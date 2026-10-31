@@ -17,3 +17,6 @@ bb_agents.workspace = true
 bb_rules.workspace = true
 bb_schema.workspace = true
 
+
+[dev-dependencies]
+serde_json.workspace = true

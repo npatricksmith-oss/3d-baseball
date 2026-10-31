@@ -1,0 +1,85 @@
+# CLAUDE.md
+
+Guidance for AI agents working in this repository. Load this every session. [PLAN.md](PLAN.md) holds the decisions and design; [TASKS.md](TASKS.md) holds what is next. Where this file and PLAN.md disagree, PLAN.md wins; fix this file.
+
+## What this is
+
+A 3D baseball management game where **every outcome comes from players' physical and mental attributes, never from dice rolls** (PLAN §0). A headless, deterministic Rust sim core resolves each pitch and play; an Unreal Engine 5 client (later) plays back the resulting timelines.
+
+## Invariants (never break these)
+
+1. **No outcome rolls (D1).** The world never consults a probability to decide what happens. Randomness enters only as noise on physical inputs: release angles, swing placement, glove placement, perception samples, and bounce-normal tilt (the *only* world-side randomness, physics-spec §9.3). Agents may hold probabilistic beliefs; the world never reads them.
+2. **Agents never see world state.** `bb_agents` must not depend on `bb_world` (PLAN §15). Agents get `bb_observe` types and may run `bb_physics` functions on their own noisy estimates. A test in `bb_game` enforces the crate graph.
+3. **Execution noise lives in `bb_agents::motor`.** Its `Executed*` outputs go only to `bb_game`/the world. Decision code never reads them.
+4. **Physics is authoritative (D4).** Animation conforms to physical trajectories, never the reverse.
+5. **Determinism (PLAN §4.2).** Same build + seed + commands ⇒ same game, bit for bit.
+   - All transcendental math goes through `bb_math::m` (the `libm` crate). Never call `f64::sin`, `exp`, `powf`, etc. directly in sim code. `sqrt` is fine (IEEE correctly rounded); `m::sqrt` wraps it anyway.
+   - No `mul_add`, no SIMD intrinsics, no fast-math.
+   - No `HashMap`/`HashSet` iteration in sim logic. Use `BTreeMap` or index vectors.
+   - Randomness only through `bb_math::KeyedRng` with an `RngKey` (data-formats §2.3). **RNG: Philox4x32-10**, key = game seed, counter = `[play_index, agent_id<<16 | purpose, sub_index, block]`. The `Purpose` registry is append-only: never renumber or reuse a value. Within one stream, the draw order is part of the replay contract (see `motor::execute_release`).
+6. **Event sourcing (PLAN §4.3).** Every statistic is a pure function of the event log. Nothing increments stat counters during simulation.
+7. **Specs before code** for risky subsystems. Implement from `docs/*.md`; tests come from the specs' golden cases. If code must deviate, update the spec in the same change and say why.
+8. **Decision log is binding.** Reopening a decided item in PLAN §1 needs the owner.
+
+## Units and frames
+
+- **SI inside the sim:** m, kg, s, rad, rad/s. mph/ft/rpm/oz only at config, UI, and report boundaries (`bb_math::units`). Stored field names carry unit suffixes (`_m`, `_mps`, `_s`, `_rad`, `_radps`).
+- **Sim frame (Statcast frame), right-handed:** origin at the rear apex of home plate at ground level; **+Y** toward the pitcher and center field; **+Z** up; **+X** toward first base (catcher's right).
+- **Spin** is the angular-velocity vector ω (right-hand rule). Pitch moving −Y with backspin ⇒ ω ∥ −X; batted ball moving +Y with backspin ⇒ ω ∥ +X (physics-spec §1.3, tested).
+- **Savant spin axis:** 180° = pure backspin, 0° = topspin; tilt is from the pitcher's perspective (12:00 = backspin, RHP four-seam ≈ 1:00). Derived for display only (data-formats §9).
+- **Unreal frame** conversion `ue = 100 × (y, x, z)` lives only in the client plugin.
+
+## Repository layout
+
+```text
+PLAN.md, TASKS.md, CLAUDE.md
+docs/                  specs (physics, agents, data formats, calibration, rules) and reviews/
+analysis/oracle/       independent Python physics oracle (stdlib only) + golden JSON fixtures
+analysis/plots/        uv-run plotting scripts (PEP 723 headers)
+sim/                   Cargo workspace
+  schemas/*.fbs        FlatBuffers schemas; regenerate with sim/schemas/gen.sh
+  crates/
+    bb_math            Vec3, Mat3, units, deterministic math (m), Philox keyed RNG
+    bb_physics         pure models: flight, atmosphere, spin axis, zone, pitch aim, bat, collision
+    bb_observe         observation types and shared domain enums (PitchType, Hand)
+    bb_agents          players/managers (no bb_world!): pitcher, motor (execution noise)
+    bb_schema          generated FlatBuffers code + event-log container and BLAKE3 digest chain
+    bb_world, bb_rules, bb_game, bb_stats, bb_league, bb_ffi   (later milestones)
+    bb_cli             `sim-cli` lab binary (Rerun output behind the default `rerun` feature)
+```
+
+## Toolchain on this machine
+
+- Rust via rustup in `~/.cargo/bin` (not on PATH in non-login shells: `export PATH=$HOME/.cargo/bin:$PATH`).
+- **No system gcc/glibc-devel and no sudo on the host.** Rust links through `~/.local/bin/zigcc` (zig from `uv tool install ziglang`), configured in `~/.cargo/config.toml`. For anything needing real system packages (e.g. `flatc`), use the toolbx container: `toolbox run -c fedora-toolbox-45 <cmd>` (passwordless `sudo dnf` works inside it).
+- Python: `uv` in `~/.local/bin`. The oracle uses only the stdlib (`python3 -m unittest analysis/oracle/test_oracle.py`). Plot scripts: `uv run analysis/plots/<script>.py`.
+- Rerun viewer 0.41.0: `uv tool install rerun-sdk==0.41.0`, then `rerun file.rrd`. The SDK crate is pinned to `=0.41.0` to match.
+- Codex CLI (`codex exec`) is available for independent validation/review passes.
+
+## Commands
+
+```bash
+cd sim && cargo test --workspace          # all tests (unit, golden, oracle cross-checks)
+cargo run --release -p bb_cli -- arsenal  # pitch-type table for an average pitcher
+cargo run --release -p bb_cli -- pitch --type SL --n 20 --rrd out/sl.rrd
+cargo run --release -p bb_cli -- tunnel --with CU --json out/t.json
+./schemas/gen.sh                          # after editing any .fbs
+```
+
+## Testing expectations
+
+- Every change must be checkable headlessly: unit, golden, property, and snapshot tests, plus CLI distribution reports.
+- **Tier A physics** (must match reality) is tested against published cases and the independent oracle (`analysis/oracle/golden/*.json`). Rust ↔ oracle flight agreement is ~3e-8 m; keep the tolerances tight so a real model change shows up.
+- **Tier B playability** (runs/game, K%, ...) is tuned only through ability distributions and noise scales, never through fudge factors (PLAN §13).
+- Parameters tagged [E] in the specs are named, configurable parameters, never literals buried in logic.
+- When you change physics, regenerate or extend the oracle fixtures from the spec, not from the Rust output.
+
+## Unreal rules (from M0.8 on; PLAN §3.4)
+
+Game logic in C++; Blueprints only for thin visual wiring. Script asset setup with the editor Python API. Automated screenshot capture for visual checks. The sim runs off the game thread; Unreal never steps gameplay physics. Low-RAM rules (14 GiB): precompiled engine only, capped build parallelism, no starter content.
+
+## Workflow
+
+- Update [TASKS.md](TASKS.md) at the end of every work session.
+- Commit in small, described steps. The repo has no remote yet.
+- Record owner-relevant choices you make in the relevant spec or PLAN §1 (as "Proposed" if the owner has not ruled).

@@ -509,6 +509,7 @@ dependencies = [
  "bb_rules",
  "bb_schema",
  "bb_world",
+ "serde_json",
 ]
 
 [[package]]
