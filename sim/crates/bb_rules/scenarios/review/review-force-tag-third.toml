@@ -1,0 +1,16 @@
+id = "review-force-tag-third"
+title = "From the Codex M4 review"
+milestone = "M4"
+tags = ["review"]
+initial = { inning = 7, outs = 2, batter = "A.4", bases = { first = "A.1", third = "A.3" } }
+step = [
+  { fact = "PitchDelivered", t = 0.0 },
+  { fact = "BatContact", t = 0.42 },
+  { fact = "BaseLeft", t = 0.5, agent = "A.1", base = 1 },
+  { fact = "BaseLeft", t = 0.5, agent = "A.3", base = 3 },
+  { fact = "BallTouched", t = 0.8, what = "Ground", pos = [-6.0, 25.0] },
+  { fact = "GloveSecured", t = 1.3, fielder = "H.SS", pos = [-8.0, 30.0] },
+  { fact = "BaseTouched", t = 4.0, agent = "A.3", base = 4 },
+  { fact = "TagContact", t = 4.1, fielder = "H.2B", runner = "A.1", holding_ball = true }
+]
+expect = { score = [0, 0], half = "bottom", outs = 0 }

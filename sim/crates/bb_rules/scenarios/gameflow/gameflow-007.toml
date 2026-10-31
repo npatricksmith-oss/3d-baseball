@@ -1,5 +1,5 @@
 id = "gameflow-007"
-title = "Walk-off single: only the winning run counts"
+title = "Walk-off single with no outs: the game ends at the winning home touch; only that run counts"
 rules = ["OBR 7.01(g)"]
 milestone = "M4"
 tags = ["gameflow", "walk-off"]
@@ -18,11 +18,6 @@ t = 0.0
 fact = "BatContact"
 t = 0.42
 [[step]]
-fact = "BallTouched"
-t = 1.6
-what = "Ground"
-pos = [-20.0, 55.0]
-[[step]]
 fact = "BaseLeft"
 t = 0.5
 agent = "H.3"
@@ -33,10 +28,16 @@ t = 0.5
 agent = "H.2"
 base = 2
 [[step]]
+fact = "BallTouched"
+t = 1.6
+what = "Ground"
+pos = [-20.0, 55.0]
+[[step]]
 fact = "BaseTouched"
 t = 2.2
 agent = "H.3"
 base = 4
+expect_events = [{ event = "RunScored", runner = "H.3" }, { event = "PlateAppearanceEnded", batter = "H.4" }, { event = "GameEnded", away = 2, home = 3, walk_off = "true" }]
 [[step]]
 fact = "BaseTouched"
 t = 2.4
@@ -60,7 +61,6 @@ base = 1
 [[step]]
 fact = "PlayEndCheck"
 t = 6.0
-expect_events = [{ event = "RunScored", runner = "H.3" }, { event = "GameEnded", away = 2, home = 3, walk_off = "true" }]
 [expect]
 status = "Final"
 score = [2, 3]

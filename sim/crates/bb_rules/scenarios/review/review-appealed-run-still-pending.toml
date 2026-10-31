@@ -1,0 +1,15 @@
+id = "review-appealed-run-still-pending"
+title = "From the Codex M4 review"
+milestone = "M4"
+tags = ["review"]
+initial = { inning = 6, outs = 0, batter = "A.4", bases = { third = "A.3" } }
+step = [
+  { fact = "PitchDelivered", t = 0.0 },
+  { fact = "BatContact", t = 0.42 },
+  { fact = "BaseLeft", t = 0.5, agent = "A.3", base = 3 },
+  { fact = "BaseTouched", t = 4.5, agent = "A.3", base = 4 },
+  { fact = "GloveSecured", t = 5.0, fielder = "H.CF", pos = [0.0, 95.0] },
+  { fact = "BaseTouched", t = 6.0, agent = "H.3B", base = 3, holding_ball = true },
+  { fact = "PlayEndCheck", t = 8.0 }
+]
+expect = { outs = 2, score = [0, 0], bases = {}, play = "Dead" }

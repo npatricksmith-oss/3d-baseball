@@ -236,7 +236,7 @@ pub fn simulate_play(inp: &PlayInput) -> PlayOutput {
     let mut speed = 0.0;
     let mut t = t_c + fa.reaction;
     let mut secured: Option<(f64, Vec3)> = None;
-    let mut attempts = 0u32;
+    let mut attempts = [0u32; 9]; // capture attempts per fielder (keyed per agent)
     let mut blocked_until = 0.0;
     let t_limit = path.t_end() + 12.0;
     let mut target = best.2;
@@ -264,8 +264,9 @@ pub fn simulate_play(inp: &PlayInput) -> PlayOutput {
             };
             if ts >= blocked_until && (horiz <= REACH && ball.z <= CATCH_MAX_Z || diving) {
                 // Capture test (agent-models §5.4): pure geometry with glove error.
-                let mut r = rng(inp.seed, inp.play, fid, Purpose::GlovePlacement, attempts);
-                attempts += 1;
+                let k = (pi as usize).min(8);
+                let mut r = rng(inp.seed, inp.play, fid, Purpose::GlovePlacement, attempts[k]);
+                attempts[k] += 1;
                 let reach_frac = (horiz / (REACH + DIVE)).min(1.0);
                 let sg = fa.hands * (1.0 + 0.5 * bv.norm() / 40.0 + 0.6 * reach_frac + if diving { 1.0 } else { 0.0 });
                 if diving {
@@ -345,14 +346,15 @@ pub fn simulate_play(inp: &PlayInput) -> PlayOutput {
         }
         t += DT;
     }
-    let (t_sec, sec_pos) = match secured {
-        Some(s) => {
-            facts.push((s.0, Input::GloveSecured { t: s.0, fielder: fid, x: s.1.x, y: s.1.y }));
-            s
-        }
-        // Never secured in time (a liveness problem): runners still run on the ball's state.
-        None => (t_limit, Vec3::new(path.at(t_limit).0.x, path.at(t_limit).0.y, 0.0)),
+    let Some((t_sec, sec_pos)) = secured else {
+        // Never secured in time: a liveness failure. Report it; never invent possession
+        // (Codex M4 review #7).
+        facts.push((t_limit, Input::PlayTimeout { t: t_limit }));
+        return finish(facts, path);
     };
+    facts.push((t_sec, Input::GloveSecured { t: t_sec, fielder: fid, x: sec_pos.x, y: sec_pos.y }));
+    // Once the ball is held, the free path's later ground and wall contacts did not happen.
+    facts.retain(|(t, f)| !(matches!(f, Input::BallTouched { .. } | Input::BallSettled { .. }) && *t > t_sec));
     // A fly is caught only if nothing but a fielder touched it first (rules-spec §5.3).
     let first_touch = path.bounces.first().map(|b| b.0).into_iter().chain(path.walls.first().map(|w| w.0)).fold(f64::INFINITY, f64::min);
     let caught_fly = first_touch >= t_sec;
@@ -364,7 +366,8 @@ pub fn simulate_play(inp: &PlayInput) -> PlayOutput {
         let occ = |b: u8| inp.runners.iter().any(|r| r.base == b);
         inp.runners.iter().map(|r| r.base == 0 || (1..r.base).all(occ)).collect()
     };
-    let mut rr = rng(inp.seed, inp.play, 0x0001, Purpose::RunnerPerception, 0);
+    // Runner perception noise: one keyed stream per runner and decision (base) index.
+    let rnoise = |id: AgentId, decision: u8| rng(inp.seed, inp.play, id, Purpose::RunnerPerception, decision as u32).truncated_normal(4.0);
     // Ball arrival estimate at base b from the fielder holding it at time t_sec.
     let ball_at = |b: u8, from: Vec3, t0: f64, arm: f64, transfer: f64| -> f64 {
         let d = (base_pos(b) - from).norm();
@@ -380,7 +383,7 @@ pub fn simulate_play(inp: &PlayInput) -> PlayOutput {
             let leg = 27.432;
             let t_run = t_sec + run_time(leg, r.speed, 1.0);
             let t_ball = ball_at(next, sec_pos, t_sec, fa.arm, fa.transfer);
-            let noise = 0.15 * rr.truncated_normal(4.0);
+            let noise = 0.15 * rnoise(r.id, next);
             if t_ball - t_run + noise > 0.3 && inp.outs < 2 {
                 touches.push((r.base, t_sec + 0.001));
                 touches.push((next, t_run));
@@ -402,7 +405,7 @@ pub fn simulate_play(inp: &PlayInput) -> PlayOutput {
             let t_next = t_at + tr;
             let must = forced[k] && b == r.base;
             let t_ball = ball_at(next, sec_pos, t_sec.max(t_at), fa.arm, fa.transfer);
-            let noise = 0.15 * rr.truncated_normal(4.0);
+            let noise = 0.15 * rnoise(r.id, next);
             let go = must || (t_ball - t_next + noise > 0.35);
             if !go || next > 4 {
                 break;
@@ -465,14 +468,15 @@ pub fn simulate_play(inp: &PlayInput) -> PlayOutput {
             let t_self = t_sec + 0.2 + run_time((base_pos(b) - sec_pos).norm(), fa.speed, fa.tau_a);
             if force {
                 facts.push((t_self, Input::BaseTouched { t: t_self, agent: fid, base: b, holding_ball: true }));
-            } else if t_self < t_runner {
+            } else if t_self + 0.05 < t_runner {
+                // The tag happens as the runner arrives, after the fielder is there with the ball.
                 facts.push((t_runner - 0.03, Input::TagContact { t: t_runner - 0.03, fielder: fid, runner, holding_ball: true }));
             }
         } else if lateral.abs() <= 1.2 {
             if force {
                 facts.push((t_catch, Input::BaseTouched { t: t_catch, agent: recv, base: b, holding_ball: true }));
-            } else if t_catch < t_runner {
-                // Tag the arriving runner just before the base.
+            } else if t_catch + 0.05 < t_runner {
+                // Tag the arriving runner just before the base, after the catch.
                 facts.push((t_runner - 0.03, Input::TagContact { t: t_runner - 0.03, fielder: recv, runner, holding_ball: true }));
             }
             // Caught fly: a throw beating a runner back to his base is the leave-early appeal.
@@ -483,8 +487,11 @@ pub fn simulate_play(inp: &PlayInput) -> PlayOutput {
             if force && b == 2 {
                 let t2 = t_catch + 0.45 + (base_pos(1) - base_pos(2)).norm() / (0.92 * inp.fattrs[recv_pos].arm);
                 let batter_first = plans.iter().find(|(r, _)| r.base == 0).and_then(|(_, t)| t.first().map(|x| x.1));
+                // The first baseman must be at the bag to take the relay.
+                let t_1b = t_c + inp.fattrs[2].reaction + run_time((base_pos(1) - home[2]).norm(), inp.fattrs[2].speed, 1.0);
                 if let Some(tf) = batter_first {
-                    if t2 < tf {
+                    if t2.max(t_1b) < tf && fid != inp.fielders[2] {
+                        let t2 = t2.max(t_1b);
                         facts.push((t2, Input::BaseTouched { t: t2, agent: inp.fielders[2], base: 1, holding_ball: true }));
                     }
                 }

@@ -262,6 +262,8 @@ pub struct PitchRecord {
     pub release: BallState,
     /// The release speed the batter perceived (for anchoring the next pitch), m/s.
     pub perceived_speed: f64,
+    /// Time the pitch crossed the judgment plane, if it did (s after release).
+    pub t_plate: Option<f64>,
 }
 
 fn rng(seed: u64, play: u32, agent: u16, purpose: Purpose, sub: u32) -> KeyedRng {
@@ -568,6 +570,7 @@ pub fn simulate_pitch_ctx(mu: &Matchup, sc: &Scouting, count: Count, seed: u64, 
         bounced,
         release,
         perceived_speed: bank.perceived_speed(sc),
+        t_plate,
     }
 }
 

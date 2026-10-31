@@ -16,6 +16,10 @@ in_zone = false
 fact = "BallTouched"
 t = 0.40
 what = "Batter"
+[[step]]
+fact = "SwingMeasured"
+t = 0.45
+swung = false
 expect_events = [{ event = "PitchResult", call = "HitByPitch" }, { event = "RunnerAdvanced", from = 0, to = 1, cause = "HitByPitch" }]
 [expect]
 bases = { first = "A.1" }

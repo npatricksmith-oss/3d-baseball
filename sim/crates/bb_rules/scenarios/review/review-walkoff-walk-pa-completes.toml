@@ -1,0 +1,11 @@
+id = "review-walkoff-walk-pa-completes"
+title = "From the Codex M4 review"
+milestone = "M4"
+tags = ["review"]
+initial = { inning = 9, half = "bottom", outs = 1, count = [3, 2], score = [3, 3], batter = "H.4", bases = { first = "H.1", second = "H.2", third = "H.3" } }
+step = [
+  { fact = "PitchDelivered", t = 0.0 },
+  { fact = "PitchCrossed", t = 0.4, in_zone = false },
+  { fact = "SwingMeasured", t = 0.45, swung = false, expect_events = [{ event = "PlateAppearanceEnded", batter = "H.4", result = "Walk" }] }
+]
+expect = { status = "Final", score = [3, 4] }

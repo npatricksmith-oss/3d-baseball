@@ -1,0 +1,12 @@
+id = "review-ground-contact-outside-line"
+title = "From the Codex M4 review"
+milestone = "M4"
+tags = ["review"]
+initial = { inning = 1 }
+step = [
+  { fact = "PitchDelivered", t = 0.0 },
+  { fact = "BatContact", t = 0.42 },
+  { fact = "BallTouched", t = 0.8, what = "Ground", pos = [5.0, 5.0] },
+  { fact = "BallSettled", t = 3.0, pos = [10.02, 10.0], expect_events = [{ event = "FairFoulDecided", fair = false }] }
+]
+expect = { strikes = 1, play = "Dead" }

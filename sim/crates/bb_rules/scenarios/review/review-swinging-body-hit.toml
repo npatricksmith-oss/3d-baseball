@@ -1,0 +1,12 @@
+id = "review-swinging-body-hit"
+title = "From the Codex M4 review"
+milestone = "M4"
+tags = ["review"]
+initial = { inning = 2, batter = "A.4" }
+step = [
+  { fact = "PitchDelivered", t = 0.0 },
+  { fact = "PitchCrossed", t = 0.39, in_zone = false },
+  { fact = "BallTouched", t = 0.4, what = "Batter" },
+  { fact = "SwingMeasured", t = 0.45, swung = true }
+]
+expect = { strikes = 1, balls = 0, bases = {}, batter = "A.4", outs = 0 }

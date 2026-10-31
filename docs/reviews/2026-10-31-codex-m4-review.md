@@ -1,12 +1,12 @@
 # Codex M4 review — 2026-10-31
 
-Reviewed PLAN §4.1–4.2, rules-spec §§1–7 and 12, agent-models §§5–6, all `bb_rules/src/*.rs`, the scenario harness and corpus, and `bb_game/src/play.rs` / `game.rs`. Line references below use checkout commit `a1ac979`. The checkout changed during this review; the wall-contact fix in `d2f4cd7` was re-read and is recorded under Resolution. An unrelated edit to `examples/bip_sweep.rs` was present during the final inspection and was left alone.
+Reviewed PLAN §4.1–4.2, rules-spec §§1–7 and 12, agent-models §§5–6, all `bb_rules/src/*.rs`, the scenario harness and corpus, and `bb_game/src/play.rs` / `game.rs`. Line references below use source commit `724469e`. The checkout changed during this review; the wall-contact fix in `d2f4cd7` and the later steppable-game refactor were re-read. The fixed wall issue is recorded under Resolution. Unrelated edits/commits were left alone.
 
 Severity: **P1** changes outs/runs or violates the authoritative-physics boundary; **P2** is another correctness, accounting, or reproducibility-contract defect. Findings are ordered by severity. These are static findings, with predicted results traced through the code; the proposed scenarios were **not** installed or executed. TOML with `id`, `initial`, `step`, and `expect` uses the current corpus syntax, including its supported inline-table form. Blocks marked **descriptive fixture** document simulator inputs or missing fact vocabulary and are not runnable by the current rules harness.
 
 Rule numbers were checked against the [2026 Official Baseball Rules](https://mktg.mlbstatic.com/mlb/official-information/2026-official-baseball-rules.pdf). Relevant provisions are 5.08(a), 5.09(b)(5)–(6), 5.09(c)(1), 5.09(d), and the definitions of Catch and Fair Ball. The current game-ending provision is **7.01(e)(3)**; the spec/corpus citation to 7.01(g) is stale. The project's classic extra innings and other explicit design choices remain the review baseline.
 
-The permitted checks passed after redirecting Zig's otherwise unwritable caches to `/tmp`: `cargo test -q -p bb_rules` and `cargo run -q --release -p bb_cli -- games --n 32`. The batch reported 9.47 runs/team-game, 43.0 PA/team-game, 254 pitches/game, four extra-inning games, three walk-offs, and `rules warnings: {}`. This is a smoke check, not proof of physical consistency or the 1,000-game accounting gate. The final corpus has 40 TOMLs versus the spec's 150-case M4 target. The documented deferrals in `bb_rules/src/lib.rs:13`—including uncaught third strikes, foul tips, interference, and first-base overruns—are not individually reported as newly discovered implementation bugs.
+The permitted checks passed after redirecting Zig's otherwise unwritable caches to `/tmp`: `cargo test -q -p bb_rules` and `cargo run -q --release -p bb_cli -- games --n 32`. The final batch at `724469e` reported 11.16 runs/team-game, 43.1 PA/team-game, 255 pitches/game, one extra-inning game, zero walk-offs, and `rules warnings: {}`. This is a smoke check, not proof of physical consistency or the 1,000-game accounting gate. The final corpus has 40 TOMLs versus the spec's 150-case M4 target. The documented deferrals in `bb_rules/src/lib.rs:13`—including uncaught third strikes, foul tips, interference, and first-base overruns—are not individually reported as newly discovered implementation bugs.
 
 ### 1. [P1] A tag on a still-forced runner is incorrectly treated as a time play
 
@@ -175,7 +175,7 @@ expected = "no throw, catch, or holding-ball out without possession"
 
 ### 8. [P1] The game loop erases unresolved live plays outside the rules engine
 
-**Location:** `sim/crates/bb_game/src/game.rs:168`–`:178`.
+**Location:** `sim/crates/bb_game/src/game.rs:221`–`:231`.
 
 On failure to settle, the orchestrator directly assigns `st.play = Dead`. It discards pending runs, outs' supporting play state, and runner positions while retaining stale pre-play bases and the current PA/count. The next pitch can therefore replay the same batter after a fair contact. This violates rules-spec §1.1's single mutation boundary and §5.8's explicit timeout placement/event behavior. A diagnostic warning does not make the resulting baseball state valid.
 
@@ -242,7 +242,7 @@ expected_retouch_required = false
 
 ### 11. [P2] Swinging HBP cannot be judged from the current fact lifecycle
 
-**Location:** `sim/crates/bb_rules/src/engine.rs:54`–`:84`; `sim/crates/bb_game/src/game.rs:100`–`:101`, `:136`; `sim/crates/bb_rules/scenarios/pitch/pitch-002.toml:15`.
+**Location:** `sim/crates/bb_rules/src/engine.rs:54`–`:84`; `sim/crates/bb_game/src/game.rs:152`–`:153`, `:189`; `sim/crates/bb_rules/scenarios/pitch/pitch-002.toml:15`.
 
 `SwingMeasured` briefly sets `p.swung`, immediately discards the pitch state, and applies a call. Therefore the HBP branch can never observe `p.swung == Some(true)` from a prior swing fact. A body touch before the end-of-swing fact awards first; a swing fact first makes a later body touch silently ignored. The game emits only the body touch whenever `rec.hit_batter`, even when `rec.swung` is true. The scenario titled “Pitch hits a swinging batter” contains **no body touch** and tests an ordinary swing instead. A swing takes precedence over an HBP award. [MLB HBP definition](https://www.mlb.com/glossary/standard-stats/hit-by-pitch)
 
@@ -364,7 +364,7 @@ expect = { status = "Final", score = [2, 3] }
 
 ### 16. [P2] Walk-offs break the PA event lifecycle and omit the winning PA from game statistics
 
-**Location:** `sim/crates/bb_rules/src/engine.rs:202`–`:209`, `:227`–`:235`, `:253`, `:390`–`:392`, `:407`, `:570`; `sim/crates/bb_game/src/game.rs:186`–`:201`.
+**Location:** `sim/crates/bb_rules/src/engine.rs:202`–`:209`, `:227`–`:235`, `:253`, `:390`–`:392`, `:407`, `:570`; `sim/crates/bb_game/src/game.rs:243`–`:258`.
 
 Walk/HBP, ground-rule-double, and settled-play walk-offs return after `score_run` finishes the game, skipping `end_pa`. The game counts PAs and BB/HBP/BIP only from `PlateAppearanceEnded`, so the winning PA is absent from those totals. `award_first` can even finish before placing/advancing the batter. The home-run path has the opposite lifecycle bug: `end_pa` starts the **next** PA before `finish` is called. It logs a plate appearance that can never occur.
 
@@ -456,9 +456,9 @@ expect = { score = [1, 0], half = "bottom" }
 
 ### 20. [P2] The inning-30 warning stops the game and returns an unfinished game as a result
 
-**Location:** `sim/crates/bb_game/src/game.rs:72`–`:75`, `:208`–`:215`; `sim/crates/bb_rules/src/state.rs:195`, `:198`.
+**Location:** `sim/crates/bb_game/src/game.rs:111`–`:122`, `:265`–`:271`, `:283`–`:286`; `sim/crates/bb_rules/src/state.rs:195`, `:198`.
 
-The loop breaks on entering inning 31, despite rules-spec §4.1 requiring a warning on reaching inning 30 and continued extra innings. The returned `GameResult` has no final-status field and can contain a tied game without `GameEnded`; the current loop then finishes an ordinary event-log footer for it. This silently mixes incomplete games into aggregate statistics. If indefinite continuation is restored, the `u8` inning/run-per-inning storage also needs an explicit overflow policy; debug panic versus release wrap is not a valid game-ending rule.
+The driver stops on entering inning 31 (`step_pitch` returns `None`, and `finished()` also treats the threshold as finished), despite rules-spec §4.1 requiring a warning on reaching inning 30 and continued extra innings. The returned `GameResult` has no final-status field and can contain a tied game without `GameEnded`; `finish()` writes an ordinary event-log footer for it. This silently mixes incomplete games into aggregate statistics. If indefinite continuation is restored, the `u8` inning/run-per-inning storage also needs an explicit overflow policy; debug panic versus release wrap is not a valid game-ending rule.
 
 **Descriptive fixture:**
 
@@ -476,7 +476,7 @@ actual = "loop exits before pitching top 31; no GameEnded"
 
 **Location:** `sim/crates/bb_game/src/play.rs:191`–`:208`, `:350`, `:499`–`:501`; `sim/crates/bb_rules/src/engine.rs:91`.
 
-All free-path ground/wall/settled facts are queued before fielding and retained after a capture changes the actual ball state. A ball caught at 3 s can still “hit the ground” on its old trajectory at 4 s. `PlayOutput.path` also remains that free path, and `game.rs:126` records it as the batted visualization. Conversely, the simulator never emits `BallPassedBase`. A roller that passes a bag fair can later be judged foul at a later touch/settlement because its decisive fair passage was never reported. Hand-authored `fairfoul-003` exercises a fact the game does not produce.
+All free-path ground/wall/settled facts are queued before fielding and retained after a capture changes the actual ball state. A ball caught at 3 s can still “hit the ground” on its old trajectory at 4 s. `PlayOutput.path` also remains that free path, and `game.rs:178` records it as the batted visualization. Conversely, the simulator never emits `BallPassedBase`. A roller that passes a bag fair can later be judged foul at a later touch/settlement because its decisive fair passage was never reported. Hand-authored `fairfoul-003` exercises a fact the game does not produce.
 
 **Descriptive fixtures:**
 
@@ -500,7 +500,7 @@ actual_missing_fact = "BallPassedBase"
 
 ### 22. [P2] The timestamp contract is not enforced, and exact-time run plays contradict the chosen priority
 
-**Location:** `sim/crates/bb_game/src/game.rs:97`–`:103`; `sim/crates/bb_game/src/play.rs:500`; `sim/crates/bb_rules/src/engine.rs:23`, `:527`; `sim/crates/bb_rules/tests/scenarios.rs:225`–`:232`.
+**Location:** `sim/crates/bb_game/src/game.rs:148`–`:155`; `sim/crates/bb_game/src/play.rs:500`; `sim/crates/bb_rules/src/engine.rs:23`, `:527`; `sim/crates/bb_rules/tests/scenarios.rs:225`–`:232`.
 
 The game always emits a made-up crossing time of 0.42 s before the physical contact fact; any contact earlier than that arrives out of time order. HBP and swing times are similarly fixed. The engine stores/asserts no last-fact time, and the harness does not validate chronological ordering. Existing `force-001`/`002`/`003`, `tag-001`, `runs-001`, `gameflow-007`, and the added `catch-004` contain backwards timestamps. These tests therefore normalize an invalid caller behavior.
 
@@ -572,7 +572,7 @@ expected = "one continuous position/velocity history with one current assignment
 
 ## Verification limits and follow-up coverage
 
-The initial unmodified `cargo test` attempt failed because the configured Zig linker tried to write `/home/natex/.cache/zig`, outside the writable roots. Retrying with `ZIG_GLOBAL_CACHE_DIR=/tmp/codex-m4-zig-global` and `ZIG_LOCAL_CACHE_DIR=/tmp/codex-m4-zig-local` succeeded. Those environment settings do not alter source or baseball inputs. The source changed during the review, so the permitted checks were repeated against the final inspected checkout; results are recorded below after completion.
+The initial unmodified `cargo test` attempt failed because the configured Zig linker tried to write `/home/natex/.cache/zig`, outside the writable roots. Retrying with `ZIG_GLOBAL_CACHE_DIR=/tmp/codex-m4-zig-global` and `ZIG_LOCAL_CACHE_DIR=/tmp/codex-m4-zig-local` succeeded. Those environment settings do not alter source or baseball inputs. After concurrent commits changed the checkout, both permitted checks were repeated at `724469e`: the rules corpus passed and the 32-game batch completed with zero reported warnings. The earlier batch's 9.47 runs/team-game and three walk-offs were from the earlier source revision, not a same-build determinism comparison. All 25 report TOML blocks were parsed with Python's `tomllib`; the scripted fact sequences are monotonic. No proposed repro scenario was executed.
 
 The 40-case corpus is one test invocation. Its subsequence event matcher (`tests/scenarios.rs:233`–`:251`) permits extra events; omitted `expect_events` makes no assertion about emitted warnings or outs. That is the documented matching format, but it leaves lifecycle defects such as extra next-PA starts undetected. Add negative/exact event assertions where needed, validate well-formed timestamps, and check live-runner/base/accounting invariants after each step/play. `pitch-002` should contain a real body touch, and `gameflow-007` should assert the actual winning boundary rather than settlement after later touches. The spec's well-formed-sequence fuzzer and 1,000-game accounting validation are not supplied by a 32-game zero-warning smoke run.
 
@@ -583,3 +583,36 @@ No direct outcome dice roll was found in `bb_rules`; it has no RNG. The Gaussian
 - **Fixed externally during review:** the initially observed missing wall-contact facts and wall-carom fly outs. Commit `d2f4cd7` adds `BallPath.walls`, emits `Touch::Wall`, invalidates the catch in the engine, updates `caught_fly`, and adds `catch-004`. That specific issue is excluded from the active findings. The new scenario still has a backwards timestamp, covered by finding 22.
 - **Open:** findings 1–24. This review changes no source, tests, scenario files, specifications, or task list. All proposed TOML remains inside this report for review; simulator fixtures explicitly identify where the current harness cannot represent the required evidence.
 - **Deferred scope acknowledged:** the explicit catcher/steal/interference/substitution/scorer limitations in `bb_rules/src/lib.rs` remain follow-up work. They do not excuse incorrect behavior in the implemented force, catch, tag-up, award, run-counting, and game-flow paths.
+
+## Resolution (Claude, 2026-10-31, after the review)
+
+Every runnable TOML scenario in this review (15) was added verbatim to `sim/crates/bb_rules/scenarios/review/`, and all of them pass. The harness now also fails any scenario whose facts go backward in time; the ten existing scenarios that did were reordered.
+
+| # | Status | Change |
+| :--- | :--- | :--- |
+| 1 | Fixed | A tag on a runner still forced to that base is recorded as `Force` (run cancellation follows) |
+| 2 | Fixed | A third-out catch cancels runs (OBR 5.08(a)); no fly-out exemption |
+| 3 | Fixed | An out runner's pending run is removed; a home touch while owing a retouch stays pending and is liable to the appeal |
+| 4 | Fixed | A home run scores every runner not put out exactly once, pending ones included |
+| 5 | **Deferred to the M5 play-simulator rewrite** | The skeleton's fielders and runners plan from the realized future path and outcomes. The fix is a causal tick loop where decisions use only observations to date; the module header lists this limitation |
+| 6 | **Deferred (M5)** | Over-fence paths are not interceptable (no home-run robbery or reach over a short wall yet) |
+| 7 | Fixed | No invented possession: a ball never secured ends in an explicit `PlayTimeout` (new rules input, §5.8 item 4) |
+| 8 | Fixed | The game loop no longer repairs rules state; an unsettled play is reported through `PlayTimeout` |
+| 9 | Partly fixed | Tags only after the receiver has the ball (≥ 50 ms margin); the double-play relay needs the first baseman at the bag. A ball that travels while waiting for a late receiver is deferred to M5 (real throw flight) |
+| 10 | **Deferred (M5)** | First touch vs secure, deflections, and fielder foot position need new facts from the capture model |
+| 11 | Fixed | A body touch waits for the swing measurement; the game always sends it; `pitch-002` now has a real body touch |
+| 12 | Fixed | The leave-early appeal is checked before the "on a base" protection, and keeps the `Appeal` kind |
+| 13 | Fixed | Runners track the base most recently touched (`at`) separately from the high-water mark; the force applies again after a retreat |
+| 14 | Fixed | Settlement places runners where they stand (`at`) |
+| 15 | Fixed | A winning home touch ends the game at once when it cannot be cancelled (no open force that could make a third out, or 0 outs; no retouch owed); `gameflow-007` now asserts this at the touch |
+| 16 | Fixed | Every walk-off completes its plate appearance before `GameEnded` (`RulesState::walk_off` flag, checked in `end_pa`); the home-run path no longer starts a phantom PA |
+| 17 | Fixed | The foul pole makes a bounced ball fair but not a home run |
+| 18 | Fixed | Ground contact and settlement use the line's outer edge (`fair_ground`); balls in the air use "any part of the ball" (`fair_air`). rules-spec §5.2 still needs the matching wording |
+| 19 | Fixed | Third-out LOB counts the runners actually standing on bases |
+| 20 | Fixed | Inning 30 only warns (in the rules engine); the orchestrator's 99-inning budget marks the result `complete = false` instead of passing it off as a finished game |
+| 21 | Partly fixed | Free-path ground, wall, and settle facts after a catch are dropped. `BallPassedBase` emission is deferred to M5 |
+| 22 | Fixed | Facts carry real times (plate crossing, swing end, contact); `PitchCrossed` is not sent for a ball hit before the plate; equal-time home touches delivered before the third out count (`<=`); the harness enforces chronological facts |
+| 23 | Fixed | Runner perception is keyed per runner and per decision (target base); glove attempts are keyed per fielder |
+| 24 | **Deferred (M5)** | Continuous state for non-primary fielders and shared coverage state |
+
+After the fixes: 88 tests pass, 64 games produce no rules warnings, and the C client still plays full games. The rules-spec's 7.01(g) citation should become 7.01(e)(3) (R11).

@@ -34,6 +34,8 @@ pub struct GameResult {
     pub digest: [u8; 32],
     /// Visualization record, filled only when requested.
     pub viz: Vec<PlayViz>,
+    /// False if the game hit the operational inning budget before ending.
+    pub complete: bool,
 }
 
 /// One pitch's paths for visualization: samples are (t, x, y, z) in play time.
@@ -90,7 +92,7 @@ impl Game {
         let bs = vec![mu.perception.break_sigma; mu.arsenal.len()];
         Game {
             field: Field::default(),
-            res: GameResult::default(),
+            res: GameResult { complete: true, ..Default::default() },
             pending_rules: log.clone(),
             log,
             writer: bb_schema::log::LogWriter::new(&crate::eventlog::header(seed)),
@@ -109,7 +111,7 @@ impl Game {
     }
 
     pub fn finished(&self) -> bool {
-        self.st.status != Status::InProgress || self.st.inning > 30
+        self.st.status != Status::InProgress || self.st.inning > MAX_INNINGS
     }
 
     /// Advance one pitch (and the play it starts). Returns `None` once the game is over.
@@ -117,8 +119,9 @@ impl Game {
         if self.st.status != Status::InProgress {
             return None;
         }
-        if self.st.inning > 30 {
-            self.res.warnings.push("liveness_inning_30");
+        if self.st.inning > MAX_INNINGS {
+            // Operational budget, not a baseball rule: the result is marked incomplete.
+            self.res.complete = false;
             return None;
         }
         let (mu, st, seed, play, record) = (&self.mu, &mut self.st, self.seed, self.play, self.record);
@@ -146,11 +149,17 @@ impl Game {
             }
         }
         let mut facts = vec![Input::PitchDelivered { t: 0.0 }];
-        let t_plate = 0.42;
-        facts.push(Input::PitchCrossed { t: t_plate, in_zone: rec.in_zone, bounced: rec.bounced });
+        // Facts carry real times (Codex M4 review #22). A pitch hit before the plate never
+        // crossed it.
+        let t_plate = rec.t_plate.unwrap_or_else(|| pitch_flight.last().t);
+        let t_contact = rec.contact_state.map(|c| c.0);
+        if t_contact.map(|tc| tc > t_plate).unwrap_or(true) {
+            facts.push(Input::PitchCrossed { t: t_plate, in_zone: rec.in_zone, bounced: rec.bounced });
+        }
         let mut batted = None;
         if rec.hit_batter {
             facts.push(Input::BallTouched { t: t_plate, what: bb_rules::Touch::Batter });
+            facts.push(Input::SwingMeasured { t: t_plate + 0.03, swung: rec.swung });
         } else if let Some((t_c, ball)) = rec.contact_state {
             facts.push(Input::BatContact { t: t_c });
             // Runners: batter plus those on base (ids from the rules state).
@@ -186,7 +195,7 @@ impl Game {
             facts.extend(out.facts);
             batted = Some(out.path);
         } else {
-            facts.push(Input::SwingMeasured { t: 0.45, swung: rec.swung });
+            facts.push(Input::SwingMeasured { t: t_plate + 0.03, swung: rec.swung });
         }
         for f in &facts {
             let ev = step(st, f);
@@ -215,11 +224,9 @@ impl Game {
             viz.label = lbl;
             self.res.viz.push(viz.clone());
         }
-        let pitcher = ((1 - side as u16) << 8) | 0x81;
-        crate::eventlog::write_pitch(&mut self.writer, play, pitcher, &rec, &self.pending_rules);
-        let rules_events = std::mem::take(&mut self.pending_rules);
         if matches!(st.play, bb_rules::PlayState::Live(_)) {
-            // The play did not settle from its facts: report and close it out.
+            // The play did not settle from its facts: a liveness failure, reported to the rules
+            // engine as a timeout rather than repaired here (rules-spec §1.1, §5.8).
             if std::env::var("BB_DEBUG").is_ok() && self.res.warnings.iter().filter(|w| **w == "unsettled_play").count() < 2 {
                 eprintln!("--- unsettled play {play}: facts");
                 for f in &facts {
@@ -228,8 +235,14 @@ impl Game {
                 eprintln!("  state: {:?}", st.play);
             }
             self.res.warnings.push("unsettled_play");
-            st.play = bb_rules::PlayState::Dead;
+            let t_end = facts.iter().filter_map(fact_t).fold(0.0, f64::max) + 1.0;
+            let ev = step(st, &Input::PlayTimeout { t: t_end });
+            self.log.extend(ev.iter().cloned());
+            self.pending_rules.extend(ev);
         }
+        let pitcher = ((1 - side as u16) << 8) | 0x81;
+        crate::eventlog::write_pitch(&mut self.writer, play, pitcher, &rec, &self.pending_rules);
+        let rules_events = std::mem::take(&mut self.pending_rules);
         self.play += 1;
         Some(PitchStep { play, record: rec, pitch_flight, batted, rules_events, viz })
     }
@@ -270,6 +283,29 @@ impl Game {
         res.innings = self.st.inning;
         res.events = self.log;
         res
+    }
+}
+
+/// Operational budget: a game still going after this many innings stops and is reported
+/// incomplete (the rules engine itself warns at inning 30 and would continue).
+pub const MAX_INNINGS: u8 = 99;
+
+fn fact_t(f: &Input) -> Option<f64> {
+    match *f {
+        Input::PitchDelivered { t }
+        | Input::PitchCrossed { t, .. }
+        | Input::SwingMeasured { t, .. }
+        | Input::BatContact { t }
+        | Input::BallTouched { t, .. }
+        | Input::BallPassedBase { t, .. }
+        | Input::BallSettled { t, .. }
+        | Input::PlayTimeout { t }
+        | Input::GloveSecured { t, .. }
+        | Input::BaseTouched { t, .. }
+        | Input::BaseLeft { t, .. }
+        | Input::TagContact { t, .. }
+        | Input::PlayEndCheck { t } => Some(t),
+        Input::StartGame => None,
     }
 }
 

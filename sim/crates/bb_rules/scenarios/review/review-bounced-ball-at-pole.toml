@@ -1,0 +1,13 @@
+id = "review-bounced-ball-at-pole"
+title = "From the Codex M4 review"
+milestone = "M4"
+tags = ["review"]
+initial = { inning = 4, batter = "A.2", bases = { first = "A.1" } }
+step = [
+  { fact = "PitchDelivered", t = 0.0 },
+  { fact = "BatContact", t = 0.42 },
+  { fact = "BallTouched", t = 3.0, what = "Ground", pos = [65.0, 70.0] },
+  { fact = "BallTouched", t = 3.6, what = "FoulPole" },
+  { fact = "BallTouched", t = 3.61, what = "OutOfPlay", pos = [75.0, 75.0], in_flight = false }
+]
+expect = { score = [0, 0], bases = { second = "A.2", third = "A.1" }, play = "Dead" }

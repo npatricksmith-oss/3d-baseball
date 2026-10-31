@@ -35,8 +35,10 @@ pub struct RunnerState {
     pub runner: AgentId,
     /// Base occupied at the time of the pitch (0 = the batter).
     pub start_base: Base,
-    /// Last base legally touched.
+    /// Highest base reached so far (bases must be touched in order).
     pub last_base: Base,
+    /// The base the runner most recently touched (moves backward on a retreat).
+    pub at: Base,
     /// Base the runner is currently touching, if any.
     pub on_base: Option<Base>,
     /// Base the runner is forced to, while the force stands.
@@ -71,6 +73,8 @@ pub struct PitchState {
     pub bounced: bool,
     pub swung: Option<bool>,
     pub contact: bool,
+    /// The pitch touched the batter; judged once the swing measurement is in (§4.4).
+    pub hit_body: bool,
 }
 
 #[derive(Clone, Debug, PartialEq)]
@@ -85,6 +89,8 @@ pub struct LivePlay {
     /// Outs recorded on this play: (time, runner, kind).
     pub outs: Vec<(f64, AgentId, OutKind)>,
     pub runs_pending: Vec<(f64, AgentId)>,
+    /// Latest fact time seen in this play (facts must not go backward).
+    pub last_t: f64,
 }
 
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
@@ -168,6 +174,8 @@ pub enum Input {
     /// The ball passed 1B or 3B on or near the ground, on the fair or foul side.
     BallPassedBase { t: f64, fair: bool },
     BallSettled { t: f64, x: f64, y: f64 },
+    /// The orchestrator could not settle the play in time (rules-spec §5.8 item 4).
+    PlayTimeout { t: f64 },
     /// A fielder secured the ball at (x, y) (rules-spec §5.3).
     GloveSecured { t: f64, fielder: AgentId, x: f64, y: f64 },
     BaseTouched { t: f64, agent: AgentId, base: Base, holding_ball: bool },
@@ -205,6 +213,9 @@ pub struct RulesState {
     pub next_up: [usize; 2],
     pub batter: AgentId,
     pub play: PlayState,
+    /// A winning run has scored in the bottom of the last inning or later; the game ends as
+    /// soon as the current plate appearance is complete.
+    pub walk_off: bool,
 }
 
 impl RulesState {
@@ -223,6 +234,7 @@ impl RulesState {
             next_up: [0, 0],
             batter: lineup[0][0],
             play: PlayState::Dead,
+            walk_off: false,
         }
     }
 
@@ -232,6 +244,9 @@ impl RulesState {
         let h: [AgentId; 9] = core::array::from_fn(|i| 0x0100 | (i + 1) as AgentId);
         Self::new([a, h], RulesOptions::default())
     }
+
+    /// Innings at which the liveness warning fires (rules-spec §4.1); play continues.
+    pub const LIVENESS_INNING: u8 = 30;
 
     pub fn score(&self) -> [u16; 2] {
         [0, 1].map(|s| self.runs_by_inning[s].iter().map(|&r| r as u16).sum())

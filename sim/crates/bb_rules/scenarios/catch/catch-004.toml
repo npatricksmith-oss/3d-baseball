@@ -15,6 +15,11 @@ t = 0.0
 fact = "BatContact"
 t = 0.42
 [[step]]
+fact = "BaseTouched"
+t = 4.6
+agent = "A.3"
+base = 1
+[[step]]
 fact = "BallTouched"
 t = 4.9
 what = "Wall"
@@ -24,11 +29,6 @@ fact = "GloveSecured"
 t = 5.1
 fielder = "H.CF"
 pos = [9.0, 116.0]
-[[step]]
-fact = "BaseTouched"
-t = 4.6
-agent = "A.3"
-base = 1
 [[step]]
 fact = "PlayEndCheck"
 t = 8.0

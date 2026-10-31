@@ -1,0 +1,18 @@
+id = "review-return-to-first-placement"
+title = "From the Codex M4 review"
+milestone = "M4"
+tags = ["review"]
+initial = { inning = 3, batter = "A.4", bases = { first = "A.1" } }
+step = [
+  { fact = "PitchDelivered", t = 0.0 },
+  { fact = "BatContact", t = 0.42 },
+  { fact = "BaseLeft", t = 0.5, agent = "A.1", base = 1 },
+  { fact = "BallTouched", t = 0.8, what = "Ground", pos = [-6.0, 25.0] },
+  { fact = "GloveSecured", t = 1.3, fielder = "H.SS", pos = [-8.0, 30.0] },
+  { fact = "BaseTouched", t = 2.4, agent = "H.1B", base = 1, holding_ball = true },
+  { fact = "BaseTouched", t = 4.5, agent = "A.1", base = 2 },
+  { fact = "BaseLeft", t = 4.6, agent = "A.1", base = 2 },
+  { fact = "BaseTouched", t = 8.5, agent = "A.1", base = 1 },
+  { fact = "PlayEndCheck", t = 10.0 }
+]
+expect = { outs = 1, bases = { first = "A.1" }, play = "Dead" }

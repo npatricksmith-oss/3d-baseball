@@ -100,6 +100,7 @@ fn parse_input(v: &Value) -> Input {
         "BaseLeft" => Input::BaseLeft { t, agent: agent(s(v, "agent")), base: v["base"].as_integer().unwrap() as u8 },
         "TagContact" => Input::TagContact { t, fielder: agent(s(v, "fielder")), runner: agent(s(v, "runner")), holding_ball: b(v, "holding_ball") },
         "PlayEndCheck" => Input::PlayEndCheck { t },
+        "PlayTimeout" => Input::PlayTimeout { t },
         x => panic!("unknown fact {x}"),
     }
 }
@@ -234,6 +235,10 @@ fn run_scenario(path: &Path) -> Result<(), String> {
         );
         let input = parse_input(stv);
         let evs = step(&mut st, &input);
+        // Facts must be chronological within a play (rules-spec §1.2; Codex M4 review #22).
+        if evs.iter().any(|e| matches!(e, Event::RulesWarning { code: "time_reversed" })) {
+            return Err(format!("step {i}: fact time goes backward"));
+        }
         if let Some(exp) = stv.get("expect_events").and_then(|v| v.as_array()) {
             let rendered: Vec<_> = evs.iter().map(render).collect();
             let mut j = 0;

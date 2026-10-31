@@ -1,0 +1,16 @@
+id = "review-equal-time-home-touch-before-third-out"
+title = "From the Codex M4 review"
+milestone = "M4"
+tags = ["review"]
+initial = { inning = 7, outs = 2, batter = "A.4", bases = { third = "A.3" } }
+step = [
+  { fact = "PitchDelivered", t = 0.0 },
+  { fact = "BatContact", t = 0.42 },
+  { fact = "BaseLeft", t = 0.5, agent = "A.3", base = 3 },
+  { fact = "BallTouched", t = 1.2, what = "Ground", pos = [30.0, 60.0] },
+  { fact = "BaseTouched", t = 4.6, agent = "A.4", base = 1 },
+  { fact = "BaseLeft", t = 4.7, agent = "A.4", base = 1 },
+  { fact = "BaseTouched", t = 5.0, agent = "A.3", base = 4 },
+  { fact = "TagContact", t = 5.0, fielder = "H.2B", runner = "A.4", holding_ball = true }
+]
+expect = { score = [1, 0], half = "bottom" }

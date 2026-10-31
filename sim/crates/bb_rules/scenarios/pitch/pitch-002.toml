@@ -13,6 +13,10 @@ fact = "PitchCrossed"
 t = 0.39
 in_zone = false
 [[step]]
+fact = "BallTouched"
+t = 0.392
+what = "Batter"
+[[step]]
 fact = "SwingMeasured"
 t = 0.395
 swung = true

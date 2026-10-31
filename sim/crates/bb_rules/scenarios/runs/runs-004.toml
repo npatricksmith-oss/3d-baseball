@@ -17,11 +17,6 @@ t = 0.0
 fact = "BatContact"
 t = 0.42
 [[step]]
-fact = "BallTouched"
-t = 1.2
-what = "Ground"
-pos = [30.0, 60.0]
-[[step]]
 fact = "BaseLeft"
 t = 0.5
 agent = "A.3"
@@ -31,6 +26,11 @@ fact = "BaseLeft"
 t = 0.5
 agent = "A.2"
 base = 2
+[[step]]
+fact = "BallTouched"
+t = 1.2
+what = "Ground"
+pos = [30.0, 60.0]
 [[step]]
 fact = "BaseTouched"
 t = 2.2

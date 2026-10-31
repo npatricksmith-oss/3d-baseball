@@ -16,11 +16,6 @@ t = 0.0
 fact = "BatContact"
 t = 0.42
 [[step]]
-fact = "BallTouched"
-t = 1.2
-what = "Ground"
-pos = [30.0, 60.0]
-[[step]]
 fact = "BaseLeft"
 t = 0.5
 agent = "A.3"
@@ -31,15 +26,10 @@ t = 0.5
 agent = "A.2"
 base = 2
 [[step]]
-fact = "BaseTouched"
-t = 2.9
-agent = "A.3"
-base = 4
-[[step]]
-fact = "BaseTouched"
-t = 4.1
-agent = "A.4"
-base = 1
+fact = "BallTouched"
+t = 1.2
+what = "Ground"
+pos = [30.0, 60.0]
 [[step]]
 fact = "BaseTouched"
 t = 2.2
@@ -50,6 +40,16 @@ fact = "BaseLeft"
 t = 2.3
 agent = "A.2"
 base = 3
+[[step]]
+fact = "BaseTouched"
+t = 2.9
+agent = "A.3"
+base = 4
+[[step]]
+fact = "BaseTouched"
+t = 4.1
+agent = "A.4"
+base = 1
 [[step]]
 fact = "TagContact"
 t = 5.0

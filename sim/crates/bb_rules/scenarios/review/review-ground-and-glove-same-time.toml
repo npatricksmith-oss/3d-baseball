@@ -1,0 +1,13 @@
+id = "review-ground-and-glove-same-time"
+title = "From the Codex M4 review"
+milestone = "M4"
+tags = ["review"]
+initial = { inning = 3, batter = "A.4", count = [1, 1] }
+step = [
+  { fact = "PitchDelivered", t = 0.0 },
+  { fact = "BatContact", t = 0.42 },
+  { fact = "BallTouched", t = 1.0, what = "Ground", pos = [5.0, 30.0] },
+  { fact = "GloveSecured", t = 1.0, fielder = "H.2B", pos = [5.0, 30.0] },
+  { fact = "PlayEndCheck", t = 5.0, expect_events = [{ event = "RulesWarning", code = "runner_between_bases" }] }
+]
+expect = { play = "Live", outs = 0, batter = "A.4" }

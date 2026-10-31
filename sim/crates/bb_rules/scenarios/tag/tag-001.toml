@@ -15,25 +15,25 @@ t = 0.0
 fact = "BatContact"
 t = 0.42
 [[step]]
-fact = "BallTouched"
-t = 1.0
-what = "Ground"
-pos = [20.0, 50.0]
-[[step]]
 fact = "BaseLeft"
 t = 0.6
 agent = "A.5"
 base = 2
 [[step]]
-fact = "BaseTouched"
-t = 4.0
-agent = "A.6"
-base = 1
+fact = "BallTouched"
+t = 1.0
+what = "Ground"
+pos = [20.0, 50.0]
 [[step]]
 fact = "GloveSecured"
 t = 2.4
 fielder = "H.RF"
 pos = [22.0, 55.0]
+[[step]]
+fact = "BaseTouched"
+t = 4.0
+agent = "A.6"
+base = 1
 [[step]]
 fact = "TagContact"
 t = 4.6
