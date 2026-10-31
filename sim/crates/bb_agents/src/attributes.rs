@@ -52,11 +52,12 @@ pub struct BatterGrades {
     pub vision: f64,
     pub spin_recognition: f64,
     pub discipline: f64,
+    pub adjustability: f64,
 }
 
 impl Default for BatterGrades {
     fn default() -> Self {
-        Self { bat_speed: 50.0, quick_hands: 50.0, bat_control: 50.0, timing: 50.0, vision: 50.0, spin_recognition: 50.0, discipline: 50.0 }
+        Self { bat_speed: 50.0, quick_hands: 50.0, bat_control: 50.0, timing: 50.0, vision: 50.0, spin_recognition: 50.0, discipline: 50.0, adjustability: 50.0 }
     }
 }
 
@@ -67,6 +68,7 @@ impl BatterGrades {
         b.t_swing = ratio_from_grade(self.quick_hands, 0.150, 1.05);
         b.bat_control = ratio_from_grade(self.bat_control, 0.012, 1.25);
         b.timing = ratio_from_grade(self.timing, 0.006, 1.25);
+        b.adjustability = linear_from_grade(self.adjustability, 0.6, 0.15).max(0.0);
         p.sigma_ang = ratio_from_grade(self.vision, 0.001, 1.2);
         p.weber = ratio_from_grade(self.vision, 0.10, 1.2);
         p.sigma_s0 = ratio_from_grade(self.spin_recognition, 1.0, 1.25);
@@ -113,8 +115,8 @@ pub mod archetypes {
             ("Contact", BatterGrades { bat_speed: 38.0, bat_control: 70.0, timing: 68.0, vision: 60.0, ..d }),
             ("Patient", BatterGrades { discipline: 75.0, vision: 60.0, ..d }),
             ("Free swinger", BatterGrades { discipline: 25.0, ..d }),
-            ("Elite", BatterGrades { bat_speed: 68.0, quick_hands: 65.0, bat_control: 68.0, timing: 68.0, vision: 68.0, spin_recognition: 68.0, discipline: 68.0 }),
-            ("Weak", BatterGrades { bat_speed: 35.0, quick_hands: 35.0, bat_control: 35.0, timing: 35.0, vision: 35.0, spin_recognition: 35.0, discipline: 35.0 }),
+            ("Elite", BatterGrades { bat_speed: 68.0, quick_hands: 65.0, bat_control: 68.0, timing: 68.0, vision: 68.0, spin_recognition: 68.0, discipline: 68.0, adjustability: 68.0 }),
+            ("Weak", BatterGrades { bat_speed: 35.0, quick_hands: 35.0, bat_control: 35.0, timing: 35.0, vision: 35.0, spin_recognition: 35.0, discipline: 35.0, adjustability: 35.0 }),
         ]
     }
 

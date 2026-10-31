@@ -61,7 +61,7 @@ impl Cage {
         let yc = self.template.contact_y(&self.batter, x);
         let tc = tr.find(Crossing::YBelow(yc))?;
         let aim = tr.at(tc).0;
-        Some(plan_swing(&self.batter, &self.template, &self.bat.profile, &self.bat.mass, aim, tc, attack_angle))
+        Some(plan_swing(&self.batter, &self.template, &self.bat.profile, &self.bat.mass, self.bat.contact.ss_from_tip, aim, tc, attack_angle))
     }
 
     /// Resolve a pitch against a swing with an explicit placement deviation.

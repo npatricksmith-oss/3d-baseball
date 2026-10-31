@@ -31,11 +31,13 @@ pub struct BatterAttrs {
     pub bat_control: f64,
     /// σ of the contact time, s (`Timing`).
     pub timing: f64,
+    /// Mid-swing correction speed of the aim point, m/s (`Adjustability`).
+    pub adjustability: f64,
 }
 
 impl BatterAttrs {
     pub fn average_rhb() -> Self {
-        Self { bats: Hand::Right, height: 1.85, bat_speed: 32.0, t_swing: 0.150, bat_control: 0.012, timing: 0.006 }
+        Self { bats: Hand::Right, height: 1.85, bat_speed: 32.0, t_swing: 0.150, bat_control: 0.012, timing: 0.006, adjustability: 0.6 }
     }
 }
 
@@ -128,17 +130,53 @@ pub struct Swing {
     pub t_c: f64,
     /// Bat center of mass from the knob, m.
     pub u_cm: f64,
+    /// Check swing: when braking starts (agent-models §3.6). The phase rate then decays
+    /// linearly to zero over [`BRAKE_S`].
+    pub t_brake: Option<f64>,
 }
 
+/// Braking duration of a check swing, s [E] (agent-models §3.6).
+pub const BRAKE_S: f64 = 0.040;
+
 impl Swing {
-    /// Rotation angle relative to the contact pose.
-    pub fn angle(&self, t: f64) -> f64 {
+    fn free_angle(&self, t: f64) -> f64 {
         let tau = (t - self.t_c) / (self.width * core::f64::consts::SQRT_2);
         self.omega * self.width * m::sqrt(core::f64::consts::FRAC_PI_2) * m::erf(tau)
     }
-    pub fn angular_speed(&self, t: f64) -> f64 {
+    fn free_speed(&self, t: f64) -> f64 {
         let tau = (t - self.t_c) / self.width;
         self.omega * m::exp(-0.5 * tau * tau)
+    }
+    /// Rotation angle relative to the contact pose (braking included).
+    pub fn angle(&self, t: f64) -> f64 {
+        match self.t_brake {
+            Some(tb) if t > tb => {
+                let tau = (t - tb).min(BRAKE_S);
+                self.free_angle(tb) + self.free_speed(tb) * (tau - tau * tau / (2.0 * BRAKE_S))
+            }
+            _ => self.free_angle(t),
+        }
+    }
+    pub fn angular_speed(&self, t: f64) -> f64 {
+        match self.t_brake {
+            Some(tb) if t > tb => self.free_speed(tb) * (1.0 - ((t - tb) / BRAKE_S).min(1.0)),
+            _ => self.free_speed(t),
+        }
+    }
+    /// Largest rotation the bat reaches (for the check-swing judgment, rules-spec §4.5).
+    pub fn max_angle(&self) -> f64 {
+        match self.t_brake {
+            Some(tb) => self.angle(tb + BRAKE_S),
+            None => f64::INFINITY,
+        }
+    }
+    /// Rules-spec §4.5: the bat's horizontal direction at its maximum rotation has reached
+    /// perpendicular to the pitcher–home line (barrel no longer pointing back toward the
+    /// catcher).
+    pub fn judged_swing(&self) -> bool {
+        let Some(tb) = self.t_brake else { return true };
+        let a = self.axis_c.rotate(self.n, self.angle(tb + BRAKE_S));
+        a.y >= 0.0
     }
     /// Swing start (10% of peak speed).
     pub fn t_start(&self) -> f64 {
@@ -163,8 +201,8 @@ impl BatPose for Swing {
 #[derive(Clone, Copy, Debug, PartialEq)]
 pub struct IntendedSwing {
     pub swing: Swing,
-    /// Attack direction before tilt noise (unit, ⟂ axis): kept so noise can tilt the plane.
-    pub e_v: Vec3,
+    /// Planned attack angle, rad (plane-tilt noise is added to it).
+    pub attack_angle: f64,
 }
 
 /// Inverse: plan a swing whose sweet spot passes through `aim` at time `t_aim`, with the
@@ -175,6 +213,7 @@ pub fn plan_swing(
     tpl: &SwingTemplate,
     profile: &BatProfile,
     mp: &MassProps,
+    ss_from_tip: f64,
     aim: Vec3,
     t_aim: f64,
     attack_angle: f64,
@@ -182,11 +221,9 @@ pub fn plan_swing(
     let c = tpl.pivot(b);
     let to_aim = aim - c;
     let axis_c = to_aim.normalized();
-    let uss = bb_physics::bat::sweet_spot(profile.length());
+    let uss = profile.length() - ss_from_tip;
     let r_knob = (to_aim.norm() - uss).clamp(tpl.r_knob_min, tpl.r_knob_max);
-    let d = Vec3::new(0.0, m::cos(attack_angle), m::sin(attack_angle));
-    let e_v = d.reject(axis_c).normalized();
-    let n = axis_c.cross(e_v);
+    let n = plane_normal(axis_c, attack_angle);
     let swing = Swing {
         pivot: c,
         n,
@@ -196,8 +233,17 @@ pub fn plan_swing(
         width: b.t_swing / START_WIDTHS,
         t_c: t_aim,
         u_cm: mp.u_cm,
+        t_brake: None,
     };
-    IntendedSwing { swing, e_v }
+    IntendedSwing { swing, attack_angle }
+}
+
+/// Swing-plane normal for a bat axis and an attack angle: the sweet spot moves "forward
+/// (+Y), tilted up by the attack angle", made perpendicular to the bat.
+fn plane_normal(axis: Vec3, attack_angle: f64) -> Vec3 {
+    let d = Vec3::new(0.0, m::cos(attack_angle), m::sin(attack_angle));
+    let e_v = d.reject(axis).normalized();
+    axis.cross(e_v)
 }
 
 /// Apply a placement deviation (used by `motor::execute_swing`, and by the cage lab to
@@ -208,11 +254,8 @@ pub fn apply_placement(i: &IntendedSwing, p: &Placement) -> Swing {
     s.r_knob += p.reach;
     s.t_c += p.t_shift;
     if p.plane_tilt != 0.0 {
-        // Tilt the attack direction about the bat axis' horizontal normal: rotate e_v toward
-        // vertical by plane_tilt (positive = more uppercut).
-        let side = s.axis_c.cross(Vec3::Z).normalized();
-        let e_v = i.e_v.rotate(side, -p.plane_tilt).reject(s.axis_c).normalized();
-        s.n = s.axis_c.cross(e_v);
+        // Positive tilt = more uppercut (Codex review: rebuild from the tilted attack angle).
+        s.n = plane_normal(s.axis_c, i.attack_angle + p.plane_tilt);
     }
     s
 }
@@ -228,7 +271,7 @@ mod tests {
         let prof = BatProfile::default_34in();
         let mp = prof.mass_props();
         let aim = Vec3::new(0.05, tpl.contact_y(&b, 0.05), 0.80);
-        let i = plan_swing(&b, &tpl, &prof, &mp, aim, 0.42, tpl.attack_angle);
+        let i = plan_swing(&b, &tpl, &prof, &mp, 0.15, aim, 0.42, tpl.attack_angle);
         let k = i.swing.at(0.42);
         let uss = bb_physics::bat::sweet_spot(prof.length());
         assert!((k.point(uss) - aim).norm() < 1e-9);
@@ -246,14 +289,49 @@ mod tests {
     }
 
     #[test]
+    fn plane_tilt_changes_attack_angle_with_sign() {
+        let b = BatterAttrs::average_rhb();
+        let tpl = SwingTemplate::default();
+        let prof = BatProfile::default_34in();
+        let mp = prof.mass_props();
+        let aim = Vec3::new(0.0, 0.35, 0.8);
+        let i = plan_swing(&b, &tpl, &prof, &mp, 0.15, aim, 0.4, tpl.attack_angle);
+        let aa = |tilt: f64| {
+            let s = apply_placement(&i, &Placement { plane_tilt: tilt, ..Default::default() });
+            let k = s.at(0.4);
+            let v = k.point_velocity(k.point(prof.length() - 0.15), mp.u_cm);
+            m::atan2(v.z, m::hypot(v.x, v.y))
+        };
+        let (lo, mid, hi) = (aa(-0.05), aa(0.0), aa(0.05));
+        assert!(lo < mid && mid < hi, "{lo} {mid} {hi}");
+        assert!(((hi - mid) - 0.05).abs() < 0.01);
+    }
+
+    #[test]
+    fn braking_stops_the_bat_and_is_judged() {
+        let b = BatterAttrs::average_rhb();
+        let tpl = SwingTemplate::default();
+        let prof = BatProfile::default_34in();
+        let mp = prof.mass_props();
+        let i = plan_swing(&b, &tpl, &prof, &mp, 0.15, Vec3::new(0.0, 0.35, 0.8), 0.4, tpl.attack_angle);
+        let mut early = i.swing;
+        early.t_brake = Some(early.t_start() + 0.03);
+        assert!(!early.judged_swing());
+        assert!(early.angular_speed(early.t_brake.unwrap() + BRAKE_S + 0.01) == 0.0);
+        let mut late = i.swing;
+        late.t_brake = Some(0.39);
+        assert!(late.judged_swing());
+    }
+
+    #[test]
     fn lefty_mirrors() {
         let r = BatterAttrs::average_rhb();
         let l = BatterAttrs { bats: Hand::Left, ..r.clone() };
         let tpl = SwingTemplate::default();
         let prof = BatProfile::default_34in();
         let mp = prof.mass_props();
-        let ir = plan_swing(&r, &tpl, &prof, &mp, Vec3::new(0.1, 0.3, 0.8), 0.4, tpl.attack_angle);
-        let il = plan_swing(&l, &tpl, &prof, &mp, Vec3::new(-0.1, 0.3, 0.8), 0.4, tpl.attack_angle);
+        let ir = plan_swing(&r, &tpl, &prof, &mp, 0.15, Vec3::new(0.1, 0.3, 0.8), 0.4, tpl.attack_angle);
+        let il = plan_swing(&l, &tpl, &prof, &mp, 0.15, Vec3::new(-0.1, 0.3, 0.8), 0.4, tpl.attack_angle);
         for t in [0.3, 0.38, 0.4, 0.41] {
             let (a, b) = (ir.swing.at(t), il.swing.at(t));
             assert!((a.knob.x + b.knob.x).abs() < 1e-12 && (a.knob.y - b.knob.y).abs() < 1e-12);

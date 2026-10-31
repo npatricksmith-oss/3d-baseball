@@ -133,9 +133,17 @@ fn contact_at(tr: &Trajectory, swing: &dyn BatPose, profile: &BatProfile, ball: 
     let i = tr.knots.partition_point(|k| k.t <= t).saturating_sub(1);
     let w = tr.knots[i].s.w;
     let (_, u, p) = gap(&bat, profile, r, ball.radius);
-    let radial = (r - p).reject(bat.axis).normalized();
-    // Tilt by the profile slope so the normal is perpendicular to the tapered surface.
-    let n = (radial - bat.axis * profile.slope(u)).normalized();
+    let radial = (r - p).reject(bat.axis);
+    let len = profile.length();
+    let at_end = u <= 0.0 || u >= len;
+    // On the side surface the normal is radial, tilted by the profile slope. Beyond either
+    // end the gap is measured to the end point (a rounded cap of the end radius, physics-spec
+    // §6.1/§7), so the normal points from that end point to the ball center.
+    let n = if at_end || radial.norm() < 1e-9 {
+        (r - p).normalized()
+    } else {
+        (radial.normalized() - bat.axis * profile.slope(u)).normalized()
+    };
     ContactPoint { t, u, n, ball: BallState { r, v, w }, bat }
 }
 

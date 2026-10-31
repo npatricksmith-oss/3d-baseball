@@ -26,7 +26,7 @@ pub fn pa(a: PaArgs) {
     let t0 = std::time::Instant::now();
     let mut rep = B1Report::default();
     for i in 0..a.n {
-        rep.add(&simulate_pa(&mu, a.seed, i * 64));
+        rep.add(&simulate_pa(&mu, a.seed, i * bb_game::pa::PA_PLAY_STRIDE));
     }
     let el = t0.elapsed();
     println!("{} PA, average RHP vs average RHB, knobs {:?}", a.n, mu.knobs);

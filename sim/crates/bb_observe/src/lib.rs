@@ -79,6 +79,8 @@ pub struct ReleaseObs {
     pub t: f64,
     /// Estimated release point (noisy).
     pub r: Vec3,
+    /// σ of that estimate per axis, m (the batter knows its own acuity).
+    pub sigma: f64,
 }
 
 /// One perceptual sample of the ball in flight (agent-models §3.3), every ~10 ms.
@@ -89,11 +91,12 @@ pub struct BallObs {
     pub az: f64,
     /// Elevation of the ball from the eye, rad.
     pub el: f64,
-    /// Angular noise σ that applied to (az, el), rad. Agents know their own acuity.
+    /// σ of the sample-to-sample (independent) part of the angular noise, rad. The
+    /// persistent part is a per-pitch bias the agent models separately.
     pub sigma_ang: f64,
-    /// Perceived time to arrival at the eye plane, s (optical expansion).
+    /// Perceived time to arrival at the plate plane, s (optical expansion).
     pub tau: f64,
-    /// σ of `tau`, s.
+    /// σ of the independent part of `tau`'s noise, s, derived from the *perceived* τ.
     pub sigma_tau: f64,
     /// Perceived spin signature (see [`spin_signature`]) and its per-component σ.
     pub spin_cue: [f64; 3],

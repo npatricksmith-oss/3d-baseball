@@ -29,7 +29,7 @@ fn main() {
     let eye = eye_point(mu.batter.bats, mu.batter.height);
     let prior = vec![0.5, 0.25, 0.13, 0.12];
     t("bank: new + 25 observations", 2000, || {
-        let mut b = Bank::new(&mu.scouting, &prior, &ReleaseObs { t: 0.0, r: plan.r }, eye, 0.06);
+        let mut b = Bank::new(&mu.scouting, &prior, &ReleaseObs { t: 0.0, r: plan.r, sigma: 0.05 }, eye, &[0.06; 4], bb_agents::batter::BiasPrior { ang: 0.0003, tau_rel: 0.03 });
         for i in 0..25 {
             let o = BallObs { t: 0.01 * (i + 1) as f64, az: 0.05, el: 0.02, sigma_ang: 0.002, tau: 0.3, sigma_tau: 0.03, spin_cue: [0.0, 0.5, 0.9], sigma_spin: 0.5 };
             b.observe(&mu.scouting, &o);

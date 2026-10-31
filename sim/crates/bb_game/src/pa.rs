@@ -5,10 +5,10 @@
 //! is executed with noise, and the world resolves bat against ball. The pitch call comes
 //! from geometry only (D1).
 
-use bb_agents::batter::{self, Bank, Decision, Discipline, Perception, PitcherMemory, Scouting, eye_point, type_model};
+use bb_agents::batter::{self, Bank, Decision, Discipline, OwnExecution, Perception, PitcherMemory, Scouting, eye_point, type_model};
 use bb_agents::motor::{ReleaseNoise, SwingNoise, execute_release, execute_swing};
 use bb_agents::pitcher::{PitchDef, PitchIntent, PitcherAttrs, plan_release, plan_release_seeded};
-use bb_agents::swing::{BatterAttrs, SwingTemplate, plan_swing};
+use bb_agents::swing::{BatterAttrs, SwingTemplate, apply_placement, plan_swing};
 use bb_math::{KeyedRng, Purpose, RngKey, Vec3, m};
 use bb_observe::{BallObs, Count, PitchType, ReleaseObs, spin_signature};
 use bb_physics::flight::{Crossing, DT_PITCH, fly};
@@ -55,7 +55,7 @@ impl Default for Knobs {
 impl Knobs {
     /// Interim M3 calibration (docs/calibration/2026-10-31-m3-interim.md).
     pub fn calibrated_m3() -> Self {
-        Self { perception: 2.5, command: 0.8, swing: 1.5 }
+        Self { perception: 2.25, command: 0.8, swing: 1.0 }
     }
 }
 
@@ -331,11 +331,13 @@ fn body_hit(mu: &Matchup, tr: &bb_physics::flight::Trajectory) -> bool {
 
 /// Simulate one pitch at `count`, with the batter's scouting models `sc`.
 pub fn simulate_pitch(mu: &Matchup, sc: &Scouting, count: Count, seed: u64, play: u32) -> PitchRecord {
-    simulate_pitch_bs(mu, sc, count, seed, play, mu.perception.break_sigma)
+    let bs = vec![mu.perception.break_sigma; sc.types.len()];
+    simulate_pitch_ctx(mu, sc, count, seed, play, &bs, None)
 }
 
-/// [`simulate_pitch`] with an explicit break-spread belief (from in-game adaptation).
-pub fn simulate_pitch_bs(mu: &Matchup, sc: &Scouting, count: Count, seed: u64, play: u32, break_sigma: f64) -> PitchRecord {
+/// [`simulate_pitch`] with per-type break-spread beliefs (from in-game adaptation) and the
+/// previous pitch type seen in this plate appearance (sequence prior, agent-models §3.1).
+pub fn simulate_pitch_ctx(mu: &Matchup, sc: &Scouting, count: Count, seed: u64, play: u32, break_sigma: &[f64], prev_read: Option<PitchType>) -> PitchRecord {
     let intent = choose_pitch(mu, count, seed, play);
     let def = &mu.arsenal.iter().find(|a| a.def.ty == intent.ty).unwrap().def;
     let plan = plan_release_seeded(&mu.env, &mu.pitcher, def, &intent, mu.aim_guess(&intent)).expect("reachable target");
@@ -346,23 +348,36 @@ pub fn simulate_pitch_bs(mu: &Matchup, sc: &Scouting, count: Count, seed: u64, p
     let free = pitch_flight(&mu.env, release);
     let t_plate = free.find(Crossing::YBelow(Y_JUDGE));
 
-    // Perception.
+    // ---- Perception (agent-models §3.2–§3.3). Observations are built here from the true
+    // flight plus noise; the batter only ever receives the noisy values.
     let pc = &mu.perception;
     let kp = mu.knobs.perception;
     let eye = eye_point(mu.batter.bats, mu.batter.height);
     let mut pr = rng(seed, play, BATTER, Purpose::BatterPerception, 0);
-    let rel_obs = ReleaseObs { t: 0.0, r: release.r + Vec3::new(0.05 * kp * pr.truncated_normal(4.0), 0.0, 0.05 * kp * pr.truncated_normal(4.0)) };
+    let rel_sigma = batter::RELEASE_SIGMA * kp;
+    let rel_obs = ReleaseObs {
+        t: 0.0,
+        r: release.r + Vec3::new(rel_sigma * pr.truncated_normal(4.0), 0.0, rel_sigma * pr.truncated_normal(4.0)),
+        sigma: rel_sigma,
+    };
+    // Prior over types: usage by count, then the sequence factor (repeats slightly less
+    // expected, agent-models §3.1).
     let g = batter::count_group(count);
-    let mut prior: Vec<f64> = mu.arsenal.iter().map(|a| a.usage[g]).collect();
+    let mut prior: Vec<f64> = mu
+        .arsenal
+        .iter()
+        .map(|a| a.usage[g] * if Some(a.def.ty) == prev_read { SEQ_REPEAT } else { 1.0 })
+        .collect();
     let ps: f64 = prior.iter().sum();
     prior.iter_mut().for_each(|p| *p /= ps);
-    let mut bank = Bank::new(sc, &prior, &rel_obs, eye, break_sigma);
+    let (wp, wi) = (m::sqrt(pc.persistent_share), m::sqrt(1.0 - pc.persistent_share));
+    let bias = batter::BiasPrior { ang: pc.sigma_ang * kp * wp, tau_rel: pc.weber * kp * wp };
+    let mut bank = Bank::new(sc, &prior, &rel_obs, eye, break_sigma, bias);
     let d = decompose(release.w, release.v);
     let true_sig = spin_signature(d.magnus_dir.x, d.magnus_dir.z, d.efficiency, bb_math::units::radps_to_rpm(release.w.norm()));
     let spin_z = [pr.truncated_normal(4.0), pr.truncated_normal(4.0), pr.truncated_normal(4.0)];
-    // Per-pitch persistent misjudgments (agent-models §3.3, M3): angle and time-to-arrival.
-    let pers = [pr.truncated_normal(4.0), pr.truncated_normal(4.0), pr.truncated_normal(4.0)];
-    let (wp, wi) = (m::sqrt(pc.persistent_share), m::sqrt(1.0 - pc.persistent_share));
+    // This pitch's persistent misjudgments (the bias states' true values).
+    let pers = [bias.ang * pr.truncated_normal(4.0), bias.ang * pr.truncated_normal(4.0), bias.tau_rel * pr.truncated_normal(4.0)];
     let t_cross_true = t_plate.unwrap_or(free.last().t);
 
     let observe = |bank: &mut Bank, i: u32| -> Option<f64> {
@@ -373,20 +388,20 @@ pub fn simulate_pitch_bs(mu: &Matchup, sc: &Scouting, count: Count, seed: u64, p
         }
         let mut r = rng(seed, play, BATTER, Purpose::BatterPerception, i + 1);
         let (az, el) = batter::angles(eye, p);
-        // Angular speed of the ball as seen from the eye.
-        let d = p - eye;
-        let omega = d.cross(v).norm() / d.norm_sq();
-        let sa = pc.angular_sigma(omega) * kp;
+        let dv = p - eye;
+        let omega = dv.cross(v).norm() / dv.norm_sq();
+        let sa = pc.angular_sigma(omega) * kp * wi;
         let tau = (t_cross_true - t).max(0.0);
-        let st = pc.weber * kp * tau.max(0.02);
+        let tau_obs = (tau * (1.0 + pers[2] + pc.weber * kp * wi * r.truncated_normal(4.0))).max(0.0);
         let ss = pc.sigma_s0 * kp / m::sqrt(1.0 + t / pc.tau_s);
         let obs = BallObs {
             t,
-            az: az + sa * (wp * pers[0] + wi * r.truncated_normal(4.0)),
-            el: el + sa * (wp * pers[1] + wi * r.truncated_normal(4.0)),
+            az: az + pers[0] + sa * r.truncated_normal(4.0),
+            el: el + pers[1] + sa * r.truncated_normal(4.0),
             sigma_ang: sa,
-            tau: tau + st * (wp * pers[2] + wi * r.truncated_normal(4.0)),
-            sigma_tau: st,
+            tau: tau_obs,
+            // From the perceived τ only (Codex M3 review #2).
+            sigma_tau: pc.weber * kp * wi * tau_obs.max(0.02),
             spin_cue: [true_sig[0] + ss * spin_z[0], true_sig[1] + ss * spin_z[1], true_sig[2] + ss * spin_z[2]],
             sigma_spin: ss,
         };
@@ -394,10 +409,9 @@ pub fn simulate_pitch_bs(mu: &Matchup, sc: &Scouting, count: Count, seed: u64, p
         Some(t)
     };
 
-    // Observe until commit.
+    // ---- Observe until commit.
     let mut i = 0u32;
     let mut t_now = 0.0;
-    let decision;
     loop {
         let t_commit = bank.arrival() - mu.batter.t_swing - pc.latency;
         if t_now >= t_commit {
@@ -409,70 +423,94 @@ pub fn simulate_pitch_bs(mu: &Matchup, sc: &Scouting, count: Count, seed: u64, p
         }
         i += 1;
     }
+    let zone = (mu.zone.bottom, mu.zone.top);
     let post = bank.posterior();
     let aim = bank.dominant();
-    let dec = batter::decide(&post, aim, count, (mu.zone.bottom, mu.zone.top), &mu.discipline, 0.0, mu.env.ball.radius);
-    decision = Some(dec);
+    // Expected correction between now and the cutoff (60 ms before the believed arrival).
+    let t_left = (bank.t_release + aim.mean.z - 0.060 - t_now).max(0.0);
+    let own = OwnExecution {
+        vertical: mu.batter.bat_control * mu.knobs.swing,
+        timing: mu.batter.timing * mu.knobs.swing,
+        correct_z: batter::CORRECTION_CREDIT * mu.batter.adjustability * t_left,
+        correct_t: batter::CORRECTION_CREDIT * 0.10 * (t_left + 0.060 - pc.latency).max(0.0),
+    };
+    let dec = batter::decide(&post, aim, count, zone, &mu.discipline, own, 0.0, mu.env.ball.radius);
 
-    let mut swung = dec.swing;
-    let mut check = false;
+    // ---- Swing: planned and executed at commit, then adjusted causally (agent-models §3.6).
     let mut swing_res = SwingResult::NoSwing;
     let mut resolved_pitch = free.clone();
-    let mut aim_error = None;
-    let mut commit_error = None;
+    let (mut aim_error, mut commit_error) = (None, None);
     let truth_err = |p: Vec3, t: f64| -> Option<Vec3> {
         let tt = free.find(Crossing::YBelow(p.y))?;
         let q = free.at(tt).0;
         Some(Vec3::new(p.x - q.x, p.z - q.z, t - tt))
     };
-    if swung {
-        let aim_pt = bank.point_at_depth(sc, aim.ty, mu.template.contact_y(&mu.batter, aim.mean.x));
-        // Keep observing to the cutoff; adjust within limits; maybe check the swing.
+    let mut swung = dec.swing;
+    let mut check = false;
+    if dec.swing {
+        let depth = |x: f64| mu.template.contact_y(&mu.batter, x);
+        // Where to aim: the dominant hypothesis' path at contact depth; if that prediction is
+        // unavailable, its plate-plane mean (Codex M3 review #8).
+        let aim_of = |bank: &Bank, c: &batter::Component| -> (Vec3, f64) {
+            bank.point_at_depth(sc, c.ty, depth(c.mean.x))
+                .unwrap_or((Vec3::new(c.mean.x, Y_JUDGE, c.mean.y), bank.t_release + c.mean.z))
+        };
+        let (mut cur, mut t_aim) = aim_of(&bank, &aim);
+        commit_error = truth_err(cur, t_aim);
+        let off = Vec3::new(0.0, 0.0, mu.template.aim_offset_z);
+        let planner = |p: Vec3, t: f64| plan_swing(&mu.batter, &mu.template, &mu.bat.profile, &mu.bat.mass, mu.bat.contact.ss_from_tip, p + off, t, mu.template.attack_angle);
+        let sn = SwingNoise::new(&mu.batter, mu.knobs.swing);
+        let ex = execute_swing(&planner(cur, t_aim), &sn, &mut rng(seed, play, BATTER, Purpose::SwingExecution, 0));
+        let mut swing = ex.swing;
         let t_commit = t_now;
-        commit_error = aim_pt.and_then(|(p, t)| truth_err(p, t));
-        let t_aim0 = aim_pt.map(|a| a.1).unwrap_or(bank.arrival());
-        let t_cut = t_aim0 - 0.060;
-        let t_abort = t_aim0 - 0.55 * mu.batter.t_swing;
-        while t_now < t_cut {
+        // Phase rate may change ±10% over the swing still to come after motor latency.
+        let dt_lim = 0.10 * (t_aim - (t_commit + pc.latency)).max(0.0);
+        let t_aim0 = t_aim;
+        let t_abort = swing.t_start() + 0.6 * (swing.t_c - swing.t_start());
+        let v_adj = mu.batter.adjustability;
+        let mut t_last = t_commit;
+        loop {
+            let t_cut = t_aim - 0.060;
+            if t_now + 0.010 > t_cut {
+                break;
+            }
             match observe(&mut bank, i) {
                 Some(t) => t_now = t,
                 None => break,
             }
             i += 1;
+            let post2 = bank.posterior();
+            let dom = bank.dominant();
             if t_now < t_abort {
-                let post2 = bank.posterior();
-                let d2 = batter::decide(&post2, bank.dominant(), count, (mu.zone.bottom, mu.zone.top), &mu.discipline, 0.0, mu.env.ball.radius);
+                let d2 = batter::decide(&post2, dom, count, zone, &mu.discipline, own, 0.0, mu.env.ball.radius);
                 if d2.ev_swing - d2.ev_take < -0.03 {
+                    // Brake after motor latency; the rules judge the result (rules-spec §4.5).
+                    swing.t_brake = Some(t_now + pc.latency);
                     check = true;
-                    swung = false;
                     break;
                 }
             }
+            // Bounded move of the aim toward the new estimate since the last tick.
+            let (want, t_want) = aim_of(&bank, &dom);
+            let lim = v_adj * (t_now - t_last);
+            t_last = t_now;
+            let dx = (want.x - cur.x).clamp(-lim, lim);
+            let dz = (want.z - cur.z).clamp(-lim, lim);
+            let nx = cur.x + dx;
+            cur = Vec3::new(nx, depth(nx), cur.z + dz);
+            t_aim = t_aim0 + (t_want - t_aim0).clamp(-dt_lim, dt_lim);
+            // The same executed placement deviation rides on the adjusted plan.
+            let mut s2 = apply_placement(&planner(cur, t_aim), &ex.placement);
+            s2.t_brake = swing.t_brake;
+            swing = s2;
         }
-        if !check {
-            let late = bank.dominant();
-            let late_pt = bank.point_at_depth(sc, late.ty, mu.template.contact_y(&mu.batter, late.mean.x));
-            if let (Some((p0, t0)), Some((p1, t1))) = (aim_pt, late_pt) {
-                // Bounded adjustment (agent-models §3.6): v_adj on position, ±10% on timing.
-                let v_adj = 0.6;
-                let span = (t_now - t_commit).max(0.0);
-                let lim = v_adj * span;
-                let dp = p1 - p0;
-                let dp = Vec3::new(dp.x.clamp(-lim, lim), dp.y, dp.z.clamp(-lim, lim));
-                let dt_lim = 0.10 * (t0 - t_commit).max(0.0);
-                let t_aim = t0 + (t1 - t0).clamp(-dt_lim, dt_lim);
-                let aim3 = p0 + dp + Vec3::new(0.0, 0.0, mu.template.aim_offset_z);
-                aim_error = truth_err(p0 + dp, t_aim);
-                let intended = plan_swing(&mu.batter, &mu.template, &mu.bat.profile, &mu.bat.mass, aim3, t_aim, mu.template.attack_angle);
-                let sn = SwingNoise::new(&mu.batter, mu.knobs.swing);
-                let ex = execute_swing(&intended, &sn, &mut rng(seed, play, BATTER, Purpose::SwingExecution, 0));
-                let res = resolve_flight(&mu.env, free.clone(), Some(&ex.swing), &mu.bat);
-                resolved_pitch = res.pitch;
-                swing_res = res.swing;
-            } else {
-                swing_res = SwingResult::Miss(bb_physics::contact::ClosestApproach { t: t_aim0, u: 0.0, gap: f64::INFINITY, offset: Vec3::ZERO });
-            }
-        }
+        aim_error = truth_err(cur, t_aim);
+        let res = resolve_flight(&mu.env, free.clone(), Some(&swing), &mu.bat);
+        resolved_pitch = res.pitch;
+        swing_res = res.swing;
+        // Any contact is a swing; otherwise a braked swing is judged by its yaw.
+        let contact = matches!(swing_res, SwingResult::Contact(_));
+        swung = contact || swing.judged_swing();
     }
 
     let plate = t_plate.map(|t| free.at(t).0);
@@ -483,22 +521,15 @@ pub fn simulate_pitch_bs(mu: &Matchup, sc: &Scouting, count: Count, seed: u64, p
     };
     let (call, batted, contact) = match &swing_res {
         SwingResult::Contact(b) => {
-            let v_in = resolved_pitch.last().s.v.normalized();
-            let v_out = b.contact.ball_after.v;
-            let cosang = v_out.normalized().dot(v_in);
             let land = b.flight.last().s.r;
             let fair = land.y > 0.0 && land.x.abs() <= land.y;
-            let call = if cosang > m::cos(25.0f64.to_radians()) && v_out.norm() > 0.5 * resolved_pitch.last().s.v.norm() {
-                Call::FoulTip
-            } else if fair {
-                Call::InPlay
-            } else {
-                Call::Foul
-            };
+            // No catcher exists yet, so no contact can be a caught foul tip (rules-spec §4.4):
+            // backward contact is a foul.
+            let call = if fair { Call::InPlay } else { Call::Foul };
             (call, Some((b.exit_speed, b.launch_angle, b.spray_angle)), true)
         }
-        SwingResult::Miss(_) => (Call::SwingingStrike, None, false),
-        SwingResult::NoSwing => {
+        _ if swung => (Call::SwingingStrike, None, false),
+        _ => {
             if body_hit(mu, &free) {
                 (Call::HitByPitch, None, false)
             } else if in_zone {
@@ -508,7 +539,7 @@ pub fn simulate_pitch_bs(mu: &Matchup, sc: &Scouting, count: Count, seed: u64, p
             }
         }
     };
-    let read = aim;
+    let _ = &resolved_pitch;
     PitchRecord {
         ty: intent.ty,
         count,
@@ -519,14 +550,17 @@ pub fn simulate_pitch_bs(mu: &Matchup, sc: &Scouting, count: Count, seed: u64, p
         check_swing: check,
         contact,
         call,
-        read: read.ty,
-        read_weight: read.w,
-        decision,
+        read: aim.ty,
+        read_weight: aim.w,
+        decision: Some(dec),
         batted,
         aim_error,
         commit_error,
     }
 }
+
+/// Factor on the prior of the type just seen in this PA (agent-models §3.1) [E].
+pub const SEQ_REPEAT: f64 = 0.85;
 
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 pub enum PaResult {
@@ -534,7 +568,14 @@ pub enum PaResult {
     Walk,
     HitByPitch,
     InPlay,
+    /// The liveness guard stopped an endless plate appearance: a model bug, not a result.
+    Unresolved,
 }
+
+/// Liveness guard for one plate appearance; play-index spacing between PAs must exceed it.
+pub const MAX_PA_PITCHES: usize = 200;
+/// Play-index stride between plate appearances in batch runs.
+pub const PA_PLAY_STRIDE: u32 = 1000;
 
 #[derive(Clone, Debug)]
 pub struct PaRecord {
@@ -562,8 +603,10 @@ pub fn simulate_pa(mu: &Matchup, seed: u64, first_play: u32) -> PaRecord {
     let mut count = Count::default();
     let mut pitches = Vec::new();
     let mut play = first_play;
+    let bs = vec![mu.perception.break_sigma; sc.types.len()];
     loop {
-        let rec = simulate_pitch(mu, sc, count, seed, play);
+        let prev = pitches.last().map(|p: &PitchRecord| p.read);
+        let rec = simulate_pitch_ctx(mu, sc, count, seed, play, &bs, prev);
         play += 1;
         let call = rec.call;
         pitches.push(rec);
@@ -588,9 +631,9 @@ pub fn simulate_pa(mu: &Matchup, seed: u64, first_play: u32) -> PaRecord {
             Call::HitByPitch => return PaRecord { pitches, result: PaResult::HitByPitch, called_third: false },
             Call::InPlay => return PaRecord { pitches, result: PaResult::InPlay, called_third: false },
         }
-        if pitches.len() > 40 {
-            // Liveness guard (rules-spec): an endless foul streak is a model bug; end it.
-            return PaRecord { pitches, result: PaResult::InPlay, called_third: false };
+        if pitches.len() >= MAX_PA_PITCHES {
+            // Liveness guard: report it, never substitute a baseball result (D1).
+            return PaRecord { pitches, result: PaResult::Unresolved, called_third: false };
         }
     }
 }
@@ -599,6 +642,7 @@ pub fn simulate_pa(mu: &Matchup, seed: u64, first_play: u32) -> PaRecord {
 #[derive(Clone, Debug, Default)]
 pub struct B1Report {
     pub pa: u32,
+    pub unresolved: u32,
     pub k: u32,
     pub bb: u32,
     pub hbp: u32,
@@ -631,6 +675,7 @@ impl B1Report {
             PaResult::Walk => self.bb += 1,
             PaResult::HitByPitch => self.hbp += 1,
             PaResult::InPlay => self.bip += 1,
+            PaResult::Unresolved => self.unresolved += 1,
         }
         if let Some(f) = pa.pitches.first() {
             self.first_pitch_strikes += matches!(f.call, Call::CalledStrike | Call::SwingingStrike | Call::Foul | Call::FoulTip | Call::InPlay) as u32;
@@ -702,7 +747,7 @@ impl B1Report {
             let flag = if v < lo || v > hi { "  <-- OUT" } else { "" };
             println!("{id:6} {name:16} {v:8.1} {t:8.1}  {lo:6.1}–{hi:<6.1}{flag}");
         }
-        println!("check swings: {}", self.checks);
+        println!("check swings: {}; unresolved PAs (liveness): {}", self.checks, self.unresolved);
     }
 }
 
@@ -710,7 +755,7 @@ impl B1Report {
 pub fn run_pas(mu: &Matchup, n: u32, seed: u64) -> B1Report {
     let mut rep = B1Report::default();
     for i in 0..n {
-        rep.add(&simulate_pa(mu, seed, i * 64));
+        rep.add(&simulate_pa(mu, seed, i * PA_PLAY_STRIDE));
     }
     rep
 }
@@ -752,16 +797,19 @@ pub fn simulate_times_through(mu: &Matchup, seed: u64, game: u32, times: u32, on
     };
     for t in 0..times {
         let sc = build_scouting_offsets(&mu.env, &mu.pitcher, &mu.arsenal, &mu.zone, &mem.offsets);
-        let first_play = game * 100_000 + t * 1000;
+        let first_play = game * 100_000 + t * PA_PLAY_STRIDE;
         let mut count = Count::default();
         let mut pitches = Vec::new();
         let mut play = first_play;
         let result = loop {
-            // Break-spread belief for the most-seen type stands in for the per-type value.
-            let k_main = (0..mu.arsenal.len()).max_by(|&a, &b| mem.n[a].total_cmp(&mem.n[b])).unwrap_or(0);
-            let bs = if adapt { mem.break_sigma(k_main, mu.perception.break_sigma, ETA) } else { mu.perception.break_sigma };
-            let rec = simulate_pitch_bs(mu, &sc, count, seed, play, bs);
+            let bs: Vec<f64> = (0..mu.arsenal.len())
+                .map(|k| if adapt { mem.break_sigma(k, mu.perception.break_sigma, ETA) } else { mu.perception.break_sigma })
+                .collect();
+            let prev = pitches.last().map(|p: &PitchRecord| p.read);
+            let rec = simulate_pitch_ctx(mu, &sc, count, seed, play, &bs, prev);
             play += 1;
+            // Learning uses the pitch type shown on the scoreboard after the pitch, a public
+            // channel (agent-models §3.8 [C]), with the batter's own sighting noise.
             learn(&mut mem, rec.ty, 1.0, &mut r);
             let call = rec.call;
             pitches.push(rec);
@@ -778,7 +826,7 @@ pub fn simulate_times_through(mu: &Matchup, seed: u64, game: u32, times: u32, on
                 Call::HitByPitch => break PaResult::HitByPitch,
                 Call::InPlay => break PaResult::InPlay,
             }
-            if pitches.len() > 40 { break PaResult::InPlay; }
+            if pitches.len() >= MAX_PA_PITCHES { break PaResult::Unresolved; }
         };
         let called_third = result == PaResult::Strikeout && pitches.last().map(|p| p.call == Call::CalledStrike).unwrap_or(false);
         out.push(PaRecord { pitches, result, called_third });

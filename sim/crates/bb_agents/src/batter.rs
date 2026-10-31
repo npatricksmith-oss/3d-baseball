@@ -124,16 +124,25 @@ pub struct Scouting {
 pub const PRIOR_LOC_SIGMA: f64 = 0.30;
 /// Prior arrival-time spread, s [E] (≈ 5% speed uncertainty).
 pub const PRIOR_T_SIGMA: f64 = 0.02;
-/// The batter's belief about its own release-point estimate error, m (agent-models §3.2).
+/// Release-point estimate error at grade 50 and K_perception 1, m (agent-models §3.2) [E].
 pub const RELEASE_SIGMA: f64 = 0.05;
 const SPIN_WEIGHT_FLOOR: f64 = -50.0;
 
 /// Filter state: plate crossing (x_p, z_p), arrival t_p (from release), the break
-/// deviation (b_x, b_z) at the plate, and the release point (r_x, r_z). The path is
+/// deviation (b_x, b_z) at the plate, the release point (r_x, r_z), and the batter's own
+/// persistent perceptual biases (azimuth, elevation, relative time-to-arrival). The path is
 /// (1−f)·release + f·plate + the type's nominal curvature + f²·break, with f the flight
 /// progress: early flight pins the release, late flight the plate, and the break shows
-/// only late (agent-models §3.3, M3 extension).
-pub const NS: usize = 7;
+/// only late. Modeling the biases as states keeps correlated errors from being counted as
+/// fresh evidence on every sample (agent-models §3.3, M3 extension; Codex M3 review #5).
+pub const NS: usize = 10;
+
+/// Prior σ of the batter's persistent perceptual biases (it knows its own acuity).
+#[derive(Clone, Copy, Debug, PartialEq)]
+pub struct BiasPrior {
+    pub ang: f64,
+    pub tau_rel: f64,
+}
 pub type SVec = [f64; NS];
 pub type SMat = [[f64; NS]; NS];
 
@@ -160,11 +169,12 @@ impl Hypothesis {
     /// Covariance of [`Hypothesis::plate`].
     pub fn plate_cov(&self) -> Mat3 {
         // plate = A s with rows picking (x_p + b_x), (z_p + b_z), t_p.
-        let a = [
-            [1.0, 0.0, 0.0, 1.0, 0.0, 0.0, 0.0],
-            [0.0, 1.0, 0.0, 0.0, 1.0, 0.0, 0.0],
-            [0.0, 0.0, 1.0, 0.0, 0.0, 0.0, 0.0],
-        ];
+        let mut a = [[0.0; NS]; 3];
+        a[0][0] = 1.0;
+        a[0][3] = 1.0;
+        a[1][1] = 1.0;
+        a[1][4] = 1.0;
+        a[2][2] = 1.0;
         let mut c = Mat3::ZERO;
         for i in 0..3 {
             for j in 0..3 {
@@ -201,24 +211,28 @@ pub struct Component {
 }
 
 impl Bank {
-    /// Start a pitch: priors π_k (same order as scouting types; values ≤ 0.01 are dropped).
-    pub fn new(sc: &Scouting, prior: &[f64], rel: &ReleaseObs, eye: Vec3, break_sigma: f64) -> Bank {
+    /// Start a pitch: priors π_k and break-spread beliefs per type (same order as scouting
+    /// types; priors ≤ 0.01 are dropped), plus the batter's own perceptual bias spread.
+    pub fn new(sc: &Scouting, prior: &[f64], rel: &ReleaseObs, eye: Vec3, break_sigma: &[f64], bias: BiasPrior) -> Bank {
         let mut hyps = Vec::new();
         for (k, tm) in sc.types.iter().enumerate() {
             if prior[k] <= 0.01 {
                 continue;
             }
-            let s = [tm.x0, tm.z0, tm.t0, 0.0, 0.0, rel.r.x, rel.r.z];
+            let s = [tm.x0, tm.z0, tm.t0, 0.0, 0.0, rel.r.x, rel.r.z, 0.0, 0.0, 0.0];
             let l2 = PRIOR_LOC_SIGMA * PRIOR_LOC_SIGMA;
-            let b2 = break_sigma * break_sigma;
+            let b2 = break_sigma[k] * break_sigma[k];
             let mut p = [[0.0; NS]; NS];
             p[0][0] = l2;
             p[1][1] = l2;
             p[2][2] = PRIOR_T_SIGMA * PRIOR_T_SIGMA;
             p[3][3] = b2;
             p[4][4] = b2;
-            p[5][5] = RELEASE_SIGMA * RELEASE_SIGMA;
-            p[6][6] = RELEASE_SIGMA * RELEASE_SIGMA;
+            p[5][5] = rel.sigma * rel.sigma;
+            p[6][6] = rel.sigma * rel.sigma;
+            p[7][7] = bias.ang * bias.ang;
+            p[8][8] = bias.ang * bias.ang;
+            p[9][9] = bias.tau_rel * bias.tau_rel;
             hyps.push(Hypothesis { ty: tm.ty, log_prior: m::ln(prior[k]), log_lik: 0.0, log_spin: 0.0, s, p, model: k });
         }
         Bank { hyps, t_release: rel.t, eye, n_obs: 0 }
@@ -241,16 +255,17 @@ impl Bank {
     fn h(sc: &Scouting, hyp: &Hypothesis, s: &SVec, t_rel: f64, eye: Vec3, t: f64) -> Vec3 {
         let p = Self::predict(sc, hyp, s, t_rel, t);
         let (az, el) = angles(eye, p);
-        // Time to arrival at the plate plane under this hypothesis.
-        let tau = (t_rel + s[2]) - t;
-        Vec3::new(az, el, tau)
+        // Time to arrival at the plate plane under this hypothesis, as perceived (with the
+        // batter's own persistent relative bias).
+        let tau = ((t_rel + s[2]) - t) * (1.0 + s[9]);
+        Vec3::new(az + s[7], el + s[8], tau)
     }
 
     /// EKF update with one observation (agent-models §3.3).
     pub fn observe(&mut self, sc: &Scouting, o: &BallObs) {
         let eye = self.eye;
         let t_rel = self.t_release;
-        let eps = [1e-4, 1e-4, 1e-5, 1e-4, 1e-4, 1e-4, 1e-4];
+        let eps = [1e-4, 1e-4, 1e-5, 1e-4, 1e-4, 1e-4, 1e-4, 1e-5, 1e-5, 1e-4];
         for hyp in &mut self.hyps {
             let s = hyp.s;
             let z = Self::h(sc, hyp, &s, t_rel, eye, o.t).to_array();
@@ -400,12 +415,34 @@ pub fn phi(x: f64) -> f64 {
     0.5 * (1.0 + m::erf(x / core::f64::consts::SQRT_2))
 }
 
-/// P(strike) for a Gaussian plate location: the zone rectangle grown by the ball radius
-/// (the rounded corners are ignored here; this is a belief, not the umpire).
-pub fn p_strike(mean_x: f64, mean_z: f64, sx: f64, sz: f64, bottom: f64, top: f64, ball_r: f64) -> f64 {
-    let px = phi((HALF_WIDTH + ball_r - mean_x) / sx) - phi((-HALF_WIDTH - ball_r - mean_x) / sx);
-    let pz = phi((top + ball_r - mean_z) / sz) - phi((bottom - ball_r - mean_z) / sz);
-    (px * pz).clamp(0.0, 1.0)
+/// P(strike) for a Gaussian plate location with full x–z covariance: the zone rectangle
+/// grown by the ball radius (rounded corners ignored; this is a belief, not the umpire).
+/// Integrates the conditional z-distribution over x with Simpson's rule.
+pub fn p_strike(mean_x: f64, mean_z: f64, sxx: f64, sxz: f64, szz: f64, bottom: f64, top: f64, ball_r: f64) -> f64 {
+    let sx = m::sqrt(sxx.max(1e-12));
+    let sz = m::sqrt(szz.max(1e-12));
+    let rho = (sxz / (sx * sz)).clamp(-0.999, 0.999);
+    let (x0, x1) = (-HALF_WIDTH - ball_r, HALF_WIDTH + ball_r);
+    let (z0, z1) = (bottom - ball_r, top + ball_r);
+    let lo = x0.max(mean_x - 5.0 * sx);
+    let hi = x1.min(mean_x + 5.0 * sx);
+    if lo >= hi {
+        return 0.0;
+    }
+    const N: usize = 24;
+    let h = (hi - lo) / N as f64;
+    let sc = sz * m::sqrt(1.0 - rho * rho);
+    let mut acc = 0.0;
+    for i in 0..=N {
+        let x = lo + h * i as f64;
+        let u = (x - mean_x) / sx;
+        let pdf = m::exp(-0.5 * u * u) / (sx * m::sqrt(2.0 * core::f64::consts::PI));
+        let mz = mean_z + rho * sz * u;
+        let pz = phi((z1 - mz) / sc) - phi((z0 - mz) / sc);
+        let w = if i == 0 || i == N { 1.0 } else if i % 2 == 1 { 4.0 } else { 2.0 };
+        acc += w * pdf * pz;
+    }
+    (acc * h / 3.0).clamp(0.0, 1.0)
 }
 
 /// Run values used before learned tables exist (agent-models §8 bootstrap) [E].
@@ -463,8 +500,25 @@ pub struct Decision {
 pub const CONTACT_TOL_Z: f64 = 0.06;
 /// Timing window for usable contact, s [E].
 pub const CONTACT_TOL_T: f64 = 0.025;
-/// The batter's belief about its own execution noise (vertical m, timing s) [E].
-pub const OWN_EXEC_SIGMA: (f64, f64) = (0.015, 0.008);
+/// Horizontal window along the bat in which contact is still on the barrel, m [E]
+/// (about ±5 in around the sweet spot).
+pub const CONTACT_TOL_X: f64 = 0.12;
+
+/// The batter's belief about its own execution noise: vertical (m) and timing (s). Agents
+/// know their own attributes; they never see the executed noise sample.
+#[derive(Clone, Copy, Debug, PartialEq)]
+pub struct OwnExecution {
+    pub vertical: f64,
+    pub timing: f64,
+    /// How much aim error the batter expects to correct between commit and the cutoff:
+    /// vertical (m) and timing (s). From `Adjustability` and the time left; discounted
+    /// because late information is itself noisy (agent-models §3.6).
+    pub correct_z: f64,
+    pub correct_t: f64,
+}
+
+/// Share of the in-swing correction capacity a batter counts on when deciding [E].
+pub const CORRECTION_CREDIT: f64 = 0.5;
 
 /// Fraction of the zone's half-sizes the batter treats as the "heart" for contact value [E].
 pub const HEART: f64 = 0.7;
@@ -474,7 +528,8 @@ fn p_within(mu: f64, sigma: f64, tol: f64) -> f64 {
     phi((tol - mu) / sigma) - phi((-tol - mu) / sigma)
 }
 
-pub fn decide(post: &[Component], aim: Component, count: Count, zone: (f64, f64), disc: &Discipline, threshold: f64, ball_r: f64) -> Decision {
+#[allow(clippy::too_many_arguments)]
+pub fn decide(post: &[Component], aim: Component, count: Count, zone: (f64, f64), disc: &Discipline, own: OwnExecution, threshold: f64, ball_r: f64) -> Decision {
     let (bottom, top) = zone;
     let mid_z = 0.5 * (bottom + top);
     let half_h = 0.5 * (top - bottom);
@@ -485,13 +540,15 @@ pub fn decide(post: &[Component], aim: Component, count: Count, zone: (f64, f64)
         let sx = m::sqrt(c.cov.r[0][0].max(1e-8));
         let sz = m::sqrt(c.cov.r[1][1].max(1e-8));
         let st = m::sqrt(c.cov.r[2][2].max(1e-10));
-        let p = p_strike(c.mean.x, c.mean.y, sx, sz, bottom, top, ball_r);
+        let p = p_strike(c.mean.x, c.mean.y, c.cov.r[0][0], c.cov.r[0][1], c.cov.r[1][1], bottom, top, ball_r);
         ps += c.w * p;
         // Contact chance if this hypothesis is true while aiming at the dominant mode: the
-        // ball must pass within the contact band, in time.
-        let sv = m::hypot(sz, OWN_EXEC_SIGMA.0);
-        let stt = m::hypot(st, OWN_EXEC_SIGMA.1);
-        let pc = p_within(c.mean.y - aim.mean.y, sv, CONTACT_TOL_Z) * p_within(c.mean.z - aim.mean.z, stt, CONTACT_TOL_T);
+        // ball must pass within the contact band, in time, and on the barrel.
+        let sv = m::hypot(sz, own.vertical);
+        let stt = m::hypot(st, own.timing);
+        let pc = p_within(c.mean.y - aim.mean.y, sv, CONTACT_TOL_Z + own.correct_z)
+            * p_within(c.mean.z - aim.mean.z, stt, CONTACT_TOL_T + own.correct_t)
+            * p_within(c.mean.x - aim.mean.x, sx, CONTACT_TOL_X + own.correct_z);
         let out_x = (c.mean.x.abs() - HEART * HALF_WIDTH).max(0.0);
         let out_z = ((c.mean.y - mid_z).abs() - HEART * half_h).max(0.0);
         let contact = values::contact_value(count, m::hypot(out_x, out_z)) - v0;

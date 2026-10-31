@@ -10,8 +10,8 @@ fn main() {
     let mut by: BTreeMap<String, [u32; 6]> = BTreeMap::new(); // n, misread, out, chase, zone, zswing
     let mut ps_hist = [0u32; 10];
     for i in 0..1500u32 {
-        let sc = scouting_for_pa(&mu, 9, i * 64);
-        let r = simulate_pitch(&mu, &sc, Count { balls: 1, strikes: 2 }, 9, i * 64);
+        let sc = scouting_for_pa(&mu, 9, i * 1000);
+        let r = simulate_pitch(&mu, &sc, Count { balls: 1, strikes: 2 }, 9, i * 1000);
         let e = by.entry(format!("{:?}", r.ty)).or_default();
         e[0] += 1;
         e[1] += (r.read != r.ty) as u32;

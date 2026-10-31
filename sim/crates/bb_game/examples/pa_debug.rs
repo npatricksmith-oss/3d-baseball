@@ -11,8 +11,8 @@ fn main() {
     let mut err_z = Vec::new();
     let (mut fe, mut ce) = (Vec::new(), Vec::new());
     for i in 0..n {
-        let sc = scouting_for_pa(&mu, 7, i * 64);
-        let r = simulate_pitch(&mu, &sc, Count { balls: 1, strikes: 1 }, 7, i * 64);
+        let sc = scouting_for_pa(&mu, 7, i * 1000);
+        let r = simulate_pitch(&mu, &sc, Count { balls: 1, strikes: 1 }, 7, i * 1000);
         let d = r.decision.unwrap();
         if r.in_zone { zone += 1 }
         if d.swing { if r.in_zone { dec_sw_z += 1 } else { dec_sw_o += 1 } }
