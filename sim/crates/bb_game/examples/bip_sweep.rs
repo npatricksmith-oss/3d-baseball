@@ -32,7 +32,14 @@ fn main() {
                 }
                 if evs.iter().any(|e| matches!(e, Event::Catch { .. })) { caught += 1; }
                 n += 1;
-                if evs.iter().any(|e| matches!(e, Event::RunnerOut { runner: 1, .. })) { outs += 1; }
+                let is_out = evs.iter().any(|e| matches!(e, Event::RunnerOut { runner: 1, .. }));
+                if is_out { outs += 1; }
+                if std::env::var("BB_GB").is_ok() && la <= 0.0 {
+                    let who = out.facts.iter().find_map(|f| if let Input::GloveSecured { fielder, t, .. } = f { Some((fielder & 0x7F, *t)) } else { None });
+                    let first = out.facts.iter().find_map(|f| if let Input::BaseTouched { agent: 1, base: 1, t, .. } = f { Some(*t) } else { None });
+                    let force1 = out.facts.iter().find_map(|f| if let Input::BaseTouched { base: 1, holding_ball: true, t, .. } = f { Some(*t) } else { None });
+                    println!("  LA {la} spray {sp:+} EV {ev}: out {is_out} secured by {:?} batter@1B {:?} ball@1B {:?}", who, first, force1);
+                }
             }
         }
         println!("LA {la:5.0}: out {outs:2}/{n}  secured {secured}  caught-fly {caught}  mean t_secure {:.2}", tsec / secured.max(1) as f64);
