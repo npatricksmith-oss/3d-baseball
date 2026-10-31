@@ -261,6 +261,12 @@ pub struct PitchRecord {
     pub aim_error: Option<Vec3>,
     /// Same, at commit (before adjustment).
     pub commit_error: Option<Vec3>,
+    /// Contact time and the ball's state just after contact (for the live-ball play).
+    pub contact_state: Option<(f64, BallState)>,
+    /// The pitch hit the batter's body (before any contact).
+    pub hit_batter: bool,
+    /// The pitch reached the ground before the plate plane.
+    pub bounced: bool,
 }
 
 fn rng(seed: u64, play: u32, agent: u16, purpose: Purpose, sub: u32) -> KeyedRng {
@@ -519,6 +525,11 @@ pub fn simulate_pitch_ctx(mu: &Matchup, sc: &Scouting, count: Count, seed: u64, 
         Some(p) if !bounced => mu.zone.is_strike(p.x, p.z, mu.env.ball.radius),
         _ => false,
     };
+    let contact_state = match &swing_res {
+        SwingResult::Contact(b) => Some((b.contact.point.t, b.contact.ball_after)),
+        _ => None,
+    };
+    let hit_batter = !matches!(swing_res, SwingResult::Contact(_)) && body_hit(mu, &free);
     let (call, batted, contact) = match &swing_res {
         SwingResult::Contact(b) => {
             let land = b.flight.last().s.r;
@@ -556,6 +567,9 @@ pub fn simulate_pitch_ctx(mu: &Matchup, sc: &Scouting, count: Count, seed: u64, 
         batted,
         aim_error,
         commit_error,
+        contact_state,
+        hit_batter,
+        bounced,
     }
 }
 

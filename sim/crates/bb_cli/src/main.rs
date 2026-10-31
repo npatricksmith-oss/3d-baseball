@@ -2,6 +2,7 @@
 
 mod arch_lab;
 mod cage_lab;
+mod game_lab;
 mod pa_lab;
 mod pitch_lab;
 mod sens_lab;
@@ -35,6 +36,10 @@ enum Cmd {
     Sensitivity(sens_lab::SensArgs),
     /// B1 profiles of batter and pitcher archetypes (M3).
     Archetypes(arch_lab::ArchArgs),
+    /// One full game, AI vs AI, printed as a linescore (M4 walking skeleton).
+    Game(game_lab::GameArgs),
+    /// Many games in parallel: run environment and rule warnings (M4 walking skeleton).
+    Games(game_lab::GamesArgs),
 }
 
 fn main() {
@@ -48,5 +53,7 @@ fn main() {
         Cmd::Pa(a) => pa_lab::pa(a),
         Cmd::Sensitivity(a) => sens_lab::sensitivity(a),
         Cmd::Archetypes(a) => arch_lab::run(a),
+        Cmd::Game(a) => game_lab::game(a),
+        Cmd::Games(a) => game_lab::games(a),
     }
 }

@@ -21,8 +21,10 @@ pub struct Surface {
     pub roughness: f64,
 }
 
-pub const DIRT: Surface = Surface { e_ref: 0.50, k_s: 0.03, mu: 0.55, mu_r: 0.09, roughness: 0.026 };
-pub const GRASS: Surface = Surface { e_ref: 0.45, k_s: 0.03, mu: 0.45, mu_r: 0.12, roughness: 0.010 };
+// Rolling resistance [E, M4]: physics-spec §9.1's 0.09/0.12 let a 25 m/s grounder roll
+// ~250 m; 0.22/0.28 gives ~110 m, closer to observed roll-outs (calibrate in M5, R4).
+pub const DIRT: Surface = Surface { e_ref: 0.50, k_s: 0.03, mu: 0.55, mu_r: 0.22, roughness: 0.026 };
+pub const GRASS: Surface = Surface { e_ref: 0.45, k_s: 0.03, mu: 0.45, mu_r: 0.28, roughness: 0.010 };
 
 /// A simple park: fence distances down the lines and to center, wall height, infield dirt.
 #[derive(Clone, Copy, Debug, PartialEq)]
@@ -195,7 +197,28 @@ pub fn batted_path(env: &FlightEnv, field: &Field, s0: BallState, t0: f64, mut t
                     let vh = Vec3::new(nb.v.x, nb.v.y, 0.0);
                     let decel = surf.mu_r * G;
                     let t_stop = t + vh.norm() / decel;
-                    segs.push(Segment::Roll { t0: t, r0: Vec3::new(nb.r.x, nb.r.y, r), v0: vh, decel, t_stop });
+                    // A rolling ball stops at the wall (skeleton: no carom off the base of the wall).
+                    let r0 = Vec3::new(nb.r.x, nb.r.y, r);
+                    let dir = vh.normalized();
+                    let sp = vh.norm();
+                    let (mut lo, mut hi) = (0.0, t_stop - t);
+                    let pos = |dt: f64| r0 + dir * (sp * dt - 0.5 * decel * dt * dt);
+                    let beyond = |p: Vec3| m::hypot(p.x, p.y) > field.fence_at(m::atan2(p.x, p.y));
+                    if beyond(pos(hi)) {
+                        for _ in 0..40 {
+                            let mid = 0.5 * (lo + hi);
+                            if beyond(pos(mid)) { hi = mid } else { lo = mid }
+                        }
+                        let p = pos(lo);
+                        let v_wall = (sp - decel * lo).max(0.0);
+                        // Treat the stop as abrupt: model the roll as decelerating to rest there.
+                        let d = (p - r0).norm();
+                        let decel2 = if d > 0.0 { sp * sp / (2.0 * d) } else { decel };
+                        let _ = v_wall;
+                        segs.push(Segment::Roll { t0: t, r0, v0: vh, decel: decel2, t_stop: t + sp / decel2 });
+                        return BallPath { segments: segs, bounces };
+                    }
+                    segs.push(Segment::Roll { t0: t, r0, v0: vh, decel, t_stop });
                     return BallPath { segments: segs, bounces };
                 }
                 s = nb;
