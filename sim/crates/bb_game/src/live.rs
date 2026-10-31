@@ -38,7 +38,7 @@ const TYPICAL_TRANSFER: f64 = 0.75;
 /// A runner's read of a batted ball, m at 30 m [E].
 const RUNNER_READ_SIGMA0: f64 = 2.0;
 /// Agents' internal flight step, s.
-const AGENT_DT: f64 = 0.02;
+const AGENT_DT: f64 = 0.04;
 const BASE_L: f64 = 27.432;
 const BATTER_START: f64 = 0.30;
 const PLAY_LIMIT_S: f64 = 40.0;
@@ -106,6 +106,10 @@ struct Runner {
     tag_up: bool,
     moving_since: f64,
     last_base: u8,
+    /// Going back to the start base to retouch after a caught fly.
+    retouch: bool,
+    /// Holding at a base until the runner ahead clears the next one.
+    waiting: bool,
 }
 
 pub struct LiveInput<'a> {
@@ -139,6 +143,8 @@ pub mod prof {
     thread_local! {
         pub static PRED: Cell<(u64, u64)> = const { Cell::new((0, 0)) };
         pub static INTER: Cell<(u64, u64)> = const { Cell::new((0, 0)) };
+        pub static RUNNER: Cell<(u64, u64)> = const { Cell::new((0, 0)) };
+        pub static LIVE: Cell<(u64, u64)> = const { Cell::new((0, 0)) };
         pub static TICKS: Cell<u64> = const { Cell::new(0) };
     }
     /// Profiling is on only when BB_PROF is set (checked once per thread).
@@ -181,6 +187,12 @@ fn phi(x: f64) -> f64 {
     0.5 * (1.0 + m::erf(x / core::f64::consts::SQRT_2))
 }
 
+/// The base a moving runner is visibly heading for: the next one in his direction of motion.
+fn visible_target(r: &Runner) -> u8 {
+    let q = r.s / BASE_L;
+    if r.goal as f64 * BASE_L < r.s { q.ceil() as u8 - 1 } else { (q.floor() as u8 + 1).min(4) }
+}
+
 /// Position on the base path at distance `s` from home.
 fn path_pos(s: f64) -> Vec3 {
     let s = s.clamp(0.0, 4.0 * BASE_L);
@@ -197,6 +209,8 @@ struct Sim<'a> {
     last_fact_t: f64,
     /// When the ball was last caught (a visible event).
     secured_at: f64,
+    /// A fly was caught (the rules engine signalled `Catch`).
+    catch_made: bool,
     st: &'a mut RulesState,
     t: f64,
     ball: Ball,
@@ -219,12 +233,23 @@ impl<'a> Sim<'a> {
             if let Some(last) = self.out.facts.last() {
                 eprintln!("   previous fact {last:?}");
             }
+            for r in &self.r {
+                eprintln!("   runner {} start {} s {:.2} goal {} v {:.1} out {} scored {} tag_up {} last {}", r.id, r.start, r.s, r.goal, r.v, r.out, r.scored, r.tag_up, r.last_base);
+            }
+            for f in &self.out.facts {
+                if matches!(f, Input::BaseTouched { .. } | Input::BaseLeft { .. } | Input::GloveSecured { .. }) {
+                    eprintln!("     {f:?}");
+                }
+            }
         }
         for e in &evs {
             if let Event::RunnerOut { runner, .. } = e {
                 if let Some(r) = self.r.iter_mut().find(|r| r.id == *runner) {
                     r.out = true;
                 }
+            }
+            if matches!(e, Event::Catch { .. }) {
+                self.catch_made = true;
             }
         }
         self.out.facts.push(fact);
@@ -717,21 +742,42 @@ impl<'a> Sim<'a> {
                 if dest == b { arrive } else { arrive + 0.6 + (target - base_pos(dest)).norm() / (THROW_FRAC * TYPICAL_ARM) }
             }
             Ball::Free { .. } => {
+                let t0 = prof::enabled().then(std::time::Instant::now);
                 let pred = self.runner_predict(k, b as u32);
                 let (tf, at) = self.believed_field_time(&pred);
+                if let Some(t0) = t0 {
+                    prof::add(&prof::RUNNER, t0.elapsed().as_nanos() as u64);
+                }
                 tf + TYPICAL_TRANSFER + (target - at).norm() / (THROW_FRAC * TYPICAL_ARM)
             }
         }
     }
 
+    /// Forced while the batter is still a runner and every base behind this runner is held by
+    /// a runner still in play (the runner sees outs as they are signalled).
+    fn forced(&self, k: usize) -> bool {
+        let r = &self.r[k];
+        let batter_alive = self.r.iter().any(|x| x.start == 0 && !x.out);
+        r.start == 0 || (batter_alive && (1..r.start).all(|b| self.r.iter().any(|x| x.start == b && !x.out)))
+    }
+
+    /// Whether a runner ahead of runner `k` holds base `b`: he is at or short of it and not
+    /// visibly moving forward (standing, or going back). Direction of motion is visible.
+    fn base_held_ahead(&self, k: usize, b: u8) -> bool {
+        let r = &self.r[k];
+        self.r.iter().any(|o| {
+            o.id != r.id && !o.out && !o.scored && o.start > r.start && o.s <= b as f64 * BASE_L + 0.5 && o.goal as f64 * BASE_L <= o.s + 1e-6
+        })
+    }
+
+    /// Whether a runner ahead of runner `k` has not yet passed base `b`.
+    fn base_uncleared_ahead(&self, k: usize, b: u8) -> bool {
+        let r = &self.r[k];
+        self.r.iter().any(|o| o.id != r.id && !o.out && !o.scored && o.start > r.start && o.s <= b as f64 * BASE_L + 0.5)
+    }
+
     fn runner_decide(&mut self, k: usize, at_base: u8) {
-        let forced = {
-            // Forced while the batter is still a runner and every base behind this runner is
-            // held by a runner still in play (the runner sees outs as they are signalled).
-            let r = &self.r[k];
-            let batter_alive = self.r.iter().any(|x| x.start == 0 && !x.out);
-            r.start == 0 || (batter_alive && (1..r.start).all(|b| self.r.iter().any(|x| x.start == b && !x.out)))
-        };
+        let forced = self.forced(k);
         let next = at_base + 1;
         if next > 4 {
             return;
@@ -742,11 +788,12 @@ impl<'a> Sim<'a> {
         let mut rr = rng(self.inp.seed, self.inp.play, r.id, Purpose::RunnerPerception, next as u32);
         let noise = 0.15 * rr.truncated_normal(4.0);
         let must = forced && at_base == r.start && !self.caught();
-        // A runner may only take a base if every runner ahead of him visibly is going past it:
-        // a runner ahead who is standing at or short of that base blocks it.
-        let blocked = self.r.iter().any(|o| o.id != r.id && !o.out && !o.scored && o.start > r.start && o.s <= next as f64 * BASE_L + 0.5 && o.v < 0.5);
-        let go = must || (!blocked && t_ball - (self.t + t_run) + noise > 0.35);
+        // A runner may only take a base once every runner ahead of him has visibly cleared it;
+        // until then he waits at his base.
+        let blocked = !must && self.base_uncleared_ahead(k, next);
+        let go = !blocked && (must || t_ball - (self.t + t_run) + noise > 0.35);
         let r = &mut self.r[k];
+        r.waiting = blocked;
         if go {
             r.goal = next;
         } else {
@@ -755,7 +802,7 @@ impl<'a> Sim<'a> {
     }
 
     fn caught(&self) -> bool {
-        self.out.events.iter().any(|e| matches!(e, Event::Catch { .. }))
+        self.catch_made
     }
 
     fn move_runners(&mut self) {
@@ -782,6 +829,25 @@ impl<'a> Sim<'a> {
                 } else {
                     continue;
                 }
+            }
+            // Waiting at a base: decide once the runner ahead has cleared the next one.
+            if self.r[k].waiting && (self.r[k].s - self.r[k].goal as f64 * BASE_L).abs() < 1e-6 {
+                let b = self.r[k].goal;
+                if !self.base_uncleared_ahead(k, b + 1) {
+                    self.runner_decide(k, b);
+                }
+            }
+            // A caught fly: a runner who left his base goes back to retouch it.
+            if self.caught() && !self.r[k].tag_up && !self.r[k].retouch && self.r[k].start > 0 && self.r[k].s > self.r[k].start as f64 * BASE_L + 1e-6 {
+                self.r[k].retouch = true;
+                self.r[k].goal = self.r[k].start;
+            }
+            // Heading for a base a runner ahead has stopped at (or is retreating to): go back,
+            // unless this is a forced advance (then the runner ahead is forced too).
+            let g = self.r[k].goal;
+            let forced_here = g == self.r[k].start + 1 && self.forced(k);
+            if g as f64 * BASE_L > self.r[k].s && self.base_held_ahead(k, g) && !forced_here {
+                self.r[k].goal = (self.r[k].s / BASE_L).floor() as u8;
             }
             let goal_s = self.r[k].goal as f64 * BASE_L;
             let r = &mut self.r[k];
@@ -823,12 +889,14 @@ impl<'a> Sim<'a> {
                 if self.done {
                     return;
                 }
-                if b < 4 && dir > 0.0 && b == self.r[k].goal {
-                    // Arrived where it was going: decide whether to keep going.
+                let retouched = dir < 0.0 && self.r[k].retouch && b == self.r[k].start;
+                if retouched {
+                    self.r[k].retouch = false;
+                }
+                if b < 4 && (dir > 0.0 || retouched) && b == self.r[k].goal {
+                    // Arrived where it was going (or retouched after a catch): decide whether
+                    // to keep going (leaving the base is reported on the next step).
                     self.runner_decide(k, b);
-                    if self.r[k].goal > b {
-                        self.emit(Input::BaseLeft { t: self.t, agent: id, base: b });
-                    }
                 }
             }
         }
@@ -873,11 +941,11 @@ impl<'a> Sim<'a> {
             if r.out || r.scored || r.v < 0.5 {
                 continue;
             }
-            let goal = ((r.s / BASE_L).floor() as u8 + 1).min(4);
+            let goal = visible_target(r);
             let tgt = base_pos(goal);
             let d_me = (tgt - fd.pos).norm();
             let t_me = run_time(d_me, fd.a.speed, fd.a.tau_a);
-            let t_runner = (goal as f64 * BASE_L - r.s) / r.v.max(5.0);
+            let t_runner = (goal as f64 * BASE_L - r.s).abs() / r.v.max(5.0);
             if d_me < 8.0 && t_me + 0.1 < t_runner {
                 self.f[by].target = tgt;
                 return;
@@ -894,8 +962,8 @@ impl<'a> Sim<'a> {
             }
             // The base a moving runner is heading for, and when he gets there at his
             // current speed (both visible).
-            let goal = ((r.s / BASE_L).floor() as u8 + 1).min(4);
-            let t_runner = self.t + (goal as f64 * BASE_L - r.s) / r.v.max(5.0);
+            let goal = visible_target(r);
+            let t_runner = self.t + (goal as f64 * BASE_L - r.s).abs() / r.v.max(5.0);
             let d = (base_pos(goal) - fd.pos).norm();
             let t_ball = self.t + d / (THROW_FRAC * fd.a.arm) + 0.05;
             let p_out = phi((t_runner - t_ball) / 0.12);
@@ -965,6 +1033,16 @@ impl<'a> Sim<'a> {
 /// Simulate one live-ball play, stepping the rules engine as facts occur. The caller has
 /// already sent `PitchDelivered` and `BatContact`.
 pub fn simulate_live(inp: &LiveInput, st: &mut RulesState) -> LiveOutput {
+    if !prof::enabled() {
+        return simulate_live_inner(inp, st);
+    }
+    let t0 = std::time::Instant::now();
+    let out = simulate_live_inner(inp, st);
+    prof::add(&prof::LIVE, t0.elapsed().as_nanos() as u64);
+    out
+}
+
+fn simulate_live_inner(inp: &LiveInput, st: &mut RulesState) -> LiveOutput {
     let t_c = inp.t_contact;
     let (seed, play) = (inp.seed, inp.play);
     let path = batted_path(inp.env, inp.field, inp.ball, t_c, |k, surf| {
@@ -1010,6 +1088,8 @@ pub fn simulate_live(inp: &LiveInput, st: &mut RulesState) -> LiveOutput {
             tag_up: false,
             moving_since: 0.0,
             last_base: x.base,
+            retouch: false,
+            waiting: false,
         })
         .collect();
     let mut actors: Vec<(AgentId, Vec<(f64, Vec3)>)> = inp.fielders.iter().map(|&id| (id, Vec::new())).collect();
@@ -1027,6 +1107,7 @@ pub fn simulate_live(inp: &LiveInput, st: &mut RulesState) -> LiveOutput {
         done: false,
         last_fact_t: t_c,
         secured_at: f64::INFINITY,
+        catch_made: false,
     };
     // Reactions: the defense reads the ball after its reaction time; runners decide at once
     // from what they see (a ball in the air that a fielder is settling under: tag up).
