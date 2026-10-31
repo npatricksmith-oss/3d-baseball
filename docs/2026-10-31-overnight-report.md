@@ -9,7 +9,8 @@ The project went from planning documents to a working simulation core:
 - **Physics (M1–M2):** pitch flight, bat–ball collisions, batted-ball flight, bounces, rolls, fence. Tier A golden tests pass. An **independent Python oracle written by Codex from the spec alone** agrees with the Rust sim to ~3×10⁻⁸ m on 21 flight cases and to 1e-9 on 18 collision cases.
 - **Agents (M3):** pitchers aim and miss physically. Batters perceive each pitch through noisy eye-angle and time-to-arrival observations with a per-pitch-type Kalman filter, decide swing or take from beliefs, commit, adjust mid-swing within limits, check their swing, and learn a pitcher's arsenal through the game. Every attribute grade maps to a physical parameter.
 - **Rules (M4 start):** a pure, deterministic rules engine, tested by 40 TOML scenarios with no physics involved.
-- **Full games (M4 walking skeleton):** AI vs AI, nine innings, pitch by pitch, every result judged from geometry and timing. Games are deterministic and logged in the FlatBuffers event-log format with a BLAKE3 digest chain.
+- **Full games (M4):** AI vs AI, nine innings, pitch by pitch. Live-ball plays run in a **causal** tick simulation: fielders and runners act only on what they have observed, throws fly and must be caught, and the rules engine judges every fact as it happens. Games are deterministic and logged in the FlatBuffers event-log format with a BLAKE3 digest chain.
+- **Client API (M0.8 prep):** a C ABI (`bb_ffi`) streams one `PlayTimeline` per pitch; a C program plays a full game through it, so the Unreal spike only needs the editor.
 
 Nothing anywhere rolls dice for an outcome (D1). The only randomness is noise on physical and perceptual inputs, drawn from a keyed counter-based RNG (Philox4x32-10).
 
@@ -18,8 +19,10 @@ Nothing anywhere rolls dice for an outcome (D1). The only randomness is noise on
 ```bash
 cd "sim"
 cargo run --release -p bb_cli -- game --seed 7 --pbp          # a full game, pitch by pitch
-cargo run --release -p bb_cli -- game --seed 7 --rrd out/g.rrd  # same game as a Rerun recording
+cargo run --release -p bb_cli -- game --seed 7 --rrd out/g.rrd  # same game as a Rerun recording (ball, fielders, runners)
 rerun out/g.rrd                                                 # scrub the game_time timeline
+cargo run --release -p bb_game --example dump_plays -- 7 > out/p.json && uv run ../analysis/plots/plays_topdown.py out/p.json out/p.png
+./crates/bb_ffi/c/run_smoke.sh                                  # a C client plays a game through the ABI
 cargo run --release -p bb_cli -- games --n 200                  # run environment over 200 games
 cargo run --release -p bb_cli -- tunnel --with SL               # fastball/slider tunneling
 cargo run --release -p bb_cli -- arsenal                        # 10 pitch types for an average RHP
@@ -42,16 +45,17 @@ The Rerun viewer is installed (`~/.local/bin/rerun`, version 0.41.0 to match the
 | M3: attribute directions | 9 of 10 attributes move their main stat the physical way (common-random-number sweeps) |
 | M3: times through the order | Emerges from in-game adaptation: contact +2.6 pp from the 1st to the 3rd time through; none with adaptation off |
 | M3: archetypes | Power, contact, patient, free-swinger, elite, and weak hitters produce distinct, sensible profiles |
-| Rules | 40 scenarios (counts, HBP, walks with forces, fair/foul, catches, tag-ups and appeals, forces and force removal, tags, time plays, home runs, ground-rule doubles, game end, extra innings, walk-offs) |
+| Rules | 55 scenarios, 15 of them written by the Codex reviewer to expose bugs (counts, HBP vs swing, walks with forces, fair/foul incl. the 2026 ground-contact clarification, catches, tag-ups and appeals, forces and reinstated forces, tags, time plays, home runs with pending runs, ground-rule doubles, LOB, game end, extra innings, walk-offs at the winning touch) |
 | Determinism (M0 exit gate) | Same seed gives the same game digest across runs and threads; logs read back and verify; recording visuals does not change the game |
 | Crate rule (D1 at compile time) | `bb_agents` cannot reach `bb_world` (test) |
-| Code review | Three independent Codex reviews: 10 + 19 findings fixed or explicitly deferred; the M4 review is in [reviews/](reviews/) |
+| Accounting (event sourcing) | Box scores rebuilt from the event logs alone match the sim over 80 games: runs, linescores, three outs per completed half-inning, PA totals |
+| Code review | Four independent Codex reviews (M1, M3, M4 rules + skeleton, causal simulator): 10 + 19 + 24 findings fixed or explicitly deferred with reasons; all in [reviews/](reviews/) |
 
 ## Numbers to know
 
 **Plate-appearance calibration (interim, 13 of 20 metrics in band):** K% 13 (target 22.5), BB% 10, Swing% 43, Z-Contact% 84, O-Swing% 11 (target 29), mean exit velocity 89 mph, mean launch angle 7°, hard-hit 38%. Full report: [calibration/2026-10-31-m3-interim.md](calibration/2026-10-31-m3-interim.md).
 
-**Full games (walking skeleton):** about 9.8 runs per team-game (MLB ≈ 4.5). Batters reach on ~45% of balls in play (MLB ≈ 32%). About 320 ms per game on one core; a 972-game season would take about 20 s on 16 threads. The skeleton's fielders are deliberately crude. M5 replaces them, so the run environment is not meaningful yet.
+**Full games:** about **5.6 runs per team-game** (MLB ≈ 4.5). Line drives (.73 vs .68), fly balls (.12 vs .13), and popups (.02 vs .02) fall in at MLB rates. Ground balls are too productive (.58 including fielder's choices vs ≈ .24), mostly because they get through the infield; the infield positions are a fixed table for now. About 230–370 ms per game on one core (budget 200 ms); 128 games take ~6 s on 16 threads, so a 972-game season would take under a minute.
 
 ## Decisions for the owner
 
@@ -64,11 +68,11 @@ The Rerun viewer is installed (`~/.local/bin/rerun`, version 0.41.0 to match the
 
 - Rust (rustup), uv, the Rerun viewer, and Codex were already present or installed per user.
 - **The host has no C compiler and no passwordless sudo**, so Rust links through a zig-based shim (`~/.local/bin/zigcc`, zig installed with uv). For system packages (e.g. `flatc`) the existing toolbx container `fedora-toolbox-45` is used. To retire the shim: `sudo dnf install gcc glibc-devel`. Also install `git-lfs` before any Unreal assets.
-- Git repository initialized on `main`, with about 45 commits; no remote.
+- Git repository initialized on `main`; every step is a separate commit; no remote.
 
 ## Known gaps (in TASKS.md)
 
-- Fielding skeleton: one chasing fielder, straight-line throws, no relays, positions from a fixed table; infield holes produce too many hits.
+- Fielding: positions from a fixed table (infield holes), throws without drag, no relays/cutoffs or runner leads, perception through a simplified noisy-state model rather than the atlas of agent-models §5.1.
 - Rules not yet covered: uncaught third strike and caught foul tips (need a catcher), interference, overrunning first, substitutions, the official scorer (hits vs errors).
 - Batter: velocity anchoring, composure (needs leverage tables), hit-by-pitch evasion; SpinCapacity has no effect yet.
 - Research items R1–R11 are unchanged, except R12, which is done.
