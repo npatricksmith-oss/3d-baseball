@@ -126,6 +126,16 @@ impl KeyedRng {
         r * m::cos(th)
     }
 
+    /// Standard normal truncated at ±`k` (agent-models §1.3 uses k = 4), by rejection.
+    pub fn truncated_normal(&mut self, k: f64) -> f64 {
+        loop {
+            let z = self.normal();
+            if z.abs() <= k {
+                return z;
+            }
+        }
+    }
+
     /// Normal with mean `mu` and standard deviation `sigma`.
     pub fn gauss(&mut self, mu: f64, sigma: f64) -> f64 {
         mu + sigma * self.normal()
