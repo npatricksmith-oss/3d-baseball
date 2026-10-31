@@ -69,3 +69,52 @@ impl Hand {
         }
     }
 }
+
+use bb_math::Vec3;
+
+/// What a batter perceives at the pitcher's release (agent-models §3.2).
+#[derive(Clone, Copy, Debug, PartialEq)]
+pub struct ReleaseObs {
+    /// Play time of release, s.
+    pub t: f64,
+    /// Estimated release point (noisy).
+    pub r: Vec3,
+}
+
+/// One perceptual sample of the ball in flight (agent-models §3.3), every ~10 ms.
+#[derive(Clone, Copy, Debug, PartialEq)]
+pub struct BallObs {
+    pub t: f64,
+    /// Azimuth of the ball from the eye, rad: atan2(dx, dy) (+ toward first base).
+    pub az: f64,
+    /// Elevation of the ball from the eye, rad.
+    pub el: f64,
+    /// Angular noise σ that applied to (az, el), rad. Agents know their own acuity.
+    pub sigma_ang: f64,
+    /// Perceived time to arrival at the eye plane, s (optical expansion).
+    pub tau: f64,
+    /// σ of `tau`, s.
+    pub sigma_tau: f64,
+    /// Perceived spin signature (see [`spin_signature`]) and its per-component σ.
+    pub spin_cue: [f64; 3],
+    pub sigma_spin: f64,
+}
+
+/// The spin signature a batter reads from seams: the catcher-view Magnus direction scaled by
+/// spin efficiency, and the spin rate in units of 2500 rpm. Pitch types differ in it.
+pub fn spin_signature(magnus_dir_x: f64, magnus_dir_z: f64, efficiency: f64, rate_rpm: f64) -> [f64; 3] {
+    [magnus_dir_x * efficiency, magnus_dir_z * efficiency, rate_rpm / 2500.0]
+}
+
+/// Ball-strike count.
+#[derive(Clone, Copy, Debug, Default, PartialEq, Eq, Hash, PartialOrd, Ord)]
+pub struct Count {
+    pub balls: u8,
+    pub strikes: u8,
+}
+
+impl Count {
+    pub fn index(self) -> usize {
+        (self.balls as usize) * 3 + self.strikes as usize
+    }
+}

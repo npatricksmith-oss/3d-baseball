@@ -56,6 +56,9 @@ pub struct SwingTemplate {
     pub contact_k: f64,
     /// Default attack angle, rad.
     pub attack_angle: f64,
+    /// Vertical offset of the aim point from the predicted ball center, m (negative = aim
+    /// under the ball to lift it) [E, authored against mean launch angle, calibration §4.4].
+    pub aim_offset_z: f64,
 }
 
 impl Default for SwingTemplate {
@@ -70,6 +73,7 @@ impl Default for SwingTemplate {
             contact_y0: 0.35,
             contact_k: 0.6,
             attack_angle: 10.0 * DEG,
+            aim_offset_z: -0.006,
         }
     }
 }

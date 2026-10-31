@@ -43,7 +43,7 @@ Not blocking; resolve during M1–M2 at the latest.
 - [ ] R9. Literature pass on human interception and time-to-contact perception to set Vision's angular σ, Weber fraction, and tracking blackout distance (agent-models §3.2–3.3, §10). **Before M3.**
 - [ ] R10. Refresh every [R] reference value in calibration-targets against FanGraphs, Savant, and Baseball-Reference for the latest full season; record sources (calibration-targets §13). **Before M3.**
 - [ ] R11. Verify the OBR rule numbers and MLB interpretations cited in rules-spec (three-batter minimum at inning boundaries, mound-visit limit, walk-off base credit). **Before M4.**
-- [ ] R12. Apply the rules-spec §15 item 2 additions to data-formats (new events, `LineupIncomplete`, `Award` cause, pitching-change reason). **Before M0.5 schemas.**
+- [x] R12. Rules-spec §15 item 2 additions are in the M0.5 schemas (`sim/schemas/events.fbs`, `commands.fbs`) (2026-10-31)
 
 ---
 

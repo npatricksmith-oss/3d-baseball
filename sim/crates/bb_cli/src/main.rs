@@ -1,6 +1,7 @@
 //! `sim-cli`: the headless lab (PLAN §13.3).
 
 mod cage_lab;
+mod pa_lab;
 mod pitch_lab;
 #[cfg(feature = "rerun")]
 mod rr;
@@ -26,6 +27,8 @@ enum Cmd {
     CageMap(cage_lab::MapArgs),
     /// Noisy pitches against noisy swings with perfect perception (M2).
     Cage(cage_lab::CageArgs),
+    /// Plate appearances with perception and decisions: B1 rates (M3).
+    Pa(pa_lab::PaArgs),
 }
 
 fn main() {
@@ -36,5 +39,6 @@ fn main() {
         Cmd::Arsenal(a) => pitch_lab::arsenal(a),
         Cmd::CageMap(a) => cage_lab::map(a),
         Cmd::Cage(a) => cage_lab::cage(a),
+        Cmd::Pa(a) => pa_lab::pa(a),
     }
 }

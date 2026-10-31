@@ -5,6 +5,7 @@
 //! Execution noise lives in [`motor`]; decision code never receives an `Executed*` value.
 
 pub mod attributes;
+pub mod batter;
 pub mod motor;
 pub mod pitcher;
 pub mod swing;
