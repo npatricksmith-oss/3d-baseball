@@ -103,7 +103,7 @@ Pregame ─▶ HalfInningStart ─▶ PlateAppearance ⟲ ─▶ HalfInningEnd �
 - **Game end** [S: OBR 7.01]:
   - After the top of the 9th or any later inning, if the home team leads: **Final**, bottom not played.
   - After the bottom of the 9th or later, if the score is not tied: **Final**.
-  - **Walk-off:** in the bottom of the 9th or later, the moment the home team takes the lead the game ends. Only the runs needed to win count, and the batter is credited with only as many bases as the winning runner needed, **except** a fair ball out of the park, where the batter and all runners score [S: OBR 7.01(g)]. The play finishes resolving the winning run's touch of home; later facts are ignored.
+  - **Walk-off:** in the bottom of the 9th or later, the moment the home team takes the lead the game ends. Only the runs needed to win count, and the batter is credited with only as many bases as the winning runner needed, **except** a fair ball out of the park, where the batter and all runners score [S: OBR 7.01(e)(3) in the 2026 edition; earlier editions numbered it 7.01(g)]. The play finishes resolving the winning run's touch of home; later facts are ignored.
   - Ties go to extra innings indefinitely. No mercy rule, no ties, no weather.
 - **Liveness guard:** a game reaching inning 30 emits a `LivenessWarning` and continues. It is reported by calibration (W7 family) and never ends a game early.
 
@@ -170,7 +170,7 @@ A live play ends (§5.8) when the ball becomes dead or "time" is in effect.
 
 ### 5.2 Fair or foul [S: OBR definitions "Fair Ball", "Foul Ball"]
 
-**Geometry.** Fair territory is the quarter-plane between the foul lines, **lines included**. A ball is over fair territory if **any part** of it is: signed distance from the ball's center to either foul line, positive into fair territory, ≥ −R (ball radius). Foul poles are fair. The decision uses the **ball's** position, never the fielder's.
+**Geometry.** Fair territory is the quarter-plane between the foul lines, **lines included** (the lines' outer edges are the boundary). A ball **in the air** is over fair territory if **any part** of it is: signed distance from the ball's center to either foul line, positive into fair territory, ≥ −R (ball radius). A ball **touching the ground** is judged by its **contact point** (under the center on flat ground), which must be on fair ground: signed distance ≥ 0 [2026 OBR "Fair Ball" clarification; changed 2026-10-31 after the Codex M4 review]. Foul poles are fair, but a ball that has already touched the ground and then hits a pole is not a home run. The decision uses the **ball's** position, never the fielder's.
 
 **Decision rules** (first that applies):
 
