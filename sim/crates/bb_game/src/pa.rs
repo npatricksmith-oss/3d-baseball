@@ -632,3 +632,24 @@ impl B1Report {
         println!("check swings: {}", self.checks);
     }
 }
+
+/// Run `n` plate appearances and collect the B1 report.
+pub fn run_pas(mu: &Matchup, n: u32, seed: u64) -> B1Report {
+    let mut rep = B1Report::default();
+    for i in 0..n {
+        rep.add(&simulate_pa(mu, seed, i * 64));
+    }
+    rep
+}
+
+impl Matchup {
+    /// Average matchup with the interim M3 knobs, and the given grades applied.
+    pub fn with_grades(b: &bb_agents::attributes::BatterGrades, p: &bb_agents::attributes::PitcherGrades) -> Matchup {
+        let mut mu = Matchup::average();
+        mu.knobs = Knobs::calibrated_m3();
+        b.apply(&mut mu.batter, &mut mu.perception, &mut mu.discipline);
+        p.apply(&mut mu.pitcher);
+        mu.refresh();
+        mu
+    }
+}

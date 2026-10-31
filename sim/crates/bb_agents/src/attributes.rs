@@ -37,3 +37,66 @@ mod tests {
         assert!((g - 63.0).abs() < 1e-9);
     }
 }
+
+use crate::batter::{Discipline, Perception};
+use crate::pitcher::PitcherAttrs;
+use crate::swing::BatterAttrs;
+
+/// Batter attributes on the 20–80 scale (agent-models §10). 50 everywhere is league average.
+#[derive(Clone, Copy, Debug, PartialEq)]
+pub struct BatterGrades {
+    pub bat_speed: f64,
+    pub quick_hands: f64,
+    pub bat_control: f64,
+    pub timing: f64,
+    pub vision: f64,
+    pub spin_recognition: f64,
+    pub discipline: f64,
+}
+
+impl Default for BatterGrades {
+    fn default() -> Self {
+        Self { bat_speed: 50.0, quick_hands: 50.0, bat_control: 50.0, timing: 50.0, vision: 50.0, spin_recognition: 50.0, discipline: 50.0 }
+    }
+}
+
+impl BatterGrades {
+    /// Apply to physical attributes, keeping height and handedness.
+    pub fn apply(&self, b: &mut BatterAttrs, p: &mut Perception, d: &mut Discipline) {
+        b.bat_speed = linear_from_grade(self.bat_speed, 32.0, 1.1);
+        b.t_swing = ratio_from_grade(self.quick_hands, 0.150, 1.05);
+        b.bat_control = ratio_from_grade(self.bat_control, 0.012, 1.25);
+        b.timing = ratio_from_grade(self.timing, 0.006, 1.25);
+        p.sigma_ang = ratio_from_grade(self.vision, 0.001, 1.2);
+        p.weber = ratio_from_grade(self.vision, 0.10, 1.2);
+        p.sigma_s0 = ratio_from_grade(self.spin_recognition, 1.0, 1.25);
+        p.tau_s = ratio_from_grade(self.spin_recognition, 0.08, 1.25);
+        d.c = linear_from_grade(self.discipline, 1.0, 0.15);
+        // A high grade removes the "everything looks like a strike" bias (§10 note).
+        d.b = -linear_from_grade(self.discipline, 0.0, 0.25);
+    }
+}
+
+/// Pitcher attributes on the 20–80 scale (agent-models §10).
+#[derive(Clone, Copy, Debug, PartialEq)]
+pub struct PitcherGrades {
+    pub arm_speed: f64,
+    pub spin_capacity: f64,
+    pub command: f64,
+    pub extension: f64,
+}
+
+impl Default for PitcherGrades {
+    fn default() -> Self {
+        Self { arm_speed: 50.0, spin_capacity: 50.0, command: 50.0, extension: 50.0 }
+    }
+}
+
+impl PitcherGrades {
+    pub fn apply(&self, p: &mut PitcherAttrs) {
+        p.arm_speed = linear_from_grade(self.arm_speed, 41.8, 1.1);
+        p.spin_capacity = linear_from_grade(self.spin_capacity, 24.2, 1.4);
+        p.command = ratio_from_grade(self.command, 0.010, 1.2);
+        p.extension = linear_from_grade(self.extension, 1.95, 0.12);
+    }
+}

@@ -3,6 +3,7 @@
 mod cage_lab;
 mod pa_lab;
 mod pitch_lab;
+mod sens_lab;
 #[cfg(feature = "rerun")]
 mod rr;
 
@@ -29,6 +30,8 @@ enum Cmd {
     Cage(cage_lab::CageArgs),
     /// Plate appearances with perception and decisions: B1 rates (M3).
     Pa(pa_lab::PaArgs),
+    /// One-attribute sweeps with common random numbers; checks directions (M3).
+    Sensitivity(sens_lab::SensArgs),
 }
 
 fn main() {
@@ -40,5 +43,6 @@ fn main() {
         Cmd::CageMap(a) => cage_lab::map(a),
         Cmd::Cage(a) => cage_lab::cage(a),
         Cmd::Pa(a) => pa_lab::pa(a),
+        Cmd::Sensitivity(a) => sens_lab::sensitivity(a),
     }
 }
