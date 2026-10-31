@@ -210,7 +210,7 @@ For each pitch type k in the arsenal with `π_k > 0.01`, the batter maintains a 
 
 - **State:** `s_k = (x_p, z_p, t_p)`, where the ball would cross the plane y = y_mid, and when.
 - **Prior:** mean from the batter's predicted trajectory for type k (§1.4 tables: nominal path from the release estimate, plus the expected spin for type k); covariance `Σ_k⁰` = within-type spread (§3.8) plus release-estimate uncertainty propagated through the precomputed sensitivities.
-- **Observation model:** each observation is linearized around hypothesis k's nominal path. The precomputed Jacobian `H_k(t)` maps a change in `s_k` to a change in the observation at time t. This is built once per (pitcher, type) at game start.
+- **Observation model:** each observation is linearized around hypothesis k's current estimate (an extended Kalman filter). The Jacobian `H_k(t)` maps a change in `s_k` to a change in the observation at time t. *Implementation (2026-10-31):* `H_k` is analytic and recomputed at every observation. The predicted position is linear in every state except the arrival time, which enters through the flight progress, so `H_k` costs one nominal-path lookup; a unit test checks it against central finite differences. This replaces the "precomputed once per (pitcher, type) at game start" of the first draft. An earlier version built a finite-difference `H_k` per observation at about three times the cost.
 - **Weights:** `w_k ← w_k · N(o_t; ô_k,t, S_k,t)`, the predictive likelihood, then normalized. A batter fooled early stays fooled until the observations diverge enough to move the weights.
 
 **Observations every 10 ms** (purpose `BatterPerception`, `sub_index` = observation number), each with noise from §10:
@@ -598,12 +598,12 @@ PLAN §13.4: ≤ 200 ms per headless game on one core, ~300 pitches and ~70 ball
 | Pitch selection | 15 ms | < 1 ms | |
 | Aiming (2–3 flights per pitch) | 20 ms | 13 ms | One full-step flight plus coarse search flights, with release execution (was 21 ms) |
 | Pitch flight (world) | 10 ms | 12 ms | |
-| Batter perception and decision | 10 ms | 71 ms | Observation and filter updates to commit (38 ms), then the causal swing-adjustment loop (33 ms). **The largest overrun** |
+| Batter perception and decision | 10 ms | ~25 ms | Filter updates with an analytic observation Jacobian (10 ms), decisions (7 ms), aim points from the nominal path's own depth crossing (3 ms); was 71 ms with a finite-difference Jacobian and a 1 ms path march |
 | Swing and contact (world) | 15 ms | 8 ms | |
 | Fielding, running, coordination (30 Hz) | 60 ms | 114 ms | Live plays at 60 Hz, batted-ball flight and the rules stepping included; fielder predictions are 64 ms of it |
 | Batted-ball flight and bounces (world) | 20 ms | (above) | |
 | Rules, scoring, event log | 10 ms | ~20 ms | Remainder: game loop, event log, timelines |
-| **Total** | **≈ 170 ms** | **≈ 245 ms** | One thread, 259 pitches and 66 balls in play (seed 3); timings vary ~15% with machine load |
+| **Total** | **≈ 170 ms** | **≈ 210 ms** | One thread, 259 pitches and 66 balls in play (seed 3); best of six runs, since timings vary widely with machine load. Live plays (~125 ms) are now the main overrun |
 
 M3 measures the real numbers with `criterion`. If a component exceeds its budget, cache or table it first; never simplify the model in a way that changes behavior without a decision-log entry.
 

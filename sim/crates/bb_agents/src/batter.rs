@@ -173,20 +173,16 @@ impl Hypothesis {
     }
     /// Covariance of [`Hypothesis::plate`].
     pub fn plate_cov(&self) -> Mat3 {
-        // plate = A s with rows picking (x_p + b_x), (z_p + b_z), t_p.
-        let mut a = [[0.0; NS]; 3];
-        a[0][0] = 1.0;
-        a[0][3] = 1.0;
-        a[1][1] = 1.0;
-        a[1][4] = 1.0;
-        a[2][2] = 1.0;
+        // plate = A s with rows picking (x_p + b_x), (z_p + b_z), t_p, so (A P Aᵀ)ᵢⱼ is the
+        // sum of P over the state indices each row picks.
+        const PICK: [&[usize]; 3] = [&[0, 3], &[1, 4], &[2]];
         let mut c = Mat3::ZERO;
         for i in 0..3 {
             for j in 0..3 {
                 let mut v = 0.0;
-                for k in 0..NS {
-                    for l in 0..NS {
-                        v += a[i][k] * self.p[k][l] * a[j][l];
+                for &k in PICK[i] {
+                    for &l in PICK[j] {
+                        v += self.p[k][l];
                     }
                 }
                 c.r[i][j] = v;
@@ -257,45 +253,84 @@ impl Bank {
 
     /// Predicted ball position at play time `t` under hypothesis state `s`.
     fn predict(sc: &Scouting, h: &Hypothesis, s: &SVec, t_rel: f64, t: f64) -> Vec3 {
+        Self::predict_d(sc, h, s, t_rel, t).0
+    }
+
+    /// [`Bank::predict`], plus the flight progress f, ∂p/∂f, and ∂f/∂t_p (state s[2]).
+    fn predict_d(sc: &Scouting, h: &Hypothesis, s: &SVec, t_rel: f64, t: f64) -> (Vec3, f64, Vec3, f64) {
         let tm = &sc.types[h.model];
         // Progress along the flight, scaled by the hypothesized arrival time.
-        let f = ((t - t_rel) / s[2]).max(0.0);
-        let n = tm.nominal.at(f * tm.t0).0;
+        let raw = (t - t_rel) / s[2];
+        let f = raw.max(0.0);
+        let tn = f * tm.t0;
+        let (n, nv) = tm.nominal.at(tn);
         // The nominal path's deviation from its own release→plate chord: gravity and break.
         let chord = tm.release * (1.0 - f) + Vec3::new(tm.x0, n.y, tm.z0) * f;
         let curve = Vec3::new(n.x - chord.x, 0.0, n.z - chord.z);
         let x = (1.0 - f) * s[5] + f * s[0] + curve.x + s[3] * f * f;
         let z = (1.0 - f) * s[6] + f * s[1] + curve.z + s[4] * f * f;
-        Vec3::new(x, n.y, z)
+        // The nominal is clamped (flat) outside its time span.
+        let inside = raw > 0.0 && tn > tm.nominal.first().t && tn < tm.nominal.last().t;
+        let dn = if inside { nv * tm.t0 } else { Vec3::ZERO };
+        let dp_df = Vec3::new(
+            s[0] - s[5] + dn.x + tm.release.x - tm.x0 + 2.0 * s[3] * f,
+            dn.y,
+            s[1] - s[6] + dn.z + tm.release.z - tm.z0 + 2.0 * s[4] * f,
+        );
+        let df_ds2 = if raw > 0.0 { -f / s[2] } else { 0.0 };
+        (Vec3::new(x, n.y, z), f, dp_df, df_ds2)
     }
 
-    fn h(sc: &Scouting, hyp: &Hypothesis, s: &SVec, t_rel: f64, eye: Vec3, t: f64) -> Vec3 {
-        let p = Self::predict(sc, hyp, s, t_rel, t);
-        let (az, el) = angles(eye, p);
+    /// The observation model h(s) — eye angles plus the batter's bias states, and the
+    /// perceived time to arrival — with its Jacobian ∂h/∂s (3 × NS). The predicted position is
+    /// linear in every state but t_p, which enters through the flight progress f.
+    fn h_jac(sc: &Scouting, hyp: &Hypothesis, s: &SVec, t_rel: f64, eye: Vec3, t: f64) -> (Vec3, [[f64; NS]; 3]) {
+        let (p, f, dp_df, df_ds2) = Self::predict_d(sc, hyp, s, t_rel, t);
+        // Eye angles and their gradients with respect to the ball position.
+        let d = p - eye;
+        let rho2 = d.x * d.x + d.y * d.y;
+        let rho = m::sqrt(rho2);
+        let r2 = rho2 + d.z * d.z;
+        let (az, el) = (m::atan2(d.x, d.y), m::atan2(d.z, rho));
+        let g_az = Vec3::new(d.y / rho2, -d.x / rho2, 0.0);
+        let g_el = Vec3::new(-d.z * d.x / (rho * r2), -d.z * d.y / (rho * r2), rho / r2);
         // Time to arrival at the plate plane under this hypothesis, as perceived (with the
         // batter's own persistent relative bias).
         let tau = ((t_rel + s[2]) - t) * (1.0 + s[9]);
-        Vec3::new(az + s[7], el + s[8], tau)
+        let mut j = [[0.0; NS]; 3];
+        // Position columns: x depends on s0, s3, s5; z on s1, s4, s6; all on s2 through f.
+        let dp = |k: usize| -> Vec3 {
+            match k {
+                0 => Vec3::new(f, 0.0, 0.0),
+                1 => Vec3::new(0.0, 0.0, f),
+                2 => dp_df * df_ds2,
+                3 => Vec3::new(f * f, 0.0, 0.0),
+                4 => Vec3::new(0.0, 0.0, f * f),
+                5 => Vec3::new(1.0 - f, 0.0, 0.0),
+                6 => Vec3::new(0.0, 0.0, 1.0 - f),
+                _ => Vec3::ZERO,
+            }
+        };
+        for k in 0..7 {
+            let v = dp(k);
+            j[0][k] = g_az.dot(v);
+            j[1][k] = g_el.dot(v);
+        }
+        j[0][7] = 1.0;
+        j[1][8] = 1.0;
+        j[2][2] = 1.0 + s[9];
+        j[2][9] = (t_rel + s[2]) - t;
+        (Vec3::new(az + s[7], el + s[8], tau), j)
     }
 
     /// EKF update with one observation (agent-models §3.3).
     pub fn observe(&mut self, sc: &Scouting, o: &BallObs) {
         let eye = self.eye;
         let t_rel = self.t_release;
-        let eps = [1e-4, 1e-4, 1e-5, 1e-4, 1e-4, 1e-4, 1e-4, 1e-5, 1e-5, 1e-4];
         for hyp in &mut self.hyps {
             let s = hyp.s;
-            let z = Self::h(sc, hyp, &s, t_rel, eye, o.t).to_array();
-            // Numerical Jacobian H (3 × NS).
-            let mut hm = [[0.0; NS]; 3];
-            for j in 0..NS {
-                let mut sp = s;
-                sp[j] += eps[j];
-                let zp = Self::h(sc, hyp, &sp, t_rel, eye, o.t).to_array();
-                for i in 0..3 {
-                    hm[i][j] = (zp[i] - z[i]) / eps[j];
-                }
-            }
+            let (z, hm) = Self::h_jac(sc, hyp, &s, t_rel, eye, o.t);
+            let z = z.to_array();
             // S = H P Hᵀ + R
             let mut ph = [[0.0; 3]; NS]; // P Hᵀ
             for i in 0..NS {
@@ -384,7 +419,11 @@ impl Bank {
 
     /// Weighted mean arrival time at the plate plane (play time).
     pub fn arrival(&self) -> f64 {
-        self.t_release + self.posterior().iter().map(|c| c.w * c.mean.z).sum::<f64>()
+        let lw: Vec<f64> = self.hyps.iter().map(|h| h.log_prior + h.log_lik + h.log_spin).collect();
+        let mx = lw.iter().cloned().fold(f64::NEG_INFINITY, f64::max);
+        let ws: Vec<f64> = lw.iter().map(|l| m::exp(l - mx)).collect();
+        let tot: f64 = ws.iter().sum();
+        self.t_release + self.hyps.iter().zip(ws).map(|(h, w)| w / tot * h.s[2]).sum::<f64>()
     }
 
     /// The dominant mode (agent-models §3.5): highest-weight component, merged with a close
@@ -409,22 +448,16 @@ impl Bank {
     /// The predicted path point at depth `y` under a component's hypothesis (for the aim).
     pub fn point_at_depth(&self, sc: &Scouting, ty: PitchType, y: f64) -> Option<(Vec3, f64)> {
         let h = self.hyps.iter().find(|h| h.ty == ty)?;
-        // March in time until the predicted path crosses y.
-        let t_end = self.t_release + h.s[2];
-        let mut t = self.t_release + 0.5 * h.s[2];
-        let mut prev = Self::predict(sc, h, &h.s, self.t_release, t);
-        let dt = 0.001;
-        while t < t_end + 0.05 {
-            let tn = t + dt;
-            let p = Self::predict(sc, h, &h.s, self.t_release, tn);
-            if prev.y > y && p.y <= y {
-                let a = (prev.y - y) / (prev.y - p.y);
-                return Some((prev.lerp(p, a), t + a * dt));
-            }
-            prev = p;
-            t = tn;
+        // The predicted depth is the nominal path's at the same flight progress, so the
+        // crossing is the nominal's own, rescaled to this hypothesis' arrival time. Searched
+        // from mid-flight to 50 ms past the believed arrival.
+        let tm = &sc.types[h.model];
+        let tn = tm.nominal.find(Crossing::YBelow(y))?;
+        let t = self.t_release + tn / tm.t0 * h.s[2];
+        if t < self.t_release + 0.5 * h.s[2] || t >= self.t_release + h.s[2] + 0.05 {
+            return None;
         }
-        None
+        Some((Self::predict(sc, h, &h.s, self.t_release, t), t))
     }
 }
 
@@ -633,5 +666,45 @@ impl PitcherMemory {
     pub fn break_sigma(&self, k: usize, sigma0: f64, eta: f64) -> f64 {
         let s_inf = 0.5 * sigma0;
         s_inf + (sigma0 - s_inf) * m::exp(-eta * self.n[k])
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use crate::pitcher::{PitchDef, PitchIntent, PitcherAttrs, plan_release};
+    use bb_physics::flight::{DT_PITCH, FlightEnv, fly};
+    use bb_physics::pitch::launch;
+
+    /// The analytic observation Jacobian agrees with central finite differences of h itself,
+    /// early, mid, and late in flight, for a state away from the prior mean.
+    #[test]
+    fn observation_jacobian_matches_finite_differences() {
+        let env = FlightEnv::default_env();
+        let p = PitcherAttrs::average_rhp();
+        let def = PitchDef::template(PitchType::Slider);
+        let rel = plan_release(&env, &p, &def, &PitchIntent { ty: PitchType::Slider, target_x: 0.1, target_z: 0.7 }).unwrap();
+        let nominal = fly(&env, launch(rel.r, &rel.shape, rel.yaw, rel.elev), 0.0, DT_PITCH, &[Crossing::YBelow(-0.5)], 2.0);
+        let sc = Scouting { types: vec![type_model(PitchType::Slider, nominal, [0.0; 3])], usage: vec![1.0] };
+        let tm = &sc.types[0];
+        let s: SVec = [tm.x0 + 0.05, tm.z0 - 0.08, tm.t0 * 1.02, 0.03, -0.02, rel.r.x + 0.04, rel.r.z - 0.03, 0.002, -0.001, 0.03];
+        let hyp = Hypothesis { ty: PitchType::Slider, log_prior: 0.0, log_lik: 0.0, log_spin: 0.0, s, p: [[0.0; NS]; NS], model: 0 };
+        let eye = eye_point(Hand::Right, 1.88);
+        for frac in [0.15, 0.5, 0.85] {
+            let t = frac * tm.t0;
+            let (_, j) = Bank::h_jac(&sc, &hyp, &s, 0.0, eye, t);
+            for k in 0..NS {
+                let e = 1e-6;
+                let (mut sp, mut sm) = (s, s);
+                sp[k] += e;
+                sm[k] -= e;
+                let hp = Bank::h_jac(&sc, &hyp, &sp, 0.0, eye, t).0.to_array();
+                let hm = Bank::h_jac(&sc, &hyp, &sm, 0.0, eye, t).0.to_array();
+                for i in 0..3 {
+                    let fd = (hp[i] - hm[i]) / (2.0 * e);
+                    assert!((j[i][k] - fd).abs() <= 1e-6 * (1.0 + fd.abs()), "t {t:.3} ∂h{i}/∂s{k}: analytic {} vs fd {fd}", j[i][k]);
+                }
+            }
+        }
     }
 }
