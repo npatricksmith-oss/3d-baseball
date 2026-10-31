@@ -66,10 +66,20 @@ pub struct PitchResolution {
     pub swing: SwingResult,
 }
 
+/// The pitch's own flight from release (independent of any swing until contact).
+pub fn pitch_flight(env: &FlightEnv, release: BallState) -> Trajectory {
+    let stops = [Crossing::YBelow(Y_PITCH_END), Crossing::ZBelow(env.ball.radius)];
+    fly(env, release, 0.0, DT_PITCH, &stops, 3.0)
+}
+
 /// Resolve a released pitch against an optional swing.
 pub fn resolve_pitch(env: &FlightEnv, release: BallState, swing: Option<&dyn BatPose>, bat: &BatModel) -> PitchResolution {
-    let stops = [Crossing::YBelow(Y_PITCH_END), Crossing::ZBelow(env.ball.radius)];
-    let mut pitch = fly(env, release, 0.0, DT_PITCH, &stops, 3.0);
+    resolve_flight(env, pitch_flight(env, release), swing, bat)
+}
+
+/// [`resolve_pitch`] for a pitch whose flight (from [`pitch_flight`]) is already known.
+pub fn resolve_flight(env: &FlightEnv, flight: Trajectory, swing: Option<&dyn BatPose>, bat: &BatModel) -> PitchResolution {
+    let mut pitch = flight;
     let crossing = pitch.find(Crossing::YBelow(Y_JUDGE)).map(|t| {
         let (r, v) = pitch.at(t);
         PlateCrossing { t, r, v }

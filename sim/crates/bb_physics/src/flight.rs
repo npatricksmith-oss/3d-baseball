@@ -199,12 +199,23 @@ impl Trajectory {
 /// Interior samples per step used to bracket a crossing on the interpolant, so a path that
 /// starts on a boundary, leaves it, and returns within one step is still caught.
 const BRACKET_SAMPLES: usize = 4;
+/// Interior sampling happens only when an endpoint is within this distance of the boundary.
+const BRACKET_MARGIN_M: f64 = 1e-3;
 
 /// First downward crossing of `c` (g from > 0 to ≤ 0) on the Hermite segment a→b.
 fn crossing_in(a: &Knot, b: &Knot, c: Crossing) -> Option<f64> {
     let h = b.t - a.t;
+    let (ga, gb) = (c.g(a.s.r), c.g(b.s.r));
+    // A cubic segment over one step departs from its chord by at most h²·|a|max/8, far
+    // below this margin for any ball; well clear of the boundary, only the endpoints matter.
+    if ga > BRACKET_MARGIN_M && gb > BRACKET_MARGIN_M {
+        return None;
+    }
+    if ga > 0.0 && gb <= 0.0 && ga > BRACKET_MARGIN_M {
+        return Some(bisect_between(a, b, c, a.t, b.t));
+    }
     let mut tp = a.t;
-    let mut gp = c.g(a.s.r);
+    let mut gp = ga;
     for i in 1..=BRACKET_SAMPLES + 1 {
         let (t, g) = if i == BRACKET_SAMPLES + 1 {
             (b.t, c.g(b.s.r))

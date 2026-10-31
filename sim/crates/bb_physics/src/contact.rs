@@ -78,6 +78,9 @@ pub enum Detection {
 /// Search window half-width and sampling step (physics-spec §7).
 pub const WINDOW_S: f64 = 0.025;
 pub const SAMPLE_S: f64 = 0.0001;
+/// Upper bound on how fast the ball–bat surface gap can close, m/s (ball ≤ 50 m/s plus any
+/// bat point ≤ 60 m/s, with margin).
+const V_CLOSE_MAX: f64 = 150.0;
 const BISECT_TOL_S: f64 = 1e-7;
 
 /// Find the first bat–ball contact on the ball's trajectory within the window around the
@@ -90,10 +93,11 @@ pub fn detect(tr: &Trajectory, swing: &dyn BatPose, profile: &BatProfile, ball: 
         gap(&swing.at(t), profile, b, ball.radius)
     };
     let mut best = ClosestApproach { t: t0, u: 0.0, gap: f64::INFINITY, offset: Vec3::ZERO };
-    let n = ((t1 - t0) / SAMPLE_S).ceil().max(1.0) as usize;
+    // Adaptive scan: the gap cannot shrink faster than the closing-speed bound, so a step of
+    // gap / V_CLOSE_MAX can never jump over a contact. Near the bat the step is SAMPLE_S.
+    let mut t = t0;
     let mut prev: Option<(f64, f64)> = None;
-    for i in 0..=n {
-        let t = (t0 + SAMPLE_S * i as f64).min(t1);
+    loop {
         let (d, u, p) = g(t);
         if d < best.gap {
             best = ClosestApproach { t, u, gap: d, offset: tr.at(t).0 - p };
@@ -110,6 +114,10 @@ pub fn detect(tr: &Trajectory, swing: &dyn BatPose, profile: &BatProfile, ball: 
             }
         }
         prev = Some((t, d));
+        if t >= t1 {
+            break;
+        }
+        t = (t + (d / V_CLOSE_MAX).max(SAMPLE_S)).min(t1);
     }
     if best.gap <= 0.0 {
         // Overlapping already at the window start: treat the start as the contact.

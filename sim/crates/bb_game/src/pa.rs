@@ -7,7 +7,7 @@
 
 use bb_agents::batter::{self, Bank, Decision, Discipline, Perception, PitcherMemory, Scouting, eye_point, type_model};
 use bb_agents::motor::{ReleaseNoise, SwingNoise, execute_release, execute_swing};
-use bb_agents::pitcher::{PitchDef, PitchIntent, PitcherAttrs, plan_release};
+use bb_agents::pitcher::{PitchDef, PitchIntent, PitcherAttrs, plan_release, plan_release_seeded};
 use bb_agents::swing::{BatterAttrs, SwingTemplate, plan_swing};
 use bb_math::{KeyedRng, Purpose, RngKey, Vec3, m};
 use bb_observe::{BallObs, Count, PitchType, ReleaseObs, spin_signature};
@@ -16,7 +16,7 @@ use bb_physics::pitch::launch;
 use bb_physics::spin::decompose;
 use bb_physics::zone::{Y_JUDGE, Zone, ZoneRule};
 use bb_physics::{BallState, FlightEnv};
-use bb_world::pitch::{BatModel, SwingResult, resolve_pitch};
+use bb_world::pitch::{BatModel, SwingResult, pitch_flight, resolve_flight};
 
 pub const PITCHER: u16 = 0x0100;
 pub const BATTER: u16 = 0x0001;
@@ -74,6 +74,8 @@ pub struct Matchup {
     /// Scouting with exact shapes (used when `model_error` is None).
     pub scouting: Scouting,
     pub model_error: Option<ModelError>,
+    /// The pitcher's cached aim per arsenal pitch: (yaw, elev, target x, target z, distance).
+    pub aim_seeds: Vec<(f64, f64, f64, f64, f64)>,
 }
 
 /// Body capsule for hit-by-pitch (agent-models §3.7, v1 without evasion): a vertical
@@ -100,16 +102,44 @@ impl Matchup {
             bat: BatModel::default_34in(),
             zone,
             knobs: Knobs::default(),
+            aim_seeds: Vec::new(),
             scouting,
             model_error: Some(ModelError::default()),
         }
+        .seeded()
     }
 
     /// Recompute what depends on the attributes (call after changing them).
     pub fn refresh(&mut self) {
         self.zone = Zone::for_batter(self.batter.height, &ZoneRule::default());
         self.scouting = build_scouting(&self.env, &self.pitcher, &self.arsenal, &self.zone);
+        self.aim_seeds = aim_seeds(&self.env, &self.pitcher, &self.arsenal, &self.zone);
     }
+
+    fn seeded(mut self) -> Self {
+        self.aim_seeds = aim_seeds(&self.env, &self.pitcher, &self.arsenal, &self.zone);
+        self
+    }
+
+    /// Initial guess for aiming `intent`, from the cached solve for its type.
+    pub fn aim_guess(&self, intent: &PitchIntent) -> Option<(f64, f64)> {
+        let k = self.arsenal.iter().position(|a| a.def.ty == intent.ty)?;
+        let &(yaw, elev, x, z, d) = self.aim_seeds.get(k)?;
+        Some((yaw + (intent.target_x - x) / d, elev + (intent.target_z - z) / d))
+    }
+}
+
+/// The pitcher's game-start aim solves to the middle of the zone, one per arsenal pitch.
+pub fn aim_seeds(env: &FlightEnv, p: &PitcherAttrs, arsenal: &[ArsenalPitch], zone: &Zone) -> Vec<(f64, f64, f64, f64, f64)> {
+    let mid = 0.5 * (zone.bottom + zone.top);
+    arsenal
+        .iter()
+        .map(|a| {
+            let plan = plan_release(env, p, &a.def, &PitchIntent { ty: a.def.ty, target_x: 0.0, target_z: mid }).expect("zone center reachable");
+            let d = (Vec3::new(0.0, Y_JUDGE, mid) - plan.r).norm();
+            (plan.yaw, plan.elev, 0.0, mid, d)
+        })
+        .collect()
 }
 
 /// How wrong a batter's model of an unfamiliar pitcher's pitch shapes starts (agent-models
@@ -308,12 +338,12 @@ pub fn simulate_pitch(mu: &Matchup, sc: &Scouting, count: Count, seed: u64, play
 pub fn simulate_pitch_bs(mu: &Matchup, sc: &Scouting, count: Count, seed: u64, play: u32, break_sigma: f64) -> PitchRecord {
     let intent = choose_pitch(mu, count, seed, play);
     let def = &mu.arsenal.iter().find(|a| a.def.ty == intent.ty).unwrap().def;
-    let plan = plan_release(&mu.env, &mu.pitcher, def, &intent).expect("reachable target");
+    let plan = plan_release_seeded(&mu.env, &mu.pitcher, def, &intent, mu.aim_guess(&intent)).expect("reachable target");
     let noise = ReleaseNoise::new(mu.pitcher.command, def.command_mult, mu.knobs.command);
     let release: BallState = execute_release(&plan, &noise, &mut rng(seed, play, PITCHER, Purpose::PitchRelease, 0)).state;
 
     // World: the pitch's own flight (independent of the swing until contact).
-    let free = fly(&mu.env, release, 0.0, DT_PITCH, &[Crossing::YBelow(-1.2), Crossing::ZBelow(mu.env.ball.radius)], 3.0);
+    let free = pitch_flight(&mu.env, release);
     let t_plate = free.find(Crossing::YBelow(Y_JUDGE));
 
     // Perception.
@@ -436,7 +466,7 @@ pub fn simulate_pitch_bs(mu: &Matchup, sc: &Scouting, count: Count, seed: u64, p
                 let intended = plan_swing(&mu.batter, &mu.template, &mu.bat.profile, &mu.bat.mass, aim3, t_aim, mu.template.attack_angle);
                 let sn = SwingNoise::new(&mu.batter, mu.knobs.swing);
                 let ex = execute_swing(&intended, &sn, &mut rng(seed, play, BATTER, Purpose::SwingExecution, 0));
-                let res = resolve_pitch(&mu.env, release, Some(&ex.swing), &mu.bat);
+                let res = resolve_flight(&mu.env, free.clone(), Some(&ex.swing), &mu.bat);
                 resolved_pitch = res.pitch;
                 swing_res = res.swing;
             } else {

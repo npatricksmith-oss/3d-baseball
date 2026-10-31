@@ -133,12 +133,18 @@ pub struct IntendedRelease {
 /// Solve the release for an intent. Pitchers know their own pitches: this uses the true
 /// physics and is exact (agent-models §2.3). Fails if the target cannot be reached.
 pub fn plan_release(env: &FlightEnv, p: &PitcherAttrs, def: &PitchDef, intent: &PitchIntent) -> Result<IntendedRelease, AimError> {
+    plan_release_seeded(env, p, def, intent, None)
+}
+
+/// [`plan_release`] starting from a guess, e.g. a cached solve for this pitch type shifted
+/// by the small-angle target offset (agent-models §2.3 "aim correction").
+pub fn plan_release_seeded(env: &FlightEnv, p: &PitcherAttrs, def: &PitchDef, intent: &PitchIntent, guess: Option<(f64, f64)>) -> Result<IntendedRelease, AimError> {
     let r = def.release_point(p);
     let shape = def.shape(p);
     if !(shape.speed > 0.0 && shape.speed.is_finite() && intent.target_x.is_finite() && intent.target_z.is_finite()) {
         return Err(AimError::BadInput);
     }
-    let a = aim(env, r, &shape, intent.target_x, intent.target_z, None).checked()?;
+    let a = aim(env, r, &shape, intent.target_x, intent.target_z, guess).checked()?;
     Ok(IntendedRelease { r, shape, yaw: a.yaw, elev: a.elev, command_mult: def.command_mult })
 }
 
