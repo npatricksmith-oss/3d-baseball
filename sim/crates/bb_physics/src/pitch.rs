@@ -68,10 +68,10 @@ pub fn fly_pitch(env: &FlightEnv, s: BallState) -> Trajectory {
     fly(env, s, 0.0, DT_PITCH, &stops, 2.0)
 }
 
-/// Where a pitch crosses the plate plane (x, z), flying through the ground if needed.
-/// Used by the aiming solve, which must converge even for pitches aimed in the dirt.
-fn plate_xz(env: &FlightEnv, s: BallState) -> Option<(f64, f64, f64)> {
-    let tr = fly(env, s, 0.0, DT_PITCH, &[Crossing::YBelow(Y_JUDGE)], 2.0);
+/// Where a pitch crosses the plane `y = plane_y` (x, z, t), flying through the ground if
+/// needed. Used by the aiming solve, which must converge even for pitches aimed in the dirt.
+fn plane_xz(env: &FlightEnv, s: BallState, plane_y: f64) -> Option<(f64, f64, f64)> {
+    let tr = fly(env, s, 0.0, DT_PITCH, &[Crossing::YBelow(plane_y)], 2.0);
     tr.stop.map(|_| {
         let k = tr.last();
         (k.s.r.x, k.s.r.z, k.t)
@@ -93,8 +93,21 @@ pub struct Aim {
 /// (target_x, target_z). Fixed-point iteration with the small-angle Jacobian 1/D
 /// (agent-models §2.3); `guess` seeds it (e.g. the previous solve for this pitch type).
 pub fn aim(env: &FlightEnv, r: Vec3, shape: &PitchShape, target_x: f64, target_z: f64, guess: Option<(f64, f64)>) -> Aim {
+    aim_at_plane(env, r, shape, Y_JUDGE, target_x, target_z, guess)
+}
+
+/// [`aim`] at an arbitrary plane `y = plane_y` (e.g. a tunnel point).
+pub fn aim_at_plane(
+    env: &FlightEnv,
+    r: Vec3,
+    shape: &PitchShape,
+    plane_y: f64,
+    target_x: f64,
+    target_z: f64,
+    guess: Option<(f64, f64)>,
+) -> Aim {
     // Straight-line guess, plus a gravity allowance: drop ≈ ½ g t² over t ≈ D / v.
-    let d0 = Vec3::new(target_x - r.x, Y_JUDGE - r.y, target_z - r.z);
+    let d0 = Vec3::new(target_x - r.x, plane_y - r.y, target_z - r.z);
     let (mut yaw, mut elev) = guess.unwrap_or_else(|| {
         let t = d0.norm() / shape.speed;
         let lift = 0.5 * bb_math::units::G * t * t;
@@ -102,14 +115,14 @@ pub fn aim(env: &FlightEnv, r: Vec3, shape: &PitchShape, target_x: f64, target_z
     });
     let mut out = Aim { yaw, elev, residual: f64::INFINITY, iterations: 0, flight_time: 0.0 };
     for it in 1..=12 {
-        let Some((x, z, t)) = plate_xz(env, launch(r, shape, yaw, elev)) else { break };
+        let Some((x, z, t)) = plane_xz(env, launch(r, shape, yaw, elev), plane_y) else { break };
         let (dx, dz) = (x - target_x, z - target_z);
         let res = m::hypot(dx, dz);
         out = Aim { yaw, elev, residual: res, iterations: it, flight_time: t };
         if res < 1e-4 {
             break;
         }
-        let dist = m::hypot(m::hypot(x - r.x, Y_JUDGE - r.y), z - r.z);
+        let dist = m::hypot(m::hypot(x - r.x, plane_y - r.y), z - r.z);
         yaw -= dx / dist;
         elev -= dz / dist;
     }
@@ -188,3 +201,7 @@ pub fn movement_40ft(env: &FlightEnv, s: BallState) -> Option<(f64, f64)> {
     let d = real.last().s.r - twin.last().s.r;
     Some((d.x, d.z))
 }
+
+/// Tunnel point used for tunneling analysis: ~23.8 ft in front of the plate, roughly where
+/// a batter must commit (~175 ms before arrival) [E, public tunneling convention].
+pub const Y_TUNNEL: f64 = 23.8 * bb_math::units::FT;

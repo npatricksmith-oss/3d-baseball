@@ -5,11 +5,24 @@ edition.workspace = true
 license.workspace = true
 publish.workspace = true
 
+[[bin]]
+name = "sim-cli"
+path = "src/main.rs"
+
 [lints]
 workspace = true
 
 [dependencies]
 bb_math.workspace = true
 bb_physics.workspace = true
+bb_observe.workspace = true
+bb_agents.workspace = true
 bb_game.workspace = true
 clap.workspace = true
+serde_json.workspace = true
+rerun = { workspace = true, optional = true }
+
+[features]
+default = ["rerun"]
+# Rerun (rerun.io) debug-visualizer output (D15). Off for minimal builds.
+rerun = ["dep:rerun"]
