@@ -511,14 +511,14 @@ display    = h:mm, rounded to 15 minutes
 | `release_spin_rate` | \|ω\| | rad/s → rpm |
 | `spin_axis` | §9.2 | degrees |
 | `pfx_x`, `pfx_z` | Savant-window movement (physics spec §12, M1 variant) | m → ft; catcher's perspective, so a right-hander's arm-side run is **negative** `pfx_x` |
-| `plate_x`, `plate_z` | crossing point at the front of the plate | m → ft |
+| `plate_x`, `plate_z` | crossing point at the **middle** of the plate (Savant changed this in 2026 to align with ABS; earlier seasons used the front edge) | m → ft |
 | `sz_top`, `sz_bot` | zone bounds | m → ft |
 | `vx0, vy0, vz0, ax, ay, az` | constant-acceleration fit to the trajectory, evaluated at y = 50 ft | SI → ft, ft/s, ft/s² [S: Kagan & Nathan 2017 frame] |
 | `launch_speed`, `launch_angle` | exit velocity, launch angle | mph, degrees |
 | `hit_distance_sc` | projected distance | ft. Both are projections, but Statcast's projection method differs from our unobstructed flight, so compare distributions, not single balls |
 | `p_throws`, `stand`, `pitch_type`, `balls`, `strikes`, `outs_when_up`, `inning` | log | Savant codes; pitch types map from the arsenal (FF, SI, SL, CU, CH, FC, ST, SV, FS, KC) |
 
-`plate_x` is evaluated at the front edge of the plate to match Statcast; the strike call itself uses the midpoint plane (physics spec §10). Both are in the log.
+`plate_x` is evaluated at the plate's midpoint plane, which matches both Statcast from 2026 on and the strike call (physics spec §10). For comparisons with pre-2026 Savant data, use the front-edge crossing, which is also in the log.
 
 ---
 
