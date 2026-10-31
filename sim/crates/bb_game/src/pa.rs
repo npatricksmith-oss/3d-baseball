@@ -269,6 +269,8 @@ pub struct PitchRecord {
     pub bounced: bool,
     /// The executed release state (world truth, for the event log).
     pub release: BallState,
+    /// The release speed the batter perceived (for anchoring the next pitch), m/s.
+    pub perceived_speed: f64,
 }
 
 fn rng(seed: u64, play: u32, agent: u16, purpose: Purpose, sub: u32) -> KeyedRng {
@@ -340,12 +342,13 @@ fn body_hit(mu: &Matchup, tr: &bb_physics::flight::Trajectory) -> bool {
 /// Simulate one pitch at `count`, with the batter's scouting models `sc`.
 pub fn simulate_pitch(mu: &Matchup, sc: &Scouting, count: Count, seed: u64, play: u32) -> PitchRecord {
     let bs = vec![mu.perception.break_sigma; sc.types.len()];
-    simulate_pitch_ctx(mu, sc, count, seed, play, &bs, None)
+    simulate_pitch_ctx(mu, sc, count, seed, play, &bs, None, None)
 }
 
 /// [`simulate_pitch`] with per-type break-spread beliefs (from in-game adaptation) and the
 /// previous pitch type seen in this plate appearance (sequence prior, agent-models §3.1).
-pub fn simulate_pitch_ctx(mu: &Matchup, sc: &Scouting, count: Count, seed: u64, play: u32, break_sigma: &[f64], prev_read: Option<PitchType>) -> PitchRecord {
+#[allow(clippy::too_many_arguments)]
+pub fn simulate_pitch_ctx(mu: &Matchup, sc: &Scouting, count: Count, seed: u64, play: u32, break_sigma: &[f64], prev_read: Option<PitchType>, last_speed: Option<f64>) -> PitchRecord {
     let intent = choose_pitch(mu, count, seed, play);
     let def = &mu.arsenal.iter().find(|a| a.def.ty == intent.ty).unwrap().def;
     let plan = plan_release_seeded(&mu.env, &mu.pitcher, def, &intent, mu.aim_guess(&intent)).expect("reachable target");
@@ -380,7 +383,7 @@ pub fn simulate_pitch_ctx(mu: &Matchup, sc: &Scouting, count: Count, seed: u64, 
     prior.iter_mut().for_each(|p| *p /= ps);
     let (wp, wi) = (m::sqrt(pc.persistent_share), m::sqrt(1.0 - pc.persistent_share));
     let bias = batter::BiasPrior { ang: pc.sigma_ang * kp * wp, tau_rel: pc.weber * kp * wp };
-    let mut bank = Bank::new(sc, &prior, &rel_obs, eye, break_sigma, bias);
+    let mut bank = Bank::new_anchored(sc, &prior, &rel_obs, eye, break_sigma, bias, last_speed);
     let d = decompose(release.w, release.v);
     let true_sig = spin_signature(d.magnus_dir.x, d.magnus_dir.z, d.efficiency, bb_math::units::radps_to_rpm(release.w.norm()));
     let spin_z = [pr.truncated_normal(4.0), pr.truncated_normal(4.0), pr.truncated_normal(4.0)];
@@ -573,6 +576,7 @@ pub fn simulate_pitch_ctx(mu: &Matchup, sc: &Scouting, count: Count, seed: u64, 
         hit_batter,
         bounced,
         release,
+        perceived_speed: bank.perceived_speed(sc),
     }
 }
 
@@ -623,7 +627,8 @@ pub fn simulate_pa(mu: &Matchup, seed: u64, first_play: u32) -> PaRecord {
     let bs = vec![mu.perception.break_sigma; sc.types.len()];
     loop {
         let prev = pitches.last().map(|p: &PitchRecord| p.read);
-        let rec = simulate_pitch_ctx(mu, sc, count, seed, play, &bs, prev);
+        let last_v = pitches.last().map(|p: &PitchRecord| p.perceived_speed);
+        let rec = simulate_pitch_ctx(mu, sc, count, seed, play, &bs, prev, last_v);
         play += 1;
         let call = rec.call;
         pitches.push(rec);
@@ -823,7 +828,8 @@ pub fn simulate_times_through(mu: &Matchup, seed: u64, game: u32, times: u32, on
                 .map(|k| if adapt { mem.break_sigma(k, mu.perception.break_sigma, ETA) } else { mu.perception.break_sigma })
                 .collect();
             let prev = pitches.last().map(|p: &PitchRecord| p.read);
-            let rec = simulate_pitch_ctx(mu, &sc, count, seed, play, &bs, prev);
+            let last_v = pitches.last().map(|p: &PitchRecord| p.perceived_speed);
+            let rec = simulate_pitch_ctx(mu, &sc, count, seed, play, &bs, prev, last_v);
             play += 1;
             // Learning uses the pitch type shown on the scoreboard after the pitch, a public
             // channel (agent-models §3.8 [C]), with the batter's own sighting noise.

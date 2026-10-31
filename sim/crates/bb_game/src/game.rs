@@ -67,6 +67,7 @@ pub fn simulate_game_with(seed: u64, record: bool) -> GameResult {
     let fattrs: [FielderAttrs; 9] = core::array::from_fn(FielderAttrs::average);
     let mut play: u32 = 0;
     let mut prev: Option<PitchType> = None;
+    let mut last_v: Option<f64> = None;
     let mut last_batter = 0;
     while st.status == Status::InProgress {
         if st.inning > 30 {
@@ -77,11 +78,13 @@ pub fn simulate_game_with(seed: u64, record: bool) -> GameResult {
         let slot = st.next_up[side];
         if st.batter != last_batter {
             prev = None;
+            last_v = None;
             last_batter = st.batter;
         }
         let count = bb_observe::Count { balls: st.balls, strikes: st.strikes };
-        let rec = simulate_pitch_ctx(&mu, &sc[side][slot], count, seed, play, &bs, prev);
+        let rec = simulate_pitch_ctx(&mu, &sc[side][slot], count, seed, play, &bs, prev, last_v);
         prev = Some(rec.read);
+        last_v = Some(rec.perceived_speed);
         res.pitches += 1;
         let mut viz = PlayViz { play, ..Default::default() };
         if record {

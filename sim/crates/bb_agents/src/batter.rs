@@ -110,6 +110,8 @@ pub struct TypeModel {
     /// Release point of the nominal path.
     pub release: Vec3,
     pub signature: [f64; 3],
+    /// Expected release speed of this type, m/s.
+    pub speed: f64,
 }
 
 /// Scouting knowledge of a pitcher: one model per arsenal pitch plus usage.
@@ -124,6 +126,9 @@ pub struct Scouting {
 pub const PRIOR_LOC_SIGMA: f64 = 0.30;
 /// Prior arrival-time spread, s [E] (≈ 5% speed uncertainty).
 pub const PRIOR_T_SIGMA: f64 = 0.02;
+/// Velocity anchoring rate a_anchor (agent-models §3.1) [E].
+pub const ANCHOR: f64 = 0.2;
+
 /// Release-point estimate error at grade 50 and K_perception 1, m (agent-models §3.2) [E].
 pub const RELEASE_SIGMA: f64 = 0.05;
 const SPIN_WEIGHT_FLOOR: f64 = -50.0;
@@ -214,12 +219,24 @@ impl Bank {
     /// Start a pitch: priors π_k and break-spread beliefs per type (same order as scouting
     /// types; priors ≤ 0.01 are dropped), plus the batter's own perceptual bias spread.
     pub fn new(sc: &Scouting, prior: &[f64], rel: &ReleaseObs, eye: Vec3, break_sigma: &[f64], bias: BiasPrior) -> Bank {
+        Self::new_anchored(sc, prior, rel, eye, break_sigma, bias, None)
+    }
+
+    /// [`Bank::new`] with velocity anchoring (agent-models §3.1): each type's expected speed
+    /// moves toward the speed perceived on the previous pitch, μ ← μ + a·(v_last − μ).
+    #[allow(clippy::too_many_arguments)]
+    pub fn new_anchored(sc: &Scouting, prior: &[f64], rel: &ReleaseObs, eye: Vec3, break_sigma: &[f64], bias: BiasPrior, last_speed: Option<f64>) -> Bank {
         let mut hyps = Vec::new();
         for (k, tm) in sc.types.iter().enumerate() {
             if prior[k] <= 0.01 {
                 continue;
             }
-            let s = [tm.x0, tm.z0, tm.t0, 0.0, 0.0, rel.r.x, rel.r.z, 0.0, 0.0, 0.0];
+            // Anchored speed shortens or lengthens the expected flight time proportionally.
+            let t_scale = match last_speed {
+                Some(v) => tm.speed / (tm.speed + ANCHOR * (v - tm.speed)),
+                None => 1.0,
+            };
+            let s = [tm.x0, tm.z0, tm.t0 * t_scale, 0.0, 0.0, rel.r.x, rel.r.z, 0.0, 0.0, 0.0];
             let l2 = PRIOR_LOC_SIGMA * PRIOR_LOC_SIGMA;
             let b2 = break_sigma[k] * break_sigma[k];
             let mut p = [[0.0; NS]; NS];
@@ -355,6 +372,16 @@ impl Bank {
             .collect()
     }
 
+    /// The speed the batter perceived for this pitch: the dominant type's expected speed
+    /// scaled by how much sooner or later it is now believed to arrive.
+    pub fn perceived_speed(&self, sc: &Scouting) -> f64 {
+        let d = self.dominant();
+        match sc.types.iter().find(|t| t.ty == d.ty) {
+            Some(tm) => tm.speed * tm.t0 / d.mean.z.max(1e-3),
+            None => 0.0,
+        }
+    }
+
     /// Weighted mean arrival time at the plate plane (play time).
     pub fn arrival(&self) -> f64 {
         self.t_release + self.posterior().iter().map(|c| c.w * c.mean.z).sum::<f64>()
@@ -407,7 +434,8 @@ pub fn type_model(ty: PitchType, nominal: Trajectory, signature: [f64; 3]) -> Ty
     let t0 = nominal.find(Crossing::YBelow(Y_JUDGE)).unwrap_or(nominal.last().t);
     let (r0, _) = nominal.at(t0);
     let release = nominal.first().s.r;
-    TypeModel { ty, x0: r0.x, z0: r0.z, t0, release, nominal, signature }
+    let speed = nominal.first().s.v.norm();
+    TypeModel { ty, x0: r0.x, z0: r0.z, t0, release, nominal, signature, speed }
 }
 
 /// Standard normal CDF.
