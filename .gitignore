@@ -1,0 +1,25 @@
+# Rust
+/sim/target/
+**/*.rs.bk
+
+# Python
+__pycache__/
+*.pyc
+.venv/
+
+# Sim outputs
+*.rrd
+/out/
+/sim/out/
+
+# Office lock files
+~$*
+.~lock.*
+
+# Unreal (client/, M0.8+)
+/client/Binaries/
+/client/Intermediate/
+/client/Saved/
+/client/DerivedDataCache/
+/client/Plugins/*/Binaries/
+/client/Plugins/*/Intermediate/

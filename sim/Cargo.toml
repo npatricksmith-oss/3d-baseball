@@ -1,0 +1,40 @@
+[workspace]
+resolver = "3"
+members = ["crates/*"]
+
+[workspace.package]
+version = "0.1.0"
+edition = "2024"
+license = "UNLICENSED"
+publish = false
+
+[workspace.dependencies]
+bb_math = { path = "crates/bb_math" }
+bb_physics = { path = "crates/bb_physics" }
+bb_observe = { path = "crates/bb_observe" }
+bb_world = { path = "crates/bb_world" }
+bb_agents = { path = "crates/bb_agents" }
+bb_rules = { path = "crates/bb_rules" }
+bb_game = { path = "crates/bb_game" }
+bb_stats = { path = "crates/bb_stats" }
+bb_league = { path = "crates/bb_league" }
+bb_ffi = { path = "crates/bb_ffi" }
+libm = "0.2"
+flatbuffers = "25"
+blake3 = { version = "1", default-features = false, features = ["pure"] }
+clap = { version = "4", features = ["derive"] }
+serde = { version = "1", features = ["derive"] }
+serde_json = "1"
+
+[workspace.lints.rust]
+unsafe_code = "deny"
+
+[workspace.lints.clippy]
+# Determinism (physics-spec §5.4): no fused multiply-add in sim code.
+suboptimal_flops = "allow"
+
+[profile.release]
+debug = 1
+
+[profile.test]
+opt-level = 2

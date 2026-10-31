@@ -1,0 +1,4 @@
+# Unreal binary assets go through Git LFS once the client exists (git-lfs not installed yet; see TASKS.md M0.1)
+*.uasset filter=lfs diff=lfs merge=lfs -text
+*.umap filter=lfs diff=lfs merge=lfs -text
+*.docx binary

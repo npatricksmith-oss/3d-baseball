@@ -1,0 +1,9 @@
+{
+  "permissions": {
+    "allow": [
+      "Bash(grep -v '^$')",
+      "Bash(sed -n '/^## 18/,$p' PLAN.md)",
+      "Bash(sed -n '/^## 17/,$p' docs/physics-spec.md)"
+    ]
+  }
+}

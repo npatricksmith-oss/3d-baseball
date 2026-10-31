@@ -1,0 +1,619 @@
+# Agent Models Specification
+
+**Last updated:** 2026-10-31
+**Status:** Draft v1. Gates milestone M3 (batter vs pitcher); the fielding and running sections gate M4–M5.
+**Parent:** [PLAN.md](../PLAN.md) §7, §8, §10.4 · **Siblings:** [physics-spec.md](physics-spec.md), [data-formats.md](data-formats.md), `calibration-targets.md` (P3), `rules-spec.md` (P4)
+
+This document defines how every autonomous agent **perceives, believes, decides, and executes**: pitchers, batters, catchers, fielders, runners, base coaches, and the AI manager. It also defines the attribute-to-parameter mappings, the learned belief tables, and the belief snapshots each model must emit for play explanations.
+
+Status tags: **[S]** sourced, **[D]** derived, **[E]** estimate (a named, configurable parameter, never a literal in code), **[C]** design choice the owner may revisit.
+
+**D1 reminder.** Agents may hold probabilities, expected values, and learned tables. Nothing in this document decides an outcome. Agents produce **motor commands**; the world resolves them with physics. Every number below either shapes a belief, shapes a decision, or sets the size of physical noise on a motor command.
+
+---
+
+## 1. Common Framework
+
+### 1.1 The agent loop
+
+Every agent runs the same four stages, at its own rate:
+
+```
+Observation (bb_observe)  →  Belief update  →  Decision  →  Intended motor command
+                                                                  │
+                                              Execution (noise)   ▼
+                                                           Executed command → world (bb_world)
+```
+
+- **Observations** are the only input. They are types in `bb_observe`, built by `bb_game` from world state plus perceptual noise. Agents never see a `bb_world` type (PLAN §4.1, §15).
+- **Execution** is a separate module, `bb_agents::motor`. It takes an *intended* command and applies execution noise with the keyed RNG ([data-formats §2.3](data-formats.md)). Its output type, `Executed*`, is consumed only by `bb_game`, which passes it to the world. **Decision code never receives an `Executed*` value**, so an agent cannot know its own error except by observing the result like anyone else. This is enforced by module visibility and checked in review.
+- **Rates [E]:** batter perception 100 Hz from release to contact; fielder and runner re-planning 30 Hz; pitcher and manager decisions once per play.
+- **Determinism:** agents run in a fixed order (by `AgentId`) within each tick. No agent reads another agent's state directly; shared information goes through observations or explicit communication messages (§5.7).
+
+### 1.2 Attributes: internal units and the 20–80 scale
+
+Attributes are stored in **physical units** (PLAN §7). The 20–80 scouting grade is a display transform over the league population for that attribute [C]:
+
+- **"More is better" quantities** (speed, arm strength): `value(g) = μ + σ_pop · (g − 50) / 10`.
+- **Noise and time quantities** (command σ, reaction time), where less is better and the scale is multiplicative: `value(g) = value_50 · ρ^(−(g − 50) / 10)`, with a per-attribute ratio ρ.
+- Grades clamp to [20, 80] for display only; the stored physical value is not clamped.
+
+μ, σ_pop, value_50, and ρ for every attribute are in §10. The population distributions themselves (correlations, position differences) belong to the generator and `calibration-targets.md`.
+
+### 1.3 Noise conventions
+
+- All execution and perception noise is **Gaussian, truncated at ±4σ** [C]. Truncation removes absurd outliers (a 6σ wild pitch from an elite pitcher) without affecting calibration.
+- Effective noise is a product of independent factors:
+  `σ_eff = σ_attr · K_global · F_fatigue · F_composure · F_situation`
+  - `σ_attr` from the attribute (§10).
+  - `K_global` is one of PLAN §13.2's global calibration knobs (perception, command, swing plane, fielder reaction). Default 1.
+  - `F_fatigue` and `F_composure` from §1.5 and §2.5.
+  - `F_situation` from the specific mechanism (a rushed throw, a short hop, a reach).
+- Every factor is a named function in one module, so the sensitivity tool (PLAN §13.3) can sweep each one.
+
+### 1.4 Agents' internal physics
+
+Agents predict with the **same physics functions** as the world (`bb_physics`), fed with their own noisy estimates (PLAN §4.1). Two cost and realism rules:
+- **Precompute per game, not per pitch.** Batter trajectory predictions use per-pitch-type tables and linear sensitivities built at game start (§3.3). Fielders use a **batted-ball atlas**: landing point, hang time, and descent path as functions of (exit speed, launch angle, spray, spin), built once per park and air density.
+- **Agents do not model what they cannot perceive.** A fielder's prediction assumes the *typical* spin for the launch angle, not the true spin (§5.1). A fielder never predicts a bad hop (surface roughness, physics spec §9.3). These mismatches are how real misreads happen.
+
+### 1.5 Composure and perceived leverage
+
+Each agent perceives game leverage from its own beliefs: `L̂` is the leverage index looked up from the learned win-expectancy table (§8) for the agent's own reading of the situation. A rookie and a veteran see the same scoreboard, so v1 uses the true base-out-score state for `L̂` [C]; misreading leverage is a later option.
+
+```
+F_composure = 1 + κ_c · (1 − C) · clamp(L̂ − 1, 0, L_max)
+```
+
+- `C ∈ [0, 1]` is `Composure`. κ_c = 0.15 [E], L_max = 4 [E]. An average player (C = 0.5) in a leverage-3 spot gets 15% more noise; a C = 0.9 player gets 3%.
+- Applies to **execution noise** (release, swing placement, glove, throw) and to **perceptual noise** (batter observations, fielder reads).
+- It never shifts a mean. Pressure makes players less precise, not systematically worse in one direction. This is physiological stress, not a "clutch" modifier (PLAN §8.6).
+
+---
+
+## 2. Pitcher
+
+### 2.1 Arsenal
+
+Each pitch type `k` in a pitcher's arsenal is defined physically:
+
+| Field | Unit | Meaning |
+| :--- | :--- | :--- |
+| `type` | enum | FF, SI, FC, SL, ST (sweeper), CU, KC, CH, FS, SV (slurve). Savant codes ([data-formats §9.4](data-formats.md)) |
+| `speed_ratio` | — | Release speed / `ArmSpeed` (FF = 1.00, CH ≈ 0.88, CU ≈ 0.82) |
+| `spin_rate_factor` | — | Spin rate / (fastball spin from `SpinCapacity`) |
+| `tilt` | clock hours | Magnus direction at release, pitcher's perspective ([data-formats §9.3](data-formats.md)) |
+| `efficiency` | 0–1 | Transverse fraction of spin |
+| `gyro_sign` | ±1 | Direction of the gyro component |
+| `command_mult` | — | Multiplier on the pitcher's base command σ for this pitch |
+| `release_offset` | m (x, z) | Small per-pitch shift of the release point (a "tell" when large) |
+| `usage` | table | Base usage by count group (ahead, even, behind, two strikes) and batter handedness |
+
+The spin vector for a release velocity **v** is constructed from rate, tilt, efficiency, and gyro sign by inverting [data-formats §9.2](data-formats.md). That construction has a round-trip unit test.
+
+### 2.2 Release point
+
+Release position from body and delivery attributes [E, chosen to land in public ranges; check bands in §11]:
+
+```
+y_rel = 18.440 − Extension
+z_rel = h_front + 0.65·H + ℓ·sin(ArmSlot)
+x_rel = s_arm · (0.10·H + ℓ·cos(ArmSlot))        ℓ = 0.40·H
+```
+
+- H is height (m); `ArmSlot` is the angle above horizontal of the shoulder-to-hand line at release; `h_front` = 0.10 m [E] is the front-of-mound height at the landing foot.
+- `s_arm` = −1 for right-handers (arm side is third base, −X), +1 for left-handers.
+- Check: H = 1.88 m, slot 45°, extension 1.95 m → release (−0.72, 16.49, 1.85) m, i.e. Savant `release_pos_x` −2.4 ft, `release_pos_z` 6.1 ft, extension 6.4 ft. Typical.
+- Release-point noise is part of execution (§2.3).
+
+### 2.3 Aiming and execution
+
+**Intent:** a pitch type `k` and a target `(x_t, z_t)` on the strike-zone plane (y = y_mid, physics spec §10).
+
+**Aiming solve** (pitcher's intent, no noise): find release direction angles (yaw ψ, elevation φ) so that the nominal pitch (`speed_ratio·ArmSpeed`, pitch-type spin, release point) reaches the target.
+- Initial guess from a per-pitch-type offset learned at game start (the "aim correction" for that pitch's break).
+- Fixed-point update: `ψ ← ψ − Δx / D`, `φ ← φ + Δz / D`, with D the release-to-plate distance. Small-angle geometry makes this Jacobian nearly exact, so 2–3 flights converge to < 1 mm. No finite differences needed.
+- Pitchers know their own pitches. The solve is exact for the intent (they aim correctly); misses come only from execution.
+
+**Execution noise** (purpose `PitchRelease`), each independent:
+
+| Quantity | σ | Notes |
+| :--- | :--- | :--- |
+| Yaw and elevation of release direction | σ_cmd · command_mult · F_fatigue · F_composure · K_cmd | σ_cmd from `Command` (§10); ≈ 1.6 cm at the plate per mrad |
+| Release speed | 0.45 m/s [E] (≈ 1 mph) · F_fatigue | |
+| Spin rate | 2% [E] | |
+| Spin tilt | 3° [E] | Moves break direction pitch to pitch |
+| Release point x, z | 2 cm [E] | |
+
+Elevation noise and release-speed noise are physically coupled in real deliveries; v1 treats them as independent [C].
+
+### 2.4 Pitch selection
+
+At each decision point the pitcher picks `(k, target)` from candidates: each arsenal pitch × a 7 × 7 target grid spanning x ∈ [−0.45, 0.45] m and z from 0.15·H_b to 0.70·H_b of the batter's height [E].
+
+**Believed value of a candidate:**
+
+```
+V(k, target) = Σ_j  π̃_j · E_exec[ RV(k, loc, count, batter_class, surprised = (j ≠ k)) ]
+```
+
+- `π̃_j`: the pitcher's **model of what the batter expects** (theory of mind). It is computed by running the batter's own prior-construction function (§3.1) on *observable* history only: the pitch sequence, the count, and the batter's visible swings and takes. It never reads the batter's internal state.
+  - `PitchCraft` (w ∈ [0, 1]) sets how much of that history the model uses: `π̃ = w · π̃_history + (1 − w) · π̃_count_only`. A crafty pitcher sequences against what the batter just saw; a thrower only knows "hitters expect fastballs when behind."
+- `E_exec[·]`: expectation over the pitcher's **own believed** command ellipse (a 9-point Gaussian quadrature over yaw and elevation). Wild pitchers therefore avoid aiming at edges they cannot hit.
+- `RV`: the learned pitch run-value table (§8). The `surprised` key is what makes deception valuable.
+- Lower V is better for the pitcher (run value to the batting team).
+
+**Mixed strategy:** sample from `P(k, target) ∝ exp(−V / τ_sel)` with purpose `PitchSelection`. τ_sel = 0.01 runs [E]. Sampling makes the pitcher unpredictable, which a pure argmin would not be. This is consistent with D1: randomness picks what the pitcher *tries*, never what happens.
+
+**Manager directives** add terms to V before sampling [E weights]:
+
+| Directive | Term |
+| :--- | :--- |
+| AttackZone | +λ · P_exec(ball) |
+| WorkEdges | −λ · edge_proximity(target) for in-zone targets; heavy penalty on the zone's center |
+| PitchAround | +λ · P_exec(strike in heart of zone); targets outside the zone favored |
+| InduceGrounder | −λ · (expected launch angle < 10° share), from the learned table |
+| IntentionalWalk | handled by rules (no pitches thrown) |
+
+**Bootstrap heuristic (M3, before tables exist):** usage-by-count sampling for `k`; targets drawn from count-based zone maps (behind → middle-low, ahead → chase regions). Replaced in M6 by the table-driven rule above.
+
+### 2.5 Fatigue
+
+Per-pitch effort `e = (v_rel / v_max)²` [E] (a max-effort fastball costs 1; a changeup about 0.8). Pickoff throws cost 0.3 [E]; warm-up pitches cost 0.4 [E].
+
+```
+f = Σ e / Stamina                        # Stamina: effort budget, "pitch-equivalents"
+F_fatigue = 1 + k_σ · max(0, f − f₀)      # f₀ = 0.75, k_σ = 1.2 [E]
+v_max(f)  = ArmSpeed · (1 − k_v · max(0, f − f₀))      # k_v = 0.06 [E]
+spin(f)   = spin · (1 − k_s · max(0, f − f₀))          # k_s = 0.04 [E]
+```
+
+- Between innings, f recovers by `r_inn = 0.04` [E] (short rest).
+- Emits `PhysicalLoad` events ([data-formats §4.3](data-formats.md)) with the effort amount.
+- Multi-day recovery (`Recovery` attribute) belongs to M7. The model stays effort-based so it can feed physically grounded injuries later (D18).
+
+**Bullpen warm-up** (M6): states cold → warming → ready → overwarmed. Ready after `n_warm` = 20 [E] warm-up pitches and at least 6 min [E] of elapsed game time ([data-formats §2.2](data-formats.md)). Each warm-up pitch adds effort, so a pitcher warmed twice starts the game partially fatigued. Ready decays to cold after 15 min [E] idle.
+
+### 2.6 Holding runners and pickoffs (M5)
+
+The pitcher compares the runner's observed lead with a learned "pickoff value" belief and chooses: deliver, pickoff throw, step-off, or vary hold time. `DeliveryTime` (first move to release) sets steal windows. A slide step trades 0.15 s [E] of delivery time for +20% command σ [E]. Full design deferred to M5 with balks.
+
+---
+
+## 3. Batter
+
+### 3.1 Prior over pitch types
+
+Before each pitch, the batter forms `π_k` over the pitcher's arsenal:
+
+```
+π_k ∝ usage_k(count, hand) · seq_k(history) · sit_k · exposure_k
+```
+
+- `usage_k`: the batter's belief about the pitcher's usage. v1: the true arsenal usage table (scouting reports are public) [C]. Scouting uncertainty comes later.
+- `seq_k`: sequence expectation from this at-bat. After a pitch of type j, `seq_j` = 0.85 [E] (repeats are slightly less expected). A learned sequence table replaces this in M6.
+- `sit_k`: the Ambush directive (or a batter's own sit decision at 2-0 / 3-1 [E]) multiplies the chosen type by `s_amb` = 3 [E] and renormalizes. Sitting on a pitch is a gamble the batter knowingly takes.
+- `exposure_k`: from in-game adaptation (§3.8).
+
+**Velocity anchoring:** the batter's expected release speed for type k moves toward the last seen pitch's speed: `μ_v,k ← μ_v,k + a_anchor · (v_last − μ_v,k)`, a_anchor = 0.2 [E]. That is the changeup-after-fastball effect, produced by the prior and nothing else.
+
+### 3.2 Perception geometry
+
+- **Eye point:** midpoint between the eyes in the stance, at height 0.86·H [E] and 0.75 m [E] toward the batter's side of the plate center, about at y = 0.3 m [E]. Comes from the batter's box position and handedness.
+- **Release estimate:** at release, a noisy estimate of the release point (σ 5 cm [E]) and release speed (Weber fraction 5% [E] on the batter's expectation) starts every hypothesis.
+- **Tracking blackout:** batters cannot follow the ball over the last part of its flight. Observations stop when the ball is within `d_blank` = 1.5 m [E] of the eye plane. Anything learned after that is unusable for the swing.
+
+### 3.3 Hypothesis bank
+
+For each pitch type k in the arsenal with `π_k > 0.01`, the batter maintains a **linear-Gaussian filter in plate coordinates**:
+
+- **State:** `s_k = (x_p, z_p, t_p)`, where the ball would cross the plane y = y_mid, and when.
+- **Prior:** mean from the batter's predicted trajectory for type k (§1.4 tables: nominal path from the release estimate, plus the expected spin for type k); covariance `Σ_k⁰` = within-type spread (§3.8) plus release-estimate uncertainty propagated through the precomputed sensitivities.
+- **Observation model:** each observation is linearized around hypothesis k's nominal path. The precomputed Jacobian `H_k(t)` maps a change in `s_k` to a change in the observation at time t. This is built once per (pitcher, type) at game start.
+- **Weights:** `w_k ← w_k · N(o_t; ô_k,t, S_k,t)`, the predictive likelihood, then normalized. A batter fooled early stays fooled until the observations diverge enough to move the weights.
+
+**Observations every 10 ms** (purpose `BatterPerception`, `sub_index` = observation number), each with noise from §10:
+
+| Observation | Model | σ |
+| :--- | :--- | :--- |
+| Angular position (azimuth, elevation) from the eye point | true angles + noise | σ_ang from `Vision` · F_composure · K_perc |
+| Time-to-arrival from optical expansion | τ̂ = τ · (1 + ε), ε ~ N(0, w²) | Weber fraction w from `Vision` |
+| Spin cue | observed spin direction and rate, as a likelihood over types via each type's spin signature | σ_spin(t_view) = σ_s0 / √(1 + t_view / τ_s); σ_s0 from `SpinRecognition` |
+
+The spin cue updates **only the weights** (it says which type, not where). Angular position and time-to-arrival update both the weights and the per-hypothesis states.
+
+**Posterior:** a Gaussian mixture `Σ_k w_k · N(s_k, Σ_k)`.
+
+**Cost:** about 6 hypotheses × 3-D Kalman updates × ~25 observations: a few microseconds per pitch. No flight integration per pitch.
+
+### 3.4 Commit time
+
+```
+t_commit = t̂_arrival − T_swing − T_latency
+```
+
+- `t̂_arrival`: weighted mean of the hypotheses' `t_p`.
+- `T_swing` from `QuickHands` (§10): start of swing to contact, ≈ 0.15 s average [E].
+- `T_latency` = 0.05 s [E]: decision to first motor output.
+- The batter re-evaluates `t_commit` each observation and commits when the current time reaches it. For a 95 mph fastball (0.40 s flight), this leaves about 0.2 s of viewing before commit.
+
+### 3.5 Swing or take
+
+At commit, from the mixture:
+
+**Aim point** `a = (x*, z*, t*)` is the **mean of the highest-weight component** (the dominant mode), not the mixture mean (PLAN §8.1). If two components are close in weight (within 0.1 [E]) and their means are within 3 cm and 5 ms [E], use their weighted average.
+
+**Value of swinging:**
+
+```
+EV_swing = Σ_k w_k · W(s_k − a, a, count)
+```
+
+`W` is the learned **swing-value table** (§8): the expected run value of a swing aimed at `a` when the ball actually arrives with offset `s_k − a`, integrated over the batter's own believed execution noise. It captures "a 3 cm miss low still makes weak contact; a 10 cm miss is a whiff."
+
+**Value of taking:**
+
+```
+EV_take = Σ_k w_k · [ P_k(strike) · RV_strike(count) + (1 − P_k(strike)) · RV_ball(count) ]
+```
+
+`P_k(strike)` from component k's Gaussian against the zone (circle-rectangle test of physics spec §10, integrated over the Gaussian).
+
+**Discipline** acts on calibration, not on vision [C]. The batter evaluates `EV_take` with a distorted strike probability:
+
+```
+logit(P̃) = c_D · logit(P) + b_D
+```
+
+`c_D` (sharpness; 1 is perfectly calibrated) and `b_D` (bias; > 0 means "everything looks like a strike") come from `Discipline` (§10). Low discipline chases because it *believes* bad pitches are strikes and decides crisply on that wrong belief.
+
+**Decision:** swing if `EV_swing − EV_take > θ_dir`, where θ_dir comes from the batting directive:
+
+| Directive | Effect |
+| :--- | :--- |
+| Normal | θ = 0 |
+| Take | no swing this pitch |
+| Patient | θ = +0.02 runs [E] |
+| Protect | θ = −0.02 runs [E]; swing-value table uses "avoid strikeout" weighting |
+| Ambush | prior sharpening (§3.1); θ = −0.01 [E] when the dominant type is the sat-on type |
+| Elevate | aim point shifted below the ball's predicted center by δ_elev = 1.0 cm [E] (undercut → lift) |
+| Bunt, HitAndRun | separate behaviors: bunt template (M5); hit-and-run forces a swing and favors contact |
+
+### 3.6 Swing model
+
+A **template in a contact-relative frame** (PLAN §8.3), authored and tuned in M2.
+
+**Template** (per batting side), phase `s ∈ [0, 1]`:
+- Hand (knob) path `H(s)`: an arc in the **swing plane**, radius ρ_h ≈ 0.30·H_scale [E], sweeping angle φ_h(s).
+- Bat direction `D(s)`: in the swing plane at angle `φ_h(s) + λ(s)`, where the lag λ(s) releases smoothly from λ₀ ≈ −90° [E] to 0 at the contact phase s_c ≈ 0.75 [E], plus a small out-of-plane tilt.
+- Scaled per batter by height and bat length.
+
+**Timing profile:** `s(t) = S((t − t₀) / T_swing)` with S a monotone quintic whose rate peaks near s_c. The phase-speed profile is scaled so the sweet-spot speed at s_c equals `BatSpeed`. Contact away from s_c (jammed or out in front) happens at lower bat speed and at a different point on the bat. That is how getting jammed physically weakens contact.
+
+**Placement** `θ = (planeTilt α, verticalOffset δ_v, reach δ_r, startTime t₀)`.
+- Contact depth `y_c(x*)` is a template function: inside pitches are met out front (larger y), outside pitches deeper. Horizontal location is handled mainly through timing (PLAN §8.3).
+- **Inverse:** given the aim point and t*, find θ so that the sweet spot `u_ss` passes through `(x*, y_c(x*), z*)` at time t*. A per-template table over (x*, z*) gives the initial θ; one or two Newton steps refine it. Microseconds.
+
+**Execution noise** (purpose `SwingExecution`) on θ, from §10:
+
+| Component | σ source |
+| :--- | :--- |
+| δ_v (vertical offset) | `BatControl` |
+| α (plane tilt) | `BatControl` (fixed ratio to δ_v [E]) |
+| δ_r (reach) | `BatControl` × 0.7 [E] |
+| t₀ (timing) | `Timing` |
+
+All widen with F_composure and K_swing. **M2 measures** the offset → (exit velocity, launch angle) map (physics spec §8.3); these σ values are then set so that a perfectly perceived pitch produces a realistic spread of contact quality. Perception error should dominate execution error for typical pitches [C].
+
+**Mid-swing adjustment:** after commit, observations continue (until the blackout). The aim point updates from the posterior; θ moves toward the new inverse at bounded rates:
+- δ_v and δ_r: ≤ `v_adj` from `Adjustability` (§10).
+- Timing: phase rate may change by ≤ ±10% [E].
+- Adjustment stops at `t_cut` = 60 ms [E] before t* (PLAN range 50–80 ms).
+
+**Check swing:** if, before phase `s_abort` = 0.45 [E], the updated `EV_swing − EV_take` falls below `−θ_check` = −0.03 runs [E], the batter brakes: phase rate decays to zero over 40 ms [E]. Whether it counts as a swing is judged by the rules engine from the bat's pose (`rules-spec.md`). The swing model only reports the maximum bat rotation reached.
+
+**Bunt** (M5): a separate near-static template; the batter positions the bat on the predicted path and applies the bunt-grip COR multiplier (physics spec §8.4).
+
+### 3.7 Body and hit-by-pitch evasion
+
+- Body is a capsule set (head, torso, upper and lower arms, thighs, shins) scaled by height, posed from the stance and the swing phase.
+- **Evasion:** if the posterior predicts the ball passing within 0.25 m [E] of the head or torso, the batter starts an evasion after 0.15 s [E] of latency: torso rotation and a step back, limited to 2 m/s [E] capsule speed. A committed swing suppresses evasion.
+- Hit-by-pitch is decided by the world (capsule contact). The batter's belief only decides whether to move.
+
+### 3.8 In-game adaptation
+
+Each batter keeps a memory per opposing pitcher and pitch type: `n_k`, the number of type-k pitches seen this game (including from the on-deck circle at reduced weight 0.3 [E]).
+
+- **Within-type spread** shrinks with exposure: `σ_k(n) = σ_∞ + (σ_0 − σ_∞) · exp(−η · n_k)`, η from `Adaptation` (§10). σ_0 is the batter's spread before seeing the pitcher; σ_∞ = 0.5·σ_0 [E].
+- **Model correction:** the batter's expected spin for type k moves toward the observed spin cue of each pitch seen: learning rate η / (1 + n_k).
+- This is the mechanism for the times-through-the-order penalty (PLAN §8.6). Nothing scripts it.
+- Memory is part of `SaveState` ([data-formats §7.1](data-formats.md)).
+
+---
+
+## 4. Catcher
+
+- **Receiving:** the catcher sets the target glove position at the intended pitch location (signaled by the pitcher's intent; the catcher and pitcher share the target, a battery convention [C]). Catching is a standard capture (§5.4) with the catcher's `Hands`. With ABS, framing does not exist.
+- **Blocking:** for a predicted pitch in the dirt, the catcher moves glove and body capsules toward the predicted bounce path. `Blocking` (§10) sets lateral reach speed and reaction. A blocked ball deflects physically off the body capsules (physics spec §9.4). Wild pitches and passed balls emerge.
+- **Throwing on steals:** transfer from `Transfer` (catcher distribution), throw from `ArmStrength` and `ArmAccuracy`. **Pop time is a derived display value** (transfer + throw flight to second base), not a separate attribute [C].
+- **Foul tips:** a foul tip is "caught" only if the catcher's capture test succeeds on the deflected ball.
+
+---
+
+## 5. Fielders
+
+### 5.1 Perception after contact
+
+After contact plus `Reaction` time T_r, each fielder holds an **intercept estimate** of the ball's future path.
+
+- **Estimated launch state:** exit speed, launch angle, spray angle, each with error `e(t)`. The fielder looks up the predicted path in the batted-ball atlas (§1.4) using the **typical spin for that launch angle** [E: from the M2 contact map], not the true spin. A ball with unusual backspin carries farther than the fielder expects. That bias is deterministic and physical.
+- **Error process** (purpose `FielderPerception`, `sub_index` = tick): `e(t)` is an Ornstein–Uhlenbeck process with correlation time τ_c = 0.3 s [E], so the estimate drifts smoothly instead of jittering. Its standard deviation shrinks with viewing time:
+  `σ_e(t) = σ_e0 / √(1 + (t − t_contact − T_r) / τ_read)`, τ_read from `ReadSkill`.
+- **Depth is harder than direction:** the error covariance is stretched along the fielder's line of sight by `k_depth` = 3 [E]. Balls hit straight at a fielder are the hardest to judge, as in real baseball.
+- Composure and `K_perc` scale σ_e0.
+
+### 5.2 Intercept planning
+
+At 30 Hz, from its current estimate, each fielder computes candidate intercepts:
+- **Fly and line drives:** the earliest point on the predicted descending path, at catchable height (0.3–2.2 m [E]), reachable before the ball. Prefer arriving early and settling; if unreachable, the point that minimizes the remaining gap (dive candidate).
+- **Ground balls:** sample the predicted ground path (the agent's own bounce/roll model, with no roughness) every 20 ms; the intercept is the earliest point where the fielder's reach time is ≤ the ball's arrival time minus a set-up margin 0.15 s [E]. A charging preference [E] favors intercepts closer to the infield when the time saved matters for the throw.
+- **Reach time** uses the movement model (§5.3) from the current state, not a straight-line distance.
+
+### 5.3 Movement
+
+A kinematic point with heading:
+- Speed along the path follows `v(t) = v_max · (1 − e^(−t/τ_a))` from rest, with v_max from `Speed` and τ_a from `Acceleration`. Check: v_max = 8.23 m/s, τ_a = 1.0 s gives 27.3 m in 4.3 s, a typical home-to-first time once the swing follow-through is added [D].
+- Turning is limited by lateral acceleration `a_lat` from `Agility`; sharp direction changes force deceleration.
+- Steering: pursuit toward the current intercept, re-planned at 30 Hz. **First steps follow the first estimate**, so an early depth error produces a visible wrong first step (a `FirstStep` explanation fact).
+- Dive: if the gap at the predicted catch time is between arm reach and arm reach + 1.5 m [E], the fielder may dive; a dive adds reach, inflates glove σ (§5.4), and costs 1.5 s [E] to get up before a throw.
+
+### 5.4 Capture
+
+The glove moves toward the predicted ball position at capture time, limited by a hand speed of 6 m/s [E] within the reach envelope (arm length 0.42·H [E] plus lean and dive extension).
+
+At the capture instant, the glove pocket center has a Gaussian error in the plane perpendicular to the ball's velocity (purpose `GlovePlacement`):
+
+```
+σ_g = σ_hands · (1 + k_v·v_ball/40 + k_late·lateness + k_reach·reach_frac + k_hop·short_hop + k_dive·diving)
+      · F_composure · K_hands
+```
+
+| Factor | Meaning | Default [E] |
+| :--- | :--- | :--- |
+| `v_ball/40` | ball speed in m/s, normalized to 40 | k_v = 0.5 |
+| `lateness` | how late the final estimate settled relative to capture, s, normalized to 0.3 s | k_late = 0.8 |
+| `reach_frac` | fraction of maximum reach used | k_reach = 0.6 |
+| `short_hop` | 1 if the ball bounced within 1 m before capture | k_hop = 1.0 |
+| `diving` | 1 if diving | k_dive = 1.0 |
+
+**Outcome (pure geometry):** with `d` the distance from ball center to pocket center in that plane:
+- `d ≤ r_pocket` (0.06 m [E]): **catch**.
+- `r_pocket < d ≤ r_rim` (0.12 m [E]): **deflection**, solved by the physics collision model with glove e_n ≈ 0.15 (physics spec §9.4). Bobbles that stay close can be re-fielded.
+- `d > r_rim`: **miss**. The ball continues and may hit the body capsules (a block).
+
+**Sanity check [D]:** for a 2-D Gaussian, P(d > r) = exp(−r²/2σ²). A routine chance with σ_g = 1.8 cm gives P(miss pocket) = exp(−5.6) ≈ 0.4%, and some of those deflections are recovered. That fits PLAN §8.7's "routine plays well above 98%" with room for harder chances to fail far more often.
+
+### 5.5 Transfer and throw
+
+- **Transfer time** from `Transfer`, plus footwork: +0.2 s [E] when moving away from the target, +0.3 s [E] after a dive (on top of the get-up time).
+- **Throw speed:** the fielder chooses a speed up to `ArmStrength`. With a large believed time margin, a lower speed improves accuracy [E: σ scales with (v/v_max)²].
+- **Trajectory:** ballistic solve with drag and typical throw backspin (1500 rpm [E]), aiming at the receiver's chest target. Long outfield throws may choose a one-hop trajectory when it arrives sooner (the bounce is physical).
+- **Execution noise** (purpose `ThrowExecution`): direction σ from `ArmAccuracy` · (1 + k_rush·rush + k_off·off_balance) · F_composure; speed σ 3% [E]. `rush` = how much the transfer was shortened below the fielder's normal; `off_balance` = 1 when throwing while moving away or after a dive.
+- The receiver runs the standard capture test. A first baseman uses §5.8.
+
+### 5.6 Throw decision
+
+At the end of the transfer, the fielder evaluates each option (each base with a runner heading to it, the cutoff, hold the ball):
+
+```
+P̂(out) = Φ( (t̂_runner − t̂_ball) / σ_FIQ )
+value  = P̂(out) · ΔRE_out + (1 − P̂(out)) · ΔRE_safe  − throw-error risk term
+```
+
+- `t̂_runner`, `t̂_ball`: the fielder's own estimates (runner speed estimated from observation; ball time from the agent's throw model).
+- σ_FIQ from `FieldingIQ` (§10). ΔRE from the run-expectancy table (§8).
+- Pick the best option; ties broken by a fixed option order.
+
+### 5.7 Defensive coordination
+
+Coordination emerges from **calls**, not a central oracle [C]:
+- Each fielder, from its own estimate, computes whether it can make the play. When its believed margin is positive, it "calls" the ball. A call reaches teammates after `T_call` = 0.3 s [E].
+- Conflicts resolve by a priority table (CF > corner OF; OF > IF on balls in between; SS > 3B on balls to the left, etc. [data file]). A fielder who hears a higher-priority call peels off to back up.
+- Two fielders who both commit before a call arrives can converge, and the world resolves the result physically (both reaching, a collision later). Rare mix-ups emerge.
+- **Coverage and cutoffs** come from situation tables (base-out state × ball direction → who covers which base, who cuts off). These are data, authored from standard baseball defensive assignments, and are beliefs the coaching staff holds.
+
+### 5.8 First base
+
+- **Foot on the bag:** reach is a volume anchored at the base, extended by stretching. Stretching takes 0.25 s [E] and gains up to 0.6 m [E] of reach, which shortens the throw's effective arrival time.
+- **Scoop:** a capture of a short-hopped throw, using k_hop.
+- **Off-bag decision:** if the predicted throw is outside the anchored reach, the first baseman leaves the bag to catch it and attempts a tag if the runner is close [E rule: when believed P(tag) > 0.3], otherwise concedes the base.
+
+### 5.9 Positioning
+
+Pre-pitch home positions come from alignment presets (normal, corners in, double-play depth, and so on; PLAN §10.1) stored as per-position offsets by batter handedness [data file], or from custom positions set by the manager. Fielders reach their positions between plays (no simulation of that walk).
+
+---
+
+## 6. Runners and Base Coaches
+
+### 6.1 Leads
+
+- **Primary lead** distance chosen from the runner's belief of pickoff risk: `lead = base_lead(Speed) − k_pick · pickoff_threat_belief` [E], with an aggressiveness shift from the manager.
+- **Secondary lead:** on the pitch, the runner shuffles out 1–1.5 m [E].
+- **Jump:** the runner detects the pitcher's commitment to the plate after `T_jump` from `JumpRead` (purpose `RunnerPerception`). A runner who starts before the commit point on a pickoff move gets picked off physically (M5).
+
+### 6.2 Running
+
+The base path is a sequence of segments with a rounding arc at each base, radius set by speed and `Agility` [E]. Movement uses the §5.3 model. A slide decelerates at 6 m/s² [E] and lowers the body for tag geometry. A base is reached when the body touches the base volume (physics spec §9.4). Tag outs are geometric: glove-with-ball contact with the runner's capsules before the base touch.
+
+### 6.3 Advance decisions
+
+At each decision point (contact, ball fielded, throw released, passing a base), the runner evaluates "advance" against "hold":
+
+```
+P̂(safe) = Φ( (t̂_ball − t̂_self) / σ_BRIQ )
+advance if  P̂(safe) · ΔRE_safe + (1 − P̂(safe)) · ΔRE_out  >  ΔRE_hold + θ_aggr
+```
+
+- `t̂_self` uses the runner's own speed (known accurately). `t̂_ball` comes from observing the fielder and the ball, with noise from `BaserunningIQ`.
+- `θ_aggr` comes from the team's running-aggressiveness setting.
+- **Base coaches** make the send-or-hold call at third (and at second when the runner cannot see the ball), with a team coach perception σ [E, average] and the same rule. The runner follows the coach.
+- **Fly balls:** the runner estimates P(catch) from the fielder's position and the ball (own estimate). High P(catch) → return and tag up; uncertain → go halfway; a likely hit → run.
+- **Batter-runner** always runs; rounding first depends on the same rule.
+
+---
+
+## 7. AI Manager
+
+Uses the identical command API (data-formats §6). v1 policy, detailed in M6:
+- **Win expectancy and leverage** from the learned tables (§8).
+- **Pitching changes:** uses only what a manager can observe: pitch count, the visible fatigue band, times through the order, matchups, the three-batter minimum (D17), and bullpen readiness.
+- **Tactics** (steal, bunt, hit-and-run, intentional walk, alignment) chosen by comparing table-estimated run or win values, shifted by a **personality vector** [C]: analytics-driven, small-ball, quick-hook, and so on as weights on these terms.
+- Emits `ManagerNote` snapshots with its believed win probability and reason (data-formats §5.5).
+
+---
+
+## 8. Learned Beliefs
+
+Tables are agent beliefs (PLAN §8.5, D1). They are built offline from the sim's own Monte Carlo output, shipped as data files, and referenced by hash in `ProducerInfo.belief_tables_hash` (data-formats §3).
+
+| Table | Key | Value | Used by |
+| :--- | :--- | :--- | :--- |
+| `RE` run expectancy | base-out state (24) | expected runs to end of inning | Everyone (ΔRE) |
+| `CountRV` | count × base-out | run value of a ball, a strike | Batter take value, pitcher |
+| `PitchRV` | pitch type × location bucket (13 × 13) × count group × batter class × surprised | expected run value | Pitcher selection |
+| `SwingW` | aim error (Δx, Δz, Δt bins) × location bucket × count group × batter class | expected run value of the swing | Batter swing decision |
+| `WE` win expectancy | inning × half × score diff × base-out | P(win) | Manager, leverage |
+| `LI` leverage index | same as `WE` | leverage | Composure, manager |
+| `ThrowOut` | throw distance × runner speed class × fielder arm class | P(out) | Fielder decisions (prior on σ_FIQ estimates) |
+
+**Bootstrap (M3–M4):** hand-written heuristics and a public-style RE/WE table [E: standard run-environment values]. `SwingW` starts as a Gaussian contact-probability model over aim error with hand-set run values.
+
+**Learning loop (M6):**
+1. Run the cage and full games with the current tables.
+2. Fit each table from the logged outcomes (event logs plus the per-pitch beliefs recorded in `SwingRecorded.batter_read`).
+3. Replace the tables; repeat until the change in each table is below a tolerance (about 3–5 rounds expected).
+4. Regenerate per league environment (M7).
+
+Tables must be **smooth and monotone where physics says so** (more break never helps a hitter guessing the other type). Learning fits use shrinkage toward the previous round so AIs cannot lock onto an exploit of another AI's blind spot.
+
+---
+
+## 9. Belief Snapshots (fills data-formats §5.5)
+
+Each model emits these only when a timeline is requested, and recording must not change behavior ([data-formats §5.5](data-formats.md)).
+
+| Snapshot | Emitted by | Fields |
+| :--- | :--- | :--- |
+| `BatterBelief` | §3.3 every observation; §3.5 at commit | per hypothesis: type, w_k, s_k mean (x, z, t), Σ_k (6 floats). At commit: aim point, P̃(strike), EV_swing, EV_take, θ_dir, decision |
+| `BatterAdjust` | §3.6 each tick from commit to cutoff | updated aim point, executed θ, adjustment rate saturation flags, check-swing state |
+| `PitcherIntent` | §2.4 | chosen (k, target); top 3 alternatives with V; π̃ (the pitcher's model of the batter's expectations); directive |
+| `FielderRead` | §5.1–5.3 each re-plan | estimated intercept point, σ_e along/across the line of sight, intercept time, role (primary/backup/cover/cutoff), call state |
+| `ThrowDecision` | §5.6 | options with P̂(out) and value; chosen option |
+| `RunnerDecision` | §6.3 | option, P̂(safe), ΔRE terms, coach signal |
+| `ManagerNote` | §7 | believed WE, decision, reason code |
+
+---
+
+## 10. Attribute-to-Parameter Mappings
+
+Defaults for an MLB-like population. **All values [E]** unless marked; `calibration-targets.md` (P3) owns the population distributions and their tuning. For "less is better" rows, the 80 and 20 columns use the ρ rule of §1.2.
+
+| Attribute | Internal parameter | Unit | Grade 50 | σ_pop or ρ | Grade 80 | Grade 20 |
+| :--- | :--- | :--- | :--- | :--- | :--- | :--- |
+| `ArmSpeed` | fastball release speed | m/s | 41.8 (93.5 mph) | σ 1.1 | 45.1 | 38.5 |
+| `SpinCapacity` | fastball spin per unit speed | rpm per mph | 24.2 | σ 1.4 | 28.4 | 20.0 |
+| `Command` | σ_cmd, release angle per axis | mrad | 10.0 | ρ 1.2 | 5.8 | 17.3 |
+| `Extension` | release extension | m | 1.95 | σ 0.12 | 2.31 | 1.59 |
+| `ArmSlot` | release arm angle | deg | 45 | σ 12 | (style, not graded) | |
+| `DeliveryTime` | first move → release, from the stretch | s | 0.98 | ρ 1.06 | 0.82 | 1.17 |
+| `Stamina` | effort budget | pitch-eq. | 95 (starters), 30 (relievers) | σ 12 / 6 | | |
+| `BatSpeed` | sweet-spot speed at s_c | m/s | 32.0 (71.5 mph) | σ 1.1 | 35.3 | 28.7 |
+| `QuickHands` | T_swing | s | 0.150 | ρ 1.05 | 0.130 | 0.174 |
+| `BatControl` | σ of δ_v | cm | 1.2 | ρ 1.25 | 0.61 | 2.3 |
+| `Timing` | σ of t₀ | ms | 6.0 | ρ 1.25 | 3.1 | 11.7 |
+| `Adjustability` | v_adj | m/s | 0.6 | σ 0.15 | 1.05 | 0.15 |
+| `Speed` | v_max (sprint speed) | m/s | 8.23 (27 ft/s) [S: Statcast average] | σ 0.46 | 9.61 | 6.85 |
+| `Acceleration` | τ_a | s | 1.00 | ρ 1.08 | 0.79 | 1.26 |
+| `Agility` | a_lat | m/s² | 7.0 | σ 0.8 | 9.4 | 4.6 |
+| `Reaction` | T_r | s | 0.25 | ρ 1.12 | 0.18 | 0.35 |
+| `Hands` | σ_hands | cm | 1.8 | ρ 1.2 | 1.04 | 3.1 |
+| `ArmStrength` | max throw speed | m/s | 37.0 (83 mph) | σ 2.2 | 43.6 | 30.4 |
+| `ArmAccuracy` | throw direction σ | deg | 1.2 | ρ 1.2 | 0.69 | 2.07 |
+| `Transfer` | catch → release | s | 0.75 | ρ 1.08 | 0.60 | 0.94 |
+| `Blocking` | catcher lateral reach speed | m/s | 3.0 | σ 0.4 | 4.2 | 1.8 |
+| `Vision` | σ_ang; Weber w | mrad; — | 1.0; 0.10 | ρ 1.2 (both) | 0.58; 0.058 | 1.73; 0.173 |
+| `SpinRecognition` | σ_s0; τ_s | (type-likelihood units); s | 1.0; 0.08 | ρ 1.25 (both) | 0.51; 0.041 | 1.95; 0.156 |
+| `Discipline` | c_D; b_D | —; logits | 1.0; 0.0 | σ 0.15; σ 0.25 | 1.45; −0.75 | 0.55; +0.75 |
+| `ReadSkill` | τ_read | s | 0.6 | ρ 1.2 | 0.35 | 1.04 |
+| `JumpRead` | T_jump | s | 0.15 | ρ 1.12 | 0.11 | 0.21 |
+| `BaserunningIQ` | σ_BRIQ | s | 0.15 | ρ 1.2 | 0.087 | 0.26 |
+| `FieldingIQ` | σ_FIQ | s | 0.12 | ρ 1.2 | 0.069 | 0.21 |
+| `PitchCraft` | w | 0–1 | 0.5 | σ 0.15 | 0.95 | 0.05 |
+| `Composure` | C | 0–1 | 0.5 | σ 0.15 | 0.95 | 0.05 |
+| `Adaptation` | η | per pitch seen | 0.15 | σ 0.04 | 0.27 | 0.03 |
+
+Notes:
+- Height, mass, and handedness are not graded.
+- `Discipline` maps to two parameters with opposite signs: a high grade sharpens (c_D up) and removes the swing bias (b_D down).
+- Bounded quantities (`PitchCraft`, `Composure`) clamp to [0, 1].
+- PLAN §7.1 lists `PopTime` as a catcher attribute. Under §4 it is derived from `Transfer` and `ArmStrength`. PLAN §7.1 is updated to match.
+
+---
+
+## 11. Validation
+
+Each mechanism gets tests that need no full game. Monotonicity tests feed `sim-cli sensitivity` (PLAN §13.2).
+
+**Unit and analytic**
+- Release point §2.2: the worked example; mirror symmetry between right and left-handers.
+- Aiming §2.3: intended pitches hit their targets to < 1 mm for every arsenal type.
+- Spin construction §2.1: round trip through data-formats §9.
+- Batter filter §3.3: with zero observation noise and a single hypothesis, the posterior mean converges to the true crossing; with two identical hypotheses, weights stay equal.
+- Swing inverse §3.6: noise-free swings put the sweet spot on the aim point to < 1 mm.
+- Capture §5.4: the closed-form P(miss pocket) matches Monte Carlo for fixed σ_g.
+- Movement §5.3: the home-to-first check.
+- Execution isolation §1.1: a compile-fail test that decision code cannot name `Executed*` types.
+
+**Monotonicity (property tests)**
+- More `Command` → smaller mean miss distance. More `BatSpeed` → higher mean exit velocity. More `Vision` → smaller aim error. More `SpinRecognition` → fewer swings at the wrong hypothesis. More `Discipline` → lower chase rate. More `Hands` → fewer misplays. More `Speed` → shorter home-to-first. More `Composure` → smaller noise growth with leverage.
+- Pitch tunneling: holding the release state fixed, a slider whose path matches the fastball's longer gets more whiffs from the same batter.
+- Adaptation: whiff rate against the same pitcher falls with plate appearances (times through the order).
+
+**Behavioral bands (checked in M3–M5, values in `calibration-targets.md`)**
+- Pitcher release-point distributions in public ranges (release height 5.5–6.5 ft, side 1–3 ft).
+- Zone rate, chase rate, whiff rate, contact rate, and pitches per plate appearance.
+- Routine-play success > 98%; error rate in envelope.
+
+---
+
+## 12. Performance Budget
+
+PLAN §13.4: ≤ 200 ms per headless game on one core, ~300 pitches and ~70 balls in play.
+
+| Component | Budget per game [E] | Notes |
+| :--- | :--- | :--- |
+| Game-start precompute (batter tables, atlas lookups, aim corrections) | 10 ms | Cached per park and pitcher where possible |
+| Pitch selection | 15 ms | 49 targets × ~6 types × 9-point quadrature table lookups |
+| Aiming (2–3 flights per pitch) | 20 ms | |
+| Pitch flight (world) | 10 ms | |
+| Batter perception and decision | 10 ms | |
+| Swing and contact (world) | 15 ms | |
+| Fielding, running, coordination (30 Hz) | 60 ms | Expected hot spot; ground-ball intercept scans dominate |
+| Batted-ball flight and bounces (world) | 20 ms | |
+| Rules, scoring, event log | 10 ms | |
+| **Total** | **≈ 170 ms** | 30 ms headroom |
+
+M3 measures the real numbers with `criterion`. If a component exceeds its budget, cache or table it first; never simplify the model in a way that changes behavior without a decision-log entry.
+
+---
+
+## 13. Open Items
+
+1. All [E] values, especially §10, need calibration in M3–M5 against `calibration-targets.md`.
+2. The swing template's exact shape (§3.6) is authored in M2 against published swing kinematics (attack angle, swing length, time to contact).
+3. The perception noise values (σ_ang, Weber fraction, d_blank) need a literature pass on interception and time-to-contact studies. New task **R9**.
+4. Execution noise correlations (release elevation with speed; swing timing with plane) are ignored in v1.
+5. Pickoffs, balks, bunts, and steals are sketched here and designed fully in M5.
+6. AI manager personalities and the full tactic set are designed at M6.
+7. Leverage perception uses the true situation in v1 (§1.5). Misreading leverage is a later option.

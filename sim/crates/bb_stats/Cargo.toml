@@ -1,0 +1,13 @@
+[package]
+name = "bb_stats"
+version.workspace = true
+edition.workspace = true
+license.workspace = true
+publish.workspace = true
+
+[lints]
+workspace = true
+
+[dependencies]
+bb_math.workspace = true
+flatbuffers.workspace = true

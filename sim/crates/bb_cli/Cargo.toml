@@ -1,0 +1,15 @@
+[package]
+name = "bb_cli"
+version.workspace = true
+edition.workspace = true
+license.workspace = true
+publish.workspace = true
+
+[lints]
+workspace = true
+
+[dependencies]
+bb_math.workspace = true
+bb_physics.workspace = true
+bb_game.workspace = true
+clap.workspace = true
