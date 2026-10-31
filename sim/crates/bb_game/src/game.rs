@@ -8,7 +8,7 @@ use bb_physics::ground::Field;
 use bb_rules::{Event, Input, PaResult, RulesState, Status, step};
 
 use crate::pa::{Knobs, Matchup, scouting_for_pa, simulate_pitch_ctx};
-use crate::play::{FielderAttrs, PlayInput, RunnerIn, simulate_play};
+use crate::play::{FielderAttrs, RunnerIn};
 
 /// Game summary for reports and tests.
 #[derive(Clone, Debug, Default)]
@@ -45,6 +45,8 @@ pub struct PlayViz {
     pub label: String,
     pub pitch: Vec<[f64; 4]>,
     pub batted: Vec<[f64; 4]>,
+    /// Fielder and runner positions (agent id, samples) during a live ball.
+    pub actors: Vec<(u16, Vec<(f64, bb_math::Vec3)>)>,
 }
 
 /// Everything one pitch produced, for timelines and visualization.
@@ -160,8 +162,20 @@ impl Game {
         if rec.hit_batter {
             facts.push(Input::BallTouched { t: t_plate, what: bb_rules::Touch::Batter });
             facts.push(Input::SwingMeasured { t: t_plate + 0.03, swung: rec.swung });
-        } else if let Some((t_c, ball)) = rec.contact_state {
+        } else if rec.contact_state.is_none() {
+            facts.push(Input::SwingMeasured { t: t_plate + 0.03, swung: rec.swung });
+        } else if let Some((t_c, _)) = rec.contact_state {
             facts.push(Input::BatContact { t: t_c });
+        }
+        for f in &facts {
+            let ev = step(st, f);
+            self.pending_rules.extend(ev.iter().cloned());
+            self.log.extend(ev);
+            if st.status == Status::Final {
+                break;
+            }
+        }
+        if let (Some((t_c, ball)), bb_rules::PlayState::Live(_)) = (rec.contact_state, &st.play) {
             // Runners: batter plus those on base (ids from the rules state).
             let mut runners = vec![RunnerIn { id: st.batter, base: 0, speed: 8.2 }];
             for (i, r) in st.bases.iter().enumerate() {
@@ -171,39 +185,20 @@ impl Game {
             }
             let fside = 1 - side as u16;
             let fielders: [u16; 9] = core::array::from_fn(|i| (fside << 8) | 0x80 | (i as u16 + 1));
-            let out = simulate_play(&PlayInput {
-                env: &mu.env,
-                field: &self.field,
-                ball,
-                t_contact: t_c,
-                runners,
-                outs: st.outs,
-                fielders,
-                fattrs: self.fattrs,
-                seed,
-                play,
-            });
+            let out = crate::live::simulate_live(
+                &crate::live::LiveInput { env: &mu.env, field: &self.field, ball, t_contact: t_c, runners, fielders, fattrs: self.fattrs, seed, play },
+                st,
+            );
             if record {
-                let (t0, t1) = (out.path.t_start(), out.path.t_end().min(out.path.t_start() + 15.0));
-                let mut t = t0;
-                while t <= t1 {
-                    let (p, _) = out.path.at(t);
-                    viz.batted.push([t, p.x, p.y, p.z]);
-                    t += 0.03;
+                for (t, p) in out.ball_track.iter().step_by(2) {
+                    viz.batted.push([*t, p.x, p.y, p.z]);
                 }
+                viz.actors = out.actors.clone();
             }
+            self.pending_rules.extend(out.events.iter().cloned());
+            self.log.extend(out.events);
             facts.extend(out.facts);
             batted = Some(out.path);
-        } else {
-            facts.push(Input::SwingMeasured { t: t_plate + 0.03, swung: rec.swung });
-        }
-        for f in &facts {
-            let ev = step(st, f);
-            self.pending_rules.extend(ev.iter().cloned());
-            self.log.extend(ev);
-            if st.status == Status::Final {
-                break;
-            }
         }
         if record {
             let who = if side == 0 { "Away" } else { "Home" };

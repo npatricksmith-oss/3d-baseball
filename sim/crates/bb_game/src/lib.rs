@@ -3,6 +3,7 @@
 pub mod cage;
 pub mod eventlog;
 pub mod game;
+pub mod live;
 pub mod pa;
 pub mod play;
 pub mod timeline;

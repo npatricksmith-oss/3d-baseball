@@ -177,16 +177,30 @@ pub const REST_SPEED: f64 = 0.05;
 
 /// Fly a fair/foul batted ball over the field: flights, bounces, wall caroms, and the final
 /// roll. `tilts` supplies one roughness tilt per bounce (index = bounce number).
-pub fn batted_path(env: &FlightEnv, field: &Field, s0: BallState, t0: f64, mut tilts: impl FnMut(u32, &Surface) -> (f64, f64)) -> BallPath {
+pub fn batted_path(env: &FlightEnv, field: &Field, s0: BallState, t0: f64, tilts: impl FnMut(u32, &Surface) -> (f64, f64)) -> BallPath {
+    batted_path_dt(env, field, s0, t0, DT_BATTED, tilts)
+}
+
+/// [`batted_path`] with an explicit flight step (agents' internal predictions use a coarser
+/// step than the world).
+pub fn batted_path_dt(env: &FlightEnv, field: &Field, s0: BallState, t0: f64, dt: f64, mut tilts: impl FnMut(u32, &Surface) -> (f64, f64)) -> BallPath {
     let mut segs = Vec::new();
     let mut bounces = Vec::new();
     let mut walls = Vec::new();
     let mut s = s0;
     let mut t = t0;
     let r = env.ball.radius;
+    // A ball starting on the ground (a deflection, a short-hopped throw) bounces or rolls
+    // from there; flight would never "cross" the ground it starts on.
+    if s.r.z <= r + 1e-3 && s.v.z <= 0.0 {
+        s.r.z = r + 1e-3;
+        if s.v.z.abs() < 1e-6 {
+            s.v.z = -1e-3;
+        }
+    }
     for k in 0..40u32 {
         let fence = Crossing::RadiusAbove { lf: field.fence_lf, cf: field.fence_cf, rf: field.fence_rf };
-        let tr = fly(env, s, t, DT_BATTED, &[Crossing::ZBelow(r), fence], 15.0);
+        let tr = fly(env, s, t, dt, &[Crossing::ZBelow(r), fence], 15.0);
         let last = *tr.last();
         match tr.stop {
             Some(0) => {
