@@ -267,6 +267,8 @@ pub struct PitchRecord {
     pub hit_batter: bool,
     /// The pitch reached the ground before the plate plane.
     pub bounced: bool,
+    /// The executed release state (world truth, for the event log).
+    pub release: BallState,
 }
 
 fn rng(seed: u64, play: u32, agent: u16, purpose: Purpose, sub: u32) -> KeyedRng {
@@ -570,6 +572,7 @@ pub fn simulate_pitch_ctx(mu: &Matchup, sc: &Scouting, count: Count, seed: u64, 
         contact_state,
         hit_batter,
         bounced,
+        release,
     }
 }
 

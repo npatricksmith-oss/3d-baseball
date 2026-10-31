@@ -29,6 +29,9 @@ pub struct GameResult {
     pub walk_off: bool,
     pub warnings: Vec<&'static str>,
     pub events: Vec<Event>,
+    /// The game's event log (data-formats §4) and its digest (§4.4).
+    pub log: Vec<u8>,
+    pub digest: [u8; 32],
 }
 
 /// Simulate one game with average players on both sides.
@@ -39,6 +42,8 @@ pub fn simulate_game(seed: u64) -> GameResult {
     let mut st = RulesState::default_fixture();
     let mut res = GameResult::default();
     let mut log = step(&mut st, &Input::StartGame);
+    let mut writer = bb_schema::log::LogWriter::new(&crate::eventlog::header(seed));
+    let mut pending_rules: Vec<Event> = log.clone();
     // Scouting per batting slot, built once per game (model error per batter–pitcher pair).
     let sc: Vec<Vec<Scouting>> = (0..2u32).map(|side| (0..9u32).map(|slot| scouting_for_pa(&mu, seed, 9_000_000 + side * 100 + slot).into_owned()).collect()).collect();
     let bs = vec![mu.perception.break_sigma; mu.arsenal.len()];
@@ -95,11 +100,15 @@ pub fn simulate_game(seed: u64) -> GameResult {
         }
         for f in &facts {
             let ev = step(&mut st, f);
+            pending_rules.extend(ev.iter().cloned());
             log.extend(ev);
             if st.status == Status::Final {
                 break;
             }
         }
+        let pitcher = ((1 - side as u16) << 8) | 0x81;
+        crate::eventlog::write_pitch(&mut writer, play, pitcher, &rec, &pending_rules);
+        pending_rules.clear();
         if matches!(st.play, bb_rules::PlayState::Live(_)) {
             // The play did not settle from its facts: report and close it out.
             if std::env::var("BB_DEBUG").is_ok() && res.warnings.iter().filter(|w| **w == "unsettled_play").count() < 2 {
@@ -142,6 +151,9 @@ pub fn simulate_game(seed: u64) -> GameResult {
     }
     res.linescore = st.runs_by_inning.clone();
     res.runs = st.score();
+    let (bytes, digest) = writer.finish(res.runs[0].min(255) as u8, res.runs[1].min(255) as u8);
+    res.log = bytes;
+    res.digest = digest;
     res.innings = st.inning;
     res.events = log;
     res

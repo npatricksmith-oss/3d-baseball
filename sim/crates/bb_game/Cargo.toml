@@ -16,6 +16,7 @@ bb_world.workspace = true
 bb_agents.workspace = true
 bb_rules.workspace = true
 bb_schema.workspace = true
+flatbuffers.workspace = true
 
 
 [dev-dependencies]

@@ -510,6 +510,7 @@ dependencies = [
  "bb_rules",
  "bb_schema",
  "bb_world",
+ "flatbuffers",
  "serde_json",
 ]
 
