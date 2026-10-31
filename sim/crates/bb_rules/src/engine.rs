@@ -335,6 +335,12 @@ fn live_touch(st: &mut RulesState, _t: f64, what: Touch, ev: &mut Vec<Event>) {
                 decide(st, fair_at(x, y), ev);
             }
         }
+        Touch::Wall { x, y } => {
+            lp.grounded = true;
+            if lp.fair == FairFoul::Pending {
+                decide(st, fair_at(x, y), ev);
+            }
+        }
         Touch::FoulPole => {
             lp.fair = FairFoul::Fair;
             home_run(st, ev);

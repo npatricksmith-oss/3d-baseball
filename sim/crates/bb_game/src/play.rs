@@ -192,6 +192,9 @@ pub fn simulate_play(inp: &PlayInput) -> PlayOutput {
     for &(t, x, y) in &path.bounces {
         facts.push((t, Input::BallTouched { t, what: Touch::Ground { x, y } }));
     }
+    for &(t, x, y) in &path.walls {
+        facts.push((t, Input::BallTouched { t, what: Touch::Wall { x, y } }));
+    }
     let end = path.end();
     if let SegmentEnd::OverFence { .. } = end {
         let (p, _) = path.at(path.t_end());
@@ -350,7 +353,9 @@ pub fn simulate_play(inp: &PlayInput) -> PlayOutput {
         // Never secured in time (a liveness problem): runners still run on the ball's state.
         None => (t_limit, Vec3::new(path.at(t_limit).0.x, path.at(t_limit).0.y, 0.0)),
     };
-    let caught_fly = !path.bounces.first().map(|b| b.0 < t_sec).unwrap_or(false);
+    // A fly is caught only if nothing but a fielder touched it first (rules-spec §5.3).
+    let first_touch = path.bounces.first().map(|b| b.0).into_iter().chain(path.walls.first().map(|w| w.0)).fold(f64::INFINITY, f64::min);
+    let caught_fly = first_touch >= t_sec;
 
     let fa = FielderAttrs { transfer: fa.transfer + if dove { DIVE_GETUP_S } else { 0.0 }, ..fa };
 

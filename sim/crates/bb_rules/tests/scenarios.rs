@@ -73,6 +73,10 @@ fn parse_input(v: &Value) -> Input {
                     Touch::OutOfPlay { x: p[0].as_float().unwrap(), y: p[1].as_float().unwrap(), in_flight: b(v, "in_flight") }
                 }
                 "Batter" => Touch::Batter,
+                "Wall" => {
+                    let p = v["pos"].as_array().unwrap();
+                    Touch::Wall { x: p[0].as_float().unwrap(), y: p[1].as_float().unwrap() }
+                }
                 "FoulPole" => Touch::FoulPole,
                 w => panic!("unknown touch {w}"),
             };

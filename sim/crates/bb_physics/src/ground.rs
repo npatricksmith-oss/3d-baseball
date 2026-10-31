@@ -89,6 +89,8 @@ pub struct BallPath {
     pub segments: Vec<Segment>,
     /// Ground touches (time, x, y) in order.
     pub bounces: Vec<(f64, f64, f64)>,
+    /// Wall touches (time, x, y) in order.
+    pub walls: Vec<(f64, f64, f64)>,
 }
 
 impl BallPath {
@@ -178,6 +180,7 @@ pub const REST_SPEED: f64 = 0.05;
 pub fn batted_path(env: &FlightEnv, field: &Field, s0: BallState, t0: f64, mut tilts: impl FnMut(u32, &Surface) -> (f64, f64)) -> BallPath {
     let mut segs = Vec::new();
     let mut bounces = Vec::new();
+    let mut walls = Vec::new();
     let mut s = s0;
     let mut t = t0;
     let r = env.ball.radius;
@@ -216,10 +219,10 @@ pub fn batted_path(env: &FlightEnv, field: &Field, s0: BallState, t0: f64, mut t
                         let decel2 = if d > 0.0 { sp * sp / (2.0 * d) } else { decel };
                         let _ = v_wall;
                         segs.push(Segment::Roll { t0: t, r0, v0: vh, decel: decel2, t_stop: t + sp / decel2 });
-                        return BallPath { segments: segs, bounces };
+                        return BallPath { segments: segs, bounces, walls };
                     }
                     segs.push(Segment::Roll { t0: t, r0, v0: vh, decel, t_stop });
-                    return BallPath { segments: segs, bounces };
+                    return BallPath { segments: segs, bounces, walls };
                 }
                 s = nb;
             }
@@ -227,9 +230,10 @@ pub fn batted_path(env: &FlightEnv, field: &Field, s0: BallState, t0: f64, mut t
                 let p = last.s.r;
                 if p.z >= field.wall_height + r {
                     segs.push(Segment::Flight { tr, end: SegmentEnd::OverFence { fair: Field::fair(p.x, p.y) } });
-                    return BallPath { segments: segs, bounces };
+                    return BallPath { segments: segs, bounces, walls };
                 }
                 // Wall carom: reverse the radial velocity with the padding COR.
+                walls.push((last.t, p.x, p.y));
                 segs.push(Segment::Flight { tr, end: SegmentEnd::Wall });
                 let radial = Vec3::new(p.x, p.y, 0.0).normalized();
                 let vr = last.s.v.dot(radial);
@@ -240,11 +244,11 @@ pub fn batted_path(env: &FlightEnv, field: &Field, s0: BallState, t0: f64, mut t
             }
             _ => {
                 segs.push(Segment::Flight { tr, end: SegmentEnd::Timeout });
-                return BallPath { segments: segs, bounces };
+                return BallPath { segments: segs, bounces, walls };
             }
         }
     }
-    BallPath { segments: segs, bounces }
+    BallPath { segments: segs, bounces, walls }
 }
 
 #[cfg(test)]
@@ -266,6 +270,7 @@ mod tests {
         let p = BallPath {
             segments: vec![Segment::Roll { t0: 1.0, r0: Vec3::new(0.0, 10.0, 0.037), v0: Vec3::new(0.0, 5.0, 0.0), decel: 0.09 * G, t_stop: 1.0 + 5.0 / (0.09 * G) }],
             bounces: vec![],
+            walls: vec![],
         };
         let (r_end, v_end) = p.at(100.0);
         let d = 25.0 / (2.0 * 0.09 * G);

@@ -151,6 +151,8 @@ pub enum Touch {
     /// The batter's body (pitch only, before bat contact).
     Batter,
     FoulPole,
+    /// The outfield wall below its top (a catch is no longer possible, rules-spec §5.3).
+    Wall { x: f64, y: f64 },
 }
 
 /// Rules inputs: facts from the world and harness pseudo-facts (rules-spec §2).
