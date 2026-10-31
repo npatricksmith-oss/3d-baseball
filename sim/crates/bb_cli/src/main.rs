@@ -1,5 +1,6 @@
 //! `sim-cli`: the headless lab (PLAN §13.3).
 
+mod arch_lab;
 mod cage_lab;
 mod pa_lab;
 mod pitch_lab;
@@ -32,6 +33,8 @@ enum Cmd {
     Pa(pa_lab::PaArgs),
     /// One-attribute sweeps with common random numbers; checks directions (M3).
     Sensitivity(sens_lab::SensArgs),
+    /// B1 profiles of batter and pitcher archetypes (M3).
+    Archetypes(arch_lab::ArchArgs),
 }
 
 fn main() {
@@ -44,5 +47,6 @@ fn main() {
         Cmd::Cage(a) => cage_lab::cage(a),
         Cmd::Pa(a) => pa_lab::pa(a),
         Cmd::Sensitivity(a) => sens_lab::sensitivity(a),
+        Cmd::Archetypes(a) => arch_lab::run(a),
     }
 }

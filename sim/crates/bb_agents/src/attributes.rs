@@ -100,3 +100,30 @@ impl PitcherGrades {
         p.extension = linear_from_grade(self.extension, 1.95, 0.12);
     }
 }
+
+/// Named archetypes for labs and tests (M3 gate: "archetypes produce distinct profiles").
+pub mod archetypes {
+    use super::{BatterGrades, PitcherGrades};
+
+    pub fn batters() -> Vec<(&'static str, BatterGrades)> {
+        let d = BatterGrades::default();
+        vec![
+            ("Average", d),
+            ("Power", BatterGrades { bat_speed: 72.0, bat_control: 38.0, timing: 45.0, discipline: 45.0, ..d }),
+            ("Contact", BatterGrades { bat_speed: 38.0, bat_control: 70.0, timing: 68.0, vision: 60.0, ..d }),
+            ("Patient", BatterGrades { discipline: 75.0, vision: 60.0, ..d }),
+            ("Free swinger", BatterGrades { discipline: 25.0, ..d }),
+            ("Elite", BatterGrades { bat_speed: 68.0, quick_hands: 65.0, bat_control: 68.0, timing: 68.0, vision: 68.0, spin_recognition: 68.0, discipline: 68.0 }),
+            ("Weak", BatterGrades { bat_speed: 35.0, quick_hands: 35.0, bat_control: 35.0, timing: 35.0, vision: 35.0, spin_recognition: 35.0, discipline: 35.0 }),
+        ]
+    }
+
+    pub fn pitchers() -> Vec<(&'static str, PitcherGrades)> {
+        let d = PitcherGrades::default();
+        vec![
+            ("Average", d),
+            ("Flamethrower", PitcherGrades { arm_speed: 75.0, spin_capacity: 60.0, command: 38.0, ..d }),
+            ("Control artist", PitcherGrades { arm_speed: 38.0, command: 75.0, ..d }),
+        ]
+    }
+}
