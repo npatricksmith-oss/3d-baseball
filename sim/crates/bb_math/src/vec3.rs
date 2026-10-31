@@ -64,6 +64,11 @@ impl Vec3 {
     pub fn max_abs(self) -> f64 {
         self.x.abs().max(self.y.abs()).max(self.z.abs())
     }
+    /// Rotate by `angle` (rad) about unit axis `k` (Rodrigues' formula).
+    pub fn rotate(self, k: Vec3, angle: f64) -> Vec3 {
+        let (s, c) = (m::sin(angle), m::cos(angle));
+        self * c + k.cross(self) * s + k * (k.dot(self) * (1.0 - c))
+    }
     #[inline]
     pub fn lerp(self, o: Vec3, s: f64) -> Vec3 {
         self + (o - self) * s

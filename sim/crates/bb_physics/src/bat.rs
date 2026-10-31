@@ -158,3 +158,66 @@ mod tests {
         assert_eq!(b.radius(35.0 * INCH), 0.0);
     }
 }
+
+/// Bat–ball contact parameters (physics-spec §8.2). All [E] except as noted.
+#[derive(Clone, Copy, Debug, PartialEq)]
+pub struct BatBallParams {
+    /// Sweet spot, m back from the tip (u_ss = L − this).
+    pub ss_from_tip: f64,
+    /// Station where the barrel starts to taper toward the handle, m from the knob; f falls
+    /// to `f_taper` there.
+    pub u_taper: f64,
+    pub f_tip: f64,
+    pub f_taper: f64,
+    pub f_handle: f64,
+    /// Normal COR at the sweet spot at `v_ref` relative normal speed.
+    pub e_ref: f64,
+    pub v_ref: f64,
+    /// COR decrease per m/s of extra normal speed (sign [S], size [E]).
+    pub s_e: f64,
+    /// Tangential restitution [S] KNS 2017 range.
+    pub e_t: f64,
+    /// Ball–bat friction [S].
+    pub mu: f64,
+}
+
+impl Default for BatBallParams {
+    fn default() -> Self {
+        Self {
+            ss_from_tip: 0.15,
+            u_taper: 22.0 * INCH,
+            f_tip: 0.75,
+            f_taper: 0.55,
+            f_handle: 0.35,
+            // A8: q = 0.20 at u_ss for the default bat needs e ≈ 0.442.
+            e_ref: 0.442,
+            v_ref: 70.0,
+            s_e: 0.001,
+            e_t: 0.40,
+            mu: 0.50,
+        }
+    }
+}
+
+impl BatBallParams {
+    /// Location factor f(u) (physics-spec §8.2): 1 at the sweet spot, quadratic falloff to
+    /// `f_tip` at the tip and to `f_taper` where the barrel starts to taper, never below
+    /// `f_handle`. (The spec's "taper start" is read as the barrel end of the taper.)
+    pub fn location_factor(&self, u: f64, length: f64) -> f64 {
+        let uss = length - self.ss_from_tip;
+        let f = if u >= uss {
+            let s = (u - uss) / self.ss_from_tip;
+            1.0 - (1.0 - self.f_tip) * s * s
+        } else {
+            let s = (uss - u) / (uss - self.u_taper);
+            1.0 - (1.0 - self.f_taper) * s * s
+        };
+        f.max(self.f_handle)
+    }
+
+    /// Normal COR e_n(u, c_n) = e_peak(c_n)·f(u).
+    pub fn e_n(&self, u: f64, length: f64, cn_abs: f64) -> f64 {
+        let e_peak = self.e_ref - self.s_e * (cn_abs - self.v_ref);
+        (e_peak * self.location_factor(u, length)).clamp(0.05, 0.9)
+    }
+}

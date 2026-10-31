@@ -60,3 +60,40 @@ pub fn execute_release(intended: &IntendedRelease, noise: &ReleaseNoise, rng: &m
     r.z += noise.point * z();
     ExecutedRelease { state: launch(r, &shape, yaw, elev), shape, yaw, elev }
 }
+
+use crate::swing::{BatterAttrs, IntendedSwing, Placement, Swing, apply_placement};
+
+/// Swing execution noise σ (agent-models §3.6, §10).
+#[derive(Clone, Copy, Debug, PartialEq)]
+pub struct SwingNoise {
+    pub v_offset: f64,
+    /// Plane tilt σ per meter of δ_v σ (fixed ratio [E]): rad/m.
+    pub tilt_per_m: f64,
+    pub reach: f64,
+    pub timing: f64,
+}
+
+impl SwingNoise {
+    /// From the batter's attributes with combined factor `k` (global × composure).
+    pub fn new(b: &BatterAttrs, k: f64) -> Self {
+        Self { v_offset: b.bat_control * k, tilt_per_m: 1.5, reach: 0.7 * b.bat_control * k, timing: b.timing * k }
+    }
+}
+
+/// The executed swing handed to the world. Draw order (δ_v, α, δ_r, t) is part of the
+/// replay contract.
+#[derive(Clone, Copy, Debug, PartialEq)]
+pub struct ExecutedSwing {
+    pub swing: Swing,
+    pub placement: Placement,
+}
+
+pub fn execute_swing(intended: &IntendedSwing, noise: &SwingNoise, rng: &mut KeyedRng) -> ExecutedSwing {
+    let mut z = || rng.truncated_normal(TRUNC_SIGMA);
+    let v_offset = noise.v_offset * z();
+    let plane_tilt = noise.v_offset * noise.tilt_per_m * z();
+    let reach = noise.reach * z();
+    let t_shift = noise.timing * z();
+    let placement = Placement { plane_tilt, v_offset, reach, t_shift };
+    ExecutedSwing { swing: apply_placement(intended, &placement), placement }
+}

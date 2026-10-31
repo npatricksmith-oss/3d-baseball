@@ -46,3 +46,7 @@ pub fn pow(x: f64, y: f64) -> f64 {
 pub fn hypot(x: f64, y: f64) -> f64 {
     libm::hypot(x, y)
 }
+#[inline]
+pub fn erf(x: f64) -> f64 {
+    libm::erf(x)
+}

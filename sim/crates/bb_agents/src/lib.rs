@@ -7,3 +7,4 @@
 pub mod attributes;
 pub mod motor;
 pub mod pitcher;
+pub mod swing;

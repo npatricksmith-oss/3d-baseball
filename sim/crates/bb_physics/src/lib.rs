@@ -8,6 +8,7 @@ pub mod atmosphere;
 pub mod ball;
 pub mod bat;
 pub mod collision;
+pub mod contact;
 pub mod flight;
 pub mod pitch;
 pub mod spin;
