@@ -48,7 +48,8 @@ impl FielderAttrs {
         let outfield = pos >= 7;
         Self {
             speed: if outfield { 8.4 } else { 7.9 },
-            tau_a: 1.0,
+            // Infielders start from an athletic ready position: a quicker first step [E].
+            tau_a: if outfield { 1.0 } else { 0.7 },
             reaction: 0.25,
             hands: 0.018,
             arm: if outfield { 39.0 } else { 36.0 },
