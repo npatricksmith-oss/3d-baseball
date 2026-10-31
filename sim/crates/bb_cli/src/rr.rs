@@ -103,6 +103,19 @@ pub fn log_game(path: &std::path::Path, g: &bb_game::game::GameResult) {
             rec.set_duration_secs("game_time", clock + s[0]);
             rec.log("world/play/ball", &rerun::Points3D::new([p3(s[1], s[2], s[3])]).with_radii([0.15f32]).with_colors([[255, 230, 120]])).unwrap();
         }
+        // Fielders (defense ids have 0x80 set in the slot byte) and runners, as capsule-ish dots.
+        for (id, samples) in &v.actors {
+            let fielder = id & 0x80 != 0;
+            let color = if fielder { [80, 140, 255] } else { [255, 90, 90] };
+            let path = format!("world/play/{}/{:04x}", if fielder { "fielders" } else { "runners" }, id);
+            for (t, p) in samples {
+                rec.set_duration_secs("game_time", clock + t);
+                rec.log(path.clone(), &rerun::Points3D::new([p3(p.x, p.y, 0.9)]).with_radii([0.45f32]).with_colors([color])).unwrap();
+            }
+        }
+        rec.set_duration_secs("game_time", clock + dur - 0.01);
+        rec.log("world/play/fielders", &rerun::Clear::new(true)).unwrap();
+        rec.log("world/play/runners", &rerun::Clear::new(true)).unwrap();
         clock += dur;
     }
 }

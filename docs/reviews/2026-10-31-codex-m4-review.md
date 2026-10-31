@@ -616,3 +616,18 @@ Every runnable TOML scenario in this review (15) was added verbatim to `sim/crat
 | 24 | **Deferred (M5)** | Continuous state for non-primary fielders and shared coverage state |
 
 After the fixes: 88 tests pass, 64 games produce no rules warnings, and the C client still plays full games. The rules-spec's 7.01(g) citation should become 7.01(e)(3) (R11).
+
+### Addendum: causal live-ball simulator (later the same night)
+
+The skeleton in `bb_game/src/play.rs` was replaced in the game loop by `bb_game/src/live.rs`, a fixed-tick (60 Hz) causal simulation. It changes the status of these findings:
+
+| # | New status | How |
+| :--- | :--- | :--- |
+| 5 | **Fixed in substance** | Fielders predict from a noisy estimate of the ball's *current* state with their own physics (smooth ground, typical spin); runners decide from the ball and fielders they observe; the rules engine is stepped live, so outs are known when they happen. No decision reads the realized future |
+| 6 | Fixed | The ball crosses the fence only if no capture happens first; leaping reach at the wall (3.0 m) makes robbing a home run possible |
+| 9 | Fixed | Throws fly physically (no drag yet); the receiver tracks the throw and must catch it; a missed throw becomes a loose ball; tags happen when the ball holder reaches an off-base runner |
+| 10 | Partly fixed | Rim contacts physically deflect the ball. A separate first-touch fact and fielder foot position remain open |
+| 21 | Fixed except `BallPassedBase` | Ball facts come from the realized, evolving path only |
+| 24 | Fixed | Every fielder has one continuous position; coverage and chasing share that state |
+
+Measured over 64 games: about 6.8 runs per team-game, no play timeouts, about 0.1 "two runners on a base" and 0.08 out-of-order-fact warnings per game (open), about 280 ms per game single-threaded. Top-down play diagrams: `cargo run --release -p bb_game --example dump_plays -- 7 > out/p.json && uv run analysis/plots/plays_topdown.py out/p.json out/p.png`.
