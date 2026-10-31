@@ -515,3 +515,38 @@ pub fn count_group(c: Count) -> usize {
         1
     }
 }
+
+/// In-game memory of one opposing pitcher (agent-models §3.8). Per pitch type: exposure
+/// count and the batter's believed shape offsets (spin axis °, spin rate fraction,
+/// efficiency, speed m/s) relative to what it has been told by scouting. Only the
+/// orchestrator, which owns the truth, can say what the offsets are relative to; the
+/// batter's decisions see only the resulting [`Scouting`] models.
+#[derive(Clone, Debug, PartialEq)]
+pub struct PitcherMemory {
+    pub n: Vec<f64>,
+    pub offsets: Vec<[f64; 4]>,
+}
+
+impl PitcherMemory {
+    pub fn new(offsets: Vec<[f64; 4]>) -> Self {
+        Self { n: vec![0.0; offsets.len()], offsets }
+    }
+
+    /// Learn from one pitch of type index `k` seen with weight `weight` (1 at the plate,
+    /// 0.3 from the on-deck circle). `cue_noise` is the perceptual noise of this sighting in
+    /// the same units as the offsets; the belief moves toward (truth + noise) at rate
+    /// η·weight/(1 + n_k).
+    pub fn learn(&mut self, k: usize, weight: f64, eta: f64, cue_noise: [f64; 4]) {
+        let lr = (eta * weight / (1.0 + self.n[k])).min(1.0);
+        for (o, c) in self.offsets[k].iter_mut().zip(cue_noise) {
+            *o += lr * (c - *o);
+        }
+        self.n[k] += weight;
+    }
+
+    /// Within-type spread belief after exposure: σ_∞ + (σ_0 − σ_∞)·exp(−η·n), σ_∞ = σ_0/2.
+    pub fn break_sigma(&self, k: usize, sigma0: f64, eta: f64) -> f64 {
+        let s_inf = 0.5 * sigma0;
+        s_inf + (sigma0 - s_inf) * m::exp(-eta * self.n[k])
+    }
+}

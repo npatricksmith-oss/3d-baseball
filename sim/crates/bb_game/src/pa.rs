@@ -5,7 +5,7 @@
 //! is executed with noise, and the world resolves bat against ball. The pitch call comes
 //! from geometry only (D1).
 
-use bb_agents::batter::{self, Bank, Decision, Discipline, Perception, Scouting, eye_point, type_model};
+use bb_agents::batter::{self, Bank, Decision, Discipline, Perception, PitcherMemory, Scouting, eye_point, type_model};
 use bb_agents::motor::{ReleaseNoise, SwingNoise, execute_release, execute_swing};
 use bb_agents::pitcher::{PitchDef, PitchIntent, PitcherAttrs, plan_release};
 use bb_agents::swing::{BatterAttrs, SwingTemplate, plan_swing};
@@ -124,7 +124,7 @@ pub struct ModelError {
 
 impl Default for ModelError {
     fn default() -> Self {
-        Self { spin_axis_deg: 10.0, spin_rate_rel: 0.08, efficiency: 0.08, speed: 0.6 }
+        Self { spin_axis_deg: 15.0, spin_rate_rel: 0.08, efficiency: 0.08, speed: 0.6 }
     }
 }
 
@@ -132,6 +132,44 @@ impl Default for ModelError {
 /// from the batter's *believed* shape of each pitch (true shape plus model error).
 pub fn build_scouting(env: &FlightEnv, p: &PitcherAttrs, arsenal: &[ArsenalPitch], zone: &Zone) -> Scouting {
     build_scouting_with(env, p, arsenal, zone, None)
+}
+
+/// Draw a batter's initial model error for each arsenal pitch (σ_0 of agent-models §3.8).
+pub fn draw_offsets(arsenal: &[ArsenalPitch], e: &ModelError, r: &mut KeyedRng) -> Vec<[f64; 4]> {
+    arsenal
+        .iter()
+        .map(|_| {
+            [
+                e.spin_axis_deg * r.truncated_normal(4.0),
+                e.spin_rate_rel * r.truncated_normal(4.0),
+                e.efficiency * r.truncated_normal(4.0),
+                e.speed * r.truncated_normal(4.0),
+            ]
+        })
+        .collect()
+}
+
+/// Scouting models built from believed shapes = true shape + per-type offsets.
+pub fn build_scouting_offsets(env: &FlightEnv, p: &PitcherAttrs, arsenal: &[ArsenalPitch], zone: &Zone, offsets: &[[f64; 4]]) -> Scouting {
+    let mid = 0.5 * (zone.bottom + zone.top);
+    let mut types = Vec::new();
+    let mut usage = Vec::new();
+    for (a, o) in arsenal.iter().zip(offsets) {
+        let mut plan = plan_release(env, p, &a.def, &PitchIntent { ty: a.def.ty, target_x: 0.0, target_z: mid }).expect("zone center reachable");
+        plan.shape.spin_axis_deg += o[0];
+        plan.shape.spin_rate *= 1.0 + o[1];
+        plan.shape.efficiency = (plan.shape.efficiency + o[2]).clamp(0.05, 1.0);
+        plan.shape.speed += o[3];
+        let a2 = bb_physics::pitch::aim(env, plan.r, &plan.shape, 0.0, mid, Some((plan.yaw, plan.elev)));
+        let s = launch(plan.r, &plan.shape, a2.yaw, a2.elev);
+        let tr = fly(env, s, 0.0, DT_PITCH, &[Crossing::YBelow(-0.5)], 2.0);
+        let d = decompose(s.w, s.v);
+        let md = d.magnus_dir;
+        let sig = spin_signature(md.x, md.z, d.efficiency, bb_math::units::radps_to_rpm(s.w.norm()));
+        types.push(type_model(a.def.ty, tr, sig));
+        usage.push(a.usage.iter().sum::<f64>() / 4.0);
+    }
+    Scouting { types, usage }
 }
 
 pub fn build_scouting_with(env: &FlightEnv, p: &PitcherAttrs, arsenal: &[ArsenalPitch], zone: &Zone, err: Option<(ModelError, &mut KeyedRng)>) -> Scouting {
@@ -263,6 +301,11 @@ fn body_hit(mu: &Matchup, tr: &bb_physics::flight::Trajectory) -> bool {
 
 /// Simulate one pitch at `count`, with the batter's scouting models `sc`.
 pub fn simulate_pitch(mu: &Matchup, sc: &Scouting, count: Count, seed: u64, play: u32) -> PitchRecord {
+    simulate_pitch_bs(mu, sc, count, seed, play, mu.perception.break_sigma)
+}
+
+/// [`simulate_pitch`] with an explicit break-spread belief (from in-game adaptation).
+pub fn simulate_pitch_bs(mu: &Matchup, sc: &Scouting, count: Count, seed: u64, play: u32, break_sigma: f64) -> PitchRecord {
     let intent = choose_pitch(mu, count, seed, play);
     let def = &mu.arsenal.iter().find(|a| a.def.ty == intent.ty).unwrap().def;
     let plan = plan_release(&mu.env, &mu.pitcher, def, &intent).expect("reachable target");
@@ -283,7 +326,7 @@ pub fn simulate_pitch(mu: &Matchup, sc: &Scouting, count: Count, seed: u64, play
     let mut prior: Vec<f64> = mu.arsenal.iter().map(|a| a.usage[g]).collect();
     let ps: f64 = prior.iter().sum();
     prior.iter_mut().for_each(|p| *p /= ps);
-    let mut bank = Bank::new(sc, &prior, &rel_obs, eye, pc.break_sigma);
+    let mut bank = Bank::new(sc, &prior, &rel_obs, eye, break_sigma);
     let d = decompose(release.w, release.v);
     let true_sig = spin_signature(d.magnus_dir.x, d.magnus_dir.z, d.efficiency, bb_math::units::radps_to_rpm(release.w.norm()));
     let spin_z = [pr.truncated_normal(4.0), pr.truncated_normal(4.0), pr.truncated_normal(4.0)];
@@ -652,4 +695,75 @@ impl Matchup {
         mu.refresh();
         mu
     }
+}
+
+/// Adaptation rate η from `Adaptation` (agent-models §10, grade 50).
+pub const ETA: f64 = 0.15;
+/// On-deck viewing weight (agent-models §3.8).
+pub const ON_DECK_WEIGHT: f64 = 0.3;
+/// Perceptual noise of one sighting when learning shapes (same units as the offsets) [E].
+const CUE_NOISE: [f64; 4] = [6.0, 0.05, 0.05, 0.4];
+
+/// One batter's sequence of plate appearances against the same pitcher in one game, with
+/// in-game adaptation (agent-models §3.8). Between PAs the batter watches `on_deck_pitches`
+/// pitches to other hitters at reduced weight. Returns the PA records in order.
+pub fn simulate_times_through(mu: &Matchup, seed: u64, game: u32, times: u32, on_deck_pitches: u32, adapt: bool) -> Vec<PaRecord> {
+    let mut r = rng(seed, game, BATTER, Purpose::BatterPerception, 2_000_000);
+    let e = mu.model_error.unwrap_or(ModelError { spin_axis_deg: 0.0, spin_rate_rel: 0.0, efficiency: 0.0, speed: 0.0 });
+    let mut mem = PitcherMemory::new(draw_offsets(&mu.arsenal, &e, &mut r));
+    let mut out = Vec::new();
+    let learn = |mem: &mut PitcherMemory, ty: PitchType, w: f64, r: &mut KeyedRng| {
+        if !adapt {
+            return;
+        }
+        let k = mu.arsenal.iter().position(|a| a.def.ty == ty).unwrap();
+        let noise = CUE_NOISE.map(|s| s * r.truncated_normal(4.0));
+        mem.learn(k, w, ETA, noise);
+    };
+    for t in 0..times {
+        let sc = build_scouting_offsets(&mu.env, &mu.pitcher, &mu.arsenal, &mu.zone, &mem.offsets);
+        let first_play = game * 100_000 + t * 1000;
+        let mut count = Count::default();
+        let mut pitches = Vec::new();
+        let mut play = first_play;
+        let result = loop {
+            // Break-spread belief for the most-seen type stands in for the per-type value.
+            let k_main = (0..mu.arsenal.len()).max_by(|&a, &b| mem.n[a].total_cmp(&mem.n[b])).unwrap_or(0);
+            let bs = if adapt { mem.break_sigma(k_main, mu.perception.break_sigma, ETA) } else { mu.perception.break_sigma };
+            let rec = simulate_pitch_bs(mu, &sc, count, seed, play, bs);
+            play += 1;
+            learn(&mut mem, rec.ty, 1.0, &mut r);
+            let call = rec.call;
+            pitches.push(rec);
+            match call {
+                Call::Ball => {
+                    count.balls += 1;
+                    if count.balls == 4 { break PaResult::Walk; }
+                }
+                Call::CalledStrike | Call::SwingingStrike | Call::FoulTip => {
+                    count.strikes += 1;
+                    if count.strikes == 3 { break PaResult::Strikeout; }
+                }
+                Call::Foul => if count.strikes < 2 { count.strikes += 1 },
+                Call::HitByPitch => break PaResult::HitByPitch,
+                Call::InPlay => break PaResult::InPlay,
+            }
+            if pitches.len() > 40 { break PaResult::InPlay; }
+        };
+        let called_third = result == PaResult::Strikeout && pitches.last().map(|p| p.call == Call::CalledStrike).unwrap_or(false);
+        out.push(PaRecord { pitches, result, called_third });
+        // Watch the rest of the lineup: sample the pitcher's usage (even-count mix).
+        for j in 0..on_deck_pitches {
+            let mut rr = rng(seed, first_play + 500 + j, PITCHER, Purpose::PitchSelection, 0);
+            let tot: f64 = mu.arsenal.iter().map(|a| a.usage[1]).sum();
+            let mut u = rr.uniform() * tot;
+            let mut ty = mu.arsenal[0].def.ty;
+            for a in &mu.arsenal {
+                if u < a.usage[1] { ty = a.def.ty; break; }
+                u -= a.usage[1];
+            }
+            learn(&mut mem, ty, ON_DECK_WEIGHT, &mut r);
+        }
+    }
+    out
 }
