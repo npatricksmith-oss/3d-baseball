@@ -595,6 +595,19 @@ impl<'a> Sim<'a> {
             let horiz = m::hypot(b.x - fd.pos.x, b.y - fd.pos.y);
             let reach = if receiver.is_some() { RECEIVE_REACH } else { REACH };
             let standing = horiz <= reach && b.z <= zmax;
+            // The glove meets the ball where it passes closest (the capture instant,
+            // agent-models §5.4), not where it first enters reach: wait while it still comes
+            // closer within reach and catchable height, and does not reach the ground first.
+            if standing {
+                let (bn, _) = self.ball_at(self.t + DT);
+                let lands = match &self.ball {
+                    Ball::Free { path, .. } => path.bounces.iter().any(|x| x.0 > self.t && x.0 <= self.t + DT),
+                    _ => false,
+                };
+                if !lands && m::hypot(bn.x - fd.pos.x, bn.y - fd.pos.y) < horiz && bn.z <= zmax && bn.z >= 0.0 {
+                    continue;
+                }
+            }
             // Dive only for a ball the fielder's own prediction says won't come closer.
             // Nobody dives at a slow or resting ball: they walk up and field it.
             let diving = !standing && self.f[i].role == Role::Chase && bv.norm() > 3.0 && horiz <= REACH + DIVE && b.z <= DIVE_MAX_Z && {
@@ -990,7 +1003,9 @@ impl<'a> Sim<'a> {
             let goal = visible_target(r);
             let t_runner = self.t + (goal as f64 * BASE_L - r.s).abs() / r.v.max(5.0);
             let d = (base_pos(goal) - fd.pos).norm();
-            let t_ball = self.t + d / (THROW_FRAC * fd.a.arm) + 0.05;
+            // The ball beats the runner only once someone is at the bag to take it.
+            let recv = self.receiver_for(by, goal);
+            let t_ball = (self.t + d / (THROW_FRAC * fd.a.arm)).max(self.receiver_ready(recv, goal)) + 0.05;
             let p_out = phi((t_runner - t_ball) / 0.12);
             let w = [0.9, 1.0, 1.1, 1.3][(goal as usize).saturating_sub(1).min(3)];
             if p_out > 0.3 && best.map(|b| p_out * w > b.0).unwrap_or(true) {
@@ -1014,9 +1029,12 @@ impl<'a> Sim<'a> {
             self.f[by].target = tgt;
             return;
         }
-        let receiver = (0..9).find(|&i| i != by && self.f[i].role == Role::Cover(b)).unwrap_or_else(|| {
-            (0..9).filter(|&i| i != by).min_by(|&a, &c| (self.f[a].pos - tgt).norm().total_cmp(&(self.f[c].pos - tgt).norm())).unwrap()
-        });
+        let receiver = self.receiver_for(by, b);
+        // Time the release so the ball arrives when the receiver can be at the bag.
+        if self.t + (tgt - fd.pos).norm() / (THROW_FRAC * fd.a.arm) < self.receiver_ready(receiver, b) - 0.05 {
+            self.f[receiver].target = tgt;
+            return;
+        }
         let mut r = rng(self.inp.seed, self.inp.play, fd.id, Purpose::ThrowExecution, fd.throws);
         self.f[by].throws += 1;
         let r0 = fd.pos + Vec3::new(0.0, 0.0, 1.8);
@@ -1029,6 +1047,21 @@ impl<'a> Sim<'a> {
         let v0 = h * vh + Vec3::new(0.0, 0.0, vz);
         self.ball = Ball::Thrown { r0, v0, t0: self.t, to_base: b, receiver };
         self.f[receiver].target = tgt;
+    }
+
+    /// Who takes a throw at base `b`: its cover man, else the nearest other fielder.
+    fn receiver_for(&self, by: usize, b: u8) -> usize {
+        let tgt = base_pos(b);
+        (0..9).find(|&i| i != by && self.f[i].role == Role::Cover(b)).unwrap_or_else(|| {
+            (0..9).filter(|&i| i != by).min_by(|&a, &c| (self.f[a].pos - tgt).norm().total_cmp(&(self.f[c].pos - tgt).norm())).unwrap()
+        })
+    }
+
+    /// When fielder `i` can take a throw at base `b`, as a teammate judges it: his visible
+    /// distance from the bag at league-typical speed from a standing start.
+    fn receiver_ready(&self, i: usize, b: u8) -> f64 {
+        let d = (base_pos(b) - self.f[i].pos).norm() - 0.5;
+        if d <= 0.0 { self.t } else { self.t + run_time(d, TYPICAL_SPEED, 0.9) }
     }
 
     fn settled(&self) -> bool {

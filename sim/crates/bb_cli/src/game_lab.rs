@@ -89,20 +89,33 @@ pub fn games(a: GamesArgs) {
         100.0 * sum(&|r| r.reached_bip as f64) / sum(&|r| r.bip as f64)
     );
     println!("extra-inning games {}, walk-offs {}", rs.iter().filter(|r| r.innings > 9).count(), rs.iter().filter(|r| r.walk_off).count());
-    // Batter reached safely on balls in play, by batted-ball type (MLB BABIP for comparison).
-    let mut by = [(0u32, 0u32); 4];
+    // By batted-ball type: hit rate (batter safe, nobody out: comparable to MLB BABIP), the
+    // batter safe on a fielder's choice, and plays with two or more outs.
+    let mut by = [(0u32, 0u32, 0u32, 0u32); 4];
     for r in &rs {
-        for &(_, la, _, reached) in &r.bip_detail {
-            let d = la.to_degrees();
+        for b in &r.bip_detail {
+            let d = b.launch_rad.to_degrees();
             let k = if d < 10.0 { 0 } else if d < 25.0 { 1 } else if d < 50.0 { 2 } else { 3 };
             by[k].0 += 1;
-            by[k].1 += reached as u32;
+            by[k].1 += b.hit() as u32;
+            by[k].2 += (b.batter_safe && b.outs > 0) as u32;
+            by[k].3 += (b.outs >= 2) as u32;
         }
     }
     let names = ["GB (<10°)", "LD (10–25°)", "FB (25–50°)", "PU (>50°)"];
     let mlb = [0.24, 0.68, 0.13, 0.02];
+    let total = by.iter().map(|x| x.0).sum::<u32>().max(1) as f64;
     for k in 0..4 {
-        println!("  {:12} share {:4.1}%  reached {:5.3}  (MLB ≈ {:.2})", names[k], 100.0 * by[k].0 as f64 / by.iter().map(|x| x.0).sum::<u32>().max(1) as f64, by[k].1 as f64 / by[k].0.max(1) as f64, mlb[k]);
+        let n = by[k].0.max(1) as f64;
+        println!(
+            "  {:12} share {:4.1}%  hit {:5.3} (MLB BABIP ≈ {:.2})  FC {:5.3}  2+ outs {:5.3}",
+            names[k],
+            100.0 * by[k].0 as f64 / total,
+            by[k].1 as f64 / n,
+            mlb[k],
+            by[k].2 as f64 / n,
+            by[k].3 as f64 / n
+        );
     }
     let mut w: std::collections::BTreeMap<&str, usize> = Default::default();
     for r in &rs {

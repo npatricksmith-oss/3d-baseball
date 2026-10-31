@@ -36,8 +36,28 @@ pub struct GameResult {
     pub viz: Vec<PlayViz>,
     /// False if the game hit the operational inning budget before ending.
     pub complete: bool,
-    /// Balls in play: (exit speed m/s, launch angle rad, spray rad, batter reached safely).
-    pub bip_detail: Vec<(f64, f64, f64, bool)>,
+    /// Every ball in play, in order.
+    pub bip_detail: Vec<BipDetail>,
+}
+
+/// One ball in play and what the defense did with it.
+#[derive(Clone, Copy, Debug, PartialEq)]
+pub struct BipDetail {
+    pub exit_speed_mps: f64,
+    pub launch_rad: f64,
+    pub spray_rad: f64,
+    /// The batter was not put out on the play.
+    pub batter_safe: bool,
+    /// Outs recorded on the play (any runner).
+    pub outs: u8,
+}
+
+impl BipDetail {
+    /// A hit in the BABIP sense: the batter safe and nobody put out (the sim has no errors
+    /// yet, so this excludes only fielder's choices).
+    pub fn hit(&self) -> bool {
+        self.batter_safe && self.outs == 0
+    }
 }
 
 /// One pitch's paths for visualization: samples are (t, x, y, z) in play time.
@@ -245,7 +265,8 @@ impl Game {
         if let Some((ev_, la, spray)) = rec.batted {
             if let Some(Event::PlateAppearanceEnded { batter, result: PaResult::BattedBall }) = rules_events.iter().find(|e| matches!(e, Event::PlateAppearanceEnded { .. })) {
                 let out = rules_events.iter().any(|e| matches!(e, Event::RunnerOut { runner, .. } if runner == batter));
-                self.res.bip_detail.push((ev_, la, spray, !out));
+                let outs = rules_events.iter().filter(|e| matches!(e, Event::RunnerOut { .. })).count() as u8;
+                self.res.bip_detail.push(BipDetail { exit_speed_mps: ev_, launch_rad: la, spray_rad: spray, batter_safe: !out, outs });
             }
         }
         self.play += 1;
