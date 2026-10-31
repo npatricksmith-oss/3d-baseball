@@ -31,6 +31,12 @@ const POCKET: f64 = 0.06;
 const RIM: f64 = 0.12;
 const DEPTH_STRETCH: f64 = 3.0;
 const READ_REF_DIST: f64 = 30.0;
+/// League-typical fielder values a runner assumes (scouting-level knowledge) [E].
+const TYPICAL_SPEED: f64 = 8.0;
+const TYPICAL_ARM: f64 = 37.0;
+const TYPICAL_TRANSFER: f64 = 0.75;
+/// A runner's read of a batted ball, m at 30 m [E].
+const RUNNER_READ_SIGMA0: f64 = 2.0;
 /// Agents' internal flight step, s.
 const AGENT_DT: f64 = 0.02;
 const BASE_L: f64 = 27.432;
@@ -39,8 +45,9 @@ const PLAY_LIMIT_S: f64 = 40.0;
 /// Fraction of arm strength used on throws [E].
 const THROW_FRAC: f64 = 0.92;
 const RECEIVE_REACH: f64 = 1.5;
-/// Infield radius for the settle rule (rules-spec §5.8), m.
-const INFIELD_R: f64 = 30.0;
+/// Infield radius for the settle rule (rules-spec §5.8), m. The spec's 30 m excluded second
+/// base (38.8 m from home); the infield dirt reaches ~45 m.
+const INFIELD_R: f64 = 45.0;
 
 #[derive(Clone, Debug)]
 enum Ball {
@@ -79,6 +86,8 @@ struct Fielder {
     t_int: f64,
     /// Last close-range re-read of the ball.
     last_close_read: f64,
+    /// Throws made this play (keys the throw-execution noise).
+    throws: u32,
 }
 
 #[derive(Clone, Debug)]
@@ -132,6 +141,11 @@ pub mod prof {
         pub static INTER: Cell<(u64, u64)> = const { Cell::new((0, 0)) };
         pub static TICKS: Cell<u64> = const { Cell::new(0) };
     }
+    /// Profiling is on only when BB_PROF is set (checked once per thread).
+    pub fn enabled() -> bool {
+        thread_local! { static ON: bool = std::env::var("BB_PROF").is_ok(); }
+        ON.with(|x| *x)
+    }
     pub fn add(c: &'static std::thread::LocalKey<Cell<(u64, u64)>>, ns: u64) {
         c.with(|x| {
             let (a, b) = x.get();
@@ -181,6 +195,8 @@ struct Sim<'a> {
     inp: &'a LiveInput<'a>,
     /// Latest fact time emitted (facts never go backward, rules-spec §1.2).
     last_fact_t: f64,
+    /// When the ball was last caught (a visible event).
+    secured_at: f64,
     st: &'a mut RulesState,
     t: f64,
     ball: Ball,
@@ -232,6 +248,9 @@ impl<'a> Sim<'a> {
     /// The fielder's noisy estimate of the ball's current state, then its own prediction
     /// (smooth ground, typical spin for the trajectory) — never the true future.
     fn predict(&self, i: usize) -> BallPath {
+        if !prof::enabled() {
+            return self.predict_inner(i);
+        }
         let t0 = std::time::Instant::now();
         let r = self.predict_inner(i);
         prof::add(&prof::PRED, t0.elapsed().as_nanos() as u64);
@@ -240,16 +259,24 @@ impl<'a> Sim<'a> {
 
     fn predict_inner(&self, i: usize) -> BallPath {
         let fd = &self.f[i];
-        let (p, v) = self.ball_at(self.t);
         let view = (self.t - self.inp.t_contact - fd.a.reaction).max(0.0);
-        let dist = m::hypot(p.x - fd.pos.x, p.y - fd.pos.y).max(1.0);
-        let shrink = 1.0 / m::sqrt(1.0 + view / fd.a.tau_read);
-        let sp = fd.a.read_sigma0 * (dist / READ_REF_DIST) * shrink;
-        let los = Vec3::new(p.x - fd.pos.x, p.y - fd.pos.y, 0.0).normalized();
+        self.predict_from(fd.pos, fd.a.read_sigma0, fd.a.tau_read, view, fd.err)
+    }
+
+    /// An observer's prediction of the ball: a noisy estimate of its current state (error
+    /// grows with distance, shrinks with viewing time, larger in depth), flown forward with
+    /// the observer's own physics on smooth ground with typical spin.
+    fn predict_from(&self, from: Vec3, sigma0: f64, tau_read: f64, view: f64, err: [f64; 4]) -> BallPath {
+        let (p, v) = self.ball_at(self.t);
+        let dist = m::hypot(p.x - from.x, p.y - from.y).max(1.0);
+        let shrink = 1.0 / m::sqrt(1.0 + view / tau_read);
+        let sp = sigma0 * (dist / READ_REF_DIST) * shrink;
+        let los = Vec3::new(p.x - from.x, p.y - from.y, 0.0).normalized();
         let lat = Vec3::new(-los.y, los.x, 0.0);
-        let pe = p + los * (fd.err[0] * sp * DEPTH_STRETCH) + lat * (fd.err[1] * sp);
+        // Height is read with the lateral precision (an angular measurement).
+        let pe = p + los * (err[0] * sp * DEPTH_STRETCH) + lat * (err[1] * sp) + Vec3::new(0.0, 0.0, err[1] * sp * 0.5);
         let sv = 0.06 * v.norm() * shrink;
-        let ve = v + los * (fd.err[2] * sv * DEPTH_STRETCH * 0.5) + lat * (fd.err[3] * sv);
+        let ve = v + los * (err[2] * sv * DEPTH_STRETCH * 0.5) + lat * (err[3] * sv) + Vec3::new(0.0, 0.0, err[3] * sv * 0.5);
         // Typical spin: backspin on rising balls, topspin on balls hit down.
         let h = Vec3::new(ve.x, ve.y, 0.0).normalized();
         let axis = Vec3::new(h.y, -h.x, 0.0);
@@ -258,8 +285,42 @@ impl<'a> Sim<'a> {
         batted_path_dt(self.inp.env, self.inp.field, BallState { r: pe, v: ve, w }, self.t, AGENT_DT, |_, _| (0.0, 0.0))
     }
 
+    /// A runner's read of the ball (keyed noise per runner and decision).
+    fn runner_predict(&self, k: usize, decision: u32) -> BallPath {
+        let r = &self.r[k];
+        let mut g = rng(self.inp.seed, self.inp.play, r.id, Purpose::RunnerPerception, 100 + decision);
+        let err = [g.truncated_normal(4.0), g.truncated_normal(4.0), g.truncated_normal(4.0), g.truncated_normal(4.0)];
+        let view = (self.t - self.inp.t_contact).max(0.0);
+        self.predict_from(path_pos(r.s), RUNNER_READ_SIGMA0, 0.6, view, err)
+    }
+
+    /// When the runner believes the defense can field the ball on `pred`: the earliest
+    /// point some visible fielder could reach with league-typical speed.
+    fn believed_field_time(&self, pred: &BallPath) -> (f64, Vec3) {
+        let mut t = self.t + 0.05;
+        let t_end = pred.t_end();
+        while t <= t_end {
+            let (b, _) = pred.at(t);
+            if b.z <= CATCH_MAX_Z {
+                let reachable = self.f.iter().any(|fd| {
+                    let d = m::hypot(b.x - fd.pos.x, b.y - fd.pos.y) - REACH;
+                    self.t + run_time(d.max(0.0), TYPICAL_SPEED, 0.9) <= t
+                });
+                if reachable {
+                    return (t, Vec3::new(b.x, b.y, 0.0));
+                }
+            }
+            t += 0.15;
+        }
+        let (rest, _) = pred.at(t_end);
+        (t_end + 1.0, Vec3::new(rest.x, rest.y, 0.0))
+    }
+
     /// Earliest point on a predicted path the fielder can reach in time: (time, point).
     fn intercept(&self, i: usize, pred: &BallPath) -> (f64, Vec3) {
+        if !prof::enabled() {
+            return self.intercept_inner(i, pred);
+        }
         let t0 = std::time::Instant::now();
         let r = self.intercept_inner(i, pred);
         prof::add(&prof::INTER, t0.elapsed().as_nanos() as u64);
@@ -336,6 +397,7 @@ impl<'a> Sim<'a> {
             self.f[i].t_int = ti;
             self.f[i].target = pt;
             self.f[i].belief = Some(p);
+            self.f[i].next_plan = self.t + REPLAN_S;
         }
         self.primary = best.1;
         self.cover_roles();
@@ -414,8 +476,14 @@ impl<'a> Sim<'a> {
 
     fn move_fielders(&mut self) {
         for fd in self.f.iter_mut() {
-            if self.t < self.inp.t_contact + fd.a.reaction || (fd.dove && self.t < fd.ready_at) {
+            if self.t < self.inp.t_contact + fd.a.reaction {
                 continue;
+            }
+            if fd.dove {
+                if self.t < fd.ready_at {
+                    continue;
+                }
+                fd.dove = false; // recovered
             }
             let to = Vec3::new(fd.target.x - fd.pos.x, fd.target.y - fd.pos.y, 0.0);
             let d = to.norm();
@@ -471,6 +539,9 @@ impl<'a> Sim<'a> {
             if receiver.is_some() && receiver != Some(i) {
                 continue;
             }
+            if b.z < 0.0 {
+                continue; // never capture a ball below the surface
+            }
             let horiz = m::hypot(b.x - fd.pos.x, b.y - fd.pos.y);
             let reach = if receiver.is_some() { RECEIVE_REACH } else { REACH };
             let standing = horiz <= reach && b.z <= zmax;
@@ -500,10 +571,12 @@ impl<'a> Sim<'a> {
             let fd = &mut self.f[i];
             fd.attempts += 1;
             if diving {
+                // A committed dive puts the fielder on the ground whatever happens next.
                 fd.dove = true;
+                fd.ready_at = self.t + DIVE_GETUP_S;
             }
             if d <= POCKET {
-                fd.ready_at = self.t + fd.a.transfer + if fd.dove { DIVE_GETUP_S } else { 0.0 };
+                fd.ready_at = self.t + fd.a.transfer + if diving { DIVE_GETUP_S } else { 0.0 };
                 if let Ball::Thrown { to_base, .. } = self.ball {
                     // A receiver steps straight to the bag; a relay goes on quickly.
                     fd.target = base_pos(to_base);
@@ -511,6 +584,7 @@ impl<'a> Sim<'a> {
                 }
                 let id = fd.id;
                 self.ball = Ball::Held { by: i };
+                self.secured_at = self.t;
                 self.emit(Input::GloveSecured { t: self.t, fielder: id, x: b.x, y: b.y });
                 return;
             } else if d <= RIM {
@@ -527,7 +601,6 @@ impl<'a> Sim<'a> {
             }
             if diving {
                 // A missed dive leaves the fielder on the ground for the get-up time.
-                fd.ready_at = self.t + DIVE_GETUP_S;
                 fd.blocked_until = fd.ready_at;
             }
         }
@@ -598,41 +671,66 @@ impl<'a> Sim<'a> {
                 self.f[receiver].target = Vec3::new(p.x, p.y, 0.0);
             }
         }
-        if let Ball::Thrown { .. } = self.ball {
-            let (b, v) = self.ball_at(self.t);
+        if let Ball::Thrown { r0, v0, t0, .. } = self.ball {
+            let (b, _) = self.ball_at(self.t);
             if b.z <= self.inp.env.ball.radius {
-                // The throw got by: it is a loose ball now.
-                self.set_free(BallState { r: Vec3::new(b.x, b.y, self.inp.env.ball.radius), v, w: Vec3::ZERO });
+                // The throw reached the ground: find when, and continue from there with the
+                // bounce model (a short hop or a throw that got by).
+                let rr = self.inp.env.ball.radius;
+                let (a, bq, c) = (0.5 * G, -v0.z, rr - r0.z);
+                let disc = (bq * bq - 4.0 * a * c).max(0.0);
+                let tau = (-bq + m::sqrt(disc)) / (2.0 * a);
+                let p = r0 + v0 * tau + Vec3::new(0.0, 0.0, -0.5 * G * tau * tau);
+                let v = v0 + Vec3::new(0.0, 0.0, -G * tau);
+                let _ = t0;
+                self.set_free(BallState { r: Vec3::new(p.x, p.y, rr), v, w: Vec3::ZERO });
             }
         }
     }
 
     /// Runners' believed time for the ball to reach base `b` (they watch the ball and the
     /// fielders; agent-models §6.3).
-    fn ball_time_to(&self, b: u8) -> f64 {
+    fn ball_time_to(&self, k: usize, b: u8) -> f64 {
         let target = base_pos(b);
         match &self.ball {
-            Ball::Held { by } => {
-                let fd = &self.f[*by];
-                fd.ready_at.max(self.t) + (target - fd.pos).norm() / (THROW_FRAC * fd.a.arm)
+            Ball::Held { .. } => {
+                // The runner sees where the ball is and when it was caught.
+                let (p, _) = self.ball_at(self.t);
+                let ready = (self.secured_at + TYPICAL_TRANSFER).max(self.t);
+                ready + m::hypot(target.x - p.x, target.y - p.y) / (THROW_FRAC * TYPICAL_ARM)
             }
-            Ball::Thrown { r0, v0, t0, to_base, .. } => {
-                let vh = m::hypot(v0.x, v0.y).max(1.0);
-                let arrive = t0 + m::hypot(base_pos(*to_base).x - r0.x, base_pos(*to_base).y - r0.y) / vh;
-                if *to_base == b { arrive } else { arrive + 0.6 + (target - base_pos(*to_base)).norm() / 33.0 }
+            Ball::Thrown { .. } => {
+                // A throw in the air: where it is and how fast it is coming.
+                let (p, v) = self.ball_at(self.t);
+                let vh = m::hypot(v.x, v.y).max(5.0);
+                let to = |q: Vec3| m::hypot(q.x - p.x, q.y - p.y);
+                let heading = Vec3::new(v.x, v.y, 0.0).normalized();
+                // The base the throw is going to: the one most nearly along its heading.
+                let dest = (1..=4u8)
+                    .max_by(|&a, &c| {
+                        let da = (base_pos(a) - p).normalized().dot(heading);
+                        let dc = (base_pos(c) - p).normalized().dot(heading);
+                        da.total_cmp(&dc)
+                    })
+                    .unwrap();
+                let arrive = self.t + to(base_pos(dest)) / vh;
+                if dest == b { arrive } else { arrive + 0.6 + (target - base_pos(dest)).norm() / (THROW_FRAC * TYPICAL_ARM) }
             }
             Ball::Free { .. } => {
-                let fd = &self.f[self.primary];
-                fd.t_int.max(self.t) + fd.a.transfer + (target - fd.target).norm() / (THROW_FRAC * fd.a.arm)
+                let pred = self.runner_predict(k, b as u32);
+                let (tf, at) = self.believed_field_time(&pred);
+                tf + TYPICAL_TRANSFER + (target - at).norm() / (THROW_FRAC * TYPICAL_ARM)
             }
         }
     }
 
     fn runner_decide(&mut self, k: usize, at_base: u8) {
         let forced = {
-            // Forced while every base behind this runner (to home) holds a forced runner.
+            // Forced while the batter is still a runner and every base behind this runner is
+            // held by a runner still in play (the runner sees outs as they are signalled).
             let r = &self.r[k];
-            r.start == 0 || (1..r.start).all(|b| self.r.iter().any(|x| x.start == b && !x.out))
+            let batter_alive = self.r.iter().any(|x| x.start == 0 && !x.out);
+            r.start == 0 || (batter_alive && (1..r.start).all(|b| self.r.iter().any(|x| x.start == b && !x.out)))
         };
         let next = at_base + 1;
         if next > 4 {
@@ -640,12 +738,13 @@ impl<'a> Sim<'a> {
         }
         let r = &self.r[k];
         let t_run = run_time(BASE_L, r.vmax, 1.0) * if r.v > 1.0 { 0.75 } else { 1.0 };
-        let t_ball = self.ball_time_to(next);
+        let t_ball = self.ball_time_to(k, next);
         let mut rr = rng(self.inp.seed, self.inp.play, r.id, Purpose::RunnerPerception, next as u32);
         let noise = 0.15 * rr.truncated_normal(4.0);
         let must = forced && at_base == r.start && !self.caught();
-        // A runner may only take a base if every runner ahead of him is going past it.
-        let blocked = self.r.iter().any(|o| o.id != r.id && !o.out && !o.scored && o.start > r.start && o.goal <= next);
+        // A runner may only take a base if every runner ahead of him visibly is going past it:
+        // a runner ahead who is standing at or short of that base blocks it.
+        let blocked = self.r.iter().any(|o| o.id != r.id && !o.out && !o.scored && o.start > r.start && o.s <= next as f64 * BASE_L + 0.5 && o.v < 0.5);
         let go = must || (!blocked && t_ball - (self.t + t_run) + noise > 0.35);
         let r = &mut self.r[k];
         if go {
@@ -771,13 +870,14 @@ impl<'a> Sim<'a> {
         // A forced runner heading for a base this fielder is closer to: run it there now
         // (stepping on a bag needs no transfer).
         for r in &self.r {
-            if r.out || r.scored || r.goal as f64 * BASE_L <= r.s + 0.05 {
+            if r.out || r.scored || r.v < 0.5 {
                 continue;
             }
-            let tgt = base_pos(r.goal);
+            let goal = ((r.s / BASE_L).floor() as u8 + 1).min(4);
+            let tgt = base_pos(goal);
             let d_me = (tgt - fd.pos).norm();
             let t_me = run_time(d_me, fd.a.speed, fd.a.tau_a);
-            let t_runner = (r.goal as f64 * BASE_L - r.s) / r.vmax.max(1.0);
+            let t_runner = (goal as f64 * BASE_L - r.s) / r.v.max(5.0);
             if d_me < 8.0 && t_me + 0.1 < t_runner {
                 self.f[by].target = tgt;
                 return;
@@ -789,14 +889,13 @@ impl<'a> Sim<'a> {
         // Options: each base a running runner is heading to.
         let mut best: Option<(f64, u8)> = None;
         for r in &self.r {
-            if r.out || r.scored {
-                continue;
+            if r.out || r.scored || r.v < 0.5 {
+                continue; // standing runners are not a play
             }
-            let goal = r.goal;
-            if goal as f64 * BASE_L <= r.s + 0.05 {
-                continue; // already there
-            }
-            let t_runner = self.t + (goal as f64 * BASE_L - r.s) / r.vmax.max(1.0);
+            // The base a moving runner is heading for, and when he gets there at his
+            // current speed (both visible).
+            let goal = ((r.s / BASE_L).floor() as u8 + 1).min(4);
+            let t_runner = self.t + (goal as f64 * BASE_L - r.s) / r.v.max(5.0);
             let d = (base_pos(goal) - fd.pos).norm();
             let t_ball = self.t + d / (THROW_FRAC * fd.a.arm) + 0.05;
             let p_out = phi((t_runner - t_ball) / 0.12);
@@ -825,7 +924,8 @@ impl<'a> Sim<'a> {
         let receiver = (0..9).find(|&i| i != by && self.f[i].role == Role::Cover(b)).unwrap_or_else(|| {
             (0..9).filter(|&i| i != by).min_by(|&a, &c| (self.f[a].pos - tgt).norm().total_cmp(&(self.f[c].pos - tgt).norm())).unwrap()
         });
-        let mut r = rng(self.inp.seed, self.inp.play, fd.id, Purpose::ThrowExecution, self.bounce_k);
+        let mut r = rng(self.inp.seed, self.inp.play, fd.id, Purpose::ThrowExecution, fd.throws);
+        self.f[by].throws += 1;
         let r0 = fd.pos + Vec3::new(0.0, 0.0, 1.8);
         let aim = tgt + Vec3::new(0.0, 0.0, 1.3);
         let d = m::hypot(aim.x - r0.x, aim.y - r0.y);
@@ -843,7 +943,7 @@ impl<'a> Sim<'a> {
         let fd = &self.f[by];
         let calm = self.r.iter().all(|r| r.out || r.scored || (r.s - r.goal as f64 * BASE_L).abs() < 1e-6);
         let in_infield = m::hypot(fd.pos.x, fd.pos.y) < INFIELD_R;
-        calm && (in_infield || self.r.iter().all(|r| r.out || r.scored || r.v == 0.0)) && self.t >= fd.ready_at
+        calm && in_infield && self.t >= fd.ready_at
     }
 
     fn record(&mut self) {
@@ -891,6 +991,7 @@ pub fn simulate_live(inp: &LiveInput, st: &mut RulesState) -> LiveOutput {
                 belief: None,
                 t_int: f64::INFINITY,
                 last_close_read: 0.0,
+                throws: 0,
             }
         })
         .collect();
@@ -925,6 +1026,7 @@ pub fn simulate_live(inp: &LiveInput, st: &mut RulesState) -> LiveOutput {
         bounce_k: 1000,
         done: false,
         last_fact_t: t_c,
+        secured_at: f64::INFINITY,
     };
     // Reactions: the defense reads the ball after its reaction time; runners decide at once
     // from what they see (a ball in the air that a fielder is settling under: tag up).
@@ -958,9 +1060,14 @@ pub fn simulate_live(inp: &LiveInput, st: &mut RulesState) -> LiveOutput {
             runners_started = true;
             let (b, bv) = sim.ball_at(sim.t);
             let airborne = matches!(sim.ball, Ball::Free { .. }) && (b.z > 1.5 || bv.z > 0.0);
-            let fd = &sim.f[sim.primary];
-            let likely_catch = airborne && fd.t_int <= sim.out.path.first_bounce().map(|x| x.0).unwrap_or(f64::INFINITY) + 0.5;
             for k in 0..sim.r.len() {
+                // Each runner reads the ball himself: if a visible fielder can get under it
+                // before it lands, he expects a catch and tags up.
+                let likely_catch = airborne && sim.r[k].start > 0 && {
+                    let pred = sim.runner_predict(k, 0);
+                    let land = pred.first_bounce().map(|x| x.0).unwrap_or(pred.t_end());
+                    sim.believed_field_time(&pred).0 <= land + 0.3
+                };
                 if sim.r[k].start == 0 {
                     sim.r[k].goal = 1;
                 } else if likely_catch {
@@ -1019,11 +1126,11 @@ pub fn simulate_live(inp: &LiveInput, st: &mut RulesState) -> LiveOutput {
         if sim.done {
             break;
         }
+        sim.update_thrown();
         sim.try_captures();
         if sim.done {
             break;
         }
-        sim.update_thrown();
         sim.holder_act();
         if sim.done {
             break;
