@@ -294,7 +294,7 @@ The ground is a **height function** h(x, y): zero everywhere except the pitcher'
 | Warning track | 0.48 | 0.60 | 0.0 | 0.10 | 1.5° | [E] |
 | Artificial turf (park option) | 0.55 | 0.40 | 0.0 | 0.06 | 0.3° | [E] |
 
-e_n decreases with impact speed: e_n(c_n) = e_ref / (1 + k_s·|c_n|) [E form]. **All values in this table are unsourced placeholders.** M5 calibrates them against observed behavior: ground-ball speeds reaching infielders, the hop height of typical grounders, roll-out distances of outfield singles. Literature on ball bounce from Cross would make good starting points if it can be found.
+e_n decreases with impact speed: e_n(c_n) = e_ref / (1 + k_s·|c_n|) [E form]. **All values in this table are unsourced placeholders.** *(M4 skeleton, 2026-10-31: the implementation uses rolling resistance μ_r = 0.22 on dirt and 0.28 on grass, because the values above let a 25 m/s grounder roll ~250 m; 0.22/0.28 gives ~110 m. R4 replaces both with measured values.)* M5 calibrates them against observed behavior: ground-ball speeds reaching infielders, the hop height of typical grounders, roll-out distances of outfield singles. Literature on ball bounce from Cross would make good starting points if it can be found.
 
 ### 9.2 Bounce and roll
 - A **bounce** is §8's solver against an immovable ground with normal n̂ (perturbed per §9.3).

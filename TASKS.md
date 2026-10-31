@@ -1,67 +1,78 @@
 # Task List
 
-**Last updated:** 2026-10-31
+**Last updated:** 2026-10-31 (overnight session)
 The live to-do list for the project. [PLAN.md](PLAN.md) holds decisions and design. This file holds what is next and what is done. Update it at the end of every work session.
 
 Status: `[ ]` not started · `[~]` in progress · `[x]` done · `[?]` needs an owner decision
 
 ---
 
+## Owner decisions waiting (from the 2026-10-31 overnight session)
+
+- [?] **O1. Chase rate / batter overconfidence.** With perception biases modeled honestly, average hitters chase ~11% (MLB 29%) because their filter is never confidently wrong. Should average hitters be overconfident (believed bias σ < true σ, or Discipline `c_D` > 1 at grade 50), or should the learned `SwingW` table (M6) carry it? See [docs/calibration/2026-10-31-m3-interim.md](docs/calibration/2026-10-31-m3-interim.md).
+- [?] **O2. Interim knobs.** `K_perception` 2.25, `K_command` 0.8, `K_swingplane` 1.0 (`Knobs::calibrated_m3()`), with 13/20 B1 metrics in band. Accept as the working point or ask for another pass.
+- [?] **O3. Spec deviations made overnight** (each written into its spec): full-state RK4 with spin decay inside the ODE (physics-spec §5.1); frictionless-impulse energy-guard fallback (physics-spec §8.1); event-log frame identifiers `BBEH`/`BBEV`/`BBEF` (data-formats §4.1); rolling resistance 0.22/0.28 (`bb_physics::ground`, physics-spec §9.1 still lists 0.09/0.12); the batter's 10-state filter (agent-models §3.3); the pursuit-limit and persistent-bias perception terms; the scoreboard as a public channel for pitch-type learning (agent-models §3.8 [C]).
+- [?] M0.9 Owner review: the Unreal spike result confirms or reopens D6 (Unreal). The spike has not been run (it needs an Epic account sign-in).
+
+---
+
 ## Done
 
-- [x] Brainstorming note (2026-10-26)
-- [x] Planning Pass 1, Gemini (archived: [docs/archive/PLAN-pass1-gemini.md](docs/archive/PLAN-pass1-gemini.md))
-- [x] Planning Pass 2, Claude (archived: [docs/archive/PLAN-pass2-claude.md](docs/archive/PLAN-pass2-claude.md))
-- [x] Owner decisions: stack (Rust sim + Unreal 5), universal DH, classic extra innings, shifts allowed, three-batter minimum, injuries later, live management is the primary experience, no RAM upgrade for now
-- [x] Merged master plan: [PLAN.md](PLAN.md)
-- [x] Physics spec draft v1, with formulas checked against Nathan's published reference case: [docs/physics-spec.md](docs/physics-spec.md)
-- [x] P1. Data formats draft v1: [docs/data-formats.md](docs/data-formats.md) (2026-10-31). Open items in its §10
-- [x] P2. Agent models draft v1: [docs/agent-models.md](docs/agent-models.md) (2026-10-31). Open items in its §13
-- [x] P3. Calibration targets draft v1: [docs/calibration-targets.md](docs/calibration-targets.md) (2026-10-31). Open items in its §13
-- [x] P4. Rules spec draft v1: [docs/rules-spec.md](docs/rules-spec.md) (2026-10-31). Open items in its §15
+- [x] Brainstorming note (2026-10-26); Planning Passes 1–2 (archived); owner decisions; merged [PLAN.md](PLAN.md)
+- [x] Specs P1–P4 drafted (data formats, agent models, calibration targets, rules) and the physics spec (2026-10-30/31)
 - [x] **M0 Foundations** (2026-10-31, except the Unreal spike M0.8/M0.9): git repo; toolchains (rustup, uv, zig linker shim, toolbx for `flatc`); Cargo workspace with the crate split; `bb_math` (Vec3/Mat3, units, `libm` wrappers, **Philox4x32-10** keyed RNG with KATs); six FlatBuffers schemas incl. the R12 additions; event-log container with BLAKE3 digest chain and determinism tests; `sim-cli`; Rerun output; [CLAUDE.md](CLAUDE.md); crate-graph test enforcing `bb_agents` ↛ `bb_world`
-- [x] **M1 Pitch flight** (2026-10-31): RK4 flight (full-state, spin decay in the ODE), Hermite events, atmosphere, spin-axis/tilt conventions, ABS zone, release point, aiming solve, movement metrics, arsenal templates for 10 pitch types (in public ranges, lefty mirror), release execution noise; Tier A A1–A6 and plausibility bands pass; **independent Python oracle written by Codex** agrees to ~3e-8 m; tunneling gate test; `sim-cli pitch/tunnel/arsenal`
-- [x] **M2 Bat and contact** (2026-10-31): bat profile with integrated mass properties (A12), §8.1 impulse solver with energy guard (A7–A9, A11, oracle fixtures), COR location profile, contact detection/resolution, analytic swing model (zero-lag template), swing execution noise, `bb_world` pitch resolution, cage harness; M2 gate sweeps pass (early→pull, late→oppo, undercut→backspin fly, overcut→topspin grounder, off-barrel→weak); contact map in [docs/m2-contact-map.md](docs/m2-contact-map.md); `sim-cli cage/cage-map`
-- [x] Codex code review of M0–M2 code: 10 findings, all fixed ([docs/reviews/2026-10-31-codex-m1-review.md](docs/reviews/2026-10-31-codex-m1-review.md))
+- [x] **M1 Pitch flight** (2026-10-31): RK4 flight, Hermite events, atmosphere, spin-axis/tilt conventions, ABS zone, release point, seeded aiming solve with explicit failure, movement metrics, arsenal templates for 10 pitch types (in public ranges, lefty mirror), release execution noise; Tier A A1–A6 and plausibility bands pass; **independent Python oracle written by Codex** agrees to ~3e-8 m; tunneling gate test; `sim-cli pitch/tunnel/arsenal`
+- [x] **M2 Bat and contact** (2026-10-31): bat profile with integrated mass properties (A12), §8.1 impulse solver with energy guard (A7–A9, A11, oracle fixtures), COR location profile, contact detection and resolution (end caps, adaptive scan), analytic swing model (zero-lag template, braking, plane tilt), swing execution noise, `bb_world` pitch resolution, cage harness; M2 gate sweeps pass; contact map in [docs/m2-contact-map.md](docs/m2-contact-map.md); `sim-cli cage/cage-map`
+- [x] **M3 Batter vs pitcher, mechanisms** (2026-10-31): 20–80 grade mappings (§10); batter hypothesis bank (10-state EKF per pitch type: plate point, arrival, break deviation, release point, persistent perceptual biases), pursuit-limited angular noise, spin cue, sequence prior; swing/take with Discipline, full-covariance P(strike), own-execution beliefs, anticipated-correction credit; causal mid-swing adjustment (Adjustability); real check swings judged by yaw; bootstrap pitcher selection with count-based target maps; in-game adaptation (`PitcherMemory`) with a times-through-the-order test; archetypes; `sim-cli pa/sensitivity/archetypes`; monotonicity tests; performance pass (~395 µs per pitch)
+- [x] **M4 started** (2026-10-31): `bb_rules` pure step function with a TOML scenario corpus (39 scenarios); ground bounces/rolls, fence, home runs, wall caroms; walking-skeleton play simulator (fielders, dives, glove capture, throws, runners, tag-ups); full AI-vs-AI games in `sim-cli game/games`
+- [x] Codex reviews: M0–M2 (10 findings, all fixed), M2–M3 (19 findings: 15 fixed, 4 deferred with reasons), in [docs/reviews/](docs/reviews/)
 
 ---
 
-## Phase: M3 Batter vs pitcher (current)
+## Phase: M3 calibration (open) and M4 (current)
 
-Planning specs P1–P4 are drafted (owner review still open). M0 (minus the Unreal spike), M1, and M2 are done.
+### M3 gate items still open
+- [~] B1 plate-appearance rates in rough Tier B bands: 13/20 in band ([report](docs/calibration/2026-10-31-m3-interim.md)). Open: O-Swing% (11 vs 29), foul share (18 vs 50), called-K share (45 vs 25), pitches/PA (3.0), Zone% (56), K% (13), HBP% (no evasion). Blocked on O1 for the chase mechanism
+- [ ] Velocity anchoring (agent-models §3.1) in the batter's type models
+- [ ] Composure (leverage-scaled noise, agent-models §1.5): needs game state; wire up in M4 now that games exist
+- [ ] Hit-by-pitch evasion and the posed capsule body (agent-models §3.7)
+- [ ] SpinCapacity has no effect (the batter's scouting knows this pitcher's true shapes; a league-prior blend would fix it); SpinRecognition is weak; QuickHands flat between 30 and 50. See the report's §7.2 notes
+- [ ] `Executed*` visibility isolation (module or crate split, plus a compile-fail test)
+- [ ] `criterion` benchmarks for the per-pitch budget (the timing harness is `bb_game/examples/perf.rs`)
+
+### M4 next steps
+- [ ] Fix the findings of the Codex M4 review ([docs/reviews/2026-10-31-codex-m4-review.md](docs/reviews/2026-10-31-codex-m4-review.md), if present)
+- [ ] Event-log output from real games (FlatBuffers `PlayRecord`s via `bb_schema::log`) and the **M0 exit test on real games**: same seed ⇒ same game digest
+- [ ] Event-sourced box score in `bb_stats` (hits vs errors needs the scorer, rules-spec §10)
+- [ ] Rules engine: uncaught third strike and caught foul tips (catcher capture), overrunning first, two runners on a base, passing runners, interference (§5.7); grow the corpus toward 150 scenarios (§12.3)
+- [ ] Play simulator: replace the skeleton simplifications listed at the top of `bb_game/src/play.rs` (true belief-based perception via an atlas, calls/coverage tables, relays, physical throws, runner leads and secondary leads, base-path rounding)
+- [ ] Run environment: runs/team-game is ~9.8 (target ~4.5); batters reach on ~45% of balls in play (target ~32%). Measure first: by batted-ball type and fielder, from `bb_game/examples/bip_sweep.rs`
+- [ ] Play timelines for the client (data-formats §5) and Rerun output of whole games
+- [ ] M0.8 Unreal spike, then the Unreal client v0 (capsules, broadcast camera, scoreboard). **Owner judges watchability**
 
 ### Research follow-ups (from the specs' open-item lists)
-Not blocking; resolve during M1–M2 at the latest.
-- [ ] R1. Get Nathan's current Trajectory Calculator spreadsheet; confirm the drag and lift coefficients against the `pybbda` port. **Before M1 golden tests.**
-- [ ] R2. Wood-bat COR versus impact location, and its speed slope. **Before M2.**
-- [ ] R3. Spin-versus-undercut data for test A10. **Before M2.**
-- [ ] R4. Ball bounce and rolling values for grass, dirt, turf. **Before M5.**
-- [ ] R5. Baseball moment-of-inertia factor α.
-- [ ] R6. Tune the default bat to ~31–32 oz; add 2–3 stock bat variants. **During M2.**
-- [ ] R7. Exact ABS edge rule. Optional; the league is fictional.
-- [ ] R8. Confirm Savant `spin_axis`, tilt, and `pfx_x` signs for RHP/LHP four-seamers against a real Savant sample (data-formats §9). **Before M1 golden tests.**
-- [ ] R9. Literature pass on human interception and time-to-contact perception to set Vision's angular σ, Weber fraction, and tracking blackout distance (agent-models §3.2–3.3, §10). **Before M3.**
-- [ ] R10. Refresh every [R] reference value in calibration-targets against FanGraphs, Savant, and Baseball-Reference for the latest full season; record sources (calibration-targets §13). **Before M3.**
-- [ ] R11. Verify the OBR rule numbers and MLB interpretations cited in rules-spec (three-batter minimum at inning boundaries, mound-visit limit, walk-off base credit). **Before M4.**
-- [x] R12. Rules-spec §15 item 2 additions are in the M0.5 schemas (`sim/schemas/events.fbs`, `commands.fbs`) (2026-10-31)
+- [ ] R1. Nathan's current Trajectory Calculator spreadsheet; confirm C_D/C_L against the `pybbda` port
+- [ ] R2. Wood-bat COR versus impact location, and its speed slope
+- [ ] R3. Spin-versus-undercut data for test A10. The sim gives ~4,300 rpm at a 2 cm undercut, which may be high
+- [ ] R4. Ball bounce and rolling values for grass, dirt, turf (rolling resistance was raised to 0.22/0.28 so grounders stop in ~110 m; needs real roll-out data)
+- [ ] R5. Baseball moment-of-inertia factor α
+- [ ] R6. Tune the default bat to ~31–32 oz (it is 34.0 oz, outside its own §6.2 band, as the oracle noted); add 2–3 stock bats
+- [ ] R7. Exact ABS edge rule (optional)
+- [ ] R8. Confirm Savant `spin_axis`, tilt, and `pfx` signs against a real Savant sample. Also settle which Savant movement window matches the sim's full-flight IVB (the arsenal templates assume full-flight ≈ Savant scale)
+- [ ] R9. Literature pass on interception and time-to-contact perception (σ_ang, Weber fraction, blackout, the 1.2 rad/s pursuit limit, the 10% persistent share)
+- [ ] R10. Refresh every [R] reference value in calibration-targets against the latest full season
+- [ ] R11. Verify the OBR rule numbers and MLB interpretations cited in rules-spec
+- [x] R12. Rules-spec §15 item 2 additions are in the M0.5 schemas (2026-10-31)
 
----
-
-## Phase: M0 leftovers
-
+### M0 leftovers
 - [ ] M0.1b Install Git LFS before any Unreal asset is committed (`.gitattributes` already routes `*.uasset`/`*.umap` to LFS). Needs `sudo dnf install git-lfs` or the toolbx
 - [ ] M0.2b Optional: `sudo dnf install gcc glibc-devel` on the host to retire the zig linker shim (see CLAUDE.md)
 - [ ] M0.8 **Unreal spike** on this machine (14 GiB RAM): precompiled UE5 for Linux, low-RAM build settings, link the Rust library through the C ABI, play a capsule timeline; record RAM use and compile times against the PLAN §3.3 pass criteria
-- [?] M0.9 Owner review: spike result confirms or reopens D6 (Unreal)
 
 ---
 
 ## Later milestones (detail added when each one starts)
 
-- [ ] **M1** Pitch flight: also build the Python physics oracle (`analysis/oracle/`)
-- [ ] **M2** Bat and contact
-- [ ] **M3** Batter vs pitcher
-- [ ] **M4** Walking-skeleton full game + Unreal client v0. **Owner judges watchability.**
 - [ ] **M5** Deepen the field
 - [ ] **M6** Live management (primary experience)
 - [ ] **M7** League and season

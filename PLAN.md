@@ -1,7 +1,7 @@
 # 3D Physics-Based Baseball Management Game: Master Plan
 
 **Last updated:** 2026-10-31
-**Status:** Planning. No code yet.
+**Status:** Implementation. M0 (except the Unreal spike), M1, and M2 are done; M3 mechanisms are done with calibration open; the M4 walking skeleton plays full AI-vs-AI games in the CLI. Live status: [TASKS.md](TASKS.md).
 **Sources:** [brainstorming note (2026-10-26)](./2026-10-26--physics-based-baseball-game__note.docx) · [Pass 1, Gemini](./docs/archive/PLAN-pass1-gemini.md) · [Pass 2, Claude](./docs/archive/PLAN-pass2-claude.md)
 
 This is the single living plan. It merges Passes 1 and 2 and the owner's answers. The archived passes are kept for history only. Where they disagree with this file, this file wins.
@@ -88,7 +88,7 @@ flowchart LR
 | CLI | `clap`-based `sim-cli` | Cage lab, sweeps, games, seasons |
 | Testing | `cargo nextest`, `proptest` (invariants/monotonicity), `insta` (event-log snapshots), `criterion` (perf budgets) | Everything the AI builds can be checked headlessly |
 | Calibration analysis | CLI writes Parquet/CSV; Python (`uv` + Polars + plotting) for notebooks and reports | Fast exploratory analysis; optional |
-| Version control | Git + Git LFS (for Unreal binary assets) | The folder is not a repository yet. Set up in M0 |
+| Version control | Git + Git LFS (for Unreal binary assets) | Repository set up in M0 (2026-10-31); Git LFS still to install before Unreal assets |
 
 ### 3.2 Alternatives considered
 

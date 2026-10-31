@@ -44,7 +44,10 @@ sim/                   Cargo workspace
     bb_observe         observation types and shared domain enums (PitchType, Hand)
     bb_agents          players/managers (no bb_world!): pitcher, motor (execution noise)
     bb_schema          generated FlatBuffers code + event-log container and BLAKE3 digest chain
-    bb_world, bb_rules, bb_game, bb_stats, bb_league, bb_ffi   (later milestones)
+    bb_world           true world: pitch resolution against the swing
+    bb_rules           rules engine: pure step function over facts; scenarios/**/*.toml corpus
+    bb_game            orchestrator: cage, plate appearances (pa.rs), live-ball plays (play.rs), games
+    bb_stats, bb_league, bb_ffi   (later milestones)
     bb_cli             `sim-cli` lab binary (Rerun output behind the default `rerun` feature)
 ```
 
@@ -63,6 +66,12 @@ cd sim && cargo test --workspace          # all tests (unit, golden, oracle cros
 cargo run --release -p bb_cli -- arsenal  # pitch-type table for an average pitcher
 cargo run --release -p bb_cli -- pitch --type SL --n 20 --rrd out/sl.rrd
 cargo run --release -p bb_cli -- tunnel --with CU --json out/t.json
+cargo run --release -p bb_cli -- pa --n 3000 --k-perception 2.25 --k-command 0.8   # B1 rates (M3)
+cargo run --release -p bb_cli -- sensitivity          # one-attribute sweeps, direction checks
+cargo run --release -p bb_cli -- archetypes           # batter/pitcher archetype profiles
+cargo run --release -p bb_cli -- game --seed 7        # one full AI-vs-AI game (M4 skeleton)
+cargo run --release -p bb_cli -- games --n 200        # run environment over many games
+cargo test -p bb_rules --test scenarios -- --nocapture   # rules scenario corpus (TOML)
 ./schemas/gen.sh                          # after editing any .fbs
 ```
 
@@ -73,6 +82,8 @@ cargo run --release -p bb_cli -- tunnel --with CU --json out/t.json
 - **Tier B playability** (runs/game, K%, ...) is tuned only through ability distributions and noise scales, never through fudge factors (PLAN §13).
 - Parameters tagged [E] in the specs are named, configurable parameters, never literals buried in logic.
 - When you change physics, regenerate or extend the oracle fixtures from the spec, not from the Rust output.
+- Calibration changes go in a report under `docs/calibration/` naming the band and mechanism that justified each change (calibration-targets §2.3–§2.4). Interim global knobs live in `bb_game::pa::Knobs::calibrated_m3()`; `Knobs::default()` stays at 1.0.
+- Independent reviews by Codex go in `docs/reviews/`, each with a Resolution section saying what was fixed or deferred and why.
 
 ## Unreal rules (from M0.8 on; PLAN §3.4)
 
