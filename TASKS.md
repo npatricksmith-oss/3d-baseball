@@ -1,21 +1,19 @@
 # Task List
 
-**Last updated:** 2026-10-31 (overnight session)
+**Last updated:** 2026-10-31 (day session)
 The live to-do list for the project. [PLAN.md](PLAN.md) holds decisions and design. This file holds what is next and what is done. Update it at the end of every work session.
 
 Status: `[ ]` not started · `[~]` in progress · `[x]` done · `[?]` needs an owner decision
 
 ---
 
-## Resume here (end of the 2026-10-31 overnight session)
+## Resume here (end of the 2026-10-31 day session)
 
-The last commit (`0c2585d`) applied the Codex live-simulator review fixes to `sim/crates/bb_game/src/live.rs`: runners judge catches and throws from their own noisy reads and league-typical fielder values, the defense infers runner targets from observed motion, and the force belief includes whether the batter is alive. All tests pass. Two regressions came with it:
+The overnight "Resume here" list is done (commit `3fd7757` plus the docs commit after it). Runners now retouch after catches, wait for the runner ahead to clear a base, and go back from a base the runner ahead holds: `sim-cli games --n 128` gives **0 rules warnings**, 5.64 runs/team-game. The "846 ms per game" was a measuring artifact (wall × 16 SMT threads); one game on one thread is ~270 ms, live plays ~117 ms. The live review's Resolution section is written. Next candidates, in order:
 
-1. [ ] **86 `two_runners_on_base` rules warnings over 128 games** (`sim-cli games --n 128`). Likely cause: `runner_decide`'s new `blocked` test only counts a runner ahead as blocking when he is standing still (`o.v < 0.5`), so a trailing runner can take a base a slower lead runner is still heading for.
-2. [ ] **Performance: ~846 ms per game per core** (was 230–370; budget 200). Likely cause: `runner_predict` + `believed_field_time` re-fly the ball on every runner decision. Cache one prediction per runner per replan, or coarsen the step. Profile with `BB_PROF=1`.
-3. [ ] Write the Resolution section of [docs/reviews/2026-10-31-codex-live-review.md](docs/reviews/2026-10-31-codex-live-review.md). Fixed: 1, 2 (partly: league-typical arm/transfer/speed and observed runner motion), 9 (intra-tick fact sort), 10, 14, 15, 17, 18, 19. Deferred to M5 with reasons: 3, 4, 5, 6, 7, 8, 11, 12, 13, 16.
-4. [ ] rules-spec §5.8: change the infield radius from 30 m to 45 m (`INFIELD_R` in live.rs) and say why: `settled()` now requires the ball in the infield.
-5. [ ] Refresh the numbers in [docs/2026-10-31-overnight-report.md](docs/2026-10-31-overnight-report.md) after 1–2 (latest: 5.08 runs/team-game, GB reached .49, LD .64, FB .14, PU .03, K% 12.6, BB% 10.0) and count the live review as the fifth Codex review.
+1. [ ] **Per-game budget (200 ms):** the pitch side now dominates (540 µs per pitch, aim solve 258 µs of it; `examples/perf.rs`). Speed up `plan_release`'s aim solve (warm start from the previous solve, fewer iterations) before touching the live sim again.
+2. [ ] **Run environment:** ground balls reach base .55 of the time (MLB ≈ .24). Measure by fielder and spray before changing positioning.
+3. [ ] The rest of "M4 next steps" below.
 
 ---
 
@@ -54,13 +52,13 @@ The last commit (`0c2585d`) applied the Codex live-simulator review fixes to `si
 
 ### M4 next steps
 - [x] Fix the findings of the Codex M4 review ([docs/reviews/2026-10-31-codex-m4-review.md](docs/reviews/2026-10-31-codex-m4-review.md), with Resolution)
-- [~] Codex live-simulator review ([docs/reviews/2026-10-31-codex-live-review.md](docs/reviews/2026-10-31-codex-live-review.md)): fixes in, Resolution section and two regressions open (see "Resume here")
+- [x] Codex live-simulator review ([docs/reviews/2026-10-31-codex-live-review.md](docs/reviews/2026-10-31-codex-live-review.md)): 8 fixed, 3 partly, 8 deferred to M5, with Resolution
 - [x] Event-log output from real games (`bb_game::eventlog`, one `PlayRecord` per pitch) and the **M0 exit test on real games**: same seed ⇒ same digest across threads; the log reads back verified (`bb_game/tests/determinism.rs`)
 - [~] Event-sourced box score in `bb_stats`: runs, linescore, PA by result, LOB, outs per half-inning from the log alone, with accounting identities over 80 games (`bb_stats/tests/accounting.rs`). Hits vs errors still need the scorer (rules-spec §10)
 - [ ] Rules engine: uncaught third strike and caught foul tips (catcher capture), overrunning first, two runners on a base, passing runners, interference (§5.7); grow the corpus toward 150 scenarios (§12.3)
 - [x] Causal live-ball simulator (`bb_game/src/live.rs`): tick loop, fielders predict from noisy observations with their own physics, calls and re-calls, coverage, real captures and deflections, wall robberies, thrown balls with tracking receivers, observation-based runners, rules stepped live (2026-10-31)
-- [ ] Live-ball simulator next steps: atlas-based perception (agent-models §5.1), relays and cutoffs, throws with drag, runner leads, rounding and slides, `BallPassedBase`, first-touch facts, the rare two-runners-on-a-base and out-of-order warnings, performance (~846 ms per game after commit `0c2585d`; budget 200)
-- [ ] Run environment: runs/team-game is ~5.1 with the causal simulator (target ~4.5). Ground balls reach base .49 of the time (MLB ≈ .24) because too many get through the fixed-table infield positions; LD/FB/PU are near MLB rates. Measure first: by batted-ball type and fielder (`examples/dump_plays.rs` plus `analysis/plots/plays_topdown.py` give visual checks)
+- [ ] Live-ball simulator next steps: atlas-based perception (agent-models §5.1), relays and cutoffs, throws with drag, runner leads, rounding and slides, `BallPassedBase`, first-touch facts, the deferred live-review findings (3–6, 11–13, 16), runners reconsidering on bobbles and throw releases
+- [ ] Run environment: runs/team-game is ~5.6 with the causal simulator (target ~4.5). Ground balls reach base .55 of the time (MLB ≈ .24) because too many get through the fixed-table infield positions; LD/FB/PU are near MLB rates. Measure first: by batted-ball type and fielder (`examples/dump_plays.rs` plus `analysis/plots/plays_topdown.py` give visual checks)
 - [x] Play timelines for the client (data-formats §5, `bb_game::timeline`: ball knots, markers, telemetry, view state) and Rerun output of whole games (`sim-cli game --rrd`)
 - [x] C ABI for the Unreal spike (`bb_ffi`: create/advance/score/free, header `sim/crates/bb_ffi/include/bb_ffi.h`); a C client plays a full game (`sim/crates/bb_ffi/c/run_smoke.sh`)
 - [ ] M0.8 Unreal spike, then the Unreal client v0 (capsules, broadcast camera, scoreboard). **Owner judges watchability**

@@ -49,13 +49,13 @@ The Rerun viewer is installed (`~/.local/bin/rerun`, version 0.41.0 to match the
 | Determinism (M0 exit gate) | Same seed gives the same game digest across runs and threads; logs read back and verify; recording visuals does not change the game |
 | Crate rule (D1 at compile time) | `bb_agents` cannot reach `bb_world` (test) |
 | Accounting (event sourcing) | Box scores rebuilt from the event logs alone match the sim over 80 games: runs, linescores, three outs per completed half-inning, PA totals |
-| Code review | Four independent Codex reviews (M1, M3, M4 rules + skeleton, causal simulator): 10 + 19 + 24 findings fixed or explicitly deferred with reasons; all in [reviews/](reviews/) |
+| Code review | Four independent Codex reviews (M1, M3, M4 rules + skeleton, causal live simulator): 10 + 19 + 24 + 19 findings, each fixed or explicitly deferred with reasons; all in [reviews/](reviews/) |
 
 ## Numbers to know
 
 **Plate-appearance calibration (interim, 13 of 20 metrics in band):** K% 13 (target 22.5), BB% 10, Swing% 43, Z-Contact% 84, O-Swing% 11 (target 29), mean exit velocity 89 mph, mean launch angle 7°, hard-hit 38%. Full report: [calibration/2026-10-31-m3-interim.md](calibration/2026-10-31-m3-interim.md).
 
-**Full games:** about **5.6 runs per team-game** (MLB ≈ 4.5). Line drives (.73 vs .68), fly balls (.12 vs .13), and popups (.02 vs .02) fall in at MLB rates. Ground balls are too productive (.58 including fielder's choices vs ≈ .24), mostly because they get through the infield; the infield positions are a fixed table for now. About 230–370 ms per game on one core (budget 200 ms); 128 games take ~6 s on 16 threads, so a 972-game season would take under a minute.
+**Full games** (128 games, updated after the live-review fixes): about **5.6 runs per team-game** (MLB ≈ 4.5), K% 12.6, BB% 10.0, no rules warnings. Line drives (.67 vs .68), fly balls (.15 vs .13), and popups (.02 vs .02) fall in at MLB rates. Ground balls are too productive (.55 including fielder's choices vs ≈ .24), mostly because they get through the infield; the infield positions are a fixed table for now. About 270 ms per game on one thread (budget 200 ms): live plays ~117 ms, pitches the rest (the pitcher's aim solve is about half of each pitch). 128 games take ~5 s on 16 threads, so a 972-game season would take under a minute.
 
 ## Decisions for the owner
 

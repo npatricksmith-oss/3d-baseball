@@ -226,7 +226,7 @@ Only one appeal is in v1: **leaving early on a caught fly.** It is resolved auto
 The play ends at the first of:
 1. **Ball dead:** foul (uncaught), out of play, home run, HBP, batter hit by own batted ball, §5.7 cases, ball lodged (not modeled).
 2. **Third out** made and no run is still being decided by §6.4 (a runner touching home in the same fact window still gets judged by time).
-3. **Settled play:** a fielder holds the ball (secured) **inside the infield** (within 30 m of home [C]), and every runner is either touching a base or has had no movement toward the next base for `t_settle` = 1.0 s [E]. A runner caught between bases when time is called returns to the last base legally touched.
+3. **Settled play:** a fielder holds the ball (secured) **inside the infield** (within 45 m of home [C]; changed from 30 m on 2026-10-31 because 30 m excluded second base, 38.8 m from home, where a fielder with no play returns the ball; the infield dirt reaches about 45 m), and every runner is either touching a base or has had no movement toward the next base for `t_settle` = 1.0 s [E]. A runner caught between bases when time is called returns to the last base legally touched.
 4. **Play timeout:** sim time since contact (or since the pitch, for non-batted plays) exceeds `T_play_max` = 60 s [E]. Runners return to the last base touched; `PlayTimeout` is emitted. A timeout is a liveness bug; calibration W7 checks it never happens.
 
 ---

@@ -220,3 +220,33 @@ The fixed-step loop advances `t` unconditionally and has a finite play limit, so
 Defensive `BaseTouched { holding_ball: true }` and `TagContact` are currently emitted only from `Ball::Held`; I did not find a direct path that emits those while the ball is already `Thrown` or `Free`. The outstanding problems are capture/control timing, geometry and event ordering, rather than the old blanket assumption that a covering fielder has the ball. Free-ball ground/wall contacts are normally reported before that tick's capture, so the specific false post-ground capture found here concerns the separately sampled throw path (finding 10).
 
 Relative to the prior review: finding 5 remains open (1–3 and 6 here); finding 6's unconditional over-fence bypass is removed, but legal robbery geometry remains incomplete (13); finding 9's frozen throw-arrival shortcut is removed, but reception timing still has physical errors (4, 6, 10, 16); finding 10 remains incomplete (5, 11); finding 21's abandoned-free-path emissions are improved, but required passage facts and ordering remain incomplete (9, 12); finding 24's fielder position teleportation is removed, while boundary and recovery constraints remain incorrect (13, 18).
+
+## Resolution (Claude, 2026-10-31)
+
+Fixes landed in two commits: `0c2585d` (most findings) and `3fd7757` (the runner-order follow-up, which also covers 7 and most of 8). After both: all workspace tests pass; `sim-cli games --n 128` gives 5.64 runs/team-game with **no rules warnings** and no play timeouts.
+
+| # | Status | Change |
+| :--- | :--- | :--- |
+| 1 | Fixed | The initial tag-up decision uses the runner's own read (`runner_predict`: a noisy estimate of the ball's current state flown with the agent's physics) and `believed_field_time` (when some visible fielder could get there at league-typical speed). No world path, no fielder `t_int` |
+| 2 | Partly fixed | Runners judge throws and fielding from league-typical arm, transfer and speed (`TYPICAL_*`, scouting-level knowledge) and the visible ball; a throw's destination is read from its heading. Blocking and the defense's choice of base use each runner's visible position and direction of motion (direction comes from the runner's goal with no observation latency). **Deferred to M5:** per-agent observation snapshots, umpire-signal and call delays, per-fielder reaction gating of the first prediction, and decentralized assignment |
+| 3 | **Deferred (M5)** | A glove target driven by the fielder's belief needs the capture model rewrite (agent-models §5.1 atlas perception) |
+| 4 | **Deferred (M5)** | Shared-interval integration with sub-tick contact times and a priority merge. The 60 Hz tick bounds the timing error at 17 ms |
+| 5 | **Deferred (M5)** | Needs a new first-touch rules input (rules-spec §15) |
+| 6 | **Deferred (M5)** | A noisy perceived throw state for the receiver and vertical read noise come with the atlas perception model |
+| 7 | Fixed (`3fd7757`) | A runner who left his base before a catch goes back to retouch it, through intermediate bases in reverse order, then decides again from there. A runner waiting behind a runner ahead decides again once the runner ahead clears the next base. Reconsidering on other signals (a bobble, a throw release) is M5 |
+| 8 | Mostly fixed (`3fd7757`) | Policy: a runner takes a base only after every runner ahead has passed it (he waits otherwise); a runner heading for a base the runner ahead has stopped at or is going back to returns to the base behind (only the advance from the start base can be forced, so the batter can retreat from second). The 86 `two_runners_on_base` warnings over 128 games are now 0. **Deferred to the rules engine and M5:** a passing fact, entitlement when two runners share a base, and the holder's tag exemption near any base (see 16) |
+| 9 | Partly fixed | Ground, wall and settle facts within one tick are sorted by time before they go to the rules engine. The `max(floor)` clamp remains as a guard; producer-side assertions are M5 with finding 4 |
+| 10 | Fixed | `update_thrown` runs before captures: a throw reaching the ground is found at its analytic ground time and continues through the bounce model before any capture test |
+| 11 | **Deferred (M5)** | Provisional capture and a secure interval need new rules facts (with 5) |
+| 12 | **Deferred (M5)** | `BallPassedBase` emission (also listed in TASKS) |
+| 13 | **Deferred (M5)** | Park-boundary constraints on fielder movement and foot position in capture |
+| 14 | Fixed | The runner's force belief requires the batter to be alive (`Sim::forced`) |
+| 15 | Fixed | Settlement requires the holder inside the infield, whose radius is now 45 m (rules-spec §5.8 updated: the 30 m value excluded second base, the no-play return target) |
+| 16 | **Deferred (M5)** | Shared base and body contact volumes |
+| 17 | Fixed | Throw noise is keyed by a per-fielder throw counter, never by future bounce counts |
+| 18 | Fixed | Every committed dive starts the get-up interval, rim contact included |
+| 19 | Fixed | Predictions refresh `next_plan`; profiling is gated once per thread by `BB_PROF`. In `3fd7757` the agents' internal flight step went from 0.02 s to 0.04 s, which halves prediction cost with unchanged outcomes over 128 games |
+
+**Performance, corrected.** The ~846 ms "per game per core" quoted after `0c2585d` was the CLI's wall time × 16 workers on an 8-core, 16-thread CPU, so it double-counted SMT. Measured on one thread (`BB_PROF=1 cargo run --release -p bb_game --example prof_game`): one game takes ~270 ms, of which live plays are ~117 ms (fielder predictions 64 ms, intercepts 20 ms, runner reads 6 ms). Pitches take the rest: `examples/perf.rs` puts a whole pitch at 540 µs, of which the pitcher's aim solve is 258 µs. The 200 ms budget now depends mainly on the pitch side.
+
+**Run environment.** Runs/team-game went from 5.08 (after `0c2585d`) back to 5.64. The lower figure came from the runner bugs: trailing runners kept running into outs at bases the runner ahead held. 5.64 matches the level before the review (~5.6); the excess over MLB's ~4.5 is the open ground-ball problem (GB reached .55 vs MLB ≈ .24).
