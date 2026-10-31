@@ -284,3 +284,302 @@ expect = { outs = 2, bases = {}, score = [0, 0] }
 ```
 
 **Suggested fix:** evaluate unresolved leave-early appeals before ordinary safe-on-base protection and retain the appeal classification for run resolution.
+
+### 13. [P2] A force is never reinstated when a runner retreats after reaching the forced base
+
+**Location:** `sim/crates/bb_rules/src/engine.rs:452`, `:484`–`:494`; `sim/crates/bb_rules/src/state.rs:34`.
+
+The force test requires `last_base < base`, and `last_base` never decreases on ordinary retreat. After R1 touches second and retreats to first while the batter remains a runner, touching second with the ball can no longer retire R1. The engine needs direction/current-obligation state to distinguish retreat from merely overrunning the forced base. OBR 5.09(b)(6) reinstates the force on retreat; the spec should state that case explicitly.
+
+```toml
+id = "review-force-reinstated-on-retreat"
+initial = { inning = 3, batter = "A.4", bases = { first = "A.1" } }
+step = [
+  { fact = "PitchDelivered", t = 0.0 },
+  { fact = "BatContact", t = 0.42 },
+  { fact = "BaseLeft", t = 0.5, agent = "A.1", base = 1 },
+  { fact = "BallTouched", t = 0.8, what = "Ground", pos = [-6.0, 25.0] },
+  { fact = "BaseTouched", t = 4.5, agent = "A.1", base = 2 },
+  { fact = "BaseLeft", t = 4.6, agent = "A.1", base = 2 },
+  { fact = "BaseTouched", t = 8.5, agent = "A.1", base = 1 },
+  { fact = "GloveSecured", t = 8.7, fielder = "H.SS", pos = [0.0, 38.8] },
+  { fact = "BaseTouched", t = 8.8, agent = "H.SS", base = 2, holding_ball = true, expect_events = [{ event = "RunnerOut", runner = "A.1", kind = "Force" }] }
+]
+expect = { outs = 1 }
+```
+
+The batter can have stumbled or delayed before first; the force still exists. Returning R1 to first avoids requiring an unimplemented heading fact just to demonstrate the bug.
+
+**Suggested fix:** track retreat and current force obligations, clearing a force on reaching the target and reinstating it on retreat when the following runners still require advancement. Keep the existing removal on a following runner's out.
+
+### 14. [P2] A runner returning to an earlier base is placed on the later base at settlement
+
+**Location:** `sim/crates/bb_rules/src/engine.rs:493`–`:494`, `:556`–`:563`.
+
+Backward touches update only `on_base`; settlement uses the high-water `last_base` as the runner's actual placement. After the batter is retired and the force removed, R1 may reach second and legally return to first. The settled state nevertheless puts R1 on second and emits an invented advancement.
+
+```toml
+id = "review-return-to-first-placement"
+initial = { inning = 3, batter = "A.4", bases = { first = "A.1" } }
+step = [
+  { fact = "PitchDelivered", t = 0.0 },
+  { fact = "BatContact", t = 0.42 },
+  { fact = "BaseLeft", t = 0.5, agent = "A.1", base = 1 },
+  { fact = "BallTouched", t = 0.8, what = "Ground", pos = [-6.0, 25.0] },
+  { fact = "GloveSecured", t = 1.3, fielder = "H.SS", pos = [-8.0, 30.0] },
+  { fact = "BaseTouched", t = 2.4, agent = "H.1B", base = 1, holding_ball = true },
+  { fact = "BaseTouched", t = 4.5, agent = "A.1", base = 2 },
+  { fact = "BaseLeft", t = 4.6, agent = "A.1", base = 2 },
+  { fact = "BaseTouched", t = 8.5, agent = "A.1", base = 1 },
+  { fact = "PlayEndCheck", t = 10.0 }
+]
+expect = { outs = 1, bases = { first = "A.1" }, play = "Dead" }
+```
+
+**Suggested fix:** represent current legally occupied base separately from maximum advancement and next-touch obligation. Commit settlement from current legal occupancy, including reverse-order return touches.
+
+### 15. [P2] An ordinary walk-off is recognized only at settlement, after later facts have changed the play
+
+**Location:** `sim/crates/bb_rules/src/engine.rs:487`–`:491`, `:567`–`:571`; `sim/crates/bb_rules/scenarios/gameflow/gameflow-007.toml:36`, `:61`.
+
+Home touches only append pending runs. A winning home touch with all relevant obligations already satisfied leaves the game live until `PlayEndCheck` or a later out. Subsequent runner advancements/outs remain accepted; settlement can emit batter advancement beyond the winning play before finally calling `score_run`. The existing walk-off single test expects finalization at 6.0 s after a winning touch at 2.2 s, so it codifies the delay. This differs from rules-spec §4.1, including its instruction to ignore later facts. Genuine two-out force/batter-before-first obligations still need resolution before a pending run can be considered a legal winner.
+
+**Scenario:** the batter is safely on first before R3 scores, no outs, and no other runner has an outstanding obligation. The winning home-touch step should end the game; it currently emits nothing.
+
+```toml
+id = "review-walkoff-at-winning-touch"
+initial = { inning = 9, half = "bottom", score = [2, 2], batter = "H.4", bases = { third = "H.3" } }
+step = [
+  { fact = "PitchDelivered", t = 0.0 },
+  { fact = "BatContact", t = 0.42 },
+  { fact = "BaseLeft", t = 0.5, agent = "H.3", base = 3 },
+  { fact = "BallTouched", t = 1.5, what = "Ground", pos = [-20.0, 55.0] },
+  { fact = "BaseTouched", t = 4.6, agent = "H.4", base = 1 },
+  { fact = "BaseTouched", t = 4.8, agent = "H.3", base = 4, expect_events = [{ event = "RunScored", runner = "H.3" }, { event = "GameEnded", home = 3, walk_off = true }] }
+]
+expect = { status = "Final", score = [2, 3] }
+```
+
+**Suggested fix:** track when the prospective winning run becomes legally irrevocable, finalize at that fact boundary, and freeze subsequent play facts. Do not defer uncomplicated walk-offs merely to reuse generic settlement.
+
+### 16. [P2] Walk-offs break the PA event lifecycle and omit the winning PA from game statistics
+
+**Location:** `sim/crates/bb_rules/src/engine.rs:202`–`:209`, `:227`–`:235`, `:253`, `:390`–`:392`, `:407`, `:570`; `sim/crates/bb_game/src/game.rs:186`–`:201`.
+
+Walk/HBP, ground-rule-double, and settled-play walk-offs return after `score_run` finishes the game, skipping `end_pa`. The game counts PAs and BB/HBP/BIP only from `PlateAppearanceEnded`, so the winning PA is absent from those totals. `award_first` can even finish before placing/advancing the batter. The home-run path has the opposite lifecycle bug: `end_pa` starts the **next** PA before `finish` is called. It logs a plate appearance that can never occur.
+
+**Scenario:** tied bottom ninth, bases-loaded ball four. This is the existing `gameflow-005` situation with the missing PA-completion expectation added; current code cannot satisfy it.
+
+```toml
+id = "review-walkoff-walk-pa-completes"
+initial = { inning = 9, half = "bottom", outs = 1, count = [3, 2], score = [3, 3], batter = "H.4", bases = { first = "H.1", second = "H.2", third = "H.3" } }
+step = [
+  { fact = "PitchDelivered", t = 0.0 },
+  { fact = "PitchCrossed", t = 0.4, in_zone = false },
+  { fact = "SwingMeasured", t = 0.45, swung = false, expect_events = [{ event = "PlateAppearanceEnded", batter = "H.4", result = "Walk" }] }
+]
+expect = { status = "Final", score = [3, 4] }
+```
+
+OBR 5.08(b) also requires the batter's first-base touch for the forced winning-run case. If awards intentionally stand in for mandatory touches in this skeleton, that abstraction must at least complete the batter's award before finalization; currently the function returns before doing so.
+
+**Suggested fix:** separate PA completion from starting the next PA, and finalize winning awards/placements and the PA exactly once before emitting `GameEnded`. Cover walk-off BB, HBP, double, single, time play, and HR, including absence of a subsequent `PlateAppearanceStarted`.
+
+### 17. [P2] A foul-pole touch after a bounce is unconditionally a home run
+
+**Location:** `sim/crates/bb_rules/src/engine.rs:344`–`:346`.
+
+`Touch::FoulPole` calls `home_run` even if `lp.grounded` is already true. Pole contact establishes fair territory; it does not restore in-flight status after a ground touch. The existing `fairfoul-004` covers only an airborne pole hit. This is also an overbroad row in rules-spec §5.2. The [MLB fair-ball definition](https://www.mlb.com/glossary/rules/fair-ball) specifically describes on-the-fly pole homers.
+
+**Scenario:** a fair drive bounces and then leaves the field at the pole. Expected the two-base award, not a homer. The subsequent out-of-play fact makes the boundary award explicit.
+
+```toml
+id = "review-bounced-ball-at-pole"
+initial = { inning = 4, batter = "A.2", bases = { first = "A.1" } }
+step = [
+  { fact = "PitchDelivered", t = 0.0 },
+  { fact = "BatContact", t = 0.42 },
+  { fact = "BallTouched", t = 3.0, what = "Ground", pos = [65.0, 70.0] },
+  { fact = "BallTouched", t = 3.6, what = "FoulPole" },
+  { fact = "BallTouched", t = 3.61, what = "OutOfPlay", pos = [75.0, 75.0], in_flight = false }
+]
+expect = { score = [0, 0], bases = { second = "A.2", third = "A.1" }, play = "Dead" }
+```
+
+**Suggested fix:** use pole contact to establish fair territory, then distinguish an ungrounded airborne boundary event from a bounced ball. Update the corresponding spec row and add a bounced-pole case.
+
+### 18. [P2] The ground fair/foul test follows a spec assumption contradicted by the 2026 OBR clarification
+
+**Location:** `sim/crates/bb_rules/src/engine.rs:7`–`:13`, `:101`, `:335`; `docs/rules-spec.md` §5.2 Geometry.
+
+`fair_at` accepts centers as much as one ball radius outside the foul line for ground contact and settlement. At `(10.02, 10.0)` the center's signed distance is approximately −0.01414 m, so the code calls a resting ball fair. The 2026 Fair Ball definition distinguishes a ball contacting fair ground from one merely over it. On the flat-ground model, that ball's ground contact is outside the line. This finding is a spec/OBR mismatch, not an implementation divergence from the written spec. [2026 OBR, Fair Ball definition, printed p. 151](https://mktg.mlbstatic.com/mlb/official-information/2026-official-baseball-rules.pdf#page=163)
+
+```toml
+id = "review-ground-contact-outside-line"
+initial = { inning = 1 }
+step = [
+  { fact = "PitchDelivered", t = 0.0 },
+  { fact = "BatContact", t = 0.42 },
+  { fact = "BallTouched", t = 0.8, what = "Ground", pos = [5.0, 5.0] },
+  { fact = "BallSettled", t = 3.0, pos = [10.02, 10.0], expect_events = [{ event = "FairFoulDecided", fair = false }] }
+]
+expect = { strikes = 1, play = "Dead" }
+```
+
+**Suggested fix:** distinguish ground-contact geometry from airborne over-territory geometry, model any painted-line width explicitly, and revise the spec with the 2026 clarification. Do not apply the same radius expansion indiscriminately to settlement and airborne contacts.
+
+### 19. [P2] Third-out LOB is computed from time-of-pitch bases
+
+**Location:** `sim/crates/bb_rules/src/engine.rs:171`, `:521`–`:536`.
+
+Live runner movements remain in `LivePlay`; `st.bases` still holds the initial runners until normal settlement. The third-out path discards the live play without reconciling those bases, then `end_half` counts the stale array. Scored/retired runners can be charged as left on base and newly stranded runners omitted. This violates the accounting promised by rules-spec §§4.1 and 12.5 even when the linescore is correct.
+
+**Scenario:** R3 scores, batter reaches first, then the batter is tagged trying for second for the third out. No runner is left, but current `HalfInningEnded` reports one.
+
+```toml
+id = "review-third-out-lob-current-runners"
+initial = { inning = 7, outs = 2, batter = "A.4", bases = { third = "A.3" } }
+step = [
+  { fact = "PitchDelivered", t = 0.0 },
+  { fact = "BatContact", t = 0.42 },
+  { fact = "BaseLeft", t = 0.5, agent = "A.3", base = 3 },
+  { fact = "BallTouched", t = 1.2, what = "Ground", pos = [30.0, 60.0] },
+  { fact = "BaseTouched", t = 4.5, agent = "A.3", base = 4 },
+  { fact = "BaseTouched", t = 4.6, agent = "A.4", base = 1 },
+  { fact = "BaseLeft", t = 4.7, agent = "A.4", base = 1 },
+  { fact = "TagContact", t = 6.0, fielder = "H.2B", runner = "A.4", holding_ball = true, expect_events = [{ event = "HalfInningEnded", runs = 1, left_on_base = 0 }] }
+]
+expect = { score = [1, 0], half = "bottom" }
+```
+
+**Suggested fix:** derive inning-end accounting from the resolved live runners and run cancellations before clearing the play, rather than from the unchanged time-of-pitch occupancy array.
+
+### 20. [P2] The inning-30 warning stops the game and returns an unfinished game as a result
+
+**Location:** `sim/crates/bb_game/src/game.rs:72`–`:75`, `:208`–`:215`; `sim/crates/bb_rules/src/state.rs:195`, `:198`.
+
+The loop breaks on entering inning 31, despite rules-spec §4.1 requiring a warning on reaching inning 30 and continued extra innings. The returned `GameResult` has no final-status field and can contain a tied game without `GameEnded`; the current loop then finishes an ordinary event-log footer for it. This silently mixes incomplete games into aggregate statistics. If indefinite continuation is restored, the `u8` inning/run-per-inning storage also needs an explicit overflow policy; debug panic versus release wrap is not a valid game-ending rule.
+
+**Descriptive fixture:**
+
+```toml
+id = "review-thirty-inning-tie"
+start = { inning = 30, half = "bottom", outs = 2, score = [0, 0] }
+next_result = "caught strike three"
+expected = "warning and continue in top 31, status InProgress"
+actual = "loop exits before pitching top 31; no GameEnded"
+```
+
+**Suggested fix:** emit a warning once at the specified threshold and continue. If a caller imposes an operational budget, return an explicit incomplete/error result and resumable state, not a completed-game result. Use counters capable of representing the promised continuation.
+
+### 21. [P2] Ball facts describe the free path after possession and omit base-passage decisions
+
+**Location:** `sim/crates/bb_game/src/play.rs:191`–`:208`, `:350`, `:499`–`:501`; `sim/crates/bb_rules/src/engine.rs:91`.
+
+All free-path ground/wall/settled facts are queued before fielding and retained after a capture changes the actual ball state. A ball caught at 3 s can still “hit the ground” on its old trajectory at 4 s. `PlayOutput.path` also remains that free path, and `game.rs:126` records it as the batted visualization. Conversely, the simulator never emits `BallPassedBase`. A roller that passes a bag fair can later be judged foul at a later touch/settlement because its decisive fair passage was never reported. Hand-authored `fairfoul-003` exercises a fact the game does not produce.
+
+**Descriptive fixtures:**
+
+```toml
+id = "review-capture-invalidates-free-path"
+capture_s = 3.0
+free_path_ground_s = 4.0
+expected = "no old-path ground fact after capture; possessed/throw path replaces it"
+```
+
+```toml
+id = "review-fair-passage-before-later-foul-location"
+ground_touch = { t = 0.8, pos = [5.0, 6.0] }
+passes_first = { t = 2.0, fair = true }
+later_touch = { t = 3.0, pos = [25.0, 24.0] }
+expected = "fair from the passage at 2.0 s"
+actual_missing_fact = "BallPassedBase"
+```
+
+**Suggested fix:** emit contacts from the actual evolving ball path, pruning invalidated free-flight events after capture/deflection, and detect the specified near-ground 1B/3B crossings geometrically. Record the resulting possessed/thrown path as well. Settlement should use real possession and the spec's infield condition, rather than merely a final scheduled timestamp.
+
+### 22. [P2] The timestamp contract is not enforced, and exact-time run plays contradict the chosen priority
+
+**Location:** `sim/crates/bb_game/src/game.rs:97`–`:103`; `sim/crates/bb_game/src/play.rs:500`; `sim/crates/bb_rules/src/engine.rs:23`, `:527`; `sim/crates/bb_rules/tests/scenarios.rs:225`–`:232`.
+
+The game always emits a made-up crossing time of 0.42 s before the physical contact fact; any contact earlier than that arrives out of time order. HBP and swing times are similarly fixed. The engine stores/asserts no last-fact time, and the harness does not validate chronological ordering. Existing `force-001`/`002`/`003`, `tag-001`, `runs-001`, `gameflow-007`, and the added `catch-004` contain backwards timestamps. These tests therefore normalize an invalid caller behavior.
+
+The play sort is stable and deterministic for a fixed vector, but sorts only by timestamp, not the promised fact priority. Separately, even if the runner's home touch is correctly delivered first at an equal timestamp, `third_out` filters runs using strict numeric `< t`, discarding that earlier-priority fact. That contradicts rules-spec §1.2's explicitly chosen equal-time ordering.
+
+```toml
+id = "review-equal-time-home-touch-before-third-out"
+initial = { inning = 7, outs = 2, batter = "A.4", bases = { third = "A.3" } }
+step = [
+  { fact = "PitchDelivered", t = 0.0 },
+  { fact = "BatContact", t = 0.42 },
+  { fact = "BaseLeft", t = 0.5, agent = "A.3", base = 3 },
+  { fact = "BallTouched", t = 1.2, what = "Ground", pos = [30.0, 60.0] },
+  { fact = "BaseTouched", t = 4.6, agent = "A.4", base = 1 },
+  { fact = "BaseLeft", t = 4.7, agent = "A.4", base = 1 },
+  { fact = "BaseTouched", t = 5.0, agent = "A.3", base = 4 },
+  { fact = "TagContact", t = 5.0, fielder = "H.2B", runner = "A.4", holding_ball = true }
+]
+expect = { score = [1, 0], half = "bottom" }
+```
+
+**Suggested fix:** use actual physical event times, schedule by `(time, documented priority, stable source ordinal)`, and assert monotonic keys within each play. Judge time plays by that complete ordering. Reset the order assertion at an explicit new-play boundary because the game currently uses play-local times. Fix the corpus's backwards sequences rather than sorting them silently inside the test.
+
+### 23. [P2] Runner noise shares one hard-coded agent stream and depends on other runners' branches
+
+**Location:** `sim/crates/bb_game/src/play.rs:367`, `:374`, `:383`, `:405`, `:267`; `docs/data-formats.md` §2.3; PLAN §4.2.
+
+All runners on both teams draw sequentially from `agent_id = 0x0001`, `RunnerPerception`, `sub_index = 0`. A runner's noise therefore changes if an earlier runner takes another leg, holds, or is inserted earlier in the input vector. The capture `attempts` counter is also shared across switches of primary fielder, so a new fielder's sub-index depends on attempts made by someone else. These are keyed-stream isolation hazards; they do **not** establish a same-build/same-input nondeterminism bug. The current serial loops and stable sorts are repeatable.
+
+**Concrete scenario:** reorder the same `RunnerIn` set, preserving IDs, speeds, and starting bases. A runner near the send/hold threshold receives a different sample and can change action despite identical observations. Adding an unrelated runner decision can likewise shift existing decisions.
+
+**Descriptive fixture:**
+
+```toml
+id = "review-runner-noise-isolation"
+seed = 42
+play = 7
+case_a_order = ["A.4", "A.1", "A.3"]
+case_b_order = ["A.4", "A.3", "A.1"]
+same_runner_attributes_and_observations = true
+compare = "RunnerPerception samples indexed by runner and decision"
+expected = "same keyed samples for each matching runner decision"
+```
+
+**Suggested fix:** key each runner's observations by its actual ID and stable decision/tick/base index. Keep capture-attempt indices per fielder, or define a stable contact-event key. If input order is semantically meaningful, validate/canonicalize it explicitly, while preserving per-agent stream isolation. Document any within-stream draw order that remains part of replay compatibility.
+
+### 24. [P2] Non-primary fielders teleport between recomputed positions and are also assumed to cover bases
+
+**Location:** `sim/crates/bb_game/src/play.rs:294`–`:320`, `:461`.
+
+At every reselection, a non-primary fielder's position is rebuilt as `home + direction_to_current_true_ball * total_jog_distance`. It is not advanced from its previous position. A changed ball direction or a previous primary losing selection can move that fielder discontinuously. Subsequent coverage calculations ignore these chase positions and independently assume the designated receiver ran directly from home to the base since reaction time. Thus a fielder can simultaneously supply a chase position and a different base-cover arrival, influencing both who secures the ball and the out time.
+
+**Concrete scenario:** at 1 s a backup is 3 m to one side of its starting position; after a sharp carom, at 2 s it is recomputed 7 m on the opposite side. That requires a 10 m movement in one second despite a maximum speed below 10 m/s, without accounting for acceleration/turning. The same player can nevertheless be declared at its assigned base using a separate home-to-base calculation.
+
+**Descriptive fixture:**
+
+```toml
+id = "review-backup-position-continuity"
+speed_max_mps = 8.0
+prior_position_offset_m = [3.0, 0.0]
+prior_time_s = 1.0
+recomputed_position_offset_m = [-7.0, 0.0]
+next_time_s = 2.0
+also_designated_base_receiver = true
+expected = "one continuous position/velocity history with one current assignment"
+```
+
+**Suggested fix:** maintain position, velocity, and assignment for every fielder on each tick. Coverage and interception must share that state. Apply calls with the specified communication delay; an instantaneous central primary selection is an additional information shortcut, not a physical movement model.
+
+## Verification limits and follow-up coverage
+
+The initial unmodified `cargo test` attempt failed because the configured Zig linker tried to write `/home/natex/.cache/zig`, outside the writable roots. Retrying with `ZIG_GLOBAL_CACHE_DIR=/tmp/codex-m4-zig-global` and `ZIG_LOCAL_CACHE_DIR=/tmp/codex-m4-zig-local` succeeded. Those environment settings do not alter source or baseball inputs. The source changed during the review, so the permitted checks were repeated against the final inspected checkout; results are recorded below after completion.
+
+The 40-case corpus is one test invocation. Its subsequence event matcher (`tests/scenarios.rs:233`–`:251`) permits extra events; omitted `expect_events` makes no assertion about emitted warnings or outs. That is the documented matching format, but it leaves lifecycle defects such as extra next-PA starts undetected. Add negative/exact event assertions where needed, validate well-formed timestamps, and check live-runner/base/accounting invariants after each step/play. `pitch-002` should contain a real body touch, and `gameflow-007` should assert the actual winning boundary rather than settlement after later touches. The spec's well-formed-sequence fuzzer and 1,000-game accounting validation are not supplied by a 32-game zero-warning smoke run.
+
+No direct outcome dice roll was found in `bb_rules`; it has no RNG. The Gaussian pocket-offset norm and lateral throw error are mathematically physical input-noise tests, and the throw-option `p_out` is used for policy selection. The D1 issues above are causal information leaks and outcomes/possession manufactured by deterministic shortcuts; determinism does not make those physical facts true.
+
+## Resolution
+
+- **Fixed externally during review:** the initially observed missing wall-contact facts and wall-carom fly outs. Commit `d2f4cd7` adds `BallPath.walls`, emits `Touch::Wall`, invalidates the catch in the engine, updates `caught_fly`, and adds `catch-004`. That specific issue is excluded from the active findings. The new scenario still has a backwards timestamp, covered by finding 22.
+- **Open:** findings 1–24. This review changes no source, tests, scenario files, specifications, or task list. All proposed TOML remains inside this report for review; simulator fixtures explicitly identify where the current harness cannot represent the required evidence.
+- **Deferred scope acknowledged:** the explicit catcher/steal/interference/substitution/scorer limitations in `bb_rules/src/lib.rs` remain follow-up work. They do not excuse incorrect behavior in the implemented force, catch, tag-up, award, run-counting, and game-flow paths.

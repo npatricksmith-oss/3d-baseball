@@ -45,54 +45,102 @@ pub struct PlayViz {
     pub batted: Vec<[f64; 4]>,
 }
 
-/// Simulate one game with average players on both sides.
-pub fn simulate_game(seed: u64) -> GameResult {
-    simulate_game_with(seed, false)
+/// Everything one pitch produced, for timelines and visualization.
+#[derive(Clone, Debug)]
+pub struct PitchStep {
+    pub play: u32,
+    pub record: crate::pa::PitchRecord,
+    /// The pitch's flight (to contact, the ground, or past the catcher).
+    pub pitch_flight: bb_physics::Trajectory,
+    /// The batted ball's full path, if there was contact.
+    pub batted: Option<bb_physics::ground::BallPath>,
+    pub rules_events: Vec<Event>,
+    pub viz: PlayViz,
 }
 
-/// [`simulate_game`], optionally recording paths for visualization (recording never changes
-/// the simulation: data-formats §5.5).
-pub fn simulate_game_with(seed: u64, record: bool) -> GameResult {
-    let mut mu = Matchup::average();
-    mu.knobs = Knobs::calibrated_m3();
-    let field = Field::default();
-    let mut st = RulesState::default_fixture();
-    let mut res = GameResult::default();
-    let mut log = step(&mut st, &Input::StartGame);
-    let mut writer = bb_schema::log::LogWriter::new(&crate::eventlog::header(seed));
-    let mut pending_rules: Vec<Event> = log.clone();
-    // Scouting per batting slot, built once per game (model error per batter–pitcher pair).
-    let sc: Vec<Vec<Scouting>> = (0..2u32).map(|side| (0..9u32).map(|slot| scouting_for_pa(&mu, seed, 9_000_000 + side * 100 + slot).into_owned()).collect()).collect();
-    let bs = vec![mu.perception.break_sigma; mu.arsenal.len()];
-    let fattrs: [FielderAttrs; 9] = core::array::from_fn(FielderAttrs::average);
-    let mut play: u32 = 0;
-    let mut prev: Option<PitchType> = None;
-    let mut last_v: Option<f64> = None;
-    let mut last_batter = 0;
-    while st.status == Status::InProgress {
-        if st.inning > 30 {
-            res.warnings.push("liveness_inning_30");
-            break;
+/// A game that advances one pitch at a time (the engine behind `simulate_game` and the
+/// client API, data-formats §6.4).
+pub struct Game {
+    mu: Matchup,
+    field: Field,
+    pub st: RulesState,
+    res: GameResult,
+    log: Vec<Event>,
+    writer: bb_schema::log::LogWriter,
+    pending_rules: Vec<Event>,
+    sc: Vec<Vec<Scouting>>,
+    bs: Vec<f64>,
+    fattrs: [FielderAttrs; 9],
+    play: u32,
+    prev: Option<PitchType>,
+    last_v: Option<f64>,
+    last_batter: u16,
+    seed: u64,
+    record: bool,
+}
+
+impl Game {
+    pub fn new(seed: u64, record: bool) -> Game {
+        let mut mu = Matchup::average();
+        mu.knobs = Knobs::calibrated_m3();
+        let mut st = RulesState::default_fixture();
+        let log = step(&mut st, &Input::StartGame);
+        // Scouting per batting slot, built once per game (model error per batter–pitcher pair).
+        let sc: Vec<Vec<Scouting>> = (0..2u32).map(|side| (0..9u32).map(|slot| scouting_for_pa(&mu, seed, 9_000_000 + side * 100 + slot).into_owned()).collect()).collect();
+        let bs = vec![mu.perception.break_sigma; mu.arsenal.len()];
+        Game {
+            field: Field::default(),
+            res: GameResult::default(),
+            pending_rules: log.clone(),
+            log,
+            writer: bb_schema::log::LogWriter::new(&crate::eventlog::header(seed)),
+            sc,
+            bs,
+            fattrs: core::array::from_fn(FielderAttrs::average),
+            play: 0,
+            prev: None,
+            last_v: None,
+            last_batter: 0,
+            seed,
+            record,
+            st,
+            mu,
         }
+    }
+
+    pub fn finished(&self) -> bool {
+        self.st.status != Status::InProgress || self.st.inning > 30
+    }
+
+    /// Advance one pitch (and the play it starts). Returns `None` once the game is over.
+    pub fn step_pitch(&mut self) -> Option<PitchStep> {
+        if self.st.status != Status::InProgress {
+            return None;
+        }
+        if self.st.inning > 30 {
+            self.res.warnings.push("liveness_inning_30");
+            return None;
+        }
+        let (mu, st, seed, play, record) = (&self.mu, &mut self.st, self.seed, self.play, self.record);
         let side = st.half.batting();
         let slot = st.next_up[side];
-        if st.batter != last_batter {
-            prev = None;
-            last_v = None;
-            last_batter = st.batter;
+        if st.batter != self.last_batter {
+            self.prev = None;
+            self.last_v = None;
+            self.last_batter = st.batter;
         }
         let count = bb_observe::Count { balls: st.balls, strikes: st.strikes };
-        let rec = simulate_pitch_ctx(&mu, &sc[side][slot], count, seed, play, &bs, prev, last_v);
-        prev = Some(rec.read);
-        last_v = Some(rec.perceived_speed);
-        res.pitches += 1;
+        let rec = simulate_pitch_ctx(mu, &self.sc[side][slot], count, seed, play, &self.bs, self.prev, self.last_v);
+        self.prev = Some(rec.read);
+        self.last_v = Some(rec.perceived_speed);
+        self.res.pitches += 1;
         let mut viz = PlayViz { play, ..Default::default() };
+        let pitch_flight = bb_world::pitch::pitch_flight(&mu.env, rec.release);
         if record {
-            let fl = bb_world::pitch::pitch_flight(&mu.env, rec.release);
-            let t_end = rec.contact_state.map(|c| c.0).unwrap_or(fl.last().t);
+            let t_end = rec.contact_state.map(|c| c.0).unwrap_or(pitch_flight.last().t);
             let mut t = 0.0;
             while t <= t_end {
-                let (p, _) = fl.at(t);
+                let (p, _) = pitch_flight.at(t);
                 viz.pitch.push([t, p.x, p.y, p.z]);
                 t += 0.01;
             }
@@ -100,6 +148,7 @@ pub fn simulate_game_with(seed: u64, record: bool) -> GameResult {
         let mut facts = vec![Input::PitchDelivered { t: 0.0 }];
         let t_plate = 0.42;
         facts.push(Input::PitchCrossed { t: t_plate, in_zone: rec.in_zone, bounced: rec.bounced });
+        let mut batted = None;
         if rec.hit_batter {
             facts.push(Input::BallTouched { t: t_plate, what: bb_rules::Touch::Batter });
         } else if let Some((t_c, ball)) = rec.contact_state {
@@ -115,13 +164,13 @@ pub fn simulate_game_with(seed: u64, record: bool) -> GameResult {
             let fielders: [u16; 9] = core::array::from_fn(|i| (fside << 8) | 0x80 | (i as u16 + 1));
             let out = simulate_play(&PlayInput {
                 env: &mu.env,
-                field: &field,
+                field: &self.field,
                 ball,
                 t_contact: t_c,
                 runners,
                 outs: st.outs,
                 fielders,
-                fattrs,
+                fattrs: self.fattrs,
                 seed,
                 play,
             });
@@ -135,13 +184,14 @@ pub fn simulate_game_with(seed: u64, record: bool) -> GameResult {
                 }
             }
             facts.extend(out.facts);
+            batted = Some(out.path);
         } else {
             facts.push(Input::SwingMeasured { t: 0.45, swung: rec.swung });
         }
         for f in &facts {
-            let ev = step(&mut st, f);
-            pending_rules.extend(ev.iter().cloned());
-            log.extend(ev);
+            let ev = step(st, f);
+            self.pending_rules.extend(ev.iter().cloned());
+            self.log.extend(ev);
             if st.status == Status::Final {
                 break;
             }
@@ -154,7 +204,7 @@ pub fn simulate_game_with(seed: u64, record: bool) -> GameResult {
             } else {
                 lbl += &format!(" -> {:?}", rec.call);
             }
-            for e in &pending_rules {
+            for e in &self.pending_rules {
                 match e {
                     Event::PlateAppearanceEnded { result, .. } => lbl += &format!(" | PA: {result:?}"),
                     Event::RunScored { .. } => lbl += " | run scores",
@@ -163,57 +213,75 @@ pub fn simulate_game_with(seed: u64, record: bool) -> GameResult {
                 }
             }
             viz.label = lbl;
-            res.viz.push(viz);
+            self.res.viz.push(viz.clone());
         }
         let pitcher = ((1 - side as u16) << 8) | 0x81;
-        crate::eventlog::write_pitch(&mut writer, play, pitcher, &rec, &pending_rules);
-        pending_rules.clear();
+        crate::eventlog::write_pitch(&mut self.writer, play, pitcher, &rec, &self.pending_rules);
+        let rules_events = std::mem::take(&mut self.pending_rules);
         if matches!(st.play, bb_rules::PlayState::Live(_)) {
             // The play did not settle from its facts: report and close it out.
-            if std::env::var("BB_DEBUG").is_ok() && res.warnings.iter().filter(|w| **w == "unsettled_play").count() < 2 {
+            if std::env::var("BB_DEBUG").is_ok() && self.res.warnings.iter().filter(|w| **w == "unsettled_play").count() < 2 {
                 eprintln!("--- unsettled play {play}: facts");
                 for f in &facts {
                     eprintln!("  {f:?}");
                 }
                 eprintln!("  state: {:?}", st.play);
             }
-            res.warnings.push("unsettled_play");
+            self.res.warnings.push("unsettled_play");
             st.play = bb_rules::PlayState::Dead;
         }
-        play += 1;
+        self.play += 1;
+        Some(PitchStep { play, record: rec, pitch_flight, batted, rules_events, viz })
     }
-    // Tally from the rules events (event sourcing, PLAN §4.3).
-    let mut pa_events: Vec<Event> = Vec::new();
-    for e in &log {
-        match e {
-            Event::PlateAppearanceEnded { batter, result } => {
-                res.pa += 1;
-                match result {
-                    PaResult::Strikeout => res.k += 1,
-                    PaResult::Walk => res.bb += 1,
-                    PaResult::HitByPitch => res.hbp += 1,
-                    PaResult::HomeRun => res.hr += 1,
-                    PaResult::BattedBall => {
-                        res.bip += 1;
-                        let out = pa_events.iter().any(|x| matches!(x, Event::RunnerOut { runner, .. } if runner == batter));
-                        if !out {
-                            res.reached_bip += 1;
+
+    /// Close the log and tally the result from the rules events (event sourcing, PLAN §4.3).
+    pub fn finish(self) -> GameResult {
+        let mut res = self.res;
+        let mut pa_events: Vec<Event> = Vec::new();
+        for e in &self.log {
+            match e {
+                Event::PlateAppearanceEnded { batter, result } => {
+                    res.pa += 1;
+                    match result {
+                        PaResult::Strikeout => res.k += 1,
+                        PaResult::Walk => res.bb += 1,
+                        PaResult::HitByPitch => res.hbp += 1,
+                        PaResult::HomeRun => res.hr += 1,
+                        PaResult::BattedBall => {
+                            res.bip += 1;
+                            let out = pa_events.iter().any(|x| matches!(x, Event::RunnerOut { runner, .. } if runner == batter));
+                            if !out {
+                                res.reached_bip += 1;
+                            }
                         }
                     }
+                    pa_events.clear();
                 }
-                pa_events.clear();
+                Event::GameEnded { walk_off, .. } => res.walk_off = *walk_off,
+                Event::RulesWarning { code } => res.warnings.push(code),
+                other => pa_events.push(other.clone()),
             }
-            Event::GameEnded { walk_off, .. } => res.walk_off = *walk_off,
-            Event::RulesWarning { code } => res.warnings.push(code),
-            other => pa_events.push(other.clone()),
         }
+        res.linescore = self.st.runs_by_inning.clone();
+        res.runs = self.st.score();
+        let (bytes, digest) = self.writer.finish(res.runs[0].min(255) as u8, res.runs[1].min(255) as u8);
+        res.log = bytes;
+        res.digest = digest;
+        res.innings = self.st.inning;
+        res.events = self.log;
+        res
     }
-    res.linescore = st.runs_by_inning.clone();
-    res.runs = st.score();
-    let (bytes, digest) = writer.finish(res.runs[0].min(255) as u8, res.runs[1].min(255) as u8);
-    res.log = bytes;
-    res.digest = digest;
-    res.innings = st.inning;
-    res.events = log;
-    res
+}
+
+/// Simulate one game with average players on both sides.
+pub fn simulate_game(seed: u64) -> GameResult {
+    simulate_game_with(seed, false)
+}
+
+/// [`simulate_game`], optionally recording paths for visualization (recording never changes
+/// the simulation: data-formats §5.5).
+pub fn simulate_game_with(seed: u64, record: bool) -> GameResult {
+    let mut g = Game::new(seed, record);
+    while g.step_pitch().is_some() {}
+    g.finish()
 }
