@@ -75,7 +75,7 @@ impl Default for SwingTemplate {
             contact_y0: 0.35,
             contact_k: 0.6,
             attack_angle: 10.0 * DEG,
-            aim_offset_z: -0.006,
+            aim_offset_z: -0.013,
         }
     }
 }

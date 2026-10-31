@@ -36,6 +36,8 @@ pub struct GameResult {
     pub viz: Vec<PlayViz>,
     /// False if the game hit the operational inning budget before ending.
     pub complete: bool,
+    /// Balls in play: (exit speed m/s, launch angle rad, spray rad, batter reached safely).
+    pub bip_detail: Vec<(f64, f64, f64, bool)>,
 }
 
 /// One pitch's paths for visualization: samples are (t, x, y, z) in play time.
@@ -59,6 +61,8 @@ pub struct PitchStep {
     /// The batted ball's full path, if there was contact.
     pub batted: Option<bb_physics::ground::BallPath>,
     pub rules_events: Vec<Event>,
+    /// Every fact sent to the rules engine for this pitch.
+    pub facts: Vec<Input>,
     pub viz: PlayViz,
 }
 
@@ -238,8 +242,14 @@ impl Game {
         let pitcher = ((1 - side as u16) << 8) | 0x81;
         crate::eventlog::write_pitch(&mut self.writer, play, pitcher, &rec, &self.pending_rules);
         let rules_events = std::mem::take(&mut self.pending_rules);
+        if let Some((ev_, la, spray)) = rec.batted {
+            if let Some(Event::PlateAppearanceEnded { batter, result: PaResult::BattedBall }) = rules_events.iter().find(|e| matches!(e, Event::PlateAppearanceEnded { .. })) {
+                let out = rules_events.iter().any(|e| matches!(e, Event::RunnerOut { runner, .. } if runner == batter));
+                self.res.bip_detail.push((ev_, la, spray, !out));
+            }
+        }
         self.play += 1;
-        Some(PitchStep { play, record: rec, pitch_flight, batted, rules_events, viz })
+        Some(PitchStep { play, record: rec, pitch_flight, batted, rules_events, facts, viz })
     }
 
     /// Close the log and tally the result from the rules events (event sourcing, PLAN §4.3).

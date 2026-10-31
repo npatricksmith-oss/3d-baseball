@@ -77,6 +77,8 @@ struct Fielder {
     belief: Option<BallPath>,
     /// Believed intercept time.
     t_int: f64,
+    /// Last close-range re-read of the ball.
+    last_close_read: f64,
 }
 
 #[derive(Clone, Debug)]
@@ -259,6 +261,22 @@ impl<'a> Sim<'a> {
     }
 
     fn intercept_inner(&self, i: usize, pred: &BallPath) -> (f64, Vec3) {
+        // Plan to field it standing; count on a dive only if no standing play exists.
+        if let Some(x) = self.intercept_with(i, pred, false) {
+            return x;
+        }
+        if let Some(x) = self.intercept_with(i, pred, true) {
+            return x;
+        }
+        let fd = &self.f[i];
+        let t_end = pred.t_end();
+        let start = self.t.max(self.inp.t_contact + fd.a.reaction);
+        let (rest, _) = pred.at(t_end);
+        let d = m::hypot(rest.x - fd.pos.x, rest.y - fd.pos.y);
+        (t_end.max(start + run_time(d, fd.a.speed, fd.a.tau_a)), Vec3::new(rest.x, rest.y, 0.0))
+    }
+
+    fn intercept_with(&self, i: usize, pred: &BallPath, dive: bool) -> Option<(f64, Vec3)> {
         let fd = &self.f[i];
         let t_end = pred.t_end();
         let start = self.t.max(self.inp.t_contact + fd.a.reaction);
@@ -266,17 +284,16 @@ impl<'a> Sim<'a> {
         while t <= t_end {
             let (b, _) = pred.at(t);
             if b.z <= CATCH_MAX_Z {
-                let reach = if b.z <= DIVE_MAX_Z { REACH + 0.6 * DIVE } else { REACH * 0.7 };
+                let reach = if dive && b.z <= DIVE_MAX_Z { REACH + 0.6 * DIVE } else { REACH * 0.7 };
                 let d = m::hypot(b.x - fd.pos.x, b.y - fd.pos.y) - reach;
                 if start + run_time(d.max(0.0), fd.a.speed, fd.a.tau_a) <= t {
-                    return (t, Vec3::new(b.x, b.y, 0.0));
+                    // Head for the ball's line itself, not the edge of reach.
+                    return Some((t, Vec3::new(b.x, b.y, 0.0)));
                 }
             }
             t += 0.12;
         }
-        let (rest, _) = pred.at(t_end);
-        let d = m::hypot(rest.x - fd.pos.x, rest.y - fd.pos.y);
-        (t_end.max(start + run_time(d, fd.a.speed, fd.a.tau_a)), Vec3::new(rest.x, rest.y, 0.0))
+        None
     }
 
     /// Who chases: everyone predicts; the earliest believed intercept takes it (calls, §5.7;
@@ -316,6 +333,44 @@ impl<'a> Sim<'a> {
         }
         self.primary = best.1;
         self.cover_roles();
+        // Ground balls: every infielder who believes he can get to it in the infield breaks
+        // for it at once; nobody waits for a call (agent-models §5.7, ground-ball case).
+        let grounder = self.f[self.primary].belief.as_ref().and_then(|p| p.first_bounce()).map(|b| m::hypot(b.1, b.2) < 25.0).unwrap_or(false);
+        if grounder {
+            let t_primary = self.f[self.primary].t_int;
+            for i in [3usize, 4, 5] {
+                let fd = &self.f[i];
+                if i != self.primary && fd.t_int.is_finite() && fd.t_int <= t_primary + 0.6 && m::hypot(fd.target.x, fd.target.y) < 45.0 && fd.belief.is_some() {
+                    self.f[i].role = Role::Chase;
+                }
+            }
+            self.cover_roles_after_chasers();
+        }
+    }
+
+    /// Re-assign base coverage among fielders who are not chasing.
+    fn cover_roles_after_chasers(&mut self) {
+        let chasing = |f: &Vec<Fielder>, i: usize| f[i].role == Role::Chase;
+        let left = self.f[self.primary].target.x < 0.0;
+        let mut taken: Vec<usize> = (0..9).filter(|&i| chasing(&self.f, i)).collect();
+        let order: [(u8, Vec<usize>); 4] = [
+            (1, vec![2, 0, 3]),
+            (2, if left { vec![3, 5] } else { vec![5, 3] }),
+            (3, vec![4, 5, 0]),
+            (4, vec![1, 0]),
+        ];
+        for (base, cands) in order.iter() {
+            // Keep an existing non-chasing cover if there is one.
+            if let Some(c) = (0..9).find(|&i| self.f[i].role == Role::Cover(*base) && !taken.contains(&i)) {
+                taken.push(c);
+                continue;
+            }
+            if let Some(&c) = cands.iter().find(|c| !taken.contains(c)) {
+                self.f[c].role = Role::Cover(*base);
+                self.f[c].target = base_pos(*base);
+                taken.push(c);
+            }
+        }
     }
 
     fn cover_roles(&mut self) {
@@ -373,6 +428,23 @@ impl<'a> Sim<'a> {
 
     /// Glove contact test for any fielder the ball passes (agent-models §5.4).
     fn try_captures(&mut self) {
+        // At close range a chaser re-reads the ball (perception error scales with distance).
+        if let Ball::Free { .. } = self.ball {
+            let (b, _) = self.ball_at(self.t);
+            for i in 0..9 {
+                if self.f[i].role == Role::Chase && self.t >= self.f[i].last_close_read + 0.1 {
+                    let d = m::hypot(b.x - self.f[i].pos.x, b.y - self.f[i].pos.y);
+                    if d < 4.0 {
+                        self.f[i].last_close_read = self.t;
+                        let p = self.predict(i);
+                        let (ti, pt) = self.intercept(i, &p);
+                        self.f[i].t_int = ti;
+                        self.f[i].target = pt;
+                        self.f[i].belief = Some(p);
+                    }
+                }
+            }
+        }
         let (b, bv) = self.ball_at(self.t);
         let receiver = match self.ball {
             Ball::Thrown { receiver, .. } => Some(receiver),
@@ -398,7 +470,7 @@ impl<'a> Sim<'a> {
             let standing = horiz <= reach && b.z <= zmax;
             // Dive only for a ball the fielder's own prediction says won't come closer.
             // Nobody dives at a slow or resting ball: they walk up and field it.
-            let diving = !standing && i == self.primary && bv.norm() > 3.0 && horiz <= REACH + DIVE && b.z <= DIVE_MAX_Z && {
+            let diving = !standing && self.f[i].role == Role::Chase && bv.norm() > 3.0 && horiz <= REACH + DIVE && b.z <= DIVE_MAX_Z && {
                 let mut closest = f64::INFINITY;
                 if let Some(p) = &fd.belief {
                     for j in 1..=6 {
@@ -414,7 +486,9 @@ impl<'a> Sim<'a> {
                 continue;
             }
             let mut r = rng(self.inp.seed, self.inp.play, fd.id, Purpose::GlovePlacement, fd.attempts);
-            let sg = fd.a.hands * (1.0 + 0.5 * bv.norm() / 40.0 + 0.6 * (horiz / (REACH + DIVE)).min(1.0) + if diving { 1.0 } else { 0.0 });
+            // agent-models §5.4 form; k_v 0.25 and k_reach 0.3 [E, M4b]: the spec's 0.5/0.6 made
+            // routine catches fail ~8% of the time against the ≥ 98% routine-play band.
+            let sg = fd.a.hands * (1.0 + 0.25 * bv.norm() / 40.0 + 0.3 * (horiz / (REACH + DIVE)).min(1.0) + if diving { 1.0 } else { 0.0 });
             let (ex, ez) = (r.truncated_normal(4.0), r.truncated_normal(4.0));
             let d = sg * m::hypot(ex, ez);
             let fd = &mut self.f[i];
@@ -724,6 +798,9 @@ impl<'a> Sim<'a> {
             }
         }
         let infield = m::hypot(fd.pos.x, fd.pos.y) < INFIELD_R;
+        if std::env::var("BB_DEBUG_THROW").is_ok() {
+            eprintln!("t {:.2} holder {} at ({:.1},{:.1}) best {:?}; runners {:?}", self.t, by, fd.pos.x, fd.pos.y, best, self.r.iter().map(|r| (r.start, r.s, r.goal, r.out, r.scored)).collect::<Vec<_>>());
+        }
         let target_base = match best {
             Some((_, b)) => Some(b),
             // No play: get the ball back to the infield.
@@ -805,6 +882,7 @@ pub fn simulate_live(inp: &LiveInput, st: &mut RulesState) -> LiveOutput {
                 dove: false,
                 belief: None,
                 t_int: f64::INFINITY,
+                last_close_read: 0.0,
             }
         })
         .collect();
@@ -897,6 +975,19 @@ pub fn simulate_live(inp: &LiveInput, st: &mut RulesState) -> LiveOutput {
             let pi = sim.primary;
             if bv.norm() < 3.0 && (Vec3::new(b.x, b.y, 0.0) - sim.f[pi].pos).norm() < 5.0 {
                 sim.f[pi].target = Vec3::new(b.x, b.y, 0.0);
+            }
+        }
+        // Other chasers re-aim at their own predictions as the ball comes on.
+        if assigned && matches!(sim.ball, Ball::Free { .. }) {
+            for i in 0..9 {
+                if i != sim.primary && sim.f[i].role == Role::Chase && sim.t >= sim.f[i].next_plan {
+                    let p = sim.predict(i);
+                    let (ti, pt) = sim.intercept(i, &p);
+                    sim.f[i].t_int = ti;
+                    sim.f[i].target = pt;
+                    sim.f[i].belief = Some(p);
+                    sim.f[i].next_plan = sim.t + REPLAN_S;
+                }
             }
         }
         // Replans for the primary, and reassignment when the ball is loose again.
