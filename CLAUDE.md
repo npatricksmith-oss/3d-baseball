@@ -96,3 +96,8 @@ Game logic in C++; Blueprints only for thin visual wiring. Script asset setup wi
 - Update [TASKS.md](TASKS.md) at the end of every work session.
 - Commit in small, described steps. The repo has no remote yet.
 - Record owner-relevant choices you make in the relevant spec or PLAN §1 (as "Proposed" if the owner has not ruled).
+- **Standard review protocol (owner, 2026-10-31):** every substantive change set (a milestone step, a risky subsystem, or the end of a work session with code changes) gets an independent review by Codex Sol before it is considered done. Run it in the background and do not poll:
+  ```bash
+  codex exec -m gpt-6.1-sol -c model_reasoning_effort="high" -s workspace-write -C "<repo root>" - < prompt.md
+  ```
+  The prompt names the commit range, the files and questions ranked by risk, and the invariants above. It tells Codex to verify claims by running tests or probes, edit no source, test, spec, or TASKS file, and write only `docs/reviews/<date>-codex-<topic>-review.md`, with findings ranked P1–P3, a Verification section, and `## Resolution` set to "Open." Afterwards: commit the review, fix or defer every finding, write the Resolution, and list unresolved findings first in TASKS.md "Resume here".
