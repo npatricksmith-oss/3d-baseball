@@ -9,5 +9,7 @@ publish.workspace = true
 workspace = true
 
 [dependencies]
-bb_math.workspace = true
 bb_schema.workspace = true
+
+[dev-dependencies]
+bb_game.workspace = true

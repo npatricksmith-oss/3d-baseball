@@ -43,7 +43,7 @@ Status: `[ ]` not started · `[~]` in progress · `[x]` done · `[?]` needs an o
 ### M4 next steps
 - [ ] Fix the findings of the Codex M4 review ([docs/reviews/2026-10-31-codex-m4-review.md](docs/reviews/2026-10-31-codex-m4-review.md), if present)
 - [x] Event-log output from real games (`bb_game::eventlog`, one `PlayRecord` per pitch) and the **M0 exit test on real games**: same seed ⇒ same digest across threads; the log reads back verified (`bb_game/tests/determinism.rs`)
-- [ ] Event-sourced box score in `bb_stats` (hits vs errors needs the scorer, rules-spec §10)
+- [~] Event-sourced box score in `bb_stats`: runs, linescore, PA by result, LOB, outs per half-inning from the log alone, with accounting identities over 80 games (`bb_stats/tests/accounting.rs`). Hits vs errors still need the scorer (rules-spec §10)
 - [ ] Rules engine: uncaught third strike and caught foul tips (catcher capture), overrunning first, two runners on a base, passing runners, interference (§5.7); grow the corpus toward 150 scenarios (§12.3)
 - [ ] Play simulator: replace the skeleton simplifications listed at the top of `bb_game/src/play.rs` (true belief-based perception via an atlas, calls/coverage tables, relays, physical throws, runner leads and secondary leads, base-path rounding)
 - [ ] Run environment: runs/team-game is ~9.8 (target ~4.5); batters reach on ~45% of balls in play (target ~32%). Measure first: by batted-ball type and fielder, from `bb_game/examples/bip_sweep.rs`

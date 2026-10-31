@@ -567,7 +567,7 @@ dependencies = [
 name = "bb_stats"
 version = "0.1.0"
 dependencies = [
- "bb_math",
+ "bb_game",
  "bb_schema",
 ]
 
