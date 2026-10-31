@@ -198,6 +198,12 @@ impl<'a> Sim<'a> {
             self.last_fact_t = self.last_fact_t.max(t);
         }
         let evs = step(self.st, &fact);
+        if std::env::var("BB_DEBUG_ORDER").is_ok() && evs.iter().any(|e| matches!(e, Event::RulesWarning { .. })) {
+            eprintln!("warning after {fact:?} at sim t {:.3}: {:?}", self.t, evs);
+            if let Some(last) = self.out.facts.last() {
+                eprintln!("   previous fact {last:?}");
+            }
+        }
         for e in &evs {
             if let Event::RunnerOut { runner, .. } = e {
                 if let Some(r) = self.r.iter_mut().find(|r| r.id == *runner) {
@@ -568,6 +574,8 @@ impl<'a> Sim<'a> {
                 }
             }
         }
+        // Ground and wall contacts inside one tick go out in time order.
+        facts.sort_by(|a, b| fact_time(a).unwrap_or(0.0).total_cmp(&fact_time(b).unwrap_or(0.0)));
         for f in facts {
             self.emit(f);
             if self.done {
@@ -636,8 +644,8 @@ impl<'a> Sim<'a> {
         let mut rr = rng(self.inp.seed, self.inp.play, r.id, Purpose::RunnerPerception, next as u32);
         let noise = 0.15 * rr.truncated_normal(4.0);
         let must = forced && at_base == r.start && !self.caught();
-        // The base ahead is taken by a runner who is staying there.
-        let blocked = self.r.iter().any(|o| o.id != r.id && !o.out && !o.scored && o.goal == next && o.start > r.start);
+        // A runner may only take a base if every runner ahead of him is going past it.
+        let blocked = self.r.iter().any(|o| o.id != r.id && !o.out && !o.scored && o.start > r.start && o.goal <= next);
         let go = must || (!blocked && t_ball - (self.t + t_run) + noise > 0.35);
         let r = &mut self.r[k];
         if go {
