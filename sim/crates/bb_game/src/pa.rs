@@ -164,16 +164,26 @@ pub fn build_scouting(env: &FlightEnv, p: &PitcherAttrs, arsenal: &[ArsenalPitch
     build_scouting_with(env, p, arsenal, zone, None)
 }
 
-/// Draw a batter's initial model error for each arsenal pitch (σ_0 of agent-models §3.8).
-pub fn draw_offsets(arsenal: &[ArsenalPitch], e: &ModelError, r: &mut KeyedRng) -> Vec<[f64; 4]> {
+/// Weight of this pitcher's own shapes in a batter's first-look expectation; the rest is
+/// the league-typical shape for the pitch type [E]. Real hitters expect typical movement,
+/// which is why unusual spin plays up until they adapt (agent-models §3.8).
+pub const OWN_SHAPE_WEIGHT: f64 = 0.6;
+
+/// Draw a batter's initial model error for each arsenal pitch (σ_0 of agent-models §3.8),
+/// including the pull toward the league-typical shape. Units: axis °, rate fraction,
+/// efficiency, speed m/s, all relative to the pitcher's true shape.
+pub fn draw_offsets(p: &PitcherAttrs, arsenal: &[ArsenalPitch], e: &ModelError, r: &mut KeyedRng) -> Vec<[f64; 4]> {
+    let league = PitcherAttrs { throws: p.throws, height: p.height, extension: p.extension, arm_slot: p.arm_slot, ..PitcherAttrs::average_rhp() };
+    let w = 1.0 - OWN_SHAPE_WEIGHT;
     arsenal
         .iter()
-        .map(|_| {
+        .map(|a| {
+            let (mine, typ) = (a.def.shape(p), a.def.shape(&league));
             [
-                e.spin_axis_deg * r.truncated_normal(4.0),
-                e.spin_rate_rel * r.truncated_normal(4.0),
-                e.efficiency * r.truncated_normal(4.0),
-                e.speed * r.truncated_normal(4.0),
+                w * (typ.spin_axis_deg - mine.spin_axis_deg) + e.spin_axis_deg * r.truncated_normal(4.0),
+                w * (typ.spin_rate / mine.spin_rate - 1.0) + e.spin_rate_rel * r.truncated_normal(4.0),
+                w * (typ.efficiency - mine.efficiency) + e.efficiency * r.truncated_normal(4.0),
+                w * (typ.speed - mine.speed) + e.speed * r.truncated_normal(4.0),
             ]
         })
         .collect()
@@ -202,31 +212,12 @@ pub fn build_scouting_offsets(env: &FlightEnv, p: &PitcherAttrs, arsenal: &[Arse
     Scouting { types, usage }
 }
 
+/// Scouting with model error drawn from `r` (see [`draw_offsets`]).
 pub fn build_scouting_with(env: &FlightEnv, p: &PitcherAttrs, arsenal: &[ArsenalPitch], zone: &Zone, err: Option<(ModelError, &mut KeyedRng)>) -> Scouting {
-    let mid = 0.5 * (zone.bottom + zone.top);
-    let mut types = Vec::new();
-    let mut usage = Vec::new();
-    let mut err = err;
-    for a in arsenal {
-        let mut plan = plan_release(env, p, &a.def, &PitchIntent { ty: a.def.ty, target_x: 0.0, target_z: mid }).expect("zone center reachable");
-        if let Some((e, r)) = err.as_mut() {
-            plan.shape.spin_axis_deg += e.spin_axis_deg * r.truncated_normal(4.0);
-            plan.shape.spin_rate *= 1.0 + e.spin_rate_rel * r.truncated_normal(4.0);
-            plan.shape.efficiency = (plan.shape.efficiency + e.efficiency * r.truncated_normal(4.0)).clamp(0.05, 1.0);
-            plan.shape.speed += e.speed * r.truncated_normal(4.0);
-            let a2 = bb_physics::pitch::aim(env, plan.r, &plan.shape, 0.0, mid, Some((plan.yaw, plan.elev)));
-            plan.yaw = a2.yaw;
-            plan.elev = a2.elev;
-        }
-        let s = launch(plan.r, &plan.shape, plan.yaw, plan.elev);
-        let tr = fly(env, s, 0.0, DT_PITCH, &[Crossing::YBelow(-0.5)], 2.0);
-        let d = decompose(s.w, s.v);
-        let md = d.magnus_dir;
-        let sig = spin_signature(md.x, md.z, d.efficiency, bb_math::units::radps_to_rpm(s.w.norm()));
-        types.push(type_model(a.def.ty, tr, sig));
-        usage.push(a.usage.iter().sum::<f64>() / 4.0);
+    match err {
+        Some((e, r)) => build_scouting_offsets(env, p, arsenal, zone, &draw_offsets(p, arsenal, &e, r)),
+        None => build_scouting_offsets(env, p, arsenal, zone, &vec![[0.0; 4]; arsenal.len()]),
     }
-    Scouting { types, usage }
 }
 
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
@@ -807,7 +798,7 @@ const CUE_NOISE: [f64; 4] = [6.0, 0.05, 0.05, 0.4];
 pub fn simulate_times_through(mu: &Matchup, seed: u64, game: u32, times: u32, on_deck_pitches: u32, adapt: bool) -> Vec<PaRecord> {
     let mut r = rng(seed, game, BATTER, Purpose::BatterPerception, 2_000_000);
     let e = mu.model_error.unwrap_or(ModelError { spin_axis_deg: 0.0, spin_rate_rel: 0.0, efficiency: 0.0, speed: 0.0 });
-    let mut mem = PitcherMemory::new(draw_offsets(&mu.arsenal, &e, &mut r));
+    let mut mem = PitcherMemory::new(draw_offsets(&mu.pitcher, &mu.arsenal, &e, &mut r));
     let mut out = Vec::new();
     let learn = |mem: &mut PitcherMemory, ty: PitchType, w: f64, r: &mut KeyedRng| {
         if !adapt {
