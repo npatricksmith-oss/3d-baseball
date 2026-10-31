@@ -32,10 +32,27 @@ pub struct GameResult {
     /// The game's event log (data-formats §4) and its digest (§4.4).
     pub log: Vec<u8>,
     pub digest: [u8; 32],
+    /// Visualization record, filled only when requested.
+    pub viz: Vec<PlayViz>,
+}
+
+/// One pitch's paths for visualization: samples are (t, x, y, z) in play time.
+#[derive(Clone, Debug, Default)]
+pub struct PlayViz {
+    pub play: u32,
+    pub label: String,
+    pub pitch: Vec<[f64; 4]>,
+    pub batted: Vec<[f64; 4]>,
 }
 
 /// Simulate one game with average players on both sides.
 pub fn simulate_game(seed: u64) -> GameResult {
+    simulate_game_with(seed, false)
+}
+
+/// [`simulate_game`], optionally recording paths for visualization (recording never changes
+/// the simulation: data-formats §5.5).
+pub fn simulate_game_with(seed: u64, record: bool) -> GameResult {
     let mut mu = Matchup::average();
     mu.knobs = Knobs::calibrated_m3();
     let field = Field::default();
@@ -66,6 +83,17 @@ pub fn simulate_game(seed: u64) -> GameResult {
         let rec = simulate_pitch_ctx(&mu, &sc[side][slot], count, seed, play, &bs, prev);
         prev = Some(rec.read);
         res.pitches += 1;
+        let mut viz = PlayViz { play, ..Default::default() };
+        if record {
+            let fl = bb_world::pitch::pitch_flight(&mu.env, rec.release);
+            let t_end = rec.contact_state.map(|c| c.0).unwrap_or(fl.last().t);
+            let mut t = 0.0;
+            while t <= t_end {
+                let (p, _) = fl.at(t);
+                viz.pitch.push([t, p.x, p.y, p.z]);
+                t += 0.01;
+            }
+        }
         let mut facts = vec![Input::PitchDelivered { t: 0.0 }];
         let t_plate = 0.42;
         facts.push(Input::PitchCrossed { t: t_plate, in_zone: rec.in_zone, bounced: rec.bounced });
@@ -94,6 +122,15 @@ pub fn simulate_game(seed: u64) -> GameResult {
                 seed,
                 play,
             });
+            if record {
+                let (t0, t1) = (out.path.t_start(), out.path.t_end().min(out.path.t_start() + 15.0));
+                let mut t = t0;
+                while t <= t1 {
+                    let (p, _) = out.path.at(t);
+                    viz.batted.push([t, p.x, p.y, p.z]);
+                    t += 0.03;
+                }
+            }
             facts.extend(out.facts);
         } else {
             facts.push(Input::SwingMeasured { t: 0.45, swung: rec.swung });
@@ -105,6 +142,25 @@ pub fn simulate_game(seed: u64) -> GameResult {
             if st.status == Status::Final {
                 break;
             }
+        }
+        if record {
+            let who = if side == 0 { "Away" } else { "Home" };
+            let mut lbl = format!("{} {}{} {} #{}: {} {:.0} mph", play, if st.half == bb_rules::Half::Top { "T" } else { "B" }, st.inning, who, slot + 1, rec.ty.code(), bb_math::units::mps_to_mph(rec.release.v.norm()));
+            if let Some((ev_, la, spray)) = rec.batted {
+                lbl += &format!(" -> EV {:.0} mph, LA {:.0}°, spray {:.0}°", bb_math::units::mps_to_mph(ev_), la.to_degrees(), spray.to_degrees());
+            } else {
+                lbl += &format!(" -> {:?}", rec.call);
+            }
+            for e in &pending_rules {
+                match e {
+                    Event::PlateAppearanceEnded { result, .. } => lbl += &format!(" | PA: {result:?}"),
+                    Event::RunScored { .. } => lbl += " | run scores",
+                    Event::RunnerOut { kind, .. } => lbl += &format!(" | out ({kind:?})"),
+                    _ => {}
+                }
+            }
+            viz.label = lbl;
+            res.viz.push(viz);
         }
         let pitcher = ((1 - side as u16) << 8) | 0x81;
         crate::eventlog::write_pitch(&mut writer, play, pitcher, &rec, &pending_rules);

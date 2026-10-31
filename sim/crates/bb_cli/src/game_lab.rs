@@ -7,6 +7,12 @@ use clap::Args;
 pub struct GameArgs {
     #[arg(long, default_value_t = 1)]
     seed: u64,
+    /// Write the game as a Rerun recording (scrub the `game_time` timeline).
+    #[arg(long)]
+    rrd: Option<std::path::PathBuf>,
+    /// Print every pitch.
+    #[arg(long)]
+    pbp: bool,
 }
 
 fn linescore(r: &GameResult) {
@@ -30,7 +36,17 @@ fn linescore(r: &GameResult) {
 
 pub fn game(a: GameArgs) {
     let t0 = std::time::Instant::now();
-    let r = simulate_game(a.seed);
+    let r = bb_game::game::simulate_game_with(a.seed, a.rrd.is_some() || a.pbp);
+    if a.pbp {
+        for v in &r.viz {
+            println!("{}", v.label);
+        }
+    }
+    #[cfg(feature = "rerun")]
+    if let Some(p) = &a.rrd {
+        crate::rr::log_game(p, &r);
+        println!("wrote {}", p.display());
+    }
     linescore(&r);
     println!(
         "{} PA, {} pitches; K {} BB {} HBP {} HR {}; balls in play {} (batter reached {}){}",

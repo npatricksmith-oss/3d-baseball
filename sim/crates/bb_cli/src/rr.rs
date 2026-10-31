@@ -76,3 +76,33 @@ pub fn log_flight(rec: &Rec, path: &str, tr: &Trajectory, color: [u8; 3], label:
     }
     rec.reset_time();
 }
+
+/// A whole game on one `game_time` timeline: each pitch, each batted ball, a text log.
+pub fn log_game(path: &std::path::Path, g: &bb_game::game::GameResult) {
+    let rec = open(path, "sim-cli game");
+    log_field(&rec, &bb_physics::zone::Zone::for_batter(1.85, &Default::default()));
+    let f = bb_physics::ground::Field::default();
+    let fence: Vec<[f32; 3]> = (0..=60)
+        .map(|i| {
+            let th = -core::f64::consts::FRAC_PI_4 + core::f64::consts::FRAC_PI_2 * i as f64 / 60.0;
+            let d = f.fence_at(th);
+            p3(d * th.sin(), d * th.cos(), f.wall_height)
+        })
+        .collect();
+    rec.log_static("world/field/fence", &rerun::LineStrips3D::new([fence]).with_colors([[60, 160, 60]])).unwrap();
+    let mut clock = 0.0;
+    for v in &g.viz {
+        let dur = v.batted.last().map(|s| s[0]).unwrap_or(v.pitch.last().map(|s| s[0]).unwrap_or(0.5)) + 1.0;
+        rec.set_duration_secs("game_time", clock);
+        rec.log("log", &rerun::TextLog::new(v.label.clone())).unwrap();
+        let ps: Vec<[f32; 3]> = v.pitch.iter().map(|s| p3(s[1], s[2], s[3])).collect();
+        rec.log("world/play/pitch", &rerun::LineStrips3D::new([ps]).with_colors([[235, 80, 70]])).unwrap();
+        let bs: Vec<[f32; 3]> = v.batted.iter().map(|s| p3(s[1], s[2], s[3])).collect();
+        rec.log("world/play/batted", &rerun::LineStrips3D::new([bs]).with_colors([[255, 255, 255]])).unwrap();
+        for s in v.pitch.iter().chain(v.batted.iter()).step_by(2) {
+            rec.set_duration_secs("game_time", clock + s[0]);
+            rec.log("world/play/ball", &rerun::Points3D::new([p3(s[1], s[2], s[3])]).with_radii([0.15f32]).with_colors([[255, 230, 120]])).unwrap();
+        }
+        clock += dur;
+    }
+}

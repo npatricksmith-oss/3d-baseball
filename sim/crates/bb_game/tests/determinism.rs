@@ -23,3 +23,12 @@ fn game_log_reads_back_and_verifies() {
     let ended = last.iter().find_map(|e| e.body_as_game_ended()).expect("GameEnded in the last play");
     assert_eq!((ended.score_away() as u16, ended.score_home() as u16), (g.runs[0], g.runs[1]));
 }
+
+#[test]
+fn recording_does_not_change_the_game() {
+    // data-formats §5.5: visualization recording must never change sim behavior.
+    let plain = simulate_game(9);
+    let recorded = bb_game::game::simulate_game_with(9, true);
+    assert_eq!(plain.digest, recorded.digest);
+    assert!(!recorded.viz.is_empty());
+}
