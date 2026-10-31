@@ -600,10 +600,10 @@ PLAN §13.4: ≤ 200 ms per headless game on one core, ~300 pitches and ~70 ball
 | Pitch flight (world) | 10 ms | 12 ms | |
 | Batter perception and decision | 10 ms | ~25 ms | Filter updates with an analytic observation Jacobian (10 ms), decisions (7 ms), aim points from the nominal path's own depth crossing (3 ms); was 71 ms with a finite-difference Jacobian and a 1 ms path march |
 | Swing and contact (world) | 15 ms | 8 ms | |
-| Fielding, running, coordination (30 Hz) | 60 ms | 114 ms | Live plays at 60 Hz, batted-ball flight and the rules stepping included; fielder predictions are 64 ms of it |
+| Fielding, running, coordination (30 Hz) | 60 ms | ~70 ms | Live plays at 60 Hz, batted-ball flight and rules stepping included. Fielder predictions ~38 ms (2,563 per game; agents fly their predictions at 0.1 s, within a few µm of the world's step); intercept scans 4 ms. Was 114 ms |
 | Batted-ball flight and bounces (world) | 20 ms | (above) | |
 | Rules, scoring, event log | 10 ms | ~20 ms | Remainder: game loop, event log, timelines |
-| **Total** | **≈ 170 ms** | **≈ 210 ms** | One thread, 259 pitches and 66 balls in play (seed 3); best of six runs, since timings vary widely with machine load. Live plays (~125 ms) are now the main overrun |
+| **Total** | **≈ 170 ms** | **≈ 155–170 ms** | One thread, 259 pitches and 66 balls in play (seed 3); best of five runs, since timings vary widely with machine load. Within the 200 ms budget |
 
 M3 measures the real numbers with `criterion`. If a component exceeds its budget, cache or table it first; never simplify the model in a way that changes behavior without a decision-log entry.
 

@@ -16,7 +16,7 @@ use bb_physics::ground::{BallPath, Field, SegmentEnd, batted_path, batted_path_d
 use bb_physics::{BallState, FlightEnv};
 use bb_rules::{AgentId, Event, Input, PlayState, RulesState, Touch, step};
 
-use crate::play::{FielderAttrs, RunnerIn, base_pos, home_positions, run_time};
+use crate::play::{FielderAttrs, RunnerIn, base_pos, home_positions, run_dist, run_time};
 
 const DT: f64 = 1.0 / 60.0;
 const REPLAN_S: f64 = 0.4;
@@ -38,7 +38,7 @@ const TYPICAL_TRANSFER: f64 = 0.75;
 /// A runner's read of a batted ball, m at 30 m [E].
 const RUNNER_READ_SIGMA0: f64 = 2.0;
 /// Agents' internal flight step, s.
-const AGENT_DT: f64 = 0.04;
+const AGENT_DT: f64 = 0.1;
 const BASE_L: f64 = 27.432;
 const BATTER_START: f64 = 0.30;
 const PLAY_LIMIT_S: f64 = 40.0;
@@ -160,6 +160,13 @@ pub mod prof {
     }
 }
 
+/// Throw-decision tracing (BB_DEBUG_THROW), checked once per thread: `holder_act` runs
+/// every tick the ball is held.
+fn debug_throw() -> bool {
+    thread_local! { static ON: bool = std::env::var("BB_DEBUG_THROW").is_ok(); }
+    ON.with(|x| *x)
+}
+
 fn rng(seed: u64, play: u32, agent: AgentId, purpose: Purpose, sub: u32) -> KeyedRng {
     KeyedRng::new(RngKey { game_seed: seed, play_index: play, agent_id: agent, purpose, sub_index: sub })
 }
@@ -228,7 +235,7 @@ impl<'a> Sim<'a> {
             self.last_fact_t = self.last_fact_t.max(t);
         }
         let evs = step(self.st, &fact);
-        if std::env::var("BB_DEBUG_ORDER").is_ok() && evs.iter().any(|e| matches!(e, Event::RulesWarning { .. })) {
+        if evs.iter().any(|e| matches!(e, Event::RulesWarning { .. })) && std::env::var("BB_DEBUG_ORDER").is_ok() {
             eprintln!("warning after {fact:?} at sim t {:.3}: {:?}", self.t, evs);
             if let Some(last) = self.out.facts.last() {
                 eprintln!("   previous fact {last:?}");
@@ -329,7 +336,7 @@ impl<'a> Sim<'a> {
             if b.z <= CATCH_MAX_Z {
                 let reachable = self.f.iter().any(|fd| {
                     let d = m::hypot(b.x - fd.pos.x, b.y - fd.pos.y) - REACH;
-                    self.t + run_time(d.max(0.0), TYPICAL_SPEED, 0.9) <= t
+                    d <= 0.0 || run_dist(t - self.t, TYPICAL_SPEED, 0.9) >= d
                 });
                 if reachable {
                     return (t, Vec3::new(b.x, b.y, 0.0));
@@ -354,10 +361,8 @@ impl<'a> Sim<'a> {
 
     fn intercept_inner(&self, i: usize, pred: &BallPath) -> (f64, Vec3) {
         // Plan to field it standing; count on a dive only if no standing play exists.
-        if let Some(x) = self.intercept_with(i, pred, false) {
-            return x;
-        }
-        if let Some(x) = self.intercept_with(i, pred, true) {
+        let (standing, dive) = self.intercept_scan(i, pred);
+        if let Some(x) = standing.or(dive) {
             return x;
         }
         let fd = &self.f[i];
@@ -368,33 +373,44 @@ impl<'a> Sim<'a> {
         (t_end.max(start + run_time(d, fd.a.speed, fd.a.tau_a)), Vec3::new(rest.x, rest.y, 0.0))
     }
 
-    fn intercept_with(&self, i: usize, pred: &BallPath, dive: bool) -> Option<(f64, Vec3)> {
+    /// One scan of the predicted path for the earliest point the fielder can reach standing,
+    /// and the earliest he can reach with a dive (found on the way; used only without a
+    /// standing play).
+    #[allow(clippy::type_complexity)]
+    fn intercept_scan(&self, i: usize, pred: &BallPath) -> (Option<(f64, Vec3)>, Option<(f64, Vec3)>) {
         let fd = &self.f[i];
         let t_end = pred.t_end();
         let start = self.t.max(self.inp.t_contact + fd.a.reaction);
+        let mut dive = None;
         let mut t = self.t + 0.05;
         while t <= t_end {
             let (b, _) = pred.at(t);
             if b.z <= CATCH_MAX_Z {
-                let reach = if dive && b.z <= DIVE_MAX_Z { REACH + 0.6 * DIVE } else { REACH * 0.7 };
-                let d = m::hypot(b.x - fd.pos.x, b.y - fd.pos.y) - reach;
-                if start + run_time(d.max(0.0), fd.a.speed, fd.a.tau_a) <= t {
-                    // Head for the ball's line itself, not the edge of reach.
-                    return Some((t, Vec3::new(b.x, b.y, 0.0)));
+                let d = m::hypot(b.x - fd.pos.x, b.y - fd.pos.y);
+                let covered = run_dist(t - start, fd.a.speed, fd.a.tau_a);
+                let can = |reach: f64| t >= start && (d - reach <= 0.0 || covered >= d - reach);
+                // Head for the ball's line itself, not the edge of reach.
+                let here = Some((t, Vec3::new(b.x, b.y, 0.0)));
+                if can(REACH * 0.7) {
+                    return (here, dive);
+                }
+                if dive.is_none() && b.z <= DIVE_MAX_Z && can(REACH + 0.6 * DIVE) {
+                    dive = here;
                 }
             }
             t += 0.12;
         }
-        None
+        (None, dive)
     }
 
     /// Who chases: everyone predicts; the earliest believed intercept takes it (calls, §5.7;
     /// outfielders win ties against infielders on balls in between). Others cover or back up.
     fn assign(&mut self) {
-        self.assign_among((0..9).collect());
+        self.assign_among((0..9).collect(), None);
     }
 
-    /// Re-call among the current chaser and the four fielders nearest the ball.
+    /// Re-call among the current chaser and the four fielders nearest the ball. Runs right
+    /// after the chaser's replan in the same tick, so his fresh prediction is reused.
     fn recall(&mut self) {
         let (b, _) = self.ball_at(self.t);
         let mut idx: Vec<usize> = (0..9).collect();
@@ -407,14 +423,23 @@ impl<'a> Sim<'a> {
         if !cands.contains(&self.primary) {
             cands.push(self.primary);
         }
-        self.assign_among(cands);
+        self.assign_among(cands, Some(self.primary));
     }
 
-    fn assign_among(&mut self, cands: Vec<usize>) {
+    /// `fresh`: a fielder whose belief, intercept, and target were computed this tick from
+    /// the same observation (reused instead of predicted again).
+    fn assign_among(&mut self, cands: Vec<usize>, fresh: Option<usize>) {
         let mut best = (f64::INFINITY, self.primary);
         for i in cands {
-            let p = self.predict(i);
-            let (ti, pt) = self.intercept(i, &p);
+            let reuse = if fresh == Some(i) { self.f[i].belief.take() } else { None };
+            let (p, ti, pt) = match reuse {
+                Some(p) => (p, self.f[i].t_int, self.f[i].target),
+                None => {
+                    let p = self.predict(i);
+                    let (ti, pt) = self.intercept(i, &p);
+                    (p, ti, pt)
+                }
+            };
             let bias = if i >= 6 { -0.15 } else { 0.0 };
             if ti + bias < best.0 {
                 best = (ti + bias, i);
@@ -973,7 +998,7 @@ impl<'a> Sim<'a> {
             }
         }
         let infield = m::hypot(fd.pos.x, fd.pos.y) < INFIELD_R;
-        if std::env::var("BB_DEBUG_THROW").is_ok() {
+        if debug_throw() {
             eprintln!("t {:.2} holder {} at ({:.1},{:.1}) best {:?}; runners {:?}", self.t, by, fd.pos.x, fd.pos.y, best, self.r.iter().map(|r| (r.start, r.s, r.goal, r.out, r.scored)).collect::<Vec<_>>());
         }
         let target_base = match best {

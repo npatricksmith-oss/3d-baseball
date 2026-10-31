@@ -91,6 +91,11 @@ pub fn home_positions() -> [Vec3; 9] {
     [p(60.0, 0.0), Vec3::new(0.0, -0.9, 0.0), p(105.0, 38.0), p(150.0, 13.0), p(110.0, -36.0), p(150.0, -13.0), p(290.0, -30.0), p(320.0, 0.0), p(290.0, 30.0)]
 }
 
+/// Distance covered in time `t` from a standing start (the curve [`run_time`] inverts).
+pub fn run_dist(t: f64, v_max: f64, tau: f64) -> f64 {
+    if t <= 0.0 { 0.0 } else { v_max * (t - tau * (1.0 - m::exp(-t / tau))) }
+}
+
 /// Time to cover distance `d` from rest with v(t) = v_max(1 − e^(−t/τ)) (agent-models §5.3).
 /// Newton's method on the closed-form distance, from the near and far asymptotes.
 pub fn run_time(d: f64, v_max: f64, tau: f64) -> f64 {
