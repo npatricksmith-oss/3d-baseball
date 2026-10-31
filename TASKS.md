@@ -47,7 +47,8 @@ Status: `[ ]` not started · `[~]` in progress · `[x]` done · `[?]` needs an o
 - [ ] Rules engine: uncaught third strike and caught foul tips (catcher capture), overrunning first, two runners on a base, passing runners, interference (§5.7); grow the corpus toward 150 scenarios (§12.3)
 - [ ] Play simulator: replace the skeleton simplifications listed at the top of `bb_game/src/play.rs` (true belief-based perception via an atlas, calls/coverage tables, relays, physical throws, runner leads and secondary leads, base-path rounding)
 - [ ] Run environment: runs/team-game is ~9.8 (target ~4.5); batters reach on ~45% of balls in play (target ~32%). Measure first: by batted-ball type and fielder, from `bb_game/examples/bip_sweep.rs`
-- [ ] Play timelines for the client (data-formats §5) and Rerun output of whole games
+- [x] Play timelines for the client (data-formats §5, `bb_game::timeline`: ball knots, markers, telemetry, view state) and Rerun output of whole games (`sim-cli game --rrd`)
+- [x] C ABI for the Unreal spike (`bb_ffi`: create/advance/score/free, header `sim/crates/bb_ffi/include/bb_ffi.h`); a C client plays a full game (`sim/crates/bb_ffi/c/run_smoke.sh`)
 - [ ] M0.8 Unreal spike, then the Unreal client v0 (capsules, broadcast camera, scoreboard). **Owner judges watchability**
 
 ### Research follow-ups (from the specs' open-item lists)

@@ -47,7 +47,9 @@ sim/                   Cargo workspace
     bb_world           true world: pitch resolution against the swing
     bb_rules           rules engine: pure step function over facts; scenarios/**/*.toml corpus
     bb_game            orchestrator: cage, plate appearances (pa.rs), live-ball plays (play.rs), games
-    bb_stats, bb_league, bb_ffi   (later milestones)
+    bb_stats           statistics as pure functions of the event log (box score, accounting identities)
+    bb_ffi             C ABI for engine clients (include/bb_ffi.h; c/run_smoke.sh links a C client)
+    bb_league          (later milestones)
     bb_cli             `sim-cli` lab binary (Rerun output behind the default `rerun` feature)
 ```
 

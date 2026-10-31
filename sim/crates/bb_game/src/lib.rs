@@ -5,3 +5,4 @@ pub mod eventlog;
 pub mod game;
 pub mod pa;
 pub mod play;
+pub mod timeline;
