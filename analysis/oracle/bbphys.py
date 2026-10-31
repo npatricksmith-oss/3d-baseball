@@ -220,8 +220,16 @@ def integrate(state, rho, tau100=None, stop=None, dt=1e-4, max_time=60.0,
         end = rk4_step(s, h, rho, tau100, wind, aero, magnus)
         event_q = None
         if s[axis] >= target and end[axis] <= target:
-            q = bisect_fraction(lambda q: hermite(s[axis], s[axis+3], end[axis],
-                                                 end[axis+3], h, q)-target, h)
+            lower = 0.0
+            # A launch from the plane can rise and return within one step.
+            # Exclude its initial root by bracketing after the interpolated apex.
+            if s[axis] == target and s[axis+3] >= 0 and end[axis+3] < 0:
+                lower = bisect_fraction(
+                    lambda q: hermite_velocity(s[axis], s[axis+3], end[axis],
+                                                end[axis+3], h, q), h)
+            q = lower + (1-lower)*bisect_fraction(
+                lambda q: hermite(s[axis], s[axis+3], end[axis], end[axis+3],
+                                  h, lower+(1-lower)*q)-target, h*(1-lower))
             if hermite_velocity(s[axis], s[axis+3], end[axis], end[axis+3], h, q) < 0:
                 event_q = q
         if s[5] > 0 and end[5] <= 0:

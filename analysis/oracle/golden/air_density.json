@@ -1,0 +1,44 @@
+[
+  {
+    "temp_f": 70,
+    "pressure_inhg": 29.92,
+    "rh_pct": 50,
+    "elev_ft": 15,
+    "rho": 1.1937648334221502
+  },
+  {
+    "temp_f": 100,
+    "pressure_inhg": 29.7,
+    "rh_pct": 20,
+    "elev_ft": 15,
+    "rho": 1.1211493704397855
+  },
+  {
+    "temp_f": 25,
+    "pressure_inhg": 30.2,
+    "rh_pct": 30,
+    "elev_ft": 15,
+    "rho": 1.322391896484437
+  },
+  {
+    "temp_f": 70,
+    "pressure_inhg": 29.92,
+    "rh_pct": 50,
+    "elev_ft": 5280,
+    "rho": 0.9809797870096837
+  },
+  {
+    "temp_f": 85,
+    "pressure_inhg": 29.92,
+    "rh_pct": 100,
+    "elev_ft": 15,
+    "rho": 1.1484015741207072
+  },
+  {
+    "temp_f": 70,
+    "pressure_inhg": 29.92,
+    "rh_pct": 0,
+    "elev_ft": 0,
+    "rho": 1.2000459184331818
+  }
+]
