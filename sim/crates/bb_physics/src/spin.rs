@@ -65,7 +65,10 @@ pub fn spin_from_axis(spin_axis_deg: f64, efficiency: f64, rate_radps: f64, gyro
     let mdir = if vh.y.abs() > 1e-6 {
         Vec3::new(mx, -(mx * vh.x + mz * vh.z) / vh.y, mz).normalized()
     } else {
-        let ez = Vec3::Z.reject(vh).normalized();
+        // No Y component: the X–Z projection convention degenerates. Build a basis ⟂ v̂
+        // from the coordinate axis least aligned with v̂ so the requested rate is kept.
+        let up = if vh.z.abs() < 0.9 { Vec3::Z } else { Vec3::Y };
+        let ez = up.reject(vh).normalized();
         let ex = ez.cross(vh);
         ex * mx + ez * mz
     };
@@ -116,6 +119,18 @@ mod tests {
                         assert_eq!(info.gyro.signum(), gs);
                     }
                 }
+            }
+        }
+    }
+
+    #[test]
+    fn vertical_velocity_keeps_spin_rate() {
+        // Codex review #10: a vertical velocity must not silently delete transverse spin.
+        for v in [Vec3::Z, -Vec3::Z, Vec3::X] {
+            for eff in [1.0, 0.5] {
+                let w = spin_from_axis(180.0, eff, 250.0, 1.0, v);
+                assert!((w.norm() - 250.0).abs() < 1e-9, "{v:?} eff {eff}: |w| {}", w.norm());
+                assert!((decompose(w, v).efficiency - eff).abs() < 1e-12);
             }
         }
     }

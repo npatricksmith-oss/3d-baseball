@@ -68,6 +68,13 @@ pub fn philox4x32_10(ctr: [u32; 4], key: [u32; 2]) -> [u32; 4] {
     c
 }
 
+/// Map a 64-bit word to the open interval (0, 1): (k + ½)·2⁻⁵² with k the top 52 bits.
+/// Every result is exactly representable, so the endpoints 0 and 1 can never occur.
+#[inline]
+pub fn word_to_open_unit(w: u64) -> f64 {
+    ((w >> 12) as f64 + 0.5) * (1.0 / (1u64 << 52) as f64)
+}
+
 /// A stream of draws for one [`RngKey`].
 #[derive(Clone, Debug)]
 pub struct KeyedRng {
@@ -108,9 +115,9 @@ impl KeyedRng {
         (hi << 32) | lo
     }
 
-    /// Uniform in the open interval (0, 1), 53-bit resolution.
+    /// Uniform in the open interval (0, 1), 52-bit resolution.
     pub fn uniform(&mut self) -> f64 {
-        ((self.next_u64() >> 11) as f64 + 0.5) * (1.0 / (1u64 << 53) as f64)
+        word_to_open_unit(self.next_u64())
     }
 
     /// Standard normal via Box–Muller (deterministic through `libm`).
@@ -193,6 +200,14 @@ mod tests {
         let var = s2 / n as f64 - mean * mean;
         assert!(mean.abs() < 0.01, "mean {mean}");
         assert!((var - 1.0).abs() < 0.01, "var {var}");
+    }
+
+    #[test]
+    fn uniform_endpoints_are_excluded() {
+        let lo = word_to_open_unit(0);
+        let hi = word_to_open_unit(u64::MAX);
+        assert!(lo > 0.0 && hi < 1.0, "{lo} {hi}");
+        assert_eq!(hi, 1.0 - f64::EPSILON / 2.0); // the largest f64 below 1
     }
 
     #[test]

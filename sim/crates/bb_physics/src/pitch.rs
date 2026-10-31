@@ -78,6 +78,18 @@ fn plane_xz(env: &FlightEnv, s: BallState, plane_y: f64) -> Option<(f64, f64, f6
     })
 }
 
+/// Largest accepted miss of the noise-free aim at the target plane, m.
+pub const AIM_TOL_M: f64 = 1e-4;
+
+#[derive(Clone, Copy, Debug, PartialEq)]
+pub enum AimError {
+    /// The pitch never reached the target plane (e.g. no speed, or thrown away from it).
+    NoCrossing,
+    /// Iterations ran out with this residual, m.
+    NotConverged(f64),
+    BadInput,
+}
+
 #[derive(Clone, Copy, Debug, PartialEq)]
 pub struct Aim {
     pub yaw: f64,
@@ -94,6 +106,19 @@ pub struct Aim {
 /// (agent-models §2.3); `guess` seeds it (e.g. the previous solve for this pitch type).
 pub fn aim(env: &FlightEnv, r: Vec3, shape: &PitchShape, target_x: f64, target_z: f64, guess: Option<(f64, f64)>) -> Aim {
     aim_at_plane(env, r, shape, Y_JUDGE, target_x, target_z, guess)
+}
+
+impl Aim {
+    /// Accept the solve only if it converged within [`AIM_TOL_M`].
+    pub fn checked(self) -> Result<Aim, AimError> {
+        if self.iterations == 0 {
+            Err(AimError::NoCrossing)
+        } else if !(self.residual <= AIM_TOL_M) {
+            Err(AimError::NotConverged(self.residual))
+        } else {
+            Ok(self)
+        }
+    }
 }
 
 /// [`aim`] at an arbitrary plane `y = plane_y` (e.g. a tunnel point).
@@ -119,7 +144,7 @@ pub fn aim_at_plane(
         let (dx, dz) = (x - target_x, z - target_z);
         let res = m::hypot(dx, dz);
         out = Aim { yaw, elev, residual: res, iterations: it, flight_time: t };
-        if res < 1e-4 {
+        if res < AIM_TOL_M {
             break;
         }
         let dist = m::hypot(m::hypot(x - r.x, plane_y - r.y), z - r.z);
@@ -149,6 +174,17 @@ mod tests {
         assert_eq!(tilt_to_axis_deg(1.0), 210.0);
         assert_eq!(tilt_to_axis_deg(6.0), 0.0);
         assert_eq!(tilt_to_axis_deg(11.0), 150.0);
+    }
+
+    #[test]
+    fn unreachable_targets_fail_explicitly() {
+        // Codex review #6.
+        let env = FlightEnv::default_env();
+        let r = release_point(1.88, 45.0 * DEG, 1.95, -1.0);
+        let s = PitchShape { speed: 41.8, spin_rate: 230.0, spin_axis_deg: 210.0, efficiency: 0.92, gyro_sign: 1.0 };
+        assert!(aim(&env, r, &s, 0.0, 100.0, None).checked().is_err());
+        let still = PitchShape { speed: 0.0, ..s };
+        assert!(aim(&env, r, &still, 0.0, 0.8, None).checked().is_err());
     }
 
     #[test]

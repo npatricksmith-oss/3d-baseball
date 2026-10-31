@@ -78,7 +78,7 @@ All four formats are FlatBuffers. Schemas live in `sim/schemas/` and are compile
 | File | Namespace | Root type | `file_identifier` |
 | :--- | :--- | :--- | :--- |
 | `common.fbs` | `bb` | (none: shared structs, enums, `ProducerInfo`) | |
-| `events.fbs` | `bb.ev` | `PlayRecord` (and `LogHeader`, `LogFooter`) | `BBEV` |
+| `events.fbs` | `bb.ev` | `PlayRecord` (and `LogHeader`, `LogFooter`) | `BBEV` (play frames); `BBEH` header and `BBEF` footer frames (§4.1) |
 | `timeline.fbs` | `bb.tl` | `PlayTimeline` | `BBTL` |
 | `commands.fbs` | `bb.cmd` | `CommandEnvelope`, `CommandResult` | `BBCM` |
 | `snapshot.fbs` | `bb.ss` | `SaveState`, `ViewState` | `BBSS` |
@@ -130,6 +130,7 @@ LogHeader  PlayRecord(0)  PlayRecord(1)  …  PlayRecord(n)  LogFooter
 - `LogHeader`: `ProducerInfo`, `GameId`, game seed, and the full `GameConfig` (rosters, lineups, park, rules options). Everything needed to re-run the game except the commands, which are in the plays.
 - `PlayRecord`: `play_index` and an ordered vector of `Event`s for that play. One record per play allows streaming, random access by play, and a per-play hash.
 - `LogFooter`: final score, the per-play digest list, and the game digest (§4.4).
+- **Frame identifiers [C, M0.5]:** header frames use `BBEH`, play frames `BBEV`, footer frames `BBEF`, so a reader never infers a frame's type from its position. A log without a `BBEF` frame is unfinished and is rejected by the finished-log reader. The footer must list exactly one digest per play, in order, with matching `play_index`.
 - **Storage:** files use the `.bbev` extension. In a league save (SQLite, M7), each game's log is a row with the whole container as one zstd-compressed blob. Compression is outside the hashed bytes.
 - **Size budget [E]:** about 300 bytes per pitch on average, roughly 100 KB per game, roughly 100 MB per 972-game season. A season keeps every event log.
 

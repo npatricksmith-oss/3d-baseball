@@ -39,14 +39,14 @@ impl Cage {
     /// Noise-free release for an intent.
     pub fn release(&self, intent: &PitchIntent) -> BallState {
         let def = PitchDef::template(intent.ty);
-        let plan = plan_release(&self.env, &self.pitcher, &def, intent);
+        let plan = plan_release(&self.env, &self.pitcher, &def, intent).expect("pitch target is reachable");
         launch(plan.r, &plan.shape, plan.yaw, plan.elev)
     }
 
     /// Release with execution noise from the keyed RNG.
     pub fn release_noisy(&self, intent: &PitchIntent, seed: u64, play: u32, command_scale: f64) -> BallState {
         let def = PitchDef::template(intent.ty);
-        let plan = plan_release(&self.env, &self.pitcher, &def, intent);
+        let plan = plan_release(&self.env, &self.pitcher, &def, intent).expect("pitch target is reachable");
         let noise = ReleaseNoise::new(self.pitcher.command, def.command_mult, command_scale);
         let mut rng = KeyedRng::new(RngKey { game_seed: seed, play_index: play, agent_id: PITCHER_AGENT, purpose: Purpose::PitchRelease, sub_index: 0 });
         execute_release(&plan, &noise, &mut rng).state

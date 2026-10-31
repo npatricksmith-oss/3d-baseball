@@ -18,7 +18,7 @@ fn fastball_and_slider_tunnel() {
     let env = FlightEnv::default_env();
     let p = PitcherAttrs::average_rhp();
     let ff = PitchDef::template(PitchType::FourSeam);
-    let plan = plan_release(&env, &p, &ff, &PitchIntent { ty: PitchType::FourSeam, target_x: 0.15, target_z: 0.95 });
+    let plan = plan_release(&env, &p, &ff, &PitchIntent { ty: PitchType::FourSeam, target_x: 0.15, target_z: 0.95 }).unwrap();
     let tr_ff = fly_pitch(&env, launch(plan.r, &plan.shape, plan.yaw, plan.elev));
     let tun = at_y(&tr_ff, Y_TUNNEL);
     let sl = PitchDef::template(PitchType::Slider);

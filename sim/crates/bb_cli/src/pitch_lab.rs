@@ -15,6 +15,11 @@ use bb_physics::FlightEnv;
 use clap::Args;
 use serde_json::json;
 
+fn fail(msg: &str) -> ! {
+    eprintln!("error: {msg}");
+    std::process::exit(2)
+}
+
 fn parse_type(s: &str) -> Result<PitchType, String> {
     PitchType::from_code(s).ok_or_else(|| format!("unknown pitch type {s}; use FF, SI, FC, SL, ST, SV, CU, KC, CH, FS"))
 }
@@ -71,7 +76,7 @@ pub fn pitch(a: PitchArgs) {
     let p = pitcher(a.lefty);
     let def = PitchDef::template(a.ty);
     let intent = PitchIntent { ty: a.ty, target_x: a.x, target_z: a.z };
-    let plan = plan_release(&env, &p, &def, &intent);
+    let plan = plan_release(&env, &p, &def, &intent).unwrap_or_else(|e| fail(&format!("cannot aim there: {e:?}")));
     let noise = ReleaseNoise::new(p.command, def.command_mult, a.command_scale);
     let zone = Zone::for_batter(1.85, &ZoneRule::default());
     println!("{} from a {} average pitcher, target ({:+.2}, {:.2}) m, seed {}", a.ty.code(), if a.lefty { "LHP" } else { "RHP" }, a.x, a.z, a.seed);
@@ -150,7 +155,7 @@ pub fn tunnel(a: TunnelArgs) {
     let p = pitcher(a.lefty);
     let ff = PitchDef::template(PitchType::FourSeam);
     let other = PitchDef::template(a.with);
-    let plan = plan_release(&env, &p, &ff, &PitchIntent { ty: PitchType::FourSeam, target_x: a.x, target_z: a.z });
+    let plan = plan_release(&env, &p, &ff, &PitchIntent { ty: PitchType::FourSeam, target_x: a.x, target_z: a.z }).unwrap_or_else(|e| fail(&format!("cannot aim there: {e:?}")));
     let tr_ff = fly_pitch(&env, launch(plan.r, &plan.shape, plan.yaw, plan.elev));
     // Aim the second pitch through the fastball's position at the tunnel point.
     let tun = at_y(&tr_ff, Y_TUNNEL);
@@ -204,7 +209,7 @@ pub fn arsenal(a: ArsenalArgs) {
     println!("type   mph    rpm  tilt  eff    IVB_in  HB_in   flight_s");
     for ty in PitchType::ALL {
         let def = PitchDef::template(ty);
-        let plan = plan_release(&env, &p, &def, &PitchIntent { ty, target_x: 0.0, target_z: 0.75 });
+        let plan = plan_release(&env, &p, &def, &PitchIntent { ty, target_x: 0.0, target_z: 0.75 }).expect("middle of the zone is reachable");
         let s = launch(plan.r, &plan.shape, plan.yaw, plan.elev);
         let (hb, ivb) = movement(&env, s).unwrap();
         let tr = fly_pitch(&env, s);

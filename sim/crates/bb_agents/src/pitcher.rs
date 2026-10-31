@@ -4,7 +4,7 @@ use bb_math::Vec3;
 use bb_math::units::{DEG, MPH, RPM};
 use bb_observe::{Hand, PitchType};
 use bb_physics::FlightEnv;
-use bb_physics::pitch::{PitchShape, aim, release_point, tilt_to_axis_deg};
+use bb_physics::pitch::{AimError, PitchShape, aim, release_point, tilt_to_axis_deg};
 
 /// Physical pitcher attributes in internal units (agent-models §10).
 #[derive(Clone, Debug, PartialEq)]
@@ -131,12 +131,15 @@ pub struct IntendedRelease {
 }
 
 /// Solve the release for an intent. Pitchers know their own pitches: this uses the true
-/// physics and is exact (agent-models §2.3).
-pub fn plan_release(env: &FlightEnv, p: &PitcherAttrs, def: &PitchDef, intent: &PitchIntent) -> IntendedRelease {
+/// physics and is exact (agent-models §2.3). Fails if the target cannot be reached.
+pub fn plan_release(env: &FlightEnv, p: &PitcherAttrs, def: &PitchDef, intent: &PitchIntent) -> Result<IntendedRelease, AimError> {
     let r = def.release_point(p);
     let shape = def.shape(p);
-    let a = aim(env, r, &shape, intent.target_x, intent.target_z, None);
-    IntendedRelease { r, shape, yaw: a.yaw, elev: a.elev, command_mult: def.command_mult }
+    if !(shape.speed > 0.0 && shape.speed.is_finite() && intent.target_x.is_finite() && intent.target_z.is_finite()) {
+        return Err(AimError::BadInput);
+    }
+    let a = aim(env, r, &shape, intent.target_x, intent.target_z, None).checked()?;
+    Ok(IntendedRelease { r, shape, yaw: a.yaw, elev: a.elev, command_mult: def.command_mult })
 }
 
 #[cfg(test)]
@@ -151,7 +154,7 @@ mod tests {
         for ty in PitchType::ALL {
             let def = PitchDef::template(ty);
             let intent = PitchIntent { ty, target_x: 0.1, target_z: 0.7 };
-            let rel = plan_release(&env, &p, &def, &intent);
+            let rel = plan_release(&env, &p, &def, &intent).unwrap();
             let tr = fly_pitch(&env, launch(rel.r, &rel.shape, rel.yaw, rel.elev));
             let end = tr.last().s.r;
             assert_eq!(tr.stop, Some(0), "{ty:?} bounced");

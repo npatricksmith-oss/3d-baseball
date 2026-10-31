@@ -73,6 +73,9 @@ pub struct Impact {
     pub branch: Branch,
     /// The first solution gained energy and was redone with e_t = 0 (§8.1 step 5).
     pub energy_guard: bool,
+    /// Even the e_t = 0 solution gained energy, so a frictionless normal impulse was used
+    /// (always dissipative for e_n ≤ 1).
+    pub frictionless_fallback: bool,
 }
 
 /// Why the solver declined to produce an impulse.
@@ -92,16 +95,42 @@ pub fn k_matrix(b1: &Body, b2: &Body) -> Mat3 {
 }
 
 /// Resolve one contact with normal `n` pointing from body 2 into body 1.
+///
+/// Energy guard (physics-spec §8.1 step 5): if the solution gains kinetic energy, retry with
+/// e_t = 0; if that still gains energy (possible through normal–tangential coupling in K),
+/// fall back to a frictionless normal impulse, which cannot gain energy for e_n ≤ 1.
 pub fn resolve(b1: Body, b2: Body, n: Vec3, mat: Material) -> Result<Impact, NoImpact> {
-    let first = solve(&b1, &b2, n, mat)?;
     let e0 = b1.kinetic_energy() + b2.kinetic_energy();
-    let e1 = first.b1.kinetic_energy() + first.b2.kinetic_energy();
-    if e1 > e0 + 1e-12 * e0.max(1e-30) && mat.e_t != 0.0 {
+    let gains = |o: &Impact| o.b1.kinetic_energy() + o.b2.kinetic_energy() > e0 + 1e-12 * e0.max(1e-30);
+    let first = solve(&b1, &b2, n, mat)?;
+    if !gains(&first) {
+        return Ok(first);
+    }
+    if mat.e_t != 0.0 {
         let mut retry = solve(&b1, &b2, n, Material { e_t: 0.0, ..mat })?;
         retry.energy_guard = true;
-        return Ok(retry);
+        if !gains(&retry) {
+            return Ok(retry);
+        }
     }
-    Ok(first)
+    let mut fb = frictionless(&b1, &b2, n, mat.e_n)?;
+    fb.energy_guard = true;
+    fb.frictionless_fallback = true;
+    Ok(fb)
+}
+
+fn frictionless(b1: &Body, b2: &Body, n: Vec3, e_n: f64) -> Result<Impact, NoImpact> {
+    let cn = (b1.point_velocity() - b2.point_velocity()).dot(n);
+    if cn >= 0.0 {
+        return Err(NoImpact::Separating);
+    }
+    let k = k_matrix(b1, b2);
+    let nkn = n.dot(k * n);
+    if !(nkn > 0.0) {
+        return Err(NoImpact::Singular);
+    }
+    let j = n * (-(1.0 + e_n) * cn / nkn);
+    Ok(Impact { j, b1: apply(b1, j), b2: apply(b2, -j), branch: Branch::Slide, energy_guard: false, frictionless_fallback: false })
 }
 
 fn solve(b1: &Body, b2: &Body, n: Vec3, mat: Material) -> Result<Impact, NoImpact> {
@@ -128,7 +157,7 @@ fn solve(b1: &Body, b2: &Body, n: Vec3, mat: Material) -> Result<Impact, NoImpac
         let jmag = -(1.0 + mat.e_n) * cn / n.dot(k * dir);
         (dir * jmag, Branch::Slide)
     };
-    Ok(Impact { j, b1: apply(b1, j), b2: apply(b2, -j), branch, energy_guard: false })
+    Ok(Impact { j, b1: apply(b1, j), b2: apply(b2, -j), branch, energy_guard: false, frictionless_fallback: false })
 }
 
 fn apply(b: &Body, j: Vec3) -> Body {

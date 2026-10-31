@@ -200,3 +200,23 @@ fn a11_energy_never_increases() {
     }
     println!("A11: worst ΔKE {worst:.3e} J");
 }
+
+#[test]
+fn a11_coupled_guard_case_from_review() {
+    // Codex review #3: e_t = 0 alone still gains energy through K's normal–tangential
+    // coupling; the frictionless fallback must engage and dissipate.
+    let b1 = Body {
+        inv_mass: 1.0,
+        inv_inertia: Mat3::diag(1.0, 1.0, 1000.0),
+        v: Vec3::new(-1.0, -100.0 / 11.0, 0.0),
+        w: Vec3::ZERO,
+        r: Vec3::new(1.0, -0.1, 0.0),
+    };
+    let b2 = Body::immovable(Vec3::ZERO);
+    let ke = |b: &Body| 0.5 * b.v.norm_sq() / b.inv_mass + 0.5 * b.w.dot(b.inv_inertia.inverse().unwrap() * b.w);
+    for e_t in [0.15, 0.0] {
+        let out = resolve(b1, b2, Vec3::X, Material { e_n: 0.55, e_t, mu: 0.5 }).unwrap();
+        assert!(out.energy_guard && out.frictionless_fallback, "e_t {e_t}");
+        assert!(ke(&out.b1) <= ke(&b1) + 1e-12, "gained {} J", ke(&out.b1) - ke(&b1));
+    }
+}

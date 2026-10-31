@@ -29,7 +29,7 @@ const BANDS: &[(PitchType, (f64, f64), (f64, f64), (f64, f64))] = &[
 fn measure(p: &PitcherAttrs, ty: PitchType) -> (f64, f64, f64, f64, f64) {
     let env = FlightEnv::default_env();
     let def = PitchDef::template(ty);
-    let rel = plan_release(&env, p, &def, &PitchIntent { ty, target_x: 0.0, target_z: 0.75 });
+    let rel = plan_release(&env, p, &def, &PitchIntent { ty, target_x: 0.0, target_z: 0.75 }).unwrap();
     let s = launch(rel.r, &rel.shape, rel.yaw, rel.elev);
     let (hb, ivb) = movement(&env, s).unwrap();
     (mps_to_mph(rel.shape.speed), m_to_in(ivb), m_to_in(hb), radps_to_rpm(rel.shape.spin_rate), spin_axis_deg(s.w, s.v))

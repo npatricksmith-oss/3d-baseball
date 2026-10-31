@@ -192,17 +192,37 @@ impl Trajectory {
     }
     /// Time at which the path first satisfies `c`, located on the interpolant.
     pub fn find(&self, c: Crossing) -> Option<f64> {
-        for w in self.knots.windows(2) {
-            if c.g(w[0].s.r) > 0.0 && c.g(w[1].s.r) <= 0.0 {
-                return Some(bisect(&w[0], &w[1], c));
-            }
-        }
-        None
+        self.knots.windows(2).find_map(|w| crossing_in(&w[0], &w[1], c))
     }
 }
 
-fn bisect(a: &Knot, b: &Knot, c: Crossing) -> f64 {
-    let (mut lo, mut hi) = (a.t, b.t);
+/// Interior samples per step used to bracket a crossing on the interpolant, so a path that
+/// starts on a boundary, leaves it, and returns within one step is still caught.
+const BRACKET_SAMPLES: usize = 4;
+
+/// First downward crossing of `c` (g from > 0 to ≤ 0) on the Hermite segment a→b.
+fn crossing_in(a: &Knot, b: &Knot, c: Crossing) -> Option<f64> {
+    let h = b.t - a.t;
+    let mut tp = a.t;
+    let mut gp = c.g(a.s.r);
+    for i in 1..=BRACKET_SAMPLES + 1 {
+        let (t, g) = if i == BRACKET_SAMPLES + 1 {
+            (b.t, c.g(b.s.r))
+        } else {
+            let t = a.t + h * i as f64 / (BRACKET_SAMPLES + 1) as f64;
+            (t, c.g(hermite(a, b, t).0))
+        };
+        if gp > 0.0 && g <= 0.0 {
+            return Some(bisect_between(a, b, c, tp, t));
+        }
+        tp = t;
+        gp = g;
+    }
+    None
+}
+
+fn bisect_between(a: &Knot, b: &Knot, c: Crossing, lo: f64, hi: f64) -> f64 {
+    let (mut lo, mut hi) = (lo, hi);
     while hi - lo > EVENT_TOL_S {
         let mid = 0.5 * (lo + hi);
         if c.g(hermite(a, b, mid).0) > 0.0 {
@@ -217,19 +237,26 @@ fn bisect(a: &Knot, b: &Knot, c: Crossing) -> f64 {
 /// Integrate from `s0` at time `t0` with fixed step `dt` until one of `stops` fires or
 /// `t_max` elapses. The final knot is the exact state at the event, rebuilt by a partial
 /// RK4 step from the start of the step in which it happened (physics-spec §5.3).
+///
+/// Panics on a non-finite or non-positive `dt`, or a negative or non-finite `t_max`: those
+/// are programming errors, not physical situations.
 pub fn fly(env: &FlightEnv, s0: BallState, t0: f64, dt: f64, stops: &[Crossing], t_max: f64) -> Trajectory {
+    assert!(dt.is_finite() && dt > 0.0, "fly: step must be finite and positive, got {dt}");
+    assert!(t_max.is_finite() && t_max >= 0.0 && t0.is_finite(), "fly: bad time span {t0} + {t_max}");
     let mut tr = Trajectory { knots: Vec::with_capacity(256), stop: None, apex_z: s0.r.z, apex_t: t0 };
     tr.knots.push(Knot { t: t0, s: s0 });
     let mut cur = Knot { t: t0, s: s0 };
-    // Stops already satisfied at the start never fire (g must start positive).
+    // A stop already satisfied at the start fires only if the path leaves it and returns.
     while cur.t < t0 + t_max {
         let h = dt.min(t0 + t_max - cur.t);
+        if cur.t + h <= cur.t {
+            break; // the step no longer advances time at this magnitude
+        }
         let next = Knot { t: cur.t + h, s: env.step(&cur.s, h) };
         // Earliest event inside this step.
         let mut hit: Option<(usize, f64)> = None;
         for (i, c) in stops.iter().enumerate() {
-            if c.g(cur.s.r) > 0.0 && c.g(next.s.r) <= 0.0 {
-                let te = bisect(&cur, &next, *c);
+            if let Some(te) = crossing_in(&cur, &next, *c) {
                 if hit.map(|(_, t)| te < t).unwrap_or(true) {
                     hit = Some((i, te));
                 }
@@ -267,6 +294,31 @@ fn track_apex(tr: &mut Trajectory, a: &Knot, b: &Knot) {
     if b.s.r.z > tr.apex_z {
         tr.apex_z = b.s.r.z;
         tr.apex_t = b.t;
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn return_to_boundary_within_first_step_is_caught() {
+        // Codex review #5: start on z = R, rise 0.01 m/s, come back down inside one 5 ms step.
+        let mut env = FlightEnv::calculator();
+        env.rho = 0.0;
+        let r = env.ball.radius;
+        let s0 = BallState { r: Vec3::new(0.0, 0.0, r), v: Vec3::new(0.0, 0.0, 0.01), w: Vec3::ZERO };
+        let tr = fly(&env, s0, 0.0, 0.005, &[Crossing::ZBelow(r)], 0.01);
+        assert_eq!(tr.stop, Some(0));
+        let expect = 2.0 * 0.01 / bb_math::units::G;
+        assert!((tr.last().t - expect).abs() < 1e-8, "{} vs {expect}", tr.last().t);
+        assert_eq!(tr.find(Crossing::ZBelow(r)).map(|t| (t - expect).abs() < 1e-8), Some(true));
+    }
+
+    #[test]
+    #[should_panic(expected = "finite and positive")]
+    fn zero_step_is_rejected() {
+        fly(&FlightEnv::calculator(), BallState::default(), 0.0, 0.0, &[], 1.0);
     }
 }
 

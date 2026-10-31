@@ -245,7 +245,7 @@ K = (1/m + 1/M)·𝟙  −  [r₁]× I₁⁻¹ [r₁]×  −  [r₂]× I₂⁻¹
 2. If |J*_t| ≤ μ · (J*·n̂), accept J = J*.
 3. **Otherwise sliding:** t̂ = c_t / |c_t|, J = j (n̂ − μ t̂), with `j = −(1 + e_n) c_n / ( n̂ᵀ K (n̂ − μ t̂) )`.
 4. **Apply:** v += J/m; ω += I₁⁻¹ (r₁ × J); V −= J/M; Ω −= I₂⁻¹ (r₂ × J).
-5. **Guard:** total kinetic energy must not increase. If it does (possible with some e_t > 0 geometries), retry with e_t = 0 and log the case.
+5. **Guard:** total kinetic energy must not increase. If it does (possible with some e_t > 0 geometries), retry with e_t = 0 and log the case. If the e_t = 0 solution still gains energy (possible through normal–tangential coupling in K; found by the M1 code review), apply a **frictionless normal impulse** `J = −(1 + e_n) c_n / (n̂ᵀK n̂) · n̂`, which cannot gain energy for e_n ≤ 1, and flag it. *(Added 2026-10-31.)*
 
 **Analytic checks** (these become test cases):
 - Head-on normal impact on the bat's axis-normal line, ball with no spin. The model reduces to 1/M_eff = 1/M + b²/I_cm (b = distance from the bat's center of mass) and the classic collision efficiency `q = (e_n − r)/(1 + r)`, r = m/M_eff, with outgoing ball speed `q·v_pitch + (1 + q)·v_bat`.

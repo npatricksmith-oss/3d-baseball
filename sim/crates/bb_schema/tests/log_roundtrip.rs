@@ -27,7 +27,7 @@ fn header(git_commit: &str, seed: u64) -> Vec<u8> {
         &mut fbb,
         &LogHeaderArgs { producer: Some(p), game_id: 1, game_seed: seed, config: None },
     );
-    fbb.finish_size_prefixed(h, Some(log::FILE_ID));
+    fbb.finish_size_prefixed(h, Some(log::HEADER_ID));
     fbb.finished_data().to_vec()
 }
 
@@ -136,4 +136,47 @@ fn tampering_is_detected() {
     let off: usize = frames[..3].iter().map(|f| f.len()).sum::<usize>() + 40;
     bytes[off] ^= 0x01;
     assert!(log::read(&bytes).is_err());
+}
+
+#[test]
+fn missing_footer_is_rejected() {
+    let (bytes, _) = fake_game(3, "abc", 2);
+    let frames = log::frames(&bytes).unwrap();
+    let cut: usize = frames[..frames.len() - 1].iter().map(|f| f.len()).sum();
+    assert!(matches!(log::read(&bytes[..cut]), Err(log::LogError::MissingFooter)));
+    // Header plus a single play and no footer: the play must not be taken for a footer.
+    let cut2: usize = frames[..2].iter().map(|f| f.len()).sum();
+    assert!(matches!(log::read(&bytes[..cut2]), Err(log::LogError::MissingFooter)));
+}
+
+#[test]
+fn zero_play_log_verifies_digest() {
+    let (bytes, d) = fake_game(3, "abc", 0);
+    assert_eq!(d, [0u8; 32]);
+    let v = log::read(&bytes).unwrap();
+    assert!(v.plays.is_empty());
+}
+
+#[test]
+fn short_and_oversized_frames_error_without_panicking() {
+    for n in 0..12u32 {
+        let mut b = n.to_le_bytes().to_vec();
+        b.extend(std::iter::repeat_n(0u8, n as usize));
+        assert!(log::read(&b).is_err(), "len {n}");
+    }
+    let mut b = u32::MAX.to_le_bytes().to_vec();
+    b.extend([0u8; 16]);
+    assert!(log::read(&b).is_err());
+    assert!(log::read(&[1, 2]).is_err());
+}
+
+#[test]
+#[should_panic(expected = "disagrees")]
+fn writer_rejects_misindexed_frame() {
+    let mut w = LogWriter::new(&header("abc", 1));
+    let mut fbb = FlatBufferBuilder::new();
+    let ev = fbb.create_vector::<flatbuffers::WIPOffset<Event>>(&[]);
+    let rec = bb_schema::ev::PlayRecord::create(&mut fbb, &bb_schema::ev::PlayRecordArgs { play_index: 0, events: Some(ev) });
+    fbb.finish_size_prefixed(rec, Some(log::FILE_ID));
+    w.push_play_frame(99, fbb.finished_data());
 }
