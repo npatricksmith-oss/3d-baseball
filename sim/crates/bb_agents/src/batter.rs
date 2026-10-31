@@ -30,6 +30,17 @@ pub struct Perception {
     /// The batter's belief about how much a type's break varies pitch to pitch: σ of the
     /// extra plate displacement, m [E].
     pub break_sigma: f64,
+    /// Smooth-pursuit limit, rad/s [E, ~70°/s; R9]. Above it the eyes fall behind the ball
+    /// and angular noise grows as (ω/ω_p)² (Bahill & LaRitz 1984).
+    pub pursuit_limit: f64,
+}
+
+impl Perception {
+    /// Angular σ for a ball moving at angular speed `omega` (rad/s) relative to the eye.
+    pub fn angular_sigma(&self, omega: f64) -> f64 {
+        let r = (omega / self.pursuit_limit).max(1.0);
+        self.sigma_ang * r * r
+    }
 }
 
 impl Default for Perception {
@@ -43,6 +54,7 @@ impl Default for Perception {
             latency: 0.05,
             persistent_share: 0.1,
             break_sigma: 0.06,
+            pursuit_limit: 1.2,
         }
     }
 }
@@ -423,7 +435,7 @@ pub mod values {
     /// Value of putting a pitch at this location in play, relative to a 0-0 start [E]:
     /// best in the heart of the zone, falling off outside it (public wOBAcon-style scale).
     pub fn bip_value(dist_out_of_heart: f64) -> f64 {
-        0.10 - 1.2 * dist_out_of_heart.max(0.0)
+        0.10 - 0.6 * dist_out_of_heart.max(0.0)
     }
     /// Share of contact the batter expects to go foul [E] (calibration-targets B1.15 ≈ 50%).
     pub const FOUL_SHARE: f64 = 0.5;
@@ -446,8 +458,21 @@ pub struct Decision {
     pub ev_take: f64,
 }
 
-/// σ of the batter's own believed contact tolerance (aim error that still makes contact), m [E].
-pub const CONTACT_SIGMA: f64 = 0.035;
+/// Half-height of the band in which the bat still meets the ball (barrel radius + ball
+/// radius, slightly less to allow for glancing contact), m [D/E].
+pub const CONTACT_TOL_Z: f64 = 0.06;
+/// Timing window for usable contact, s [E].
+pub const CONTACT_TOL_T: f64 = 0.025;
+/// The batter's belief about its own execution noise (vertical m, timing s) [E].
+pub const OWN_EXEC_SIGMA: (f64, f64) = (0.015, 0.008);
+
+/// Fraction of the zone's half-sizes the batter treats as the "heart" for contact value [E].
+pub const HEART: f64 = 0.7;
+
+/// P(|e| < tol) for e ~ N(mu, sigma²).
+fn p_within(mu: f64, sigma: f64, tol: f64) -> f64 {
+    phi((tol - mu) / sigma) - phi((-tol - mu) / sigma)
+}
 
 pub fn decide(post: &[Component], aim: Component, count: Count, zone: (f64, f64), disc: &Discipline, threshold: f64, ball_r: f64) -> Decision {
     let (bottom, top) = zone;
@@ -459,15 +484,16 @@ pub fn decide(post: &[Component], aim: Component, count: Count, zone: (f64, f64)
     for c in post {
         let sx = m::sqrt(c.cov.r[0][0].max(1e-8));
         let sz = m::sqrt(c.cov.r[1][1].max(1e-8));
+        let st = m::sqrt(c.cov.r[2][2].max(1e-10));
         let p = p_strike(c.mean.x, c.mean.y, sx, sz, bottom, top, ball_r);
         ps += c.w * p;
-        // Contact chance if this hypothesis is true while aiming at the dominant mode.
-        let dz = c.mean.y - aim.mean.y;
-        let dt_m = (c.mean.z - aim.mean.z) * 30.0; // timing error as bat-travel distance
-        let d2 = dz * dz + 0.25 * dt_m * dt_m + sz * sz;
-        let pc = m::exp(-0.5 * d2 / (CONTACT_SIGMA * CONTACT_SIGMA + sz * sz));
-        let out_x = (c.mean.x.abs() - 0.6 * HALF_WIDTH).max(0.0);
-        let out_z = ((c.mean.y - mid_z).abs() - 0.6 * half_h).max(0.0);
+        // Contact chance if this hypothesis is true while aiming at the dominant mode: the
+        // ball must pass within the contact band, in time.
+        let sv = m::hypot(sz, OWN_EXEC_SIGMA.0);
+        let stt = m::hypot(st, OWN_EXEC_SIGMA.1);
+        let pc = p_within(c.mean.y - aim.mean.y, sv, CONTACT_TOL_Z) * p_within(c.mean.z - aim.mean.z, stt, CONTACT_TOL_T);
+        let out_x = (c.mean.x.abs() - HEART * HALF_WIDTH).max(0.0);
+        let out_z = ((c.mean.y - mid_z).abs() - HEART * half_h).max(0.0);
         let contact = values::contact_value(count, m::hypot(out_x, out_z)) - v0;
         let whiff = values::after_strike(count) - v0;
         ev_swing += c.w * (pc * contact + (1.0 - pc) * whiff);
