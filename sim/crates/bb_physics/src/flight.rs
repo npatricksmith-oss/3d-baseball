@@ -1,7 +1,7 @@
 //! Ball flight (physics-spec §4–§5): forces, fixed-step RK4, cubic Hermite dense output, and
 //! event location by bisection on the interpolant.
 
-use bb_math::Vec3;
+use bb_math::{Vec3, m};
 
 use crate::ball::{AeroParams, BallParams};
 
@@ -140,6 +140,9 @@ pub enum Crossing {
     YAbove(f64),
     /// Ball center descends to height `z` (ground contact uses z = R).
     ZBelow(f64),
+    /// Horizontal distance from home exceeds the fence distance at the ball's spray angle
+    /// (quadratic through left-line, center, right-line distances; see `ground::Field`).
+    RadiusAbove { lf: f64, cf: f64, rf: f64 },
 }
 
 impl Crossing {
@@ -149,6 +152,12 @@ impl Crossing {
             Crossing::YBelow(y) => r.y - y,
             Crossing::YAbove(y) => y - r.y,
             Crossing::ZBelow(z) => r.z - z,
+            Crossing::RadiusAbove { lf, cf, rf } => {
+                let theta = m::atan2(r.x, r.y);
+                let s = (theta / core::f64::consts::FRAC_PI_4).clamp(-1.0, 1.0);
+                let side = if s < 0.0 { lf } else { rf };
+                (cf + (side - cf) * s * s) - m::hypot(r.x, r.y)
+            }
         }
     }
 }
