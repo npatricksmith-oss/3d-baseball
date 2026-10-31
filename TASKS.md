@@ -19,12 +19,16 @@ Status: `[ ]` not started · `[~]` in progress · `[x]` done · `[?]` needs an o
 - [x] P2. Agent models draft v1: [docs/agent-models.md](docs/agent-models.md) (2026-10-31). Open items in its §13
 - [x] P3. Calibration targets draft v1: [docs/calibration-targets.md](docs/calibration-targets.md) (2026-10-31). Open items in its §13
 - [x] P4. Rules spec draft v1: [docs/rules-spec.md](docs/rules-spec.md) (2026-10-31). Open items in its §15
+- [x] **M0 Foundations** (2026-10-31, except the Unreal spike M0.8/M0.9): git repo; toolchains (rustup, uv, zig linker shim, toolbx for `flatc`); Cargo workspace with the crate split; `bb_math` (Vec3/Mat3, units, `libm` wrappers, **Philox4x32-10** keyed RNG with KATs); six FlatBuffers schemas incl. the R12 additions; event-log container with BLAKE3 digest chain and determinism tests; `sim-cli`; Rerun output; [CLAUDE.md](CLAUDE.md); crate-graph test enforcing `bb_agents` ↛ `bb_world`
+- [x] **M1 Pitch flight** (2026-10-31): RK4 flight (full-state, spin decay in the ODE), Hermite events, atmosphere, spin-axis/tilt conventions, ABS zone, release point, aiming solve, movement metrics, arsenal templates for 10 pitch types (in public ranges, lefty mirror), release execution noise; Tier A A1–A6 and plausibility bands pass; **independent Python oracle written by Codex** agrees to ~3e-8 m; tunneling gate test; `sim-cli pitch/tunnel/arsenal`
+- [x] **M2 Bat and contact** (2026-10-31): bat profile with integrated mass properties (A12), §8.1 impulse solver with energy guard (A7–A9, A11, oracle fixtures), COR location profile, contact detection/resolution, analytic swing model (zero-lag template), swing execution noise, `bb_world` pitch resolution, cage harness; M2 gate sweeps pass (early→pull, late→oppo, undercut→backspin fly, overcut→topspin grounder, off-barrel→weak); contact map in [docs/m2-contact-map.md](docs/m2-contact-map.md); `sim-cli cage/cage-map`
+- [x] Codex code review of M0–M2 code: 10 findings, all fixed ([docs/reviews/2026-10-31-codex-m1-review.md](docs/reviews/2026-10-31-codex-m1-review.md))
 
 ---
 
-## Phase: Planning (current)
+## Phase: M3 Batter vs pitcher (current)
 
-All four planning specs (P1–P4) are drafted. Planning closes when the owner has reviewed them; the follow-ups below run alongside M0–M2.
+Planning specs P1–P4 are drafted (owner review still open). M0 (minus the Unreal spike), M1, and M2 are done.
 
 ### Research follow-ups (from the specs' open-item lists)
 Not blocking; resolve during M1–M2 at the latest.
@@ -43,15 +47,10 @@ Not blocking; resolve during M1–M2 at the latest.
 
 ---
 
-## Phase: M0 Foundations (next after planning)
+## Phase: M0 leftovers
 
-- [ ] M0.1 `git init`, Git LFS, `.gitignore`; first commit of the planning docs
-- [ ] M0.2 Install toolchains: Rust (rustup, stable), Python with `uv` (oracle and analysis), Rerun viewer
-- [ ] M0.3 Cargo workspace with empty crates per PLAN §15, including the `bb_agents` ↛ `bb_world` dependency rule
-- [ ] M0.4 `bb_math`: SI vector types, unit conversions, keyed counter-based RNG, `libm` wrappers
-- [ ] M0.5 FlatBuffers schemas from P1; event-log writer and reader; determinism hash test
-- [ ] M0.6 `sim-cli` skeleton; Rerun hello-world (log a hand-built trajectory)
-- [ ] M0.7 `CLAUDE.md`: invariants, units/frames, Unreal rules, testing expectations
+- [ ] M0.1b Install Git LFS before any Unreal asset is committed (`.gitattributes` already routes `*.uasset`/`*.umap` to LFS). Needs `sudo dnf install git-lfs` or the toolbx
+- [ ] M0.2b Optional: `sudo dnf install gcc glibc-devel` on the host to retire the zig linker shim (see CLAUDE.md)
 - [ ] M0.8 **Unreal spike** on this machine (14 GiB RAM): precompiled UE5 for Linux, low-RAM build settings, link the Rust library through the C ABI, play a capsule timeline; record RAM use and compile times against the PLAN §3.3 pass criteria
 - [?] M0.9 Owner review: spike result confirms or reopens D6 (Unreal)
 

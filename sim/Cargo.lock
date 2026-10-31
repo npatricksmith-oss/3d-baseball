@@ -486,6 +486,7 @@ dependencies = [
  "bb_math",
  "bb_observe",
  "bb_physics",
+ "bb_world",
  "clap",
  "rerun",
  "serde_json",

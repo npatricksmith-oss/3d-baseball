@@ -20,7 +20,7 @@ fn fail(msg: &str) -> ! {
     std::process::exit(2)
 }
 
-fn parse_type(s: &str) -> Result<PitchType, String> {
+pub fn parse_type(s: &str) -> Result<PitchType, String> {
     PitchType::from_code(s).ok_or_else(|| format!("unknown pitch type {s}; use FF, SI, FC, SL, ST, SV, CU, KC, CH, FS"))
 }
 
