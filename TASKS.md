@@ -11,7 +11,7 @@ Status: `[ ]` not started · `[~]` in progress · `[x]` done · `[?]` needs an o
 
 The overnight "Resume here" list is done (commit `3fd7757` plus the docs commit after it). Runners now retouch after catches, wait for the runner ahead to clear a base, and go back from a base the runner ahead holds: `sim-cli games --n 128` gives **0 rules warnings**, 5.64 runs/team-game. The "846 ms per game" was a measuring artifact (wall × 16 SMT threads); one game on one thread is ~270 ms, live plays ~117 ms. The live review's Resolution section is written. Next candidates, in order:
 
-1. [ ] **Per-game budget (200 ms):** the pitch side now dominates (540 µs per pitch, aim solve 258 µs of it; `examples/perf.rs`). Speed up `plan_release`'s aim solve (warm start from the previous solve, fewer iterations) before touching the live sim again.
+1. [~] **Per-game budget (200 ms), ~245 ms now.** Done: two-stage aim solve and seeded scouting builds (−28 ms per game; a cold `plan_release` 258 → 62 µs). The measured breakdown is in agent-models §12. The next cuts in size order: batter perception plus the swing-adjustment loop (71 ms vs a 10 ms budget: per-observation filter updates for every hypothesis, `point_at_depth` every 10 ms), fielder predictions (64 ms: 2,746 full-path predictions per game; cut the horizon or reuse across replans).
 2. [ ] **Run environment:** ground balls reach base .55 of the time (MLB ≈ .24). Measure by fielder and spray before changing positioning.
 3. [ ] The rest of "M4 next steps" below.
 

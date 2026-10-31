@@ -70,8 +70,8 @@ pub fn fly_pitch(env: &FlightEnv, s: BallState) -> Trajectory {
 
 /// Where a pitch crosses the plane `y = plane_y` (x, z, t), flying through the ground if
 /// needed. Used by the aiming solve, which must converge even for pitches aimed in the dirt.
-fn plane_xz(env: &FlightEnv, s: BallState, plane_y: f64) -> Option<(f64, f64, f64)> {
-    let tr = fly(env, s, 0.0, DT_PITCH, &[Crossing::YBelow(plane_y)], 2.0);
+fn plane_xz(env: &FlightEnv, s: BallState, plane_y: f64, dt: f64) -> Option<(f64, f64, f64)> {
+    let tr = fly(env, s, 0.0, dt, &[Crossing::YBelow(plane_y)], 2.0);
     tr.stop.map(|_| {
         let k = tr.last();
         (k.s.r.x, k.s.r.z, k.t)
@@ -80,6 +80,10 @@ fn plane_xz(env: &FlightEnv, s: BallState, plane_y: f64) -> Option<(f64, f64, f6
 
 /// Largest accepted miss of the noise-free aim at the target plane, m.
 pub const AIM_TOL_M: f64 = 1e-4;
+/// Flight step for the aiming solve's search iterations, s. RK4 at this step lands within
+/// ~3 nm of [`DT_PITCH`] at the plate for every arsenal type, at a tenth of the cost; the
+/// accepted answer is always confirmed at `DT_PITCH` (agent-models §2.3).
+pub const AIM_SEARCH_DT: f64 = 0.02;
 
 #[derive(Clone, Copy, Debug, PartialEq)]
 pub enum AimError {
@@ -96,7 +100,10 @@ pub struct Aim {
     pub elev: f64,
     /// Residual miss at the plate plane after the last iteration, m.
     pub residual: f64,
+    /// Flights at [`DT_PITCH`] (the confirmation stage).
     pub iterations: u32,
+    /// Flights at [`AIM_SEARCH_DT`] (the search stage).
+    pub search_iterations: u32,
     /// Flight time to the plate plane, s.
     pub flight_time: f64,
 }
@@ -138,18 +145,26 @@ pub fn aim_at_plane(
         let lift = 0.5 * bb_math::units::G * t * t;
         (m::atan2(d0.x, -d0.y), m::atan2(d0.z + lift, m::hypot(d0.x, d0.y)))
     });
-    let mut out = Aim { yaw, elev, residual: f64::INFINITY, iterations: 0, flight_time: 0.0 };
-    for it in 1..=12 {
-        let Some((x, z, t)) = plane_xz(env, launch(r, shape, yaw, elev), plane_y) else { break };
-        let (dx, dz) = (x - target_x, z - target_z);
-        let res = m::hypot(dx, dz);
-        out = Aim { yaw, elev, residual: res, iterations: it, flight_time: t };
-        if res < AIM_TOL_M {
-            break;
+    let mut out = Aim { yaw, elev, residual: f64::INFINITY, iterations: 0, search_iterations: 0, flight_time: 0.0 };
+    // Search with the cheap step to well inside the tolerance, then confirm (and if need be
+    // correct) with the true step. Only the true-step residual is reported.
+    for (dt, tol, stage) in [(AIM_SEARCH_DT, 0.1 * AIM_TOL_M, 0), (DT_PITCH, AIM_TOL_M, 1)] {
+        for it in 1..=12 {
+            let Some((x, z, t)) = plane_xz(env, launch(r, shape, yaw, elev), plane_y, dt) else { break };
+            let (dx, dz) = (x - target_x, z - target_z);
+            let res = m::hypot(dx, dz);
+            if stage == 0 {
+                out.search_iterations = it;
+            } else {
+                out = Aim { yaw, elev, residual: res, iterations: it, flight_time: t, ..out };
+            }
+            if res < tol {
+                break;
+            }
+            let dist = m::hypot(m::hypot(x - r.x, plane_y - r.y), z - r.z);
+            yaw -= dx / dist;
+            elev -= dz / dist;
         }
-        let dist = m::hypot(m::hypot(x - r.x, plane_y - r.y), z - r.z);
-        yaw -= dx / dist;
-        elev -= dz / dist;
     }
     out
 }
@@ -201,7 +216,7 @@ mod tests {
             for &(tx, tz) in &[(0.0, 0.75), (-0.25, 0.45), (0.3, 1.1), (0.0, 0.05)] {
                 let a = aim(&env, r, s, tx, tz, None);
                 assert!(a.residual < 1e-4, "{s:?} → ({tx},{tz}): residual {} after {}", a.residual, a.iterations);
-                assert!(a.iterations <= 6, "{} iterations", a.iterations);
+                assert!(a.iterations <= 2 && a.search_iterations <= 8, "{} + {} iterations", a.search_iterations, a.iterations);
             }
         }
     }

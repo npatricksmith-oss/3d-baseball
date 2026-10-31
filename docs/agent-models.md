@@ -113,6 +113,7 @@ x_rel = s_arm · (0.10·H + ℓ·cos(ArmSlot))        ℓ = 0.40·H
 **Aiming solve** (pitcher's intent, no noise): find release direction angles (yaw ψ, elevation φ) so that the nominal pitch (`speed_ratio·ArmSpeed`, pitch-type spin, release point) reaches the target.
 - Initial guess from a per-pitch-type offset learned at game start (the "aim correction" for that pitch's break).
 - Fixed-point update: `ψ ← ψ − Δx / D`, `φ ← φ + Δz / D`, with D the release-to-plate distance. Small-angle geometry makes this Jacobian nearly exact, so 2–3 flights converge to < 1 mm. No finite differences needed.
+- Two stages (implementation, 2026-10-31): the search iterates with a 0.02 s flight step (`AIM_SEARCH_DT`) to 1e-5 m, then the answer is confirmed, and corrected if needed, with the world's pitch step (`DT_PITCH`, 0.002 s) to the 1e-4 m acceptance tolerance. At 0.02 s RK4 lands within ~3 nm of `DT_PITCH` at the plate for every arsenal type, so a warm-started solve costs one full-step flight plus a few at a tenth of the cost. The reported residual is always the full-step one. A batter's scouting models aim each believed shape from the pitcher's cached zone-center solve rather than re-solving the true pitch.
 - Pitchers know their own pitches. The solve is exact for the intent (they aim correctly); misses come only from execution.
 
 **Execution noise** (purpose `PitchRelease`), each independent:
@@ -591,18 +592,18 @@ Each mechanism gets tests that need no full game. Monotonicity tests feed `sim-c
 
 PLAN §13.4: ≤ 200 ms per headless game on one core, ~300 pitches and ~70 balls in play.
 
-| Component | Budget per game [E] | Notes |
-| :--- | :--- | :--- |
-| Game-start precompute (batter tables, atlas lookups, aim corrections) | 10 ms | Cached per park and pitcher where possible |
-| Pitch selection | 15 ms | 49 targets × ~6 types × 9-point quadrature table lookups |
-| Aiming (2–3 flights per pitch) | 20 ms | |
-| Pitch flight (world) | 10 ms | |
-| Batter perception and decision | 10 ms | |
-| Swing and contact (world) | 15 ms | |
-| Fielding, running, coordination (30 Hz) | 60 ms | Expected hot spot; ground-ball intercept scans dominate |
-| Batted-ball flight and bounces (world) | 20 ms | |
-| Rules, scoring, event log | 10 ms | |
-| **Total** | **≈ 170 ms** | 30 ms headroom |
+| Component | Budget per game [E] | Measured 2026-10-31 | Notes |
+| :--- | :--- | :--- | :--- |
+| Game-start precompute (batter tables, atlas lookups, aim corrections) | 10 ms | 8 ms | 18 scouting builds, seeded from the cached aim solves (was 23 ms) |
+| Pitch selection | 15 ms | < 1 ms | |
+| Aiming (2–3 flights per pitch) | 20 ms | 13 ms | One full-step flight plus coarse search flights, with release execution (was 21 ms) |
+| Pitch flight (world) | 10 ms | 12 ms | |
+| Batter perception and decision | 10 ms | 71 ms | Observation and filter updates to commit (38 ms), then the causal swing-adjustment loop (33 ms). **The largest overrun** |
+| Swing and contact (world) | 15 ms | 8 ms | |
+| Fielding, running, coordination (30 Hz) | 60 ms | 114 ms | Live plays at 60 Hz, batted-ball flight and the rules stepping included; fielder predictions are 64 ms of it |
+| Batted-ball flight and bounces (world) | 20 ms | (above) | |
+| Rules, scoring, event log | 10 ms | ~20 ms | Remainder: game loop, event log, timelines |
+| **Total** | **≈ 170 ms** | **≈ 245 ms** | One thread, 259 pitches and 66 balls in play (seed 3); timings vary ~15% with machine load |
 
 M3 measures the real numbers with `criterion`. If a component exceeds its budget, cache or table it first; never simplify the model in a way that changes behavior without a decision-log entry.
 

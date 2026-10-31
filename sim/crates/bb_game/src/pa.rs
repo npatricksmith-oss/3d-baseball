@@ -191,17 +191,36 @@ pub fn draw_offsets(p: &PitcherAttrs, arsenal: &[ArsenalPitch], e: &ModelError, 
 
 /// Scouting models built from believed shapes = true shape + per-type offsets.
 pub fn build_scouting_offsets(env: &FlightEnv, p: &PitcherAttrs, arsenal: &[ArsenalPitch], zone: &Zone, offsets: &[[f64; 4]]) -> Scouting {
+    build_scouting_seeded(env, p, arsenal, zone, offsets, None)
+}
+
+/// [`build_scouting_offsets`] seeded with the true pitches' solves to the middle of the zone
+/// ([`aim_seeds`] for the same zone), which skips re-solving the true pitch.
+pub fn build_scouting_seeded(
+    env: &FlightEnv,
+    p: &PitcherAttrs,
+    arsenal: &[ArsenalPitch],
+    zone: &Zone,
+    offsets: &[[f64; 4]],
+    seeds: Option<&[(f64, f64, f64, f64, f64)]>,
+) -> Scouting {
     let mid = 0.5 * (zone.bottom + zone.top);
     let mut types = Vec::new();
     let mut usage = Vec::new();
-    for (a, o) in arsenal.iter().zip(offsets) {
-        let mut plan = plan_release(env, p, &a.def, &PitchIntent { ty: a.def.ty, target_x: 0.0, target_z: mid }).expect("zone center reachable");
-        plan.shape.spin_axis_deg += o[0];
-        plan.shape.spin_rate *= 1.0 + o[1];
-        plan.shape.efficiency = (plan.shape.efficiency + o[2]).clamp(0.05, 1.0);
-        plan.shape.speed += o[3];
-        let a2 = bb_physics::pitch::aim(env, plan.r, &plan.shape, 0.0, mid, Some((plan.yaw, plan.elev)));
-        let s = launch(plan.r, &plan.shape, a2.yaw, a2.elev);
+    for (k, (a, o)) in arsenal.iter().zip(offsets).enumerate() {
+        let (r, mut shape, guess) = match seeds.and_then(|sd| sd.get(k)) {
+            Some(&(yaw, elev, ..)) => (a.def.release_point(p), a.def.shape(p), (yaw, elev)),
+            None => {
+                let plan = plan_release(env, p, &a.def, &PitchIntent { ty: a.def.ty, target_x: 0.0, target_z: mid }).expect("zone center reachable");
+                (plan.r, plan.shape, (plan.yaw, plan.elev))
+            }
+        };
+        shape.spin_axis_deg += o[0];
+        shape.spin_rate *= 1.0 + o[1];
+        shape.efficiency = (shape.efficiency + o[2]).clamp(0.05, 1.0);
+        shape.speed += o[3];
+        let a2 = bb_physics::pitch::aim(env, r, &shape, 0.0, mid, Some(guess));
+        let s = launch(r, &shape, a2.yaw, a2.elev);
         let tr = fly(env, s, 0.0, DT_PITCH, &[Crossing::YBelow(-0.5)], 2.0);
         let d = decompose(s.w, s.v);
         let md = d.magnus_dir;
@@ -606,7 +625,9 @@ pub fn scouting_for_pa(mu: &Matchup, seed: u64, first_play: u32) -> std::borrow:
         None => std::borrow::Cow::Borrowed(&mu.scouting),
         Some(e) => {
             let mut r = rng(seed, first_play, BATTER, Purpose::BatterPerception, 1_000_000);
-            std::borrow::Cow::Owned(build_scouting_with(&mu.env, &mu.pitcher, &mu.arsenal, &mu.zone, Some((e, &mut r))))
+            let offsets = draw_offsets(&mu.pitcher, &mu.arsenal, &e, &mut r);
+            let seeds = (mu.aim_seeds.len() == mu.arsenal.len()).then_some(mu.aim_seeds.as_slice());
+            std::borrow::Cow::Owned(build_scouting_seeded(&mu.env, &mu.pitcher, &mu.arsenal, &mu.zone, &offsets, seeds))
         }
     }
 }
@@ -812,7 +833,8 @@ pub fn simulate_times_through(mu: &Matchup, seed: u64, game: u32, times: u32, on
         mem.learn(k, w, ETA, noise);
     };
     for t in 0..times {
-        let sc = build_scouting_offsets(&mu.env, &mu.pitcher, &mu.arsenal, &mu.zone, &mem.offsets);
+        let seeds = (mu.aim_seeds.len() == mu.arsenal.len()).then_some(mu.aim_seeds.as_slice());
+        let sc = build_scouting_seeded(&mu.env, &mu.pitcher, &mu.arsenal, &mu.zone, &mem.offsets, seeds);
         let first_play = game * 100_000 + t * PA_PLAY_STRIDE;
         let mut count = Count::default();
         let mut pitches = Vec::new();
