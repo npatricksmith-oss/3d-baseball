@@ -91,19 +91,56 @@ pub fn home_positions() -> [Vec3; 9] {
     [p(60.0, 0.0), Vec3::new(0.0, -0.9, 0.0), p(105.0, 38.0), p(150.0, 13.0), p(110.0, -36.0), p(150.0, -13.0), p(290.0, -30.0), p(320.0, 0.0), p(290.0, 30.0)]
 }
 
-/// Time to cover distance `d` from rest with v(t) = v_max(1 − e^(−t/τ)) (agent-models §5.3),
-/// by bisection on the closed-form distance.
+/// Time to cover distance `d` from rest with v(t) = v_max(1 − e^(−t/τ)) (agent-models §5.3).
+/// Newton's method on the closed-form distance, from the near and far asymptotes.
 pub fn run_time(d: f64, v_max: f64, tau: f64) -> f64 {
     if d <= 0.0 {
         return 0.0;
     }
     let dist = |t: f64| v_max * (t - tau * (1.0 - m::exp(-t / tau)));
-    let (mut lo, mut hi) = (0.0, d / v_max + 3.0 * tau);
-    for _ in 0..24 {
-        let mid = 0.5 * (lo + hi);
-        if dist(mid) < d { lo = mid } else { hi = mid }
+    // Early: x ≈ v t²/(2τ); late: x ≈ v (t − τ).
+    let mut t = (m::sqrt(2.0 * d * tau / v_max)).max(d / v_max + tau).min(m::sqrt(2.0 * d * tau / v_max).max(d / v_max));
+    for _ in 0..8 {
+        let f = dist(t) - d;
+        let fp = v_max * (1.0 - m::exp(-t / tau));
+        if fp <= 1e-12 {
+            break;
+        }
+        let nt = (t - f / fp).max(1e-9);
+        if (nt - t).abs() < 1e-9 {
+            t = nt;
+            break;
+        }
+        t = nt;
     }
-    hi
+    t
+}
+
+#[cfg(test)]
+mod run_time_tests {
+    use super::*;
+
+    fn bisect(d: f64, v: f64, tau: f64) -> f64 {
+        let dist = |t: f64| v * (t - tau * (1.0 - m::exp(-t / tau)));
+        let (mut lo, mut hi) = (0.0, d / v + 3.0 * tau);
+        for _ in 0..80 {
+            let mid = 0.5 * (lo + hi);
+            if dist(mid) < d { lo = mid } else { hi = mid }
+        }
+        hi
+    }
+
+    #[test]
+    fn newton_matches_bisection() {
+        for &d in &[0.01, 0.3, 1.0, 3.0, 10.0, 27.432, 60.0, 120.0] {
+            for &(v, tau) in &[(8.2, 1.0), (7.9, 0.7), (8.4, 1.0), (6.0, 1.3)] {
+                let (a, b) = (run_time(d, v, tau), bisect(d, v, tau));
+                assert!((a - b).abs() < 1e-6, "d {d} v {v} tau {tau}: {a} vs {b}");
+            }
+        }
+        // agent-models §5.3 check: 27.3 m in ~4.3 s at 8.23 m/s, τ 1.0.
+        assert!((run_time(27.3, 8.23, 1.0) - 4.3).abs() < 0.05);
+    }
 }
 
 /// One runner in the play: id, base at the pitch (0 = batter), speed.

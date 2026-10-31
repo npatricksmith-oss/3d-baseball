@@ -107,6 +107,8 @@ pub struct LiveInput<'a> {
     pub fattrs: [FielderAttrs; 9],
     pub seed: u64,
     pub play: u32,
+    /// Record ball and actor tracks (timelines and visualization only).
+    pub record: bool,
 }
 
 pub struct LiveOutput {
@@ -280,9 +282,28 @@ impl<'a> Sim<'a> {
     /// Who chases: everyone predicts; the earliest believed intercept takes it (calls, §5.7;
     /// outfielders win ties against infielders on balls in between). Others cover or back up.
     fn assign(&mut self) {
-        let mut best = (f64::INFINITY, 0usize);
-        let mut preds = Vec::with_capacity(9);
-        for i in 0..9 {
+        self.assign_among((0..9).collect());
+    }
+
+    /// Re-call among the current chaser and the four fielders nearest the ball.
+    fn recall(&mut self) {
+        let (b, _) = self.ball_at(self.t);
+        let mut idx: Vec<usize> = (0..9).collect();
+        idx.sort_by(|&a, &c| {
+            let da = (Vec3::new(b.x, b.y, 0.0) - self.f[a].pos).norm();
+            let dc = (Vec3::new(b.x, b.y, 0.0) - self.f[c].pos).norm();
+            da.total_cmp(&dc).then(a.cmp(&c))
+        });
+        let mut cands: Vec<usize> = idx.into_iter().take(4).collect();
+        if !cands.contains(&self.primary) {
+            cands.push(self.primary);
+        }
+        self.assign_among(cands);
+    }
+
+    fn assign_among(&mut self, cands: Vec<usize>) {
+        let mut best = (f64::INFINITY, self.primary);
+        for i in cands {
             let p = self.predict(i);
             let (ti, pt) = self.intercept(i, &p);
             let bias = if i >= 6 { -0.15 } else { 0.0 };
@@ -291,12 +312,9 @@ impl<'a> Sim<'a> {
             }
             self.f[i].t_int = ti;
             self.f[i].target = pt;
-            preds.push(p);
-        }
-        self.primary = best.1;
-        for (i, p) in preds.into_iter().enumerate() {
             self.f[i].belief = Some(p);
         }
+        self.primary = best.1;
         self.cover_roles();
     }
 
@@ -895,7 +913,7 @@ pub fn simulate_live(inp: &LiveInput, st: &mut RulesState) -> LiveOutput {
             let (b, _) = sim.ball_at(sim.t);
             if sim.t >= next_recall && (Vec3::new(b.x, b.y, 0.0) - sim.f[pi].pos).norm() > 8.0 {
                 next_recall = sim.t + 1.0;
-                sim.assign();
+                sim.recall();
             }
         }
         sim.ball_facts();
@@ -924,7 +942,9 @@ pub fn simulate_live(inp: &LiveInput, st: &mut RulesState) -> LiveOutput {
                 break;
             }
         }
-        sim.record();
+        if inp.record {
+            sim.record();
+        }
         prof::TICKS.with(|c| c.set(c.get() + 1));
         sim.t += DT;
     }
