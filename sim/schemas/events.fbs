@@ -1,0 +1,339 @@
+// Event log (data-formats §4). One log per game:
+//   LogHeader PlayRecord(0) ... PlayRecord(n) LogFooter, each size-prefixed.
+// The union and every enum are append-only (data-formats §8).
+include "common.fbs";
+include "config.fbs";
+include "commands.fbs";
+
+namespace bb.ev;
+
+// ---- enums -----------------------------------------------------------------------------
+
+enum HalfInning : ubyte { Unknown = 0, Top = 1, Bottom = 2 }
+
+enum GameEndReason : ubyte { Unknown = 0, Regulation = 1, WalkOff = 2, ExtraInnings = 3, Forfeit = 4 }
+
+enum PitchOutcome : ubyte {
+  Unknown = 0, Ball = 1, CalledStrike = 2, SwingingStrike = 3, Foul = 4, FoulTip = 5,
+  InPlay = 6, HitByPitch = 7, HitUmpire = 8, FoulBunt = 9, MissedBunt = 10
+}
+
+// data-formats §4.5
+enum PaResult : ubyte {
+  Unknown = 0, Single = 1, Double = 2, Triple = 3, HomeRun = 4, Walk = 5, IntentionalWalk = 6,
+  HitByPitch = 7, Strikeout = 8, StrikeoutDroppedThirdReached = 9, GroundOut = 10, FlyOut = 11,
+  LineOut = 12, PopOut = 13, ForceOut = 14, FieldersChoice = 15, DoublePlay = 16,
+  TriplePlay = 17, ReachedOnError = 18, SacrificeBunt = 19, SacrificeFly = 20,
+  CatcherInterference = 21
+}
+
+enum ContactTarget : ubyte {
+  Unknown = 0, Ground = 1, Wall = 2, Pole = 3, Base = 4, Body = 5, Glove = 6, Backstop = 7,
+  Stands = 8, Rubber = 9, Plate = 10
+}
+
+enum Surface : ubyte {
+  Unknown = 0, InfieldGrass = 1, InfieldDirt = 2, OutfieldGrass = 3, WarningTrack = 4,
+  Turf = 5, Mound = 6, FoulGrass = 7
+}
+
+enum FielderActionKind : ubyte {
+  Unknown = 0, Catch = 1, Deflection = 2, Bobble = 3, Pickup = 4, Block = 5, Miss = 6
+}
+
+enum ThrowOutcome : ubyte { Unknown = 0, Caught = 1, ShortHop = 2, Wide = 3, Past = 4, Cut = 5 }
+
+enum DeadBallReason : ubyte {
+  Unknown = 0, OutOfPlay = 1, HomeRun = 2, GroundRuleDouble = 3, TimeCalled = 4,
+  HitByPitch = 5, FoulBall = 6, Interference = 7
+}
+
+enum AdvanceCause : ubyte {
+  Unknown = 0, Hit = 1, Walk = 2, Steal = 3, Error = 4, WildPitch = 5, PassedBall = 6,
+  Balk = 7, Force = 8, OnThrow = 9, TagUp = 10, FieldersChoice = 11, HitByPitch = 12,
+  Award = 13                                   // rules-spec §15 item 2
+}
+
+enum OutKind : ubyte {
+  Unknown = 0, Force = 1, Tag = 2, FlyOut = 3, Strikeout = 4, Appeal = 5, Interference = 6,
+  InfieldFly = 7, RunnerHitByBattedBall = 8, LeftBaseEarly = 9
+}
+
+enum HitKind : ubyte { Unknown = 0, Single = 1, Double = 2, Triple = 3, HomeRun = 4 }
+enum ErrorKind : ubyte { Unknown = 0, Fielding = 1, Throwing = 2, Catching = 3 }
+
+enum RulingKind : ubyte {
+  Unknown = 0, Hit = 1, Error = 2, FieldersChoice = 3, WildPitch = 4, PassedBall = 5,
+  Sacrifice = 6, EarnedRun = 7, UnearnedRun = 8, DefensiveIndifference = 9
+}
+
+enum WarmupStateKind : ubyte { Unknown = 0, Cold = 1, Warming = 2, Ready = 3, Overwarmed = 4 }
+
+enum LoadKind : ubyte { Unknown = 0, PitchEffort = 1, Sprint = 2, Dive = 3, Collision = 4, HbpEnergy = 5 }
+
+enum FairFoul : ubyte { Unknown = 0, Fair = 1, Foul = 2 }
+
+enum UmpireSignalKind : ubyte {
+  Unknown = 0, Strike = 1, Ball = 2, Foul = 3, Fair = 4, Safe = 5, Out = 6, Time = 7,
+  InfieldFly = 8, HomeRun = 9, DeadBall = 10
+}
+
+// ---- small shared tables ---------------------------------------------------------------
+
+struct BaseOut { bases_mask: ubyte; outs: ubyte; }   // bit0 = 1B, bit1 = 2B, bit2 = 3B
+
+table RunnerOnBase { base: ubyte (id: 0); agent: ushort (id: 1); }
+
+table SwingPlacement {
+  plane_tilt_rad: double (id: 0);
+  vertical_offset_m: double (id: 1);
+  reach_m: double (id: 2);
+  t_start_s: double (id: 3);
+}
+
+// ---- game flow ----------------------------------------------------------------------------
+
+table GameStarted {
+  config: bb.cfg.GameConfig (id: 0);
+}
+table HalfInningStarted { inning: ubyte (id: 0); half: HalfInning (id: 1); }
+table PlateAppearanceStarted {
+  batter: ushort (id: 0);
+  pitcher: ushort (id: 1);
+  catcher: ushort (id: 2);
+  base_out: BaseOut (id: 3);
+  runners: [RunnerOnBase] (id: 4);
+  score_away: ubyte (id: 5);
+  score_home: ubyte (id: 6);
+  batter_height_m: double (id: 7);
+}
+table PlateAppearanceEnded {
+  batter: ushort (id: 0);
+  result: PaResult (id: 1);
+  outs_recorded: ubyte (id: 2);
+  runs_scored: ubyte (id: 3);
+  rbi: ubyte (id: 4);
+}
+table HalfInningEnded { runs: ubyte (id: 0); left_on_base: ubyte (id: 1); }
+table GameEnded {
+  score_away: ubyte (id: 0);
+  score_home: ubyte (id: 1);
+  innings: ubyte (id: 2);
+  reason: GameEndReason (id: 3);
+}
+
+// ---- pitch -----------------------------------------------------------------------------------
+
+table PitchReleased {
+  pitcher: ushort (id: 0);
+  pitch_number: uint (id: 1);
+  pitch_type: bb.PitchType (id: 2);
+  t_release: double (id: 3);
+  r: bb.Vec3d (id: 4);
+  v: bb.Vec3d (id: 5);
+  w: bb.Vec3d (id: 6);
+  // intent (a belief, kept apart from the physical release state)
+  intent_type: bb.PitchType (id: 7);
+  intent_target_x_m: double (id: 8);
+  intent_target_z_m: double (id: 9);
+  directive: bb.cmd.PitchingMode (id: 10);
+}
+table PitchCrossed {
+  t_cross: double (id: 0);
+  r: bb.Vec3d (id: 1);
+  v: bb.Vec3d (id: 2);
+  zone_bottom_m: double (id: 3);
+  zone_top_m: double (id: 4);
+  in_zone: bool (id: 5);
+  bounced_before_plate: bool (id: 6);
+  bounce_point: bb.Vec3d (id: 7);
+}
+table SwingRecorded {
+  batter: ushort (id: 0);
+  swung: bool (id: 1);
+  check_swing: bool (id: 2);
+  judged_swing: bool (id: 3);
+  t_commit: double (id: 4);
+  placement: SwingPlacement (id: 5);
+  bat_speed_mps: double (id: 6);
+  attack_angle_rad: double (id: 7);
+  contact: bool (id: 8);
+  t_contact: double (id: 9);          // contact time, or closest-approach time on a miss
+  offset_vertical_m: double (id: 10); // signed; on a miss, the closest-approach gap
+  offset_axial_m: double (id: 11);    // u* - u_ss
+  u_contact_m: double (id: 12);
+  read_type: bb.PitchType (id: 13);   // batter_read: dominant hypothesis at commit (a belief)
+  read_weight: float (id: 14);
+}
+table PitchResult {
+  outcome: PitchOutcome (id: 0);
+  balls: ubyte (id: 1);
+  strikes: ubyte (id: 2);
+}
+
+// ---- ball in play ----------------------------------------------------------------------------
+
+table BattedBall {
+  v: bb.Vec3d (id: 0);
+  w: bb.Vec3d (id: 1);
+  exit_velocity_mps: double (id: 2);
+  launch_angle_rad: double (id: 3);
+  spray_angle_rad: double (id: 4);
+  projected_distance_m: double (id: 5);
+}
+table BallContact {
+  target: ContactTarget (id: 0);
+  surface: Surface (id: 1);
+  agent: ushort (id: 2);             // Body / Glove
+  segment: ushort (id: 3);           // Wall segment index
+  point: bb.Vec3d (id: 4);
+  v_after: bb.Vec3d (id: 5);
+}
+table FielderAction {
+  agent: ushort (id: 0);
+  kind: FielderActionKind (id: 1);
+  glove_error_m: double (id: 2);
+  ball_speed_mps: double (id: 3);
+  point: bb.Vec3d (id: 4);
+}
+table Throw {
+  thrower: ushort (id: 0);
+  receiver: ushort (id: 1);
+  base: ubyte (id: 2);
+  r: bb.Vec3d (id: 3);
+  v: bb.Vec3d (id: 4);
+  transfer_s: double (id: 5);
+  outcome: ThrowOutcome (id: 6);
+}
+table BallDead { reason: DeadBallReason (id: 0); }
+
+// ---- runners and outs ----------------------------------------------------------------------
+
+table RunnerAdvanced {
+  runner: ushort (id: 0);
+  from_base: ubyte (id: 1);
+  to_base: ubyte (id: 2);
+  t_arrival: double (id: 3);
+  cause: AdvanceCause (id: 4);
+}
+table RunnerOut {
+  runner: ushort (id: 0);
+  base: ubyte (id: 1);
+  kind: OutKind (id: 2);
+  putout: ushort (id: 3);
+  assists: [ushort] (id: 4);
+}
+table RunScored {
+  runner: ushort (id: 0);
+  rbi_batter: ushort (id: 1);
+  has_rbi: bool (id: 2);
+}
+table StolenBaseAttempt {
+  runner: ushort (id: 0);
+  to_base: ubyte (id: 1);
+  jump_s: double (id: 2);
+  success: bool (id: 3);
+}
+
+// ---- bookkeeping -------------------------------------------------------------------------------
+
+table ScorerRuling {
+  kind: RulingKind (id: 0);
+  hit: HitKind (id: 1);
+  error_agent: ushort (id: 2);
+  error_kind: ErrorKind (id: 3);
+  runner: ushort (id: 4);
+  scorer_version: ushort (id: 5);
+}
+table ScorerEvidence {
+  ruling_seq: uint (id: 0);          // EventSeq of the ScorerRuling it supports
+  clean_play_margin_s: double (id: 1);
+  reference_fielder: ushort (id: 2);
+  note_code: ushort (id: 3);
+}
+table ManagerCommandApplied {
+  command: bb.cmd.CommandEnvelope (id: 0);
+}
+table Substitution {
+  out_agent: ushort (id: 0);
+  in_agent: ushort (id: 1);
+  in_player: uint (id: 2);
+  position: bb.Position (id: 3);
+  batting_slot: ubyte (id: 4);
+  is_pitching_change: bool (id: 5);
+  reason: bb.cmd.ChangeReason (id: 6); // rules-spec §15 item 2
+}
+table AlignmentChanged {
+  side: bb.Side (id: 0);
+  infield: bb.cmd.InfieldMode (id: 1);
+  outfield: bb.cmd.OutfieldMode (id: 2);
+  homes: [bb.Vec3d] (id: 3);          // per fielding position 1..9, index = position - 1
+}
+table MoundVisit { side: bb.Side (id: 0); visits_used: ubyte (id: 1); }
+table WarmupState {
+  pitcher: ushort (id: 0);
+  state: WarmupStateKind (id: 1);
+  pen_pitches: ushort (id: 2);
+}
+table PhysicalLoad {
+  agent: ushort (id: 0);
+  kind: LoadKind (id: 1);
+  amount: double (id: 2);
+}
+
+// ---- rules-spec §15 item 2 additions ---------------------------------------------------------
+
+table BattedBallRuling {
+  fair_foul: FairFoul (id: 0);
+  caught: bool (id: 1);
+  deciding_point: bb.Vec3d (id: 2);   // where the deciding fact happened
+  deciding_target: ContactTarget (id: 3);
+}
+table PlayTimeout { t_limit: double (id: 0); }
+table RulesWarning { code: ushort (id: 0); detail: string (id: 1); }
+table LivenessWarning { code: ushort (id: 0); detail: string (id: 1); }
+table UmpireSignal { umpire: ushort (id: 0); signal: UmpireSignalKind (id: 1); }
+
+// ---- envelope ------------------------------------------------------------------------------------
+
+union EventBody {
+  GameStarted, HalfInningStarted, PlateAppearanceStarted, PlateAppearanceEnded,
+  HalfInningEnded, GameEnded,
+  PitchReleased, PitchCrossed, SwingRecorded, PitchResult,
+  BattedBall, BallContact, FielderAction, Throw, BallDead,
+  RunnerAdvanced, RunnerOut, RunScored, StolenBaseAttempt,
+  ScorerRuling, ScorerEvidence, ManagerCommandApplied, Substitution, AlignmentChanged,
+  MoundVisit, WarmupState, PhysicalLoad,
+  BattedBallRuling, PlayTimeout, RulesWarning, LivenessWarning, UmpireSignal
+}
+
+table Event {
+  seq: uint (id: 0);
+  t: double (id: 1);
+  body: EventBody (id: 3);            // body_type takes id 2
+}
+
+table PlayRecord {
+  play_index: uint (id: 0);
+  events: [Event] (id: 1);
+}
+
+table LogHeader {
+  producer: bb.ProducerInfo (id: 0);
+  game_id: uint (id: 1);
+  game_seed: ulong (id: 2);
+  config: bb.cfg.GameConfig (id: 3);
+}
+
+table PlayDigest { play_index: uint (id: 0); digest: [ubyte] (id: 1); }
+
+table LogFooter {
+  score_away: ubyte (id: 0);
+  score_home: ubyte (id: 1);
+  play_digests: [PlayDigest] (id: 2);
+  game_digest: [ubyte] (id: 3);
+}
+
+root_type PlayRecord;
+file_identifier "BBEV";
+file_extension "bbev";

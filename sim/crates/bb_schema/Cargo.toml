@@ -1,0 +1,13 @@
+[package]
+name = "bb_schema"
+version.workspace = true
+edition.workspace = true
+license.workspace = true
+publish.workspace = true
+
+[dependencies]
+flatbuffers.workspace = true
+blake3.workspace = true
+
+[dev-dependencies]
+bb_math.workspace = true

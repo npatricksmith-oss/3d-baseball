@@ -93,9 +93,8 @@ dependencies = [
  "bb_observe",
  "bb_physics",
  "bb_rules",
+ "bb_schema",
  "bb_world",
- "blake3",
- "flatbuffers",
 ]
 
 [[package]]
@@ -136,11 +135,20 @@ dependencies = [
 ]
 
 [[package]]
+name = "bb_schema"
+version = "0.1.0"
+dependencies = [
+ "bb_math",
+ "blake3",
+ "flatbuffers",
+]
+
+[[package]]
 name = "bb_stats"
 version = "0.1.0"
 dependencies = [
  "bb_math",
- "flatbuffers",
+ "bb_schema",
 ]
 
 [[package]]

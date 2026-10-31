@@ -1,0 +1,53 @@
+// GameConfig: rosters, park, rules options, seed (data-formats §3, §4.1).
+include "common.fbs";
+
+namespace bb.cfg;
+
+table RosterEntry {
+  agent_id: ushort (id: 0);
+  player_id: uint (id: 1);
+  name: string (id: 2);
+  position: bb.Position (id: 3);
+  batting_order: ubyte (id: 4);       // 1-9; 0 = not in the starting order
+  bats: bb.Hand (id: 5);
+  throws: bb.Hand (id: 6);
+  height_m: float (id: 7);
+  bat_model_id: ushort (id: 8);
+}
+
+table TeamConfig {
+  team_id: ushort (id: 0);
+  name: string (id: 1);
+  roster: [RosterEntry] (id: 2);
+  starting_pitcher: ushort (id: 3);
+  manager_is_human: bool (id: 4);
+}
+
+table ParkConfig {
+  park_id: ushort (id: 0);
+  name: string (id: 1);
+  elevation_m: float (id: 2);
+  air_density_kgm3: double (id: 3);
+}
+
+table RulesOptions {
+  universal_dh: bool (id: 0);
+  auto_runner_extras: bool (id: 1);   // false = classic extra innings (D10)
+  three_batter_minimum: bool (id: 2); // D17
+  shifts_allowed: bool (id: 3);       // D16
+  innings: ubyte (id: 4);
+  zone_bottom_frac: float (id: 5);    // of batter height (D11)
+  zone_top_frac: float (id: 6);
+}
+
+table GameConfig {
+  game_id: uint (id: 0);
+  game_seed: ulong (id: 1);
+  away: TeamConfig (id: 2);
+  home: TeamConfig (id: 3);
+  park: ParkConfig (id: 4);
+  rules: RulesOptions (id: 5);
+}
+
+root_type GameConfig;
+file_identifier "BBCF";

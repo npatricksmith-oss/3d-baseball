@@ -10,4 +10,4 @@ workspace = true
 
 [dependencies]
 bb_math.workspace = true
-flatbuffers.workspace = true
+bb_schema.workspace = true

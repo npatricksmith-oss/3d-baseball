@@ -15,5 +15,5 @@ bb_observe.workspace = true
 bb_world.workspace = true
 bb_agents.workspace = true
 bb_rules.workspace = true
-flatbuffers.workspace = true
-blake3.workspace = true
+bb_schema.workspace = true
+

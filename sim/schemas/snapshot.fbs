@@ -1,0 +1,66 @@
+// Game-state snapshots (data-formats §7). SaveState is opaque to the client; ViewState holds
+// only what a real manager could see.
+include "common.fbs";
+include "config.fbs";
+include "commands.fbs";
+
+namespace bb.ss;
+
+table LineupSlot {
+  agent: ushort (id: 0);
+  player_id: uint (id: 1);
+  position: bb.Position (id: 2);
+  stand_x_m: float (id: 3);
+  stand_y_m: float (id: 4);
+  pitch_count: ushort (id: 5);
+  fatigue_band: ubyte (id: 6);       // display band only, never the exact value
+  warmup_state: ubyte (id: 7);
+  today_line: string (id: 8);
+}
+
+table TeamView {
+  runs_by_inning: [ubyte] (id: 0);
+  runs: ubyte (id: 1);
+  hits: ubyte (id: 2);
+  errors: ubyte (id: 3);
+  lineup: [LineupSlot] (id: 4);
+  bullpen: [LineupSlot] (id: 5);
+  pitching_directive: bb.cmd.PitchingMode (id: 6);
+  batting_directive: bb.cmd.BattingMode (id: 7);
+  infield: bb.cmd.InfieldMode (id: 8);
+  outfield: bb.cmd.OutfieldMode (id: 9);
+}
+
+table ViewState {
+  inning: ubyte (id: 0);
+  top: bool (id: 1);
+  outs: ubyte (id: 2);
+  balls: ubyte (id: 3);
+  strikes: ubyte (id: 4);
+  runner_1b: ushort (id: 5);         // 0xFFFF = empty
+  runner_2b: ushort (id: 6);
+  runner_3b: ushort (id: 7);
+  batter: ushort (id: 8);
+  pitcher: ushort (id: 9);
+  due_up: [ushort] (id: 10);
+  away: TeamView (id: 11);
+  home: TeamView (id: 12);
+  legal_commands: [ubyte] (id: 13);  // bb.cmd.Command union type values legal now
+}
+
+table SaveState {
+  producer: bb.ProducerInfo (id: 0);
+  config: bb.cfg.GameConfig (id: 1);
+  game_seed: ulong (id: 2);
+  next_play_index: uint (id: 3);
+  pitch_number: uint (id: 4);
+  event_seq: uint (id: 5);
+  elapsed_game_time_s: double (id: 6);
+  rules_state: [ubyte] (id: 7);      // nested blobs, versioned by their owning crates
+  agent_state: [ubyte] (id: 8);
+  pending_commands: [bb.cmd.CommandEnvelope] (id: 9);
+  belief_tables_hash: [ubyte] (id: 10);
+}
+
+root_type ViewState;
+file_identifier "BBSS";

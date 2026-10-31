@@ -1,0 +1,76 @@
+// Manager commands (data-formats §6). Every command adjusts agent policies, never physics.
+include "common.fbs";
+
+namespace bb.cmd;
+
+enum Scope : ubyte { Unknown = 0, NextPitch = 1, PlateAppearance = 2, UntilChanged = 3 }
+enum PitchingMode : ubyte { Unknown = 0, Normal = 1, AttackZone = 2, WorkEdges = 3, PitchAround = 4, InduceGrounder = 5 }
+enum BattingMode : ubyte { Unknown = 0, Normal = 1, Take = 2, Patient = 3, Ambush = 4, Protect = 5, Elevate = 6 }
+enum ZoneRegion : ubyte { Unknown = 0, Any = 1, Up = 2, Down = 3, In = 4, Away = 5, Middle = 6 }
+enum HoldKind : ubyte { Unknown = 0, Pickoff = 1, StepOff = 2, VaryHold = 3 }
+enum BuntKind : ubyte { Unknown = 0, Sacrifice = 1, ForHit = 2, SafetySqueeze = 3, SuicideSqueeze = 4 }
+enum StealKind : ubyte { Unknown = 0, Straight = 1, Delayed = 2 }
+enum InfieldMode : ubyte { Unknown = 0, Normal = 1, CornersIn = 2, AllIn = 3, DoublePlayDepth = 4, GuardLines = 5, Custom = 6 }
+enum OutfieldMode : ubyte { Unknown = 0, Shallow = 1, Normal = 2, Deep = 3, NoDoubles = 4, ShadeLeft = 5, ShadeRight = 6, Custom = 7 }
+enum WarmupAction : ubyte { Unknown = 0, Start = 1, Stop = 2 }
+enum DelegateScope : ubyte { Unknown = 0, None = 1, UntilHalfInningEnd = 2, UntilGameEnd = 3, PlayersOnly = 4 }
+enum ChangeReason : ubyte { Unknown = 0, Tactical = 1, Injury = 2, Ejection = 3 }
+
+enum Status : ubyte { Unknown = 0, Accepted = 1, Rejected = 2 }
+enum RejectReason : ubyte {
+  Unknown = 0, None = 1, Stale = 2, IllegalNow = 3, ThreeBatterMinimum = 4, PlayerUnavailable = 5,
+  DhRule = 6, NotYourTeam = 7, Malformed = 8,
+  LineupIncomplete = 9                     // rules-spec §15 item 2
+}
+
+table PitchingDirective { mode: PitchingMode (id: 0); scope: Scope (id: 1); }
+table IntentionalWalk {}
+table PickoffOrStepOff { base: ubyte (id: 0); kind: HoldKind (id: 1); }
+table MoundVisitCmd {}
+table BattingDirective {
+  mode: BattingMode (id: 0);
+  scope: Scope (id: 1);
+  ambush_type: bb.PitchType (id: 2);
+  ambush_region: ZoneRegion (id: 3);
+}
+table Bunt { kind: BuntKind (id: 0); }
+table HitAndRun { runners: [ushort] (id: 0); }
+table Steal { runner: ushort (id: 0); kind: StealKind (id: 1); }
+table RunningAggressiveness { send_threshold: float (id: 0); }
+table FielderSpot { position: bb.Position (id: 0); x_m: float (id: 1); y_m: float (id: 2); }
+table InfieldAlignment { mode: InfieldMode (id: 0); custom: [FielderSpot] (id: 1); }
+table OutfieldAlignment { mode: OutfieldMode (id: 0); custom: [FielderSpot] (id: 1); }
+table SubItem {
+  out_agent: ushort (id: 0);
+  in_player: uint (id: 1);
+  position: bb.Position (id: 2);
+  batting_slot: ubyte (id: 3);
+}
+table SubstitutionCmd { items: [SubItem] (id: 0); }
+table PitchingChange { out_pitcher: ushort (id: 0); in_player: uint (id: 1); reason: ChangeReason (id: 2); }
+table BullpenWarmup { pitcher: uint (id: 0); action: WarmupAction (id: 1); }
+table DelegateToAi { scope: DelegateScope (id: 0); }
+
+union Command {
+  PitchingDirective, IntentionalWalk, PickoffOrStepOff, MoundVisitCmd, BattingDirective, Bunt,
+  HitAndRun, Steal, RunningAggressiveness, InfieldAlignment, OutfieldAlignment, SubstitutionCmd,
+  PitchingChange, BullpenWarmup, DelegateToAi
+}
+
+table CommandEnvelope {
+  issuer: ushort (id: 0);
+  is_ai: bool (id: 1);
+  expected_play_index: uint (id: 2);
+  client_seq: uint (id: 3);
+  command: Command (id: 5);           // command_type takes id 4
+}
+
+table CommandResult {
+  client_seq: uint (id: 0);
+  status: Status (id: 1);
+  reason: RejectReason (id: 2);
+  detail: string (id: 3);
+}
+
+root_type CommandEnvelope;
+file_identifier "BBCM";

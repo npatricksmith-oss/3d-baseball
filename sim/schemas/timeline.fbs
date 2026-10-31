@@ -1,0 +1,145 @@
+// PlayTimeline (data-formats §5): everything the client needs to animate, overlay, and
+// explain one play. Beliefs are kept apart from physical tracks (principle 5).
+include "common.fbs";
+include "snapshot.fbs";
+
+namespace bb.tl;
+
+enum BallMode : ubyte { Unknown = 0, Flight = 1, Rolling = 2, Held = 3, Rest = 4 }
+
+enum MarkerKind : ubyte {
+  Unknown = 0, DeliveryStart = 1, Release = 2, PlateCross = 3, SwingStart = 4,
+  CheckSwingBrake = 5, Contact = 6, Bounce = 7, WallHit = 8, FirstStep = 9, Dive = 10,
+  Catch = 11, Transfer = 12, ThrowRelease = 13, BaseTouch = 14, SlideStart = 15, Tag = 16,
+  RunScores = 17, BallDead = 18
+}
+
+struct BallKnot { t: float; r: bb.Vec3f; v: bb.Vec3f; }
+table BallSegment {
+  mode: BallMode (id: 0);
+  holder: ushort (id: 1);
+  knots: [BallKnot] (id: 2);
+  spin_radps: bb.Vec3f (id: 3);
+}
+table BallTrack { segments: [BallSegment] (id: 0); }
+
+struct BatSample { t: float; knob: bb.Vec3f; rot: bb.Quatf; }   // bat axis = rot * (+X local)
+table BatTrack { agent: ushort (id: 0); model_id: ushort (id: 1); samples: [BatSample] (id: 2); }
+
+struct RootKnot { t: float; p: bb.Vec3f; v: bb.Vec3f; yaw: float; }
+struct GloveKnot { t: float; p: bb.Vec3f; normal: bb.Vec3f; }
+struct Capsule { a: bb.Vec3f; b: bb.Vec3f; radius: float; }
+table BodyPose { t: float (id: 0); capsules: [Capsule] (id: 1); }
+table ActorTrack {
+  agent: ushort (id: 0);
+  root: [RootKnot] (id: 1);
+  glove: [GloveKnot] (id: 2);
+  body_pose: [BodyPose] (id: 3);
+}
+
+table Marker {
+  t: float (id: 0);
+  kind: MarkerKind (id: 1);
+  agent: ushort (id: 2);
+  base: ubyte (id: 3);
+  p: bb.Vec3f (id: 4);
+}
+
+// ---- beliefs (§5.5) -----------------------------------------------------------------------
+struct HypothesisSnap {
+  pitch_type: ubyte; weight: float;
+  mean_x: float; mean_z: float; mean_t: float;
+  cov_xx: float; cov_xz: float; cov_xt: float; cov_zz: float; cov_zt: float; cov_tt: float;
+}
+table BatterBelief {
+  t: float (id: 0);
+  hypotheses: [HypothesisSnap] (id: 1);
+  is_commit: bool (id: 2);
+  aim_x: float (id: 3);
+  aim_z: float (id: 4);
+  aim_t: float (id: 5);
+  p_strike: float (id: 6);
+  decision_value: float (id: 7);
+  directive: ubyte (id: 8);
+}
+table BatterAdjust { t: float (id: 0); aim_x: float (id: 1); aim_z: float (id: 2); aim_t: float (id: 3); }
+table PitchOption { pitch_type: bb.PitchType (id: 0); x: float (id: 1); z: float (id: 2); value: float (id: 3); }
+table PitcherIntent {
+  chosen: PitchOption (id: 0);
+  alternatives: [PitchOption] (id: 1);
+  modeled_batter_prior: [float] (id: 2);  // weight per pitch type, indexed by PitchType value
+}
+table FielderRead {
+  agent: ushort (id: 0);
+  t: float (id: 1);
+  estimate: bb.Vec3f (id: 2);
+  sigma_m: float (id: 3);
+  route_target: bb.Vec3f (id: 4);
+  role: ubyte (id: 5);
+}
+table ThrowOption { base: ubyte (id: 0); p_out: float (id: 1); }
+table ThrowDecision { agent: ushort (id: 0); t: float (id: 1); chosen_base: ubyte (id: 2); options: [ThrowOption] (id: 3); }
+table RunnerDecision { agent: ushort (id: 0); t: float (id: 1); option: ubyte (id: 2); margin_s: float (id: 3); coach_signal: ubyte (id: 4); }
+table ManagerNote { side: bb.Side (id: 0); win_prob: float (id: 1); reason_code: ushort (id: 2); }
+
+table Beliefs {
+  batter: [BatterBelief] (id: 0);
+  batter_adjust: [BatterAdjust] (id: 1);
+  pitcher: PitcherIntent (id: 2);
+  fielders: [FielderRead] (id: 3);
+  throws: [ThrowDecision] (id: 4);
+  runners: [RunnerDecision] (id: 5);
+  managers: [ManagerNote] (id: 6);
+}
+
+// ---- explanation facts (§5.6) -------------------------------------------------------------
+enum FactKind : ubyte {
+  Unknown = 0, PitchRead = 1, SwingMiss = 2, ContactQuality = 3, FirstStep = 4, RouteCost = 5,
+  ReachMiss = 6, ThrowRace = 7, DirectiveEffect = 8
+}
+table ExplanationFact {
+  kind: FactKind (id: 0);
+  agent: ushort (id: 1);
+  importance: float (id: 2);
+  values: [float] (id: 3);    // meaning fixed per kind (documented in bb_game::facts)
+  codes: [ubyte] (id: 4);
+}
+
+// ---- telemetry (§5.7) ---------------------------------------------------------------------
+table Telemetry {
+  release_speed_mps: float (id: 0);
+  plate_speed_mps: float (id: 1);
+  spin_radps: bb.Vec3f (id: 2);
+  spin_efficiency: float (id: 3);
+  ivb_m: float (id: 4);
+  hb_m: float (id: 5);
+  plate_x_m: float (id: 6);
+  plate_z_m: float (id: 7);
+  exit_velocity_mps: float (id: 8);
+  launch_angle_rad: float (id: 9);
+  spray_angle_rad: float (id: 10);
+  contact_offset_m: float (id: 11);
+  bat_speed_mps: float (id: 12);
+  attack_angle_rad: float (id: 13);
+  projected_distance_m: float (id: 14);
+  hang_time_s: float (id: 15);
+  apex_m: float (id: 16);
+}
+
+table PlayTimeline {
+  producer: bb.ProducerInfo (id: 0);
+  game_id: uint (id: 1);
+  play_index: uint (id: 2);
+  duration_s: float (id: 3);
+  ball: BallTrack (id: 4);
+  bat: BatTrack (id: 5);
+  actors: [ActorTrack] (id: 6);
+  markers: [Marker] (id: 7);
+  beliefs: Beliefs (id: 8);
+  facts: [ExplanationFact] (id: 9);
+  telemetry: Telemetry (id: 10);
+  view_after: bb.ss.ViewState (id: 11);
+}
+
+root_type PlayTimeline;
+file_identifier "BBTL";

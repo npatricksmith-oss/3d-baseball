@@ -1,0 +1,3 @@
+// Codegen entry point: pulls every schema into one generated module tree.
+include "events.fbs";
+include "timeline.fbs";

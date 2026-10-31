@@ -1,0 +1,35 @@
+// Shared types for every bb schema (data-formats §3).
+// Rules: every table field has an explicit id; every enum has explicit values and starts with
+// Unknown = 0; append-only (data-formats §8). Schema version: see SCHEMA_MAJOR/MINOR in bb_schema.
+
+namespace bb;
+
+struct Vec3d { x: double; y: double; z: double; }
+struct Vec3f { x: float;  y: float;  z: float;  }
+struct Quatf { x: float;  y: float;  z: float;  w: float; }
+
+enum Side : ubyte { Unknown = 0, Away = 1, Home = 2, Officials = 3 }
+enum Hand : ubyte { Unknown = 0, Left = 1, Right = 2, Switch = 3 }
+
+// Scorer numbering (data-formats §2.1).
+enum Position : ubyte {
+  Unknown = 0, P = 1, C = 2, FirstBase = 3, SecondBase = 4, ThirdBase = 5, SS = 6,
+  LF = 7, CF = 8, RF = 9, DH = 10, PH = 11, PR = 12
+}
+
+// Savant-style codes for export; the arsenal maps each pitch to one of these.
+enum PitchType : ubyte {
+  Unknown = 0, FourSeam = 1, Sinker = 2, Cutter = 3, Slider = 4, Sweeper = 5, Slurve = 6,
+  Curveball = 7, KnuckleCurve = 8, Changeup = 9, Splitter = 10
+}
+
+table ProducerInfo {
+  schema_major: ushort (id: 0);
+  schema_minor: ushort (id: 1);
+  sim_version: string (id: 2);
+  git_commit: string (id: 3);
+  physics_params_hash: [ubyte] (id: 4);
+  rules_version: ushort (id: 5);
+  scorer_version: ushort (id: 6);
+  belief_tables_hash: [ubyte] (id: 7);
+}

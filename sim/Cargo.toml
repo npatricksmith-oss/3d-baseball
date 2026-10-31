@@ -19,6 +19,7 @@ bb_game = { path = "crates/bb_game" }
 bb_stats = { path = "crates/bb_stats" }
 bb_league = { path = "crates/bb_league" }
 bb_ffi = { path = "crates/bb_ffi" }
+bb_schema = { path = "crates/bb_schema" }
 libm = "0.2"
 flatbuffers = "25"
 blake3 = { version = "1", default-features = false, features = ["pure"] }
