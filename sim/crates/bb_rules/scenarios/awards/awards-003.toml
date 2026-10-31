@@ -1,0 +1,26 @@
+id = "awards-003"
+title = "Walk with runners on first and third: runner on first to second, third stays"
+rules = ["rules-spec 7.1"]
+milestone = "M4"
+tags = ["awards", "walk"]
+[initial]
+inning = 3
+count = [3, 2]
+bases = { first = "A.1", third = "A.3" }
+batter = "A.4"
+
+[[step]]
+fact = "PitchDelivered"
+t = 0
+[[step]]
+fact = "PitchCrossed"
+t = 0.4
+in_zone = false
+bounced = false
+[[step]]
+fact = "SwingMeasured"
+t = 0.45
+swung = false
+[expect]
+bases = { first = "A.4", second = "A.1", third = "A.3" }
+score = [0, 0]

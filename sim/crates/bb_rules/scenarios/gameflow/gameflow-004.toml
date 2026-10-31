@@ -1,0 +1,29 @@
+id = "gameflow-004"
+title = "Tied after nine: extra innings, no automatic runner"
+rules = ["OBR 7.01", "D10"]
+milestone = "M4"
+tags = ["gameflow", "extra-innings"]
+[initial]
+inning = 9
+half = "bottom"
+outs = 2
+count = [0, 2]
+score = [4, 4]
+
+[[step]]
+fact = "PitchDelivered"
+t = 0
+[[step]]
+fact = "PitchCrossed"
+t = 0.4
+in_zone = true
+bounced = false
+[[step]]
+fact = "SwingMeasured"
+t = 0.45
+swung = true
+[expect]
+status = "InProgress"
+inning = 10
+half = "top"
+bases = {}

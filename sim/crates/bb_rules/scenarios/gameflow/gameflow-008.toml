@@ -1,0 +1,31 @@
+id = "gameflow-008"
+title = "Pitches after the game ends are rejected with a warning"
+rules = ["rules-spec 4.1"]
+milestone = "M4"
+tags = ["gameflow"]
+
+[initial]
+inning = 9
+half = "top"
+outs = 2
+count = [0, 2]
+score = [0, 1]
+
+[[step]]
+fact = "PitchDelivered"
+t = 0.0
+[[step]]
+fact = "PitchCrossed"
+t = 0.4
+in_zone = true
+[[step]]
+fact = "SwingMeasured"
+t = 0.45
+swung = true
+[[step]]
+fact = "PitchDelivered"
+t = 20.0
+expect_events = [{ event = "RulesWarning", code = "game_over" }]
+
+[expect]
+status = "Final"

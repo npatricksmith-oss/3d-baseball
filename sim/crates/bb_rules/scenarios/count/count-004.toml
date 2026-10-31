@@ -1,0 +1,28 @@
+id = "count-004"
+title = "Strike three called: strikeout, next batter up with a fresh count"
+rules = ["rules-spec 4.4"]
+milestone = "M4"
+tags = ["count", "strikeout"]
+[initial]
+inning = 1
+count = [2, 2]
+batter = "A.4"
+
+[[step]]
+fact = "PitchDelivered"
+t = 0
+[[step]]
+fact = "PitchCrossed"
+t = 0.4
+in_zone = true
+bounced = false
+[[step]]
+fact = "SwingMeasured"
+t = 0.45
+swung = false
+expect_events = [{ event = "RunnerOut", runner = "A.4", kind = "Strikeout" }, { event = "PlateAppearanceEnded", batter = "A.4", result = "Strikeout" }]
+[expect]
+outs = 1
+balls = 0
+strikes = 0
+batter = "A.5"

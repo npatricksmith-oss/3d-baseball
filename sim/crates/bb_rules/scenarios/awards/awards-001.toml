@@ -1,0 +1,28 @@
+id = "awards-001"
+title = "Walk with the bases loaded forces in a run"
+rules = ["rules-spec 7.1"]
+milestone = "M4"
+tags = ["awards", "walk"]
+[initial]
+inning = 3
+half = "top"
+count = [3, 1]
+bases = { first = "A.1", second = "A.2", third = "A.3" }
+batter = "A.4"
+
+[[step]]
+fact = "PitchDelivered"
+t = 0
+[[step]]
+fact = "PitchCrossed"
+t = 0.4
+in_zone = false
+bounced = false
+[[step]]
+fact = "SwingMeasured"
+t = 0.45
+swung = false
+expect_events = [{ event = "RunnerAdvanced", runner = "A.3", from = 3, to = 4, cause = "Walk" }, { event = "RunScored", runner = "A.3" }, { event = "PlateAppearanceEnded", result = "Walk" }]
+[expect]
+bases = { first = "A.4", second = "A.1", third = "A.2" }
+score = [1, 0]

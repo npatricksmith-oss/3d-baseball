@@ -1,0 +1,38 @@
+id = "catch-003"
+title = "A ball that touches the ground before the glove is not a catch: the batter is not out"
+rules = ["OBR Catch", "rules-spec 5.3"]
+milestone = "M4"
+tags = ["catch"]
+
+[initial]
+inning = 5
+batter = "A.2"
+
+[[step]]
+fact = "PitchDelivered"
+t = 0.0
+[[step]]
+fact = "BatContact"
+t = 0.42
+[[step]]
+fact = "BallTouched"
+t = 3.8
+what = "Ground"
+pos = [5.0, 70.0]
+[[step]]
+fact = "GloveSecured"
+t = 3.9
+fielder = "H.CF"
+pos = [5.0, 70.5]
+[[step]]
+fact = "BaseTouched"
+t = 4.3
+agent = "A.2"
+base = 1
+[[step]]
+fact = "PlayEndCheck"
+t = 6.0
+
+[expect]
+outs = 0
+bases = { first = "A.2" }

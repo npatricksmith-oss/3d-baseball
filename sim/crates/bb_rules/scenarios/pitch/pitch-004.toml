@@ -1,0 +1,21 @@
+id = "pitch-004"
+title = "Check swing judged no swing: ball outside the zone"
+rules = ["rules-spec 4.5"]
+milestone = "M4"
+tags = ["pitch", "check-swing"]
+[initial]
+inning = 1
+
+[[step]]
+fact = "PitchDelivered"
+t = 0
+[[step]]
+fact = "PitchCrossed"
+t = 0.4
+in_zone = false
+bounced = false
+[[step]]
+fact = "SwingMeasured"
+t = 0.45
+swung = false
+expect_events = [{ event = "PitchResult", call = "Ball", balls = 1 }]

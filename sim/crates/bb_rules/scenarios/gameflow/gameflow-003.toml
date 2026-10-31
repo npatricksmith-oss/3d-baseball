@@ -1,0 +1,27 @@
+id = "gameflow-003"
+title = "Home team leads after the top of the 9th: game over, bottom not played"
+rules = ["OBR 7.01"]
+milestone = "M4"
+tags = ["gameflow", "game-end"]
+[initial]
+inning = 9
+half = "top"
+outs = 2
+count = [0, 2]
+score = [2, 3]
+
+[[step]]
+fact = "PitchDelivered"
+t = 0
+[[step]]
+fact = "PitchCrossed"
+t = 0.4
+in_zone = true
+bounced = false
+[[step]]
+fact = "SwingMeasured"
+t = 0.45
+swung = false
+expect_events = [{ event = "GameEnded", away = 2, home = 3, walk_off = "false" }]
+[expect]
+status = "Final"

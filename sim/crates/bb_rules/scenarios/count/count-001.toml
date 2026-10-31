@@ -1,0 +1,48 @@
+id = "count-001"
+title = "Called strike, ball, swinging strike: count 1-2"
+rules = ["OBR 5.05", "rules-spec 4.4"]
+milestone = "M4"
+tags = ["count"]
+[initial]
+inning = 1
+
+[[step]]
+fact = "PitchDelivered"
+t = 0
+[[step]]
+fact = "PitchCrossed"
+t = 0.4
+in_zone = true
+bounced = false
+[[step]]
+fact = "SwingMeasured"
+t = 0.45
+swung = false
+[[step]]
+fact = "PitchDelivered"
+t = 10
+[[step]]
+fact = "PitchCrossed"
+t = 10.4
+in_zone = false
+bounced = false
+[[step]]
+fact = "SwingMeasured"
+t = 10.45
+swung = false
+[[step]]
+fact = "PitchDelivered"
+t = 20
+[[step]]
+fact = "PitchCrossed"
+t = 20.4
+in_zone = false
+bounced = false
+[[step]]
+fact = "SwingMeasured"
+t = 20.45
+swung = true
+[expect]
+balls = 1
+strikes = 2
+outs = 0

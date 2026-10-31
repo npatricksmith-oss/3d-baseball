@@ -1,0 +1,22 @@
+id = "pitch-001"
+title = "Hit by pitch outside the zone, no swing: award first"
+rules = ["rules-spec 4.4 item 1", "OBR 5.05(b)(2)"]
+milestone = "M4"
+tags = ["pitch", "hbp"]
+[initial]
+inning = 2
+[[step]]
+fact = "PitchDelivered"
+t = 0.0
+[[step]]
+fact = "PitchCrossed"
+t = 0.39
+in_zone = false
+[[step]]
+fact = "BallTouched"
+t = 0.40
+what = "Batter"
+expect_events = [{ event = "PitchResult", call = "HitByPitch" }, { event = "RunnerAdvanced", from = 0, to = 1, cause = "HitByPitch" }]
+[expect]
+bases = { first = "A.1" }
+play = "Dead"

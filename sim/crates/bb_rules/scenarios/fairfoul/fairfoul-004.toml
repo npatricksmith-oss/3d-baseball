@@ -1,0 +1,21 @@
+id = "fairfoul-004"
+title = "Ball off the foul pole is a home run"
+rules = ["OBR Fair Ball", "rules-spec 5.2"]
+milestone = "M4"
+tags = ["fairfoul", "homerun"]
+[initial]
+inning = 1
+
+[[step]]
+fact = "PitchDelivered"
+t = 0.0
+[[step]]
+fact = "BatContact"
+t = 0.42
+[[step]]
+fact = "BallTouched"
+t = 4.0
+what = "FoulPole"
+expect_events = [{ event = "RunScored", runner = "A.1" }, { event = "PlateAppearanceEnded", result = "HomeRun" }]
+[expect]
+score = [1, 0]

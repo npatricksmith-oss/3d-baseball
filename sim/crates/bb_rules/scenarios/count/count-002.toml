@@ -1,0 +1,24 @@
+id = "count-002"
+title = "Bounced pitch taken in the zone is a ball"
+rules = ["rules-spec 4.4 item 4"]
+milestone = "M4"
+tags = ["count", "pitch"]
+[initial]
+inning = 1
+
+[[step]]
+fact = "PitchDelivered"
+t = 0
+[[step]]
+fact = "PitchCrossed"
+t = 0.4
+in_zone = true
+bounced = true
+[[step]]
+fact = "SwingMeasured"
+t = 0.45
+swung = false
+expect_events = [{ event = "PitchResult", call = "Ball", balls = 1, strikes = 0 }]
+[expect]
+balls = 1
+strikes = 0

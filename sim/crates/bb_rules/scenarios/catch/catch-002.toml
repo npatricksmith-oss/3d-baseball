@@ -1,0 +1,26 @@
+id = "catch-002"
+title = "Caught foul pop: the batter is out"
+rules = ["OBR Catch", "rules-spec 5.3"]
+milestone = "M4"
+tags = ["catch", "foul"]
+[initial]
+inning = 1
+
+[[step]]
+fact = "PitchDelivered"
+t = 0.0
+[[step]]
+fact = "BatContact"
+t = 0.42
+[[step]]
+fact = "GloveSecured"
+t = 3.0
+fielder = "H.1B"
+pos = [22.0, 10.0]
+expect_events = [{ event = "RunnerOut", runner = "A.1", kind = "FlyOut" }]
+[[step]]
+fact = "PlayEndCheck"
+t = 6.0
+[expect]
+outs = 1
+play = "Dead"

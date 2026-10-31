@@ -1,0 +1,24 @@
+id = "fairfoul-002"
+title = "Infield roller that settles in fair territory is fair"
+rules = ["OBR Fair Ball", "rules-spec 5.2"]
+milestone = "M4"
+tags = ["fairfoul"]
+[initial]
+inning = 1
+
+[[step]]
+fact = "PitchDelivered"
+t = 0.0
+[[step]]
+fact = "BatContact"
+t = 0.42
+[[step]]
+fact = "BallTouched"
+t = 0.8
+what = "Ground"
+pos = [-2.0, 4.0]
+[[step]]
+fact = "BallSettled"
+t = 2.5
+pos = [3.0, 8.0]
+expect_events = [{ event = "FairFoulDecided", fair = "true" }, { event = "PitchResult", call = "InPlay" }]

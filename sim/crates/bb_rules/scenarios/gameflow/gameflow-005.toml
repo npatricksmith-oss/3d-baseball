@@ -1,0 +1,30 @@
+id = "gameflow-005"
+title = "Walk-off walk with the bases loaded in the bottom of the 9th"
+rules = ["OBR 7.01(g)"]
+milestone = "M4"
+tags = ["gameflow", "walk-off"]
+[initial]
+inning = 9
+half = "bottom"
+outs = 1
+count = [3, 2]
+score = [3, 3]
+bases = { first = "H.1", second = "H.2", third = "H.3" }
+batter = "H.4"
+
+[[step]]
+fact = "PitchDelivered"
+t = 0
+[[step]]
+fact = "PitchCrossed"
+t = 0.4
+in_zone = false
+bounced = false
+[[step]]
+fact = "SwingMeasured"
+t = 0.45
+swung = false
+expect_events = [{ event = "RunScored", runner = "H.3" }, { event = "GameEnded", away = 3, home = 4, walk_off = "true" }]
+[expect]
+status = "Final"
+score = [3, 4]

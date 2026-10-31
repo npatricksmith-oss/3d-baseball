@@ -1,0 +1,13 @@
+id = "gameflow-001"
+title = "Start of game: top of the first, leadoff batter up"
+rules = ["rules-spec 4.1"]
+milestone = "M4"
+tags = ["gameflow"]
+[[step]]
+fact = "StartGame"
+expect_events = [{ event = "GameStarted" }, { event = "HalfInningStarted" }, { event = "PlateAppearanceStarted", batter = "A.1" }]
+[expect]
+status = "InProgress"
+inning = 1
+half = "top"
+batter = "A.1"

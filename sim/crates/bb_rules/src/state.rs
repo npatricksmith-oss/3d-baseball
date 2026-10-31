@@ -1,0 +1,237 @@
+//! Rules state, inputs (facts), and events (rules-spec §2–§3).
+
+/// Agent ids follow data-formats §2.1: `side << 8 | slot`.
+pub type AgentId = u16;
+
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub enum Half {
+    Top,
+    Bottom,
+}
+
+impl Half {
+    /// Index of the batting team: 0 away (top), 1 home (bottom).
+    pub fn batting(self) -> usize {
+        match self {
+            Half::Top => 0,
+            Half::Bottom => 1,
+        }
+    }
+}
+
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub enum Status {
+    Pregame,
+    InProgress,
+    Final,
+}
+
+/// Bases are numbered 1–3; 4 is home (scored).
+pub type Base = u8;
+
+/// A runner during a live play (rules-spec §5.1).
+#[derive(Clone, Copy, Debug, PartialEq)]
+pub struct RunnerState {
+    pub runner: AgentId,
+    /// Base occupied at the time of the pitch (0 = the batter).
+    pub start_base: Base,
+    /// Last base legally touched.
+    pub last_base: Base,
+    /// Base the runner is currently touching, if any.
+    pub on_base: Option<Base>,
+    /// Base the runner is forced to, while the force stands.
+    pub forced_to: Option<Base>,
+    /// Must retouch `start_base` after the first touch of a caught fly.
+    pub retouch_required: bool,
+    pub left_start_at: Option<f64>,
+    pub retouched: bool,
+    pub out: bool,
+    pub scored_at: Option<f64>,
+}
+
+#[derive(Clone, Copy, Debug, PartialEq)]
+pub enum FairFoul {
+    Pending,
+    Fair,
+    Foul,
+}
+
+#[derive(Clone, Debug, PartialEq)]
+pub enum PlayState {
+    Dead,
+    /// A pitch is in flight / being judged.
+    Pitch(PitchState),
+    /// A batted ball is live.
+    Live(LivePlay),
+}
+
+#[derive(Clone, Copy, Debug, Default, PartialEq)]
+pub struct PitchState {
+    pub in_zone: Option<bool>,
+    pub bounced: bool,
+    pub swung: Option<bool>,
+    pub contact: bool,
+}
+
+#[derive(Clone, Debug, PartialEq)]
+pub struct LivePlay {
+    pub fair: FairFoul,
+    /// The ball has touched the ground or an object (so no catch is possible).
+    pub grounded: bool,
+    /// First fielder touch time of a fly that was then caught (retouch reference).
+    pub first_touch: Option<f64>,
+    pub caught: bool,
+    pub runners: Vec<RunnerState>,
+    /// Outs recorded on this play: (time, runner, kind).
+    pub outs: Vec<(f64, AgentId, OutKind)>,
+    pub runs_pending: Vec<(f64, AgentId)>,
+}
+
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub enum OutKind {
+    Strikeout,
+    FlyOut,
+    Force,
+    Tag,
+    Appeal,
+}
+
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub enum PitchCall {
+    Ball,
+    CalledStrike,
+    SwingingStrike,
+    Foul,
+    InPlay,
+    HitByPitch,
+}
+
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub enum PaResult {
+    Walk,
+    HitByPitch,
+    Strikeout,
+    /// The batter reached or was retired on a batted ball; the scorer classifies it later.
+    BattedBall,
+    HomeRun,
+}
+
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub enum AdvanceCause {
+    Walk,
+    HitByPitch,
+    Award,
+    OnPlay,
+}
+
+#[derive(Clone, Debug, PartialEq)]
+pub enum Event {
+    GameStarted,
+    HalfInningStarted { inning: u8, half: Half },
+    PlateAppearanceStarted { batter: AgentId },
+    PitchResult { call: PitchCall, balls: u8, strikes: u8 },
+    FairFoulDecided { fair: bool },
+    Catch { fielder: AgentId },
+    RunnerAdvanced { runner: AgentId, from: Base, to: Base, cause: AdvanceCause },
+    RunnerOut { runner: AgentId, base: Base, kind: OutKind },
+    RunScored { runner: AgentId },
+    PlateAppearanceEnded { batter: AgentId, result: PaResult },
+    HalfInningEnded { runs: u8, left_on_base: u8 },
+    GameEnded { away: u16, home: u16, innings: u8, walk_off: bool },
+    RulesWarning { code: &'static str },
+}
+
+/// Where a ball touched (rules-spec §2 `BallTouched`).
+#[derive(Clone, Copy, Debug, PartialEq)]
+pub enum Touch {
+    /// Ground at (x, y), m.
+    Ground { x: f64, y: f64 },
+    /// Out of the playing field: over the fence in flight (`in_flight`) or after bouncing.
+    OutOfPlay { x: f64, y: f64, in_flight: bool },
+    /// The batter's body (pitch only, before bat contact).
+    Batter,
+    FoulPole,
+}
+
+/// Rules inputs: facts from the world and harness pseudo-facts (rules-spec §2).
+#[derive(Clone, Debug, PartialEq)]
+pub enum Input {
+    StartGame,
+    PitchDelivered { t: f64 },
+    PitchCrossed { t: f64, in_zone: bool, bounced: bool },
+    /// End of swing: whether it counts as a swing (rules-spec §4.5 yaw judgment, or contact).
+    SwingMeasured { t: f64, swung: bool },
+    BatContact { t: f64 },
+    BallTouched { t: f64, what: Touch },
+    /// The ball passed 1B or 3B on or near the ground, on the fair or foul side.
+    BallPassedBase { t: f64, fair: bool },
+    BallSettled { t: f64, x: f64, y: f64 },
+    /// A fielder secured the ball at (x, y) (rules-spec §5.3).
+    GloveSecured { t: f64, fielder: AgentId, x: f64, y: f64 },
+    BaseTouched { t: f64, agent: AgentId, base: Base, holding_ball: bool },
+    BaseLeft { t: f64, agent: AgentId, base: Base },
+    TagContact { t: f64, fielder: AgentId, runner: AgentId, holding_ball: bool },
+    /// Harness/orchestrator pseudo-fact: the play has settled (rules-spec §5.8 item 3).
+    PlayEndCheck { t: f64 },
+}
+
+#[derive(Clone, Copy, Debug, PartialEq)]
+pub struct RulesOptions {
+    pub innings: u8,
+}
+
+impl Default for RulesOptions {
+    fn default() -> Self {
+        Self { innings: 9 }
+    }
+}
+
+#[derive(Clone, Debug, PartialEq)]
+pub struct RulesState {
+    pub options: RulesOptions,
+    pub status: Status,
+    pub inning: u8,
+    pub half: Half,
+    /// Runs by inning for [away, home].
+    pub runs_by_inning: [Vec<u8>; 2],
+    pub outs: u8,
+    pub balls: u8,
+    pub strikes: u8,
+    /// Runner on 1B, 2B, 3B.
+    pub bases: [Option<AgentId>; 3],
+    pub lineup: [[AgentId; 9]; 2],
+    pub next_up: [usize; 2],
+    pub batter: AgentId,
+    pub play: PlayState,
+}
+
+impl RulesState {
+    pub fn new(lineup: [[AgentId; 9]; 2], options: RulesOptions) -> Self {
+        Self {
+            options,
+            status: Status::Pregame,
+            inning: 1,
+            half: Half::Top,
+            runs_by_inning: [Vec::new(), Vec::new()],
+            outs: 0,
+            balls: 0,
+            strikes: 0,
+            bases: [None; 3],
+            lineup,
+            next_up: [0, 0],
+            batter: lineup[0][0],
+            play: PlayState::Dead,
+        }
+    }
+
+    /// The default 9-v-9 fixture: away slots 1–9 are agents 0x0001–0x0009, home 0x0101–0x0109.
+    pub fn default_fixture() -> Self {
+        let a: [AgentId; 9] = core::array::from_fn(|i| (i + 1) as AgentId);
+        let h: [AgentId; 9] = core::array::from_fn(|i| 0x0100 | (i + 1) as AgentId);
+        Self::new([a, h], RulesOptions::default())
+    }
+
+    pub fn score(&self) -> [u16; 2] {
+        [0, 1].map(|s| self.runs_by_inning[s].iter().map(|&r| r as u16).sum())
+    }
+}

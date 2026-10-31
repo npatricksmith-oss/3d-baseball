@@ -10,3 +10,7 @@ workspace = true
 
 [dependencies]
 bb_math.workspace = true
+
+[dev-dependencies]
+serde.workspace = true
+toml.workspace = true

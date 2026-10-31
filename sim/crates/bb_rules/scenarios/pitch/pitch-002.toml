@@ -1,0 +1,21 @@
+id = "pitch-002"
+title = "Pitch hits a swinging batter: strike, no award"
+rules = ["rules-spec 4.4 item 1"]
+milestone = "M4"
+tags = ["pitch", "hbp"]
+[initial]
+inning = 2
+[[step]]
+fact = "PitchDelivered"
+t = 0.0
+[[step]]
+fact = "PitchCrossed"
+t = 0.39
+in_zone = false
+[[step]]
+fact = "SwingMeasured"
+t = 0.395
+swung = true
+expect_events = [{ event = "PitchResult", call = "SwingingStrike", strikes = 1 }]
+[expect]
+strikes = 1

@@ -1,0 +1,38 @@
+id = "tag-002"
+title = "A tag on a runner standing on a base is not an out"
+rules = ["OBR Tag", "rules-spec 5.5"]
+milestone = "M4"
+tags = ["tag"]
+[initial]
+inning = 2
+bases = { second = "A.5" }
+batter = "A.6"
+
+[[step]]
+fact = "PitchDelivered"
+t = 0.0
+[[step]]
+fact = "BatContact"
+t = 0.42
+[[step]]
+fact = "BallTouched"
+t = 1.0
+what = "Ground"
+pos = [20.0, 50.0]
+[[step]]
+fact = "BaseTouched"
+t = 4.0
+agent = "A.6"
+base = 1
+[[step]]
+fact = "TagContact"
+t = 4.6
+fielder = "H.SS"
+runner = "A.5"
+holding_ball = true
+[[step]]
+fact = "PlayEndCheck"
+t = 6.0
+[expect]
+outs = 0
+bases = { first = "A.6", second = "A.5" }

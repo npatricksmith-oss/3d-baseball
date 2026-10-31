@@ -1,0 +1,58 @@
+id = "runs-004"
+title = "Time play: the third-out tag comes before the runner touches home, so the run does not count"
+rules = ["OBR 5.08"]
+milestone = "M4"
+tags = ["runs", "time-play"]
+
+[initial]
+inning = 7
+outs = 2
+bases = { second = "A.2", third = "A.3" }
+batter = "A.4"
+
+[[step]]
+fact = "PitchDelivered"
+t = 0.0
+[[step]]
+fact = "BatContact"
+t = 0.42
+[[step]]
+fact = "BallTouched"
+t = 1.2
+what = "Ground"
+pos = [30.0, 60.0]
+[[step]]
+fact = "BaseLeft"
+t = 0.5
+agent = "A.3"
+base = 3
+[[step]]
+fact = "BaseLeft"
+t = 0.5
+agent = "A.2"
+base = 2
+[[step]]
+fact = "BaseTouched"
+t = 2.2
+agent = "A.2"
+base = 3
+[[step]]
+fact = "BaseLeft"
+t = 2.3
+agent = "A.2"
+base = 3
+[[step]]
+fact = "TagContact"
+t = 2.6
+fielder = "H.C"
+runner = "A.2"
+holding_ball = true
+[[step]]
+fact = "BaseTouched"
+t = 2.9
+agent = "A.3"
+base = 4
+
+[expect]
+score = [0, 0]
+half = "bottom"

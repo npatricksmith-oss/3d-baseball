@@ -1,0 +1,32 @@
+id = "gameflow-002"
+title = "Third strike for the third out switches sides; the order continues"
+rules = ["rules-spec 4.1"]
+milestone = "M4"
+tags = ["gameflow"]
+[initial]
+inning = 2
+half = "top"
+outs = 2
+count = [0, 2]
+bases = { second = "A.6" }
+batter = "A.7"
+
+[[step]]
+fact = "PitchDelivered"
+t = 0
+[[step]]
+fact = "PitchCrossed"
+t = 0.4
+in_zone = true
+bounced = false
+[[step]]
+fact = "SwingMeasured"
+t = 0.45
+swung = true
+expect_events = [{ event = "HalfInningEnded", runs = 0, left_on_base = 1 }, { event = "HalfInningStarted" }]
+[expect]
+half = "bottom"
+inning = 2
+outs = 0
+bases = {}
+batter = "H.1"

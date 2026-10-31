@@ -1,0 +1,21 @@
+id = "pitch-003"
+title = "Hit by pitch in the strike zone: strike"
+rules = ["rules-spec 4.4 item 1"]
+milestone = "M4"
+tags = ["pitch", "hbp"]
+[initial]
+inning = 1
+[[step]]
+fact = "PitchDelivered"
+t = 0.0
+[[step]]
+fact = "PitchCrossed"
+t = 0.39
+in_zone = true
+[[step]]
+fact = "BallTouched"
+t = 0.40
+what = "Batter"
+expect_events = [{ event = "PitchResult", call = "CalledStrike", strikes = 1 }]
+[expect]
+strikes = 1

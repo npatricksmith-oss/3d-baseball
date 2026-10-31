@@ -1,0 +1,29 @@
+id = "gameflow-006"
+title = "Walk-off grand slam counts all four runs"
+rules = ["OBR 7.01(g)"]
+milestone = "M4"
+tags = ["gameflow", "walk-off", "homerun"]
+[initial]
+inning = 10
+half = "bottom"
+outs = 2
+score = [5, 4]
+bases = { first = "H.1", second = "H.2", third = "H.3" }
+batter = "H.4"
+
+[[step]]
+fact = "PitchDelivered"
+t = 0.0
+[[step]]
+fact = "BatContact"
+t = 0.42
+[[step]]
+fact = "BallTouched"
+t = 5.0
+what = "OutOfPlay"
+pos = [-30.0, 120.0]
+in_flight = true
+expect_events = [{ event = "GameEnded", away = 5, home = 8, walk_off = "true" }]
+[expect]
+status = "Final"
+score = [5, 8]

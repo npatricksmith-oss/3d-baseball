@@ -1,0 +1,31 @@
+id = "hr-002"
+title = "Fair ball bounces over the fence: ground-rule double, runners two bases from the pitch"
+rules = ["OBR 5.05(a)(6)", "rules-spec 7.2"]
+milestone = "M4"
+tags = ["awards", "ground-rule-double"]
+[initial]
+inning = 4
+bases = { first = "A.1" }
+batter = "A.2"
+
+[[step]]
+fact = "PitchDelivered"
+t = 0.0
+[[step]]
+fact = "BatContact"
+t = 0.42
+[[step]]
+fact = "BallTouched"
+t = 3.0
+what = "Ground"
+pos = [40.0, 95.0]
+[[step]]
+fact = "BallTouched"
+t = 3.6
+what = "OutOfPlay"
+pos = [44.0, 110.0]
+in_flight = false
+[expect]
+bases = { second = "A.2", third = "A.1" }
+score = [0, 0]
+play = "Dead"

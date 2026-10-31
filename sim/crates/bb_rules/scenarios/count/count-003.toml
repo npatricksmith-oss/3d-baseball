@@ -1,0 +1,24 @@
+id = "count-003"
+title = "Foul with two strikes leaves the count unchanged"
+rules = ["rules-spec 4.4 count transitions"]
+milestone = "M4"
+tags = ["count", "foul"]
+[initial]
+inning = 1
+count = [1, 2]
+[[step]]
+fact = "PitchDelivered"
+t = 0.0
+[[step]]
+fact = "BatContact"
+t = 0.41
+[[step]]
+fact = "BallTouched"
+t = 1.2
+what = "Ground"
+pos = [-35.0, 20.0]
+expect_events = [{ event = "FairFoulDecided", fair = "false" }, { event = "PitchResult", call = "Foul", balls = 1, strikes = 2 }]
+[expect]
+balls = 1
+strikes = 2
+play = "Dead"

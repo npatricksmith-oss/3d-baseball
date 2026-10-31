@@ -1,0 +1,30 @@
+id = "hr-001"
+title = "Three-run home run: every runner and the batter score"
+rules = ["rules-spec 7.2"]
+milestone = "M4"
+tags = ["homerun"]
+[initial]
+inning = 4
+half = "bottom"
+outs = 1
+bases = { first = "H.1", second = "H.2" }
+batter = "H.3"
+score = [2, 0]
+
+[[step]]
+fact = "PitchDelivered"
+t = 0.0
+[[step]]
+fact = "BatContact"
+t = 0.42
+[[step]]
+fact = "BallTouched"
+t = 4.8
+what = "OutOfPlay"
+pos = [10.0, 125.0]
+in_flight = true
+expect_events = [{ event = "RunScored", runner = "H.2" }, { event = "RunScored", runner = "H.1" }, { event = "RunScored", runner = "H.3" }]
+[expect]
+score = [2, 3]
+bases = {}
+outs = 1
