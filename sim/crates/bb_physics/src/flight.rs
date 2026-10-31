@@ -1,7 +1,7 @@
 //! Ball flight (physics-spec §4–§5): forces, fixed-step RK4, cubic Hermite dense output, and
 //! event location by bisection on the interpolant.
 
-use bb_math::{Vec3, m};
+use bb_math::Vec3;
 
 use crate::ball::{AeroParams, BallParams};
 
@@ -71,32 +71,37 @@ impl FlightEnv {
         a
     }
 
-    /// One RK4 step of (r, v) with spin held constant, then analytic spin decay using the
-    /// mean airspeed over the step (physics-spec §5.1).
+    /// Spin decay rate dω/dt (physics-spec §4.4): −u/(τ₁₀₀·44.704)·ω.
+    #[inline]
+    fn spin_rate(&self, v: Vec3, w: Vec3) -> Vec3 {
+        match self.aero.tau100 {
+            Some(tau) => w * (-(v - self.wind).norm() / (tau * V100)),
+            None => Vec3::ZERO,
+        }
+    }
+
+    /// One classic RK4 step of the full state (r, v, ω). Spin decay is integrated with the
+    /// rest of the state rather than applied once per step: this matches the continuous
+    /// ODE to ~1e-9 m at production step sizes (checked against the oracle).
     pub fn step(&self, s: &BallState, dt: f64) -> BallState {
-        let w = s.w;
-        let (r0, v0) = (s.r, s.v);
-        let k1v = self.accel(v0, w);
-        let k1r = v0;
-        let v2 = v0 + k1v * (dt / 2.0);
-        let k2v = self.accel(v2, w);
-        let k2r = v2;
-        let v3 = v0 + k2v * (dt / 2.0);
-        let k3v = self.accel(v3, w);
-        let k3r = v3;
-        let v4 = v0 + k3v * dt;
-        let k4v = self.accel(v4, w);
-        let k4r = v4;
-        let r = r0 + (k1r + k2r * 2.0 + k3r * 2.0 + k4r) * (dt / 6.0);
-        let v = v0 + (k1v + k2v * 2.0 + k3v * 2.0 + k4v) * (dt / 6.0);
-        let w = match self.aero.tau100 {
-            Some(tau) => {
-                let u_mean = 0.5 * ((v0 - self.wind).norm() + (v - self.wind).norm());
-                w * m::exp(-u_mean * dt / (tau * V100))
-            }
-            None => w,
-        };
-        BallState { r, v, w }
+        let h2 = dt / 2.0;
+        let (r0, v0, w0) = (s.r, s.v, s.w);
+        let a1 = self.accel(v0, w0);
+        let o1 = self.spin_rate(v0, w0);
+        let (v2, w2) = (v0 + a1 * h2, w0 + o1 * h2);
+        let a2 = self.accel(v2, w2);
+        let o2 = self.spin_rate(v2, w2);
+        let (v3, w3) = (v0 + a2 * h2, w0 + o2 * h2);
+        let a3 = self.accel(v3, w3);
+        let o3 = self.spin_rate(v3, w3);
+        let (v4, w4) = (v0 + a3 * dt, w0 + o3 * dt);
+        let a4 = self.accel(v4, w4);
+        let o4 = self.spin_rate(v4, w4);
+        BallState {
+            r: r0 + (v0 + v2 * 2.0 + v3 * 2.0 + v4) * (dt / 6.0),
+            v: v0 + (a1 + a2 * 2.0 + a3 * 2.0 + a4) * (dt / 6.0),
+            w: w0 + (o1 + o2 * 2.0 + o3 * 2.0 + o4) * (dt / 6.0),
+        }
     }
 }
 

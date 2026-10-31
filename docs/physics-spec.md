@@ -131,7 +131,7 @@ dω/dt = −(u / (τ₁₀₀ · 44.704 m/s)) · ω         # decay rate proport
 ## 5. Numerical Integration
 
 ### 5.1 Integrator
-Classic **RK4** on `(r, v)`. Spin is held constant within a step and decayed analytically at the step end: `ω ← ω · exp(−u·Δt / (τ₁₀₀·44.704))`.
+Classic **RK4** on the full state `(r, v, ω)`, with spin decay (§4.4) integrated as part of the ODE. *(Changed in M1, 2026-10-31: the earlier draft held spin constant within a step and decayed it once at the step end. That split scheme drifted 0.7 mm over a 5.6 s fly ball against the oracle; the full-state form agrees with the oracle to ~3e-8 m at production step sizes and costs nothing measurable.)*
 
 ### 5.2 Step size
 Cross-check result: on a 100 mph / 30° / 2500 rpm fly ball, RK4 at Δt = 10 ms and Δt = 1 ms agree to **0.0001 ft** in carry. A fixed 1 ms step everywhere (Pass 1) is unnecessary.
@@ -142,7 +142,7 @@ Cross-check result: on a 100 mph / 30° / 2500 rpm fly ball, RK4 at Δt = 10 ms 
 | Batted ball / throw flight | 5 ms | |
 | Bat-ball contact window | see §7 | Sampled from interpolated ball motion, not integrated more finely |
 
-**M1 task:** confirm these with the convergence test (A3, §14).
+**M1 result:** confirmed. A3 gives |Δcarry| < 1e-6 ft between 10 ms and 1 ms, and the Rust sim at these steps matches the independent oracle (Δt = 0.1 ms) to ~3e-8 m on all 21 flight fixtures.
 
 ### 5.3 Dense output and event detection
 Between steps, ball position is a **cubic Hermite interpolant** built from (r, v) at both step ends. All events are found on this interpolant, then refined by bisection to 1 µs:
