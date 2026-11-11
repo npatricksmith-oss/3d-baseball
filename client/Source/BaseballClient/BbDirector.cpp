@@ -15,6 +15,7 @@
 #include "Engine/StaticMeshActor.h"
 #include "Engine/World.h"
 #include "GameFramework/PlayerController.h"
+#include "InputCoreTypes.h"
 #include "HAL/PlatformMemory.h"
 #include "Kismet/GameplayStatics.h"
 #include "Materials/MaterialInstanceDynamic.h"
@@ -162,6 +163,55 @@ void ABbDirector::BuildField()
 	}
 }
 
+void ABbDirector::BuildStands()
+{
+	// Seating as plain blocks, so the park reads as a park: a bank beyond the outfield wall,
+	// a grandstand down each foul line, and a curve behind home. None of it is in the sim.
+	const FLinearColor Seats(0.2f, 0.22f, 0.28f);
+	const FLinearColor Concrete(0.45f, 0.45f, 0.47f);
+	auto Block = [this](const FVector2D& A, const FVector2D& B, double Depth, double Height, const FLinearColor& Color)
+	{
+		const FVector2D Mid = (A + B) * 0.5;
+		const FVector Dir = ToUE(B.X - A.X, B.Y - A.Y, 0).GetSafeNormal();
+		Shape(Cube, ToUE(Mid.X, Mid.Y, Height * 0.5), FVector((B - A).Size() + 0.2, Depth, Height), Color, Dir.Rotation())->GetStaticMeshComponent()->SetCastShadow(false);
+	};
+	const int32 N = 24;
+	for (int32 I = 0; I < N; ++I)
+	{
+		const double T0 = -PI / 4 + (PI / 2) * I / N;
+		const double T1 = -PI / 4 + (PI / 2) * (I + 1) / N;
+		// Two tiers stepping up and back from the wall.
+		for (int32 Tier = 0; Tier < 2; ++Tier)
+		{
+			const double Out = 5.0 + 7.0 * Tier;
+			const FVector2D A((FenceAt(T0) + Out) * FMath::Sin(T0), (FenceAt(T0) + Out) * FMath::Cos(T0));
+			const FVector2D B((FenceAt(T1) + Out) * FMath::Sin(T1), (FenceAt(T1) + Out) * FMath::Cos(T1));
+			Block(A, B, 7.0, 5.0 + 4.5 * Tier, Tier == 0 ? Seats : Concrete);
+		}
+	}
+	// Foul-line grandstands: parallel to each line, 20 m outside it, from behind the plate
+	// area to the pole.
+	for (int32 Side = -1; Side <= 1; Side += 2)
+	{
+		const FVector2D Along(Side * 0.7071, 0.7071);
+		const FVector2D Outward(Side * 0.7071, -0.7071);
+		for (int32 Tier = 0; Tier < 2; ++Tier)
+		{
+			const FVector2D Off = Outward * (20.0 + 8.0 * Tier);
+			Block(Along * 12.0 + Off, Along * (330.0 * FT) + Off, 8.0, 5.0 + 5.0 * Tier, Tier == 0 ? Seats : Concrete);
+		}
+	}
+	// Behind home: a curve of seats joining the two grandstands, and the backstop wall.
+	const int32 M = 10;
+	for (int32 I = 0; I < M; ++I)
+	{
+		const double T0 = PI * 0.75 + (PI * 0.5) * I / M;
+		const double T1 = PI * 0.75 + (PI * 0.5) * (I + 1) / M;
+		Block(FVector2D(24.0 * FMath::Sin(T0), 24.0 * FMath::Cos(T0)), FVector2D(24.0 * FMath::Sin(T1), 24.0 * FMath::Cos(T1)), 6.0, 5.0, Seats);
+		Block(FVector2D(18.0 * FMath::Sin(T0), 18.0 * FMath::Cos(T0)), FVector2D(18.0 * FMath::Sin(T1), 18.0 * FMath::Cos(T1)), 0.3, 1.2, WallColor);
+	}
+}
+
 void ABbDirector::BeginPlay()
 {
 	Super::BeginPlay();
@@ -181,6 +231,7 @@ void ABbDirector::BeginPlay()
 
 	BuildLights();
 	BuildField();
+	BuildStands();
 
 	// Players: a body and a head each, hidden until a frame uses them.
 	for (int32 I = 0; I < MaxActors; ++I)
@@ -199,6 +250,7 @@ void ABbDirector::BeginPlay()
 	Bat = Shape(Cylinder, FVector::ZeroVector, FVector(0.09, 0.09, 0.86), FLinearColor(0.75f, 0.55f, 0.3f));
 
 	Camera = GetWorld()->SpawnActor<ACameraActor>(ToUE(-9, 136, 16), FRotator::ZeroRotator);
+	ShownCam = 0;
 	Camera->GetCameraComponent()->SetFieldOfView(8.5f);
 	Camera->GetCameraComponent()->bConstrainAspectRatio = false;
 	// Fixed exposure, a little under the default: daylight on flat colors.
@@ -216,6 +268,7 @@ void ABbDirector::BeginPlay()
 	uint64 Seed = 7;
 	FParse::Value(Cmd, TEXT("BbSeed="), Seed);
 	FParse::Value(Cmd, TEXT("BbSpeed="), Speed);
+	FParse::Value(Cmd, TEXT("BbCamera="), CameraMode);
 	FParse::Value(Cmd, TEXT("BbShots="), ShotsLeft);
 	FParse::Value(Cmd, TEXT("BbShotEvery="), ShotEvery);
 	FParse::Value(Cmd, TEXT("BbBenchSeconds="), BenchSeconds);
@@ -266,24 +319,33 @@ void ABbDirector::BeginPlayback(FBbPlay&& Play)
 
 void ABbDirector::UpdateCamera(const BbFrame& Frame, float DeltaSeconds)
 {
-	// Two cameras, cut like a broadcast: the pitch from beyond center field through a long
-	// lens, then the play from high behind home, following the ball.
 	UCameraComponent* C = Camera->GetCameraComponent();
-	const bool bFollow = bBallInPlay;
-	if (bFollow != bFollowCam)
+	const FVector BallUE = ToUE(Frame.ball);
+	// Mode 0 cuts like a broadcast: the pitch from beyond center field through a long lens,
+	// then the play from high behind home, following the ball. Mode 1 stays high behind
+	// home; mode 2 looks straight down on the whole field.
+	if (CameraMode == 2)
 	{
-		bFollowCam = bFollow;
-		const FVector BallNow = ToUE(Frame.ball);
-		Camera->SetActorLocation(bFollow ? ToUE(0, -30, 17) : ToUE(-9, 136, 16));
-		CamLook = bFollow ? FVector(BallNow.X, BallNow.Y, 0.0) : ToUE(0, 6, 1.0);
+		Camera->SetActorLocation(ToUE(0, 55, 230));
+		Camera->SetActorRotation(FRotator(-90.f, 0.f, 0.f));
+		C->SetFieldOfView(50.f);
+		ShownCam = 2;
+		return;
+	}
+	const bool bFollow = bBallInPlay || CameraMode == 1;
+	const int32 Want = bFollow ? 1 : 0;
+	if (Want != ShownCam)
+	{
+		ShownCam = Want;
+		Camera->SetActorLocation(bFollow ? ToUE(0, -34, 19) : ToUE(-9, 136, 16));
+		CamLook = bFollow ? (bBallInPlay ? FVector(BallUE.X, BallUE.Y, 0.0) : ToUE(0, 16, 0)) : ToUE(0, 6, 1.0);
 		C->SetFieldOfView(bFollow ? 48.f : 8.5f);
 	}
 	if (bFollow)
 	{
-		const FVector BallUE = ToUE(Frame.ball);
-		const FVector Target(BallUE.X, BallUE.Y, FMath::Min(BallUE.Z, 1500.0) * 0.5);
+		const FVector Target = bBallInPlay ? FVector(BallUE.X, BallUE.Y, FMath::Min(BallUE.Z, 1500.0) * 0.5) : ToUE(0, 16, 0);
 		CamLook = FMath::VInterpTo(CamLook, Target, DeltaSeconds, 4.f);
-		C->SetFieldOfView(FMath::FInterpTo(C->FieldOfView, 42.f, DeltaSeconds, 2.f));
+		C->SetFieldOfView(FMath::FInterpTo(C->FieldOfView, bBallInPlay ? 42.f : 55.f, DeltaSeconds, 2.f));
 	}
 	Camera->SetActorRotation((CamLook - Camera->GetActorLocation()).Rotation());
 }
@@ -298,9 +360,30 @@ void ABbDirector::Tick(float DeltaSeconds)
 		WorstFrame = FMath::Max(WorstFrame, (double)DeltaSeconds);
 	}
 
+	// Keys: Space pauses, - and = change speed, C changes camera.
+	if (APlayerController* PC = GetWorld()->GetFirstPlayerController())
+	{
+		if (PC->WasInputKeyJustPressed(EKeys::SpaceBar))
+		{
+			bPaused = !bPaused;
+		}
+		if (PC->WasInputKeyJustPressed(EKeys::Equals))
+		{
+			Speed = FMath::Min(Speed * 1.5f, 16.f);
+		}
+		if (PC->WasInputKeyJustPressed(EKeys::Hyphen))
+		{
+			Speed = FMath::Max(Speed / 1.5f, 0.1f);
+		}
+		if (PC->WasInputKeyJustPressed(EKeys::C))
+		{
+			CameraMode = (CameraMode + 1) % 3;
+		}
+	}
+
 	if (Current.bValid && Sim)
 	{
-		PlayTime += DeltaSeconds * Speed;
+		PlayTime += bPaused ? 0.f : DeltaSeconds * Speed;
 		const float T = FMath::Min(PlayTime, Current.Info.duration_s);
 		BbFrame Frame;
 		if (Sim->Sample(Current, T, Frame))
@@ -353,8 +436,11 @@ void ABbDirector::Tick(float DeltaSeconds)
 			// put in play, at the end of the play if it was.
 			const bool bKnown = In.exit_velocity_mps > 0.f ? PlayTime >= In.duration_s : PlayTime >= 0.55f;
 			Hud->Call = bKnown ? FString(UTF8_TO_TCHAR(In.summary)) : FString();
+			static const TCHAR* CamNames[3] = { TEXT("broadcast"), TEXT("behind home"), TEXT("overhead") };
+			Hud->Footer = FString::Printf(TEXT("Space: %s    - / =: speed %.2gx    C: camera (%s)"), bPaused ? TEXT("paused") : TEXT("pause"), Speed, CamNames[CameraMode]);
 			if (bKnown)
 			{
+				Hud->Bases = In.bases;
 				Hud->Scoreboard = FString::Printf(TEXT("AWAY %d   HOME %d    %s %d    %d out    %d-%d"), In.away_runs, In.home_runs, In.top ? TEXT("Top") : TEXT("Bot"), In.inning, In.outs, In.balls, In.strikes);
 			}
 			const float Mph = In.release_speed_mps * 2.23694f;

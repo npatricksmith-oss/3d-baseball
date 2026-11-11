@@ -39,6 +39,9 @@ Unattended: add `-RenderOffscreen -BbShots=6` (screenshots to `client/Saved/Shot
 - The bat: the executed swing is in the timeline and the client draws it; the batter stands in his box until contact.
 - Two cameras cut like a broadcast: the pitch from beyond center field through a long lens, the play from high behind home following the ball.
 
+- Stands as plain blocks, a runners-on diamond, and keys: Space pauses, `-` and `=` change speed, C cycles cameras (broadcast, behind home, overhead).
+- Run in a window on the desktop (`client/run.sh 7 -BbBenchSeconds=25`): 328 fps at 1600×900, worst frame 7.5 ms.
+
 ## Known gaps in v0
 
 - Players are capsules that slide: no facing, no throwing or catching motion, no pitcher's delivery.

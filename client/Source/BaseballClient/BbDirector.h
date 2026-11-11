@@ -17,6 +17,7 @@ class UMaterialInterface;
  * pitch ahead; nothing here decides anything about the game (PLAN §3.4, D4).
  *
  * Command line: -BbSimLib=<path to libbb_ffi.so> -BbSeed=<n> -BbSpeed=<x>
+ *               -BbCamera=<0 broadcast | 1 behind home | 2 overhead>
  *               -BbShots=<n> (take n screenshots, then quit) -BbShotEvery=<seconds>
  *               -BbBenchSeconds=<s> (log frame rate and memory, then quit)
  */
@@ -35,6 +36,7 @@ private:
 	AStaticMeshActor* Shape(UStaticMesh* Mesh, const FVector& Location, const FVector& Scale, const FLinearColor& Color, const FRotator& Rotation = FRotator::ZeroRotator);
 	void BuildField();
 	void BuildLights();
+	void BuildStands();
 	void RequestNext();
 	void BeginPlayback(FBbPlay&& Play);
 	void UpdateCamera(const BbFrame& Frame, float DeltaSeconds);
@@ -72,7 +74,10 @@ private:
 
 	FVector CamLook = FVector::ZeroVector;
 	bool bBallInPlay = false;
-	bool bFollowCam = false;
+	/** 0 broadcast (cuts), 1 behind home, 2 overhead. */
+	int32 CameraMode = 0;
+	int32 ShownCam = -1;
+	bool bPaused = false;
 
 	// Unattended checks.
 	int32 ShotsLeft = 0;

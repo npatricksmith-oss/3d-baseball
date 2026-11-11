@@ -28,4 +28,8 @@ public:
 	FString PitchLine;
 	/** The call on the current pitch, shown large once it is known. */
 	FString Call;
+	/** Runners on base: bit 0 first, bit 1 second, bit 2 third. */
+	uint8 Bases = 0;
+	/** Key help and playback state, bottom left. */
+	FString Footer;
 };

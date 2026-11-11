@@ -27,7 +27,8 @@ typedef struct {
 #define BB_SUMMARY_LEN 96
 typedef struct {
   uint32_t play_index; float duration_s;
-  uint8_t inning, top, outs, balls, strikes, away_runs, home_runs, _pad;
+  uint8_t inning, top, outs, balls, strikes, away_runs, home_runs;
+  uint8_t bases; /* runners on after the play: bit 0 first, bit 1 second, bit 2 third */
   float release_speed_mps, exit_velocity_mps, launch_angle_rad;
   char summary[BB_SUMMARY_LEN]; /* the play in words, NUL-terminated */
 } BbPlayInfo;

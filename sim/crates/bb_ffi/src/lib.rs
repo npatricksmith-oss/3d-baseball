@@ -126,7 +126,8 @@ pub struct BbPlayInfo {
     pub strikes: u8,
     pub away_runs: u8,
     pub home_runs: u8,
-    pub _pad: u8,
+    /// Runners on base after the play: bit 0 first, bit 1 second, bit 2 third.
+    pub bases: u8,
     pub release_speed_mps: f32,
     pub exit_velocity_mps: f32,
     pub launch_angle_rad: f32,
@@ -174,6 +175,8 @@ pub unsafe extern "C" fn bb_timeline_info(blob: *const u8, len: usize, out: *mut
         info.strikes = v.strikes();
         info.away_runs = v.away().map(|t| t.runs()).unwrap_or(0);
         info.home_runs = v.home().map(|t| t.runs()).unwrap_or(0);
+        let on = |id: u16, bit: u8| if id != 0xFFFF { bit } else { 0 };
+        info.bases = on(v.runner_1b(), 1) | on(v.runner_2b(), 2) | on(v.runner_3b(), 4);
     }
     if let Some(t) = tl.telemetry() {
         info.release_speed_mps = t.release_speed_mps();
@@ -312,6 +315,7 @@ mod tests {
     fn timelines_sample_to_plausible_frames() {
         let g = bb_game_create(5);
         let (mut plays, mut moved, mut contacts, mut awards) = (0, 0, 0, 0);
+        let mut any_on = false;
         let mut seen = std::collections::BTreeMap::new();
         loop {
             let (mut p, mut len) = (std::ptr::null_mut(), 0usize);
@@ -320,7 +324,8 @@ mod tests {
             }
             let mut info = BbPlayInfo::default();
             assert_eq!(unsafe { bb_timeline_info(p, len, &mut info) }, 1);
-            assert!(info.duration_s > 0.3 && info.duration_s < 60.0 && info.outs <= 3 && info.inning >= 1);
+            assert!(info.duration_s > 0.3 && info.duration_s < 60.0 && info.outs <= 3 && info.inning >= 1 && info.bases < 8);
+            any_on |= info.bases != 0;
             let text = std::ffi::CStr::from_bytes_until_nul(&info.summary).unwrap().to_str().unwrap();
             assert!(!text.is_empty() && text.is_ascii(), "summary {text:?}");
             *seen.entry(text.split(',').next().unwrap().to_string()).or_insert(0u32) += 1;
@@ -397,6 +402,7 @@ mod tests {
             assert!(seen.contains_key(call), "no {call:?} in {seen:?}");
         }
         assert!(seen.keys().any(|k| k.starts_with("Ground out")) && seen.keys().any(|k| k.starts_with("Single")), "{seen:?}");
+        assert!(any_on);
         assert!(contacts > 30 && awards > 3, "{contacts} batted balls, {awards} walks and home runs");
         assert!(plays > 150 && moved > 20, "{plays} pitches, {moved} with a runner covering 10 m");
         // Bad input is refused, not read.
