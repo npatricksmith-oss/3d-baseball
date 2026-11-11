@@ -45,6 +45,11 @@ const PLAY_LIMIT_S: f64 = 40.0;
 /// Fraction of arm strength used on throws [E].
 const THROW_FRAC: f64 = 0.92;
 const RECEIVE_REACH: f64 = 1.5;
+/// A fielder taking a throw already faces his next target: his catch-to-release is this
+/// fraction of his transfer time on a batted ball [E] (about 0.45 s for an infielder; it was
+/// a flat 0.25 s, which turned one double play in ten ground balls and a triple play every
+/// eight games).
+const RELAY_TRANSFER_FRAC: f64 = 0.7;
 /// Infield radius for the settle rule (rules-spec §5.8), m. The spec's 30 m excluded second
 /// base (38.8 m from home); the infield dirt reaches ~45 m.
 const INFIELD_R: f64 = 45.0;
@@ -720,7 +725,7 @@ impl<'a> Sim<'a> {
                 if let Ball::Thrown { to_base, .. } = self.ball {
                     // A receiver steps straight to the bag; a relay goes on quickly.
                     fd.target = base_pos(to_base);
-                    fd.ready_at = self.t + 0.25;
+                    fd.ready_at = self.t + RELAY_TRANSFER_FRAC * fd.a.transfer;
                 }
                 let id = fd.id;
                 self.ball = Ball::Held { by: i };
