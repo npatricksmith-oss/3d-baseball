@@ -201,7 +201,8 @@ impl Game {
             let fside = 1 - side as u16;
             let home = crate::play::home_positions();
             viz.standing.extend((0..9).map(|i| ((fside << 8) | 0x80 | (i as u16 + 1), home[i])));
-            viz.standing.extend(st.bases.iter().enumerate().filter_map(|(i, r)| r.map(|id| (id, crate::play::base_pos(i as u8 + 1)))));
+            // Runners stand off their bases with their leads.
+            viz.standing.extend(st.bases.iter().enumerate().filter_map(|(i, r)| r.map(|id| (id, crate::live::path_pos(crate::live::lead_s(i as u8 + 1))))));
             // The batter stands where his swing pivots (agent-models §3.6).
             let pivot = mu.template.pivot(&mu.batter);
             viz.standing.push((st.batter, bb_math::Vec3::new(pivot.x, pivot.y, 0.0)));

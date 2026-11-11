@@ -55,7 +55,7 @@ impl Default for Knobs {
 impl Knobs {
     /// Interim M3 calibration (docs/calibration/2026-10-31-m3-interim.md).
     pub fn calibrated_m3() -> Self {
-        Self { perception: 2.25, command: 0.8, swing: 1.0 }
+        Self { perception: 2.7, command: 0.8, swing: 1.0 }
     }
 }
 

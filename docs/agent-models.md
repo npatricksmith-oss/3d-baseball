@@ -417,6 +417,8 @@ value  = P̂(out) · ΔRE_out + (1 − P̂(out)) · ΔRE_safe  − throw-error r
 
 ### 5.7 Defensive coordination
 
+**Backups (built 2026-11-11, `Sim::assign_backups`):** every fielder with no other job backs up the play: one behind the man fielding the ball and one behind each base a throw is likely to go to, on the line of that throw and about 13 m beyond the base, never two at one base. Who goes where follows standard assignments (the pitcher behind third or home, the far outfielder behind second, the catcher behind first with the bases empty); the list is in docs/calibration/2026-11-11-owner-watch-notes.md. Cutoff and relay men are not built yet.
+
 Coordination emerges from **calls**, not a central oracle [C]:
 - Each fielder, from its own estimate, computes whether it can make the play. When its believed margin is positive, it "calls" the ball. A call reaches teammates after `T_call` = 0.3 s [E].
 - Conflicts resolve by a priority table (CF > corner OF; OF > IF on balls in between; SS > 3B on balls to the left, etc. [data file]). A fielder who hears a higher-priority call peels off to back up.
@@ -545,7 +547,7 @@ Defaults for an MLB-like population. **All values [E]** unless marked; `calibrat
 | `Blocking` | catcher lateral reach speed | m/s | 3.0 | σ 0.4 | 4.2 | 1.8 |
 | `Vision` | σ_ang; Weber w | mrad; — | 1.0; 0.10 | ρ 1.2 (both) | 0.58; 0.058 | 1.73; 0.173 |
 | `SpinRecognition` | σ_s0; τ_s | (type-likelihood units); s | 1.0; 0.08 | ρ 1.25 (both) | 0.51; 0.041 | 1.95; 0.156 |
-| `Discipline` | c_D; b_D | —; logits | 1.0; 0.0 | σ 0.15; σ 0.25 | 1.45; −0.75 | 0.55; +0.75 |
+| `Discipline` | c_D; b_D | —; logits | 0.5; +0.9 (owner-directed calibration, 2026-11-11; were 1.0; 0.0) | σ 0.15; σ 0.25 | 0.95; +0.15 | 0.05; +1.65 |
 | `ReadSkill` | τ_read | s | 0.6 | ρ 1.2 | 0.35 | 1.04 |
 | `JumpRead` | T_jump | s | 0.15 | ρ 1.12 | 0.11 | 0.21 |
 | `BaserunningIQ` | σ_BRIQ | s | 0.15 | ρ 1.2 | 0.087 | 0.26 |

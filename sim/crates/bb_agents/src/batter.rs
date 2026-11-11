@@ -68,7 +68,7 @@ pub struct Discipline {
 
 impl Default for Discipline {
     fn default() -> Self {
-        Self { c: 1.0, b: 0.0 }
+        Self { c: 0.5, b: 0.9 }
     }
 }
 

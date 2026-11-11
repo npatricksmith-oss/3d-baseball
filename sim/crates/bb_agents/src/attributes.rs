@@ -73,9 +73,11 @@ impl BatterGrades {
         p.weber = ratio_from_grade(self.vision, 0.10, 1.2);
         p.sigma_s0 = ratio_from_grade(self.spin_recognition, 1.0, 1.25);
         p.tau_s = ratio_from_grade(self.spin_recognition, 0.08, 1.25);
-        d.c = linear_from_grade(self.discipline, 1.0, 0.15);
+        // Grade 50 is a blurry, swing-leaning judge of the zone (c 0.5, b +0.9), which is what
+        // gives an average hitter an MLB-like swing rate; see docs/calibration/2026-11-11.
+        d.c = linear_from_grade(self.discipline, 0.5, 0.15);
         // A high grade removes the "everything looks like a strike" bias (§10 note).
-        d.b = -linear_from_grade(self.discipline, 0.0, 0.25);
+        d.b = 0.9 - linear_from_grade(self.discipline, 0.0, 0.25);
     }
 }
 

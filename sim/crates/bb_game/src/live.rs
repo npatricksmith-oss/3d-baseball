@@ -33,6 +33,8 @@ const DEPTH_STRETCH: f64 = 3.0;
 const READ_REF_DIST: f64 = 30.0;
 /// League-typical fielder values a runner assumes (scouting-level knowledge) [E].
 const TYPICAL_SPEED: f64 = 8.0;
+/// League-typical runner top speed a fielder assumes, m/s [E].
+const TYPICAL_RUNNER_SPEED: f64 = 8.2;
 const TYPICAL_ARM: f64 = 37.0;
 const TYPICAL_TRANSFER: f64 = 0.75;
 /// A runner's read of a batted ball, m at 30 m [E].
@@ -40,11 +42,28 @@ const RUNNER_READ_SIGMA0: f64 = 2.0;
 /// Agents' internal flight step, s.
 const AGENT_DT: f64 = 0.1;
 const BASE_L: f64 = 27.432;
-const BATTER_START: f64 = 0.30;
+const BATTER_START: f64 = 0.25;
+/// Time constant of a runner's acceleration, s [E]. With the batter's start delay an
+/// average runner (8.2 m/s) reaches first 4.45 s after contact (MLB averages about 4.4).
+const RUNNER_TAU: f64 = 0.85;
+/// On a ball in the air that may or may not be caught, with fewer than two out, a runner
+/// goes this far past his lead and waits to see it land or be caught, m [E].
+const HALFWAY_M: f64 = 5.0;
 const PLAY_LIMIT_S: f64 = 40.0;
 /// Fraction of arm strength used on throws [E].
 const THROW_FRAC: f64 = 0.92;
 const RECEIVE_REACH: f64 = 1.5;
+/// How far behind a base its backup stands, on the line of the throw, m [E] (coaching
+/// guides give 15–18 m for an outfielder; foul ground allows less).
+const BACKUP_M: f64 = 13.0;
+/// A runner's distance off his base as the ball is hit, m [E]: his lead plus the shuffle he
+/// takes as the pitch is delivered. Index = base (none at home).
+const LEAD_M: [f64; 4] = [0.0, 5.5, 6.5, 4.5];
+
+/// Where a runner on `base` stands as the pitch is hit, as base-path distance from home.
+pub(crate) fn lead_s(base: u8) -> f64 {
+    base as f64 * BASE_L + LEAD_M[(base as usize).min(3)]
+}
 /// A fielder taking a throw already faces his next target: his catch-to-release is this
 /// fraction of his transfer time on a batted ball [E] (about 0.45 s for an infielder; it was
 /// a flat 0.25 s, which turned one double play in ten ground balls and a triple play every
@@ -93,6 +112,8 @@ struct Fielder {
     last_close_read: f64,
     /// Throws made this play (keys the throw-execution noise).
     throws: u32,
+    /// The base whose throws he is backing up, if that is his job on this play.
+    backs: Option<u8>,
 }
 
 #[derive(Clone, Debug)]
@@ -115,6 +136,9 @@ struct Runner {
     retouch: bool,
     /// Holding at a base until the runner ahead clears the next one.
     waiting: bool,
+    /// Waiting partway to the next base (base-path distance) to see whether a ball in the
+    /// air is caught.
+    hold_s: Option<f64>,
     /// The timing-error draw of the latest advance decision (standard normal; diagnostics).
     last_timing_draw: f64,
     /// The runner has seen the catch and settled whether he owes a retouch (decided once:
@@ -244,6 +268,21 @@ fn run_time_from(d: f64, v0: f64, v_max: f64, tau: f64) -> f64 {
         if run_dist_from(mid, v0, v_max, tau) < d { lo = mid } else { hi = mid }
     }
     0.5 * (lo + hi)
+}
+
+/// A fielder's estimate of how long a runner needs to cover `d` metres: he sees the runner's
+/// speed now and assumes a league-typical runner getting up to speed (not the runner's own
+/// attributes, which he does not know).
+fn runner_eta(d: f64, v_now: f64) -> f64 {
+    run_time_from(d, v_now.min(TYPICAL_RUNNER_SPEED), TYPICAL_RUNNER_SPEED, RUNNER_TAU)
+}
+
+/// Where the backup of a throw from `from` to `base` stands: on the line of the throw,
+/// [`BACKUP_M`] beyond the base.
+fn backup_spot(from: Vec3, base: u8) -> Vec3 {
+    let b = base_pos(base);
+    let dir = Vec3::new(b.x - from.x, b.y - from.y, 0.0);
+    if dir.norm() < 1e-6 { b } else { b + dir.normalized() * BACKUP_M }
 }
 
 /// A fielder's position and speed after the movement step of the tick at time `t`: toward
@@ -555,6 +594,92 @@ impl<'a> Sim<'a> {
         if broke {
             self.cover_roles_after_chasers();
         }
+        self.assign_backups();
+    }
+
+    /// Fielders with no part in the play back it up (agent-models §5.7): one behind the man
+    /// fielding the ball, and one behind each base a throw is likely to go to, on the line
+    /// of that throw. One backup per base. Decided from what every fielder can see: where
+    /// the ball is being fielded and which bases are occupied.
+    fn assign_backups(&mut self) {
+        let pi = self.primary;
+        let from = self.f[pi].target;
+        let depth = m::hypot(from.x, from.y);
+        let outfield_hit = depth > INFIELD_R;
+        let on = |b: u8| self.r.iter().any(|r| r.start == b && !r.out && !r.scored);
+        let empty = !(on(1) || on(2) || on(3));
+        for fd in self.f.iter_mut() {
+            fd.backs = None;
+            if fd.role == Role::Backup {
+                fd.role = Role::Idle;
+            }
+        }
+        // With nobody on base the catcher is not needed at home: he trails the batter to
+        // back up first.
+        if empty && self.f[1].role == Role::Cover(4) {
+            self.f[1].role = Role::Idle;
+        }
+        let mut free: Vec<usize> = (0..9).filter(|&i| self.f[i].role == Role::Idle).collect();
+        // Behind the fielder: the nearest free outfielder gets into the ball's line beyond
+        // him (deeper than the chase point, and no shallower than he already is).
+        let line = Vec3::new(from.x, from.y, 0.0).normalized();
+        let ofs: Vec<usize> = free.iter().copied().filter(|&i| i >= 6).collect();
+        if let Some(&i) = ofs.iter().min_by(|&&a, &&c| (self.f[a].pos - from).norm().total_cmp(&(self.f[c].pos - from).norm()).then(a.cmp(&c))) {
+            let own = m::hypot(self.f[i].pos.x, self.f[i].pos.y);
+            self.f[i].target = line * (depth + 8.0).max(own * 0.85);
+            self.f[i].role = Role::Backup;
+            free.retain(|&x| x != i);
+        }
+        // Behind the bases. The likeliest throw first; candidates in order of preference
+        // (P 0, C 1, LF 6, CF 7, RF 8).
+        let far_of = if from.x > 0.0 { 6 } else { 8 };
+        let mut jobs: Vec<(u8, Vec<usize>)> = Vec::new();
+        if outfield_hit {
+            if on(2) || on(3) {
+                jobs.push((4, vec![0]));
+                jobs.push((2, vec![far_of, 7]));
+            } else if on(1) {
+                jobs.push((3, vec![0, 6]));
+                jobs.push((2, vec![far_of, 7]));
+            } else {
+                jobs.push((2, vec![far_of, 0, 7]));
+                jobs.push((1, vec![1]));
+            }
+        } else {
+            jobs.push((1, vec![1, 8]));
+            if on(1) {
+                jobs.push((2, vec![7, far_of]));
+            }
+            if on(2) {
+                jobs.push((3, vec![6, 0]));
+            }
+        }
+        for (base, cands) in jobs {
+            let Some(&i) = cands.iter().find(|c| free.contains(c)) else { continue };
+            // A throw to first with nobody on comes from the infield or from second base's
+            // side; other throws come from where the ball is fielded.
+            let origin = if base == 1 && outfield_hit { base_pos(2) } else { from };
+            self.f[i].target = backup_spot(origin, base);
+            self.f[i].role = Role::Backup;
+            self.f[i].backs = Some(base);
+            free.retain(|&x| x != i);
+        }
+    }
+
+    /// A throw has been released toward `base`: its backup lines up with the real throw. If
+    /// nobody has that job, the nearest fielder with nothing to do takes it.
+    fn back_up_throw(&mut self, from: Vec3, base: u8) {
+        let spot = backup_spot(from, base);
+        let who = (0..9).find(|&i| self.f[i].backs == Some(base) && self.f[i].role == Role::Backup).or_else(|| {
+            (0..9)
+                .filter(|&i| matches!(self.f[i].role, Role::Idle | Role::Backup) && self.f[i].backs.is_none())
+                .min_by(|&a, &c| (self.f[a].pos - spot).norm().total_cmp(&(self.f[c].pos - spot).norm()).then(a.cmp(&c)))
+        });
+        if let Some(i) = who {
+            self.f[i].target = spot;
+            self.f[i].role = Role::Backup;
+            self.f[i].backs = Some(base);
+        }
     }
 
     /// Re-assign base coverage among fielders who are not chasing.
@@ -604,13 +729,9 @@ impl<'a> Sim<'a> {
             if i == pi {
                 self.f[i].role = Role::Chase;
             } else if !taken.contains(&i) {
-                self.f[i].role = if i >= 6 { Role::Backup } else { Role::Idle };
-                if i >= 6 {
-                    // Back up the play: head toward the chase point, staying ~8 m behind it.
-                    let from = Vec3::new(0.0, 0.0, 0.0);
-                    let dir = (tgt - from).normalized();
-                    self.f[i].target = tgt + dir * 8.0;
-                }
+                // Fielders with no job yet; `assign_backups` gives most of them one.
+                self.f[i].role = Role::Idle;
+                let _ = tgt;
             }
         }
     }
@@ -906,7 +1027,7 @@ impl<'a> Sim<'a> {
         self.r[k].decisions += 1;
         let n = self.r[k].decisions;
         let r = &self.r[k];
-        let t_run = run_time(BASE_L, r.vmax, 1.0) * if r.v > 1.0 { 0.75 } else { 1.0 };
+        let t_run = run_time((next as f64 * BASE_L - r.s).max(0.0), r.vmax, RUNNER_TAU) * if r.v > 1.0 { 0.75 } else { 1.0 };
         let t_ball = self.ball_time_to(k, next, 2 * n + 1);
         let mut rr = rng(self.inp.seed, self.inp.play, r.id, Purpose::RunnerPerception, 2 * n);
         let draw = rr.truncated_normal(4.0);
@@ -945,14 +1066,17 @@ impl<'a> Sim<'a> {
                 self.r[k].catch_seen = true;
                 if self.r[k].start > 0 && self.r[k].s > self.r[k].start as f64 * BASE_L + 1e-6 {
                     self.r[k].tag_up = false;
+                    self.r[k].hold_s = None;
                     self.r[k].retouch = true;
                     self.r[k].waiting = false;
                     self.r[k].goal = self.r[k].start;
                 }
             }
-            // Tag-up: hold the base until the catch, then decide.
+            // Tag-up: go back to the base and hold it until the catch, then decide.
             if self.r[k].tag_up {
+                let on_base = (self.r[k].s - self.r[k].start as f64 * BASE_L).abs() < 1e-6;
                 if self.caught() {
+                    // (A runner still off his base at the catch was sent back above.)
                     self.r[k].tag_up = false;
                     let b = self.r[k].last_base;
                     self.emit(Input::BaseTouched { t: self.t, agent: self.r[k].id, base: b, holding_ball: false });
@@ -962,9 +1086,17 @@ impl<'a> Sim<'a> {
                     self.r[k].tag_up = false;
                     let b = self.r[k].last_base;
                     self.runner_decide(k, b);
-                } else {
+                } else if on_base {
                     continue;
+                } else {
+                    self.r[k].goal = self.r[k].start;
                 }
+            }
+            // Halfway on a ball in the air: once it is down (or fielded on a hop), decide.
+            if self.r[k].hold_s.is_some() && !self.caught() && (!matches!(self.ball, Ball::Free { .. }) || self.out.facts.iter().any(|f| matches!(f, Input::BallTouched { what: Touch::Ground { .. }, .. }))) {
+                self.r[k].hold_s = None;
+                let b = self.r[k].start;
+                self.runner_decide(k, b);
             }
             // Waiting at a base: decide once the runner ahead has cleared the next one.
             if self.r[k].waiting && (self.r[k].s - self.r[k].goal as f64 * BASE_L).abs() < 1e-6 {
@@ -980,7 +1112,7 @@ impl<'a> Sim<'a> {
             if g as f64 * BASE_L > self.r[k].s && self.base_held_ahead(k, g) && !forced_here {
                 self.r[k].goal = (self.r[k].s / BASE_L).floor() as u8;
             }
-            let goal_s = self.r[k].goal as f64 * BASE_L;
+            let goal_s = self.r[k].hold_s.unwrap_or(self.r[k].goal as f64 * BASE_L);
             let r = &mut self.r[k];
             let dir = (goal_s - r.s).signum();
             if (goal_s - r.s).abs() < 1e-6 {
@@ -990,7 +1122,7 @@ impl<'a> Sim<'a> {
             if r.v == 0.0 {
                 r.moving_since = self.t;
             }
-            r.v += (r.vmax - r.v) * (DT / 1.0);
+            r.v += (r.vmax - r.v) * (DT / RUNNER_TAU);
             let prev = r.s;
             let nxt = prev + dir * r.v * DT;
             let crossed = |b: u8| {
@@ -1076,7 +1208,7 @@ impl<'a> Sim<'a> {
             let tgt = base_pos(goal);
             let d_me = (tgt - fd.pos).norm();
             let t_me = run_time(d_me, fd.a.speed, fd.a.tau_a);
-            let t_runner = (goal as f64 * BASE_L - r.s).abs() / r.v.max(5.0);
+            let t_runner = runner_eta((goal as f64 * BASE_L - r.s).abs(), r.v);
             if d_me < 8.0 && t_me + 0.1 < t_runner {
                 self.f[by].target = tgt;
                 return;
@@ -1094,15 +1226,17 @@ impl<'a> Sim<'a> {
             // The base a moving runner is heading for, and when he gets there at his
             // current speed (both visible).
             let goal = visible_target(r);
-            let t_runner = self.t + (goal as f64 * BASE_L - r.s).abs() / r.v.max(5.0);
+            let t_runner = self.t + runner_eta((goal as f64 * BASE_L - r.s).abs(), r.v);
             let d = (base_pos(goal) - fd.pos).norm();
             // The ball beats the runner only once someone is at the bag to take it.
             let recv = self.receiver_for(by, goal);
             let t_ball = (self.t + d / (THROW_FRAC * fd.a.arm)).max(self.receiver_ready(recv, goal)) + 0.05;
             let p_out = phi((t_runner - t_ball) / 0.12);
             let w = [0.9, 1.0, 1.1, 1.3][(goal as usize).saturating_sub(1).min(3)];
-            if p_out > 0.3 && best.map(|b| p_out * w > b.0).unwrap_or(true) {
-                best = Some((p_out * w, goal));
+            // Take the sure out: an uncertain play on a lead runner loses to a certain one
+            // elsewhere (the chance is squared before the base's weight is applied).
+            if p_out > 0.3 && best.map(|b| p_out * p_out * w > b.0).unwrap_or(true) {
+                best = Some((p_out * p_out * w, goal));
             }
         }
         let infield = m::hypot(fd.pos.x, fd.pos.y) < INFIELD_R;
@@ -1140,6 +1274,7 @@ impl<'a> Sim<'a> {
         let v0 = h * vh + Vec3::new(0.0, 0.0, vz);
         self.ball = Ball::Thrown { r0, v0, t0: self.t, to_base: b, receiver };
         self.f[receiver].target = tgt;
+        self.back_up_throw(fd.pos, b);
     }
 
     /// Who takes a throw at base `b`: its cover man, else the nearest other fielder.
@@ -1225,6 +1360,7 @@ fn new_sim<'a>(inp: &'a LiveInput<'a>, st: &'a mut RulesState) -> Sim<'a> {
                 t_int: f64::INFINITY,
                 last_close_read: 0.0,
                 throws: 0,
+                backs: None,
             }
         })
         .collect();
@@ -1234,7 +1370,7 @@ fn new_sim<'a>(inp: &'a LiveInput<'a>, st: &'a mut RulesState) -> Sim<'a> {
         .map(|x| Runner {
             id: x.id,
             start: x.base,
-            s: x.base as f64 * BASE_L,
+            s: if x.base == 0 { 0.0 } else { lead_s(x.base) },
             v: 0.0,
             vmax: x.speed,
             goal: x.base,
@@ -1245,6 +1381,7 @@ fn new_sim<'a>(inp: &'a LiveInput<'a>, st: &'a mut RulesState) -> Sim<'a> {
             last_base: x.base,
             retouch: false,
             waiting: false,
+            hold_s: None,
             last_timing_draw: 0.0,
             catch_seen: false,
             decisions: 0,
@@ -1273,6 +1410,13 @@ fn simulate_live_inner(inp: &LiveInput, st: &mut RulesState) -> LiveOutput {
     let t_c = inp.t_contact;
     let play = inp.play;
     let mut sim = new_sim(inp, st);
+    // Runners are off their bases with their leads as the ball is hit: the rules hear of it.
+    for k in 0..sim.r.len() {
+        if sim.r[k].start > 0 {
+            let (id, base) = (sim.r[k].id, sim.r[k].start);
+            sim.emit(Input::BaseLeft { t: t_c, agent: id, base });
+        }
+    }
     // Reactions: the defense reads the ball after its reaction time; runners decide at once
     // from what they see (a ball in the air that a fielder is settling under: tag up).
     let react = inp.fattrs.iter().map(|a| a.reaction).fold(f64::INFINITY, f64::min);
@@ -1306,17 +1450,25 @@ fn simulate_live_inner(inp: &LiveInput, st: &mut RulesState) -> LiveOutput {
             let (b, bv) = sim.ball_at(sim.t);
             let airborne = matches!(sim.ball, Ball::Free { .. }) && (b.z > 1.5 || bv.z > 0.0);
             for k in 0..sim.r.len() {
-                // Each runner reads the ball himself: if a visible fielder can get under it
-                // before it lands, he expects a catch and tags up.
-                let likely_catch = airborne && sim.r[k].start > 0 && {
+                // Each runner reads the ball himself. If a visible fielder can get under it
+                // before it lands, he expects a catch and goes back to tag up. If it is a
+                // fly or liner to the outfield that might drop, with fewer than two out, he
+                // goes partway and watches. Otherwise he decides now.
+                let (likely_catch, deep_fly) = if airborne && sim.r[k].start > 0 {
                     let pred = sim.runner_predict(k, 1);
-                    let land = pred.first_bounce().map(|x| x.0).unwrap_or(pred.t_end());
-                    sim.believed_field_time(&pred).0 <= land + 0.3
+                    let first = pred.first_bounce();
+                    let land = first.map(|x| x.0).unwrap_or(pred.t_end());
+                    (sim.believed_field_time(&pred).0 <= land + 0.3, first.map(|x| m::hypot(x.1, x.2) > INFIELD_R).unwrap_or(true))
+                } else {
+                    (false, false)
                 };
                 if sim.r[k].start == 0 {
                     sim.r[k].goal = 1;
                 } else if likely_catch {
                     sim.r[k].tag_up = true;
+                } else if deep_fly && sim.st.outs < 2 {
+                    let base = sim.r[k].start;
+                    sim.r[k].hold_s = Some((lead_s(base) + HALFWAY_M).min((base as f64 + 0.6) * BASE_L));
                 } else {
                     let b0 = sim.r[k].start;
                     sim.runner_decide(k, b0);
@@ -1723,6 +1875,95 @@ mod tests {
         assert!(t < run_time(6.0, 7.9, 0.7) && t > 6.0 / 7.9);
         assert!((run_dist_from(t, 6.0, 7.9, 0.7) - 6.0).abs() < 1e-9);
         assert!((run_time_from(6.0, 0.0, 7.9, 0.7) - run_time(6.0, 7.9, 0.7)).abs() < 1e-9);
+    }
+
+    /// Set up who fields the ball where, then hand out cover and backup jobs.
+    fn jobs(sim: &mut Sim, fielder: usize, at: Vec3) {
+        sim.primary = fielder;
+        sim.f[fielder].target = at;
+        sim.cover_roles();
+        sim.assign_backups();
+    }
+
+    /// The backup of `base` stands beyond it on the line of a throw from `from`.
+    fn behind(sim: &Sim, i: usize, base: u8, from: Vec3) -> bool {
+        let b = base_pos(base);
+        let beyond = sim.f[i].target - b;
+        let throw = (b - from).normalized();
+        sim.f[i].role == Role::Backup && sim.f[i].backs == Some(base) && beyond.norm() > 8.0 && beyond.normalized().dot(throw) > 0.95
+    }
+
+    // Backup jobs as coaching guides give them (Spiders "Cutoff & Backup Responsibilities",
+    // the owner's reference). Indices: P 0, C 1, 1B 2, 2B 3, 3B 4, SS 5, LF 6, CF 7, RF 8.
+    #[test]
+    fn idle_fielders_back_up_the_play() {
+        let batter = |fx: &Fixture| RunnerIn { id: fx.st.batter, base: 0, speed: 8.2 };
+        // Grounder to short, nobody on: the catcher trails the batter to back up first.
+        let fx = fixture(&[]);
+        let inp = input(&fx, vec![batter(&fx)]);
+        let mut st = fx.st.clone();
+        let mut sim = new_sim(&inp, &mut st);
+        let at = Vec3::new(-9.0, 40.0, 0.0);
+        jobs(&mut sim, SS, at);
+        assert!(behind(&sim, 1, 1, at), "catcher: {:?} {:?} {:?}", sim.f[1].role, sim.f[1].backs, sim.f[1].target);
+
+        // Single to left, nobody on: the center fielder backs up the left fielder, the
+        // right fielder backs up the throw into second, the catcher backs up first.
+        let mut st = fx.st.clone();
+        let mut sim = new_sim(&inp, &mut st);
+        let at = Vec3::new(-40.0, 65.0, 0.0);
+        jobs(&mut sim, 6, at);
+        assert!(sim.f[7].role == Role::Backup && sim.f[7].backs.is_none() && sim.f[7].target.norm() > at.norm(), "CF: {:?}", sim.f[7].target);
+        assert!(behind(&sim, 8, 2, at), "RF: {:?} {:?}", sim.f[8].backs, sim.f[8].target);
+        assert!(sim.f[1].backs == Some(1) && sim.f[1].role == Role::Backup);
+
+        // Single to left, runner on first: the pitcher backs up third from foul ground, the
+        // right fielder still backs up second, and the catcher stays home.
+        const R: AgentId = 0x0007;
+        let fx = fixture(&[(R, 1)]);
+        let inp = input(&fx, vec![batter(&fx), RunnerIn { id: R, base: 1, speed: 8.2 }]);
+        let mut st = fx.st.clone();
+        let mut sim = new_sim(&inp, &mut st);
+        jobs(&mut sim, 6, at);
+        assert!(behind(&sim, 0, 3, at), "P: {:?} {:?}", sim.f[0].backs, sim.f[0].target);
+        assert!(!Field::fair(sim.f[0].target.x, sim.f[0].target.y), "pitcher backs up third in foul ground: {:?}", sim.f[0].target);
+        assert!(behind(&sim, 8, 2, at));
+        assert_eq!(sim.f[1].role, Role::Cover(4));
+        // Nobody has two jobs and no base has two backups.
+        for base in 1..=4u8 {
+            assert!(sim.f.iter().filter(|f| f.backs == Some(base)).count() <= 1);
+        }
+
+        // When the throw actually goes, the backup lines up with it.
+        let thrower = Vec3::new(-30.0, 50.0, 0.0);
+        sim.back_up_throw(thrower, 3);
+        assert!(behind(&sim, 0, 3, thrower));
+    }
+
+    // Runners take leads, and on a fly that might drop with fewer than two out they go
+    // partway rather than all the way: a runner from first is never past halfway to second
+    // while a deep fly is still in the air.
+    #[test]
+    fn runner_leads_off_and_goes_halfway_on_a_fly() {
+        const R: AgentId = 0x0007;
+        let fx = fixture(&[(R, 1)]);
+        let inp = input(&fx, vec![RunnerIn { id: fx.st.batter, base: 0, speed: 8.2 }, RunnerIn { id: R, base: 1, speed: 8.2 }]);
+        let mut st = fx.st.clone();
+        let out = simulate_live(&LiveInput { record: true, ..inp }, &mut st);
+        let track = &out.actors.iter().find(|(id, _)| *id == R).unwrap().1;
+        let first = base_pos(1);
+        let lead = (track[0].1 - first).norm();
+        assert!(lead > 3.0 && lead < 7.5, "lead {lead:.1} m");
+        // The fixture's ball is a fly to center that is in the air for several seconds.
+        let landed = out.facts.iter().find_map(|f| match f {
+            Input::BallTouched { t, what: Touch::Ground { .. } } | Input::GloveSecured { t, .. } => Some(*t),
+            _ => None,
+        });
+        let t_down = landed.expect("the ball comes down");
+        assert!(t_down > inp.t_contact + 2.5, "fly was up for {:.1} s", t_down - inp.t_contact);
+        for (t, p) in track.iter().filter(|(t, _)| *t < t_down) {
+            assert!((*p - first).norm() <= 0.6 * BASE_L, "{:.1} m off first at +{:.2} s with the ball in the air", (*p - first).norm(), t - inp.t_contact);
+        }
     }
 
     // A chaser's plan has him reaching the ball at speed, so he must get there when the plan

@@ -42,9 +42,11 @@ Unattended: add `-RenderOffscreen -BbShots=6` (screenshots to `client/Saved/Shot
 - Stands as plain blocks, a runners-on diamond, and keys: Space pauses, `-` and `=` change speed, C cycles cameras (broadcast, behind home, overhead).
 - Run in a window on the desktop (`client/run.sh 7 -BbBenchSeconds=25`): 328 fps at 1600×900, worst frame 7.5 ms.
 
+- After the owner's first watch: human figures (the engine's mannequin, copied into `client/Content` by `client/run.sh`, with idle, walk and jog picked by speed, facing, and a team tint), and Esc or Q to quit.
+
 ## Known gaps in v0
 
-- Players are capsules that slide: no facing, no throwing or catching motion, no pitcher's delivery.
+- The figures stand, walk and jog; there is no throwing, catching, pitching or swinging motion, and the bat floats beside the batter.
 - Between pitches everyone snaps back to his starting spot; the ball is not returned to the pitcher.
 - The scoreboard has no names, no runners-on display, no line score.
 - The ball is hard to see on deep flies.

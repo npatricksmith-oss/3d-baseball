@@ -7,23 +7,26 @@ Status: `[ ]` not started · `[~]` in progress · `[x]` done · `[?]` needs an o
 
 ---
 
-## Resume here (end of the 2026-11-11 session)
+## Resume here (2026-11-11, after the owner's first watch)
 
-Done today, in order:
-- The five findings of the [Codex day review](docs/reviews/2026-10-31-codex-day-review.md) (tag-up loop, capture deferral, hit labels, runner RNG).
-- Its follow-up [Codex day-fixes review](docs/reviews/2026-11-11-codex-day-fixes-review.md): 3 fixed, 3 deferred to rules-engine and scorer work (Resolution written).
-- Three fielding planner bugs and re-set outfielder values ([report](docs/calibration/2026-11-11-fielding-planner.md)): routine grounders 88.6% → 94.2%.
-- Two diagnoses with no fix: [chase rate](docs/calibration/2026-11-11-chase-diagnosis.md) and [foul share](docs/calibration/2026-11-11-foul-share-diagnosis.md).
+The owner watched the Unreal client and asked for four things; all four are in ([notes and numbers](docs/calibration/2026-11-11-owner-watch-notes.md)):
+1. **Human figures:** the engine's mannequin with idle / walk / jog, facing, team tint (`client/run.sh` copies the assets from the engine; they are not in the repository).
+2. **Quit:** Esc or Q. Other keys: Space pause, `-` `=` speed, C camera.
+3. **Double plays:** 3.6 → 2.0 a game (MLB ≈ 1.7): runner leads, going halfway on flies, a 4.45 s batter to first, fewer grounders, plus `K_perception` 2.7 and Discipline's grade-50 values (0.5, +0.9) to keep scoring at 4.48 runs per team.
+4. **Backups:** idle fielders back up the fielder and the likely throw, one per base, per the coaching guides the owner linked.
 
-All three Codex reviews from today have Resolutions; nothing is waiting on a review. The [fielding review](docs/reviews/2026-11-11-codex-fielding-review.md) found left field was using infield values (index bug), so the outfielder values were re-fitted: **reaction 0.35 s, chase speed 8.2 m/s, read error 2.5 m** (the owner had accepted 0.40 / 8.0 / 3.0 before the bug was found).
+Owner direction: favor what is visible over calibration; get numbers close and move on.
 
-Numbers now (`sim-cli games --n 512 --seed 2`): **4.29 runs/team-game** (MLB ≈ 4.5). Provisional hit rates: GB .311 (MLB .24), LD .702 (.68), FB .121 (.13), PU .017 (.02). Routine grounders 92.3% (`cargo run --release -p bb_game --example gb_through -- 128`; target ≥ 96%, envelope ≥ 93%). Owner's direction (2026-11-11): get these close and move on; this is not an MLB historical simulator, so do not chase a point or two. Build `sim-cli` with `cargo build --release -p bb_cli` on its own: adding `--example` to the same command builds only the example.
+**Check first:** a Codex Sol review of this change set may be at `docs/reviews/2026-11-11-codex-watch-fixes-review.md`; if its Resolution is "Open", handle it.
 
-**Unreal client v0 exists and the spike passed** ([docs/unreal-spike.md](docs/unreal-spike.md)): `client/run.sh` plays a full game with capsules at ~300 fps. Owner direction (2026-11-11): people will enjoy watching a 3D game unfold and will not notice percentages a little off, so favor what is visible over calibration.
+**Next, in the order a viewer would notice:**
+- Throwing, catching, pitching and swinging motion for the figures (they only stand, walk and jog; the bat floats beside the batter).
+- Cutoff and relay men on outfield throws (in both of the owner's references; not built).
+- The ball back to the pitcher and players walking to position between pitches.
+- Ground balls go for hits too often (.377; infield hits ~16% of grounders) since leads and the faster batter.
+- Still open from reviews: a runner who crosses home before a catch never returns; foul share 24% vs 50%; foul-territory walls.
 
-Relay exchanges were slowed (0.25 s flat → 0.7 × the fielder's transfer time) after 40 games of play-by-play showed 5 triple plays; now 1 in 40 games. Double plays are still about 3.6 per game (MLB ≈ 1.6): mostly because 56% of balls in play are grounders. Numbers after that change: 4.41 runs/team-game, GB .311, LD .701, FB .121.
-
-**Next:** the fielding side is close enough. The batting side is where the sim is furthest from baseball: 56% of balls in play are grounders (MLB ≈ 43%), which is item 2(c), the contact model's topped balls. The foul-share and chase diagnoses point at the same swing and contact model, so take them together. On the fielding side what is left is positioning (364 of 681 through-balls are out of reach from the fixed starting spots) and item 2(a), foul-territory walls.
+Numbers (`sim-cli games --n 512 --seed 2`): 4.48 runs/team-game, K 17.4%, BB 7.4%, HR 4.0%; GB .377 / LD .708 / FB .135; routine grounders 91.0%. Build `sim-cli` with `cargo build --release -p bb_cli` on its own.
 
 1. [x] **Per-game budget (200 ms): met, ~155–170 ms on one thread** (the laptop's timings swing widely with load; compare builds interleaved, best of several). Two-stage aim solve and seeded scouting builds (−28 ms); batter filter with an analytic Jacobian, direct plate covariance, and aim points from the nominal's depth crossing (−61 ms; `sim-cli pa` 641 → 421 µs per pitch, identical B1 rates); live plays with a 0.1 s agent flight step, the recall reusing the chaser's same-tick prediction, and a single-pass intercept scan using the forward running curve (−51 ms; 512 games unchanged within noise). Breakdown in agent-models §12. Note: run totals differ by seed set (5.6–5.8 runs/team-game between 128- and 512-game samples); compare calibration runs on the same seeds.
 2. [~] **Run environment: 4.29 runs/team-game now** (512 games, seed 2; MLB ≈ 4.5). (a0) is done: replans keep the fielder's speed, the intercept scan tests between its samples, chasers arrive at speed; the "everyone breaks" rule now uses each infielder's own read and has lost its extra 0.6 s condition (no measurable effect). Still open: (a) foul-territory walls and backstop (physics-spec §9.4; foul ground reaches the outfield-fence radius, so overthrows roll ~100 m), which needs the rules engine's thrown-ball-out-of-play award; (b) infield positioning: most remaining through-balls are in the 5–6 hole, the 3–4 hole, and up the middle on the first-base side, and shifting toward the pull side made things worse last time; (c) the contact model makes too many grounders and topped balls (BIP launch-angle quartiles −15/5/25° vs MLB ≈ −2/13/28°).
