@@ -417,6 +417,8 @@ value  = P̂(out) · ΔRE_out + (1 − P̂(out)) · ΔRE_safe  − throw-error r
 
 ### 5.7 Defensive coordination
 
+**Runners, interim values in the live simulator (2026-11-11):** every runner accelerates with a 0.85 s time constant (not yet the grade-based `Acceleration` of §10), the batter starts 0.25 s after contact, runners take leads of 5.5 / 6.5 / 4.5 m off first / second / third and hold them until their first read of the ball, and with fewer than two out they go 5 m further and wait on a fly that might drop.
+
 **Backups (built 2026-11-11, `Sim::assign_backups`):** every fielder with no other job backs up the play: one behind the man fielding the ball and one behind each base a throw is likely to go to, on the line of that throw and about 13 m beyond the base, never two at one base. Who goes where follows standard assignments (the pitcher behind third or home, the far outfielder behind second, the catcher behind first with the bases empty); the list is in docs/calibration/2026-11-11-owner-watch-notes.md. Cutoff and relay men are not built yet.
 
 Coordination emerges from **calls**, not a central oracle [C]:

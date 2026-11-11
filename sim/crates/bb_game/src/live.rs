@@ -666,6 +666,20 @@ impl<'a> Sim<'a> {
         }
     }
 
+    /// With the bases empty the catcher left home to back up first. Once any runner has
+    /// rounded first he is a threat to score, and the catcher goes back (a visible fact:
+    /// where the runners are).
+    fn cover_home_again(&mut self) {
+        if (0..9).any(|i| self.f[i].role == Role::Cover(4)) || matches!(self.ball, Ball::Held { by: 1 }) || self.f[1].role == Role::Chase {
+            return;
+        }
+        if self.r.iter().any(|r| !r.out && !r.scored && r.s > 1.25 * BASE_L) {
+            self.f[1].role = Role::Cover(4);
+            self.f[1].backs = None;
+            self.f[1].target = base_pos(4);
+        }
+    }
+
     /// A throw has been released toward `base`: its backup lines up with the real throw. If
     /// nobody has that job, the nearest fielder with nothing to do takes it.
     fn back_up_throw(&mut self, from: Vec3, base: u8) {
@@ -780,9 +794,19 @@ impl<'a> Sim<'a> {
             if self.t < fd.blocked_until || self.t < self.inp.t_contact + fd.a.reaction {
                 continue;
             }
-            // On a throw only the receiver, and nobody else in its path, tries.
+            // On a throw only the receiver tries, and nobody in its path in front of him; the
+            // base's backup may take it once it has gone past the base.
             if receiver.is_some() && receiver != Some(i) {
-                continue;
+                let past_base = match self.ball {
+                    Ball::Thrown { to_base, .. } if fd.backs == Some(to_base) => {
+                        let base = base_pos(to_base);
+                        (b.x - base.x) * bv.x + (b.y - base.y) * bv.y > 0.0
+                    }
+                    _ => false,
+                };
+                if !past_base {
+                    continue;
+                }
             }
             if b.z < 0.0 {
                 continue; // never capture a ball below the surface
@@ -1381,7 +1405,8 @@ fn new_sim<'a>(inp: &'a LiveInput<'a>, st: &'a mut RulesState) -> Sim<'a> {
             last_base: x.base,
             retouch: false,
             waiting: false,
-            hold_s: None,
+            // Until his first read of the ball he stays where his lead put him.
+            hold_s: if x.base == 0 { None } else { Some(lead_s(x.base)) },
             last_timing_draw: 0.0,
             catch_seen: false,
             decisions: 0,
@@ -1450,6 +1475,7 @@ fn simulate_live_inner(inp: &LiveInput, st: &mut RulesState) -> LiveOutput {
             let (b, bv) = sim.ball_at(sim.t);
             let airborne = matches!(sim.ball, Ball::Free { .. }) && (b.z > 1.5 || bv.z > 0.0);
             for k in 0..sim.r.len() {
+                sim.r[k].hold_s = None;
                 // Each runner reads the ball himself. If a visible fielder can get under it
                 // before it lands, he expects a catch and goes back to tag up. If it is a
                 // fly or liner to the outfield that might drop, with fewer than two out, he
@@ -1532,6 +1558,7 @@ fn simulate_live_inner(inp: &LiveInput, st: &mut RulesState) -> LiveOutput {
         if sim.done {
             break;
         }
+        sim.cover_home_again();
         sim.move_fielders();
         sim.move_runners();
         if sim.done {
@@ -1938,6 +1965,61 @@ mod tests {
         let thrower = Vec3::new(-30.0, 50.0, 0.0);
         sim.back_up_throw(thrower, 3);
         assert!(behind(&sim, 0, 3, thrower));
+    }
+
+    // Watch-fixes review #1–#3: the catcher goes back to cover home once a runner rounds
+    // first; a backup catches an overthrow that reaches him in the air; a runner holds his
+    // lead (he does not drift back to the base) until he has read the ball.
+    #[test]
+    fn catcher_returns_backup_catches_and_runners_hold_their_leads() {
+        const R: AgentId = 0x0007;
+        let fx = fixture(&[]);
+        let inp = input(&fx, vec![RunnerIn { id: fx.st.batter, base: 0, speed: 8.2 }]);
+        let mut st = fx.st.clone();
+        let mut sim = new_sim(&inp, &mut st);
+        jobs(&mut sim, 6, Vec3::new(-40.0, 65.0, 0.0));
+        assert_eq!(sim.f[1].backs, Some(1));
+        sim.cover_home_again();
+        assert_eq!(sim.f[1].backs, Some(1), "nobody has rounded first yet");
+        sim.r[0].s = 1.4 * BASE_L;
+        sim.cover_home_again();
+        assert_eq!(sim.f[1].role, Role::Cover(4));
+        assert!((sim.f[1].target - base_pos(4)).norm() < 1e-9);
+
+        // A throw to second sails over the receiver and comes down to the backup 13 m behind
+        // the base (the review's scenario): he catches it.
+        let mut st = fx.st.clone();
+        let mut sim = new_sim(&inp, &mut st);
+        let second = base_pos(2);
+        sim.t = 2.0;
+        sim.f[3].role = Role::Cover(2);
+        sim.f[3].pos = second;
+        sim.f[0].role = Role::Backup;
+        sim.f[0].backs = Some(2);
+        sim.f[0].pos = second + Vec3::new(0.0, -BACKUP_M, 0.0);
+        sim.f[0].target = sim.f[0].pos;
+        // From deep center toward home, 4 m over the base, falling to chest height at the backup.
+        let (r0, tf) = (Vec3::new(0.0, 80.0, 1.8), 1.6);
+        let end = sim.f[0].pos + Vec3::new(0.0, 0.0, 1.3);
+        let v0 = Vec3::new(0.0, (end.y - r0.y) / tf, (end.z - r0.z + 0.5 * G * tf * tf) / tf);
+        sim.ball = Ball::Thrown { r0, v0, t0: 2.0, to_base: 2, receiver: 3 };
+        for _ in 0..110 {
+            sim.update_thrown();
+            sim.try_captures();
+            sim.t += DT;
+        }
+        assert!(matches!(sim.ball, Ball::Held { by: 0 }), "ball: {:?}", sim.ball);
+
+        // A runner on first stays at his lead until the runners read the ball at +0.5 s.
+        let fx = fixture(&[(R, 1)]);
+        let inp = input(&fx, vec![RunnerIn { id: fx.st.batter, base: 0, speed: 8.2 }, RunnerIn { id: R, base: 1, speed: 8.2 }]);
+        let mut st = fx.st.clone();
+        let mut sim = new_sim(&inp, &mut st);
+        for _ in 0..25 {
+            sim.move_runners();
+            sim.t += DT;
+        }
+        assert!((sim.r[1].s - lead_s(1)).abs() < 1e-9, "runner drifted to {:.2} m", sim.r[1].s - BASE_L);
     }
 
     // Runners take leads, and on a fly that might drop with fewer than two out they go

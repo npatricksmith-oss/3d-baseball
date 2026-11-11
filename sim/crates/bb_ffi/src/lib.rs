@@ -369,6 +369,24 @@ mod tests {
             }
             let fielders = f0.actors[..f0.n_actors as usize].iter().filter(|a| a.agent & 0x80 != 0).count();
             assert_eq!(fielders, 9);
+            // Nobody on offense moves faster than a sprinter between samples: no jumps (the
+            // batter runs out of his box; a runner on a walk starts from his lead).
+            let mut prev: Option<BbFrame> = None;
+            let mut t = 0.0;
+            while t <= info.duration_s {
+                let mut f = BbFrame::default();
+                unsafe { bb_timeline_sample(p, len, t, &mut f) };
+                if let Some(q) = prev {
+                    for i in 0..f.n_actors as usize {
+                        if f.actors[i].agent & 0x80 == 0 {
+                            let d = (f.actors[i].pos[0] - q.actors[i].pos[0]).hypot(f.actors[i].pos[1] - q.actors[i].pos[1]);
+                            assert!(d / 0.05 < 13.0, "agent {:#x} moved {d:.2} m in 0.05 s at {t:.2} s of play {} ({text})", f.actors[i].agent, info.play_index);
+                        }
+                    }
+                }
+                prev = Some(f);
+                t += 0.05;
+            }
             // The ball never goes under the turf, at any instant of any play.
             let mut t = 0.0;
             while t <= info.duration_s {

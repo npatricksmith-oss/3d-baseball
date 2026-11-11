@@ -105,7 +105,14 @@ pub fn encode(step: &PitchStep, st: &RulesState) -> Vec<u8> {
             let mut v = vec![(0.0, *at)];
             if let Some(s) = step.viz.actors.iter().find(|(a, s)| a == id && !s.is_empty()).map(|x| &x.1) {
                 v.push(((s[0].0 - 0.02).max(0.0), *at));
-                v.extend(s.iter().copied());
+                // The running model starts the batter at the plate; he actually starts from
+                // his box. Over his first four metres the track eases from one to the other,
+                // so he runs out of the box and does not jump to the plate at contact.
+                let from_box = step.viz.standing.last().map(|b| b.0) == Some(*id);
+                v.extend(s.iter().map(|&(t, p)| {
+                    let w = if from_box { (p.norm() / 4.0).min(1.0) } else { 1.0 };
+                    (t, p + Vec3::new(at.x, at.y, 0.0) * (1.0 - w))
+                }));
             }
             (*id, v)
         })
@@ -129,10 +136,12 @@ pub fn encode(step: &PitchStep, st: &RulesState) -> Vec<u8> {
         let Some((_, track)) = tracks.iter_mut().find(|(id, _)| id == runner) else { continue };
         let (s_lo, s_hi) = (*from as f64 * BASE_L, *to as f64 * BASE_L);
         // Where he already is on the base path (a batter may be past first when the ball
-        // clears the fence): the nearest point of his awarded stretch, if he has run at all.
+        // clears the fence, a runner on a walk is off the base with his lead): the nearest
+        // point of his awarded stretch.
         let here = track.last().unwrap().1;
         let mut s0 = s_lo;
-        if track.len() > 1 {
+        // (A runner who never moved is at his lead, not on the base: start from there too.)
+        {
             let mut best = f64::INFINITY;
             let mut s = s_lo;
             while s <= s_hi {

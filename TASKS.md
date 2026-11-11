@@ -17,7 +17,7 @@ The owner watched the Unreal client and asked for four things; all four are in (
 
 Owner direction: favor what is visible over calibration; get numbers close and move on.
 
-**Check first:** a Codex Sol review of this change set may be at `docs/reviews/2026-11-11-codex-watch-fixes-review.md`; if its Resolution is "Open", handle it.
+The [Codex review of that change set](docs/reviews/2026-11-11-codex-watch-fixes-review.md) is resolved: the catcher returns home when a runner rounds first, a backup can catch an overthrow in the air, runners hold their leads, nobody jumps or runs backward in the timeline, and the batter runs out of his box.
 
 **Next, in the order a viewer would notice:**
 - Throwing, catching, pitching and swinging motion for the figures (they only stand, walk and jog; the bat floats beside the batter).
@@ -26,7 +26,7 @@ Owner direction: favor what is visible over calibration; get numbers close and m
 - Ground balls go for hits too often (.377; infield hits ~16% of grounders) since leads and the faster batter.
 - Still open from reviews: a runner who crosses home before a catch never returns; foul share 24% vs 50%; foul-territory walls.
 
-Numbers (`sim-cli games --n 512 --seed 2`): 4.48 runs/team-game, K 17.4%, BB 7.4%, HR 4.0%; GB .377 / LD .708 / FB .135; routine grounders 91.0%. Build `sim-cli` with `cargo build --release -p bb_cli` on its own.
+Numbers (`sim-cli games --n 512 --seed 2`): 4.32 runs/team-game, K 17.5%, BB 7.4%, HR 3.9%; GB .374 / LD .707 / FB .132; 83 double plays per 40 games. Build `sim-cli` with `cargo build --release -p bb_cli` on its own.
 
 1. [x] **Per-game budget (200 ms): met, ~155–170 ms on one thread** (the laptop's timings swing widely with load; compare builds interleaved, best of several). Two-stage aim solve and seeded scouting builds (−28 ms); batter filter with an analytic Jacobian, direct plate covariance, and aim points from the nominal's depth crossing (−61 ms; `sim-cli pa` 641 → 421 µs per pitch, identical B1 rates); live plays with a 0.1 s agent flight step, the recall reusing the chaser's same-tick prediction, and a single-pass intercept scan using the forward running curve (−51 ms; 512 games unchanged within noise). Breakdown in agent-models §12. Note: run totals differ by seed set (5.6–5.8 runs/team-game between 128- and 512-game samples); compare calibration runs on the same seeds.
 2. [~] **Run environment: 4.29 runs/team-game now** (512 games, seed 2; MLB ≈ 4.5). (a0) is done: replans keep the fielder's speed, the intercept scan tests between its samples, chasers arrive at speed; the "everyone breaks" rule now uses each infielder's own read and has lost its extra 0.6 s condition (no measurable effect). Still open: (a) foul-territory walls and backstop (physics-spec §9.4; foul ground reaches the outfield-fence radius, so overthrows roll ~100 m), which needs the rules engine's thrown-ball-out-of-play award; (b) infield positioning: most remaining through-balls are in the 5–6 hole, the 3–4 hole, and up the middle on the first-base side, and shifting toward the pull side made things worse last time; (c) the contact model makes too many grounders and topped balls (BIP launch-angle quartiles −15/5/25° vs MLB ≈ −2/13/28°).
