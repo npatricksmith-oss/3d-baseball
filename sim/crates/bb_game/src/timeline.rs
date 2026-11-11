@@ -84,14 +84,18 @@ pub fn encode(step: &PitchStep, st: &RulesState) -> Vec<u8> {
     for (id, at) in &step.viz.standing {
         let track = step.viz.actors.iter().find(|(a, s)| a == id && !s.is_empty()).map(|x| &x.1);
         let knots: Vec<tl::RootKnot> = match track {
-            Some(s) => (0..s.len())
+            // Until his recorded movement starts (at contact), he is where he stood: the
+            // batter in his box, not yet on the base path.
+            Some(s) => std::iter::once(tl::RootKnot::new(0.0, &v3f(*at), &v3f(Vec3::ZERO), 0.0))
+                .chain(std::iter::once(tl::RootKnot::new((s[0].0 - 0.02).max(0.0) as f32, &v3f(*at), &v3f(Vec3::ZERO), 0.0)))
+                .chain((0..s.len())
                 .map(|i| {
                     let (a, b) = (i.saturating_sub(1), (i + 1).min(s.len() - 1));
                     let v = if b > a { (s[b].1 - s[a].1) / (s[b].0 - s[a].0).max(1e-6) } else { Vec3::ZERO };
                     let yaw = if v.norm() > 0.5 { bb_math::m::atan2(v.x, v.y) } else { 0.0 };
                     last_t = last_t.max(s[i].0);
                     tl::RootKnot::new(s[i].0 as f32, &v3f(s[i].1), &v3f(v), yaw as f32)
-                })
+                }))
                 .collect(),
             None => vec![tl::RootKnot::new(0.0, &v3f(*at), &v3f(Vec3::ZERO), 0.0)],
         };
@@ -99,6 +103,46 @@ pub fn encode(step: &PitchStep, st: &RulesState) -> Vec<u8> {
         actor_offs.push(tl::ActorTrack::create(&mut fbb, &tl::ActorTrackArgs { agent: *id, root: Some(kv), ..Default::default() }));
     }
     let actors = if actor_offs.is_empty() { None } else { Some(fbb.create_vector(&actor_offs)) };
+
+    // Bat: the executed swing sampled every 5 ms from its start through the follow-through.
+    // With no swing, one sample: the bat held upright at the batter's back shoulder.
+    let quat_from_x = |a: Vec3| {
+        // Shortest rotation taking +X to the unit vector `a` (bat axis = rot · +X).
+        let (c, w) = (Vec3::new(0.0, -a.z, a.y), 1.0 + a.x);
+        let q = if w < 1e-6 { (0.0, 0.0, 1.0, 0.0) } else { (c.x, c.y, c.z, w) };
+        let n = bb_math::m::sqrt(q.0 * q.0 + q.1 * q.1 + q.2 * q.2 + q.3 * q.3);
+        bb_schema::Quatf::new((q.0 / n) as f32, (q.1 / n) as f32, (q.2 / n) as f32, (q.3 / n) as f32)
+    };
+    let bat_samples: Vec<tl::BatSample> = match &rec.swing {
+        Some(sw) => {
+            use bb_physics::contact::BatPose;
+            let (t0, t1) = (sw.t_start(), sw.t_c + 0.12);
+            let n = ((t1 - t0) / 0.005).ceil() as usize;
+            (0..=n)
+                .map(|i| {
+                    let t = t0 + (t1 - t0) * i as f64 / n as f64;
+                    let k = sw.at(t);
+                    tl::BatSample::new(t as f32, &v3f(k.knob), &quat_from_x(k.axis))
+                })
+                .collect()
+        }
+        None => step
+            .viz
+            .standing
+            .last()
+            .map(|(_, at)| {
+                let back = if at.x < 0.0 { -1.0 } else { 1.0 };
+                let axis = Vec3::new(0.15 * back, -0.25, 1.0).normalized();
+                vec![tl::BatSample::new(0.0, &v3f(*at + Vec3::new(0.0, -0.15, 1.25)), &quat_from_x(axis))]
+            })
+            .unwrap_or_default(),
+    };
+    let bat = if bat_samples.is_empty() {
+        None
+    } else {
+        let sv = fbb.create_vector(&bat_samples);
+        Some(tl::BatTrack::create(&mut fbb, &tl::BatTrackArgs { agent: st.batter, model_id: 0, samples: Some(sv) }))
+    };
 
     // Markers.
     let mut mk: Vec<(f64, MarkerKind, Vec3)> = vec![(0.0, MarkerKind::Release, rec.release.r)];
@@ -173,6 +217,7 @@ pub fn encode(step: &PitchStep, st: &RulesState) -> Vec<u8> {
             play_index: step.play,
             duration_s: duration,
             ball: Some(ball),
+            bat,
             actors,
             summary: Some(summary),
             markers: Some(markv),

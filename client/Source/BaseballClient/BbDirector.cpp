@@ -176,6 +176,9 @@ void ABbDirector::BeginPlay()
 	}
 	// The ball is drawn three times its real size so it can be seen from the stands.
 	Ball = Shape(Sphere, FVector::ZeroVector, FVector(0.22), FLinearColor(1.f, 1.f, 0.9f));
+	// The bat: a cylinder stretched between the knob and the tip the sim reports, drawn a
+	// little thicker than real so the swing reads from the stands.
+	Bat = Shape(Cylinder, FVector::ZeroVector, FVector(0.09, 0.09, 0.86), FLinearColor(0.75f, 0.55f, 0.3f));
 
 	Camera = GetWorld()->SpawnActor<ACameraActor>(ToUE(0, -30, 17), FRotator::ZeroRotator);
 	Camera->GetCameraComponent()->SetFieldOfView(60.f);
@@ -276,6 +279,15 @@ void ABbDirector::Tick(float DeltaSeconds)
 		if (Sim->Sample(Current, T, Frame))
 		{
 			Ball->SetActorLocation(ToUE(Frame.ball));
+			Bat->SetActorHiddenInGame(Frame.has_bat == 0);
+			if (Frame.has_bat != 0)
+			{
+				const FVector Knob = ToUE(Frame.bat_knob);
+				const FVector Tip = ToUE(Frame.bat_tip);
+				Bat->SetActorLocation((Knob + Tip) * 0.5);
+				// The cylinder's long axis is its local Z.
+				Bat->SetActorRotation(FRotationMatrix::MakeFromZ(Tip - Knob).Rotator());
+			}
 			for (int32 I = 0; I < MaxActors; ++I)
 			{
 				const bool bShow = I < (int32)Frame.n_actors;

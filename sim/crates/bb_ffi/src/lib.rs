@@ -107,6 +107,10 @@ pub struct BbFrame {
     pub ball: [f32; 3],
     pub n_actors: u32,
     pub actors: [BbActor; BB_MAX_ACTORS],
+    /// 1 if the bat is in someone's hands at this instant (it is dropped after contact).
+    pub has_bat: u32,
+    pub bat_knob: [f32; 3],
+    pub bat_tip: [f32; 3],
 }
 
 /// A play's length, the scoreboard after it, and its headline measurements (SI).
@@ -245,9 +249,26 @@ pub unsafe extern "C" fn bb_timeline_sample(blob: *const u8, len: usize, t: f32,
             frame.n_actors += 1;
         }
     }
+    if let Some(k) = tl.bat().and_then(|b| b.samples()).filter(|k| !k.is_empty()) {
+        let n = k.len();
+        let i = (0..n).take_while(|&i| k.get(i).t() <= t).count().clamp(1, n) - 1;
+        // A swing's track ends with the follow-through; after that the bat is on the ground.
+        if n == 1 || t <= k.get(n - 1).t() + 0.25 {
+            let s = k.get(i);
+            let (q, knob) = (s.rot(), v3(s.knob()));
+            // Bat axis = rot · +X (first column of the rotation matrix).
+            let axis = [1.0 - 2.0 * (q.y() * q.y() + q.z() * q.z()), 2.0 * (q.x() * q.y() + q.w() * q.z()), 2.0 * (q.x() * q.z() - q.w() * q.y())];
+            frame.has_bat = 1;
+            frame.bat_knob = knob;
+            frame.bat_tip = core::array::from_fn(|j| knob[j] + BAT_LENGTH_M * axis[j]);
+        }
+    }
     unsafe { *out = frame };
     1
 }
+
+/// Length of the stock bat (34 in), m: the only bat model so far (timeline `model_id` 0).
+const BAT_LENGTH_M: f32 = 0.8636;
 
 #[cfg(test)]
 mod tests {
@@ -288,7 +309,7 @@ mod tests {
     #[test]
     fn timelines_sample_to_plausible_frames() {
         let g = bb_game_create(5);
-        let (mut plays, mut moved) = (0, 0);
+        let (mut plays, mut moved, mut contacts) = (0, 0, 0);
         let mut seen = std::collections::BTreeMap::new();
         loop {
             let (mut p, mut len) = (std::ptr::null_mut(), 0usize);
@@ -312,6 +333,33 @@ mod tests {
             assert!(f0.ball[1] > 15.0 && f0.ball[1] < 18.5 && f0.ball[2] > 1.0 && f0.ball[2] < 2.5, "release at {:?}", f0.ball);
             assert!(f1.ball[1] < 6.0, "0.35 s after release the ball is at y = {}", f1.ball[1]);
             assert!(f0.n_actors >= 10 && f0.n_actors <= 13, "{} actors", f0.n_actors);
+            // A bat is in the batter's hands as the pitch is thrown: 34 inches long, held
+            // within arm's reach of the plate, off the ground.
+            assert_eq!(f0.has_bat, 1);
+            let bat_len = (0..3).map(|j| (f0.bat_tip[j] - f0.bat_knob[j]).powi(2)).sum::<f32>().sqrt();
+            assert!((bat_len - 0.8636).abs() < 1e-3, "bat length {bat_len}");
+            assert!(f0.bat_knob[0].abs() < 1.6 && f0.bat_knob[1].abs() < 1.6 && f0.bat_knob[2] > 0.3 && f0.bat_knob[2] < 2.0, "knob at {:?}", f0.bat_knob);
+            if info.exit_velocity_mps > 0.0 {
+                // On contact the barrel is where the ball is: some point of the bat is within
+                // a bat-plus-ball radius (7 cm, with slack for 5 ms sampling at 30 m/s) of
+                // the ball at some instant near the plate.
+                let mut best = f32::MAX;
+                let mut t = 0.30;
+                while t < 0.60 {
+                    let mut f = BbFrame::default();
+                    unsafe { bb_timeline_sample(p, len, t, &mut f) };
+                    if f.has_bat == 1 {
+                        for s in 0..=20 {
+                            let u = s as f32 / 20.0;
+                            let d = (0..3).map(|j| (f.bat_knob[j] + u * (f.bat_tip[j] - f.bat_knob[j]) - f.ball[j]).powi(2)).sum::<f32>().sqrt();
+                            best = best.min(d);
+                        }
+                    }
+                    t += 0.001;
+                }
+                assert!(best < 0.25, "bat never came within {best} m of the ball on a batted ball");
+                contacts += 1;
+            }
             let fielders = f0.actors[..f0.n_actors as usize].iter().filter(|a| a.agent & 0x80 != 0).count();
             assert_eq!(fielders, 9);
             for a in &fe.actors[..fe.n_actors as usize] {
@@ -332,6 +380,7 @@ mod tests {
             assert!(seen.contains_key(call), "no {call:?} in {seen:?}");
         }
         assert!(seen.keys().any(|k| k.starts_with("Ground out")) && seen.keys().any(|k| k.starts_with("Single")), "{seen:?}");
+        assert!(contacts > 30);
         assert!(plays > 150 && moved > 20, "{plays} pitches, {moved} with a runner covering 10 m");
         // Bad input is refused, not read.
         let junk = [0u8; 64];

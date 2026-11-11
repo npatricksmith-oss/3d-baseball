@@ -20,7 +20,10 @@ int32_t bb_game_score(const BbGame *g, uint16_t *away, uint16_t *home);
  * rear point of home plate, +Y to center field, +Z up, +X to first base). */
 typedef struct { uint16_t agent; uint16_t _pad; float pos[3]; float yaw; } BbActor;
 #define BB_MAX_ACTORS 16
-typedef struct { float ball[3]; uint32_t n_actors; BbActor actors[BB_MAX_ACTORS]; } BbFrame;
+typedef struct {
+  float ball[3]; uint32_t n_actors; BbActor actors[BB_MAX_ACTORS];
+  uint32_t has_bat; float bat_knob[3]; float bat_tip[3]; /* the bat, while someone holds it */
+} BbFrame;
 #define BB_SUMMARY_LEN 96
 typedef struct {
   uint32_t play_index; float duration_s;

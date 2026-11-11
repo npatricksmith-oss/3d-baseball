@@ -283,6 +283,8 @@ pub struct PitchRecord {
     pub perceived_speed: f64,
     /// Time the pitch crossed the judgment plane, if it did (s after release).
     pub t_plate: Option<f64>,
+    /// The swing as executed, if the batter started one (for the timeline's bat track).
+    pub swing: Option<bb_agents::swing::Swing>,
 }
 
 fn rng(seed: u64, play: u32, agent: u16, purpose: Purpose, sub: u32) -> KeyedRng {
@@ -461,6 +463,7 @@ pub fn simulate_pitch_ctx(mu: &Matchup, sc: &Scouting, count: Count, seed: u64, 
 
     // ---- Swing: planned and executed at commit, then adjusted causally (agent-models §3.6).
     let mut swing_res = SwingResult::NoSwing;
+    let mut swing_done = None;
     let mut resolved_pitch = free.clone();
     let (mut aim_error, mut commit_error) = (None, None);
     let truth_err = |p: Vec3, t: f64| -> Option<Vec3> {
@@ -531,6 +534,7 @@ pub fn simulate_pitch_ctx(mu: &Matchup, sc: &Scouting, count: Count, seed: u64, 
         let res = resolve_flight(&mu.env, free.clone(), Some(&swing), &mu.bat);
         resolved_pitch = res.pitch;
         swing_res = res.swing;
+        swing_done = Some(swing);
         // Any contact is a swing; otherwise a braked swing is judged by its yaw.
         let contact = matches!(swing_res, SwingResult::Contact(_));
         swung = contact || swing.judged_swing();
@@ -590,6 +594,7 @@ pub fn simulate_pitch_ctx(mu: &Matchup, sc: &Scouting, count: Count, seed: u64, 
         release,
         perceived_speed: bank.perceived_speed(sc),
         t_plate,
+        swing: swing_done,
     }
 }
 

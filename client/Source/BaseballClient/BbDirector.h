@@ -66,6 +66,8 @@ private:
 	UPROPERTY()
 	TObjectPtr<AStaticMeshActor> Ball;
 	UPROPERTY()
+	TObjectPtr<AStaticMeshActor> Bat;
+	UPROPERTY()
 	TObjectPtr<ACameraActor> Camera;
 
 	FVector CamLook = FVector::ZeroVector;
