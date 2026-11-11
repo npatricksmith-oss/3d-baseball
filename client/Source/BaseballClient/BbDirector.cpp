@@ -9,6 +9,7 @@
 #include "Components/SkyLightComponent.h"
 #include "Components/StaticMeshComponent.h"
 #include "Engine/DirectionalLight.h"
+#include "Engine/ExponentialHeightFog.h"
 #include "Engine/SkyLight.h"
 #include "Engine/StaticMesh.h"
 #include "Engine/StaticMeshActor.h"
@@ -71,10 +72,22 @@ void ABbDirector::BuildLights()
 	UWorld* W = GetWorld();
 	// The template map may bring its own sky and sun; only add what is missing.
 	TArray<AActor*> Found;
+	// No distance haze: the pitch camera looks down 140 m of field through a long lens.
+	UGameplayStatics::GetAllActorsOfClass(W, AExponentialHeightFog::StaticClass(), Found);
+	for (AActor* A : Found)
+	{
+		A->Destroy();
+	}
+	Found.Reset();
 	UGameplayStatics::GetAllActorsOfClass(W, ADirectionalLight::StaticClass(), Found);
+	// An early-afternoon sun over the third-base side lights both camera angles.
+	for (AActor* A : Found)
+	{
+		A->SetActorRotation(FRotator(-55.f, 100.f, 0.f));
+	}
 	if (Found.Num() == 0)
 	{
-		ADirectionalLight* Sun = W->SpawnActor<ADirectionalLight>(FVector(0, 0, 5000), FRotator(-50.f, 35.f, 0.f));
+		ADirectionalLight* Sun = W->SpawnActor<ADirectionalLight>(FVector(0, 0, 5000), FRotator(-55.f, 100.f, 0.f));
 		Sun->GetLightComponent()->SetMobility(EComponentMobility::Movable);
 		Sun->GetLightComponent()->SetIntensity(6.f);
 		if (UDirectionalLightComponent* D = Cast<UDirectionalLightComponent>(Sun->GetLightComponent()))
@@ -102,14 +115,19 @@ void ABbDirector::BuildLights()
 void ABbDirector::BuildField()
 {
 	// Engine primitives are 100 cm across (the plane is 100 × 100 cm).
-	// Layers from the bottom, each a few centimetres above the last so none of them fight.
-	Shape(Plane, ToUE(0, 60, -0.20), FVector(400, 400, 1), Grass);
+	// Ground layers from the bottom, a centimetre or two apart so none of them fight; they
+	// cast no shadows, so their edges do not show as dark rims.
+	auto Flat = [this](UStaticMesh* Mesh, const FVector& At, const FVector& Scale, const FLinearColor& Color, const FRotator& Rot = FRotator::ZeroRotator)
+	{
+		Shape(Mesh, At, Scale, Color, Rot)->GetStaticMeshComponent()->SetCastShadow(false);
+	};
+	Flat(Plane, ToUE(0, 60, -0.06), FVector(400, 400, 1), Grass);
 	// Infield dirt: a flat disc of the sim's dirt radius (95 ft).
-	Shape(Cylinder, ToUE(0, 0, -0.15), FVector(2 * 95 * FT, 2 * 95 * FT, 0.1), Dirt);
-	// Grass inside the base paths, then the mound and the home-plate circle.
-	Shape(Cube, ToUE(0, BASE * 0.7071, -0.10), FVector(BASE * 0.82, BASE * 0.82, 0.1), Grass, FRotator(0, 45, 0));
-	Shape(Cylinder, ToUE(0, 18.44, -0.05), FVector(5.5, 5.5, 0.15), Dirt);
-	Shape(Cylinder, ToUE(0, 0, -0.06), FVector(8.0, 8.0, 0.1), Dirt);
+	Flat(Cylinder, ToUE(0, 0, -0.045), FVector(2 * 95 * FT, 2 * 95 * FT, 0.02), Dirt);
+	// Grass inside the base paths, then the home-plate circle and the mound.
+	Flat(Cube, ToUE(0, BASE * 0.7071, -0.03), FVector(BASE * 0.82, BASE * 0.82, 0.02), Grass, FRotator(0, 45, 0));
+	Flat(Cylinder, ToUE(0, 0, -0.015), FVector(8.0, 8.0, 0.02), Dirt);
+	Flat(Cylinder, ToUE(0, 18.44, -0.005), FVector(5.5, 5.5, 0.02), Dirt);
 	// Bases and home plate.
 	const double Bx[4] = { 0, BASE * 0.7071, 0, -BASE * 0.7071 };
 	const double By[4] = { 0, BASE * 0.7071, BASE * 1.4142, BASE * 0.7071 };
@@ -180,13 +198,13 @@ void ABbDirector::BeginPlay()
 	// little thicker than real so the swing reads from the stands.
 	Bat = Shape(Cylinder, FVector::ZeroVector, FVector(0.09, 0.09, 0.86), FLinearColor(0.75f, 0.55f, 0.3f));
 
-	Camera = GetWorld()->SpawnActor<ACameraActor>(ToUE(0, -30, 17), FRotator::ZeroRotator);
-	Camera->GetCameraComponent()->SetFieldOfView(60.f);
+	Camera = GetWorld()->SpawnActor<ACameraActor>(ToUE(-9, 136, 16), FRotator::ZeroRotator);
+	Camera->GetCameraComponent()->SetFieldOfView(8.5f);
 	Camera->GetCameraComponent()->bConstrainAspectRatio = false;
 	// Fixed exposure, a little under the default: daylight on flat colors.
 	Camera->GetCameraComponent()->PostProcessSettings.bOverride_AutoExposureBias = true;
 	Camera->GetCameraComponent()->PostProcessSettings.AutoExposureBias = -0.7f;
-	CamLook = ToUE(0, 16, 0);
+	CamLook = ToUE(0, 6, 1.0);
 	if (APlayerController* PC = GetWorld()->GetFirstPlayerController())
 	{
 		PC->SetViewTarget(Camera);
@@ -248,17 +266,26 @@ void ABbDirector::BeginPlayback(FBbPlay&& Play)
 
 void ABbDirector::UpdateCamera(const BbFrame& Frame, float DeltaSeconds)
 {
-	const FVector BallUE = ToUE(Frame.ball);
-	// Once the ball is hit past the mound side of the plate, follow it; otherwise frame the
-	// pitcher-to-plate line from behind home.
-	const bool bFollow = bBallInPlay;
-	const FVector Target = bFollow ? FVector(BallUE.X, BallUE.Y, FMath::Min(BallUE.Z, 1500.0) * 0.5) : ToUE(0, 16, 0);
-	CamLook = FMath::VInterpTo(CamLook, Target, DeltaSeconds, bFollow ? 4.f : 2.f);
-	const FVector Eye = Camera->GetActorLocation();
-	Camera->SetActorRotation((CamLook - Eye).Rotation());
-	const float WantFov = bFollow ? 42.f : 58.f;
+	// Two cameras, cut like a broadcast: the pitch from beyond center field through a long
+	// lens, then the play from high behind home, following the ball.
 	UCameraComponent* C = Camera->GetCameraComponent();
-	C->SetFieldOfView(FMath::FInterpTo(C->FieldOfView, WantFov, DeltaSeconds, 2.f));
+	const bool bFollow = bBallInPlay;
+	if (bFollow != bFollowCam)
+	{
+		bFollowCam = bFollow;
+		const FVector BallNow = ToUE(Frame.ball);
+		Camera->SetActorLocation(bFollow ? ToUE(0, -30, 17) : ToUE(-9, 136, 16));
+		CamLook = bFollow ? FVector(BallNow.X, BallNow.Y, 0.0) : ToUE(0, 6, 1.0);
+		C->SetFieldOfView(bFollow ? 48.f : 8.5f);
+	}
+	if (bFollow)
+	{
+		const FVector BallUE = ToUE(Frame.ball);
+		const FVector Target(BallUE.X, BallUE.Y, FMath::Min(BallUE.Z, 1500.0) * 0.5);
+		CamLook = FMath::VInterpTo(CamLook, Target, DeltaSeconds, 4.f);
+		C->SetFieldOfView(FMath::FInterpTo(C->FieldOfView, 42.f, DeltaSeconds, 2.f));
+	}
+	Camera->SetActorRotation((CamLook - Camera->GetActorLocation()).Rotation());
 }
 
 void ABbDirector::Tick(float DeltaSeconds)

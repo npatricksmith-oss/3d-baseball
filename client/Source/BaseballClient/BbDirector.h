@@ -72,6 +72,7 @@ private:
 
 	FVector CamLook = FVector::ZeroVector;
 	bool bBallInPlay = false;
+	bool bFollowCam = false;
 
 	// Unattended checks.
 	int32 ShotsLeft = 0;

@@ -21,7 +21,7 @@ Build parallelism is capped at 6 actions in `~/.config/Unreal Engine/UnrealBuild
 - `client/`: a C++-only Unreal project. **No binary assets**, so Git LFS is still not needed. The field (grass, infield dirt, mound, bases, foul lines and poles, the outfield wall on the sim's fence curve) is built at start-up from the engine's basic shapes; players are a cylinder and a sphere each, colored by team; the ball is drawn three times its real size.
 - The sim is loaded at run time (`libbb_ffi.so`, `BbSim.cpp`) and runs on a worker thread, one pitch ahead of what is on screen. The client decides nothing about the game.
 - `BbFrame.h` is the only place sim coordinates become Unreal coordinates (`ue = 100 × (y, x, z)`).
-- A camera behind home that follows balls in play, and a text scoreboard (score, inning, outs, count, pitch speed, exit speed and launch angle).
+- A text scoreboard (score, inning, outs, count, pitch speed, exit speed and launch angle).
 - Sim side (`bdd1e43`): timelines carry the realized ball (fielded, held, thrown) and a root track for every fielder, runner and the batter; `bb_timeline_info` and `bb_timeline_sample` let a client play a timeline without a FlatBuffers parser.
 
 ## Running it
@@ -33,11 +33,17 @@ client/run.sh 11 -BbSpeed=2
 
 Unattended: add `-RenderOffscreen -BbShots=6` (screenshots to `client/Saved/Shots`, then quit) or `-RenderOffscreen -BbBenchSeconds=60` (logs a `BB_RESULT` line with frame rate and memory, then quits). The engine is expected at `~/UnrealEngine/5.8.4` (`UE_ROOT` overrides).
 
+## Added after the spike (same day)
+
+- A line of play-by-play for every pitch ("Called strike", "Ground out to short", "Double to right, 1 run scores"), built in the sim (`bb_game::describe`) and shown when the viewer would know it.
+- The bat: the executed swing is in the timeline and the client draws it; the batter stands in his box until contact.
+- Two cameras cut like a broadcast: the pitch from beyond center field through a long lens, the play from high behind home following the ball.
+
 ## Known gaps in v0
 
-- Players do not turn to face anything, swing, or throw: they slide. There is no bat.
+- Players are capsules that slide: no facing, no throwing or catching motion, no pitcher's delivery.
 - Between pitches everyone snaps back to his starting spot; the ball is not returned to the pitcher.
-- The scoreboard shows the state after the current pitch once it ends; there are no names, no runners-on display, no line score.
-- One camera. The ball is hard to see on deep flies.
+- The scoreboard has no names, no runners-on display, no line score.
+- The ball is hard to see on deep flies.
 - The park dimensions are repeated in the client (`BbDirector.cpp`) instead of coming from the sim.
 - The client samples through C structs. The spec's plan (data-formats §6.4) is for the client to read the FlatBuffers timeline directly; the sampler is a deliberate shortcut and the timeline blob is still the only data crossing the boundary.
