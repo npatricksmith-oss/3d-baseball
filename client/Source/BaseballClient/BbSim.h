@@ -4,7 +4,7 @@
 #include "CoreMinimal.h"
 #include "bb_ffi.h"
 
-/** One pitch's timeline blob, owned by the sim library. Move-only. */
+/** One pitch's timeline blob, owned by the sim library: release it exactly once (FBbSim::Release). */
 struct FBbPlay
 {
 	uint8* Blob = nullptr;

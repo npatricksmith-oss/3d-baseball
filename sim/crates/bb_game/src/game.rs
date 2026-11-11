@@ -255,8 +255,12 @@ impl Game {
                 st,
             );
             if record {
-                for (t, p) in out.ball_track.iter().step_by(2) {
-                    viz.batted.push([*t, p.x, p.y, p.z]);
+                // Every other tick, and always the last one (the instant the play ended).
+                let n = out.ball_track.len();
+                for (i, (t, p)) in out.ball_track.iter().enumerate() {
+                    if i % 2 == 0 || i + 1 == n {
+                        viz.batted.push([*t, p.x, p.y, p.z]);
+                    }
                 }
                 viz.actors = out.actors.clone();
             }

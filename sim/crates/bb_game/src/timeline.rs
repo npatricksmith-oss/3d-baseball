@@ -34,19 +34,36 @@ pub fn encode(step: &PitchStep, st: &RulesState) -> Vec<u8> {
             .filter(|k| t_contact.map(|tc| k.t <= tc).unwrap_or(true))
             .map(|k| BallKnot::new(k.t as f32, &v3f(k.s.r), &v3f(k.s.v)))
             .collect();
+        // End the pitch exactly at contact, so the batted ball starts where the pitch stops.
+        let mut knots = knots;
+        if let Some(tc) = t_contact {
+            let (r, v) = step.pitch_flight.at(tc);
+            knots.push(BallKnot::new(tc as f32, &v3f(r), &v3f(v)));
+        }
         let kv = fbb.create_vector(&knots);
         let spin = v3f(rec.release.w);
         segs.push(tl::BallSegment::create(&mut fbb, &tl::BallSegmentArgs { mode: BallMode::Flight, holder: 0, knots: Some(kv), spin_radps: Some(&spin) }));
     }
     let realized = &step.viz.batted;
     if realized.len() >= 2 {
-        // The ball as it actually went: sampled positions, velocities by central difference.
+        // The ball as it actually went: sampled positions. Each knot's velocity is the
+        // smaller of the slopes on its two sides, per axis, and zero where they disagree
+        // (minmod), so the Hermite curve never overshoots a sample: a grounder does not dip
+        // under the turf before a pickup, and a caught ball stops in the glove.
         let n = realized.len();
         let p = |i: usize| Vec3::new(realized[i][1], realized[i][2], realized[i][3]);
+        let slope = |i: usize| (p(i + 1) - p(i)) / (realized[i + 1][0] - realized[i][0]).max(1e-6);
+        let minmod = |a: f64, b: f64| if a * b <= 0.0 { 0.0 } else if a.abs() < b.abs() { a } else { b };
         let knots: Vec<BallKnot> = (0..n)
             .map(|i| {
-                let (a, b) = (i.saturating_sub(1), (i + 1).min(n - 1));
-                let v = (p(b) - p(a)) / (realized[b][0] - realized[a][0]).max(1e-6);
+                let v = if i == 0 {
+                    slope(0)
+                } else if i == n - 1 {
+                    slope(n - 2)
+                } else {
+                    let (a, b) = (slope(i - 1), slope(i));
+                    Vec3::new(minmod(a.x, b.x), minmod(a.y, b.y), minmod(a.z, b.z))
+                };
                 BallKnot::new(realized[i][0] as f32, &v3f(p(i)), &v3f(v))
             })
             .collect();
@@ -78,27 +95,76 @@ pub fn encode(step: &PitchStep, st: &RulesState) -> Vec<u8> {
     let ball = tl::BallTrack::create(&mut fbb, &tl::BallTrackArgs { segments: Some(segv) });
 
     // Actors: a root track for everyone on the field. Those who moved during a live ball
-    // have their sampled track; everyone else stands where he was at the pitch.
+    // have their sampled track, preceded by where they stood until it starts (the batter in
+    // his box until contact); everyone else stands where he was at the pitch.
+    let mut tracks: Vec<(u16, Vec<(f64, Vec3)>)> = step
+        .viz
+        .standing
+        .iter()
+        .map(|(id, at)| {
+            let mut v = vec![(0.0, *at)];
+            if let Some(s) = step.viz.actors.iter().find(|(a, s)| a == id && !s.is_empty()).map(|x| &x.1) {
+                v.push(((s[0].0 - 0.02).max(0.0), *at));
+                v.extend(s.iter().copied());
+            }
+            (*id, v)
+        })
+        .collect();
+    let mut t_end = match realized.last() {
+        Some(k) if realized.len() >= 2 => k[0],
+        _ => step.batted.as_ref().map(|p| p.t_end()).unwrap_or(step.pitch_flight.last().t),
+    };
+    t_end = tracks.iter().filter_map(|(_, v)| v.last().map(|k| k.0)).fold(t_end, f64::max);
+    // Bases awarded with the ball dead (a walk, a hit batter, a home run, a ball out of
+    // play): the runners jog to them after the play. This is presentation only: the rules
+    // have already put them there, and nothing here feeds back into the game.
+    const JOG_MPS: f64 = 6.0;
+    const BASE_L: f64 = 27.432;
+    let t_jog = t_end + 0.4;
+    for e in &step.rules_events {
+        let bb_rules::Event::RunnerAdvanced { runner, from, to, cause } = e else { continue };
+        if *cause == bb_rules::AdvanceCause::OnPlay || to <= from {
+            continue;
+        }
+        let Some((_, track)) = tracks.iter_mut().find(|(id, _)| id == runner) else { continue };
+        let (s_lo, s_hi) = (*from as f64 * BASE_L, *to as f64 * BASE_L);
+        // Where he already is on the base path (a batter may be past first when the ball
+        // clears the fence): the nearest point of his awarded stretch, if he has run at all.
+        let here = track.last().unwrap().1;
+        let mut s0 = s_lo;
+        if track.len() > 1 {
+            let mut best = f64::INFINITY;
+            let mut s = s_lo;
+            while s <= s_hi {
+                let d = (crate::live::path_pos(s) - here).norm();
+                if d < best {
+                    (best, s0) = (d, s);
+                }
+                s += 0.25;
+            }
+        }
+        track.push((t_jog, crate::live::path_pos(s0)));
+        let mut k = 1;
+        loop {
+            let s = (s0 + JOG_MPS * 0.1 * k as f64).min(s_hi);
+            track.push((t_jog + 0.1 * k as f64, crate::live::path_pos(s)));
+            if s >= s_hi {
+                break;
+            }
+            k += 1;
+        }
+        t_end = t_end.max(track.last().unwrap().0);
+    }
     let mut actor_offs = Vec::new();
-    let mut last_t = 0.0f64;
-    for (id, at) in &step.viz.standing {
-        let track = step.viz.actors.iter().find(|(a, s)| a == id && !s.is_empty()).map(|x| &x.1);
-        let knots: Vec<tl::RootKnot> = match track {
-            // Until his recorded movement starts (at contact), he is where he stood: the
-            // batter in his box, not yet on the base path.
-            Some(s) => std::iter::once(tl::RootKnot::new(0.0, &v3f(*at), &v3f(Vec3::ZERO), 0.0))
-                .chain(std::iter::once(tl::RootKnot::new((s[0].0 - 0.02).max(0.0) as f32, &v3f(*at), &v3f(Vec3::ZERO), 0.0)))
-                .chain((0..s.len())
-                .map(|i| {
-                    let (a, b) = (i.saturating_sub(1), (i + 1).min(s.len() - 1));
-                    let v = if b > a { (s[b].1 - s[a].1) / (s[b].0 - s[a].0).max(1e-6) } else { Vec3::ZERO };
-                    let yaw = if v.norm() > 0.5 { bb_math::m::atan2(v.x, v.y) } else { 0.0 };
-                    last_t = last_t.max(s[i].0);
-                    tl::RootKnot::new(s[i].0 as f32, &v3f(s[i].1), &v3f(v), yaw as f32)
-                }))
-                .collect(),
-            None => vec![tl::RootKnot::new(0.0, &v3f(*at), &v3f(Vec3::ZERO), 0.0)],
-        };
+    for (id, s) in &tracks {
+        let knots: Vec<tl::RootKnot> = (0..s.len())
+            .map(|i| {
+                let (a, b) = (i.saturating_sub(1), (i + 1).min(s.len() - 1));
+                let v = if b > a { (s[b].1 - s[a].1) / (s[b].0 - s[a].0).max(1e-6) } else { Vec3::ZERO };
+                let yaw = if v.norm() > 0.5 { bb_math::m::atan2(v.x, v.y) } else { 0.0 };
+                tl::RootKnot::new(s[i].0 as f32, &v3f(s[i].1), &v3f(v), yaw as f32)
+            })
+            .collect();
         let kv = fbb.create_vector(&knots);
         actor_offs.push(tl::ActorTrack::create(&mut fbb, &tl::ActorTrackArgs { agent: *id, root: Some(kv), ..Default::default() }));
     }
@@ -205,10 +271,7 @@ pub fn encode(step: &PitchStep, st: &RulesState) -> Vec<u8> {
             ..Default::default()
         },
     );
-    let duration = match realized.last() {
-        Some(k) if realized.len() >= 2 => k[0].max(last_t),
-        _ => step.batted.as_ref().map(|p| p.t_end()).unwrap_or(step.pitch_flight.last().t),
-    } as f32;
+    let duration = t_end as f32;
     let text = crate::describe::describe(rec.call, rec.batted.map(|b| b.1.to_degrees()), &step.rules_events, &step.facts);
     let summary = fbb.create_string(&text);
     let root = tl::PlayTimeline::create(

@@ -210,7 +210,7 @@ fn visible_target(r: &Runner) -> u8 {
 }
 
 /// Position on the base path at distance `s` from home.
-fn path_pos(s: f64) -> Vec3 {
+pub(crate) fn path_pos(s: f64) -> Vec3 {
     let s = s.clamp(0.0, 4.0 * BASE_L);
     let k = ((s / BASE_L).floor() as u8).min(3);
     let f = (s - k as f64 * BASE_L) / BASE_L;
@@ -1160,10 +1160,12 @@ impl<'a> Sim<'a> {
         calm && in_infield && self.t >= fd.ready_at
     }
 
-    fn record(&mut self) {
+    /// Record the ball every tick and everyone's position every 0.1 s; `last` forces both,
+    /// so the track ends on the instant that ended the play.
+    fn record(&mut self, last: bool) {
         let (b, _) = self.ball_at(self.t);
         self.out.ball_track.push((self.t, b));
-        if ((self.t - self.inp.t_contact) / 0.1).fract() < DT / 0.1 {
+        if last || ((self.t - self.inp.t_contact) / 0.1).fract() < DT / 0.1 {
             for (i, fd) in self.f.iter().enumerate() {
                 self.out.actors[i].1.push((self.t, fd.pos));
             }
@@ -1387,10 +1389,14 @@ fn simulate_live_inner(inp: &LiveInput, st: &mut RulesState) -> LiveOutput {
             }
         }
         if inp.record {
-            sim.record();
+            sim.record(false);
         }
         prof::TICKS.with(|c| c.set(c.get() + 1));
         sim.t += DT;
+    }
+    if inp.record {
+        // The tick that ended the play (the catch, the force, the ball leaving the park).
+        sim.record(true);
     }
     sim.out
 }

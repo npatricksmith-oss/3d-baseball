@@ -145,7 +145,9 @@ impl Default for BbPlayInfo {
 }
 
 fn timeline<'a>(blob: *const u8, len: usize) -> Option<bb_schema::tl::PlayTimeline<'a>> {
-    if blob.is_null() {
+    // Too short to hold a FlatBuffers header and identifier: not a timeline (and the
+    // identifier check below would panic on it).
+    if blob.is_null() || len < 8 {
         return None;
     }
     let bytes = unsafe { std::slice::from_raw_parts(blob, len) };
@@ -309,7 +311,7 @@ mod tests {
     #[test]
     fn timelines_sample_to_plausible_frames() {
         let g = bb_game_create(5);
-        let (mut plays, mut moved, mut contacts) = (0, 0, 0);
+        let (mut plays, mut moved, mut contacts, mut awards) = (0, 0, 0, 0);
         let mut seen = std::collections::BTreeMap::new();
         loop {
             let (mut p, mut len) = (std::ptr::null_mut(), 0usize);
@@ -362,6 +364,21 @@ mod tests {
             }
             let fielders = f0.actors[..f0.n_actors as usize].iter().filter(|a| a.agent & 0x80 != 0).count();
             assert_eq!(fielders, 9);
+            // The ball never goes under the turf, at any instant of any play.
+            let mut t = 0.0;
+            while t <= info.duration_s {
+                let mut f = BbFrame::default();
+                unsafe { bb_timeline_sample(p, len, t, &mut f) };
+                assert!(f.ball[2] > -0.005, "ball at height {} m, {t} s into play {}", f.ball[2], info.play_index);
+                t += 0.004;
+            }
+            // Whoever is credited with a walk or a home run ends the clip on his base.
+            if text.starts_with("Walk") || text.starts_with("Home run") {
+                let batter = fe.actors[..fe.n_actors as usize].iter().filter(|a| a.agent & 0x80 == 0).map(|a| (a.pos[0].hypot(a.pos[1]), a.pos)).collect::<Vec<_>>();
+                let want: [f32; 2] = if text.starts_with("Walk") { [19.4, 19.4] } else { [0.0, 0.0] };
+                assert!(batter.iter().any(|(_, p)| (p[0] - want[0]).hypot(p[1] - want[1]) < 0.3), "{text}: nobody ends at {want:?}: {batter:?}");
+                awards += 1;
+            }
             for a in &fe.actors[..fe.n_actors as usize] {
                 assert!(a.pos.iter().all(|x| x.is_finite()) && a.pos[0].hypot(a.pos[1]) < 140.0);
             }
@@ -380,13 +397,16 @@ mod tests {
             assert!(seen.contains_key(call), "no {call:?} in {seen:?}");
         }
         assert!(seen.keys().any(|k| k.starts_with("Ground out")) && seen.keys().any(|k| k.starts_with("Single")), "{seen:?}");
-        assert!(contacts > 30);
+        assert!(contacts > 30 && awards > 3, "{contacts} batted balls, {awards} walks and home runs");
         assert!(plays > 150 && moved > 20, "{plays} pitches, {moved} with a runner covering 10 m");
         // Bad input is refused, not read.
         let junk = [0u8; 64];
         let mut f = BbFrame::default();
         assert_eq!(unsafe { bb_timeline_sample(junk.as_ptr(), junk.len(), 0.0, &mut f) }, -1);
         assert_eq!(unsafe { bb_timeline_sample(std::ptr::null(), 0, 0.0, &mut f) }, -1);
+        assert_eq!(unsafe { bb_timeline_sample(junk.as_ptr(), 7, 0.0, &mut f) }, -1);
+        let mut info = BbPlayInfo::default();
+        assert_eq!(unsafe { bb_timeline_info(junk.as_ptr(), 7, &mut info) }, -1);
         unsafe { bb_game_free(g) };
     }
 }

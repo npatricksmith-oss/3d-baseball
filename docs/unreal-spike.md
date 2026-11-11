@@ -1,6 +1,6 @@
 # Unreal spike (M0.8) and client v0: result, 2026-11-11
 
-**Result: the spike passes on the owner's machine.** Unreal Engine 5.8.4 (Epic's precompiled Linux build) runs on Fedora with 14 GiB of RAM and the Radeon RX 6700S, loads the Rust sim through the C ABI, and plays full AI-vs-AI games with capsule players. D6 (Unreal as the presentation engine) is confirmed against the PLAN §3.3 criteria; what remains for M0.9 is the owner looking at it.
+**Result: every check that could be run unattended passes.** Unreal Engine 5.8.4 (Epic's precompiled Linux build) runs on Fedora with 14 GiB of RAM and the Radeon RX 6700S, loads the Rust sim through the C ABI, and plays full AI-vs-AI games with capsule players, rendered offscreen. Two parts of the PLAN §3.3 gate are still open and need someone at the machine: opening the editor's window and playing in it, and the owner's judgment of how it looks (M0.9). D6 (Unreal as the presentation engine) should be confirmed after that.
 
 ![Pitch view](img/client-v0-pitch.jpg)
 ![Ball in play](img/client-v0-play.jpg)

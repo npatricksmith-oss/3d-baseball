@@ -32,7 +32,8 @@ typedef struct {
   char summary[BB_SUMMARY_LEN]; /* the play in words, NUL-terminated */
 } BbPlayInfo;
 /* Agent ids: high byte = team (0 away, 1 home); bit 0x80 = fielder, low 7 bits = position 1-9. */
-/* Summary of a timeline blob: 1 = ok, -1 = bad args or not a timeline. */
+/* blob/len must be a readable allocation of that length (normally one from bb_game_advance).
+ * Summary of a timeline blob: 1 = ok, -1 = bad args or not a timeline. */
 int32_t bb_timeline_info(const uint8_t *blob, size_t len, BbPlayInfo *out);
 /* Ball and actors at play time t (s from release, clamped): 1 = ok, -1 = bad args. */
 int32_t bb_timeline_sample(const uint8_t *blob, size_t len, float t, BbFrame *out);

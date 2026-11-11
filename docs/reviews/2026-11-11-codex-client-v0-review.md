@@ -72,4 +72,15 @@ The three sim-side fixes I would prioritize for watchability are **F2** (show th
 
 ## Resolution
 
-Open.
+Resolved 2026-11-11. All six findings fixed. `cargo test --workspace --release` passes; the FFI test now walks a whole game through the C sampler.
+
+| # | Status | What changed |
+|---|---|---|
+| F1 | Fixed | Blobs shorter than 8 bytes are refused before the identifier check; the header says the caller must pass a readable allocation. Tested with a 7-byte buffer on both calls |
+| F2 | Fixed | The live loop records the ball and every actor on the tick that ends the play, and the every-other-tick thinning always keeps the last sample. The clip now ends on the catch, the force, or the ball leaving the park |
+| F3 | Fixed | Runners awarded bases with the ball dead (walk, hit batter, home run, ball out of play) jog to them at 6 m/s after the play, from wherever they already were on the base path; the clip is extended to cover it. It is built in the timeline encoder from the rules events and feeds nothing back. Test: on every walk and home run of a game, someone ends the clip on first base or home |
+| F4 | Fixed (in `9ccbd4c`, before this review landed) | The batter stands at his swing's pivot until his recorded movement starts at contact. He still covers the ~1 m from the box to the plate in two hundredths of a second: the runner model starts everyone on the base path |
+| F5 | Fixed | Realized-ball knot velocities are the smaller of the two neighboring slopes per axis, zero where they disagree, so the Hermite curve cannot overshoot a sample. The pitch segment now ends with an exact contact knot. Test: sampled every 4 ms, the ball is never below the turf in any play of a game |
+| F6 | Fixed | The spike report now says the unattended checks pass and that the editor window and the owner's look are still open; it no longer calls D6 confirmed |
+
+Noted, not changed: `GameResult.viz` keeps every play's samples for the life of a game (about 2 MB per game), which a streaming client does not need. NaN play times sample the first knot.
