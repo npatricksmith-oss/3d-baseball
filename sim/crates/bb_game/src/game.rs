@@ -98,6 +98,9 @@ pub struct PlayViz {
     pub batted: Vec<[f64; 4]>,
     /// Fielder and runner positions (agent id, samples) during a live ball.
     pub actors: Vec<(u16, Vec<(f64, bb_math::Vec3)>)>,
+    /// Where everyone stands as the pitch is thrown: nine fielders, runners on their bases,
+    /// the batter in his box.
+    pub standing: Vec<(u16, bb_math::Vec3)>,
 }
 
 /// Everything one pitch produced, for timelines and visualization.
@@ -194,6 +197,14 @@ impl Game {
         self.res.pitches += 1;
         let mut viz = PlayViz { play, ..Default::default() };
         let pitch_flight = bb_world::pitch::pitch_flight(&mu.env, rec.release);
+        if record {
+            let fside = 1 - side as u16;
+            let home = crate::play::home_positions();
+            viz.standing.extend((0..9).map(|i| ((fside << 8) | 0x80 | (i as u16 + 1), home[i])));
+            viz.standing.extend(st.bases.iter().enumerate().filter_map(|(i, r)| r.map(|id| (id, crate::play::base_pos(i as u8 + 1)))));
+            let box_side = if mu.batter.bats == bb_observe::Hand::Right { -1.0 } else { 1.0 };
+            viz.standing.push((st.batter, bb_math::Vec3::new(0.75 * box_side, 0.2, 0.0)));
+        }
         if record {
             let t_end = rec.contact_state.map(|c| c.0).unwrap_or(pitch_flight.last().t);
             let mut t = 0.0;

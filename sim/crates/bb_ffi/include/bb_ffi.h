@@ -16,6 +16,21 @@ BbGame *bb_game_create(uint64_t seed);
 int32_t bb_game_advance(BbGame *g, uint8_t **out_blob, size_t *out_len);
 /* Score: returns 1 if final, 0 if in progress, -1 on bad args. */
 int32_t bb_game_score(const BbGame *g, uint16_t *away, uint16_t *home);
+/* Sampling a timeline without parsing it (positions in the sim frame, metres: origin at the
+ * rear point of home plate, +Y to center field, +Z up, +X to first base). */
+typedef struct { uint16_t agent; uint16_t _pad; float pos[3]; float yaw; } BbActor;
+#define BB_MAX_ACTORS 16
+typedef struct { float ball[3]; uint32_t n_actors; BbActor actors[BB_MAX_ACTORS]; } BbFrame;
+typedef struct {
+  uint32_t play_index; float duration_s;
+  uint8_t inning, top, outs, balls, strikes, away_runs, home_runs, _pad;
+  float release_speed_mps, exit_velocity_mps, launch_angle_rad;
+} BbPlayInfo;
+/* Agent ids: high byte = team (0 away, 1 home); bit 0x80 = fielder, low 7 bits = position 1-9. */
+/* Summary of a timeline blob: 1 = ok, -1 = bad args or not a timeline. */
+int32_t bb_timeline_info(const uint8_t *blob, size_t len, BbPlayInfo *out);
+/* Ball and actors at play time t (s from release, clamped): 1 = ok, -1 = bad args. */
+int32_t bb_timeline_sample(const uint8_t *blob, size_t len, float t, BbFrame *out);
 /* Release a blob returned by bb_game_advance. */
 void bb_blob_free(uint8_t *blob, size_t len);
 void bb_game_free(BbGame *g);

@@ -1,6 +1,10 @@
 //! PlayTimeline encoding (data-formats §5): what a client needs to play back one pitch.
-//! M4 skeleton: ball track (Hermite knots), markers, telemetry, and the view state after
-//! the play. Bat, actor, and belief tracks come with the full fielding model.
+//! M4 skeleton: ball track (Hermite knots), actor root tracks, markers, telemetry, and the
+//! view state after the play. Bat and belief tracks come later.
+//!
+//! When the game records visualization data (`Game::new(seed, true)`), the ball track after
+//! contact is the **realized** ball (fielded, held, thrown) and every fielder and runner has a
+//! root track. Without it, only the batted ball's free path is known and there are no actors.
 
 use bb_math::Vec3;
 use bb_physics::ground::Segment;
@@ -34,7 +38,21 @@ pub fn encode(step: &PitchStep, st: &RulesState) -> Vec<u8> {
         let spin = v3f(rec.release.w);
         segs.push(tl::BallSegment::create(&mut fbb, &tl::BallSegmentArgs { mode: BallMode::Flight, holder: 0, knots: Some(kv), spin_radps: Some(&spin) }));
     }
-    if let Some(path) = &step.batted {
+    let realized = &step.viz.batted;
+    if realized.len() >= 2 {
+        // The ball as it actually went: sampled positions, velocities by central difference.
+        let n = realized.len();
+        let p = |i: usize| Vec3::new(realized[i][1], realized[i][2], realized[i][3]);
+        let knots: Vec<BallKnot> = (0..n)
+            .map(|i| {
+                let (a, b) = (i.saturating_sub(1), (i + 1).min(n - 1));
+                let v = (p(b) - p(a)) / (realized[b][0] - realized[a][0]).max(1e-6);
+                BallKnot::new(realized[i][0] as f32, &v3f(p(i)), &v3f(v))
+            })
+            .collect();
+        let kv = fbb.create_vector(&knots);
+        segs.push(tl::BallSegment::create(&mut fbb, &tl::BallSegmentArgs { mode: BallMode::Flight, holder: 0, knots: Some(kv), spin_radps: None }));
+    } else if let Some(path) = &step.batted {
         for seg in &path.segments {
             let (mode, knots, spin): (BallMode, Vec<BallKnot>, Vec3) = match seg {
                 Segment::Flight { tr, .. } => (BallMode::Flight, tr.knots.iter().map(|k| BallKnot::new(k.t as f32, &v3f(k.s.r), &v3f(k.s.v))).collect(), tr.first().s.w),
@@ -58,6 +76,29 @@ pub fn encode(step: &PitchStep, st: &RulesState) -> Vec<u8> {
     }
     let segv = fbb.create_vector(&segs);
     let ball = tl::BallTrack::create(&mut fbb, &tl::BallTrackArgs { segments: Some(segv) });
+
+    // Actors: a root track for everyone on the field. Those who moved during a live ball
+    // have their sampled track; everyone else stands where he was at the pitch.
+    let mut actor_offs = Vec::new();
+    let mut last_t = 0.0f64;
+    for (id, at) in &step.viz.standing {
+        let track = step.viz.actors.iter().find(|(a, s)| a == id && !s.is_empty()).map(|x| &x.1);
+        let knots: Vec<tl::RootKnot> = match track {
+            Some(s) => (0..s.len())
+                .map(|i| {
+                    let (a, b) = (i.saturating_sub(1), (i + 1).min(s.len() - 1));
+                    let v = if b > a { (s[b].1 - s[a].1) / (s[b].0 - s[a].0).max(1e-6) } else { Vec3::ZERO };
+                    let yaw = if v.norm() > 0.5 { bb_math::m::atan2(v.x, v.y) } else { 0.0 };
+                    last_t = last_t.max(s[i].0);
+                    tl::RootKnot::new(s[i].0 as f32, &v3f(s[i].1), &v3f(v), yaw as f32)
+                })
+                .collect(),
+            None => vec![tl::RootKnot::new(0.0, &v3f(*at), &v3f(Vec3::ZERO), 0.0)],
+        };
+        let kv = fbb.create_vector(&knots);
+        actor_offs.push(tl::ActorTrack::create(&mut fbb, &tl::ActorTrackArgs { agent: *id, root: Some(kv), ..Default::default() }));
+    }
+    let actors = if actor_offs.is_empty() { None } else { Some(fbb.create_vector(&actor_offs)) };
 
     // Markers.
     let mut mk: Vec<(f64, MarkerKind, Vec3)> = vec![(0.0, MarkerKind::Release, rec.release.r)];
@@ -120,13 +161,17 @@ pub fn encode(step: &PitchStep, st: &RulesState) -> Vec<u8> {
             ..Default::default()
         },
     );
-    let duration = step.batted.as_ref().map(|p| p.t_end()).unwrap_or(step.pitch_flight.last().t) as f32;
+    let duration = match realized.last() {
+        Some(k) if realized.len() >= 2 => k[0].max(last_t),
+        _ => step.batted.as_ref().map(|p| p.t_end()).unwrap_or(step.pitch_flight.last().t),
+    } as f32;
     let root = tl::PlayTimeline::create(
         &mut fbb,
         &tl::PlayTimelineArgs {
             play_index: step.play,
             duration_s: duration,
             ball: Some(ball),
+            actors,
             markers: Some(markv),
             telemetry: Some(telem),
             view_after: Some(view),

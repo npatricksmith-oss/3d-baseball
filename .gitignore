@@ -23,3 +23,6 @@ __pycache__/
 /client/DerivedDataCache/
 /client/Plugins/*/Binaries/
 /client/Plugins/*/Intermediate/
+
+# Engine downloads never go in the repository
+*.zip
