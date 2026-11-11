@@ -48,7 +48,7 @@ pub fn pa(a: PaArgs) {
     rep.print();
     // MLB reference: Statcast attack zones, league shares and swing rates, approximate.
     let total: u32 = miss.iter().map(|x| x.0).sum();
-    println!("out-of-zone pitches by miss distance: share of them, swing rate (MLB ≈)");
+    println!("out-of-zone pitches by miss distance: share of them, swing rate (MLB estimates in brackets, unverified)");
     for (k, (name, share, swing)) in [("shadow  0–8.5 cm", 40.0, 43.0), ("chase 8.5–25.5 cm", 41.0, 23.5), ("waste   > 25.5 cm", 19.0, 5.5)].iter().enumerate() {
         println!("  {name}  share {:4.1}% ({share:.0})  swing {:4.1}% ({swing})", 100.0 * miss[k].0 as f64 / total.max(1) as f64, 100.0 * miss[k].1 as f64 / miss[k].0.max(1) as f64);
     }

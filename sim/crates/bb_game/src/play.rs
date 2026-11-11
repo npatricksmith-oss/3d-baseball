@@ -45,20 +45,21 @@ pub struct FielderAttrs {
 
 impl FielderAttrs {
     pub fn average(pos: usize) -> Self {
-        let outfield = pos >= 7;
+        // `pos` is the zero-based index used everywhere (P0 C1 1B2 2B3 3B4 SS5 LF6 CF7 RF8).
+        let outfield = pos >= 6;
         Self {
             // Outfielders chase a fly while tracking it, a little under sprint speed [E].
-            speed: if outfield { 8.0 } else { 7.9 },
+            speed: if outfield { 8.2 } else { 7.9 },
             // Infielders start from an athletic ready position: a quicker first step [E].
             tau_a: if outfield { 1.0 } else { 0.7 },
             // An outfielder needs longer to read a ball off the bat before his first step [E].
-            reaction: if outfield { 0.40 } else { 0.25 },
+            reaction: if outfield { 0.35 } else { 0.25 },
             hands: 0.018,
             arm: if outfield { 39.0 } else { 36.0 },
             arm_sigma: 1.2f64.to_radians(),
             transfer: if outfield { 0.85 } else { 0.65 },
             tau_read: 0.6,
-            read_sigma0: if outfield { 3.0 } else { 0.3 },
+            read_sigma0: if outfield { 2.5 } else { 0.3 },
         }
     }
 }
@@ -550,4 +551,21 @@ pub fn simulate_play(inp: &PlayInput) -> PlayOutput {
 fn finish(mut facts: Vec<(f64, Input)>, path: BallPath) -> PlayOutput {
     facts.sort_by(|a, b| a.0.total_cmp(&b.0));
     PlayOutput { facts: facts.into_iter().map(|f| f.1).collect(), path }
+}
+
+#[cfg(test)]
+mod attr_tests {
+    use super::*;
+
+    // Fielding review #1: positions are indexed from zero (P0 … LF6 CF7 RF8); all three
+    // outfielders share the outfield values and no infielder has them.
+    #[test]
+    fn all_three_outfielders_get_outfield_values() {
+        let cf = FielderAttrs::average(7);
+        assert_eq!(FielderAttrs::average(6), cf);
+        assert_eq!(FielderAttrs::average(8), cf);
+        for i in 0..6 {
+            assert_ne!(FielderAttrs::average(i).read_sigma0, cf.read_sigma0, "position index {i}");
+        }
+    }
 }

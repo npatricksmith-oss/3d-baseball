@@ -537,7 +537,7 @@ Defaults for an MLB-like population. **All values [E]** unless marked; `calibrat
 | `Speed` | v_max (sprint speed) | m/s | 8.23 (27 ft/s) [S: Statcast average] | σ 0.46 | 9.61 | 6.85 |
 | `Acceleration` | τ_a | s | 1.00 | ρ 1.08 | 0.79 | 1.26 |
 | `Agility` | a_lat | m/s² | 7.0 | σ 0.8 | 9.4 | 4.6 |
-| `Reaction` | T_r | s | 0.25 (infield); 0.40 (outfield, interim) | ρ 1.12 | 0.18 | 0.35 |
+| `Reaction` | T_r | s | 0.25 (infield); 0.35 (outfield, interim) | ρ 1.12 | 0.18 | 0.35 |
 | `Hands` | σ_hands | cm | 1.8 | ρ 1.2 | 1.04 | 3.1 |
 | `ArmStrength` | max throw speed | m/s | 37.0 (83 mph) | σ 2.2 | 43.6 | 30.4 |
 | `ArmAccuracy` | throw direction σ | deg | 1.2 | ρ 1.2 | 0.69 | 2.07 |
@@ -551,7 +551,7 @@ Defaults for an MLB-like population. **All values [E]** unless marked; `calibrat
 | `BaserunningIQ` | σ_BRIQ | s | 0.15 | ρ 1.2 | 0.087 | 0.26 |
 | `FieldingIQ` | σ_FIQ | s | 0.12 | ρ 1.2 | 0.069 | 0.21 |
 
-Interim outfielder values (owner accepted 2026-11-11, `FielderAttrs::average`; docs/calibration/2026-11-11-fielding-planner.md): reaction 0.40 s, top speed while chasing 8.0 m/s, initial read error 3.0 m at 30 m. They were fitted to line-drive and fly-ball hit rates and stand in for the atlas perception of §5.1 until it is built; the grade-20 and grade-80 columns above are for the infield value.
+Interim outfielder values (owner accepted 2026-11-11, `FielderAttrs::average`; docs/calibration/2026-11-11-fielding-planner.md): reaction 0.35 s, top speed while chasing 8.2 m/s, initial read error 2.5 m at 30 m (re-fitted after the left-field index fix; the owner had accepted 0.40 / 8.0 / 3.0). They were fitted to line-drive and fly-ball hit rates and stand in for the atlas perception of §5.1 until it is built; the grade-20 and grade-80 columns above are for the infield value.
 | `PitchCraft` | w | 0–1 | 0.5 | σ 0.15 | 0.95 | 0.05 |
 | `Composure` | C | 0–1 | 0.5 | σ 0.15 | 0.95 | 0.05 |
 | `Adaptation` | η | per pitch seen | 0.15 | σ 0.04 | 0.27 | 0.03 |

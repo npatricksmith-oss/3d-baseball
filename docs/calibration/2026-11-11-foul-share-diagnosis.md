@@ -1,6 +1,6 @@
 # Foul share of contact: diagnosis, 2026-11-11
 
-Target B1.15: about 50% of contact goes foul (envelope 40–60%). The sim gives 21%. The owner asked for this to be fixed in the contact model ahead of the chase rate ([chase diagnosis](2026-11-11-chase-diagnosis.md)). **It is not fixed.** No noise scale reaches the band, so the gap is structural, in the swing or contact geometry, and needs a decision on where to look. No calibration values changed.
+Target B1.15: about 50% of contact goes foul (envelope 40–60%). The sim gives 21%. The owner asked for this to be fixed in the contact model ahead of the chase rate ([chase diagnosis](2026-11-11-chase-diagnosis.md)). **It is not fixed.** None of the noise settings swept here gets past about 30%, which points at the swing or contact geometry, though the sweeps do not prove a ceiling. No calibration values changed.
 
 Runs: `cargo run --release -p bb_game --example foul_diag -- 3000 [timing σ ms] [bat-control σ cm] [K_perception]` (average RHP vs average RHB, seed 1, otherwise `Knobs::calibrated_m3()`), and `sim-cli cage-map --type FF` with a wider timing axis.
 
@@ -40,9 +40,16 @@ From the cage map (four-seam, middle-middle, perfect perception, only the listed
 - Undercutting shifts the ball to the opposite field (+30° of spray at −5 cm), which is where the sim's fouls come from. Overcutting shifts it to the pull side by less.
 - A ball clipped 5 cm under still leaves forward (56° launch, 83 mph): the ball grips the bat, so glancing contact is a pop-up, not a foul back. Backward fouls need 6–7 cm of offset, the last centimetre before a miss.
 
+## 3a. Corrections from the Codex fielding review (#6)
+
+- The timing window above is the slice at zero height error. The contact boundary depends strongly on height: 5 cm under and 35 ms early still makes fair contact, 5 cm over and 35 ms late makes contact at +119° of spray.
+- The collision model already slides at steep angles: stick at −5 cm, slide at −7 cm (backward, spray 157°). What needs checking is where that transition falls, not whether sliding exists.
+- The bat is already tilted about 20° below horizontal at contact in the on-time case.
+- Early and late contact at the edge of the window is on the bat's rounded end cap. Where on the bat contact happens is a cheap thing to measure next.
+
 ## 4. What this means
 
-If the collision model and the swing kinematics are both right, MLB's 50% is not reachable, so one of them is missing something. Candidates, none verified:
+Something in the collision model or the swing kinematics is likely missing. Candidates, none verified and none shown to be the most likely (read 1 and 2 with the corrections above):
 
 1. **Glancing contact.** The impulse model keeps the ball gripping the bat at steep contact angles. If real glancing contact slides, more of it goes backward. This is Tier A physics (physics-spec §8.1, research items R2–R3: the sim's spin at a 2 cm undercut already looked high). It needs published oblique-collision data, not tuning.
 2. **Bat angle at contact.** A real bat points down from the hands (about 30° at contact for a low pitch). With a tilted bat, a vertical miss throws the ball sideways as well as up or down, which makes fouls out of vertical error on well-timed swings. The swing template's handling of this should be checked against the map's weak overcut-to-pull shift.

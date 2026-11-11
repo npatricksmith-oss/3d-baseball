@@ -226,6 +226,21 @@ fn run_dist_from(t: f64, v0: f64, v_max: f64, tau: f64) -> f64 {
     if t <= 0.0 { 0.0 } else { v_max * t - (v_max - v0) * tau * (1.0 - m::exp(-t / tau)) }
 }
 
+/// Time to cover distance `d` when already moving at `v0`: the inverse of [`run_dist_from`]
+/// (which is increasing in t), by bisection.
+fn run_time_from(d: f64, v0: f64, v_max: f64, tau: f64) -> f64 {
+    if d <= 0.0 {
+        return 0.0;
+    }
+    // From rest the run takes at most d / v_max + τ; any starting speed only shortens it.
+    let (mut lo, mut hi) = (0.0, d / v_max + tau);
+    for _ in 0..50 {
+        let mid = 0.5 * (lo + hi);
+        if run_dist_from(mid, v0, v_max, tau) < d { lo = mid } else { hi = mid }
+    }
+    0.5 * (lo + hi)
+}
+
 /// A fielder's position and speed after the movement step of the tick at time `t`: toward
 /// his target, accelerating to top speed and braking to stop on it. Not yet reacting, or on
 /// the ground after a dive: unchanged.
@@ -240,9 +255,12 @@ fn fielder_step(fd: &Fielder, t: f64, t_contact: f64) -> (Vec3, f64) {
     // speed, so he slows for the spot only if he will be there before the ball.
     let early = fd.role != Role::Chase || !fd.t_int.is_finite() || t + d / fd.speed.max(0.5) + 0.1 < fd.t_int;
     let speed = if d > brake + 0.05 || !early { fd.speed + (fd.a.speed - fd.speed) * (DT / fd.a.tau_a) } else { (fd.speed - 6.0 * DT).max(0.0) };
-    let stepd = (speed * DT).min(d);
-    let pos = if d > 1e-6 { fd.pos + to * (stepd / d) } else { fd.pos };
-    (pos, speed)
+    // Reaching the target ends the run: a fielder standing on his spot has no speed to carry
+    // into the next plan.
+    if speed * DT >= d {
+        return (Vec3::new(fd.target.x, fd.target.y, fd.pos.z), 0.0);
+    }
+    (fd.pos + to * (speed * DT / d), speed)
 }
 
 struct Sim<'a> {
@@ -406,7 +424,7 @@ impl<'a> Sim<'a> {
         let start = self.t.max(self.inp.t_contact + fd.a.reaction);
         let (rest, _) = pred.at(t_end);
         let d = m::hypot(rest.x - fd.pos.x, rest.y - fd.pos.y);
-        (t_end.max(start + run_time(d, fd.a.speed, fd.a.tau_a)), Vec3::new(rest.x, rest.y, 0.0))
+        (t_end.max(start + run_time_from(d, fd.speed, fd.a.speed, fd.a.tau_a)), Vec3::new(rest.x, rest.y, 0.0))
     }
 
     /// One scan of the predicted path for the earliest point the fielder can reach standing,
@@ -418,42 +436,52 @@ impl<'a> Sim<'a> {
         let t_end = pred.t_end();
         let start = self.t.max(self.inp.t_contact + fd.a.reaction);
         let mut dive = None;
+        // Shortfall at time `t` for a ball at `b`: how far short of the ball's line the
+        // fielder still is (≤ 0: he can field it standing, with the planning reach).
+        let gap = |t: f64, b: Vec3| {
+            let d = m::hypot(b.x - fd.pos.x, b.y - fd.pos.y);
+            d - REACH * 0.7 - if t >= start { run_dist_from(t - start, fd.speed, fd.a.speed, fd.a.tau_a) } else { 0.0 }
+        };
+        // The dive's extra reach over the standing plan.
+        let dive_extra = REACH + 0.6 * DIVE - REACH * 0.7;
+        const STEP: f64 = 0.12;
+        const SUB: u32 = 6;
         let mut t = self.t + 0.05;
-        // The previous sample: between samples a hard grounder travels several metres, more
-        // than a fielder's reach, so each step also tests the point of the ball's straight
-        // path between the two samples that passes closest to the fielder.
-        let mut prev: Option<(f64, Vec3)> = None;
+        let mut prev: Option<(f64, Vec3, f64)> = None;
         while t <= t_end {
             let (b, _) = pred.at(t);
-            let mut pts = [None, Some((t, b))];
-            if let Some((tp, bp)) = prev {
-                let (sx, sy) = (b.x - bp.x, b.y - bp.y);
-                let l2 = sx * sx + sy * sy;
-                if l2 > 1e-9 {
-                    let u = ((fd.pos.x - bp.x) * sx + (fd.pos.y - bp.y) * sy) / l2;
-                    if u > 0.0 && u < 1.0 {
-                        pts[0] = Some((tp + u * (t - tp), bp + (b - bp) * u));
+            let g = gap(t, b);
+            // Between two samples a hard grounder travels several metres, more than a
+            // fielder's reach. The shortfall cannot fall faster than the ball moves plus the
+            // fielder runs, so an interval is searched at a finer step (on the predicted path
+            // itself) only when the shortfall at its start is within that bound.
+            let mut pts: Vec<(f64, Vec3, f64)> = Vec::new();
+            if let Some((tp, bp, gp)) = prev {
+                let travel = m::hypot(b.x - bp.x, b.y - bp.y) + fd.a.speed * (t - tp);
+                if gp - dive_extra <= travel {
+                    for k in 1..SUB {
+                        let ts = tp + (t - tp) * k as f64 / SUB as f64;
+                        let (bs, _) = pred.at(ts);
+                        pts.push((ts, bs, gap(ts, bs)));
                     }
                 }
             }
-            prev = Some((t, b));
-            for (t, b) in pts.into_iter().flatten() {
-                if b.z > CATCH_MAX_Z {
+            pts.push((t, b, g));
+            prev = Some((t, b, g));
+            for (t, b, g) in pts {
+                if b.z > CATCH_MAX_Z || t < start {
                     continue;
                 }
-                let d = m::hypot(b.x - fd.pos.x, b.y - fd.pos.y);
-                let covered = run_dist_from(t - start, fd.speed, fd.a.speed, fd.a.tau_a);
-                let can = |reach: f64| t >= start && (d - reach <= 0.0 || covered >= d - reach);
                 // Head for the ball's line itself, not the edge of reach.
                 let here = Some((t, Vec3::new(b.x, b.y, 0.0)));
-                if can(REACH * 0.7) {
+                if g <= 0.0 {
                     return (here, dive);
                 }
-                if dive.is_none() && b.z <= DIVE_MAX_Z && can(REACH + 0.6 * DIVE) {
+                if dive.is_none() && b.z <= DIVE_MAX_Z && g - dive_extra <= 0.0 {
                     dive = here;
                 }
             }
-            t += 0.12;
+            t += STEP;
         }
         (None, dive)
     }
@@ -507,16 +535,19 @@ impl<'a> Sim<'a> {
         self.primary = best.1;
         self.cover_roles();
         // Ground balls: every infielder who believes he can get to it in the infield breaks
-        // for it at once; nobody waits for a call (agent-models §5.7, ground-ball case).
-        let grounder = self.f[self.primary].belief.as_ref().and_then(|p| p.first_bounce()).map(|b| m::hypot(b.1, b.2) < 25.0).unwrap_or(false);
-        if grounder {
-            let t_primary = self.f[self.primary].t_int;
-            for i in [3usize, 4, 5] {
-                let fd = &self.f[i];
-                if i != self.primary && fd.t_int.is_finite() && fd.t_int <= t_primary + 0.6 && m::hypot(fd.target.x, fd.target.y) < 45.0 && fd.belief.is_some() {
-                    self.f[i].role = Role::Chase;
-                }
+        // for it at once; nobody waits for a call (agent-models §5.7, ground-ball case). Each
+        // judges from his own read: that it is a ground ball (first bounce in the infield)
+        // and that his intercept is in the infield.
+        let mut broke = false;
+        for i in [3usize, 4, 5] {
+            let fd = &self.f[i];
+            let grounder = fd.belief.as_ref().and_then(|p| p.first_bounce()).map(|b| m::hypot(b.1, b.2) < 25.0).unwrap_or(false);
+            if i != self.primary && grounder && fd.t_int.is_finite() && m::hypot(fd.target.x, fd.target.y) < INFIELD_R {
+                self.f[i].role = Role::Chase;
+                broke = true;
             }
+        }
+        if broke {
             self.cover_roles_after_chasers();
         }
     }
@@ -1625,6 +1656,62 @@ mod tests {
         // The speed law itself: from rest it is `run_dist`; at top speed it is v·t.
         assert!((run_dist_from(0.8, 0.0, 7.9, 0.7) - run_dist(0.8, 7.9, 0.7)).abs() < 1e-12);
         assert!((run_dist_from(0.8, 7.9, 7.9, 0.7) - 7.9 * 0.8).abs() < 1e-12);
+    }
+
+    // Fielding review #3: the moment a fielder can first reach a rolling ball comes after its
+    // closest pass, as he gains ground. Expected value from a 1 ms search of the same reach
+    // rule (the review's scenario): standing at 2.296 s, not the late point near 4.7 s.
+    #[test]
+    fn intercept_finds_the_first_reachable_moment_on_a_slowing_ball() {
+        let fx = fixture(&[]);
+        let inp = input(&fx, vec![RunnerIn { id: fx.st.batter, base: 0, speed: 8.2 }]);
+        let mut st = fx.st.clone();
+        let mut sim = new_sim(&inp, &mut st);
+        sim.t = 2.0;
+        sim.f[SS].pos = Vec3::new(1.1, 30.0, 0.0);
+        let r = fx.env.ball.radius;
+        let path = batted_path_dt(&fx.env, &fx.field, BallState { r: Vec3::new(0.0, 27.4, r), v: Vec3::new(0.0, 10.0, 0.0), w: Vec3::ZERO }, 2.0, AGENT_DT, |_, _| (0.0, 0.0));
+        // Independent fine search with the published rule: within 0.7 m after running
+        // run_dist from rest (he has reacted long ago).
+        let a = sim.f[SS].a;
+        let mut first = f64::NAN;
+        let mut t = 2.0;
+        while t < path.t_end() {
+            let b = path.at(t).0;
+            if (b.x - 1.1).hypot(b.y - 30.0) - 0.7 <= run_dist(t - 2.0, a.speed, a.tau_a) {
+                first = t;
+                break;
+            }
+            t += 0.001;
+        }
+        let (t_int, _) = sim.intercept(SS, &path);
+        assert!(first.is_finite() && (t_int - first).abs() <= 0.03, "scan {t_int:.3} s, fine search {first:.3} s");
+    }
+
+    // Fielding review #2 and #4: a fielder who has reached his spot is standing still, and a
+    // running fielder's time to a resting ball counts his speed.
+    #[test]
+    fn stopped_fielders_have_no_speed_and_running_ones_keep_it() {
+        let fx = fixture(&[]);
+        let inp = input(&fx, vec![RunnerIn { id: fx.st.batter, base: 0, speed: 8.2 }]);
+        let mut st = fx.st.clone();
+        let mut sim = new_sim(&inp, &mut st);
+        sim.t = 2.0;
+        sim.f[SS].role = Role::Chase;
+        sim.f[SS].speed = 7.0;
+        sim.f[SS].target = sim.f[SS].pos + Vec3::new(0.05, 0.0, 0.0);
+        sim.f[SS].t_int = 2.0;
+        for _ in 0..30 {
+            sim.move_fielders();
+            sim.t += DT;
+        }
+        assert_eq!(sim.f[SS].speed, 0.0);
+        // 6 m at 6 m/s already (top speed 7.9, τ 0.7): quicker than 6 m from rest, slower
+        // than 6 m at top speed, and exactly inverse to the distance law.
+        let t = run_time_from(6.0, 6.0, 7.9, 0.7);
+        assert!(t < run_time(6.0, 7.9, 0.7) && t > 6.0 / 7.9);
+        assert!((run_dist_from(t, 6.0, 7.9, 0.7) - 6.0).abs() < 1e-9);
+        assert!((run_time_from(6.0, 0.0, 7.9, 0.7) - run_time(6.0, 7.9, 0.7)).abs() < 1e-9);
     }
 
     // A chaser's plan has him reaching the ball at speed, so he must get there when the plan

@@ -6,7 +6,7 @@ All runs: `sim-cli pa --n 3000 --k-perception 2.25 --k-command 0.8` (average RHP
 
 ## 1. Pitchers are not missing too far outside
 
-Out-of-zone pitches by how far the ball's edge missed the zone (Statcast attack zones; MLB values are approximate league figures):
+Out-of-zone pitches by how far the ball's edge missed the zone. **The MLB columns here and in §3 are estimates quoted from memory, with no season, query, or matched bin definition behind them** (Codex fielding review #5); the sim's bins are fixed distances from its own zone, only loosely Statcast's attack zones. Treat the comparison as indicative until a dated extraction with the same bins replaces it (research item R13):
 
 | Band | Share of out-of-zone pitches | MLB ≈ | Swing rate | MLB ≈ |
 |---|---|---|---|---|
@@ -14,7 +14,7 @@ Out-of-zone pitches by how far the ball's edge missed the zone (Statcast attack 
 | Chase, 8.5–25.5 cm | 48.2% | 41% | 5.7% | 23.5% |
 | Waste, > 25.5 cm | 9.1% | 19% | 3.7% | 5.5% |
 
-Pitches are, if anything, closer to the zone than in MLB. The gap is in the swing rates band by band, so it is on the batter's side. (`sim-cli pa` now prints this table.)
+Pitches look no farther from the zone than in MLB, and the swing rates are lower in every band, which points at the batter's side; given the unverified reference and the sim's short plate appearances (few two-strike counts: outside-shadow swing rate is 15% with no strikes and 38% with two), this does not rule out a contribution from pitch location or count mix. (`sim-cli pa` now prints this table.)
 
 ## 2. Overconfidence about perceptual bias: tried, rejected
 

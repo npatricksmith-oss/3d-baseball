@@ -39,6 +39,8 @@ Sweeps that led there (512 games, seed 2; LD / FB hit rate, runs):
 | 0.40, 8.0, 4.0 | .721 | .181 | 4.15 |
 | **0.40, 8.0, 3.0** | **.691** | **.121** | **3.87** |
 
+**Superseded the same day:** the Codex fielding review found left field was not getting the outfield values (a position-index bug), so this fit was made with two of three outfielders. Re-fitted with all three and the review's planner fixes: **reaction 0.35 s, chase speed 8.2 m/s, read error 2.5 m**, giving 4.29 runs/team-game, GB .311, LD .702, FB .121, PU .017, routine grounders 92.3%. See docs/reviews/2026-11-11-codex-fielding-review.md.
+
 These three values are a fit to two hit rates, not measurements; public outfield jump and catch-probability data should replace them (research). **Accepted by the owner, 2026-11-11.**
 
 ## 3. Where the run environment stands
