@@ -19,7 +19,7 @@ Done today, in order:
 
 Numbers now (`sim-cli games --n 512 --seed 2`): **3.87 runs/team-game** (MLB ≈ 4.5). Provisional hit rates: GB .287 (MLB .24), LD .691 (.68), FB .121 (.13), PU .018 (.02). Routine grounders 94.2% (`cargo run --release -p bb_game --example gb_through -- 128`; target ≥ 96%). Build `sim-cli` with `cargo build --release -p bb_cli` on its own: adding `--example` to the same command builds only the example.
 
-**Owner to confirm:** the outfielder values (reaction 0.40 s, chase speed 8.0 m/s, read error 3.0 m), fitted to the LD and FB hit rates after the planner fixes.
+**Outfielder values accepted by the owner (2026-11-11):** reaction 0.40 s, chase speed 8.0 m/s, read error 3.0 m, fitted to the LD and FB hit rates after the planner fixes. Still worth checking against public outfield jump and catch-probability data.
 
 **Next:** runs are now below MLB while grounders still fall in too often, so the gap has moved to the batting side: 56% of balls in play are grounders (MLB ≈ 43%), which is item 2(c), the contact model's topped balls. The foul-share and chase diagnoses point at the same swing and contact model, so take them together. On the fielding side what is left is positioning (364 of 681 through-balls are out of reach from the fixed starting spots) and item 2(a), foul-territory walls.
 

@@ -39,7 +39,7 @@ Sweeps that led there (512 games, seed 2; LD / FB hit rate, runs):
 | 0.40, 8.0, 4.0 | .721 | .181 | 4.15 |
 | **0.40, 8.0, 3.0** | **.691** | **.121** | **3.87** |
 
-These three values are a fit to two hit rates, not measurements; public outfield jump and catch-probability data should replace them (research). **Proposed, owner to confirm.**
+These three values are a fit to two hit rates, not measurements; public outfield jump and catch-probability data should replace them (research). **Accepted by the owner, 2026-11-11.**
 
 ## 3. Where the run environment stands
 
