@@ -110,6 +110,8 @@ struct Runner {
     retouch: bool,
     /// Holding at a base until the runner ahead clears the next one.
     waiting: bool,
+    /// The timing-error draw of the latest advance decision (standard normal; diagnostics).
+    last_timing_draw: f64,
     /// The runner has seen the catch and settled whether he owes a retouch (decided once:
     /// off his base at the catch ⇒ owes it; on it ⇒ free to leave).
     catch_seen: bool,
@@ -612,11 +614,10 @@ impl<'a> Sim<'a> {
             Ball::Free { .. } => None,
             Ball::Held { .. } => return,
         };
-        let near_wall = {
-            let th = m::atan2(b.x, b.y);
-            self.inp.field.fence_at(th) - m::hypot(b.x, b.y) < 3.0
-        };
-        let zmax = if near_wall { WALL_CATCH_MAX_Z } else { CATCH_MAX_Z };
+        // Catchable height where the ball is: a fielder at the wall can leap.
+        let field = self.inp.field;
+        let zmax_at = |p: Vec3| if field.fence_at(m::atan2(p.x, p.y)) - m::hypot(p.x, p.y) < 3.0 { WALL_CATCH_MAX_Z } else { CATCH_MAX_Z };
+        let zmax = zmax_at(b);
         for i in 0..9 {
             let fd = &self.f[i];
             if self.t < fd.blocked_until || self.t < self.inp.t_contact + fd.a.reaction {
@@ -643,11 +644,13 @@ impl<'a> Sim<'a> {
                 let within = |x: f64| x > self.t && x <= t1;
                 let boundary = match &self.ball {
                     Ball::Free { path, .. } => path.bounces.iter().any(|x| within(x.0)) || path.walls.iter().any(|x| within(x.0)) || path.t_end() <= t1,
-                    _ => false,
+                    // A throw that reaches the ground becomes a bouncing ball before the next test.
+                    Ball::Thrown { .. } => bn.z <= self.inp.env.ball.radius,
+                    Ball::Held { .. } => false,
                 };
                 let (pn, _) = fielder_step(fd, self.t, self.inp.t_contact);
                 let hn = m::hypot(bn.x - pn.x, bn.y - pn.y);
-                if !boundary && hn < horiz && hn <= reach && bn.z <= zmax && bn.z >= 0.0 {
+                if !boundary && hn < horiz && hn <= reach && bn.z <= zmax_at(bn) && bn.z >= 0.0 {
                     continue;
                 }
             }
@@ -870,13 +873,15 @@ impl<'a> Sim<'a> {
         let t_run = run_time(BASE_L, r.vmax, 1.0) * if r.v > 1.0 { 0.75 } else { 1.0 };
         let t_ball = self.ball_time_to(k, next, 2 * n + 1);
         let mut rr = rng(self.inp.seed, self.inp.play, r.id, Purpose::RunnerPerception, 2 * n);
-        let noise = 0.15 * rr.truncated_normal(4.0);
+        let draw = rr.truncated_normal(4.0);
+        let noise = 0.15 * draw;
         let must = forced && at_base == r.start && !self.caught();
         // A runner may only take a base once every runner ahead of him has visibly cleared it;
         // until then he waits at his base.
         let blocked = !must && self.base_uncleared_ahead(k, next);
         let go = !blocked && (must || t_ball - (self.t + t_run) + noise > 0.35);
         let r = &mut self.r[k];
+        r.last_timing_draw = draw;
         r.waiting = blocked;
         if go {
             r.goal = next;
@@ -1202,6 +1207,7 @@ fn new_sim<'a>(inp: &'a LiveInput<'a>, st: &'a mut RulesState) -> Sim<'a> {
             last_base: x.base,
             retouch: false,
             waiting: false,
+            last_timing_draw: 0.0,
             catch_seen: false,
             decisions: 0,
         })
@@ -1525,22 +1531,47 @@ mod tests {
         assert!(!sim.out.events.iter().any(|e| matches!(e, Event::RulesWarning { .. })));
     }
 
-    // A runner caught off his base by the catch goes back and retouches exactly once; after
-    // that he is free (review #1: the obligation is settled once per catch).
+    // A runner caught off his base by the catch goes back, retouches once, and is then free:
+    // given a clear chance he takes the next base and is not sent back again (review #1; the
+    // day-fixes review #6 asked for the advance after the retouch). He left second before the
+    // catch, as the rules engine was told. His speed is far above a real runner's so that the
+    // decision to go does not hang on his timing noise.
     #[test]
-    fn runner_off_base_at_the_catch_retouches_once() {
+    fn runner_off_base_at_the_catch_retouches_once_then_advances() {
         const R: AgentId = 0x0007;
-        let fx = fixture(&[(R, 1)]);
-        let inp = input(&fx, vec![RunnerIn { id: fx.st.batter, base: 0, speed: 8.2 }, RunnerIn { id: R, base: 1, speed: 8.2 }]);
+        let fx = fixture(&[(R, 2)]);
+        let inp = input(&fx, vec![RunnerIn { id: fx.st.batter, base: 0, speed: 8.2 }, RunnerIn { id: R, base: 2, speed: 16.0 }]);
         let mut st = fx.st.clone();
         let mut sim = new_sim(&inp, &mut st);
-        sim.r[1].s = BASE_L + 8.0;
-        sim.r[1].goal = 2;
+        sim.emit(Input::BaseLeft { t: 4.0, agent: R, base: 2 });
+        sim.r[1].s = 2.0 * BASE_L + 8.0;
+        sim.r[1].goal = 3;
         sim.r[1].v = 6.0;
         after_catch(&mut sim);
-        assert_eq!(count(&sim, |f| matches!(f, Input::BaseTouched { agent: R, base: 1, holding_ball: false, .. })), 1, "facts: {:?}", sim.out.facts);
-        assert!(count(&sim, |f| matches!(f, Input::BaseLeft { agent: R, base: 1, .. })) <= 1);
-        assert!(!sim.r[1].retouch && !sim.r[1].out);
+        // Second: the one retouch. Third: reached once. He left second twice (before the
+        // catch and after the retouch) and never came back to it a second time.
+        assert_eq!(count(&sim, |f| matches!(f, Input::BaseTouched { agent: R, base: 2, holding_ball: false, .. })), 1, "facts: {:?}", sim.out.facts);
+        assert_eq!(count(&sim, |f| matches!(f, Input::BaseTouched { agent: R, base: 3, holding_ball: false, .. })), 1, "facts: {:?}", sim.out.facts);
+        assert_eq!(count(&sim, |f| matches!(f, Input::BaseLeft { agent: R, base: 2, .. })), 2);
+        assert!(!sim.out.events.iter().any(|e| matches!(e, Event::RulesWarning { .. })));
+    }
+
+    // Day-fixes review #3: within 3 m of the wall a fielder can catch higher (a leap). A ball
+    // leaving that strip must be judged by the height limit where it will be, so a catch
+    // available now is not put off to a tick where it is out of reach.
+    #[test]
+    fn catch_is_not_deferred_out_of_the_wall_leap_zone() {
+        let fx = fixture(&[]);
+        let inp = input(&fx, vec![RunnerIn { id: fx.st.batter, base: 0, speed: 8.2 }]);
+        let fence = fx.field.fence_at(0.0);
+        let mut st = fx.st.clone();
+        let mut sim = new_sim(&inp, &mut st);
+        sim.f[CF].pos = Vec3::new(0.0, fence - 3.8, 0.0);
+        loose_ball(&mut sim, 2.0, Vec3::new(0.0, fence - 2.99, 2.9), Vec3::new(0.0, -20.0, 0.0));
+        for _ in 0..10 {
+            world_tick(&mut sim);
+        }
+        assert!(caught(&sim), "facts: {:?}", sim.out.facts);
     }
 
     /// A grounder rolling up the middle line (x = 0) at 30 m/s from `y0` at the sim's time.
@@ -1625,28 +1656,25 @@ mod tests {
         assert!(cover > plan + 0.2, "a fielder stopping on a base took {cover:.3} s");
     }
 
-    // Codex day review #5: each advance decision is a fresh look at the play. Two decisions
-    // at the same instant about the same base must not see the same misread of the ball.
+    // Codex day review #5: each advance decision is a fresh look at the play. Repeated
+    // decisions about the same base at the same instant must each use a new timing draw (read
+    // back from the decision itself), none of them the draw of the first read at contact.
     #[test]
-    fn repeated_runner_decisions_draw_fresh_reads() {
+    fn repeated_runner_decisions_draw_fresh_noise() {
         const R: AgentId = 0x0007;
         let fx = fixture(&[(R, 1)]);
         let inp = input(&fx, vec![RunnerIn { id: fx.st.batter, base: 0, speed: 8.2 }, RunnerIn { id: R, base: 1, speed: 8.2 }]);
         let mut st = fx.st.clone();
         let mut sim = new_sim(&inp, &mut st);
         sim.t = 1.0;
-        let mut reads = Vec::new();
-        for _ in 0..3 {
+        let mut draws = Vec::new();
+        for _ in 0..4 {
             sim.runner_decide(1, 1);
-            let n = sim.r[1].decisions;
-            reads.push((sim.runner_predict(1, 2 * n + 1).t_end(), rng(inp.seed, inp.play, R, Purpose::RunnerPerception, 2 * n).truncated_normal(4.0)));
+            draws.push(sim.r[1].last_timing_draw);
         }
-        let first_look = sim.runner_predict(1, 1).t_end();
-        for i in 0..3 {
-            assert_ne!(reads[i].0, first_look);
+        for i in 0..4 {
             for j in 0..i {
-                assert_ne!(reads[i].0, reads[j].0, "decisions {j} and {i} read the ball identically");
-                assert_ne!(reads[i].1, reads[j].1, "decisions {j} and {i} share a timing draw");
+                assert_ne!(draws[i], draws[j], "decisions {j} and {i} used the same timing draw");
             }
         }
     }

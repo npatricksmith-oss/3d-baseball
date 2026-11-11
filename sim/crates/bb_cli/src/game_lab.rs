@@ -89,9 +89,10 @@ pub fn games(a: GamesArgs) {
         100.0 * sum(&|r| r.reached_bip as f64) / sum(&|r| r.bip as f64)
     );
     println!("extra-inning games {}, walk-offs {}", rs.iter().filter(|r| r.innings > 9).count(), rs.iter().filter(|r| r.walk_off).count());
-    // By batted-ball type: hit rate (interim ruling from the play's ordered facts,
-    // `bb_game::game::classify_bip`; comparable to MLB BABIP while the sim has no errors), the
-    // batter reaching on a fielder's choice, and plays with two or more outs.
+    // By batted-ball type: hit rate, the batter reaching on a fielder's choice, and plays with
+    // two or more outs. Hits and fielder's choices are the provisional lab ruling
+    // `bb_game::game::classify_bip`, not the official scorer (no errors, no judgment calls).
+    println!("by batted-ball type (hit / FC are a provisional ruling, not the scorer's):");
     let mut by = [(0u32, 0u32, 0u32, 0u32); 4];
     for r in &rs {
         for b in &r.bip_detail {

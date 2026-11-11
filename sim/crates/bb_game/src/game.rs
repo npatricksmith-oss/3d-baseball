@@ -63,46 +63,29 @@ impl BipDetail {
     }
 }
 
-/// Interim hit / fielder's-choice ruling for one ball in play, from the play's ordered facts
-/// and rules events: `(reached_first, hit)`. The official scorer (rules-spec §10, with
-/// `ScorerEvidence` and errors) replaces this; until then the sim has no errors, so:
+/// Provisional hit / fielder's-choice ruling for one ball in play, from the play's facts and
+/// rules events: `(reached_first, hit)`. **A lab diagnostic, not a statistic:** it reads
+/// facts that are not in the event log, has no errors, and makes none of the scorer's
+/// judgments; the official scorer (rules-spec §10, with `ScorerEvidence`) replaces it.
 ///
-/// - The batter **reached first** unless he was put out before getting there: a fly out or a
-///   force, or a tag before he touched the bag. A batter tagged out after touching first
-///   (stretching a hit) did reach.
-/// - It is a **hit** unless another runner was forced out (OBR 9.05(b)(1)), or another runner
-///   was tagged out before the batter touched first (the defense took that out while the
-///   batter could still have been played on). A runner thrown out advancing after the batter
-///   was already on first is an out on the bases, and the hit stands.
-///
-/// A tag with no timed fact, or a batter who never touched first (a base award), counts the
-/// conservative way (not a hit) if another runner was tagged out.
+/// - The batter **reached first** if he touched it (or was awarded it) without having been
+///   put out on the way: not on a fly out, a force, or a tag short of the bag. A batter
+///   tagged out after touching first (stretching a hit) did reach. A batter still short of
+///   first when the third out was made elsewhere did not.
+/// - It is a **hit** unless another runner was forced out (OBR 9.05(b)(1)), or the batted
+///   ball was first fielded by the pitcher, catcher, or an infielder and another runner was
+///   put out (9.05(b)(3); the "advancing one base or returning" qualifier and the failed
+///   choices of 9.05(b)(4) are not judged). A runner thrown out on a ball first fielded by an
+///   outfielder is an out on the bases, and the hit stands.
 pub fn classify_bip(batter: bb_rules::AgentId, events: &[Event], facts: &[Input]) -> (bool, bool) {
     use bb_rules::OutKind;
-    let t_first = facts.iter().find_map(|f| match f {
-        Input::BaseTouched { t, agent, base: 1, holding_ball: false } if *agent == batter => Some(*t),
-        _ => None,
-    });
+    let touched_first = facts.iter().any(|f| matches!(f, Input::BaseTouched { agent, base: 1, holding_ball: false, .. } if *agent == batter));
+    let awarded = events.iter().any(|e| matches!(e, Event::RunnerAdvanced { runner, cause: bb_rules::AdvanceCause::Award, .. } if *runner == batter));
     let outs = || events.iter().filter_map(|e| if let Event::RunnerOut { runner, kind, .. } = e { Some((*runner, *kind)) } else { None });
-    let reached_first = match outs().find(|(r, _)| *r == batter) {
-        None => true,
-        Some((_, OutKind::Tag | OutKind::Appeal)) => t_first.is_some(),
-        Some(_) => false,
-    };
-    let tag_time = |runner: bb_rules::AgentId| {
-        facts.iter().find_map(|f| match f {
-            Input::TagContact { t, runner: r, holding_ball: true, .. } if *r == runner => Some(*t),
-            _ => None,
-        })
-    };
-    let taken_instead = outs().filter(|(r, _)| *r != batter).any(|(r, kind)| match kind {
-        OutKind::Force => true,
-        OutKind::Tag => match (tag_time(r), t_first) {
-            (Some(t_tag), Some(t1)) => t_tag < t1,
-            _ => true,
-        },
-        _ => false,
-    });
+    let reached_first = (touched_first || awarded) && !matches!(outs().find(|(r, _)| *r == batter), Some((_, OutKind::FlyOut | OutKind::Force | OutKind::Strikeout)));
+    // Fielding positions are the low seven bits of a fielder's id: 1–6 are the infield.
+    let infield_handled = facts.iter().find_map(|f| if let Input::GloveSecured { fielder, .. } = f { Some(fielder & 0x7F) } else { None }).is_some_and(|pos| pos <= 6);
+    let taken_instead = outs().filter(|(r, _)| *r != batter).any(|(_, kind)| kind == OutKind::Force || infield_handled);
     (reached_first, reached_first && !taken_instead)
 }
 
@@ -402,11 +385,13 @@ mod tests {
 
     const BATTER: u16 = 2;
     const R3: u16 = 5;
+    const SHORTSTOP: u16 = 0x0186;
+    const CENTER: u16 = 0x0188;
     fn touch(t: f64, agent: u16, base: u8) -> Input {
         Input::BaseTouched { t, agent, base, holding_ball: false }
     }
-    fn tag(t: f64, runner: u16) -> Input {
-        Input::TagContact { t, fielder: 0x186, runner, holding_ball: true }
+    fn fielded(t: f64, fielder: u16) -> Input {
+        Input::GloveSecured { t, fielder, x: 0.0, y: 40.0 }
     }
     fn out(runner: u16, base: u8, kind: OutKind) -> Event {
         Event::RunnerOut { runner, base, kind }
@@ -415,26 +400,30 @@ mod tests {
     /// Scoring expectations come from OBR 9.05, not from the code: each case names the ruling
     /// an official scorer would make (no errors in the sim).
     #[test]
-    fn interim_hit_rulings_follow_the_scoring_rules() {
-        // Clean single.
-        assert_eq!(classify_bip(BATTER, &[], &[touch(4.3, BATTER, 1)]), (true, true));
-        // Single, batter thrown out stretching to second: a hit, with an out on the bases
-        // (Codex day review #4, seed 0 play 37).
-        assert_eq!(classify_bip(BATTER, &[out(BATTER, 2, OutKind::Tag)], &[touch(5.01, BATTER, 1), tag(8.2, BATTER)]), (true, true));
-        // Single, runner from second thrown out at home after the batter reached: a hit
-        // (review #4, seed 2 play 209).
-        assert_eq!(classify_bip(BATTER, &[out(R3, 4, OutKind::Tag)], &[touch(5.05, BATTER, 1), tag(7.9, R3)]), (true, true));
-        // Grounder, runner forced at second, batter beats the relay: fielder's choice.
-        assert_eq!(classify_bip(BATTER, &[out(R3, 2, OutKind::Force)], &[touch(4.4, BATTER, 1)]), (true, false));
-        // Outfield single, but the runner from first is forced at second: no hit (9.05(b)(1)).
-        assert_eq!(classify_bip(BATTER, &[out(R3, 2, OutKind::Force)], &[touch(4.4, BATTER, 1)]).1, false);
-        // Grounder, runner tagged between third and home before the batter reaches first:
-        // fielder's choice.
-        assert_eq!(classify_bip(BATTER, &[out(R3, 4, OutKind::Tag)], &[tag(3.1, R3), touch(4.4, BATTER, 1)]), (true, false));
+    fn provisional_hit_rulings_follow_obr_9_05() {
+        // Clean single to center.
+        assert_eq!(classify_bip(BATTER, &[], &[touch(4.3, BATTER, 1), fielded(4.6, CENTER)]), (true, true));
+        // Single to center, batter thrown out stretching to second: a hit, out on the bases
+        // (day review #4, seed 0 play 37).
+        assert_eq!(classify_bip(BATTER, &[out(BATTER, 2, OutKind::Tag)], &[touch(5.01, BATTER, 1), fielded(5.04, CENTER)]), (true, true));
+        // Single to right, runner thrown out at home, before or after the batter reaches
+        // first: a hit either way (day review #4, seed 2 play 209).
+        assert_eq!(classify_bip(BATTER, &[out(R3, 4, OutKind::Tag)], &[touch(5.05, BATTER, 1), fielded(5.58, CENTER)]), (true, true));
+        assert_eq!(classify_bip(BATTER, &[out(R3, 4, OutKind::Tag)], &[fielded(3.0, CENTER), touch(5.05, BATTER, 1)]), (true, true));
+        // Grounder to short, runner forced at second, batter beats the relay: fielder's choice.
+        assert_eq!(classify_bip(BATTER, &[out(R3, 2, OutKind::Force)], &[fielded(1.2, SHORTSTOP), touch(4.4, BATTER, 1)]), (true, false));
+        // Single to center but the runner from first is forced at second: no hit (9.05(b)(1)).
+        assert_eq!(classify_bip(BATTER, &[out(R3, 2, OutKind::Force)], &[touch(4.4, BATTER, 1), fielded(4.5, CENTER)]), (true, false));
+        // An infielder fields it and a runner is tagged out advancing, even after the batter
+        // has reached first: fielder's choice (9.05(b)(3); day-fixes review #4, seed 6 play 112).
+        assert_eq!(classify_bip(BATTER, &[out(R3, 3, OutKind::Tag)], &[fielded(0.96, SHORTSTOP), touch(5.01, BATTER, 1)]), (true, false));
         // Ground out at first; fly out (even if the batter crossed first before the catch);
         // batter tagged on the line.
-        assert_eq!(classify_bip(BATTER, &[out(BATTER, 1, OutKind::Force)], &[]), (false, false));
-        assert_eq!(classify_bip(BATTER, &[out(BATTER, 0, OutKind::FlyOut)], &[touch(4.4, BATTER, 1)]), (false, false));
-        assert_eq!(classify_bip(BATTER, &[out(BATTER, 1, OutKind::Tag)], &[tag(3.9, BATTER)]), (false, false));
+        assert_eq!(classify_bip(BATTER, &[out(BATTER, 1, OutKind::Force)], &[fielded(1.2, SHORTSTOP)]), (false, false));
+        assert_eq!(classify_bip(BATTER, &[out(BATTER, 0, OutKind::FlyOut)], &[touch(4.4, BATTER, 1), fielded(5.0, CENTER)]), (false, false));
+        assert_eq!(classify_bip(BATTER, &[out(BATTER, 1, OutKind::Tag)], &[fielded(1.2, SHORTSTOP)]), (false, false));
+        // Third out made on another runner before the batter got to first: he did not reach
+        // (day-fixes review #4, seed 0 play 7).
+        assert_eq!(classify_bip(BATTER, &[out(R3, 2, OutKind::Force)], &[fielded(1.2, SHORTSTOP)]), (false, false));
     }
 }

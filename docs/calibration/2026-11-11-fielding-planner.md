@@ -43,7 +43,7 @@ These three values are a fit to two hit rates, not measurements; public outfield
 
 ## 3. Where the run environment stands
 
-512 games, seed 2: **3.87 runs/team-game** (MLB ≈ 4.5; 4.98 before). Hit rates by type (interim ruling): GB .303 (MLB .24), LD .691 (.68), FB .121 (.13), PU .018 (.02). Routine grounders 94.2%.
+512 games, seed 2: **3.87 runs/team-game** (MLB ≈ 4.5; 4.98 before). Hit rates by type (provisional ruling, corrected later the same day per the Codex day-fixes review): GB .287 (MLB .24), LD .691 (.68), FB .121 (.13), PU .018 (.02). Routine grounders 94.2%.
 
 Runs are now below MLB although ground balls still fall for hits too often. The rest of the gap is on the batting side and is not a fielding question: 56% of balls in play are grounders (MLB ≈ 43%), the contact model's topped-ball excess (TASKS 2(c)), and the plate-appearance mix is off (K 12%, BB 9.5%).
 
