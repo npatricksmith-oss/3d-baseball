@@ -48,16 +48,62 @@ pub struct BipDetail {
     pub spray_rad: f64,
     /// The batter was not put out on the play.
     pub batter_safe: bool,
+    /// The batter reached first base safely (he may have been put out later, stretching).
+    pub reached_first: bool,
+    /// Interim hit ruling (see [`classify_bip`]); `reached_first && !hit` is a fielder's choice.
+    pub hit: bool,
     /// Outs recorded on the play (any runner).
     pub outs: u8,
 }
 
 impl BipDetail {
-    /// A hit in the BABIP sense: the batter safe and nobody put out (the sim has no errors
-    /// yet, so this excludes only fielder's choices).
-    pub fn hit(&self) -> bool {
-        self.batter_safe && self.outs == 0
+    /// The batter reached first because the defense put out another runner instead.
+    pub fn fielders_choice(&self) -> bool {
+        self.reached_first && !self.hit
     }
+}
+
+/// Interim hit / fielder's-choice ruling for one ball in play, from the play's ordered facts
+/// and rules events: `(reached_first, hit)`. The official scorer (rules-spec §10, with
+/// `ScorerEvidence` and errors) replaces this; until then the sim has no errors, so:
+///
+/// - The batter **reached first** unless he was put out before getting there: a fly out or a
+///   force, or a tag before he touched the bag. A batter tagged out after touching first
+///   (stretching a hit) did reach.
+/// - It is a **hit** unless another runner was forced out (OBR 9.05(b)(1)), or another runner
+///   was tagged out before the batter touched first (the defense took that out while the
+///   batter could still have been played on). A runner thrown out advancing after the batter
+///   was already on first is an out on the bases, and the hit stands.
+///
+/// A tag with no timed fact, or a batter who never touched first (a base award), counts the
+/// conservative way (not a hit) if another runner was tagged out.
+pub fn classify_bip(batter: bb_rules::AgentId, events: &[Event], facts: &[Input]) -> (bool, bool) {
+    use bb_rules::OutKind;
+    let t_first = facts.iter().find_map(|f| match f {
+        Input::BaseTouched { t, agent, base: 1, holding_ball: false } if *agent == batter => Some(*t),
+        _ => None,
+    });
+    let outs = || events.iter().filter_map(|e| if let Event::RunnerOut { runner, kind, .. } = e { Some((*runner, *kind)) } else { None });
+    let reached_first = match outs().find(|(r, _)| *r == batter) {
+        None => true,
+        Some((_, OutKind::Tag | OutKind::Appeal)) => t_first.is_some(),
+        Some(_) => false,
+    };
+    let tag_time = |runner: bb_rules::AgentId| {
+        facts.iter().find_map(|f| match f {
+            Input::TagContact { t, runner: r, holding_ball: true, .. } if *r == runner => Some(*t),
+            _ => None,
+        })
+    };
+    let taken_instead = outs().filter(|(r, _)| *r != batter).any(|(r, kind)| match kind {
+        OutKind::Force => true,
+        OutKind::Tag => match (tag_time(r), t_first) {
+            (Some(t_tag), Some(t1)) => t_tag < t1,
+            _ => true,
+        },
+        _ => false,
+    });
+    (reached_first, reached_first && !taken_instead)
 }
 
 /// One pitch's paths for visualization: samples are (t, x, y, z) in play time.
@@ -266,7 +312,8 @@ impl Game {
             if let Some(Event::PlateAppearanceEnded { batter, result: PaResult::BattedBall }) = rules_events.iter().find(|e| matches!(e, Event::PlateAppearanceEnded { .. })) {
                 let out = rules_events.iter().any(|e| matches!(e, Event::RunnerOut { runner, .. } if runner == batter));
                 let outs = rules_events.iter().filter(|e| matches!(e, Event::RunnerOut { .. })).count() as u8;
-                self.res.bip_detail.push(BipDetail { exit_speed_mps: ev_, launch_rad: la, spray_rad: spray, batter_safe: !out, outs });
+                let (reached_first, hit) = classify_bip(*batter, &rules_events, &facts);
+                self.res.bip_detail.push(BipDetail { exit_speed_mps: ev_, launch_rad: la, spray_rad: spray, batter_safe: !out, reached_first, hit, outs });
             }
         }
         self.play += 1;
@@ -346,4 +393,48 @@ pub fn simulate_game_with(seed: u64, record: bool) -> GameResult {
     let mut g = Game::new(seed, record);
     while g.step_pitch().is_some() {}
     g.finish()
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use bb_rules::OutKind;
+
+    const BATTER: u16 = 2;
+    const R3: u16 = 5;
+    fn touch(t: f64, agent: u16, base: u8) -> Input {
+        Input::BaseTouched { t, agent, base, holding_ball: false }
+    }
+    fn tag(t: f64, runner: u16) -> Input {
+        Input::TagContact { t, fielder: 0x186, runner, holding_ball: true }
+    }
+    fn out(runner: u16, base: u8, kind: OutKind) -> Event {
+        Event::RunnerOut { runner, base, kind }
+    }
+
+    /// Scoring expectations come from OBR 9.05, not from the code: each case names the ruling
+    /// an official scorer would make (no errors in the sim).
+    #[test]
+    fn interim_hit_rulings_follow_the_scoring_rules() {
+        // Clean single.
+        assert_eq!(classify_bip(BATTER, &[], &[touch(4.3, BATTER, 1)]), (true, true));
+        // Single, batter thrown out stretching to second: a hit, with an out on the bases
+        // (Codex day review #4, seed 0 play 37).
+        assert_eq!(classify_bip(BATTER, &[out(BATTER, 2, OutKind::Tag)], &[touch(5.01, BATTER, 1), tag(8.2, BATTER)]), (true, true));
+        // Single, runner from second thrown out at home after the batter reached: a hit
+        // (review #4, seed 2 play 209).
+        assert_eq!(classify_bip(BATTER, &[out(R3, 4, OutKind::Tag)], &[touch(5.05, BATTER, 1), tag(7.9, R3)]), (true, true));
+        // Grounder, runner forced at second, batter beats the relay: fielder's choice.
+        assert_eq!(classify_bip(BATTER, &[out(R3, 2, OutKind::Force)], &[touch(4.4, BATTER, 1)]), (true, false));
+        // Outfield single, but the runner from first is forced at second: no hit (9.05(b)(1)).
+        assert_eq!(classify_bip(BATTER, &[out(R3, 2, OutKind::Force)], &[touch(4.4, BATTER, 1)]).1, false);
+        // Grounder, runner tagged between third and home before the batter reaches first:
+        // fielder's choice.
+        assert_eq!(classify_bip(BATTER, &[out(R3, 4, OutKind::Tag)], &[tag(3.1, R3), touch(4.4, BATTER, 1)]), (true, false));
+        // Ground out at first; fly out (even if the batter crossed first before the catch);
+        // batter tagged on the line.
+        assert_eq!(classify_bip(BATTER, &[out(BATTER, 1, OutKind::Force)], &[]), (false, false));
+        assert_eq!(classify_bip(BATTER, &[out(BATTER, 0, OutKind::FlyOut)], &[touch(4.4, BATTER, 1)]), (false, false));
+        assert_eq!(classify_bip(BATTER, &[out(BATTER, 1, OutKind::Tag)], &[tag(3.9, BATTER)]), (false, false));
+    }
 }

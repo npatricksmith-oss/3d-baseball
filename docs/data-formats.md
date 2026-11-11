@@ -52,7 +52,7 @@ PLAN §4.2 requires a keyed, counter-based RNG. The **key layout** is fixed here
 key = (game_seed: u64, play_index: u32, agent_id: u16, purpose: u16, sub_index: u32)
 ```
 
-`sub_index` separates repeated draws within one play: the observation number for perception, the bounce number for surfaces, the throw number for throws. The `purpose` registry is append-only. **Never renumber or reuse a value.**
+`sub_index` separates repeated draws within one play: the observation number for perception, the bounce number for surfaces, the throw number for throws. A runner's advance decisions: decision *n* (from 1) uses 2*n* for its timing error and 2*n* + 1 for its read of a free ball; 1 is the first read at contact. The `purpose` registry is append-only. **Never renumber or reuse a value.**
 
 | Purpose | Value | Used by |
 | :--- | :--- | :--- |

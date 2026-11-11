@@ -89,16 +89,17 @@ pub fn games(a: GamesArgs) {
         100.0 * sum(&|r| r.reached_bip as f64) / sum(&|r| r.bip as f64)
     );
     println!("extra-inning games {}, walk-offs {}", rs.iter().filter(|r| r.innings > 9).count(), rs.iter().filter(|r| r.walk_off).count());
-    // By batted-ball type: hit rate (batter safe, nobody out: comparable to MLB BABIP), the
-    // batter safe on a fielder's choice, and plays with two or more outs.
+    // By batted-ball type: hit rate (interim ruling from the play's ordered facts,
+    // `bb_game::game::classify_bip`; comparable to MLB BABIP while the sim has no errors), the
+    // batter reaching on a fielder's choice, and plays with two or more outs.
     let mut by = [(0u32, 0u32, 0u32, 0u32); 4];
     for r in &rs {
         for b in &r.bip_detail {
             let d = b.launch_rad.to_degrees();
             let k = if d < 10.0 { 0 } else if d < 25.0 { 1 } else if d < 50.0 { 2 } else { 3 };
             by[k].0 += 1;
-            by[k].1 += b.hit() as u32;
-            by[k].2 += (b.batter_safe && b.outs > 0) as u32;
+            by[k].1 += b.hit as u32;
+            by[k].2 += b.fielders_choice() as u32;
             by[k].3 += (b.outs >= 2) as u32;
         }
     }

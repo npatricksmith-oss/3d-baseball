@@ -68,4 +68,16 @@ The new waiting/retouch paths can call `runner_decide` repeatedly for the same n
 
 ## Resolution
 
-Open.
+Resolved 2026-11-11. All five findings fixed, each with a regression test (`bb_game` unit tests in `live.rs` and `game.rs`); `cargo test --workspace --release` passes.
+
+| # | Status | What changed |
+|---|---|---|
+| 1 | Fixed | The retouch obligation is settled once, on the first tick a runner sees the catch (`Runner::catch_seen`): off his base then ⇒ he owes a retouch; on it (tagging or just standing) ⇒ he owes nothing. The per-tick re-arming condition is gone. Tests: `legal_tag_up_from_third_scores` (leaves third once, touches home, no rules warning), `runner_off_base_at_the_catch_retouches_once` |
+| 2 | Fixed | A capture is put off a tick only if the ball touches nothing before the next tick: no ground contact, no wall contact, and the path does not end (over the fence, at rest). Test: `fly_catchable_just_before_the_wall_is_caught` (the review's scenario: `Catch`, no wall fact) |
+| 3 | Fixed | The deferral compares against where the fielder will be next tick (`fielder_step`, the same function `move_fielders` uses, so the position is exact) and requires the ball to be closer **and still within reach** there. Tests: `ball_in_reach_of_a_fielder_moving_away_is_caught_now` (the review's scenario), and `standing_catch_happens_at_closest_approach` guards the §5.4 behavior the deferral exists for |
+| 4 | Fixed (interim ruling) | `BipDetail` now carries `reached_first` and `hit`, derived by `bb_game::game::classify_bip` from the play's ordered facts and rules events: the batter reached first unless put out before the bag (fly out, force, tag short of first); it is a hit unless another runner was forced out (OBR 9.05(b)(1)) or tagged out before the batter touched first. Outs on the bases after the batter reached leave the hit standing. This is still not the official scorer (rules-spec §10, no errors or `ScorerEvidence` yet) and the doc comment says so. Test: `interim_hit_rulings_follow_the_scoring_rules`, including both of the review's plays as synthetic cases |
+| 5 | Fixed | Each advance decision takes fresh draws: decision *n* (from 1) uses `RunnerPerception` sub-index 2*n* for its timing error and 2*n* + 1 for its read of a free ball; sub-index 1 is the first read at contact. Documented on `Runner::decisions` and in data-formats §2.3. Test: `repeated_runner_decisions_draw_fresh_reads`. This changes the replay stream of every play with a runner decision (no released logs depend on it) |
+
+**Effect on the numbers** (`sim-cli games --n 512 --seed 2`): 4.98 runs/team-game (4.91 before; tag-up advances now complete, and the runner noise streams changed), no rules warnings. With the hit ruling corrected, ground balls are hits .398 of the time and fielder's choices .161 (the old labels read .331 / FC); LD .710, FB .136, PU .015 against MLB ≈ .68 / .13 / .02. So the ground-ball excess is larger than the old label showed, and it is the whole of the run-environment gap. Routine-grounder conversion is unchanged at 88.6% (`gb_through`, 128 games).
+
+**Not verified:** the new tests were not run against the pre-fix code; the review's own probes are the evidence that the old code failed these scenarios.

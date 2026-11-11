@@ -288,11 +288,13 @@ The ground is a **height function** h(x, y): zero everywhere except the pitcher'
 
 | Surface | e_n at reference speed | μ | e_t | Rolling resistance μ_r | Roughness σ_n | Status |
 | :--- | :--- | :--- | :--- | :--- | :--- | :--- |
-| Infield grass | 0.45 | 0.45 | 0.0 | 0.12 | 0.6° | [E] all |
-| Infield dirt | 0.50 | 0.55 | 0.0 | 0.09 | 1.5° | [E] |
+| Infield grass | 0.45 | 0.45 | 0.0 | 0.28 | 0.6° | [E] all |
+| Infield dirt | 0.50 | 0.55 | 0.0 | 0.22 | 1.5° | [E] |
 | Outfield grass | 0.42 | 0.45 | 0.0 | 0.14 | 0.8° | [E] |
 | Warning track | 0.48 | 0.60 | 0.0 | 0.10 | 1.5° | [E] |
 | Artificial turf (park option) | 0.55 | 0.40 | 0.0 | 0.06 | 0.3° | [E] |
+
+Rolling resistance for infield grass and dirt was raised from 0.12 / 0.09 to 0.28 / 0.22 in M4 so that grounders stop in ~110 m (owner accepted 2026-11-11; real roll-out data is research item R4). The code has only these two surfaces so far (`bb_physics::ground`: dirt inside the infield radius, grass elsewhere); the other rows keep their first-draft values until they are implemented.
 
 e_n decreases with impact speed: e_n(c_n) = e_ref / (1 + k_s·|c_n|) [E form]. **All values in this table are unsourced placeholders.** *(M4 skeleton, 2026-10-31: the implementation uses rolling resistance μ_r = 0.22 on dirt and 0.28 on grass, because the values above let a 25 m/s grounder roll ~250 m; 0.22/0.28 gives ~110 m. R4 replaces both with measured values.)* M5 calibrates them against observed behavior: ground-ball speeds reaching infielders, the hop height of typical grounders, roll-out distances of outfield singles. Literature on ball bounce from Cross would make good starting points if it can be found.
 
