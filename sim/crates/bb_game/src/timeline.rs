@@ -165,6 +165,8 @@ pub fn encode(step: &PitchStep, st: &RulesState) -> Vec<u8> {
         Some(k) if realized.len() >= 2 => k[0].max(last_t),
         _ => step.batted.as_ref().map(|p| p.t_end()).unwrap_or(step.pitch_flight.last().t),
     } as f32;
+    let text = crate::describe::describe(rec.call, rec.batted.map(|b| b.1.to_degrees()), &step.rules_events, &step.facts);
+    let summary = fbb.create_string(&text);
     let root = tl::PlayTimeline::create(
         &mut fbb,
         &tl::PlayTimelineArgs {
@@ -172,6 +174,7 @@ pub fn encode(step: &PitchStep, st: &RulesState) -> Vec<u8> {
             duration_s: duration,
             ball: Some(ball),
             actors,
+            summary: Some(summary),
             markers: Some(markv),
             telemetry: Some(telem),
             view_after: Some(view),

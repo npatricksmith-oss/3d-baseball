@@ -26,4 +26,6 @@ public:
 	virtual void DrawHUD() override;
 	FString Scoreboard;
 	FString PitchLine;
+	/** The call on the current pitch, shown large once it is known. */
+	FString Call;
 };

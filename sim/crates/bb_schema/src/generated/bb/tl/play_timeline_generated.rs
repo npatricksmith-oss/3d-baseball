@@ -30,6 +30,7 @@ impl<'a> PlayTimeline<'a> {
   pub const VT_FACTS: ::flatbuffers::VOffsetT = 22;
   pub const VT_TELEMETRY: ::flatbuffers::VOffsetT = 24;
   pub const VT_VIEW_AFTER: ::flatbuffers::VOffsetT = 26;
+  pub const VT_SUMMARY: ::flatbuffers::VOffsetT = 28;
 
   #[inline]
   pub unsafe fn init_from_table(table: ::flatbuffers::Table<'a>) -> Self {
@@ -41,6 +42,7 @@ impl<'a> PlayTimeline<'a> {
     args: &'args PlayTimelineArgs<'args>
   ) -> ::flatbuffers::WIPOffset<PlayTimeline<'bldr>> {
     let mut builder = PlayTimelineBuilder::new(_fbb);
+    if let Some(x) = args.summary { builder.add_summary(x); }
     if let Some(x) = args.view_after { builder.add_view_after(x); }
     if let Some(x) = args.telemetry { builder.add_telemetry(x); }
     if let Some(x) = args.facts { builder.add_facts(x); }
@@ -141,6 +143,13 @@ impl<'a> PlayTimeline<'a> {
     // which contains a valid value in this slot
     unsafe { self._tab.get::<::flatbuffers::ForwardsUOffset<super::ss::ViewState>>(PlayTimeline::VT_VIEW_AFTER, None)}
   }
+  #[inline]
+  pub fn summary(&self) -> Option<&'a str> {
+    // Safety:
+    // Created from valid Table for this object
+    // which contains a valid value in this slot
+    unsafe { self._tab.get::<::flatbuffers::ForwardsUOffset<&str>>(PlayTimeline::VT_SUMMARY, None)}
+  }
 }
 
 impl ::flatbuffers::Verifiable for PlayTimeline<'_> {
@@ -161,6 +170,7 @@ impl ::flatbuffers::Verifiable for PlayTimeline<'_> {
      .visit_field::<::flatbuffers::ForwardsUOffset<::flatbuffers::Vector<'_, ::flatbuffers::ForwardsUOffset<ExplanationFact>>>>("facts", Self::VT_FACTS, false)?
      .visit_field::<::flatbuffers::ForwardsUOffset<Telemetry>>("telemetry", Self::VT_TELEMETRY, false)?
      .visit_field::<::flatbuffers::ForwardsUOffset<super::ss::ViewState>>("view_after", Self::VT_VIEW_AFTER, false)?
+     .visit_field::<::flatbuffers::ForwardsUOffset<&str>>("summary", Self::VT_SUMMARY, false)?
      .finish();
     Ok(())
   }
@@ -178,6 +188,7 @@ pub struct PlayTimelineArgs<'a> {
     pub facts: Option<::flatbuffers::WIPOffset<::flatbuffers::Vector<'a, ::flatbuffers::ForwardsUOffset<ExplanationFact<'a>>>>>,
     pub telemetry: Option<::flatbuffers::WIPOffset<Telemetry<'a>>>,
     pub view_after: Option<::flatbuffers::WIPOffset<super::ss::ViewState<'a>>>,
+    pub summary: Option<::flatbuffers::WIPOffset<&'a str>>,
 }
 impl<'a> Default for PlayTimelineArgs<'a> {
   #[inline]
@@ -195,6 +206,7 @@ impl<'a> Default for PlayTimelineArgs<'a> {
       facts: None,
       telemetry: None,
       view_after: None,
+      summary: None,
     }
   }
 }
@@ -253,6 +265,10 @@ impl<'a: 'b, 'b, A: ::flatbuffers::Allocator + 'a> PlayTimelineBuilder<'a, 'b, A
     self.fbb_.push_slot_always::<::flatbuffers::WIPOffset<super::ss::ViewState>>(PlayTimeline::VT_VIEW_AFTER, view_after);
   }
   #[inline]
+  pub fn add_summary(&mut self, summary: ::flatbuffers::WIPOffset<&'b  str>) {
+    self.fbb_.push_slot_always::<::flatbuffers::WIPOffset<_>>(PlayTimeline::VT_SUMMARY, summary);
+  }
+  #[inline]
   pub fn new(_fbb: &'b mut ::flatbuffers::FlatBufferBuilder<'a, A>) -> PlayTimelineBuilder<'a, 'b, A> {
     let start = _fbb.start_table();
     PlayTimelineBuilder {
@@ -282,6 +298,7 @@ impl ::core::fmt::Debug for PlayTimeline<'_> {
       ds.field("facts", &self.facts());
       ds.field("telemetry", &self.telemetry());
       ds.field("view_after", &self.view_after());
+      ds.field("summary", &self.summary());
       ds.finish()
   }
 }

@@ -177,13 +177,13 @@ void ABbDirector::BeginPlay()
 	// The ball is drawn three times its real size so it can be seen from the stands.
 	Ball = Shape(Sphere, FVector::ZeroVector, FVector(0.22), FLinearColor(1.f, 1.f, 0.9f));
 
-	Camera = GetWorld()->SpawnActor<ACameraActor>(ToUE(0, -22, 14), FRotator::ZeroRotator);
+	Camera = GetWorld()->SpawnActor<ACameraActor>(ToUE(0, -30, 17), FRotator::ZeroRotator);
 	Camera->GetCameraComponent()->SetFieldOfView(60.f);
 	Camera->GetCameraComponent()->bConstrainAspectRatio = false;
 	// Fixed exposure, a little under the default: daylight on flat colors.
 	Camera->GetCameraComponent()->PostProcessSettings.bOverride_AutoExposureBias = true;
 	Camera->GetCameraComponent()->PostProcessSettings.AutoExposureBias = -0.7f;
-	CamLook = ToUE(0, 22, 0);
+	CamLook = ToUE(0, 16, 0);
 	if (APlayerController* PC = GetWorld()->GetFirstPlayerController())
 	{
 		PC->SetViewTarget(Camera);
@@ -240,7 +240,7 @@ void ABbDirector::BeginPlayback(FBbPlay&& Play)
 	}
 	++PlaysShown;
 	// A ball in play gets a moment at the end; a taken pitch moves on quickly.
-	HoldAfter = Current.Info.exit_velocity_mps > 0.f ? 1.5f : 0.6f;
+	HoldAfter = Current.Info.exit_velocity_mps > 0.f ? 2.5f : 1.2f;
 }
 
 void ABbDirector::UpdateCamera(const BbFrame& Frame, float DeltaSeconds)
@@ -249,7 +249,7 @@ void ABbDirector::UpdateCamera(const BbFrame& Frame, float DeltaSeconds)
 	// Once the ball is hit past the mound side of the plate, follow it; otherwise frame the
 	// pitcher-to-plate line from behind home.
 	const bool bFollow = bBallInPlay;
-	const FVector Target = bFollow ? FVector(BallUE.X, BallUE.Y, FMath::Min(BallUE.Z, 1500.0) * 0.5) : ToUE(0, 20, 1);
+	const FVector Target = bFollow ? FVector(BallUE.X, BallUE.Y, FMath::Min(BallUE.Z, 1500.0) * 0.5) : ToUE(0, 16, 0);
 	CamLook = FMath::VInterpTo(CamLook, Target, DeltaSeconds, bFollow ? 4.f : 2.f);
 	const FVector Eye = Camera->GetActorLocation();
 	Camera->SetActorRotation((CamLook - Eye).Rotation());
@@ -310,7 +310,11 @@ void ABbDirector::Tick(float DeltaSeconds)
 		if (ABbHUD* Hud = GetWorld()->GetFirstPlayerController() ? Cast<ABbHUD>(GetWorld()->GetFirstPlayerController()->GetHUD()) : nullptr)
 		{
 			const BbPlayInfo& In = Current.Info;
-			if (PlayTime >= In.duration_s)
+			// The call appears when a viewer would know it: as the pitch arrives if it was not
+			// put in play, at the end of the play if it was.
+			const bool bKnown = In.exit_velocity_mps > 0.f ? PlayTime >= In.duration_s : PlayTime >= 0.55f;
+			Hud->Call = bKnown ? FString(UTF8_TO_TCHAR(In.summary)) : FString();
+			if (bKnown)
 			{
 				Hud->Scoreboard = FString::Printf(TEXT("AWAY %d   HOME %d    %s %d    %d out    %d-%d"), In.away_runs, In.home_runs, In.top ? TEXT("Top") : TEXT("Bot"), In.inning, In.outs, In.balls, In.strikes);
 			}

@@ -139,6 +139,9 @@ table PlayTimeline {
   facts: [ExplanationFact] (id: 9);
   telemetry: Telemetry (id: 10);
   view_after: bb.ss.ViewState (id: 11);
+  // One line a viewer can read: the call on this pitch and, if the play ended a plate
+  // appearance, what happened ("Ground out to short", "Single to left, 1 run scores").
+  summary: string (id: 12);
 }
 
 root_type PlayTimeline;

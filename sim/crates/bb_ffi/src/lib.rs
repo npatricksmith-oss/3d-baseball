@@ -111,7 +111,7 @@ pub struct BbFrame {
 
 /// A play's length, the scoreboard after it, and its headline measurements (SI).
 #[repr(C)]
-#[derive(Clone, Copy, Default)]
+#[derive(Clone, Copy)]
 pub struct BbPlayInfo {
     pub play_index: u32,
     pub duration_s: f32,
@@ -126,6 +126,18 @@ pub struct BbPlayInfo {
     pub release_speed_mps: f32,
     pub exit_velocity_mps: f32,
     pub launch_angle_rad: f32,
+    /// The play in words, NUL-terminated UTF-8 (ASCII in practice), truncated to fit.
+    pub summary: [u8; BB_SUMMARY_LEN],
+}
+
+/// Size of [`BbPlayInfo::summary`], including the terminating NUL.
+pub const BB_SUMMARY_LEN: usize = 96;
+
+impl Default for BbPlayInfo {
+    fn default() -> Self {
+        // SAFETY: every field is a plain number or byte array; all-zero is a valid value.
+        unsafe { std::mem::zeroed() }
+    }
 }
 
 fn timeline<'a>(blob: *const u8, len: usize) -> Option<bb_schema::tl::PlayTimeline<'a>> {
@@ -161,6 +173,10 @@ pub unsafe extern "C" fn bb_timeline_info(blob: *const u8, len: usize, out: *mut
         info.release_speed_mps = t.release_speed_mps();
         info.exit_velocity_mps = t.exit_velocity_mps();
         info.launch_angle_rad = t.launch_angle_rad();
+    }
+    if let Some(s) = tl.summary() {
+        let n = s.len().min(BB_SUMMARY_LEN - 1);
+        info.summary[..n].copy_from_slice(&s.as_bytes()[..n]);
     }
     unsafe { *out = info };
     1
@@ -273,6 +289,7 @@ mod tests {
     fn timelines_sample_to_plausible_frames() {
         let g = bb_game_create(5);
         let (mut plays, mut moved) = (0, 0);
+        let mut seen = std::collections::BTreeMap::new();
         loop {
             let (mut p, mut len) = (std::ptr::null_mut(), 0usize);
             if unsafe { bb_game_advance(g, &mut p, &mut len) } != 1 {
@@ -281,6 +298,9 @@ mod tests {
             let mut info = BbPlayInfo::default();
             assert_eq!(unsafe { bb_timeline_info(p, len, &mut info) }, 1);
             assert!(info.duration_s > 0.3 && info.duration_s < 60.0 && info.outs <= 3 && info.inning >= 1);
+            let text = std::ffi::CStr::from_bytes_until_nul(&info.summary).unwrap().to_str().unwrap();
+            assert!(!text.is_empty() && text.is_ascii(), "summary {text:?}");
+            *seen.entry(text.split(',').next().unwrap().to_string()).or_insert(0u32) += 1;
             let (mut f0, mut f1, mut fe) = (BbFrame::default(), BbFrame::default(), BbFrame::default());
             unsafe {
                 assert_eq!(bb_timeline_sample(p, len, 0.0, &mut f0), 1);
@@ -307,6 +327,11 @@ mod tests {
             plays += 1;
             unsafe { bb_blob_free(p, len) };
         }
+        // A whole game has the ordinary calls in it.
+        for call in ["Ball", "Called strike", "Foul", "Walk"] {
+            assert!(seen.contains_key(call), "no {call:?} in {seen:?}");
+        }
+        assert!(seen.keys().any(|k| k.starts_with("Ground out")) && seen.keys().any(|k| k.starts_with("Single")), "{seen:?}");
         assert!(plays > 150 && moved > 20, "{plays} pitches, {moved} with a runner covering 10 m");
         // Bad input is refused, not read.
         let junk = [0u8; 64];
