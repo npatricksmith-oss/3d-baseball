@@ -105,14 +105,9 @@ pub fn encode(step: &PitchStep, st: &RulesState) -> Vec<u8> {
             let mut v = vec![(0.0, *at)];
             if let Some(s) = step.viz.actors.iter().find(|(a, s)| a == id && !s.is_empty()).map(|x| &x.1) {
                 v.push(((s[0].0 - 0.02).max(0.0), *at));
-                // The running model starts the batter at the plate; he actually starts from
-                // his box. Over his first four metres the track eases from one to the other,
-                // so he runs out of the box and does not jump to the plate at contact.
-                let from_box = step.viz.standing.last().map(|b| b.0) == Some(*id);
-                v.extend(s.iter().map(|&(t, p)| {
-                    let w = if from_box { (p.norm() / 4.0).min(1.0) } else { 1.0 };
-                    (t, p + Vec3::new(at.x, at.y, 0.0) * (1.0 - w))
-                }));
+                // The realized positions, as the live simulator had them (the batter's run out
+                // of his box included: `live::Sim::runner_pos`).
+                v.extend(s.iter().copied());
             }
             (*id, v)
         })
@@ -231,11 +226,15 @@ pub fn encode(step: &PitchStep, st: &RulesState) -> Vec<u8> {
         mk.extend(path.bounces.iter().map(|&(t, x, y)| (t, MarkerKind::Bounce, Vec3::new(x, y, 0.0))));
         mk.extend(path.walls.iter().map(|&(t, x, y)| (t, MarkerKind::WallHit, Vec3::new(x, y, 0.0))));
     }
+    // Possession: who secured the ball and when, and each throw's release, by agent.
+    let mut mk: Vec<(f64, MarkerKind, Vec3, u16)> = mk.into_iter().map(|(t, k, p)| (t, k, p, 0)).collect();
+    mk.extend(step.viz.secured.iter().map(|&(t, id)| (t, MarkerKind::Catch, Vec3::ZERO, id)));
+    mk.extend(step.viz.released.iter().map(|&(t, id)| (t, MarkerKind::ThrowRelease, Vec3::ZERO, id)));
     let marks: Vec<_> = mk
         .into_iter()
-        .map(|(t, kind, p)| {
+        .map(|(t, kind, p, agent)| {
             let pv = v3f(p);
-            tl::Marker::create(&mut fbb, &tl::MarkerArgs { t: t as f32, kind, agent: 0, base: 0, p: Some(&pv) })
+            tl::Marker::create(&mut fbb, &tl::MarkerArgs { t: t as f32, kind, agent, base: 0, p: Some(&pv) })
         })
         .collect();
     let markv = fbb.create_vector(&marks);

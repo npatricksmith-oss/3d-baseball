@@ -56,4 +56,11 @@ Being within 0.5 m of the nominal carrying point does not establish possession. 
 
 ## Resolution
 
-Open.
+All four findings fixed (2026-11-11). `cargo test --workspace` passes; `sim-cli games --n 512 --seed 2` is unchanged at 4.32 runs/team-game with no rules warnings; the C smoke client plays a full game against the new `BbFrame`; the Unreal client was rebuilt and run offscreen for screenshots.
+
+1. **Fixed.** A backup is admitted to a throw only once the ball is more than the receiving reach (1.5 m) beyond the receiver himself, measured along the throw, not beyond the bag. Test `backup_in_front_of_the_receiver_leaves_him_the_throw` is the review's scenario; the overthrow test still passes.
+2. **Fixed.** The offset left the encoder. The live simulator now owns the batter's run out of his box (`Sim::runner_pos`: his box offset shrinks linearly to nothing over his first 4 m, `BOX_EXIT_M` [E]); tags, his own view of the ball, and the recorded track all read that one position, and the timeline writes the realized samples unchanged. He is still charged the base-path distance, which differs from this route's length by a few centimetres; that approximation is stated in the code. Test `batter_runs_out_of_his_box_onto_the_line`.
+3. **Fixed.** The live simulator records every securing of the ball and every throw release by agent; the timeline carries them as `Catch` and `ThrowRelease` markers; `bb_timeline_sample` reports `holder` and `release_in_s` in `BbFrame` (C header updated). The client starts a throwing motion only for the recorded holder within 0.3 s of his recorded release. The proximity test is gone. The FFI game test checks that a reported holder is a fielder with the ball about him and that an announced throw leaves him.
+4. **Fixed.** The clip preview requires the eight figures to exist.
+
+Not reviewed: the between-pitch staging added to the client after this review started (the ball thrown back to the pitcher, players walking to their next spots). It goes in the next review.

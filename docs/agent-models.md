@@ -451,6 +451,8 @@ Pre-pitch home positions come from alignment presets (normal, corners in, double
 
 The base path is a sequence of segments with a rounding arc at each base, radius set by speed and `Agility` [E]. Movement uses the §5.3 model. A slide decelerates at 6 m/s² [E] and lowers the body for tag geometry. A base is reached when the body touches the base volume (physics spec §9.4). Tag outs are geometric: glove-with-ball contact with the runner's capsules before the base touch.
 
+*(M4, 2026-11-11: the batter starts in his box, not on the plate. His offset from the base path shrinks linearly to nothing over his first 4 m of running (`BOX_EXIT_M` [E]); tags, his view of the ball, and the recorded track all use that position. He is charged the base-path distance, a few centimetres short of the route's true length.)*
+
 ### 6.3 Advance decisions
 
 At each decision point (contact, ball fielded, throw released, passing a base), the runner evaluates "advance" against "hold":

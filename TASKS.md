@@ -20,9 +20,9 @@ Owner direction: favor what is visible over calibration; get numbers close and m
 The [Codex review of that change set](docs/reviews/2026-11-11-codex-watch-fixes-review.md) is resolved: the catcher returns home when a runner rounds first, a backup can catch an overthrow in the air, runners hold their leads, nobody jumps or runs backward in the timeline, and the batter runs out of his box.
 
 **Next, in the order a viewer would notice:**
-- [~] Throwing, pitching and batting motion: stand-ins from the engine's stock clips are in (`914a187`: wind-up and delivery before each pitch, fielders' throws, the catcher's crouch, the batter's stance and turn). Still missing: a catching motion, the bat in the batter's hands, real baseball animation. **Codex review of `31d57bb..914a187` is running** (`docs/reviews/2026-11-11-codex-motions-review.md`); resolve it first.
+- [~] Throwing, pitching and batting motion: stand-ins from the engine's stock clips are in (`914a187`: wind-up and delivery before each pitch, fielders' throws, the catcher's crouch, the batter's stance and turn). Still missing: a catching motion, the bat in the batter's hands, real baseball animation. The [Codex review of `31d57bb..914a187`](docs/reviews/2026-11-11-codex-motions-review.md) is resolved (backups wait until a throw is past the receiver; the batter's run out of his box is in the live simulator, not the encoder; throw motions follow recorded possession, `BbFrame.holder` / `release_in_s`).
 - Cutoff and relay men on outfield throws (in both of the owner's references; not built).
-- The ball back to the pitcher and players walking to position between pitches.
+- [x] The ball back to the pitcher and players walking to position between pitches: staged by the client (`StartReset` / `ResetFrame` in `BbDirector.cpp`; [docs/unreal-spike.md](docs/unreal-spike.md)). **Not yet reviewed by Codex**: include it in the next review. The owner has not watched it yet.
 - Ground balls go for hits too often (.377; infield hits ~16% of grounders) since leads and the faster batter.
 - Still open from reviews: a runner who crosses home before a catch never returns; foul share 24% vs 50%; foul-territory walls.
 

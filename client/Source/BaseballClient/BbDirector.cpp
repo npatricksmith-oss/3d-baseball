@@ -309,7 +309,7 @@ void ABbDirector::BeginPlay()
 
 	// Clip preview (-BbAnimTest): a row of figures each looping one stock clip slowly, for
 	// choosing which clip stands in for which baseball motion. No game is played.
-	if (FParse::Param(Cmd, TEXT("BbAnimTest")) && FigureMesh)
+	if (FParse::Param(Cmd, TEXT("BbAnimTest")) && Figures.Num() >= 8)
 	{
 		const TCHAR* Clips[8] = {
 			TEXT("/Game/Characters/Mannequins/Anims/Unarmed/Attack/MM_Attack_01.MM_Attack_01"),
@@ -391,7 +391,189 @@ void ABbDirector::BeginPlayback(FBbPlay&& Play)
 	HoldAfter = Current.Info.exit_velocity_mps > 0.f ? 2.5f : 0.7f;
 }
 
-void ABbDirector::PoseFigure(int32 Index, const BbFrame& Frame, const BbFrame& Soon, const BbFrame& Later, float SimDt, float DeltaSeconds)
+bool ABbDirector::StartReset(const FBbPlay& Next)
+{
+	BbFrame From, To;
+	if (!Sim->Sample(Current, Current.Info.duration_s, From) || !Sim->Sample(Next, 0.f, To) || To.n_actors == 0)
+	{
+		return false;
+	}
+	auto Find = [](const BbFrame& F, uint16 Agent) -> const BbActor*
+	{
+		for (uint32 I = 0; I < F.n_actors; ++I)
+		{
+			if (F.actors[I].agent == Agent)
+			{
+				return &F.actors[I];
+			}
+		}
+		return nullptr;
+	};
+	// Fielders carry 0x80 plus their position in the low byte: 1 the pitcher, 2 the catcher.
+	auto AtPosition = [](const BbFrame& F, int32 Position) -> const BbActor*
+	{
+		for (uint32 I = 0; I < F.n_actors; ++I)
+		{
+			if ((F.actors[I].agent & 0xFF) == (0x80 | Position))
+			{
+				return &F.actors[I];
+			}
+		}
+		return nullptr;
+	};
+	const BbActor* WasPitcher = AtPosition(From, 1);
+	const BbActor* Pitcher = AtPosition(To, 1);
+	const bool bSideChange = WasPitcher && Pitcher && (WasPitcher->agent >> 8) != (Pitcher->agent >> 8);
+	// Stand-in dugouts beside the plate: home on the first-base side, away on the third-base side.
+	auto Dugout = [](uint16 Agent) { return FVector2D((Agent >> 8) != 0 ? 19.0 : -19.0, 6.0); };
+	auto OnDeck = [](uint16 Agent) { return FVector2D((Agent >> 8) != 0 ? 10.0 : -10.0, -3.0); };
+
+	// Everyone in the next pitch first, in its order, so the hand-over to the play is seamless.
+	Movers.Reset();
+	for (uint32 I = 0; I < To.n_actors; ++I)
+	{
+		const BbActor& A = To.actors[I];
+		FResetMover M;
+		M.Agent = A.agent;
+		M.To = FVector2D(A.pos[0], A.pos[1]);
+		if (const BbActor* Was = Find(From, A.agent))
+		{
+			M.From = FVector2D(Was->pos[0], Was->pos[1]);
+		}
+		else
+		{
+			// New on the field: a fielder from his dugout, a batter from the on-deck circle.
+			// A fielder with far to go is picked up already on his way out.
+			M.From = (A.agent & 0x80) != 0 ? Dugout(A.agent) : OnDeck(A.agent);
+			const double Dist = (M.To - M.From).Size();
+			if (Dist > ResetEnterMaxM)
+			{
+				M.From = M.To + (M.From - M.To) * (ResetEnterMaxM / Dist);
+			}
+		}
+		Movers.Add(M);
+	}
+	const int32 NumStay = Movers.Num();
+	// Then whoever is leaving (the retired batter, a runner who scored, the side going in),
+	// as many as there are figures for. They head for the dugout and are gone at the pitch.
+	for (uint32 I = 0; I < From.n_actors && Movers.Num() < MaxActors; ++I)
+	{
+		const BbActor& A = From.actors[I];
+		if (!Find(To, A.agent))
+		{
+			FResetMover M;
+			M.Agent = A.agent;
+			M.From = FVector2D(A.pos[0], A.pos[1]);
+			M.To = Dugout(A.agent);
+			Movers.Add(M);
+		}
+	}
+	float Longest = 0.f;
+	for (int32 I = 0; I < Movers.Num(); ++I)
+	{
+		FResetMover& M = Movers[I];
+		const float Dist = (M.To - M.From).Size();
+		M.SpeedMps = Dist < ResetWalkWithinM ? ResetWalkMps : ResetJogMps;
+		if (I < NumStay)
+		{
+			// Nobody keeps the next pitch waiting longer than the cap: he hurries instead.
+			M.SpeedMps = FMath::Max(M.SpeedMps, Dist / ResetMaxSeconds);
+			Longest = FMath::Max(Longest, Dist / M.SpeedMps);
+		}
+	}
+
+	// The ball: whoever ended the play with it throws it to the pitcher once he is back on
+	// the mound. If nobody has it (a home run, a foul into the seats) the catcher throws a
+	// new one. At a change of sides nothing is thrown.
+	ResetThrower = -1;
+	ResetBallFrom = FVector(From.ball[0], From.ball[1], From.ball[2]);
+	ResetBallTo = Pitcher ? FVector(Pitcher->pos[0], Pitcher->pos[1], 1.4) : FVector(0.0, 18.44, 1.4);
+	ResetDuration = FMath::Max(Longest, 0.6f);
+	if (!bSideChange && Pitcher)
+	{
+		int32 Thrower = -1;
+		for (int32 I = 0; I < NumStay; ++I)
+		{
+			if (From.holder == (int32)Movers[I].Agent && Find(From, Movers[I].Agent))
+			{
+				Thrower = I;
+			}
+		}
+		if (Thrower < 0)
+		{
+			for (int32 I = 0; I < NumStay; ++I)
+			{
+				if ((Movers[I].Agent & 0xFF) == 0x82)
+				{
+					Thrower = I;
+					ResetBallFrom = FVector(Movers[I].From.X, Movers[I].From.Y, 1.2);
+				}
+			}
+		}
+		if (Thrower >= 0 && Movers[Thrower].Agent != Pitcher->agent)
+		{
+			FResetMover& M = Movers[Thrower];
+			const FResetMover* PitcherMove = Movers.FindByPredicate([Pitcher](const FResetMover& X) { return X.Agent == Pitcher->agent; });
+			const float PitcherArrives = PitcherMove ? (PitcherMove->To - PitcherMove->From).Size() / PitcherMove->SpeedMps : 0.f;
+			const float Dist = (ResetBallTo - FVector(M.From.X, M.From.Y, 1.2)).Size();
+			ResetThrower = Thrower;
+			ResetFlight = FMath::Clamp(Dist / ResetThrowMps, 0.35f, 2.5f);
+			ResetThrowAt = FMath::Max(0.55f, PitcherArrives - ResetFlight);
+			// He stands for the throw and its follow-through, then makes up the time.
+			M.Depart = ResetThrowAt + 0.45f;
+			const float Walk = (M.To - M.From).Size();
+			M.SpeedMps = FMath::Max(M.SpeedMps, Walk / 3.f);
+			ResetDuration = FMath::Max3(ResetDuration, ResetThrowAt + ResetFlight + 0.3f, M.Depart + Walk / M.SpeedMps);
+		}
+	}
+	return true;
+}
+
+void ABbDirector::ResetFrame(float T, BbFrame& Out, bool& bBallShown) const
+{
+	FMemory::Memzero(Out);
+	Out.n_actors = Movers.Num();
+	Out.holder = -1;
+	Out.release_in_s = -1.f;
+	for (int32 I = 0; I < Movers.Num(); ++I)
+	{
+		const FResetMover& M = Movers[I];
+		const FVector2D Path = M.To - M.From;
+		const double Dist = Path.Size();
+		const double Gone = FMath::Min(Dist, (double)M.SpeedMps * FMath::Max(0.f, T - M.Depart));
+		const FVector2D P = Dist > 1e-3 ? M.From + Path * (Gone / Dist) : M.To;
+		Out.actors[I].agent = M.Agent;
+		Out.actors[I].pos[0] = P.X;
+		Out.actors[I].pos[1] = P.Y;
+	}
+	FVector B = ResetBallTo;
+	bBallShown = false;
+	if (ResetThrower >= 0)
+	{
+		// The thrower stands still until the ball is gone, holding it as the sim does: 1.2 m
+		// above his feet.
+		const FVector Hand(Movers[ResetThrower].From.X, Movers[ResetThrower].From.Y, 1.2);
+		const float U = (T - ResetThrowAt) / ResetFlight;
+		if (U < 0.f)
+		{
+			B = FMath::Lerp(ResetBallFrom, Hand, FMath::Clamp(T / 0.2f, 0.f, 1.f));
+			bBallShown = true;
+			Out.holder = Movers[ResetThrower].Agent;
+			Out.release_in_s = ResetThrowAt - T;
+		}
+		else if (U < 1.f)
+		{
+			// A lob under gravity: the arc's height follows from its time in the air.
+			B = FMath::Lerp(Hand, ResetBallTo, U) + FVector(0.0, 0.0, 4.9 * ResetFlight * ResetFlight * U * (1.f - U));
+			bBallShown = true;
+		}
+	}
+	Out.ball[0] = B.X;
+	Out.ball[1] = B.Y;
+	Out.ball[2] = B.Z;
+}
+
+void ABbDirector::PoseFigure(int32 Index, const BbFrame& Frame, const BbFrame& Later, float SimDt, float DeltaSeconds)
 {
 	const BbActor& A = Frame.actors[Index];
 	ASkeletalMeshActor* F = Figures[Index];
@@ -430,12 +612,6 @@ void ABbDirector::PoseFigure(int32 Index, const BbFrame& Frame, const BbFrame& S
 	const bool bStill = St.SpeedCm < 40.f;
 	const UAnimSequence* Manual = nullptr;
 	float ClipTime = 0.f;
-	auto Holds = [](const BbFrame& F, const BbActor& Who)
-	{
-		// The sim carries a held ball 1.2 m above the fielder's feet.
-		const float Dx = F.ball[0] - Who.pos[0], Dy = F.ball[1] - Who.pos[1], Dz = F.ball[2] - (Who.pos[2] + 1.2f);
-		return Dx * Dx + Dy * Dy + Dz * Dz < 0.25f;
-	};
 	if (bFielder && Position == 1 && PlayTime < 0.8f && AnimPitch)
 	{
 		// The delivery: the clip's strike (1.0 s in) lands on the release (play time 0).
@@ -445,12 +621,13 @@ void ABbDirector::PoseFigure(int32 Index, const BbFrame& Frame, const BbFrame& S
 	}
 	else if (bFielder && AnimThrow)
 	{
-		// A throw: he has the ball now and will not in 0.3 s. The clip's release (0.45 s
-		// in) is timed to that moment; he turns toward where the ball is going.
-		if (!St.bThrowing && PlayTime > 0.f && Index < (int32)Soon.n_actors && Holds(Frame, A) && !Holds(Soon, Soon.actors[Index]))
+		// A throw: the timeline says he has the ball and will release it within 0.3 s. The
+		// clip's release (0.45 s in) is timed to that moment; he turns toward where the ball
+		// is going. Possession comes from the sim's record, never from how near the ball is.
+		if (!St.bThrowing && Frame.holder == (int32)A.agent && Frame.release_in_s >= 0.f && Frame.release_in_s <= 0.3f)
 		{
 			St.bThrowing = true;
-			St.ThrowStart = PlayTime - 0.15f;
+			St.ThrowStart = PlayTime + Frame.release_in_s - 0.45f;
 			St.ThrowYaw = (ToUE(Later.ball) - Foot).Rotation().Yaw;
 		}
 		if (St.bThrowing)
@@ -618,15 +795,32 @@ void ABbDirector::Tick(float DeltaSeconds)
 	{
 		PlayTime += bPaused ? 0.f : DeltaSeconds * Speed;
 		const float T = FMath::Clamp(PlayTime, 0.f, Current.Info.duration_s);
-		// Two looks ahead, for motions that must start before the event they lead to.
-		BbFrame Frame, Soon, Later;
-		Sim->Sample(Current, T + 0.3f, Soon);
-		Sim->Sample(Current, T + 0.7f, Later);
-		if (Sim->Sample(Current, T, Frame))
+		// A look ahead, for motions that must aim at where the ball is going.
+		BbFrame Frame, Later;
+		bool bHave = false;
+		// During the wind-up the ball is in the pitcher's glove.
+		bool bBallShown = PlayTime >= 0.f;
+		if (bReset)
+		{
+			ResetTime += bPaused ? 0.f : DeltaSeconds * Speed;
+			bool bUnused = false;
+			ResetFrame(ResetTime, Frame, bBallShown);
+			ResetFrame(ResetTime + 0.7f, Later, bUnused);
+			bHave = true;
+		}
+		else
+		{
+			// A look-ahead that cannot be sampled falls back to the present frame.
+			bHave = Sim->Sample(Current, T, Frame);
+			if (!Sim->Sample(Current, T + 0.7f, Later))
+			{
+				Later = Frame;
+			}
+		}
+		if (bHave)
 		{
 			Ball->SetActorLocation(ToUE(Frame.ball));
-			// During the wind-up the ball is in the pitcher's glove.
-			Ball->SetActorHiddenInGame(PlayTime < 0.f);
+			Ball->SetActorHiddenInGame(!bBallShown);
 			Bat->SetActorHiddenInGame(Frame.has_bat == 0);
 			if (Frame.has_bat != 0)
 			{
@@ -647,7 +841,7 @@ void ABbDirector::Tick(float DeltaSeconds)
 					Figures[I]->SetActorHiddenInGame(!bShow);
 					if (bShow)
 					{
-						PoseFigure(I, Frame, Soon, Later, bPaused ? 0.f : DeltaSeconds * Speed, DeltaSeconds);
+						PoseFigure(I, Frame, Later, bPaused ? 0.f : DeltaSeconds * Speed, DeltaSeconds);
 					}
 					else
 					{
@@ -700,14 +894,34 @@ void ABbDirector::Tick(float DeltaSeconds)
 				? FString::Printf(TEXT("Pitch %.0f mph   Exit %.0f mph at %.0f deg"), Mph, In.exit_velocity_mps * 2.23694f, FMath::RadiansToDegrees(In.launch_angle_rad))
 				: FString::Printf(TEXT("Pitch %.0f mph"), Mph);
 		}
-		if (PlayTime >= Current.Info.duration_s + HoldAfter && bPending && Pending.IsReady())
+		if (bReset)
+		{
+			if (ResetTime >= ResetDuration)
+			{
+				bReset = false;
+				BeginPlayback(MoveTemp(NextPlay));
+				NextPlay = FBbPlay();
+			}
+		}
+		else if (PlayTime >= Current.Info.duration_s + HoldAfter && bPending && Pending.IsReady())
 		{
 			FBbPlay Next = Pending.Get();
 			bPending = false;
-			BeginPlayback(MoveTemp(Next));
-			if (!bGameOver)
+			if (Next.bValid && StartReset(Next))
 			{
+				// The next pitch waits while everyone gets back into place.
+				NextPlay = MoveTemp(Next);
+				bReset = true;
+				ResetTime = 0.f;
 				RequestNext();
+			}
+			else
+			{
+				BeginPlayback(MoveTemp(Next));
+				if (!bGameOver)
+				{
+					RequestNext();
+				}
 			}
 		}
 	}
@@ -754,6 +968,10 @@ void ABbDirector::EndPlay(const EEndPlayReason::Type Reason)
 	if (Sim && Current.Blob)
 	{
 		Sim->Release(Current);
+	}
+	if (Sim && NextPlay.Blob)
+	{
+		Sim->Release(NextPlay);
 	}
 	Sim.Reset();
 	Super::EndPlay(Reason);

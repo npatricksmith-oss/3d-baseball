@@ -109,7 +109,40 @@ private:
 		const UAnimSequence* Manual = nullptr;
 	};
 	TArray<FFigureState> FigureState;
-	void PoseFigure(int32 Index, const BbFrame& Frame, const BbFrame& Soon, const BbFrame& Later, float SimDt, float DeltaSeconds);
+
+	// Between pitches: the ball goes back to the pitcher and everyone walks or jogs to where
+	// the next pitch starts; players leaving the field head for their dugout. This is the
+	// client's own staging of dead time. The sim does not model it and nothing here feeds back.
+	struct FResetMover
+	{
+		uint16 Agent = 0;
+		FVector2D From = FVector2D::ZeroVector; // sim frame, metres
+		FVector2D To = FVector2D::ZeroVector;
+		float Depart = 0.f;
+		float SpeedMps = 0.f;
+	};
+	// Staging values (client presentation only).
+	float ResetWalkMps = 1.6f;
+	float ResetJogMps = 4.5f;
+	float ResetWalkWithinM = 4.f;
+	float ResetMaxSeconds = 4.5f;
+	float ResetEnterMaxM = 30.f;
+	float ResetThrowMps = 22.f;
+	bool bReset = false;
+	float ResetTime = 0.f;
+	float ResetDuration = 0.f;
+	FBbPlay NextPlay;
+	TArray<FResetMover> Movers;
+	/** Index into Movers of whoever returns the ball, or -1 when no ball is thrown back. */
+	int32 ResetThrower = -1;
+	FVector ResetBallFrom = FVector::ZeroVector; // sim frame, metres
+	FVector ResetBallTo = FVector::ZeroVector;
+	float ResetThrowAt = 0.f;
+	float ResetFlight = 0.f;
+	bool StartReset(const FBbPlay& Next);
+	/** The staged frame at reset time T; false in bBallShown while the ball is in a glove. */
+	void ResetFrame(float T, BbFrame& Out, bool& bBallShown) const;
+	void PoseFigure(int32 Index, const BbFrame& Frame, const BbFrame& Later, float SimDt, float DeltaSeconds);
 	UPROPERTY()
 	TObjectPtr<AStaticMeshActor> Ball;
 	UPROPERTY()

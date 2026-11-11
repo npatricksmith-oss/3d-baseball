@@ -47,7 +47,7 @@ Unattended: add `-RenderOffscreen -BbShots=6` (screenshots to `client/Saved/Shot
 ## Known gaps in v0
 
 - The baseball motions are stand-ins from the engine's stock clips, driven by play time: a wind-up and strike for the pitcher's delivery (each pitch opens 1.0 s before release), a punch for a fielder's throw, a landing crouch for the catcher, a guard stance for the batter, who turns with the bat. There is no catching motion, the bat is not in the batter's hands, and none of it is real baseball animation. `-BbAnimTest` previews the stock clips side by side.
-- Between pitches everyone snaps back to his starting spot; the ball is not returned to the pitcher.
+- Between pitches the client stages the dead time itself (the sim does not model it): whoever has the ball throws it to the pitcher once he is back on the mound (the catcher throws a new one if nobody has it), everyone walks or jogs to where the next pitch starts, the retired batter and the side going in head for a stand-in dugout point, and the new batter comes from the on-deck circle. It is capped at about 4.5 s; players with far to go hurry, and fielders taking the field appear already on their way out. There is no real dugout, and no throwing the ball around the infield.
 - The scoreboard has no names, no runners-on display, no line score.
 - The ball is hard to see on deep flies.
 - The park dimensions are repeated in the client (`BbDirector.cpp`) instead of coming from the sim.

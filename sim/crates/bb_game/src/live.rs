@@ -53,6 +53,8 @@ const PLAY_LIMIT_S: f64 = 40.0;
 /// Fraction of arm strength used on throws [E].
 const THROW_FRAC: f64 = 0.92;
 const RECEIVE_REACH: f64 = 1.5;
+/// Running distance over which the batter leaves his box and joins the base path, m [E].
+const BOX_EXIT_M: f64 = 4.0;
 /// How far behind a base its backup stands, on the line of the throw, m [E] (coaching
 /// guides give 15–18 m for an outfielder; foul ground allows less).
 const BACKUP_M: f64 = 13.0;
@@ -158,6 +160,8 @@ pub struct LiveInput<'a> {
     pub runners: Vec<RunnerIn>,
     pub fielders: [AgentId; 9],
     pub fattrs: [FielderAttrs; 9],
+    /// Where the batter stands in his box (ground point). He runs out of it: see `Sim::runner_pos`.
+    pub batter_box: Vec3,
     pub seed: u64,
     pub play: u32,
     /// Record ball and actor tracks (timelines and visualization only).
@@ -173,6 +177,10 @@ pub struct LiveOutput {
     pub ball_track: Vec<(f64, Vec3)>,
     /// Every fielder's and runner's position every 0.1 s.
     pub actors: Vec<(AgentId, Vec<(f64, Vec3)>)>,
+    /// Every time a fielder secured the ball (t, fielder), in time order.
+    pub secured: Vec<(f64, AgentId)>,
+    /// Every throw release (t, thrower), in time order.
+    pub released: Vec<(f64, AgentId)>,
 }
 
 /// Profiling counters (BB_PROF=1): nanoseconds and calls for predict / intercept / ticks.
@@ -421,7 +429,7 @@ impl<'a> Sim<'a> {
         let mut g = rng(self.inp.seed, self.inp.play, r.id, Purpose::RunnerPerception, sub);
         let err = [g.truncated_normal(4.0), g.truncated_normal(4.0), g.truncated_normal(4.0), g.truncated_normal(4.0)];
         let view = (self.t - self.inp.t_contact).max(0.0);
-        self.predict_from(path_pos(r.s), RUNNER_READ_SIGMA0, 0.6, view, err)
+        self.predict_from(self.runner_pos(r), RUNNER_READ_SIGMA0, 0.6, view, err)
     }
 
     /// When the runner believes the defense can field the ball on `pred`: the earliest
@@ -795,16 +803,18 @@ impl<'a> Sim<'a> {
                 continue;
             }
             // On a throw only the receiver tries, and nobody in its path in front of him; the
-            // base's backup may take it once it has gone past the base.
-            if receiver.is_some() && receiver != Some(i) {
-                let past_base = match self.ball {
+            // base's backup may take it only once it is beyond the receiver's reach on the far
+            // side of him, so the receiver always has his own chance first.
+            if let Some(rcv) = receiver.filter(|&rcv| rcv != i) {
+                let past_receiver = match self.ball {
                     Ball::Thrown { to_base, .. } if fd.backs == Some(to_base) => {
-                        let base = base_pos(to_base);
-                        (b.x - base.x) * bv.x + (b.y - base.y) * bv.y > 0.0
+                        let at = self.f[rcv].pos;
+                        let vh = m::hypot(bv.x, bv.y).max(1e-9);
+                        ((b.x - at.x) * bv.x + (b.y - at.y) * bv.y) / vh > RECEIVE_REACH
                     }
                     _ => false,
                 };
-                if !past_base {
+                if !past_receiver {
                     continue;
                 }
             }
@@ -875,6 +885,7 @@ impl<'a> Sim<'a> {
                 let id = fd.id;
                 self.ball = Ball::Held { by: i };
                 self.secured_at = self.t;
+                self.out.secured.push((self.t, id));
                 self.emit(Input::GloveSecured { t: self.t, fielder: id, x: b.x, y: b.y });
                 return;
             } else if d <= RIM {
@@ -1200,7 +1211,7 @@ impl<'a> Sim<'a> {
                 continue;
             }
             let on_base = (r.s / BASE_L - (r.s / BASE_L).round()).abs() * BASE_L < 0.3;
-            if !on_base && (path_pos(r.s) - fd.pos).norm() < 1.2 {
+            if !on_base && (self.runner_pos(r) - fd.pos).norm() < 1.2 {
                 let id = r.id;
                 self.emit(Input::TagContact { t: self.t, fielder: fd.id, runner: id, holding_ball: true });
                 if self.done {
@@ -1297,6 +1308,7 @@ impl<'a> Sim<'a> {
         let h = Vec3::new(aim.x - r0.x, aim.y - r0.y, 0.0).normalized().rotate(Vec3::Z, fd.a.arm_sigma * r.truncated_normal(4.0));
         let v0 = h * vh + Vec3::new(0.0, 0.0, vz);
         self.ball = Ball::Thrown { r0, v0, t0: self.t, to_base: b, receiver };
+        self.out.released.push((self.t, fd.id));
         self.f[receiver].target = tgt;
         self.back_up_throw(fd.pos, b);
     }
@@ -1324,6 +1336,21 @@ impl<'a> Sim<'a> {
         calm && in_infield && self.t >= fd.ready_at
     }
 
+    /// Where a runner is. Runners move along the base path (`path_pos`), except that the
+    /// batter starts in his box, off the path: his offset from the plate shrinks linearly to
+    /// nothing over his first `BOX_EXIT_M` of running. Tags, his own view of the ball, and the
+    /// recorded track all use this one position. The distance he is charged for is still the
+    /// base-path distance, which is within a few centimetres of this route's length.
+    fn runner_pos(&self, r: &Runner) -> Vec3 {
+        let p = path_pos(r.s);
+        if r.start == 0 && r.s < BOX_EXIT_M {
+            let b = self.inp.batter_box;
+            p + Vec3::new(b.x, b.y, 0.0) * (1.0 - r.s / BOX_EXIT_M)
+        } else {
+            p
+        }
+    }
+
     /// Record the ball every tick and everyone's position every 0.1 s; `last` forces both,
     /// so the track ends on the instant that ended the play.
     fn record(&mut self, last: bool) {
@@ -1333,9 +1360,10 @@ impl<'a> Sim<'a> {
             for (i, fd) in self.f.iter().enumerate() {
                 self.out.actors[i].1.push((self.t, fd.pos));
             }
-            for (k, r) in self.r.iter().enumerate() {
-                if !r.out {
-                    self.out.actors[9 + k].1.push((self.t, path_pos(r.s)));
+            for k in 0..self.r.len() {
+                if !self.r[k].out {
+                    let p = self.runner_pos(&self.r[k]);
+                    self.out.actors[9 + k].1.push((self.t, p));
                 }
             }
         }
@@ -1422,7 +1450,7 @@ fn new_sim<'a>(inp: &'a LiveInput<'a>, st: &'a mut RulesState) -> Sim<'a> {
         f,
         r,
         primary: 0,
-        out: LiveOutput { facts: Vec::new(), events: Vec::new(), path, ball_track: Vec::new(), actors },
+        out: LiveOutput { facts: Vec::new(), events: Vec::new(), path, ball_track: Vec::new(), actors, secured: Vec::new(), released: Vec::new() },
         bounce_k: 1000,
         done: false,
         last_fact_t: t_c,
@@ -1625,6 +1653,7 @@ mod tests {
             runners,
             fielders: core::array::from_fn(|i| 0x0180 | (i as u16 + 1)),
             fattrs,
+            batter_box: Vec3::new(-0.95, 0.30, 0.0),
             seed: 11,
             play: 3,
             record: false,
@@ -2098,5 +2127,55 @@ mod tests {
                 assert_ne!(draws[i], draws[j], "decisions {j} and {i} used the same timing draw");
             }
         }
+    }
+
+    // Review of 2026-11-11 (motions), finding 1: a backup standing between the base and the
+    // receiver (who has stepped past the bag to meet the throw) must leave a catchable throw
+    // to the receiver.
+    #[test]
+    fn backup_in_front_of_the_receiver_leaves_him_the_throw() {
+        let fx = fixture(&[]);
+        let inp = input(&fx, vec![RunnerIn { id: fx.st.batter, base: 0, speed: 8.2 }]);
+        let mut st = fx.st.clone();
+        let mut sim = new_sim(&inp, &mut st);
+        let second = base_pos(2);
+        sim.t = 2.0;
+        sim.f[3].role = Role::Cover(2);
+        sim.f[3].pos = second + Vec3::new(0.0, -0.5, 0.0);
+        sim.f[3].target = sim.f[3].pos;
+        sim.f[0].role = Role::Backup;
+        sim.f[0].backs = Some(2);
+        sim.f[0].pos = second + Vec3::new(0.0, -0.2, 0.0);
+        sim.f[0].target = sim.f[0].pos;
+        // From deep center, arriving chest-high at the receiver.
+        let (r0, tf) = (Vec3::new(0.0, 80.0, 1.8), 1.6);
+        let end = sim.f[3].pos + Vec3::new(0.0, 0.0, 1.3);
+        let v0 = Vec3::new(0.0, (end.y - r0.y) / tf, (end.z - r0.z + 0.5 * G * tf * tf) / tf);
+        sim.ball = Ball::Thrown { r0, v0, t0: 2.0, to_base: 2, receiver: 3 };
+        for _ in 0..110 {
+            sim.update_thrown();
+            sim.try_captures();
+            sim.t += DT;
+        }
+        assert!(matches!(sim.ball, Ball::Held { by: 3 }), "ball: {:?}", sim.ball);
+    }
+
+    // Finding 2 of the same review: the batter's realized track starts in his box and joins
+    // the first-base line; nothing downstream has to move him.
+    #[test]
+    fn batter_runs_out_of_his_box_onto_the_line() {
+        let fx = fixture(&[]);
+        let inp = input(&fx, vec![RunnerIn { id: fx.st.batter, base: 0, speed: 8.2 }]);
+        let mut st = fx.st.clone();
+        let out = simulate_live(&LiveInput { record: true, ..inp }, &mut st);
+        let track = &out.actors.iter().find(|(id, _)| *id == fx.st.batter).unwrap().1;
+        let p0 = track[0].1;
+        assert!((p0 - Vec3::new(-0.95, 0.30, 0.0)).norm() < 0.05, "starts at {p0:?}");
+        // Past his first few strides he is on the line from home to first (x = y).
+        let on_line: Vec<_> = track.iter().filter(|(_, p)| p.x > 4.0 && p.x < 19.0 && p.y < 19.0).collect();
+        assert!(!on_line.is_empty());
+        assert!(on_line.iter().all(|(_, p)| (p.x - p.y).abs() < 1e-9), "{on_line:?}");
+        // And no step along the way is longer than a sprinter covers in 0.1 s.
+        assert!(track.windows(2).all(|w| (w[1].1 - w[0].1).norm() <= 11.0 * (w[1].0 - w[0].0) + 1e-9));
     }
 }

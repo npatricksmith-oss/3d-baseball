@@ -101,6 +101,9 @@ pub struct PlayViz {
     /// Where everyone stands as the pitch is thrown: nine fielders, runners on their bases,
     /// the batter in his box.
     pub standing: Vec<(u16, bb_math::Vec3)>,
+    /// Possession during a live ball: when each fielder secured the ball, and each throw's release.
+    pub secured: Vec<(f64, u16)>,
+    pub released: Vec<(f64, u16)>,
 }
 
 /// Everything one pitch produced, for timelines and visualization.
@@ -252,7 +255,7 @@ impl Game {
             let fside = 1 - side as u16;
             let fielders: [u16; 9] = core::array::from_fn(|i| (fside << 8) | 0x80 | (i as u16 + 1));
             let out = crate::live::simulate_live(
-                &crate::live::LiveInput { env: &mu.env, field: &self.field, ball, t_contact: t_c, runners, fielders, fattrs: self.fattrs, seed, play, record },
+                &crate::live::LiveInput { env: &mu.env, field: &self.field, ball, t_contact: t_c, runners, fielders, fattrs: self.fattrs, batter_box: { let p = mu.template.pivot(&mu.batter); bb_math::Vec3::new(p.x, p.y, 0.0) }, seed, play, record },
                 st,
             );
             if record {
@@ -264,6 +267,8 @@ impl Game {
                     }
                 }
                 viz.actors = out.actors.clone();
+                viz.secured = out.secured.clone();
+                viz.released = out.released.clone();
             }
             self.pending_rules.extend(out.events.iter().cloned());
             self.log.extend(out.events);

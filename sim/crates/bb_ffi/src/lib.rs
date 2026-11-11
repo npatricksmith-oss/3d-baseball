@@ -7,6 +7,7 @@
 #![allow(unsafe_code)]
 
 use bb_game::game::Game;
+use bb_schema::tl::MarkerKind;
 
 /// Opaque game handle.
 pub struct BbGame {
@@ -111,6 +112,10 @@ pub struct BbFrame {
     pub has_bat: u32,
     pub bat_knob: [f32; 3],
     pub bat_tip: [f32; 3],
+    /// The fielder who has the ball at this instant (agent id), or -1 if nobody does.
+    pub holder: i32,
+    /// Seconds until that holder releases a throw, or -1 if he does not throw it.
+    pub release_in_s: f32,
 }
 
 /// A play's length, the scoreboard after it, and its headline measurements (SI).
@@ -210,7 +215,24 @@ fn v3(v: &bb_schema::Vec3f) -> [f32; 3] {
 #[unsafe(no_mangle)]
 pub unsafe extern "C" fn bb_timeline_sample(blob: *const u8, len: usize, t: f32, out: *mut BbFrame) -> i32 {
     let (Some(tl), false) = (timeline(blob, len), out.is_null()) else { return -1 };
-    let mut frame = BbFrame::default();
+    let mut frame = BbFrame { holder: -1, release_in_s: -1.0, ..Default::default() };
+    // Possession, from the markers: the latest securing of the ball not yet followed by a
+    // release, and the first release after now.
+    if let Some(marks) = tl.markers() {
+        let (mut caught, mut let_go, mut next) = (None::<(f32, u16)>, f32::NEG_INFINITY, f32::INFINITY);
+        for mk in marks.iter() {
+            match mk.kind() {
+                MarkerKind::Catch if mk.t() <= t && caught.is_none_or(|c| mk.t() >= c.0) => caught = Some((mk.t(), mk.agent())),
+                MarkerKind::ThrowRelease if mk.t() <= t => let_go = let_go.max(mk.t()),
+                MarkerKind::ThrowRelease => next = next.min(mk.t()),
+                _ => {}
+            }
+        }
+        if let Some((_, who)) = caught.filter(|c| c.0 >= let_go) {
+            frame.holder = who as i32;
+            frame.release_in_s = if next.is_finite() { next - t } else { -1.0 };
+        }
+    }
     // Ball: the last segment that has started by `t` (segments are in time order).
     if let Some(segs) = tl.ball().and_then(|b| b.segments()) {
         let mut best = None;
@@ -316,6 +338,7 @@ mod tests {
         let g = bb_game_create(5);
         let (mut plays, mut moved, mut contacts, mut awards) = (0, 0, 0, 0);
         let mut any_on = false;
+        let (mut held, mut thrown) = (0u32, 0u32);
         let mut seen = std::collections::BTreeMap::new();
         loop {
             let (mut p, mut len) = (std::ptr::null_mut(), 0usize);
@@ -387,6 +410,32 @@ mod tests {
                 prev = Some(f);
                 t += 0.05;
             }
+            // Possession: whoever is reported holding the ball is a fielder on the field with
+            // the ball about him, and a throw reported as coming does leave him.
+            let mut t = 0.0;
+            while t <= info.duration_s {
+                let mut f = BbFrame::default();
+                unsafe { bb_timeline_sample(p, len, t, &mut f) };
+                if f.holder >= 0 {
+                    let near = |f: &BbFrame| {
+                        let a = f.actors[..f.n_actors as usize].iter().find(|a| a.agent as i32 == f.holder).expect("the holder is on the field");
+                        assert!(a.agent & 0x80 != 0, "holder {:#x} is not a fielder", a.agent);
+                        (0..3).map(|j| (f.ball[j] - a.pos[j] - if j == 2 { 1.2 } else { 0.0 }).powi(2)).sum::<f32>().sqrt()
+                    };
+                    assert!(near(&f) < 2.0, "play {} at {t:.2} s: the ball is {} m from its holder", info.play_index, near(&f));
+                    held += 1;
+                    if f.release_in_s > 0.0 && f.release_in_s < 0.1 && t + f.release_in_s + 0.3 < info.duration_s {
+                        let mut g = BbFrame::default();
+                        unsafe { bb_timeline_sample(p, len, t + f.release_in_s + 0.3, &mut g) };
+                        g.holder = f.holder;
+                        assert!(near(&g) > 3.0, "play {} at {t:.2} s: the announced throw did not leave", info.play_index);
+                        thrown += 1;
+                    }
+                } else {
+                    assert_eq!(f.release_in_s, -1.0);
+                }
+                t += 0.05;
+            }
             // The ball never goes under the turf, at any instant of any play.
             let mut t = 0.0;
             while t <= info.duration_s {
@@ -415,6 +464,7 @@ mod tests {
             plays += 1;
             unsafe { bb_blob_free(p, len) };
         }
+        assert!(held > 100 && thrown > 10, "held {held} frames, {thrown} throws");
         // A whole game has the ordinary calls in it.
         for call in ["Ball", "Called strike", "Foul", "Walk"] {
             assert!(seen.contains_key(call), "no {call:?} in {seen:?}");

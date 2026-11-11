@@ -23,6 +23,8 @@ typedef struct { uint16_t agent; uint16_t _pad; float pos[3]; float yaw; } BbAct
 typedef struct {
   float ball[3]; uint32_t n_actors; BbActor actors[BB_MAX_ACTORS];
   uint32_t has_bat; float bat_knob[3]; float bat_tip[3]; /* the bat, while someone holds it */
+  int32_t holder;      /* agent id of the fielder who has the ball, or -1 */
+  float release_in_s;  /* seconds until that holder releases a throw, or -1 if he does not */
 } BbFrame;
 #define BB_SUMMARY_LEN 96
 typedef struct {
