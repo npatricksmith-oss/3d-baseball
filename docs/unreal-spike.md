@@ -46,7 +46,7 @@ Unattended: add `-RenderOffscreen -BbShots=6` (screenshots to `client/Saved/Shot
 
 ## Known gaps in v0
 
-- The figures stand, walk and jog; there is no throwing, catching, pitching or swinging motion, and the bat floats beside the batter.
+- The baseball motions are stand-ins from the engine's stock clips, driven by play time: a wind-up and strike for the pitcher's delivery (each pitch opens 1.0 s before release), a punch for a fielder's throw, a landing crouch for the catcher, a guard stance for the batter, who turns with the bat. There is no catching motion, the bat is not in the batter's hands, and none of it is real baseball animation. `-BbAnimTest` previews the stock clips side by side.
 - Between pitches everyone snaps back to his starting spot; the ball is not returned to the pitcher.
 - The scoreboard has no names, no runners-on display, no line score.
 - The ball is hard to see on deep flies.

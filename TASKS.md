@@ -20,7 +20,7 @@ Owner direction: favor what is visible over calibration; get numbers close and m
 The [Codex review of that change set](docs/reviews/2026-11-11-codex-watch-fixes-review.md) is resolved: the catcher returns home when a runner rounds first, a backup can catch an overthrow in the air, runners hold their leads, nobody jumps or runs backward in the timeline, and the batter runs out of his box.
 
 **Next, in the order a viewer would notice:**
-- Throwing, catching, pitching and swinging motion for the figures (they only stand, walk and jog; the bat floats beside the batter).
+- [~] Throwing, pitching and batting motion: stand-ins from the engine's stock clips are in (`914a187`: wind-up and delivery before each pitch, fielders' throws, the catcher's crouch, the batter's stance and turn). Still missing: a catching motion, the bat in the batter's hands, real baseball animation. **Codex review of `31d57bb..914a187` is running** (`docs/reviews/2026-11-11-codex-motions-review.md`); resolve it first.
 - Cutoff and relay men on outfield throws (in both of the owner's references; not built).
 - The ball back to the pitcher and players walking to position between pitches.
 - Ground balls go for hits too often (.377; infield hits ~16% of grounders) since leads and the faster batter.
