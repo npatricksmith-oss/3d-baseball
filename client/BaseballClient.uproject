@@ -1,0 +1,19 @@
+{
+	"FileVersion": 3,
+	"EngineAssociation": "5.8",
+	"Category": "",
+	"Description": "3D Baseball client: plays back timelines from the Rust sim core.",
+	"Modules": [
+		{
+			"Name": "BaseballClient",
+			"Type": "Runtime",
+			"LoadingPhase": "Default"
+		}
+	],
+	"Plugins": [
+		{ "Name": "ModelingToolsEditorMode", "Enabled": false },
+		{ "Name": "ChaosCloth", "Enabled": false },
+		{ "Name": "Fab", "Enabled": false },
+		{ "Name": "Bridge", "Enabled": false }
+	]
+}
