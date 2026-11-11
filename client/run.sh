@@ -11,4 +11,8 @@ export PATH="$HOME/.cargo/bin:$PATH"
 "$UE/Engine/Build/BatchFiles/Linux/Build.sh" BaseballClientEditor Linux Development -project="$HERE/BaseballClient.uproject"
 SEED="${1:-7}"
 shift || true
-exec "$UE/Engine/Binaries/Linux/UnrealEditor" "$HERE/BaseballClient.uproject" -game -windowed -ResX=1600 -ResY=900 -nosplash -BbSeed="$SEED" "$@"
+# Capped at 120 fps for watching: uncapped it renders ~300 fps and keeps five cores busy.
+# Pass -BbUncapped to measure.
+CAP=(-ExecCmds="t.MaxFPS 120")
+for a in "$@"; do [ "$a" = "-BbUncapped" ] && CAP=(); done
+exec "$UE/Engine/Binaries/Linux/UnrealEditor" "$HERE/BaseballClient.uproject" -game -windowed -ResX=1600 -ResY=900 -nosplash -BbSeed="$SEED" "${CAP[@]}" "$@"
