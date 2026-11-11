@@ -47,16 +47,18 @@ impl FielderAttrs {
     pub fn average(pos: usize) -> Self {
         let outfield = pos >= 7;
         Self {
-            speed: if outfield { 8.4 } else { 7.9 },
+            // Outfielders chase a fly while tracking it, a little under sprint speed [E].
+            speed: if outfield { 8.0 } else { 7.9 },
             // Infielders start from an athletic ready position: a quicker first step [E].
             tau_a: if outfield { 1.0 } else { 0.7 },
-            reaction: 0.25,
+            // An outfielder needs longer to read a ball off the bat before his first step [E].
+            reaction: if outfield { 0.40 } else { 0.25 },
             hands: 0.018,
             arm: if outfield { 39.0 } else { 36.0 },
             arm_sigma: 1.2f64.to_radians(),
             transfer: if outfield { 0.85 } else { 0.65 },
             tau_read: 0.6,
-            read_sigma0: if outfield { 1.5 } else { 0.3 },
+            read_sigma0: if outfield { 3.0 } else { 0.3 },
         }
     }
 }

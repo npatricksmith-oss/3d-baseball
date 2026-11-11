@@ -21,6 +21,8 @@ fn main() {
     // infielder's starting position while low; success = an out on the play.
     let (mut routine, mut routine_out) = (0u32, 0u32);
     let home = home_positions();
+    let mut reach_class = [0u32; 3];
+    let mut spray_unreach = [0u32; 6];
     for seed in 0..games {
         let mut g = Game::new(seed, true);
         while let Some(st) = g.step_pitch() {
@@ -62,6 +64,44 @@ fn main() {
             if class == 0 && first.is_some_and(|p| p < 7) {
                 touched_through += 1;
             }
+            // Could an average infielder have got there at all? From each starting position,
+            // running from his reaction time: the best margin (m) over the low ball's path.
+            if let (0, Some(path)) = (class, &st.batted) {
+                let mut slack = f64::NEG_INFINITY;
+                let mut who = (0usize, 0.0, path.at(path.t_start()).0);
+                let mut t = path.t_start();
+                while t < path.t_end() {
+                    let p = path.at(t).0;
+                    if p.z <= 1.2 && p.x.hypot(p.y) <= 45.0 {
+                        for i in [2usize, 3, 4, 5] {
+                            let a = bb_game::play::FielderAttrs::average(i);
+                            let run = bb_game::play::run_dist(t - path.t_start() - a.reaction, a.speed, a.tau_a);
+                            let sl = run - (p.x - home[i].x).hypot(p.y - home[i].y);
+                            if sl > slack {
+                                slack = sl;
+                                who = (i, t - path.t_start(), p);
+                            }
+                        }
+                    }
+                    t += 0.01;
+                }
+                // Standing reach 1.0 m, full dive 2.5 m (live.rs REACH, DIVE).
+                let k = if slack >= -1.0 { 0 } else if slack >= -2.5 { 1 } else { 2 };
+                reach_class[k] += 1;
+                if k == 0 && std::env::var("GB_TRACE").is_ok() && reach_class[0] <= 25 {
+                    // The fielder's actual track: where he was when the ball passed that point.
+                    let id_pos = who.0 as u16 + 1;
+                    let tr = st.viz.actors.iter().find(|(id, _)| id & 0x80 != 0 && (id & 0x7F) == id_pos).map(|x| &x.1);
+                    let t_abs = path.t_start() + who.1;
+                    let at = tr.and_then(|s| s.iter().min_by(|a, b| (a.0 - t_abs).abs().total_cmp(&(b.0 - t_abs).abs())).map(|x| x.1));
+                    let first = tr.and_then(|s| s.iter().find(|x| (x.1 - home[who.0]).norm() > 0.3).map(|x| x.0 - path.t_start()));
+                    println!("seed {seed} play {} EV {:.0} LA {:.0} spray {:.0}: pos {} could reach ({:.1},{:.1}) at +{:.2}s with {:.1} m to spare; he was at {:?}, first moved at {:?}", st.play, ev / 0.44704, la.to_degrees(), st.record.batted.unwrap().2.to_degrees(), id_pos, who.2.x, who.2.y, who.1, slack, at.map(|p| ((p.x * 10.0).round() / 10.0, (p.y * 10.0).round() / 10.0)), first.map(|x| (x * 100.0).round() / 100.0));
+                }
+                if k == 2 {
+                    let sp = st.record.batted.unwrap().2.to_degrees();
+                    spray_unreach[(((sp + 45.0) / 15.0).floor() as isize).clamp(0, 5) as usize] += 1;
+                }
+            }
             if let Some(path) = &st.batted {
                 let near = (0..6).filter(|&i| i != 1).any(|i| {
                     let h = home[i];
@@ -94,6 +134,8 @@ fn main() {
         let pct: Vec<String> = hist[c].iter().map(|&h| format!("{:5.0}%", 100.0 * h as f64 / tot)).collect();
         println!("{:15} {:5} {:7.1}  {}", names[c], n[c], ev_sum[c] / tot, pct.join(" "));
     }
+    println!("through balls an average infielder could have reached from his start: standing {}, only diving {}, not at all {}", reach_class[0], reach_class[1], reach_class[2]);
+    println!("  unreachable ones by spray (15° bins from the left-field line): {:?}", spray_unreach);
     println!("through balls first secured by an infielder (deflected on): {touched_through}");
     println!("routine grounders (< 95 mph, within 3 m of an infielder's start): {routine}, converted to an out {:.1}% (target ≥ 96%, envelope ≥ 93%)", 100.0 * routine_out as f64 / routine.max(1) as f64);
     println!("by exit speed: through / infield hit / out");

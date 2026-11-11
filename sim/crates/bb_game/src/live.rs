@@ -217,6 +217,13 @@ fn path_pos(s: f64) -> Vec3 {
     a + (b - a) * f
 }
 
+/// Distance covered in time `t` by a fielder already moving at `v0`, with the speed law the
+/// movement step uses (v → v_max with time constant τ; [`run_dist`] is the `v0` = 0 case).
+/// Like the movement step, it takes a change of direction to cost nothing.
+fn run_dist_from(t: f64, v0: f64, v_max: f64, tau: f64) -> f64 {
+    if t <= 0.0 { 0.0 } else { v_max * t - (v_max - v0) * tau * (1.0 - m::exp(-t / tau)) }
+}
+
 /// A fielder's position and speed after the movement step of the tick at time `t`: toward
 /// his target, accelerating to top speed and braking to stop on it. Not yet reacting, or on
 /// the ground after a dive: unchanged.
@@ -227,7 +234,10 @@ fn fielder_step(fd: &Fielder, t: f64, t_contact: f64) -> (Vec3, f64) {
     let to = Vec3::new(fd.target.x - fd.pos.x, fd.target.y - fd.pos.y, 0.0);
     let d = to.norm();
     let brake = fd.speed * fd.speed / (2.0 * 6.0);
-    let speed = if d > brake + 0.05 { fd.speed + (fd.a.speed - fd.speed) * (DT / fd.a.tau_a) } else { (fd.speed - 6.0 * DT).max(0.0) };
+    // A chaser fields the ball on the run: his intercept plan (`run_dist`) has him arriving at
+    // speed, so he slows for the spot only if he will be there before the ball.
+    let early = fd.role != Role::Chase || !fd.t_int.is_finite() || t + d / fd.speed.max(0.5) + 0.1 < fd.t_int;
+    let speed = if d > brake + 0.05 || !early { fd.speed + (fd.a.speed - fd.speed) * (DT / fd.a.tau_a) } else { (fd.speed - 6.0 * DT).max(0.0) };
     let stepd = (speed * DT).min(d);
     let pos = if d > 1e-6 { fd.pos + to * (stepd / d) } else { fd.pos };
     (pos, speed)
@@ -407,11 +417,30 @@ impl<'a> Sim<'a> {
         let start = self.t.max(self.inp.t_contact + fd.a.reaction);
         let mut dive = None;
         let mut t = self.t + 0.05;
+        // The previous sample: between samples a hard grounder travels several metres, more
+        // than a fielder's reach, so each step also tests the point of the ball's straight
+        // path between the two samples that passes closest to the fielder.
+        let mut prev: Option<(f64, Vec3)> = None;
         while t <= t_end {
             let (b, _) = pred.at(t);
-            if b.z <= CATCH_MAX_Z {
+            let mut pts = [None, Some((t, b))];
+            if let Some((tp, bp)) = prev {
+                let (sx, sy) = (b.x - bp.x, b.y - bp.y);
+                let l2 = sx * sx + sy * sy;
+                if l2 > 1e-9 {
+                    let u = ((fd.pos.x - bp.x) * sx + (fd.pos.y - bp.y) * sy) / l2;
+                    if u > 0.0 && u < 1.0 {
+                        pts[0] = Some((tp + u * (t - tp), bp + (b - bp) * u));
+                    }
+                }
+            }
+            prev = Some((t, b));
+            for (t, b) in pts.into_iter().flatten() {
+                if b.z > CATCH_MAX_Z {
+                    continue;
+                }
                 let d = m::hypot(b.x - fd.pos.x, b.y - fd.pos.y);
-                let covered = run_dist(t - start, fd.a.speed, fd.a.tau_a);
+                let covered = run_dist_from(t - start, fd.speed, fd.a.speed, fd.a.tau_a);
                 let can = |reach: f64| t >= start && (d - reach <= 0.0 || covered >= d - reach);
                 // Head for the ball's line itself, not the edge of reach.
                 let here = Some((t, Vec3::new(b.x, b.y, 0.0)));
@@ -1512,6 +1541,88 @@ mod tests {
         assert_eq!(count(&sim, |f| matches!(f, Input::BaseTouched { agent: R, base: 1, holding_ball: false, .. })), 1, "facts: {:?}", sim.out.facts);
         assert!(count(&sim, |f| matches!(f, Input::BaseLeft { agent: R, base: 1, .. })) <= 1);
         assert!(!sim.r[1].retouch && !sim.r[1].out);
+    }
+
+    /// A grounder rolling up the middle line (x = 0) at 30 m/s from `y0` at the sim's time.
+    fn grounder(fx: &Fixture, t: f64, y0: f64) -> BallPath {
+        let r = fx.env.ball.radius;
+        batted_path_dt(&fx.env, &fx.field, BallState { r: Vec3::new(0.0, y0, r), v: Vec3::new(0.0, 30.0, 0.0), w: Vec3::ZERO }, t, AGENT_DT, |_, _| (0.0, 0.0))
+    }
+
+    const SS: usize = 5;
+
+    // A hard grounder passing 2 m to an infielder's side is his to field where it passes: from
+    // a standing start he covers 1.46 m by then (run_dist with his reaction time) and needs
+    // 1.3 m. The window is 0.05 s of ball travel, shorter than the scan's step, so the answer
+    // must not depend on where the scan's samples fall.
+    #[test]
+    fn intercept_finds_a_grounder_passing_between_scan_samples() {
+        let fx = fixture(&[]);
+        let inp = input(&fx, vec![RunnerIn { id: fx.st.batter, base: 0, speed: 8.2 }]);
+        for phase in 0..12 {
+            let mut st = fx.st.clone();
+            let mut sim = new_sim(&inp, &mut st);
+            // The ball reaches the fielder's depth (y = 30) 0.83 s after contact in every
+            // case; only the scan's phase changes.
+            let dt = 0.01 * phase as f64;
+            sim.t = inp.t_contact + dt;
+            sim.f[SS].pos = Vec3::new(2.0, 30.0, 0.0);
+            let path = grounder(&fx, sim.t, 5.0 + 30.0 * dt);
+            let (t_int, at) = sim.intercept(SS, &path);
+            assert!((at.y - 30.0).abs() < 1.5 && t_int - inp.t_contact < 0.95, "phase {phase}: intercept at y {:.1}, +{:.2} s", at.y, t_int - inp.t_contact);
+        }
+    }
+
+    // A fielder already running keeps his speed into a replan. At 6 m/s he covers 3.27 m in
+    // the 0.5 s the ball takes to reach his depth, enough for a ball 3.5 m away (2.8 m needed);
+    // from a standing start he would cover 1.1 m and have to give the near point up.
+    #[test]
+    fn replan_counts_the_speed_the_fielder_already_has() {
+        let fx = fixture(&[]);
+        let inp = input(&fx, vec![RunnerIn { id: fx.st.batter, base: 0, speed: 8.2 }]);
+        let mut st = fx.st.clone();
+        let mut sim = new_sim(&inp, &mut st);
+        sim.t = inp.t_contact + 1.0;
+        sim.f[SS].pos = Vec3::new(3.5, 30.0, 0.0);
+        let path = grounder(&fx, sim.t, 15.0);
+        sim.f[SS].speed = 6.0;
+        let (_, running) = sim.intercept(SS, &path);
+        assert!((running.y - 30.0).abs() < 2.0, "running fielder plans for y {:.1}", running.y);
+        sim.f[SS].speed = 0.0;
+        let (_, standing) = sim.intercept(SS, &path);
+        assert!(standing.y > running.y + 3.0, "standing fielder plans for y {:.1}", standing.y);
+        // The speed law itself: from rest it is `run_dist`; at top speed it is v·t.
+        assert!((run_dist_from(0.8, 0.0, 7.9, 0.7) - run_dist(0.8, 7.9, 0.7)).abs() < 1e-12);
+        assert!((run_dist_from(0.8, 7.9, 7.9, 0.7) - 7.9 * 0.8).abs() < 1e-12);
+    }
+
+    // A chaser's plan has him reaching the ball at speed, so he must get there when the plan
+    // says: 6 m from rest takes `run_time(6 m)`. A fielder going to cover a base stops on it,
+    // which takes longer.
+    #[test]
+    fn chaser_arrives_on_the_plans_schedule() {
+        let fx = fixture(&[]);
+        let inp = input(&fx, vec![RunnerIn { id: fx.st.batter, base: 0, speed: 8.2 }]);
+        let arrive = |role: Role| {
+            let mut st = fx.st.clone();
+            let mut sim = new_sim(&inp, &mut st);
+            sim.t = inp.t_contact + 1.0;
+            let a = sim.f[SS].a;
+            let plan = run_time(6.0, a.speed, a.tau_a);
+            sim.f[SS].role = role;
+            sim.f[SS].target = sim.f[SS].pos + Vec3::new(6.0, 0.0, 0.0);
+            sim.f[SS].t_int = sim.t + plan;
+            let t0 = sim.t;
+            while (sim.f[SS].target - sim.f[SS].pos).norm() > 1e-6 {
+                sim.move_fielders();
+                sim.t += DT;
+            }
+            (sim.t - t0, plan)
+        };
+        let (chase, plan) = arrive(Role::Chase);
+        assert!((chase - plan).abs() <= 2.0 * DT, "chaser took {chase:.3} s, plan {plan:.3} s");
+        let (cover, _) = arrive(Role::Cover(2));
+        assert!(cover > plan + 0.2, "a fielder stopping on a base took {cover:.3} s");
     }
 
     // Codex day review #5: each advance decision is a fresh look at the play. Two decisions
