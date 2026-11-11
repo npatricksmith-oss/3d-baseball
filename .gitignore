@@ -23,6 +23,8 @@ __pycache__/
 /client/DerivedDataCache/
 /client/Plugins/*/Binaries/
 /client/Plugins/*/Intermediate/
+# Epic's mannequin, copied from the engine templates by client/run.sh
+/client/Content/Characters/
 
 # Engine downloads never go in the repository
 *.zip

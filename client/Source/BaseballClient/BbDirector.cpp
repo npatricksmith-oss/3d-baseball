@@ -1,13 +1,17 @@
 #include "BbDirector.h"
 #include "BbFrame.h"
 #include "BbGameMode.h"
+#include "Animation/AnimSequence.h"
+#include "Animation/SkeletalMeshActor.h"
 #include "Async/Async.h"
 #include "Camera/CameraActor.h"
 #include "Camera/CameraComponent.h"
 #include "Components/DirectionalLightComponent.h"
 #include "Components/SkyAtmosphereComponent.h"
 #include "Components/SkyLightComponent.h"
+#include "Components/SkeletalMeshComponent.h"
 #include "Components/StaticMeshComponent.h"
+#include "Engine/SkeletalMesh.h"
 #include "Engine/DirectionalLight.h"
 #include "Engine/ExponentialHeightFog.h"
 #include "Engine/SkyLight.h"
@@ -233,7 +237,32 @@ void ABbDirector::BeginPlay()
 	BuildField();
 	BuildStands();
 
-	// Players: a body and a head each, hidden until a frame uses them.
+	// Players. Human figures if the mannequin assets are in Content (client/run.sh copies
+	// them from the engine's templates; they are not in the repository).
+	FigureMesh = LoadObject<USkeletalMesh>(nullptr, TEXT("/Game/Characters/Mannequins/Meshes/SKM_Manny_Simple.SKM_Manny_Simple"));
+	AnimIdle = LoadObject<UAnimSequence>(nullptr, TEXT("/Game/Characters/Mannequins/Anims/Unarmed/MM_Idle.MM_Idle"));
+	AnimWalk = LoadObject<UAnimSequence>(nullptr, TEXT("/Game/Characters/Mannequins/Anims/Unarmed/Walk/MF_Unarmed_Walk_Fwd.MF_Unarmed_Walk_Fwd"));
+	AnimJog = LoadObject<UAnimSequence>(nullptr, TEXT("/Game/Characters/Mannequins/Anims/Unarmed/Jog/MF_Unarmed_Jog_Fwd.MF_Unarmed_Jog_Fwd"));
+	const bool bFigures = FigureMesh && AnimIdle && AnimWalk && AnimJog;
+	if (!bFigures)
+	{
+		UE_LOG(LogBb, Warning, TEXT("Mannequin assets not found under /Game/Characters/Mannequins: drawing players as cylinders. Run client/run.sh once to copy them."));
+	}
+	FigureState.SetNum(MaxActors);
+	for (int32 I = 0; bFigures && I < MaxActors; ++I)
+	{
+		ASkeletalMeshActor* F = GetWorld()->SpawnActor<ASkeletalMeshActor>(FVector::ZeroVector, FRotator::ZeroRotator);
+		USkeletalMeshComponent* C = F->GetSkeletalMeshComponent();
+		C->SetMobility(EComponentMobility::Movable);
+		C->SetSkeletalMeshAsset(FigureMesh);
+		C->SetCollisionEnabled(ECollisionEnabled::NoCollision);
+		C->SetAnimationMode(EAnimationMode::AnimationSingleNode);
+		// Animate even when a figure is small or briefly off screen: the camera cuts often.
+		C->VisibilityBasedAnimTickOption = EVisibilityBasedAnimTickOption::AlwaysTickPoseAndRefreshBones;
+		F->SetActorHiddenInGame(true);
+		Figures.Add(F);
+	}
+	// Cylinder stand-ins: a body and a head each, hidden until a frame uses them.
 	for (int32 I = 0; I < MaxActors; ++I)
 	{
 		AStaticMeshActor* Body = Shape(Cylinder, FVector::ZeroVector, FVector(0.5, 0.5, 1.5), FLinearColor::White);
@@ -317,6 +346,77 @@ void ABbDirector::BeginPlayback(FBbPlay&& Play)
 	HoldAfter = Current.Info.exit_velocity_mps > 0.f ? 2.5f : 1.2f;
 }
 
+void ABbDirector::PoseFigure(int32 Index, const BbActor& A, float SimDt, float DeltaSeconds)
+{
+	ASkeletalMeshActor* F = Figures[Index];
+	USkeletalMeshComponent* C = F->GetSkeletalMeshComponent();
+	FFigureState& St = FigureState[Index];
+	const FVector Foot = ToUE(A.pos);
+	// Speed from how far he moved in sim time. A new agent in this slot, or a jump of
+	// more than a sprinter could cover (a new play), is a placement, not a run.
+	if (St.Agent != A.agent)
+	{
+		St.Agent = A.agent;
+		St.SpeedCm = 0.f;
+		St.Gait = -1;
+		St.Yaw = ((ToUE(0, 0.3, 0) - Foot).Rotation().Yaw);
+	}
+	else if (SimDt > 1e-5f)
+	{
+		const float Raw = (Foot - St.Pos).Size2D() / SimDt;
+		St.SpeedCm = Raw > 1400.f ? 0.f : FMath::FInterpTo(St.SpeedCm, Raw, DeltaSeconds, 12.f);
+	}
+	// Facing: where he is going if he is moving, otherwise the plate (everyone watches the
+	// pitch; the batter stands side-on to the pitcher).
+	const FVector Move = Foot - St.Pos;
+	float WantYaw = St.Yaw;
+	if (St.SpeedCm > 90.f && Move.SizeSquared2D() > 1e-4)
+	{
+		WantYaw = Move.Rotation().Yaw;
+	}
+	else if (St.SpeedCm < 40.f)
+	{
+		WantYaw = (ToUE(0, 0.3, 0) - Foot).Rotation().Yaw;
+	}
+	St.Yaw = FMath::RInterpTo(FRotator(0, St.Yaw, 0), FRotator(0, WantYaw, 0), DeltaSeconds, 10.f).Yaw;
+	St.Pos = Foot;
+	F->SetActorLocation(Foot);
+	// The mannequin's mesh faces +Y in its own frame.
+	F->SetActorRotation(FRotator(0.f, St.Yaw - 90.f, 0.f));
+
+	const int32 Gait = St.SpeedCm < 40.f ? 0 : (St.SpeedCm < 250.f ? 1 : 2);
+	if (Gait != St.Gait)
+	{
+		St.Gait = Gait;
+		C->PlayAnimation(Gait == 0 ? AnimIdle : (Gait == 1 ? AnimWalk : AnimJog), true);
+	}
+	// The walk clip covers about 2.3 m/s and the jog about 5 m/s; play faster for a sprint.
+	C->SetPlayRate(SimDt <= 1e-5f ? 0.f : (Gait == 0 ? 1.f : FMath::Clamp(St.SpeedCm / (Gait == 1 ? 230.f : 500.f), 0.6f, 1.9f)) * (SimDt / FMath::Max(DeltaSeconds, 1e-5f)));
+
+	// Uniform colors: home white, away blue; fielders a shade apart from batters and runners.
+	const bool bHome = (A.agent >> 8) != 0;
+	const bool bFielder = (A.agent & 0x80) != 0;
+	const int32 Team = (bHome ? 2 : 0) + (bFielder ? 1 : 0);
+	if (Team != St.Team)
+	{
+		St.Team = Team;
+		const FLinearColor Col = bHome ? (bFielder ? FLinearColor(0.8f, 0.8f, 0.85f) : FLinearColor(0.95f, 0.95f, 0.95f)) : (bFielder ? FLinearColor(0.08f, 0.12f, 0.4f) : FLinearColor(0.15f, 0.2f, 0.6f));
+		for (int32 M = 0; M < C->GetNumMaterials(); ++M)
+		{
+			// The mannequin's own material, with its painted panels tinted to the uniform.
+			UMaterialInstanceDynamic* Mat = Cast<UMaterialInstanceDynamic>(C->GetMaterial(M));
+			if (!Mat)
+			{
+				Mat = C->CreateDynamicMaterialInstance(M);
+			}
+			if (Mat)
+			{
+				Mat->SetVectorParameterValue(TEXT("Paint Tint"), Col);
+			}
+		}
+	}
+}
+
 void ABbDirector::UpdateCamera(const BbFrame& Frame, float DeltaSeconds)
 {
 	UCameraComponent* C = Camera->GetCameraComponent();
@@ -360,7 +460,7 @@ void ABbDirector::Tick(float DeltaSeconds)
 		WorstFrame = FMath::Max(WorstFrame, (double)DeltaSeconds);
 	}
 
-	// Keys: Space pauses, - and = change speed, C changes camera.
+	// Keys: Space pauses, - and = change speed, C changes camera, Esc or Q quits.
 	if (APlayerController* PC = GetWorld()->GetFirstPlayerController())
 	{
 		if (PC->WasInputKeyJustPressed(EKeys::SpaceBar))
@@ -378,6 +478,10 @@ void ABbDirector::Tick(float DeltaSeconds)
 		if (PC->WasInputKeyJustPressed(EKeys::C))
 		{
 			CameraMode = (CameraMode + 1) % 3;
+		}
+		if (PC->WasInputKeyJustPressed(EKeys::Escape) || PC->WasInputKeyJustPressed(EKeys::Q))
+		{
+			FPlatformMisc::RequestExit(false);
 		}
 	}
 
@@ -401,8 +505,22 @@ void ABbDirector::Tick(float DeltaSeconds)
 			for (int32 I = 0; I < MaxActors; ++I)
 			{
 				const bool bShow = I < (int32)Frame.n_actors;
-				Bodies[I]->SetActorHiddenInGame(!bShow);
-				Heads[I]->SetActorHiddenInGame(!bShow);
+				const bool bFigure = Figures.Num() == MaxActors;
+				Bodies[I]->SetActorHiddenInGame(!bShow || bFigure);
+				Heads[I]->SetActorHiddenInGame(!bShow || bFigure);
+				if (bFigure)
+				{
+					Figures[I]->SetActorHiddenInGame(!bShow);
+					if (bShow)
+					{
+						PoseFigure(I, Frame.actors[I], bPaused ? 0.f : DeltaSeconds * Speed, DeltaSeconds);
+					}
+					else
+					{
+						FigureState[I].Agent = 0xFFFF;
+					}
+					continue;
+				}
 				if (!bShow)
 				{
 					continue;
@@ -437,7 +555,7 @@ void ABbDirector::Tick(float DeltaSeconds)
 			const bool bKnown = In.exit_velocity_mps > 0.f ? PlayTime >= In.duration_s : PlayTime >= 0.55f;
 			Hud->Call = bKnown ? FString(UTF8_TO_TCHAR(In.summary)) : FString();
 			static const TCHAR* CamNames[3] = { TEXT("broadcast"), TEXT("behind home"), TEXT("overhead") };
-			Hud->Footer = FString::Printf(TEXT("Space: %s    - / =: speed %.2gx    C: camera (%s)"), bPaused ? TEXT("paused") : TEXT("pause"), Speed, CamNames[CameraMode]);
+			Hud->Footer = FString::Printf(TEXT("Space: %s    - / =: speed %.2gx    C: camera (%s)    Esc or Q: quit"), bPaused ? TEXT("paused") : TEXT("pause"), Speed, CamNames[CameraMode]);
 			if (bKnown)
 			{
 				Hud->Bases = In.bases;

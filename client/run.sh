@@ -8,6 +8,12 @@ UE="${UE_ROOT:-$HOME/UnrealEngine/5.8.4}"
 HERE="$(cd "$(dirname "$0")" && pwd)"
 export PATH="$HOME/.cargo/bin:$PATH"
 (cd "$HERE/../sim" && cargo build --release -p bb_ffi)
+# Human figures: the engine's mannequin and its idle, walk and jog clips, copied from the
+# engine's own templates. They are Epic's binary assets, so they stay out of the repository.
+if [ ! -f "$HERE/Content/Characters/Mannequins/Meshes/SKM_Manny_Simple.uasset" ]; then
+  mkdir -p "$HERE/Content/Characters"
+  cp -r "$UE/Templates/TemplateResources/High/Characters/Content/Mannequins" "$HERE/Content/Characters/"
+fi
 "$UE/Engine/Build/BatchFiles/Linux/Build.sh" BaseballClientEditor Linux Development -project="$HERE/BaseballClient.uproject"
 SEED="${1:-7}"
 shift || true

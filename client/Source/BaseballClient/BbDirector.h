@@ -7,6 +7,9 @@
 #include "BbDirector.generated.h"
 
 class AStaticMeshActor;
+class ASkeletalMeshActor;
+class USkeletalMesh;
+class UAnimSequence;
 class ACameraActor;
 class UStaticMesh;
 class UMaterialInterface;
@@ -65,6 +68,29 @@ private:
 	TArray<TObjectPtr<AStaticMeshActor>> Bodies;
 	UPROPERTY()
 	TArray<TObjectPtr<AStaticMeshActor>> Heads;
+	// Human figures (the engine's mannequin, copied into Content by client/run.sh). When
+	// the assets are missing the cylinders above are used instead.
+	UPROPERTY()
+	TObjectPtr<USkeletalMesh> FigureMesh;
+	UPROPERTY()
+	TObjectPtr<UAnimSequence> AnimIdle;
+	UPROPERTY()
+	TObjectPtr<UAnimSequence> AnimWalk;
+	UPROPERTY()
+	TObjectPtr<UAnimSequence> AnimJog;
+	UPROPERTY()
+	TArray<TObjectPtr<ASkeletalMeshActor>> Figures;
+	struct FFigureState
+	{
+		uint16 Agent = 0xFFFF;
+		FVector Pos = FVector::ZeroVector;
+		float Yaw = 0.f;
+		int32 Gait = -1; // 0 idle, 1 walk, 2 jog
+		float SpeedCm = 0.f;
+		int32 Team = -1;
+	};
+	TArray<FFigureState> FigureState;
+	void PoseFigure(int32 Index, const BbActor& A, float SimDt, float DeltaSeconds);
 	UPROPERTY()
 	TObjectPtr<AStaticMeshActor> Ball;
 	UPROPERTY()
