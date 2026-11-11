@@ -21,7 +21,7 @@ class UMaterialInterface;
  *
  * Command line: -BbSimLib=<path to libbb_ffi.so> -BbSeed=<n> -BbSpeed=<x>
  *               -BbCamera=<0 broadcast | 1 behind home | 2 overhead>
- *               -BbShots=<n> (take n screenshots, then quit) -BbShotEvery=<seconds>
+ *               -BbShots=<n> (take n screenshots, then quit) -BbShotEvery=<seconds> -BbShotStart=<seconds>
  *               -BbBenchSeconds=<s> (log frame rate and memory, then quit)
  */
 UCLASS()
@@ -53,6 +53,8 @@ private:
 	float PlayTime = 0.f;
 	float Speed = 1.f;
 	float HoldAfter = 0.f;
+	/** Seconds shown before each pitch's release: the pitcher's wind-up. */
+	float PreRoll = 1.0f;
 
 	UPROPERTY()
 	TObjectPtr<UStaticMesh> Cube;
@@ -78,6 +80,17 @@ private:
 	TObjectPtr<UAnimSequence> AnimWalk;
 	UPROPERTY()
 	TObjectPtr<UAnimSequence> AnimJog;
+	// Stand-ins from the engine's stock clips until real baseball animation exists: a
+	// wind-up-and-strike for the pitcher's delivery, a punch for a fielder's throw, a landing
+	// crouch for the catcher, a guard stance for the batter.
+	UPROPERTY()
+	TObjectPtr<UAnimSequence> AnimPitch;
+	UPROPERTY()
+	TObjectPtr<UAnimSequence> AnimThrow;
+	UPROPERTY()
+	TObjectPtr<UAnimSequence> AnimCrouch;
+	UPROPERTY()
+	TObjectPtr<UAnimSequence> AnimStance;
 	UPROPERTY()
 	TArray<TObjectPtr<ASkeletalMeshActor>> Figures;
 	struct FFigureState
@@ -88,9 +101,15 @@ private:
 		int32 Gait = -1; // 0 idle, 1 walk, 2 jog
 		float SpeedCm = 0.f;
 		int32 Team = -1;
+		// A throw in progress: when it began (play time) and which way it goes.
+		bool bThrowing = false;
+		float ThrowStart = 0.f;
+		float ThrowYaw = 0.f;
+		// The clip being driven by hand (null while the gait clips play on their own).
+		const UAnimSequence* Manual = nullptr;
 	};
 	TArray<FFigureState> FigureState;
-	void PoseFigure(int32 Index, const BbActor& A, float SimDt, float DeltaSeconds);
+	void PoseFigure(int32 Index, const BbFrame& Frame, const BbFrame& Soon, const BbFrame& Later, float SimDt, float DeltaSeconds);
 	UPROPERTY()
 	TObjectPtr<AStaticMeshActor> Ball;
 	UPROPERTY()

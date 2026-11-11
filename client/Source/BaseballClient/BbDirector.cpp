@@ -243,6 +243,10 @@ void ABbDirector::BeginPlay()
 	AnimIdle = LoadObject<UAnimSequence>(nullptr, TEXT("/Game/Characters/Mannequins/Anims/Unarmed/MM_Idle.MM_Idle"));
 	AnimWalk = LoadObject<UAnimSequence>(nullptr, TEXT("/Game/Characters/Mannequins/Anims/Unarmed/Walk/MF_Unarmed_Walk_Fwd.MF_Unarmed_Walk_Fwd"));
 	AnimJog = LoadObject<UAnimSequence>(nullptr, TEXT("/Game/Characters/Mannequins/Anims/Unarmed/Jog/MF_Unarmed_Jog_Fwd.MF_Unarmed_Jog_Fwd"));
+	AnimPitch = LoadObject<UAnimSequence>(nullptr, TEXT("/Game/Characters/Mannequins/Anims/Unarmed/Attack/MM_ChargedAttack.MM_ChargedAttack"));
+	AnimThrow = LoadObject<UAnimSequence>(nullptr, TEXT("/Game/Characters/Mannequins/Anims/Unarmed/Attack/MM_Attack_02.MM_Attack_02"));
+	AnimCrouch = LoadObject<UAnimSequence>(nullptr, TEXT("/Game/Characters/Mannequins/Anims/Unarmed/Jump/MM_Land.MM_Land"));
+	AnimStance = LoadObject<UAnimSequence>(nullptr, TEXT("/Game/Characters/Mannequins/Anims/Unarmed/Attack/MM_Attack_01.MM_Attack_01"));
 	const bool bFigures = FigureMesh && AnimIdle && AnimWalk && AnimJog;
 	if (!bFigures)
 	{
@@ -300,7 +304,43 @@ void ABbDirector::BeginPlay()
 	FParse::Value(Cmd, TEXT("BbCamera="), CameraMode);
 	FParse::Value(Cmd, TEXT("BbShots="), ShotsLeft);
 	FParse::Value(Cmd, TEXT("BbShotEvery="), ShotEvery);
+	FParse::Value(Cmd, TEXT("BbShotStart="), NextShot);
 	FParse::Value(Cmd, TEXT("BbBenchSeconds="), BenchSeconds);
+
+	// Clip preview (-BbAnimTest): a row of figures each looping one stock clip slowly, for
+	// choosing which clip stands in for which baseball motion. No game is played.
+	if (FParse::Param(Cmd, TEXT("BbAnimTest")) && FigureMesh)
+	{
+		const TCHAR* Clips[8] = {
+			TEXT("/Game/Characters/Mannequins/Anims/Unarmed/Attack/MM_Attack_01.MM_Attack_01"),
+			TEXT("/Game/Characters/Mannequins/Anims/Unarmed/Attack/MM_Attack_02.MM_Attack_02"),
+			TEXT("/Game/Characters/Mannequins/Anims/Unarmed/Attack/MM_Attack_03.MM_Attack_03"),
+			TEXT("/Game/Characters/Mannequins/Anims/Unarmed/Attack/MM_ChargedAttack.MM_ChargedAttack"),
+			TEXT("/Game/Characters/Mannequins/Anims/Unarmed/Jump/MM_Jump.MM_Jump"),
+			TEXT("/Game/Characters/Mannequins/Anims/Unarmed/Jump/MM_Dash.MM_Dash"),
+			TEXT("/Game/Characters/Mannequins/Anims/Unarmed/Jump/MM_Land.MM_Land"),
+			TEXT("/Game/Characters/Mannequins/Anims/Unarmed/Jump/MM_Fall_Loop.MM_Fall_Loop"),
+		};
+		for (int32 I = 0; I < 8; ++I)
+		{
+			UAnimSequence* Clip = LoadObject<UAnimSequence>(nullptr, Clips[I]);
+			ASkeletalMeshActor* F = Figures[I];
+			F->SetActorHiddenInGame(false);
+			F->SetActorLocation(ToUE(-7.0 + 2.0 * I, 12.0, 0.0));
+			// Three-quarter view: turned a little off facing the camera.
+			F->SetActorRotation(FRotator(0.f, 180.f - 90.f + 35.f, 0.f));
+			if (Clip)
+			{
+				UE_LOG(LogBb, Display, TEXT("clip %d %s length %.2f s"), I, Clips[I], Clip->GetPlayLength());
+				F->GetSkeletalMeshComponent()->PlayAnimation(Clip, true);
+				F->GetSkeletalMeshComponent()->SetPlayRate(0.25f);
+			}
+		}
+		Camera->SetActorLocation(ToUE(0, -1, 2.0));
+		Camera->SetActorRotation((ToUE(0, 12, 1.0) - ToUE(0, -1, 2.0)).Rotation());
+		Camera->GetCameraComponent()->SetFieldOfView(62.f);
+		return;
+	}
 
 	Sim = MakeUnique<FBbSim>();
 	if (!Sim->Start(Lib, Seed))
@@ -333,7 +373,12 @@ void ABbDirector::BeginPlayback(FBbPlay&& Play)
 		Sim->Release(Current);
 	}
 	Current = MoveTemp(Play);
-	PlayTime = 0.f;
+	// Each pitch opens with the wind-up: play time runs from −PreRoll to the release at 0.
+	PlayTime = -PreRoll;
+	for (FFigureState& St : FigureState)
+	{
+		St.bThrowing = false;
+	}
 	bBallInPlay = false;
 	if (!Current.bValid)
 	{
@@ -343,11 +388,12 @@ void ABbDirector::BeginPlayback(FBbPlay&& Play)
 	}
 	++PlaysShown;
 	// A ball in play gets a moment at the end; a taken pitch moves on quickly.
-	HoldAfter = Current.Info.exit_velocity_mps > 0.f ? 2.5f : 1.2f;
+	HoldAfter = Current.Info.exit_velocity_mps > 0.f ? 2.5f : 0.7f;
 }
 
-void ABbDirector::PoseFigure(int32 Index, const BbActor& A, float SimDt, float DeltaSeconds)
+void ABbDirector::PoseFigure(int32 Index, const BbFrame& Frame, const BbFrame& Soon, const BbFrame& Later, float SimDt, float DeltaSeconds)
 {
+	const BbActor& A = Frame.actors[Index];
 	ASkeletalMeshActor* F = Figures[Index];
 	USkeletalMeshComponent* C = F->GetSkeletalMeshComponent();
 	FFigureState& St = FigureState[Index];
@@ -378,24 +424,107 @@ void ABbDirector::PoseFigure(int32 Index, const BbActor& A, float SimDt, float D
 	{
 		WantYaw = (ToUE(0, 0.3, 0) - Foot).Rotation().Yaw;
 	}
-	St.Yaw = FMath::RInterpTo(FRotator(0, St.Yaw, 0), FRotator(0, WantYaw, 0), DeltaSeconds, 10.f).Yaw;
+	// Baseball motions, driven by play time so they hold their place when paused or sped up.
+	const bool bFielder = (A.agent & 0x80) != 0;
+	const int32 Position = A.agent & 0x7F;
+	const bool bStill = St.SpeedCm < 40.f;
+	const UAnimSequence* Manual = nullptr;
+	float ClipTime = 0.f;
+	auto Holds = [](const BbFrame& F, const BbActor& Who)
+	{
+		// The sim carries a held ball 1.2 m above the fielder's feet.
+		const float Dx = F.ball[0] - Who.pos[0], Dy = F.ball[1] - Who.pos[1], Dz = F.ball[2] - (Who.pos[2] + 1.2f);
+		return Dx * Dx + Dy * Dy + Dz * Dz < 0.25f;
+	};
+	if (bFielder && Position == 1 && PlayTime < 0.8f && AnimPitch)
+	{
+		// The delivery: the clip's strike (1.0 s in) lands on the release (play time 0).
+		Manual = AnimPitch;
+		ClipTime = PlayTime + 1.0f;
+		WantYaw = (ToUE(0, 0.3, 0) - Foot).Rotation().Yaw;
+	}
+	else if (bFielder && AnimThrow)
+	{
+		// A throw: he has the ball now and will not in 0.3 s. The clip's release (0.45 s
+		// in) is timed to that moment; he turns toward where the ball is going.
+		if (!St.bThrowing && PlayTime > 0.f && Index < (int32)Soon.n_actors && Holds(Frame, A) && !Holds(Soon, Soon.actors[Index]))
+		{
+			St.bThrowing = true;
+			St.ThrowStart = PlayTime - 0.15f;
+			St.ThrowYaw = (ToUE(Later.ball) - Foot).Rotation().Yaw;
+		}
+		if (St.bThrowing)
+		{
+			ClipTime = PlayTime - St.ThrowStart;
+			if (ClipTime > 0.9f)
+			{
+				St.bThrowing = false;
+			}
+			else
+			{
+				Manual = AnimThrow;
+				WantYaw = St.ThrowYaw;
+			}
+		}
+	}
+	if (!Manual && bFielder && Position == 2 && bStill && PlayTime < 0.6f && AnimCrouch)
+	{
+		// The catcher squats to receive the pitch.
+		Manual = AnimCrouch;
+		ClipTime = 0.1f;
+	}
+	if (!bFielder && Frame.has_bat != 0 && AnimStance)
+	{
+		// The batter: whoever is at the bat's knob. Hands up in a stance; as the bat comes
+		// around, his body turns with it.
+		const FVector Knob = ToUE(Frame.bat_knob);
+		if ((FVector(Knob.X, Knob.Y, 0) - FVector(Foot.X, Foot.Y, 0)).Size() < 160.f && bStill)
+		{
+			Manual = AnimStance;
+			ClipTime = 0.f;
+			const FVector Along = ToUE(Frame.bat_tip) - Knob;
+			if (Along.Size2D() > 45.f)
+			{
+				// Hips lead the barrel: face between the bat's direction and the pitcher.
+				WantYaw = (Along.GetSafeNormal2D() + ToUE(0, 1, 0).GetSafeNormal() * 0.6).Rotation().Yaw;
+			}
+		}
+	}
+	St.Yaw = FMath::RInterpTo(FRotator(0, St.Yaw, 0), FRotator(0, WantYaw, 0), DeltaSeconds, Manual ? 18.f : 10.f).Yaw;
 	St.Pos = Foot;
 	F->SetActorLocation(Foot);
 	// The mannequin's mesh faces +Y in its own frame.
 	F->SetActorRotation(FRotator(0.f, St.Yaw - 90.f, 0.f));
 
+	if (Manual)
+	{
+		if (St.Manual != Manual)
+		{
+			St.Manual = Manual;
+			St.Gait = -1;
+			C->PlayAnimation(const_cast<UAnimSequence*>(Manual), false);
+		}
+		C->SetPlayRate(0.f);
+		C->SetPosition(FMath::Clamp(ClipTime, 0.f, Manual->GetPlayLength() - 0.02f), false);
+	}
+	else
+	{
+		St.Manual = nullptr;
+	}
 	const int32 Gait = St.SpeedCm < 40.f ? 0 : (St.SpeedCm < 250.f ? 1 : 2);
-	if (Gait != St.Gait)
+	if (!Manual && Gait != St.Gait)
 	{
 		St.Gait = Gait;
 		C->PlayAnimation(Gait == 0 ? AnimIdle : (Gait == 1 ? AnimWalk : AnimJog), true);
 	}
 	// The walk clip covers about 2.3 m/s and the jog about 5 m/s; play faster for a sprint.
-	C->SetPlayRate(SimDt <= 1e-5f ? 0.f : (Gait == 0 ? 1.f : FMath::Clamp(St.SpeedCm / (Gait == 1 ? 230.f : 500.f), 0.6f, 1.9f)) * (SimDt / FMath::Max(DeltaSeconds, 1e-5f)));
+	if (!Manual)
+	{
+		C->SetPlayRate(SimDt <= 1e-5f ? 0.f : (Gait == 0 ? 1.f : FMath::Clamp(St.SpeedCm / (Gait == 1 ? 230.f : 500.f), 0.6f, 1.9f)) * (SimDt / FMath::Max(DeltaSeconds, 1e-5f)));
+	}
 
 	// Uniform colors: home white, away blue; fielders a shade apart from batters and runners.
 	const bool bHome = (A.agent >> 8) != 0;
-	const bool bFielder = (A.agent & 0x80) != 0;
 	const int32 Team = (bHome ? 2 : 0) + (bFielder ? 1 : 0);
 	if (Team != St.Team)
 	{
@@ -488,11 +617,16 @@ void ABbDirector::Tick(float DeltaSeconds)
 	if (Current.bValid && Sim)
 	{
 		PlayTime += bPaused ? 0.f : DeltaSeconds * Speed;
-		const float T = FMath::Min(PlayTime, Current.Info.duration_s);
-		BbFrame Frame;
+		const float T = FMath::Clamp(PlayTime, 0.f, Current.Info.duration_s);
+		// Two looks ahead, for motions that must start before the event they lead to.
+		BbFrame Frame, Soon, Later;
+		Sim->Sample(Current, T + 0.3f, Soon);
+		Sim->Sample(Current, T + 0.7f, Later);
 		if (Sim->Sample(Current, T, Frame))
 		{
 			Ball->SetActorLocation(ToUE(Frame.ball));
+			// During the wind-up the ball is in the pitcher's glove.
+			Ball->SetActorHiddenInGame(PlayTime < 0.f);
 			Bat->SetActorHiddenInGame(Frame.has_bat == 0);
 			if (Frame.has_bat != 0)
 			{
@@ -513,7 +647,7 @@ void ABbDirector::Tick(float DeltaSeconds)
 					Figures[I]->SetActorHiddenInGame(!bShow);
 					if (bShow)
 					{
-						PoseFigure(I, Frame.actors[I], bPaused ? 0.f : DeltaSeconds * Speed, DeltaSeconds);
+						PoseFigure(I, Frame, Soon, Later, bPaused ? 0.f : DeltaSeconds * Speed, DeltaSeconds);
 					}
 					else
 					{
