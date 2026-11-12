@@ -52,6 +52,7 @@ sim/                   Cargo workspace
     bb_league          (later milestones)
     bb_cli             `sim-cli` lab binary (Rerun output behind the default `rerun` feature)
 client/                Unreal Engine 5.8 project, C++ only, no binary assets (docs/unreal-spike.md); `client/run.sh`
+bin/                   owner's desktop launcher: play.sh (Unreal client, or the Rerun viewer when the engine is absent), install_launcher.sh
 ```
 
 ## Toolchain on this machine
@@ -61,7 +62,7 @@ client/                Unreal Engine 5.8 project, C++ only, no binary assets (do
 - Python: `uv` in `~/.local/bin`. The oracle uses only the stdlib (`python3 -m unittest analysis/oracle/test_oracle.py`). Plot scripts: `uv run analysis/plots/<script>.py`.
 - Rerun viewer 0.41.0: `uv tool install rerun-sdk==0.41.0`, then `rerun file.rrd`. The SDK crate is pinned to `=0.41.0` to match.
 - Codex CLI (`codex exec`) is available for independent validation/review passes.
-- Unreal Engine 5.8.4 (precompiled) is at `~/UnrealEngine/5.8.4`, outside the repository. Build the client with `Engine/Build/BatchFiles/Linux/Build.sh BaseballClientEditor Linux Development -project=<abs path>/client/BaseballClient.uproject` (6 s incremental). Check visual changes headlessly: `client/run.sh 7 -RenderOffscreen -BbShots=6`, then read the PNGs in `client/Saved/Shots`.
+- Unreal Engine 5.8.4 (precompiled) belongs at `~/UnrealEngine/5.8.4`, outside the repository. **It was missing on 2026-11-12** (engine folder and download zip both gone); reinstalling needs the owner's Epic sign-in. Until then `bin/play.sh` falls back to Rerun. Build the client with `Engine/Build/BatchFiles/Linux/Build.sh BaseballClientEditor Linux Development -project=<abs path>/client/BaseballClient.uproject` (6 s incremental). Check visual changes headlessly: `client/run.sh 7 -RenderOffscreen -BbShots=6`, then read the PNGs in `client/Saved/Shots`.
 
 ## Commands
 
