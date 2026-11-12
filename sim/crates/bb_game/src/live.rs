@@ -8,7 +8,8 @@
 //! Remaining simplifications, documented for M5: fielder perception is a noisy estimate of
 //! the ball's current state fed into the agent's own physics (smooth ground, typical spin)
 //! rather than the full atlas model of agent-models §5.1; throws never choose a one-hop
-//! trajectory; no slides, rundown tactics, or collisions; coverage follows a small fixed table.
+//! trajectory; one cutoff or relay man at most (no double cut); no slides, rundown tactics,
+//! or collisions; coverage follows a small fixed table.
 
 use bb_math::{KeyedRng, Purpose, RngKey, Vec3, m};
 use bb_physics::ground::{BallPath, Field, SegmentEnd, batted_path, batted_path_dt};
@@ -104,6 +105,15 @@ const RELAY_TRANSFER_FRAC: f64 = 0.7;
 /// Infield radius for the settle rule (rules-spec §5.8), m. The spec's 30 m excluded second
 /// base (38.8 m from home); the infield dirt reaches ~45 m.
 const INFIELD_R: f64 = 45.0;
+/// Cutoffs and relays (agent-models §5.7) [E]: a ball fielded beyond `RELAY_FROM_M` from home
+/// gets a cutoff man on the line to the base; beyond `RELAY_DEEP_M` a middle infielder goes
+/// out as the relay man instead. He stands short of the base by the throw's length less
+/// `RELAY_OF_THROW_M` (what the outfielder throws), at least `CUTOFF_M` (about 45 ft, the
+/// coaching guides' cutoff spot) and at most halfway.
+const RELAY_FROM_M: f64 = 50.0;
+const RELAY_DEEP_M: f64 = 80.0;
+const RELAY_OF_THROW_M: f64 = 45.0;
+const CUTOFF_M: f64 = 14.0;
 
 #[derive(Clone, Debug)]
 enum Ball {
@@ -112,13 +122,16 @@ enum Ball {
     Held { by: usize },
     /// A throw in flight until it reaches the ground (`path` ends there). `catch_at` is
     /// where the receiver goes to take it.
-    Thrown { path: Trajectory, catch_at: Vec3, to_base: u8, receiver: usize },
+    /// `relay`: thrown to the cutoff or relay man, who throws on to `to_base`.
+    Thrown { path: Trajectory, catch_at: Vec3, to_base: u8, receiver: usize, relay: bool },
 }
 
 #[derive(Clone, Copy, Debug, PartialEq)]
 enum Role {
     Chase,
     Cover(u8),
+    /// Cutoff or relay man for throws to this base (agent-models §5.7).
+    Relay(u8),
     Backup,
     Idle,
 }
@@ -631,7 +644,110 @@ impl<'a> Sim<'a> {
         if broke {
             self.cover_roles_after_chasers();
         }
+        self.assign_relay();
         self.assign_backups();
+    }
+
+    /// Where the ball is being fielded, as the defense sees it: the holder, or the chaser's
+    /// intercept point while it is loose.
+    fn fielding_point(&self) -> Vec3 {
+        match self.ball {
+            Ball::Held { by } => self.f[by].pos,
+            _ => self.f[self.primary].target,
+        }
+    }
+
+    /// The cutoff or relay job for a ball fielded at `from`: who takes it and toward which
+    /// base, from the standard assignments (the likeliest throw: home with a runner in scoring
+    /// position, third with a runner on first, otherwise second, or third on a deep ball;
+    /// raised to any base a runner is visibly heading past that).
+    fn relay_job(&self, from: Vec3) -> Option<(usize, u8)> {
+        let depth = m::hypot(from.x, from.y);
+        if depth < RELAY_FROM_M {
+            return None;
+        }
+        let deep = depth > RELAY_DEEP_M;
+        // Infielders go out to the cutoff spot once the ball is down in the outfield (or in a
+        // fielder's hands). While it is in the air they play the ball; only on a ball going
+        // deep does the relay man go out early, and only if his own read says he has no
+        // play on it.
+        let down = match &self.ball {
+            Ball::Free { path, .. } => path.bounces.first().map(|x| x.0 <= self.t).unwrap_or(false),
+            _ => true,
+        };
+        let on = |b: u8| self.r.iter().any(|r| r.start == b && !r.out && !r.scored);
+        let mut b = if on(2) || on(3) { 4 } else if on(1) || deep { 3 } else { 2 };
+        for r in self.r.iter().filter(|r| !r.out && !r.scored) {
+            b = b.max(visible_target(r).min(4));
+        }
+        let who = if deep {
+            if from.x <= 10.0 { 5 } else { 3 }
+        } else {
+            match b {
+                4 => if from.x < -15.0 { 4 } else { 2 },
+                3 => 5,
+                _ => return None,
+            }
+        };
+        if matches!(self.f[who].role, Role::Chase) || matches!(self.ball, Ball::Held { by } if by == who) {
+            return None;
+        }
+        if !down && !(deep && self.f[who].t_int.is_infinite()) {
+            return None;
+        }
+        Some((who, b))
+    }
+
+    /// The cutoff man's spot: on the line from the ball to the base.
+    fn relay_spot(from: Vec3, b: u8) -> Vec3 {
+        let base = base_pos(b);
+        let line = Vec3::new(from.x - base.x, from.y - base.y, 0.0);
+        let d = line.norm();
+        let s = (d - RELAY_OF_THROW_M).max(CUTOFF_M).min(0.5 * d);
+        base + line.normalized() * s
+    }
+
+    /// Give the cutoff or relay job to its man (taking him off any base he was covering,
+    /// which someone else then covers).
+    fn assign_relay(&mut self) {
+        let Some((i, b)) = self.relay_job(self.fielding_point()) else { return };
+        let was_cover = matches!(self.f[i].role, Role::Cover(_));
+        self.f[i].role = Role::Relay(b);
+        self.f[i].backs = None;
+        self.f[i].target = Self::relay_spot(self.fielding_point(), b);
+        if was_cover {
+            self.cover_roles_after_chasers();
+        }
+    }
+
+    /// Each tick the cutoff man keeps to the line as the fielding point and the runners'
+    /// intentions change (not while a throw is coming to him).
+    fn update_relay(&mut self) {
+        let Some(i) = (0..9).find(|&i| matches!(self.f[i].role, Role::Relay(_))) else {
+            // The job may begin now (the ball has come down in the outfield).
+            if !matches!(self.ball, Ball::Thrown { .. }) {
+                self.assign_relay();
+            }
+            return;
+        };
+        if matches!(self.ball, Ball::Thrown { receiver, .. } if receiver == i) {
+            return;
+        }
+        let from = self.fielding_point();
+        let b = match self.relay_job(from) {
+            Some((who, b)) if who == i => b,
+            // His job is over (or someone else's): he goes back to covering.
+            _ => {
+                self.f[i].role = Role::Idle;
+                self.cover_roles_after_chasers();
+                if matches!(self.ball, Ball::Free { .. }) {
+                    self.assign_relay();
+                }
+                return;
+            }
+        };
+        self.f[i].role = Role::Relay(b);
+        self.f[i].target = Self::relay_spot(from, b);
     }
 
     /// Fielders with no part in the play back it up (agent-models §5.7): one behind the man
@@ -735,11 +851,19 @@ impl<'a> Sim<'a> {
 
     /// Re-assign base coverage among fielders who are not chasing.
     fn cover_roles_after_chasers(&mut self) {
-        let chasing = |f: &Vec<Fielder>, i: usize| f[i].role == Role::Chase;
+        let busy = |f: &Vec<Fielder>, i: usize| matches!(f[i].role, Role::Chase | Role::Relay(_));
         let left = self.f[self.primary].target.x < 0.0;
-        let mut taken: Vec<usize> = (0..9).filter(|&i| chasing(&self.f, i)).collect();
+        let mut taken: Vec<usize> = (0..9).filter(|&i| busy(&self.f, i)).collect();
+        // The first baseman out as the cutoff to home: on a ball to the right side the second
+        // baseman takes first and the pitcher stays free to back up home; to the left side
+        // the second baseman is needed at second, so the pitcher takes first.
+        let first = match (matches!(self.f[2].role, Role::Relay(_)), left) {
+            (true, false) => vec![3, 0],
+            (true, true) => vec![0, 3],
+            _ => vec![2, 0, 3],
+        };
         let order: [(u8, Vec<usize>); 4] = [
-            (1, vec![2, 0, 3]),
+            (1, first),
             (2, if left { vec![3, 5] } else { vec![5, 3] }),
             (3, vec![4, 5, 0]),
             (4, vec![1, 0]),
@@ -836,7 +960,7 @@ impl<'a> Sim<'a> {
             // side of him, so the receiver always has his own chance first.
             if let Some(rcv) = receiver.filter(|&rcv| rcv != i) {
                 let past_receiver = match self.ball {
-                    Ball::Thrown { to_base, .. } if fd.backs == Some(to_base) => {
+                    Ball::Thrown { to_base, relay: false, .. } if fd.backs == Some(to_base) => {
                         let at = self.f[rcv].pos;
                         let vh = m::hypot(bv.x, bv.y).max(1e-9);
                         ((b.x - at.x) * bv.x + (b.y - at.y) * bv.y) / vh > RECEIVE_REACH
@@ -906,9 +1030,15 @@ impl<'a> Sim<'a> {
             }
             if d <= POCKET {
                 fd.ready_at = self.t + fd.a.transfer + if diving { DIVE_GETUP_S } else { 0.0 };
-                if let Ball::Thrown { to_base, .. } = self.ball {
-                    // A receiver steps straight to the bag; a relay goes on quickly.
-                    fd.target = base_pos(to_base);
+                if let Ball::Thrown { to_base, relay, .. } = self.ball {
+                    // A receiver steps straight to the bag; a relay man stays put. Either goes
+                    // on quickly, already facing his next target.
+                    if relay {
+                        fd.target = fd.pos;
+                        fd.role = Role::Idle;
+                    } else {
+                        fd.target = base_pos(to_base);
+                    }
                     fd.ready_at = self.t + RELAY_TRANSFER_FRAC * fd.a.transfer;
                 }
                 let id = fd.id;
@@ -988,7 +1118,7 @@ impl<'a> Sim<'a> {
     }
 
     /// Put a throw aimed at ground point `aim` in the air from launch state `s0` now.
-    fn launch_throw(&mut self, s0: BallState, aim: Vec3, to_base: u8, receiver: usize) {
+    fn launch_throw(&mut self, s0: BallState, aim: Vec3, to_base: u8, receiver: usize, relay: bool) {
         let path = fly_throw(self.inp.env, s0, self.t, 15.0);
         // The receiver takes the ball where it is catchable (glove height, from a scoop to
         // a reach overhead) nearest the spot he means to be: on the bag when the throw is in
@@ -1000,7 +1130,7 @@ impl<'a> Sim<'a> {
             .min_by(|a, b| m::hypot(a.s.r.x - aim.x, a.s.r.y - aim.y).total_cmp(&m::hypot(b.s.r.x - aim.x, b.s.r.y - aim.y)))
             .map(|k| if m::hypot(k.s.r.x - aim.x, k.s.r.y - aim.y) < 0.5 { aim } else { k.s.r })
             .unwrap_or(path.last().s.r);
-        self.ball = Ball::Thrown { path, catch_at, to_base, receiver };
+        self.ball = Ball::Thrown { path, catch_at, to_base, receiver, relay };
     }
 
     fn update_thrown(&mut self) {
@@ -1279,8 +1409,20 @@ impl<'a> Sim<'a> {
         if self.t < fd.ready_at {
             return;
         }
+        // A cutoff or relay man between the holder and the bases, if there is one: the throw
+        // can go through him when that gets it there sooner (a long throw slows with drag,
+        // agent-models §5.5) or when the holder cannot reach the base on the fly.
+        let relay = (0..9).find(|&i| i != by && matches!(self.f[i].role, Role::Relay(_)) && (self.f[i].pos - fd.pos).norm() > 10.0);
+        let via = |b: u8| -> f64 {
+            let Some(i) = relay else { return f64::INFINITY };
+            let rp = self.f[i].pos;
+            if (base_pos(b) - rp).norm() >= (base_pos(b) - fd.pos).norm() {
+                return f64::INFINITY; // not between the holder and this base
+            }
+            self.t + throw_time(THROW_EFFORT * fd.a.arm, (rp - fd.pos).norm()) + RELAY_TRANSFER_FRAC * self.f[i].a.transfer + throw_time(THROW_EFFORT * self.f[i].a.arm, (base_pos(b) - rp).norm())
+        };
         // Options: each base a running runner is heading to.
-        let mut best: Option<(f64, u8)> = None;
+        let mut best: Option<(f64, u8, bool)> = None;
         for r in &self.r {
             if r.out || r.scored || r.v < 0.5 {
                 continue; // standing runners are not a play
@@ -1292,13 +1434,15 @@ impl<'a> Sim<'a> {
             let d = (base_pos(goal) - fd.pos).norm();
             // The ball beats the runner only once someone is at the bag to take it.
             let recv = self.receiver_for(by, goal);
-            let t_ball = (self.t + throw_time(THROW_EFFORT * fd.a.arm, d)).max(self.receiver_ready(recv, goal)) + 0.05;
+            let t_direct = self.t + throw_time(THROW_EFFORT * fd.a.arm, d);
+            let t_via = via(goal);
+            let t_ball = t_direct.min(t_via).max(self.receiver_ready(recv, goal)) + 0.05;
             let p_out = phi((t_runner - t_ball) / 0.12);
             let w = [0.9, 1.0, 1.1, 1.3][(goal as usize).saturating_sub(1).min(3)];
             // Take the sure out: an uncertain play on a lead runner loses to a certain one
             // elsewhere (the chance is squared before the base's weight is applied).
             if p_out > 0.3 && best.map(|b| p_out * p_out * w > b.0).unwrap_or(true) {
-                best = Some((p_out * p_out * w, goal));
+                best = Some((p_out * p_out * w, goal, t_via < t_direct));
             }
         }
         let infield = m::hypot(fd.pos.x, fd.pos.y) < INFIELD_R;
@@ -1306,12 +1450,20 @@ impl<'a> Sim<'a> {
             eprintln!("t {:.2} holder {} at ({:.1},{:.1}) best {:?}; runners {:?}", self.t, by, fd.pos.x, fd.pos.y, best, self.r.iter().map(|r| (r.start, r.s, r.goal, r.out, r.scored)).collect::<Vec<_>>());
         }
         let target_base = match best {
-            Some((_, b)) => Some(b),
-            // No play: get the ball back to the infield.
-            None if !infield => Some(2),
+            Some((_, b, through)) => Some((b, through)),
+            // No play: get the ball back to second base, the quicker way: straight there, or
+            // through the cutoff man when that is quicker or the throw cannot carry.
+            None if !infield => Some((2, via(2) < self.t + throw_time(THROW_EFFORT * fd.a.arm, (base_pos(2) - fd.pos).norm()))),
             None => None,
         };
-        let Some(b) = target_base else { return };
+        let Some((b, through)) = target_base else { return };
+        if through {
+            if let Some(i) = relay {
+                let at = self.f[i].pos;
+                self.throw_to(by, at, b, i, true);
+                return;
+            }
+        }
         let tgt = base_pos(b);
         if (tgt - fd.pos).norm() < 6.0 {
             // Closer to take it himself.
@@ -1324,6 +1476,15 @@ impl<'a> Sim<'a> {
             self.f[receiver].target = tgt;
             return;
         }
+        self.throw_to(by, tgt, b, receiver, false);
+        self.f[receiver].target = tgt;
+        self.back_up_throw(fd.pos, b);
+    }
+
+    /// Fielder `by` throws to ground point `tgt` for `receiver` (the ball is headed for base
+    /// `b`, through a relay man when `relay`).
+    fn throw_to(&mut self, by: usize, tgt: Vec3, b: u8, receiver: usize, relay: bool) {
+        let fd = self.f[by].clone();
         let mut r = rng(self.inp.seed, self.inp.play, fd.id, Purpose::ThrowExecution, fd.throws);
         self.f[by].throws += 1;
         // Aim with the thrower's own throw physics (drag and backspin, agent-models §5.5);
@@ -1335,17 +1496,19 @@ impl<'a> Sim<'a> {
         // Execution noise: speed 3%, then direction (the draw order of the vacuum model).
         let v = v_aim * (1.0 + 0.03 * r.truncated_normal(4.0));
         let h = Vec3::new(tgt.x - r0.x, tgt.y - r0.y, 0.0).normalized().rotate(Vec3::Z, fd.a.arm_sigma * r.truncated_normal(4.0));
-        self.launch_throw(throw_state(r0, h, v, elev), tgt, b, receiver);
+        self.launch_throw(throw_state(r0, h, v, elev), tgt, b, receiver, relay);
         self.out.released.push((self.t, fd.id));
-        self.f[receiver].target = tgt;
-        self.back_up_throw(fd.pos, b);
     }
 
-    /// Who takes a throw at base `b`: its cover man, else the nearest other fielder.
+    /// Who takes a throw at base `b`: its cover man, else the nearest other fielder who is
+    /// not the cutoff man (he keeps to his line).
     fn receiver_for(&self, by: usize, b: u8) -> usize {
         let tgt = base_pos(b);
         (0..9).find(|&i| i != by && self.f[i].role == Role::Cover(b)).unwrap_or_else(|| {
-            (0..9).filter(|&i| i != by).min_by(|&a, &c| (self.f[a].pos - tgt).norm().total_cmp(&(self.f[c].pos - tgt).norm())).unwrap()
+            (0..9)
+                .filter(|&i| i != by && !matches!(self.f[i].role, Role::Relay(_)))
+                .min_by(|&a, &c| (self.f[a].pos - tgt).norm().total_cmp(&(self.f[c].pos - tgt).norm()).then(a.cmp(&c)))
+                .unwrap()
         })
     }
 
@@ -1615,6 +1778,7 @@ fn simulate_live_inner(inp: &LiveInput, st: &mut RulesState) -> LiveOutput {
             break;
         }
         sim.cover_home_again();
+        sim.update_relay();
         sim.move_fielders();
         sim.move_runners();
         if sim.done {
@@ -1968,7 +2132,105 @@ mod tests {
         let d = m::hypot(to.x - from.x, to.y - from.y);
         let s = solve_throw(sim.inp.env, THROW_RELEASE_Z, THROW_CATCH_Z, d, speed).expect("in reach");
         let s0 = throw_state(from + Vec3::new(0.0, 0.0, THROW_RELEASE_Z), to - from, speed, s.elev);
-        sim.launch_throw(s0, to, 2, 3);
+        sim.launch_throw(s0, to, 2, 3, false);
+    }
+
+    /// The ball in fielder `holder`'s hands at `at`, the defense's jobs set as at assignment.
+    fn held_at(sim: &mut Sim, holder: usize, at: Vec3) {
+        sim.primary = holder;
+        sim.f[holder].pos = at;
+        sim.f[holder].target = at;
+        sim.ball = Ball::Held { by: holder };
+        sim.cover_roles();
+        sim.assign_relay();
+        sim.assign_backups();
+    }
+
+    /// Point `p` lies on the segment a–b (within 1 cm of the line, between the ends).
+    fn on_segment(p: Vec3, a: Vec3, b: Vec3) -> bool {
+        let (ab, ap) = (b - a, p - a);
+        let along = ap.dot(ab) / ab.dot(ab);
+        (ap - ab * along).norm() < 0.01 && along > 0.0 && along < 1.0
+    }
+
+    // Cutoffs and relays (agent-models §5.7), from the standard assignments.
+    #[test]
+    fn cutoff_and_relay_men_line_up_between_the_ball_and_the_base() {
+        const R: AgentId = 0x0007;
+        let fx = fixture(&[(R, 2)]);
+        let inp = input(&fx, vec![RunnerIn { id: fx.st.batter, base: 0, speed: 8.2 }, RunnerIn { id: R, base: 2, speed: 8.2 }]);
+        // Single to right-center with a runner on second: the first baseman is the cutoff to
+        // home, short of the plate on the throw's line; the second baseman takes first and the
+        // shortstop second.
+        let mut st = fx.st.clone();
+        let mut sim = new_sim(&inp, &mut st);
+        let at = Vec3::new(25.0, 62.0, 0.0);
+        held_at(&mut sim, 8, at);
+        assert_eq!(sim.f[2].role, Role::Relay(4));
+        let spot = sim.f[2].target;
+        assert!(on_segment(spot, base_pos(4), at), "cutoff spot {spot:?}");
+        assert!((spot - base_pos(4)).norm() >= CUTOFF_M - 1e-9 && (spot - base_pos(4)).norm() <= 0.5 * at.norm() + 1e-9);
+        assert_eq!((sim.f[3].role, sim.f[5].role, sim.f[4].role), (Role::Cover(1), Role::Cover(2), Role::Cover(3)));
+        // Single to left with a runner on second: the third baseman cuts off, the shortstop
+        // takes third.
+        let mut st = fx.st.clone();
+        let mut sim = new_sim(&inp, &mut st);
+        held_at(&mut sim, 6, Vec3::new(-35.0, 60.0, 0.0));
+        assert_eq!(sim.f[4].role, Role::Relay(4));
+        assert!((0..9).any(|i| sim.f[i].role == Role::Cover(3)) && (0..9).any(|i| sim.f[i].role == Role::Cover(2)));
+        // Deep in the left-center gap: the shortstop goes out as the relay man, far enough
+        // that the outfielder's throw to him is RELAY_OF_THROW_M, or half the way home when
+        // that is longer.
+        let mut st = fx.st.clone();
+        let mut sim = new_sim(&inp, &mut st);
+        let deep = Vec3::new(-30.0, 105.0, 0.0);
+        held_at(&mut sim, 7, deep);
+        assert_eq!(sim.f[5].role, Role::Relay(4));
+        assert!(on_segment(sim.f[5].target, base_pos(4), deep));
+        assert!(((sim.f[5].target - deep).norm() - RELAY_OF_THROW_M.max(0.5 * deep.norm())).abs() < 1e-6);
+        // No cutoff for a ball fielded in the infield.
+        let mut st = fx.st.clone();
+        let mut sim = new_sim(&inp, &mut st);
+        held_at(&mut sim, 5, Vec3::new(-8.0, 38.0, 0.0));
+        assert!(!(0..9).any(|i| matches!(sim.f[i].role, Role::Relay(_))));
+    }
+
+    // A throw home from the wall is beyond a weak arm on the fly (drag): it goes through the
+    // relay man, who catches it and throws on, and the catcher takes it at the plate.
+    #[test]
+    fn a_throw_beyond_the_arm_goes_through_the_relay_man() {
+        const R: AgentId = 0x0007;
+        let fx = fixture(&[(R, 2)]);
+        let mut inp = input(&fx, vec![RunnerIn { id: fx.st.batter, base: 0, speed: 8.2 }, RunnerIn { id: R, base: 2, speed: 8.2 }]);
+        inp.fattrs[CF].arm = 30.0;
+        inp.fattrs[CF].arm_sigma = 0.0;
+        inp.fattrs[SS].arm_sigma = 0.0;
+        let deep = Vec3::new(-5.0, 112.0, 0.0);
+        assert!(solve_throw(&fx.env, THROW_RELEASE_Z, THROW_CATCH_Z, deep.norm(), 30.0).is_none(), "the direct throw must be out of reach");
+        let mut st = fx.st.clone();
+        let mut sim = new_sim(&inp, &mut st);
+        sim.t = 5.0;
+        held_at(&mut sim, CF, deep);
+        // The relay man is already on his spot; the runner is past third, jogging home (he
+        // is not moved by this test, so the play on him stays open).
+        sim.f[SS].pos = sim.f[SS].target;
+        sim.f[1].pos = base_pos(4);
+        let k = sim.r.iter().position(|r| r.id == R).unwrap();
+        (sim.r[k].s, sim.r[k].goal, sim.r[k].v) = (3.2 * BASE_L, 4, 3.0);
+        for _ in 0..600 {
+            sim.update_relay();
+            sim.update_thrown();
+            sim.try_captures();
+            sim.holder_act();
+            sim.move_fielders();
+            sim.t += DT;
+            if matches!(sim.ball, Ball::Held { by: 1 }) {
+                break;
+            }
+        }
+        let who: Vec<AgentId> = sim.out.released.iter().map(|x| x.1).collect();
+        assert_eq!(who, vec![sim.f[CF].id, sim.f[SS].id], "throws by {who:?}");
+        assert!(matches!(sim.ball, Ball::Held { by: 1 }), "ball: {:?}", match &sim.ball { Ball::Held { by } => format!("held by {by}"), _ => "loose".into() });
     }
 
     fn jobs(sim: &mut Sim, fielder: usize, at: Vec3) {
