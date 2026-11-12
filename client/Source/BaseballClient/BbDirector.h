@@ -146,6 +146,11 @@ private:
 	UPROPERTY()
 	TObjectPtr<AStaticMeshActor> Ball;
 	UPROPERTY()
+	TObjectPtr<AStaticMeshActor> BallShadow;
+	/** Diameter of the ball's ground shadow with the ball on the ground, m (engine units are
+	 *  set by the cylinder's 1 m size at scale 1). */
+	static constexpr float BallShadowM = 0.50f;
+	UPROPERTY()
 	TObjectPtr<AStaticMeshActor> Bat;
 	UPROPERTY()
 	TObjectPtr<ACameraActor> Camera;

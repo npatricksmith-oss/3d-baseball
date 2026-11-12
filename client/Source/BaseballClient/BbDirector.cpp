@@ -278,6 +278,11 @@ void ABbDirector::BeginPlay()
 	}
 	// The ball is drawn three times its real size so it can be seen from the stands.
 	Ball = Shape(Sphere, FVector::ZeroVector, FVector(0.22), FLinearColor(1.f, 1.f, 0.9f));
+	// The ball's shadow as a viewer reads it: a dark disc on the ground straight under the
+	// ball (the sun's own shadow of so small a ball is lost at a distance and falls well
+	// to the side of a high fly). It shrinks as the ball climbs, so height reads too.
+	BallShadow = Shape(Cylinder, FVector::ZeroVector, FVector(BallShadowM, BallShadowM, 0.002), FLinearColor(0.02f, 0.03f, 0.02f));
+	BallShadow->GetStaticMeshComponent()->SetCastShadow(false);
 	// The bat: a cylinder stretched between the knob and the tip the sim reports, drawn a
 	// little thicker than real so the swing reads from the stands.
 	Bat = Shape(Cylinder, FVector::ZeroVector, FVector(0.09, 0.09, 0.86), FLinearColor(0.75f, 0.55f, 0.3f));
@@ -821,6 +826,14 @@ void ABbDirector::Tick(float DeltaSeconds)
 		{
 			Ball->SetActorLocation(ToUE(Frame.ball));
 			Ball->SetActorHiddenInGame(!bBallShown);
+			{
+				// Above every ground layer (the mound's top is at 5 mm), below anything else.
+				const float H = FMath::Max(0.f, Frame.ball[2]);
+				const float Size = BallShadowM * FMath::Lerp(1.f, 0.55f, FMath::Clamp(H / 30.f, 0.f, 1.f));
+				BallShadow->SetActorLocation(ToUE(Frame.ball[0], Frame.ball[1], 0.012));
+				BallShadow->SetActorScale3D(FVector(Size, Size, 0.002));
+				BallShadow->SetActorHiddenInGame(!bBallShown);
+			}
 			Bat->SetActorHiddenInGame(Frame.has_bat == 0);
 			if (Frame.has_bat != 0)
 			{
