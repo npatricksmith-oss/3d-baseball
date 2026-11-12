@@ -1,13 +1,29 @@
 # Task List
 
-**Last updated:** 2026-11-11
+**Last updated:** 2026-11-12
 The live to-do list for the project. [PLAN.md](PLAN.md) holds decisions and design. This file holds what is next and what is done. Update it at the end of every work session.
 
 Status: `[ ]` not started · `[~]` in progress · `[x]` done · `[?]` needs an owner decision
 
 ---
 
-## Resume here (2026-11-11, after the owner's first watch)
+## Resume here (2026-11-12)
+
+**First:** the [Codex review of `1f7ca4c..845a862`](docs/reviews/2026-11-12-codex-throws-relays-review.md) (throws with drag, cutoffs and relays, ball shadow, launcher, and the between-pitch staging that had not been reviewed). Fix or defer each finding and write its Resolution. If the file is missing, the review did not finish: rerun it with the prompt in the protocol (CLAUDE.md).
+
+Done 2026-11-12:
+- **Desktop launcher** (owner request): `bin/play.sh`, installed in the app menu as "3D Baseball" by `bin/install_launcher.sh`. It builds and opens the Unreal client with a new seed each launch (shown in the notification); right-click offers a chosen seed or the Rerun viewer. The engine had been moved to the desktop Trash on 2026-11-11 and was restored to `~/UnrealEngine/5.8.4`; the launcher now says so and asks before falling back to Rerun.
+- **Ball shadow** (owner request): a dark disc straight under the ball, shrinking as it climbs (`845a862`).
+- **Throws with drag and backspin** (`dbaae0a`, agent-models §5.5): `bb_physics::throw` (solve and `ThrowTable`), receivers take a throw at the bag when it is catchable there. Runs 4.32 → 4.99 per team-game: long throws take a few tenths longer, which the vacuum model's 0.92 × arm had hidden.
+- **Cutoff and relay men** (`8c430e9`, agent-models §5.7): 5.05 runs (4.99 throwing direct; +0.06 to +0.12 on two seed sets, near noise). Open question for the review: why relays do not help the defense at all.
+
+Next, in the order a viewer would notice:
+- Run environment is now 5.05 runs/team-game (MLB ≈ 4.5) after the honest throw physics. Ground balls are the excess (GB hit .385 vs MLB .24). Before tuning abilities, look for planner bugs first (memory: three fielder-planning bugs once hid behind tuned values). One-hop throws (agent-models §5.5) are not chosen yet.
+- Throwing, pitching and batting motion are stand-ins; no catching motion; the bat is not in the batter's hands.
+- Still open from reviews: a runner who crosses home before a catch never returns (day-fixes review #1, P1, rules engine); foul share 24% vs 50%; foul-territory walls.
+
+### Previous handoff (2026-11-11, after the owner's first watch)
+
 
 The owner watched the Unreal client and asked for four things; all four are in ([notes and numbers](docs/calibration/2026-11-11-owner-watch-notes.md)):
 1. **Human figures:** the engine's mannequin with idle / walk / jog, facing, team tint (`client/run.sh` copies the assets from the engine; they are not in the repository).
@@ -26,7 +42,7 @@ The [Codex review of that change set](docs/reviews/2026-11-11-codex-watch-fixes-
 - Ground balls go for hits too often (.377; infield hits ~16% of grounders) since leads and the faster batter.
 - Still open from reviews: a runner who crosses home before a catch never returns; foul share 24% vs 50%; foul-territory walls.
 
-Numbers (`sim-cli games --n 512 --seed 2`): 4.32 runs/team-game, K 17.5%, BB 7.4%, HR 3.9%; GB .374 / LD .707 / FB .132; 83 double plays per 40 games. Build `sim-cli` with `cargo build --release -p bb_cli` on its own.
+Numbers (`sim-cli games --n 512 --seed 2`), 2026-11-12: 5.05 runs/team-game, K 17.2%, BB 7.3%, HR 4.2%; GB .385 / LD .713 / FB .137 / PU .018. (2026-11-11: 4.32 runs, GB .374.) Build `sim-cli` with `cargo build --release -p bb_cli` on its own.
 
 1. [x] **Per-game budget (200 ms): met, ~155–170 ms on one thread** (the laptop's timings swing widely with load; compare builds interleaved, best of several). Two-stage aim solve and seeded scouting builds (−28 ms); batter filter with an analytic Jacobian, direct plate covariance, and aim points from the nominal's depth crossing (−61 ms; `sim-cli pa` 641 → 421 µs per pitch, identical B1 rates); live plays with a 0.1 s agent flight step, the recall reusing the chaser's same-tick prediction, and a single-pass intercept scan using the forward running curve (−51 ms; 512 games unchanged within noise). Breakdown in agent-models §12. Note: run totals differ by seed set (5.6–5.8 runs/team-game between 128- and 512-game samples); compare calibration runs on the same seeds.
 2. [~] **Run environment: 4.29 runs/team-game now** (512 games, seed 2; MLB ≈ 4.5). (a0) is done: replans keep the fielder's speed, the intercept scan tests between its samples, chasers arrive at speed; the "everyone breaks" rule now uses each infielder's own read and has lost its extra 0.6 s condition (no measurable effect). Still open: (a) foul-territory walls and backstop (physics-spec §9.4; foul ground reaches the outfield-fence radius, so overthrows roll ~100 m), which needs the rules engine's thrown-ball-out-of-play award; (b) infield positioning: most remaining through-balls are in the 5–6 hole, the 3–4 hole, and up the middle on the first-base side, and shifting toward the pull side made things worse last time; (c) the contact model makes too many grounders and topped balls (BIP launch-angle quartiles −15/5/25° vs MLB ≈ −2/13/28°).
@@ -75,7 +91,7 @@ Numbers (`sim-cli games --n 512 --seed 2`): 4.32 runs/team-game, K 17.5%, BB 7.4
 - [ ] Rules engine, from the Codex day-fixes review: a runner returning from home after a catch (un-scoring a pending run; finding 1, P1) and a fielder-touch fact so the retouch reference is first touch, not secure possession (finding 2)
 - [ ] Rules engine: uncaught third strike and caught foul tips (catcher capture), overrunning first, two runners on a base, passing runners, interference (§5.7); grow the corpus toward 150 scenarios (§12.3)
 - [x] Causal live-ball simulator (`bb_game/src/live.rs`): tick loop, fielders predict from noisy observations with their own physics, calls and re-calls, coverage, real captures and deflections, wall robberies, thrown balls with tracking receivers, observation-based runners, rules stepped live (2026-10-31)
-- [ ] Live-ball simulator next steps: atlas-based perception (agent-models §5.1), relays and cutoffs, throws with drag, runner leads, rounding and slides, `BallPassedBase`, first-touch facts, the deferred live-review findings (3–6, 11–13, 16), runners reconsidering on bobbles and throw releases
+- [ ] Live-ball simulator next steps (relays, cutoffs, and throws with drag done 2026-11-12; no double cut, no one-hop throws): atlas-based perception (agent-models §5.1), runner leads, rounding and slides, `BallPassedBase`, first-touch facts, the deferred live-review findings (3–6, 11–13, 16), runners reconsidering on bobbles and throw releases
 - [ ] Run environment: runs/team-game is ~5.6 with the causal simulator (target ~4.5). Ground balls reach base .55 of the time (MLB ≈ .24) because too many get through the fixed-table infield positions; LD/FB/PU are near MLB rates. Measure first: by batted-ball type and fielder (`examples/dump_plays.rs` plus `analysis/plots/plays_topdown.py` give visual checks)
 - [x] Play timelines for the client (data-formats §5, `bb_game::timeline`: ball knots, markers, telemetry, view state) and Rerun output of whole games (`sim-cli game --rrd`)
 - [x] C ABI for the Unreal spike (`bb_ffi`: create/advance/score/free, header `sim/crates/bb_ffi/include/bb_ffi.h`); a C client plays a full game (`sim/crates/bb_ffi/c/run_smoke.sh`)
