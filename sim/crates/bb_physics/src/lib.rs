@@ -13,6 +13,7 @@ pub mod flight;
 pub mod ground;
 pub mod pitch;
 pub mod spin;
+pub mod throw;
 pub mod zone;
 
 pub use ball::{AeroParams, BallParams};

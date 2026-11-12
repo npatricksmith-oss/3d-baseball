@@ -7,13 +7,13 @@
 //!
 //! Remaining simplifications, documented for M5: fielder perception is a noisy estimate of
 //! the ball's current state fed into the agent's own physics (smooth ground, typical spin)
-//! rather than the full atlas model of agent-models §5.1; throws fly without drag; no
-//! relays, slides, rundown tactics, or collisions; coverage follows a small fixed table.
+//! rather than the full atlas model of agent-models §5.1; throws never choose a one-hop
+//! trajectory; no slides, rundown tactics, or collisions; coverage follows a small fixed table.
 
-use bb_math::units::G;
 use bb_math::{KeyedRng, Purpose, RngKey, Vec3, m};
 use bb_physics::ground::{BallPath, Field, SegmentEnd, batted_path, batted_path_dt};
-use bb_physics::{BallState, FlightEnv};
+use bb_physics::throw::{THROW_MAX_ELEV, ThrowTable, fly_throw, solve_throw, throw_state};
+use bb_physics::{BallState, FlightEnv, Trajectory};
 use bb_rules::{AgentId, Event, Input, PlayState, RulesState, Touch, step};
 
 use crate::play::{FielderAttrs, RunnerIn, base_pos, home_positions, run_dist, run_time};
@@ -51,7 +51,37 @@ const RUNNER_TAU: f64 = 0.85;
 const HALFWAY_M: f64 = 5.0;
 const PLAY_LIMIT_S: f64 = 40.0;
 /// Fraction of arm strength used on throws [E].
-const THROW_FRAC: f64 = 0.92;
+/// Release speed of a throw as a fraction of the fielder's arm strength [E]. Throws fly with
+/// drag and backspin (agent-models §5.5); before that, a vacuum throw at 0.92 of the arm stood
+/// in for the speed drag takes off. Every throw is full effort until speed-for-accuracy is
+/// modelled.
+const THROW_EFFORT: f64 = 1.0;
+/// Release and catch heights of a throw, m.
+const THROW_RELEASE_Z: f64 = 1.8;
+const THROW_CATCH_Z: f64 = 1.3;
+/// Lowest a receiver takes a throw in the air (a scoop), m [E].
+const THROW_SCOOP_Z: f64 = 0.15;
+
+/// How long a throw takes, as a fielder or runner believes it: tabulated once from the throw
+/// physics in a reference atmosphere (a learned belief, not the world's air).
+fn throw_table() -> &'static ThrowTable {
+    static T: std::sync::OnceLock<ThrowTable> = std::sync::OnceLock::new();
+    T.get_or_init(|| ThrowTable::build(&FlightEnv::default_env(), THROW_RELEASE_Z, THROW_CATCH_Z))
+}
+
+/// Believed flight time of a throw at release speed `v` over horizontal distance `d`
+/// (infinite beyond the arm's reach on the fly).
+fn throw_time(v: f64, d: f64) -> f64 {
+    throw_table().time(v, d)
+}
+
+/// A runner's estimate of how long the defense needs to get the ball over horizontal
+/// distance `d` by throwing: a league-typical arm, relayed through a man halfway when that is
+/// quicker or the throw cannot carry.
+fn typical_throw_time(d: f64) -> f64 {
+    let v = THROW_EFFORT * TYPICAL_ARM;
+    throw_time(v, d).min(2.0 * throw_time(v, 0.5 * d) + RELAY_TRANSFER_FRAC * TYPICAL_TRANSFER)
+}
 const RECEIVE_REACH: f64 = 1.5;
 /// Running distance over which the batter leaves his box and joins the base path, m [E].
 const BOX_EXIT_M: f64 = 4.0;
@@ -80,7 +110,9 @@ enum Ball {
     /// Following physics (batted, deflected, or a throw that got away).
     Free { path: BallPath, next_touch: usize, next_wall: usize, settled_sent: bool },
     Held { by: usize },
-    Thrown { r0: Vec3, v0: Vec3, t0: f64, to_base: u8, receiver: usize },
+    /// A throw in flight until it reaches the ground (`path` ends there). `catch_at` is
+    /// where the receiver goes to take it.
+    Thrown { path: Trajectory, catch_at: Vec3, to_base: u8, receiver: usize },
 }
 
 #[derive(Clone, Copy, Debug, PartialEq)]
@@ -375,10 +407,7 @@ impl<'a> Sim<'a> {
         match &self.ball {
             Ball::Free { path, .. } => path.at(t),
             Ball::Held { by } => (self.f[*by].pos + Vec3::new(0.0, 0.0, 1.2), Vec3::ZERO),
-            Ball::Thrown { r0, v0, t0, .. } => {
-                let dt = t - t0;
-                (*r0 + *v0 * dt + Vec3::new(0.0, 0.0, -0.5 * G * dt * dt), *v0 + Vec3::new(0.0, 0.0, -G * dt))
-            }
+            Ball::Thrown { path, .. } => path.at(t),
         }
     }
 
@@ -836,7 +865,7 @@ impl<'a> Sim<'a> {
                 let boundary = match &self.ball {
                     Ball::Free { path, .. } => path.bounces.iter().any(|x| within(x.0)) || path.walls.iter().any(|x| within(x.0)) || path.t_end() <= t1,
                     // A throw that reaches the ground becomes a bouncing ball before the next test.
-                    Ball::Thrown { .. } => bn.z <= self.inp.env.ball.radius,
+                    Ball::Thrown { path, .. } => t1 >= path.last().t,
                     Ball::Held { .. } => false,
                 };
                 let (pn, _) = fielder_step(fd, self.t, self.inp.t_contact);
@@ -958,34 +987,32 @@ impl<'a> Sim<'a> {
         }
     }
 
+    /// Put a throw aimed at ground point `aim` in the air from launch state `s0` now.
+    fn launch_throw(&mut self, s0: BallState, aim: Vec3, to_base: u8, receiver: usize) {
+        let path = fly_throw(self.inp.env, s0, self.t, 15.0);
+        // The receiver takes the ball where it is catchable (glove height, from a scoop to
+        // a reach overhead) nearest the spot he means to be: on the bag when the throw is in
+        // reach there, otherwise as close to it as he can.
+        let catch_at = path
+            .knots
+            .iter()
+            .filter(|k| k.s.r.z >= THROW_SCOOP_Z && k.s.r.z <= CATCH_MAX_Z)
+            .min_by(|a, b| m::hypot(a.s.r.x - aim.x, a.s.r.y - aim.y).total_cmp(&m::hypot(b.s.r.x - aim.x, b.s.r.y - aim.y)))
+            .map(|k| if m::hypot(k.s.r.x - aim.x, k.s.r.y - aim.y) < 0.5 { aim } else { k.s.r })
+            .unwrap_or(path.last().s.r);
+        self.ball = Ball::Thrown { path, catch_at, to_base, receiver };
+    }
+
     fn update_thrown(&mut self) {
-        // The receiver watches the throw and moves to where it will come down to catch height.
-        if let Ball::Thrown { r0, v0, t0, receiver, .. } = self.ball {
-            let a = 0.5 * G;
-            let (b, c) = (-v0.z, 1.3 - r0.z);
-            // z(t) = r0.z + v0.z·τ − ½gτ² = 1.3  →  aτ² + bτ + c = 0, take the later root.
-            let disc = b * b - 4.0 * a * c;
-            if disc >= 0.0 {
-                let tau = (-b + m::sqrt(disc)) / (2.0 * a);
-                let p = r0 + v0 * tau;
-                let _ = t0;
-                self.f[receiver].target = Vec3::new(p.x, p.y, 0.0);
-            }
-        }
-        if let Ball::Thrown { r0, v0, t0, .. } = self.ball {
-            let (b, _) = self.ball_at(self.t);
-            if b.z <= self.inp.env.ball.radius {
-                // The throw reached the ground: find when, and continue from there with the
-                // bounce model (a short hop or a throw that got by).
-                let rr = self.inp.env.ball.radius;
-                let (a, bq, c) = (0.5 * G, -v0.z, rr - r0.z);
-                let disc = (bq * bq - 4.0 * a * c).max(0.0);
-                let tau = (-bq + m::sqrt(disc)) / (2.0 * a);
-                let p = r0 + v0 * tau + Vec3::new(0.0, 0.0, -0.5 * G * tau * tau);
-                let v = v0 + Vec3::new(0.0, 0.0, -G * tau);
-                let _ = t0;
-                self.set_free(BallState { r: Vec3::new(p.x, p.y, rr), v, w: Vec3::ZERO });
-            }
+        // The receiver watches the throw and goes to where he can take it.
+        let Ball::Thrown { path, catch_at, receiver, .. } = &self.ball else { return };
+        self.f[*receiver].target = Vec3::new(catch_at.x, catch_at.y, 0.0);
+        if self.t >= path.last().t {
+            // The throw reached the ground: continue from there with the bounce model (a
+            // short hop or a throw that got by).
+            let mut s = path.last().s;
+            s.r.z = s.r.z.max(self.inp.env.ball.radius);
+            self.set_free(s);
         }
     }
 
@@ -998,7 +1025,7 @@ impl<'a> Sim<'a> {
                 // The runner sees where the ball is and when it was caught.
                 let (p, _) = self.ball_at(self.t);
                 let ready = (self.secured_at + TYPICAL_TRANSFER).max(self.t);
-                ready + m::hypot(target.x - p.x, target.y - p.y) / (THROW_FRAC * TYPICAL_ARM)
+                ready + typical_throw_time(m::hypot(target.x - p.x, target.y - p.y))
             }
             Ball::Thrown { .. } => {
                 // A throw in the air: where it is and how fast it is coming.
@@ -1015,7 +1042,7 @@ impl<'a> Sim<'a> {
                     })
                     .unwrap();
                 let arrive = self.t + to(base_pos(dest)) / vh;
-                if dest == b { arrive } else { arrive + 0.6 + (target - base_pos(dest)).norm() / (THROW_FRAC * TYPICAL_ARM) }
+                if dest == b { arrive } else { arrive + 0.6 + typical_throw_time((target - base_pos(dest)).norm()) }
             }
             Ball::Free { .. } => {
                 let t0 = prof::enabled().then(std::time::Instant::now);
@@ -1024,7 +1051,7 @@ impl<'a> Sim<'a> {
                 if let Some(t0) = t0 {
                     prof::add(&prof::RUNNER, t0.elapsed().as_nanos() as u64);
                 }
-                tf + TYPICAL_TRANSFER + (target - at).norm() / (THROW_FRAC * TYPICAL_ARM)
+                tf + TYPICAL_TRANSFER + typical_throw_time(m::hypot(target.x - at.x, target.y - at.y))
             }
         }
     }
@@ -1265,7 +1292,7 @@ impl<'a> Sim<'a> {
             let d = (base_pos(goal) - fd.pos).norm();
             // The ball beats the runner only once someone is at the bag to take it.
             let recv = self.receiver_for(by, goal);
-            let t_ball = (self.t + d / (THROW_FRAC * fd.a.arm)).max(self.receiver_ready(recv, goal)) + 0.05;
+            let t_ball = (self.t + throw_time(THROW_EFFORT * fd.a.arm, d)).max(self.receiver_ready(recv, goal)) + 0.05;
             let p_out = phi((t_runner - t_ball) / 0.12);
             let w = [0.9, 1.0, 1.1, 1.3][(goal as usize).saturating_sub(1).min(3)];
             // Take the sure out: an uncertain play on a lead runner loses to a certain one
@@ -1293,21 +1320,22 @@ impl<'a> Sim<'a> {
         }
         let receiver = self.receiver_for(by, b);
         // Time the release so the ball arrives when the receiver can be at the bag.
-        if self.t + (tgt - fd.pos).norm() / (THROW_FRAC * fd.a.arm) < self.receiver_ready(receiver, b) - 0.05 {
+        if self.t + throw_time(THROW_EFFORT * fd.a.arm, (tgt - fd.pos).norm()) < self.receiver_ready(receiver, b) - 0.05 {
             self.f[receiver].target = tgt;
             return;
         }
         let mut r = rng(self.inp.seed, self.inp.play, fd.id, Purpose::ThrowExecution, fd.throws);
         self.f[by].throws += 1;
-        let r0 = fd.pos + Vec3::new(0.0, 0.0, 1.8);
-        let aim = tgt + Vec3::new(0.0, 0.0, 1.3);
-        let d = m::hypot(aim.x - r0.x, aim.y - r0.y);
-        let vh = THROW_FRAC * fd.a.arm * (1.0 + 0.03 * r.truncated_normal(4.0));
-        let tf = d / vh;
-        let vz = (aim.z - r0.z + 0.5 * G * tf * tf) / tf;
-        let h = Vec3::new(aim.x - r0.x, aim.y - r0.y, 0.0).normalized().rotate(Vec3::Z, fd.a.arm_sigma * r.truncated_normal(4.0));
-        let v0 = h * vh + Vec3::new(0.0, 0.0, vz);
-        self.ball = Ball::Thrown { r0, v0, t0: self.t, to_base: b, receiver };
+        // Aim with the thrower's own throw physics (drag and backspin, agent-models §5.5);
+        // a throw beyond his reach on the fly goes at the steepest useful angle and bounces.
+        let r0 = fd.pos + Vec3::new(0.0, 0.0, THROW_RELEASE_Z);
+        let v_aim = THROW_EFFORT * fd.a.arm;
+        let d = m::hypot(tgt.x - r0.x, tgt.y - r0.y);
+        let elev = solve_throw(self.inp.env, THROW_RELEASE_Z, THROW_CATCH_Z, d, v_aim).map(|s| s.elev).unwrap_or(THROW_MAX_ELEV);
+        // Execution noise: speed 3%, then direction (the draw order of the vacuum model).
+        let v = v_aim * (1.0 + 0.03 * r.truncated_normal(4.0));
+        let h = Vec3::new(tgt.x - r0.x, tgt.y - r0.y, 0.0).normalized().rotate(Vec3::Z, fd.a.arm_sigma * r.truncated_normal(4.0));
+        self.launch_throw(throw_state(r0, h, v, elev), tgt, b, receiver);
         self.out.released.push((self.t, fd.id));
         self.f[receiver].target = tgt;
         self.back_up_throw(fd.pos, b);
@@ -1482,7 +1510,7 @@ fn simulate_live_inner(inp: &LiveInput, st: &mut RulesState) -> LiveOutput {
                 eprintln!("timeout play {}: ball {:?}", play, match &sim.ball { Ball::Free { .. } => "free".to_string(), Ball::Held { by } => format!("held by {} at {:?} ready {}", by, sim.f[*by].pos, sim.f[*by].ready_at), Ball::Thrown { to_base, receiver, .. } => format!("thrown to {to_base} recv {receiver}") });
                 let (bp, bv) = sim.ball_at(sim.t);
                 eprintln!("  ball at ({:.2},{:.2},{:.2}) v ({:.2},{:.2},{:.2}); primary {} blocked_until {:.2} dove {} next_plan {:.2}", bp.x, bp.y, bp.z, bv.x, bv.y, bv.z, sim.primary, sim.f[sim.primary].blocked_until, sim.f[sim.primary].dove, sim.f[sim.primary].next_plan);
-                if let Ball::Thrown { r0, v0, t0, .. } = &sim.ball { eprintln!("  throw r0 {:?} v0 {:?} t0 {:.2} now {:.2}", r0, v0, t0, sim.t); }
+                if let Ball::Thrown { path, .. } = &sim.ball { eprintln!("  throw from {:?} at {:.2}, lands {:.2}; now {:.2}", path.first().s.r, path.first().t, path.last().t, sim.t); }
                 for r in &sim.r {
                     eprintln!("  runner {} start {} s {:.1} goal {} v {:.1} out {} scored {} tag_up {}", r.id, r.start, r.s, r.goal, r.v, r.out, r.scored, r.tag_up);
                 }
@@ -1934,6 +1962,15 @@ mod tests {
     }
 
     /// Set up who fields the ball where, then hand out cover and backup jobs.
+    /// A throw to second (receiver: the second baseman) from `from` aimed to come down to
+    /// chest height at ground point `to`, released at `speed`.
+    fn aimed_throw(sim: &mut Sim, from: Vec3, to: Vec3, speed: f64) {
+        let d = m::hypot(to.x - from.x, to.y - from.y);
+        let s = solve_throw(sim.inp.env, THROW_RELEASE_Z, THROW_CATCH_Z, d, speed).expect("in reach");
+        let s0 = throw_state(from + Vec3::new(0.0, 0.0, THROW_RELEASE_Z), to - from, speed, s.elev);
+        sim.launch_throw(s0, to, 2, 3);
+    }
+
     fn jobs(sim: &mut Sim, fielder: usize, at: Vec3) {
         sim.primary = fielder;
         sim.f[fielder].target = at;
@@ -2027,12 +2064,14 @@ mod tests {
         sim.f[0].backs = Some(2);
         sim.f[0].pos = second + Vec3::new(0.0, -BACKUP_M, 0.0);
         sim.f[0].target = sim.f[0].pos;
-        // From deep center toward home, 4 m over the base, falling to chest height at the backup.
-        let (r0, tf) = (Vec3::new(0.0, 80.0, 1.8), 1.6);
-        let end = sim.f[0].pos + Vec3::new(0.0, 0.0, 1.3);
-        let v0 = Vec3::new(0.0, (end.y - r0.y) / tf, (end.z - r0.z + 0.5 * G * tf * tf) / tf);
-        sim.ball = Ball::Thrown { r0, v0, t0: 2.0, to_base: 2, receiver: 3 };
-        for _ in 0..110 {
+        // From deep center toward home, a soft throw over the receiver's head at the base,
+        // falling to chest height at the backup.
+        let backup = sim.f[0].pos;
+        aimed_throw(&mut sim, Vec3::new(0.0, 80.0, 0.0), backup, 29.0);
+        let Ball::Thrown { path, .. } = &sim.ball else { unreachable!() };
+        let over = path.find(bb_physics::flight::Crossing::YBelow(second.y)).map(|t| path.at(t).0.z).unwrap();
+        assert!(over > CATCH_MAX_Z + 0.3, "the throw must sail over the receiver: {over}");
+        for _ in 0..300 {
             sim.update_thrown();
             sim.try_captures();
             sim.t += DT;
@@ -2148,10 +2187,8 @@ mod tests {
         sim.f[0].pos = second + Vec3::new(0.0, -0.2, 0.0);
         sim.f[0].target = sim.f[0].pos;
         // From deep center, arriving chest-high at the receiver.
-        let (r0, tf) = (Vec3::new(0.0, 80.0, 1.8), 1.6);
-        let end = sim.f[3].pos + Vec3::new(0.0, 0.0, 1.3);
-        let v0 = Vec3::new(0.0, (end.y - r0.y) / tf, (end.z - r0.z + 0.5 * G * tf * tf) / tf);
-        sim.ball = Ball::Thrown { r0, v0, t0: 2.0, to_base: 2, receiver: 3 };
+        let at = sim.f[3].pos;
+        aimed_throw(&mut sim, Vec3::new(0.0, 80.0, 0.0), at, 39.0);
         for _ in 0..110 {
             sim.update_thrown();
             sim.try_captures();

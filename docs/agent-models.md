@@ -402,6 +402,8 @@ At the capture instant, the glove pocket center has a Gaussian error in the plan
 - **Execution noise** (purpose `ThrowExecution`): direction σ from `ArmAccuracy` · (1 + k_rush·rush + k_off·off_balance) · F_composure; speed σ 3% [E]. `rush` = how much the transfer was shortened below the fielder's normal; `off_balance` = 1 when throwing while moving away or after a dive.
 - The receiver runs the standard capture test. A first baseman uses §5.8.
 
+**Built 2026-11-12 (`bb_physics::throw`, `live.rs`):** throws fly with drag and 1500 rpm backspin, aimed by the thrower's own solve (the flatter elevation that reaches chest height at the target; none past 35°). Every throw is released at full arm strength (`THROW_EFFORT` 1.0) until speed-for-accuracy is modelled; the old vacuum throw at 0.92 of the arm stood in for drag. Speed noise (3%) now moves where the throw comes down, so the receiver takes it at the bag whenever it passes there between scoop height (0.15 m) and 2.4 m, and otherwise goes to the catchable point nearest the bag. Fielders and runners judge throw times from a table of the same physics in a reference atmosphere (`ThrowTable`, a belief). One-hop throws are not chosen yet: a throw beyond the arm's reach leaves at 35° and bounces.
+
 ### 5.6 Throw decision
 
 At the end of the transfer, the fielder evaluates each option (each base with a runner heading to it, the cutoff, hold the ball):
