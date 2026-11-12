@@ -13,7 +13,7 @@
 
 use bb_math::{KeyedRng, Purpose, RngKey, Vec3, m};
 use bb_physics::ground::{BallPath, Field, SegmentEnd, batted_path, batted_path_dt};
-use bb_physics::throw::{THROW_MAX_ELEV, ThrowTable, fly_throw, solve_throw, throw_state};
+use bb_physics::throw::{THROW_MAX_ELEV, THROW_SPIN_RPM, ThrowTable, fly_throw, solve_throw, throw_state};
 use bb_physics::{BallState, FlightEnv, Trajectory};
 use bb_rules::{AgentId, Event, Input, PlayState, RulesState, Touch, step};
 
@@ -60,6 +60,8 @@ const THROW_EFFORT: f64 = 1.0;
 /// Release and catch heights of a throw, m.
 const THROW_RELEASE_Z: f64 = 1.8;
 const THROW_CATCH_Z: f64 = 1.3;
+/// How often a receiver re-reads a throw coming to him, s [E].
+const RECEIVE_REPLAN_S: f64 = 0.25;
 /// Lowest a receiver takes a throw in the air (a scoop), m [E].
 const THROW_SCOOP_Z: f64 = 0.15;
 
@@ -120,10 +122,12 @@ enum Ball {
     /// Following physics (batted, deflected, or a throw that got away).
     Free { path: BallPath, next_touch: usize, next_wall: usize, settled_sent: bool },
     Held { by: usize },
-    /// A throw in flight until it reaches the ground (`path` ends there). `catch_at` is
-    /// where the receiver goes to take it.
+    /// A throw in flight until it reaches the ground (`path` ends there; world-side only).
+    /// The receiver's plan is his own: `aim` is the spot he was thrown to, `catch_at` where
+    /// he believes he can take it (the aim until his first read), `read_err` his read's
+    /// error draws for this throw, and `next_read` when he looks again.
     /// `relay`: thrown to the cutoff or relay man, who throws on to `to_base`.
-    Thrown { path: Trajectory, catch_at: Vec3, to_base: u8, receiver: usize, relay: bool },
+    Thrown { path: Trajectory, aim: Vec3, catch_at: Vec3, read_err: [f64; 4], next_read: f64, to_base: u8, receiver: usize, relay: bool },
 }
 
 #[derive(Clone, Copy, Debug, PartialEq)]
@@ -662,6 +666,15 @@ impl<'a> Sim<'a> {
     /// position, third with a runner on first, otherwise second, or third on a deep ball;
     /// raised to any base a runner is visibly heading past that).
     fn relay_job(&self, from: Vec3) -> Option<(usize, u8)> {
+        // Only for a ball an outfielder fields: once an infielder has it (the relay man
+        // himself, or a middle infielder on a shallow fly), nobody else goes out.
+        let fielder = match self.ball {
+            Ball::Held { by } => by,
+            _ => self.primary,
+        };
+        if fielder < 6 {
+            return None;
+        }
         let depth = m::hypot(from.x, from.y);
         if depth < RELAY_FROM_M {
             return None;
@@ -692,7 +705,19 @@ impl<'a> Sim<'a> {
         if matches!(self.f[who].role, Role::Chase) || matches!(self.ball, Ball::Held { by } if by == who) {
             return None;
         }
-        if !down && !(deep && self.f[who].t_int.is_infinite()) {
+        // "No play on it": by his own read he cannot be there before it lands (his
+        // intercept time is when he could field it, possibly long after the bounce).
+        let no_air_play = || {
+            let fd = &self.f[who];
+            fd.belief.as_ref().and_then(|p| p.first_bounce()).map(|b| fd.t_int > b.0).unwrap_or(true)
+        };
+        if !down && !(deep && no_air_play()) {
+            return None;
+        }
+        // While the ball is loose he plays it himself if his own read says he gets there
+        // before the man chasing it (a grounder he can cut off before it reaches the
+        // outfield): the relay job is for a ball that is past him.
+        if matches!(self.ball, Ball::Free { .. }) && self.f[who].t_int <= self.f[self.primary].t_int {
             return None;
         }
         Some((who, b))
@@ -730,8 +755,14 @@ impl<'a> Sim<'a> {
             }
             return;
         };
-        if matches!(self.ball, Ball::Thrown { receiver, .. } if receiver == i) {
-            return;
+        match self.ball {
+            Ball::Thrown { receiver, .. } if receiver == i => return,
+            // A throw to someone else has gone by him (see `holder_act`).
+            Ball::Thrown { .. } => {
+                self.f[i].role = Role::Idle;
+                return;
+            }
+            _ => {}
         }
         let from = self.fielding_point();
         let b = match self.relay_job(from) {
@@ -1120,21 +1151,58 @@ impl<'a> Sim<'a> {
     /// Put a throw aimed at ground point `aim` in the air from launch state `s0` now.
     fn launch_throw(&mut self, s0: BallState, aim: Vec3, to_base: u8, receiver: usize, relay: bool) {
         let path = fly_throw(self.inp.env, s0, self.t, 15.0);
-        // The receiver takes the ball where it is catchable (glove height, from a scoop to
-        // a reach overhead) nearest the spot he means to be: on the bag when the throw is in
-        // reach there, otherwise as close to it as he can.
-        let catch_at = path
-            .knots
+        // The receiver's read errors for this throw: a fresh look per throw, keyed by how
+        // many throws the play has seen (sub-index 0 is his read of the batted ball).
+        let mut r = rng(self.inp.seed, self.inp.play, self.f[receiver].id, Purpose::FielderPerception, 1 + self.out.released.len() as u32);
+        let read_err = [r.truncated_normal(4.0), r.truncated_normal(4.0), r.truncated_normal(4.0), r.truncated_normal(4.0)];
+        let next_read = self.t + self.f[receiver].a.reaction;
+        self.ball = Ball::Thrown { path, aim, catch_at: aim, read_err, next_read, to_base, receiver, relay };
+    }
+
+    /// The receiver's read of a throw in the air (agent-models §5.5 receiving): a noisy
+    /// estimate of where the ball is and how it is moving now (the batted-ball read model:
+    /// error grows with distance and shrinks with viewing time), flown on with his own throw
+    /// physics. He takes it where it is catchable (from a scoop to a reach overhead) nearest
+    /// the spot he was thrown to: on the bag when he believes it comes through there.
+    fn receiver_read(&self, i: usize, aim: Vec3, err: [f64; 4], t_release: f64) -> Vec3 {
+        let fd = &self.f[i];
+        let (p, v) = self.ball_at(self.t);
+        let view = (self.t - t_release - fd.a.reaction).max(0.0);
+        let shrink = 1.0 / m::sqrt(1.0 + view / fd.a.tau_read);
+        let dist = m::hypot(p.x - fd.pos.x, p.y - fd.pos.y).max(1.0);
+        let sp = fd.a.read_sigma0 * (dist / READ_REF_DIST) * shrink;
+        let los = Vec3::new(p.x - fd.pos.x, p.y - fd.pos.y, 0.0).normalized();
+        let lat = Vec3::new(-los.y, los.x, 0.0);
+        let pe = p + los * (err[0] * sp * DEPTH_STRETCH) + lat * (err[1] * sp) + Vec3::new(0.0, 0.0, err[1] * sp * 0.5);
+        let sv = 0.06 * v.norm() * shrink;
+        let ve = v + los * (err[2] * sv * DEPTH_STRETCH * 0.5) + lat * (err[3] * sv) + Vec3::new(0.0, 0.0, err[3] * sv * 0.5);
+        // He assumes a throw's typical backspin.
+        let w = Vec3::new(ve.x, ve.y, 0.0).normalized().cross(Vec3::Z) * bb_math::units::rpm_to_radps(THROW_SPIN_RPM);
+        let r = Vec3::new(pe.x, pe.y, pe.z.max(self.inp.env.ball.radius));
+        // Flown until a second past the spot he was thrown to (he cares about nothing later).
+        let vh = m::hypot(ve.x, ve.y).max(5.0);
+        let pred = fly_throw(self.inp.env, BallState { r, v: ve, w }, self.t, m::hypot(aim.x - r.x, aim.y - r.y) / vh + 1.0);
+        pred.knots
             .iter()
             .filter(|k| k.s.r.z >= THROW_SCOOP_Z && k.s.r.z <= CATCH_MAX_Z)
             .min_by(|a, b| m::hypot(a.s.r.x - aim.x, a.s.r.y - aim.y).total_cmp(&m::hypot(b.s.r.x - aim.x, b.s.r.y - aim.y)))
             .map(|k| if m::hypot(k.s.r.x - aim.x, k.s.r.y - aim.y) < 0.5 { aim } else { k.s.r })
-            .unwrap_or(path.last().s.r);
-        self.ball = Ball::Thrown { path, catch_at, to_base, receiver, relay };
+            .unwrap_or(aim)
     }
 
     fn update_thrown(&mut self) {
-        // The receiver watches the throw and goes to where he can take it.
+        // The receiver watches the throw and goes to where he believes he can take it,
+        // re-reading it as it comes (he starts on the spot it was thrown to).
+        if let Ball::Thrown { path, aim, read_err, next_read, receiver, .. } = &self.ball {
+            if self.t >= *next_read {
+                let (aim, err, i, t0) = (*aim, *read_err, *receiver, path.first().t);
+                let at = self.receiver_read(i, aim, err, t0);
+                if let Ball::Thrown { catch_at, next_read, .. } = &mut self.ball {
+                    *catch_at = at;
+                    *next_read = self.t + RECEIVE_REPLAN_S;
+                }
+            }
+        }
         let Ball::Thrown { path, catch_at, receiver, .. } = &self.ball else { return };
         self.f[*receiver].target = Vec3::new(catch_at.x, catch_at.y, 0.0);
         if self.t >= path.last().t {
@@ -1478,6 +1546,12 @@ impl<'a> Sim<'a> {
         }
         self.throw_to(by, tgt, b, receiver, false);
         self.f[receiver].target = tgt;
+        // A throw that goes past the cutoff man ends his job: he is free to back it up.
+        for i in 0..9 {
+            if matches!(self.f[i].role, Role::Relay(_)) {
+                self.f[i].role = Role::Idle;
+            }
+        }
         self.back_up_throw(fd.pos, b);
     }
 
@@ -2193,6 +2267,63 @@ mod tests {
         let mut sim = new_sim(&inp, &mut st);
         held_at(&mut sim, 5, Vec3::new(-8.0, 38.0, 0.0));
         assert!(!(0..9).any(|i| matches!(sim.f[i].role, Role::Relay(_))));
+    }
+
+    // Codex review 2026-11-12 #3: on a fly going deep the relay man goes out before it
+    // lands, once his own read says he has no play on it.
+    #[test]
+    fn relay_man_goes_out_early_on_a_deep_fly() {
+        const R: AgentId = 0x0007;
+        let fx = fixture(&[(R, 2)]);
+        let mut inp = input(&fx, vec![RunnerIn { id: fx.st.batter, base: 0, speed: 8.2 }, RunnerIn { id: R, base: 2, speed: 8.2 }]);
+        inp.ball = BallState { r: Vec3::new(0.0, 0.5, 1.0), v: Vec3::new(-4.0, 28.0, 22.0), w: Vec3::ZERO };
+        let mut st = fx.st.clone();
+        let mut sim = new_sim(&inp, &mut st);
+        sim.t = 1.0;
+        sim.assign();
+        let Ball::Free { path, .. } = &sim.ball else { unreachable!() };
+        assert!(path.bounces[0].0 > sim.t + 2.0, "the ball must still be well up");
+        assert!(m::hypot(sim.fielding_point().x, sim.fielding_point().y) > RELAY_DEEP_M);
+        assert_eq!(sim.f[SS].role, Role::Relay(4));
+        // A short fly an infielder can catch keeps him on the ball.
+        let mut inp = input(&fx, vec![RunnerIn { id: fx.st.batter, base: 0, speed: 8.2 }, RunnerIn { id: R, base: 2, speed: 8.2 }]);
+        inp.ball = BallState { r: Vec3::new(0.0, 0.5, 1.0), v: Vec3::new(-2.0, 14.0, 24.0), w: Vec3::ZERO };
+        let mut st = fx.st.clone();
+        let mut sim = new_sim(&inp, &mut st);
+        sim.t = 1.0;
+        sim.assign();
+        assert!(!(0..9).any(|i| matches!(sim.f[i].role, Role::Relay(_))));
+    }
+
+    // Codex review 2026-11-12 #1: the receiver plans from his own read of the throw, never
+    // from its realized future. At the release he has not seen it yet: whatever the
+    // executed speed, he is on the spot it was thrown to.
+    #[test]
+    fn receiver_plans_from_his_read_not_the_throws_future() {
+        let fx = fixture(&[]);
+        let inp = input(&fx, vec![RunnerIn { id: fx.st.batter, base: 0, speed: 8.2 }]);
+        let from = Vec3::new(0.0, 100.0, 0.0);
+        let second = base_pos(2);
+        let d = (second - from).norm();
+        let elev = solve_throw(&fx.env, THROW_RELEASE_Z, THROW_CATCH_Z, d, 37.0).unwrap().elev;
+        let mut reads = Vec::new();
+        for v in [35.0, 37.0, 39.0] {
+            let mut st = fx.st.clone();
+            let mut sim = new_sim(&inp, &mut st);
+            sim.t = 5.0;
+            sim.f[3].pos = second;
+            sim.launch_throw(throw_state(from + Vec3::new(0.0, 0.0, THROW_RELEASE_Z), second - from, v, elev), second, 2, 3, false);
+            sim.update_thrown();
+            assert!((sim.f[3].target - second).norm() < 1e-9, "v {v}: {:?}", sim.f[3].target);
+            // After his reaction he reads it: a throw that dies short draws him in; a hot one
+            // still within reach at the bag leaves him on it.
+            while sim.t < 5.0 + 1.5 {
+                sim.t += DT;
+                sim.update_thrown();
+            }
+            reads.push(sim.f[3].target.y);
+        }
+        assert!(reads[0] > second.y + 1.0 && (reads[1] - second.y).abs() < 0.5 && reads[2] <= second.y + 0.5, "{reads:?}");
     }
 
     // A throw home from the wall is beyond a weak arm on the fly (drag): it goes through the

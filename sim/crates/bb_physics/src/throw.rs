@@ -17,6 +17,12 @@ pub const THROW_DT: f64 = 0.01;
 /// little range and hangs in the air, which no fielder chooses.
 pub const THROW_MAX_ELEV: f64 = 35.0 * core::f64::consts::PI / 180.0;
 const THROW_MIN_ELEV: f64 = -30.0 * core::f64::consts::PI / 180.0;
+/// Angle step of the solve's search for its bracket, rad. A throw whose height at the target
+/// peaks above chest height for less than this span of angles may be missed: such a throw
+/// is at the very limit of the arm anyway.
+const SCAN_STEP: f64 = 5.0 * core::f64::consts::PI / 180.0;
+/// How far below the vacuum answer the search starts, rad.
+const VACUUM_MARGIN: f64 = 6.0 * core::f64::consts::PI / 180.0;
 /// The aim solve stops within this height of the target, m: far inside a glove.
 const SOLVE_TOL_M: f64 = 0.01;
 /// The aim solve's integration step, s. It only has to find the launch angle; the thrown
@@ -67,21 +73,51 @@ pub fn solve_throw(env: &FlightEnv, z0: f64, zt: f64, d: f64, speed: f64) -> Opt
     }
     let (mut lo, mut hi) = (THROW_MIN_ELEV, THROW_MAX_ELEV);
     let (mut f_lo, _) = height_at(env, z0, speed, lo, d);
-    let (mut f_hi, t_hi) = height_at(env, z0, speed, hi, d);
     f_lo -= zt;
-    f_hi -= zt;
+    if f_lo >= 0.0 {
+        // Even the steepest downward throw arrives high: the target is under the hand.
+        let (_, t) = height_at(env, z0, speed, lo, d);
+        return Some(ThrowSolution { elev: lo, t_flight: t });
+    }
+    // With drag and backspin the height at the target rises with elevation only up to a
+    // peak, which can be below the steepest angle allowed. Step up from the flattest angle
+    // to the first one that gets there, so the bracket holds the flatter root.
+    let (mut f_hi, mut t_hi) = (f64::NEG_INFINITY, f64::INFINITY);
+    let mut a = lo;
+    // Start the search a little below the vacuum answer, which drag and lift move by a few
+    // degrees at most; if that start already reaches the target, the flatter root lies
+    // between the flattest angle and it.
+    let g = bb_math::units::G;
+    let k = g * d * d / (2.0 * speed * speed);
+    let disc = d * d - 4.0 * k * (k + zt - z0);
+    if disc >= 0.0 {
+        let start = (m::atan2(d - m::sqrt(disc), 2.0 * k) - VACUUM_MARGIN).max(lo);
+        if start > lo {
+            let (h, t) = height_at(env, z0, speed, start, d);
+            if h - zt >= 0.0 {
+                (hi, f_hi, t_hi) = (start, h - zt, t);
+                a = hi;
+            } else {
+                (a, lo, f_lo) = (start, start, h - zt);
+            }
+        }
+    }
+    while f_hi < 0.0 && a < hi {
+        let next = (a + SCAN_STEP).min(hi);
+        let (h, t) = height_at(env, z0, speed, next, d);
+        if h - zt >= 0.0 {
+            (lo, hi, f_hi, t_hi) = (a, next, h - zt, t);
+            break;
+        }
+        (a, f_lo) = (next, h - zt);
+    }
     if f_hi < 0.0 {
         return None;
     }
     if f_hi == 0.0 {
         return Some(ThrowSolution { elev: hi, t_flight: t_hi });
     }
-    if f_lo >= 0.0 {
-        // Even the steepest downward throw arrives high: the target is under the hand.
-        let (_, t) = height_at(env, z0, speed, lo, d);
-        return Some(ThrowSolution { elev: lo, t_flight: t });
-    }
-    // Illinois regula falsi on a bracketed, increasing function.
+    // Illinois regula falsi on the bracket.
     let mut side = 0i8;
     for _ in 0..60 {
         let x = (lo * f_hi - hi * f_lo) / (f_hi - f_lo);
@@ -137,6 +173,9 @@ impl ThrowTable {
     /// Believed flight time at release speed `v` over horizontal distance `d` (bilinear
     /// interpolation, clamped to the table's speeds); infinite past the throw's reach.
     pub fn time(&self, v: f64, d: f64) -> f64 {
+        if !(v.is_finite() && d.is_finite()) {
+            return f64::INFINITY;
+        }
         let d = d.max(0.0);
         let (dn, vn) = (self.dists.len(), self.speeds.len());
         if d > self.dists[dn - 1] {
@@ -147,14 +186,21 @@ impl ThrowTable {
         let fj = d / (self.dists[1] - self.dists[0]);
         let (i, j) = ((fi as usize).min(vn - 2), (fj as usize).min(dn - 2));
         let (a, b) = (fi - i as f64, fj - j as f64);
-        // Near the limit of reach the cell is treated as out of reach (conservative).
-        let row = |i: usize| {
-            let (t0, t1) = (self.t[i][j], self.t[i][j + 1]);
-            if b == 0.0 { t0 } else { t0 + (t1 - t0) * b }
+        // A neighbour with no weight never enters the arithmetic; between two cells where
+        // either is out of reach the result is out of reach (conservative near the limit).
+        let lerp = |x0: f64, x1: f64, w: f64| {
+            if w <= 0.0 {
+                x0
+            } else if w >= 1.0 {
+                x1
+            } else if x0.is_finite() && x1.is_finite() {
+                x0 + (x1 - x0) * w
+            } else {
+                f64::INFINITY
+            }
         };
-        let (r0, r1) = (row(i), row(i + 1));
-        let t = if a == 0.0 { r0 } else { r0 + (r1 - r0) * a };
-        if t.is_finite() { t } else { f64::INFINITY }
+        let row = |i: usize| lerp(self.t[i][j], self.t[i][j + 1], b);
+        lerp(row(i), row(i + 1), a)
     }
 
     /// Longest distance (m) a throw at speed `v` carries on the fly, to the table's 5 m grid.
@@ -203,6 +249,30 @@ mod tests {
         let (p, _) = tr.at(s.t_flight);
         let want = Vec3::new(5.0, 10.0, 1.3) + dir * d;
         assert!((p - want).norm() < 0.03, "{p:?} vs {want:?}");
+    }
+
+    // Codex review 2026-11-12 #2: with drag and backspin the height at the target peaks
+    // below 35°, so the steepest angle falling short does not mean the throw is out of reach.
+    // Reference: the independent Python oracle (analysis/oracle/bbphys.py, 1 ms step) puts
+    // the flatter chest-height root for 44 m/s over 122 m at 29.784088°, arriving 5.168754 s.
+    #[test]
+    fn a_long_throw_whose_height_peaks_below_the_steepest_angle_is_solved() {
+        let env = FlightEnv::default_env();
+        let s = solve_throw(&env, 1.8, 1.3, 122.0, 44.0).expect("reachable");
+        assert!((s.elev.to_degrees() - 29.784088).abs() < 0.05, "{}", s.elev.to_degrees());
+        assert!((s.t_flight - 5.168754).abs() < 0.01, "{}", s.t_flight);
+    }
+
+    // Codex review 2026-11-12 #4: the table's fastest arm at its longest distance, and
+    // invalid input.
+    #[test]
+    fn the_table_edges_are_finite_where_the_throw_carries() {
+        let env = FlightEnv::default_env();
+        let tab = ThrowTable::build(&env, 1.8, 1.3);
+        let direct = solve_throw(&env, 1.8, 1.3, 125.0, 48.0).unwrap().t_flight;
+        assert!((tab.time(48.0, 125.0) - direct).abs() < 1e-9);
+        assert!(tab.time(48.0, 127.0).is_finite());
+        assert!(tab.time(30.0, f64::NAN).is_infinite() && tab.time(f64::NAN, 30.0).is_infinite());
     }
 
     #[test]

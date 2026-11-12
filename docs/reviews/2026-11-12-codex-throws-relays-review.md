@@ -75,4 +75,15 @@ At the maximum speed the selected cell has weight `a == 1`. If its lower-speed r
 
 ## Resolution
 
-Open.
+Resolved 2026-11-12: all four findings fixed. `cargo test --workspace --release` passes.
+
+| # | Status | What was done |
+|---|---|---|
+| 1 | Fixed | The receiver no longer sees the realized path. He starts on the spot the throw was aimed at; after his reaction time he reads the throw every 0.25 s with the batted-ball read model (a noisy estimate of its current position and velocity, error growing with distance and shrinking with viewing time, fresh error draws per throw from `FielderPerception` sub-index 1 + throws so far), flies that estimate with his own throw physics and typical backspin, and goes to the catchable point nearest the aim. The realized path is used only to move the ball and for captures. Test: `receiver_plans_from_his_read_not_the_throws_future` (the review's 35 / 37 / 39 m/s case: on the bag at release whatever the executed speed; a throw dying short draws him in after he reads it) |
+| 2 | Fixed | `solve_throw` now searches upward in 5° steps for the first angle that reaches the target, starting 6° below the vacuum answer, and refines that bracket; the steepest angle falling short no longer means out of reach. Test: `a_long_throw_whose_height_peaks_below_the_steepest_angle_is_solved`, against the review's oracle root (29.784°, 5.1688 s) |
+| 3 | Fixed | "No play on it" is now the man's own read: his intercept is later than his believed first bounce. Test: `relay_man_goes_out_early_on_a_deep_fly` (the review's scenario), plus a short fly that keeps everyone on the ball |
+| 4 | Fixed | `ThrowTable::time` never lets a neighbour with no weight into the arithmetic, and non-finite input is out of reach. Test: `the_table_edges_are_finite_where_the_throw_carries` |
+
+The relay cost the review asked about, re-measured after these fixes (512 games each): seed set 2, 5.14 runs/team-game with relays against 4.99 without; seed set 5, 5.05 against 4.91. Experiments, each on both seed sets: throwing direct instead of through the relay man changes nothing, so the route choice is not the cause; with cutoffs but no deep relay man, runs equal no relays, so the cutoffs are neutral and the deep relay man (beyond 80 m) is the whole cost; letting him go out only after the ball is down changes nothing. Three behaviours found on the way were fixed because they looked wrong, though none moved the number: an infielder with the ball (the relay man himself) set off a second cutoff that took the first baseman off his base; a relay man stayed on his line after a throw went past him instead of becoming free to back it up; and a middle infielder could be sent out while his own read said he could cut the ball off first. **Still open:** why the deep relay man costs about 0.1–0.15 runs. Per the owner (2026-11-12), players should not play perfectly but should look believable, so this is a diagnosis item, not a calibration target.
+
+Per-game time after the fixes: 218 ms (205 before them, 199 before the session); the solver's search and the receiver's reads cost the difference.
