@@ -54,7 +54,11 @@ if [[ "$viewer" == auto && -x "$UE/Engine/Binaries/Linux/UnrealEditor" ]]; then
 fi
 
 if [[ "$viewer" == auto ]]; then
-  say "Unreal Engine is not installed at $UE, so seed $seed opens in the Rerun viewer."
+  # Never swap in the Rerun viewer silently: say why the 3D game cannot start, and ask.
+  where="Unreal Engine is not installed at $UE, so the 3D game cannot start."
+  [[ -d "$HOME/.local/share/Trash/files/UnrealEngine" ]] && where="$where It is in the Trash: restore it from there."
+  zenity --question --title="3D Baseball" --width=420 --text="$where\n\nOpen seed $seed in the Rerun viewer instead?" 2>/dev/null \
+    || { say "$where"; exit 1; }
 else
   say "Recording seed $seed for the Rerun viewer."
 fi
