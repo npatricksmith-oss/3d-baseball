@@ -128,23 +128,37 @@ Changing the swing would move the launch-angle mix and the spray, and so the run
 
 ## 6. Where the misses come from (follow-up, same day)
 
-The owner asked Fable to choose between measuring first and building §3.6's hand path. Fable recommended measuring, with a change of aim. Its check: with perception almost removed (`foul_diag -- 3000 15 - 0.05`: execution timing σ 15 ms), early swings almost never whiff (1 whiff in about 580 swings at AD 12–30°; well-timed contact also fouled only 4.7%). So the over-the-ball misses had to come from where the batter aimed. Its argument from geometry: §3.6's hand path and lag lie in the same swing plane as v1, so they would not change a height miss. Both new measures below are in `foul_diag` and `cage-map`.
+The owner asked Fable to choose between measuring first and building §3.6's hand path. Fable recommended measuring, with a change of aim. Its check: with perception almost removed (`foul_diag -- 3000 15 - 0.05`: execution timing σ 15 ms), early swings almost never whiff (1 whiff in about 580 swings at AD 12–30°; well-timed contact also fouled only 4.7%). So the over-the-ball misses had to come mostly from where the batter aimed. That run changes perception and timing noise together, so it supports the aim-error reading but does not isolate the swing's shape (Codex foul-sources review). The new measures below are in `foul_diag` and `cage-map`. The first version of this section overstated four conclusions; the [Codex foul-sources review](../reviews/2026-11-13-codex-foul-sources-review.md) corrected them.
 
-**Each whiff's height miss, split** (bat above the ball's center, cm, mean, 3,000 PAs, default knobs). "Nominal" is the executed swing's sweet spot at its own contact time, against the ball when it reaches that depth. It splits into the batter's aim error (his perceived point minus the true one), the template's aim offset (−2 cm) and the rest (execution noise). "Path adds" is how much more the miss grew by the instant of closest approach.
+**Each whiff's height miss, as an accounting** (bat above the ball's center, cm, means, 3,000 PAs, default knobs).
+- "Nominal" is the executed swing's sweet spot at its own contact time, against the ball when it reaches that depth.
+- It is written as the batter's final aim error (his perceived point minus the true one, at the aim's own depth), the template's aim offset (−2 cm), and a rest. The rest holds execution offset and reach noise, plus the ball's drop between the aim's depth and the sweet spot's.
+- "Path" is the change from nominal to the closest approach. It sums the sweet spot's movement, the change of station along the bat, and the ball's movement. For AD 12–30° whiffs these are +8.5, −6.8 and −6.3 cm (review probe), so a small net hides large opposing terms.
+- The terms are measured at different depths and times, so they are an accounting identity, not independent causes.
 
-| AD bin (°) | whiffs | at intercept | nominal | path adds | aim | offset | rest |
-|---|---|---|---|---|---|---|---|
-| < −12 (late) | 78 | −12.5 | −14.9 | +2.4 | −12.5 | −2.0 | −0.4 |
-| −12 to 12 | 496 | −1.5 | −1.0 | −0.5 | +1.3 | −2.0 | −0.3 |
-| 12 to 30 | 504 | +15.9 | +20.4 | −4.6 | **+22.5** | −2.0 | −0.1 |
-| > 30 (early) | 320 | +23.7 | +24.4 | −0.7 | **+27.0** | −2.0 | −0.6 |
+| AD bin (°) | whiffs | at intercept | nominal | path (RMS) | aim | offset | rest (RMS) | read right at commit |
+|---|---|---|---|---|---|---|---|---|
+| < −12 (late) | 78 | −12.5 | −14.9 | +2.4 (5.8) | −12.5 | −2.0 | −0.4 (1.2) | 68% |
+| −12 to 12 | 497 | −1.5 | −1.0 | −0.4 (4.6) | +1.3 | −2.0 | −0.4 (1.4) | 72% |
+| 12 to 30 | 504 | +15.9 | +20.4 | −4.6 (7.3) | **+22.5** | −2.0 | −0.1 (1.4) | 28% |
+| > 30 (early) | 320 | +23.7 | +24.4 | −0.7 (5.1) | **+27.0** | −2.0 | −0.6 (1.7) | 24% |
 
-By pitch type, at AD 12–30°: FF aim +7.7 cm; SL +29.9; CH +23.8; CU +29.1.
+By pitch type, at AD 12–30°, the mean aim error and the share read right at commit are: FF +7.7 cm (99%), SL +29.9 (13%), CH +23.8 (3%), CU +29.1 (3%).
 
-- **Early whiffs are the batter's aim, not the swing.** The aim error is more than the whole nominal miss, past Fable's 75% threshold. Execution noise adds almost nothing, and the swing's path between nominal and intercept *reduces* the miss. On sliders, curves and changeups the batter aims 24–30 cm high: he read a fastball and swung at its path. Across all swings, height error falls 0.59 cm per ms of timing error (corr −0.78): fooled early means aimed high.
-- **A different swing shape would not recover these.** A 20–30 cm misread is a whiff in MLB too (74% whiff per swing at AD > 30°).
+- **The batter's final aim is the largest term in early whiffs.** On average it exceeds the nominal miss. The rest averages near zero but has an RMS of about 1.4 cm, about the size of execution's vertical noise. The swing's path term averages −4.6 cm on these whiffs but varies by 7 cm.
+- **Most early whiffs on SL/CU/CH were misread at commit** as fastballs. Across all swings, height error falls 0.59 cm per ms of timing error (corr −0.78): early goes with aimed high. The commit read is not the whole story. Of the 1,107 early-and-over swings, 760 ended the adjustment loop with the right dominant type (review probe, which instrumented `pa.rs`). The batter found the pitch type and still could not move his aim far enough.
+- **What another swing shape would change is untested.** §3.6's hand path and lag are in-plane, but the spec also has a small out-of-plane tilt. Within the same plane, a different phase or hand motion changes where and when the bat meets the ball's height. The review found a whiff (PA 43, pitch 1, AD 18.8°) that a 10 ms later swing with unchanged geometry turns into contact. The measurements here neither support nor exclude a swing change.
 
-**The swings' joint errors, with the outcome in each cell** (share of swings % / whiff % / foul % of contact; timing negative = early, height positive = bat over):
+**Swing populations by nominal error** (4,356 swings with a nominal error; one pitch came down before the sweet spot's depth):
+
+| Population | share of swings | whiff | foul of contact | read right at commit |
+|---|---|---|---|---|
+| early, bat over by > 6 cm | 25.4% | 92% | 18% | 27% |
+| close: within ±15 ms and ±4 cm | 37.8% | 1% | **10%** | 99% |
+| other, bat under by > 4 cm | 25.2% | 37% | 61% | 94% |
+| other, the rest | 11.5% | 21% | 15% | 98% |
+
+The joint table (share of swings % / whiff % / foul % of contact; timing negative = early, height positive = bat over):
 
 | height \ timing | < −25 ms | −25..−15 | −15..−5 | −5..5 | 5..15 |
 |---|---|---|---|---|---|
@@ -157,19 +171,23 @@ By pitch type, at AD 12–30°: FF aim +7.7 cm; SL +29.9; CH +23.8; CU +29.1.
 | −6..−4 | 0.1 | 0.4 | 2.5 / 7 / 22 | 5.2 / 6 / 50 | 2.0 / 14 / 84 |
 | < −6 | 0.1 | 0.3 | 2.0 / 42 / 58 | 6.7 / 52 / 84 | 4.1 / 70 / 93 |
 
-- **The sim's errors are bimodal.** About a quarter of swings are fooled: early with the bat more than 6 cm over the ball, and nearly all whiff. Most of the rest are close: within 15 ms and about ±4 cm, with 0–2% whiffs and 1–20% fouls. Few swings land in between, the moderately-off zone where fouls come from.
-- **Where the sim's batter is under the ball, it fouls at MLB-like rates or more:** 50–93% from −4 cm down, on time or late. Over the ball and early, it fouls 9–20%.
+- The first version called the errors bimodal. That was wrong: 37% of swings are in neither the early-and-over group nor the close group.
+- **The sim's fouls come mostly from the bat under the ball** (61% of that group's contact). The early-and-over group is mostly whiffs.
+- **The close group is the largest, and it fouls only 10% of its contact.** MLB's well-timed contact fouls about 40% (R13 F3: |AD| < 6°). The groups are not the same cut, so this is a pointer, not a comparison.
 
 **The contact map at fixed pitch and aim** (`cage-map --type FF`, "Timing × height grid"):
 - On time (−5 to +5 ms), contact is fair from about −4 to +5 cm. The foul band is the last 1–2 cm before a miss, under the ball.
 - Late (+10 to +30 ms), it fouls across most of the band, as sliced flies and balls going back.
-- Early (−20 to −35 ms) with the bat over, it makes pulled grounders that leave outside the lines. Those roll foul in a game, so they are the early fouls R13 F4 describes. Few swings reach that corner without also being fooled by 20 cm or more.
-- SL and CH maps have the same shape.
+- Early (−20 to −35 ms) with the bat over, it makes pulled grounders launched outside the ±45° lines (`g`). They first land fair, and in live plays they are often still fair: the review ran the 14 `g` cells through the live play and rules engine over 16 seeds each, and got 121 fair, 103 foul. So the grid does not show that these become MLB's early fouls.
+- SL and CH maps have the same broad shape.
 
 ## 7. What this changes
 
-- **The hand-path swing is not indicated by these measurements.** The swing's path contributes little to the misses (−4.6 to +2.4 cm). Its own claims (swing length 9.5 ft against 7.2, the AD spread) are a separate, smaller question for later.
-- **The main lever is the batter's error distribution, not the swing or the collision.** Fooled swings in the sim are all-or-nothing. A batter either reads the pitch type right and is close, or reads it wrong and swings 20–30 cm over the ball. An MLB batter fooled by a slider often gets part of the way back, staying back or dropping the barrel, and fouls it off. In the sim the mid-swing correction (`Adjustability` 0.6 m/s, the 60 ms cutoff, ±10% phase rate) can move the aim about 8 cm at most (0.6 m/s over the roughly 0.14 s from commit to the cutoff), and only as fast as his read of the pitch changes. More partially-fooled swings would fill the moderately-off cells where fouls happen. This is Tier B (perception and adjustment noise, PLAN §13) and overlaps coordinator item 6 (batter timing fooled by offspeed and sequence).
-- **On-time topped balls are a separate, physical question.** MLB fouls 62% of well-timed contact below −30° (R13 F3). The sim's on-time map sends a ball 5–7 cm overcut at −50° to −67°, spraying −18° to −37°, and it stays fair. Whether real topped balls go foul off the plate and the dirt, by hooking on the bounce or off the batter, needs evidence before any Tier A change.
+- **No swing change is indicated or excluded yet.** The hand path's own claims (swing length 9.5 ft against 7.2, the AD spread) remain a separate question. Its effect on the misses is untested.
+- **Mid-swing correction is the strongest candidate lever, as an experiment.** On early whiffs the final aim is 20–30 cm high, and most of those batters had the pitch type right by the end of the loop.
+  - The correction moves each coordinate at `Adjustability` (0.6 m/s per axis). It stops 60 ms before the aim time, which itself moves within ±10% of the time left.
+  - In the default sample the vertical budget has a median of 7.8 cm, a p95 of 9.0 and a maximum of 10.2. The largest actual vertical correction was 9.6 cm (review probe).
+  - Whether batters hit that budget (saturation), and what a larger or earlier correction does to whiffs and fouls by AD, is the next measurement. This is Tier B (perception and adjustment noise, PLAN §13) and overlaps coordinator item 6.
+- **The close group's low foul rate is a second question:** the on-time map's narrow foul band. MLB fouls 62% of well-timed contact below −30° (R13 F3). In the sim's on-time map, a ball overcut by 5–6 cm leaves at −50° to −67°, sprays −18° to −37° and stays fair, while +7 cm already lands foul backward. Whether real topped balls go foul off the plate, the dirt or the batter needs evidence before any Tier A change.
 
-**Proposed next step (owner):** work on the batter's correction and the size of his misreads (how fooled he is, and how much of a fooled swing he can save mid-swing), measured with `foul_diag`'s joint table and AD bins, with the foul share and the whiff rate by AD as the checks. This lands with coordinator item 6. The hand path and the bat angle wait. Until then, Discipline's grade-50 values (chase, O1) stay parked as before.
+**Proposed next step (owner):** measure how often the mid-swing correction saturates. Then, as counterfactuals, raise and lengthen it and watch whiffs, fouls by AD and the joint table, before choosing any change. This lands with coordinator item 6. The hand path and the bat angle wait. Until then, Discipline's grade-50 values (chase, O1) stay parked as before.

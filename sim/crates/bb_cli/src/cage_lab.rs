@@ -77,7 +77,7 @@ pub fn map(a: MapArgs) {
 /// height error, so the joint errors that make fouls can be read off one map.
 fn timing_height_grid(cage: &Cage, rel: bb_physics::BallState, md: &mut String) {
     writeln!(md, "\n## Timing × height grid\n").unwrap();
-    writeln!(md, "The same pitch and perfectly perceived aim; the swing is shifted in time (negative = early) and moved up or down as a whole (positive = bat over the ball). `·` miss, `F` first lands foul, `g` lands fair but leaves outside the foul lines on the ground (it rolls foul in a game), `o` fair. Fair/foul by first landing, as `pa.rs` calls it.\n").unwrap();
+    writeln!(md, "The same pitch and perfectly perceived aim; the swing is shifted in time (negative = early) and moved up or down as a whole (positive = bat over the ball). `·` miss, `F` first lands foul, `g` launched downward outside the ±45° lines but first lands fair: the later call is not measured (in live plays most of these cells come out fair at least sometimes: Codex foul-sources review #2), `o` fair. Fair/foul by first landing, as `pa.rs` calls it.\n").unwrap();
     let ts: Vec<i32> = (-40..=40).step_by(5).collect();
     write!(md, "| cm \\ ms |").unwrap();
     for t in &ts {

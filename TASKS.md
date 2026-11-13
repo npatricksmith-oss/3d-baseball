@@ -24,15 +24,20 @@ Done (coordinator item 2, as the owner directed: measure before changing calibra
   - The foul share by pitch height is inverted (high pitches foul least).
 - **Bat-angle counterfactual:** −30° matches Statcast tilt (31.9°) and Blast's bat angle. The foul share goes 23.7 → 27.5%, but well-timed steep fouls overshoot (67% against 46% at 40–50°). It is a lever worth about a seventh of the gap, to remeasure with the next swing shape.
 
-- **Follow-up (owner: "ask Fable which to do"; Fable: measure first, re-aimed; note §6–§7):** `foul_diag` splits each whiff's height miss into aim, template offset, execution and swing path, and prints the swings' joint timing × height errors with the outcome per cell. `cage-map` prints a timing × height grid at a fixed pitch and aim.
-  - **Early whiffs are the batter's aim.** On SL/CU/CH he aims 24–30 cm high (he read a fastball); execution adds ~0 and the swing's path reduces the miss. Height error falls 0.59 cm per ms of timing error (corr −0.78).
-  - **The errors are bimodal:** a quarter of swings are fooled (early, more than 6 cm over, nearly all whiffs); the rest are close (within 15 ms and ±4 cm, 1–20% foul). Few are moderately off, where fouls come from.
-  - **The hand-path swing is not indicated.** The lever is how fooled the batter is and how much of a fooled swing he saves mid-swing (Tier B, overlaps item 6). On-time topped balls (MLB 62% foul below −30°, sim fair) are a separate physical question needing evidence.
+- **Follow-up (owner: "ask Fable which to do"; Fable: measure first; note §6–§7, corrected by the [Codex foul-sources review](docs/reviews/2026-11-13-codex-foul-sources-review.md), resolved):**
+  - **New measures.** `foul_diag` accounts for each whiff's height miss (aim, template offset, rest, swing path, with RMS and the commit read). It also prints swing populations and the joint timing × height table. `cage-map` prints a timing × height grid at a fixed pitch and aim.
+  - **Early whiffs.** The batter's final aim is the largest term: 20–30 cm high on SL/CU/CH, mostly misread at commit, yet most found the type by the end of the adjustment loop. The correction budget is about 8 cm (max 10.2).
+  - **Swing populations:**
+    - 25% early and over (92% whiff);
+    - 38% close (1% whiff, but only 10% foul);
+    - 25% bat under (61% foul: where the sim's fouls come from);
+    - 12% the rest.
+  - **No swing change is indicated or excluded** by these measures.
 
-**First:** the Codex review of the follow-up (`docs/reviews/2026-11-13-codex-foul-sources-review.md`) was started at the end of the session. If it is there, commit it, fix or defer each finding, and write its Resolution.
+**Nothing is waiting on a review.** Both Codex reviews of this session are resolved.
 
 Next:
-1. **[?] Owner: the batter's misreads and mid-swing correction** (note §7). Make partially fooled swings possible: the size of a misread, and how much of it `Adjustability` can save. Check it with `foul_diag`'s joint table, the foul share and whiff rate by AD. This merges coordinator items 2 and 6. The hand path and the bat angle (−30° matches Statcast tilt) wait.
+1. **[?] Owner: the mid-swing correction, as an experiment** (note §7). Measure how often it saturates, then raise and lengthen it as counterfactuals, and watch whiffs, fouls by AD and the joint table before choosing a change (Tier B; merges coordinator items 2 and 6). The close group's narrow foul band is the second question (on-time topped balls stay fair; needs evidence). The hand path and the bat angle wait.
 2. Then items 3–5 and 7 of the coordinator list below.
 
 ## Previous: 2026-11-13, fourth session: the plate cue

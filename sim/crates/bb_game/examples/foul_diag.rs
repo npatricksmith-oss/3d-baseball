@@ -102,6 +102,9 @@ struct Sw {
     /// Whiff only: the bat axis above the ball's center at closest approach, cm. Its excess
     /// over `h_nom_cm` is what the swing's path added between nominal and the intercept.
     h_int_cm: f64,
+    /// The batter read the pitch type right at commit (`PitchRecord::read`; the final read of
+    /// the adjustment loop is not recorded).
+    read_ok: bool,
 }
 
 fn measure(mu: &Matchup, p: &PitchRecord) -> Option<Sw> {
@@ -171,10 +174,13 @@ fn measure(mu: &Matchup, p: &PitchRecord) -> Option<Sw> {
     let dt_ms = 1000.0 * (t - sw.t_c);
     let free = pitch_flight(&mu.env, p.release);
     let ss = sw.at(sw.t_c).point(uss);
-    let tb = free.find(Crossing::YBelow(ss.y))?;
-    let ball_c = free.at(tb).0;
-    let t_err_ms = 1000.0 * (sw.t_c - tb);
-    let h_nom_cm = 100.0 * (ss.z - ball_c.z);
+    // A pitch that comes down before the sweet spot's depth has no nominal error; the swing
+    // stays in every other measure.
+    let (t_err_ms, h_nom_cm) = match free.find(Crossing::YBelow(ss.y)) {
+        Some(tb) => (1000.0 * (sw.t_c - tb), 100.0 * (ss.z - free.at(tb).0.z)),
+        None => (f64::NAN, f64::NAN),
+    };
+    let read_ok = p.read == p.ty;
     let h_aim_cm = p.aim_error.map_or(f64::NAN, |e| 100.0 * e.y);
     let h_off_cm = 100.0 * mu.template.aim_offset_z;
     let (out, ev, la, land_dir) = match contact {
@@ -194,7 +200,7 @@ fn measure(mu: &Matchup, p: &PitchRecord) -> Option<Sw> {
         }
         None => (Outcome::Whiff, f64::NAN, f64::NAN, f64::NAN),
     };
-    Some(Sw { out, ty: p.ty, h, ad, aa, vba, tilt, length_ft: len / 0.3048, bat_mph: v.norm() / 0.44704, y, ev, la, land_dir, miss, clear_cm, past_tip_cm, dt_ms, t_err_ms, h_nom_cm, h_aim_cm, h_off_cm, h_int_cm })
+    Some(Sw { out, ty: p.ty, h, ad, aa, vba, tilt, length_ft: len / 0.3048, bat_mph: v.norm() / 0.44704, y, ev, la, land_dir, miss, clear_cm, past_tip_cm, dt_ms, t_err_ms, h_nom_cm, h_aim_cm, h_off_cm, h_int_cm, read_ok })
 }
 
 fn main() {
@@ -455,12 +461,28 @@ fn statcast_tables(sws: &[Sw]) {
 /// Where whiffs' height misses come from (Fable's decomposition), and the joint distribution
 /// of the swings' timing and height errors with the outcome in each cell.
 fn miss_sources(sws: &[Sw]) {
-    println!("\nWhiffs: the bat's height above the ball (cm, + = over), mean, by attack direction");
-    println!("{:>12} | {:>6} | {:>9} = {:>8} + {:>9} | nominal = {:>6} + {:>7} + {:>6}", "AD bin °", "whiffs", "intercept", "nominal", "path adds", "aim", "offset", "rest");
+    // An accounting of each whiff's height miss, not a causal split: the three heights are
+    // measured at different depths and times (the aim at its own depth; nominal at the sweet
+    // spot's depth at its contact time; the intercept against the axis extended past the tip
+    // at closest approach). "Rest" holds execution offset and reach noise and the ball's drop
+    // between the aim's depth and the sweet spot's; "path" holds the sweet spot's movement,
+    // the change of station along the bat and the ball's movement after nominal.
+    println!("\nWhiffs: the bat's height above the ball (cm, + = over), by attack direction. Accounting terms, means (RMS of the last two)");
+    println!("{:>12} | {:>6} | {:>9} = {:>8} + {:>9} | nominal = {:>6} + {:>7} + {:>6} | {:>8} {:>8} | {:>10}", "AD bin °", "whiffs", "intercept", "nominal", "path", "aim", "offset", "rest", "RMS path", "RMS rest", "commit read");
     let row = |label: &str, b: &[&Sw]| {
-        let f = |g: &dyn Fn(&Sw) -> f64| mean(&b.iter().map(|s| g(s)).filter(|v| v.is_finite()).collect::<Vec<_>>());
+        let vals = |g: &dyn Fn(&Sw) -> f64| b.iter().map(|s| g(s)).filter(|v| v.is_finite()).collect::<Vec<_>>();
+        let f = |g: &dyn Fn(&Sw) -> f64| mean(&vals(g));
+        let rms = |v: Vec<f64>| m::sqrt(mean(&v.iter().map(|x| x * x).collect::<Vec<_>>()));
         let (int, nom, aim, off) = (f(&|s| s.h_int_cm), f(&|s| s.h_nom_cm), f(&|s| s.h_aim_cm), f(&|s| s.h_off_cm));
-        println!("{label:>12} | {:6} | {int:9.1} = {nom:8.1} + {:9.1} | nominal = {aim:6.1} + {off:7.1} + {:6.1}", b.len(), int - nom, nom - aim - off);
+        let path = rms(vals(&|s| s.h_int_cm - s.h_nom_cm));
+        let rest = rms(vals(&|s| s.h_nom_cm - s.h_aim_cm - s.h_off_cm));
+        println!(
+            "{label:>12} | {:6} | {int:9.1} = {nom:8.1} + {:9.1} | nominal = {aim:6.1} + {off:7.1} + {:6.1} | {path:8.1} {rest:8.1} | {:>8} ok",
+            b.len(),
+            int - nom,
+            nom - aim - off,
+            share(b.iter().filter(|s| s.read_ok).count(), b.len())
+        );
     };
     for (lo, hi) in [(-1e9, -12.0), (-12.0, 12.0), (12.0, 30.0), (30.0, 1e9)] {
         let b: Vec<&Sw> = sws.iter().filter(|s| s.out == Outcome::Whiff && s.miss != 3 && s.ad >= lo && s.ad < hi).collect();
@@ -472,8 +494,29 @@ fn miss_sources(sws: &[Sw]) {
         let b: Vec<&Sw> = sws.iter().filter(|s| s.out == Outcome::Whiff && s.miss != 3 && s.ad >= 12.0 && s.ad < 30.0 && s.ty == ty).collect();
         row(ty.code(), &b);
     }
-    let te: Vec<f64> = sws.iter().map(|s| s.t_err_ms).collect();
-    let he: Vec<f64> = sws.iter().map(|s| s.h_nom_cm).collect();
+    let nomd: Vec<&Sw> = sws.iter().filter(|s| s.h_nom_cm.is_finite()).collect();
+    if nomd.len() < sws.len() {
+        println!("({} competitive swings have no nominal error: the pitch came down before the sweet spot's depth)", sws.len() - nomd.len());
+    }
+    let te: Vec<f64> = nomd.iter().map(|s| s.t_err_ms).collect();
+    let he: Vec<f64> = nomd.iter().map(|s| s.h_nom_cm).collect();
+    let n = nomd.len();
+    let grp = |f: &dyn Fn(&Sw) -> bool| {
+        let b: Vec<&&Sw> = nomd.iter().filter(|s| f(s)).collect();
+        let con = b.iter().filter(|s| s.out != Outcome::Whiff).count();
+        format!(
+            "{} % of swings, whiff {} %, foul {} % of contact, commit read right {} %",
+            share(b.len(), n),
+            share(b.len() - con, b.len()),
+            share(b.iter().filter(|s| s.out == Outcome::Foul).count(), con),
+            share(b.iter().filter(|s| s.read_ok).count(), b.len())
+        )
+    };
+    println!("Swing populations by nominal error:");
+    println!("  early and over by > 6 cm:            {}", grp(&|s| s.t_err_ms < 0.0 && s.h_nom_cm > 6.0));
+    println!("  close (±15 ms, ±4 cm):               {}", grp(&|s| s.t_err_ms.abs() <= 15.0 && s.h_nom_cm.abs() <= 4.0));
+    println!("  the rest, bat under by > 4 cm:       {}", grp(&|s| !(s.t_err_ms < 0.0 && s.h_nom_cm > 6.0) && !(s.t_err_ms.abs() <= 15.0 && s.h_nom_cm.abs() <= 4.0) && s.h_nom_cm < -4.0));
+    println!("  the rest, otherwise:                 {}", grp(&|s| !(s.t_err_ms < 0.0 && s.h_nom_cm > 6.0) && !(s.t_err_ms.abs() <= 15.0 && s.h_nom_cm.abs() <= 4.0) && s.h_nom_cm >= -4.0));
     println!("All competitive swings: timing error p5/p25/p50/p75/p95 {:.0} / {:.0} / {:.0} / {:.0} / {:.0} ms; height error {:.1} / {:.1} / {:.1} / {:.1} / {:.1} cm", pct(&te, 0.05), pct(&te, 0.25), pct(&te, 0.5), pct(&te, 0.75), pct(&te, 0.95), pct(&he, 0.05), pct(&he, 0.25), pct(&he, 0.5), pct(&he, 0.75), pct(&he, 0.95));
     let (r, _) = slope(&te, &he);
     let (_, corr) = slope(&te, &he);
@@ -493,9 +536,9 @@ fn miss_sources(sws: &[Sw]) {
         let l = if i == 0 { "> 6 cm".to_string() } else if i == 7 { "< -6 cm".to_string() } else { format!("{lo}..{hi} cm") };
         print!("{l:>12}");
         for j in 0..7 {
-            let c: Vec<&Sw> = sws.iter().filter(|s| s.h_nom_cm >= lo && s.h_nom_cm < hi && s.t_err_ms >= tb[j] && s.t_err_ms < tb[j + 1]).collect();
+            let c: Vec<&&Sw> = nomd.iter().filter(|s| s.h_nom_cm >= lo && s.h_nom_cm < hi && s.t_err_ms >= tb[j] && s.t_err_ms < tb[j + 1]).collect();
             let con = c.iter().filter(|s| s.out != Outcome::Whiff).count();
-            let sh = 100.0 * c.len() as f64 / sws.len().max(1) as f64;
+            let sh = 100.0 * c.len() as f64 / n.max(1) as f64;
             if c.len() < 20 {
                 print!(" | {sh:5.1}          ");
             } else {

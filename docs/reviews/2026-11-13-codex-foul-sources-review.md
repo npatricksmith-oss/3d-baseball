@@ -103,4 +103,11 @@ All builds and probe executables used `sim/target`. Scratch source, the instrume
 
 ## Resolution
 
-Open.
+All six findings fixed (2026-11-13); diagnostics and the note only, no simulation code changed.
+
+- **P1 (height accounting):** fixed. `foul_diag` labels the split as an accounting, says what "rest" and "path" contain, and prints the RMS of both beside the means. It also prints the share read right at commit. Note §6 quotes the review's three opposing path components and the rest's RMS of about 1.4 cm, and drops "execution adds almost nothing" and "a different swing shape would not recover these". §7 now says no swing change is indicated or excluded, and cites the review's same-plane timing counterexample.
+- **P1 (`g` marker):** fixed. The cage legend now says `g` is a downward launch outside ±45° that first lands fair, with the later call not measured, and cites the live-play check (121 fair, 103 foul). The note no longer claims these cells are MLB's early fouls.
+- **P1 (bimodal):** fixed. `foul_diag` prints four populations with shares, whiff, foul and commit read: 25.4% early and over, 37.8% close, 25.2% bat under, 11.5% the rest. The note drops "bimodal" and "all-or-nothing", quotes the review's 760 of 1,107 early-and-over swings that ended with the right type, and keeps the commit read and the final aim distinct. The proposal is now an experiment, not a measured solution.
+- **P1 (8 cm budget):** fixed. The note gives the review's measured budget distribution (median 7.8 cm, p95 9.0, max 10.2; largest actual correction 9.6 cm). It explains the per-axis limit and the moving cutoff, and makes saturation the first measurement of the next step.
+- **P3 (dropped swing):** fixed. A swing without a nominal crossing keeps every other measure, and its nominal fields are NaN and reported (1 of 4,357).
+- **P3 (topped-ball range):** fixed. The range is now 5–6 cm, with +7 cm landing foul backward.
