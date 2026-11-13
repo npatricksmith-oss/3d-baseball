@@ -137,6 +137,26 @@ Numbers (`sim-cli games --n 512 --seed 2`), 2026-11-12 after the review fixes: 5
 
 ---
 
+## Owner wishlist: eventual improvements (2026-11-12)
+
+The owner asked for these to be recorded, **not worked on yet**. They are in the owner's order, not in priority order. When one starts, move it into its milestone and add detail.
+
+- [ ] W1. **Stadium and field aesthetics**: a real ballpark look for the field and stands (the stands are plain blocks now). Presentation, M8
+- [ ] W2. **Pitcher windup vs. stretch**: a full windup with the bases empty, the stretch with a runner on. The stretch should also shorten the delivery time, which matters to stolen bases (W13)
+- [ ] W3. **Batter stances and swings**: each player has their own stance and swing, with a wide variety. The owner's examples of styles: Pete Rose, Darryl Strawberry, Gary Carter. The owner may send a longer list of styles to model later. Overlaps the parked "swing styles" item
+- [ ] W4. **HUD**: make it look more like a TV broadcast
+- [ ] W5. **More teams**: team names, mascots, and full rosters. Ties to M7 (league)
+- [ ] W6. **Team selection** before a game
+- [ ] W7. **Player aging**: a career arc for both skill and experience. M7
+- [ ] W8. **Fielders' throwing animation** (also under the M0.8 client next steps)
+- [ ] W9. **Player names**
+- [ ] W10. **Fielding errors**. Errors must come from physical causes (a bobble, a bad throw), never from a die roll (D1). Ties to the scorer's hit-or-error ruling (rules-spec §10)
+- [ ] W11. **Player and team statistics**, built from the event log (`bb_stats`)
+- [ ] W12. **Umpires with animations** (an umpire-calls module, `bb_game/src/umpire.rs`, was in progress in the main checkout's uncommitted changes on 2026-11-12)
+- [ ] W13. **Stolen bases** (needs runner leads, from the live-ball next steps, and the stretch delivery, W2)
+
+---
+
 ## Later milestones (detail added when each one starts)
 
 - [ ] **M5** Deepen the field
