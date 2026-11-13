@@ -3,6 +3,7 @@
 #include "BbGameMode.h"
 #include "Animation/AnimSequence.h"
 #include "Animation/SkeletalMeshActor.h"
+#include "Animation/Skeleton.h"
 #include "Async/Async.h"
 #include "Camera/CameraActor.h"
 #include "Camera/CameraComponent.h"
@@ -51,6 +52,71 @@ namespace
 	float YawToPlate(const FVector& Foot)
 	{
 		return (ToUE(0, 0.3, 0) - Foot).Rotation().Yaw;
+	}
+
+	/** A bone's place in the clip's component space at Time, cm (its parents composed). */
+	FVector ClipBoneAt(const UAnimSequence* Clip, const FReferenceSkeleton& Ref, int32 Bone, double Time)
+	{
+		FTransform T = FTransform::Identity;
+		for (int32 B = Bone; B != INDEX_NONE; B = Ref.GetParentIndex(B))
+		{
+			FTransform Local;
+			Clip->GetBoneTransform(Local, FSkeletonPoseBoneIndex(B), FAnimExtractContext(Time), false);
+			T = T * Local;
+		}
+		return T.GetLocation();
+	}
+
+	/**
+	 * The ground speed a walk or run clip is animated for, cm/s, measured from the clip itself
+	 * (-BbClipSpeeds). The mannequin's clips carry their travel in the root bone, so that is
+	 * the speed: how far the root goes in one loop over the loop's length. As a check, Detail
+	 * also gives how fast the planted feet pass back under the root (the same speed when the
+	 * feet hold the ground) and how much a planted foot itself slides in the clip. A foot is
+	 * planted while it is within 2 cm of its lowest point.
+	 */
+	float ClipGroundSpeed(const UAnimSequence* Clip, FString& Detail)
+	{
+		const USkeleton* Skel = Clip ? Clip->GetSkeleton() : nullptr;
+		if (!Skel)
+		{
+			return 0.f;
+		}
+		const FReferenceSkeleton& Ref = Skel->GetReferenceSkeleton();
+		const double Len = Clip->GetPlayLength();
+		const int32 N = 240;
+		const double Dt = Len / N;
+		const float RootCmps = (ClipBoneAt(Clip, Ref, 0, Len) - ClipBoneAt(Clip, Ref, 0, 0.0)).Size2D() / Len;
+		double PassSum = 0.0, SlideSum = 0.0;
+		int32 Count = 0;
+		for (const TCHAR* Name : { TEXT("ball_l"), TEXT("ball_r") })
+		{
+			const int32 Bone = Ref.FindBoneIndex(FName(Name));
+			if (Bone == INDEX_NONE)
+			{
+				continue;
+			}
+			TArray<FVector> Foot, Root;
+			double Low = TNumericLimits<double>::Max();
+			for (int32 I = 0; I <= N; ++I)
+			{
+				Foot.Add(ClipBoneAt(Clip, Ref, Bone, I * Dt));
+				Root.Add(ClipBoneAt(Clip, Ref, 0, I * Dt));
+				Low = FMath::Min(Low, Foot.Last().Z);
+			}
+			for (int32 I = 0; I < N; ++I)
+			{
+				if (Foot[I].Z < Low + 2.0 && Foot[I + 1].Z < Low + 2.0)
+				{
+					PassSum += ((Foot[I + 1] - Root[I + 1]) - (Foot[I] - Root[I])).Size2D() / Dt;
+					SlideSum += (Foot[I + 1] - Foot[I]).Size2D() / Dt;
+					++Count;
+				}
+			}
+		}
+		Detail = FString::Printf(TEXT("length=%.3f s root_motion=%d planted_foot_passes_root=%.2f m/s planted_foot_slides=%.2f m/s"),
+			Len, Clip->HasRootMotion() ? 1 : 0, Count ? PassSum / Count / 100.0 : 0.0, Count ? SlideSum / Count / 100.0 : 0.0);
+		return RootCmps;
 	}
 }
 
@@ -327,6 +393,17 @@ void ABbDirector::BeginPlay()
 	FParse::Value(Cmd, TEXT("BbShotStart="), NextShot);
 	FParse::Value(Cmd, TEXT("BbBenchSeconds="), BenchSeconds);
 	bStagingLog = FParse::Param(Cmd, TEXT("BbStagingLog"));
+	if (FParse::Param(Cmd, TEXT("BbClipSpeeds")))
+	{
+		// The pace each gait clip is animated for, to check the staging speeds against.
+		const UAnimSequence* Gaits[5] = { AnimWalk, AnimJog, AnimWalkBack, AnimWalkLeft, AnimWalkRight };
+		for (const UAnimSequence* Clip : Gaits)
+		{
+			FString Detail;
+			const float Cmps = ClipGroundSpeed(Clip, Detail);
+			UE_LOG(LogBb, Display, TEXT("BB_CLIP %s ground_speed=%.2f m/s %s"), Clip ? *Clip->GetName() : TEXT("(missing)"), Cmps / 100.f, *Detail);
+		}
+	}
 
 	// Clip preview (-BbAnimTest): a row of figures each looping one stock clip slowly, for
 	// choosing which clip stands in for which baseball motion. No game is played.
@@ -569,6 +646,8 @@ bool ABbDirector::StartReset(const FBbPlay& Next)
 		M.To = FVector2D(A.pos[0], A.pos[1]);
 		const int32 Walking = Exits.IndexOfByPredicate([&A](const FExitSlot& X) { return X.bActive && X.Move.Agent == A.agent; });
 		bool bTurns = false;
+		// At a change of sides the fielders taking the field jog all the way from their dugout.
+		const bool bTakesField = bSideChange && (A.agent & 0x80) != 0;
 		if (const BbActor* Was = Find(From, A.agent))
 		{
 			M.From = FVector2D(Was->pos[0], Was->pos[1]);
@@ -584,19 +663,24 @@ bool ABbDirector::StartReset(const FBbPlay& Next)
 		else
 		{
 			// New on the field: a fielder from his dugout, a batter from the on-deck circle.
-			// A fielder with far to go is picked up already on his way out.
+			// A fielder coming on mid-inning with far to go is picked up already on his way
+			// out; at a change of sides he comes out of the dugout.
 			M.From = (A.agent & 0x80) != 0 ? Dugout(A.agent) : OnDeck(A.agent);
 			const double Dist = (M.To - M.From).Size();
-			if (Dist > ResetEnterMaxM)
+			if (Dist > ResetEnterMaxM && !bTakesField)
 			{
 				M.From = M.To + (M.From - M.To) * (ResetEnterMaxM / Dist);
 			}
 		}
 		const float Dist = (M.To - M.From).Size();
 		M.SpeedMps = Dist < ResetWalkWithinM ? ResetWalkMps : ResetJogMps;
+		if (bTakesField)
+		{
+			M.SpeedMps = SideChangeJogMps;
+		}
 		// He quickens rather than keep the next pitch waiting, but only up to a jog: a
 		// sprint (or faster than legs go) back to his spot looks wrong.
-		if (TravelSeconds(Dist, M.SpeedMps, ResetAccelMps2) > ResetMaxSeconds)
+		else if (TravelSeconds(Dist, M.SpeedMps, ResetAccelMps2) > ResetMaxSeconds)
 		{
 			M.SpeedMps = FMath::Max(M.SpeedMps, SpeedFor(Dist, ResetMaxSeconds, ResetAccelMps2, ResetHurryMps));
 		}
@@ -613,14 +697,14 @@ bool ABbDirector::StartReset(const FBbPlay& Next)
 	}
 	// Then whoever is leaving (the retired batter, a runner who scored, the side going in):
 	// they walk to their dugout in figures of their own, through the reset and on into the
-	// next pitch if they need to.
+	// next pitch if they need to. At a change of sides they all jog off.
 	int32 Leaving = 0;
 	for (uint32 I = 0; I < From.n_actors; ++I)
 	{
 		const BbActor& A = From.actors[I];
 		if (!Find(To, A.agent))
 		{
-			AddExit(Old, A.agent, FVector2D(A.pos[0], A.pos[1]));
+			AddExit(Old, A.agent, FVector2D(A.pos[0], A.pos[1]), bSideChange);
 			++Leaving;
 		}
 	}
@@ -691,7 +775,7 @@ bool ABbDirector::StartReset(const FBbPlay& Next)
 	return true;
 }
 
-float ABbDirector::AddExit(const TArray<FFigureState>& Old, uint16 Agent, const FVector2D& From)
+float ABbDirector::AddExit(const TArray<FFigureState>& Old, uint16 Agent, const FVector2D& From, bool bJog)
 {
 	FResetMover M;
 	M.Agent = Agent;
@@ -699,7 +783,11 @@ float ABbDirector::AddExit(const TArray<FFigureState>& Old, uint16 Agent, const 
 	M.To = Dugout(Agent);
 	const float Dist = (M.To - M.From).Size();
 	M.SpeedMps = Dist < ResetWalkWithinM ? ResetWalkMps : ResetJogMps;
-	if (TravelSeconds(Dist, M.SpeedMps, ResetAccelMps2) > ResetMaxSeconds)
+	if (bJog)
+	{
+		M.SpeedMps = SideChangeJogMps;
+	}
+	else if (TravelSeconds(Dist, M.SpeedMps, ResetAccelMps2) > ResetMaxSeconds)
 	{
 		M.SpeedMps = FMath::Max(M.SpeedMps, SpeedFor(Dist, ResetMaxSeconds, ResetAccelMps2, ResetHurryMps));
 	}
@@ -1061,12 +1149,13 @@ void ABbDirector::PoseFigure(int32 Slot, const BbActor& A, const BbFrame& Frame,
 		St.Gait = Gait;
 		C->PlayAnimation(Clips[Gait], true);
 	}
-	// The walk clips cover about 2.3 m/s and the jog about 5 m/s; play faster for a sprint,
-	// slower for a step.
+	// The jog clip covers JogClipMps; the walk clips are played as covering about 2.3 m/s
+	// (their root bones travel 3.0 m/s, but the walk was not retuned with the jog). Play
+	// faster for a sprint, slower for a step.
 	if (!Manual)
 	{
 		const float Floor = In.bStaged ? 0.4f : 0.6f;
-		const float Rate = Gait == 0 ? 1.f : FMath::Clamp(St.SpeedCm / (Gait == 2 ? 500.f : 230.f), Floor, 1.9f);
+		const float Rate = Gait == 0 ? 1.f : FMath::Clamp(St.SpeedCm / (Gait == 2 ? JogClipMps * 100.f : 230.f), Floor, 1.9f);
 		C->SetPlayRate(SimDt <= 1e-5f ? 0.f : Rate * (SimDt / FMath::Max(DeltaSeconds, 1e-5f)));
 	}
 
