@@ -166,6 +166,10 @@ const RECALL_MARGIN_S: f64 = 0.3;
 /// How sure a fielder is before he calls a ball in the air (agent-models §5.7): the time to
 /// spare must also cover this many σ of his read's depth error, run off at his speed [E].
 const CALL_SURE_SIGMAS: f64 = 1.0;
+/// An infielder called off a ball in the air (agent-models §5.7, "peels off to back up")
+/// stops this far short of where his own read has it coming down, on his side of it, m [E]:
+/// out of the caller's way and of reach, close enough to field a ball that drops or pops out.
+const PEEL_BACKUP_M: f64 = 5.0;
 /// Cutoffs and relays (agent-models §5.7) [E]: a ball fielded beyond `RELAY_FROM_M` from home
 /// gets a cutoff man on the line to the base; beyond `RELAY_DEEP_M` a middle infielder goes
 /// out as the relay man instead. He stands short of the base by the throw's length less
@@ -227,6 +231,10 @@ struct Fielder {
     throws: u32,
     /// The base whose throws he is backing up, if that is his job on this play.
     backs: Option<u8>,
+    /// Called off a ball in the air by a sure call (agent-models §5.7): the spot he backs up
+    /// the catch from, short of where his own read has it coming down. Kept across re-calls
+    /// he is not part of, until the ball comes down or he is given another job.
+    peel: Option<Vec3>,
 }
 
 #[derive(Clone, Debug)]
@@ -1133,6 +1141,25 @@ impl<'a> Sim<'a> {
                 }
             }
         }
+        // A sure call: an infielder who was going for it himself (he believes he catches it in
+        // the air) hears it and peels off to back up the catch (agent-models §5.7). He stops
+        // `PEEL_BACKUP_M` short of where his own read has it coming down, on the side he is
+        // coming from; `assign_backups` gives him the job unless a cover job took him first.
+        let sure = calls.iter().any(|c| c.0 == chosen && c.1.0 >= 2);
+        self.f[chosen].peel = None;
+        for c in &calls {
+            let i = c.0;
+            if i == chosen || i >= 6 {
+                continue;
+            }
+            if sure && c.1.0 >= 1 {
+                let fd = &self.f[i];
+                let at = Vec3::new(own[i].x, own[i].y, 0.0);
+                let back = Vec3::new(fd.pos.x - at.x, fd.pos.y - at.y, 0.0);
+                let dir = if back.norm() > 1e-6 { back.normalized() } else { Vec3::new(-at.x, -at.y, 0.0).normalized() };
+                self.f[i].peel = Some(at + dir * PEEL_BACKUP_M);
+            }
+        }
         for i in [3usize, 4, 5] {
             let fd = &self.f[i];
             let grounder = fd.belief.as_ref().and_then(|p| p.first_bounce()).map(|b| m::hypot(b.1, b.2) < 25.0 && b.0 - t_c < GROUNDER_BOUNCE_S).unwrap_or(false);
@@ -1324,6 +1351,22 @@ impl<'a> Sim<'a> {
                 go_idle(&mut self.f[i]);
             }
         }
+        // Infielders called off a ball in the air back up the catch first (see
+        // `assign_among`), while it is still in the air (its landing is a visible fact) and
+        // only if no cover job took them.
+        let in_air = match &self.ball {
+            Ball::Free { path, .. } => path.bounces.first().map(|x| x.0 > self.t).unwrap_or(true),
+            _ => false,
+        };
+        for i in 0..9 {
+            match self.f[i].peel {
+                Some(spot) if in_air && self.f[i].role == Role::Idle => {
+                    self.f[i].target = spot;
+                    self.f[i].role = Role::Backup;
+                }
+                _ => self.f[i].peel = None,
+            }
+        }
         // With nobody on base the catcher is not needed at home: he trails the batter to
         // back up first.
         if empty && self.f[1].role == Role::Cover(4) {
@@ -1408,6 +1451,7 @@ impl<'a> Sim<'a> {
             self.f[i].target = spot;
             self.f[i].role = Role::Backup;
             self.f[i].backs = Some(base);
+            self.f[i].peel = None;
         }
     }
 
@@ -2248,6 +2292,7 @@ fn new_sim<'a>(inp: &'a LiveInput<'a>, st: &'a mut RulesState) -> Sim<'a> {
                 last_close_read: 0.0,
                 throws: 0,
                 backs: None,
+                peel: None,
             }
         })
         .collect();
@@ -3692,6 +3737,47 @@ mod tests {
         assert_eq!(tier(&sim, CF), 3);
         assert_eq!(sim.f[CF].role, Role::Chase);
         assert_ne!(sim.f[RF].role, Role::Chase, "called off");
+    }
+
+    // Agent-models §5.7, "peels off to back up": a pop-up coming down at (20, 36) m, between
+    // first and second, that both the first and second basemen are sure of. The first baseman, nearer, has more time to
+    // spare and calls it; the second baseman, with no base to cover (the shortstop takes
+    // second on a ball to the right side), does not stop where he is but backs up the catch
+    // from 5 m short of where his own read has it coming down, on his side of it. A re-call he
+    // is not part of leaves him that job; once the ball is down it ends.
+    #[test]
+    fn a_called_off_infielder_backs_up_the_catch() {
+        const B1: usize = 2;
+        const B2: usize = 3;
+        let fx = fixture(&[]);
+        let inp = hit(&fx, Vec3::new(7.0, 12.5, 28.0));
+        let mut st = fx.st.clone();
+        let mut sim = new_sim(&inp, &mut st);
+        at_first_read(&mut sim);
+        let land = landing(&sim);
+        assert!((land - Vec3::new(20.0, 36.0, 0.0)).norm() < 2.0, "lands at {land:?}");
+        assert!((sim.f[B1].pos - land).norm() < (sim.f[B2].pos - land).norm(), "1B nearer");
+        assert_eq!((tier(&sim, B1), tier(&sim, B2)), (2, 2), "both sure");
+        sim.assign();
+        assert_eq!(sim.primary, B1);
+        assert_eq!(sim.f[5].role, Role::Cover(2));
+        let fd = &sim.f[B2];
+        assert_eq!(fd.role, Role::Backup, "2B");
+        // Error-free read: his read of where it comes down is where it does (to the
+        // intercept's 0.12 s sampling and the planning reach).
+        let off = fd.target - land;
+        assert!((off.norm() - PEEL_BACKUP_M).abs() < 1.5, "2B backs up from {:?}, {:.1} m from the landing", fd.target, off.norm());
+        let side = Vec3::new(fd.pos.x - land.x, fd.pos.y - land.y, 0.0).normalized();
+        assert!(off.normalized().dot(side) > 0.9, "on his side of it");
+        // A re-call among others leaves him the job.
+        let spot = fd.target;
+        sim.assign_among(vec![B1, 0, 1], Some(B1));
+        assert_eq!((sim.f[B2].role, sim.f[B2].target), (Role::Backup, spot));
+        // Once the ball is down, the job ends.
+        let Ball::Free { path, .. } = &sim.ball else { unreachable!() };
+        sim.t = path.bounces[0].0 + 0.1;
+        sim.assign_backups();
+        assert_ne!(sim.f[B2].target, spot);
     }
 
     // Codex idle-fielder review #1: every way into `Role::Idle` brakes the fielder, not only
