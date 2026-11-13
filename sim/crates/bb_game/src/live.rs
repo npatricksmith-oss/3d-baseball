@@ -1343,14 +1343,17 @@ impl<'a> Sim<'a> {
         set(2, if left { &[3, 5] } else { &[5, 3] }, &mut self.f, &mut taken);
         set(3, &[4, 5], &mut self.f, &mut taken);
         set(4, &[1, 0], &mut self.f, &mut taken);
-        let tgt = self.f[pi].target;
         for i in 0..9 {
             if i == pi {
                 self.f[i].role = Role::Chase;
             } else if !taken.contains(&i) {
-                // Fielders with no job yet; `assign_backups` gives most of them one.
+                // Fielders with no job yet; `assign_backups` gives most of them one. Until
+                // then he pulls up where braking stops him: `assign_among` left his own
+                // intercept of the ball in `target`, and a man with no job does not chase it
+                // (agent-models §5.7; docs/calibration/2026-11-12-pitcher-outfield-diagnosis.md).
+                // The ground-ball break reads its own saved copy of the intercepts.
                 self.f[i].role = Role::Idle;
-                let _ = tgt;
+                self.f[i].target = stop_point(&self.f[i]);
             }
         }
     }
@@ -3313,6 +3316,48 @@ mod tests {
         let thrower = Vec3::new(-30.0, 50.0, 0.0);
         sim.back_up_throw(thrower, 3);
         assert!(behind(&sim, 0, 3, thrower));
+    }
+
+    // A fielder left with no job does not chase the ball (pitcher-outfield diagnosis,
+    // 2026-11-12). `assign_among` writes every candidate's own intercept into his target
+    // before the cover and backup steps; on a fly to right-center with nobody on, the
+    // pitcher and the second baseman get no job, and each must pull up where braking stops
+    // him instead of running out toward the ball.
+    #[test]
+    fn idle_fielders_do_not_chase_the_ball() {
+        let fx = fixture(&[]);
+        let inp = input(&fx, vec![RunnerIn { id: fx.st.batter, base: 0, speed: 8.2 }]);
+        let mut st = fx.st.clone();
+        let mut sim = new_sim(&inp, &mut st);
+        let at = Vec3::new(62.0, 88.0, 0.0);
+        // The pitcher is already moving toward the ball at 7 m/s: he stops within
+        // v²/(2·6 m/s²) ≈ 4.1 m of where he is, on his line of motion.
+        let toward = (at - sim.f[0].pos).normalized();
+        sim.f[0].vel = toward * 7.0;
+        for fd in sim.f.iter_mut() {
+            fd.target = at;
+        }
+        sim.primary = 8;
+        sim.cover_roles();
+        sim.assign_backups();
+        let idle: Vec<usize> = (0..9).filter(|&i| sim.f[i].role == Role::Idle).collect();
+        assert!(idle.contains(&0) && idle.contains(&3), "idle: {idle:?}");
+        for &i in &idle {
+            let fd = &sim.f[i];
+            let off = Vec3::new(fd.target.x - fd.pos.x, fd.target.y - fd.pos.y, 0.0);
+            assert!(off.norm() < 5.0, "f{i} idle at {:?} aims at {:?}", fd.pos, fd.target);
+            if fd.vel.norm() > 0.0 {
+                assert!(off.normalized().dot(fd.vel.normalized()) > 0.99, "f{i} brakes along his motion");
+            }
+        }
+        // Stepping on, the pitcher comes to rest near the mound instead of reaching the ball.
+        let start = sim.f[0].pos;
+        sim.t = sim.inp.t_contact + 2.0;
+        for _ in 0..300 {
+            sim.move_fielders();
+            sim.t += DT;
+        }
+        assert!(sim.f[0].vel.norm() < 1e-9 && (sim.f[0].pos - start).norm() < 5.0, "P at {:?} moving {:?}", sim.f[0].pos, sim.f[0].vel);
     }
 
     // Watch-fixes review #1–#3: the catcher goes back to cover home once a runner rounds
