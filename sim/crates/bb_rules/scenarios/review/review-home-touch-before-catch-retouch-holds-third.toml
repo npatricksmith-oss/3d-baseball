@@ -1,0 +1,16 @@
+id = "review-home-touch-before-catch-retouch-holds-third"
+title = "Day-fixes review #1: the run of a runner who goes back to retouch is cancelled; if he stays, he is on third and no run scores"
+rules = ["OBR 5.09(b)(5)", "rules-spec 5.3"]
+milestone = "M4"
+tags = ["review", "retouch"]
+initial = { inning = 6, outs = 0, batter = "A.4", bases = { third = "A.3" } }
+step = [
+  { fact = "PitchDelivered", t = 0.0 },
+  { fact = "BatContact", t = 0.42 },
+  { fact = "BaseLeft", t = 0.5, agent = "A.3", base = 3 },
+  { fact = "BaseTouched", t = 4.5, agent = "A.3", base = 4 },
+  { fact = "GloveSecured", t = 5.0, fielder = "H.CF", pos = [0.0, 95.0] },
+  { fact = "BaseTouched", t = 8.0, agent = "A.3", base = 3 },
+  { fact = "PlayEndCheck", t = 10.0 }
+]
+expect = { outs = 1, score = [0, 0], bases = { third = "A.3" }, play = "Dead" }

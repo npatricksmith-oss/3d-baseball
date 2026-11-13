@@ -549,10 +549,21 @@ fn base_touched(st: &mut RulesState, t: f64, agent: AgentId, base: Base, holding
     }
     let first_touch = lp.first_touch;
     let Some(r) = lp.runners.iter_mut().find(|r| r.runner == agent && !r.out) else { return };
+    let retouch = base == r.start_base && r.retouch_required && !r.retouched && first_touch.map(|ft| t >= ft).unwrap_or(false);
     if r.scored_at.is_some() {
-        return;
+        if !retouch {
+            // Passing bases on the way back to retouch: nothing changes until he gets there.
+            return;
+        }
+        // He touched home before the catch and has come back to retouch (rules-spec §5.3):
+        // the pending run is cancelled, and he must touch home again for it to count. The
+        // bases between are not re-required in reverse order (missed-base appeals are
+        // deferred, §5.6), so his next home touch is the next base in order.
+        r.scored_at = None;
+        r.last_base = 3;
+        lp.runs_pending.retain(|(_, id)| *id != agent);
     }
-    if base == r.start_base && r.retouch_required && first_touch.map(|ft| t >= ft).unwrap_or(false) {
+    if retouch {
         r.retouched = true;
         r.at = base;
         r.on_base = Some(base);

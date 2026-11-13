@@ -1,0 +1,18 @@
+id = "review-home-touch-before-catch-appealed-on-return"
+title = "Day-fixes review #1: a runner going back from home to retouch is tagged before he gets there: out on appeal, no run"
+rules = ["OBR 5.09(b)(5)", "rules-spec 5.6"]
+milestone = "M4"
+tags = ["review", "retouch", "appeal"]
+initial = { inning = 6, outs = 0, batter = "A.4", bases = { third = "A.3" } }
+step = [
+  { fact = "PitchDelivered", t = 0.0 },
+  { fact = "BatContact", t = 0.42 },
+  { fact = "BaseLeft", t = 0.5, agent = "A.3", base = 3 },
+  { fact = "BaseTouched", t = 4.5, agent = "A.3", base = 4 },
+  { fact = "GloveSecured", t = 5.0, fielder = "H.CF", pos = [0.0, 95.0] },
+  { fact = "TagContact", t = 7.0, fielder = "H.3B", runner = "A.3", holding_ball = true, expect_events = [{ event = "RunnerOut", runner = "A.3", kind = "Appeal" }] },
+  # Too late: he is already out.
+  { fact = "BaseTouched", t = 7.5, agent = "A.3", base = 3 },
+  { fact = "PlayEndCheck", t = 9.0 }
+]
+expect = { outs = 2, score = [0, 0], bases = {}, play = "Dead" }

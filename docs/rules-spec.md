@@ -194,7 +194,7 @@ A pending ground ball that rolls foul then back fair before reaching a base is f
 - The fielder's **feet must be in the playing field** at the capture moment: the fielder's ground-contact point is inside the field boundary of the park config [C: approximates "in the field of play"]. A fielder reaching over the wall from inside the field may rob a home run.
 - A catch of a fair or foul fly is an out (batter out, `FlyOut`/`LineOut`/`PopOut` by launch-angle class, data-formats §4.5).
 - If the fielder loses the ball (`BallReleasedFromGlove{Drop|Knocked}`) before `t_secure`, there was no catch.
-- **Runners on a caught fly:** each runner must **retouch** their time-of-pitch base after the ball is **first touched** by a fielder (not when secured) [S: OBR 5.09(b)(5) and comments]. A runner who left early is out on appeal (§5.6). Retouch requirement = a `BaseTouched` (or still touching) at or after first-touch time.
+- **Runners on a caught fly:** each runner must **retouch** their time-of-pitch base after the ball is **first touched** by a fielder (not when secured) [S: OBR 5.09(b)(5) and comments]. A runner who left early is out on appeal (§5.6). Retouch requirement = a `BaseTouched` (or still touching) at or after first-touch time. This includes a runner who **touched home before the first touch**: his run is only pending (§6.4). If he goes back and retouches, the pending run is cancelled and counts only if he touches home again; the bases between are not re-required in reverse order, since missed-base appeals are deferred (§5.6). If he never goes back, the run stands unless he is put out on appeal. (Added 2026-11-12, day-fixes review #1.)
 
 ### 5.4 Forces
 
