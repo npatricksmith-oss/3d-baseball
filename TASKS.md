@@ -9,6 +9,8 @@ Status: `[ ]` not started · `[~]` in progress · `[x]` done · `[?]` needs an o
 
 ## Resume here (2026-11-12, second session)
 
+**Owner watch fix (2026-11-12, third session, branch `worktree-batter-presentation`):** the owner saw the batter turn around before the pitch on swings, and a walked batter start walking during the pitch. The sim's decision was already causal; it was a timeline presentation problem (`bb_game::timeline`): the bat track began at the swing's laid-back start pose (the client holds the first sample, and turns the body after the bat), and award jogs had no hold knot (root tracks interpolate linearly, so the batter drifted from release). Now every pitch opens in the same stance and leaves it only in the 50 ms motor latency before the swing; on a walk or hit batter nobody moves until the umpire's call (pitch end + `T_signal` 0.2 s) plus 0.4 s. A `SwingStart` marker is emitted. Test `nothing_is_given_away_before_the_decision_or_the_call` (bb_ffi) fails on the old code for both. Not yet watched in Unreal. Still a stand-in: the walked batter keeps the bat in his hands (no drop).
+
 **First:** the [Codex review of the Anticipation commit](docs/reviews/2026-11-12-codex-anticipation-review.md) (`74679a6..cdd473c`) was started at the end of the session. If it is in `docs/reviews/`, commit it, fix or defer each finding, and write its Resolution. Its first question: whether reading the swing from the true launch direction plus noise is honest perception (the alternative is reading the bat's yaw from the swing record).
 
 Done this session (owner request: fielders "get a jump" by anticipating from pitch location and batter handedness, with a rating):

@@ -19,6 +19,24 @@ fn v3f(v: Vec3) -> Vec3f {
     Vec3f::new(v.x as f32, v.y as f32, v.z as f32)
 }
 
+/// Umpire signal latency, s: how long after a judgment the players have it (rules-spec §1.3,
+/// `T_signal`).
+pub const UMPIRE_SIGNAL_S: f64 = 0.2;
+/// Presentation only [E]: after the call of ball four or a hit batter, how long before the
+/// batter and forced runners start for their bases, s.
+pub const AWARD_REACTION_S: f64 = 0.4;
+/// Presentation only [E]: how long before the swing starts the bat leaves the stance, s. At
+/// most the batter's decision-to-motor latency (0.05 s), so it never begins before he has
+/// committed.
+pub const LOAD_S: f64 = 0.05;
+
+/// The bat in the stance, for a batter standing at `at`: knob and axis (knob → tip), the bat
+/// upright at the back shoulder and tipped a little back toward the catcher.
+pub fn stance_pose(at: Vec3) -> (Vec3, Vec3) {
+    let back = if at.x < 0.0 { -1.0 } else { 1.0 };
+    (at + Vec3::new(0.0, -0.15, 1.25), Vec3::new(0.15 * back, -0.25, 1.0).normalized())
+}
+
 /// Encode one pitch's timeline as a finished `BBTL` FlatBuffer.
 pub fn encode(step: &PitchStep, st: &RulesState) -> Vec<u8> {
     let mut fbb = FlatBufferBuilder::with_capacity(16 * 1024);
@@ -122,7 +140,11 @@ pub fn encode(step: &PitchStep, st: &RulesState) -> Vec<u8> {
     // have already put them there, and nothing here feeds back into the game.
     const JOG_MPS: f64 = 6.0;
     const BASE_L: f64 = 27.432;
-    let t_jog = t_end + 0.4;
+    // On ball four or a hit batter nobody moves until the umpire's call: it comes when the
+    // catcher has the ball (the pitch's end), reaches the players after the signal latency
+    // (rules-spec §1.3), and they take a moment to react (drop the bat, look, go).
+    let t_call = step.pitch_flight.last().t + UMPIRE_SIGNAL_S;
+    let t_jog = (t_end + 0.4).max(t_call + AWARD_REACTION_S);
     for e in &step.rules_events {
         let bb_rules::Event::RunnerAdvanced { runner, from, to, cause } = e else { continue };
         if *cause == bb_rules::AdvanceCause::OnPlay || to <= from {
@@ -147,11 +169,16 @@ pub fn encode(step: &PitchStep, st: &RulesState) -> Vec<u8> {
                 s += 0.25;
             }
         }
-        track.push((t_jog, crate::live::path_pos(s0)));
+        // He stands where he is until he goes (root tracks interpolate linearly, so without
+        // this knot he would drift toward the base path from the moment of release), then
+        // steps onto the path and jogs along it.
+        track.push((t_jog, here));
+        let t_on = t_jog + (crate::live::path_pos(s0) - here).norm() / JOG_MPS;
+        track.push((t_on, crate::live::path_pos(s0)));
         let mut k = 1;
         loop {
             let s = (s0 + JOG_MPS * 0.1 * k as f64).min(s_hi);
-            track.push((t_jog + 0.1 * k as f64, crate::live::path_pos(s)));
+            track.push((t_on + 0.1 * k as f64, crate::live::path_pos(s)));
             if s >= s_hi {
                 break;
             }
@@ -174,8 +201,11 @@ pub fn encode(step: &PitchStep, st: &RulesState) -> Vec<u8> {
     }
     let actors = if actor_offs.is_empty() { None } else { Some(fbb.create_vector(&actor_offs)) };
 
-    // Bat: the executed swing sampled every 5 ms from its start through the follow-through.
-    // With no swing, one sample: the bat held upright at the batter's back shoulder.
+    // Bat: every pitch starts from the same stance, the bat upright at the batter's back
+    // shoulder, so nothing before the swing tells a viewer whether he will swing. A swing
+    // leaves the stance only in the motor latency before it starts (he has committed by
+    // then: agent-models §3.6), blending into the swing's own start pose, then follows the
+    // executed swing every 5 ms through the follow-through.
     let quat_from_x = |a: Vec3| {
         // Shortest rotation taking +X to the unit vector `a` (bat axis = rot · +X).
         let (c, w) = (Vec3::new(0.0, -a.z, a.y), 1.0 + a.x);
@@ -183,30 +213,31 @@ pub fn encode(step: &PitchStep, st: &RulesState) -> Vec<u8> {
         let n = bb_math::m::sqrt(q.0 * q.0 + q.1 * q.1 + q.2 * q.2 + q.3 * q.3);
         bb_schema::Quatf::new((q.0 / n) as f32, (q.1 / n) as f32, (q.2 / n) as f32, (q.3 / n) as f32)
     };
-    let bat_samples: Vec<tl::BatSample> = match &rec.swing {
-        Some(sw) => {
-            use bb_physics::contact::BatPose;
-            let (t0, t1) = (sw.t_start(), sw.t_c + 0.12);
-            let n = ((t1 - t0) / 0.005).ceil() as usize;
-            (0..=n)
-                .map(|i| {
-                    let t = t0 + (t1 - t0) * i as f64 / n as f64;
-                    let k = sw.at(t);
-                    tl::BatSample::new(t as f32, &v3f(k.knob), &quat_from_x(k.axis))
-                })
-                .collect()
+    let stance = step.viz.standing.last().map(|(_, at)| stance_pose(*at));
+    let mut bat_samples: Vec<tl::BatSample> = stance.iter().map(|(knob, axis)| tl::BatSample::new(0.0, &v3f(*knob), &quat_from_x(*axis))).collect();
+    if let Some(sw) = &rec.swing {
+        use bb_physics::contact::BatPose;
+        let (t0, t1) = (sw.t_start(), sw.t_c + 0.12);
+        if let Some((knob_s, axis_s)) = stance {
+            let t_load = (t0 - LOAD_S).max(1e-3);
+            let start = sw.at(t0);
+            let mut t = t_load;
+            while t < t0 {
+                let u = (t - t_load) / (t0 - t_load).max(1e-6);
+                let knob = knob_s + (start.knob - knob_s) * u;
+                let a = axis_s * (1.0 - u) + start.axis * u;
+                let axis = if a.norm() > 1e-6 { a.normalized() } else { start.axis };
+                bat_samples.push(tl::BatSample::new(t as f32, &v3f(knob), &quat_from_x(axis)));
+                t += 0.005;
+            }
         }
-        None => step
-            .viz
-            .standing
-            .last()
-            .map(|(_, at)| {
-                let back = if at.x < 0.0 { -1.0 } else { 1.0 };
-                let axis = Vec3::new(0.15 * back, -0.25, 1.0).normalized();
-                vec![tl::BatSample::new(0.0, &v3f(*at + Vec3::new(0.0, -0.15, 1.25)), &quat_from_x(axis))]
-            })
-            .unwrap_or_default(),
-    };
+        let n = ((t1 - t0) / 0.005).ceil() as usize;
+        bat_samples.extend((0..=n).map(|i| {
+            let t = t0 + (t1 - t0) * i as f64 / n as f64;
+            let k = sw.at(t);
+            tl::BatSample::new(t as f32, &v3f(k.knob), &quat_from_x(k.axis))
+        }));
+    }
     let bat = if bat_samples.is_empty() {
         None
     } else {
@@ -218,6 +249,10 @@ pub fn encode(step: &PitchStep, st: &RulesState) -> Vec<u8> {
     let mut mk: Vec<(f64, MarkerKind, Vec3)> = vec![(0.0, MarkerKind::Release, rec.release.r)];
     if let Some(p) = rec.plate {
         mk.push((0.42, MarkerKind::PlateCross, p));
+    }
+    if let Some(sw) = &rec.swing {
+        use bb_physics::contact::BatPose;
+        mk.push((sw.t_start(), MarkerKind::SwingStart, sw.at(sw.t_start()).knob));
     }
     if let Some((tc, b)) = rec.contact_state {
         mk.push((tc, MarkerKind::Contact, b.r));

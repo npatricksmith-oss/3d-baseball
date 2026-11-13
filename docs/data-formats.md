@@ -270,6 +270,10 @@ table BallTrack { segments: [BallSegment] (id: 0); }
 
 **Bat track:** sampled pose every **2 ms** over the swing [E], plus one exact sample at contact (or closest approach).
 
+*(M4, 2026-11-12, owner watch: "the batting outcome is already settled" before the pitch.)* Every pitch's track opens at t = 0 with the same stance sample (bat upright at the back shoulder), swing or take, because a client holds the first sample until the next one, and a swing's first sample (bat laid back) gave the decision away before the release. A swing leaves the stance only in the `LOAD_S` = 0.05 s [E] before it starts, which is within the batter's decision-to-motor latency, so it never moves before he has committed. A `SwingStart` marker marks the swing's start. Built samples are every 5 ms, not 2.
+
+**Awarded bases** (walk, hit batter, home run, ball out of play): the runners' root tracks hold still until they go, then jog at 6 m/s. On a walk or a hit batter they go at the umpire's call (the pitch's end, when the catcher has it, plus `T_signal` = 0.2 s, rules-spec §1.3) plus `AWARD_REACTION_S` = 0.4 s [E]. Root tracks interpolate linearly, so without the hold knot they drifted toward the base path from the release.
+
 ```fbs
 struct BatSample { t: float; knob: bb.Vec3f; rot: bb.Quatf; }   // bat axis = rot × (+X local)
 table BatTrack { agent: ushort (id: 0); model_id: ushort (id: 1); samples: [BatSample] (id: 2); }
