@@ -9,10 +9,10 @@ Status: `[ ]` not started · `[~]` in progress · `[x]` done · `[?]` needs an o
 
 ## Resume here (2026-11-13, coordinator run; branch `coord/review-fixes`, not pushed, not in main)
 
-All of this session's work is on `coord/review-fixes` (cut from `origin/main` 638871c). It is **not pushed and not merged into main**; the owner decides. `cargo test --workspace --release`: 137 passed, 0 failed, after every merge.
+All of this session's work is on `coord/review-fixes` (cut from `origin/main` 638871c). It is **not pushed and not merged into main**; the owner decides. `cargo test --workspace --release`: 138 passed, 0 failed, after every merge.
 
 **First, unresolved:**
-- [Codex idle-fielder review](docs/reviews/2026-11-13-codex-idle-fielder-review.md) of the Part A fix below: queued to run after the rules review (prompt names `760afe8..fix/idle-fielder-target`, commits `077aab5`, `87344d1`).
+- [Codex idle-fielder review](docs/reviews/2026-11-13-codex-idle-fielder-review.md) **resolved**: every way a fielder becomes Idle now goes through one helper (`go_idle`) that stops him (relay/cutoff retirement had the same bug); the calibration note's explanation of the dropped pop-ups was corrected. **Deferred:** the unconditional outfield call priority (see Next 1).
 - [Codex rules-passing review](docs/reviews/2026-11-13-codex-rules-passing-review.md) **resolved**: all five P2 fixed (passes made while the ball is in doubt are held and judged when it is ruled fair or caught; a runner going back from a pending home touch can be passed; overrun protection starts when the batter-runner leaves first in a sampled play; one retreat can produce several passing outs; left on base counts runners, not occupied bases, which adds one LOB in 10 of 512 real games). Scenarios 94 → 106. Open from it: runners between bases at the third out count as neither run nor LOB (breaks box-score identities I1/I10; fixing it moves LOB in ordinary games, so it needs its own change); a batter-runner put out on a held pass before a home run lands still gets a home-run PA result.
 - Owner decisions waiting:
   1. **Side changes now take 16.5–23 s** of play time (about 3× before), because outgoing players walk all the way off instead of vanishing; stand-in dugouts moved into the foul-line stands (18 m along each line). The alternative is a camera cut that hides the walk-off.
@@ -31,11 +31,10 @@ Done this session (coordinator with worker agents; merges in `coord/review-fixes
 - CLAUDE.md no longer says the repo has no remote.
 
 Next, in order:
-1. Resolve the Codex idle-fielder review.
-2. **Pop-ups dropping in short right/center** (above): find why the outfielder misreads their depth (spin/drag assumed for balls above 50°? re-call never handing the ball to a better-placed infielder?) and build §5.7's "a called-off fielder peels off to back up". Then Part B of the pitcher fix if the owner agrees.
-3. **Fouls (O1/R13)**, following the owner's direction: extend `foul_diag` with Statcast-style measures (foul share by launch angle and attack direction, early/late split, bat tilt at contact, swing length) and add a `cage-map` bat-tilt counterfactual (−20/−30/−35°) before changing any calibration.
-4. Live sim emits `RunnerPosition` at ~30 Hz and models an overrun of first.
-5. Watch the client (`bin/play.sh`): reset staging, side-change walk-offs, sidesteps.
+1. **Pop-ups dropping in short right/center** (above): the review ranks the outfielder's early depth misread first (with zero read errors 25 of the 26 dropped pop-ups are caught; letting confident infielders share the call tier recovers 12). Find why the read is off for balls launched above 50° (spin/drag assumed?) before touching call priority; then decide when outfield priority applies (real priority is for balls in between; test seed 41/play 93 plus cases where the outfielder should keep it) and build §5.7's "a called-off fielder peels off to back up". Then Part B of the pitcher fix if the owner agrees.
+2. **Fouls (O1/R13)**, following the owner's direction: extend `foul_diag` with Statcast-style measures (foul share by launch angle and attack direction, early/late split, bat tilt at contact, swing length) and add a `cage-map` bat-tilt counterfactual (−20/−30/−35°) before changing any calibration.
+3. Live sim emits `RunnerPosition` at ~30 Hz and models an overrun of first.
+4. Watch the client (`bin/play.sh`): reset staging, side-change walk-offs, sidesteps.
 
 Process (owner, 2026-11-13): at most two Claude worker agents at once, and every worker commits after each meaningful step; five at once hit the usage limit and one worker's uncommitted work had to be rescued.
 
