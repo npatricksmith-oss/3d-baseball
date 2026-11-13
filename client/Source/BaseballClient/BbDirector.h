@@ -53,9 +53,9 @@ private:
 	float PlayTime = 0.f;
 	float Speed = 1.f;
 	float HoldAfter = 0.f;
-	/** The scoreboard as last shown in full (after the previous play). During a play the
-	 *  outs on it advance as the umpire calls each one. */
-	BbPlayInfo Shown{};
+	/** The scoreboard as the current play started (the previous play's result). During a
+	 *  play the outs on it advance as the umpire calls each one. */
+	BbPlayInfo Before{};
 	/** How long the umpire's out signal stays up, s of play time. */
 	static constexpr float UmpireShowS = 2.0f;
 	/** A play this close (runner's time short of the base, s) is called with emphasis. */

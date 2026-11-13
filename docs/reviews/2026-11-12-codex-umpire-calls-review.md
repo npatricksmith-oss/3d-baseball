@@ -48,4 +48,12 @@ Unreal was not built or launched; rendered text layout and frame-by-frame visual
 
 ## Resolution
 
-Open.
+Both findings fixed in the client (`BbDirector.cpp`, HUD update), checked with offscreen screenshots of seed 7 around the third out of the top of the first (a strikeout, called 0.82 s into the pitch):
+
+- **P2, strikeout outs before the call: fixed.** On a pitch not put in play, the result (summary, count, bases) now appears at the later of 0.55 s and the umpire's last call. Screenshot at 0.4 s: "Top 1, 2 out, 2-2", no summary.
+- **P2, third out skipped: fixed.** The board is now built from `Before` (the previous play's result, set in `BeginPlayback`, top of the first before the first pitch) plus the calls delivered so far. It never reads the final state's outs. A play that ends the half leaves that half on the board at three outs, through the hold and the reset, until the next pitch begins. Screenshots: "Top 1, 3 out" with "Strikeout swinging / OUT" after the call, "Bot 1, 0 out" on the next pitch. This also fills the board from the first frame (the blank opening the review noted).
+- While checking, I found and fixed a bug of my own in the fix: on an inning-ending pitch the count was zeroed before the play was known (it showed 0-0 instead of 2-2).
+
+Not changed, with reasons:
+- Test strength (`tests/umpire_calls.rs`): the timestamp check matches *a* deciding fact rather than the one that retired this runner. The review's replay probe confirmed the exact association for all 1,079 calls, so this is left as is. The HUD's reveal logic has no automated test: the client has no unit-test harness, and offscreen screenshots are the project's check for it (CLAUDE.md).
+- ABI handshake: there is no size or version check for a mismatched library. `client/run.sh` and `bin/play.sh` always rebuild both sides, so this is deferred until the client loads libraries it did not build.

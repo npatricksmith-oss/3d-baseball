@@ -9,7 +9,7 @@ Status: `[ ]` not started · `[~]` in progress · `[x]` done · `[?]` needs an o
 
 ## Resume here (2026-11-12, third session: umpire calls)
 
-**First:** the [Codex review of the umpire calls](docs/reviews/2026-11-12-codex-umpire-calls-review.md) was started at the end of this session; if it is in `docs/reviews/`, commit it, fix or defer each finding, and write its Resolution. Then the Anticipation review below (its file is in `docs/reviews/`, uncommitted, Resolution open).
+**First:** the [Codex review of the Anticipation commit](docs/reviews/2026-11-12-codex-anticipation-review.md) is finished but uncommitted and unresolved (see the second-session handoff below). The [Codex review of the umpire calls](docs/reviews/2026-11-12-codex-umpire-calls-review.md) is resolved: two client scoreboard-timing bugs fixed (strike three showed before the call; the third out was skipped straight to the next half).
 
 Done (owner request: "when an out is made the umpire should make a call right away; within 1 s for non-close plays, almost right away when close"):
 - **Umpire out calls** (rules-spec §1.3, data-formats §5.4): every out gets an `UmpireCall` timeline marker at the moment the umpire signals it: 0.2 s after a bang-bang out (runner within 0.15 s of the bag, a diving or shoestring catch, strike three), rising to 0.7 s on routine plays. The client shows "OUT at first" / "OUT!, caught" (red and larger when close) as it happens and advances the outs on the scoreboard; the play's summary still appears when the clip ends. `bb_game::umpire`; `BbPlayInfo.calls`; `cargo run --release -p bb_game --example umpire_calls -- 20`. Observation only: game results are unchanged.

@@ -373,6 +373,18 @@ void ABbDirector::RequestNext()
 
 void ABbDirector::BeginPlayback(FBbPlay&& Play)
 {
+	// The board as this play starts: as the last one left it (top of the first, before the
+	// first pitch). The board stays on the outgoing half inning until here.
+	if (Current.bValid)
+	{
+		Before = Current.Info;
+	}
+	else
+	{
+		FMemory::Memzero(Before);
+		Before.inning = 1;
+		Before.top = 1;
+	}
 	if (Current.Blob)
 	{
 		Sim->Release(Current);
@@ -393,12 +405,6 @@ void ABbDirector::BeginPlayback(FBbPlay&& Play)
 		return;
 	}
 	++PlaysShown;
-	if (Shown.inning == 0)
-	{
-		// Before the first pitch the board reads top of the first.
-		Shown.inning = 1;
-		Shown.top = 1;
-	}
 	// A ball in play gets a moment at the end; a taken pitch moves on quickly.
 	HoldAfter = Current.Info.exit_velocity_mps > 0.f ? 2.5f : 0.7f;
 }
@@ -900,7 +906,9 @@ void ABbDirector::Tick(float DeltaSeconds)
 			const BbPlayInfo& In = Current.Info;
 			// The call appears when a viewer would know it: as the pitch arrives if it was not
 			// put in play, at the end of the play if it was.
-			const bool bKnown = In.exit_velocity_mps > 0.f ? PlayTime >= In.duration_s : PlayTime >= 0.55f;
+			// (Not before the umpire has signalled strike three.)
+			const float LastCall = In.n_calls > 0 ? In.calls[In.n_calls - 1].t_s : 0.f;
+			const bool bKnown = In.exit_velocity_mps > 0.f ? PlayTime >= In.duration_s : PlayTime >= FMath::Max(0.55f, LastCall);
 			Hud->Call = bKnown ? FString(UTF8_TO_TCHAR(In.summary)) : FString();
 			// Outs, though, are called by the umpire as they happen (the sim times each
 			// signal: at once on a close play, within a second on a routine one).
@@ -928,20 +936,16 @@ void ABbDirector::Tick(float DeltaSeconds)
 			}
 			static const TCHAR* CamNames[3] = { TEXT("broadcast"), TEXT("behind home"), TEXT("overhead") };
 			Hud->Footer = FString::Printf(TEXT("Space: %s    - / =: speed %.2gx    C: camera (%s)    Esc or Q: quit"), bPaused ? TEXT("paused") : TEXT("pause"), Speed, CamNames[CameraMode]);
-			auto Board = [](const BbPlayInfo& I, int32 Outs)
+			// The outs on the board are the ones called so far. Runs, count and bases change
+			// when the play is known. A play that ends the half inning leaves it on the board,
+			// at three outs, until the next pitch (BeginPlayback).
 			{
-				return FString::Printf(TEXT("AWAY %d   HOME %d    %s %d    %d out    %d-%d"), I.away_runs, I.home_runs, I.top ? TEXT("Top") : TEXT("Bot"), I.inning, Outs, I.balls, I.strikes);
-			};
-			if (bKnown)
-			{
-				Shown = In;
-				Hud->Bases = In.bases;
-				Hud->Scoreboard = Board(In, In.outs);
-			}
-			else if (Called > 0)
-			{
-				// Everything else on the board waits for the play to finish.
-				Hud->Scoreboard = Board(Shown, FMath::Min<int32>(Shown.outs + Called, 3));
+				const BbPlayInfo& Src = bKnown ? In : Before;
+				const bool bHalfOver = In.inning != Before.inning || In.top != Before.top;
+				const BbPlayInfo& Half = bHalfOver ? Before : Src;
+				const int32 Outs = FMath::Min<int32>(Before.outs + Called, 3);
+				Hud->Bases = Src.bases;
+				Hud->Scoreboard = FString::Printf(TEXT("AWAY %d   HOME %d    %s %d    %d out    %d-%d"), Src.away_runs, Src.home_runs, Half.top ? TEXT("Top") : TEXT("Bot"), Half.inning, Outs, bHalfOver && bKnown ? 0 : Src.balls, bHalfOver && bKnown ? 0 : Src.strikes);
 			}
 			const float Mph = In.release_speed_mps * 2.23694f;
 			Hud->PitchLine = In.exit_velocity_mps > 0.f
