@@ -67,4 +67,4 @@ The two requested 1,024-game run totals reproduced exactly to the reported preci
 
 `cargo test --workspace --release -j 4` passes after the change: 141 tests, no failures.
 
-**Left for the owner/coordinator:** `docs/agent-models.md` §5.10 "Honest information" (l. 471) still quotes the earlier noisy-read numbers (22.36 → 22.18 → 22.06° at grade 80; 22.44 → 22.39 → 22.36° at grade 50). This worker was not allowed to edit that spec. The regenerated values are 22.33 → 22.16 → 22.00° and 22.42 → 22.40 → 22.35°. The difference is sampling noise only.
+**Done by the coordinator (2026-11-13), after `710fc63`:** brought into line. Originally left open: `docs/agent-models.md` §5.10 "Honest information" (l. 471) still quotes the earlier noisy-read numbers (22.36 → 22.18 → 22.06° at grade 80; 22.44 → 22.39 → 22.36° at grade 50). This worker was not allowed to edit that spec. The regenerated values are 22.33 → 22.16 → 22.00° and 22.42 → 22.40 → 22.35°. The difference is sampling noise only.
