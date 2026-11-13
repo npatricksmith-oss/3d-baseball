@@ -67,6 +67,11 @@ pub struct SwingTemplate {
     /// The swing's phase rate may change by at most this fraction over the swing still to
     /// come after motor latency [E] (agent-models §3.6: ±10%).
     pub adj_phase_frac: f64,
+    /// A check swing can start only before this fraction of the swing's start-to-contact
+    /// *time* [E]. The spec gives the abort point as a phase, `s_abort` = 0.45 (agent-models
+    /// §3.6); under v1's Gaussian speed bump a time fraction is not the same thing, and v1's
+    /// 0.6 of the time is kept as built until a change is validated.
+    pub abort_time_frac: f64,
 }
 
 impl Default for SwingTemplate {
@@ -84,6 +89,7 @@ impl Default for SwingTemplate {
             aim_offset_z: -0.020,
             adj_cutoff_s: 0.060,
             adj_phase_frac: 0.10,
+            abort_time_frac: 0.6,
         }
     }
 }

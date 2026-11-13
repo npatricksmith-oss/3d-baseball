@@ -578,6 +578,10 @@ pub struct OwnExecution {
     pub correct_t: f64,
 }
 
+/// Check swing: the batter brakes when the updated `EV_swing − EV_take` falls below minus
+/// this, runs [E] (agent-models §3.6 `θ_check`).
+pub const CHECK_THETA_RUNS: f64 = 0.03;
+
 /// Share of the in-swing correction capacity a batter counts on when deciding [E].
 pub const CORRECTION_CREDIT: f64 = 0.5;
 

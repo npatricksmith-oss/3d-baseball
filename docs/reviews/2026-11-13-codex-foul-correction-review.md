@@ -101,4 +101,9 @@ Only this review file was added. Probe sources and logs were written under `/tmp
 
 ## Resolution
 
-Open.
+All four findings fixed (2026-11-13). Game digests for seeds 1, 2, 3 and 42 are still bit-identical after the fixes.
+
+- **P2 (foul rate by AD not invariant):** fixed. Note §8 now says the tested settings do not close the foul gap and saved swings are *mostly* fair. It quotes this review's paired transitions (925 whiffs → 623 fair, 302 foul; 250 fair → foul; 190 foul → fair; 185 contact → whiff). It drops the invariance claim, gives the AD-tail changes, and says AD bins are a pointer, not a controlled test. TASKS carries the qualified conclusion.
+- **P2 (estimate error at the wrong depth):** fixed. `PitchRecord::est_error` records the batter's last estimate against the truth at the estimate's own depth (`truth_err(want, t_want)`), and `foul_diag` prints it directly. The values now match this review: +10.0 / +1.4 / −3.6 / +9.3 cm. The note says the three terms sum only approximately when the depths differ.
+- **P2 (face/spray identity):** fixed. Note §8 states the exact in-plane identity (`n × axis`). It distinguishes that from the horizontal face angle (median 3.5°) and the collision normal (median 23°), calls the spray-tied-to-AD mechanism an unmeasured hypothesis, and makes measuring spray minus AD the first step. TASKS says the same.
+- **P3 (other bare literals):** fixed. The check threshold is `batter::CHECK_THETA_RUNS` (0.03). The abort point is `SwingTemplate::abort_time_frac` (0.6 of the start-to-contact time), both unchanged. Agent-models §3.6 names both and documents that v1's time fraction is not the spec's phase `s_abort` = 0.45; changing that is left as a behavior change to validate. The stale "Nothing is waiting on a review" line in TASKS is reconciled.

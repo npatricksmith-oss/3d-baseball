@@ -311,7 +311,7 @@ All widen with F_composure and K_swing. **M2 measures** the offset → (exit vel
 - Timing: phase rate may change by ≤ ±10% [E] (`SwingTemplate::adj_phase_frac`).
 - Adjustment stops at `t_cut` = 60 ms [E] before t* (PLAN range 50–80 ms; `SwingTemplate::adj_cutoff_s`).
 
-**Check swing:** if, before phase `s_abort` = 0.45 [E], the updated `EV_swing − EV_take` falls below `−θ_check` = −0.03 runs [E], the batter brakes: phase rate decays to zero over 40 ms [E]. Whether it counts as a swing is judged by the rules engine from the bat's pose (`rules-spec.md`). The swing model only reports the maximum bat rotation reached.
+**Check swing:** if, before phase `s_abort` = 0.45 [E], the updated `EV_swing − EV_take` falls below `−θ_check` = −0.03 runs [E] (`batter::CHECK_THETA_RUNS`), the batter brakes: phase rate decays to zero over 40 ms [E]. Whether it counts as a swing is judged by the rules engine from the bat's pose (`rules-spec.md`). The swing model only reports the maximum bat rotation reached. *v1 as built:* the abort point is a fraction of the swing's start-to-contact time, 0.6 (`SwingTemplate::abort_time_frac`), not the phase 0.45; under v1's Gaussian speed bump the two differ, and changing it is a behavior change to validate.
 
 **Bunt** (M5): a separate near-static template; the batter positions the bat on the predicted path and applies the bunt-grip COR multiplier (physics spec §8.4).
 

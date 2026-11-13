@@ -275,6 +275,9 @@ pub struct PitchRecord {
     /// he had moved his aim: (x, z) m and timing s, estimate minus aim. What the correction's
     /// limits left uncorrected of what he knew; None if no adjustment tick ran. Diagnostics only.
     pub known_gap: Option<Vec3>,
+    /// At the same tick, the batter's latest estimate against the truth at the estimate's own
+    /// depth: (x, z) m and timing s, as `aim_error`. Diagnostics only.
+    pub est_error: Option<Vec3>,
     /// Contact time and the ball's state just after contact (for the live-ball play).
     pub contact_state: Option<(f64, BallState)>,
     /// The pitch hit the batter's body (before any contact).
@@ -473,7 +476,7 @@ pub fn simulate_pitch_ctx(mu: &Matchup, sc: &Scouting, count: Count, seed: u64, 
     let mut swing_res = SwingResult::NoSwing;
     let mut swing_done = None;
     let mut resolved_pitch = free.clone();
-    let (mut aim_error, mut commit_error, mut known_gap) = (None, None, None);
+    let (mut aim_error, mut commit_error, mut known_gap, mut est_error) = (None, None, None, None);
     let truth_err = |p: Vec3, t: f64| -> Option<Vec3> {
         let tt = free.find(Crossing::YBelow(p.y))?;
         let q = free.at(tt).0;
@@ -500,7 +503,7 @@ pub fn simulate_pitch_ctx(mu: &Matchup, sc: &Scouting, count: Count, seed: u64, 
         // Phase rate may change ±10% over the swing still to come after motor latency.
         let dt_lim = mu.template.adj_phase_frac * (t_aim - (t_commit + pc.latency)).max(0.0);
         let t_aim0 = t_aim;
-        let t_abort = swing.t_start() + 0.6 * (swing.t_c - swing.t_start());
+        let t_abort = swing.t_start() + mu.template.abort_time_frac * (swing.t_c - swing.t_start());
         let v_adj = mu.batter.adjustability;
         let mut t_last = t_commit;
         loop {
@@ -517,7 +520,7 @@ pub fn simulate_pitch_ctx(mu: &Matchup, sc: &Scouting, count: Count, seed: u64, 
             let dom = bank.dominant();
             if t_now < t_abort {
                 let d2 = batter::decide(&post2, dom, count, zone, &mu.discipline, own, 0.0, mu.env.ball.radius);
-                if d2.ev_swing - d2.ev_take < -0.03 {
+                if d2.ev_swing - d2.ev_take < -batter::CHECK_THETA_RUNS {
                     // Brake after motor latency; the rules judge the result (rules-spec §4.5).
                     swing.t_brake = Some(t_now + pc.latency);
                     check = true;
@@ -534,6 +537,7 @@ pub fn simulate_pitch_ctx(mu: &Matchup, sc: &Scouting, count: Count, seed: u64, 
             cur = Vec3::new(nx, depth(nx), cur.z + dz);
             t_aim = t_aim0 + (t_want - t_aim0).clamp(-dt_lim, dt_lim);
             known_gap = Some(Vec3::new(want.x - cur.x, want.z - cur.z, t_want - t_aim));
+            est_error = truth_err(want, t_want);
             // The same executed placement deviation rides on the adjusted plan.
             let mut s2 = apply_placement(&planner(cur, t_aim), &ex.placement);
             s2.t_brake = swing.t_brake;
@@ -598,6 +602,7 @@ pub fn simulate_pitch_ctx(mu: &Matchup, sc: &Scouting, count: Count, seed: u64, 
         aim_error,
         commit_error,
         known_gap,
+        est_error,
         contact_state,
         hit_batter,
         bounced,

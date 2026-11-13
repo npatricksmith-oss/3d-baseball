@@ -106,7 +106,9 @@ struct Sw {
     /// the adjustment loop is not recorded).
     read_ok: bool,
     /// At the last adjustment tick: the batter's estimate minus his aim (what he knew and had
-    /// not yet corrected), height cm and timing ms; and his estimate minus the truth (height cm).
+    /// not yet corrected), height cm and timing ms; and his estimate minus the truth at the
+    /// estimate's own depth (height cm). The aim error is measured at the aim's depth, so the
+    /// three do not sum exactly when the two depths differ.
     gap_z_cm: f64,
     gap_t_ms: f64,
     est_z_cm: f64,
@@ -189,7 +191,7 @@ fn measure(mu: &Matchup, p: &PitchRecord) -> Option<Sw> {
     let (gap_z_cm, gap_t_ms) = p.known_gap.map_or((f64::NAN, f64::NAN), |g| (100.0 * g.y, 1000.0 * g.z));
     let h_aim_cm = p.aim_error.map_or(f64::NAN, |e| 100.0 * e.y);
     let h_off_cm = 100.0 * mu.template.aim_offset_z;
-    let est_z_cm = h_aim_cm + gap_z_cm;
+    let est_z_cm = p.est_error.map_or(f64::NAN, |e| 100.0 * e.y);
     let (out, ev, la, land_dir) = match contact {
         Some(b) => {
             let land = b.flight.last().s.r;
@@ -541,13 +543,13 @@ fn miss_sources(sws: &[Sw]) {
         )
     };
     let sat = |f: &dyn Fn(&Sw) -> bool| {
-        let b: Vec<&&Sw> = nomd.iter().filter(|s| f(s) && s.gap_z_cm.is_finite()).collect();
+        let b: Vec<&&Sw> = nomd.iter().filter(|s| f(s) && s.gap_z_cm.is_finite() && s.est_z_cm.is_finite()).collect();
         let gz: Vec<f64> = b.iter().map(|s| s.gap_z_cm).collect();
         let gt: Vec<f64> = b.iter().map(|s| s.gap_t_ms).collect();
         let ez: Vec<f64> = b.iter().map(|s| s.est_z_cm).collect();
         let az: Vec<f64> = b.iter().map(|s| s.h_aim_cm).collect();
         format!(
-            "n {:4} | aim error z {:+6.1} | = estimate error {:+6.1} − known gap {:+6.1} cm (|gap| > 2 cm: {} %) | known timing gap {:+5.1} ms (|gap| > 3 ms: {} %)",
+            "n {:4} | aim error z {:+6.1} | estimate error {:+6.1}, known gap {:+6.1} cm (|gap| > 2 cm: {} %) | known timing gap {:+5.1} ms (|gap| > 3 ms: {} %)",
             b.len(),
             mean(&az),
             mean(&ez),
@@ -557,7 +559,7 @@ fn miss_sources(sws: &[Sw]) {
             share(gt.iter().filter(|g| g.abs() > 3.0).count(), b.len())
         )
     };
-    println!("Saturation of the mid-swing correction, at its last tick (means; the aim error is the estimate's error minus what he knew and had not yet moved):");
+    println!("Saturation of the mid-swing correction, at its last tick (means; aim error ≈ estimate error − known gap, exactly when aim and estimate share a depth):");
     println!("  early and over by > 6 cm:   {}", sat(&|s| s.t_err_ms < 0.0 && s.h_nom_cm > 6.0));
     println!("  close (±15 ms, ±4 cm):      {}", sat(&|s| s.t_err_ms.abs() <= 15.0 && s.h_nom_cm.abs() <= 4.0));
     println!("  bat under by > 4 cm:        {}", sat(&|s| !(s.t_err_ms < 0.0 && s.h_nom_cm > 6.0) && !(s.t_err_ms.abs() <= 15.0 && s.h_nom_cm.abs() <= 4.0) && s.h_nom_cm < -4.0));

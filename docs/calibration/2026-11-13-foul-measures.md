@@ -194,23 +194,23 @@ The joint table (share of swings % / whiff % / foul % of contact; timing negativ
 
 ## 8. The correction experiment (owner: "yes", same day)
 
-§7 proposed the batter's mid-swing correction as the strongest candidate lever, to be tested as an experiment. It is not the foul lever.
+§7 proposed the batter's mid-swing correction as the strongest candidate lever, to be tested as an experiment. The tested settings do not close the foul gap.
 
 Changes made for the experiment:
-- `t_cut` and the phase-rate limit were bare literals in `pa.rs`. They are now the named [E] parameters `SwingTemplate::adj_cutoff_s` (60 ms) and `adj_phase_frac` (0.10), with the same values. The game digests for seeds 1, 2, 3 and 42 are bit-identical before and after.
-- `PitchRecord::known_gap` (diagnostics only) records, at the last adjustment tick, the batter's latest estimate minus where he had moved his aim.
+- `t_cut`, the phase-rate limit, the check-swing threshold and the abort point were bare literals in `pa.rs`. They are now named [E] parameters with the same values: `SwingTemplate::adj_cutoff_s` (60 ms), `adj_phase_frac` (0.10), `abort_time_frac` (0.6 of the start-to-contact time; the spec's `s_abort` = 0.45 is a phase, which is not the same thing under v1's speed bump, so it is kept as built) and `batter::CHECK_THETA_RUNS` (0.03). The game digests for seeds 1, 2, 3 and 42 are bit-identical before and after (checked by the Codex review too).
+- `PitchRecord::known_gap` and `est_error` (diagnostics only) record, at the last adjustment tick, the batter's latest estimate minus where he had moved his aim, and that estimate against the truth at its own depth.
 - `foul_diag` takes `adj=<m/s>`, `cut=<ms>` and `phase=<fraction>` as counterfactuals, and prints the saturation measures below.
 
-**Saturation** (default; at the last tick; the aim error is the estimate's error minus the gap he knew of and had not yet moved):
+**Saturation** (default; at the last tick). The aim error is about the estimate's error minus the gap he knew of and had not yet moved. It is exact only when the aim and the estimate share a depth; the aim error is measured at the aim's depth and the estimate's error at its own (Codex correction review #2):
 
 | Population | n | final aim error, z | his estimate's error | known gap left | \|gap\| > 2 cm | known timing gap | \|gap\| > 3 ms |
 |---|---|---|---|---|---|---|---|
-| early, bat over by > 6 cm | 1,107 | +25.6 cm | +9.3 | −16.3 | 81% | +22.3 ms | 77% |
-| close (±15 ms, ±4 cm) | 1,647 | +1.7 | +1.3 | −0.3 | 21% | +1.6 | 20% |
+| early, bat over by > 6 cm | 1,107 | +25.6 cm | +10.0 | −16.3 | 81% | +22.3 ms | 77% |
+| close (±15 ms, ±4 cm) | 1,647 | +1.7 | +1.4 | −0.3 | 21% | +1.6 | 20% |
 | bat under by > 4 cm | 1,099 | −5.3 | −3.6 | +1.7 | 29% | +1.0 | 24% |
-| AD 12–30° whiffs | 504 | +22.5 | +8.7 | −13.8 | 77% | +16.7 | 77% |
+| AD 12–30° whiffs | 504 | +22.5 | +9.3 | −13.8 | 77% | +16.7 | 77% |
 
-The limits do bind on fooled swings. By the last tick the batter knew the ball was about 16 cm lower and 22 ms later than his swing, and could not get there. About two-thirds of the final aim error on those swings is correction he knew he needed.
+The limits do bind on fooled swings. By the last tick the batter knew the ball was about 16 cm lower and 22 ms later than his swing, and could not get there. Roughly 60% of the final aim error on those swings is correction he knew he needed. These are the requests left at the last completed update, not saturation on every tick.
 
 **Counterfactuals** (3,000 PAs each; MLB in brackets):
 
@@ -228,12 +228,15 @@ The limits do bind on fooled swings. By the last tick the batter knew the ball w
 | MLB | [51] | [40] | [54 / 23] | | [22.5] | [76] | [85 / 57] |
 
 - **The variants also change who swings.** The batter counts on half his expected correction when he decides (`OwnExecution`, `CORRECTION_CREDIT`), so O-Swing% rises from 23.8 to 28.9 with no limits, and the rows compare slightly different swing populations.
-- **More correction saves swings, but as fair contact.** Even with no limits at all, the foul share moves only from 23.7% to 26.1%. Fooled swings fall from 25% to 8%, whiffs fall and K% halves. Foul per contact holds at about 20% for well-timed contact and 8–12% at AD 12–20°, in every variant. The foul rate at a given timing is a property of the contact map, not of how many swings reach it.
-- **The phase limit's wider settings move the timing distribution** (more swings in AD 0–6° and fewer early) but raise whiffs there. They do not change the foul rate in any bin.
+- **More correction saves swings, mostly as fair contact.** Even with no limits at all, the foul share moves only from 23.7% to 26.1%. Fooled swings fall from 25% to 8%, whiffs fall and K% halves. A paired run by the Codex review held the 4,357 baseline swings' pitches, contexts, decisions and random draws fixed and lifted all limits:
+  - 925 whiffs became contact: 623 fair and 302 foul (33% foul, against 23.7% overall);
+  - 250 fair balls became foul and 190 fouls became fair;
+  - 185 contacts became whiffs.
+- **The foul rate by AD changes little:** about 20% for well-timed contact in every variant, and 8–12% at AD 12–20° (MLB 40% and 54%). It is not invariant, though. The AD tails move: below −20° it goes 79 → 59% with the phase limit at ±20%, on small samples. Correction also changes height, station and pitch within each AD bin. AD alone does not fix the contact map's inputs, so comparing by AD bin is a pointer, not a controlled test.
 - **What the correction does move is contact.** Contact%, Z-Contact% and O-Contact% are all below MLB's band now (64.7, 71.8, 40.2 against 76, 85, 57). They rise toward it with a larger Adjustability: at 2.4 m/s O-Contact% enters its band. But K% falls to 16 while the foul share stays low. With MLB's foul share, two-strike fouls would keep more at-bats alive and push K% the other way. So Adjustability cannot be set from these numbers until the foul share is fixed. This is B1 calibration (O1), noted here, not changed.
 
-**What this changes.** The question is now the contact map: why contact at a given timing and height is fair so much more often than MLB's. At AD 12–20° MLB fouls 54% of contact and the sim 8–12%, whatever the correction. In the cage grid, contact 10–15 ms early is fair across −8 to +4 cm. Two candidates remain, neither measured yet:
-1. **Spray tied to AD.** v1's radial bat about a fixed pivot points the bat's face exactly along the sweet spot's velocity, so a ball leaves close to the swing's direction. No public MLB data give spray minus AD (R13 F5: Statcast has no foul coordinates), so this rests on v1's construction and on MLB's fouls at a given AD, not on a measured spread. A bat whose face and path differ, as with §3.6's hand path and lag, would spread spray around AD and send more early and late contact past the lines. That is a cage counterfactual to build.
+**What this changes.** The main question moves to the contact map: why contact at a given timing and height is fair so much more often than MLB's. At AD 12–20° MLB fouls 54% of contact and the sim 8–12% in every variant tried. In the cage grid, contact 10–15 ms early is fair across −8 to +4 cm. Two candidates remain, neither measured yet:
+1. **Spray tied to AD.** In v1 the sweet spot moves exactly along `n × axis`: perpendicular to the 3D bat axis, in the swing plane. That is not the bat's horizontal face angle (the two differ by a median 3.5°, p95 9.1°), nor the collision's surface normal, which depends on where the ball meets the round bat (a median 23° from the sweet spot's velocity at contact; Codex correction review #3). The outgoing ball also depends on the pitch's velocity, friction and spin. Whether v1's construction holds spray close to AD is not measured. No public MLB data give spray minus AD (R13 F5: Statcast has no foul coordinates), so this rests on v1's construction and on MLB's fouls at a given AD, not on a measured spread. A bat whose face and path can differ, as with §3.6's hand path and lag, *could* spread spray around AD and send more early and late contact past the lines. The first step is to measure the sim's spray-minus-AD distribution, then compare a controlled swing variant in the cage.
 2. **The on-time foul band** (§6, §7): topped and undercut balls on time stay fair in the sim. The −30° bat angle widens it a little (§4).
 
 **Proposed next step (owner):** a cage counterfactual of a swing whose bat face and path can differ: §3.6's hand path and lag, or the simplest version of it. Measure spray minus AD and the foul share by AD before building anything into the PA model. Adjustability stays at 0.6 m/s.
