@@ -42,7 +42,7 @@ Plate-appearance report (`sim-cli pa --n 3000 --k-perception 2.7 --k-command 0.8
 `Sim::assign_backups` (agent-models §5.7): fielders with no job back up the play, one per base, on the line of the likely throw and 13 m beyond the base.
 
 - Behind the fielder: the nearest free outfielder gets into the ball's line beyond him.
-- Outfield hit, nobody on: the far-side outfielder backs up second; the catcher backs up first.
+- Outfield hit, nobody on: the far-side outfielder backs up second; the catcher backs up first; the pitcher backs up third (owner, 2026-11-13; agent-models §5.7 holds the current table).
 - Outfield hit, runner on first: the pitcher backs up third from foul ground; the far-side outfielder backs up second; the catcher stays home.
 - Outfield hit, runner in scoring position: the pitcher backs up home.
 - Infield ball: the catcher (bases empty) or the right fielder backs up first; the center fielder backs up second with a runner on first; the left fielder backs up third with a runner on second.
