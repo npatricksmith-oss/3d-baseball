@@ -11,7 +11,7 @@ Status: `[ ]` not started · `[~]` in progress · `[x]` done · `[?]` needs an o
 
 Branch `claude/next-task-list-item-11a78e` (continuing from the fifth session below). `cargo test --workspace --release`: 151 passed, 0 failed.
 
-**Waiting on a review:** the [Codex overrun-samples review](docs/reviews/2026-11-13-codex-overrun-samples-review.md) is running (or, if this line is still here, was started and not yet resolved).
+**Nothing is waiting on a review.** The [Codex overrun-samples review](docs/reviews/2026-11-13-codex-overrun-samples-review.md) is resolved: no P1/P2, and its one P3 (the spec overstated what is unmodelled: a batter-runner sent back by a blocked base already retreats to first, judged from the samples) is fixed. It reproduced every count and verified determinism, box-score identities, and the timelines headlessly. Merged into main (not pushed).
 
 Done (coordinator item 3; [note](docs/calibration/2026-11-13-overrun-and-samples.md), agent-models §6.2, rules-spec §5.5 and §15 item 7):
 - **Position samples.** The live sim sends every runner on the base paths to the rules engine as a `RunnerPosition` at 30 Hz (`Sim::sample_runners`), so the engine's position-based overrun and passing rules now run in real games.

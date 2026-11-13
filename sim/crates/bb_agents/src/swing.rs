@@ -222,7 +222,7 @@ impl Swing {
         let early = t - self.t_start();
         if early > 0.0 {
             self.t_c += early;
-            // Exactly: rounding can leave the start an ulp short of `t`.
+            // Exactly: rounding can leave the start short of `t` (by many ulps when `t_c` is large against `width`).
             while self.t_start() < t {
                 self.t_c = self.t_c.next_up();
             }

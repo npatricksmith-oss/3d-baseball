@@ -61,13 +61,17 @@ The changed game paths made the FFI test `nothing_is_given_away_before_the_decis
 fail on seed 11 play 227: the bat left the stance 7 ms before the batter's commit. The
 swing is planned from the believed arrival, and execution noise and the timing adjustment
 move it; nothing kept its start after the commit. Over 64 games, 13 of 8,199 swings (0.16%)
-started before the decision, by up to 18 ms. A swing now starts no earlier than the commit,
+started before the decision, by up to 18 ms (Codex: 12 of 8,172 at the commit before this
+work, on its own game paths). A swing now starts no earlier than the commit,
 moved whole, so it meets the ball that much later (`Swing::start_no_earlier_than`,
 agent-models §3.4); after it, none do. Test: `no_swing_starts_before_the_batter_decides`.
 
 ## Not done
 
-- Rounding first toward second on a hit and coming back; a slide into first; a batter-runner
+- A voluntary turn toward second on a hit and back (he decides at the bag to go on or run
+  through). A batter-runner sent back because the runner ahead holds second does already
+  retreat to first, with the attempt judged from the samples (Codex review #1); none did
+  in the 512 games above. Also not done: a slide into first; a batter-runner
   who sees an overthrow during his overrun and goes for second (he decides again only once
   back on the bag, and only if he was waiting on a runner ahead).
 - The play cannot end until he is back: about 6.2 s after he crosses the bag from 8.2 m/s
