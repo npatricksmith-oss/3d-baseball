@@ -75,7 +75,7 @@ impl FielderAttrs {
             arm_sigma: 1.2f64.to_radians(),
             transfer: if outfield { 0.85 } else { 0.65 },
             tau_read: 0.6,
-            read_sigma0: if outfield { 3.0 } else { 0.3 },
+            read_sigma0: if outfield { 3.5 } else { 0.3 },
             antic_sigma: ANTIC_SIGMA_50,
             swing_sigma: bat_read_sigma(BAT_READ_TIME_SIGMA_50_S),
             lead_sigma: LEAD_READ_TIME_SIGMA_50_S,

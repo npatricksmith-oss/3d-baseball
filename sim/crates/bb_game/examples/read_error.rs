@@ -58,7 +58,7 @@ fn main() {
                     continue;
                 }
                 let view = (tau - of.reaction).max(0.0);
-                let read = |err: [f64; 4]| read_prediction(&mu.env, &field, path.at(t), t, from, sigma0, tau_read, view, err, Some(tau)).first_bounce().map(|b| Vec3::new(b.1, b.2, 0.0));
+                let read = |err: [f64; 4]| read_prediction(&mu.env, &field, path.at(t), t, from, sigma0, tau_read, view, err, Some((tau, tr.first().s.r))).first_bounce().map(|b| Vec3::new(b.1, b.2, 0.0));
                 let Some(base) = read([0.0; 4]) else { continue };
                 acc[k][j][0].push((base - land).dot(out));
                 let mut ss = 0.0;
