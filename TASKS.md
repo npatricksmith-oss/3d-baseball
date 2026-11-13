@@ -1,13 +1,28 @@
 # Task List
 
-**Last updated:** 2026-11-13 (foul measures, sources and the correction experiment; pushed; the spray experiment parked for later; before that, the read knows the ball started at the plate; before that, called-off infielders back up the catch; before that, pop-up calls on `fix/popup-calls`; before that, owner's observations merged into the "Owner backlog" section; before that, the coordinator run on `coord/review-fixes`)
+**Last updated:** 2026-11-13 (the overrun of first and runner position samples; before that, foul measures, sources and the correction experiment; pushed; the spray experiment parked for later; before that, the read knows the ball started at the plate; before that, called-off infielders back up the catch; before that, pop-up calls on `fix/popup-calls`; before that, owner's observations merged into the "Owner backlog" section; before that, the coordinator run on `coord/review-fixes`)
 The live to-do list for the project. [PLAN.md](PLAN.md) holds decisions and design. This file holds what is next and what is done. Update it at the end of every work session.
 
 Status: `[ ]` not started · `[~]` in progress · `[x]` done · `[?]` needs an owner decision
 
 ---
 
-## Resume here (2026-11-13, fifth session: foul measures)
+## Resume here (2026-11-13, sixth session: the overrun of first)
+
+Branch `claude/next-task-list-item-11a78e` (continuing from the fifth session below). `cargo test --workspace --release`: 151 passed, 0 failed.
+
+**Waiting on a review:** the [Codex overrun-samples review](docs/reviews/2026-11-13-codex-overrun-samples-review.md) is running (or, if this line is still here, was started and not yet resolved).
+
+Done (coordinator item 3; [note](docs/calibration/2026-11-13-overrun-and-samples.md), agent-models §6.2, rules-spec §5.5 and §15 item 7):
+- **Position samples.** The live sim sends every runner on the base paths to the rules engine as a `RunnerPosition` at 30 Hz (`Sim::sample_runners`), so the engine's position-based overrun and passing rules now run in real games.
+- **The overrun of first.** A batter-runner who stops at first runs through the bag, brakes down the line (`OVERRUN_DECEL` 4 m/s² [E], 8.4 m from 8.2 m/s), and walks back (`OVERRUN_RETURN_MPS` 2.5 m/s [E]); the rules engine sees him protected and the fielders make no play on him. In 512 games, 8,421 of 19,826 batter-runners who reached first overran it and came back; every one who was off the bag at the end of a play was put out, the inning or game ended, or the ball left the park. No passing outs and no rules warnings. Runs: seed 5 5.36 → 5.39, seed 2 5.21 → 5.23 (1,024 games; noise ±0.07). Not tuned.
+- **Found on the way: swings could start before the batter decided** (0.16% of swings, up to 18 ms), exposed when seed 11's changed game path failed the FFI no-give-away test. A swing now starts no earlier than the commit, moved whole (`Swing::start_no_earlier_than`, agent-models §3.4).
+- New diagnostic: `cargo run --release -p bb_game --example overrun_probe -- 512 0`.
+- Not done: rounding first and coming back on a hit, sliding into first, going for second on an overthrow during the overrun. Plays that leave the batter on first now last until he is back (about 6 s after he crosses the bag). Not watched in the client.
+
+Next: items 4–7 of the coordinator list below (item 2, fouls, is parked with the spray experiment; item 6 is related to it).
+
+## Previous: 2026-11-13, fifth session: foul measures
 
 Branch `claude/next-task-list-item-11a78e`, merged into main and pushed to origin (owner, 2026-11-13: "push and stop here"). `cargo test --workspace --release`: 148 passed, 0 failed. No simulation behavior or values changed (game digests bit-identical): the code changes are diagnostics, new template methods, named [E] parameters that were literals, and a refactor of the cage lab's aim.
 
@@ -125,7 +140,7 @@ Done this session (coordinator with worker agents; merges in `coord/review-fixes
 Next, in order:
 1. ~~Pop-ups dropping in short right/center~~ **done 2026-11-13** (see "Resume here").
 2. ~~**Fouls (O1/R13)**: extend `foul_diag` with Statcast-style measures and add a `cage-map` bat-tilt counterfactual before changing any calibration~~ **measured 2026-11-13** (fifth session, above). Its next step is parked: "Foul share: the spray experiment" under Parked.
-3. Live sim emits `RunnerPosition` at ~30 Hz and models an overrun of first.
+3. ~~Live sim emits `RunnerPosition` at ~30 Hz and models an overrun of first.~~ **Done 2026-11-13** (sixth session).
 4. Watch the client (`bin/play.sh`): reset staging, side-change jogs, sidesteps.
 5. **Camera cut at side changes** (owner, 2026-11-13: later) to hide the 23–27 s jog off/on.
 6. **Batter timing fooled by offspeed and sequence** (pa.rs/bb_agents), which is what would give fielders' Anticipation real information to read.

@@ -514,6 +514,10 @@ The base path is a sequence of segments with a rounding arc at each base, radius
 
 *(M4, 2026-11-11: the batter starts in his box, not on the plate. His offset from the base path shrinks linearly to nothing over his first 4 m of running (`BOX_EXIT_M` [E]); tags, his view of the ball, and the recorded track all use that position. He is charged the base-path distance, a few centimetres short of the route's true length.)*
 
+*(Built 2026-11-13, `Sim::step_overrun`: the overrun of first.)* A batter-runner who decides at first to stop there runs through the bag: he touches it, leaves it on the next tick, and carries on straight down the first-base line, braking from his crossing speed at `OVERRUN_DECEL` = 4 m/s² [E] (from 8.2 m/s he pulls up 8.4 m, 28 ft, past the bag), then walks back at `OVERRUN_RETURN_MPS` = 2.5 m/s [E] (reached with the running time constant) and touches it again. He makes no turn toward second, so the rules engine sees an overrun and he cannot be tagged out on the way back (rules-spec §5.5); the fielders see that too and make no play on him. The play does not settle until he is back on the bag. He makes no new decision while out there; one waiting on a runner ahead decides once he is back. Not yet modelled: rounding the bag toward second on a hit and coming back (he either goes on or runs through), a slide into first, and a runner who sees an overthrow during his overrun and goes for second.
+
+*Position samples (built 2026-11-13).* Every other 60 Hz tick (30 Hz, `SAMPLE_EVERY_TICKS`), after the runners move, the live sim sends each runner still on the base paths to the rules engine as a `RunnerPosition` at his recorded position, all at the same time (rules-spec §2). They are what lets the engine judge the overrun and passing between bases from positions (§5.5).
+
 ### 6.3 Advance decisions
 
 At each decision point (contact, ball fielded, throw released, passing a base), the runner evaluates "advance" against "hold":

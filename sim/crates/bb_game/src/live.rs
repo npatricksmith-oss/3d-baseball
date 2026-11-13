@@ -15,7 +15,7 @@ use bb_math::{KeyedRng, Mat3, Purpose, RngKey, Vec3, m};
 use bb_physics::ground::{BallPath, Field, SegmentEnd, batted_path, batted_path_dt};
 use bb_physics::throw::{THROW_MAX_ELEV, THROW_SPIN_RPM, ThrowTable, fly_throw, solve_throw, throw_state};
 use bb_physics::{BallState, FlightEnv, Trajectory};
-use bb_rules::{AgentId, Event, Input, OutKind, PlayState, RulesState, Touch, step};
+use bb_rules::{AgentId, Event, Input, OutKind, PlayState, RulesState, RunnerPosition, Touch, step};
 
 use crate::play::{FielderAttrs, RunnerIn, base_pos, home_positions, run_dist, run_time};
 
@@ -49,6 +49,14 @@ const BATTER_START: f64 = 0.25;
 /// Time constant of a runner's acceleration, s [E]. With the batter's start delay an
 /// average runner (8.2 m/s) reaches first 4.45 s after contact (MLB averages about 4.4).
 const RUNNER_TAU: f64 = 0.85;
+/// A batter-runner who stops at first runs through the bag down the line and brakes at this
+/// rate, m/s² [E] (agent-models §6.2): from 8.2 m/s he pulls up 8.4 m (28 ft) past the bag.
+const OVERRUN_DECEL: f64 = 4.0;
+/// The speed he walks back to first at after an overrun, m/s [E].
+const OVERRUN_RETURN_MPS: f64 = 2.5;
+/// Runner positions go to the rules engine every this many ticks (30 Hz, rules-spec §2
+/// `RunnerPosition`).
+const SAMPLE_EVERY_TICKS: u64 = 2;
 /// On a ball in the air that may or may not be caught, with fewer than two out, a runner
 /// goes this far past his lead and waits to see it land or be caught, m [E].
 const HALFWAY_M: f64 = 5.0;
@@ -276,6 +284,20 @@ struct Runner {
     /// `RunnerPerception` sub-index 2n and its read of a free ball from 2n + 1; sub-index 1
     /// is the first read at contact (tag up or go).
     decisions: u32,
+    /// The batter-runner's overrun of first (agent-models §6.2): his phase, and how far past
+    /// the bag down the first-base line he is, m (his `s` stays at first meanwhile).
+    overrun: OverrunPhase,
+    over_m: f64,
+}
+
+/// A batter-runner who stopped at first runs through it, pulls up, and walks back.
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+enum OverrunPhase {
+    None,
+    /// Through the bag, braking.
+    Out,
+    /// Walking back to it.
+    Back,
 }
 
 pub struct LiveInput<'a> {
@@ -959,6 +981,31 @@ impl<'a> Sim<'a> {
             }
         }
         let t_fact = fact_time(&fact).unwrap_or(self.t);
+        self.out.facts.push(fact);
+        self.absorb(evs, t_fact);
+    }
+
+    /// Send every runner still on the base paths to the rules engine as a position sample
+    /// (rules-spec §2 `RunnerPosition`), all at this tick's time.
+    fn sample_runners(&mut self) {
+        for k in 0..self.r.len() {
+            let r = &self.r[k];
+            if r.out || (r.scored && (r.catch_seen || !self.caught())) {
+                continue;
+            }
+            let p = self.runner_pos(r);
+            let sample = RunnerPosition { t: self.t, runner: r.id, x: p.x, y: p.y };
+            let evs = step(self.st, &sample);
+            self.absorb(evs, self.t);
+            if self.done {
+                return;
+            }
+        }
+    }
+
+    /// Book the rules engine's events for a fact at `t_fact`: outs (with the umpire's call),
+    /// the catch, the end of the play.
+    fn absorb(&mut self, evs: Vec<Event>, t_fact: f64) {
         for e in &evs {
             if let Event::RunnerOut { runner, base, kind } = e {
                 if let Some(k) = self.r.iter().position(|r| r.id == *runner) {
@@ -979,7 +1026,6 @@ impl<'a> Sim<'a> {
                 self.catch_made = true;
             }
         }
-        self.out.facts.push(fact);
         self.out.events.extend(evs);
         if !matches!(self.st.play, PlayState::Live(_)) {
             self.done = true;
@@ -2106,6 +2152,13 @@ impl<'a> Sim<'a> {
             if self.r[k].scored {
                 continue;
             }
+            if self.r[k].overrun != OverrunPhase::None {
+                self.step_overrun(k);
+                if self.done {
+                    return;
+                }
+                continue;
+            }
             // Tag-up: go back to the base and hold it until the catch, then decide.
             if self.r[k].tag_up {
                 let on_base = (self.r[k].s - self.r[k].start as f64 * BASE_L).abs() < 1e-6;
@@ -2194,6 +2247,47 @@ impl<'a> Sim<'a> {
                     // Arrived where it was going (or retouched after a catch): decide whether
                     // to keep going (leaving the base is reported on the next step).
                     self.runner_decide(k, b);
+                    // A batter-runner stopping at first runs through it (agent-models §6.2).
+                    let r = &mut self.r[k];
+                    if r.start == 0 && b == 1 && dir > 0.0 && r.goal == 1 {
+                        r.overrun = OverrunPhase::Out;
+                        r.over_m = 0.0;
+                    }
+                }
+            }
+        }
+    }
+
+    /// One tick of the batter-runner's overrun of first: through the bag at his crossing
+    /// speed, braking at `OVERRUN_DECEL` down the line, then walking back at
+    /// `OVERRUN_RETURN_MPS` until he touches it again. He leaves the bag on the first tick
+    /// after his touch, like any runner (rules-spec §5.5 judges his protection from that
+    /// `BaseLeft` and the position samples).
+    fn step_overrun(&mut self, k: usize) {
+        let id = self.r[k].id;
+        let r = &mut self.r[k];
+        match r.overrun {
+            OverrunPhase::None => {}
+            OverrunPhase::Out => {
+                let leaving = r.over_m == 0.0;
+                r.v = (r.v - OVERRUN_DECEL * DT).max(0.0);
+                r.over_m += r.v * DT;
+                if r.v == 0.0 {
+                    r.overrun = OverrunPhase::Back;
+                }
+                if leaving {
+                    self.emit(Input::BaseLeft { t: self.t, agent: id, base: 1 });
+                }
+            }
+            OverrunPhase::Back => {
+                r.v += (OVERRUN_RETURN_MPS - r.v) * (DT / RUNNER_TAU);
+                r.over_m -= r.v * DT;
+                if r.over_m <= 0.0 {
+                    r.over_m = 0.0;
+                    r.v = 0.0;
+                    r.overrun = OverrunPhase::None;
+                    r.last_base = 1;
+                    self.emit(Input::BaseTouched { t: self.t, agent: id, base: 1, holding_ball: false });
                 }
             }
         }
@@ -2206,7 +2300,9 @@ impl<'a> Sim<'a> {
         // Tag any runner within reach who is off a base.
         for k in 0..self.r.len() {
             let r = &self.r[k];
-            if r.out || r.scored {
+            // A batter-runner coming straight back from his overrun of first is no play: he
+            // cannot be tagged out (OBR 5.09(b)(4)), and the fielders see he made no turn.
+            if r.out || r.scored || r.overrun != OverrunPhase::None {
                 continue;
             }
             let on_base = (r.s / BASE_L - (r.s / BASE_L).round()).abs() * BASE_L < 0.3;
@@ -2235,7 +2331,7 @@ impl<'a> Sim<'a> {
         // A forced runner heading for a base this fielder is closer to: run it there now
         // (stepping on a bag needs no transfer).
         for r in &self.r {
-            if r.out || r.scored || r.v < 0.5 {
+            if r.out || r.scored || r.v < 0.5 || r.overrun != OverrunPhase::None {
                 continue;
             }
             let goal = visible_target(r);
@@ -2266,8 +2362,8 @@ impl<'a> Sim<'a> {
         // Options: each base a running runner is heading to.
         let mut best: Option<(f64, u8, bool)> = None;
         for r in &self.r {
-            if r.out || r.scored || r.v < 0.5 {
-                continue; // standing runners are not a play
+            if r.out || r.scored || r.v < 0.5 || r.overrun != OverrunPhase::None {
+                continue; // standing runners are not a play, nor is an overrun of first
             }
             // The base a moving runner is heading for, and when he gets there at his
             // current speed (both visible).
@@ -2370,7 +2466,7 @@ impl<'a> Sim<'a> {
     fn settled(&self) -> bool {
         let Ball::Held { by } = self.ball else { return false };
         let fd = &self.f[by];
-        let calm = self.r.iter().all(|r| r.out || r.scored || (r.s - r.goal as f64 * BASE_L).abs() < 1e-6);
+        let calm = self.r.iter().all(|r| r.out || r.scored || ((r.s - r.goal as f64 * BASE_L).abs() < 1e-6 && r.overrun == OverrunPhase::None));
         let in_infield = m::hypot(fd.pos.x, fd.pos.y) < INFIELD_R;
         calm && in_infield && self.t >= fd.ready_at
     }
@@ -2379,8 +2475,13 @@ impl<'a> Sim<'a> {
     /// batter starts in his box, off the path: his offset from the plate shrinks linearly to
     /// nothing over his first `BOX_EXIT_M` of running. Tags, his own view of the ball, and the
     /// recorded track all use this one position. The distance he is charged for is still the
-    /// base-path distance, which is within a few centimetres of this route's length.
+    /// base-path distance, which is within a few centimetres of this route's length. On his
+    /// overrun of first he is past the bag on the first-base line.
     fn runner_pos(&self, r: &Runner) -> Vec3 {
+        if r.overrun != OverrunPhase::None {
+            // Past first, straight down the first-base line.
+            return base_pos(1) * (1.0 + r.over_m / BASE_L);
+        }
         let p = path_pos(r.s);
         if r.start == 0 && r.s < BOX_EXIT_M {
             let b = self.inp.batter_box;
@@ -2479,6 +2580,8 @@ fn new_sim<'a>(inp: &'a LiveInput<'a>, st: &'a mut RulesState) -> Sim<'a> {
             last_timing_draw: 0.0,
             catch_seen: false,
             decisions: 0,
+            overrun: OverrunPhase::None,
+            over_m: 0.0,
         })
         .collect();
     let mut actors: Vec<(AgentId, Vec<(f64, Vec3)>)> = inp.fielders.iter().map(|&id| (id, Vec::new())).collect();
@@ -2518,6 +2621,7 @@ fn simulate_live_inner(inp: &LiveInput, st: &mut RulesState) -> LiveOutput {
     let mut assigned = false;
     let mut runners_started = false;
     let mut next_recall = t_c + 1.0;
+    let mut tick: u64 = 0;
     while !sim.done {
         if sim.t - t_c > PLAY_LIMIT_S {
             if std::env::var("BB_DEBUG_LIVE").is_ok() {
@@ -2633,6 +2737,12 @@ fn simulate_live_inner(inp: &LiveInput, st: &mut RulesState) -> LiveOutput {
         if sim.done {
             break;
         }
+        if tick % SAMPLE_EVERY_TICKS == 0 {
+            sim.sample_runners();
+            if sim.done {
+                break;
+            }
+        }
         // A runner who reached base and stopped while a throw comes in stays put.
         if sim.settled() {
             let t = sim.t;
@@ -2645,6 +2755,7 @@ fn simulate_live_inner(inp: &LiveInput, st: &mut RulesState) -> LiveOutput {
             sim.record(false);
         }
         prof::TICKS.with(|c| c.set(c.get() + 1));
+        tick += 1;
         sim.t += DT;
     }
     if inp.record {
@@ -4278,6 +4389,104 @@ mod tests {
             sim.t += DT;
         }
         assert!(matches!(sim.ball, Ball::Held { by: 3 }), "ball: {:?}", sim.ball);
+    }
+
+    /// A grounder to short; the throw pulls the first baseman off the bag into foul ground,
+    /// so the batter-runner is safe, stops at first (the ball is a few metres away), and runs
+    /// through the bag. The first baseman tags him on his way back, 3 m short of the bag.
+    /// Returns whether that tag put him out, his deepest point past the bag (m), his speed
+    /// crossing it, whether the rules engine saw him protected, and the facts and events.
+    fn overrun_with_tag(fx: &Fixture, samples: bool) -> (bool, f64, f64, bool, Vec<Input>, Vec<Event>) {
+        const FB: usize = 2;
+        let bat = fx.st.batter;
+        let inp = input(fx, vec![RunnerIn { id: bat, base: 0, speed: 8.2 }]);
+        let mut st = fx.st.clone();
+        let mut sim = new_sim(&inp, &mut st);
+        sim.emit(Input::BallTouched { t: 0.8, what: Touch::Ground { x: -8.0, y: 30.0 } });
+        sim.emit(Input::GloveSecured { t: 1.3, fielder: sim.f[5].id, x: -8.0, y: 30.0 });
+        let off_bag = base_pos(1) + Vec3::new(1.5, -1.5, 0.0);
+        sim.f[FB].pos = off_bag;
+        sim.f[FB].target = off_bag;
+        sim.emit(Input::GloveSecured { t: 3.9, fielder: sim.f[FB].id, x: off_bag.x, y: off_bag.y });
+        sim.ball = Ball::Held { by: FB };
+        sim.secured_at = 3.9;
+        sim.t = 4.0;
+        sim.r[0].s = BASE_L - 3.0;
+        sim.r[0].goal = 1;
+        sim.r[0].v = 8.0;
+        let (mut deepest, mut v_cross, mut tagged, mut protected_seen) = (0.0f64, 0.0, false, false);
+        for tick in 0..600u64 {
+            let before = sim.r[0].overrun;
+            let v = sim.r[0].v;
+            sim.move_runners();
+            if before == OverrunPhase::None && sim.r[0].overrun == OverrunPhase::Out {
+                v_cross = v + (sim.r[0].vmax - v) * (DT / RUNNER_TAU);
+            }
+            if samples && tick % SAMPLE_EVERY_TICKS == 0 {
+                sim.sample_runners();
+            }
+            if let PlayState::Live(lp) = &sim.st.play {
+                protected_seen |= lp.runners.iter().any(|r| r.runner == bat && r.overrun == bb_rules::Overrun::Protected);
+            }
+            deepest = deepest.max(sim.r[0].over_m);
+            if sim.r[0].overrun != OverrunPhase::None {
+                // His recorded position is on the first-base line, past the bag.
+                let p = sim.runner_pos(&sim.r[0]);
+                assert!((p.x - p.y).abs() < 1e-9 && p.x >= base_pos(1).x - 1e-9, "{p:?}");
+            }
+            if !tagged && sim.r[0].overrun == OverrunPhase::Back && sim.r[0].over_m < 3.0 {
+                tagged = true;
+                let (fb, t) = (sim.f[FB].id, sim.t);
+                sim.emit(Input::TagContact { t, fielder: fb, runner: bat, holding_ball: true });
+            }
+            if sim.r[0].out || (tagged && sim.r[0].overrun == OverrunPhase::None) {
+                break;
+            }
+            sim.t += DT;
+        }
+        let t = sim.t + 1.0;
+        sim.emit(Input::PlayEndCheck { t });
+        let out = sim.out.events.iter().any(|e| matches!(e, Event::RunnerOut { runner, .. } if *runner == bat));
+        (out, deepest, v_cross, protected_seen, sim.out.facts.clone(), sim.out.events.clone())
+    }
+
+    // Rules-spec §5.5 / OBR 5.09(b)(4), simulator side: the batter-runner who stops at first
+    // runs through the bag, pulls up down the line, and walks back; with the live sim's
+    // position samples the rules engine sees an overrun and a tag on his way straight back is
+    // no out. He is left on first.
+    #[test]
+    fn batter_runner_overruns_first_and_is_not_liable_coming_back() {
+        let fx = fixture(&[]);
+        let bat = fx.st.batter;
+        let (out, deepest, v_cross, protected_seen, facts, events) = overrun_with_tag(&fx, true);
+        assert!(!out, "tagged out coming straight back: {events:?}");
+        assert!(protected_seen);
+        // Braking from his crossing speed at the overrun rate: v²/(2a) past the bag.
+        let stop = v_cross * v_cross / (2.0 * OVERRUN_DECEL);
+        assert!(v_cross > 7.5 && (deepest - stop).abs() < 0.15, "deepest {deepest:.2} m, v {v_cross:.2}, kinematic {stop:.2}");
+        // First touched, left, touched again, in that order, and nothing else of his.
+        let mine: Vec<(bool, u8)> = facts
+            .iter()
+            .filter_map(|f| match *f {
+                Input::BaseTouched { agent, base, .. } if agent == bat => Some((true, base)),
+                Input::BaseLeft { agent, base, .. } if agent == bat => Some((false, base)),
+                _ => None,
+            })
+            .collect();
+        assert_eq!(mine, vec![(true, 1), (false, 1), (true, 1)]);
+        assert!(events.iter().any(|e| matches!(e, Event::RunnerAdvanced { runner, to: 1, .. } if *runner == bat)), "{events:?}");
+        assert!(!events.iter().any(|e| matches!(e, Event::RulesWarning { .. })), "{events:?}");
+    }
+
+    // The same play without position samples: the rules engine has no evidence of an overrun
+    // (rules-spec §5.5), so he is an ordinary runner off the bag and the tag retires him. The
+    // samples are what protect him.
+    #[test]
+    fn without_position_samples_the_overrunner_is_an_ordinary_runner() {
+        let fx = fixture(&[]);
+        let (out, _, _, protected_seen, _, events) = overrun_with_tag(&fx, false);
+        assert!(!protected_seen);
+        assert!(out, "{events:?}");
     }
 
     // Finding 2 of the same review: the batter's realized track starts in his box and joins
