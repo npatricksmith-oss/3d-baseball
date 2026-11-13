@@ -2788,6 +2788,11 @@ mod tests {
         let mut inp = input(&fx, vec![RunnerIn { id: fx.st.batter, base: 0, speed: 8.2 }]);
         inp.pitch_x = Some(-0.1);
         inp.bat_yaw = Some(80.0_f64.to_radians());
+        // A fixed 15° read error rather than the grade-50 one (77°, agent-models §5.10), so the
+        // read carries enough for someone to lean on it and the comparison is not vacuous.
+        for a in inp.fattrs.iter_mut() {
+            a.swing_sigma = 15.0_f64.to_radians();
+        }
         let home = home_positions();
         let ball = |deg: f64| BallState { r: Vec3::new(0.0, 0.5, 1.0), v: Vec3::new(f64::to_radians(deg).sin(), f64::to_radians(deg).cos(), 0.2) * 35.0, w: Vec3::ZERO };
         inp.ball = ball(4.071844);
@@ -2804,7 +2809,7 @@ mod tests {
     // which gives +6.663°. (b) The review's case, at the level a fielder sees: a bat at
     // +179.999° and one at −179.999° (barrel pointing at the catcher, 0.002° apart). Read
     // perfectly, both face behind the batter and nobody jumps (back-half policy). Read with
-    // grade-20 error (the same draws for both), some reads land in the forward half, and the
+    // 29.3° of error (the same draws for both), some reads land in the forward half, and the
     // jumps must still agree to within what 0.002° can change (the first version's linear
     // fusion swung a third baseman from no jump to 3.6 m/s here). (c) The cue's model: a
     // right-hander's bat square to the pitch line (yaw 90°) says +5.2° (the fit's intercept);
