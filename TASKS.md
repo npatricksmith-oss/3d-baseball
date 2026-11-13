@@ -1,13 +1,31 @@
 # Task List
 
-**Last updated:** 2026-11-12
+**Last updated:** 2026-11-12 (second session)
 The live to-do list for the project. [PLAN.md](PLAN.md) holds decisions and design. This file holds what is next and what is done. Update it at the end of every work session.
 
 Status: `[ ]` not started · `[~]` in progress · `[x]` done · `[?]` needs an owner decision
 
 ---
 
-## Resume here (2026-11-12)
+## Resume here (2026-11-12, second session)
+
+**First:** the [Codex review of the Anticipation commit](docs/reviews/2026-11-12-codex-anticipation-review.md) (`74679a6..cdd473c`) was started at the end of the session. If it is in `docs/reviews/`, commit it, fix or defer each finding, and write its Resolution. Its first question: whether reading the swing from the true launch direction plus noise is honest perception (the alternative is reading the bat's yaw from the swing record).
+
+Done this session (owner request: fielders "get a jump" by anticipating from pitch location and batter handedness, with a rating):
+- **Fielder momentum** (`21a4535`, agent-models §5.3): velocity is a vector; braking at most 6 m/s², turning at most a_lat 7 m/s²; fielders slow into turns they cannot make. Until now they turned and reversed instantly at full speed, which hid six planner bugs, now fixed: infielders broke for pop-ups as if grounders; a breaking infielder ran at his base; fly balls went to the earliest intercept (a coin toss); the re-call looked near the ball's current position; calls were traded on noise; fielders assumed 1,800 rpm backspin where the contact model gives flies 3,300–6,500 (now a table by launch angle). Refit: velocity read 0.06 → 0.04, OF read 2.5 → 3.0. [Report](docs/calibration/2026-11-12-fielder-momentum.md).
+- **[Codex momentum review](docs/reviews/2026-11-12-codex-momentum-review.md): resolved** (`74679a6`): arrivals no longer stop a fielder dead, planting distance, a turn-aware reach estimate (tested against the stepped movement), receivers not pinned to the bag, fresh-read breaks, wall caroms.
+- **Anticipation** (`cdd473c`, agent-models §5.10): the fielder combines the pitch location and batter's side (a prior) with a read of the swing at contact, and starts toward the side he expects at contact instead of standing through his reaction time. Leaning on location alone made fielders *worse* (7° of signal against 22° of scatter); the swing read is what pays. 2,048 games: no jump 5.35 runs/team-game, grade 20 5.31, 50 5.22, 80 5.03. `sim-cli games --anticipation <grade>` / `--no-jump`.
+
+Next, in the order a viewer would notice:
+- **Watch it in the client** (`bin/play.sh`): fielders now carry momentum, plant after catches, curve into turns, and move at contact. Nothing in the Unreal client changed; check it still looks right.
+- **Batters of both sides in games.** Every game batter is right-handed (`Matchup::average()`), so the handedness half of Anticipation only runs in unit tests. Needs per-slot batters and a check that pitcher targeting handles left-handers.
+- Run environment 5.22 runs/team-game (MLB ≈ 4.5): ground balls still go for hits at .40 (MLB .24); infield hits are 20% of grounders, mostly high choppers from the contact model's launch-angle spread. Turning is still the largest movement cost (runs would be ~4.4 if turns were free); the atlas perception of §5.1 should reduce replan target jumps.
+- One-hop throws; the motion stand-ins (no catching motion, bat not in the batter's hands).
+- Still open from reviews: a runner who crosses home before a catch never returns (day-fixes #1, P1, rules engine); foul share 24% vs 50%; foul-territory walls.
+
+Numbers (`sim-cli games --n 1024`), end of session: seed 2, 5.22 runs/team-game (before Anticipation), seed 5 2,048 games 5.22 with it; GB .399, LD .721, FB .116, PU .005. Per-game time unchanged (~260 ms single thread on the loaded laptop, same as HEAD before the session).
+
+### Previous handoff (2026-11-12, first session)
 
 **First:** nothing is waiting on a review. The [Codex review of `1f7ca4c..845a862`](docs/reviews/2026-11-12-codex-throws-relays-review.md) is resolved (receivers read throws instead of seeing their future; the throw solve finds long throws whose height peaks below 35°; the deep relay man goes out early on his own read; table edges). Its one open item: the deep relay man costs 0.1–0.15 runs per team-game and the cause is unknown (the experiments that ruled things out are in its Resolution). Owner direction (2026-11-12): players should not play perfectly, but play must be believable; treat this as a diagnosis item, not a number to tune away.
 
