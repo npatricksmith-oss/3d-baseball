@@ -6,6 +6,7 @@
 //! prior), so a cue's *added* information shows. Batter-relative signs: negative spray = pull
 //! side (every game batter is right-handed, so this is the raw spray).
 //! `cargo run --release -p bb_game --example spray_cues -- [games]`
+use bb_math::{m, KeyedRng, Purpose, RngKey};
 use bb_physics::contact::BatPose;
 use bb_rules::Event;
 
@@ -93,7 +94,7 @@ fn main() {
             let (Some(sw), Some((t_c, st))) = (r.swing, r.contact_state) else { continue };
             let Some(p) = r.plate.or(Some(st.r)) else { continue };
             let a = sw.at(t_c).axis;
-            let face = bb_math::m::atan2(a.x, a.y).to_degrees() - 90.0;
+            let face = m::atan2(a.x, a.y).to_degrees() - 90.0;
             let t_plate = r.t_plate.unwrap_or(t_c);
             rows.push(Row {
                 spray: spray.to_degrees(),
@@ -107,7 +108,7 @@ fn main() {
                     1000.0 * (t_c - sw.t_c),
                     st.r.y,
                     1000.0 * (sw.t_start() - t_plate),
-                    a.z.asin().to_degrees(),
+                    m::asin(a.z).to_degrees(),
                     r.count.balls as f64,
                     r.count.strikes as f64,
                     la.to_degrees(),
@@ -241,20 +242,28 @@ fn history(rows: &[Row]) {
     }
 }
 
+/// Game seed reserved for this diagnostic's read noise. Its streams are keyed like the
+/// production `FielderAnticipation` streams, but under this seed (no game in a calibration run
+/// uses it; games here are seeded 0..n), with agent id 0 (no real agent; fielders are 0x181..),
+/// play index = Anticipation grade, and sub-indices from 100 up (production uses 0, 1, 2), so a
+/// diagnostic draw can never be mistaken for, or coincide with, a game draw (CLAUDE.md inv. 5).
+const DIAG_SEED: u64 = 0xD1A6_5EED_5C0E_0001;
+
+/// One explicitly keyed noise stream of [`honest`]: grade `g`, cue slot `cue`.
+fn diag_stream(g: u32, cue: u32) -> KeyedRng {
+    KeyedRng::new(RngKey {
+        game_seed: DIAG_SEED,
+        play_index: g,
+        agent_id: 0,
+        purpose: Purpose::FielderAnticipation,
+        sub_index: 100 + cue,
+    })
+}
+
 /// Spray residual sd of the best linear fit on *noisy* reads, at the Anticipation grades'
 /// timing σ (78, 40, 20.5, 5.4 ms at grades 20, 50, 80, 160) and pitch-location σ.
+/// Each noisy cue draws from its own keyed stream (`diag_stream`), one normal per row in row order.
 fn honest(rows: &[Row], y: &[f64]) {
-    let mut s: u64 = 0x9E37_79B9_7F4A_7C15;
-    let mut gauss = move || {
-        let mut u = || {
-            s ^= s << 13;
-            s ^= s >> 7;
-            s ^= s << 17;
-            ((s >> 11) as f64 + 0.5) / (1u64 << 53) as f64
-        };
-        let (a, b) = (u(), u());
-        (-2.0 * a.ln()).sqrt() * (core::f64::consts::TAU * b).cos()
-    };
     println!("\nhonest reads: spray residual sd (deg) of the best linear fit on noisy reads");
     println!("grade  sigma_t  px only  +face  +depth  +onset(plate)  +face+onset  +onset(release)+type");
     let types: Vec<String> = {
@@ -263,18 +272,22 @@ fn honest(rows: &[Row], y: &[f64]) {
         t.dedup();
         t
     };
-    for (g, st_ms, spx) in [(20, 78.0, 0.293), (50, 40.0, 0.15), (80, 20.5, 0.0768), (160, 5.37, 0.0201)] {
-        let px: Vec<f64> = rows.iter().map(|r| r.cues[0] + spx * gauss()).collect();
-        let face: Vec<f64> = rows.iter().map(|r| r.cues[5] + 1.915 * st_ms * gauss()).collect();
-        let depth: Vec<f64> = rows.iter().map(|r| r.cues[7] + 0.038 * st_ms * gauss()).collect();
-        let onset: Vec<f64> = rows.iter().map(|r| r.cues[8] + st_ms * gauss()).collect();
-        let onset_rel: Vec<f64> = rows.iter().map(|r| r.cues[14] + st_ms * gauss()).collect();
+    for (g, st_ms, spx) in [(20u32, 78.0, 0.293), (50, 40.0, 0.15), (80, 20.5, 0.0768), (160, 5.37, 0.0201)] {
+        let noisy = |cue: u32, col: usize, sd: f64| -> Vec<f64> {
+            let mut r = diag_stream(g, cue);
+            rows.iter().map(|row| row.cues[col] + sd * r.normal()).collect()
+        };
+        let px = noisy(0, 0, spx);
+        let face = noisy(1, 5, 1.915 * st_ms);
+        let depth = noisy(2, 7, 0.038 * st_ms);
+        let onset = noisy(3, 8, st_ms);
+        let onset_rel = noisy(4, 14, st_ms);
         let mut tr = vec![px.clone(), onset_rel];
         for t in types.iter().skip(1) {
             tr.push(rows.iter().map(|r| if &r.ty == t { 1.0 } else { 0.0 }).collect());
         }
         // As built (live.rs): the lead timed with the cue off the ball, 75/40 of the timing σ.
-        let lead_built: Vec<f64> = rows.iter().map(|r| r.cues[8] + st_ms * 75.0 / 40.0 * gauss()).collect();
+        let lead_built = noisy(5, 8, st_ms * 75.0 / 40.0);
         println!(
             "{g:5}  {st_ms:6.1}  {:7.2}  {:5.2}  {:6.2}  {:13.2}  {:11.2}  {:20.2}   as built (face + lead at {:.0} ms): {:.2}",
             ls(&[px.clone()], y).1,
