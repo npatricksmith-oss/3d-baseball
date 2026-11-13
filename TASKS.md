@@ -1,15 +1,45 @@
 # Task List
 
-**Last updated:** 2026-11-12 (fourth session: runner return, branch merges)
+**Last updated:** 2026-11-13 (coordinator run on `coord/review-fixes`: two reviews resolved, rules gaps, R13, pitcher diagnosis)
 The live to-do list for the project. [PLAN.md](PLAN.md) holds decisions and design. This file holds what is next and what is done. Update it at the end of every work session.
 
 Status: `[ ]` not started · `[~]` in progress · `[x]` done · `[?]` needs an owner decision
 
 ---
 
-## Resume here (2026-11-12, fourth session: runner return; all branches merged)
+## Resume here (2026-11-13, coordinator run; branch `coord/review-fixes`, not pushed, not in main)
 
-**First, unresolved review findings:**
+All of this session's work is on `coord/review-fixes` (cut from `origin/main` 638871c). It is **not pushed and not merged into main**; the owner decides. `cargo test --workspace --release`: 136 passed, 0 failed, after every merge.
+
+**First, unresolved:**
+- [Codex rules-passing review](docs/reviews/2026-11-13-codex-rules-passing-review.md) of the rules change below: the first run hit the Codex usage limit before writing anything (it had confirmed identical event-log digests over 512 real games before/after). A rerun was scheduled for 03:10. If the file is missing, rerun Codex on commits `ac6e4d5..0026dd0` (bb_rules and rules-spec only), asking: each new scenario's expected outcome against the OBR rules listed below; regression risk for real games (equal-timestamp touches, a passing out that ends the inning); determinism and event sourcing; spec/code agreement.
+- Owner decisions waiting:
+  1. **Side changes now take 16.5–23 s** of play time (about 3× before), because outgoing players walk all the way off instead of vanishing; stand-in dugouts moved into the foul-line stands (18 m along each line). The alternative is a camera cut that hides the walk-off.
+  2. **Pitcher on bases-empty outfield balls:** proposed that he backs up third (diagnosis Part B below). The spec has no job for this case.
+  3. **Anticipation tops out around grade 80.** With the honest bat cue, 1,024 games, seed 5: no jump 5.34 runs/team-game, grade 20 5.30, 50 5.27, 80 5.16, 160 5.20 (80 vs 160 is within noise, ±0.07). Even a perfect bat read leaves ~18.6° of bat-angle-to-spray scatter. If elite fielders should get a bigger jump they need another honest cue (the batter's timing, the pitch's distance from him); not built.
+  4. `swing_sigma` per grade (7.7/15/29°) was chosen for the old spray read and now means degrees of bat angle; not re-derived.
+
+Done this session (coordinator with worker agents; merges in `coord/review-fixes`):
+- **[Anticipation review](docs/reviews/2026-11-12-codex-anticipation-review.md) resolved:** fielders read the bat's horizontal angle at the actual contact instant (plus noise), not the true launch direction, and map it to spray with their own fixed line (`examples/spray_by_bat_angle.rs`); plans before a fielder's reaction gate step him through the rest of his jump; circular angle fusion, with cues more than 90° from straightaway ignored; the cover-job guarantee was dropped from §5.10. Grade 50 now saves 0.07 runs/team-game against no jump (was 0.16). [Report](docs/calibration/2026-11-12-anticipation-review-fixes.md).
+- **[Reset staging review](docs/reviews/2026-11-12-codex-reset-staging-review.md) resolved (client):** outgoing players get their own 24 figures and walk off to the dugout; the first pitch is requested off the game thread ("Warming up" until ready); short returns sidestep or back-step from the planned move; the return-throw clip phase comes from its release time, so 16× playback no longer skips it. New `-BbStagingLog` flag. Built and checked headlessly; **not watched**.
+- **[Codex coord review](docs/reviews/2026-11-13-codex-coord-review-fixes-review.md) resolved:** no P1/P2; both P3 fixed (the projected jump state is timed by the tick that produced it; the example uses `bb_math::m`).
+- **Rules engine (rules-spec §5.4, §5.5):** overrunning first (OBR 5.09(b)(4)), two runners on a base (5.06(a)(2), (b)(2)), passing a preceding runner (5.09(b)(9)), a forced runner tagged on a base short of his forced base (force-004). Scenarios 64 → 94. Real games unchanged (identical digests over 512 games). **Simulator side not done:** the live sim does not emit `RunnerPosition` samples (so overrun protection never starts and passing is judged from base touches only) and the batter-runner never actually overruns first.
+- **[R13 foul research](docs/research/r13-foul-direction.md):** MLB foul share of contact is ~51%, and ~40% even for well-timed contact; well-timed fouls are mostly steep undercut balls (69–88% foul above 50° launch). The gap is inside the timing window, not at its edges. Owner (2026-11-13): accepted; "ball/bat contact is two curves colliding at weird angles so foul balls should be fairly common."
+- **[Pitcher in the outfield diagnosed](docs/calibration/2026-11-12-pitcher-outfield-diagnosis.md)** (not fixed): a fielder set Idle keeps his own intercept as his target, and with the bases empty the pitcher gets no job on outfield balls; 13.7% of balls in play. `cargo run --release -p bb_game --example pitcher_roam -- 7 1`.
+- CLAUDE.md no longer says the repo has no remote.
+
+Next, in order:
+1. Resolve the Codex rules-passing review.
+2. **Pitcher-in-outfield fix**: Part A (an Idle fielder's target becomes his stop point, `cover_roles`) is a plain bug fix; Part B (pitcher backs up third) waits on owner decision 2. Re-measure runs (idle outfielders will stop drifting toward balls).
+3. **Fouls (O1/R13)**, following the owner's direction: extend `foul_diag` with Statcast-style measures (foul share by launch angle and attack direction, early/late split, bat tilt at contact, swing length) and add a `cage-map` bat-tilt counterfactual (−20/−30/−35°) before changing any calibration.
+4. Live sim emits `RunnerPosition` at ~30 Hz and models an overrun of first.
+5. Watch the client (`bin/play.sh`): reset staging, side-change walk-offs, sidesteps.
+
+Process (owner, 2026-11-13): at most two Claude worker agents at once, and every worker commits after each meaningful step; five at once hit the usage limit and one worker's uncommitted work had to be rescued.
+
+## Previous handoff (2026-11-12, fourth session: runner return; all branches merged)
+
+**First, unresolved review findings** (both resolved 2026-11-13, see above):
 - [Reset staging review](docs/reviews/2026-11-12-codex-reset-staging-review.md) (client, all deferred): (P2) outgoing players vanish at side changes, because the 16-slot actor pool is shared with the next pitch; (P2) the first pitch resolves on the game thread in `BeginPlay`; (P3) very short returns play idle or face backward; (P3) at high playback speed the return-throw clip can be skipped.
 - The Anticipation review below (uncommitted in the main checkout, Resolution open; another session owns it).
 
@@ -39,7 +69,7 @@ Done this session (owner request: fielders "get a jump" by anticipating from pit
 - **Anticipation** (`cdd473c`, agent-models §5.10): the fielder combines the pitch location and batter's side (a prior) with a read of the swing at contact, and starts toward the side he expects at contact instead of standing through his reaction time. Leaning on location alone made fielders *worse* (7° of signal against 22° of scatter); the swing read is what pays. 2,048 games: no jump 5.35 runs/team-game, grade 20 5.31, 50 5.22, 80 5.03. `sim-cli games --anticipation <grade>` / `--no-jump`.
 
 Owner report (2026-11-12, late): "the pitcher looks like he's skating or flying back to the mound after the play." Cause: the client's between-pitch staging held the reset to 4.5 s, so a pitcher far from the mound was moved at distance / 4.5 s: median 5.5 m/s, up to 16 m/s over three games (seeds 7–9), faster than the jog clip plays and, above 14 m/s, shown in the idle pose. **Fixed in the client** (`dc870d7`, merged): walk / easy jog, quickening to at most 5 m/s, with acceleration at both ends; the reset lasts as long as the slowest returner needs (6–7 s for a pitcher 20–25 m out, ~16 s from 70 m). Compiled; not yet watched. Reviewed by Codex together with the earlier staging work: findings deferred (see "Resume here").
-- **Pitcher in the outfield (sim bug, open):** on fly balls and hits to the outfield the pitcher ends the play sprinting (7.9 m/s) as far as 50–70 m out, e.g. (54, 55) on "Fly out to right" (seed 7, play 1) and (21, 86) (seed 7, play 195). He is neither the called chaser nor at a base backup spot, so some other job (relay, re-call, or `back_up_throw`'s fallback) sends him there. A real pitcher backs up third or home. Find which role, then fix the planner.
+- **Pitcher in the outfield (sim bug, open; diagnosed 2026-11-13, [note](docs/calibration/2026-11-12-pitcher-outfield-diagnosis.md)):** on fly balls and hits to the outfield the pitcher ends the play sprinting (7.9 m/s) as far as 50–70 m out, e.g. (54, 55) on "Fly out to right" (seed 7, play 1) and (21, 86) (seed 7, play 195). He is neither the called chaser nor at a base backup spot, so some other job (relay, re-call, or `back_up_throw`'s fallback) sends him there. A real pitcher backs up third or home. Find which role, then fix the planner.
 
 Next, in the order a viewer would notice:
 - **Watch it in the client** (`bin/play.sh`): fielders now carry momentum, plant after catches, curve into turns, and move at contact. Nothing in the Unreal client changed; check it still looks right.
@@ -95,7 +125,7 @@ Numbers (`sim-cli games --n 512 --seed 2`), 2026-11-12 after the review fixes: 5
 
 ## Owner decisions (from the 2026-10-31 overnight session)
 
-- [?] **O1. Chase rate.** Average hitters chase 11.6% (MLB 29%). The owner approved trying perceptual overconfidence (2026-11-11); it was implemented, measured, and backed out: even total overconfidence gives 18% and wrecks contact. Diagnosis in [docs/calibration/2026-11-11-chase-diagnosis.md](docs/calibration/2026-11-11-chase-diagnosis.md): pitch locations are fine and the batter's strike belief is already uncertain near the edge; the swing decision is what is too sharp, and the low foul share (21% vs 50%) is what keeps K% and pitches/PA low. The owner chose to fix fouls first (2026-11-11). **That is not done:** [docs/calibration/2026-11-11-foul-share-diagnosis.md](docs/calibration/2026-11-11-foul-share-diagnosis.md) shows no noise setting gets the foul share past ~30% (timing errors turn into whiffs, glancing contact stays forward), so the gap is structural. Next: get the MLB foul-direction split and oblique-collision data (new research item R13), then check the bat's angle at contact and its time through the zone in the swing model. Discipline's grade-50 values (about c_D 0.5, b_D 0.9; currently 1.0, 0.0) stay parked behind that. `cargo run --release -p bb_game --example foul_diag -- 3000 [timing ms] [bat-control cm] [K_perception]`. Tools: `sim-cli pa` prints swing rate by miss distance; `cargo run --release -p bb_game --example chase_diag -- 3000 [c_D] [b_D]`.
+- [?] **O1. Chase rate.** Average hitters chase 11.6% (MLB 29%). The owner approved trying perceptual overconfidence (2026-11-11); it was implemented, measured, and backed out: even total overconfidence gives 18% and wrecks contact. Diagnosis in [docs/calibration/2026-11-11-chase-diagnosis.md](docs/calibration/2026-11-11-chase-diagnosis.md): pitch locations are fine and the batter's strike belief is already uncertain near the edge; the swing decision is what is too sharp, and the low foul share (21% vs 50%) is what keeps K% and pitches/PA low. The owner chose to fix fouls first (2026-11-11). **That is not done:** [docs/calibration/2026-11-11-foul-share-diagnosis.md](docs/calibration/2026-11-11-foul-share-diagnosis.md) shows no noise setting gets the foul share past ~30% (timing errors turn into whiffs, glancing contact stays forward), so the gap is structural. R13 is done ([note](docs/research/r13-foul-direction.md), 2026-11-13): the gap is well-timed steep contact that MLB hitters foul off, not timing noise. Next: check the bat's angle at contact and its time through the zone in the swing model. Discipline's grade-50 values (about c_D 0.5, b_D 0.9; currently 1.0, 0.0) stay parked behind that. `cargo run --release -p bb_game --example foul_diag -- 3000 [timing ms] [bat-control cm] [K_perception]`. Tools: `sim-cli pa` prints swing rate by miss distance; `cargo run --release -p bb_game --example chase_diag -- 3000 [c_D] [b_D]`.
 - [x] **O2. Interim knobs: accepted by the owner (2026-11-11)** as the working point: `K_perception` 2.25, `K_command` 0.8, `K_swingplane` 1.0 (`Knobs::calibrated_m3()`).
 - [x] **O3. Spec deviations made overnight: accepted by the owner (2026-11-11).** Full-state RK4 with spin decay inside the ODE (physics-spec §5.1); frictionless-impulse energy-guard fallback (physics-spec §8.1); event-log frame identifiers `BBEH`/`BBEV`/`BBEF` (data-formats §4.1); rolling resistance 0.22/0.28 (`bb_physics::ground`; physics-spec §9.1 now lists them); the batter's 10-state filter (agent-models §3.3); the pursuit-limit and persistent-bias perception terms; the scoreboard as a public channel for pitch-type learning (agent-models §3.8 [C]).
 - [?] M0.9 Owner review: **the Unreal spike passes every unattended check (2026-11-11, [docs/unreal-spike.md](docs/unreal-spike.md))**: ~300 fps offscreen, 2.4 GB, 6 s rebuilds. Client v0 plays full games with capsules, a bat, two cameras and play-by-play. Still needed from the owner: run `client/run.sh`, confirm the editor window opens, and judge watchability; then D6 can be marked confirmed.
@@ -152,7 +182,7 @@ Numbers (`sim-cli games --n 512 --seed 2`), 2026-11-12 after the review fixes: 5
 - [ ] R9. Literature pass on interception and time-to-contact perception (σ_ang, Weber fraction, blackout, the 1.2 rad/s pursuit limit, the 10% persistent share)
 - [ ] R10. Refresh every [R] reference value in calibration-targets against the latest full season
 - [ ] R11. Verify the OBR rule numbers and MLB interpretations cited in rules-spec
-- [ ] R13. MLB fouls by direction (pull side, opposite side, backward) and a published oblique bat-ball collision data set (does glancing contact grip or slide?), for the foul-share gap (calibration report 2026-11-11)
+- [x] R13 ([docs/research/r13-foul-direction.md](docs/research/r13-foul-direction.md), 2026-11-13; the pull/opposite split stays open: Statcast has no foul coordinates). MLB fouls by direction (pull side, opposite side, backward) and a published oblique bat-ball collision data set (does glancing contact grip or slide?), for the foul-share gap (calibration report 2026-11-11)
 - [x] R12. Rules-spec §15 item 2 additions are in the M0.5 schemas (2026-10-31)
 
 ### M0 leftovers
