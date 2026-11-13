@@ -190,3 +190,25 @@ current code the Idle fielders keep `at`, 60–90 m away, so this also fails.
 An end-to-end check is the example itself. After the fix, `pitcher_roam 7 1` should flag
 none of plays 1 and 195. `pitcher_roam 1 200` should report fewer than 0.5% flagged, leaving
 roughly the 28 balls-behind-home `Chase` plays.
+
+## Part A applied (2026-11-13)
+
+`cover_roles` now sets an `Idle` fielder's target to `stop_point`, and the dead `let _ = tgt;`
+is gone (branch `fix/idle-fielder-target`). The claims above hold: the only reader of an idle
+fielder's `target` is `fielder_step`. The ground-ball break reads `own`, which is saved before
+`cover_roles`, and the relay check reads `t_int` and `belief`. A capture (`try_captures`) does
+not read `target`, but it does not check roles either, and that matters for the run
+environment (below). The unit test `idle_fielders_do_not_chase_the_ball` fails on the old
+code.
+
+`pitcher_roam 1 200`: 2,030 of 14,777 balls in play flagged (13.7%) at base `760afe8`, 39 of
+14,856 (0.3%) after. All 39 are `Chase` plays: 35 balls hit behind home and 4 loose throws.
+`pitcher_roam 7 1`: 8 flagged before, 0 after. Play numbers have shifted since 638871c, so
+seed 7's play 195 no longer exists; play 1 is no longer flagged.
+
+Side effect: runs went from 5.27 to 5.48 per team-game, almost all of it from pop-ups (hit
+rate .005 to .044). Idle infielders running at their own intercepts had been catching shallow
+pop-ups that the outfielder who called them misjudged. See
+docs/calibration/2026-11-13-idle-fielder-target.md. Part B (the pitcher's job on a
+bases-empty outfield ball) is not applied and waits on the owner. Until then the pitcher
+stands near the mound on those plays.
