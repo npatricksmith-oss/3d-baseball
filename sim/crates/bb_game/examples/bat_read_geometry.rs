@@ -39,9 +39,10 @@ fn main() {
             let h = 1e-5;
             rate.push(((yaw(t_c + h) - yaw(t_c - h)) / (2.0 * h)).abs().to_degrees());
             let a = sw.at(t_c).axis;
-            tilt.push(a.z.asin().to_degrees());
+            tilt.push(bb_math::m::asin(a.z).to_degrees());
             let c = st.r;
-            rad.push(((c.x - sw.pivot.x).powi(2) + (c.y - sw.pivot.y).powi(2)).sqrt());
+            let (dx, dy) = (c.x - sw.pivot.x, c.y - sw.pivot.y);
+            rad.push((dx * dx + dy * dy).sqrt());
             // A change of yaw moves the barrel horizontally, at right angles to the bat's
             // horizontal direction.
             let ah = Vec3::new(a.x, a.y, 0.0).normalized();

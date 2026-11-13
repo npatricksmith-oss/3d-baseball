@@ -58,4 +58,13 @@ The two requested 1,024-game run totals reproduced exactly to the reported preci
 
 ## Resolution
 
-Open.
+**P3 (diagnostic examples' math and RNG): fixed** in `d329a33` (diagnostic agent id corrected from 0 to 0xFFFF in `66e03a7`, since 0 is the away team's roster slot 0) on `fix/example-determinism`.
+
+- `spray_cues.rs` and `bat_read_geometry.rs` now call `bb_math::m::asin` (and `m::atan2`, as before) instead of inherent `asin`. A grep of both files for other native transcendentals found only `powi(2)` in `bat_read_geometry.rs`, now an explicit product; `sqrt` stays inherent (IEEE correctly rounded, CLAUDE.md invariant 5).
+- `honest()` no longer has its own xorshift generator or inherent `ln`/`cos`. Each noisy cue at each grade draws from its own `KeyedRng` stream (`KeyedRng::normal`, the libm Box–Muller), one normal per row in row order. The key cannot collide with a production draw: game seed `DIAG_SEED = 0xD1A6_5EED_5C0E_0001`, reserved for the diagnostic (the examples' games use seeds 0..n); agent id 0xFFFF, which no agent has (side 0xFF is no side in data-formats §2.1); play index = the grade; purpose `FielderAnticipation`; sub-indices 100–105, away from production's 0, 1 and 2. No new `Purpose` was added, so the registry and data-formats are unchanged. The key layout is documented at `DIAG_SEED` in the example.
+
+**Regeneration** (`b9d584d`, then `66e03a7` after the agent-id correction; the numbers below are from `66e03a7`). `bat_read_geometry` prints exactly the same output before and after (32 games: 1,915°/s, sd 136°/s), so `2026-11-13-bat-read-derivation.md` needed no change. `spray_cues -- 200` prints the same perfect-read tables; only the noisy-read (`honest()`) table moved, by sampling noise from the new draws: at most 0.08° in any cell. The as-built column is now 22.52/22.35/22.00/20.19° at grades 20/50/80/160, compared with 22.54/22.36/22.06/20.20° before. The headline is now 22.16° → 22.00° at grade 80 and 22.40° → 22.35° at grade 50, compared with 22.18° → 22.06° and 22.39° → 22.36°. `2026-11-13-anticipation-cue.md` has the new table, a regeneration note and the two sentences that quote these numbers. No conclusion changed.
+
+`cargo test --workspace --release -j 4` passes after the change: 141 tests, no failures.
+
+**Left for the owner/coordinator:** `docs/agent-models.md` §5.10 "Honest information" (l. 471) still quotes the earlier noisy-read numbers (22.36 → 22.18 → 22.06° at grade 80; 22.44 → 22.39 → 22.36° at grade 50). This worker was not allowed to edit that spec. The regenerated values are 22.33 → 22.16 → 22.00° and 22.42 → 22.40 → 22.35°. The difference is sampling noise only.
