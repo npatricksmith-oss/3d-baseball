@@ -1,6 +1,6 @@
 //! `sim-cli game` and `sim-cli games` (M4 walking skeleton).
 
-use bb_game::game::{GameResult, simulate_game};
+use bb_game::game::{GameResult, simulate_game_fielders};
 use clap::Args;
 
 #[derive(Args)]
@@ -64,6 +64,12 @@ pub struct GamesArgs {
     n: u64,
     #[arg(long, default_value_t = 1)]
     seed: u64,
+    /// Every fielder's `Anticipation` grade (20–80; default: the average fielder, 50).
+    #[arg(long)]
+    anticipation: Option<f64>,
+    /// Fielders get no jump: they wait for their read of the ball (agent-models §5.10 off).
+    #[arg(long)]
+    no_jump: bool,
 }
 
 pub fn games(a: GamesArgs) {
@@ -71,13 +77,22 @@ pub fn games(a: GamesArgs) {
     let chunk = (a.n as usize).div_ceil(16);
     let seeds: Vec<u64> = (0..a.n).map(|i| a.seed * 1_000_003 + i).collect();
     let rs: Vec<GameResult> = std::thread::scope(|s| {
-        let hs: Vec<_> = seeds.chunks(chunk.max(1)).map(|c| s.spawn(move || c.iter().map(|&sd| simulate_game(sd)).collect::<Vec<_>>())).collect();
+        let mut fattrs: [bb_game::play::FielderAttrs; 9] = core::array::from_fn(bb_game::play::FielderAttrs::average);
+        for f in fattrs.iter_mut() {
+            if let Some(g) = a.anticipation {
+                *f = f.with_anticipation(g);
+            }
+            if a.no_jump {
+                f.jump_gain = 0.0;
+            }
+        }
+        let hs: Vec<_> = seeds.chunks(chunk.max(1)).map(|c| s.spawn(move || c.iter().map(|&sd| simulate_game_fielders(sd, fattrs)).collect::<Vec<_>>())).collect();
         hs.into_iter().flat_map(|h| h.join().unwrap()).collect()
     });
     let n = rs.len() as f64;
     let sum = |f: &dyn Fn(&GameResult) -> f64| rs.iter().map(f).sum::<f64>();
     let pa = sum(&|r| r.pa as f64);
-    println!("{} games, average players, interim M3 knobs, reference park 330/400/330", rs.len());
+    println!("{} games, average players{}, interim M3 knobs, reference park 330/400/330", rs.len(), match (a.anticipation, a.no_jump) { (_, true) => " (no jumps)".to_string(), (Some(g), _) => format!(" (Anticipation {g})"), _ => String::new() });
     println!("runs/team-game {:.2}", sum(&|r| (r.runs[0] + r.runs[1]) as f64) / (2.0 * n));
     println!("PA/team-game {:.1}, pitches/game {:.0}", pa / (2.0 * n), sum(&|r| r.pitches as f64) / n);
     println!(

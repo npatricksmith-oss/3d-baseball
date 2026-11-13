@@ -213,6 +213,7 @@ Every attribute has a **physical or cognitive meaning, a unit, and one owning me
 | | `Adjustability` | Mid-swing correction rate | Late swing changes |
 | Fielder/Runner | `Speed`, `Acceleration`, `Agility` | m/s, m/s², turn rate | Movement |
 | | `Reaction` | ms after contact | Fielding perception |
+| | `Anticipation` | Reads of the pitch location and the swing before the ball is off the bat | The jump (agent-models §5.10; owner request 2026-11-12) |
 | | `Hands` | Glove-placement σ | Capture |
 | | `ArmStrength`, `ArmAccuracy`, `Transfer` | m/s, angular σ, s | Throws |
 | Catcher | `Blocking` (pop time is derived from `Transfer` and `ArmStrength`) | Glove/body reach on balls in dirt | Wild pitches, passed balls; steals via transfer and throw |

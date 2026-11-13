@@ -43,6 +43,15 @@ pub struct FielderAttrs {
     pub tau_read: f64,
     /// Lateral read error at the start, m; depth error is `DEPTH_STRETCH` times larger.
     pub read_sigma0: f64,
+    /// `Anticipation` (agent-models §5.10): σ of his read of where the pitch crosses the
+    /// plate (horizontal), m.
+    pub antic_sigma: f64,
+    /// `Anticipation`: σ of his read of the swing at contact, as the direction the bat sends
+    /// the ball, rad.
+    pub swing_sigma: f64,
+    /// How hard he commits to his read before he has seen the ball off the bat (1: as the
+    /// odds justify; 0: he waits, no jump), [E].
+    pub jump_gain: f64,
 }
 
 impl FielderAttrs {
@@ -63,9 +72,29 @@ impl FielderAttrs {
             transfer: if outfield { 0.85 } else { 0.65 },
             tau_read: 0.6,
             read_sigma0: if outfield { 3.0 } else { 0.3 },
+            antic_sigma: ANTIC_SIGMA_50,
+            swing_sigma: SWING_SIGMA_50_DEG.to_radians(),
+            jump_gain: 1.0,
+        }
+    }
+
+    /// The same fielder with `Anticipation` at `grade` (20–80 scale, agent-models §10): both
+    /// read σs by the ρ rule (less is better).
+    pub fn with_anticipation(self, grade: f64) -> Self {
+        Self {
+            antic_sigma: bb_agents::attributes::ratio_from_grade(grade, ANTIC_SIGMA_50, ANTIC_RHO),
+            swing_sigma: bb_agents::attributes::ratio_from_grade(grade, SWING_SIGMA_50_DEG, ANTIC_RHO).to_radians(),
+            ..self
         }
     }
 }
+
+/// `Anticipation` at grade 50: pitch-location read σ, m [E].
+pub const ANTIC_SIGMA_50: f64 = 0.15;
+/// `Anticipation` at grade 50: swing read σ, as a direction, degrees [E].
+pub const SWING_SIGMA_50_DEG: f64 = 15.0;
+/// Ratio per 10 grades for both read σs (less is better), [E].
+pub const ANTIC_RHO: f64 = 1.25;
 
 const DEPTH_STRETCH: f64 = 3.0;
 /// Distance at which `read_sigma0` applies, m [E].

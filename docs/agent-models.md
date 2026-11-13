@@ -448,6 +448,23 @@ Coordination emerges from **calls**, not a central oracle [C]:
 
 Pre-pitch home positions come from alignment presets (normal, corners in, double-play depth, and so on; PLAN §10.1) stored as per-position offsets by batter handedness [data file], or from custom positions set by the manager. Fielders reach their positions between plays (no simulation of that walk).
 
+### 5.10 Anticipation: the jump (owner request, built 2026-11-12)
+
+The owner asked that fielders get a jump on the ball, anticipating where it will be hit from the pitch location and the batter's side, with a rating for it alongside range. `Anticipation` is that rating. Range is not a separate attribute: it comes out of `Speed`, `Acceleration`, `Agility`, `Reaction` and `Anticipation` together.
+
+**Two reads, combined (`live.rs`, `jump_at_contact`):**
+- **Before contact: the pitch.** He reads where the pitch crosses the plate (horizontal, σ `antic_sigma`, purpose `FielderAnticipation` sub-index 0). With the batter's side it gives a prior on the ball's direction: the batter's typical pull (5° to his pull side, `MEAN_PULL_DEG`) plus the shift for that location (`anticipated_pull_deg`: inside pitches pulled up to 7.7° more, outside ones up to 6.5° less; means by 10 cm bin from `examples/spray_by_location.rs`, a belief about the contact model), scattered by 22° (`SPRAY_SCATTER_DEG`).
+- **At contact: the swing.** He reads the bat's angle as the direction it sends the ball (σ `swing_sigma`, sub-index 1): a noisy look at physical state, as in §5.1.
+- He combines them (precision-weighted). If the estimate puts the ball within 20° (infield) or 25° (outfield) of his line from home but off to one side (`JUMP_ZONE_DEG`), he starts toward that side across his line, at top speed × min(1, offset / (2 σ_posterior)) (`JUMP_FULL_SIGMAS`) × `jump_gain` (1). A ball at him or well away from him, and he stays set (so a man with a cover job is not pulled off it). The pitcher and catcher do not jump.
+
+**Movement:** from contact until his reaction time ends he goes for that velocity with the speed law (§5.3); then he reads the ball (§5.1) and plans from where he is and how he is moving, so a misread costs the stop and turn of §5.3.
+
+**Why the swing as well:** fielders leaning on the pitch location alone did worse than fielders who waited (2,048 games: 5.35 runs per team-game with no lean, 5.36 average, 5.45 at grade 80), and shading position before the pitch did too. Location moves the expected direction only about 7° against 22° of scatter, so for a ball in his area the side he leans to is right only a little more than half the time, and a wrong lean (carried through the reaction time, then braked at 6 m/s²) costs more than a right one gains. Most of the scatter comes from the swing's timing, which the bat shows.
+
+**Measured (2,048 games, seed 5), every fielder at one grade:** no jump 5.35 runs per team-game (GB hit .408); Anticipation 20: 5.31 (.406); 50: 5.22 (.399); 80: 5.03 (.384). `sim-cli games --anticipation <grade>` / `--no-jump`.
+
+**Not built yet:** batters of both sides in games (every game batter is right-handed, so the handedness half is exercised only by the unit test `fielders_jump_toward_the_side_they_read`); depth anticipation (the swing also hints at the launch angle); pitch type as a cue (it shifts spray by under 1.5° in the sim).
+
 ---
 
 ## 6. Runners and Base Coaches
@@ -564,6 +581,7 @@ Defaults for an MLB-like population. **All values [E]** unless marked; `calibrat
 | `SpinRecognition` | σ_s0; τ_s | (type-likelihood units); s | 1.0; 0.08 | ρ 1.25 (both) | 0.51; 0.041 | 1.95; 0.156 |
 | `Discipline` | c_D; b_D | —; logits | 0.5; +0.9 (owner-directed calibration, 2026-11-11; were 1.0; 0.0) | σ 0.15; σ 0.25 | 0.95; +0.15 | 0.05; +1.65 |
 | `ReadSkill` | τ_read | s | 0.6 | ρ 1.2 | 0.35 | 1.04 |
+| `Anticipation` (§5.10) | σ of the pitch-location read; σ of the swing read | m; deg | 0.15; 15 | ρ 1.25 (both) | 0.077; 7.7 | 0.29; 29 |
 | `JumpRead` | T_jump | s | 0.15 | ρ 1.12 | 0.11 | 0.21 |
 | `BaserunningIQ` | σ_BRIQ | s | 0.15 | ρ 1.2 | 0.087 | 0.26 |
 | `FieldingIQ` | σ_FIQ | s | 0.12 | ρ 1.2 | 0.069 | 0.21 |

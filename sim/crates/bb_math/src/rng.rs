@@ -29,6 +29,8 @@ pub enum Purpose {
     RunnerPerception = 8,
     SurfaceBounce = 9,
     AgentPolicy = 10,
+    /// A fielder's read of the pitch location before contact (agent-models §5.10).
+    FielderAnticipation = 11,
 }
 
 /// The full key of one random stream.

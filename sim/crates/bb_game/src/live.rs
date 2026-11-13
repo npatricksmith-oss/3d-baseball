@@ -126,6 +126,17 @@ const BAG_REACH_FRAC: f64 = 0.9;
 const READ_VEL_FRAC: f64 = 0.04;
 /// Below this speed a fielder reaching his spot simply stops on it (one tick's step), m/s [E].
 const SETTLE_V: f64 = 0.5;
+/// The batter's typical pull: how far to his pull side of straightaway his balls in play go
+/// on average, degrees (right-handers −5.0° in `examples/spray_by_location.rs`) [E].
+const MEAN_PULL_DEG: f64 = 5.0;
+/// The scatter of balls in play about the direction a pitch location suggests, degrees
+/// (σ within a 10 cm bin, `examples/spray_by_location.rs`) [E].
+const SPRAY_SCATTER_DEG: f64 = 22.0;
+/// A fielder jumps only for a ball he expects within this angle of his line from home,
+/// degrees (infield, outfield) [E].
+const JUMP_ZONE_DEG: [f64; 2] = [20.0, 25.0];
+/// He commits fully when he expects the ball this many of his σs to one side, [E].
+const JUMP_FULL_SIGMAS: f64 = 2.0;
 /// A fielder's braking deceleration, m/s² [E].
 const BRAKE: f64 = 6.0;
 /// Time to spare a fielder needs to believe he has before he calls a ball in the air, s [E].
@@ -173,6 +184,8 @@ struct Fielder {
     pos: Vec3,
     /// Velocity on the ground, m/s.
     vel: Vec3,
+    /// The velocity he goes for until he has read the ball (his jump, agent-models §5.10).
+    jump: Vec3,
     role: Role,
     target: Vec3,
     next_plan: f64,
@@ -238,6 +251,12 @@ pub struct LiveInput<'a> {
     pub fattrs: [FielderAttrs; 9],
     /// Where the batter stands in his box (ground point). He runs out of it: see `Sim::runner_pos`.
     pub batter_box: Vec3,
+    /// The batter's side of the plate (public).
+    pub bats: bb_observe::Hand,
+    /// Where the pitch reached the batter, horizontally (sim x, m): what fielders read,
+    /// with noise, before contact to anticipate the ball (agent-models §5.10). `None`: no
+    /// pitch was seen (lab set-ups), so nobody leans.
+    pub pitch_x: Option<f64>,
     pub seed: u64,
     pub play: u32,
     /// Record ball and actor tracks (timelines and visualization only).
@@ -404,6 +423,62 @@ fn typical_batted_spin_rpm(la: f64) -> f64 {
     RPM[k] + (RPM[k + 1] - RPM[k]) * f
 }
 
+/// How much farther toward the batter's pull side than his average a ball is hit, by where
+/// the pitch is (agent-models §5.10): degrees of spray (+ = pulled more), against the pitch's
+/// distance toward the batter from the middle of the plate, m (+ = inside). A fielder's
+/// belief about the contact model: means by 10 cm bin from `examples/spray_by_location.rs`
+/// (96 games of right-handed batters, 2026-11-12) less the overall mean (−5.0°), linear
+/// between bin centres, flat beyond the last. Refit when the contact model changes.
+fn anticipated_pull_deg(x_inside: f64) -> f64 {
+    const X: [f64; 7] = [-0.30, -0.20, -0.10, 0.0, 0.10, 0.20, 0.30];
+    const PULL: [f64; 7] = [-6.5, -4.5, -3.6, 0.0, 3.4, 7.2, 7.7];
+    let x = x_inside.clamp(X[0], X[6]);
+    let k = (((x - X[0]) / 0.10).floor() as usize).min(5);
+    let f = (x - X[k]) / 0.10;
+    PULL[k] + (PULL[k + 1] - PULL[k]) * f
+}
+
+/// A fielder's jump (agent-models §5.10): the velocity he goes for between contact and the
+/// end of his reaction time, before he has read the ball itself. He combines two reads:
+/// before contact, where the pitch is (his read of its location, `antic_sigma`) and the
+/// batter's side give a prior on the ball's direction (the batter's typical pull plus
+/// [`anticipated_pull_deg`], scattered by `SPRAY_SCATTER_DEG`); at contact, the swing (the
+/// direction the bat's angle sends the ball, read with `swing_sigma`). If the combined
+/// estimate puts the ball within `JUMP_ZONE_DEG` of his line from home but off to one side,
+/// he starts toward that side across his line, committing in proportion to how far off it
+/// is against his uncertainty (fully at `JUMP_FULL_SIGMAS`). A ball at him, or well away
+/// from him, and he stays set. The pitcher and catcher do not jump. Reads use purpose
+/// `FielderAnticipation` (sub-index 0: pitch location; 1: swing).
+fn jump_at_contact(inp: &LiveInput, i: usize, home: Vec3) -> Vec3 {
+    let a = &inp.fattrs[i];
+    let Some(px) = inp.pitch_x else { return Vec3::ZERO };
+    if i < 2 || a.jump_gain <= 0.0 {
+        return Vec3::ZERO;
+    }
+    let mut r0 = rng(inp.seed, inp.play, inp.fielders[i], Purpose::FielderAnticipation, 0);
+    let seen_x = px + a.antic_sigma * r0.truncated_normal(4.0);
+    let right = inp.bats == bb_observe::Hand::Right;
+    // A right-handed batter stands on the −x side: inside is −x, and pulling is −spray.
+    let pull = (MEAN_PULL_DEG + anticipated_pull_deg(if right { -seen_x } else { seen_x })).to_radians();
+    let prior = if right { -pull } else { pull };
+    let mut r1 = rng(inp.seed, inp.play, inp.fielders[i], Purpose::FielderAnticipation, 1);
+    let seen_swing = m::atan2(inp.ball.v.x, inp.ball.v.y) + a.swing_sigma * r1.truncated_normal(4.0);
+    let (sp, ss) = (SPRAY_SCATTER_DEG.to_radians(), a.swing_sigma);
+    let k = sp * sp / (sp * sp + ss * ss);
+    let est = prior + (seen_swing - prior) * k;
+    let s_post = sp * ss / m::sqrt(sp * sp + ss * ss);
+    let phi = m::atan2(home.x, home.y);
+    let off = est - phi;
+    let zone = if i >= 6 { JUMP_ZONE_DEG[1] } else { JUMP_ZONE_DEG[0] }.to_radians();
+    if off.abs() > zone {
+        return Vec3::ZERO;
+    }
+    let commit = a.jump_gain * (off.abs() / (JUMP_FULL_SIGMAS * s_post)).min(1.0);
+    // Toward larger spray angle (toward right field) across his line from home.
+    let across = Vec3::new(m::cos(phi), -m::sin(phi), 0.0);
+    across * (off.signum() * a.speed * commit)
+}
+
 /// How far a fielder is still short of `goal` (less `reach`) after `t` seconds of running
 /// at it from his current motion (agent-models §5.2: reach from the movement model, not a
 /// straight line). In the goal's frame his velocity is u toward it and w across. With no
@@ -465,8 +540,17 @@ fn run_time_to(fd: &Fielder, goal: Vec3, reach: f64) -> f64 {
 /// So a reversal means a full stop, and a sharp turn at speed a curve.
 /// Not yet reacting, or on the ground after a dive: unchanged.
 fn fielder_step(fd: &Fielder, t: f64, t_contact: f64) -> (Vec3, Vec3) {
-    if t < t_contact + fd.a.reaction || (fd.dove && t < fd.ready_at) {
+    if fd.dove && t < fd.ready_at {
         return (fd.pos, fd.vel);
+    }
+    // Until he has read the batted ball he goes with his jump (agent-models §5.10: the speed
+    // law toward it from contact); with none, he stays set.
+    if t < t_contact + fd.a.reaction {
+        if t < t_contact || (fd.jump == Vec3::ZERO && fd.vel == Vec3::ZERO) {
+            return (fd.pos, fd.vel);
+        }
+        let vel = fd.vel + (fd.jump - fd.vel) * (DT / fd.a.tau_a);
+        return (fd.pos + vel * DT, vel);
     }
     let to = Vec3::new(fd.target.x - fd.pos.x, fd.target.y - fd.pos.y, 0.0);
     let d = to.norm();
@@ -1904,6 +1988,7 @@ fn new_sim<'a>(inp: &'a LiveInput<'a>, st: &'a mut RulesState) -> Sim<'a> {
                 a: inp.fattrs[i],
                 pos: home[i],
                 vel: Vec3::ZERO,
+                jump: jump_at_contact(inp, i, home[i]),
                 role: Role::Idle,
                 target: home[i],
                 next_plan: 0.0,
@@ -2159,6 +2244,8 @@ mod tests {
             fielders: core::array::from_fn(|i| 0x0180 | (i as u16 + 1)),
             fattrs,
             batter_box: Vec3::new(-0.95, 0.30, 0.0),
+            bats: bb_observe::Hand::Right,
+            pitch_x: None,
             seed: 11,
             play: 3,
             record: false,
@@ -2457,6 +2544,73 @@ mod tests {
         }
         let rms = (sq / n).sqrt();
         assert!(worst_early > -0.35 && worst_late < 0.35 && rms < 0.15, "estimate − step: worst {worst_early:+.3} / {worst_late:+.3} s, rms {rms:.3} s");
+    }
+
+    // agent-models §5.10, worked by hand from the home positions (P 0°, 1B 38°, 2B 13°,
+    // SS −13°, 3B −36°, LF −30°, CF 0°, RF 30° of spray). With a perfect read of the swing
+    // the fielder expects the ball where it goes. A right-hander's ball at −20°: the third
+    // baseman (16° to his right-field side, inside his 20° zone) and left fielder (10°) start
+    // toward right field; the shortstop (7°) and centre fielder (20°, inside the outfield's
+    // 25°) toward left field; second (33° away), first and right field stay set; so do the
+    // pitcher and catcher. Each who goes, goes at full speed (perfect read: no doubt). A
+    // left-hander's ball at +20° is the mirror image. With no read of the swing at all, a
+    // right-hander's pitch down the middle leaves only the prior (his typical pull, −5°,
+    // σ 22°): the shortstop, 8° off it, starts toward right field at 8/(2·22) of full speed.
+    #[test]
+    fn fielders_jump_toward_the_side_they_read() {
+        let fx = fixture(&[]);
+        let mut inp = input(&fx, vec![RunnerIn { id: fx.st.batter, base: 0, speed: 8.2 }]);
+        for a in inp.fattrs.iter_mut() {
+            a.antic_sigma = 0.0;
+            a.swing_sigma = 1e-9;
+        }
+        inp.pitch_x = Some(0.0);
+        let home = home_positions();
+        let toward_rf = |i: usize| {
+            let phi = home[i].x.atan2(home[i].y);
+            Vec3::new(phi.cos(), -phi.sin(), 0.0)
+        };
+        let jumps = |inp: &LiveInput| -> Vec<f64> { (0..9).map(|i| jump_at_contact(inp, i, home[i]).dot(toward_rf(i)) / inp.fattrs[i].speed).collect() };
+        let ball = |deg: f64| BallState { r: Vec3::new(0.0, 0.5, 1.0), v: Vec3::new(deg.to_radians().sin(), deg.to_radians().cos(), 0.2) * 35.0, w: Vec3::ZERO };
+        inp.ball = ball(-20.0);
+        let rhb = jumps(&inp);
+        let expect_r = [0.0, 0.0, 0.0, 0.0, 1.0, -1.0, 1.0, -1.0, 0.0];
+        inp.bats = bb_observe::Hand::Left;
+        inp.ball = ball(20.0);
+        let lhb = jumps(&inp);
+        let expect_l = [0.0, 0.0, -1.0, 1.0, 0.0, 0.0, 0.0, 1.0, -1.0];
+        for i in 0..9 {
+            assert!((rhb[i] - expect_r[i]).abs() < 1e-6, "right-hander, fielder {i}: {:.3}", rhb[i]);
+            assert!((lhb[i] - expect_l[i]).abs() < 1e-6, "left-hander, fielder {i}: {:.3}", lhb[i]);
+        }
+        inp.bats = bb_observe::Hand::Right;
+        for a in inp.fattrs.iter_mut() {
+            a.swing_sigma = 1e6;
+        }
+        let blind = jumps(&inp);
+        assert!((blind[5] - 8.0 / 44.0).abs() < 1e-3, "shortstop on the prior alone: {:.4}", blind[5]);
+    }
+
+    // agent-models §5.10: a lean is a bet. A grounder passes 4 m to the shortstop's left; a
+    // grade-80 lean (2 m/s) toward it gets him there sooner than standing, one away from it
+    // later (the movement laws of §5.3, through the planner's own reach model). By hand:
+    // braking 2 m/s at 6 m/s² takes 0.33 s and loses 0.33 m, where from rest he would have
+    // covered 0.54 m, so he is about 0.9 m behind at several m/s: hundredths to tenths.
+    #[test]
+    fn a_lean_the_right_way_gains_ground_and_the_wrong_way_costs() {
+        let fx = fixture(&[]);
+        let inp = input(&fx, vec![RunnerIn { id: fx.st.batter, base: 0, speed: 8.2 }]);
+        let mut st = fx.st.clone();
+        let mut sim = new_sim(&inp, &mut st);
+        sim.t = inp.t_contact + sim.f[SS].a.reaction;
+        sim.f[SS].pos = Vec3::new(4.0, 40.0, 0.0);
+        let path = grounder(&fx, sim.t, 10.0);
+        let mut t_at = |vx: f64| {
+            sim.f[SS].vel = Vec3::new(vx, 0.0, 0.0);
+            sim.intercept(SS, &path).0
+        };
+        let (right, none, wrong) = (t_at(-2.0), t_at(0.0), t_at(2.0));
+        assert!(right < none - 0.01 && none < wrong - 0.01, "leaning toward {right:.3} s, standing {none:.3} s, leaning away {wrong:.3} s");
     }
 
     // agent-models §5.3: a fielder running the wrong way must stop and turn. Expected from the

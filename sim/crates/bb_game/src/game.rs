@@ -171,6 +171,12 @@ impl Game {
         }
     }
 
+    /// The same game with these fielders on both sides (labs; agent-models §10 grades).
+    pub fn with_fielders(mut self, fattrs: [FielderAttrs; 9]) -> Game {
+        self.fattrs = fattrs;
+        self
+    }
+
     pub fn finished(&self) -> bool {
         self.st.status != Status::InProgress || self.st.inning > MAX_INNINGS
     }
@@ -255,7 +261,7 @@ impl Game {
             let fside = 1 - side as u16;
             let fielders: [u16; 9] = core::array::from_fn(|i| (fside << 8) | 0x80 | (i as u16 + 1));
             let out = crate::live::simulate_live(
-                &crate::live::LiveInput { env: &mu.env, field: &self.field, ball, t_contact: t_c, runners, fielders, fattrs: self.fattrs, batter_box: { let p = mu.template.pivot(&mu.batter); bb_math::Vec3::new(p.x, p.y, 0.0) }, seed, play, record },
+                &crate::live::LiveInput { env: &mu.env, field: &self.field, ball, t_contact: t_c, runners, fielders, fattrs: self.fattrs, batter_box: { let p = mu.template.pivot(&mu.batter); bb_math::Vec3::new(p.x, p.y, 0.0) }, bats: mu.batter.bats, pitch_x: rec.plate.map(|p| p.x).or(Some(ball.r.x)), seed, play, record },
                 st,
             );
             if record {
@@ -396,6 +402,13 @@ pub fn simulate_game(seed: u64) -> GameResult {
 /// the simulation: data-formats §5.5).
 pub fn simulate_game_with(seed: u64, record: bool) -> GameResult {
     let mut g = Game::new(seed, record);
+    while g.step_pitch().is_some() {}
+    g.finish()
+}
+
+/// [`simulate_game`] with these fielders on both sides.
+pub fn simulate_game_fielders(seed: u64, fattrs: [FielderAttrs; 9]) -> GameResult {
+    let mut g = Game::new(seed, false).with_fielders(fattrs);
     while g.step_pitch().is_some() {}
     g.finish()
 }
