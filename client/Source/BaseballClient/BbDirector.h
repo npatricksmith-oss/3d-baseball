@@ -119,13 +119,26 @@ private:
 		FVector2D From = FVector2D::ZeroVector; // sim frame, metres
 		FVector2D To = FVector2D::ZeroVector;
 		float Depart = 0.f;
+		/** Cruising speed; he speeds up to it and slows from it at ResetAccelMps2. */
 		float SpeedMps = 0.f;
 	};
-	// Staging values (client presentation only).
+	/** Seconds to cover Dist from rest to rest, cruising at V with acceleration A. */
+	static float TravelSeconds(float Dist, float V, float A);
+	/** Distance covered T seconds after setting off, on the same profile. */
+	static float TravelGone(float Dist, float V, float A, float T);
+	/** The cruising speed that covers Dist in Seconds (rest to rest), or Cap if none under it does. */
+	static float SpeedFor(float Dist, float Seconds, float A, float Cap);
+	// Staging values (client presentation only). Players walk a short way and jog easily
+	// farther; to keep the next pitch from waiting past ResetMaxSeconds they quicken, but
+	// never past ResetHurryMps (the jog clip's own pace). Someone farther than that allows,
+	// such as a pitcher who chased a fly ball into the outfield, takes as long as it takes.
+	// Nobody starts or stops dead: speed builds and falls at ResetAccelMps2.
 	float ResetWalkMps = 1.6f;
-	float ResetJogMps = 4.5f;
-	float ResetWalkWithinM = 4.f;
-	float ResetMaxSeconds = 4.5f;
+	float ResetJogMps = 3.6f;
+	float ResetHurryMps = 5.f;
+	float ResetAccelMps2 = 3.f;
+	float ResetWalkWithinM = 6.f;
+	float ResetMaxSeconds = 6.f;
 	float ResetEnterMaxM = 30.f;
 	float ResetThrowMps = 22.f;
 	bool bReset = false;
