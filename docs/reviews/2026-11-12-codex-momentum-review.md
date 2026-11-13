@@ -90,4 +90,13 @@ The condition excludes ground bounces and replacement free paths, but does not e
 
 ## Resolution
 
-Open.
+All six fixed (2026-11-12).
+
+1. **Arrival snap (P2): fixed.** A fielder stops on his spot only within 5 cm and below 0.5 m/s (`SETTLE_V`), or when one tick's step at under 0.5 m/s crosses it; faster, he carries on. At zero distance a moving fielder keeps moving. While checking this, the probe for #3 showed a late chaser who narrowly missed his spot looping round it (he never slowed to turn); everyone now slows into a turn he cannot make at speed, √(a_lat·d/(2 sin θ)). The test `stopped_fielders_have_no_speed_and_running_ones_keep_it` now checks the honest stop (7/6 s from 7 m/s) and that a late chaser runs through.
+2. **`stop_point` (P2): fixed.** v²/(2·BRAKE) ahead, and the holder's intercept time is cleared so he brakes onto it.
+3. **Reach estimate (P2): fixed.** `run_gap`/`run_time_to` model the turn as the step does: sideways speed braked off at 6 m/s² while speed toward the goal grows at a_lat, then the speed law. New test `reach_estimate_tracks_the_movement_step` compares it with the stepped movement over 85 cases: worst ±0.35 s, RMS < 0.15 s (the old estimate: −1.1 s worst). Your case (5 m, 7.9 m/s across) now predicts within the bound.
+4. **Receiver pinned to the bag (P2): fixed.** He stays on the bag only if both the weighed point and his read alone are within reach of it; otherwise he goes to the weighed point. New test `a_throw_passing_beyond_reach_of_the_bag_draws_the_receiver_off_it` (your scenario at second, perfect read and hands) fails under the old rule and passes now. The 0.5 m floor and 0.9 reserve are named (`THROW_MISS_MIN_M`, `BAG_REACH_FRAC`).
+5. **Stale bag target on a break (P2): fixed.** Only fielders whose intercept was recomputed in this call may break.
+6. **Wall carom read as off the bat (P3): fixed.** The straight-off-the-bat test also requires no wall contact yet. New test `a_carom_off_the_wall_is_not_read_as_straight_off_the_bat` (your case).
+
+Numbers after the fixes (`sim-cli games --n 1024`): seed 2, 5.22 runs per team-game (GB .408, LD .721, FB .113, PU .005); seed 5, 5.34. No rules warnings.

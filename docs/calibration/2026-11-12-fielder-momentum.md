@@ -44,6 +44,10 @@ Free movement also hid two smaller artifacts: after a running catch the fielder 
 - A chaser who cruises at the pace that gets him there just in time: +0.9 runs, because he leaves himself no slack for read changes.
 - Shedding sideways speed at a_lat in the target's frame: the fielder orbits a spot inside his turning circle (+2 runs). Replaced by braking and turning limits on the velocity itself.
 
+## 4b. After the Codex review (same day)
+
+Six findings fixed (docs/reviews/2026-11-12-codex-momentum-review.md, Resolution): arrival no longer stops a fielder dead, planting brakes over the right distance, the reach estimate models the turn, receivers are not pinned to the bag, breaks use only fresh reads, and wall caroms are not read as straight off the bat. Fielders also slow into turns they cannot make at speed. `sim-cli games --n 1024`: seed 2, 5.22 runs (GB .408, LD .721, FB .113, PU .005); seed 5, 5.34. No refit.
+
 ## 5. Still open
 
 - Ground balls remain the excess (.400 vs .24). Infield hits are 20% of fair grounders against MLB's 3–4%, most on high choppers: the contact model's launch-angle spread (quartiles −15/5/25° vs MLB ≈ −2/13/28°).
