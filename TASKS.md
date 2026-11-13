@@ -24,9 +24,16 @@ Done (coordinator item 2, as the owner directed: measure before changing calibra
   - The foul share by pitch height is inverted (high pitches foul least).
 - **Bat-angle counterfactual:** −30° matches Statcast tilt (31.9°) and Blast's bat angle. The foul share goes 23.7 → 27.5%, but well-timed steep fouls overshoot (67% against 46% at 40–50°). It is a lever worth about a seventh of the gap, to remeasure with the next swing shape.
 
+- **Follow-up (owner: "ask Fable which to do"; Fable: measure first, re-aimed; note §6–§7):** `foul_diag` splits each whiff's height miss into aim, template offset, execution and swing path, and prints the swings' joint timing × height errors with the outcome per cell. `cage-map` prints a timing × height grid at a fixed pitch and aim.
+  - **Early whiffs are the batter's aim.** On SL/CU/CH he aims 24–30 cm high (he read a fastball); execution adds ~0 and the swing's path reduces the miss. Height error falls 0.59 cm per ms of timing error (corr −0.78).
+  - **The errors are bimodal:** a quarter of swings are fooled (early, more than 6 cm over, nearly all whiffs); the rest are close (within 15 ms and ±4 cm, 1–20% foul). Few are moderately off, where fouls come from.
+  - **The hand-path swing is not indicated.** The lever is how fooled the batter is and how much of a fooled swing he saves mid-swing (Tier B, overlaps item 6). On-time topped balls (MLB 62% foul below −30°, sim fair) are a separate physical question needing evidence.
+
+**First:** the Codex review of the follow-up (`docs/reviews/2026-11-13-codex-foul-sources-review.md`) was started at the end of the session. If it is there, commit it, fix or defer each finding, and write its Resolution.
+
 Next:
-1. **[?] Owner: what to measure before changing the swing** (note §5). First, a timing-against-height sweep with the pitch and aim held fixed: why the sim's bat leaves the ball's height so fast off on-time (plane alignment against the pitch's descent, tilt, or the fixed pivot). Second, a cage counterfactual of §3.6's hand path and lag (v1 is its zero-lag, fixed-pivot case). Then choose the swing change, with the bat angle remeasured. Any change needs refits of the run environment, the fielders' spray reads (`spray_by_bat_angle`, `LEAD_FACE_*`) and the client's batter-box position.
-2. Then items 3–7 of the coordinator list below.
+1. **[?] Owner: the batter's misreads and mid-swing correction** (note §7). Make partially fooled swings possible: the size of a misread, and how much of it `Adjustability` can save. Check it with `foul_diag`'s joint table, the foul share and whiff rate by AD. This merges coordinator items 2 and 6. The hand path and the bat angle (−30° matches Statcast tilt) wait.
+2. Then items 3–5 and 7 of the coordinator list below.
 
 ## Previous: 2026-11-13, fourth session: the plate cue
 

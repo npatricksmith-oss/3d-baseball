@@ -64,11 +64,46 @@ pub fn map(a: MapArgs) {
             writeln!(md, "| {cm:+} cm | miss | | | |").unwrap();
         }
     }
+    timing_height_grid(&cage, rel, &mut md);
     bat_angle_counterfactual(&cage, rel, &mut md);
     print!("{md}");
     if let Some(p) = a.out {
         std::fs::write(&p, md).unwrap();
         eprintln!("wrote {}", p.display());
+    }
+}
+
+/// Fable's grid (foul-measures follow-up): the same pitch and aim, timing against the swing's
+/// height error, so the joint errors that make fouls can be read off one map.
+fn timing_height_grid(cage: &Cage, rel: bb_physics::BallState, md: &mut String) {
+    writeln!(md, "\n## Timing × height grid\n").unwrap();
+    writeln!(md, "The same pitch and perfectly perceived aim; the swing is shifted in time (negative = early) and moved up or down as a whole (positive = bat over the ball). `·` miss, `F` first lands foul, `g` lands fair but leaves outside the foul lines on the ground (it rolls foul in a game), `o` fair. Fair/foul by first landing, as `pa.rs` calls it.\n").unwrap();
+    let ts: Vec<i32> = (-40..=40).step_by(5).collect();
+    write!(md, "| cm \\ ms |").unwrap();
+    for t in &ts {
+        write!(md, " {t:+} |").unwrap();
+    }
+    writeln!(md, "\n|{}", " :-: |".repeat(ts.len() + 1)).unwrap();
+    for cm in (-8..=8).rev() {
+        write!(md, "| {cm:+} |").unwrap();
+        for t in &ts {
+            let p = Placement { v_offset: cm as f64 / 100.0, t_shift: *t as f64 / 1000.0, ..Default::default() };
+            let c = match cage.swing_with(rel, &p).swing {
+                SwingResult::Contact(b) => {
+                    let land = b.flight.last().s.r;
+                    if !(land.y > 0.0 && land.x.abs() <= land.y) {
+                        "F"
+                    } else if b.launch_angle < 0.0 && b.spray_angle.abs() > core::f64::consts::FRAC_PI_4 {
+                        "g"
+                    } else {
+                        "o"
+                    }
+                }
+                _ => "·",
+            };
+            write!(md, " {c} |").unwrap();
+        }
+        writeln!(md).unwrap();
     }
 }
 

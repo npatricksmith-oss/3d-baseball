@@ -21,7 +21,8 @@ use bb_game::pa::{B1Report, Call, Knobs, Matchup, PA_PLAY_STRIDE, PitchRecord, s
 use bb_math::{Vec3, m};
 use bb_observe::{Hand, PitchType};
 use bb_physics::contact::BatPose;
-use bb_world::pitch::{SwingResult, resolve_pitch};
+use bb_physics::flight::Crossing;
+use bb_world::pitch::{SwingResult, pitch_flight, resolve_pitch};
 
 const DEG: f64 = 180.0 / core::f64::consts::PI;
 const IN: f64 = 0.0254;
@@ -88,6 +89,19 @@ struct Sw {
     past_tip_cm: f64,
     /// Intercept time minus the swing's nominal contact time, ms.
     dt_ms: f64,
+    /// Where the swing was aimed, against the ball: the executed swing's timing error (its
+    /// nominal contact time minus when the ball truly reaches the sweet spot's depth then, ms,
+    /// negative = early) and its height error there (sweet spot above the ball's center, cm,
+    /// positive = the bat over the ball), split into the batter's aim (his perceived point
+    /// minus the true one at his contact depth), the template's aim offset, and the rest
+    /// (execution noise and the aim-to-sweet-spot depth difference).
+    t_err_ms: f64,
+    h_nom_cm: f64,
+    h_aim_cm: f64,
+    h_off_cm: f64,
+    /// Whiff only: the bat axis above the ball's center at closest approach, cm. Its excess
+    /// over `h_nom_cm` is what the swing's path added between nominal and the intercept.
+    h_int_cm: f64,
 }
 
 fn measure(mu: &Matchup, p: &PitchRecord) -> Option<Sw> {
@@ -131,7 +145,7 @@ fn measure(mu: &Matchup, p: &PitchRecord) -> Option<Sw> {
     }
     let plate = p.plate.unwrap_or(Vec3::ZERO);
     let h = (plate.z - mu.zone.bottom) / (mu.zone.top - mu.zone.bottom);
-    let (mut miss, mut clear_cm, mut past_tip_cm) = (0, f64::NAN, f64::NAN);
+    let (mut miss, mut clear_cm, mut past_tip_cm, mut h_int_cm) = (0, f64::NAN, f64::NAN, f64::NAN);
     if let SwingResult::Miss(ca) = &res.swing {
         let len_bat = mu.bat.profile.length();
         let ball = res.pitch.at(ca.t).0;
@@ -140,6 +154,7 @@ fn measure(mu: &Matchup, p: &PitchRecord) -> Option<Sw> {
         let tr = ball - (k.knob + k.axis * u_c);
         clear_cm = 100.0 * (tr.norm() - mu.bat.profile.radius(u_c.min(len_bat)) - mu.env.ball.radius);
         past_tip_cm = 100.0 * (u_raw - len_bat).max(0.0);
+        h_int_cm = -100.0 * tr.z;
         let (lo, hi) = (sw.t_c - bb_physics::contact::WINDOW_S, sw.t_c + bb_physics::contact::WINDOW_S);
         miss = if (ca.t - lo).abs() < 2e-4 || (ca.t - hi).abs() < 2e-4 {
             3
@@ -154,6 +169,14 @@ fn measure(mu: &Matchup, p: &PitchRecord) -> Option<Sw> {
         };
     }
     let dt_ms = 1000.0 * (t - sw.t_c);
+    let free = pitch_flight(&mu.env, p.release);
+    let ss = sw.at(sw.t_c).point(uss);
+    let tb = free.find(Crossing::YBelow(ss.y))?;
+    let ball_c = free.at(tb).0;
+    let t_err_ms = 1000.0 * (sw.t_c - tb);
+    let h_nom_cm = 100.0 * (ss.z - ball_c.z);
+    let h_aim_cm = p.aim_error.map_or(f64::NAN, |e| 100.0 * e.y);
+    let h_off_cm = 100.0 * mu.template.aim_offset_z;
     let (out, ev, la, land_dir) = match contact {
         Some(b) => {
             let land = b.flight.last().s.r;
@@ -171,7 +194,7 @@ fn measure(mu: &Matchup, p: &PitchRecord) -> Option<Sw> {
         }
         None => (Outcome::Whiff, f64::NAN, f64::NAN, f64::NAN),
     };
-    Some(Sw { out, ty: p.ty, h, ad, aa, vba, tilt, length_ft: len / 0.3048, bat_mph: v.norm() / 0.44704, y, ev, la, land_dir, miss, clear_cm, past_tip_cm, dt_ms })
+    Some(Sw { out, ty: p.ty, h, ad, aa, vba, tilt, length_ft: len / 0.3048, bat_mph: v.norm() / 0.44704, y, ev, la, land_dir, miss, clear_cm, past_tip_cm, dt_ms, t_err_ms, h_nom_cm, h_aim_cm, h_off_cm, h_int_cm })
 }
 
 fn main() {
@@ -386,6 +409,8 @@ fn statcast_tables(sws: &[Sw]) {
     let dts: Vec<f64> = sws.iter().filter(|s| is_contact(s)).map(|s| s.dt_ms).collect();
     println!("contact time minus nominal, ms: p1 {:.1}  p5 {:.1}  p50 {:.1}  p95 {:.1}  p99 {:.1} (search window ±{:.0})", pct(&dts, 0.01), pct(&dts, 0.05), pct(&dts, 0.5), pct(&dts, 0.95), pct(&dts, 0.99), 1000.0 * bb_physics::contact::WINDOW_S);
 
+    miss_sources(sws);
+
     println!("\nF4 early / late fouls (attack direction)");
     let fouls: Vec<&Sw> = sws.iter().filter(|s| is_foul(s)).collect();
     let early: Vec<f64> = fouls.iter().filter(|s| s.ad > 10.0).map(|s| s.la).collect();
@@ -424,5 +449,59 @@ fn statcast_tables(sws: &[Sw]) {
         let pull = dirs.iter().filter(|d| **d >= lo && **d < hi).count();
         let oppo = dirs.iter().filter(|d| -**d >= lo && -**d < hi).count();
         println!("|dir| {lo:3.0}–{hi:3.0}°: pull side {} %, opposite {} %", share(pull, dirs.len()), share(oppo, dirs.len()));
+    }
+}
+
+/// Where whiffs' height misses come from (Fable's decomposition), and the joint distribution
+/// of the swings' timing and height errors with the outcome in each cell.
+fn miss_sources(sws: &[Sw]) {
+    println!("\nWhiffs: the bat's height above the ball (cm, + = over), mean, by attack direction");
+    println!("{:>12} | {:>6} | {:>9} = {:>8} + {:>9} | nominal = {:>6} + {:>7} + {:>6}", "AD bin °", "whiffs", "intercept", "nominal", "path adds", "aim", "offset", "rest");
+    let row = |label: &str, b: &[&Sw]| {
+        let f = |g: &dyn Fn(&Sw) -> f64| mean(&b.iter().map(|s| g(s)).filter(|v| v.is_finite()).collect::<Vec<_>>());
+        let (int, nom, aim, off) = (f(&|s| s.h_int_cm), f(&|s| s.h_nom_cm), f(&|s| s.h_aim_cm), f(&|s| s.h_off_cm));
+        println!("{label:>12} | {:6} | {int:9.1} = {nom:8.1} + {:9.1} | nominal = {aim:6.1} + {off:7.1} + {:6.1}", b.len(), int - nom, nom - aim - off);
+    };
+    for (lo, hi) in [(-1e9, -12.0), (-12.0, 12.0), (12.0, 30.0), (30.0, 1e9)] {
+        let b: Vec<&Sw> = sws.iter().filter(|s| s.out == Outcome::Whiff && s.miss != 3 && s.ad >= lo && s.ad < hi).collect();
+        let label = if lo < -1e8 { format!("< {hi}") } else if hi > 1e8 { format!("> {lo}") } else { format!("{lo} to {hi}") };
+        row(&label, &b);
+    }
+    println!("AD 12–30° whiffs by pitch type:");
+    for ty in [PitchType::FourSeam, PitchType::Slider, PitchType::Changeup, PitchType::Curveball] {
+        let b: Vec<&Sw> = sws.iter().filter(|s| s.out == Outcome::Whiff && s.miss != 3 && s.ad >= 12.0 && s.ad < 30.0 && s.ty == ty).collect();
+        row(ty.code(), &b);
+    }
+    let te: Vec<f64> = sws.iter().map(|s| s.t_err_ms).collect();
+    let he: Vec<f64> = sws.iter().map(|s| s.h_nom_cm).collect();
+    println!("All competitive swings: timing error p5/p25/p50/p75/p95 {:.0} / {:.0} / {:.0} / {:.0} / {:.0} ms; height error {:.1} / {:.1} / {:.1} / {:.1} / {:.1} cm", pct(&te, 0.05), pct(&te, 0.25), pct(&te, 0.5), pct(&te, 0.75), pct(&te, 0.95), pct(&he, 0.05), pct(&he, 0.25), pct(&he, 0.5), pct(&he, 0.75), pct(&he, 0.95));
+    let (r, _) = slope(&te, &he);
+    let (_, corr) = slope(&te, &he);
+    println!("height error against timing error: {r:+.3} cm per ms, corr {corr:+.2} (fooled early = aimed high shows as a negative slope)");
+
+    println!("\nJoint timing × height error of competitive swings: share of swings % / whiff % / foul % of contact (cells under 20 swings: share only)");
+    let tb = [-1e9, -25.0, -15.0, -5.0, 5.0, 15.0, 25.0, 1e9];
+    let hb = [1e9, 6.0, 4.0, 2.0, 0.0, -2.0, -4.0, -6.0, -1e9];
+    print!("{:>12}", "height \\ ms");
+    for j in 0..7 {
+        let l = if j == 0 { "< -25".to_string() } else if j == 6 { "> 25".to_string() } else { format!("{}..{}", tb[j], tb[j + 1]) };
+        print!(" | {l:>14}");
+    }
+    println!();
+    for i in 0..8 {
+        let (hi, lo) = (hb[i], hb[i + 1]);
+        let l = if i == 0 { "> 6 cm".to_string() } else if i == 7 { "< -6 cm".to_string() } else { format!("{lo}..{hi} cm") };
+        print!("{l:>12}");
+        for j in 0..7 {
+            let c: Vec<&Sw> = sws.iter().filter(|s| s.h_nom_cm >= lo && s.h_nom_cm < hi && s.t_err_ms >= tb[j] && s.t_err_ms < tb[j + 1]).collect();
+            let con = c.iter().filter(|s| s.out != Outcome::Whiff).count();
+            let sh = 100.0 * c.len() as f64 / sws.len().max(1) as f64;
+            if c.len() < 20 {
+                print!(" | {sh:5.1}          ");
+            } else {
+                print!(" | {sh:4.1}/{:3.0}/{:3.0}  ", 100.0 * (c.len() - con) as f64 / c.len() as f64, 100.0 * c.iter().filter(|s| s.out == Outcome::Foul).count() as f64 / con.max(1) as f64);
+            }
+        }
+        println!();
     }
 }
