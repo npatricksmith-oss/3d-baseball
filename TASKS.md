@@ -1,13 +1,34 @@
 # Task List
 
-**Last updated:** 2026-11-13 (the read knows the ball started at the plate; before that, called-off infielders back up the catch; before that, pop-up calls on `fix/popup-calls`; before that, owner's observations merged into the "Owner backlog" section; before that, the coordinator run on `coord/review-fixes`)
+**Last updated:** 2026-11-13 (foul measures: Statcast-style swing diagnostics and the bat-angle counterfactual; before that, the read knows the ball started at the plate; before that, called-off infielders back up the catch; before that, pop-up calls on `fix/popup-calls`; before that, owner's observations merged into the "Owner backlog" section; before that, the coordinator run on `coord/review-fixes`)
 The live to-do list for the project. [PLAN.md](PLAN.md) holds decisions and design. This file holds what is next and what is done. Update it at the end of every work session.
 
 Status: `[ ]` not started · `[~]` in progress · `[x]` done · `[?]` needs an owner decision
 
 ---
 
-## Resume here (2026-11-13, fourth session: the plate cue)
+## Resume here (2026-11-13, fifth session: foul measures)
+
+Branch `claude/next-task-list-item-11a78e`, merged into main (not pushed). `cargo test --workspace --release`: 148 passed, 0 failed. No simulation behavior or values changed: the code changes are new template methods, a refactor of the cage lab's aim, and diagnostics.
+
+**First:** the Codex foul-measures review (`docs/reviews/2026-11-13-codex-foul-measures-review.md`) was started at the end of the session. If it is there, commit it, fix or defer each finding, and write its Resolution.
+
+Done (coordinator item 2, as the owner directed: measure before changing calibration; [note](docs/calibration/2026-11-13-foul-measures.md)):
+- `examples/foul_diag.rs` now prints R13's tables F1–F6 from the sim's swings with the MLB value beside each, plus how whiffs miss. An optional fifth argument sets the bat angle as a counterfactual. New `examples/foul_in_games.rs` gives the foul share by launch angle in full games. `sim-cli cage-map` gains a bat-angle counterfactual section. `SwingTemplate::bat_angle` / `with_bat_angle` (tested) give the counterfactual geometry.
+- **R13's main hypothesis is refuted:** steep contact (LA ≥ 40°) is foul at MLB rates, for well-timed contact too. The missing fouls are low: P(foul | LA < 25°) is 3–11% against MLB's 22–57%. Full games agree with the PA model's call (22.9% against 22.6%), so this is the contact, not the fair/foul judgment.
+- **Early swings miss off the end of the bat** (78% of whiffs at AD 12–30°). v1's fixed pivot swings the barrel out front and off the plate, so MLB's hooked and topped early fouls become whiffs. Late contact is at the right foul rate but rare (5% of swings against 26%).
+- **Swing measures against Statcast:**
+  - Swing length is 9.5 ft against 7.2. The symmetric speed bump has no late whip.
+  - AD per inch of depth is +1.04° against 1.48. AD spreads half as much as MLB's.
+  - Swing path tilt is 23.7° against 32. Vertical bat angle is −18.6° against −25 to −35.
+  - The foul share by pitch height is inverted (high pitches foul least).
+- **Bat-angle counterfactual:** at −30° the tilt matches Statcast (31.9° against 32) and the bat angle matches Blast. The foul share goes 23.7 → 27.5% (−35°: 30.3%, which overshoots). It is a real lever, but only about a seventh of the gap.
+
+Next:
+1. **[?] Owner: the v2 swing.** The proposal is to implement agent-models §3.6's hand path and lag release (the spec's template; v1 is its zero-lag, fixed-pivot special case), with the bat angle at about −30° in the same change. Then measure it with `foul_diag` before tuning. It moves the launch mix, the run environment, the fielders' spray-read fits (`spray_by_bat_angle`, `LEAD_FACE_*`) and the client's batter-box position, so those need refits.
+2. Then items 3–7 of the coordinator list below.
+
+## Previous: 2026-11-13, fourth session: the plate cue
 
 Branch `claude/next-task-list-item-11a78e` (continuing from the third session below). `cargo test --workspace --release`: 147 passed, 0 failed.
 
@@ -84,7 +105,7 @@ Done this session (coordinator with worker agents; merges in `coord/review-fixes
 
 Next, in order:
 1. ~~Pop-ups dropping in short right/center~~ **done 2026-11-13** (see "Resume here").
-2. **Fouls (O1/R13)**, following the owner's direction: extend `foul_diag` with Statcast-style measures (foul share by launch angle and attack direction, early/late split, bat tilt at contact, swing length) and add a `cage-map` bat-tilt counterfactual (−20/−30/−35°) before changing any calibration.
+2. ~~**Fouls (O1/R13)**: extend `foul_diag` with Statcast-style measures and add a `cage-map` bat-tilt counterfactual before changing any calibration~~ **measured 2026-11-13** (fifth session, above). The fix it points to, the v2 swing, waits on the owner.
 3. Live sim emits `RunnerPosition` at ~30 Hz and models an overrun of first.
 4. Watch the client (`bin/play.sh`): reset staging, side-change jogs, sidesteps.
 5. **Camera cut at side changes** (owner, 2026-11-13: later) to hide the 23–27 s jog off/on.
@@ -181,7 +202,7 @@ Numbers (`sim-cli games --n 512 --seed 2`), 2026-11-12 after the review fixes: 5
 
 ## Owner decisions (from the 2026-10-31 overnight session)
 
-- [?] **O1. Chase rate.** Average hitters chase 11.6% (MLB 29%). The owner approved trying perceptual overconfidence (2026-11-11); it was implemented, measured, and backed out: even total overconfidence gives 18% and wrecks contact. Diagnosis in [docs/calibration/2026-11-11-chase-diagnosis.md](docs/calibration/2026-11-11-chase-diagnosis.md): pitch locations are fine and the batter's strike belief is already uncertain near the edge; the swing decision is what is too sharp, and the low foul share (21% vs 50%) is what keeps K% and pitches/PA low. The owner chose to fix fouls first (2026-11-11). **That is not done:** [docs/calibration/2026-11-11-foul-share-diagnosis.md](docs/calibration/2026-11-11-foul-share-diagnosis.md) shows no noise setting gets the foul share past ~30% (timing errors turn into whiffs, glancing contact stays forward), so the gap is structural. R13 is done ([note](docs/research/r13-foul-direction.md), 2026-11-13): the gap is well-timed steep contact that MLB hitters foul off, not timing noise. Next: check the bat's angle at contact and its time through the zone in the swing model. Discipline's grade-50 values (about c_D 0.5, b_D 0.9; currently 1.0, 0.0) stay parked behind that. `cargo run --release -p bb_game --example foul_diag -- 3000 [timing ms] [bat-control cm] [K_perception]`. Tools: `sim-cli pa` prints swing rate by miss distance; `cargo run --release -p bb_game --example chase_diag -- 3000 [c_D] [b_D]`.
+- [?] **O1. Chase rate.** Average hitters chase 11.6% (MLB 29%). The owner approved trying perceptual overconfidence (2026-11-11); it was implemented, measured, and backed out: even total overconfidence gives 18% and wrecks contact. Diagnosis in [docs/calibration/2026-11-11-chase-diagnosis.md](docs/calibration/2026-11-11-chase-diagnosis.md): pitch locations are fine and the batter's strike belief is already uncertain near the edge; the swing decision is what is too sharp, and the low foul share (21% vs 50%) is what keeps K% and pitches/PA low. The owner chose to fix fouls first (2026-11-11). **That is not done:** [docs/calibration/2026-11-11-foul-share-diagnosis.md](docs/calibration/2026-11-11-foul-share-diagnosis.md) shows no noise setting gets the foul share past ~30% (timing errors turn into whiffs, glancing contact stays forward), so the gap is structural. R13 is done ([note](docs/research/r13-foul-direction.md), 2026-11-13). The measurements ([note](docs/calibration/2026-11-13-foul-measures.md), 2026-11-13) found that steep contact is already foul at MLB rates. The gap is low-angle contact and early swings that miss off the end of v1's fixed-pivot bat. Next: the v2 swing (§3.6 hand path and lag, bat angle ≈ −30°), pending the owner. Discipline's grade-50 values (about c_D 0.5, b_D 0.9; currently 1.0, 0.0) stay parked behind that. `cargo run --release -p bb_game --example foul_diag -- 3000 [timing ms] [bat-control cm] [K_perception]`. Tools: `sim-cli pa` prints swing rate by miss distance; `cargo run --release -p bb_game --example chase_diag -- 3000 [c_D] [b_D]`.
 - [x] **O2. Interim knobs: accepted by the owner (2026-11-11)** as the working point: `K_perception` 2.25, `K_command` 0.8, `K_swingplane` 1.0 (`Knobs::calibrated_m3()`).
 - [x] **O3. Spec deviations made overnight: accepted by the owner (2026-11-11).** Full-state RK4 with spin decay inside the ODE (physics-spec §5.1); frictionless-impulse energy-guard fallback (physics-spec §8.1); event-log frame identifiers `BBEH`/`BBEV`/`BBEF` (data-formats §4.1); rolling resistance 0.22/0.28 (`bb_physics::ground`; physics-spec §9.1 now lists them); the batter's 10-state filter (agent-models §3.3); the pursuit-limit and persistent-bias perception terms; the scoreboard as a public channel for pitch-type learning (agent-models §3.8 [C]).
 - [?] M0.9 Owner review: **the Unreal spike passes every unattended check (2026-11-11, [docs/unreal-spike.md](docs/unreal-spike.md))**: ~300 fps offscreen, 2.4 GB, 6 s rebuilds. Client v0 plays full games with capsules, a bat, two cameras and play-by-play. Still needed from the owner: run `client/run.sh`, confirm the editor window opens, and judge watchability; then D6 can be marked confirmed.

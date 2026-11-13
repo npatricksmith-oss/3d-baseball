@@ -97,6 +97,25 @@ impl SwingTemplate {
         let x_inside = -Self::side(b.bats) * x;
         self.contact_y0 + self.contact_k * x_inside
     }
+    /// The bat's vertical angle at contact for an aim point (rad, negative = barrel below
+    /// the hands): the elevation of the pivot-to-aim line, since v1's bat is radial.
+    pub fn bat_angle(&self, b: &BatterAttrs, aim: Vec3) -> f64 {
+        let d = aim - self.pivot(b);
+        m::atan2(d.z, m::hypot(d.x, d.y))
+    }
+    /// Counterfactual geometry (R13 check 4): the same template with the pivot swung about
+    /// `aim` in its vertical plane, at the same distance, so that the bat meets `aim` at the
+    /// vertical angle `angle` (rad). Reach and bat speed at that aim point are unchanged; the
+    /// swing plane tilts with the bat (`plane_normal`).
+    pub fn with_bat_angle(&self, b: &BatterAttrs, aim: Vec3, angle: f64) -> Self {
+        let d = self.pivot(b) - aim;
+        let (r, h) = (d.norm(), m::hypot(d.x, d.y));
+        let (ux, uy) = (d.x / h, d.y / h);
+        // The pivot is above the aim point for a negative bat angle.
+        let (hz, dz) = (r * m::cos(angle), -r * m::sin(angle));
+        let p = Vec3::new(aim.x + ux * hz, aim.y + uy * hz, aim.z + dz);
+        Self { pivot_x: Self::side(b.bats) * p.x, pivot_y: p.y, pivot_z_frac: p.z / b.height, ..*self }
+    }
 }
 
 /// Placement θ (agent-models §3.6), as deviations applied by execution noise.
@@ -321,6 +340,30 @@ mod tests {
         let mut late = i.swing;
         late.t_brake = Some(0.39);
         assert!(late.judged_swing());
+    }
+
+    #[test]
+    fn bat_angle_counterfactual_keeps_reach_and_sets_the_angle() {
+        let b = BatterAttrs::average_rhb();
+        let tpl = SwingTemplate::default();
+        let prof = BatProfile::default_34in();
+        let mp = prof.mass_props();
+        let aim = Vec3::new(0.0, 0.35, 0.75);
+        // Default geometry: pivot 0.95 m to the side and 0.36 m above the aim point.
+        let a0 = tpl.bat_angle(&b, aim);
+        assert!((a0 - m::atan2(0.75 - 0.6 * 1.85, m::hypot(0.95, 0.05))).abs() < 1e-12);
+        for (deg, bats) in [(-30.0, Hand::Right), (-35.0, Hand::Left), (-10.0, Hand::Right)] {
+            let b = BatterAttrs { bats, ..b.clone() };
+            let aim = Vec3::new(if bats == Hand::Left { 0.03 } else { -0.03 }, 0.35, 0.75);
+            let t2 = tpl.with_bat_angle(&b, aim, deg * DEG);
+            assert!(((aim - t2.pivot(&b)).norm() - (aim - tpl.pivot(&b)).norm()).abs() < 1e-12);
+            // The planned bat axis at contact has that elevation (barrel below the hands).
+            let i = plan_swing(&b, &t2, &prof, &mp, 0.15, aim, 0.4, t2.attack_angle);
+            let ax = i.swing.at(0.4).axis;
+            assert!((m::asin(ax.z) - deg * DEG).abs() < 1e-9, "{deg}: {}", m::asin(ax.z) / DEG);
+            // Same side of the plate as before: the batter did not move across it.
+            assert!(t2.pivot(&b).x * tpl.pivot(&b).x > 0.0);
+        }
     }
 
     #[test]

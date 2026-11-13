@@ -52,15 +52,20 @@ impl Cage {
         execute_release(&plan, &noise, &mut rng).state
     }
 
-    /// Perfect-perception swing plan: aim at where the ball truly is at the contact depth.
-    pub fn plan_perfect(&self, release: BallState, attack_angle: f64) -> Option<IntendedSwing> {
+    /// Perfect perception: where the ball truly is at the template's contact depth, and when.
+    pub fn aim_perfect(&self, release: BallState) -> Option<(bb_math::Vec3, f64)> {
         let tr = bb_physics::flight::fly(&self.env, release, 0.0, bb_physics::flight::DT_PITCH, &[Crossing::YBelow(-1.0)], 3.0);
         // Contact depth depends on the plate x; iterate once from the judgment-plane x.
         let tj = tr.find(Crossing::YBelow(bb_physics::zone::Y_JUDGE))?;
         let x = tr.at(tj).0.x;
         let yc = self.template.contact_y(&self.batter, x);
         let tc = tr.find(Crossing::YBelow(yc))?;
-        let aim = tr.at(tc).0;
+        Some((tr.at(tc).0, tc))
+    }
+
+    /// Perfect-perception swing plan: aim at where the ball truly is at the contact depth.
+    pub fn plan_perfect(&self, release: BallState, attack_angle: f64) -> Option<IntendedSwing> {
+        let (aim, tc) = self.aim_perfect(release)?;
         Some(plan_swing(&self.batter, &self.template, &self.bat.profile, &self.bat.mass, self.bat.contact.ss_from_tip, aim, tc, attack_angle))
     }
 

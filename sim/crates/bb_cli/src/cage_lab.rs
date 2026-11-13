@@ -64,10 +64,87 @@ pub fn map(a: MapArgs) {
             writeln!(md, "| {cm:+} cm | miss | | | |").unwrap();
         }
     }
+    bat_angle_counterfactual(&cage, rel, &mut md);
     print!("{md}");
     if let Some(p) = a.out {
         std::fs::write(&p, md).unwrap();
         eprintln!("wrote {}", p.display());
+    }
+}
+
+/// R13 check 4: the same pitch and swing with the bat met at other vertical angles (the
+/// pivot swung about the aim point at the same distance, `SwingTemplate::with_bat_angle`).
+/// Fair or foul is judged where the ball first comes down, as `pa.rs` does.
+fn bat_angle_counterfactual(base: &Cage, rel: bb_physics::BallState, md: &mut String) {
+    let (aim, _) = base.aim_perfect(rel).expect("pitch reaches the batter");
+    let a0 = rad_to_deg(base.template.bat_angle(&base.batter, aim));
+    let angles = [a0, -20.0, -30.0, -35.0];
+    let cages: Vec<Cage> = angles
+        .iter()
+        .map(|deg| {
+            let mut c = Cage::average();
+            c.template = base.template.with_bat_angle(&base.batter, aim, deg.to_radians());
+            c
+        })
+        .collect();
+    let cell = |c: &Cage, p: &Placement| match c.swing_with(rel, p).swing {
+        SwingResult::Contact(b) => {
+            let land = b.flight.last().s.r;
+            let fair = land.y > 0.0 && land.x.abs() <= land.y;
+            format!(" {:.0} / {:.0} / {:+.0}{} |", mps_to_mph(b.exit_speed), rad_to_deg(b.launch_angle), rad_to_deg(b.spray_angle), if fair { "" } else { " **F**" })
+        }
+        _ => " — |".to_string(),
+    };
+    let header = |md: &mut String, first: &str| {
+        write!(md, "| {first} |").unwrap();
+        for (i, a) in angles.iter().enumerate() {
+            write!(md, " {a:.0}°{} |", if i == 0 { " (now)" } else { "" }).unwrap();
+        }
+        writeln!(md, "\n|{}", " :--- |".repeat(angles.len() + 1)).unwrap();
+    };
+    writeln!(md, "\n## Bat-angle counterfactual (R13 check 4)\n").unwrap();
+    writeln!(md, "The same pitch and swing with the bat meeting the aim point at other vertical angles (negative = barrel below the hands): the pivot is swung about the aim point at the same distance, so reach and bat speed there are unchanged and the swing plane tilts with the bat. MLB reference: about −25° to −35° (Blast, vendor). Each cell: EV (mph) / LA (°) / spray (°, negative = pull); **F** = first lands foul.\n").unwrap();
+    writeln!(md, "### On time, by vertical offset\n").unwrap();
+    header(md, "v-offset \\ bat angle");
+    for cm in -7..=7 {
+        write!(md, "| {cm:+} cm |").unwrap();
+        for c in &cages {
+            md.push_str(&cell(c, &Placement { v_offset: cm as f64 / 100.0, ..Default::default() }));
+        }
+        writeln!(md).unwrap();
+    }
+    writeln!(md, "\n### Square (no vertical offset), by timing\n").unwrap();
+    header(md, "timing \\ bat angle");
+    for ms in (-40..=40).step_by(5) {
+        write!(md, "| {ms:+} ms |").unwrap();
+        for c in &cages {
+            md.push_str(&cell(c, &Placement { t_shift: ms as f64 / 1000.0, ..Default::default() }));
+        }
+        writeln!(md).unwrap();
+    }
+    // Share of a uniform grid of offsets (−7..7 cm, 0.5 cm) × timing (−40..40 ms, 2.5 ms)
+    // that makes contact, and of that contact the share that goes foul: a coarse summary.
+    writeln!(md, "\n### Grid summary (offsets −7…+7 cm by 0.5, timing −40…+40 ms by 2.5, uniform)\n").unwrap();
+    writeln!(md, "| bat angle | contact cells | foul share of contact | pull-side fouls | LA < −10° fouls |\n| :--- | :--- | :--- | :--- | :--- |").unwrap();
+    for (a, c) in angles.iter().zip(&cages) {
+        let (mut n, mut con, mut foul, mut pull, mut low) = (0u32, 0u32, 0u32, 0u32, 0u32);
+        for i in -14..=14 {
+            for j in -16..=16 {
+                n += 1;
+                let p = Placement { v_offset: i as f64 * 0.005, t_shift: j as f64 * 0.0025, ..Default::default() };
+                if let SwingResult::Contact(b) = c.swing_with(rel, &p).swing {
+                    con += 1;
+                    let land = b.flight.last().s.r;
+                    if !(land.y > 0.0 && land.x.abs() <= land.y) {
+                        foul += 1;
+                        pull += (land.x < 0.0) as u32;
+                        low += (b.launch_angle < (-10.0f64).to_radians()) as u32;
+                    }
+                }
+            }
+        }
+        let pc = |a: u32, b: u32| 100.0 * a as f64 / b.max(1) as f64;
+        writeln!(md, "| {a:.0}° | {con}/{n} | {:.1}% | {:.1}% | {:.1}% |", pc(foul, con), pc(pull, foul), pc(low, foul)).unwrap();
     }
 }
 
