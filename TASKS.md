@@ -220,7 +220,7 @@ On the field (sim):
 
 On the screen (client). The owner (2026-11-13): hitting and throwing motions affect gameplay, so they stay here; the other looks wait for the polish stage (below).
 - [ ] A13. **Fielders' throwing motion** does not look real [W8] (a stand-in from the engine's stock clips).
-- [ ] A14. **Hitting animation:** stance, load, swing, follow-through (also a stand-in). Per-player stances and swings are P3 below.
+- [ ] A14. **Hitting animation:** stance, load, swing, follow-through (also a stand-in). Per-player stances and swings are L3 below.
 - [ ] A15. **Ball shadow after a hit cannot be seen.** Have: a disc under the ball, shrunk to 15 cm on 2026-11-12 because the owner found 50 cm too big. It is lost from the follow camera; size it by camera distance.
 - [ ] A16. **Home runs:** once the ball is over the wall, cut back to center to show the runners circling the bases; show a display with the batter's name (A2), the distance, and the exit speed in mph.
 
@@ -234,17 +234,17 @@ On the screen (client). The owner (2026-11-13): hitting and throwing motions aff
 
 ### Priority C
 
-- [ ] C1. **Better crowds** (after P1).
+- [ ] C1. **Better crowds** (after L1).
 - [ ] C2. **Player development** (includes aging: a career arc for skill and experience [W7]). M7.
 - [ ] C3. **Post-game highlights** (timelines are already recorded, D9).
 
 ### Polish stage (M8; owner, 2026-11-13: these wait, D13 stands)
 
-- [ ] P1. **Stadium and diamond that look real** [W1]. Crowds can be something cheap for now (better crowds are C1).
-- [ ] P2. **Players' look:** a variety of body shapes, skin colors, ethnicities and nationalities (names in A2 should match); team uniforms (teams are a tint now); gloves, on the hand given by A1 (the glove hand still matters to the sim under A1).
-- [ ] P3. **Batter stances and swings per player** [W3], with a wide variety. The owner's examples: Pete Rose, Darryl Strawberry, Gary Carter; a longer list may follow. Follows A14
-- [ ] P4. **HUD** [W4] that looks more like a TV broadcast
-- [ ] P5. **Umpires with animations** [W12] (out calls exist as HUD text, `bb_game/src/umpire.rs`; no umpire figures)
+- [ ] L1. **Stadium and diamond that look real** [W1]. Crowds can be something cheap for now (better crowds are C1).
+- [ ] L2. **Players' look:** a variety of body shapes, skin colors, ethnicities and nationalities (names in A2 should match); team uniforms (teams are a tint now); gloves, on the hand given by A1 (the glove hand still matters to the sim under A1).
+- [ ] L3. **Batter stances and swings per player** [W3], with a wide variety. The owner's examples: Pete Rose, Darryl Strawberry, Gary Carter; a longer list may follow. Follows A14
+- [ ] L4. **HUD** [W4] that looks more like a TV broadcast
+- [ ] L5. **Umpires with animations** [W12] (out calls exist as HUD text, `bb_game/src/umpire.rs`; no umpire figures)
 
 ### Order for priority A (owner agreed, 2026-11-13)
 
