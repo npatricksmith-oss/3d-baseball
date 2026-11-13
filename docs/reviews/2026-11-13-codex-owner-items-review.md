@@ -1,0 +1,61 @@
+# Codex review: owner decisions of 2026-11-13
+
+Scope: `490c0e7..849f66e6069a94ded077c2bb06fdc9802b80bb21` on `coord/review-fixes`, covering workers J–M and the integration follow-ups. Read `CLAUDE.md` first. Locations below refer to HEAD. No existing source, test, specification, or TASKS file was changed; scratch probes and the K-era export live under `sim/target/codex-probes/`.
+
+## Findings
+
+No P1 or P2 findings.
+
+### P3 — Use the repository math and RNG in the new diagnostic examples
+
+**Locations:** `sim/crates/bb_game/examples/spray_cues.rs:247` and `:256`; also its `:110` and `sim/crates/bb_game/examples/bat_read_geometry.rs:42`.
+
+**Defect:** `honest()` introduces a sequential xorshift generator and uses inherent `ln`/`cos` for its Gaussian samples. Both examples use inherent `asin`. This bypasses CLAUDE.md invariant 5, including the explicit requirement to use `KeyedRng`/`RngKey`. These are calibration diagnostics, so this does not compromise the production game's streams, but their measurement arithmetic does not follow the same portable determinism contract.
+
+**Verified failing scenario:** A scratch Rust probe replayed the exact generator in `honest()`. Its tenth Gaussian sample (`a=0.98569069463286962`, `b=0.57414518664216496`) produced bits `bfc36a7be6a75b85` with the native operations versus `bfc36a7be6a75b86` with `bb_math::m`. For an actual sampled bat-axis component, `z=-0.57135206248778436`, native `asin` produced `bfe375fbec192635` versus `bfe375fbec192636` through `m::asin`. Thus the nonconformance is observable on this machine, although these differences do not change the printed two-decimal tables here. Cross-platform output divergence was not tested.
+
+**Suggested fix:** Use `m::asin`, `m::ln`, and `m::cos`; generate diagnostic read noise with explicitly keyed `KeyedRng` streams, keeping production purpose-11 sub-indices 0 and 1 unchanged. Regenerate the noisy-read table after changing its generator.
+
+## Other checks
+
+- **Observation boundary (L/M):** `game.rs:277–285` constructs true yaw and lead on the orchestrator side. `live.rs:615–632` adds each fielder's noise before calling `jump_from_reads`. That helper receives only `JumpReads`, his attributes, position index, and his own starting position. It cannot access `LiveInput`, true lead/yaw, outgoing spray, velocity, spin, or the batted path. The existing test that changes the outgoing ball while holding the observed swing/pitch inputs fixed passes. The face-from-lead coefficients are fixed belief constants (`live.rs:151–153`), not a fit to the current play's outcome.
+
+- **What the lead measures:** `t_plate` is the free pitch's crossing of `Y_JUDGE` (8.5 inches in front of the rear plate apex), not necessarily an event that actually happens after the bat hits the ball. `Swing::t_start()` is the executed swing's 10%-of-peak-speed threshold. In a 48-game HEAD probe, contact preceded the free crossing on 2,734 of 2,865 fair balls; the largest difference was 24.99 ms, and none lacked `t_plate`. For example, seed 0/play 3: start 0.253461793 s, contact 0.404443288 s, free crossing 0.410549675 s. Accordingly, the honest interpretation is a noisy **estimate of time to plate from the ball in flight**, paired with the visible bat launch, rather than timing two witnessed events. That is the aggregate perception approximation described in §5.10; a separate fielder estimator of that arrival time is not implemented. No outgoing-ball information enters that approximation. The lab-to-field transfer and independence of the two perceptual errors remain modeling assumptions, not findings established by the cited studies.
+
+- **Fusion and discard (M):** Each plausible face read is fused before the single spray mapping; the 18.6° collision residual enters once. A lead read remains unwrapped until the plausibility check. For example, lead 0.50 s implies face −369.62° and spray −497.48°, which is discarded; wrapping it first would incorrectly admit a −7.88° spray. Accepted faces occupy one interval shorter than 180°, so shortest-angle fusion cannot cross a seam between them. One discarded read leaves the other; both discarded reads give exactly the pitch prior. A scratch invocation of the HEAD helper verified both-discard fallback and exact left/right mirroring at mirrored fielder positions. Handedness changes yaw/face and spray signs consistently; lead itself does not change sign. The older marginal spray fit still overlaps slightly with the pitch-location prior, as the specification already acknowledges; M does not introduce a second copy of the spray residual.
+
+- **Independent arithmetic:** A separate Python calculation using inverse variances in degrees, rather than the Rust fusion helper, reproduced the new hand-worked expectations. Lead 0.180123 s gives face −29.5587613°, spray −34.9999154°, cue σ 19.2335856°, posterior mean −22.0036715° and σ 14.4801011°. The normalized RH jumps are `[0, 0, 0, 0, .4833, −.3109, .2761, −.7598, 0]`; the LH values match the test too. Adding the 10° bat read gives face σ 3.3871947°, posterior approximately −22.0586°, σ 14.4494626°, and the asserted jumps. The tiny mean difference from using the test's rounded yaw is below its tolerance.
+
+- **Production determinism:** Purpose 11 remains unchanged in the registry. The preexisting sub-index-0 pitch draw and sub-index-1 yaw draw retain their keys and single `truncated_normal(4.0)` call; the lead uses a separate per-fielder sub-index-2 stream. Changed production calculations use `bb_math::m`; no new unordered collection iteration or outcome roll was found. The examples are the exception reported above.
+
+- **Timing derivation (L):** The cited scales are represented appropriately as estimates for explicit visual judgments, rather than interception precision. [Linares, Holcombe & White (2009)](https://visionlab.neuroscience.barnard.edu/sites/visionlab.neuroscience.barnard.edu/files/content/Linares%2C%2BHolcombe%2C%2BWhite_Journal%2Bof%2BVision_2009.pdf) report Exp. 1's mean 75 ms and Exp. 8's mean 40 ms with salient nearby rings. The rings surround the trajectory; the bat-contact analogy is a model choice. [Brenner & Smeets (2010)](https://personal.fgb.vu.nl/~ebrenner/pdfs/VR10.pdf) discuss typical 40–50 ms synchrony/order judgments and distinguish them from finer interception/motion judgments; their own adjustment task allowed repeated presentations, so it should not itself be treated as a single-look measurement. [Their 2015 paper](https://research.vu.nl/files/1279249/JOV15.pdf) states the 20 ms best-case scale for simple explicit visual tasks. Neither paper establishes baseball scouting-grade anchors or independent errors for these two cues.
+
+- **Geometry (L):** HEAD's 48-game run gives 2,865 fair balls, mean yaw rate 1,917°/s, SD 137°/s, and mean pivot-to-contact radius 0.99 m. The earlier sample's 1,915°/s is a reasonable fixed model estimate; the arithmetic gives 76.6°, 39.2192°, and 149.609375° at grades 50/80/20. Independently evaluating the stated spatial formula gives about 0.74° at first, 5.43° at short, and 11.52° in center. The center-field median increases grade-80 total σ about 4.2%, supporting the typical-view simplification. It is not negligible in the edge-on tail: visible fraction .03 gives about 43.6° and a 49.5% increase. The specification explicitly records that limitation.
+
+- **Pitcher backup (K):** For a fielding point `(62,88)`, the independently calculated third-base backup is `(−29.3377,11.0195)`, 13 m beyond third along the throw line and in foul ground. The new jobs use separate free fielders for second, third, and first; the pitcher is no longer consumed as second's fallback. Existing runners-on priorities remain intact. `go_idle` clears stale backup state, and `back_up_throw` updates the assigned backup to the released throw's line. The relevant coverage, braking, and throw-line tests pass.
+
+- **The three K-era roam flags:** Replayed `2e715df` in an isolated export, stopping at seeds/plays `48/0`, `101/3`, and `129/78`. Each trace first puts the pitcher near third, then shows CF (agent `0x188`) release a throw, the ball pass through the infield behind home, and P (`0x181`) secure that loose ball. CF release/P pickup times were respectively 7.125/23.908 s, 5.512/16.629 s, and 6.049/14.032 s. These are real loose-ball pursuits, not idle-target leakage. At HEAD, `pitcher_roam 1 200` reports 43/15,011 flagged plays (0.3%); historical play counts need not survive L/M's changed games.
+
+- **Client (J), static review:** On a side change, all nine incoming fielder IDs are new to the fielding side, start at `Dugout`, bypass the 30 m entry shortening, and cruise at 4.8 m/s. Departing actors receive the same speed. `ResetDuration` includes incoming arrival times and every active outgoing leg; playback begins only after that duration. Travel functions handle zero distance without normalizing a zero vector and let long paths take their full time: 105 m takes 23.475 s before any departure delay, rather than being capped at six seconds. The 24-slot exit pool and its overflow handling are unchanged; the new longer reset gives outgoing actors time to arrive. I could not independently measure `exits_cut` or validate rendered gait/overlap behavior because the editor build was blocked. The common jog divisor is 600 cm/s, so 4.8 m/s gives rate .8 and an 8.2 m/s sprint about 1.367, within the existing clamps. Acceleration/deceleration still switches through the walking gait below 2.5 m/s; “steady jog” describes the cruising segment. The measured-speed diagnostic samples clips only when requested with `-BbClipSpeeds`.
+
+## Verification
+
+Commands run from `sim` unless noted. Cargo used the checkout's default `sim/target`. After an initial CLI link failed against the read-only default Zig cache, subsequent builds set `ZIG_GLOBAL_CACHE_DIR` and `ZIG_LOCAL_CACHE_DIR` beneath `sim/target/codex-probes/`. No Cargo target, export, or Zig cache was placed in `/tmp`.
+
+| Check | Result |
+|---|---|
+| `cargo test --workspace --release -j 4` | Passed: 141 tests, zero failures; doc tests also passed. |
+| Included `bb_game` determinism suite | All three passed: same seed across threads, log verification, recording independence. |
+| `cargo run --release -p bb_cli -- games --n 1024 --seed 5` | 5.55 runs/team-game; GB/LD/FB/PU hit .410/.719/.134/.047; no rules warnings. |
+| Same command with `--anticipation 80`, run after default completed | 5.49 runs/team-game; GB/LD/FB/PU hit .412/.720/.133/.045; no rules warnings. |
+| `cargo run --release -p bb_game --example bat_read_geometry -- 48` | 1,917°/s mean yaw rate; geometry summarized above. |
+| `cargo run --release -p bb_game --example spray_cues -- 200` | 11,615 fair balls; noisy-read “as built” residuals 22.54/22.36/22.06/20.20° at grades 20/50/80/160, reproducing the note. HEAD lead-face refit: 161.736° − 1,061.8°/s × lead, residual 3.61°. |
+| `cargo run --release -p bb_game --example pitcher_roam -- 1 200` | 43/15,011 flagged; selected historical traces checked separately on `2e715df`. |
+| Scratch Rust/Python probes | Confirmed fusion arithmetic, fallback, mirroring, timing semantics, geometry, and native-versus-`m` bit differences. |
+| Unreal `Build.sh BaseballClientEditor Linux Development -project=<absolute checkout>/client/BaseballClient.uproject -MaxParallelActions=4` | Blocked before C++ compilation: `System.IO.IOException: Read-only file system` while backing up a trace under `/home/natex/.config/Epic/UnrealBuildTool/`. Exit 134. Client review is static; no visual verification claimed. |
+
+The two requested 1,024-game run totals reproduced exactly to the reported precision. I did not rerun the historical five-mode or 4,096-game matrices.
+
+## Resolution
+
+Open.
