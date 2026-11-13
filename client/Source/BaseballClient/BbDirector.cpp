@@ -904,11 +904,11 @@ void ABbDirector::Tick(float DeltaSeconds)
 		if (ABbHUD* Hud = GetWorld()->GetFirstPlayerController() ? Cast<ABbHUD>(GetWorld()->GetFirstPlayerController()->GetHUD()) : nullptr)
 		{
 			const BbPlayInfo& In = Current.Info;
-			// The call appears when a viewer would know it: as the pitch arrives if it was not
-			// put in play, at the end of the play if it was.
-			// (Not before the umpire has signalled strike three.)
+			// The call appears when a viewer would know it: at the umpire's call if the pitch
+			// was not hit, at the end of the play if it was (the sim says when: call_s), and
+			// never before the umpire has signalled the last out (strike three).
 			const float LastCall = In.n_calls > 0 ? In.calls[In.n_calls - 1].t_s : 0.f;
-			const bool bKnown = In.exit_velocity_mps > 0.f ? PlayTime >= In.duration_s : PlayTime >= FMath::Max(0.55f, LastCall);
+			const bool bKnown = PlayTime >= FMath::Max(In.call_s, LastCall);
 			Hud->Call = bKnown ? FString(UTF8_TO_TCHAR(In.summary)) : FString();
 			// Outs, though, are called by the umpire as they happen (the sim times each
 			// signal: at once on a close play, within a second on a routine one).
@@ -948,7 +948,9 @@ void ABbDirector::Tick(float DeltaSeconds)
 				Hud->Scoreboard = FString::Printf(TEXT("AWAY %d   HOME %d    %s %d    %d out    %d-%d"), Src.away_runs, Src.home_runs, Half.top ? TEXT("Top") : TEXT("Bot"), Half.inning, Outs, bHalfOver && bKnown ? 0 : Src.balls, bHalfOver && bKnown ? 0 : Src.strikes);
 			}
 			const float Mph = In.release_speed_mps * 2.23694f;
-			Hud->PitchLine = In.exit_velocity_mps > 0.f
+			// Contact measurements only once the bat has met the ball: before that they would
+			// say he is going to swing and hit it.
+			Hud->PitchLine = In.exit_velocity_mps > 0.f && In.contact_s >= 0.f && PlayTime >= In.contact_s
 				? FString::Printf(TEXT("Pitch %.0f mph   Exit %.0f mph at %.0f deg"), Mph, In.exit_velocity_mps * 2.23694f, FMath::RadiansToDegrees(In.launch_angle_rad))
 				: FString::Printf(TEXT("Pitch %.0f mph"), Mph);
 		}

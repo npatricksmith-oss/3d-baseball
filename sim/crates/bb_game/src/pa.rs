@@ -285,6 +285,9 @@ pub struct PitchRecord {
     pub t_plate: Option<f64>,
     /// The swing as executed, if the batter started one (for the timeline's bat track).
     pub swing: Option<bb_agents::swing::Swing>,
+    /// When the batter made his swing-or-take decision (his commit tick), s after release.
+    /// Presentation keeps his stance unchanged until then.
+    pub t_decide: f64,
 }
 
 fn rng(seed: u64, play: u32, agent: u16, purpose: Purpose, sub: u32) -> KeyedRng {
@@ -448,6 +451,7 @@ pub fn simulate_pitch_ctx(mu: &Matchup, sc: &Scouting, count: Count, seed: u64, 
         }
         i += 1;
     }
+    let t_decide = t_now;
     let zone = (mu.zone.bottom, mu.zone.top);
     let post = bank.posterior();
     let aim = bank.dominant();
@@ -595,6 +599,7 @@ pub fn simulate_pitch_ctx(mu: &Matchup, sc: &Scouting, count: Count, seed: u64, 
         perceived_speed: bank.perceived_speed(sc),
         t_plate,
         swing: swing_done,
+        t_decide,
     }
 }
 

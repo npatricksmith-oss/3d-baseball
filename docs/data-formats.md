@@ -270,6 +270,12 @@ table BallTrack { segments: [BallSegment] (id: 0); }
 
 **Bat track:** sampled pose every **2 ms** over the swing [E], plus one exact sample at contact (or closest approach).
 
+*(M4, 2026-11-12, owner watch: "the batting outcome is already settled" before the pitch.)* Every pitch's track opens at t = 0 with the same stance sample (bat upright at the back shoulder), swing or take, because a client holds the first sample until the next one, and a swing's first sample (bat laid back) gave the decision away before the release. A swing leaves the stance at most `LOAD_S` = 0.05 s [E] before it starts and never before the batter's decision (`PitchRecord::t_decide`, his commit tick). The executed swing can start less than his latency after the decision (timing noise and the in-flight aim adjustment move it), and then the load is shorter (Codex batter-presentation review #1). A `SwingStart` marker marks the swing's start. Built samples are every 5 ms, not 2.
+
+**Awarded bases** (walk, hit batter, home run, ball out of play): the runners' root tracks hold still until they go, then jog at 6 m/s. On a walk or a hit batter they go at the umpire's call (the pitch's end, when the catcher has it, plus `T_signal` = 0.2 s, rules-spec §1.3) plus `AWARD_REACTION_S` = 0.4 s [E]; on a home run or a ball out of play, 0.4 s after the play ends. Root tracks interpolate linearly, so without the hold knot they drifted toward the base path from the release. A root knot at the same spot as a neighbour (the start or end of a hold) has zero velocity, and so the stationary facing, so it does not turn toward where he goes next.
+
+**When a client may show results** (`bb_timeline_info`): a complete timeline carries the future (telemetry, summary, view after the play), so the client must gate it. `contact_s` is the play time of contact (−1 if none): show contact measurements only from then on. `call_s` is when the result may be shown: on a pitch not hit, the umpire's call (pitch end + `T_signal`); on contact, the end of the play.
+
 ```fbs
 struct BatSample { t: float; knob: bb.Vec3f; rot: bb.Quatf; }   // bat axis = rot × (+X local)
 table BatTrack { agent: ushort (id: 0); model_id: ushort (id: 1); samples: [BatSample] (id: 2); }
