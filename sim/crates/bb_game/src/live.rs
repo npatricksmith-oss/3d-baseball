@@ -1787,7 +1787,10 @@ impl<'a> Sim<'a> {
             }
             let horiz = m::hypot(b.x - fd.pos.x, b.y - fd.pos.y);
             let reach = if receiver.is_some() { RECEIVE_REACH } else { REACH };
-            let standing = horiz <= reach && b.z <= zmax;
+            // Still on the ground from a dive (a rimmed ball that stayed close, agent-models
+            // §5.4): he can grab a low ball within arm's reach, but cannot dive again.
+            let down = fd.dove && self.t < fd.ready_at;
+            let standing = horiz <= reach && b.z <= if down { DIVE_MAX_Z } else { zmax };
             // The glove meets the ball where it passes closest (the capture instant,
             // agent-models §5.4), not where it first enters reach. Wait a tick only if the
             // next tick's contact is certain to be there and better: the ball touches nothing
@@ -1811,7 +1814,7 @@ impl<'a> Sim<'a> {
             }
             // Dive only for a ball the fielder's own prediction says won't come closer.
             // Nobody dives at a slow or resting ball: they walk up and field it.
-            let diving = !standing && self.f[i].role == Role::Chase && bv.norm() > 3.0 && horiz <= REACH + DIVE && b.z <= DIVE_MAX_Z && {
+            let diving = !standing && !down && self.f[i].role == Role::Chase && bv.norm() > 3.0 && horiz <= REACH + DIVE && b.z <= DIVE_MAX_Z && {
                 let mut closest = f64::INFINITY;
                 if let Some(p) = &fd.belief {
                     for j in 1..=6 {
@@ -1840,7 +1843,10 @@ impl<'a> Sim<'a> {
                 fd.ready_at = self.t + DIVE_GETUP_S;
             }
             if d <= POCKET {
-                fd.ready_at = self.t + fd.a.transfer + if diving { DIVE_GETUP_S } else { 0.0 };
+                // Up off the ground first (the get-up runs from his dive, whichever attempt
+                // secured the ball), then the transfer.
+                let up_at = if fd.dove { fd.ready_at.max(self.t) } else { self.t };
+                fd.ready_at = up_at + fd.a.transfer;
                 // Having caught it, he plants: his run dies out where braking stops him, not
                 // back at the spot he planned (which a running catch has carried him past).
                 fd.target = stop_point(fd);
@@ -2893,6 +2899,43 @@ mod tests {
         let y = sim.out.facts.iter().find_map(|f| if let Input::GloveSecured { y, .. } = f { Some(*y) } else { None });
         let y = y.expect("the ball passed through the fielder's reach");
         assert!((y - 80.0).abs() <= speed * DT, "caught {:.3} m from the fielder", (y - 80.0).abs());
+    }
+
+    /// The center fielder on the ground from a dive at time 1.0 (get-up ends at 2.5), and a
+    /// ball rolling across in front of him at 6 m/s, passing `pass_m` from him at time 2.0.
+    fn down_after_dive(pass_m: f64) -> (Vec<Input>, f64) {
+        let fx = fixture(&[]);
+        let inp = input(&fx, vec![RunnerIn { id: fx.st.batter, base: 0, speed: 8.2 }]);
+        let mut st = fx.st.clone();
+        let mut sim = new_sim(&inp, &mut st);
+        sim.f[CF].pos = Vec3::new(0.0, 80.0, 0.0);
+        loose_ball(&mut sim, 1.5, Vec3::new(-3.0, 80.0 - pass_m, 0.04), Vec3::new(6.0, 0.0, 0.0));
+        sim.f[CF].role = Role::Chase;
+        sim.f[CF].dove = true;
+        sim.f[CF].ready_at = 1.0 + DIVE_GETUP_S;
+        for _ in 0..60 {
+            world_tick(&mut sim);
+        }
+        (sim.out.facts.clone(), sim.f[CF].ready_at)
+    }
+
+    // Seed 7475 play 25 (2026-11-13): the center fielder's dive rimmed a 123 mph grounder off
+    // his glove, he dove again for the dribbler from the ground half a second later, and the
+    // catch started a second full get-up, so he held the ball 2.4 s. Down from a dive he can
+    // grab a ball within arm's reach (agent-models §5.4: a bobble that stays close can be
+    // re-fielded) but cannot dive again, and his get-up runs from the first dive.
+    #[test]
+    fn a_fielder_down_from_a_dive_does_not_dive_again() {
+        let (facts, _) = down_after_dive(1.6);
+        assert!(!facts.iter().any(|f| matches!(f, Input::GloveSecured { .. })), "dove from the ground: {facts:?}");
+    }
+
+    #[test]
+    fn a_fielder_down_from_a_dive_grabs_a_ball_in_reach_and_gets_up_on_time() {
+        let (facts, ready_at) = down_after_dive(0.5);
+        assert!(facts.iter().any(|f| matches!(f, Input::GloveSecured { .. })), "facts: {facts:?}");
+        // Up at 2.5 (the first dive's get-up), then the average outfielder's 0.85 s transfer.
+        assert!((ready_at - (2.5 + 0.85)).abs() < 1e-9, "ready to throw at {ready_at}");
     }
 
     /// A deep fly to center is caught at time 5.0 with the given runners in the given states;
