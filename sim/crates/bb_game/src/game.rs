@@ -444,6 +444,22 @@ mod tests {
     const R3: u16 = 5;
     const SHORTSTOP: u16 = 0x0186;
     const CENTER: u16 = 0x0188;
+    // Agent-models §3.4: no swing starts before the batter has decided on it. Seed 11 has a
+    // swing (play 227) whose plan and execution noise put its start 7 ms before the commit;
+    // it now starts at the commit.
+    #[test]
+    fn no_swing_starts_before_the_batter_decides() {
+        let mut g = Game::new(11, false);
+        let mut swings = 0;
+        while let Some(step) = g.step_pitch() {
+            if let Some(s) = &step.record.swing {
+                swings += 1;
+                assert!(s.t_start() >= step.record.t_decide, "play {}: swing starts at {:.4}, decision at {:.4}", step.play, s.t_start(), step.record.t_decide);
+            }
+        }
+        assert!(swings > 100);
+    }
+
     fn touch(t: f64, agent: u16, base: u8) -> Input {
         Input::BaseTouched { t, agent, base, holding_ball: false }
     }

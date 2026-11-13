@@ -237,6 +237,7 @@ t_commit = t̂_arrival − T_swing − T_latency
 - `T_swing` from `QuickHands` (§10): start of swing to contact, ≈ 0.15 s average [E].
 - `T_latency` = 0.05 s [E]: decision to first motor output.
 - The batter re-evaluates `t_commit` each observation and commits when the current time reaches it. For a 95 mph fastball (0.40 s flight), this leaves about 0.2 s of viewing before commit.
+- **No swing starts before the commit** (built 2026-11-13, `Swing::start_no_earlier_than`). The planned swing is timed from the believed arrival, and execution noise and the later timing adjustment (§3.6) move it; a start that would fall before the commit is moved to the commit, the whole swing with it, so he meets the ball that much later. A start inside `T_latency` after the commit is allowed (a shorter load). Before this, 0.16% of swings (13 of 8,199 in 64 games) started up to 18 ms before the batter had decided to swing.
 
 ### 3.5 Swing or take
 

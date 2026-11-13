@@ -215,6 +215,19 @@ impl Swing {
     pub fn t_start(&self) -> f64 {
         self.t_c - START_WIDTHS * self.width
     }
+    /// Delay the whole swing, if need be, so it starts no earlier than `t` (agent-models
+    /// §3.4): a batter cannot start a swing before he has decided on it. One whose plan and
+    /// execution noise would start it earlier starts at `t` and meets the ball that much later.
+    pub fn start_no_earlier_than(&mut self, t: f64) {
+        let early = t - self.t_start();
+        if early > 0.0 {
+            self.t_c += early;
+            // Exactly: rounding can leave the start an ulp short of `t`.
+            while self.t_start() < t {
+                self.t_c = self.t_c.next_up();
+            }
+        }
+    }
 }
 
 impl BatPose for Swing {

@@ -498,8 +498,9 @@ pub fn simulate_pitch_ctx(mu: &Matchup, sc: &Scouting, count: Count, seed: u64, 
         let planner = |p: Vec3, t: f64| plan_swing(&mu.batter, &mu.template, &mu.bat.profile, &mu.bat.mass, mu.bat.contact.ss_from_tip, p + off, t, mu.template.attack_angle);
         let sn = SwingNoise::new(&mu.batter, mu.knobs.swing);
         let ex = execute_swing(&planner(cur, t_aim), &sn, &mut rng(seed, play, BATTER, Purpose::SwingExecution, 0));
-        let mut swing = ex.swing;
         let t_commit = t_now;
+        let mut swing = ex.swing;
+        swing.start_no_earlier_than(t_commit);
         // Phase rate may change ±10% over the swing still to come after motor latency.
         let dt_lim = mu.template.adj_phase_frac * (t_aim - (t_commit + pc.latency)).max(0.0);
         let t_aim0 = t_aim;
@@ -540,6 +541,7 @@ pub fn simulate_pitch_ctx(mu: &Matchup, sc: &Scouting, count: Count, seed: u64, 
             est_error = truth_err(want, t_want);
             // The same executed placement deviation rides on the adjusted plan.
             let mut s2 = apply_placement(&planner(cur, t_aim), &ex.placement);
+            s2.start_no_earlier_than(t_commit);
             s2.t_brake = swing.t_brake;
             swing = s2;
         }
