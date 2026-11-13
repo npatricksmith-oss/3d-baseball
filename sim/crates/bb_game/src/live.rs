@@ -428,6 +428,18 @@ fn stop_point(fd: &Fielder) -> Vec3 {
     Vec3::new(p.x, p.y, 0.0)
 }
 
+/// A fielder with no job (agent-models §5.7) pulls up where braking stops him
+/// ([`stop_point`]) instead of running on toward whatever his last job (a cutoff spot, a backup
+/// spot) or his own intercept of the ball left in `target`. Every transition into `Role::Idle`
+/// goes through here; a caller with a real job for him (a base to cover, a throw to back up)
+/// assigns it afterwards. Called on the transition only, never per tick: an idle man keeps
+/// braking to the spot he chose when his job ended (Codex idle-fielder review #1).
+fn go_idle(fd: &mut Fielder) {
+    fd.role = Role::Idle;
+    fd.backs = None;
+    fd.target = stop_point(fd);
+}
+
 /// The backspin (rpm; negative: topspin) a batted ball typically has at launch angle `la`
 /// (rad): a fielder's belief about the contact model. Medians by 10° launch-angle bin from
 /// `examples/batted_spin.rs` (48 games, 2026-11-12), interpolated linearly at the bin
@@ -1172,7 +1184,7 @@ impl<'a> Sim<'a> {
             Ball::Thrown { receiver, .. } if receiver == i => return,
             // A throw to someone else has gone by him (see `holder_act`).
             Ball::Thrown { .. } => {
-                self.f[i].role = Role::Idle;
+                go_idle(&mut self.f[i]);
                 return;
             }
             _ => {}
@@ -1182,7 +1194,7 @@ impl<'a> Sim<'a> {
             Some((who, b)) if who == i => b,
             // His job is over (or someone else's): he goes back to covering.
             _ => {
-                self.f[i].role = Role::Idle;
+                go_idle(&mut self.f[i]);
                 self.cover_roles_after_chasers();
                 if matches!(self.ball, Ball::Free { .. }) {
                     self.assign_relay();
@@ -1205,16 +1217,16 @@ impl<'a> Sim<'a> {
         let outfield_hit = depth > INFIELD_R;
         let on = |b: u8| self.r.iter().any(|r| r.start == b && !r.out && !r.scored);
         let empty = !(on(1) || on(2) || on(3));
-        for fd in self.f.iter_mut() {
-            fd.backs = None;
-            if fd.role == Role::Backup {
-                fd.role = Role::Idle;
+        for i in 0..9 {
+            self.f[i].backs = None;
+            if self.f[i].role == Role::Backup {
+                go_idle(&mut self.f[i]);
             }
         }
         // With nobody on base the catcher is not needed at home: he trails the batter to
         // back up first.
         if empty && self.f[1].role == Role::Cover(4) {
-            self.f[1].role = Role::Idle;
+            go_idle(&mut self.f[1]);
         }
         let mut free: Vec<usize> = (0..9).filter(|&i| self.f[i].role == Role::Idle).collect();
         // Behind the fielder: the nearest free outfielder gets into the ball's line beyond
@@ -1352,8 +1364,7 @@ impl<'a> Sim<'a> {
                 // intercept of the ball in `target`, and a man with no job does not chase it
                 // (agent-models §5.7; docs/calibration/2026-11-12-pitcher-outfield-diagnosis.md).
                 // The ground-ball break reads its own saved copy of the intercepts.
-                self.f[i].role = Role::Idle;
-                self.f[i].target = stop_point(&self.f[i]);
+                go_idle(&mut self.f[i]);
             }
         }
     }
@@ -1486,8 +1497,7 @@ impl<'a> Sim<'a> {
                     // A receiver steps straight to the bag; a relay man stays put. Either goes
                     // on quickly, already facing his next target.
                     if relay {
-                        fd.target = stop_point(fd);
-                        fd.role = Role::Idle;
+                        go_idle(fd);
                     } else {
                         fd.target = base_pos(to_base);
                     }
@@ -1999,10 +2009,10 @@ impl<'a> Sim<'a> {
         }
         self.throw_to(by, tgt, b, receiver, false);
         self.f[receiver].target = tgt;
-        // A throw that goes past the cutoff man ends his job: he is free to back it up.
+        // A throw that goes past the cutoff man ends his job: he pulls up, free to back it up.
         for i in 0..9 {
             if matches!(self.f[i].role, Role::Relay(_)) {
-                self.f[i].role = Role::Idle;
+                go_idle(&mut self.f[i]);
             }
         }
         self.back_up_throw(fd.pos, b);
@@ -3358,6 +3368,68 @@ mod tests {
             sim.t += DT;
         }
         assert!(sim.f[0].vel.norm() < 1e-9 && (sim.f[0].pos - start).norm() < 5.0, "P at {:?} moving {:?}", sim.f[0].pos, sim.f[0].vel);
+    }
+
+    // Codex idle-fielder review #1: every way into `Role::Idle` brakes the fielder, not only
+    // the calls. Runner on second, ball held by the right fielder at (25, 62) m: the first
+    // baseman is the cutoff to home, his spot ~12.5 m in from where he stands. His job then
+    // ends three ways: the right fielder throws straight to second past him (`holder_act`),
+    // a throw to another man is in the air (`update_relay`), or an infielder has the ball
+    // (`update_relay`). Nobody gives him another job (every base is covered and the throw's
+    // backup is someone else), so a man standing still stays where he is, and a man already
+    // running toward his old spot at 7 m/s pulls up within v²/(2·6 m/s²) ≈ 4.08 m along his
+    // line instead of going on to it.
+    #[test]
+    fn a_retired_cutoff_man_with_no_job_stops() {
+        const R: AgentId = 0x0007;
+        const B1: usize = 2;
+        let fx = fixture(&[(R, 2)]);
+        let inp = input(&fx, vec![RunnerIn { id: fx.st.batter, base: 0, speed: 8.2 }, RunnerIn { id: R, base: 2, speed: 8.2 }]);
+        let rf_at = Vec3::new(25.0, 62.0, 0.0);
+        for (case, run) in [(0, 0.0), (1, 0.0), (2, 0.0), (0, 7.0), (2, 7.0)] {
+            let mut st = fx.st.clone();
+            let mut sim = new_sim(&inp, &mut st);
+            sim.t = 5.0;
+            held_at(&mut sim, 8, rf_at);
+            assert_eq!(sim.f[B1].role, Role::Relay(4), "case {case}: the first baseman is the cutoff to home");
+            let spot = sim.f[B1].target;
+            let start = sim.f[B1].pos;
+            assert!((spot - start).norm() > 10.0, "case {case}: cutoff spot {spot:?} from {start:?}");
+            let dir = Vec3::new(spot.x - start.x, spot.y - start.y, 0.0).normalized();
+            sim.f[B1].vel = dir * run;
+            // The second-base cover is on his bag; the runner on second is standing (no play).
+            let c2 = (0..9).find(|&i| sim.f[i].role == Role::Cover(2)).expect("second is covered");
+            sim.f[c2].pos = base_pos(2);
+            sim.f[c2].target = base_pos(2);
+            match case {
+                0 => {
+                    sim.holder_act();
+                    assert!(matches!(sim.ball, Ball::Thrown { receiver, relay: false, .. } if receiver == c2), "case 0: a straight throw to second");
+                }
+                1 => {
+                    sim.throw_to(8, base_pos(2), 2, c2, false);
+                    sim.update_relay();
+                }
+                _ => {
+                    sim.f[c2].target = sim.f[c2].pos;
+                    sim.ball = Ball::Held { by: c2 };
+                    sim.update_relay();
+                }
+            }
+            assert_eq!(sim.f[B1].role, Role::Idle, "case {case}: his job is over and he has no other");
+            for _ in 0..200 {
+                sim.move_fielders();
+                sim.t += DT;
+            }
+            let fd = &sim.f[B1];
+            let moved = fd.pos - start;
+            assert!(fd.vel.norm() < 1e-9, "case {case} (v0 {run}): still moving {:?} at {:?}", fd.vel, fd.pos);
+            let want = run * run / (2.0 * 6.0);
+            assert!((moved.norm() - want).abs() < 0.15, "case {case} (v0 {run}): moved {:.3} m, expected {want:.3} m; at {:?}", moved.norm(), fd.pos);
+            if run > 0.0 {
+                assert!(moved.normalized().dot(dir) > 0.99, "case {case}: stops on his line of motion");
+            }
+        }
     }
 
     // Watch-fixes review #1–#3: the catcher goes back to cover home once a runner rounds
