@@ -1,0 +1,26 @@
+id = "twoonbase-008"
+title = "Two out: the runner from third comes back to third and the runner from second arrives there too; the batter is retired before first: both runners on third are left on base (2, not 1)"
+# OBR 5.06(a)(2): two runners may not occupy a base, but neither is out merely for sharing it
+# (only the one not entitled is out, and only when tagged). OBR 9.02(a)(3) / rules-spec I1, I10:
+# left on base counts every runner who reached and neither scored nor was put out. The
+# batter's force at first is the third out (OBR 5.08(a)(1)): no run. Codex rules-passing
+# review #5 (pre-existing: LOB was counted from one slot per base).
+rules = ["OBR 5.06(a)(2)", "OBR 9.02(a)(3)", "rules-spec 5.5", "rules-spec 11 I10"]
+milestone = "M4"
+tags = ["two-on-base", "lob"]
+initial = { inning = 5, outs = 2, batter = "A.6", bases = { second = "A.4", third = "A.5" } }
+step = [
+  { fact = "PitchDelivered", t = 0.0 },
+  { fact = "BatContact", t = 0.42 },
+  { fact = "BaseLeft", t = 0.6, agent = "A.5", base = 3 },
+  { fact = "BaseLeft", t = 0.6, agent = "A.4", base = 2 },
+  { fact = "BallTouched", t = 0.8, what = "Ground", pos = [-8.0, 30.0] },
+  { fact = "GloveSecured", t = 1.3, fielder = "H.SS", pos = [-8.0, 30.0] },
+  { fact = "BaseTouched", t = 3.0, agent = "A.5", base = 3 },
+  { fact = "BaseTouched", t = 3.4, agent = "A.4", base = 3 },
+  { fact = "TagContact", t = 3.8, fielder = "H.1B", runner = "A.6", holding_ball = true, expect_events = [
+    { event = "RunnerOut", runner = "A.6", base = 1, kind = "Force" },
+    { event = "HalfInningEnded", runs = 0, left_on_base = 2 },
+  ] },
+]
+expect = { score = [0, 0], inning = 5, half = "bottom", outs = 0 }

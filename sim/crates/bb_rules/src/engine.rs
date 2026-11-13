@@ -104,8 +104,8 @@ fn step_position(st: &mut RulesState, p: &RunnerPosition) -> Vec<Event> {
         ev.push(Event::RulesWarning { code: "time_reversed" });
     }
     lp.last_t = lp.last_t.max(p.t);
-    // A runner whose home touch is pending is off the base paths until he retouches.
-    let Some(i) = lp.runners.iter().position(|r| r.runner == p.runner && !r.out && r.scored_at.is_none()) else { return ev };
+    lp.sampled = true;
+    let Some(i) = lp.runners.iter().position(|r| r.runner == p.runner && on_paths(r)) else { return ev };
     let r = &mut lp.runners[i];
     if r.start_base == 0 && r.at == 1 && r.last_base == 1 && r.on_base.is_none() && r.overrun != Overrun::Ended {
         if line_dist(p.x, p.y) > attempt_m {
@@ -123,70 +123,119 @@ fn step_position(st: &mut RulesState, p: &RunnerPosition) -> Vec<Event> {
         None => path_progress(r.at, p.x, p.y),
     };
     r.sample = Some((p.t, s));
-    if !passing_judged(lp) {
-        return ev;
-    }
     // Compare with every runner whose position is known at this instant: standing on a base,
-    // or sampled at the same time.
-    let mut passer = None;
-    for (j, o) in lp.runners.iter().enumerate() {
-        if j == i || o.out || o.scored_at.is_some() {
-            continue;
-        }
-        let so = match (o.on_base, o.sample) {
-            (Some(b), _) => b as f64,
-            (None, Some((ts, so))) if (ts - p.t).abs() < 1e-9 => so,
-            _ => continue,
-        };
-        let (fol, s_fol, pre, s_pre) = if lp.runners[i].start_base < o.start_base { (i, s, j, so) } else { (j, so, i, s) };
-        if s_fol - s_pre > margin {
-            passer = Some((fol, pre));
+    // or sampled at the same time. Every pass is an out: one at a time in runner order,
+    // re-reading the play after each, until none remain, the sampled runner is out, or the
+    // inning ends (one retreat can leave several followers ahead of him).
+    while let PlayState::Live(lp) = &st.play {
+        if lp.runners[i].out {
             break;
         }
-    }
-    if let Some((fol, pre)) = passer {
+        let Some((fol, pre)) = pass_at_sample(lp, i, p.t, s, margin) else { break };
         let base = (lp.runners[fol].at + 1).min(4);
         passing_out(st, p.t, fol, pre, base, &mut ev);
     }
     ev
 }
 
-/// Passing is judged only once the batted ball is fair or caught: an uncaught foul ball is
-/// dead, and nothing the runners did while it was in doubt counts (rules-spec §5.5).
+/// The first pass (passer, passed), in runner order, between runner `i`, sampled at `t` with
+/// path progress `s`, and a runner whose position is known at `t` (rules-spec §5.5).
+fn pass_at_sample(lp: &LivePlay, i: usize, t: f64, s: f64, margin: f64) -> Option<(usize, usize)> {
+    for (j, o) in lp.runners.iter().enumerate() {
+        if j == i || !on_paths(o) {
+            continue;
+        }
+        let so = match (o.on_base, o.sample) {
+            (Some(b), _) => b as f64,
+            (None, Some((ts, so))) if (ts - t).abs() < 1e-9 => so,
+            _ => continue,
+        };
+        let (fol, s_fol, pre, s_pre) = if lp.runners[i].start_base < o.start_base { (i, s, j, so) } else { (j, so, i, s) };
+        if s_fol - s_pre > margin {
+            return Some((fol, pre));
+        }
+    }
+    None
+}
+
+/// A runner whose home touch is pending but who owes a retouch of his time-of-pitch base on a
+/// caught fly (rules-spec §5.3): he is going back (or is liable to the appeal), so he is still
+/// on the base paths, though his pending run stands until he retouches.
+fn returning(r: &RunnerState) -> bool {
+    r.scored_at.is_some() && r.retouch_required && !r.retouched
+}
+
+/// A runner who can pass or be passed (rules-spec §5.5): not out, and not home, unless he is
+/// returning from a pending home touch.
+fn on_paths(r: &RunnerState) -> bool {
+    !r.out && (r.scored_at.is_none() || returning(r))
+}
+
+/// A pass counts once the batted ball is fair or caught; while it is in doubt the pass is held
+/// (an uncaught foul ball is dead, and nothing the runners did meanwhile counts) (rules-spec
+/// §5.5).
 fn passing_judged(lp: &LivePlay) -> bool {
     lp.caught || lp.fair == FairFoul::Fair
 }
 
 /// Passing judged at a base touch (rules-spec §5.5): runner `i` is exactly on base `b`; every
 /// other live runner is short of the base after the one he touched last and past the one
-/// before it. Returns (passer, passed).
+/// before it. Returns (passer, passed): the toucher if he passed a preceding runner, else the
+/// first following runner (in runner order) he has fallen behind.
 fn passed_on_touch(lp: &LivePlay, i: usize, b: Base) -> Option<(usize, usize)> {
-    if !passing_judged(lp) {
-        return None;
+    let si = lp.runners[i].start_base;
+    let others = || lp.runners.iter().enumerate().filter(|&(j, o)| j != i && on_paths(o));
+    // A preceding runner `o` is behind base `o.at + 1`, so behind `b` when b > o.at.
+    if let Some((j, _)) = others().find(|(_, o)| si < o.start_base && b > o.at) {
+        return Some((i, j));
     }
-    for (j, o) in lp.runners.iter().enumerate() {
-        if j == i || o.out || o.scored_at.is_some() {
-            continue;
-        }
-        if lp.runners[i].start_base < o.start_base {
-            // `o` precedes and is behind base `o.at + 1`, so behind `b` when b > o.at.
-            if b > o.at {
-                return Some((i, j));
-            }
-        } else if o.at > b {
-            // `o` follows and is past base `o.at - 1 >= b`.
-            return Some((j, i));
-        }
-    }
-    None
+    // A following runner `o` is past base `o.at - 1 >= b`.
+    others().find(|(_, o)| si > o.start_base && o.at > b).map(|(j, _)| (j, i))
 }
 
-/// Record a passing out: the following runner `fol` passed the preceding runner `pre`.
+/// Judge every pass that `agent`'s touch of `base` establishes (rules-spec §5.5): one at a
+/// time in runner order, re-reading the play after each out, until none remain, the toucher
+/// himself is out, or the inning ends. One retreat can leave several followers ahead of him.
+fn judge_touch_passes(st: &mut RulesState, t: f64, agent: AgentId, base: Base, ev: &mut Vec<Event>) {
+    loop {
+        let PlayState::Live(lp) = &st.play else { return };
+        let Some(i) = lp.runners.iter().position(|x| x.runner == agent && !x.out) else { return };
+        let Some((fol, pre)) = passed_on_touch(lp, i, base) else { return };
+        let hb = if fol == i { base } else { (lp.runners[fol].at + 1).min(4) };
+        passing_out(st, t, fol, pre, hb, ev);
+    }
+}
+
+/// Record a passing out: the following runner `fol` passed the preceding runner `pre`. While
+/// the batted ball is in doubt the pass is held, with its time, and the passer leaves the play
+/// at once; it is judged when the ball is ruled (`judge_pending_passes`).
 fn passing_out(st: &mut RulesState, t: f64, fol: usize, pre: usize, base: Base, ev: &mut Vec<Event>) {
-    let PlayState::Live(lp) = &st.play else { return };
+    let PlayState::Live(lp) = &mut st.play else { return };
     let (f, p) = (lp.runners[fol].runner, lp.runners[pre].runner);
+    if !passing_judged(lp) {
+        let r = &mut lp.runners[fol];
+        r.out = true;
+        r.on_base = None;
+        lp.pending_passes.push(PendingPass { t, runner: f, passed: p, base });
+        return;
+    }
     ev.push(Event::RunnerPassed { runner: f, passed: p });
     record_out(st, t, f, base, OutKind::Tag, ev);
+}
+
+/// The batted ball is now fair or caught: every pass held while it was in doubt stands, each
+/// recorded at its own time and in order, until none remain or the inning ends (rules-spec
+/// §5.5, §6.4).
+fn judge_pending_passes(st: &mut RulesState, ev: &mut Vec<Event>) {
+    let PlayState::Live(lp) = &mut st.play else { return };
+    let passes = core::mem::take(&mut lp.pending_passes);
+    for pp in passes {
+        if !matches!(st.play, PlayState::Live(_)) {
+            return;
+        }
+        ev.push(Event::RunnerPassed { runner: pp.runner, passed: pp.passed });
+        retire(st, pp.t, pp.runner, pp.base, OutKind::Tag, ev);
+    }
 }
 
 fn step_input(st: &mut RulesState, input: &Input) -> Vec<Event> {
@@ -271,9 +320,17 @@ fn step_input(st: &mut RulesState, input: &Input) -> Vec<Event> {
         Input::BaseTouched { t, agent, base, holding_ball } => base_touched(st, t, agent, base, holding_ball, &mut ev),
         Input::BaseLeft { t, agent, base } => {
             if let PlayState::Live(lp) = &mut st.play {
+                let sampled = lp.sampled;
                 if let Some(r) = lp.runners.iter_mut().find(|r| r.runner == agent && !r.out) {
                     if r.on_base == Some(base) {
                         r.on_base = None;
+                    }
+                    // The batter-runner leaving first after his first touch of it: with samples in
+                    // the play he is protected from now until a sample shows an attempt toward
+                    // second, so a tag before his next sample is judged like one after it
+                    // (rules-spec §5.5; OBR 5.09(b)(4) exception).
+                    if sampled && base == 1 && r.start_base == 0 && r.at == 1 && r.last_base == 1 && r.overrun == Overrun::NotSeen {
+                        r.overrun = Overrun::Protected;
                     }
                     if base == r.start_base && r.left_start_at.is_none() {
                         r.left_start_at = Some(t);
@@ -382,6 +439,13 @@ fn start_pa(st: &mut RulesState, ev: &mut Vec<Event>) {
 /// Complete a plate appearance; then the game ends (walk-off), the half ends, or the next
 /// batter comes up — exactly one of these.
 fn end_pa(st: &mut RulesState, result: PaResult, ev: &mut Vec<Event>) {
+    end_pa_lob(st, result, None, ev);
+}
+
+/// `end_pa`, with the left-on-base count of a third out made during a live play (counted from
+/// runner identities, since two runners can share a base: rules-spec §6.4). `None` counts the
+/// occupied bases.
+fn end_pa_lob(st: &mut RulesState, result: PaResult, lob: Option<u8>, ev: &mut Vec<Event>) {
     ev.push(Event::PlateAppearanceEnded { batter: st.batter, result });
     let side = st.half.batting();
     st.next_up[side] = (st.next_up[side] + 1) % 9;
@@ -390,16 +454,16 @@ fn end_pa(st: &mut RulesState, result: PaResult, ev: &mut Vec<Event>) {
     if st.walk_off {
         finish(st, true, ev);
     } else if st.outs >= 3 {
-        end_half(st, ev);
+        end_half(st, lob, ev);
     } else {
         start_pa(st, ev);
     }
 }
 
-fn end_half(st: &mut RulesState, ev: &mut Vec<Event>) {
+fn end_half(st: &mut RulesState, lob: Option<u8>, ev: &mut Vec<Event>) {
     let side = st.half.batting();
     let runs = *st.runs_by_inning[side].last().unwrap_or(&0);
-    let lob = st.bases.iter().filter(|b| b.is_some()).count() as u8;
+    let lob = lob.unwrap_or_else(|| st.bases.iter().filter(|b| b.is_some()).count() as u8);
     ev.push(Event::HalfInningEnded { runs, left_on_base: lob });
     st.bases = [None; 3];
     let [away, home] = st.score();
@@ -546,6 +610,8 @@ fn new_live_play(st: &RulesState) -> LivePlay {
         outs: Vec::new(),
         runs_pending: Vec::new(),
         last_t: 0.0,
+        pending_passes: Vec::new(),
+        sampled: false,
     }
 }
 
@@ -559,6 +625,7 @@ fn decide(st: &mut RulesState, fair: bool, ev: &mut Vec<Event>) {
     if fair {
         lp.fair = FairFoul::Fair;
         apply_call(st, PitchCall::InPlay, ev);
+        judge_pending_passes(st, ev);
     } else {
         lp.fair = FairFoul::Foul;
         if lp.caught {
@@ -625,9 +692,13 @@ fn live_touch(st: &mut RulesState, _t: f64, what: Touch, ev: &mut Vec<Event>) {
 }
 
 fn home_run(st: &mut RulesState, ev: &mut Vec<Event>) {
-    let PlayState::Live(lp) = st.play.clone() else { return };
+    let PlayState::Live(_) = st.play else { return };
     ev.push(Event::FairFoulDecided { fair: true });
     ev.push(Event::PitchResult { call: PitchCall::InPlay, balls: st.balls, strikes: st.strikes });
+    // A pass made before the ball left the park stands (rules-spec §5.5); passing on the trot
+    // itself is deferred.
+    judge_pending_passes(st, ev);
+    let PlayState::Live(lp) = st.play.clone() else { return };
     st.play = PlayState::Dead;
     st.bases = [None; 3];
     // Every runner not put out scores exactly once, including any who already touched home
@@ -687,6 +758,8 @@ fn glove(st: &mut RulesState, t: f64, fielder: AgentId, x: f64, y: f64, ev: &mut
             ev.push(Event::FairFoulDecided { fair: lp.fair == FairFoul::Fair });
             ev.push(Event::PitchResult { call: PitchCall::InPlay, balls: st.balls, strikes: st.strikes });
         }
+        // Passes made while the fly was in the air came first (rules-spec §5.5).
+        judge_pending_passes(st, ev);
         let b = st.batter;
         record_out(st, t, b, 0, OutKind::FlyOut, ev);
     } else if lp.fair == FairFoul::Pending {
@@ -724,7 +797,13 @@ fn base_touched(st: &mut RulesState, t: f64, agent: AgentId, base: Base, holding
     let retouch = base == r.start_base && r.retouch_required && !r.retouched && first_touch.map(|ft| t >= ft).unwrap_or(false);
     if r.scored_at.is_some() {
         if !retouch {
-            // Passing bases on the way back to retouch: nothing changes until he gets there.
+            // On his way back to retouch (rules-spec §5.3) he is at this base now, and can pass
+            // or be passed (§5.5); his pending run stands until he retouches.
+            if returning(r) && base < 4 {
+                r.at = base;
+                r.on_base = Some(base);
+                judge_touch_passes(st, t, agent, base, ev);
+            }
             return;
         }
         // He touched home before the catch and has come back to retouch (rules-spec §5.3):
@@ -739,13 +818,9 @@ fn base_touched(st: &mut RulesState, t: f64, agent: AgentId, base: Base, holding
         r.retouched = true;
         r.at = base;
         r.on_base = Some(base);
-        // A runner going back can leave a following runner ahead of him (OBR 5.09(b)(9)
+        // A runner going back can leave following runners ahead of him (OBR 5.09(b)(9)
         // comment: passing by the lead runner's actions).
-        let i = lp.runners.iter().position(|x| x.runner == agent && !x.out).unwrap();
-        if let Some((fol, pre)) = passed_on_touch(lp, i, base) {
-            let hb = if fol == i { base } else { (lp.runners[fol].at + 1).min(4) };
-            passing_out(st, t, fol, pre, hb, ev);
-        }
+        judge_touch_passes(st, t, agent, base, ev);
         return;
     }
     if base > r.last_base + 1 {
@@ -753,19 +828,17 @@ fn base_touched(st: &mut RulesState, t: f64, agent: AgentId, base: Base, holding
         return;
     }
     let i = lp.runners.iter().position(|x| x.runner == agent && !x.out).unwrap();
-    if let Some((fol, pre)) = passed_on_touch(lp, i, base) {
-        // Reaching a base a preceding runner has not reached means passing him on the way
-        // (out before the touch counts); a preceding runner falling back behind a following
-        // one retires the following one (OBR 5.09(b)(9) comment), and his own touch then
-        // counts as usual.
-        let hb = if fol == i { base } else { (lp.runners[fol].at + 1).min(4) };
-        passing_out(st, t, fol, pre, hb, ev);
-        if fol == i {
-            return;
-        }
+    if let Some((fol, pre)) = passed_on_touch(lp, i, base)
+        && fol == i
+    {
+        // Reaching a base a preceding runner has not reached means passing him on the way: out
+        // before the touch counts.
+        passing_out(st, t, i, pre, base, ev);
+        return;
     }
-    // The passing out may have ended the inning.
-    let PlayState::Live(lp) = &mut st.play else { return };
+    // His touch counts. A preceding runner falling back behind following ones retires each of
+    // them (OBR 5.09(b)(9) comment), judged after his touch so he stands on the base he
+    // reached if one of those outs ends the inning.
     let r = &mut lp.runners[i];
     if r.start_base == 0 && base == 1 && r.last_base >= 1 {
         // The batter-runner back on first: any overrun protection is over.
@@ -782,13 +855,16 @@ fn base_touched(st: &mut RulesState, t: f64, agent: AgentId, base: Base, holding
             r.on_base = None;
             let id = r.runner;
             lp.runs_pending.push((t, id));
+            // Nobody can be ahead of a runner at home.
             try_walk_off(st, ev);
+            return;
         }
     } else {
         // Returning to an earlier base (or re-touching): the runner is now there.
         r.at = base;
         r.on_base = Some(base);
     }
+    judge_touch_passes(st, t, agent, base, ev);
 }
 
 /// End the game at the winning home touch when that run can no longer be cancelled
@@ -831,8 +907,17 @@ fn try_walk_off(st: &mut RulesState, ev: &mut Vec<Event>) {
 }
 
 fn record_out(st: &mut RulesState, t: f64, runner: AgentId, base: Base, kind: OutKind, ev: &mut Vec<Event>) {
+    let PlayState::Live(lp) = &st.play else { return };
+    if lp.runners.iter().any(|r| r.runner == runner && !r.out) {
+        retire(st, t, runner, base, kind, ev);
+    }
+}
+
+/// Put `runner` out at time `t`. Unlike `record_out` it also takes a runner already off the
+/// play awaiting a held pass (`judge_pending_passes`).
+fn retire(st: &mut RulesState, t: f64, runner: AgentId, base: Base, kind: OutKind, ev: &mut Vec<Event>) {
     let PlayState::Live(lp) = &mut st.play else { return };
-    let Some(idx) = lp.runners.iter().position(|r| r.runner == runner && !r.out) else { return };
+    let Some(idx) = lp.runners.iter().position(|r| r.runner == runner) else { return };
     let start = lp.runners[idx].start_base;
     lp.runners[idx].out = true;
     lp.runners[idx].on_base = None;
@@ -873,15 +958,19 @@ fn third_out(st: &mut RulesState, t: f64, start: Base, kind: OutKind, ev: &mut V
             score_run(st, r, ev);
         }
     }
-    // Left on base: the runners actually standing on bases now.
+    // Left on base: the runners actually standing on bases now, counted by identity (two runners
+    // sharing a base are both left on it, OBR 5.06(a)(2)); the one-slot-per-base `bases` keeps
+    // the later one for the record.
     st.bases = [None; 3];
+    let mut lob = 0u8;
     for r in &lp.runners {
         // An overrunning batter-runner still protected is entitled to first (§5.5).
         if !r.out && r.scored_at.is_none() && (1..=3).contains(&r.at) && (r.on_base == Some(r.at) || r.overrun == Overrun::Protected) {
             st.bases[(r.at - 1) as usize] = Some(r.runner);
+            lob += 1;
         }
     }
-    end_pa(st, PaResult::BattedBall, ev);
+    end_pa_lob(st, PaResult::BattedBall, Some(lob), ev);
 }
 
 /// The play has settled (rules-spec §5.8 item 3): count runs, place runners, next batter.
@@ -929,13 +1018,15 @@ fn close_play(st: &mut RulesState, lp: &LivePlay, ev: &mut Vec<Event>) {
 /// back to the last base touched; a batter-runner who never reached first is placed there
 /// with forced runners advancing, and the whole thing is reported.
 fn play_timeout(st: &mut RulesState, _t: f64, ev: &mut Vec<Event>) {
-    let PlayState::Live(mut lp) = st.play.clone() else { return };
+    let PlayState::Live(lp) = &mut st.play else { return };
     ev.push(Event::RulesWarning { code: "play_timeout" });
     if lp.fair == FairFoul::Pending {
         lp.fair = FairFoul::Fair;
         ev.push(Event::FairFoulDecided { fair: true });
         ev.push(Event::PitchResult { call: PitchCall::InPlay, balls: st.balls, strikes: st.strikes });
+        judge_pending_passes(st, ev);
     }
+    let PlayState::Live(mut lp) = st.play.clone() else { return };
     // Resolve occupancy from the batter outward: anyone at base 0 goes to first, pushing
     // forced runners along.
     let mut order: Vec<usize> = (0..lp.runners.len()).collect();

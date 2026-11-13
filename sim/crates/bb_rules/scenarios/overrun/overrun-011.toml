@@ -1,0 +1,28 @@
+id = "overrun-011"
+title = "Batter-runner rounds first toward second: a tag before any sample shows the turn is no out; once a sample shows him well into fair territory he is an ordinary runner, and the next tag retires him"
+# OBR 5.09(b)(4) exception: protected unless he makes an attempt toward second. Adjudication
+# between samples (rules-spec 5.5, Codex rules-passing review #3): with samples in the play he
+# is protected from leaving first until a sample shows the attempt (more than
+# overrun_attempt_m into fair territory); a tag before that has no evidence of an attempt.
+rules = ["OBR 5.09(b)(4) exception", "rules-spec 5.5"]
+milestone = "M4"
+tags = ["overrun", "tag", "positions", "sampling"]
+initial = { inning = 6, outs = 0, batter = "A.4" }
+step = [
+  { fact = "PitchDelivered", t = 0.0 },
+  { fact = "BatContact", t = 0.42 },
+  { fact = "BallTouched", t = 1.6, what = "Ground", pos = [20.0, 55.0] },
+  { fact = "RunnerPosition", t = 4.167, runner = "A.4", pos = [18.9, 18.9] },
+  { fact = "BaseTouched", t = 4.19, agent = "A.4", base = 1 },
+  { fact = "RunnerPosition", t = 4.2, runner = "A.4", pos = [19.4, 19.45] },
+  { fact = "BaseLeft", t = 4.21, agent = "A.4", base = 1 },
+  { fact = "TagContact", t = 4.22, fielder = "H.1B", runner = "A.4", holding_ball = true },
+  # 0.3 m fair of the line: no attempt shown yet.
+  { fact = "RunnerPosition", t = 4.233, runner = "A.4", pos = [19.5, 19.9] },
+  # Turned for second, 2.5 m fair of the line: the protection is gone.
+  { fact = "RunnerPosition", t = 4.5, runner = "A.4", pos = [19.0, 22.5] },
+  { fact = "GloveSecured", t = 4.6, fielder = "H.RF", pos = [22.0, 52.0] },
+  { fact = "TagContact", t = 6.5, fielder = "H.1B", runner = "A.4", holding_ball = true, expect_events = [{ event = "RunnerOut", runner = "A.4", base = 2, kind = "Tag" }] },
+  { fact = "PlayEndCheck", t = 8.0 },
+]
+expect = { outs = 1, bases = {}, play = "Dead" }

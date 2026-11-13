@@ -1,0 +1,30 @@
+id = "passing-014"
+title = "While a high fly is in doubt, the runner from second goes around third and touches home past the runner holding on third; the ball drops fair: he passed him and is out (judged when the ball is ruled fair), and the lead runner then scores"
+# OBR 5.09(b)(9): a following runner who passes a preceding runner before that runner is out
+# is out. OBR 5.06(c)(5) kills the play only on an uncaught foul, so once the ball is fair the
+# pass made while it was in the air stands (Codex rules-passing review #1, touch-only probe).
+rules = ["OBR 5.09(b)(9)", "OBR 5.06(c)(5)", "rules-spec 5.5"]
+milestone = "M4"
+tags = ["passing", "pending-ball", "runs"]
+initial = { inning = 3, outs = 0, batter = "A.6", bases = { second = "A.4", third = "A.5" } }
+step = [
+  { fact = "PitchDelivered", t = 0.0 },
+  { fact = "BatContact", t = 0.42 },
+  { fact = "BaseLeft", t = 0.6, agent = "A.4", base = 2 },
+  { fact = "BaseTouched", t = 4.0, agent = "A.4", base = 3 },
+  { fact = "BaseLeft", t = 4.1, agent = "A.4", base = 3 },
+  { fact = "BaseTouched", t = 4.2, agent = "A.6", base = 1 },
+  # Home, with the runner from third still standing on third: the pass (the ball is in the air).
+  { fact = "BaseTouched", t = 7.5, agent = "A.4", base = 4 },
+  # Down fair in left-centre: the pass is judged now, and his home touch never counts.
+  { fact = "BallTouched", t = 8.0, what = "Ground", pos = [-15.0, 80.0], expect_events = [
+    { event = "FairFoulDecided", fair = true },
+    { event = "PitchResult", call = "InPlay" },
+    { event = "RunnerPassed", runner = "A.4", passed = "A.5" },
+    { event = "RunnerOut", runner = "A.4", base = 4, kind = "Tag" },
+  ] },
+  { fact = "BaseLeft", t = 8.1, agent = "A.5", base = 3 },
+  { fact = "BaseTouched", t = 11.5, agent = "A.5", base = 4 },
+  { fact = "PlayEndCheck", t = 13.0, expect_events = [{ event = "RunScored", runner = "A.5" }] },
+]
+expect = { outs = 1, score = [1, 0], bases = { first = "A.6" }, play = "Dead" }

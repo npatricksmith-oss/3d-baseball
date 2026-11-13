@@ -1,5 +1,8 @@
 id = "passing-009"
-title = "Runner from third touched home before the catch and goes back to retouch; the runner from second, between third and home, is now ahead of him: passed by the lead runner's actions, out; the lead runner tags and scores"
+title = "Runner from third touched home before the catch and goes back to retouch; the runner from second, coming home, crosses him on the line: passed by the lead runner's actions, out at the crossing; the lead runner tags and scores"
+# OBR 5.09(b)(9) and comment: a pending home touch does not take the returning runner off the
+# base paths, so he can be passed while going back (Codex rules-passing review #2; this
+# scenario used to wait for his retouch and record the out at 7.6).
 rules = ["OBR 5.09(b)(9) comment", "OBR 5.09(b)(5)", "rules-spec 5.3", "rules-spec 5.5"]
 milestone = "M4"
 tags = ["passing", "retouch", "lead-runner-action", "positions"]
@@ -13,16 +16,21 @@ step = [
   { fact = "BaseLeft", t = 4.1, agent = "A.4", base = 3 },
   { fact = "BaseTouched", t = 4.5, agent = "A.5", base = 4 },
   { fact = "GloveSecured", t = 5.0, fielder = "H.CF", pos = [0.0, 95.0] },
-  # The runner from third, his home touch only pending, is on his way back: not judged.
+  # The runner from third, his home touch only pending, is on his way back: still on the base
+  # paths. 54% of the way home, he is still ahead of the runner from second (40%).
   { fact = "RunnerPosition", t = 7.0, runner = "A.5", pos = [-9.0, 9.0] },
   { fact = "RunnerPosition", t = 7.0, runner = "A.4", pos = [-11.638, 11.638] },
-  { fact = "BaseTouched", t = 7.5, agent = "A.5", base = 3 },
-  # He has retouched third; the runner from second is 35% of the way home, ahead of him.
-  { fact = "RunnerPosition", t = 7.6, runner = "A.5", pos = [-19.397, 19.397] },
-  { fact = "RunnerPosition", t = 7.6, runner = "A.4", pos = [-12.608, 12.608], expect_events = [
+  # They have crossed: 20% and 35% of the way home. The runner from second is out now, before
+  # the lead runner gets back to third.
+  { fact = "RunnerPosition", t = 7.3, runner = "A.5", pos = [-15.518, 15.518] },
+  { fact = "RunnerPosition", t = 7.3, runner = "A.4", pos = [-12.608, 12.608], expect_events = [
     { event = "RunnerPassed", runner = "A.4", passed = "A.5" },
     { event = "RunnerOut", runner = "A.4", base = 4, kind = "Tag" },
   ] },
+  { fact = "BaseTouched", t = 7.5, agent = "A.5", base = 3 },
+  # Already out: nothing more.
+  { fact = "RunnerPosition", t = 7.6, runner = "A.5", pos = [-19.397, 19.397] },
+  { fact = "RunnerPosition", t = 7.6, runner = "A.4", pos = [-12.608, 12.608] },
   { fact = "BaseLeft", t = 8.0, agent = "A.5", base = 3 },
   { fact = "BaseTouched", t = 11.0, agent = "A.5", base = 4 },
   { fact = "PlayEndCheck", t = 13.0, expect_events = [{ event = "RunScored", runner = "A.5" }] },

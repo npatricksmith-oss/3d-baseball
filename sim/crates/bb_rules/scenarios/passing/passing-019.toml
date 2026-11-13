@@ -1,0 +1,34 @@
+id = "passing-019"
+title = "Runner from third scores before the catch and goes back; the runner from second tags up legally, rounds third and passes him on the line: out at the crossing; the lead runner retouches and scores"
+# OBR 5.09(b)(9) and comment: a runner going back to retouch (OBR 5.09(b)(5)) is still a
+# preceding runner, and his pending home touch does not change that. The runner from second
+# owes no retouch here, so the result does not lean on appeals. Codex rules-passing review #2
+# (verified probe: the engine gave one out and two runs).
+rules = ["OBR 5.09(b)(9) comment", "OBR 5.09(b)(5)", "rules-spec 5.3", "rules-spec 5.5"]
+milestone = "M4"
+tags = ["passing", "retouch", "lead-runner-action", "positions"]
+initial = { inning = 4, outs = 0, batter = "A.6", bases = { second = "A.4", third = "A.5" } }
+step = [
+  { fact = "PitchDelivered", t = 0.0 },
+  { fact = "BatContact", t = 0.42 },
+  { fact = "BaseLeft", t = 0.5, agent = "A.5", base = 3 },
+  { fact = "BaseTouched", t = 4.5, agent = "A.5", base = 4 },
+  { fact = "GloveSecured", t = 5.0, fielder = "H.CF", pos = [0.0, 95.0] },
+  # The runner from second stayed on the bag through the catch: a legal tag-up.
+  { fact = "BaseLeft", t = 5.2, agent = "A.4", base = 2 },
+  { fact = "BaseTouched", t = 8.5, agent = "A.4", base = 3 },
+  { fact = "BaseLeft", t = 8.6, agent = "A.4", base = 3 },
+  # The returning runner 40% of the way home, the runner from second 60%: passed.
+  { fact = "RunnerPosition", t = 10.0, runner = "A.5", pos = [-11.638, 11.638] },
+  { fact = "RunnerPosition", t = 10.0, runner = "A.4", pos = [-7.759, 7.759], expect_events = [
+    { event = "RunnerPassed", runner = "A.4", passed = "A.5" },
+    { event = "RunnerOut", runner = "A.4", base = 4, kind = "Tag" },
+  ] },
+  # Out already: his home touch scores nothing.
+  { fact = "BaseTouched", t = 11.0, agent = "A.4", base = 4 },
+  { fact = "BaseTouched", t = 12.0, agent = "A.5", base = 3 },
+  { fact = "BaseLeft", t = 12.1, agent = "A.5", base = 3 },
+  { fact = "BaseTouched", t = 15.5, agent = "A.5", base = 4 },
+  { fact = "PlayEndCheck", t = 17.0, expect_events = [{ event = "RunScored", runner = "A.5" }] },
+]
+expect = { outs = 2, score = [1, 0], bases = {}, play = "Dead" }
