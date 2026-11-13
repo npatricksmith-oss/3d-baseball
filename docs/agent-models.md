@@ -463,7 +463,9 @@ The owner asked that fielders get a jump on the ball, anticipating where it will
 
 **Why the swing as well:** fielders leaning on the pitch location alone did worse than fielders who waited (2,048 games: 5.35 runs per team-game with no lean, 5.36 average, 5.45 at grade 80), and shading position before the pitch did too. Location moves the expected direction only about 7° against 22° of scatter, so for a ball in his area the side he leans to is right only a little more than half the time, and a wrong lean (carried through the reaction time, then braked at 6 m/s²) costs more than a right one gains. Most of the scatter comes from the swing's timing, which the bat shows. (Measured since the bat read replaced the spray read: see the anticipation-review calibration note, docs/calibration/2026-11-12-anticipation-review-fixes.md.)
 
-**Measured with the first (spray) read (2,048 games, seed 5), superseded; see the calibration note above:** no jump 5.35 runs per team-game (GB hit .408); Anticipation 20: 5.31 (.406); 50: 5.22 (.399); 80: 5.03 (.384). `sim-cli games --anticipation <grade>` / `--no-jump`.
+**Measured with the bat read (1,024 games, seed 5), every fielder at one grade:** no jump 5.34 runs per team-game (GB hit .410); Anticipation 20: 5.30 (.408); 50: 5.27 (.409); 80: 5.16 (.406). The honest cue carries about half the value the spray read did; nothing was retuned to recover it (docs/calibration/2026-11-12-anticipation-review-fixes.md).
+
+**Measured with the first (spray) read (2,048 games, seed 5), superseded:** no jump 5.35 runs per team-game (GB hit .408); Anticipation 20: 5.31 (.406); 50: 5.22 (.399); 80: 5.03 (.384). `sim-cli games --anticipation <grade>` / `--no-jump`.
 
 **Not built yet:** batters of both sides in games (every game batter is right-handed, so the handedness half is exercised only by the unit test `fielders_jump_toward_the_side_they_read`); depth anticipation (the swing also hints at the launch angle); pitch type as a cue (it shifts spray by under 1.5° in the sim).
 
