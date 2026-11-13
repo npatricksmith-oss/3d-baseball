@@ -112,6 +112,9 @@ pub struct LivePlay {
     /// passer is already off the play (`out`); the out is recorded, at the pass's own time, once
     /// the ball is fair or caught, and dropped with the play on an uncaught foul.
     pub pending_passes: Vec<PendingPass>,
+    /// A `RunnerPosition` sample has arrived in this play: the orchestrator is sampling, so
+    /// positions can be waited for (rules-spec §5.5 overrun of first).
+    pub sampled: bool,
 }
 
 /// A pass made while the batted ball was in doubt (rules-spec §5.5).

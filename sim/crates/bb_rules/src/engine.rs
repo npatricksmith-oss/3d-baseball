@@ -104,6 +104,7 @@ fn step_position(st: &mut RulesState, p: &RunnerPosition) -> Vec<Event> {
         ev.push(Event::RulesWarning { code: "time_reversed" });
     }
     lp.last_t = lp.last_t.max(p.t);
+    lp.sampled = true;
     let Some(i) = lp.runners.iter().position(|r| r.runner == p.runner && on_paths(r)) else { return ev };
     let r = &mut lp.runners[i];
     if r.start_base == 0 && r.at == 1 && r.last_base == 1 && r.on_base.is_none() && r.overrun != Overrun::Ended {
@@ -302,9 +303,17 @@ fn step_input(st: &mut RulesState, input: &Input) -> Vec<Event> {
         Input::BaseTouched { t, agent, base, holding_ball } => base_touched(st, t, agent, base, holding_ball, &mut ev),
         Input::BaseLeft { t, agent, base } => {
             if let PlayState::Live(lp) = &mut st.play {
+                let sampled = lp.sampled;
                 if let Some(r) = lp.runners.iter_mut().find(|r| r.runner == agent && !r.out) {
                     if r.on_base == Some(base) {
                         r.on_base = None;
+                    }
+                    // The batter-runner leaving first after his first touch of it: with samples in
+                    // the play he is protected from now until a sample shows an attempt toward
+                    // second, so a tag before his next sample is judged like one after it
+                    // (rules-spec §5.5; OBR 5.09(b)(4) exception).
+                    if sampled && base == 1 && r.start_base == 0 && r.at == 1 && r.last_base == 1 && r.overrun == Overrun::NotSeen {
+                        r.overrun = Overrun::Protected;
                     }
                     if base == r.start_base && r.left_start_at.is_none() {
                         r.left_start_at = Some(t);
@@ -578,6 +587,7 @@ fn new_live_play(st: &RulesState) -> LivePlay {
         runs_pending: Vec::new(),
         last_t: 0.0,
         pending_passes: Vec::new(),
+        sampled: false,
     }
 }
 
