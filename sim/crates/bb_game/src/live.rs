@@ -879,7 +879,9 @@ impl<'a> Sim<'a> {
     /// Where a fielder's plans start from (agent-models §5.10, Codex anticipation review #2):
     /// once his reaction gate has opened, his state now; before it, the state his jump will
     /// have carried him to, stepped tick by tick with the movement step itself (position and
-    /// velocity) up to the first tick at or after his gate. The start time is now, or his gate.
+    /// velocity) up to the first tick at or after his gate. The start time is the time of
+    /// that state: now, or that tick (not the gate itself, which for a reaction off the tick
+    /// grid lies up to a tick earlier; Codex coord review #1).
     fn planning_state(&self, i: usize) -> (std::borrow::Cow<'_, Fielder>, f64) {
         let fd = &self.f[i];
         let t_c = self.inp.t_contact;
@@ -894,7 +896,7 @@ impl<'a> Sim<'a> {
             (g.pos, g.vel) = fielder_step(&g, t, t_c);
             t += DT;
         }
-        (std::borrow::Cow::Owned(g), gate)
+        (std::borrow::Cow::Owned(g), t)
     }
 
     /// One scan of the predicted path for the earliest point the fielder can reach standing,
@@ -2858,7 +2860,54 @@ mod tests {
         assert!(sim.f[CF].vel.norm() > 2.0, "he is leaning: {:?}", sim.f[CF].vel);
         let gate = sim.call_value(CF, &pred, ti, pt, 0.0);
         assert!(early.0 == 2 && gate.0 == 2, "a fly he calls: {early:?} {gate:?}");
-        assert!((early.1 - gate.1).abs() < 0.02, "time to spare planned early {:.3} s, at his gate {:.3} s", early.1, gate.1);
+        assert!((early.1 - gate.1).abs() < 1e-9, "time to spare planned early {:.3} s, at his gate {:.3} s", early.1, gate.1);
+    }
+
+    // Codex coord review #1: a reaction time off the 1/60 s tick grid. The projected jump
+    // state is the one the movement step reaches at the first tick at or after the gate, so
+    // its start time must be that tick, not the gate itself. Centre fielder, 0.607 s
+    // reaction (gate 1.007 s, first tick at or after it 61/60 s), leaning toward left field
+    // at full speed; the call is first made at the infielders' 0.25 s. Expected values come
+    // from stepping the real movement up to his gate: his position, velocity and the clock
+    // there. A fly he would reach at that spot 0.305 s after his gate is 0.295 s after that
+    // tick, inside `CALL_SLACK_S`: no confident call, early or at the gate (the first version
+    // timed the state at 1.007 s and called it with 0.305 s to spare).
+    #[test]
+    fn the_projected_jump_is_timed_by_the_tick_that_produced_it() {
+        let fx = fixture(&[]);
+        let mut inp = input(&fx, vec![RunnerIn { id: fx.st.batter, base: 0, speed: 8.2 }]);
+        inp.fattrs[CF].reaction = 0.607;
+        let mut st = fx.st.clone();
+        let mut sim = new_sim(&inp, &mut st);
+        sim.f[CF].jump = Vec3::new(-sim.f[CF].a.speed, 0.0, 0.0);
+        let t_c = inp.t_contact;
+        let gate = t_c + inp.fattrs[CF].reaction;
+        let react = inp.fattrs.iter().map(|a| a.reaction).fold(f64::INFINITY, f64::min);
+        while sim.t < t_c + react {
+            world_tick(&mut sim);
+        }
+        let (live_pos, live_vel) = (sim.f[CF].pos, sim.f[CF].vel);
+        let (proj, start) = {
+            let (g, s) = sim.planning_state(CF);
+            (g.into_owned(), s)
+        };
+        assert_eq!((sim.f[CF].pos, sim.f[CF].vel), (live_pos, live_vel), "projecting must not move him");
+        let pred = sim.predict(CF);
+        let ti = gate + CALL_SLACK_S + 0.005;
+        assert!(pred.first_bounce().map(|b| ti < b.0).unwrap_or(true), "a fly, still in the air at {ti:.3} s");
+        let pt = proj.pos;
+        let early = sim.call_value(CF, &pred, ti, pt, 0.0);
+        while sim.t < gate {
+            world_tick(&mut sim);
+        }
+        assert!(sim.t > gate + 0.005, "the gate is off the tick grid: {:.6} s vs {gate:.6} s", sim.t);
+        assert!(sim.f[CF].vel.norm() > 2.0, "he is leaning: {:?}", sim.f[CF].vel);
+        assert_eq!(start, sim.t, "the projected state is timed by the tick that produced it");
+        assert_eq!((proj.pos, proj.vel), (sim.f[CF].pos, sim.f[CF].vel), "projected vs stepped state");
+        assert!(ti - sim.t < CALL_SLACK_S, "{:.6} s to spare from where he is", ti - sim.t);
+        let at_gate = sim.call_value(CF, &pred, ti, pt, 0.0);
+        assert_eq!(at_gate.0, 0, "not enough to spare for a confident call at his gate: {at_gate:?}");
+        assert_eq!(early, at_gate, "the call made early matches the call at his gate");
     }
 
     // agent-models §5.10: a lean is a bet. A grounder passes 4 m to the shortstop's left; a
