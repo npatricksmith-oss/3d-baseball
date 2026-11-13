@@ -61,6 +61,12 @@ pub struct SwingTemplate {
     /// Vertical offset of the aim point from the predicted ball center, m (negative = aim
     /// under the ball to lift it) [E, authored against mean launch angle, calibration §4.4].
     pub aim_offset_z: f64,
+    /// Mid-swing adjustment stops this long before the aim time, s [E] (agent-models §3.6
+    /// `t_cut`; PLAN range 50–80 ms).
+    pub adj_cutoff_s: f64,
+    /// The swing's phase rate may change by at most this fraction over the swing still to
+    /// come after motor latency [E] (agent-models §3.6: ±10%).
+    pub adj_phase_frac: f64,
 }
 
 impl Default for SwingTemplate {
@@ -76,6 +82,8 @@ impl Default for SwingTemplate {
             contact_k: 0.6,
             attack_angle: 10.0 * DEG,
             aim_offset_z: -0.020,
+            adj_cutoff_s: 0.060,
+            adj_phase_frac: 0.10,
         }
     }
 }

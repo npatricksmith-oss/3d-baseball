@@ -105,6 +105,11 @@ struct Sw {
     /// The batter read the pitch type right at commit (`PitchRecord::read`; the final read of
     /// the adjustment loop is not recorded).
     read_ok: bool,
+    /// At the last adjustment tick: the batter's estimate minus his aim (what he knew and had
+    /// not yet corrected), height cm and timing ms; and his estimate minus the truth (height cm).
+    gap_z_cm: f64,
+    gap_t_ms: f64,
+    est_z_cm: f64,
 }
 
 fn measure(mu: &Matchup, p: &PitchRecord) -> Option<Sw> {
@@ -181,8 +186,10 @@ fn measure(mu: &Matchup, p: &PitchRecord) -> Option<Sw> {
         None => (f64::NAN, f64::NAN),
     };
     let read_ok = p.read == p.ty;
+    let (gap_z_cm, gap_t_ms) = p.known_gap.map_or((f64::NAN, f64::NAN), |g| (100.0 * g.y, 1000.0 * g.z));
     let h_aim_cm = p.aim_error.map_or(f64::NAN, |e| 100.0 * e.y);
     let h_off_cm = 100.0 * mu.template.aim_offset_z;
+    let est_z_cm = h_aim_cm + gap_z_cm;
     let (out, ev, la, land_dir) = match contact {
         Some(b) => {
             let land = b.flight.last().s.r;
@@ -200,26 +207,47 @@ fn measure(mu: &Matchup, p: &PitchRecord) -> Option<Sw> {
         }
         None => (Outcome::Whiff, f64::NAN, f64::NAN, f64::NAN),
     };
-    Some(Sw { out, ty: p.ty, h, ad, aa, vba, tilt, length_ft: len / 0.3048, bat_mph: v.norm() / 0.44704, y, ev, la, land_dir, miss, clear_cm, past_tip_cm, dt_ms, t_err_ms, h_nom_cm, h_aim_cm, h_off_cm, h_int_cm, read_ok })
+    Some(Sw { out, ty: p.ty, h, ad, aa, vba, tilt, length_ft: len / 0.3048, bat_mph: v.norm() / 0.44704, y, ev, la, land_dir, miss, clear_cm, past_tip_cm, dt_ms, t_err_ms, h_nom_cm, h_aim_cm, h_off_cm, h_int_cm, read_ok, gap_z_cm, gap_t_ms, est_z_cm })
 }
 
 fn main() {
-    let n: u32 = std::env::args().nth(1).and_then(|s| s.parse().ok()).unwrap_or(3000);
+    // Positional arguments, then `key=value` counterfactuals of the mid-swing correction:
+    // `adj=<m/s>` (Adjustability), `cut=<ms>` (adjustment cutoff before the aim time),
+    // `phase=<fraction>` (phase-rate change).
+    let args: Vec<String> = std::env::args().collect();
+    let pos = |i: usize| args.iter().filter(|a| !a.contains('=')).nth(i).cloned();
+    let flag = |k: &str| args.iter().find_map(|a| a.strip_prefix(&format!("{k}=")).and_then(|v| v.parse::<f64>().ok()));
+    let n: u32 = pos(1).and_then(|s| s.parse().ok()).unwrap_or(3000);
     let mut mu = Matchup::average();
     mu.knobs = Knobs::calibrated_m3();
-    if let Some(t) = std::env::args().nth(2).and_then(|s| s.parse::<f64>().ok()) {
+    if let Some(t) = pos(2).and_then(|s| s.parse::<f64>().ok()) {
         mu.batter.timing = t / 1000.0;
     }
-    if let Some(c) = std::env::args().nth(3).and_then(|s| s.parse::<f64>().ok()) {
+    if let Some(c) = pos(3).and_then(|s| s.parse::<f64>().ok()) {
         mu.batter.bat_control = c / 100.0;
     }
-    if let Some(k) = std::env::args().nth(4).and_then(|s| s.parse::<f64>().ok()) {
+    if let Some(k) = pos(4).and_then(|s| s.parse::<f64>().ok()) {
         mu.knobs.perception = k;
     }
     let mid = Vec3::new(0.0, mu.template.contact_y(&mu.batter, 0.0), 0.5 * (mu.zone.bottom + mu.zone.top));
-    if let Some(a) = std::env::args().nth(5).and_then(|s| s.parse::<f64>().ok()) {
+    if let Some(a) = pos(5).and_then(|s| s.parse::<f64>().ok()) {
         mu.template = mu.template.with_bat_angle(&mu.batter, mid, a.to_radians());
     }
+    if let Some(v) = flag("adj") {
+        mu.batter.adjustability = v;
+    }
+    if let Some(v) = flag("cut") {
+        mu.template.adj_cutoff_s = v / 1000.0;
+    }
+    if let Some(v) = flag("phase") {
+        mu.template.adj_phase_frac = v;
+    }
+    println!(
+        "adjustment: Adjustability {:.2} m/s, cutoff {:.0} ms, phase ±{:.0}%",
+        mu.batter.adjustability,
+        1000.0 * mu.template.adj_cutoff_s,
+        100.0 * mu.template.adj_phase_frac
+    );
     println!(
         "timing σ {:.1} ms, bat-control σ {:.2} cm, K_perception {}, bat angle at a middle-middle aim {:.1}°",
         1000.0 * mu.batter.timing,
@@ -512,6 +540,28 @@ fn miss_sources(sws: &[Sw]) {
             share(b.iter().filter(|s| s.read_ok).count(), b.len())
         )
     };
+    let sat = |f: &dyn Fn(&Sw) -> bool| {
+        let b: Vec<&&Sw> = nomd.iter().filter(|s| f(s) && s.gap_z_cm.is_finite()).collect();
+        let gz: Vec<f64> = b.iter().map(|s| s.gap_z_cm).collect();
+        let gt: Vec<f64> = b.iter().map(|s| s.gap_t_ms).collect();
+        let ez: Vec<f64> = b.iter().map(|s| s.est_z_cm).collect();
+        let az: Vec<f64> = b.iter().map(|s| s.h_aim_cm).collect();
+        format!(
+            "n {:4} | aim error z {:+6.1} | = estimate error {:+6.1} − known gap {:+6.1} cm (|gap| > 2 cm: {} %) | known timing gap {:+5.1} ms (|gap| > 3 ms: {} %)",
+            b.len(),
+            mean(&az),
+            mean(&ez),
+            mean(&gz),
+            share(gz.iter().filter(|g| g.abs() > 2.0).count(), b.len()),
+            mean(&gt),
+            share(gt.iter().filter(|g| g.abs() > 3.0).count(), b.len())
+        )
+    };
+    println!("Saturation of the mid-swing correction, at its last tick (means; the aim error is the estimate's error minus what he knew and had not yet moved):");
+    println!("  early and over by > 6 cm:   {}", sat(&|s| s.t_err_ms < 0.0 && s.h_nom_cm > 6.0));
+    println!("  close (±15 ms, ±4 cm):      {}", sat(&|s| s.t_err_ms.abs() <= 15.0 && s.h_nom_cm.abs() <= 4.0));
+    println!("  bat under by > 4 cm:        {}", sat(&|s| !(s.t_err_ms < 0.0 && s.h_nom_cm > 6.0) && !(s.t_err_ms.abs() <= 15.0 && s.h_nom_cm.abs() <= 4.0) && s.h_nom_cm < -4.0));
+    println!("  AD 12–30° whiffs:           {}", sat(&|s| s.out == Outcome::Whiff && s.ad >= 12.0 && s.ad < 30.0));
     println!("Swing populations by nominal error:");
     println!("  early and over by > 6 cm:            {}", grp(&|s| s.t_err_ms < 0.0 && s.h_nom_cm > 6.0));
     println!("  close (±15 ms, ±4 cm):               {}", grp(&|s| s.t_err_ms.abs() <= 15.0 && s.h_nom_cm.abs() <= 4.0));

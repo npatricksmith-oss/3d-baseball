@@ -271,6 +271,10 @@ pub struct PitchRecord {
     pub aim_error: Option<Vec3>,
     /// Same, at commit (before adjustment).
     pub commit_error: Option<Vec3>,
+    /// At the last adjustment tick, how far the batter's latest estimate still was from where
+    /// he had moved his aim: (x, z) m and timing s, estimate minus aim. What the correction's
+    /// limits left uncorrected of what he knew; None if no adjustment tick ran. Diagnostics only.
+    pub known_gap: Option<Vec3>,
     /// Contact time and the ball's state just after contact (for the live-ball play).
     pub contact_state: Option<(f64, BallState)>,
     /// The pitch hit the batter's body (before any contact).
@@ -456,12 +460,12 @@ pub fn simulate_pitch_ctx(mu: &Matchup, sc: &Scouting, count: Count, seed: u64, 
     let post = bank.posterior();
     let aim = bank.dominant();
     // Expected correction between now and the cutoff (60 ms before the believed arrival).
-    let t_left = (bank.t_release + aim.mean.z - 0.060 - t_now).max(0.0);
+    let t_left = (bank.t_release + aim.mean.z - mu.template.adj_cutoff_s - t_now).max(0.0);
     let own = OwnExecution {
         vertical: mu.batter.bat_control * mu.knobs.swing,
         timing: mu.batter.timing * mu.knobs.swing,
         correct_z: batter::CORRECTION_CREDIT * mu.batter.adjustability * t_left,
-        correct_t: batter::CORRECTION_CREDIT * 0.10 * (t_left + 0.060 - pc.latency).max(0.0),
+        correct_t: batter::CORRECTION_CREDIT * mu.template.adj_phase_frac * (t_left + mu.template.adj_cutoff_s - pc.latency).max(0.0),
     };
     let dec = batter::decide(&post, aim, count, zone, &mu.discipline, own, 0.0, mu.env.ball.radius);
 
@@ -469,7 +473,7 @@ pub fn simulate_pitch_ctx(mu: &Matchup, sc: &Scouting, count: Count, seed: u64, 
     let mut swing_res = SwingResult::NoSwing;
     let mut swing_done = None;
     let mut resolved_pitch = free.clone();
-    let (mut aim_error, mut commit_error) = (None, None);
+    let (mut aim_error, mut commit_error, mut known_gap) = (None, None, None);
     let truth_err = |p: Vec3, t: f64| -> Option<Vec3> {
         let tt = free.find(Crossing::YBelow(p.y))?;
         let q = free.at(tt).0;
@@ -494,13 +498,13 @@ pub fn simulate_pitch_ctx(mu: &Matchup, sc: &Scouting, count: Count, seed: u64, 
         let mut swing = ex.swing;
         let t_commit = t_now;
         // Phase rate may change ±10% over the swing still to come after motor latency.
-        let dt_lim = 0.10 * (t_aim - (t_commit + pc.latency)).max(0.0);
+        let dt_lim = mu.template.adj_phase_frac * (t_aim - (t_commit + pc.latency)).max(0.0);
         let t_aim0 = t_aim;
         let t_abort = swing.t_start() + 0.6 * (swing.t_c - swing.t_start());
         let v_adj = mu.batter.adjustability;
         let mut t_last = t_commit;
         loop {
-            let t_cut = t_aim - 0.060;
+            let t_cut = t_aim - mu.template.adj_cutoff_s;
             if t_now + 0.010 > t_cut {
                 break;
             }
@@ -529,6 +533,7 @@ pub fn simulate_pitch_ctx(mu: &Matchup, sc: &Scouting, count: Count, seed: u64, 
             let nx = cur.x + dx;
             cur = Vec3::new(nx, depth(nx), cur.z + dz);
             t_aim = t_aim0 + (t_want - t_aim0).clamp(-dt_lim, dt_lim);
+            known_gap = Some(Vec3::new(want.x - cur.x, want.z - cur.z, t_want - t_aim));
             // The same executed placement deviation rides on the adjusted plan.
             let mut s2 = apply_placement(&planner(cur, t_aim), &ex.placement);
             s2.t_brake = swing.t_brake;
@@ -592,6 +597,7 @@ pub fn simulate_pitch_ctx(mu: &Matchup, sc: &Scouting, count: Count, seed: u64, 
         batted,
         aim_error,
         commit_error,
+        known_gap,
         contact_state,
         hit_batter,
         bounced,

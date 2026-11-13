@@ -308,8 +308,8 @@ All widen with F_composure and K_swing. **M2 measures** the offset → (exit vel
 
 **Mid-swing adjustment:** after commit, observations continue (until the blackout). The aim point updates from the posterior; θ moves toward the new inverse at bounded rates:
 - δ_v and δ_r: ≤ `v_adj` from `Adjustability` (§10).
-- Timing: phase rate may change by ≤ ±10% [E].
-- Adjustment stops at `t_cut` = 60 ms [E] before t* (PLAN range 50–80 ms).
+- Timing: phase rate may change by ≤ ±10% [E] (`SwingTemplate::adj_phase_frac`).
+- Adjustment stops at `t_cut` = 60 ms [E] before t* (PLAN range 50–80 ms; `SwingTemplate::adj_cutoff_s`).
 
 **Check swing:** if, before phase `s_abort` = 0.45 [E], the updated `EV_swing − EV_take` falls below `−θ_check` = −0.03 runs [E], the batter brakes: phase rate decays to zero over 40 ms [E]. Whether it counts as a swing is judged by the rules engine from the bat's pose (`rules-spec.md`). The swing model only reports the maximum bat rotation reached.
 

@@ -34,10 +34,17 @@ Done (coordinator item 2, as the owner directed: measure before changing calibra
     - 12% the rest.
   - **No swing change is indicated or excluded** by these measures.
 
-**Nothing is waiting on a review.** Both Codex reviews of this session are resolved.
+- **The correction experiment (owner: "yes"; note §8):**
+  - **Named parameters.** `t_cut` and the phase limit are now named [E] parameters (`SwingTemplate::adj_cutoff_s`, `adj_phase_frac`), with game digests bit-identical.
+  - **New diagnostics.** `PitchRecord::known_gap` records what the batter knew and had not yet corrected; `foul_diag` takes `adj=`, `cut=` and `phase=` counterfactuals.
+  - **The limits bind** on fooled swings (81% saturated, 16 cm and 22 ms of known correction left).
+  - **Correction is still not the foul lever.** Even with no limits the foul share goes only 23.7 → 26.1%, and foul per contact by AD does not move. Saved swings become fair contact (K% 19.8 → 8.4).
+  - **Contact% follows Adjustability.** At 2.4 m/s O-Contact% enters its band, but that waits on the foul share.
+
+**First:** the Codex review of the correction experiment (`docs/reviews/2026-11-13-codex-foul-correction-review.md`) was started at the end of the session. If it is there, commit it, fix or defer each finding, and write its Resolution.
 
 Next:
-1. **[?] Owner: the mid-swing correction, as an experiment** (note §7). Measure how often it saturates, then raise and lengthen it as counterfactuals, and watch whiffs, fouls by AD and the joint table before choosing a change (Tier B; merges coordinator items 2 and 6). The close group's narrow foul band is the second question (on-time topped balls stay fair; needs evidence). The hand path and the bat angle wait.
+1. **[?] Owner: a cage counterfactual of a swing whose bat face and path can differ** (note §8): §3.6's hand path and lag, or its simplest version. v1's fixed pivot ties spray to attack direction; MLB contact at AD 12–20° fouls 54%, the sim's 8–12% whatever the correction. Measure spray minus AD and foul share by AD in the cage before changing the PA model. The on-time foul band and the bat angle (−30°) are the second question. Adjustability stays at 0.6 m/s until the foul share is fixed.
 2. Then items 3–5 and 7 of the coordinator list below.
 
 ## Previous: 2026-11-13, fourth session: the plate cue
