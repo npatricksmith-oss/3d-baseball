@@ -7,11 +7,19 @@ Status: `[ ]` not started · `[~]` in progress · `[x]` done · `[?]` needs an o
 
 ---
 
-## Resume here (2026-11-13, second session: pop-ups; branch `fix/popup-calls`, not merged)
+## Resume here (2026-11-13, second session: pop-ups; merged into main, not pushed)
 
-Work is on `fix/popup-calls` (cut from main `454d341`), committed, **not merged and not pushed**. `cargo test --workspace --release`: 143 passed, 0 failed.
+`fix/popup-calls` (cut from main `454d341`) is merged into local main; nothing is pushed. `cargo test --workspace --release`: 143 passed, 0 failed. The owner paused here and will continue in a new session. Owner (2026-11-13): merge into main often.
 
-**First, unresolved:** the Codex review of this branch (`docs/reviews/2026-11-13-codex-popup-calls-review.md`) was started in the background at the end of the session. If it is there, commit it, fix or defer each finding, write its Resolution; then merge the branch into main (ask the owner before pushing).
+**First, unresolved:** the [Codex popup-calls review](docs/reviews/2026-11-13-codex-popup-calls-review.md), Resolution **Open**, nothing fixed yet. No P1.
+- (P2) With extra chasers, both middle infielders can chase and nobody covers second until the next recall (seed 55 play 159, runner on second; 17 such assignments in 1,024 games). Wanted: a fallback cover when both are busy, before backups are handed out.
+- (P2) A recall looks only at the chaser and the four fielders nearest his target, so another active chaser outside that set is sent to backup before anyone is sure (seed 897 play 163). Wanted: every active chaser is a recall candidate.
+- (P3) The calibration note's baseline GB/LD rates should read .410/.719 (not .411/.723), and its read-error table was measured with the old call rule's games (the committed code gives −0.6 / 21.9 / 8.2 / 6.3 / 4.1 / 24.6 in the first row).
+- The review also notes the gap-fly test's right fielder has only 30 ms of margin over the chase threshold; pick a more comfortable ball.
+
+**Then, the owner's two items (2026-11-13), in this order, merging each into main when done:**
+1. The called-off infielder drifts out behind the caller instead of standing still (§5.7 "peels off to back up"; seed 29 play 135, confirmed by the review as a wrong sure call by the centre fielder, depth draw −1.47 σ).
+2. The read knows the ball started at the plate (§5.1 launch-state perception), and the outfield read values are refitted.
 
 Done (old "Next" item 1, pop-ups dropping in short right/center; [note](docs/calibration/2026-11-13-popup-read-and-calls.md)):
 - **Why the outfielder's read is off above 50°: not spin or drag** (under 1.5 m at any launch angle). One σ of his read moves the predicted landing point about 25 m at first look on every fly, nearly all of it the position-depth term, which scales with his distance from the ball. A fly hit toward him brings that down to under 2 m; a shallow pop-up never comes near him, so he is still 5–7 m unsure with a second and a half left. New diagnostic: `cargo run --release -p bb_game --example read_error -- 48` (the read is now a pure function, `live::read_prediction`; digests unchanged).
