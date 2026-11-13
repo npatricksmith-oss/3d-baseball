@@ -50,6 +50,9 @@ pub struct FielderAttrs {
     /// rad of bat angle: his timing error for the contact instant times how fast the bat is
     /// turning then ([`bat_read_sigma`]).
     pub swing_sigma: f64,
+    /// `Anticipation`: σ of his timing of the bat's launch against the ball in flight (the
+    /// swing's lead, agent-models §5.10), s.
+    pub lead_sigma: f64,
     /// How hard he commits to his read before he has seen the ball off the bat (1: as the
     /// odds justify; 0: he waits, no jump), [E].
     pub jump_gain: f64,
@@ -75,16 +78,18 @@ impl FielderAttrs {
             read_sigma0: if outfield { 3.0 } else { 0.3 },
             antic_sigma: ANTIC_SIGMA_50,
             swing_sigma: bat_read_sigma(BAT_READ_TIME_SIGMA_50_S),
+            lead_sigma: LEAD_READ_TIME_SIGMA_50_S,
             jump_gain: 1.0,
         }
     }
 
-    /// The same fielder with `Anticipation` at `grade` (20–80 scale, agent-models §10): both
-    /// read σs by the ρ rule (less is better).
+    /// The same fielder with `Anticipation` at `grade` (20–80 scale, agent-models §10): all
+    /// three read σs by the ρ rule (less is better).
     pub fn with_anticipation(self, grade: f64) -> Self {
         Self {
             antic_sigma: bb_agents::attributes::ratio_from_grade(grade, ANTIC_SIGMA_50, ANTIC_RHO),
             swing_sigma: bat_read_sigma(bb_agents::attributes::ratio_from_grade(grade, BAT_READ_TIME_SIGMA_50_S, ANTIC_RHO)),
+            lead_sigma: bb_agents::attributes::ratio_from_grade(grade, LEAD_READ_TIME_SIGMA_50_S, ANTIC_RHO),
             ..self
         }
     }
@@ -97,11 +102,16 @@ pub const ANTIC_SIGMA_50: f64 = 0.15;
 /// Holcombe & White 2009, Exp. 8: 40 ms); with [`ANTIC_RHO`] it gives 20.5 ms at grade 80 and
 /// 78 ms at grade 20, both published values too (agent-models §5.10, the derivation).
 pub const BAT_READ_TIME_SIGMA_50_S: f64 = 0.040;
+/// `Anticipation` at grade 50: σ of his timing of the bat's launch against the ball in flight,
+/// s [E]. Judging where a moving object (the ball) was at the moment of a cue away from it (the
+/// bat starting forward): Linares, Holcombe & White (2009), Exp. 1, 75 ms; with [`ANTIC_RHO`]
+/// 38 ms at grade 80 and 146 ms at grade 20 (agent-models §5.10, the swing's lead).
+pub const LEAD_READ_TIME_SIGMA_50_S: f64 = 0.075;
 /// How fast the bat's horizontal angle turns at contact, deg/s [E]: the mean over fair balls in
 /// play (sd 143; `examples/bat_read_geometry.rs`, 48 games, 2026-11-13). A property of the
 /// swing model: refit when it changes.
 pub const BAT_YAW_RATE_DPS: f64 = 1915.0;
-/// Ratio per 10 grades for both read σs (less is better), [E].
+/// Ratio per 10 grades for every Anticipation read σ (less is better), [E].
 pub const ANTIC_RHO: f64 = 1.25;
 
 /// The σ of a fielder's read of the bat's angle at contact (rad) from his timing σ for the
@@ -631,5 +641,10 @@ mod attr_tests {
         assert!((g80 - 39.2192).abs() < 1e-4, "grade 80: {g80}");
         assert!((g20 - 149.609375).abs() < 1e-6, "grade 20: {g20}");
         assert_eq!(a.antic_sigma, 0.15);
+        // The swing's lead (2026-11-13): 75 ms at grade 50 (Linares Exp. 1), 75 / 1.953125 =
+        // 38.4 ms at grade 80, 75 × 1.953125 = 146.484375 ms at grade 20.
+        assert!((a.lead_sigma - 0.075).abs() < 1e-12);
+        assert!((a.with_anticipation(80.0).lead_sigma - 0.0384).abs() < 1e-9);
+        assert!((a.with_anticipation(20.0).lead_sigma - 0.146484375).abs() < 1e-9);
     }
 }

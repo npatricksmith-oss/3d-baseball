@@ -278,8 +278,11 @@ impl Game {
                 let a = bb_physics::contact::BatPose::at(&s, t_c).axis;
                 bb_math::m::atan2(a.x, a.y)
             });
+            // And the swing's lead: how long before the pitch reached the plate the bat started
+            // forward (world truth, read with each fielder's error, agent-models §5.10).
+            let swing_lead = rec.swing.map(|s| t_plate - s.t_start());
             let out = crate::live::simulate_live(
-                &crate::live::LiveInput { env: &mu.env, field: &self.field, ball, t_contact: t_c, runners, fielders, fattrs: self.fattrs, batter_box: { let p = mu.template.pivot(&mu.batter); bb_math::Vec3::new(p.x, p.y, 0.0) }, bats: mu.batter.bats, pitch_x: rec.plate.map(|p| p.x).or(Some(ball.r.x)), bat_yaw, seed, play, record },
+                &crate::live::LiveInput { env: &mu.env, field: &self.field, ball, t_contact: t_c, runners, fielders, fattrs: self.fattrs, batter_box: { let p = mu.template.pivot(&mu.batter); bb_math::Vec3::new(p.x, p.y, 0.0) }, bats: mu.batter.bats, pitch_x: rec.plate.map(|p| p.x).or(Some(ball.r.x)), bat_yaw, swing_lead, seed, play, record },
                 st,
             );
             if record {
