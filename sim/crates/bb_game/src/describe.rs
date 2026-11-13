@@ -74,8 +74,10 @@ pub fn describe(call: Call, launch_deg: Option<f64>, events: &[Event], facts: &[
                     format!("{name}{to}{extra}")
                 }
                 _ if reached => format!("{multi}Fielder's choice{to}"),
-                // The batter was not put out but never reached: the inning ended on another runner.
-                _ => format!("{multi}Force out{to}"),
+                // The batter was not put out but never reached: the inning ended on another
+                // runner, forced or tagged.
+                _ if outs.iter().any(|(r, k)| *r != batter && *k == OutKind::Force) => format!("{multi}Force out{to}"),
+                _ => format!("{multi}Fielder's choice{to}, runner tagged out"),
             }
         }
     };
@@ -120,6 +122,10 @@ mod tests {
         assert_eq!(describe(Call::InPlay, Some(18.0), &[adv(2), Event::RunScored { runner: R }, Event::RunScored { runner: 6 }, ended(PaResult::BattedBall)], &[first(4.2), by(8)]), "Double to center, 2 runs score");
         assert_eq!(describe(Call::InPlay, Some(-3.0), &[out(R, OutKind::Force), out(B, OutKind::Force), ended(PaResult::BattedBall)], &[by(6)]), "Double play: ground out to short");
         assert_eq!(describe(Call::InPlay, Some(-3.0), &[out(R, OutKind::Force), adv(1), ended(PaResult::BattedBall)], &[by(6), first(4.3)]), "Fielder's choice to short");
+        // The third out made on another runner before the batter reached first: a force at
+        // second, or (seed 7475 play 26) a tag on the runner from third at home.
+        assert_eq!(describe(Call::InPlay, Some(-50.0), &[out(R, OutKind::Force), ended(PaResult::BattedBall)], &[by(1)]), "Force out to the pitcher");
+        assert_eq!(describe(Call::InPlay, Some(-54.0), &[out(R, OutKind::Tag), ended(PaResult::BattedBall)], &[by(1)]), "Fielder's choice to the pitcher, runner tagged out");
         assert_eq!(describe(Call::InPlay, Some(28.0), &[ended(PaResult::HomeRun), Event::RunScored { runner: B }], &[]), "Home run, 1 run scores");
     }
 }

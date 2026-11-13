@@ -114,6 +114,10 @@ pub(crate) fn lead_s(base: u8) -> f64 {
 /// a flat 0.25 s, which turned one double play in ten ground balls and a triple play every
 /// eight games).
 const RELAY_TRANSFER_FRAC: f64 = 0.7;
+/// With two out, a tag play's weight against a force's 1.0 when the holder picks his throw
+/// [E]: an equally sure tag loses to the force (a run can score ahead of a tag for the
+/// third out, never ahead of a force), but a sure tag still beats a doubtful force.
+const TWO_OUT_TAG_W: f64 = 0.9;
 /// Infield radius for the settle rule (rules-spec §5.8), m. The spec's 30 m excluded second
 /// base (38.8 m from home); the infield dirt reaches ~45 m.
 const INFIELD_R: f64 = 45.0;
@@ -2367,7 +2371,7 @@ impl<'a> Sim<'a> {
         };
         // Options: each base a running runner is heading to.
         let mut best: Option<(f64, u8, bool)> = None;
-        for r in &self.r {
+        for (k, r) in self.r.iter().enumerate() {
             if r.out || r.scored || r.v < 0.5 || r.overrun != OverrunPhase::None {
                 continue; // standing runners are not a play, nor is an overrun of first
             }
@@ -2382,7 +2386,14 @@ impl<'a> Sim<'a> {
             let t_via = via(goal);
             let t_ball = t_direct.min(t_via).max(self.receiver_ready(recv, goal)) + 0.05;
             let p_out = phi((t_runner - t_ball) / 0.12);
-            let w = [0.9, 1.0, 1.1, 1.3][(goal as usize).saturating_sub(1).min(3)];
+            // With fewer than two out the lead runner is worth more. With two out every out
+            // ends the inning, so the weights go: the sure out is the play, and a force is
+            // preferred to a tag (it needs no tag, and a run cannot score on it; OBR 5.08(a)).
+            let w = if self.st.outs >= 2 {
+                if self.forced(k) && goal == r.start + 1 { 1.0 } else { TWO_OUT_TAG_W }
+            } else {
+                [0.9, 1.0, 1.1, 1.3][(goal as usize).saturating_sub(1).min(3)]
+            };
             // Take the sure out: an uncertain play on a lead runner loses to a certain one
             // elsewhere (the chance is squared before the base's weight is applied).
             if p_out > 0.3 && best.map(|b| p_out * p_out * w > b.0).unwrap_or(true) {
@@ -3822,6 +3833,47 @@ mod tests {
         let who: Vec<AgentId> = sim.out.released.iter().map(|x| x.1).collect();
         assert_eq!(who, vec![sim.f[CF].id, sim.f[SS].id], "throws by {who:?}; facts {:?}; catcher at {:?}", sim.out.facts, sim.f[1].pos);
         assert!(matches!(sim.ball, Ball::Held { by: 1 }), "ball: {:?}", match &sim.ball { Ball::Held { by } => format!("held by {by}"), _ => "loose".into() });
+    }
+
+    /// Seed 7475 play 26 (2026-11-13): runners on first and third, a chopper to the
+    /// pitcher. Where does he throw with `outs` out?
+    fn pitcher_throws_to(outs: u8) -> u8 {
+        const R1: AgentId = 0x0007;
+        const R3: AgentId = 0x0008;
+        let fx = fixture(&[(R1, 1), (R3, 3)]);
+        let mut inp = input(&fx, vec![RunnerIn { id: fx.st.batter, base: 0, speed: 8.2 }, RunnerIn { id: R1, base: 1, speed: 8.2 }, RunnerIn { id: R3, base: 3, speed: 8.2 }]);
+        inp.fattrs[0].arm_sigma = 0.0;
+        let mut st = fx.st.clone();
+        st.outs = outs;
+        let mut sim = new_sim(&inp, &mut st);
+        sim.t = 3.25;
+        held_at(&mut sim, 0, Vec3::new(0.9, 18.2, 0.0));
+        sim.f[1].pos = base_pos(4);
+        sim.f[2].pos = base_pos(1);
+        // As the play stood: the batter 12.5 m from first, the runner from first 5.3 m from
+        // second, the runner from third 8 m from home, all at 7 m/s. Each is a sure out.
+        for (id, s, goal) in [(fx.st.batter, 14.9, 1), (R1, 49.6, 2), (R3, 101.6, 4)] {
+            let k = sim.r.iter().position(|r| r.id == id).unwrap();
+            (sim.r[k].s, sim.r[k].goal, sim.r[k].v) = (s, goal, 7.0);
+        }
+        sim.holder_act();
+        match sim.ball {
+            Ball::Thrown { to_base, .. } => to_base,
+            _ => panic!("no throw; facts {:?}", sim.out.facts),
+        }
+    }
+
+    // With two out every out ends the inning: the pitcher takes the force at first, not the
+    // tag play at home (the owner: "a real player would have thrown to first").
+    #[test]
+    fn with_two_out_the_holder_takes_the_force_over_the_lead_runner() {
+        assert_eq!(pitcher_throws_to(2), 1);
+    }
+
+    // With fewer than two out, cutting down the run at home is still the play.
+    #[test]
+    fn with_one_out_the_holder_cuts_down_the_lead_runner() {
+        assert_eq!(pitcher_throws_to(1), 4);
     }
 
     fn jobs(sim: &mut Sim, fielder: usize, at: Vec3) {
