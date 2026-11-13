@@ -163,6 +163,9 @@ const CALL_SLACK_S: f64 = 0.3;
 /// On a re-call, a fielder in the chaser's tier takes the ball only with this much more time
 /// to spare (or an earlier intercept), s [E]: calls are not traded on noise.
 const RECALL_MARGIN_S: f64 = 0.3;
+/// How sure a fielder is before he calls a ball in the air (agent-models §5.7): the time to
+/// spare must also cover this many σ of his read's depth error, run off at his speed [E].
+const CALL_SURE_SIGMAS: f64 = 1.0;
 /// Cutoffs and relays (agent-models §5.7) [E]: a ball fielded beyond `RELAY_FROM_M` from home
 /// gets a cutoff man on the line to the base; beyond `RELAY_DEEP_M` a middle infielder goes
 /// out as the relay man instead. He stands short of the base by the throw's length less
@@ -464,6 +467,48 @@ fn typical_batted_spin_rpm(la: f64) -> f64 {
     let k = (((x - DEG[0]) / 10.0).floor() as usize).min(7);
     let f = (x - DEG[k]) / 10.0;
     RPM[k] + (RPM[k + 1] - RPM[k]) * f
+}
+
+/// The σ of an observer's read of where the ball is along his line of sight, m: the depth
+/// term of [`read_prediction`] at distance `dist` after `view` seconds of watching. A fielder
+/// knows how good his own read is (a belief about himself, not about the ball).
+fn read_depth_sigma(dist: f64, sigma0: f64, tau_read: f64, view: f64) -> f64 {
+    sigma0 * (dist.max(1.0) / READ_REF_DIST) / m::sqrt(1.0 + view / tau_read) * DEPTH_STRETCH
+}
+
+/// An observer's prediction of the ball (agent-models §5.1, interim model): a noisy estimate
+/// of its state now (`truth` = position and velocity at `t`; the error grows with distance,
+/// shrinks with viewing time `view`, and is larger in depth), flown forward with the
+/// observer's own physics on smooth ground with typical spin. `err`: his error draws (depth,
+/// lateral, velocity depth, velocity lateral; standard normal). `off_bat_since`: for a ball
+/// still on its first flight off the bat, the time since contact, s.
+#[allow(clippy::too_many_arguments)]
+pub fn read_prediction(env: &FlightEnv, field: &Field, truth: (Vec3, Vec3), t: f64, from: Vec3, sigma0: f64, tau_read: f64, view: f64, err: [f64; 4], off_bat_since: Option<f64>) -> BallPath {
+    let (p, v) = truth;
+    let dist = m::hypot(p.x - from.x, p.y - from.y).max(1.0);
+    let shrink = 1.0 / m::sqrt(1.0 + view / tau_read);
+    let sp = sigma0 * (dist / READ_REF_DIST) * shrink;
+    let los = Vec3::new(p.x - from.x, p.y - from.y, 0.0).normalized();
+    let lat = Vec3::new(-los.y, los.x, 0.0);
+    // Height is read with the lateral precision (an angular measurement).
+    let pe = p + los * (err[0] * sp * DEPTH_STRETCH) + lat * (err[1] * sp) + Vec3::new(0.0, 0.0, err[1] * sp * 0.5);
+    let sv = READ_VEL_FRAC * v.norm() * shrink;
+    let ve = v + los * (err[2] * sv * DEPTH_STRETCH * 0.5) + lat * (err[3] * sv) + Vec3::new(0.0, 0.0, err[3] * sv * 0.5);
+    // Typical spin (agent-models §5.1): straight off the bat, the spin the contact model
+    // typically gives a ball at the launch angle he estimates (his read of its velocity
+    // with gravity's pull since contact added back); after a bounce or a deflection, a
+    // little topspin.
+    let h = Vec3::new(ve.x, ve.y, 0.0).normalized();
+    let axis = Vec3::new(h.y, -h.x, 0.0);
+    let rpm = match off_bat_since {
+        Some(since) => {
+            let la = m::atan2(ve.z + bb_math::units::G * since, m::hypot(ve.x, ve.y));
+            typical_batted_spin_rpm(la)
+        }
+        None => -600.0,
+    };
+    let w = axis * (rpm * core::f64::consts::PI / 30.0);
+    batted_path_dt(env, field, BallState { r: pe, v: ve, w }, t, AGENT_DT, |_, _| (0.0, 0.0))
 }
 
 /// How much farther toward the batter's pull side than his average a ball is hit, by where
@@ -851,26 +896,10 @@ impl<'a> Sim<'a> {
         self.predict_from(fd.pos, fd.a.read_sigma0, fd.a.tau_read, view, fd.err)
     }
 
-    /// An observer's prediction of the ball: a noisy estimate of its current state (error
-    /// grows with distance, shrinks with viewing time, larger in depth), flown forward with
-    /// the observer's own physics on smooth ground with typical spin.
+    /// An observer's prediction of the ball from where he stands: [`read_prediction`] of its
+    /// state now.
     fn predict_from(&self, from: Vec3, sigma0: f64, tau_read: f64, view: f64, err: [f64; 4]) -> BallPath {
-        let (p, v) = self.ball_at(self.t);
-        let dist = m::hypot(p.x - from.x, p.y - from.y).max(1.0);
-        let shrink = 1.0 / m::sqrt(1.0 + view / tau_read);
-        let sp = sigma0 * (dist / READ_REF_DIST) * shrink;
-        let los = Vec3::new(p.x - from.x, p.y - from.y, 0.0).normalized();
-        let lat = Vec3::new(-los.y, los.x, 0.0);
-        // Height is read with the lateral precision (an angular measurement).
-        let pe = p + los * (err[0] * sp * DEPTH_STRETCH) + lat * (err[1] * sp) + Vec3::new(0.0, 0.0, err[1] * sp * 0.5);
-        let sv = READ_VEL_FRAC * v.norm() * shrink;
-        let ve = v + los * (err[2] * sv * DEPTH_STRETCH * 0.5) + lat * (err[3] * sv) + Vec3::new(0.0, 0.0, err[3] * sv * 0.5);
-        // Typical spin (agent-models §5.1): straight off the bat, the spin the contact model
-        // typically gives a ball at the launch angle he estimates (his read of its velocity
-        // with gravity's pull since contact added back); after a bounce or a deflection, a
-        // little topspin. A carom off the wall counts as a deflection (Codex momentum review #6).
-        let h = Vec3::new(ve.x, ve.y, 0.0).normalized();
-        let axis = Vec3::new(h.y, -h.x, 0.0);
+        // A carom off the wall counts as a deflection (Codex momentum review #6).
         let off_the_bat = match &self.ball {
             Ball::Free { path, .. } => {
                 let t0 = match path.segments.first() { Some(bb_physics::ground::Segment::Flight { tr, .. }) => tr.first().t, _ => f64::NAN };
@@ -878,15 +907,8 @@ impl<'a> Sim<'a> {
             }
             _ => false,
         };
-        let rpm = if off_the_bat {
-            let since = self.t - self.inp.t_contact;
-            let la = m::atan2(ve.z + bb_math::units::G * since, m::hypot(ve.x, ve.y));
-            typical_batted_spin_rpm(la)
-        } else {
-            -600.0
-        };
-        let w = axis * (rpm * core::f64::consts::PI / 30.0);
-        batted_path_dt(self.inp.env, self.inp.field, BallState { r: pe, v: ve, w }, self.t, AGENT_DT, |_, _| (0.0, 0.0))
+        let since = off_the_bat.then(|| self.t - self.inp.t_contact);
+        read_prediction(self.inp.env, self.inp.field, self.ball_at(self.t), self.t, from, sigma0, tau_read, view, err, since)
     }
 
     /// A runner's read of the ball: a fresh look per decision, keyed by `sub` (see
@@ -1074,8 +1096,9 @@ impl<'a> Sim<'a> {
             self.f[i].belief = Some(p);
             self.f[i].next_plan = self.t + REPLAN_S;
         }
-        // The best call: a confident catch in the air (outfielders first, then the most time to
-        // spare) over everything else; otherwise the earliest intercept. On a re-call the
+        // The best call: a sure catch in the air (outfielders first, then the most time to
+        // spare), then a catch in the air nobody is sure of yet (the most time to spare), over
+        // everything else; otherwise the earliest intercept. On a re-call the
         // chaser keeps the ball unless someone calls it in a higher tier, or in his tier with
         // `RECALL_MARGIN_S` more to spare.
         let key = |c: &(usize, (u8, f64))| c.1;
@@ -1098,6 +1121,18 @@ impl<'a> Sim<'a> {
         // the base the cover step just gave him.
         let mut broke = false;
         let t_c = self.inp.t_contact;
+        // A ball in the air that nobody has called (the chaser is not sure of it): everyone
+        // else who believes he catches it in the air keeps going for it too, until someone
+        // is sure and calls it; then the others peel off (agent-models §5.7).
+        if calls.iter().any(|c| c.0 == chosen && c.1.0 == 1) {
+            for c in &calls {
+                if c.0 != chosen && c.1.0 == 1 {
+                    self.f[c.0].role = Role::Chase;
+                    self.f[c.0].target = own[c.0];
+                    broke = true;
+                }
+            }
+        }
         for i in [3usize, 4, 5] {
             let fd = &self.f[i];
             let grounder = fd.belief.as_ref().and_then(|p| p.first_bounce()).map(|b| m::hypot(b.1, b.2) < 25.0 && b.0 - t_c < GROUNDER_BOUNCE_S).unwrap_or(false);
@@ -1117,17 +1152,27 @@ impl<'a> Sim<'a> {
         self.assign_backups();
     }
 
-    /// A fielder's call on the ball from his own read: tier 2 (outfielder) or 1 (infielder)
-    /// when he believes he catches it in the air with at least `CALL_SLACK_S` to spare, valued
-    /// by the time to spare; otherwise tier 0, valued by how early he fields it (outfielders
-    /// win near-ties on balls in between).
+    /// A fielder's call on the ball from his own read (agent-models §5.7). He believes he
+    /// catches it in the air with at least `CALL_SLACK_S` to spare: if that margin also covers
+    /// `CALL_SURE_SIGMAS` of his read's depth error (the distance run off at his speed), he is
+    /// sure and calls it, tier 3 (outfielder) or 2 (infielder); if not, he goes for it without
+    /// calling, tier 1. Both are valued by the time to spare. Otherwise tier 0, valued by how
+    /// early he fields it (outfielders win near-ties on balls in between).
     fn call_value(&self, i: usize, pred: &BallPath, ti: f64, pt: Vec3, bias: f64) -> (u8, f64) {
         let in_air = ti.is_finite() && pred.first_bounce().map(|b| ti < b.0).unwrap_or(true);
         if in_air {
             let (fd, start) = self.planning_state(i);
             let spare = ti - (start + run_time_to(&fd, pt, REACH * 0.7));
             if spare >= CALL_SLACK_S {
-                return (if i >= 6 { 2 } else { 1 }, spare);
+                // Where he believes the ball is now, and how long he has watched it.
+                let (b, _) = pred.at(self.t);
+                let dist = m::hypot(b.x - fd.pos.x, b.y - fd.pos.y);
+                let view = (self.t - self.inp.t_contact - fd.a.reaction).max(0.0);
+                let doubt = CALL_SURE_SIGMAS * read_depth_sigma(dist, fd.a.read_sigma0, fd.a.tau_read, view) / fd.a.speed;
+                if spare < CALL_SLACK_S + doubt {
+                    return (1, spare);
+                }
+                return (if i >= 6 { 3 } else { 2 }, spare);
             }
         }
         (0, -(ti + bias))
@@ -3025,7 +3070,9 @@ mod tests {
         }
         assert!(sim.f[CF].vel.norm() > 2.0, "he is leaning: {:?}", sim.f[CF].vel);
         let gate = sim.call_value(CF, &pred, ti, pt, 0.0);
-        assert!(early.0 == 2 && gate.0 == 2, "a fly he calls: {early:?} {gate:?}");
+        // Tier 1 or 3: a fly he believes he catches in the air, sure of it or not (how sure
+        // depends on where the ball is by then; the time to spare must not).
+        assert!(early.0 >= 1 && gate.0 >= 1, "a fly he goes for: {early:?} {gate:?}");
         assert!((early.1 - gate.1).abs() < 1e-9, "time to spare planned early {:.3} s, at his gate {:.3} s", early.1, gate.1);
     }
 
@@ -3546,6 +3593,105 @@ mod tests {
             sim.t += DT;
         }
         assert!(sim.f[B2].vel.norm() < 1e-9 && (sim.f[B2].pos - start).norm() < 5.0, "2B at {:?} moving {:?}", sim.f[B2].pos, sim.f[B2].vel);
+    }
+
+    /// A ball hit from the plate with velocity `v`, every fielder reading it without error
+    /// (the tests below are about the call rule, not the draws), at the outfielders'
+    /// reaction time.
+    fn hit(fx: &Fixture, v: Vec3) -> LiveInput<'_> {
+        let mut inp = input(fx, vec![RunnerIn { id: fx.st.batter, base: 0, speed: 8.2 }]);
+        // The spin fielders expect at this launch angle, so their reads match the ball.
+        let h = Vec3::new(v.x, v.y, 0.0).normalized();
+        let rpm = typical_batted_spin_rpm(m::atan2(v.z, m::hypot(v.x, v.y)));
+        inp.ball = BallState { r: Vec3::new(0.0, 0.5, 1.0), v, w: Vec3::new(h.y, -h.x, 0.0) * (rpm * core::f64::consts::PI / 30.0) };
+        inp
+    }
+
+    fn at_first_read(sim: &mut Sim) {
+        for fd in sim.f.iter_mut() {
+            fd.err = [0.0; 4];
+        }
+        sim.t = sim.inp.t_contact + 0.35;
+    }
+
+    fn tier(sim: &Sim, i: usize) -> u8 {
+        let p = sim.predict(i);
+        let (ti, pt) = sim.intercept(i, &p);
+        sim.call_value(i, &p, ti, pt, 0.0).0
+    }
+
+    fn landing(sim: &Sim) -> Vec3 {
+        let Ball::Free { path, .. } = &sim.ball else { unreachable!() };
+        Vec3::new(path.bounces[0].1, path.bounces[0].2, 0.0)
+    }
+
+    // Agent-models §5.7, calls: a fielder calls a ball in the air only when his time to spare
+    // also covers his read's depth error. A pop-up to short right-center, about 70 m out: the
+    // right fielder, some 85 m from the ball at his first look, reads its depth to about
+    // 3.0 × 85/30 × 3 ≈ 25 m, three seconds of running, more than anyone has to spare on a
+    // six-second ball he must run 25 m for; the second baseman, under 40 m from it, reads it
+    // to about 0.3 × 40/30 × 3 ≈ 1.2 m. So the second baseman calls it and the right fielder
+    // does not (the old rule gave it to the outfielder: Codex idle-fielder review #2).
+    #[test]
+    fn an_outfielder_does_not_call_a_pop_up_he_cannot_be_sure_of() {
+        const B2: usize = 3;
+        const RF: usize = 8;
+        let fx = fixture(&[]);
+        let inp = hit(&fx, Vec3::new(7.0, 22.0, 26.0));
+        let mut st = fx.st.clone();
+        let mut sim = new_sim(&inp, &mut st);
+        at_first_read(&mut sim);
+        let land = landing(&sim);
+        assert!((land - Vec3::new(21.0, 67.0, 0.0)).norm() < 3.0, "lands at {land:?}");
+        assert_eq!((tier(&sim, B2), tier(&sim, RF)), (2, 1));
+        sim.assign();
+        assert_eq!(sim.primary, B2);
+        assert_ne!(sim.f[RF].role, Role::Chase, "the infielder has called it");
+        // A fly hit at the centre fielder he has only to wait for: he calls it at once.
+        let inp = hit(&fx, Vec3::new(0.0, 33.0, 22.0));
+        let mut st = fx.st.clone();
+        let mut sim = new_sim(&inp, &mut st);
+        at_first_read(&mut sim);
+        let land = landing(&sim);
+        assert!((land - sim.f[CF].pos).norm() < 4.0, "lands at {land:?}");
+        assert_eq!(tier(&sim, CF), 3);
+        sim.assign();
+        assert_eq!(sim.primary, CF);
+        assert_eq!((0..9).filter(|&i| sim.f[i].role == Role::Chase).count(), 1);
+    }
+
+    // A fly into the right-center gap that the centre and right fielders both believe they
+    // can run down, neither surely at first look: both go for it. A second and a half on, the
+    // centre fielder's read has firmed up enough to call it, and the right fielder peels off.
+    #[test]
+    fn until_someone_is_sure_everyone_who_can_catch_it_goes() {
+        const RF: usize = 8;
+        let fx = fixture(&[]);
+        let inp = hit(&fx, Vec3::new(6.0, 30.0, 22.0));
+        let mut st = fx.st.clone();
+        let mut sim = new_sim(&inp, &mut st);
+        at_first_read(&mut sim);
+        let land = landing(&sim);
+        assert!((land - Vec3::new(18.0, 91.0, 0.0)).norm() < 3.0, "lands at {land:?}");
+        sim.assign();
+        for i in [CF, RF] {
+            assert_eq!(sim.f[i].role, Role::Chase, "f{i}");
+            assert!((sim.f[i].target - land).norm() < 6.0, "f{i} runs at {:?}", sim.f[i].target);
+        }
+        assert_eq!((0..9).filter(|&i| sim.f[i].role == Role::Chase).count(), 2, "nobody else can get there");
+        for _ in 0..90 {
+            sim.move_fielders();
+            sim.t += DT;
+        }
+        let pi = sim.primary;
+        let p = sim.predict(pi);
+        (sim.f[pi].t_int, sim.f[pi].target) = sim.intercept(pi, &p);
+        sim.f[pi].belief = Some(p);
+        sim.recall();
+        assert_eq!(sim.primary, CF);
+        assert_eq!(tier(&sim, CF), 3);
+        assert_eq!(sim.f[CF].role, Role::Chase);
+        assert_ne!(sim.f[RF].role, Role::Chase, "called off");
     }
 
     // Codex idle-fielder review #1: every way into `Role::Idle` brakes the fielder, not only

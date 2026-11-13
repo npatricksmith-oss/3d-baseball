@@ -1,13 +1,38 @@
 # Task List
 
-**Last updated:** 2026-11-13 (owner's observations merged into the "Owner backlog" section; before that, the coordinator run on `coord/review-fixes`)
+**Last updated:** 2026-11-13 (pop-up calls on `fix/popup-calls`; before that, owner's observations merged into the "Owner backlog" section; before that, the coordinator run on `coord/review-fixes`)
 The live to-do list for the project. [PLAN.md](PLAN.md) holds decisions and design. This file holds what is next and what is done. Update it at the end of every work session.
 
 Status: `[ ]` not started · `[~]` in progress · `[x]` done · `[?]` needs an owner decision
 
 ---
 
-## Resume here (2026-11-13, coordinator run; branch `coord/review-fixes`, merged into main)
+## Resume here (2026-11-13, second session: pop-ups; merged into main, not pushed)
+
+`fix/popup-calls` (cut from main `454d341`) is merged into local main; nothing is pushed. `cargo test --workspace --release`: 143 passed, 0 failed. The owner paused here and will continue in a new session. Owner (2026-11-13): merge into main often.
+
+**First, unresolved:** the [Codex popup-calls review](docs/reviews/2026-11-13-codex-popup-calls-review.md), Resolution **Open**, nothing fixed yet. No P1.
+- (P2) With extra chasers, both middle infielders can chase and nobody covers second until the next recall (seed 55 play 159, runner on second; 17 such assignments in 1,024 games). Wanted: a fallback cover when both are busy, before backups are handed out.
+- (P2) A recall looks only at the chaser and the four fielders nearest his target, so another active chaser outside that set is sent to backup before anyone is sure (seed 897 play 163). Wanted: every active chaser is a recall candidate.
+- (P3) The calibration note's baseline GB/LD rates should read .410/.719 (not .411/.723), and its read-error table was measured with the old call rule's games (the committed code gives −0.6 / 21.9 / 8.2 / 6.3 / 4.1 / 24.6 in the first row).
+- The review also notes the gap-fly test's right fielder has only 30 ms of margin over the chase threshold; pick a more comfortable ball.
+
+**Then, the owner's two items (2026-11-13), in this order, merging each into main when done:**
+1. The called-off infielder drifts out behind the caller instead of standing still (§5.7 "peels off to back up"; seed 29 play 135, confirmed by the review as a wrong sure call by the centre fielder, depth draw −1.47 σ).
+2. The read knows the ball started at the plate (§5.1 launch-state perception), and the outfield read values are refitted.
+
+Done (old "Next" item 1, pop-ups dropping in short right/center; [note](docs/calibration/2026-11-13-popup-read-and-calls.md)):
+- **Why the outfielder's read is off above 50°: not spin or drag** (under 1.5 m at any launch angle). One σ of his read moves the predicted landing point about 25 m at first look on every fly, nearly all of it the position-depth term, which scales with his distance from the ball. A fly hit toward him brings that down to under 2 m; a shallow pop-up never comes near him, so he is still 5–7 m unsure with a second and a half left. New diagnostic: `cargo run --release -p bb_game --example read_error -- 48` (the read is now a pure function, `live::read_prediction`; digests unchanged).
+- **Calls (agent-models §5.7):** a fielder calls a ball in the air only when he is sure: his time to spare covers one σ (`CALL_SURE_SIGMAS` [E]) of his own read's depth error. Until someone is sure, everyone who believes he can catch it goes for it; a sure call sends the others to their cover and backup jobs. Outfielders still outrank infielders among sure calls. 1,024 games, seed 5: pop-up hits .047 → .018 (MLB ≈ .02), fly balls .134 → .122, runs 5.55 → 5.47; seed 2: 5.27 runs. Uncaught pop-ups in 128 games: 28 → 12; seed 41 play 93 (the review's example) is caught by the second baseman.
+
+Open from it:
+- A called-off infielder still stands still under the ball (seed 29 play 135); §5.7's "peels off to back up" for him is not built. About looks now, not a number.
+- The interim read gives the observer no knowledge that the ball started at the plate (22 m of depth error when the ball is 16 m from home). How fast a depth read should firm up belongs to §5.1's launch-state perception; changing it means refitting the outfield read values.
+- Part B of the pitcher fix was already done (the pitcher backs up third, owner 2026-11-13).
+
+Next, in order: items 2–7 of the list below (fouls first).
+
+## Previous: coordinator run (2026-11-13; branch `coord/review-fixes`, merged into main)
 
 All of this session's work was done on `coord/review-fixes` (cut from `origin/main` 638871c, PR #1) and merged into main at the owner's request. `cargo test --workspace --release`: 141 passed, 0 failed, after every merge.
 
@@ -32,7 +57,7 @@ Done this session (coordinator with worker agents; merges in `coord/review-fixes
 - CLAUDE.md no longer says the repo has no remote.
 
 Next, in order:
-1. **Pop-ups dropping in short right/center** (above): the review ranks the outfielder's early depth misread first (with zero read errors 25 of the 26 dropped pop-ups are caught; letting confident infielders share the call tier recovers 12). Find why the read is off for balls launched above 50° (spin/drag assumed?) before touching call priority; then decide when outfield priority applies (real priority is for balls in between; test seed 41/play 93 plus cases where the outfielder should keep it) and build §5.7's "a called-off fielder peels off to back up". Then Part B of the pitcher fix if the owner agrees.
+1. ~~Pop-ups dropping in short right/center~~ **done 2026-11-13** (see "Resume here").
 2. **Fouls (O1/R13)**, following the owner's direction: extend `foul_diag` with Statcast-style measures (foul share by launch angle and attack direction, early/late split, bat tilt at contact, swing length) and add a `cage-map` bat-tilt counterfactual (−20/−30/−35°) before changing any calibration.
 3. Live sim emits `RunnerPosition` at ~30 Hz and models an overrun of first.
 4. Watch the client (`bin/play.sh`): reset staging, side-change jogs, sidesteps.
