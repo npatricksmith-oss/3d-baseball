@@ -210,5 +210,55 @@ Side effect: runs went from 5.27 to 5.48 per team-game, almost all of it from po
 rate .005 to .044). Idle infielders running at their own intercepts had been catching shallow
 pop-ups that the outfielder who called them misjudged. See
 docs/calibration/2026-11-13-idle-fielder-target.md. Part B (the pitcher's job on a
-bases-empty outfield ball) is not applied and waits on the owner. Until then the pitcher
-stands near the mound on those plays.
+bases-empty outfield ball) was not applied with Part A; it waited on the owner (applied
+below).
+
+## Part B applied (2026-11-13, owner's decision)
+
+The owner ruled on 2026-11-13: on a ball to the outfield with the bases empty, the pitcher
+backs up third. Branch `fix/pitcher-backs-up-third`. `assign_backups` now gives that case
+`(2, [far_of, 7])`, `(3, [0])`, `(1, [1])`. The pitcher is the only candidate for third, at
+`backup_spot(from, 3)`: 13 m past the bag on the line of a throw from where the ball is
+fielded, which is in foul ground beyond third for any ball to the outfield. He is no longer a
+fallback for second. That slot came before CF in the old list, but he never reached it
+because the far outfielder was nearly always free. When a throw is actually released,
+`back_up_throw` moves whoever backs up that base onto the real throw's line, as it does with
+runners on. agent-models §5.7 now has the full backup table and records the decision.
+
+Tests (both fail on the old rule): `idle_fielders_back_up_the_play` checks that the pitcher
+backs up third in foul ground on a single to left with nobody on. It also checks the fly to
+right-center at (62, 88) from the test proposed above, where his spot is worked by hand as
+(−29.3, 11.0). `idle_fielders_do_not_chase_the_ball` now checks the second baseman, the one
+fielder still left idle on that play.
+
+Where the pitcher ends a bases-empty ball to the outfield (first bounce more than 45 m from
+home). The scratch probe ran seeds 1–200 and was not committed. "3B spot" means
+`backup_spot` taken from the first bounce:
+
+| | before (`0d42ca5`) | after |
+|---|---:|---:|
+| plays | 3,549 | 3,560 |
+| median distance from the 3B spot | 29.5 m | 0.4 m |
+| within 15 m of the 3B spot | 2% | 86% |
+| median distance from third base | 19.4 m | 13.0 m |
+| median distance from the mound | 0.2 m | 27.6 m |
+| ends past third (x < third base's x) | 0% | 73% |
+| median / p90 speed at the end | 0.0 / 0.0 m/s | 0.0 / 3.3 m/s |
+
+Most of the remaining 14% end short of the spot because the play ended before he got there,
+for example on a quick catch.
+
+`pitcher_roam 1 200`: 40 of 14,863 flagged before (0.27%) and 43 of 14,858 after (0.29%).
+`pitcher_roam 7 1`: 0 flagged. The three new flags (seed 48 play 0, 101/3, 129/78) all
+follow one pattern. After a catch or a single to deep center, the center fielder's no-play
+throw to second sails over the bag and rolls through the infield to the backstop. The
+pitcher used to stop such a throw just by standing on the mound. Now he is behind third, the
+far outfielder who backs up second is still on his way in from 80 m, and the pitcher, the
+nearest free man, chases the ball behind home. That is the same `Chase` class as the 35 balls
+hit behind home already in the count. A possible follow-up, not done here: when the throw is
+released, `back_up_throw` could give the second-base backup to whoever reaches the spot
+first rather than keeping the man assigned at contact.
+
+`sim-cli games --n 1024 --seed 5`: 5.48 → 5.49 runs per team-game. GB .410 → .410, LD .722 →
+.723, FB .132 → .132, PU .044 → .045. As expected, nothing moved beyond noise. With the bases
+empty the pitcher seldom touches the ball on an outfield play. No tuning.
