@@ -1,0 +1,16 @@
+id = "force-004"
+title = "Runner on first never leaves the bag on a ground ball: forced, he has lost his right to first, so a tag on him there is a force out"
+rules = ["OBR 5.09(b)(6)", "OBR definition 'Force Play'", "rules-spec 5.4", "rules-spec 5.5"]
+milestone = "M4"
+tags = ["force", "tag"]
+initial = { inning = 3, outs = 0, batter = "A.6", bases = { first = "A.5" } }
+step = [
+  { fact = "PitchDelivered", t = 0.0 },
+  { fact = "BatContact", t = 0.42 },
+  { fact = "BallTouched", t = 0.8, what = "Ground", pos = [12.0, 22.0] },
+  { fact = "GloveSecured", t = 1.2, fielder = "H.1B", pos = [17.0, 20.0] },
+  { fact = "TagContact", t = 1.6, fielder = "H.1B", runner = "A.5", holding_ball = true, expect_events = [{ event = "RunnerOut", runner = "A.5", base = 2, kind = "Force" }] },
+  { fact = "BaseTouched", t = 4.2, agent = "A.6", base = 1 },
+  { fact = "PlayEndCheck", t = 6.0 },
+]
+expect = { outs = 1, bases = { first = "A.6" }, play = "Dead" }

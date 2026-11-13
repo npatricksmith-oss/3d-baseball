@@ -1,0 +1,28 @@
+id = "passing-005"
+title = "OBR comment play: lead runner in a rundown runs back to and beyond third toward left field; the trailing runner on third has passed him and is out; the lead runner retakes third"
+rules = ["OBR 5.09(b)(9) comment", "OBR 5.06(a)(1)", "rules-spec 5.5"]
+milestone = "M4"
+tags = ["passing", "positions", "lead-runner-action"]
+initial = { inning = 6, outs = 1, batter = "A.6", bases = { second = "A.4", third = "A.5" } }
+step = [
+  { fact = "PitchDelivered", t = 0.0 },
+  { fact = "BatContact", t = 0.42 },
+  { fact = "BallTouched", t = 0.8, what = "Ground", pos = [-8.0, 30.0] },
+  { fact = "GloveSecured", t = 1.3, fielder = "H.SS", pos = [-8.0, 30.0] },
+  { fact = "BaseLeft", t = 1.4, agent = "A.5", base = 3 },
+  { fact = "BaseLeft", t = 1.4, agent = "A.4", base = 2 },
+  # Caught in a rundown 40% of the way home.
+  { fact = "RunnerPosition", t = 3.0, runner = "A.5", pos = [-11.638, 11.638] },
+  { fact = "BaseTouched", t = 3.5, agent = "A.4", base = 3 },
+  { fact = "BaseTouched", t = 4.2, agent = "A.6", base = 1 },
+  { fact = "BaseTouched", t = 4.5, agent = "A.5", base = 3 },
+  { fact = "BaseLeft", t = 4.6, agent = "A.5", base = 3 },
+  # Three metres beyond third, down the left-field line.
+  { fact = "RunnerPosition", t = 4.8, runner = "A.5", pos = [-21.5, 21.5], expect_events = [
+    { event = "RunnerPassed", runner = "A.4", passed = "A.5" },
+    { event = "RunnerOut", runner = "A.4", base = 4, kind = "Tag" },
+  ] },
+  { fact = "BaseTouched", t = 5.5, agent = "A.5", base = 3 },
+  { fact = "PlayEndCheck", t = 7.0 },
+]
+expect = { outs = 2, bases = { first = "A.6", third = "A.5" }, play = "Dead" }

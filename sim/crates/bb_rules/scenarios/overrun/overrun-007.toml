@@ -1,0 +1,21 @@
+id = "overrun-007"
+title = "Third out made elsewhere while the batter-runner is still overrunning first: he is left on first"
+rules = ["OBR 5.09(b)(4) exception", "rules-spec 5.5"]
+milestone = "M4"
+tags = ["overrun", "lob"]
+initial = { inning = 7, outs = 2, batter = "A.6", bases = { second = "A.5" } }
+step = [
+  { fact = "PitchDelivered", t = 0.0 },
+  { fact = "BatContact", t = 0.42 },
+  { fact = "BaseLeft", t = 0.6, agent = "A.5", base = 2 },
+  { fact = "BallTouched", t = 0.8, what = "Ground", pos = [-8.0, 30.0] },
+  { fact = "GloveSecured", t = 1.3, fielder = "H.SS", pos = [-8.0, 30.0] },
+  { fact = "BaseTouched", t = 4.2, agent = "A.6", base = 1 },
+  { fact = "BaseLeft", t = 4.3, agent = "A.6", base = 1 },
+  { fact = "RunnerPosition", t = 4.5, runner = "A.6", pos = [21.6, 21.5] },
+  { fact = "TagContact", t = 4.7, fielder = "H.3B", runner = "A.5", holding_ball = true, expect_events = [
+    { event = "RunnerOut", runner = "A.5", base = 3, kind = "Tag" },
+    { event = "HalfInningEnded", runs = 0, left_on_base = 1 },
+  ] },
+]
+expect = { outs = 0, inning = 7, half = "bottom", score = [0, 0] }

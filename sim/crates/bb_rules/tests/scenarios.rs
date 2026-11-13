@@ -54,9 +54,19 @@ fn check_keys(v: &Value, allowed: &[&str], ctx: &str) {
     }
 }
 
-fn parse_input(v: &Value) -> Input {
+/// A scenario step: a discrete fact, or a runner position sample (rules-spec §2).
+enum Parsed {
+    Input(Input),
+    Position(RunnerPosition),
+}
+
+fn parse_input(v: &Value) -> Parsed {
     let t = v.get("t").map(|_| f(v, "t")).unwrap_or(0.0);
-    match s(v, "fact") {
+    if s(v, "fact") == "RunnerPosition" {
+        let p = v["pos"].as_array().unwrap();
+        return Parsed::Position(RunnerPosition { t, runner: agent(s(v, "runner")), x: p[0].as_float().unwrap(), y: p[1].as_float().unwrap() });
+    }
+    Parsed::Input(match s(v, "fact") {
         "StartGame" => Input::StartGame,
         "PitchDelivered" => Input::PitchDelivered { t },
         "PitchCrossed" => Input::PitchCrossed { t, in_zone: b(v, "in_zone"), bounced: v.get("bounced").and_then(|x| x.as_bool()).unwrap_or(false) },
@@ -102,7 +112,7 @@ fn parse_input(v: &Value) -> Input {
         "PlayEndCheck" => Input::PlayEndCheck { t },
         "PlayTimeout" => Input::PlayTimeout { t },
         x => panic!("unknown fact {x}"),
-    }
+    })
 }
 
 /// Render an event as a key→string map for matching.
@@ -127,6 +137,10 @@ fn render(e: &Event) -> BTreeMap<&'static str, String> {
             m.insert("from", from.to_string());
             m.insert("to", to.to_string());
             m.insert("cause", format!("{cause:?}"));
+        }
+        Event::RunnerPassed { runner, passed } => {
+            m.insert("runner", name_of(*runner));
+            m.insert("passed", name_of(*passed));
         }
         Event::RunScored { runner } => {
             m.insert("runner", name_of(*runner));
@@ -233,8 +247,10 @@ fn run_scenario(path: &Path) -> Result<(), String> {
             &["fact", "t", "in_zone", "bounced", "swung", "what", "pos", "in_flight", "fair", "fielder", "agent", "base", "holding_ball", "runner", "expect_events"],
             &format!("step {i}"),
         );
-        let input = parse_input(stv);
-        let evs = step(&mut st, &input);
+        let evs = match parse_input(stv) {
+            Parsed::Input(i) => step(&mut st, &i),
+            Parsed::Position(p) => step(&mut st, &p),
+        };
         // Facts must be chronological within a play (rules-spec §1.2; Codex M4 review #22).
         if evs.iter().any(|e| matches!(e, Event::RulesWarning { code: "time_reversed" })) {
             return Err(format!("step {i}: fact time goes backward"));

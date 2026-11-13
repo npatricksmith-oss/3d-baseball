@@ -1,0 +1,23 @@
+id = "overrun-003"
+title = "The overrun protection is spent once he is back on first: stepping off again later, he is tagged out"
+rules = ["OBR 5.09(b)(4) exception (returns immediately)", "rules-spec 5.5"]
+milestone = "M4"
+tags = ["overrun", "tag"]
+initial = { inning = 4, outs = 0, batter = "A.4" }
+step = [
+  { fact = "PitchDelivered", t = 0.0 },
+  { fact = "BatContact", t = 0.42 },
+  { fact = "BallTouched", t = 0.8, what = "Ground", pos = [-8.0, 30.0] },
+  { fact = "GloveSecured", t = 1.3, fielder = "H.SS", pos = [-8.0, 30.0] },
+  { fact = "BaseTouched", t = 4.2, agent = "A.4", base = 1 },
+  { fact = "BaseLeft", t = 4.3, agent = "A.4", base = 1 },
+  { fact = "RunnerPosition", t = 4.6, runner = "A.4", pos = [21.5, 21.6] },
+  { fact = "BaseTouched", t = 5.4, agent = "A.4", base = 1 },
+  # Back on the bag; he wanders off it down the line again and the first baseman tags him.
+  { fact = "BaseLeft", t = 6.0, agent = "A.4", base = 1 },
+  { fact = "RunnerPosition", t = 6.3, runner = "A.4", pos = [20.5, 20.6] },
+  { fact = "GloveSecured", t = 6.4, fielder = "H.1B", pos = [20.0, 20.4] },
+  { fact = "TagContact", t = 6.5, fielder = "H.1B", runner = "A.4", holding_ball = true, expect_events = [{ event = "RunnerOut", runner = "A.4", kind = "Tag" }] },
+  { fact = "PlayEndCheck", t = 8.0 },
+]
+expect = { outs = 1, bases = {}, play = "Dead" }

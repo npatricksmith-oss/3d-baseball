@@ -1,0 +1,27 @@
+id = "passing-006"
+title = "Lead runner rounds third, panics, and goes all the way back to second while the trailing runner stands on third: the trailing runner has passed him and is out (base touches only)"
+rules = ["OBR 5.09(b)(9) comment", "rules-spec 5.5"]
+milestone = "M4"
+tags = ["passing", "lead-runner-action"]
+initial = { inning = 6, outs = 0, batter = "A.6", bases = { first = "A.4", second = "A.5" } }
+step = [
+  { fact = "PitchDelivered", t = 0.0 },
+  { fact = "BatContact", t = 0.42 },
+  { fact = "BaseLeft", t = 0.6, agent = "A.5", base = 2 },
+  { fact = "BaseLeft", t = 0.6, agent = "A.4", base = 1 },
+  { fact = "BallTouched", t = 1.5, what = "Ground", pos = [20.0, 70.0] },
+  { fact = "BaseTouched", t = 3.0, agent = "A.5", base = 3 },
+  { fact = "BaseLeft", t = 3.1, agent = "A.5", base = 3 },
+  { fact = "BaseTouched", t = 3.2, agent = "A.4", base = 2 },
+  { fact = "BaseLeft", t = 3.3, agent = "A.4", base = 2 },
+  { fact = "BaseTouched", t = 4.2, agent = "A.6", base = 1 },
+  { fact = "BaseTouched", t = 6.0, agent = "A.4", base = 3 },
+  { fact = "BaseTouched", t = 6.3, agent = "A.5", base = 3 },
+  { fact = "BaseLeft", t = 6.4, agent = "A.5", base = 3 },
+  { fact = "BaseTouched", t = 9.0, agent = "A.5", base = 2, expect_events = [
+    { event = "RunnerPassed", runner = "A.4", passed = "A.5" },
+    { event = "RunnerOut", runner = "A.4", base = 4, kind = "Tag" },
+  ] },
+  { fact = "PlayEndCheck", t = 11.0 },
+]
+expect = { outs = 1, bases = { first = "A.6", second = "A.5" }, play = "Dead" }

@@ -1,0 +1,17 @@
+id = "twoonbase-005"
+title = "Caught fly ends the forces: runner from first tags up and takes second, where the runner from second stayed; the following runner is out when tagged"
+rules = ["OBR 5.06(a)(2)", "rules-spec 5.4", "rules-spec 5.5"]
+milestone = "M4"
+tags = ["two-on-base", "tagup", "tag"]
+initial = { inning = 5, outs = 0, batter = "A.6", bases = { first = "A.4", second = "A.5" } }
+step = [
+  { fact = "PitchDelivered", t = 0.0 },
+  { fact = "BatContact", t = 0.42 },
+  { fact = "GloveSecured", t = 4.0, fielder = "H.CF", pos = [0.0, 95.0] },
+  { fact = "BaseLeft", t = 4.1, agent = "A.4", base = 1 },
+  { fact = "BaseTouched", t = 7.5, agent = "A.4", base = 2 },
+  { fact = "TagContact", t = 7.6, fielder = "H.SS", runner = "A.5", holding_ball = true },
+  { fact = "TagContact", t = 7.7, fielder = "H.SS", runner = "A.4", holding_ball = true, expect_events = [{ event = "RunnerOut", runner = "A.4", base = 2, kind = "Tag" }] },
+  { fact = "PlayEndCheck", t = 9.0 },
+]
+expect = { outs = 2, bases = { second = "A.5" }, play = "Dead" }

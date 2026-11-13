@@ -1,0 +1,21 @@
+id = "passing-001"
+title = "Runner from first holds halfway on a fly that drops; the batter-runner reaches second before him: the batter-runner passed him and is out"
+rules = ["OBR 5.09(b)(9)", "rules-spec 5.5"]
+milestone = "M4"
+tags = ["passing"]
+initial = { inning = 2, outs = 0, batter = "A.6", bases = { first = "A.4" } }
+step = [
+  { fact = "PitchDelivered", t = 0.0 },
+  { fact = "BatContact", t = 0.42 },
+  { fact = "BaseLeft", t = 0.6, agent = "A.4", base = 1 },
+  { fact = "BallTouched", t = 3.5, what = "Ground", pos = [20.0, 70.0] },
+  { fact = "BaseTouched", t = 4.2, agent = "A.6", base = 1 },
+  { fact = "BaseLeft", t = 4.3, agent = "A.6", base = 1 },
+  { fact = "BaseTouched", t = 7.8, agent = "A.6", base = 2, expect_events = [
+    { event = "RunnerPassed", runner = "A.6", passed = "A.4" },
+    { event = "RunnerOut", runner = "A.6", base = 2, kind = "Tag" },
+  ] },
+  { fact = "BaseTouched", t = 8.2, agent = "A.4", base = 2 },
+  { fact = "PlayEndCheck", t = 10.0 },
+]
+expect = { outs = 1, bases = { second = "A.4" }, play = "Dead" }

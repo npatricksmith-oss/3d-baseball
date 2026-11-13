@@ -1,0 +1,23 @@
+id = "passing-007"
+title = "Runner from second touches home while the runner from third is still hesitating off third: he passed him, is out, and his run never counts; the lead runner then scores"
+rules = ["OBR 5.09(b)(9)", "OBR 5.08(a)", "rules-spec 6.4"]
+milestone = "M4"
+tags = ["passing", "runs"]
+initial = { inning = 3, outs = 0, batter = "A.6", bases = { second = "A.4", third = "A.5" } }
+step = [
+  { fact = "PitchDelivered", t = 0.0 },
+  { fact = "BatContact", t = 0.42 },
+  { fact = "BaseLeft", t = 0.6, agent = "A.5", base = 3 },
+  { fact = "BaseLeft", t = 0.6, agent = "A.4", base = 2 },
+  { fact = "BallTouched", t = 1.5, what = "Ground", pos = [20.0, 70.0] },
+  { fact = "BaseTouched", t = 2.0, agent = "A.4", base = 3 },
+  { fact = "BaseLeft", t = 2.1, agent = "A.4", base = 3 },
+  { fact = "BaseTouched", t = 3.0, agent = "A.4", base = 4, expect_events = [
+    { event = "RunnerPassed", runner = "A.4", passed = "A.5" },
+    { event = "RunnerOut", runner = "A.4", base = 4, kind = "Tag" },
+  ] },
+  { fact = "BaseTouched", t = 4.0, agent = "A.5", base = 4 },
+  { fact = "BaseTouched", t = 4.2, agent = "A.6", base = 1 },
+  { fact = "PlayEndCheck", t = 6.0, expect_events = [{ event = "RunScored", runner = "A.5" }] },
+]
+expect = { outs = 1, score = [1, 0], bases = { first = "A.6" }, play = "Dead" }

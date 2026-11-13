@@ -1,6 +1,6 @@
 # Rules Specification
 
-**Last updated:** 2026-10-31
+**Last updated:** 2026-11-13
 **Status:** Draft v1. Gates milestone M4 (walking-skeleton game). M5 additions and substitution rules (M6) are specified here too so the state machine is designed for them from the start.
 **Parent:** [PLAN.md](../PLAN.md) §9 · **Siblings:** [physics-spec.md](physics-spec.md), [agent-models.md](agent-models.md), [data-formats.md](data-formats.md), [calibration-targets.md](calibration-targets.md)
 
@@ -60,7 +60,7 @@ The complete vocabulary `bb_game` may send. Each is a plain record; positions in
 | `BallReleasedFromGlove` | t, fielder, kind (`Throw`, `Drop`, `Knocked`) | Loss of possession |
 | `BaseTouched` / `BaseLeft` | t, agent, base | Body capsule enters or leaves the base volume (physics spec §9.4) |
 | `TagContact` | t, fielder, runner, `holding_ball` | Glove or ball-holding hand touches a runner capsule |
-| `RunnerPosition` | t, runner, nearest base path point, heading | 30 Hz, for overrun and baseline checks |
+| `RunnerPosition` | t, runner, ground point (x, y) | About 30 Hz per runner while a play is live, every runner at the same tick times (§5.5 compares samples with equal t); for the overrun of first and passing (§5.5), later the base-path check (M5). In `bb_rules` it is its own type (`RunnerPosition`), not an `Input` variant; `step` takes either. (Changed 2026-11-13 from "nearest base path point, heading": the engine projects the point itself, and no rule needs the heading.) |
 | `PitcherOnRubber` / `PitcherOffRubber` | t | Set/step-off (M5 balks and pickoffs) |
 | `BodyContact` | t, agent A, agent B | Fielder–runner contact (M5 obstruction/interference) |
 
@@ -199,17 +199,28 @@ A pending ground ball that rolls foul then back fair before reaching a base is f
 ### 5.4 Forces
 
 - A runner is **forced** when the batter becoming a runner (fair ball, walk, HBP, uncaught strike three) takes away their right to their base. Forces chain from first base outward through consecutively occupied bases.
-- A force is **removed** for a runner when any following runner (closer to home in the order of the bases) is put out [S: OBR 5.09(b)(6)]. The batter-runner being out removes all forces.
-- **Force out:** a fielder holding the ball touches the forced base (`BaseTouched` by the fielder with `holding_ball`, or the ball in hand touching the base) before the forced runner touches it.
+- A force is **removed** for a runner when any following runner (closer to home in the order of the bases) is put out [S: OBR 5.09(b)(6)]. The batter-runner being out removes all forces. Any kind of out counts, a passing out included (§5.5).
+- **Force out:** a fielder holding the ball touches the forced base (`BaseTouched` by the fielder with `holding_ball`, or the ball in hand touching the base) before the forced runner touches it. A tag on a forced runner who has not reached his forced base is a force out too, **including while he stands on a base short of it**: a forced runner has lost his right to his time-of-pitch base, alone on it or not [S: OBR 5.09(b)(6), definition "Force Play"]. (Added 2026-11-13; before, a tag on a forced runner standing on his own base did nothing.)
 - On a caught fly, forces cease; runners returning to retouch are subject to "reverse force" appeal outs (§5.6) — touching the base before the runner returns retires them.
 
 ### 5.5 Tags and touching bases
 
 - **Tag out:** `TagContact` with `holding_ball` while the runner is not touching a base (no open `BaseTouched` interval), and the fielder still holds the ball `t_secure` after the tag (no `Drop` before then) [S: OBR definition "Tag"].
 - **Reaching a base:** a runner reaches a base when their capsule enters the base volume (`BaseTouched`). Bases must be touched **in order**; the runner model always paths through the base volume. A runner whose path skips a base is a model bug: v1 treats the skipped base as not reached and logs a `RulesWarning`. (Appeals for missed bases are deferred.)
-- **Overrunning first base:** the batter-runner who overruns or overslides first is not liable to be tagged when returning **immediately**, unless they make an attempt toward second [S: OBR 5.09(b)(4)]. "Attempt toward second" is judged geometrically: the runner's heading turns more than θ_attempt = 45° [E] toward second after passing first, or the runner enters fair territory more than 1.5 m [E] past the base [C].
-- **Two runners on one base:** the base belongs to the preceding runner unless the following runner is forced, in which case the following runner is entitled to it. The non-entitled runner is out if tagged [S: OBR 5.06(a)(3)].
-- **Passing a runner:** a following runner who passes a preceding runner before the latter is out is out immediately [S: OBR 5.09(b)(9)].
+- **Overrunning first base** [S: OBR 5.09(b)(4) exception]: a batter-runner who touches first and then overruns or overslides it is not liable to be tagged out while returning to it, unless he makes an attempt toward second. Judged from `RunnerPosition` samples, not a heading [C] (rewritten 2026-11-13; the earlier heading test, θ_attempt = 45°, is dropped: a runner rounding the bag toward second soon crosses the attempt line, and one who turns but stays near the line has made no attempt the umpire could see):
+  - **Starts:** after his first touch of first and before any other base touch, a sample while he is off the bag and **past first base down the line** (right-field side, distance along the line from home beyond 90 ft).
+  - **Attempt toward second:** a sample more than `overrun_attempt_m` = 1.5 m [E] into fair territory from the first-base line. The protection is then gone for good, even if he comes back.
+  - **Ends** also when he touches first again; stepping off later, he is an ordinary runner.
+  - **While protected:** a tag is no out; a fielder with the ball touching first is no force (he has reached it; the OBR 5.09(c)(3) appeal does not apply to a runner who returns at once); if the third out is made elsewhere he is left on first; for passing he is at first.
+  - Not judged in v1: whether he returns **immediately** (the runner model always comes straight back; one who loiters stays protected until he touches first or crosses the attempt line). The 5.09(c)(3) appeal for not returning at once is deferred with the other appeals (§5.6). Until the orchestrator sends samples, a batter-runner off first is an ordinary runner.
+- **Two runners on one base** [S: OBR 5.06(a)(2), 5.06(b)(2); the citation was 5.06(a)(3) until 2026-11-13]: while two runners both touch a base, the preceding runner is entitled to it unless the following runner is forced there. The runner not entitled is out when tagged; a tag on the entitled one is no out. Kind: a preceding runner still forced onward is out **by force** at the base he is forced to (§5.4, so no run scores on it as a third out, §6.4); otherwise the out is a **tag** at the shared base. The liability lasts only while both are touching it: once the entitled runner leaves, a tag on the other one standing there is no out.
+- **Passing a runner** [S: OBR 5.09(b)(9) and its comment]: a following runner who passes a preceding runner before that runner is out is out. The pass can come from either runner's actions: a lead runner who retreats behind a following runner (the comment's rundown play, a lead runner running back past third toward left field) retires the following runner. It is proven two ways:
+  - **Base touches** (always on): a following runner touching a base beyond the last base a preceding runner touched has passed him, and is out before the touch counts (a home touch scores nothing). A runner retreating to a base behind the last base a following runner touched has been passed by him; his own touch counts as usual. An exact time tie between the two runners' touches of one base relies on §1.2 ordering: the orchestrator must deliver the preceding runner's touch first. (Continuous-time detection makes such ties vanishingly rare; 2,560 full games on 2026-11-13 produced no passing outs.)
+  - **Position samples:** a sample becomes path progress in bases (0 = home, 1 = first, ..., 4 = home again) as the nearest point on the two base lines that meet at the runner's last touched base. It is not clamped behind that base, so a runner beyond third toward left field is short of third. A runner touching a base is at that base, wherever his center is within it; a protected overrunner (above) is at first. A following runner whose progress exceeds a preceding runner's by more than `pass_margin_m` = 0.5 m [E] has passed him; level is not past. Runners compare with others sampled at the same t or standing on a base.
+  - **Who can be passed:** not a runner already out; not a runner whose home touch is pending (§6.4), and one who goes back to retouch after a catch (§5.3) is off the base paths until he retouches, then judged again.
+  - **When:** only once the batted ball is fair or caught. An uncaught foul ball is dead and nothing the runners did while it was in doubt counts [S: OBR 5.06(c)(5)].
+  - **The out:** `RunnerPassed { runner, passed }` (§15), then `RunnerOut { kind: Tag }` at the base the passer was heading for. For run counting it is a time play, not a force (§6.4); it removes the forces of runners ahead of him (§5.4).
+  - **Deferred:** passing during a home-run trot or any other award (the engine awards every runner at once; judging a runner passed on a home-run trot needs the trot modeled).
 - **Out of the base path (M5):** a runner more than 3 ft (0.914 m) from their direct line to the base while avoiding a tag is out [S: OBR 5.09(b)(1)]. Uses `RunnerPosition` relative to the line from the runner's position when the tag attempt began to the base.
 
 ### 5.6 Appeals
@@ -241,7 +252,7 @@ Strikeout (§4.4); caught fly (§5.3); force at first or tag before reaching fir
 
 ### 6.2 Runner outs
 
-Force out (§5.4); tag out (§5.5); appeal on leaving early (§5.6); passing a runner; fair ball touching runner (§5.7); out of base path (M5); pickoff (a tag, M5).
+Force out (§5.4), including a tag on a forced runner standing on a base short of his forced base; tag out (§5.5), including the runner not entitled to a base two runners touch (§5.5); appeal on leaving early (§5.6); passing a runner (§5.5: a tag-kind out preceded by `RunnerPassed`); fair ball touching runner (§5.7); out of base path (M5); pickoff (a tag, M5). An overrunning batter-runner returning to first is exempt from tags (§5.5).
 
 ### 6.3 Multiple outs on one play
 
@@ -541,7 +552,10 @@ At least **150 scenarios** by the M4 gate, at least one per row below; M5 and M6
 | `catch` | catch after deflection; drop before t_secure; wall-robbed HR; foul fly caught; foot out of field | 10 |
 | `tagup` | leaves early → appeal out; leaves on first touch (legal) before secure; time play on sac fly with third out elsewhere | 10 |
 | `force` | force chains; force removed after following runner out; reverse force | 12 |
-| `tag` | tag before base; base before tag; tag then drop; overrun first return / attempt to second | 12 |
+| `tag` | tag before base; base before tag; tag then drop | 12 |
+| `overrun` | overrun tagged on the way straight back (no out); attempt toward second; protection spent once back on first; oversliding second (no exemption); ball to first while overrunning; third out elsewhere (left on first); drift short of the attempt line; overrunner a step fair of a runner standing on first | 8 |
+| `twoonbase` | preceding runner entitled; following runner forced there; force at the next base; force removed first; caught fly ends the forces; liability ends when one leaves; batter-runner forced onto first | 7 |
+| `passing` | by base touch; by position (level is not past); time play counts / not counts; lead runner's actions (OBR comment play, retreat to second, retreat after a home touch before a catch); passer's home touch scores nothing; out or scored runner cannot be passed; force removed by the passing out; both on one base; fly in doubt lands foul | 12 |
 | `runs` | time play counts / not counts; third out a force; batter out before first | 10 |
 | `awards` | walk with bases loaded; ground-rule double from time of pitch; throw out of play (infielder first play vs other) | 12 |
 | `interference` | fair ball hits runner; hits umpire before/after passing an infielder | 6 |
@@ -588,4 +602,5 @@ With physics and agents connected, `sim-cli game` runs assert after every play t
 4. **Two-way players** (a pitcher who is also the DH) are unsupported.
 5. The reference-fielder definition (§10.1) and the ordinary-effort thresholds are first drafts; M5 reviews scorer rulings against watched plays.
 6. "Passed an infielder" (§5.7) and "attempt toward second" (§5.5) are geometric stand-ins for umpire judgment; tune in M5 if they produce calls that look wrong on replay.
-7. Infield-fly declaration timing (M5): real umpires call it near the apex; the rule uses the atlas prediction then. Check that agents' behavior (runners holding) matches.
+7. **Passing and overrun (2026-11-13).** `RunnerPassed { runner, passed }` is a new rules event; it needs a data-formats §8 append-only addition before the event log records it (today `bb_game` logs only the `RunnerOut`, kind `Tag`). An `OutKind::PassedRunner` would let the scorer and box score name the out; until then it is a tag. Simulator side, not yet done: `bb_game` must send `RunnerPosition` samples during live plays (§2) for position-based passing and any overrun protection, and the runner model must actually overrun first (today it stops on the bag).
+8. Infield-fly declaration timing (M5): real umpires call it near the apex; the rule uses the atlas prediction then. Check that agents' behavior (runners holding) matches.
