@@ -41,16 +41,16 @@ What a fielder's noisy reads are worth, as the spray scatter left by the best li
 
 | Grade (timing σ) | Location only | + bat angle | + depth | + lead at the bat read's σ | + bat angle + lead at that σ | **As built: + bat angle + lead at 75/40 of it** |
 | :--- | ---: | ---: | ---: | ---: | ---: | ---: |
-| 20 (78 ms) | 22.55° | 22.53° | 22.54° | 22.52° | 22.49° | **22.53°** (lead 146 ms) |
-| 50 (40 ms) | 22.41° | 22.38° | 22.37° | 22.27° | 22.24° | **22.36°** (lead 75 ms) |
-| 80 (20.5 ms) | 22.34° | 22.17° | 22.22° | 21.85° | 21.71° | **22.05°** (lead 38 ms) |
-| 160, lab (5.4 ms) | 22.26° | 20.84° | 21.15° | 19.76° | 19.56° | **20.29°** (lead 10 ms) |
+| 20 (78 ms) | 22.55° | 22.53° | 22.54° | 22.52° | 22.50° | **22.52°** (lead 146 ms) |
+| 50 (40 ms) | 22.42° | 22.40° | 22.37° | 22.32° | 22.30° | **22.35°** (lead 75 ms) |
+| 80 (20.5 ms) | 22.33° | 22.16° | 22.21° | 21.86° | 21.72° | **22.00°** (lead 38 ms) |
+| 160, lab (5.4 ms) | 22.27° | 20.77° | 21.15° | 19.77° | 19.53° | **20.19°** (lead 10 ms) |
 
-*Regenerated 2026-11-13* after the Codex owner-items review (P3): `honest()` now draws its read noise from explicitly keyed `KeyedRng` streams (a seed reserved for the diagnostic) instead of an ad-hoc xorshift generator, and the examples use `bb_math::m` for `asin`, `ln` and `cos`. Only the noise draws changed, so the table moved by sampling noise alone: at most 0.09° in any cell, the as-built column by 0.01° at grades 20–80 (0.09° at the lab grade). The perfect-read rows and every conclusion are unchanged.
+*Regenerated 2026-11-13* after the Codex owner-items review (P3): `honest()` now draws its read noise from explicitly keyed `KeyedRng` streams (a seed reserved for the diagnostic) instead of an ad-hoc xorshift generator, and the examples use `bb_math::m` for `asin`, `ln` and `cos`. Only the noise draws changed, so the table moved by sampling noise alone: at most 0.08° in any cell, the as-built column by 0.01–0.06°. The perfect-read rows and every conclusion are unchanged.
 
 **The chosen cue is the swing's lead**, because it carries the most spray information per millisecond of reading error of the honest views, and it is a second, independent judgment (a different event, a different object), so its error is independent of the bat read's. It is modelled as a second read of the bat's face, not a second spray cue (no double counting): agent-models §5.10, "During the swing: the swing's lead".
 
-**What it is worth, honestly:** at grade 80 it takes the spray scatter from 22.17° to 22.05°; at grade 50 from 22.38° to 22.36°. Nothing honest in this sim gives a fielder on the 20–80 scale much more than the pitch prior. Even reading every timing view perfectly would only bring the scatter to 18.3°.
+**What it is worth, honestly:** at grade 80 it takes the spray scatter from 22.16° to 22.00°; at grade 50 from 22.40° to 22.35°. Nothing honest in this sim gives a fielder on the 20–80 scale much more than the pitch prior. Even reading every timing view perfectly would only bring the scatter to 18.3°.
 
 ## 3. The model
 
@@ -83,7 +83,7 @@ Because 1,024 games cannot separate a few hundredths, the same three builds were
 
 **What this says.**
 
-- **The grades still do not rank on the 20–80 scale.** Over 4,096 games, after the change: no jump 5.55, grade 20 5.56, grade 50 5.58, grade 80 5.51 runs per team-game. Grade 80 is the best of the three, by 0.04–0.07 runs, but grade 50 is no better than grade 20 or than no jump. Paired whole-game comparisons at this size still carry a few hundredths of noise, so the honest reading is that grade 80 may gain a few hundredths of a run per team-game and grades 20 and 50 gain nothing. This is what the information measurement predicted: the lead takes a grade-80 fielder's spray scatter from 22.17° to 22.05°, and a grade-50 fielder's from 22.38° to 22.36°. No retuning was done to make them rank.
+- **The grades still do not rank on the 20–80 scale.** Over 4,096 games, after the change: no jump 5.55, grade 20 5.56, grade 50 5.58, grade 80 5.51 runs per team-game. Grade 80 is the best of the three, by 0.04–0.07 runs, but grade 50 is no better than grade 20 or than no jump. Paired whole-game comparisons at this size still carry a few hundredths of noise, so the honest reading is that grade 80 may gain a few hundredths of a run per team-game and grades 20 and 50 gain nothing. This is what the information measurement predicted: the lead takes a grade-80 fielder's spray scatter from 22.16° to 22.00°, and a grade-50 fielder's from 22.40° to 22.35°. No retuning was done to make them rank.
 - **The lead is worth a few hundredths at grade 80 and nothing below.** Fallback only → after: grade 80 5.55 → 5.51; grade 50 5.58 → 5.58; grade 20 5.57 → 5.56.
 - **The fallback policy changes little, and if anything costs.** Before → fallback only: grade 50 5.55 → 5.58, grade 80 5.54 → 5.55, grade 20 5.57 → 5.57. A fielder whose bat read is implausible now leans on the pitch prior instead of standing still. The earlier finding (agent-models §5.10, "Why the swing as well") was that the location prior alone is worth no more than waiting, because location moves the expected direction only about 7° against 22° of scatter, and that holds here: the extra leans on the prior gain nothing. Grade 160 is identical to the digit before and after the fallback, as it must be: its 6.6° bat read is almost never implausible, and identical draws mean identical games.
 - **Grade 160 (lab)** improves no further with the lead (5.47 → 5.49 over 4,096 games, within noise). Its bat read is already sharp, and the lead's 10 ms adds little to it.

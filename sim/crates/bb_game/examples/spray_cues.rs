@@ -244,7 +244,8 @@ fn history(rows: &[Row]) {
 
 /// Game seed reserved for this diagnostic's read noise. Its streams are keyed like the
 /// production `FielderAnticipation` streams, but under this seed (no game in a calibration run
-/// uses it; games here are seeded 0..n), with agent id 0 (no real agent; fielders are 0x181..),
+/// uses it; games here are seeded 0..n), with agent id 0xFFFF (side 0xFF is no side in
+/// data-formats §2.1's `side << 8 | slot`, so no real agent has it),
 /// play index = Anticipation grade, and sub-indices from 100 up (production uses 0, 1, 2), so a
 /// diagnostic draw can never be mistaken for, or coincide with, a game draw (CLAUDE.md inv. 5).
 const DIAG_SEED: u64 = 0xD1A6_5EED_5C0E_0001;
@@ -254,7 +255,7 @@ fn diag_stream(g: u32, cue: u32) -> KeyedRng {
     KeyedRng::new(RngKey {
         game_seed: DIAG_SEED,
         play_index: g,
-        agent_id: 0,
+        agent_id: 0xFFFF,
         purpose: Purpose::FielderAnticipation,
         sub_index: 100 + cue,
     })
