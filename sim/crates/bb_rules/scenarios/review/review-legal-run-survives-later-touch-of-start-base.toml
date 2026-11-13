@@ -1,0 +1,19 @@
+id = "review-legal-run-survives-later-touch-of-start-base"
+title = "Runner-return review (verification note): a runner who retouched, left legally and scored keeps his run if he touches his old base again"
+rules = ["OBR 5.08(a)", "rules-spec 5.3"]
+milestone = "M4"
+tags = ["review", "retouch"]
+initial = { inning = 6, outs = 0, batter = "A.4", bases = { third = "A.3" } }
+step = [
+  { fact = "PitchDelivered", t = 0.0 },
+  { fact = "BatContact", t = 0.42 },
+  { fact = "BaseLeft", t = 0.5, agent = "A.3", base = 3 },
+  { fact = "GloveSecured", t = 3.0, fielder = "H.LF", pos = [-30.0, 70.0] },
+  { fact = "BaseTouched", t = 4.0, agent = "A.3", base = 3 },
+  { fact = "BaseLeft", t = 4.1, agent = "A.3", base = 3 },
+  { fact = "BaseTouched", t = 8.0, agent = "A.3", base = 4 },
+  # A stray touch of third after scoring is not a second retouch and cancels nothing.
+  { fact = "BaseTouched", t = 9.0, agent = "A.3", base = 3 },
+  { fact = "PlayEndCheck", t = 11.0, expect_events = [{ event = "RunScored", runner = "A.3" }] }
+]
+expect = { outs = 1, score = [1, 0], bases = {}, play = "Dead" }

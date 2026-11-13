@@ -105,7 +105,7 @@ Pregame ─▶ HalfInningStart ─▶ PlateAppearance ⟲ ─▶ HalfInningEnd �
 - **Game end** [S: OBR 7.01]:
   - After the top of the 9th or any later inning, if the home team leads: **Final**, bottom not played.
   - After the bottom of the 9th or later, if the score is not tied: **Final**.
-  - **Walk-off:** in the bottom of the 9th or later, the moment the home team takes the lead the game ends. Only the runs needed to win count, and the batter is credited with only as many bases as the winning runner needed, **except** a fair ball out of the park, where the batter and all runners score [S: OBR 7.01(e)(3) in the 2026 edition; earlier editions numbered it 7.01(g)]. The play finishes resolving the winning run's touch of home; later facts are ignored.
+  - **Walk-off:** in the bottom of the 9th or later, the moment the home team takes the lead the game ends. Only the runs needed to win count, and the batter is credited with only as many bases as the winning runner needed, **except** a fair ball out of the park, where the batter and all runners score [S: OBR 7.01(e)(3) in the 2026 edition; earlier editions numbered it 7.01(g)]. The play finishes resolving the winning run's touch of home; later facts are ignored. A winning touch is final only once the run cannot be cancelled: no runner can still be forced out for a third out, no retouch is owed, and the batted ball is down fair or caught. A touch made while a fly is still in the air waits; if the ball drops in fair the game ends then, and if it is caught the runner owes a retouch (§5.3) and wins it only on his next touch of home (runner-return review #1, 2026-11-12).
   - Ties go to extra innings indefinitely. No mercy rule, no ties, no weather.
 - **Liveness guard:** a game reaching inning 30 emits a `LivenessWarning` and continues. It is reported by calibration (W7 family) and never ends a game early.
 
@@ -254,7 +254,9 @@ A run scores when a runner legally touches home before the third out, **except**
 - any runner **forced** out (including the batter on a force at first);
 - a preceding runner declared out for missing a base on appeal (deferred).
 
-Otherwise it is a **time play**: the run counts if the home-plate `BaseTouched` precedes the third-out fact (tag, or appeal on a caught fly — by the OBR comment, an appeal out for leaving early on a fly is a time play).
+- a **preceding** runner put out on appeal for leaving early on a caught fly: no **following** runner (one who started behind him, including the batter) scores on the play [S: OBR 5.09(d)]. Runners ahead of the appealed runner are judged as a time play.
+
+Otherwise it is a **time play**: the run counts if the home-plate `BaseTouched` precedes the third-out fact (a tag, or an appeal on a caught fly for the runners ahead of the appealed runner; by the OBR comment, an appeal out for leaving early on a fly is a time play). (Corrected 2026-11-12, runner-return review #2: this sentence used to make every caught-fly appeal a time play for all runners.) Fourth-out appeals (OBR 5.09(c)) are not modeled: a run by a runner who still owes a retouch when another out ends the inning stands.
 
 ---
 

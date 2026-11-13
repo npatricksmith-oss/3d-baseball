@@ -1,7 +1,7 @@
 //! Diagnostic (day-fixes review #1): plays where a runner touched home before a fly was
-//! caught, and what became of him: back to retouch and home again, out on appeal, or still
-//! scored with no retouch. `-- <games> [first seed]`
-use bb_rules::{Base, Event, Input, OutKind};
+//! caught, and what became of him: back to retouch and home again, back and holding, out
+//! on appeal, or no retouch. `-- <games> [first seed]`
+use bb_rules::{Event, Input, OutKind};
 
 fn main() {
     let a: Vec<u64> = std::env::args().skip(1).map(|s| s.parse().unwrap()).collect();
@@ -10,16 +10,28 @@ fn main() {
     let (mut plays, mut rescored, mut held, mut appealed, mut stayed, mut inning_over) = (0, 0, 0, 0, 0, 0);
     for seed in seed0..seed0 + games {
         let mut g = bb_game::game::Game::new(seed, false);
-        while let Some(step) = g.step_pitch() {
+        loop {
+            let outs_before = g.st.outs;
+            let Some(step) = g.step_pitch() else { break };
             let Some(t_catch) = step.facts.iter().find_map(|f| match f {
                 Input::GloveSecured { t, .. } => Some(*t),
                 _ => None,
             }) else {
                 continue;
             };
-            if !step.rules_events.iter().any(|e| matches!(e, Event::Catch { .. })) {
-                continue;
+            // Which out the catch was: count the outs on this play in order (runner-return
+            // review #3: an inning ending later in the play is not a third-out catch).
+            let mut n = outs_before;
+            let mut catch_out = None;
+            for e in &step.rules_events {
+                if let Event::RunnerOut { kind, .. } = e {
+                    n += 1;
+                    if *kind == OutKind::FlyOut && catch_out.is_none() {
+                        catch_out = Some(n);
+                    }
+                }
             }
+            let Some(catch_out) = catch_out else { continue };
             let early: Vec<_> = step
                 .facts
                 .iter()
@@ -28,31 +40,36 @@ fn main() {
                     _ => None,
                 })
                 .collect();
-            // A catch for the third out ends the inning: no run, and nobody owes a retouch.
-            let third_out = step.rules_events.iter().any(|e| matches!(e, Event::HalfInningEnded { .. } | Event::GameEnded { .. }));
             for id in early {
-                if third_out {
+                // A catch for the third out ends the inning: no run, and nobody owes a retouch.
+                if catch_out >= 3 {
                     inning_over += 1;
                     continue;
                 }
                 plays += 1;
-                let touched = |b: Base| step.facts.iter().any(|f| matches!(f, Input::BaseTouched { t, agent, base, holding_ball: false } if *agent == id && *base == b && *t > t_catch));
+                // His start base: the first base he left (only bases 1-3 report leaving).
+                let start = step.facts.iter().find_map(|f| match f {
+                    Input::BaseLeft { agent, base, .. } if *agent == id => Some(*base),
+                    _ => None,
+                });
+                let touched_after = |b: u8| step.facts.iter().any(|f| matches!(f, Input::BaseTouched { t, agent, base, holding_ball: false } if *agent == id && *base == b && *t > t_catch));
+                let retouched = start.map(touched_after).unwrap_or(false);
                 let out = step.rules_events.iter().any(|e| matches!(e, Event::RunnerOut { runner, kind: OutKind::Appeal, .. } if *runner == id));
                 let scored = step.rules_events.iter().any(|e| matches!(e, Event::RunScored { runner } if *runner == id));
                 let what = if out {
                     appealed += 1;
                     "out on appeal"
-                } else if touched(4) && scored {
+                } else if retouched && touched_after(4) && scored {
                     rescored += 1;
                     "retouched, scored"
-                } else if !scored && step.facts.iter().any(|f| matches!(f, Input::BaseTouched { agent, holding_ball: false, t, .. } if *agent == id && *t > t_catch)) {
+                } else if retouched && !scored {
                     held += 1;
                     "retouched, held"
                 } else {
                     stayed += 1;
                     "no retouch"
                 };
-                println!("seed {seed} play {} runner {id}: catch {t_catch:.2} s, {what} (scored {scored}, home again {})", step.play, touched(4));
+                println!("seed {seed} play {} runner {id} from {start:?}: catch {t_catch:.2} s (out {catch_out}), {what} (scored {scored}, home again {})", step.play, touched_after(4));
             }
         }
     }

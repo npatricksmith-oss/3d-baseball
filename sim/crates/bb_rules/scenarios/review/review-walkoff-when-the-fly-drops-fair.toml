@@ -1,0 +1,14 @@
+id = "review-walkoff-when-the-fly-drops-fair"
+title = "Runner-return review #1: a winning home touch while the ball is in the air counts the moment the ball comes down fair"
+rules = ["OBR 7.01", "rules-spec 4.1"]
+milestone = "M4"
+tags = ["review", "walkoff"]
+initial = { inning = 9, half = "bottom", score = [0, 0], batter = "H.4", bases = { third = "H.3" } }
+step = [
+  { fact = "PitchDelivered", t = 0.0 },
+  { fact = "BatContact", t = 0.42 },
+  { fact = "BaseLeft", t = 0.5, agent = "H.3", base = 3 },
+  { fact = "BaseTouched", t = 4.5, agent = "H.3", base = 4 },
+  { fact = "BallTouched", t = 5.0, what = "Ground", pos = [0.0, 70.0], expect_events = [{ event = "RunScored", runner = "H.3" }, { event = "GameEnded", home = 1, walk_off = true }] }
+]
+expect = { status = "Final", score = [0, 1] }
