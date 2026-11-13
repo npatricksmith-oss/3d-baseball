@@ -271,8 +271,15 @@ impl Game {
             }
             let fside = 1 - side as u16;
             let fielders: [u16; 9] = core::array::from_fn(|i| (fside << 8) | 0x80 | (i as u16 + 1));
+            // What the fielders can see of the swing: the bat's horizontal angle at the instant
+            // of contact, from the executed swing (world truth; each fielder reads it with his
+            // own error inside the play, agent-models §5.10). Never the ball's launch.
+            let bat_yaw = rec.swing.map(|s| {
+                let a = bb_physics::contact::BatPose::at(&s, t_c).axis;
+                bb_math::m::atan2(a.x, a.y)
+            });
             let out = crate::live::simulate_live(
-                &crate::live::LiveInput { env: &mu.env, field: &self.field, ball, t_contact: t_c, runners, fielders, fattrs: self.fattrs, batter_box: { let p = mu.template.pivot(&mu.batter); bb_math::Vec3::new(p.x, p.y, 0.0) }, bats: mu.batter.bats, pitch_x: rec.plate.map(|p| p.x).or(Some(ball.r.x)), seed, play, record },
+                &crate::live::LiveInput { env: &mu.env, field: &self.field, ball, t_contact: t_c, runners, fielders, fattrs: self.fattrs, batter_box: { let p = mu.template.pivot(&mu.batter); bb_math::Vec3::new(p.x, p.y, 0.0) }, bats: mu.batter.bats, pitch_x: rec.plate.map(|p| p.x).or(Some(ball.r.x)), bat_yaw, seed, play, record },
                 st,
             );
             if record {

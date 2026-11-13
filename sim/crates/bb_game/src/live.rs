@@ -134,6 +134,15 @@ const MEAN_PULL_DEG: f64 = 5.0;
 /// The scatter of balls in play about the direction a pitch location suggests, degrees
 /// (σ within a 10 cm bin, `examples/spray_by_location.rs`) [E].
 const SPRAY_SCATTER_DEG: f64 = 22.0;
+/// A fielder's belief about what the bat's angle at contact says about the ball's direction
+/// (agent-models §5.10): spray ≈ `SWING_SPRAY_A_DEG` + `SWING_SPRAY_B` × face, with
+/// `SWING_SPRAY_RESID_DEG` of scatter about the line, batter-relative (negative = his pull
+/// side). The face is the barrel's yaw less 90° (mirrored for a left-hander). Least-squares
+/// fit to 5,386 fair balls in play, `examples/spray_by_bat_angle.rs` (96 games, 2026-11-12);
+/// refit when the swing or contact model changes [E].
+const SWING_SPRAY_A_DEG: f64 = 5.2;
+const SWING_SPRAY_B: f64 = 1.36;
+const SWING_SPRAY_RESID_DEG: f64 = 18.6;
 /// A fielder jumps only for a ball he expects within this angle of his line from home,
 /// degrees (infield, outfield) [E].
 const JUMP_ZONE_DEG: [f64; 2] = [20.0, 25.0];
@@ -259,6 +268,11 @@ pub struct LiveInput<'a> {
     /// with noise, before contact to anticipate the ball (agent-models §5.10). `None`: no
     /// pitch was seen (lab set-ups), so nobody leans.
     pub pitch_x: Option<f64>,
+    /// The bat's horizontal angle at the instant of contact (yaw of its axis, knob to tip,
+    /// `atan2(x, y)`, rad), sampled by the orchestrator from the executed swing. World truth:
+    /// a fielder gets it only through his noisy read in `jump_at_contact` (agent-models
+    /// §5.10). `None`: no swing seen (lab set-ups); fielders lean on the pitch alone.
+    pub bat_yaw: Option<f64>,
     pub seed: u64,
     pub play: u32,
     /// Record ball and actor tracks (timelines and visualization only).
@@ -442,37 +456,84 @@ fn anticipated_pull_deg(x_inside: f64) -> f64 {
     PULL[k] + (PULL[k + 1] - PULL[k]) * f
 }
 
+/// An angle brought into (−π, π].
+fn wrap_pi(a: f64) -> f64 {
+    use core::f64::consts::{PI, TAU};
+    let x = a % TAU;
+    if x > PI {
+        x - TAU
+    } else if x <= -PI {
+        x + TAU
+    } else {
+        x
+    }
+}
+
+/// Precision-weighted fusion of two direction estimates on the circle (agent-models §5.10):
+/// the prior moved by k = σp²/(σp² + σc²) of the shortest angle to the cue, and the posterior
+/// σ. Rotating both inputs rotates the estimate by the same amount, so there is no seam at
+/// ±180°.
+fn fuse_on_circle(prior: f64, sp: f64, cue: f64, sc: f64) -> (f64, f64) {
+    let k = sp * sp / (sp * sp + sc * sc);
+    (wrap_pi(prior + k * wrap_pi(cue - prior)), sp * sc / m::sqrt(sp * sp + sc * sc))
+}
+
+/// What the bat's angle at contact tells a fielder (agent-models §5.10), from his read of it
+/// (`seen_yaw`, rad, read with error σ `read_sigma`): his belief about the spray (rad, + toward
+/// right field) and its σ. A cue outside the forward half (more than 90° from
+/// straightaway) is off his model, and he gets nothing from it (`None`).
+fn swing_spray_cue(seen_yaw: f64, bats: bb_observe::Hand, read_sigma: f64) -> Option<(f64, f64)> {
+    let right = bats == bb_observe::Hand::Right;
+    // Batter-relative: a left-hander's swing is the mirror image in x.
+    let yaw = if right { seen_yaw } else { -seen_yaw };
+    let face = wrap_pi(yaw - core::f64::consts::FRAC_PI_2);
+    let spray_r = SWING_SPRAY_A_DEG.to_radians() + SWING_SPRAY_B * face;
+    let spray = wrap_pi(if right { spray_r } else { -spray_r });
+    if spray.abs() > core::f64::consts::FRAC_PI_2 {
+        return None;
+    }
+    let resid = SWING_SPRAY_RESID_DEG.to_radians();
+    let sigma = m::sqrt(SWING_SPRAY_B * SWING_SPRAY_B * read_sigma * read_sigma + resid * resid);
+    Some((spray, sigma))
+}
+
+/// A fielder's own reads at contact (agent-models §5.10), all with his error already in
+/// them: where he saw the pitch cross (sim x, m), the bat's angle he saw at contact (rad;
+/// `None` without a swing to see), and the batter's side (public).
+struct JumpReads {
+    pitch_x: f64,
+    bat_yaw: Option<f64>,
+    bats: bb_observe::Hand,
+}
+
 /// A fielder's jump (agent-models §5.10): the velocity he goes for between contact and the
-/// end of his reaction time, before he has read the ball itself. He combines two reads:
-/// before contact, where the pitch is (his read of its location, `antic_sigma`) and the
-/// batter's side give a prior on the ball's direction (the batter's typical pull plus
-/// [`anticipated_pull_deg`], scattered by `SPRAY_SCATTER_DEG`); at contact, the swing (the
-/// direction the bat's angle sends the ball, read with `swing_sigma`). If the combined
-/// estimate puts the ball within `JUMP_ZONE_DEG` of his line from home but off to one side,
-/// he starts toward that side across his line, committing in proportion to how far off it
-/// is against his uncertainty (fully at `JUMP_FULL_SIGMAS`). A ball at him, or well away
-/// from him, and he stays set. The pitcher and catcher do not jump. Reads use purpose
-/// `FielderAnticipation` (sub-index 0: pitch location; 1: swing).
-fn jump_at_contact(inp: &LiveInput, i: usize, home: Vec3) -> Vec3 {
-    let a = &inp.fattrs[i];
-    let Some(px) = inp.pitch_x else { return Vec3::ZERO };
+/// end of his reaction time, before he has read the ball itself, decided from his own reads
+/// alone. The pitch location and the batter's side give a prior on the ball's direction (the
+/// batter's typical pull plus [`anticipated_pull_deg`], scattered by `SPRAY_SCATTER_DEG`); the
+/// bat's angle at contact gives a cue ([`swing_spray_cue`]); he fuses them on the circle
+/// ([`fuse_on_circle`]). If the estimate puts the ball within `JUMP_ZONE_DEG` of his line
+/// from home but off to one side, he starts toward that side across his line, committing in
+/// proportion to how far off it is against his uncertainty (fully at `JUMP_FULL_SIGMAS`). A
+/// ball at him, or well away from him, and he stays set; a bat cue that points behind the
+/// batter (back-half policy) and he stays set too. The pitcher and catcher do not jump.
+fn jump_from_reads(reads: &JumpReads, a: &FielderAttrs, i: usize, home: Vec3) -> Vec3 {
     if i < 2 || a.jump_gain <= 0.0 {
         return Vec3::ZERO;
     }
-    let mut r0 = rng(inp.seed, inp.play, inp.fielders[i], Purpose::FielderAnticipation, 0);
-    let seen_x = px + a.antic_sigma * r0.truncated_normal(4.0);
-    let right = inp.bats == bb_observe::Hand::Right;
+    let right = reads.bats == bb_observe::Hand::Right;
     // A right-handed batter stands on the −x side: inside is −x, and pulling is −spray.
-    let pull = (MEAN_PULL_DEG + anticipated_pull_deg(if right { -seen_x } else { seen_x })).to_radians();
+    let pull = (MEAN_PULL_DEG + anticipated_pull_deg(if right { -reads.pitch_x } else { reads.pitch_x })).to_radians();
     let prior = if right { -pull } else { pull };
-    let mut r1 = rng(inp.seed, inp.play, inp.fielders[i], Purpose::FielderAnticipation, 1);
-    let seen_swing = m::atan2(inp.ball.v.x, inp.ball.v.y) + a.swing_sigma * r1.truncated_normal(4.0);
-    let (sp, ss) = (SPRAY_SCATTER_DEG.to_radians(), a.swing_sigma);
-    let k = sp * sp / (sp * sp + ss * ss);
-    let est = prior + (seen_swing - prior) * k;
-    let s_post = sp * ss / m::sqrt(sp * sp + ss * ss);
+    let sp = SPRAY_SCATTER_DEG.to_radians();
+    let (est, s_post) = match reads.bat_yaw {
+        None => (prior, sp),
+        Some(yaw) => match swing_spray_cue(yaw, reads.bats, a.swing_sigma) {
+            Some((cue, sc)) => fuse_on_circle(prior, sp, cue, sc),
+            None => return Vec3::ZERO,
+        },
+    };
     let phi = m::atan2(home.x, home.y);
-    let off = est - phi;
+    let off = wrap_pi(est - phi);
     let zone = if i >= 6 { JUMP_ZONE_DEG[1] } else { JUMP_ZONE_DEG[0] }.to_radians();
     if off.abs() > zone {
         return Vec3::ZERO;
@@ -481,6 +542,25 @@ fn jump_at_contact(inp: &LiveInput, i: usize, home: Vec3) -> Vec3 {
     // Toward larger spray angle (toward right field) across his line from home.
     let across = Vec3::new(m::cos(phi), -m::sin(phi), 0.0);
     across * (off.signum() * a.speed * commit)
+}
+
+/// The orchestrator's side of a fielder's jump (agent-models §5.10): his reads of the true
+/// pitch location (σ `antic_sigma`, purpose `FielderAnticipation` sub-index 0) and of the
+/// bat's true angle at contact (σ `swing_sigma`, sub-index 1), handed to his belief
+/// ([`jump_from_reads`]). Nothing about the ball after contact reaches him here.
+fn jump_at_contact(inp: &LiveInput, i: usize, home: Vec3) -> Vec3 {
+    let a = &inp.fattrs[i];
+    let Some(px) = inp.pitch_x else { return Vec3::ZERO };
+    if i < 2 || a.jump_gain <= 0.0 {
+        return Vec3::ZERO;
+    }
+    let mut r0 = rng(inp.seed, inp.play, inp.fielders[i], Purpose::FielderAnticipation, 0);
+    let pitch_x = px + a.antic_sigma * r0.truncated_normal(4.0);
+    let bat_yaw = inp.bat_yaw.map(|y| {
+        let mut r1 = rng(inp.seed, inp.play, inp.fielders[i], Purpose::FielderAnticipation, 1);
+        wrap_pi(y + a.swing_sigma * r1.truncated_normal(4.0))
+    });
+    jump_from_reads(&JumpReads { pitch_x, bat_yaw, bats: inp.bats }, a, i, home)
 }
 
 /// How far a fielder is still short of `goal` (less `reach`) after `t` seconds of running
@@ -790,11 +870,31 @@ impl<'a> Sim<'a> {
         if let Some(x) = standing.or(dive) {
             return x;
         }
-        let fd = &self.f[i];
+        let (fd, start) = self.planning_state(i);
         let t_end = pred.t_end();
-        let start = self.t.max(self.inp.t_contact + fd.a.reaction);
         let (rest, _) = pred.at(t_end);
-        (t_end.max(start + run_time_to(fd, rest, 0.0)), Vec3::new(rest.x, rest.y, 0.0))
+        (t_end.max(start + run_time_to(&fd, rest, 0.0)), Vec3::new(rest.x, rest.y, 0.0))
+    }
+
+    /// Where a fielder's plans start from (agent-models §5.10, Codex anticipation review #2):
+    /// once his reaction gate has opened, his state now; before it, the state his jump will
+    /// have carried him to, stepped tick by tick with the movement step itself (position and
+    /// velocity) up to the first tick at or after his gate. The start time is now, or his gate.
+    fn planning_state(&self, i: usize) -> (std::borrow::Cow<'_, Fielder>, f64) {
+        let fd = &self.f[i];
+        let t_c = self.inp.t_contact;
+        let gate = t_c + fd.a.reaction;
+        if self.t >= gate || (fd.jump == Vec3::ZERO && fd.vel == Vec3::ZERO) {
+            return (std::borrow::Cow::Borrowed(fd), self.t.max(gate));
+        }
+        let mut g = fd.clone();
+        g.belief = None;
+        let mut t = self.t;
+        while t < gate {
+            (g.pos, g.vel) = fielder_step(&g, t, t_c);
+            t += DT;
+        }
+        (std::borrow::Cow::Owned(g), gate)
     }
 
     /// One scan of the predicted path for the earliest point the fielder can reach standing,
@@ -802,9 +902,9 @@ impl<'a> Sim<'a> {
     /// standing play).
     #[allow(clippy::type_complexity)]
     fn intercept_scan(&self, i: usize, pred: &BallPath) -> (Option<(f64, Vec3)>, Option<(f64, Vec3)>) {
-        let fd = &self.f[i];
+        let (fd, start) = self.planning_state(i);
+        let fd: &Fielder = &fd;
         let t_end = pred.t_end();
-        let start = self.t.max(self.inp.t_contact + fd.a.reaction);
         let mut dive = None;
         // Shortfall at time `t` for a ball at `b`: how far short of the ball's line the
         // fielder still is (≤ 0: he can field it standing, with the planning reach).
@@ -952,11 +1052,10 @@ impl<'a> Sim<'a> {
     /// by the time to spare; otherwise tier 0, valued by how early he fields it (outfielders
     /// win near-ties on balls in between).
     fn call_value(&self, i: usize, pred: &BallPath, ti: f64, pt: Vec3, bias: f64) -> (u8, f64) {
-        let fd = &self.f[i];
         let in_air = ti.is_finite() && pred.first_bounce().map(|b| ti < b.0).unwrap_or(true);
         if in_air {
-            let start = self.t.max(self.inp.t_contact + fd.a.reaction);
-            let spare = ti - (start + run_time_to(fd, pt, REACH * 0.7));
+            let (fd, start) = self.planning_state(i);
+            let spare = ti - (start + run_time_to(&fd, pt, REACH * 0.7));
             if spare >= CALL_SLACK_S {
                 return (if i >= 6 { 2 } else { 1 }, spare);
             }
@@ -2273,6 +2372,7 @@ mod tests {
             batter_box: Vec3::new(-0.95, 0.30, 0.0),
             bats: bb_observe::Hand::Right,
             pitch_x: None,
+            bat_yaw: None,
             seed: 11,
             play: 3,
             record: false,
@@ -2612,49 +2712,153 @@ mod tests {
         assert!(worst_early > -0.35 && worst_late < 0.35 && rms < 0.15, "estimate − step: worst {worst_early:+.3} / {worst_late:+.3} s, rms {rms:.3} s");
     }
 
-    // agent-models §5.10, worked by hand from the home positions (P 0°, 1B 38°, 2B 13°,
-    // SS −13°, 3B −36°, LF −30°, CF 0°, RF 30° of spray). With a perfect read of the swing
-    // the fielder expects the ball where it goes. A right-hander's ball at −20°: the third
-    // baseman (16° to his right-field side, inside his 20° zone) and left fielder (10°) start
-    // toward right field; the shortstop (7°) and centre fielder (20°, inside the outfield's
-    // 25°) toward left field; second (33° away), first and right field stay set; so do the
-    // pitcher and catcher. Each who goes, goes at full speed (perfect read: no doubt). A
-    // left-hander's ball at +20° is the mirror image. With no read of the swing at all, a
-    // right-hander's pitch down the middle leaves only the prior (his typical pull, −5°,
-    // σ 22°): the shortstop, 8° off it, starts toward right field at 8/(2·22) of full speed.
+    // agent-models §5.10, worked by hand. Fielders' lines from home, from the home positions:
+    // 1B 38°, 2B 13°, SS −13°, 3B −36°, LF −30°, CF 0°, RF 30° of spray. Perfect reads. A
+    // right-hander, pitch down the middle: the prior is his typical pull, −5°, σ 22°. A bat
+    // read at yaw 60.4412° (face −29.5588°) is a cue at 5.2 + 1.36 × (−29.5588) = −35.0°, with
+    // σ 18.6° (the scatter about the fit; no read error). k = 22²/(22² + 18.6²) = 0.58316, so
+    // the estimate is −5 − 0.58316 × 30 = −22.495°, σ = 22 × 18.6 / √(22² + 18.6²) = 14.204°.
+    // Offsets against 2σ = 28.408° (zones 20° infield, 25° outfield): 3B +13.505° → +0.4754;
+    // SS −9.495° → −0.3342; LF +7.505° → +0.2642; CF −22.495° → −0.7919; 1B, 2B and RF outside
+    // their zones; the pitcher and catcher never. A left-hander's mirror image (yaw −60.4412°,
+    // prior +5°) gives +22.495°: 1B −0.5458, 2B +0.3342, CF +0.7919, RF −0.2642, the rest 0.
+    // With no bat read, the prior alone: the shortstop, 8° off it, at 8/(2·22) = 0.1818.
     #[test]
     fn fielders_jump_toward_the_side_they_read() {
         let fx = fixture(&[]);
         let mut inp = input(&fx, vec![RunnerIn { id: fx.st.batter, base: 0, speed: 8.2 }]);
         for a in inp.fattrs.iter_mut() {
             a.antic_sigma = 0.0;
-            a.swing_sigma = 1e-9;
+            a.swing_sigma = 0.0;
         }
         inp.pitch_x = Some(0.0);
         let home = home_positions();
+        // Unit vector across fielder i's line, toward right field, from his published angle.
+        let deg = [0.0, 0.0, 38.0, 13.0, -36.0, -13.0, -30.0, 0.0, 30.0];
         let toward_rf = |i: usize| {
-            let phi = home[i].x.atan2(home[i].y);
+            let phi: f64 = f64::to_radians(deg[i]);
             Vec3::new(phi.cos(), -phi.sin(), 0.0)
         };
         let jumps = |inp: &LiveInput| -> Vec<f64> { (0..9).map(|i| jump_at_contact(inp, i, home[i]).dot(toward_rf(i)) / inp.fattrs[i].speed).collect() };
-        let ball = |deg: f64| BallState { r: Vec3::new(0.0, 0.5, 1.0), v: Vec3::new(deg.to_radians().sin(), deg.to_radians().cos(), 0.2) * 35.0, w: Vec3::ZERO };
-        inp.ball = ball(-20.0);
+        inp.bat_yaw = Some(60.4412_f64.to_radians());
         let rhb = jumps(&inp);
-        let expect_r = [0.0, 0.0, 0.0, 0.0, 1.0, -1.0, 1.0, -1.0, 0.0];
+        let expect_r = [0.0, 0.0, 0.0, 0.0, 0.4754, -0.3342, 0.2642, -0.7919, 0.0];
         inp.bats = bb_observe::Hand::Left;
-        inp.ball = ball(20.0);
+        inp.bat_yaw = Some((-60.4412_f64).to_radians());
         let lhb = jumps(&inp);
-        let expect_l = [0.0, 0.0, -1.0, 1.0, 0.0, 0.0, 0.0, 1.0, -1.0];
+        let expect_l = [0.0, 0.0, -0.5458, 0.3342, 0.0, 0.0, 0.0, 0.7919, -0.2642];
         for i in 0..9 {
-            assert!((rhb[i] - expect_r[i]).abs() < 1e-6, "right-hander, fielder {i}: {:.3}", rhb[i]);
-            assert!((lhb[i] - expect_l[i]).abs() < 1e-6, "left-hander, fielder {i}: {:.3}", lhb[i]);
+            assert!((rhb[i] - expect_r[i]).abs() < 1e-3, "right-hander, fielder {i}: {:.4}", rhb[i]);
+            assert!((lhb[i] - expect_l[i]).abs() < 1e-3, "left-hander, fielder {i}: {:.4}", lhb[i]);
         }
         inp.bats = bb_observe::Hand::Right;
-        for a in inp.fattrs.iter_mut() {
-            a.swing_sigma = 1e6;
-        }
+        inp.bat_yaw = None;
         let blind = jumps(&inp);
         assert!((blind[5] - 8.0 / 44.0).abs() < 1e-3, "shortstop on the prior alone: {:.4}", blind[5]);
+    }
+
+    // Codex anticipation review #1: before his reaction time a fielder reads the bat, not the
+    // ball. Two contacts with the same bat angle but different outgoing directions (the
+    // review's spin probe: +4.07° and −3.24° of spray from identical bat kinematics) must give
+    // every fielder the same jump. Reading the ball's launch direction, as the first version
+    // did, fails this.
+    #[test]
+    fn the_jump_reads_the_bat_not_the_ball() {
+        let fx = fixture(&[]);
+        let mut inp = input(&fx, vec![RunnerIn { id: fx.st.batter, base: 0, speed: 8.2 }]);
+        inp.pitch_x = Some(-0.1);
+        inp.bat_yaw = Some(80.0_f64.to_radians());
+        let home = home_positions();
+        let ball = |deg: f64| BallState { r: Vec3::new(0.0, 0.5, 1.0), v: Vec3::new(f64::to_radians(deg).sin(), f64::to_radians(deg).cos(), 0.2) * 35.0, w: Vec3::ZERO };
+        inp.ball = ball(4.071844);
+        let a: Vec<Vec3> = (0..9).map(|i| jump_at_contact(&inp, i, home[i])).collect();
+        inp.ball = ball(-3.239788);
+        let b: Vec<Vec3> = (0..9).map(|i| jump_at_contact(&inp, i, home[i])).collect();
+        assert!(a.iter().any(|v| v.norm() > 0.1), "someone leans on this bat read: {a:?}");
+        assert_eq!(a, b, "the jump must not depend on where the ball actually went");
+    }
+
+    // Codex anticipation review #3. (a) Fusion on the circle has no seam: fusing a prior at
+    // 170° with a cue at −170° (20° apart across ±180°) lands 0.58316 × 20° = 11.663° past the
+    // prior, at −178.337°, exactly the same fusion as −5° with +15° (both rotated by −175°),
+    // which gives +6.663°. (b) The review's case, at the level a fielder sees: a bat at
+    // +179.999° and one at −179.999° (barrel pointing at the catcher, 0.002° apart). Read
+    // perfectly, both face behind the batter and nobody jumps (back-half policy). Read with
+    // grade-20 error (the same draws for both), some reads land in the forward half, and the
+    // jumps must still agree to within what 0.002° can change (the first version's linear
+    // fusion swung a third baseman from no jump to 3.6 m/s here). (c) The cue's model: a
+    // right-hander's bat square to the pitch line (yaw 90°) says +5.2° (the fit's intercept);
+    // a left-hander's mirror image (−90°) says −5.2°.
+    #[test]
+    fn anticipation_has_no_seam_behind_the_plate() {
+        let r = f64::to_radians;
+        let (e1, s1) = fuse_on_circle(r(170.0), r(22.0), r(-170.0), r(18.6));
+        let (e2, s2) = fuse_on_circle(r(-5.0), r(22.0), r(15.0), r(18.6));
+        assert!((e1.to_degrees() + 178.337).abs() < 1e-3, "across the seam: {:.4}°", e1.to_degrees());
+        assert!((e2.to_degrees() - 6.663).abs() < 1e-3, "rotated: {:.4}°", e2.to_degrees());
+        assert!((s1 - s2).abs() < 1e-12 && (s1.to_degrees() - 14.204).abs() < 1e-3);
+        let fx = fixture(&[]);
+        let mut inp = input(&fx, vec![RunnerIn { id: fx.st.batter, base: 0, speed: 8.2 }]);
+        inp.pitch_x = Some(0.0);
+        let home = home_positions();
+        let mut leaned = false;
+        for sigma in [0.0, r(29.296875)] {
+            for a in inp.fattrs.iter_mut() {
+                a.antic_sigma = 0.0;
+                a.swing_sigma = sigma;
+            }
+            for bats in [bb_observe::Hand::Right, bb_observe::Hand::Left] {
+                inp.bats = bats;
+                inp.bat_yaw = Some(r(179.999));
+                let a: Vec<Vec3> = (0..9).map(|i| jump_at_contact(&inp, i, home[i])).collect();
+                inp.bat_yaw = Some(r(-179.999));
+                let b: Vec<Vec3> = (0..9).map(|i| jump_at_contact(&inp, i, home[i])).collect();
+                for i in 0..9 {
+                    if sigma == 0.0 {
+                        assert!(a[i] == Vec3::ZERO && b[i] == Vec3::ZERO, "{bats:?}, fielder {i}: {:?} {:?}", a[i], b[i]);
+                    }
+                    assert!((a[i] - b[i]).norm() < 1e-3, "{bats:?}, fielder {i}: {:?} vs {:?}", a[i], b[i]);
+                    leaned |= a[i].norm() > 0.5;
+                }
+            }
+        }
+        assert!(leaned, "the noisy reads put someone in the forward half (the continuity case)");
+        let (c_r, _) = swing_spray_cue(r(90.0), bb_observe::Hand::Right, 0.0).unwrap();
+        let (c_l, _) = swing_spray_cue(r(-90.0), bb_observe::Hand::Left, 0.0).unwrap();
+        assert!((c_r.to_degrees() - 5.2).abs() < 1e-9 && (c_l.to_degrees() + 5.2).abs() < 1e-9, "{c_r} {c_l}");
+        assert!(swing_spray_cue(r(179.999), bb_observe::Hand::Right, 0.0).is_none());
+    }
+
+    // Codex anticipation review #2: the defense's first call is made at the quickest
+    // reaction time, while a slower fielder is still carried by his jump. What he believes he
+    // has to spare on a fly must not depend on whether he works it out then or at his own
+    // gate, from where he actually is: nothing new has been read in between. Centre fielder,
+    // 0.6 s reaction, leaning toward left field at full speed; the call is first made at the
+    // infielders' 0.25 s. The first version planned from his state at 0.25 s (0.35 s of lean
+    // missing) and was optimistic by tenths of a second.
+    #[test]
+    fn plans_before_the_gate_count_the_rest_of_the_jump() {
+        let fx = fixture(&[]);
+        let mut inp = input(&fx, vec![RunnerIn { id: fx.st.batter, base: 0, speed: 8.2 }]);
+        inp.fattrs[CF].reaction = 0.6;
+        let mut st = fx.st.clone();
+        let mut sim = new_sim(&inp, &mut st);
+        sim.f[CF].jump = Vec3::new(-sim.f[CF].a.speed, 0.0, 0.0);
+        let t_c = inp.t_contact;
+        let react = inp.fattrs.iter().map(|a| a.reaction).fold(f64::INFINITY, f64::min);
+        while sim.t < t_c + react {
+            world_tick(&mut sim);
+        }
+        let pred = sim.predict(CF);
+        let (ti, pt) = sim.intercept(CF, &pred);
+        let early = sim.call_value(CF, &pred, ti, pt, 0.0);
+        while sim.t < t_c + inp.fattrs[CF].reaction {
+            world_tick(&mut sim);
+        }
+        assert!(sim.f[CF].vel.norm() > 2.0, "he is leaning: {:?}", sim.f[CF].vel);
+        let gate = sim.call_value(CF, &pred, ti, pt, 0.0);
+        assert!(early.0 == 2 && gate.0 == 2, "a fly he calls: {early:?} {gate:?}");
+        assert!((early.1 - gate.1).abs() < 0.02, "time to spare planned early {:.3} s, at his gate {:.3} s", early.1, gate.1);
     }
 
     // agent-models §5.10: a lean is a bet. A grounder passes 4 m to the shortstop's left; a
