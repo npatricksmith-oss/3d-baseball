@@ -124,28 +124,39 @@ fn step_position(st: &mut RulesState, p: &RunnerPosition) -> Vec<Event> {
     };
     r.sample = Some((p.t, s));
     // Compare with every runner whose position is known at this instant: standing on a base,
-    // or sampled at the same time.
-    let mut passer = None;
+    // or sampled at the same time. Every pass is an out: one at a time in runner order,
+    // re-reading the play after each, until none remain, the sampled runner is out, or the
+    // inning ends (one retreat can leave several followers ahead of him).
+    loop {
+        let PlayState::Live(lp) = &st.play else { break };
+        if lp.runners[i].out {
+            break;
+        }
+        let Some((fol, pre)) = pass_at_sample(lp, i, p.t, s, margin) else { break };
+        let base = (lp.runners[fol].at + 1).min(4);
+        passing_out(st, p.t, fol, pre, base, &mut ev);
+    }
+    ev
+}
+
+/// The first pass (passer, passed), in runner order, between runner `i`, sampled at `t` with
+/// path progress `s`, and a runner whose position is known at `t` (rules-spec §5.5).
+fn pass_at_sample(lp: &LivePlay, i: usize, t: f64, s: f64, margin: f64) -> Option<(usize, usize)> {
     for (j, o) in lp.runners.iter().enumerate() {
         if j == i || !on_paths(o) {
             continue;
         }
         let so = match (o.on_base, o.sample) {
             (Some(b), _) => b as f64,
-            (None, Some((ts, so))) if (ts - p.t).abs() < 1e-9 => so,
+            (None, Some((ts, so))) if (ts - t).abs() < 1e-9 => so,
             _ => continue,
         };
         let (fol, s_fol, pre, s_pre) = if lp.runners[i].start_base < o.start_base { (i, s, j, so) } else { (j, so, i, s) };
         if s_fol - s_pre > margin {
-            passer = Some((fol, pre));
-            break;
+            return Some((fol, pre));
         }
     }
-    if let Some((fol, pre)) = passer {
-        let base = (lp.runners[fol].at + 1).min(4);
-        passing_out(st, p.t, fol, pre, base, &mut ev);
-    }
-    ev
+    None
 }
 
 /// A runner whose home touch is pending but who owes a retouch of his time-of-pitch base on a
@@ -170,23 +181,30 @@ fn passing_judged(lp: &LivePlay) -> bool {
 
 /// Passing judged at a base touch (rules-spec §5.5): runner `i` is exactly on base `b`; every
 /// other live runner is short of the base after the one he touched last and past the one
-/// before it. Returns (passer, passed).
+/// before it. Returns (passer, passed): the toucher if he passed a preceding runner, else the
+/// first following runner (in runner order) he has fallen behind.
 fn passed_on_touch(lp: &LivePlay, i: usize, b: Base) -> Option<(usize, usize)> {
-    for (j, o) in lp.runners.iter().enumerate() {
-        if j == i || !on_paths(o) {
-            continue;
-        }
-        if lp.runners[i].start_base < o.start_base {
-            // `o` precedes and is behind base `o.at + 1`, so behind `b` when b > o.at.
-            if b > o.at {
-                return Some((i, j));
-            }
-        } else if o.at > b {
-            // `o` follows and is past base `o.at - 1 >= b`.
-            return Some((j, i));
-        }
+    let si = lp.runners[i].start_base;
+    let others = || lp.runners.iter().enumerate().filter(|&(j, o)| j != i && on_paths(o));
+    // A preceding runner `o` is behind base `o.at + 1`, so behind `b` when b > o.at.
+    if let Some((j, _)) = others().find(|(_, o)| si < o.start_base && b > o.at) {
+        return Some((i, j));
     }
-    None
+    // A following runner `o` is past base `o.at - 1 >= b`.
+    others().find(|(_, o)| si > o.start_base && o.at > b).map(|(j, _)| (j, i))
+}
+
+/// Judge every pass that `agent`'s touch of `base` establishes (rules-spec §5.5): one at a
+/// time in runner order, re-reading the play after each out, until none remain, the toucher
+/// himself is out, or the inning ends. One retreat can leave several followers ahead of him.
+fn judge_touch_passes(st: &mut RulesState, t: f64, agent: AgentId, base: Base, ev: &mut Vec<Event>) {
+    loop {
+        let PlayState::Live(lp) = &st.play else { return };
+        let Some(i) = lp.runners.iter().position(|x| x.runner == agent && !x.out) else { return };
+        let Some((fol, pre)) = passed_on_touch(lp, i, base) else { return };
+        let hb = if fol == i { base } else { (lp.runners[fol].at + 1).min(4) };
+        passing_out(st, t, fol, pre, hb, ev);
+    }
 }
 
 /// Record a passing out: the following runner `fol` passed the preceding runner `pre`. While
@@ -778,11 +796,7 @@ fn base_touched(st: &mut RulesState, t: f64, agent: AgentId, base: Base, holding
             if returning(r) && base < 4 {
                 r.at = base;
                 r.on_base = Some(base);
-                let i = lp.runners.iter().position(|x| x.runner == agent && !x.out).unwrap();
-                if let Some((fol, pre)) = passed_on_touch(lp, i, base) {
-                    let hb = if fol == i { base } else { (lp.runners[fol].at + 1).min(4) };
-                    passing_out(st, t, fol, pre, hb, ev);
-                }
+                judge_touch_passes(st, t, agent, base, ev);
             }
             return;
         }
@@ -798,13 +812,9 @@ fn base_touched(st: &mut RulesState, t: f64, agent: AgentId, base: Base, holding
         r.retouched = true;
         r.at = base;
         r.on_base = Some(base);
-        // A runner going back can leave a following runner ahead of him (OBR 5.09(b)(9)
+        // A runner going back can leave following runners ahead of him (OBR 5.09(b)(9)
         // comment: passing by the lead runner's actions).
-        let i = lp.runners.iter().position(|x| x.runner == agent && !x.out).unwrap();
-        if let Some((fol, pre)) = passed_on_touch(lp, i, base) {
-            let hb = if fol == i { base } else { (lp.runners[fol].at + 1).min(4) };
-            passing_out(st, t, fol, pre, hb, ev);
-        }
+        judge_touch_passes(st, t, agent, base, ev);
         return;
     }
     if base > r.last_base + 1 {
@@ -813,18 +823,16 @@ fn base_touched(st: &mut RulesState, t: f64, agent: AgentId, base: Base, holding
     }
     let i = lp.runners.iter().position(|x| x.runner == agent && !x.out).unwrap();
     if let Some((fol, pre)) = passed_on_touch(lp, i, base) {
-        // Reaching a base a preceding runner has not reached means passing him on the way
-        // (out before the touch counts); a preceding runner falling back behind a following
-        // one retires the following one (OBR 5.09(b)(9) comment), and his own touch then
-        // counts as usual.
-        let hb = if fol == i { base } else { (lp.runners[fol].at + 1).min(4) };
-        passing_out(st, t, fol, pre, hb, ev);
         if fol == i {
+            // Reaching a base a preceding runner has not reached means passing him on the way:
+            // out before the touch counts.
+            passing_out(st, t, i, pre, base, ev);
             return;
         }
     }
-    // The passing out may have ended the inning.
-    let PlayState::Live(lp) = &mut st.play else { return };
+    // His touch counts. A preceding runner falling back behind following ones retires each of
+    // them (OBR 5.09(b)(9) comment), judged after his touch so he stands on the base he
+    // reached if one of those outs ends the inning.
     let r = &mut lp.runners[i];
     if r.start_base == 0 && base == 1 && r.last_base >= 1 {
         // The batter-runner back on first: any overrun protection is over.
@@ -841,13 +849,16 @@ fn base_touched(st: &mut RulesState, t: f64, agent: AgentId, base: Base, holding
             r.on_base = None;
             let id = r.runner;
             lp.runs_pending.push((t, id));
+            // Nobody can be ahead of a runner at home.
             try_walk_off(st, ev);
+            return;
         }
     } else {
         // Returning to an earlier base (or re-touching): the runner is now there.
         r.at = base;
         r.on_base = Some(base);
     }
+    judge_touch_passes(st, t, agent, base, ev);
 }
 
 /// End the game at the winning home touch when that run can no longer be cancelled

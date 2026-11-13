@@ -1,0 +1,37 @@
+id = "passing-022"
+title = "OBR comment play with two followers: the lead runner runs back beyond third toward left field while one follower stands on third and another is nearly there: both have passed him and both are out"
+# OBR 5.09(b)(9) and comment (the rundown play), with a second follower: each following runner
+# who is now ahead of the lead runner has passed him. Judged from one position sample of the
+# lead runner, compared with every runner whose position is known at that instant, in runner
+# order (Codex rules-passing review #4: the position path stopped at the first pass).
+rules = ["OBR 5.09(b)(9) comment", "rules-spec 5.5"]
+milestone = "M4"
+tags = ["passing", "positions", "lead-runner-action"]
+initial = { inning = 6, outs = 0, batter = "A.6", bases = { first = "A.3", second = "A.4", third = "A.5" } }
+step = [
+  { fact = "PitchDelivered", t = 0.0 },
+  { fact = "BatContact", t = 0.42 },
+  { fact = "BallTouched", t = 0.8, what = "Ground", pos = [-8.0, 30.0] },
+  { fact = "GloveSecured", t = 1.3, fielder = "H.SS", pos = [-8.0, 30.0] },
+  { fact = "BaseLeft", t = 1.4, agent = "A.5", base = 3 },
+  { fact = "BaseLeft", t = 1.4, agent = "A.4", base = 2 },
+  { fact = "BaseLeft", t = 1.4, agent = "A.3", base = 1 },
+  { fact = "BaseTouched", t = 3.0, agent = "A.3", base = 2 },
+  { fact = "BaseLeft", t = 3.1, agent = "A.3", base = 2 },
+  { fact = "BaseTouched", t = 3.5, agent = "A.4", base = 3 },
+  { fact = "BaseTouched", t = 4.2, agent = "A.6", base = 1 },
+  { fact = "BaseTouched", t = 4.5, agent = "A.5", base = 3 },
+  { fact = "BaseLeft", t = 4.6, agent = "A.5", base = 3 },
+  # The runner from first, 95% of the way from second to third.
+  { fact = "RunnerPosition", t = 4.8, runner = "A.3", pos = [-18.427, 20.367] },
+  # The lead runner three metres beyond third, down the left-field line.
+  { fact = "RunnerPosition", t = 4.8, runner = "A.5", pos = [-21.5, 21.5], expect_events = [
+    { event = "RunnerPassed", runner = "A.3", passed = "A.5" },
+    { event = "RunnerOut", runner = "A.3", base = 3, kind = "Tag" },
+    { event = "RunnerPassed", runner = "A.4", passed = "A.5" },
+    { event = "RunnerOut", runner = "A.4", base = 4, kind = "Tag" },
+  ] },
+  { fact = "BaseTouched", t = 5.5, agent = "A.5", base = 3 },
+  { fact = "PlayEndCheck", t = 7.0 },
+]
+expect = { outs = 2, bases = { first = "A.6", third = "A.5" }, play = "Dead" }

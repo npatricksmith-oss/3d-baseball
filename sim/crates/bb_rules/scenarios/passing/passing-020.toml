@@ -1,0 +1,34 @@
+id = "passing-020"
+title = "Bases loaded, a single: the runners from second and first both reach third, the lead runner comes back to it and then retreats all the way to second: he has fallen behind both of them, and both are out for passing"
+# OBR 5.09(b)(9) and comment: each following runner who passes a preceding runner before that
+# runner is out is out; one retreat by the lead runner can pass several followers at once.
+# Outs in runner order (the runner from first, then from second). Codex rules-passing review #4
+# (verified probe: only the first was retired).
+rules = ["OBR 5.09(b)(9) comment", "rules-spec 5.5"]
+milestone = "M4"
+tags = ["passing", "lead-runner-action"]
+initial = { inning = 7, outs = 0, batter = "A.6", bases = { first = "A.4", second = "A.5", third = "A.3" } }
+step = [
+  { fact = "PitchDelivered", t = 0.0 },
+  { fact = "BatContact", t = 0.42 },
+  { fact = "BaseLeft", t = 0.6, agent = "A.3", base = 3 },
+  { fact = "BaseLeft", t = 0.6, agent = "A.5", base = 2 },
+  { fact = "BaseLeft", t = 0.6, agent = "A.4", base = 1 },
+  { fact = "BallTouched", t = 1.5, what = "Ground", pos = [20.0, 70.0] },
+  { fact = "BaseTouched", t = 3.0, agent = "A.4", base = 2 },
+  { fact = "BaseLeft", t = 3.1, agent = "A.4", base = 2 },
+  { fact = "BaseTouched", t = 4.2, agent = "A.6", base = 1 },
+  { fact = "BaseTouched", t = 5.0, agent = "A.5", base = 3 },
+  { fact = "BaseTouched", t = 5.1, agent = "A.4", base = 3 },
+  # The lead runner, caught off third, gets back to it: three runners on third, nobody passed.
+  { fact = "BaseTouched", t = 6.0, agent = "A.3", base = 3 },
+  { fact = "BaseLeft", t = 6.1, agent = "A.3", base = 3 },
+  { fact = "BaseTouched", t = 9.0, agent = "A.3", base = 2, expect_events = [
+    { event = "RunnerPassed", runner = "A.4", passed = "A.3" },
+    { event = "RunnerOut", runner = "A.4", base = 4, kind = "Tag" },
+    { event = "RunnerPassed", runner = "A.5", passed = "A.3" },
+    { event = "RunnerOut", runner = "A.5", base = 4, kind = "Tag" },
+  ] },
+  { fact = "PlayEndCheck", t = 11.0 },
+]
+expect = { outs = 2, bases = { first = "A.6", second = "A.3" }, play = "Dead" }
