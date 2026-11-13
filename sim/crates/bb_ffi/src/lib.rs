@@ -101,6 +101,24 @@ pub struct BbActor {
 /// Maximum actors in a frame: nine fielders, the batter, three runners, and room to spare.
 pub const BB_MAX_ACTORS: usize = 16;
 
+/// A fielder off his feet from a dive at this instant: from the moment he leaves them until
+/// he is back on them.
+#[repr(C)]
+#[derive(Clone, Copy, Default)]
+pub struct BbDive {
+    pub agent: u16,
+    pub _pad: u16,
+    /// Seconds since he left his feet.
+    pub since_s: f32,
+    /// Seconds until he is back on them.
+    pub up_in_s: f32,
+    /// Direction of the dive on the ground (sim frame, unit; zero if he went nowhere).
+    pub dir: [f32; 2],
+}
+
+/// Most dives shown at one instant.
+pub const BB_MAX_DIVES: usize = 4;
+
 /// Everything's position at one instant of a play (sim frame, metres).
 #[repr(C)]
 #[derive(Clone, Copy, Default)]
@@ -116,6 +134,9 @@ pub struct BbFrame {
     pub holder: i32,
     /// Seconds until that holder releases a throw, or -1 if he does not throw it.
     pub release_in_s: f32,
+    /// Fielders off their feet from a dive.
+    pub n_dives: u32,
+    pub dives: [BbDive; BB_MAX_DIVES],
 }
 
 /// A play's length, the scoreboard after it, and its headline measurements (SI).
@@ -276,6 +297,21 @@ pub unsafe extern "C" fn bb_timeline_sample(blob: *const u8, len: usize, t: f32,
         if let Some((_, who)) = caught.filter(|c| c.0 >= let_go) {
             frame.holder = who as i32;
             frame.release_in_s = if next.is_finite() { next - t } else { -1.0 };
+        }
+        // Dives under way: each Dive marker pairs with the fielder's next DiveUp.
+        for mk in marks.iter().filter(|m| m.kind() == MarkerKind::Dive && m.t() <= t) {
+            let up = marks.iter().filter(|u| u.kind() == MarkerKind::DiveUp && u.agent() == mk.agent() && u.t() >= mk.t()).min_by(|a, b| a.t().total_cmp(&b.t()));
+            let Some(up) = up.filter(|u| u.t() > t) else { continue };
+            if frame.n_dives as usize == BB_MAX_DIVES {
+                break;
+            }
+            let (Some(pa), Some(pb)) = (mk.p(), up.p()) else { continue };
+            let (a, b) = (v3(pa), v3(pb));
+            let (dx, dy) = (b[0] - a[0], b[1] - a[1]);
+            let n = (dx * dx + dy * dy).sqrt();
+            let dir = if n > 1e-4 { [dx / n, dy / n] } else { [0.0, 0.0] };
+            frame.dives[frame.n_dives as usize] = BbDive { agent: mk.agent(), _pad: 0, since_s: t - mk.t(), up_in_s: up.t() - t, dir };
+            frame.n_dives += 1;
         }
     }
     // Ball: the last segment that has started by `t` (segments are in time order).
@@ -449,7 +485,7 @@ mod tests {
         let g = bb_game_create(5);
         let (mut plays, mut moved, mut contacts, mut awards) = (0, 0, 0, 0);
         let mut any_on = false;
-        let (mut held, mut thrown) = (0u32, 0u32);
+        let (mut held, mut thrown, mut dives) = (0u32, 0u32, 0u32);
         let mut seen = std::collections::BTreeMap::new();
         // The scoreboard before each play, to count the outs it made.
         let (mut prev_half, mut prev_outs, mut calls_seen) = ((1u8, 1u8), 0u8, 0u32);
@@ -560,6 +596,31 @@ mod tests {
                 }
                 t += 0.05;
             }
+            // Dives: the diver is a fielder on the field, down for the sim's get-up time; his
+            // lunge ends within 0.35 s, and after it he lies where he landed until he is up
+            // (to within one 0.1 s track sample, which blends in his first step).
+            let mut t = 0.0;
+            let mut lying: Vec<(u16, [f32; 3])> = Vec::new();
+            while t <= info.duration_s {
+                let mut f = BbFrame::default();
+                unsafe { bb_timeline_sample(p, len, t, &mut f) };
+                for d in &f.dives[..f.n_dives as usize] {
+                    assert!(d.agent & 0x80 != 0, "diver {:#x} is not a fielder", d.agent);
+                    assert!((d.since_s + d.up_in_s - 1.5).abs() < 1e-3, "down {} + {} s", d.since_s, d.up_in_s);
+                    let n = d.dir[0].hypot(d.dir[1]);
+                    assert!(n == 0.0 || (n - 1.0).abs() < 1e-4, "dive direction {:?}", d.dir);
+                    let a = f.actors[..f.n_actors as usize].iter().find(|a| a.agent == d.agent).expect("the diver is on the field");
+                    if d.since_s > 0.45 && d.up_in_s > 0.1 {
+                        match lying.iter().find(|l| l.0 == d.agent) {
+                            Some(l) => assert!((a.pos[0] - l.1[0]).hypot(a.pos[1] - l.1[1]) < 1e-3, "play {} at {t:.2} s: {:#x} moved while down", info.play_index, d.agent),
+                            None => lying.push((d.agent, a.pos)),
+                        }
+                    }
+                    dives += 1;
+                }
+                lying.retain(|l| f.dives[..f.n_dives as usize].iter().any(|d| d.agent == l.0));
+                t += 0.05;
+            }
             // The ball never goes under the turf, at any instant of any play.
             let mut t = 0.0;
             while t <= info.duration_s {
@@ -589,6 +650,7 @@ mod tests {
             unsafe { bb_blob_free(p, len) };
         }
         assert!(held > 100 && thrown > 10, "held {held} frames, {thrown} throws");
+        assert!(dives > 20, "{dives} frames with a fielder down from a dive");
         // A whole game has the ordinary calls in it.
         for call in ["Ball", "Called strike", "Foul", "Walk"] {
             assert!(seen.contains_key(call), "no {call:?} in {seen:?}");

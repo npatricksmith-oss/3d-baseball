@@ -1,13 +1,27 @@
 # Task List
 
-**Last updated:** 2026-11-13 (the overrun of first and runner position samples; before that, foul measures, sources and the correction experiment; pushed; the spray experiment parked for later; before that, the read knows the ball started at the plate; before that, called-off infielders back up the catch; before that, pop-up calls on `fix/popup-calls`; before that, owner's observations merged into the "Owner backlog" section; before that, the coordinator run on `coord/review-fixes`)
+**Last updated:** 2026-11-13 (dives shown in the client, the get-up after a rimmed dive, two-out throws; before that, the overrun of first and runner position samples; before that, foul measures, sources and the correction experiment; pushed; the spray experiment parked for later; before that, the read knows the ball started at the plate; before that, called-off infielders back up the catch; before that, pop-up calls on `fix/popup-calls`; before that, owner's observations merged into the "Owner backlog" section; before that, the coordinator run on `coord/review-fixes`)
 The live to-do list for the project. [PLAN.md](PLAN.md) holds decisions and design. This file holds what is next and what is done. Update it at the end of every work session.
 
 Status: `[ ]` not started · `[~]` in progress · `[x]` done · `[?]` needs an owner decision
 
 ---
 
-## Resume here (2026-11-13, sixth session: the overrun of first)
+## Resume here (2026-11-13, seventh session: dives, from the owner watching seed 7475)
+
+Branch `claude/cf-misplay-analysis-98b93b` (from main at `2355c34`). `cargo test --workspace --release`: all pass.
+
+**Nothing is waiting on a review.** The [Codex dive and two-out throw review](docs/reviews/2026-11-13-codex-dive-and-two-out-throw-review.md) is resolved: its two P2s and one P3 are fixed. The dive animation and the lunge came after that review and have not been reviewed yet.
+
+Done (the owner watched seed 7475 and reported three plays; the traces are in the commits):
+- **A rimmed dive no longer allows a second dive from the ground** (play 25). The get-up runs from the first dive. A downed fielder can only grab a low ball within arm's reach. Runs/team-game 5.48 → 5.85 and GB hits .413 → .436 over 3 × 200 games, almost all from this fix (Codex verified it). The double dive had been converting hits into outs.
+- **With two out the holder takes the force over a tag on the lead runner** (play 26: the pitcher had thrown home instead of to first). `Sim::out_weight`, `TWO_OUT_TAG_W` 0.9 [E]. The caption for an inning-ending tag now reads "Fielder's choice …, runner tagged out" instead of "Force out".
+- **Dives are shown in the client** (A5, play 58: the shortstop's diving stop looked like him standing with the ball for 2 s). In the sim a dive carries the body over a 0.3 s lunge (`DIVE_LUNGE_S` [E]), and the timeline gets `Dive`/`DiveUp` markers. `BbFrame.dives` reports dives under way. The client lays the figure out toward the ball (a stock leap clip, tipped 45° and dropped to the turf), holds him there, and stands him up through the landing clip's crouch. Check it headlessly with `client/run.sh 7 -RenderOffscreen -BbDiveShots=3`; `-BbAnimTest=dive` previews pose candidates.
+- Measured: fielders dive about 23 times a game (both teams). Most dives start at the edge of dive range (2.25–2.5 m), and about 60% are caught. The owner accepts dives ("it's fine if he dives").
+
+Not done: a player lying down when the play ends pops up at the reset. Real dive and get-up clips (the stand-ins are the mannequin's leap and landing). A18 (outfielders block hard singles instead of diving) is still open.
+
+## Previous: 2026-11-13, sixth session: the overrun of first
 
 Branch `claude/next-task-list-item-11a78e` (continuing from the fifth session below). `cargo test --workspace --release`: 151 passed, 0 failed.
 
@@ -314,7 +328,7 @@ On the field (sim):
 - [ ] A2. **Rosters: player names, numbers, positions** [W9, part of W5]. Most of the items below need it (the home-run display, the box score, uniforms, handedness per player).
 - [ ] A3. **Throwing ratings and hurried throws.** Each player has ratings for arm speed, accuracy, and set-up time. A hurried throw loses accuracy and speed; a fielder with time to get balanced gains both. Have: the spec's `ArmStrength`, `ArmAccuracy`, `Transfer` and its rush and off-balance noise terms (agent-models §5.5); in code each fielder has an arm speed and a fixed transfer time. Missing: no throw is ever hurried (the rush terms are not built), and the spec gives a rushed throw no speed loss, so §5.5 needs that added.
 - [ ] A4. **Smarter throw choices from the outs and the runners.** The owner's example: runner on third, two outs, the fielders should take the force at first or second, not throw home. Collect plays where the choice is wrong before changing the option evaluation (agent-models §5.5).
-- [ ] A5. **Dives that extend range, with a real cost to get up and throw.** Have: chasers dive (1.5 m extra reach, 1.5 s to get up, harder capture). Missing: no dive or get-up motion in the client, so the owner may not be seeing them; measure how often fielders dive and whether the range and the cost are believable.
+- [~] A5. **Dives that extend range, with a real cost to get up and throw.** Have: chasers dive (1.5 m extra reach, 1.5 s to get up, harder capture). The body lunges toward the ball, and since 2026-11-13 the client shows the dive, lying down, and the get-up with stand-in clips. Measured 2026-11-13: about 23 dives a game, 60% caught, most started at the edge of dive range. Missing: real dive and get-up animation, and a judgment of whether that dive rate is believable (A18 is one part of it).
 - [ ] A6. **Runners slide** when the play calls for it (agent-models §6.2; was in M5). Not built.
 - [ ] A7. **Windup vs. stretch** [W2]: a full windup with the bases empty, the stretch with runners on; the stretch shortens the delivery, which matters to steals. Owner's references: [Am J Sports Med 2024 study](https://journals.sagepub.com/doi/abs/10.1177/03635465241247543), [Umpire Bible: pitching positions](https://umpirebible.com/pitching-positions/), and a search for "pitching stretch vs windup visualization". Not built (one delivery; agent-models §2.6 sketches the slide step).
 - [ ] A8. **Runners lead off only once the pitcher is set; pickoffs.** The owner saw runners leading before the pitcher was on the mound, where a real pitcher would pick them off. Have: fixed leads of 5.5 / 6.5 / 4.5 m from first, second, third (`LEAD_M` in `live.rs`). Missing: lead timing tied to the pitcher coming set, leads chosen from the runner's belief of pickoff risk, and the pickoff itself (agent-models §2.6, §6.1).

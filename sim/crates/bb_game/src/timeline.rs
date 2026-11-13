@@ -283,6 +283,9 @@ pub fn encode(step: &PitchStep, st: &RulesState) -> Vec<u8> {
     let mut mk: Vec<(f64, MarkerKind, Vec3, u16)> = mk.into_iter().map(|(t, k, p)| (t, k, p, 0)).collect();
     mk.extend(step.viz.secured.iter().map(|&(t, id)| (t, MarkerKind::Catch, Vec3::ZERO, id)));
     mk.extend(step.viz.released.iter().map(|&(t, id)| (t, MarkerKind::ThrowRelease, Vec3::ZERO, id)));
+    // Dives: the fielder leaves his feet (p = where) and is back on them (p = where he landed).
+    mk.extend(step.viz.dives.iter().map(|&(t, id, from, _)| (t, MarkerKind::Dive, from, id)));
+    mk.extend(step.viz.dives.iter().map(|&(t, id, _, land)| (t + crate::live::DIVE_GETUP_S, MarkerKind::DiveUp, land, id)));
     let mut marks: Vec<_> = mk
         .into_iter()
         .map(|(t, kind, p, agent)| {

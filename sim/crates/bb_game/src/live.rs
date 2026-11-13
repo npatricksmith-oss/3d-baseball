@@ -24,7 +24,10 @@ const REPLAN_S: f64 = 0.4;
 const REACH: f64 = 1.0;
 const DIVE: f64 = 1.5;
 const DIVE_MAX_Z: f64 = 1.2;
-const DIVE_GETUP_S: f64 = 1.5;
+pub const DIVE_GETUP_S: f64 = 1.5;
+/// A dive's lunge: the body travels until the glove is at the ball, at most [`DIVE`], over
+/// this long [E] (a layout dive covers 1.5 m in about 0.3 s), then lies there.
+const DIVE_LUNGE_S: f64 = 0.3;
 /// A catch below this height is a shoestring catch: a close call for the umpire, m [E].
 const LOW_CATCH_Z: f64 = 0.4;
 const CATCH_MAX_Z: f64 = 2.4;
@@ -240,6 +243,9 @@ struct Fielder {
     blocked_until: f64,
     ready_at: f64,
     dove: bool,
+    /// His dive's lunge (start time, from, to): the body goes toward the ball, then lies
+    /// there until he is up.
+    lunge: Option<(f64, Vec3, Vec3)>,
     /// The fielder's own prediction of the ball, refreshed at replans.
     belief: Option<BallPath>,
     /// Believed intercept time.
@@ -349,6 +355,9 @@ pub struct LiveOutput {
     pub secured: Vec<(f64, AgentId)>,
     /// Every throw release (t, thrower), in time order.
     pub released: Vec<(f64, AgentId)>,
+    /// Every dive (t, fielder, where he left his feet, where his body lands), in time order.
+    /// He is back on his feet [`DIVE_GETUP_S`] after the dive.
+    pub dives: Vec<(f64, AgentId, Vec3, Vec3)>,
     /// Every out, with how close the play was, in time order (the umpire's calls).
     pub calls: Vec<crate::umpire::OutCall>,
 }
@@ -880,7 +889,15 @@ fn run_time_to(fd: &Fielder, goal: Vec3, reach: f64) -> f64 {
 /// Not yet reacting, or on the ground after a dive: unchanged.
 fn fielder_step(fd: &Fielder, t: f64, t_contact: f64) -> (Vec3, Vec3) {
     if fd.dove && t < fd.ready_at {
-        return (fd.pos, fd.vel);
+        // Down from a dive: the lunge carries him toward the ball, then he lies still.
+        return match fd.lunge {
+            Some((t0, a, b)) if t < t0 + DIVE_LUNGE_S => {
+                let u = ((t + DT - t0) / DIVE_LUNGE_S).min(1.0);
+                (a + (b - a) * u, (b - a) * (1.0 / DIVE_LUNGE_S))
+            }
+            Some((_, _, b)) => (b, Vec3::ZERO),
+            None => (fd.pos, Vec3::ZERO),
+        };
     }
     // Until he has read the batted ball he goes with his jump (agent-models §5.10: the speed
     // law toward it from contact); with none, he stays set.
@@ -1039,7 +1056,12 @@ impl<'a> Sim<'a> {
     fn ball_at(&self, t: f64) -> (Vec3, Vec3) {
         match &self.ball {
             Ball::Free { path, .. } => path.at(t),
-            Ball::Held { by } => (self.f[*by].pos + Vec3::new(0.0, 0.0, 1.2), Vec3::ZERO),
+            // In his hand at chest height, or by the turf while he is down from a dive.
+            Ball::Held { by } => {
+                let fd = &self.f[*by];
+                let down = fd.dove && fd.lunge.is_some_and(|(t0, _, _)| t < t0 + DIVE_GETUP_S);
+                (fd.pos + Vec3::new(0.0, 0.0, if down { 0.3 } else { 1.2 }), Vec3::ZERO)
+            }
             Ball::Thrown { path, .. } => path.at(t),
         }
     }
@@ -1812,7 +1834,9 @@ impl<'a> Sim<'a> {
                 };
                 let (pn, _) = fielder_step(fd, self.t, self.inp.t_contact);
                 let hn = m::hypot(bn.x - pn.x, bn.y - pn.y);
-                if !boundary && hn < horiz && hn <= reach && bn.z <= zmax_at(bn) && bn.z >= 0.0 {
+                // (Still down then, he is held to a low ball then too: Codex dive review #2.)
+                let zmax_next = if fd.dove && t1 < fd.ready_at { DIVE_MAX_Z } else { zmax_at(bn) };
+                if !boundary && hn < horiz && hn <= reach && bn.z <= zmax_next && bn.z >= 0.0 {
                     continue;
                 }
             }
@@ -1842,9 +1866,15 @@ impl<'a> Sim<'a> {
             let fd = &mut self.f[i];
             fd.attempts += 1;
             if diving {
-                // A committed dive puts the fielder on the ground whatever happens next.
+                // A committed dive puts the fielder on the ground whatever happens next. His
+                // body goes until the glove is at the ball (arm's reach short of it).
                 fd.dove = true;
                 fd.ready_at = self.t + DIVE_GETUP_S;
+                let to_ball = Vec3::new(b.x - fd.pos.x, b.y - fd.pos.y, 0.0);
+                let land = fd.pos + to_ball * ((horiz - REACH).max(0.0) / horiz.max(1e-9));
+                fd.lunge = Some((self.t, fd.pos, land));
+                let (id, from) = (fd.id, fd.pos);
+                self.out.dives.push((self.t, id, from, land));
             }
             if d <= POCKET {
                 // Up off the ground first (the get-up runs from his dive, whichever attempt
@@ -1864,7 +1894,8 @@ impl<'a> Sim<'a> {
                     } else {
                         fd.target = base_pos(to_base);
                     }
-                    fd.ready_at = self.t + RELAY_TRANSFER_FRAC * fd.a.transfer;
+                    // (Taking it on the ground from a dive, he is up first.)
+                    fd.ready_at = up_at + RELAY_TRANSFER_FRAC * fd.a.transfer;
                 }
                 let id = fd.id;
                 self.ball = Ball::Held { by: i };
@@ -2082,6 +2113,20 @@ impl<'a> Sim<'a> {
         let r = &self.r[k];
         let batter_alive = self.r.iter().any(|x| x.start == 0 && !x.out);
         r.start == 0 || (batter_alive && (1..r.start).all(|b| self.r.iter().any(|x| x.start == b && !x.out)))
+    }
+
+    /// How much the holder values an out on runner `k` at base `goal`. With fewer than two out
+    /// the lead runner is worth more. With two out every out ends the inning, so the sure out
+    /// is the play, and a force is preferred to a tag (it needs no tag, and a run cannot score
+    /// on it; OBR 5.08(a)). It is a force only while he is still short of the base: a runner
+    /// coming back to a base he has already reached must be tagged (Codex dive review #1).
+    fn out_weight(&self, k: usize, goal: u8) -> f64 {
+        let r = &self.r[k];
+        if self.st.outs >= 2 {
+            if self.forced(k) && goal == r.start + 1 && r.s < goal as f64 * BASE_L { 1.0 } else { TWO_OUT_TAG_W }
+        } else {
+            [0.9, 1.0, 1.1, 1.3][(goal as usize).saturating_sub(1).min(3)]
+        }
     }
 
     /// Whether a runner ahead of runner `k` holds base `b`: he is at or short of it and not
@@ -2386,14 +2431,7 @@ impl<'a> Sim<'a> {
             let t_via = via(goal);
             let t_ball = t_direct.min(t_via).max(self.receiver_ready(recv, goal)) + 0.05;
             let p_out = phi((t_runner - t_ball) / 0.12);
-            // With fewer than two out the lead runner is worth more. With two out every out
-            // ends the inning, so the weights go: the sure out is the play, and a force is
-            // preferred to a tag (it needs no tag, and a run cannot score on it; OBR 5.08(a)).
-            let w = if self.st.outs >= 2 {
-                if self.forced(k) && goal == r.start + 1 { 1.0 } else { TWO_OUT_TAG_W }
-            } else {
-                [0.9, 1.0, 1.1, 1.3][(goal as usize).saturating_sub(1).min(3)]
-            };
+            let w = self.out_weight(k, goal);
             // Take the sure out: an uncertain play on a lead runner loses to a certain one
             // elsewhere (the chance is squared before the base's weight is applied).
             if p_out > 0.3 && best.map(|b| p_out * p_out * w > b.0).unwrap_or(true) {
@@ -2566,6 +2604,7 @@ fn new_sim<'a>(inp: &'a LiveInput<'a>, st: &'a mut RulesState) -> Sim<'a> {
                 blocked_until: 0.0,
                 ready_at: 0.0,
                 dove: false,
+                lunge: None,
                 belief: None,
                 t_int: f64::INFINITY,
                 last_close_read: 0.0,
@@ -2611,7 +2650,7 @@ fn new_sim<'a>(inp: &'a LiveInput<'a>, st: &'a mut RulesState) -> Sim<'a> {
         f,
         r,
         primary: 0,
-        out: LiveOutput { facts: Vec::new(), events: Vec::new(), path, ball_track: Vec::new(), actors, secured: Vec::new(), released: Vec::new(), calls: Vec::new() },
+        out: LiveOutput { facts: Vec::new(), events: Vec::new(), path, ball_track: Vec::new(), actors, secured: Vec::new(), released: Vec::new(), dives: Vec::new(), calls: Vec::new() },
         bounce_k: 1000,
         done: false,
         last_fact_t: t_c,
@@ -2939,6 +2978,24 @@ mod tests {
     fn a_fielder_down_from_a_dive_does_not_dive_again() {
         let (facts, _) = down_after_dive(1.6);
         assert!(!facts.iter().any(|f| matches!(f, Input::GloveSecured { .. })), "dove from the ground: {facts:?}");
+    }
+
+    // Codex dive review #2: a low ball in reach of a fielder who is down is taken now, not
+    // deferred to the next tick, when it will have risen past what he can reach lying down.
+    #[test]
+    fn a_fielder_down_from_a_dive_takes_a_rising_ball_while_it_is_low() {
+        let fx = fixture(&[]);
+        let inp = input(&fx, vec![RunnerIn { id: fx.st.batter, base: 0, speed: 8.2 }]);
+        let mut st = fx.st.clone();
+        let mut sim = new_sim(&inp, &mut st);
+        sim.f[CF].pos = Vec3::new(0.0, 80.0, 0.0);
+        loose_ball(&mut sim, 1.5, Vec3::new(-0.3, 80.0, DIVE_MAX_Z - 0.01), Vec3::new(6.0, 0.0, 2.0));
+        sim.f[CF].dove = true;
+        sim.f[CF].ready_at = 2.5;
+        for _ in 0..20 {
+            world_tick(&mut sim);
+        }
+        assert!(sim.out.facts.iter().any(|f| matches!(f, Input::GloveSecured { .. })), "facts: {:?}", sim.out.facts);
     }
 
     #[test]
@@ -3868,6 +3925,23 @@ mod tests {
     #[test]
     fn with_two_out_the_holder_takes_the_force_over_the_lead_runner() {
         assert_eq!(pitcher_throws_to(2), 1);
+    }
+
+    // Codex dive review #1: with two out, a runner who reached second and is coming back to it
+    // must be tagged there; short of it he can still be forced.
+    #[test]
+    fn a_runner_back_to_a_base_he_reached_is_a_tag_play() {
+        const R1: AgentId = 0x0007;
+        let fx = fixture(&[(R1, 1)]);
+        let inp = input(&fx, vec![RunnerIn { id: fx.st.batter, base: 0, speed: 8.2 }, RunnerIn { id: R1, base: 1, speed: 8.2 }]);
+        let mut st = fx.st.clone();
+        st.outs = 2;
+        let mut sim = new_sim(&inp, &mut st);
+        let k = sim.r.iter().position(|r| r.id == R1).unwrap();
+        (sim.r[k].s, sim.r[k].goal) = (2.0 * BASE_L - 4.0, 2);
+        assert_eq!(sim.out_weight(k, 2), 1.0, "short of second, forced");
+        (sim.r[k].s, sim.r[k].goal) = (2.0 * BASE_L + 4.0, 2);
+        assert_eq!(sim.out_weight(k, 2), TWO_OUT_TAG_W, "back to second, a tag");
     }
 
     // With fewer than two out, cutting down the run at home is still the play.

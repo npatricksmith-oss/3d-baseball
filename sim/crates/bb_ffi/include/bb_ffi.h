@@ -20,11 +20,17 @@ int32_t bb_game_score(const BbGame *g, uint16_t *away, uint16_t *home);
  * rear point of home plate, +Y to center field, +Z up, +X to first base). */
 typedef struct { uint16_t agent; uint16_t _pad; float pos[3]; float yaw; } BbActor;
 #define BB_MAX_ACTORS 16
+/* A fielder off his feet from a dive, from leaving them until he is back on them: since_s
+ * after he left them, up_in_s before he is up; dir = the dive's direction on the ground (sim
+ * frame, unit; zero if he went nowhere). */
+typedef struct { uint16_t agent; uint16_t _pad; float since_s; float up_in_s; float dir[2]; } BbDive;
+#define BB_MAX_DIVES 4
 typedef struct {
   float ball[3]; uint32_t n_actors; BbActor actors[BB_MAX_ACTORS];
   uint32_t has_bat; float bat_knob[3]; float bat_tip[3]; /* the bat, while someone holds it */
   int32_t holder;      /* agent id of the fielder who has the ball, or -1 */
   float release_in_s;  /* seconds until that holder releases a throw, or -1 if he does not */
+  uint32_t n_dives; BbDive dives[BB_MAX_DIVES]; /* fielders off their feet from a dive */
 } BbFrame;
 #define BB_SUMMARY_LEN 96
 /* One out as the umpire signals it: at t_s (s from release, within a second of the out);

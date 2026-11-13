@@ -318,6 +318,7 @@ void ABbDirector::BeginPlay()
 	AnimThrow = LoadObject<UAnimSequence>(nullptr, TEXT("/Game/Characters/Mannequins/Anims/Unarmed/Attack/MM_Attack_02.MM_Attack_02"));
 	AnimCrouch = LoadObject<UAnimSequence>(nullptr, TEXT("/Game/Characters/Mannequins/Anims/Unarmed/Jump/MM_Land.MM_Land"));
 	AnimStance = LoadObject<UAnimSequence>(nullptr, TEXT("/Game/Characters/Mannequins/Anims/Unarmed/Attack/MM_Attack_01.MM_Attack_01"));
+	AnimDive = LoadObject<UAnimSequence>(nullptr, TEXT("/Game/Characters/Mannequins/Anims/Unarmed/Jump/MM_WallJump.MM_WallJump"));
 	AnimWalkBack = LoadObject<UAnimSequence>(nullptr, TEXT("/Game/Characters/Mannequins/Anims/Unarmed/Walk/MF_Unarmed_Walk_Bwd.MF_Unarmed_Walk_Bwd"));
 	AnimWalkLeft = LoadObject<UAnimSequence>(nullptr, TEXT("/Game/Characters/Mannequins/Anims/Unarmed/Walk/MF_Unarmed_Walk_Left.MF_Unarmed_Walk_Left"));
 	AnimWalkRight = LoadObject<UAnimSequence>(nullptr, TEXT("/Game/Characters/Mannequins/Anims/Unarmed/Walk/MF_Unarmed_Walk_Right.MF_Unarmed_Walk_Right"));
@@ -392,6 +393,7 @@ void ABbDirector::BeginPlay()
 	FParse::Value(Cmd, TEXT("BbShotEvery="), ShotEvery);
 	FParse::Value(Cmd, TEXT("BbShotStart="), NextShot);
 	FParse::Value(Cmd, TEXT("BbBenchSeconds="), BenchSeconds);
+	FParse::Value(Cmd, TEXT("BbDiveShots="), DiveShotsLeft);
 	bStagingLog = FParse::Param(Cmd, TEXT("BbStagingLog"));
 	if (FParse::Param(Cmd, TEXT("BbClipSpeeds")))
 	{
@@ -405,6 +407,49 @@ void ABbDirector::BeginPlay()
 		}
 	}
 
+	// Dive preview (-BbAnimTest=dive): candidate clips, each held at a fraction of its length,
+	// on figures tipped forward as a dive lays them out (BbAnimTilt degrees, default 80), seen
+	// side-on diving toward screen right, for choosing the dive's stand-in. No game is played.
+	FString AnimTest;
+	if (FParse::Value(Cmd, TEXT("BbAnimTest="), AnimTest) && AnimTest == TEXT("dive") && Figures.Num() >= 8)
+	{
+		const TCHAR* Clips[8] = {
+			TEXT("/Game/Characters/Mannequins/Anims/Unarmed/Jump/MM_Fall_Loop.MM_Fall_Loop"),
+			TEXT("/Game/Characters/Mannequins/Anims/Unarmed/Jump/MM_Jump.MM_Jump"),
+			TEXT("/Game/Characters/Mannequins/Anims/Unarmed/Jump/MM_Dash.MM_Dash"),
+			TEXT("/Game/Characters/Mannequins/Anims/Unarmed/Jump/MM_WallJump.MM_WallJump"),
+			TEXT("/Game/Characters/Mannequins/Anims/Unarmed/Attack/MM_Attack_02.MM_Attack_02"),
+			TEXT("/Game/Characters/Mannequins/Anims/Unarmed/Attack/MM_Attack_03.MM_Attack_03"),
+			TEXT("/Game/Characters/Mannequins/Anims/Unarmed/Jump/MM_Land.MM_Land"),
+			TEXT("/Game/Characters/Mannequins/Anims/Unarmed/Attack/MM_ChargedAttack.MM_ChargedAttack"),
+		};
+		float Frac = 0.5f;
+		float Tilt = 80.f;
+		FParse::Value(Cmd, TEXT("BbAnimFrac="), Frac);
+		FParse::Value(Cmd, TEXT("BbAnimTilt="), Tilt);
+		float Lift = 0.f;
+		FParse::Value(Cmd, TEXT("BbAnimLift="), Lift);
+		for (int32 I = 0; I < 8; ++I)
+		{
+			UAnimSequence* Clip = LoadObject<UAnimSequence>(nullptr, Clips[I]);
+			ASkeletalMeshActor* F = Figures[I];
+			F->SetActorHiddenInGame(false);
+			// Facing sim +X (screen right from behind home), Unreal yaw 90.
+			PlaceDiver(F, ToUE(-7.0 + 2.2 * I, 8.0, 0.0), 90.f, Tilt, Lift);
+			if (Clip)
+			{
+				UE_LOG(LogBb, Display, TEXT("BB_ANIM %d %s length %.2f s, held at %.2f s"), I, Clips[I], Clip->GetPlayLength(), Frac * Clip->GetPlayLength());
+				USkeletalMeshComponent* C = F->GetSkeletalMeshComponent();
+				C->PlayAnimation(Clip, false);
+				C->SetPlayRate(0.f);
+				C->SetPosition(Frac * Clip->GetPlayLength(), false);
+			}
+		}
+		Camera->SetActorLocation(ToUE(0, 1, 3.0));
+		Camera->SetActorRotation((ToUE(0, 8, 0.3) - ToUE(0, 1, 3.0)).Rotation());
+		Camera->GetCameraComponent()->SetFieldOfView(90.f);
+		return;
+	}
 	// Clip preview (-BbAnimTest): a row of figures each looping one stock clip slowly, for
 	// choosing which clip stands in for which baseball motion. No game is played.
 	if (FParse::Param(Cmd, TEXT("BbAnimTest")) && Figures.Num() >= 8)
@@ -1001,6 +1046,18 @@ void ABbDirector::ResetFrame(float T, BbFrame& Out, bool& bBallShown) const
 	Out.ball[2] = B.Z;
 }
 
+void ABbDirector::PlaceDiver(ASkeletalMeshActor* F, const FVector& Foot, float Yaw, float TiltDeg, float LiftCm) const
+{
+	// The mannequin's mesh faces +Y in its own frame. A tilt tips him forward about the axis
+	// across his body, pivoting at the feet; tipped, his middle (not his feet) is kept over
+	// the sim's position. LiftCm raises (or, negative, lowers) him.
+	const FQuat Facing(FRotator(0.f, Yaw - 90.f, 0.f));
+	const float S = FMath::Sin(FMath::DegreesToRadians(FMath::Abs(TiltDeg)));
+	const FQuat Tip(FVector(1.f, 0.f, 0.f), FMath::DegreesToRadians(DiveTiltSign * TiltDeg));
+	const FVector Ahead = FRotator(0.f, Yaw, 0.f).Vector();
+	F->SetActorLocationAndRotation(Foot - Ahead * (DiveBodyBackCm * S) + FVector(0, 0, LiftCm), Facing * Tip);
+}
+
 void ABbDirector::PoseFigure(int32 Slot, const BbActor& A, const BbFrame& Frame, const FPoseInput& In, float SimDt, float DeltaSeconds)
 {
 	ASkeletalMeshActor* F = Figures[Slot];
@@ -1063,6 +1120,28 @@ void ABbDirector::PoseFigure(int32 Slot, const BbActor& A, const BbFrame& Frame,
 		ClipTime = PlayTime + 1.0f;
 		WantYaw = YawToPlate(Foot);
 	}
+	else if (bMotions && bFielder && AnimDive && AnimCrouch && In.DiveSince >= 0.f)
+	{
+		// A dive, as the sim has it: he leaves his feet toward the ball (the sim carries his
+		// body there), lies where he landed, and is back up when the sim says. Stand-ins:
+		// a held leap with an arm reaching overhead, which the layout (below) turns into a
+		// reach for the ball; then, over the last DiveRiseS, a landing clip from its crouch
+		// up to standing.
+		if (In.DiveUpIn < DiveRiseS)
+		{
+			Manual = AnimCrouch;
+			ClipTime = (1.f - In.DiveUpIn / DiveRiseS) * 0.9f * AnimCrouch->GetPlayLength();
+		}
+		else
+		{
+			Manual = AnimDive;
+			ClipTime = DiveClipFrac * AnimDive->GetPlayLength();
+		}
+		if (In.bDiveDir)
+		{
+			WantYaw = In.DiveYaw;
+		}
+	}
 	else if (bMotions && bFielder && AnimThrow && In.ThrowClip >= 0.f && In.ThrowClip <= ThrowClipS)
 	{
 		// A throw: the clip's release (ThrowReleaseS in) lands on the known release time, and
@@ -1099,9 +1178,17 @@ void ABbDirector::PoseFigure(int32 Slot, const BbActor& A, const BbFrame& Frame,
 	// Turns ease on play time, so a pause holds them and fast playback keeps up.
 	St.Yaw = FMath::RInterpTo(FRotator(0, St.Yaw, 0), FRotator(0, WantYaw, 0), SimDt, Manual ? 18.f : TurnRate).Yaw;
 	St.Pos = Foot;
-	F->SetActorLocation(Foot);
-	// The mannequin's mesh faces +Y in its own frame.
-	F->SetActorRotation(FRotator(0.f, St.Yaw - 90.f, 0.f));
+	// A dive lays him out: tipped forward from the feet over DiveFallS, coming down onto the
+	// turf as he lands (late, so he is in the air first), flat until he gets up.
+	float Tilt = 0.f;
+	float Lift = 0.f;
+	if (Manual && Manual == AnimDive && In.DiveSince >= 0.f)
+	{
+		const float Down = FMath::Clamp(In.DiveSince / DiveFallS, 0.f, 1.f);
+		Tilt = DiveTiltDeg * FMath::Sin(HALF_PI * Down);
+		Lift = DiveDropCm * Down * Down;
+	}
+	PlaceDiver(F, Foot, St.Yaw, Tilt, Lift);
 
 	if (Manual)
 	{
@@ -1289,6 +1376,37 @@ void ABbDirector::Tick(float DeltaSeconds)
 		else
 		{
 			bHave = Sim->Sample(Current, T, Frame);
+			// -BbDiveShots: each dive photographed in the air, lying, and getting up.
+			for (uint32 D = 0; bHave && DiveShotsLeft > 0 && D < Frame.n_dives; ++D)
+			{
+				const BbDive& Dv = Frame.dives[D];
+				const float Marks[3] = { 0.12f, 0.8f, Dv.since_s + Dv.up_in_s - 0.3f };
+				for (int32 M = 0; M < 3; ++M)
+				{
+					if (Dv.since_s >= Marks[M] && Dv.since_s - SimDt < Marks[M])
+					{
+						const FString Name = FPaths::Combine(FPaths::ProjectSavedDir(), TEXT("Shots"), FString::Printf(TEXT("dive_%02d_%d.png"), DiveShotIndex, M));
+						FScreenshotRequest::RequestScreenshot(Name, true, false);
+						float FigYaw = 0.f;
+						for (int32 Q = 0; Q < FigureState.Num(); ++Q)
+						{
+							if (FigureState[Q].Agent == Dv.agent)
+							{
+								FigYaw = FigureState[Q].Yaw;
+							}
+						}
+						UE_LOG(LogBb, Display, TEXT("BB_DIVE_SHOT %s play %u t %.2f agent %#x dir (%.2f, %.2f) dive yaw %.0f figure yaw %.0f"), *Name, Current.Info.play_index, T, Dv.agent, Dv.dir[0], Dv.dir[1], ToUE(Dv.dir[0], Dv.dir[1], 0.0).Rotation().Yaw, FigYaw);
+						if (M == 2)
+						{
+							++DiveShotIndex;
+							if (--DiveShotsLeft == 0)
+							{
+								BenchSeconds = FMath::Max(BenchSeconds, (float)Wall + 2.f);
+							}
+						}
+					}
+				}
+			}
 			// Throws coming up, from every frame since the last one drawn.
 			NoteThrows(ThrowsSampledTo, T);
 			ThrowsSampledTo = FMath::Max(ThrowsSampledTo, T);
@@ -1354,6 +1472,17 @@ void ABbDirector::Tick(float DeltaSeconds)
 					}
 					else if (bShow && !bReset)
 					{
+						for (uint32 D = 0; D < Frame.n_dives; ++D)
+						{
+							const BbDive& Dv = Frame.dives[D];
+							if (Dv.agent == A.agent)
+							{
+								In.DiveSince = Dv.since_s;
+								In.DiveUpIn = Dv.up_in_s;
+								In.bDiveDir = Dv.dir[0] != 0.f || Dv.dir[1] != 0.f;
+								In.DiveYaw = ToUE(Dv.dir[0], Dv.dir[1], 0.0).Rotation().Yaw;
+							}
+						}
 						for (FThrowNote& N : Throws)
 						{
 							const float Clip = PlayTime - (N.ReleaseAt - ThrowReleaseS);
@@ -1419,6 +1548,22 @@ void ABbDirector::Tick(float DeltaSeconds)
 				bBallInPlay = true;
 			}
 			UpdateCamera(Frame, DeltaSeconds);
+			// -BbDiveShots: the camera on the diver, from his side, while he is down.
+			if (DiveShotsLeft > 0 && !bReset && Frame.n_dives > 0)
+			{
+				for (uint32 I = 0; I < Frame.n_actors; ++I)
+				{
+					if (Frame.actors[I].agent == Frame.dives[0].agent)
+					{
+						const FVector P = ToUE(Frame.actors[I].pos);
+						const FVector Dir = ToUE(Frame.dives[0].dir[0], Frame.dives[0].dir[1], 0.0);
+						const FVector Side = Dir.IsNearlyZero() ? FVector(1, 0, 0) : FVector(-Dir.Y, Dir.X, 0.0).GetSafeNormal();
+						const FVector Eye = P + Side * 700.f + FVector(0, 0, 250.f);
+						Camera->SetActorLocation(Eye);
+						Camera->SetActorRotation((P + FVector(0, 0, 50.f) - Eye).Rotation());
+					}
+				}
+			}
 		}
 		if (ABbHUD* Hud = GetWorld()->GetFirstPlayerController() ? Cast<ABbHUD>(GetWorld()->GetFirstPlayerController()->GetHUD()) : nullptr)
 		{

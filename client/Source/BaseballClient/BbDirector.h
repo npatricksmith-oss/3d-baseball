@@ -22,6 +22,9 @@ class UMaterialInterface;
  * Command line: -BbSimLib=<path to libbb_ffi.so> -BbSeed=<n> -BbSpeed=<x>
  *               -BbCamera=<0 broadcast | 1 behind home | 2 overhead>
  *               -BbShots=<n> (take n screenshots, then quit) -BbShotEvery=<seconds> -BbShotStart=<seconds>
+ *               -BbDiveShots=<n> (photograph n dives: in the air, lying, getting up; then quit)
+ *               -BbAnimTest (stock clips looping) or -BbAnimTest=dive (dive pose candidates;
+ *               -BbAnimFrac=<0..1> -BbAnimTilt=<degrees>)
  *               -BbBenchSeconds=<s> (log frame rate and memory, then quit)
  *               -BbStagingLog (log each reset, each player leaving the field and each throw's
  *               first animation phase as BB_RESET / BB_EXIT / BB_THROW, and a BB_STAGING summary)
@@ -103,6 +106,9 @@ private:
 	TObjectPtr<UAnimSequence> AnimCrouch;
 	UPROPERTY()
 	TObjectPtr<UAnimSequence> AnimStance;
+	// A dive: a stock fall, played forward as he goes down and backward as he gets up.
+	UPROPERTY()
+	TObjectPtr<UAnimSequence> AnimDive;
 	// Sidestep and back-step walks, for a short shuffle that does not turn the body.
 	UPROPERTY()
 	TObjectPtr<UAnimSequence> AnimWalkBack;
@@ -145,8 +151,28 @@ private:
 		/** Seconds into AnimThrow (its release is ThrowReleaseS in), or negative for no throw. */
 		float ThrowClip = -1.f;
 		float ThrowYaw = 0.f; // Unreal yaw, degrees
+		/** Down from a dive (the sim's BbDive): seconds since he left his feet, or negative
+		 *  for none; seconds until he is up; which way he dove (Unreal yaw, if bDiveDir). */
+		float DiveSince = -1.f;
+		float DiveUpIn = 0.f;
+		bool bDiveDir = false;
+		float DiveYaw = 0.f;
 	};
 	void PoseFigure(int32 Slot, const BbActor& A, const BbFrame& Frame, const FPoseInput& In, float SimDt, float DeltaSeconds);
+	/** A dive's layout (client presentation): he tips forward to DiveTiltDeg from the feet
+	 *  over DiveFallS (the sim's lunge takes 0.3 s) and comes down DiveDropCm onto the turf
+	 *  (the leap clip, held DiveClipFrac through, has him in the air and leaning 45° already),
+	 *  lies there, and gets up over the last DiveRiseS before the sim has him up. Tipped
+	 *  flat, his middle is DiveBodyBackCm from his feet. Check with -BbDiveShots. */
+	float DiveFallS = 0.3f;
+	float DiveRiseS = 0.6f;
+	float DiveTiltDeg = 45.f;
+	float DiveTiltSign = -1.f;
+	float DiveClipFrac = 0.5f;
+	float DiveBodyBackCm = 90.f;
+	float DiveDropCm = -40.f;
+	/** Places a figure at Foot facing Yaw (Unreal degrees), tipped forward TiltDeg and raised LiftCm. */
+	void PlaceDiver(ASkeletalMeshActor* F, const FVector& Foot, float Yaw, float TiltDeg, float LiftCm) const;
 	/** The throw clip: its release this far in, and how long it runs. */
 	static constexpr float ThrowReleaseS = 0.45f;
 	static constexpr float ThrowClipS = 0.9f;
@@ -282,6 +308,9 @@ private:
 	// Unattended checks.
 	int32 ShotsLeft = 0;
 	int32 ShotIndex = 0;
+	/** -BbDiveShots=<n>: photograph the next n dives (in the air, lying, getting up), then quit. */
+	int32 DiveShotsLeft = 0;
+	int32 DiveShotIndex = 0;
 	float ShotEvery = 4.f;
 	float NextShot = 3.f;
 	float BenchSeconds = 0.f;

@@ -104,6 +104,9 @@ pub struct PlayViz {
     /// Possession during a live ball: when each fielder secured the ball, and each throw's release.
     pub secured: Vec<(f64, u16)>,
     pub released: Vec<(f64, u16)>,
+    /// Dives (t, fielder, where he left his feet, where his body lands); he is up
+    /// [`crate::live::DIVE_GETUP_S`] later.
+    pub dives: Vec<(f64, u16, bb_math::Vec3, bb_math::Vec3)>,
 }
 
 /// Everything one pitch produced, for timelines and visualization.
@@ -296,6 +299,7 @@ impl Game {
                 viz.actors = out.actors.clone();
                 viz.secured = out.secured.clone();
                 viz.released = out.released.clone();
+                viz.dives = out.dives.clone();
             }
             calls.extend(out.calls.iter().copied());
             self.pending_rules.extend(out.events.iter().cloned());

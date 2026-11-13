@@ -303,11 +303,13 @@ table ActorTrack {
 
 Discrete moments that animation is **time-warped** to (PLAN §12) and that cameras and audio cue off.
 
-`DeliveryStart, Release, PlateCross, SwingStart, CheckSwingBrake, Contact, Bounce, WallHit, FirstStep, Dive, Catch, Transfer, ThrowRelease, BaseTouch, SlideStart, Tag, RunScores, BallDead, UmpireCall`
+`DeliveryStart, Release, PlateCross, SwingStart, CheckSwingBrake, Contact, Bounce, WallHit, FirstStep, Dive, Catch, Transfer, ThrowRelease, BaseTouch, SlideStart, Tag, RunScores, BallDead, UmpireCall, DiveUp`
 
 ```fbs
 table Marker { t: float (id: 0); kind: MarkerKind (id: 1); agent: ushort (id: 2); base: ubyte (id: 3); p: bb.Vec3f (id: 4); margin_s: float (id: 5); }
 ```
+
+`Dive` and `DiveUp` (emitted since 2026-11-13) bracket a fielder's dive: `Dive` when he leaves his feet (`agent`, `p` where he left them), `DiveUp` when he is back on them, the get-up time later (`p` where his body landed: the sim carries him there over the 0.3 s lunge, agent-models §5.3). The FFI reports a dive under way in `BbFrame.dives` (`since_s`, `up_in_s`, `dir`), so a client can lay the figure out and get it up on the sim's times.
 
 `UmpireCall` (added 2026-11-12) is the umpire signalling an out, at the time he signals it (rules-spec §1.3): `agent` is the runner retired, `base` where (0: the batter at the plate, a caught fly or a strikeout; 4 home), `p` the runner's position, `margin_s` how close the play was (s; 0 bang-bang, `FLT_MAX` for a routine catch). One per out, so a client can advance the outs on the scoreboard as each is called. The play's `duration_s` covers the last call. `bb_timeline_info` copies them into `BbPlayInfo.calls` (`sim/crates/bb_ffi/include/bb_ffi.h`).
 

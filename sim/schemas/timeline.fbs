@@ -14,7 +14,10 @@ enum MarkerKind : ubyte {
   RunScores = 17, BallDead = 18,
   // The umpire signals an out: agent = the runner retired, base = where (0 = the batter at
   // the plate: a caught fly or a strikeout), p = the runner's position, margin_s = how close.
-  UmpireCall = 19
+  UmpireCall = 19,
+  // A diving fielder is back on his feet (agent; p = where his body landed). Paired with the
+  // Dive marker at the moment he left them (p = where he left them).
+  DiveUp = 20
 }
 
 struct BallKnot { t: float; r: bb.Vec3f; v: bb.Vec3f; }
