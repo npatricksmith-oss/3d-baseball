@@ -1,0 +1,25 @@
+id = "passing-004"
+title = "Two out: the runner from first passes the runner from second between second and third for the third out before the lead runner reaches home: no run"
+rules = ["OBR 5.09(b)(9)", "OBR 5.08(a)", "rules-spec 6.4"]
+milestone = "M4"
+tags = ["passing", "runs", "time-play", "positions"]
+initial = { inning = 5, outs = 2, batter = "A.6", bases = { first = "A.5", second = "A.4" } }
+step = [
+  { fact = "PitchDelivered", t = 0.0 },
+  { fact = "BatContact", t = 0.42 },
+  { fact = "BaseLeft", t = 0.6, agent = "A.4", base = 2 },
+  { fact = "BaseLeft", t = 0.6, agent = "A.5", base = 1 },
+  { fact = "BallTouched", t = 1.5, what = "Ground", pos = [20.0, 70.0] },
+  { fact = "BaseTouched", t = 2.4, agent = "A.5", base = 2 },
+  { fact = "BaseLeft", t = 2.5, agent = "A.5", base = 2 },
+  # Halfway and 60% of the way from second to third.
+  { fact = "RunnerPosition", t = 3.0, runner = "A.4", pos = [-9.699, 29.096] },
+  { fact = "RunnerPosition", t = 3.0, runner = "A.5", pos = [-11.638, 27.156], expect_events = [
+    { event = "RunnerPassed", runner = "A.5", passed = "A.4" },
+    { event = "RunnerOut", runner = "A.5", base = 3, kind = "Tag" },
+    { event = "HalfInningEnded", runs = 0 },
+  ] },
+  # The ball is dead with the third out; this touch comes too late to matter.
+  { fact = "BaseTouched", t = 5.0, agent = "A.4", base = 4 },
+]
+expect = { score = [0, 0], half = "bottom", inning = 5, outs = 0 }

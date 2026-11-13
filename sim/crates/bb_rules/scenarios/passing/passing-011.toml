@@ -1,0 +1,21 @@
+id = "passing-011"
+title = "The batter-runner is out for passing the runner from first, which removes that runner's force: touching second with the ball no longer retires him"
+rules = ["OBR 5.09(b)(9)", "OBR 5.09(b)(6)", "rules-spec 5.4", "rules-spec 5.5"]
+milestone = "M4"
+tags = ["passing", "force-removed", "positions"]
+initial = { inning = 2, outs = 0, batter = "A.6", bases = { first = "A.4" } }
+step = [
+  { fact = "PitchDelivered", t = 0.0 },
+  { fact = "BatContact", t = 0.42 },
+  { fact = "BaseLeft", t = 0.6, agent = "A.4", base = 1 },
+  { fact = "BallTouched", t = 2.0, what = "Ground", pos = [20.0, 70.0] },
+  { fact = "BaseTouched", t = 4.2, agent = "A.6", base = 1 },
+  { fact = "BaseLeft", t = 4.3, agent = "A.6", base = 1 },
+  { fact = "RunnerPosition", t = 5.0, runner = "A.4", pos = [12.026, 26.768] },
+  { fact = "RunnerPosition", t = 5.0, runner = "A.6", pos = [10.669, 28.126], expect_events = [{ event = "RunnerOut", runner = "A.6" }] },
+  { fact = "GloveSecured", t = 5.4, fielder = "H.SS", pos = [0.5, 38.5] },
+  { fact = "BaseTouched", t = 5.5, agent = "H.SS", base = 2, holding_ball = true },
+  { fact = "BaseTouched", t = 6.5, agent = "A.4", base = 2 },
+  { fact = "PlayEndCheck", t = 8.0 },
+]
+expect = { outs = 1, bases = { second = "A.4" }, play = "Dead" }

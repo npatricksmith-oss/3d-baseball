@@ -48,9 +48,130 @@ fn fact_time(input: &Input) -> Option<f64> {
     }
 }
 
-/// Apply one input; returns the events it produced. Inputs that do not fit the current state
-/// are ignored with a `RulesWarning` (the orchestrator sent something out of order).
-pub fn step(st: &mut RulesState, input: &Input) -> Vec<Event> {
+/// Apply one input (a fact, command, or position sample); returns the events it produced.
+/// Inputs that do not fit the current state are ignored with a `RulesWarning` (the
+/// orchestrator sent something out of order).
+pub fn step<'a>(st: &mut RulesState, fact: impl Into<Fact<'a>>) -> Vec<Event> {
+    match fact.into() {
+        Fact::Input(i) => step_input(st, i),
+        Fact::Position(p) => step_position(st, p),
+    }
+}
+
+/// Ground position of a base (1-3; 0 and 4 are home) in the sim frame.
+fn base_xy(b: Base) -> (f64, f64) {
+    let d = BASE_DIST / core::f64::consts::SQRT_2;
+    match b {
+        1 => (d, d),
+        2 => (0.0, 2.0 * d),
+        3 => (-d, d),
+        _ => (0.0, 0.0),
+    }
+}
+
+/// Progress along the base path, in bases (0 = home, 1 = first, ..., 4 = home again), of a
+/// runner at ground point (x, y) whose last touched base is `at`: the nearest point on the
+/// two base lines that meet at `at` (rules-spec §5.5).
+fn path_progress(at: Base, x: f64, y: f64) -> f64 {
+    let mut best = (f64::INFINITY, at as f64);
+    for k in at.saturating_sub(1)..=at.min(3) {
+        let (ax, ay) = base_xy(k);
+        let (bx, by) = base_xy(k + 1);
+        let (ux, uy) = (bx - ax, by - ay);
+        // Not clamped below: a runner beyond a base on the far side from the next one (the
+        // lead runner "beyond third base toward left field", OBR 5.09(b)(9) comment) is short
+        // of it.
+        let u = (((x - ax) * ux + (y - ay) * uy) / (ux * ux + uy * uy)).min(1.0);
+        let (dx, dy) = (x - ax - u * ux, y - ay - u * uy);
+        let d2 = dx * dx + dy * dy;
+        if d2 < best.0 {
+            best = (d2, k as f64 + u);
+        }
+    }
+    best.1
+}
+
+/// A position sample (rules-spec §2 `RunnerPosition`): judges the overrun of first and
+/// passing between bases (§5.5).
+fn step_position(st: &mut RulesState, p: &RunnerPosition) -> Vec<Event> {
+    let mut ev = Vec::new();
+    if st.status == Status::Final {
+        return ev;
+    }
+    let (attempt_m, margin) = (st.options.overrun_attempt_m, st.options.pass_margin_m / BASE_DIST);
+    let PlayState::Live(lp) = &mut st.play else { return ev };
+    if p.t + 1e-9 < lp.last_t {
+        ev.push(Event::RulesWarning { code: "time_reversed" });
+    }
+    lp.last_t = lp.last_t.max(p.t);
+    // A runner whose home touch is pending is off the base paths until he retouches.
+    let Some(i) = lp.runners.iter().position(|r| r.runner == p.runner && !r.out && r.scored_at.is_none()) else { return ev };
+    let r = &mut lp.runners[i];
+    if r.start_base == 0 && r.at == 1 && r.last_base == 1 && r.on_base.is_none() && r.overrun != Overrun::Ended {
+        if line_dist(p.x, p.y) > attempt_m {
+            // Into fair territory toward second: an attempt; the protection is gone for good.
+            r.overrun = Overrun::Ended;
+        } else if r.overrun == Overrun::NotSeen && p.x > 0.0 && along_line(p.x, p.y) > BASE_DIST {
+            r.overrun = Overrun::Protected;
+        }
+    }
+    let s = path_progress(r.at, p.x, p.y);
+    r.sample = Some((p.t, s));
+    // Compare with every runner whose position is known at this instant: standing on a base,
+    // or sampled at the same time.
+    let mut passer = None;
+    for (j, o) in lp.runners.iter().enumerate() {
+        if j == i || o.out || o.scored_at.is_some() {
+            continue;
+        }
+        let so = match (o.on_base, o.sample) {
+            (Some(b), _) => b as f64,
+            (None, Some((ts, so))) if (ts - p.t).abs() < 1e-9 => so,
+            _ => continue,
+        };
+        let (fol, s_fol, pre, s_pre) = if lp.runners[i].start_base < o.start_base { (i, s, j, so) } else { (j, so, i, s) };
+        if s_fol - s_pre > margin {
+            passer = Some((fol, pre));
+            break;
+        }
+    }
+    if let Some((fol, pre)) = passer {
+        let base = (lp.runners[fol].at + 1).min(4);
+        passing_out(st, p.t, fol, pre, base, &mut ev);
+    }
+    ev
+}
+
+/// Passing judged at a base touch (rules-spec §5.5): runner `i` is exactly on base `b`; every
+/// other live runner is short of the base after the one he touched last and past the one
+/// before it. Returns (passer, passed).
+fn passed_on_touch(lp: &LivePlay, i: usize, b: Base) -> Option<(usize, usize)> {
+    for (j, o) in lp.runners.iter().enumerate() {
+        if j == i || o.out || o.scored_at.is_some() {
+            continue;
+        }
+        if lp.runners[i].start_base < o.start_base {
+            // `o` precedes and is behind base `o.at + 1`, so behind `b` when b > o.at.
+            if b > o.at {
+                return Some((i, j));
+            }
+        } else if o.at > b {
+            // `o` follows and is past base `o.at - 1 >= b`.
+            return Some((j, i));
+        }
+    }
+    None
+}
+
+/// Record a passing out: the following runner `fol` passed the preceding runner `pre`.
+fn passing_out(st: &mut RulesState, t: f64, fol: usize, pre: usize, base: Base, ev: &mut Vec<Event>) {
+    let PlayState::Live(lp) = &st.play else { return };
+    let (f, p) = (lp.runners[fol].runner, lp.runners[pre].runner);
+    ev.push(Event::RunnerPassed { runner: f, passed: p });
+    record_out(st, t, f, base, OutKind::Tag, ev);
+}
+
+fn step_input(st: &mut RulesState, input: &Input) -> Vec<Event> {
     let mut ev = Vec::new();
     if st.status == Status::Final {
         if !matches!(input, Input::PlayEndCheck { .. } | Input::PlayTimeout { .. }) {
@@ -155,7 +276,25 @@ pub fn step(st: &mut RulesState, input: &Input) -> Vec<Event> {
                 record_out(st, t, runner, b, OutKind::Appeal, &mut ev);
                 return ev;
             }
-            if r.scored_at.is_some() || r.on_base.is_some() {
+            if r.scored_at.is_some() {
+                return ev;
+            }
+            if let Some(b) = r.on_base {
+                // Two runners touching one base (rules-spec §5.5; OBR 5.06(a)(2), 5.06(b)(2)):
+                // the preceding runner is entitled to it unless the following runner is forced
+                // there; the other one is out when tagged.
+                let Some(o) = lp.runners.iter().find(|o| o.runner != runner && !o.out && o.scored_at.is_none() && o.on_base == Some(b)) else { return ev };
+                let (pre, fol) = if r.start_base > o.start_base { (r, o) } else { (o, r) };
+                let entitled = if fol.forced_to == Some(b) { fol.runner } else { pre.runner };
+                if entitled != runner {
+                    // A preceding runner still forced onward is retired by force (§6.4).
+                    let (base, kind) = if r.forced_to == Some(b + 1) { (b + 1, OutKind::Force) } else { (b, OutKind::Tag) };
+                    record_out(st, t, runner, base, kind, &mut ev);
+                }
+                return ev;
+            }
+            if r.overrun == Overrun::Protected {
+                // Overran first and is coming straight back (OBR 5.09(b)(4) exception).
                 return ev;
             }
             let base = r.at + 1;
@@ -348,6 +487,8 @@ fn new_live_play(st: &RulesState) -> LivePlay {
         retouched: false,
         out: false,
         scored_at: None,
+        overrun: Overrun::NotSeen,
+        sample: None,
     }];
     let occ = st.bases.map(|b| b.is_some());
     for (i, r) in st.bases.iter().enumerate() {
@@ -367,6 +508,8 @@ fn new_live_play(st: &RulesState) -> LivePlay {
                 retouched: false,
                 out: false,
                 scored_at: None,
+                overrun: Overrun::NotSeen,
+                sample: None,
             });
         }
     }
@@ -572,7 +715,38 @@ fn base_touched(st: &mut RulesState, t: f64, agent: AgentId, base: Base, holding
         r.retouched = true;
         r.at = base;
         r.on_base = Some(base);
+        // A runner going back can leave a following runner ahead of him (OBR 5.09(b)(9)
+        // comment: passing by the lead runner's actions).
+        let i = lp.runners.iter().position(|x| x.runner == agent && !x.out).unwrap();
+        if let Some((fol, pre)) = passed_on_touch(lp, i, base) {
+            let hb = (lp.runners[fol].at + 1).min(4);
+            passing_out(st, t, fol, pre, hb, ev);
+        }
         return;
+    }
+    if base > r.last_base + 1 {
+        ev.push(Event::RulesWarning { code: "base_skipped" });
+        return;
+    }
+    let i = lp.runners.iter().position(|x| x.runner == agent && !x.out).unwrap();
+    if let Some((fol, pre)) = passed_on_touch(lp, i, base) {
+        // Reaching a base a preceding runner has not reached means passing him on the way
+        // (out before the touch counts); a preceding runner falling back behind a following
+        // one retires the following one (OBR 5.09(b)(9) comment).
+        let hb = if fol == i { base } else { (lp.runners[fol].at + 1).min(4) };
+        if fol != i {
+            let r = &mut lp.runners[i];
+            r.at = base;
+            r.on_base = Some(base);
+            r.last_base = r.last_base.max(base);
+        }
+        passing_out(st, t, fol, pre, hb, ev);
+        return;
+    }
+    let r = &mut lp.runners[i];
+    if r.start_base == 0 && base == 1 && r.last_base >= 1 {
+        // The batter-runner back on first: any overrun protection is over.
+        r.overrun = Overrun::Ended;
     }
     if base == r.last_base + 1 {
         r.last_base = base;
@@ -587,12 +761,10 @@ fn base_touched(st: &mut RulesState, t: f64, agent: AgentId, base: Base, holding
             lp.runs_pending.push((t, id));
             try_walk_off(st, ev);
         }
-    } else if base <= r.last_base {
+    } else {
         // Returning to an earlier base (or re-touching): the runner is now there.
         r.at = base;
         r.on_base = Some(base);
-    } else {
-        ev.push(Event::RulesWarning { code: "base_skipped" });
     }
 }
 
@@ -681,7 +853,8 @@ fn third_out(st: &mut RulesState, t: f64, start: Base, kind: OutKind, ev: &mut V
     // Left on base: the runners actually standing on bases now.
     st.bases = [None; 3];
     for r in &lp.runners {
-        if !r.out && r.scored_at.is_none() && (1..=3).contains(&r.at) && r.on_base == Some(r.at) {
+        // An overrunning batter-runner still protected is entitled to first (§5.5).
+        if !r.out && r.scored_at.is_none() && (1..=3).contains(&r.at) && (r.on_base == Some(r.at) || r.overrun == Overrun::Protected) {
             st.bases[(r.at - 1) as usize] = Some(r.runner);
         }
     }

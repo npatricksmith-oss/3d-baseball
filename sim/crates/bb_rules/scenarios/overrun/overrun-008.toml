@@ -1,0 +1,23 @@
+id = "overrun-008"
+title = "Overrunning wide into foul territory, then drifting a step fair but short of the attempt line: still protected"
+rules = ["OBR 5.09(b)(4) exception", "rules-spec 5.5"]
+milestone = "M4"
+tags = ["overrun", "tag", "edge"]
+initial = { inning = 1, outs = 0, batter = "A.1" }
+step = [
+  { fact = "PitchDelivered", t = 0.0 },
+  { fact = "BatContact", t = 0.42 },
+  { fact = "BallTouched", t = 0.8, what = "Ground", pos = [-8.0, 30.0] },
+  { fact = "GloveSecured", t = 1.3, fielder = "H.SS", pos = [-8.0, 30.0] },
+  { fact = "BaseTouched", t = 4.2, agent = "A.1", base = 1 },
+  { fact = "BaseLeft", t = 4.3, agent = "A.1", base = 1 },
+  # 1.4 m into foul territory, past the bag.
+  { fact = "RunnerPosition", t = 4.5, runner = "A.1", pos = [23.0, 21.0] },
+  # 1.34 m into fair territory: inside the 1.5 m attempt line.
+  { fact = "RunnerPosition", t = 5.0, runner = "A.1", pos = [20.4, 22.3] },
+  { fact = "GloveSecured", t = 5.1, fielder = "H.1B", pos = [20.0, 21.5] },
+  { fact = "TagContact", t = 5.2, fielder = "H.1B", runner = "A.1", holding_ball = true },
+  { fact = "BaseTouched", t = 5.8, agent = "A.1", base = 1 },
+  { fact = "PlayEndCheck", t = 7.0 },
+]
+expect = { outs = 0, bases = { first = "A.1" }, play = "Dead" }

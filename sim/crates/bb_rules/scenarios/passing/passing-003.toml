@@ -1,0 +1,24 @@
+id = "passing-003"
+title = "Two out: the runner from third has scored before the batter-runner passes the runner from first for the third out: a time play, the run counts"
+rules = ["OBR 5.09(b)(9)", "OBR 5.08(a)", "rules-spec 6.4"]
+milestone = "M4"
+tags = ["passing", "runs", "time-play"]
+initial = { inning = 3, outs = 2, batter = "A.6", bases = { first = "A.5", third = "A.4" } }
+step = [
+  { fact = "PitchDelivered", t = 0.0 },
+  { fact = "BatContact", t = 0.42 },
+  { fact = "BaseLeft", t = 0.6, agent = "A.4", base = 3 },
+  { fact = "BaseLeft", t = 0.6, agent = "A.5", base = 1 },
+  { fact = "BallTouched", t = 2.0, what = "Ground", pos = [20.0, 70.0] },
+  { fact = "BaseTouched", t = 3.2, agent = "A.4", base = 4 },
+  { fact = "BaseTouched", t = 4.2, agent = "A.6", base = 1 },
+  { fact = "BaseLeft", t = 4.3, agent = "A.6", base = 1 },
+  { fact = "RunnerPosition", t = 5.0, runner = "A.5", pos = [12.026, 26.768] },
+  { fact = "RunnerPosition", t = 5.0, runner = "A.6", pos = [10.669, 28.126], expect_events = [
+    { event = "RunnerPassed", runner = "A.6", passed = "A.5" },
+    { event = "RunnerOut", runner = "A.6", kind = "Tag" },
+    { event = "RunScored", runner = "A.4" },
+    { event = "HalfInningEnded", runs = 1 },
+  ] },
+]
+expect = { score = [1, 0], half = "bottom", inning = 3, outs = 0 }

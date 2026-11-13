@@ -1,0 +1,20 @@
+id = "overrun-004"
+title = "The overrun exemption is for first base only: a runner who overslides second is tagged out"
+rules = ["OBR 5.09(b)(4)", "rules-spec 5.5"]
+milestone = "M4"
+tags = ["overrun", "tag"]
+initial = { inning = 3, outs = 0, batter = "A.6", bases = { first = "A.5" } }
+step = [
+  { fact = "PitchDelivered", t = 0.0 },
+  { fact = "BatContact", t = 0.42 },
+  { fact = "BaseLeft", t = 0.6, agent = "A.5", base = 1 },
+  { fact = "BallTouched", t = 0.9, what = "Ground", pos = [-8.0, 30.0] },
+  { fact = "GloveSecured", t = 1.4, fielder = "H.SS", pos = [-8.0, 30.0] },
+  { fact = "BaseTouched", t = 3.0, agent = "A.5", base = 2 },
+  { fact = "BaseLeft", t = 3.1, agent = "A.5", base = 2 },
+  { fact = "RunnerPosition", t = 3.2, runner = "A.5", pos = [-0.8, 39.8] },
+  { fact = "TagContact", t = 3.3, fielder = "H.2B", runner = "A.5", holding_ball = true, expect_events = [{ event = "RunnerOut", runner = "A.5", base = 3, kind = "Tag" }] },
+  { fact = "BaseTouched", t = 4.2, agent = "A.6", base = 1 },
+  { fact = "PlayEndCheck", t = 6.0 },
+]
+expect = { outs = 1, bases = { first = "A.6" }, play = "Dead" }

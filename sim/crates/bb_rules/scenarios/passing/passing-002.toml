@@ -1,0 +1,29 @@
+id = "passing-002"
+title = "Batter-runner runs past the runner from first between the bases: out the moment he is past (level is not past)"
+rules = ["OBR 5.09(b)(9)", "rules-spec 5.5"]
+milestone = "M4"
+tags = ["passing", "positions"]
+initial = { inning = 2, outs = 0, batter = "A.6", bases = { first = "A.4" } }
+step = [
+  { fact = "PitchDelivered", t = 0.0 },
+  { fact = "BatContact", t = 0.42 },
+  { fact = "BaseLeft", t = 0.6, agent = "A.4", base = 1 },
+  { fact = "BallTouched", t = 2.0, what = "Ground", pos = [20.0, 70.0] },
+  { fact = "BaseTouched", t = 4.2, agent = "A.6", base = 1 },
+  { fact = "BaseLeft", t = 4.3, agent = "A.6", base = 1 },
+  # 30% and 20% of the way from first to second: the batter-runner is behind.
+  { fact = "RunnerPosition", t = 5.0, runner = "A.4", pos = [13.578, 25.217] },
+  { fact = "RunnerPosition", t = 5.0, runner = "A.6", pos = [15.518, 23.277] },
+  # Level, 0.27 m apart: not passed.
+  { fact = "RunnerPosition", t = 5.5, runner = "A.4", pos = [12.026, 26.768] },
+  { fact = "RunnerPosition", t = 5.5, runner = "A.6", pos = [11.832, 26.962] },
+  # Two metres past him.
+  { fact = "RunnerPosition", t = 6.0, runner = "A.4", pos = [12.026, 26.768] },
+  { fact = "RunnerPosition", t = 6.0, runner = "A.6", pos = [10.669, 28.126], expect_events = [
+    { event = "RunnerPassed", runner = "A.6", passed = "A.4" },
+    { event = "RunnerOut", runner = "A.6", base = 2, kind = "Tag" },
+  ] },
+  { fact = "BaseTouched", t = 7.5, agent = "A.4", base = 2 },
+  { fact = "PlayEndCheck", t = 9.0 },
+]
+expect = { outs = 1, bases = { second = "A.4" }, play = "Dead" }

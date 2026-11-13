@@ -1,0 +1,19 @@
+id = "overrun-006"
+title = "Batter-runner rounds first toward second on a single and is tagged off the bag: out (no overrun, he turned for second)"
+rules = ["OBR 5.09(b)(4)", "rules-spec 5.5"]
+milestone = "M4"
+tags = ["overrun", "tag"]
+initial = { inning = 6, outs = 0, batter = "A.4" }
+step = [
+  { fact = "PitchDelivered", t = 0.0 },
+  { fact = "BatContact", t = 0.42 },
+  { fact = "BallTouched", t = 1.6, what = "Ground", pos = [20.0, 55.0] },
+  { fact = "BaseTouched", t = 4.2, agent = "A.4", base = 1 },
+  { fact = "BaseLeft", t = 4.3, agent = "A.4", base = 1 },
+  { fact = "RunnerPosition", t = 4.5, runner = "A.4", pos = [18.0, 22.5] },
+  { fact = "GloveSecured", t = 4.6, fielder = "H.RF", pos = [22.0, 52.0] },
+  { fact = "RunnerPosition", t = 5.0, runner = "A.4", pos = [16.0, 24.0] },
+  { fact = "TagContact", t = 6.5, fielder = "H.1B", runner = "A.4", holding_ball = true, expect_events = [{ event = "RunnerOut", runner = "A.4", base = 2, kind = "Tag" }] },
+  { fact = "PlayEndCheck", t = 8.0 },
+]
+expect = { outs = 1, bases = {}, play = "Dead" }

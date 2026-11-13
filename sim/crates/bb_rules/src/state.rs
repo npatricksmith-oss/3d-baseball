@@ -49,6 +49,23 @@ pub struct RunnerState {
     pub retouched: bool,
     pub out: bool,
     pub scored_at: Option<f64>,
+    /// The batter-runner's overrun of first base (rules-spec §5.5; OBR 5.09(b)(4)).
+    pub overrun: Overrun,
+    /// Latest `RunnerPosition` sample: (time, path progress in bases, rules-spec §5.5).
+    pub sample: Option<(f64, f64)>,
+}
+
+/// The batter-runner's protection after overrunning or oversliding first base (rules-spec
+/// §5.5, OBR 5.09(b)(4) exception).
+#[derive(Clone, Copy, Debug, Default, PartialEq, Eq)]
+pub enum Overrun {
+    /// No overrun seen (yet).
+    #[default]
+    NotSeen,
+    /// Past first base down the line after touching it, not yet back: not liable to a tag.
+    Protected,
+    /// Back on first, or made an attempt toward second: an ordinary runner from now on.
+    Ended,
 }
 
 #[derive(Clone, Copy, Debug, PartialEq)]
@@ -144,6 +161,10 @@ pub enum Event {
     PlateAppearanceEnded { batter: AgentId, result: PaResult },
     HalfInningEnded { runs: u8, left_on_base: u8 },
     GameEnded { away: u16, home: u16, innings: u8, walk_off: bool },
+    /// `runner` passed the preceding runner `passed` and is out (OBR 5.09(b)(9)); the
+    /// `RunnerOut` that follows carries `OutKind::Tag`, the same time play for run counting
+    /// (rules-spec §5.5, §6.4).
+    RunnerPassed { runner: AgentId, passed: AgentId },
     RulesWarning { code: &'static str },
 }
 
@@ -185,14 +206,50 @@ pub enum Input {
     PlayEndCheck { t: f64 },
 }
 
+/// A sampled runner position (rules-spec §2 `RunnerPosition`, about 30 Hz while a play is
+/// live): the runner's ground point in the sim frame, m. It is a stream rather than a
+/// discrete fact, so it is its own type; `step` takes it like any `Input`.
+#[derive(Clone, Copy, Debug, PartialEq)]
+pub struct RunnerPosition {
+    pub t: f64,
+    pub runner: AgentId,
+    pub x: f64,
+    pub y: f64,
+}
+
+/// Anything `step` accepts: a discrete fact or command (`Input`) or a position sample.
+#[derive(Clone, Copy, Debug, PartialEq)]
+pub enum Fact<'a> {
+    Input(&'a Input),
+    Position(&'a RunnerPosition),
+}
+
+impl<'a> From<&'a Input> for Fact<'a> {
+    fn from(i: &'a Input) -> Self {
+        Fact::Input(i)
+    }
+}
+
+impl<'a> From<&'a RunnerPosition> for Fact<'a> {
+    fn from(p: &'a RunnerPosition) -> Self {
+        Fact::Position(p)
+    }
+}
+
 #[derive(Clone, Copy, Debug, PartialEq)]
 pub struct RulesOptions {
     pub innings: u8,
+    /// An overrunning batter-runner more than this far into fair territory (m, from the
+    /// first-base line) has made an attempt toward second (rules-spec §5.5) [E].
+    pub overrun_attempt_m: f64,
+    /// A following runner whose path position exceeds a preceding runner's by more than this
+    /// (m) has passed him (rules-spec §5.5) [E].
+    pub pass_margin_m: f64,
 }
 
 impl Default for RulesOptions {
     fn default() -> Self {
-        Self { innings: 9 }
+        Self { innings: 9, overrun_attempt_m: 1.5, pass_margin_m: 0.5 }
     }
 }
 
