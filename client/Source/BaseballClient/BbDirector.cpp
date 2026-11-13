@@ -891,9 +891,9 @@ void ABbDirector::Tick(float DeltaSeconds)
 		if (ABbHUD* Hud = GetWorld()->GetFirstPlayerController() ? Cast<ABbHUD>(GetWorld()->GetFirstPlayerController()->GetHUD()) : nullptr)
 		{
 			const BbPlayInfo& In = Current.Info;
-			// The call appears when a viewer would know it: as the pitch arrives if it was not
-			// put in play, at the end of the play if it was.
-			const bool bKnown = In.exit_velocity_mps > 0.f ? PlayTime >= In.duration_s : PlayTime >= 0.55f;
+			// The call appears when a viewer would know it: at the umpire's call if the pitch
+			// was not hit, at the end of the play if it was (the sim says when: call_s).
+			const bool bKnown = PlayTime >= In.call_s;
 			Hud->Call = bKnown ? FString(UTF8_TO_TCHAR(In.summary)) : FString();
 			static const TCHAR* CamNames[3] = { TEXT("broadcast"), TEXT("behind home"), TEXT("overhead") };
 			Hud->Footer = FString::Printf(TEXT("Space: %s    - / =: speed %.2gx    C: camera (%s)    Esc or Q: quit"), bPaused ? TEXT("paused") : TEXT("pause"), Speed, CamNames[CameraMode]);
@@ -903,7 +903,9 @@ void ABbDirector::Tick(float DeltaSeconds)
 				Hud->Scoreboard = FString::Printf(TEXT("AWAY %d   HOME %d    %s %d    %d out    %d-%d"), In.away_runs, In.home_runs, In.top ? TEXT("Top") : TEXT("Bot"), In.inning, In.outs, In.balls, In.strikes);
 			}
 			const float Mph = In.release_speed_mps * 2.23694f;
-			Hud->PitchLine = In.exit_velocity_mps > 0.f
+			// Contact measurements only once the bat has met the ball: before that they would
+			// say he is going to swing and hit it.
+			Hud->PitchLine = In.exit_velocity_mps > 0.f && In.contact_s >= 0.f && PlayTime >= In.contact_s
 				? FString::Printf(TEXT("Pitch %.0f mph   Exit %.0f mph at %.0f deg"), Mph, In.exit_velocity_mps * 2.23694f, FMath::RadiansToDegrees(In.launch_angle_rad))
 				: FString::Printf(TEXT("Pitch %.0f mph"), Mph);
 		}

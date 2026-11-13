@@ -143,13 +143,18 @@ pub fn encode(step: &PitchStep, st: &RulesState) -> Vec<u8> {
     // On ball four or a hit batter nobody moves until the umpire's call: it comes when the
     // catcher has the ball (the pitch's end), reaches the players after the signal latency
     // (rules-spec §1.3), and they take a moment to react (drop the bat, look, go).
+    // (A home run or a ball out of play is already over by `t_end`: they go 0.4 s after.)
     let t_call = step.pitch_flight.last().t + UMPIRE_SIGNAL_S;
-    let t_jog = (t_end + 0.4).max(t_call + AWARD_REACTION_S);
+    let t_after = t_end + 0.4;
     for e in &step.rules_events {
         let bb_rules::Event::RunnerAdvanced { runner, from, to, cause } = e else { continue };
         if *cause == bb_rules::AdvanceCause::OnPlay || to <= from {
             continue;
         }
+        let t_jog = match cause {
+            bb_rules::AdvanceCause::Walk | bb_rules::AdvanceCause::HitByPitch => t_after.max(t_call + AWARD_REACTION_S),
+            _ => t_after,
+        };
         let Some((_, track)) = tracks.iter_mut().find(|(id, _)| id == runner) else { continue };
         let (s_lo, s_hi) = (*from as f64 * BASE_L, *to as f64 * BASE_L);
         // Where he already is on the base path (a batter may be past first when the ball
@@ -191,7 +196,11 @@ pub fn encode(step: &PitchStep, st: &RulesState) -> Vec<u8> {
         let knots: Vec<tl::RootKnot> = (0..s.len())
             .map(|i| {
                 let (a, b) = (i.saturating_sub(1), (i + 1).min(s.len() - 1));
-                let v = if b > a { (s[b].1 - s[a].1) / (s[b].0 - s[a].0).max(1e-6) } else { Vec3::ZERO };
+                // A knot that begins or ends a hold (the same spot as a neighbour) is at rest:
+                // its velocity and facing must not look ahead to where he goes next (Codex
+                // batter-presentation review #3).
+                let holds = (a < i && s[a].1 == s[i].1) || (b > i && s[b].1 == s[i].1);
+                let v = if b > a && !holds { (s[b].1 - s[a].1) / (s[b].0 - s[a].0).max(1e-6) } else { Vec3::ZERO };
                 let yaw = if v.norm() > 0.5 { bb_math::m::atan2(v.x, v.y) } else { 0.0 };
                 tl::RootKnot::new(s[i].0 as f32, &v3f(s[i].1), &v3f(v), yaw as f32)
             })
@@ -203,8 +212,8 @@ pub fn encode(step: &PitchStep, st: &RulesState) -> Vec<u8> {
 
     // Bat: every pitch starts from the same stance, the bat upright at the batter's back
     // shoulder, so nothing before the swing tells a viewer whether he will swing. A swing
-    // leaves the stance only in the motor latency before it starts (he has committed by
-    // then: agent-models §3.6), blending into the swing's own start pose, then follows the
+    // leaves the stance at most `LOAD_S` before it starts and never before his decision
+    // (agent-models §3.6), blending into the swing's own start pose, then follows the
     // executed swing every 5 ms through the follow-through.
     let quat_from_x = |a: Vec3| {
         // Shortest rotation taking +X to the unit vector `a` (bat axis = rot · +X).
@@ -218,8 +227,15 @@ pub fn encode(step: &PitchStep, st: &RulesState) -> Vec<u8> {
     if let Some(sw) = &rec.swing {
         use bb_physics::contact::BatPose;
         let (t0, t1) = (sw.t_start(), sw.t_c + 0.12);
-        if let Some((knob_s, axis_s)) = stance {
-            let t_load = (t0 - LOAD_S).max(1e-3);
+        if t0 <= 0.0 {
+            // A swing under way at the release has no stance to start from.
+            bat_samples.clear();
+        } else if let Some((knob_s, axis_s)) = stance {
+            // Never before his decision (Codex batter-presentation review #1): the swing's
+            // start can come less than the latency after it, through timing noise and the
+            // in-flight aim adjustment, and then the load is shorter. The first load sample
+            // is the stance itself.
+            let t_load = (t0 - LOAD_S).max(rec.t_decide);
             let start = sw.at(t0);
             let mut t = t_load;
             while t < t0 {

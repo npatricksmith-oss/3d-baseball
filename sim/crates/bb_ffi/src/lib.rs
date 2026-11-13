@@ -136,6 +136,13 @@ pub struct BbPlayInfo {
     pub release_speed_mps: f32,
     pub exit_velocity_mps: f32,
     pub launch_angle_rad: f32,
+    /// Play time of contact, s, or −1 if the bat never touched the ball. Show contact
+    /// measurements (exit velocity, launch angle) only from then on.
+    pub contact_s: f32,
+    /// Play time from which the result (`summary`, count, bases, score) may be shown, s: on
+    /// a pitch not hit, the umpire's call (the catcher has the ball, plus the signal latency,
+    /// rules-spec §1.3); on contact, the end of the play.
+    pub call_s: f32,
     /// The play in words, NUL-terminated UTF-8 (ASCII in practice), truncated to fit.
     pub summary: [u8; BB_SUMMARY_LEN],
 }
@@ -188,6 +195,11 @@ pub unsafe extern "C" fn bb_timeline_info(blob: *const u8, len: usize, out: *mut
         info.exit_velocity_mps = t.exit_velocity_mps();
         info.launch_angle_rad = t.launch_angle_rad();
     }
+    let contact = tl.markers().and_then(|m| m.iter().find(|m| m.kind() == MarkerKind::Contact)).map(|m| m.t());
+    info.contact_s = contact.unwrap_or(-1.0);
+    // The pitch ends in the catcher's glove, on the ground, or at contact.
+    let pitch_end = tl.ball().and_then(|b| b.segments()).and_then(|s| s.iter().next()).and_then(|s| s.knots()).and_then(|k| k.iter().last()).map(|k| k.t()).unwrap_or(0.0);
+    info.call_s = if contact.is_some() { info.duration_s } else { pitch_end + bb_game::timeline::UMPIRE_SIGNAL_S as f32 };
     if let Some(s) = tl.summary() {
         let n = s.len().min(BB_SUMMARY_LEN - 1);
         info.summary[..n].copy_from_slice(&s.as_bytes()[..n]);
@@ -329,50 +341,51 @@ mod tests {
         assert!(n > 150);
     }
 
-    // What a viewer sees before the batter has committed must not depend on what he will
-    // decide: until the motor latency before his swing starts (or through the whole pitch on
-    // a take), the bat is upright in his stance, near enough vertical that its horizontal
-    // reach stays inside the 45 cm at which the client turns his body after the bat. And on
-    // ball four nobody on offense moves until the umpire's call has reached them.
+    // What a viewer sees before the batter has decided must not depend on what he will
+    // decide. Through his decision (the sim's commit tick, read from the game, not from the
+    // timeline), the bat stays in the stance it had at the release, upright enough that its
+    // horizontal reach stays inside the 45 cm at which the client turns his body after the
+    // bat. The result is not announced before the umpire's call (the catcher has the ball,
+    // plus the 0.2 s signal latency), nor contact measurements before contact. And on ball
+    // four nobody on offense moves or turns until the call has reached them.
     #[test]
     fn nothing_is_given_away_before_the_decision_or_the_call() {
-        let g = bb_game_create(11);
-        let (mut swings, mut takes, mut walks) = (0, 0, 0);
-        loop {
-            let (mut p, mut len) = (std::ptr::null_mut(), 0usize);
-            if unsafe { bb_game_advance(g, &mut p, &mut len) } != 1 {
-                break;
-            }
+        let mut game = Game::new(11, true);
+        let (mut swings, mut takes, mut walks, mut loads) = (0, 0, 0, 0);
+        while let Some(step) = game.step_pitch() {
+            let bytes = bb_game::timeline::encode(&step, &game.st);
+            let (p, len) = (bytes.as_ptr(), bytes.len());
+            let rec = &step.record;
             let mut info = BbPlayInfo::default();
-            unsafe { bb_timeline_info(p, len, &mut info) };
+            assert_eq!(unsafe { bb_timeline_info(p, len, &mut info) }, 1);
             let text = std::ffi::CStr::from_bytes_until_nul(&info.summary).unwrap().to_str().unwrap().to_string();
-            let bytes = unsafe { std::slice::from_raw_parts(p, len) };
-            let tl = flatbuffers::root::<bb_schema::tl::PlayTimeline>(bytes).unwrap();
-            let swing_at = tl.markers().unwrap().iter().find(|m| m.kind() == MarkerKind::SwingStart).map(|m| m.t());
-            let pitch = tl.ball().unwrap().segments().unwrap().get(0).knots().unwrap();
-            let t_pitch_end = pitch.get(pitch.len() - 1).t();
-            // Up to the latency (50 ms) before the swing starts; on a take, through the pitch.
-            let t_free = swing_at.map(|t| t - 0.05).unwrap_or(t_pitch_end);
+            let t_pitch_end = step.pitch_flight.last().t as f32;
+            match rec.contact_state {
+                Some((tc, _)) => assert!(info.contact_s >= tc as f32 - 1e-6 && info.call_s >= tc as f32, "{text}: contact at {tc}, shown from {} / {}", info.contact_s, info.call_s),
+                None => assert!(info.contact_s < 0.0 && info.call_s >= t_pitch_end + 0.2 - 1e-5, "{text}: call shown at {} s, the umpire's call reaches them at {}", info.call_s, t_pitch_end + 0.2),
+            }
             let mut f0 = BbFrame::default();
             unsafe { bb_timeline_sample(p, len, 0.0, &mut f0) };
+            let t_decide = rec.t_decide as f32;
             let mut t = 0.0;
-            while t < t_free - 1e-3 {
+            while t <= t_decide {
                 let mut f = BbFrame::default();
                 unsafe { bb_timeline_sample(p, len, t, &mut f) };
                 assert_eq!(f.has_bat, 1);
                 let a: [f32; 3] = core::array::from_fn(|j| f.bat_tip[j] - f.bat_knob[j]);
                 assert!(a[0].hypot(a[1]) < 0.45 && a[2] > 0.7, "play {} ({text}) at {t:.3} s: bat out of the stance, axis {a:?}", info.play_index);
                 assert!(f.bat_knob[2] > 1.0, "play {} at {t:.3} s: knob at {:?}", info.play_index, f.bat_knob);
-                assert_eq!((f.bat_knob, f.bat_tip), (f0.bat_knob, f0.bat_tip), "play {} at {t:.3} s: the stance moved", info.play_index);
-                t += 0.005;
+                assert_eq!((f.bat_knob, f.bat_tip), (f0.bat_knob, f0.bat_tip), "play {} ({text}) at {t:.3} s, decision at {t_decide:.3} s: the stance moved", info.play_index);
+                t += 0.0025;
             }
-            if swing_at.is_some() {
+            if let Some(sw) = &rec.swing {
                 swings += 1;
+                // The swing starts less than the 50 ms latency after the decision: a shorter load.
+                loads += (sw.t_start() - rec.t_decide < 0.05) as u32;
             } else {
                 takes += 1;
             }
             if text.starts_with("Walk") {
-                // The call: the catcher has the ball, plus the 0.2 s signal latency.
                 let t_call = t_pitch_end + 0.2;
                 let mut t = 0.0;
                 while t <= t_call {
@@ -380,18 +393,18 @@ mod tests {
                     unsafe { bb_timeline_sample(p, len, t, &mut f) };
                     for i in 0..f.n_actors as usize {
                         if f.actors[i].agent & 0x80 == 0 {
-                            let d = (f.actors[i].pos[0] - f0.actors[i].pos[0]).hypot(f.actors[i].pos[1] - f0.actors[i].pos[1]);
-                            assert!(d < 0.01, "{text}: agent {:#x} has moved {d:.2} m at {t:.2} s, before the call at {t_call:.2} s", f.actors[i].agent);
+                            let (a, b) = (f.actors[i], f0.actors[i]);
+                            let d = (a.pos[0] - b.pos[0]).hypot(a.pos[1] - b.pos[1]);
+                            assert!(d < 0.01 && a.yaw == b.yaw, "{text}: agent {:#x} has moved {d:.2} m or turned to {} at {t:.2} s, before the call at {t_call:.2} s", a.agent, a.yaw);
                         }
                     }
                     t += 0.02;
                 }
                 walks += 1;
             }
-            unsafe { bb_blob_free(p, len) };
         }
-        assert!(swings > 50 && takes > 50 && walks >= 2, "{swings} swings, {takes} takes, {walks} walks");
-        unsafe { bb_game_free(g) };
+        // Enough of each, including swings that start inside the latency after the decision.
+        assert!(swings > 50 && takes > 50 && walks >= 2 && loads > 5, "{swings} swings ({loads} short loads), {takes} takes, {walks} walks");
     }
 
     // A client samples timelines without parsing them. Everything checked here is a fact

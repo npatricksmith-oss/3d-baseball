@@ -32,6 +32,8 @@ typedef struct {
   uint8_t inning, top, outs, balls, strikes, away_runs, home_runs;
   uint8_t bases; /* runners on after the play: bit 0 first, bit 1 second, bit 2 third */
   float release_speed_mps, exit_velocity_mps, launch_angle_rad;
+  float contact_s; /* play time of contact, or -1: show contact measurements only from then */
+  float call_s;    /* play time from which the result may be shown (the umpire's call; on contact, the play's end) */
   char summary[BB_SUMMARY_LEN]; /* the play in words, NUL-terminated */
 } BbPlayInfo;
 /* Agent ids: high byte = team (0 away, 1 home); bit 0x80 = fielder, low 7 bits = position 1-9. */
