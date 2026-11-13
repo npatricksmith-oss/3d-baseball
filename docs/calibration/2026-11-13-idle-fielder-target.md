@@ -35,20 +35,35 @@ when it landed:
 | before | 25 | 3 |
 | after | 32 | 26 |
 
-On 25 of the 26 pop-ups that drop after the change, the nearest fielder at landing is the
-outfielder who had the ball: right or center fielder, median 4.7 m away, usually standing on
-the spot he ran to. The landing points cluster 55–65 m out, in short right and center. These
-are shallow pop-ups an outfielder called (tier 2, his own read giving at least
-`CALL_SLACK_S` to spare) and then misjudged in depth. The infielders are 20–35 m away when
-the ball lands.
+Corrected after the Codex idle-fielder review (finding #3, P3; numbers re-measured with the
+review's landing snapshot at `fix/idle-fielder-review`, seeds 0–127, the 26 uncaught fair
+pop-ups landing within 75 m, each snapshot at the first tick at or after the landing time):
+
+- On 25 of the 26 the nearest fielder at landing is an outfielder (right or center fielder,
+  two left fielders), median 4.93 m from the landing point. The landing points are 51–71 m
+  from home, mostly in short right and center.
+- These fielders are **not standing on a spot**: 24 of the 26 nearest fielders are moving
+  faster than 4 m/s (median 8.14 m/s), and none slower than 0.5 m/s. The pattern is an
+  outfielder who called the ball (tier 2, his own read giving at least `CALL_SLACK_S` to
+  spare), misread its depth early (outfield `read_sigma0` is 3.0 m against 0.3 m in the
+  infield, stretched in depth), corrected his route all the way in, and was still running
+  when it came down. Seed 9 play 197 is an example: at 0.65 s after contact the left
+  fielder's read puts the landing near (−29, 92) m (review trace); it lands at (−8, 59) m and
+  he is 11.8 m away, still running at 8.2 m/s. A late route after an early depth error is a perception question, not a
+  stationary fielder refusing to adjust.
 
 Before the change, the infielders who heard that call were left `Idle` but still aimed at
-their own intercepts, so they kept running out. When the outfielder misread the ball, one of
-them was under it and caught it, because a capture does not check who is supposed to catch
-the ball. That accidental safety net is what held pop-up hits at .005. One example of the
-other pattern: seed 6 play 84, where the second baseman ran out, was called off by the right
-fielder at a re-call, and now pulls up 1.3 m from where the ball lands. The right fielder
-ends 8 m short.
+their own intercepts, so they kept running out. Replaying each of the 26 from the same
+contact input and rules state with the old target behavior, 23 are caught. Most of those are
+not catches by an idle man: at the first successful glove contact **19 of the 23 catchers
+have regained `Chase`** (their drift put them close enough to win a later re-call) and only
+**4 are still `Idle`** (a capture does not check who is supposed to catch the ball). Seed 35
+play 74 is a direct idle rescue: with the old behavior the idle second baseman pockets the
+ball 0.81 m from him, 1.2 m up, 5.48 s after contact and 0.06 s before it would land; now he pulls up, and the right fielder, who called it, is 3.85 m away
+at landing, running at 8.1 m/s. (The earlier example here, seed 6 play 84, was wrong: the
+second baseman is `Chase` throughout, never called off; he is 1.30 m away and moving
+1.09 m/s at landing after a dive that rims the ball, and the old behavior does not catch it
+either.)
 
 ## Assessment
 
