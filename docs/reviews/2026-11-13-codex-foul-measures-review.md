@@ -104,4 +104,13 @@ All builds used `sim/target`; scratch source and logs were under `/tmp`. No sour
 
 ## Resolution
 
-Open.
+All findings fixed (2026-11-13). Note and diagnostics updated; no simulation code changed.
+
+- **P1 (steep contact, all vs well-timed):** fixed. Note §1 now says well-timed steep contact passes (63.7% against a bin-weighted MLB 62.9%), while over all contact 40–60° still falls short (60.5% against 72.4% above 40°). Low-angle contact is the largest deficit, not the whole gap. §5 and TASKS are corrected to match.
+- **P1 (clamped tip station):** fixed, and it changed the diagnosis. `foul_diag` now judges each whiff against the bat's axis extended past the tip. It reports swung under, swung over, longer barrel would hit, inside the knob, and window edge, with the median clearance and axial excess. At AD 12–30°, 91% of whiffs are the bat passing over the ball (median clearance 11 cm); 6% would hit with a longer barrel, in line with the review's 32/394 probe. The note no longer claims the barrel runs out of reach. It says timing error becomes height error, and leaves the cause (plane alignment, swing shape) as a hypothesis to test with a fixed-pitch timing sweep.
+- **P1 (−30° overcorrection):** fixed. The note's counterfactual table adds the well-timed steep bins (67/83/100% against MLB 46/69/81) and the early foul/whiff trade-off (AD 12–20°: foul 8 → 17%, whiff 43 → 52%). "None move" is replaced by the actual changes. −30° is called a candidate to remeasure, not a validated setting.
+- **P1 (depth-slope explanation):** fixed. The speed explanation is removed; the regression is reported as a pooled observation, and why it is low is left open.
+- **P2 (fair-cohort spray definition):** fixed. Fair pulled and opposite are now split by where the ball first comes down, which stands in for Statcast's hit coordinates. AD SD is 6.9 / 6.8°.
+- **P3 (cage grid −20.1° vs −20°):** fixed. The cage headers print one decimal, and the note gives 32.8 → 34.4 → 37.3% for exactly −20/−30/−35° (33.0% for the current −20.1°).
+- **P3 (MLB aggregate 51 vs 52.5):** fixed. `foul_in_games` prints 52.5% with the convention explained. Play timeouts, which force a fair decision, are now counted with the undecided contacts (none in 128 games).
+- **P3 ("merged into main"):** fixed by merging into local main at the end of the session (not pushed).

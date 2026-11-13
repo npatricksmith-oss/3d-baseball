@@ -4,13 +4,13 @@ TASKS "Next" item 2 (O1/R13), done as the owner directed: measure first, change 
 
 Tools:
 - `cargo run --release -p bb_game --example foul_diag -- 3000 [timing ms] [bat-control cm] [K_perception] [bat angle °]` prints R13's tables F1–F6 from the sim's swings, with the MLB value beside each. It uses an average RHP against an average RHB, seed 1, `Knobs::calibrated_m3()`. The last argument is the counterfactual of §4; `-` keeps an earlier argument's default.
-- `cargo run --release -p bb_game --example foul_in_games -- 128` gives the foul share by launch angle in full games, where the rules engine judges each ball from the live play.
+- `cargo run --release -p bb_game --example foul_in_games -- 128` gives the foul share by launch angle in full games, where the rules engine judges each ball from the live play. Caught fouls count as fouls, so its MLB total is 52.5% (R13 F1). Play timeouts, which force a fair decision, are left out.
 - `sim-cli cage-map --type FF` gains a "Bat-angle counterfactual" section.
 - `SwingTemplate::bat_angle` / `with_bat_angle` (bb_agents) give the counterfactual geometry: the pivot swung about an aim point at the same distance.
 
 Definitions follow R13: attack direction (AD) is pull-positive; for a whiff the intercept is the instant of closest approach; check swings are left out (4,357 competitive swings in 3,000 PAs).
 
-## 1. The main check passes: steep contact is foul about as often as in MLB
+## 1. Well-timed steep contact passes; the larger deficit is low-angle contact
 
 R13's leading hypothesis was that the sim's well-timed steep contact stays fair. It does not. P(foul | contact):
 
@@ -26,9 +26,11 @@ R13's leading hypothesis was that the sim's well-timed steep contact stays fair.
 | 60 to 70 | 75 | 78 | 86 | 81 |
 | 70 and up | 86 | 87 | 90 | 88 |
 
-Above 40° the sim matches MLB, for well-timed contact as well. **The missing fouls are low:** grounders, chopped balls and liners. In MLB a fifth of fouls leave below −10°; in the sim it is 8%. Sim fouls are steeper than MLB's: LA p50 46° against 30°, and 41% of them leave above 50° against 26%.
+- **Well-timed steep contact matches MLB.** Above 40° with |AD| < 6°, 63.7% of contact goes foul against a bin-weighted MLB 62.9% (Codex review probe).
+- **Over all contact, 40–60° still falls short:** 46% against 66% at 40–50°, and 65% against 74% at 50–60°. Above 40°, 60.5% of contact goes foul against a bin-weighted MLB 72.4%. The shortfall there comes from mistimed contact.
+- **The largest deficit is low contact:** grounders, chopped balls and liners. Below 25° the sim fouls 3–11% against MLB's 22–57%. In MLB a fifth of fouls leave below −10°; in the sim it is 8%. Sim fouls are steeper than MLB's: LA p50 46° against 30°, and 41% of them leave above 50° against 26%.
 
-Full games give the same answer (`foul_in_games`, 128 games, 9,333 contacts): 22.9% foul under the rules engine's §5.2 judgment, against 22.6% from `pa.rs`'s call where the ball first comes down. By bin the two agree within 3.4 points. The low-angle deficit is in the contact itself, not in how fair or foul is called.
+Full games give the same answer (`foul_in_games`, 128 games, 9,333 contacts, no play timeouts): 22.9% foul under the rules engine's §5.2 judgment, against 22.6% from `pa.rs`'s call where the ball first comes down. By bin the two agree within 3.4 points. The deficits are in the contact itself, not in how fair or foul is called.
 
 ## 2. Where in the timing window the fouls are missing
 
@@ -49,7 +51,18 @@ Three things differ from MLB:
 - **Early contact almost never goes foul, and early swings mostly miss.** At AD 12–20° the sim fouls 8% of contact against 54%. Early fouls should be hooked or topped grounders (R13 F4, LA p50 0°). The sim has the right kind (its 75 early fouls have LA p50 7°, and 41% are below −10°) but few of them. Only 34% of its fouls have a pull-side AD (MLB 45%).
 - **Well-timed contact fouls half as often** (|AD| < 6°: 20% against 40%), and the shortfall is the low-angle bins of §1.
 
-**Why early swings miss: the end of the bat.** Of whiffs at AD 12–30°, 78% pass beyond the bat's tip; beyond 30° the share is 68%, and another 31% have their closest approach at the edge of the contact search window (`contact.rs` `WINDOW_S` ±25 ms; contact itself always happens within −9 to +12 ms of nominal at p1/p99, so the window clips only far misses). Near on time, 88% of whiffs are over or under the ball. v1's swing rotates a radial bat about a fixed pivot (agent-models §3.6: "the zero-lag special case of the spec's template"). An early bat has swung on around the pivot, out front, and its barrel no longer reaches across the plate. In MLB, early contact is met out front and pulled (R13 F6: intercept +3.3 in, AD +8° on whiffs).
+**Why early swings miss: the bat passes over the ball.** Each whiff is judged against the bat's axis extended past the tip. The world's closest-approach station is clamped to the bat, so "closest at the tip" alone does not say that a longer bat would have hit; the first version of this note made that mistake (Codex review #2).
+
+| AD bin (°) | whiffs | swung under | swung over | longer barrel hits | window edge | clearance p50 |
+|---|---|---|---|---|---|---|
+| < −12 (late) | 80 | 98% | 0% | 0% | 3% | 3.5 cm |
+| −12 to 12 | 497 | 65% | 35% | 1% | 0% | 2.4 cm |
+| 12 to 30 | 504 | 3% | **91%** | 6% | 0% | 11.0 cm |
+| > 30 (early) | 461 | 0% | 67% | 2% | 31% | 18.7 cm |
+
+Timing error becomes height error. Early bats pass over the ball and late bats under it, by more the further off the timing is. Only 6% of the early whiffs would have hit with a longer barrel. The search window (`contact.rs` `WINDOW_S` ±25 ms) clips only far misses: contact always happens within −9 to +12 ms of nominal (p1/p99), and the review's search of ±50 ms recovered no contact.
+
+In the cage map the same thing shows on a perfectly perceived, square swing. 30 ms early makes contact at −38° LA, and each 5 ms early lowers the launch by 5–9° more (5° on time, −20° at 20 ms early). In MLB, early contact is still met (whiff 23–40% at AD 12–30° against the sim's 43–74%) and fouled (54–77%) as hooked or topped grounders (R13 F4). The sim's bat leaves the ball's height faster on either side of on-time than MLB's. Why is not measured here. Candidates: how the swing plane lines up with the pitch's path, and the shape of v1's swing (a radial bat about a fixed pivot, agent-models §3.6's "zero-lag special case") against the spec's hand path. A timing sweep with the pitch and aim held fixed, comparing swing shapes, would tell them apart.
 
 ## 3. The swing against Statcast
 
@@ -63,11 +76,11 @@ Three things differ from MLB:
 | Vertical bat angle, ° (mean / p10 / p90) | −18.5 / −30.5 / −6.6 | −25 to −35 (Blast, vendor) |
 | AD against intercept depth, ° per inch out front | +1.04 (corr 0.94) | +1.48 (corr 0.87) |
 | AA against AD, ° per ° toward pull | +0.26 (corr 0.83) | +0.41 (corr 0.71) |
-| AD SD of fair contact, ° (pulled / opposite) | 6.9 / 6.9 | 14 / 19 |
+| AD SD of fair contact, ° (pulled / opposite, by where the ball comes down) | 6.9 / 6.8 | 14 / 19 |
 
 - **Bat angle and swing-plane tilt** steepen for low pitches as in MLB, but are 7–10° too flat at every height. Median vertical bat angle runs from −25° in the bottom third to −12° in the top third. Tilt runs 28° / 23° / 17° by third, against MLB's 37° / 32° / 25°.
 - **The swing is about 30% too long.** Over the last 150 ms the sweet spot travels 9.5 ft against 7.2. The speed bump is a symmetric Gaussian, so the barrel reaches speed early. A real swing whips: the lag releases late (§3.6's λ), and the barrel gains most of its speed in the last few tens of ms. The long swing does not show in bat speed at contact, which matches. The p90 of 86.7 mph comes from outside pitches met at a longer radius (speed scales with r).
-- **Attack direction spreads half as much.** Its slope against depth is 70% of MLB's. Fair contact spans AD ±7° against MLB's ±14–19°, so timing error turns into less spray. R13 §5 derived 1.45° per inch for a 1 m arc at peak speed. The measured 1.04 is lower because contact away from peak happens at lower angular speed.
+- **Attack direction spreads half as much.** Fair contact spans AD ±7° against MLB's ±14–19°. The pooled regression of AD on depth gives 70% of MLB's slope. That regression mixes pitch locations, aims and radii, so it is not the derivative along one arc. R13 §5 derived 1.45° per inch for a 1 m arc. Why the pooled value is lower is not established: every intercept is at ≥ 94% of peak angular speed, so slower contact away from peak does not explain it (Codex review #4). Fair pulled and opposite are split by where the ball first comes down. R13 used Statcast's hit coordinates; splitting by launch direction moves 88 of 2,160 balls.
 - **Foul share by pitch height is inverted.** By height the sim gives 16% below the zone, 30% / 23% / 20% by third (bottom to top), and 19% above. MLB gives 52% / 47% / 47% / 58% / 69%. High pitches, where MLB's fouls concentrate, are where the sim's bat is flattest.
 - **By pitch type:** FF 22.6%, SL 23.5%, CH 28.7%, CU 23.6%. MLB has FF highest (57%) and the others at 46–48%.
 - **Foul EV** p25/p50/p75 is 63 / 73 / 88 mph, against 70 / 77 / 84.
@@ -80,7 +93,7 @@ The pivot is swung about a middle-middle aim point at the same distance. Reach a
 **Cage map** (FF middle-middle, perfect perception):
 - On time, a steeper bat sends undercut balls to the opposite field sooner and lower. At −4 cm, −20° gives 45° LA, +24° spray, fair; −30° gives 36°, +29°, foul (first landing); −35° gives 32°, +31°, foul.
 - It sends topped balls further to the pull side: at +4 cm, spray −10° becomes −14°.
-- Over a uniform grid of offsets (±7 cm) and timings (±40 ms), the foul share of contact goes 33.0% → 34.4% → 37.3% at −20° / −30° / −35°, with more of the fouls on the pull side (15% → 25%).
+- Over a uniform grid of offsets (±7 cm) and timings (±40 ms), the foul share of contact goes 32.8% → 34.4% → 37.3% at exactly −20° / −30° / −35° (33.0% for the current −20.1°), with more of the fouls on the pull side (15% → 25%).
 
 **PA model** (`foul_diag … - - - <angle>`, 3,000 PAs):
 
@@ -91,19 +104,31 @@ The pivot is swung about a middle-middle aim point at the same distance. Reach a
 | Swing path tilt, mean (MLB 32°) | 23.7° | **31.9°** | 36.6° |
 | Vertical bat angle, p50 (MLB −25 to −35) | −18.6° | −27.5° | −32.4° |
 | P(foul \| LA 25–40°, \|AD\| < 6°) (MLB 24) | 15.5% | 29.0% | 44.8% |
+| P(foul \| LA 40–50°, \|AD\| < 6°) (MLB 46) | 43.9% | 66.9% | |
+| P(foul \| LA 50–60°, \|AD\| < 6°) (MLB 69) | 70.8% | 83.0% | |
+| P(foul \| LA 60–70°, \|AD\| < 6°) (MLB 81) | 86.0% | 100% (n = 35) | |
+| AD 12–20°: foul per contact (MLB 54) / whiff per swing (MLB 23) | 8.1% / 42.7% | 16.5% / 51.7% | |
 | P(foul \| LA < −30°) (MLB 57) | 11.3% | 15.8% | 19.3% |
 | K% / Contact% | 19.8 / 64.7 | 20.6 / 65.9 | 21.0 / 66.9 |
 | Mean LA / LA SD | 13.1° / 32.9° | 12.3° / 29.8° | 11.6° / 28.1° |
 
-The −30° geometry matches two independent MLB measures at once: Statcast's swing path tilt (mean 31.9° against 32°, p10 22° against 23°, p90 42° against 41°) and Blast's vertical bat angle. It gains about 4 points of foul share. −35° overshoots both tilt and the well-timed 25–40° bin. **Bat angle is a real lever, but only about a seventh of the gap.** None of the §2 deficits move: the early-foul share, the AD spread, the swing length and the low-angle fouls all stay where they were.
+The −30° geometry matches two independent MLB measures at once: Statcast's swing path tilt (mean 31.9° against 32°, p10 22° against 23°, p90 42° against 41°) and Blast's vertical bat angle. It gains about 4 points of foul share. The foul distributions do not support it on their own:
+- It **overshoots the well-timed steep bins that passed at −21°**: 67% against 46% at 40–50°, 83% against 69% at 50–60°.
+- The low-angle fouls move but stay far short: 11 → 16% below −30° (MLB 57), 3 → 4% at −10–10° (22), 11 → 17% at 10–25° (37).
+- Early contact (AD 12–20°) fouls twice as often, 8 → 17% (MLB 54), but whiffs more, 43 → 52% (MLB 23).
+- The swing length and the AD spread do not move.
+
+−35° overshoots tilt as well. **Bat angle is a real lever, but only about a seventh of the gap,** and at −30° it trades a steep-foul surplus for a small low-foul gain. It is a candidate to remeasure with the next swing model, not a setting the foul data validate.
 
 ## 5. What this means
 
-The R13 picture shifts. Steep contact is not the gap. What the sim lacks is the hooked and chopped contact that comes from early and late swings that still meet the ball. Its swing has a narrow timing window that ends in a miss off the end of the bat. In MLB the same window ends in a foul. The causes point at the swing kinematics, not the collision model (§8 stays untouched, as R13 F7 advised):
+The R13 picture shifts. Well-timed steep contact is not the gap. What the sim lacks most is contact on mistimed swings: hooked and topped balls early, sliced ones late. The sim's bat leaves the ball's height quickly on either side of on-time, so those swings miss over or under the ball where MLB batters still foul it off. Low-angle fouls on well-timed swings are short as well. The collision model stays untouched for now (§8, as R13 F7 advised).
 
-1. **A fixed pivot with a radial bat (v1)** cannot keep the barrel over the plate on an early swing, and turns less AD per inch of timing than MLB. The spec's template (§3.6) has a hand path (an arc of radius ρ_h ≈ 0.30 m) and a lag λ that releases to 0 at contact. Hands that keep moving toward the ball carry the barrel across the plate out front. A late lag release shortens the swing toward 7.2 ft and steepens AD against depth. This is the larger lever, and it is already specified.
-2. **Bat angle:** about −30° at a middle pitch (the template's pivot higher and closer), worth about 4 points, and supported by two measures.
+What to measure next, before changing the swing:
+1. **Timing against height, with the pitch and the aim held fixed.** How fast the bat's height at the ball's path changes per ms of timing error, in the sim and as implied by MLB's whiff and foul rates by AD. Then which part of the swing sets it: attack angle against the pitch's descent, plane tilt, or the fixed pivot.
+2. **The swing's shape.** §3.6 specifies a hand path (an arc of radius ρ_h ≈ 0.30 m) with a lag λ that releases at contact. v1 is its zero-lag, fixed-pivot case. Whether the full template keeps the bat on the ball's path longer, shortens the swing toward 7.2 ft (v1's symmetric speed bump has no late whip), or changes the AD spread is a hypothesis to test. A counterfactual swing in the cage would test it, not an assumption.
+3. **Bat angle:** about −30° matches two kinematic measures and gains about 4 points, but overproduces well-timed steep fouls. Remeasure it with whatever swing shape comes next.
 
-Changing either moves the launch-angle mix and the spray, and so the run environment, the fielders' spray reads (`live.rs` fits to `spray_by_bat_angle`, `LEAD_FACE_*`) and the batter's box position in the client (taken from the pivot). Each needs those refits, so neither is done here.
+Changing the swing moves the launch-angle mix and the spray, and so the run environment, the fielders' spray reads (`live.rs` fits to `spray_by_bat_angle`, `LEAD_FACE_*`) and the client's batter-box position (taken from the pivot). Any change needs those refits.
 
-**Proposed next step (owner):** implement §3.6's hand path and lag (the v2 swing), with the bat angle set to about −30° in the same change, and measure it with these tools before tuning anything. Swing length, AD against depth, the share of early whiffs past the tip, and the foul share by AD are the checks. Until that is done, Discipline's grade-50 values (chase, O1) stay parked as before.
+**Proposed next step (owner):** measure 1 and 2 as counterfactuals in the cage and with `foul_diag`, then choose the swing change, likely §3.6's hand path and lag with the bat angle remeasured. Until that is done, Discipline's grade-50 values (chase, O1) stay parked as before.

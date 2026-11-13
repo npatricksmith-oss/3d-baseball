@@ -26,7 +26,9 @@ fn main() {
             let k = EDGES.iter().rposition(|e| la >= *e).unwrap();
             let pa_foul = matches!(step.record.call, Call::Foul | Call::FoulTip);
             let fair = step.rules_events.iter().find_map(|e| if let Event::FairFoulDecided { fair } = e { Some(*fair) } else { None });
-            let Some(fair) = fair else {
+            // A play timeout forces a fair decision (rules-spec §5.8): not a judgment.
+            let timeout = step.rules_events.iter().any(|e| matches!(e, Event::RulesWarning { code: "play_timeout" }));
+            let Some(fair) = fair.filter(|_| !timeout) else {
                 undecided += 1;
                 continue;
             };
@@ -37,7 +39,7 @@ fn main() {
             n[k][4] += (fair && pa_foul) as u64;
         }
     }
-    println!("{games} games from seed {first}; contacts with no fair/foul decision: {undecided}");
+    println!("{games} games from seed {first}; contacts with no fair/foul decision, or a play timeout: {undecided}");
     println!("{:>10} | {:>6} | {:>8} {:>8} {:>6} | {:>14} {:>14}", "LA bin °", "n", "PA call", "game", "MLB", "foul, PA fair", "fair, PA foul");
     let mut tot = [0u64; 5];
     for (k, row) in n.iter().enumerate() {
@@ -57,5 +59,6 @@ fn main() {
         }
     }
     let c = tot[0].max(1) as f64;
-    println!("{:>10} | {:6} | {:8.1} {:8.1} {:>6} | {:14} {:14}", "all", tot[0], 100.0 * tot[1] as f64 / c, 100.0 * tot[2] as f64 / c, "51", tot[3], tot[4]);
+    println!("{:>10} | {:6} | {:8.1} {:8.1} {:>6} | {:14} {:14}", "all", tot[0], 100.0 * tot[1] as f64 / c, 100.0 * tot[2] as f64 / c, "52.5", tot[3], tot[4]);
+    println!("(MLB all: 52.5% counts caught fouls as fouls, as this table does; 51.2% without them, R13 F1)");
 }

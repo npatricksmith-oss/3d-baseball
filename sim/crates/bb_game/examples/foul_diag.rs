@@ -76,9 +76,16 @@ struct Sw {
     ev: f64,
     la: f64,
     land_dir: f64,
-    /// Whiff only: how it missed. 0 = over or under the bat, 1 = past the tip, 2 = inside the
-    /// knob, 3 = the closest approach is at the edge of the contact search window.
+    /// Whiff only, judged against the bat's axis extended past the tip (the world's
+    /// closest-approach station is clamped to the bat, so "closest at the tip" alone does not
+    /// say whether a longer bat would have hit): 1 = a longer barrel would have hit, 2 = inside
+    /// the knob, 3 = the closest approach is at the edge of the contact search window, 4 = the
+    /// ball passed above the bat (swung under it), 5 = below it (swung over it).
     miss: u8,
+    /// Whiff only: surface clearance from the extended axis, cm, and how far past the tip the
+    /// ball's axial station was, cm (0 if within the bat).
+    clear_cm: f64,
+    past_tip_cm: f64,
     /// Intercept time minus the swing's nominal contact time, ms.
     dt_ms: f64,
 }
@@ -124,29 +131,38 @@ fn measure(mu: &Matchup, p: &PitchRecord) -> Option<Sw> {
     }
     let plate = p.plate.unwrap_or(Vec3::ZERO);
     let h = (plate.z - mu.zone.bottom) / (mu.zone.top - mu.zone.bottom);
-    let miss = match &res.swing {
-        SwingResult::Miss(ca) => {
-            let (lo, hi) = (sw.t_c - bb_physics::contact::WINDOW_S, sw.t_c + bb_physics::contact::WINDOW_S);
-            if (ca.t - lo).abs() < 2e-4 || (ca.t - hi).abs() < 2e-4 {
-                3
-            } else if ca.u >= mu.bat.profile.length() - 1e-6 {
-                1
-            } else if ca.u <= 1e-6 {
-                2
-            } else {
-                0
-            }
-        }
-        _ => 0,
-    };
+    let (mut miss, mut clear_cm, mut past_tip_cm) = (0, f64::NAN, f64::NAN);
+    if let SwingResult::Miss(ca) = &res.swing {
+        let len_bat = mu.bat.profile.length();
+        let ball = res.pitch.at(ca.t).0;
+        let u_raw = (ball - k.knob).dot(k.axis);
+        let u_c = u_raw.max(0.0);
+        let tr = ball - (k.knob + k.axis * u_c);
+        clear_cm = 100.0 * (tr.norm() - mu.bat.profile.radius(u_c.min(len_bat)) - mu.env.ball.radius);
+        past_tip_cm = 100.0 * (u_raw - len_bat).max(0.0);
+        let (lo, hi) = (sw.t_c - bb_physics::contact::WINDOW_S, sw.t_c + bb_physics::contact::WINDOW_S);
+        miss = if (ca.t - lo).abs() < 2e-4 || (ca.t - hi).abs() < 2e-4 {
+            3
+        } else if u_raw > len_bat && clear_cm <= 0.0 {
+            1
+        } else if u_raw < 0.0 {
+            2
+        } else if tr.z > 0.0 {
+            4
+        } else {
+            5
+        };
+    }
     let dt_ms = 1000.0 * (t - sw.t_c);
     let (out, ev, la, land_dir) = match contact {
         Some(b) => {
             let land = b.flight.last().s.r;
-            let spray_pull = -side * b.spray_angle * DEG;
+            // Pulled or opposite by where the ball comes down (R13 uses the hit coordinates;
+            // the unobstructed first landing stands in for them), not by its launch direction.
+            let land_pull = -side * land.x;
             let out = if matches!(p.call, Call::Foul | Call::FoulTip) {
                 Outcome::Foul
-            } else if spray_pull >= 0.0 {
+            } else if land_pull >= 0.0 {
                 Outcome::FairPull
             } else {
                 Outcome::FairOppo
@@ -155,7 +171,7 @@ fn measure(mu: &Matchup, p: &PitchRecord) -> Option<Sw> {
         }
         None => (Outcome::Whiff, f64::NAN, f64::NAN, f64::NAN),
     };
-    Some(Sw { out, ty: p.ty, h, ad, aa, vba, tilt, length_ft: len / 0.3048, bat_mph: v.norm() / 0.44704, y, ev, la, land_dir, miss, dt_ms })
+    Some(Sw { out, ty: p.ty, h, ad, aa, vba, tilt, length_ft: len / 0.3048, bat_mph: v.norm() / 0.44704, y, ev, la, land_dir, miss, clear_cm, past_tip_cm, dt_ms })
 }
 
 fn main() {
@@ -343,13 +359,29 @@ fn statcast_tables(sws: &[Sw]) {
         );
     }
 
-    println!("\nHow whiffs miss, by attack direction (share of whiffs in the bin)");
-    println!("{:>12} | {:>6} | {:>8} {:>8} {:>8} {:>8}", "AD bin °", "whiffs", "over/und", "past tip", "in knob", "window");
+    println!("\nHow whiffs miss, by attack direction (share of whiffs in the bin), against the bat's axis extended past the tip");
+    println!(
+        "{:>12} | {:>6} | {:>8} {:>8} {:>8} {:>8} {:>8} | {:>10} {:>10}",
+        "AD bin °", "whiffs", "swung un", "swung ov", "longer b", "in knob", "window", "clear p50", "past tip p50"
+    );
     for (lo, hi) in [(-1e9, -12.0), (-12.0, 12.0), (12.0, 30.0), (30.0, 1e9)] {
         let b: Vec<&Sw> = sws.iter().filter(|s| s.out == Outcome::Whiff && s.ad >= lo && s.ad < hi).collect();
         let k = |m: u8| share(b.iter().filter(|s| s.miss == m).count(), b.len());
         let label = if lo < -1e8 { format!("< {hi}") } else if hi > 1e8 { format!("> {lo}") } else { format!("{lo} to {hi}") };
-        println!("{label:>12} | {:6} | {:>8} {:>8} {:>8} {:>8}", b.len(), k(0), k(1), k(2), k(3));
+        let inner: Vec<&&Sw> = b.iter().filter(|s| s.miss != 3).collect();
+        let clear: Vec<f64> = inner.iter().map(|s| s.clear_cm).collect();
+        let past: Vec<f64> = inner.iter().map(|s| s.past_tip_cm).collect();
+        println!(
+            "{label:>12} | {:6} | {:>8} {:>8} {:>8} {:>8} {:>8} | {:8.1}cm {:10.1}cm",
+            b.len(),
+            k(4),
+            k(5),
+            k(1),
+            k(2),
+            k(3),
+            pct(&clear, 0.5),
+            pct(&past, 0.5)
+        );
     }
     let dts: Vec<f64> = sws.iter().filter(|s| is_contact(s)).map(|s| s.dt_ms).collect();
     println!("contact time minus nominal, ms: p1 {:.1}  p5 {:.1}  p50 {:.1}  p95 {:.1}  p99 {:.1} (search window ±{:.0})", pct(&dts, 0.01), pct(&dts, 0.05), pct(&dts, 0.5), pct(&dts, 0.95), pct(&dts, 0.99), 1000.0 * bb_physics::contact::WINDOW_S);

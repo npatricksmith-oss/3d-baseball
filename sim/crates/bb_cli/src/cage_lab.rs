@@ -98,7 +98,7 @@ fn bat_angle_counterfactual(base: &Cage, rel: bb_physics::BallState, md: &mut St
     let header = |md: &mut String, first: &str| {
         write!(md, "| {first} |").unwrap();
         for (i, a) in angles.iter().enumerate() {
-            write!(md, " {a:.0}°{} |", if i == 0 { " (now)" } else { "" }).unwrap();
+            write!(md, " {a:.1}°{} |", if i == 0 { " (now)" } else { "" }).unwrap();
         }
         writeln!(md, "\n|{}", " :--- |".repeat(angles.len() + 1)).unwrap();
     };
@@ -144,7 +144,7 @@ fn bat_angle_counterfactual(base: &Cage, rel: bb_physics::BallState, md: &mut St
             }
         }
         let pc = |a: u32, b: u32| 100.0 * a as f64 / b.max(1) as f64;
-        writeln!(md, "| {a:.0}° | {con}/{n} | {:.1}% | {:.1}% | {:.1}% |", pc(foul, con), pc(pull, foul), pc(low, foul)).unwrap();
+        writeln!(md, "| {a:.1}° | {con}/{n} | {:.1}% | {:.1}% | {:.1}% |", pc(foul, con), pc(pull, foul), pc(low, foul)).unwrap();
     }
 }
 
