@@ -25,6 +25,7 @@ class UMaterialInterface;
  *               -BbBenchSeconds=<s> (log frame rate and memory, then quit)
  *               -BbStagingLog (log each reset, each player leaving the field and each throw's
  *               first animation phase as BB_RESET / BB_EXIT / BB_THROW, and a BB_STAGING summary)
+ *               -BbClipSpeeds (log the ground speed each gait clip is animated for as BB_CLIP)
  */
 UCLASS()
 class ABbDirector : public AActor
@@ -188,11 +189,24 @@ private:
 	static float TravelGone(float Dist, float V, float A, float T);
 	/** The cruising speed that covers Dist in Seconds (rest to rest), or Cap if none under it does. */
 	static float SpeedFor(float Dist, float Seconds, float A, float Cap);
+	/** The ground speed the mannequin's jog clip (MF_Unarmed_Jog_Fwd) is animated for, m/s:
+	 *  its root bone travels 6.00 m/s over the 1.77 s loop, and its planted feet pass back
+	 *  under the root at 5.9 m/s while sliding under 0.3 m/s themselves (measured with
+	 *  -BbClipSpeeds, 2026-11-13). The jog clip plays at a figure's speed over this, so his
+	 *  feet keep pace with the ground. */
+	static constexpr float JogClipMps = 6.0f;
+	/** At a change of sides, everyone going off (the fielders, the retired batter, runners
+	 *  left on) and the fielders coming on jog at this steady pace, speeding up and slowing
+	 *  at ResetAccelMps2 at the ends. It plays the jog clip at 0.8 of its own rate: about 2.8
+	 *  strides of 1.7 m a second, an easy ballplayer's jog (a home-run trot is 4.5–5 m/s).
+	 *  At the clip's own 6 m/s, 3.5 strides a second, he would be running. */
+	static constexpr float SideChangeJogMps = 4.8f;
 	// Staging values (client presentation only). Players walk a short way and jog easily
 	// farther; to keep the next pitch from waiting past ResetMaxSeconds they quicken, but
-	// never past ResetHurryMps (the jog clip's own pace). Someone farther than that allows,
-	// such as a pitcher who chased a fly ball into the outfield, takes as long as it takes.
-	// Nobody starts or stops dead: speed builds and falls at ResetAccelMps2.
+	// never past ResetHurryMps (a brisk jog). Someone farther than that allows, such as a
+	// pitcher who chased a fly ball into the outfield, takes as long as it takes. Nobody
+	// starts or stops dead: speed builds and falls at ResetAccelMps2. A change of sides is
+	// staged differently: everyone jogs at SideChangeJogMps, however far.
 	float ResetWalkMps = 1.6f;
 	float ResetJogMps = 3.6f;
 	float ResetHurryMps = 5.f;
@@ -222,8 +236,9 @@ private:
 	};
 	TArray<FExitSlot> Exits;
 	float ExitClock = 0.f;
-	/** Starts the walk off for Agent from From; returns his seconds to the dugout. */
-	float AddExit(const TArray<FFigureState>& Old, uint16 Agent, const FVector2D& From);
+	/** Starts the walk off for Agent from From (a steady jog at SideChangeJogMps if bJog);
+	 *  returns his seconds to the dugout. */
+	float AddExit(const TArray<FFigureState>& Old, uint16 Agent, const FVector2D& From, bool bJog);
 	/** Takes anyone in Frame out of the exit walk (he is in the next pitch after all). */
 	void PurgeExits(const BbFrame& Frame);
 	void EndExit(int32 Index, const TCHAR* Reason);
