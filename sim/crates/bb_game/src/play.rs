@@ -32,6 +32,8 @@ pub fn base_pos(b: u8) -> Vec3 {
 pub struct FielderAttrs {
     pub speed: f64,
     pub tau_a: f64,
+    /// Lateral acceleration when changing direction, m/s² (`Agility`, agent-models §10).
+    pub a_lat: f64,
     pub reaction: f64,
     pub hands: f64,
     pub arm: f64,
@@ -52,6 +54,7 @@ impl FielderAttrs {
             speed: if outfield { 8.2 } else { 7.9 },
             // Infielders start from an athletic ready position: a quicker first step [E].
             tau_a: if outfield { 1.0 } else { 0.7 },
+            a_lat: 7.0,
             // An outfielder needs longer to read a ball off the bat before his first step [E].
             reaction: if outfield { 0.35 } else { 0.25 },
             hands: 0.018,
@@ -59,7 +62,7 @@ impl FielderAttrs {
             arm_sigma: 1.2f64.to_radians(),
             transfer: if outfield { 0.85 } else { 0.65 },
             tau_read: 0.6,
-            read_sigma0: if outfield { 2.5 } else { 0.3 },
+            read_sigma0: if outfield { 3.0 } else { 0.3 },
         }
     }
 }

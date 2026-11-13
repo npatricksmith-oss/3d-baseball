@@ -107,6 +107,25 @@ const RELAY_TRANSFER_FRAC: f64 = 0.7;
 /// Infield radius for the settle rule (rules-spec §5.8), m. The spec's 30 m excluded second
 /// base (38.8 m from home); the infield dirt reaches ~45 m.
 const INFIELD_R: f64 = 45.0;
+/// A ball an infielder believes comes down in the infield within this time of contact is a
+/// ground ball to him (he breaks for it without waiting for a call); later, it is a pop-up
+/// or a fly, s [E].
+const GROUNDER_BOUNCE_S: f64 = 1.0;
+/// How far a throw typically misses the spot it was aimed at, as a fraction of its length
+/// (a receiver's belief: about 1.2° of direction and 3% of speed from a league-typical arm),
+/// [E].
+const THROW_MISS_FRAC: f64 = 0.05;
+/// A fielder's first read of the ball's velocity is off by this fraction of its speed per
+/// axis (stretched in depth like the position error), shrinking with viewing time like it;
+/// interim stand-in for §5.1's launch-state errors, refitted with momentum 2026-11-12 [E].
+const READ_VEL_FRAC: f64 = 0.04;
+/// A fielder's braking deceleration, m/s² [E].
+const BRAKE: f64 = 6.0;
+/// Time to spare a fielder needs to believe he has before he calls a ball in the air, s [E].
+const CALL_SLACK_S: f64 = 0.3;
+/// On a re-call, a fielder in the chaser's tier takes the ball only with this much more time
+/// to spare (or an earlier intercept), s [E]: calls are not traded on noise.
+const RECALL_MARGIN_S: f64 = 0.3;
 /// Cutoffs and relays (agent-models §5.7) [E]: a ball fielded beyond `RELAY_FROM_M` from home
 /// gets a cutoff man on the line to the base; beyond `RELAY_DEEP_M` a middle infielder goes
 /// out as the relay man instead. He stands short of the base by the throw's length less
@@ -145,7 +164,8 @@ struct Fielder {
     id: AgentId,
     a: FielderAttrs,
     pos: Vec3,
-    speed: f64,
+    /// Velocity on the ground, m/s.
+    vel: Vec3,
     role: Role,
     target: Vec3,
     next_plan: f64,
@@ -305,21 +325,35 @@ pub(crate) fn path_pos(s: f64) -> Vec3 {
     a + (b - a) * f
 }
 
-/// Distance covered in time `t` by a fielder already moving at `v0`, with the speed law the
-/// movement step uses (v → v_max with time constant τ; [`run_dist`] is the `v0` = 0 case).
-/// Like the movement step, it takes a change of direction to cost nothing.
+/// Distance covered toward a goal in time `t` by a fielder whose velocity has the component
+/// `v0` toward it, with the movement step's laws (agent-models §5.3): from `v0` ≥ 0 the
+/// speed law v → v_max with time constant τ ([`run_dist`] is the `v0` = 0 case); from
+/// `v0` < 0, moving away, he brakes at [`BRAKE`] to a stop and then runs from rest. Sideways
+/// speed is left out (the step sheds it at the fielder's lateral acceleration).
 fn run_dist_from(t: f64, v0: f64, v_max: f64, tau: f64) -> f64 {
-    if t <= 0.0 { 0.0 } else { v_max * t - (v_max - v0) * tau * (1.0 - m::exp(-t / tau)) }
+    if t <= 0.0 {
+        return 0.0;
+    }
+    if v0 < 0.0 {
+        let t_stop = -v0 / BRAKE;
+        if t <= t_stop {
+            return v0 * t + 0.5 * BRAKE * t * t;
+        }
+        return -v0 * v0 / (2.0 * BRAKE) + run_dist(t - t_stop, v_max, tau);
+    }
+    v_max * t - (v_max - v0) * tau * (1.0 - m::exp(-t / tau))
 }
 
-/// Time to cover distance `d` when already moving at `v0`: the inverse of [`run_dist_from`]
-/// (which is increasing in t), by bisection.
+/// Time to cover distance `d` toward a goal: the inverse of [`run_dist_from`] (increasing in
+/// t once he is coming toward it), by bisection.
 fn run_time_from(d: f64, v0: f64, v_max: f64, tau: f64) -> f64 {
     if d <= 0.0 {
         return 0.0;
     }
-    // From rest the run takes at most d / v_max + τ; any starting speed only shortens it.
-    let (mut lo, mut hi) = (0.0, d / v_max + tau);
+    // From rest the run takes at most d / v_max + τ; moving away adds the stop and the
+    // ground lost.
+    let back = if v0 < 0.0 { -v0 / BRAKE } else { 0.0 };
+    let (mut lo, mut hi) = (back, back + (d + v0.min(0.0).powi(2) / (2.0 * BRAKE)) / v_max + tau);
     for _ in 0..50 {
         let mid = 0.5 * (lo + hi);
         if run_dist_from(mid, v0, v_max, tau) < d { lo = mid } else { hi = mid }
@@ -342,26 +376,88 @@ fn backup_spot(from: Vec3, base: u8) -> Vec3 {
     if dir.norm() < 1e-6 { b } else { b + dir.normalized() * BACKUP_M }
 }
 
-/// A fielder's position and speed after the movement step of the tick at time `t`: toward
-/// his target, accelerating to top speed and braking to stop on it. Not yet reacting, or on
-/// the ground after a dive: unchanged.
-fn fielder_step(fd: &Fielder, t: f64, t_contact: f64) -> (Vec3, f64) {
+/// Where a fielder comes to rest if he brakes now ([`BRAKE`] along his motion).
+fn stop_point(fd: &Fielder) -> Vec3 {
+    let v = fd.vel.norm();
+    let p = if v < 1e-9 { fd.pos } else { fd.pos + fd.vel * (v / (2.0 * BRAKE) / v) };
+    Vec3::new(p.x, p.y, 0.0)
+}
+
+/// The backspin (rpm; negative: topspin) a batted ball typically has at launch angle `la`
+/// (rad): a fielder's belief about the contact model. Medians by 10° launch-angle bin from
+/// `examples/batted_spin.rs` (48 games, 2026-11-12), interpolated linearly at the bin
+/// centres; refit when the contact model changes.
+fn typical_batted_spin_rpm(la: f64) -> f64 {
+    const DEG: [f64; 9] = [-25.0, -15.0, -5.0, 5.0, 15.0, 25.0, 35.0, 45.0, 55.0];
+    const RPM: [f64; 9] = [-7060.0, -4750.0, -2820.0, -710.0, 1330.0, 3290.0, 4800.0, 5990.0, 6470.0];
+    let x = la.to_degrees().clamp(DEG[0], DEG[8]);
+    let k = (((x - DEG[0]) / 10.0).floor() as usize).min(7);
+    let f = (x - DEG[k]) / 10.0;
+    RPM[k] + (RPM[k + 1] - RPM[k]) * f
+}
+
+/// What a run to `goal` asks of a fielder from his current motion (agent-models §5.2: reach
+/// time from the movement model, not a straight line): (distance, speed toward the goal).
+/// Speed toward it counts (negative: moving away, a stop first); sideways speed must be shed
+/// at his lateral acceleration, and the drift while he sheds it, v²/(2·a_lat), is ground he
+/// must make up, added at right angles to the run.
+fn run_terms(fd: &Fielder, goal: Vec3) -> (f64, f64) {
+    let to = Vec3::new(goal.x - fd.pos.x, goal.y - fd.pos.y, 0.0);
+    let d = to.norm();
+    if d < 1e-9 {
+        return (0.0, 0.0);
+    }
+    let along = fd.vel.dot(to) / d;
+    let side = (fd.vel - to * (along / d)).norm();
+    let drift = side * side / (2.0 * fd.a.a_lat);
+    (m::hypot(d, drift), along)
+}
+
+/// A fielder's position and velocity after the movement step of the tick at time `t`
+/// (agent-models §5.3). His velocity goes toward a wanted velocity: top speed toward his
+/// target, or the braking curve that stops him on the spot (a chaser late for the ball runs
+/// through). Speeding up along his direction of motion follows the speed law (time constant
+/// τ); slowing takes at most [`BRAKE`] and turning at most his lateral acceleration `a_lat`.
+/// So a reversal means a full stop, and a sharp turn at speed a curve.
+/// Not yet reacting, or on the ground after a dive: unchanged.
+fn fielder_step(fd: &Fielder, t: f64, t_contact: f64) -> (Vec3, Vec3) {
     if t < t_contact + fd.a.reaction || (fd.dove && t < fd.ready_at) {
-        return (fd.pos, fd.speed);
+        return (fd.pos, fd.vel);
     }
     let to = Vec3::new(fd.target.x - fd.pos.x, fd.target.y - fd.pos.y, 0.0);
     let d = to.norm();
-    let brake = fd.speed * fd.speed / (2.0 * 6.0);
+    // Within a few centimetres and nearly stopped, he is on his spot.
+    if d < 1e-9 || (d < 0.05 && fd.vel.norm() < 0.5) {
+        return (Vec3::new(fd.target.x, fd.target.y, fd.pos.z), Vec3::ZERO);
+    }
+    let dir = to * (1.0 / d);
+    let along = fd.vel.dot(dir);
     // A chaser fields the ball on the run: his intercept plan (`run_dist`) has him arriving at
     // speed, so he slows for the spot only if he will be there before the ball.
-    let early = fd.role != Role::Chase || !fd.t_int.is_finite() || t + d / fd.speed.max(0.5) + 0.1 < fd.t_int;
-    let speed = if d > brake + 0.05 || !early { fd.speed + (fd.a.speed - fd.speed) * (DT / fd.a.tau_a) } else { (fd.speed - 6.0 * DT).max(0.0) };
+    let early = fd.role != Role::Chase || !fd.t_int.is_finite() || t + d / along.max(0.5) + 0.1 < fd.t_int;
+    let want = if early { fd.a.speed.min(m::sqrt(2.0 * BRAKE * d)) } else { fd.a.speed };
+    // Speeding up in his direction of motion follows the speed law; slowing (braking at most
+    // `BRAKE`) and turning (at most `a_lat`) take what the change needs, up to those limits.
+    let delta = dir * want - fd.vel;
+    let speed = fd.vel.norm();
+    let acc = if speed < 1e-6 {
+        delta * (1.0 / fd.a.tau_a)
+    } else {
+        let vh = fd.vel * (1.0 / speed);
+        let dpar = delta.dot(vh);
+        let dperp = delta - vh * dpar;
+        let par = if dpar >= 0.0 { dpar / fd.a.tau_a } else { -(BRAKE.min(-dpar / DT)) };
+        let np = dperp.norm();
+        let perp = if np < 1e-12 { Vec3::ZERO } else { dperp * (fd.a.a_lat.min(np / DT) / np) };
+        vh * par + perp
+    };
+    let vel = fd.vel + acc * DT;
     // Reaching the target ends the run: a fielder standing on his spot has no speed to carry
     // into the next plan.
-    if speed * DT >= d {
-        return (Vec3::new(fd.target.x, fd.target.y, fd.pos.z), 0.0);
+    if vel.dot(dir) * DT >= d && (vel - dir * vel.dot(dir)).norm() * DT < 0.05 {
+        return (Vec3::new(fd.target.x, fd.target.y, fd.pos.z), Vec3::ZERO);
     }
-    (fd.pos + to * (speed * DT / d), speed)
+    (fd.pos + vel * DT, vel)
 }
 
 struct Sim<'a> {
@@ -458,12 +554,28 @@ impl<'a> Sim<'a> {
         let lat = Vec3::new(-los.y, los.x, 0.0);
         // Height is read with the lateral precision (an angular measurement).
         let pe = p + los * (err[0] * sp * DEPTH_STRETCH) + lat * (err[1] * sp) + Vec3::new(0.0, 0.0, err[1] * sp * 0.5);
-        let sv = 0.06 * v.norm() * shrink;
+        let sv = READ_VEL_FRAC * v.norm() * shrink;
         let ve = v + los * (err[2] * sv * DEPTH_STRETCH * 0.5) + lat * (err[3] * sv) + Vec3::new(0.0, 0.0, err[3] * sv * 0.5);
-        // Typical spin: backspin on rising balls, topspin on balls hit down.
+        // Typical spin (agent-models §5.1): straight off the bat, the spin the contact model
+        // typically gives a ball at the launch angle he estimates (his read of its velocity
+        // with gravity's pull since contact added back); after a bounce or a deflection, a
+        // little topspin.
         let h = Vec3::new(ve.x, ve.y, 0.0).normalized();
         let axis = Vec3::new(h.y, -h.x, 0.0);
-        let rpm = if ve.z > 2.0 { 1800.0 } else { -600.0 };
+        let off_the_bat = match &self.ball {
+            Ball::Free { path, .. } => {
+                let t0 = match path.segments.first() { Some(bb_physics::ground::Segment::Flight { tr, .. }) => tr.first().t, _ => f64::NAN };
+                (t0 - self.inp.t_contact).abs() < 1e-9 && path.first_bounce().is_none_or(|b| self.t < b.0)
+            }
+            _ => false,
+        };
+        let rpm = if off_the_bat {
+            let since = self.t - self.inp.t_contact;
+            let la = m::atan2(ve.z + bb_math::units::G * since, m::hypot(ve.x, ve.y));
+            typical_batted_spin_rpm(la)
+        } else {
+            -600.0
+        };
         let w = axis * (rpm * core::f64::consts::PI / 30.0);
         batted_path_dt(self.inp.env, self.inp.field, BallState { r: pe, v: ve, w }, self.t, AGENT_DT, |_, _| (0.0, 0.0))
     }
@@ -521,8 +633,8 @@ impl<'a> Sim<'a> {
         let t_end = pred.t_end();
         let start = self.t.max(self.inp.t_contact + fd.a.reaction);
         let (rest, _) = pred.at(t_end);
-        let d = m::hypot(rest.x - fd.pos.x, rest.y - fd.pos.y);
-        (t_end.max(start + run_time_from(d, fd.speed, fd.a.speed, fd.a.tau_a)), Vec3::new(rest.x, rest.y, 0.0))
+        let (d, v0) = run_terms(fd, rest);
+        (t_end.max(start + run_time_from(d, v0, fd.a.speed, fd.a.tau_a)), Vec3::new(rest.x, rest.y, 0.0))
     }
 
     /// One scan of the predicted path for the earliest point the fielder can reach standing,
@@ -537,8 +649,8 @@ impl<'a> Sim<'a> {
         // Shortfall at time `t` for a ball at `b`: how far short of the ball's line the
         // fielder still is (≤ 0: he can field it standing, with the planning reach).
         let gap = |t: f64, b: Vec3| {
-            let d = m::hypot(b.x - fd.pos.x, b.y - fd.pos.y);
-            d - REACH * 0.7 - if t >= start { run_dist_from(t - start, fd.speed, fd.a.speed, fd.a.tau_a) } else { 0.0 }
+            let (d, v0) = run_terms(fd, b);
+            d - REACH * 0.7 - if t >= start { run_dist_from(t - start, v0, fd.a.speed, fd.a.tau_a) } else { 0.0 }
         };
         // The dive's extra reach over the standing plan.
         let dive_extra = REACH + 0.6 * DIVE - REACH * 0.7;
@@ -593,7 +705,9 @@ impl<'a> Sim<'a> {
     /// Re-call among the current chaser and the four fielders nearest the ball. Runs right
     /// after the chaser's replan in the same tick, so his fresh prediction is reused.
     fn recall(&mut self) {
-        let (b, _) = self.ball_at(self.t);
+        // The fielders nearest where the chaser is going (which everyone can see), not the
+        // ball's position now: a pop-up is over the infield while it climbs.
+        let b = self.f[self.primary].target;
         let mut idx: Vec<usize> = (0..9).collect();
         idx.sort_by(|&a, &c| {
             let da = (Vec3::new(b.x, b.y, 0.0) - self.f[a].pos).norm();
@@ -611,6 +725,8 @@ impl<'a> Sim<'a> {
     /// the same observation (reused instead of predicted again).
     fn assign_among(&mut self, cands: Vec<usize>, fresh: Option<usize>) {
         let mut best = (f64::INFINITY, self.primary);
+        // Calls on a ball in the air (agent-models §5.7): (tier, value) per candidate.
+        let mut calls: Vec<(usize, (u8, f64))> = Vec::new();
         for i in cands {
             let reuse = if fresh == Some(i) { self.f[i].belief.take() } else { None };
             let (p, ti, pt) = match reuse {
@@ -625,23 +741,42 @@ impl<'a> Sim<'a> {
             if ti + bias < best.0 {
                 best = (ti + bias, i);
             }
+            calls.push((i, self.call_value(i, &p, ti, pt, bias)));
             self.f[i].t_int = ti;
             self.f[i].target = pt;
             self.f[i].belief = Some(p);
             self.f[i].next_plan = self.t + REPLAN_S;
         }
-        self.primary = best.1;
+        // The best call: a confident catch in the air (outfielders first, then the most time to
+        // spare) over everything else; otherwise the earliest intercept. On a re-call the
+        // chaser keeps the ball unless someone calls it in a higher tier, or in his tier with
+        // `RECALL_MARGIN_S` more to spare.
+        let key = |c: &(usize, (u8, f64))| c.1;
+        let top = calls.iter().copied().max_by(|a, b| key(a).0.cmp(&key(b).0).then(key(a).1.total_cmp(&key(b).1)).then(b.0.cmp(&a.0)));
+        let mut chosen = top.map(|c| c.0).unwrap_or(best.1);
+        if let (Some(cur), Some(top)) = (fresh.and_then(|p| calls.iter().copied().find(|c| c.0 == p)), top) {
+            if top.0 != cur.0 && top.1.0 == cur.1.0 && top.1.1 <= cur.1.1 + RECALL_MARGIN_S {
+                chosen = cur.0;
+            }
+        }
+        self.primary = chosen;
+        // Each fielder's own intercept, before cover jobs replace some targets with bases.
+        let own: Vec<Vec3> = self.f.iter().map(|fd| fd.target).collect();
         self.cover_roles();
         // Ground balls: every infielder who believes he can get to it in the infield breaks
         // for it at once; nobody waits for a call (agent-models §5.7, ground-ball case). Each
-        // judges from his own read: that it is a ground ball (first bounce in the infield)
-        // and that his intercept is in the infield.
+        // judges from his own read: that it is a ground ball (it comes down within 25 m in
+        // the first `GROUNDER_BOUNCE_S`; an infield pop-up also lands in the infield, seconds
+        // later) and that his intercept is in the infield. He runs at that intercept, not at
+        // the base the cover step just gave him.
         let mut broke = false;
+        let t_c = self.inp.t_contact;
         for i in [3usize, 4, 5] {
             let fd = &self.f[i];
-            let grounder = fd.belief.as_ref().and_then(|p| p.first_bounce()).map(|b| m::hypot(b.1, b.2) < 25.0).unwrap_or(false);
-            if i != self.primary && grounder && fd.t_int.is_finite() && m::hypot(fd.target.x, fd.target.y) < INFIELD_R {
+            let grounder = fd.belief.as_ref().and_then(|p| p.first_bounce()).map(|b| m::hypot(b.1, b.2) < 25.0 && b.0 - t_c < GROUNDER_BOUNCE_S).unwrap_or(false);
+            if i != self.primary && grounder && fd.t_int.is_finite() && m::hypot(own[i].x, own[i].y) < INFIELD_R {
                 self.f[i].role = Role::Chase;
+                self.f[i].target = own[i];
                 broke = true;
             }
         }
@@ -650,6 +785,24 @@ impl<'a> Sim<'a> {
         }
         self.assign_relay();
         self.assign_backups();
+    }
+
+    /// A fielder's call on the ball from his own read: tier 2 (outfielder) or 1 (infielder)
+    /// when he believes he catches it in the air with at least `CALL_SLACK_S` to spare, valued
+    /// by the time to spare; otherwise tier 0, valued by how early he fields it (outfielders
+    /// win near-ties on balls in between).
+    fn call_value(&self, i: usize, pred: &BallPath, ti: f64, pt: Vec3, bias: f64) -> (u8, f64) {
+        let fd = &self.f[i];
+        let in_air = ti.is_finite() && pred.first_bounce().map(|b| ti < b.0).unwrap_or(true);
+        if in_air {
+            let start = self.t.max(self.inp.t_contact + fd.a.reaction);
+            let (d, v0) = run_terms(fd, pt);
+            let spare = ti - (start + run_time_from(d - REACH * 0.7, v0, fd.a.speed, fd.a.tau_a));
+            if spare >= CALL_SLACK_S {
+                return (if i >= 6 { 2 } else { 1 }, spare);
+            }
+        }
+        (0, -(ti + bias))
     }
 
     /// Where the ball is being fielded, as the defense sees it: the holder, or the chaser's
@@ -948,7 +1101,7 @@ impl<'a> Sim<'a> {
             if fd.dove && t >= fd.ready_at {
                 fd.dove = false; // recovered
             }
-            (fd.pos, fd.speed) = fielder_step(fd, t, t_contact);
+            (fd.pos, fd.vel) = fielder_step(fd, t, t_contact);
         }
     }
 
@@ -1061,11 +1214,14 @@ impl<'a> Sim<'a> {
             }
             if d <= POCKET {
                 fd.ready_at = self.t + fd.a.transfer + if diving { DIVE_GETUP_S } else { 0.0 };
+                // Having caught it, he plants: his run dies out where braking stops him, not
+                // back at the spot he planned (which a running catch has carried him past).
+                fd.target = stop_point(fd);
                 if let Ball::Thrown { to_base, relay, .. } = self.ball {
                     // A receiver steps straight to the bag; a relay man stays put. Either goes
                     // on quickly, already facing his next target.
                     if relay {
-                        fd.target = fd.pos;
+                        fd.target = stop_point(fd);
                         fd.role = Role::Idle;
                     } else {
                         fd.target = base_pos(to_base);
@@ -1174,7 +1330,7 @@ impl<'a> Sim<'a> {
         let los = Vec3::new(p.x - fd.pos.x, p.y - fd.pos.y, 0.0).normalized();
         let lat = Vec3::new(-los.y, los.x, 0.0);
         let pe = p + los * (err[0] * sp * DEPTH_STRETCH) + lat * (err[1] * sp) + Vec3::new(0.0, 0.0, err[1] * sp * 0.5);
-        let sv = 0.06 * v.norm() * shrink;
+        let sv = READ_VEL_FRAC * v.norm() * shrink;
         let ve = v + los * (err[2] * sv * DEPTH_STRETCH * 0.5) + lat * (err[3] * sv) + Vec3::new(0.0, 0.0, err[3] * sv * 0.5);
         // He assumes a throw's typical backspin.
         let w = Vec3::new(ve.x, ve.y, 0.0).normalized().cross(Vec3::Z) * bb_math::units::rpm_to_radps(THROW_SPIN_RPM);
@@ -1182,12 +1338,24 @@ impl<'a> Sim<'a> {
         // Flown until a second past the spot he was thrown to (he cares about nothing later).
         let vh = m::hypot(ve.x, ve.y).max(5.0);
         let pred = fly_throw(self.inp.env, BallState { r, v: ve, w }, self.t, m::hypot(aim.x - r.x, aim.y - r.y) / vh + 1.0);
-        pred.knots
+        let raw = pred
+            .knots
             .iter()
             .filter(|k| k.s.r.z >= THROW_SCOOP_Z && k.s.r.z <= CATCH_MAX_Z)
             .min_by(|a, b| m::hypot(a.s.r.x - aim.x, a.s.r.y - aim.y).total_cmp(&m::hypot(b.s.r.x - aim.x, b.s.r.y - aim.y)))
-            .map(|k| if m::hypot(k.s.r.x - aim.x, k.s.r.y - aim.y) < 0.5 { aim } else { k.s.r })
-            .unwrap_or(aim)
+            .map(|k| k.s.r)
+            .unwrap_or(aim);
+        // He knows throws mostly come where they are aimed, so he weighs his read against
+        // that: a throw typically misses its spot by `THROW_MISS_FRAC` of its length; his
+        // read's own error is its depth error now plus the velocity error flown to the spot.
+        // Early, from far off, he barely moves; as the read firms up he goes where it says.
+        let from = match &self.ball { Ball::Thrown { path, .. } => path.first().s.r, _ => p };
+        let s_prior = (THROW_MISS_FRAC * m::hypot(aim.x - from.x, aim.y - from.y)).max(0.5);
+        let t_left = m::hypot(aim.x - p.x, aim.y - p.y) / vh;
+        let s_read = m::hypot(sp * DEPTH_STRETCH, sv * DEPTH_STRETCH * 0.5 * t_left);
+        let k = s_prior * s_prior / (s_prior * s_prior + s_read * s_read);
+        let at = aim + Vec3::new(raw.x - aim.x, raw.y - aim.y, 0.0) * k;
+        if m::hypot(at.x - aim.x, at.y - aim.y) < 0.5 { aim } else { at }
     }
 
     fn update_thrown(&mut self) {
@@ -1203,8 +1371,13 @@ impl<'a> Sim<'a> {
                 }
             }
         }
-        let Ball::Thrown { path, catch_at, receiver, .. } = &self.ball else { return };
-        self.f[*receiver].target = Vec3::new(catch_at.x, catch_at.y, 0.0);
+        let Ball::Thrown { path, catch_at, receiver, to_base, relay, .. } = &self.ball else { return };
+        // Taking a throw at a bag, he keeps his foot on it and stretches for any throw he
+        // believes he can reach from there (agent-models §5.8); he leaves it only for one
+        // he cannot.
+        let bag = base_pos(*to_base);
+        let on_bag = !*relay && (1..=4).contains(to_base) && m::hypot(catch_at.x - bag.x, catch_at.y - bag.y) <= 0.9 * RECEIVE_REACH;
+        self.f[*receiver].target = if on_bag { Vec3::new(bag.x, bag.y, 0.0) } else { Vec3::new(catch_at.x, catch_at.y, 0.0) };
         if self.t >= path.last().t {
             // The throw reached the ground: continue from there with the bounce model (a
             // short hop or a throw that got by).
@@ -1664,7 +1837,7 @@ fn new_sim<'a>(inp: &'a LiveInput<'a>, st: &'a mut RulesState) -> Sim<'a> {
                 id: inp.fielders[i],
                 a: inp.fattrs[i],
                 pos: home[i],
-                speed: 0.0,
+                vel: Vec3::ZERO,
                 role: Role::Idle,
                 target: home[i],
                 next_plan: 0.0,
@@ -1933,7 +2106,7 @@ mod tests {
         for fd in sim.f.iter_mut() {
             fd.role = Role::Idle;
             fd.target = fd.pos;
-            fd.speed = 0.0;
+            fd.vel = Vec3::ZERO;
         }
     }
 
@@ -1978,7 +2151,7 @@ mod tests {
         let mut sim = new_sim(&inp, &mut st);
         sim.f[CF].pos = Vec3::new(0.0, 80.0, 0.0);
         loose_ball(&mut sim, 2.0, Vec3::new(0.0, 79.05, 1.0), Vec3::new(0.0, 1.0, 0.0));
-        sim.f[CF].speed = 8.0;
+        sim.f[CF].vel = Vec3::new(0.0, 1.0, 0.0) * 8.0;
         sim.f[CF].target = Vec3::new(0.0, 110.0, 0.0);
         world_tick(&mut sim);
         let secured = sim.out.facts.iter().find_map(|f| if let Input::GloveSecured { t, .. } = f { Some(*t) } else { None });
@@ -2132,10 +2305,11 @@ mod tests {
         sim.t = inp.t_contact + 1.0;
         sim.f[SS].pos = Vec3::new(3.5, 30.0, 0.0);
         let path = grounder(&fx, sim.t, 15.0);
-        sim.f[SS].speed = 6.0;
+        // Running at the ball's line (−x).
+        sim.f[SS].vel = Vec3::new(-1.0, 0.0, 0.0) * 6.0;
         let (_, running) = sim.intercept(SS, &path);
         assert!((running.y - 30.0).abs() < 2.0, "running fielder plans for y {:.1}", running.y);
-        sim.f[SS].speed = 0.0;
+        sim.f[SS].vel = Vec3::ZERO;
         let (_, standing) = sim.intercept(SS, &path);
         assert!(standing.y > running.y + 3.0, "standing fielder plans for y {:.1}", standing.y);
         // The speed law itself: from rest it is `run_dist`; at top speed it is v·t.
@@ -2173,6 +2347,66 @@ mod tests {
         assert!(first.is_finite() && (t_int - first).abs() <= 0.03, "scan {t_int:.3} s, fine search {first:.3} s");
     }
 
+    // agent-models §5.3: a fielder running the wrong way must stop and turn. Expected from the
+    // published laws, worked by hand: braking at 6 m/s² from 7 m/s takes 7/6 s and carries
+    // him 7²/12 = 4.08 m past his start; then 9.08 m from rest (run_time). The movement step
+    // integrates the same laws tick by tick.
+    #[test]
+    fn running_the_wrong_way_costs_the_turn() {
+        let fx = fixture(&[]);
+        let inp = input(&fx, vec![RunnerIn { id: fx.st.batter, base: 0, speed: 8.2 }]);
+        let mut st = fx.st.clone();
+        let mut sim = new_sim(&inp, &mut st);
+        sim.t = 2.0;
+        let p0 = Vec3::new(5.0, 30.0, 0.0);
+        sim.f[SS].pos = p0;
+        sim.f[SS].vel = Vec3::new(7.0, 0.0, 0.0);
+        sim.f[SS].target = p0 - Vec3::new(5.0, 0.0, 0.0);
+        // A chaser already late for the ball runs through his spot (no braking for it).
+        sim.f[SS].role = Role::Chase;
+        sim.f[SS].t_int = 2.0;
+        let a = sim.f[SS].a;
+        let mut farthest: f64 = 0.0;
+        let mut n = 0;
+        while sim.f[SS].pos.x > 0.0 && n < 1000 {
+            sim.move_fielders();
+            sim.t += DT;
+            farthest = farthest.max(sim.f[SS].pos.x - p0.x);
+            n += 1;
+        }
+        let took = n as f64 * DT;
+        let expect = 7.0 / 6.0 + run_time(5.0 + 49.0 / 12.0, a.speed, a.tau_a);
+        assert!((took - expect).abs() < 0.05, "took {took:.3} s, expected {expect:.3} s");
+        assert!((run_time_from(5.0, -7.0, a.speed, a.tau_a) - expect).abs() < 1e-6);
+        assert!((farthest - 49.0 / 12.0).abs() < 0.1, "carried {farthest:.2} m");
+    }
+
+    // agent-models §5.3: a fielder at 7 m/s whose target swings 90° carries on the old way
+    // while he turns: some drift, but less than a straight stop at 6 m/s² would take
+    // (7²/12 = 4.08 m), and by 2 s he is running at the target near top speed.
+    #[test]
+    fn a_turn_carries_the_fielder_on_a_curve() {
+        let fx = fixture(&[]);
+        let inp = input(&fx, vec![RunnerIn { id: fx.st.batter, base: 0, speed: 8.2 }]);
+        let mut st = fx.st.clone();
+        let mut sim = new_sim(&inp, &mut st);
+        sim.t = 2.0;
+        let p0 = Vec3::new(0.0, 30.0, 0.0);
+        sim.f[SS].pos = p0;
+        sim.f[SS].vel = Vec3::new(7.0, 0.0, 0.0);
+        // Far away, so the direction to it stays fixed while he drifts (the closed form's frame).
+        sim.f[SS].target = p0 + Vec3::new(0.0, 4000.0, 0.0);
+        let a_lat = sim.f[SS].a.a_lat;
+        for _ in 0..120 {
+            sim.move_fielders();
+            sim.t += DT;
+        }
+        let drift = sim.f[SS].pos.x - p0.x;
+        assert!(drift > 1.0 && drift < 49.0 / 12.0, "drifted {drift:.2} m (a_lat {a_lat})");
+        let v = sim.f[SS].vel;
+        assert!(v.x.abs() < 0.05 && v.y > 0.9 * sim.f[SS].a.speed, "velocity after 2 s {v:?}");
+    }
+
     // Fielding review #2 and #4: a fielder who has reached his spot is standing still, and a
     // running fielder's time to a resting ball counts his speed.
     #[test]
@@ -2183,14 +2417,14 @@ mod tests {
         let mut sim = new_sim(&inp, &mut st);
         sim.t = 2.0;
         sim.f[SS].role = Role::Chase;
-        sim.f[SS].speed = 7.0;
+        sim.f[SS].vel = Vec3::new(1.0, 0.0, 0.0) * 7.0;
         sim.f[SS].target = sim.f[SS].pos + Vec3::new(0.05, 0.0, 0.0);
         sim.f[SS].t_int = 2.0;
         for _ in 0..30 {
             sim.move_fielders();
             sim.t += DT;
         }
-        assert_eq!(sim.f[SS].speed, 0.0);
+        assert_eq!(sim.f[SS].vel, Vec3::ZERO);
         // 6 m at 6 m/s already (top speed 7.9, τ 0.7): quicker than 6 m from rest, slower
         // than 6 m at top speed, and exactly inverse to the distance law.
         let t = run_time_from(6.0, 6.0, 7.9, 0.7);
@@ -2360,7 +2594,7 @@ mod tests {
             }
         }
         let who: Vec<AgentId> = sim.out.released.iter().map(|x| x.1).collect();
-        assert_eq!(who, vec![sim.f[CF].id, sim.f[SS].id], "throws by {who:?}");
+        assert_eq!(who, vec![sim.f[CF].id, sim.f[SS].id], "throws by {who:?}; facts {:?}; catcher at {:?}", sim.out.facts, sim.f[1].pos);
         assert!(matches!(sim.ball, Ball::Held { by: 1 }), "ball: {:?}", match &sim.ball { Ball::Held { by } => format!("held by {by}"), _ => "loose".into() });
     }
 
