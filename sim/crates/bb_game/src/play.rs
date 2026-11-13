@@ -46,8 +46,9 @@ pub struct FielderAttrs {
     /// `Anticipation` (agent-models §5.10): σ of his read of where the pitch crosses the
     /// plate (horizontal), m.
     pub antic_sigma: f64,
-    /// `Anticipation`: σ of his read of the swing at contact, as the direction the bat sends
-    /// the ball, rad.
+    /// `Anticipation`: σ of his read of the bat's horizontal angle at the instant of contact,
+    /// rad of bat angle: his timing error for the contact instant times how fast the bat is
+    /// turning then ([`bat_read_sigma`]).
     pub swing_sigma: f64,
     /// How hard he commits to his read before he has seen the ball off the bat (1: as the
     /// odds justify; 0: he waits, no jump), [E].
@@ -73,7 +74,7 @@ impl FielderAttrs {
             tau_read: 0.6,
             read_sigma0: if outfield { 3.0 } else { 0.3 },
             antic_sigma: ANTIC_SIGMA_50,
-            swing_sigma: SWING_SIGMA_50_DEG.to_radians(),
+            swing_sigma: bat_read_sigma(BAT_READ_TIME_SIGMA_50_S),
             jump_gain: 1.0,
         }
     }
@@ -83,7 +84,7 @@ impl FielderAttrs {
     pub fn with_anticipation(self, grade: f64) -> Self {
         Self {
             antic_sigma: bb_agents::attributes::ratio_from_grade(grade, ANTIC_SIGMA_50, ANTIC_RHO),
-            swing_sigma: bb_agents::attributes::ratio_from_grade(grade, SWING_SIGMA_50_DEG, ANTIC_RHO).to_radians(),
+            swing_sigma: bat_read_sigma(bb_agents::attributes::ratio_from_grade(grade, BAT_READ_TIME_SIGMA_50_S, ANTIC_RHO)),
             ..self
         }
     }
@@ -91,10 +92,24 @@ impl FielderAttrs {
 
 /// `Anticipation` at grade 50: pitch-location read σ, m [E].
 pub const ANTIC_SIGMA_50: f64 = 0.15;
-/// `Anticipation` at grade 50: swing read σ, as a direction, degrees [E].
-pub const SWING_SIGMA_50_DEG: f64 = 15.0;
+/// `Anticipation` at grade 50: σ of his timing of the contact instant against the bat's sweep,
+/// s [E]. Judging where a moving object was at the moment of a cue on its own path (Linares,
+/// Holcombe & White 2009, Exp. 8: 40 ms); with [`ANTIC_RHO`] it gives 20.5 ms at grade 80 and
+/// 78 ms at grade 20, both published values too (agent-models §5.10, the derivation).
+pub const BAT_READ_TIME_SIGMA_50_S: f64 = 0.040;
+/// How fast the bat's horizontal angle turns at contact, deg/s [E]: the mean over fair balls in
+/// play (sd 143; `examples/bat_read_geometry.rs`, 48 games, 2026-11-13). A property of the
+/// swing model: refit when it changes.
+pub const BAT_YAW_RATE_DPS: f64 = 1915.0;
 /// Ratio per 10 grades for both read σs (less is better), [E].
 pub const ANTIC_RHO: f64 = 1.25;
+
+/// The σ of a fielder's read of the bat's angle at contact (rad) from his timing σ for the
+/// contact instant (s): the bat turns `BAT_YAW_RATE_DPS` meanwhile (agent-models §5.10). Distance
+/// and viewing angle add at most a few percent at the standard positions, and are left out.
+pub fn bat_read_sigma(time_sigma_s: f64) -> f64 {
+    (BAT_YAW_RATE_DPS * time_sigma_s).to_radians()
+}
 
 const DEPTH_STRETCH: f64 = 3.0;
 /// Distance at which `read_sigma0` applies, m [E].
@@ -599,5 +614,22 @@ mod attr_tests {
         for i in 0..6 {
             assert_ne!(FielderAttrs::average(i).read_sigma0, cf.read_sigma0, "position index {i}");
         }
+    }
+
+    // agent-models §5.10 and §10 (the bat-read derivation, 2026-11-13): the bat-angle read σ is
+    // the bat's 1,915°/s at contact times his timing σ for the contact instant, 40 ms at grade
+    // 50 and a factor 1.25³ = 1.953125 per 30 grades. By hand: grade 50, 1915 × 0.040 = 76.6°;
+    // grade 80, 76.6 / 1.953125 = 39.2192°; grade 20, 76.6 × 1.953125 = 149.609375°. The
+    // pitch-location read keeps its 0.15 m at grade 50.
+    #[test]
+    fn bat_read_sigma_follows_the_timing_derivation() {
+        let a = FielderAttrs::average(5);
+        assert!((a.swing_sigma.to_degrees() - 76.6).abs() < 1e-9, "{}", a.swing_sigma.to_degrees());
+        assert!((a.with_anticipation(50.0).swing_sigma.to_degrees() - 76.6).abs() < 1e-9);
+        let g80 = a.with_anticipation(80.0).swing_sigma.to_degrees();
+        let g20 = a.with_anticipation(20.0).swing_sigma.to_degrees();
+        assert!((g80 - 39.2192).abs() < 1e-4, "grade 80: {g80}");
+        assert!((g20 - 149.609375).abs() < 1e-6, "grade 20: {g20}");
+        assert_eq!(a.antic_sigma, 0.15);
     }
 }
