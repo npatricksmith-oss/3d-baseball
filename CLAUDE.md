@@ -97,7 +97,7 @@ Game logic in C++; Blueprints only for thin visual wiring. Script asset setup wi
 ## Workflow
 
 - Update [TASKS.md](TASKS.md) at the end of every work session.
-- Commit in small, described steps. The repo has no remote yet.
+- Commit in small, described steps. The remote is `origin` on GitHub; ask the owner before pushing, and never force-push or push to `main` without their OK.
 - Record owner-relevant choices you make in the relevant spec or PLAN §1 (as "Proposed" if the owner has not ruled).
 - **Standard review protocol (owner, 2026-10-31):** every substantive change set (a milestone step, a risky subsystem, or the end of a work session with code changes) gets an independent review by Codex Sol before it is considered done. Run it in the background and do not poll:
   ```bash
