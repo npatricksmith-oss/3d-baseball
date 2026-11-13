@@ -167,6 +167,11 @@ pub fn step(st: &mut RulesState, input: &Input) -> Vec<Event> {
         Input::PlayEndCheck { .. } => end_play(st, &mut ev),
         Input::PlayTimeout { t } => play_timeout(st, t, &mut ev),
     }
+    // A winning run that touched home while the ball could still be caught or go foul was
+    // held back by `try_walk_off`; once the ball is down fair (or caught), judge it again.
+    if matches!(input, Input::BallTouched { .. } | Input::BallPassedBase { .. } | Input::BallSettled { .. } | Input::GloveSecured { .. }) {
+        try_walk_off(st, &mut ev);
+    }
     ev
 }
 
@@ -549,10 +554,21 @@ fn base_touched(st: &mut RulesState, t: f64, agent: AgentId, base: Base, holding
     }
     let first_touch = lp.first_touch;
     let Some(r) = lp.runners.iter_mut().find(|r| r.runner == agent && !r.out) else { return };
+    let retouch = base == r.start_base && r.retouch_required && !r.retouched && first_touch.map(|ft| t >= ft).unwrap_or(false);
     if r.scored_at.is_some() {
-        return;
+        if !retouch {
+            // Passing bases on the way back to retouch: nothing changes until he gets there.
+            return;
+        }
+        // He touched home before the catch and has come back to retouch (rules-spec §5.3):
+        // the pending run is cancelled, and he must touch home again for it to count. The
+        // bases between are not re-required in reverse order (missed-base appeals are
+        // deferred, §5.6), so his next home touch is the next base in order.
+        r.scored_at = None;
+        r.last_base = 3;
+        lp.runs_pending.retain(|(_, id)| *id != agent);
     }
-    if base == r.start_base && r.retouch_required && first_touch.map(|ft| t >= ft).unwrap_or(false) {
+    if retouch {
         r.retouched = true;
         r.at = base;
         r.on_base = Some(base);
@@ -591,6 +607,12 @@ fn try_walk_off(st: &mut RulesState, ev: &mut Vec<Event>) {
     let [away, home] = st.score();
     let pending = lp.runs_pending.len() as u16;
     if home + pending <= away {
+        return;
+    }
+    // Not while the batted ball is unresolved: a catch would oblige every runner who has
+    // left to retouch (a home touch before it is no run yet, rules-spec §5.3), and a ball
+    // that goes foul sends everyone back (runner-return review #1).
+    if !lp.caught && !(lp.grounded && lp.fair == FairFoul::Fair) {
         return;
     }
     let outs_left = 3 - st.outs.min(3);
@@ -647,7 +669,10 @@ fn third_out(st: &mut RulesState, t: f64, start: Base, kind: OutKind, ev: &mut V
     if !no_runs {
         // Time play: runs whose home touch was delivered before this out count, including
         // equal timestamps (input order is the tie-break, rules-spec §1.2).
-        let mut runs: Vec<(f64, AgentId)> = lp.runs_pending.iter().cloned().filter(|(ts, _)| *ts <= t).collect();
+        // A preceding runner retired on appeal for the third out takes the runs of the
+        // runners following him with him (OBR 5.09(d)); runners ahead of him keep theirs.
+        let following = |id: AgentId| kind == OutKind::Appeal && lp.runners.iter().any(|x| x.runner == id && x.start_base < start);
+        let mut runs: Vec<(f64, AgentId)> = lp.runs_pending.iter().cloned().filter(|(ts, id)| *ts <= t && !following(*id)).collect();
         runs.sort_by(|a, b| a.0.total_cmp(&b.0));
         for (_, r) in runs {
             score_run(st, r, ev);

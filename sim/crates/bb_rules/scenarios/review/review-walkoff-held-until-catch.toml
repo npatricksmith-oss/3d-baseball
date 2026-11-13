@@ -1,0 +1,16 @@
+id = "review-walkoff-held-until-catch"
+title = "Runner-return review #1: a winning home touch while the fly is still in the air does not end the game; the catch sends him back"
+rules = ["OBR 5.09(b)(5)", "OBR 7.01", "rules-spec 4.1", "rules-spec 5.3"]
+milestone = "M4"
+tags = ["review", "walkoff", "retouch"]
+initial = { inning = 9, half = "bottom", score = [0, 0], batter = "H.4", bases = { third = "H.3" } }
+step = [
+  { fact = "PitchDelivered", t = 0.0 },
+  { fact = "BatContact", t = 0.42 },
+  { fact = "BaseLeft", t = 0.5, agent = "H.3", base = 3 },
+  { fact = "BaseTouched", t = 4.5, agent = "H.3", base = 4 },
+  { fact = "GloveSecured", t = 5.0, fielder = "A.CF", pos = [0.0, 95.0], expect_events = [{ event = "RunnerOut", runner = "H.4", kind = "FlyOut" }] },
+  { fact = "BaseTouched", t = 8.0, agent = "H.3", base = 3 },
+  { fact = "PlayEndCheck", t = 10.0 }
+]
+expect = { status = "InProgress", outs = 1, score = [0, 0], bases = { third = "H.3" }, play = "Dead" }

@@ -1,0 +1,18 @@
+id = "review-third-out-appeal-cancels-following-run"
+title = "Runner-return review #2: a preceding runner retired on appeal for the third out takes the following runner's run with him"
+rules = ["OBR 5.09(d)", "rules-spec 6.4"]
+milestone = "M4"
+tags = ["review", "appeal", "runs"]
+initial = { inning = 6, outs = 1, batter = "A.4", bases = { second = "A.2", third = "A.3" } }
+step = [
+  { fact = "PitchDelivered", t = 0.0 },
+  { fact = "BatContact", t = 0.42 },
+  { fact = "BaseLeft", t = 0.5, agent = "A.3", base = 3 },
+  { fact = "BaseLeft", t = 0.5, agent = "A.2", base = 2 },
+  { fact = "BaseTouched", t = 3.0, agent = "A.2", base = 3 },
+  { fact = "BaseTouched", t = 4.0, agent = "A.3", base = 4 },
+  { fact = "BaseTouched", t = 4.5, agent = "A.2", base = 4 },
+  { fact = "GloveSecured", t = 5.0, fielder = "H.CF", pos = [0.0, 95.0] },
+  { fact = "BaseTouched", t = 7.0, agent = "H.3B", base = 3, holding_ball = true, expect_events = [{ event = "RunnerOut", runner = "A.3", kind = "Appeal" }, { event = "HalfInningEnded", runs = 0 }] }
+]
+expect = { score = [0, 0], half = "bottom" }

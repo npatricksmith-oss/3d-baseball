@@ -1,0 +1,18 @@
+id = "review-third-out-appeal-keeps-preceding-run"
+title = "Runner-return review #2 (control): a following runner retired on appeal for the third out is a time play; the preceding runner's earlier legal run counts"
+rules = ["OBR 5.08(a)", "OBR 5.09(d)", "rules-spec 6.4"]
+milestone = "M4"
+tags = ["review", "appeal", "runs"]
+initial = { inning = 6, outs = 1, batter = "A.4", bases = { second = "A.2", third = "A.3" } }
+step = [
+  { fact = "PitchDelivered", t = 0.0 },
+  { fact = "BatContact", t = 0.42 },
+  { fact = "BaseLeft", t = 0.5, agent = "A.2", base = 2 },
+  { fact = "BaseTouched", t = 3.0, agent = "A.2", base = 3 },
+  { fact = "GloveSecured", t = 5.0, fielder = "H.CF", pos = [0.0, 95.0] },
+  # A.3 tagged up: he was on third at the catch.
+  { fact = "BaseLeft", t = 5.1, agent = "A.3", base = 3 },
+  { fact = "BaseTouched", t = 8.0, agent = "A.3", base = 4 },
+  { fact = "BaseTouched", t = 9.0, agent = "H.SS", base = 2, holding_ball = true, expect_events = [{ event = "RunnerOut", runner = "A.2", kind = "Appeal" }, { event = "RunScored", runner = "A.3" }, { event = "HalfInningEnded", runs = 1 }] }
+]
+expect = { score = [1, 0], half = "bottom" }

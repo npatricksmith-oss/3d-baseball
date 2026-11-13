@@ -1654,7 +1654,9 @@ impl<'a> Sim<'a> {
 
     fn move_runners(&mut self) {
         for k in 0..self.r.len() {
-            if self.r[k].out || self.r[k].scored || self.done {
+            // A runner who has touched home is done, unless the catch is still to be seen: his
+            // run is only pending until then (day-fixes review #1).
+            if self.r[k].out || self.done || (self.r[k].scored && (self.r[k].catch_seen || !self.caught())) {
                 continue;
             }
             let start_t = if self.r[k].start == 0 { self.inp.t_contact + BATTER_START } else { self.inp.t_contact };
@@ -1662,16 +1664,22 @@ impl<'a> Sim<'a> {
                 continue;
             }
             // The catch, seen once: a runner off his base at that moment owes a retouch; one
-            // standing on it (tagging up or not) owes nothing and may leave for good.
+            // standing on it (tagging up or not) owes nothing and may leave for good. That
+            // includes a runner who already crossed the plate: he goes back from home, is a
+            // live runner again (tags and throws can retire him), and must touch home again.
             if self.caught() && !self.r[k].catch_seen {
                 self.r[k].catch_seen = true;
                 if self.r[k].start > 0 && self.r[k].s > self.r[k].start as f64 * BASE_L + 1e-6 {
+                    self.r[k].scored = false;
                     self.r[k].tag_up = false;
                     self.r[k].hold_s = None;
                     self.r[k].retouch = true;
                     self.r[k].waiting = false;
                     self.r[k].goal = self.r[k].start;
                 }
+            }
+            if self.r[k].scored {
+                continue;
             }
             // Tag-up: go back to the base and hold it until the catch, then decide.
             if self.r[k].tag_up {
@@ -2415,6 +2423,45 @@ mod tests {
         assert_eq!(count(&sim, |f| matches!(f, Input::BaseTouched { agent: R, base: 3, holding_ball: false, .. })), 1, "facts: {:?}", sim.out.facts);
         assert_eq!(count(&sim, |f| matches!(f, Input::BaseLeft { agent: R, base: 2, .. })), 2);
         assert!(!sim.out.events.iter().any(|e| matches!(e, Event::RulesWarning { .. })));
+    }
+
+    // Day-fixes review #1 (P1): a runner from third who crossed the plate before the catch
+    // (the review's seed 59 play 186 shape) still owes the retouch. Before the fix he stood on
+    // home for good (`scored`, never saw the catch) and the defense's appeal took the run
+    // off. Now he goes back, retouches third, and touches home again; the rules engine holds
+    // one pending run for him, from the second touch.
+    #[test]
+    fn runner_home_before_the_catch_goes_back_and_touches_again() {
+        const R: AgentId = 0x0007;
+        let fx = fixture(&[(R, 3)]);
+        let inp = input(&fx, vec![RunnerIn { id: fx.st.batter, base: 0, speed: 8.2 }, RunnerIn { id: R, base: 3, speed: 16.0 }]);
+        let mut st = fx.st.clone();
+        let mut sim = new_sim(&inp, &mut st);
+        sim.emit(Input::BaseLeft { t: 1.0, agent: R, base: 3 });
+        sim.t = 4.5;
+        sim.emit(Input::BaseTouched { t: 4.5, agent: R, base: 4, holding_ball: false });
+        {
+            let r = &mut sim.r[1];
+            r.s = 4.0 * BASE_L;
+            r.goal = 4;
+            r.last_base = 4;
+            r.scored = true;
+            r.v = 0.0;
+        }
+        after_catch(&mut sim);
+        let touches = |b: u8| count(&sim, |f| matches!(f, Input::BaseTouched { agent: R, base, holding_ball: false, .. } if *base == b));
+        assert_eq!(touches(3), 1, "the retouch; facts: {:?}", sim.out.facts);
+        assert_eq!(touches(4), 2, "home before the catch and again after the retouch");
+        let retouch_t = sim.out.facts.iter().find_map(|f| match f {
+            Input::BaseTouched { t, agent: R, base: 3, .. } => Some(*t),
+            _ => None,
+        });
+        assert!(retouch_t.unwrap() > 5.0);
+        assert!(!sim.out.events.iter().any(|e| matches!(e, Event::RulesWarning { .. })), "events: {:?}", sim.out.events);
+        let PlayState::Live(lp) = &sim.st.play else { panic!("play ended: {:?}", sim.st.play) };
+        assert_eq!(lp.runs_pending.len(), 1);
+        assert_eq!(lp.runs_pending[0].1, R);
+        assert!(lp.runs_pending[0].0 > retouch_t.unwrap(), "the pending run is the second home touch");
     }
 
     // Day-fixes review #3: within 3 m of the wall a fielder can catch higher (a leap). A ball
