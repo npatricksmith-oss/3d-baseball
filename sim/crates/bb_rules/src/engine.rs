@@ -123,9 +123,6 @@ fn step_position(st: &mut RulesState, p: &RunnerPosition) -> Vec<Event> {
         None => path_progress(r.at, p.x, p.y),
     };
     r.sample = Some((p.t, s));
-    if !passing_judged(lp) {
-        return ev;
-    }
     // Compare with every runner whose position is known at this instant: standing on a base,
     // or sampled at the same time.
     let mut passer = None;
@@ -151,8 +148,9 @@ fn step_position(st: &mut RulesState, p: &RunnerPosition) -> Vec<Event> {
     ev
 }
 
-/// Passing is judged only once the batted ball is fair or caught: an uncaught foul ball is
-/// dead, and nothing the runners did while it was in doubt counts (rules-spec §5.5).
+/// A pass counts once the batted ball is fair or caught; while it is in doubt the pass is held
+/// (an uncaught foul ball is dead, and nothing the runners did meanwhile counts) (rules-spec
+/// §5.5).
 fn passing_judged(lp: &LivePlay) -> bool {
     lp.caught || lp.fair == FairFoul::Fair
 }
@@ -161,9 +159,6 @@ fn passing_judged(lp: &LivePlay) -> bool {
 /// other live runner is short of the base after the one he touched last and past the one
 /// before it. Returns (passer, passed).
 fn passed_on_touch(lp: &LivePlay, i: usize, b: Base) -> Option<(usize, usize)> {
-    if !passing_judged(lp) {
-        return None;
-    }
     for (j, o) in lp.runners.iter().enumerate() {
         if j == i || o.out || o.scored_at.is_some() {
             continue;
@@ -181,12 +176,36 @@ fn passed_on_touch(lp: &LivePlay, i: usize, b: Base) -> Option<(usize, usize)> {
     None
 }
 
-/// Record a passing out: the following runner `fol` passed the preceding runner `pre`.
+/// Record a passing out: the following runner `fol` passed the preceding runner `pre`. While
+/// the batted ball is in doubt the pass is held, with its time, and the passer leaves the play
+/// at once; it is judged when the ball is ruled (`judge_pending_passes`).
 fn passing_out(st: &mut RulesState, t: f64, fol: usize, pre: usize, base: Base, ev: &mut Vec<Event>) {
-    let PlayState::Live(lp) = &st.play else { return };
+    let PlayState::Live(lp) = &mut st.play else { return };
     let (f, p) = (lp.runners[fol].runner, lp.runners[pre].runner);
+    if !passing_judged(lp) {
+        let r = &mut lp.runners[fol];
+        r.out = true;
+        r.on_base = None;
+        lp.pending_passes.push(PendingPass { t, runner: f, passed: p, base });
+        return;
+    }
     ev.push(Event::RunnerPassed { runner: f, passed: p });
     record_out(st, t, f, base, OutKind::Tag, ev);
+}
+
+/// The batted ball is now fair or caught: every pass held while it was in doubt stands, each
+/// recorded at its own time and in order, until none remain or the inning ends (rules-spec
+/// §5.5, §6.4).
+fn judge_pending_passes(st: &mut RulesState, ev: &mut Vec<Event>) {
+    let PlayState::Live(lp) = &mut st.play else { return };
+    let passes = core::mem::take(&mut lp.pending_passes);
+    for pp in passes {
+        if !matches!(st.play, PlayState::Live(_)) {
+            return;
+        }
+        ev.push(Event::RunnerPassed { runner: pp.runner, passed: pp.passed });
+        retire(st, pp.t, pp.runner, pp.base, OutKind::Tag, ev);
+    }
 }
 
 fn step_input(st: &mut RulesState, input: &Input) -> Vec<Event> {
@@ -546,6 +565,7 @@ fn new_live_play(st: &RulesState) -> LivePlay {
         outs: Vec::new(),
         runs_pending: Vec::new(),
         last_t: 0.0,
+        pending_passes: Vec::new(),
     }
 }
 
@@ -559,6 +579,7 @@ fn decide(st: &mut RulesState, fair: bool, ev: &mut Vec<Event>) {
     if fair {
         lp.fair = FairFoul::Fair;
         apply_call(st, PitchCall::InPlay, ev);
+        judge_pending_passes(st, ev);
     } else {
         lp.fair = FairFoul::Foul;
         if lp.caught {
@@ -625,9 +646,13 @@ fn live_touch(st: &mut RulesState, _t: f64, what: Touch, ev: &mut Vec<Event>) {
 }
 
 fn home_run(st: &mut RulesState, ev: &mut Vec<Event>) {
-    let PlayState::Live(lp) = st.play.clone() else { return };
+    let PlayState::Live(_) = st.play else { return };
     ev.push(Event::FairFoulDecided { fair: true });
     ev.push(Event::PitchResult { call: PitchCall::InPlay, balls: st.balls, strikes: st.strikes });
+    // A pass made before the ball left the park stands (rules-spec §5.5); passing on the trot
+    // itself is deferred.
+    judge_pending_passes(st, ev);
+    let PlayState::Live(lp) = st.play.clone() else { return };
     st.play = PlayState::Dead;
     st.bases = [None; 3];
     // Every runner not put out scores exactly once, including any who already touched home
@@ -687,6 +712,8 @@ fn glove(st: &mut RulesState, t: f64, fielder: AgentId, x: f64, y: f64, ev: &mut
             ev.push(Event::FairFoulDecided { fair: lp.fair == FairFoul::Fair });
             ev.push(Event::PitchResult { call: PitchCall::InPlay, balls: st.balls, strikes: st.strikes });
         }
+        // Passes made while the fly was in the air came first (rules-spec §5.5).
+        judge_pending_passes(st, ev);
         let b = st.batter;
         record_out(st, t, b, 0, OutKind::FlyOut, ev);
     } else if lp.fair == FairFoul::Pending {
@@ -831,8 +858,17 @@ fn try_walk_off(st: &mut RulesState, ev: &mut Vec<Event>) {
 }
 
 fn record_out(st: &mut RulesState, t: f64, runner: AgentId, base: Base, kind: OutKind, ev: &mut Vec<Event>) {
+    let PlayState::Live(lp) = &st.play else { return };
+    if lp.runners.iter().any(|r| r.runner == runner && !r.out) {
+        retire(st, t, runner, base, kind, ev);
+    }
+}
+
+/// Put `runner` out at time `t`. Unlike `record_out` it also takes a runner already off the
+/// play awaiting a held pass (`judge_pending_passes`).
+fn retire(st: &mut RulesState, t: f64, runner: AgentId, base: Base, kind: OutKind, ev: &mut Vec<Event>) {
     let PlayState::Live(lp) = &mut st.play else { return };
-    let Some(idx) = lp.runners.iter().position(|r| r.runner == runner && !r.out) else { return };
+    let Some(idx) = lp.runners.iter().position(|r| r.runner == runner) else { return };
     let start = lp.runners[idx].start_base;
     lp.runners[idx].out = true;
     lp.runners[idx].on_base = None;
@@ -929,13 +965,15 @@ fn close_play(st: &mut RulesState, lp: &LivePlay, ev: &mut Vec<Event>) {
 /// back to the last base touched; a batter-runner who never reached first is placed there
 /// with forced runners advancing, and the whole thing is reported.
 fn play_timeout(st: &mut RulesState, _t: f64, ev: &mut Vec<Event>) {
-    let PlayState::Live(mut lp) = st.play.clone() else { return };
+    let PlayState::Live(lp) = &mut st.play else { return };
     ev.push(Event::RulesWarning { code: "play_timeout" });
     if lp.fair == FairFoul::Pending {
         lp.fair = FairFoul::Fair;
         ev.push(Event::FairFoulDecided { fair: true });
         ev.push(Event::PitchResult { call: PitchCall::InPlay, balls: st.balls, strikes: st.strikes });
+        judge_pending_passes(st, ev);
     }
+    let PlayState::Live(mut lp) = st.play.clone() else { return };
     // Resolve occupancy from the batter outward: anyone at base 0 goes to first, pushing
     // forced runners along.
     let mut order: Vec<usize> = (0..lp.runners.len()).collect();

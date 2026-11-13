@@ -1,0 +1,37 @@
+id = "passing-017"
+title = "Two out, bases loaded, a towering fly in doubt: the lead runner scores, the runner from first passes the runner holding on third at home, that runner then scores too, and the ball drops fair: third out at the pass, so only the run before it counts"
+# OBR 5.09(b)(9): out for passing, made at the moment of the pass (7.5) even though it is judged
+# when the ball is ruled fair (8.0). OBR 5.08(a): a time play, so the run touched before the
+# third out (3.0) counts and the one touched after it (7.9) does not. Codex rules-passing
+# review #1 ("preserve third-out/run timing").
+rules = ["OBR 5.09(b)(9)", "OBR 5.06(c)(5)", "OBR 5.08(a)", "rules-spec 5.5", "rules-spec 6.4"]
+milestone = "M4"
+tags = ["passing", "pending-ball", "runs", "time-play"]
+initial = { inning = 6, outs = 2, batter = "A.6", bases = { first = "A.4", second = "A.5", third = "A.3" } }
+step = [
+  { fact = "PitchDelivered", t = 0.0 },
+  { fact = "BatContact", t = 0.42 },
+  { fact = "BaseLeft", t = 0.5, agent = "A.3", base = 3 },
+  { fact = "BaseLeft", t = 0.5, agent = "A.5", base = 2 },
+  { fact = "BaseLeft", t = 0.5, agent = "A.4", base = 1 },
+  { fact = "BaseTouched", t = 2.5, agent = "A.5", base = 3 },
+  { fact = "BaseTouched", t = 2.6, agent = "A.4", base = 2 },
+  { fact = "BaseLeft", t = 2.7, agent = "A.4", base = 2 },
+  { fact = "BaseTouched", t = 3.0, agent = "A.3", base = 4 },
+  { fact = "BaseTouched", t = 4.2, agent = "A.6", base = 1 },
+  { fact = "BaseTouched", t = 4.6, agent = "A.4", base = 3 },
+  { fact = "BaseLeft", t = 4.7, agent = "A.4", base = 3 },
+  # Home while the runner from second still stands on third: the pass.
+  { fact = "BaseTouched", t = 7.5, agent = "A.4", base = 4 },
+  { fact = "BaseLeft", t = 7.6, agent = "A.5", base = 3 },
+  { fact = "BaseTouched", t = 7.9, agent = "A.5", base = 4 },
+  { fact = "BallTouched", t = 8.0, what = "Ground", pos = [-15.0, 80.0], expect_events = [
+    { event = "FairFoulDecided", fair = true },
+    { event = "PitchResult", call = "InPlay" },
+    { event = "RunnerPassed", runner = "A.4", passed = "A.5" },
+    { event = "RunnerOut", runner = "A.4", base = 4, kind = "Tag" },
+    { event = "RunScored", runner = "A.3" },
+    { event = "HalfInningEnded", runs = 1 },
+  ] },
+]
+expect = { score = [1, 0], inning = 6, half = "bottom", outs = 0 }

@@ -108,6 +108,20 @@ pub struct LivePlay {
     pub runs_pending: Vec<(f64, AgentId)>,
     /// Latest fact time seen in this play (facts must not go backward).
     pub last_t: f64,
+    /// Passes made while the batted ball was in doubt, in fact order (rules-spec §5.5). The
+    /// passer is already off the play (`out`); the out is recorded, at the pass's own time, once
+    /// the ball is fair or caught, and dropped with the play on an uncaught foul.
+    pub pending_passes: Vec<PendingPass>,
+}
+
+/// A pass made while the batted ball was in doubt (rules-spec §5.5).
+#[derive(Clone, Copy, Debug, PartialEq)]
+pub struct PendingPass {
+    pub t: f64,
+    pub runner: AgentId,
+    pub passed: AgentId,
+    /// The base the passer was heading for (the out's `base`).
+    pub base: Base,
 }
 
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]

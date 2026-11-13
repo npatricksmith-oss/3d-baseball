@@ -1,0 +1,35 @@
+id = "passing-016"
+title = "Caught counterpart of passing-013: the runner from first passes the runner from second between second and third while the fly is in the air, both scramble back, and it is caught: the pass stands, then the catch"
+# OBR 5.09(b)(9): out for passing; a caught fly (fair or foul) keeps the ball alive, so the pass
+# made before the catch counts (OBR 5.06(c)(5) cancels only an uncaught foul). Outs keep their
+# times: the pass (4.0) is recorded before the catch (5.5). The runner from second still owes
+# his retouch (OBR 5.09(b)(5)). Codex rules-passing review #1.
+rules = ["OBR 5.09(b)(9)", "OBR 5.06(c)(5)", "OBR 5.09(b)(5)", "rules-spec 5.3", "rules-spec 5.5"]
+milestone = "M4"
+tags = ["passing", "pending-ball", "catch", "positions"]
+initial = { inning = 5, outs = 0, batter = "A.6", bases = { first = "A.4", second = "A.5" } }
+step = [
+  { fact = "PitchDelivered", t = 0.0 },
+  { fact = "BatContact", t = 0.42 },
+  { fact = "BaseLeft", t = 0.6, agent = "A.5", base = 2 },
+  { fact = "BaseLeft", t = 0.6, agent = "A.4", base = 1 },
+  { fact = "BaseTouched", t = 3.0, agent = "A.4", base = 2 },
+  { fact = "BaseLeft", t = 3.1, agent = "A.4", base = 2 },
+  # The runner from second holds 40% of the way to third; the runner from first is 60% there.
+  { fact = "RunnerPosition", t = 4.0, runner = "A.5", pos = [-7.759, 31.036] },
+  { fact = "RunnerPosition", t = 4.0, runner = "A.4", pos = [-11.638, 27.156] },
+  # Both head back; the runner from first is behind him again.
+  { fact = "RunnerPosition", t = 5.0, runner = "A.5", pos = [-5.819, 32.976] },
+  { fact = "RunnerPosition", t = 5.0, runner = "A.4", pos = [-3.879, 34.916] },
+  { fact = "GloveSecured", t = 5.5, fielder = "H.CF", pos = [0.0, 95.0], expect_events = [
+    { event = "Catch", fielder = "H.CF" },
+    { event = "FairFoulDecided", fair = true },
+    { event = "PitchResult", call = "InPlay" },
+    { event = "RunnerPassed", runner = "A.4", passed = "A.5" },
+    { event = "RunnerOut", runner = "A.4", base = 3, kind = "Tag" },
+    { event = "RunnerOut", runner = "A.6", base = 0, kind = "FlyOut" },
+  ] },
+  { fact = "BaseTouched", t = 6.5, agent = "A.5", base = 2 },
+  { fact = "PlayEndCheck", t = 8.0 },
+]
+expect = { outs = 2, bases = { second = "A.5" }, play = "Dead" }
