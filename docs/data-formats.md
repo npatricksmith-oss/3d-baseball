@@ -66,7 +66,7 @@ key = (game_seed: u64, play_index: u32, agent_id: u16, purpose: u16, sub_index: 
 | `RunnerPerception` | 8 | Jump reads, arrival-versus-throw estimates |
 | `SurfaceBounce` | 9 | Bounce-normal tilt (physics spec §9.3, the only world-side use) |
 | `AgentPolicy` | 10 | Other sampled agent decisions (manager AI, tie-breaks) |
-| `FielderAnticipation` | 11 | A fielder's read of the pitch location before contact (agent-models §5.10); sub-index 0 |
+| `FielderAnticipation` | 11 | A fielder's reads before he reads the ball (agent-models §5.10): sub-index 0, the pitch location before contact; sub-index 1, the bat's angle at contact |
 
 The game seed is `derive(season_seed, game_id)` (PLAN §4.2). Because the RNG is counter-based, **no RNG state is ever saved**. Snapshots (§7) need only the seed and the indices.
 
