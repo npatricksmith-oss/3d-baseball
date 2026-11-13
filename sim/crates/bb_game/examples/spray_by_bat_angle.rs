@@ -25,7 +25,7 @@ fn main() {
             // swing is mirrored in x: knob on +x side.
             let lefty = sw.pivot.x > 0.0;
             let (ax, sp) = if lefty { (-a.x, -spray) } else { (a.x, spray) };
-            let yaw = ax.atan2(a.y).to_degrees();
+            let yaw = bb_math::m::atan2(ax, a.y).to_degrees();
             pts.push((yaw - 90.0, sp.to_degrees()));
         }
     }
@@ -37,7 +37,7 @@ fn main() {
     let syy = pts.iter().map(|p| (p.1 - my) * (p.1 - my)).sum::<f64>();
     let b = sxy / sxx;
     let a = my - b * mx;
-    let res = (pts.iter().map(|p| (p.1 - a - b * p.0).powi(2)).sum::<f64>() / n).sqrt();
+    let res = (pts.iter().map(|p| (p.1 - a - b * p.0) * (p.1 - a - b * p.0)).sum::<f64>() / n).sqrt();
     println!("{} fair balls in play; face mean {:+.1}° sd {:.1}°; spray mean {:+.1}° sd {:.1}°", pts.len(), mx, (sxx / n).sqrt(), my, (syy / n).sqrt());
     println!("fit: spray = {a:+.2}° + {b:.3} × face; residual sd {res:.1}°; r = {:.3}", sxy / (sxx * syy).sqrt());
     println!("face bin (deg)     n   mean spray   sd");
