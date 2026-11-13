@@ -9,9 +9,10 @@ Status: `[ ]` not started · `[~]` in progress · `[x]` done · `[?]` needs an o
 
 ## Resume here (2026-11-13, coordinator run; branch `coord/review-fixes`, not pushed, not in main)
 
-All of this session's work is on `coord/review-fixes` (cut from `origin/main` 638871c). It is **not pushed and not merged into main**; the owner decides. `cargo test --workspace --release`: 136 passed, 0 failed, after every merge.
+All of this session's work is on `coord/review-fixes` (cut from `origin/main` 638871c). It is **not pushed and not merged into main**; the owner decides. `cargo test --workspace --release`: 137 passed, 0 failed, after every merge.
 
 **First, unresolved:**
+- [Codex idle-fielder review](docs/reviews/2026-11-13-codex-idle-fielder-review.md) of the Part A fix below: queued to run after the rules review (prompt names `760afe8..fix/idle-fielder-target`, commits `077aab5`, `87344d1`).
 - [Codex rules-passing review](docs/reviews/2026-11-13-codex-rules-passing-review.md) of the rules change below: the first run hit the Codex usage limit before writing anything (it had confirmed identical event-log digests over 512 real games before/after). A rerun was scheduled for 03:10. If the file is missing, rerun Codex on commits `ac6e4d5..0026dd0` (bb_rules and rules-spec only), asking: each new scenario's expected outcome against the OBR rules listed below; regression risk for real games (equal-timestamp touches, a passing out that ends the inning); determinism and event sourcing; spec/code agreement.
 - Owner decisions waiting:
   1. **Side changes now take 16.5–23 s** of play time (about 3× before), because outgoing players walk all the way off instead of vanishing; stand-in dugouts moved into the foul-line stands (18 m along each line). The alternative is a camera cut that hides the walk-off.
@@ -25,12 +26,13 @@ Done this session (coordinator with worker agents; merges in `coord/review-fixes
 - **[Codex coord review](docs/reviews/2026-11-13-codex-coord-review-fixes-review.md) resolved:** no P1/P2; both P3 fixed (the projected jump state is timed by the tick that produced it; the example uses `bb_math::m`).
 - **Rules engine (rules-spec §5.4, §5.5):** overrunning first (OBR 5.09(b)(4)), two runners on a base (5.06(a)(2), (b)(2)), passing a preceding runner (5.09(b)(9)), a forced runner tagged on a base short of his forced base (force-004). Scenarios 64 → 94. Real games unchanged (identical digests over 512 games). **Simulator side not done:** the live sim does not emit `RunnerPosition` samples (so overrun protection never starts and passing is judged from base touches only) and the batter-runner never actually overruns first.
 - **[R13 foul research](docs/research/r13-foul-direction.md):** MLB foul share of contact is ~51%, and ~40% even for well-timed contact; well-timed fouls are mostly steep undercut balls (69–88% foul above 50° launch). The gap is inside the timing window, not at its edges. Owner (2026-11-13): accepted; "ball/bat contact is two curves colliding at weird angles so foul balls should be fairly common."
-- **[Pitcher in the outfield diagnosed](docs/calibration/2026-11-12-pitcher-outfield-diagnosis.md)** (not fixed): a fielder set Idle keeps his own intercept as his target, and with the bases empty the pitcher gets no job on outfield balls; 13.7% of balls in play. `cargo run --release -p bb_game --example pitcher_roam -- 7 1`.
+- **[Pitcher in the outfield](docs/calibration/2026-11-12-pitcher-outfield-diagnosis.md): Part A fixed.** A fielder set Idle kept his own intercept as his target; now he pulls up where braking stops him (`cover_roles`). Flagged plays 13.7% → 0.3% of balls in play (the rest are balls hit behind home). Part B (the pitcher's job on bases-empty outfield balls) waits on owner decision 2; until then he stays near the mound. `cargo run --release -p bb_game --example pitcher_roam -- 1 200`.
+- **It uncovered a hidden bug: pop-ups drop.** Runs 5.27 → 5.48 per team-game, PU hit .005 → .044 (MLB ≈ .02), FB .122 → .131 ([note](docs/calibration/2026-11-13-idle-fielder-target.md)). The called outfielder misjudges the depth of pop-ups landing 55–65 m out in short right and center and keeps the call (outfielders outrank infielders); the infielders who used to drift there by mistake caught them. Not tuned.
 - CLAUDE.md no longer says the repo has no remote.
 
 Next, in order:
 1. Resolve the Codex rules-passing review.
-2. **Pitcher-in-outfield fix**: Part A (an Idle fielder's target becomes his stop point, `cover_roles`) is a plain bug fix; Part B (pitcher backs up third) waits on owner decision 2. Re-measure runs (idle outfielders will stop drifting toward balls).
+2. **Pop-ups dropping in short right/center** (above): find why the outfielder misreads their depth (spin/drag assumed for balls above 50°? re-call never handing the ball to a better-placed infielder?) and build §5.7's "a called-off fielder peels off to back up". Then Part B of the pitcher fix if the owner agrees.
 3. **Fouls (O1/R13)**, following the owner's direction: extend `foul_diag` with Statcast-style measures (foul share by launch angle and attack direction, early/late split, bat tilt at contact, swing length) and add a `cage-map` bat-tilt counterfactual (−20/−30/−35°) before changing any calibration.
 4. Live sim emits `RunnerPosition` at ~30 Hz and models an overrun of first.
 5. Watch the client (`bin/play.sh`): reset staging, side-change walk-offs, sidesteps.
