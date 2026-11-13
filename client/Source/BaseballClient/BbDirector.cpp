@@ -1113,7 +1113,8 @@ void ABbDirector::PoseFigure(int32 Slot, const BbActor& A, const BbFrame& Frame,
 	const bool bStill = St.SpeedCm < 40.f;
 	const UAnimSequence* Manual = nullptr;
 	float ClipTime = 0.f;
-	if (bMotions && bFielder && Position == 1 && !In.bStaged && PlayTime < 0.8f && AnimPitch)
+	// (A pitcher who dives on an early comebacker is diving, not finishing his delivery.)
+	if (bMotions && bFielder && Position == 1 && !In.bStaged && PlayTime < 0.8f && AnimPitch && In.DiveSince < 0.f)
 	{
 		// The delivery: the clip's strike (1.0 s in) lands on the release (play time 0).
 		Manual = AnimPitch;
@@ -1187,6 +1188,15 @@ void ABbDirector::PoseFigure(int32 Slot, const BbActor& A, const BbFrame& Frame,
 		const float Down = FMath::Clamp(In.DiveSince / DiveFallS, 0.f, 1.f);
 		Tilt = DiveTiltDeg * FMath::Sin(HALF_PI * Down);
 		Lift = DiveDropCm * Down * Down;
+	}
+	else if (Manual && Manual == AnimCrouch && In.DiveSince >= 0.f)
+	{
+		// Getting up: the layout eases off over the first half of the rise, so he comes up
+		// from where he lay rather than jumping to his feet.
+		const float Left = FMath::Clamp((In.DiveUpIn / DiveRiseS - 0.5f) / 0.5f, 0.f, 1.f);
+		const float Ease = Left * Left * (3.f - 2.f * Left);
+		Tilt = DiveTiltDeg * Ease;
+		Lift = DiveDropCm * Ease;
 	}
 	PlaceDiver(F, Foot, St.Yaw, Tilt, Lift);
 

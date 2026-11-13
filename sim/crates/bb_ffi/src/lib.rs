@@ -119,6 +119,30 @@ pub struct BbDive {
 /// Most dives shown at one instant.
 pub const BB_MAX_DIVES: usize = 4;
 
+/// A `Dive` or `DiveUp` marker, decoded.
+struct DiveMark {
+    up: bool,
+    t: f32,
+    agent: u16,
+    p: [f32; 3],
+}
+
+/// The dives under way at `t`: each `Dive` pairs with that fielder's first `DiveUp` strictly
+/// after it (a second dive can start the instant he is up from the first, and must not pair
+/// with that first get-up: Codex dive animation review #2).
+fn active_dives(marks: &[DiveMark], t: f32) -> Vec<BbDive> {
+    let mut out = Vec::new();
+    for mk in marks.iter().filter(|m| !m.up && m.t <= t) {
+        let up = marks.iter().filter(|u| u.up && u.agent == mk.agent && u.t > mk.t).min_by(|a, b| a.t.total_cmp(&b.t));
+        let Some(up) = up.filter(|u| u.t > t) else { continue };
+        let (dx, dy) = (up.p[0] - mk.p[0], up.p[1] - mk.p[1]);
+        let n = (dx * dx + dy * dy).sqrt();
+        let dir = if n > 1e-4 { [dx / n, dy / n] } else { [0.0, 0.0] };
+        out.push(BbDive { agent: mk.agent, _pad: 0, since_s: t - mk.t, up_in_s: up.t - t, dir });
+    }
+    out
+}
+
 /// Everything's position at one instant of a play (sim frame, metres).
 #[repr(C)]
 #[derive(Clone, Copy, Default)]
@@ -298,19 +322,14 @@ pub unsafe extern "C" fn bb_timeline_sample(blob: *const u8, len: usize, t: f32,
             frame.holder = who as i32;
             frame.release_in_s = if next.is_finite() { next - t } else { -1.0 };
         }
-        // Dives under way: each Dive marker pairs with the fielder's next DiveUp.
-        for mk in marks.iter().filter(|m| m.kind() == MarkerKind::Dive && m.t() <= t) {
-            let up = marks.iter().filter(|u| u.kind() == MarkerKind::DiveUp && u.agent() == mk.agent() && u.t() >= mk.t()).min_by(|a, b| a.t().total_cmp(&b.t()));
-            let Some(up) = up.filter(|u| u.t() > t) else { continue };
-            if frame.n_dives as usize == BB_MAX_DIVES {
-                break;
-            }
-            let (Some(pa), Some(pb)) = (mk.p(), up.p()) else { continue };
-            let (a, b) = (v3(pa), v3(pb));
-            let (dx, dy) = (b[0] - a[0], b[1] - a[1]);
-            let n = (dx * dx + dy * dy).sqrt();
-            let dir = if n > 1e-4 { [dx / n, dy / n] } else { [0.0, 0.0] };
-            frame.dives[frame.n_dives as usize] = BbDive { agent: mk.agent(), _pad: 0, since_s: t - mk.t(), up_in_s: up.t() - t, dir };
+        // Dives under way.
+        let dm: Vec<DiveMark> = marks
+            .iter()
+            .filter(|m| matches!(m.kind(), MarkerKind::Dive | MarkerKind::DiveUp))
+            .filter_map(|m| m.p().map(|p| DiveMark { up: m.kind() == MarkerKind::DiveUp, t: m.t(), agent: m.agent(), p: v3(p) }))
+            .collect();
+        for d in active_dives(&dm, t).into_iter().take(BB_MAX_DIVES) {
+            frame.dives[frame.n_dives as usize] = d;
             frame.n_dives += 1;
         }
     }
@@ -621,6 +640,11 @@ mod tests {
                 lying.retain(|l| f.dives[..f.n_dives as usize].iter().any(|d| d.agent == l.0));
                 t += 0.05;
             }
+            // Every dive is over before the clip ends: a play that ended during one lasts until
+            // the diver is up (Codex dive animation review #3).
+            let mut f = BbFrame::default();
+            unsafe { bb_timeline_sample(p, len, info.duration_s, &mut f) };
+            assert!(f.dives[..f.n_dives as usize].iter().all(|d| d.up_in_s < 1e-3), "play {}: the clip ends with a fielder still down", info.play_index);
             // The ball never goes under the turf, at any instant of any play.
             let mut t = 0.0;
             while t <= info.duration_s {
@@ -669,5 +693,21 @@ mod tests {
         let mut info = BbPlayInfo::default();
         assert_eq!(unsafe { bb_timeline_info(junk.as_ptr(), 7, &mut info) }, -1);
         unsafe { bb_game_free(g) };
+    }
+
+    // Codex dive animation review #2: a second dive that starts the instant the fielder is up
+    // from the first is reported, with its own direction, not paired with the first get-up.
+    #[test]
+    fn a_dive_starting_as_the_last_one_ends_is_reported() {
+        let mk = |up: bool, t: f32, p: [f32; 3]| DiveMark { up, t, agent: 0x186, p };
+        let marks = [mk(false, 1.0, [0.0, 30.0, 0.0]), mk(true, 2.5, [1.0, 30.0, 0.0]), mk(false, 2.5, [1.0, 30.0, 0.0]), mk(true, 4.0, [1.0, 31.5, 0.0])];
+        for t in [2.5f32, 3.0, 3.9] {
+            let d = active_dives(&marks, t);
+            assert_eq!(d.len(), 1, "at {t}: {} dives", d.len());
+            assert_eq!(d[0].dir, [0.0, 1.0], "at {t}: the second dive's direction");
+            assert!((d[0].since_s - (t - 2.5)).abs() < 1e-6 && (d[0].up_in_s - (4.0 - t)).abs() < 1e-6);
+        }
+        assert_eq!(active_dives(&marks, 1.2)[0].dir, [1.0, 0.0]);
+        assert!(active_dives(&marks, 4.0).is_empty());
     }
 }

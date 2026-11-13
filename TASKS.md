@@ -11,7 +11,7 @@ Status: `[ ]` not started · `[~]` in progress · `[x]` done · `[?]` needs an o
 
 Branch `claude/cf-misplay-analysis-98b93b` (from main at `2355c34`). `cargo test --workspace --release`: all pass.
 
-**Nothing is waiting on a review.** The [Codex dive and two-out throw review](docs/reviews/2026-11-13-codex-dive-and-two-out-throw-review.md) is resolved: its two P2s and one P3 are fixed. The dive animation and the lunge came after that review and have not been reviewed yet.
+**Nothing is waiting on a review.** The [Codex dive and two-out throw review](docs/reviews/2026-11-13-codex-dive-and-two-out-throw-review.md) and the [Codex dive animation review](docs/reviews/2026-11-13-codex-dive-animation-review.md) are resolved: all eight findings are fixed (five P2s, three P3s). The animation review's fixes: the lunge never crosses the wall, an adjacent second dive reaches the client, a play that ends during a dive lasts until the diver is up, the rise eases out of the layout, and an early pitcher dive beats the delivery pose.
 
 Done (the owner watched seed 7475 and reported three plays; the traces are in the commits):
 - **A rimmed dive no longer allows a second dive from the ground** (play 25). The get-up runs from the first dive. A downed fielder can only grab a low ball within arm's reach. Runs/team-game 5.48 → 5.85 and GB hits .413 → .436 over 3 × 200 games, almost all from this fix (Codex verified it). The double dive had been converting hits into outs.
@@ -19,7 +19,7 @@ Done (the owner watched seed 7475 and reported three plays; the traces are in th
 - **Dives are shown in the client** (A5, play 58: the shortstop's diving stop looked like him standing with the ball for 2 s). In the sim a dive carries the body over a 0.3 s lunge (`DIVE_LUNGE_S` [E]), and the timeline gets `Dive`/`DiveUp` markers. `BbFrame.dives` reports dives under way. The client lays the figure out toward the ball (a stock leap clip, tipped 45° and dropped to the turf), holds him there, and stands him up through the landing clip's crouch. Check it headlessly with `client/run.sh 7 -RenderOffscreen -BbDiveShots=3`; `-BbAnimTest=dive` previews pose candidates.
 - Measured: fielders dive about 23 times a game (both teams). Most dives start at the edge of dive range (2.25–2.5 m), and about 60% are caught. The owner accepts dives ("it's fine if he dives").
 
-Not done: a player lying down when the play ends pops up at the reset. Real dive and get-up clips (the stand-ins are the mannequin's leap and landing). A18 (outfielders block hard singles instead of diving) is still open.
+Not done: real dive and get-up clips (the stand-ins are the mannequin's leap and landing). A18 (outfielders block hard singles instead of diving) is still open.
 
 ## Previous: 2026-11-13, sixth session: the overrun of first
 

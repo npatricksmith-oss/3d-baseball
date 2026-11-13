@@ -191,6 +191,21 @@ pub fn encode(step: &PitchStep, st: &RulesState) -> Vec<u8> {
         }
         t_end = t_end.max(track.last().unwrap().0);
     }
+    // A dive the play ended during (the deciding fact can come on the dive's own tick): the
+    // diver finishes his lunge to where his body lands and lies there until he is up, and
+    // the clip lasts until then. Presentation only, like the jogs above.
+    for &(t, id, _, land) in &step.viz.dives {
+        let up = t + crate::live::DIVE_GETUP_S;
+        let Some((_, track)) = tracks.iter_mut().find(|(a, _)| *a == id) else { continue };
+        let last = track.last().unwrap().0;
+        if last < up {
+            if last < t + crate::live::DIVE_LUNGE_S {
+                track.push((t + crate::live::DIVE_LUNGE_S, land));
+            }
+            track.push((up, land));
+            t_end = t_end.max(up);
+        }
+    }
     // The play is not over for a viewer until the umpire has signalled its last out.
     t_end = step.calls.iter().map(|c| c.t_call()).fold(t_end, f64::max);
     let mut actor_offs = Vec::new();

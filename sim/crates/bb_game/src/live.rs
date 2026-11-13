@@ -27,7 +27,11 @@ const DIVE_MAX_Z: f64 = 1.2;
 pub const DIVE_GETUP_S: f64 = 1.5;
 /// A dive's lunge: the body travels until the glove is at the ball, at most [`DIVE`], over
 /// this long [E] (a layout dive covers 1.5 m in about 0.3 s), then lies there.
-const DIVE_LUNGE_S: f64 = 0.3;
+pub const DIVE_LUNGE_S: f64 = 0.3;
+/// Points checked along a dive's lunge against the wall, and the body's half-width kept off
+/// it, m [E].
+const LUNGE_CHECKS: usize = 15;
+const BODY_R: f64 = 0.3;
 /// A catch below this height is a shoestring catch: a close call for the umpire, m [E].
 const LOW_CATCH_Z: f64 = 0.4;
 const CATCH_MAX_Z: f64 = 2.4;
@@ -1871,7 +1875,23 @@ impl<'a> Sim<'a> {
                 fd.dove = true;
                 fd.ready_at = self.t + DIVE_GETUP_S;
                 let to_ball = Vec3::new(b.x - fd.pos.x, b.y - fd.pos.y, 0.0);
-                let land = fd.pos + to_ball * ((horiz - REACH).max(0.0) / horiz.max(1e-9));
+                let mut land = fd.pos + to_ball * ((horiz - REACH).max(0.0) / horiz.max(1e-9));
+                // Never through the wall: the body stops short of the first point of its
+                // path that would put him within his body's width of it (the fair and foul
+                // fences meet at an inward corner a straight lunge can cut; Codex dive
+                // animation review #1).
+                let field = self.inp.field;
+                let inside = |p: Vec3| m::hypot(p.x, p.y) <= field.fence_at(m::atan2(p.x, p.y)) - BODY_R;
+                let from = fd.pos;
+                let mut ok = from;
+                for j in 1..=LUNGE_CHECKS {
+                    let q = from + (land - from) * (j as f64 / LUNGE_CHECKS as f64);
+                    if !inside(q) {
+                        break;
+                    }
+                    ok = q;
+                }
+                land = ok;
                 fd.lunge = Some((self.t, fd.pos, land));
                 let (id, from) = (fd.id, fd.pos);
                 self.out.dives.push((self.t, id, from, land));
@@ -2980,7 +3000,31 @@ mod tests {
         assert!(!facts.iter().any(|f| matches!(f, Input::GloveSecured { .. })), "dove from the ground: {facts:?}");
     }
 
-    // Codex dive review #2: a low ball in reach of a fielder who is down is taken now, not
+    // Codex dive animation review #1: where the fair and foul fences meet, a straight lunge
+    // between two points inside the wall can cut the corner. The body stops short of it.
+    #[test]
+    fn a_dive_never_carries_the_body_through_the_wall() {
+        let fx = fixture(&[]);
+        let inp = input(&fx, vec![RunnerIn { id: fx.st.batter, base: 0, speed: 8.2 }]);
+        let mut st = fx.st.clone();
+        let mut sim = new_sim(&inp, &mut st);
+        let at = |th: f64, inset: f64| {
+            let r = fx.field.fence_at(th) - inset;
+            Vec3::new(r * m::sin(th), r * m::cos(th), 0.0)
+        };
+        let (fielder, ball) = (at(core::f64::consts::FRAC_PI_4 - 0.006, 0.001), at(core::f64::consts::FRAC_PI_4 + 0.018, 0.001));
+        sim.f[CF].pos = fielder;
+        loose_ball(&mut sim, 2.0, ball + Vec3::new(0.0, 0.0, 0.05), (ball - fielder).normalized() * 4.0);
+        sim.f[CF].role = Role::Chase;
+        for _ in 0..40 {
+            world_tick(&mut sim);
+            let p = sim.f[CF].pos;
+            assert!(m::hypot(p.x, p.y) <= fx.field.fence_at(m::atan2(p.x, p.y)) + 1e-9, "at {:.2} s the body is {:.3} m past the wall", sim.t, m::hypot(p.x, p.y) - fx.field.fence_at(m::atan2(p.x, p.y)));
+        }
+        assert!(!sim.out.dives.is_empty(), "he never dove (gap {:.2} m)", (ball - fielder).norm());
+    }
+
+        // Codex dive review #2: a low ball in reach of a fielder who is down is taken now, not
     // deferred to the next tick, when it will have risen past what he can reach lying down.
     #[test]
     fn a_fielder_down_from_a_dive_takes_a_rising_ball_while_it_is_low() {
