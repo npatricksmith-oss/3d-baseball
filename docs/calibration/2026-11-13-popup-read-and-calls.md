@@ -15,6 +15,11 @@ digests are identical). Each column is how far one σ of one error term alone mo
 predicted landing point; "spin" is the miss with no read error at all (typical-spin belief
 and the 0.1 s agent flight step against the true path, + = predicted deeper). Medians, m.
 
+The table was measured on games played with the old call rule (`CALL_SURE_SIGMAS` 0). The
+committed rule changes which balls are hit later in a game, so the same command now gives
+slightly different samples (first row −0.6 / 21.9 / 8.2 / 6.3 / 4.1 / 24.6); the read
+function and the conclusion are the same (Codex popup-calls review, P3).
+
 | launch | t after contact | spin | position depth | position lateral/height | velocity depth | velocity lateral/vertical | all, 1 σ |
 |---|---:|---:|---:|---:|---:|---:|---:|
 | 25–35° (hang 5.0 s) | 0.4 s | −0.8 | 22.0 | 8.2 | 6.3 | 4.1 | 24.7 |
@@ -81,7 +86,7 @@ digests), which is how the "before" column was run.
 
 | | runs/team-game | GB hit | LD hit | FB hit | PU hit |
 |---|---:|---:|---:|---:|---:|
-| before | 5.55 | .411 | .723 | .134 | .047 |
+| before | 5.55 | .410 | .719 | .134 | .047 |
 | after (1 σ) | 5.47 | .411 | .723 | .122 | .018 |
 | 2 σ (not adopted) | 5.41 | | .725 | .119 | .007 |
 | 3 σ (not adopted) | 5.38 | | .726 | .118 | .004 |

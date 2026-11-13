@@ -7,15 +7,14 @@ Status: `[ ]` not started · `[~]` in progress · `[x]` done · `[?]` needs an o
 
 ---
 
-## Resume here (2026-11-13, second session: pop-ups; merged into main, not pushed)
+## Resume here (2026-11-13, second session: pop-ups; merged into main and pushed)
 
-`fix/popup-calls` (cut from main `454d341`) is merged into local main; nothing is pushed. `cargo test --workspace --release`: 143 passed, 0 failed. The owner paused here and will continue in a new session. Owner (2026-11-13): merge into main often.
+`fix/popup-calls` (cut from main `454d341`) is merged into main and pushed to origin. `cargo test --workspace --release`: 143 passed, 0 failed. The owner paused here and will continue in a new session. Owner (2026-11-13): merge into main often.
 
-**First, unresolved:** the [Codex popup-calls review](docs/reviews/2026-11-13-codex-popup-calls-review.md), Resolution **Open**, nothing fixed yet. No P1.
-- (P2) With extra chasers, both middle infielders can chase and nobody covers second until the next recall (seed 55 play 159, runner on second; 17 such assignments in 1,024 games). Wanted: a fallback cover when both are busy, before backups are handed out.
-- (P2) A recall looks only at the chaser and the four fielders nearest his target, so another active chaser outside that set is sent to backup before anyone is sure (seed 897 play 163). Wanted: every active chaser is a recall candidate.
-- (P3) The calibration note's baseline GB/LD rates should read .410/.719 (not .411/.723), and its read-error table was measured with the old call rule's games (the committed code gives −0.6 / 21.9 / 8.2 / 6.3 / 4.1 / 24.6 in the first row).
-- The review also notes the gap-fly test's right fielder has only 30 ms of margin over the chase threshold; pick a more comfortable ball.
+**Nothing is waiting on a review.** The [Codex popup-calls review](docs/reviews/2026-11-13-codex-popup-calls-review.md) is resolved: its P3 (two numbers in the calibration note) is fixed, and the owner deferred both P2 findings (2026-11-13: "errors such as you describe can take place" in real games; fine once in a while, keep for a later fix):
+- Later: when both middle infielders go for an uncalled ball, nobody covers second until the next re-call (seed 55 play 159; 17 such assignments in 1,024 games). Wanted: a fallback cover before backups are handed out.
+- Later: a re-call looks only at the chaser and the four fielders nearest his target, so another active chaser can be sent to backup before anyone is sure (seed 897 play 163). Wanted: every active chaser is a re-call candidate.
+- Later: the gap-fly test's right fielder has only 30 ms of margin over the chase threshold; pick a more comfortable ball.
 
 **Then, the owner's two items (2026-11-13), in this order, merging each into main when done:**
 1. The called-off infielder drifts out behind the caller instead of standing still (§5.7 "peels off to back up"; seed 29 play 135, confirmed by the review as a wrong sure call by the centre fielder, depth draw −1.47 σ).

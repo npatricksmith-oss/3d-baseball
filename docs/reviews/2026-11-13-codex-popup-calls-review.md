@@ -85,4 +85,12 @@ All temporary sources, copies, logs, linker cache and build output were kept und
 
 ## Resolution
 
-Open.
+Resolved 2026-11-13: one finding fixed, two deferred by the owner.
+
+**P2 #1, both middle infielders chasing leaves second uncovered: deferred (owner, 2026-11-13).** The gap lasts until the next re-call, at most about a second, and the review's example lost nothing. The owner's ruling on both P2 findings: mistakes like these happen in real games, so an occasional one is fine for now; keep them for a later fix. Listed in TASKS.md.
+
+**P2 #2, a re-call sends an active chaser outside its candidate set to backup before anyone is sure: deferred (owner, 2026-11-13)**, same ruling. The fix when it is taken up: every active chaser is a re-call candidate.
+
+**P3, calibration note: fixed.** The baseline ground-ball and line-drive rates now read .410 and .719, and the read-error table is labelled as measured on the old call rule's games, with the committed code's first row given.
+
+Also noted for later, not a finding: the gap-fly test's right fielder has 30 ms of margin over the chase threshold; a more comfortable ball would make the test less sensitive to planner changes.
