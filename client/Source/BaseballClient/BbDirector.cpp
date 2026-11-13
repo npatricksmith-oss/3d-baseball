@@ -494,9 +494,13 @@ bool ABbDirector::StartReset(const FBbPlay& Next)
 		M.SpeedMps = Dist < ResetWalkWithinM ? ResetWalkMps : ResetJogMps;
 		if (I < NumStay)
 		{
-			// Nobody keeps the next pitch waiting longer than the cap: he hurries instead.
-			M.SpeedMps = FMath::Max(M.SpeedMps, Dist / ResetMaxSeconds);
-			Longest = FMath::Max(Longest, Dist / M.SpeedMps);
+			// He quickens rather than keep the next pitch waiting, but only up to a jog: a
+			// sprint (or faster than legs go) back to his spot looks wrong.
+			if (TravelSeconds(Dist, M.SpeedMps, ResetAccelMps2) > ResetMaxSeconds)
+			{
+				M.SpeedMps = FMath::Max(M.SpeedMps, SpeedFor(Dist, ResetMaxSeconds, ResetAccelMps2, ResetHurryMps));
+			}
+			Longest = FMath::Max(Longest, TravelSeconds(Dist, M.SpeedMps, ResetAccelMps2));
 		}
 	}
 
@@ -532,7 +536,7 @@ bool ABbDirector::StartReset(const FBbPlay& Next)
 		{
 			FResetMover& M = Movers[Thrower];
 			const FResetMover* PitcherMove = Movers.FindByPredicate([Pitcher](const FResetMover& X) { return X.Agent == Pitcher->agent; });
-			const float PitcherArrives = PitcherMove ? (PitcherMove->To - PitcherMove->From).Size() / PitcherMove->SpeedMps : 0.f;
+			const float PitcherArrives = PitcherMove ? TravelSeconds((PitcherMove->To - PitcherMove->From).Size(), PitcherMove->SpeedMps, ResetAccelMps2) : 0.f;
 			const float Dist = (ResetBallTo - FVector(M.From.X, M.From.Y, 1.2)).Size();
 			ResetThrower = Thrower;
 			ResetFlight = FMath::Clamp(Dist / ResetThrowMps, 0.35f, 2.5f);
@@ -540,11 +544,62 @@ bool ABbDirector::StartReset(const FBbPlay& Next)
 			// He stands for the throw and its follow-through, then makes up the time.
 			M.Depart = ResetThrowAt + 0.45f;
 			const float Walk = (M.To - M.From).Size();
-			M.SpeedMps = FMath::Max(M.SpeedMps, Walk / 3.f);
-			ResetDuration = FMath::Max3(ResetDuration, ResetThrowAt + ResetFlight + 0.3f, M.Depart + Walk / M.SpeedMps);
+			M.SpeedMps = FMath::Max(M.SpeedMps, SpeedFor(Walk, 3.f, ResetAccelMps2, ResetHurryMps));
+			ResetDuration = FMath::Max3(ResetDuration, ResetThrowAt + ResetFlight + 0.3f, M.Depart + TravelSeconds(Walk, M.SpeedMps, ResetAccelMps2));
 		}
 	}
 	return true;
+}
+
+float ABbDirector::TravelSeconds(float Dist, float V, float A)
+{
+	if (Dist <= 0.f || V <= 0.f || A <= 0.f)
+	{
+		return 0.f;
+	}
+	// Too short to reach V: speed up halfway, slow down the rest.
+	if (Dist < V * V / A)
+	{
+		return 2.f * FMath::Sqrt(Dist / A);
+	}
+	return Dist / V + V / A;
+}
+
+float ABbDirector::TravelGone(float Dist, float V, float A, float T)
+{
+	const float Total = TravelSeconds(Dist, V, A);
+	if (T <= 0.f || Total <= 0.f)
+	{
+		return 0.f;
+	}
+	if (T >= Total)
+	{
+		return Dist;
+	}
+	const float Peak = FMath::Min(V, FMath::Sqrt(A * Dist)); // top speed actually reached
+	const float Ramp = Peak / A;
+	if (T < Ramp)
+	{
+		return 0.5f * A * T * T;
+	}
+	if (T > Total - Ramp)
+	{
+		const float Left = Total - T;
+		return Dist - 0.5f * A * Left * Left;
+	}
+	return 0.5f * Peak * Ramp + Peak * (T - Ramp);
+}
+
+float ABbDirector::SpeedFor(float Dist, float Seconds, float A, float Cap)
+{
+	// Dist / V + V / A = Seconds; the smaller root is the gentler pace. No root means even
+	// speeding up and slowing down the whole way is not enough.
+	const float Disc = A * A * Seconds * Seconds - 4.f * A * Dist;
+	if (Disc < 0.f)
+	{
+		return Cap;
+	}
+	return FMath::Min(Cap, 0.5f * (A * Seconds - FMath::Sqrt(Disc)));
 }
 
 void ABbDirector::ResetFrame(float T, BbFrame& Out, bool& bBallShown) const
@@ -558,7 +613,7 @@ void ABbDirector::ResetFrame(float T, BbFrame& Out, bool& bBallShown) const
 		const FResetMover& M = Movers[I];
 		const FVector2D Path = M.To - M.From;
 		const double Dist = Path.Size();
-		const double Gone = FMath::Min(Dist, (double)M.SpeedMps * FMath::Max(0.f, T - M.Depart));
+		const double Gone = TravelGone(Dist, M.SpeedMps, ResetAccelMps2, T - M.Depart);
 		const FVector2D P = Dist > 1e-3 ? M.From + Path * (Gone / Dist) : M.To;
 		Out.actors[I].agent = M.Agent;
 		Out.actors[I].pos[0] = P.X;
