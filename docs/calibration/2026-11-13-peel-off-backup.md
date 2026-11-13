@@ -26,35 +26,41 @@ On a sure call (tier 2 or 3), every *infielder* in that call who believed he cou
 the ball in the air (tier ≥ 1) is called off. Unless the cover step gives him a base, he
 backs up the catch: he goes to a spot 5 m short of where **his own read** has the ball
 coming down, on the side he is coming from (`assign_backups`, before any other backup job).
-He keeps that job through re-calls he is not part of, until the ball comes down (a visible
-fact) or he is given a throw to back up. Outfielders called off keep the existing job behind
+He keeps that job through re-calls he is not part of. It ends when the ball comes down,
+is caught, or is thrown (visible facts), checked every tick (`expire_peels`); a loose ball
+is then re-called at once so he can field it. A glove deflection is a new ball and a new
+call. While the call stands he makes no glove attempt at all (`try_captures`), however close
+the ball comes to him. Outfielders called off keep the existing job behind
 the fielder, deeper on the ball's line from home.
 
 Why his own read and not the caller's target: he backs up the ball, not the man, and on a
 shallow pop-up the infielder's read is the better one (1 m against 25 m at first look). Why
-5 m: out of the caller's way and well beyond the 1 m standing reach (only a chaser dives),
-so he does not take a ball the caller would have caught, but close enough to field one that
-drops or pops out, or to call it on a re-call.
+5 m: out of the caller's way and well beyond the 1 m standing reach, but close enough to
+field a ball that drops or pops out, or to call it on a re-call. The distance alone does
+not keep him off the caller's ball (his read can be off, and a man already under the ball
+needs time to back away: Codex peel-off review #1), so the yield is explicit.
 
 That last part matters: he is now near the ball, so when the caller's read falls apart the
 once-a-second re-call can hand it to him by the existing rule (a higher tier wins). In seed
 29 play 135 the shortstop drifts out to (−7, 61); at 2.7 s the centre fielder drops to tier
 1, the shortstop is sure (tier 2), calls it and catches it at 5.8 s.
 
-Test: `live::tests::a_called_off_infielder_backs_up_the_catch` (pop-up at (20, 36) m that
+Test: `live::tests::a_called_off_infielder_backs_up_the_catch`. A pop-up at (20, 36) m that
 both the first and second basemen are sure of; the first baseman calls it; the second
-baseman, with no base to cover, backs up from 5 m short of the landing point on his side;
-a re-call he is not in leaves him the job; it ends once the ball is down). On the old code
-he is Idle.
+baseman, with no base to cover, backs up from 5 m short of the landing point on his side; a
+re-call he is not in leaves him the job; with the ball in his reach while the call stands he
+makes no glove attempt; once it is down the tick's expiry step ends the job. On the old code
+he is Idle; without the yield he catches the first baseman's ball.
 
 ## Numbers (`sim-cli games --n 1024`, before → after)
 
 | seed | runs/team-game | PU hit (MLB ≈ .02) | FB hit (≈ .13) | LD hit | GB hit |
 |---|---|---|---|---|---|
-| 5 | 5.47 → 5.43 | .018 → .008 | .122 → .120 | .723 → .723 | .411 → .411 |
+| 5 | 5.47 → 5.44 | .018 → .008 | .122 → .120 | .723 → .724 | .411 → .411 |
 | 2 | 5.27 → 5.26 | .018 → .008 | .120 → .119 | .712 → .715 | .407 → .406 |
 
-Uncaught pop-ups (launch > 50°) in 128 games (`--example pu_hits -- 128`): 12 → 7. All
+(After the Codex review fixes; before them seed 5 gave 5.43 runs and LD .723, seed 2 the
+same.) Uncaught pop-ups (launch > 50°) in 128 games (`--example pu_hits -- 128`): 12 → 7. All
 seven left are 50–53° balls hit 81–100 mph that land deep, first touched by an outfielder
 6–9 s after contact; no infielder can be near them.
 
@@ -62,5 +68,4 @@ Pop-up hits are now under the MLB reference (.008 against ≈ .02). Not tuned: t
 is a real one (infielders who drift out under a pop-up catch the ones an outfielder misjudges),
 and the remaining excess catching comes from the read model, whose depth error at the first
 look is owner item 2 (§5.1 launch-state perception), which will move these numbers again.
-Time per game unchanged within noise (387–399 → 404–407 ms per game per core on a loaded
-machine).
+Time per game was not measured under comparable load (the review notes the runs overlapped).

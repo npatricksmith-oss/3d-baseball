@@ -62,4 +62,9 @@ The numerical rate claims are verified. The performance claim was not assessed u
 
 ## Resolution
 
-Open.
+Both findings fixed (2026-11-13, same branch).
+
+- **P2, a peeled backup can take the caller's catch: fixed.** The yield is now explicit: in `try_captures` a fielder whose job is a peel-off backup (`peel` set, role `Backup`) makes no glove attempt, however close the ball comes. The job ends (below) when the ball comes down, is caught or is thrown; a glove deflection goes through `set_free`, which now clears every peel before its full re-call, so a ball off the caller's glove is a new ball that anyone may play; a re-call that hands him the ball makes him the chaser and clears it. `assign_among` now also clears the peel of every infielder in a call with no sure caller, so a spot from an earlier call does not survive into a later one. The test checks that, with the ball within his reach while the call stands, he makes no attempt (on the code before the fix he catches it: `(1, false)` against `(0, true)`). The calibration note's claim that the 5 m alone kept him off the ball is corrected.
+- **P3, the job does not expire when the ball comes down: fixed.** `Sim::expire_peels` runs every tick, after the ball facts and before the capture test: once the ball is no longer up (bounced, held, or thrown; `ball_still_up`, the same visible fact as before), every peel is cleared, a man still on that backup job is stopped (`go_idle`), and a loose ball is re-called at once after the chaser's replan (`replan_primary`, now shared with the tick loop's replan). The test ends the job through `expire_peels`, not a manual `assign_backups`.
+
+After the fixes: 144 tests pass; 1,024 games seed 5 5.44 runs/team-game (5.43 before the fixes), seed 2 5.26 (unchanged), pop-up hits .008 on both; seed 29 play 135 still caught by the shortstop at 5.79 s; 7 uncaught pop-ups in 128 games (unchanged). The performance claim was withdrawn from the note (the timing runs overlapped).

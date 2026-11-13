@@ -1145,6 +1145,8 @@ impl<'a> Sim<'a> {
         // the air) hears it and peels off to back up the catch (agent-models §5.7). He stops
         // `PEEL_BACKUP_M` short of where his own read has it coming down, on the side he is
         // coming from; `assign_backups` gives him the job unless a cover job took him first.
+        // Each infielder in this call is judged afresh: with no sure call, nobody is called off;
+        // a man in it who no longer believes he catches it keeps the spot he had.
         let sure = calls.iter().any(|c| c.0 == chosen && c.1.0 >= 2);
         self.f[chosen].peel = None;
         for c in &calls {
@@ -1152,7 +1154,9 @@ impl<'a> Sim<'a> {
             if i == chosen || i >= 6 {
                 continue;
             }
-            if sure && c.1.0 >= 1 {
+            if !sure {
+                self.f[i].peel = None;
+            } else if c.1.0 >= 1 {
                 let fd = &self.f[i];
                 let at = Vec3::new(own[i].x, own[i].y, 0.0);
                 let back = Vec3::new(fd.pos.x - at.x, fd.pos.y - at.y, 0.0);
@@ -1203,6 +1207,45 @@ impl<'a> Sim<'a> {
             }
         }
         (0, -(ti + bias))
+    }
+
+    /// The ball is in the air off the bat or off a glove and has not come down yet (a fact
+    /// everyone can see): while it is, a called-off infielder's backup job stands.
+    fn ball_still_up(&self) -> bool {
+        match &self.ball {
+            Ball::Free { path, .. } => path.bounces.first().map(|x| x.0 > self.t).unwrap_or(true),
+            _ => false,
+        }
+    }
+
+    /// A called-off infielder's backup job ends when the ball comes down, is caught, or is
+    /// thrown (Codex peel-off review #2): he is free again, and a loose ball is re-called at
+    /// once (after the chaser's replan, as the once-a-second re-call does), so the man who
+    /// was backing it up can field it.
+    fn expire_peels(&mut self) {
+        if self.ball_still_up() || !self.f.iter().any(|fd| fd.peel.is_some()) {
+            return;
+        }
+        for fd in self.f.iter_mut() {
+            if fd.peel.take().is_some() && fd.role == Role::Backup && fd.backs.is_none() {
+                go_idle(fd);
+            }
+        }
+        if matches!(self.ball, Ball::Free { .. }) {
+            self.replan_primary();
+            self.recall();
+        }
+    }
+
+    /// The chaser's replan from a fresh read.
+    fn replan_primary(&mut self) {
+        let pi = self.primary;
+        let p = self.predict(pi);
+        let (ti, pt) = self.intercept(pi, &p);
+        self.f[pi].t_int = ti;
+        self.f[pi].target = pt;
+        self.f[pi].belief = Some(p);
+        self.f[pi].next_plan = self.t + REPLAN_S;
     }
 
     /// Where the ball is being fielded, as the defense sees it: the holder, or the chaser's
@@ -1354,10 +1397,7 @@ impl<'a> Sim<'a> {
         // Infielders called off a ball in the air back up the catch first (see
         // `assign_among`), while it is still in the air (its landing is a visible fact) and
         // only if no cover job took them.
-        let in_air = match &self.ball {
-            Ball::Free { path, .. } => path.bounces.first().map(|x| x.0 > self.t).unwrap_or(true),
-            _ => false,
-        };
+        let in_air = self.ball_still_up();
         for i in 0..9 {
             match self.f[i].peel {
                 Some(spot) if in_air && self.f[i].role == Role::Idle => {
@@ -1563,6 +1603,12 @@ impl<'a> Sim<'a> {
             if self.t < fd.blocked_until || self.t < self.inp.t_contact + fd.a.reaction {
                 continue;
             }
+            // Called off (Codex peel-off review #1): while the call stands he leaves the ball
+            // to the caller, however close it comes; once it is down, off a glove, or handed
+            // to him on a re-call, his job has ended and he may play it.
+            if fd.peel.is_some() && fd.role == Role::Backup {
+                continue;
+            }
             // On a throw only the receiver tries, and nobody in its path in front of him; the
             // base's backup may take it only once it is beyond the receiver's reach on the far
             // side of him, so the receiver always has his own chance first.
@@ -1688,6 +1734,10 @@ impl<'a> Sim<'a> {
         });
         self.bounce_k += path.bounces.len() as u32 + 1;
         self.ball = Ball::Free { path, next_touch: 0, next_wall: 0, settled_sent: false };
+        // A new ball (off a glove, or a throw on the ground): any call off the old one is over.
+        for fd in self.f.iter_mut() {
+            fd.peel = None;
+        }
         self.assign();
     }
 
@@ -2439,13 +2489,8 @@ fn simulate_live_inner(inp: &LiveInput, st: &mut RulesState) -> LiveOutput {
         }
         // Replans for the primary, and reassignment when the ball is loose again.
         if assigned && sim.t >= sim.f[sim.primary].next_plan && matches!(sim.ball, Ball::Free { .. }) {
+            sim.replan_primary();
             let pi = sim.primary;
-            let p = sim.predict(pi);
-            let (ti, pt) = sim.intercept(pi, &p);
-            sim.f[pi].t_int = ti;
-            sim.f[pi].target = pt;
-            sim.f[pi].belief = Some(p);
-            sim.f[pi].next_plan = sim.t + REPLAN_S;
             // Once a second, a ball the chaser is still far from is re-called by the defense
             // (calls, agent-models §5.7).
             let (b, _) = sim.ball_at(sim.t);
@@ -2457,6 +2502,9 @@ fn simulate_live_inner(inp: &LiveInput, st: &mut RulesState) -> LiveOutput {
         sim.ball_facts();
         if sim.done {
             break;
+        }
+        if assigned {
+            sim.expire_peels();
         }
         sim.update_thrown();
         sim.try_captures();
@@ -3773,11 +3821,27 @@ mod tests {
         let spot = fd.target;
         sim.assign_among(vec![B1, 0, 1], Some(B1));
         assert_eq!((sim.f[B2].role, sim.f[B2].target), (Role::Backup, spot));
-        // Once the ball is down, the job ends.
+        // While the call stands he leaves the ball alone, even one that comes within his reach
+        // (a misread can put him under it: Codex peel-off review #1): no glove attempt. The
+        // first baseman is moved away so that only the second baseman could reach it.
         let Ball::Free { path, .. } = &sim.ball else { unreachable!() };
-        sim.t = path.bounces[0].0 + 0.1;
-        sim.assign_backups();
-        assert_ne!(sim.f[B2].target, spot);
+        let t_down = path.bounces[0].0;
+        sim.t = t_down - 0.05;
+        let (b, _) = sim.ball_at(sim.t);
+        assert!(b.z > 0.0 && b.z < CATCH_MAX_Z, "ball at {b:?}");
+        let b2_at = sim.f[B2].pos;
+        sim.f[B1].pos = Vec3::new(b.x + 10.0, b.y, 0.0);
+        sim.f[B2].pos = Vec3::new(b.x, b.y, 0.0);
+        sim.try_captures();
+        assert_eq!((sim.f[B2].attempts, matches!(sim.ball, Ball::Free { .. })), (0, true));
+        // Once the ball is down, the tick's expiry step ends the job (Codex peel-off review
+        // #2): he has no spot to go to any more, and the ball is re-called among the fielders
+        // near it, so he can field it.
+        sim.f[B2].pos = b2_at;
+        sim.t = t_down + DT;
+        sim.expire_peels();
+        assert_eq!(sim.f[B2].peel, None);
+        assert_ne!((sim.f[B2].role, sim.f[B2].target), (Role::Backup, spot));
     }
 
     // Codex idle-fielder review #1: every way into `Role::Idle` brakes the fielder, not only
