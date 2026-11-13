@@ -440,6 +440,13 @@ fn start_pa(st: &mut RulesState, ev: &mut Vec<Event>) {
 /// Complete a plate appearance; then the game ends (walk-off), the half ends, or the next
 /// batter comes up — exactly one of these.
 fn end_pa(st: &mut RulesState, result: PaResult, ev: &mut Vec<Event>) {
+    end_pa_lob(st, result, None, ev);
+}
+
+/// `end_pa`, with the left-on-base count of a third out made during a live play (counted from
+/// runner identities, since two runners can share a base: rules-spec §6.4). `None` counts the
+/// occupied bases.
+fn end_pa_lob(st: &mut RulesState, result: PaResult, lob: Option<u8>, ev: &mut Vec<Event>) {
     ev.push(Event::PlateAppearanceEnded { batter: st.batter, result });
     let side = st.half.batting();
     st.next_up[side] = (st.next_up[side] + 1) % 9;
@@ -448,16 +455,16 @@ fn end_pa(st: &mut RulesState, result: PaResult, ev: &mut Vec<Event>) {
     if st.walk_off {
         finish(st, true, ev);
     } else if st.outs >= 3 {
-        end_half(st, ev);
+        end_half(st, lob, ev);
     } else {
         start_pa(st, ev);
     }
 }
 
-fn end_half(st: &mut RulesState, ev: &mut Vec<Event>) {
+fn end_half(st: &mut RulesState, lob: Option<u8>, ev: &mut Vec<Event>) {
     let side = st.half.batting();
     let runs = *st.runs_by_inning[side].last().unwrap_or(&0);
-    let lob = st.bases.iter().filter(|b| b.is_some()).count() as u8;
+    let lob = lob.unwrap_or_else(|| st.bases.iter().filter(|b| b.is_some()).count() as u8);
     ev.push(Event::HalfInningEnded { runs, left_on_base: lob });
     st.bases = [None; 3];
     let [away, home] = st.score();
@@ -952,15 +959,19 @@ fn third_out(st: &mut RulesState, t: f64, start: Base, kind: OutKind, ev: &mut V
             score_run(st, r, ev);
         }
     }
-    // Left on base: the runners actually standing on bases now.
+    // Left on base: the runners actually standing on bases now, counted by identity (two runners
+    // sharing a base are both left on it, OBR 5.06(a)(2)); the one-slot-per-base `bases` keeps
+    // the later one for the record.
     st.bases = [None; 3];
+    let mut lob = 0u8;
     for r in &lp.runners {
         // An overrunning batter-runner still protected is entitled to first (§5.5).
         if !r.out && r.scored_at.is_none() && (1..=3).contains(&r.at) && (r.on_base == Some(r.at) || r.overrun == Overrun::Protected) {
             st.bases[(r.at - 1) as usize] = Some(r.runner);
+            lob += 1;
         }
     }
-    end_pa(st, PaResult::BattedBall, ev);
+    end_pa_lob(st, PaResult::BattedBall, Some(lob), ev);
 }
 
 /// The play has settled (rules-spec §5.8 item 3): count runs, place runners, next batter.
