@@ -1,0 +1,33 @@
+id = "passing-018"
+title = "Third-out variant of passing-009: one out, the catch makes two, and the runner from second crosses the lead runner going back to retouch: the third out, made before the retouch, so the lead runner's earlier home touch still stands"
+# OBR 5.09(b)(9) and comment: out for passing at the crossing (7.3), while the lead runner is
+# still going back (Codex rules-passing review #2). OBR 5.08(a): a time play; the lead runner's
+# home touch (4.5) came before it. He left third early, but that is an appeal play (OBR
+# 5.09(c)(1)): after the third out only a fourth-out appeal could take the run away, and v1 does
+# not make one (rules-spec 6.4), so the run counts.
+rules = ["OBR 5.09(b)(9) comment", "OBR 5.08(a)", "OBR 5.09(c)", "rules-spec 5.3", "rules-spec 5.5", "rules-spec 6.4"]
+milestone = "M4"
+tags = ["passing", "retouch", "lead-runner-action", "positions", "time-play"]
+initial = { inning = 4, outs = 1, batter = "A.6", bases = { second = "A.4", third = "A.5" } }
+step = [
+  { fact = "PitchDelivered", t = 0.0 },
+  { fact = "BatContact", t = 0.42 },
+  { fact = "BaseLeft", t = 0.5, agent = "A.5", base = 3 },
+  { fact = "BaseLeft", t = 0.5, agent = "A.4", base = 2 },
+  { fact = "BaseTouched", t = 4.0, agent = "A.4", base = 3 },
+  { fact = "BaseLeft", t = 4.1, agent = "A.4", base = 3 },
+  { fact = "BaseTouched", t = 4.5, agent = "A.5", base = 4 },
+  { fact = "GloveSecured", t = 5.0, fielder = "H.CF", pos = [0.0, 95.0] },
+  { fact = "RunnerPosition", t = 7.0, runner = "A.5", pos = [-9.0, 9.0] },
+  { fact = "RunnerPosition", t = 7.0, runner = "A.4", pos = [-11.638, 11.638] },
+  { fact = "RunnerPosition", t = 7.3, runner = "A.5", pos = [-15.518, 15.518] },
+  { fact = "RunnerPosition", t = 7.3, runner = "A.4", pos = [-12.608, 12.608], expect_events = [
+    { event = "RunnerPassed", runner = "A.4", passed = "A.5" },
+    { event = "RunnerOut", runner = "A.4", base = 4, kind = "Tag" },
+    { event = "RunScored", runner = "A.5" },
+    { event = "HalfInningEnded", runs = 1 },
+  ] },
+  # The half is over: his retouch changes nothing.
+  { fact = "BaseTouched", t = 7.5, agent = "A.5", base = 3 },
+]
+expect = { score = [1, 0], inning = 4, half = "bottom", outs = 0 }

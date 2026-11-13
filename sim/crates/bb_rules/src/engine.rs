@@ -104,8 +104,7 @@ fn step_position(st: &mut RulesState, p: &RunnerPosition) -> Vec<Event> {
         ev.push(Event::RulesWarning { code: "time_reversed" });
     }
     lp.last_t = lp.last_t.max(p.t);
-    // A runner whose home touch is pending is off the base paths until he retouches.
-    let Some(i) = lp.runners.iter().position(|r| r.runner == p.runner && !r.out && r.scored_at.is_none()) else { return ev };
+    let Some(i) = lp.runners.iter().position(|r| r.runner == p.runner && on_paths(r)) else { return ev };
     let r = &mut lp.runners[i];
     if r.start_base == 0 && r.at == 1 && r.last_base == 1 && r.on_base.is_none() && r.overrun != Overrun::Ended {
         if line_dist(p.x, p.y) > attempt_m {
@@ -127,7 +126,7 @@ fn step_position(st: &mut RulesState, p: &RunnerPosition) -> Vec<Event> {
     // or sampled at the same time.
     let mut passer = None;
     for (j, o) in lp.runners.iter().enumerate() {
-        if j == i || o.out || o.scored_at.is_some() {
+        if j == i || !on_paths(o) {
             continue;
         }
         let so = match (o.on_base, o.sample) {
@@ -148,6 +147,19 @@ fn step_position(st: &mut RulesState, p: &RunnerPosition) -> Vec<Event> {
     ev
 }
 
+/// A runner whose home touch is pending but who owes a retouch of his time-of-pitch base on a
+/// caught fly (rules-spec §5.3): he is going back (or is liable to the appeal), so he is still
+/// on the base paths, though his pending run stands until he retouches.
+fn returning(r: &RunnerState) -> bool {
+    r.scored_at.is_some() && r.retouch_required && !r.retouched
+}
+
+/// A runner who can pass or be passed (rules-spec §5.5): not out, and not home, unless he is
+/// returning from a pending home touch.
+fn on_paths(r: &RunnerState) -> bool {
+    !r.out && (r.scored_at.is_none() || returning(r))
+}
+
 /// A pass counts once the batted ball is fair or caught; while it is in doubt the pass is held
 /// (an uncaught foul ball is dead, and nothing the runners did meanwhile counts) (rules-spec
 /// §5.5).
@@ -160,7 +172,7 @@ fn passing_judged(lp: &LivePlay) -> bool {
 /// before it. Returns (passer, passed).
 fn passed_on_touch(lp: &LivePlay, i: usize, b: Base) -> Option<(usize, usize)> {
     for (j, o) in lp.runners.iter().enumerate() {
-        if j == i || o.out || o.scored_at.is_some() {
+        if j == i || !on_paths(o) {
             continue;
         }
         if lp.runners[i].start_base < o.start_base {
@@ -751,7 +763,17 @@ fn base_touched(st: &mut RulesState, t: f64, agent: AgentId, base: Base, holding
     let retouch = base == r.start_base && r.retouch_required && !r.retouched && first_touch.map(|ft| t >= ft).unwrap_or(false);
     if r.scored_at.is_some() {
         if !retouch {
-            // Passing bases on the way back to retouch: nothing changes until he gets there.
+            // On his way back to retouch (rules-spec §5.3) he is at this base now, and can pass
+            // or be passed (§5.5); his pending run stands until he retouches.
+            if returning(r) && base < 4 {
+                r.at = base;
+                r.on_base = Some(base);
+                let i = lp.runners.iter().position(|x| x.runner == agent && !x.out).unwrap();
+                if let Some((fol, pre)) = passed_on_touch(lp, i, base) {
+                    let hb = if fol == i { base } else { (lp.runners[fol].at + 1).min(4) };
+                    passing_out(st, t, fol, pre, hb, ev);
+                }
+            }
             return;
         }
         // He touched home before the catch and has come back to retouch (rules-spec §5.3):
