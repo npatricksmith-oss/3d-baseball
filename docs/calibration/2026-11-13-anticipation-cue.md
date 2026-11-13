@@ -59,11 +59,33 @@ What a fielder's noisy reads are worth, as the spray scatter left by the best li
 
 ## 4. Measured (1,024 games, `sim-cli games --n 1024 --seed 5`, every fielder at one grade)
 
-RESULTS_1K
+"Before" is the base (`coord/review-fixes`, `437c314`); it reproduces the bat-read derivation note's table to the digit. "Fallback only" is the revised back-half policy without the lead read (a scratch build with `swing_lead` set to `None`, not committed); "after" is the full change.
 
-RESULTS_4K
+| Mode | Runs/team-game: before → fallback only → after | GB hit | LD hit | FB hit | PU hit |
+| :--- | :--- | :--- | :--- | :--- | :--- |
+| No jump | 5.57 → 5.57 → 5.57 | .412 → .412 → .412 | .726 → .726 → .726 | .133 → .133 → .133 | .046 → .046 → .046 |
+| Anticipation 20 | 5.59 → 5.53 → 5.52 | .411 → .411 → .411 | .719 → .721 → .720 | .135 → .135 → .135 | .044 → .047 → .047 |
+| Anticipation 50 (default) | 5.52 → 5.55 → 5.55 | .411 → .411 → .410 | .720 → .721 → .719 | .134 → .134 → .134 | .042 → .046 → .047 |
+| Anticipation 80 | 5.54 → 5.57 → 5.49 | .414 → .414 → .412 | .723 → .722 → .720 | .134 → .133 → .133 | .045 → .047 → .045 |
+| Anticipation 160 (lab) | 5.36 → 5.36 → 5.47 | .405 → .405 → .406 | .717 → .717 → .727 | .131 → .131 → .129 | .044 → .044 → .045 |
 
-RESULTS_DISCUSSION
+Because 1,024 games cannot separate a few hundredths, the same three builds were also run over 4,096 games (`--n 4096 --seed 5`):
+
+| Mode | Runs/team-game: before → fallback only → after | GB hit before → after |
+| :--- | :--- | :--- |
+| No jump | 5.55 → 5.55 → 5.55 | .410 → .410 |
+| Anticipation 20 | 5.57 → 5.57 → 5.56 | .411 → .412 |
+| Anticipation 50 (default) | 5.55 → 5.58 → 5.58 | .411 → .413 |
+| Anticipation 80 | 5.54 → 5.55 → 5.51 | .412 → .412 |
+| Anticipation 160 (lab) | 5.47 → 5.47 → 5.49 | .408 → .408 |
+
+**What this says.**
+
+- **The grades still do not rank on the 20–80 scale.** Over 4,096 games, after the change: no jump 5.55, grade 20 5.56, grade 50 5.58, grade 80 5.51 runs per team-game. Grade 80 is the best of the three, by 0.04–0.07 runs, but grade 50 is no better than grade 20 or than no jump. Paired whole-game comparisons at this size still carry a few hundredths of noise, so the honest reading is that grade 80 may gain a few hundredths of a run per team-game and grades 20 and 50 gain nothing. This is what the information measurement predicted: the lead takes a grade-80 fielder's spray scatter from 22.18° to 22.06°, and a grade-50 fielder's from 22.39° to 22.36°. No retuning was done to make them rank.
+- **The lead is worth a few hundredths at grade 80 and nothing below.** Fallback only → after: grade 80 5.55 → 5.51; grade 50 5.58 → 5.58; grade 20 5.57 → 5.56.
+- **The fallback policy changes little, and if anything costs.** Before → fallback only: grade 50 5.55 → 5.58, grade 80 5.54 → 5.55, grade 20 5.57 → 5.57. A fielder whose bat read is implausible now leans on the pitch prior instead of standing still. The earlier finding (agent-models §5.10, "Why the swing as well") was that the location prior alone is worth no more than waiting, because location moves the expected direction only about 7° against 22° of scatter, and that holds here: the extra leans on the prior gain nothing. Grade 160 is identical to the digit before and after the fallback, as it must be: its 6.6° bat read is almost never implausible, and identical draws mean identical games.
+- **Grade 160 (lab)** improves no further with the lead (5.47 → 5.49 over 4,096 games, within noise). Its bat read is already sharp, and the lead's 10 ms adds little to it.
+- **The default run environment** (grade 50) moves 5.52 → 5.55 at 1,024 games and 5.55 → 5.58 at 4,096 games, through the fallback policy.
 
 ## Not done
 
