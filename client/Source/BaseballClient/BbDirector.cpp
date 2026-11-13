@@ -385,6 +385,7 @@ void ABbDirector::BeginPlayback(FBbPlay&& Play)
 		St.bThrowing = false;
 	}
 	bBallInPlay = false;
+	CallsLogged = 0;
 	if (!Current.bValid)
 	{
 		bGameOver = true;
@@ -392,6 +393,12 @@ void ABbDirector::BeginPlayback(FBbPlay&& Play)
 		return;
 	}
 	++PlaysShown;
+	if (Shown.inning == 0)
+	{
+		// Before the first pitch the board reads top of the first.
+		Shown.inning = 1;
+		Shown.top = 1;
+	}
 	// A ball in play gets a moment at the end; a taken pitch moves on quickly.
 	HoldAfter = Current.Info.exit_velocity_mps > 0.f ? 2.5f : 0.7f;
 }
@@ -895,12 +902,46 @@ void ABbDirector::Tick(float DeltaSeconds)
 			// put in play, at the end of the play if it was.
 			const bool bKnown = In.exit_velocity_mps > 0.f ? PlayTime >= In.duration_s : PlayTime >= 0.55f;
 			Hud->Call = bKnown ? FString(UTF8_TO_TCHAR(In.summary)) : FString();
+			// Outs, though, are called by the umpire as they happen (the sim times each
+			// signal: at once on a close play, within a second on a routine one).
+			int32 Called = 0;
+			while (Called < (int32)In.n_calls && PlayTime >= In.calls[Called].t_s)
+			{
+				++Called;
+			}
+			Hud->Umpire.Reset();
+			if (Called > 0 && PlayTime < In.calls[Called - 1].t_s + UmpireShowS)
+			{
+				const BbCall& C = In.calls[Called - 1];
+				static const TCHAR* Where[5] = { TEXT(""), TEXT(" at first"), TEXT(" at second"), TEXT(" at third"), TEXT(" at home") };
+				// Base 0 is the batter retired at the plate: a caught ball, or strike three.
+				const TCHAR* At = C.base == 0 ? (In.exit_velocity_mps > 0.f ? TEXT(", caught") : TEXT("")) : Where[FMath::Min<int32>(C.base, 4)];
+				// Emphasis for a bang-bang play in the field, not for strike three.
+				Hud->bUmpireClose = C.margin_s <= CloseCallS && !(C.base == 0 && In.exit_velocity_mps <= 0.f);
+				Hud->Umpire = FString::Printf(TEXT("OUT%s%s"), Hud->bUmpireClose ? TEXT("!") : TEXT(""), At);
+				if (Called > CallsLogged)
+				{
+					// For unattended checks: when each call went up, to aim screenshots at it.
+					UE_LOG(LogBb, Display, TEXT("BB_CALL wall=%.2f play=%u t=%.2f margin=%.2f %s"), Wall, In.play_index, PlayTime, C.margin_s, *Hud->Umpire);
+					CallsLogged = Called;
+				}
+			}
 			static const TCHAR* CamNames[3] = { TEXT("broadcast"), TEXT("behind home"), TEXT("overhead") };
 			Hud->Footer = FString::Printf(TEXT("Space: %s    - / =: speed %.2gx    C: camera (%s)    Esc or Q: quit"), bPaused ? TEXT("paused") : TEXT("pause"), Speed, CamNames[CameraMode]);
+			auto Board = [](const BbPlayInfo& I, int32 Outs)
+			{
+				return FString::Printf(TEXT("AWAY %d   HOME %d    %s %d    %d out    %d-%d"), I.away_runs, I.home_runs, I.top ? TEXT("Top") : TEXT("Bot"), I.inning, Outs, I.balls, I.strikes);
+			};
 			if (bKnown)
 			{
+				Shown = In;
 				Hud->Bases = In.bases;
-				Hud->Scoreboard = FString::Printf(TEXT("AWAY %d   HOME %d    %s %d    %d out    %d-%d"), In.away_runs, In.home_runs, In.top ? TEXT("Top") : TEXT("Bot"), In.inning, In.outs, In.balls, In.strikes);
+				Hud->Scoreboard = Board(In, In.outs);
+			}
+			else if (Called > 0)
+			{
+				// Everything else on the board waits for the play to finish.
+				Hud->Scoreboard = Board(Shown, FMath::Min<int32>(Shown.outs + Called, 3));
 			}
 			const float Mph = In.release_speed_mps * 2.23694f;
 			Hud->PitchLine = In.exit_velocity_mps > 0.f

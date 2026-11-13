@@ -118,6 +118,8 @@ pub struct PitchStep {
     pub rules_events: Vec<Event>,
     /// Every fact sent to the rules engine for this pitch.
     pub facts: Vec<Input>,
+    /// Every out on this pitch, in time order, as the umpire calls it.
+    pub calls: Vec<crate::umpire::OutCall>,
     pub viz: PlayViz,
 }
 
@@ -242,8 +244,17 @@ impl Game {
         } else if let Some((t_c, _)) = rec.contact_state {
             facts.push(Input::BatContact { t: t_c });
         }
+        let mut calls = Vec::new();
         for f in &facts {
             let ev = step(st, f);
+            // An out on the pitch (a strikeout): the umpire calls it with the pitch.
+            for e in &ev {
+                if let Event::RunnerOut { runner, base, .. } = e {
+                    let pivot = mu.template.pivot(&mu.batter);
+                    let t_out = fact_t(f).unwrap_or(t_plate);
+                    calls.push(crate::umpire::OutCall { t_out, runner: *runner, base: *base, margin_s: 0.0, at: bb_math::Vec3::new(pivot.x, pivot.y, 0.0) });
+                }
+            }
             self.pending_rules.extend(ev.iter().cloned());
             self.log.extend(ev);
             if st.status == Status::Final {
@@ -276,6 +287,7 @@ impl Game {
                 viz.secured = out.secured.clone();
                 viz.released = out.released.clone();
             }
+            calls.extend(out.calls.iter().copied());
             self.pending_rules.extend(out.events.iter().cloned());
             self.log.extend(out.events);
             facts.extend(out.facts);
@@ -328,7 +340,7 @@ impl Game {
             }
         }
         self.play += 1;
-        Some(PitchStep { play, record: rec, pitch_flight, batted, rules_events, facts, viz })
+        Some(PitchStep { play, record: rec, pitch_flight, batted, rules_events, facts, calls, viz })
     }
 
     /// Close the log and tally the result from the rules events (event sourcing, PLAN §4.3).

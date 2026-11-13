@@ -297,11 +297,13 @@ table ActorTrack {
 
 Discrete moments that animation is **time-warped** to (PLAN §12) and that cameras and audio cue off.
 
-`DeliveryStart, Release, PlateCross, SwingStart, CheckSwingBrake, Contact, Bounce, WallHit, FirstStep, Dive, Catch, Transfer, ThrowRelease, BaseTouch, SlideStart, Tag, RunScores, BallDead`
+`DeliveryStart, Release, PlateCross, SwingStart, CheckSwingBrake, Contact, Bounce, WallHit, FirstStep, Dive, Catch, Transfer, ThrowRelease, BaseTouch, SlideStart, Tag, RunScores, BallDead, UmpireCall`
 
 ```fbs
-table Marker { t: float (id: 0); kind: MarkerKind (id: 1); agent: ushort (id: 2); base: ubyte (id: 3); p: bb.Vec3f (id: 4); }
+table Marker { t: float (id: 0); kind: MarkerKind (id: 1); agent: ushort (id: 2); base: ubyte (id: 3); p: bb.Vec3f (id: 4); margin_s: float (id: 5); }
 ```
+
+`UmpireCall` (added 2026-11-12) is the umpire signalling an out, at the time he signals it (rules-spec §1.3): `agent` is the runner retired, `base` where (0: the batter at the plate, a caught fly or a strikeout; 4 home), `p` the runner's position, `margin_s` how close the play was (s; 0 bang-bang, `FLT_MAX` for a routine catch). One per out, so a client can advance the outs on the scoreboard as each is called. The play's `duration_s` covers the last call. `bb_timeline_info` copies them into `BbPlayInfo.calls` (`sim/crates/bb_ffi/include/bb_ffi.h`).
 
 ### 5.5 Agent belief snapshots
 

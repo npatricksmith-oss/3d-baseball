@@ -39,6 +39,8 @@ bb_world ──(physical events)──▶ bb_game ──(RulesFacts)──▶ bb
 
 The umpire's calls are information that agents act on (a runner tags up after seeing "catch"). When `bb_rules` emits a judgment, `bb_game` publishes an **umpire signal** to agents' observations after a latency `T_signal` = 0.2 s [E]. Agents never read `RulesState` directly; they see the scoreboard (count, outs, bases) and these signals, like real players.
 
+**Visible out calls (owner request, 2026-11-12).** Each out also gets the umpire's visible signal, which the timeline carries as an `UmpireCall` marker (data-formats §5.4) and the client shows as it happens, not at the end of the play. Its delay after the out (the deciding fact's time) depends on how close the play was. The margin is the runner's time short of the base he needed: his base-path distance from it at the out over his top speed (the base forced to or appealed at; for a tag, the base he was heading for). A caught fly is routine unless the catch was diving or below `z_low_catch` = 0.4 m [E] (margin 0), and a strikeout is called with the pitch (margin 0). Delay = `T_call_close` = 0.2 s [E] for margins up to 0.15 s [E], rising linearly to `T_call_routine` = 0.7 s [E] at 0.65 s [E] and beyond: at once on a bang-bang play, within a second on a routine one. This is presentation only: the out was made when its fact arrived, and agents still see outs at once (`bb_game::umpire`).
+
 ---
 
 ## 2. Input Facts

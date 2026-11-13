@@ -159,6 +159,8 @@ pub fn encode(step: &PitchStep, st: &RulesState) -> Vec<u8> {
         }
         t_end = t_end.max(track.last().unwrap().0);
     }
+    // The play is not over for a viewer until the umpire has signalled its last out.
+    t_end = step.calls.iter().map(|c| c.t_call()).fold(t_end, f64::max);
     let mut actor_offs = Vec::new();
     for (id, s) in &tracks {
         let knots: Vec<tl::RootKnot> = (0..s.len())
@@ -230,13 +232,21 @@ pub fn encode(step: &PitchStep, st: &RulesState) -> Vec<u8> {
     let mut mk: Vec<(f64, MarkerKind, Vec3, u16)> = mk.into_iter().map(|(t, k, p)| (t, k, p, 0)).collect();
     mk.extend(step.viz.secured.iter().map(|&(t, id)| (t, MarkerKind::Catch, Vec3::ZERO, id)));
     mk.extend(step.viz.released.iter().map(|&(t, id)| (t, MarkerKind::ThrowRelease, Vec3::ZERO, id)));
-    let marks: Vec<_> = mk
+    let mut marks: Vec<_> = mk
         .into_iter()
         .map(|(t, kind, p, agent)| {
             let pv = v3f(p);
-            tl::Marker::create(&mut fbb, &tl::MarkerArgs { t: t as f32, kind, agent, base: 0, p: Some(&pv) })
+            tl::Marker::create(&mut fbb, &tl::MarkerArgs { t: t as f32, kind, agent, base: 0, p: Some(&pv), margin_s: 0.0 })
         })
         .collect();
+    // The umpire's out calls (rules-spec §1.3), at the moment he signals each.
+    for c in &step.calls {
+        let pv = v3f(c.at);
+        marks.push(tl::Marker::create(
+            &mut fbb,
+            &tl::MarkerArgs { t: c.t_call() as f32, kind: MarkerKind::UmpireCall, agent: c.runner, base: c.base, p: Some(&pv), margin_s: c.margin_s.min(f32::MAX as f64) as f32 },
+        ));
+    }
     let markv = fbb.create_vector(&marks);
 
     // Telemetry (SI; the client converts for display).

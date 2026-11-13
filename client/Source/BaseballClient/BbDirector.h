@@ -53,6 +53,15 @@ private:
 	float PlayTime = 0.f;
 	float Speed = 1.f;
 	float HoldAfter = 0.f;
+	/** The scoreboard as last shown in full (after the previous play). During a play the
+	 *  outs on it advance as the umpire calls each one. */
+	BbPlayInfo Shown{};
+	/** How long the umpire's out signal stays up, s of play time. */
+	static constexpr float UmpireShowS = 2.0f;
+	/** A play this close (runner's time short of the base, s) is called with emphasis. */
+	static constexpr float CloseCallS = 0.15f;
+	/** Calls of the current play already logged (BB_CALL). */
+	int32 CallsLogged = 0;
 	/** Seconds shown before each pitch's release: the pitcher's wind-up. */
 	float PreRoll = 1.0f;
 

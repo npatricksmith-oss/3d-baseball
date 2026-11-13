@@ -8,3 +8,4 @@ pub mod live;
 pub mod pa;
 pub mod play;
 pub mod timeline;
+pub mod umpire;

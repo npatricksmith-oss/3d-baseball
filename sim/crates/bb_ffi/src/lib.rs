@@ -138,7 +138,29 @@ pub struct BbPlayInfo {
     pub launch_angle_rad: f32,
     /// The play in words, NUL-terminated UTF-8 (ASCII in practice), truncated to fit.
     pub summary: [u8; BB_SUMMARY_LEN],
+    /// The umpire's out calls during the play, in time order (`calls[..n_calls]`).
+    pub n_calls: u32,
+    pub calls: [BbCall; BB_MAX_CALLS],
 }
+
+/// One out as the umpire signals it (rules-spec §1.3).
+#[repr(C)]
+#[derive(Clone, Copy, Default, Debug)]
+pub struct BbCall {
+    /// When the umpire signals it, s from release (within a second of the out).
+    pub t_s: f32,
+    /// How close the play was, s: the runner's time short of the base (0 bang-bang; very
+    /// large for a routine catch).
+    pub margin_s: f32,
+    /// The runner retired.
+    pub runner: u16,
+    /// Where: 0 the batter at the plate (a caught fly or a strikeout), 1-3 a base, 4 home.
+    pub base: u8,
+    pub _pad: u8,
+}
+
+/// Room for every out a play can make.
+pub const BB_MAX_CALLS: usize = 4;
 
 /// Size of [`BbPlayInfo::summary`], including the terminating NUL.
 pub const BB_SUMMARY_LEN: usize = 96;
@@ -191,6 +213,17 @@ pub unsafe extern "C" fn bb_timeline_info(blob: *const u8, len: usize, out: *mut
     if let Some(s) = tl.summary() {
         let n = s.len().min(BB_SUMMARY_LEN - 1);
         info.summary[..n].copy_from_slice(&s.as_bytes()[..n]);
+    }
+    if let Some(mks) = tl.markers() {
+        let mut calls: Vec<BbCall> = mks
+            .iter()
+            .filter(|m| m.kind() == MarkerKind::UmpireCall)
+            .map(|m| BbCall { t_s: m.t(), margin_s: m.margin_s(), runner: m.agent(), base: m.base(), _pad: 0 })
+            .collect();
+        calls.sort_by(|a, b| a.t_s.total_cmp(&b.t_s));
+        let n = calls.len().min(BB_MAX_CALLS);
+        info.calls[..n].copy_from_slice(&calls[..n]);
+        info.n_calls = n as u32;
     }
     unsafe { *out = info };
     1
@@ -340,6 +373,8 @@ mod tests {
         let mut any_on = false;
         let (mut held, mut thrown) = (0u32, 0u32);
         let mut seen = std::collections::BTreeMap::new();
+        // The scoreboard before each play, to count the outs it made.
+        let (mut prev_half, mut prev_outs, mut calls_seen) = ((1u8, 1u8), 0u8, 0u32);
         loop {
             let (mut p, mut len) = (std::ptr::null_mut(), 0usize);
             if unsafe { bb_game_advance(g, &mut p, &mut len) } != 1 {
@@ -349,6 +384,14 @@ mod tests {
             assert_eq!(unsafe { bb_timeline_info(p, len, &mut info) }, 1);
             assert!(info.duration_s > 0.3 && info.duration_s < 60.0 && info.outs <= 3 && info.inning >= 1 && info.bases < 8);
             any_on |= info.bases != 0;
+            // The umpire calls each out the play made, in order, while the clip is running.
+            let made = if (info.inning, info.top) == prev_half { info.outs - prev_outs } else { 3 - prev_outs };
+            assert_eq!(info.n_calls, made as u32, "play {}: {made} outs, {} calls", info.play_index, info.n_calls);
+            let calls = &info.calls[..info.n_calls as usize];
+            assert!(calls.windows(2).all(|w| w[0].t_s <= w[1].t_s) && calls.iter().all(|c| c.t_s > 0.3 && c.t_s <= info.duration_s && c.base <= 4));
+            calls_seen += info.n_calls;
+            // (After a third out the scoreboard already shows the next half inning.)
+            (prev_half, prev_outs) = ((info.inning, info.top), info.outs);
             let text = std::ffi::CStr::from_bytes_until_nul(&info.summary).unwrap().to_str().unwrap();
             assert!(!text.is_empty() && text.is_ascii(), "summary {text:?}");
             *seen.entry(text.split(',').next().unwrap().to_string()).or_insert(0u32) += 1;
@@ -474,6 +517,7 @@ mod tests {
         }
         assert!(seen.keys().any(|k| k.starts_with("Ground out")) && seen.keys().any(|k| k.starts_with("Single")), "{seen:?}");
         assert!(any_on);
+        assert!(calls_seen >= 51, "{calls_seen} out calls in a game");
         assert!(contacts > 30 && awards > 3, "{contacts} batted balls, {awards} walks and home runs");
         assert!(plays > 150 && moved > 20, "{plays} pitches, {moved} with a runner covering 10 m");
         // Bad input is refused, not read.

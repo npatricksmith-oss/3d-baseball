@@ -27,12 +27,19 @@ typedef struct {
   float release_in_s;  /* seconds until that holder releases a throw, or -1 if he does not */
 } BbFrame;
 #define BB_SUMMARY_LEN 96
+/* One out as the umpire signals it: at t_s (s from release, within a second of the out);
+ * margin_s = how close the play was (the runner's time short of the base; 0 bang-bang,
+ * very large for a routine catch); base 0 = the batter at the plate (a caught fly or a
+ * strikeout), 1-3 a base, 4 home. */
+typedef struct { float t_s; float margin_s; uint16_t runner; uint8_t base; uint8_t _pad; } BbCall;
+#define BB_MAX_CALLS 4
 typedef struct {
   uint32_t play_index; float duration_s;
   uint8_t inning, top, outs, balls, strikes, away_runs, home_runs;
   uint8_t bases; /* runners on after the play: bit 0 first, bit 1 second, bit 2 third */
   float release_speed_mps, exit_velocity_mps, launch_angle_rad;
   char summary[BB_SUMMARY_LEN]; /* the play in words, NUL-terminated */
+  uint32_t n_calls; BbCall calls[BB_MAX_CALLS]; /* the umpire's out calls, in time order */
 } BbPlayInfo;
 /* Agent ids: high byte = team (0 away, 1 home); bit 0x80 = fielder, low 7 bits = position 1-9. */
 /* blob/len must be a readable allocation of that length (normally one from bb_game_advance).

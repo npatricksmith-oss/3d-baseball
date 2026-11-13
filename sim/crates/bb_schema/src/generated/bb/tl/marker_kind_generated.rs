@@ -5,10 +5,10 @@ use super::*;
 #[deprecated(since = "2.0.0", note = "Use associated constants instead. This will no longer be generated in 2021.")]
 pub const ENUM_MIN_MARKER_KIND: u8 = 0;
 #[deprecated(since = "2.0.0", note = "Use associated constants instead. This will no longer be generated in 2021.")]
-pub const ENUM_MAX_MARKER_KIND: u8 = 18;
+pub const ENUM_MAX_MARKER_KIND: u8 = 19;
 #[deprecated(since = "2.0.0", note = "Use associated constants instead. This will no longer be generated in 2021.")]
 #[allow(non_camel_case_types)]
-pub const ENUM_VALUES_MARKER_KIND: [MarkerKind; 19] = [
+pub const ENUM_VALUES_MARKER_KIND: [MarkerKind; 20] = [
   MarkerKind::Unknown,
   MarkerKind::DeliveryStart,
   MarkerKind::Release,
@@ -28,6 +28,7 @@ pub const ENUM_VALUES_MARKER_KIND: [MarkerKind; 19] = [
   MarkerKind::Tag,
   MarkerKind::RunScores,
   MarkerKind::BallDead,
+  MarkerKind::UmpireCall,
 ];
 
 #[derive(Clone, Copy, PartialEq, Eq, PartialOrd, Ord, Hash, Default)]
@@ -54,9 +55,10 @@ impl MarkerKind {
   pub const Tag: Self = Self(16);
   pub const RunScores: Self = Self(17);
   pub const BallDead: Self = Self(18);
+  pub const UmpireCall: Self = Self(19);
 
   pub const ENUM_MIN: u8 = 0;
-  pub const ENUM_MAX: u8 = 18;
+  pub const ENUM_MAX: u8 = 19;
   pub const ENUM_VALUES: &'static [Self] = &[
     Self::Unknown,
     Self::DeliveryStart,
@@ -77,6 +79,7 @@ impl MarkerKind {
     Self::Tag,
     Self::RunScores,
     Self::BallDead,
+    Self::UmpireCall,
   ];
   /// Returns the variant's name or "" if unknown.
   pub fn variant_name(self) -> Option<&'static str> {
@@ -100,6 +103,7 @@ impl MarkerKind {
       Self::Tag => Some("Tag"),
       Self::RunScores => Some("RunScores"),
       Self::BallDead => Some("BallDead"),
+      Self::UmpireCall => Some("UmpireCall"),
       _ => None,
     }
   }

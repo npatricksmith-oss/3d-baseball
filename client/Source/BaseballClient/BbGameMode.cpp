@@ -50,4 +50,15 @@ void ABbHUD::DrawHUD()
 		DrawRect(FLinearColor(0.f, 0.f, 0.f, 0.55f), X - 18.f * S, Y - 8.f * S, W + 36.f * S, H + 16.f * S);
 		DrawText(Call, FLinearColor(1.f, 0.95f, 0.6f), X, Y, Font, 2.2f * S);
 	}
+	if (!Umpire.IsEmpty())
+	{
+		// The umpire's out signal, below the call line: larger and red on a close play.
+		const float Scale = (bUmpireClose ? 2.8f : 2.4f) * S;
+		float W = 0.f, H = 0.f;
+		GetTextSize(Umpire, W, H, Font, Scale);
+		const float X = (Canvas->ClipX - W) * 0.5f;
+		const float Y = 172.f * S;
+		DrawRect(FLinearColor(0.f, 0.f, 0.f, 0.6f), X - 18.f * S, Y - 8.f * S, W + 36.f * S, H + 16.f * S);
+		DrawText(Umpire, bUmpireClose ? FLinearColor(1.f, 0.35f, 0.3f) : FLinearColor::White, X, Y, Font, Scale);
+	}
 }

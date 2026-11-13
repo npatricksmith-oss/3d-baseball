@@ -23,6 +23,7 @@ impl<'a> Marker<'a> {
   pub const VT_AGENT: ::flatbuffers::VOffsetT = 8;
   pub const VT_BASE: ::flatbuffers::VOffsetT = 10;
   pub const VT_P: ::flatbuffers::VOffsetT = 12;
+  pub const VT_MARGIN_S: ::flatbuffers::VOffsetT = 14;
 
   #[inline]
   pub unsafe fn init_from_table(table: ::flatbuffers::Table<'a>) -> Self {
@@ -34,6 +35,7 @@ impl<'a> Marker<'a> {
     args: &'args MarkerArgs<'args>
   ) -> ::flatbuffers::WIPOffset<Marker<'bldr>> {
     let mut builder = MarkerBuilder::new(_fbb);
+    builder.add_margin_s(args.margin_s);
     if let Some(x) = args.p { builder.add_p(x); }
     builder.add_t(args.t);
     builder.add_agent(args.agent);
@@ -78,6 +80,13 @@ impl<'a> Marker<'a> {
     // which contains a valid value in this slot
     unsafe { self._tab.get::<super::Vec3f>(Marker::VT_P, None)}
   }
+  #[inline]
+  pub fn margin_s(&self) -> f32 {
+    // Safety:
+    // Created from valid Table for this object
+    // which contains a valid value in this slot
+    unsafe { self._tab.get::<f32>(Marker::VT_MARGIN_S, Some(0.0)).unwrap()}
+  }
 }
 
 impl ::flatbuffers::Verifiable for Marker<'_> {
@@ -91,6 +100,7 @@ impl ::flatbuffers::Verifiable for Marker<'_> {
      .visit_field::<u16>("agent", Self::VT_AGENT, false)?
      .visit_field::<u8>("base", Self::VT_BASE, false)?
      .visit_field::<super::Vec3f>("p", Self::VT_P, false)?
+     .visit_field::<f32>("margin_s", Self::VT_MARGIN_S, false)?
      .finish();
     Ok(())
   }
@@ -101,6 +111,7 @@ pub struct MarkerArgs<'a> {
     pub agent: u16,
     pub base: u8,
     pub p: Option<&'a super::Vec3f>,
+    pub margin_s: f32,
 }
 impl<'a> Default for MarkerArgs<'a> {
   #[inline]
@@ -111,6 +122,7 @@ impl<'a> Default for MarkerArgs<'a> {
       agent: 0,
       base: 0,
       p: None,
+      margin_s: 0.0,
     }
   }
 }
@@ -141,6 +153,10 @@ impl<'a: 'b, 'b, A: ::flatbuffers::Allocator + 'a> MarkerBuilder<'a, 'b, A> {
     self.fbb_.push_slot_always::<&super::Vec3f>(Marker::VT_P, p);
   }
   #[inline]
+  pub fn add_margin_s(&mut self, margin_s: f32) {
+    self.fbb_.push_slot::<f32>(Marker::VT_MARGIN_S, margin_s, 0.0);
+  }
+  #[inline]
   pub fn new(_fbb: &'b mut ::flatbuffers::FlatBufferBuilder<'a, A>) -> MarkerBuilder<'a, 'b, A> {
     let start = _fbb.start_table();
     MarkerBuilder {
@@ -163,6 +179,7 @@ impl ::core::fmt::Debug for Marker<'_> {
       ds.field("agent", &self.agent());
       ds.field("base", &self.base());
       ds.field("p", &self.p());
+      ds.field("margin_s", &self.margin_s());
       ds.finish()
   }
 }

@@ -11,7 +11,10 @@ enum MarkerKind : ubyte {
   Unknown = 0, DeliveryStart = 1, Release = 2, PlateCross = 3, SwingStart = 4,
   CheckSwingBrake = 5, Contact = 6, Bounce = 7, WallHit = 8, FirstStep = 9, Dive = 10,
   Catch = 11, Transfer = 12, ThrowRelease = 13, BaseTouch = 14, SlideStart = 15, Tag = 16,
-  RunScores = 17, BallDead = 18
+  RunScores = 17, BallDead = 18,
+  // The umpire signals an out: agent = the runner retired, base = where (0 = the batter at
+  // the plate: a caught fly or a strikeout), p = the runner's position, margin_s = how close.
+  UmpireCall = 19
 }
 
 struct BallKnot { t: float; r: bb.Vec3f; v: bb.Vec3f; }
@@ -43,6 +46,8 @@ table Marker {
   agent: ushort (id: 2);
   base: ubyte (id: 3);
   p: bb.Vec3f (id: 4);
+  // UmpireCall: how close the play was, s (the runner's time short of the base; 0 = bang-bang).
+  margin_s: float (id: 5);
 }
 
 // ---- beliefs (§5.5) -----------------------------------------------------------------------

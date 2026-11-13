@@ -15,7 +15,7 @@ use bb_math::{KeyedRng, Purpose, RngKey, Vec3, m};
 use bb_physics::ground::{BallPath, Field, SegmentEnd, batted_path, batted_path_dt};
 use bb_physics::throw::{THROW_MAX_ELEV, THROW_SPIN_RPM, ThrowTable, fly_throw, solve_throw, throw_state};
 use bb_physics::{BallState, FlightEnv, Trajectory};
-use bb_rules::{AgentId, Event, Input, PlayState, RulesState, Touch, step};
+use bb_rules::{AgentId, Event, Input, OutKind, PlayState, RulesState, Touch, step};
 
 use crate::play::{FielderAttrs, RunnerIn, base_pos, home_positions, run_dist, run_time};
 
@@ -25,6 +25,8 @@ const REACH: f64 = 1.0;
 const DIVE: f64 = 1.5;
 const DIVE_MAX_Z: f64 = 1.2;
 const DIVE_GETUP_S: f64 = 1.5;
+/// A catch below this height is a shoestring catch: a close call for the umpire, m [E].
+const LOW_CATCH_Z: f64 = 0.4;
 const CATCH_MAX_Z: f64 = 2.4;
 /// Leaping reach at the wall [E].
 const WALL_CATCH_MAX_Z: f64 = 3.0;
@@ -276,6 +278,8 @@ pub struct LiveOutput {
     pub secured: Vec<(f64, AgentId)>,
     /// Every throw release (t, thrower), in time order.
     pub released: Vec<(f64, AgentId)>,
+    /// Every out, with how close the play was, in time order (the umpire's calls).
+    pub calls: Vec<crate::umpire::OutCall>,
 }
 
 /// Profiling counters (BB_PROF=1): nanoseconds and calls for predict / intercept / ticks.
@@ -612,6 +616,8 @@ struct Sim<'a> {
     secured_at: f64,
     /// A fly was caught (the rules engine signalled `Catch`).
     catch_made: bool,
+    /// The latest catch was low or diving: a close call for the umpire.
+    low_catch: bool,
     st: &'a mut RulesState,
     t: f64,
     ball: Ball,
@@ -643,10 +649,21 @@ impl<'a> Sim<'a> {
                 }
             }
         }
+        let t_fact = fact_time(&fact).unwrap_or(self.t);
         for e in &evs {
-            if let Event::RunnerOut { runner, .. } = e {
-                if let Some(r) = self.r.iter_mut().find(|r| r.id == *runner) {
-                    r.out = true;
+            if let Event::RunnerOut { runner, base, kind } = e {
+                if let Some(k) = self.r.iter().position(|r| r.id == *runner) {
+                    // How close it was: the runner's time short of the base he needed (back
+                    // to on an appeal, ahead to on a force or a tag), at his top speed.
+                    let r = &self.r[k];
+                    let margin_s = match kind {
+                        OutKind::FlyOut | OutKind::Strikeout => if self.low_catch { 0.0 } else { f64::INFINITY },
+                        OutKind::Force | OutKind::Appeal => (*base as f64 * BASE_L - r.s).abs() / r.vmax.max(1.0),
+                        OutKind::Tag => (r.goal as f64 * BASE_L - r.s).abs() / r.vmax.max(1.0),
+                    };
+                    let at = self.runner_pos(r);
+                    self.out.calls.push(crate::umpire::OutCall { t_out: t_fact, runner: *runner, base: *base, margin_s, at });
+                    self.r[k].out = true;
                 }
             }
             if matches!(e, Event::Catch { .. }) {
@@ -1376,6 +1393,7 @@ impl<'a> Sim<'a> {
                 self.ball = Ball::Held { by: i };
                 self.secured_at = self.t;
                 self.out.secured.push((self.t, id));
+                self.low_catch = diving || b.z < LOW_CATCH_Z;
                 self.emit(Input::GloveSecured { t: self.t, fielder: id, x: b.x, y: b.y });
                 return;
             } else if d <= RIM {
@@ -2039,12 +2057,13 @@ fn new_sim<'a>(inp: &'a LiveInput<'a>, st: &'a mut RulesState) -> Sim<'a> {
         f,
         r,
         primary: 0,
-        out: LiveOutput { facts: Vec::new(), events: Vec::new(), path, ball_track: Vec::new(), actors, secured: Vec::new(), released: Vec::new() },
+        out: LiveOutput { facts: Vec::new(), events: Vec::new(), path, ball_track: Vec::new(), actors, secured: Vec::new(), released: Vec::new(), calls: Vec::new() },
         bounce_k: 1000,
         done: false,
         last_fact_t: t_c,
         secured_at: f64::INFINITY,
         catch_made: false,
+        low_catch: false,
     }
 }
 

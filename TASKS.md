@@ -1,13 +1,21 @@
 # Task List
 
-**Last updated:** 2026-11-12 (second session)
+**Last updated:** 2026-11-12 (third session)
 The live to-do list for the project. [PLAN.md](PLAN.md) holds decisions and design. This file holds what is next and what is done. Update it at the end of every work session.
 
 Status: `[ ]` not started · `[~]` in progress · `[x]` done · `[?]` needs an owner decision
 
 ---
 
-## Resume here (2026-11-12, second session)
+## Resume here (2026-11-12, third session: umpire calls)
+
+**First:** the [Codex review of the umpire calls](docs/reviews/2026-11-12-codex-umpire-calls-review.md) was started at the end of this session; if it is in `docs/reviews/`, commit it, fix or defer each finding, and write its Resolution. Then the Anticipation review below (its file is in `docs/reviews/`, uncommitted, Resolution open).
+
+Done (owner request: "when an out is made the umpire should make a call right away; within 1 s for non-close plays, almost right away when close"):
+- **Umpire out calls** (rules-spec §1.3, data-formats §5.4): every out gets an `UmpireCall` timeline marker at the moment the umpire signals it: 0.2 s after a bang-bang out (runner within 0.15 s of the bag, a diving or shoestring catch, strike three), rising to 0.7 s on routine plays. The client shows "OUT at first" / "OUT!, caught" (red and larger when close) as it happens and advances the outs on the scoreboard; the play's summary still appears when the clip ends. `bb_game::umpire`; `BbPlayInfo.calls`; `cargo run --release -p bb_game --example umpire_calls -- 20`. Observation only: game results are unchanged.
+- Not done: no umpire figures on the field (the call is HUD text); safe calls on close plays are not signalled.
+
+## Previous handoff (2026-11-12, second session)
 
 **First:** the [Codex review of the Anticipation commit](docs/reviews/2026-11-12-codex-anticipation-review.md) (`74679a6..cdd473c`) was started at the end of the session. If it is in `docs/reviews/`, commit it, fix or defer each finding, and write its Resolution. Its first question: whether reading the swing from the true launch direction plus noise is honest perception (the alternative is reading the bat's yaw from the swing record).
 
