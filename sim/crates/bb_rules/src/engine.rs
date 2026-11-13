@@ -115,8 +115,17 @@ fn step_position(st: &mut RulesState, p: &RunnerPosition) -> Vec<Event> {
             r.overrun = Overrun::Protected;
         }
     }
-    let s = path_progress(r.at, p.x, p.y);
+    // A runner touching a base is at that base, wherever his center is within it; so is a
+    // protected overrunning batter-runner, who is entitled to first (OBR 5.09(b)(4)).
+    let s = match r.on_base {
+        Some(b) => b as f64,
+        None if r.overrun == Overrun::Protected => 1.0,
+        None => path_progress(r.at, p.x, p.y),
+    };
     r.sample = Some((p.t, s));
+    if !passing_judged(lp) {
+        return ev;
+    }
     // Compare with every runner whose position is known at this instant: standing on a base,
     // or sampled at the same time.
     let mut passer = None;
@@ -142,10 +151,19 @@ fn step_position(st: &mut RulesState, p: &RunnerPosition) -> Vec<Event> {
     ev
 }
 
+/// Passing is judged only once the batted ball is fair or caught: an uncaught foul ball is
+/// dead, and nothing the runners did while it was in doubt counts (rules-spec §5.5).
+fn passing_judged(lp: &LivePlay) -> bool {
+    lp.caught || lp.fair == FairFoul::Fair
+}
+
 /// Passing judged at a base touch (rules-spec §5.5): runner `i` is exactly on base `b`; every
 /// other live runner is short of the base after the one he touched last and past the one
 /// before it. Returns (passer, passed).
 fn passed_on_touch(lp: &LivePlay, i: usize, b: Base) -> Option<(usize, usize)> {
+    if !passing_judged(lp) {
+        return None;
+    }
     for (j, o) in lp.runners.iter().enumerate() {
         if j == i || o.out || o.scored_at.is_some() {
             continue;
@@ -280,16 +298,22 @@ fn step_input(st: &mut RulesState, input: &Input) -> Vec<Event> {
                 return ev;
             }
             if let Some(b) = r.on_base {
+                // A runner still forced onward has lost his right to the base he stands on,
+                // alone on it or not: a tag retires him by force (rules-spec §5.4, §5.5; OBR
+                // 5.09(b)(6)).
+                if r.forced_to == Some(b + 1) {
+                    record_out(st, t, runner, b + 1, OutKind::Force, &mut ev);
+                    return ev;
+                }
                 // Two runners touching one base (rules-spec §5.5; OBR 5.06(a)(2), 5.06(b)(2)):
                 // the preceding runner is entitled to it unless the following runner is forced
-                // there; the other one is out when tagged.
+                // there (and then the preceding one was retired by force just above); the other
+                // one is out when tagged.
                 let Some(o) = lp.runners.iter().find(|o| o.runner != runner && !o.out && o.scored_at.is_none() && o.on_base == Some(b)) else { return ev };
                 let (pre, fol) = if r.start_base > o.start_base { (r, o) } else { (o, r) };
                 let entitled = if fol.forced_to == Some(b) { fol.runner } else { pre.runner };
                 if entitled != runner {
-                    // A preceding runner still forced onward is retired by force (§6.4).
-                    let (base, kind) = if r.forced_to == Some(b + 1) { (b + 1, OutKind::Force) } else { (b, OutKind::Tag) };
-                    record_out(st, t, runner, base, kind, &mut ev);
+                    record_out(st, t, runner, b, OutKind::Tag, &mut ev);
                 }
                 return ev;
             }
@@ -719,7 +743,7 @@ fn base_touched(st: &mut RulesState, t: f64, agent: AgentId, base: Base, holding
         // comment: passing by the lead runner's actions).
         let i = lp.runners.iter().position(|x| x.runner == agent && !x.out).unwrap();
         if let Some((fol, pre)) = passed_on_touch(lp, i, base) {
-            let hb = (lp.runners[fol].at + 1).min(4);
+            let hb = if fol == i { base } else { (lp.runners[fol].at + 1).min(4) };
             passing_out(st, t, fol, pre, hb, ev);
         }
         return;
@@ -732,17 +756,16 @@ fn base_touched(st: &mut RulesState, t: f64, agent: AgentId, base: Base, holding
     if let Some((fol, pre)) = passed_on_touch(lp, i, base) {
         // Reaching a base a preceding runner has not reached means passing him on the way
         // (out before the touch counts); a preceding runner falling back behind a following
-        // one retires the following one (OBR 5.09(b)(9) comment).
+        // one retires the following one (OBR 5.09(b)(9) comment), and his own touch then
+        // counts as usual.
         let hb = if fol == i { base } else { (lp.runners[fol].at + 1).min(4) };
-        if fol != i {
-            let r = &mut lp.runners[i];
-            r.at = base;
-            r.on_base = Some(base);
-            r.last_base = r.last_base.max(base);
-        }
         passing_out(st, t, fol, pre, hb, ev);
-        return;
+        if fol == i {
+            return;
+        }
     }
+    // The passing out may have ended the inning.
+    let PlayState::Live(lp) = &mut st.play else { return };
     let r = &mut lp.runners[i];
     if r.start_base == 0 && base == 1 && r.last_base >= 1 {
         // The batter-runner back on first: any overrun protection is over.

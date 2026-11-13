@@ -1,0 +1,22 @@
+id = "passing-013"
+title = "Batter-runner runs past the runner from first while a towering fly down the line is still in the air; it lands foul: dead ball, nothing the runners did counts, no passing out"
+rules = ["OBR 5.09(b)(9)", "OBR 5.06(c)(5)", "rules-spec 5.2", "rules-spec 5.5"]
+milestone = "M4"
+tags = ["passing", "foul", "positions", "edge"]
+initial = { inning = 2, outs = 0, count = [1, 1], batter = "A.6", bases = { first = "A.4" } }
+step = [
+  { fact = "PitchDelivered", t = 0.0 },
+  { fact = "BatContact", t = 0.42 },
+  { fact = "BaseLeft", t = 0.6, agent = "A.4", base = 1 },
+  { fact = "BaseTouched", t = 4.2, agent = "A.6", base = 1 },
+  { fact = "BaseLeft", t = 4.3, agent = "A.6", base = 1 },
+  # The runner from first holds 38% of the way to second; the batter-runner is 2 m past him.
+  { fact = "RunnerPosition", t = 6.0, runner = "A.4", pos = [12.026, 26.768] },
+  { fact = "RunnerPosition", t = 6.0, runner = "A.6", pos = [10.669, 28.126] },
+  # Down in foul ground beyond first base.
+  { fact = "BallTouched", t = 6.5, what = "Ground", pos = [40.0, 30.0], expect_events = [
+    { event = "FairFoulDecided", fair = false },
+    { event = "PitchResult", call = "Foul", balls = 1, strikes = 2 },
+  ] },
+]
+expect = { outs = 0, balls = 1, strikes = 2, bases = { first = "A.4" }, play = "Dead" }

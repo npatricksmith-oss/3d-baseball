@@ -1,0 +1,26 @@
+id = "overrun-009"
+title = "Runner from first scrambles back to first as the batter-runner overruns it a step fair: the protected batter-runner has not passed him, and the runner is out by force when tagged"
+rules = ["OBR 5.09(b)(4) exception", "OBR 5.09(b)(6)", "OBR 5.09(b)(9)", "rules-spec 5.5"]
+milestone = "M4"
+tags = ["overrun", "passing", "force", "positions"]
+initial = { inning = 4, outs = 0, batter = "A.6", bases = { first = "A.5" } }
+step = [
+  { fact = "PitchDelivered", t = 0.0 },
+  { fact = "BatContact", t = 0.42 },
+  { fact = "BaseLeft", t = 0.6, agent = "A.5", base = 1 },
+  { fact = "BallTouched", t = 0.8, what = "Ground", pos = [-8.0, 30.0] },
+  { fact = "GloveSecured", t = 1.3, fielder = "H.SS", pos = [-8.0, 30.0] },
+  { fact = "BaseTouched", t = 2.0, agent = "A.5", base = 1 },
+  { fact = "BaseTouched", t = 4.2, agent = "A.6", base = 1 },
+  { fact = "BaseLeft", t = 4.3, agent = "A.6", base = 1 },
+  # Three metres past the bag, down the line: protected.
+  { fact = "RunnerPosition", t = 4.5, runner = "A.6", pos = [21.5, 21.6] },
+  # Drifting 1.3 m fair, short of the attempt line: still protected, and still at first for
+  # passing (his path position would otherwise be 1.3 m past the runner standing on first).
+  { fact = "RunnerPosition", t = 4.8, runner = "A.6", pos = [20.4, 22.3] },
+  { fact = "GloveSecured", t = 4.9, fielder = "H.1B", pos = [19.0, 19.0] },
+  { fact = "TagContact", t = 5.0, fielder = "H.1B", runner = "A.5", holding_ball = true, expect_events = [{ event = "RunnerOut", runner = "A.5", base = 2, kind = "Force" }] },
+  { fact = "BaseTouched", t = 5.6, agent = "A.6", base = 1 },
+  { fact = "PlayEndCheck", t = 7.0 },
+]
+expect = { outs = 1, bases = { first = "A.6" }, play = "Dead" }
