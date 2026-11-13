@@ -1,13 +1,25 @@
 # Task List
 
-**Last updated:** 2026-11-12 (third session)
+**Last updated:** 2026-11-12 (fourth session: runner return, branch merges)
 The live to-do list for the project. [PLAN.md](PLAN.md) holds decisions and design. This file holds what is next and what is done. Update it at the end of every work session.
 
 Status: `[ ]` not started · `[~]` in progress · `[x]` done · `[?]` needs an owner decision
 
 ---
 
-## Resume here (2026-11-12, third session: umpire calls)
+## Resume here (2026-11-12, fourth session: runner return; all branches merged)
+
+**First, unresolved review findings:**
+- [Reset staging review](docs/reviews/2026-11-12-codex-reset-staging-review.md) (client, all deferred): (P2) outgoing players vanish at side changes, because the 16-slot actor pool is shared with the next pitch; (P2) the first pitch resolves on the game thread in `BeginPlay`; (P3) very short returns play idle or face backward; (P3) at high playback speed the return-throw clip can be skipped.
+- The Anticipation review below (uncommitted in the main checkout, Resolution open; another session owns it).
+
+Merged into main this session: `worktree-runner-return-on-catch`, `worktree-owner-wishlist` (W1–W13 below), `worktree-batter-presentation` (one conflict in `BbDirector.cpp`: the HUD call now waits for max(`call_s`, the umpire's last out call)), `worktree-pitcher-reset-walk`. None of the client changes has been watched yet.
+
+Done (day-fixes review #1, P1, open since 2026-11-11):
+- **A runner who crossed home before a catch goes back** (rules-spec §5.3). The rules engine cancels his pending run when he retouches, and his next home touch scores. The runner agent sees the catch, runs back as a live runner (taggable, appealable, a throw target) and decides again. Rare in games: in 2,000 games, 79 runners crossed home before a third-out catch (no run, nothing owed) and 2 before a catch with the inning still going; both went back (`--example home_before_catch`).
+- [Codex runner-return review](docs/reviews/2026-11-12-codex-runner-return-review.md) **resolved**: a walk-off no longer ends the game on a home touch made while the fly is still in the air (§4.1). A preceding runner retired on appeal for the third out cancels the following runners' runs (OBR 5.09(d), §6.4 corrected). Fourth-out appeals are still not modeled.
+
+### Previous handoff (2026-11-12, third session: umpire calls)
 
 **First:** the [Codex review of the Anticipation commit](docs/reviews/2026-11-12-codex-anticipation-review.md) is finished but uncommitted and unresolved (see the second-session handoff below). The [Codex review of the umpire calls](docs/reviews/2026-11-12-codex-umpire-calls-review.md) is resolved: two client scoreboard-timing bugs fixed (strike three showed before the call; the third out was skipped straight to the next half).
 
@@ -26,7 +38,7 @@ Done this session (owner request: fielders "get a jump" by anticipating from pit
 - **[Codex momentum review](docs/reviews/2026-11-12-codex-momentum-review.md): resolved** (`74679a6`): arrivals no longer stop a fielder dead, planting distance, a turn-aware reach estimate (tested against the stepped movement), receivers not pinned to the bag, fresh-read breaks, wall caroms.
 - **Anticipation** (`cdd473c`, agent-models §5.10): the fielder combines the pitch location and batter's side (a prior) with a read of the swing at contact, and starts toward the side he expects at contact instead of standing through his reaction time. Leaning on location alone made fielders *worse* (7° of signal against 22° of scatter); the swing read is what pays. 2,048 games: no jump 5.35 runs/team-game, grade 20 5.31, 50 5.22, 80 5.03. `sim-cli games --anticipation <grade>` / `--no-jump`.
 
-Owner report (2026-11-12, late): "the pitcher looks like he's skating or flying back to the mound after the play." Cause: the client's between-pitch staging held the reset to 4.5 s, so a pitcher far from the mound was moved at distance / 4.5 s: median 5.5 m/s, up to 16 m/s over three games (seeds 7–9), faster than the jog clip plays and, above 14 m/s, shown in the idle pose. **Fixed in the client** (branch `worktree-pitcher-reset-walk`): walk / easy jog, quickening to at most 5 m/s, with acceleration at both ends; the reset lasts as long as the slowest returner needs (6–7 s for a pitcher 20–25 m out, ~16 s from 70 m). Compiled; not yet watched, and not yet reviewed by Codex (include it with the other unreviewed staging work below).
+Owner report (2026-11-12, late): "the pitcher looks like he's skating or flying back to the mound after the play." Cause: the client's between-pitch staging held the reset to 4.5 s, so a pitcher far from the mound was moved at distance / 4.5 s: median 5.5 m/s, up to 16 m/s over three games (seeds 7–9), faster than the jog clip plays and, above 14 m/s, shown in the idle pose. **Fixed in the client** (`dc870d7`, merged): walk / easy jog, quickening to at most 5 m/s, with acceleration at both ends; the reset lasts as long as the slowest returner needs (6–7 s for a pitcher 20–25 m out, ~16 s from 70 m). Compiled; not yet watched. Reviewed by Codex together with the earlier staging work: findings deferred (see "Resume here").
 - **Pitcher in the outfield (sim bug, open):** on fly balls and hits to the outfield the pitcher ends the play sprinting (7.9 m/s) as far as 50–70 m out, e.g. (54, 55) on "Fly out to right" (seed 7, play 1) and (21, 86) (seed 7, play 195). He is neither the called chaser nor at a base backup spot, so some other job (relay, re-call, or `back_up_throw`'s fallback) sends him there. A real pitcher backs up third or home. Find which role, then fix the planner.
 
 Next, in the order a viewer would notice:
@@ -34,7 +46,7 @@ Next, in the order a viewer would notice:
 - **Batters of both sides in games.** Every game batter is right-handed (`Matchup::average()`), so the handedness half of Anticipation only runs in unit tests. Needs per-slot batters and a check that pitcher targeting handles left-handers.
 - Run environment 5.22 runs/team-game (MLB ≈ 4.5): ground balls still go for hits at .40 (MLB .24); infield hits are 20% of grounders, mostly high choppers from the contact model's launch-angle spread. Turning is still the largest movement cost (runs would be ~4.4 if turns were free); the atlas perception of §5.1 should reduce replan target jumps.
 - One-hop throws; the motion stand-ins (no catching motion, bat not in the batter's hands).
-- Still open from reviews: foul share 24% vs 50%; foul-territory walls. (Day-fixes #1, the runner who crossed home before a catch and never went back, is fixed: branch `worktree-runner-return-on-catch`, 2026-11-12; see that review's Resolution.)
+- Still open from reviews: foul share 24% vs 50%; foul-territory walls. (Day-fixes #1, the runner who crossed home before a catch and never went back, is fixed and merged, 2026-11-12; see that review's Resolution.)
 
 Numbers (`sim-cli games --n 1024`), end of session: seed 2, 5.22 runs/team-game (before Anticipation), seed 5 2,048 games 5.22 with it; GB .399, LD .721, FB .116, PU .005. Per-game time unchanged (~260 ms single thread on the loaded laptop, same as HEAD before the session).
 
@@ -165,7 +177,7 @@ The owner asked for these to be recorded, **not worked on yet**. They are in the
 - [ ] W9. **Player names**
 - [ ] W10. **Fielding errors**. Errors must come from physical causes (a bobble, a bad throw), never from a die roll (D1). Ties to the scorer's hit-or-error ruling (rules-spec §10)
 - [ ] W11. **Player and team statistics**, built from the event log (`bb_stats`)
-- [ ] W12. **Umpires with animations** (an umpire-calls module, `bb_game/src/umpire.rs`, was in progress in the main checkout's uncommitted changes on 2026-11-12)
+- [ ] W12. **Umpires with animations** (the umpire's out calls exist as HUD text since `0d81821`, `bb_game/src/umpire.rs`; no umpire figures yet)
 - [ ] W13. **Stolen bases** (needs runner leads, from the live-ball next steps, and the stretch delivery, W2)
 
 ---
