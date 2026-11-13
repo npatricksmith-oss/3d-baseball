@@ -518,21 +518,23 @@ pub fn position_from_plate(env: &FlightEnv, p0: Vec3, ve: Vec3, w: Vec3, s: f64)
 
 /// An observer's error covariance for a read of a ball's position or velocity whose σ per
 /// lateral axis is `sigma` (agent-models §5.1): `depth`× that along his line of sight `los`
-/// (horizontal unit), half of it in height.
+/// (horizontal unit), and across it one draw that moves the read sideways by σ and up by σ/2
+/// together, as [`read_prediction`] samples it (Codex plate-cue review #2: lateral and height
+/// errors were first taken as independent).
 fn read_cov(los: Vec3, sigma: f64, depth: f64) -> Mat3 {
-    let lat = Vec3::new(-los.y, los.x, 0.0);
-    let z = Vec3::new(0.0, 0.0, 1.0);
-    let (sd, sl, sz) = (depth * sigma, sigma, 0.5 * sigma);
-    Mat3::outer(los, los) * (sd * sd) + Mat3::outer(lat, lat) * (sl * sl) + Mat3::outer(z, z) * (sz * sz)
+    let across = Vec3::new(-los.y, los.x, 0.5);
+    let sd = depth * sigma;
+    Mat3::outer(los, los) * (sd * sd) + Mat3::outer(across, across) * (sigma * sigma)
 }
 
 /// For a ball still on its first flight off the bat `s` seconds ago, how an observer weighs
 /// the two things he knows about where it is now (agent-models §5.1): his direct read
 /// (position σ `sp` per lateral axis) and where a ball going as fast as he reads it (σ `sv`)
 /// must be, having left the plate `s` seconds ago ([`position_from_plate`]; that error grows
-/// as `s` times the velocity error). Returns the gain applied to (plate − direct) and his
-/// remaining depth σ along `los`.
-fn plate_weighing(los: Vec3, sp: f64, sv: f64, s: f64) -> (Mat3, f64) {
+/// as `s` times the velocity error, plus the spin he cannot see). Returns the gain applied to
+/// (plate − direct), his remaining depth σ along `los`, and the depth gain (how much of his
+/// depth estimate comes from the plate).
+fn plate_weighing(los: Vec3, sp: f64, sv: f64, s: f64) -> (Mat3, f64, f64) {
     let r_read = read_cov(los, sp, DEPTH_STRETCH);
     let spin = PLATE_SPIN_M * s * m::sqrt(s);
     let r_plate = read_cov(los, sv * s, DEPTH_STRETCH * 0.5) + Mat3::scale(spin * spin);
@@ -541,28 +543,49 @@ fn plate_weighing(los: Vec3, sp: f64, sv: f64, s: f64) -> (Mat3, f64) {
         None => Mat3::scale(0.0),
     };
     let post = r_read - gain * r_read;
-    (gain, m::sqrt((post * los).dot(los).max(0.0)))
+    (gain, m::sqrt((post * los).dot(los).max(0.0)), (gain * los).dot(los))
 }
 
-/// The σ of an observer's read of where the ball comes down along his line of sight, m, a
+/// The σ of an observer's read of where the ball comes down along his line of sight, m: a
 /// fielder's knowledge of how good his own read is (a belief about himself, not about the
-/// ball; agent-models §5.7 calls): his read of where it is now at distance `dist` after
-/// `view` seconds of watching (for a ball still on its first flight off the bat, `plate` =
-/// his line of sight and the seconds since contact, after weighing in what the plate tells
-/// him), and his read of its velocity (speed `speed`) carried over the `t_left` seconds until
-/// it comes down. *Since 2026-11-13:* the velocity term was added with the plate cue, which
-/// makes the read of where the ball is now nearly exact early, so that what an outfielder
-/// does not know at first is how hard and at what angle it was hit.
+/// ball; agent-models §5.7 calls). He runs his own read ([`read_prediction`]) from what he
+/// believes the ball is doing now (`belief` at `t`, seen from `from`), once as it is and once
+/// with each of its four error draws at one σ, and adds up in quadrature how far each moves
+/// where he predicts it comes down, along his line of sight to it; for a ball still on its
+/// first flight, with the spin he cannot see (`PLATE_SPIN_M`) in the plate's share of his
+/// depth estimate. Running his own physics carries the drag, the plate cue's use of the same
+/// velocity he flies forward, and the coupled lateral and height draws (Codex plate-cue review
+/// #1: the first version added a position term and a straight-line velocity term in
+/// quadrature, which missed the coupling and ignored drag).
 #[allow(clippy::too_many_arguments)]
-fn landing_depth_sigma(dist: f64, sigma0: f64, tau_read: f64, view: f64, speed: f64, t_left: f64, plate: Option<(Vec3, f64)>) -> f64 {
-    let shrink = 1.0 / m::sqrt(1.0 + view / tau_read);
-    let sp = sigma0 * (dist.max(1.0) / READ_REF_DIST) * shrink;
-    let sv = READ_VEL_FRAC * speed * shrink;
-    let now = match plate {
-        Some((los, s)) => plate_weighing(los, sp, sv, s).1,
-        None => sp * DEPTH_STRETCH,
+pub fn landing_depth_sigma(env: &FlightEnv, field: &Field, belief: (Vec3, Vec3), t: f64, from: Vec3, sigma0: f64, tau_read: f64, view: f64, off_bat: Option<(f64, Vec3)>) -> f64 {
+    let land = |err: [f64; 4]| {
+        let path = read_prediction(env, field, belief, t, from, sigma0, tau_read, view, err, off_bat);
+        match path.first_bounce() {
+            Some((_, x, y)) => Vec3::new(x, y, 0.0),
+            None => path.at(path.t_end()).0,
+        }
     };
-    m::hypot(now, sv * DEPTH_STRETCH * 0.5 * t_left.max(0.0))
+    let (p, v) = belief;
+    let los = Vec3::new(p.x - from.x, p.y - from.y, 0.0).normalized();
+    let base = land([0.0; 4]);
+    let mut var = 0.0;
+    for k in 0..4 {
+        let mut e = [0.0; 4];
+        e[k] = 1.0;
+        let d = (land(e) - base).dot(los);
+        var += d * d;
+    }
+    if let Some((s, _)) = off_bat
+        && s > 0.0
+    {
+        let shrink = 1.0 / m::sqrt(1.0 + view / tau_read);
+        let sp = sigma0 * (m::hypot(p.x - from.x, p.y - from.y).max(1.0) / READ_REF_DIST) * shrink;
+        let (_, _, k) = plate_weighing(los, sp, READ_VEL_FRAC * v.norm() * shrink, s);
+        let spin = k * PLATE_SPIN_M * s * m::sqrt(s);
+        var += spin * spin;
+    }
+    m::sqrt(var)
 }
 
 /// An observer's prediction of the ball (agent-models §5.1, interim model): a noisy estimate
@@ -598,7 +621,7 @@ pub fn read_prediction(env: &FlightEnv, field: &Field, truth: (Vec3, Vec3), t: f
     {
         // The plate: where a ball going as fast as he reads it must be, weighed against his
         // direct read by how good each is.
-        let (gain, _) = plate_weighing(los, sp, sv, s);
+        let (gain, _, _) = plate_weighing(los, sp, sv, s);
         pe += gain * (position_from_plate(env, p0, ve, w, s) - pe);
     }
     batted_path_dt(env, field, BallState { r: pe, v: ve, w }, t, AGENT_DT, |_, _| (0.0, 0.0))
@@ -1285,12 +1308,8 @@ impl<'a> Sim<'a> {
             let spare = ti - (start + run_time_to(&fd, pt, REACH * 0.7));
             if spare >= CALL_SLACK_S {
                 // Where he believes the ball is now, and how long he has watched it.
-                let (b, bv) = pred.at(self.t);
-                let dist = m::hypot(b.x - fd.pos.x, b.y - fd.pos.y);
                 let view = (self.t - self.inp.t_contact - fd.a.reaction).max(0.0);
-                let los = Vec3::new(b.x - fd.pos.x, b.y - fd.pos.y, 0.0).normalized();
-                let plate = self.off_bat().map(|(s, _)| (los, s));
-                let sigma = landing_depth_sigma(dist, fd.a.read_sigma0, fd.a.tau_read, view, bv.norm(), ti - self.t, plate);
+                let sigma = landing_depth_sigma(self.inp.env, self.inp.field, pred.at(self.t), self.t, fd.pos, fd.a.read_sigma0, fd.a.tau_read, view, self.off_bat());
                 let doubt = CALL_SURE_SIGMAS * sigma / fd.a.speed;
                 if spare < CALL_SLACK_S + doubt {
                     return (1, spare);
@@ -3850,17 +3869,17 @@ mod tests {
     // centre fielder's read has firmed up enough to call it, and the right fielder peels off.
     // (Re-chosen 2026-11-13 with the plate cue of §5.1, which made the centre fielder sure of
     // the old ball, landing at (18, 91), at once; the right fielder now clears the chase
-    // threshold by 0.65 s, where the old ball left him 30 ms.)
+    // threshold by 0.4 s, where the old ball left him 30 ms.)
     #[test]
     fn until_someone_is_sure_everyone_who_can_catch_it_goes() {
         const RF: usize = 8;
         let fx = fixture(&[]);
-        let inp = hit(&fx, Vec3::new(7.0, 30.0, 24.0));
+        let inp = hit(&fx, Vec3::new(9.0, 34.0, 24.0));
         let mut st = fx.st.clone();
         let mut sim = new_sim(&inp, &mut st);
         at_first_read(&mut sim);
         let land = landing(&sim);
-        assert!((land - Vec3::new(21.0, 92.0, 0.0)).norm() < 3.0, "lands at {land:?}");
+        assert!((land - Vec3::new(27.5, 104.5, 0.0)).norm() < 3.0, "lands at {land:?}");
         assert_eq!((tier(&sim, CF), tier(&sim, RF)), (1, 1), "neither is sure yet");
         sim.assign();
         for i in [CF, RF] {
@@ -3908,6 +3927,68 @@ mod tests {
                 let floor = PLATE_SPIN_M * s * m::sqrt(s);
                 assert!((typical - st.r).norm() < 4.0 * floor, "typical spin at {s} s misses by {:.2} m", (typical - st.r).norm());
             }
+        }
+    }
+
+    // The covariance the plate weighing assumes is the one the read samples (Codex plate-cue
+    // review #2): every combination of the sampler's depth and across draws at ±1, averaged.
+    #[test]
+    fn the_read_covariance_is_the_sampled_one() {
+        let los = Vec3::new(0.6, 0.8, 0.0);
+        let lat = Vec3::new(-los.y, los.x, 0.0);
+        let (sigma, depth) = (1.3, 3.0);
+        let mut acc = Mat3::scale(0.0);
+        for e0 in [-1.0, 1.0] {
+            for e1 in [-1.0, 1.0] {
+                // As `read_prediction` draws a position error.
+                let e = los * (e0 * sigma * depth) + lat * (e1 * sigma) + Vec3::new(0.0, 0.0, e1 * sigma * 0.5);
+                acc = acc + Mat3::outer(e, e) * 0.25;
+            }
+        }
+        let c = read_cov(los, sigma, depth);
+        for (a, b) in [(Vec3::X, Vec3::X), (Vec3::Y, Vec3::Z), (Vec3::Z, Vec3::Z), (Vec3::X, Vec3::Y), (Vec3::X, Vec3::Z)] {
+            assert!(((c * a).dot(b) - (acc * a).dot(b)).abs() < 1e-12, "{a:?}·{b:?}");
+        }
+    }
+
+    // A fielder's belief about how far off his landing point is (`landing_depth_sigma`, used
+    // for calls) against the real spread: 600 reads of one fly, drawn as the simulator draws
+    // them and flown forward with his physics, their landing points measured along his line
+    // of sight. (The first version of the belief, a straight-line sum, was 1.1–1.4× the
+    // spread here, with or without the plate/velocity cross term, part of it the spin floor
+    // the sample does not contain. Codex plate-cue review #1.)
+    #[test]
+    fn a_fielders_doubt_matches_the_spread_of_his_reads() {
+        let fx = fixture(&[]);
+        let inp = hit(&fx, Vec3::new(7.0, 30.0, 24.0));
+        let mut st = fx.st.clone();
+        let sim = new_sim(&inp, &mut st);
+        let cf = home_positions()[CF];
+        let a = FielderAttrs::average(CF);
+        let Ball::Free { path, .. } = &sim.ball else { unreachable!() };
+        for s in [0.7, 1.5, 2.5] {
+            let t = inp.t_contact + s;
+            let (p, v) = path.at(t);
+            let los = Vec3::new(p.x - cf.x, p.y - cf.y, 0.0).normalized();
+            let view = s - a.reaction;
+            let mut depths = Vec::new();
+            for k in 0..600 {
+                let mut r = rng(77, 0, 0, Purpose::FielderPerception, k);
+                let err = [r.truncated_normal(4.0), r.truncated_normal(4.0), r.truncated_normal(4.0), r.truncated_normal(4.0)];
+                let pred = read_prediction(inp.env, inp.field, (p, v), t, cf, a.read_sigma0, a.tau_read, view, err, Some((s, inp.ball.r)));
+                let (_, x, y) = pred.first_bounce().unwrap();
+                depths.push(Vec3::new(x, y, 0.0).dot(los));
+            }
+            let mean = depths.iter().sum::<f64>() / depths.len() as f64;
+            let spread = m::sqrt(depths.iter().map(|d| (d - mean) * (d - mean)).sum::<f64>() / depths.len() as f64);
+            let belief = landing_depth_sigma(inp.env, inp.field, (p, v), t, cf, a.read_sigma0, a.tau_read, view, Some((s, inp.ball.r)));
+            // This ball has the typical spin, so the spread has no spin error; the belief
+            // also allows for the spin he cannot see, in the plate's share of his depth.
+            let shrink = 1.0 / m::sqrt(1.0 + view / a.tau_read);
+            let sp = a.read_sigma0 * m::hypot(p.x - cf.x, p.y - cf.y) / READ_REF_DIST * shrink;
+            let (_, _, k) = plate_weighing(los, sp, READ_VEL_FRAC * v.norm() * shrink, s);
+            let expect = m::hypot(spread, k * PLATE_SPIN_M * s * m::sqrt(s));
+            assert!(belief > 0.85 * expect && belief < 1.15 * expect, "at {s} s: believes {belief:.2} m, spread {spread:.2} m, with spin {expect:.2} m");
         }
     }
 

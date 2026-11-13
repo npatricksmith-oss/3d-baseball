@@ -26,7 +26,10 @@ fn main() {
             let (Some((_, la, _)), Some(path)) = (step.record.batted, &step.batted) else { continue };
             let Some(bb_physics::ground::Segment::Flight { tr, .. }) = path.segments.first() else { continue };
             let s0 = tr.first();
-            let t_end = path.first_bounce().map(|b| b.0).unwrap_or(f64::INFINITY).min(path.walls.first().map(|w| w.0).unwrap_or(f64::INFINITY));
+            // The first flight ends at the ground, a wall, or over the fence (its last knot;
+            // past it `at` holds the last state, which is not a later flight sample: Codex
+            // plate-cue review #3).
+            let t_end = path.first_bounce().map(|b| b.0).unwrap_or(f64::INFINITY).min(path.walls.first().map(|w| w.0).unwrap_or(f64::INFINITY)).min(tr.last().t);
             let la = la.to_degrees();
             let k = BINS.iter().position(|b| la >= b.0 && la < b.1).unwrap_or(0);
             for (j, &s) in TIMES.iter().enumerate() {

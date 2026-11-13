@@ -66,4 +66,10 @@ The initial new CLI/example links were blocked by Zig attempting to write its ca
 
 ## Resolution
 
-Open.
+All three findings fixed (2026-11-13).
+
+- **P2, position/velocity covariance in the call's doubt: fixed, more broadly than suggested.** Adding the cross term to the linear model was tried first; against 600 reads of a gap fly drawn as the simulator draws them and flown forward, the linear model (with or without the cross term) was 1.1–1.4× the real spread (part of that the spin floor, which the sample does not contain), and it ignores drag. `landing_depth_sigma` now runs the fielder's own read (`read_prediction`) from his belief, once as it is and once with each of the four error draws at one σ, and adds up in quadrature how far each moves his landing point along his line of sight, plus the spin floor times the plate's depth gain. That carries the plate/velocity coupling, drag and the coupled lateral/height draws in one step. New test `a_fielders_doubt_matches_the_spread_of_his_reads` (within 15% of the sampled spread plus the spin term at 0.7, 1.5 and 2.5 s). The gap-fly call test was re-chosen again: with the smaller, more accurate doubt the centre fielder was sure of the first replacement ball at first look (now a ball landing at (27.5, 104.5); the right fielder clears the chase threshold by 0.4 s). Cost: +6% game time.
+- **P2, covariance from the sampled noise: fixed.** `read_cov` now builds the across-the-line-of-sight part as one draw along `lat + 0.5 ẑ`, as the sampler draws it, for both position and velocity. The sampler is unchanged (no replay decision needed). New test `the_read_covariance_is_the_sampled_one` (exact enumeration of the ±1 draws).
+- **P3, plate-cue diagnostic past the fence: fixed.** `t_end` is capped at `tr.last().t`. `plate_cue -- 16 true` now prints 0.00 / 0.00 in every cell; the liner figure in the note and spec is now 18–23 m.
+
+After the fixes, `sim-cli games --n 1024`: seed 5 5.36 runs, LD .718, FB .128, PU .008; seed 2 5.21, LD .710, FB .131, PU .009. Close to the reviewed numbers; not refitted. `cargo test --workspace --release`: 147 passed.

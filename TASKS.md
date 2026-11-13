@@ -9,15 +9,16 @@ Status: `[ ]` not started · `[~]` in progress · `[x]` done · `[?]` needs an o
 
 ## Resume here (2026-11-13, fourth session: the plate cue)
 
-Branch `claude/next-task-list-item-11a78e` (continuing from the third session below). `cargo test --workspace --release`: 145 passed, 0 failed.
+Branch `claude/next-task-list-item-11a78e` (continuing from the third session below). `cargo test --workspace --release`: 147 passed, 0 failed.
 
-**First:** the Codex review of this session's change (`5da8633..HEAD`, `docs/reviews/2026-11-13-codex-plate-cue-review.md`) was started in the background at the end of the session. If it is there, commit it, fix or defer every finding, and write its Resolution.
+**Nothing is waiting on a review.** Merged into main (not pushed).
 
 Done (owner item 2; [note](docs/calibration/2026-11-13-plate-cue.md), agent-models §5.1 "The plate cue"):
 - **The read knows the ball started at the plate.** While a batted ball is on its first flight, the fielder flies his read of its velocity back to contact with his own physics and typical spin (drag and gravity act on the velocity alone), which says where a ball going that fast must be now, and weighs that against his direct read in 3D by how good each is. The cue's own error is all spin (`examples/plate_cue.rs`: exact with the true spin). An outfielder's first-look landing error is now about 7 m, nearly all of it his velocity read (how hard and at what angle), against 25 m before; a ball 15 m from home is no longer read 26 m deep or 9 m wide.
-- **The call rule's self-knowledge** is now where the ball comes down (`landing_depth_sigma`: adds the velocity read carried over the time left); without it every outfielder was sure of every pop-up at first look.
-- **Refit:** outfield read σ₀ 3.0 → 3.5 m at 30 m (FB band). 1,024 games, seed 5 / seed 2: runs 5.44 → 5.35 / 5.26 → 5.23; LD .724 → .707 / .715 → .694 (MLB ≈ .68); FB .120 → .123 / .119 → .131 (≈ .13); PU .008 / .008 (≈ .02). Uncaught pop-ups in 128 games 7 → 5. Game time unchanged.
-- The gap-fly call test now uses a ball both outfielders are unsure of with 0.65 s of margin (was 30 ms; deferred popup-calls review item).
+- **The call rule's self-knowledge** is now where the ball comes down (`landing_depth_sigma`: he runs his own read with each error draw at one σ and sees how far each moves his landing point); without it every outfielder was sure of every pop-up at first look.
+- **Refit:** outfield read σ₀ 3.0 → 3.5 m at 30 m (FB band). 1,024 games, seed 5 / seed 2: runs 5.44 → 5.36 / 5.26 → 5.21; LD .724 → .718 / .715 → .710 (MLB ≈ .68); FB .120 → .128 / .119 → .131 (≈ .13); PU .008 → .008 / .009 (≈ .02). Uncaught pop-ups in 128 games 7 → 6. Game time +6%.
+- The gap-fly call test now uses a ball both outfielders are unsure of with 0.4 s of margin (was 30 ms; deferred popup-calls review item).
+- [Codex plate-cue review](docs/reviews/2026-11-13-codex-plate-cue-review.md) **resolved**: all three findings fixed (the call's doubt now runs the fielder's own read per error draw, which carries the plate/velocity coupling and drag; the weighing's covariance matches the sampler's coupled lateral/height draw; the plate-cue diagnostic stops at the fence).
 - New diagnostic `examples/hit_bases.rs` (hits by bases per batted-ball type). It shows **triples far above MLB**: about .07 of liners and .02 of ground balls go for triples, before and after this change (MLB triples are well under 1% of balls in play; not checked by type): a run-environment lead for later.
 
 Next: items 2–7 of the coordinator list below (fouls first).
