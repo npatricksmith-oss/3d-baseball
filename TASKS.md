@@ -38,7 +38,7 @@ Next, in order:
 4. Watch the client (`bin/play.sh`): reset staging, side-change jogs, sidesteps.
 5. **Camera cut at side changes** (owner, 2026-11-13: later) to hide the 23–27 s jog off/on.
 6. **Batter timing fooled by offspeed and sequence** (pa.rs/bb_agents), which is what would give fielders' Anticipation real information to read.
-7. **The owner's priority A backlog** ([Owner backlog](#owner-backlog-observations-of-2026-11-13-merged-with-the-wishlist-of-2026-11-12) below, 18 items from watching games, with a proposed order). Not yet slotted against items 1–6: the owner decides whether it goes ahead of them. Item 4 is partly answered by the observations themselves; "batters of both sides" (previous handoff) is now A1 and the foul-territory walls are A10.
+7. **The owner's priority A backlog** ([Owner backlog](#owner-backlog-observations-of-2026-11-13-merged-with-the-wishlist-of-2026-11-12) below, 17 items, in the order the owner agreed on 2026-11-13). It comes after items 1–6 (owner, 2026-11-13). Item 4 is partly answered by the observations themselves; "batters of both sides" (previous handoff) is now A1 and the foul-territory walls are A10.
 
 Process (owner, 2026-11-13): at most two Claude worker agents at once, and every worker commits after each meaningful step; five at once hit the usage limit and one worker's uncommitted work had to be rescued.
 
@@ -199,7 +199,7 @@ Numbers (`sim-cli games --n 512 --seed 2`), 2026-11-12 after the review fixes: 5
 
 ## Owner backlog (observations of 2026-11-13, merged with the wishlist of 2026-11-12)
 
-Source: [observations.md](observations.md), written by the owner after watching games. Priorities A, B, C are the owner's. This list replaces the old wishlist; its numbers are kept in brackets (`[W2]`). "Have" says what already exists, checked against the code on 2026-11-13. Within a priority the order is by theme, not rank. When an item starts, move it into its milestone and add detail.
+Source: [observations.md](observations.md), written by the owner after watching games. Priorities A, B, C are the owner's. This list replaces the old wishlist; its numbers are kept in brackets (`[W2]`). "Have" says what already exists, checked against the code on 2026-11-13. Within a priority the order is by theme, not rank. Items were renumbered once on 2026-11-13 after the owner's rulings (looks moved to the polish stage, errors moved to A). When an item starts, move it into its milestone and add detail.
 
 ### Priority A
 
@@ -215,15 +215,14 @@ On the field (sim):
 - [ ] A9. **Stolen bases** [W13]. Needs A7 (delivery time), A8 (leads, jumps, pickoffs), A6 (slides), and the catcher's throw (agent-models §4).
 - [ ] A10. **Limits of the play area.** The owner saw a foul ball go out of play and the play carry on. Build the foul-territory walls and backstop (physics-spec §9.4; this is "Run environment (a)" above: foul ground now reaches the outfield-fence radius), make a ball that leaves the park dead (with the rules award for a thrown ball out of play), and have the client cut back to the field once the ball is gone.
 - [ ] A11. **Wind and weather** that act on the ball and the players. Have: the flight model takes a wind vector (always zero) and an air density. Missing: weather per game, and rain. Rain must act through physical causes (D1): a wet ball (release and throw noise), wet ground (traction, bounces), not a mistake rate. **Was deferred past M8; the owner moved it to A on 2026-11-13** (PLAN §14 updated).
+- [ ] A17. **Fielding errors** [W10; owner made it a priority, 2026-11-13], from physical causes only (a bobble, a bad throw; D1). Ties to the scorer's hit-or-error ruling (rules-spec §10), A3, A11, and B5
 - [ ] A12. **Post-game box score.** Have: `bb_stats` builds runs, the linescore, PA results, and LOB from the event log. Missing: hits vs. errors need the scorer (rules-spec §10; see "M4 next steps"), per-player lines need A2, and the client has no box-score screen.
 
-On the screen (client):
-- [ ] A13. **Stadium and diamond that look real** [W1]. Crowds can be something cheap for now (better crowds are C1).
-- [ ] A14. **Players' look:** a variety of body shapes, skin colors, ethnicities and nationalities (names in A2 should match); team uniforms (teams are a tint now); gloves, on the hand given by A1.
-- [ ] A15. **Fielders' throwing motion** does not look real [W8] (a stand-in from the engine's stock clips).
-- [ ] A16. **Hitting animation:** stance, load, swing, follow-through (also a stand-in). Per-player stances and swings are W3 below.
-- [ ] A17. **Ball shadow after a hit cannot be seen.** Have: a disc under the ball, shrunk to 15 cm on 2026-11-12 because the owner found 50 cm too big. It is lost from the follow camera; size it by camera distance.
-- [ ] A18. **Home runs:** once the ball is over the wall, cut back to center to show the runners circling the bases; show a display with the batter's name (A2), the distance, and the exit speed in mph.
+On the screen (client). The owner (2026-11-13): hitting and throwing motions affect gameplay, so they stay here; the other looks wait for the polish stage (below).
+- [ ] A13. **Fielders' throwing motion** does not look real [W8] (a stand-in from the engine's stock clips).
+- [ ] A14. **Hitting animation:** stance, load, swing, follow-through (also a stand-in). Per-player stances and swings are P3 below.
+- [ ] A15. **Ball shadow after a hit cannot be seen.** Have: a disc under the ball, shrunk to 15 cm on 2026-11-12 because the owner found 50 cm too big. It is lost from the follow camera; size it by camera distance.
+- [ ] A16. **Home runs:** once the ball is over the wall, cut back to center to show the runners circling the bases; show a display with the batter's name (A2), the distance, and the exit speed in mph.
 
 ### Priority B
 
@@ -235,27 +234,28 @@ On the screen (client):
 
 ### Priority C
 
-- [ ] C1. **Better crowds** (after A13).
+- [ ] C1. **Better crowds** (after P1).
 - [ ] C2. **Player development** (includes aging: a career arc for skill and experience [W7]). M7.
 - [ ] C3. **Post-game highlights** (timelines are already recorded, D9).
 
-### From the earlier wishlist, no priority given yet
+### Polish stage (M8; owner, 2026-11-13: these wait, D13 stands)
 
-- [ ] W3. **Batter stances and swings per player**, with a wide variety. The owner's examples: Pete Rose, Darryl Strawberry, Gary Carter; a longer list may follow. Follows A16
-- [ ] W4. **HUD** that looks more like a TV broadcast
-- [ ] W10. **Fielding errors**, from physical causes only (a bobble, a bad throw; D1). Ties to the scorer's hit-or-error ruling (rules-spec §10), A3, A11, and B5
-- [ ] W12. **Umpires with animations** (out calls exist as HUD text, `bb_game/src/umpire.rs`; no umpire figures)
+- [ ] P1. **Stadium and diamond that look real** [W1]. Crowds can be something cheap for now (better crowds are C1).
+- [ ] P2. **Players' look:** a variety of body shapes, skin colors, ethnicities and nationalities (names in A2 should match); team uniforms (teams are a tint now); gloves, on the hand given by A1 (the glove hand still matters to the sim under A1).
+- [ ] P3. **Batter stances and swings per player** [W3], with a wide variety. The owner's examples: Pete Rose, Darryl Strawberry, Gary Carter; a longer list may follow. Follows A14
+- [ ] P4. **HUD** [W4] that looks more like a TV broadcast
+- [ ] P5. **Umpires with animations** [W12] (out calls exist as HUD text, `bb_game/src/umpire.rs`; no umpire figures)
 
-### Proposed order for priority A (the owner has not ruled)
+### Order for priority A (owner agreed, 2026-11-13)
 
 1. A2 rosters and A1 handedness: nearly everything else hangs off them.
-2. Quick client fixes alongside: A17 shadow, A18 home-run camera and display.
+2. Quick client fixes alongside: A15 shadow, A16 home-run camera and display.
 3. A10 play-area limits (also a known run-environment item).
-4. A3 and A4 throws, with A5 measured in the same pass.
+4. A3 and A4 throws, with A5 measured in the same pass, then A17 errors (they come out of rushed throws and bobbles).
 5. A8 → A7 → A6 → A9: leads and pickoffs, the stretch, slides, then steals.
 6. A12 box score (with the scorer, which also settles B5).
 7. A11 wind first (the flight model is ready), rain after.
-8. A13–A16 looks and motion, in parallel with the sim work as RAM allows (see D13 in PLAN §1).
+8. A13 throwing motion and A14 hitting animation.
 
 ---
 

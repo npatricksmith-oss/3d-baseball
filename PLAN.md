@@ -34,7 +34,7 @@ The human is the **manager**. They pick lineups, tactics, pitching changes, and 
 | D10 | **Universal DH. Classic extra innings** (no automatic runner) | **Decided** (owner) | |
 | D11 | Strike zone: 2D plane at the plate's midpoint depth, top and bottom scaled to batter height (ABS-style), judged exactly | **Proposed** | Simple, testable, modern. Human-umpire mode later |
 | D12 | **Primary experience: managing live games.** League/season play is secondary | **Decided** (owner) | Manager layer (M6) comes before league (M7) |
-| D13 | Simple geometric visuals until the final polish milestone | **Decided** (owner). **Proposed amendment (2026-11-13):** the owner's observations rank a realistic stadium, uniforms, gloves, body variety, and throwing and hitting motion as priority A (TASKS.md, backlog A13–A16), which moves that part of M8 forward; awaiting the owner's confirmation | Engine must still support high fidelity later (D6) |
+| D13 | Simple geometric visuals until the final polish milestone | **Decided** (owner; reaffirmed 2026-11-13: stadium, uniforms, body variety and other looks wait for the polish stage, but hitting and throwing motions come sooner because they affect gameplay) | Engine must still support high fidelity later (D6) |
 | D14 | A crude but rule-honest full game ("walking skeleton") at M4, before deepening each subsystem | **Adopted** | Catches integration and "fun to watch?" problems early |
 | D15 | Rerun (rerun.io) as the physics/AI debug visualizer until the Unreal client exists, and as a lab tool afterward | **Proposed** | Zero engine commitment; time-scrubbable 3D logs |
 | D16 | **Defensive shifts allowed** (no positioning restrictions beyond rulebook basics) | **Decided** (owner) | More managerial depth |
