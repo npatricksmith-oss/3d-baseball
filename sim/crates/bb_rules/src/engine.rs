@@ -127,8 +127,7 @@ fn step_position(st: &mut RulesState, p: &RunnerPosition) -> Vec<Event> {
     // or sampled at the same time. Every pass is an out: one at a time in runner order,
     // re-reading the play after each, until none remain, the sampled runner is out, or the
     // inning ends (one retreat can leave several followers ahead of him).
-    loop {
-        let PlayState::Live(lp) = &st.play else { break };
+    while let PlayState::Live(lp) = &st.play {
         if lp.runners[i].out {
             break;
         }
@@ -829,13 +828,13 @@ fn base_touched(st: &mut RulesState, t: f64, agent: AgentId, base: Base, holding
         return;
     }
     let i = lp.runners.iter().position(|x| x.runner == agent && !x.out).unwrap();
-    if let Some((fol, pre)) = passed_on_touch(lp, i, base) {
-        if fol == i {
-            // Reaching a base a preceding runner has not reached means passing him on the way:
-            // out before the touch counts.
-            passing_out(st, t, i, pre, base, ev);
-            return;
-        }
+    if let Some((fol, pre)) = passed_on_touch(lp, i, base)
+        && fol == i
+    {
+        // Reaching a base a preceding runner has not reached means passing him on the way: out
+        // before the touch counts.
+        passing_out(st, t, i, pre, base, ev);
+        return;
     }
     // His touch counts. A preceding runner falling back behind following ones retires each of
     // them (OBR 5.09(b)(9) comment), judged after his touch so he stands on the base he
