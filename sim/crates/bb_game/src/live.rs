@@ -3360,6 +3360,68 @@ mod tests {
         assert!(sim.f[0].vel.norm() < 1e-9 && (sim.f[0].pos - start).norm() < 5.0, "P at {:?} moving {:?}", sim.f[0].pos, sim.f[0].vel);
     }
 
+    // Codex idle-fielder review #1: every way into `Role::Idle` brakes the fielder, not only
+    // the calls. Runner on second, ball held by the right fielder at (25, 62) m: the first
+    // baseman is the cutoff to home, his spot ~12.5 m in from where he stands. His job then
+    // ends three ways: the right fielder throws straight to second past him (`holder_act`),
+    // a throw to another man is in the air (`update_relay`), or an infielder has the ball
+    // (`update_relay`). Nobody gives him another job (every base is covered and the throw's
+    // backup is someone else), so a man standing still stays where he is, and a man already
+    // running toward his old spot at 7 m/s pulls up within v²/(2·6 m/s²) ≈ 4.08 m along his
+    // line instead of going on to it.
+    #[test]
+    fn a_retired_cutoff_man_with_no_job_stops() {
+        const R: AgentId = 0x0007;
+        const B1: usize = 2;
+        let fx = fixture(&[(R, 2)]);
+        let inp = input(&fx, vec![RunnerIn { id: fx.st.batter, base: 0, speed: 8.2 }, RunnerIn { id: R, base: 2, speed: 8.2 }]);
+        let rf_at = Vec3::new(25.0, 62.0, 0.0);
+        for (case, run) in [(0, 0.0), (1, 0.0), (2, 0.0), (0, 7.0), (2, 7.0)] {
+            let mut st = fx.st.clone();
+            let mut sim = new_sim(&inp, &mut st);
+            sim.t = 5.0;
+            held_at(&mut sim, 8, rf_at);
+            assert_eq!(sim.f[B1].role, Role::Relay(4), "case {case}: the first baseman is the cutoff to home");
+            let spot = sim.f[B1].target;
+            let start = sim.f[B1].pos;
+            assert!((spot - start).norm() > 10.0, "case {case}: cutoff spot {spot:?} from {start:?}");
+            let dir = Vec3::new(spot.x - start.x, spot.y - start.y, 0.0).normalized();
+            sim.f[B1].vel = dir * run;
+            // The second-base cover is on his bag; the runner on second is standing (no play).
+            let c2 = (0..9).find(|&i| sim.f[i].role == Role::Cover(2)).expect("second is covered");
+            sim.f[c2].pos = base_pos(2);
+            sim.f[c2].target = base_pos(2);
+            match case {
+                0 => {
+                    sim.holder_act();
+                    assert!(matches!(sim.ball, Ball::Thrown { receiver, relay: false, .. } if receiver == c2), "case 0: a straight throw to second");
+                }
+                1 => {
+                    sim.throw_to(8, base_pos(2), 2, c2, false);
+                    sim.update_relay();
+                }
+                _ => {
+                    sim.f[c2].target = sim.f[c2].pos;
+                    sim.ball = Ball::Held { by: c2 };
+                    sim.update_relay();
+                }
+            }
+            assert_eq!(sim.f[B1].role, Role::Idle, "case {case}: his job is over and he has no other");
+            for _ in 0..200 {
+                sim.move_fielders();
+                sim.t += DT;
+            }
+            let fd = &sim.f[B1];
+            let moved = fd.pos - start;
+            assert!(fd.vel.norm() < 1e-9, "case {case} (v0 {run}): still moving {:?} at {:?}", fd.vel, fd.pos);
+            let want = run * run / (2.0 * 6.0);
+            assert!((moved.norm() - want).abs() < 0.15, "case {case} (v0 {run}): moved {:.3} m, expected {want:.3} m; at {:?}", moved.norm(), fd.pos);
+            if run > 0.0 {
+                assert!(moved.normalized().dot(dir) > 0.99, "case {case}: stops on his line of motion");
+            }
+        }
+    }
+
     // Watch-fixes review #1–#3: the catcher goes back to cover home once a runner rounds
     // first; a backup catches an overthrow that reaches him in the air; a runner holds his
     // lead (he does not drift back to the base) until he has read the ball.
