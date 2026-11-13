@@ -1,13 +1,28 @@
 # Task List
 
-**Last updated:** 2026-11-13 (called-off infielders back up the catch; before that, pop-up calls on `fix/popup-calls`; before that, owner's observations merged into the "Owner backlog" section; before that, the coordinator run on `coord/review-fixes`)
+**Last updated:** 2026-11-13 (the read knows the ball started at the plate; before that, called-off infielders back up the catch; before that, pop-up calls on `fix/popup-calls`; before that, owner's observations merged into the "Owner backlog" section; before that, the coordinator run on `coord/review-fixes`)
 The live to-do list for the project. [PLAN.md](PLAN.md) holds decisions and design. This file holds what is next and what is done. Update it at the end of every work session.
 
 Status: `[ ]` not started · `[~]` in progress · `[x]` done · `[?]` needs an owner decision
 
 ---
 
-## Resume here (2026-11-13, third session: the called-off infielder)
+## Resume here (2026-11-13, fourth session: the plate cue)
+
+Branch `claude/next-task-list-item-11a78e` (continuing from the third session below). `cargo test --workspace --release`: 145 passed, 0 failed.
+
+**First:** the Codex review of this session's change (`5da8633..HEAD`, `docs/reviews/2026-11-13-codex-plate-cue-review.md`) was started in the background at the end of the session. If it is there, commit it, fix or defer every finding, and write its Resolution.
+
+Done (owner item 2; [note](docs/calibration/2026-11-13-plate-cue.md), agent-models §5.1 "The plate cue"):
+- **The read knows the ball started at the plate.** While a batted ball is on its first flight, the fielder flies his read of its velocity back to contact with his own physics and typical spin (drag and gravity act on the velocity alone), which says where a ball going that fast must be now, and weighs that against his direct read in 3D by how good each is. The cue's own error is all spin (`examples/plate_cue.rs`: exact with the true spin). An outfielder's first-look landing error is now about 7 m, nearly all of it his velocity read (how hard and at what angle), against 25 m before; a ball 15 m from home is no longer read 26 m deep or 9 m wide.
+- **The call rule's self-knowledge** is now where the ball comes down (`landing_depth_sigma`: adds the velocity read carried over the time left); without it every outfielder was sure of every pop-up at first look.
+- **Refit:** outfield read σ₀ 3.0 → 3.5 m at 30 m (FB band). 1,024 games, seed 5 / seed 2: runs 5.44 → 5.35 / 5.26 → 5.23; LD .724 → .707 / .715 → .694 (MLB ≈ .68); FB .120 → .123 / .119 → .131 (≈ .13); PU .008 / .008 (≈ .02). Uncaught pop-ups in 128 games 7 → 5. Game time unchanged.
+- The gap-fly call test now uses a ball both outfielders are unsure of with 0.65 s of margin (was 30 ms; deferred popup-calls review item).
+- New diagnostic `examples/hit_bases.rs` (hits by bases per batted-ball type). It shows **triples far above MLB**: about .07 of liners and .02 of ground balls go for triples, before and after this change (MLB triples are well under 1% of balls in play; not checked by type): a run-environment lead for later.
+
+Next: items 2–7 of the coordinator list below (fouls first).
+
+## Previous: 2026-11-13, third session: the called-off infielder
 
 Branch `claude/next-task-list-item-11a78e` (cut from main `a23f7c2`), merged into main (not pushed). `cargo test --workspace --release`: 144 passed, 0 failed.
 
@@ -25,11 +40,11 @@ Next: owner item 2 (the read knows the ball started at the plate), then items 2�
 **Nothing is waiting on a review.** The [Codex popup-calls review](docs/reviews/2026-11-13-codex-popup-calls-review.md) is resolved: its P3 (two numbers in the calibration note) is fixed, and the owner deferred both P2 findings (2026-11-13: "errors such as you describe can take place" in real games; fine once in a while, keep for a later fix):
 - Later: when both middle infielders go for an uncalled ball, nobody covers second until the next re-call (seed 55 play 159; 17 such assignments in 1,024 games). Wanted: a fallback cover before backups are handed out.
 - Later: a re-call looks only at the chaser and the four fielders nearest his target, so another active chaser can be sent to backup before anyone is sure (seed 897 play 163). Wanted: every active chaser is a re-call candidate.
-- Later: the gap-fly test's right fielder has only 30 ms of margin over the chase threshold; pick a more comfortable ball.
+- ~~Later: the gap-fly test's right fielder has only 30 ms of margin over the chase threshold; pick a more comfortable ball.~~ Done 2026-11-13 (fourth session: 0.65 s).
 
 **Then, the owner's two items (2026-11-13), in this order, merging each into main when done:**
 1. ~~The called-off infielder drifts out behind the caller instead of standing still~~ **done 2026-11-13** (third session, above).
-2. The read knows the ball started at the plate (§5.1 launch-state perception), and the outfield read values are refitted.
+2. ~~The read knows the ball started at the plate (§5.1 launch-state perception), and the outfield read values are refitted~~ **done 2026-11-13** (fourth session, above).
 
 Done (old "Next" item 1, pop-ups dropping in short right/center; [note](docs/calibration/2026-11-13-popup-read-and-calls.md)):
 - **Why the outfielder's read is off above 50°: not spin or drag** (under 1.5 m at any launch angle). One σ of his read moves the predicted landing point about 25 m at first look on every fly, nearly all of it the position-depth term, which scales with his distance from the ball. A fly hit toward him brings that down to under 2 m; a shallow pop-up never comes near him, so he is still 5–7 m unsure with a second and a half left. New diagnostic: `cargo run --release -p bb_game --example read_error -- 48` (the read is now a pure function, `live::read_prediction`; digests unchanged).

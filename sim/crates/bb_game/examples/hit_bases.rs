@@ -1,5 +1,6 @@
 //! Diagnostic: fair balls in play by batted-ball type, and how many bases the batter's hits
-//! reached (single, double, triple, inside-the-park home run), to tell whether a change in
+//! reached (single, double, triple, home run of either kind; "hit" counts all four, unlike
+//! `sim-cli games`, which leaves home runs out of its BABIP), to tell whether a change in
 //! runs comes from more hits or from longer ones. `-- [games] [first seed]`
 use bb_rules::Event;
 
@@ -8,7 +9,7 @@ fn main() {
     let games: u64 = a.first().and_then(|s| s.parse().ok()).unwrap_or(256);
     let first: u64 = a.get(1).and_then(|s| s.parse().ok()).unwrap_or(0);
     const NAMES: [&str; 4] = ["GB (<10°)", "LD (10–25°)", "FB (25–50°)", "PU (>50°)"];
-    // [type] -> [balls, 1B, 2B, 3B, ITP HR]
+    // [type] -> [balls, 1B, 2B, 3B, HR]
     let mut n = [[0u64; 5]; 4];
     let mut runs = 0u64;
     for seed in first..first + games {
@@ -73,7 +74,7 @@ fn main() {
     );
     println!(
         "{:>12} {:>6} {:>7} {:>7} {:>7} {:>7} {:>7}",
-        "type", "balls", "hit", "1B", "2B", "3B", "ITPHR"
+        "type", "balls", "hit", "1B", "2B", "3B", "HR"
     );
     for (k, row) in n.iter().enumerate() {
         let b = row[0].max(1) as f64;

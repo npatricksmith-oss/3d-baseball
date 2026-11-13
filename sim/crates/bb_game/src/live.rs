@@ -3883,6 +3883,34 @@ mod tests {
         assert_ne!(sim.f[RF].role, Role::Chase, "called off");
     }
 
+    // Agent-models §5.1, the plate cue: flying a ball's true velocity and spin back to contact
+    // lands on the contact point (the world's flight, run forward with its own step, is the
+    // independent reference), for a liner, a fly and a pop-up, at a time between steps too.
+    // With the typical spin in place of the true one it misses by about the spin floor.
+    #[test]
+    fn the_plate_cue_flies_the_ball_back_to_contact() {
+        let env = FlightEnv::default_env();
+        let p0 = Vec3::new(0.0, 0.5, 1.0);
+        for (v, rpm) in [(Vec3::new(-8.0, 40.0, 7.0), 2500.0), (Vec3::new(9.0, 33.0, 22.0), 4800.0), (Vec3::new(4.0, 14.0, 30.0), 6400.0)] {
+            let h = Vec3::new(v.x, v.y, 0.0).normalized();
+            let w0 = Vec3::new(h.y, -h.x, 0.0) * (rpm * core::f64::consts::PI / 30.0);
+            let mut st = BallState { r: p0, v, w: w0 };
+            let mut t = 0.0f64;
+            for s in [0.4f64, 1.0, 1.85, 3.0] {
+                while t < s - 1e-9 {
+                    let h = (s - t).min(0.01);
+                    st = env.step(&st, h);
+                    t += h;
+                }
+                let back = position_from_plate(&env, p0, st.v, st.w, s);
+                assert!((back - st.r).norm() < 1e-3, "v {v:?} at {s} s: {back:?} against {:?}", st.r);
+                let typical = position_from_plate(&env, p0, st.v, believed_spin(st.v, Some(s)), s);
+                let floor = PLATE_SPIN_M * s * m::sqrt(s);
+                assert!((typical - st.r).norm() < 4.0 * floor, "typical spin at {s} s misses by {:.2} m", (typical - st.r).norm());
+            }
+        }
+    }
+
     // Agent-models §5.7, "peels off to back up": a pop-up coming down at (20, 36) m, between
     // first and second, that both the first and second basemen are sure of. The first baseman, nearer, has more time to
     // spare and calls it; the second baseman, with no base to cover (the shortstop takes
