@@ -273,14 +273,18 @@ fn honest(rows: &[Row], y: &[f64]) {
         for t in types.iter().skip(1) {
             tr.push(rows.iter().map(|r| if &r.ty == t { 1.0 } else { 0.0 }).collect());
         }
+        // As built (live.rs): the lead timed with the cue off the ball, 75/40 of the timing σ.
+        let lead_built: Vec<f64> = rows.iter().map(|r| r.cues[8] + st_ms * 75.0 / 40.0 * gauss()).collect();
         println!(
-            "{g:5}  {st_ms:6.1}  {:7.2}  {:5.2}  {:6.2}  {:13.2}  {:11.2}  {:20.2}",
+            "{g:5}  {st_ms:6.1}  {:7.2}  {:5.2}  {:6.2}  {:13.2}  {:11.2}  {:20.2}   as built (face + lead at {:.0} ms): {:.2}",
             ls(&[px.clone()], y).1,
             ls(&[px.clone(), face.clone()], y).1,
             ls(&[px.clone(), depth], y).1,
             ls(&[px.clone(), onset.clone()], y).1,
-            ls(&[px.clone(), face, onset], y).1,
+            ls(&[px.clone(), face.clone(), onset], y).1,
             ls(&tr, y).1,
+            st_ms * 75.0 / 40.0,
+            ls(&[px.clone(), face, lead_built], y).1,
         );
     }
 }
