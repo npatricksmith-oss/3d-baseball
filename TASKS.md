@@ -1,6 +1,6 @@
 # Task List
 
-**Last updated:** 2026-11-13 (coordinator run on `coord/review-fixes`: two reviews resolved, rules gaps, R13, pitcher diagnosis)
+**Last updated:** 2026-11-13 (owner's observations merged into the "Owner backlog" section; before that, the coordinator run on `coord/review-fixes`)
 The live to-do list for the project. [PLAN.md](PLAN.md) holds decisions and design. This file holds what is next and what is done. Update it at the end of every work session.
 
 Status: `[ ]` not started · `[~]` in progress · `[x]` done · `[?]` needs an owner decision
@@ -38,6 +38,7 @@ Next, in order:
 4. Watch the client (`bin/play.sh`): reset staging, side-change jogs, sidesteps.
 5. **Camera cut at side changes** (owner, 2026-11-13: later) to hide the 23–27 s jog off/on.
 6. **Batter timing fooled by offspeed and sequence** (pa.rs/bb_agents), which is what would give fielders' Anticipation real information to read.
+7. **The owner's priority A backlog** ([Owner backlog](#owner-backlog-observations-of-2026-11-13-merged-with-the-wishlist-of-2026-11-12) below, 18 items from watching games, with a proposed order). Not yet slotted against items 1–6: the owner decides whether it goes ahead of them. Item 4 is partly answered by the observations themselves; "batters of both sides" (previous handoff) is now A1 and the foul-territory walls are A10.
 
 Process (owner, 2026-11-13): at most two Claude worker agents at once, and every worker commits after each meaningful step; five at once hit the usage limit and one worker's uncommitted work had to be rescued.
 
@@ -196,23 +197,65 @@ Numbers (`sim-cli games --n 512 --seed 2`), 2026-11-12 after the review fixes: 5
 
 ---
 
-## Owner wishlist: eventual improvements (2026-11-12)
+## Owner backlog (observations of 2026-11-13, merged with the wishlist of 2026-11-12)
 
-The owner asked for these to be recorded, **not worked on yet**. They are in the owner's order, not in priority order. When one starts, move it into its milestone and add detail.
+Source: [observations.md](observations.md), written by the owner after watching games. Priorities A, B, C are the owner's. This list replaces the old wishlist; its numbers are kept in brackets (`[W2]`). "Have" says what already exists, checked against the code on 2026-11-13. Within a priority the order is by theme, not rank. When an item starts, move it into its milestone and add detail.
 
-- [ ] W1. **Stadium and field aesthetics**: a real ballpark look for the field and stands (the stands are plain blocks now). Presentation, M8
-- [ ] W2. **Pitcher windup vs. stretch**: a full windup with the bases empty, the stretch with a runner on. The stretch should also shorten the delivery time, which matters to stolen bases (W13)
-- [ ] W3. **Batter stances and swings**: each player has their own stance and swing, with a wide variety. The owner's examples of styles: Pete Rose, Darryl Strawberry, Gary Carter. The owner may send a longer list of styles to model later. Overlaps the parked "swing styles" item
-- [ ] W4. **HUD**: make it look more like a TV broadcast
-- [ ] W5. **More teams**: team names, mascots, and full rosters. Ties to M7 (league)
-- [ ] W6. **Team selection** before a game
-- [ ] W7. **Player aging**: a career arc for both skill and experience. M7
-- [ ] W8. **Fielders' throwing animation** (also under the M0.8 client next steps)
-- [ ] W9. **Player names**
-- [ ] W10. **Fielding errors**. Errors must come from physical causes (a bobble, a bad throw), never from a die roll (D1). Ties to the scorer's hit-or-error ruling (rules-spec §10)
-- [ ] W11. **Player and team statistics**, built from the event log (`bb_stats`)
-- [ ] W12. **Umpires with animations** (the umpire's out calls exist as HUD text since `0d81821`, `bb_game/src/umpire.rs`; no umpire figures yet)
-- [ ] W13. **Stolen bases** (needs runner leads, from the live-ball next steps, and the stretch delivery, W2)
+### Priority A
+
+On the field (sim):
+- [ ] A1. **Handedness for every player.** Each player throws left or right and bats left, right, or both; the throwing hand usually matches the batting side but not always. Switch hitters bat from the side opposite the pitcher's hand. Fielders throw with their throwing hand and wear the glove on the other. Have: `Hand`, the pitcher's `throws`, the batter's `bats`. Missing: every game batter is right-handed (`Matchup::average()`), fielders have no hand, no switch hitters, and the client's motions are not mirrored. Includes the earlier "batters of both sides in games" item (check that pitcher targeting handles left-handed batters).
+- [ ] A2. **Rosters: player names, numbers, positions** [W9, part of W5]. Most of the items below need it (the home-run display, the box score, uniforms, handedness per player).
+- [ ] A3. **Throwing ratings and hurried throws.** Each player has ratings for arm speed, accuracy, and set-up time. A hurried throw loses accuracy and speed; a fielder with time to get balanced gains both. Have: the spec's `ArmStrength`, `ArmAccuracy`, `Transfer` and its rush and off-balance noise terms (agent-models §5.5); in code each fielder has an arm speed and a fixed transfer time. Missing: no throw is ever hurried (the rush terms are not built), and the spec gives a rushed throw no speed loss, so §5.5 needs that added.
+- [ ] A4. **Smarter throw choices from the outs and the runners.** The owner's example: runner on third, two outs, the fielders should take the force at first or second, not throw home. Collect plays where the choice is wrong before changing the option evaluation (agent-models §5.5).
+- [ ] A5. **Dives that extend range, with a real cost to get up and throw.** Have: chasers dive (1.5 m extra reach, 1.5 s to get up, harder capture). Missing: no dive or get-up motion in the client, so the owner may not be seeing them; measure how often fielders dive and whether the range and the cost are believable.
+- [ ] A6. **Runners slide** when the play calls for it (agent-models §6.2; was in M5). Not built.
+- [ ] A7. **Windup vs. stretch** [W2]: a full windup with the bases empty, the stretch with runners on; the stretch shortens the delivery, which matters to steals. Owner's references: [Am J Sports Med 2024 study](https://journals.sagepub.com/doi/abs/10.1177/03635465241247543), [Umpire Bible: pitching positions](https://umpirebible.com/pitching-positions/), and a search for "pitching stretch vs windup visualization". Not built (one delivery; agent-models §2.6 sketches the slide step).
+- [ ] A8. **Runners lead off only once the pitcher is set; pickoffs.** The owner saw runners leading before the pitcher was on the mound, where a real pitcher would pick them off. Have: fixed leads of 5.5 / 6.5 / 4.5 m from first, second, third (`LEAD_M` in `live.rs`). Missing: lead timing tied to the pitcher coming set, leads chosen from the runner's belief of pickoff risk, and the pickoff itself (agent-models §2.6, §6.1).
+- [ ] A9. **Stolen bases** [W13]. Needs A7 (delivery time), A8 (leads, jumps, pickoffs), A6 (slides), and the catcher's throw (agent-models §4).
+- [ ] A10. **Limits of the play area.** The owner saw a foul ball go out of play and the play carry on. Build the foul-territory walls and backstop (physics-spec §9.4; this is "Run environment (a)" above: foul ground now reaches the outfield-fence radius), make a ball that leaves the park dead (with the rules award for a thrown ball out of play), and have the client cut back to the field once the ball is gone.
+- [ ] A11. **Wind and weather** that act on the ball and the players. Have: the flight model takes a wind vector (always zero) and an air density. Missing: weather per game, and rain. Rain must act through physical causes (D1): a wet ball (release and throw noise), wet ground (traction, bounces), not a mistake rate. **Was deferred past M8; the owner moved it to A on 2026-11-13** (PLAN §14 updated).
+- [ ] A12. **Post-game box score.** Have: `bb_stats` builds runs, the linescore, PA results, and LOB from the event log. Missing: hits vs. errors need the scorer (rules-spec §10; see "M4 next steps"), per-player lines need A2, and the client has no box-score screen.
+
+On the screen (client):
+- [ ] A13. **Stadium and diamond that look real** [W1]. Crowds can be something cheap for now (better crowds are C1).
+- [ ] A14. **Players' look:** a variety of body shapes, skin colors, ethnicities and nationalities (names in A2 should match); team uniforms (teams are a tint now); gloves, on the hand given by A1.
+- [ ] A15. **Fielders' throwing motion** does not look real [W8] (a stand-in from the engine's stock clips).
+- [ ] A16. **Hitting animation:** stance, load, swing, follow-through (also a stand-in). Per-player stances and swings are W3 below.
+- [ ] A17. **Ball shadow after a hit cannot be seen.** Have: a disc under the ball, shrunk to 15 cm on 2026-11-12 because the owner found 50 cm too big. It is lost from the follow camera; size it by camera distance.
+- [ ] A18. **Home runs:** once the ball is over the wall, cut back to center to show the runners circling the bases; show a display with the batter's name (A2), the distance, and the exit speed in mph.
+
+### Priority B
+
+- [ ] B1. **Leagues, divisions, teams with rosters** [W5]: team names, mascots, full rosters. M7.
+- [ ] B2. **Lineups by pitcher hand:** separate batting orders against left- and right-handed pitchers (needs A1; a manager lever, M6).
+- [ ] B3. **Game settings screen** (includes team selection [W6]).
+- [ ] B4. **Player and team statistics** from the event log [W11] (`bb_stats`).
+- [ ] B5. **"Fielder's choice" is used too freely, and needs explaining.** Today the play-by-play says it whenever the batter reaches base on a ball in play that is not ruled a hit (`describe.rs`, `classify_bip`, after OBR 9.05). With no errors in the sim (W10) and a provisional scorer, it also covers plays a real scorer would call a hit or an error. Audit a few hundred such plays against 9.05, fix with the scorer work, and make the text say what happened ("reached on a fielder's choice, runner out at second").
+
+### Priority C
+
+- [ ] C1. **Better crowds** (after A13).
+- [ ] C2. **Player development** (includes aging: a career arc for skill and experience [W7]). M7.
+- [ ] C3. **Post-game highlights** (timelines are already recorded, D9).
+
+### From the earlier wishlist, no priority given yet
+
+- [ ] W3. **Batter stances and swings per player**, with a wide variety. The owner's examples: Pete Rose, Darryl Strawberry, Gary Carter; a longer list may follow. Follows A16
+- [ ] W4. **HUD** that looks more like a TV broadcast
+- [ ] W10. **Fielding errors**, from physical causes only (a bobble, a bad throw; D1). Ties to the scorer's hit-or-error ruling (rules-spec §10), A3, A11, and B5
+- [ ] W12. **Umpires with animations** (out calls exist as HUD text, `bb_game/src/umpire.rs`; no umpire figures)
+
+### Proposed order for priority A (the owner has not ruled)
+
+1. A2 rosters and A1 handedness: nearly everything else hangs off them.
+2. Quick client fixes alongside: A17 shadow, A18 home-run camera and display.
+3. A10 play-area limits (also a known run-environment item).
+4. A3 and A4 throws, with A5 measured in the same pass.
+5. A8 → A7 → A6 → A9: leads and pickoffs, the stretch, slides, then steals.
+6. A12 box score (with the scorer, which also settles B5).
+7. A11 wind first (the flight model is ready), rain after.
+8. A13–A16 looks and motion, in parallel with the sim work as RAM allows (see D13 in PLAN §1).
 
 ---
 
@@ -230,4 +273,5 @@ Exit gates for each are in [PLAN.md §14](PLAN.md).
 ## Parked (decided "later")
 
 - Injuries, physically grounded (D18), after M8
-- Seam-shifted wake, weather and wind, human-umpire mode, swing styles, scouting inferred from behavior, online play
+- Seam-shifted wake, human-umpire mode, swing styles (W3), scouting inferred from behavior, online play
+- Weather and wind left this list on 2026-11-13 (owner priority A, backlog A11)
