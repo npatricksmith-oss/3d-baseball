@@ -276,8 +276,8 @@ void ABbDirector::BeginPlay()
 		Bodies.Add(Body);
 		Heads.Add(Head);
 	}
-	// The ball is drawn three times its real size so it can be seen from the stands.
-	Ball = Shape(Sphere, FVector::ZeroVector, FVector(0.22), FLinearColor(1.f, 1.f, 0.9f));
+	// The ball is drawn twice its real size (7.4 cm) so it can be seen from the stands.
+	Ball = Shape(Sphere, FVector::ZeroVector, FVector(BallDrawnM), FLinearColor(1.f, 1.f, 0.9f));
 	// The ball's shadow as a viewer reads it: a dark disc on the ground straight under the
 	// ball (the sun's own shadow of so small a ball is lost at a distance and falls well
 	// to the side of a high fly). It shrinks as the ball climbs, so height reads too.

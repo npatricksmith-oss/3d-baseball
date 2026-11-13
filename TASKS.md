@@ -31,7 +31,7 @@ Numbers (`sim-cli games --n 1024`), end of session: seed 2, 5.22 runs/team-game 
 
 Done 2026-11-12:
 - **Desktop launcher** (owner request): `bin/play.sh`, installed in the app menu as "3D Baseball" by `bin/install_launcher.sh`. It builds and opens the Unreal client with a new seed each launch (shown in the notification); right-click offers a chosen seed or the Rerun viewer. The engine had been moved to the desktop Trash on 2026-11-11 and was restored to `~/UnrealEngine/5.8.4`; the launcher now says so and asks before falling back to Rerun.
-- **Ball shadow** (owner request): a dark disc straight under the ball, shrinking as it climbs (`845a862`).
+- **Ball shadow** (owner request): a dark disc straight under the ball, shrinking as it climbs (`845a862`). Owner found ball and shadow too big: ball now drawn 2× real (15 cm, was 3×), shadow the drawn ball's size (15 cm, was 50 cm).
 - **Throws with drag and backspin** (`dbaae0a`, agent-models §5.5): `bb_physics::throw` (solve and `ThrowTable`), receivers take a throw at the bag when it is catchable there. Runs 4.32 → 4.99 per team-game: long throws take a few tenths longer, which the vacuum model's 0.92 × arm had hidden.
 - **Cutoff and relay men** (`8c430e9`, agent-models §5.7): 5.05 runs (4.99 throwing direct; +0.06 to +0.12 on two seed sets, near noise). Open question for the review: why relays do not help the defense at all.
 

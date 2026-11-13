@@ -147,9 +147,12 @@ private:
 	TObjectPtr<AStaticMeshActor> Ball;
 	UPROPERTY()
 	TObjectPtr<AStaticMeshActor> BallShadow;
-	/** Diameter of the ball's ground shadow with the ball on the ground, m (engine units are
-	 *  set by the cylinder's 1 m size at scale 1). */
-	static constexpr float BallShadowM = 0.50f;
+	/** Diameter the ball is drawn at, m: twice the real 7.4 cm (engine primitives are 1 m
+	 *  across at scale 1). */
+	static constexpr float BallDrawnM = 0.15f;
+	/** Diameter of the ball's ground shadow with the ball on the ground, m: the drawn ball's
+	 *  own size, as the sun's shadow of a ball is. */
+	static constexpr float BallShadowM = BallDrawnM;
 	UPROPERTY()
 	TObjectPtr<AStaticMeshActor> Bat;
 	UPROPERTY()
