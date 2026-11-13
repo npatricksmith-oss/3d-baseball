@@ -1,13 +1,24 @@
 # Task List
 
-**Last updated:** 2026-11-13 (pop-up calls on `fix/popup-calls`; before that, owner's observations merged into the "Owner backlog" section; before that, the coordinator run on `coord/review-fixes`)
+**Last updated:** 2026-11-13 (called-off infielders back up the catch; before that, pop-up calls on `fix/popup-calls`; before that, owner's observations merged into the "Owner backlog" section; before that, the coordinator run on `coord/review-fixes`)
 The live to-do list for the project. [PLAN.md](PLAN.md) holds decisions and design. This file holds what is next and what is done. Update it at the end of every work session.
 
 Status: `[ ]` not started · `[~]` in progress · `[x]` done · `[?]` needs an owner decision
 
 ---
 
-## Resume here (2026-11-13, second session: pop-ups; merged into main and pushed)
+## Resume here (2026-11-13, third session: the called-off infielder)
+
+Branch `claude/next-task-list-item-11a78e` (cut from main `a23f7c2`). `cargo test --workspace --release`: 144 passed, 0 failed.
+
+**First:** the Codex review of this change (`docs/reviews/2026-11-13-codex-peel-off-review.md`) was started at the end of the session. Commit it, fix or defer each finding, write its Resolution.
+
+Done (owner item 1 below; [note](docs/calibration/2026-11-13-peel-off-backup.md)):
+- **A called-off infielder backs up the catch** (agent-models §5.7 "peels off to back up", `PEEL_BACKUP_M` 5 m [E]): an infielder who believed he could catch a ball in the air and hears a sure call goes, unless a base needs him, to 5 m short of where his own read has it coming down, on his side; he keeps the job across re-calls until the ball is down. Being near the ball, he can take it on a re-call when the caller's read falls apart: seed 29 play 135 is now caught by the shortstop. 1,024 games: pop-up hits .018 → .008 (MLB ≈ .02) on seeds 5 and 2; runs 5.47 → 5.43 and 5.27 → 5.26. Not tuned; owner item 2 (the read) will move it again.
+
+Next: owner item 2 (the read knows the ball started at the plate), then items 2–7 of the coordinator list (fouls first).
+
+## Previous: 2026-11-13, second session: pop-ups; merged into main and pushed
 
 `fix/popup-calls` (cut from main `454d341`) is merged into main and pushed to origin. `cargo test --workspace --release`: 143 passed, 0 failed. The owner paused here and will continue in a new session. Owner (2026-11-13): merge into main often.
 
@@ -17,7 +28,7 @@ Status: `[ ]` not started · `[~]` in progress · `[x]` done · `[?]` needs an o
 - Later: the gap-fly test's right fielder has only 30 ms of margin over the chase threshold; pick a more comfortable ball.
 
 **Then, the owner's two items (2026-11-13), in this order, merging each into main when done:**
-1. The called-off infielder drifts out behind the caller instead of standing still (§5.7 "peels off to back up"; seed 29 play 135, confirmed by the review as a wrong sure call by the centre fielder, depth draw −1.47 σ).
+1. ~~The called-off infielder drifts out behind the caller instead of standing still~~ **done 2026-11-13** (third session, above).
 2. The read knows the ball started at the plate (§5.1 launch-state perception), and the outfield read values are refitted.
 
 Done (old "Next" item 1, pop-ups dropping in short right/center; [note](docs/calibration/2026-11-13-popup-read-and-calls.md)):
@@ -25,7 +36,7 @@ Done (old "Next" item 1, pop-ups dropping in short right/center; [note](docs/cal
 - **Calls (agent-models §5.7):** a fielder calls a ball in the air only when he is sure: his time to spare covers one σ (`CALL_SURE_SIGMAS` [E]) of his own read's depth error. Until someone is sure, everyone who believes he can catch it goes for it; a sure call sends the others to their cover and backup jobs. Outfielders still outrank infielders among sure calls. 1,024 games, seed 5: pop-up hits .047 → .018 (MLB ≈ .02), fly balls .134 → .122, runs 5.55 → 5.47; seed 2: 5.27 runs. Uncaught pop-ups in 128 games: 28 → 12; seed 41 play 93 (the review's example) is caught by the second baseman.
 
 Open from it:
-- A called-off infielder still stands still under the ball (seed 29 play 135); §5.7's "peels off to back up" for him is not built. About looks now, not a number.
+- ~~A called-off infielder still stands still under the ball (seed 29 play 135)~~ done (third session).
 - The interim read gives the observer no knowledge that the ball started at the plate (22 m of depth error when the ball is 16 m from home). How fast a depth read should firm up belongs to §5.1's launch-state perception; changing it means refitting the outfield read values.
 - Part B of the pitcher fix was already done (the pitcher backs up third, owner 2026-11-13).
 
