@@ -1,6 +1,6 @@
 # Task List
 
-**Last updated:** 2026-11-13 (foul measures: Statcast-style swing diagnostics and the bat-angle counterfactual; before that, the read knows the ball started at the plate; before that, called-off infielders back up the catch; before that, pop-up calls on `fix/popup-calls`; before that, owner's observations merged into the "Owner backlog" section; before that, the coordinator run on `coord/review-fixes`)
+**Last updated:** 2026-11-13 (foul measures, sources and the correction experiment; pushed; the spray experiment parked for later; before that, the read knows the ball started at the plate; before that, called-off infielders back up the catch; before that, pop-up calls on `fix/popup-calls`; before that, owner's observations merged into the "Owner backlog" section; before that, the coordinator run on `coord/review-fixes`)
 The live to-do list for the project. [PLAN.md](PLAN.md) holds decisions and design. This file holds what is next and what is done. Update it at the end of every work session.
 
 Status: `[ ]` not started · `[~]` in progress · `[x]` done · `[?]` needs an owner decision
@@ -9,7 +9,7 @@ Status: `[ ]` not started · `[~]` in progress · `[x]` done · `[?]` needs an o
 
 ## Resume here (2026-11-13, fifth session: foul measures)
 
-Branch `claude/next-task-list-item-11a78e`, merged into main (not pushed). `cargo test --workspace --release`: 148 passed, 0 failed. No simulation behavior or values changed: the code changes are new template methods, a refactor of the cage lab's aim, and diagnostics.
+Branch `claude/next-task-list-item-11a78e`, merged into main and pushed to origin (owner, 2026-11-13: "push and stop here"). `cargo test --workspace --release`: 148 passed, 0 failed. No simulation behavior or values changed (game digests bit-identical): the code changes are diagnostics, new template methods, named [E] parameters that were literals, and a refactor of the cage lab's aim.
 
 The [Codex foul-measures review](docs/reviews/2026-11-13-codex-foul-measures-review.md) is resolved: all eight findings fixed. Four were P1s about the note's conclusions, and one of them changed the diagnosis of early whiffs.
 
@@ -43,9 +43,9 @@ Done (coordinator item 2, as the owner directed: measure before changing calibra
 
 **Nothing is waiting on a review.** The [Codex foul-correction review](docs/reviews/2026-11-13-codex-foul-correction-review.md) is resolved: all four findings fixed.
 
-Next:
-1. **[?] Owner: test whether spray is held too close to attack direction** (note §8, a hypothesis). First, measure the sim's spray-minus-AD distribution. Then build a cage counterfactual of a swing whose bat face and path can differ (§3.6's hand path and lag, or its simplest version). MLB contact at AD 12–20° fouls 54%; the sim's fouls 8–12% in every correction variant tried. Measure spray minus AD and foul share by AD in the cage before changing the PA model. The on-time foul band and the bat angle (−30°) are the second question. Adjustability stays at 0.6 m/s until the foul share is fixed.
-2. Then items 3–5 and 7 of the coordinator list below.
+The owner stopped the foul work here (2026-11-13) and parked its next step for later: see "Foul share: the spray experiment" under [Parked](#parked-decided-later).
+
+Next: items 3–7 of the coordinator list below (item 2, fouls, is parked with the spray experiment; item 6 is related to it).
 
 ## Previous: 2026-11-13, fourth session: the plate cue
 
@@ -124,7 +124,7 @@ Done this session (coordinator with worker agents; merges in `coord/review-fixes
 
 Next, in order:
 1. ~~Pop-ups dropping in short right/center~~ **done 2026-11-13** (see "Resume here").
-2. ~~**Fouls (O1/R13)**: extend `foul_diag` with Statcast-style measures and add a `cage-map` bat-tilt counterfactual before changing any calibration~~ **measured 2026-11-13** (fifth session, above). The next measurements and the swing change wait on the owner.
+2. ~~**Fouls (O1/R13)**: extend `foul_diag` with Statcast-style measures and add a `cage-map` bat-tilt counterfactual before changing any calibration~~ **measured 2026-11-13** (fifth session, above). Its next step is parked: "Foul share: the spray experiment" under Parked.
 3. Live sim emits `RunnerPosition` at ~30 Hz and models an overrun of first.
 4. Watch the client (`bin/play.sh`): reset staging, side-change jogs, sidesteps.
 5. **Camera cut at side changes** (owner, 2026-11-13: later) to hide the 23–27 s jog off/on.
@@ -362,6 +362,21 @@ Exit gates for each are in [PLAN.md §14](PLAN.md).
 ---
 
 ## Parked (decided "later")
+
+- [ ] **Foul share: the spray experiment** (owner, 2026-11-13: "add a task potentially for this at a later time"). The foul share is 23.7% of contact against MLB's ~51% (B1.15, O1/R13). This blocks the chase rate (Discipline's grade-50 values), and so contact rates and Adjustability as well. Read [the note](docs/calibration/2026-11-13-foul-measures.md) §5–§8 and its three Codex reviews first.
+  - **Ruled out or weak so far:**
+    - well-timed steep contact (already MLB-like);
+    - the fair/foul call (games agree with the PA model);
+    - mid-swing correction: saved swings come out mostly fair, 23.7 → 26.1% even with no limits;
+    - bat angle alone: −30° matches Statcast tilt but gives only +4 points and overshoots steep fouls.
+  - **The open hypothesis:** v1's radial bat about a fixed pivot may hold the ball's spray too close to the swing's attack direction. MLB contact at AD 12–20° fouls 54%, the sim's 8–12%.
+  - **Steps:**
+    1. Measure the sim's spray-minus-AD distribution, by AD and outcome, in `foul_diag`.
+    2. In the cage, build a counterfactual swing whose bat face and path can differ (§3.6's hand path and lag, or its simplest version, with the bat angle remeasured), and compare spray minus AD and the foul share by AD at fixed pitch and aim.
+    3. Only then change the PA model's swing, with refits of the run environment, the fielders' spray reads (`spray_by_bat_angle`, `LEAD_FACE_*`) and the client's batter-box position.
+  - **Second question:** on-time topped balls stay fair (MLB fouls 62% of well-timed contact below −30°); needs evidence (plate, dirt, batter) before any Tier A change.
+  - **Related:** coordinator item 6 (batter timing fooled by offspeed and sequence).
+  - **Tools:** `foul_diag` (with `adj=`/`cut=`/`phase=` and a bat-angle argument), `foul_in_games`, `sim-cli cage-map` (timing × height grid, bat-angle counterfactual).
 
 - Injuries, physically grounded (D18), after M8
 - Seam-shifted wake, human-umpire mode, swing styles (W3), scouting inferred from behavior, online play
