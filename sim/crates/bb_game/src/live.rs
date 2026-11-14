@@ -498,6 +498,8 @@ pub struct LiveOutput {
     /// For each release: how hurried it was (0 set, 1 the earliest he could let go) and
     /// whether he was off balance (agent-models §5.5). Diagnostics.
     pub hurry: Vec<(f64, bool)>,
+    /// For each release: its effort, the fraction of the thrower's arm (agent-models §5.5).
+    pub effort: Vec<f64>,
     /// Every dive (t, fielder, where he left his feet, where his body lands), in time order.
     /// He is back on his feet [`DIVE_GETUP_S`] after the dive.
     pub dives: Vec<(f64, AgentId, Vec3, Vec3)>,
@@ -2996,7 +2998,8 @@ impl<'a> Sim<'a> {
         let action = if margins.is_some() { "throw" } else { "return" };
         if let (true, Some(i)) = (through, race.relay) {
             self.trace_choice(by, action, b, true, best, &options);
-            self.throw_to(by, leg, b, i, true);
+            // Through a cutoff man: full effort (the relay is a race by construction).
+            self.throw_to(by, leg, b, i, true, 1.0);
             if let Some(fact) = self.out.scorer_throws.last_mut() { fact.attempted_out = margins.is_some(); fact.runner = if margins.is_some() { target_runner } else { 0 }; }
             return;
         }
@@ -3007,7 +3010,20 @@ impl<'a> Sim<'a> {
             return;
         }
         self.trace_choice(by, action, b, false, best, &options);
-        self.throw_to(by, tgt, b, receiver, false);
+        // As hard as the play needs and no harder (agent-models §5.5): with no play, the
+        // floor; for an out, the least effort that still keeps the safe margin by his own
+        // read of the race, else everything he has.
+        let effort = match best.filter(|_| margins.is_some()).map(|i| options[i]) {
+            None => throwing::EFFORT_MIN,
+            Some(o) => {
+                let v = THROW_EFFORT * fd.a.arm * su.speed_mult(su.hurry(since));
+                let d = (tgt - fd.pos).norm();
+                let tag = if o.force { 0.0 } else { self.f[receiver].a.tag_apply_s };
+                let ball_at = |e: f64| (self.t + throw_time(e * v, d)).max(race.receiver_at) + 0.05 + tag;
+                (0..=20).map(|i| throwing::EFFORT_MIN + (1.0 - throwing::EFFORT_MIN) * i as f64 / 20.0).find(|&e| o.runner_at - ball_at(e) >= SAFE_MARGIN_S).unwrap_or(1.0)
+            }
+        };
+        self.throw_to(by, tgt, b, receiver, false, effort);
         if let Some(fact) = self.out.scorer_throws.last_mut() { fact.attempted_out = margins.is_some(); fact.runner = if margins.is_some() { target_runner } else { 0 }; }
         self.f[receiver].target = tgt;
         // A throw that goes past the cutoff man ends his job: he pulls up, free to back it up.
@@ -3041,7 +3057,7 @@ impl<'a> Sim<'a> {
     /// Fielder `by` throws to ground point `tgt` for `receiver` (the ball is headed for base
     /// `b`, through a relay man when `relay`). Let go before he is set, the throw is slower
     /// and wilder (agent-models §5.5).
-    fn throw_to(&mut self, by: usize, tgt: Vec3, b: u8, receiver: usize, relay: bool) {
+    fn throw_to(&mut self, by: usize, tgt: Vec3, b: u8, receiver: usize, relay: bool, effort: f64) {
         let fd = self.f[by].clone();
         let mut r = rng(self.inp.seed, self.inp.play, fd.id, Purpose::ThrowExecution, fd.throws);
         self.f[by].throws += 1;
@@ -3050,13 +3066,13 @@ impl<'a> Sim<'a> {
         // Aim with the thrower's own throw physics (drag and backspin, agent-models §5.5);
         // a throw beyond his reach on the fly goes at the steepest useful angle and bounces.
         let r0 = throw_release_point(fd.pos, tgt, fd.a.throws);
-        let v_aim = THROW_EFFORT * fd.a.arm * su.speed_mult(hurry);
+        let v_aim = effort * THROW_EFFORT * fd.a.arm * su.speed_mult(hurry);
         let d = m::hypot(tgt.x - r0.x, tgt.y - r0.y);
         let elev = solve_throw(self.inp.env, THROW_RELEASE_Z, THROW_CATCH_Z, d, v_aim).map(|s| s.elev).unwrap_or(THROW_MAX_ELEV);
         // Execution noise: speed 3%, then direction (the draw order of the vacuum model).
         // A pivot man's throw: the slide's seam (nothing until A6 builds slides).
         let slide = if fd.pivot { throwing::PIVOT_SLIDE_SIGMA_MULT } else { 1.0 };
-        let ex = execute_throw(v_aim, &ThrowNoise::new(fd.a.arm_sigma * su.sigma_mult(hurry) * slide), &mut r);
+        let ex = execute_throw(v_aim, &ThrowNoise::new(fd.a.arm_sigma * su.sigma_mult(hurry) * slide * throwing::effort_sigma_mult(effort)), &mut r);
         let h = Vec3::new(tgt.x - r0.x, tgt.y - r0.y, 0.0).normalized().rotate(Vec3::Z, ex.yaw_err);
         self.launch_throw(throw_state(r0, h, ex.speed, elev), tgt, b, receiver, relay);
         self.out.released.push((self.t, fd.id));
@@ -3067,6 +3083,7 @@ impl<'a> Sim<'a> {
         let t_rel = self.t.max(self.last_fact_t);
         self.emit(Input::BallReleasedFromGlove { t: t_rel, fielder: fd.id, kind: ReleaseKind::Throw, infielder: by < 6 });
         self.out.hurry.push((hurry, su.off_balance));
+        self.out.effort.push(effort);
     }
 
     /// Who takes a throw at base `b`: its cover man, else the nearest other fielder who is
@@ -3234,7 +3251,7 @@ fn new_sim<'a>(inp: &'a LiveInput<'a>, st: &'a mut RulesState) -> Sim<'a> {
         f,
         r,
         primary: 0,
-        out: LiveOutput { scorer_carries: Vec::new(), first_handling: None, scorer_throws: Vec::new(), batter_first_eta: None, ref_set_s: None, facts: Vec::new(), events: Vec::new(), path, ball_track: Vec::new(), actors, secured: Vec::new(), released: Vec::new(), hurry: Vec::new(), dives: Vec::new(), calls: Vec::new() },
+        out: LiveOutput { scorer_carries: Vec::new(), first_handling: None, scorer_throws: Vec::new(), batter_first_eta: None, ref_set_s: None, facts: Vec::new(), events: Vec::new(), path, ball_track: Vec::new(), actors, secured: Vec::new(), released: Vec::new(), hurry: Vec::new(), effort: Vec::new(), dives: Vec::new(), calls: Vec::new() },
         bounce_k: 1000,
         done: false,
         last_fact_t: t_c,
@@ -5444,7 +5461,7 @@ mod tests {
                     assert!(matches!(sim.ball, Ball::Thrown { receiver, relay: false, .. } if receiver == c2), "case 0: a straight throw to second");
                 }
                 1 => {
-                    sim.throw_to(8, base_pos(2), 2, c2, false);
+                    sim.throw_to(8, base_pos(2), 2, c2, false, 1.0);
                     sim.update_relay();
                 }
                 _ => {
@@ -5891,6 +5908,18 @@ mod tests {
         sim.holder_act();
         assert_eq!(sim.f[2].carry_to, None, "he must not run it to first");
         assert!(matches!(sim.ball, Ball::Thrown { to_base: 4, .. }), "the force at home");
+    }
+
+    // agent-models §5.5, speed for accuracy: with the batter 3 s from first the shortstop's
+    // 33 m throw beats him by far more than the 0.25 s margin even at 80% of his arm, so he
+    // throws at the measured floor (and more accurately); in a race he wins by 0.1 s letting
+    // go as early as he can, no effort keeps that margin, so he throws everything he has.
+    #[test]
+    fn a_fielder_throws_as_hard_as_the_play_needs() {
+        let (easy, _) = shortstop_to_first(3.0, Vec3::ZERO);
+        assert_eq!(easy.out.effort, vec![throwing::EFFORT_MIN]);
+        let (close, _) = shortstop_to_first(eta_for_margin(0.10, false), Vec3::ZERO);
+        assert_eq!(close.out.effort, vec![1.0]);
     }
 
     /// The shortstop holds the ball at (−8, 38) at time 1.0, on his feet, having taken it
