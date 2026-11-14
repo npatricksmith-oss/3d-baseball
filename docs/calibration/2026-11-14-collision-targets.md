@@ -267,3 +267,38 @@ High minus low tercile slope: +0.166 deg per deg (SE 0.053, 3.1 sigma); per unit
 - **Peer-reviewed:** one search for kinematics papers with hand velocity, lead forearm or bat angle at contact found nothing: only Orishimo et al. on bat speed against ground reaction forces (no hand or bat-axis quantities), clinical-trial registrations, and an unrelated preprint. **Not found.** I did not read the paywalled literature.
 
 So the face-to-path angle, the forearm-to-bat angle and hand speed at contact have no usable public source here; the sim's 14 mph at contact is not contradicted by Blast's peak figures (peak is higher than contact by Blast's own account), but it is not confirmed either.
+
+## 8. Is the pull-side offset already there at square contact? (job 4, Savant check)
+
+**Question.** The real spray minus attack direction averages about +12° on lofted-low balls (§2). Is that offset present when the barrel travels straight up the middle, or does it appear only as swings get more pulled?
+
+**Method.** Script `analysis/statcast/savant_square_contact_spray.py` (`python3 -I analysis/statcast/savant_square_contact_spray.py sim/target/data/savant 3`), the twelve-date sample, 5,182 balls in play with hit coordinates, launch angle 0–50° and attack direction. Spray is pull-positive for both hands (left-handers mirrored); the attack direction is signed the same way (p = −`attack_direction`, so that positive means the barrel travels toward the pull side). "Square" is **|p| ≤ 3°**: 978 balls, mean p = +0.06°, 515 right-handed and 463 left-handed. Standard errors are of the mean, balls treated as independent.
+
+**Result at |p| ≤ 3° (spray, which here equals spray − p to within 0.1°):**
+
+| launch angle | both hands | right-handed | left-handed |
+|---|---|---|---|
+| 0–10° | **+22.0° (n 206, SE 1.0)** | +19.9° (115, 1.2) | +24.7° (91, 1.6) |
+| 10–25° | **+9.3° (328, 0.8)** | +7.3° (173, 1.1) | +11.5° (155, 1.2) |
+| 25–35° | −1.5° (256, 1.0) | −2.8° (134, 1.3) | −0.1° (122, 1.4) |
+| 35–50° | −13.2° (188, 1.5) | −13.3° (93, 2.1) | −13.1° (95, 2.0) |
+
+**The offset is already there at square contact.** A barrel travelling straight up the middle sends low-launch balls (0–10°) 22° to the pull side and 10–25° balls 9° to the pull side, then 25–35° balls to dead centre and high ones to the opposite field. Both hands show it (right-handers a few degrees less than left-handers at the low and middle launch angles; the difference is 2–5° with SEs of about 1.5°). The offset does not need the swing to be pulled. It is a function of launch angle: roughly +22° at 5°, +9° at 17°, −1.5° at 30°, −13° at 42°, about −0.9° per degree of launch angle.
+
+**It also changes with attack direction, which is why the §2 average of 12° is not a constant (spray − p, both hands; SE 0.8–1.5 unless stated):**
+
+| p (pull +) | n | 0–10° | 10–25° | 25–35° |
+|---|---|---|---|---|
+| −30 to −8 | 1,287 | +0.3 | −8.1 | −14.8 |
+| −8 to −3 | 754 | +14.2 | +3.1 | −7.1 |
+| −3 to +3 | 978 | +22.0 | +9.3 | −1.6 |
+| +3 to +8 | 818 | +22.5 | +17.2 | +8.6 |
+| +8 to +13 | 647 | +24.8 | +19.6 | +11.7 |
+| +13 to +20 | 480 | +18.6 | +18.8 | +11.6 |
+| +20 and up | 197 | +3.9 (SE 4.5) | −0.2 (3.4) | +10.3 (2.4) |
+
+The OLS slope of spray on p over all swings is 1.05 (0–10°), 1.14 (10–25°), 1.34 (25–35°) and 1.05 (35–50°), SE 0.04–0.06, with intercepts (spray at p = 0) of +14.0, +6.3, −0.9 and −8.4°. So spray follows the attack direction one for one or a little faster, and the whole curve sits shifted by a launch-angle-dependent offset. The offset grows by 5–10° from square to moderately pulled swings (p up to 8–13°) and falls away for the most pulled swings and the most opposite-field ones.
+
+**Reading.** At square contact the real offset is +22° at 0–10° launch and +9° at 10–25°, so a sim that makes balls leave along the barrel's path at square contact has no source for it; a model has to produce about +9 to +22° at square contact for low launches, not only as swings get pulled. (The roughly 12° figure in the stage-1 note mixes launch angles; at the lowest launch angles the offset is larger than 12°.)
+
+**Caveats.** (1) Attack direction is one video frame's sweet-spot velocity (§4), so p carries noise of a few degrees; this pulls the offset in the middle bins towards the offset of the whole sample and blurs the ladder above, but a ±3° window around zero is not sensitive to a constant bias. (2) Spray here is where the ball was fielded or landed (hit coordinates), not the angle it left the bat; ground balls (0–10°) curve and bounce, which can move their spray by several degrees from the departure angle, so the 22° at 0–10° is the least certain figure and the 9° at 10–25° the safer one. (3) Balls in play only: fouls and misses are excluded, which trims the extreme pull side. (4) Balls at square contact are chosen by the barrel's direction, not by where the ball was; pitch location and contact depth are free to vary and are not controlled here.
