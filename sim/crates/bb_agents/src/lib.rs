@@ -9,3 +9,4 @@ pub mod batter;
 pub mod motor;
 pub mod pitcher;
 pub mod swing;
+pub mod throwing;

@@ -97,3 +97,34 @@ pub fn execute_swing(intended: &IntendedSwing, noise: &SwingNoise, rng: &mut Key
     let placement = Placement { plane_tilt, v_offset, reach, t_shift };
     ExecutedSwing { swing: apply_placement(intended, &placement), placement }
 }
+
+/// Execution noise of a throw (agent-models §5.5).
+#[derive(Clone, Copy, Debug, PartialEq)]
+pub struct ThrowNoise {
+    /// Direction σ about the vertical, rad: `ArmAccuracy` times the hurry and balance factors.
+    pub direction: f64,
+    /// Relative release-speed σ [E].
+    pub speed_rel: f64,
+}
+
+impl ThrowNoise {
+    pub const SPEED_REL: f64 = 0.03;
+    pub fn new(direction: f64) -> Self {
+        Self { direction, speed_rel: Self::SPEED_REL }
+    }
+}
+
+/// The throw as it left the hand: release speed, and the error of its horizontal direction.
+#[derive(Clone, Copy, Debug, PartialEq)]
+pub struct ExecutedThrow {
+    pub speed: f64,
+    pub yaw_err: f64,
+}
+
+/// Apply throw noise to an intended release speed. Draw order (speed, direction) is part of
+/// the replay contract.
+pub fn execute_throw(speed: f64, noise: &ThrowNoise, rng: &mut KeyedRng) -> ExecutedThrow {
+    let speed = speed * (1.0 + noise.speed_rel * rng.truncated_normal(TRUNC_SIGMA));
+    let yaw_err = noise.direction * rng.truncated_normal(TRUNC_SIGMA);
+    ExecutedThrow { speed, yaw_err }
+}

@@ -87,6 +87,13 @@ pub struct GamesArgs {
     /// Every fielder's `Anticipation` grade (20–80; default: the average fielder, 50).
     #[arg(long)]
     anticipation: Option<f64>,
+    /// Every fielder's `ArmStrength`, `ArmAccuracy` and `Transfer` grades (20–80; default 50).
+    #[arg(long)]
+    arm_strength: Option<f64>,
+    #[arg(long)]
+    arm_accuracy: Option<f64>,
+    #[arg(long)]
+    transfer: Option<f64>,
     /// Fielders get no jump: they wait for their read of the ball (agent-models §5.10 off).
     #[arg(long)]
     no_jump: bool,
@@ -101,6 +108,9 @@ pub fn games(a: GamesArgs) {
         for f in fattrs.iter_mut() {
             if let Some(g) = a.anticipation {
                 *f = f.with_anticipation(g);
+            }
+            if a.arm_strength.is_some() || a.arm_accuracy.is_some() || a.transfer.is_some() {
+                *f = f.with_throwing(a.arm_strength.unwrap_or(50.0), a.arm_accuracy.unwrap_or(50.0), a.transfer.unwrap_or(50.0));
             }
             if a.no_jump {
                 f.jump_gain = 0.0;

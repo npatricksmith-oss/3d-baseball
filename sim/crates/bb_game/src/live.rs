@@ -17,6 +17,9 @@ use bb_physics::throw::{THROW_MAX_ELEV, THROW_SPIN_RPM, ThrowTable, fly_throw, s
 use bb_physics::{BallState, FlightEnv, Trajectory};
 use bb_rules::{AgentId, Event, Input, OutKind, PlayState, RulesState, RunnerPosition, Touch, step};
 
+use bb_agents::motor::{ThrowNoise, execute_throw};
+use bb_agents::throwing::{self, SetUp};
+
 use crate::play::{FielderAttrs, RunnerIn, base_pos, home_positions, run_dist, run_time};
 
 const DT: f64 = 1.0 / 60.0;
@@ -91,6 +94,15 @@ const PLAY_LIMIT_S: f64 = 40.0;
 /// in for the speed drag takes off. Every throw is full effort until speed-for-accuracy is
 /// modelled.
 const THROW_EFFORT: f64 = 1.0;
+/// A holder with at least this much time in hand on the runner, by his own judgment, gets
+/// set before he throws; with less he lets it go early, as early as keeps this much, s [E]
+/// (about two of his timing σ, agent-models §5.5).
+const SAFE_MARGIN_S: f64 = 0.25;
+/// Hurrying must buy at least this much to be worth it, s.
+const HURRY_GAIN_MIN_S: f64 = 0.01;
+/// A fielder running, or a ball coming, faster than this sets which way he faces as he
+/// takes it, m/s [E].
+const FACE_MIN_MPS: f64 = 3.0;
 /// Release and catch heights of a throw, m.
 const THROW_RELEASE_Z: f64 = 1.8;
 const THROW_CATCH_Z: f64 = 1.3;
@@ -298,6 +310,14 @@ struct Fielder {
     will_dive: std::cell::Cell<bool>,
     /// Throws made this play (keys the throw-execution noise).
     throws: u32,
+    /// Since he last secured the ball: when his set-up for a throw began (on his feet with
+    /// it), his catch-to-release for this kind of throw, the way he faced taking it (`None`
+    /// for a throw he received: he set up to it, facing his next target), and how he was
+    /// moving (agent-models §5.5).
+    up_at: f64,
+    set_base: f64,
+    face: Option<Vec3>,
+    catch_vel: Vec3,
     /// The base whose throws he is backing up, if that is his job on this play.
     backs: Option<u8>,
     /// Called off a ball in the air by a sure call (agent-models §5.7): the spot he backs up
@@ -399,6 +419,9 @@ pub struct LiveOutput {
     pub secured: Vec<(f64, AgentId)>,
     /// Every throw release (t, thrower), in time order.
     pub released: Vec<(f64, AgentId)>,
+    /// For each release: how hurried it was (0 set, 1 the earliest he could let go) and
+    /// whether he was off balance (agent-models §5.5). Diagnostics.
+    pub hurry: Vec<(f64, bool)>,
     /// Every dive (t, fielder, where he left his feet, where his body lands), in time order.
     /// He is back on his feet [`DIVE_GETUP_S`] after the dive.
     pub dives: Vec<(f64, AgentId, Vec3, Vec3)>,
@@ -2006,6 +2029,13 @@ impl<'a> Sim<'a> {
                 // (After a stretch he has to get his balance back.)
                 let up_at = if fd.dove { fd.ready_at.max(self.t) } else if extending.is_some() { self.t + STRETCH_COST_S } else { self.t };
                 fd.ready_at = up_at + fd.a.transfer;
+                // What his set-up for a throw starts from (agent-models §5.5): he faces the
+                // way he is running, or the ball coming to him, or the plate.
+                let toward = |v: Vec3| (m::hypot(v.x, v.y) > FACE_MIN_MPS).then(|| Vec3::new(v.x, v.y, 0.0));
+                fd.up_at = up_at;
+                fd.set_base = fd.a.transfer;
+                fd.catch_vel = fd.vel;
+                fd.face = Some(toward(fd.vel).or(toward(-bv)).unwrap_or(Vec3::new(-fd.pos.x, -fd.pos.y, 0.0)));
                 // Having caught it, he plants: his run dies out where braking stops him, not
                 // back at the spot he planned (which a running catch has carried him past).
                 fd.target = stop_point(fd);
@@ -2021,6 +2051,8 @@ impl<'a> Sim<'a> {
                     }
                     // (Taking it on the ground from a dive, he is up first.)
                     fd.ready_at = up_at + RELAY_TRANSFER_FRAC * fd.a.transfer;
+                    fd.set_base = RELAY_TRANSFER_FRAC * fd.a.transfer;
+                    fd.face = None;
                 }
                 let id = fd.id;
                 self.ball = Ball::Held { by: i };
@@ -2545,23 +2577,39 @@ impl<'a> Sim<'a> {
                 return;
             }
         }
-        if self.t < fd.ready_at {
+        if self.t < fd.up_at {
             return;
         }
+        // His set-up, and what letting go at time `at` (now, or later) gives him: when the
+        // ball leaves at the soonest, and how fast (he knows what hurrying costs his arm).
+        let release = |tgt: Vec3, at: f64| -> (f64, f64) {
+            let su = self.set_up_for(by, tgt);
+            let t_rel = at.max(fd.up_at + su.earliest_s);
+            (t_rel, THROW_EFFORT * fd.a.arm * su.speed_mult(su.hurry(t_rel - fd.up_at)))
+        };
+        let set_at = |tgt: Vec3| fd.up_at + self.set_up_for(by, tgt).set_s;
         // A cutoff or relay man between the holder and the bases, if there is one: the throw
         // can go through him when that gets it there sooner (a long throw slows with drag,
         // agent-models §5.5) or when the holder cannot reach the base on the fly.
         let relay = (0..9).find(|&i| i != by && matches!(self.f[i].role, Role::Relay(_)) && (self.f[i].pos - fd.pos).norm() > 10.0);
-        let via = |b: u8| -> f64 {
+        // When the ball reaches base `b` thrown straight there, and through the relay man,
+        // let go at `at` or as soon after as he can.
+        let direct = |b: u8, at: f64| -> f64 {
+            let (t_rel, v) = release(base_pos(b), at);
+            t_rel + throw_time(v, (base_pos(b) - fd.pos).norm())
+        };
+        let via = |b: u8, at: f64| -> f64 {
             let Some(i) = relay else { return f64::INFINITY };
             let rp = self.f[i].pos;
             if (base_pos(b) - rp).norm() >= (base_pos(b) - fd.pos).norm() {
                 return f64::INFINITY; // not between the holder and this base
             }
-            self.t + throw_time(THROW_EFFORT * fd.a.arm, (rp - fd.pos).norm()) + RELAY_TRANSFER_FRAC * self.f[i].a.transfer + throw_time(THROW_EFFORT * self.f[i].a.arm, (base_pos(b) - rp).norm())
+            let (t_rel, v) = release(rp, at);
+            t_rel + throw_time(v, (rp - fd.pos).norm()) + RELAY_TRANSFER_FRAC * self.f[i].a.transfer + throw_time(THROW_EFFORT * self.f[i].a.arm, (base_pos(b) - rp).norm())
         };
-        // Options: each base a running runner is heading to.
-        let mut best: Option<(f64, u8, bool)> = None;
+        // Options: each base a running runner is heading to. For the best one he keeps how
+        // much time he has on the runner letting go now, and waiting until he is set.
+        let mut best: Option<(f64, u8, bool, f64, f64)> = None;
         for (k, r) in self.r.iter().enumerate() {
             if r.out || r.scored || r.v < 0.5 || r.overrun != OverrunPhase::None {
                 continue; // standing runners are not a play, nor is an overrun of first
@@ -2570,40 +2618,66 @@ impl<'a> Sim<'a> {
             // current speed (both visible).
             let goal = visible_target(r);
             let t_runner = self.t + runner_eta((goal as f64 * BASE_L - r.s).abs(), r.v);
-            let d = (base_pos(goal) - fd.pos).norm();
             // The ball beats the runner only once someone is at the bag to take it.
             let recv = self.receiver_for(by, goal);
-            let t_direct = self.t + throw_time(THROW_EFFORT * fd.a.arm, d);
-            let t_via = via(goal);
-            let t_ball = t_direct.min(t_via).max(self.receiver_ready(recv, goal)) + 0.05;
+            let recv_ready = self.receiver_ready(recv, goal);
+            let (t_direct, t_via) = (direct(goal, self.t), via(goal, self.t));
+            let through = t_via < t_direct;
+            let t_ball = t_direct.min(t_via).max(recv_ready) + 0.05;
+            // The same throw from a full set-up.
+            let leg = if through { relay.map(|i| self.f[i].pos).unwrap_or(base_pos(goal)) } else { base_pos(goal) };
+            let at_set = set_at(leg).max(self.t);
+            let t_ball_set = if through { via(goal, at_set) } else { direct(goal, at_set) }.max(recv_ready) + 0.05;
             let p_out = phi((t_runner - t_ball) / 0.12);
             let w = self.out_weight(k, goal);
             // Take the sure out: an uncertain play on a lead runner loses to a certain one
             // elsewhere (the chance is squared before the base's weight is applied).
             if p_out > 0.3 && best.map(|b| p_out * p_out * w > b.0).unwrap_or(true) {
-                best = Some((p_out * p_out * w, goal, t_via < t_direct));
+                best = Some((p_out * p_out * w, goal, through, t_runner - t_ball, t_runner - t_ball_set));
             }
         }
         let infield = m::hypot(fd.pos.x, fd.pos.y) < INFIELD_R;
         if debug_throw() {
             eprintln!("t {:.2} holder {} at ({:.1},{:.1}) best {:?}; runners {:?}", self.t, by, fd.pos.x, fd.pos.y, best, self.r.iter().map(|r| (r.start, r.s, r.goal, r.out, r.scored)).collect::<Vec<_>>());
         }
+        // (base, through the relay man, time in hand now and from a full set-up)
         let target_base = match best {
-            Some((_, b, through)) => Some((b, through)),
+            Some((_, b, through, now, set)) => Some((b, through, Some((now, set)))),
             // No play: get the ball back to second base, the quicker way: straight there, or
             // through the cutoff man when that is quicker or the throw cannot carry.
-            None if !infield => Some((2, via(2) < self.t + throw_time(THROW_EFFORT * fd.a.arm, (base_pos(2) - fd.pos).norm()))),
+            None if !infield => Some((2, via(2, self.t) < direct(2, self.t), None)),
             None => None,
         };
-        let Some((b, through)) = target_base else { return };
-        if through {
-            if let Some(i) = relay {
-                let at = self.f[i].pos;
-                self.throw_to(by, at, b, i, true);
+        let Some((b, through, margins)) = target_base else { return };
+        let tgt = base_pos(b);
+        let leg = match relay {
+            Some(i) if through => self.f[i].pos,
+            _ => tgt,
+        };
+        // Get set, or hurry? (agent-models §5.5) With no play on, and with time in hand, he
+        // gets set. Short of time he lets go as soon as waiting longer would cost him his
+        // margin, and as soon as he can if he has none; but only if that gets the ball
+        // there sooner (not when it would wait for the man covering the bag anyway).
+        let su = self.set_up_for(by, leg);
+        let since = self.t - fd.up_at;
+        if since < su.earliest_s {
+            return;
+        }
+        if since < su.set_s {
+            let hurry = match margins {
+                Some((now, set)) => set < SAFE_MARGIN_S && now <= SAFE_MARGIN_S && now > set + HURRY_GAIN_MIN_S,
+                None => false,
+            };
+            if !hurry {
                 return;
             }
         }
-        let tgt = base_pos(b);
+        if through {
+            if let Some(i) = relay {
+                self.throw_to(by, leg, b, i, true);
+                return;
+            }
+        }
         if (tgt - fd.pos).norm() < 6.0 {
             // Closer to take it himself.
             self.f[by].target = tgt;
@@ -2611,7 +2685,7 @@ impl<'a> Sim<'a> {
         }
         let receiver = self.receiver_for(by, b);
         // Time the release so the ball arrives when the receiver can be at the bag.
-        if self.t + throw_time(THROW_EFFORT * fd.a.arm, (tgt - fd.pos).norm()) < self.receiver_ready(receiver, b) - 0.05 {
+        if direct(b, self.t) < self.receiver_ready(receiver, b) - 0.05 {
             self.f[receiver].target = tgt;
             return;
         }
@@ -2626,23 +2700,37 @@ impl<'a> Sim<'a> {
         self.back_up_throw(fd.pos, b);
     }
 
+    /// Fielder `by`'s set-up for a throw to ground point `tgt` with the ball he holds: the
+    /// turn from the way he faced taking it, and the footwork he owes if he took it moving
+    /// away or diving (agent-models §5.5).
+    fn set_up_for(&self, by: usize, tgt: Vec3) -> SetUp {
+        let fd = &self.f[by];
+        let to = tgt - fd.pos;
+        let turn = fd.face.map(|f| throwing::turn_extra_s(f, to, fd.a.throws)).unwrap_or(0.0);
+        SetUp::new(fd.set_base, turn, throwing::footwork_s(fd.catch_vel, to, fd.dove))
+    }
+
     /// Fielder `by` throws to ground point `tgt` for `receiver` (the ball is headed for base
-    /// `b`, through a relay man when `relay`).
+    /// `b`, through a relay man when `relay`). Let go before he is set, the throw is slower
+    /// and wilder (agent-models §5.5).
     fn throw_to(&mut self, by: usize, tgt: Vec3, b: u8, receiver: usize, relay: bool) {
         let fd = self.f[by].clone();
         let mut r = rng(self.inp.seed, self.inp.play, fd.id, Purpose::ThrowExecution, fd.throws);
         self.f[by].throws += 1;
+        let su = self.set_up_for(by, tgt);
+        let hurry = su.hurry(self.t - fd.up_at);
         // Aim with the thrower's own throw physics (drag and backspin, agent-models §5.5);
         // a throw beyond his reach on the fly goes at the steepest useful angle and bounces.
         let r0 = throw_release_point(fd.pos, tgt, fd.a.throws);
-        let v_aim = THROW_EFFORT * fd.a.arm;
+        let v_aim = THROW_EFFORT * fd.a.arm * su.speed_mult(hurry);
         let d = m::hypot(tgt.x - r0.x, tgt.y - r0.y);
         let elev = solve_throw(self.inp.env, THROW_RELEASE_Z, THROW_CATCH_Z, d, v_aim).map(|s| s.elev).unwrap_or(THROW_MAX_ELEV);
         // Execution noise: speed 3%, then direction (the draw order of the vacuum model).
-        let v = v_aim * (1.0 + 0.03 * r.truncated_normal(4.0));
-        let h = Vec3::new(tgt.x - r0.x, tgt.y - r0.y, 0.0).normalized().rotate(Vec3::Z, fd.a.arm_sigma * r.truncated_normal(4.0));
-        self.launch_throw(throw_state(r0, h, v, elev), tgt, b, receiver, relay);
+        let ex = execute_throw(v_aim, &ThrowNoise::new(fd.a.arm_sigma * su.sigma_mult(hurry)), &mut r);
+        let h = Vec3::new(tgt.x - r0.x, tgt.y - r0.y, 0.0).normalized().rotate(Vec3::Z, ex.yaw_err);
+        self.launch_throw(throw_state(r0, h, ex.speed, elev), tgt, b, receiver, relay);
         self.out.released.push((self.t, fd.id));
+        self.out.hurry.push((hurry, su.off_balance));
     }
 
     /// Who takes a throw at base `b`: its cover man, else the nearest other fielder who is
@@ -2758,6 +2846,10 @@ fn new_sim<'a>(inp: &'a LiveInput<'a>, st: &'a mut RulesState) -> Sim<'a> {
                 last_dive_read: f64::NEG_INFINITY,
                 will_dive: std::cell::Cell::new(false),
                 throws: 0,
+                up_at: 0.0,
+                set_base: 0.0,
+                face: None,
+                catch_vel: Vec3::ZERO,
                 backs: None,
                 peel: None,
             }
@@ -2799,7 +2891,7 @@ fn new_sim<'a>(inp: &'a LiveInput<'a>, st: &'a mut RulesState) -> Sim<'a> {
         f,
         r,
         primary: 0,
-        out: LiveOutput { facts: Vec::new(), events: Vec::new(), path, ball_track: Vec::new(), actors, secured: Vec::new(), released: Vec::new(), dives: Vec::new(), calls: Vec::new() },
+        out: LiveOutput { facts: Vec::new(), events: Vec::new(), path, ball_track: Vec::new(), actors, secured: Vec::new(), released: Vec::new(), hurry: Vec::new(), dives: Vec::new(), calls: Vec::new() },
         bounce_k: 1000,
         done: false,
         last_fact_t: t_c,
@@ -5011,6 +5103,129 @@ mod tests {
     /// The ball leaves the throwing hand (owner backlog A1): facing his target, a
     /// right-hander's hand is on his right and a left-hander's on his left, `THROW_ARM_OFFSET_M`
     /// out, at release height. Worked in the sim frame (+X first base, +Y center field).
+    /// The shortstop holds the ball at (−8, 38) at time 1.0, on his feet, having taken it
+    /// standing (no turn counted), the first baseman on his bag, and the batter `eta_s` from
+    /// first at full speed. Steps the holder and the runner until the ball is thrown; returns
+    /// the sim and how long after he had the ball he let go.
+    fn shortstop_to_first(eta_s: f64, catch_vel: Vec3) -> (Sim<'static>, f64) {
+        const SS: usize = 5;
+        let fx: &'static Fixture = Box::leak(Box::new(fixture(&[])));
+        let inp: &'static LiveInput<'static> = Box::leak(Box::new(input(fx, vec![RunnerIn { id: fx.st.batter, base: 0, speed: 8.2 }])));
+        let st: &'static mut RulesState = Box::leak(Box::new(fx.st.clone()));
+        let mut sim = new_sim(inp, st);
+        sim.t = 1.0;
+        held_at(&mut sim, SS, Vec3::new(-8.0, 38.0, 0.0));
+        sim.f[2].pos = base_pos(1);
+        let fd = &mut sim.f[SS];
+        (fd.up_at, fd.set_base, fd.face, fd.catch_vel) = (1.0, fd.a.transfer, None, catch_vel);
+        (sim.r[0].s, sim.r[0].v, sim.r[0].goal) = (BASE_L - 8.2 * eta_s, 8.2, 1);
+        for _ in 0..120 {
+            sim.holder_act();
+            if matches!(sim.ball, Ball::Thrown { .. }) {
+                let after = sim.t - 1.0;
+                return (sim, after);
+            }
+            sim.r[0].s += 8.2 * DT;
+            sim.t += DT;
+        }
+        panic!("no throw");
+    }
+
+    /// The batter's time to first that leaves the shortstop of [`shortstop_to_first`]
+    /// `margin_s` in hand if he lets go as early as he can, on balance or not.
+    fn eta_for_margin(margin_s: f64, off_balance: bool) -> f64 {
+        let d = (base_pos(1) - Vec3::new(-8.0, 38.0, 0.0)).norm();
+        let v = 36.0 * if off_balance { 0.82 } else { 0.90 };
+        0.6 * 0.65 + throw_time(v, d) + 0.05 + margin_s
+    }
+
+    // Owner backlog A3, agent-models §5.5. An average infielder's catch-to-release is 0.65 s;
+    // the earliest he can let go is 0.6 of it, 0.39 s. With three seconds on the runner he
+    // gets set and throws at 0.65 s, unhurried.
+    #[test]
+    fn a_fielder_with_time_gets_set_before_he_throws() {
+        let (sim, after) = shortstop_to_first(3.0, Vec3::ZERO);
+        assert!(after >= 0.65 - 1e-9 && after < 0.65 + DT + 1e-9, "let go after {after:.3} s");
+        assert_eq!(sim.out.hurry, vec![(0.0, false)]);
+    }
+
+    // With only a tenth of a second in hand at his quickest, he lets go as early as he can.
+    #[test]
+    fn a_fielder_short_of_time_hurries_his_throw() {
+        let (sim, after) = shortstop_to_first(eta_for_margin(0.10, false), Vec3::ZERO);
+        assert!(after >= 0.39 - 1e-9 && after < 0.39 + DT + 1e-9, "let go after {after:.3} s");
+        let (hurry, off) = sim.out.hurry[0];
+        assert!(hurry > 0.93 && !off, "hurry {hurry:.2}");
+    }
+
+    // In between he uses the time he has: 0.35 s in hand at his quickest, 0.25 s kept, so
+    // he has a tenth to spend. Waiting also gives him his arm back (a set throw of 33 m
+    // gets there about 0.1 s sooner than a fully hurried one), so each 0.1 s he waits
+    // costs him only about half of it: he lets go some 0.2 s after his earliest, mostly set.
+    #[test]
+    fn a_fielder_uses_the_time_he_has() {
+        let (sim, after) = shortstop_to_first(eta_for_margin(0.35, false), Vec3::ZERO);
+        assert!(after > 0.39 + 0.11 && after < 0.65 - 0.03, "let go after {after:.3} s");
+        let hurry = sim.out.hurry[0].0;
+        assert!(hurry > 0.1 && hurry < 0.6, "hurry {hurry:.2}");
+    }
+
+    // Taking the ball moving away from first at 5 m/s he owes 0.2 s of footwork: set at
+    // 0.85 s when he has the time.
+    #[test]
+    fn a_fielder_moving_away_needs_longer_to_get_set() {
+        let away = (Vec3::new(-8.0, 38.0, 0.0) - base_pos(1)).normalized() * 5.0;
+        let (sim, after) = shortstop_to_first(3.0, away);
+        assert!(after >= 0.85 - 1e-9 && after < 0.85 + DT + 1e-9, "let go after {after:.3} s");
+        assert_eq!(sim.out.hurry, vec![(0.0, true)]);
+    }
+
+    // The same hurried throw on balance and off it draws the same noise (same seed, play,
+    // thrower and throw number), so the two differ exactly by the model's factors: fully
+    // hurried, speed 0.90 against 0.82 of his arm, and direction error ×2 against ×3.
+    #[test]
+    fn an_off_balance_hurried_throw_is_slower_and_wilder() {
+        let from = Vec3::new(-8.0, 38.0, 0.0);
+        let away = (from - base_pos(1)).normalized() * 5.0;
+        let thrown = |off: bool| {
+            let (sim, after) = shortstop_to_first(eta_for_margin(0.05, off), if off { away } else { Vec3::ZERO });
+            let (hurry, was_off) = sim.out.hurry[0];
+            assert!(was_off == off && after < 0.39 + DT + 1e-9, "after {after:.3}");
+            let (_, v) = sim.ball_at(sim.t);
+            // Signed angle off the line from his hand to the bag.
+            let line = base_pos(1) - throw_release_point(from, base_pos(1), bb_observe::Hand::Right);
+            let yaw = m::atan2(line.x * v.y - line.y * v.x, line.x * v.x + line.y * v.y);
+            (hurry, v.norm(), yaw)
+        };
+        let ((h_on, v_on, yaw_on), (h_off, v_off, yaw_off)) = (thrown(false), thrown(true));
+        // Each let go on the first tick after his earliest, a shade under full hurry.
+        let speed = |h: f64, loss: f64| 1.0 - h * loss;
+        assert!((v_off / v_on - speed(h_off, 0.18) / speed(h_on, 0.10)).abs() < 1e-9, "speeds {v_on:.2} and {v_off:.2}");
+        assert!((yaw_off / yaw_on - (1.0 + 2.0 * h_off) / (1.0 + h_on)).abs() < 1e-6, "errors {yaw_on:.5} and {yaw_off:.5}");
+        assert!(v_off < 0.95 * v_on && yaw_off.abs() > 1.3 * yaw_on.abs());
+    }
+
+    // The glove hand (agent-models §5.5): a first baseman who fields a grounder facing the
+    // plate turns a half turn to throw to second if he is right-handed, and not at all if
+    // he is left-handed: 0.12 s more than his plain transfer against 0.12 s less.
+    #[test]
+    fn a_left_handed_first_baseman_is_set_sooner_for_second() {
+        let fx = fixture(&[]);
+        let inp = input(&fx, vec![RunnerIn { id: fx.st.batter, base: 0, speed: 8.2 }]);
+        let mut st = fx.st.clone();
+        let mut sim = new_sim(&inp, &mut st);
+        // Placed where the turn is exact: facing −Y at (38.8, 38.8), second base (0, 38.8)
+        // is due −X, straight off his right shoulder.
+        let at = Vec3::new(38.8, 38.8, 0.0);
+        sim.f[2].pos = at;
+        (sim.f[2].set_base, sim.f[2].face) = (0.65, Some(Vec3::new(0.0, -1.0, 0.0)));
+        sim.f[2].a.throws = bb_observe::Hand::Right;
+        let right = sim.set_up_for(2, base_pos(2));
+        sim.f[2].a.throws = bb_observe::Hand::Left;
+        let left = sim.set_up_for(2, base_pos(2));
+        assert!((right.set_s - 0.77).abs() < 1e-3 && (left.set_s - 0.53).abs() < 1e-3, "right {:.3}, left {:.3}", right.set_s, left.set_s);
+    }
+
     #[test]
     fn a_throw_leaves_the_throwing_hand() {
         use bb_observe::Hand;

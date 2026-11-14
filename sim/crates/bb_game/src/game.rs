@@ -105,6 +105,9 @@ pub struct PlayViz {
     /// Possession during a live ball: when each fielder secured the ball, and each throw's release.
     pub secured: Vec<(f64, u16)>,
     pub released: Vec<(f64, u16)>,
+    /// For each release: how hurried it was (0 set, 1 as early as he could) and whether he
+    /// was off balance (agent-models §5.5).
+    pub hurry: Vec<(f64, bool)>,
     /// Dives (t, fielder, where he left his feet, where his body lands); he is up
     /// [`crate::live::DIVE_GETUP_S`] later.
     pub dives: Vec<(f64, u16, bb_math::Vec3, bb_math::Vec3)>,
@@ -330,6 +333,7 @@ impl Game {
                 viz.actors = out.actors.clone();
                 viz.secured = out.secured.clone();
                 viz.released = out.released.clone();
+                viz.hurry = out.hurry.clone();
                 viz.dives = out.dives.clone();
             }
             calls.extend(out.calls.iter().copied());

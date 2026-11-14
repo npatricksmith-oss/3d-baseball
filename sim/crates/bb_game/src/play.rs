@@ -86,6 +86,19 @@ impl FielderAttrs {
         }
     }
 
+    /// The same fielder with his throwing ratings at these grades (20–80 scale, agent-models
+    /// §10): `ArmStrength` moves his top throw speed about his position's average, `ArmAccuracy`
+    /// sets his direction σ, and `Transfer` scales his position's catch-to-release.
+    pub fn with_throwing(self, strength: f64, accuracy: f64, transfer: f64) -> Self {
+        use bb_agents::throwing::{ARM_STRENGTH_50_MPS, arm_accuracy, arm_strength, transfer_scale};
+        Self {
+            arm: self.arm + arm_strength(strength) - ARM_STRENGTH_50_MPS,
+            arm_sigma: arm_accuracy(accuracy),
+            transfer: self.transfer * transfer_scale(transfer),
+            ..self
+        }
+    }
+
     /// The same fielder with `Anticipation` at `grade` (20–80 scale, agent-models §10): all
     /// three read σs by the ρ rule (less is better).
     pub fn with_anticipation(self, grade: f64) -> Self {

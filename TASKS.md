@@ -1,13 +1,32 @@
 # Task List
 
-**Last updated:** 2026-11-13 (handedness, A1; before that, the dive rate judged and fixed, A5, and rosters, A2, merged; before that, dives shown in the client, the get-up after a rimmed dive, two-out throws; before that, the overrun of first and runner position samples; before that, foul measures, sources and the correction experiment; pushed; the spray experiment parked for later; before that, the read knows the ball started at the plate; before that, called-off infielders back up the catch; before that, pop-up calls on `fix/popup-calls`; before that, owner's observations merged into the "Owner backlog" section; before that, the coordinator run on `coord/review-fixes`)
+**Last updated:** 2026-11-13 (hurried throws, A3; before that, handedness, A1; before that, the dive rate judged and fixed, A5, and rosters, A2, merged; before that, dives shown in the client, the get-up after a rimmed dive, two-out throws; before that, the overrun of first and runner position samples; before that, foul measures, sources and the correction experiment; pushed; the spray experiment parked for later; before that, the read knows the ball started at the plate; before that, called-off infielders back up the catch; before that, pop-up calls on `fix/popup-calls`; before that, owner's observations merged into the "Owner backlog" section; before that, the coordinator run on `coord/review-fixes`)
 The live to-do list for the project. [PLAN.md](PLAN.md) holds decisions and design. This file holds what is next and what is done. Update it at the end of every work session.
 
 Status: `[ ]` not started · `[~]` in progress · `[x]` done · `[?]` needs an owner decision
 
 ---
 
-## Resume here (2026-11-13: handedness, A1)
+## Resume here (2026-11-13: hurried throws, A3)
+
+Branch `claude/handedness-complete-6e0bc7` (handedness is merged into main at `a4c8219`; A3 is on top). `cargo test --workspace --release`: 192 pass. Spec: agent-models §5.5 (set-up, the turn, hurrying), §10 (ratings note); measurements in [the throwing note](docs/calibration/2026-11-13-throwing.md).
+
+- **Waiting on a review:** the Codex review of A3 (`docs/reviews/2026-11-13-codex-hurried-throws-review.md`) was started at the end of the session. Commit it, fix or defer its findings, write its Resolution.
+- **Open, for the next calibration:** runs/team-game 5.35 → 5.54 (seeds 0–299). The footwork a fielder owes moving away (0.2 s) or after a dive (0.3 s) costs 0.37; hurrying and the turn give back 0.18. Recalibrate with the handedness mix (below). Check the outfield's 0.85 s transfer against measured exchange times: it may already contain some of that footwork.
+- **Next in the agreed order:** A4 throw choices from the outs and the runners, then A17 errors.
+
+Done (A3):
+- **A fielder needs time to get set, and can throw before he is.** Set = transfer + turn + footwork. He can let go at 0.6 of transfer + turn; the earlier, the slower (down to 90% of his arm, 82% off balance) and the wilder (direction σ ×2, ×3 off balance). He hurries only when his own read of the race leaves him under 0.25 s from a full set-up. About 2.5 throws a game are hurried; a fully hurried one is not taken cleanly twice as often as a set one.
+- **The glove hand turns the body.** A target off the glove shoulder is quick, off the throwing shoulder slow (±0.12 s): a left-handed first baseman is set for second 0.24 s sooner than a right-handed one.
+- **Ratings:** `FielderAttrs::with_throwing(strength, accuracy, transfer)` (grades, §10); `sim-cli games --arm-strength/--arm-accuracy/--transfer`. Grade-80 arms make .606 outs per ball in play against .548 for grade 20.
+- Throw noise is drawn in `bb_agents::motor::execute_throw`; what a fielder knows of his own set-up is `bb_agents::throwing`. With the new terms off, every game is unchanged. New diagnostic: `cargo run --release -p bb_game --example throw_probe -- 300 0`.
+
+Not done:
+- **No player has his own throwing ratings** (all grade 50): that needs the population generator.
+- A backhand is no harder to field than a forehand (moved to A17). Speed-for-accuracy on set throws and composure are not built. A hurried throw is not shown differently in the client.
+- All eleven new parameters are estimates [E] with no real-game source yet.
+
+## Previous: 2026-11-13, handedness, A1
 
 Branch `claude/a1-173226` (from main at `3de5572`). `cargo test --workspace --release`: 179 pass. Spec: data-formats §2.4 (hands), agent-models §5.5 (the throwing hand); measurements in [the handedness note](docs/calibration/2026-11-13-handedness.md).
 
@@ -389,7 +408,7 @@ Source: [observations.md](observations.md), written by the owner after watching 
 On the field (sim):
 - [x] A1. **Handedness for every player** (2026-11-13; data-formats §2.4, agent-models §5.5, [note](docs/calibration/2026-11-13-handedness.md)). Hands in the roster, switch hitters, batters and pitchers of both sides in games, throws from the throwing hand, left-handers mirrored in the client. Left for A3: what the glove hand does to fielding and to the footwork of a throw.
 - [x] A2. **Rosters: player names, numbers, positions** [W9, part of W5] (2026-11-13; data-formats §2.4, `bb_game::roster`). Nine named players a side from the game seed; names in captions, the event log, the box-score lines and the C ABI. Team names and benches wait for the league (B1); the client does not show numbers yet.
-- [ ] A3. **Throwing ratings and hurried throws.** Each player has ratings for arm speed, accuracy, and set-up time. A hurried throw loses accuracy and speed; a fielder with time to get balanced gains both. Have: the spec's `ArmStrength`, `ArmAccuracy`, `Transfer` and its rush and off-balance noise terms (agent-models §5.5); in code each fielder has an arm speed and a fixed transfer time. Missing: no throw is ever hurried (the rush terms are not built), and the spec gives a rushed throw no speed loss, so §5.5 needs that added.
+- [x] A3. **Throwing ratings and hurried throws** (2026-11-13; agent-models §5.5, [note](docs/calibration/2026-11-13-throwing.md)). Set-up time with the turn and footwork, hurried and off-balance throws, rating grades. Left: per-player ratings (population generator), the backhand (A17). Original entry: Each player has ratings for arm speed, accuracy, and set-up time. A hurried throw loses accuracy and speed; a fielder with time to get balanced gains both. Have: the spec's `ArmStrength`, `ArmAccuracy`, `Transfer` and its rush and off-balance noise terms (agent-models §5.5); in code each fielder has an arm speed and a fixed transfer time. Missing: no throw is ever hurried (the rush terms are not built), and the spec gives a rushed throw no speed loss, so §5.5 needs that added.
 - [ ] A4. **Smarter throw choices from the outs and the runners.** The owner's example: runner on third, two outs, the fielders should take the force at first or second, not throw home. Collect plays where the choice is wrong before changing the option evaluation (agent-models §5.5).
 - [~] A5. **Dives that extend range, with a real cost to get up and throw.** Have: chasers dive (up to 1.5 m extra reach, 1.5 s to get up, harder the further out), the client shows the dive and the get-up with stand-in clips, and since 2026-11-13 the rate is believable: about 3 a game against 22 before and 2 to 3 in real games ([note](docs/calibration/2026-11-13-dive-rate.md)). A ball just past reach is taken with a stretch on his feet; outfielders dive only when they like their chances (this was "A18"). Missing: real dive and get-up animation, a stretch animation, and the owner watching it.
 - [ ] A6. **Runners slide** when the play calls for it (agent-models §6.2; was in M5). Not built.

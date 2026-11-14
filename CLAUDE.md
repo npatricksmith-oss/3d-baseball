@@ -42,7 +42,7 @@ sim/                   Cargo workspace
     bb_math            Vec3, Mat3, units, deterministic math (m), Philox keyed RNG
     bb_physics         pure models: flight, atmosphere, spin axis, zone, pitch aim, bat, collision
     bb_observe         observation types and shared domain enums (PitchType, Hand)
-    bb_agents          players/managers (no bb_world!): pitcher, motor (execution noise)
+    bb_agents          players/managers (no bb_world!): pitcher, throwing (set-up and hurry), motor (execution noise)
     bb_schema          generated FlatBuffers code + event-log container and BLAKE3 digest chain
     bb_world           true world: pitch resolution against the swing
     bb_rules           rules engine: pure step function over facts; scenarios/**/*.toml corpus
