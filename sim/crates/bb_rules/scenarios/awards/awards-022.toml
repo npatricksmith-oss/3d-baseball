@@ -1,0 +1,47 @@
+id = "awards-022"
+title = "Throw out of play with runners held at first and second and the batter on first: home, third, and second for the batter, who cannot share third"
+rules = ["rules-spec 7.2", "OBR 5.06(b)(4)(G) comment"]
+milestone = "M4"
+tags = ["awards", "throw", "outofplay"]
+[initial]
+inning = 7
+half = "top"
+bases = { first = "A.2", second = "A.1" }
+batter = "A.3"
+
+[[step]]
+fact = "PitchDelivered"
+t = 0.0
+[[step]]
+fact = "BatContact"
+t = 0.42
+[[step]]
+fact = "BallTouched"
+t = 2.4
+what = "Ground"
+pos = [30.0, 62.0]
+[[step]]
+fact = "BaseTouched"
+t = 3.9
+agent = "A.3"
+base = 1
+[[step]]
+fact = "GloveSecured"
+t = 4.0
+fielder = "H.RF"
+pos = [33.0, 66.0]
+[[step]]
+fact = "BallReleasedFromGlove"
+t = 4.4
+fielder = "H.RF"
+infielder = false
+[[step]]
+fact = "BallTouched"
+t = 5.6
+what = "OutOfPlay"
+pos = [22.0, 4.0]
+in_flight = true
+expect_events = [{ event = "BallDead", reason = "OutOfPlay" }, { event = "RunnerAdvanced", runner = "A.1", from = 2, to = 4, cause = "Award" }, { event = "RunScored", runner = "A.1" }, { event = "RunnerAdvanced", runner = "A.2", from = 1, to = 3, cause = "Award" }, { event = "RunnerAdvanced", runner = "A.3", from = 0, to = 2, cause = "Award" }]
+[expect]
+bases = { second = "A.3", third = "A.2" }
+score = [1, 0]

@@ -25,8 +25,8 @@ fn main() {
         let seed = if list { set + i } else { set * 1_000_003 + i };
         let mut g = Game::new(seed, false);
         while let Some(s) = g.step_pitch() {
-            let Some((t, x, y)) = s.facts.iter().find_map(|f| match f {
-                Input::BallTouched { t, what: Touch::OutOfPlay { x, y, .. } } => Some((*t, *x, *y)),
+            let Some((t, x, y, z)) = s.facts.iter().find_map(|f| match f {
+                Input::BallTouched { t, what: Touch::OutOfPlay { x, y, z, .. } } => Some((*t, *x, *y, *z)),
                 _ => None,
             }) else {
                 continue;
@@ -45,10 +45,12 @@ fn main() {
             } else {
                 "fair, bounced"
             };
-            // The wall it left over: the piece nearest where it ended, a dugout by its place.
-            let w = field.body_clearance(x, y, 0.0);
+            // The wall it left over: the piece where it crossed; at a dugout, into it under the
+            // roof or onto the seats over it.
+            let w = field.ball_clearance(x, y, 0.036888);
             let wall = match w.kind {
-                WallKind::Side if field.wall_top(&w) == 0.0 => "dugout".to_string(),
+                _ if field.is_dugout(&w) && z < field.dugout_roof_m + 0.036888 => "dugout".to_string(),
+                _ if field.is_dugout(&w) => "dug.roof".to_string(),
                 k => format!("{k:?}"),
             };
             if list {

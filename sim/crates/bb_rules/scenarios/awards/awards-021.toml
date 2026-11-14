@@ -1,0 +1,63 @@
+id = "awards-021"
+title = "A throw that caroms off the stands wall stays live; when it then rolls into the dugout it is still the throw: two bases from the time of the throw"
+rules = ["rules-spec 7.2", "OBR 5.06(b)(4)(G)"]
+milestone = "M4"
+tags = ["awards", "throw", "outofplay", "wall"]
+[initial]
+inning = 3
+half = "top"
+bases = { second = "A.1" }
+batter = "A.2"
+
+[[step]]
+fact = "PitchDelivered"
+t = 0.0
+[[step]]
+fact = "BatContact"
+t = 0.42
+[[step]]
+fact = "BaseLeft"
+t = 0.5
+agent = "A.1"
+base = 2
+[[step]]
+fact = "BallTouched"
+t = 2.0
+what = "Ground"
+pos = [-35.0, 60.0]
+[[step]]
+fact = "BaseTouched"
+t = 3.4
+agent = "A.1"
+base = 3
+[[step]]
+fact = "BaseTouched"
+t = 3.8
+agent = "A.2"
+base = 1
+[[step]]
+fact = "GloveSecured"
+t = 3.9
+fielder = "H.LF"
+pos = [-38.0, 66.0]
+[[step]]
+fact = "BallReleasedFromGlove"
+t = 4.3
+fielder = "H.LF"
+infielder = false
+[[step]]
+fact = "BallTouched"
+t = 5.4
+what = "Wall"
+pos = [-19.0, -2.0]
+expect_no_events = [{ event = "BallDead" }]
+[[step]]
+fact = "BallTouched"
+t = 6.5
+what = "OutOfPlay"
+pos = [-15.0, 4.0]
+in_flight = false
+expect_events = [{ event = "BallDead", reason = "OutOfPlay" }, { event = "RunnerAdvanced", runner = "A.1", from = 2, to = 4, cause = "Award" }, { event = "RunScored", runner = "A.1" }, { event = "RunnerAdvanced", runner = "A.2", from = 0, to = 3, cause = "Award" }]
+[expect]
+bases = { third = "A.2" }
+score = [1, 0]

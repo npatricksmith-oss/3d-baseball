@@ -58,6 +58,8 @@ pub struct FielderAttrs {
     pub jump_gain: f64,
     /// The hand he throws with; his glove is on the other (not graded).
     pub throws: bb_observe::Hand,
+    /// Configurable A4 option/observation thresholds [E] (agent-models §5.5–5.7).
+    pub throw_choice: bb_agents::throwing::ChoiceParams,
 }
 
 /// Grade-50 `ArmStrength` by position, mph: the league means of Statcast's arm-strength
@@ -100,6 +102,7 @@ impl FielderAttrs {
             lead_sigma: LEAD_READ_TIME_SIGMA_50_S,
             jump_gain: 1.0,
             throws: bb_observe::Hand::Right,
+            throw_choice: bb_agents::throwing::ChoiceParams::default(),
         }
     }
 
@@ -334,7 +337,7 @@ pub fn simulate_play(inp: &PlayInput) -> PlayOutput {
     if let SegmentEnd::OverFence { .. } = end {
         let (p, _) = path.at(path.t_end());
         let in_flight = path.bounces.is_empty();
-        facts.push((path.t_end(), Input::BallTouched { t: path.t_end(), what: Touch::OutOfPlay { x: p.x, y: p.y, in_flight } }));
+        facts.push((path.t_end(), Input::BallTouched { t: path.t_end(), what: Touch::OutOfPlay { x: p.x, y: p.y, z: p.z, in_flight } }));
         return finish(facts, path);
     }
 

@@ -28,8 +28,15 @@ fn identities_hold_over_many_games() {
             }
         }
         // PA = K + BB + HBP + HR + batted balls; PA matches the sim's own count.
-        for t in &b.teams {
+        for (side, t) in b.teams.iter().enumerate() {
             assert_eq!(t.pa, t.k + t.bb + t.hbp + t.hr + t.batted);
+            assert_eq!(t.pa, t.ab + t.bb + t.hbp + t.sf + t.sh, "I2 seed side {side}");
+            let outs = b.outs_by_half.iter().skip(side).step_by(2).sum::<u32>();
+            assert_eq!(t.pa, t.runs + t.left_on_base + outs, "I1 seed side {side}, line {t:?}");
+            assert_eq!(t.h, t.singles + t.doubles + t.triples + t.hr, "I7");
+            // The only unruled play is a walk-off that ends before the batter touches first
+            // (rules-spec §10.2): at most one, by the home team.
+            assert!(t.undetermined == 0 || (side == 1 && t.undetermined == 1), "unresolved rulings, side {side}: {}", t.undetermined);
         }
         assert_eq!(b.teams[0].pa + b.teams[1].pa, g.pa);
         // Pitches seen = log records.
@@ -80,14 +87,91 @@ fn batting_lines_name_the_roster_and_follow_the_order() {
                 let runs = g.events.iter().filter(|e| matches!(e, bb_rules::Event::RunScored { runner } if *runner == slot_id)).count() as u32;
                 let pa = g.events.iter().filter(|e| matches!(e, bb_rules::Event::PlateAppearanceEnded { batter, .. } if *batter == slot_id)).count() as u32;
                 let hr = g.events.iter().filter(|e| matches!(e, bb_rules::Event::PlateAppearanceEnded { batter, result: bb_rules::PaResult::HomeRun } if *batter == slot_id)).count() as u32;
-                assert_eq!((l.agent, l.runs, l.pa, l.hr), (slot_id, runs, pa, hr), "seed {seed}: {}", l.name);
+                assert_eq!((l.agent, l.runs, l.pa), (slot_id, runs, pa), "seed {seed}: {}", l.name);
+                assert!(l.hr >= hr, "inside-the-park HR also count");
+                assert_eq!(l.pa, l.ab + l.bb + l.hbp + l.sf + l.sh);
             }
             // The players' lines add up to the team's.
             let t = &b.teams[side];
             let sum = |f: fn(&bb_stats::BatterLine) -> u32| lines.iter().map(f).sum::<u32>();
             assert_eq!((sum(|l| l.pa), sum(|l| l.runs), sum(|l| l.k), sum(|l| l.bb), sum(|l| l.hbp), sum(|l| l.hr), sum(|l| l.batted)), (t.pa, t.runs, t.k, t.bb, t.hbp, t.hr, t.batted), "seed {seed} side {side}");
+            assert_eq!((sum(|l| l.ab), sum(|l| l.h), sum(|l| l.singles), sum(|l| l.doubles), sum(|l| l.triples), sum(|l| l.rbi), sum(|l| l.sf)), (t.ab, t.h, t.singles, t.doubles, t.triples, t.rbi, t.sf));
         }
     }
     // The games include the awkward endings.
     assert!(walk_offs >= 1 && extras >= 1, "{walk_offs} walk-offs, {extras} extra-inning games");
+}
+
+/// Log-only checks for the pitch and pitcher accounting identities. There is one pitcher
+/// per team today; the pitcher on the deciding pitch is charged with that PA and its outs.
+#[test]
+fn pitch_and_pitcher_accounting_over_games() {
+    use bb_schema::{ev, log};
+    for seed in 0..40 {
+        let game = simulate_game(seed);
+        let b = box_score(&game.log).unwrap();
+        let view = log::read(&game.log).unwrap();
+        let mut batting_side = 0usize;
+        let mut faced = [0u32; 2];
+        let mut pitcher_outs = [0u32; 2];
+        let mut pitches = [0u32; 2];
+        let mut classified = [0u32; 2];
+        for play in &view.plays {
+            let events = play.events().unwrap();
+            let pitch = events.iter().find_map(|e| e.body_as_pitch_released()).unwrap();
+            // In this sim fielding agent IDs encode the defending side in the high byte.
+            let defense = (pitch.pitcher() >> 8) as usize;
+            assert!(defense < 2);
+            pitches[defense] += 1;
+            for e in events.iter() {
+                match e.body_type() {
+                    ev::EventBody::HalfInningStarted => batting_side = usize::from(e.body_as_half_inning_started().unwrap().half() == ev::HalfInning::Bottom),
+                    ev::EventBody::PitchResult => {
+                        let outcome = e.body_as_pitch_result().unwrap().outcome();
+                        assert!(matches!(outcome, ev::PitchOutcome::Ball | ev::PitchOutcome::CalledStrike | ev::PitchOutcome::SwingingStrike | ev::PitchOutcome::Foul | ev::PitchOutcome::FoulTip | ev::PitchOutcome::InPlay | ev::PitchOutcome::HitByPitch));
+                        classified[defense] += 1;
+                    }
+                    ev::EventBody::RunnerOut => { assert_eq!(defense, 1 - batting_side); pitcher_outs[defense] += 1; }
+                    ev::EventBody::PlateAppearanceEnded => { assert_eq!(defense, 1 - batting_side); faced[defense] += 1; }
+                    _ => {}
+                }
+            }
+        }
+        for defense in 0..2 {
+            // I4: IP in outs equals putouts; I5: batters faced equals opponent PAs.
+            let expected_outs = b.outs_by_half.iter().skip(1 - defense).step_by(2).sum::<u32>();
+            assert_eq!(pitcher_outs[defense], expected_outs, "I4 seed {seed}");
+            assert_eq!(faced[defense], b.teams[1 - defense].pa, "I5 seed {seed}");
+            // I8: exactly one known outcome for each released pitch (HBP included).
+            assert_eq!(pitches[defense], classified[defense], "I8 seed {seed}");
+        }
+    }
+}
+
+/// I10: every runner entering a live ball is accounted for once as retired, scored, or
+/// still live at the end of that play; a terminal event may not be duplicated.
+#[test]
+fn live_ball_runner_terminal_events_are_disjoint() {
+    use std::collections::BTreeSet;
+    use bb_schema::log;
+    for seed in 0..40 {
+        let game = simulate_game(seed);
+        let view = log::read(&game.log).unwrap();
+        for play in &view.plays {
+            let events = play.events().unwrap();
+            let Some(evidence) = events.iter().find_map(|e| e.body_as_scorer_evidence()) else { continue };
+            // A foul ball that continues the PA does not complete a runner accounting cycle.
+            if !events.iter().any(|e| e.body_as_plate_appearance_ended().is_some()) { continue; }
+            let mut live = BTreeSet::new();
+            for runner in evidence.runners().unwrap().iter() {
+                assert!(live.insert(runner.agent()), "duplicate initial runner seed {seed}");
+            }
+            for event in events.iter() {
+                let ended = event.body_as_runner_out().map(|o| o.runner()).or_else(|| event.body_as_run_scored().map(|r| r.runner()));
+                if let Some(runner) = ended {
+                    assert!(live.remove(&runner), "duplicate or unregistered terminal runner {runner}, seed {seed}, play {}", play.play_index());
+                }
+            }
+        }
+    }
 }

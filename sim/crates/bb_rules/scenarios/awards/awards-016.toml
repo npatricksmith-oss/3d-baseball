@@ -1,0 +1,68 @@
+id = "awards-016"
+title = "Infielder's first throw out of play after a runner went to third and came back to second: he has not advanced, so the award is from the time of the pitch"
+rules = ["rules-spec 7.2", "OBR 5.06(b)(4)(G) Approved Ruling"]
+milestone = "M4"
+tags = ["awards", "throw", "outofplay"]
+[initial]
+inning = 3
+half = "top"
+bases = { second = "A.1" }
+batter = "A.2"
+
+[[step]]
+fact = "PitchDelivered"
+t = 0.0
+[[step]]
+fact = "BatContact"
+t = 0.42
+[[step]]
+fact = "BaseLeft"
+t = 0.5
+agent = "A.1"
+base = 2
+[[step]]
+fact = "BallTouched"
+t = 0.8
+what = "Ground"
+pos = [-6.0, 25.0]
+[[step]]
+fact = "BaseTouched"
+t = 2.6
+agent = "A.1"
+base = 3
+[[step]]
+fact = "BaseLeft"
+t = 2.7
+agent = "A.1"
+base = 3
+[[step]]
+fact = "GloveSecured"
+t = 2.8
+fielder = "H.SS"
+pos = [-12.0, 40.0]
+[[step]]
+fact = "BaseTouched"
+t = 3.9
+agent = "A.2"
+base = 1
+[[step]]
+fact = "BaseTouched"
+t = 4.0
+agent = "A.1"
+base = 2
+[[step]]
+fact = "BallReleasedFromGlove"
+t = 4.2
+fielder = "H.SS"
+infielder = true
+[[step]]
+fact = "BallTouched"
+t = 5.0
+what = "OutOfPlay"
+pos = [25.0, 5.0]
+in_flight = true
+expect_events = [{ event = "BallDead", reason = "OutOfPlay" }, { event = "RunnerAdvanced", runner = "A.1", from = 2, to = 4, cause = "Award" }, { event = "RunScored", runner = "A.1" }, { event = "RunnerAdvanced", runner = "A.2", from = 0, to = 2, cause = "Award" }]
+expect_no_events = [{ event = "RunnerAdvanced", runner = "A.2", to = 3 }]
+[expect]
+bases = { second = "A.2" }
+score = [1, 0]

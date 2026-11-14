@@ -34,21 +34,21 @@ fn linescore(r: &GameResult) {
     }
 }
 
-/// Each side's batters by name, from the event log alone (`bb_stats`). At-bats and hits wait
-/// for the official scorer; BIP is plate appearances that ended on a batted ball.
+/// Each side's batting lines, derived from the event log by `bb_stats`.
 fn batting_lines(r: &GameResult) {
     let b = match bb_stats::box_score(&r.log) {
         Ok(b) => b,
         Err(e) => return println!("box score unavailable: {e:?}"),
     };
     for (side, team) in ["Away", "Home"].iter().enumerate() {
-        println!("\n{:<36}{:>3}{:>3}{:>3}{:>3}{:>4}{:>3}{:>4}", format!("{team} batting (bats/throws)"), "PA", "R", "K", "BB", "HBP", "HR", "BIP");
+        println!("\n{:<36}{:>4}{:>4}{:>4}{:>4}{:>4}{:>4}{:>4}{:>5}{:>4}{:>4}{:>5}", format!("{team} batting (bats/throws)"), "PA", "AB", "R", "H", "2B", "3B", "HR", "RBI", "BB", "K", "HBP");
         for l in &b.batting[side] {
             let who = format!("{} {:<2} #{:<2} {}/{} {}", l.batting_order, l.position_code(), l.number, l.bats, l.throws, l.name);
-            println!("{who:<36}{:>3}{:>3}{:>3}{:>3}{:>4}{:>3}{:>4}", l.pa, l.runs, l.k, l.bb, l.hbp, l.hr, l.batted);
+            println!("{who:<36}{:>4}{:>4}{:>4}{:>4}{:>4}{:>4}{:>4}{:>5}{:>4}{:>4}{:>5}", l.pa, l.ab, l.runs, l.h, l.doubles, l.triples, l.hr, l.rbi, l.bb, l.k, l.hbp);
         }
         let t = &b.teams[side];
-        println!("{:<36}{:>3}{:>3}{:>3}{:>3}{:>4}{:>3}{:>4}   LOB {}", "Totals", t.pa, t.runs, t.k, t.bb, t.hbp, t.hr, t.batted, t.left_on_base);
+        println!("{:<36}{:>4}{:>4}{:>4}{:>4}{:>4}{:>4}{:>4}{:>5}{:>4}{:>4}{:>5}   LOB {}", "Totals", t.pa, t.ab, t.runs, t.h, t.doubles, t.triples, t.hr, t.rbi, t.bb, t.k, t.hbp, t.left_on_base);
+        if t.undetermined > 0 { println!("{} batted-ball rulings lack evidence", t.undetermined); }
     }
     println!();
 }

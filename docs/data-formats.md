@@ -244,6 +244,26 @@ Grouped by producer. "Physical" events record what the world did. "Rules" events
 | `WarmupState` | pitcher, state (cold, warming, ready, overwarmed), pitches thrown in the pen. Emitted on change |
 | `PhysicalLoad` | agent, kind (pitch effort, sprint, dive, collision, HBP energy), amount in J or a defined load unit. Feeds fatigue now and injuries later (PLAN §11, D18) |
 
+For each live ball `ScorerEvidence` records the batter and starting runners, the first
+handling (including a glove deflection), the first secure possession and its location,
+each runner's actual base touches (including the batter's first-base touch when present),
+and the origin, target, base and time
+of each throw, including whether the defense chose it as an attempted out rather than a
+routine return, and the batter's running goal at release. A fielder's attempt to carry
+the ball to another base is recorded separately from throws. `has_margin` distinguishes a computed reference margin from absent evidence;
+`clean_play_margin_s` is actual first touch minus the arrival of the set grade-50 reference
+throw. It is computed after the play from the first secure possession, not used by agents.
+No margin is asserted when the batter never touched first or the ball was not secured. A
+reference throw that lands short continues through the noise-free bounce model; one that
+never reaches the bag has a negative-infinite margin.
+Runner outs and their destination bases are recorded by `RunnerOut`. Errors are not yet ruled.
+
+The scorer also reads, from the same play record: `BallDead` with reason `OutOfPlay` (a thrown
+ball left the field and bases were awarded; the batter reaches only by that award unless
+`first_touch_s` precedes the last throw's `t_release`), `RunnerAdvanced.cause = Award`, and
+`PlateAppearanceEnded.result`. `ScorerRuling` is not written yet: rulings are derived on read
+(`bb_stats::scorer`, `scorer_version` 1), so a better scorer re-rules old logs.
+
 ### 4.4 Determinism digest
 
 - `digest_n = BLAKE3(digest_{n−1} ‖ bytes(PlayRecord_n))`, with `digest_{−1}` = 32 zero bytes.
@@ -352,7 +372,7 @@ table Marker { t: float (id: 0); kind: MarkerKind (id: 1); agent: ushort (id: 2)
 
 `Dive` and `DiveUp` (emitted since 2026-11-13) bracket a fielder's dive: `Dive` when he leaves his feet (`agent`, `p` where he left them), `DiveUp` when he is back on them, the get-up time later (`p` where his body landed: the sim carries him there over the 0.3 s lunge, agent-models §5.3). A play that ends during a dive (the deciding fact can come on the dive's own tick) lasts until the diver is up: his track finishes the lunge and holds at the landing point, and `duration_s` covers the `DiveUp`. This is presentation only. The FFI reports a dive under way in `BbFrame.dives` (`since_s`, `up_in_s`, `dir`), pairing each `Dive` with the fielder's first `DiveUp` strictly after it, so a client can lay the figure out and get it up on the sim's times. At most `BB_MAX_DIVES` (4) are reported at once; any more are left out.
 
-`BallDead` (emitted since 2026-11-14, A10) is the moment the ball left the playing field and was dead (physics-spec §9.5; rules-spec §5.8). `p` is the ground point where it crossed the boundary (for a ball over a foul-territory wall the time is when it comes down in the seats, the point where it went over). `base` is the reason, in the event log's `DeadBallReason` numbering: 1 out of play (a foul ball or a throw), 2 home run, 3 ground-rule double. `agent` is 0. The ball track ends at that time and the play is over, so a client can cut back to the field from a ball in the seats or a dugout. Only balls leaving the field get the marker for now, home runs included; other dead balls (an uncaught foul on the field, a hit batter) do not. `bb_timeline_info` copies it into `BbPlayInfo.dead_s` (−1 if the ball never left), `dead_at` and `dead_reason` (0 if it never left; `sim/crates/bb_ffi/include/bb_ffi.h`). The client stops following the ball at `dead_s` on reasons 1 and 3 and returns to the broadcast view; home runs keep their follow until A16.
+`BallDead` (emitted since 2026-11-14, A10) is the moment the ball was dead after leaving the playing field (physics-spec §9.5; rules-spec §5.8). Over the fence that is as it clears; a throw over a wall, as it crosses (nobody catches a throw in the seats); a batted ball over a foul-territory wall or into a dugout, when it comes down in the seats or the dugout, because until then a fielder at the rail may reach over for it (rules-spec §5.3). `p` is where it crossed the boundary: the ball's centre, height included (since the Gemini play-area review P2-2, 2026-11-14; it was the ground point under it). `base` is the reason, in the event log's `DeadBallReason` numbering: 1 out of play (a foul ball or a throw), 2 home run, 3 ground-rule double. `agent` is 0. The ball track ends at that time and the play is over, so a client can cut back to the field from a ball in the seats or a dugout. Only balls leaving the field get the marker for now, home runs included; other dead balls (an uncaught foul on the field, a hit batter) do not. `bb_timeline_info` copies it into `BbPlayInfo.dead_s` (−1 if the ball never left), `dead_at` and `dead_reason` (0 if it never left; `sim/crates/bb_ffi/include/bb_ffi.h`). The client stops following the ball at `dead_s` on reasons 1 and 3 and returns to the broadcast view; home runs keep their follow until A16.
 
 `UmpireCall` (added 2026-11-12) is the umpire signalling an out, at the time he signals it (rules-spec §1.3): `agent` is the runner retired, `base` where (0: the batter at the plate, a caught fly or a strikeout; 4 home), `p` the runner's position, `margin_s` how close the play was (s; 0 bang-bang, `FLT_MAX` for a routine catch). One per out, so a client can advance the outs on the scoreboard as each is called. The play's `duration_s` covers the last call. `bb_timeline_info` copies them into `BbPlayInfo.calls` (`sim/crates/bb_ffi/include/bb_ffi.h`).
 

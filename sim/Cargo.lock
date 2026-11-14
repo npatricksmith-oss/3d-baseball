@@ -514,6 +514,7 @@ dependencies = [
  "bb_physics",
  "bb_rules",
  "bb_schema",
+ "bb_stats",
  "bb_world",
  "flatbuffers",
  "serde_json",

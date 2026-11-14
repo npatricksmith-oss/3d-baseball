@@ -50,7 +50,7 @@ typedef struct {
   uint32_t n_calls; BbCall calls[BB_MAX_CALLS]; /* the umpire's out calls, in time order */
   uint16_t batter; uint16_t _pad; /* the batter the pitch was thrown to (his batting id) */
   /* The ball left the playing field (rules-spec 5.8): dead_s = play time it was dead, or -1
-   * if it never left; dead_at = the ground point where it left (sim frame); dead_reason
+   * if it never left; dead_at = where it crossed the wall or fence (the ball's centre, sim frame); dead_reason
    * 0 never left, 1 out of play (a foul ball or a throw), 2 home run, 3 ground-rule double. */
   float dead_s; float dead_at[3]; uint8_t dead_reason; uint8_t _pad2[3];
   /* On contact, the projected distance (physics-spec 12): from home to where the batted ball

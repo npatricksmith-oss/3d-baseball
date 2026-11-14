@@ -54,6 +54,36 @@ pub const AWAY_FOOTWORK_S: f64 = 0.2;
 pub const DIVE_FOOTWORK_S: f64 = 0.3;
 pub const AWAY_MPS: f64 = 2.0;
 
+/// A4 decision parameters [E], agent-models §5.5–5.7. These configure beliefs and
+/// option admission, never physical outcomes or execution noise.
+#[derive(Clone, Copy, Debug, PartialEq)]
+pub struct ChoiceParams {
+    pub moving_mps: f64,
+    pub on_bag_m: f64,
+    pub carry_max_m: f64,
+    pub tag_reach_m: f64,
+    pub continuation_weight: f64,
+}
+
+impl Default for ChoiceParams {
+    fn default() -> Self {
+        Self { moving_mps: 0.5, on_bag_m: 0.05, carry_max_m: 8.0, tag_reach_m: 1.2, continuation_weight: 1.0 }
+    }
+}
+
+impl ChoiceParams {
+    /// Moving destination from a fielder's read of PUBLIC motion only. Arrival
+    /// on a bag is not evidence of an advance toward the next one. The caller
+    /// may supply noisy estimates; no intention or world object enters here.
+    pub fn runner_target(self, path_m: f64, velocity_mps: f64, base_length_m: f64) -> Option<u8> {
+        if velocity_mps.abs() < self.moving_mps || (path_m / base_length_m - (path_m / base_length_m).round()).abs() * base_length_m <= self.on_bag_m {
+            return None;
+        }
+        let target = if velocity_mps > 0.0 { (path_m / base_length_m).floor() + 1.0 } else { (path_m / base_length_m).ceil() - 1.0 };
+        (target >= 1.0 && target <= 4.0).then_some(target as u8)
+    }
+}
+
 /// Extra time (negative: time saved) to turn for a throw along `to_target`, having taken the
 /// ball facing `facing` (both horizontal; lengths do not matter). A thrower is side-on at
 /// release, glove shoulder to the target. Facing the ball he is square, so a target straight
@@ -131,6 +161,19 @@ mod tests {
 
     fn close(a: f64, b: f64) -> bool {
         (a - b).abs() < 1e-9
+    }
+
+    #[test]
+    fn observed_runner_motion_admits_only_the_visible_leg() {
+        // §5.6 independent geometry: 90-ft bases, third at 82.296 m. A man on
+        // third offers no home play, even an arrival-speed read; leaving it does.
+        let p = ChoiceParams::default();
+        assert_eq!(p.runner_target(82.296, 0.0, 27.432), None);
+        assert_eq!(p.runner_target(82.296, 8.0, 27.432), None);
+        assert_eq!(p.runner_target(82.40, 8.0, 27.432), Some(4));
+        assert_eq!(p.runner_target(70.0, -6.0, 27.432), Some(2));
+        assert_eq!(p.runner_target(70.0, 6.0, 27.432), Some(3));
+        assert_eq!(p.runner_target(70.0, 0.0, 27.432), None);
     }
 
     // agent-models §10: the grade table's printed values.

@@ -1,0 +1,45 @@
+id = "awards-015"
+title = "Walk-off on a throw into the dugout: only the winning run scores"
+rules = ["rules-spec 4.1", "rules-spec 7.2", "OBR 7.01(e)(3)", "OBR 5.06(b)(4)(G)"]
+milestone = "M4"
+tags = ["awards", "throw", "walk-off"]
+[initial]
+inning = 10
+half = "bottom"
+outs = 0
+score = [5, 5]
+bases = { first = "H.1", third = "H.3" }
+batter = "H.2"
+
+[[step]]
+fact = "PitchDelivered"
+t = 0.0
+[[step]]
+fact = "BatContact"
+t = 0.42
+[[step]]
+fact = "BallTouched"
+t = 0.8
+what = "Ground"
+pos = [-6.0, 25.0]
+[[step]]
+fact = "GloveSecured"
+t = 1.5
+fielder = "H.SS"
+pos = [-10.0, 38.0]
+[[step]]
+fact = "BallReleasedFromGlove"
+t = 2.0
+fielder = "H.SS"
+infielder = true
+[[step]]
+fact = "BallTouched"
+t = 2.8
+what = "OutOfPlay"
+pos = [25.0, 5.0]
+in_flight = true
+expect_events = [{ event = "BallDead", reason = "OutOfPlay" }, { event = "RunnerAdvanced", runner = "H.3", from = 3, to = 4, cause = "Award" }, { event = "RunScored", runner = "H.3" }, { event = "GameEnded", away = 5, home = 6, walk_off = "true" }]
+expect_no_events = [{ event = "RunnerAdvanced", runner = "H.1" }, { event = "RunnerAdvanced", runner = "H.2" }]
+[expect]
+status = "Final"
+score = [5, 6]

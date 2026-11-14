@@ -35,7 +35,7 @@ int main(void) {
         calls += info.n_calls;
         /* A ball that left the field: inside the clip, a known reason, a ground point. */
         if (info.dead_s >= 0.f) {
-            if (info.dead_s > info.duration_s + 1e-4f || info.dead_reason < 1 || info.dead_reason > 3 || info.dead_at[2] != 0.f) { fprintf(stderr, "bad dead ball\n"); return 1; }
+            if (info.dead_s > info.duration_s + 1e-4f || info.dead_reason < 1 || info.dead_reason > 3 || info.dead_at[2] < 0.f || info.dead_at[2] > 60.f) { fprintf(stderr, "bad dead ball\n"); return 1; }
             dead++;
         } else if (info.dead_reason != 0) { fprintf(stderr, "bad dead reason\n"); return 1; }
         /* Projected distance: only with contact, and within any park (m). */

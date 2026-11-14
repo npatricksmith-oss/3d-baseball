@@ -22,6 +22,20 @@ impl<'a> ScorerEvidence<'a> {
   pub const VT_CLEAN_PLAY_MARGIN_S: ::flatbuffers::VOffsetT = 6;
   pub const VT_REFERENCE_FIELDER: ::flatbuffers::VOffsetT = 8;
   pub const VT_NOTE_CODE: ::flatbuffers::VOffsetT = 10;
+  pub const VT_BATTER: ::flatbuffers::VOffsetT = 12;
+  pub const VT_RUNNERS: ::flatbuffers::VOffsetT = 14;
+  pub const VT_HAS_FIRST_TOUCH: ::flatbuffers::VOffsetT = 16;
+  pub const VT_FIRST_TOUCH_S: ::flatbuffers::VOffsetT = 18;
+  pub const VT_HAS_HANDLING: ::flatbuffers::VOffsetT = 20;
+  pub const VT_FIRST_HANDLER: ::flatbuffers::VOffsetT = 22;
+  pub const VT_HANDLING_S: ::flatbuffers::VOffsetT = 24;
+  pub const VT_HAS_SECURED: ::flatbuffers::VOffsetT = 26;
+  pub const VT_SECURED_S: ::flatbuffers::VOffsetT = 28;
+  pub const VT_SECURED_AT: ::flatbuffers::VOffsetT = 30;
+  pub const VT_HAS_MARGIN: ::flatbuffers::VOffsetT = 32;
+  pub const VT_THROWS: ::flatbuffers::VOffsetT = 34;
+  pub const VT_CARRIES: ::flatbuffers::VOffsetT = 36;
+  pub const VT_TOUCHES: ::flatbuffers::VOffsetT = 38;
 
   #[inline]
   pub unsafe fn init_from_table(table: ::flatbuffers::Table<'a>) -> Self {
@@ -30,13 +44,27 @@ impl<'a> ScorerEvidence<'a> {
   #[allow(unused_mut)]
   pub fn create<'bldr: 'args, 'args: 'mut_bldr, 'mut_bldr, A: ::flatbuffers::Allocator + 'bldr>(
     _fbb: &'mut_bldr mut ::flatbuffers::FlatBufferBuilder<'bldr, A>,
-    args: &'args ScorerEvidenceArgs
+    args: &'args ScorerEvidenceArgs<'args>
   ) -> ::flatbuffers::WIPOffset<ScorerEvidence<'bldr>> {
     let mut builder = ScorerEvidenceBuilder::new(_fbb);
+    builder.add_secured_s(args.secured_s);
+    builder.add_handling_s(args.handling_s);
+    builder.add_first_touch_s(args.first_touch_s);
     builder.add_clean_play_margin_s(args.clean_play_margin_s);
+    if let Some(x) = args.touches { builder.add_touches(x); }
+    if let Some(x) = args.carries { builder.add_carries(x); }
+    if let Some(x) = args.throws { builder.add_throws(x); }
+    if let Some(x) = args.secured_at { builder.add_secured_at(x); }
+    if let Some(x) = args.runners { builder.add_runners(x); }
     builder.add_ruling_seq(args.ruling_seq);
+    builder.add_first_handler(args.first_handler);
+    builder.add_batter(args.batter);
     builder.add_note_code(args.note_code);
     builder.add_reference_fielder(args.reference_fielder);
+    builder.add_has_margin(args.has_margin);
+    builder.add_has_secured(args.has_secured);
+    builder.add_has_handling(args.has_handling);
+    builder.add_has_first_touch(args.has_first_touch);
     builder.finish()
   }
 
@@ -69,6 +97,104 @@ impl<'a> ScorerEvidence<'a> {
     // which contains a valid value in this slot
     unsafe { self._tab.get::<u16>(ScorerEvidence::VT_NOTE_CODE, Some(0)).unwrap()}
   }
+  #[inline]
+  pub fn batter(&self) -> u16 {
+    // Safety:
+    // Created from valid Table for this object
+    // which contains a valid value in this slot
+    unsafe { self._tab.get::<u16>(ScorerEvidence::VT_BATTER, Some(0)).unwrap()}
+  }
+  #[inline]
+  pub fn runners(&self) -> Option<::flatbuffers::Vector<'a, ::flatbuffers::ForwardsUOffset<RunnerOnBase<'a>>>> {
+    // Safety:
+    // Created from valid Table for this object
+    // which contains a valid value in this slot
+    unsafe { self._tab.get::<::flatbuffers::ForwardsUOffset<::flatbuffers::Vector<'a, ::flatbuffers::ForwardsUOffset<RunnerOnBase>>>>(ScorerEvidence::VT_RUNNERS, None)}
+  }
+  #[inline]
+  pub fn has_first_touch(&self) -> bool {
+    // Safety:
+    // Created from valid Table for this object
+    // which contains a valid value in this slot
+    unsafe { self._tab.get::<bool>(ScorerEvidence::VT_HAS_FIRST_TOUCH, Some(false)).unwrap()}
+  }
+  #[inline]
+  pub fn first_touch_s(&self) -> f64 {
+    // Safety:
+    // Created from valid Table for this object
+    // which contains a valid value in this slot
+    unsafe { self._tab.get::<f64>(ScorerEvidence::VT_FIRST_TOUCH_S, Some(0.0)).unwrap()}
+  }
+  #[inline]
+  pub fn has_handling(&self) -> bool {
+    // Safety:
+    // Created from valid Table for this object
+    // which contains a valid value in this slot
+    unsafe { self._tab.get::<bool>(ScorerEvidence::VT_HAS_HANDLING, Some(false)).unwrap()}
+  }
+  #[inline]
+  pub fn first_handler(&self) -> u16 {
+    // Safety:
+    // Created from valid Table for this object
+    // which contains a valid value in this slot
+    unsafe { self._tab.get::<u16>(ScorerEvidence::VT_FIRST_HANDLER, Some(0)).unwrap()}
+  }
+  #[inline]
+  pub fn handling_s(&self) -> f64 {
+    // Safety:
+    // Created from valid Table for this object
+    // which contains a valid value in this slot
+    unsafe { self._tab.get::<f64>(ScorerEvidence::VT_HANDLING_S, Some(0.0)).unwrap()}
+  }
+  #[inline]
+  pub fn has_secured(&self) -> bool {
+    // Safety:
+    // Created from valid Table for this object
+    // which contains a valid value in this slot
+    unsafe { self._tab.get::<bool>(ScorerEvidence::VT_HAS_SECURED, Some(false)).unwrap()}
+  }
+  #[inline]
+  pub fn secured_s(&self) -> f64 {
+    // Safety:
+    // Created from valid Table for this object
+    // which contains a valid value in this slot
+    unsafe { self._tab.get::<f64>(ScorerEvidence::VT_SECURED_S, Some(0.0)).unwrap()}
+  }
+  #[inline]
+  pub fn secured_at(&self) -> Option<&'a super::Vec3d> {
+    // Safety:
+    // Created from valid Table for this object
+    // which contains a valid value in this slot
+    unsafe { self._tab.get::<super::Vec3d>(ScorerEvidence::VT_SECURED_AT, None)}
+  }
+  #[inline]
+  pub fn has_margin(&self) -> bool {
+    // Safety:
+    // Created from valid Table for this object
+    // which contains a valid value in this slot
+    unsafe { self._tab.get::<bool>(ScorerEvidence::VT_HAS_MARGIN, Some(false)).unwrap()}
+  }
+  #[inline]
+  pub fn throws(&self) -> Option<::flatbuffers::Vector<'a, ::flatbuffers::ForwardsUOffset<ScorerThrow<'a>>>> {
+    // Safety:
+    // Created from valid Table for this object
+    // which contains a valid value in this slot
+    unsafe { self._tab.get::<::flatbuffers::ForwardsUOffset<::flatbuffers::Vector<'a, ::flatbuffers::ForwardsUOffset<ScorerThrow>>>>(ScorerEvidence::VT_THROWS, None)}
+  }
+  #[inline]
+  pub fn carries(&self) -> Option<::flatbuffers::Vector<'a, ::flatbuffers::ForwardsUOffset<ScorerCarry<'a>>>> {
+    // Safety:
+    // Created from valid Table for this object
+    // which contains a valid value in this slot
+    unsafe { self._tab.get::<::flatbuffers::ForwardsUOffset<::flatbuffers::Vector<'a, ::flatbuffers::ForwardsUOffset<ScorerCarry>>>>(ScorerEvidence::VT_CARRIES, None)}
+  }
+  #[inline]
+  pub fn touches(&self) -> Option<::flatbuffers::Vector<'a, ::flatbuffers::ForwardsUOffset<ScorerTouch<'a>>>> {
+    // Safety:
+    // Created from valid Table for this object
+    // which contains a valid value in this slot
+    unsafe { self._tab.get::<::flatbuffers::ForwardsUOffset<::flatbuffers::Vector<'a, ::flatbuffers::ForwardsUOffset<ScorerTouch>>>>(ScorerEvidence::VT_TOUCHES, None)}
+  }
 }
 
 impl ::flatbuffers::Verifiable for ScorerEvidence<'_> {
@@ -81,17 +207,45 @@ impl ::flatbuffers::Verifiable for ScorerEvidence<'_> {
      .visit_field::<f64>("clean_play_margin_s", Self::VT_CLEAN_PLAY_MARGIN_S, false)?
      .visit_field::<u16>("reference_fielder", Self::VT_REFERENCE_FIELDER, false)?
      .visit_field::<u16>("note_code", Self::VT_NOTE_CODE, false)?
+     .visit_field::<u16>("batter", Self::VT_BATTER, false)?
+     .visit_field::<::flatbuffers::ForwardsUOffset<::flatbuffers::Vector<'_, ::flatbuffers::ForwardsUOffset<RunnerOnBase>>>>("runners", Self::VT_RUNNERS, false)?
+     .visit_field::<bool>("has_first_touch", Self::VT_HAS_FIRST_TOUCH, false)?
+     .visit_field::<f64>("first_touch_s", Self::VT_FIRST_TOUCH_S, false)?
+     .visit_field::<bool>("has_handling", Self::VT_HAS_HANDLING, false)?
+     .visit_field::<u16>("first_handler", Self::VT_FIRST_HANDLER, false)?
+     .visit_field::<f64>("handling_s", Self::VT_HANDLING_S, false)?
+     .visit_field::<bool>("has_secured", Self::VT_HAS_SECURED, false)?
+     .visit_field::<f64>("secured_s", Self::VT_SECURED_S, false)?
+     .visit_field::<super::Vec3d>("secured_at", Self::VT_SECURED_AT, false)?
+     .visit_field::<bool>("has_margin", Self::VT_HAS_MARGIN, false)?
+     .visit_field::<::flatbuffers::ForwardsUOffset<::flatbuffers::Vector<'_, ::flatbuffers::ForwardsUOffset<ScorerThrow>>>>("throws", Self::VT_THROWS, false)?
+     .visit_field::<::flatbuffers::ForwardsUOffset<::flatbuffers::Vector<'_, ::flatbuffers::ForwardsUOffset<ScorerCarry>>>>("carries", Self::VT_CARRIES, false)?
+     .visit_field::<::flatbuffers::ForwardsUOffset<::flatbuffers::Vector<'_, ::flatbuffers::ForwardsUOffset<ScorerTouch>>>>("touches", Self::VT_TOUCHES, false)?
      .finish();
     Ok(())
   }
 }
-pub struct ScorerEvidenceArgs {
+pub struct ScorerEvidenceArgs<'a> {
     pub ruling_seq: u32,
     pub clean_play_margin_s: f64,
     pub reference_fielder: u16,
     pub note_code: u16,
+    pub batter: u16,
+    pub runners: Option<::flatbuffers::WIPOffset<::flatbuffers::Vector<'a, ::flatbuffers::ForwardsUOffset<RunnerOnBase<'a>>>>>,
+    pub has_first_touch: bool,
+    pub first_touch_s: f64,
+    pub has_handling: bool,
+    pub first_handler: u16,
+    pub handling_s: f64,
+    pub has_secured: bool,
+    pub secured_s: f64,
+    pub secured_at: Option<&'a super::Vec3d>,
+    pub has_margin: bool,
+    pub throws: Option<::flatbuffers::WIPOffset<::flatbuffers::Vector<'a, ::flatbuffers::ForwardsUOffset<ScorerThrow<'a>>>>>,
+    pub carries: Option<::flatbuffers::WIPOffset<::flatbuffers::Vector<'a, ::flatbuffers::ForwardsUOffset<ScorerCarry<'a>>>>>,
+    pub touches: Option<::flatbuffers::WIPOffset<::flatbuffers::Vector<'a, ::flatbuffers::ForwardsUOffset<ScorerTouch<'a>>>>>,
 }
-impl<'a> Default for ScorerEvidenceArgs {
+impl<'a> Default for ScorerEvidenceArgs<'a> {
   #[inline]
   fn default() -> Self {
     ScorerEvidenceArgs {
@@ -99,6 +253,20 @@ impl<'a> Default for ScorerEvidenceArgs {
       clean_play_margin_s: 0.0,
       reference_fielder: 0,
       note_code: 0,
+      batter: 0,
+      runners: None,
+      has_first_touch: false,
+      first_touch_s: 0.0,
+      has_handling: false,
+      first_handler: 0,
+      handling_s: 0.0,
+      has_secured: false,
+      secured_s: 0.0,
+      secured_at: None,
+      has_margin: false,
+      throws: None,
+      carries: None,
+      touches: None,
     }
   }
 }
@@ -125,6 +293,62 @@ impl<'a: 'b, 'b, A: ::flatbuffers::Allocator + 'a> ScorerEvidenceBuilder<'a, 'b,
     self.fbb_.push_slot::<u16>(ScorerEvidence::VT_NOTE_CODE, note_code, 0);
   }
   #[inline]
+  pub fn add_batter(&mut self, batter: u16) {
+    self.fbb_.push_slot::<u16>(ScorerEvidence::VT_BATTER, batter, 0);
+  }
+  #[inline]
+  pub fn add_runners(&mut self, runners: ::flatbuffers::WIPOffset<::flatbuffers::Vector<'b , ::flatbuffers::ForwardsUOffset<RunnerOnBase<'b >>>>) {
+    self.fbb_.push_slot_always::<::flatbuffers::WIPOffset<_>>(ScorerEvidence::VT_RUNNERS, runners);
+  }
+  #[inline]
+  pub fn add_has_first_touch(&mut self, has_first_touch: bool) {
+    self.fbb_.push_slot::<bool>(ScorerEvidence::VT_HAS_FIRST_TOUCH, has_first_touch, false);
+  }
+  #[inline]
+  pub fn add_first_touch_s(&mut self, first_touch_s: f64) {
+    self.fbb_.push_slot::<f64>(ScorerEvidence::VT_FIRST_TOUCH_S, first_touch_s, 0.0);
+  }
+  #[inline]
+  pub fn add_has_handling(&mut self, has_handling: bool) {
+    self.fbb_.push_slot::<bool>(ScorerEvidence::VT_HAS_HANDLING, has_handling, false);
+  }
+  #[inline]
+  pub fn add_first_handler(&mut self, first_handler: u16) {
+    self.fbb_.push_slot::<u16>(ScorerEvidence::VT_FIRST_HANDLER, first_handler, 0);
+  }
+  #[inline]
+  pub fn add_handling_s(&mut self, handling_s: f64) {
+    self.fbb_.push_slot::<f64>(ScorerEvidence::VT_HANDLING_S, handling_s, 0.0);
+  }
+  #[inline]
+  pub fn add_has_secured(&mut self, has_secured: bool) {
+    self.fbb_.push_slot::<bool>(ScorerEvidence::VT_HAS_SECURED, has_secured, false);
+  }
+  #[inline]
+  pub fn add_secured_s(&mut self, secured_s: f64) {
+    self.fbb_.push_slot::<f64>(ScorerEvidence::VT_SECURED_S, secured_s, 0.0);
+  }
+  #[inline]
+  pub fn add_secured_at(&mut self, secured_at: &super::Vec3d) {
+    self.fbb_.push_slot_always::<&super::Vec3d>(ScorerEvidence::VT_SECURED_AT, secured_at);
+  }
+  #[inline]
+  pub fn add_has_margin(&mut self, has_margin: bool) {
+    self.fbb_.push_slot::<bool>(ScorerEvidence::VT_HAS_MARGIN, has_margin, false);
+  }
+  #[inline]
+  pub fn add_throws(&mut self, throws: ::flatbuffers::WIPOffset<::flatbuffers::Vector<'b , ::flatbuffers::ForwardsUOffset<ScorerThrow<'b >>>>) {
+    self.fbb_.push_slot_always::<::flatbuffers::WIPOffset<_>>(ScorerEvidence::VT_THROWS, throws);
+  }
+  #[inline]
+  pub fn add_carries(&mut self, carries: ::flatbuffers::WIPOffset<::flatbuffers::Vector<'b , ::flatbuffers::ForwardsUOffset<ScorerCarry<'b >>>>) {
+    self.fbb_.push_slot_always::<::flatbuffers::WIPOffset<_>>(ScorerEvidence::VT_CARRIES, carries);
+  }
+  #[inline]
+  pub fn add_touches(&mut self, touches: ::flatbuffers::WIPOffset<::flatbuffers::Vector<'b , ::flatbuffers::ForwardsUOffset<ScorerTouch<'b >>>>) {
+    self.fbb_.push_slot_always::<::flatbuffers::WIPOffset<_>>(ScorerEvidence::VT_TOUCHES, touches);
+  }
+  #[inline]
   pub fn new(_fbb: &'b mut ::flatbuffers::FlatBufferBuilder<'a, A>) -> ScorerEvidenceBuilder<'a, 'b, A> {
     let start = _fbb.start_table();
     ScorerEvidenceBuilder {
@@ -146,6 +370,20 @@ impl ::core::fmt::Debug for ScorerEvidence<'_> {
       ds.field("clean_play_margin_s", &self.clean_play_margin_s());
       ds.field("reference_fielder", &self.reference_fielder());
       ds.field("note_code", &self.note_code());
+      ds.field("batter", &self.batter());
+      ds.field("runners", &self.runners());
+      ds.field("has_first_touch", &self.has_first_touch());
+      ds.field("first_touch_s", &self.first_touch_s());
+      ds.field("has_handling", &self.has_handling());
+      ds.field("first_handler", &self.first_handler());
+      ds.field("handling_s", &self.handling_s());
+      ds.field("has_secured", &self.has_secured());
+      ds.field("secured_s", &self.secured_s());
+      ds.field("secured_at", &self.secured_at());
+      ds.field("has_margin", &self.has_margin());
+      ds.field("throws", &self.throws());
+      ds.field("carries", &self.carries());
+      ds.field("touches", &self.touches());
       ds.finish()
   }
 }
