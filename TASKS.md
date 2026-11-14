@@ -7,6 +7,22 @@ Status: `[ ]` not started · `[~]` in progress · `[x]` done · `[?]` needs an o
 
 ---
 
+## Swing and collision work (branch `work/collision`, 2026-11-14; not on main, the owner rules on the merge)
+
+**Reviews first:** the [Codex spin review](docs/reviews/2026-11-14-codex-collision-spin-review.md) is resolved (P2-1: A14 now runs the production `resolve_contact` against oracle contact states, including a sloped rotating bat mid-ramp, and a wrong 34–60 m/s ramp fails it; P3-1: the e_t 0 tee slope is 116 rpm/°, not 131). **No review yet of `08b167c..dfeb54a`** (the A14 extension, the knob split, the refit): it is next under the standard protocol.
+
+Where it stands (`dfeb54a`; [collision note](docs/calibration/2026-11-14-collision-sloped-barrel.md) §8–§9; ledger §3):
+- **Tangential restitution e_t(|c_n|)** (PLAN D20 Option A): built, tested (A10a–c, A14), cage spin anchors met.
+- **The swing knob is split** (agent-models §3.6): `Knobs::swing_miss` (placement and timing σ, also the batter's `OwnExecution`) and `Knobs::swing_effort` (bat-speed σ, held at 1, sourced). With both at one value the games are unchanged (digests checked).
+- **Adopted:** perception 2.7 → 2.9, miss 1.0 → 1.4. Standard run: runs 5.76 → 4.31 [5.78 → 4.68] (real 4.39), K% 16.8 → 21.5 [same] (22.6), BB% 7.9 [8.4] (8.2), HR/PA 2.36% → 1.78% [1.77%] (3.0), max EV 116.8 mph, p99 109.8, hard-hit 38.2%.
+
+Open:
+- **HR/PA 1.78% against 3.0%:** barrels 4.4% of BIP against 7.5% (per barrel 47%, steady). The old combined knob held HR up only through a wider effort that is not Statcast's. Candidates: the launch-angle spread (SD 29°) and the direction gap (known, unexplained, PLAN D20). Not chased with bat speed (sourced).
+- **Contact% 65.9% below its band (70–83)**; chase 24.5% against 29%.
+- **Runs sit at real only because K rose while ball-in-play hits are still high** (GB .322 against .245). When the fielding work lowers those, runs fall below 4.39: look at the batter's knobs again then, not before.
+- **Seed 5, play 201:** a first baseman about 1 m from the bag tosses to the pitcher on it instead of stepping on the bag (throw choice in `live.rs`; not traced). The `bb_ffi` timeline test now accepts a throw another fielder already holds.
+- The direction gap (spray minus attack direction) stays a known gap; nothing changed for it.
+
 ## Resume here (2026-11-14, overnight lead session, 00:00 to 06:00)
 
 Main is pushed and passes `cargo test --workspace --release`: 305 pass, 3 ignored (two owner-deferred pop-up fixtures, one diagnostic table). Where the numbers stand, measured together on main `a321e55`, and how the night's changes add up: [docs/metrics-ledger.md](docs/metrics-ledger.md) §1. Workers ran in herdr panes (tabs "Workers", "Workers 2"), each in a worktree under `.claude/worktrees/` on a `work/*` branch.

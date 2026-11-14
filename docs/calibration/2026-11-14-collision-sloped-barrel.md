@@ -278,10 +278,82 @@ Targets (calibration-targets; 2024 MLB): runs 4.39, K% 22.6, BB% 8.2, HR/PA 3.0%
   - Standard run: runs 5.76 [5.78], K% 16.8 [16.7], BB% 7.7 [7.7], HR/PA 2.36% [2.24%], fouls 21.1 [21.4] a game.
   - Cage: backspin 2,465 rpm at 25–30°, sidespin −80 rpm/°, tee 184 rpm/°.
 - **Remains:**
-  - The refit (plan in §8.3; it needs the swing knob split, a code change, before any sweep can be adopted).
-  - A Codex review of `f710d9f..` (standard protocol; not run).
+  - The refit (plan in §8.3; it needs the swing knob split, a code change, before any sweep can be adopted). *Done in §9.*
+  - A Codex review of `f710d9f..` (standard protocol; not run). *Done: [review](../reviews/2026-11-14-codex-collision-spin-review.md), both findings resolved.*
   - The direction gap (known, unexplained).
   - Nothing is merged; `work/collision` is not on main.
+
+## 9. Stage 3: the refit, with the swing knob split (2026-11-14)
+
+### 9.1 The split (no game changes)
+
+`Knobs::swing` scaled the swing's placement and timing σ (δ_v, α, δ_r, t₀) and its effort σ together. It is now two knobs (agent-models §1.3, §3.6; `f452845`): **`swing_miss`** (`K_swing`, calibration-targets §2.3's `K_swingplane`: the four placement and timing σ, and the batter's own-execution model `OwnExecution`, so a batter knows his misses widened) and **`swing_effort`** (`K_effort`: the effort σ alone, held at 1 because the 4.5% is Statcast's within-batter SD). Both are noise scales on physical inputs (PLAN §13.2); neither stream nor draw order changed.
+
+- **Replay unchanged.** With both knobs at one value the games are the old games: digests at k = 1.0 and k = 1.8, seeds 0, 1, 2, 7, 42, 299 and 1,000,003,000, are identical between `be66dab` (old single knob) and the split (temporary `knob_digest` probe, not committed). The k = 1 digests for seeds 0, 7 and 1,000,003,000 also equal the Codex spin review's. `run_env_diag 100 0` reproduces `sim/out/et/env_base.txt` line for line.
+- **Test** (`swing_statcast::wider_misses_keep_statcasts_bat_speed_spread`): with misses ×1.8 and effort ×1 the within-batter bat-speed SD at contact is 3.21 mph (Statcast 3.2); the old combined 1.8 gives 5.77. The effort draws do not depend on the miss scale.
+- **Run with `BB_K_MISS`, `BB_K_EFFORT`** (`run_env_diag`; `BB_K_SWING` still sets both, as the §8.3 rows did) or `sim-cli pa --k-miss/--k-effort`.
+
+### 9.2 Sweep (miss scale alone, with perception)
+
+`run_env_diag 100 0` (seeds 0–99; the base runs 0.4 above the 300-game standard run). Effort 1.0 throughout. Files `sim/out/refit/env_miss{m}_perc{p}.txt` (untracked).
+
+| miss / perception | runs | K% | BB% | HR/PA | O-Swing | SwStr | foul/contact | mean EV | p99 EV | max EV | LA mean ± SD |
+|---|---|---|---|---|---|---|---|---|---|---|---|
+| base 1.0 / 2.7 | 6.18 | 16.5 | 7.7 | 2.64% | 23.5 | 14.7 | 26.2 | 90.5 | 110.3 | 118.1 | 12.0 ± 26.3 |
+| 1.4 / 2.7 | 5.27 | 18.3 | 7.8 | 2.10% | 23.8 | 15.2 | 28.3 | 89.8 | 109.8 | 115.7 | 10.7 ± 28.3 |
+| 1.6 / 2.7 | 5.02 | 19.3 | 7.9 | 1.93% | 23.9 | 15.7 | 29.0 | 89.6 | 110.0 | 122.0 | 9.6 ± 29.1 |
+| 1.8 / 2.7 | 4.80 | 20.1 | 8.3 | 1.78% | 23.4 | 15.8 | 29.2 | 89.4 | 109.9 | 117.4 | 9.8 ± 29.6 |
+| 2.0 / 2.7 | 4.69 | 21.5 | 8.8 | 1.70% | 23.8 | 16.6 | 30.7 | 89.1 | 109.6 | 118.1 | 8.4 ± 30.2 |
+| 1.2 / 2.8 | 4.87 | 19.4 | 7.6 | 2.23% | 24.4 | 15.5 | 27.9 | 89.9 | 109.8 | 118.1 | 10.9 ± 27.5 |
+| 1.0 / 3.0 | 4.68 | 22.1 | 8.2 | 1.95% | 24.5 | 15.9 | 26.9 | 89.2 | 110.2 | 116.5 | 10.6 ± 28.2 |
+| 1.0 / 3.1 | 4.84 | 23.8 | 8.3 | 2.21% | 24.7 | 16.3 | 26.9 | 89.2 | 109.5 | 119.6 | 11.1 ± 28.0 |
+| 1.2 / 2.9 | 4.84 | 21.0 | 8.3 | 2.03% | 24.2 | 15.9 | 27.6 | 89.6 | 109.7 | 117.1 | 10.9 ± 27.7 |
+| **1.4 / 2.9** | **4.49** | **22.0** | 8.1 | 1.90% | 24.3 | 16.0 | 28.1 | 89.2 | 109.8 | 116.3 | 10.1 ± 28.9 |
+| 1.6 / 2.9 | 4.59 | 22.3 | 7.8 | 1.90% | 24.4 | 16.4 | 28.6 | 88.7 | 109.8 | 123.5 | 9.2 ± 29.7 |
+| 1.8 / 2.9 | 4.36 | 23.9 | 9.0 | 1.87% | 23.8 | 17.0 | 29.9 | 89.0 | 109.8 | 117.3 | 9.5 ± 30.1 |
+| 1.6 / 3.0 | 3.95 | 23.9 | 8.4 | 1.64% | 24.6 | 16.7 | 29.4 | 88.5 | 109.3 | 117.8 | 9.0 ± 30.1 |
+
+- **The split keeps the tail.** Fair-ball p99 stays at 109.3–110.3 mph in every row (the combined knob took it to 113.9 at 1.8, §8.3), and the maximum stays 115.7–123.5, single balls whose value moves a few mph from row to row. Nothing comes near 125.
+- **But the miss costs home runs; the combined knob's home runs came from the effort.** HR/PA falls with the miss scale (2.64 → 2.10 → 1.93 → 1.78% at perception 2.7), where the combined knob held it at 2.7–3.0%. Home runs come from the fastest swings (HR mean bat speed 76.6 mph against 71.4 for all fair balls), so the combined knob's wider effort made more of them. That speed spread is not Statcast's (§9.1), so those home runs were not physical.
+- **Every route to K 22 lands HR/PA near 2%.** Over 100 games HR/PA has about ±0.15 points of noise (about 160 home runs); 1.0/3.0, 1.2/2.9, 1.4/2.9 and 1.6/2.9 are 1.90–2.03%.
+
+### 9.3 Adopted: perception 2.7 → 2.9, miss 1.0 → 1.4 (`Knobs::calibrated_m3`, `dfeb54a`)
+
+| Change | Band (calibration-targets) | Mechanism |
+|---|---|---|
+| `perception` 2.7 → 2.9 | K% 22.6 (B1/§2, 2024 MLB), BB% 8.2 | The batter's read of the pitch is noisier, so he commits to a worse aim and swings at fewer strikes: more whiffs and called strikes, a little more chase |
+| `swing_miss` 1.0 → 1.4 | K% 22.6; foul share (51% real, sim 26%); hard-hit 38% (30–47%) | Placement and timing σ widen (`BatControl` 1.2 → 1.7 cm at grade 50, `Timing` 6.0 → 8.4 ms): more swinging strikes and glancing contact, which is foul more often, without any change to the speed of the swing |
+| `swing_effort` stays 1 | Statcast within-batter bat-speed SD 3.2 mph | Sourced; not a fitting knob |
+
+**Why this pair and not perception alone.** Perception 3.0 alone reaches the same K and HR, but by making batters passive: Z-Swing 63.6% and called strikes 20.0% of pitches, against 64.9% and 19.4% with 1.4/2.9 (MLB Z-Swing 67%). The miss route also moves the foul share toward real (28.1% against 26.9% of contact). The gap between them is small; this is the plan's (§8.3) route, and it is close enough.
+
+**Standard run** (`sim-cli games --n 300`, seeds 0–299 [1000–1299]; `be66dab` → the adopted setting; ledger §3):
+
+| | before | after | real (2024) |
+|---|---|---|---|
+| runs / team-game | 5.76 [5.78] | **4.31 [4.68]** | 4.39 |
+| K% | 16.8 [16.7] | **21.5 [21.5]** | 22.6 |
+| BB% | 7.7 [7.7] | 7.9 [8.4] | 8.2 |
+| HR / PA | 2.36% [2.24%] | **1.78% [1.77%]** | 3.0% |
+| reached on BIP | 40.6% [40.5%] | 38.6% [39.1%] | |
+| GB / LD / FB / PU hits | .345 / .763 / .221 / .035 | .322 / .761 / .212 / .036 | .245 / .68 / .13 / .02 |
+| fouls a game | 21.1 [21.4] | 20.5 [21.2] | |
+| PA / team-game | 40.2 [40.1] | 38.8 [39.4] | |
+| pitches / game | 239 [237] | 241 [245] | |
+
+From `run_env_diag 300 0`, which reproduces the CLI's seed-0 set exactly (`sim/out/refit/env300_*.txt`): mean EV 90.4 → 89.2 mph; fair-ball p99 110.3 → 109.8, **max 118.1 → 116.8** (band: none over 125); hard-hit 41.7% → 38.2% (target 38%); barrels 5.63% → 4.42% of balls in play (target 7.5%, band 4–11%), home runs per barrel 47.8% → 47.0%; LA 11.6 ± 26.8 → 10.0 ± 29.0; Z-Swing 69.1 → 65.5% (67); Contact% 69.9 → 65.9% (76, band 70–83); O-Swing 23.9 → 24.5% (29); SwStr 14.8 → 16.1%; foul/contact 27.1 → 28.2%.
+
+- **Runs.** Down 1.45 [1.10]: fewer balls in play (K +4.7 points), weaker contact and fewer home runs. They now sit at the real 4.39, but the hits on balls in play are still too many (GB .322 against .245): when the fielding work lowers them, runs will fall below real, and the batter's knobs will need another look then. Runs were not a target here.
+- **K%** 1.1 points short of 22.6 [same]. Close enough: no further bisection.
+- **Home runs moved away from real (2.36 → 1.78%).** Per barrel nothing changed. The loss is in how often contact is square at a carrying angle (barrels 5.6 → 4.4% of balls in play). Exit speed is now right on average (hard-hit 38%), so the deficit is in the angle and direction of the hardest-hit balls: the LA spread is wide (SD 29° against about 27°), and fly balls leave about 20° toward the opposite field of MLB's (the direction gap, §7, ledger §5), where they carry less. Not chased: bat speed's mean and spread are sourced, and the direction gap stays a known gap (PLAN D20).
+- **Contact% below its band (65.9% against 70–83)** got worse (69.9 before). Both knobs lower it. Chase is still low (24.5 against 29). Neither was a target; both are recorded.
+- **A fielding oddity the new games expose (not this job's code).** Seed 5's game now has a force at first where the first baseman, about 1 m from the bag with the ball, tosses it to the pitcher standing on the bag instead of stepping on it himself (play 201). The `bb_ffi` timeline test assumed every throw carries the ball 3 m from its thrower within 0.3 s; it now also accepts a throw another fielder already holds. The choice belongs to the throw-choice code in `live.rs` (left to its worker).
+
+### 9.4 Verification and reproduction
+
+- `cargo test --workspace --release`: 340 pass, 3 ignored. `python3 -m unittest analysis/oracle/test_oracle.py`: 23 pass.
+- Replay: the `digest` example (seeds 1, 2, 3, 42) twice on `dfeb54a`, identical.
+- Sweep: `BB_K_MISS=m BB_K_PERCEPTION=p run_env_diag 100 0` → `sim/out/refit/env_miss{m}_perc{p}.txt`; standard runs `sim/out/refit/std-seed{0,1000}.txt`; 300-game diagnostics `run_env_diag 300 0` (after) and `BB_K_MISS=1.0 BB_K_PERCEPTION=2.7 run_env_diag 300 0` (before; the split's digests show these are `be66dab`'s games) → `sim/out/refit/env300_{after,before}.txt`. All untracked.
 
 ## 6. Reproduction
 
