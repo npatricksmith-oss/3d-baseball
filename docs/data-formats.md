@@ -63,7 +63,7 @@ key = (game_seed: u64, play_index: u32, agent_id: u16, purpose: u16, sub_index: 
 | `FielderPerception` | 5 | Landing/intercept estimate noise |
 | `GlovePlacement` | 6 | Capture error |
 | `ThrowExecution` | 7 | Throw direction and speed noise |
-| `RunnerPerception` | 8 | Jump reads, arrival-versus-throw estimates |
+| `RunnerPerception` | 8 | Jump reads, arrival-versus-throw estimates. Sub-index 1: the first read at contact; 2n and 2n + 1: decision n's timing error and read of a free ball; 2^20 + fielder position index (0–8): his read of that fielder's arm (agent-models §6.4) |
 | `SurfaceBounce` | 9 | Bounce-normal tilt (physics spec §9.3, the only world-side use) |
 | `AgentPolicy` | 10 | Other sampled agent decisions (manager AI, tie-breaks) |
 | `FielderAnticipation` | 11 | A fielder's reads before he reads the ball (agent-models §5.10): sub-index 0, the pitch location before contact; sub-index 1, the bat's angle at contact; sub-index 2, the swing's lead (when the bat started forward against the pitch's arrival) |
@@ -486,6 +486,8 @@ The real API is specified in M0 by the spike (`bb_ffi`). It is expected to look 
 | `bb_job_poll(job) → status`, `bb_job_take(job) → timeline_blobs + view_state` | Non-blocking for the game thread (PLAN §3.4) |
 | `bb_game_save(handle) → savestate_blob` | Only at a decision point |
 | `bb_blob_free(blob)` | Rust owns every blob it returns |
+
+**Built in `bb_ffi` (as of 2026-11-14), beyond the sketch above.** `bb_game_box_score(game, through_plays, &BbBoxScore)` (A12) fills a plain struct (`include/bb_ffi.h`, append-only) with the box score of the game so far: for each side, the batting lines in order (name, number, position, PA, AB, R, H, 2B, 3B, HR, RBI, BB, K, HBP, SF, SH), the team totals with runners left on base and any unruled batted balls, and the linescore with runs and hits by inning (`first_inning`, `n_batted`; a game past 30 innings keeps the last 30); `is_final` is set once the log holds `GameEnded`. It is a **pure function of the event log**: the library closes a copy of the log it has written (`bb_game::Game::log_through`, `bb_schema::LogWriter::snapshot`: the plays asked for, a footer carrying their digests, the game's own log untouched) and reads it with `bb_stats::box_score`, the same scorer a finished log gets. `through_plays` is the number of pitches to include (`BbPlayInfo.play_index` is the number before that pitch; `UINT32_MAX` is all so far), so a client that runs a pitch behind the sim shows only what it has shown. It costs a pass over the log, so a client asks when the box is shown, not every frame. The sim keeps no extra state for it and no statistic is counted during play.
 
 ---
 

@@ -60,11 +60,16 @@ pub struct FielderAttrs {
     pub throws: bb_observe::Hand,
     /// Configurable A4 option/observation thresholds [E] (agent-models §5.5–5.7).
     pub throw_choice: bb_agents::throwing::ChoiceParams,
+    /// From securing the ball to the earliest tag he can put on a runner, s [E] (agent-models
+    /// §6.4): 0.25 s, the one quoted receive-and-tag time (a catcher, MLB.com via the tag-up
+    /// sources note §3; low confidence), for every fielder, the same catch-and-sweep. Before,
+    /// a tag landed on the tick the ball was secured.
+    pub tag_apply_s: f64,
 }
 
 /// Grade-50 `ArmStrength` by position, mph: the league means of Statcast's arm-strength
 /// leaderboard (Baseball Savant, 2026 as displayed; docs/calibration/2026-11-14-sources.md),
-/// which is each player's mean over his max-effort throws (the top 10% of his throws), at the
+/// which is each player's mean over his max-effort throws (the top 1% at first base, 5% for other infielders, 10% for outfielders), at the
 /// release point. Indexed P0 C1 1B2 2B3 3B4 SS5 LF6 CF7 RF8. `None`: the leaderboard has no
 /// pitcher, and catchers are on a separate one, so those two keep [`ARM_UNSOURCED_MPS`]. The
 /// sim's value is a full-effort throw (agent-models §5.5), so the conversion is only the unit
@@ -103,6 +108,7 @@ impl FielderAttrs {
             jump_gain: 1.0,
             throws: bb_observe::Hand::Right,
             throw_choice: bb_agents::throwing::ChoiceParams::default(),
+            tag_apply_s: 0.25,
         }
     }
 

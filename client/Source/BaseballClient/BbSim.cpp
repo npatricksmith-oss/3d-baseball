@@ -31,6 +31,8 @@ bool FBbSim::Start(const FString& LibraryPath, uint64 Seed)
 	FnInfo = reinterpret_cast<decltype(FnInfo)>(Sym(TEXT("bb_timeline_info")));
 	FnSample = reinterpret_cast<decltype(FnSample)>(Sym(TEXT("bb_timeline_sample")));
 	FnRoster = reinterpret_cast<decltype(FnRoster)>(Sym(TEXT("bb_game_roster")));
+	// Optional: an older library without the box score still plays the game.
+	FnBoxScore = reinterpret_cast<decltype(FnBoxScore)>(Sym(TEXT("bb_game_box_score")));
 	if (!FnRoster || !FnCreate || !FnAdvance || !FnBlobFree || !FnGameFree || !FnInfo || !FnSample)
 	{
 		UE_LOG(LogBbSim, Error, TEXT("The sim library at %s is missing part of the C ABI"), *LibraryPath);
@@ -67,11 +69,22 @@ bool FBbSim::Start(const FString& LibraryPath, uint64 Seed)
 FBbPlay FBbSim::Next()
 {
 	FBbPlay Play;
+	FScopeLock Lock(&GameLock);
 	if (Game && FnAdvance(Game, &Play.Blob, &Play.Len) == 1)
 	{
 		Play.bValid = FnInfo(Play.Blob, Play.Len, &Play.Info) == 1;
 	}
 	return Play;
+}
+
+bool FBbSim::BoxScore(uint32 ThroughPlays, BbBoxScore& Out) const
+{
+	if (!Game || !FnBoxScore)
+	{
+		return false;
+	}
+	FScopeLock Lock(&GameLock);
+	return FnBoxScore(Game, ThroughPlays, &Out) == 1;
 }
 
 bool FBbSim::Sample(const FBbPlay& Play, float T, BbFrame& Out) const

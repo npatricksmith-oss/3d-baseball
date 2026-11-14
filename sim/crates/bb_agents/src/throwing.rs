@@ -37,6 +37,21 @@ pub fn transfer_scale(grade: f64) -> f64 {
 /// The quickest a throw can be let go, as a fraction of the normal catch-to-release for that
 /// throw [E]: no step, arm only.
 pub const RUSH_MIN_FRAC: f64 = 0.6;
+
+/// Speed for accuracy on a set throw (agent-models §5.5): the lowest effort a fielder throws
+/// at, as a fraction of his arm. Freeston, Adams and Rooney (2014; docs/calibration/
+/// 2026-11-14-sources.md) measured elite young throwers at 80% and 100% of their maximum:
+/// 26.4 against 33.0 m/s (0.80), so 0.80 is the measured range's floor.
+pub const EFFORT_MIN: f64 = 0.80;
+/// Their total target error at that effort against full: 46.9 against 61.1 cm.
+pub const EFFORT_MIN_ERROR_RATIO: f64 = 46.9 / 61.1;
+
+/// Direction σ multiplier of a throw at `effort` (fraction of his arm): 1 at full effort,
+/// [`EFFORT_MIN_ERROR_RATIO`] at [`EFFORT_MIN`], linear between (the two measured points).
+pub fn effort_sigma_mult(effort: f64) -> f64 {
+    let e = effort.clamp(EFFORT_MIN, 1.0);
+    1.0 - (1.0 - e) / (1.0 - EFFORT_MIN) * (1.0 - EFFORT_MIN_ERROR_RATIO)
+}
 /// Direction σ grows by this much at full hurry (k_rush), and by this much more when he was
 /// also off balance (k_off) [E].
 pub const K_RUSH: f64 = 1.0;
@@ -207,6 +222,16 @@ mod tests {
 
     fn close(a: f64, b: f64) -> bool {
         (a - b).abs() < 1e-9
+    }
+
+    // Freeston et al. 2014 (sources note): total target error 46.9 cm at 80% of maximum
+    // speed against 61.1 cm at 100%. Halfway, the linear rule gives the mean of the two.
+    #[test]
+    fn effort_trades_speed_for_accuracy_as_measured() {
+        assert!((effort_sigma_mult(1.0) - 1.0).abs() < 1e-12);
+        assert!((effort_sigma_mult(0.80) - 46.9 / 61.1).abs() < 1e-12);
+        assert!((effort_sigma_mult(0.90) - (46.9 + 61.1) / 2.0 / 61.1).abs() < 1e-12);
+        assert!((effort_sigma_mult(0.5) - effort_sigma_mult(0.8)).abs() < 1e-12, "not below the measured range");
     }
 
     #[test]

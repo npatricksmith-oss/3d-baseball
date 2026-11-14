@@ -11,6 +11,7 @@ crate-type = ["staticlib", "cdylib", "rlib"]
 [dependencies]
 bb_game.workspace = true
 bb_schema.workspace = true
+bb_stats.workspace = true
 bb_observe.workspace = true
 flatbuffers.workspace = true
 
