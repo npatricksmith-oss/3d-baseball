@@ -20,6 +20,7 @@ enum Body {
     Run(u16),
     Dead(ev::DeadBallReason),
     WalkOff,
+    CaughtFoul,
 }
 
 #[derive(Clone)]
@@ -38,13 +39,15 @@ struct Play {
     throws: Vec<(u8, f64, bool, u16)>,
     carries: Vec<(u8, u16)>,
     touches: Vec<(u16, u8, f64)>,
+    /// The batter's running goal logged on every throw.
+    goal: u8,
     body: Vec<Body>,
 }
 
 impl Play {
     /// A batted ball in play, batter alone on, nobody handled it yet.
     fn bip() -> Self {
-        Play { result: ev::PaResult::Unknown, evidence: true, runners: vec![(B, 0)], first_touch: None, handler: None, secured: None, margin: None, eta: None, throws: vec![], carries: vec![], touches: vec![], body: vec![] }
+        Play { result: ev::PaResult::Unknown, evidence: true, runners: vec![(B, 0)], first_touch: None, handler: None, secured: None, margin: None, eta: None, throws: vec![], carries: vec![], touches: vec![], goal: 0, body: vec![] }
     }
     fn on(mut self, runners: &[(u16, u8)]) -> Self {
         self.runners.extend_from_slice(runners);
@@ -84,13 +87,17 @@ impl Play {
         self.throws.push((base, t, attempted, runner));
         self
     }
+    fn goal(mut self, g: u8) -> Self {
+        self.goal = g;
+        self
+    }
     fn bytes(&self) -> Vec<u8> {
         let mut f = FlatBufferBuilder::new();
         let mut bodies: Vec<(EventBody, WIPOffset<UnionWIPOffset>)> = Vec::new();
         if self.evidence {
             let runners: Vec<_> = self.runners.iter().map(|&(agent, base)| ev::RunnerOnBase::create(&mut f, &ev::RunnerOnBaseArgs { agent, base })).collect();
             let runners = f.create_vector(&runners);
-            let throws: Vec<_> = self.throws.iter().map(|&(base, t, attempted_out, runner)| ev::ScorerThrow::create(&mut f, &ev::ScorerThrowArgs { base, t_release: t, attempted_out, runner, ..Default::default() })).collect();
+            let throws: Vec<_> = self.throws.iter().map(|&(base, t, attempted_out, runner)| ev::ScorerThrow::create(&mut f, &ev::ScorerThrowArgs { base, t_release: t, attempted_out, runner, batter_goal: self.goal, ..Default::default() })).collect();
             let throws = f.create_vector(&throws);
             let carries: Vec<_> = self.carries.iter().map(|&(base, runner)| ev::ScorerCarry::create(&mut f, &ev::ScorerCarryArgs { base, runner, ..Default::default() })).collect();
             let carries = f.create_vector(&carries);
@@ -129,6 +136,7 @@ impl Play {
                 Body::Run(runner) => bodies.push((EventBody::RunScored, ev::RunScored::create(&mut f, &ev::RunScoredArgs { runner, ..Default::default() }).as_union_value())),
                 Body::Dead(reason) => bodies.push((EventBody::BallDead, ev::BallDead::create(&mut f, &ev::BallDeadArgs { reason }).as_union_value())),
                 Body::WalkOff => walk_off = true,
+                Body::CaughtFoul => bodies.push((EventBody::BattedBallRuling, ev::BattedBallRuling::create(&mut f, &ev::BattedBallRulingArgs { fair_foul: ev::FairFoul::Foul, caught: true, ..Default::default() }).as_union_value())),
             }
         }
         bodies.push((EventBody::PlateAppearanceEnded, ev::PlateAppearanceEnded::create(&mut f, &ev::PlateAppearanceEndedArgs { batter: B, result: self.result, ..Default::default() }).as_union_value()));
@@ -409,4 +417,99 @@ fn a_shallow_fly_caught_by_an_outfielder_is_a_sacrifice_fly_one_by_an_infielder_
     // An infielder who runs out and takes it in the outfield: sacrifice fly again.
     let running_out = Play::bip().on(&[(R3, 3)]).handled(0x184, 60.0).out(B, 0, Kind::FlyOut).run(R3);
     assert!(running_out.judge(0).sacrifice_fly);
+}
+
+// ---- Codex unreviewed-merges review (2026-11-14), scorer findings -------------------------
+
+// P1-1, 9.06(b): "when a batter-runner, having reached first safely, takes an extra base on a
+// throw to another base he is credited with a single" (the rule's example: a single to right,
+// the throw goes to third on a runner and the batter takes second). He touched first at 4.0 s;
+// the throw at R1 left at 5.0 s with his goal still first.
+#[test]
+fn a_batter_safe_at_first_who_takes_second_on_a_throw_at_another_runner_has_a_single() {
+    let mut p = Play::bip().on(&[(R1, 1)]).handled(0x189, 80.0).touch(4.0).margin(-1.0).goal(1)
+        .throw(3, 5.0, true, R1).adv(R1, 1, 3, Cause::Hit);
+    p.touches.push((B, 2, 7.0));
+    p.body.push(Body::Adv(B, 0, 2, Cause::Hit));
+    assert_eq!(p.judge(0).outcome, Outcome::Hit(1));
+}
+
+// ... but a double he was already running out when the throw left stands: his goal at release
+// was second.
+#[test]
+fn a_double_already_in_progress_when_the_throw_left_is_still_a_double() {
+    let mut p = Play::bip().on(&[(R1, 1)]).handled(0x189, 95.0).touch(4.0).margin(-1.0).goal(2)
+        .throw(3, 5.0, true, R1);
+    p.touches.push((B, 2, 6.6));
+    assert_eq!(p.judge(0).outcome, Outcome::Hit(2));
+}
+
+// P1-2, 9.05(a)(1)/9.12(a)(1): a hit earned before a later throw to first goes out of play
+// stays a hit; the award is no part of its value. A return throw at 6.0 s after he touched
+// first at 4.0 s (an ordinary throw would have been 0.30 s early at the time of the play).
+#[test]
+fn a_return_throw_out_of_play_after_the_batter_was_safe_at_first_does_not_erase_the_hit() {
+    let p = Play::bip().handled(0x186, 25.0).margin(0.30).touch(4.0)
+        .throw(1, 6.0, false, B).dead(ev::DeadBallReason::OutOfPlay).adv(B, 0, 2, Cause::Award);
+    assert_eq!(p.judge(0).outcome, Outcome::Hit(1));
+}
+
+// The desperation throw leaves before he touches first: that one is the thrower's, still.
+#[test]
+fn a_desperation_throw_out_of_play_before_first_still_gives_no_hit() {
+    let p = Play::bip().handled(0x186, 25.0).margin(0.30).touch(4.2)
+        .throw(1, 3.1, true, B).dead(ev::DeadBallReason::OutOfPlay).adv(B, 0, 2, Cause::Award);
+    assert_eq!(p.judge(0).outcome, Outcome::ReachedOnThrowAward);
+}
+
+// P1-3, 9.08(d): the outfielder / infielder-in-the-outfield condition holds in foul territory
+// too. A catcher's foul catch with a runner tagging and scoring is an ordinary out and an RBI,
+// no sacrifice fly; an outfielder's foul catch is one.
+#[test]
+fn a_foul_caught_by_the_catcher_is_not_a_sacrifice_fly() {
+    let mut c = Play::bip().on(&[(R3, 3)]).handled(0x182, 10.0).out(B, 0, Kind::FlyOut).run(R3);
+    c.body.push(Body::CaughtFoul);
+    let r = c.judge(0);
+    assert!(!r.sacrifice_fly);
+    assert_eq!(r.rbi, 1);
+    let mut f = Play::bip().on(&[(R3, 3)]).handled(0x184, 30.0).out(B, 0, Kind::FlyOut).run(R3);
+    f.body.push(Body::CaughtFoul);
+    assert!(!f.judge(0).sacrifice_fly, "an infielder in the infield");
+    let mut o = Play::bip().on(&[(R3, 3)]).handled(0x189, 80.0).out(B, 0, Kind::FlyOut).run(R3);
+    o.body.push(Body::CaughtFoul);
+    assert!(o.judge(0).sacrifice_fly);
+}
+
+// P2-1, 9.06(f): the walk-off limit applies whatever form the hit arrives in: a ground-rule
+// double award, a record already ruled a double, a triple. The winning runner from third
+// advanced one base.
+#[test]
+fn the_walk_off_cap_covers_every_form_of_hit_record() {
+    let mut award = Play::bip().on(&[(R3, 3)]).run(R3).adv(B, 0, 2, Cause::Award);
+    award.body.push(Body::WalkOff);
+    assert_eq!(award.judge(0).outcome, Outcome::Hit(1));
+    for result in [ev::PaResult::Double, ev::PaResult::Triple] {
+        let mut p = Play::bip().on(&[(R3, 3)]).run(R3);
+        p.result = result;
+        p.body.push(Body::WalkOff);
+        assert_eq!(p.judge(0).outcome, Outcome::Hit(1), "{result:?}");
+    }
+    // From second, two bases: a recorded triple is a double; a recorded double stands.
+    let mut t = Play::bip().on(&[(R2, 2)]).run(R2);
+    t.result = ev::PaResult::Triple;
+    t.body.push(Body::WalkOff);
+    assert_eq!(t.judge(0).outcome, Outcome::Hit(2));
+}
+
+// P2-2, 9.05(b)(2): the appeal denies the hit only for a runner forced to advance by the batter
+// becoming a runner. R2 alone is not forced (first was empty).
+#[test]
+fn an_appeal_out_of_an_unforced_runner_does_not_deny_the_hit() {
+    let p = Play::bip().on(&[(R2, 2)]).handled(0x188, 70.0).touch(4.5).margin(-0.4)
+        .out(R2, 3, Kind::Appeal);
+    assert_eq!(p.judge(0).outcome, Outcome::Hit(1));
+    // R1 and R2: R2 is forced (first is occupied by R1) and the appeal at third denies it.
+    let q = Play::bip().on(&[(R1, 1), (R2, 2)]).handled(0x188, 70.0).touch(4.5).margin(-0.4)
+        .out(R2, 3, Kind::Appeal);
+    assert_eq!(q.judge(0).outcome, Outcome::FieldersChoice);
 }

@@ -59,7 +59,6 @@ pub fn score_play_with_options(play: ev::PlayRecord<'_>, outs_before: u32, optio
     let start_of = |id: u16| evidence.and_then(|e| e.runners()).and_then(|rs| rs.iter().find(|r| r.agent() == id)).map(|r| r.base());
     let flyout = outs.iter().any(|o| o.runner() == batter && o.kind() == ev::OutKind::FlyOut);
     let walk_off = events.iter().filter_map(|e| e.body_as_game_ended()).any(|g| g.reason() == ev::GameEndReason::WalkOff);
-    let caught_foul = events.iter().filter_map(|e| e.body_as_batted_ball_ruling()).any(|r| r.caught() && r.fair_foul() == ev::FairFoul::Foul);
     let thrown_award = events.iter().filter_map(|e| e.body_as_ball_dead()).any(|d| d.reason() == ev::DeadBallReason::OutOfPlay);
     // A throw out of play: when the last throw left (rules-spec §10.2).
     let award_cutoff_s = if thrown_award { evidence.and_then(|e| e.throws()).and_then(|ts| ts.iter().map(|t| t.t_release()).reduce(f64::max)) } else { None };
@@ -70,6 +69,14 @@ pub fn score_play_with_options(play: ev::PlayRecord<'_>, outs_before: u32, optio
     let first_touch = evidence.filter(|e| e.has_first_touch()).map(|e| e.first_touch_s());
     let preceding_target = |runner: u16, fallback_base: u8, base: u8| -> bool {
         if runner == 0 { base != fallback_base } else { runner != batter && start_of(runner).is_some_and(|b| b > 0) }
+    };
+    // A runner is forced when every base behind him is occupied at the pitch (the batter
+    // becoming a runner forces him on).
+    let forced_start = |id: u16| -> bool {
+        match start_of(id) {
+            Some(b) if b >= 1 => (1..b).all(|k| evidence.and_then(|e| e.runners()).is_some_and(|rs| rs.iter().any(|r| r.base() == k))),
+            _ => false,
+        }
     };
     let while_batter_short = |t: f64| first_touch.is_none_or(|ft| t < ft);
 
@@ -92,15 +99,18 @@ pub fn score_play_with_options(play: ev::PlayRecord<'_>, outs_before: u32, optio
                 let award = events.iter().filter_map(|e| e.body_as_runner_advanced()).find(|a| a.runner() == batter && a.cause() == ev::AdvanceCause::Award);
                 let margin = evidence.has_margin().then(|| evidence.clean_play_margin_s());
                 let last_throw = evidence.throws().and_then(|ts| ts.iter().max_by(|a, b| a.t_release().total_cmp(&b.t_release())));
+                // Only a throw to first that left before he touched it can have supplied his arrival;
+                // one after his touch (a return throw) leaves the hit he had earned and only awards.
+                let first_throw_supplied_arrival = thrown_award && last_throw.is_some_and(|t| t.base() == 1 && first_touch.is_none_or(|ft| t.t_release() <= ft));
                 if let Some(a) = award.filter(|_| !thrown_award) {
                     // A ground-rule double.
                     Outcome::Hit(a.to_base().clamp(1, 4))
                 } else if !evidence.has_first_touch() && !walk_off && !thrown_award {
                     // A third out can end the inning before first (9.02(g)).
                     Outcome::Out
-                } else if thrown_award && last_throw.is_some_and(|t| t.base() == 1) && margin.is_none() {
+                } else if first_throw_supplied_arrival && margin.is_none() {
                     Outcome::Undetermined
-                } else if thrown_award && last_throw.is_some_and(|t| t.base() == 1) && margin.is_some_and(|m| m >= options.choice_margin_s) {
+                } else if first_throw_supplied_arrival && margin.is_some_and(|m| m >= options.choice_margin_s) {
                     // 9.12(a)(1): the ordinary throw would have retired him; the bases are the
                     // thrower's (error ruling pending, A17).
                     Outcome::ReachedOnThrowAward
@@ -112,8 +122,9 @@ pub fn score_play_with_options(play: ev::PlayRecord<'_>, outs_before: u32, optio
                         let one_or_return = start.is_some_and(|b| o.base() == b || (o.base() == b + 1 && !evidence.touches().is_some_and(|ts| ts.iter().any(|t| t.runner() == o.runner() && t.base() > b + 1))));
                         let p = if o.kind() == ev::OutKind::Force {
                             PrecedingPlay::ForceOut
-                        } else if o.kind() == ev::OutKind::Appeal && start.is_some_and(|b| o.base() == b + 1) {
-                            // 9.05(b)(2): out for missing the first base to which he advanced.
+                        } else if o.kind() == ev::OutKind::Appeal && start.is_some_and(|b| o.base() == b + 1) && forced_start(o.runner()) {
+                            // 9.05(b)(2): a runner forced by the batter becoming a runner, out for
+                            // missing the first base to which he advanced.
                             PrecedingPlay::ForceOut
                         } else if infield && one_or_return {
                             PrecedingPlay::InfieldOneBaseOut
@@ -141,16 +152,10 @@ pub fn score_play_with_options(play: ev::PlayRecord<'_>, outs_before: u32, optio
                             let touched = evidence.touches().and_then(|ts| ts.iter().filter(|t| t.runner() == batter && before_throw(t.t())).map(|t| t.base()).max()).unwrap_or(1);
                             let value = reached.max(before_out).max(touched).clamp(1, 4);
                             // Advancement begun only after an attempted play on a preceding
-                            // runner is on that throw. A goal already chosen at release stands.
-                            let on_throw_cap = evidence.throws().and_then(|ts| ts.iter().find(|t| t.attempted_out() && preceding_target(t.runner(), 1, t.base()) && while_batter_short(t.t_release()))).map(|t| t.batter_goal().max(1));
-                            let mut value = on_throw_cap.map_or(value, |cap| value.min(cap));
-                            // 9.06(f): a walk-off hit is worth the bases the winning runner advanced.
-                            if walk_off {
-                                if let Some(b) = run_ids.last().and_then(|&id| start_of(id)).filter(|&b| b >= 1) {
-                                    value = value.min(4 - b);
-                                }
-                            }
-                            Outcome::Hit(value)
+                            // runner is on that throw, even when he was already safe at first
+                            // (9.06(b)). A goal already chosen at release stands.
+                            let on_throw_cap = evidence.throws().and_then(|ts| ts.iter().filter(|t| t.attempted_out() && preceding_target(t.runner(), 1, t.base())).map(|t| t.batter_goal().max(1)).min());
+                            Outcome::Hit(on_throw_cap.map_or(value, |cap| value.min(cap)))
                         }
                     }
                 }
@@ -159,6 +164,15 @@ pub fn score_play_with_options(play: ev::PlayRecord<'_>, outs_before: u32, optio
             }
         }
         _ => Outcome::Out,
+    };
+    // 9.06(f): a walk-off hit, however the record reached it, is worth the bases the runner who
+    // scored the winning run advanced. A home run over the fence counts in full (9.06(g)).
+    let outcome = match outcome {
+        Outcome::Hit(k) if walk_off && pa.result() != ev::PaResult::HomeRun => {
+            let cap = run_ids.last().and_then(|&id| start_of(id)).filter(|&b| b >= 1).map_or(k, |b| 4 - b);
+            Outcome::Hit(k.min(cap))
+        }
+        o => o,
     };
     // Runs that count. A run scored only because a thrown ball went out of play was given by
     // the award, not driven in, unless the batter's hit would have scored him anyway (9.04(a)(1)).
@@ -172,14 +186,8 @@ pub fn score_play_with_options(play: ev::PlayRecord<'_>, outs_before: u32, optio
     let catcher = evidence.and_then(|e| if e.has_secured() { Some(e.reference_fielder()) } else if e.has_handling() { Some(e.first_handler()) } else { None });
     let by_outfielder = catcher.is_some_and(|f| (7..=9).contains(&(f & 0x7f)));
     let caught_in_outfield = evidence.and_then(|e| e.secured_at()).is_some_and(|p| p.x() * p.x() + p.y() * p.y() >= options.outfield_radius_m * options.outfield_radius_m);
-    let sf = flyout && outs_before < 2 && !credited.is_empty() && (caught_foul || by_outfielder || caught_in_outfield);
+    let sf = flyout && outs_before < 2 && !credited.is_empty() && (by_outfielder || caught_in_outfield);
     // 9.04(b)(1): no RBI when the batter grounds into a force or reverse-force double play.
-    let forced_start = |id: u16| -> bool {
-        match start_of(id) {
-            Some(b) if b >= 1 => (1..b).all(|k| evidence.and_then(|e| e.runners()).is_some_and(|rs| rs.iter().any(|r| r.base() == k))),
-            _ => false,
-        }
-    };
     let ground_double_play = !flyout && !matches!(outcome, Outcome::Hit(_) | Outcome::Walk | Outcome::HitByPitch | Outcome::Strikeout)
         && outs.len() >= 2
         && outs.iter().any(|o| o.kind() == ev::OutKind::Force)
