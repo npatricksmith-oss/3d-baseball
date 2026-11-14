@@ -463,7 +463,7 @@ An **independent Python reference implementation** (`analysis/oracle/`, written 
 | A8 | Default bat at u_ss, game speeds | q = 0.20 ± 0.01; EV 105–109 mph for an 85 mph plate speed and 75 mph bat | [S] q≈0.2 |
 | A9 | Gripping oblique impact on a stationary ball | Spin and tangential speed match the KNS formulas (§8.1) | [S] KNS 2017 |
 | A10 | Spin vs undercut sweep | Backspin rises with undercut, topspin with overcut; magnitudes within published ranges | [S] Nathan et al. batted-ball spin work (pull exact values in M2) |
-| A10a | Tee: level default bat, 77 mph at b = 6.8 in past the center of mass, ball at rest, offset ψ 5–30° | Spin within 2% of KNS Eq. (8) at e_t(|c_n|); fitted spin per degree of launch θ 179 ± 18 rpm/° | [S] KNS 2017 Eq. (8), Fig. 3 |
+| A10a | Tee: level default bat, 77 mph at b = 6.8 in past the center of mass, ball at rest, offset ψ 5–30° | Spin about the bat's axis equals KNS Eq. (8) with e_t_lab at the across-barrel relative speed (ψ 10–30°, normal speed below v_t_lab); fitted total spin per degree of launch θ 179 ± 18 rpm/° | [S] KNS 2017 Eq. (8), Fig. 3 |
 | A10b | Game: average RHP four-seamer at the middle, on time, met under the ball to launch 25–30°, exit speed 90+ | Backspin 2,300 ± 600 rpm | [S, derived] Nathan 2020 Fig. 4 |
 | A10c | Same contacts swept over timing ±15 ms and 1.5–4.5 cm under | Sidespin −65 ± 30 rpm per degree of adjusted spray (+ = opposite field) | [S, derived] Nathan 2020 Fig. 2 |
 | A10d | Same sweep | Sidespin zero at −10 ± 5° of adjusted spray | [S] Nathan 2020 Fig. 2. **Report only** (the direction gap, §17 item 8) |

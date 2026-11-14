@@ -1,10 +1,11 @@
-//! Bat and collision tests: physics-spec §14.2 A7–A9, A11, A12, and the oracle's
-//! `collision.json` / `bat_default.json` fixtures.
+//! Bat and collision tests: physics-spec §14.2 A7–A9, A10a, A11, A12, A14, and the oracle's
+//! `collision.json` / `bat_default.json` / `tangential_restitution.json` fixtures.
 
 use bb_math::units::{INCH, MPH};
 use bb_math::{Mat3, Vec3};
-use bb_physics::BallParams;
-use bb_physics::bat::{BatProfile, sweet_spot};
+use bb_physics::bat::{BatBallParams, BatProfile, sweet_spot};
+use bb_physics::contact::{BatKinematics, ContactPoint, resolve_contact};
+use bb_physics::{BallParams, BallState};
 use bb_physics::collision::{
     Body, Branch, Material, axisymmetric_inv_inertia, collision_efficiency, resolve, sphere_inv_inertia,
 };
@@ -219,4 +220,81 @@ fn a11_coupled_guard_case_from_review() {
         assert!(out.energy_guard && out.frictionless_fallback, "e_t {e_t}");
         assert!(ke(&out.b1) <= ke(&b1) + 1e-12, "gained {} J", ke(&out.b1) - ke(&b1));
     }
+}
+
+#[test]
+fn a14_tangential_restitution_law_matches_oracle() {
+    // physics-spec §8.2.1, oracle `tangential_restitution.json`: the law's values, then
+    // bat–ball contacts below, inside and above the ramp resolved with e_t(|c_n|).
+    let g = golden("tangential_restitution.json");
+    let params = BatBallParams::default();
+    for row in g["law"].as_array().unwrap() {
+        let cn = row["cn_abs"].as_f64().unwrap();
+        let want = row["e_t"].as_f64().unwrap();
+        assert!((params.e_t(cn) - want).abs() < 1e-15, "e_t({cn}) {} vs oracle {want}", params.e_t(cn));
+    }
+    let mut regimes = std::collections::BTreeSet::new();
+    for c in g["collisions"].as_array().unwrap() {
+        let name = c["name"].as_str().unwrap();
+        let b1 = Body { inv_mass: 1.0 / c["m"].as_f64().unwrap(), inv_inertia: m3(&c["inv_I1"]), v: v3(&c["v"]), w: v3(&c["w"]), r: v3(&c["r1"]) };
+        let b2 = Body { inv_mass: c["inv_M2"].as_f64().unwrap(), inv_inertia: m3(&c["inv_I2"]), v: v3(&c["V"]), w: v3(&c["W"]), r: v3(&c["r2"]) };
+        let n = v3(&c["n"]);
+        let cn = (b1.point_velocity() - b2.point_velocity()).dot(n).abs();
+        let res = &c["result"];
+        assert!((cn - res["cn_abs"].as_f64().unwrap()).abs() < 1e-12, "{name}: |c_n|");
+        let e_t = params.e_t(cn);
+        assert!((e_t - res["e_t"].as_f64().unwrap()).abs() < 1e-15, "{name}: e_t");
+        regimes.insert(if cn <= params.v_t_lab { "lab" } else if cn >= params.v_t_game { "game" } else { "ramp" });
+        let mat = Material { e_n: c["e_n"].as_f64().unwrap(), e_t, mu: c["mu"].as_f64().unwrap() };
+        let out = resolve(b1, b2, n, mat).unwrap_or_else(|e| panic!("{name}: {e:?}"));
+        let close = |a: Vec3, b: &Value| (a - v3(b)).norm() <= 1e-9 * (1.0 + v3(b).norm());
+        assert!(close(out.j, &res["J"]), "{name}: J");
+        assert!(close(out.b1.v, &res["v"]), "{name}: v");
+        assert!(close(out.b1.w, &res["w"]), "{name}: w");
+        assert!(close(out.b2.v, &res["V"]), "{name}: V");
+        assert!(close(out.b2.w, &res["W"]), "{name}: W");
+    }
+    assert_eq!(regimes.len(), 3, "the fixture covers the lab value, the ramp and the game value");
+}
+
+#[test]
+fn a10a_kns_tee_spin() {
+    // physics-spec §14.2 A10a: KNS 2017's tee. A level default bat swung about its knob at
+    // 77 mph at the impact point, 6.8 in past the center of mass (KNS Table II), into a ball at
+    // rest, offset across the barrel by ψ. Spin about the bat's axis follows KNS Eq. (8) with
+    // the lab e_t (the tee's normal speed, 34.4·cos ψ m/s, is below the ramp for ψ ≥ 10°), and
+    // the spin per degree of launch matches KNS Fig. 3's measured 179 rpm/° (±10%).
+    let ball = BallParams::default();
+    let prof = BatProfile::default_34in();
+    let mp = prof.mass_props();
+    let params = BatBallParams::default();
+    let u_i = mp.u_cm + 6.8 * INCH;
+    let rb = prof.radius(u_i);
+    let v_imp = 77.0 * MPH;
+    let rate = v_imp / u_i;
+    let bat = BatKinematics { knob: Vec3::ZERO, axis: Vec3::X, v_cm: Vec3::new(0.0, rate * mp.u_cm, 0.0), omega: Vec3::new(0.0, 0.0, rate) };
+    let alpha = ball.inertia_factor;
+    let r_x = ball.mass * alpha / (1.0 + alpha) * (1.0 / mp.mass + (u_i - mp.u_cm).powi(2) / mp.i_cm + rb * rb / mp.i_ax);
+    let mut pts = Vec::new();
+    for psi_d in [10.0, 15.0, 20.0, 25.0, 30.0_f64] {
+        let psi = psi_d.to_radians();
+        let n = Vec3::new(0.0, psi.cos(), psi.sin());
+        let center = bat.point(u_i) + n * (rb + ball.radius);
+        let cp = ContactPoint { t: 0.0, u: u_i, n, ball: BallState { r: center, v: Vec3::ZERO, w: Vec3::ZERO }, bat };
+        let r = resolve_contact(&cp, &prof, &mp, &params, &ball);
+        let s = r.ball_after;
+        // Eq. (8) with the across-barrel relative speed at the contact point (the bat's
+        // rotation adds a small along-axis part, which spins the ball about another axis).
+        let contact_pt = center - n * ball.radius;
+        let v_bat_pt = bat.point_velocity(contact_pt, mp.u_cm);
+        let v_t = v_bat_pt.dot(Vec3::X.cross(n)).abs();
+        let w_kns = (1.0 + params.e_t_lab) * v_t / (ball.radius * (1.0 + r_x) * (1.0 + alpha));
+        assert!((s.w.x / w_kns - 1.0).abs() < 1e-9, "ψ {psi_d}: ω_x {} vs KNS Eq. 8 {w_kns}", s.w.x);
+        pts.push((s.v.z.atan2(s.v.y).to_degrees(), s.w.norm() * 60.0 / (2.0 * std::f64::consts::PI)));
+    }
+    let n = pts.len() as f64;
+    let (mx, my) = (pts.iter().map(|p| p.0).sum::<f64>() / n, pts.iter().map(|p| p.1).sum::<f64>() / n);
+    let slope = pts.iter().map(|p| (p.0 - mx) * (p.1 - my)).sum::<f64>() / pts.iter().map(|p| (p.0 - mx).powi(2)).sum::<f64>();
+    println!("A10a: {slope:.0} rpm per degree of launch (KNS Fig. 3: 179)");
+    assert!((slope - 179.0).abs() <= 18.0, "spin per degree {slope:.0} outside 179 ± 18");
 }

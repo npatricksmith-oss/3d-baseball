@@ -186,8 +186,11 @@ pub fn resolve_contact(
         r: contact_pt - c_bat,
     };
     let rel = b1.point_velocity() - b2.point_velocity();
-    let e_n = params.e_n(cp.u, len, rel.dot(cp.n).abs());
-    let mat = Material { e_n, e_t: params.e_t, mu: params.mu };
+    // Both restitutions are set by the first impulse's normal approach speed (§8.1, §8.2.1);
+    // a second impulse reuses them.
+    let cn_abs = rel.dot(cp.n).abs();
+    let e_n = params.e_n(cp.u, len, cn_abs);
+    let mat = Material { e_n, e_t: params.e_t(cn_abs), mu: params.mu };
     let mut impulses = 0;
     for _ in 0..2 {
         match resolve(b1, b2, cp.n, mat) {

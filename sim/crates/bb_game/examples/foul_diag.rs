@@ -249,10 +249,10 @@ fn main() {
     if let Some(v) = flag("phase") {
         mu.template.adj_phase_frac = v;
     }
-    // Tangential restitution e_t of the bat–ball collision, a counterfactual (default 0.40;
-    // docs/calibration/2026-11-14-collision-sloped-barrel.md §7).
+    // Tangential restitution e_t of the bat–ball collision held constant, a counterfactual
+    // (default: e_t(|c_n|), physics-spec §8.2.1; docs/calibration/2026-11-14-collision-sloped-barrel.md §7).
     if let Some(v) = flag("et") {
-        mu.bat.contact.e_t = v;
+        mu.bat.contact = mu.bat.contact.with_constant_e_t(v);
         println!("bat–ball tangential restitution e_t {v:.3} (counterfactual)");
     }
     // The bat's lag at contact λ_c, degrees (docs/calibration/2026-11-14-bat-angle-at-contact.md).

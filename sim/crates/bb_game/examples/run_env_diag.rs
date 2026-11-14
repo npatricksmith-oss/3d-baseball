@@ -4,7 +4,7 @@
 //! Q3: Ground-ball hit decomposition (H-to-1B, gap geometry, fielder timelines, dives/stretches/throws).
 //!
 //! Usage: `cargo run --release -p bb_game --example run_env_diag -- [games] [seed0]`
-//! (env `BB_BAT_SPEED_SIGMA` m/s, `BB_AIM_OFFSET_Z` m, `BB_K_SWING`: counterfactual population, aim and swing noise)
+//! (env `BB_BAT_SPEED_SIGMA` m/s, `BB_AIM_OFFSET_Z` m, `BB_K_SWING`, `BB_K_PERCEPTION`, `BB_K_COMMAND`, `BB_BAT_SPEED_MU` m/s: counterfactual population, aim, noise scales and mean bat speed)
 
 use bb_agents::batter::count_group;
 use bb_game::game::{Game, classify_bip};
@@ -423,6 +423,15 @@ fn main() {
         }
         if let Some(k) = var("BB_K_SWING") {
             g = g.map_matchups(|mu| mu.knobs.swing = k);
+        }
+        if let Some(k) = var("BB_K_PERCEPTION") {
+            g = g.map_matchups(|mu| mu.knobs.perception = k);
+        }
+        if let Some(k) = var("BB_K_COMMAND") {
+            g = g.map_matchups(|mu| mu.knobs.command = k);
+        }
+        if let Some(mu_bs) = var("BB_BAT_SPEED_MU") {
+            g = g.map_matchups(|mu| mu.batter.bat_speed += mu_bs - bb_agents::attributes::BAT_SPEED_MU_MPS);
         }
         while let Some(st) = g.step_pitch() {
             let batting_side = (st.batter >> 8) as usize;

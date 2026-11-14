@@ -7,7 +7,7 @@
 //! Part B: the game contact (cage, average RHP four-seamer, middle, on time) at 0–4 cm under the
 //! ball: what the normal, the tangential impulse and the bat's slope each do.
 //! Part C: the same contacts with e_t and μ changed (counterfactuals; the code's values are
-//! e_t 0.40, μ 0.50).
+//! e_t(|c_n|) of physics-spec §8.2.1, μ 0.50).
 //! `cargo run --release -p bb_game --example collision_anatomy`
 use bb_agents::pitcher::PitchIntent;
 use bb_agents::swing::{Placement, apply_placement};
@@ -49,8 +49,9 @@ fn first_impact(cage: &Cage, cp: &ContactPoint, p: &BatBallParams) -> (Vec3, Bra
     let b1 = Body { inv_mass: 1.0 / ball.mass, inv_inertia: sphere_inv_inertia(ball.inertia()), v: cp.ball.v, w: cp.ball.w, r: cp.n * -ball.radius };
     let b2 = Body { inv_mass: 1.0 / mp.mass, inv_inertia: axisymmetric_inv_inertia(mp.i_cm, mp.i_ax, cp.bat.axis), v: cp.bat.v_cm, w: cp.bat.omega, r: contact_pt - cp.bat.point(mp.u_cm) };
     let rel = b1.point_velocity() - b2.point_velocity();
-    let e_n = p.e_n(cp.u, len, rel.dot(cp.n).abs());
-    let imp = resolve(b1, b2, cp.n, Material { e_n, e_t: p.e_t, mu: p.mu }).expect("approaching");
+    let cn_abs = rel.dot(cp.n).abs();
+    let e_n = p.e_n(cp.u, len, cn_abs);
+    let imp = resolve(b1, b2, cp.n, Material { e_n, e_t: p.e_t(cn_abs), mu: p.mu }).expect("approaching");
     (imp.j, imp.branch, e_n)
 }
 
@@ -94,9 +95,8 @@ fn main() {
     let alpha = ball.inertia_factor;
     let r_x = ball.mass * alpha / (1.0 + alpha) * (1.0 / mp.mass + (u_i - mp.u_cm).powi(2) / mp.i_cm + rb * rb / mp.i_ax);
     println!("  bat: M {:.3} kg, u_cm {:.3} m, I_cm {:.4}, I_ax {:.2e}; R_bat {:.4} m at the impact; r_x {:.3}", mp.mass, mp.u_cm, mp.i_cm, mp.i_ax, rb, r_x);
-    for e_t in [code.e_t, 0.464] {
-        let p = BatBallParams { e_t, ..code };
-        println!("  e_t {e_t:.3} (μ {:.2}):  ψ°   spin rpm (KNS Eq. 8)   θ°    rpm/°θ   EV mph  branch", p.mu);
+    for (p, label) in [(code, "e_t(|c_n|), §8.2.1"), (code.with_constant_e_t(0.464), "e_t 0.464 (KNS wood)")] {
+        println!("  {label} (μ {:.2}):  ψ°   spin rpm (KNS Eq. 8)   θ°    rpm/°θ   EV mph  branch", p.mu);
         let mut pts = Vec::new();
         for psi_d in [5.0, 10.0, 15.0, 20.0, 25.0, 30.0] {
             let psi = psi_d * DEG;
@@ -107,6 +107,7 @@ fn main() {
             let s = r.ball_after;
             let theta = s.v.z.atan2(s.v.y) / DEG;
             let spin = s.w.norm() * RPM;
+            let e_t = p.e_t(v_imp * psi.cos());
             let kns = (1.0 + e_t) * v_imp * psi.sin() / (ball.radius * (1.0 + r_x) * (1.0 + alpha)) * RPM;
             let (_, br, _) = first_impact(&cage, &cp, &p);
             pts.push((theta, spin));
@@ -187,13 +188,13 @@ fn main() {
     }
 
     // ---------------- Part C: e_t and μ ----------------
-    println!("\nPart C. Counterfactual tangential parameters (middle, on time). Code: e_t 0.40, μ 0.50.");
+    println!("\nPart C. Counterfactual tangential parameters (middle, on time). Code: e_t(|c_n|) (§8.2.1), μ 0.50; these rows hold e_t constant.");
     println!(" under   e_t    μ   | branch | launch az land az (− AD) | LA°   EV mph | back  side  gyro rpm | carry ft");
     for d in [-0.02, -0.03] {
         let cp = contact(d);
         let ad = az(cp.bat.point_velocity(cp.bat.point(uss), mp.u_cm));
         for (e_t, mu) in [(0.40, 0.50), (0.464, 0.50), (0.16, 0.50), (0.0, 0.50), (0.40, 0.30), (0.40, 0.20), (0.40, 0.15), (0.0, 0.0)] {
-            let p = BatBallParams { e_t, mu, ..code };
+            let p = BatBallParams { mu, ..code.with_constant_e_t(e_t) };
             let (_, br, _) = first_impact(&cage, &cp, &p);
             let o = outcome(&cage, &cp, &p);
             println!(
@@ -215,8 +216,7 @@ fn main() {
     // Fly balls at 25–30° launch and 90+ mph from timing −15…+15 ms and 1.5–4.5 cm under, on a
     // middle pitch. Nathan's sign: adjusted spray negative to the pull field; sidespin positive
     // breaking toward the left-field line (for a right-handed batter, slicing = negative).
-    for (e_t, label) in [(code.e_t, "code e_t 0.40"), (0.0, "e_t 0")] {
-        let p = BatBallParams { e_t, ..code };
+    for (p, label) in [(code, "code, e_t(|c_n|) §8.2.1"), (code.with_constant_e_t(0.40), "e_t 0.40 constant, before"), (code.with_constant_e_t(0.0), "e_t 0")] {
         let mut pts: Vec<(f64, f64, f64)> = Vec::new();
         for it in -10..=10 {
             let dt = it as f64 * 0.0015;
@@ -250,8 +250,7 @@ fn main() {
     // falls 0.37° per degree of launch angle, from +13.9° at 0–10° to −0.6° at 25–35°.
     println!("\nPart E. On time, middle: spray − AD (pull +) against launch angle, the bat's slope scaled.");
     println!(" slope× bat slope° e_t  | land: −AD at LA 10 / 27, per °LA | launch dir: at 10 / 27, per °LA | backspin, sidespin at LA 27");
-    for e_t in [code.e_t, 0.0] {
-        let p = BatBallParams { e_t, ..code };
+    for (p, e_t) in [(code, "law"), (code.with_constant_e_t(0.0), "0.00")] {
         for frac in [1.0, 0.75, 0.5, 0.25, 0.0] {
             let mut pts: Vec<(f64, f64, f64, f64, f64)> = Vec::new();
             let mut slope_deg = 0.0;
@@ -286,14 +285,14 @@ fn main() {
             let (d10, d27, db) = fit(&|p| p.2);
             let (_, bk27, _) = fit(&|p| p.3);
             let (_, sd27, _) = fit(&|p| p.4);
-            println!("  {frac:4.2}   {slope_deg:6.1}   {e_t:4.2} |  {l10:+6.1} / {l27:+6.1}, {lb:+5.2}       |  {d10:+6.1} / {d27:+6.1}, {db:+5.2}    | {bk27:5.0}, {sd27:+6.0}");
+            println!("  {frac:4.2}   {slope_deg:6.1}   {e_t:>4} |  {l10:+6.1} / {l27:+6.1}, {lb:+5.2}       |  {d10:+6.1} / {d27:+6.1}, {db:+5.2}    | {bk27:5.0}, {sd27:+6.0}");
         }
     }
 
     // ---------------- Part F: the same fit by pitch height (the swing's own bat slope) ----------------
     // MLB (collision-targets note §2): spray-on-LA slope −0.30 bottom third, −0.35 middle, −0.35 top:
     // no steeper for low pitches, where the bat is steeper.
-    println!("\nPart F. On time, x 0, by pitch height (code e_t 0.40): landing spray − AD on launch angle.");
+    println!("\nPart F. On time, x 0, by pitch height (code, e_t(|c_n|)): landing spray − AD on launch angle.");
     for z in [0.55, 0.75, 0.95] {
         let rel = cage.release(&PitchIntent { ty: PitchType::FourSeam, target_x: 0.0, target_z: z });
         let plan = cage.plan_perfect(rel, None).unwrap();
