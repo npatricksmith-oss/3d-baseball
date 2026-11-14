@@ -353,6 +353,9 @@ struct Runner {
     scored: bool,
     /// Holding at a base until a catch is made (tag-up).
     tag_up: bool,
+    /// He tagged up and is going on the catch: when his first step comes. Until he next
+    /// stops he runs from the set start (agent-models §6.6); no earlier speed carries over.
+    set_start: Option<f64>,
     moving_since: f64,
     last_base: u8,
     /// Going back to the start base to retouch after a caught fly.
@@ -417,6 +420,8 @@ pub struct LiveInput<'a> {
     pub play: u32,
     /// Record ball and actor tracks (timelines and visualization only).
     pub record: bool,
+    /// How runners who tag up start, and what they believe of the tag (agent-models §6.6).
+    pub tag_up: bb_agents::running::TagUpParams,
 }
 
 /// Physical throw facts retained for the scorer, not passed to an agent.
@@ -570,6 +575,13 @@ fn run_time_from(d: f64, v0: f64, v_max: f64, tau: f64) -> f64 {
         if run_dist_from(mid, v0, v_max, tau) < d { lo = mid } else { hi = mid }
     }
     0.5 * (lo + hi)
+}
+
+/// How long a runner leaving from a tag-up needs to cover `d` m: the wait for his first step,
+/// then the speed law from rest with the set start's time constant (agent-models §6.6). His
+/// decision uses this and his legs run the same law; no earlier speed carries over.
+fn tag_up_time(tag: bb_agents::running::TagUpParams, wait_s: f64, d: f64, v_max: f64) -> f64 {
+    wait_s + run_time(d, v_max, tag.tau_s)
 }
 
 /// A fielder's estimate of how long a runner needs to cover `d` metres: he sees the runner's
@@ -2444,8 +2456,15 @@ impl<'a> Sim<'a> {
         self.r[k].decisions += 1;
         let n = self.r[k].decisions;
         let r = &self.r[k];
-        let t_run = run_time((next as f64 * BASE_L - r.s).max(0.0), r.vmax, RUNNER_TAU) * if r.v > 1.0 { 0.75 } else { 1.0 };
-        let t_ball = self.ball_time_to(k, next, 2 * n + 1);
+        let d_run = (next as f64 * BASE_L - r.s).max(0.0);
+        let t_run = match r.set_start {
+            // Going from a tag-up: the same start his legs will run (§6.6).
+            Some(leave) => tag_up_time(self.inp.tag_up, (leave - self.t).max(0.0), d_run, r.vmax),
+            None => run_time(d_run, r.vmax, RUNNER_TAU) * if r.v > 1.0 { 0.75 } else { 1.0 },
+        };
+        // Unforced, he must beat the tag, not only the ball: his belief of the time it takes.
+        let tag_s = if forced { 0.0 } else { self.inp.tag_up.typical_tag_s };
+        let t_ball = self.ball_time_to(k, next, 2 * n + 1) + tag_s;
         let mut rr = rng(self.inp.seed, self.inp.play, r.id, Purpose::RunnerPerception, 2 * n);
         let draw = rr.truncated_normal(4.0);
         let noise = 0.15 * draw;
@@ -2512,7 +2531,13 @@ impl<'a> Sim<'a> {
                     self.r[k].tag_up = false;
                     let b = self.r[k].last_base;
                     self.emit(Input::BaseTouched { t: self.t, agent: self.r[k].id, base: b, holding_ball: false });
+                    // Set on the bag and watching the catch, he leaves on it: an anticipated
+                    // start, judged with the same model his legs then run (§6.6).
+                    self.r[k].set_start = Some(self.t + self.inp.tag_up.react_s);
                     self.runner_decide(k, b);
+                    if self.r[k].goal <= b {
+                        self.r[k].set_start = None;
+                    }
                 } else if !matches!(self.ball, Ball::Free { .. }) || self.out.facts.iter().any(|f| matches!(f, Input::BallTouched { what: Touch::Ground { .. }, .. })) {
                     // The ball dropped in: run.
                     self.r[k].tag_up = false;
@@ -2545,17 +2570,26 @@ impl<'a> Sim<'a> {
                 self.r[k].goal = (self.r[k].s / BASE_L).floor() as u8;
             }
             let goal_s = self.r[k].hold_s.unwrap_or(self.r[k].goal as f64 * BASE_L);
+            let (now, tag) = (self.t, self.inp.tag_up);
             let r = &mut self.r[k];
             let dir = (goal_s - r.s).signum();
             if (goal_s - r.s).abs() < 1e-6 {
                 r.v = 0.0;
                 continue;
             }
+            match r.set_start {
+                // Turning back ends the set start.
+                Some(_) if dir < 0.0 => r.set_start = None,
+                // Still waiting for his first step after the catch.
+                Some(leave) if now < leave => continue,
+                _ => {}
+            }
             r.direction = dir;
             if r.v == 0.0 {
-                r.moving_since = self.t;
+                r.moving_since = now;
             }
-            r.v += (r.vmax - r.v) * (DT / RUNNER_TAU);
+            let tau = if r.set_start.is_some() { tag.tau_s } else { RUNNER_TAU };
+            r.v += (r.vmax - r.v) * (DT / tau);
             let prev = r.s;
             let nxt = prev + dir * r.v * DT;
             let crossed = |b: u8| {
@@ -2607,6 +2641,7 @@ impl<'a> Sim<'a> {
             let stop_s = r.hold_s.unwrap_or(r.goal as f64 * BASE_L);
             if r.overrun == OverrunPhase::None && (stop_s - r.s).abs() < 1e-6 {
                 r.v = 0.0;
+                r.set_start = None;
             }
         }
     }
@@ -2687,7 +2722,8 @@ impl<'a> Sim<'a> {
                 continue;
             }
             let on_base = (r.s / BASE_L - (r.s / BASE_L).round()).abs() * BASE_L < 0.3;
-            if !on_base && (self.runner_pos(r) - fd.pos).norm() < fd.a.throw_choice.tag_reach_m {
+            // A tag takes him `tag_apply_s` from securing the ball (agent-models §6.6).
+            if !on_base && self.t >= self.secured_at + fd.a.tag_apply_s && (self.runner_pos(r) - fd.pos).norm() < fd.a.throw_choice.tag_reach_m {
                 let id = r.id;
                 self.emit(Input::TagContact { t: self.t, fielder: fd.id, runner: id, holding_ball: true });
                 if self.done {
@@ -2983,6 +3019,7 @@ fn new_sim<'a>(inp: &'a LiveInput<'a>, st: &'a mut RulesState) -> Sim<'a> {
             out: false,
             scored: false,
             tag_up: false,
+            set_start: None,
             moving_since: 0.0,
             last_base: x.base,
             retouch: false,
@@ -3225,6 +3262,7 @@ mod tests {
             seed: 11,
             play: 3,
             record: false,
+            tag_up: Default::default(),
         }
     }
 
