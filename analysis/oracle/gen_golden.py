@@ -108,6 +108,42 @@ def collision_inputs():
     return cases
 
 
+def tangential_restitution_inputs():
+    """Section 8.2.1 law values and bat-ball contacts below, inside and above the ramp.
+
+    The bat is the default 34-in bat, axis +X, swung about its knob (at the origin) about +Z;
+    the impact station is 6.8 in past the center of mass (KNS Table II's impact point). The
+    normal is tilted by psi from +Y toward +Z (the ball met under its center).
+    """
+    law = [dict(cn_abs=c, e_t=p.tangential_restitution(c))
+           for c in (0.0, 4.0, 20.0, 33.9, 34.0, 40.0, 49.5, 55.0, 60.0, 64.3, 65.0, 70.0, 90.0)]
+    bat = p.bat_mass_properties()
+    u = bat['u_cm'] + 6.8*p.INCH
+    rb = p.bat_radius(u)
+    inv1 = p.diagonal(1/p.BALL_INERTIA)
+    inv2 = p.bat_inverse_inertia((1, 0, 0), bat['I_cm'], bat['I_ax'])
+    cases = []
+    for name, v_imp_mph, psi_deg, pitch_mph, descent_deg, backspin_rpm in [
+        ('tee_77mph_psi10', 77.0, 10.0, 0.0, 0.0, 0.0),        # KNS tee: below the ramp
+        ('tee_77mph_psi25', 77.0, 25.0, 0.0, 0.0, 0.0),
+        ('slow_pitch_mid_ramp', 70.0, 15.0, 35.0, 8.0, 1500.0),  # inside the ramp
+        ('game_undercut_psi28', 72.0, 28.0, 86.0, 7.0, 2300.0),  # near the top of the ramp
+        ('game_near_head_on', 72.0, 5.0, 86.0, 7.0, 2300.0),    # above the ramp
+    ]:
+        psi = math.radians(psi_deg)
+        n = (0.0, math.cos(psi), math.sin(psi))
+        rate = v_imp_mph*p.MPH/u
+        d = math.radians(descent_deg)
+        vp = pitch_mph*p.MPH
+        cases.append(dict(
+            name=name, m=p.MASS, inv_I1=inv1,
+            v=(0.0, -vp*math.cos(d), -vp*math.sin(d)), w=(-backspin_rpm*p.RPM, 0.0, 0.0),
+            r1=p.scale(n, -p.RADIUS), inv_M2=1/bat['M'], inv_I2=inv2,
+            V=(0.0, rate*bat['u_cm'], 0.0), W=(0.0, 0.0, rate),
+            r2=p.add((u-bat['u_cm'], 0.0, 0.0), p.scale(n, rb)), n=n, e_n=.45, mu=.5))
+    return dict(law=law, collisions=cases)
+
+
 def spin_inputs():
     result = []
     for tilt, eff, rate, sign in [(0, 1, 2300, 1), (6, 1, 2600, 1),
@@ -130,8 +166,11 @@ def build_corpus(progress=None):
     for c in collisions:
         c['result'] = p.collision(**{k: v for k, v in c.items() if k != 'name'})
     spins = [dict(**c, **p.spin_metrics(c['w'], c['v'])) for c in spin_inputs()]
+    et = tangential_restitution_inputs()
+    for c in et['collisions']:
+        c['result'] = p.bat_ball_collision(**{k: v for k, v in c.items() if k != 'name'})
     return {'air_density': air_cases(), 'flight': flights, 'bat_default': p.bat_mass_properties(),
-            'collision': collisions, 'spin_axis': spins}
+            'collision': collisions, 'spin_axis': spins, 'tangential_restitution': et}
 
 
 def results_notes(corpus):
@@ -191,7 +230,7 @@ def main():
     marker = '<!-- GENERATED RESULTS -->'
     text = notes.read_text().split(marker)[0].rstrip() if notes.exists() else '# Oracle notes'
     notes.write_text(text + '\n\n' + marker + '\n\n' + results_notes(corpus))
-    print('Wrote five golden JSON files and refreshed NOTES.md results.', flush=True)
+    print('Wrote six golden JSON files and refreshed NOTES.md results.', flush=True)
 
 
 if __name__ == '__main__':

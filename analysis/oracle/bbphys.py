@@ -393,6 +393,34 @@ def collision(m, inv_I1, v, w, r1, inv_M2, inv_I2, V, W, r2, n, e_n, e_t, mu):
     return result
 
 
+# Physics-spec §8.2.1: tangential restitution against the normal approach speed |c_n|.
+E_T_LAB = 0.405   # KNS 2017, all bats with baseballs, tee at 77 mph
+V_T_LAB = 34.0    # m/s
+E_T_GAME = 0.0    # Statcast batted spin read through the model (Nathan 2020 Figs. 2, 4)
+V_T_GAME = 65.0   # m/s
+
+
+def tangential_restitution(cn_abs, e_lab=E_T_LAB, v_lab=V_T_LAB, e_game=E_T_GAME, v_game=V_T_GAME):
+    """Section 8.2.1: e_lab up to v_lab, linear in |c_n| to e_game at v_game, constant beyond."""
+    if not v_lab < v_game:
+        raise ValueError('the ramp needs v_lab < v_game')
+    if cn_abs <= v_lab:
+        return e_lab
+    if cn_abs >= v_game:
+        return e_game
+    return e_lab + (e_game-e_lab)*(cn_abs-v_lab)/(v_game-v_lab)
+
+
+def bat_ball_collision(m, inv_I1, v, w, r1, inv_M2, inv_I2, V, W, r2, n, e_n, mu):
+    """Section 8.1 with e_t from section 8.2.1 at this contact's normal approach speed."""
+    cn_abs = abs(dot(sub(add(v, cross(w, r1)), add(V, cross(W, r2))), n))
+    e_t = tangential_restitution(cn_abs)
+    result = collision(m, inv_I1, v, w, r1, inv_M2, inv_I2, V, W, r2, n, e_n, e_t, mu)
+    result['cn_abs'] = cn_abs
+    result['e_t'] = e_t
+    return result
+
+
 def plate_strike(position, batter_height, radius=RADIUS):
     """Circle/rectangle overlap at the midpoint plane, including rounded corners."""
     dx = max(abs(position[0])-0.2159, 0.0)
