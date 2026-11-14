@@ -61,7 +61,7 @@ K% 15.3 against 22.6 comes from the foul share (23% of contact against 52%) and 
 
 If home runs stay far short after B and C without a fudge factor, the remaining gap is the collision's (q, D) or the batted ball's spin (§2.4 below), both Tier A. That is a result to report, not a reason to tune a Tier B knob against it.
 
-## 2. Results (in progress)
+## 2. Results
 
 ### 2.1 B: per-player `BatSpeed` (`run_env_diag -- 100 0`; outputs in `sim/out/recalib/`)
 
@@ -88,9 +88,69 @@ B doubles home runs, as the proxy said, and leaves runs where they were (within 
 
 About 8° of launch per cm. A perfectly squared-up average swing in the barrel window (27°) leaves at 97.7 mph, just under the barrel line. **Batted backspin is about twice the published range** (≈ 5,900 rpm at 27°, where Statcast-era measurements put fly balls near 2,500): it costs 15–30 ft of carry at 23–27°. That is the collision's tangential behaviour (physics-spec §8, e_t 0.40, test A10 "values pending"), Tier A, outside B and C; it goes with D as a sourcing question.
 
-### 2.3 Attack angle by zone third (step 4)
+### 2.3 C: the aim offset in games (`run_env_diag -- 100 0`, σ_pop 1.25; `BB_AIM_OFFSET_Z`)
 
-The Savant sample (re-run, `savant_bat.py`, competitive swings) gives 11.9 / 7.8 / 6.1° bottom / middle / top (17.4 below, 6.0 above): the spec's text quotes the data correctly. The linear formula 8 − 8.7·(h − ½) gives 10.9 / 8.0 / 5.1° at the thirds' centers, about 1° low at both ends (the data are convex in height). To settle: re-fit α₀ and α_h by least squares over swings, or state that the fit is a line through a convex curve; a change to α₀/α_h changes games, so it is not part of the digest-neutral step.
+| `aim_offset_z` | runs | K% | HR/PA | LA mean / SD | sweet spot | GB / LD / FB / PU | barrels | EV mean; ≥ 105 |
+|---|---|---|---|---|---|---|---|---|
+| −1.5 cm | 4.76 | 14.7 | 0.74% | 8.8 / 25.5 | 35.8% | 49.9 / 23.3 / 22.3 / 4.5 | 3.51% | 89.3; 6.2% |
+| **−2.0 cm** (kept) | 4.54 | 15.8 | 0.96% | 11.8 / 25.1 | 38.0% | 44.5 / 25.0 / 25.0 / 5.5 | 4.55% | 89.6; 6.5% |
+| −2.5 cm | 4.38 | 16.7 | 0.88% | 13.9 / 25.1 | 38.4% | 40.5 / 25.4 / 28.0 / 6.2 | 4.54% | 89.3; 5.5% |
+| −3.0 cm | 3.93 | 18.2 | 1.06% | 16.6 / 25.5 | 37.9% | 36.4 / 24.5 / 31.1 / 7.9 | 5.13% | 88.6; 4.8% |
+| MLB (2025 sample; targets §4.4) | 4.39 | 22.6 | 3.0% | 12.2 / 29.1 | 33% | 43 / 21 / 29 / 7 | ≈ 8.7% | 89.5; 10.6% |
 
-### Next
-C sweep (`BB_AIM_OFFSET_Z` −1.5 / −2.5 / −3.0 cm with σ_pop 1.25), spray diagnostics (c), spec edits for B (agent-models §10 σ_pop 1.1 → 1.25, data-formats §2.3 purpose 15 and §2.4 step 5, calibration-targets §4.3), tests, standard runs, ledger row, the named literals.
+- **The aim moves the mean, not the spread.** Each 0.5 cm under the ball adds about 2.6° of mean launch in games (8° per cm on time in the cage, diluted by mistimed contact); the SD stays at 25.1–25.5°. Barrels and home runs barely move (within about ±0.1 points of HR/PA, the noise of 100 games): they are limited by exit speed, not by launch.
+- **Decision: `aim_offset_z` stays at −2.0 cm.** It gives 11.8° against Statcast's 12.2° (−2.1 cm would close the gap; not worth chasing), inside the band of targets §4.4 (12°, 6–18). Under §2.3 item 3 an agent [E] parameter moves only when its band is off; this one is not. Only the doc comment changed (it now says it was re-checked on v2).
+- **What is off is the shape.** At the right mean, the sim's launch angles are too concentrated (SD 25.1° against 29.1°; inside the envelope 20–35, under the ~27° target): too many line drives (25.0% against 21%) and too few fly balls and pop-ups (25.0 + 5.5 against 29 + 7). That is part of why balls in play fall for hits so often. Getting MLB's mix by aiming higher (−2.5 cm gives GB 40.5 / FB 28.0) puts the mean at 13.9° and K% does not care; the band says no.
+- **Counterfactual: the swing-noise knob** `K_swingplane` 1.0 → 1.5 (`BB_K_SWING`): LA SD 25.1 → 27.2°, mean 10.2°, sweet spot 34.8%, but runs 5.10, max exit speed 128.7 mph (the effort σ scales with the knob too, so the tail grows past targets §4.4's "none over 125") and GB hits .361. Not adopted: it mixes the vertical miss with the effort, and the ruling did not ask for it. The vertical miss that sets the LA spread is mostly perception's (the batter's height estimate) and `BatControl`'s; a `BatControl` population draw (M7) would widen it between batters.
+
+### 2.4 Spray (diagnosis; `foul_diag -- 3000`, average R/R, pull-positive by first landing)
+
+| | outside | mid-away | middle | mid-in | inside |
+|---|---|---|---|---|---|
+| Batter's timing error, ms (− early) | −17.2 | −11.8 | −9.6 | −6.4 | −2.3 |
+| All fair contact: spray | −5.7 | −5.7 | −1.3 | −0.5 | +1.3 |
+| All fair contact: spray − AD | −6.9 | −7.4 | −4.5 | −5.1 | −3.2 |
+| On time (±5 ms): spray | −15.5 | −13.6 | −9.8 | −8.5 | −3.2 |
+| On time: AD | −4.0 | −2.3 | −1.0 | +0.7 | +2.0 |
+| On time: spray − AD | −11.4 | −11.3 | −8.8 | −9.2 | −5.2 |
+| MLB spray (Savant 2025) | −1.3 | +4.5 | +6.9 | +8.4 | +14.3 |
+| MLB spray − AD | +7.2 (R/R) to +8.9 (all) | | | | |
+
+Both mechanisms of the plan are confirmed:
+1. **On time, the trend by location is there** (−15.5° outside to −3.2° inside, a 12° range against MLB's 15.6°), but the whole curve sits on the opposite-field side: on-time contact goes 5–11° to the opposite side of the sweet spot's path, where MLB's goes 7–9° to the pull side. That is a 15–20° offset at contact, and it is not the batters'. The swing meets the ball with the bat ⊥ to its path (λ_c = 0, an assumption with no source, swing note Open 7), and an undercut ball off a barrel tilted 28° down leaves toward the tip's side. A bat already turned a little past the hands' line at contact (λ_c > 0) would face the pull side of its path. That is a swing [E] parameter that could be fitted to Statcast's spray − AD; it is outside B and C and would refit the fielders' spray beliefs again, so it is **left for the owner** as a proposal.
+2. **The batters' timing flattens it.** They are 17 ms early on outside pitches and 2 ms inside (perception, diagnosis rank 5). Early contact is pulled, so outside balls are pulled back toward the middle and the location trend collapses to 7°. Fixing the timing alone would make spray worse (outside balls would go 15° the other way) unless λ_c moves with it: **the two belong together.**
+3. The infield's alignment for the pull is the fielding lead's; it is fit to where balls go, so it follows whatever these two do.
+
+### 2.5 Standard run (300 games, seeds 0–299 [1000–1299]; `sim/out/recalib-seed0.txt`, `recalib-seed1000.txt`)
+
+| | `9f71441` | B (`cf1cce4`) | MLB |
+|---|---|---|---|
+| Runs / team-game | 4.57 [4.53] | 4.79 [4.50] | 4.39 |
+| K% / BB% | 15.3 / 7.3 [15.6 / 7.3] | 15.5 / 7.4 [15.8 / 7.5] | 22.6 / 8.2 |
+| HR / PA | 0.57% [0.53%] | **1.01% [0.94%]** | 3.0% |
+| Reached on BIP | 39.3% [39.7%] | 39.3% [38.1%] | |
+| GB share / hit | 45.5% / .364 [44.0% / .364] | 45.1% / .367 [43.8% / .355] | 43% / .245 |
+| LD share / hit | 24.5% / .668 [25.0% / .673] | 24.3% / .677 [24.7% / .652] | 21% / .68 |
+| FB share / hit | 24.7% / .174 [25.5% / .177] | 24.9% / .168 [26.1% / .170] | 29% / .13 |
+| PU share / hit | 5.3% / .017 [5.5% / .021] | 5.6% / .026 [5.4% / .025] | 7% / .02 |
+| Home runs / game (out of play) | 0.45 [0.42] | 0.79 [0.73] | 2.2 |
+
+Runs move +0.22 and −0.03 on the two sets: within their noise. Home runs move from a fifth to a third of MLB's.
+
+### 2.6 Attack angle by zone third (step 4)
+
+The Savant sample (re-run, `savant_bat.py`, competitive swings) gives 11.9 / 7.8 / 6.1° bottom / middle / top (17.4 below, 6.0 above): the spec's text quotes the data correctly. The linear formula 8 − 8.7·(h − ½) gives 10.9 / 8.0 / 5.1° at the thirds' centers, about 1° low at both ends (the data are convex in height). The slope is exactly the outer thirds' difference over the 2/3 of a zone height between their centers ((6.1 − 11.9)/(2/3) = −8.7), and the level, 8°, sits near the middle third's 7.8: no line passes through all three. **The wrong one was the spec's text**, which read as if the line reproduced the thirds; it now says how the line was made and what it misses (agent-models §3.6 step 2). The code is unchanged. A convex curve (or a least-squares refit over swings) would put about 1° more lift on low and high pitches; that changes games and is left as an option, not done here.
+
+### 2.7 Named literals (step 4)
+
+`motor::PLANE_TILT_PER_M` = 1.5 rad per m of δ_v's σ (1.0° at grade 50; spec value now given, marked unsourced: it dates from M2, `7358907`), `motor::REACH_PER_BAT_CONTROL` = 0.7, `swing::TILT_GUARD_MARGIN` = 1°; agent-models §3.6 names them. Checked: game digests for seeds 1, 2, 3, 42 and the whole `sim-cli games --n 300 --seed 0` output are identical before and after.
+
+## 3. Where this leaves the gaps
+
+1. **Home runs: 1.0% of PA against 3.0%.** B was worth what the proxy said, and C has no home runs to give: the aim's sweep moves launch, not exit speed. What is left is outside the swing's abilities:
+   - **Collision efficiency** (D, ruled "not now"): the sim's squared-up average swing leaves at 103 mph, Statcast's squared-up formula would give about 107.5 at the same bat and pitch speeds.
+   - **Batted backspin** (§2.2): about twice the published values at home-run launch angles, costing 15–30 ft of carry. A Tier A question for the collision (physics-spec §8: e_t 0.40 from KNS 2017; test A10's magnitudes still pending). The swing note's counterfactual (q 0.23, plus the spread proxy) reached 3.06% HR, but with mean exit speed 93 against 89.5. Lower spin would add carry without raising exit speed, so **the sourcing question for D should take spin first**. Nothing here was changed: per the ruling, a sourcing question, not a knob.
+   - The sim's home runs need faster swings than MLB's (77.7 against 75.4 mph): the same two causes, read from the other side.
+2. **Runs are right for the wrong reasons**, still: 4.79 [4.50] against 4.39, with a third of the home runs. The surplus is hits on balls in play: grounders (.36 against .245, fielding's) and the over-concentrated launch angles (too many line drives, §2.3).
+3. **Spray** (§2.4): the bat's face at contact (λ_c) and the batters' timing by location, together. Proposal for the owner.
+4. **K% and fouls**: unchanged by B and C, as the plan said (15.5 [15.8] against 22.6).
