@@ -88,11 +88,31 @@ impl LogWriter {
         self.digest
     }
 
+    /// The log through the first `plays` plays (all of them if there are fewer), closed with a
+    /// footer, without ending the writer: a reader takes it like a finished log. The footer's
+    /// scores are the ones given; the digests are those of the plays kept.
+    pub fn snapshot(&self, plays: usize, score_away: u8, score_home: u8) -> Vec<u8> {
+        let keep = plays.min(self.play_digests.len());
+        let fr = frames(&self.out).expect("the writer holds whole frames");
+        let end = fr[..1 + keep].iter().map(|f| f.len()).sum::<usize>();
+        let mut out = self.out[..end].to_vec();
+        out.extend_from_slice(&footer_frame(&self.play_digests[..keep], score_away, score_home));
+        out
+    }
+
     /// Write the footer and return the whole log.
     pub fn finish(mut self, score_away: u8, score_home: u8) -> (Vec<u8>, Digest) {
-        let mut fbb = FlatBufferBuilder::with_capacity(256 + 48 * self.play_digests.len());
-        let pds: Vec<_> = self
-            .play_digests
+        let footer = footer_frame(&self.play_digests, score_away, score_home);
+        self.out.extend_from_slice(&footer);
+        (self.out, self.digest)
+    }
+}
+
+/// The footer frame for these plays' digests (the last is the game digest).
+fn footer_frame(play_digests: &[(u32, Digest)], score_away: u8, score_home: u8) -> Vec<u8> {
+    {
+        let mut fbb = FlatBufferBuilder::with_capacity(256 + 48 * play_digests.len());
+        let pds: Vec<_> = play_digests
             .iter()
             .map(|(i, d)| {
                 let dv = fbb.create_vector(d);
@@ -100,14 +120,14 @@ impl LogWriter {
             })
             .collect();
         let pds = fbb.create_vector(&pds);
-        let gd = fbb.create_vector(&self.digest);
+        let last: Digest = play_digests.last().map(|x| x.1).unwrap_or([0; 32]);
+        let gd = fbb.create_vector(&last);
         let f = LogFooter::create(
             &mut fbb,
             &LogFooterArgs { score_away, score_home, play_digests: Some(pds), game_digest: Some(gd) },
         );
         fbb.finish_size_prefixed(f, Some(FOOTER_ID));
-        self.out.extend_from_slice(fbb.finished_data());
-        (self.out, self.digest)
+        fbb.finished_data().to_vec()
     }
 }
 

@@ -520,6 +520,192 @@ pub unsafe extern "C" fn bb_timeline_sample(blob: *const u8, len: usize, t: f32,
 /// Length of the stock bat (34 in), m: the only bat model so far (timeline `model_id` 0).
 const BAT_LENGTH_M: f32 = 0.8636;
 
+/// Most batting lines per side the box score carries. A lineup is nine today; substitutes
+/// will need more.
+pub const BB_BOX_MAX_BATTERS: usize = 12;
+/// Most innings in the linescore. A longer game keeps its last `BB_BOX_MAX_INNINGS` and sets
+/// `first_inning`.
+pub const BB_BOX_MAX_INNINGS: usize = 30;
+
+/// One batter's line of the box score (rules-spec §10, `bb_stats::BatterLine`). Counts are
+/// capped at 255.
+#[repr(C)]
+#[derive(Clone, Copy)]
+pub struct BbBatLine {
+    /// His batting id, as in [`BbPlayer`].
+    pub agent: u16,
+    pub number: u8,
+    /// Fielding position, scorer's numbering 1–9.
+    pub position: u8,
+    pub batting_order: u8,
+    pub _pad: [u8; 3],
+    pub pa: u8,
+    pub ab: u8,
+    pub r: u8,
+    pub h: u8,
+    pub doubles: u8,
+    pub triples: u8,
+    pub hr: u8,
+    pub rbi: u8,
+    pub bb: u8,
+    pub k: u8,
+    pub hbp: u8,
+    pub sf: u8,
+    pub sh: u8,
+    pub _pad2: [u8; 3],
+    /// NUL-terminated, ASCII.
+    pub given: [u8; BB_NAME_LEN],
+    pub family: [u8; BB_NAME_LEN],
+}
+
+/// A side's totals.
+#[repr(C)]
+#[derive(Clone, Copy, Default)]
+pub struct BbBoxTotals {
+    pub pa: u16,
+    pub ab: u16,
+    pub r: u16,
+    pub h: u16,
+    pub doubles: u16,
+    pub triples: u16,
+    pub hr: u16,
+    pub rbi: u16,
+    pub bb: u16,
+    pub k: u16,
+    pub hbp: u16,
+    pub sf: u16,
+    pub sh: u16,
+    /// Runners left on base at the end of each half-inning played so far.
+    pub lob: u16,
+    /// Batted-ball plays the scorer could not rule (a walk-off before the batter reached
+    /// first); not counted as hits.
+    pub undetermined: u16,
+    pub _pad: u16,
+}
+
+/// One side of the box score.
+#[repr(C)]
+#[derive(Clone, Copy)]
+pub struct BbBoxTeam {
+    /// Batting lines filled in `lines`, in batting order.
+    pub n_lines: u8,
+    /// Half-innings this side has batted (entries of `runs` and `hits` used, counting from
+    /// `first_inning` of the box score).
+    pub n_batted: u8,
+    pub _pad: [u8; 2],
+    pub totals: BbBoxTotals,
+    pub lines: [BbBatLine; BB_BOX_MAX_BATTERS],
+    /// Runs and hits in each inning, from the box score's `first_inning`.
+    pub runs: [u8; BB_BOX_MAX_INNINGS],
+    pub hits: [u8; BB_BOX_MAX_INNINGS],
+}
+
+/// The box score of a game so far, a pure function of its event log (data-formats §4;
+/// computed when asked). Sides: 0 away, 1 home.
+#[repr(C)]
+#[derive(Clone, Copy)]
+pub struct BbBoxScore {
+    /// 1 once the log holds the end of the game.
+    pub is_final: u8,
+    /// Innings played or begun, and the first one in the linescore arrays (1 unless the game
+    /// ran past `BB_BOX_MAX_INNINGS`).
+    pub innings: u8,
+    pub first_inning: u8,
+    pub _pad: u8,
+    pub teams: [BbBoxTeam; 2],
+}
+
+fn sat8(x: u32) -> u8 {
+    x.min(255) as u8
+}
+fn sat16(x: u32) -> u16 {
+    x.min(65535) as u16
+}
+
+/// The box score of the game so far: batting lines (name, position, AB, R, H, RBI, BB, K,
+/// the extra-base hits and sacrifice flies), team totals with runners left on, and the
+/// linescore with runs and hits by inning. Fills `out` and returns 1; 0 if the log cannot be
+/// read; −1 on a null argument. `through_plays` counts the pitches to include (the play
+/// index of a timeline is the number of pitches before it): a client a pitch behind the sim
+/// asks for the pitches it has shown, and `u32::MAX` asks for all so far. It costs one pass over the log, so ask when it is shown, not
+/// every frame.
+///
+/// # Safety
+/// `g` must come from [`bb_game_create`]; `out` must be a valid pointer.
+#[unsafe(no_mangle)]
+pub unsafe extern "C" fn bb_game_box_score(g: *const BbGame, through_plays: u32, out: *mut BbBoxScore) -> i32 {
+    if g.is_null() || out.is_null() {
+        return -1;
+    }
+    let Some(game) = unsafe { &*g }.game.as_ref() else { return -1 };
+    let Ok(b) = bb_stats::box_score(&game.log_through(through_plays)) else { return 0 };
+    let mut box_: BbBoxScore = unsafe { std::mem::zeroed() };
+    box_.is_final = b.final_score.is_some() as u8;
+    let longest = b.linescore[0].len().max(b.linescore[1].len());
+    let first = longest.saturating_sub(BB_BOX_MAX_INNINGS);
+    box_.innings = b.innings.min(255) as u8;
+    box_.first_inning = (first + 1).min(255) as u8;
+    for side in 0..2 {
+        let t = &mut box_.teams[side];
+        let line = |l: &bb_stats::BatterLine| BbBatLine {
+            agent: l.agent,
+            number: l.number,
+            position: l.position,
+            batting_order: l.batting_order,
+            _pad: [0; 3],
+            pa: sat8(l.pa),
+            ab: sat8(l.ab),
+            r: sat8(l.runs),
+            h: sat8(l.h),
+            doubles: sat8(l.doubles),
+            triples: sat8(l.triples),
+            hr: sat8(l.hr),
+            rbi: sat8(l.rbi),
+            bb: sat8(l.bb),
+            k: sat8(l.k),
+            hbp: sat8(l.hbp),
+            sf: sat8(l.sf),
+            sh: sat8(l.sh),
+            _pad2: [0; 3],
+            given: name_field(l.name.strip_suffix(l.family.as_str()).unwrap_or(&l.name).trim_end()),
+            family: name_field(&l.family),
+        };
+        let n = b.batting[side].len().min(BB_BOX_MAX_BATTERS);
+        t.n_lines = n as u8;
+        for (dst, src) in t.lines.iter_mut().zip(&b.batting[side][..n]) {
+            *dst = line(src);
+        }
+        let x = &b.teams[side];
+        t.totals = BbBoxTotals {
+            pa: sat16(x.pa),
+            ab: sat16(x.ab),
+            r: sat16(x.runs),
+            h: sat16(x.h),
+            doubles: sat16(x.doubles),
+            triples: sat16(x.triples),
+            hr: sat16(x.hr),
+            rbi: sat16(x.rbi),
+            bb: sat16(x.bb),
+            k: sat16(x.k),
+            hbp: sat16(x.hbp),
+            sf: sat16(x.sf),
+            sh: sat16(x.sh),
+            lob: sat16(x.left_on_base),
+            undetermined: sat16(x.undetermined),
+            _pad: 0,
+        };
+        let runs = &b.linescore[side];
+        let hits = &b.hits_by_inning[side];
+        t.n_batted = runs.len().saturating_sub(first).min(BB_BOX_MAX_INNINGS) as u8;
+        for i in 0..t.n_batted as usize {
+            t.runs[i] = sat8(runs[first + i]);
+            t.hits[i] = sat8(hits.get(first + i).copied().unwrap_or(0));
+        }
+    }
+    unsafe { *out = box_ };
+    1
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -925,5 +1111,91 @@ mod tests {
         }
         assert_eq!(active_dives(&marks, 1.2)[0].dir, [1.0, 0.0]);
         assert!(active_dives(&marks, 4.0).is_empty());
+    }
+    /// The box score across the ABI is `bb_stats::box_score` of the same log (a pure function
+    /// of the log, computed when asked), however often it is asked, and it adds up: lines to
+    /// totals, innings to the score, and the same numbers at the end as from the finished game.
+    #[test]
+    fn the_box_score_is_the_stats_crates_reading_of_the_log() {
+        for seed in [3u64, 11] {
+            let g = bb_game_create(seed);
+            let mut asked_midway = None;
+            let (mut blob, mut len) = (std::ptr::null_mut(), 0usize);
+            let mut n = 0;
+            while unsafe { bb_game_advance(g, &mut blob, &mut len) } == 1 {
+                unsafe { bb_blob_free(blob, len) };
+                n += 1;
+                if n == 90 {
+                    let mut a: BbBoxScore = unsafe { std::mem::zeroed() };
+                    let mut b: BbBoxScore = unsafe { std::mem::zeroed() };
+                    assert_eq!(unsafe { bb_game_box_score(g, u32::MAX, &mut a) }, 1);
+                    assert_eq!(unsafe { bb_game_box_score(g, u32::MAX, &mut b) }, 1);
+                    // Asking twice gives the same answer (no state is kept or advanced).
+                    assert_eq!(unsafe { std::slice::from_raw_parts(&a as *const _ as *const u8, std::mem::size_of::<BbBoxScore>()) }, unsafe { std::slice::from_raw_parts(&b as *const _ as *const u8, std::mem::size_of::<BbBoxScore>()) });
+                    assert_eq!(a.is_final, 0);
+                    asked_midway = Some(a);
+                }
+            }
+            let mut f: BbBoxScore = unsafe { std::mem::zeroed() };
+            assert_eq!(unsafe { bb_game_box_score(g, u32::MAX, &mut f) }, 1);
+            assert_eq!(f.is_final, 1);
+            let (mut away, mut home) = (0u16, 0u16);
+            assert_eq!(unsafe { bb_game_score(g, &mut away, &mut home) }, 1);
+            // The same game played to the end by the library's own driver, read directly.
+            let log = bb_game::game::simulate_game(seed).log;
+            let want = bb_stats::box_score(&log).unwrap();
+            for side in 0..2 {
+                let t = &f.teams[side];
+                let runs: u32 = t.runs[..t.n_batted as usize].iter().map(|&x| x as u32).sum();
+                let hits: u32 = t.hits[..t.n_batted as usize].iter().map(|&x| x as u32).sum();
+                assert_eq!(runs, if side == 0 { away } else { home } as u32, "seed {seed} side {side}");
+                assert_eq!(t.n_batted as usize, want.linescore[side].len());
+                assert_eq!(t.totals.r as u32, want.teams[side].runs);
+                assert_eq!(hits, want.teams[side].h);
+                // Lines add up to the totals.
+                let lines = &t.lines[..t.n_lines as usize];
+                assert_eq!(lines.len(), 9);
+                assert_eq!(lines.iter().map(|l| l.ab as u32).sum::<u32>(), t.totals.ab as u32);
+                assert_eq!(lines.iter().map(|l| l.h as u32).sum::<u32>(), hits);
+                assert_eq!(lines.iter().map(|l| l.r as u32).sum::<u32>(), runs);
+                assert_eq!(lines.iter().map(|l| l.rbi as u32).sum::<u32>(), t.totals.rbi as u32);
+                for (l, w) in lines.iter().zip(&want.batting[side]) {
+                    assert_eq!((l.agent, l.ab as u32, l.h as u32, l.rbi as u32, l.bb as u32, l.k as u32), (w.agent, w.ab, w.h, w.rbi, w.bb, w.k));
+                    assert_eq!(text(&l.family), w.family);
+                    assert_eq!(format!("{} {}", text(&l.given), text(&l.family)), w.name);
+                }
+            }
+            // Midway the lines can only be shorter than at the end.
+            let m = asked_midway.expect("asked at pitch 90");
+            for side in 0..2 {
+                assert!(m.teams[side].totals.pa <= f.teams[side].totals.pa);
+                assert!(m.teams[side].n_batted <= f.teams[side].n_batted);
+            }
+            unsafe { bb_game_free(g) };
+        }
+        let mut x: BbBoxScore = unsafe { std::mem::zeroed() };
+        assert_eq!(unsafe { bb_game_box_score(std::ptr::null(), 0, &mut x) }, -1);
+    }
+    /// `through_plays` shows a client only what it has shown: the plate appearances in a box
+    /// score through k pitches are exactly those ended in the first k plays of the log.
+    #[test]
+    fn the_box_score_stops_where_asked() {
+        let g = bb_game_create(5);
+        let (mut blob, mut len) = (std::ptr::null_mut(), 0usize);
+        while unsafe { bb_game_advance(g, &mut blob, &mut len) } == 1 {
+            unsafe { bb_blob_free(blob, len) };
+        }
+        let log = bb_game::game::simulate_game(5).log;
+        let view = bb_schema::log::read(&log).unwrap();
+        for k in [0u32, 1, 37, 120, 10_000] {
+            let mut b: BbBoxScore = unsafe { std::mem::zeroed() };
+            assert_eq!(unsafe { bb_game_box_score(g, k, &mut b) }, 1);
+            let ended = view.plays.iter().take(k as usize).filter(|p| p.events().unwrap().iter().any(|e| e.body_as_plate_appearance_ended().is_some())).count();
+            let pa: usize = b.teams.iter().map(|t| t.totals.pa as usize).sum();
+            assert_eq!(pa, ended, "through {k} pitches");
+            assert_eq!(b.teams[0].n_lines, 9, "the lineups are there before a pitch");
+            assert_eq!(b.is_final == 1, k as usize >= view.plays.len());
+        }
+        unsafe { bb_game_free(g) };
     }
 }
