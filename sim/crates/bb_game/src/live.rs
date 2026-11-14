@@ -2712,8 +2712,21 @@ impl<'a> Sim<'a> {
         // Carry and throw are alternatives in ONE table. In particular, taking
         // the nearby bag cannot bypass an available lead force or double play.
         let options = self.holder_options(by);
+        // Equal values (p_out saturates to 1.0 for a second or more in hand, and with two out
+        // every out weighs the same) go to the carry, which has no throw to miss, then to the
+        // larger margin (Gemini A4 review P1-1: the first option listed, a throw to first,
+        // used to win, though a force was a step away).
+        let better = |o: &holder::HolderOption, cur: &holder::HolderOption| {
+            if (o.value - cur.value).abs() > 1e-9 {
+                o.value > cur.value
+            } else if o.carry != cur.carry {
+                o.carry
+            } else {
+                o.runner_at - o.ball_at > cur.runner_at - cur.ball_at
+            }
+        };
         let best = options.iter().enumerate().filter(|(_, o)| o.p_out > 0.3)
-            .fold(None, |best: Option<usize>, (i, o)| if best.is_none_or(|j| o.value > options[j].value) { Some(i) } else { best });
+            .fold(None, |best: Option<usize>, (i, o)| if best.is_none_or(|j| better(o, &options[j])) { Some(i) } else { best });
         if debug_throw() {
             eprintln!("t {:.2} holder {} best {:?}; options {:?}", self.t, by, best, options);
         }
@@ -5944,4 +5957,32 @@ mod tests {
         assert!(worst.0 <= 2.05 + 0.6, "a fielder reached the wall at {:.2} m/s (ball {:.1} m into the seats)", worst.0, worst.1);
     }
 
+
+    /// Gemini A4 review P1-1: with two out every out ends the inning, and p_out saturates to
+    /// 1.0 for any margin over a second, so a sure force a step away and a sure throw across
+    /// the diamond tie exactly. A fielder a step from the bag takes the force with his foot
+    /// rather than throw 27 m to first (the throw is the one that can go wrong).
+    #[test]
+    fn with_two_out_a_sure_force_a_step_away_beats_a_sure_throw_across() {
+        const SS: usize = 5;
+        let fx = fixture(&[(5, 1)]);
+        let inp = input(&fx, vec![RunnerIn { id: fx.st.batter, base: 0, speed: 8.2 }, RunnerIn { id: 5, base: 1, speed: 8.2 }]);
+        let mut st = fx.st.clone();
+        st.outs = 2;
+        let mut sim = new_sim(&inp, &mut st);
+        sim.t = 2.0;
+        held_at(&mut sim, SS, base_pos(2) + Vec3::new(-1.0, 0.0, 0.0));
+        sim.f[2].pos = base_pos(1);
+        let fd = &mut sim.f[SS];
+        (fd.up_at, fd.set_base, fd.face, fd.catch_vel) = (1.0, fd.a.transfer, None, Vec3::ZERO);
+        // The batter 2.6 s from first, the runner from first 2.0 s from second: both outs sure.
+        (sim.r[0].s, sim.r[0].v, sim.r[0].goal) = (BASE_L - 8.2 * 2.6, 8.2, 1);
+        (sim.r[1].s, sim.r[1].v, sim.r[1].goal) = (2.0 * BASE_L - 8.2 * 2.0, 8.2, 2);
+        let opts = sim.holder_options(SS);
+        let first = opts.iter().find(|o| !o.carry && o.base == 1).expect("a throw to first");
+        let step = opts.iter().find(|o| o.carry && o.base == 2).expect("a carry to second");
+        assert!(first.p_out > 0.999 && step.p_out > 0.999, "fixture: both sure ({} and {})", first.p_out, step.p_out);
+        sim.holder_act();
+        assert!(matches!(sim.ball, Ball::Held { by: SS }) && sim.f[SS].carry_to == Some(2), "he steps on second: {:?} carry {:?}", sim.ball, sim.f[SS].carry_to);
+    }
 }
