@@ -285,6 +285,49 @@ mod tests {
         assert_ne!(r.teams[0].players.iter().map(|p| p.family).collect::<Vec<_>>(), r.teams[1].players.iter().map(|p| p.family).collect::<Vec<_>>());
     }
 
+    /// The draw contract of data-formats §2.4, pinned: seed 7's two nines in batting order
+    /// (order, position, number, given, family). The Codex rosters review (2026-11-13)
+    /// reproduced these players with its own Python Philox and §2.4 generator, so the
+    /// literals are an independent expectation; a change to a stream id, a sub-index, the
+    /// draw order, the shuffle or a name list breaks them. Seed 7 exercises the rejection of
+    /// a teammate's given name (the away right fielder and the home second baseman were
+    /// each drawn as a second "Yuki" and a second "Diego" first).
+    #[test]
+    fn seed_7_gives_these_players() {
+        let want: [[(u8, &str, u8, &str, &str); 9]; 2] = [
+            [
+                (1, "CF", 28, "Yuki", "Kobayashi"),
+                (2, "LF", 13, "Tyler", "Davis"),
+                (3, "1B", 31, "Woo-jin", "Hwang"),
+                (4, "SS", 22, "Julio", "Nunez"),
+                (5, "RF", 68, "Justin", "Carter"),
+                (6, "C", 70, "Austin", "Cooper"),
+                (7, "2B", 94, "Kevin", "Roberts"),
+                (8, "3B", 19, "Ryan", "Hayes"),
+                (9, "P", 6, "Daniel", "Morgan"),
+            ],
+            [
+                (1, "C", 66, "Logan", "Thompson"),
+                (2, "2B", 65, "Raul", "Hernandez"),
+                (3, "RF", 67, "Justin", "Phillips"),
+                (4, "1B", 18, "Diego", "Cruz"),
+                (5, "LF", 4, "Jordan", "Harris"),
+                (6, "SS", 15, "Santiago", "Flores"),
+                (7, "3B", 61, "Sam", "Baker"),
+                (8, "CF", 19, "Koji", "Hayashi"),
+                (9, "P", 82, "Haruto", "Fujita"),
+            ],
+        ];
+        let r = Rosters::generate(7);
+        for side in 0..2 {
+            let got = r.teams[side].batting_order().map(|p| (p.batting_order, p.position_code(), p.number, p.given, p.family));
+            assert_eq!(got, want[side], "side {side}");
+            assert!(r.teams[side].players.iter().all(|p| (p.bats, p.throws) == (Hand::Right, Hand::Right)));
+        }
+        // Player ids: away 1–9 and home 10–18, in position order.
+        assert_eq!(r.teams.iter().flat_map(|t| t.players.iter().map(|p| p.player_id)).collect::<Vec<_>>(), (1..=18).collect::<Vec<_>>());
+    }
+
     /// The pools as data-formats §2.4 describes them.
     #[test]
     fn name_pools_are_ascii_weighted_to_one_and_share_no_family_name() {
@@ -299,8 +342,9 @@ mod tests {
                 assert!(seen.insert(*f), "{f} is in two pools or twice in one");
             }
         }
-        // More names than any game needs, so the rejection loop always ends: 18 family names
-        // in a game, nine given names on a team.
+        // More names than any game needs, so a rejected attempt always has acceptable names
+        // left to draw (18 family names in a game, nine given names on a team). That makes
+        // the loop end in practice; it is not a bound on the number of attempts.
         assert!(seen.len() > 18);
         assert!(NAME_POOLS.iter().map(|p| p.given.len()).sum::<usize>() > 9);
     }

@@ -572,6 +572,7 @@ name = "bb_stats"
 version = "0.1.0"
 dependencies = [
  "bb_game",
+ "bb_rules",
  "bb_schema",
 ]
 
