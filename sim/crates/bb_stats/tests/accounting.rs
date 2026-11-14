@@ -32,11 +32,17 @@ fn identities_hold_over_many_games() {
             assert_eq!(t.pa, t.k + t.bb + t.hbp + t.hr + t.batted);
             assert_eq!(t.pa, t.ab + t.bb + t.hbp + t.sf + t.sh, "I2 seed side {side}");
             let outs = b.outs_by_half.iter().skip(side).step_by(2).sum::<u32>();
-            assert_eq!(t.pa, t.runs + t.left_on_base + outs, "I1 seed side {side}, line {t:?}");
+            // I1 in its own words (rules-spec §11): AB + BB + HBP + SH + SF = R + LOB + opposing
+            // putouts. (The batter-runner left short of first when a preceding runner makes the
+            // third out is in LOB, 9.02(g).)
+            assert_eq!(t.ab + t.bb + t.hbp + t.sh + t.sf, t.runs + t.left_on_base + outs, "I1 seed side {side}, line {t:?}");
+            // Review P2-4: facts the scorer's own arithmetic cannot make true by itself.
+            assert!(t.rbi <= t.runs, "more RBI than runs, side {side}");
+            assert!(t.rbi >= t.hr, "a home run drives in at least the batter, side {side}");
+            assert!(t.sf <= t.rbi, "every sacrifice fly is an RBI, side {side}");
+            assert!(t.h <= t.ab && t.hr <= t.h && t.doubles + t.triples + t.hr <= t.h);
             assert_eq!(t.h, t.singles + t.doubles + t.triples + t.hr, "I7");
-            // The only unruled play is a walk-off that ends before the batter touches first
-            // (rules-spec §10.2): at most one, by the home team.
-            assert!(t.undetermined == 0 || (side == 1 && t.undetermined == 1), "unresolved rulings, side {side}: {}", t.undetermined);
+            assert_eq!(t.undetermined, 0, "unresolved rulings, side {side}");
         }
         assert_eq!(b.teams[0].pa + b.teams[1].pa, g.pa);
         // Pitches seen = log records.
