@@ -461,6 +461,8 @@ void ABbDirector::BeginPlay()
 	FParse::Value(Cmd, TEXT("BbShotStart="), NextShot);
 	FParse::Value(Cmd, TEXT("BbBenchSeconds="), BenchSeconds);
 	FParse::Value(Cmd, TEXT("BbDiveShots="), DiveShotsLeft);
+	FParse::Value(Cmd, TEXT("BbBoxShots="), BoxShotAtPlay);
+	FParse::Value(Cmd, TEXT("BbBoxHold="), BoxHoldS);
 	{
 		int32 Cut = 1;
 		FParse::Value(Cmd, TEXT("BbSideCut="), Cut);
@@ -656,6 +658,14 @@ void ABbDirector::BeginPlayback(FBbPlay&& Play)
 	{
 		bGameOver = true;
 		UE_LOG(LogBb, Display, TEXT("Game over after %d pitches"), PlaysShown);
+		if (Sim)
+		{
+			// The final box: every pitch, read by the sim from its log. The worker has nothing
+			// left to do, so nothing contends for the game.
+			RefreshBox(0xFFFFFFFFu);
+			bBoxFinal = bBoxValid;
+			BoxFinalTime = 0.f;
+		}
 		return;
 	}
 	++PlaysShown;
@@ -1508,7 +1518,9 @@ void ABbDirector::Tick(float DeltaSeconds)
 		WorstFrame = FMath::Max(WorstFrame, (double)DeltaSeconds);
 	}
 
-	// Keys: Space pauses, - and = change speed, C changes camera, Esc or Q quits.
+	// Keys: Space pauses, - and = change speed, C changes camera, Tab holds the box score,
+	// Esc or Q quits.
+	bool bTabHeld = false;
 	if (APlayerController* PC = GetWorld()->GetFirstPlayerController())
 	{
 		if (PC->WasInputKeyJustPressed(EKeys::SpaceBar))
@@ -1548,6 +1560,7 @@ void ABbDirector::Tick(float DeltaSeconds)
 		{
 			FPlatformMisc::RequestExit(false);
 		}
+		bTabHeld = PC->IsInputKeyDown(EKeys::Tab);
 	}
 
 	// The first pitch resolves on a worker like every other (PLAN §3.4): until it is ready
@@ -1944,9 +1957,114 @@ void ABbDirector::Tick(float DeltaSeconds)
 			BenchSeconds = FMath::Max(BenchSeconds, (float)Wall + 2.f);
 		}
 	}
-	if ((BenchSeconds > 0.f && Wall >= BenchSeconds) || (bGameOver && (ShotsLeft > 0 || BenchSeconds > 0.f)))
+	UpdateBoxScreen(DeltaSeconds, bTabHeld);
+	// A game that has ended leaves the final box up: an unattended run waits for it to settle
+	// (BoxHoldS) before it quits; a player quits with Esc or Q.
+	const bool bBoxSettled = !bBoxFinal || BoxFinalTime >= BoxHoldS;
+	if ((BenchSeconds > 0.f && Wall >= BenchSeconds) || (bGameOver && bBoxSettled && (ShotsLeft > 0 || BenchSeconds > 0.f)))
 	{
 		Finish();
+	}
+	if (bBoxFinalShot && Wall >= BoxShotWall + 1.5f)
+	{
+		Finish();
+	}
+}
+
+void ABbDirector::RefreshBox(uint32 Through)
+{
+	if (!Sim || (bBoxValid && BoxThrough == Through))
+	{
+		return;
+	}
+	bBoxValid = Sim->BoxScore(Through, Box);
+	BoxThrough = Through;
+	if (!bBoxValid)
+	{
+		UE_LOG(LogBb, Warning, TEXT("No box score from the sim library"));
+	}
+}
+
+void ABbDirector::BoxTitles(FString& Title, FString& Subtitle) const
+{
+	const int32 Away = Box.teams[0].totals.r;
+	const int32 Home = Box.teams[1].totals.r;
+	if (Box.is_final)
+	{
+		Title = Away > Home ? FString::Printf(TEXT("AWAY %d, HOME %d"), Away, Home) : FString::Printf(TEXT("HOME %d, AWAY %d"), Home, Away);
+		Subtitle = Box.innings == 9 ? FString(TEXT("FINAL")) : FString::Printf(TEXT("FINAL  -  %d INNINGS"), Box.innings);
+	}
+	else
+	{
+		Title = FString::Printf(TEXT("AWAY %d, HOME %d"), Away, Home);
+		Subtitle = TEXT("GAME IN PROGRESS");
+	}
+}
+
+void ABbDirector::UpdateBoxScreen(float DeltaSeconds, bool bTabHeld)
+{
+	APlayerController* PC = GetWorld()->GetFirstPlayerController();
+	ABbHUD* Hud = PC ? Cast<ABbHUD>(PC->GetHUD()) : nullptr;
+	if (!Hud)
+	{
+		return;
+	}
+	if (bBoxFinal)
+	{
+		// Fade to black, then the paper comes up on it. The sim has stopped; nothing else moves.
+		BoxFinalTime += DeltaSeconds;
+		if (PC->PlayerCameraManager)
+		{
+			PC->PlayerCameraManager->SetManualCameraFade(FMath::Clamp(BoxFinalTime / BoxFadeS, 0.f, 1.f), FLinearColor::Black, false);
+		}
+		BoxTitles(Hud->BoxTitle, Hud->BoxSubtitle);
+		Hud->Box = Box;
+		Hud->bBoxData = bBoxValid;
+		Hud->BoxDim = 1.f;
+		Hud->BoxAlpha = FMath::Clamp((BoxFinalTime - BoxFadeS * 0.8f) / BoxInS, 0.f, 1.f);
+		if (BoxShotAtPlay >= 0 && !bBoxFinalShot && BoxFinalTime >= BoxFadeS + BoxInS + 0.8f)
+		{
+			FScreenshotRequest::RequestScreenshot(FPaths::Combine(FPaths::ProjectSavedDir(), TEXT("Shots"), TEXT("box_final.png")), true, false);
+			bBoxFinalShot = true;
+			BoxShotWall = (float)Wall;
+		}
+		return;
+	}
+	// Unattended: hold the Tab view once, at pitch BoxShotAtPlay.
+	bool bWant = bTabHeld;
+	if (BoxShotAtPlay >= 0 && !bBoxMidShot && PlaysShown >= BoxShotAtPlay && !bGameOver)
+	{
+		bWant = true;
+		if (BoxShotWall < 0.f)
+		{
+			BoxShotWall = (float)Wall;
+		}
+		else if (Wall >= BoxShotWall + 0.8f)
+		{
+			FScreenshotRequest::RequestScreenshot(FPaths::Combine(FPaths::ProjectSavedDir(), TEXT("Shots"), TEXT("box_midgame.png")), true, false);
+			bBoxMidShot = true;
+			BoxShotWall = -1.f;
+		}
+	}
+	bWant = bWant && Current.bValid && Sim;
+	BoxPeek = FMath::Clamp(BoxPeek + (bWant ? 1.f : -1.f) * DeltaSeconds / BoxPeekS, 0.f, 1.f);
+	if (bWant)
+	{
+		// The pitches that have played out on screen; the worker is a pitch ahead and the
+		// box must not be.
+		RefreshBox(Current.Info.play_index + (PlayTime >= Current.Info.duration_s ? 1u : 0u));
+	}
+	Hud->BoxAlpha = bBoxValid ? BoxPeek : 0.f;
+	Hud->BoxDim = 0.62f;
+	if (BoxPeek > 0.f && bBoxValid)
+	{
+		BoxTitles(Hud->BoxTitle, Hud->BoxSubtitle);
+		Hud->Box = Box;
+		Hud->bBoxData = true;
+	}
+	else
+	{
+		Hud->bBoxData = false;
 	}
 }
 

@@ -486,6 +486,8 @@ The real API is specified in M0 by the spike (`bb_ffi`). It is expected to look 
 | `bb_game_save(handle) → savestate_blob` | Only at a decision point |
 | `bb_blob_free(blob)` | Rust owns every blob it returns |
 
+**Built in `bb_ffi` (as of 2026-11-14), beyond the sketch above.** `bb_game_box_score(game, through_plays, &BbBoxScore)` (A12) fills a plain struct (`include/bb_ffi.h`, append-only) with the box score of the game so far: for each side, the batting lines in order (name, number, position, PA, AB, R, H, 2B, 3B, HR, RBI, BB, K, HBP, SF, SH), the team totals with runners left on base and any unruled batted balls, and the linescore with runs and hits by inning (`first_inning`, `n_batted`; a game past 30 innings keeps the last 30); `is_final` is set once the log holds `GameEnded`. It is a **pure function of the event log**: the library closes a copy of the log it has written (`bb_game::Game::log_through`, `bb_schema::LogWriter::snapshot`: the plays asked for, a footer carrying their digests, the game's own log untouched) and reads it with `bb_stats::box_score`, the same scorer a finished log gets. `through_plays` is the number of pitches to include (`BbPlayInfo.play_index` is the number before that pitch; `UINT32_MAX` is all so far), so a client that runs a pitch behind the sim shows only what it has shown. It costs a pass over the log, so a client asks when the box is shown, not every frame. The sim keeps no extra state for it and no statistic is counted during play.
+
 ---
 
 ## 7. Game-State Snapshots

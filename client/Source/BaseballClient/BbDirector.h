@@ -22,6 +22,7 @@ class UMaterialInterface;
  * Command line: -BbSimLib=<path to libbb_ffi.so> -BbSeed=<n> -BbSpeed=<x>
  *               -BbCamera=<0 broadcast | 1 behind home | 2 overhead>
  *               -BbShots=<n> (take n screenshots, then quit) -BbShotEvery=<seconds> -BbShotStart=<seconds>
+ *               -BbBoxShots=<n> (photograph the Tab box at pitch n and the final box, then quit)
  *               -BbDiveShots=<n> (photograph n dives: in the air, lying, getting up; then quit)
  *               -BbAnimTest (stock clips looping) or -BbAnimTest=dive (dive pose candidates;
  *               -BbAnimFrac=<0..1> -BbAnimTilt=<degrees>)
@@ -52,6 +53,12 @@ private:
 	/** Puts the ball's shadow under the ball, sized for the camera as it now stands. */
 	void PlaceBallShadow(const BbFrame& Frame, bool bShown);
 	void Finish();
+	/** Reads the box score of the first Through pitches from the sim (A12), once per change. */
+	void RefreshBox(uint32 Through);
+	/** The box-score screen: held with Tab during the game, final at its end. */
+	void UpdateBoxScreen(float DeltaSeconds, bool bTabHeld);
+	/** Words for the box's title and subtitle. */
+	void BoxTitles(FString& Title, FString& Subtitle) const;
 
 	TUniquePtr<FBbSim> Sim;
 	FBbPlay Current;
@@ -349,6 +356,27 @@ private:
 	static constexpr float HrHoldS = 1.5f;
 	/** The card's lines: the batter's family name, "412 ft   108 mph", what it scored. */
 	FString HrName, HrLine, HrKind;
+
+	// The box score (A12). Box is the sim's reading of the log through BoxThrough pitches.
+	BbBoxScore Box{};
+	bool bBoxValid = false;
+	uint32 BoxThrough = 0;
+	/** How far the Tab view is up (0 to 1; it comes and goes in BoxPeekS). */
+	float BoxPeek = 0.f;
+	static constexpr float BoxPeekS = 0.15f;
+	/** The game is over: the picture fades to black, then the box fades in and stays. */
+	bool bBoxFinal = false;
+	float BoxFinalTime = 0.f;
+	static constexpr float BoxFadeS = 1.0f;
+	static constexpr float BoxInS = 0.7f;
+	/** Wall seconds an unattended run waits on the final box before it quits. */
+	float BoxHoldS = 3.f;
+	// -BbBoxShots=<n>: unattended check. At pitch n the Tab view is held for a moment and
+	// photographed (box_midgame.png), and at the end of the game the final box is (box_final.png).
+	int32 BoxShotAtPlay = -1;
+	float BoxShotWall = -1.f;
+	bool bBoxMidShot = false;
+	bool bBoxFinalShot = false;
 
 	/** 0 broadcast (cuts), 1 behind home, 2 overhead. */
 	int32 CameraMode = 0;

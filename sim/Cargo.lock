@@ -501,6 +501,7 @@ dependencies = [
  "bb_observe",
  "bb_physics",
  "bb_schema",
+ "bb_stats",
  "flatbuffers",
 ]
 

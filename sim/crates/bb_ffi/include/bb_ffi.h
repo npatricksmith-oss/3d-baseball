@@ -80,6 +80,41 @@ typedef struct {
 int32_t bb_game_roster(const BbGame *g, uint32_t side, uint32_t batting_slot, BbPlayer *out);
 /* The player behind an agent id of either kind: 1 = *out filled, 0 = not a player, -1 = bad args. */
 int32_t bb_game_player(const BbGame *g, uint16_t agent, BbPlayer *out);
+/* The box score of the game so far, a pure function of its event log, computed when asked
+ * (one pass over the log: ask when it is shown, not every frame). Sides: 0 away, 1 home.
+ * through_plays = how many pitches to include (BbPlayInfo.play_index is the number before that
+ * pitch; UINT32_MAX = all so far), so a client a pitch behind the sim shows only what it has shown.
+ * Counts are capped at 255 per batter, 65535 per side. Names are NUL-terminated ASCII.
+ * Fills *out and returns 1; 0 if the log cannot be read; -1 on bad args. */
+#define BB_BOX_MAX_BATTERS 12
+#define BB_BOX_MAX_INNINGS 30
+typedef struct {
+  uint16_t agent; uint8_t number, position, batting_order, _pad[3]; /* position 1-9 */
+  uint8_t pa, ab, r, h, doubles, triples, hr, rbi, bb, k, hbp, sf, sh, _pad2[3];
+  char given[BB_NAME_LEN], family[BB_NAME_LEN];
+} BbBatLine;
+typedef struct {
+  uint16_t pa, ab, r, h, doubles, triples, hr, rbi, bb, k, hbp, sf, sh;
+  uint16_t lob;          /* runners left on base at the end of each half-inning so far */
+  uint16_t undetermined; /* batted balls the scorer could not rule (not counted as hits) */
+  uint16_t _pad;
+} BbBoxTotals;
+typedef struct {
+  uint8_t n_lines;   /* lines[0..n_lines), in batting order */
+  uint8_t n_batted;  /* innings this side has batted: runs[] and hits[] used, from first_inning */
+  uint8_t _pad[2];
+  BbBoxTotals totals;
+  BbBatLine lines[BB_BOX_MAX_BATTERS];
+  uint8_t runs[BB_BOX_MAX_INNINGS], hits[BB_BOX_MAX_INNINGS];
+} BbBoxTeam;
+typedef struct {
+  uint8_t is_final;     /* 1 once the log holds the end of the game */
+  uint8_t innings;      /* innings played or begun */
+  uint8_t first_inning; /* inning number of runs[0]: 1 unless the game ran past BB_BOX_MAX_INNINGS */
+  uint8_t _pad;
+  BbBoxTeam teams[2];
+} BbBoxScore;
+int32_t bb_game_box_score(const BbGame *g, uint32_t through_plays, BbBoxScore *out);
 /* blob/len must be a readable allocation of that length (normally one from bb_game_advance).
  * Summary of a timeline blob: 1 = ok, -1 = bad args or not a timeline. */
 int32_t bb_timeline_info(const uint8_t *blob, size_t len, BbPlayInfo *out);

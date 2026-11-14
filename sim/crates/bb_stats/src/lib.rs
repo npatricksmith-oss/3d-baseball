@@ -87,6 +87,8 @@ pub struct BoxScore {
     /// Each side's batters in batting order (away, home); empty if the log has no rosters.
     pub batting: [Vec<BatterLine>; 2],
     pub linescore: [Vec<u32>; 2],
+    /// Hits by inning, parallel to `linescore` (one entry per half-inning the side batted).
+    pub hits_by_inning: [Vec<u32>; 2],
     /// Outs recorded per half-inning, in order (index = half-inning number).
     pub outs_by_half: Vec<u32>,
     pub final_score: Option<(u32, u32)>,
@@ -142,6 +144,7 @@ pub fn box_score_with_options(bytes: &[u8], options: scorer::ScorerOptions) -> R
                     let h = e.body_as_half_inning_started().unwrap();
                     side = if h.half() == ev::HalfInning::Top { 0 } else { 1 };
                     b.linescore[side].push(0);
+                    b.hits_by_inning[side].push(0);
                     b.outs_by_half.push(0);
                     b.innings = b.innings.max(h.inning() as u32);
                     outs_in_half = 0;
@@ -207,6 +210,7 @@ pub fn box_score_with_options(bytes: &[u8], options: scorer::ScorerOptions) -> R
                         Outcome::Strikeout => { t.k += 1; l.k += 1; t.ab += 1; l.ab += 1; }
                         Outcome::Hit(base) => {
                             t.ab += 1; l.ab += 1; t.h += 1; l.h += 1;
+                            if let Some(x) = b.hits_by_inning[side].last_mut() { *x += 1; }
                             match base {
                                 1 => { t.singles += 1; l.singles += 1; }
                                 2 => { t.doubles += 1; l.doubles += 1; }

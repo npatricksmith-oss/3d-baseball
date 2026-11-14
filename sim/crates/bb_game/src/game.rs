@@ -496,6 +496,15 @@ impl Game {
     }
 
     /// Close the log and tally the result from the rules events (event sourcing, PLAN §4.3).
+    /// The event log through the first `plays` pitches (all so far if fewer), closed with a
+    /// footer, without ending the game. A reader (`bb_stats::box_score`) takes it like a
+    /// finished log; the game's own log and digest chain are untouched. The footer's score is
+    /// the score now, which is only the score at `plays` when that is all of them.
+    pub fn log_through(&self, plays: u32) -> Vec<u8> {
+        let s = self.st.score();
+        self.writer.snapshot(plays as usize, s[0].min(255) as u8, s[1].min(255) as u8)
+    }
+
     pub fn finish(self) -> GameResult {
         let mut res = self.res;
         let mut pa_events: Vec<Event> = Vec::new();
