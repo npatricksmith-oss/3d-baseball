@@ -240,6 +240,7 @@ Runs per game were not printed until late in the day; the early rows have PA per
 
 | Date | Task | Commit | Check |
 |---|---|---|---|
+| 11-14 | Swing v2 literals named (`PLANE_TILT_PER_M`, `REACH_PER_BAT_CONTROL`, `TILT_GUARD_MARGIN`); attack-angle spec text corrected (**branch `work/swing-recalib`**) | see `work/swing-recalib` log | Digests identical, seeds 1, 2, 3, 42; `sim-cli games --n 300 --seed 0` output identical |
 | 11-14 | A runner reads whether the base ahead is held from what he sees (Gemini A4 review): the runner ahead visibly not moving forward for 0.2 s, not his private goal | `33d43ff` | Standard run (seeds 0–299 and 1000–1299), `sf_probe` (300 games) and `dp_probe` (256 games) identical to the build before it, on main `f3dc029` |
 | 11-14 | Tag-up start model (agent-models §6.4), parameters named and pending, neutral defaults | `1508c1b` | Digests identical, seeds 1, 2, 3, 42; `sim-cli games --n 300 --seed 0` output identical to main `f1154f3` (5.32). Values and the measurement wait for the tag-up sources note |
 | 11-14 | Second round of deferred tests (low-catch boundary, golden roster seeds from a Python oracle, rules-passing scenarios with `known_gap`, ignored pop-up fixtures) | `486866f`..`0deb559` | Tests, scenarios and the scenario harness only; no sim code changed |

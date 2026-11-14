@@ -78,9 +78,15 @@ pub struct SwingNoise {
 impl SwingNoise {
     /// From the batter's attributes with combined factor `k` (global × composure).
     pub fn new(b: &BatterAttrs, k: f64) -> Self {
-        Self { v_offset: b.bat_control * k, tilt_per_m: 1.5, reach: 0.7 * b.bat_control * k, timing: b.timing * k, effort: EFFORT_SIGMA * k }
+        Self { v_offset: b.bat_control * k, tilt_per_m: PLANE_TILT_PER_M, reach: REACH_PER_BAT_CONTROL * b.bat_control * k, timing: b.timing * k, effort: EFFORT_SIGMA * k }
     }
 }
+
+/// Plane-tilt σ (rad) per meter of δ_v σ [E] (agent-models §3.6): 1.0° at grade 50 (δ_v σ
+/// 1.2 cm). An M2 engineering value, unsourced.
+pub const PLANE_TILT_PER_M: f64 = 1.5;
+/// Reach σ δ_r as a fraction of δ_v σ (`BatControl`) [E] (agent-models §3.6).
+pub const REACH_PER_BAT_CONTROL: f64 = 0.7;
 
 /// Relative σ of a swing's sweet-spot speed about the batter's `BatSpeed` [E] (agent-models
 /// §3.6): Statcast's within-batter SD of bat speed on competitive swings met within 3 in of the

@@ -320,7 +320,7 @@ Derived at grade 50 (checks, not inputs): hands turn about 76° and the bat abou
 2. **Attack angle** α (the sweet spot's elevation at t_c): `α = α₀ + α_h·(h − ½)`, α₀ = 8°, α_h = −8.7° per zone height [E from the same sample: 11.9 / 7.8 / 6.1° by third]. Execution's plane-tilt noise adds to α.
 3. **Attack direction** ψ (horizontal direction of the sweet spot's velocity, pull-positive): `ψ = ψ₀ + ψ_x·x_in`, ψ₀ = 0, ψ_x = +16.6° per m inside [E from the sample's means: −1.6 / +0.6 / +6.5° outside / middle / inside].
 4. **Velocity direction** `V̂ = cos α·ĥ + sin α·ẑ`, ĥ the horizontal unit vector at ψ (toward the pull side for positive ψ).
-5. **Plane normal.** Up-normal `ν̂ = cos β·ẑ + sin β·(cos κ·ĥ + sin κ·p̂)` with `p̂ = ẑ × ĥ`, `cos κ = −tan α / tan β` (so ν̂ ⊥ V̂; requires |α| < β, else β is raised to |α| + 1°), and sin κ chosen so the plane falls away from the batter toward the plate (`sin κ = −side·√(1 − cos²κ)`, side = +1 for a right-handed batter). **n̂ = side·ν̂**.
+5. **Plane normal.** Up-normal `ν̂ = cos β·ẑ + sin β·(cos κ·ĥ + sin κ·p̂)` with `p̂ = ẑ × ĥ`, `cos κ = −tan α / tan β` (so ν̂ ⊥ V̂; requires |α| < β, else β is raised to |α| + 1° [E], `swing::TILT_GUARD_MARGIN`), and sin κ chosen so the plane falls away from the batter toward the plate (`sin κ = −side·√(1 − cos²κ)`, side = +1 for a right-handed batter). **n̂ = side·ν̂**.
 6. **Bat axis** at t_c: `â_c = V̂ × n̂` (in the plane, ⊥ to the path, pointing knob to tip). The vertical bat angle `asin(â_c·ẑ)` comes out of α and β alone: about −30° at a middle aim, steeper low and flatter high (Blast: −25° to −35° for professionals, vendor).
 7. **Hand radius.** C sits on the line through the knob along −â_c: `C = A − (u_ss + ρ)·â_c`, with C's lateral position fixed at `x_C = side·center_x` (center_x = −1.10 m for a right-handed batter [E]: puts ρ near 0.30·H at a middle aim). So `ρ = (A.x − x_C)/â_c.x − u_ss`, clamped to the ρ range; a clamped swing keeps x_C and comes up short or long along â_c, and the world decides what that does (contact off the sweet spot, or a miss). Inside pitches are met with the hands in, outside pitches with the arms extended, at the same bat speed (Statcast: the intercept moves 17 in further from the batter from inside to outside with no rise in bat speed).
 8. **Contact depth** `y_c(x*) = y₀ + k·x_in`, y₀ = 0.35 m [E], k = 0.125 [E from the sample: intercept depth 29.4 in outside to 31.8 in inside; v1's 0.6 was authored for its radial bat].
@@ -336,8 +336,8 @@ C is the center of the hands' effective arc, not the spine; it moves up and down
 | Component | σ source |
 | :--- | :--- |
 | δ_v (vertical offset) | `BatControl` |
-| α (plane tilt) | `BatControl` (fixed ratio to δ_v [E]) |
-| δ_r (reach) | `BatControl` × 0.7 [E] |
+| α (plane tilt) | `BatControl`: 1.5 rad per m of δ_v's σ [E] (`motor::PLANE_TILT_PER_M`; 1.0° at grade 50; an M2 engineering value, unsourced) |
+| δ_r (reach) | `BatControl` × 0.7 [E] (`motor::REACH_PER_BAT_CONTROL`) |
 | t₀ (timing) | `Timing` |
 | effort (relative sweet-spot speed) | 4.5% [E] (`motor::EFFORT_SIGMA`; purpose `SwingEffort`, its own stream). Statcast 2025 sample: within-batter SD of competitive bat speed 3.2 mph at 71.7 for swings met within 3 in of the batter's own mean depth over the middle of the plate (4.3 mph without that restriction, which includes depth and location). v2 sets every planned swing to `BatSpeed`, so without this term every grade-50 swing would be 71.5 mph |
 

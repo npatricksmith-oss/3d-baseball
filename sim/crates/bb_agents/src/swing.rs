@@ -187,9 +187,13 @@ impl SwingTemplate {
     }
 }
 
+/// How much steeper than |α| a plane raised by the tilt guard is, rad [E] (agent-models §3.6
+/// step 5).
+pub const TILT_GUARD_MARGIN: f64 = DEG;
+
 /// The plane must be steeper than the path it contains (agent-models §3.6 step 5).
 fn guard_tilt(beta: f64, alpha: f64) -> f64 {
-    if alpha.abs() >= beta { alpha.abs() + DEG } else { beta }
+    if alpha.abs() >= beta { alpha.abs() + TILT_GUARD_MARGIN } else { beta }
 }
 
 /// Placement θ (agent-models §3.6), as deviations applied by execution noise.
