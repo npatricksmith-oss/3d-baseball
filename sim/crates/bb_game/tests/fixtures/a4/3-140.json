@@ -57,6 +57,7 @@
     ]
   ],
   "seed": 3,
+  "source_commit": "d565cf6cc53865833c0ea84caf8dd0fc3dd89d2e",
   "strikes": 1,
   "swing_lead": 0.1571437943822251,
   "t_contact": 0.4526404599640437

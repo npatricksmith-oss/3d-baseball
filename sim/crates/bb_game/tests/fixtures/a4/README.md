@@ -1,7 +1,7 @@
 # A4 live-ball regression fixtures
 
-Frozen from main `9fdeec169a0ba522bf7b165da425e2d6274e1ea3` before the fixes (`1-64`, `17-203`)
-and under Savant 2024 infield alignment (`23-109`, `3-140`).
+Frozen from main `9fdeec169a0ba522bf7b165da425e2d6274e1ea3` before the fixes (`1-64`, `13-140`,
+`17-203`) and under Savant 2024 infield alignment (`23-109`, `3-140`).
 The numbers are the original pitch's executed contact and public starting rules
 situation, captured via `Game::step_pitch`. No alternate outcome was generated.
 Use the original seed/play for all keyed input noise. Reconstruct ordinary
@@ -12,8 +12,12 @@ future changed game's earlier pitches.
 - `1-64`: stop at third must not create a home destination.
 - `23-109`: fourth inning, one out and loaded; a carry to first is an option,
   which removes the other forces, and the holder must weigh the sure lead force
-  home instead (`[4, 1]`). Replaces frozen `9fdeec1` `13-140`, whose +35.4° chopper
-  skips past 1B holding at Savant LHB DP depth (88.9 ft / +41.0°) into shallow RF.
+  home instead (`[4, 1]`; the feed home goes at full effort, a force at first being
+  behind it).
+- `13-140`: tied sixth, one out and loaded; the original case of the same choice.
+  It was dropped with the Savant alignment, when the +35.4° chopper skipped past a
+  first baseman holding near his bag, and restored on 2026-11-14 once he played at
+  Standard depth with second occupied. Only the choice is asserted.
 - `3-140`: tied sixth, one out, runners first/third; preserve a likely
   throw-second/throw-first double play against a single home tag (replaces
   frozen `9fdeec1` `70-157`, whose 102 mph +11.0° LHB grounder shoots cleanly
