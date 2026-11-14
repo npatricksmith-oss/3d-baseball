@@ -318,6 +318,9 @@ struct Fielder {
     set_base: f64,
     face: Option<Vec3>,
     catch_vel: Vec3,
+    /// He took it on the ground from a dive (set at each securing; `dove` is his recovery
+    /// state and is cleared while he still holds the ball: Codex hurried-throws review #1).
+    took_diving: bool,
     /// The base whose throws he is backing up, if that is his job on this play.
     backs: Option<u8>,
     /// Called off a ball in the air by a sure call (agent-models §5.7): the spot he backs up
@@ -2033,6 +2036,9 @@ impl<'a> Sim<'a> {
                 // way he is running, or the ball coming to him, or the plate.
                 let toward = |v: Vec3| (m::hypot(v.x, v.y) > FACE_MIN_MPS).then(|| Vec3::new(v.x, v.y, 0.0));
                 fd.up_at = up_at;
+                // Down as he takes it: diving now, or not yet up from an earlier dive (a
+                // man whose get-up is over is on his feet, whatever the flag still says).
+                fd.took_diving = fd.dove && up_at > self.t;
                 fd.set_base = fd.a.transfer;
                 fd.catch_vel = fd.vel;
                 fd.face = Some(toward(fd.vel).or(toward(-bv)).unwrap_or(Vec3::new(-fd.pos.x, -fd.pos.y, 0.0)));
@@ -2658,6 +2664,15 @@ impl<'a> Sim<'a> {
         // gets set. Short of time he lets go as soon as waiting longer would cost him his
         // margin, and as soon as he can if he has none; but only if that gets the ball
         // there sooner (not when it would wait for the man covering the bag anyway).
+        if !through && (tgt - fd.pos).norm() < 6.0 {
+            // Closer to take it himself: no throw, so no set-up for one; he goes once he
+            // has the ball in hand (his plain transfer, as before hurried throws: Codex
+            // hurried-throws review #2).
+            if self.t >= fd.ready_at {
+                self.f[by].target = tgt;
+            }
+            return;
+        }
         let su = self.set_up_for(by, leg);
         let since = self.t - fd.up_at;
         if since < su.earliest_s {
@@ -2677,11 +2692,6 @@ impl<'a> Sim<'a> {
                 self.throw_to(by, leg, b, i, true);
                 return;
             }
-        }
-        if (tgt - fd.pos).norm() < 6.0 {
-            // Closer to take it himself.
-            self.f[by].target = tgt;
-            return;
         }
         let receiver = self.receiver_for(by, b);
         // Time the release so the ball arrives when the receiver can be at the bag.
@@ -2707,7 +2717,7 @@ impl<'a> Sim<'a> {
         let fd = &self.f[by];
         let to = tgt - fd.pos;
         let turn = fd.face.map(|f| throwing::turn_extra_s(f, to, fd.a.throws)).unwrap_or(0.0);
-        SetUp::new(fd.set_base, turn, throwing::footwork_s(fd.catch_vel, to, fd.dove))
+        SetUp::new(fd.set_base, turn, throwing::footwork_s(fd.catch_vel, to, fd.took_diving))
     }
 
     /// Fielder `by` throws to ground point `tgt` for `receiver` (the ball is headed for base
@@ -2850,6 +2860,7 @@ fn new_sim<'a>(inp: &'a LiveInput<'a>, st: &'a mut RulesState) -> Sim<'a> {
                 set_base: 0.0,
                 face: None,
                 catch_vel: Vec3::ZERO,
+                took_diving: false,
                 backs: None,
                 peel: None,
             }
@@ -5103,6 +5114,76 @@ mod tests {
     /// The ball leaves the throwing hand (owner backlog A1): facing his target, a
     /// right-hander's hand is on his right and a left-hander's on his left, `THROW_ARM_OFFSET_M`
     /// out, at release height. Worked in the sim frame (+X first base, +Y center field).
+    /// The center fielder at (0, 80) with the dive flag up and his get-up due at `up_s`,
+    /// the shortstop on second, nobody running. A slow roller passes half a metre in front
+    /// of him from time 1.5, starting `x0` along its path. Runs whole ticks (captures, the
+    /// holder, movement) until he throws; returns the sim and the release time.
+    fn center_fielder_takes_a_roller(up_s: f64, x0: f64) -> (Sim<'static>, f64) {
+        let fx: &'static Fixture = Box::leak(Box::new(fixture(&[])));
+        let inp: &'static LiveInput<'static> = Box::leak(Box::new(input(fx, vec![RunnerIn { id: fx.st.batter, base: 0, speed: 8.2 }])));
+        let st: &'static mut RulesState = Box::leak(Box::new(fx.st.clone()));
+        let mut sim = new_sim(inp, st);
+        sim.f[CF].pos = Vec3::new(0.0, 80.0, 0.0);
+        loose_ball(&mut sim, 1.5, Vec3::new(x0, 79.5, 0.04), Vec3::new(6.0, 0.0, 0.0));
+        (sim.f[5].pos, sim.f[5].target) = (base_pos(2), base_pos(2));
+        sim.f[CF].role = Role::Chase;
+        sim.f[CF].dove = true;
+        sim.f[CF].ready_at = up_s;
+        for _ in 0..240 {
+            world_tick(&mut sim);
+            sim.holder_act();
+            if matches!(sim.ball, Ball::Thrown { .. }) {
+                let t = sim.t;
+                return (sim, t);
+            }
+        }
+        panic!("no throw");
+    }
+
+    // Codex hurried-throws review #1. He takes the roller lying down from a dive, up at
+    // 2.5 s. Facing the ball (it comes from −X), second base is straight off a
+    // right-hander's glove shoulder: set = 0.85 − 0.12 + 0.30 after a dive = 1.03 s after he
+    // is up, so the throw leaves at 3.53 s, and it is recorded as an off-balance set-up.
+    // (His recovery flag clears at 3.35 s; the footwork must outlast it.)
+    #[test]
+    fn dive_footwork_lasts_until_the_throw() {
+        let (sim, t) = center_fielder_takes_a_roller(2.5, -3.0);
+        assert!(t >= 3.53 - 1e-9 && t < 3.53 + 2.0 * DT, "released at {t:.3}");
+        assert_eq!(sim.out.hurry, vec![(0.0, true)]);
+    }
+
+    // And a man whose get-up ended half a tick before he takes a ball standing owes no dive
+    // footwork, though his recovery flag is still up: set 0.85 − 0.12 = 0.73 s after 1.5 s.
+    #[test]
+    fn a_recovered_fielder_owes_no_dive_footwork() {
+        let (sim, t) = center_fielder_takes_a_roller(1.5 - 0.5 * DT, 0.0);
+        assert!(secured_at(&sim) == Some(1.5), "secured {:?}", secured_at(&sim));
+        assert!(t >= 2.23 - 1e-9 && t < 2.23 + 2.0 * DT, "released at {t:.3}");
+        assert_eq!(sim.out.hurry, vec![(0.0, false)]);
+    }
+
+    // Codex hurried-throws review #2: a first baseman 5 m from his bag with the ball carries
+    // it there as soon as he has it in hand (0.65 s), without first getting set for a throw
+    // he will not make (0.77 s, turning off his throwing shoulder).
+    #[test]
+    fn carrying_the_ball_to_the_bag_waits_for_no_throw_set_up() {
+        let fx = fixture(&[]);
+        let inp = input(&fx, vec![RunnerIn { id: fx.st.batter, base: 0, speed: 8.2 }]);
+        let mut st = fx.st.clone();
+        let mut sim = new_sim(&inp, &mut st);
+        sim.t = 1.0 + 0.66;
+        let at = base_pos(1) + Vec3::new(5.0, 0.0, 0.0);
+        held_at(&mut sim, 2, at);
+        sim.f[0].pos = base_pos(1);
+        let fd = &mut sim.f[2];
+        (fd.up_at, fd.ready_at, fd.set_base, fd.face) = (1.0, 1.65, 0.65, Some(Vec3::new(0.0, -1.0, 0.0)));
+        // The batter 1.2 s from first: too close for the sure-thing run check, a play all the same.
+        (sim.r[0].s, sim.r[0].v, sim.r[0].goal) = (BASE_L - 8.2 * 1.2, 8.2, 1);
+        assert!((sim.set_up_for(2, base_pos(1)).set_s - 0.77).abs() < 1e-9);
+        sim.holder_act();
+        assert!((sim.f[2].target - base_pos(1)).norm() < 1e-9, "target {:?}", sim.f[2].target);
+    }
+
     /// The shortstop holds the ball at (−8, 38) at time 1.0, on his feet, having taken it
     /// standing (no turn counted), the first baseman on his bag, and the batter `eta_s` from
     /// first at full speed. Steps the holder and the runner until the ball is thrown; returns

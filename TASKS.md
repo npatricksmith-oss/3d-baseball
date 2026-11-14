@@ -9,10 +9,10 @@ Status: `[ ]` not started · `[~]` in progress · `[x]` done · `[?]` needs an o
 
 ## Resume here (2026-11-13: hurried throws, A3)
 
-Branch `claude/handedness-complete-6e0bc7` (handedness is merged into main at `a4c8219`; A3 is on top). `cargo test --workspace --release`: 192 pass. Spec: agent-models §5.5 (set-up, the turn, hurrying), §10 (ratings note); measurements in [the throwing note](docs/calibration/2026-11-13-throwing.md).
+Branch `claude/handedness-complete-6e0bc7` (handedness is merged into main at `a4c8219`; A3 is on top). `cargo test --workspace --release`: 195 pass. Spec: agent-models §5.5 (set-up, the turn, hurrying), §10 (ratings note); measurements in [the throwing note](docs/calibration/2026-11-13-throwing.md).
 
-- **Waiting on a review:** the Codex review of A3 (`docs/reviews/2026-11-13-codex-hurried-throws-review.md`) was started at the end of the session. Commit it, fix or defer its findings, write its Resolution.
-- **Open, for the next calibration:** runs/team-game 5.35 → 5.54 (seeds 0–299). The footwork a fielder owes moving away (0.2 s) or after a dive (0.3 s) costs 0.37; hurrying and the turn give back 0.18. Recalibrate with the handedness mix (below). Check the outfield's 0.85 s transfer against measured exchange times: it may already contain some of that footwork.
+- **Nothing is waiting on a review.** The [Codex hurried-throws review](docs/reviews/2026-11-13-codex-hurried-throws-review.md) is resolved: no P1; both P2s (dive footwork was read from a flag that clears mid-possession; carrying the ball to a bag waited for a throw's set-up) and both P3s (spec gaps) are fixed. It reproduced every number in the note and matched game digests with the new terms off.
+- **Open, for the next calibration:** runs/team-game 5.35 → 5.53 (seeds 0–299). The footwork a fielder owes moving away (0.2 s) or after a dive (0.3 s) costs 0.37; hurrying and the turn give back 0.18. Recalibrate with the handedness mix (below). Check the outfield's 0.85 s transfer against measured exchange times: it may already contain some of that footwork.
 - **Next in the agreed order:** A4 throw choices from the outs and the runners, then A17 errors.
 
 Done (A3):

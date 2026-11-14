@@ -73,7 +73,8 @@ pub fn turn_extra_s(facing: Vec3, to_target: Vec3, throws: Hand) -> f64 {
 }
 
 /// Footwork owed before a balanced throw along `to_target` by a fielder who took the ball
-/// moving at `catch_vel` (`dove`: he went to the ground for it), s.
+/// moving at `catch_vel` (`dove`: he took it on the ground from a dive), s. A dive replaces
+/// the moving-away term: he gets up from a standstill.
 pub fn footwork_s(catch_vel: Vec3, to_target: Vec3, dove: bool) -> f64 {
     if dove {
         return DIVE_FOOTWORK_S;
@@ -177,6 +178,8 @@ mod tests {
         assert_eq!(footwork_s(Vec3::new(5.0, 0.0, 0.0), to, false), 0.0);
         assert_eq!(footwork_s(Vec3::new(-1.5, 6.0, 0.0), to, false), 0.0); // across, not away
         assert_eq!(footwork_s(Vec3::ZERO, to, true), 0.3);
+        // A dive while moving away: 0.3, not 0.5 (he gets up from a standstill).
+        assert_eq!(footwork_s(Vec3::new(-5.0, 0.0, 0.0), to, true), 0.3);
     }
 
     // The worked example of agent-models §5.5: an infielder (0.65 s) moving away.
