@@ -103,16 +103,16 @@ fn seed_23_play_109_takes_a_sure_lead_force_instead_of_automatic_first() {
 #[test]
 fn seed_3_play_140_keeps_the_force_double_play_against_a_single_home_tag() {
     // §5.6: tied sixth, runners first and third, one out: two likely outs (second
-    // then first) beat a single home attempt. With continuation disabled the
-    // unchanged first-out weights instead favour home.
+    // then first) beat a single home attempt; the throw is weighed with its likely
+    // second out. (Since a tag takes 0.25 s and runners start with τ 0.68 s, §6.4,
+    // home is no longer the single-out favourite either, so that counterfactual is gone.)
     // (Replaces frozen 9fdeec1 fixture `70-157`, whose 102 mph +11.0° LHB grounder
     // now shoots cleanly between Savant LHB DP SS -5.7° and 2B +19.0° into CF.)
     let (out, choices, _) = replay(include_str!("fixtures/a4/3-140.json"));
     assert_eq!((choices[0].action, choices[0].base), ("throw", 2), "{:#?}", choices[0]);
     assert_eq!(out.calls.iter().map(|c| c.base).collect::<Vec<_>>(), vec![2, 1]);
-    let params = bb_agents::throwing::ChoiceParams { continuation_weight: 0.0, ..Default::default() };
-    let (_, single_out_choices, _) = replay_with(include_str!("fixtures/a4/3-140.json"), params);
-    assert_eq!(single_out_choices[0].base, 4, "single-out destination weights still favour home");
+    let chosen = &choices[0].options[choices[0].selected_option.unwrap()];
+    assert!(chosen.second_out_p.is_some_and(|p| p > 0.5), "{chosen:#?}");
 }
 
 #[test]
