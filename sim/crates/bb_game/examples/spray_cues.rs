@@ -285,7 +285,7 @@ fn honest(rows: &[Row], y: &[f64]) {
             rows.iter().map(|row| row.cues[col] + sd * r.normal()).collect()
         };
         let px = noisy(0, 0, spx);
-        let face = noisy(1, 5, 1.915 * st_ms);
+        let face = noisy(1, 5, bb_game::play::BAT_YAW_RATE_DPS / 1000.0 * st_ms);
         let depth = noisy(2, 7, 0.038 * st_ms);
         let onset = noisy(3, 8, st_ms);
         let onset_rel = noisy(4, 14, st_ms);

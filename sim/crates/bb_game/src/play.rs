@@ -144,9 +144,9 @@ pub const BAT_READ_TIME_SIGMA_50_S: f64 = 0.040;
 /// 38 ms at grade 80 and 146 ms at grade 20 (agent-models §5.10, the swing's lead).
 pub const LEAD_READ_TIME_SIGMA_50_S: f64 = 0.075;
 /// How fast the bat's horizontal angle turns at contact, deg/s [E]: the mean over fair balls in
-/// play (sd 143; `examples/bat_read_geometry.rs`, 48 games, 2026-11-13). A property of the
-/// swing model: refit when it changes.
-pub const BAT_YAW_RATE_DPS: f64 = 1915.0;
+/// play (sd 209; `examples/bat_read_geometry.rs`, 48 games, refit for the v2 swing 2026-11-14;
+/// v1 gave 1,915, sd 143). A property of the swing model: refit when it changes.
+pub const BAT_YAW_RATE_DPS: f64 = 2312.0;
 /// Ratio per 10 grades for every Anticipation read σ (less is better), [E].
 pub const ANTIC_RHO: f64 = 1.25;
 
@@ -760,19 +760,19 @@ mod attr_tests {
     }
 
     // agent-models §5.10 and §10 (the bat-read derivation, 2026-11-13): the bat-angle read σ is
-    // the bat's 1,915°/s at contact times his timing σ for the contact instant, 40 ms at grade
-    // 50 and a factor 1.25³ = 1.953125 per 30 grades. By hand: grade 50, 1915 × 0.040 = 76.6°;
-    // grade 80, 76.6 / 1.953125 = 39.2192°; grade 20, 76.6 × 1.953125 = 149.609375°. The
-    // pitch-location read keeps its 0.15 m at grade 50.
+    // the bat's 2,312°/s at contact (v2 swing) times his timing σ for the contact instant, 40 ms
+    // at grade 50 and a factor 1.25³ = 1.953125 per 30 grades. By hand: grade 50, 2312 × 0.040 =
+    // 92.48°; grade 80, 92.48 / 1.953125 = 47.349760°; grade 20, 92.48 × 1.953125 = 180.625°.
+    // The pitch-location read keeps its 0.15 m at grade 50.
     #[test]
     fn bat_read_sigma_follows_the_timing_derivation() {
         let a = FielderAttrs::average(5);
-        assert!((a.swing_sigma.to_degrees() - 76.6).abs() < 1e-9, "{}", a.swing_sigma.to_degrees());
-        assert!((a.with_anticipation(50.0).swing_sigma.to_degrees() - 76.6).abs() < 1e-9);
+        assert!((a.swing_sigma.to_degrees() - 92.48).abs() < 1e-9, "{}", a.swing_sigma.to_degrees());
+        assert!((a.with_anticipation(50.0).swing_sigma.to_degrees() - 92.48).abs() < 1e-9);
         let g80 = a.with_anticipation(80.0).swing_sigma.to_degrees();
         let g20 = a.with_anticipation(20.0).swing_sigma.to_degrees();
-        assert!((g80 - 39.2192).abs() < 1e-4, "grade 80: {g80}");
-        assert!((g20 - 149.609375).abs() < 1e-6, "grade 20: {g20}");
+        assert!((g80 - 47.34976).abs() < 1e-4, "grade 80: {g80}");
+        assert!((g20 - 180.625).abs() < 1e-6, "grade 20: {g20}");
         assert_eq!(a.antic_sigma, 0.15);
         // The swing's lead (2026-11-13): 75 ms at grade 50 (Linares Exp. 1), 75 / 1.953125 =
         // 38.4 ms at grade 80, 75 × 1.953125 = 146.484375 ms at grade 20.
