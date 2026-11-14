@@ -1,7 +1,8 @@
 //! A4 measuring only. `-- [games=256] [first_seed=0] [records.jsonl]`.
 //! JSONL includes EVERY throw/carry commitment, its original estimates, and outcome.
-//! Consecutive carry ticks coalesce; options are from the FIRST tick. All options
-//! come from the actual common comparison; the A4 shadow formulas are retired.
+//! Consecutive carry ticks coalesce; options are from the FIRST tick. Since the A4
+//! fix every option is one the holder actually weighed (carries and throws in one
+//! table); the `unweighed_throw` shadow of the old nearby-carry shortcut is retired.
 //! Each seed is replayed without tracing and both log bytes and digest must match.
 use bb_game::game::{Game, PitchStep};
 use bb_game::live::choice_trace::{Choice, OptionEstimate, capture};
@@ -37,9 +38,6 @@ fn chosen(c: &Choice) -> Option<&OptionEstimate> {
     }
     if c.action == "return" {
         None
-    } else if c.action == "near_carry" {
-        // This branch stops at its first successful candidate (the last tested).
-        c.options.iter().rev().find(|o| o.base == c.base && o.kind == "near_carry")
     } else {
         // Two runners can head toward the same bag. The real best loop retains the
         // first in a value tie, so associate the evidence with that runner as well.
@@ -47,7 +45,7 @@ fn chosen(c: &Choice) -> Option<&OptionEstimate> {
     }
 }
 fn alternatives(c: &Choice) -> impl Iterator<Item = &OptionEstimate> {
-    c.options.iter().filter(|o| o.base != c.base && o.kind != "near_carry")
+    c.options.iter().filter(|o| o.base != c.base)
 }
 fn flags(c: &Choice) -> Vec<&'static str> {
     if c.action == "return" {
@@ -152,6 +150,10 @@ fn main() {
     let (mut bip, mut commitments, mut flagged, mut runs, mut pitches, mut outs) = (0u64, 0u64, 0u64, 0u64, 0u64, 0u64);
     let mut actions = BTreeMap::<&str, u64>::new();
     let (mut via, mut concession, mut two_out_third, mut target_outs) = (0u64, 0u64, 0u64, 0u64);
+    // Sub-counts the note reports: the cutoff share of ahead-of-stopped throws; how
+    // many behind-lead choices the holder weighed with a double-play continuation and
+    // how many of those plays got two outs; non-force (tag-plan) carries and their tags.
+    let (mut stopped_via, mut behind_cont, mut behind_two_outs, mut tag_carries, mut tag_carry_outs) = (0u64, 0u64, 0u64, 0u64, 0u64);
     for seed in first..first + games {
         let mut g = Game::new(seed, true);
         loop {
@@ -177,6 +179,18 @@ fn main() {
                 }
                 if c.outs < 2 && c.base < 4 && chosen(c).is_some_and(|o| margin(o) >= SURE_S) && alternatives(c).any(|o| o.base == 4 && margin(o) < 0.0) {
                     concession += 1;
+                }
+                let s = chosen(c);
+                if labels.contains(&"ahead_of_stopped_runner") && c.through {
+                    stopped_via += 1;
+                }
+                if labels.contains(&"behind_sure_lead") {
+                    behind_cont += s.is_some_and(|o| o.second_out_p.is_some_and(|p| p > 0.3)) as u64;
+                    behind_two_outs += (row["outcome"]["outs_after"].as_array().unwrap().len() >= 2) as u64;
+                }
+                if c.action.contains("carry") && s.is_some_and(|o| !o.force && o.distance > 1.2) {
+                    tag_carries += 1;
+                    tag_carry_outs += step.calls.iter().any(|call| Some(call.runner) == s.map(|o| o.runner) && call.base == c.base && call.t_out >= c.t - 1e-9) as u64;
                 }
                 for &class in &labels {
                     *counts.entry(class).or_default() += 1;
@@ -221,6 +235,7 @@ fn main() {
     println!("{games} games seeds {first}..{}: {bip} BIP; {commitments} commitments; {flagged} flagged; {target_outs} selected runners retired later", first + games - 1);
     println!("all {games} traced/untraced logs and digests identical; {runs} runs, {pitches} pitches, {outs} outs");
     println!("actions {actions:?}; {via} through cutoff; {concession} sure outs conceding unavailable home play; {two_out_third} commitments with two out and runner from third");
+    println!("ahead_of_stopped through cutoff {stopped_via}; behind_sure_lead weighed with a continuation {behind_cont}, plays with two outs {behind_two_outs}; non-force carries from beyond 1.2 m {tag_carries}, tagged at that bag {tag_carry_outs}");
     for name in CLASSES {
         let n = counts.get(name).copied().unwrap_or(0);
         println!("{name:<36} {n:>6} {:>9.4}/game", n as f64 / games as f64);

@@ -111,13 +111,11 @@ fn seed_70_play_157_keeps_the_force_double_play_against_a_single_home_tag() {
 }
 
 #[test]
-fn seed_17_play_203_never_carries_to_unforced_third_outside_tag_reach() {
+fn seed_17_play_203_does_not_run_at_third_for_a_runner_stopped_at_second() {
+    // Main's third baseman ran a tick toward third, 2.56 m away, for the runner
+    // from second, who was already back on second with his arrival speed still
+    // live. Nothing visible moves toward third: no option there; take first.
     let (_, choices, _) = replay(include_str!("fixtures/a4/17-203.json"));
-    assert_eq!((choices[0].action, choices[0].base), ("throw", 1));
-    for c in &choices {
-        if c.action == "carry" {
-            let o = &c.options[c.selected_option.unwrap()];
-            assert!(o.force || o.distance <= 1.2, "outside tag reach an unforced bag is not a carry out");
-        }
-    }
+    assert_eq!((choices[0].action, choices[0].base), ("throw", 1), "{:#?}", choices[0]);
+    assert!(choices[0].options.iter().all(|o| o.base != 3), "{:#?}", choices[0]);
 }
