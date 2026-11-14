@@ -578,6 +578,23 @@ pub(crate) fn path_pos(s: f64) -> Vec3 {
     a + (b - a) * f
 }
 
+/// A feed receiver at second who took it off the bag stops being a pivot man (the force is
+/// gone, or he throws instead of going to the bag): he is an ordinary receiver, set up from his
+/// catch (`RELAY_TRANSFER_FRAC` of his transfer), not facing a feed, and no longer heading for
+/// the bag.
+fn end_pivot_wait(f: &mut Fielder) {
+    (f.pivot, f.pivot_wait_bag) = (false, false);
+    f.set_base = RELAY_TRANSFER_FRAC * f.a.transfer;
+    f.face = None;
+    f.target = stop_point(f);
+}
+
+/// Whether a throw to `tgt` by a pivot man is the pivot (a throw to first after a force at
+/// second, agent-models §5.5); a throw to third or home is an ordinary throw.
+fn pivot_throw(fd: &Fielder, tgt: Vec3) -> bool {
+    fd.pivot && (tgt - base_pos(1)).norm() < 5.0
+}
+
 /// Distance covered toward a goal in time `t` by a fielder whose velocity has the component
 /// `v0` toward it, with the movement step's laws (agent-models §5.3): from `v0` ≥ 0 the
 /// speed law v → v_max with time constant τ ([`run_dist`] is the `v0` = 0 case); from
@@ -2858,8 +2875,7 @@ impl<'a> Sim<'a> {
             // With the force at second gone before he got the bag (taken off), there is no
             // pivot: he is an ordinary receiver, set up from his catch.
             if f.pivot_wait_bag && !force_at_second {
-                (f.pivot, f.pivot_wait_bag) = (false, false);
-                f.set_base = RELAY_TRANSFER_FRAC * f.a.transfer;
+                end_pivot_wait(f);
             }
             let on_bag = (base_pos(2) - f.pos).norm() < 0.6;
             // (A carrier to second caught nothing there: he keeps the set-up he spent holding
@@ -2954,9 +2970,11 @@ impl<'a> Sim<'a> {
             self.abandon_carry(by);
             return;
         };
-        // A pivot man who took the feed off the bag throws only once he has it.
+        // A pivot man who took the feed off the bag and now throws rather than carry it to the
+        // bag (the runner will beat him there, or the play is elsewhere) is an ordinary
+        // receiver, not locked out until he has the bag (Gemini pivot review P2-1).
         if fd.pivot_wait_bag {
-            return;
+            end_pivot_wait(&mut self.f[by]);
         }
         // He plants for the throw: a carry he gave up does not keep him running at its bag
         // while his set-up clock runs (§5.6 A4).
@@ -3030,7 +3048,14 @@ impl<'a> Sim<'a> {
         let to = tgt - fd.pos;
         let turn = fd.face.map(|f| throwing::turn_extra_s(f, to, fd.a.throws)).unwrap_or(0.0);
         let footwork = throwing::footwork_s(fd.catch_vel, to, fd.took_diving);
-        if fd.pivot { SetUp::pivot(fd.set_base, turn, footwork) } else { SetUp::new(fd.set_base, turn, footwork) }
+        if pivot_throw(fd, tgt) {
+            SetUp::pivot(fd.set_base, turn, footwork)
+        } else if fd.pivot {
+            // At the bag with the feed, throwing elsewhere: an ordinary throw from his catch.
+            SetUp::new(RELAY_TRANSFER_FRAC * fd.a.transfer, turn, footwork)
+        } else {
+            SetUp::new(fd.set_base, turn, footwork)
+        }
     }
 
     /// Fielder `by` throws to ground point `tgt` for `receiver` (the ball is headed for base
@@ -3050,7 +3075,7 @@ impl<'a> Sim<'a> {
         let elev = solve_throw(self.inp.env, THROW_RELEASE_Z, THROW_CATCH_Z, d, v_aim).map(|s| s.elev).unwrap_or(THROW_MAX_ELEV);
         // Execution noise: speed 3%, then direction (the draw order of the vacuum model).
         // A pivot man's throw: the slide's seam (nothing until A6 builds slides).
-        let slide = if fd.pivot { throwing::PIVOT_SLIDE_SIGMA_MULT } else { 1.0 };
+        let slide = if pivot_throw(&fd, tgt) { throwing::PIVOT_SLIDE_SIGMA_MULT } else { 1.0 };
         let ex = execute_throw(v_aim, &ThrowNoise::new(fd.a.arm_sigma * su.sigma_mult(hurry) * slide), &mut r);
         let h = Vec3::new(tgt.x - r0.x, tgt.y - r0.y, 0.0).normalized().rotate(Vec3::Z, ex.yaw_err);
         self.launch_throw(throw_state(r0, h, ex.speed, elev), tgt, b, receiver, relay);
@@ -6755,6 +6780,110 @@ mod tests {
             world_tick(&mut sim);
         }
         panic!("never threw: {:?}", sim.ball);
+    }
+
+    /// A feed receiver at second, `off_m` off the bag, holding the ball: the state `try_captures` gives
+    /// him (pivot, waiting for the bag, facing the feed, heading for the bag).
+    fn off_bag_receiver(batter_eta_s: f64, r1_short_m: f64, off_m: f64) -> (Sim<'static>, usize, usize) {
+        const SS: usize = 5;
+        let fx: &'static Fixture = Box::leak(Box::new(fixture(&[(5, 1)])));
+        let inp: &'static LiveInput<'static> = Box::leak(Box::new(input(fx, vec![RunnerIn { id: fx.st.batter, base: 0, speed: 8.2 }, RunnerIn { id: 5, base: 1, speed: 8.2 }])));
+        let st: &'static mut RulesState = Box::leak(Box::new(fx.st.clone()));
+        let mut sim = new_sim(inp, st);
+        sim.t = 2.0;
+        let at = base_pos(2) + Vec3::new(-off_m, 0.0, 0.0);
+        let ss_id = sim.f[SS].id;
+        sim.emit(Input::BallTouched { t: 1.2, what: Touch::Ground { x: 10.0, y: 36.0 } });
+        sim.emit(Input::GloveSecured { t: 2.0, fielder: ss_id, x: at.x, y: at.y });
+        for fd in sim.f.iter_mut() {
+            (fd.vel, fd.role) = (Vec3::ZERO, Role::Idle);
+            fd.target = fd.pos;
+        }
+        (sim.f[2].pos, sim.f[2].target) = (base_pos(1), base_pos(1));
+        held_at(&mut sim, SS, at);
+        let fd = &mut sim.f[SS];
+        fd.up_at = 2.0;
+        fd.ready_at = 2.0;
+        fd.catch_vel = Vec3::ZERO;
+        fd.pivot = true;
+        fd.pivot_wait_bag = true;
+        fd.set_base = throwing::pivot_s(fd.a.transfer);
+        fd.face = Some(Vec3::new(-1.0, 1.0, 0.0).normalized());
+        fd.target = base_pos(2);
+        let (b, r1) = (sim.r.iter().position(|r| r.start == 0).unwrap(), sim.r.iter().position(|r| r.start == 1).unwrap());
+        (sim.r[b].s, sim.r[b].v, sim.r[b].goal, sim.r[b].direction) = (BASE_L - 8.2 * batter_eta_s, 8.2, 1, 1.0);
+        (sim.r[r1].s, sim.r[r1].v, sim.r[r1].goal, sim.r[r1].direction) = (2.0 * BASE_L - r1_short_m, 8.2, 2, 1.0);
+        (sim, b, r1)
+    }
+
+    /// Gemini pivot review P2-1 (a), agent-models §5.5: a feed receiver 4 m off the bag with the
+    /// runner from first 5 m short of it (0.6 s away, the receiver 0.75 s from the bag) cannot
+    /// get the force, and the batter is 1.9 s from first. He throws to first now, as any
+    /// receiver would, instead of waiting for a bag he will not beat the runner to. Bug caught:
+    /// the throw held back until the runner passes second and the force is gone.
+    #[test]
+    fn a_receiver_who_cannot_beat_the_runner_to_the_bag_throws_instead_of_waiting_for_it() {
+        const SS: usize = 5;
+        let (mut sim, b, r1) = off_bag_receiver(1.9, 5.0, 4.0);
+        for _ in 0..200 {
+            sim.holder_act();
+            if let Ball::Thrown { to_base, .. } = sim.ball {
+                assert_eq!(to_base, 1);
+                // An ordinary receiver lets go 0.7 × transfer after his catch at 2.0 s (no turn,
+                // no footwork: nothing owed); waiting for the bag would be 0.75 s later.
+                let ordinary = RELAY_TRANSFER_FRAC * sim.f[SS].a.transfer;
+                assert!(sim.t - 2.0 <= ordinary + 2.0 * DT, "let go {:.3} s after the catch, ordinary {ordinary:.3}", sim.t - 2.0);
+                assert!(!sim.f[SS].pivot && !sim.f[SS].pivot_wait_bag);
+                return;
+            }
+            for k in [b, r1] {
+                let goal = sim.r[k].goal as f64 * BASE_L;
+                sim.r[k].s = (sim.r[k].s + 8.2 * DT).min(goal);
+            }
+            world_tick(&mut sim);
+        }
+        panic!("never threw: {:?}", sim.ball);
+    }
+
+    /// Gemini pivot review P2-1 (c), agent-models §5.5: when the force at second is gone before
+    /// the off-bag receiver has the bag he is an ordinary receiver: no pivot, the ordinary
+    /// 0.7 × transfer, and not facing the feed or heading for the bag.
+    #[test]
+    fn a_receiver_whose_force_is_gone_is_an_ordinary_receiver() {
+        const SS: usize = 5;
+        let (mut sim, _, r1) = off_bag_receiver(6.0, 5.0, 4.0);
+        sim.r[r1].s = 2.0 * BASE_L + 0.5; // safe at second
+        sim.holder_act();
+        let fd = &sim.f[SS];
+        assert!(!fd.pivot && !fd.pivot_wait_bag);
+        assert!((fd.set_base - RELAY_TRANSFER_FRAC * fd.a.transfer).abs() < 1e-12, "set_base {}", fd.set_base);
+        assert!(fd.face.is_none(), "still facing the feed: {:?}", fd.face);
+        assert!((fd.target - base_pos(2)).norm() > 0.5, "still heading for the bag: {:?}", fd.target);
+    }
+
+    /// Gemini pivot review P2-1 (b), agent-models §5.5: only a throw to first after the force at
+    /// second is the pivot ("a force at second followed by a throw to first"). A pivot man who
+    /// throws to third or home is an ordinary thrower: 0.7 × transfer, not the 0.80 s pivot.
+    #[test]
+    fn only_a_throw_to_first_is_a_pivot() {
+        const B2: usize = 3;
+        let fx = fixture(&[(5, 1)]);
+        let inp = input(&fx, vec![RunnerIn { id: fx.st.batter, base: 0, speed: 8.2 }, RunnerIn { id: 5, base: 1, speed: 8.2 }]);
+        let mut st = fx.st.clone();
+        let mut sim = new_sim(&inp, &mut st);
+        sim.f[B2].pos = base_pos(2);
+        sim.f[B2].catch_vel = Vec3::ZERO;
+        sim.f[B2].face = Some(Vec3::new(0.0, -1.0, 0.0)); // facing the feed, away from both targets' glove sides
+        sim.f[B2].pivot = true;
+        sim.f[B2].set_base = throwing::pivot_s(sim.f[B2].a.transfer);
+        let tr = sim.f[B2].a.transfer;
+        let first = sim.set_up_for(B2, base_pos(1)).set_s;
+        let third = sim.set_up_for(B2, base_pos(3)).set_s;
+        let home = sim.set_up_for(B2, base_pos(4)).set_s;
+        assert!(first >= throwing::pivot_s(tr) - 0.12 - 1e-9, "to first {first:.3}");
+        for (name, s) in [("third", third), ("home", home)] {
+            assert!(s <= RELAY_TRANSFER_FRAC * tr + 0.12 + 0.2 + 1e-9, "to {name} {s:.3} s: a pivot clock");
+        }
     }
 
     /// agent-models §5.5: the holder's estimate of a double play uses the pivot model the
