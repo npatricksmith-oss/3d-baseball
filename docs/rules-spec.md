@@ -288,6 +288,7 @@ When a batter is awarded first (walk, IBB, HBP, catcher's interference, §5.7 ca
 | Thrown ball out of play, first play by an infielder | Two bases | Time of the **pitch** [S: OBR 5.06(b)(4)(G)], unless every runner, the batter-runner included, had advanced at least one base when the throw was released: then the time of the throw [S: the rule's Approved Ruling] |
 | Thrown ball out of play, any other throw | Two bases | Time of the **throw** [S: OBR 5.06(b)(4)(G)] (base last legally touched at release — v1 uses the base each runner had last touched then, `at`, not crediting a base he was past but had not reached) [C] |
 | Pitch or pickoff throw by the pitcher from the rubber out of play | One base | Time of the pitch/throw [S] |
+| A caught fly (fair or foul) leaves the field with no throw: the fielder carried it out of play | One base each runner; the batter is out | Each runner's base when it left, a retouch owed counting as the base he must go back to [S: OBR 5.06(b)(3)(C)]. The sim cannot produce it yet (a caught ball leaves the fielder only by a throw); added 2026-11-14, Gemini play-area review P1-4, which found it ruled a home run |
 | Balk (M5) | One base, all runners | — |
 | Catcher's interference (M5) | Batter first; others only if forced or stealing | — |
 

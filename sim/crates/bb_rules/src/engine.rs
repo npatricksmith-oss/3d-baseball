@@ -688,6 +688,9 @@ fn live_touch(st: &mut RulesState, _t: f64, what: Touch, ev: &mut Vec<Event>) {
             }
         }
         Touch::OutOfPlay { .. } if lp.throw.is_some() => throw_out_of_play(st, ev),
+        // A caught fly that leaves the field without a throw (the fielder carried it out):
+        // one base each (Gemini play-area review P1-4: it was ruled a home run).
+        Touch::OutOfPlay { .. } if lp.caught => catch_carried_out(st, ev),
         Touch::OutOfPlay { x, y, in_flight } => {
             let fair = match lp.fair {
                 FairFoul::Fair => true,
@@ -700,11 +703,6 @@ fn live_touch(st: &mut RulesState, _t: f64, what: Touch, ev: &mut Vec<Event>) {
                 ev.push(Event::BallDead { reason: DeadBall::OutOfPlay });
                 if lp.fair == FairFoul::Pending {
                     decide(st, false, ev);
-                } else if lp.caught {
-                    // A caught foul fly that then left the field without a throw: the batter is
-                    // out and runners stay where they are.
-                    let lp = lp.clone();
-                    close_play(st, &lp, ev);
                 } else {
                     st.play = PlayState::Dead;
                 }
@@ -817,6 +815,43 @@ fn throw_out_of_play(st: &mut RulesState, ev: &mut Vec<Event>) {
         ahead = Some(to);
         if to != r.start_base {
             // A runner who had legally scored before the throw scored on the play.
+            let cause = if from == 4 { AdvanceCause::OnPlay } else { AdvanceCause::Award };
+            ev.push(Event::RunnerAdvanced { runner: r.runner, from: r.start_base, to, cause });
+        }
+        if to == 4 {
+            score_run(st, r.runner, ev);
+        } else if to >= 1 {
+            st.bases[(to - 1) as usize] = Some(r.runner);
+        }
+    }
+    end_pa(st, PaResult::BattedBall, ev);
+}
+
+/// A caught fly, fair or foul, left the field with no throw: the fielder carried it out of
+/// play. The ball is dead and each runner gets one base from the base he holds (one who owes
+/// a retouch holds his own base), lead runner first, none passing the runner ahead [S: OBR
+/// 5.06(b)(3)(C)]. The batter is already out.
+fn catch_carried_out(st: &mut RulesState, ev: &mut Vec<Event>) {
+    let PlayState::Live(lp) = st.play.clone() else { return };
+    ev.push(Event::BallDead { reason: DeadBall::OutOfPlay });
+    st.play = PlayState::Dead;
+    let held = |r: &RunnerState| if r.retouch_required && !r.retouched { r.start_base } else if r.scored_at.is_some() { 4 } else { r.at };
+    let mut order: Vec<(&RunnerState, Base)> = lp.runners.iter().filter(|r| !r.out).map(|r| (r, held(r))).collect();
+    order.sort_by_key(|&(r, b)| (core::cmp::Reverse(b), core::cmp::Reverse(r.start_base)));
+    st.bases = [None; 3];
+    let mut ahead: Option<Base> = None;
+    for (r, from) in order {
+        if st.walk_off {
+            break;
+        }
+        let mut to = (from + 1).min(4);
+        if let Some(a) = ahead
+            && a < 4
+        {
+            to = to.min(a - 1).max(from);
+        }
+        ahead = Some(to);
+        if to != r.start_base {
             let cause = if from == 4 { AdvanceCause::OnPlay } else { AdvanceCause::Award };
             ev.push(Event::RunnerAdvanced { runner: r.runner, from: r.start_base, to, cause });
         }
