@@ -384,6 +384,9 @@ struct Runner {
     /// `SEEN_MOVING_MPS`), from the previous tick's motion; `None` while he is. What a
     /// runner behind him can see (agent-models §6.4).
     still_since: Option<f64>,
+    /// The base he turned back from because the runner ahead was seen holding it, while he
+    /// is on his way back; he resumes if that base visibly clears.
+    turned_back: Option<u8>,
     moving_since: f64,
     last_base: u8,
     /// Going back to the start base to retouch after a caught fly.
@@ -2713,6 +2716,14 @@ impl<'a> Sim<'a> {
             let forced_here = g == self.r[k].start + 1 && self.forced(k);
             if g as f64 * BASE_L > self.r[k].s && self.base_held_ahead(k, g) && !forced_here {
                 self.r[k].goal = (self.r[k].s / BASE_L).floor() as u8;
+                self.r[k].turned_back = Some(g);
+            } else if let Some(g0) = self.r[k].turned_back {
+                // He keeps reading the runner ahead on his way back: once that base is
+                // visibly no longer held, he goes for it again (Gemini tag-up review P1-2).
+                if !self.base_held_ahead(k, g0) {
+                    self.r[k].goal = g0;
+                    self.r[k].turned_back = None;
+                }
             }
             let goal_s = self.r[k].hold_s.unwrap_or(self.r[k].goal as f64 * BASE_L);
             let (now, tag) = (self.t, self.inp.tag_up);
@@ -2787,6 +2798,7 @@ impl<'a> Sim<'a> {
             if r.overrun == OverrunPhase::None && (stop_s - r.s).abs() < 1e-6 {
                 r.v = 0.0;
                 r.set_start = None;
+                r.turned_back = None;
             }
         }
     }
@@ -3230,6 +3242,7 @@ fn new_sim<'a>(inp: &'a LiveInput<'a>, st: &'a mut RulesState) -> Sim<'a> {
             tag_up: false,
             set_start: None,
             still_since: None,
+            turned_back: None,
             moving_since: 0.0,
             last_base: x.base,
             retouch: false,
@@ -3988,6 +4001,28 @@ mod tests {
             sim.r[2].still_since = None;
             assert!(!sim.base_held_ahead(1, 2), "goal {goal}: seen running");
         }
+    }
+
+    // Gemini tag-up review P1-2: the runner from second has stood on his bag for a second
+    // and now breaks for third; the runner from first (unforced: the batter is out) is
+    // coming to second. On the tick he leaves he still looks to be holding, so the runner
+    // behind may start back, but he keeps reading: second visibly clears and he takes it.
+    // (Before the fix a turn-back was final and he never reached second.)
+    #[test]
+    fn a_runner_ahead_breaking_forward_does_not_turn_the_runner_behind_back() {
+        let fx = fixture(&[(6, 1), (7, 2)]);
+        let inp = input(&fx, vec![RunnerIn { id: fx.st.batter, base: 0, speed: 8.2 }, RunnerIn { id: 6, base: 1, speed: 8.2 }, RunnerIn { id: 7, base: 2, speed: 8.2 }]);
+        let mut st = fx.st.clone();
+        let mut sim = new_sim(&inp, &mut st);
+        sim.t = 3.0;
+        sim.r[0].out = true;
+        (sim.r[1].s, sim.r[1].v, sim.r[1].goal, sim.r[1].hold_s) = (BASE_L + 10.0, 8.0, 2, None);
+        (sim.r[2].s, sim.r[2].v, sim.r[2].goal, sim.r[2].hold_s, sim.r[2].still_since) = (2.0 * BASE_L, 0.0, 3, None, Some(2.0));
+        for _ in 0..180 {
+            sim.move_runners();
+            sim.t += DT;
+        }
+        assert!(sim.out.facts.iter().any(|f| matches!(f, Input::BaseTouched { agent: 6, base: 2, .. })), "the runner behind never reached second: s {:.2} goal {}", sim.r[1].s, sim.r[1].goal);
     }
 
     // A runner caught off his base by the catch goes back, retouches once, and is then free:
