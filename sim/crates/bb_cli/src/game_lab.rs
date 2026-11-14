@@ -34,6 +34,25 @@ fn linescore(r: &GameResult) {
     }
 }
 
+/// Each side's batters by name, from the event log alone (`bb_stats`). At-bats and hits wait
+/// for the official scorer; BIP is plate appearances that ended on a batted ball.
+fn batting_lines(r: &GameResult) {
+    let b = match bb_stats::box_score(&r.log) {
+        Ok(b) => b,
+        Err(e) => return println!("box score unavailable: {e:?}"),
+    };
+    for (side, team) in ["Away", "Home"].iter().enumerate() {
+        println!("\n{:<32}{:>3}{:>3}{:>3}{:>3}{:>4}{:>3}{:>4}", format!("{team} batting"), "PA", "R", "K", "BB", "HBP", "HR", "BIP");
+        for l in &b.batting[side] {
+            let who = format!("{} {:<2} #{:<2} {}", l.batting_order, l.position_code(), l.number, l.name);
+            println!("{who:<32}{:>3}{:>3}{:>3}{:>3}{:>4}{:>3}{:>4}", l.pa, l.runs, l.k, l.bb, l.hbp, l.hr, l.batted);
+        }
+        let t = &b.teams[side];
+        println!("{:<32}{:>3}{:>3}{:>3}{:>3}{:>4}{:>3}{:>4}   LOB {}", "Totals", t.pa, t.runs, t.k, t.bb, t.hbp, t.hr, t.batted, t.left_on_base);
+    }
+    println!();
+}
+
 pub fn game(a: GameArgs) {
     let t0 = std::time::Instant::now();
     let r = bb_game::game::simulate_game_with(a.seed, a.rrd.is_some() || a.pbp);
@@ -48,6 +67,7 @@ pub fn game(a: GameArgs) {
         println!("wrote {}", p.display());
     }
     linescore(&r);
+    batting_lines(&r);
     println!(
         "{} PA, {} pitches; K {} BB {} HBP {} HR {}; balls in play {} (batter reached {}){}",
         r.pa, r.pitches, r.k, r.bb, r.hbp, r.hr, r.bip, r.reached_bip, if r.walk_off { "; walk-off" } else { "" }
