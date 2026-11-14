@@ -140,3 +140,31 @@ fn pitch_and_pitcher_accounting_over_games() {
         }
     }
 }
+
+/// I10: every runner entering a live ball is accounted for once as retired, scored, or
+/// still live at the end of that play; a terminal event may not be duplicated.
+#[test]
+fn live_ball_runner_terminal_events_are_disjoint() {
+    use std::collections::BTreeSet;
+    use bb_schema::log;
+    for seed in 0..40 {
+        let game = simulate_game(seed);
+        let view = log::read(&game.log).unwrap();
+        for play in &view.plays {
+            let events = play.events().unwrap();
+            let Some(evidence) = events.iter().find_map(|e| e.body_as_scorer_evidence()) else { continue };
+            // A foul ball that continues the PA does not complete a runner accounting cycle.
+            if !events.iter().any(|e| e.body_as_plate_appearance_ended().is_some()) { continue; }
+            let mut live = BTreeSet::new();
+            for runner in evidence.runners().unwrap().iter() {
+                assert!(live.insert(runner.agent()), "duplicate initial runner seed {seed}");
+            }
+            for event in events.iter() {
+                let ended = event.body_as_runner_out().map(|o| o.runner()).or_else(|| event.body_as_run_scored().map(|r| r.runner()));
+                if let Some(runner) = ended {
+                    assert!(live.remove(&runner), "duplicate or unregistered terminal runner {runner}, seed {seed}, play {}", play.play_index());
+                }
+            }
+        }
+    }
+}

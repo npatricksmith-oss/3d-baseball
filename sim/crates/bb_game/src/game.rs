@@ -11,6 +11,33 @@ use crate::pa::{Knobs, Matchup, scouting_for_pa, simulate_pitch_ctx};
 use crate::play::{FielderAttrs, RunnerIn};
 use crate::roster::Rosters;
 
+/// Noise-free flight time for a set reference throw. When the ball cannot reach first
+/// in the air, continue the same maximal-elevation throw through the world's bounce and
+/// roll physics, with zero bounce-normal noise. Infinity means it never reaches the bag.
+fn reference_throw_time(env: &bb_physics::FlightEnv, field: &Field, origin: bb_math::Vec3, target: bb_math::Vec3, speed: f64) -> f64 {
+    use bb_math::{Vec3, m};
+    use bb_physics::throw::{THROW_MAX_ELEV, fly_throw, solve_throw, throw_state};
+    let delta = Vec3::new(target.x - origin.x, target.y - origin.y, 0.0);
+    let distance = m::hypot(delta.x, delta.y);
+    if distance < crate::live::REACH { return 0.0; }
+    if let Some(solution) = solve_throw(env, origin.z, 1.3, distance, speed) { return solution.t_flight; }
+    let start = throw_state(origin, delta.normalized(), speed, THROW_MAX_ELEV);
+    let flight = fly_throw(env, start, 0.0, 30.0);
+    let last = flight.last();
+    let mut state = last.s;
+    state.r.z = state.r.z.max(env.ball.radius);
+    let path = bb_physics::ground::batted_path(env, field, state, last.t, |_, _| (0.0, 0.0));
+    // A set receiver can reach a ball within a metre of the bag. Sample at 10 ms,
+    // well below the 0.15 s scorer threshold; all time is post-release.
+    let mut t = last.t;
+    while t <= path.t_end() {
+        let (p, _) = path.at(t);
+        if m::hypot(p.x - target.x, p.y - target.y) <= crate::live::REACH && p.z <= crate::live::CATCH_MAX_Z { return t; }
+        t += bb_physics::throw::THROW_DT;
+    }
+    f64::INFINITY
+}
+
 /// Game summary for reports and tests.
 #[derive(Clone, Debug, Default)]
 pub struct GameResult {
@@ -342,8 +369,7 @@ impl Game {
                 let avg = FielderAttrs::average(pos);
                 let target = crate::play::base_pos(1);
                 let origin = crate::live::throw_release_point(at, target, self.fattrs[fside as usize][pos].throws);
-                let distance = bb_math::m::hypot(target.x - origin.x, target.y - origin.y);
-                let flight = bb_physics::throw::solve_throw(&mu.env, origin.z, 1.3, distance, avg.arm).map(|s| s.t_flight).unwrap_or(f64::INFINITY);
+                let flight = reference_throw_time(&mu.env, &self.field, origin, target, avg.arm);
                 Some(touch - (t + avg.transfer + flight))
             });
             let touches = out.facts.iter().filter_map(|f| match f { Input::BaseTouched { t, agent, base, holding_ball: false } => Some((*agent, *base, *t)), _ => None }).collect();
@@ -509,6 +535,18 @@ pub fn simulate_game_fielders(seed: u64, fattrs: [FielderAttrs; 9]) -> GameResul
 mod tests {
     use super::*;
     use bb_rules::OutKind;
+
+    #[test]
+    fn reference_throw_uses_physical_travel_time() {
+        let env = bb_physics::FlightEnv::default_env();
+        let field = Field::default();
+        let first = crate::play::base_pos(1);
+        let short = bb_math::Vec3::new(first.x, first.y + 20.0, 1.8);
+        let t = reference_throw_time(&env, &field, short, first, 36.0);
+        // A 36 m/s throw needs at least 0.56 s in vacuum for 20 m; drag and
+        // ordinary launch angles keep it well below 1.2 s at this distance.
+        assert!((0.55..1.2).contains(&t), "flight time {t}");
+    }
 
     const BATTER: u16 = 2;
     const R3: u16 = 5;

@@ -246,7 +246,7 @@ table ScorerRuling {
   scorer_version: ushort (id: 5);
 }
 table ScorerEvidence {
-  ruling_seq: uint (id: 0);          // EventSeq of the ScorerRuling it supports
+  ruling_seq: uint (id: 0);          // legacy link; zero for raw evidence without a stored ruling
   clean_play_margin_s: double (id: 1);
   reference_fielder: ushort (id: 2);
   note_code: ushort (id: 3);

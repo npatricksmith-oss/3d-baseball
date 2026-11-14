@@ -98,7 +98,10 @@ pub fn describe_scored(call: Call, launch_deg: Option<f64>, events: &[Event], fa
                 // The batter was not put out but never reached: the inning ended on another
                 // runner, forced or tagged.
                 _ if outs.iter().any(|(r, k, _)| *r != batter && *k == OutKind::Force) => format!("{multi}Force out{to}"),
-                _ => format!("{multi}Fielder's choice{to}, runner tagged out"),
+                _ => {
+                    let at = outs.iter().find(|(r, _, _)| *r != batter).map(|(_, _, base)| match base { 1 => "first", 2 => "second", 3 => "third", 4 => "home", _ => "a base" }).unwrap_or("a base");
+                    format!("{multi}Ball hit{to}, runner tagged out at {at}")
+                },
             }
         }
     };
@@ -154,7 +157,7 @@ mod tests {
         // The third out made on another runner before the batter reached first: a force at
         // second, or (seed 7475 play 26) a tag on the runner from third at home.
         assert_eq!(describe(Call::InPlay, Some(-50.0), &[out(R, OutKind::Force), ended(PaResult::BattedBall)], &[by(1)], None), "Force out to the pitcher");
-        assert_eq!(describe(Call::InPlay, Some(-54.0), &[out(R, OutKind::Tag), ended(PaResult::BattedBall)], &[by(1)], None), "Fielder's choice to the pitcher, runner tagged out");
+        assert_eq!(describe(Call::InPlay, Some(-54.0), &[Event::RunnerOut { runner: R, base: 4, kind: OutKind::Tag }, ended(PaResult::BattedBall)], &[by(1)], None), "Ball hit to the pitcher, runner tagged out at home");
         assert_eq!(describe(Call::InPlay, Some(28.0), &[ended(PaResult::HomeRun), Event::RunScored { runner: B }], &[], None), "Home run, 1 run scores");
     }
 }

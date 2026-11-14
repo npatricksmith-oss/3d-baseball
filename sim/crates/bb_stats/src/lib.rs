@@ -89,6 +89,11 @@ pub struct BoxScore {
 
 /// Build the box score from a finished log.
 pub fn box_score(bytes: &[u8]) -> Result<BoxScore, LogError> {
+    box_score_with_options(bytes, scorer::ScorerOptions::default())
+}
+
+/// Score a log with an explicitly chosen counterfactual threshold.
+pub fn box_score_with_options(bytes: &[u8], options: scorer::ScorerOptions) -> Result<BoxScore, LogError> {
     let hand = |h: bb_schema::Hand| match h {
         bb_schema::Hand::Left => 'L',
         bb_schema::Hand::Right => 'R',
@@ -169,8 +174,10 @@ pub fn box_score(bytes: &[u8]) -> Result<BoxScore, LogError> {
                     t.pa += 1;
                     l.pa += 1;
                     let play_outs = events.iter().filter(|e| e.body_type() == EventBody::RunnerOut).count() as u32;
-                    let ruling = scorer::score_play(*play, outs_in_half.saturating_sub(play_outs), scorer::DEFAULT_CHOICE_MARGIN_S).expect("PA event exists");
-                    if events.iter().filter_map(|e| e.body_as_scorer_evidence()).any(|sc| sc.batter() == pa.batter() && sc.has_first_touch())
+                    let ruling = scorer::score_play_with_options(*play, outs_in_half.saturating_sub(play_outs), options).expect("PA event exists");
+                    let pending_walk_off = ruling.outcome == scorer::Outcome::Undetermined
+                        && events.iter().filter_map(|e| e.body_as_game_ended()).any(|g| g.reason() == ev::GameEndReason::WalkOff);
+                    if (pending_walk_off || events.iter().filter_map(|e| e.body_as_scorer_evidence()).any(|sc| sc.batter() == pa.batter() && sc.has_first_touch()))
                         && !events.iter().filter_map(|e| e.body_as_runner_out()).any(|o| o.runner() == pa.batter())
                         && !events.iter().filter_map(|e| e.body_as_run_scored()).any(|r| r.runner() == pa.batter()) {
                         runners.insert(pa.batter());

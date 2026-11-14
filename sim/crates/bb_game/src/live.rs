@@ -24,7 +24,7 @@ use crate::play::{FielderAttrs, RunnerIn, base_pos, home_positions, run_dist, ru
 
 const DT: f64 = 1.0 / 60.0;
 const REPLAN_S: f64 = 0.4;
-const REACH: f64 = 1.0;
+pub(crate) const REACH: f64 = 1.0;
 const DIVE: f64 = 1.5;
 const DIVE_MAX_Z: f64 = 1.2;
 pub const DIVE_GETUP_S: f64 = 1.5;
@@ -54,7 +54,7 @@ const LUNGE_CHECKS: usize = 15;
 const BODY_R: f64 = 0.3;
 /// A catch below this height is a shoestring catch: a close call for the umpire, m [E].
 const LOW_CATCH_Z: f64 = 0.4;
-const CATCH_MAX_Z: f64 = 2.4;
+pub(crate) const CATCH_MAX_Z: f64 = 2.4;
 /// Leaping reach at the wall [E].
 const WALL_CATCH_MAX_Z: f64 = 3.0;
 const POCKET: f64 = 0.06;

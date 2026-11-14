@@ -410,9 +410,12 @@ touch when it occurs, and each throw's release time, origin and target. The refe
 is computed in `bb_game` after the play, never exposed to agents: from the first secure
 possession's location and time, a set grade-50 fielder uses the position's average transfer
 and arm, the actual environment, and the throw physics to first. The margin is actual batter
-first-touch time minus reference arrival; a missing touch or possession is explicitly marked unavailable. A throw that cannot reach
-first on the fly has a negative-infinite margin. For a play ending before first is touched there is no actual
-time to first and no fabricated margin. These facts support re-ruling without simulation.
+first-touch time minus reference arrival; a missing touch or possession is explicitly marked unavailable. When the ball cannot reach first on the fly, the reference continues a maximum-elevation
+throw through the same ground physics with bounce-normal noise set to zero. A ball that
+never reaches the bag has a negative-infinite margin. For a play ending before first is touched there is no actual
+time to first and no fabricated margin. If the sim ends a walk-off before the batter's
+first-base touch, the hit ruling remains explicitly undetermined; the box score counts that
+still-live batter as left on base. These facts support re-ruling without simulation.
 Fielding-error rulings remain provisional until A17: do not invent an error from a miss.
 The batter's running goal at an attempted throw to another base is recorded: extra bases
 chosen only afterward are provisionally treated as on the throw. This is an observable
@@ -426,7 +429,7 @@ A misplay that is ordinary and lets any runner (including the batter-runner afte
 
 - **Wild pitch vs passed ball:** scored only when a runner advances (or the batter reaches on an uncaught strike three) because the catcher did not hold the pitch. **Wild pitch** if the pitch bounced before the catcher, or its crossing point was outside the catcher's ordinary reach (`reach_frac` > 0.7 at the receiving target). Otherwise **passed ball**.
 - **Stolen base** if a runner advances on an attempt with no hit, error, WP, or PB; **caught stealing** if retired on the attempt. **Defensive indifference** (no SB credited) if the defense made no throw or move and the runner's team was not in a scoring-relevant spot: 9th inning or later, defense leading by ≥ 3 [C].
-- **Sacrifice fly:** fewer than two outs, a fly or line drive caught (or dropped on error) in the outfield or foul territory, and a runner scores. **Sacrifice bunt** (M5).
+- **Sacrifice fly:** fewer than two outs, a fly or line drive caught (or dropped on error) in the outfield or foul territory, and a runner scores. The current reference park's outfield boundary is the 45 m [E] radial infield limit used by the live-play settle rule; the scorer exposes it as a configurable option. A future park-specific boundary can replace this approximation. **Sacrifice bunt** (M5).
 - **GIDP:** ground ball, two outs recorded on force or batter outs on the play.
 
 ### 10.5 RBI [S: OBR 9.04]

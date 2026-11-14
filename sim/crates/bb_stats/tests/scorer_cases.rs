@@ -10,12 +10,17 @@ fn fixture(handler: u16, prior_out: Option<(u8, ev::OutKind)>, throw_choice: boo
 }
 #[allow(clippy::too_many_arguments)]
 fn fixture_extended(handler: u16, prior_out: Option<(u8, ev::OutKind)>, throw_choice: bool, margin: Option<f64>, batter_out: Option<ev::OutKind>, runs: bool, reached: u8, goal: u8) -> Vec<u8> {
+    fixture_at(handler, prior_out, throw_choice, margin, batter_out, runs, reached, goal, if handler >= 7 { 75.0 } else { 25.0 })
+}
+#[allow(clippy::too_many_arguments)]
+fn fixture_at(handler: u16, prior_out: Option<(u8, ev::OutKind)>, throw_choice: bool, margin: Option<f64>, batter_out: Option<ev::OutKind>, runs: bool, reached: u8, goal: u8, catch_y: f64) -> Vec<u8> {
     let mut f = FlatBufferBuilder::new();
     let runners = [ev::RunnerOnBase::create(&mut f, &ev::RunnerOnBaseArgs { agent: BATTER, base: 0 }), ev::RunnerOnBase::create(&mut f, &ev::RunnerOnBaseArgs { agent: RUNNER, base: 1 })];
     let runners = f.create_vector(&runners);
     let throw = ev::ScorerThrow::create(&mut f, &ev::ScorerThrowArgs { base: 2, attempted_out: throw_choice, batter_goal: goal, ..Default::default() });
     let throws = f.create_vector(&[throw]);
-    let evidence = ev::ScorerEvidence::create(&mut f, &ev::ScorerEvidenceArgs { batter: BATTER, runners: Some(runners), has_first_touch: batter_out.is_none(), first_touch_s: 4.5, has_handling: true, first_handler: handler, has_margin: margin.is_some(), clean_play_margin_s: margin.unwrap_or_default(), throws: Some(throws), ..Default::default() });
+    let catch_at = bb_schema::vec3d([0.0, catch_y, 0.0]);
+    let evidence = ev::ScorerEvidence::create(&mut f, &ev::ScorerEvidenceArgs { has_secured: true, secured_at: Some(&catch_at), batter: BATTER, runners: Some(runners), has_first_touch: batter_out.is_none(), first_touch_s: 4.5, has_handling: true, first_handler: handler, has_margin: margin.is_some(), clean_play_margin_s: margin.unwrap_or_default(), throws: Some(throws), ..Default::default() });
     let mut bodies: Vec<(EventBody, WIPOffset<UnionWIPOffset>)> = vec![(EventBody::ScorerEvidence, evidence.as_union_value())];
     if let Some((base, kind)) = prior_out {
         let o = ev::RunnerOut::create(&mut f, &ev::RunnerOutArgs { runner: RUNNER, base, kind, ..Default::default() }); bodies.push((EventBody::RunnerOut, o.as_union_value()));
@@ -63,4 +68,51 @@ fn extra_base_chosen_only_after_throw_is_scored_as_advance_on_throw() {
     assert_eq!(judge(&after, 0).outcome, Outcome::Hit(1));
     let before = fixture_extended(8, Some((3, ev::OutKind::Tag)), true, Some(-1.0), None, false, 2, 2);
     assert_eq!(judge(&before, 0).outcome, Outcome::Hit(2));
+}
+
+#[test]
+fn run_on_double_play_has_no_rbi() {
+    let p = fixture(6, Some((2, ev::OutKind::Force)), true, Some(0.4), Some(ev::OutKind::Force), true);
+    assert_eq!(judge(&p, 0).rbi, 0);
+}
+
+#[test]
+fn forced_walk_and_hit_batter_credit_the_run() {
+    for (result, expected) in [(ev::PaResult::Walk, Outcome::Walk), (ev::PaResult::HitByPitch, Outcome::HitByPitch)] {
+        let mut f = FlatBufferBuilder::new();
+        let run = ev::RunScored::create(&mut f, &ev::RunScoredArgs { runner: RUNNER, ..Default::default() });
+        let pa = ev::PlateAppearanceEnded::create(&mut f, &ev::PlateAppearanceEndedArgs { batter: BATTER, result, ..Default::default() });
+        let e1 = ev::Event::create(&mut f, &ev::EventArgs { body_type: EventBody::RunScored, body: Some(run.as_union_value()), ..Default::default() });
+        let e2 = ev::Event::create(&mut f, &ev::EventArgs { body_type: EventBody::PlateAppearanceEnded, body: Some(pa.as_union_value()), ..Default::default() });
+        let events = f.create_vector(&[e1, e2]);
+        let play = ev::PlayRecord::create(&mut f, &ev::PlayRecordArgs { events: Some(events), ..Default::default() });
+        f.finish(play, None);
+        let ruling = judge(f.finished_data(), 1);
+        assert_eq!((ruling.outcome, ruling.rbi), (expected, 1));
+    }
+}
+
+#[test]
+fn walk_off_before_batter_touches_first_remains_undetermined() {
+    let mut f = FlatBufferBuilder::new();
+    let sc = ev::ScorerEvidence::create(&mut f, &ev::ScorerEvidenceArgs { batter: BATTER, has_first_touch: false, ..Default::default() });
+    let pa = ev::PlateAppearanceEnded::create(&mut f, &ev::PlateAppearanceEndedArgs { batter: BATTER, result: ev::PaResult::Unknown, ..Default::default() });
+    let end = ev::GameEnded::create(&mut f, &ev::GameEndedArgs { reason: ev::GameEndReason::WalkOff, ..Default::default() });
+    let events = [
+        ev::Event::create(&mut f, &ev::EventArgs { body_type: EventBody::ScorerEvidence, body: Some(sc.as_union_value()), ..Default::default() }),
+        ev::Event::create(&mut f, &ev::EventArgs { body_type: EventBody::PlateAppearanceEnded, body: Some(pa.as_union_value()), ..Default::default() }),
+        ev::Event::create(&mut f, &ev::EventArgs { body_type: EventBody::GameEnded, body: Some(end.as_union_value()), ..Default::default() }),
+    ];
+    let events = f.create_vector(&events);
+    let play = ev::PlayRecord::create(&mut f, &ev::PlayRecordArgs { events: Some(events), ..Default::default() });
+    f.finish(play, None);
+    assert_eq!(judge(f.finished_data(), 0).outcome, Outcome::Undetermined);
+}
+
+#[test]
+fn sacrifice_depends_on_catch_location_not_fielders_position() {
+    let infielder_in_outfield = fixture_at(6, None, false, None, Some(ev::OutKind::FlyOut), true, 1, 1, 75.0);
+    let outfielder_in_infield = fixture_at(8, None, false, None, Some(ev::OutKind::FlyOut), true, 1, 1, 25.0);
+    assert!(judge(&infielder_in_outfield, 1).sacrifice_fly);
+    assert!(!judge(&outfielder_in_infield, 1).sacrifice_fly);
 }

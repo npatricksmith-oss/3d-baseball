@@ -29,24 +29,24 @@ Numbers are only comparable within one seed set and game count. The standard set
 
 ## 1. Where the numbers stand
 
-After hurried throws (A3), main at `a69dd50`, 300 games, seeds 0–299 (MLB column approximate, from the calibration notes):
+After scorer evidence (A12/B5), 300 games, seeds 0–299; these game outcomes match `db5c012` at printed precision (MLB column approximate, from the calibration notes):
 
 | | now | MLB |
 |---|---|---|
-| runs / team-game | 5.54 (TASKS says 5.53 after the review fixes) | about 4.4–4.6 |
-| K% | 15.4 | 22 |
+| runs / team-game | 5.53 | about 4.4–4.6 |
+| K% | 15.3 | 22 |
 | BB% | 6.9 | 8.5 |
 | HR / PA | 5.12% | 3% |
 | reached on BIP | 32.5% | |
-| GB hits | .352 | .24 |
-| LD hits | .724 | about .68 |
+| GB hits | .351 | .24 |
+| LD hits | .723 | about .68 |
 | FB hits | .127 | .13 |
 | PU hits | .014 | about .02 |
 | foul share of contact | 23.7% (3,000 PAs, measured 2026-11-13, right-handed only) | 51% |
 | dives a game | 3.8 (seeds 1000–1299, after handedness) | 2–3 |
 | double plays a game | 2.0 (measured 2026-11-11, not since) | about 1.7 |
 
-Seeds 1000–1299 were last measured after handedness: 5.43 runs. A3 was measured on seeds 0–299 only.
+The second standard seed set now measures 5.40 runs/team-game both before and after the scorer work. The hit rates above remain the CLI's older provisional diagnostic; the log-backed scorer audit gives batting average .3131 and BABIP .3241 on seeds 0–299 (see the note).
 
 ## 2. The run environment in one line per step
 
@@ -94,6 +94,12 @@ The "5.48" at the top of the last block is a coincidence of two samples: the div
 ## 3. The rows
 
 Hit rates are per ball in play of that type. "Seed 5" and "seed 2" mean `sim-cli games --seed` with 1,024 games unless a row says otherwise.
+
+### 2026-11-14 (official scorer; 300 games per seed set)
+
+| Task | Commit | What changed | Numbers (before → after) | Cause | Open |
+|---|---|---|---|---|---|
+| **A12/B5 scorer and box score** | `8564dbd`, `8823b4a`; [audit](calibration/2026-11-14-scorer.md) | Added world-side scoring evidence to the event log, log-backed batting lines and log-backed captions. Digests change because play records contain the new facts and advance causes; the original pitch records, rules events and facts match for seeds 0, 1, 7, 42. | Seeds 0–299: runs 5.53 → 5.53; K% 15.3 → 15.3; BB% 6.9 → 6.9; HR/PA 5.12% → 5.12%; reached on BIP 32.5% → 32.5%; GB .351 → .351, LD .723 → .723, FB .127 → .127, PU .014 → .014; PA/team-game 38.4 → 38.4; pitches/game 221 → 221. Seeds 1000–1299: runs 5.40 → 5.40; K% 15.1 → 15.1; BB% 7.3 → 7.3; HR/PA 4.88% → 4.88%; reached 32.5% → 32.5%; GB .349 → .349, LD .727 → .727, FB .137 → .137, PU .015 → .015; PA/team-game 38.6 → 38.6; pitches/game 220 → 220. These BIP rates are the unchanged provisional lab diagnostic. The new scorer changes 14 of 397 old choices to hits and 65 old hits to choices; AVG .3131, BABIP .3241. | Scoring and presentation only; no gameplay change at printed precision. | No errors modeled; the running goal at the throw is a provisional proxy for advances on the throw. Pitching/fielding statistics and their identities remain future work. |
 
 ### 2026-11-13 (owner backlog A-items; 300 games, seeds 0–299 and 1000–1299)
 

@@ -7,6 +7,17 @@ pub const SCORER_VERSION: u16 = 1;
 
 /// Configurable rules-spec §10.1 threshold for an unsuccessful choice, seconds.
 pub const DEFAULT_CHOICE_MARGIN_S: f64 = 0.15;
+/// Provisional infield/outfield boundary, matching the live-play settle radius.
+pub const DEFAULT_OUTFIELD_RADIUS_M: f64 = 45.0;
+
+#[derive(Clone, Copy, Debug, PartialEq)]
+pub struct ScorerOptions {
+    pub choice_margin_s: f64,
+    pub outfield_radius_m: f64,
+}
+impl Default for ScorerOptions {
+    fn default() -> Self { Self { choice_margin_s: DEFAULT_CHOICE_MARGIN_S, outfield_radius_m: DEFAULT_OUTFIELD_RADIUS_M } }
+}
 
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 pub enum Outcome {
@@ -24,6 +35,10 @@ pub struct PlayRuling {
 /// Judge a completed plate appearance from a verified play record and pre-play outs.
 /// The caller may use a different threshold for a future scorer version.
 pub fn score_play(play: ev::PlayRecord<'_>, outs_before: u32, choice_margin_s: f64) -> Option<PlayRuling> {
+    score_play_with_options(play, outs_before, ScorerOptions { choice_margin_s, ..Default::default() })
+}
+
+pub fn score_play_with_options(play: ev::PlayRecord<'_>, outs_before: u32, options: ScorerOptions) -> Option<PlayRuling> {
     let events = play.events()?;
     let pa = events.iter().find_map(|e| e.body_as_plate_appearance_ended())?;
     let batter = pa.batter();
@@ -32,7 +47,8 @@ pub fn score_play(play: ev::PlayRecord<'_>, outs_before: u32, choice_margin_s: f
     let evidence = events.iter().find_map(|e| e.body_as_scorer_evidence());
     let flyout = outs.iter().any(|o| o.runner() == batter && o.kind() == ev::OutKind::FlyOut);
     let caught_foul = events.iter().filter_map(|e| e.body_as_batted_ball_ruling()).any(|r| r.caught() && r.fair_foul() == ev::FairFoul::Foul);
-    let sf = flyout && outs_before < 2 && runs > 0 && (caught_foul || evidence.is_some_and(|e| e.has_handling() && (7..=9).contains(&(e.first_handler() & 0x7f))));
+    let caught_in_outfield = evidence.and_then(|e| e.secured_at()).is_some_and(|p| p.x() * p.x() + p.y() * p.y() >= options.outfield_radius_m * options.outfield_radius_m);
+    let sf = flyout && outs_before < 2 && runs > 0 && (caught_foul || caught_in_outfield);
     let outcome = match pa.result() {
         ev::PaResult::Walk | ev::PaResult::IntentionalWalk => Outcome::Walk,
         ev::PaResult::HitByPitch => Outcome::HitByPitch,
@@ -50,8 +66,9 @@ pub fn score_play(play: ev::PlayRecord<'_>, outs_before: u32, choice_margin_s: f
                 if let Some(a) = award {
                     Outcome::Hit(a.to_base().clamp(1, 4))
                 } else if !evidence.has_first_touch() {
-                    // The third out can end the inning before the batter reaches first.
-                    Outcome::Out
+                    // A third out can end the inning before first. A walk-off that ends
+                    // before the batter arrives leaves the hit judgment unresolved.
+                    if events.iter().filter_map(|e| e.body_as_game_ended()).any(|g| g.reason() == ev::GameEndReason::WalkOff) { Outcome::Undetermined } else { Outcome::Out }
                 } else {
                     let mut preceding = PrecedingPlay::None;
                     for o in outs.iter().filter(|o| o.runner() != batter) {
@@ -68,7 +85,7 @@ pub fn score_play(play: ev::PlayRecord<'_>, outs_before: u32, choice_margin_s: f
                         preceding = PrecedingPlay::UnsuccessfulAttempt;
                     }
                     let margin = evidence.has_margin().then(|| evidence.clean_play_margin_s());
-                    match judge_hit(HitEvidence { preceding_play: preceding, reference_margin_s: margin }, choice_margin_s) {
+                    match judge_hit(HitEvidence { preceding_play: preceding, reference_margin_s: margin }, options.choice_margin_s) {
                         HitDecision::FieldersChoice => Outcome::FieldersChoice,
                         HitDecision::Undetermined => Outcome::Undetermined,
                         HitDecision::Hit => {
@@ -160,6 +177,7 @@ mod tests {
         let evidence = |margin| HitEvidence { preceding_play: PrecedingPlay::UnsuccessfulAttempt, reference_margin_s: margin };
         assert_eq!(judge_hit(evidence(Some(-0.20)), 0.15), HitDecision::Hit);
         assert_eq!(judge_hit(evidence(Some(0.15)), 0.15), HitDecision::FieldersChoice);
+        assert_eq!(judge_hit(evidence(Some(0.20)), 0.25), HitDecision::Hit);
         assert_eq!(judge_hit(evidence(None), 0.15), HitDecision::Undetermined);
     }
 

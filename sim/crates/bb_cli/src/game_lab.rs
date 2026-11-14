@@ -41,13 +41,13 @@ fn batting_lines(r: &GameResult) {
         Err(e) => return println!("box score unavailable: {e:?}"),
     };
     for (side, team) in ["Away", "Home"].iter().enumerate() {
-        println!("\n{:<36}{:>4}{:>4}{:>4}{:>4}{:>4}{:>4}{:>5}{:>4}{:>4}{:>5}", format!("{team} batting (bats/throws)"), "AB", "R", "H", "2B", "3B", "HR", "RBI", "BB", "K", "HBP");
+        println!("\n{:<36}{:>4}{:>4}{:>4}{:>4}{:>4}{:>4}{:>4}{:>5}{:>4}{:>4}{:>5}", format!("{team} batting (bats/throws)"), "PA", "AB", "R", "H", "2B", "3B", "HR", "RBI", "BB", "K", "HBP");
         for l in &b.batting[side] {
             let who = format!("{} {:<2} #{:<2} {}/{} {}", l.batting_order, l.position_code(), l.number, l.bats, l.throws, l.name);
-            println!("{who:<36}{:>4}{:>4}{:>4}{:>4}{:>4}{:>4}{:>5}{:>4}{:>4}{:>5}", l.ab, l.runs, l.h, l.doubles, l.triples, l.hr, l.rbi, l.bb, l.k, l.hbp);
+            println!("{who:<36}{:>4}{:>4}{:>4}{:>4}{:>4}{:>4}{:>4}{:>5}{:>4}{:>4}{:>5}", l.pa, l.ab, l.runs, l.h, l.doubles, l.triples, l.hr, l.rbi, l.bb, l.k, l.hbp);
         }
         let t = &b.teams[side];
-        println!("{:<36}{:>4}{:>4}{:>4}{:>4}{:>4}{:>4}{:>5}{:>4}{:>4}{:>5}   LOB {}", "Totals", t.ab, t.runs, t.h, t.doubles, t.triples, t.hr, t.rbi, t.bb, t.k, t.hbp, t.left_on_base);
+        println!("{:<36}{:>4}{:>4}{:>4}{:>4}{:>4}{:>4}{:>4}{:>5}{:>4}{:>4}{:>5}   LOB {}", "Totals", t.pa, t.ab, t.runs, t.h, t.doubles, t.triples, t.hr, t.rbi, t.bb, t.k, t.hbp, t.left_on_base);
         if t.undetermined > 0 { println!("{} batted-ball rulings lack evidence", t.undetermined); }
     }
     println!();

@@ -255,7 +255,8 @@ the ball to another base is recorded separately from throws. `has_margin` distin
 `clean_play_margin_s` is actual first touch minus the arrival of the set grade-50 reference
 throw. It is computed after the play from the first secure possession, not used by agents.
 No margin is asserted when the batter never touched first or the ball was not secured. A
-reference throw unable to reach first on the fly has a negative-infinite margin.
+reference throw that lands short continues through the noise-free bounce model; one that
+never reaches the bag has a negative-infinite margin.
 Runner outs and their destination bases are recorded by `RunnerOut`. Errors are not yet ruled.
 
 
