@@ -76,7 +76,7 @@ So, at the game's aim:
    - **Launch direction, about 12°.** The contact normal points up and toward the tip, so 2 cm under the center its azimuth is 7° opposite of the face; the ball also takes the tangential push along the sloped barrel.
    - **Sidespin carry, about 12° more.** Launch −13.7° becomes −25.7° at landing.
 
-   This is a **collision cause**: the geometry is real, and the swing's slope (vertical bat angle −28° at the middle, Blast −25 to −35°, vendor) is in range. The collision's spin is about twice the published values at these launch angles (recalibration report §2.2), so the sidespin share is probably overstated too.
+   This is a **collision cause**: the geometry is real, and the swing's slope (vertical bat angle −28° at the middle, Blast −25 to −35°, vendor) is in range. The collision's sidespin is above Statcast's: 3,720 rpm at a 27° launch, where Nathan (2020) has about 2,000–2,500 rpm for right-handed batters' opposite-field fly balls (recalibration report §2.2). The backspin is not the problem: it is past the point where carry depends on it. So the sidespin share of the offset is probably overstated.
 2. **The pitch's incoming angle: about 1.5–2°.** A RHP's four-seamer moves toward the first-base side; the ball keeps part of that.
 3. **The pitch's spin: about 1°.**
 4. **What is left with a level bat: about 2°.** The bat's own rotation during the collision and the contact's place along the barrel.
@@ -89,7 +89,7 @@ So, at the game's aim:
 
 - **λ_c is not the lever.** A few degrees moves spray − AD by about 0.2° per degree and moves the ball not at all; reaching +8° would take a face 25–30° ahead of its path, which this kinematics cannot make at any λ_c. A large λ_c would also lengthen the swing past Statcast's and push the sim's AD further from Statcast's by location. **Recommendation: leave λ_c at 0.**
 - **The cause is the collision's, plus possibly the measure.** About 90% of the on-time offset comes from undercut contact on a sloped barrel: its launch direction and its sidespin. The sim's spray falls with launch angle about 1.6 times as fast as MLB's (2.2 times on time).
-  - The same Tier A collision that gives about twice the published backspin probably gives too much sidespin as well.
+  - The same Tier A collision gives 1.5–1.9 times Statcast's sidespin on undercut fly balls (recalibration report §2.2), and the carry it loses follows that sidespin, not the backspin.
   - The tangential behavior (e_t 0.40, μ) decides how much of the barrel's slope the ball takes away.
 
   Both belong to the sourcing question the owner put under D (physics-spec §8; test A10's magnitudes still pending). Spray by launch angle (§2 table) is a check for any collision change.

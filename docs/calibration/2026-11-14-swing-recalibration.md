@@ -164,8 +164,29 @@ The Savant sample (re-run, `savant_bat.py`, competitive swings) gives 11.9 / 7.8
 
 1. **Home runs: 1.0% of PA against 3.0%.** B was worth what the proxy said, and C has no home runs to give: the aim's sweep moves launch, not exit speed. What is left is outside the swing's abilities:
    - **Collision efficiency** (D, ruled "not now"): the sim's squared-up average swing leaves at 103 mph, Statcast's squared-up formula would give about 107.5 at the same bat and pitch speeds.
-   - **Batted sidespin** (§2.2): 3,720 rpm at the 27° barrel launch, against about 2,000–2,500 in Statcast's opposite-field fly balls (Nathan 2020), costing about 29 ft of carry at 7.8 ft per 1,000 rpm, the same rate as Nathan's model. The backspin (4,364 rpm) is past the saturation of carry and costs nothing: scaling it to 2,500 rpm loses 6 ft. The sidespin goes with the opposite-field spray offset (§2.4) in the bat's tilt at contact, so the sourcing question for D is the collision's behaviour on an undercut, tilted bat (physics-spec §8: e_t 0.40 from KNS 2017; test A10's magnitudes still pending), and it should be taken together with λ_c. The swing note's counterfactual (q 0.23, plus the spread proxy) reached 3.06% HR, but with mean exit speed 93 against 89.5. Lower sidespin would add carry without raising exit speed. Nothing here was changed: per the ruling, a sourcing question, not a knob.
+   - **Batted sidespin** (§2.2): 3,720 rpm at the 27° barrel launch, against about 2,000–2,500 in Statcast's opposite-field fly balls (Nathan 2020), costing about 29 ft of carry at 7.8 ft per 1,000 rpm, the same rate as Nathan's model. The backspin (4,364 rpm) is past the saturation of carry and costs nothing: scaling it to 2,500 rpm loses 6 ft. The sidespin goes with the opposite-field spray offset (§2.4) in the bat's tilt at contact, so the sourcing question for D is the collision's behaviour on an undercut, tilted bat (physics-spec §8: e_t 0.40 from KNS 2017; test A10's magnitudes still pending). λ_c is not part of it: the bat-angle sweep ([2026-11-14-bat-angle-at-contact.md](2026-11-14-bat-angle-at-contact.md)) found the lag moves spray − AD by only about 0.2° per degree, and that leveling the bat removes the offset (§3.1). The swing note's counterfactual (q 0.23, plus the spread proxy) reached 3.06% HR, but with mean exit speed 93 against 89.5. Lower sidespin would add carry without raising exit speed. Nothing here was changed: per the ruling, a sourcing question, not a knob.
    - The sim's home runs need faster swings than MLB's (77.7 against 75.4 mph): the same two causes, read from the other side.
 2. **Runs are right for the wrong reasons**, still: 4.79 [4.50] against 4.39, with a third of the home runs. The surplus is hits on balls in play: grounders (.36 against .245, fielding's) and the over-concentrated launch angles (too many line drives, §2.3).
-3. **Spray** (§2.4): the bat's face at contact (λ_c) and the batters' timing by location, together. Proposal for the owner.
+3. **Spray** (§2.4): not the bat's face. λ_c was swept and closed ([bat-angle note](2026-11-14-bat-angle-at-contact.md): about 0.2° of spray − AD per degree, and the ball itself does not move). What is left is the collision off an undercut, sloped barrel (§3.1) and the batters' timing by location (perception, diagnosis rank 5).
 4. **K% and fouls**: unchanged by B and C, as the plan said (15.5 [15.8] against 22.6).
+5. **Attack angle against attack direction** (Codex review P3, Sonnet's fix `32504ce`): over a population mixture (5 × 3 aims, 41 contact times at normal quantiles, timing SD set so AD's SD is Statcast's 18.7°, not tuned to the slope), the slope is 0.533° per degree for v2 and 0.355 for v1, against Statcast's 0.41. The measure does not separate the two swings (v1 is nearer), so no test was built on it; the swing note's 0.44 (v2) and 0.26 (v1) were PA-model figures, which include perception's timing errors.
+
+### 3.1 The one open question both results point to
+
+The carry this report could not find (§2.2) and the spray offset (§2.4; bat-angle note §3) lead to the same place. **The collision's direction and sidespin off an undercut contact on a sloped barrel.**
+- The swing's slope is in range: vertical bat angle about −28° at the middle, Blast −25 to −35° (vendor).
+- The bat's face is not the cause: λ_c moves spray − AD by about 0.2° per degree.
+- Leveling the bat in the collision removes 18–26° of the 22–27° on-time offset at a 2 cm undercut. About half is the launch direction (the normal tipped toward the tip) and half is the sidespin's curve in flight.
+
+A collision change (physics-spec §8: e_t, μ, the normal geometry; a sourcing question under D, not a knob) would have to meet:
+
+| Check | Sim now | Target |
+|---|---|---|
+| Fair spray by batted-ball type, pull-positive: GB / LD / FB / PU (`foul_diag`, R/R) | +8.5 / −8.2 / −19.8 / −27.7 | MLB +15.3 / +6.6 / −2.8 / −21.7 (Savant 2025) |
+| Spray − AD, all fair | −5.5 | +7.2 (R/R) to +8.9 (all); less 3–7° if Statcast's AD is read a few ms before contact (bat-angle note §3, a hypothesis) |
+| Sidespin at a 27° launch (cage, met 3 cm under) | 3,720 rpm at +19.6° opposite-field spray | about 2,000–2,500 rpm at that spray (Nathan 2020, Fig. 2) |
+| Sidespin per degree of spray | about 210 rpm per degree, along the undercut (cage: 443 → 3,720 rpm as spray goes +4.1 → +19.6°) | about 80–110 rpm per degree across Statcast balls (Nathan's Fig. 2: zero near −10°, −2,000 to −2,500 by +10 to +25°); not the same slice of data, so a direction check, not a fit |
+| Carry at 97.7 mph, 27° | 346 ft; 375 with the sidespin zeroed; sidespin costs 7.8 ft per 1,000 rpm | Nathan's model: 8 ft per 1,000 rpm of sidespin; about 400 ft at 100 mph, 27.5°, 2,500 rpm with no sidespin |
+| Backspin at 27° | 4,364 rpm (past carry saturation) | 2,000–3,000 window (Nathan's selection, not a distribution); no published distribution found |
+
+Spray by batted-ball type is the single check that sees both the launch direction and the curve. MLB's spray falls 18° from grounders to fly balls, the sim's 28° (39° on time).
