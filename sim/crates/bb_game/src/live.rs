@@ -5415,7 +5415,8 @@ mod tests {
 
     /// The center fielder (hands σ `hands`, average otherwise) standing at (0, 80) with a
     /// ground ball crossing in front of him at 20 m/s, `pass_m` away at its closest, first
-    /// seen `lead_s` before it. His belief is the true path, replaced by `swap` (a ball he
+    /// seen `lead_s` before it. His belief is his own read of the true path (`Sim::predict`, with his
+    /// perception noise), replaced by `swap` (a ball he
     /// would take on his feet) at the first tick the ball is within `swap_within_m` of him.
     fn crossing_with_mind_change(pass_m: f64, lead_s: f64, hands: Option<f64>, swap_within_m: f64, easy_from_m: f64, swap: bool) -> Sim<'static> {
         let fx: &'static Fixture = Box::leak(Box::new(fixture(&[])));
@@ -5464,7 +5465,7 @@ mod tests {
         let (t_kept, t_changed) = (secured_at(&kept).unwrap(), secured_at(&changed).expect("he lets it go for good"));
         assert!(t_changed > t_kept, "kept {t_kept:.3}, changed {t_changed:.3}");
         let ready = |s: &Sim| s.f[CF].ready_at - secured_at(s).unwrap() - s.f[CF].a.transfer;
-        assert!(ready(&kept).abs() < 1e-9 + 0.3, "control owes a stretch: {}", ready(&kept));
+        assert!((ready(&kept) - 0.3).abs() < 1e-9, "control owes a stretch's 0.3 s: {}", ready(&kept));
         assert!(ready(&changed) > 0.3 + 1e-9, "after the change: a dive's get-up, not a stretch: {}", ready(&changed));
     }
 
@@ -5495,8 +5496,9 @@ mod tests {
         assert!(sim.f[CF].attempts >= 1, "he never tried");
     }
 
-    /// Fielder CF at (0, 80), a fly or roller in the air or on the ground believed to be
-    /// the world's own, seen at time `t`.
+    /// Fielder CF at (0, 80) and a fly or roller seen at time `t`. His belief is his own read
+    /// of it (`Sim::predict`: the world's ball with his perception noise), not the world's
+    /// path itself, so fixtures built on this leave wide margins.
     fn believing_the_truth(r: Vec3, v: Vec3, t: f64) -> Sim<'static> {
         let fx: &'static Fixture = Box::leak(Box::new(fixture(&[])));
         let mut inp = input(fx, vec![RunnerIn { id: fx.st.batter, base: 0, speed: 8.2 }]);
@@ -5522,6 +5524,15 @@ mod tests {
         assert!(near.ball_still_up());
         assert!(!near.dive_gains(CF, DIVE_GETUP_S), "he can wait under it");
         assert!(!near.dive_gains(CF, STRETCH_COST_S));
+        // 15 m out: he gets there on his feet, but only after it has landed (15 m in 2.2 s is
+        // 6.8 m/s from a standing start, more than he can average), so there is a standing
+        // play and it is no catch: going for it gains. This is the airborne comparison itself;
+        // the 40 m case below never reaches it (no standing play at all).
+        let mid = believing_the_truth(Vec3::new(0.0, 95.0, 2.0), Vec3::new(0.0, 0.0, 10.0), 2.0);
+        assert!(mid.ball_still_up());
+        let read = mid.f[CF].belief.as_ref().unwrap();
+        assert!(mid.intercept_scan(CF, read).0.is_some(), "fixture: he can reach it on his feet");
+        assert!(mid.dive_gains(CF, DIVE_GETUP_S) && mid.dive_gains(CF, STRETCH_COST_S), "on his feet he is too late to catch it");
         let far = believing_the_truth(Vec3::new(0.0, 120.0, 2.0), Vec3::new(0.0, 0.0, 10.0), 2.0);
         assert!(far.ball_still_up());
         assert!(far.dive_gains(CF, DIVE_GETUP_S) && far.dive_gains(CF, STRETCH_COST_S), "he cannot get there on his feet");
@@ -5542,10 +5553,14 @@ mod tests {
         // distance to his planning reach (0.7 of 1.0 m) over the ball's speed now plus his
         // top speed of 8.5 m/s (he runs flat out at it), no later than the ball takes to
         // reach that point with him standing still.
-        let (d, v0) = (path.at(2.0).0.y - 80.0 - 0.7, path.at(2.0).1.norm());
-        let t_up = (0..400).map(|k| 2.0 + 0.005 * k as f64).find(|&t| path.at(t).0.y - 80.0 <= 0.7).expect("it reaches him") - 2.0;
-        let t_low = d / (v0 + 8.5);
-        assert!(t_low > STRETCH_COST_S && t_up < DIVE_GETUP_S, "fixture: wait between {t_low:.2} and {t_up:.2} s");
+        // The same bracket must hold for his read of it, which is what he judges by (it
+        // differs from the world's path by his perception noise).
+        for (name, p) in [("world", path), ("his read", sim.f[CF].belief.as_ref().unwrap())] {
+            let (d, v0) = (p.at(2.0).0.y - 80.0 - 0.7, p.at(2.0).1.norm());
+            let t_up = (0..400).map(|k| 2.0 + 0.005 * k as f64).find(|&t| p.at(t).0.y - 80.0 <= 0.7).expect("it reaches him") - 2.0;
+            let t_low = d / (v0 + 8.5);
+            assert!(t_low > STRETCH_COST_S && t_up < DIVE_GETUP_S, "fixture ({name}): wait between {t_low:.2} and {t_up:.2} s");
+        }
         assert!(!sim.ball_still_up(), "fixture: on the ground");
         assert!(!sim.dive_gains(CF, DIVE_GETUP_S), "a roller he can run down is not worth a dive");
         assert!(sim.dive_gains(CF, STRETCH_COST_S), "he would not have it within a stretch's 0.3 s");
