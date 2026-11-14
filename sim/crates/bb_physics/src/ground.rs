@@ -120,6 +120,15 @@ impl Field {
     /// fence, backstop, side wall, taper (physics-spec §9.5). The walls are those on the
     /// point's side of the field (x ≥ 0: first base).
     pub fn pieces(&self, x: f64, y: f64) -> [WallAt; 4] {
+        self.pieces_for(x, y, 0.0, 0.0)
+    }
+
+    /// [`Field::pieces`] for something of radius `r_wall` against the walls and `r_fence`
+    /// against the fence: each distance less the radius, and only then the fair-ground rule
+    /// for the taper, so a centre on fair ground is never against a foul-territory wall
+    /// (Gemini play-area review P1-1: the rule used to come first, and the radius then put the
+    /// taper's line 3.7 cm into fair ground for a ball and 0.3 m for a body).
+    fn pieces_for(&self, x: f64, y: f64, r_wall: f64, r_fence: f64) -> [WallAt; 4] {
         let r2 = core::f64::consts::SQRT_2;
         let sg = if x < 0.0 { -1.0 } else { 1.0 };
         let xa = x.abs();
@@ -127,13 +136,13 @@ impl Field {
         let c = (xa - y) / r2;
         let rho = m::hypot(x, y);
         let radial = Vec3::new(x, y, 0.0).normalized();
-        let fence = WallAt { kind: WallKind::Fence, dist: self.fence_at(m::atan2(x, y)) - rho, inward: -radial, s };
-        let back = WallAt { kind: WallKind::Backstop, dist: y + self.backstop_m, inward: Vec3::Y, s };
-        let side = WallAt { kind: WallKind::Side, dist: self.foul_clear_m - c, inward: Vec3::new(-sg, 1.0, 0.0) * (1.0 / r2), s };
+        let fence = WallAt { kind: WallKind::Fence, dist: self.fence_at(m::atan2(x, y)) - rho - r_fence, inward: -radial, s };
+        let back = WallAt { kind: WallKind::Backstop, dist: y + self.backstop_m - r_wall, inward: Vec3::Y, s };
+        let side = WallAt { kind: WallKind::Side, dist: self.foul_clear_m - c - r_wall, inward: Vec3::new(-sg, 1.0, 0.0) * (1.0 / r2), s };
         let s_pole = if x < 0.0 { self.fence_lf } else { self.fence_rf };
         let k = self.foul_clear_m / (s_pole - self.foul_taper_m);
         let norm = m::sqrt(1.0 + k * k);
-        let taper_d = (k * (s_pole - s) - c) / norm;
+        let taper_d = (k * (s_pole - s) - c) / norm - r_wall;
         // Inward in (s, c) is (−k, −1)/norm; s = (1, 1)/√2 and c = (1, −1)/√2 on this side.
         let inward = Vec3::new(sg * (-k - 1.0), -k + 1.0, 0.0) * (1.0 / (r2 * norm));
         // The walls bound foul territory only (§9.5): beyond the pole the taper's line would
@@ -153,10 +162,7 @@ impl Field {
     /// (physics-spec §9.5).
     pub fn ball_clearance(&self, x: f64, y: f64, r: f64) -> WallAt {
         let mut best = WallAt { kind: WallKind::Fence, dist: f64::INFINITY, inward: Vec3::Y, s: 0.0 };
-        for mut w in self.pieces(x, y) {
-            if w.kind != WallKind::Fence {
-                w.dist -= r;
-            }
+        for w in self.pieces_for(x, y, r, 0.0) {
             if w.dist < best.dist {
                 best = w;
             }
@@ -168,8 +174,7 @@ impl Field {
     /// measured from its plane or curve, minus `r`), for keeping players inside the field.
     pub fn body_clearance(&self, x: f64, y: f64, r: f64) -> WallAt {
         let mut best = WallAt { kind: WallKind::Fence, dist: f64::INFINITY, inward: Vec3::Y, s: 0.0 };
-        for mut w in self.pieces(x, y) {
-            w.dist -= r;
+        for w in self.pieces_for(x, y, r, r) {
             if w.dist < best.dist {
                 best = w;
             }
@@ -613,25 +618,47 @@ mod tests {
         assert_eq!(gb.end(), SegmentEnd::OverFence { fair: false }, "{:?}", gb.at(gb.t_end()));
     }
 
-    /// The walls bound foul territory only: every fair point inside the fence is inside the
-    /// field, for the reference park and for one with a steep taper (stands 300 ft off the
-    /// lines closing in over the last 30 ft before the poles), physics-spec §9.5.
+    /// The walls bound foul territory only (physics-spec §9.5): a ball (radius 0.036888 m) or a
+    /// body (0.3 m) whose centre is on fair ground and inside the fence (the fence itself
+    /// meets a ball at its centre and a body at its radius) touches no foul-territory wall,
+    /// for the reference park and for one with a steep taper (stands 300 ft off the lines
+    /// closing in over the last 30 ft before the poles). Plus the review's point: 5 cm in
+    /// front of the fence and 2 cm fair of the line, a ball is clear of the taper.
     #[test]
     fn foul_walls_never_cut_fair_ground() {
+        const BALL_R: f64 = 0.036888;
+        const BODY_R: f64 = 0.3;
         let steep = Field { foul_clear_m: 300.0 * FT, foul_taper_m: 300.0 * FT, ..Field::default() };
         for f in [Field::default(), steep] {
-            for i in 0..=200 {
-                let th = (-45.0 + 0.45 * i as f64) * core::f64::consts::PI / 180.0;
+            for i in 0..=400 {
+                let th = (-45.0 + 0.225 * i as f64) * core::f64::consts::PI / 180.0;
                 let fence = f.fence_at(th);
-                for j in 1..=100 {
-                    let rho = fence * j as f64 / 100.0 - 1e-6;
+                for j in 1..=200 {
+                    let rho = fence * j as f64 / 200.0;
                     let (x, y) = (rho * m::sin(th), rho * m::cos(th));
-                    let w = f.body_clearance(x, y, 0.0);
-                    assert!(w.dist >= -1e-9, "fair ({x:.2}, {y:.2}) outside by {:?}", w);
-                    assert!(w.kind == WallKind::Fence || w.dist > 0.0);
+                    if y < x.abs() {
+                        continue;
+                    }
+                    if rho < fence - 1e-6 {
+                        let w = f.ball_clearance(x, y, BALL_R);
+                        assert!(w.dist >= 0.0, "ball at fair ({x:.3}, {y:.3}) meets {w:?}");
+                    }
+                    if rho < fence - BODY_R - 1e-6 {
+                        let w = f.body_clearance(x, y, BODY_R);
+                        assert!(w.dist >= 0.0, "body at fair ({x:.3}, {y:.3}) meets {w:?}");
+                    }
                 }
             }
         }
+        let f = Field::default();
+        let (s, c) = (330.0 * FT - 0.05, -0.02);
+        let (x, y) = ((s + c) / core::f64::consts::SQRT_2, (s - c) / core::f64::consts::SQRT_2);
+        let w = f.ball_clearance(x, y, BALL_R);
+        assert!(w.dist >= 0.0, "{w:?}");
+        // 20 cm on along the line it is past the fence: it meets the fence, not the taper.
+        let (x2, y2) = ((s + 0.2 + c) / core::f64::consts::SQRT_2, (s + 0.2 - c) / core::f64::consts::SQRT_2);
+        let w = f.ball_clearance(x2, y2, BALL_R);
+        assert!(w.dist < 0.0 && w.kind == WallKind::Fence, "{w:?}");
     }
 
     #[test]
