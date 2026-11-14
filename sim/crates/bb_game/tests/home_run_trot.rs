@@ -12,7 +12,11 @@ const H: f32 = 19.397_3; // 27.432 / √2: first base is at (H, H), second (0, 2
 fn home_run_trots_touch_every_base_ahead_and_end_at_home() {
     let bases = [(H, H), (0.0, 2.0 * H), (-H, H), (0.0, 0.0)];
     let (mut homers, mut runners) = (0, 0);
-    for seed in 0..10u64 {
+    // Enough games for several home runs (the v2 swing, 2026-11-14, hits far fewer than v1 did).
+    for seed in 0..80u64 {
+        if homers >= 8 {
+            break;
+        }
         let mut g = Game::new(seed, true);
         while let Some(s) = g.step_pitch() {
             if !s.rules_events.iter().any(|e| matches!(e, Event::PlateAppearanceEnded { result: PaResult::HomeRun, .. })) {

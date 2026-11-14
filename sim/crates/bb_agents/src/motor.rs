@@ -71,30 +71,38 @@ pub struct SwingNoise {
     pub tilt_per_m: f64,
     pub reach: f64,
     pub timing: f64,
+    /// Relative σ of the swing's speed (its effort) against `BatSpeed`.
+    pub effort: f64,
 }
 
 impl SwingNoise {
     /// From the batter's attributes with combined factor `k` (global × composure).
     pub fn new(b: &BatterAttrs, k: f64) -> Self {
-        Self { v_offset: b.bat_control * k, tilt_per_m: 1.5, reach: 0.7 * b.bat_control * k, timing: b.timing * k }
+        Self { v_offset: b.bat_control * k, tilt_per_m: 1.5, reach: 0.7 * b.bat_control * k, timing: b.timing * k, effort: EFFORT_SIGMA * k }
     }
 }
 
+/// Relative σ of a swing's sweet-spot speed about the batter's `BatSpeed` [E] (agent-models
+/// §3.6): Statcast's within-batter SD of bat speed on competitive swings met within 3 in of the
+/// batter's own mean depth and over the middle of the plate, 3.2 mph at 71.7 (2025 sample).
+pub const EFFORT_SIGMA: f64 = 0.045;
+
 /// The executed swing handed to the world. Draw order (δ_v, α, δ_r, t) is part of the
-/// replay contract.
+/// replay contract; the effort is drawn from its own stream (`Purpose::SwingEffort`).
 #[derive(Clone, Copy, Debug, PartialEq)]
 pub struct ExecutedSwing {
     pub swing: Swing,
     pub placement: Placement,
 }
 
-pub fn execute_swing(intended: &IntendedSwing, noise: &SwingNoise, rng: &mut KeyedRng) -> ExecutedSwing {
+pub fn execute_swing(intended: &IntendedSwing, noise: &SwingNoise, rng: &mut KeyedRng, effort_rng: &mut KeyedRng) -> ExecutedSwing {
     let mut z = || rng.truncated_normal(TRUNC_SIGMA);
     let v_offset = noise.v_offset * z();
     let plane_tilt = noise.v_offset * noise.tilt_per_m * z();
     let reach = noise.reach * z();
     let t_shift = noise.timing * z();
-    let placement = Placement { plane_tilt, v_offset, reach, t_shift };
+    let effort = noise.effort * effort_rng.truncated_normal(TRUNC_SIGMA);
+    let placement = Placement { plane_tilt, v_offset, reach, t_shift, effort };
     ExecutedSwing { swing: apply_placement(intended, &placement), placement }
 }
 

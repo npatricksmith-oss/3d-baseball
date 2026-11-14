@@ -37,6 +37,9 @@ pub enum Purpose {
     /// The throwing hand and batting side of a generated player (data-formats §2.4). Like
     /// `RosterGeneration`, drawn before the first pitch.
     RosterHands = 13,
+    /// The swing's effort: its sweet-spot speed against the batter's `BatSpeed`, one draw per
+    /// swing (agent-models §3.6, added 2026-11-14 with the v2 swing).
+    SwingEffort = 14,
 }
 
 /// The full key of one random stream.

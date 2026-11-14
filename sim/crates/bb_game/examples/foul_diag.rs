@@ -65,6 +65,8 @@ struct Sw {
     ty: PitchType,
     /// Normalized pitch height at the plate: 0 = zone bottom, 1 = zone top.
     h: f64,
+    /// Plate x toward the batter from the plate's center, m (+ = inside).
+    x_in: f64,
     ad: f64,
     aa: f64,
     vba: f64,
@@ -155,6 +157,7 @@ fn measure(mu: &Matchup, p: &PitchRecord) -> Option<Sw> {
     }
     let plate = p.plate.unwrap_or(Vec3::ZERO);
     let h = (plate.z - mu.zone.bottom) / (mu.zone.top - mu.zone.bottom);
+    let x_in = -side * plate.x;
     let (mut miss, mut clear_cm, mut past_tip_cm, mut h_int_cm) = (0, f64::NAN, f64::NAN, f64::NAN);
     if let SwingResult::Miss(ca) = &res.swing {
         let len_bat = mu.bat.profile.length();
@@ -209,7 +212,7 @@ fn measure(mu: &Matchup, p: &PitchRecord) -> Option<Sw> {
         }
         None => (Outcome::Whiff, f64::NAN, f64::NAN, f64::NAN),
     };
-    Some(Sw { out, ty: p.ty, h, ad, aa, vba, tilt, length_ft: len / 0.3048, bat_mph: v.norm() / 0.44704, y, ev, la, land_dir, miss, clear_cm, past_tip_cm, dt_ms, t_err_ms, h_nom_cm, h_aim_cm, h_off_cm, h_int_cm, read_ok, gap_z_cm, gap_t_ms, est_z_cm })
+    Some(Sw { out, ty: p.ty, h, x_in, ad, aa, vba, tilt, length_ft: len / 0.3048, bat_mph: v.norm() / 0.44704, y, ev, la, land_dir, miss, clear_cm, past_tip_cm, dt_ms, t_err_ms, h_nom_cm, h_aim_cm, h_off_cm, h_int_cm, read_ok, gap_z_cm, gap_t_ms, est_z_cm })
 }
 
 fn main() {
@@ -416,6 +419,33 @@ fn statcast_tables(sws: &[Sw]) {
             pct(&tilt, 0.5),
             share(b.iter().filter(|s| is_foul(s)).count(), con)
         );
+    }
+
+    // By horizontal location, in the Statcast sample's bins (ft from the plate's center line,
+    // + = inside): MLB means from the 2025 Savant sample (docs/calibration/2026-11-14-swing-model.md).
+    println!("By horizontal location (competitive swings; fair-ball spray pull-positive by first landing): sim (MLB)");
+    let mean = |v: &[f64]| if v.is_empty() { f64::NAN } else { v.iter().sum::<f64>() / v.len() as f64 };
+    for (lo, hi, name, m_bat, m_ad, m_tilt, m_len, m_spray) in [
+        (-1e9, -0.55, "outside", "70.1", "-1.6", "29.7", "7.45", "-1.3"),
+        (-0.55, -0.18, "mid-away", "71.4", "-1.4", "31.2", "7.31", "4.5"),
+        (-0.18, 0.18, "middle", "72.1", "0.6", "32.3", "7.23", "6.9"),
+        (0.18, 0.55, "mid-in", "72.0", "3.6", "33.8", "7.19", "8.4"),
+        (0.55, 1e9, "inside", "71.4", "6.5", "35.1", "7.13", "14.3"),
+    ] {
+        let b: Vec<&Sw> = sws.iter().filter(|s| s.x_in / 0.3048 >= lo && s.x_in / 0.3048 < hi).collect();
+        let f = |g: &dyn Fn(&Sw) -> f64| mean(&b.iter().map(|s| g(s)).filter(|v| v.is_finite()).collect::<Vec<_>>());
+        let spray: Vec<f64> = b.iter().filter(|s| matches!(s.out, Outcome::FairPull | Outcome::FairOppo)).map(|s| s.land_dir).collect();
+        println!(
+            "{name:>9}: n {:5}  bat {:5.1} ({m_bat})  AD {:+5.1} ({m_ad})  tilt {:4.1} ({m_tilt})  length {:4.2} ({m_len})  fair spray {:+5.1} ({m_spray}, n {})  timing err {:+5.1} ms",
+            b.len(), f(&|s| s.bat_mph), f(&|s| s.ad), f(&|s| s.tilt), f(&|s| s.length_ft), mean(&spray), spray.len(), f(&|s| s.t_err_ms)
+        );
+    }
+    // Bat speed by intercept depth relative to the mean (Statcast's depth bins, inches).
+    let ym = mean(&sws.iter().map(|s| s.y).collect::<Vec<_>>());
+    println!("Bat speed by intercept depth relative to the mean (in, + = out front): sim (MLB)");
+    for (lo, hi, m_bat) in [(-99.0, -12.0, "68.3"), (-12.0, -6.0, "70.6"), (-6.0, -2.0, "71.8"), (-2.0, 2.0, "72.9"), (2.0, 6.0, "73.1"), (6.0, 12.0, "73.4"), (12.0, 99.0, "72.6")] {
+        let b: Vec<f64> = sws.iter().filter(|s| { let d = (s.y - ym) / 0.0254; d >= lo && d < hi }).map(|s| s.bat_mph).collect();
+        println!("  [{lo:+4.0}, {hi:+4.0}): n {:5}  bat {:5.1} ({m_bat})", b.len(), mean(&b));
     }
 
     println!("\nHow whiffs miss, by attack direction (share of whiffs in the bin), against the bat's axis extended past the tip");

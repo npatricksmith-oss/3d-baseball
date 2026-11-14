@@ -201,6 +201,8 @@ pub struct Placement {
     pub reach: f64,
     /// Contact-time shift, s.
     pub t_shift: f64,
+    /// Relative change of the swing's speed (effort): both rate bumps scale by 1 + effort.
+    pub effort: f64,
 }
 
 /// One Gaussian rate bump about t_c: rate(τ) = peak·exp(−(τ − τ_p)²/2w²).
@@ -448,6 +450,8 @@ pub fn apply_placement(i: &IntendedSwing, p: &Placement) -> Swing {
     s.pivot.z += p.v_offset;
     s.pivot = s.pivot + s.axis_c * p.reach;
     s.t_c += p.t_shift;
+    s.hands.peak *= 1.0 + p.effort;
+    s.bat.peak *= 1.0 + p.effort;
     s
 }
 

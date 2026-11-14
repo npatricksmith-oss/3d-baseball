@@ -512,7 +512,7 @@ pub fn simulate_pitch_ctx(mu: &Matchup, sc: &Scouting, count: Count, seed: u64, 
             plan_swing(&mu.batter, &mu.template, &mu.bat.profile, &mu.bat.mass, mu.bat.contact.ss_from_tip, a, t, mu.template.attack_angle_at(&mu.batter, a))
         };
         let sn = SwingNoise::new(&mu.batter, mu.knobs.swing);
-        let ex = execute_swing(&planner(cur, t_aim), &sn, &mut rng(seed, play, BATTER, Purpose::SwingExecution, 0));
+        let ex = execute_swing(&planner(cur, t_aim), &sn, &mut rng(seed, play, BATTER, Purpose::SwingExecution, 0), &mut rng(seed, play, BATTER, Purpose::SwingEffort, 0));
         let t_commit = t_now;
         let mut swing = ex.swing;
         swing.start_no_earlier_than(t_commit);

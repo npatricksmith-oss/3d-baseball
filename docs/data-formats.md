@@ -69,6 +69,7 @@ key = (game_seed: u64, play_index: u32, agent_id: u16, purpose: u16, sub_index: 
 | `FielderAnticipation` | 11 | A fielder's reads before he reads the ball (agent-models §5.10): sub-index 0, the pitch location before contact; sub-index 1, the bat's angle at contact; sub-index 2, the swing's lead (when the bat started forward against the pitch's arrival) |
 | `RosterGeneration` | 12 | Names, uniform numbers and the batting order of a generated game roster (§2.4). Not a world draw: it happens before the first pitch and decides who the players are, never what happens |
 | `RosterHands` | 13 | The throwing hand and batting side of a generated player (§2.4). Like `RosterGeneration`, drawn before the first pitch |
+| `SwingEffort` | 14 | The swing's effort: its sweet-spot speed relative to the batter's `BatSpeed`, one truncated-normal draw per swing (agent-models §3.6 v2, 2026-11-14) |
 
 The game seed is `derive(season_seed, game_id)` (PLAN §4.2). Because the RNG is counter-based, **no RNG state is ever saved**. Snapshots (§7) need only the seed and the indices.
 

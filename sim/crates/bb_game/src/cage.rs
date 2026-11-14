@@ -83,7 +83,8 @@ impl Cage {
         let plan = self.plan_perfect(release, None).expect("pitch reaches the batter");
         let noise = SwingNoise::new(&self.batter, k);
         let mut rng = KeyedRng::new(RngKey { game_seed: seed, play_index: play, agent_id: BATTER_AGENT, purpose: Purpose::SwingExecution, sub_index: 0 });
-        let ex = execute_swing(&plan, &noise, &mut rng);
+        let mut effort = KeyedRng::new(RngKey { game_seed: seed, play_index: play, agent_id: BATTER_AGENT, purpose: Purpose::SwingEffort, sub_index: 0 });
+        let ex = execute_swing(&plan, &noise, &mut rng, &mut effort);
         resolve_pitch(&self.env, release, Some(&ex.swing), &self.bat)
     }
 }
