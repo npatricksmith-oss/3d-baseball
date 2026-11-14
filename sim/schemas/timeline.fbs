@@ -150,6 +150,8 @@ table PlayTimeline {
   // One line a viewer can read: the call on this pitch and, if the play ended a plate
   // appearance, what happened ("Ground out to short", "Single to left, 1 run scores").
   summary: string (id: 12);
+  // The batter this pitch was thrown to (his batting id, data-formats §2.4).
+  batter: ushort (id: 13);
 }
 
 root_type PlayTimeline;

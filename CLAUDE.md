@@ -46,7 +46,7 @@ sim/                   Cargo workspace
     bb_schema          generated FlatBuffers code + event-log container and BLAKE3 digest chain
     bb_world           true world: pitch resolution against the swing
     bb_rules           rules engine: pure step function over facts; scenarios/**/*.toml corpus
-    bb_game            orchestrator: cage, plate appearances (pa.rs), causal live-ball plays (live.rs; play.rs is the older skeleton kept for diagnostics), games (game.rs), event log, timelines
+    bb_game            orchestrator: cage, plate appearances (pa.rs), causal live-ball plays (live.rs; play.rs is the older skeleton kept for diagnostics), games (game.rs), rosters (roster.rs: who the players are, identity only), event log, timelines
     bb_stats           statistics as pure functions of the event log (box score, accounting identities)
     bb_ffi             C ABI for engine clients (include/bb_ffi.h; c/run_smoke.sh links a C client)
     bb_league          (later milestones)

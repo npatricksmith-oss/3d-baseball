@@ -35,7 +35,7 @@ pub unsafe extern "C" fn bb_game_advance(g: *mut BbGame, out_blob: *mut *mut u8,
     let Some(game) = g.game.as_mut() else { return 0 };
     match game.step_pitch() {
         Some(step) => {
-            let bytes = bb_game::timeline::encode(&step, &game.st).into_boxed_slice();
+            let bytes = bb_game::timeline::encode(&step, &game.st, &game.rosters).into_boxed_slice();
             unsafe {
                 *out_len = bytes.len();
                 *out_blob = Box::into_raw(bytes) as *mut u8;
@@ -63,6 +63,98 @@ pub unsafe extern "C" fn bb_game_score(g: *const BbGame, away: *mut u16, home: *
         *home = s[1];
     }
     game.finished() as i32
+}
+
+/// Size of the name fields of [`BbPlayer`], including the terminating NUL.
+pub const BB_NAME_LEN: usize = 32;
+
+/// Who a player is (data-formats §2.4). Identity only.
+#[repr(C)]
+#[derive(Clone, Copy)]
+pub struct BbPlayer {
+    pub player_id: u32,
+    /// The agent id he bats and runs under, and the one he fields under.
+    pub bat_agent: u16,
+    pub field_agent: u16,
+    /// 0 away, 1 home.
+    pub side: u8,
+    /// Uniform number, 1–99.
+    pub number: u8,
+    /// Fielding position, scorer's numbering: 1 pitcher … 9 right field.
+    pub position: u8,
+    /// Place in the batting order, 1–9.
+    pub batting_order: u8,
+    /// Hands: 1 left, 2 right (3 = switch hitter, `bats` only, once backlog A1 adds them).
+    pub bats: u8,
+    pub throws: u8,
+    pub _pad: [u8; 2],
+    /// NUL-terminated, ASCII.
+    pub given: [u8; BB_NAME_LEN],
+    pub family: [u8; BB_NAME_LEN],
+}
+
+fn name_field(s: &str) -> [u8; BB_NAME_LEN] {
+    let mut out = [0u8; BB_NAME_LEN];
+    // Names are ASCII (data-formats §2.4), so a cut at any byte leaves valid text.
+    let n = s.len().min(BB_NAME_LEN - 1);
+    out[..n].copy_from_slice(&s.as_bytes()[..n]);
+    out
+}
+
+fn player(team: &bb_game::roster::TeamRoster, p: &bb_game::roster::Player) -> BbPlayer {
+    let hand = |h: bb_observe::Hand| match h {
+        bb_observe::Hand::Left => 1,
+        bb_observe::Hand::Right => 2,
+    };
+    BbPlayer {
+        player_id: p.player_id,
+        bat_agent: team.bat_agent(p),
+        field_agent: team.field_agent(p),
+        side: team.side,
+        number: p.number,
+        position: p.position,
+        batting_order: p.batting_order,
+        bats: hand(p.bats),
+        throws: hand(p.throws),
+        _pad: [0; 2],
+        given: name_field(p.given),
+        family: name_field(p.family),
+    }
+}
+
+/// One player of a side's roster, by place in the batting order: `side` 0 away, 1 home;
+/// `batting_slot` 0–8. Returns 1 and fills `out`; 0 if there is no such side or slot; −1 on
+/// a null argument.
+///
+/// # Safety
+/// `g` must come from [`bb_game_create`]; `out` must be a valid pointer.
+#[unsafe(no_mangle)]
+pub unsafe extern "C" fn bb_game_roster(g: *const BbGame, side: u32, batting_slot: u32, out: *mut BbPlayer) -> i32 {
+    if g.is_null() || out.is_null() {
+        return -1;
+    }
+    let Some(game) = unsafe { &*g }.game.as_ref() else { return -1 };
+    let Some(team) = game.rosters.teams.get(side as usize) else { return 0 };
+    let Some(p) = team.batting_order().get(batting_slot as usize).copied() else { return 0 };
+    unsafe { *out = player(team, p) };
+    1
+}
+
+/// The player behind an agent id, batting or fielding (a `BbActor::agent`, a
+/// `BbPlayInfo::batter`, a `BbCall::runner`). Returns 1 and fills `out`; 0 if the id is not
+/// a player; −1 on a null argument.
+///
+/// # Safety
+/// `g` must come from [`bb_game_create`]; `out` must be a valid pointer.
+#[unsafe(no_mangle)]
+pub unsafe extern "C" fn bb_game_player(g: *const BbGame, agent: u16, out: *mut BbPlayer) -> i32 {
+    if g.is_null() || out.is_null() {
+        return -1;
+    }
+    let Some(game) = unsafe { &*g }.game.as_ref() else { return -1 };
+    let Some((team, p)) = game.rosters.find(agent) else { return 0 };
+    unsafe { *out = player(team, p) };
+    1
 }
 
 /// Release a blob returned by this library.
@@ -193,6 +285,10 @@ pub struct BbPlayInfo {
     /// The umpire's out calls during the play, in time order (`calls[..n_calls]`).
     pub n_calls: u32,
     pub calls: [BbCall; BB_MAX_CALLS],
+    /// The batter the pitch was thrown to: his batting id (look him up with
+    /// [`bb_game_player`]).
+    pub batter: u16,
+    pub _pad: u16,
 }
 
 /// One out as the umpire signals it (rules-spec §1.3).
@@ -245,7 +341,7 @@ fn timeline<'a>(blob: *const u8, len: usize) -> Option<bb_schema::tl::PlayTimeli
 #[unsafe(no_mangle)]
 pub unsafe extern "C" fn bb_timeline_info(blob: *const u8, len: usize, out: *mut BbPlayInfo) -> i32 {
     let (Some(tl), false) = (timeline(blob, len), out.is_null()) else { return -1 };
-    let mut info = BbPlayInfo { play_index: tl.play_index(), duration_s: tl.duration_s(), ..Default::default() };
+    let mut info = BbPlayInfo { play_index: tl.play_index(), duration_s: tl.duration_s(), batter: tl.batter(), ..Default::default() };
     if let Some(v) = tl.view_after() {
         info.inning = v.inning();
         info.top = v.top() as u8;
@@ -429,6 +525,63 @@ mod tests {
         assert!(n > 150);
     }
 
+    fn text(field: &[u8]) -> &str {
+        std::ffi::CStr::from_bytes_until_nul(field).unwrap().to_str().unwrap()
+    }
+
+    // The roster read through the C ABI is the game's roster (data-formats §2.4): nine a
+    // side in batting order, each found again under both of his agent ids; every play names
+    // the batter it was thrown to, and a play that ends his plate appearance says his name.
+    #[test]
+    fn rosters_and_batters_cross_the_abi() {
+        let seed = 7;
+        let want = bb_game::roster::Rosters::generate(seed);
+        let g = bb_game_create(seed);
+        // SAFETY: an all-zero BbPlayer is a valid value (plain numbers and bytes).
+        let mut p: BbPlayer = unsafe { std::mem::zeroed() };
+        for side in 0..2u32 {
+            let team = &want.teams[side as usize];
+            for (slot, w) in team.batting_order().into_iter().enumerate() {
+                assert_eq!(unsafe { bb_game_roster(g, side, slot as u32, &mut p) }, 1);
+                assert_eq!((text(&p.given), text(&p.family)), (w.given, w.family));
+                assert_eq!((p.player_id, p.side as u32, p.number, p.position, p.batting_order as usize), (w.player_id, side, w.number, w.position, slot + 1));
+                assert_eq!((p.bat_agent, p.field_agent), (((side as u16) << 8) | (slot as u16 + 1), ((side as u16) << 8) | 0x80 | w.position as u16));
+                assert_eq!((p.bats, p.throws), (2, 2));
+                for id in [p.bat_agent, p.field_agent] {
+                    let mut q: BbPlayer = unsafe { std::mem::zeroed() };
+                    assert_eq!(unsafe { bb_game_player(g, id, &mut q) }, 1);
+                    assert_eq!((q.player_id, text(&q.family)), (w.player_id, w.family));
+                }
+            }
+        }
+        // Not players, and bad arguments.
+        assert_eq!(unsafe { bb_game_roster(g, 2, 0, &mut p) }, 0);
+        assert_eq!(unsafe { bb_game_roster(g, 0, 9, &mut p) }, 0);
+        assert_eq!(unsafe { bb_game_player(g, 0x0200, &mut p) }, 0);
+        assert_eq!(unsafe { bb_game_player(g, 0x00FF, &mut p) }, 0);
+        assert_eq!(unsafe { bb_game_roster(std::ptr::null(), 0, 0, &mut p) }, -1);
+        assert_eq!(unsafe { bb_game_roster(g, 0, 0, std::ptr::null_mut()) }, -1);
+        assert_eq!(unsafe { bb_game_player(g, 1, std::ptr::null_mut()) }, -1);
+        // The first batters of the game, by the order: away 1, 2, 3, ... until the half ends.
+        let (mut blob, mut len) = (std::ptr::null_mut(), 0usize);
+        let (mut up, mut named) = (0usize, 0);
+        while unsafe { bb_game_advance(g, &mut blob, &mut len) } == 1 && named < 3 {
+            let mut info = BbPlayInfo::default();
+            assert_eq!(unsafe { bb_timeline_info(blob, len, &mut info) }, 1);
+            let batter = want.teams[0].batting_order()[up];
+            assert_eq!(info.batter, up as u16 + 1);
+            let summary = text(&info.summary);
+            if summary.contains(':') {
+                assert!(summary.starts_with(&format!("{}: ", batter.family)), "{summary}");
+                up += 1;
+                named += 1;
+            }
+            unsafe { bb_blob_free(blob, len) };
+        }
+        assert_eq!(named, 3);
+        unsafe { bb_game_free(g) };
+    }
+
     // What a viewer sees before the batter has decided must not depend on what he will
     // decide. Through his decision (the sim's commit tick, read from the game, not from the
     // timeline), the bat stays in the stance it had at the release, upright enough that its
@@ -441,7 +594,7 @@ mod tests {
         let mut game = Game::new(11, true);
         let (mut swings, mut takes, mut walks, mut loads) = (0, 0, 0, 0);
         while let Some(step) = game.step_pitch() {
-            let bytes = bb_game::timeline::encode(&step, &game.st);
+            let bytes = bb_game::timeline::encode(&step, &game.st, &game.rosters);
             let (p, len) = (bytes.as_ptr(), bytes.len());
             let rec = &step.record;
             let mut info = BbPlayInfo::default();
@@ -473,7 +626,8 @@ mod tests {
             } else {
                 takes += 1;
             }
-            if text.starts_with("Walk") {
+            // A line that ends a plate appearance starts with the batter's name.
+            if text.split_once(": ").is_some_and(|x| x.1.starts_with("Walk")) {
                 let t_call = t_pitch_end + 0.2;
                 let mut t = 0.0;
                 while t <= t_call {
@@ -527,7 +681,8 @@ mod tests {
             (prev_half, prev_outs) = ((info.inning, info.top), info.outs);
             let text = std::ffi::CStr::from_bytes_until_nul(&info.summary).unwrap().to_str().unwrap();
             assert!(!text.is_empty() && text.is_ascii(), "summary {text:?}");
-            *seen.entry(text.split(',').next().unwrap().to_string()).or_insert(0u32) += 1;
+            // Tallied without the batter's name, which starts a line that ends his plate appearance.
+            *seen.entry(text.split_once(": ").map_or(text, |x| x.1).split(',').next().unwrap().to_string()).or_insert(0u32) += 1;
             let (mut f0, mut f1, mut fe) = (BbFrame::default(), BbFrame::default(), BbFrame::default());
             unsafe {
                 assert_eq!(bb_timeline_sample(p, len, 0.0, &mut f0), 1);
@@ -654,6 +809,8 @@ mod tests {
                 t += 0.004;
             }
             // Whoever is credited with a walk or a home run ends the clip on his base.
+            // A line that ends a plate appearance starts with the batter's name.
+            let text = text.split_once(": ").map_or(text, |x| x.1);
             if text.starts_with("Walk") || text.starts_with("Home run") {
                 let batter = fe.actors[..fe.n_actors as usize].iter().filter(|a| a.agent & 0x80 == 0).map(|a| (a.pos[0].hypot(a.pos[1]), a.pos)).collect::<Vec<_>>();
                 let want: [f32; 2] = if text.starts_with("Walk") { [19.4, 19.4] } else { [0.0, 0.0] };

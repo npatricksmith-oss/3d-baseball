@@ -1,6 +1,6 @@
 # Task List
 
-**Last updated:** 2026-11-13 (the dive rate judged and fixed, A5; before that, dives shown in the client, the get-up after a rimmed dive, two-out throws; before that, the overrun of first and runner position samples; before that, foul measures, sources and the correction experiment; pushed; the spray experiment parked for later; before that, the read knows the ball started at the plate; before that, called-off infielders back up the catch; before that, pop-up calls on `fix/popup-calls`; before that, owner's observations merged into the "Owner backlog" section; before that, the coordinator run on `coord/review-fixes`)
+**Last updated:** 2026-11-13 (the dive rate judged and fixed, A5, and rosters, A2, merged; before that, dives shown in the client, the get-up after a rimmed dive, two-out throws; before that, the overrun of first and runner position samples; before that, foul measures, sources and the correction experiment; pushed; the spray experiment parked for later; before that, the read knows the ball started at the plate; before that, called-off infielders back up the catch; before that, pop-up calls on `fix/popup-calls`; before that, owner's observations merged into the "Owner backlog" section; before that, the coordinator run on `coord/review-fixes`)
 The live to-do list for the project. [PLAN.md](PLAN.md) holds decisions and design. This file holds what is next and what is done. Update it at the end of every work session.
 
 Status: `[ ]` not started · `[~]` in progress · `[x]` done · `[?]` needs an owner decision
@@ -9,7 +9,7 @@ Status: `[ ]` not started · `[~]` in progress · `[x]` done · `[?]` needs an o
 
 ## Resume here (2026-11-13, eighth session: the dive rate, A5)
 
-Branch `claude/a15-de1824` (from main at `328e51b`). `cargo test --workspace --release`: all pass.
+Branch `claude/a15-de1824`, merged into main together with the rosters branch (section below). `cargo test --workspace --release` on the merge: all pass.
 
 **Nothing is waiting on a review.** The [Codex dive-rate review](docs/reviews/2026-11-13-codex-dive-rate-review.md) is resolved: its P1 (the outfielder weighed a dive with the world's ball speed, not his read) and the dive half of a P2 (he could change his mind while waiting for the closest tick) are fixed; two P3s in the note are fixed.
 
@@ -23,8 +23,25 @@ Done ([note](docs/calibration/2026-11-13-dive-rate.md), agent-models §5.3–§5
 
 Not done: real dive and get-up clips; the stretch has no animation; not watched in the client after this change. The shortstop still dives about 2.5 times the real rate (all batters are right-handed until A1, and near misses from the earliest-point fielding plan). The four new parameters are estimates [E].
 
-## Previous: 2026-11-13, seventh session: dives, from the owner watching seed 7475
+## Also 2026-11-13, in a parallel session: rosters, owner backlog A2
 
+Branch `claude/practical-lalande-b928a3`, merged into main with the dive work. `cargo test --workspace --release`: all pass. Game digests are unchanged (seeds 1, 2, 3, 42 compared before and after): rosters are identity only and the log header is outside the digest.
+
+**Nothing is waiting on a review.** The [Codex rosters review](docs/reviews/2026-11-13-codex-rosters-review.md) is resolved: no P1/P2, and its two P3s (no literal roster fixture; runs not checked per player) are fixed. It reproduced 18,000 generated players with its own Python generator, confirmed the unchanged digests, and checked the C layouts. Deferred: a committed test of a log without rosters.
+
+Done (A2; spec in data-formats §2.4):
+- **Every game has two named nines.** `bb_game::roster::Rosters::generate(seed)` gives each side nine players: given and family name, uniform number (1–99, unique on the team), position (each of 1–9 once), place in the batting order (a seeded shuffle of the eight position players; the pitcher bats ninth), and `bats`/`throws` (all right-handed until A1, which is what the sim plays). The same seed gives the same players. New RNG purpose `RosterGeneration` = 12.
+- **Names [E]:** four pools (English .62, Spanish .28, Japanese .06, Korean .04), ASCII only; a player's pool is kept as `origin` so his look can match later (L2). Family names are unique in a game and given names on a team, so play-by-play uses the family name alone.
+- **A player still has two agent ids** (batting `side<<8 | order`, fielding `side<<8 | 0x80 | position`); the roster resolves either. Merging them would change every game's RNG keys, so it waits for substitutions.
+- **Where names show:** a caption that ends a plate appearance starts with the batter's family name ("Ramirez: Single to left"), so the client's HUD shows names with no client change. `sim-cli game` prints each side's batting lines by name (`bb_stats::BoxScore.batting`: PA, R, K, BB, HBP, HR, batted balls; at-bats and hits still need the scorer, A12). `--pbp` labels each pitch with the batter's position and name. The event log's header carries both rosters (schema 0.2).
+- **C ABI for the client:** `BbPlayer`, `bb_game_roster(game, side, batting_slot)`, `bb_game_player(game, agent_id)`, and `BbPlayInfo.batter` (the batter of a play). That is what A16's home-run display and uniform numbers need.
+
+Not done:
+- The Unreal client was not rebuilt against the new header (the change only appends to `BbPlayInfo`; the C smoke test checks the layout). Nothing in the client shows numbers or a lineup yet.
+- Choices the owner has not ruled on (data-formats §2.4): ASCII names without accents (marked Proposed); the pool weights [E]; a random batting order while every player is average.
+- A1 (handedness) is next in the agreed order: fill `Player.bats`/`throws` in the generator, add switch hitters, and give each batting slot its own batter instead of `Matchup::average()`.
+
+## Previous: 2026-11-13, seventh session: dives, from the owner watching seed 7475
 
 Branch `claude/cf-misplay-analysis-98b93b` (from main at `2355c34`). `cargo test --workspace --release`: all pass.
 
@@ -342,7 +359,7 @@ Source: [observations.md](observations.md), written by the owner after watching 
 
 On the field (sim):
 - [ ] A1. **Handedness for every player.** Each player throws left or right and bats left, right, or both; the throwing hand usually matches the batting side but not always. Switch hitters bat from the side opposite the pitcher's hand. Fielders throw with their throwing hand and wear the glove on the other. Have: `Hand`, the pitcher's `throws`, the batter's `bats`. Missing: every game batter is right-handed (`Matchup::average()`), fielders have no hand, no switch hitters, and the client's motions are not mirrored. Includes the earlier "batters of both sides in games" item (check that pitcher targeting handles left-handed batters).
-- [ ] A2. **Rosters: player names, numbers, positions** [W9, part of W5]. Most of the items below need it (the home-run display, the box score, uniforms, handedness per player).
+- [x] A2. **Rosters: player names, numbers, positions** [W9, part of W5] (2026-11-13; data-formats §2.4, `bb_game::roster`). Nine named players a side from the game seed; names in captions, the event log, the box-score lines and the C ABI. Team names and benches wait for the league (B1); the client does not show numbers yet.
 - [ ] A3. **Throwing ratings and hurried throws.** Each player has ratings for arm speed, accuracy, and set-up time. A hurried throw loses accuracy and speed; a fielder with time to get balanced gains both. Have: the spec's `ArmStrength`, `ArmAccuracy`, `Transfer` and its rush and off-balance noise terms (agent-models §5.5); in code each fielder has an arm speed and a fixed transfer time. Missing: no throw is ever hurried (the rush terms are not built), and the spec gives a rushed throw no speed loss, so §5.5 needs that added.
 - [ ] A4. **Smarter throw choices from the outs and the runners.** The owner's example: runner on third, two outs, the fielders should take the force at first or second, not throw home. Collect plays where the choice is wrong before changing the option evaluation (agent-models §5.5).
 - [~] A5. **Dives that extend range, with a real cost to get up and throw.** Have: chasers dive (up to 1.5 m extra reach, 1.5 s to get up, harder the further out), the client shows the dive and the get-up with stand-in clips, and since 2026-11-13 the rate is believable: about 3 a game against 22 before and 2 to 3 in real games ([note](docs/calibration/2026-11-13-dive-rate.md)). A ball just past reach is taken with a stretch on his feet; outfielders dive only when they like their chances (this was "A18"). Missing: real dive and get-up animation, a stretch animation, and the owner watching it.
@@ -353,7 +370,7 @@ On the field (sim):
 - [ ] A10. **Limits of the play area.** The owner saw a foul ball go out of play and the play carry on. Build the foul-territory walls and backstop (physics-spec §9.4; this is "Run environment (a)" above: foul ground now reaches the outfield-fence radius), make a ball that leaves the park dead (with the rules award for a thrown ball out of play), and have the client cut back to the field once the ball is gone.
 - [ ] A11. **Wind and weather** that act on the ball and the players. Have: the flight model takes a wind vector (always zero) and an air density. Missing: weather per game, and rain. Rain must act through physical causes (D1): a wet ball (release and throw noise), wet ground (traction, bounces), not a mistake rate. **Was deferred past M8; the owner moved it to A on 2026-11-13** (PLAN §14 updated).
 - [ ] A17. **Fielding errors** [W10; owner made it a priority, 2026-11-13], from physical causes only (a bobble, a bad throw; D1). Ties to the scorer's hit-or-error ruling (rules-spec §10), A3, A11, and B5
-- [ ] A12. **Post-game box score.** Have: `bb_stats` builds runs, the linescore, PA results, and LOB from the event log. Missing: hits vs. errors need the scorer (rules-spec §10; see "M4 next steps"), per-player lines need A2, and the client has no box-score screen.
+- [ ] A12. **Post-game box score.** Have: `bb_stats` builds runs, the linescore, PA results, and LOB from the event log. Missing: hits vs. errors need the scorer (rules-spec §10; see "M4 next steps"), per-player lines now exist by name (`BoxScore.batting`: PA, R, K, BB, HBP, HR) but have no at-bats or hits until the scorer, and the client has no box-score screen.
 
 On the screen (client). The owner (2026-11-13): hitting and throwing motions affect gameplay, so they stay here; the other looks wait for the polish stage (below).
 - [ ] A13. **Fielders' throwing motion** does not look real [W8] (a stand-in from the engine's stock clips).

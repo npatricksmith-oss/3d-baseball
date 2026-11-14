@@ -13,6 +13,12 @@ table RosterEntry {
   throws: bb.Hand (id: 6);
   height_m: float (id: 7);
   bat_model_id: ushort (id: 8);
+  // data-formats §2.4. `agent_id` is the id the player bats and runs under; this is the id he
+  // fields under (the two merge with the substitution work).
+  uniform_number: ubyte (id: 9);
+  field_agent_id: ushort (id: 10);
+  family_name: string (id: 11);       // `name` is the full name, given name first
+  name_origin: ubyte (id: 12);        // name pool: 0 unknown, 1 English, 2 Spanish, 3 Japanese, 4 Korean
 }
 
 table TeamConfig {

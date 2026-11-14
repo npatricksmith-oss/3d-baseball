@@ -48,8 +48,24 @@ typedef struct {
   float call_s;    /* play time from which the result may be shown (the umpire's call; on contact, the play's end) */
   char summary[BB_SUMMARY_LEN]; /* the play in words, NUL-terminated */
   uint32_t n_calls; BbCall calls[BB_MAX_CALLS]; /* the umpire's out calls, in time order */
+  uint16_t batter; uint16_t _pad; /* the batter the pitch was thrown to (his batting id) */
 } BbPlayInfo;
-/* Agent ids: high byte = team (0 away, 1 home); bit 0x80 = fielder, low 7 bits = position 1-9. */
+/* Agent ids: high byte = team (0 away, 1 home); bit 0x80 = fielder, low 7 bits = position 1-9;
+ * without bit 0x80, a batter or runner, low 7 bits = place in the batting order 1-9. A player
+ * has one id of each kind; bb_game_player resolves either. */
+/* Who a player is (identity only): names are NUL-terminated ASCII; position 1 = pitcher ...
+ * 9 = right field; hands 1 = left, 2 = right (bats may become 3 = switch). */
+#define BB_NAME_LEN 32
+typedef struct {
+  uint32_t player_id; uint16_t bat_agent, field_agent;
+  uint8_t side, number, position, batting_order, bats, throws, _pad[2];
+  char given[BB_NAME_LEN], family[BB_NAME_LEN];
+} BbPlayer;
+/* One player of a side (0 away, 1 home) by place in the batting order (batting_slot 0-8):
+ * 1 = *out filled, 0 = no such side or slot, -1 = bad args. */
+int32_t bb_game_roster(const BbGame *g, uint32_t side, uint32_t batting_slot, BbPlayer *out);
+/* The player behind an agent id of either kind: 1 = *out filled, 0 = not a player, -1 = bad args. */
+int32_t bb_game_player(const BbGame *g, uint16_t agent, BbPlayer *out);
 /* blob/len must be a readable allocation of that length (normally one from bb_game_advance).
  * Summary of a timeline blob: 1 = ok, -1 = bad args or not a timeline. */
 int32_t bb_timeline_info(const uint8_t *blob, size_t len, BbPlayInfo *out);

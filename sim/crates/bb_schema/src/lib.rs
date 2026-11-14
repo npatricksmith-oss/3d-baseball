@@ -13,7 +13,7 @@ pub mod log;
 
 /// Shared schema version for all six schema files (data-formats §8).
 pub const SCHEMA_MAJOR: u16 = 0;
-pub const SCHEMA_MINOR: u16 = 1;
+pub const SCHEMA_MINOR: u16 = 2;
 
 /// Convert between `bb_math`-free plain arrays and the schema structs.
 pub fn vec3d(a: [f64; 3]) -> Vec3d {

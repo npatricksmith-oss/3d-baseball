@@ -9,6 +9,7 @@ use bb_rules::{Event, Input, PaResult, RulesState, Status, step};
 
 use crate::pa::{Knobs, Matchup, scouting_for_pa, simulate_pitch_ctx};
 use crate::play::{FielderAttrs, RunnerIn};
+use crate::roster::Rosters;
 
 /// Game summary for reports and tests.
 #[derive(Clone, Debug, Default)]
@@ -113,6 +114,8 @@ pub struct PlayViz {
 #[derive(Clone, Debug)]
 pub struct PitchStep {
     pub play: u32,
+    /// The batter the pitch was thrown to (his batting id, data-formats §2.4).
+    pub batter: u16,
     pub record: crate::pa::PitchRecord,
     /// The pitch's flight (to contact, the ground, or past the catcher).
     pub pitch_flight: bb_physics::Trajectory,
@@ -130,6 +133,8 @@ pub struct PitchStep {
 /// client API, data-formats §6.4).
 pub struct Game {
     mu: Matchup,
+    /// Who the players are (data-formats §2.4). Identity only: no play reads it.
+    pub rosters: Rosters,
     field: Field,
     pub st: RulesState,
     res: GameResult,
@@ -151,7 +156,8 @@ impl Game {
     pub fn new(seed: u64, record: bool) -> Game {
         let mut mu = Matchup::average();
         mu.knobs = Knobs::calibrated_m3();
-        let mut st = RulesState::default_fixture();
+        let rosters = Rosters::generate(seed);
+        let mut st = RulesState::new(rosters.lineups(), bb_rules::RulesOptions::default());
         let log = step(&mut st, &Input::StartGame);
         // Scouting per batting slot, built once per game (model error per batter–pitcher pair).
         let sc: Vec<Vec<Scouting>> = (0..2u32).map(|side| (0..9u32).map(|slot| scouting_for_pa(&mu, seed, 9_000_000 + side * 100 + slot).into_owned()).collect()).collect();
@@ -161,7 +167,8 @@ impl Game {
             res: GameResult { complete: true, ..Default::default() },
             pending_rules: log.clone(),
             log,
-            writer: bb_schema::log::LogWriter::new(&crate::eventlog::header(seed)),
+            writer: bb_schema::log::LogWriter::new(&crate::eventlog::header(seed, &rosters)),
+            rosters,
             sc,
             bs,
             fattrs: core::array::from_fn(FielderAttrs::average),
@@ -199,6 +206,7 @@ impl Game {
         let (mu, st, seed, play, record) = (&self.mu, &mut self.st, self.seed, self.play, self.record);
         let side = st.half.batting();
         let slot = st.next_up[side];
+        let batter = st.batter;
         if st.batter != self.last_batter {
             self.prev = None;
             self.last_v = None;
@@ -309,7 +317,8 @@ impl Game {
         }
         if record {
             let who = if side == 0 { "Away" } else { "Home" };
-            let mut lbl = format!("{} {}{} {} #{}: {} {:.0} mph", play, if st.half == bb_rules::Half::Top { "T" } else { "B" }, st.inning, who, slot + 1, rec.ty.code(), bb_math::units::mps_to_mph(rec.release.v.norm()));
+            let name = self.rosters.player(batter).map(|p| format!(" {} {}", p.position_code(), p.family)).unwrap_or_default();
+            let mut lbl = format!("{} {}{} {} #{}{}: {} {:.0} mph", play, if st.half == bb_rules::Half::Top { "T" } else { "B" }, st.inning, who, slot + 1, name, rec.ty.code(), bb_math::units::mps_to_mph(rec.release.v.norm()));
             if let Some((ev_, la, spray)) = rec.batted {
                 lbl += &format!(" -> EV {:.0} mph, LA {:.0}°, spray {:.0}°", bb_math::units::mps_to_mph(ev_), la.to_degrees(), spray.to_degrees());
             } else {
@@ -354,7 +363,7 @@ impl Game {
             }
         }
         self.play += 1;
-        Some(PitchStep { play, record: rec, pitch_flight, batted, rules_events, facts, calls, viz })
+        Some(PitchStep { play, batter, record: rec, pitch_flight, batted, rules_events, facts, calls, viz })
     }
 
     /// Close the log and tally the result from the rules events (event sourcing, PLAN §4.3).
