@@ -5609,4 +5609,70 @@ mod tests {
             assert_eq!(outs[0].margin_s, if low { 0.0 } else { f64::INFINITY }, "caught at {z_catch:.2} m");
         }
     }
+
+    /// A fly ball from home (`land` m of vacuum range at `th_deg` elevation, `az_deg` from
+    /// center, negative toward third) read without error by everyone (`err` zero: a controlled
+    /// belief, not `Sim::predict`'s noisy one) 0.5 s after contact, with a runner on `base`
+    /// (0: none), and `place` setting where fielders stand. Runs the first call (`assign`).
+    fn popup_after_the_first_call(land: f64, th_deg: f64, az_deg: f64, base: u8, place: &[(usize, Vec3)]) -> Sim<'static> {
+        let (th, az) = (th_deg.to_radians(), az_deg.to_radians());
+        let v = m::sqrt(land * 9.80665 / m::sin(2.0 * th));
+        let on_base: Vec<(AgentId, u8)> = if base > 0 { vec![(0x0005, base)] } else { vec![] };
+        let fx: &'static Fixture = Box::leak(Box::new(fixture(&on_base)));
+        let mut inp = input(fx, vec![]);
+        inp.ball = BallState { r: Vec3::new(0.0, 0.5, 1.0), v: Vec3::new(v * m::cos(th) * m::sin(az), v * m::cos(th) * m::cos(az), v * m::sin(th)), w: Vec3::ZERO };
+        let inp: &'static LiveInput<'static> = Box::leak(Box::new(inp));
+        let st: &'static mut RulesState = Box::leak(Box::new(fx.st.clone()));
+        let mut sim = new_sim(inp, st);
+        for fd in sim.f.iter_mut() {
+            fd.err = [0.0; 4];
+        }
+        for &(i, at) in place {
+            (sim.f[i].pos, sim.f[i].target) = (at, at);
+        }
+        sim.t = 0.4 + 0.5;
+        sim.assign();
+        sim
+    }
+
+    fn call_of(sim: &Sim, i: usize) -> (u8, f64) {
+        let p = sim.f[i].belief.clone().unwrap();
+        sim.call_value(i, &p, sim.f[i].t_int, sim.f[i].target, 0.0)
+    }
+
+    // Popup-calls review P2 #1, deferred by the owner 2026-11-13 ("mistakes like these happen in
+    // real games"). A 42 m pop-up with a runner on second: the second baseman and the shortstop
+    // each believe they catch it in the air with 0.3 s or more to spare, but not by enough to be
+    // sure (tier 1, agent-models §5.7), so both go for it, and nobody covers second. The
+    // believable behavior: when two infielders chase, someone still takes the bag, because a
+    // runner is on second and the third baseman, first baseman, pitcher and catcher are free.
+    // Fixture: err = 0, so both read the pop-up exactly; found by search for the tier-1 pair.
+    #[test]
+    #[ignore = "owner-deferred 2026-11-13 (popup-calls review P2 #1): both middle infielders chase and second base has no cover until the next re-call"]
+    fn someone_covers_second_when_both_middle_infielders_chase_a_popup() {
+        let sim = popup_after_the_first_call(42.0, 55.0, 0.0, 2, &[]);
+        assert_eq!((call_of(&sim, 3).0, call_of(&sim, 5).0), (1, 1), "fixture: both are tier 1");
+        assert!(sim.f[3].role == Role::Chase && sim.f[5].role == Role::Chase, "fixture: both chase: {:?}", sim.f.iter().map(|f| f.role).collect::<Vec<_>>());
+        assert!(sim.f.iter().any(|f| f.role == Role::Cover(2)), "nobody covers second: {:?}", sim.f.iter().map(|f| f.role).collect::<Vec<_>>());
+    }
+
+    // Popup-calls review P2 #2, deferred by the owner 2026-11-13. Left field and center field
+    // both go for a fly down the left-field line (tier 1: each believes he catches it, neither
+    // is sure), left field as the chaser. A re-call asks only the chaser and the four fielders
+    // nearest where he is going, so a chaser who is not among them is called off to back up
+    // before anyone is sure. The believable behavior: he keeps going until someone calls it.
+    // The re-call is invoked with the candidate list the rule would build when center field is
+    // the fifth man (left field, short, third, second): the fixture's reads are exact (err = 0)
+    // and the geometry that makes him the fifth nearest is the review's, not reproducible with
+    // two outfielders both in the air ball's reach.
+    #[test]
+    #[ignore = "owner-deferred 2026-11-13 (popup-calls review P2 #2): a re-call sends an active chaser outside its candidate set to backup before anyone is sure"]
+    fn a_chaser_outside_the_recall_keeps_going_until_someone_is_sure() {
+        let mut sim = popup_after_the_first_call(95.0, 38.0, -35.0, 0, &[(7, Vec3::new(-40.0, 80.0, 0.0))]);
+        assert_eq!((call_of(&sim, 6).0, call_of(&sim, 7).0), (1, 1), "fixture: both outfielders are tier 1");
+        assert!(sim.primary == 6 && sim.f[7].role == Role::Chase, "fixture: left field has it and center field chases too");
+        sim.replan_primary();
+        sim.assign_among(vec![6, 5, 4, 3], Some(6));
+        assert!(sim.f[7].role == Role::Chase, "called off with nobody sure: {:?}", sim.f[7].role);
+    }
 }
