@@ -136,7 +136,8 @@ pub struct Game {
     mus: Vec<Matchup>,
     /// The matchup of each batting slot, `[batting side][slot]`, as an index into `mus`.
     mu_ix: [[usize; 9]; 2],
-    /// Who the players are (data-formats §2.4). Identity only: no play reads it.
+    /// Who the players are (data-formats §2.4). The game takes their hands from it when it is
+    /// built; no play reads it after that.
     pub rosters: Rosters,
     field: Field,
     pub st: RulesState,

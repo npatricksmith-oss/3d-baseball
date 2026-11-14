@@ -23,6 +23,9 @@ public:
 	FBbPlay Next();
 	bool Sample(const FBbPlay& Play, float T, BbFrame& Out) const;
 	void Release(FBbPlay& Play) const;
+	/** True if the player behind this agent id (batting or fielding) throws left-handed.
+	 *  Read once at the start of the game, so it is safe on any thread. */
+	bool ThrowsLeft(uint16 Agent) const { return LeftHanded.Contains(Agent); }
 
 private:
 	void* Handle = nullptr;
@@ -33,4 +36,7 @@ private:
 	void (*FnGameFree)(BbGame*) = nullptr;
 	int32 (*FnInfo)(const uint8*, size_t, BbPlayInfo*) = nullptr;
 	int32 (*FnSample)(const uint8*, size_t, float, BbFrame*) = nullptr;
+	int32 (*FnRoster)(const BbGame*, uint32, uint32, BbPlayer*) = nullptr;
+	/** Both agent ids of every left-handed thrower. */
+	TSet<uint16> LeftHanded;
 };

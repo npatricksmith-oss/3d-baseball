@@ -337,5 +337,7 @@ private:
 	int32 ExitsCut = 0;
 	int32 ExitsRejoined = 0;
 	int32 ThrowsShown = 0;
+	/** Figure-frames drawn mirrored (a left-hander pitching, throwing or batting). */
+	int32 MirroredFrames = 0;
 	int32 ThrowsMissed = 0;
 };

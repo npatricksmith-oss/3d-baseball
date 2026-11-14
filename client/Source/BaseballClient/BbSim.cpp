@@ -30,13 +30,31 @@ bool FBbSim::Start(const FString& LibraryPath, uint64 Seed)
 	FnGameFree = reinterpret_cast<decltype(FnGameFree)>(Sym(TEXT("bb_game_free")));
 	FnInfo = reinterpret_cast<decltype(FnInfo)>(Sym(TEXT("bb_timeline_info")));
 	FnSample = reinterpret_cast<decltype(FnSample)>(Sym(TEXT("bb_timeline_sample")));
-	if (!FnCreate || !FnAdvance || !FnBlobFree || !FnGameFree || !FnInfo || !FnSample)
+	FnRoster = reinterpret_cast<decltype(FnRoster)>(Sym(TEXT("bb_game_roster")));
+	if (!FnRoster || !FnCreate || !FnAdvance || !FnBlobFree || !FnGameFree || !FnInfo || !FnSample)
 	{
 		UE_LOG(LogBbSim, Error, TEXT("The sim library at %s is missing part of the C ABI"), *LibraryPath);
 		return false;
 	}
 	Game = FnCreate(Seed);
-	return Game != nullptr;
+	if (!Game)
+	{
+		return false;
+	}
+	// Who throws left: the rosters never change during a game, so read them once here.
+	for (uint32 Side = 0; Side < 2; ++Side)
+	{
+		for (uint32 Slot = 0; Slot < 9; ++Slot)
+		{
+			BbPlayer P{};
+			if (FnRoster(Game, Side, Slot, &P) == 1 && P.throws == 1)
+			{
+				LeftHanded.Add(P.bat_agent);
+				LeftHanded.Add(P.field_agent);
+			}
+		}
+	}
+	return true;
 }
 
 FBbPlay FBbSim::Next()

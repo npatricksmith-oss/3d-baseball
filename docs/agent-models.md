@@ -415,6 +415,8 @@ At the capture instant, the glove pocket center has a Gaussian error in the plan
 
 ### 5.5 Transfer and throw
 
+**The throwing hand (built 2026-11-13, owner backlog A1; `throw_release_point`).** A fielder throws with his throwing hand (`FielderAttrs.throws`, from the roster, data-formats §2.4): the ball leaves at release height `THROW_ARM_OFFSET_M` = 0.35 m [E] to his arm side of his body's centre, with him facing his target (a right-hander's hand is to the right of the line to it). His aim is solved from that point. *Not built:* what the glove hand does to fielding. The glove's reach is still a circle around his body, the same to either side, and a throw needs no turn of the body, so a backhand play costs nothing and a left-handed first baseman has no easier throw to second. That belongs with set-up time and hurried throws (backlog A3); the roster already keeps left-handed throwers out of the positions where it matters most.
+
 - **Transfer time** from `Transfer`, plus footwork: +0.2 s [E] when moving away from the target, +0.3 s [E] after a dive (on top of the get-up time).
 - **Throw speed:** the fielder chooses a speed up to `ArmStrength`. With a large believed time margin, a lower speed improves accuracy [E: σ scales with (v/v_max)²].
 - **Trajectory:** ballistic solve with drag and typical throw backspin (1500 rpm [E]), aiming at the receiver's chest target. Long outfield throws may choose a one-hop trajectory when it arrives sooner (the bounce is physical).
@@ -506,7 +508,9 @@ The owner asked that fielders get a jump on the ball, anticipating where it will
 
 **Measured with the first (spray) read (2,048 games, seed 5), superseded:** no jump 5.35 runs per team-game (GB hit .408); Anticipation 20: 5.31 (.406); 50: 5.22 (.399); 80: 5.03 (.384). `sim-cli games --anticipation <grade>` / `--no-jump`.
 
-**Not built yet:** batters of both sides in games (every game batter is right-handed, so the handedness half is exercised only by the unit tests `fielders_jump_toward_the_side_they_read` and `the_swing_lead_moves_the_jump_toward_the_side_it_reads`); depth anticipation (the swing also hints at the launch angle). Pitch type (the called pitch) was assessed as a cue on 2026-11-13 and carries no spray information in the sim (type means within 1.3°; see "Cues assessed").
+*Batters of both sides (2026-11-13, owner backlog A1):* games now have left-handed and switch hitters (data-formats §2.4), so the handedness half of this section runs in every game. The beliefs above (the spray fits) were fitted on right-handed batters and are mirrored for a left-hander; refit them on both sides when they are next refit.
+
+**Not built yet:** depth anticipation (the swing also hints at the launch angle). Pitch type (the called pitch) was assessed as a cue on 2026-11-13 and carries no spray information in the sim (type means within 1.3°; see "Cues assessed").
 
 ---
 

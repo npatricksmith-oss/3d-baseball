@@ -1113,6 +1113,10 @@ void ABbDirector::PoseFigure(int32 Slot, const BbActor& A, const BbFrame& Frame,
 	const bool bStill = St.SpeedCm < 40.f;
 	const UAnimSequence* Manual = nullptr;
 	float ClipTime = 0.f;
+	// The stand-in clips are right-handed. A left-hander's delivery, throw or stance is the
+	// same clip in a mirror: the figure is flipped across his own facing (owner backlog A1).
+	const bool bLefty = Sim && Sim->ThrowsLeft(A.agent);
+	bool bMirror = false;
 	// (A pitcher who dives on an early comebacker is diving, not finishing his delivery.)
 	if (bMotions && bFielder && Position == 1 && !In.bStaged && PlayTime < 0.8f && AnimPitch && In.DiveSince < 0.f)
 	{
@@ -1120,6 +1124,7 @@ void ABbDirector::PoseFigure(int32 Slot, const BbActor& A, const BbFrame& Frame,
 		Manual = AnimPitch;
 		ClipTime = PlayTime + 1.0f;
 		WantYaw = YawToPlate(Foot);
+		bMirror = bLefty;
 	}
 	else if (bMotions && bFielder && AnimDive && AnimCrouch && In.DiveSince >= 0.f)
 	{
@@ -1152,6 +1157,7 @@ void ABbDirector::PoseFigure(int32 Slot, const BbActor& A, const BbFrame& Frame,
 		Manual = AnimThrow;
 		ClipTime = In.ThrowClip;
 		WantYaw = In.ThrowYaw;
+		bMirror = bLefty;
 	}
 	if (bMotions && !Manual && bFielder && Position == 2 && bStill && !In.bStaged && PlayTime < 0.6f && AnimCrouch)
 	{
@@ -1168,6 +1174,9 @@ void ABbDirector::PoseFigure(int32 Slot, const BbActor& A, const BbFrame& Frame,
 		{
 			Manual = AnimStance;
 			ClipTime = 0.f;
+			// A left-handed batter (in the first-base-side box, sim x > 0) is the right-handed
+			// stance in a mirror.
+			bMirror = A.pos[0] > 0.f;
 			const FVector Along = ToUE(Frame.bat_tip) - Knob;
 			if (Along.Size2D() > 45.f)
 			{
@@ -1199,6 +1208,17 @@ void ABbDirector::PoseFigure(int32 Slot, const BbActor& A, const BbFrame& Frame,
 		Lift = DiveDropCm * Ease;
 	}
 	PlaceDiver(F, Foot, St.Yaw, Tilt, Lift);
+	// The mannequin faces +Y in its own frame, so its left and right are its X.
+	const FVector Scale = F->GetActorScale3D();
+	const float WantX = FMath::Abs(Scale.X) * (bMirror ? -1.f : 1.f);
+	if (Scale.X != WantX)
+	{
+		F->SetActorScale3D(FVector(WantX, Scale.Y, Scale.Z));
+	}
+	if (bMirror)
+	{
+		++MirroredFrames;
+	}
 
 	if (Manual)
 	{
@@ -1719,8 +1739,8 @@ void ABbDirector::Finish()
 		{
 			Walking += X.bActive ? 1 : 0;
 		}
-		UE_LOG(LogBb, Display, TEXT("BB_STAGING speed=%.2f exits_arrived=%d exits_rejoined=%d exits_cut=%d exits_walking=%d throws_shown=%d throws_missed=%d"),
-			Speed, ExitsArrived, ExitsRejoined, ExitsCut, Walking, ThrowsShown, ThrowsMissed);
+		UE_LOG(LogBb, Display, TEXT("BB_STAGING speed=%.2f exits_arrived=%d exits_rejoined=%d exits_cut=%d exits_walking=%d throws_shown=%d throws_missed=%d mirrored_frames=%d"),
+			Speed, ExitsArrived, ExitsRejoined, ExitsCut, Walking, ThrowsShown, ThrowsMissed, MirroredFrames);
 	}
 	BenchSeconds = 0.f;
 	ShotsLeft = 0;

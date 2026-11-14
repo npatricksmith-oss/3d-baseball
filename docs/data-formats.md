@@ -68,6 +68,7 @@ key = (game_seed: u64, play_index: u32, agent_id: u16, purpose: u16, sub_index: 
 | `AgentPolicy` | 10 | Other sampled agent decisions (manager AI, tie-breaks) |
 | `FielderAnticipation` | 11 | A fielder's reads before he reads the ball (agent-models §5.10): sub-index 0, the pitch location before contact; sub-index 1, the bat's angle at contact; sub-index 2, the swing's lead (when the bat started forward against the pitch's arrival) |
 | `RosterGeneration` | 12 | Names, uniform numbers and the batting order of a generated game roster (§2.4). Not a world draw: it happens before the first pitch and decides who the players are, never what happens |
+| `RosterHands` | 13 | The throwing hand and batting side of a generated player (§2.4). Like `RosterGeneration`, drawn before the first pitch |
 
 The game seed is `derive(season_seed, game_id)` (PLAN §4.2). Because the RNG is counter-based, **no RNG state is ever saved**. Snapshots (§7) need only the seed and the indices.
 
@@ -85,15 +86,20 @@ Every game has a **roster** for each side: who the players are. A roster is iden
 | `number` | 1–99 | Uniform number, unique within the team |
 | `position` | 1–9 | Scorer's numbering (§2.1); every position is filled exactly once per team |
 | `batting_order` | 1–9 | Unique within the team; the pitcher bats ninth |
-| `bats`, `throws` | `Hand` | The slot backlog A1 fills. Until then every player is right-handed, which is what the sim plays today |
+| `throws` | `Hand` (left, right) | The hand he throws with; his glove is on the other. Drawn from his position (below) |
+| `bats` | left, right or switch | The side of the plate he bats from. A switch hitter stands on the side opposite the pitcher's throwing hand. Drawn from his throwing hand (below) |
 
 **Two agent ids per player (interim).** The code predates this section and gives a player one id while he bats and runs, and another while he fields: the **batting id** `side << 8 | batting_order` and the **fielding id** `side << 8 | 0x80 | position`. Both are RNG key components, so merging them would change every game; that waits for the substitution work, which needs §2.1's roster slots anyway. Until then the roster is the only place that knows the two ids are one man, and it resolves either one.
 
-**Generation.** With no league, the roster is generated from the game seed alone, so the same seed always gives the same players. All draws use `RosterGeneration` (§2.3) at `play_index` 0, and a draw of an index below *n* is `floor(u · n)` for a uniform `u` in (0, 1). Teams are generated away first, players in position order 1–9.
+**Generation.** With no league, the roster is generated from the game seed alone, so the same seed always gives the same players. All draws use `RosterGeneration` (§2.3; the hands use `RosterHands`) at `play_index` 0, and a draw of an index below *n* is `floor(u · n)` for a uniform `u` in (0, 1). Teams are generated away first, players in position order 1–9.
 
 1. **Name.** Stream `agent_id` = the player's fielding id, `sub_index` = 2*a* for attempt *a* = 0, 1, …. Three draws in order: the pool (by the pool weights), the given name's index in that pool, the family name's index. If an earlier player **in the game** (either team) already has that family name, or an earlier teammate that given name, the attempt is rejected and the next one drawn; so a family name identifies one player in a game, and play-by-play can use it alone.
 2. **Number.** Same stream id, `sub_index` = 2*a* + 1, one draw: `1 + floor(u · 99)`. Rejected if a teammate has it.
 3. **Batting order.** Stream `agent_id` = the team's manager (`side << 8 | 0xFF`), `sub_index` 0. A Fisher–Yates shuffle of the eight position players, listed catcher to right field (positions 2–9): for *i* = 7 down to 1, swap entries *i* and `floor(u · (i + 1))`. The result bats first to eighth; the pitcher bats ninth. With every player average the order carries no meaning yet; the manager AI sets it from ability later (M6).
+
+4. **Hands (owner backlog A1).** Stream `agent_id` = the player's fielding id, purpose `RosterHands`, `sub_index` 0. Two draws in order. *Throwing hand:* left if `u` is below his position's share of left-handed throwers, `THROWS_LEFT` [E]: pitcher 0.27, first base 0.35, left field 0.25, center field 0.20, right field 0.25, and 0 at catcher, second, third and shortstop (a left-hander there has to turn his body to throw across the infield, so teams do not play one). *Batting side:* from his throwing hand [E]: a right-handed thrower bats left if `u` < 0.24, switch if `u` < 0.38, else right; a left-handed thrower bats left if `u` < 0.88, switch if `u` < 0.92, else right. Together these put 32% of position players on the left side, 13% switch and 55% on the right, so about 42% of plate appearances against a right-handed pitcher are taken from the left side (MLB: 44% in 2012, 49% in 2026, switch hitters batting left included; switch hitters 14% of plate appearances). The names and numbers of every seed are unchanged by this step, because it has its own purpose.
+
+**What the hands do in a game.** The pitcher of the fielding side throws with his hand (a left-hander is the right-hander's mirror image: release point and spin, agent-models §2.2). The batter stands on his side of the plate, a switch hitter on the side opposite that pitcher's hand; his eyes, swing and body are there, and the fielders read his swing as a left- or right-handed one (agent-models §5.10). A fielder releases his throws from his throwing-arm side (agent-models §5.5). Abilities are still average: two players differ only in their hands.
 
 **Name pools [E].** Four pools, each a list of given names and a list of family names, with weights near the make-up of professional baseball: English 0.62, Spanish 0.28, Japanese 0.06, Korean 0.04. No family name appears in two pools. The lists live in `bb_game::roster`; **reordering or editing them changes every generated roster**, so they are append-only in spirit once the owner has seen names he likes. Any full name is a chance pairing of two common names; none is taken from a real player.
 

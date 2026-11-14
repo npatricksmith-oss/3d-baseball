@@ -1,13 +1,36 @@
 # Task List
 
-**Last updated:** 2026-11-13 (the dive rate judged and fixed, A5, and rosters, A2, merged; before that, dives shown in the client, the get-up after a rimmed dive, two-out throws; before that, the overrun of first and runner position samples; before that, foul measures, sources and the correction experiment; pushed; the spray experiment parked for later; before that, the read knows the ball started at the plate; before that, called-off infielders back up the catch; before that, pop-up calls on `fix/popup-calls`; before that, owner's observations merged into the "Owner backlog" section; before that, the coordinator run on `coord/review-fixes`)
+**Last updated:** 2026-11-13 (handedness, A1; before that, the dive rate judged and fixed, A5, and rosters, A2, merged; before that, dives shown in the client, the get-up after a rimmed dive, two-out throws; before that, the overrun of first and runner position samples; before that, foul measures, sources and the correction experiment; pushed; the spray experiment parked for later; before that, the read knows the ball started at the plate; before that, called-off infielders back up the catch; before that, pop-up calls on `fix/popup-calls`; before that, owner's observations merged into the "Owner backlog" section; before that, the coordinator run on `coord/review-fixes`)
 The live to-do list for the project. [PLAN.md](PLAN.md) holds decisions and design. This file holds what is next and what is done. Update it at the end of every work session.
 
 Status: `[ ]` not started · `[~]` in progress · `[x]` done · `[?]` needs an owner decision
 
 ---
 
-## Resume here (2026-11-13: the dive rate, A5, and rosters, A2)
+## Resume here (2026-11-13: handedness, A1)
+
+Branch `claude/a1-173226` (from main at `3de5572`). `cargo test --workspace --release`: 179 pass. Spec: data-formats §2.4 (hands), agent-models §5.5 (the throwing hand); measurements in [the handedness note](docs/calibration/2026-11-13-handedness.md).
+
+REVIEW_STATUS
+
+- **Open, for the next calibration:** left-handers raised the run environment. Runs/team-game 4.73 → 5.35 (seeds 0–299) and 4.89 → 5.43 (seeds 1000–1299); K% 17.8 → 15.2; HR/PA 4.1% → 5.2%. Nothing was tuned. The interim knobs were set with every plate appearance right against right; 45% are now opposite-handed. Recalibrate the plate-appearance knobs over the real mix.
+- **Open, a model question:** the platoon advantage comes out of the geometry (the batter's eyes are on his side of the plate and a same-handed pitcher releases on that side) and is about twice the real size: K 19.8% same-handed against 14.4% opposite, 5.4 points (MLB about 3 from memory, unsourced; wOBA gap .030–.045). Candidates: the eye offset 0.75 m [E]; what the batter's scouting already expects of the release side.
+- **Next in the agreed order:** A3 throwing ratings and hurried throws (which is also where the glove hand should start to matter, below).
+
+Done (A1):
+- **Every player has hands.** The roster draws a throwing hand from the position (27% of pitchers, 35% of first basemen, 20–25% of outfielders throw left; nobody at catcher, second, third or short) and a batting side from the throwing hand (position players: 32% left, 13% switch, 55% right) [E]. New RNG purpose `RosterHands` = 13, so no seed's names or numbers changed. `sim-cli game` prints bats/throws on each batting line; the event log's header and `BbPlayer` carry them (`bats` 3 = switch).
+- **Games play them.** Each batter stands on his own side against the other side's pitcher, a switch hitter on the side opposite the pitcher's hand; the pitcher throws with his own hand (`Matchup::for_hands`, one matchup per pairing in a game). Abilities are still average. Every game's digest changed.
+- **A left-hander is a mirror image** (`cargo run --release -p bb_game --example platoon`): same-handed pairings agree with each other, opposite-handed ones with each other, pull is 5–6° to the batter's own side, and left-handed batters are hit by pitches no more often (the targeting check A1 asked for).
+- **Fielders throw from their throwing hand:** the ball leaves 0.35 m [E] to the arm side (`throw_release_point`).
+- **Client:** a left-hander's delivery, throw and batting stance are the right-handed stand-in clips in a mirror (the figure is flipped across his facing). CLIENT_STATUS
+
+Not done:
+- **The glove hand does nothing in the sim yet.** Reach is the same to both sides, a backhand costs nothing, and a throw needs no turn of the body. It belongs with set-up time in A3 (agent-models §5.5 says so). Gloves are not drawn (L2).
+- A manager does not use hands: no lineups by pitcher hand (B2), no left-handed specialist.
+- The fielders' spray beliefs (agent-models §5.10) were fitted on right-handed batters and are mirrored for left-handers; refit on both when next refit.
+- Dives did not fall: 3.8 a game, the shortstop 0.98 and now the second baseman 0.90 (left-handed batters pull to his side).
+
+## Previous: 2026-11-13, the dive rate, A5, and rosters, A2
 
 Two sessions ran side by side; both are merged into main at `74cc5ca` and pushed. `cargo test --workspace --release` on the merge: 175 pass. The client was rebuilt against the new header and run headlessly on seed 7 (`client/run.sh 7 -RenderOffscreen -BbShots=6`): no errors.
 
@@ -36,7 +59,7 @@ Game digests are unchanged (seeds 1, 2, 3, 42 compared before and after): roster
 The [Codex rosters review](docs/reviews/2026-11-13-codex-rosters-review.md) is resolved: no P1/P2, and its two P3s (no literal roster fixture; runs not checked per player) are fixed. It reproduced 18,000 generated players with its own Python generator, confirmed the unchanged digests, and checked the C layouts. Deferred: a committed test of a log without rosters.
 
 Done (A2; spec in data-formats §2.4):
-- **Every game has two named nines.** `bb_game::roster::Rosters::generate(seed)` gives each side nine players: given and family name, uniform number (1–99, unique on the team), position (each of 1–9 once), place in the batting order (a seeded shuffle of the eight position players; the pitcher bats ninth), and `bats`/`throws` (all right-handed until A1, which is what the sim plays). The same seed gives the same players. New RNG purpose `RosterGeneration` = 12.
+- **Every game has two named nines.** `bb_game::roster::Rosters::generate(seed)` gives each side nine players: given and family name, uniform number (1–99, unique on the team), position (each of 1–9 once), place in the batting order (a seeded shuffle of the eight position players; the pitcher bats ninth), and `bats`/`throws` (filled by A1, above). The same seed gives the same players. New RNG purpose `RosterGeneration` = 12.
 - **Names [E]:** four pools (English .62, Spanish .28, Japanese .06, Korean .04), ASCII only; a player's pool is kept as `origin` so his look can match later (L2). Family names are unique in a game and given names on a team, so play-by-play uses the family name alone.
 - **A player still has two agent ids** (batting `side<<8 | order`, fielding `side<<8 | 0x80 | position`); the roster resolves either. Merging them would change every game's RNG keys, so it waits for substitutions.
 - **Where names show:** a caption that ends a plate appearance starts with the batter's family name ("Ramirez: Single to left"), so the client's HUD shows names with no client change. `sim-cli game` prints each side's batting lines by name (`bb_stats::BoxScore.batting`: PA, R, K, BB, HBP, HR, batted balls; at-bats and hits still need the scorer, A12). `--pbp` labels each pitch with the batter's position and name. The event log's header carries both rosters (schema 0.2).
@@ -364,7 +387,7 @@ Source: [observations.md](observations.md), written by the owner after watching 
 ### Priority A
 
 On the field (sim):
-- [ ] A1. **Handedness for every player.** Each player throws left or right and bats left, right, or both; the throwing hand usually matches the batting side but not always. Switch hitters bat from the side opposite the pitcher's hand. Fielders throw with their throwing hand and wear the glove on the other. Have: `Hand`, the pitcher's `throws`, the batter's `bats`. Missing: every game batter is right-handed (`Matchup::average()`), fielders have no hand, no switch hitters, and the client's motions are not mirrored. Includes the earlier "batters of both sides in games" item (check that pitcher targeting handles left-handed batters).
+- [x] A1. **Handedness for every player** (2026-11-13; data-formats §2.4, agent-models §5.5, [note](docs/calibration/2026-11-13-handedness.md)). Hands in the roster, switch hitters, batters and pitchers of both sides in games, throws from the throwing hand, left-handers mirrored in the client. Left for A3: what the glove hand does to fielding and to the footwork of a throw.
 - [x] A2. **Rosters: player names, numbers, positions** [W9, part of W5] (2026-11-13; data-formats §2.4, `bb_game::roster`). Nine named players a side from the game seed; names in captions, the event log, the box-score lines and the C ABI. Team names and benches wait for the league (B1); the client does not show numbers yet.
 - [ ] A3. **Throwing ratings and hurried throws.** Each player has ratings for arm speed, accuracy, and set-up time. A hurried throw loses accuracy and speed; a fielder with time to get balanced gains both. Have: the spec's `ArmStrength`, `ArmAccuracy`, `Transfer` and its rush and off-balance noise terms (agent-models §5.5); in code each fielder has an arm speed and a fixed transfer time. Missing: no throw is ever hurried (the rush terms are not built), and the spec gives a rushed throw no speed loss, so §5.5 needs that added.
 - [ ] A4. **Smarter throw choices from the outs and the runners.** The owner's example: runner on third, two outs, the fielders should take the force at first or second, not throw home. Collect plays where the choice is wrong before changing the option evaluation (agent-models §5.5).
@@ -408,7 +431,7 @@ On the screen (client). The owner (2026-11-13): hitting and throwing motions aff
 
 ### Order for priority A (owner agreed, 2026-11-13)
 
-1. A2 rosters and A1 handedness: nearly everything else hangs off them.
+1. A2 rosters and A1 handedness: nearly everything else hangs off them. (Both done.)
 2. Quick client fixes alongside: A15 shadow, A16 home-run camera and display.
 3. A10 play-area limits (also a known run-environment item).
 4. A3 and A4 throws, with A5 measured in the same pass, then A17 errors (they come out of rushed throws and bobbles).
