@@ -186,7 +186,7 @@ impl Field {
             if w.dist >= 0.0 {
                 break;
             }
-            q = q + w.inward * (-w.dist + 1e-6);
+            q += w.inward * (-w.dist + 1e-6);
         }
         q
     }
