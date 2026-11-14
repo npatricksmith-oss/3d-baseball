@@ -375,6 +375,10 @@ struct Runner {
     /// He tagged up and is going on the catch: when his first step comes. Until he next
     /// stops he runs from the set start (agent-models §6.4); no earlier speed carries over.
     set_start: Option<f64>,
+    /// Since when he has visibly not been moving forward (signed speed at most
+    /// `SEEN_MOVING_MPS`), from the previous tick's motion; `None` while he is. What a
+    /// runner behind him can see (agent-models §6.4).
+    still_since: Option<f64>,
     moving_since: f64,
     last_base: u8,
     /// Going back to the start base to retouch after a caught fly.
@@ -595,6 +599,14 @@ fn run_time_from(d: f64, v0: f64, v_max: f64, tau: f64) -> f64 {
     }
     0.5 * (lo + hi)
 }
+
+/// A runner moving forward faster than this is seen to be advancing, m/s [E] (the fielders'
+/// `ChoiceParams::moving_mps`, agent-models §5.6).
+const SEEN_MOVING_MPS: f64 = 0.5;
+/// How long a runner must see the runner ahead not moving forward before he takes it that
+/// the base ahead is held, s [E, unsourced: a visual reaction time]. A runner who has just
+/// decided to go is still under `SEEN_MOVING_MPS` for about three ticks.
+const HOLD_READ_S: f64 = 0.2;
 
 /// How long a runner leaving from a tag-up needs to cover `d` m: the wait for his first step,
 /// then the speed law from rest with the set start's time constant (agent-models §6.4). His
@@ -2464,12 +2476,13 @@ impl<'a> Sim<'a> {
         self.r.iter().any(|r| !r.out && !r.scored && (r.s / BASE_L + 1e-6).floor() as u8 == b)
     }
 
-    /// Whether a runner ahead of runner `k` holds base `b`: he is at or short of it and not
-    /// visibly moving forward (standing, or going back). Direction of motion is visible.
+    /// Whether a runner ahead of runner `k` holds base `b`, as `k` can see it: he is at or
+    /// short of it and has visibly not been moving forward (standing, or going back) for
+    /// `HOLD_READ_S`. His intended goal is private (Gemini A4 review; agent-models §6.4).
     fn base_held_ahead(&self, k: usize, b: u8) -> bool {
         let r = &self.r[k];
         self.r.iter().any(|o| {
-            o.id != r.id && !o.out && !o.scored && o.start > r.start && o.s <= b as f64 * BASE_L + 0.5 && o.goal as f64 * BASE_L <= o.s + 1e-6
+            o.id != r.id && !o.out && !o.scored && o.start > r.start && o.s <= b as f64 * BASE_L + 0.5 && o.still_since.is_some_and(|t0| self.t - t0 >= HOLD_READ_S)
         })
     }
 
@@ -2530,6 +2543,13 @@ impl<'a> Sim<'a> {
             let start_t = if self.r[k].start == 0 { self.inp.t_contact + BATTER_START } else { self.inp.t_contact };
             if self.t < start_t {
                 continue;
+            }
+            // What the runners behind can see of him once the ball is live: moving forward, or not (§6.4).
+            let r = &mut self.r[k];
+            if r.direction * r.v > SEEN_MOVING_MPS {
+                r.still_since = None;
+            } else if r.still_since.is_none() {
+                r.still_since = Some(self.t);
             }
             // The catch, seen once: a runner off his base at that moment owes a retouch; one
             // standing on it (tagging up or not) owes nothing and may leave for good. That
@@ -3067,6 +3087,7 @@ fn new_sim<'a>(inp: &'a LiveInput<'a>, st: &'a mut RulesState) -> Sim<'a> {
             scored: false,
             tag_up: false,
             set_start: None,
+            still_since: None,
             moving_since: 0.0,
             last_base: x.base,
             retouch: false,
@@ -3790,6 +3811,31 @@ mod tests {
             let belief = TYPICAL_TRANSFER + typical_throw_time(d);
             let run = run_time(BASE_L, 8.2, RUNNER_TAU);
             println!("{ft:4} ft {d:6.1} m  CF arm {cf:.2}: flight {flight:.2} s, +0.85 transfer {:.2} s | runner believes ball {belief:.2} s (37 m/s, relay if quicker); runner {run:.2} s", 0.85 + flight);
+        }
+    }
+
+    // Gemini A4 review (agent-models §6.4): whether the runner ahead holds a base is read
+    // from what can be seen, never his private goal. The runner from second stands on second;
+    // the runner from first is coming. Seen standing 0.1 s: not yet taken as holding (a runner
+    // who has just decided to go is still slow for a few ticks); 0.25 s: holding, whatever
+    // he privately intends. Seen running on toward third: never.
+    #[test]
+    fn the_base_ahead_is_held_by_what_the_runner_sees() {
+        let fx = fixture(&[(6, 1), (7, 2)]);
+        let inp = input(&fx, vec![RunnerIn { id: fx.st.batter, base: 0, speed: 8.2 }, RunnerIn { id: 6, base: 1, speed: 8.2 }, RunnerIn { id: 7, base: 2, speed: 8.2 }]);
+        let mut st = fx.st.clone();
+        let mut sim = new_sim(&inp, &mut st);
+        sim.t = 3.0;
+        (sim.r[1].s, sim.r[1].v, sim.r[1].goal) = (BASE_L + 15.0, 8.0, 2);
+        (sim.r[2].s, sim.r[2].v) = (2.0 * BASE_L, 0.0);
+        for goal in [2, 3] {
+            sim.r[2].goal = goal;
+            sim.r[2].still_since = Some(2.9);
+            assert!(!sim.base_held_ahead(1, 2), "goal {goal}: seen still for 0.1 s");
+            sim.r[2].still_since = Some(2.75);
+            assert!(sim.base_held_ahead(1, 2), "goal {goal}: seen still for 0.25 s");
+            sim.r[2].still_since = None;
+            assert!(!sim.base_held_ahead(1, 2), "goal {goal}: seen running");
         }
     }
 
