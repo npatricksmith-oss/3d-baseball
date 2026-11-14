@@ -85,7 +85,8 @@ pub struct BbPlayer {
     /// Place in the batting order, 1–9.
     pub batting_order: u8,
     /// Hands: 1 left, 2 right; `bats` may also be 3, a switch hitter, who bats from the side
-    /// opposite the pitcher's hand (`BbPlayInfo.batter_side` says which on a given play).
+    /// opposite the pitcher's hand (on a given play, his box is on the first-base side, sim
+    /// x > 0, when he bats left).
     pub bats: u8,
     pub throws: u8,
     pub _pad: [u8; 2],

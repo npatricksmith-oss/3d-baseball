@@ -15,7 +15,20 @@
 
 - **A left-hander is a right-hander in a mirror.** The two same-side rows agree and the two opposite-side rows agree, within sampling error (one sd of a K% here is 0.6 points), and every batter pulls the ball by the same 5° to 6°, to his own side.
 - **Pitchers hit left-handed batters no more often** than right-handed ones (the "check that pitcher targeting handles left-handed batters" part of A1). Targets are symmetric across the plate and the body is on the batter's own side.
-- **The platoon advantage is real in the sim, and too big.** Against an opposite-handed pitcher the average batter strikes out 14.4% of the time, against a same-handed one 19.8%: 5.4 points. Nothing sets it. The batter sees a pitch by the angles from his eyes (agent-models §3.2), which are 0.75 m to his side of the plate; a same-handed pitcher lets go on that same side, so the ball comes nearly down his line of sight and its sideways movement shows late, and his breaking balls move away from the batter. In MLB the gap is smaller: batters hit about .030 to .045 of wOBA better against opposite-handed pitchers (FanGraphs community research; the gap has been shrinking), and the strikeout gap is about 3 points (my recollection; I found no published league table to cite). So the direction is right and the size is roughly double. It is recorded here, not tuned: the candidates are the eye offset (0.75 m [E]) and how much of a pitcher's release side the batter's scouting model already expects.
+- **The platoon advantage is real in the sim, and too big.** Against an opposite-handed pitcher the average batter strikes out 14.4% of the time, against a same-handed one 19.8%: 5.4 points. Nothing sets it. In MLB the gap is smaller: batters hit about .030 to .045 of wOBA better against opposite-handed pitchers (FanGraphs community research; the gap has been shrinking), and the strikeout gap is about 3 points (my recollection; I found no published league table to cite). So the direction is right and the size is roughly double. It is recorded here, not tuned.
+- **Where it comes from: sideways movement, seen from the batter's side.** My first account (the ball comes down a same-handed batter's line of sight, so the eye offset is the cause) was a guess, and the Codex review tested it with scratch interventions (4,000 PA per pairing, seed 3; K% for R/R, L/L, R/L, L/R):
+
+  | Intervention | R/R | L/L | R/L | L/R |
+  |---|---|---|---|---|
+  | none | 20.0 | 19.3 | 13.8 | 14.7 |
+  | eyes at x = 0 | 26.3 | 26.0 | 21.9 | 21.8 |
+  | release at x = 0 | 19.4 | 18.6 | 13.9 | 15.4 |
+  | eyes and release at x = 0 | 25.6 | 24.6 | 23.0 | 22.7 |
+  | no sideways spin on any pitch | 17.1 | 16.3 | 15.1 | 16.3 |
+  | eyes and release at x = 0, no sideways spin | 24.8 | 24.6 | 24.4 | 24.9 |
+  | exact scouting | 12.2 | 11.9 | 8.0 | 8.3 |
+
+  Neither the eye offset nor the release side alone explains the gap. It shrinks to about 2 points when both are centred, to 1 or 2 points when pitches have no sideways spin, and vanishes only with all three. So it is the handed movement of the pitches (arm-side run, glove-side break) meeting a batter who sees and swings from one side, not one parameter. No sign error was found. These are counterfactual populations, not a decomposition, and the eye offset is not shown to be the right thing to adjust.
 
 ## Games (300 games each; before = every player right-handed, main at `3de5572`; MLB column approximate)
 
@@ -29,7 +42,7 @@
 | GB hits | .333 | .346 | .343 | .349 | .24 |
 | FB hits | .162 | .124 | .138 | .133 | .13 |
 
-About 45% of plate appearances are now opposite-handed (they were none), and those batters strike out less, put more balls in the air and hit more home runs. **Runs rose by about 0.6 a team-game and strikeouts fell by 2.6 points.** The run environment is back near where it was before the dive-rate work (5.48). The fix belongs to the next calibration of the plate-appearance knobs, which should be done over the real mix of pairings, and to the size of the platoon gap above; it is listed open in TASKS.
+Half of plate appearances are now opposite-handed (49.8% measured over seeds 0–299: R/R 9,449, R/L 7,474, L/R 3,965, L/L 2,086, counted by the Codex review; they were none), and those batters strike out less, put more balls in the air and hit more home runs. **Runs rose by about 0.6 a team-game and strikeouts fell by 2.6 points.** The run environment is back near where it was before the dive-rate work (5.48). The fix belongs to the next calibration of the plate-appearance knobs, which should be done over the real mix of pairings, and to the size of the platoon gap above; it is listed open in TASKS.
 
 ## Dives (300 games from seed 1000, `examples/dive_probe.rs`)
 

@@ -11,10 +11,10 @@ Status: `[ ]` not started · `[~]` in progress · `[x]` done · `[?]` needs an o
 
 Branch `claude/a1-173226` (from main at `3de5572`). `cargo test --workspace --release`: 179 pass. Spec: data-formats §2.4 (hands), agent-models §5.5 (the throwing hand); measurements in [the handedness note](docs/calibration/2026-11-13-handedness.md).
 
-REVIEW_STATUS
+**Nothing is waiting on a review.** The [Codex handedness review](docs/reviews/2026-11-13-codex-handedness-review.md) is resolved: no P1 or P2; its two P3s (wrong shares in the docs, an ABI comment naming a field that does not exist) are fixed. It rebuilt 54,000 players' hands with its own Python Philox, confirmed names and numbers are unchanged from before, matched 1,452 pitch records against its own matchup construction, and checked the mirror on all ten pitch types.
 
-- **Open, for the next calibration:** left-handers raised the run environment. Runs/team-game 4.73 → 5.35 (seeds 0–299) and 4.89 → 5.43 (seeds 1000–1299); K% 17.8 → 15.2; HR/PA 4.1% → 5.2%. Nothing was tuned. The interim knobs were set with every plate appearance right against right; 45% are now opposite-handed. Recalibrate the plate-appearance knobs over the real mix.
-- **Open, a model question:** the platoon advantage comes out of the geometry (the batter's eyes are on his side of the plate and a same-handed pitcher releases on that side) and is about twice the real size: K 19.8% same-handed against 14.4% opposite, 5.4 points (MLB about 3 from memory, unsourced; wOBA gap .030–.045). Candidates: the eye offset 0.75 m [E]; what the batter's scouting already expects of the release side.
+- **Open, for the next calibration:** left-handers raised the run environment. Runs/team-game 4.73 → 5.35 (seeds 0–299) and 4.89 → 5.43 (seeds 1000–1299); K% 17.8 → 15.2; HR/PA 4.1% → 5.2%. Nothing was tuned. The interim knobs were set with every plate appearance right against right; half are now opposite-handed (49.8% measured). Recalibrate the plate-appearance knobs over the real mix.
+- **Open, a model question:** the platoon advantage comes out of the geometry and is about twice the real size: K 19.8% same-handed against 14.4% opposite, 5.4 points (MLB about 3 from memory, unsourced; wOBA gap .030–.045). Codex's interventions (table in the note) show it is the pitches' sideways movement meeting a batter who sees and swings from one side; neither the eye offset nor the release side explains it alone, so there is no single parameter to turn yet.
 - **Next in the agreed order:** A3 throwing ratings and hurried throws (which is also where the glove hand should start to matter, below).
 
 Done (A1):
@@ -22,7 +22,7 @@ Done (A1):
 - **Games play them.** Each batter stands on his own side against the other side's pitcher, a switch hitter on the side opposite the pitcher's hand; the pitcher throws with his own hand (`Matchup::for_hands`, one matchup per pairing in a game). Abilities are still average. Every game's digest changed.
 - **A left-hander is a mirror image** (`cargo run --release -p bb_game --example platoon`): same-handed pairings agree with each other, opposite-handed ones with each other, pull is 5–6° to the batter's own side, and left-handed batters are hit by pitches no more often (the targeting check A1 asked for).
 - **Fielders throw from their throwing hand:** the ball leaves 0.35 m [E] to the arm side (`throw_release_point`).
-- **Client:** a left-hander's delivery, throw and batting stance are the right-handed stand-in clips in a mirror (the figure is flipped across his facing). CLIENT_STATUS
+- **Client:** a left-hander's delivery, throw and batting stance are the right-handed stand-in clips in a mirror (the figure is flipped across his facing). Checked headlessly: seed 7 (left-handed batters in the first-base-side box) and seed 6 (a left-handed pitcher follows through with his left arm; `client/run.sh 6 -RenderOffscreen -BbShots=14 -BbShotEvery=0.45 -BbSpeed=0.25`). No throw by a left-handed fielder was looked at.
 
 Not done:
 - **The glove hand does nothing in the sim yet.** Reach is the same to both sides, a backhand costs nothing, and a throw needs no turn of the body. It belongs with set-up time in A3 (agent-models §5.5 says so). Gloves are not drawn (L2).
