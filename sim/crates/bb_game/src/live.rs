@@ -384,6 +384,9 @@ struct Runner {
     /// `SEEN_MOVING_MPS`), from the previous tick's motion; `None` while he is. What a
     /// runner behind him can see (agent-models §6.4).
     still_since: Option<f64>,
+    /// The base he turned back from because the runner ahead was seen holding it, while he
+    /// is on his way back; he resumes if that base visibly clears.
+    turned_back: Option<u8>,
     moving_since: f64,
     last_base: u8,
     /// Going back to the start base to retouch after a caught fly.
@@ -498,6 +501,8 @@ pub struct LiveOutput {
     /// For each release: how hurried it was (0 set, 1 the earliest he could let go) and
     /// whether he was off balance (agent-models §5.5). Diagnostics.
     pub hurry: Vec<(f64, bool)>,
+    /// For each release: its effort, the fraction of the thrower's arm (agent-models §5.5).
+    pub effort: Vec<f64>,
     /// Every dive (t, fielder, where he left his feet, where his body lands), in time order.
     /// He is back on his feet [`DIVE_GETUP_S`] after the dive.
     pub dives: Vec<(f64, AgentId, Vec3, Vec3)>,
@@ -2484,14 +2489,21 @@ impl<'a> Sim<'a> {
         match &self.ball {
             Ball::Held { by } => {
                 // The runner sees where the ball is, when it was caught, and who has it: his
-                // read of that fielder is the position's grade-50 transfer and arm, the arm
-                // off by his own read error (agent-models §6.4; one draw per runner, fielder
-                // and play).
+                // read of that fielder is the position's grade-50 transfer and the fielder's
+                // own arm (scouting knows an arm), off by his own read error (agent-models
+                // §6.4; Gemini tag-up review P2-1; one draw per runner, fielder and play).
                 let (p, _) = self.ball_at(self.t);
                 let mean = FielderAttrs::average(*by);
                 let err = rng(self.inp.seed, self.inp.play, self.r[k].id, Purpose::RunnerPerception, ARM_READ_SUB + *by as u32).truncated_normal(4.0);
-                let ready = (self.secured_at + mean.transfer).max(self.t);
-                ready + read_throw_time(mean.arm + ARM_READ_SIGMA_MPS * err, m::hypot(target.x - p.x, target.y - p.y))
+                // His set-up as the runner sees it: the position's transfer, plus the turn
+                // and footwork a throw to this base needs from the way he took the ball
+                // (both visible), after any get-up (§5.5, §6.4).
+                let fd = &self.f[*by];
+                let to = target - fd.pos;
+                let turn = fd.face.map(|f| throwing::turn_extra_s(f, to, fd.a.throws)).unwrap_or(0.0);
+                let su = SetUp::new(if fd.face.is_some() { mean.transfer } else { RELAY_TRANSFER_FRAC * mean.transfer }, turn, throwing::footwork_s(fd.catch_vel, to, fd.took_diving));
+                let ready = (fd.up_at + su.set_s).max(self.t);
+                ready + read_throw_time(fd.a.arm + ARM_READ_SIGMA_MPS * err, m::hypot(target.x - p.x, target.y - p.y))
             }
             Ball::Thrown { .. } => {
                 // A throw in the air: where it is and how fast it is coming.
@@ -2564,7 +2576,7 @@ impl<'a> Sim<'a> {
     fn base_held_ahead(&self, k: usize, b: u8) -> bool {
         let r = &self.r[k];
         self.r.iter().any(|o| {
-            o.id != r.id && !o.out && !o.scored && o.start > r.start && o.s <= b as f64 * BASE_L + 0.5 && o.still_since.is_some_and(|t0| self.t - t0 >= HOLD_READ_S)
+            o.id != r.id && !o.out && !o.scored && o.start > r.start && o.s <= b as f64 * BASE_L + 0.5 && o.still_since.is_some_and(|t0| self.t - t0 >= HOLD_READ_S - 1e-9)
         })
     }
 
@@ -2704,6 +2716,14 @@ impl<'a> Sim<'a> {
             let forced_here = g == self.r[k].start + 1 && self.forced(k);
             if g as f64 * BASE_L > self.r[k].s && self.base_held_ahead(k, g) && !forced_here {
                 self.r[k].goal = (self.r[k].s / BASE_L).floor() as u8;
+                self.r[k].turned_back = Some(g);
+            } else if let Some(g0) = self.r[k].turned_back {
+                // He keeps reading the runner ahead on his way back: once that base is
+                // visibly no longer held, he goes for it again (Gemini tag-up review P1-2).
+                if !self.base_held_ahead(k, g0) {
+                    self.r[k].goal = g0;
+                    self.r[k].turned_back = None;
+                }
             }
             let goal_s = self.r[k].hold_s.unwrap_or(self.r[k].goal as f64 * BASE_L);
             let (now, tag) = (self.t, self.inp.tag_up);
@@ -2778,6 +2798,7 @@ impl<'a> Sim<'a> {
             if r.overrun == OverrunPhase::None && (stop_s - r.s).abs() < 1e-6 {
                 r.v = 0.0;
                 r.set_start = None;
+                r.turned_back = None;
             }
         }
     }
@@ -2884,7 +2905,7 @@ impl<'a> Sim<'a> {
             }
             let on_base = (r.s / BASE_L - (r.s / BASE_L).round()).abs() * BASE_L < 0.3;
             // A tag takes him `tag_apply_s` from securing the ball (agent-models §6.4).
-            if !on_base && self.t >= self.secured_at + fd.a.tag_apply_s && (self.runner_pos(r) - fd.pos).norm() < fd.a.throw_choice.tag_reach_m {
+            if !on_base && self.t + 1e-9 >= self.secured_at + fd.a.tag_apply_s && (self.runner_pos(r) - fd.pos).norm() < fd.a.throw_choice.tag_reach_m {
                 let id = r.id;
                 self.emit(Input::TagContact { t: self.t, fielder: fd.id, runner: id, holding_ball: true });
                 if self.done {
@@ -2989,7 +3010,8 @@ impl<'a> Sim<'a> {
         let action = if margins.is_some() { "throw" } else { "return" };
         if let (true, Some(i)) = (through, race.relay) {
             self.trace_choice(by, action, b, true, best, &options);
-            self.throw_to(by, leg, b, i, true);
+            // Through a cutoff man: full effort (the relay is a race by construction).
+            self.throw_to(by, leg, b, i, true, 1.0);
             if let Some(fact) = self.out.scorer_throws.last_mut() { fact.attempted_out = margins.is_some(); fact.runner = if margins.is_some() { target_runner } else { 0 }; }
             return;
         }
@@ -3000,7 +3022,24 @@ impl<'a> Sim<'a> {
             return;
         }
         self.trace_choice(by, action, b, false, best, &options);
-        self.throw_to(by, tgt, b, receiver, false);
+        // As hard as the play needs and no harder (agent-models §5.5). With no out to try
+        // for, a runner he can see moving could still take a base on the throw: that is the
+        // play, full effort; with every runner standing, the floor. For an out, the least
+        // effort that still keeps the safe margin by his own read of the race, else everything.
+        let effort = match best.filter(|_| margins.is_some()).map(|i| options[i]) {
+            None if self.r.iter().any(|r| !r.out && !r.scored && (r.overrun != OverrunPhase::None || r.v > SEEN_MOVING_MPS)) => 1.0,
+            None => throwing::EFFORT_MIN,
+            // A first out with a likely second behind it: the feed is a race for that one.
+            Some(o) if o.continuation.is_some_and(|(p2, _)| p2 > 0.3) => 1.0,
+            Some(o) => {
+                let v = THROW_EFFORT * fd.a.arm * su.speed_mult(su.hurry(since));
+                let d = (tgt - fd.pos).norm();
+                let tag = if o.force { 0.0 } else { self.f[receiver].a.tag_apply_s };
+                let ball_at = |e: f64| (self.t + throw_time(e * v, d)).max(race.receiver_at) + 0.05 + tag;
+                (0..=20).map(|i| throwing::EFFORT_MIN + (1.0 - throwing::EFFORT_MIN) * i as f64 / 20.0).find(|&e| o.runner_at - ball_at(e) >= SAFE_MARGIN_S).unwrap_or(1.0)
+            }
+        };
+        self.throw_to(by, tgt, b, receiver, false, effort);
         if let Some(fact) = self.out.scorer_throws.last_mut() { fact.attempted_out = margins.is_some(); fact.runner = if margins.is_some() { target_runner } else { 0 }; }
         self.f[receiver].target = tgt;
         // A throw that goes past the cutoff man ends his job: he pulls up, free to back it up.
@@ -3034,7 +3073,7 @@ impl<'a> Sim<'a> {
     /// Fielder `by` throws to ground point `tgt` for `receiver` (the ball is headed for base
     /// `b`, through a relay man when `relay`). Let go before he is set, the throw is slower
     /// and wilder (agent-models §5.5).
-    fn throw_to(&mut self, by: usize, tgt: Vec3, b: u8, receiver: usize, relay: bool) {
+    fn throw_to(&mut self, by: usize, tgt: Vec3, b: u8, receiver: usize, relay: bool, effort: f64) {
         let fd = self.f[by].clone();
         let mut r = rng(self.inp.seed, self.inp.play, fd.id, Purpose::ThrowExecution, fd.throws);
         self.f[by].throws += 1;
@@ -3043,13 +3082,13 @@ impl<'a> Sim<'a> {
         // Aim with the thrower's own throw physics (drag and backspin, agent-models §5.5);
         // a throw beyond his reach on the fly goes at the steepest useful angle and bounces.
         let r0 = throw_release_point(fd.pos, tgt, fd.a.throws);
-        let v_aim = THROW_EFFORT * fd.a.arm * su.speed_mult(hurry);
+        let v_aim = effort * THROW_EFFORT * fd.a.arm * su.speed_mult(hurry);
         let d = m::hypot(tgt.x - r0.x, tgt.y - r0.y);
         let elev = solve_throw(self.inp.env, THROW_RELEASE_Z, THROW_CATCH_Z, d, v_aim).map(|s| s.elev).unwrap_or(THROW_MAX_ELEV);
         // Execution noise: speed 3%, then direction (the draw order of the vacuum model).
         // A pivot man's throw: the slide's seam (nothing until A6 builds slides).
         let slide = if fd.pivot { throwing::PIVOT_SLIDE_SIGMA_MULT } else { 1.0 };
-        let ex = execute_throw(v_aim, &ThrowNoise::new(fd.a.arm_sigma * su.sigma_mult(hurry) * slide), &mut r);
+        let ex = execute_throw(v_aim, &ThrowNoise::new(fd.a.arm_sigma * su.sigma_mult(hurry) * slide * throwing::effort_sigma_mult(effort)), &mut r);
         let h = Vec3::new(tgt.x - r0.x, tgt.y - r0.y, 0.0).normalized().rotate(Vec3::Z, ex.yaw_err);
         self.launch_throw(throw_state(r0, h, ex.speed, elev), tgt, b, receiver, relay);
         self.out.released.push((self.t, fd.id));
@@ -3060,6 +3099,7 @@ impl<'a> Sim<'a> {
         let t_rel = self.t.max(self.last_fact_t);
         self.emit(Input::BallReleasedFromGlove { t: t_rel, fielder: fd.id, kind: ReleaseKind::Throw, infielder: by < 6 });
         self.out.hurry.push((hurry, su.off_balance));
+        self.out.effort.push(effort);
     }
 
     /// Who takes a throw at base `b`: its cover man, else the nearest other fielder who is
@@ -3204,6 +3244,7 @@ fn new_sim<'a>(inp: &'a LiveInput<'a>, st: &'a mut RulesState) -> Sim<'a> {
             tag_up: false,
             set_start: None,
             still_since: None,
+            turned_back: None,
             moving_since: 0.0,
             last_base: x.base,
             retouch: false,
@@ -3227,7 +3268,7 @@ fn new_sim<'a>(inp: &'a LiveInput<'a>, st: &'a mut RulesState) -> Sim<'a> {
         f,
         r,
         primary: 0,
-        out: LiveOutput { scorer_carries: Vec::new(), first_handling: None, scorer_throws: Vec::new(), batter_first_eta: None, ref_set_s: None, facts: Vec::new(), events: Vec::new(), path, ball_track: Vec::new(), actors, secured: Vec::new(), released: Vec::new(), hurry: Vec::new(), dives: Vec::new(), calls: Vec::new() },
+        out: LiveOutput { scorer_carries: Vec::new(), first_handling: None, scorer_throws: Vec::new(), batter_first_eta: None, ref_set_s: None, facts: Vec::new(), events: Vec::new(), path, ball_track: Vec::new(), actors, secured: Vec::new(), released: Vec::new(), hurry: Vec::new(), effort: Vec::new(), dives: Vec::new(), calls: Vec::new() },
         bounce_k: 1000,
         done: false,
         last_fact_t: t_c,
@@ -3962,6 +4003,37 @@ mod tests {
             sim.r[2].still_since = None;
             assert!(!sim.base_held_ahead(1, 2), "goal {goal}: seen running");
         }
+    }
+
+    // Gemini tag-up review P1-2: the runner from second has stood on his bag for a second
+    // and now breaks for third; the runner from first (unforced: the batter is out) is
+    // coming to second. On the tick he leaves he still looks to be holding, so the runner
+    // behind may start back, but he keeps reading: second visibly clears and he takes it.
+    // (Before the fix a turn-back was final and he never reached second.)
+    #[test]
+    fn a_runner_ahead_breaking_forward_does_not_turn_the_runner_behind_back() {
+        let fx = fixture(&[(6, 1), (7, 2)]);
+        let inp = input(&fx, vec![RunnerIn { id: fx.st.batter, base: 0, speed: 8.2 }, RunnerIn { id: 6, base: 1, speed: 8.2 }, RunnerIn { id: 7, base: 2, speed: 8.2 }]);
+        let mut st = fx.st.clone();
+        let mut sim = new_sim(&inp, &mut st);
+        sim.t = 3.0;
+        sim.r[0].out = true;
+        (sim.r[1].s, sim.r[1].v, sim.r[1].goal, sim.r[1].hold_s) = (BASE_L + 10.0, 8.0, 2, None);
+        (sim.r[2].s, sim.r[2].v, sim.r[2].goal, sim.r[2].hold_s, sim.r[2].still_since) = (2.0 * BASE_L, 0.0, 3, None, Some(2.0));
+        for _ in 0..180 {
+            sim.move_runners();
+            sim.t += DT;
+        }
+        assert!(sim.out.facts.iter().any(|f| matches!(f, Input::BaseTouched { agent: 6, base: 2, .. })), "the runner behind never reached second: s {:.2} goal {}", sim.r[1].s, sim.r[1].goal);
+    }
+
+    // Tag-up sources note §1, §7 (agent-models §6.4): an average runner (8.2 m/s) tagging
+    // from third reaches home about 3.9–4.3 s after the catch (standing 90-ft mean 4.03 s,
+    // Statcast 2017–2020). The decision's start model, at its set values, must land there.
+    #[test]
+    fn the_tag_up_time_is_inside_the_measured_range() {
+        let t = tag_up_time(bb_agents::running::TagUpParams::default(), 0.0, BASE_L, 8.2);
+        assert!((3.9..=4.3).contains(&t), "third to home {t:.3} s");
     }
 
     // A runner caught off his base by the catch goes back, retouches once, and is then free:
@@ -5437,7 +5509,7 @@ mod tests {
                     assert!(matches!(sim.ball, Ball::Thrown { receiver, relay: false, .. } if receiver == c2), "case 0: a straight throw to second");
                 }
                 1 => {
-                    sim.throw_to(8, base_pos(2), 2, c2, false);
+                    sim.throw_to(8, base_pos(2), 2, c2, false, 1.0);
                     sim.update_relay();
                 }
                 _ => {
@@ -5884,6 +5956,18 @@ mod tests {
         sim.holder_act();
         assert_eq!(sim.f[2].carry_to, None, "he must not run it to first");
         assert!(matches!(sim.ball, Ball::Thrown { to_base: 4, .. }), "the force at home");
+    }
+
+    // agent-models §5.5, speed for accuracy: with the batter 3 s from first the shortstop's
+    // 33 m throw beats him by far more than the 0.25 s margin even at 80% of his arm, so he
+    // throws at the measured floor (and more accurately); in a race he wins by 0.1 s letting
+    // go as early as he can, no effort keeps that margin, so he throws everything he has.
+    #[test]
+    fn a_fielder_throws_as_hard_as_the_play_needs() {
+        let (easy, _) = shortstop_to_first(3.0, Vec3::ZERO);
+        assert_eq!(easy.out.effort, vec![throwing::EFFORT_MIN]);
+        let (close, _) = shortstop_to_first(eta_for_margin(0.10, false), Vec3::ZERO);
+        assert_eq!(close.out.effort, vec![1.0]);
     }
 
     /// The shortstop holds the ball at (−8, 38) at time 1.0, on his feet, having taken it
