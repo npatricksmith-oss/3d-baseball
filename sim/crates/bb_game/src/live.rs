@@ -996,6 +996,13 @@ fn glove_sigma_mult(v: f64, horiz: f64, extending: bool) -> f64 {
 /// τ); slowing takes at most [`BRAKE`] and turning at most his lateral acceleration `a_lat`.
 /// So a reversal means a full stop, and a sharp turn at speed a curve.
 /// Not yet reacting, or on the ground after a dive: unchanged.
+/// How far past a wall a ball at `b` is beyond a fielder's reach over it: his body stops its
+/// radius inside the wall and his glove reaches `REACH` from his body's centre (> 0: out of
+/// reach; physics-spec §9.5). Players see the walls, so plans use it.
+fn beyond_reach_over_wall(field: &Field, b: Vec3) -> f64 {
+    -field.body_clearance(b.x, b.y, 0.0).dist - (REACH - BODY_R)
+}
+
 fn fielder_step(fd: &Fielder, t: f64, t_contact: f64) -> (Vec3, Vec3) {
     if fd.dove && t < fd.ready_at {
         // Down from a dive: the lunge carries him toward the ball, then he lies still.
@@ -1227,9 +1234,11 @@ impl<'a> Sim<'a> {
     fn believed_field_time(&self, pred: &BallPath) -> (f64, Vec3) {
         let mut t = self.t + 0.05;
         let t_end = pred.t_end();
+        let field = self.inp.field;
         while t <= t_end {
             let (b, _) = pred.at(t);
-            if b.z <= CATCH_MAX_Z {
+            // Not where nobody can reach: farther past a wall than a fielder reaches over it.
+            if b.z <= CATCH_MAX_Z && beyond_reach_over_wall(field, b) <= 0.0 {
                 let reachable = self.f.iter().any(|fd| {
                     let d = m::hypot(b.x - fd.pos.x, b.y - fd.pos.y) - REACH;
                     d <= 0.0 || run_dist(t - self.t, TYPICAL_SPEED, 0.9) >= d
@@ -1329,7 +1338,9 @@ impl<'a> Sim<'a> {
             pts.push((t, b, g));
             prev = Some((t, b, g));
             for (t, b, g) in pts {
-                if b.z > CATCH_MAX_Z || t < start {
+                // Players see the walls: no intercept past a wall, beyond his reach over it
+                // (Gemini play-area review P2-3).
+                if b.z > CATCH_MAX_Z || t < start || beyond_reach_over_wall(self.inp.field, b) > 0.0 {
                     continue;
                 }
                 // Head for the ball's line itself, not the edge of reach.
@@ -1861,6 +1872,14 @@ impl<'a> Sim<'a> {
                 fd.dove = false; // recovered
             }
             (fd.pos, fd.vel) = fielder_step(fd, t, t_contact);
+            // He sees the wall: never coming at it faster than he can stop before it at the
+            // braking limit (Gemini play-area review P2-3: chasers ran into it at full speed).
+            let w = field.body_clearance(fd.pos.x, fd.pos.y, BODY_R);
+            let into = -fd.vel.dot(w.inward);
+            let allowed = m::sqrt(2.0 * BRAKE * w.dist.max(0.0));
+            if into > allowed {
+                fd.vel = fd.vel + w.inward * (into - allowed);
+            }
             // Nobody runs through a wall (physics-spec §9.5): he stops at it, losing the speed
             // he had into it.
             let w = field.body_clearance(fd.pos.x, fd.pos.y, BODY_R);
@@ -2194,7 +2213,8 @@ impl<'a> Sim<'a> {
                     SegmentEnd::OverFence { .. } => {
                         let in_flight = path.bounces.is_empty();
                         // Where it left the field (fair or foul is judged there, rules-spec
-                        // §5.2), though it is dead only once it is down in the seats.
+                        // §5.2). A batted ball is dead only once it is down in the seats: until
+                        // then a fielder at the rail may reach over for it (rules-spec §5.3).
                         let r = self.inp.env.ball.radius;
                         let exit = match path.segments.last() {
                             Some(bb_physics::ground::Segment::Flight { tr, .. }) => tr.find(bb_physics::flight::Crossing::Boundary { field: *self.inp.field, r }).map(|tc| tr.at(tc).0).or_else(|| {
@@ -2205,7 +2225,7 @@ impl<'a> Sim<'a> {
                             _ => None,
                         };
                         let q = exit.unwrap_or(p);
-                        facts.push(Input::BallTouched { t: path.t_end().max(floor), what: Touch::OutOfPlay { x: q.x, y: q.y, in_flight } });
+                        facts.push(Input::BallTouched { t: path.t_end().max(floor), what: Touch::OutOfPlay { x: q.x, y: q.y, z: q.z, in_flight } });
                     }
                     SegmentEnd::Rest => facts.push(Input::BallSettled { t: path.t_end().max(floor), x: p.x, y: p.y }),
                     _ => {}
@@ -2310,8 +2330,14 @@ impl<'a> Sim<'a> {
                 // and out of play.
                 match wall_contact(self.inp.field, s, self.inp.env.ball.radius) {
                     (WallContact::Out, _) => {
+                        // A throw over the wall is dead as it crosses: nobody catches a throw
+                        // in the seats (Gemini play-area review P2-2: it used to stay live
+                        // until it came down there). The ball flies on into the seats for the
+                        // picture only.
                         let path = over_the_wall(self.inp.env, self.inp.field, s, t_end);
-                        self.ball = Ball::Free { path, next_touch: 0, next_wall: 0, settled_sent: false };
+                        self.ball = Ball::Free { path, next_touch: 0, next_wall: 0, settled_sent: true };
+                        let floor = self.last_fact_t;
+                        self.emit(Input::BallTouched { t: t_end.max(floor), what: Touch::OutOfPlay { x: s.r.x, y: s.r.y, z: s.r.z, in_flight: true } });
                     }
                     (WallContact::Carom(ns), _) => {
                         let floor = self.last_fact_t;
@@ -5505,6 +5531,8 @@ mod tests {
         sim.emit(Input::BallReleasedFromGlove { t: 2.0, fielder: ss, kind: ReleaseKind::Throw, infielder: true });
         let out = Vec3::new(1.0, -1.0, 0.0).normalized();
         sim.launch_throw(BallState { r: Vec3::new(15.0, 25.0, 2.5), v: out * 30.0 + Vec3::new(0.0, 0.0, 3.0), w: Vec3::ZERO }, Vec3::new(40.0, 0.0, 0.0), 1, 2, false);
+        let Ball::Thrown { path, .. } = &sim.ball else { panic!("a throw in flight") };
+        let t_wall = path.last().t;
         for _ in 0..400 {
             sim.update_thrown();
             if sim.done {
@@ -5522,11 +5550,15 @@ mod tests {
         assert!(ev.contains(&Event::RunnerAdvanced { runner: fx.st.batter, from: 0, to: 2, cause: bb_rules::AdvanceCause::Award }), "{ev:?}");
         // It left over the wall: the out-of-play point is where it crossed, its center one
         // ball radius short of the wall's plane, 50 ft off the line.
+        // Dead as it crosses the wall (a throw is not caught in the seats), and from above the
+        // wall's 4-ft top.
         let oop = sim.out.facts.iter().find_map(|f| match f {
-            Input::BallTouched { what: Touch::OutOfPlay { x, y, .. }, .. } => Some((*x, *y)),
+            Input::BallTouched { t, what: Touch::OutOfPlay { x, y, z, .. } } => Some((*t, *x, *y, *z)),
             _ => None,
         });
-        let (x, y) = oop.expect("an out-of-play fact");
+        let (t, x, y, z) = oop.expect("an out-of-play fact");
+        assert!((t - t_wall).abs() < 1e-9, "out of play at {t}, the wall at {t_wall}");
+        assert!(z > 4.0 * bb_math::units::FT + fx.env.ball.radius && z < 2.5, "crossed at {z:.2} m");
         let c = (x - y) / core::f64::consts::SQRT_2;
         assert!((c - (50.0 * bb_math::units::FT - fx.env.ball.radius)).abs() < 1e-3, "({x:.2}, {y:.2}): {c:.4} m off the line");
     }
@@ -5868,4 +5900,48 @@ mod tests {
         sim.assign_among(vec![6, 5, 4, 3], Some(6));
         assert!(sim.f[7].role == Role::Chase, "called off with nobody sure: {:?}", sim.f[7].role);
     }
+
+    /// Foul pops that come down in the first-base seats, from just past the stands wall to
+    /// 10 m in (Gemini play-area review P2-3): nobody catches one beyond his reach over the
+    /// wall, and a fielder who goes after one sees the wall and stops at it. Arriving at the
+    /// wall he is no faster than stopping from where he could still see it allows: from at
+    /// most 0.35 m out at the braking limit (6 m/s², BRAKE), √(2·6·0.35) ≈ 2.05 m/s, plus one
+    /// 0.1 s sample's slack (0.6 m/s).
+    #[test]
+    fn nobody_runs_into_the_stands_after_a_ball_out_of_reach() {
+        let fx = fixture(&[]);
+        let mut worst = (0.0f64, 0.0f64);
+        for k in 0..8 {
+            let mut inp = input(&fx, vec![RunnerIn { id: fx.st.batter, base: 0, speed: 8.2 }]);
+            // Up 35 m and out toward the first-base seats, a little farther each time.
+            let dir = Vec3::new(0.80, 0.25, 0.0).normalized();
+            inp.ball = BallState { r: Vec3::new(0.0, 0.5, 1.0), v: dir * (11.0 + 0.5 * k as f64) + Vec3::new(0.0, 0.0, 26.0), w: Vec3::ZERO };
+            let path = batted_path(&fx.env, &fx.field, inp.ball, inp.t_contact, |_, _| (0.0, 0.0));
+            let (land, _) = path.at(path.t_end());
+            let beyond = -fx.field.body_clearance(land.x, land.y, 0.0).dist;
+            inp.record = true;
+            let mut st = fx.st.clone();
+            let out = simulate_live(&inp, &mut st);
+            if beyond > REACH {
+                assert!(!out.events.iter().any(|e| matches!(e, Event::Catch { .. })), "a catch {beyond:.1} m into the seats");
+            }
+            for (id, track) in &out.actors {
+                if id & 0x80 == 0 {
+                    continue;
+                }
+                for w in track.windows(2) {
+                    let (a, b) = (w[0].1, w[1].1);
+                    let wall = fx.field.body_clearance(b.x, b.y, BODY_R);
+                    if wall.dist < 0.02 {
+                        let into = (b - a).dot(-wall.inward) / (w[1].0 - w[0].0);
+                        if into > worst.0 {
+                            worst = (into, beyond);
+                        }
+                    }
+                }
+            }
+        }
+        assert!(worst.0 <= 2.05 + 0.6, "a fielder reached the wall at {:.2} m/s (ball {:.1} m into the seats)", worst.0, worst.1);
+    }
+
 }

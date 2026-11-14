@@ -13,3 +13,6 @@ bb_game.workspace = true
 bb_schema.workspace = true
 bb_observe.workspace = true
 flatbuffers.workspace = true
+
+[dev-dependencies]
+bb_physics.workspace = true

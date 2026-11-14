@@ -52,6 +52,9 @@ pub struct Field {
     pub dugout_from_m: f64,
     /// ...to this one (m) [E].
     pub dugout_to_m: f64,
+    /// Height of a dugout's roof above the field, m [E]: a ball under it goes into the dugout,
+    /// one over it into the seats on the roof (both out of play).
+    pub dugout_roof_m: f64,
     /// Restitution of the backstop and foul-territory walls [E] (§9.5).
     pub foul_wall_e: f64,
 }
@@ -74,6 +77,7 @@ impl Default for Field {
             backstop_height: 9.0,
             dugout_from_m: 20.0 * FT,
             dugout_to_m: 80.0 * FT,
+            dugout_roof_m: 4.0 * FT,
             foul_wall_e: 0.35,
         }
     }
@@ -116,10 +120,41 @@ impl Field {
         y >= x.abs()
     }
 
+    /// Over fair territory in the air: any part of a ball of radius `r` is (rules-spec §5.2).
+    pub fn fair_in_air(x: f64, y: f64, r: f64) -> bool {
+        (y - x.abs()) / core::f64::consts::SQRT_2 >= -r
+    }
+
+    /// The wall piece is a dugout's opening.
+    pub fn is_dugout(&self, w: &WallAt) -> bool {
+        w.kind == WallKind::Side && w.s >= 0.0 && w.s >= self.dugout_from_m && w.s <= self.dugout_to_m
+    }
+
+    /// The height a ball of radius `r` that has gone over (or into) the wall `w` at height `z`
+    /// comes down to: the seats at the wall's top; at a dugout, its floor if it went in under
+    /// the roof, the seats on the roof if it went over (Gemini play-area review P2-1). The
+    /// fence skeleton ends a flight as it clears, so this is not asked for the fence.
+    pub fn landing_top(&self, w: &WallAt, z: f64, r: f64) -> f64 {
+        if self.is_dugout(w) {
+            if z >= self.dugout_roof_m + r { self.dugout_roof_m } else { 0.0 }
+        } else {
+            self.wall_top(w)
+        }
+    }
+
     /// Every boundary piece at (x, y) with its signed distance (positive inside), in the order
     /// fence, backstop, side wall, taper (physics-spec §9.5). The walls are those on the
     /// point's side of the field (x ≥ 0: first base).
     pub fn pieces(&self, x: f64, y: f64) -> [WallAt; 4] {
+        self.pieces_for(x, y, 0.0, 0.0)
+    }
+
+    /// [`Field::pieces`] for something of radius `r_wall` against the walls and `r_fence`
+    /// against the fence: each distance less the radius, and only then the fair-ground rule
+    /// for the taper, so a centre on fair ground is never against a foul-territory wall
+    /// (Gemini play-area review P1-1: the rule used to come first, and the radius then put the
+    /// taper's line 3.7 cm into fair ground for a ball and 0.3 m for a body).
+    fn pieces_for(&self, x: f64, y: f64, r_wall: f64, r_fence: f64) -> [WallAt; 4] {
         let r2 = core::f64::consts::SQRT_2;
         let sg = if x < 0.0 { -1.0 } else { 1.0 };
         let xa = x.abs();
@@ -127,13 +162,13 @@ impl Field {
         let c = (xa - y) / r2;
         let rho = m::hypot(x, y);
         let radial = Vec3::new(x, y, 0.0).normalized();
-        let fence = WallAt { kind: WallKind::Fence, dist: self.fence_at(m::atan2(x, y)) - rho, inward: -radial, s };
-        let back = WallAt { kind: WallKind::Backstop, dist: y + self.backstop_m, inward: Vec3::Y, s };
-        let side = WallAt { kind: WallKind::Side, dist: self.foul_clear_m - c, inward: Vec3::new(-sg, 1.0, 0.0) * (1.0 / r2), s };
+        let fence = WallAt { kind: WallKind::Fence, dist: self.fence_at(m::atan2(x, y)) - rho - r_fence, inward: -radial, s };
+        let back = WallAt { kind: WallKind::Backstop, dist: y + self.backstop_m - r_wall, inward: Vec3::Y, s };
+        let side = WallAt { kind: WallKind::Side, dist: self.foul_clear_m - c - r_wall, inward: Vec3::new(-sg, 1.0, 0.0) * (1.0 / r2), s };
         let s_pole = if x < 0.0 { self.fence_lf } else { self.fence_rf };
         let k = self.foul_clear_m / (s_pole - self.foul_taper_m);
         let norm = m::sqrt(1.0 + k * k);
-        let taper_d = (k * (s_pole - s) - c) / norm;
+        let taper_d = (k * (s_pole - s) - c) / norm - r_wall;
         // Inward in (s, c) is (−k, −1)/norm; s = (1, 1)/√2 and c = (1, −1)/√2 on this side.
         let inward = Vec3::new(sg * (-k - 1.0), -k + 1.0, 0.0) * (1.0 / (r2 * norm));
         // The walls bound foul territory only (§9.5): beyond the pole the taper's line would
@@ -153,10 +188,7 @@ impl Field {
     /// (physics-spec §9.5).
     pub fn ball_clearance(&self, x: f64, y: f64, r: f64) -> WallAt {
         let mut best = WallAt { kind: WallKind::Fence, dist: f64::INFINITY, inward: Vec3::Y, s: 0.0 };
-        for mut w in self.pieces(x, y) {
-            if w.kind != WallKind::Fence {
-                w.dist -= r;
-            }
+        for w in self.pieces_for(x, y, r, 0.0) {
             if w.dist < best.dist {
                 best = w;
             }
@@ -168,8 +200,7 @@ impl Field {
     /// measured from its plane or curve, minus `r`), for keeping players inside the field.
     pub fn body_clearance(&self, x: f64, y: f64, r: f64) -> WallAt {
         let mut best = WallAt { kind: WallKind::Fence, dist: f64::INFINITY, inward: Vec3::Y, s: 0.0 };
-        for mut w in self.pieces(x, y) {
-            w.dist -= r;
+        for w in self.pieces_for(x, y, r, r) {
             if w.dist < best.dist {
                 best = w;
             }
@@ -197,7 +228,7 @@ impl Field {
         match w.kind {
             WallKind::Fence => self.wall_height,
             _ if w.s < 0.0 => self.backstop_height,
-            WallKind::Side if w.s >= self.dugout_from_m && w.s <= self.dugout_to_m => 0.0,
+            WallKind::Side if self.is_dugout(w) => 0.0,
             _ => self.foul_wall_height,
         }
     }
@@ -235,9 +266,10 @@ pub fn wall_contact(field: &Field, s: BallState, r: f64) -> (WallContact, WallAt
 /// (see [`wall_contact`]): on into the seats or the dugout for a foul-territory wall, ending
 /// at once at the fence. It ends `OverFence`.
 pub fn over_the_wall(env: &FlightEnv, field: &Field, s: BallState, t: f64) -> BallPath {
-    let w = field.ball_clearance(s.r.x, s.r.y, env.ball.radius);
-    let fair = Field::fair(s.r.x, s.r.y);
-    let tr = if w.kind == WallKind::Fence { Trajectory::single(t, s) } else { into_the_stands(env, s, t, DT_BATTED, field.wall_top(&w)) };
+    let r = env.ball.radius;
+    let w = field.ball_clearance(s.r.x, s.r.y, r);
+    let fair = Field::fair_in_air(s.r.x, s.r.y, r);
+    let tr = if w.kind == WallKind::Fence { Trajectory::single(t, s) } else { into_the_stands(env, s, t, DT_BATTED, field.landing_top(&w, s.r.z, r)) };
     BallPath { segments: vec![Segment::Flight { tr, end: SegmentEnd::OverFence { fair } }], bounces: vec![], walls: vec![] }
 }
 
@@ -245,7 +277,12 @@ pub fn over_the_wall(env: &FlightEnv, field: &Field, s: BallState, t: f64) -> Ba
 /// the wall top's height) or a dugout, or `t_max` passes. The fence skeleton ends at the
 /// fence instead (a home run is over when it clears).
 fn into_the_stands(env: &FlightEnv, s: BallState, t: f64, dt: f64, top: f64) -> Trajectory {
-    fly(env, s, t, dt, &[Crossing::ZBelow(top.max(0.0) + env.ball.radius)], 15.0)
+    let floor = top.max(0.0) + env.ball.radius;
+    // Already down there (it went in low, or rolled in): out where it is.
+    if s.r.z <= floor {
+        return Trajectory::single(t, s);
+    }
+    fly(env, s, t, dt, &[Crossing::ZBelow(floor)], 15.0)
 }
 
 /// What ended a flight segment.
@@ -384,6 +421,11 @@ pub fn batted_path_dt(env: &FlightEnv, field: &Field, s0: BallState, t0: f64, dt
             s.v.z = -1e-3;
         }
     }
+    // Starting outside the field (a ball knocked off a glove reaching over a wall): it is out
+    // of play from there (Gemini play-area review P2-4).
+    if field.ball_clearance(s.r.x, s.r.y, r).dist < 0.0 {
+        return over_the_wall(env, field, s, t);
+    }
     for k in 0..40u32 {
         let fence = Crossing::Boundary { field: *field, r };
         let tr = fly(env, s, t, dt, &[Crossing::ZBelow(r), fence], 15.0);
@@ -438,10 +480,10 @@ pub fn batted_path_dt(env: &FlightEnv, field: &Field, s0: BallState, t0: f64, dt
                 let p = last.s.r;
                 match wall_contact(field, last.s, r) {
                     (WallContact::Out, w) => {
-                        let fair = Field::fair(p.x, p.y);
+                        let fair = Field::fair_in_air(p.x, p.y, r);
                         // Over a foul-territory wall it flies on into the seats or the dugout;
                         // over the fence the path ends as it clears.
-                        let tr = if w.kind == WallKind::Fence { tr } else { tr.join(into_the_stands(env, last.s, last.t, dt, field.wall_top(&w))) };
+                        let tr = if w.kind == WallKind::Fence { tr } else { tr.join(into_the_stands(env, last.s, last.t, dt, field.landing_top(&w, p.z, r))) };
                         segs.push(Segment::Flight { tr, end: SegmentEnd::OverFence { fair } });
                         return BallPath { segments: segs, bounces, walls };
                     }
@@ -613,25 +655,127 @@ mod tests {
         assert_eq!(gb.end(), SegmentEnd::OverFence { fair: false }, "{:?}", gb.at(gb.t_end()));
     }
 
-    /// The walls bound foul territory only: every fair point inside the fence is inside the
-    /// field, for the reference park and for one with a steep taper (stands 300 ft off the
-    /// lines closing in over the last 30 ft before the poles), physics-spec §9.5.
+    /// The walls bound foul territory only (physics-spec §9.5): a ball (radius 0.036888 m) or a
+    /// body (0.3 m) whose centre is on fair ground and inside the fence (the fence itself
+    /// meets a ball at its centre and a body at its radius) touches no foul-territory wall,
+    /// for the reference park and for one with a steep taper (stands 300 ft off the lines
+    /// closing in over the last 30 ft before the poles). Plus the review's point: 5 cm in
+    /// front of the fence and 2 cm fair of the line, a ball is clear of the taper.
     #[test]
     fn foul_walls_never_cut_fair_ground() {
+        const BALL_R: f64 = 0.036888;
+        const BODY_R: f64 = 0.3;
         let steep = Field { foul_clear_m: 300.0 * FT, foul_taper_m: 300.0 * FT, ..Field::default() };
         for f in [Field::default(), steep] {
-            for i in 0..=200 {
-                let th = (-45.0 + 0.45 * i as f64) * core::f64::consts::PI / 180.0;
+            for i in 0..=400 {
+                let th = (-45.0 + 0.225 * i as f64) * core::f64::consts::PI / 180.0;
                 let fence = f.fence_at(th);
-                for j in 1..=100 {
-                    let rho = fence * j as f64 / 100.0 - 1e-6;
+                for j in 1..=200 {
+                    let rho = fence * j as f64 / 200.0;
                     let (x, y) = (rho * m::sin(th), rho * m::cos(th));
-                    let w = f.body_clearance(x, y, 0.0);
-                    assert!(w.dist >= -1e-9, "fair ({x:.2}, {y:.2}) outside by {:?}", w);
-                    assert!(w.kind == WallKind::Fence || w.dist > 0.0);
+                    if y < x.abs() {
+                        continue;
+                    }
+                    if rho < fence - 1e-6 {
+                        let w = f.ball_clearance(x, y, BALL_R);
+                        assert!(w.dist >= 0.0, "ball at fair ({x:.3}, {y:.3}) meets {w:?}");
+                    }
+                    if rho < fence - BODY_R - 1e-6 {
+                        let w = f.body_clearance(x, y, BODY_R);
+                        assert!(w.dist >= 0.0, "body at fair ({x:.3}, {y:.3}) meets {w:?}");
+                    }
                 }
             }
         }
+        let f = Field::default();
+        let (s, c) = (330.0 * FT - 0.05, -0.02);
+        let (x, y) = ((s + c) / core::f64::consts::SQRT_2, (s - c) / core::f64::consts::SQRT_2);
+        let w = f.ball_clearance(x, y, BALL_R);
+        assert!(w.dist >= 0.0, "{w:?}");
+        // 20 cm on along the line it is past the fence: it meets the fence, not the taper.
+        let (x2, y2) = ((s + 0.2 + c) / core::f64::consts::SQRT_2, (s + 0.2 - c) / core::f64::consts::SQRT_2);
+        let w = f.ball_clearance(x2, y2, BALL_R);
+        assert!(w.dist < 0.0 && w.kind == WallKind::Fence, "{w:?}");
+    }
+
+    /// Into a dugout or over it (physics-spec §9.5, Gemini play-area review P2-1): a ball
+    /// crossing the first-base dugout's opening (50 ft along the line) below the 4-ft roof
+    /// comes down to the dugout floor (centre at the ball radius); one crossing 10 m up comes
+    /// down onto the seats on the roof (centre at 4 ft plus the radius). Both are out of play.
+    #[test]
+    fn a_dugout_takes_low_balls_and_the_roof_takes_high_ones() {
+        let env = FlightEnv::default_env();
+        let f = Field::default();
+        let r = env.ball.radius;
+        let along = Vec3::new(1.0, 1.0, 0.0).normalized();
+        let out = Vec3::new(1.0, -1.0, 0.0).normalized();
+        for (z0, floor) in [(0.6, r), (10.0, 4.0 * FT + r)] {
+            let p0 = along * (50.0 * FT) + out * (50.0 * FT - 1.0) + Vec3::new(0.0, 0.0, z0);
+            let path = batted_path(&env, &f, BallState { r: p0, v: out * 15.0 + Vec3::new(0.0, 0.0, 1.0), w: Vec3::ZERO }, 0.0, |_, _| (0.0, 0.0));
+            assert_eq!(path.end(), SegmentEnd::OverFence { fair: false });
+            let (end, _) = path.at(path.t_end());
+            assert!((end.z - floor).abs() < 1e-6, "from {z0} m it came down to {:.3} m, not {floor:.3}", end.z);
+        }
+    }
+
+    /// A ball that starts outside the field (knocked off a glove reaching over the stands
+    /// wall) is out of play at once, where it is (Gemini play-area review P2-4).
+    #[test]
+    fn a_ball_starting_beyond_a_wall_is_out_of_play() {
+        let env = FlightEnv::default_env();
+        let f = Field::default();
+        let along = Vec3::new(1.0, 1.0, 0.0).normalized();
+        let out = Vec3::new(1.0, -1.0, 0.0).normalized();
+        let p0 = along * (95.0 * FT) + out * (50.0 * FT + 0.5) + Vec3::new(0.0, 0.0, 1.5);
+        let path = batted_path(&env, &f, BallState { r: p0, v: out * -3.0 + Vec3::new(0.0, 0.0, -1.0), w: Vec3::ZERO }, 2.0, |_, _| (0.0, 0.0));
+        assert_eq!(path.end(), SegmentEnd::OverFence { fair: false });
+        assert!(path.bounces.is_empty() && path.walls.is_empty());
+        let (start, _) = path.at(2.0);
+        assert!((start - p0).norm() < 1e-9);
+    }
+
+    /// The playing field is convex (physics-spec §9.5: half-planes, the fence's curve, and
+    /// the taper's half-plane joined to fair ground at the pole, which lies on the fence), so a
+    /// straight roll that starts and stops inside never leaves it: checking where it stops is
+    /// enough (answer to Gemini play-area review P2-4's mid-roll concern). Checked on chords
+    /// between inside points across the whole field and densely near both poles.
+    #[test]
+    fn the_playing_field_is_convex() {
+        let f = Field::default();
+        let inside = |x: f64, y: f64| f.body_clearance(x, y, 0.0).dist >= 0.0;
+        // A deterministic spread of points: a grid over the park, and a fine one at each pole.
+        let mut pts = Vec::new();
+        for i in 0..60 {
+            for j in 0..60 {
+                let (x, y) = (-110.0 + 220.0 * i as f64 / 59.0, -20.0 + 150.0 * j as f64 / 59.0);
+                if inside(x, y) {
+                    pts.push((x, y));
+                }
+            }
+        }
+        let pole = 330.0 * FT / core::f64::consts::SQRT_2;
+        for sx in [-1.0, 1.0] {
+            for i in 0..30 {
+                for j in 0..30 {
+                    let (x, y) = (sx * (pole - 6.0 + 7.0 * i as f64 / 29.0), pole - 6.0 + 7.0 * j as f64 / 29.0);
+                    if inside(x, y) {
+                        pts.push((x, y));
+                    }
+                }
+            }
+        }
+        let mut chords = 0u64;
+        for (a, pa) in pts.iter().enumerate().step_by(7) {
+            for pb in pts.iter().skip(a + 1).step_by(5) {
+                chords += 1;
+                for k in 1..20 {
+                    let u = k as f64 / 20.0;
+                    let (x, y) = (pa.0 + (pb.0 - pa.0) * u, pa.1 + (pb.1 - pa.1) * u);
+                    assert!(f.body_clearance(x, y, 0.0).dist >= -1e-9, "chord {pa:?}–{pb:?} leaves the field at ({x:.3}, {y:.3})");
+                }
+            }
+        }
+        assert!(chords > 10_000, "{chords} chords");
     }
 
     #[test]
