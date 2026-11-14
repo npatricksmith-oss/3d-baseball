@@ -3029,6 +3029,8 @@ impl<'a> Sim<'a> {
         let effort = match best.filter(|_| margins.is_some()).map(|i| options[i]) {
             None if self.r.iter().any(|r| !r.out && !r.scored && (r.overrun != OverrunPhase::None || r.v > SEEN_MOVING_MPS)) => 1.0,
             None => throwing::EFFORT_MIN,
+            // A first out with a likely second behind it: the feed is a race for that one.
+            Some(o) if o.continuation.is_some_and(|(p2, _)| p2 > 0.3) => 1.0,
             Some(o) => {
                 let v = THROW_EFFORT * fd.a.arm * su.speed_mult(su.hurry(since));
                 let d = (tgt - fd.pos).norm();
