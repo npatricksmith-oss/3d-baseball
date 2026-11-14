@@ -1,44 +1,46 @@
 # Task List
 
-**Last updated:** 2026-11-14 (the swing block below, from the second lead session; before that, hurried throws, A3; before that, handedness, A1; before that, the dive rate judged and fixed, A5, and rosters, A2, merged; before that, dives shown in the client, the get-up after a rimmed dive, two-out throws; before that, the overrun of first and runner position samples; before that, foul measures, sources and the correction experiment; pushed; the spray experiment parked for later; before that, the read knows the ball started at the plate; before that, called-off infielders back up the catch; before that, pop-up calls on `fix/popup-calls`; before that, owner's observations merged into the "Owner backlog" section; before that, the coordinator run on `coord/review-fixes`)
+**Last updated:** 2026-11-14 (the swing and collision block below and the fielder-communication line, at the pause of the second lead session; before that, hurried throws, A3; before that, handedness, A1; before that, the dive rate judged and fixed, A5, and rosters, A2, merged; before that, dives shown in the client, the get-up after a rimmed dive, two-out throws; before that, the overrun of first and runner position samples; before that, foul measures, sources and the correction experiment; pushed; the spray experiment parked for later; before that, the read knows the ball started at the plate; before that, called-off infielders back up the catch; before that, pop-up calls on `fix/popup-calls`; before that, owner's observations merged into the "Owner backlog" section; before that, the coordinator run on `coord/review-fixes`)
 The live to-do list for the project. [PLAN.md](PLAN.md) holds decisions and design. This file holds what is next and what is done. Update it at the end of every work session.
 
 Status: `[ ]` not started · `[~]` in progress · `[x]` done · `[?]` needs an owner decision
 
 ---
 
-## Swing work (lead "Fable Swing", 2026-11-14 midday; its own block, separate from the fielding handoff below)
+## Swing and collision work (lead "Fable Swing", 2026-11-14, paused late afternoon; its own block, separate from the fielding handoff below)
 
-**Not on main.** Everything is on `work/swing-recalib` (`f46ea5a`; `work/swing-model` points at the same commit), which contains main `dae1b7a`. `cargo test --workspace --release`: 335 pass, 3 ignored. Merging the v2 swing into main waits for the owner's word (PLAN §1 D19).
+**Not on main. Do not merge it without the owner's word** (PLAN §1 D19, D20). Everything is on **`work/collision`** (`be66dab`, pushed), which contains `work/swing-recalib` (`f46ea5a`: swing v2, per-player bat speed, main `dae1b7a`) and `work/collision-targets`. 338 tests pass (worker's run).
 
-**Owner's ruling on the swing note's proposals (D19):** A, v2 is the swing, off main until recalibrated; B, per-player bat speed, yes; C, re-check the vertical aim, yes; D, collision efficiency, not now.
+**Unresolved, first:**
+- **No Codex review yet of the spin change** (`f710d9f..be66dab` on `work/collision`). Standard protocol; run it before anything else is built on it.
+- **The refit is not done.** Plan in [the collision note §8.3 on the branch](docs/calibration/2026-11-14-collision-sloped-barrel.md): split the swing-noise knob so the miss can widen without lengthening the exit-speed tail (a code change, spec first), then perception 2.7 → about 2.9–3.0. Two sweep rounds adopted nothing: swing noise 1.8 reaches runs and K but gives a 128 mph ball.
 
-**Where the numbers stand** (standard run, seeds 0–299 [1000–1299]; main `dae1b7a` → branch; [ledger](docs/metrics-ledger.md) rows on the branch):
+**Owner's rulings this session:**
+- D19: v2 is the swing, off main until recalibrated; per-player bat speed yes; vertical aim re-checked (left at −2.0 cm); collision efficiency not now.
+- D20: the collision was reopened as sourced physics, and **Option A** was chosen for the spin: tangential restitution 0.405 up to 34 m/s normal impact speed, linear to 0 at 65 m/s (physics-spec §8.2.1). It matches the lab (KNS tee, 184 rpm/° against 179) and Statcast (backspin 2,465 rpm at 25–30° against about 2,300).
+- **Driveline OpenBiomechanics data: not to be used** (licence excludes commercial use). Removed from the branch history; nothing in the repository derives from it.
+- The direction gap stays a recorded, unexplained gap; nothing is changed for it.
 
-| | main | branch | real |
-|---|---|---|---|
-| Runs / team-game | 5.86 [6.18] | 4.82 [4.50] | 4.39 |
-| HR / PA | 5.13% [5.30%] | 1.04% [0.98%] | 3.0% |
-| K% | 15.8 [16.0] | 15.6 [15.8] | 22.6 |
-| Ground-ball hits | .327 [.329] | .368 [.353] | .245 |
+**Where the numbers stand** (standard run, seeds 0–299 [1000–1299]; ledger rows on the branch):
 
-Runs are near real for the wrong reasons: a third of the home runs, too many hits on balls in play.
+| | main `dae1b7a` | v2 before the spin change | `work/collision` | real |
+|---|---|---|---|---|
+| Runs / team-game | 5.86 [6.18] | 4.82 [4.50] | 5.76 [5.78] | 4.39 |
+| HR / PA | 5.13% [5.30%] | 1.04% [0.98%] | 2.36% [2.24%] | 3.0% |
+| K% | 15.8 [16.0] | 15.6 [15.8] | 16.8 [16.7] | 22.6 |
+| Fouls / game | | 17.8 [17.5] | 21.1 [21.4] | |
 
-**Done on the branch** (notes are on the branch, under `docs/calibration/`):
-- Main merged in twice; the fielding files differ from main only by the swing's refit spray-belief constants.
-- **B: each batter has his own bat speed** (`bb_game::population`, RNG purpose `RosterAbilities` = 15, spread 1.25 m/s = Statcast's 2.8 mph). Home runs 0.57% → 1.0% of PA. `2026-11-14-swing-recalibration.md`.
-- **C: the vertical aim was swept and left at −2.0 cm** (mean launch 11.8° against 12.2°, inside its band). The aim moves launch angle, not home runs: they are limited by exit speed.
-- **The bat's angle at contact (λ_c) was swept and left at 0**: about 0.2° of spray per degree, and it moves the measured path, not the ball. `2026-11-14-bat-angle-at-contact.md`.
-- Statcast-anchored tests of v2 (`bb_agents/tests/swing_statcast.rs`), the v2 literals named, the note's figures checked and corrected (`2026-11-14-swing-note-check.md` is on `work/swing-chores`, not merged).
-- **[Codex Sol review](docs/reviews/2026-11-14-codex-swing-v2-recalib-review.md): resolved** (on the branch). No P1; the P2 (carry loss wrongly put down to backspin) and three P3s are fixed. It reproduced the kinematics against the oracle and its own probes, the digests, and the seed-0 standard run.
+The runs surplus is mostly hits on balls in play (GB .34, LD .76, FB .22 against .245, .68, .13), which is the fielding's.
 
-**Waiting for the owner:**
-- **Whether to merge v2 into main as it stands** (truer swing, home runs a third of real).
-- **Whether to open the collision question** (it reopens D). The swing's abilities are exhausted as a way to recover home runs and spray. Both remaining gaps point to one thing (recalibration report §3.1): off a barrel sloped 28° down and met under the ball's center, the collision sends the ball too far toward the tip side with too much sidespin (3,720 rpm at a 27° launch against about 2,000–2,500 in Nathan's Statcast figures; fly balls −19.8° against MLB's −2.8°). The report lists the numbers a sourced collision change would have to meet. Tier A physics: specs and the oracle first.
+**The direction gap (known, unexplained; physics-spec §17 item 8, ledger §5):**
+- Sim: spray minus attack direction sits about 12° toward the opposite field at all launch angles, with a slope against launch angle about twice the real one. The spin setting does not move it; the collision's parameters do not; a sweep of the bat's angle at contact could, but only with hands far faster than published.
+- Real (Savant, [collision-targets note](docs/calibration/2026-11-14-collision-targets.md) on the branch): with the barrel travelling within 3° of straight up the middle, the ball leaves to the pull side by about 22° at launch 0–10°, 9° at 10–25°, and −1.5° at 25–35°. So the offset is in square contact itself and depends on launch angle. Not yet compared with the sim band by band.
 
-**Open, not the swing's:** the batters are 17 ms early on outside pitches and 2 ms inside (perception); launch angles are too bunched (SD 25.1° against 29.1°); K% and the foul share did not move. On a mix of swings v2's attack-angle slope against direction is 0.53 and v1's 0.36 (Statcast 0.41): a v2 shortfall, recorded in the report.
+**Waiting for the owner:** whether to merge v2 with the spin change into main, after the review and the refit.
 
-**Housekeeping:** worktrees `swing`, `swing-tests`, `swing-lambda`, `swing-chores`, `swing-tasks` and their `work/swing-*` branches are left in place. Workers ran in the Herdr desktop app (`herdr-app`, `hc`), not the terminal server.
+**Open, not the swing's:** batters are 17 ms early on outside pitches and 2 ms inside (perception); v2's attack-angle slope against direction is 0.53 (Statcast 0.41).
+
+**Housekeeping:** worktrees `swing` (on `work/collision`), `swing-tests` (`work/collision-targets`, merged into `work/collision`), `swing-lambda`, `swing-chores` (`work/swing-chores`, Haiku's note check, not merged), `swing-tasks`, `live-comm` are left in place. Workers ran in the Herdr desktop app (`herdr-app`, `hc`); the worker tabs are closed.
 
 ## Resume here (2026-11-14, overnight lead session, 00:00 to 06:00)
 
@@ -48,7 +50,8 @@ Main is pushed and passes `cargo test --workspace --release`: 305 pass, 3 ignore
 - **Owner: no more Gemini `agy` agents.** Claude and Codex workers only.
 - **Merged this morning: the infield alignment review fixes** (`work/infield-fixes-2`). The Gemini analyst's fixes were reviewed by Opus 5.5 high ([review](docs/reviews/2026-11-14-opus-infield-fixes-review.md), resolved): it found first base left uncovered (P1, fixed: the first baseman leaves first only when it stays covered, and a chaser who sees a teammate secure the ball goes to his base) and a double play lost to an eased throw (fixed: a force feed with a second force behind it goes at full effort). Deferred from it: **P2-3**, the cover-second guard reads a teammate's choice in the same tick, to be fixed with the Codex live-play P1 below; P3-4 (relay man by pre-pitch spot) left as built. Not traced: infield hits with no throw rose 257 → 338 over 300 games, probably holders at 45–47.4 m who no longer make a return throw.
 - **Held by the owner: the pitcher change** (`work/pitcher-fielding`; [note on that branch](docs/calibration/2026-11-14-pitcher-fielding.md)). The pitcher starts from his follow-through and waits 0.55 s to recover; he then fields 8% of infield grounders, as in MLB, in place of 20%. Combined with the first version of the infield fixes it measured runs 6.83 [6.99] and ground-ball hits .396 [.405]. It stays off main until the middle infield is recalibrated. It has had no review. `work/integrate-agy-calib` (`5686ece`) is that combination with the superseded infield fixes: use it for reference only and re-merge the pitcher branch onto main when the time comes (one test there is ignored: `middle_infielder_past_45m_breaks_for_infield_grounder` needs the pitcher as primary, which his recovery rules out).
-- **Next in the fielding code:** the [Codex live-play review](docs/reviews/2026-11-14-codex-live-play-review.md), Resolution open, nothing fixed (below). Its P1 (fielders read teammates' private targets and same-tick choices; no communication delay) now also carries the Opus review's P2-3 and the new `Cover(1)` check.
+- **Fielder communication (live-play review P1-1): built on `work/live-comm` (`c0976f3`, pushed), NOT merged.** A teammate's chase and call are known 0.3 s late. Its [Codex review](docs/reviews/2026-11-14-codex-fielder-communication-review.md) (on the branch, Resolution open) found **P1: coverage and backup assignment still read unpublished choices**; P2: a stale read after a same-tick deflection; P2: two corner outfielders both keep going on a ball between them; P2: the ledger's attribution of the run increase (5.86 → 6.08 [6.18 → 6.25]) is not established; P3: repeated intercept scans (games 28% slower). Fix these before merging; the branch's own TASKS line and ledger row come with it.
+- **Next in the fielding code:** the fixes above, then the rest of the [Codex live-play review](docs/reviews/2026-11-14-codex-live-play-review.md) (P2s and P3s open).
 - **A second lead session ("Fable Swing") may be running in the desktop app** on swing v2 (`work/swing-model`), with Opus, Sonnet and Haiku workers; its brief is `~/.claude/projects/-home-natex-Projects-3D-Baseball/prompts/swing-lead.md`. It stays out of `live.rs`; it does not merge swing v2 into main without the owner.
 - **No review yet:** A16 (home runs on screen), the box-score screen and `bb_game_box_score`, the side-change camera cut, speed for accuracy on throws. The Gemini recheck of the scorer fixes was never done: give it to Codex. The speed keys, the side-change cut and the box-score screen have not been watched by a person.
 - **Left in place:** worktrees under `.claude/worktrees/` (all clean) and their `work/*` branches, all merged except `work/swing-model`, `work/pitcher-fielding`, `work/integrate-agy-calib` and the Gemini review branches (`work/review-*`, whose review files are already on main).
