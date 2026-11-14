@@ -18,3 +18,4 @@ for 2025-04-22, 2025-05-20, 2025-06-17, 2025-07-22, 2025-08-19 and 2025-09-16, t
 
 Attack direction's CSV sign is taken as negative = pulled (inside pitches and out-front contact are negative).
 - `savant_collision_targets.py`: spray of balls in play by launch-angle band, batter side, horizontal location and height third (cells with n, mean, SD), spray against launch angle, spray minus attack direction by band; run on twelve dates (R13's) for `docs/calibration/2026-11-14-collision-targets.md`. Fetch all twelve dates: 2025-04-08, 04-22, 05-06, 05-20, 06-03, 06-17, 07-01, 07-22, 08-05, 08-19, 09-02, 09-16.
+- `savant_slope_by_tilt.py`: slope of spray − attack direction on launch angle (0–50°) by terciles of the swing's tilt, the batter's mean tilt and the swing's attack angle, with standard errors.

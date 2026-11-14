@@ -202,3 +202,58 @@ So attack angle and direction are the velocity direction of the sweet spot **in 
 ## 5. Reproduction and files
 
 `analysis/statcast/savant_collision_targets.py` (standard library; `python3 -I`), documented in `analysis/statcast/README.md`. The CSVs are not committed. The tables of §2 are the script's output, unedited except for heading levels.
+
+## 6. Does the real spray slope steepen with the swing's slope? (job 4, part 1)
+
+A sloped-barrel mechanism (Opus's stage-1 note, `work/collision`: `docs/calibration/2026-11-14-collision-sloped-barrel.md` §3–§4) predicts that a steeper bat pushes lofted balls further toward the opposite field: in the sim the on-time landing slope of spray − AD on launch angle is −1.35 on low pitches (steepest bat, tilt about 35°), −1.17 in the middle and −1.01 on high pitches (tilt about 29°), so about **−0.34 over 6.6° of tilt, −0.05 per degree** (all on-time cage contact; vertical bat angle −35° to −30°).
+
+`analysis/statcast/savant_slope_by_tilt.py` (reproduce: `python3 -I analysis/statcast/savant_slope_by_tilt.py sim/target/data/savant`, the §1 CSVs): the twelve-date balls in play with hit coordinates, launch angle 0–50°, attack direction, `swing_path_tilt` and `attack_angle` (**5,182**), spray − AD as in §2 (pull-positive), the least-squares slope on launch angle with its standard error, and the band means with standard errors. Terciles are of balls, so each has about 1,727. Over these balls the slope is **−0.60 ± 0.02** per degree, steeper than the −0.37 of §2, which includes the 50°+ popups and balls below 0° that bend it; over 0–50° the real slope is −0.6, against the sim's −1.2.
+
+Balls in play, launch angle 0-50, with spray, attack direction, tilt and attack angle: 5182
+All: slope of (spray - AD) on launch angle -0.598 (SE 0.022)
+
+#### Terciles of the swing's own swing_path_tilt (deg)
+
+Cut points: 29.2 and 34.9. n = 5182 balls in play.
+
+| tercile | range | n | slope (deg per deg) | SE | 0-10: mean (n, SE) | 10-25: mean (n, SE) | 25-35: mean (n, SE) | 35-50: mean (n, SE) |
+|---|---|---|---|---|---|---|---|---|
+| low | 3.9 to 29.2 | 1727 | -0.532 | 0.033 | +13.2 (379, 1.0) | +5.8 (602, 0.7) | +0.6 (393, 0.8) | -7.0 (353, 1.2) |
+| middle | 29.2 to 34.9 | 1727 | -0.604 | 0.034 | +13.8 (397, 0.9) | +7.0 (599, 0.7) | -0.7 (410, 1.0) | -8.4 (321, 1.2) |
+| high | 34.9 to 82.9 | 1728 | -0.667 | 0.047 | +14.8 (433, 1.3) | +5.8 (679, 1.0) | -1.9 (354, 1.0) | -9.8 (262, 1.6) |
+
+High minus low tercile slope: -0.135 deg per deg (SE 0.057, -2.4 sigma); per unit of the splitting variable: -0.0091 (range of tercile means 14.8)
+
+Batters with at least 30 tracked swings in the sample: 329 (their balls in play in the sample: 4539 of 5182)
+
+#### Terciles of the batter's mean swing_path_tilt over all his tracked swings (deg)
+
+Cut points: 30.7 and 33.9. n = 4539 balls in play.
+
+| tercile | range | n | slope (deg per deg) | SE | 0-10: mean (n, SE) | 10-25: mean (n, SE) | 25-35: mean (n, SE) | 35-50: mean (n, SE) |
+|---|---|---|---|---|---|---|---|---|
+| low | 18.8 to 30.7 | 1507 | -0.491 | 0.039 | +13.0 (360, 1.1) | +5.6 (552, 0.7) | -0.1 (318, 0.9) | -4.8 (277, 1.7) |
+| middle | 30.7 to 33.9 | 1516 | -0.605 | 0.041 | +12.9 (330, 1.0) | +5.9 (553, 1.0) | -0.0 (330, 1.0) | -10.3 (303, 1.2) |
+| high | 33.9 to 43.2 | 1516 | -0.673 | 0.043 | +15.7 (367, 1.4) | +7.7 (545, 0.8) | -1.0 (354, 1.1) | -9.4 (250, 1.3) |
+
+High minus low tercile slope: -0.183 deg per deg (SE 0.058, -3.1 sigma); per unit of the splitting variable: -0.0213 (range of tercile means 8.6)
+
+#### Terciles of the swing's attack angle (deg)
+
+Cut points: 5.7 and 12.6. n = 5182 balls in play.
+
+| tercile | range | n | slope (deg per deg) | SE | 0-10: mean (n, SE) | 10-25: mean (n, SE) | 25-35: mean (n, SE) | 35-50: mean (n, SE) |
+|---|---|---|---|---|---|---|---|---|
+| low | -77.7 to 5.7 | 1727 | -0.672 | 0.041 | +3.5 (471, 0.9) | -6.4 (687, 0.9) | -13.5 (328, 1.0) | -20.9 (241, 1.8) |
+| middle | 5.7 to 12.6 | 1727 | -0.907 | 0.027 | +19.7 (370, 0.7) | +9.4 (632, 0.6) | -2.2 (424, 0.7) | -13.0 (301, 1.0) |
+| high | 12.6 to 55.5 | 1728 | -0.507 | 0.033 | +21.6 (368, 1.3) | +17.8 (561, 0.7) | +11.4 (405, 0.7) | +3.1 (394, 0.9) |
+
+High minus low tercile slope: +0.166 deg per deg (SE 0.053, 3.1 sigma); per unit of the splitting variable: +0.0095 (range of tercile means 17.5)
+
+**Reading.**
+- **By the swing's own tilt: the slope steepens, modestly.** −0.53 ± 0.03 (tilt below 29.2°) → −0.60 ± 0.03 → −0.67 ± 0.05 (above 34.9°): high minus low −0.135 ± 0.057, 2.4σ, about −0.009 per degree of tercile-mean tilt (14.8° apart). The 40 ms tilt of one swing is a noisy measure of the bat's slope at contact, which pulls this toward zero.
+- **By the batter's mean tilt (329 batters with 30+ tracked swings, 4,539 of the balls): clearer.** −0.49 ± 0.04 → −0.61 ± 0.04 → −0.67 ± 0.04: high minus low **−0.183 ± 0.058, 3.1σ**, about **−0.021 per degree** (tercile means 8.6° apart). Batters who swing steeper loft balls further toward the opposite field per degree of launch angle. Averaging the tilt over a batter's swings removes most of the swing-to-swing noise, but also confounds tilt with whatever else differs between steep and flat swingers (handedness, contact depth, pitch mix).
+- **Against the sim:** the sim's −0.05 per degree (−0.34 over 6.6° of tilt, 29% of its −1.17 slope) is 2.5 to 5 times the real −0.009 to −0.021 per degree (the real −0.135 to −0.18 over 8.6–14.8° is 25–37% of the real −0.5 to −0.6). **In relative terms the batter-level real change per degree (about 4.3% of the slope per degree) matches the sim's (4.4%), the swing-level one (1.7% per degree) is smaller; in absolute terms the sim's slope is twice the real one at every tilt.** So the real data do show the direction a sloped barrel predicts, with a size that depends on how the tilt is measured; they do not show the height-independence the stage-1 note read from the pitch-height thirds (§2: −0.30, −0.35, −0.35 there, with all balls and a different slope definition; spray against launch rather than spray − AD against launch, so the two are not directly comparable and the stage-1 note's "no steeper for low pitches" is a statement about the pitch-height thirds, not about swings with steeper tilt).
+- **By attack angle: not monotone and confounded.** The slopes are −0.67 ± 0.04 (attack angle below 5.7°), −0.91 ± 0.03 (5.7–12.6°), −0.51 ± 0.03 (above 12.6°); the band means move by 20–35° between terciles at the same launch angle (low attack-angle swings pull the ball far less at the same launch angle: +3.5° against +21.6° at 0–10°). Attack angle is nearly what makes the launch angle (a high-AA swing lofts a ball with little undercut), so conditioning on it changes who is in each launch-angle band; the terciles are not comparable swings. I would not read a slope trend from this split.
+
+**Caveats.** Standard errors are the OLS standard errors on balls treated as independent (several balls per batter in the batter-level split, so the real error is larger there). Tilt, attack angle, spray and AD are all noisy single-swing measures; the slope of one noisy variable on another also attenuates. A twelve-date sample has few swings above 45° tilt. This does not separate the mechanism (a sloped barrel) from any other that makes steep swingers' balls go opposite (for instance a steeper swing meeting the ball later in its arc).
