@@ -291,7 +291,7 @@ When a batter is awarded first (walk, IBB, HBP, catcher's interference, §5.7 ca
 | Balk (M5) | One base, all runners | — |
 | Catcher's interference (M5) | Batter first; others only if forced or stealing | — |
 
-Awarded runners are placed with `RunnerAdvanced{cause: Award}`. Runs forced in by an award score immediately.
+Awarded runners are placed with `RunnerAdvanced{cause: Award}`. Runs forced in by an award score immediately. On a walk-off (§4.1) the awarding stops at the winning run: runners behind it and the batter are given nothing more, as on any walk-off; a home run is the exception (all score). (Fixed 2026-11-14, Gemini play-area review P1-2: trailing runners were sent home without scoring.)
 
 **Thrown ball out of play, in detail** (added 2026-11-14, A10):
 - **A thrown ball** is one released by a `BallReleasedFromGlove{Throw}` and not secured by a fielder since (`GloveSecured`). A throw that bounces, caroms off a wall, or rolls before leaving the field is still the throw.
@@ -544,7 +544,7 @@ scorer = { batter = "FieldersChoice" }   # optional; requires ScorerEvidence ste
 ```
 
 Rules of the format:
-- `expect_events` on a step checks the events emitted **by that step**, as an ordered subsequence. `[expect]` checks the final state.
+- `expect_events` on a step checks the events emitted **by that step**, as an ordered subsequence. `expect_no_events` lists events that step must not emit (any field match fails). `[expect]` checks the final state.
 - Commands are steps too: `command = "PitchingChange"`, with fields, and `expect_reject = "ThreeBatterMinimum"` or `expect_accept = true`.
 - `ScorerEvidence` can be supplied as a step (`fact = "ScorerEvidence"`, reference-play margins) for scorer scenarios.
 - Agent names are `team.slot` (`A.6`) or `team.position` (`H.SS`), resolved through the fixture.

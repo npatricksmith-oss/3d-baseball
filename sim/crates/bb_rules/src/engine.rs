@@ -754,6 +754,11 @@ fn ground_rule_double(st: &mut RulesState, ev: &mut Vec<Event>) {
     order.sort_by_key(|r| core::cmp::Reverse(r.start_base));
     st.bases = [None; 3];
     for r in order {
+        // A walk-off: the game ended with the winning run; nobody behind him is awarded
+        // anything more (rules-spec §4.1; the batter's credit is the scorer's, OBR 9.06(f)).
+        if st.walk_off {
+            break;
+        }
         let to = (r.start_base + 2).min(4);
         ev.push(Event::RunnerAdvanced { runner: r.runner, from: r.start_base, to, cause: AdvanceCause::Award });
         if to == 4 {
@@ -791,6 +796,10 @@ fn throw_out_of_play(st: &mut RulesState, ev: &mut Vec<Event>) {
     st.bases = [None; 3];
     let mut ahead: Option<Base> = None;
     for (r, from) in order {
+        // A walk-off ends the game at the winning run (rules-spec §4.1), as above.
+        if st.walk_off {
+            break;
+        }
         let mut to = (from + 2).min(4);
         if let Some(a) = ahead
             && a < 4

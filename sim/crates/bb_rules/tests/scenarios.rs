@@ -258,7 +258,7 @@ fn run_scenario(path: &Path) -> Result<(), String> {
     for (i, stv) in doc.get("step").and_then(|v| v.as_array()).unwrap_or(&empty).iter().enumerate() {
         check_keys(
             stv,
-            &["fact", "t", "in_zone", "bounced", "swung", "what", "pos", "in_flight", "fair", "fielder", "agent", "base", "holding_ball", "runner", "kind", "infielder", "expect_events"],
+            &["fact", "t", "in_zone", "bounced", "swung", "what", "pos", "in_flight", "fair", "fielder", "agent", "base", "holding_ball", "runner", "kind", "infielder", "expect_events", "expect_no_events"],
             &format!("step {i}"),
         );
         let evs = match parse_input(stv) {
@@ -286,6 +286,16 @@ fn run_scenario(path: &Path) -> Result<(), String> {
                 };
                 if !ok {
                     return Err(format!("step {i}: expected {e} in {evs:?}"));
+                }
+            }
+        }
+        // `expect_no_events`: no event of the step matches any of these.
+        if let Some(none) = stv.get("expect_no_events").and_then(|v| v.as_array()) {
+            let rendered: Vec<_> = evs.iter().map(render).collect();
+            for e in none {
+                let want: Vec<(String, String)> = e.as_table().unwrap().iter().map(|(k, v)| (k.clone(), val_str(v))).collect();
+                if rendered.iter().any(|r| want.iter().all(|(k, v)| r.get(k.as_str()) == Some(v))) {
+                    return Err(format!("step {i}: unexpected {e} in {evs:?}"));
                 }
             }
         }
