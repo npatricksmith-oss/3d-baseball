@@ -101,4 +101,39 @@ No tracked source, test, spec, ledger or TASKS file was edited. No commit was ma
 
 ## Resolution
 
-Open.
+**All four findings fixed** in `faf2737` (worker Claude Opus 5.5 for lead "Fable Lead", 2026-11-14); docs, ledger and this Resolution in the commit after it. Every new test below failed on `e02ade8` (or under the old rule, by a scratch mutation) and passes now.
+
+- **P1-1 (private jobs through the holder's route and two scheduling gates): fixed.**
+  - `throw_race` (`live/holder.rs`) finds the cutoff man the holder knows of (`seen(by, i)`), not the actual one. Test `the_holders_route_does_not_read_an_unheard_cutoff`, the review's probe: `(None, false, ∞)` against `(Some(2B), true, 5.639)` before, equal now.
+  - `update_relay` no longer starts from the first actual cutoff man found. Each tick the cutoff job is worked out once (`relay_job`, public inputs plus its own man's chase and read); its man takes it, a man who has it and is not its man any more retires, a throw going past him retires him. Test `the_cutoff_job_does_not_read_an_unheard_cutoff`: 1B `Relay(4)` against `Cover(1)` before, equal now. On a held ball the replacement is now assigned in the same tick.
+  - `expire_peels` no longer re-calls the men near the ball when someone's private backup of the catch ends. The man whose backup ended reads the ball and takes his own job (`retake`: his own decision, else his own cover or backup table). Test `a_peel_ending_does_not_move_teammates`.
+  - **Audit of scheduling gates as well as table inputs** (every `.role`, `.peel`, `.backs` read of another man in `live.rs` and `live/holder.rs`): the remaining reads are the man's own (`relay_job`'s man, `fielder_step`, `try_captures`' chaser and peel checks, `apply`, `retake`), the sim's own bookkeeping of who acts this tick on his own job (`recall` adding every actual chaser to refresh *his own* read, as the first review accepted; each chaser's replan on his own clock; the close re-read), or world events every fielder sees (a throw released, the ball secured). The once-a-second `recall` is scheduled from the known lead's distance to the ball, public. The coverage trace below is read-only.
+- **P1-2 (the no-chaser cycle and open bases): fixed.**
+  - The nobody-known path that sent every man with a recent read is gone. Once every man is known not to be going for the ball, one man goes by an order every fielder computes alike from what all can see (`fallback_chaser`, `public_rank`: the soonest to the ball's ground track from where he is and how he moves, at his known speed after his known reaction; a dead heat to the lower index). A man known to be covering first is never chosen.
+  - A chaser no longer drops his chase because more men became known to be going. He stops only for a known chaser who beats him by his own estimate **and** is ahead in the shared order, so the man first in that order is never stopped by the others. (A first version used the shared order alone; `throw_choices` 13-140 then lost its play, the right fielder ranking ahead of the second baseman, who stopped, and the chopper rolled through. The order ignores when the ball arrives, so it is only a tie rule.)
+  - First base: the first baseman whom the ground-ball rule leaves out stays with his bag (no fall-through to the general rule), and a chasing first baseman goes back to it when the pitcher is known to be going and ahead of him in the order.
+  - Coverage: a man's own stop is now instant in his own table (`48bcb9d` kept him out until his stop was known, which on fly balls several infielders start for left first and second with nobody assigned for 0.6 s); the second baseman is dealt first after second.
+  - Tests: `a_ball_everyone_left_goes_to_one_man_and_first_stays_covered` (3 s of hearings: one man, the same throughout, and first covered every tick; under the old rules all nine went) and `two_chasers_who_each_think_the_other_is_first_do_not_both_stop` (one of them always going, no restart; both stopped under the old chaser rule). The peel test became `a_called_off_infielder_covers_his_base_or_backs_up_the_catch` (the called-off first baseman takes first; the backup of the catch is tested on a second baseman with no base to take).
+  - **Measured as the review did**, seeds 0–49, contiguous loose-ball intervals with no assigned cover after the first assignment (`BB_COVER_TRACE=1 examples/coverage_trace 50`, `python3 analysis/coverage_gaps.py`; the script reproduces this review's numbers from its own traces of main and `e02ade8`):
+
+    | Seeds 0–49, loose ball | Main `5ba6750` | `e02ade8` (recheck) | `faf2737` |
+    |---|---:|---:|---:|
+    | First uncovered > 0.3 s (longest) | 0 | 152 (4.80 s) | 0 (0.30 s) |
+    | Second uncovered > 0.3 s (longest) | 7 (1.90 s) | 220 (4.80 s) | 26 (2.13 s) |
+    | Third uncovered > 0.3 s (longest) | 43 (2.67 s) | 171 (4.80 s) | 33 (3.15 s) |
+    | First uncovered on grounders > 0.3 s | 0 | 34 | 0 |
+    | Two covering one base > 0.3 s | 0 | 0 | 0 |
+    | No known lead > 0.3 s (longest) | 0 | 67 (0.60 s) | 65 (0.60 s) |
+    | Nobody going for the ball > 0.3 s | 0 | 0 | 0 |
+    | Plays with all nine starting a chase twice or more | 0 | 26 | 0 |
+    | Live plays | 3,706 | 3,736 | 3,710 |
+
+    First base never goes without an assigned cover for more than 0.3 s, as on main. Second goes so more often than on main and third less; half of the second-base cases are both middle infielders going for a fly neither is sure of (everyone who believes he can catch a ball in the air goes until someone is sure). No base had two covers for more than 0.3 s. Nobody was going for the ball for at most 0.3 s; no known lead for at most 0.6 s (the mutual deferral and its recovery). No play has all nine start a chase.
+  - The spec (§5.7) and the note (§2, §3, §5, §7) no longer claim "one goes"/"only those 32"/a 0.3 s coverage bound; they describe the convention and give the table.
+  - **The owner's approved "seen him break" rule and this fix do not depend on each other.** The recovery triggers on delayed knowledge that nobody is going and orders men by what all can see; an earlier knowledge of a chase would make the 0.6 s case rarer, but nothing here needs it, and nothing in it needs this fix's convention. When it is built, `fallback_chaser`'s "everyone known not to be going" should use the same earlier knowledge.
+- **P2-1 (cache key repeats within a tick): fixed.** The read key is a ball count (`Sim::ball_gen`, incremented by every `set_free`), not the time the ball came loose. Tests `a_second_new_ball_in_one_tick_is_read_again` (the review's simple probe: `(5.14, 78.42)` kept before) and `a_grounded_throw_rimmed_in_the_same_tick_is_read_again` (the production sequence: `update_thrown` then a rim in `try_captures`; `(5.02, 72.30)` kept before, now a plan for the ball off the rim).
+- **P3-1 (allocation in `scan_from`): done.** A fixed buffer of `SUB` points; all 50 game digests identical before and after. The broader teammate-scan cache stays deferred.
+
+**Re-measured** (standard run, zero-delay variant, 1,000 games): `faf2737` 6.21 [6.34], 1,000 games from seed 5: 6.30; the same revision with `CALL_HEARD_S` = 0 (nothing else changed): 5.93 [6.14], 1,000 games 6.14; main `5ba6750` 5.86 [6.18], 6.03. On 1,000 games the delay is worth about +0.16 and the rest of the change, against main, about +0.11. Against `e02ade8` (6.21 on 1,000 games) this fix added about +0.09; which of its parts did is not traced. The ledger row is rewritten; nothing was tuned.
+
+**Verification:** `cargo test --workspace --release` passes (153 `bb_game` library tests pass, 3 ignored; every other suite passes). Same-seed digests repeat (`examples/digest` twice: seeds 1, 2, 3, 42 identical; seed 42 `e17e0ad6fa6417bdbd8ca193cd9bcfea20da59f74bc8753c98ff10b332278d7a`).
