@@ -45,11 +45,14 @@ fn main() {
             let ot = p.rules_events.iter().any(|e| matches!(e, Event::RunnerOut { runner, .. } if *runner == id));
             let what = if sc { scored += 1; "scored" } else if ot { out += 1; "OUT" } else { held += 1; "held" };
             // The catch: the first glove securing; its depth from home.
+            // Like for like with the sources (tag-ups note §2): outfield catches only, binned
+            // by depth in feet at the note's boundaries.
             if let Some((t_catch, depth)) = p.facts.iter().find_map(|f| match *f {
-                Input::GloveSecured { t, x, y, .. } => Some((t, x.hypot(y))),
+                Input::GloveSecured { t, x, y, fielder } if (7..=9).contains(&(fielder & 0x7f)) => Some((t, x.hypot(y))),
                 _ => None,
             }) {
-                let bin = (depth / 15.0) as u32 * 15;
+                let ft = depth / 0.3048;
+                let bin = [0.0, 225.0, 250.0, 275.0, 300.0, 325.0, 350.0].iter().rposition(|&b| ft >= b).unwrap() as u32;
                 by_depth.entry(bin).or_default()[if sc { 0 } else if ot { 1 } else { 2 }] += 1;
                 let home = p.facts.iter().find_map(|f| match *f {
                     Input::BaseTouched { t, agent, base: 4, holding_ball: false } if agent == id => Some(t),
@@ -74,10 +77,15 @@ fn main() {
         }
     }
     println!("{n} games from {first}: fly outs {fly}; with runner on third and <2 out {with3}: scored {scored}, put out {out}, held {held}");
-    println!("by catch depth (m from home): scored / put out / held");
+    let names = ["<225", "225-250", "250-275", "275-300", "300-325", "325-350", "350+"];
+    let tot = by_depth.values().fold([0u32; 3], |a, c| [a[0] + c[0], a[1] + c[1], a[2] + c[2]]);
+    let n_of = (tot[0] + tot[1] + tot[2]).max(1) as f64;
+    println!("outfield catches by depth (ft): scored / put out / held   (sent%, safe% when sent)");
     for (bin, c) in &by_depth {
-        println!("  {bin:3}-{:3} m  {:3} {:3} {:3}", bin + 15, c[0], c[1], c[2]);
+        let sent = c[0] + c[1];
+        println!("  {:>8}  {:3} {:3} {:3}   ({:.0}%, {:.0}%)", names[*bin as usize], c[0], c[1], c[2], 100.0 * sent as f64 / (sent + c[2]).max(1) as f64, 100.0 * c[0] as f64 / sent.max(1) as f64);
     }
+    println!("outfield total {}: scored {:.1}%, put out {:.1}%, held {:.1}%; scored per team-game {:.3}", n_of, 100.0 * tot[0] as f64 / n_of, 100.0 * tot[1] as f64 / n_of, 100.0 * tot[2] as f64 / n_of, tot[0] as f64 / (2.0 * n as f64));
     println!("runner went: catch to home touch {:.2} s (n {}); catch to outfielder's release {:.2} s (n {}); release to the catcher's catch {:.2} s (n {}); catcher's catch to the runner's touch {:+.2} s (n {})",
         mean(&run_home), run_home.len(), mean(&of_release), of_release.len(), mean(&flight), flight.len(), mean(&catcher_to_home_touch), catcher_to_home_touch.len());
 }

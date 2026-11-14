@@ -3732,6 +3732,21 @@ mod tests {
         assert!(home_touch(&real).is_some_and(|t| t < 2.0 + 0.3));
     }
 
+    // Diagnostic (agent-models §6.4, tag-up sources note §3): the ball's side of a tag-up
+    // race by depth. `cargo test -p bb_game --release --lib tag_up_race_table -- --ignored --nocapture`
+    #[test]
+    #[ignore]
+    fn tag_up_race_table() {
+        let cf = crate::play::arm_strength_50_mps(8);
+        for ft in [200.0, 225.0, 250.0, 275.0, 280.0, 300.0, 325.0, 350.0] {
+            let d = ft * 0.3048;
+            let flight = throw_time(THROW_EFFORT * cf, d);
+            let belief = TYPICAL_TRANSFER + typical_throw_time(d);
+            let run = run_time(BASE_L, 8.2, RUNNER_TAU);
+            println!("{ft:4} ft {d:6.1} m  CF arm {cf:.2}: flight {flight:.2} s, +0.85 transfer {:.2} s | runner believes ball {belief:.2} s (37 m/s, relay if quicker); runner {run:.2} s", 0.85 + flight);
+        }
+    }
+
     // A runner caught off his base by the catch goes back, retouches once, and is then free:
     // given a clear chance he takes the next base and is not sent back again (review #1; the
     // day-fixes review #6 asked for the advance after the retouch). He left second before the
