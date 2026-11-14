@@ -106,4 +106,9 @@ Archived standard-run logs are `target/refit-review-old-std{0,1000}.txt`. The ef
 
 ## Resolution
 
-Open.
+All three findings fixed, records only; no sim code changed (2026-11-14, Opus 5.5 worker on `work/collision`). The numbers added below were re-read from `sim/out/refit/env300_{before,after}.txt` and calibration-targets, not copied from this review.
+
+- **P2-1, fixed.** Collision note §9.3 and ledger (§3 row, §5) keep the measured barrel fall (5.63 → 4.42% of balls in play, HR per barrel 47.8 → 47.0%) and now record the short upper exit-speed tail: EV ≥ 105 mph 6.3 → 5.5% and ≥ 110 mph 1.1 → 0.9% of fair balls, against 10.23% and 1.89% in the twelve-date Savant 2025 sample. The angle-and-direction attribution is labelled a hypothesis, with the original conclusion marked as corrected; the next step named is joint EV × LA bins and HR per bin against a matched real sample. Nothing was changed in physics or in the effort spread.
+- **P3-1, fixed.** The 7.5% is identified as calibration-targets' approximate [R] reference; the note and ledger give Savant 2024's league table, 9,716 barrels in 124,203 batted balls (7.8%), with its URL (as this review read it; not re-fetched), and keep the twelve-date 2025 sample's 8.9% as a separate sample.
+- **P3-2, fixed.** The note (§9.3) and ledger (§3 row, §5) now list O-Contact 47.4 → 42.8% (45–68) and swinging strikes 14.8 → 16.1% (8–15) as newly outside their bands; Contact% 69.9 → 65.9% (70–83) and Z-Contact 76.1 → 72.9% (79–91) as already outside and further away; pitches/PA 2.97 → 3.11 (3.5–4.3) as outside but closer; called strikes 17.1 → 19.0% of pitches. They say the B1 bands are the PA lab's, applied to the game diagnostic. (The first record had called Contact% "below its band"; at 69.9 it was already just outside before the refit.)
+- **Seed 5, play 201** (other results): the trace (the tie threshold at `live.rs:3042` between two near-certain outs) is recorded in this branch's TASKS block for the fielding side. `live.rs` is not this worker's file; nothing was changed there.

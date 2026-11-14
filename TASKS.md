@@ -9,7 +9,7 @@ Status: `[ ]` not started · `[~]` in progress · `[x]` done · `[?]` needs an o
 
 ## Swing and collision work (branch `work/collision`, 2026-11-14; not on main, the owner rules on the merge)
 
-**Reviews first:** the [Codex spin review](docs/reviews/2026-11-14-codex-collision-spin-review.md) is resolved (P2-1: A14 now runs the production `resolve_contact` against oracle contact states, including a sloped rotating bat mid-ramp, and a wrong 34–60 m/s ramp fails it; P3-1: the e_t 0 tee slope is 116 rpm/°, not 131). **No review yet of `08b167c..dfeb54a`** (the A14 extension, the knob split, the refit): it is next under the standard protocol.
+**Reviews first:** the [Codex spin review](docs/reviews/2026-11-14-codex-collision-spin-review.md) is resolved (P2-1: A14 now runs the production `resolve_contact` against oracle contact states, including a sloped rotating bat mid-ramp, and a wrong 34–60 m/s ramp fails it; P3-1: the e_t 0 tee slope is 116 rpm/°, not 131). The [Codex refit review](docs/reviews/2026-11-14-codex-swing-refit-review.md) of `7ace606..375e3f9` is resolved: no P1; three record fixes, docs only (the HR deficit's attribution is a hypothesis, the barrel reference, plate-discipline bands crossed).
 
 Where it stands (`dfeb54a`; [collision note](docs/calibration/2026-11-14-collision-sloped-barrel.md) §8–§9; ledger §3):
 - **Tangential restitution e_t(|c_n|)** (PLAN D20 Option A): built, tested (A10a–c, A14), cage spin anchors met.
@@ -17,10 +17,10 @@ Where it stands (`dfeb54a`; [collision note](docs/calibration/2026-11-14-collisi
 - **Adopted:** perception 2.7 → 2.9, miss 1.0 → 1.4. Standard run: runs 5.76 → 4.31 [5.78 → 4.68] (real 4.39), K% 16.8 → 21.5 [same] (22.6), BB% 7.9 [8.4] (8.2), HR/PA 2.36% → 1.78% [1.77%] (3.0), max EV 116.8 mph, p99 109.8, hard-hit 38.2%.
 
 Open:
-- **HR/PA 1.78% against 3.0%:** barrels 4.4% of BIP against 7.5% (per barrel 47%, steady). The old combined knob held HR up only through a wider effort that is not Statcast's. Candidates: the launch-angle spread (SD 29°) and the direction gap (known, unexplained, PLAN D20). Not chased with bat speed (sourced).
-- **Contact% 65.9% below its band (70–83)**; chase 24.5% against 29%.
+- **HR/PA 1.78% against 3.0%:** barrels 4.4% of BIP against Savant 2024's 7.8% (per barrel 47%, steady). The old combined knob held HR up only through a wider effort that is not Statcast's. Not separated: the short upper exit-speed tail (≥ 105 mph 5.5% of fair balls against 10.2% in the Savant 2025 sample), the launch-angle spread (SD 29°) and the direction gap (known, PLAN D20). Next: joint EV × LA bins and HR per bin against a matched real sample. Not chased with bat speed (sourced).
+- **Plate discipline:** newly outside, O-Contact 42.8% (45–68) and swinging strikes 16.1% (8–15); further below, Contact% 65.9% (70–83) and Z-Contact 72.9% (79–91); pitches/PA 3.11 (3.5–4.3); chase 24.5% against 29%.
 - **Runs sit at real only because K rose while ball-in-play hits are still high** (GB .322 against .245). When the fielding work lowers those, runs fall below 4.39: look at the batter's knobs again then, not before.
-- **Seed 5, play 201:** a first baseman about 1 m from the bag tosses to the pitcher on it instead of stepping on the bag (throw choice in `live.rs`; not traced). The `bb_ffi` timeline test now accepts a throw another fielder already holds.
+- **For the fielding side: seed 5, play 201.** The first baseman, one metre from the bag with the ball, throws to the pitcher on it instead of stepping on the bag. Traced by the Codex refit review: he first chooses to carry, then at 4.025 s switches to the throw, because the two near-certain outs (values 0.9999927 carry, 0.9999971 throw; arrival 4.127 s against 4.104 s) differ by more than the 1e-9 tie threshold at `live.rs:3042`, so the carry preference does not apply. The throw-choice model is sensitive to tiny differences between near-certain options. The `bb_ffi` timeline test now accepts a throw another fielder already holds; that is correct for short tosses, and does not fix the choice.
 - The direction gap (spray minus attack direction) stays a known gap; nothing changed for it.
 
 ## Resume here (2026-11-14, overnight lead session, 00:00 to 06:00)
