@@ -69,7 +69,7 @@ pub struct FielderAttrs {
 
 /// Grade-50 `ArmStrength` by position, mph: the league means of Statcast's arm-strength
 /// leaderboard (Baseball Savant, 2026 as displayed; docs/calibration/2026-11-14-sources.md),
-/// which is each player's mean over his max-effort throws (the top 10% of his throws), at the
+/// which is each player's mean over his max-effort throws (the top 1% at first base, 5% for other infielders, 10% for outfielders), at the
 /// release point. Indexed P0 C1 1B2 2B3 3B4 SS5 LF6 CF7 RF8. `None`: the leaderboard has no
 /// pitcher, and catchers are on a separate one, so those two keep [`ARM_UNSOURCED_MPS`]. The
 /// sim's value is a full-effort throw (agent-models §5.5), so the conversion is only the unit
