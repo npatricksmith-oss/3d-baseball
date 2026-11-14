@@ -1008,8 +1008,11 @@ mod tests {
                     if f.release_in_s > 0.0 && f.release_in_s < 0.1 && t + f.release_in_s + 0.3 < info.duration_s {
                         let mut g = BbFrame::default();
                         unsafe { bb_timeline_sample(p, len, t + f.release_in_s + 0.3, &mut g) };
+                        // Gone from him: well away, or already in a teammate's glove (a flip of
+                        // two or three metres to a man covering the bag).
+                        let caught_by_other = g.holder >= 0 && g.holder != f.holder;
                         g.holder = f.holder;
-                        assert!(near(&g) > 3.0, "play {} at {t:.2} s: the announced throw did not leave", info.play_index);
+                        assert!(caught_by_other || near(&g) > 3.0, "play {} at {t:.2} s: the announced throw did not leave", info.play_index);
                         thrown += 1;
                     }
                 } else {
