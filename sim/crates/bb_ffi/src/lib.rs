@@ -296,6 +296,16 @@ pub struct BbPlayInfo {
     /// [`bb_game_player`]).
     pub batter: u16,
     pub _pad: u16,
+    /// Play time at which the ball left the playing field and was dead (rules-spec §5.8), s,
+    /// or −1 if it never left: the moment a client can cut back to the field.
+    pub dead_s: f32,
+    /// Where it left: the ground point under the ball as it crossed the wall or fence (sim
+    /// frame, m; zeros if it never left).
+    pub dead_at: [f32; 3],
+    /// Why: 0 it never left; 1 out of play (a foul ball or a throw); 2 home run; 3 ground-rule
+    /// double (the event log's `DeadBallReason`).
+    pub dead_reason: u8,
+    pub _pad2: [u8; 3],
 }
 
 /// One out as the umpire signals it (rules-spec §1.3).
@@ -384,6 +394,12 @@ pub unsafe extern "C" fn bb_timeline_info(blob: *const u8, len: usize, out: *mut
         let n = calls.len().min(BB_MAX_CALLS);
         info.calls[..n].copy_from_slice(&calls[..n]);
         info.n_calls = n as u32;
+    }
+    info.dead_s = -1.0;
+    if let Some(m) = tl.markers().and_then(|m| m.iter().find(|m| m.kind() == MarkerKind::BallDead)) {
+        info.dead_s = m.t();
+        info.dead_at = m.p().map(v3).unwrap_or_default();
+        info.dead_reason = m.base();
     }
     unsafe { *out = info };
     1
@@ -508,6 +524,7 @@ mod tests {
     fn plays_a_game_through_the_abi() {
         let g = bb_game_create(3);
         let mut n = 0;
+        let mut dead = [0u32; 4];
         loop {
             let (mut p, mut len) = (std::ptr::null_mut(), 0usize);
             let r = unsafe { bb_game_advance(g, &mut p, &mut len) };
@@ -519,6 +536,19 @@ mod tests {
             let tl = flatbuffers::root::<bb_schema::tl::PlayTimeline>(bytes).expect("valid timeline");
             assert!(flatbuffers::buffer_has_identifier(bytes, "BBTL", false));
             assert!(tl.ball().unwrap().segments().unwrap().len() >= 1);
+            // A ball that left the field: when and where it did, against the timeline's own
+            // ball track (it ends there, within a sample), and why.
+            let mut info = BbPlayInfo::default();
+            assert_eq!(unsafe { bb_timeline_info(p, len, &mut info) }, 1);
+            if info.dead_s >= 0.0 {
+                dead[info.dead_reason as usize] += 1;
+                assert!((1..=3).contains(&info.dead_reason) && info.dead_s <= info.duration_s + 1e-4, "{}", info.dead_s);
+                let last = tl.ball().unwrap().segments().unwrap().iter().filter_map(|s| s.knots()).flat_map(|k| k.iter()).map(|k| k.t()).fold(0.0f32, f32::max);
+                assert!(last >= info.dead_s - 0.05, "the track ends at {last} before the ball was dead at {}", info.dead_s);
+                assert!(info.dead_at[2] == 0.0 && (info.dead_at[0] != 0.0 || info.dead_at[1] != 0.0));
+            } else {
+                assert_eq!((info.dead_reason, info.dead_at), (0, [0.0; 3]));
+            }
             unsafe { bb_blob_free(p, len) };
             n += 1;
         }
@@ -530,6 +560,8 @@ mod tests {
         let r = bb_game::game::simulate_game(3);
         assert_eq!((a, h), (r.runs[0], r.runs[1]));
         assert!(n > 150);
+        // A game has about ten foul balls into the seats and a few home runs.
+        assert!(dead[1] >= 3 && dead[2] + dead[3] >= 1, "dead balls by reason {dead:?}");
     }
 
     fn text(field: &[u8]) -> &str {

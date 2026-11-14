@@ -5,7 +5,7 @@
 
 int main(void) {
     BbGame *g = bb_game_create(3);
-    uint8_t *blob; size_t len; int n = 0, calls = 0;
+    uint8_t *blob; size_t len; int n = 0, calls = 0, dead = 0;
     /* The header's BbPlayer layout must match the library's: both lineups read back in
      * order with printable names, and each player is found again under both of his ids. */
     for (uint32_t side = 0; side < 2; side++) {
@@ -33,12 +33,17 @@ int main(void) {
             if (c->t_s <= 0.f || c->t_s > info.duration_s || c->base > 4 || (i > 0 && c->t_s < info.calls[i - 1].t_s)) { fprintf(stderr, "bad call\n"); return 1; }
         }
         calls += info.n_calls;
+        /* A ball that left the field: inside the clip, a known reason, a ground point. */
+        if (info.dead_s >= 0.f) {
+            if (info.dead_s > info.duration_s + 1e-4f || info.dead_reason < 1 || info.dead_reason > 3 || info.dead_at[2] != 0.f) { fprintf(stderr, "bad dead ball\n"); return 1; }
+            dead++;
+        } else if (info.dead_reason != 0) { fprintf(stderr, "bad dead reason\n"); return 1; }
         bb_blob_free(blob, len);
         n++;
     }
     uint16_t a, h;
     int fin = bb_game_score(g, &a, &h);
     bb_game_free(g);
-    printf("C client: %d pitches, %d out calls, final=%d, score %u-%u\n", n, calls, fin, a, h);
-    return fin == 1 && calls >= 51 ? 0 : 1;
+    printf("C client: %d pitches, %d out calls, %d balls out of play, final=%d, score %u-%u\n", n, calls, dead, fin, a, h);
+    return fin == 1 && calls >= 51 && dead >= 3 ? 0 : 1;
 }

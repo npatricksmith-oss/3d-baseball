@@ -331,6 +331,11 @@ private:
 
 	FVector CamLook = FVector::ZeroVector;
 	bool bBallInPlay = false;
+	/** The ball left the playing field and is dead (a foul or a throw out of play, a fair ball
+	 *  bounding out; BbPlayInfo::dead_s, A10): the camera has stopped following it. */
+	bool bBallDead = false;
+	/** The cut back to the field has been made for this play. */
+	bool bDeadCut = false;
 	/** 0 broadcast (cuts), 1 behind home, 2 overhead. */
 	int32 CameraMode = 0;
 	int32 ShownCam = -1;

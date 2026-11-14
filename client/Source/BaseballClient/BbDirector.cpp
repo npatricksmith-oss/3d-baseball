@@ -44,6 +44,24 @@ namespace
 		const double S = FMath::Clamp(Theta / (PI / 4.0), -1.0, 1.0);
 		return 400.0 * FT + (330.0 - 400.0) * FT * S * S;
 	}
+	// Foul territory's walls (physics-spec §9.5, Field::default): the backstop 60 ft behind the
+	// apex with a 9 m screen over the walls behind home, the stands' 4-ft wall 50 ft off each
+	// line closing in to the pole from 100 ft along it, and a dugout opening 20-80 ft along it.
+	const double BackstopM = 60.0 * FT;
+	const double FoulClearM = 50.0 * FT;
+	const double FoulTaperM = 100.0 * FT;
+	const double FoulWallH = 4.0 * FT;
+	const double ScreenH = 9.0;
+	const double DugoutFromM = 20.0 * FT;
+	const double DugoutToM = 80.0 * FT;
+	/** The sim-frame ground point `S` along a foul line and `C` off it into foul ground, on the
+	 *  first-base side (Side +1) or the third-base side (-1). */
+	FVector2D LinePoint(double Side, double S, double C)
+	{
+		return FVector2D(Side * (S + C) * 0.70710678, (S - C) * 0.70710678);
+	}
+	/** Where the side wall meets the backstop, as a distance along the line (negative). */
+	const double BackstopCornerS = FoulClearM - BackstopM * 1.41421356;
 	const FLinearColor Grass(0.05f, 0.22f, 0.05f);
 	const FLinearColor Dirt(0.35f, 0.2f, 0.1f);
 	const FLinearColor Chalk(0.9f, 0.9f, 0.9f);
@@ -237,6 +255,45 @@ void ABbDirector::BuildField()
 		const FVector Dir = ToUE(B.X - A.X, B.Y - A.Y, 0).GetSafeNormal();
 		Shape(Cube, ToUE(Mid.X, Mid.Y, 4.0 * FT), FVector(Len + 0.05, 0.3, 8.0 * FT), WallColor, Dir.Rotation());
 	}
+	// Foul territory's walls, where the sim has them (physics-spec §9.5): a panel of height H
+	// from A to B (sim frame), standing on the wall's line.
+	auto Panel = [this](const FVector2D& A, const FVector2D& B, double H)
+	{
+		const FVector2D Mid = (A + B) * 0.5;
+		const FVector Dir = ToUE(B.X - A.X, B.Y - A.Y, 0).GetSafeNormal();
+		Shape(Cube, ToUE(Mid.X, Mid.Y, H * 0.5), FVector((B - A).Size() + 0.05, 0.3, H), WallColor, Dir.Rotation());
+	};
+	const FLinearColor Shade(0.03f, 0.03f, 0.035f);
+	const double Pole = 330.0 * FT;
+	// The backstop: a low wall under the screen, which is drawn as its posts and top rail
+	// only (the net itself is see-through).
+	const FVector2D BL = LinePoint(-1, BackstopCornerS, FoulClearM), BR = LinePoint(1, BackstopCornerS, FoulClearM);
+	Panel(BL, BR, FoulWallH);
+	for (int32 Side = -1; Side <= 1; Side += 2)
+	{
+		// Behind home the side walls carry the screen too (s < 0): posts at the backstop
+		// corner and where the screen ends, and its top rail.
+		const FVector2D Corner = LinePoint(Side, BackstopCornerS, FoulClearM);
+		const FVector2D ScreenEnd = LinePoint(Side, 0.0, FoulClearM);
+		Panel(Corner, ScreenEnd, FoulWallH);
+		for (const FVector2D& P : { Corner, ScreenEnd })
+		{
+			Shape(Cylinder, ToUE(P.X, P.Y, ScreenH * 0.5), FVector(0.12, 0.12, ScreenH), Chalk);
+		}
+		const FVector2D Mid = (Corner + ScreenEnd) * 0.5;
+		Shape(Cube, ToUE(Mid.X, Mid.Y, ScreenH), FVector((ScreenEnd - Corner).Size(), 0.08, 0.08), Chalk, ToUE(ScreenEnd.X - Corner.X, ScreenEnd.Y - Corner.Y, 0).Rotation());
+		// The stands' wall, open at the dugout, then closing in to the pole.
+		Panel(ScreenEnd, LinePoint(Side, DugoutFromM, FoulClearM), FoulWallH);
+		Panel(LinePoint(Side, DugoutToM, FoulClearM), LinePoint(Side, FoulTaperM, FoulClearM), FoulWallH);
+		Panel(LinePoint(Side, FoulTaperM, FoulClearM), LinePoint(Side, Pole, 0.0), FoulWallH);
+		// The dugout: a dark bay sunk behind the opening, under a roof.
+		const double Deep = 3.5;
+		const FVector2D Floor = (LinePoint(Side, DugoutFromM, FoulClearM + Deep * 0.5) + LinePoint(Side, DugoutToM, FoulClearM + Deep * 0.5)) * 0.5;
+		const FRotator Along = ToUE(Side * 0.70710678, 0.70710678, 0).Rotation();
+		Flat(Cube, ToUE(Floor.X, Floor.Y, 0.0), FVector(DugoutToM - DugoutFromM, Deep, 0.02), Shade, Along);
+		const FVector2D Roof = (LinePoint(Side, DugoutFromM, FoulClearM + Deep * 0.5 + 0.3) + LinePoint(Side, DugoutToM, FoulClearM + Deep * 0.5 + 0.3)) * 0.5;
+		Shape(Cube, ToUE(Roof.X, Roof.Y, 2.4), FVector(DugoutToM - DugoutFromM, Deep - 0.6, 0.2), WallColor, Along);
+	}
 }
 
 void ABbDirector::BuildStands()
@@ -265,26 +322,35 @@ void ABbDirector::BuildStands()
 			Block(A, B, 7.0, 5.0 + 4.5 * Tier, Tier == 0 ? Seats : Concrete);
 		}
 	}
-	// Foul-line grandstands: parallel to each line, 20 m outside it, from behind the plate
-	// area to the pole.
+	// Foul-line grandstands: behind the stands' wall (physics-spec §9.5), parallel to the
+	// line past the dugout and then following the wall in to the pole; the first tier starts
+	// 4 m behind the wall (behind the dugouts' roofs), the second 8 m farther.
 	for (int32 Side = -1; Side <= 1; Side += 2)
 	{
-		const FVector2D Along(Side * 0.7071, 0.7071);
-		const FVector2D Outward(Side * 0.7071, -0.7071);
-		for (int32 Tier = 0; Tier < 2; ++Tier)
+		const double Pole = 330.0 * FT;
+		// The wall's pieces in (along, off) on this side, each with its outward normal.
+		const double Seg[2][4] = { { 0.0, FoulClearM, FoulTaperM, FoulClearM }, { FoulTaperM, FoulClearM, Pole, 0.0 } };
+		for (const auto& W : Seg)
 		{
-			const FVector2D Off = Outward * (20.0 + 8.0 * Tier);
-			Block(Along * 12.0 + Off, Along * (330.0 * FT) + Off, 8.0, 5.0 + 5.0 * Tier, Tier == 0 ? Seats : Concrete);
+			const FVector2D D(W[2] - W[0], W[3] - W[1]);
+			const FVector2D Out = FVector2D(-D.Y, D.X).GetSafeNormal();
+			for (int32 Tier = 0; Tier < 2; ++Tier)
+			{
+				const double Back = 8.0 + 8.0 * Tier;
+				const FVector2D A = LinePoint(Side, W[0] + Out.X * Back, W[1] + Out.Y * Back);
+				const FVector2D B = LinePoint(Side, W[2] + Out.X * Back, W[3] + Out.Y * Back);
+				Block(A, B, 8.0, 5.0 + 5.0 * Tier, Tier == 0 ? Seats : Concrete);
+			}
 		}
 	}
-	// Behind home: a curve of seats joining the two grandstands, and the backstop wall.
+	// Behind home: a curve of seats joining the two grandstands (the backstop and its
+	// screen are with the field's walls).
 	const int32 M = 10;
 	for (int32 I = 0; I < M; ++I)
 	{
 		const double T0 = PI * 0.75 + (PI * 0.5) * I / M;
 		const double T1 = PI * 0.75 + (PI * 0.5) * (I + 1) / M;
 		Block(FVector2D(24.0 * FMath::Sin(T0), 24.0 * FMath::Cos(T0)), FVector2D(24.0 * FMath::Sin(T1), 24.0 * FMath::Cos(T1)), 6.0, 5.0, Seats);
-		Block(FVector2D(18.0 * FMath::Sin(T0), 18.0 * FMath::Cos(T0)), FVector2D(18.0 * FMath::Sin(T1), 18.0 * FMath::Cos(T1)), 0.3, 1.2, WallColor);
 	}
 }
 
@@ -582,6 +648,8 @@ void ABbDirector::BeginPlayback(FBbPlay&& Play)
 	// Each pitch opens with the wind-up: play time runs from −PreRoll to the release at 0.
 	PlayTime = -PreRoll;
 	bBallInPlay = false;
+	bBallDead = false;
+	bDeadCut = false;
 	CallsLogged = 0;
 	if (!Current.bValid)
 	{
@@ -648,12 +716,11 @@ void ABbDirector::NoteThrows(float From, float To)
 
 FVector2D ABbDirector::Dugout(uint16 Agent)
 {
-	// Stand-in dugouts in the front of the foul-line grandstands (BuildStands), 18 m along
-	// the line and just inside the stand's face: home on the first-base side, away on the
-	// third-base side. A player walking off disappears into the stand, not in the open.
+	// The dugouts are the sim's openings in the stands' wall (physics-spec §9.5, 20-80 ft along
+	// each line): home on the first-base side, away on the third-base side. A player walking
+	// off goes in at the middle of the opening and disappears under the roof.
 	const double Side = (Agent >> 8) != 0 ? 1.0 : -1.0;
-	const double Along = 17.7, Out = 18.5;
-	return FVector2D(Side * 0.7071 * (Along + Out), 0.7071 * (Along - Out));
+	return LinePoint(Side, (DugoutFromM + DugoutToM) * 0.5, FoulClearM + 1.5);
 }
 
 void ABbDirector::CarryFigure(const TArray<FFigureState>& Old, int32 Slot, uint16 Agent)
@@ -1354,19 +1421,29 @@ void ABbDirector::UpdateCamera(const BbFrame& Frame, float DeltaSeconds)
 		return;
 	}
 	const bool bFollow = bBallInPlay || CameraMode == 1;
+	// Once the ball has left the field and is dead the camera stops following it: the high
+	// view from behind home on the whole field (A10).
+	const bool bOnBall = bBallInPlay && !bBallDead;
 	const int32 Want = bFollow ? 1 : 0;
 	if (Want != ShownCam)
 	{
 		ShownCam = Want;
 		Camera->SetActorLocation(bFollow ? ToUE(0, -34, 19) : ToUE(-9, 136, 16));
-		CamLook = bFollow ? (bBallInPlay ? FVector(BallUE.X, BallUE.Y, 0.0) : ToUE(0, 16, 0)) : ToUE(0, 6, 1.0);
+		CamLook = bFollow ? (bOnBall ? FVector(BallUE.X, BallUE.Y, 0.0) : ToUE(0, 16, 0)) : ToUE(0, 6, 1.0);
 		C->SetFieldOfView(bFollow ? 48.f : 8.5f);
+	}
+	if (bFollow && bBallDead && !bDeadCut)
+	{
+		// A cut, not a pan back from the seats.
+		bDeadCut = true;
+		CamLook = ToUE(0, 16, 0);
+		C->SetFieldOfView(55.f);
 	}
 	if (bFollow)
 	{
-		const FVector Target = bBallInPlay ? FVector(BallUE.X, BallUE.Y, FMath::Min(BallUE.Z, 1500.0) * 0.5) : ToUE(0, 16, 0);
+		const FVector Target = bOnBall ? FVector(BallUE.X, BallUE.Y, FMath::Min(BallUE.Z, 1500.0) * 0.5) : ToUE(0, 16, 0);
 		CamLook = FMath::VInterpTo(CamLook, Target, DeltaSeconds, 4.f);
-		C->SetFieldOfView(FMath::FInterpTo(C->FieldOfView, bBallInPlay ? 42.f : 55.f, DeltaSeconds, 2.f));
+		C->SetFieldOfView(FMath::FInterpTo(C->FieldOfView, bOnBall ? 42.f : 55.f, DeltaSeconds, 2.f));
 	}
 	Camera->SetActorRotation((CamLook - Camera->GetActorLocation()).Rotation());
 }
@@ -1556,6 +1633,18 @@ void ABbDirector::Tick(float DeltaSeconds)
 			{
 				EndExit(X, TEXT("arrived"));
 			}
+		}
+		// A ball that left the field is dead (A10; rules-spec 5.8): a foul or a throw into the
+		// seats or a dugout, or a fair ball bounding out. The camera stops following it and cuts
+		// back to the field, and the ball is gone from view. A home run keeps the follow (A16).
+		if (!bBallDead && Current.Info.dead_s >= 0.f && Current.Info.dead_reason != 2 && PlayTime >= Current.Info.dead_s)
+		{
+			bBallDead = true;
+			UE_LOG(LogBb, Display, TEXT("BB_DEAD wall=%.2f play=%u t=%.2f reason=%u at=(%.1f, %.1f)"), Wall, Current.Info.play_index, Current.Info.dead_s, Current.Info.dead_reason, Current.Info.dead_at[0], Current.Info.dead_at[1]);
+		}
+		if (bBallDead && !bReset)
+		{
+			bBallShown = false;
 		}
 		if (bHave)
 		{
