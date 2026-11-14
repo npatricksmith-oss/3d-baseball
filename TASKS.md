@@ -7,7 +7,29 @@ Status: `[ ]` not started · `[~]` in progress · `[x]` done · `[?]` needs an o
 
 ---
 
-## Resume here (2026-11-13: hurried throws, A3)
+## Resume here (2026-11-14, overnight lead session; stopped at about 3:05 AM when the Claude usage limit was reached)
+
+Main is `f23fe57`, pushed, 255 tests pass. Workers ran in herdr panes (tabs "Workers", "Workers 2"), each in a worktree under `.claude/worktrees/` on a `work/*` branch. The worktrees and branches hold whatever was unfinished; check each with `git log main..work/<name>` and `git status` in its worktree.
+
+**Unresolved review findings first:**
+- [Gemini scorer review](docs/reviews/2026-11-14-gemini-scorer-review.md): Resolution **open**. Six P1s (RBI zeroed on any two-out play, RBI stripped on throws out of play, infield hit plus wild throw ruled an award, walk-off hits, 9.05(b) cases, plays on the batter-runner). Being fixed on `work/scorer-review-fixes` (worktree `a12-scorer`).
+- Arm strength by position (`4937cb8`, merged) has **no review**: the Codex Sol review died at the Codex limit; a rerun was scheduled for 5:26 AM from this session and will not happen if the session is gone. Prompt: first question is whether Statcast's top-fraction definition differs by position group.
+- Codex Sol reviews are still owed for A10 (play area), A4 (throw choices), A12 (scorer), A16. Gemini reviewed A10, A4 and A12 instead; a Gemini recheck of the A10 fixes was running on `work/review-a10-fixes`.
+
+**Known wrong on main:**
+- **Sacrifice flies are a quarter of the real rate** (45-57 per 300 games against about 150) since the A4 fix removed a stale-speed running start ([diagnosis](docs/calibration/2026-11-14-throw-choices.md), [sources](docs/calibration/2026-11-14-tag-ups.md)). The tag-up model is in progress on `work/a4-throw-choices` (decision by depth, the runner's belief of the arm, then `RUNNER_TAU` 0.85 to about 0.68 as its own commit).
+- **Double plays 2.9 a game** against 1.33 GIDP: the pivot is 0.43 s against 0.67-0.9. Pivot model just assigned on `work/dp-pivot` (worktree `a10-play-area`); nothing built.
+- A 133 mph exit speed was seen (real maximum about 122): the contact model's tail.
+
+**In progress, not merged:** infield alignment from Statcast positioning (`work/infield-alignment`, a Gemini agent, first sim change by one: read the diff closely); the post-game box-score screen (`work/box-score-screen`, paused for the scorer review).
+
+**Next, from the [run-environment diagnosis](docs/calibration/2026-11-14-run-environment-diagnosis.md):** rank 1 is the swing (fixed angular speed makes outside pitches 84 mph at the sweet spot; foul share 21% against 52%), spec first, not started.
+
+**For the owner:** the two `known_gap` rules scenarios (strict left-on-base counting) need a ruling; the speed keys (0.25 to 16x) were not exercised headlessly; cargo once treated stale library builds as fresh in `sim/target` (fix: `cargo clean --release -p` the workspace crates).
+
+Done and merged 2026-11-14: A10 play area (sim and client), A4 throw choices with its review fixes, A12 scorer and batting lines, A16 home-run camera and card, arm strength by position, the side-change cut and stepped speed keys, two rounds of deferred tests, the sources, tag-up and diagnosis notes. Numbers and causes are in [docs/metrics-ledger.md](docs/metrics-ledger.md).
+
+## Previous (2026-11-13: hurried throws, A3)
 
 Branch `claude/handedness-complete-6e0bc7` (handedness is merged into main at `a4c8219`; A3 is on top). `cargo test --workspace --release`: 195 pass. Spec: agent-models §5.5 (set-up, the turn, hurrying), §10 (ratings note); measurements in [the throwing note](docs/calibration/2026-11-13-throwing.md).
 
