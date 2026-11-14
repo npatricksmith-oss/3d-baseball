@@ -22,5 +22,221 @@ overlap); failed execution alone is not a wrong choice. Every measured seed is
 also run with tracing disabled and its event-log digest compared. A pre-hook
 digest sample guards against a change shared by the enabled and disabled paths.
 
-Results, classification thresholds, limitations and ranked proposals follow after
-measurement. Proposed changes are recommendations only.
+## Reproduction and interpretation
+
+```sh
+export PATH="$HOME/.cargo/bin:$PATH"
+cd sim
+# In the restricted worktree sandbox the linker's usual home cache is read-only.
+export ZIG_GLOBAL_CACHE_DIR="$PWD/target/zig-global-cache"
+export ZIG_LOCAL_CACHE_DIR="$PWD/target/zig-local-cache"
+# Leave CARGO_BUILD_JOBS=2 in effect.
+cargo run --release -p bb_game --example throw_choice_probe -- 256 0 /tmp/a4-choices.jsonl
+cargo test -p bb_game --release --test determinism --example throw_choice_probe
+cargo test --workspace --release
+```
+
+Games use the existing average abilities, generated handed rosters and calibrated
+M3 environment, with no substitutions. Play indices are the game's pitch/play
+indices, not the ordinal fair ball. Times are seconds from pitch release. Scores
+are `[away, home]`; `batting=0` means top, `1` bottom. A watch reference is therefore
+seed + play + time; no client was built or launched for this investigation.
+
+The sink is `live::choice_trace::capture`, off by default and isolated per thread.
+It records actual releases, the first nearby-carry commitment, and short carries
+substituted for selected throws. Repeated carries toward the same bag in the same
+possession retain their first options, with `until_s` and `ticks` recording the
+duration. A carry can be abandoned before arrival. A zero-distance nearby carry
+is effectively waiting at the bag, often correctly waiting to tag at home.
+The probe asserts that every recorded release has exactly one choice record.
+It does not count waiting for setup as another throw or count each movement tick
+as a new tactical mistake.
+
+Each JSONL row contains outs, inning, batting side, score, holder and position,
+runner path positions and speeds, the tested options in iteration order, the
+chosen destination and runner, direct/relay/receiver/setup times, probability,
+weight and value where the chooser actually calculated them. Nearby carries
+have no probability or value in the real chooser. For these alone, additional
+`unweighed_throw` rows show the weighted loop's estimates at that instant using
+the same observer inputs. **These alternatives were bypassed, not weighed.**
+Their formulas deliberately live only in the diagnostic module; if the chooser
+changes later, this shadow must be updated or retired. Missing/infinite numeric
+estimates serialize as JSON `null`; `kind` distinguishes a branch that did not
+calculate a quantity from an unavailable direct/relay route.
+
+Outcomes include the next possession, subsequent bag touches and outs with
+times, and the play's run scorers. `selected_runner_out_later` means that runner
+was retired later in this play, possibly after another decision; it is **not**
+causal credit for this particular commitment. Play run scorers likewise include
+the whole play. No alternate option is simulated to manufacture its outcome.
+
+The independent tactical screen calls an estimated margin of at least **0.25 s**
+"sure" (the existing §5.5 setup safety margin); under **0.15 s** is close (the
+umpire's close-play boundary). These are diagnostic judgment thresholds, not
+new simulation parameters. Bad execution does not by itself fail the screen.
+Flags are deliberately broader than confirmed tactical mistakes: a double play
+can justify taking a trailing force, a close throw can be the only useful try,
+and a temporary wrong-way carry can be corrected. The table reports screening
+counts and the case assessment separately, rather than claiming every flag is
+a lost out or run. Classes overlap.
+
+The additional `audit_intended_goal` is copied from runner internals **only for
+retrospective diagnosis**, never offered to the holder or used to pick an option.
+It identifies the one-tick stale-speed case described below; it is not a proposal
+to give defenders knowledge of a runner's future decision.
+
+## Results
+
+**256 games, seeds 0–255:** 18,318 balls in play and **14,238 commitments**:
+5,523 throws attempting an out, 7,020 no-play returns to second, 1,652 nearby
+carry/hold episodes, and 43 carries substituted for short throws. There were
+404 commitments with at least one flag. These are counts per **whole game**,
+not per team-game. No gameplay number moved: the traced and untraced runs both
+produced **2,880 runs, 56,455 pitches and 13,739 outs**.
+
+| Class / screen definition | Count | Per game | Judgment; cause and proposed priority |
+|---|---:|---:|---|
+| Carry behind a sure lead out: fewer than two outs, carry margin ≥0.25 s, another destination also ≥0.25 s | **146** | **0.5703** | All from the nearby-carry shortcut. 127 have a sure lead **force**, 27 a sure force home. Compare the options before committing (**1**). Not all 146 are bad tactics: 81 plays produced two outs. |
+| Ahead of a stopped runner: out-attempt throw targets a base beyond the runner's internal stopping goal while he is already exactly on that goal | **124** | **0.4844** | Clear target-generation mismatch, from stale arrival speed and `visible_target` (**2**). 86 to home, 38 to third; **none** of the targeted runners is retired later in that play. These occur in 94 games. |
+| Cutoff carrying that same nonexistent advance (subset of the preceding row) | **28** | **0.1094** | 28 of 42 relay **out attempts** target a runner already stopped short of that destination. Gate the destination before optimizing the route (**2**, then **5**); this is not 28 additional independent mistakes. |
+| Nonforce carry rather than sure force: carry starts outside 1.2 m tag reach, selected runner unforced, another force has ≥0.25 s | **17** | **0.0664** | Missing force guard / tag-completion plan (**3**). 13 are one-tick episodes; three of the four sustained carries get a tag out. The fourth recovers by throwing first (66/59). Do not label the successful tags wrong merely because a force existed. |
+| Risky lead rather than sure trailing out: chosen margin <0.15 s, trailing alternative ≥0.25 s | **1** | **0.0039** | Initial carry miscomparison (**1**); 21/111 recovers the out at first. No lost out established. |
+| Early/leading home gamble: fewer than two outs, unforced home margin <0.15 s against a sure force, inning ≤6 or defensive lead ≥2 | **0** | **0.0000** | No measured instance. Fixed home weight / missing situation value remain a model limitation (**4**); no tuning justified from this sample. |
+| Late close-score home option bypassed: inning ≥8, defensive lead 0–1, fewer than two outs, home alternative ≥0.25 s | **3** | **0.0117** | All nearby carries; **all three allow no run and finish with two outs**. No confirmed late-score mistake. Continuation value must accompany score awareness (**1**, **4**). |
+| Two-out home tag over available force at first/second with margin ≥0.15 s | **0** | **0.0000** | Existing force preference works in this sample (**5**). Do not retune `TWO_OUT_TAG_W` on this evidence. |
+| Truly hopeless by the holder's own timing: selected throw margin ≤−0.25 s | **0** | **0.0000** | The `p_out > 0.3` admission rule prevents this by construction. It cannot prevent the nonexistent-target cases above. No threshold change justified (**4**). |
+| Speculative out-attempt throw: selected margin <0 | **120** | **0.4688** | Timing says more likely safe; 34 targeted runners nevertheless get out later. Margins −0.063 to −0.001 s, not hopeless. Missing error/advance/hold value prevents calling all 120 wrong (**4**). |
+| Slower available cutoff route: chosen route >0.05 s slower than the other route's own estimate | **0** | **0.0000** | Structural consistency check of the minimum-time comparison, not a tactical endorsement of cutoffs (**5**). |
+
+The force-home subset of the first row has **10 plays with a run scoring**
+(0.0391/game). That is an exposure count, **not 10 proved preventable runs**:
+the alternative throw was not executed, and a two-out trade can be rational.
+The clearest tied-game case is 13/140 below. There are 90 one-out and 56
+zero-out cases among the 146; only two produce no out at all.
+
+The owner's situation is not a common wrong choice under today's weighted
+rule: there are **119 two-out commitments** offering a home tag and a force
+at first/second with ≥0.15 s in hand; 103 choose first and 16 second. The
+broader cohort has 519 commitments with two outs and a live runner who began
+on third (including no-play returns). There are also **37** choices taking
+a ≥0.25 s out elsewhere when the home estimate is already late: conceding
+the run for an out is often appropriate, not a class to "fix" indiscriminately.
+The continuation of 7/129 below is an example.
+
+**Validation:** all 256 traced/untraced **log bytes and digests** match. The
+eight saved pre-hook digests (seeds 0–7) also match after instrumentation.
+Seed 0's digest is
+`d3e0ba5a999fa3d1e0d99c0e1a0315634ca7404798c846d58c9961823c647a1e`.
+`cd sim && cargo test --workspace --release`: **196 passed, 0 failed, 0 ignored**
+(42 suite results, including doc-test suites). The explicit focused command
+above also passes all four determinism tests and the two example tests. Those
+example expectations come from the owner's two-out case and the distinction
+between an out attempt and a control return, not snapshots of implementation.
+The full 14,238-row JSONL used here has SHA-256
+`7212b63bcf94affcae9a4a81e1fee765ab8d979c1954c9ba3f38109e2511d8f8`;
+it is reproducible with the command above and is not checked in as a large log.
+
+### Plays to watch
+
+| Seed / play / time | Situation and choice | Evidence and assessment |
+|---|---|---|
+| **13 / 140 / 1.667 s** | Top 6, tied 4–4, one out, loaded. 1B carries to first. | Skipped force-home margin **+0.694 s**, **+0.571 s even fully set**. First is touched at 4.000 s; the go-ahead run scores and there is only one out on the play. This is the clearest close-score example of the shortcut choosing behind the lead runner. |
+| **1 / 77 / 1.756 s** | Bottom 3, away ahead 3–0, one out, loaded. 1B carries to first. | Carry margin +1.836 s; skipped forces at second +0.553, third +0.398, home **+0.967** (+0.818 fully set). First is touched at 3.689 s and the runner scores at 4.089 s. Conceding a run with a lead can be sound, but here the evaluator never compares an apparently routine home force. |
+| **7 / 129 / 1.754 s** | Bottom 5, home ahead 4–2, no outs, loaded. 2B carries to second. | Home force estimate +1.116 s. The actual second/first double play succeeds and a run scores. A useful **counterexample to blanket adjudication**: two outs for a run may be competent with none out in the fifth. |
+| **21 / 111 / 2.183 s** | Bottom 4, two out, score 2–3. SS initially carries toward second. | Carry margin only +0.126 s versus a throw-first margin +1.100 s. After three carry ticks he abandons it and throws first at 2.800 s; third out at 3.733 s. Wrong initial margin preference, recovered without a lost out. |
+| **17 / 203 / 1.932 s** | Bottom 8, zero outs, score 8–6. 3B briefly heads to third for an unforced runner. | Nonforce carry from 2.56 m away; first force estimate +1.316 s. The runner is already back at second and his arrival speed has not yet reset. One carry tick, then throw-first at 2.349 s and an out at 3.582 s. This exposes both the missing force guard and stale movement cue; it does not lose the sure out. |
+| **1 / 64 / 3.824 s** | Top 3, two out, away ahead 3–0. After taking first, 1B throws home. | Runner 5 has stopped at third (`s=82.296 m`, intended goal 3), but residual speed 8.053 m/s makes `visible_target` say home. The fictitious home-out margin is **+2.479 s**, `p_out=1`. The catcher takes it at 4.674 s; that runner never tries home and no further out occurs. A clear ahead-of-runner target-generation error. |
+| **54 / 182 / 1.800 s** | Bottom 8, tied 2–2, one out, loaded. SS carries to second while a home force is estimated +0.961 s. | The probe's late-score screen flags it, but the actual second/first double play ends the inning without a run. **Do not count it as a proven score-awareness error.** The other late-score flags, 70/197 and 132/256, also recover and allow no run. |
+| **0 / 20 / 3.981 s** | Top 2, one out, score 1–0. 2B throws first. | First estimate −0.019 s, second −0.187 s; no out results. A low-percentage attempt rather than a truly hopeless throw. Holding might or might not be better once error/advance risk is modelled. |
+| **3 / 19 / 3.160 s** | Top 1, two out, runner from third, tied 0–0. Throw first. | First-force estimate +0.523 s and home-tag +0.452 s. **Correct choice by the owner's criterion**, even though execution produces no out and a run scores. This is why failed execution must not be counted as a wrong destination. |
+
+
+## Why these choices arise; proposed changes in priority order
+
+1. **Compare nearby carries with the other outs, including a continuation.**
+   `holder_act`'s first carry loop accepts the first eligible runner with a bag
+   within 8 m and a run-to-bag margin above 0.1 s, then returns before
+   `out_weight`, `p_out`, score or any other destination can be consulted. The
+   vector starts with the batter. That explains first basemen taking first
+   automatically, even with other forces available. With fewer than two outs,
+   keeping the lead force alive matters: retiring the batter removes it. The
+   later weighted loop cannot correct a choice it never sees. Proposed fix:
+   offer carry and throw in the same comparison, with a modest two-out sequence
+   estimate where a double play is available. Do not simply ban taking first:
+   there are successful carry-second/throw-first double plays in these samples.
+
+2. **Stop valuing a base ahead of a runner who has stopped as an out attempt.**
+   `visible_target` uses the next integer base whenever the runner's intended
+   goal is not strictly behind his current path position. On the tick after
+   arriving exactly at a bag, a runner can have decided to stop there while
+   retaining his arrival `v` until `move_runners` next resets it. `holder_act`
+   runs before `move_runners`, so it admits him as a moving runner and gives
+   him an ETA to the *following* base. A high `p_out` can then send a throw home
+   with nobody actually trying to score. This is an observation/target-generation
+   defect before weighting, not evidence that a run-saving weight is too high.
+   Proposed fix: derive visible movement toward a destination from recent
+   observed displacement/heading and deceleration, distinguish arrival from
+   leaving the bag, and retain a control/hold option. Never read intended goal
+   as a defender's oracle. Measure these throws again after that work.
+
+3. **Make tag and carry completion honest.** The first carry loop's comment
+   says "forced runner", but its condition never checks `forced`. Stepping on
+   third does not retire an unforced runner; a home catcher may legitimately
+   wait to tag, while a third baseman can briefly run to a bag that offers no
+   out. The later throw loop also uses ball arrival plus the same 0.05 s for
+   both forces and tags. Proposed fix: compare force touch, actual reachable
+   tag plan, and carry time with heading, get-up and stopping costs. Preserve
+   legitimate waits for tags; do not count every catcher at home as a bad carry.
+
+4. **Replace fixed destination rewards with situation value and error cost.**
+   Below two outs the weights are `[0.9, 1.0, 1.1, 1.3]`, regardless of inning,
+   lead, who else is on, or whether allowing one run is acceptable. Squaring
+   `p_out` favors certainty but is not run expectancy. `p_out > 0.3` admits
+   more-likely-safe throws even when controlling the ball might be worth more;
+   there is no cost for overthrow, missed catch, extra advancement or relay
+   handling. Proposed fix: use the §5.6/§8 out/safe/hold values and throw-error
+   cost, informed by outs and base occupancy; use late close-game run/win value
+   when preserving a particular run matters. Judge uncertainty from fielding
+   IQ and known arm/capture ability rather than a universal 0.12 s. The screen
+   alone does **not** justify raising the 0.3 cutoff: sometimes trying the only
+   out is sound.
+
+5. **Keep the two-out force preference; validate routing before changing it.**
+   With two outs, an eligible force gets 1.0 and a tag 0.9 (`TWO_OUT_TAG_W`).
+   That already expresses the owner's normal example. A tag is also a time
+   play for run counting; a force or batter out before first cancels preceding
+   runs on the third out. The sample does not justify tuning the 0.9. A better
+   evaluator would explicitly value inning termination and the timing of runs,
+   especially when a high-confidence tag competes with a close force.
+   Direct-versus-relay routing currently minimizes believed travel time, with
+   a fixed relay transfer fraction and the final receiver's arrival. It lacks
+   each leg's catch/error cost and a tactical cut/hold decision; it chooses
+   among at most one currently assigned relay man. Proposed fix, after higher
+   priorities: compare completion and control value, cover continuity and both
+   catches, rather than merely changing the route-time comparison. A zero
+   count in the slower-route screen only verifies this narrow minimization;
+   it cannot vindicate all cutoff positioning or tactical choices.
+
+No proposed change above is implemented here. In particular, `out_weight`,
+`TWO_OUT_TAG_W`, the 0.3 admission cutoff, the probabilities, evaluation order,
+movement and random draws are unchanged.
+
+## What the fielder would need to know
+
+Outs, score, inning and runner occupancy already exist in `RulesState`; this is
+mostly **unused context**, not information the game lacks. The current choice
+function consumes outs, and otherwise largely reduces the situation to target
+base and estimated arrival times.
+
+What is missing from the decision interface/model is a runner observation with
+reliable current direction, slowing/stopping and uncertainty; a belief about
+whether an unforced runner will actually challenge the next base; the team's
+preferred play and communicated cutoff instruction; teammate receiving readiness
+with motion and ability rather than league-typical speed from rest; the holder's
+own throw/catch reliability and the possibility of advancement on an error; a
+tag plan's time and geometry; and the continuation value of a second out. A
+fielder knows the public situation and his own abilities, can observe motion
+and hear teammates, and can hold beliefs about all of these. He must never be
+told the actual future path, realized execution noise, or a runner's private
+planned destination. The diagnostic's retrospective state audit grants none
+of that information to gameplay.
