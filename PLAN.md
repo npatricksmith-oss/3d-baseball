@@ -40,6 +40,7 @@ The human is the **manager**. They pick lineups, tactics, pitching changes, and 
 | D16 | **Defensive shifts allowed** (no positioning restrictions beyond rulebook basics) | **Decided** (owner) | More managerial depth |
 | D17 | **Three-batter minimum enforced** for relievers (completes three batters or the half-inning; injury exception) | **Decided** (owner) | Adds weight to bullpen timing decisions |
 | D18 | **Injuries: later**, after M8, and only physically grounded (§11) | **Decided** (owner) | |
+| D19 | **Swing v2** (kinematic double pendulum, agent-models §3.6) is the swing. Recalibrate through a per-player `BatSpeed` population draw (Statcast between-batter SD 2.8 mph) and a re-authored `aim_offset_z` / launch-angle check; collision efficiency stays at q = 0.20 (revisit only as a sourcing question if a tail gap remains). v2 stays off main until home runs and runs come back, and merging waits for the owner | **Decided** (owner, 2026-11-14) | docs/calibration/2026-11-14-swing-model.md §6 |
 
 ---
 

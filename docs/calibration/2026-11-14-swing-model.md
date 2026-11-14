@@ -127,12 +127,16 @@ The steeper plane makes high pitches and well-timed contact foul more often (top
 4. **More hits on balls in play.** Reached on BIP 33.6 → 38.3%: more line drives (17.6 → 24.4%), fly balls that die at the wall (wall hits that are not home runs 743 → 1,029 per 100 games; FB hit rate .139 → .172), and grounders still hit at .357 (the infield items of the diagnosis's rank 2–3).
 5. **K%, BB% and pitches per PA do not move.** Those need the foul share (§4) and the zone rate (diagnosis rank 4).
 
-## 6. Proposed, for the owner
+## 6. The owner's ruling (2026-11-14)
 
-- **Proposed A (the decision): take v2 as the swing.** It fixes a model error with sourced measures, and its remaining gaps are elsewhere. But it takes the run environment from 0.8 runs high to 0.7 runs low. *Conservative choice made here:* population means at sourced values (`BatSpeed` 71.6 mph, effort 4.5%, Statcast tilt and angles), nothing tuned to a run total.
-- **Proposed B: compare the run environment against a population, not an average league.** Draw `BatSpeed` per player (σ_pop 1.1 m/s in §10; Statcast's between-batter SD is 2.8 mph, 1.25 m/s) before reading home runs against MLB's. This is the roster generator's job (M7) and the single largest lever found on home runs (+0.5 points of HR/PA by the proxy).
-- **Proposed C: re-author `aim_offset_z` and look at the launch-angle spread** against Statcast's LA distribution (mean 12.2°, SD 29.1° in play; v2 gives 11.7°, 25.1°) before touching the collision.
-- **Proposed D: q against Statcast.** Ask whether the 0.20 sweet-spot efficiency or Statcast's 0.23 squared-up reference is right for game wood (Tier A; the counterfactual says not alone).
+The owner ruled on proposals A–D on 2026-11-14 ("I'll take your recommendations", through the lead). PLAN §1 D19.
+
+- **A, decided: v2 is the swing.** It stays off main until the recalibration brings home runs and runs back; merging to main still waits for the owner's word.
+- **B, decided, now:** per-player `BatSpeed` drawn from a population distribution (Statcast between-batter SD 2.8 mph). Work: [2026-11-14-swing-recalibration.md](2026-11-14-swing-recalibration.md).
+- **C, decided, before D:** re-author `aim_offset_z` and check the launch-angle spread against Statcast (mean 12.2°, SD 29.1° in play). Same report.
+- **D, not now:** collision efficiency stays at q = 0.20. Revisit only if B and C leave a gap in the exit-speed tail, and then as a sourcing question, not a tuning knob.
+
+What was proposed, for the record: A, take v2 (it takes the run environment from 0.8 runs high to 0.7 low; population means at sourced values, nothing tuned to a run total). B, compare against a population, not an average league (largest lever found on home runs, +0.5 points of HR/PA by the effort-σ proxy). C, re-author `aim_offset_z` (authored on v1) before touching the collision. D, ask whether q = 0.20 or Statcast's squared-up 0.23 is right for game wood (the counterfactual says not alone).
 
 ## 7. Open questions
 
