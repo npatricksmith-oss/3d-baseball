@@ -309,7 +309,7 @@ so φ̇(0) = k·q and θ̇(0) = k. Angles are their integrals from t_c (closed f
 | w_b, bat's bump width | 0.055 s | [E] |
 | τ_b, bat's peak | +0.010 s | [E]; Statcast's bat speed rises with contact depth out to about 6–12 in in front of a batter's mean |
 | q = φ̇/θ̇ at t_c | 0.32 | [E]; hands at about 14 mph when the sweet spot is at 71.5 (ρ = 0.555 m). No sourced MLB hand speed at contact was found |
-| λ_c, lag at contact | 0 | [E] |
+| λ_c, lag at contact | 0 | [E]. *Proposed and measured (2026-11-14, docs/calibration/2026-11-14-bat-angle-at-contact.md, branch `work/swing-lambda`):* λ_c > 0 turns the face toward the pull side of the path by only about 0.2° per degree (the hands are slow), so it cannot supply Statcast's spray − AD of +7–9°; that offset is the collision's (undercut on a sloped barrel, and sidespin). Kept at 0; no published value found |
 | ρ at a middle-middle aim | about 0.30·H (derived from C's lateral position) | [E] |
 | ρ range | 0.15·H to 0.46·H | [E] hands in tight to arms fully extended |
 

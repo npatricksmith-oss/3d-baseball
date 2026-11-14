@@ -247,6 +247,11 @@ fn main() {
     if let Some(v) = flag("phase") {
         mu.template.adj_phase_frac = v;
     }
+    // The bat's lag at contact λ_c, degrees (docs/calibration/2026-11-14-bat-angle-at-contact.md).
+    if let Some(v) = flag("lag") {
+        mu.template.lag_c = v.to_radians();
+        println!("bat's lag at contact λ_c {v:.1}°");
+    }
     println!(
         "adjustment: Adjustability {:.2} m/s, cutoff {:.0} ms, phase ±{:.0}%",
         mu.batter.adjustability,
@@ -449,6 +454,24 @@ fn statcast_tables(sws: &[Sw]) {
             "", m(&fair, &|s| s.land_dir - s.ad), on.len(), m(&on, &|s| s.land_dir), m(&on, &|s| s.ad), m(&on, &|s| s.land_dir - s.ad)
         );
     }
+    // Fair spray by batted-ball type, pull-positive (MLB: 2025 Savant sample, `savant_spray.py`,
+    // by Statcast's bb_type; here by launch angle).
+    println!("Fair spray by launch angle, pull-positive: sim (MLB by type)");
+    for (lo, hi, name, m) in [(-90.0, 10.0, "GB <10°", "+15.3"), (10.0, 25.0, "LD 10–25°", "+6.6"), (25.0, 50.0, "FB 25–50°", "-2.8"), (50.0, 90.0, "PU 50°+", "-21.7")] {
+        let b: Vec<&Sw> = sws.iter().filter(|s| matches!(s.out, Outcome::FairPull | Outcome::FairOppo) && s.la >= lo && s.la < hi).collect();
+        let on: Vec<&&Sw> = b.iter().filter(|s| s.t_err_ms.abs() <= 5.0).collect();
+        println!(
+            "  {name:>9}: n {:5}  spray {:+5.1} ({m})  spray − AD {:+5.1} | on time n {:4} spray {:+5.1} spray − AD {:+5.1}",
+            b.len(),
+            mean(&b.iter().map(|s| s.land_dir).collect::<Vec<_>>()),
+            mean(&b.iter().map(|s| s.land_dir - s.ad).collect::<Vec<_>>()),
+            on.len(),
+            mean(&on.iter().map(|s| s.land_dir).collect::<Vec<_>>()),
+            mean(&on.iter().map(|s| s.land_dir - s.ad).collect::<Vec<_>>())
+        );
+    }
+    let fair: Vec<&Sw> = sws.iter().filter(|s| matches!(s.out, Outcome::FairPull | Outcome::FairOppo)).collect();
+    println!("  all fair: n {}  spray {:+5.1} (MLB +6.1 to +8.1 by pair)  spray − AD {:+5.1} (MLB +7.2 R/R, +8.9 all)", fair.len(), mean(&fair.iter().map(|s| s.land_dir).collect::<Vec<_>>()), mean(&fair.iter().map(|s| s.land_dir - s.ad).collect::<Vec<_>>()));
     // Bat speed by intercept depth relative to the mean (Statcast's depth bins, inches).
     let ym = mean(&sws.iter().map(|s| s.y).collect::<Vec<_>>());
     println!("Bat speed by intercept depth relative to the mean (in, + = out front): sim (MLB)");
