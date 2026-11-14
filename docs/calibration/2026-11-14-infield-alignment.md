@@ -7,7 +7,7 @@
 
 ## 1. Sourced MLB league-average infield positioning
 
-All four published non-shifted league-average infield alignments were pulled directly from Baseball Savant's Fielder Positioning dataset ([visual](https://baseballsavant.mlb.com/visuals/fielder-positioning), query endpoint `/visuals/position_data?type=player&teamId=&firstBase=<0|1|27>&shift=0&batSide=<R|L>&season=2024&position=&attempts=1`, PA-weighted with `attempts=1`) for the **2024 MLB season** under MLB's 2023+ two-infielders-per-side positioning rules, using **`shift=0` (`Shaded: No`, standard non-shifted alignment)**. Cross-checking 2023 and 2025 showed stability within `~0.5 ft` depth and `~0.5°` angle. Coordinates use home-plate origin, depth in feet (`0.3048 m/ft`), and horizontal spray angle in degrees (`0°` = CF `+Y`, `−45°` = 3B line, `+45°` = 1B line).
+All four published non-shifted league-average infield alignments were pulled directly from Baseball Savant's Fielder Positioning dataset ([visual](https://baseballsavant.mlb.com/visuals/fielder-positioning), query endpoint `/visuals/position_data?type=player&teamId=&firstBase=<0|1|27>&shift=0&batSide=<R|L>&season=2024&position=&attempts=1`, computed from the PA-weighted means of Savant's full-precision Cartesian fields `avg_norm_start_pos_x` and `avg_norm_start_pos_y` with `attempts=1` and converted to polar `(hypot, atan2)`) for the **2024 MLB season** under MLB's 2023+ two-infielders-per-side positioning rules, using **`shift=0` (`Shaded: No`, standard non-shifted alignment)**. Cross-checking 2023 and 2025 showed stability within `~0.5 ft` depth and `~0.5°` angle. Coordinates use home-plate origin, depth in feet (`0.3048 m/ft`), and horizontal spray angle in degrees (`0°` = CF `+Y`, `−45°` = 3B line, `+45°` = 1B line).
 
 | Alignment (`season=2024`, `shift=0`) | `n` (PA) | `1B` depth / angle | `2B` depth / angle | `3B` depth / angle | `SS` depth / angle | Source filter |
 |---|---:|---|---|---|---|---|
@@ -127,3 +127,37 @@ Measured on `main` `a791a9e` (before; identical to `27c2494` in `metrics-ledger.
 1. **Batted-ball distribution (`+5..+10°` screamers and `<-15°` choppers):** `13.6%` of GBs are `+5..+10°` `100.5 mph` liners (`50.0%` Through in 300g); `42.2%` are `<-15°` topped choppers (`10.7%` IFH). Both await the Rank 1 swing-model update.
 2. **Diving IFHs and throw delays:** In 300 games, `373` GB IFHs involve a dive attempt (`333` diving-caught at mean `t_sec = 3.22 s`) and `311` IFHs release before 1B touch (`218` with no 1B secure, `199` thrown to another base).
 3. **Per-batter pull shading (`Shaded: Yes`) & pitcher fielding:** Average hitters currently use `shift=0`; adding `shift=1` manager tendencies for pull hitters will tighten the middle vs. high-pull LHB, while pitcher fielding (`21.7%` of GB outs vs `~8%` MLB) remains an active follow-up topic.
+
+---
+
+## 6. Review fixes (`work/infield-review-fixes` on `main` `8a7e938`)
+
+Addressed all findings in [docs/reviews/2026-11-14-gemini-infield-alignment-review.md](../reviews/2026-11-14-gemini-infield-alignment-review.md):
+
+1. **`P2-1` (`1B` behind with second occupied):** `home_positions_for(bats, runner_on_first, runner_on_second, outs)` now keeps `1B` at `Standard` (`114.1 ft / +29.6°` RHB, `123.9 ft / +37.6°` LHB) while `2B/3B/SS` hold `DoublePlay` depth when `runner_on_first && runner_on_second && outs < 2` (`1st & 2nd` and `bases loaded`; `1st & 3rd` keeps `1B` at `DoublePlay`). Rejected Savant `firstBase=27` because it pools `2B`-only/`3B`-only/RISP/infield-in states.
+2. **`P2-2` (Coupled `live.rs` / `holder.rs` geometry):**
+   - Replaced hardcoded `INFIELD_R = 45.0` with `crate::play::MAX_INFIELD_DEPTH_M + INFIELD_DEPTH_MARGIN_M` (`46.60 + 5.0 ≈ 51.60 m` `[E]`) so middle infielders starting at `45.2–46.6 m` break for infield grounders, settle with the ball, and trigger infield backups consistently.
+   - Protected `Cover(2)` in `assign_among` (`cover2_pass` checks non-`Cover(2)` infielders first, and a `Cover(2)` MI breaks only when his partner is not already `Role::Chase`) and in `cover_roles_after_chasers()` (reserves existing non-chasing covers before reassigning vacated bases).
+   - Included `1B` (`2`) in the secondary ground-ball break loop `[2, 3, 4, 5]`.
+   - Admitted `carry` beyond `carry_max_m = 8.0` (while `carry_max_m > 0`) when `carry_ball_at < throw_ball_at` in `holder.rs`, so `1B` at Savant `Standard` depth (`~11.1 m`) carries unassisted when faster than waiting for the pitcher.
+   - Replaced the hardcoded `from.x <= 10.0` deep-relay split in `relay_job` with closer pre-pitch alignment `(self.home[5] - spot).norm() <= (self.home[3] - spot).norm()` (`spot = relay_spot(from, b)`).
+3. **`P2-3` & `P3-1`:** Added constructed unit tests covering the `option.carry == true` `force_continuation` branch and `outs == 0` `w_second = 0.9` weight (`carry_double_play_at_second_uses_carrier_continuation_and_out_weight`, `carry_non_second_force_dp_uses_carrier_post_touch_setup_clock`), exposed `bats` on `PlayInput`/`simulate_play`, added `"source_commit": "d565cf6cc53865833c0ea84caf8dd0fc3dd89d2e"` to `23-109.json` and `3-140.json`, updated `agent-models.md` §5.6/§5.7/§5.9, and clarified Cartesian averaging + `metrics-ledger.md` baseline ordering.
+
+### Before (`main` `8a7e938`) → After (`work/infield-review-fixes`)
+
+- **300-game runs (`--seed 0` [`--seed 1000`]):** runs `5.84 → 6.00` [`6.11 → 6.01`]; GB hit `0.327 → 0.337` [`0.337 → 0.335`]; reached on BIP `33.7% → 34.2%` [`34.7% → 34.6%`]; HR/PA `5.24% → 5.13%` [`5.34% → 5.27%`]; K% `16.0 → 15.9` [`15.9 → 16.1`]; BB% `7.0 → 7.0` [`7.5 → 7.5`].
+- **`run_env_diag` GB middle lanes (`100g 0..99` before → `100g 0..99` / `300g 0..299` after):**
+  - `SS–mid [−15..−5°)`: Thru `35.1% → 34.4% / 33.4%`, Hit `47.7% → 47.1% / 46.3%` (`RHB 48.1% → 47.9% / 47.2%`, `LHB 46.1% → 44.3% / 43.4%`).
+  - `mid–2B [+5..+15°)`: Thru `38.6% → 38.2% / 36.7%`, Hit `48.9% → 49.0% / 47.2%` (`RHB 43.6% → 42.9% / 45.1%`, `LHB 52.3% → 52.8% / 48.7%`).
+  - Aggregate `100g` GB: Through `630 (21.5%) → 629 (21.7%)`, IFH `281 (9.6%) → 292 (10.1%)` (`P` IFH `19 → 29`), Outs `2,020 (68.9%) → 1,975 (68.2%)`. Over `300g 0..299` after: `8,631` GB (`Through 20.6%`, `IFH 10.9%`, `Outs 68.5%`).
+  - As a baseline probe confirmed, `INFIELD_R = 45 m` previously blocked `69` secondary middle-infielder breaks over 100 games (`< 0.7/game`) where another fielder already held `primary`; closing the remaining `SS–mid` / `mid–2B` gap below `.46–.47` toward MLB `.300–.330` comes from `shift=1` pull shading, Rank 1's swing model (`+5..+10°` `100.5 mph` liners), and pitcher fielding, not alignment constants.
+
+## 7. After the Opus review of the fixes (`work/infield-fixes-2`, on the merge `4d3bf1b`)
+
+The [Opus review](../reviews/2026-11-14-opus-infield-fixes-review.md) measured §6 on the merge with main `fb6dbf7` rather than on its branch, and found that two of its changes went too far. Its Resolution lists what changed; in short:
+
+- **The first baseman in the break (§6 item 2) opened first base.** He broke for any grounder he could reach within 51.6 m, either side of the mound, and kept running after the pitcher fielded it: infield hits 854 → 934 in 300 games, by the pitcher 56 → 103. The `P` IFH `19 → 29` above was this, not seed divergence. He now breaks only on the first-base side of the mound and only if first stays covered, and a chaser who sees a teammate secure the ball goes to his base.
+- **`INFIELD_R` = 51.6 m (§6 item 2) also moved the settle rule, backups, the return throw and the runner's read** onto 4 m of outfield grass. The 51.6 m range is now the grounder break's only (`INFIELD_BREAK_R`); the infield/outfield boundary is the dirt's edge, 47.40 m (155.5 ft on the line through second), which keeps a second baseman at his deepest Savant spot inside it.
+- A feed with a force behind it now goes at full effort at any p; fixture 23-109 completes its 3-2-3 again.
+
+**Measured, main `fb6dbf7` → `7fbe7f2`** (seeds 0–299 [1000–1299]): runs 5.83 → 5.86 [6.21 → 6.18]; GB hits .327 → .327 [.333 → .329]; infield hits 854 → 870, by the pitcher 56 → 61; plays with 2+ outs 1.76 → 1.82 a game. The merge without these fixes had 5.95 [6.14], .334 [.335], 934 and 103. The full row is in the [metrics ledger](../metrics-ledger.md).

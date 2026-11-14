@@ -7,8 +7,10 @@ pub const SCORER_VERSION: u16 = 1;
 
 /// Configurable rules-spec §10.1 threshold for an unsuccessful choice, seconds.
 pub const DEFAULT_CHOICE_MARGIN_S: f64 = 0.15;
-/// Provisional infield/outfield boundary, matching the live-play settle radius.
-pub const DEFAULT_OUTFIELD_RADIUS_M: f64 = 45.0;
+/// Provisional infield/outfield boundary, the same radial boundary as the live-play settle
+/// rule (rules-spec §5.8): the edge of the infield dirt on the line through second base, 95 ft
+/// beyond the pitcher's plate (155.5 ft = 47.40 m from home; 45 m before 2026-11-14).
+pub const DEFAULT_OUTFIELD_RADIUS_M: f64 = 155.5 * 0.3048;
 
 #[derive(Clone, Copy, Debug, PartialEq)]
 pub struct ScorerOptions {

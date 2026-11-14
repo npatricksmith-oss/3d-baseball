@@ -87,8 +87,6 @@ fn seed_23_play_109_takes_a_sure_lead_force_instead_of_automatic_first() {
     // Fourth inning, loaded, one out. A carry to first is an option, which would
     // remove the force at every other base, so the holder must compare the sure
     // lead forces and throw home first for the 3-2-3 / lead-force double play.
-    // (Replaces frozen 9fdeec1 fixture `13-140`, whose +35.4° chopper now skips past
-    // 1B holding at Savant LHB DP depth 88.9 ft / +41.0° into shallow RF.)
     let (out, choices, _) = replay(include_str!("fixtures/a4/23-109.json"));
     let first = &choices[0];
     assert!(!(first.action == "carry" && first.base == 1), "{first:#?}");
@@ -97,7 +95,31 @@ fn seed_23_play_109_takes_a_sure_lead_force_instead_of_automatic_first() {
     assert!(chosen.force && chosen.base >= 2, "{first:#?}");
     // §5.6 note's "sure" screen: at least 0.25 s in hand on the first out.
     assert!(chosen.runner_at - chosen.ball_at >= 0.25, "{chosen:#?}");
+    // The feed home has a force at first behind it, so it goes at full effort however
+    // unlikely the first baseman reads that second out (here p 0.11; Opus infield-fixes
+    // review P2-1: easing it to 0.85 cost the catcher 0.18 s and the double play), and the
+    // 3-2-3 is completed.
+    assert_eq!(out.effort.first(), Some(&1.0), "feed home at full effort: {:?}", out.effort);
     assert_eq!(out.calls.iter().map(|c| c.base).collect::<Vec<_>>(), vec![4, 1]);
+}
+
+#[test]
+fn seed_13_play_140_takes_a_sure_lead_force_instead_of_automatic_first() {
+    // Tied sixth, loaded, one out. Main's proximity shortcut (frozen 9fdeec1) carried the
+    // ball to first, which took the force off every other base, and the go-ahead run
+    // scored. The holder must weigh the lead forces. (Dropped with the Savant alignment,
+    // when the first baseman held near his bag with the bases loaded and the chopper
+    // skipped past him; with him at Standard depth whenever second is occupied it is his
+    // ball again, and he throws for a lead force with time in hand. Restored 2026-11-14, Opus
+    // infield-fixes review P3-2. What happens after the throw is not asserted: on the
+    // infield merge it crossed the plate high and deflected off the catcher.)
+    let (_, choices, _) = replay(include_str!("fixtures/a4/13-140.json"));
+    let first = &choices[0];
+    assert!(!(first.action == "carry" && first.base == 1), "{first:#?}");
+    let chosen = &first.options[first.selected_option.unwrap()];
+    assert!(chosen.force && chosen.base >= 2, "{first:#?}");
+    // §5.6 note's "sure" screen: at least 0.25 s in hand on the first out.
+    assert!(chosen.runner_at - chosen.ball_at >= 0.25, "{chosen:#?}");
 }
 
 #[test]

@@ -24,7 +24,7 @@ fn main() {
                 step(&mut st, &Input::StartGame);
                 step(&mut st, &Input::PitchDelivered { t: 0.0 });
                 step(&mut st, &Input::BatContact { t: 0.45 });
-                let out = simulate_play(&PlayInput { env: &env, field: &field, ball, t_contact: 0.45, runners: vec![RunnerIn { id: 1, base: 0, speed: 8.2 }], outs: 0, fielders, fattrs, seed: 1, play: (la * 100.0 + sp * 10.0 + ev) as u32 });
+                let out = simulate_play(&PlayInput { env: &env, field: &field, ball, t_contact: 0.45, runners: vec![RunnerIn { id: 1, base: 0, speed: 8.2 }], outs: 0, bats: bb_observe::Hand::Right, fielders, fattrs, seed: 1, play: (la * 100.0 + sp * 10.0 + ev) as u32 });
                 let mut evs = Vec::new();
                 for f in &out.facts {
                     if let Input::GloveSecured { t, .. } = f { secured += 1; tsec += t; }
