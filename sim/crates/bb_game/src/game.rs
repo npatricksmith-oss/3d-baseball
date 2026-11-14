@@ -484,6 +484,7 @@ fn fact_t(f: &Input) -> Option<f64> {
         | Input::BallSettled { t, .. }
         | Input::PlayTimeout { t }
         | Input::GloveSecured { t, .. }
+        | Input::BallReleasedFromGlove { t, .. }
         | Input::BaseTouched { t, .. }
         | Input::BaseLeft { t, .. }
         | Input::TagContact { t, .. }

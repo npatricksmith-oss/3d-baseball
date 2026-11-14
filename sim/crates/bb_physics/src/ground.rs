@@ -224,6 +224,16 @@ pub fn wall_contact(field: &Field, s: BallState, r: f64) -> (WallContact, WallAt
     (WallContact::Carom(BallState { r: r_in, v, w: s.w * 0.5 }), w)
 }
 
+/// The path of a ball in state `s` at time `t` that has just gone over a wall or into a dugout
+/// (see [`wall_contact`]): on into the seats or the dugout for a foul-territory wall, ending
+/// at once at the fence. It ends `OverFence`.
+pub fn over_the_wall(env: &FlightEnv, field: &Field, s: BallState, t: f64) -> BallPath {
+    let w = field.ball_clearance(s.r.x, s.r.y, env.ball.radius);
+    let fair = Field::fair(s.r.x, s.r.y);
+    let tr = if w.kind == WallKind::Fence { Trajectory::single(t, s) } else { into_the_stands(env, s, t, DT_BATTED, field.wall_top(&w)) };
+    BallPath { segments: vec![Segment::Flight { tr, end: SegmentEnd::OverFence { fair } }], bounces: vec![], walls: vec![] }
+}
+
 /// Fly a ball that has left the field over a wall until it comes down into the seats (to
 /// the wall top's height) or a dugout, or `t_max` passes. The fence skeleton ends at the
 /// fence instead (a home run is over when it clears).
