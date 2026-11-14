@@ -339,6 +339,9 @@ struct Runner {
     /// Distance along the base path from home, m (base k at k·BASE_L).
     s: f64,
     v: f64,
+    /// Last physical movement direction. Public signed velocity is direction × v;
+    /// private `goal` is never offered to the fielder's target builder.
+    direction: f64,
     vmax: f64,
     /// Base the runner is heading for (may be behind it on a retreat).
     goal: u8,
@@ -493,9 +496,8 @@ fn phi(x: f64) -> f64 {
 }
 
 /// The base a moving runner is visibly heading for: the next one in his direction of motion.
-fn visible_target(r: &Runner) -> u8 {
-    let q = r.s / BASE_L;
-    if r.goal as f64 * BASE_L < r.s { q.ceil() as u8 - 1 } else { (q.floor() as u8 + 1).min(4) }
+fn visible_target(r: &Runner, params: throwing::ChoiceParams) -> Option<u8> {
+    params.runner_target(r.s, r.direction * r.v, BASE_L)
 }
 
 /// Position on the base path at distance `s` from home.
@@ -1551,7 +1553,9 @@ impl<'a> Sim<'a> {
         let on = |b: u8| self.r.iter().any(|r| r.start == b && !r.out && !r.scored);
         let mut b = if on(2) || on(3) { 4 } else if on(1) || deep { 3 } else { 2 };
         for r in self.r.iter().filter(|r| !r.out && !r.scored) {
-            b = b.max(visible_target(r).min(4));
+            if let Some(target) = visible_target(r, self.f[fielder].a.throw_choice) {
+                b = b.max(target);
+            }
         }
         let who = if deep {
             if from.x <= 10.0 { 5 } else { 3 }
@@ -2448,6 +2452,7 @@ impl<'a> Sim<'a> {
                 r.v = 0.0;
                 continue;
             }
+            r.direction = dir;
             if r.v == 0.0 {
                 r.moving_since = self.t;
             }
@@ -2496,6 +2501,13 @@ impl<'a> Sim<'a> {
                         r.over_m = 0.0;
                     }
                 }
+            }
+            // End the physical stop on arrival, before the next holder reads its
+            // speed. Protected overruns retain the crossing speed for braking.
+            let r = &mut self.r[k];
+            let stop_s = r.hold_s.unwrap_or(r.goal as f64 * BASE_L);
+            if r.overrun == OverrunPhase::None && (stop_s - r.s).abs() < 1e-6 {
+                r.v = 0.0;
             }
         }
     }
@@ -2558,7 +2570,7 @@ impl<'a> Sim<'a> {
             base,
             through,
             runners: self.r.iter().map(|r| choice_trace::RunnerView {
-                id: r.id, start: r.start, s: r.s, speed: r.v, goal: visible_target(r), intended_goal: r.goal,
+                id: r.id, start: r.start, s: r.s, speed: r.v, goal: visible_target(r, self.f[by].a.throw_choice).unwrap_or((r.s / BASE_L).round() as u8), intended_goal: r.goal,
                 out: r.out, scored: r.scored, protected_overrun: r.overrun != OverrunPhase::None,
             }).collect(),
             options,
@@ -2578,7 +2590,7 @@ impl<'a> Sim<'a> {
                 continue;
             }
             let on_base = (r.s / BASE_L - (r.s / BASE_L).round()).abs() * BASE_L < 0.3;
-            if !on_base && (self.runner_pos(r) - fd.pos).norm() < 1.2 {
+            if !on_base && (self.runner_pos(r) - fd.pos).norm() < fd.a.throw_choice.tag_reach_m {
                 let id = r.id;
                 self.emit(Input::TagContact { t: self.t, fielder: fd.id, runner: id, holding_ball: true });
                 if self.done {
@@ -2590,7 +2602,7 @@ impl<'a> Sim<'a> {
         for b in 1..=4u8 {
             if (base_pos(b) - fd.pos).norm() < 0.6 {
                 let base = if b == 4 { 4 } else { b };
-                let pending = self.r.iter().any(|r| !r.out && !r.scored && r.goal >= base && r.s < base as f64 * BASE_L - 0.1)
+                let pending = self.r.iter().enumerate().any(|(k, r)| !r.out && !r.scored && self.forced(k) && r.start + 1 == base && r.s < base as f64 * BASE_L - 0.1)
                     || self.r.iter().any(|r| !r.out && r.start == base && r.s > base as f64 * BASE_L + 0.1);
                 if pending && !self.out.facts.iter().any(|f| matches!(f, Input::BaseTouched { agent, base: bb, holding_ball: true, .. } if *agent == fd.id && *bb == base)) {
                     self.emit(Input::BaseTouched { t: self.t, agent: fd.id, base, holding_ball: true });
@@ -2605,10 +2617,10 @@ impl<'a> Sim<'a> {
         let tracing = choice_trace::enabled();
         let mut carry_options = Vec::new();
         for (k, r) in self.r.iter().enumerate() {
-            if r.out || r.scored || r.v < 0.5 || r.overrun != OverrunPhase::None {
+            if r.out || r.scored || r.overrun != OverrunPhase::None {
                 continue;
             }
-            let goal = visible_target(r);
+            let Some(goal) = visible_target(r, fd.a.throw_choice) else { continue };
             let tgt = base_pos(goal);
             let d_me = (tgt - fd.pos).norm();
             let t_me = run_time(d_me, fd.a.speed, fd.a.tau_a);
@@ -2662,12 +2674,12 @@ impl<'a> Sim<'a> {
         let mut best: Option<(f64, u8, bool, f64, f64)> = None;
         let mut options = Vec::new();
         for (k, r) in self.r.iter().enumerate() {
-            if r.out || r.scored || r.v < 0.5 || r.overrun != OverrunPhase::None {
+            if r.out || r.scored || r.overrun != OverrunPhase::None {
                 continue; // standing runners are not a play, nor is an overrun of first
             }
             // The base a moving runner is heading for, and when he gets there at his
             // current speed (both visible).
-            let goal = visible_target(r);
+            let Some(goal) = visible_target(r, fd.a.throw_choice) else { continue };
             let t_runner = self.t + runner_eta((goal as f64 * BASE_L - r.s).abs(), r.v);
             // The ball beats the runner only once someone is at the bag to take it.
             let recv = self.receiver_for(by, goal);
@@ -2932,6 +2944,7 @@ fn new_sim<'a>(inp: &'a LiveInput<'a>, st: &'a mut RulesState) -> Sim<'a> {
             start: x.base,
             s: if x.base == 0 { 0.0 } else { lead_s(x.base) },
             v: 0.0,
+            direction: 1.0,
             vmax: x.speed,
             goal: x.base,
             out: false,

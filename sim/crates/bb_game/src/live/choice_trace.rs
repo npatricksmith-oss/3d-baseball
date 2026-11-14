@@ -131,9 +131,9 @@ pub(super) fn skipped_throw_options(sim: &super::Sim<'_>, by: usize) -> Vec<Opti
     sim.r
         .iter()
         .enumerate()
-        .filter(|(_, r)| !r.out && !r.scored && r.v >= 0.5 && r.overrun == OverrunPhase::None)
-        .map(|(k, r)| {
-            let goal = visible_target(r);
+        .filter(|(_, r)| !r.out && !r.scored && r.overrun == OverrunPhase::None)
+        .filter_map(|(k, r)| {
+            let goal = visible_target(r, fd.a.throw_choice)?;
             let runner_at = sim.t + runner_eta((goal as f64 * BASE_L - r.s).abs(), r.v);
             let recv = sim.receiver_for(by, goal);
             let recv_at = sim.receiver_ready(recv, goal);
@@ -145,7 +145,7 @@ pub(super) fn skipped_throw_options(sim: &super::Sim<'_>, by: usize) -> Vec<Opti
             let set_at = (if through { via(goal, set) } else { direct(goal, set) }).max(recv_at) + 0.05;
             let p = phi((runner_at - ball_at) / 0.12);
             let weight = sim.out_weight(k, goal);
-            OptionEstimate {
+            Some(OptionEstimate {
                 runner: r.id,
                 base: goal,
                 kind: "unweighed_throw",
@@ -162,7 +162,7 @@ pub(super) fn skipped_throw_options(sim: &super::Sim<'_>, by: usize) -> Vec<Opti
                 value: Some(p * p * weight),
                 through,
                 distance: (base_pos(goal) - fd.pos).norm(),
-            }
+            })
         })
         .collect()
 }
