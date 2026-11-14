@@ -7384,7 +7384,7 @@ mod tests {
         const B2: usize = 3;
         const B1: usize = 2;
         const SS: usize = 5;
-        let mut ratios = Vec::new();
+        let mut bonuses = Vec::new();
         for outs in [0u8, 1u8] {
             let mut fx = fixture(&[(5, 1), (7, 3)]);
             fx.st.outs = outs;
@@ -7414,11 +7414,10 @@ mod tests {
             let carry2 = opts.iter().find(|o| o.base == 2 && o.carry && o.force).expect("carry 2 option");
             let (p2, _) = carry2.continuation.expect("carry DP at second must evaluate continuation");
             assert!(p2 > 0.3, "expected throwable second out at first, p2={p2}");
+            // The second out is counted (and recorded for the comparison across outs below).
             let bonus = carry2.value - carry2.p_out * carry2.p_out * carry2.weight;
-            let expected_w = if outs == 0 { 0.9 } else { 1.0 };
-            let implied_w = bonus / (carry2.p_out * carry2.p_out * p2 * p2);
-            assert!((implied_w - expected_w).abs() < 1e-9, "outs={outs}: want w_second={expected_w}, got {implied_w}");
-            ratios.push(implied_w);
+            assert!(bonus > 0.0, "outs={outs}: the continuation adds value: {carry2:#?}");
+            bonuses.push(bonus);
 
             sim.holder_act();
             assert_eq!(sim.f[B2].carry_to, Some(2), "outs={outs}: carry DP at 2B must beat single home throw");
@@ -7447,7 +7446,10 @@ mod tests {
             sim0.holder_act();
             assert_ne!(sim0.f[B2].carry_to, Some(2), "outs={outs}: without continuation, single home throw (w=1.3) beats carry 2");
         }
-        assert!((ratios[0] - 0.9).abs() < 1e-9 && (ratios[1] - 1.0).abs() < 1e-9);
+        // Same geometry: the second out that ends the inning (one out) is worth more than the
+        // second out with none (Opus infield-fixes review P3-1 replaced checks that divided the
+        // value back by its own formula).
+        assert!(bonuses[1] > bonuses[0], "inning-ending DP worth more: {bonuses:?}");
     }
 
     #[test]
@@ -7466,8 +7468,9 @@ mod tests {
         let mut sim = new_sim(&inp, &mut st);
         sim.t = inp.t_contact + 1.0;
         held_at(&mut sim, B3, base_pos(3) + Vec3::new(0.0, 2.5, 0.0));
+        // He picked it up a second ago and is ready to go.
         sim.f[B3].ready_at = sim.t;
-        sim.f[B3].up_at = sim.t;
+        sim.f[B3].up_at = sim.t - 1.0;
         sim.f[B1].role = Role::Cover(1);
         sim.f[B1].pos = base_pos(1);
         sim.f[B1].target = base_pos(1);
@@ -7479,11 +7482,19 @@ mod tests {
         let carry3 = opts.iter().find(|o| o.base == 3 && o.carry && o.force).expect("carry 3 option");
         let (p2, ball_at_1) = carry3.continuation.expect("carry at 3B must use carrier post-touch continuation");
         assert!(p2 > 0.3, "expected continuation throw to 1B, p2={p2}");
-        // Must include carrier's own post-touch setup (> carry completion time) rather than 0.
-        assert!(ball_at_1 > carry3.ball_at + 0.5, "ball_at_1={ball_at_1} vs carry={}", carry3.ball_at);
-        let bonus = carry3.value - carry3.p_out * carry3.p_out * carry3.weight;
-        let implied_w = bonus / (carry3.p_out * carry3.p_out * p2 * p2);
-        assert!((implied_w - 0.9).abs() < 1e-9, "0-out carry at 3B must use w_second=0.9, got {implied_w}");
+        // The carrier has held the ball for a second before the carry, so he is set when he
+        // touches third and throws at once at full speed, the first baseman being on
+        // his bag: the ball reaches first one flight of the 38.8 m throw (+0.05 s handling)
+        // after the touch. A receiver's catch-to-release (0.7 × transfer, the non-carry
+        // branch) would add about 0.45 s (Opus infield-fixes review P3-1: the old bound,
+        // touch + 0.5 s, held for either branch).
+        let fd = &sim.f[B3];
+        assert!(carry3.ball_at - fd.up_at > fd.a.transfer + 0.2, "setup: he is set before the touch");
+        let flight = throw_time(THROW_EFFORT * fd.a.arm, (base_pos(1) - base_pos(3)).norm());
+        let expect = carry3.ball_at + flight + 0.05;
+        assert!((ball_at_1 - expect).abs() < 0.02, "ball at first {ball_at_1:.3}, expected {expect:.3} (touch {:.3}, flight {flight:.3})", carry3.ball_at);
+        assert!(RELAY_TRANSFER_FRAC * fd.a.transfer > 0.3, "the branches are told apart");
+        assert!(carry3.value > carry3.p_out * carry3.p_out * carry3.weight, "the continuation is counted: {carry3:#?}");
     }
 
     /// The first baseman's own read of where he would field the ball (his intercept, before

@@ -946,6 +946,11 @@ mod attr_tests {
         });
         let (tr, ar) = secured_at(&run(bb_observe::Hand::Right)).expect("RHB fielded");
         let (tl, al) = secured_at(&run(bb_observe::Hand::Left)).expect("LHB fielded");
-        assert!(al != ar || (tl - tr).abs() > 0.05, "bats={:?} changed 1B spot: R=({tr:.3},{ar}) L=({tl:.3},{al})", (ar, al));
+        // Against the left-handed batter the first baseman (0x0183) stands in the ball's path
+        // and fields it himself, sooner than anyone fields it against the right-hander
+        // (Opus infield-fixes review P3-1: the old check passed on any difference at all).
+        eprintln!("R=({tr:.3},{ar:#x}) L=({tl:.3},{al:#x})");
+        assert_eq!(al, 0x0183, "LHB: the 1B fields it: R=({tr:.3},{ar:#x}) L=({tl:.3},{al:#x})");
+        assert!(tl + 0.05 < tr, "LHB: fielded sooner than against RHB: R=({tr:.3},{ar:#x}) L=({tl:.3},{al:#x})");
     }
 }
