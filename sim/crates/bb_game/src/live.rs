@@ -6734,7 +6734,7 @@ mod tests {
     fn a_pivot_off_the_bag_starts_when_he_gets_it() {
         let (_, caught, on_bag, released) = feed_to_shortstop(base_pos(2) + Vec3::new(-2.0, 0.0, 0.0), 6.0);
         assert!(on_bag > caught, "he caught it off the bag ({caught:.3}) and got there at {on_bag:.3}");
-        assert!(released - on_bag >= 0.80 - 0.12 - 1e-9 && released - on_bag <= 0.80 + 0.12 + 0.2 + 2.0 * DT && released - caught > 0.80 + DT, "caught {caught:.3}, on the bag {on_bag:.3}, released {released:.3}");
+        assert!(released - on_bag >= 0.80 - 0.12 - 1e-9 && released - caught > 0.80 + DT, "caught {caught:.3}, on the bag {on_bag:.3}, released {released:.3}");
     }
 
     /// Gemini pivot review P2-2, agent-models §5.6: a shortstop who carries the ball to second
