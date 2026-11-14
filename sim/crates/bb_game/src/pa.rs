@@ -59,9 +59,12 @@ impl Default for Knobs {
 }
 
 impl Knobs {
-    /// Interim M3 calibration (docs/calibration/2026-10-31-m3-interim.md).
+    /// Interim M3 calibration (docs/calibration/2026-10-31-m3-interim.md); perception 2.7 → 2.9
+    /// and the swing's miss scale 1.0 → 1.4 in the refit after the tangential-restitution law
+    /// (docs/calibration/2026-11-14-collision-sloped-barrel.md §9: K% toward 22.6 with the
+    /// exit-speed tail kept). The effort scale stays 1 (sourced σ).
     pub fn calibrated_m3() -> Self {
-        Self { perception: 2.7, command: 0.8, swing_miss: 1.0, swing_effort: 1.0 }
+        Self { perception: 2.9, command: 0.8, swing_miss: 1.4, swing_effort: 1.0 }
     }
 }
 
