@@ -1942,6 +1942,8 @@ impl<'a> Sim<'a> {
         // Catchable height where the ball is: a fielder at the wall can leap.
         let field = self.inp.field;
         let zmax_at = |p: Vec3| if field.body_clearance(p.x, p.y, 0.0).dist < 3.0 { WALL_CATCH_MAX_Z } else { CATCH_MAX_Z };
+        // A force at second still to be made: a feed there is a double-play pivot (§5.5).
+        let force_at_second = self.force_pending_at_second();
         let zmax = zmax_at(b);
         for i in 0..9 {
             let fd = &self.f[i];
@@ -2133,7 +2135,7 @@ impl<'a> Sim<'a> {
                     fd.ready_at = up_at + RELAY_TRANSFER_FRAC * fd.a.transfer;
                     fd.set_base = RELAY_TRANSFER_FRAC * fd.a.transfer;
                     fd.face = None;
-                    if !relay && to_base == 2 {
+                    if !relay && to_base == 2 && force_at_second {
                         // The feed at second: a double-play pivot (agent-models §5.5). He faces
                         // the way he is moving, or the feed coming to him; his pivot starts
                         // when he has the bag.
@@ -2443,6 +2445,12 @@ impl<'a> Sim<'a> {
         self.r.iter().any(|r| !r.out && !r.scored && (r.s / BASE_L + 1e-6).floor() as u8 == b)
     }
 
+    /// A runner forced to second who has not yet reached it (a force there is still to be
+    /// made, §5.4): what makes a feed to second a double-play pivot.
+    fn force_pending_at_second(&self) -> bool {
+        (0..self.r.len()).any(|k| !self.r[k].out && self.r[k].start == 1 && self.forced(k) && self.r[k].s < 2.0 * BASE_L - 0.1)
+    }
+
     /// Whether a runner ahead of runner `k` holds base `b`: he is at or short of it and not
     /// visibly moving forward (standing, or going back). Direction of motion is visible.
     fn base_held_ahead(&self, k: usize, b: u8) -> bool {
@@ -2706,8 +2714,14 @@ impl<'a> Sim<'a> {
         // himself (he plants, turns and throws; no release on the touch tick).
         {
             let t = self.t;
-            let force_at_second = (0..self.r.len()).any(|k| !self.r[k].out && self.r[k].start == 1 && self.forced(k));
+            let force_at_second = self.force_pending_at_second();
             let f = &mut self.f[by];
+            // With the force at second gone before he got the bag (taken off), there is no
+            // pivot: he is an ordinary receiver, set up from his catch.
+            if f.pivot_wait_bag && !force_at_second {
+                (f.pivot, f.pivot_wait_bag) = (false, false);
+                f.set_base = RELAY_TRANSFER_FRAC * f.a.transfer;
+            }
             let on_bag = (base_pos(2) - f.pos).norm() < 0.6;
             let carried = !f.pivot && f.carry_to == Some(2) && force_at_second;
             if on_bag && (f.pivot_wait_bag || carried) {
