@@ -146,6 +146,22 @@ fn throw_time(v: f64, d: f64) -> f64 {
 /// A runner's estimate of how long the defense needs to get the ball over horizontal
 /// distance `d` by throwing: a league-typical arm, relayed through a man halfway when that is
 /// quicker or the throw cannot carry.
+/// A runner's read of how long the man holding the ball needs to get it `d` m by throwing:
+/// his read of that fielder's arm, relayed through a man halfway (a league-typical arm) when
+/// that is quicker or the throw cannot carry (agent-models §6.4).
+fn read_throw_time(arm: f64, d: f64) -> f64 {
+    let v = THROW_EFFORT * arm;
+    throw_time(v, d).min(throw_time(v, 0.5 * d) + RELAY_TRANSFER_FRAC * TYPICAL_TRANSFER + throw_time(THROW_EFFORT * TYPICAL_ARM, 0.5 * d))
+}
+
+/// A runner's read of a fielder's arm is his position's grade-50 arm (scouting-level
+/// knowledge) off by this σ, m/s [E, unsourced]: half the population spread of arm grades
+/// (`ARM_STRENGTH_SIGMA_MPS` 2.2), so he knows a strong arm from a weak one only roughly.
+const ARM_READ_SIGMA_MPS: f64 = 1.1;
+/// Sub-indices of the runner-perception stream used for his read of the holder's arm: this
+/// base plus the fielder's position index (far above the per-decision subs 2n, 2n + 1).
+const ARM_READ_SUB: u32 = 1 << 20;
+
 fn typical_throw_time(d: f64) -> f64 {
     let v = THROW_EFFORT * TYPICAL_ARM;
     throw_time(v, d).min(2.0 * throw_time(v, 0.5 * d) + RELAY_TRANSFER_FRAC * TYPICAL_TRANSFER)
@@ -2374,11 +2390,16 @@ impl<'a> Sim<'a> {
     fn ball_time_to(&self, k: usize, b: u8, read_sub: u32) -> f64 {
         let target = base_pos(b);
         match &self.ball {
-            Ball::Held { .. } => {
-                // The runner sees where the ball is and when it was caught.
+            Ball::Held { by } => {
+                // The runner sees where the ball is, when it was caught, and who has it: his
+                // read of that fielder is the position's grade-50 transfer and arm, the arm
+                // off by his own read error (agent-models §6.4; one draw per runner, fielder
+                // and play).
                 let (p, _) = self.ball_at(self.t);
-                let ready = (self.secured_at + TYPICAL_TRANSFER).max(self.t);
-                ready + typical_throw_time(m::hypot(target.x - p.x, target.y - p.y))
+                let mean = FielderAttrs::average(*by);
+                let err = rng(self.inp.seed, self.inp.play, self.r[k].id, Purpose::RunnerPerception, ARM_READ_SUB + *by as u32).truncated_normal(4.0);
+                let ready = (self.secured_at + mean.transfer).max(self.t);
+                ready + read_throw_time(mean.arm + ARM_READ_SIGMA_MPS * err, m::hypot(target.x - p.x, target.y - p.y))
             }
             Ball::Thrown { .. } => {
                 // A throw in the air: where it is and how fast it is coming.
