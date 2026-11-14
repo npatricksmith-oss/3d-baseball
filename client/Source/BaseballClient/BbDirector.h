@@ -295,15 +295,18 @@ private:
 	/** Smallest diameter of the ball's ground shadow with the ball on the ground, m: the drawn
 	 *  ball's own size, as the sun's shadow of a ball is. Close to the camera it stays this size. */
 	static constexpr float BallShadowM = BallDrawnM;
-	/** Farther away the shadow keeps at least this share of the view's width across (about
-	 *  16 px of a 1600 px view), so it can still be seen deep in the outfield. At the pitch
-	 *  camera's long lens this is about the drawn ball's size. */
-	static constexpr float BallShadowViewShare = 0.01f;
+	/** With the ball on the ground, a far shadow keeps at least this share of the view's width
+	 *  across (about 11 px of a 1600 px view), so it can still be seen deep in the outfield.
+	 *  The climb then shrinks it like the 15 cm floor. Sized so the shadow is never larger on
+	 *  screen than the 50 cm disc the owner found too big (2026-11-12): from the follow camera
+	 *  a ball in the near infield gets about 11 x 6.5 px against that disc's 18 x 6; at the
+	 *  pitch camera's long lens the 15 cm floor governs. */
+	static constexpr float BallShadowViewShare = 0.007f;
 	/** Most the shadow is drawn longer along the line of sight than across it. A camera low
-	 *  over a far ball sees the disc nearly edge-on (19 m up and 135 m out it shows a seventh
+	 *  over a far ball sees the disc nearly edge-on (19 m up and 155 m away it shows an eighth
 	 *  of its width); the length makes up the square root of that, so the shadow still reads
-	 *  as lying flat on the ground but stays a few pixels tall. */
-	static constexpr float BallShadowMaxStretch = 3.f;
+	 *  as lying flat on the ground but stays a few pixels tall (deep fly: 11 x 3.4 px). */
+	static constexpr float BallShadowMaxStretch = 2.5f;
 	UPROPERTY()
 	TObjectPtr<AStaticMeshActor> Bat;
 	UPROPERTY()

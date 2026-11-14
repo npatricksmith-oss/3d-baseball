@@ -1318,8 +1318,9 @@ void ABbDirector::PlaceBallShadow(const BbFrame& Frame, bool bShown)
 	const FVector At = ToUE(Frame.ball[0], Frame.ball[1], 0.012);
 	const FVector Look = At - Camera->GetActorLocation();
 	const float DistM = Look.Size() / 100.f;
-	// Width of the view at the shadow's distance, m: a far shadow is drawn larger so it stays
-	// a fixed share of the screen (a long lens shows less, so it needs less).
+	// Width of the view at the shadow's distance, m: a far shadow is drawn larger so it keeps
+	// about a fixed share of the screen (a long lens shows less, so it needs less). Slant
+	// distance stands in for the camera-space depth, which is close enough near the aim.
 	const float HalfFov = FMath::DegreesToRadians(Camera->GetCameraComponent()->FieldOfView * 0.5f);
 	const float ViewM = 2.f * DistM * FMath::Tan(HalfFov);
 	// It shrinks to about half as the ball climbs to 30 m, so height reads too.
