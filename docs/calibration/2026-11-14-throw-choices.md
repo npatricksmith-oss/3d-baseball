@@ -326,19 +326,153 @@ Standard run, main `69826e4` → this branch, seeds 0–299 [1000–1299]: runs
 5.41 → 5.07 [5.62 → 5.28]; double plays (probe, seeds 0–255) 2.30 → 2.75 a game.
 Counterfactuals on seeds 0–299: continuation weight 0 gives 5.27, the strict
 non-force rule 5.06, both 5.26. So the **double-play continuation is −0.20 runs**
-(grounders with 2+ outs .079 → .097), and **the visible-target gate plus the common
-comparison is −0.14**. In that second share, lead forces are now taken instead of
-the batter at first (fielder's choice on grounders .039 → .048 without the
-continuation). How much of the −0.14 is the lead forces and how much the 148
-throws at stopped runners is not separated. Nothing was tuned to bring runs back.
+(grounders with 2+ outs .079 → .097). *Corrected after the follow-up below:* the
+remaining −0.14 is **not** the choice fixes. It is the world change in fix 2 (a
+stopping runner's speed zeroed on his arrival tick), which removed the flying start
+of runners tagging up: without that zeroing the branch gives 5.32 [5.42], so it is
+worth about −0.25 [−0.14] runs, and the holder's fixes themselves are within noise
+of zero. Nothing was tuned to bring runs back.
 
-**Open.** Double plays 2.75 a game against MLB's about 1.7. The continuation values
-a double play at its full worth; the excess is more likely in how quickly the pivot
-and the throw to first happen than in the choice, but this is not measured.
-Line-drive and fly-ball 2+ outs fell (.011 → .006 [.011 → .008]; .014 → .007
-[.013 → .006]) in every variant, continuation or not. In the probe sample,
-outs at a runner's own base went 12 → 3, but 8 of main's 12 were batter-runners
-standing on first with stale arrival speed, called out with no base play (base 0)
-on the same tick as a nearby carry; they were not traced further. Genuine
-doubled-off runners were 4 → 3. The line-drive and fly-ball drop is **not
-explained**.
+**Open** (both answered in the follow-up below). Double plays 2.75 a game against
+MLB's about 1.7. Line-drive and fly-ball 2+ outs fell (.011 → .006 [.011 → .008];
+.014 → .007 [.013 → .006]). My first reading of "8 of main's 12 outs at a runner's
+own base were batter-runners called out with no base play" was wrong: those are
+caught fly balls (follow-up, A).
+
+## Follow-up (2026-11-14): eight base-0 outs, double plays, sacrifice flies
+
+Measured on the branch after the A4 merge (main `0a17ae8`) against main `69826e4`,
+seeds 0–255 unless stated, with the new `examples/dp_probe.rs`
+(`-- [games] [first_seed]`; `DP_LIST=1` lists the plays on stderr).
+
+### A. The eight batter-runners "out at base 0"
+
+Traced on `69826e4` (fact and rules-event dump of each play): 33/211, 55/159, 88/60,
+101/22, 101/153, 155/101, 178/123, 235/220. **All eight are caught fly balls**
+(`Catch`, then `RunnerOut { base: 0, kind: FlyOut }` on the `GloveSecured` tick;
+three foul, five fair). Base 0 is the umpire's record for "no base play: at the
+plate, a caught fly or a strikeout". The batter was standing on first because he
+had run while the ball was in the air. They are **real outs under the rules, worth
+0 free outs a game**; nothing was handed to the defense.
+
+What tied them to a nearby carry: on the catch tick the fielder who caught the ball
+committed a carry to a **different** runner, one standing on a bag with his stale
+arrival speed (the "ahead of a stopped runner" defect). On the branch no commitment
+falls on a caught-fly tick (8 → 0 in the sample). That path is the stale-speed
+target, pinned by `ChoiceParams::runner_target`'s geometry test (a runner on a bag
+at 8 m/s gives no target) and the 1/64 fixture. No rules or live test is added:
+there is no rules defect to pin. My count of "outs at a runner's own base 12 → 3"
+counted these eight because a batter starts at base 0; genuine doubled-off runners
+were 4 → 3.
+
+### B. Double plays: 2.75 a game against about 1.7
+
+**Real figures.**
+- Baseball-Reference 2024 situational batting
+  ([page](https://www.baseball-reference.com/leagues/majors/2024-situational-batting.shtml)):
+  33,097 GIDP opportunities (PAs with a runner on first and fewer than two out),
+  3,227 GIDP, **9.8% per opportunity**; 13.6 opportunities and 1.33 GIDP a game.
+  High confidence in the totals.
+- FanGraphs, Baumann, 2 July 2025
+  ([article](https://blogs.fangraphs.com/if-junior-caminero-had-any-more-gdps-hed-be-macroeconomics/)),
+  Savant 2023–2025: ground balls with a runner on first and fewer than two out turn
+  into double plays "about a third" of the time above 60 mph (buckets 32.9–38.4%).
+  By the fielder who took it: P 19.6%, C 3.8%, 1B 21.5%, 2B 44.7%, 3B 37.8%, SS 54.1%
+  (weighted over the infield, about 40%). Medium confidence: its exit-velocity
+  shares do not sum to 100, no sample sizes are printed, and real pitcher, catcher
+  and first-base grounders include sacrifice bunts, which the sim does not have.
+- Home to first: the same article's 416 Savant sprint-speed players average
+  **4.47 s**.
+- Pivot catch-to-release: **no Statcast figure found**. A coaching site says 0.7–0.9 s
+  at college and pro level, unsourced (low confidence). The 2016 Statcast figure in
+  the sources note (second baseman, 1.2 s) is his exchange on all plays where the
+  batter was out on his throw, grounders he fielded plus pivots, so it is not a
+  pivot time.
+
+**The sim** (branch; old main in brackets where measured):
+
+| | Sim | Real |
+|---|---:|---:|
+| PA opportunities a game | 14.1 [14.1] | 13.6 |
+| Grounder double plays per opportunity | **19.5%** [16.2%] | 9.8% |
+| Chance grounders a game (fair, launch < 10°) | 5.2 [5.4] | |
+| Converted per chance grounder | **52.5%** [42.8%] | about 33% (≥ 61 mph) |
+| By first fielder, infield: P / 1B / 2B / 3B / SS | 70 / 73 / 62 / 75 / 72% | 20 / 22 / 45 / 38 / 54% |
+| Pitcher's share of infield chance grounders | 20% | 8.2% |
+| 2B exchange on the Statcast play set (batter out on his throw) | **0.70 s** (fielded 0.78, pivots 0.44) | 1.2 s |
+| Pivot catch-to-release, fielder → second → first | 0.43 s (sd 0.07) | 0.7–0.9 s (unsourced) |
+| Feed glove-to-release | 1.05 s | |
+| Contact to the ball at first | 4.35 s (sd 1.4) | |
+| Batter contact to first | 4.417 s (**sd 0**) | 4.47 s mean |
+
+Applying FanGraphs' per-fielder rates to the sim's own fielder mix gives about 400
+double plays in the sample instead of 703, so **the excess is in conversion per
+chance, not in the number of chances** (+4%) or who fields them.
+
+**Ranked causes.**
+
+1. **Infield exchanges about half a second quicker than Statcast's on the matching
+   play set** (0.70 s against 1.2 s), in grounders the second baseman fields (0.78 s)
+   and in pivots (0.44 s). Counterfactual: the receiver's catch-to-release
+   (`RELAY_TRANSFER_FRAC`) × 1.43 (to 1.0) or × 1.79 (to 1.25) gives conversion
+   46.5% or 39.0% and 2.57 or 2.16 double plays a game. The pivot itself only moves
+   0.43 → 0.52–0.53 s because the hurry rule lets him release early, so most of the
+   effect comes through slower hurried throws. **Not a plain mis-set parameter:**
+   the 1.2 s is not split by play type, `RELAY_TRANSFER_FRAC` also sets every relay
+   and receiver throw, and raising the infield transfer itself would slow the throw
+   on every grounder while grounder hits are already .35 against .24. It needs a
+   pivot model (catch, foot on the bag or across it, clear the runner, throw) and a
+   real pivot-time source. **Model change; stop.**
+2. **No slide and no pivot clearance.** The runner from first never breaks up the
+   play and the pivot man never has to avoid him (`live.rs` header: "no slides,
+   rundown tactics, or collisions"). A real pivot man throws while avoiding the
+   runner, which costs time and accuracy. Size not measured. **Model change.**
+3. **The A4 continuation values the double play** (2.30 → 2.75; conversion 42.8% →
+   52.5%). Turning two when it is likely is sound baseball; it amplifies cause 1 and
+   is not itself the defect.
+4. **The pitcher fields 20% of infield chances** (real 8.2%) and converts 70% (real
+   19.6%). Part of the real figure is sacrifice bunts; the rest is the pitcher's
+   reach after his follow-through. Not measured further.
+5. **Every batter is the same runner** (4.417 s, sd 0) against a 4.47 s mean.
+   0.05 s quick on average; the missing spread means no slow-footed double-play
+   candidates and no burners. Small, and by design for average players.
+
+Nothing in B was changed: no cause is a single mis-set parameter with a measured
+value for the same quantity.
+
+### C. Sacrifice flies and the line-drive and fly-ball double plays: one cause
+
+After a caught line drive or fly ball with runners on, out attempts on advancing
+runners fell 163 → 53 (sample) and the holder's first act became the return throw
+(throws 71 → 9). Caught flies with a run scoring: **62.5 per 100 games on `69826e4`,
+15.6 on the branch**. The real figure the lead gives is about 50.
+
+Cause: fix 2's world change. `move_runners` now zeroes a stopping runner's speed on
+the tick he arrives (`98c58ed`). Before it, a runner who went back to his base to
+tag up kept his arrival speed while standing on it, because the tag-up branch
+`continue`s before speed is ever reset. At the catch he then (1) judged the advance
+with `runner_decide`'s running-start discount (`t_run × 0.75` when `v > 1`) and
+(2) left the bag at that leftover speed, a flying start from standing still. That
+was a bug, and it had been carrying the sacrifice-fly rate. With it gone, runners
+on third start from rest (time constant 0.85 s), get no discount, need a 0.35 s
+margin, and rarely go.
+
+Counterfactual, the branch with only the arrival-tick zeroing removed: caught flies
+with a run **63.3 per 100 games**; line-drive and fly-ball plays with 2+ outs 67
+(old main 76, branch 37); grounder conversion unchanged (52.1%); runs 5.32 [5.42]
+against the branch's 5.07 [5.28]. The holder's fix does not need the zeroing: with
+it removed, throws ahead of a stopped runner stay at **0** and non-force carries
+over a sure force at 1, because the target already ignores a runner within
+`on_bag_m` of a bag.
+
+Two ways forward; **the lead or owner decides**:
+- **Remove the arrival-tick zeroing** (one block in `move_runners`): restores main's
+  runner physics exactly, sacrifice flies and air double plays included, and keeps
+  the A4 choice fix. It brings back the flying-start bug that was hiding the slow
+  standing start.
+- **Keep it and model the tag-up start**: a runner set on the bag who times his
+  leave with the catch, from a measured third-to-home time on tag-ups (unsourced
+  here), and a `runner_decide` that does not depend on a stale speed. Model change.
+
+Either way, my ledger attribution of −0.14 runs to "visible targets plus one
+comparison" was wrong; it was mostly this. Corrected in the ledger.
