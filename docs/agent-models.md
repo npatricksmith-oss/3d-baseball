@@ -496,7 +496,22 @@ Coordination emerges from **calls**, not a central oracle [C]:
 
 ### 5.9 Positioning
 
-Pre-pitch home positions come from alignment presets (normal, corners in, double-play depth, and so on; PLAN §10.1) stored as per-position offsets by batter handedness [data file], or from custom positions set by the manager. Fielders reach their positions between plays (no simulation of that walk).
+Pre-pitch infield positions are physical inputs set before each pitch from league-average Baseball Savant fielder-positioning data (2024 MLB season, `Shaded: No` / `shift=0` standard non-shifted alignment under the 2023+ two-infielders-per-side rule, PA-weighted across all players `attempts=1`; [Baseball Savant Fielder Positioning](https://baseballsavant.mlb.com/visuals/fielder-positioning)). Coordinates are polar from home plate: straight-line depth in feet (`0.3048 m/ft`) and horizontal spray angle in degrees (`0°` straight to CF along `+Y`, `-45°` toward the 3B line, `+45°` toward the 1B line).
+
+| Alignment (`season=2024`, `shift=0`) | `1B` depth / angle | `2B` depth / angle | `3B` depth / angle | `SS` depth / angle | Source filter |
+| :--- | :--- | :--- | :--- | :--- | :--- |
+| vs. RHB, Standard (`firstBase=0`, `n=53,775`) | 114.1 ft / +29.6° | 152.9 ft / +6.8° | 122.0 ft / -36.4° | 148.3 ft / -18.3° | `batSide=R&firstBase=0&shift=0` |
+| vs. RHB, Double-play (`firstBase=1`, `n=17,792`) | 88.0 ft / +40.5° | 148.7 ft / +6.7° | 118.8 ft / -36.5° | 144.8 ft / -17.3° | `batSide=R&firstBase=1&shift=0` |
+| vs. LHB, Standard (`firstBase=0`, `n=19,287`) | 123.9 ft / +37.6° | 148.2 ft / +19.1° | 116.1 ft / -27.1° | 152.6 ft / -6.2° | `batSide=L&firstBase=0&shift=0` |
+| vs. LHB, Double-play (`firstBase=1`, `n=6,172`) | 88.9 ft / +41.0° | 143.1 ft / +19.0° | 113.8 ft / -27.2° | 148.8 ft / -5.7° | `batSide=L&firstBase=1&shift=0` |
+
+Before each pitch (`bb_game::play::home_positions_for`), the defense takes the batter's plate side (`Right` / `Left`) and selects `DoublePlay` when a runner occupies first base with fewer than two outs (`runner_on_first && outs < 2`), otherwise `Standard`. Fielders reach their positions between plays (no simulation of that walk).
+
+What stays `[E]` or omitted:
+- Savant's `firstBase=1` bucket pools all out counts (0, 1, and 2 outs, dominated by `< 2` outs); applying it specifically when `runner_on_first && outs < 2` is used here for holding the runner at double-play depth.
+- Savant's `Shaded: Yes` (`shift=1`, heavily used vs. pull-heavy LHB where `3B` backs to 131.4 ft / -21.9°) awaits per-batter pull-tendency manager shading (PLAN §10.1), so average hitters use `Standard` (`Shaded: No`, which already rotates the infield toward the batter's pull side relative to center).
+- "Infield in" / corners-in presets have no separate published filter in Savant's positioning leaderboard (`Strategic` pools multiple alignments in Statcast's glossary and `firstBase=27` pools 2B/3B/RISP states) and are not added as unsourced guesses; custom manager presets remain PLAN §10.1.
+- Outfielders (`LF` 290 ft / -30°, `CF` 320 ft / 0°, `RF` 290 ft / +30°), `P` (60 ft / 0°), and `C` (0, -0.9 m) keep their existing positions.
 
 ### 5.10 Anticipation: the jump (owner request, built 2026-11-12)
 

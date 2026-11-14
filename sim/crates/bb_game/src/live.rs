@@ -20,7 +20,7 @@ use bb_rules::{AgentId, Event, Input, OutKind, PlayState, ReleaseKind, RulesStat
 use bb_agents::motor::{ThrowNoise, execute_throw};
 use bb_agents::throwing::{self, SetUp};
 
-use crate::play::{FielderAttrs, RunnerIn, base_pos, home_positions, run_dist, run_time};
+use crate::play::{FielderAttrs, RunnerIn, base_pos, home_positions_for, run_dist, run_time};
 
 /// Opt-in, read-only A4 evidence. Never consulted by the option evaluation.
 pub mod choice_trace;
@@ -2995,7 +2995,7 @@ fn new_sim<'a>(inp: &'a LiveInput<'a>, st: &'a mut RulesState) -> Sim<'a> {
         let mut r = rng(seed, play, 0x0200, Purpose::SurfaceBounce, k);
         (surf.roughness * r.truncated_normal(4.0), surf.roughness * r.truncated_normal(4.0))
     });
-    let home = home_positions();
+    let home = home_positions_for(inp.bats, st.bases[0].is_some(), st.outs);
     let f: Vec<Fielder> = (0..9)
         .map(|i| {
             let mut r = rng(seed, play, inp.fielders[i], Purpose::FielderPerception, 0);
@@ -3243,6 +3243,7 @@ fn simulate_live_inner(inp: &LiveInput, st: &mut RulesState) -> LiveOutput {
 #[cfg(test)]
 mod tests {
     use super::*;
+    use crate::play::home_positions;
     use bb_math::units::MPH;
 
     const CF: usize = 7;
@@ -4007,8 +4008,8 @@ mod tests {
         assert!(worst_early > -0.35 && worst_late < 0.35 && rms < 0.15, "estimate − step: worst {worst_early:+.3} / {worst_late:+.3} s, rms {rms:.3} s");
     }
 
-    // agent-models §5.10, worked by hand. Fielders' lines from home, from the home positions:
-    // 1B 38°, 2B 13°, SS −13°, 3B −36°, LF −30°, CF 0°, RF 30° of spray. Perfect reads. A
+    // agent-models §5.10, worked by hand. Fielders' lines from home, from a fixed symmetric
+    // test layout (1B 38°, 2B 13°, SS −13°, 3B −36°, LF −30°, CF 0°, RF 30° of spray). Perfect reads. A
     // right-hander, pitch down the middle: the prior is his typical pull, −5°, σ 22°. A bat
     // read at yaw 60.4412° (face −29.5588°) is a cue at 5.2 + 1.36 × (−29.5588) = −35.0°, with
     // σ 18.6° (the scatter about the fit; no read error). k = 22²/(22² + 18.6²) = 0.58316, so
@@ -4018,6 +4019,15 @@ mod tests {
     // their zones; the pitcher and catcher never. A left-hander's mirror image (yaw −60.4412°,
     // prior +5°) gives +22.495°: 1B −0.5458, 2B +0.3342, CF +0.7919, RF −0.2642, the rest 0.
     // With no bat read, the prior alone: the shortstop, 8° off it, at 8/(2·22) = 0.1818.
+    fn symmetric_jump_test_positions() -> [Vec3; 9] {
+        let p = |d_ft: f64, deg: f64| {
+            let d = d_ft * 0.3048;
+            let a = deg.to_radians();
+            Vec3::new(d * m::sin(a), d * m::cos(a), 0.0)
+        };
+        [p(60.0, 0.0), Vec3::new(0.0, -0.9, 0.0), p(105.0, 38.0), p(150.0, 13.0), p(110.0, -36.0), p(150.0, -13.0), p(290.0, -30.0), p(320.0, 0.0), p(290.0, 30.0)]
+    }
+
     #[test]
     fn fielders_jump_toward_the_side_they_read() {
         let fx = fixture(&[]);
@@ -4027,7 +4037,7 @@ mod tests {
             a.swing_sigma = 0.0;
         }
         inp.pitch_x = Some(0.0);
-        let home = home_positions();
+        let home = symmetric_jump_test_positions();
         // Unit vector across fielder i's line, toward right field, from his published angle.
         let deg = [0.0, 0.0, 38.0, 13.0, -36.0, -13.0, -30.0, 0.0, 30.0];
         let toward_rf = |i: usize| {
@@ -4103,7 +4113,7 @@ mod tests {
         }
         inp.pitch_x = Some(0.0);
         inp.swing_lead = Some(0.180123);
-        let home = home_positions();
+        let home = symmetric_jump_test_positions();
         let deg = [0.0, 0.0, 38.0, 13.0, -36.0, -13.0, -30.0, 0.0, 30.0];
         let toward_rf = |i: usize| {
             let phi: f64 = f64::to_radians(deg[i]);
@@ -4143,7 +4153,7 @@ mod tests {
             a.lead_sigma = 0.0;
         }
         inp.pitch_x = Some(0.0);
-        let home = home_positions();
+        let home = symmetric_jump_test_positions();
         let toward_rf = Vec3::new(f64::to_radians(-13.0).cos(), -f64::to_radians(-13.0).sin(), 0.0);
         let ss = |inp: &LiveInput| jump_at_contact(inp, SS, home[SS]).dot(toward_rf) / inp.fattrs[SS].speed;
         inp.bat_yaw = None;

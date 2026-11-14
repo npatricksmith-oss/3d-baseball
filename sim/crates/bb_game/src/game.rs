@@ -297,7 +297,7 @@ impl Game {
         let pitch_flight = bb_world::pitch::pitch_flight(&mu.env, rec.release);
         if record {
             let fside = 1 - side as u16;
-            let home = crate::play::home_positions();
+            let home = crate::play::home_positions_for(mu.batter.bats, st.bases[0].is_some(), st.outs);
             viz.standing.extend((0..9).map(|i| ((fside << 8) | 0x80 | (i as u16 + 1), home[i])));
             // Runners stand off their bases with their leads.
             viz.standing.extend(st.bases.iter().enumerate().filter_map(|(i, r)| r.map(|id| (id, crate::live::path_pos(crate::live::lead_s(i as u8 + 1))))));
