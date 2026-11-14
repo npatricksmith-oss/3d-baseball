@@ -336,6 +336,20 @@ private:
 	bool bBallDead = false;
 	/** The cut back to the field has been made for this play. */
 	bool bDeadCut = false;
+	/** A home run (BbPlayInfo.dead_reason 2; A16). The sim's play ends as the ball clears
+	 *  the fence; the timeline then has the batter and runners trot round the bases to home
+	 *  (bb_game::timeline, presentation only), and the play's duration covers it. */
+	bool bHomeRun = false;
+	/** The ball is over the wall: the camera is in center field and the card is up. */
+	bool bHomeRunCut = false;
+	/** The trot's view: from beyond center field, looking in at the diamond, wide enough for
+	 *  all four bases (Unreal field of view, degrees). */
+	static constexpr float HrViewFov = 30.f;
+	/** After the last runner scores, the view holds this long before the reset, s. */
+	static constexpr float HrHoldS = 1.5f;
+	/** The card's lines: the batter's family name, "412 ft   108 mph", what it scored. */
+	FString HrName, HrLine, HrKind;
+
 	/** 0 broadcast (cuts), 1 behind home, 2 overhead. */
 	int32 CameraMode = 0;
 	int32 ShownCam = -1;

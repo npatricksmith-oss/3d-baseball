@@ -306,6 +306,9 @@ pub struct BbPlayInfo {
     /// double (the event log's `DeadBallReason`).
     pub dead_reason: u8,
     pub _pad2: [u8; 3],
+    /// On contact, the projected distance (physics-spec §12): from home to where the batted
+    /// ball would have come down to field level unobstructed, m; 0 without contact.
+    pub projected_distance_m: f32,
 }
 
 /// One out as the umpire signals it (rules-spec §1.3).
@@ -374,6 +377,7 @@ pub unsafe extern "C" fn bb_timeline_info(blob: *const u8, len: usize, out: *mut
         info.release_speed_mps = t.release_speed_mps();
         info.exit_velocity_mps = t.exit_velocity_mps();
         info.launch_angle_rad = t.launch_angle_rad();
+        info.projected_distance_m = t.projected_distance_m();
     }
     let contact = tl.markers().and_then(|m| m.iter().find(|m| m.kind() == MarkerKind::Contact)).map(|m| m.t());
     info.contact_s = contact.unwrap_or(-1.0);
@@ -549,9 +553,16 @@ mod tests {
                 // the fence's curve), at or above the ground.
                 let w = bb_physics::ground::Field::default().ball_clearance(info.dead_at[0] as f64, info.dead_at[1] as f64, 0.036888);
                 assert!(w.dist.abs() < 2e-3 && info.dead_at[2] >= 0.0, "dead at {:?}: {w:?}", info.dead_at);
+                if info.dead_reason == 2 {
+                    // Over the 8-ft wall in flight, it would have come down beyond the fence.
+                    let fence = bb_physics::ground::Field::default().fence_at((info.dead_at[0] as f64).atan2(info.dead_at[1] as f64));
+                    assert!(info.projected_distance_m as f64 > fence, "home run projected {} m, fence {fence} m", info.projected_distance_m);
+                }
             } else {
                 assert_eq!((info.dead_reason, info.dead_at), (0, [0.0; 3]));
             }
+            // A distance only with contact.
+            assert_eq!(info.projected_distance_m > 0.0, info.contact_s >= 0.0, "projected {} contact {}", info.projected_distance_m, info.contact_s);
             unsafe { bb_blob_free(p, len) };
             n += 1;
         }

@@ -274,6 +274,10 @@ pub struct PitchRecord {
     pub decision: Option<Decision>,
     /// Batted-ball facts on contact: exit speed m/s, launch angle rad, spray rad.
     pub batted: Option<(f64, f64, f64)>,
+    /// On contact, the projected distance (physics-spec §12): horizontal distance from home
+    /// to where the batted ball would come down to field level with nothing in its way, m
+    /// (the world's own unobstructed flight, `bb_world::pitch::BattedBall`).
+    pub projected_distance_m: Option<f64>,
     /// Final (adjusted) aim error at the swing's contact depth: (x, z) in m and timing in s
     /// (positive = aim later than the ball). Diagnostics only.
     pub aim_error: Option<Vec3>,
@@ -574,6 +578,10 @@ pub fn simulate_pitch_ctx(mu: &Matchup, sc: &Scouting, count: Count, seed: u64, 
         _ => None,
     };
     let hit_batter = !matches!(swing_res, SwingResult::Contact(_)) && body_hit(mu, &free);
+    let projected_distance_m = match &swing_res {
+        SwingResult::Contact(b) => Some(b.projected_distance),
+        _ => None,
+    };
     let (call, batted, contact) = match &swing_res {
         SwingResult::Contact(b) => {
             let land = b.flight.last().s.r;
@@ -609,6 +617,7 @@ pub fn simulate_pitch_ctx(mu: &Matchup, sc: &Scouting, count: Count, seed: u64, 
         read_weight: aim.w,
         decision: Some(dec),
         batted,
+        projected_distance_m,
         aim_error,
         commit_error,
         known_gap,

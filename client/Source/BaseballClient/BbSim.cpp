@@ -47,11 +47,18 @@ bool FBbSim::Start(const FString& LibraryPath, uint64 Seed)
 		for (uint32 Slot = 0; Slot < 9; ++Slot)
 		{
 			BbPlayer P{};
-			if (FnRoster(Game, Side, Slot, &P) == 1 && P.throws == 1)
+			if (FnRoster(Game, Side, Slot, &P) != 1)
+			{
+				continue;
+			}
+			if (P.throws == 1)
 			{
 				LeftHanded.Add(P.bat_agent);
 				LeftHanded.Add(P.field_agent);
 			}
+			const FString Name = UTF8_TO_TCHAR(P.family);
+			Family.Add(P.bat_agent, Name);
+			Family.Add(P.field_agent, Name);
 		}
 	}
 	return true;

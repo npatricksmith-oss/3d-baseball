@@ -9,7 +9,7 @@
 use std::collections::BTreeMap;
 
 use bb_game::game::Game;
-use bb_physics::ground::{Field, WallKind};
+use bb_physics::ground::Field;
 use bb_rules::{Event, Input, Touch};
 
 fn main() {
@@ -54,7 +54,8 @@ fn main() {
                 k => format!("{k:?}"),
             };
             if list {
-                println!("seed {seed} play {} t {t:.2} {kind} over {wall} at ({x:.1}, {y:.1})", s.play);
+                let runs = s.rules_events.iter().filter(|e| matches!(e, Event::RunScored { .. })).count();
+                println!("seed {seed} play {} t {t:.2} {kind} over {wall} at ({x:.1}, {y:.1}), {runs} runs", s.play);
             }
             *by.entry((kind.to_string(), wall)).or_default() += 1;
             if let Some(f) = thrower {
