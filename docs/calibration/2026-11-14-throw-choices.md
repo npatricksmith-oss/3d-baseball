@@ -371,8 +371,8 @@ he was:
 - **Before** (`00445f5`, `live.rs:2462`, the tag-up branch of `move_runners`): a runner who has come
   back to his base to tag up reaches `else if on_base { continue; }` on every tick, which skips the
   code that zeroes `r.v` (`live.rs:2491`, `if (goal_s − r.s).abs() < 1e-6 { r.v = 0.0; continue; }`).
-  He stands on the bag with the speed he had when he got back to it, frozen: **6.19 m/s** in 56 of
-  the 60 matched traces, never zero. At the catch `r.v > 1.0` is true, so `t_run` for the 27.43 m
+  He stands on the bag with the speed he had when he got back to it, frozen: **6.19 m/s** in 102 of
+  the 108 traced decisions at a catch (the other six 6.85–7.36 m/s), never zero. At the catch `r.v > 1.0` is true, so `t_run` for the 27.43 m
   from third to home is **3.14 s**.
 - **After** (A4, `live.rs:2578–2584`, "End the physical stop on arrival, before the next holder reads
   its speed"): `r.v = 0.0` is set on the arrival tick, for every runner whose goal is reached,
@@ -404,17 +404,19 @@ There are 28 such plays in seeds 0–99 where both builds make the same catch: t
 and was put out in 3 before; he held in 27 and was put out in 1 after. Others: (4, 59), (8, 85),
 (23, 117), (30, 94), (44, 55), (45, 46), (46, 152), (47, 103), (49, 40), (53, 37), (57, 147),
 (64, 76), (66, 42), (67, 187), (67, 203), (76, 213), (87, 95), (90, 107), (92, 163), (99, 179).
-Most have a ball-needs time of 3.5–4.6 s, between the two `t_run` values, which is why the runner
+Most have a ball-needs time of 3.5–4.7 s, between the two `t_run` values, which is why the runner
 went before and holds now.
 
 ### What it is not
 
 - **The defense.** A runner who goes is put out at about the same rate (before 5 of 65, after 2 of 18,
-  with the experiment 4 of 68), and a runner who holds draws no throw in either build: he is standing
-  on a base with the ball in the air or just caught, and he is "not a play" in both. The gating of
+  with the experiment 4 of 68), and a runner who holds is standing on his base with the ball just caught, so there is no
+  play on him in either build (I did not trace the fielders' choices in the held plays; the
+  unchanged out rate and the restored scoring rate with only the runner's rule changed say the
+  defense is not the cause). The gating of
   fielders' targets on visible motion (`visible_target`, `runner_target`) does not enter, because the
-  decision comes at the catch, before anyone is moving. The nearby-carry replacement does not enter
-  either; a catch in the outfield with nobody running is not a carry choice.
+  decision comes at the catch, before anyone is moving. The decision is the runner's, and it is
+  made from `Ball::Held`, which A4 did not touch.
 - **The runner's read of the ball.** `ball_time_to` (`live.rs:2336`) gives the same `t_ball − t` in
   both builds for the same play (the "ball needs" column).
 - **Noise.** The draw is the same in both builds; margin shifts by exactly the `t_run` difference of
@@ -450,9 +452,9 @@ fielders' gate, which A4 means to be zero.
    toward `next` (`r.direction > 0.0 && r.v > 1.0`).
 3. Choose the factor from the sacrifice-fly rate: fly outs with a run on third and <2 out should score
    about 55–60 % (the old 60 of 108); that is in line with the count of about 150 sacrifice flies per
-   300 games. 0.75 has no source and gives a standing 27.4 m in 3.14 s, faster than most MLB
-   third-to-home times from a tag; the true value probably sits between 3.14 s and 4.19 s, and the
-   decision threshold (0.35 s) and runner noise (0.15 s) move the rate the same way, so fit them
+   300 games. 0.75 has no source; it gives 27.4 m in 3.14 s, against 4.19 s from a
+   standing start. A tag-up is neither (the runner leans and leaves on the catch), so the right value
+   is somewhere between and should be measured. The decision threshold (0.35 s) and runner noise (0.15 s) move the rate the same way, so fit them
    together or not at all.
 4. Tests: a runner tagging up on third with a fly caught 4.1 s of throw from home goes and scores; the
    same with a 5.0 s throw holds; and a regression that `sf_probe 0 100` stays near 60 scored of 108.
