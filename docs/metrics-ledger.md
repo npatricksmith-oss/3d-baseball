@@ -186,6 +186,7 @@ Runs per game were not printed until late in the day; the early rows have PA per
 
 | Date | Task | Commit | Check |
 |---|---|---|---|
+| 11-14 | Tag-up start model (agent-models §6.4), parameters named and pending, neutral defaults | `1508c1b` | Digests identical, seeds 1, 2, 3, 42; `sim-cli games --n 300 --seed 0` output identical to main `f1154f3` (5.32). Values and the measurement wait for the tag-up sources note |
 | 11-14 | Second round of deferred tests (low-catch boundary, golden roster seeds from a Python oracle, rules-passing scenarios with `known_gap`, ignored pop-up fixtures) | `486866f`..`0deb559` | Tests, scenarios and the scenario harness only; no sim code changed |
 | 11-14 | A10 client half: `BallDead` marker carries the reason, `bb_ffi` decodes it (`BbPlayInfo.dead_s`, `dead_at`, `dead_reason`) | `39db36c`, `834a335` | Digests identical, seeds 1, 2, 3, 42 (`dbcf92c` against `834a335`; the change is in the timeline encoding only) |
 | 11-14 | A12/B5 partial: isolated scorer helper and captions naming the out base | `555b32c` and follow-up | Game digests identical to `db5c012` for seeds 0, 1, 7, 42; captions changed, event logs did not. Official scorer and audit remain incomplete |
