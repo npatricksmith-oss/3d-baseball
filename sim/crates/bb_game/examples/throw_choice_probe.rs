@@ -190,7 +190,10 @@ fn main() {
                 }
                 if c.action.contains("carry") && s.is_some_and(|o| !o.force && o.distance > 1.2) {
                     tag_carries += 1;
-                    tag_carry_outs += step.calls.iter().any(|call| Some(call.runner) == s.map(|o| o.runner) && call.base == c.base && call.t_out >= c.t - 1e-9) as u64;
+                    // The rules record a tag at the base after the runner's last touch, so a
+                    // runner going back to the carry's bag is out "at" the next one (Gemini A4
+                    // review P2-5: those tags were not counted).
+                    tag_carry_outs += step.calls.iter().any(|call| Some(call.runner) == s.map(|o| o.runner) && (call.base == c.base || call.base == c.base + 1) && call.t_out >= c.t - 1e-9) as u64;
                 }
                 for &class in &labels {
                     *counts.entry(class).or_default() += 1;
