@@ -222,4 +222,16 @@ Only this review is a tracked deliverable. No source, test, spec, ledger or TASK
 
 ## Resolution
 
-Open.
+**P1-1: fixed** on `work/live-comm` (from main `c3a2714`): `8861a38` (the mechanism and every read listed), `636366d` (outfielders weigh only outfielders on balls nobody catches in the air; spec). Design and the replacement for each read: [docs/calibration/2026-11-14-fielder-communication.md](../calibration/2026-11-14-fielder-communication.md). This also covers the Opus infield-fixes review's P2-3 (the `Cover(2)` guard) and the `Cover(1)` check.
+
+- A teammate's chase and his call tier reach the others `CALL_HEARD_S` = 0.3 s after he begins it (`Fielder::shown`, `Sim::publish`, `Sim::known`). That is the spec's `T_call`, now built.
+- Each candidate decides alone (`Sim::decide`). He uses his own read and call, the sure calls he has heard, and his own estimate of each teammate. That estimate (`seen_intercept`, `eta`) runs his own read against the teammate's visible position and velocity, known speed and reaction. No decision reads a teammate's `target`, `belief`, `t_int`, call value, or a chase started less than 0.3 s ago. Sure calls of the same tier are settled by the priority table (`CALL_PRIORITY` [E]), because the time to spare they used to compare can't be heard. `RECALL_MARGIN_S` is gone.
+- `fielding_point()` is now what everyone can see: the holder, or, while the ball is loose, the point on its ground track nearest the man known to be going for it (`None` until one is known). It drives cutoffs, backups, re-call candidates and the side used for covering second. `relay_job` compares the relay man's own `t_int` with his estimate of the lead's run to his own intercept point.
+- Second base: a middle infielder whose own read has his partner fielding a grounder covers second at once. The first baseman stays with the bag when his own read has the pitcher first. The pitcher breaks for first when his own read has the first baseman going.
+- **The probe is now a test** (`second_base_cover_does_not_read_a_private_target`): moving only the centre fielder's target no longer changes who covers second. `a_call_is_not_heard_before_its_delay` checks that a lower-priority sure caller gives the ball up at the first tick after 0.3 s, not before.
+- Tests: `cargo test --workspace --release`, 322 passed, 3 ignored.
+- **Effect on games:** see the metrics-ledger row "Fielder communication". Runs are 5.86 → 6.08 [6.18 → 6.25] on the standard run, and 6.03 → 6.18 on 1,000 games from seed 5. In counterfactuals with every knowledge delay set to zero, the structural changes cost about nothing (6.07 on the same 1,000 games). The rest is the cost of the 0.3 s delay itself, mostly through the relay man (300-game splits).
+
+Left as simplifications, listed in the note §5: exact reads of present motion; a man who stops chasing is seen at once; the third base and home covers wait 0.3 s for a known chase.
+
+**P2-1 to P2-8, P3-1, P3-2: open** (not started in this pass).

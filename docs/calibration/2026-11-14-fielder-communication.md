@@ -64,4 +64,21 @@ Each candidate reads the ball and makes his own call. Then he decides alone:
 
 ## 7. Effect on the game
 
-See the [metrics ledger](../metrics-ledger.md) row "Fielder communication (live-play review P1-1)".
+Standard run, main `c3a2714` → `636366d`, seeds 0–299 [1000–1299]: runs 5.86 → 6.08 [6.18 → 6.25]; reached on BIP 33.5% → 34.2% [34.2% → 34.9%]; grounder hits .327 → .329 [.329 → .332]; double plays 1.64 → 1.61 a game. On 1,000 games from seed 5: 6.03 → 6.18. Full row: [metrics ledger](../metrics-ledger.md), "Fielder communication".
+
+**Where it comes from (counterfactuals, same build):**
+
+| Build | Seeds 0–299 [1000–1299] | 1,000 games from 5 |
+|---|---|---|
+| main `c3a2714` | 5.86 [6.18] | 6.03 |
+| first version `8861a38` | 6.21 [6.34] | — |
+| `8861a38`, `CALL_HEARD_S` = 0 | 5.76 [6.01] | — |
+| `636366d` | 6.08 [6.25] | 6.18 |
+| `636366d`, the relay man's knowledge of the chaser instant | 5.96 [6.06] | — |
+| `636366d`, backups' knowledge instant | 6.05 [6.26] | — |
+| `636366d`, covers' knowledge instant | 6.05 [6.26] | — |
+| `636366d`, every use instant except the decisions | — | 6.07 |
+
+The structural changes (each man decides alone, the priority table, the visible fielding point) are worth about nothing. The rise is the 0.3 s delay. Its first form was a defect: outfielders reading from 60 m deferred to infielders whose own reads had no play, nobody went in 4.5% of first calls (seed 0, 100 games), and triples went 919 → 1055 (seeds 0–299). After `636366d` (outfielders weigh only outfielders), triples are 911. What is left is mostly the relay man learning late who has the ball. That is not understood, since he goes out only once the ball is down, and his job does not end and restart more often with the delay than without it (11 a game either way). The 300-game splits are within this ledger's 0.1–0.2 run reshuffle noise. Nothing was tuned back.
+
+**Cost:** a game takes 28% longer (920 → 1180 ms per core), from the teammate intercept scans (`seen_intercept`) in each decision. They could be cached per read if this matters.
