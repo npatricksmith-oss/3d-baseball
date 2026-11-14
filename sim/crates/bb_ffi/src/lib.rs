@@ -299,7 +299,7 @@ pub struct BbPlayInfo {
     /// Play time at which the ball left the playing field and was dead (rules-spec §5.8), s,
     /// or −1 if it never left: the moment a client can cut back to the field.
     pub dead_s: f32,
-    /// Where it left: the ground point under the ball as it crossed the wall or fence (sim
+    /// Where it left: the ball's centre as it crossed the wall or fence (sim
     /// frame, m; zeros if it never left).
     pub dead_at: [f32; 3],
     /// Why: 0 it never left; 1 out of play (a foul ball or a throw); 2 home run; 3 ground-rule
@@ -545,7 +545,10 @@ mod tests {
                 assert!((1..=3).contains(&info.dead_reason) && info.dead_s <= info.duration_s + 1e-4, "{}", info.dead_s);
                 let last = tl.ball().unwrap().segments().unwrap().iter().filter_map(|s| s.knots()).flat_map(|k| k.iter()).map(|k| k.t()).fold(0.0f32, f32::max);
                 assert!(last >= info.dead_s - 0.05, "the track ends at {last} before the ball was dead at {}", info.dead_s);
-                assert!(info.dead_at[2] == 0.0 && (info.dead_at[0] != 0.0 || info.dead_at[1] != 0.0));
+                // Where it crossed: on the boundary (a ball radius inside a wall's plane, or on
+                // the fence's curve), at or above the ground.
+                let w = bb_physics::ground::Field::default().ball_clearance(info.dead_at[0] as f64, info.dead_at[1] as f64, 0.036888);
+                assert!(w.dist.abs() < 2e-3 && info.dead_at[2] >= 0.0, "dead at {:?}: {w:?}", info.dead_at);
             } else {
                 assert_eq!((info.dead_reason, info.dead_at), (0, [0.0; 3]));
             }

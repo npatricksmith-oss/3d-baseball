@@ -80,7 +80,7 @@ fn parse_input(v: &Value) -> Parsed {
                 }
                 "OutOfPlay" => {
                     let p = v["pos"].as_array().unwrap();
-                    Touch::OutOfPlay { x: p[0].as_float().unwrap(), y: p[1].as_float().unwrap(), in_flight: b(v, "in_flight") }
+                    Touch::OutOfPlay { x: p[0].as_float().unwrap(), y: p[1].as_float().unwrap(), z: p.get(2).and_then(|z| z.as_float()).unwrap_or(0.0), in_flight: b(v, "in_flight") }
                 }
                 "Batter" => Touch::Batter,
                 "Wall" => {

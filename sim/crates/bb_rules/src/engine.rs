@@ -691,7 +691,7 @@ fn live_touch(st: &mut RulesState, _t: f64, what: Touch, ev: &mut Vec<Event>) {
         // A caught fly that leaves the field without a throw (the fielder carried it out):
         // one base each (Gemini play-area review P1-4: it was ruled a home run).
         Touch::OutOfPlay { .. } if lp.caught => catch_carried_out(st, ev),
-        Touch::OutOfPlay { x, y, in_flight } => {
+        Touch::OutOfPlay { x, y, in_flight, .. } => {
             let fair = match lp.fair {
                 FairFoul::Fair => true,
                 FairFoul::Foul => false,
