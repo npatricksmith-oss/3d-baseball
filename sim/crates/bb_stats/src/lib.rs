@@ -1,6 +1,8 @@
 //! Statistics as pure functions of the event log (PLAN §4.3, data-formats §4). Nothing here
 //! looks at the simulation; it reads only the verified log.
 
+pub mod scorer;
+
 use bb_schema::ev::{self, EventBody};
 use bb_schema::log::{self, LogError};
 
@@ -9,6 +11,18 @@ use bb_schema::log::{self, LogError};
 pub struct TeamLine {
     pub runs: u32,
     pub pa: u32,
+    pub ab: u32,
+    pub h: u32,
+    pub singles: u32,
+    pub doubles: u32,
+    pub triples: u32,
+    pub rbi: u32,
+    pub sf: u32,
+    pub sh: u32,
+    pub undetermined: u32,
+    /// At-bats ended by a base awarded on a thrown ball out of play: no hit, and not yet
+    /// ruled an error (rules-spec §10.2).
+    pub thrown_award: u32,
     pub k: u32,
     pub bb: u32,
     pub hbp: u32,
@@ -20,7 +34,7 @@ pub struct TeamLine {
 }
 
 /// One player's batting line, with who he is from the log header's roster (data-formats
-/// §2.4). At-bats and hits wait for the official scorer (rules-spec §10), as in [`TeamLine`].
+/// §2.4). Batting statistics are derived by the log-backed scorer (rules-spec §10).
 #[derive(Clone, Debug, Default, PartialEq, Eq)]
 pub struct BatterLine {
     /// The id he bats and runs under.
@@ -39,6 +53,18 @@ pub struct BatterLine {
     pub throws: char,
     pub pa: u32,
     pub runs: u32,
+    pub ab: u32,
+    pub h: u32,
+    pub singles: u32,
+    pub doubles: u32,
+    pub triples: u32,
+    pub rbi: u32,
+    pub sf: u32,
+    pub sh: u32,
+    pub undetermined: u32,
+    /// At-bats ended by a base awarded on a thrown ball out of play: no hit, and not yet
+    /// ruled an error (rules-spec §10.2).
+    pub thrown_award: u32,
     pub k: u32,
     pub bb: u32,
     pub hbp: u32,
@@ -56,6 +82,7 @@ impl BatterLine {
 
 #[derive(Clone, Debug, Default, PartialEq, Eq)]
 pub struct BoxScore {
+    pub scorer_version: u16,
     pub teams: [TeamLine; 2],
     /// Each side's batters in batting order (away, home); empty if the log has no rosters.
     pub batting: [Vec<BatterLine>; 2],
@@ -68,6 +95,11 @@ pub struct BoxScore {
 
 /// Build the box score from a finished log.
 pub fn box_score(bytes: &[u8]) -> Result<BoxScore, LogError> {
+    box_score_with_options(bytes, scorer::ScorerOptions::default())
+}
+
+/// Score a log with an explicitly chosen counterfactual threshold.
+pub fn box_score_with_options(bytes: &[u8], options: scorer::ScorerOptions) -> Result<BoxScore, LogError> {
     let hand = |h: bb_schema::Hand| match h {
         bb_schema::Hand::Left => 'L',
         bb_schema::Hand::Right => 'R',
@@ -75,7 +107,7 @@ pub fn box_score(bytes: &[u8]) -> Result<BoxScore, LogError> {
         _ => '?',
     };
     let v = log::read(bytes)?;
-    let mut b = BoxScore::default();
+    let mut b = BoxScore { scorer_version: scorer::SCORER_VERSION, ..Default::default() };
     if let Some(cfg) = v.header.config() {
         for (side, team) in [cfg.away(), cfg.home()].into_iter().enumerate() {
             let Some(roster) = team.and_then(|t| t.roster()) else { continue };
@@ -98,6 +130,10 @@ pub fn box_score(bytes: &[u8]) -> Result<BoxScore, LogError> {
         }
     }
     let mut side = 0usize;
+    let mut outs_in_half = 0u32;
+    let mut runners = std::collections::BTreeSet::new();
+    let mut half_ended = true;
+    let mut stranded_batter = false;
     for play in &v.plays {
         let Some(events) = play.events() else { continue };
         for e in events.iter() {
@@ -108,10 +144,15 @@ pub fn box_score(bytes: &[u8]) -> Result<BoxScore, LogError> {
                     b.linescore[side].push(0);
                     b.outs_by_half.push(0);
                     b.innings = b.innings.max(h.inning() as u32);
+                    outs_in_half = 0;
+                    runners.clear();
+                    half_ended = false;
+                    stranded_batter = false;
                 }
                 EventBody::PitchReleased => b.teams[side].pitches_seen += 1,
                 EventBody::RunScored => {
                     let runner = e.body_as_run_scored().unwrap().runner();
+                    runners.remove(&runner);
                     if let Some(l) = b.batting[side].iter_mut().find(|l| l.agent == runner) {
                         l.runs += 1;
                     }
@@ -120,7 +161,13 @@ pub fn box_score(bytes: &[u8]) -> Result<BoxScore, LogError> {
                         *x += 1;
                     }
                 }
+                EventBody::RunnerAdvanced => {
+                    let a = e.body_as_runner_advanced().unwrap();
+                    if (1..=3).contains(&a.to_base()) { runners.insert(a.runner()); } else { runners.remove(&a.runner()); }
+                }
                 EventBody::RunnerOut => {
+                    outs_in_half += 1;
+                    runners.remove(&e.body_as_runner_out().unwrap().runner());
                     if let Some(x) = b.outs_by_half.last_mut() {
                         *x += 1;
                     }
@@ -132,21 +179,55 @@ pub fn box_score(bytes: &[u8]) -> Result<BoxScore, LogError> {
                     let t = &mut b.teams[side];
                     t.pa += 1;
                     l.pa += 1;
-                    let (tc, lc) = match pa.result() {
-                        ev::PaResult::Strikeout => (&mut t.k, &mut l.k),
-                        ev::PaResult::Walk => (&mut t.bb, &mut l.bb),
-                        ev::PaResult::HitByPitch => (&mut t.hbp, &mut l.hbp),
-                        ev::PaResult::HomeRun => (&mut t.hr, &mut l.hr),
-                        _ => (&mut t.batted, &mut l.batted),
-                    };
-                    *tc += 1;
-                    *lc += 1;
+                    let play_outs = events.iter().filter(|e| e.body_type() == EventBody::RunnerOut).count() as u32;
+                    let ruling = scorer::score_play_with_options(*play, outs_in_half.saturating_sub(play_outs), options).expect("PA event exists");
+                    let pending_walk_off = ruling.outcome == scorer::Outcome::Undetermined
+                        && events.iter().filter_map(|e| e.body_as_game_ended()).any(|g| g.reason() == ev::GameEndReason::WalkOff);
+                    if (pending_walk_off || events.iter().filter_map(|e| e.body_as_scorer_evidence()).any(|sc| sc.batter() == pa.batter() && sc.has_first_touch()))
+                        && !events.iter().filter_map(|e| e.body_as_runner_out()).any(|o| o.runner() == pa.batter())
+                        && !events.iter().filter_map(|e| e.body_as_run_scored()).any(|r| r.runner() == pa.batter()) {
+                        runners.insert(pa.batter());
+                    }
+                    // OBR box-score LOB includes a batter still short of first when a
+                    // preceding runner makes the third out (9.02(g)), even though the
+                    // rules engine's occupied-base count does not.
+                    stranded_batter = outs_in_half >= 3 && ruling.outcome == scorer::Outcome::Out
+                        && pa.result() == ev::PaResult::Unknown
+                        && !events.iter().filter_map(|e| e.body_as_runner_out()).any(|o| o.runner() == pa.batter());
+                    if ruling.sacrifice_fly { t.sf += 1; l.sf += 1; }
+                    t.rbi += ruling.rbi;
+                    l.rbi += ruling.rbi;
+                    use scorer::Outcome;
+                    match ruling.outcome {
+                        Outcome::Walk => { t.bb += 1; l.bb += 1; }
+                        Outcome::HitByPitch => { t.hbp += 1; l.hbp += 1; }
+                        Outcome::Strikeout => { t.k += 1; l.k += 1; t.ab += 1; l.ab += 1; }
+                        Outcome::Hit(base) => {
+                            t.ab += 1; l.ab += 1; t.h += 1; l.h += 1;
+                            match base {
+                                1 => { t.singles += 1; l.singles += 1; }
+                                2 => { t.doubles += 1; l.doubles += 1; }
+                                3 => { t.triples += 1; l.triples += 1; }
+                                4 => { t.hr += 1; l.hr += 1; }
+                                _ => {}
+                            }
+                            if base != 4 { t.batted += 1; l.batted += 1; }
+                        }
+                        Outcome::Out | Outcome::FieldersChoice | Outcome::Undetermined | Outcome::ReachedOnThrowAward => {
+                            if !ruling.sacrifice_fly { t.ab += 1; l.ab += 1; }
+                            t.batted += 1; l.batted += 1;
+                            if ruling.outcome == Outcome::ReachedOnThrowAward { t.thrown_award += 1; l.thrown_award += 1; }
+                            if ruling.outcome == Outcome::Undetermined { t.undetermined += 1; l.undetermined += 1; }
+                        }
+                    }
                 }
                 EventBody::HalfInningEnded => {
-                    b.teams[side].left_on_base += e.body_as_half_inning_ended().unwrap().left_on_base() as u32;
+                    b.teams[side].left_on_base += runners.len() as u32 + u32::from(stranded_batter);
+                    half_ended = true;
                 }
                 EventBody::GameEnded => {
                     let g = e.body_as_game_ended().unwrap();
+                    if !half_ended { b.teams[side].left_on_base += runners.len() as u32; half_ended = true; }
                     b.final_score = Some((g.score_away() as u32, g.score_home() as u32));
                 }
                 _ => {}

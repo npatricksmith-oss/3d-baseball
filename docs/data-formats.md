@@ -244,6 +244,26 @@ Grouped by producer. "Physical" events record what the world did. "Rules" events
 | `WarmupState` | pitcher, state (cold, warming, ready, overwarmed), pitches thrown in the pen. Emitted on change |
 | `PhysicalLoad` | agent, kind (pitch effort, sprint, dive, collision, HBP energy), amount in J or a defined load unit. Feeds fatigue now and injuries later (PLAN §11, D18) |
 
+For each live ball `ScorerEvidence` records the batter and starting runners, the first
+handling (including a glove deflection), the first secure possession and its location,
+each runner's actual base touches (including the batter's first-base touch when present),
+and the origin, target, base and time
+of each throw, including whether the defense chose it as an attempted out rather than a
+routine return, and the batter's running goal at release. A fielder's attempt to carry
+the ball to another base is recorded separately from throws. `has_margin` distinguishes a computed reference margin from absent evidence;
+`clean_play_margin_s` is actual first touch minus the arrival of the set grade-50 reference
+throw. It is computed after the play from the first secure possession, not used by agents.
+No margin is asserted when the batter never touched first or the ball was not secured. A
+reference throw that lands short continues through the noise-free bounce model; one that
+never reaches the bag has a negative-infinite margin.
+Runner outs and their destination bases are recorded by `RunnerOut`. Errors are not yet ruled.
+
+The scorer also reads, from the same play record: `BallDead` with reason `OutOfPlay` (a thrown
+ball left the field and bases were awarded; the batter reaches only by that award unless
+`first_touch_s` precedes the last throw's `t_release`), `RunnerAdvanced.cause = Award`, and
+`PlateAppearanceEnded.result`. `ScorerRuling` is not written yet: rulings are derived on read
+(`bb_stats::scorer`, `scorer_version` 1), so a better scorer re-rules old logs.
+
 ### 4.4 Determinism digest
 
 - `digest_n = BLAKE3(digest_{n−1} ‖ bytes(PlayRecord_n))`, with `digest_{−1}` = 32 zero bytes.

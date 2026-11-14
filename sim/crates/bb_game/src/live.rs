@@ -28,7 +28,7 @@ mod holder;
 
 const DT: f64 = 1.0 / 60.0;
 const REPLAN_S: f64 = 0.4;
-const REACH: f64 = 1.0;
+pub(crate) const REACH: f64 = 1.0;
 const DIVE: f64 = 1.5;
 const DIVE_MAX_Z: f64 = 1.2;
 pub const DIVE_GETUP_S: f64 = 1.5;
@@ -58,7 +58,7 @@ const LUNGE_CHECKS: usize = 15;
 const BODY_R: f64 = 0.3;
 /// A catch below this height is a shoestring catch: a close call for the umpire, m [E].
 const LOW_CATCH_Z: f64 = 0.4;
-const CATCH_MAX_Z: f64 = 2.4;
+pub(crate) const CATCH_MAX_Z: f64 = 2.4;
 /// Leaping reach at the wall [E].
 const WALL_CATCH_MAX_Z: f64 = 3.0;
 const POCKET: f64 = 0.06;
@@ -419,7 +419,28 @@ pub struct LiveInput<'a> {
     pub record: bool,
 }
 
+/// Physical throw facts retained for the scorer, not passed to an agent.
+#[derive(Clone, Copy, Debug)]
+pub struct ScorerThrowFact {
+    pub thrower: AgentId,
+    pub t: f64,
+    pub origin: Vec3,
+    pub target: Vec3,
+    pub base: u8,
+    /// The throw was selected as a play on a runner, not a routine return.
+    pub attempted_out: bool,
+    pub batter_goal: u8,
+}
+
+#[derive(Clone, Copy, Debug)]
+pub struct ScorerCarryFact { pub fielder: AgentId, pub t: f64, pub base: u8, pub batter_goal: u8 }
+
 pub struct LiveOutput {
+    pub scorer_carries: Vec<ScorerCarryFact>,
+    /// First glove contact with the batted ball, including a deflection.
+    pub first_handling: Option<(f64, AgentId)>,
+    /// Physical releases, independent of visualization recording.
+    pub scorer_throws: Vec<ScorerThrowFact>,
     pub facts: Vec<Input>,
     pub events: Vec<Event>,
     /// The batted ball's free path at contact (for timelines).
@@ -2049,6 +2070,9 @@ impl<'a> Sim<'a> {
                 let (id, from) = (fd.id, fd.pos);
                 self.out.dives.push((self.t, id, from, land));
             }
+            if d <= RIM && self.out.first_handling.is_none() {
+                self.out.first_handling = Some((self.t, fd.id));
+            }
             if d <= POCKET {
                 // Up off the ground first (the get-up runs from his dive, whichever attempt
                 // secured the ball), then the transfer.
@@ -2676,6 +2700,11 @@ impl<'a> Sim<'a> {
                     self.trace_choice(by, "carry", o.base, false, Some(i), &options);
                     self.f[by].target = base_pos(o.base);
                     self.f[by].carry_to = Some(o.base);
+                    // Scorer evidence (rules-spec §10.2): he is carrying the ball to put a runner out.
+                    if !self.out.scorer_carries.iter().any(|c| c.fielder == fd.id && c.base == o.base) {
+                        let batter_goal = self.r.iter().find(|r| r.start == 0).map(|r| r.goal).unwrap_or(0);
+                        self.out.scorer_carries.push(ScorerCarryFact { fielder: fd.id, t: self.t, base: o.base, batter_goal });
+                    }
                 }
                 return;
             }
@@ -2721,6 +2750,7 @@ impl<'a> Sim<'a> {
         if let (true, Some(i)) = (through, race.relay) {
             self.trace_choice(by, action, b, true, best, &options);
             self.throw_to(by, leg, b, i, true);
+            if let Some(fact) = self.out.scorer_throws.last_mut() { fact.attempted_out = margins.is_some(); }
             return;
         }
         let receiver = race.receiver;
@@ -2731,6 +2761,7 @@ impl<'a> Sim<'a> {
         }
         self.trace_choice(by, action, b, false, best, &options);
         self.throw_to(by, tgt, b, receiver, false);
+        if let Some(fact) = self.out.scorer_throws.last_mut() { fact.attempted_out = margins.is_some(); }
         self.f[receiver].target = tgt;
         // A throw that goes past the cutoff man ends his job: he pulls up, free to back it up.
         for i in 0..9 {
@@ -2779,6 +2810,8 @@ impl<'a> Sim<'a> {
         let h = Vec3::new(tgt.x - r0.x, tgt.y - r0.y, 0.0).normalized().rotate(Vec3::Z, ex.yaw_err);
         self.launch_throw(throw_state(r0, h, ex.speed, elev), tgt, b, receiver, relay);
         self.out.released.push((self.t, fd.id));
+        let batter_goal = self.r.iter().find(|r| r.start == 0).map(|r| r.goal).unwrap_or(0);
+        self.out.scorer_throws.push(ScorerThrowFact { thrower: fd.id, t: self.t, origin: r0, target: tgt, base: b, attempted_out: false, batter_goal });
         // The rules engine needs the release for a throw that goes out of play (rules-spec §7.2);
         // fielders 0–5 are P, C, 1B, 2B, 3B, SS.
         let t_rel = self.t.max(self.last_fact_t);
@@ -2947,7 +2980,7 @@ fn new_sim<'a>(inp: &'a LiveInput<'a>, st: &'a mut RulesState) -> Sim<'a> {
         f,
         r,
         primary: 0,
-        out: LiveOutput { facts: Vec::new(), events: Vec::new(), path, ball_track: Vec::new(), actors, secured: Vec::new(), released: Vec::new(), hurry: Vec::new(), dives: Vec::new(), calls: Vec::new() },
+        out: LiveOutput { scorer_carries: Vec::new(), first_handling: None, scorer_throws: Vec::new(), facts: Vec::new(), events: Vec::new(), path, ball_track: Vec::new(), actors, secured: Vec::new(), released: Vec::new(), hurry: Vec::new(), dives: Vec::new(), calls: Vec::new() },
         bounce_k: 1000,
         done: false,
         last_fact_t: t_c,

@@ -29,26 +29,33 @@ fn header(teams: bool) -> Vec<u8> {
 /// One play: the top of the 1st starts; batter 7 strikes out; batter 8 homers and scores
 /// himself; the game ends 1–0 after one inning.
 fn log(teams: bool) -> Vec<u8> {
+    // Each play record holds one plate appearance, as the sim writes them.
+    fn play(w: &mut LogWriter, index: u32, build: impl FnOnce(&mut Vec<(EventBody, flatbuffers::WIPOffset<flatbuffers::UnionWIPOffset>)>, &mut FlatBufferBuilder<'_>)) {
+        w.write_play(index, |fbb| {
+            let mut bodies = Vec::new();
+            build(&mut bodies, fbb);
+            let evs: Vec<_> = bodies
+                .into_iter()
+                .enumerate()
+                .map(|(i, (body_type, body))| Event::create(fbb, &EventArgs { seq: i as u32, t: i as f64, body_type, body: Some(body) }))
+                .collect();
+            fbb.create_vector(&evs)
+        });
+    }
     let mut w = LogWriter::new(&header(teams));
-    w.write_play(0, |fbb| {
-        let mut bodies = Vec::new();
-        let mut add = |_: &mut FlatBufferBuilder<'_>, body_type, body| bodies.push((body_type, body));
+    play(&mut w, 0, |bodies, fbb| {
         let h = ev::HalfInningStarted::create(fbb, &ev::HalfInningStartedArgs { inning: 1, half: ev::HalfInning::Top }).as_union_value();
-        add(fbb, EventBody::HalfInningStarted, h);
+        bodies.push((EventBody::HalfInningStarted, h));
         let k = ev::PlateAppearanceEnded::create(fbb, &ev::PlateAppearanceEndedArgs { batter: 7, result: ev::PaResult::Strikeout, outs_recorded: 1, ..Default::default() }).as_union_value();
-        add(fbb, EventBody::PlateAppearanceEnded, k);
+        bodies.push((EventBody::PlateAppearanceEnded, k));
+    });
+    play(&mut w, 1, |bodies, fbb| {
         let hr = ev::PlateAppearanceEnded::create(fbb, &ev::PlateAppearanceEndedArgs { batter: 8, result: ev::PaResult::HomeRun, runs_scored: 1, ..Default::default() }).as_union_value();
-        add(fbb, EventBody::PlateAppearanceEnded, hr);
+        bodies.push((EventBody::PlateAppearanceEnded, hr));
         let r = ev::RunScored::create(fbb, &ev::RunScoredArgs { runner: 8, ..Default::default() }).as_union_value();
-        add(fbb, EventBody::RunScored, r);
+        bodies.push((EventBody::RunScored, r));
         let g = ev::GameEnded::create(fbb, &ev::GameEndedArgs { score_away: 1, score_home: 0, innings: 1, ..Default::default() }).as_union_value();
-        add(fbb, EventBody::GameEnded, g);
-        let evs: Vec<_> = bodies
-            .into_iter()
-            .enumerate()
-            .map(|(i, (body_type, body))| Event::create(fbb, &EventArgs { seq: i as u32, t: i as f64, body_type, body: Some(body) }))
-            .collect();
-        fbb.create_vector(&evs)
+        bodies.push((EventBody::GameEnded, g));
     });
     w.finish(1, 0).0
 }

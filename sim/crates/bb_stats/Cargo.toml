@@ -12,6 +12,6 @@ workspace = true
 bb_schema.workspace = true
 
 [dev-dependencies]
+flatbuffers.workspace = true
 bb_rules.workspace = true
 bb_game.workspace = true
-flatbuffers.workspace = true

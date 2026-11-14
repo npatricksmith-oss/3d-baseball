@@ -99,8 +99,21 @@ fn pa_result(r: PaResult) -> ev::PaResult {
     }
 }
 
+/// Evidence gathered after a live play, independent of the rules engine and agents.
+pub struct ScorerPlayEvidence {
+    pub batter: u16,
+    pub runners: Vec<crate::play::RunnerIn>,
+    pub first_touch: Option<f64>,
+    pub first_handling: Option<(f64, u16)>,
+    pub secured: Option<(f64, u16, bb_math::Vec3)>,
+    pub margin: Option<f64>,
+    pub throws: Vec<crate::live::ScorerThrowFact>,
+    pub carries: Vec<crate::live::ScorerCarryFact>,
+    pub touches: Vec<(u16, u8, f64)>,
+}
+
 /// Append one pitch's record: physical facts first, then the rules events it produced.
-pub fn write_pitch(w: &mut LogWriter, play: u32, pitcher: u16, rec: &PitchRecord, rules: &[RE]) {
+pub fn write_pitch(w: &mut LogWriter, play: u32, pitcher: u16, rec: &PitchRecord, rules: &[RE], scorer: Option<&ScorerPlayEvidence>) {
     w.write_play(play, |fbb| {
         let mut items: Vec<(f64, EventBody, WIPOffset<flatbuffers::UnionWIPOffset>)> = Vec::new();
         let (r, v, wv) = (vec3d(rec.release.r.to_array()), vec3d(rec.release.v.to_array()), vec3d(rec.release.w.to_array()));
@@ -147,14 +160,43 @@ pub fn write_pitch(w: &mut LogWriter, play: u32, pitcher: u16, rec: &PitchRecord
             );
             items.push((t, EventBody::BattedBall, bb.as_union_value()));
         }
+        if let Some(sc) = scorer {
+            let runners: Vec<_> = sc.runners.iter().map(|r| ev::RunnerOnBase::create(fbb, &ev::RunnerOnBaseArgs { base: r.base, agent: r.id })).collect();
+            let runners = fbb.create_vector(&runners);
+            let throws: Vec<_> = sc.throws.iter().map(|t| {
+                let origin = vec3d(t.origin.to_array());
+                let target = vec3d(t.target.to_array());
+                ev::ScorerThrow::create(fbb, &ev::ScorerThrowArgs { thrower: t.thrower, t_release: t.t, origin: Some(&origin), target: Some(&target), base: t.base, attempted_out: t.attempted_out, batter_goal: t.batter_goal })
+            }).collect();
+            let throws = fbb.create_vector(&throws);
+            let carries: Vec<_> = sc.carries.iter().map(|c| ev::ScorerCarry::create(fbb, &ev::ScorerCarryArgs { fielder: c.fielder, t: c.t, base: c.base, batter_goal: c.batter_goal })).collect();
+            let carries = fbb.create_vector(&carries);
+            let touches: Vec<_> = sc.touches.iter().map(|&(runner, base, t)| ev::ScorerTouch::create(fbb, &ev::ScorerTouchArgs { runner, base, t })).collect();
+            let touches = fbb.create_vector(&touches);
+            let secured_at = sc.secured.map(|(_, _, p)| vec3d(p.to_array()));
+            let x = ev::ScorerEvidence::create(fbb, &ev::ScorerEvidenceArgs {
+                batter: sc.batter, runners: Some(runners),
+                has_first_touch: sc.first_touch.is_some(), first_touch_s: sc.first_touch.unwrap_or_default(),
+                has_handling: sc.first_handling.is_some(), first_handler: sc.first_handling.map(|x| x.1).unwrap_or_default(), handling_s: sc.first_handling.map(|x| x.0).unwrap_or_default(),
+                has_secured: sc.secured.is_some(), reference_fielder: sc.secured.map(|x| x.1).unwrap_or_default(), secured_s: sc.secured.map(|x| x.0).unwrap_or_default(), secured_at: secured_at.as_ref(),
+                has_margin: sc.margin.is_some(), clean_play_margin_s: sc.margin.unwrap_or_default(), throws: Some(throws), carries: Some(carries), touches: Some(touches), ..Default::default()
+            });
+            items.push((0.0, EventBody::ScorerEvidence, x.as_union_value()));
+        }
+        if let Some(fair) = rules.iter().find_map(|e| match e { RE::FairFoulDecided { fair } => Some(*fair), _ => None }) {
+            let caught = rules.iter().any(|e| matches!(e, RE::Catch { .. }));
+            let ruling = ev::BattedBallRuling::create(fbb, &ev::BattedBallRulingArgs { fair_foul: if fair { ev::FairFoul::Fair } else { ev::FairFoul::Foul }, caught, ..Default::default() });
+            items.push((0.0, EventBody::BattedBallRuling, ruling.as_union_value()));
+        }
         for e in rules {
             match e {
                 RE::PitchResult { call: c, balls, strikes } => {
                     let x = ev::PitchResult::create(fbb, &ev::PitchResultArgs { outcome: call(*c), balls: *balls, strikes: *strikes });
                     items.push((0.0, EventBody::PitchResult, x.as_union_value()));
                 }
-                RE::RunnerAdvanced { runner, from, to, .. } => {
-                    let x = ev::RunnerAdvanced::create(fbb, &ev::RunnerAdvancedArgs { runner: *runner, from_base: *from, to_base: *to, ..Default::default() });
+                RE::RunnerAdvanced { runner, from, to, cause } => {
+                    let cause = match cause { bb_rules::AdvanceCause::Walk => ev::AdvanceCause::Walk, bb_rules::AdvanceCause::HitByPitch => ev::AdvanceCause::HitByPitch, bb_rules::AdvanceCause::Award => ev::AdvanceCause::Award, bb_rules::AdvanceCause::OnPlay => ev::AdvanceCause::Unknown };
+                    let x = ev::RunnerAdvanced::create(fbb, &ev::RunnerAdvancedArgs { runner: *runner, from_base: *from, to_base: *to, cause, ..Default::default() });
                     items.push((0.0, EventBody::RunnerAdvanced, x.as_union_value()));
                 }
                 RE::RunnerOut { runner, base, kind } => {

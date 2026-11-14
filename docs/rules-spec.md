@@ -391,7 +391,7 @@ The rules engine also publishes the **legal-command set** at each decision point
 
 ## 10. Official Scorer
 
-The scorer is a **pure function of the event log** (PLAN §4.3), versioned by `scorer_version`, living in `bb_stats` with its decision helpers in `bb_rules`. Every ruling writes `ScorerRuling` plus `ScorerEvidence` (data-formats §4.3) so a later scorer version can re-rule from the log.
+The scorer is a **pure function of the event log** (PLAN §4.3), versioned by `scorer_version`, living in `bb_stats` with its decision helpers in `bb_rules`. The event writer records `ScorerEvidence` (data-formats §4.3); rulings are derived when the log is read, so a later scorer version can re-rule without re-simulation.
 
 ### 10.1 The counterfactual test
 
@@ -406,12 +406,41 @@ Key margins (all [E], configurable):
 
 For each batter-runner reaching base on a fair ball:
 1. If a fielder **misplayed an ordinary chance** (capture failure or errant throw on an ordinary chance) and the reference play retires the batter by ≥ `m_err`: **reached on error** (fielding or throwing, by which act failed).
-2. Else if the defense **chose** to play on another runner and the reference throw to first retires the batter by ≥ `m_fc`: **fielder's choice** (whether or not the other runner was retired).
+2. Else if a preceding runner was forced out, or an infielder handled the ball and put out a preceding runner advancing one base or returning, deny the hit (OBR 9.05(b)(1), (3)). If the defense unsuccessfully attempted to retire a preceding runner and the reference throw to first retires the batter by ≥ `m_fc`, score a **fielder's choice** (9.05(a)(6), (b)(4)). A mere look or feint toward another base is not an attempted play.
 3. Else: **hit**. The hit's value is the last base the batter reached **without** the help of an error or a throw to another base (advance on the throw) [S: OBR 9.06].
 - A batter who would have reached anyway is credited with a hit even if a fielder misplayed; the misplay may still be an error if it let a runner advance extra (§10.3).
 - A **dropped foul fly** that was an ordinary catch is an error that prolongs the PA.
 - **Infield hit:** the ball was fielded cleanly but the reference throw was late.
 - **Ground-rule double**, **HR** by award. A walk-off hit is limited per §4.1.
+
+**Evidence implementation:** for each live ball the log records each runner's starting base,
+first glove handling (including a deflection), first secure possession, batter's first-base
+touch when it occurs, and each throw's release time, origin and target. The reference throw
+is computed in `bb_game` after the play, never exposed to agents: from the first secure
+possession's location and time, a set grade-50 fielder uses the position's average transfer
+and arm, the actual environment, and the throw physics to first. The margin is actual batter
+first-touch time minus reference arrival; a missing touch or possession is explicitly marked unavailable. When the ball cannot reach first on the fly, the reference continues a maximum-elevation
+throw through the same ground physics with bounce-normal noise set to zero. A ball that
+never reaches the bag has a negative-infinite margin. For a play ending before first is touched there is no actual
+time to first and no fabricated margin. If the sim ends a walk-off before the batter's
+first-base touch, the hit ruling remains explicitly undetermined; the box score counts that
+still-live batter as left on base. These facts support re-ruling without simulation.
+Fielding-error rulings remain provisional until A17: do not invent an error from a miss.
+The batter's running goal at an attempted throw to another base is recorded: extra bases
+chosen only afterward are provisionally treated as on the throw. This is an observable
+heuristic, not a full counterfactual of how far he would have run absent the throw.
+
+**Error seam (provisional until A17).** The sim has no fielding errors, and the scorer rules
+none. The one place the sim already hands out bases for a bad act is a **thrown ball out of
+play** (§7.2). Its award is not a hit (OBR 5.06(b)(4)(G) gives the bases; 9.12 charges the
+thrower). Under scorer version 1 such a batter is ruled `ReachedOnThrowAward`: an at-bat
+with no hit, no RBI for a run the award itself scores, and no error charged. If he had
+touched first before the last throw's release, the play is judged as any other (hit,
+fielder's choice) and the award is left out of the hit's value. Without this rule the
+award, which the log carries as `RunnerAdvanced{Award}`, was counted as a hit worth
+its bases (43 of 53 such plays in 300 games). When A17 adds errors, this case becomes
+*reached on error* (§10.2 step 1) and `ReachedOnThrowAward` goes away; every other place a rule says
+"error" waits for that fact too (§10.3 extra bases, unearned runs §10.6, dropped fouls).
 
 ### 10.3 Errors on runners and extra bases
 
@@ -421,7 +450,7 @@ A misplay that is ordinary and lets any runner (including the batter-runner afte
 
 - **Wild pitch vs passed ball:** scored only when a runner advances (or the batter reaches on an uncaught strike three) because the catcher did not hold the pitch. **Wild pitch** if the pitch bounced before the catcher, or its crossing point was outside the catcher's ordinary reach (`reach_frac` > 0.7 at the receiving target). Otherwise **passed ball**.
 - **Stolen base** if a runner advances on an attempt with no hit, error, WP, or PB; **caught stealing** if retired on the attempt. **Defensive indifference** (no SB credited) if the defense made no throw or move and the runner's team was not in a scoring-relevant spot: 9th inning or later, defense leading by ≥ 3 [C].
-- **Sacrifice fly:** fewer than two outs, a fly or line drive caught (or dropped on error) in the outfield or foul territory, and a runner scores. **Sacrifice bunt** (M5).
+- **Sacrifice fly:** fewer than two outs, a fly or line drive caught (or dropped on error) in the outfield or foul territory, and a runner scores. The current reference park's outfield boundary is the 45 m [E] radial infield limit used by the live-play settle rule; the scorer exposes it as a configurable option. A future park-specific boundary can replace this approximation. **Sacrifice bunt** (M5).
 - **GIDP:** ground ball, two outs recorded on force or batter outs on the play.
 
 ### 10.5 RBI [S: OBR 9.04]
@@ -454,7 +483,7 @@ Checked by `bb_stats` tests on every generated game (calibration-targets: 1,000-
 | I5 | Σ batters faced by pitchers = opponent PA |
 | I6 | Runs = count of `RunScored` = Σ inning line score |
 | I7 | H = 1B + 2B + 3B + HR |
-| I8 | Pitches = balls + strikes + in-play pitches (strikes include fouls and foul tips) |
+| I8 | Pitches = balls + strikes + in-play pitches + hit-by-pitch outcomes (strikes include fouls and foul tips; the sim logs HBP separately) |
 | I9 | Earned runs ≤ runs per pitcher; team ER ≤ team R |
 | I10 | Every runner who reached base ends the half-inning scored, out, or left on base, exactly once |
 | I11 | Assists and putouts: every out has exactly one putout; total chances = PO + A + E |
