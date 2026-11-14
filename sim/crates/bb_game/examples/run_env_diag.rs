@@ -408,9 +408,63 @@ fn main() {
     let mut routine_ts = GbTimeStats::default();
     let mut routine_outs = 0u32;
 
+    // Pitcher fielding & positional share breakdown (Q4 / pitcher-fielding)
+    let mut gb_pos_all = [0u32; 10];       // 0=unsecured, 1..9=pos
+    let mut gb_pos_out = [0u32; 10];       // plays with >=1 out
+    let mut gb_pos_dp_act = [0u32; 10];    // plays with >=2 outs
+    let mut gb_pos_dp_opp = [0u32; 10];    // R1 && outs<2 (pre-pitch)
+    let mut gb_pos_dp_opp_2 = [0u32; 10];  // R1 && outs<2 ending in >=2 outs
+
+    #[derive(Default)]
+    struct PFieldSample {
+        ev_mph: f64,
+        v_cap_mph: f64,
+        la_deg: f64,
+        _spray_deg: f64,
+        t_sec: f64,
+        bounces: u32,
+        z_cap: f64,
+        _sx: f64,
+        sy: f64,
+        glove_dx: f64, // >0 = toward pitcher's glove side (+X RHP, -X LHP)
+        lat_from_p0: f64,
+        dist_from_p0: f64,
+        t_first_move: Option<f64>, // time after contact when P moved >0.02m (0.1s resolution)
+        p_moved_m: f64,
+        p_max_spd: f64,
+        p_cap_spd: f64,
+        dove: bool,
+        stretched: bool,
+        outs: usize,
+        ss_reach: bool,
+        ss_stretch: bool,
+        ss_dive: bool,
+        b2_reach: bool,
+        b2_stretch: bool,
+        b2_dive: bool,
+        other_if_reach: bool,
+        ss2b_in_time_for_out: bool, // SS or 2B reach+transfer+throw < ~4.35s
+    }
+    let mut p_samples: Vec<PFieldSample> = Vec::new();
+    // Same-bucket comparison to Savant 2024: all GBs and |-6..+6 deg| middle GBs by EV bin
+    // Bins: 0..60, 60..75, 75..85, 85..95, 95..105, 105+
+    let mut ev_bin_all_n = [0u32; 6];
+    let mut ev_bin_all_p = [0u32; 6];
+    let mut ev_bin_mid_n = [0u32; 6];
+    let mut ev_bin_mid_p = [0u32; 6];
+    let mut ev_bin_mid_ss = [0u32; 6];
+    let mut ev_bin_mid_2b = [0u32; 6];
+    let mut ev_bin_mid_thru = [0u32; 6];
+    let mut ev_bin_mid_hits = [0u32; 6];
+
     for seed in seed0..seed0 + games {
         let mut g = Game::new(seed, true);
         while let Some(st) = g.step_pitch() {
+            // Note: StepRecord happens post-pitch; use 1B standing alignment (which holds bag <3.0m
+            // iff runner_on_first && outs < 2) to identify DP-opportunity grounders cleanly.
+            let dp_opp_r1 = st.viz.standing.iter().any(|&(id, p)| {
+                (id & 0x80) != 0 && (id & 0x7F) == 3 && (p.x - 19.397).hypot(p.y - 19.397) < 3.0
+            });
             let batting_side = (st.batter >> 8) as usize;
             let field_side = 1 - batting_side;
             let throws = g.rosters.pitcher_throws(field_side);
@@ -641,6 +695,50 @@ fn main() {
                             if outs >= 2 {
                                 gb_outs_dp += 1;
                             }
+                            let pos_slot = first_pos.filter(|&p| (1..=9).contains(&p)).unwrap_or(0);
+                            gb_pos_all[pos_slot] += 1;
+                            if outs > 0 {
+                                gb_pos_out[pos_slot] += 1;
+                            }
+                            if outs >= 2 {
+                                gb_pos_dp_act[pos_slot] += 1;
+                            }
+                            if dp_opp_r1 {
+                                gb_pos_dp_opp[pos_slot] += 1;
+                                if outs >= 2 {
+                                    gb_pos_dp_opp_2[pos_slot] += 1;
+                                }
+                            }
+                            let ev_b = if ev_mph < 60.0 {
+                                0
+                            } else if ev_mph < 75.0 {
+                                1
+                            } else if ev_mph < 85.0 {
+                                2
+                            } else if ev_mph < 95.0 {
+                                3
+                            } else if ev_mph < 105.0 {
+                                4
+                            } else {
+                                5
+                            };
+                            ev_bin_all_n[ev_b] += 1;
+                            if pos_slot == 1 {
+                                ev_bin_all_p[ev_b] += 1;
+                            }
+                            if spray_deg.abs() <= 6.0 {
+                                ev_bin_mid_n[ev_b] += 1;
+                                match pos_slot {
+                                    1 => ev_bin_mid_p[ev_b] += 1,
+                                    6 => ev_bin_mid_ss[ev_b] += 1,
+                                    4 => ev_bin_mid_2b[ev_b] += 1,
+                                    7..=9 | 0 => ev_bin_mid_thru[ev_b] += 1,
+                                    _ => {}
+                                }
+                                if class != 2 {
+                                    ev_bin_mid_hits[ev_b] += 1;
+                                }
+                            }
                             let (rf, hit) = classify_bip(st.batter, &st.rules_events, &st.facts);
                             if hit {
                                 gb_hit_clas += 1;
@@ -841,6 +939,105 @@ fn main() {
                                 };
                                 if can_reach(&def_pos) { thru_reach_def += 1; }
                                 if can_reach(&bal_pos) { thru_reach_bal += 1; }
+                            }
+                            if let Some((ts_sec, fld, sx, sy)) = first_sec {
+                                if (fld & 0x7F) == 1 {
+                                    let p0 = play_home[0];
+                                    let (p_at, v_at) = path.at(ts_sec);
+                                    let mut t_first_move = None;
+                                    let mut p_max_spd = 0.0f64;
+                                    let mut p_cap_spd = 0.0f64;
+                                    let mut p_pos_sec = p0;
+                                    if let Some((_, samples)) = st.viz.actors.iter().find(|(id, _)| (*id & 0x80 != 0) && (*id & 0x7F) == 1) {
+                                        for w in samples.windows(2) {
+                                            let (t0, a0) = w[0];
+                                            let (t1, a1) = w[1];
+                                            let dt_s = (t1 - t0).max(1e-6);
+                                            let spd = (a1.x - a0.x).hypot(a1.y - a0.y) / dt_s;
+                                            if t1 <= ts_sec + 0.05 {
+                                                p_max_spd = p_max_spd.max(spd);
+                                            }
+                                            if t0 <= ts_sec && ts_sec <= t1 + 0.05 {
+                                                p_cap_spd = spd;
+                                            }
+                                        }
+                                        for &(ta, posa) in samples {
+                                            if ta >= t_c - 1e-6 && t_first_move.is_none() && (posa.x - p0.x).hypot(posa.y - p0.y) > 0.02 {
+                                                t_first_move = Some(ta - t_c);
+                                            }
+                                            if (ta - ts_sec).abs() < 0.06 {
+                                                p_pos_sec = posa;
+                                            }
+                                        }
+                                    }
+                                    let dove = st.viz.dives.iter().any(|(td, id, _, _)| *id == fld && *td <= ts_sec + 1e-6);
+                                    let rel = st.viz.released.iter().find(|(_, id)| *id == fld).map(|x| x.0);
+                                    let stretched = !dove && rel.is_some_and(|tr| tr - ts_sec > 0.85);
+
+                                    // Check whether SS (idx 5) or 2B (idx 3) or 3B/1B (idx 4,2) would reach path behind P
+                                    let check_if_behind = |idx: usize, max_reach: f64| -> Option<f64> {
+                                        let fp = play_home[idx];
+                                        let mut tt = ts_sec;
+                                        while tt <= path.t_end() {
+                                            let q = path.at(tt).0;
+                                            if q.x.hypot(q.y) <= 50.0 && q.z <= if max_reach > 1.5 { 1.5 } else { 2.4 } {
+                                                let d = (q.x - fp.x).hypot(q.y - fp.y);
+                                                let need = (d - max_reach).max(0.0);
+                                                let dt = tt - t_c - 0.25;
+                                                if dt >= 0.0 && dt >= run_time(need, 7.9, 0.7) {
+                                                    return Some(tt);
+                                                }
+                                            }
+                                            tt += 0.005;
+                                        }
+                                        None
+                                    };
+                                    let ss_r = check_if_behind(5, 1.0);
+                                    let ss_s = check_if_behind(5, 1.4);
+                                    let ss_d = check_if_behind(5, 2.0);
+                                    let b2_r = check_if_behind(3, 1.0);
+                                    let b2_s = check_if_behind(3, 1.4);
+                                    let b2_d = check_if_behind(3, 2.0);
+                                    let other_r = check_if_behind(2, 1.0).is_some() || check_if_behind(4, 1.0).is_some();
+                                    let out_by = [(5usize, ss_r), (3usize, b2_r)].iter().any(|&(idx, opt)| {
+                                        opt.is_some_and(|tf| {
+                                            let q = path.at(tf).0;
+                                            let d1b = (q.x - 19.399).hypot(q.y - 19.399);
+                                            let arm = if idx == 5 { 38.49 } else { 35.36 };
+                                            (tf - t_c) + 0.65 + d1b / arm < 4.35
+                                        })
+                                    });
+                                    let glove_sign = if throws == Hand::Right { 1.0 } else { -1.0 };
+                                    p_samples.push(PFieldSample {
+                                        ev_mph,
+                                        v_cap_mph: v_at.norm() / MPH,
+                                        la_deg,
+                                        _spray_deg: spray_deg,
+                                        t_sec: ts_sec - t_c,
+                                        bounces: b_cnt,
+                                        z_cap: p_at.z,
+                                        _sx: sx,
+                                        sy,
+                                        glove_dx: (sx - p0.x) * glove_sign,
+                                        lat_from_p0: (sx - p0.x).abs(),
+                                        dist_from_p0: (sx - p0.x).hypot(sy - p0.y),
+                                        t_first_move,
+                                        p_moved_m: (p_pos_sec.x - p0.x).hypot(p_pos_sec.y - p0.y),
+                                        p_max_spd,
+                                        p_cap_spd,
+                                        dove,
+                                        stretched,
+                                        outs: outs_here,
+                                        ss_reach: ss_r.is_some(),
+                                        ss_stretch: ss_s.is_some(),
+                                        ss_dive: ss_d.is_some(),
+                                        b2_reach: b2_r.is_some(),
+                                        b2_stretch: b2_s.is_some(),
+                                        b2_dive: b2_d.is_some(),
+                                        other_if_reach: other_r,
+                                        ss2b_in_time_for_out: out_by,
+                                    });
+                                }
                             }
                             if class == 1 {
                                 if let Some((ts_sec, fld, sx, sy)) = first_sec {
@@ -1222,6 +1419,131 @@ fn main() {
             s.doubles_3b_35, s.doubles_gb_3b_35, s.doubles_3b_30, s.doubles_gb_3b_30,
             s.doubles_1b_35, s.doubles_gb_1b_35, s.doubles_1b_30, s.doubles_gb_1b_30,
         );
+    }
+
+    // ---- Q4: Pitcher fielding breakdown
+    println!("\n=== Q4: PITCHER & INFIELD GROUND-BALL SHARES (LA < 10 deg) ===");
+    let pos_names = ["Unf", "P", "C", "1B", "2B", "3B", "SS", "LF", "CF", "RF"];
+    let if_all: u32 = gb_pos_all[1..=6].iter().sum();
+    let all_out: u32 = gb_pos_out.iter().sum();
+    let if_out: u32 = gb_pos_out[1..=6].iter().sum();
+    let all_dp_act: u32 = gb_pos_dp_act.iter().sum();
+    let if_dp_opp: u32 = gb_pos_dp_opp[1..=6].iter().sum();
+    println!("Counts: ALL GB={gb_tot}, IF-fielded(1..6)={if_all}, Outs={all_out} (IF={if_out}), 2+outs={all_dp_act}, R1&<2outs IF={if_dp_opp}");
+    println!("  Pos | All GB (%)    | IF GB (%)     | GB Out (%)    | R1<2 IF (%) [GDP%]     | 2+outs (%)");
+    for p in 1..=9 {
+        let a = gb_pos_all[p];
+        let o = gb_pos_out[p];
+        let dpo = gb_pos_dp_opp[p];
+        let dp2 = gb_pos_dp_opp_2[p];
+        let dpa = gb_pos_dp_act[p];
+        if p <= 6 {
+            println!("  {:3} | {:4} ({:5.2}%) | {:4} ({:5.2}%) | {:4} ({:5.2}%) | {:4} ({:5.2}%) [{:4.1}%] | {:4} ({:5.2}%)",
+                pos_names[p],
+                a, 100.0 * a as f64 / gb_tot.max(1) as f64,
+                a, 100.0 * a as f64 / if_all.max(1) as f64,
+                o, 100.0 * o as f64 / all_out.max(1) as f64,
+                dpo, 100.0 * dpo as f64 / if_dp_opp.max(1) as f64,
+                100.0 * dp2 as f64 / dpo.max(1) as f64,
+                dpa, 100.0 * dpa as f64 / all_dp_act.max(1) as f64);
+        } else {
+            println!("  {:3} | {:4} ({:5.2}%)", pos_names[p], a, 100.0 * a as f64 / gb_tot.max(1) as f64);
+        }
+    }
+    println!("  Unf | {:4} ({:5.2}%)", gb_pos_all[0], 100.0 * gb_pos_all[0] as f64 / gb_tot.max(1) as f64);
+
+    let bin_lbl = ["  0..60", " 60..75", " 75..85", " 85..95", "95..105", "   105+"];
+    println!("\nSim vs Savant middle-GB (|-6..+6 deg|) & total P share by EV bin:");
+    for b in 0..6 {
+        let an = ev_bin_all_n[b].max(1) as f64;
+        let mn = ev_bin_mid_n[b].max(1) as f64;
+        println!("  EV {} mph: ALL n={:4} P={:3} ({:5.2}%) | Mid |-6..+6°| n={:4} P={:3} ({:4.1}%) SS={:3} ({:4.1}%) 2B={:3} ({:4.1}%) Thru/OF={:3} ({:4.1}%) Hit={:4.1}%",
+            bin_lbl[b], ev_bin_all_n[b], ev_bin_all_p[b], 100.0 * ev_bin_all_p[b] as f64 / an,
+            ev_bin_mid_n[b], ev_bin_mid_p[b], 100.0 * ev_bin_mid_p[b] as f64 / mn,
+            ev_bin_mid_ss[b], 100.0 * ev_bin_mid_ss[b] as f64 / mn,
+            ev_bin_mid_2b[b], 100.0 * ev_bin_mid_2b[b] as f64 / mn,
+            ev_bin_mid_thru[b], 100.0 * ev_bin_mid_thru[b] as f64 / mn,
+            100.0 * ev_bin_mid_hits[b] as f64 / mn);
+    }
+
+    if !p_samples.is_empty() {
+        let pn = p_samples.len();
+        let pnf = pn as f64;
+        let mut evs: Vec<f64> = p_samples.iter().map(|x| x.ev_mph).collect();
+        let mut vcaps: Vec<f64> = p_samples.iter().map(|x| x.v_cap_mph).collect();
+        let mut tsecs: Vec<f64> = p_samples.iter().map(|x| x.t_sec).collect();
+        let mut lats: Vec<f64> = p_samples.iter().map(|x| x.lat_from_p0).collect();
+        let mut dists: Vec<f64> = p_samples.iter().map(|x| x.dist_from_p0).collect();
+        let mut ys: Vec<f64> = p_samples.iter().map(|x| x.sy).collect();
+        let mut las: Vec<f64> = p_samples.iter().map(|x| x.la_deg).collect();
+        let mut tmoves: Vec<f64> = p_samples.iter().filter_map(|x| x.t_first_move).collect();
+        let mut spds: Vec<f64> = p_samples.iter().map(|x| x.p_max_spd).collect();
+        let mut cap_spds: Vec<f64> = p_samples.iter().map(|x| x.p_cap_spd).collect();
+        let mut pmoves: Vec<f64> = p_samples.iter().map(|x| x.p_moved_m).collect();
+        for v in [&mut evs, &mut vcaps, &mut tsecs, &mut lats, &mut dists, &mut ys, &mut las, &mut tmoves, &mut spds, &mut cap_spds, &mut pmoves] {
+            v.sort_by(|a, b| a.total_cmp(b));
+        }
+        let b0 = p_samples.iter().filter(|x| x.bounces == 0).count();
+        let b1 = p_samples.iter().filter(|x| x.bounces == 1).count();
+        let b2 = p_samples.iter().filter(|x| x.bounces >= 2).count();
+        let dives = p_samples.iter().filter(|x| x.dove).count();
+        let stretches = p_samples.iter().filter(|x| x.stretched).count();
+        let under_045 = p_samples.iter().filter(|x| x.t_sec < 0.45).count();
+        let under_060 = p_samples.iter().filter(|x| x.t_sec < 0.60).count();
+        let hi95 = p_samples.iter().filter(|x| x.ev_mph >= 95.0).count();
+        let outs_n = p_samples.iter().filter(|x| x.outs > 0).count();
+
+        let ss_r = p_samples.iter().filter(|x| x.ss_reach).count();
+        let b2_r = p_samples.iter().filter(|x| x.b2_reach).count();
+        let ss2b_r = p_samples.iter().filter(|x| x.ss_reach || x.b2_reach).count();
+        let ss2b_s = p_samples.iter().filter(|x| x.ss_stretch || x.b2_stretch).count();
+        let ss2b_d = p_samples.iter().filter(|x| x.ss_dive || x.b2_dive).count();
+        let any_if = p_samples.iter().filter(|x| x.ss_reach || x.b2_reach || x.other_if_reach).count();
+        let ss2b_out = p_samples.iter().filter(|x| x.ss2b_in_time_for_out).count();
+
+        println!("\nPitcher-fielded GB deep audit (n={pn}, outs={outs_n} ({:.1}%)):", 100.0 * outs_n as f64 / pnf);
+        println!("  EV mph:     mean {:.1}, p10 {:.1}, p50 {:.1}, p90 {:.1}, >=95 mph {} ({:.1}%)",
+            mean_sd(&evs).0, quantile(&evs, 0.1), quantile(&evs, 0.5), quantile(&evs, 0.9), hi95, 100.0 * hi95 as f64 / pnf);
+        println!("  V_cap mph:  mean {:.1}, p10 {:.1}, p50 {:.1}, p90 {:.1} | LA mean {:.1}° (p50 {:.1}°)",
+            mean_sd(&vcaps).0, quantile(&vcaps, 0.1), quantile(&vcaps, 0.5), quantile(&vcaps, 0.9), mean_sd(&las).0, quantile(&las, 0.5));
+        println!("  t_sec s:    mean {:.3}s, p10 {:.3}s, p25 {:.3}s, p50 {:.3}s, p90 {:.3}s | <0.45s: {} ({:.1}%), <0.60s: {} ({:.1}%)",
+            mean_sd(&tsecs).0, quantile(&tsecs, 0.1), quantile(&tsecs, 0.25), quantile(&tsecs, 0.5), quantile(&tsecs, 0.9),
+            under_045, 100.0 * under_045 as f64 / pnf, under_060, 100.0 * under_060 as f64 / pnf);
+        println!("  Hops:       0={} ({:.1}%), 1={} ({:.1}%), 2+={} ({:.1}%) | dives={} ({:.1}%), stretches={} ({:.1}%)",
+            b0, 100.0 * b0 as f64 / pnf, b1, 100.0 * b1 as f64 / pnf, b2, 100.0 * b2 as f64 / pnf,
+            dives, 100.0 * dives as f64 / pnf, stretches, 100.0 * stretches as f64 / pnf);
+        println!("  Pos at cap: |dx| mean {:.2}m (p50 {:.2}, p90 {:.2}) | dist_p0 mean {:.2}m (p50 {:.2}, p90 {:.2}) | y mean {:.2}m (p10 {:.2}, p50 {:.2}, p90 {:.2})",
+            mean_sd(&lats).0, quantile(&lats, 0.5), quantile(&lats, 0.9),
+            mean_sd(&dists).0, quantile(&dists, 0.5), quantile(&dists, 0.9),
+            mean_sd(&ys).0, quantile(&ys, 0.1), quantile(&ys, 0.5), quantile(&ys, 0.9));
+        println!("  P movement: moved (n={}/{pn}) first_step mean {:.2}s (p10 {:.2}, p50 {:.2}) | p_moved mean {:.2}m (p50 {:.2}, p90 {:.2}) | max_spd mean {:.2}m/s (p90 {:.2}), cap_spd mean {:.2}m/s",
+            tmoves.len(), mean_sd(&tmoves).0, quantile(&tmoves, 0.1), quantile(&tmoves, 0.5),
+            mean_sd(&pmoves).0, quantile(&pmoves, 0.5), quantile(&pmoves, 0.9),
+            mean_sd(&spds).0, quantile(&spds, 0.9), mean_sd(&cap_spds).0);
+        println!("  Behind P?   SS reach(1.0m)={} ({:.1}%), 2B reach={} ({:.1}%), SS|2B reach={} ({:.1}%), stretch(1.4m)={} ({:.1}%), dive(2.0m)={} ({:.1}%), any IF={} ({:.1}%), SS|2B out<4.35s={} ({:.1}%)",
+            ss_r, 100.0 * ss_r as f64 / pnf,
+            b2_r, 100.0 * b2_r as f64 / pnf,
+            ss2b_r, 100.0 * ss2b_r as f64 / pnf,
+            ss2b_s, 100.0 * ss2b_s as f64 / pnf,
+            ss2b_d, 100.0 * ss2b_d as f64 / pnf,
+            any_if, 100.0 * any_if as f64 / pnf,
+            ss2b_out, 100.0 * ss2b_out as f64 / pnf);
+        // Sub-split P captures by |dx| bins and t_sec bins
+        for &(lbl, lo, hi) in &[("<0.45s", 0.0, 0.45), ("0.45..0.60s", 0.45, 0.60), ("0.60..0.90s", 0.60, 0.90), (">=0.90s", 0.90, 99.0)] {
+            let sub: Vec<&PFieldSample> = p_samples.iter().filter(|x| x.t_sec >= lo && x.t_sec < hi).collect();
+            let sn = sub.len().max(1) as f64;
+            let s_dx = sub.iter().map(|x| x.lat_from_p0).sum::<f64>() / sn;
+            let s_gdx = sub.iter().map(|x| x.glove_dx).sum::<f64>() / sn;
+            let s_ss2b = sub.iter().filter(|x| x.ss_reach || x.b2_reach).count();
+            let s_ss2b_s = sub.iter().filter(|x| x.ss_stretch || x.b2_stretch).count();
+            let s_ev = sub.iter().map(|x| x.ev_mph).sum::<f64>() / sn;
+            let s_moved = sub.iter().map(|x| x.p_moved_m).sum::<f64>() / sn;
+            let s_str = sub.iter().filter(|x| x.stretched).count();
+            let s_z = sub.iter().map(|x| x.z_cap).sum::<f64>() / sn;
+            println!("    t_sec {:11}: n={:3} ({:4.1}%) | EV {:4.1} | |dx| {:4.2}m (glove {:+.2}m) | z {:4.2}m | str {:3} | p_moved {:4.2}m | behind SS|2B reach {:3} ({:4.1}%), stretch {:3} ({:4.1}%)",
+                lbl, sub.len(), 100.0 * sub.len() as f64 / pnf, s_ev, s_dx, s_gdx, s_z, s_str, s_moved,
+                s_ss2b, 100.0 * s_ss2b as f64 / sn, s_ss2b_s, 100.0 * s_ss2b_s as f64 / sn);
+        }
     }
 }
 

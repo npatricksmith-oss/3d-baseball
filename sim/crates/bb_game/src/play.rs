@@ -87,15 +87,18 @@ pub fn arm_strength_50_mps(pos: usize) -> f64 {
 impl FielderAttrs {
     pub fn average(pos: usize) -> Self {
         // `pos` is the zero-based index used everywhere (P0 C1 1B2 2B3 3B4 SS5 LF6 CF7 RF8).
+        let pitcher = pos == 0;
         let outfield = pos >= 6;
         Self {
-            // Outfielders chase a fly while tracking it, a little under sprint speed [E].
-            speed: if outfield { 8.2 } else { 7.9 },
-            // Infielders start from an athletic ready position: a quicker first step [E].
-            tau_a: if outfield { 1.0 } else { 0.7 },
+            // Pitchers run slower off the sloped mound than set position players [E] (agent-models §10).
+            speed: if outfield { 8.2 } else if pitcher { 7.5 } else { 7.9 },
+            // Position infielders start from an athletic ready crouch (`0.7 s`); pitchers start
+            // off-mound slightly slower (`0.80 s`), outfielders use long-stride cruise (`1.0 s`, §10) [E].
+            tau_a: if outfield { 1.0 } else if pitcher { 0.80 } else { 0.7 },
             a_lat: 7.0,
-            // An outfielder needs longer to read a ball off the bat before his first step [E].
-            reaction: if outfield { 0.35 } else { 0.25 },
+            // Pitchers need extra visual-motor time to spot the ball off the bat while finishing
+            // delivery (`0.30 s`), set infielders `0.25 s`, outfielders `0.35 s` [E] (agent-models §10).
+            reaction: if outfield { 0.35 } else if pitcher { 0.30 } else { 0.25 },
             hands: 0.018,
             arm: arm_strength_50_mps(pos),
             arm_sigma: 1.2f64.to_radians(),
@@ -260,6 +263,29 @@ pub fn home_positions_for(bats: bb_observe::Hand, runner_on_first: bool, outs: u
         polar_m(320.0, 0.0),         // CF
         polar_m(290.0, 30.0),        // RF
     ]
+}
+
+/// Distance forward of the pitching rubber (18.440 m, OBR) where the pitcher finishes his
+/// delivery follow-through at contact, m [E] (agent-models §5.3: 1.5–2.0 m biomechanical
+/// landing zone ahead of the rubber -> y = 16.64 m ≈ 54.6 ft from home; Savant 2024 mean
+/// release extension 6.47 ft = 1.97 m).
+pub const PITCHER_FOLLOW_THROUGH_FORWARD_M: f64 = 1.80;
+/// Lateral offset toward his glove side at the end of his delivery, m [E] (`+X` 1B side
+/// for an RHP facing `-Y` home plate, `-X` 3B side for an LHP).
+pub const PITCHER_GLOVE_DRIFT_M: f64 = 0.35;
+/// Residual lateral velocity toward his glove side at contact as he brakes off his delivery,
+/// m/s [E] (agent-models §5.3).
+pub const PITCHER_FOLLOW_THROUGH_MPS: f64 = 0.8;
+
+/// The pitcher's post-delivery follow-through `(position, velocity)` at bat contact, ~0.4 s
+/// after pitch release (agent-models §5.3).
+pub fn pitcher_follow_through(throws: bb_observe::Hand) -> (Vec3, Vec3) {
+    let glove_x = if throws == bb_observe::Hand::Right { 1.0 } else { -1.0 };
+    let y = bb_physics::pitch::RUBBER_Y - PITCHER_FOLLOW_THROUGH_FORWARD_M;
+    (
+        Vec3::new(glove_x * PITCHER_GLOVE_DRIFT_M, y, 0.0),
+        Vec3::new(glove_x * PITCHER_FOLLOW_THROUGH_MPS, 0.0, 0.0),
+    )
 }
 
 /// Standard pre-pitch positions for a neutral right-handed batter with bases empty.
@@ -879,5 +905,23 @@ mod attr_tests {
             assert!((dp_0[2] - bag1).norm() < 2.3);
             assert!((std_p[2] - bag1).norm() > 10.5);
         }
+    }
+
+    // agent-models §5.3 & §10: post-delivery follow-through pose at contact (`RUBBER_Y` = 18.440 m,
+    // forward 1.80 m -> y = 16.640 m) falls off toward the pitcher's glove side (`+X` 1B side for
+    // RHP facing `-Y` home, `-X` 3B side for LHP) and sets mound fielding attributes on P0.
+    #[test]
+    fn pitcher_follow_through_lands_forward_and_glove_side() {
+        let (rp, rv) = pitcher_follow_through(bb_observe::Hand::Right);
+        assert!((rp.x - 0.35).abs() < 1e-12 && (rp.y - 16.640).abs() < 1e-12 && rp.z == 0.0);
+        assert!((rv.x - 0.8).abs() < 1e-12 && rv.y == 0.0 && rv.z == 0.0);
+        let (lp, lv) = pitcher_follow_through(bb_observe::Hand::Left);
+        assert!((lp.x - (-0.35)).abs() < 1e-12 && (lp.y - 16.640).abs() < 1e-12 && lp.z == 0.0);
+        assert!((lv.x - (-0.8)).abs() < 1e-12 && lv.y == 0.0 && lv.z == 0.0);
+
+        let p = FielderAttrs::average(0);
+        assert_eq!(p.speed, 7.5);
+        assert_eq!(p.tau_a, 0.80);
+        assert_eq!(p.reaction, 0.30);
     }
 }
