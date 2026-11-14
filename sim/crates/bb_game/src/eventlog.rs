@@ -110,6 +110,7 @@ pub struct ScorerPlayEvidence {
     pub throws: Vec<crate::live::ScorerThrowFact>,
     pub carries: Vec<crate::live::ScorerCarryFact>,
     pub touches: Vec<(u16, u8, f64)>,
+    pub batter_eta: Option<f64>,
 }
 
 /// Append one pitch's record: physical facts first, then the rules events it produced.
@@ -166,10 +167,10 @@ pub fn write_pitch(w: &mut LogWriter, play: u32, pitcher: u16, rec: &PitchRecord
             let throws: Vec<_> = sc.throws.iter().map(|t| {
                 let origin = vec3d(t.origin.to_array());
                 let target = vec3d(t.target.to_array());
-                ev::ScorerThrow::create(fbb, &ev::ScorerThrowArgs { thrower: t.thrower, t_release: t.t, origin: Some(&origin), target: Some(&target), base: t.base, attempted_out: t.attempted_out, batter_goal: t.batter_goal })
+                ev::ScorerThrow::create(fbb, &ev::ScorerThrowArgs { thrower: t.thrower, t_release: t.t, origin: Some(&origin), target: Some(&target), base: t.base, attempted_out: t.attempted_out, batter_goal: t.batter_goal, runner: t.runner })
             }).collect();
             let throws = fbb.create_vector(&throws);
-            let carries: Vec<_> = sc.carries.iter().map(|c| ev::ScorerCarry::create(fbb, &ev::ScorerCarryArgs { fielder: c.fielder, t: c.t, base: c.base, batter_goal: c.batter_goal })).collect();
+            let carries: Vec<_> = sc.carries.iter().map(|c| ev::ScorerCarry::create(fbb, &ev::ScorerCarryArgs { fielder: c.fielder, t: c.t, base: c.base, batter_goal: c.batter_goal, runner: c.runner })).collect();
             let carries = fbb.create_vector(&carries);
             let touches: Vec<_> = sc.touches.iter().map(|&(runner, base, t)| ev::ScorerTouch::create(fbb, &ev::ScorerTouchArgs { runner, base, t })).collect();
             let touches = fbb.create_vector(&touches);
@@ -179,7 +180,8 @@ pub fn write_pitch(w: &mut LogWriter, play: u32, pitcher: u16, rec: &PitchRecord
                 has_first_touch: sc.first_touch.is_some(), first_touch_s: sc.first_touch.unwrap_or_default(),
                 has_handling: sc.first_handling.is_some(), first_handler: sc.first_handling.map(|x| x.1).unwrap_or_default(), handling_s: sc.first_handling.map(|x| x.0).unwrap_or_default(),
                 has_secured: sc.secured.is_some(), reference_fielder: sc.secured.map(|x| x.1).unwrap_or_default(), secured_s: sc.secured.map(|x| x.0).unwrap_or_default(), secured_at: secured_at.as_ref(),
-                has_margin: sc.margin.is_some(), clean_play_margin_s: sc.margin.unwrap_or_default(), throws: Some(throws), carries: Some(carries), touches: Some(touches), ..Default::default()
+                has_margin: sc.margin.is_some(), clean_play_margin_s: sc.margin.unwrap_or_default(), throws: Some(throws), carries: Some(carries), touches: Some(touches),
+                has_batter_eta: sc.batter_eta.is_some(), batter_eta_s: sc.batter_eta.unwrap_or_default(), ..Default::default()
             });
             items.push((0.0, EventBody::ScorerEvidence, x.as_union_value()));
         }

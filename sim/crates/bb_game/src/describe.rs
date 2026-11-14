@@ -68,6 +68,7 @@ pub fn describe_scored(call: Call, launch_deg: Option<f64>, events: &[Event], fa
                 _ => "",
             };
             match batter_out {
+                Some(OutKind::FlyOut) if ruling.is_some_and(|r| r.sacrifice_fly) => format!("{multi}{}{to}", if multi.is_empty() { "Sacrifice fly" } else { "sacrifice fly" }),
                 Some(OutKind::FlyOut) => {
                     let kind = if la > 50.0 { "Pop out" } else if la < 20.0 { "Line out" } else { "Fly out" };
                     format!("{multi}{}{to}", if multi.is_empty() { kind.to_string() } else { kind.to_lowercase() })
@@ -79,14 +80,19 @@ pub fn describe_scored(call: Call, launch_deg: Option<f64>, events: &[Event], fa
                         Some(bb_stats::scorer::Outcome::Hit(bases)) => bases,
                         _ => events.iter().filter_map(|e| if let Event::RunnerAdvanced { runner, to, .. } = e { (*runner == batter).then_some(*to) } else { None }).max().unwrap_or(1),
                     };
+                    let ground_rule = events.iter().any(|e| matches!(e, Event::BallDead { reason: bb_rules::DeadBall::GroundRuleDouble }));
                     let name = match bases {
+                        2 if ground_rule => "Ground-rule double",
                         2 => "Double",
                         3 => "Triple",
                         4 => "Inside-the-park home run",
                         _ => "Single",
                     };
-                    let extra = if batter_out.is_some() { ", batter out stretching" } else if outs.len() == 1 { ", runner out on the bases" } else { "" };
-                    format!("{name}{to}{extra}")
+                    // Every out on the bases, said: the batter's, and each runner's.
+                    let runners_out = outs.iter().filter(|(r, _, _)| *r != batter).count();
+                    let batter_part = if batter_out.is_some() { ", batter out stretching" } else { "" };
+                    let runner_part = match runners_out { 0 => String::new(), 1 => ", runner out on the bases".to_string(), n => format!(", {n} runners out on the bases") };
+                    format!("{name}{to}{batter_part}{runner_part}")
                 }
                 // Bases given for a throw out of play: not a hit, and (until the sim has
                 // fielding errors) not ruled an error either.
@@ -172,6 +178,15 @@ mod tests {
         assert_eq!(describe_scored(Call::InPlay, Some(-3.0), &[awarded, ended(PaResult::BattedBall)], &[by(6)], None, Some(thrown)), "Reached on a throw out of play, bases awarded (ball hit to short)");
         // A walk-off that ends the game before the batter reaches first: nobody was put out.
         assert_eq!(describe(Call::InPlay, Some(5.0), &[Event::RunScored { runner: R }, ended(PaResult::BattedBall)], &[by(6)], None), "Ball hit to short, 1 run scores");
+        // The review's cases (P3-1): a sacrifice fly, two outs on the bases on a hit, a ground-rule double.
+        let sf = bb_stats::scorer::PlayRuling { batter: B, outcome: bb_stats::scorer::Outcome::Out, sacrifice_fly: true, rbi: 1 };
+        assert_eq!(describe_scored(Call::InPlay, Some(30.0), &[out(B, OutKind::FlyOut), Event::RunScored { runner: R }, ended(PaResult::BattedBall)], &[by(9)], None, Some(sf)), "Sacrifice fly to right, 1 run scores");
+        let single = bb_stats::scorer::PlayRuling { batter: B, outcome: bb_stats::scorer::Outcome::Hit(1), sacrifice_fly: false, rbi: 0 };
+        let adv1 = Event::RunnerAdvanced { runner: B, from: 0, to: 1, cause: bb_rules::AdvanceCause::OnPlay };
+        assert_eq!(describe_scored(Call::InPlay, Some(15.0), &[adv1.clone(), out(R, OutKind::Tag), out(6, OutKind::Tag), ended(PaResult::BattedBall)], &[first(4.2), by(7)], None, Some(single)), "Single to left, 2 runners out on the bases");
+        let adv2 = Event::RunnerAdvanced { runner: B, from: 0, to: 2, cause: bb_rules::AdvanceCause::Award };
+        let double = bb_stats::scorer::PlayRuling { batter: B, outcome: bb_stats::scorer::Outcome::Hit(2), sacrifice_fly: false, rbi: 0 };
+        assert_eq!(describe_scored(Call::InPlay, Some(15.0), &[Event::BallDead { reason: bb_rules::DeadBall::GroundRuleDouble }, adv2, ended(PaResult::BattedBall)], &[first(4.2), by(8)], None, Some(double)), "Ground-rule double to center");
         assert_eq!(describe(Call::InPlay, Some(28.0), &[ended(PaResult::HomeRun), Event::RunScored { runner: B }], &[], None), "Home run, 1 run scores");
     }
 }

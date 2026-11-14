@@ -24,6 +24,7 @@ struct Counts {
     old_hit_now_throw_award: u64,
     unresolved: u64,
     thrown_awards: u64,
+    inside_park_hr: u64,
     ab: u64, h: u64, hr: u64, k: u64, sf: u64, bb: u64, hbp: u64,
     // Per batted-ball type, balls in play only (home runs are not in play here, as in BABIP).
     bip: [u64; 4], old_hits: [u64; 4], new_hits: [u64; 4], new_choices: [u64; 4], new_outs: [u64; 4], award: [u64; 4],
@@ -34,7 +35,7 @@ impl Counts {
         self.games += x.games; self.old_choices += x.old_choices; self.old_choice_now_hit += x.old_choice_now_hit;
         self.old_choice_now_choice += x.old_choice_now_choice; self.old_hit_now_choice += x.old_hit_now_choice;
         self.old_hit_now_throw_award += x.old_hit_now_throw_award;
-        self.unresolved += x.unresolved; self.thrown_awards += x.thrown_awards;
+        self.unresolved += x.unresolved; self.thrown_awards += x.thrown_awards; self.inside_park_hr += x.inside_park_hr;
         self.ab += x.ab; self.h += x.h; self.hr += x.hr; self.k += x.k; self.sf += x.sf; self.bb += x.bb; self.hbp += x.hbp;
         for i in 0..4 {
             self.bip[i] += x.bip[i]; self.old_hits[i] += x.old_hits[i]; self.new_hits[i] += x.new_hits[i];
@@ -54,6 +55,11 @@ fn game(seed: u64) -> Counts {
     while let Some(p) = g.step_pitch() {
         let Some(batter) = p.rules_events.iter().find_map(|e| if let Event::PlateAppearanceEnded { batter, result: bb_rules::PaResult::BattedBall } = e { Some(*batter) } else { None }) else { continue };
         let ruling = p.scorer_ruling.expect("recorded game carries the scorer's ruling");
+        // An inside-the-park home run is a home run: not a ball in play for BABIP (review P2-2).
+        if ruling.outcome == Outcome::Hit(4) {
+            c.inside_park_hr += 1;
+            continue;
+        }
         let (_, old_hit) = classify_bip(batter, &p.rules_events, &p.facts);
         let old_choice = classify_bip(batter, &p.rules_events, &p.facts).0 && !old_hit;
         let t = bin(p.record.batted.map(|b| b.1.to_degrees()).unwrap_or(0.0));
@@ -116,7 +122,7 @@ fn main() {
     println!("games {} (seeds {first}..{})", c.games, first + n);
     println!("old classifier called {} plays fielder's choices: now hits {}, still choices {}, other {}", c.old_choices, c.old_choice_now_hit, c.old_choice_now_choice, c.old_choices - c.old_choice_now_hit - c.old_choice_now_choice);
     println!("old classifier hits now ruled fielder's choice {}, now bases-awarded-on-a-throw {}", c.old_hit_now_choice, c.old_hit_now_throw_award);
-    println!("thrown-ball awards {}; unresolved rulings {}", c.thrown_awards, c.unresolved);
+    println!("thrown-ball awards {}; unresolved rulings {}; inside-the-park home runs (not in play) {}", c.thrown_awards, c.unresolved, c.inside_park_hr);
     println!("\n{:<13}{:>7}{:>10}{:>10}{:>8}{:>8}{:>9}{:>10}", "type", "BIP", "old hits", "new hits", "FC", "award", "old BABIP", "new BABIP");
     for i in 0..4 {
         // The old classifier counted hits per ball in play; the scorer's hits per ball in

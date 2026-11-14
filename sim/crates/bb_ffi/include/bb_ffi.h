@@ -51,7 +51,12 @@ typedef struct {
   uint16_t batter; uint16_t _pad; /* the batter the pitch was thrown to (his batting id) */
   /* The ball left the playing field (rules-spec 5.8): dead_s = play time it was dead, or -1
    * if it never left; dead_at = where it crossed the wall or fence (the ball's centre, sim frame); dead_reason
-   * 0 never left, 1 out of play (a foul ball or a throw), 2 home run, 3 ground-rule double. */
+   * 0 never left, 1 out of play (a foul ball or a throw), 2 home run, 3 ground-rule double.
+   * The two do not describe the same instant for a batted ball over a foul-territory wall or into a
+   * dugout: it is dead only once it is down in the seats (a fielder at the rail may reach over for it
+   * until then, rules-spec 5.3), so dead_s is that landing time (the clip's end), after the
+   * ball passed dead_at. Sampling the ball at dead_s gives its place in the seats, not dead_at. For a
+   * home run, a ground-rule double and a throw over a wall the two coincide. */
   float dead_s; float dead_at[3]; uint8_t dead_reason; uint8_t _pad2[3];
   /* On contact, the projected distance (physics-spec 12): from home to where the batted ball
    * would have come down to field level unobstructed, m; 0 without contact. */

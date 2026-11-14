@@ -607,3 +607,18 @@ if std::env::var("BB_SF_TRACE").is_ok() && r.start == 3 {
         self.inp.play, self.t, r.id, r.v, t_run, t_ball - self.t, t_ball - (self.t + t_run), noise, go);
 }
 ```
+
+## Where things stand (2026-11-14, about 05:15; branch `work/a4-throw-choices` at main `a9a95b2` + fixes)
+
+**Job: the 225–300 ft tag-up gap, speed for accuracy, and the plate.** Seeds 0–299 [1000–1299] unless stated; rows in docs/metrics-ledger.md §3.
+
+1. *Arm strength's definition* (Baseball Savant leaderboard, read 2026-11-14): the mean of a player's hardest throws, top 1% at first base, 5% at second, short and third, 10% in the outfield (minimums 100 / 75 / 50 throws); it notes that many lobs are captured. So the sim's arm is near max effort, and a throw home on a tag-up is right at it.
+2. *At the plate* (`sf_probe`, 600 games): only 9 of 271 sent runners faced a throw the catcher took. The 4 caught 2.3–3.6 m off line were all safe (the runner never came within tag reach); the rest were out, tags 0.28–0.73 s after the catch. Off-line throws already cost the defense. How often real throws home are cut off: unsourced (tag-ups note §3).
+3. *The runner's belief was the gap's main side* (`1677fc2`): he read the outfielder's release as 0.85 s where it is 0.98 s with the turn and footwork of a throw home. He now reads the set-up as the fielder's own model builds it from what he sees. 275–300 ft sent 7% → 35% (safe 91%).
+4. *Speed for accuracy* (`4477892`, `c8ab5de`, `6b7e1ac`; agent-models §5.5): effort 0.80–1.0 of the arm, direction σ × 0.768 at 0.80 (Freeston 2014). The least effort that keeps the 0.25 s margin; full for a double-play feed with a likely second out, for relays, and for a no-play throw while any runner moves; 0.80 only with every runner standing. Two defects were found and fixed by measurement on the way: returns at the floor let runners take bases (+0.24 runs), and feeds at the floor lost double plays (1.73 → 1.55 a game).
+5. *Now:* runs 5.81 [6.25] (main `a9a95b2` 5.84 [6.11]); GB hits .327 [.332]; double plays 1.70 a game (MLB about 1.7); set throws taken in the air 96.9% (from 96.1%); sacrifice flies 0.257 a team-game (MLB 0.24–0.27), 55.8% of outfield catches with a runner on third scoring (MLB 75–80%), 1.4% put out (2–3.5%).
+
+**Still open, in order:**
+- *225–275 ft still holds* (MLB sends about 40%). What is left is the decision rule: a 0.35 s margin against 0.15 s noise asks for a 99% safe estimate, where agent-models §6.3's own rule is run expectancy (break-even about a third with one out). Replacing it is a model change and an owner decision (Gemini tag-up review P1-1).
+- Gemini tag-up review P2-2 (tag geometry, the carry's double tag time), P2-3 (τ fitted to faster-than-average runners: 4.10 s at league speed would mean τ about 0.75 s; batter box offset gives left- and right-handed batters the same time), P2-4's restored counterfactual: deferred, see the review's Resolution.
+- Runs remain 1.4–1.9 above MLB; nothing was tuned.

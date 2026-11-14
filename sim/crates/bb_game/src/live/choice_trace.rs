@@ -77,7 +77,10 @@ pub(super) fn enabled() -> bool {
 pub(super) fn push(c: Choice) {
     RECORDS.with_borrow_mut(|records| {
         if let Some(last) = records.last_mut() {
+            // Only consecutive ticks merge (one 1/60 s tick apart): a carry given up and taken
+            // up again shows as two records (Gemini A4 review P2-5).
             if c.action.contains("carry")
+                && (c.t - last.until) < 1.5 / 60.0
                 && last.action == c.action
                 && last.play == c.play
                 && last.holder == c.holder

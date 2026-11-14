@@ -297,7 +297,7 @@ impl Game {
         let pitch_flight = bb_world::pitch::pitch_flight(&mu.env, rec.release);
         if record {
             let fside = 1 - side as u16;
-            let home = crate::play::home_positions();
+            let home = crate::play::home_positions_for(mu.batter.bats, st.bases[0].is_some(), st.outs);
             viz.standing.extend((0..9).map(|i| ((fside << 8) | 0x80 | (i as u16 + 1), home[i])));
             // Runners stand off their bases with their leads.
             viz.standing.extend(st.bases.iter().enumerate().filter_map(|(i, r)| r.map(|id| (id, crate::live::path_pos(crate::live::lead_s(i as u8 + 1))))));
@@ -371,7 +371,7 @@ impl Game {
             // forward (world truth, read with each fielder's error, agent-models §5.10).
             let swing_lead = rec.swing.map(|s| t_plate - s.t_start());
             let out = crate::live::simulate_live(
-                &crate::live::LiveInput { env: &mu.env, field: &self.field, ball, t_contact: t_c, runners, fielders, fattrs: self.fattrs[fside as usize], batter_box: { let p = mu.template.pivot(&mu.batter); bb_math::Vec3::new(p.x, p.y, 0.0) }, bats: mu.batter.bats, pitch_x: rec.plate.map(|p| p.x).or(Some(ball.r.x)), bat_yaw, swing_lead, seed, play, record },
+                &crate::live::LiveInput { env: &mu.env, field: &self.field, ball, t_contact: t_c, runners, fielders, fattrs: self.fattrs[fside as usize], batter_box: { let p = mu.template.pivot(&mu.batter); bb_math::Vec3::new(p.x, p.y, 0.0) }, bats: mu.batter.bats, pitch_x: rec.plate.map(|p| p.x).or(Some(ball.r.x)), bat_yaw, swing_lead, seed, play, record, tag_up: Default::default() },
                 st,
             );
             let first_touch = out.facts.iter().find_map(|f| match f {
@@ -383,19 +383,30 @@ impl Game {
                 _ => None,
             });
             // The clean play is scorer evidence only. It cannot influence the live simulation.
-            let margin = first_touch.zip(secured).and_then(|(touch, (t, fielder, at))| {
+            // The batter's arrival is his actual touch or, when the play ended first (a throw out
+            // of play, a walk-off), when he would have touched, running as he was.
+            let margin = first_touch.or(out.batter_first_eta).zip(secured).and_then(|(arrival, (t, fielder, at))| {
                 let pos = (fielder & 0x7f).checked_sub(1)? as usize;
                 if pos >= 9 { return None; }
                 let avg = FielderAttrs::average(pos);
                 let target = crate::play::base_pos(1);
                 let origin = crate::live::throw_release_point(at, target, self.fattrs[fside as usize][pos].throws);
                 let flight = reference_throw_time(&mu.env, &self.field, origin, target, avg.arm);
-                Some(touch - (t + avg.transfer + flight))
+                // The reference fielder is set as the actual one was at the catch (the get-up
+                // after a dive, transfer, turn, footwork) with a grade-50 transfer.
+                let mut ref_at = t + out.ref_set_s.unwrap_or(avg.transfer) + flight;
+                if pos == 2 {
+                    // A first baseman takes the bag himself if that is quicker than a flip to
+                    // the man covering it.
+                    let d = bb_math::m::hypot(target.x - at.x, target.y - at.y);
+                    ref_at = ref_at.min(t + crate::play::run_time(d, avg.speed, avg.tau_a));
+                }
+                Some(arrival - ref_at)
             });
             let touches = out.facts.iter().filter_map(|f| match f { Input::BaseTouched { t, agent, base, holding_ball: false } => Some((*agent, *base, *t)), _ => None }).collect();
             scorer_evidence = Some(crate::eventlog::ScorerPlayEvidence {
                 batter, runners: scorer_runners, first_touch, first_handling: out.first_handling,
-                secured, margin, throws: out.scorer_throws.clone(), carries: out.scorer_carries.clone(), touches,
+                secured, margin, throws: out.scorer_throws.clone(), carries: out.scorer_carries.clone(), touches, batter_eta: if first_touch.is_none() { out.batter_first_eta } else { None },
             });
             if record {
                 // Every other tick, and always the last one (the instant the play ended).

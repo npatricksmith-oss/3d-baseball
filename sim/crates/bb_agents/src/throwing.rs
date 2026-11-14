@@ -37,6 +37,21 @@ pub fn transfer_scale(grade: f64) -> f64 {
 /// The quickest a throw can be let go, as a fraction of the normal catch-to-release for that
 /// throw [E]: no step, arm only.
 pub const RUSH_MIN_FRAC: f64 = 0.6;
+
+/// Speed for accuracy on a set throw (agent-models §5.5): the lowest effort a fielder throws
+/// at, as a fraction of his arm. Freeston, Adams and Rooney (2014; docs/calibration/
+/// 2026-11-14-sources.md) measured elite young throwers at 80% and 100% of their maximum:
+/// 26.4 against 33.0 m/s (0.80), so 0.80 is the measured range's floor.
+pub const EFFORT_MIN: f64 = 0.80;
+/// Their total target error at that effort against full: 46.9 against 61.1 cm.
+pub const EFFORT_MIN_ERROR_RATIO: f64 = 46.9 / 61.1;
+
+/// Direction σ multiplier of a throw at `effort` (fraction of his arm): 1 at full effort,
+/// [`EFFORT_MIN_ERROR_RATIO`] at [`EFFORT_MIN`], linear between (the two measured points).
+pub fn effort_sigma_mult(effort: f64) -> f64 {
+    let e = effort.clamp(EFFORT_MIN, 1.0);
+    1.0 - (1.0 - e) / (1.0 - EFFORT_MIN) * (1.0 - EFFORT_MIN_ERROR_RATIO)
+}
 /// Direction σ grows by this much at full hurry (k_rush), and by this much more when he was
 /// also off balance (k_off) [E].
 pub const K_RUSH: f64 = 1.0;
@@ -117,6 +132,24 @@ pub fn footwork_s(catch_vel: Vec3, to_target: Vec3, dove: bool) -> f64 {
     if away > AWAY_MPS { AWAY_FOOTWORK_S } else { 0.0 }
 }
 
+/// The double-play pivot's catch-to-release at a `Transfer` grade of 50, s (agent-models
+/// §5.5) [E]: the middle of the 0.7–0.9 s coaching norm (low confidence); scaled by the
+/// `Transfer` grade it is 0.69 s at grade 70, near the one measured elite pivot (J.J. Hardy,
+/// 0.67 s, FanGraphs 2014). No split by pivot man or feed type is known.
+pub const PIVOT_S_50: f64 = 0.80;
+/// An infielder's `Transfer` at grade 50, s (`bb_game::play::FielderAttrs::average`): the
+/// pivot time scales with his own `Transfer` against this.
+pub const INFIELD_TRANSFER_50_S: f64 = 0.65;
+/// What the runner from first's slide costs the pivot man (A6, not built): time, s, and a
+/// multiplier on his throw's direction σ. Set to nothing until slides exist.
+pub const PIVOT_SLIDE_DELAY_S: f64 = 0.0;
+pub const PIVOT_SLIDE_SIGMA_MULT: f64 = 1.0;
+
+/// A pivot man's own catch-to-release before turn and footwork, from his `Transfer` (s).
+pub fn pivot_s(transfer_s: f64) -> f64 {
+    PIVOT_S_50 * transfer_s / INFIELD_TRANSFER_50_S
+}
+
 /// The set-up for one throw, in seconds after the fielder has the ball and is on his feet.
 #[derive(Clone, Copy, Debug, PartialEq)]
 pub struct SetUp {
@@ -134,6 +167,14 @@ impl SetUp {
     pub fn new(base_s: f64, turn_s: f64, footwork_s: f64) -> Self {
         let normal = (base_s + turn_s).max(0.0);
         Self { earliest_s: RUSH_MIN_FRAC * normal, set_s: normal + footwork_s, off_balance: footwork_s > 0.0 }
+    }
+
+    /// A double-play pivot (agent-models §5.5): the measured pivot times are already the quick
+    /// release of a double-play race, so there is no earlier one. Earliest and set are both
+    /// `base_s + turn + footwork` (and the slide's delay, nothing yet), at full arm.
+    pub fn pivot(base_s: f64, turn_s: f64, footwork_s: f64) -> Self {
+        let t = (base_s + turn_s).max(0.0) + footwork_s + PIVOT_SLIDE_DELAY_S;
+        Self { earliest_s: t, set_s: t, off_balance: footwork_s > 0.0 }
     }
 
     /// How hurried a release `elapsed_s` into the set-up is: 1 at the earliest, falling
@@ -157,10 +198,40 @@ impl SetUp {
 
 #[cfg(test)]
 mod tests {
+
+    /// agent-models §5.5: the pivot is 0.80 s at a grade-50 `Transfer` (0.65 s), and at grade
+    /// 70 it comes within 0.02 s of the measured elite pivot, 0.67 s (0.80 × 1.08⁻² = 0.686).
+    #[test]
+    fn pivot_time_by_transfer_grade() {
+        assert!((pivot_s(0.65) - 0.80).abs() < 1e-12);
+        let g70 = pivot_s(0.65 * transfer_scale(70.0));
+        assert!((g70 - 0.80 / (1.08f64 * 1.08)).abs() < 1e-9 && (g70 - 0.67).abs() < 0.02, "{g70}");
+    }
+
+    /// agent-models §5.5: a pivot has no earlier release than its set one, and a release then is
+    /// at full arm and normal accuracy (the slide's seam adds nothing yet).
+    #[test]
+    fn a_pivot_is_released_set() {
+        let su = SetUp::pivot(0.80, -0.06, 0.2);
+        assert!((su.earliest_s - 0.94).abs() < 1e-12 && su.earliest_s == su.set_s);
+        assert_eq!(su.hurry(su.earliest_s), 0.0);
+        assert_eq!((su.speed_mult(0.0), su.sigma_mult(0.0)), (1.0, 1.0));
+        assert_eq!((PIVOT_SLIDE_DELAY_S, PIVOT_SLIDE_SIGMA_MULT), (0.0, 1.0));
+    }
     use super::*;
 
     fn close(a: f64, b: f64) -> bool {
         (a - b).abs() < 1e-9
+    }
+
+    // Freeston et al. 2014 (sources note): total target error 46.9 cm at 80% of maximum
+    // speed against 61.1 cm at 100%. Halfway, the linear rule gives the mean of the two.
+    #[test]
+    fn effort_trades_speed_for_accuracy_as_measured() {
+        assert!((effort_sigma_mult(1.0) - 1.0).abs() < 1e-12);
+        assert!((effort_sigma_mult(0.80) - 46.9 / 61.1).abs() < 1e-12);
+        assert!((effort_sigma_mult(0.90) - (46.9 + 61.1) / 2.0 / 61.1).abs() < 1e-12);
+        assert!((effort_sigma_mult(0.5) - effort_sigma_mult(0.8)).abs() < 1e-12, "not below the measured range");
     }
 
     #[test]

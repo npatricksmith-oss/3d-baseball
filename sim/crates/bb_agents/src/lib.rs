@@ -8,5 +8,6 @@ pub mod attributes;
 pub mod batter;
 pub mod motor;
 pub mod pitcher;
+pub mod running;
 pub mod swing;
 pub mod throwing;

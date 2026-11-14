@@ -90,7 +90,14 @@ impl Sim<'_> {
             return None;
         }
         let runner_at = self.t + runner_eta(BASE_L - batter.s, batter.v);
-        let (next_holder, release_at, speed) = if option.carry {
+        let (next_holder, release_at, speed) = if option.base == 2 {
+            // A double-play pivot at second, by the same model as the world's (agent-models
+            // §5.5), from what the holder sees.
+            let pivot = if option.carry { by } else { option.receiver };
+            let pf = &self.f[pivot];
+            let arriving = (base_pos(2) - pf.pos).norm() >= 0.6 && (option.carry || self.receiver_ready(pivot, 2) + 0.3 >= option.ball_at);
+            (pivot, self.pivot_release(pivot, fd.pos, option.ball_at, arriving), THROW_EFFORT * pf.a.arm)
+        } else if option.carry {
             // The carrier still has the same setup clock after touching the bag.
             let to = base_pos(1) - base_pos(option.base);
             let turn = fd.face.map(|face| throwing::turn_extra_s(face, to, fd.a.throws)).unwrap_or(0.0);
@@ -104,6 +111,25 @@ impl Sim<'_> {
         let receiver = self.receiver_for(next_holder, 1);
         let ball_at = (release_at + throw_time(speed, (base_pos(1) - base_pos(option.base)).norm())).max(self.receiver_ready(receiver, 1)) + 0.05;
         Some((phi((runner_at - ball_at) / 0.12), ball_at))
+    }
+
+    /// When the pivot man at second lets the ball go for first, as a teammate judges it
+    /// (agent-models §5.5): he has the bag at `t_bag`; still `arriving`, he is braking into it
+    /// along his approach (√(2·BRAKE·0.6 m) at the touch radius, the movement law) and faces
+    /// that way; already there, he stands facing the feed from `feed_from`. His `Transfer`
+    /// is known to his teammates.
+    pub(super) fn pivot_release(&self, pivot: usize, feed_from: Vec3, t_bag: f64, arriving: bool) -> f64 {
+        let pf = &self.f[pivot];
+        let bag = base_pos(2);
+        let to_first = base_pos(1) - bag;
+        let approach = Vec3::new(bag.x - pf.pos.x, bag.y - pf.pos.y, 0.0).normalized();
+        let (face, vel) = if arriving {
+            (approach, approach * m::sqrt(2.0 * BRAKE * 0.6))
+        } else {
+            (Vec3::new(feed_from.x - bag.x, feed_from.y - bag.y, 0.0).normalized(), Vec3::ZERO)
+        };
+        let su = SetUp::pivot(throwing::pivot_s(pf.a.transfer), throwing::turn_extra_s(face, to_first, pf.a.throws), throwing::footwork_s(vel, to_first, false));
+        t_bag + su.set_s
     }
 
     pub(super) fn holder_options(&self, by: usize) -> Vec<HolderOption> {
@@ -144,7 +170,9 @@ impl Sim<'_> {
                     continuation: None,
                 };
                 option.continuation = self.force_continuation(by, &option);
-                if let Some((p_second, _)) = option.continuation {
+                // Only a second out whose throw would be attempted (p > 0.3, the holder's own
+                // rule) adds to the value (Gemini A4 review P1-2).
+                if let Some((p_second, _)) = option.continuation.filter(|c| c.0 > 0.3) {
                     let w_second = if self.st.outs + 1 >= 2 { 1.0 } else { 0.9 };
                     option.value += params.continuation_weight * p_out * p_out * p_second * p_second * w_second;
                 }
@@ -156,10 +184,13 @@ impl Sim<'_> {
             // weighed as a tag (`out_weight`, no force continuation), never as a touch.
             if distance < params.carry_max_m {
                 let ready = if fd.dove { fd.ready_at } else { fd.up_at };
-                let ball_at = self.t.max(ready) + run_time_to(fd, target, 0.6);
+                // A tag (not a force) also needs the time to put it on (§6.4).
+                let tag = if force { 0.0 } else { fd.a.tag_apply_s };
+                let ball_at = self.t.max(ready) + run_time_to(fd, target, 0.6) + tag;
                 add(true, ball_at, ball_at);
             }
-            add(false, race.ball_at, race.set_ball_at);
+            let tag = if force { 0.0 } else { self.f[race.receiver].a.tag_apply_s };
+            add(false, race.ball_at + tag, race.set_ball_at + tag);
         }
         options
     }
