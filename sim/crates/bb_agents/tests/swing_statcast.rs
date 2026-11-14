@@ -12,7 +12,7 @@
 //!
 //! For each test the comment gives the v1 swing's value (the note's §1 and §3 columns, measured
 //! on main `bcbb91f` by `foul_diag` / `platoon_diag`; v1 is not in this tree, so those numbers
-//! are quoted, not rerun), and the tolerance is chosen so that value fails.
+//! are quoted, not rerun), and the tolerance is chosen so that value fails (all but the attack-angle test, which v1 also passes; see it).
 //!
 //! The x axis is +X toward first base: for the right-handed batter, +x is outside and −x inside.
 
@@ -174,14 +174,20 @@ fn vertical_bat_angle_is_in_blasts_band() {
     assert!((-33.0..-27.0).contains(&mean(&angles)), "grid mean {:.1}° (v1 −18.5)", mean(&angles));
 }
 
-// Attack angle rises toward the pull side: +0.41° per degree of attack direction, across
-// swings (R13, r 0.71; the note's sample gives 0.44 in the sim's games against 0.26 for v1).
-// In the sim the relation is the geometry of contact time: the same swing met later in its arc
-// (the batter early on the ball) is more pulled and steeper, met earlier (the batter late)
-// more opposite and flatter. Sweeping the contact instant ±12 ms
-// about a middle-middle aim gives a slope of 0.58 (a pure-geometry sweep of one swing, steeper
-// than the game mixture of timing, location and height). v1's 0.26 fails the lower bound, a
-// negative or zero slope fails it by more.
+// Attack angle rises toward the pull side: Statcast's population slope is +0.41° per degree of
+// attack direction (R13, r 0.71). This test is a geometry and sign check on ONE swing's timing
+// sweep, not a population regression and not a v1 detector. The same swing met later in its arc
+// (the batter early on the ball) is more pulled and steeper, met earlier (the batter late) more
+// opposite and flatter; sweeping the contact instant ±12 ms about a middle-middle aim gives 0.58
+// for v2, and the band keeps it positive, of the right order and short of the extremes. v1's
+// single-swing sweep gives 0.378 (the Codex review of 2026-11-14, reproduced by compiling main's
+// `swing.rs` at bcbb91f in a temporary probe), inside the band, so v1 passes it.
+// A population version was tried and does not discriminate either: a 5 × 3 grid of aims times 41
+// contact times at normal quantiles, the timing SD set so the attack direction's SD is Statcast's
+// 18.7° (not tuned to the slope), gives 0.533 for v2 and 0.355 for v1 against Statcast's 0.41;
+// v1 is the nearer of the two, so no band around 0.41 rejects v1 without rejecting v2. It was not
+// added. The swing note's +0.26 (v1) against +0.44 (v2) in games presumably comes from the games' own
+// timing errors (perception) and location mix, not from the swing's geometry alone; not checked.
 #[test]
 fn attack_angle_rises_toward_the_pull_side() {
     let r = rig();
