@@ -220,7 +220,7 @@ Grouped by producer. "Physical" events record what the world did. "Rules" events
 | `BallContact` | what the ball touched: `Ground` (surface type, point), `Wall` (segment, height), `Pole`, `Base`, `Body` (agent), `Glove` (agent). Point and post-contact velocity |
 | `FielderAction` | agent, kind: `Catch`, `Deflection`, `Bobble`, `Pickup`, `Block`, `Miss`. Glove pose error, ball speed at capture |
 | `Throw` | thrower, intended receiver and base, release `r`/`v`, transfer time, outcome (caught, short hop, wide, past) |
-| `BallDead` | reason (out of play, home run, ground-rule double, time called) |
+| `BallDead` | reason (out of play, home run, ground-rule double, time called). Written since 2026-11-14 for balls leaving the playing field: `HomeRun`, `GroundRuleDouble`, or `OutOfPlay` (a foul ball or a throw), before the awards it brings |
 
 **Runners and outs (rules)**
 
@@ -351,6 +351,8 @@ table Marker { t: float (id: 0); kind: MarkerKind (id: 1); agent: ushort (id: 2)
 ```
 
 `Dive` and `DiveUp` (emitted since 2026-11-13) bracket a fielder's dive: `Dive` when he leaves his feet (`agent`, `p` where he left them), `DiveUp` when he is back on them, the get-up time later (`p` where his body landed: the sim carries him there over the 0.3 s lunge, agent-models §5.3). A play that ends during a dive (the deciding fact can come on the dive's own tick) lasts until the diver is up: his track finishes the lunge and holds at the landing point, and `duration_s` covers the `DiveUp`. This is presentation only. The FFI reports a dive under way in `BbFrame.dives` (`since_s`, `up_in_s`, `dir`), pairing each `Dive` with the fielder's first `DiveUp` strictly after it, so a client can lay the figure out and get it up on the sim's times. At most `BB_MAX_DIVES` (4) are reported at once; any more are left out.
+
+`BallDead` (emitted since 2026-11-14, A10) is the moment the ball left the playing field (physics-spec §9.5; rules-spec §5.8): `p` is where it crossed the boundary, `agent` and `base` are 0. The ball track ends there and the play is over, so a client can cut back to the field from a ball in the seats or the dugout. Only balls leaving the field get it for now (home runs included); other dead balls (an uncaught foul on the field, a hit batter) do not. **ABI gap:** `bb_ffi` does not decode it yet; the client needs it in `BbPlayInfo` (a time and point) before it can cut away.
 
 `UmpireCall` (added 2026-11-12) is the umpire signalling an out, at the time he signals it (rules-spec §1.3): `agent` is the runner retired, `base` where (0: the batter at the plate, a caught fly or a strikeout; 4 home), `p` the runner's position, `margin_s` how close the play was (s; 0 bang-bang, `FLT_MAX` for a routine catch). One per out, so a client can advance the outs on the scoreboard as each is called. The play's `duration_s` covers the last call. `bb_timeline_info` copies them into `BbPlayInfo.calls` (`sim/crates/bb_ffi/include/bb_ffi.h`).
 

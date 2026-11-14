@@ -314,9 +314,43 @@ At each bounce, the surface normal is tilted by a random angle drawn from a 2D G
 | Outfield wall segments | Vertical rectangles along a polyline with per-segment height; **top edge as a horizontal cylinder** (radius 5 cm [E]) | §8 against immovable; padding e_n 0.35 [E], μ 0.5 [E] | The top-edge cylinder produces "off the top of the wall" bounces. A segment's material (padding, brick, ivy, chain-link) sets its parameters per park, giving emergent park character |
 | Foul poles | Vertical cylinders on the foul lines | Rules: contact = home run | Radius per park config |
 | Bases | 18 in × 18 in boxes [S], 3 in high [E]; the plate and rubber are flush or near-flush | §8 | "Ball hits the bag" bounces emerge |
-| Backstop, dugout lips, stands boundary | Vertical planes / out-of-play volumes | Backstop bounces via §8; stands mean out of play | |
+| Backstop, foul-territory walls, dugouts | Vertical walls along the playing-field boundary (§9.5) | A wall below its top: carom like the outfield wall (stands-wall padding e_n 0.35 [E]). Over its top, or into a dugout: out of play | Geometry and the reference park's values in §9.5 |
 | Batter, catcher, umpire bodies | Capsule sets from the agent's current pose | Contact recorded for rules (hit by pitch, ball hits umpire); the ball is damped (e_n 0.2 [E]) | Pose supplied by agents |
 | Gloves | Defined in `agent-models.md` (capture geometry) | A failed capture deflects via §8 with glove e_n ≈ 0.15 [E] | |
+
+
+### 9.5 The playing-field boundary (added 2026-11-14, A10)
+
+The playing field is the region the ball and the players stay inside. Its boundary is the outfield fence (§9.4, `fence_at(θ)` through the line and center distances) plus, in foul territory, the **backstop** behind home and a **foul-territory wall** (the front of the stands) along each foul line. A ball that crosses the boundary above the wall top there, or crosses it at a dugout, has **left the playing field** (rules-spec §2 `BallTouched{OutOfPlay}`); below the top it caroms. Before this section the fence's line distance simply continued around into foul ground, so foul territory reached 330 ft from home in every direction and a foul pop could be chased 100 m from the plate.
+
+**Geometry** (reference park; every value a park parameter). Coordinates along and off a foul line: for the first-base side (x ≥ 0), s = (x + y)/√2 is the distance along the line from the rear apex of home, c = (x − y)/√2 the distance off it into foul ground (c > 0 is foul). The third-base side mirrors it (x → −x). The playing field is the intersection of:
+
+| Boundary piece | Inside when | Reference value | Status / source |
+| :--- | :--- | :--- | :--- |
+| Outfield fence | ρ ≤ fence_at(θ) (ρ = horizontal distance from home) | 330 / 400 / 330 ft, 8 ft high | existing (§9.4) |
+| Backstop | y ≥ −B | **B = 60 ft** (18.29 m) | [S] OBR 2.01 recommends 60 ft or more from home to the backstop |
+| Side wall (each side) | c ≤ C | **C = 50 ft** (15.24 m) | [E] OBR 2.01 recommends 60 ft from the base lines to the nearest fence or stand; most major-league parks have less (below) |
+| Taper to the foul pole | c ≤ C·(s_pole − s)/(s_pole − s_T) | **s_T = 100 ft** (30.48 m) along the line; s_pole = the fence's line distance | [E] the stands close in to meet the fence at the pole, as in most parks |
+
+All four are half-planes or (the fence) a star-shaped curve, so "inside" is the minimum of four signed distances being ≥ 0, and the wall a ball meets is the one whose signed distance is the smallest.
+
+With these values the backstop runs between x = ±3.26 m (the side walls meet it there, at 45°), and the foul territory inside the walls, behind home included, is **≈ 23,900 sq ft** (2,220 m²). That matches the major-league average of about 23,300 sq ft [S: Beyond the Box Score, 2019, "Marco Estrada and the Oakland Athletics' foul pop-ups"; the Oakland Coliseum, the largest, about 40,700]. OBR's 60 ft side clearance with the same taper would give about 31,800 sq ft, an Oakland-sized park, so the reference park uses 50 ft. **Geometry test (from this table, not the code):** the shoelace area of the polygon (pole, home, pole, taper start, backstop corner, backstop corner, taper start) is 23,885 sq ft ± 1.
+
+**Heights and openings** [E], by where the wall is:
+
+| Part | Height | Why |
+| :--- | :--- | :--- |
+| Backstop screen: the backstop and the side walls behind home (s < 0 on either side) | **9.0 m** (≈ 30 ft) | A backstop is a low wall under a tall net that the ball rebounds from; a pop-up that clears the net is in the seats |
+| Dugouts: the side wall for **s from 20 ft to 80 ft** (6.10–24.38 m) | **0** (an opening) | The dugout is sunk below field level; any ball that reaches its front, rolling or in the air, has left the field. Placement and length are unsourced placeholders |
+| Foul-territory wall elsewhere | **4 ft** (1.22 m) | The front wall of the stands along the lines; a fielder can reach over it for a catch (rules-spec §5.3: his feet must be in the field) |
+
+Protective netting above the side walls is not modeled (deferred): a ball that would strike it goes into the seats here.
+
+**Contact.** A ball meets a backstop, side or taper wall when its **center** comes within the ball radius R of the wall plane (the outfield fence skeleton still uses the center on its curve; that 3.7 cm is left as is so the outfield stays unchanged). Below the top (center height < wall height + R), the wall is §8's immovable body with the normal of the plane: the normal velocity reverses with the stands-wall restitution e_n = 0.35 [E] (the same padding value as the outfield wall), the tangential velocity is kept, and spin is halved, as for the outfield wall. At or above the top, or at a dugout, the ball has left the field. A ball **rolling** into a wall stops at it, as at the outfield fence (skeleton); rolling into a dugout it leaves the field.
+
+**Throws** fly inside the same boundary: a thrown ball that reaches a wall in the air caroms or leaves the field by the same rules, and one that reaches the ground continues with the bounce model (§9.2) inside the boundary.
+
+**Players** stay inside it: a fielder's body center stays at least its radius (0.3 m, the body radius used for dives) inside every wall. A fielder who runs at a wall stops at it, losing the velocity component into it; one at the wall can still reach above its top for a catch (the wall leap height applies within 3 m of any wall, as at the outfield fence).
 
 ---
 
