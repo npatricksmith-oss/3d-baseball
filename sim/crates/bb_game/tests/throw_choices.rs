@@ -83,32 +83,36 @@ fn seed_1_play_64_never_projects_the_stopped_third_base_runner_home() {
 }
 
 #[test]
-fn seed_13_play_140_takes_a_sure_lead_force_instead_of_automatic_first() {
-    // Tied sixth, loaded, one out. Main's proximity shortcut carried the ball to
-    // first (touched at 4.000 s), which took the force off every other base, and the
-    // go-ahead run scored. The holder must now weigh the lead forces. (Since main's
-    // arm-by-position change the first baseman is 9.1 m from his bag by the time he
-    // can throw, and the common comparison finds a 3-6-3 double play that ends the
-    // inning; either that or the home force satisfies §5.6.)
-    let (_, choices, _) = replay(include_str!("fixtures/a4/13-140.json"));
+fn seed_23_play_109_takes_a_sure_lead_force_instead_of_automatic_first() {
+    // Fourth inning, loaded, one out. A carry to first is an option, which would
+    // remove the force at every other base, so the holder must compare the sure
+    // lead forces and throw home first for the 3-2-3 / lead-force double play.
+    // (Replaces frozen 9fdeec1 fixture `13-140`, whose +35.4° chopper now skips past
+    // 1B holding at Savant LHB DP depth 88.9 ft / +41.0° into shallow RF.)
+    let (out, choices, _) = replay(include_str!("fixtures/a4/23-109.json"));
     let first = &choices[0];
     assert!(!(first.action == "carry" && first.base == 1), "{first:#?}");
+    assert!(first.options.iter().any(|o| o.base == 1 && o.kind == "carry" && o.force), "carry first was compared: {first:#?}");
     let chosen = &first.options[first.selected_option.unwrap()];
     assert!(chosen.force && chosen.base >= 2, "{first:#?}");
     // §5.6 note's "sure" screen: at least 0.25 s in hand on the first out.
     assert!(chosen.runner_at - chosen.ball_at >= 0.25, "{chosen:#?}");
+    assert_eq!(out.calls.iter().map(|c| c.base).collect::<Vec<_>>(), vec![4, 1]);
 }
 
 #[test]
-fn seed_70_play_157_keeps_the_force_double_play_against_a_single_home_tag() {
-    // §5.6: two likely outs (second then first) beat a single home tag. The carry is
-    // weighed with its likely second out. (Since the tag takes 0.25 s and runners start
-    // with τ 0.68 s, §6.4, the home tag is no longer the single-out favourite either.)
-    let (out, choices, _) = replay(include_str!("fixtures/a4/70-157.json"));
-    assert_eq!((choices[0].action, choices[0].base), ("carry", 2), "{:#?}", choices[0]);
+fn seed_3_play_140_keeps_the_force_double_play_against_a_single_home_tag() {
+    // §5.6: tied sixth, runners first and third, one out: two likely outs (second
+    // then first) beat a single home attempt. With continuation disabled the
+    // unchanged first-out weights instead favour home.
+    // (Replaces frozen 9fdeec1 fixture `70-157`, whose 102 mph +11.0° LHB grounder
+    // now shoots cleanly between Savant LHB DP SS -5.7° and 2B +19.0° into CF.)
+    let (out, choices, _) = replay(include_str!("fixtures/a4/3-140.json"));
+    assert_eq!((choices[0].action, choices[0].base), ("throw", 2), "{:#?}", choices[0]);
     assert_eq!(out.calls.iter().map(|c| c.base).collect::<Vec<_>>(), vec![2, 1]);
-    let chosen = &choices[0].options[choices[0].selected_option.unwrap()];
-    assert!(chosen.second_out_p.is_some_and(|p| p > 0.5), "{chosen:#?}");
+    let params = bb_agents::throwing::ChoiceParams { continuation_weight: 0.0, ..Default::default() };
+    let (_, single_out_choices, _) = replay_with(include_str!("fixtures/a4/3-140.json"), params);
+    assert_eq!(single_out_choices[0].base, 4, "single-out destination weights still favour home");
 }
 
 #[test]
