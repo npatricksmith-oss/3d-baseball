@@ -27,7 +27,7 @@ Across the sweep (0 → 15°, all five locations): exit speed 101.6–100.6 mph,
 **Met at the ball's center (launch about 3°):** spray − AD at λ_c = 0 is −5.8 / −4.6 / −3.5 / −2.3 / −1.1 outside to inside; at 15° it is −2.7 / −1.7 / −0.8 / 0.0 / +0.9. Every λ_c in between moves it in proportion (full table in `sim/out/lag/cage.txt`).
 
 - **The effect is about 0.2° of spray − AD per degree of λ_c.** It matches the kinematic bound: the face leads the path by atan(qρ·sin λ / (u_ss + qρ·cos λ)) with qρ ≈ 0.18 m and u_ss ≈ 0.71 m.
-- **Reaching +8° would need a face about 30° ahead of the path** at the game's aim (about 11° at the ball's center). The planar double pendulum cannot produce that at any λ_c.
+- **Reaching +8° would need a face 25–30° ahead of the path** at the game's aim (about 11° at the ball's center). The planar double pendulum cannot produce that at any λ_c.
 - **Most of the change is in AD, not in the ball.** At 15° the middle AD moves −1.3 → −4.0 while spray moves −25.7 → −25.1. A larger λ_c makes the sim's AD by location worse against Statcast's (its AD is already 2–10° too far toward the pull side in games, from the batters' timing).
 - **Timing constants.** Swing length grows with λ_c, about 0.02 ft per degree. Up to about 5° it stays within the fit (7.2–7.4 ft against Statcast's 7.2–7.3). At 10–15° the widths w_b and τ_b would need refitting to bring the length back. Bat speed needs nothing, since k is solved from the full velocity.
 
@@ -87,7 +87,7 @@ So, at the game's aim:
 
 ## 4. Judgment
 
-- **λ_c is not the lever.** A few degrees moves spray − AD by about 0.2° per degree and moves the ball not at all; reaching +8° would take a face 30° ahead of its path, which this kinematics cannot make at any λ_c. A large λ_c would also lengthen the swing past Statcast's and push the sim's AD further from Statcast's by location. **Recommendation: leave λ_c at 0.**
+- **λ_c is not the lever.** A few degrees moves spray − AD by about 0.2° per degree and moves the ball not at all; reaching +8° would take a face 25–30° ahead of its path, which this kinematics cannot make at any λ_c. A large λ_c would also lengthen the swing past Statcast's and push the sim's AD further from Statcast's by location. **Recommendation: leave λ_c at 0.**
 - **The cause is the collision's, plus possibly the measure.** About 90% of the on-time offset comes from undercut contact on a sloped barrel: its launch direction and its sidespin. The sim's spray falls with launch angle about 1.6 times as fast as MLB's (2.2 times on time).
   - The same Tier A collision that gives about twice the published backspin probably gives too much sidespin as well.
   - The tangential behavior (e_t 0.40, μ) decides how much of the barrel's slope the ball takes away.
