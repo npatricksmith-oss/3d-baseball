@@ -404,6 +404,14 @@ For each batter-runner reaching base on a fair ball:
 - **Infield hit:** the ball was fielded cleanly but the reference throw was late.
 - **Ground-rule double**, **HR** by award. A walk-off hit is limited per §4.1.
 
+**Implementation status (2026-11-14):** the current event writer does not persist first-base
+contacts, first fielding, throws, or a reference-play margin. The existing `classify_bip`
+is a provisional display/lab diagnostic, not an official ruling and not sufficient to
+reconstruct hits from a log. Fielding errors are not simulated; when added, error rulings
+must use the ordinary-chance and reference-play evidence above rather than treating every
+failed play as an error. Until that evidence is recorded, failed choices and advances on
+a throw cannot be scored reliably.
+
 ### 10.3 Errors on runners and extra bases
 
 A misplay that is ordinary and lets any runner (including the batter-runner after reaching) advance one or more bases that the reference play would have prevented, by ≥ `m_err`, is an error. A wild throw that does not change any outcome is not an error [S: OBR 9.12(d) on mental mistakes and no-effect misplays].
