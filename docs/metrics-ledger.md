@@ -72,11 +72,11 @@ Measured together on main `a9a95b2` (2026-11-14; includes the infield alignment,
 What does not add up, or is not explained:
 
 - **The tag-up rows' "before" is not `f3dc029`.** They quote 5.19 [5.46] as main `f3dc029`, which measured 5.11 [5.47] on set 0 (5.19 is the earlier base `a791a9e`, before the alignment). I used their deltas, not their endpoints. Their sum with the others lands on the measured value, so the error is in the label, not the arithmetic.
-- **The two seed sets now differ by 0.27** (5.84 against 6.11), twice the 0.1–0.2 the ledger has quoted. It was 0.07 at the start of the night and grew with each merge that touched baserunning (tag-ups: 0.31 apart). The cause is not known; one reading is that fewer double plays and more runners scoring make runs more sensitive to the particular games.
+- **The two seed sets now differ by 0.27** (5.84 against 6.11), twice the 0.1–0.2 the ledger has quoted. It was 0.13 at the start of the night (the arm row) and 0.48 after the tag-up and τ rows (5.66 against 6.14). The cause is not known; one reading is that fewer double plays and more runners scoring make runs more sensitive to the particular games.
 - **The recheck's runs (+0.03, −0.12) have opposite signs**; it is noise-sized, so it adds nothing to the reconciliation but cannot be shown to add nothing.
 - **Grounder hits fell .024 with tag-ups and are not explained** (§3), then returned to .327 [.337] in the combination: the combination's GB hits (.327 [.337]) are about the level of the start of the night (.348 [.353] before alignment, then .318 after), so the alignment's fall, tag-ups' fall and the pivot's and τ's rises roughly cancel. This is a description of the sum, not an explanation.
 - **HR/PA is 5.24% [5.34%]** against 5.0–5.1% at most points of the night with no batting change; it varies by 0.1–0.3 points with each merge because games diverge (already noted under tag-ups). The gap to real (2.99%) is unchanged in kind.
-- **Runs are 1.45 [1.72] above real** and K% 6.6 points below, with every cause listed in [§5](#5-open-questions) still open. Nothing here was tuned.
+- **Runs are 1.45 [1.72] above real** and K% 6.6 points below, with every cause listed in §5 still open. Nothing here was tuned.
 - **Not remeasured before tonight and not independent of the night's changes:** the foul share (21.8% against 23.7% in 3,000 PAs on 2026-11-13, right-handed only: a different sample), dives (3.0 against 3.8 after handedness), and the per-opportunity double-play rate (12.5% here is the `dp_probe` PA-opportunity line; earlier rows quoted 15.3% and 17.0% "per opportunity", which I did not confirm are the same line).
 
 ## 2. The run environment in one line per step
