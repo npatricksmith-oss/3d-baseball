@@ -475,6 +475,7 @@ dependencies = [
  "bb_math",
  "bb_observe",
  "bb_physics",
+ "serde_json",
 ]
 
 [[package]]

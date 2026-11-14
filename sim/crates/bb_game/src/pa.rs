@@ -507,7 +507,10 @@ pub fn simulate_pitch_ctx(mu: &Matchup, sc: &Scouting, count: Count, seed: u64, 
         let (mut cur, mut t_aim) = aim_of(&bank, &aim);
         commit_error = truth_err(cur, t_aim);
         let off = Vec3::new(0.0, 0.0, mu.template.aim_offset_z);
-        let planner = |p: Vec3, t: f64| plan_swing(&mu.batter, &mu.template, &mu.bat.profile, &mu.bat.mass, mu.bat.contact.ss_from_tip, p + off, t, mu.template.attack_angle);
+        let planner = |p: Vec3, t: f64| {
+            let a = p + off;
+            plan_swing(&mu.batter, &mu.template, &mu.bat.profile, &mu.bat.mass, mu.bat.contact.ss_from_tip, a, t, mu.template.attack_angle_at(&mu.batter, a))
+        };
         let sn = SwingNoise::new(&mu.batter, mu.knobs.swing);
         let ex = execute_swing(&planner(cur, t_aim), &sn, &mut rng(seed, play, BATTER, Purpose::SwingExecution, 0));
         let t_commit = t_now;

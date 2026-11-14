@@ -457,7 +457,6 @@ fn main() {
     run_int("10. Flat contact_y (contact_k=0)", &|m| m.template.contact_k = 0.0);
     run_int("11. Zero swing noise (k_swing=0)", &|m| m.knobs.swing = 0.0);
     run_int("12. k_perception = 1.0", &|m| m.knobs.perception = 1.0);
-    run_int("13. Outside r_knob_max = 0.28", &|m| m.template.r_knob_max = 0.28);
     run_int("14. Discipline b = 1.4 (more chase)", &|m| m.discipline.b = 1.4);
 
     // Extra detailed print of R/R vs R/L under Pursuit Off + Clamp r_knob_max + Discipline b=1.4
@@ -490,12 +489,11 @@ fn main() {
     println!("\n=== R/R LEVER-ARM & DISCIPLINE DIAGNOSTIC (2000 PA) ===");
     for &(lbl, rmax, disc_b, bat_v) in &[
         ("Baseline (r_max=0.70, b=0.9, v=32)", 0.70, 0.9, 32.0),
-        ("r_knob_max = 0.28 (cap out bat spd)", 0.28, 0.9, 32.0),
         ("Discipline b = 1.4 (OSw toward 31%)", 0.70, 1.4, 32.0),
         ("Bat speed 30.5 rad/s (~2-str/power)", 0.70, 0.9, 30.5),
     ] {
         let mut mu = make_mu(Hand::Right, Hand::Right);
-        mu.template.r_knob_max = rmax;
+        let _ = rmax; // v1's r_knob_max lever arm is gone with the v2 swing (agent-models §3.6)
         mu.discipline.b = disc_b;
         mu.batter.bat_speed = bat_v;
         mu.refresh();

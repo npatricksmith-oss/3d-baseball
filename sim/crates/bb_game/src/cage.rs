@@ -64,21 +64,23 @@ impl Cage {
     }
 
     /// Perfect-perception swing plan: aim at where the ball truly is at the contact depth.
-    pub fn plan_perfect(&self, release: BallState, attack_angle: f64) -> Option<IntendedSwing> {
+    /// `attack_angle` overrides the template's planned attack angle at the aim when given.
+    pub fn plan_perfect(&self, release: BallState, attack_angle: Option<f64>) -> Option<IntendedSwing> {
         let (aim, tc) = self.aim_perfect(release)?;
-        Some(plan_swing(&self.batter, &self.template, &self.bat.profile, &self.bat.mass, self.bat.contact.ss_from_tip, aim, tc, attack_angle))
+        let aa = attack_angle.unwrap_or_else(|| self.template.attack_angle_at(&self.batter, aim));
+        Some(plan_swing(&self.batter, &self.template, &self.bat.profile, &self.bat.mass, self.bat.contact.ss_from_tip, aim, tc, aa))
     }
 
     /// Resolve a pitch against a swing with an explicit placement deviation.
     pub fn swing_with(&self, release: BallState, placement: &Placement) -> PitchResolution {
-        let plan = self.plan_perfect(release, self.template.attack_angle).expect("pitch reaches the batter");
+        let plan = self.plan_perfect(release, None).expect("pitch reaches the batter");
         let swing = apply_placement(&plan, placement);
         resolve_pitch(&self.env, release, Some(&swing), &self.bat)
     }
 
     /// Resolve a pitch against a swing with execution noise.
     pub fn swing_noisy(&self, release: BallState, seed: u64, play: u32, k: f64) -> PitchResolution {
-        let plan = self.plan_perfect(release, self.template.attack_angle).expect("pitch reaches the batter");
+        let plan = self.plan_perfect(release, None).expect("pitch reaches the batter");
         let noise = SwingNoise::new(&self.batter, k);
         let mut rng = KeyedRng::new(RngKey { game_seed: seed, play_index: play, agent_id: BATTER_AGENT, purpose: Purpose::SwingExecution, sub_index: 0 });
         let ex = execute_swing(&plan, &noise, &mut rng);
