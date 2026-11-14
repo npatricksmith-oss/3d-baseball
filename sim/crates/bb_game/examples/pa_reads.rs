@@ -6,7 +6,8 @@ use std::collections::BTreeMap;
 fn main() {
     let mut mu = Matchup::average();
     mu.knobs.perception = std::env::args().nth(1).and_then(|s| s.parse().ok()).unwrap_or(2.5);
-    mu.knobs.swing = 2.0;
+    mu.knobs.swing_miss = 2.0;
+    mu.knobs.swing_effort = 2.0;
     let mut by: BTreeMap<String, [u32; 6]> = BTreeMap::new(); // n, misread, out, chase, zone, zswing
     let mut ps_hist = [0u32; 10];
     for i in 0..1500u32 {

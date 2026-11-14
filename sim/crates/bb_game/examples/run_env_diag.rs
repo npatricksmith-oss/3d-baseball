@@ -4,7 +4,7 @@
 //! Q3: Ground-ball hit decomposition (H-to-1B, gap geometry, fielder timelines, dives/stretches/throws).
 //!
 //! Usage: `cargo run --release -p bb_game --example run_env_diag -- [games] [seed0]`
-//! (env `BB_BAT_SPEED_SIGMA` m/s, `BB_AIM_OFFSET_Z` m, `BB_K_SWING`, `BB_K_PERCEPTION`, `BB_K_COMMAND`, `BB_BAT_SPEED_MU` m/s: counterfactual population, aim, noise scales and mean bat speed)
+//! (env `BB_BAT_SPEED_SIGMA` m/s, `BB_AIM_OFFSET_Z` m, `BB_K_SWING` (miss and effort together), `BB_K_MISS`, `BB_K_EFFORT`, `BB_K_PERCEPTION`, `BB_K_COMMAND`, `BB_BAT_SPEED_MU` m/s: counterfactual population, aim, noise scales and mean bat speed)
 
 use bb_agents::batter::count_group;
 use bb_game::game::{Game, classify_bip};
@@ -421,8 +421,19 @@ fn main() {
         if let Some(off) = var("BB_AIM_OFFSET_Z") {
             g = g.map_matchups(|mu| mu.template.aim_offset_z = off);
         }
+        // BB_K_SWING is the old combined knob (miss and effort together, as before the split);
+        // BB_K_MISS and BB_K_EFFORT set one each and are applied after it.
         if let Some(k) = var("BB_K_SWING") {
-            g = g.map_matchups(|mu| mu.knobs.swing = k);
+            g = g.map_matchups(|mu| {
+                mu.knobs.swing_miss = k;
+                mu.knobs.swing_effort = k;
+            });
+        }
+        if let Some(k) = var("BB_K_MISS") {
+            g = g.map_matchups(|mu| mu.knobs.swing_miss = k);
+        }
+        if let Some(k) = var("BB_K_EFFORT") {
+            g = g.map_matchups(|mu| mu.knobs.swing_effort = k);
         }
         if let Some(k) = var("BB_K_PERCEPTION") {
             g = g.map_matchups(|mu| mu.knobs.perception = k);

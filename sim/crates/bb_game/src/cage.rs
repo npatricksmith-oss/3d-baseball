@@ -78,10 +78,11 @@ impl Cage {
         resolve_pitch(&self.env, release, Some(&swing), &self.bat)
     }
 
-    /// Resolve a pitch against a swing with execution noise.
+    /// Resolve a pitch against a swing with execution noise, `k` scaling both the miss and the
+    /// effort (agent-models §3.6).
     pub fn swing_noisy(&self, release: BallState, seed: u64, play: u32, k: f64) -> PitchResolution {
         let plan = self.plan_perfect(release, None).expect("pitch reaches the batter");
-        let noise = SwingNoise::new(&self.batter, k);
+        let noise = SwingNoise::new(&self.batter, k, k);
         let mut rng = KeyedRng::new(RngKey { game_seed: seed, play_index: play, agent_id: BATTER_AGENT, purpose: Purpose::SwingExecution, sub_index: 0 });
         let mut effort = KeyedRng::new(RngKey { game_seed: seed, play_index: play, agent_id: BATTER_AGENT, purpose: Purpose::SwingEffort, sub_index: 0 });
         let ex = execute_swing(&plan, &noise, &mut rng, &mut effort);

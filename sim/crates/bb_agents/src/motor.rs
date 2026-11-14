@@ -76,9 +76,17 @@ pub struct SwingNoise {
 }
 
 impl SwingNoise {
-    /// From the batter's attributes with combined factor `k` (global × composure).
-    pub fn new(b: &BatterAttrs, k: f64) -> Self {
-        Self { v_offset: b.bat_control * k, tilt_per_m: PLANE_TILT_PER_M, reach: REACH_PER_BAT_CONTROL * b.bat_control * k, timing: b.timing * k, effort: EFFORT_SIGMA * k }
+    /// From the batter's attributes with two combined factors (global × composure;
+    /// agent-models §3.6): `k_miss` scales the placement and timing σ (δ_v, α, δ_r, t₀),
+    /// `k_effort` the effort σ alone.
+    pub fn new(b: &BatterAttrs, k_miss: f64, k_effort: f64) -> Self {
+        Self {
+            v_offset: b.bat_control * k_miss,
+            tilt_per_m: PLANE_TILT_PER_M,
+            reach: REACH_PER_BAT_CONTROL * b.bat_control * k_miss,
+            timing: b.timing * k_miss,
+            effort: EFFORT_SIGMA * k_effort,
+        }
     }
 }
 

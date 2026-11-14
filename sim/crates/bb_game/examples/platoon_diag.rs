@@ -455,7 +455,7 @@ fn main() {
     run_int("8. Zero spin noise (sigma_s0=0)", &|m| m.perception.sigma_s0 = 0.0);
     run_int("9. Exact scouting (model_error=None)", &|m| m.model_error = None);
     run_int("10. Flat contact_y (contact_k=0)", &|m| m.template.contact_k = 0.0);
-    run_int("11. Zero swing noise (k_swing=0)", &|m| m.knobs.swing = 0.0);
+    run_int("11. Zero swing noise (k_swing=0)", &|m| { m.knobs.swing_miss = 0.0; m.knobs.swing_effort = 0.0 });
     run_int("12. k_perception = 1.0", &|m| m.knobs.perception = 1.0);
     run_int("14. Discipline b = 1.4 (more chase)", &|m| m.discipline.b = 1.4);
 

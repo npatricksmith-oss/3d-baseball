@@ -95,7 +95,7 @@ fn sd(v: &[f64]) -> f64 {
 #[test]
 fn bat_speed_is_flat_across_the_plate() {
     let r = rig();
-    let noise = SwingNoise::new(&r.b, 1.0);
+    let noise = SwingNoise::new(&r.b, 1.0, 1.0);
     let statcast = [71.4, 72.1, 70.1];
     let means: Vec<f64> = THIRDS.iter().map(|&(_, x)| mean(&r.noisy_speeds_mph(r.aim(x, 0.5), 1500, &noise))).collect();
     for (((name, _), mu), want) in THIRDS.iter().zip(&means).zip(statcast) {
@@ -113,12 +113,44 @@ fn bat_speed_is_flat_across_the_plate() {
 #[test]
 fn bat_speed_spread_within_a_batter_is_statcasts() {
     let r = rig();
-    let v = r.noisy_speeds_mph(r.aim(0.0, 0.5), 4000, &SwingNoise::new(&r.b, 1.0));
+    let v = r.noisy_speeds_mph(r.aim(0.0, 0.5), 4000, &SwingNoise::new(&r.b, 1.0, 1.0));
     let (s, mu) = (sd(&v), mean(&v));
     assert!((2.8..3.6).contains(&s), "SD {s:.2} mph against Statcast 3.2");
     assert!((0.040..0.051).contains(&(s / mu)), "relative SD {:.3} against 0.045", s / mu);
     // The mean stays at BatSpeed (32.0 m/s = 71.58 mph) less the small loss to timing noise.
     assert!((70.0..71.7).contains(&mu), "mean {mu:.2} mph");
+}
+
+// The miss scale and the effort scale are separate (agent-models §3.6): widening the misses
+// (placement and timing σ ×1.8, the refit's range) leaves the bat-speed spread at Statcast's
+// 3.2 mph for swings met at the batter's usual depth (Statcast's sample keeps contacts within
+// 3 in of it, about 3 ms of timing; here the speed is read at each swing's own executed contact
+// instant), and the effort draws themselves unchanged (own stream). Under the old single knob,
+// 1.8 also took the effort σ to 8.1%, about 5.8 mph SD, which fails the band.
+#[test]
+fn wider_misses_keep_statcasts_bat_speed_spread() {
+    let r = rig();
+    let plan = r.plan(r.aim(0.0, 0.5), 0.40);
+    let run = |k_miss: f64, k_effort: f64| {
+        let n = SwingNoise::new(&r.b, k_miss, k_effort);
+        (0..4000)
+            .map(|play| {
+                let key = |purpose| RngKey { game_seed: 5, play_index: play, agent_id: 1, purpose, sub_index: 0 };
+                let ex = execute_swing(&plan, &n, &mut KeyedRng::new(key(Purpose::SwingExecution)), &mut KeyedRng::new(key(Purpose::SwingEffort)));
+                (r.vel(&ex.swing, ex.swing.t_c).norm() / MPH, ex.placement)
+            })
+            .collect::<Vec<_>>()
+    };
+    let (split, base) = (run(1.8, 1.0), run(1.0, 1.0));
+    let s = sd(&split.iter().map(|x| x.0).collect::<Vec<_>>());
+    assert!((2.8..3.6).contains(&s), "SD {s:.2} mph with misses ×1.8, against Statcast 3.2");
+    let old = sd(&run(1.8, 1.8).iter().map(|x| x.0).collect::<Vec<_>>());
+    println!("bat-speed SD at contact: misses ×1.8, effort ×1: {s:.2} mph; both ×1.8: {old:.2} mph");
+    assert!(old > 4.5, "the combined knob at 1.8 should widen the speed spread ({old:.2} mph)");
+    for (play, ((_, a), (_, b))) in base.iter().zip(&split).enumerate() {
+        assert_eq!(a.effort, b.effort, "play {play}: the effort draw must not depend on the miss scale");
+        assert!((b.v_offset - 1.8 * a.v_offset).abs() < 1e-15 && (b.t_shift - 1.8 * a.t_shift).abs() < 1e-15, "play {play}");
+    }
 }
 
 // Statcast swing length 7.2–7.3 ft (league average, ESPN; this sample's competitive swings

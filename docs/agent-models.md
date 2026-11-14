@@ -46,7 +46,7 @@ Attributes are stored in **physical units** (PLAN §7). The 20–80 scouting gra
 - Effective noise is a product of independent factors:
   `σ_eff = σ_attr · K_global · F_fatigue · F_composure · F_situation`
   - `σ_attr` from the attribute (§10).
-  - `K_global` is one of PLAN §13.2's global calibration knobs (perception, command, swing plane, fielder reaction). Default 1.
+  - `K_global` is one of PLAN §13.2's global calibration knobs (perception, command, swing miss, swing effort, fielder reaction). Default 1. The swing has two (§3.6): the miss scale (placement and timing) and the effort scale (bat speed).
   - `F_fatigue` and `F_composure` from §1.5 and §2.5.
   - `F_situation` from the specific mechanism (a rushed throw, a short hop, a reach).
 - Every factor is a named function in one module, so the sensitivity tool (PLAN §13.3) can sweep each one.
@@ -341,7 +341,12 @@ C is the center of the hands' effective arc, not the spine; it moves up and down
 | t₀ (timing) | `Timing` |
 | effort (relative sweet-spot speed) | 4.5% [E] (`motor::EFFORT_SIGMA`; purpose `SwingEffort`, its own stream). Statcast 2025 sample: within-batter SD of competitive bat speed 3.2 mph at 71.7 for swings met within 3 in of the batter's own mean depth over the middle of the plate (4.3 mph without that restriction, which includes depth and location). v2 sets every planned swing to `BatSpeed`, so without this term every grade-50 swing would be 71.5 mph |
 
-All widen with F_composure and K_swing. **M2 measures** the offset → (exit velocity, launch angle) map (physics spec §8.3); these σ values are then set so that a perfectly perceived pitch produces a realistic spread of contact quality. Perception error should dominate execution error for typical pitches [C].
+All widen with F_composure. The global knobs split them in two (*2026-11-14, the refit after PLAN D20*):
+
+- **`K_swing` (the miss scale; `Knobs::swing_miss`)** multiplies the σ of δ_v, α, δ_r and t₀: where and when the bat arrives. This is calibration-targets §2.3's `K_swingplane`. The batter's model of his own execution (`OwnExecution` in the swing decision, §3.5) uses the same scaled σ_v and σ_t, so a batter whose misses widen knows it.
+- **`K_effort` (the effort scale; `Knobs::swing_effort`)** multiplies the effort σ alone: how fast the bat arrives. It stays 1 in calibration, because the 4.5% is sourced (Statcast's within-batter SD); it exists so the two can be swept apart. The batter's decision model has no effort term and does not read it.
+
+The two are separate physical inputs and were already drawn apart: the placement from the `SwingExecution` stream in the fixed order (δ_v, α, δ_r, t₀), the effort from its own `SwingEffort` stream. Splitting the scales changes neither stream nor its draw order, so with both knobs at one shared value every game replays exactly as with the old single knob. *Why:* the old single knob widened the effort with the miss, and at 1.8 the effort tail (`1 + effort` on both angular-rate bumps) put the fastest batted ball at 128 mph against the "none over 125" band (collision note §8.3); the miss alone carries K and contact quality. **M2 measures** the offset → (exit velocity, launch angle) map (physics spec §8.3); these σ values are then set so that a perfectly perceived pitch produces a realistic spread of contact quality. Perception error should dominate execution error for typical pitches [C].
 
 **Mid-swing adjustment:** after commit, observations continue (until the blackout). The aim point updates from the posterior; θ moves toward the new inverse at bounded rates:
 - δ_v and δ_r: ≤ `v_adj` from `Adjustability` (§10).
