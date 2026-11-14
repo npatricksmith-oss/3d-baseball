@@ -144,7 +144,9 @@ impl Sim<'_> {
                     continuation: None,
                 };
                 option.continuation = self.force_continuation(by, &option);
-                if let Some((p_second, _)) = option.continuation {
+                // Only a second out whose throw would be attempted (p > 0.3, the holder's own
+                // rule) adds to the value (Gemini A4 review P1-2).
+                if let Some((p_second, _)) = option.continuation.filter(|c| c.0 > 0.3) {
                     let w_second = if self.st.outs + 1 >= 2 { 1.0 } else { 0.9 };
                     option.value += params.continuation_weight * p_out * p_out * p_second * p_second * w_second;
                 }
