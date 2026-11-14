@@ -650,6 +650,7 @@ void ABbDirector::BeginPlayback(FBbPlay&& Play)
 	bBallInPlay = false;
 	bBallDead = false;
 	bDeadCut = false;
+	bHomeRunCut = false;
 	CallsLogged = 0;
 	if (!Current.bValid)
 	{
@@ -666,6 +667,13 @@ void ABbDirector::BeginPlayback(FBbPlay&& Play)
 	}
 	// A ball in play gets a moment at the end; a taken pitch moves on quickly.
 	HoldAfter = Current.Info.exit_velocity_mps > 0.f ? 2.5f : 0.7f;
+	// A home run: the timeline has the batter and runners trot round to home after the ball
+	// clears the fence (bb_game::timeline); the view holds a moment after the last one scores.
+	bHomeRun = Current.Info.dead_reason == 2;
+	if (bHomeRun)
+	{
+		HoldAfter = HrHoldS;
+	}
 }
 
 void ABbDirector::NoteThrows(float From, float To)
@@ -1420,10 +1428,26 @@ void ABbDirector::UpdateCamera(const BbFrame& Frame, float DeltaSeconds)
 		ShownCam = 2;
 		return;
 	}
+	// A home run, once the ball is over the wall (A16): from beyond center field looking in at
+	// the diamond, for the trot, until the next pitch.
+	if (bHomeRunCut && CameraMode == 0)
+	{
+		if (ShownCam != 3)
+		{
+			ShownCam = 3;
+			Camera->SetActorLocation(ToUE(0, 125, 22));
+			CamLook = ToUE(0, 21, 0);
+			C->SetFieldOfView(HrViewFov);
+		}
+		Camera->SetActorRotation((CamLook - Camera->GetActorLocation()).Rotation());
+		return;
+	}
 	const bool bFollow = bBallInPlay || CameraMode == 1;
 	// Once the ball has left the field and is dead the camera stops following it: the high
-	// view from behind home on the whole field (A10).
-	const bool bOnBall = bBallInPlay && !bBallDead;
+	// view from behind home on the whole field (A10). Behind home (mode 1) a home run does
+	// the same.
+	const bool bGone = bBallDead || bHomeRunCut;
+	const bool bOnBall = bBallInPlay && !bGone;
 	const int32 Want = bFollow ? 1 : 0;
 	if (Want != ShownCam)
 	{
@@ -1432,7 +1456,7 @@ void ABbDirector::UpdateCamera(const BbFrame& Frame, float DeltaSeconds)
 		CamLook = bFollow ? (bOnBall ? FVector(BallUE.X, BallUE.Y, 0.0) : ToUE(0, 16, 0)) : ToUE(0, 6, 1.0);
 		C->SetFieldOfView(bFollow ? 48.f : 8.5f);
 	}
-	if (bFollow && bBallDead && !bDeadCut)
+	if (bFollow && bGone && !bDeadCut)
 	{
 		// A cut, not a pan back from the seats.
 		bDeadCut = true;
@@ -1642,7 +1666,19 @@ void ABbDirector::Tick(float DeltaSeconds)
 			bBallDead = true;
 			UE_LOG(LogBb, Display, TEXT("BB_DEAD wall=%.2f play=%u t=%.2f reason=%u at=(%.1f, %.1f)"), Wall, Current.Info.play_index, Current.Info.dead_s, Current.Info.dead_reason, Current.Info.dead_at[0], Current.Info.dead_at[1]);
 		}
-		if (bBallDead && !bReset)
+		// A home run (A16): once the ball is over the wall the camera cuts to center field to
+		// watch the trot, the ball is gone, and the card goes up.
+		if (bHomeRun && !bHomeRunCut && PlayTime >= Current.Info.dead_s)
+		{
+			bHomeRunCut = true;
+			const int32 Runs = Before.top ? Current.Info.away_runs - Before.away_runs : Current.Info.home_runs - Before.home_runs;
+			static const TCHAR* Kinds[] = { TEXT("Home run"), TEXT("Solo home run"), TEXT("Two-run home run"), TEXT("Three-run home run"), TEXT("Grand slam") };
+			HrKind = Kinds[FMath::Clamp(Runs, 0, 4)];
+			HrName = Sim->FamilyName(Current.Info.batter).ToUpper();
+			HrLine = FString::Printf(TEXT("%d ft     %d mph"), FMath::RoundToInt(Current.Info.projected_distance_m / 0.3048f), FMath::RoundToInt(Current.Info.exit_velocity_mps * 2.2369363f));
+			UE_LOG(LogBb, Display, TEXT("BB_HR wall=%.2f play=%u t=%.2f trot_end=%.2f card=\"%s / %s / %s\""), Wall, Current.Info.play_index, Current.Info.dead_s, Current.Info.duration_s, *HrName, *HrLine, *HrKind);
+		}
+		if ((bBallDead || bHomeRunCut) && !bReset)
 		{
 			bBallShown = false;
 		}
@@ -1788,6 +1824,12 @@ void ABbDirector::Tick(float DeltaSeconds)
 		if (ABbHUD* Hud = GetWorld()->GetFirstPlayerController() ? Cast<ABbHUD>(GetWorld()->GetFirstPlayerController()->GetHUD()) : nullptr)
 		{
 			const BbPlayInfo& In = Current.Info;
+			// The home-run card: up as the camera cuts to the trot, fading in over 0.4 s, down
+			// as the reset begins.
+			Hud->HomeRunName = HrName;
+			Hud->HomeRunLine = HrLine;
+			Hud->HomeRunKind = HrKind;
+			Hud->HomeRunAlpha = bHomeRunCut && !bReset ? FMath::Clamp((PlayTime - In.dead_s) / 0.4f, 0.f, 1.f) : 0.f;
 			// The call appears when a viewer would know it: at the umpire's call if the pitch
 			// was not hit, at the end of the play if it was (the sim says when: call_s), and
 			// never before the umpire has signalled the last out (strike three).

@@ -41,4 +41,11 @@ public:
 	FString CardScore;
 	/** 0 hidden, 1 fully shown. */
 	float CardAlpha = 0.f;
+	/** A home run (A16): the batter's family name, "412 ft   108 mph", and what it scored
+	 *  ("Two-run home run"), as a card low on the screen while he circles the bases. */
+	FString HomeRunName;
+	FString HomeRunLine;
+	FString HomeRunKind;
+	/** 0 hidden, 1 fully shown. */
+	float HomeRunAlpha = 0.f;
 };
