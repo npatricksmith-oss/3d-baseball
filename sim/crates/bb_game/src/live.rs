@@ -192,9 +192,12 @@ const RELAY_TRANSFER_FRAC: f64 = 0.7;
 /// [E]: an equally sure tag loses to the force (a run can score ahead of a tag for the
 /// third out, never ahead of a force), but a sure tag still beats a doubtful force.
 const TWO_OUT_TAG_W: f64 = 0.9;
-/// Infield radius for the settle rule (rules-spec §5.8), m. The spec's 30 m excluded second
-/// base (38.8 m from home); the infield dirt reaches ~45 m.
-const INFIELD_R: f64 = 45.0;
+/// How far behind the deepest Savant pre-pitch infield position
+/// ([`crate::play::MAX_INFIELD_DEPTH_M`], 152.9 ft = 46.60 m) a ball still belongs to
+/// infield range (secondary ground-ball break, settle rule, infield backups, runner
+/// deep-fly read), m [E].
+const INFIELD_DEPTH_MARGIN_M: f64 = 5.0;
+const INFIELD_R: f64 = crate::play::MAX_INFIELD_DEPTH_M + INFIELD_DEPTH_MARGIN_M;
 /// A ball an infielder believes comes down in the infield within this time of contact is a
 /// ground ball to him (he breaks for it without waiting for a call); later, it is a pop-up
 /// or a fly, s [E].
@@ -1186,6 +1189,7 @@ struct Sim<'a> {
     st: &'a mut RulesState,
     t: f64,
     ball: Ball,
+    home: [Vec3; 9],
     f: Vec<Fielder>,
     r: Vec<Runner>,
     primary: usize,
@@ -1566,16 +1570,31 @@ impl<'a> Sim<'a> {
                 self.f[i].peel = Some(at + dir * PEEL_BACKUP_M);
             }
         }
-        for i in [3usize, 4, 5] {
-            let fd = &self.f[i];
-            let grounder = fd.belief.as_ref().and_then(|p| p.first_bounce()).map(|b| m::hypot(b.1, b.2) < 25.0 && b.0 - t_c < GROUNDER_BOUNCE_S).unwrap_or(false);
-            // Only a fielder who read the ball for this call (Codex momentum review #5: another's
-            // saved target may be a base from an earlier job).
-            let fresh_read = calls.iter().any(|c| c.0 == i);
-            if i != self.primary && fresh_read && grounder && fd.t_int.is_finite() && m::hypot(own[i].x, own[i].y) < INFIELD_R {
-                self.f[i].role = Role::Chase;
-                self.f[i].target = own[i];
-                broke = true;
+        // Check non-Cover(2) infielders (1B, 3B, and the on-side idle middle infielder) first,
+        // then let a Role::Cover(2) middle infielder break only if his partner (3 or 5) is not
+        // already chasing, so second base is never left uncovered.
+        for cover2_pass in [false, true] {
+            for i in [2usize, 3, 4, 5] {
+                let is_cover2 = self.f[i].role == Role::Cover(2);
+                if is_cover2 != cover2_pass {
+                    continue;
+                }
+                if is_cover2 {
+                    let other_mi = if i == 3 { 5 } else { 3 };
+                    if self.f[other_mi].role == Role::Chase {
+                        continue;
+                    }
+                }
+                let fd = &self.f[i];
+                let grounder = fd.belief.as_ref().and_then(|p| p.first_bounce()).map(|b| m::hypot(b.1, b.2) < 25.0 && b.0 - t_c < GROUNDER_BOUNCE_S).unwrap_or(false);
+                // Only a fielder who read the ball for this call (Codex momentum review #5: another's
+                // saved target may be a base from an earlier job).
+                let fresh_read = calls.iter().any(|c| c.0 == i);
+                if i != self.primary && fresh_read && grounder && fd.t_int.is_finite() && m::hypot(own[i].x, own[i].y) < INFIELD_R {
+                    self.f[i].role = Role::Chase;
+                    self.f[i].target = own[i];
+                    broke = true;
+                }
             }
         }
         if broke {
@@ -1693,7 +1712,8 @@ impl<'a> Sim<'a> {
             }
         }
         let who = if deep {
-            if from.x <= 10.0 { 5 } else { 3 }
+            let spot = Self::relay_spot(from, b);
+            if (self.home[5] - spot).norm() <= (self.home[3] - spot).norm() { 5 } else { 3 }
         } else {
             match b {
                 4 => if from.x < -15.0 { 4 } else { 2 },
@@ -1918,10 +1938,16 @@ impl<'a> Sim<'a> {
             (3, vec![4, 5, 0]),
             (4, vec![1, 0]),
         ];
-        for (base, cands) in order.iter() {
-            // Keep an existing non-chasing cover if there is one.
+        // Reserve kept non-chasing covers first so base 1's fallback never steals Cover(2).
+        let mut kept = [false; 4];
+        for (slot, (base, _)) in order.iter().enumerate() {
             if let Some(c) = (0..9).find(|&i| self.f[i].role == Role::Cover(*base) && !taken.contains(&i)) {
                 taken.push(c);
+                kept[slot] = true;
+            }
+        }
+        for (slot, (base, cands)) in order.iter().enumerate() {
+            if kept[slot] {
                 continue;
             }
             if let Some(&c) = cands.iter().find(|c| !taken.contains(c)) {
@@ -3149,7 +3175,7 @@ fn new_sim<'a>(inp: &'a LiveInput<'a>, st: &'a mut RulesState) -> Sim<'a> {
         let mut r = rng(seed, play, 0x0200, Purpose::SurfaceBounce, k);
         (surf.roughness * r.truncated_normal(4.0), surf.roughness * r.truncated_normal(4.0))
     });
-    let home = home_positions_for(inp.bats, st.bases[0].is_some(), st.outs);
+    let home = home_positions_for(inp.bats, st.bases[0].is_some(), st.bases[1].is_some(), st.outs);
     let f: Vec<Fielder> = (0..9)
         .map(|i| {
             let mut r = rng(seed, play, inp.fielders[i], Purpose::FielderPerception, 0);
@@ -3224,6 +3250,7 @@ fn new_sim<'a>(inp: &'a LiveInput<'a>, st: &'a mut RulesState) -> Sim<'a> {
         st,
         t: t_c,
         ball: Ball::Free { path: path.clone(), next_touch: 0, next_wall: 0, settled_sent: false },
+        home,
         f,
         r,
         primary: 0,
@@ -4829,7 +4856,9 @@ mod tests {
         let Ball::Free { path, .. } = &sim.ball else { unreachable!() };
         assert!(path.bounces[0].0 > sim.t + 2.0, "the ball must still be well up");
         assert!(m::hypot(sim.fielding_point().x, sim.fielding_point().y) > RELAY_DEEP_M);
-        assert_eq!(sim.f[SS].role, Role::Relay(4));
+        // Against RHB (Savant standard: 2B +6.8 deg, SS -18.3 deg), 2B starts closer to this
+        // straightaway CF relay spot (~ -2 m, 45 m) than SS and goes out early.
+        assert_eq!(sim.f[3].role, Role::Relay(4));
         // A short fly an infielder can catch keeps him on the ball.
         let mut inp = input(&fx, vec![RunnerIn { id: fx.st.batter, base: 0, speed: 8.2 }, RunnerIn { id: R, base: 2, speed: 8.2 }]);
         inp.ball = BallState { r: Vec3::new(0.0, 0.5, 1.0), v: Vec3::new(-2.0, 14.0, 24.0), w: Vec3::ZERO };
@@ -4932,18 +4961,19 @@ mod tests {
         const R: AgentId = 0x0007;
         let fx = fixture(&[(R, 2)]);
         let mut inp = input(&fx, vec![RunnerIn { id: fx.st.batter, base: 0, speed: 8.2 }, RunnerIn { id: R, base: 2, speed: 8.2 }]);
+        const B2: usize = 3;
         inp.fattrs[CF].arm = 30.0;
         inp.fattrs[CF].arm_sigma = 0.0;
-        inp.fattrs[SS].arm_sigma = 0.0;
+        inp.fattrs[B2].arm_sigma = 0.0;
         let deep = Vec3::new(-5.0, 112.0, 0.0);
         assert!(solve_throw(&fx.env, THROW_RELEASE_Z, THROW_CATCH_Z, deep.norm(), 30.0).is_none(), "the direct throw must be out of reach");
         let mut st = fx.st.clone();
         let mut sim = new_sim(&inp, &mut st);
         sim.t = 5.0;
         held_at(&mut sim, CF, deep);
-        // The relay man is already on his spot; the runner is past third, jogging home (he
-        // is not moved by this test, so the play on him stays open).
-        sim.f[SS].pos = sim.f[SS].target;
+        // The closer deep relay man (2B against RHB for CF x = -5 m) is already on his spot;
+        // the runner is past third, jogging home (not moved by this test, so the play stays open).
+        sim.f[B2].pos = sim.f[B2].target;
         sim.f[1].pos = base_pos(4);
         let k = sim.r.iter().position(|r| r.id == R).unwrap();
         (sim.r[k].s, sim.r[k].goal, sim.r[k].v) = (3.2 * BASE_L, 4, 3.0);
@@ -4959,7 +4989,7 @@ mod tests {
             }
         }
         let who: Vec<AgentId> = sim.out.released.iter().map(|x| x.1).collect();
-        assert_eq!(who, vec![sim.f[CF].id, sim.f[SS].id], "throws by {who:?}; facts {:?}; catcher at {:?}", sim.out.facts, sim.f[1].pos);
+        assert_eq!(who, vec![sim.f[CF].id, sim.f[B2].id], "throws by {who:?}; facts {:?}; catcher at {:?}", sim.out.facts, sim.f[1].pos);
         assert!(matches!(sim.ball, Ball::Held { by: 1 }), "ball: {:?}", match &sim.ball { Ball::Held { by } => format!("held by {by}"), _ => "loose".into() });
     }
 
@@ -6769,5 +6799,302 @@ mod tests {
             }
         }
         panic!("no double play attempt: {:?}", sim.ball);
+    }
+
+    #[test]
+    fn first_baseman_plays_standard_depth_when_second_is_occupied() {
+        for bats in [bb_observe::Hand::Right, bb_observe::Hand::Left] {
+            let fx_e = fixture(&[]);
+            let mut st_e = fx_e.st.clone();
+            let mut inp_e = input(&fx_e, vec![RunnerIn { id: 0x0001, base: 0, speed: 8.2 }]);
+            inp_e.bats = bats;
+            let sim_empty = new_sim(&inp_e, &mut st_e);
+
+            let mut fx13 = fixture(&[(5, 1), (7, 3)]);
+            fx13.st.outs = 1;
+            let mut st13 = fx13.st.clone();
+            let mut inp13 = input(&fx13, vec![
+                RunnerIn { id: fx13.st.batter, base: 0, speed: 8.2 },
+                RunnerIn { id: 5, base: 1, speed: 8.2 },
+                RunnerIn { id: 7, base: 3, speed: 8.2 },
+            ]);
+            inp13.bats = bats;
+            let sim_13 = new_sim(&inp13, &mut st13);
+            assert!((sim_13.f[2].pos - base_pos(1)).norm() < 2.3, "{bats:?} 1st&3rd should hold runner at 1B");
+
+            for (label, on_base) in [
+                ("1st&2nd", vec![(5, 1), (6, 2)]),
+                ("loaded", vec![(5, 1), (6, 2), (7, 3)]),
+            ] {
+                let mut fx = fixture(&on_base);
+                fx.st.outs = 1;
+                let mut st = fx.st.clone();
+                let mut runners = vec![RunnerIn { id: fx.st.batter, base: 0, speed: 8.2 }];
+                runners.extend(on_base.iter().map(|&(id, base)| RunnerIn { id, base, speed: 8.2 }));
+                let mut inp = input(&fx, runners);
+                inp.bats = bats;
+                let sim = new_sim(&inp, &mut st);
+                assert!((sim.f[2].pos - sim_empty.f[2].pos).norm() < 1e-9,
+                    "{bats:?} {label}: 1B should stay at Standard depth {:?}, got {:?}", sim_empty.f[2].pos, sim.f[2].pos);
+                assert!(sim.f[3].pos.norm() < sim_empty.f[3].pos.norm(), "{bats:?} {label}: 2B stays at DP depth");
+                assert!(sim.f[5].pos.norm() < sim_empty.f[5].pos.norm(), "{bats:?} {label}: SS stays at DP depth");
+            }
+        }
+    }
+
+    #[test]
+    fn middle_infielder_past_45m_breaks_for_infield_grounder() {
+        let fx = fixture(&[]);
+        let mut st = fx.st.clone();
+        let mut inp = input(&fx, vec![RunnerIn { id: fx.st.batter, base: 0, speed: 8.2 }]);
+        inp.fattrs[0].speed = 14.0;
+        inp.fattrs[0].reaction = 0.05;
+        inp.fattrs[3].reaction = 0.50;
+        inp.ball = BallState { r: Vec3::new(0.0, 0.5, 0.5), v: Vec3::new(6.0, 48.0, -5.0), w: Vec3::ZERO };
+        let mut sim = new_sim(&inp, &mut st);
+        for f in sim.f.iter_mut() { f.err = [0.0; 4]; }
+        sim.t = inp.t_contact + 0.19;
+        sim.assign();
+        assert_ne!(sim.primary, 3, "setup expects P to be primary");
+        assert!(sim.f[3].t_int.is_finite() && sim.f[3].target.norm() > 45.0,
+            "2B intercept should lie past 45 m: {:?}", sim.f[3].target);
+        assert_eq!(sim.f[3].role, Role::Chase, "2B starting at 46.6 m must still break for infield grounder");
+    }
+
+    #[test]
+    fn dp_pivot_man_keeps_covering_second_when_partner_chases() {
+        for make_p_primary in [false, true] {
+            let mut fx = fixture(&[(5, 1)]);
+            fx.st.outs = 1;
+            let mut st = fx.st.clone();
+            let mut inp = input(&fx, vec![
+                RunnerIn { id: fx.st.batter, base: 0, speed: 8.2 },
+                RunnerIn { id: 5, base: 1, speed: 8.2 },
+            ]);
+            if make_p_primary {
+                inp.fattrs[0].speed = 14.0;
+                inp.fattrs[0].reaction = 0.1;
+            }
+            inp.ball = BallState { r: Vec3::new(0.0, 0.5, 0.5), v: Vec3::new(-1.5, 24.0, -3.0), w: Vec3::ZERO };
+            let mut sim = new_sim(&inp, &mut st);
+            for f in sim.f.iter_mut() { f.err = [0.0; 4]; }
+            sim.t = inp.t_contact + 0.19;
+            sim.assign();
+            assert!((0..9).any(|i| sim.f[i].role == Role::Cover(2)),
+                "make_p_primary={make_p_primary}: second base left uncovered (primary={}, roles={:?})",
+                sim.primary, sim.f.iter().map(|f| f.role).collect::<Vec<_>>());
+        }
+    }
+
+    #[test]
+    fn infielder_at_savant_depth_settles_without_return_throw() {
+        let fx = fixture(&[]);
+        let mut st = fx.st.clone();
+        let mut inp = input(&fx, vec![RunnerIn { id: fx.st.batter, base: 0, speed: 8.2 }]);
+        inp.bats = bb_observe::Hand::Right;
+        let mut sim = new_sim(&inp, &mut st);
+        let at = sim.f[3].pos;
+        assert!(m::hypot(at.x, at.y) > 45.0);
+        sim.r[0].s = BASE_L;
+        sim.r[0].goal = 1;
+        sim.r[0].v = 0.0;
+        held_at(&mut sim, 3, at);
+        sim.t = sim.f[3].ready_at + 1.0;
+        sim.holder_act();
+        assert!(sim.settled(), "2B at Savant depth {:.2} m must count as in infield", m::hypot(at.x, at.y));
+        assert!(matches!(sim.ball, Ball::Held { by: 3 }), "no return throw from Savant 2B depth: {:?}", sim.ball);
+    }
+
+    #[test]
+    fn first_baseman_breaks_on_right_side_infield_grounder() {
+        let fx = fixture(&[]);
+        let mut st = fx.st.clone();
+        let mut inp = input(&fx, vec![RunnerIn { id: fx.st.batter, base: 0, speed: 8.2 }]);
+        inp.bats = bb_observe::Hand::Right;
+        inp.fattrs[3].speed = 26.0;
+        inp.fattrs[3].reaction = 0.05;
+        inp.ball = BallState { r: Vec3::new(0.0, 0.5, 0.5), v: Vec3::new(7.5, 19.0, 0.5), w: Vec3::ZERO };
+        let mut sim = new_sim(&inp, &mut st);
+        for f in sim.f.iter_mut() { f.err = [0.0; 4]; }
+        sim.t = inp.t_contact + 0.19;
+        sim.assign();
+        assert_ne!(sim.primary, 2, "setup expects 2B primary on this grounder (t_int_1b={:.3})", sim.f[2].t_int);
+        assert_eq!(sim.f[2].role, Role::Chase, "1B must break for reachable right-side infield grounder: primary={}, t_int={:.3}, bounce={:?}, target={:?}", sim.primary, sim.f[2].t_int, sim.f[2].belief.as_ref().and_then(|p| p.first_bounce()), sim.f[2].target);
+        assert!(m::hypot(sim.f[2].target.x, sim.f[2].target.y) < INFIELD_R, "1B intercept inside infield: {:?}", sim.f[2].target);
+        assert!((0..9).any(|i| sim.f[i].role == Role::Cover(1)), "another fielder (P) must cover first");
+    }
+
+    #[test]
+    fn first_baseman_at_standard_depth_carries_when_faster_than_pitcher() {
+        let fx = fixture(&[]);
+        let mut st = fx.st.clone();
+        let mut inp = input(&fx, vec![RunnerIn { id: fx.st.batter, base: 0, speed: 8.2 }]);
+        inp.bats = bb_observe::Hand::Right;
+        let mut sim = new_sim(&inp, &mut st);
+        let std_1b = sim.f[2].pos;
+        assert!((std_1b - base_pos(1)).norm() > 10.5);
+        sim.r[0].s = 12.0;
+        sim.r[0].v = 7.5;
+        sim.r[0].goal = 1;
+        held_at(&mut sim, 2, std_1b);
+        sim.f[0].role = Role::Cover(1);
+        sim.f[0].target = base_pos(1);
+        sim.t = sim.f[2].ready_at + 1.0;
+        let opts = sim.holder_options(2);
+        assert!(opts.iter().any(|o| o.base == 1 && o.carry && o.force),
+            "carry 1 must be admitted when 1B beats waiting for P: {:#?}",
+            opts.iter().map(|o| (o.base, o.carry, o.ball_at, o.receiver_at)).collect::<Vec<_>>());
+        sim.holder_act();
+        assert_eq!(sim.f[2].carry_to, Some(1), "1B should carry unassisted instead of stalling for P");
+    }
+
+    #[test]
+    fn deep_relay_picks_closer_middle_infielder_by_alignment() {
+        // Runner on 2nd: relay is toward home (0, 0); from RHB (+8, 92), spot is (+4, 46),
+        // ~2 m from 2B (+5.5, 46.3) vs ~18 m from SS (-14.2, 42.9).
+        let fx = fixture(&[(5, 2)]);
+        let mut st_r = fx.st.clone();
+        let mut inp_r = input(&fx, vec![
+            RunnerIn { id: fx.st.batter, base: 0, speed: 8.2 },
+            RunnerIn { id: 5, base: 2, speed: 8.2 },
+        ]);
+        inp_r.bats = bb_observe::Hand::Right;
+        let mut sim_r = new_sim(&inp_r, &mut st_r);
+        let from_rc = Vec3::new(8.0, 92.0, 0.0);
+        held_at(&mut sim_r, 7, from_rc);
+        assert_eq!(sim_r.relay_job(from_rc).map(|j| j.0), Some(3), "RHB (+8, 92) -> home: 2B is closer to relay spot than SS");
+
+        // Against LHB (SS -6.2 deg, 2B +19.1 deg), SS starts closer to straightaway CF (0, 92) -> home.
+        let fx_l = fixture(&[(5, 2)]);
+        let mut st_l = fx_l.st.clone();
+        let mut inp_l = input(&fx_l, vec![
+            RunnerIn { id: fx_l.st.batter, base: 0, speed: 8.2 },
+            RunnerIn { id: 5, base: 2, speed: 8.2 },
+        ]);
+        inp_l.bats = bb_observe::Hand::Left;
+        let mut sim_l = new_sim(&inp_l, &mut st_l);
+        let from_cf = Vec3::new(0.0, 92.0, 0.0);
+        held_at(&mut sim_l, 7, from_cf);
+        assert_eq!(sim_l.relay_job(from_cf).map(|j| j.0), Some(5), "LHB (0, 92) -> home: SS is closer to relay spot than 2B");
+
+        // Runner on 1st only (relay toward 3B): at RHB (+25, 88), relay spot toward 3B is near 2B.
+        let fx_1 = fixture(&[(5, 1)]);
+        let mut st_1 = fx_1.st.clone();
+        let mut inp_1 = input(&fx_1, vec![
+            RunnerIn { id: fx_1.st.batter, base: 0, speed: 8.2 },
+            RunnerIn { id: 5, base: 1, speed: 8.2 },
+        ]);
+        inp_1.bats = bb_observe::Hand::Right;
+        let mut sim_1 = new_sim(&inp_1, &mut st_1);
+        let from_rf = Vec3::new(25.0, 88.0, 0.0);
+        held_at(&mut sim_1, 8, from_rf);
+        assert_eq!(sim_1.relay_job(from_rf).map(|j| j.0), Some(3), "RHB (+25, 88) -> 3B: 2B is closer to relay spot than SS");
+    }
+
+    #[test]
+    fn carry_double_play_at_second_uses_carrier_continuation_and_out_weight() {
+        const B2: usize = 3;
+        const B1: usize = 2;
+        const SS: usize = 5;
+        let mut ratios = Vec::new();
+        for outs in [0u8, 1u8] {
+            let mut fx = fixture(&[(5, 1), (7, 3)]);
+            fx.st.outs = outs;
+            let mut st = fx.st.clone();
+            let mut inp = input(&fx, vec![
+                RunnerIn { id: fx.st.batter, base: 0, speed: 8.2 },
+                RunnerIn { id: 5, base: 1, speed: 8.2 },
+                RunnerIn { id: 7, base: 3, speed: 8.2 },
+            ]);
+            inp.bats = bb_observe::Hand::Right;
+            let mut sim = new_sim(&inp, &mut st);
+            sim.t = inp.t_contact + 1.0;
+            held_at(&mut sim, B2, Vec3::new(1.8, 38.8, 0.0));
+            sim.f[B2].ready_at = sim.t;
+            sim.f[B2].up_at = sim.t;
+            sim.f[B1].role = Role::Cover(1);
+            sim.f[B1].pos = base_pos(1);
+            sim.f[B1].target = base_pos(1);
+            sim.f[SS].pos = Vec3::new(-14.0, 42.0, 0.0);
+            sim.f[1].role = Role::Cover(4);
+            sim.f[1].pos = base_pos(4);
+            sim.r[0].s = 4.0; sim.r[0].v = 8.2; sim.r[0].goal = 1;
+            sim.r[1].s = BASE_L + 22.0; sim.r[1].v = 8.0; sim.r[1].goal = 2;
+            sim.r[2].s = 3.0 * BASE_L + 23.0; sim.r[2].v = 7.5; sim.r[2].goal = 4;
+
+            let opts = sim.holder_options(B2);
+            let carry2 = opts.iter().find(|o| o.base == 2 && o.carry && o.force).expect("carry 2 option");
+            let (p2, _) = carry2.continuation.expect("carry DP at second must evaluate continuation");
+            assert!(p2 > 0.3, "expected throwable second out at first, p2={p2}");
+            let bonus = carry2.value - carry2.p_out * carry2.p_out * carry2.weight;
+            let expected_w = if outs == 0 { 0.9 } else { 1.0 };
+            let implied_w = bonus / (carry2.p_out * carry2.p_out * p2 * p2);
+            assert!((implied_w - expected_w).abs() < 1e-9, "outs={outs}: want w_second={expected_w}, got {implied_w}");
+            ratios.push(implied_w);
+
+            sim.holder_act();
+            assert_eq!(sim.f[B2].carry_to, Some(2), "outs={outs}: carry DP at 2B must beat single home throw");
+
+            let mut fx0 = fixture(&[(5, 1), (7, 3)]);
+            fx0.st.outs = outs;
+            let mut st0 = fx0.st.clone();
+            let mut inp0 = input(&fx0, vec![
+                RunnerIn { id: fx0.st.batter, base: 0, speed: 8.2 },
+                RunnerIn { id: 5, base: 1, speed: 8.2 },
+                RunnerIn { id: 7, base: 3, speed: 8.2 },
+            ]);
+            inp0.bats = bb_observe::Hand::Right;
+            inp0.fattrs[B2].throw_choice.continuation_weight = 0.0;
+            let mut sim0 = new_sim(&inp0, &mut st0);
+            sim0.t = sim.t;
+            held_at(&mut sim0, B2, Vec3::new(1.8, 38.8, 0.0));
+            sim0.f[B2].ready_at = sim0.t;
+            sim0.f[B2].up_at = sim0.t;
+            sim0.f[B1].role = Role::Cover(1); sim0.f[B1].pos = base_pos(1);
+            sim0.f[SS].pos = Vec3::new(-14.0, 42.0, 0.0);
+            sim0.f[1].role = Role::Cover(4); sim0.f[1].pos = base_pos(4);
+            sim0.r[0].s = 4.0; sim0.r[0].v = 8.2; sim0.r[0].goal = 1;
+            sim0.r[1].s = BASE_L + 22.0; sim0.r[1].v = 8.0; sim0.r[1].goal = 2;
+            sim0.r[2].s = 3.0 * BASE_L + 23.0; sim0.r[2].v = 7.5; sim0.r[2].goal = 4;
+            sim0.holder_act();
+            assert_ne!(sim0.f[B2].carry_to, Some(2), "outs={outs}: without continuation, single home throw (w=1.3) beats carry 2");
+        }
+        assert!((ratios[0] - 0.9).abs() < 1e-9 && (ratios[1] - 1.0).abs() < 1e-9);
+    }
+
+    #[test]
+    fn carry_non_second_force_dp_uses_carrier_post_touch_setup_clock() {
+        const B3: usize = 4;
+        const B1: usize = 2;
+        let mut fx = fixture(&[(5, 1), (6, 2)]);
+        fx.st.outs = 0;
+        let mut st = fx.st.clone();
+        let mut inp = input(&fx, vec![
+            RunnerIn { id: fx.st.batter, base: 0, speed: 8.2 },
+            RunnerIn { id: 5, base: 1, speed: 8.2 },
+            RunnerIn { id: 6, base: 2, speed: 8.2 },
+        ]);
+        inp.bats = bb_observe::Hand::Right;
+        let mut sim = new_sim(&inp, &mut st);
+        sim.t = inp.t_contact + 1.0;
+        held_at(&mut sim, B3, base_pos(3) + Vec3::new(0.0, 2.5, 0.0));
+        sim.f[B3].ready_at = sim.t;
+        sim.f[B3].up_at = sim.t;
+        sim.f[B1].role = Role::Cover(1);
+        sim.f[B1].pos = base_pos(1);
+        sim.f[B1].target = base_pos(1);
+        sim.r[0].s = 9.0; sim.r[0].v = 8.2; sim.r[0].goal = 1;
+        sim.r[1].s = BASE_L + 22.0; sim.r[1].v = 8.0; sim.r[1].goal = 2;
+        sim.r[2].s = 2.0 * BASE_L + 23.0; sim.r[2].v = 7.5; sim.r[2].goal = 3;
+
+        let opts = sim.holder_options(B3);
+        let carry3 = opts.iter().find(|o| o.base == 3 && o.carry && o.force).expect("carry 3 option");
+        let (p2, ball_at_1) = carry3.continuation.expect("carry at 3B must use carrier post-touch continuation");
+        assert!(p2 > 0.3, "expected continuation throw to 1B, p2={p2}");
+        // Must include carrier's own post-touch setup (> carry completion time) rather than 0.
+        assert!(ball_at_1 > carry3.ball_at + 0.5, "ball_at_1={ball_at_1} vs carry={}", carry3.ball_at);
+        let bonus = carry3.value - carry3.p_out * carry3.p_out * carry3.weight;
+        let implied_w = bonus / (carry3.p_out * carry3.p_out * p2 * p2);
+        assert!((implied_w - 0.9).abs() < 1e-9, "0-out carry at 3B must use w_second=0.9, got {implied_w}");
     }
 }
