@@ -9,7 +9,7 @@
 use std::collections::BTreeMap;
 
 use bb_game::game::Game;
-use bb_physics::ground::{Field, WallKind};
+use bb_physics::ground::Field;
 use bb_rules::{Event, Input, Touch};
 
 fn main() {
