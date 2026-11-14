@@ -60,9 +60,10 @@ pub struct FielderAttrs {
     pub throws: bb_observe::Hand,
     /// Configurable A4 option/observation thresholds [E] (agent-models §5.5–5.7).
     pub throw_choice: bb_agents::throwing::ChoiceParams,
-    /// From securing the ball to the earliest tag he can put on a runner, s [E], **value
-    /// pending** the tag-up sources note (agent-models §6.4); 0 (neutral) reproduces the game
-    /// before the tag-up model, where a tag landed on the tick the ball was secured.
+    /// From securing the ball to the earliest tag he can put on a runner, s [E] (agent-models
+    /// §6.4): 0.25 s, the one quoted receive-and-tag time (a catcher, MLB.com via the tag-up
+    /// sources note §3; low confidence), for every fielder, the same catch-and-sweep. Before,
+    /// a tag landed on the tick the ball was secured.
     pub tag_apply_s: f64,
 }
 
@@ -107,7 +108,7 @@ impl FielderAttrs {
             jump_gain: 1.0,
             throws: bb_observe::Hand::Right,
             throw_choice: bb_agents::throwing::ChoiceParams::default(),
-            tag_apply_s: 0.0,
+            tag_apply_s: 0.25,
         }
     }
 

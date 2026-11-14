@@ -21,6 +21,6 @@ pub struct TagUpParams {
 
 impl Default for TagUpParams {
     fn default() -> Self {
-        Self { react_s: 0.0, tau_s: 0.85, typical_tag_s: 0.0 }
+        Self { react_s: 0.0, tau_s: 0.85, typical_tag_s: 0.25 }
     }
 }
