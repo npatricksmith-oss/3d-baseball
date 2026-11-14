@@ -32,3 +32,20 @@ fn recording_does_not_change_the_game() {
     assert_eq!(plain.digest, recorded.digest);
     assert!(!recorded.viz.is_empty());
 }
+
+#[test]
+fn choice_evidence_does_not_change_the_game_or_leak_between_captures() {
+    use bb_game::live::choice_trace::capture;
+    // PLAN §4.2: a diagnostic observer must preserve the entire deterministic log.
+    let plain = simulate_game(7);
+    let (traced, choices) = capture(|| simulate_game(7));
+    assert_eq!(plain.log, traced.log);
+    assert_eq!(plain.digest, traced.digest);
+    assert!(!choices.is_empty());
+    let (_, empty) = capture(|| ());
+    assert!(empty.is_empty());
+    // The sink is thread-local, like keyed diagnostic profiling, never global state.
+    let (other, local) = capture(|| std::thread::spawn(|| simulate_game(7)).join().unwrap());
+    assert_eq!(plain.log, other.log);
+    assert!(local.is_empty());
+}

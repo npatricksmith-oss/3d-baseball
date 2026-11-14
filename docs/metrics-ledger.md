@@ -95,6 +95,12 @@ The "5.48" at the top of the last block is a coincidence of two samples: the div
 
 Hit rates are per ball in play of that type. "Seed 5" and "seed 2" mean `sim-cli games --seed` with 1,024 games unless a row says otherwise.
 
+### 2026-11-14 (300 games, seeds 0–299 and 1000–1299)
+
+| Task | Commit | What changed | Numbers (before → after) | Cause | Open |
+|---|---|---|---|---|---|
+| **Arm strength by position** | `4937cb8`; [note](calibration/2026-11-14-arm-by-position.md) | Grade-50 `ArmStrength` per position from Statcast's positional means (m/s): 1B 35.45, 2B 35.36, 3B 37.95, SS 38.49, LF 39.07, CF 40.05, RF 40.55; pitcher and catcher keep 36. Was 36 for every infielder and 39 for every outfielder. Every digest changed | Seeds 0–299 [1000–1299]: runs 5.53 → 5.40 [5.40 → 5.53] (mean of the two sets 5.465 → 5.465); K% 15.3 → 15.3 [15.1 → 14.8]; BB% 6.9 → 7.0 [7.3 → 7.2]; HR/PA 5.12% → 5.14% [4.88% → 4.97%]; reached on BIP 32.5% → 32.4% [32.5% → 32.7%]; GB .351 → .348 [.349 → .353]; LD .723 → .713 [.727 → .721]; FB .127 → .128 [.137 → .132]; PU .014 → .011 [.015 → .015]. Throw probe (seeds 0–299): 71.1 → 70.9 balls in play a game; outs per ball in play .590 → .591; throws taken in the air 96.3% → 96.1%; hurried over 2/3 1.95 → 1.97 a game; SS throws 7.70 → 7.91, 2B 8.16 → 8.02, LF 7.20 → 7.00 | Every throw leaves at a different speed, so every game diverges at its first throw and the two sample sets reshuffle; the two sets traded values (5.53/5.40 → 5.40/5.53), about the 0.1–0.2 spread between sets (header of this section), and their mean did not move. The per-position probe moves are in the direction of the change (the SS arm is 2.5 m/s stronger, so more of the plays that go to SS end in a throw; 2B and LF are 0.7 and 0.1 m/s weaker or less used) but no shift here is larger than the sets' own noise | **Not explained, and not resolved at 600 games:** whether the small drops in LD (.723 → .713, .727 → .721) and PU are an effect of stronger infield arms or noise. Nothing was tuned to bring any number back |
+
 ### 2026-11-14 (official scorer; 300 games per seed set)
 
 | Task | Commit | What changed | Numbers (before → after) | Cause | Open |
@@ -173,6 +179,8 @@ Runs per game were not printed until late in the day; the early rows have PA per
 | Date | Task | Commit | Check |
 |---|---|---|---|
 | 11-14 | A12/B5 partial: isolated scorer helper and captions naming the out base | `555b32c` and follow-up | Game digests identical to `db5c012` for seeds 0, 1, 7, 42; captions changed, event logs did not. Official scorer and audit remain incomplete |
+| 11-14 | A4 evidence: throw-choice trace and `throw_choice_probe` (hooks in `live.rs`, off by default) | `886ab88`..`cb5782b` | 256 games, seeds 0–255, traced and untraced: digests identical (2,880 runs, 56,455 pitches); 8 pre-hook digests match |
+| 11-14 | Tests the reviews deferred (dives, set-up times, left-handed release, a log without rosters) | `92b3128`, `7104cd5` | Tests only; digests identical, seeds 1, 2, 3, 42 (the worker's check; Codex review pending) |
 | 11-13 | Rosters (A2): names, numbers, order | `5ab0b51`..`050bd15` | Digests identical, seeds 1, 2, 3, 42 |
 | 11-13 | Rules: overrun, two on a base, passing | `25a56c1` | 512 games, seed 2: digests identical; zero passing outs |
 | 11-13 | Rules-passing review, five fixes | `8a46f67`..`0f3c0c6` | Only change: 10 of 512 games count one more runner left on base |

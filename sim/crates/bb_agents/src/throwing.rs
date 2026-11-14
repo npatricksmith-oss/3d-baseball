@@ -197,4 +197,36 @@ mod tests {
         assert!(close(b.sigma_mult(1.0), 2.0) && close(b.speed_mult(1.0), 0.90));
         assert!(close(b.sigma_mult(0.0), 1.0) && close(b.speed_mult(0.0), 1.0));
     }
+
+    // agent-models §5.5, all three terms together: set = Transfer + turn + footwork, and he can
+    // let go from RUSH_MIN_FRAC (0.6) of Transfer + turn (the footwork is not part of it).
+    // Transfer 0.65 s:
+    //   off his throwing shoulder (+0.12) and moving away (+0.2): set = 0.65+0.12+0.2 = 0.97,
+    //     earliest = 0.6·(0.65+0.12) = 0.462; at 0.6 s hurry = (0.97−0.6)/(0.97−0.462) = 0.7283;
+    //   off his glove shoulder (−0.12) after a dive (+0.3): set = 0.65−0.12+0.3 = 0.83,
+    //     earliest = 0.6·0.53 = 0.318; half way (0.574 s) hurry 0.5: speed 1−0.5·0.18 = 0.91,
+    //     direction σ ×(1+0.5·2) = 2.
+    #[test]
+    fn set_up_adds_transfer_turn_and_footwork() {
+        let to = Vec3::new(10.0, 0.0, 0.0);
+        let a = SetUp::new(0.65, 0.12, footwork_s(Vec3::new(-5.0, 0.0, 0.0), to, false));
+        assert!(close(a.set_s, 0.97) && close(a.earliest_s, 0.462) && a.off_balance);
+        assert!(close(a.hurry(0.6), 0.37 / 0.508));
+        let b = SetUp::new(0.65, -0.12, footwork_s(Vec3::ZERO, to, true));
+        assert!(close(b.set_s, 0.83) && close(b.earliest_s, 0.318) && b.off_balance);
+        let mid = 0.5 * (0.318 + 0.83);
+        assert!(close(b.hurry(mid), 0.5) && close(b.speed_mult(0.5), 0.91) && close(b.sigma_mult(0.5), 2.0));
+        // A fielder taking a throw already facing his target needs 0.7 of the transfer and
+        // no turn (§5.5): 0.7 · 0.65 = 0.455 s, earliest 0.273, on balance.
+        let c = SetUp::new(0.7 * 0.65, 0.0, 0.0);
+        assert!(close(c.set_s, 0.455) && close(c.earliest_s, 0.273) && !c.off_balance);
+    }
+
+    // The incoming-ball and moving-away thresholds: owed only above 2 m/s away (§5.5).
+    #[test]
+    fn moving_away_is_owed_only_above_two_metres_a_second() {
+        let to = Vec3::new(0.0, 10.0, 0.0);
+        assert_eq!(footwork_s(Vec3::new(0.0, -2.0, 0.0), to, false), 0.0);
+        assert_eq!(footwork_s(Vec3::new(0.0, -2.01, 0.0), to, false), 0.2);
+    }
 }

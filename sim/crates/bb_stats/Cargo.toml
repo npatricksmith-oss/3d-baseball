@@ -15,3 +15,4 @@ bb_schema.workspace = true
 flatbuffers.workspace = true
 bb_rules.workspace = true
 bb_game.workspace = true
+flatbuffers.workspace = true

@@ -36,4 +36,9 @@ public:
 	uint8 Bases = 0;
 	/** Key help and playback state, bottom left. */
 	FString Footer;
+	/** Between innings, while the picture is cut away: "Middle of the 3rd" and the score. */
+	FString Card;
+	FString CardScore;
+	/** 0 hidden, 1 fully shown. */
+	float CardAlpha = 0.f;
 };
