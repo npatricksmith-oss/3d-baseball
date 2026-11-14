@@ -397,7 +397,7 @@ Key margins (all [E], configurable):
 
 For each batter-runner reaching base on a fair ball:
 1. If a fielder **misplayed an ordinary chance** (capture failure or errant throw on an ordinary chance) and the reference play retires the batter by ≥ `m_err`: **reached on error** (fielding or throwing, by which act failed).
-2. Else if the defense **chose** to play on another runner and the reference throw to first retires the batter by ≥ `m_fc`: **fielder's choice** (whether or not the other runner was retired).
+2. Else if a preceding runner was forced out, or an infielder handled the ball and put out a preceding runner advancing one base or returning, deny the hit (OBR 9.05(b)(1), (3)). If the defense unsuccessfully attempted to retire a preceding runner and the reference throw to first retires the batter by ≥ `m_fc`, score a **fielder's choice** (9.05(a)(6), (b)(4)). A mere look or feint toward another base is not an attempted play.
 3. Else: **hit**. The hit's value is the last base the batter reached **without** the help of an error or a throw to another base (advance on the throw) [S: OBR 9.06].
 - A batter who would have reached anyway is credited with a hit even if a fielder misplayed; the misplay may still be an error if it let a runner advance extra (§10.3).
 - A **dropped foul fly** that was an ordinary catch is an error that prolongs the PA.

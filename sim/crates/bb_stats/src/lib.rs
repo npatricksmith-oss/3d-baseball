@@ -1,6 +1,8 @@
 //! Statistics as pure functions of the event log (PLAN §4.3, data-formats §4). Nothing here
 //! looks at the simulation; it reads only the verified log.
 
+pub mod scorer;
+
 use bb_schema::ev::{self, EventBody};
 use bb_schema::log::{self, LogError};
 
