@@ -2489,9 +2489,9 @@ impl<'a> Sim<'a> {
         match &self.ball {
             Ball::Held { by } => {
                 // The runner sees where the ball is, when it was caught, and who has it: his
-                // read of that fielder is the position's grade-50 transfer and arm, the arm
-                // off by his own read error (agent-models §6.4; one draw per runner, fielder
-                // and play).
+                // read of that fielder is the position's grade-50 transfer and the fielder's
+                // own arm (scouting knows an arm), off by his own read error (agent-models
+                // §6.4; Gemini tag-up review P2-1; one draw per runner, fielder and play).
                 let (p, _) = self.ball_at(self.t);
                 let mean = FielderAttrs::average(*by);
                 let err = rng(self.inp.seed, self.inp.play, self.r[k].id, Purpose::RunnerPerception, ARM_READ_SUB + *by as u32).truncated_normal(4.0);
@@ -2503,7 +2503,7 @@ impl<'a> Sim<'a> {
                 let turn = fd.face.map(|f| throwing::turn_extra_s(f, to, fd.a.throws)).unwrap_or(0.0);
                 let su = SetUp::new(if fd.face.is_some() { mean.transfer } else { RELAY_TRANSFER_FRAC * mean.transfer }, turn, throwing::footwork_s(fd.catch_vel, to, fd.took_diving));
                 let ready = (fd.up_at + su.set_s).max(self.t);
-                ready + read_throw_time(mean.arm + ARM_READ_SIGMA_MPS * err, m::hypot(target.x - p.x, target.y - p.y))
+                ready + read_throw_time(fd.a.arm + ARM_READ_SIGMA_MPS * err, m::hypot(target.x - p.x, target.y - p.y))
             }
             Ball::Thrown { .. } => {
                 // A throw in the air: where it is and how fast it is coming.
@@ -4023,6 +4023,15 @@ mod tests {
             sim.t += DT;
         }
         assert!(sim.out.facts.iter().any(|f| matches!(f, Input::BaseTouched { agent: 6, base: 2, .. })), "the runner behind never reached second: s {:.2} goal {}", sim.r[1].s, sim.r[1].goal);
+    }
+
+    // Tag-up sources note §1, §7 (agent-models §6.4): an average runner (8.2 m/s) tagging
+    // from third reaches home about 3.9–4.3 s after the catch (standing 90-ft mean 4.03 s,
+    // Statcast 2017–2020). The decision's start model, at its set values, must land there.
+    #[test]
+    fn the_tag_up_time_is_inside_the_measured_range() {
+        let t = tag_up_time(bb_agents::running::TagUpParams::default(), 0.0, BASE_L, 8.2);
+        assert!((3.9..=4.3).contains(&t), "third to home {t:.3} s");
     }
 
     // A runner caught off his base by the catch goes back, retouches once, and is then free:
