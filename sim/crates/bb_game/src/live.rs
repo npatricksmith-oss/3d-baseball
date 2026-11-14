@@ -1745,19 +1745,29 @@ impl<'a> Sim<'a> {
     /// By fielder `i`'s own read, he fields the ball before every teammate who could (his
     /// estimate of each from where that man is and how he is moving, at his known speed,
     /// after what is left of his known reaction; outfielders win near-ties of 0.15 s on balls
-    /// in between). A teammate known to be on another job does not count.
+    /// in between). A teammate known to be on another job does not count. An outfielder
+    /// weighs only the other outfielders: he comes in on any ball hit his way and does not
+    /// stop for an infielder his own read, from 60 m and more, says might reach it (the
+    /// infielder, near it, judges that himself; if he fields it the outfielder's run is the
+    /// backup). Weighing the infielders too, outfielders left 4.5% of balls to an infielder
+    /// whose own read had no play, and nobody went for them until the 0.3 s had passed (docs/
+    /// calibration/2026-11-14-fielder-communication.md §7).
     fn first_by_own_estimate(&self, i: usize) -> bool {
         let fd = &self.f[i];
         let Some(pred) = fd.belief.as_ref() else { return false };
         let bias = |j: usize| if j >= 6 { -0.15 } else { 0.0 };
         let mine = fd.t_int + bias(i);
-        (0..9).filter(|&j| j != i).all(|j| {
+        (0..9).filter(|&j| j != i && (i < 6 || j >= 6)).all(|j| {
             let (chasing, _, this_ball) = self.known(j);
             if this_ball && !chasing {
                 return true;
             }
             let theirs = self.seen_intercept(j, pred).0 + bias(j);
-            mine < theirs || (mine == theirs && i < j)
+            let first = mine < theirs || (mine == theirs && i < j);
+            if !first && debug_comm() {
+                eprintln!("comm t {:.3} play {} f{i} ({mine:.2}) defers to f{j} ({theirs:.2}) at {:?}", self.t, self.inp.play, self.seen_intercept(j, pred).1);
+            }
+            first
         })
     }
 
