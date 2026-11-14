@@ -191,4 +191,45 @@ All builds used `CARGO_BUILD_JOBS=2` and `taskset -c 0-7 nice`, one at a time.
 
 ## Resolution
 
-Open.
+Claude Opus 5.5, 2026-11-14, on `work/infield-fixes-2` (from this review's branch, on the merge `4d3bf1b`). Every finding is fixed or deferred with a reason. Unresolved: **P2-3** (deferred to the Codex live-play review's P1-1) and **P3-4** (left as built).
+
+**P1-1, fixed (`49b6913`).**
+- The first baseman breaks for a grounder only when his own intercept lies on the first-base side of the line through the mound (x > 0), where the pitcher's job is to cover first. On a ball to the left of the mound he goes to his bag.
+- If, after the others have broken, nobody holds `Cover(1)` (the pitcher fields it and the second baseman chases or holds second), he stays with the bag.
+- A fielder still chasing who **sees** another fielder secure the ball (the ball in a teammate's glove, a visible fact, after his own `Reaction` time) gives up the chase: P and 1B go to first, C home, 2B and SS second, 3B third, each only if nobody covers it; anyone else pulls up where braking stops him (`chasers_see_the_ball_secured`). No teammate's target, belief or intercept is read. A man who has held the ball this play is left alone.
+- Tests, each failing without the fix: `first_baseman_goes_to_the_bag_on_a_grounder_left_of_the_mound` (the missing left-side test, both batter sides), `first_baseman_stays_with_the_bag_when_nobody_else_can_take_first`, `a_chaser_who_sees_a_teammate_secure_the_ball_goes_to_his_base`.
+- The uncovered-first probe (seeds 0–299, batter safe, no throw, nobody within 6 m of first at the secure time), by fielder P/C/1B/2B/3B/SS: fb6dbf7 0/0/1/9/22/30 = 62; merge 47/1/5/25/34/45 = 157; **tip 4/0/1/26/23/39 = 93**. Most of the remainder are not uncovered bases: the first baseman, from his deep Savant spot, is 6–7 m from the bag at the secure time and on it before any throw arrives. The 6 m test counts them.
+- The `Cover(1)` check reads roles set in the same tick, the same shared-assignment class as P2-3 below; it goes with that work.
+
+**P2-1, fixed (`423ea6b`).** A force with a second force at first behind it (any `force_continuation`) is fed at full effort, at any p. Fixture 23-109 now asserts full effort on the feed home and calls `[4, 1]`; it was `[4]` with the throw at 0.85. agent-models §5.5 updated.
+
+**P2-2, fixed (`9093a0b`).**
+- The 51.6 m range (`MAX_INFIELD_DEPTH_M` + 5 m) is now `INFIELD_BREAK_R`, used for the secondary grounder break only.
+- `INFIELD_R` (settle rule, backups, the no-play return throw, the runner's deep-fly read) is the edge of the infield dirt on the line through second: an arc of 95 ft about the pitcher's plate, 155.5 ft = 47.40 m from home (OBR 2.01 diagram). That keeps a second baseman at his deepest Savant spot (46.60 m) inside the infield, the case Gemini P2-2 raised, without tying a rules boundary to the alignment table or reaching onto the grass.
+- The scorer's `DEFAULT_OUTFIELD_RADIUS_M` moves with it (45 → 47.40 m). rules-spec §5.8 and §10 and agent-models §5.7 and §5.9 are updated.
+- Test `the_settle_boundary_is_the_infield_dirt_not_the_break_range`.
+
+**P2-3, deferred** to the fix for the [Codex live-play review](2026-11-14-codex-live-play-review.md) P1-1. It is the same class: a decision consumes another fielder's same-tick, unannounced choice; that review's §"Other-agent private planning" already lists direct `Role` reads as needing a public-assignment interpretation. Half-fixing it here (say, a reaction delay on the partner's break alone) would add a second ad hoc mechanism before the communication model exists. The P1-1 `Cover(1)` check above goes in the same list.
+
+**P3-1, fixed (`722b960`).**
+- `carry_non_second_force_dp_uses_carrier_post_touch_setup_clock`: the carrier has held the ball a second, so the second throw's arrival must be the touch plus one flight of the 38.8 m throw plus 0.05 s (within 0.02 s). Mutation check: with the carry sent down the receiver branch, the test fails.
+- The `implied_w` checks are gone. In their place: the continuation adds value, and the inning-ending double play (one out) is worth more than the same play with none out.
+- `simulate_play_honors_batter_hand`: against the left-hander the first baseman fields the ball hit at him (1.34 s), sooner than anyone fields it against the right-hander (3.18 s, the right fielder).
+
+**P3-2, fixed (`722b960`).** Fixture 13-140 (frozen `9fdeec1`) is restored from `d565cf6^`, with its original choice assertions. Its outcome after the throw is not asserted.
+
+**P3-3, fixed.** One ledger row, measured on fb6dbf7 → the tip, covers the whole infield change as it will merge (the Gemini fixes and these), in place of the branch-only row.
+
+**P3-4, left as built** and noted in agent-models §5.7 (`7fbe7f2`). It is low risk, and a change to the relay man belongs with a measured relay review.
+
+**Measured** (fb6dbf7 → tip, seeds 0–299 [1000–1299]):
+- runs 5.83 → 5.86 [6.21 → 6.18];
+- grounder hits .327 → .327 [.333 → .329];
+- reached on BIP 33.7% → 33.5% [34.6% → 34.2%];
+- infield hits 854 → 870 (merge 934), by the pitcher 56 → 61 (merge 103), with no throw 257 → 338 (merge 539; the rest of the rise is probably holders at 45–47.4 m with no play who no longer make a return throw, not traced) (`run_env_diag`);
+- plays with 2+ outs 1.76 → 1.82 a game (merge 1.83), grounder double plays 12.4% → 12.8% per opportunity (`dp_probe`);
+- sacrifice flies 0.253 → 0.233 a team-game (merge 0.247), from fewer chances (277 → 248); the share scored 54.9% → 56.5% (`sf_probe`, seeds 0–299, run on all three builds).
+
+The fb6dbf7 and merge numbers are this review's own runs, from binaries built at those commits; the tip was built at `7fbe7f2`. The ledger row and the infield alignment note §7 have the full set.
+
+**Tests:** `cargo test --workspace --release` at `7fbe7f2`: **320 passed, 0 failed, 3 ignored**. Each new P1-1 test fails with its rule switched off, and the carry test fails with the carry sent down the receiver branch (both checked by temporary edits, reverted).

@@ -151,3 +151,13 @@ Addressed all findings in [docs/reviews/2026-11-14-gemini-infield-alignment-revi
   - `mid–2B [+5..+15°)`: Thru `38.6% → 38.2% / 36.7%`, Hit `48.9% → 49.0% / 47.2%` (`RHB 43.6% → 42.9% / 45.1%`, `LHB 52.3% → 52.8% / 48.7%`).
   - Aggregate `100g` GB: Through `630 (21.5%) → 629 (21.7%)`, IFH `281 (9.6%) → 292 (10.1%)` (`P` IFH `19 → 29`), Outs `2,020 (68.9%) → 1,975 (68.2%)`. Over `300g 0..299` after: `8,631` GB (`Through 20.6%`, `IFH 10.9%`, `Outs 68.5%`).
   - As a baseline probe confirmed, `INFIELD_R = 45 m` previously blocked `69` secondary middle-infielder breaks over 100 games (`< 0.7/game`) where another fielder already held `primary`; closing the remaining `SS–mid` / `mid–2B` gap below `.46–.47` toward MLB `.300–.330` comes from `shift=1` pull shading, Rank 1's swing model (`+5..+10°` `100.5 mph` liners), and pitcher fielding, not alignment constants.
+
+## 7. After the Opus review of the fixes (`work/infield-fixes-2`, on the merge `4d3bf1b`)
+
+The [Opus review](../reviews/2026-11-14-opus-infield-fixes-review.md) measured §6 on the merge with main `fb6dbf7` rather than on its branch, and found that two of its changes went too far. Its Resolution lists what changed; in short:
+
+- **The first baseman in the break (§6 item 2) opened first base.** He broke for any grounder he could reach within 51.6 m, either side of the mound, and kept running after the pitcher fielded it: infield hits 854 → 934 in 300 games, by the pitcher 56 → 103. The `P` IFH `19 → 29` above was this, not seed divergence. He now breaks only on the first-base side of the mound and only if first stays covered, and a chaser who sees a teammate secure the ball goes to his base.
+- **`INFIELD_R` = 51.6 m (§6 item 2) also moved the settle rule, backups, the return throw and the runner's read** onto 4 m of outfield grass. The 51.6 m range is now the grounder break's only (`INFIELD_BREAK_R`); the infield/outfield boundary is the dirt's edge, 47.40 m (155.5 ft on the line through second), which keeps a second baseman at his deepest Savant spot inside it.
+- A feed with a force behind it now goes at full effort at any p; fixture 23-109 completes its 3-2-3 again.
+
+**Measured, main `fb6dbf7` → `7fbe7f2`** (seeds 0–299 [1000–1299]): runs 5.83 → 5.86 [6.21 → 6.18]; GB hits .327 → .327 [.333 → .329]; infield hits 854 → 870, by the pitcher 56 → 61; plays with 2+ outs 1.76 → 1.82 a game. The merge without these fixes had 5.95 [6.14], .334 [.335], 934 and 103. The full row is in the [metrics ledger](../metrics-ledger.md).
