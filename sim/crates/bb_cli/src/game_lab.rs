@@ -122,7 +122,7 @@ pub fn games(a: GamesArgs) {
     let n = rs.len() as f64;
     let sum = |f: &dyn Fn(&GameResult) -> f64| rs.iter().map(f).sum::<f64>();
     let pa = sum(&|r| r.pa as f64);
-    println!("{} games, average players{}, interim M3 knobs, reference park 330/400/330", rs.len(), match (a.anticipation, a.no_jump) { (_, true) => " (no jumps)".to_string(), (Some(g), _) => format!(" (Anticipation {g})"), _ => String::new() });
+    println!("{} games, average players with drawn BatSpeed{}, interim M3 knobs, reference park 330/400/330", rs.len(), match (a.anticipation, a.no_jump) { (_, true) => " (no jumps)".to_string(), (Some(g), _) => format!(" (Anticipation {g})"), _ => String::new() });
     println!("runs/team-game {:.2}", sum(&|r| (r.runs[0] + r.runs[1]) as f64) / (2.0 * n));
     println!("PA/team-game {:.1}, pitches/game {:.0}", pa / (2.0 * n), sum(&|r| r.pitches as f64) / n);
     println!(
