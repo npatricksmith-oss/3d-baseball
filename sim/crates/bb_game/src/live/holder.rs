@@ -178,19 +178,22 @@ impl Sim<'_> {
                 }
                 options.push(option);
             };
+            let carry_ready = if fd.dove { fd.ready_at } else { fd.up_at };
+            let carry_tag = if force { 0.0 } else { fd.a.tag_apply_s };
+            let carry_ball_at = self.t.max(carry_ready) + run_time_to(fd, target, 0.6) + carry_tag;
+            let throw_tag = if force { 0.0 } else { self.f[race.receiver].a.tag_apply_s };
+            let throw_ball_at = race.ball_at + throw_tag;
             // A carry to a forced runner's bag is a force touch. To an unforced runner's bag
             // it is a tag plan: be on the bag before him and tag him as he comes in (the tag
             // itself is glove/runner contact within `tag_reach_m` in holder_act). It is
             // weighed as a tag (`out_weight`, no force continuation), never as a touch.
-            if distance < params.carry_max_m {
-                let ready = if fd.dove { fd.ready_at } else { fd.up_at };
-                // A tag (not a force) also needs the time to put it on (§6.4).
-                let tag = if force { 0.0 } else { fd.a.tag_apply_s };
-                let ball_at = self.t.max(ready) + run_time_to(fd, target, 0.6) + tag;
-                add(true, ball_at, ball_at);
+            // Admitted within `carry_max_m`, or from further away (e.g. 1B playing Standard
+            // depth ~11.1 m off first) when carrying reaches the bag sooner than throwing to
+            // the covering receiver.
+            if params.carry_max_m > 0.0 && (distance < params.carry_max_m || carry_ball_at < throw_ball_at) {
+                add(true, carry_ball_at, carry_ball_at);
             }
-            let tag = if force { 0.0 } else { self.f[race.receiver].a.tag_apply_s };
-            add(false, race.ball_at + tag, race.set_ball_at + tag);
+            add(false, throw_ball_at, race.set_ball_at + throw_tag);
         }
         options
     }

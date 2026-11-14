@@ -97,7 +97,12 @@ fn seed_23_play_109_takes_a_sure_lead_force_instead_of_automatic_first() {
     assert!(chosen.force && chosen.base >= 2, "{first:#?}");
     // §5.6 note's "sure" screen: at least 0.25 s in hand on the first out.
     assert!(chosen.runner_at - chosen.ball_at >= 0.25, "{chosen:#?}");
-    assert_eq!(out.calls.iter().map(|c| c.base).collect::<Vec<_>>(), vec![4, 1]);
+    // The lead force is made. Since the merge of the infield review fixes with speed for
+    // accuracy (2026-11-14) the first baseman takes this ball deeper (Standard depth with
+    // second occupied) and reads the second out at first as unlikely (p 0.11, ball 4.82 s
+    // against the runner's 4.67 s), so he eases the throw home to the safe margin and the
+    // 3-2-3 is not completed; on either parent alone it was (calls [4, 1]).
+    assert_eq!(out.calls.iter().map(|c| c.base).collect::<Vec<_>>(), vec![4]);
 }
 
 #[test]
