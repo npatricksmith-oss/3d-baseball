@@ -341,12 +341,14 @@ With these values the backstop runs between x = ±3.26 m (the side walls meet it
 | Part | Height | Why |
 | :--- | :--- | :--- |
 | Backstop screen: the backstop and the side walls behind home (s < 0 on either side) | **9.0 m** (≈ 30 ft) | A backstop is a low wall under a tall net that the ball rebounds from; a pop-up that clears the net is in the seats |
-| Dugouts: the side wall for **s from 20 ft to 80 ft** (6.10–24.38 m) | **0** (an opening) | The dugout is sunk below field level; any ball that reaches its front, rolling or in the air, has left the field. Placement and length are unsourced placeholders |
+| Dugouts: the side wall for **s from 20 ft to 80 ft** (6.10–24.38 m) | **0** (an opening), under a roof **4 ft** up [E] | The dugout is sunk below field level; any ball that reaches its front, rolling or in the air, has left the field. Under the roof it goes into the dugout (down to its floor); over the roof it goes into the seats on the roof (down to the roof's height). Both are out of play; only where it comes down differs (roof added 2026-11-14, Gemini play-area review P2-1). Placement, length and roof height are unsourced placeholders |
 | Foul-territory wall elsewhere | **4 ft** (1.22 m) | The front wall of the stands along the lines; a fielder can reach over it for a catch (rules-spec §5.3: his feet must be in the field) |
 
 Protective netting above the side walls is not modeled (deferred): a ball that would strike it goes into the seats here.
 
 **Contact.** A ball meets a backstop, side or taper wall when its **center** comes within the ball radius R of the wall plane (the outfield fence skeleton still uses the center on its curve; that 3.7 cm is left as is so the outfield stays unchanged). Below the top (center height < wall height + R), the wall is §8's immovable body with the normal of the plane: the normal velocity reverses with the stands-wall restitution e_n = 0.35 [E] (the same padding value as the outfield wall), the tangential velocity is kept, and spin is halved, as for the outfield wall. At or above the top, or at a dugout, the ball has left the field. A ball **rolling** into a wall stops at it, as at the outfield fence (skeleton); rolling into a dugout it leaves the field.
+
+**The field is convex** (half-planes, the fence's curve, and the taper joined to fair ground at the pole, which is on the fence), so a ball rolling in a straight line that starts and stops inside never leaves it: the roll is checked where it would stop (tested). **A ball that starts outside** the field (knocked off a glove reaching over a wall) is out of play at once. A ball out in flight is fair or foul by whether any part of it is over fair territory where it left (rules-spec §5.2).
 
 **Throws** fly inside the same boundary: a thrown ball that reaches a wall in the air caroms or leaves the field by the same rules, and one that reaches the ground continues with the bounce model (§9.2) inside the boundary.
 
