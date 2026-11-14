@@ -2576,7 +2576,7 @@ impl<'a> Sim<'a> {
     fn base_held_ahead(&self, k: usize, b: u8) -> bool {
         let r = &self.r[k];
         self.r.iter().any(|o| {
-            o.id != r.id && !o.out && !o.scored && o.start > r.start && o.s <= b as f64 * BASE_L + 0.5 && o.still_since.is_some_and(|t0| self.t - t0 >= HOLD_READ_S)
+            o.id != r.id && !o.out && !o.scored && o.start > r.start && o.s <= b as f64 * BASE_L + 0.5 && o.still_since.is_some_and(|t0| self.t - t0 >= HOLD_READ_S - 1e-9)
         })
     }
 
@@ -2905,7 +2905,7 @@ impl<'a> Sim<'a> {
             }
             let on_base = (r.s / BASE_L - (r.s / BASE_L).round()).abs() * BASE_L < 0.3;
             // A tag takes him `tag_apply_s` from securing the ball (agent-models §6.4).
-            if !on_base && self.t >= self.secured_at + fd.a.tag_apply_s && (self.runner_pos(r) - fd.pos).norm() < fd.a.throw_choice.tag_reach_m {
+            if !on_base && self.t + 1e-9 >= self.secured_at + fd.a.tag_apply_s && (self.runner_pos(r) - fd.pos).norm() < fd.a.throw_choice.tag_reach_m {
                 let id = r.id;
                 self.emit(Input::TagContact { t: self.t, fielder: fd.id, runner: id, holding_ball: true });
                 if self.done {
