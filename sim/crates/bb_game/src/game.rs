@@ -383,19 +383,30 @@ impl Game {
                 _ => None,
             });
             // The clean play is scorer evidence only. It cannot influence the live simulation.
-            let margin = first_touch.zip(secured).and_then(|(touch, (t, fielder, at))| {
+            // The batter's arrival is his actual touch or, when the play ended first (a throw out
+            // of play, a walk-off), when he would have touched, running as he was.
+            let margin = first_touch.or(out.batter_first_eta).zip(secured).and_then(|(arrival, (t, fielder, at))| {
                 let pos = (fielder & 0x7f).checked_sub(1)? as usize;
                 if pos >= 9 { return None; }
                 let avg = FielderAttrs::average(pos);
                 let target = crate::play::base_pos(1);
                 let origin = crate::live::throw_release_point(at, target, self.fattrs[fside as usize][pos].throws);
                 let flight = reference_throw_time(&mu.env, &self.field, origin, target, avg.arm);
-                Some(touch - (t + avg.transfer + flight))
+                // The reference fielder is set as the actual one was at the catch (the get-up
+                // after a dive, transfer, turn, footwork) with a grade-50 transfer.
+                let mut ref_at = t + out.ref_set_s.unwrap_or(avg.transfer) + flight;
+                if pos == 2 {
+                    // A first baseman takes the bag himself if that is quicker than a flip to
+                    // the man covering it.
+                    let d = bb_math::m::hypot(target.x - at.x, target.y - at.y);
+                    ref_at = ref_at.min(t + crate::play::run_time(d, avg.speed, avg.tau_a));
+                }
+                Some(arrival - ref_at)
             });
             let touches = out.facts.iter().filter_map(|f| match f { Input::BaseTouched { t, agent, base, holding_ball: false } => Some((*agent, *base, *t)), _ => None }).collect();
             scorer_evidence = Some(crate::eventlog::ScorerPlayEvidence {
                 batter, runners: scorer_runners, first_touch, first_handling: out.first_handling,
-                secured, margin, throws: out.scorer_throws.clone(), carries: out.scorer_carries.clone(), touches,
+                secured, margin, throws: out.scorer_throws.clone(), carries: out.scorer_carries.clone(), touches, batter_eta: if first_touch.is_none() { out.batter_first_eta } else { None },
             });
             if record {
                 // Every other tick, and always the last one (the instant the play ended).

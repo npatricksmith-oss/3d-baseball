@@ -1,6 +1,6 @@
 //! Scoring decisions derived only from serialized play facts. No game state or RNG is used.
 
-use bb_schema::ev::{self, EventBody};
+use bb_schema::ev;
 
 /// Version of the scoring rules applied to logged evidence.
 pub const SCORER_VERSION: u16 = 1;
@@ -48,22 +48,29 @@ pub fn score_play_with_options(play: ev::PlayRecord<'_>, outs_before: u32, optio
     let events = play.events()?;
     let pa = events.iter().find_map(|e| e.body_as_plate_appearance_ended())?;
     let batter = pa.batter();
-    let runs = events.iter().filter(|e| e.body_type() == EventBody::RunScored).count() as u32;
+    let run_ids: Vec<u16> = events.iter().filter_map(|e| e.body_as_run_scored()).map(|r| r.runner()).collect();
     let outs: Vec<_> = events.iter().filter_map(|e| e.body_as_runner_out()).collect();
     let evidence = events.iter().find_map(|e| e.body_as_scorer_evidence());
+    // Evidence written before A12 lacks the runner list (the batter is always in it): its
+    // flags read as "false", which must not be read as facts.
+    let evidence = evidence.filter(|e| e.runners().is_some_and(|r| !r.is_empty()));
+    let start_of = |id: u16| evidence.and_then(|e| e.runners()).and_then(|rs| rs.iter().find(|r| r.agent() == id)).map(|r| r.base());
     let flyout = outs.iter().any(|o| o.runner() == batter && o.kind() == ev::OutKind::FlyOut);
+    let walk_off = events.iter().filter_map(|e| e.body_as_game_ended()).any(|g| g.reason() == ev::GameEndReason::WalkOff);
     let caught_foul = events.iter().filter_map(|e| e.body_as_batted_ball_ruling()).any(|r| r.caught() && r.fair_foul() == ev::FairFoul::Foul);
-    let caught_in_outfield = evidence.and_then(|e| e.secured_at()).is_some_and(|p| p.x() * p.x() + p.y() * p.y() >= options.outfield_radius_m * options.outfield_radius_m);
-    // A thrown ball out of play awards bases, and the batter's included. The award is not
-    // a hit; only what he had reached by the time of the throw can be one.
     let thrown_award = events.iter().filter_map(|e| e.body_as_ball_dead()).any(|d| d.reason() == ev::DeadBallReason::OutOfPlay);
+    // A throw out of play: when the last throw left (rules-spec §10.2).
     let award_cutoff_s = if thrown_award { evidence.and_then(|e| e.throws()).and_then(|ts| ts.iter().map(|t| t.t_release()).reduce(f64::max)) } else { None };
-    // Runs that score by the award itself (after the dead ball) follow no batter action.
-    let runs_after_dead = if thrown_award {
-        let dead_at = events.iter().position(|e| e.body_type() == EventBody::BallDead).unwrap_or(0);
-        events.iter().skip(dead_at).filter(|e| e.body_type() == EventBody::RunScored).count() as u32
-    } else { 0 };
-    let sf = flyout && outs_before < 2 && runs > 0 && (caught_foul || caught_in_outfield);
+    let before_throw = |t: f64| award_cutoff_s.is_none_or(|c| t <= c);
+    let home_touch = |id: u16| evidence.and_then(|e| e.touches()).is_some_and(|ts| ts.iter().any(|t| t.runner() == id && t.base() == 4));
+    // The batter's touch of first, or the throws and carries on a preceding runner while he was
+    // still short of it.
+    let first_touch = evidence.filter(|e| e.has_first_touch()).map(|e| e.first_touch_s());
+    let preceding_target = |runner: u16, fallback_base: u8, base: u8| -> bool {
+        if runner == 0 { base != fallback_base } else { runner != batter && start_of(runner).is_some_and(|b| b > 0) }
+    };
+    let while_batter_short = |t: f64| first_touch.is_none_or(|ft| t < ft);
+
     let outcome = match pa.result() {
         ev::PaResult::Walk | ev::PaResult::IntentionalWalk => Outcome::Walk,
         ev::PaResult::HitByPitch => Outcome::HitByPitch,
@@ -74,35 +81,53 @@ pub fn score_play_with_options(play: ev::PlayRecord<'_>, outs_before: u32, optio
         ev::PaResult::Triple => Outcome::Hit(3),
         ev::PaResult::FieldersChoice => Outcome::FieldersChoice,
         ev::PaResult::Unknown => {
-            if flyout || outs.iter().any(|o| o.runner() == batter && (o.kind() == ev::OutKind::Force || o.kind() == ev::OutKind::Strikeout)) {
+            if outs_before < 2 && flyout && !run_ids.is_empty() && evidence.is_none() {
+                // Without the catch's place the scorer cannot tell a sacrifice fly (9.08(d)).
+                Outcome::Undetermined
+            } else if flyout || outs.iter().any(|o| o.runner() == batter && (o.kind() == ev::OutKind::Force || o.kind() == ev::OutKind::Strikeout)) {
                 Outcome::Out
             } else if let Some(evidence) = evidence {
                 let award = events.iter().filter_map(|e| e.body_as_runner_advanced()).find(|a| a.runner() == batter && a.cause() == ev::AdvanceCause::Award);
-                let before_throw = |t: f64| award_cutoff_s.is_none_or(|c| t <= c);
+                let margin = evidence.has_margin().then(|| evidence.clean_play_margin_s());
+                let last_throw = evidence.throws().and_then(|ts| ts.iter().max_by(|a, b| a.t_release().total_cmp(&b.t_release())));
                 if let Some(a) = award.filter(|_| !thrown_award) {
+                    // A ground-rule double.
                     Outcome::Hit(a.to_base().clamp(1, 4))
-                } else if thrown_award && !(evidence.has_first_touch() && before_throw(evidence.first_touch_s())) {
+                } else if !evidence.has_first_touch() && !walk_off && !thrown_award {
+                    // A third out can end the inning before first (9.02(g)).
+                    Outcome::Out
+                } else if thrown_award && last_throw.is_some_and(|t| t.base() == 1) && margin.is_none() {
+                    Outcome::Undetermined
+                } else if thrown_award && last_throw.is_some_and(|t| t.base() == 1) && margin.is_some_and(|m| m >= options.choice_margin_s) {
+                    // 9.12(a)(1): the ordinary throw would have retired him; the bases are the
+                    // thrower's (error ruling pending, A17).
                     Outcome::ReachedOnThrowAward
-                } else if !evidence.has_first_touch() {
-                    // A third out can end the inning before first. A walk-off that ends
-                    // before the batter arrives leaves the hit judgment unresolved.
-                    if events.iter().filter_map(|e| e.body_as_game_ended()).any(|g| g.reason() == ev::GameEndReason::WalkOff) { Outcome::Undetermined } else { Outcome::Out }
                 } else {
                     let mut preceding = PrecedingPlay::None;
                     for o in outs.iter().filter(|o| o.runner() != batter) {
-                        let start = evidence.runners().and_then(|rs| rs.iter().find(|r| r.agent() == o.runner())).map(|r| r.base());
+                        let start = start_of(o.runner());
                         let infield = evidence.has_handling() && (1..=6).contains(&(evidence.first_handler() & 0x7f));
                         let one_or_return = start.is_some_and(|b| o.base() == b || (o.base() == b + 1 && !evidence.touches().is_some_and(|ts| ts.iter().any(|t| t.runner() == o.runner() && t.base() > b + 1))));
-                        let p = if o.kind() == ev::OutKind::Force { PrecedingPlay::ForceOut }
-                            else if infield && one_or_return { PrecedingPlay::InfieldOneBaseOut }
-                            else { PrecedingPlay::OtherOut };
+                        let p = if o.kind() == ev::OutKind::Force {
+                            PrecedingPlay::ForceOut
+                        } else if o.kind() == ev::OutKind::Appeal && start.is_some_and(|b| o.base() == b + 1) {
+                            // 9.05(b)(2): out for missing the first base to which he advanced.
+                            PrecedingPlay::ForceOut
+                        } else if infield && one_or_return {
+                            PrecedingPlay::InfieldOneBaseOut
+                        } else {
+                            PrecedingPlay::OtherOut
+                        };
                         if matches!(p, PrecedingPlay::ForceOut | PrecedingPlay::InfieldOneBaseOut) { preceding = p; break; }
                         preceding = p;
                     }
-                    if preceding == PrecedingPlay::None && (evidence.throws().is_some_and(|ts| ts.iter().any(|t| t.attempted_out() && t.base() != 1)) || evidence.carries().is_some_and(|cs| cs.iter().any(|c| c.base() != 1))) {
+                    // A play chosen on a runner ahead of the batter, made while he was still
+                    // short of first (9.05(a)(6)); one meant for the batter-runner is no choice.
+                    let attempt_throw = |t: ev::ScorerThrow| t.attempted_out() && preceding_target(t.runner(), 1, t.base()) && while_batter_short(t.t_release());
+                    let attempt_carry = |c: ev::ScorerCarry| preceding_target(c.runner(), 1, c.base()) && while_batter_short(c.t());
+                    if preceding == PrecedingPlay::None && (evidence.throws().is_some_and(|ts| ts.iter().any(attempt_throw)) || evidence.carries().is_some_and(|cs| cs.iter().any(attempt_carry))) {
                         preceding = PrecedingPlay::UnsuccessfulAttempt;
                     }
-                    let margin = evidence.has_margin().then(|| evidence.clean_play_margin_s());
                     match judge_hit(HitEvidence { preceding_play: preceding, reference_margin_s: margin }, options.choice_margin_s) {
                         HitDecision::FieldersChoice => Outcome::FieldersChoice,
                         HitDecision::Undetermined => Outcome::Undetermined,
@@ -115,16 +140,49 @@ pub fn score_play_with_options(play: ev::PlayRecord<'_>, outs_before: u32, optio
                             let value = reached.max(before_out).max(touched).clamp(1, 4);
                             // Advancement begun only after an attempted play on a preceding
                             // runner is on that throw. A goal already chosen at release stands.
-                            let on_throw_cap = evidence.throws().and_then(|ts| ts.iter().find(|t| t.attempted_out() && t.base() != 1)).map(|t| t.batter_goal().max(1));
-                            Outcome::Hit(on_throw_cap.map_or(value, |cap| value.min(cap)))
+                            let on_throw_cap = evidence.throws().and_then(|ts| ts.iter().find(|t| t.attempted_out() && preceding_target(t.runner(), 1, t.base()) && while_batter_short(t.t_release()))).map(|t| t.batter_goal().max(1));
+                            let mut value = on_throw_cap.map_or(value, |cap| value.min(cap));
+                            // 9.06(f): a walk-off hit is worth the bases the winning runner advanced.
+                            if walk_off {
+                                if let Some(b) = run_ids.last().and_then(|&id| start_of(id)).filter(|&b| b >= 1) {
+                                    value = value.min(4 - b);
+                                }
+                            }
+                            Outcome::Hit(value)
                         }
                     }
                 }
-            } else { Outcome::Undetermined }
+            } else {
+                Outcome::Undetermined
+            }
         }
         _ => Outcome::Out,
     };
-    let rbi = if outs.len() >= 2 { 0 } else { runs - runs_after_dead };
+    // Runs that count. A run scored only because a thrown ball went out of play was given by
+    // the award, not driven in, unless the batter's hit would have scored him anyway (9.04(a)(1)).
+    let hit_bases = if let Outcome::Hit(k) = outcome { Some(k) } else { None };
+    let credited: Vec<u16> = run_ids.iter().copied()
+        .filter(|&id| id != batter || outcome == Outcome::Hit(4))
+        .filter(|&id| !thrown_award || home_touch(id) || hit_bases.is_some_and(|k| start_of(id).is_some_and(|b| b >= 1 && b + k >= 4)))
+        .collect();
+    // 9.08(d): a runner scored after a caught fly, fewer than two out, the ball handled by an
+    // outfielder or an infielder running in the outfield, in fair or foul territory.
+    let catcher = evidence.and_then(|e| if e.has_secured() { Some(e.reference_fielder()) } else if e.has_handling() { Some(e.first_handler()) } else { None });
+    let by_outfielder = catcher.is_some_and(|f| (7..=9).contains(&(f & 0x7f)));
+    let caught_in_outfield = evidence.and_then(|e| e.secured_at()).is_some_and(|p| p.x() * p.x() + p.y() * p.y() >= options.outfield_radius_m * options.outfield_radius_m);
+    let sf = flyout && outs_before < 2 && !credited.is_empty() && (caught_foul || by_outfielder || caught_in_outfield);
+    // 9.04(b)(1): no RBI when the batter grounds into a force or reverse-force double play.
+    let forced_start = |id: u16| -> bool {
+        match start_of(id) {
+            Some(b) if b >= 1 => (1..b).all(|k| evidence.and_then(|e| e.runners()).is_some_and(|rs| rs.iter().any(|r| r.base() == k))),
+            _ => false,
+        }
+    };
+    let ground_double_play = !flyout && !matches!(outcome, Outcome::Hit(_) | Outcome::Walk | Outcome::HitByPitch | Outcome::Strikeout)
+        && outs.len() >= 2
+        && outs.iter().any(|o| o.kind() == ev::OutKind::Force)
+        && outs.iter().all(|o| o.kind() == ev::OutKind::Force || (o.runner() != batter && forced_start(o.runner())));
+    let rbi = if matches!(outcome, Outcome::Strikeout) || ground_double_play { 0 } else { credited.len() as u32 };
     Some(PlayRuling { batter, outcome, sacrifice_fly: sf, rbi })
 }
 
