@@ -45,7 +45,12 @@ fn identities_hold_over_many_games() {
 #[test]
 fn batting_lines_name_the_roster_and_follow_the_order() {
     let (mut walk_offs, mut extras) = (0, 0);
-    for seed in 0..40u64 {
+    // Forty games, and on until both awkward endings have been seen (a walk-off comes in
+    // about one game in ten, so forty can miss it; capped at 200).
+    for seed in 0..200u64 {
+        if seed >= 40 && walk_offs >= 1 && extras >= 1 {
+            break;
+        }
         let g = simulate_game(seed);
         let b = box_score(&g.log).expect("log verifies");
         walk_offs += g.walk_off as u32;

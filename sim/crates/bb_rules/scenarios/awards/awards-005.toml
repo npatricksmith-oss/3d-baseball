@@ -1,0 +1,35 @@
+id = "awards-005"
+title = "Foul fly into the seats: dead, a strike, the runner goes back"
+rules = ["rules-spec 5.2", "rules-spec 5.8", "rules-spec 7.4"]
+milestone = "M4"
+tags = ["awards", "foul", "outofplay"]
+[initial]
+inning = 2
+half = "top"
+count = [1, 0]
+bases = { first = "A.1" }
+batter = "A.2"
+
+[[step]]
+fact = "PitchDelivered"
+t = 0.0
+[[step]]
+fact = "BatContact"
+t = 0.42
+[[step]]
+fact = "BaseLeft"
+t = 0.6
+agent = "A.1"
+base = 1
+[[step]]
+fact = "BallTouched"
+t = 4.0
+what = "OutOfPlay"
+pos = [40.0, 15.0]
+in_flight = true
+expect_events = [{ event = "BallDead", reason = "OutOfPlay" }, { event = "FairFoulDecided", fair = false }, { event = "PitchResult", call = "Foul", balls = 1, strikes = 1 }]
+[expect]
+bases = { first = "A.1" }
+balls = 1
+strikes = 1
+batter = "A.2"

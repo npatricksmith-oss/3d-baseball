@@ -187,6 +187,15 @@ pub fn write_pitch(w: &mut LogWriter, play: u32, pitcher: u16, rec: &PitchRecord
                     let x = ev::GameEnded::create(fbb, &ev::GameEndedArgs { score_away: (*away).min(255) as u8, score_home: (*home).min(255) as u8, innings: *innings, reason });
                     items.push((0.0, EventBody::GameEnded, x.as_union_value()));
                 }
+                RE::BallDead { reason } => {
+                    let reason = match reason {
+                        bb_rules::DeadBall::HomeRun => ev::DeadBallReason::HomeRun,
+                        bb_rules::DeadBall::GroundRuleDouble => ev::DeadBallReason::GroundRuleDouble,
+                        bb_rules::DeadBall::OutOfPlay => ev::DeadBallReason::OutOfPlay,
+                    };
+                    let x = ev::BallDead::create(fbb, &ev::BallDeadArgs { reason });
+                    items.push((0.0, EventBody::BallDead, x.as_union_value()));
+                }
                 RE::RulesWarning { .. } => {
                     let x = ev::RulesWarning::create(fbb, &ev::RulesWarningArgs { code: 1, detail: None });
                     items.push((0.0, EventBody::RulesWarning, x.as_union_value()));

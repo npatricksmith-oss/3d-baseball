@@ -101,6 +101,17 @@ fn parse_input(v: &Value) -> Parsed {
             let p = v["pos"].as_array().unwrap();
             Input::GloveSecured { t, fielder: agent(s(v, "fielder")), x: p[0].as_float().unwrap(), y: p[1].as_float().unwrap() }
         }
+        "BallReleasedFromGlove" => Input::BallReleasedFromGlove {
+            t,
+            fielder: agent(s(v, "fielder")),
+            kind: match v.get("kind").and_then(|x| x.as_str()).unwrap_or("Throw") {
+                "Throw" => ReleaseKind::Throw,
+                "Drop" => ReleaseKind::Drop,
+                "Knocked" => ReleaseKind::Knocked,
+                k => panic!("unknown release kind {k}"),
+            },
+            infielder: b(v, "infielder"),
+        },
         "BaseTouched" => Input::BaseTouched {
             t,
             agent: agent(s(v, "agent")),
@@ -174,6 +185,9 @@ fn render(e: &Event) -> BTreeMap<&'static str, String> {
             m.insert("runs", runs.to_string());
             m.insert("left_on_base", left_on_base.to_string());
         }
+        Event::BallDead { reason } => {
+            m.insert("reason", format!("{reason:?}"));
+        }
         _ => {}
     }
     m
@@ -244,7 +258,7 @@ fn run_scenario(path: &Path) -> Result<(), String> {
     for (i, stv) in doc.get("step").and_then(|v| v.as_array()).unwrap_or(&empty).iter().enumerate() {
         check_keys(
             stv,
-            &["fact", "t", "in_zone", "bounced", "swung", "what", "pos", "in_flight", "fair", "fielder", "agent", "base", "holding_ball", "runner", "expect_events"],
+            &["fact", "t", "in_zone", "bounced", "swung", "what", "pos", "in_flight", "fair", "fielder", "agent", "base", "holding_ball", "runner", "kind", "infielder", "expect_events"],
             &format!("step {i}"),
         );
         let evs = match parse_input(stv) {

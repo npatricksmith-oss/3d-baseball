@@ -1,0 +1,42 @@
+id = "awards-004"
+title = "Ground-rule double: two bases from the time of the pitch, however far the runner had gone"
+rules = ["rules-spec 7.2", "OBR 5.05(a)(6)", "OBR 5.06(b)(4)(F)"]
+milestone = "M4"
+tags = ["awards", "groundrule", "outofplay"]
+[initial]
+inning = 2
+half = "top"
+bases = { first = "A.1" }
+batter = "A.2"
+
+[[step]]
+fact = "PitchDelivered"
+t = 0.0
+[[step]]
+fact = "BatContact"
+t = 0.42
+[[step]]
+fact = "BaseLeft"
+t = 0.6
+agent = "A.1"
+base = 1
+[[step]]
+fact = "BallTouched"
+t = 3.0
+what = "Ground"
+pos = [-30.0, 85.0]
+[[step]]
+fact = "BaseTouched"
+t = 3.4
+agent = "A.1"
+base = 2
+[[step]]
+fact = "BallTouched"
+t = 4.5
+what = "OutOfPlay"
+pos = [-40.0, 115.0]
+in_flight = false
+expect_events = [{ event = "BallDead", reason = "GroundRuleDouble" }, { event = "RunnerAdvanced", runner = "A.1", from = 1, to = 3, cause = "Award" }, { event = "RunnerAdvanced", runner = "A.2", from = 0, to = 2, cause = "Award" }, { event = "PlateAppearanceEnded", result = "BattedBall" }]
+[expect]
+bases = { second = "A.2", third = "A.1" }
+score = [0, 0]

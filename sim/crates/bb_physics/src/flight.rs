@@ -143,6 +143,9 @@ pub enum Crossing {
     /// Horizontal distance from home exceeds the fence distance at the ball's spray angle
     /// (quadratic through left-line, center, right-line distances; see `ground::Field`).
     RadiusAbove { lf: f64, cf: f64, rf: f64 },
+    /// A ball of radius `r` reaches the boundary of the playing field: the fence, the backstop,
+    /// or a foul-territory wall (physics-spec §9.5, `ground::Field::ball_clearance`).
+    Boundary { field: crate::ground::Field, r: f64 },
 }
 
 impl Crossing {
@@ -158,6 +161,7 @@ impl Crossing {
                 let side = if s < 0.0 { lf } else { rf };
                 (cf + (side - cf) * s * s) - m::hypot(r.x, r.y)
             }
+            Crossing::Boundary { ref field, r: rad } => field.ball_clearance(r.x, r.y, rad).dist,
         }
     }
 }
@@ -177,6 +181,21 @@ pub struct Trajectory {
 }
 
 impl Trajectory {
+    /// A flight of one instant: the ball at `s` at time `t`.
+    pub fn single(t: f64, s: BallState) -> Self {
+        Self { knots: vec![Knot { t, s }], stop: None, apex_z: s.r.z, apex_t: t }
+    }
+    /// This flight followed by `next`, which starts where this one ends; the stop is `next`'s.
+    pub fn join(mut self, next: Trajectory) -> Self {
+        let skip = usize::from(next.knots.first().is_some_and(|k| k.t <= self.last().t));
+        if next.apex_z > self.apex_z {
+            self.apex_z = next.apex_z;
+            self.apex_t = next.apex_t;
+        }
+        self.knots.extend(next.knots.into_iter().skip(skip));
+        self.stop = next.stop;
+        self
+    }
     pub fn first(&self) -> &Knot {
         &self.knots[0]
     }
