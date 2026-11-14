@@ -53,6 +53,9 @@ typedef struct {
    * if it never left; dead_at = the ground point where it left (sim frame); dead_reason
    * 0 never left, 1 out of play (a foul ball or a throw), 2 home run, 3 ground-rule double. */
   float dead_s; float dead_at[3]; uint8_t dead_reason; uint8_t _pad2[3];
+  /* On contact, the projected distance (physics-spec 12): from home to where the batted ball
+   * would have come down to field level unobstructed, m; 0 without contact. */
+  float projected_distance_m;
 } BbPlayInfo;
 /* Agent ids: high byte = team (0 away, 1 home); bit 0x80 = fielder, low 7 bits = position 1-9;
  * without bit 0x80, a batter or runner, low 7 bits = place in the batting order 1-9. A player

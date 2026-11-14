@@ -343,6 +343,7 @@ pub fn encode(step: &PitchStep, st: &RulesState, rosters: &crate::roster::Roster
         &mut fbb,
         &tl::TelemetryArgs {
             release_speed_mps: rec.release.v.norm() as f32,
+            projected_distance_m: rec.projected_distance_m.unwrap_or(0.0) as f32,
             spin_radps: Some(&spin),
             plate_x_m: plate.x as f32,
             plate_z_m: plate.z as f32,

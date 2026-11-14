@@ -38,6 +38,8 @@ int main(void) {
             if (info.dead_s > info.duration_s + 1e-4f || info.dead_reason < 1 || info.dead_reason > 3 || info.dead_at[2] != 0.f) { fprintf(stderr, "bad dead ball\n"); return 1; }
             dead++;
         } else if (info.dead_reason != 0) { fprintf(stderr, "bad dead reason\n"); return 1; }
+        /* Projected distance: only with contact, and within any park (m). */
+        if ((info.contact_s >= 0.f) != (info.projected_distance_m > 0.f) || info.projected_distance_m > 200.f) { fprintf(stderr, "bad projected distance\n"); return 1; }
         bb_blob_free(blob, len);
         n++;
     }
