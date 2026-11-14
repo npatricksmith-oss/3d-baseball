@@ -322,10 +322,18 @@ fn step_input(st: &mut RulesState, input: &Input) -> Vec<Event> {
             // Only throws matter so far: they fix what a throw out of play would award
             // (rules-spec §7.2). Drops and knocked balls have no producer yet.
             if let (ReleaseKind::Throw, PlayState::Live(lp)) = (kind, &mut st.play) {
-                let advanced = lp.runners.iter().filter(|r| !r.out).all(|r| r.scored_at.is_some() || r.last_base > r.start_base);
+                // Each runner's base at the release, as the rules hold it: one who owes a retouch
+                // after a catch holds his own base until he has retouched it (rules-spec §5.3);
+                // one who has legally touched home has scored; anyone else is at the base he
+                // last touched (going back counts). (Gemini play-area review P1-3: the
+                // high-water mark and early touches used to count.)
+                let legal = |r: &RunnerState| if r.retouch_required && !r.retouched { r.start_base } else if r.scored_at.is_some() { 4 } else { r.at };
+                let advanced = lp.runners.iter().filter(|r| !r.out).all(|r| legal(r) > r.start_base);
                 let first_play = lp.throws == 0 && lp.outs.is_empty();
                 let from_pitch = infielder && first_play && !advanced;
-                let from = lp.runners.iter().map(|r| (r.runner, if from_pitch { r.start_base } else if r.scored_at.is_some() { 4 } else { r.at })).collect();
+                // From the time of the pitch a runner counts from his base then, but a run
+                // already legally scored stands.
+                let from = lp.runners.iter().map(|r| (r.runner, if from_pitch && legal(r) < 4 { r.start_base } else { legal(r) })).collect();
                 lp.throws = lp.throws.saturating_add(1);
                 lp.throw = Some(ThrowAward { t, from_pitch, from });
             }
@@ -680,7 +688,10 @@ fn live_touch(st: &mut RulesState, _t: f64, what: Touch, ev: &mut Vec<Event>) {
             }
         }
         Touch::OutOfPlay { .. } if lp.throw.is_some() => throw_out_of_play(st, ev),
-        Touch::OutOfPlay { x, y, in_flight } => {
+        // A caught fly that leaves the field without a throw (the fielder carried it out):
+        // one base each (Gemini play-area review P1-4: it was ruled a home run).
+        Touch::OutOfPlay { .. } if lp.caught => catch_carried_out(st, ev),
+        Touch::OutOfPlay { x, y, in_flight, .. } => {
             let fair = match lp.fair {
                 FairFoul::Fair => true,
                 FairFoul::Foul => false,
@@ -692,11 +703,6 @@ fn live_touch(st: &mut RulesState, _t: f64, what: Touch, ev: &mut Vec<Event>) {
                 ev.push(Event::BallDead { reason: DeadBall::OutOfPlay });
                 if lp.fair == FairFoul::Pending {
                     decide(st, false, ev);
-                } else if lp.caught {
-                    // A caught foul fly that then left the field without a throw: the batter is
-                    // out and runners stay where they are.
-                    let lp = lp.clone();
-                    close_play(st, &lp, ev);
                 } else {
                     st.play = PlayState::Dead;
                 }
@@ -754,6 +760,11 @@ fn ground_rule_double(st: &mut RulesState, ev: &mut Vec<Event>) {
     order.sort_by_key(|r| core::cmp::Reverse(r.start_base));
     st.bases = [None; 3];
     for r in order {
+        // A walk-off: the game ended with the winning run; nobody behind him is awarded
+        // anything more (rules-spec §4.1; the batter's credit is the scorer's, OBR 9.06(f)).
+        if st.walk_off {
+            break;
+        }
         let to = (r.start_base + 2).min(4);
         ev.push(Event::RunnerAdvanced { runner: r.runner, from: r.start_base, to, cause: AdvanceCause::Award });
         if to == 4 {
@@ -791,6 +802,10 @@ fn throw_out_of_play(st: &mut RulesState, ev: &mut Vec<Event>) {
     st.bases = [None; 3];
     let mut ahead: Option<Base> = None;
     for (r, from) in order {
+        // A walk-off ends the game at the winning run (rules-spec §4.1), as above.
+        if st.walk_off {
+            break;
+        }
         let mut to = (from + 2).min(4);
         if let Some(a) = ahead
             && a < 4
@@ -799,7 +814,46 @@ fn throw_out_of_play(st: &mut RulesState, ev: &mut Vec<Event>) {
         }
         ahead = Some(to);
         if to != r.start_base {
-            ev.push(Event::RunnerAdvanced { runner: r.runner, from: r.start_base, to, cause: AdvanceCause::Award });
+            // A runner who had legally scored before the throw scored on the play.
+            let cause = if from == 4 { AdvanceCause::OnPlay } else { AdvanceCause::Award };
+            ev.push(Event::RunnerAdvanced { runner: r.runner, from: r.start_base, to, cause });
+        }
+        if to == 4 {
+            score_run(st, r.runner, ev);
+        } else if to >= 1 {
+            st.bases[(to - 1) as usize] = Some(r.runner);
+        }
+    }
+    end_pa(st, PaResult::BattedBall, ev);
+}
+
+/// A caught fly, fair or foul, left the field with no throw: the fielder carried it out of
+/// play. The ball is dead and each runner gets one base from the base he holds (one who owes
+/// a retouch holds his own base), lead runner first, none passing the runner ahead [S: OBR
+/// 5.06(b)(3)(C)]. The batter is already out.
+fn catch_carried_out(st: &mut RulesState, ev: &mut Vec<Event>) {
+    let PlayState::Live(lp) = st.play.clone() else { return };
+    ev.push(Event::BallDead { reason: DeadBall::OutOfPlay });
+    st.play = PlayState::Dead;
+    let held = |r: &RunnerState| if r.retouch_required && !r.retouched { r.start_base } else if r.scored_at.is_some() { 4 } else { r.at };
+    let mut order: Vec<(&RunnerState, Base)> = lp.runners.iter().filter(|r| !r.out).map(|r| (r, held(r))).collect();
+    order.sort_by_key(|&(r, b)| (core::cmp::Reverse(b), core::cmp::Reverse(r.start_base)));
+    st.bases = [None; 3];
+    let mut ahead: Option<Base> = None;
+    for (r, from) in order {
+        if st.walk_off {
+            break;
+        }
+        let mut to = (from + 1).min(4);
+        if let Some(a) = ahead
+            && a < 4
+        {
+            to = to.min(a - 1).max(from);
+        }
+        ahead = Some(to);
+        if to != r.start_base {
+            let cause = if from == 4 { AdvanceCause::OnPlay } else { AdvanceCause::Award };
+            ev.push(Event::RunnerAdvanced { runner: r.runner, from: r.start_base, to, cause });
         }
         if to == 4 {
             score_run(st, r.runner, ev);

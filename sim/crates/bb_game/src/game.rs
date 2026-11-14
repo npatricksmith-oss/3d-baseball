@@ -11,6 +11,33 @@ use crate::pa::{Knobs, Matchup, scouting_for_pa, simulate_pitch_ctx};
 use crate::play::{FielderAttrs, RunnerIn};
 use crate::roster::Rosters;
 
+/// Noise-free flight time for a set reference throw. When the ball cannot reach first
+/// in the air, continue the same maximal-elevation throw through the world's bounce and
+/// roll physics, with zero bounce-normal noise. Infinity means it never reaches the bag.
+fn reference_throw_time(env: &bb_physics::FlightEnv, field: &Field, origin: bb_math::Vec3, target: bb_math::Vec3, speed: f64) -> f64 {
+    use bb_math::{Vec3, m};
+    use bb_physics::throw::{THROW_MAX_ELEV, fly_throw, solve_throw, throw_state};
+    let delta = Vec3::new(target.x - origin.x, target.y - origin.y, 0.0);
+    let distance = m::hypot(delta.x, delta.y);
+    if distance < crate::live::REACH { return 0.0; }
+    if let Some(solution) = solve_throw(env, origin.z, 1.3, distance, speed) { return solution.t_flight; }
+    let start = throw_state(origin, delta.normalized(), speed, THROW_MAX_ELEV);
+    let flight = fly_throw(env, start, 0.0, 30.0);
+    let last = flight.last();
+    let mut state = last.s;
+    state.r.z = state.r.z.max(env.ball.radius);
+    let path = bb_physics::ground::batted_path(env, field, state, last.t, |_, _| (0.0, 0.0));
+    // A set receiver can reach a ball within a metre of the bag. Sample at 10 ms,
+    // well below the 0.15 s scorer threshold; all time is post-release.
+    let mut t = last.t;
+    while t <= path.t_end() {
+        let (p, _) = path.at(t);
+        if m::hypot(p.x - target.x, p.y - target.y) <= crate::live::REACH && p.z <= crate::live::CATCH_MAX_Z { return t; }
+        t += bb_physics::throw::THROW_DT;
+    }
+    f64::INFINITY
+}
+
 /// Game summary for reports and tests.
 #[derive(Clone, Debug, Default)]
 pub struct GameResult {
@@ -145,6 +172,8 @@ pub struct PitchStep {
     /// The batted ball's full path, if there was contact.
     pub batted: Option<bb_physics::ground::BallPath>,
     pub rules_events: Vec<Event>,
+    /// Scorer's ruling from this pitch's persisted record, when recording presentation.
+    pub scorer_ruling: Option<bb_stats::scorer::PlayRuling>,
     /// Every fact sent to the rules engine for this pitch.
     pub facts: Vec<Input>,
     /// Every out on this pitch, in time order, as the umpire calls it.
@@ -253,6 +282,7 @@ impl Game {
         let slot = st.next_up[side];
         let mu = &self.mus[self.mu_ix[side][slot]];
         let batter = st.batter;
+        let outs_before = st.outs as u32;
         if st.batter != self.last_batter {
             self.prev = None;
             self.last_v = None;
@@ -293,6 +323,7 @@ impl Game {
             facts.push(Input::PitchCrossed { t: t_plate, in_zone: rec.in_zone, bounced: rec.bounced });
         }
         let mut batted = None;
+        let mut scorer_evidence = None;
         if rec.hit_batter {
             facts.push(Input::BallTouched { t: t_plate, what: bb_rules::Touch::Batter });
             facts.push(Input::SwingMeasured { t: t_plate + 0.03, swung: rec.swung });
@@ -326,6 +357,7 @@ impl Game {
                     runners.push(RunnerIn { id: *r, base: (i + 1) as u8, speed: 8.2 });
                 }
             }
+            let scorer_runners = runners.clone();
             let fside = 1 - side as u16;
             let fielders: [u16; 9] = core::array::from_fn(|i| (fside << 8) | 0x80 | (i as u16 + 1));
             // What the fielders can see of the swing: the bat's horizontal angle at the instant
@@ -342,6 +374,29 @@ impl Game {
                 &crate::live::LiveInput { env: &mu.env, field: &self.field, ball, t_contact: t_c, runners, fielders, fattrs: self.fattrs[fside as usize], batter_box: { let p = mu.template.pivot(&mu.batter); bb_math::Vec3::new(p.x, p.y, 0.0) }, bats: mu.batter.bats, pitch_x: rec.plate.map(|p| p.x).or(Some(ball.r.x)), bat_yaw, swing_lead, seed, play, record },
                 st,
             );
+            let first_touch = out.facts.iter().find_map(|f| match f {
+                Input::BaseTouched { t, agent, base: 1, holding_ball: false } if *agent == batter => Some(*t),
+                _ => None,
+            });
+            let secured = out.facts.iter().find_map(|f| match f {
+                Input::GloveSecured { t, fielder, x, y } => Some((*t, *fielder, bb_math::Vec3::new(*x, *y, 0.0))),
+                _ => None,
+            });
+            // The clean play is scorer evidence only. It cannot influence the live simulation.
+            let margin = first_touch.zip(secured).and_then(|(touch, (t, fielder, at))| {
+                let pos = (fielder & 0x7f).checked_sub(1)? as usize;
+                if pos >= 9 { return None; }
+                let avg = FielderAttrs::average(pos);
+                let target = crate::play::base_pos(1);
+                let origin = crate::live::throw_release_point(at, target, self.fattrs[fside as usize][pos].throws);
+                let flight = reference_throw_time(&mu.env, &self.field, origin, target, avg.arm);
+                Some(touch - (t + avg.transfer + flight))
+            });
+            let touches = out.facts.iter().filter_map(|f| match f { Input::BaseTouched { t, agent, base, holding_ball: false } => Some((*agent, *base, *t)), _ => None }).collect();
+            scorer_evidence = Some(crate::eventlog::ScorerPlayEvidence {
+                batter, runners: scorer_runners, first_touch, first_handling: out.first_handling,
+                secured, margin, throws: out.scorer_throws.clone(), carries: out.scorer_carries.clone(), touches,
+            });
             if record {
                 // Every other tick, and always the last one (the instant the play ended).
                 let n = out.ball_track.len();
@@ -414,7 +469,8 @@ impl Game {
             self.pending_rules.extend(ev);
         }
         let pitcher = ((1 - side as u16) << 8) | 0x81;
-        crate::eventlog::write_pitch(&mut self.writer, play, pitcher, &rec, &self.pending_rules);
+        crate::eventlog::write_pitch(&mut self.writer, play, pitcher, &rec, &self.pending_rules, scorer_evidence.as_ref());
+        let scorer_ruling = if record { self.writer.latest_play().and_then(|p| bb_stats::scorer::score_play(p, outs_before, bb_stats::scorer::DEFAULT_CHOICE_MARGIN_S)) } else { None };
         let rules_events = std::mem::take(&mut self.pending_rules);
         if let Some((ev_, la, spray)) = rec.batted {
             if let Some(Event::PlateAppearanceEnded { batter, result: PaResult::BattedBall }) = rules_events.iter().find(|e| matches!(e, Event::PlateAppearanceEnded { .. })) {
@@ -425,7 +481,7 @@ impl Game {
             }
         }
         self.play += 1;
-        Some(PitchStep { play, batter, record: rec, pitch_flight, batted, rules_events, facts, calls, viz })
+        Some(PitchStep { play, batter, record: rec, pitch_flight, batted, rules_events, scorer_ruling, facts, calls, viz })
     }
 
     /// Close the log and tally the result from the rules events (event sourcing, PLAN §4.3).
@@ -517,6 +573,18 @@ pub fn simulate_game_fielders(seed: u64, fattrs: [FielderAttrs; 9]) -> GameResul
 mod tests {
     use super::*;
     use bb_rules::OutKind;
+
+    #[test]
+    fn reference_throw_uses_physical_travel_time() {
+        let env = bb_physics::FlightEnv::default_env();
+        let field = Field::default();
+        let first = crate::play::base_pos(1);
+        let short = bb_math::Vec3::new(first.x, first.y + 20.0, 1.8);
+        let t = reference_throw_time(&env, &field, short, first, 36.0);
+        // A 36 m/s throw needs at least 0.56 s in vacuum for 20 m; drag and
+        // ordinary launch angles keep it well below 1.2 s at this distance.
+        assert!((0.55..1.2).contains(&t), "flight time {t}");
+    }
 
     const BATTER: u16 = 2;
     const R3: u16 = 5;

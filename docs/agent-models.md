@@ -386,6 +386,8 @@ A kinematic point with heading:
   - **An outfielder has nobody behind him.** He knows his own hands: he dives only when he gives himself at least `OF_DIVE_MIN_P` 0.5 [E] of the ball (the §5.4 σ, with the ball's speed and distance as his own read has them); otherwise he plays it on his feet. He decides once, when a dive first offers; having decided to go, he goes. Infielders always go. The rule does not look at the inning, the score, or who is backing him up.
   - Either way the glove meets the ball where it passes closest, as for a standing catch.
 
+- *Walls (added 2026-11-14, Gemini play-area review P2-3; physics-spec §9.5):* fielders see the walls. A point of his own predicted path farther past a wall than he can reach over it (his body stops `BODY_R` 0.3 m inside the wall, his glove reaches 1.0 m from his body's centre, so 0.7 m past the wall's plane) is no intercept, and the runners' estimate of when a fielder gets the ball skips such points too. Moving, he never comes at the nearest wall faster than he can stop before it at `BRAKE` (6 m/s²): speed into it at most √(2·6·distance). A fielder no longer runs into the stands wall at 7 m/s after a pop 12 m into the seats (tested); outfielders chasing to the fence slow for it in the same way.
+
 ### 5.4 Capture
 
 The glove moves toward the predicted ball position at capture time, limited by a hand speed of 6 m/s [E] within the reach envelope (arm length 0.42·H [E] plus lean and dive extension).

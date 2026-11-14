@@ -1,0 +1,35 @@
+id = "awards-014"
+title = "Walk-off ground-rule double: the winning run scores and the game ends; the trailing runner does not score"
+rules = ["rules-spec 4.1", "rules-spec 7.2", "OBR 7.01(e)(3)", "OBR 5.06(b)(4)(F)"]
+milestone = "M4"
+tags = ["awards", "groundrule", "walk-off"]
+[initial]
+inning = 9
+half = "bottom"
+outs = 1
+score = [3, 3]
+bases = { second = "H.2", third = "H.3" }
+batter = "H.4"
+
+[[step]]
+fact = "PitchDelivered"
+t = 0.0
+[[step]]
+fact = "BatContact"
+t = 0.42
+[[step]]
+fact = "BallTouched"
+t = 3.0
+what = "Ground"
+pos = [30.0, 80.0]
+[[step]]
+fact = "BallTouched"
+t = 4.4
+what = "OutOfPlay"
+pos = [45.0, 102.0]
+in_flight = false
+expect_events = [{ event = "BallDead", reason = "GroundRuleDouble" }, { event = "RunnerAdvanced", runner = "H.3", from = 3, to = 4, cause = "Award" }, { event = "RunScored", runner = "H.3" }, { event = "GameEnded", away = 3, home = 4, walk_off = "true" }]
+expect_no_events = [{ event = "RunnerAdvanced", runner = "H.2" }, { event = "RunnerAdvanced", runner = "H.4" }]
+[expect]
+status = "Final"
+score = [3, 4]

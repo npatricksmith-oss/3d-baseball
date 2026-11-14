@@ -316,8 +316,8 @@ pub fn encode(step: &PitchStep, st: &RulesState, rosters: &crate::roster::Roster
             &tl::MarkerArgs { t: c.t_call() as f32, kind: MarkerKind::UmpireCall, agent: c.runner, base: c.base, p: Some(&pv), margin_s: c.margin_s.min(f32::MAX as f64) as f32 },
         ));
     }
-    // The ball left the playing field (rules-spec §5.8): when it was dead, the ground point
-    // where it left, and why in `base` (the event log's `DeadBallReason`: 1 out of play, a
+    // The ball left the playing field (rules-spec §5.8): when it was dead, the point where it
+    // crossed the boundary, and why in `base` (the event log's `DeadBallReason`: 1 out of play, a
     // foul or a throw; 2 home run; 3 ground-rule double), so a client can cut back to the field.
     let reason = step.rules_events.iter().find_map(|e| match e {
         bb_rules::Event::BallDead { reason } => Some(match reason {
@@ -328,8 +328,8 @@ pub fn encode(step: &PitchStep, st: &RulesState, rosters: &crate::roster::Roster
         _ => None,
     });
     for f in &step.facts {
-        if let bb_rules::Input::BallTouched { t, what: bb_rules::Touch::OutOfPlay { x, y, .. } } = *f {
-            let pv = v3f(Vec3::new(x, y, 0.0));
+        if let bb_rules::Input::BallTouched { t, what: bb_rules::Touch::OutOfPlay { x, y, z, .. } } = *f {
+            let pv = v3f(Vec3::new(x, y, z));
             marks.push(tl::Marker::create(&mut fbb, &tl::MarkerArgs { t: t as f32, kind: MarkerKind::BallDead, agent: 0, base: reason.unwrap_or(0), p: Some(&pv), margin_s: 0.0 }));
         }
     }
@@ -376,7 +376,7 @@ pub fn encode(step: &PitchStep, st: &RulesState, rosters: &crate::roster::Roster
         },
     );
     let duration = t_end as f32;
-    let text = crate::describe::describe(rec.call, rec.batted.map(|b| b.1.to_degrees()), &step.rules_events, &step.facts, Some(rosters));
+    let text = crate::describe::describe_scored(rec.call, rec.batted.map(|b| b.1.to_degrees()), &step.rules_events, &step.facts, Some(rosters), step.scorer_ruling);
     let summary = fbb.create_string(&text);
     let root = tl::PlayTimeline::create(
         &mut fbb,

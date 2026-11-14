@@ -246,10 +246,47 @@ table ScorerRuling {
   scorer_version: ushort (id: 5);
 }
 table ScorerEvidence {
-  ruling_seq: uint (id: 0);          // EventSeq of the ScorerRuling it supports
+  ruling_seq: uint (id: 0);          // legacy link; zero for raw evidence without a stored ruling
   clean_play_margin_s: double (id: 1);
   reference_fielder: ushort (id: 2);
   note_code: ushort (id: 3);
+  batter: ushort (id: 4);
+  runners: [RunnerOnBase] (id: 5);  // includes batter at base 0
+  has_first_touch: bool (id: 6);
+  first_touch_s: double (id: 7);
+  has_handling: bool (id: 8);
+  first_handler: ushort (id: 9);
+  handling_s: double (id: 10);
+  has_secured: bool (id: 11);
+  secured_s: double (id: 12);
+  secured_at: bb.Vec3d (id: 13);
+  has_margin: bool (id: 14);
+  throws: [ScorerThrow] (id: 15);
+  carries: [ScorerCarry] (id: 16);
+  touches: [ScorerTouch] (id: 17);
+}
+
+table ScorerTouch {
+  runner: ushort (id: 0);
+  base: ubyte (id: 1);
+  t: double (id: 2);
+}
+
+table ScorerCarry {
+  fielder: ushort (id: 0);
+  t: double (id: 1);
+  base: ubyte (id: 2);
+  batter_goal: ubyte (id: 3);
+}
+
+table ScorerThrow {
+  thrower: ushort (id: 0);
+  t_release: double (id: 1);
+  origin: bb.Vec3d (id: 2);
+  target: bb.Vec3d (id: 3);
+  base: ubyte (id: 4);
+  attempted_out: bool (id: 5);
+  batter_goal: ubyte (id: 6); // batter's running goal when released
 }
 table ManagerCommandApplied {
   command: bb.cmd.CommandEnvelope (id: 0);

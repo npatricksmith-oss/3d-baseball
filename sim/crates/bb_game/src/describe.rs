@@ -1,7 +1,7 @@
 //! One line a viewer can read for each pitch: the call, and what happened if the plate
 //! appearance ended. Built only from the pitch record, the rules events, and the facts of
-//! the play. The hit / fielder's-choice wording uses the provisional ruling
-//! [`crate::game::classify_bip`]; the official scorer will replace it.
+//! the play. Timeline captions use the scorer's log-backed ruling; callers without a
+//! persisted ruling retain the provisional laboratory classification.
 
 use bb_rules::{AgentId, Event, Input, OutKind, PaResult};
 
@@ -28,8 +28,13 @@ fn runs_phrase(n: usize) -> String {
 /// the game's rosters, a line that ends a plate appearance starts with the batter's family
 /// name ("Ramirez: Single to left"; family names are unique in a game, data-formats §2.4).
 pub fn describe(call: Call, launch_deg: Option<f64>, events: &[Event], facts: &[Input], rosters: Option<&Rosters>) -> String {
+    describe_scored(call, launch_deg, events, facts, rosters, None)
+}
+
+/// As `describe`, but use the ruling reconstructed from this play's event log.
+pub fn describe_scored(call: Call, launch_deg: Option<f64>, events: &[Event], facts: &[Input], rosters: Option<&Rosters>, ruling: Option<bb_stats::scorer::PlayRuling>) -> String {
     let runs = events.iter().filter(|e| matches!(e, Event::RunScored { .. })).count();
-    let outs: Vec<(AgentId, OutKind)> = events.iter().filter_map(|e| if let Event::RunnerOut { runner, kind, .. } = e { Some((*runner, *kind)) } else { None }).collect();
+    let outs: Vec<(AgentId, OutKind, u8)> = events.iter().filter_map(|e| if let Event::RunnerOut { runner, kind, base } = e { Some((*runner, *kind, *base)) } else { None }).collect();
     let ended = events.iter().find_map(|e| if let Event::PlateAppearanceEnded { batter, result } = e { Some((*batter, *result)) } else { None });
     let Some((batter, result)) = ended else {
         // The plate appearance goes on (or a foul with two strikes).
@@ -51,8 +56,12 @@ pub fn describe(call: Call, launch_deg: Option<f64>, events: &[Event], facts: &[
         PaResult::BattedBall => {
             let la = launch_deg.unwrap_or(0.0);
             let to = fielded_to(facts).map(|t| format!(" {t}")).unwrap_or_default();
-            let batter_out = outs.iter().find(|(r, _)| *r == batter).map(|x| x.1);
-            let (reached, hit) = crate::game::classify_bip(batter, events, facts);
+            let batter_out = outs.iter().find(|(r, _, _)| *r == batter).map(|x| x.1);
+            let (reached, hit) = match ruling.map(|r| r.outcome) {
+                Some(bb_stats::scorer::Outcome::Hit(_)) => (true, true),
+                Some(bb_stats::scorer::Outcome::FieldersChoice | bb_stats::scorer::Outcome::ReachedOnThrowAward) => (true, false),
+                _ => crate::game::classify_bip(batter, events, facts),
+            };
             let multi = match outs.len() {
                 2 => "Double play: ",
                 3 => "Triple play: ",
@@ -66,7 +75,10 @@ pub fn describe(call: Call, launch_deg: Option<f64>, events: &[Event], facts: &[
                 Some(_) if !reached => format!("{multi}{}{to}", if multi.is_empty() { "Ground out" } else { "ground out" }),
                 _ if hit => {
                     // The furthest base the batter reached safely names the hit.
-                    let bases = events.iter().filter_map(|e| if let Event::RunnerAdvanced { runner, to, .. } = e { (*runner == batter).then_some(*to) } else { None }).max().unwrap_or(1);
+                    let bases = match ruling.map(|r| r.outcome) {
+                        Some(bb_stats::scorer::Outcome::Hit(bases)) => bases,
+                        _ => events.iter().filter_map(|e| if let Event::RunnerAdvanced { runner, to, .. } = e { (*runner == batter).then_some(*to) } else { None }).max().unwrap_or(1),
+                    };
                     let name = match bases {
                         2 => "Double",
                         3 => "Triple",
@@ -76,11 +88,28 @@ pub fn describe(call: Call, launch_deg: Option<f64>, events: &[Event], facts: &[
                     let extra = if batter_out.is_some() { ", batter out stretching" } else if outs.len() == 1 { ", runner out on the bases" } else { "" };
                     format!("{name}{to}{extra}")
                 }
-                _ if reached => format!("{multi}Fielder's choice{to}"),
+                // Bases given for a throw out of play: not a hit, and (until the sim has
+                // fielding errors) not ruled an error either.
+                _ if ruling.is_some_and(|r| r.outcome == bb_stats::scorer::Outcome::ReachedOnThrowAward) => format!("{multi}Reached on a throw out of play, bases awarded (ball hit{to})"),
+                _ if reached => {
+                    let runner_out = outs.iter().find(|(runner, _, _)| *runner != batter).map(|(_, _, base)| {
+                        let place = match base { 1 => "first", 2 => "second", 3 => "third", 4 => "home", _ => "a base" };
+                        format!(", runner out at {place}")
+                    }).unwrap_or_default();
+                    format!("{multi}Reached on a fielder's choice{to}{runner_out}")
+                },
                 // The batter was not put out but never reached: the inning ended on another
                 // runner, forced or tagged.
-                _ if outs.iter().any(|(r, k)| *r != batter && *k == OutKind::Force) => format!("{multi}Force out{to}"),
-                _ => format!("{multi}Fielder's choice{to}, runner tagged out"),
+                _ if outs.iter().any(|(r, k, _)| *r != batter && *k == OutKind::Force) => format!("{multi}Force out{to}"),
+                _ => match outs.iter().find(|(r, _, _)| *r != batter) {
+                    Some((_, _, base)) => {
+                        let at = match base { 1 => "first", 2 => "second", 3 => "third", 4 => "home", _ => "a base" };
+                        format!("{multi}Ball hit{to}, runner tagged out at {at}")
+                    }
+                    // A walk-off that ended before anyone could be put out or the batter
+                    // reached first: the scorer leaves the play unruled (rules-spec §10.2).
+                    None => format!("{multi}Ball hit{to}"),
+                },
             }
         }
     };
@@ -107,6 +136,13 @@ mod tests {
         Input::BaseTouched { t, agent: B, base: 1, holding_ball: false }
     }
 
+    #[test]
+    fn caption_uses_log_scorer_when_provisional_classifier_disagrees() {
+        let events = [Event::RunnerOut { runner: R, base: 3, kind: OutKind::Tag }, Event::RunnerAdvanced { runner: B, from: 0, to: 1, cause: bb_rules::AdvanceCause::OnPlay }, ended(PaResult::BattedBall)];
+        let ruling = bb_stats::scorer::PlayRuling { batter: B, outcome: bb_stats::scorer::Outcome::Hit(1), sacrifice_fly: false, rbi: 0 };
+        assert_eq!(describe_scored(Call::InPlay, Some(5.0), &events, &[by(6), first(4.3)], None, Some(ruling)), "Single to short, runner out on the bases");
+    }
+
     // The expected strings are how a radio announcer would call each play.
     #[test]
     fn plays_read_the_way_they_are_called() {
@@ -125,11 +161,17 @@ mod tests {
         assert_eq!(describe(Call::InPlay, Some(15.0), &[adv(1), ended(PaResult::BattedBall)], &[first(4.2), by(7)], None), "Single to left");
         assert_eq!(describe(Call::InPlay, Some(18.0), &[adv(2), Event::RunScored { runner: R }, Event::RunScored { runner: 6 }, ended(PaResult::BattedBall)], &[first(4.2), by(8)], None), "Double to center, 2 runs score");
         assert_eq!(describe(Call::InPlay, Some(-3.0), &[out(R, OutKind::Force), out(B, OutKind::Force), ended(PaResult::BattedBall)], &[by(6)], None), "Double play: ground out to short");
-        assert_eq!(describe(Call::InPlay, Some(-3.0), &[out(R, OutKind::Force), adv(1), ended(PaResult::BattedBall)], &[by(6), first(4.3)], None), "Fielder's choice to short");
+        assert_eq!(describe(Call::InPlay, Some(-3.0), &[Event::RunnerOut { runner: R, base: 2, kind: OutKind::Force }, adv(1), ended(PaResult::BattedBall)], &[by(6), first(4.3)], None), "Reached on a fielder's choice to short, runner out at second");
         // The third out made on another runner before the batter reached first: a force at
         // second, or (seed 7475 play 26) a tag on the runner from third at home.
         assert_eq!(describe(Call::InPlay, Some(-50.0), &[out(R, OutKind::Force), ended(PaResult::BattedBall)], &[by(1)], None), "Force out to the pitcher");
-        assert_eq!(describe(Call::InPlay, Some(-54.0), &[out(R, OutKind::Tag), ended(PaResult::BattedBall)], &[by(1)], None), "Fielder's choice to the pitcher, runner tagged out");
+        assert_eq!(describe(Call::InPlay, Some(-54.0), &[Event::RunnerOut { runner: R, base: 4, kind: OutKind::Tag }, ended(PaResult::BattedBall)], &[by(1)], None), "Ball hit to the pitcher, runner tagged out at home");
+        // Bases awarded on a throw out of play are not a hit.
+        let thrown = bb_stats::scorer::PlayRuling { batter: B, outcome: bb_stats::scorer::Outcome::ReachedOnThrowAward, sacrifice_fly: false, rbi: 0 };
+        let awarded = Event::RunnerAdvanced { runner: B, from: 0, to: 2, cause: bb_rules::AdvanceCause::Award };
+        assert_eq!(describe_scored(Call::InPlay, Some(-3.0), &[awarded, ended(PaResult::BattedBall)], &[by(6)], None, Some(thrown)), "Reached on a throw out of play, bases awarded (ball hit to short)");
+        // A walk-off that ends the game before the batter reaches first: nobody was put out.
+        assert_eq!(describe(Call::InPlay, Some(5.0), &[Event::RunScored { runner: R }, ended(PaResult::BattedBall)], &[by(6)], None), "Ball hit to short, 1 run scores");
         assert_eq!(describe(Call::InPlay, Some(28.0), &[ended(PaResult::HomeRun), Event::RunScored { runner: B }], &[], None), "Home run, 1 run scores");
     }
 }

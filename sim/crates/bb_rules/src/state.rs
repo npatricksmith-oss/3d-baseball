@@ -225,7 +225,9 @@ pub enum Touch {
     /// Ground at (x, y), m.
     Ground { x: f64, y: f64 },
     /// Out of the playing field: over the fence in flight (`in_flight`) or after bouncing.
-    OutOfPlay { x: f64, y: f64, in_flight: bool },
+    /// `x`, `y`, `z` where it crossed the boundary (m); `z` is for presentation (the rules
+    /// judge fair or foul from `x`, `y`).
+    OutOfPlay { x: f64, y: f64, z: f64, in_flight: bool },
     /// The batter's body (pitch only, before bat contact).
     Batter,
     FoulPole,

@@ -499,6 +499,7 @@ version = "0.1.0"
 dependencies = [
  "bb_game",
  "bb_observe",
+ "bb_physics",
  "bb_schema",
  "flatbuffers",
 ]
@@ -513,6 +514,7 @@ dependencies = [
  "bb_physics",
  "bb_rules",
  "bb_schema",
+ "bb_stats",
  "bb_world",
  "flatbuffers",
  "serde_json",

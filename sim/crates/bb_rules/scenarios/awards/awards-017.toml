@@ -1,0 +1,51 @@
+id = "awards-017"
+title = "Runner who left early on a caught fly: a throw out of play awards two bases from the base he must go back to, not from the base he reached early"
+rules = ["rules-spec 5.3", "rules-spec 7.2", "OBR 5.09(b)(5)", "OBR 5.06(b)(4)(G)"]
+milestone = "M4"
+tags = ["awards", "throw", "outofplay", "tagup"]
+[initial]
+inning = 6
+half = "top"
+outs = 0
+bases = { first = "A.1" }
+batter = "A.2"
+
+[[step]]
+fact = "PitchDelivered"
+t = 0.0
+[[step]]
+fact = "BatContact"
+t = 0.42
+[[step]]
+fact = "BaseLeft"
+t = 0.5
+agent = "A.1"
+base = 1
+[[step]]
+fact = "BaseTouched"
+t = 3.4
+agent = "A.1"
+base = 2
+[[step]]
+fact = "GloveSecured"
+t = 4.0
+fielder = "H.CF"
+pos = [0.0, 95.0]
+expect_events = [{ event = "Catch" }, { event = "RunnerOut", runner = "A.2", kind = "FlyOut" }]
+[[step]]
+fact = "BallReleasedFromGlove"
+t = 4.6
+fielder = "H.CF"
+infielder = false
+[[step]]
+fact = "BallTouched"
+t = 6.0
+what = "OutOfPlay"
+pos = [-24.0, 1.0]
+in_flight = false
+expect_events = [{ event = "BallDead", reason = "OutOfPlay" }, { event = "RunnerAdvanced", runner = "A.1", from = 1, to = 3, cause = "Award" }]
+expect_no_events = [{ event = "RunScored" }]
+[expect]
+bases = { third = "A.1" }
+score = [0, 0]
+outs = 1

@@ -337,7 +337,7 @@ pub fn simulate_play(inp: &PlayInput) -> PlayOutput {
     if let SegmentEnd::OverFence { .. } = end {
         let (p, _) = path.at(path.t_end());
         let in_flight = path.bounces.is_empty();
-        facts.push((path.t_end(), Input::BallTouched { t: path.t_end(), what: Touch::OutOfPlay { x: p.x, y: p.y, in_flight } }));
+        facts.push((path.t_end(), Input::BallTouched { t: path.t_end(), what: Touch::OutOfPlay { x: p.x, y: p.y, z: p.z, in_flight } }));
         return finish(facts, path);
     }
 
