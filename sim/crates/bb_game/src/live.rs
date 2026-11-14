@@ -331,6 +331,9 @@ struct Fielder {
     /// the catch from, short of where his own read has it coming down. Kept across re-calls
     /// he is not part of, until the ball comes down or he is given another job.
     peel: Option<Vec3>,
+    /// The bag he is carrying the ball to (agent-models §5.5 A4), so that abandoning the
+    /// carry for a throw or for no play brakes him instead of leaving him running at it.
+    carry_to: Option<u8>,
 }
 
 #[derive(Clone, Debug)]
@@ -2053,6 +2056,7 @@ impl<'a> Sim<'a> {
                 // Having caught it, he plants: his run dies out where braking stops him, not
                 // back at the spot he planned (which a running catch has carried him past).
                 fd.target = stop_point(fd);
+                fd.carry_to = None;
                 // No longer racing the ball: he brakes onto that spot.
                 fd.t_int = f64::INFINITY;
                 if let Ball::Thrown { to_base, relay, .. } = self.ball {
@@ -2622,42 +2626,55 @@ impl<'a> Sim<'a> {
         let (b, through, margins) = if let Some(i) = best {
             let o = options[i];
             if o.carry {
+                // Running with the ball needs no transfer, only his feet (a diver's get-up).
                 let ready = if fd.dove { fd.ready_at } else { fd.up_at };
                 if self.t >= ready {
                     self.trace_choice(by, "carry", o.base, false, Some(i), &options);
                     self.f[by].target = base_pos(o.base);
+                    self.f[by].carry_to = Some(o.base);
                 }
                 return;
             }
             (o.base, o.through, Some((o.runner_at - o.ball_at, o.runner_at - o.set_ball_at)))
         } else if m::hypot(fd.pos.x, fd.pos.y) >= INFIELD_R {
-            let race = self.throw_race(by, 2);
-            (2, race.through, None)
+            // No play: get the ball back to second base, the quicker way.
+            (2, self.throw_race(by, 2).through, None)
         } else {
-            // An invalidated destination must not leave yesterday's carry alive.
-            self.f[by].target = stop_point(&fd);
+            self.abandon_carry(by);
             return;
         };
-        // He plants for a throw; abandoning a carry does not keep him running at
-        // its old bag while the new throw's setup clock runs.
-        self.f[by].target = stop_point(&fd);
-        if self.t < fd.up_at { return; }
+        // He plants for the throw: a carry he gave up does not keep him running at its bag
+        // while his set-up clock runs (§5.6 A4).
+        self.abandon_carry(by);
+        if self.t < fd.up_at {
+            return;
+        }
         let race = self.throw_race(by, b);
         let tgt = base_pos(b);
-        let leg = if through { self.f[race.relay.unwrap()].pos } else { tgt };
+        let leg = match race.relay {
+            Some(i) if through => self.f[i].pos,
+            _ => tgt,
+        };
+        // Get set, or hurry? (agent-models §5.5) With no play on, and with time in hand, he
+        // gets set. Short of time he lets go as soon as waiting longer would cost him his
+        // margin, and as soon as he can if he has none; but only if that gets the ball
+        // there sooner (not when it would wait for the man covering the bag anyway).
         let su = self.set_up_for(by, leg);
         let since = self.t - fd.up_at;
-        if since < su.earliest_s { return; }
+        if since < su.earliest_s {
+            return;
+        }
         if since < su.set_s {
             let hurry = match margins {
                 Some((now, set)) => set < SAFE_MARGIN_S && now <= SAFE_MARGIN_S && now > set + HURRY_GAIN_MIN_S,
                 None => false,
             };
-            if !hurry { return; }
+            if !hurry {
+                return;
+            }
         }
         let action = if margins.is_some() { "throw" } else { "return" };
-        if through {
-            let i = race.relay.unwrap();
+        if let (true, Some(i)) = (through, race.relay) {
             self.trace_choice(by, action, b, true, best, &options);
             self.throw_to(by, leg, b, i, true);
             return;
@@ -2678,6 +2695,14 @@ impl<'a> Sim<'a> {
             }
         }
         self.back_up_throw(fd.pos, b);
+    }
+
+    /// A holder who gives up a carry pulls up where braking stops him (agent-models §5.6 A4);
+    /// any other target (a receiver's step to his bag, the catch's own stop) is left alone.
+    fn abandon_carry(&mut self, by: usize) {
+        if self.f[by].carry_to.take().is_some() {
+            self.f[by].target = stop_point(&self.f[by]);
+        }
     }
 
     /// Fielder `by`'s set-up for a throw to ground point `tgt` with the ball he holds: the
@@ -2833,6 +2858,7 @@ fn new_sim<'a>(inp: &'a LiveInput<'a>, st: &'a mut RulesState) -> Sim<'a> {
                 took_diving: false,
                 backs: None,
                 peel: None,
+                carry_to: None,
             }
         })
         .collect();
@@ -5156,14 +5182,17 @@ mod tests {
         assert!((sim.f[2].target - base_pos(1)).norm() < 1e-9, "target {:?}", sim.f[2].target);
     }
 
-    #[test]
-    fn an_unforced_bag_outside_tag_reach_is_not_a_carry_out() {
-        // §5.5: runner second-to-third with first vacant is unforced. Touching
-        // third cannot retire him. Take the routine batter force at first.
-        let fx = fixture(&[(7, 2)]);
-        let inp = input(&fx, vec![RunnerIn { id: fx.st.batter, base: 0, speed: 8.2 }, RunnerIn { id: 7, base: 2, speed: 8.2 }]);
-        let mut st = fx.st.clone();
-        let mut sim = new_sim(&inp, &mut st);
+    /// Third baseman 3 m from third with the ball at 2.0 s, on his feet since 1.0; the first
+    /// baseman on his bag; the batter 4 m out of the box and an unforced runner (first is
+    /// open) 10 m past second, both running at 6 m/s. Both outs are sure by any timing: the
+    /// runner needs about 2.3 s to third against about 0.6 s for the holder, the batter
+    /// about 3.3 s to first against a 38 m throw.
+    fn third_baseman_with_an_unforced_runner_coming(outs: u8) -> Sim<'static> {
+        let fx: &'static Fixture = Box::leak(Box::new(fixture(&[(7, 2)])));
+        let inp: &'static LiveInput<'static> = Box::leak(Box::new(input(fx, vec![RunnerIn { id: fx.st.batter, base: 0, speed: 8.2 }, RunnerIn { id: 7, base: 2, speed: 8.2 }])));
+        let st: &'static mut RulesState = Box::leak(Box::new(fx.st.clone()));
+        st.outs = outs;
+        let mut sim = new_sim(inp, st);
         sim.t = 2.0;
         held_at(&mut sim, 4, base_pos(3) + Vec3::new(3.0, 0.0, 0.0));
         sim.f[2].pos = base_pos(1);
@@ -5171,7 +5200,50 @@ mod tests {
         (sim.r[0].s, sim.r[0].v, sim.r[0].goal) = (4.0, 6.0, 1);
         (sim.r[1].s, sim.r[1].v, sim.r[1].goal) = (2.0 * BASE_L + 10.0, 6.0, 3);
         sim.holder_act();
-        assert!(matches!(sim.ball, Ball::Thrown { to_base: 1, .. }), "must take first, not run to an unforced third");
+        sim
+    }
+
+    // agent-models §5.6 A4: carrying to an unforced runner's bag is a tag plan weighed as a
+    // tag, in the same comparison as the throws. With two out a sure force beats a sure tag
+    // (1.0 against `TWO_OUT_TAG_W` 0.9): he throws to first. With fewer than two out the
+    // lead runner at third is worth more than the batter (1.1 against 0.9), and a fielder
+    // 3 m from the bag with the runner 17 m away tags him there.
+    #[test]
+    fn an_unforced_runner_is_a_tag_weighed_against_the_force() {
+        let sim = third_baseman_with_an_unforced_runner_coming(2);
+        assert!(matches!(sim.ball, Ball::Thrown { to_base: 1, .. }), "two out: the force at first");
+        let sim = third_baseman_with_an_unforced_runner_coming(0);
+        assert!(matches!(sim.ball, Ball::Held { by: 4 }), "none out: he keeps the ball");
+        assert_eq!(sim.f[4].carry_to, Some(3));
+        assert!((sim.f[4].target - base_pos(3)).norm() < 1e-9, "and takes it to third for the tag");
+    }
+
+    // agent-models §5.6 A4 (the measuring note's seed 13 / play 140): bases loaded, one out,
+    // the first baseman 3 m from his bag. Carrying it there is a near-sure out on the batter,
+    // but it takes the force off every other base. The runner from third is 24 m from home
+    // and the catcher is on the plate: a sure force there is worth 1.3 against first's 0.9.
+    // The old proximity shortcut ran to first without looking at home.
+    #[test]
+    fn a_sure_force_at_home_beats_carrying_first() {
+        let fx = fixture(&[(5, 1), (6, 2), (7, 3)]);
+        let runners = vec![RunnerIn { id: fx.st.batter, base: 0, speed: 8.2 }, RunnerIn { id: 5, base: 1, speed: 8.2 }, RunnerIn { id: 6, base: 2, speed: 8.2 }, RunnerIn { id: 7, base: 3, speed: 8.2 }];
+        let inp = input(&fx, runners);
+        let mut st = fx.st.clone();
+        st.outs = 1;
+        let mut sim = new_sim(&inp, &mut st);
+        sim.t = 2.0;
+        held_at(&mut sim, 2, base_pos(1) + Vec3::new(-1.0, 2.8, 0.0));
+        sim.f[1].pos = base_pos(4);
+        sim.f[2].up_at = 0.5;
+        // The batter 1.2 s from first: no time for a second out there after any force.
+        (sim.r[0].s, sim.r[0].v, sim.r[0].goal) = (BASE_L - 8.2 * 1.2, 8.2, 1);
+        for k in 1..4 {
+            let r = &mut sim.r[k];
+            (r.s, r.v, r.goal) = (r.start as f64 * BASE_L + 3.0, 6.0, r.start + 1);
+        }
+        sim.holder_act();
+        assert_eq!(sim.f[2].carry_to, None, "he must not run it to first");
+        assert!(matches!(sim.ball, Ball::Thrown { to_base: 4, .. }), "the force at home");
     }
 
     /// The shortstop holds the ball at (−8, 38) at time 1.0, on his feet, having taken it

@@ -82,14 +82,20 @@ fn seed_1_play_64_never_projects_the_stopped_third_base_runner_home() {
 }
 
 #[test]
-fn seed_13_play_140_takes_the_sure_home_force_instead_of_automatic_first() {
-    // Tied sixth, loaded, one out: a routine home force preserves the run and
-    // leaves first available. Original shortcut took first and allowed a run.
+fn seed_13_play_140_takes_a_sure_lead_force_instead_of_automatic_first() {
+    // Tied sixth, loaded, one out. Main's proximity shortcut carried the ball to
+    // first (touched at 4.000 s), which took the force off every other base, and the
+    // go-ahead run scored. The holder must now weigh the lead forces. (Since main's
+    // arm-by-position change the first baseman is 9.1 m from his bag by the time he
+    // can throw, and the common comparison finds a 3-6-3 double play that ends the
+    // inning; either that or the home force satisfies §5.6.)
     let (_, choices, _) = replay(include_str!("fixtures/a4/13-140.json"));
     let first = &choices[0];
-    assert_eq!((first.action, first.base), ("throw", 4), "{first:#?}");
-    assert!(first.options.iter().any(|o| o.base == 1 && o.kind == "carry" && o.force), "first was compared");
-    assert!(first.options[first.selected_option.unwrap()].force);
+    assert!(!(first.action == "carry" && first.base == 1), "{first:#?}");
+    let chosen = &first.options[first.selected_option.unwrap()];
+    assert!(chosen.force && chosen.base >= 2, "{first:#?}");
+    // §5.6 note's "sure" screen: at least 0.25 s in hand on the first out.
+    assert!(chosen.runner_at - chosen.ball_at >= 0.25, "{chosen:#?}");
 }
 
 #[test]

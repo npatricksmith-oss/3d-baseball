@@ -150,9 +150,11 @@ impl Sim<'_> {
                 }
                 options.push(option);
             };
-            // No nonforce chase to a bag. Already there, he may wait for the tag;
-            // the actual tag still requires glove/runner contact in holder_act.
-            if (force && distance < params.carry_max_m) || (!force && distance <= params.tag_reach_m) {
+            // A carry to a forced runner's bag is a force touch. To an unforced runner's bag
+            // it is a tag plan: be on the bag before him and tag him as he comes in (the tag
+            // itself is glove/runner contact within `tag_reach_m` in holder_act). It is
+            // weighed as a tag (`out_weight`, no force continuation), never as a touch.
+            if distance < params.carry_max_m {
                 let ready = if fd.dove { fd.ready_at } else { fd.up_at };
                 let ball_at = self.t.max(ready) + run_time_to(fd, target, 0.6);
                 add(true, ball_at, ball_at);
