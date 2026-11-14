@@ -1312,6 +1312,31 @@ void ABbDirector::UpdateCamera(const BbFrame& Frame, float DeltaSeconds)
 	Camera->SetActorRotation((CamLook - Camera->GetActorLocation()).Rotation());
 }
 
+void ABbDirector::PlaceBallShadow(const BbFrame& Frame, bool bShown)
+{
+	// Above every ground layer (the mound's top is at 5 mm), below anything else.
+	const FVector At = ToUE(Frame.ball[0], Frame.ball[1], 0.012);
+	const FVector Look = At - Camera->GetActorLocation();
+	const float DistM = Look.Size() / 100.f;
+	// Width of the view at the shadow's distance, m: a far shadow is drawn larger so it stays
+	// a fixed share of the screen (a long lens shows less, so it needs less).
+	const float HalfFov = FMath::DegreesToRadians(Camera->GetCameraComponent()->FieldOfView * 0.5f);
+	const float ViewM = 2.f * DistM * FMath::Tan(HalfFov);
+	// It shrinks to about half as the ball climbs to 30 m, so height reads too.
+	const float H = FMath::Max(0.f, Frame.ball[2]);
+	const float Climb = FMath::Lerp(1.f, 0.55f, FMath::Clamp(H / 30.f, 0.f, 1.f));
+	const float Across = FMath::Max(BallShadowM, ViewM * BallShadowViewShare) * Climb;
+	// Seen from above at angle E, a disc shows sin E of its width in height. Lengthen it along
+	// the line of sight by 1/sqrt(sin E), at most BallShadowMaxStretch.
+	const float SinE = DistM > 0.f ? FMath::Clamp((float)(-Look.Z / Look.Size()), 0.f, 1.f) : 1.f;
+	const float Along = Across * FMath::Min(BallShadowMaxStretch, 1.f / FMath::Sqrt(FMath::Max(SinE, 1e-4f)));
+	// The cylinder's local X lies along the line of sight on the ground.
+	const float Yaw = FMath::RadiansToDegrees(FMath::Atan2(Look.Y, Look.X));
+	BallShadow->SetActorLocationAndRotation(At, FRotator(0.f, Yaw, 0.f));
+	BallShadow->SetActorScale3D(FVector(Along, Across, 0.002));
+	BallShadow->SetActorHiddenInGame(!bShown);
+}
+
 void ABbDirector::Tick(float DeltaSeconds)
 {
 	Super::Tick(DeltaSeconds);
@@ -1434,14 +1459,6 @@ void ABbDirector::Tick(float DeltaSeconds)
 		{
 			Ball->SetActorLocation(ToUE(Frame.ball));
 			Ball->SetActorHiddenInGame(!bBallShown);
-			{
-				// Above every ground layer (the mound's top is at 5 mm), below anything else.
-				const float H = FMath::Max(0.f, Frame.ball[2]);
-				const float Size = BallShadowM * FMath::Lerp(1.f, 0.55f, FMath::Clamp(H / 30.f, 0.f, 1.f));
-				BallShadow->SetActorLocation(ToUE(Frame.ball[0], Frame.ball[1], 0.012));
-				BallShadow->SetActorScale3D(FVector(Size, Size, 0.002));
-				BallShadow->SetActorHiddenInGame(!bBallShown);
-			}
 			Bat->SetActorHiddenInGame(Frame.has_bat == 0);
 			if (Frame.has_bat != 0)
 			{
@@ -1574,6 +1591,8 @@ void ABbDirector::Tick(float DeltaSeconds)
 					}
 				}
 			}
+			// After the camera has moved, since the shadow is sized for it.
+			PlaceBallShadow(Frame, bBallShown);
 		}
 		if (ABbHUD* Hud = GetWorld()->GetFirstPlayerController() ? Cast<ABbHUD>(GetWorld()->GetFirstPlayerController()->GetHUD()) : nullptr)
 		{

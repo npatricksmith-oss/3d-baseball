@@ -49,6 +49,8 @@ private:
 	void RequestNext();
 	void BeginPlayback(FBbPlay&& Play);
 	void UpdateCamera(const BbFrame& Frame, float DeltaSeconds);
+	/** Puts the ball's shadow under the ball, sized for the camera as it now stands. */
+	void PlaceBallShadow(const BbFrame& Frame, bool bShown);
 	void Finish();
 
 	TUniquePtr<FBbSim> Sim;
@@ -290,9 +292,18 @@ private:
 	/** Diameter the ball is drawn at, m: twice the real 7.4 cm (engine primitives are 1 m
 	 *  across at scale 1). */
 	static constexpr float BallDrawnM = 0.15f;
-	/** Diameter of the ball's ground shadow with the ball on the ground, m: the drawn ball's
-	 *  own size, as the sun's shadow of a ball is. */
+	/** Smallest diameter of the ball's ground shadow with the ball on the ground, m: the drawn
+	 *  ball's own size, as the sun's shadow of a ball is. Close to the camera it stays this size. */
 	static constexpr float BallShadowM = BallDrawnM;
+	/** Farther away the shadow keeps at least this share of the view's width across (about
+	 *  16 px of a 1600 px view), so it can still be seen deep in the outfield. At the pitch
+	 *  camera's long lens this is about the drawn ball's size. */
+	static constexpr float BallShadowViewShare = 0.01f;
+	/** Most the shadow is drawn longer along the line of sight than across it. A camera low
+	 *  over a far ball sees the disc nearly edge-on (19 m up and 135 m out it shows a seventh
+	 *  of its width); the length makes up the square root of that, so the shadow still reads
+	 *  as lying flat on the ground but stays a few pixels tall. */
+	static constexpr float BallShadowMaxStretch = 3.f;
 	UPROPERTY()
 	TObjectPtr<AStaticMeshActor> Bat;
 	UPROPERTY()

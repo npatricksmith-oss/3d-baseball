@@ -341,7 +341,7 @@ On the field (sim):
 On the screen (client). The owner (2026-11-13): hitting and throwing motions affect gameplay, so they stay here; the other looks wait for the polish stage (below).
 - [ ] A13. **Fielders' throwing motion** does not look real [W8] (a stand-in from the engine's stock clips).
 - [ ] A14. **Hitting animation:** stance, load, swing, follow-through (also a stand-in). Per-player stances and swings are L3 below.
-- [ ] A15. **Ball shadow after a hit cannot be seen.** Have: a disc under the ball, shrunk to 15 cm on 2026-11-12 because the owner found 50 cm too big. It is lost from the follow camera; size it by camera distance.
+- [x] A15. **Ball shadow after a hit cannot be seen.** Done 2026-11-13: the disc under the ball is sized by the camera (`ABbDirector::PlaceBallShadow`). It is at least 15 cm, and far away it keeps at least 1% of the view's width (`BallShadowViewShare`). It is up to 3× longer along the line of sight (`BallShadowMaxStretch`), since the follow camera sees a far disc nearly edge-on. It shrinks to about half as the ball climbs, as before. Checked in headless shots of seed 7 (docs/unreal-spike.md). Not yet watched by the owner in a window; the drawn ball itself (15 cm) is still about 3 px on a deep fly.
 - [ ] A16. **Home runs:** once the ball is over the wall, cut back to center to show the runners circling the bases; show a display with the batter's name (A2), the distance, and the exit speed in mph.
 
 ### Priority B
