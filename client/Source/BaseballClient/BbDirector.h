@@ -246,6 +246,23 @@ private:
 	bool bReset = false;
 	float ResetTime = 0.f;
 	float ResetDuration = 0.f;
+	// The cut at a change of sides (owner, 2026-11-14; to be a game setting): the jog off and
+	// on takes 23-27 s, so the picture stays for SideCutLeadS while the sides start off, fades
+	// to black over SideCutFadeS, skips the middle of the jog, holds the between-innings card
+	// for SideCutHoldS, and fades back in SideCutTailS before the first pitch, as the fielders
+	// reach their spots. Nothing in the staging changes: both staging clocks jump together
+	// while the picture is black. -BbSideCut=0 plays the whole changeover.
+	bool bSideCut = true;
+	float SideCutLeadS = 4.f;
+	float SideCutFadeS = 0.5f;
+	float SideCutHoldS = 1.5f;
+	float SideCutTailS = 3.5f;
+	/** This reset is a change of sides long enough to cut. */
+	bool bSideCutPlanned = false;
+	/** The jump over the middle of the jog has been made. */
+	bool bSideCutJumped = false;
+	/** How black the picture is (0 clear, 1 black) at ResetTime; makes the jump when it gets there. */
+	float SideCutFade();
 	FBbPlay NextPlay;
 	TArray<FResetMover> Movers;
 	/** The planned pose of a staged mover at time T on his own clock. */

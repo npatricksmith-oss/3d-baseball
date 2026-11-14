@@ -379,6 +379,36 @@ mod tests {
     /// worked by hand from the two tables (position players: 13.125% throw left, so
     /// left 0.13125 × 0.88 + 0.86875 × 0.24 = 32.4%, switch 0.13125 × 0.04 + 0.86875 × 0.14 =
     /// 12.7%, right 54.9%).
+
+    /// Seeds 18 and 19 against the independent oracle (`analysis/oracle/roster_oracle.py`, a
+    /// Python Philox4x32-10 and the §2.4 rules written from the spec; its output is committed
+    /// as `analysis/oracle/golden/rosters.txt`, and a Python test checks that the file is the
+    /// oracle's). Seed 18 rejects four family names (and a given name and a uniform number);
+    /// seed 19 rejects one family name, three uniform numbers and a given name. Seed 7's
+    /// literals above rejected given names; these two reach the other two rejection paths.
+    #[test]
+    fn seeds_18_and_19_match_the_independent_oracle() {
+        let golden = include_str!("../../../../analysis/oracle/golden/rosters.txt");
+        let mut want: Vec<&str> = golden.lines().filter(|l| !l.starts_with('#')).collect();
+        want.reverse();
+        for seed in [18u64, 19] {
+            let r = Rosters::generate(seed);
+            for side in 0..2 {
+                for p in r.teams[side].batting_order() {
+                    let c = |b: Bats| match b {
+                        Bats::Left => 'L',
+                        Bats::Right => 'R',
+                        Bats::Switch => 'S',
+                    };
+                    let t = if p.throws == Hand::Left { 'L' } else { 'R' };
+                    let got = format!("{seed} {side} {} {} {} {} {} {}/{t}", p.batting_order, p.position_code(), p.number, p.given, p.family, c(p.bats));
+                    assert_eq!(Some(got.as_str()), want.pop(), "seed {seed}");
+                }
+            }
+        }
+        assert!(want.is_empty());
+    }
+
     #[test]
     fn hands_follow_the_position_and_the_batting_side_follows_the_hand() {
         let n_seeds = 3000u64;

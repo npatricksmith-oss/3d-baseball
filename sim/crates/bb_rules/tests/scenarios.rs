@@ -252,7 +252,7 @@ fn setup(init: Option<&Value>) -> RulesState {
 fn run_scenario(path: &Path) -> Result<(), String> {
     let text = std::fs::read_to_string(path).unwrap();
     let doc: Value = toml::from_str(&text).map_err(|e| format!("parse: {e}"))?;
-    check_keys(&doc, &["id", "title", "rules", "milestone", "tags", "initial", "step", "expect"], "top level");
+    check_keys(&doc, &["id", "title", "rules", "milestone", "tags", "known_gap", "initial", "step", "expect"], "top level");
     let mut st = setup(doc.get("initial"));
     let empty = Vec::new();
     for (i, stv) in doc.get("step").and_then(|v| v.as_array()).unwrap_or(&empty).iter().enumerate() {
@@ -370,11 +370,22 @@ fn scenario_corpus() {
     fs.sort();
     assert!(!fs.is_empty(), "no scenarios found");
     let mut fails = Vec::new();
+    let mut gaps = Vec::new();
     for p in &fs {
-        if let Err(e) = run_scenario(p) {
-            fails.push(format!("{}: {e}", p.strip_prefix(&root).unwrap().display()));
+        let name = p.strip_prefix(&root).unwrap().display().to_string();
+        // `known_gap = "why"`: the scenario states what the rules say and the engine is known to
+        // disagree. It must keep failing; if it starts to pass, the marker has to go.
+        let gap = toml::from_str::<Value>(&std::fs::read_to_string(p).unwrap()).ok().and_then(|d| d.get("known_gap").and_then(|g| g.as_str().map(String::from)));
+        match (run_scenario(p), gap) {
+            (Ok(()), None) => {}
+            (Err(e), None) => fails.push(format!("{name}: {e}")),
+            (Err(e), Some(why)) => gaps.push(format!("{name}: {why} [engine: {e}]")),
+            (Ok(()), Some(_)) => fails.push(format!("{name}: passes now; remove `known_gap`")),
         }
     }
-    println!("{} scenarios, {} failed", fs.len(), fails.len());
+    for g in &gaps {
+        println!("known gap {g}");
+    }
+    println!("{} scenarios, {} failed, {} known gaps", fs.len(), fails.len(), gaps.len());
     assert!(fails.is_empty(), "\n{}", fails.join("\n"));
 }
