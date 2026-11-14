@@ -342,3 +342,131 @@ standing on first with stale arrival speed, called out with no base play (base 0
 on the same tick as a nearby carry; they were not traced further. Genuine
 doubled-off runners were 4 → 3. The line-drive and fly-ball drop is **not
 explained**.
+
+## Diagnosis: why sacrifice flies fell by three quarters (2026-11-14, `work/sf-diagnosis`)
+
+Diagnosis only; no sim behavior was edited. The scorer audit found sacrifice flies at 178 [157]
+per 300 games on `69826e4` and 45 [57] on `0a17409`, against about 150 per 300 in MLB. Fly
+outs with a run scoring, 100 games (seeds 0–99), counted by `sim/crates/bb_game/examples/sf_probe.rs`:
+
+| | fly outs, runner on third, <2 out | runner scores | put out | holds |
+|---|---:|---:|---:|---:|
+| main `00445f5` (before A4) | 108 | 60 | 5 | 43 |
+| main `05666c0` (A4) | 98 | 16 | 2 | 80 |
+| `05666c0` plus the experiment below | 114 | 64 | 4 | 46 |
+
+### The cause: the runner, not the defense
+
+The runner on third **holds** after the catch where he used to go, because his own race estimate
+got 1.05 s worse. At the catch, `runner_decide` (`live.rs:2421`) estimates
+
+```rust
+let t_run = run_time((next as f64 * BASE_L - r.s).max(0.0), r.vmax, RUNNER_TAU) * if r.v > 1.0 { 0.75 } else { 1.0 };
+```
+
+and goes if `t_ball − (t + t_run) + noise > 0.35`. The factor 0.75 is a running start for a runner
+already in motion (`r.v > 1.0`). A runner tagging up is not in motion, but before A4 he looked like
+he was:
+
+- **Before** (`00445f5`, `live.rs:2462`, the tag-up branch of `move_runners`): a runner who has come
+  back to his base to tag up reaches `else if on_base { continue; }` on every tick, which skips the
+  code that zeroes `r.v` (`live.rs:2491`, `if (goal_s − r.s).abs() < 1e-6 { r.v = 0.0; continue; }`).
+  He stands on the bag with the speed he had when he got back to it, frozen: **6.19 m/s** in 102 of
+  the 108 traced decisions at a catch (the other six 6.85–7.36 m/s), never zero. At the catch `r.v > 1.0` is true, so `t_run` for the 27.43 m
+  from third to home is **3.14 s**.
+- **After** (A4, `live.rs:2578–2584`, "End the physical stop on arrival, before the next holder reads
+  its speed"): `r.v = 0.0` is set on the arrival tick, for every runner whose goal is reached,
+  including a tag-up runner. At the catch `r.v = 0.00`, the factor is 1.0, and `t_run` is **4.19 s**:
+  a standing start over 27.43 m (`run_time`, `RUNNER_TAU` 0.85 s).
+
+So the 25 % running start the tagging runner used to get was an accident of a stale speed, and A4's
+correct fix to the speed removed it. Nothing was meant to touch the sacrifice fly. The zeroing is
+needed by A4 (the fielders' gate reads `direction × v`); it is the runner's decision rule that was
+leaning on the bug.
+
+### Three clear examples (identical in both builds up to the decision)
+
+Same seed, same play number, same catching fielder, same catch tick, same noise draw, so the only
+difference is `r.v`. `t` is play seconds at the catch (tick = t × 60). "ball needs" is `t_ball − t`:
+the runner's estimate of when the ball reaches home, from the catch. margin is
+`t_ball − (t + t_run)`; he goes if margin + noise > 0.35.
+
+| Seed, play | catch t (tick) | build | `r.v` | `t_run` | ball needs | margin | noise | result |
+|---|---|---|---:|---:|---:|---:|---:|---|
+| 1, 54 | 4.53 s (272) | before | 6.19 | 3.14 | 3.79 | +0.65 | +0.12 | **goes, scores** |
+| | | after | 0.00 | 4.19 | 3.79 | −0.40 | +0.12 | holds |
+| 23, 111 | 6.37 s (382) | before | 6.19 | 3.14 | 4.17 | +1.03 | +0.05 | **goes, scores** |
+| | | after | 0.00 | 4.19 | 4.17 | −0.02 | +0.05 | holds |
+| 45, 74 | 5.41 s (325) | before | 6.19 | 3.14 | 4.16 | +1.01 | −0.03 | **goes, scores** |
+| | | after | 0.00 | 4.19 | 4.16 | −0.03 | −0.03 | holds |
+
+There are 28 such plays in seeds 0–99 where both builds make the same catch: the runner scored in 25
+and was put out in 3 before; he held in 27 and was put out in 1 after. Others: (4, 59), (8, 85),
+(23, 117), (30, 94), (44, 55), (45, 46), (46, 152), (47, 103), (49, 40), (53, 37), (57, 147),
+(64, 76), (66, 42), (67, 187), (67, 203), (76, 213), (87, 95), (90, 107), (92, 163), (99, 179).
+Most have a ball-needs time of 3.5–4.7 s, between the two `t_run` values, which is why the runner
+went before and holds now.
+
+### What it is not
+
+- **The defense.** A runner who goes is put out at about the same rate (before 5 of 65, after 2 of 18,
+  with the experiment 4 of 68), and a runner who holds is standing on his base with the ball just caught, so there is no
+  play on him in either build (I did not trace the fielders' choices in the held plays; the
+  unchanged out rate and the restored scoring rate with only the runner's rule changed say the
+  defense is not the cause). The gating of
+  fielders' targets on visible motion (`visible_target`, `runner_target`) does not enter, because the
+  decision comes at the catch, before anyone is moving. The decision is the runner's, and it is
+  made from `Ball::Held`, which A4 did not touch.
+- **The runner's read of the ball.** `ball_time_to` (`live.rs:2336`) gives the same `t_ball − t` in
+  both builds for the same play (the "ball needs" column).
+- **Noise.** The draw is the same in both builds; margin shifts by exactly the `t_run` difference of
+  1.05 s.
+
+### Experiment (not committed) and how much of A4's run drop it explains
+
+One edit restores the old behavior for a tagging runner only: at `live.rs:2583` add `&& !r.tag_up` to
+the condition that zeroes `r.v` on arrival. Result, seeds 0–99 for the probe and 300 games per set
+for the runs:
+
+| | probe (scored / out / held) | runs / team-game, seeds 0–299 [1000–1299] |
+|---|---|---|
+| before A4 (`00445f5`, `980a7dc` row) | 60 / 5 / 43 | 5.41 [5.62] |
+| A4 (`05666c0`) | 16 / 2 / 80 | 5.07 [5.28] |
+| A4 with the edit | 64 / 4 / 46 | 5.32 [5.42] |
+
+Sacrifice flies come back to the old rate, and **about 0.25 [0.14] of A4's 0.34 [0.34] run drop is this
+runner bug, not better defense** (set noise is about 0.1). What is left, about 0.1–0.2 runs, is
+A4 itself plus noise. The edit is a diagnostic, not the fix: it also leaves the speed frozen for the
+fielders' gate, which A4 means to be zero.
+
+### The fix I would make (for opus-a4)
+
+1. Keep `r.v = 0.0` on arrival (A4's change is right: a runner standing on a bag is not moving).
+2. Make the tag-up start an explicit rule in `runner_decide`, not a side effect of a stale speed.
+   Give it a named [E] parameter, for example `TAG_UP_START_FACTOR` (initially 0.75, which reproduces
+   the old behavior exactly: `t_run` 3.14 s from third). Pass a `leaving_on_catch: bool` from the
+   tag-up branch (`live.rs:2462–2470`, where `self.runner_decide(k, b)` is called right after
+   `tag_up = false`) and write
+   `* if leaving_on_catch { TAG_UP_START_FACTOR } else if r.v > 1.0 { 0.75 } else { 1.0 }`.
+   Better, replace the speed proxy (`r.v > 1.0`) with the fact it stands for: the runner is moving
+   toward `next` (`r.direction > 0.0 && r.v > 1.0`).
+3. Choose the factor from the sacrifice-fly rate: fly outs with a run on third and <2 out should score
+   about 55–60 % (the old 60 of 108); that is in line with the count of about 150 sacrifice flies per
+   300 games. 0.75 has no source; it gives 27.4 m in 3.14 s, against 4.19 s from a
+   standing start. A tag-up is neither (the runner leans and leaves on the catch), so the right value
+   is somewhere between and should be measured. The decision threshold (0.35 s) and runner noise (0.15 s) move the rate the same way, so fit them
+   together or not at all.
+4. Tests: a runner tagging up on third with a fly caught 4.1 s of throw from home goes and scores; the
+   same with a 5.0 s throw holds; and a regression that `sf_probe 0 100` stays near 60 scored of 108.
+
+To reproduce: `cargo build --release -p bb_game --example sf_probe` then
+`BB_SF_TRACE=1 sf_probe 0 100 v` after adding the one-line trace below to `runner_decide` (local
+only; the trace is not committed). The example prints one line per qualifying play
+(`seed N play M outs O runner R scored|OUT|held`).
+
+```rust
+if std::env::var("BB_SF_TRACE").is_ok() && r.start == 3 {
+    eprintln!("SF play {} t {:.2} runner {} v {:.2} t_run {:.2} t_ball-t {:.2} margin {:.2} noise {:.2} go {}",
+        self.inp.play, self.t, r.id, r.v, t_run, t_ball - self.t, t_ball - (self.t + t_run), noise, go);
+}
+```
