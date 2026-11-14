@@ -6,7 +6,7 @@ Branch `work/swing-model`, cut from main `bcbb91f`. Not merged: the owner rules 
 
 ## 1. The claims, checked on main `bcbb91f`
 
-Sources for MLB: a Baseball Savant pitch-level sample I pulled for this note (regular season 2025, six dates: Apr 22, May 20, Jun 17, Jul 22, Aug 19, Sep 16; 26,489 pitches, 12,180 tracked swings, 11,238 competitive by Savant's definition: a batter's fastest 90% plus any 60+ mph swing with a 90+ mph exit speed; same query template as [R13](../research/r13-foul-direction.md)). Analysis scripts: `analysis/statcast/` (the CSVs are not committed; §8 has the query). R13's 2025 sample (12 dates, these six among them) gives the same means to within 0.3 (bat speed 69.9 against 69.7, swing length 7.2 against 7.2, attack angle 9.0 against 9.0, tilt 32 against 32.2).
+Sources for MLB: a Baseball Savant pitch-level sample I pulled for this note (regular season 2025, six dates: Apr 22, May 20, Jun 17, Jul 22, Aug 19, Sep 16; 26,489 pitches, 12,180 tracked swings, 11,238 competitive by Savant's definition: a batter's fastest 90% plus any 60+ mph swing with a 90+ mph exit speed; same query template as [R13](../research/r13-foul-direction.md)). Analysis scripts: `analysis/statcast/` (the CSVs are not committed; §8 has the query). R13's 2025 sample (12 dates, these six among them) gives the same means to within 0.3 (R13 against the six-date sample: bat speed, all tracked swings, 69.9 against 69.7; swing length 7.2 against 7.2; attack angle 9.0 against 9.0; tilt 32 against 32.2). **Which sample is which:** §3's MLB figures for the whole-population measures (bat speed all tracked, swing length, tilt overall and its p10/p90, tilt by third "R13", attack angle, attack direction, the AA–AD and AD–depth slopes, fair-contact AD SD) are R13's twelve-date numbers, copied from its §F6; the figures marked "competitive", the "this sample" tilt by third, and every by-location and by-depth figure (§1, §3) are from the six-date sample. The exit-speed and launch-angle figures in §5 come from the same six-date CSVs by the scripts' inputs (the CSVs are not in the repo, so this and the six-date figures themselves cannot be rechecked from the repo; the independent check of this note found R13's numbers match the whole-population ones exactly).
 
 **Claim 1, bat speed grows with reach: confirmed.**
 
@@ -16,7 +16,7 @@ Sources for MLB: a Baseball Savant pitch-level sample I pulled for this note (re
 | Exit speed by horizontal third, mph | 84.0 / 90.3 / 99.0 | 79.3 inside, 89.6 mid-in, 93.1 middle, 90.9 mid-away, 83.9 outside |
 | HR per ball in play, outside third | 14.2% | 1.8% (outside bin) |
 | Exit speed in play, p90 / p99 / max, mph (run_env_diag, 100 games) | 112.1 / 125.9 / 136.2 | 105.2 / 111.0 / 116.7 |
-| HR / PA (standard run, seeds 0–299) | 5.11% | 3.0% (2024) |
+| HR / PA (standard run, seeds 0–299) | 5.11% | 3.0% (2024; 5,453 HR in 182,449 PA = 2.99%, Savant league totals, [sources](2026-11-14-sources.md)) |
 
 Statcast's bat speed is flat across the plate within ±2 mph, rising only with contact depth out front (68.3 mph 12+ in deep to 73.4 at 6–12 in out front). Its lateral intercept moves 17 in further from the batter from inside to outside with no rise in speed: the batter reaches, he does not swing faster. Within a batter, at fixed depth (±3 in of his own mean) over the middle of the plate, bat speed still varies by 3.2 mph SD (4.5%); between batters the SD of means is 2.8 mph.
 
@@ -33,7 +33,7 @@ Spec first ([agent-models §3.6](../agent-models.md), commit `bade326`), then an
 - **Speed set per swing.** The rate scale is `k = BatSpeed / (q·ρ + u_ss)`, so every planned swing meets its aim at `BatSpeed`. A long reach turns more slowly.
 - **Contact-relative plan.** At the aim: tilt β (Statcast path tilt by zone height and location), attack angle α (Statcast by height), attack direction ψ (Statcast by location), contact depth slope 0.125 (Statcast intercept depth by location; v1's 0.6 was authored for its radial bat). The bat axis is ⊥ to the path in the plane; the vertical bat angle follows from α and β (sin² = sin²β − sin²α). C keeps its lateral position (−1.10 m for a right-hander [E]); ρ is solved from it and clamped to 0.15–0.46 × height (a clamped swing comes up short along the bat).
 - **Timing constants** fitted to Statcast's swing length (7.2–7.3 ft) and Blast's 0.149 s time to contact (vendor): hands' width 55 ms, bat's width 55 ms, bat's peak +10 ms, hands' rate 0.32 of the bat's at contact [E].
-- **Execution noise.** Unchanged in kind: δ_v, plane tilt, reach, timing from `Purpose::SwingExecution`. New: **effort**, the swing's speed relative to `BatSpeed`, σ 4.5% [E from the Statcast within-batter SD above], drawn from a new appended `Purpose::SwingEffort` (14) so the existing draws are untouched. Without it every grade-50 swing would be exactly 71.5 mph and exit speed would top out at 103.8.
+- **Execution noise.** Unchanged in kind: δ_v, plane tilt, reach, timing from `Purpose::SwingExecution`. New: **effort**, the swing's speed relative to `BatSpeed`, σ 4.5% [E from the Statcast within-batter SD above], drawn from a new appended `Purpose::SwingEffort` (14) so the existing draws are untouched. Without it every grade-50 swing would be exactly 71.6 mph (32.0 m/s is 71.58 mph) and exit speed would top out at 103.8.
 - **Decision code** is unchanged: the batter still plans from his own noisy read; the planner now takes the template's attack angle at the aim (`SwingTemplate::attack_angle_at`).
 - **Fielders' beliefs refit, mechanically**, with the same tools (`live.rs`, agent-models §5.10): spray from face 5.2 + 1.36·face (18.6°) → 6.91 + 0.939·face (18.0°); face from lead 161.93 − 1,063.1·L (3.6°) → 184.10 − 1,213.3·L (3.1°); typical pull 5.0° → 1.23°; scatter 22° → 20.5°; pull by location (v1 −6.5° to +7.7°) → −2.8° to +0.6°; `BAT_YAW_RATE_DPS` 1,915 → 2,312°/s (so the grade-50 bat-read σ is 92° instead of 77°). Two of the fitting tools, `spray_cues` and `spray_by_location`, still assumed every batter was right-handed (true before A1); they now mirror left-handers. The hand-worked jump tests in `live.rs` are recomputed by `analysis/oracle/anticipation_jumps.py` from §5.10's formulas.
 - `foul_diag` gains a by-location table and bat speed by depth, with the MLB columns from the sample; `examples/swing_cage_probe.rs` prints the on-time cage at five locations.
@@ -51,7 +51,7 @@ Tests: `cargo test --workspace --release` 294 passed, 0 failed, 2 ignored; Pytho
 | Vertical bat angle, °, mean / p10 / p90 | −18.5 / −30.5 / −6.6 | −28.0 / −33.8 / −21.1 | −25 to −35 (Blast, vendor) |
 | Attack angle, °, mean / p10 / p90 | 12.1 / 6.3 / 18.9 | 11.5 / 3.2 / 21.6 | 9.0 / −5 / 23 |
 | AA against AD, ° per ° toward pull | +0.26 (r 0.83) | +0.44 (r 0.87) | +0.41 (r 0.71) |
-| AD against depth, ° per inch out front | +1.04 (r 0.94) | +0.98 (r 0.95) | +1.48 (r 0.87) |
+| AD against depth, ° per inch out front | +1.04 (r 0.94) | +0.98 (r 0.95) | +1.48 (r 0.87, the mean of R13's 0.89 right-handed and 0.85 left-handed; R13 states −1.48 ° per inch *deeper*) |
 | Attack direction, °, p10 / p50 / p90 (pull +) | −8.7 / 4.7 / 31.1 | −7.0 / 4.1 / 28.1 | −25 / ≈0 / 23 |
 | Fair-contact AD SD, pulled / opposite | 6.9 / 6.8 | 6.2 / 6.9 | 14 / 19 |
 
@@ -105,6 +105,8 @@ The steeper plane makes high pitches and well-timed contact foul more often (top
 | PU share / hit | 8.7% / .017 [8.9% / .018] | 5.2% / .027 [5.4% / .017] | 7% / .02 |
 | PA / team-game; pitches / game | 38.4; 224 [38.7; 224] | 38.7; 224 [39.3; 228] | |
 | Fouls / game; foul outs / game | 14.1; 2.07 [14.1; 2.10] | 17.4; 1.50 [18.0; 1.66] | ; about 1.4 |
+
+**Where the MLB column comes from.** K% 22.6, BB% 8.2 and HR/PA 3.0% are the 2024 Baseball Savant league totals (41,197 K, 14,929 BB and 5,453 HR in 182,449 PA = 22.58%, 8.18%, 2.99%; BB includes intentional walks), and 4.39 runs a team-game is Baseball-Reference 2024, all from [sources](2026-11-14-sources.md). [calibration-targets](../calibration-targets.md) B1.1 and B1.2 give 22.5% and 8.3%, which are approximate \[R] values from general knowledge awaiting its R10 refresh (K% band 15–28%, BB% 5–12%), so the 0.1-point differences are two sources, not an error. Its B3.3 (1.1 HR per team-game, band 0.6–1.6) agrees with the totals: 5,453 HR over 4,860 team-games is 1.12. The runs column's 4.4–4.6 is a range, not a sourced figure: the repo's sourced value is 4.39 (2024) and calibration-targets B3.1 says 4.4.
 
 **Batted balls** (`run_env_diag`, 100 games, seeds 0–99; MLB 2025 sample, balls in play):
 
