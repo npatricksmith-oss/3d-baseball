@@ -59,7 +59,7 @@ pub fn describe_scored(call: Call, launch_deg: Option<f64>, events: &[Event], fa
             let batter_out = outs.iter().find(|(r, _, _)| *r == batter).map(|x| x.1);
             let (reached, hit) = match ruling.map(|r| r.outcome) {
                 Some(bb_stats::scorer::Outcome::Hit(_)) => (true, true),
-                Some(bb_stats::scorer::Outcome::FieldersChoice) => (true, false),
+                Some(bb_stats::scorer::Outcome::FieldersChoice | bb_stats::scorer::Outcome::ReachedOnThrowAward) => (true, false),
                 _ => crate::game::classify_bip(batter, events, facts),
             };
             let multi = match outs.len() {
@@ -88,6 +88,9 @@ pub fn describe_scored(call: Call, launch_deg: Option<f64>, events: &[Event], fa
                     let extra = if batter_out.is_some() { ", batter out stretching" } else if outs.len() == 1 { ", runner out on the bases" } else { "" };
                     format!("{name}{to}{extra}")
                 }
+                // Bases given for a throw out of play: not a hit, and (until the sim has
+                // fielding errors) not ruled an error either.
+                _ if ruling.is_some_and(|r| r.outcome == bb_stats::scorer::Outcome::ReachedOnThrowAward) => format!("{multi}Reached on a throw out of play, bases awarded{to}"),
                 _ if reached => {
                     let runner_out = outs.iter().find(|(runner, _, _)| *runner != batter).map(|(_, _, base)| {
                         let place = match base { 1 => "first", 2 => "second", 3 => "third", 4 => "home", _ => "a base" };
@@ -158,6 +161,10 @@ mod tests {
         // second, or (seed 7475 play 26) a tag on the runner from third at home.
         assert_eq!(describe(Call::InPlay, Some(-50.0), &[out(R, OutKind::Force), ended(PaResult::BattedBall)], &[by(1)], None), "Force out to the pitcher");
         assert_eq!(describe(Call::InPlay, Some(-54.0), &[Event::RunnerOut { runner: R, base: 4, kind: OutKind::Tag }, ended(PaResult::BattedBall)], &[by(1)], None), "Ball hit to the pitcher, runner tagged out at home");
+        // Bases awarded on a throw out of play are not a hit.
+        let thrown = bb_stats::scorer::PlayRuling { batter: B, outcome: bb_stats::scorer::Outcome::ReachedOnThrowAward, sacrifice_fly: false, rbi: 0 };
+        let awarded = Event::RunnerAdvanced { runner: B, from: 0, to: 2, cause: bb_rules::AdvanceCause::Award };
+        assert_eq!(describe_scored(Call::InPlay, Some(-3.0), &[awarded, ended(PaResult::BattedBall)], &[by(6)], None, Some(thrown)), "Reached on a throw out of play, bases awarded to short");
         assert_eq!(describe(Call::InPlay, Some(28.0), &[ended(PaResult::HomeRun), Event::RunScored { runner: B }], &[], None), "Home run, 1 run scores");
     }
 }

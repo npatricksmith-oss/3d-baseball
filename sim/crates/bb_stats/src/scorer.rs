@@ -22,6 +22,12 @@ impl Default for ScorerOptions {
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 pub enum Outcome {
     Hit(u8), FieldersChoice, Out, Walk, HitByPitch, Strikeout, Undetermined,
+    /// The batter reached only because a thrown ball left the field and bases were awarded
+    /// (OBR 5.06(b)(3)(D)). Not a hit. This is the seam for the error ruling (rules-spec
+    /// §10.2, A17): once the sim has fielding errors the throw is ruled an error and this
+    /// becomes reached on error. Until then it is an at-bat without a hit, and no error is
+    /// charged.
+    ReachedOnThrowAward,
 }
 
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
@@ -48,6 +54,15 @@ pub fn score_play_with_options(play: ev::PlayRecord<'_>, outs_before: u32, optio
     let flyout = outs.iter().any(|o| o.runner() == batter && o.kind() == ev::OutKind::FlyOut);
     let caught_foul = events.iter().filter_map(|e| e.body_as_batted_ball_ruling()).any(|r| r.caught() && r.fair_foul() == ev::FairFoul::Foul);
     let caught_in_outfield = evidence.and_then(|e| e.secured_at()).is_some_and(|p| p.x() * p.x() + p.y() * p.y() >= options.outfield_radius_m * options.outfield_radius_m);
+    // A thrown ball out of play awards bases, and the batter's included. The award is not
+    // a hit; only what he had reached by the time of the throw can be one.
+    let thrown_award = events.iter().filter_map(|e| e.body_as_ball_dead()).any(|d| d.reason() == ev::DeadBallReason::OutOfPlay);
+    let award_cutoff_s = if thrown_award { evidence.and_then(|e| e.throws()).and_then(|ts| ts.iter().map(|t| t.t_release()).reduce(f64::max)) } else { None };
+    // Runs that score by the award itself (after the dead ball) follow no batter action.
+    let runs_after_dead = if thrown_award {
+        let dead_at = events.iter().position(|e| e.body_type() == EventBody::BallDead).unwrap_or(0);
+        events.iter().skip(dead_at).filter(|e| e.body_type() == EventBody::RunScored).count() as u32
+    } else { 0 };
     let sf = flyout && outs_before < 2 && runs > 0 && (caught_foul || caught_in_outfield);
     let outcome = match pa.result() {
         ev::PaResult::Walk | ev::PaResult::IntentionalWalk => Outcome::Walk,
@@ -63,8 +78,11 @@ pub fn score_play_with_options(play: ev::PlayRecord<'_>, outs_before: u32, optio
                 Outcome::Out
             } else if let Some(evidence) = evidence {
                 let award = events.iter().filter_map(|e| e.body_as_runner_advanced()).find(|a| a.runner() == batter && a.cause() == ev::AdvanceCause::Award);
-                if let Some(a) = award {
+                let before_throw = |t: f64| award_cutoff_s.is_none_or(|c| t <= c);
+                if let Some(a) = award.filter(|_| !thrown_award) {
                     Outcome::Hit(a.to_base().clamp(1, 4))
+                } else if thrown_award && !(evidence.has_first_touch() && before_throw(evidence.first_touch_s())) {
+                    Outcome::ReachedOnThrowAward
                 } else if !evidence.has_first_touch() {
                     // A third out can end the inning before first. A walk-off that ends
                     // before the batter arrives leaves the hit judgment unresolved.
@@ -90,10 +108,10 @@ pub fn score_play_with_options(play: ev::PlayRecord<'_>, outs_before: u32, optio
                         HitDecision::Undetermined => Outcome::Undetermined,
                         HitDecision::Hit => {
                             let reached = events.iter().filter_map(|e| e.body_as_runner_advanced())
-                                .filter(|a| a.runner() == batter).map(|a| a.to_base()).max().unwrap_or(1);
+                                .filter(|a| a.runner() == batter && a.cause() != ev::AdvanceCause::Award).map(|a| a.to_base()).max().unwrap_or(1);
                             // A runner put out stretching gets the last base he safely passed.
                             let before_out = outs.iter().filter(|o| o.runner() == batter && o.base() > 1).map(|o| o.base() - 1).max().unwrap_or(1);
-                            let touched = evidence.touches().and_then(|ts| ts.iter().filter(|t| t.runner() == batter).map(|t| t.base()).max()).unwrap_or(1);
+                            let touched = evidence.touches().and_then(|ts| ts.iter().filter(|t| t.runner() == batter && before_throw(t.t())).map(|t| t.base()).max()).unwrap_or(1);
                             let value = reached.max(before_out).max(touched).clamp(1, 4);
                             // Advancement begun only after an attempted play on a preceding
                             // runner is on that throw. A goal already chosen at release stands.
@@ -106,7 +124,7 @@ pub fn score_play_with_options(play: ev::PlayRecord<'_>, outs_before: u32, optio
         }
         _ => Outcome::Out,
     };
-    let rbi = if outs.len() >= 2 { 0 } else { runs };
+    let rbi = if outs.len() >= 2 { 0 } else { runs - runs_after_dead };
     Some(PlayRuling { batter, outcome, sacrifice_fly: sf, rbi })
 }
 

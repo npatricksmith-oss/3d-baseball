@@ -20,6 +20,9 @@ pub struct TeamLine {
     pub sf: u32,
     pub sh: u32,
     pub undetermined: u32,
+    /// At-bats ended by a base awarded on a thrown ball out of play: no hit, and not yet
+    /// ruled an error (rules-spec §10.2).
+    pub thrown_award: u32,
     pub k: u32,
     pub bb: u32,
     pub hbp: u32,
@@ -59,6 +62,9 @@ pub struct BatterLine {
     pub sf: u32,
     pub sh: u32,
     pub undetermined: u32,
+    /// At-bats ended by a base awarded on a thrown ball out of play: no hit, and not yet
+    /// ruled an error (rules-spec §10.2).
+    pub thrown_award: u32,
     pub k: u32,
     pub bb: u32,
     pub hbp: u32,
@@ -207,9 +213,10 @@ pub fn box_score_with_options(bytes: &[u8], options: scorer::ScorerOptions) -> R
                             }
                             if base != 4 { t.batted += 1; l.batted += 1; }
                         }
-                        Outcome::Out | Outcome::FieldersChoice | Outcome::Undetermined => {
+                        Outcome::Out | Outcome::FieldersChoice | Outcome::Undetermined | Outcome::ReachedOnThrowAward => {
                             if !ruling.sacrifice_fly { t.ab += 1; l.ab += 1; }
                             t.batted += 1; l.batted += 1;
+                            if ruling.outcome == Outcome::ReachedOnThrowAward { t.thrown_award += 1; l.thrown_award += 1; }
                             if ruling.outcome == Outcome::Undetermined { t.undetermined += 1; l.undetermined += 1; }
                         }
                     }

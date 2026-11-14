@@ -116,3 +116,47 @@ fn sacrifice_depends_on_catch_location_not_fielders_position() {
     assert!(judge(&infielder_in_outfield, 1).sacrifice_fly);
     assert!(!judge(&outfielder_in_infield, 1).sacrifice_fly);
 }
+
+/// A play in which a thrown ball leaves the field (OBR 5.06(b)(3)(D)): the batter is
+/// awarded bases from the time of the throw. `touch_s` is when he touched first, if he did;
+/// the throw leaves at 4.0 s. A runner on second scores by the award.
+fn thrown_ball_out_of_play(touch_s: Option<f64>) -> Vec<u8> {
+    let mut f = FlatBufferBuilder::new();
+    let runners = [ev::RunnerOnBase::create(&mut f, &ev::RunnerOnBaseArgs { agent: BATTER, base: 0 }), ev::RunnerOnBase::create(&mut f, &ev::RunnerOnBaseArgs { agent: RUNNER, base: 2 })];
+    let runners = f.create_vector(&runners);
+    let throw = ev::ScorerThrow::create(&mut f, &ev::ScorerThrowArgs { base: 1, t_release: 4.0, ..Default::default() });
+    let throws = f.create_vector(&[throw]);
+    let touches = [ev::ScorerTouch::create(&mut f, &ev::ScorerTouchArgs { runner: BATTER, base: 1, t: touch_s.unwrap_or(0.0) })];
+    let touches = f.create_vector(&touches);
+    let ev_ = ev::ScorerEvidence::create(&mut f, &ev::ScorerEvidenceArgs { batter: BATTER, runners: Some(runners), has_first_touch: touch_s.is_some(), first_touch_s: touch_s.unwrap_or(0.0), has_margin: true, clean_play_margin_s: -1.0, throws: Some(throws), touches: Some(touches), ..Default::default() });
+    let dead = ev::BallDead::create(&mut f, &ev::BallDeadArgs { reason: ev::DeadBallReason::OutOfPlay });
+    let adv = ev::RunnerAdvanced::create(&mut f, &ev::RunnerAdvancedArgs { runner: BATTER, to_base: 3, cause: ev::AdvanceCause::Award, ..Default::default() });
+    let run = ev::RunScored::create(&mut f, &ev::RunScoredArgs { runner: RUNNER, ..Default::default() });
+    let pa = ev::PlateAppearanceEnded::create(&mut f, &ev::PlateAppearanceEndedArgs { batter: BATTER, result: ev::PaResult::Unknown, ..Default::default() });
+    let bodies = [(EventBody::ScorerEvidence, ev_.as_union_value()), (EventBody::BallDead, dead.as_union_value()), (EventBody::RunnerAdvanced, adv.as_union_value()), (EventBody::RunScored, run.as_union_value()), (EventBody::PlateAppearanceEnded, pa.as_union_value())];
+    let es: Vec<_> = bodies.into_iter().enumerate().map(|(seq, (ty, body))| ev::Event::create(&mut f, &ev::EventArgs { seq: seq as u32, body_type: ty, body: Some(body), ..Default::default() })).collect();
+    let es = f.create_vector(&es);
+    let p = ev::PlayRecord::create(&mut f, &ev::PlayRecordArgs { play_index: 1, events: Some(es) });
+    f.finish(p, None);
+    f.finished_data().to_vec()
+}
+
+// OBR 9.12 / 5.06(b)(3)(D): bases given for a throw out of play are not hits. A batter who
+// had already reached first when the ball was thrown has a single; the award is not
+// counted in the hit's value. The sim has no error ruling yet, so none is charged.
+#[test]
+fn bases_awarded_for_a_throw_out_of_play_are_not_a_hit() {
+    let late = judge(&thrown_ball_out_of_play(None), 0);
+    assert_eq!(late.outcome, Outcome::ReachedOnThrowAward);
+    // He touched first at 5.0 s, after the throw left at 4.0 s: the throw, not his bat,
+    // put him on base.
+    assert_eq!(judge(&thrown_ball_out_of_play(Some(5.0)), 0).outcome, Outcome::ReachedOnThrowAward);
+    // He touched first at 3.5 s, before the throw: a single, whatever the award added.
+    assert_eq!(judge(&thrown_ball_out_of_play(Some(3.5)), 0).outcome, Outcome::Hit(1));
+}
+
+// The runner from second scored by the award, because of the throw and not the batter: no RBI.
+#[test]
+fn a_run_scoring_by_the_throw_award_is_not_an_rbi() {
+    assert_eq!(judge(&thrown_ball_out_of_play(Some(3.5)), 0).rbi, 0);
+}

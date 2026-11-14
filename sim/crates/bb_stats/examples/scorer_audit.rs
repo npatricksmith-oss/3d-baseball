@@ -3,13 +3,13 @@ use bb_schema::{ev, log};
 use bb_stats::{box_score, scorer::{score_play, Outcome, DEFAULT_CHOICE_MARGIN_S}};
 
 #[derive(Default)]
-struct Counts { old_choices: u64, changed_to_hit: u64, converted_infield: u64, converted_outfield: u64, converted_unhandled: u64, old_hits_to_choice: u64, unresolved: u64, ab: u64, h: u64, hr: u64, k: u64, sf: u64, games: u64 }
+struct Counts { old_choices: u64, changed_to_hit: u64, converted_infield: u64, converted_outfield: u64, converted_unhandled: u64, old_hits_to_choice: u64, unresolved: u64, ab: u64, h: u64, hr: u64, k: u64, sf: u64, games: u64, thrown_awards: u64, thrown_award_hits: u64 }
 impl Counts {
     fn add(&mut self, x: Self) {
         self.old_choices += x.old_choices; self.changed_to_hit += x.changed_to_hit;
         self.converted_infield += x.converted_infield; self.converted_outfield += x.converted_outfield; self.converted_unhandled += x.converted_unhandled;
         self.old_hits_to_choice += x.old_hits_to_choice; self.unresolved += x.unresolved;
-        self.ab += x.ab; self.h += x.h; self.hr += x.hr; self.k += x.k; self.sf += x.sf; self.games += x.games;
+        self.ab += x.ab; self.h += x.h; self.hr += x.hr; self.k += x.k; self.sf += x.sf; self.games += x.games; self.thrown_awards += x.thrown_awards; self.thrown_award_hits += x.thrown_award_hits;
     }
 }
 fn game(seed: u64) -> Counts {
@@ -29,6 +29,11 @@ fn game(seed: u64) -> Counts {
         let Some(events) = p.events() else { continue };
         let is_bip = events.iter().filter_map(|e| e.body_as_plate_appearance_ended()).any(|pa| pa.result() == ev::PaResult::Unknown);
         if !is_bip { continue; }
+        if events.iter().filter_map(|e| e.body_as_ball_dead()).any(|d| d.reason() == ev::DeadBallReason::OutOfPlay) {
+            c.thrown_awards += 1;
+            let now = score_play(*p, 0, DEFAULT_CHOICE_MARGIN_S).unwrap().outcome;
+            if matches!(now, Outcome::Hit(_)) { c.thrown_award_hits += 1; }
+        }
         let prior = old.next().expect("one diagnostic per BIP");
         let now = score_play(*p, 0, DEFAULT_CHOICE_MARGIN_S).unwrap().outcome;
         if prior.fielders_choice() {
@@ -56,5 +61,6 @@ fn main() {
     });
     println!("games {} old_FC {} became_hits {} old_hits_became_FC {} unresolved {}", counts.games, counts.old_choices, counts.changed_to_hit, counts.old_hits_to_choice, counts.unresolved);
     println!("converted first handler: infield {} outfield {} unknown {}", counts.converted_infield, counts.converted_outfield, counts.converted_unhandled);
+    println!("thrown-ball awards {} (scored as hits {})", counts.thrown_awards, counts.thrown_award_hits);
     println!("AB {} H {} HR {} K {} SF {} AVG {:.6} BABIP {:.6}", counts.ab, counts.h, counts.hr, counts.k, counts.sf, counts.h as f64 / counts.ab as f64, (counts.h - counts.hr) as f64 / (counts.ab - counts.k - counts.hr + counts.sf) as f64);
 }
