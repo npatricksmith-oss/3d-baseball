@@ -29,6 +29,8 @@ Numbers are only comparable within one seed set and game count. The standard set
 
 ## 1. Where the numbers stand
 
+*Update 2026-11-14 ~05:15 (`work/a4-throw-choices`, `6b7e1ac`, on main `a9a95b2`): runs 5.81 [6.25]; GB hits .327 [.332]; reached on BIP 33.7% [34.7%]; double plays 1.70 a game (`dp_probe`); sacrifice flies 0.257 a team-game (`sf_probe`; 55.8% scored, 1.4% put out); set throws taken in the air 96.9% (`throw_probe`). The table below is main `a9a95b2` as measured together.*
+
 Measured together on main `a9a95b2` (2026-11-14; includes the infield alignment, the double-play pivot, the scorer and both review fixes, the tag-up work and runner τ 0.68 s), 300 games per set, seeds 0–299 [1000–1299]. Nothing was changed for this measurement. "Real" is the 2024 MLB season from [sources](calibration/2026-11-14-sources.md) (Savant and Baseball-Reference totals), [run-environment diagnosis](calibration/2026-11-14-run-environment-diagnosis.md) and [tag-ups](calibration/2026-11-14-tag-ups.md); the batted-ball rows marked "approx." are the CLI's printed MLB column, not a sourced table.
 
 | | now | real |
