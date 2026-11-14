@@ -29,7 +29,7 @@ fn runs_phrase(n: usize) -> String {
 /// name ("Ramirez: Single to left"; family names are unique in a game, data-formats §2.4).
 pub fn describe(call: Call, launch_deg: Option<f64>, events: &[Event], facts: &[Input], rosters: Option<&Rosters>) -> String {
     let runs = events.iter().filter(|e| matches!(e, Event::RunScored { .. })).count();
-    let outs: Vec<(AgentId, OutKind)> = events.iter().filter_map(|e| if let Event::RunnerOut { runner, kind, .. } = e { Some((*runner, *kind)) } else { None }).collect();
+    let outs: Vec<(AgentId, OutKind, u8)> = events.iter().filter_map(|e| if let Event::RunnerOut { runner, kind, base } = e { Some((*runner, *kind, *base)) } else { None }).collect();
     let ended = events.iter().find_map(|e| if let Event::PlateAppearanceEnded { batter, result } = e { Some((*batter, *result)) } else { None });
     let Some((batter, result)) = ended else {
         // The plate appearance goes on (or a foul with two strikes).
@@ -51,7 +51,7 @@ pub fn describe(call: Call, launch_deg: Option<f64>, events: &[Event], facts: &[
         PaResult::BattedBall => {
             let la = launch_deg.unwrap_or(0.0);
             let to = fielded_to(facts).map(|t| format!(" {t}")).unwrap_or_default();
-            let batter_out = outs.iter().find(|(r, _)| *r == batter).map(|x| x.1);
+            let batter_out = outs.iter().find(|(r, _, _)| *r == batter).map(|x| x.1);
             let (reached, hit) = crate::game::classify_bip(batter, events, facts);
             let multi = match outs.len() {
                 2 => "Double play: ",
@@ -76,10 +76,16 @@ pub fn describe(call: Call, launch_deg: Option<f64>, events: &[Event], facts: &[
                     let extra = if batter_out.is_some() { ", batter out stretching" } else if outs.len() == 1 { ", runner out on the bases" } else { "" };
                     format!("{name}{to}{extra}")
                 }
-                _ if reached => format!("{multi}Fielder's choice{to}"),
+                _ if reached => {
+                    let runner_out = outs.iter().find(|(runner, _, _)| *runner != batter).map(|(_, _, base)| {
+                        let place = match base { 1 => "first", 2 => "second", 3 => "third", 4 => "home", _ => "a base" };
+                        format!(", runner out at {place}")
+                    }).unwrap_or_default();
+                    format!("{multi}Reached on a fielder's choice{to}{runner_out}")
+                },
                 // The batter was not put out but never reached: the inning ended on another
                 // runner, forced or tagged.
-                _ if outs.iter().any(|(r, k)| *r != batter && *k == OutKind::Force) => format!("{multi}Force out{to}"),
+                _ if outs.iter().any(|(r, k, _)| *r != batter && *k == OutKind::Force) => format!("{multi}Force out{to}"),
                 _ => format!("{multi}Fielder's choice{to}, runner tagged out"),
             }
         }
@@ -125,7 +131,7 @@ mod tests {
         assert_eq!(describe(Call::InPlay, Some(15.0), &[adv(1), ended(PaResult::BattedBall)], &[first(4.2), by(7)], None), "Single to left");
         assert_eq!(describe(Call::InPlay, Some(18.0), &[adv(2), Event::RunScored { runner: R }, Event::RunScored { runner: 6 }, ended(PaResult::BattedBall)], &[first(4.2), by(8)], None), "Double to center, 2 runs score");
         assert_eq!(describe(Call::InPlay, Some(-3.0), &[out(R, OutKind::Force), out(B, OutKind::Force), ended(PaResult::BattedBall)], &[by(6)], None), "Double play: ground out to short");
-        assert_eq!(describe(Call::InPlay, Some(-3.0), &[out(R, OutKind::Force), adv(1), ended(PaResult::BattedBall)], &[by(6), first(4.3)], None), "Fielder's choice to short");
+        assert_eq!(describe(Call::InPlay, Some(-3.0), &[Event::RunnerOut { runner: R, base: 2, kind: OutKind::Force }, adv(1), ended(PaResult::BattedBall)], &[by(6), first(4.3)], None), "Reached on a fielder's choice to short, runner out at second");
         // The third out made on another runner before the batter reached first: a force at
         // second, or (seed 7475 play 26) a tag on the runner from third at home.
         assert_eq!(describe(Call::InPlay, Some(-50.0), &[out(R, OutKind::Force), ended(PaResult::BattedBall)], &[by(1)], None), "Force out to the pitcher");

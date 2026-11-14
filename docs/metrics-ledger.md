@@ -166,6 +166,7 @@ Runs per game were not printed until late in the day; the early rows have PA per
 
 | Date | Task | Commit | Check |
 |---|---|---|---|
+| 11-14 | A12/B5 partial: isolated scorer helper and captions naming the out base | `555b32c` and follow-up | Game digests identical to `db5c012` for seeds 0, 1, 7, 42; captions changed, event logs did not. Official scorer and audit remain incomplete |
 | 11-13 | Rosters (A2): names, numbers, order | `5ab0b51`..`050bd15` | Digests identical, seeds 1, 2, 3, 42 |
 | 11-13 | Rules: overrun, two on a base, passing | `25a56c1` | 512 games, seed 2: digests identical; zero passing outs |
 | 11-13 | Rules-passing review, five fixes | `8a46f67`..`0f3c0c6` | Only change: 10 of 512 games count one more runner left on base |
