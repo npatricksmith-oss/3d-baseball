@@ -110,6 +110,10 @@ const HURRY_GAIN_MIN_S: f64 = 0.01;
 /// A fielder running, or a ball coming, faster than this sets which way he faces as he
 /// takes it, m/s [E].
 const FACE_MIN_MPS: f64 = 3.0;
+/// The same for a pivot man coming onto the bag: he brakes onto it (√(2·BRAKE·0.6 m) = 2.68 m/s
+/// at the touch radius), under the running threshold above, and still faces the way he is
+/// moving (agent-models §5.5, Gemini pivot review P2-3): a walk's pace, m/s [E].
+const PIVOT_FACE_MIN_MPS: f64 = 1.0;
 /// Release and catch heights of a throw, m.
 const THROW_RELEASE_Z: f64 = 1.8;
 const THROW_CATCH_Z: f64 = 1.3;
@@ -2260,7 +2264,8 @@ impl<'a> Sim<'a> {
                         // when he has the bag.
                         fd.pivot = true;
                         fd.set_base = throwing::pivot_s(fd.a.transfer);
-                        fd.face = Some(toward(fd.vel).unwrap_or(Vec3::new(-bv.x, -bv.y, 0.0)));
+                        let moving = (m::hypot(fd.vel.x, fd.vel.y) > PIVOT_FACE_MIN_MPS).then(|| Vec3::new(fd.vel.x, fd.vel.y, 0.0));
+                        fd.face = Some(moving.unwrap_or(Vec3::new(-bv.x, -bv.y, 0.0)));
                         fd.pivot_wait_bag = (base_pos(2) - fd.pos).norm() >= 0.6;
                     }
                 }
@@ -2882,7 +2887,7 @@ impl<'a> Sim<'a> {
             // the ball, agent-models §5.6, and is an ordinary holder on the bag. Gemini pivot
             // review P2-2.)
             if on_bag && f.pivot_wait_bag {
-                let moving = (m::hypot(f.vel.x, f.vel.y) > FACE_MIN_MPS).then(|| Vec3::new(f.vel.x, f.vel.y, 0.0));
+                let moving = (m::hypot(f.vel.x, f.vel.y) > PIVOT_FACE_MIN_MPS).then(|| Vec3::new(f.vel.x, f.vel.y, 0.0));
                 f.face = moving.or(f.face);
                 f.catch_vel = f.vel;
                 f.took_diving = false;
@@ -6729,7 +6734,7 @@ mod tests {
     fn a_pivot_off_the_bag_starts_when_he_gets_it() {
         let (_, caught, on_bag, released) = feed_to_shortstop(base_pos(2) + Vec3::new(-2.0, 0.0, 0.0), 6.0);
         assert!(on_bag > caught, "he caught it off the bag ({caught:.3}) and got there at {on_bag:.3}");
-        assert!(released - on_bag >= 0.80 - 0.12 - 1e-9 && released - caught > 0.80 + DT, "caught {caught:.3}, on the bag {on_bag:.3}, released {released:.3}");
+        assert!(released - on_bag >= 0.80 - 0.12 - 1e-9 && released - on_bag <= 0.80 + 0.12 + 0.2 + 2.0 * DT && released - caught > 0.80 + DT, "caught {caught:.3}, on the bag {on_bag:.3}, released {released:.3}");
     }
 
     /// Gemini pivot review P2-2, agent-models §5.6: a shortstop who carries the ball to second
@@ -6884,6 +6889,44 @@ mod tests {
         for (name, s) in [("third", third), ("home", home)] {
             assert!(s <= RELAY_TRANSFER_FRAC * tr + 0.12 + 0.2 + 1e-9, "to {name} {s:.3} s: a pivot clock");
         }
+    }
+
+    /// Gemini pivot review P2-3 and P3-1, agent-models §5.5: a covering man brakes onto the bag
+    /// (√(2·BRAKE·0.6 m) = 2.68 m/s at the touch radius, the movement law) and "faces the way
+    /// he is moving"; his teammates' estimate (`pivot_release(.., arriving)`) says the same. The
+    /// world used the running threshold (3 m/s), so the man who was visibly moving at 2.68
+    /// faced the feed instead, and the estimate and the world differed by the turn. Checked for
+    /// a second baseman coming across from the left (−1, −0.3), the case the review measured:
+    /// he faces his approach, and the pivot he is credited with is the one predicted for him.
+    /// Bug caught: the facing threshold above the braking speed at the bag.
+    #[test]
+    fn a_pivot_man_braking_onto_the_bag_faces_the_way_he_is_moving() {
+        const B2: usize = 3;
+        let fx = fixture(&[(5, 1)]);
+        let inp = input(&fx, vec![RunnerIn { id: fx.st.batter, base: 0, speed: 8.2 }, RunnerIn { id: 5, base: 1, speed: 8.2 }]);
+        let mut st = fx.st.clone();
+        let mut sim = new_sim(&inp, &mut st);
+        sim.t = 2.0;
+        let (b, r1) = (sim.r.iter().position(|r| r.start == 0).unwrap(), sim.r.iter().position(|r| r.start == 1).unwrap());
+        (sim.r[b].s, sim.r[b].v, sim.r[b].goal, sim.r[b].direction) = (BASE_L - 8.2 * 3.0, 8.2, 1, 1.0);
+        (sim.r[r1].s, sim.r[r1].v, sim.r[r1].goal, sim.r[r1].direction) = (1.5 * BASE_L, 8.2, 2, 1.0);
+        let approach = Vec3::new(1.0, 0.3, 0.0).normalized();
+        let speed = m::sqrt(2.0 * BRAKE * 0.6);
+        held_at(&mut sim, B2, base_pos(2) - approach * 0.59);
+        let feed_from = Vec3::new(-7.0, 35.0, 0.0);
+        let predicted = sim.pivot_release(B2, feed_from, 0.0, true);
+        let fd = &mut sim.f[B2];
+        fd.vel = approach * speed;
+        fd.pivot = true;
+        fd.pivot_wait_bag = true;
+        fd.face = Some((feed_from - base_pos(2)).normalized()); // as the catch left it: the feed
+        fd.up_at = 2.0;
+        sim.holder_act();
+        let face = sim.f[B2].face.expect("facing");
+        assert!(face.dot(approach) > 0.99, "faces {face:?}, not his approach {approach:?}");
+        let world = sim.set_up_for(B2, base_pos(1)).set_s;
+        // (The world turns toward first from where he stands, 0.59 m off the bag.)
+        assert!((world - predicted).abs() < 0.005, "the world's pivot {world:.4} s, the estimate {predicted:.4} s");
     }
 
     /// agent-models §5.5: the holder's estimate of a double play uses the pivot model the
