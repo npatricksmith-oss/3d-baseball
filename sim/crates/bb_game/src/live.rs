@@ -5280,7 +5280,8 @@ mod tests {
     /// `margin_s` in hand if he lets go as early as he can, on balance or not.
     fn eta_for_margin(margin_s: f64, off_balance: bool) -> f64 {
         let d = (base_pos(1) - Vec3::new(-8.0, 38.0, 0.0)).norm();
-        let v = 36.0 * if off_balance { 0.82 } else { 0.90 };
+        // The shortstop's arm: Statcast's 86.1 mph × 0.44704 = 38.490 m/s (agent-models §10).
+        let v = 38.490 * if off_balance { 0.82 } else { 0.90 };
         0.6 * 0.65 + throw_time(v, d) + 0.05 + margin_s
     }
 
