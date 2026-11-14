@@ -322,10 +322,18 @@ fn step_input(st: &mut RulesState, input: &Input) -> Vec<Event> {
             // Only throws matter so far: they fix what a throw out of play would award
             // (rules-spec §7.2). Drops and knocked balls have no producer yet.
             if let (ReleaseKind::Throw, PlayState::Live(lp)) = (kind, &mut st.play) {
-                let advanced = lp.runners.iter().filter(|r| !r.out).all(|r| r.scored_at.is_some() || r.last_base > r.start_base);
+                // Each runner's base at the release, as the rules hold it: one who owes a retouch
+                // after a catch holds his own base until he has retouched it (rules-spec §5.3);
+                // one who has legally touched home has scored; anyone else is at the base he
+                // last touched (going back counts). (Gemini play-area review P1-3: the
+                // high-water mark and early touches used to count.)
+                let legal = |r: &RunnerState| if r.retouch_required && !r.retouched { r.start_base } else if r.scored_at.is_some() { 4 } else { r.at };
+                let advanced = lp.runners.iter().filter(|r| !r.out).all(|r| legal(r) > r.start_base);
                 let first_play = lp.throws == 0 && lp.outs.is_empty();
                 let from_pitch = infielder && first_play && !advanced;
-                let from = lp.runners.iter().map(|r| (r.runner, if from_pitch { r.start_base } else if r.scored_at.is_some() { 4 } else { r.at })).collect();
+                // From the time of the pitch a runner counts from his base then, but a run
+                // already legally scored stands.
+                let from = lp.runners.iter().map(|r| (r.runner, if from_pitch && legal(r) < 4 { r.start_base } else { legal(r) })).collect();
                 lp.throws = lp.throws.saturating_add(1);
                 lp.throw = Some(ThrowAward { t, from_pitch, from });
             }
@@ -808,7 +816,9 @@ fn throw_out_of_play(st: &mut RulesState, ev: &mut Vec<Event>) {
         }
         ahead = Some(to);
         if to != r.start_base {
-            ev.push(Event::RunnerAdvanced { runner: r.runner, from: r.start_base, to, cause: AdvanceCause::Award });
+            // A runner who had legally scored before the throw scored on the play.
+            let cause = if from == 4 { AdvanceCause::OnPlay } else { AdvanceCause::Award };
+            ev.push(Event::RunnerAdvanced { runner: r.runner, from: r.start_base, to, cause });
         }
         if to == 4 {
             score_run(st, r.runner, ev);
