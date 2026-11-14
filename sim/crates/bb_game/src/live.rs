@@ -202,6 +202,9 @@ const TWO_OUT_TAG_W: f64 = 0.9;
 /// deep-fly read), m [E].
 const INFIELD_DEPTH_MARGIN_M: f64 = 5.0;
 const INFIELD_R: f64 = crate::play::MAX_INFIELD_DEPTH_M + INFIELD_DEPTH_MARGIN_M;
+/// The secondary ground-ball break's range (agent-models §5.7): an infielder who is not the
+/// chaser breaks for a ground ball he believes he can field within this distance of home.
+const INFIELD_BREAK_R: f64 = crate::play::MAX_INFIELD_DEPTH_M + INFIELD_DEPTH_MARGIN_M;
 /// A ball an infielder believes comes down in the infield within this time of contact is a
 /// ground ball to him (he breaks for it without waiting for a call); later, it is a pop-up
 /// or a fly, s [E].
@@ -1616,7 +1619,12 @@ impl<'a> Sim<'a> {
                 // Only a fielder who read the ball for this call (Codex momentum review #5: another's
                 // saved target may be a base from an earlier job).
                 let fresh_read = calls.iter().any(|c| c.0 == i);
-                if i != self.primary && fresh_read && grounder && fd.t_int.is_finite() && m::hypot(own[i].x, own[i].y) < INFIELD_R {
+                // The first baseman leaves his bag only for a ball on the first-base side of
+                // the line through the mound, the side on which the pitcher's job is to cover
+                // first (agent-models §5.7; Opus infield-fixes review P1-1). On a ball to the
+                // left of the mound he goes to the bag.
+                let side_ok = i != 2 || own[i].x > 0.0;
+                if i != self.primary && fresh_read && grounder && side_ok && fd.t_int.is_finite() && m::hypot(own[i].x, own[i].y) < INFIELD_BREAK_R {
                     self.f[i].role = Role::Chase;
                     self.f[i].target = own[i];
                     broke = true;
@@ -1625,6 +1633,13 @@ impl<'a> Sim<'a> {
         }
         if broke {
             self.cover_roles_after_chasers();
+            // He breaks only if first base will still be covered: when the pitcher and the
+            // second baseman are both taken (the pitcher fields it, the second baseman chases
+            // or holds second), he stays with the bag (Opus infield-fixes review P1-1).
+            if self.primary != 2 && self.f[2].role == Role::Chase && !(0..9).any(|i| self.f[i].role == Role::Cover(1)) {
+                self.f[2].role = Role::Cover(1);
+                self.f[2].target = base_pos(1);
+            }
         }
         self.assign_relay();
         self.assign_backups();
@@ -1653,6 +1668,35 @@ impl<'a> Sim<'a> {
             }
         }
         (0, -(ti + bias))
+    }
+
+    /// A fielder still going for the ball who sees another fielder secure it (a visible
+    /// fact, seen after his reaction time) gives up the chase: an infielder, the pitcher or
+    /// the catcher goes to his own base if nobody else covers it, anyone else pulls up
+    /// (agent-models §5.7; Opus infield-fixes review P1-1: a first baseman who had broken
+    /// for a grounder the pitcher fielded ran on across the infield and nobody took first).
+    /// A man who has had the ball himself this play is left alone.
+    fn chasers_see_the_ball_secured(&mut self) {
+        let Ball::Held { by } = self.ball else { return };
+        for i in 0..9 {
+            let fd = &self.f[i];
+            if i == by || fd.role != Role::Chase || self.t < self.secured_at + fd.a.reaction || self.out.secured.iter().any(|s| s.1 == fd.id) {
+                continue;
+            }
+            // Indices are position − 1: P0 C1 1B2 2B3 3B4 SS5.
+            let base = match i {
+                0 | 2 => Some(1),
+                1 => Some(4),
+                3 | 5 => Some(2),
+                4 => Some(3),
+                _ => None,
+            };
+            go_idle(&mut self.f[i]);
+            if let Some(b) = base.filter(|&b| !(0..9).any(|j| j != by && self.f[j].role == Role::Cover(b))) {
+                self.f[i].role = Role::Cover(b);
+                self.f[i].target = base_pos(b);
+            }
+        }
     }
 
     /// The ball is in the air off the bat or off a glove and has not come down yet (a fact
@@ -3453,6 +3497,7 @@ fn simulate_live_inner(inp: &LiveInput, st: &mut RulesState) -> LiveOutput {
         }
         if assigned {
             sim.expire_peels();
+            sim.chasers_see_the_ball_secured();
         }
         sim.update_thrown();
         sim.try_captures();
@@ -7404,5 +7449,107 @@ mod tests {
         let bonus = carry3.value - carry3.p_out * carry3.p_out * carry3.weight;
         let implied_w = bonus / (carry3.p_out * carry3.p_out * p2 * p2);
         assert!((implied_w - 0.9).abs() < 1e-9, "0-out carry at 3B must use w_second=0.9, got {implied_w}");
+    }
+
+    /// The first baseman's own read of where he would field the ball (his intercept, before
+    /// any cover job replaces his target).
+    fn own_intercept(sim: &Sim, i: usize) -> (f64, Vec3) {
+        let p = sim.f[i].belief.clone().expect("he has read the ball");
+        sim.intercept(i, &p)
+    }
+
+    // Opus infield-fixes review P1-1: a grounder to the left of the mound that the first
+    // baseman could reach inside the break range. The pitcher fields it; the first baseman
+    // goes to his bag instead of breaking across the infield.
+    #[test]
+    fn first_baseman_goes_to_the_bag_on_a_grounder_left_of_the_mound() {
+        for bats in [bb_observe::Hand::Right, bb_observe::Hand::Left] {
+            let fx = fixture(&[]);
+            let mut st = fx.st.clone();
+            let mut inp = input(&fx, vec![RunnerIn { id: fx.st.batter, base: 0, speed: 8.2 }]);
+            inp.bats = bats;
+            inp.fattrs[0].speed = 14.0;
+            inp.fattrs[0].reaction = 0.05;
+            inp.fattrs[2].speed = 14.0;
+            inp.ball = BallState { r: Vec3::new(0.0, 0.5, 0.5), v: Vec3::new(-2.5, 13.0, 0.5), w: Vec3::ZERO };
+            let mut sim = new_sim(&inp, &mut st);
+            for f in sim.f.iter_mut() { f.err = [0.0; 4]; }
+            sim.t = inp.t_contact + 0.19;
+            sim.assign();
+            let (ti, pt) = own_intercept(&sim, 2);
+            assert_eq!(sim.primary, 0, "{bats:?}: setup expects the pitcher to field it");
+            assert!(ti.is_finite() && m::hypot(pt.x, pt.y) < INFIELD_BREAK_R && pt.x < 0.0, "{bats:?}: setup expects a 1B intercept left of the mound in range: {ti:.2} {pt:?}");
+            assert_eq!(sim.f[2].role, Role::Cover(1), "{bats:?}: 1B must take his bag, roles {:?}", sim.f.iter().map(|f| f.role).collect::<Vec<_>>());
+        }
+    }
+
+    // P1-1, the other half of "first will be covered": on the right side the pitcher fields
+    // it himself and the second baseman is also going for it, so nobody else can take first.
+    #[test]
+    fn first_baseman_stays_with_the_bag_when_nobody_else_can_take_first() {
+        let fx = fixture(&[]);
+        let mut st = fx.st.clone();
+        let mut inp = input(&fx, vec![RunnerIn { id: fx.st.batter, base: 0, speed: 8.2 }]);
+        inp.bats = bb_observe::Hand::Right;
+        inp.fattrs[0].speed = 14.0;
+        inp.fattrs[0].reaction = 0.05;
+        inp.fattrs[2].speed = 14.0;
+        inp.fattrs[3].speed = 14.0;
+        inp.fattrs[3].reaction = 0.05;
+        inp.ball = BallState { r: Vec3::new(0.0, 0.5, 0.5), v: Vec3::new(3.0, 13.0, 0.5), w: Vec3::ZERO };
+        let mut sim = new_sim(&inp, &mut st);
+        for f in sim.f.iter_mut() { f.err = [0.0; 4]; }
+        sim.t = inp.t_contact + 0.19;
+        sim.assign();
+        let (ti, pt) = own_intercept(&sim, 2);
+        let roles: Vec<Role> = sim.f.iter().map(|f| f.role).collect();
+        assert_eq!(sim.primary, 0, "setup expects the pitcher to field it: {roles:?}");
+        assert!(ti.is_finite() && m::hypot(pt.x, pt.y) < INFIELD_BREAK_R && pt.x > 0.0, "setup expects a 1B intercept right of the mound in range: {ti:.2} {pt:?}");
+        assert!(matches!(sim.f[3].role, Role::Chase | Role::Cover(2)), "setup expects the 2B taken: {roles:?}");
+        assert_eq!(sim.f[2].role, Role::Cover(1), "1B must stay with first: {roles:?}");
+    }
+
+    // P1-1: a first baseman who broke for a ball sees the pitcher secure it and, after his
+    // reaction time, goes back to his bag; with first already taken he pulls up instead.
+    #[test]
+    fn a_chaser_who_sees_a_teammate_secure_the_ball_goes_to_his_base() {
+        for first_taken in [false, true] {
+            let fx = fixture(&[]);
+            let mut st = fx.st.clone();
+            let inp = input(&fx, vec![RunnerIn { id: fx.st.batter, base: 0, speed: 8.2 }]);
+            let mut sim = new_sim(&inp, &mut st);
+            sim.t = inp.t_contact + 2.0;
+            held_at(&mut sim, 0, Vec3::new(-5.0, 14.0, 0.0));
+            sim.secured_at = sim.t;
+            sim.out.secured.push((sim.t, sim.f[0].id));
+            for i in 0..9 {
+                if sim.f[i].role == Role::Cover(1) {
+                    go_idle(&mut sim.f[i]);
+                }
+            }
+            if first_taken {
+                sim.f[3].role = Role::Cover(1);
+                sim.f[3].target = base_pos(1);
+            }
+            sim.f[2].role = Role::Chase;
+            sim.f[2].pos = Vec3::new(16.2, 29.3, 0.0);
+            sim.f[2].vel = Vec3::new(-6.0, 0.5, 0.0);
+            sim.f[2].target = Vec3::new(-17.5, 31.6, 0.0);
+            let seen = sim.secured_at + sim.f[2].a.reaction;
+            sim.t = seen - 0.01;
+            sim.chasers_see_the_ball_secured();
+            assert_eq!(sim.f[2].role, Role::Chase, "he has not seen it yet");
+            sim.t = seen;
+            sim.chasers_see_the_ball_secured();
+            if first_taken {
+                assert_eq!(sim.f[2].role, Role::Idle, "first is taken: he pulls up");
+                assert!(sim.f[2].target.x > 0.0, "he stops, not on across the infield: {:?}", sim.f[2].target);
+            } else {
+                assert_eq!(sim.f[2].role, Role::Cover(1));
+                assert_eq!(sim.f[2].target, base_pos(1));
+            }
+            assert!(matches!(sim.ball, Ball::Held { by: 0 }));
+            assert_eq!(sim.f[0].role, Role::Chase, "the holder keeps his ball");
+        }
     }
 }
