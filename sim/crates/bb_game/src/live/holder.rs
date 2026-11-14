@@ -40,7 +40,9 @@ impl Sim<'_> {
     /// Also used for the unchanged no-play return to second.
     pub(super) fn throw_race(&self, by: usize, base: u8) -> ThrowRace {
         let fd = &self.f[by];
-        let relay = (0..9).find(|&i| i != by && matches!(self.f[i].role, Role::Relay(_)) && (self.f[i].pos - fd.pos).norm() > 10.0);
+        // The cutoff man as the holder knows him (`seen`: a job taken in the last
+        // `CALL_HEARD_S` is not yet known; Codex fielder-communication recheck P1-1).
+        let relay = (0..9).find(|&i| i != by && matches!(self.seen(by, i).0, Role::Relay(_)) && (self.f[i].pos - fd.pos).norm() > 10.0);
         let release = |target, at: f64| {
             let su = self.set_up_for(by, target);
             let t = at.max(fd.up_at + su.earliest_s);
