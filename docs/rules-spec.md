@@ -435,17 +435,17 @@ facts support re-ruling without simulation.
 was meant to retire (`runner`; 0 for a routine return). Only a play on a runner ahead of the batter,
 made while he was still short of first, is a fielder's choice or caps his hit; a play on the
 batter-runner himself, or one made after he was safe, is neither. A runner called out on appeal
-at the base to which he advanced (9.05(b)(2)) denies the hit whoever handled the ball. **Not done:**
+at the base to which he advanced (9.05(b)(2)) denies the hit whoever handled the ball, but only a runner forced to advance by the batter becoming a runner (every base behind him occupied at the pitch); an unforced runner's appeal out does not. **Not done:**
 an unforced runner who oversides the base to which he advanced and is tagged out returning (9.05(b)(3)):
 the sim's runners stop dead on a base, and the log cannot tell his return from an extra-base try
 (both are an out at the base after the next); it needs the runner's direction at the tag.
 
 **Walk-offs (9.06(f)).** A walk-off hit is credited at least as a single (the batter is taken to
 run it out; the engine ends the game on the winning run before he reaches first with none out) and
-is worth no more than the bases the runner who scored the winning run advanced.
+is worth no more than the bases the runner who scored the winning run advanced. The limit is applied once, after the provisional value, to every form the hit takes in the log (ruled single/double/triple, award, or classified from evidence); a home run over the fence counts in full (9.06(g)). Not modelled: the engine ends the game at the winning run, so the natural-course base touches 9.06(f) discusses after it never happen.
 Fielding-error rulings remain provisional until A17: do not invent an error from a miss.
 The batter's running goal at an attempted throw to another base is recorded: extra bases
-chosen only afterward are provisionally treated as on the throw. This is an observable
+chosen only afterward are provisionally treated as on the throw, whether the throw left before the batter touched first or after (9.06(b): a batter safe at first who takes second on a throw at another runner has a single; a goal of second already chosen at release stands). The before-first timing gate applies only to the hit-versus-fielder's-choice decision. A later throw to first that goes out of play, after his touch, awards bases but does not undo a hit he had earned; only a throw that left before his touch can supply his arrival (9.12(a)(1)). A sacrifice fly (9.08(d)) needs the catch by an outfielder or an infielder in the outfield, in foul territory as in fair. This is an observable
 heuristic, not a full counterfactual of how far he would have run absent the throw.
 
 **Error seam (provisional until A17).** The sim has no fielding errors, and the scorer rules

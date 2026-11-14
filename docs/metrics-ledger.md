@@ -247,6 +247,7 @@ Runs per game were not printed until late in the day; the early rows have PA per
 
 | Date | Task | Commit | Check |
 |---|---|---|---|
+| 11-14 | Scorer fixes from the Codex unreviewed-merges review (P1-1 to P2-2; `bb_stats` only; **branch `work/scorer-recheck-fixes`**) | `5c015a4` | Statistics only, no game logic touched. `scorer_audit 300` seeds 0 and 1000: output identical before and after (AB 21,247 [21,090], H 6,160 [6,208], HR 512 [541], SF 99 [138], zero unresolved); the cases are latent in generated games. Doubles are not in the audit print |
 | 11-14 | Swing knob split into `swing_miss` and `swing_effort` (agent-models §3.6; **branch `work/collision`**) | `f452845` | Digests identical with both knobs at 1.0 and at 1.8 against the old single knob (`be66dab`), seeds 0, 1, 2, 7, 42, 299, 1,000,003,000; `run_env_diag 100 0` line for line |
 | 11-14 | A14 through `resolve_contact` (Codex spin review P2-1): oracle contact states, tests only (**branch `work/collision`**) | `08b167c` | Tests and oracle fixture only; no sim code changed |
 | 11-14 | Swing v2 literals named (`PLANE_TILT_PER_M`, `REACH_PER_BAT_CONTROL`, `TILT_GUARD_MARGIN`); attack-angle spec text corrected (**branch `work/swing-recalib`**) | see `work/swing-recalib` log | Digests identical, seeds 1, 2, 3, 42; `sim-cli games --n 300 --seed 0` output identical |

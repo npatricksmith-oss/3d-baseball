@@ -262,6 +262,8 @@ reference throw that lands short continues through the noise-free bounce model; 
 never reaches the bag has a negative-infinite margin.
 Runner outs and their destination bases are recorded by `RunnerOut`. Errors are not yet ruled.
 
+*Reading rules (Codex unreviewed-merges review, 2026-11-14):* `ScorerThrow.batter_goal` caps the batter's hit value for any attempted throw at a preceding runner, before or after his first touch (the touch time gates only the fielder's-choice decision); a throw to first with `t_release` after `first_touch_s` never supplies his arrival; a caught foul is a sacrifice fly only by the same fielder rule as a fair fly; the walk-off cap applies to every hit record form but a home run; `RunnerOut` kind `Appeal` denies the hit only for a runner forced by the batter (his start base's lower bases occupied in `runners`).
+
 Added with the scorer review (2026-11-14): every `ScorerThrow` and `ScorerCarry` names the runner it was meant to retire (`runner`; 0 for a routine return or unknown), so the scorer can tell a play on a preceding runner from one on the batter-runner. `has_batter_eta` / `batter_eta_s` give, when the play ended before the batter touched first, when he would have touched it running as he was; `clean_play_margin_s` then uses that arrival. The reference fielder in the margin has the actual fielder's get-up, turn and footwork at the catch and a grade-50 transfer (`LiveOutput.ref_set_s`, not logged on its own). All appended fields; old logs read with them absent (`ScorerEvidence` without `runners` is treated as pre-A12 evidence and rulings from it are `Undetermined`, never outs).
 
 The scorer also reads, from the same play record: `BallDead` with reason `OutOfPlay` (a thrown
