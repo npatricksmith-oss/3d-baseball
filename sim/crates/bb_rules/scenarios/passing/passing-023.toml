@@ -1,0 +1,23 @@
+id = "passing-023"
+title = "Two out, runner on first: the batter is forced out at first (the third out) while the runner from first is between first and second: he is left on base, 1, not 0"
+# Third out a force at first: no run (OBR 5.08(a)). LOB: OBR 9.02(a)(3) and rules-spec I1/I10
+# count every runner who reached base and neither scored nor was put out, exactly once; a runner
+# between bases at the third out is one of them. Codex rules-passing review, "Not done".
+known_gap = "LOB counts only runners standing on a base (rules-spec 6.4); a runner between bases is in neither R nor LOB (strict I1/I10)"
+rules = ["OBR 5.08(a)", "OBR 9.02(a)(3)", "rules-spec 6.4", "rules-spec 11 I1", "rules-spec 11 I10"]
+milestone = "M4"
+tags = ["lob", "between-bases", "gap"]
+initial = { inning = 5, outs = 2, batter = "A.6", bases = { first = "A.4" } }
+step = [
+  { fact = "PitchDelivered", t = 0.0 },
+  { fact = "BatContact", t = 0.42 },
+  { fact = "BaseLeft", t = 0.6, agent = "A.4", base = 1 },
+  { fact = "BallTouched", t = 0.8, what = "Ground", pos = [-8.0, 30.0] },
+  { fact = "GloveSecured", t = 1.3, fielder = "H.SS", pos = [-8.0, 30.0] },
+  # The batter, forced at first at 3.0 s; the runner from first is 2 s up the path to second.
+  { fact = "TagContact", t = 3.0, fielder = "H.1B", runner = "A.6", holding_ball = true, expect_events = [
+    { event = "RunnerOut", runner = "A.6", base = 1, kind = "Force" },
+    { event = "HalfInningEnded", runs = 0, left_on_base = 1 },
+  ] },
+]
+expect = { score = [0, 0], inning = 5, half = "bottom", outs = 0 }

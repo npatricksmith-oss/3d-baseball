@@ -1,0 +1,22 @@
+id = "passing-024"
+title = "Two out, runner on third: the batter is forced out at first, and the runner from third crosses home afterward: no run"
+# OBR 5.08(a)(1): no run scores if the third out is the batter-runner put out at first; the
+# runner's later touch of home (3.5, after the third out at 3.0) is the next half-inning's
+# fact, where a stray touch must not score. (How he is counted in LOB is passing-023's gap.)
+rules = ["OBR 5.08(a)", "OBR 9.02(a)(3)", "rules-spec 6.4", "rules-spec 11 I10"]
+milestone = "M4"
+tags = ["runs", "after-third-out"]
+initial = { inning = 5, outs = 2, batter = "A.6", bases = { third = "A.4" } }
+step = [
+  { fact = "PitchDelivered", t = 0.0 },
+  { fact = "BatContact", t = 0.42 },
+  { fact = "BaseLeft", t = 0.6, agent = "A.4", base = 3 },
+  { fact = "BallTouched", t = 0.8, what = "Ground", pos = [-8.0, 30.0] },
+  { fact = "GloveSecured", t = 1.3, fielder = "H.SS", pos = [-8.0, 30.0] },
+  { fact = "TagContact", t = 3.0, fielder = "H.1B", runner = "A.6", holding_ball = true, expect_events = [
+    { event = "RunnerOut", runner = "A.6", base = 1, kind = "Force" },
+    { event = "HalfInningEnded", runs = 0 },
+  ] },
+  { fact = "BaseTouched", t = 3.5, agent = "A.4", base = 4 },
+]
+expect = { score = [0, 0], inning = 5, half = "bottom", outs = 0 }

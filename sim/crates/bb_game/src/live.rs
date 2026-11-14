@@ -5212,7 +5212,8 @@ mod tests {
     /// `margin_s` in hand if he lets go as early as he can, on balance or not.
     fn eta_for_margin(margin_s: f64, off_balance: bool) -> f64 {
         let d = (base_pos(1) - Vec3::new(-8.0, 38.0, 0.0)).norm();
-        let v = 36.0 * if off_balance { 0.82 } else { 0.90 };
+        // The shortstop's arm: Statcast's 86.1 mph × 0.44704 = 38.490 m/s (agent-models §10).
+        let v = 38.490 * if off_balance { 0.82 } else { 0.90 };
         0.6 * 0.65 + throw_time(v, d) + 0.05 + margin_s
     }
 
@@ -5347,7 +5348,8 @@ mod tests {
 
     /// The center fielder (hands σ `hands`, average otherwise) standing at (0, 80) with a
     /// ground ball crossing in front of him at 20 m/s, `pass_m` away at its closest, first
-    /// seen `lead_s` before it. His belief is the true path, replaced by `swap` (a ball he
+    /// seen `lead_s` before it. His belief is his own read of the true path (`Sim::predict`, with his
+    /// perception noise), replaced by `swap` (a ball he
     /// would take on his feet) at the first tick the ball is within `swap_within_m` of him.
     fn crossing_with_mind_change(pass_m: f64, lead_s: f64, hands: Option<f64>, swap_within_m: f64, easy_from_m: f64, swap: bool) -> Sim<'static> {
         let fx: &'static Fixture = Box::leak(Box::new(fixture(&[])));
@@ -5396,7 +5398,7 @@ mod tests {
         let (t_kept, t_changed) = (secured_at(&kept).unwrap(), secured_at(&changed).expect("he lets it go for good"));
         assert!(t_changed > t_kept, "kept {t_kept:.3}, changed {t_changed:.3}");
         let ready = |s: &Sim| s.f[CF].ready_at - secured_at(s).unwrap() - s.f[CF].a.transfer;
-        assert!(ready(&kept).abs() < 1e-9 + 0.3, "control owes a stretch: {}", ready(&kept));
+        assert!((ready(&kept) - 0.3).abs() < 1e-9, "control owes a stretch's 0.3 s: {}", ready(&kept));
         assert!(ready(&changed) > 0.3 + 1e-9, "after the change: a dive's get-up, not a stretch: {}", ready(&changed));
     }
 
@@ -5427,8 +5429,9 @@ mod tests {
         assert!(sim.f[CF].attempts >= 1, "he never tried");
     }
 
-    /// Fielder CF at (0, 80), a fly or roller in the air or on the ground believed to be
-    /// the world's own, seen at time `t`.
+    /// Fielder CF at (0, 80) and a fly or roller seen at time `t`. His belief is his own read
+    /// of it (`Sim::predict`: the world's ball with his perception noise), not the world's
+    /// path itself, so fixtures built on this leave wide margins.
     fn believing_the_truth(r: Vec3, v: Vec3, t: f64) -> Sim<'static> {
         let fx: &'static Fixture = Box::leak(Box::new(fixture(&[])));
         let mut inp = input(fx, vec![RunnerIn { id: fx.st.batter, base: 0, speed: 8.2 }]);
@@ -5454,6 +5457,15 @@ mod tests {
         assert!(near.ball_still_up());
         assert!(!near.dive_gains(CF, DIVE_GETUP_S), "he can wait under it");
         assert!(!near.dive_gains(CF, STRETCH_COST_S));
+        // 15 m out: he gets there on his feet, but only after it has landed (15 m in 2.2 s is
+        // 6.8 m/s from a standing start, more than he can average), so there is a standing
+        // play and it is no catch: going for it gains. This is the airborne comparison itself;
+        // the 40 m case below never reaches it (no standing play at all).
+        let mid = believing_the_truth(Vec3::new(0.0, 95.0, 2.0), Vec3::new(0.0, 0.0, 10.0), 2.0);
+        assert!(mid.ball_still_up());
+        let read = mid.f[CF].belief.as_ref().unwrap();
+        assert!(mid.intercept_scan(CF, read).0.is_some(), "fixture: he can reach it on his feet");
+        assert!(mid.dive_gains(CF, DIVE_GETUP_S) && mid.dive_gains(CF, STRETCH_COST_S), "on his feet he is too late to catch it");
         let far = believing_the_truth(Vec3::new(0.0, 120.0, 2.0), Vec3::new(0.0, 0.0, 10.0), 2.0);
         assert!(far.ball_still_up());
         assert!(far.dive_gains(CF, DIVE_GETUP_S) && far.dive_gains(CF, STRETCH_COST_S), "he cannot get there on his feet");
@@ -5474,12 +5486,125 @@ mod tests {
         // distance to his planning reach (0.7 of 1.0 m) over the ball's speed now plus his
         // top speed of 8.5 m/s (he runs flat out at it), no later than the ball takes to
         // reach that point with him standing still.
-        let (d, v0) = (path.at(2.0).0.y - 80.0 - 0.7, path.at(2.0).1.norm());
-        let t_up = (0..400).map(|k| 2.0 + 0.005 * k as f64).find(|&t| path.at(t).0.y - 80.0 <= 0.7).expect("it reaches him") - 2.0;
-        let t_low = d / (v0 + 8.5);
-        assert!(t_low > STRETCH_COST_S && t_up < DIVE_GETUP_S, "fixture: wait between {t_low:.2} and {t_up:.2} s");
+        // The same bracket must hold for his read of it, which is what he judges by (it
+        // differs from the world's path by his perception noise).
+        for (name, p) in [("world", path), ("his read", sim.f[CF].belief.as_ref().unwrap())] {
+            let (d, v0) = (p.at(2.0).0.y - 80.0 - 0.7, p.at(2.0).1.norm());
+            let t_up = (0..400).map(|k| 2.0 + 0.005 * k as f64).find(|&t| p.at(t).0.y - 80.0 <= 0.7).expect("it reaches him") - 2.0;
+            let t_low = d / (v0 + 8.5);
+            assert!(t_low > STRETCH_COST_S && t_up < DIVE_GETUP_S, "fixture ({name}): wait between {t_low:.2} and {t_up:.2} s");
+        }
         assert!(!sim.ball_still_up(), "fixture: on the ground");
         assert!(!sim.dive_gains(CF, DIVE_GETUP_S), "a roller he can run down is not worth a dive");
         assert!(sim.dive_gains(CF, STRETCH_COST_S), "he would not have it within a stretch's 0.3 s");
+    }
+
+    /// The center fielder at (0, 80) with an exact read (his belief is the world's own path)
+    /// of a fly passing him 1.3 m away at 20 m/s, 1.5 s in, when it is `z0` m up at 0.15 s
+    /// before closest approach. Runs 0.8 s of world ticks.
+    fn stretch_for_a_fly(z0: f64) -> Sim<'static> {
+        let fx: &'static Fixture = Box::leak(Box::new(fixture(&[])));
+        let inp: &'static LiveInput<'static> = Box::leak(Box::new(input(fx, vec![RunnerIn { id: fx.st.batter, base: 0, speed: 8.2 }])));
+        let st: &'static mut RulesState = Box::leak(Box::new(fx.st.clone()));
+        let mut sim = new_sim(inp, st);
+        sim.f[CF].pos = Vec3::new(0.0, 80.0, 0.0);
+        loose_ball(&mut sim, 1.5, Vec3::new(-3.0, 78.7, z0), Vec3::new(20.0, 0.0, 0.0));
+        let Ball::Free { path, .. } = &sim.ball else { unreachable!() };
+        let exact = path.clone();
+        sim.f[CF].role = Role::Chase;
+        sim.f[CF].belief = Some(exact);
+        for _ in 0..48 {
+            world_tick(&mut sim);
+        }
+        sim
+    }
+
+    // agent-models §5.3–§5.4 and rules-spec (visible out calls): "A caught fly is routine unless
+    // the catch was diving or below z_low_catch = 0.4 m (margin 0)." A stretch is upright, so
+    // it counts as low only by its height. By hand, the fly (20 m/s across, falling under
+    // gravity from z0) passes the fielder at x = 0 after 3 m / 20 m/s = 0.15 s, having fallen
+    // ½·9.80665·0.15² = 0.110 m (drag changes it by well under a centimetre): from 0.65 m it is
+    // caught at about 0.54 m, from 0.45 m at about 0.34 m. Upright, above the line, the out is
+    // routine (margin ∞); upright, below it, a shoestring catch (margin 0).
+    #[test]
+    fn an_upright_stretch_is_a_low_catch_only_below_the_low_catch_height() {
+        for (z0, low) in [(0.65, false), (0.45, true)] {
+            let sim = stretch_for_a_fly(z0);
+            let t = secured_at(&sim).expect("he got it");
+            let Ball::Held { .. } = sim.ball else { panic!("not held") };
+            // The world's own height of the ball at the catch, from its path before it was held.
+            let z_catch = z0 - 0.5 * 9.80665 * (t - 1.5) * (t - 1.5);
+            assert!((z_catch < 0.4) == low && (z_catch - 0.4).abs() > 0.05, "fixture: caught at about {z_catch:.2} m");
+            assert!(sim.out.dives.is_empty(), "an upright stretch, not a dive");
+            let outs: Vec<_> = sim.out.calls.iter().collect();
+            assert_eq!(outs.len(), 1, "one out, the batter's: {outs:?}");
+            assert_eq!(outs[0].margin_s, if low { 0.0 } else { f64::INFINITY }, "caught at {z_catch:.2} m");
+        }
+    }
+
+    /// A fly ball from home (`land` m of vacuum range at `th_deg` elevation, `az_deg` from
+    /// center, negative toward third) read without error by everyone (`err` zero: a controlled
+    /// belief, not `Sim::predict`'s noisy one) 0.5 s after contact, with a runner on `base`
+    /// (0: none), and `place` setting where fielders stand. Runs the first call (`assign`).
+    fn popup_after_the_first_call(land: f64, th_deg: f64, az_deg: f64, base: u8, place: &[(usize, Vec3)]) -> Sim<'static> {
+        let (th, az) = (th_deg.to_radians(), az_deg.to_radians());
+        let v = m::sqrt(land * 9.80665 / m::sin(2.0 * th));
+        let on_base: Vec<(AgentId, u8)> = if base > 0 { vec![(0x0005, base)] } else { vec![] };
+        let fx: &'static Fixture = Box::leak(Box::new(fixture(&on_base)));
+        let mut inp = input(fx, vec![]);
+        inp.ball = BallState { r: Vec3::new(0.0, 0.5, 1.0), v: Vec3::new(v * m::cos(th) * m::sin(az), v * m::cos(th) * m::cos(az), v * m::sin(th)), w: Vec3::ZERO };
+        let inp: &'static LiveInput<'static> = Box::leak(Box::new(inp));
+        let st: &'static mut RulesState = Box::leak(Box::new(fx.st.clone()));
+        let mut sim = new_sim(inp, st);
+        for fd in sim.f.iter_mut() {
+            fd.err = [0.0; 4];
+        }
+        for &(i, at) in place {
+            (sim.f[i].pos, sim.f[i].target) = (at, at);
+        }
+        sim.t = 0.4 + 0.5;
+        sim.assign();
+        sim
+    }
+
+    fn call_of(sim: &Sim, i: usize) -> (u8, f64) {
+        let p = sim.f[i].belief.clone().unwrap();
+        sim.call_value(i, &p, sim.f[i].t_int, sim.f[i].target, 0.0)
+    }
+
+    // Popup-calls review P2 #1, deferred by the owner 2026-11-13 ("mistakes like these happen in
+    // real games"). A 42 m pop-up with a runner on second: the second baseman and the shortstop
+    // each believe they catch it in the air with 0.3 s or more to spare, but not by enough to be
+    // sure (tier 1, agent-models §5.7), so both go for it, and nobody covers second. The
+    // believable behavior: when two infielders chase, someone still takes the bag, because a
+    // runner is on second and the third baseman, first baseman, pitcher and catcher are free.
+    // Fixture: err = 0, so both read the pop-up exactly; found by search for the tier-1 pair.
+    #[test]
+    #[ignore = "owner-deferred 2026-11-13 (popup-calls review P2 #1): both middle infielders chase and second base has no cover until the next re-call"]
+    fn someone_covers_second_when_both_middle_infielders_chase_a_popup() {
+        let sim = popup_after_the_first_call(42.0, 55.0, 0.0, 2, &[]);
+        assert_eq!((call_of(&sim, 3).0, call_of(&sim, 5).0), (1, 1), "fixture: both are tier 1");
+        assert!(sim.f[3].role == Role::Chase && sim.f[5].role == Role::Chase, "fixture: both chase: {:?}", sim.f.iter().map(|f| f.role).collect::<Vec<_>>());
+        assert!(sim.f.iter().any(|f| f.role == Role::Cover(2)), "nobody covers second: {:?}", sim.f.iter().map(|f| f.role).collect::<Vec<_>>());
+    }
+
+    // Popup-calls review P2 #2, deferred by the owner 2026-11-13. Left field and center field
+    // both go for a fly down the left-field line (tier 1: each believes he catches it, neither
+    // is sure), left field as the chaser. A re-call asks only the chaser and the four fielders
+    // nearest where he is going, so a chaser who is not among them is called off to back up
+    // before anyone is sure. The believable behavior: he keeps going until someone calls it.
+    // The re-call is invoked with the candidate list the rule would build when center field is
+    // the fifth man (left field, short, third, second): the fixture's reads are exact (err = 0)
+    // and the geometry that makes him the fifth nearest is the review's, not reproducible with
+    // two outfielders both in the air ball's reach.
+    #[test]
+    #[ignore = "owner-deferred 2026-11-13 (popup-calls review P2 #2): a re-call sends an active chaser outside its candidate set to backup before anyone is sure"]
+    fn a_chaser_outside_the_recall_keeps_going_until_someone_is_sure() {
+        let mut sim = popup_after_the_first_call(95.0, 38.0, -35.0, 0, &[(7, Vec3::new(-40.0, 80.0, 0.0))]);
+        assert_eq!((call_of(&sim, 6).0, call_of(&sim, 7).0), (1, 1), "fixture: both outfielders are tier 1");
+        assert!(sim.primary == 6 && sim.f[7].role == Role::Chase, "fixture: left field has it and center field chases too");
+        sim.replan_primary();
+        sim.assign_among(vec![6, 5, 4, 3], Some(6));
+        assert!(sim.f[7].role == Role::Chase, "called off with nobody sure: {:?}", sim.f[7].role);
     }
 }

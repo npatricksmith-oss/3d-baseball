@@ -41,6 +41,16 @@ void ABbHUD::DrawHUD()
 	{
 		DrawText(Footer, FLinearColor(1.f, 1.f, 1.f, 0.7f), 24.f * S, Canvas->ClipY - 30.f * S, Font, 1.0f * S);
 	}
+	if (CardAlpha > 0.f && !Card.IsEmpty())
+	{
+		// Centered on the black between innings; it comes and goes with the fade.
+		float W = 0.f, H = 0.f, W2 = 0.f, H2 = 0.f;
+		GetTextSize(Card, W, H, Font, 3.0f * S);
+		GetTextSize(CardScore, W2, H2, Font, 2.2f * S);
+		const float Y = Canvas->ClipY * 0.5f - H;
+		DrawText(Card, FLinearColor(1.f, 1.f, 1.f, CardAlpha), (Canvas->ClipX - W) * 0.5f, Y, Font, 3.0f * S);
+		DrawText(CardScore, FLinearColor(1.f, 0.95f, 0.6f, CardAlpha), (Canvas->ClipX - W2) * 0.5f, Y + H + 14.f * S, Font, 2.2f * S);
+	}
 	if (!Call.IsEmpty())
 	{
 		float W = 0.f, H = 0.f;

@@ -644,7 +644,7 @@ Defaults for an MLB-like population. **All values [E]** unless marked; `calibrat
 | `Agility` | a_lat | m/s² | 7.0 (built 2026-11-12, §5.3) | σ 0.8 | 9.4 | 4.6 |
 | `Reaction` | T_r | s | 0.25 (infield); 0.35 (outfield, interim) | ρ 1.12 | 0.18 | 0.35 |
 | `Hands` | σ_hands | cm | 1.8 | ρ 1.2 | 1.04 | 3.1 |
-| `ArmStrength` | max throw speed | m/s | 37.0 (83 mph) | σ 2.2 | 43.6 | 30.4 |
+| `ArmStrength` | max throw speed | m/s | 37.0 (83 mph; the generic scale reference, the fielder positions' own means are in the note below) | σ 2.2 | 43.6 | 30.4 |
 | `ArmAccuracy` | throw direction σ | deg | 1.2 | ρ 1.2 | 0.69 | 2.07 |
 | `Transfer` | catch → release | s | 0.75 | ρ 1.08 | 0.60 | 0.94 |
 | `Blocking` | catcher lateral reach speed | m/s | 3.0 | σ 0.4 | 4.2 | 1.8 |
@@ -666,7 +666,23 @@ Notes:
 - Height, mass, and handedness are not graded.
 - `Discipline` maps to two parameters with opposite signs: a high grade sharpens (c_D up) and removes the swing bias (b_D down).
 - Bounded quantities (`PitchCraft`, `Composure`) clamp to [0, 1].
-- **Throwing ratings (backlog A3, 2026-11-13).** `FielderAttrs::with_throwing(strength, accuracy, transfer)` gives a fielder the three grades: `ArmStrength` moves his top throw speed about his position's average (36 m/s infield, 39 outfield, interim), `ArmAccuracy` sets his direction σ, `Transfer` scales his position's catch-to-release (0.65 s infield, 0.85 s outfield, interim). Every rostered player is still grade 50; drawing ratings per player waits for the population generator (calibration-targets).
+- **Throwing ratings (backlog A3, 2026-11-13).** `FielderAttrs::with_throwing(strength, accuracy, transfer)` gives a fielder the three grades: `ArmStrength` moves his top throw speed about his position's average (per-position means from Statcast, below), `ArmAccuracy` sets his direction σ, `Transfer` scales his position's catch-to-release (0.65 s infield, 0.85 s outfield, interim). Every rostered player is still grade 50; drawing ratings per player waits for the population generator (calibration-targets).
+- **Arm strength by position (2026-11-14; `bb_game::play::ARM_MEAN_MPH`).** The grade-50 `ArmStrength` of a position's fielder is that position's measured mean, not one number for all infielders and one for all outfielders.
+  - *What Statcast measures.* Savant's arm-strength leaderboard is, per player, the mean speed of his *max-effort* throws, defined by MLB's glossary as his top 10% of throws, taken at the release point (the glossary notes that outfielders' running starts can put their throws above a pitcher's). The league positional means (2026 leaderboard, docs/calibration/2026-11-14-sources.md) are in mph: 1B 79.3, 2B 79.1, 3B 84.9, SS 86.1, LF 87.4, CF 89.6, RF 90.7.
+  - *What the sim's value is.* `ArmStrength` is "max throw speed" (§10), and every set throw is released at it (`THROW_EFFORT` 1.0, §5.5; speed noise 3%; hurried throws less). So the sim's number is the speed of a full-effort throw, which is what Statcast's top-decile mean also describes: a thrower's hard throws, not his routine ones. The conversion is therefore the unit change only, × 0.44704 m/s per mph (CF: 89.6 × 0.44704 = 40.05 m/s), with no discount for "typical" throws and no uplift to a record throw. The table below is that conversion.
+  - *What stays an estimate [E].* (1) That a top-decile mean equals a set, full-effort throw: Statcast's selection is of a player's own hardest tenth, so a set throw is probably a little below it, and an outfielder's running start (crow hop) adds speed the sim's stationary release does not have; the sim's outfield values may therefore be on the high side by a few mph. (2) Pitcher and catcher have no value in the table (the catcher's arm is on a separate leaderboard; the 2017 HitTrax figure of 81.8 mph, 36.57 m/s, is a medium-confidence cross-check only), so they keep the previous 36 m/s. (3) Position means are not player distributions: the spread across players of one position (σ 2.2 m/s in §10) is unchanged and unsourced.
+
+| Position | Statcast mean, mph | Sim `ArmStrength` at grade 50, m/s |
+| :--- | :--- | :--- |
+| P, C | none (kept) | 36.00 |
+| 1B | 79.3 | 35.45 |
+| 2B | 79.1 | 35.36 |
+| 3B | 84.9 | 37.95 |
+| SS | 86.1 | 38.49 |
+| LF | 87.4 | 39.07 |
+| CF | 89.6 | 40.05 |
+| RF | 90.7 | 40.55 |
+
 - PLAN §7.1 lists `PopTime` as a catcher attribute. Under §4 it is derived from `Transfer` and `ArmStrength`. PLAN §7.1 is updated to match.
 
 ---
