@@ -7,11 +7,17 @@ Status: `[ ]` not started · `[~]` in progress · `[x]` done · `[?]` needs an o
 
 ---
 
-## Resume here (2026-11-13, eighth session: the dive rate, A5)
+## Resume here (2026-11-13: the dive rate, A5, and rosters, A2)
 
-Branch `claude/a15-de1824`, merged into main together with the rosters branch (section below). `cargo test --workspace --release` on the merge: all pass.
+Two sessions ran side by side; both are merged into main at `74cc5ca` and pushed. `cargo test --workspace --release` on the merge: 175 pass. The client was rebuilt against the new header and run headlessly on seed 7 (`client/run.sh 7 -RenderOffscreen -BbShots=6`): no errors.
 
-**Nothing is waiting on a review.** The [Codex dive-rate review](docs/reviews/2026-11-13-codex-dive-rate-review.md) is resolved: its P1 (the outfielder weighed a dive with the world's ball speed, not his read) and the dive half of a P2 (he could change his mind while waiting for the closest tick) are fixed; two P3s in the note are fixed.
+- **Nothing is waiting on a review.** Both Codex reviews are resolved.
+- **Open:** the stretch on his feet is unvalidated and moves the run environment (see the dive rate below).
+- **Next:** A1 handedness (the roster already has `Player.bats`/`throws` to fill).
+
+### The dive rate (A5)
+
+The [Codex dive-rate review](docs/reviews/2026-11-13-codex-dive-rate-review.md) is resolved: its P1 (the outfielder weighed a dive with the world's ball speed, not his read) and the dive half of a P2 (he could change his mind while waiting for the closest tick) are fixed; two P3s in the note are fixed.
 
 **Open from that review:** the stretch on his feet is unvalidated and moves the run environment (about 0.2 runs/team-game per 0.1 m of stretch; table in the note). Check it against charted plays before relying on the lower run total. Also untested: airborne `dive_gains`, stretch misses, a change of mind during a stretch's wait.
 
@@ -21,13 +27,13 @@ Done ([note](docs/calibration/2026-11-13-dive-rate.md), agent-models §5.3–§5
 - **Run environment moved, not by tuning:** runs/team-game 5.48 → 4.73 (seeds 0–299) and 5.71 → 4.89 (seeds 1000–1299); GB hits .425 → .333 (MLB .24). The stretch does it (without it: 5.60 runs, 7.5 dives a game). Fly-ball hits rose on one seed set (.131 → .162) and not on the other.
 - New diagnostic: `cargo run --release -p bb_game --example dive_probe -- 300 1000` (add `list` to print each dive).
 
-Not done: real dive and get-up clips; the stretch has no animation; not watched in the client after this change. The shortstop still dives about 2.5 times the real rate (all batters are right-handed until A1, and near misses from the earliest-point fielding plan). The four new parameters are estimates [E].
+Not done: real dive and get-up clips; the stretch has no animation; no dive was looked at in the client after this change. The shortstop still dives about 2.5 times the real rate (all batters are right-handed until A1, and near misses from the earliest-point fielding plan). The four new parameters are estimates [E].
 
-## Also 2026-11-13, in a parallel session: rosters, owner backlog A2
+### Rosters (A2)
 
-Branch `claude/practical-lalande-b928a3`, merged into main with the dive work. `cargo test --workspace --release`: all pass. Game digests are unchanged (seeds 1, 2, 3, 42 compared before and after): rosters are identity only and the log header is outside the digest.
+Game digests are unchanged (seeds 1, 2, 3, 42 compared before and after): rosters are identity only and the log header is outside the digest.
 
-**Nothing is waiting on a review.** The [Codex rosters review](docs/reviews/2026-11-13-codex-rosters-review.md) is resolved: no P1/P2, and its two P3s (no literal roster fixture; runs not checked per player) are fixed. It reproduced 18,000 generated players with its own Python generator, confirmed the unchanged digests, and checked the C layouts. Deferred: a committed test of a log without rosters.
+The [Codex rosters review](docs/reviews/2026-11-13-codex-rosters-review.md) is resolved: no P1/P2, and its two P3s (no literal roster fixture; runs not checked per player) are fixed. It reproduced 18,000 generated players with its own Python generator, confirmed the unchanged digests, and checked the C layouts. Deferred: a committed test of a log without rosters.
 
 Done (A2; spec in data-formats §2.4):
 - **Every game has two named nines.** `bb_game::roster::Rosters::generate(seed)` gives each side nine players: given and family name, uniform number (1–99, unique on the team), position (each of 1–9 once), place in the batting order (a seeded shuffle of the eight position players; the pitcher bats ninth), and `bats`/`throws` (all right-handed until A1, which is what the sim plays). The same seed gives the same players. New RNG purpose `RosterGeneration` = 12.
@@ -37,7 +43,7 @@ Done (A2; spec in data-formats §2.4):
 - **C ABI for the client:** `BbPlayer`, `bb_game_roster(game, side, batting_slot)`, `bb_game_player(game, agent_id)`, and `BbPlayInfo.batter` (the batter of a play). That is what A16's home-run display and uniform numbers need.
 
 Not done:
-- The Unreal client was not rebuilt against the new header (the change only appends to `BbPlayInfo`; the C smoke test checks the layout). Nothing in the client shows numbers or a lineup yet.
+- `client/run.sh` rebuilds the client against the header every time it runs (done once after the merge, above). Nothing in the client shows numbers or a lineup yet.
 - Choices the owner has not ruled on (data-formats §2.4): ASCII names without accents (marked Proposed); the pool weights [E]; a random batting order while every player is average.
 - A1 (handedness) is next in the agreed order: fill `Player.bats`/`throws` in the generator, add switch hitters, and give each batting slot its own batter instead of `Matchup::average()`.
 
