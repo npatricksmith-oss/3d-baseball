@@ -1,0 +1,54 @@
+id = "awards-006"
+title = "Infielder's first play thrown into the dugout: two bases from the time of the pitch"
+rules = ["rules-spec 7.2", "OBR 5.06(b)(4)(G)"]
+milestone = "M4"
+tags = ["awards", "throw", "outofplay"]
+[initial]
+inning = 3
+half = "top"
+bases = { first = "A.1" }
+batter = "A.2"
+
+[[step]]
+fact = "PitchDelivered"
+t = 0.0
+[[step]]
+fact = "BatContact"
+t = 0.42
+[[step]]
+fact = "BaseLeft"
+t = 0.5
+agent = "A.1"
+base = 1
+[[step]]
+fact = "BallTouched"
+t = 0.8
+what = "Ground"
+pos = [-6.0, 25.0]
+[[step]]
+fact = "GloveSecured"
+t = 1.5
+fielder = "H.SS"
+pos = [-10.0, 38.0]
+[[step]]
+fact = "BaseTouched"
+t = 2.0
+agent = "A.1"
+base = 2
+# The batter-runner has not reached first: not everyone has advanced a base.
+[[step]]
+fact = "BallReleasedFromGlove"
+t = 2.1
+fielder = "H.SS"
+infielder = true
+[[step]]
+fact = "BallTouched"
+t = 2.9
+what = "OutOfPlay"
+pos = [25.0, 5.0]
+in_flight = true
+expect_events = [{ event = "BallDead", reason = "OutOfPlay" }, { event = "RunnerAdvanced", runner = "A.1", from = 1, to = 3, cause = "Award" }, { event = "RunnerAdvanced", runner = "A.2", from = 0, to = 2, cause = "Award" }]
+[expect]
+bases = { second = "A.2", third = "A.1" }
+score = [0, 0]
+outs = 0

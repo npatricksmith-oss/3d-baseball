@@ -1,0 +1,70 @@
+id = "awards-009"
+title = "Infielder's wild throw after he made a force out is not the first play: time of the throw"
+rules = ["rules-spec 7.2", "OBR 5.06(b)(4)(G)"]
+milestone = "M4"
+tags = ["awards", "throw", "outofplay", "force"]
+[initial]
+inning = 3
+half = "top"
+bases = { first = "A.1", second = "A.2", third = "A.3" }
+batter = "A.4"
+
+[[step]]
+fact = "PitchDelivered"
+t = 0.0
+[[step]]
+fact = "BatContact"
+t = 0.42
+[[step]]
+fact = "BaseLeft"
+t = 0.5
+agent = "A.1"
+base = 1
+[[step]]
+fact = "BaseLeft"
+t = 0.5
+agent = "A.2"
+base = 2
+[[step]]
+fact = "BaseLeft"
+t = 0.5
+agent = "A.3"
+base = 3
+[[step]]
+fact = "BallTouched"
+t = 0.8
+what = "Ground"
+pos = [-15.0, 20.0]
+[[step]]
+fact = "GloveSecured"
+t = 1.4
+fielder = "H.3B"
+pos = [-20.0, 26.0]
+[[step]]
+fact = "BaseTouched"
+t = 1.9
+agent = "H.3B"
+base = 3
+holding_ball = true
+expect_events = [{ event = "RunnerOut", runner = "A.2", base = 3, kind = "Force" }]
+[[step]]
+fact = "BaseTouched"
+t = 2.6
+agent = "A.1"
+base = 2
+[[step]]
+fact = "BallReleasedFromGlove"
+t = 2.7
+fielder = "H.3B"
+infielder = true
+[[step]]
+fact = "BallTouched"
+t = 3.4
+what = "OutOfPlay"
+pos = [25.0, 5.0]
+in_flight = true
+expect_events = [{ event = "BallDead", reason = "OutOfPlay" }, { event = "RunnerAdvanced", runner = "A.3", from = 3, to = 4, cause = "Award" }, { event = "RunnerAdvanced", runner = "A.1", from = 1, to = 4, cause = "Award" }, { event = "RunnerAdvanced", runner = "A.4", from = 0, to = 2, cause = "Award" }]
+[expect]
+bases = { second = "A.4" }
+score = [2, 0]
+outs = 1

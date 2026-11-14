@@ -1,0 +1,45 @@
+id = "awards-011"
+title = "Throw after a caught fly goes into the seats: the batter is out, the runner tagging up scores"
+rules = ["rules-spec 7.2", "OBR 5.06(b)(4)(G)"]
+milestone = "M4"
+tags = ["awards", "throw", "outofplay", "tagup"]
+[initial]
+inning = 6
+half = "top"
+outs = 0
+bases = { second = "A.1" }
+batter = "A.2"
+
+[[step]]
+fact = "PitchDelivered"
+t = 0.0
+[[step]]
+fact = "BatContact"
+t = 0.42
+[[step]]
+fact = "GloveSecured"
+t = 4.0
+fielder = "H.CF"
+pos = [0.0, 95.0]
+expect_events = [{ event = "Catch" }, { event = "RunnerOut", runner = "A.2", kind = "FlyOut" }]
+[[step]]
+fact = "BaseLeft"
+t = 4.1
+agent = "A.1"
+base = 2
+[[step]]
+fact = "BallReleasedFromGlove"
+t = 4.6
+fielder = "H.CF"
+infielder = false
+[[step]]
+fact = "BallTouched"
+t = 6.0
+what = "OutOfPlay"
+pos = [-24.0, 1.0]
+in_flight = false
+expect_events = [{ event = "BallDead", reason = "OutOfPlay" }, { event = "RunnerAdvanced", runner = "A.1", from = 2, to = 4, cause = "Award" }, { event = "RunScored", runner = "A.1" }]
+[expect]
+bases = {}
+score = [1, 0]
+outs = 1
