@@ -278,6 +278,9 @@ struct Fielder {
     /// out only as far as the time since then allows.
     must_dive_since: f64,
     last_dive_read: f64,
+    /// An outfielder has weighed this ball and will dive for it (`OF_DIVE_MIN_P`): decided
+    /// once, when a dive first offers, and kept until the ball changes.
+    will_dive: std::cell::Cell<bool>,
     /// Throws made this play (keys the throw-execution noise).
     throws: u32,
     /// The base whose throws he is backing up, if that is his job on this play.
@@ -904,6 +907,14 @@ fn run_time_to(fd: &Fielder, goal: Vec3, reach: f64) -> f64 {
         if run_gap(fd, goal, mid, reach) > 0.0 { lo = mid } else { hi = mid }
     }
     hi
+}
+
+/// The glove σ multiplier (agent-models §5.4 form) for a ball at speed `v` taken `horiz`
+/// from the body. k_v 0.25 and k_reach 0.3 [E, M4b]: the spec's 0.5/0.6 made routine catches
+/// fail ~8% of the time against the ≥ 98% routine-play band. Off his feet or off balance
+/// (`extending`) the glove is harder to place, more so the further out (`K_EXTEND`).
+fn glove_sigma_mult(v: f64, horiz: f64, extending: bool) -> f64 {
+    1.0 + 0.25 * v / 40.0 + 0.3 * (horiz / (REACH + DIVE)).min(1.0) + if extending { 1.0 + K_EXTEND * ((horiz - REACH) / DIVE).clamp(0.0, 1.0) } else { 0.0 }
 }
 
 /// A fielder's position and velocity after the movement step of the tick at time `t`
@@ -1903,6 +1914,21 @@ impl<'a> Sim<'a> {
             };
             let extending = if !standing && !down && receiver.is_none() && fd.role == Role::Chase && bv.norm() > 3.0 { how(self.t, horiz, b, zmax) } else { None };
             if let Some(dive) = extending {
+                // An outfielder weighs a dive first: a ball that gets by him rolls to the
+                // wall. He knows his own hands, and judges the ball by his own read of it
+                // (where it is and how fast, from his belief, not the world's): the chance
+                // that a glove placed with his error σ per axis is within the pocket. Below
+                // `OF_DIVE_MIN_P` he stays on his feet. Once he has decided to go he goes
+                // (Codex dive-rate review #1, #2).
+                if dive && i >= 6 && !fd.will_dive.get() {
+                    let Some((q, qv)) = fd.belief.as_ref().map(|p| p.at(self.t)) else { continue };
+                    let h = m::hypot(q.x - fd.pos.x, q.y - fd.pos.y);
+                    let sg = fd.a.hands * glove_sigma_mult(qv.norm(), h, true);
+                    if 1.0 - m::exp(-0.5 * (POCKET / sg) * (POCKET / sg)) < OF_DIVE_MIN_P {
+                        continue;
+                    }
+                    fd.will_dive.set(true);
+                }
                 let t1 = self.t + DT;
                 let (bn, _) = self.ball_at(t1);
                 let within = |x: f64| x > self.t && x <= t1;
@@ -1926,16 +1952,7 @@ impl<'a> Sim<'a> {
             if !(standing || extending.is_some()) {
                 continue;
             }
-            // agent-models §5.4 form; k_v 0.25 and k_reach 0.3 [E, M4b]: the spec's 0.5/0.6 made
-            // routine catches fail ~8% of the time against the ≥ 98% routine-play band. Off
-            // his feet or off balance the glove is harder to place, more so the further out.
-            let sg = fd.a.hands * (1.0 + 0.25 * bv.norm() / 40.0 + 0.3 * (horiz / (REACH + DIVE)).min(1.0) + if extending.is_some() { 1.0 + K_EXTEND * ((horiz - REACH) / DIVE).clamp(0.0, 1.0) } else { 0.0 });
-            // An outfielder weighs a dive: a ball that gets by him rolls to the wall. He knows
-            // his own hands (the chance that a glove placed with error σ per axis is within
-            // the pocket), and stays on his feet when he does not like his chances.
-            if diving && i >= 6 && 1.0 - m::exp(-0.5 * (POCKET / sg) * (POCKET / sg)) < OF_DIVE_MIN_P {
-                continue;
-            }
+            let sg = fd.a.hands * glove_sigma_mult(bv.norm(), horiz, extending.is_some());
             let mut r = rng(self.inp.seed, self.inp.play, fd.id, Purpose::GlovePlacement, fd.attempts);
             let (ex, ez) = (r.truncated_normal(4.0), r.truncated_normal(4.0));
             let d = sg * m::hypot(ex, ez);
@@ -2048,6 +2065,7 @@ impl<'a> Sim<'a> {
             fd.peel = None;
             fd.must_dive_since = f64::INFINITY;
             fd.last_dive_read = f64::NEG_INFINITY;
+            fd.will_dive.set(false);
         }
         self.assign();
     }
@@ -2723,6 +2741,7 @@ fn new_sim<'a>(inp: &'a LiveInput<'a>, st: &'a mut RulesState) -> Sim<'a> {
                 last_close_read: 0.0,
                 must_dive_since: f64::INFINITY,
                 last_dive_read: f64::NEG_INFINITY,
+                will_dive: std::cell::Cell::new(false),
                 throws: 0,
                 backs: None,
                 peel: None,
@@ -3155,6 +3174,63 @@ mod tests {
         assert!(cf.out.dives.is_empty(), "the center fielder dove: {:?}", cf.out.dives);
         let (ss, _) = crossing_ball(SS, 2.3, 0.5, 1.5, false);
         assert_eq!(ss.out.dives.len(), 1, "the shortstop should dive");
+    }
+
+    /// The center fielder (hands `hands`) at (0, 80) with a dive long earned and his reads
+    /// frozen: the world's ball is at `r` moving `world_v`, and he believes it is the same
+    /// ball moving `believed_v`. Runs `ticks` world ticks.
+    fn weighed_dive(hands: f64, r: Vec3, world_v: Vec3, believed_v: Vec3, ticks: usize) -> usize {
+        let fx = fixture(&[]);
+        let mut inp = input(&fx, vec![RunnerIn { id: fx.st.batter, base: 0, speed: 8.2 }]);
+        inp.fattrs[CF].hands = hands;
+        let mut st = fx.st.clone();
+        let mut sim = new_sim(&inp, &mut st);
+        sim.f[CF].pos = Vec3::new(0.0, 80.0, 0.0);
+        loose_ball(&mut sim, 2.0, r, believed_v);
+        let Ball::Free { path, .. } = &sim.ball else { unreachable!() };
+        let believed = path.clone();
+        loose_ball(&mut sim, 2.0, r, world_v);
+        let fd = &mut sim.f[CF];
+        (fd.role, fd.belief) = (Role::Chase, Some(believed));
+        (fd.must_dive_since, fd.last_dive_read, fd.last_close_read) = (0.0, f64::INFINITY, f64::INFINITY);
+        for _ in 0..ticks {
+            world_tick(&mut sim);
+        }
+        sim.out.dives.len()
+    }
+
+    // Codex dive-rate review #1: the outfielder weighed his dive with the world's ball speed.
+    // It is his read that counts: believing the ball slow he likes his chances 1.5 m out
+    // (53% with average hands) and goes; believing it fast (48%) he does not, whatever the
+    // ball is really doing.
+    #[test]
+    fn an_outfielder_weighs_a_dive_by_his_own_read_of_the_ball() {
+        let hands = FielderAttrs::average(CF).hands;
+        let r = Vec3::new(0.0, 78.5, 0.04);
+        let v = |s: f64| Vec3::new(s, 0.0, 0.0);
+        for world in [5.0, 20.0, 40.0] {
+            assert_eq!(weighed_dive(hands, r, v(world), v(5.0), 1), 1, "believed slow, really {world} m/s");
+            assert_eq!(weighed_dive(hands, r, v(world), v(40.0), 1), 0, "believed fast, really {world} m/s");
+        }
+    }
+
+    // Codex dive-rate review #2: a ball coming down gains speed, so a tick later the same
+    // dive can look worse. Having decided to go while waiting for it to come closest, he
+    // goes. Hands chosen so the first tick is just over an even chance and the next under.
+    #[test]
+    fn an_outfielder_who_has_decided_to_dive_goes() {
+        let (r, v) = (Vec3::new(-0.02, 78.4, 1.0), Vec3::new(1.0, 0.0, -10.0));
+        let chance = |hands: f64, dt: f64| {
+            let (q, qv) = (r + v * dt, v + Vec3::new(0.0, 0.0, -9.8 * dt));
+            let sg = hands * glove_sigma_mult(qv.norm(), m::hypot(q.x, q.y - 80.0), true);
+            1.0 - m::exp(-0.5 * (POCKET / sg) * (POCKET / sg))
+        };
+        let mut hands = 0.018;
+        while chance(hands, 0.0) < 0.5 {
+            hands *= 0.9999;
+        }
+        assert!(chance(hands, 0.0) >= 0.5 && chance(hands, DT) < 0.5, "fixture: {} then {}", chance(hands, 0.0), chance(hands, DT));
+        assert_eq!(weighed_dive(hands, r, v, v, 3), 1);
     }
 
     // The pitcher is finishing his delivery at contact (0.4 s here): a ball by him 0.5 s

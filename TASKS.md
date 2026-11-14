@@ -11,12 +11,14 @@ Status: `[ ]` not started · `[~]` in progress · `[x]` done · `[?]` needs an o
 
 Branch `claude/a15-de1824` (from main at `328e51b`). `cargo test --workspace --release`: all pass.
 
-**Waiting on a review:** the Codex review of the dive-rate change (`docs/reviews/2026-11-13-codex-dive-rate-review.md`) was started in the background at the end of the session. Commit it, fix or defer every finding, and write its Resolution before anything else.
+**Nothing is waiting on a review.** The [Codex dive-rate review](docs/reviews/2026-11-13-codex-dive-rate-review.md) is resolved: its P1 (the outfielder weighed a dive with the world's ball speed, not his read) and the dive half of a P2 (he could change his mind while waiting for the closest tick) are fixed; two P3s in the note are fixed.
+
+**Open from that review:** the stretch on his feet is unvalidated and moves the run environment (about 0.2 runs/team-game per 0.1 m of stretch; table in the note). Check it against charted plays before relying on the lower run total. Also untested: airborne `dive_gains`, stretch misses, a change of mind during a stretch's wait.
 
 Done ([note](docs/calibration/2026-11-13-dive-rate.md), agent-models §5.3–§5.4):
 - **Judged: the dive rate was not believable.** 22 dives a game against 2 to 3 in real games (Sports Info Solutions: a team's shortstops dive 36 times a season; the sim's dove 4.4 times a game for both teams, and its outfielders 8 times a game).
-- **Fixed by when a fielder leaves his feet**, not by a rate: a dive must gain him something by his own read (no dive at a roller he is about to pick up); a dive needs its lunge time from when he knew he must dive (the pitcher cannot lay out for 0.7 s after contact); a ball just past reach is taken with a stretch on his feet (0.4 m, 0.3 s off balance); the further out, the harder the catch; an outfielder dives only when he gives himself an even chance. **3.1–3.5 dives a game, 42–44% caught.**
-- **Run environment moved, not by tuning:** runs/team-game 5.48 → 4.77 (seeds 0–299) and 5.71 → 4.94 (seeds 1000–1299); GB hits .425 → .332 (MLB .24). The stretch does it (without it: 5.63 runs, 7.3 dives a game). Fly-ball hits rose on one seed set (.131 → .160) and not on the other.
+- **Fixed by when a fielder leaves his feet**, not by a rate: a dive must gain him something by his own read (no dive at a roller he is about to pick up); a dive needs its lunge time from when he knew he must dive (the pitcher cannot lay out for 0.7 s after contact); a ball just past reach is taken with a stretch on his feet (0.4 m, 0.3 s off balance); the further out, the harder the catch; an outfielder dives only when he gives himself an even chance. **3.3–3.7 dives a game, 41–45% caught.**
+- **Run environment moved, not by tuning:** runs/team-game 5.48 → 4.73 (seeds 0–299) and 5.71 → 4.89 (seeds 1000–1299); GB hits .425 → .333 (MLB .24). The stretch does it (without it: 5.60 runs, 7.5 dives a game). Fly-ball hits rose on one seed set (.131 → .162) and not on the other.
 - New diagnostic: `cargo run --release -p bb_game --example dive_probe -- 300 1000` (add `list` to print each dive).
 
 Not done: real dive and get-up clips; the stretch has no animation; not watched in the client after this change. The shortstop still dives about 2.5 times the real rate (all batters are right-handed until A1, and near misses from the earliest-point fielding plan). The four new parameters are estimates [E].

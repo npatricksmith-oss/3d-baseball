@@ -151,4 +151,12 @@ All commands ran from this worktree. Cargo commands used `export PATH=$HOME/.car
 
 ## Resolution
 
-Open.
+Resolved 2026-11-13.
+
+1. **P1, fixed.** The outfielder's chance is now computed from his belief: where his own prediction has the ball and how fast (`fd.belief.at(t)`), with his own hands, through the same σ form (`glove_sigma_mult`). The world's ball state no longer enters the choice. Test `an_outfielder_weighs_a_dive_by_his_own_read_of_the_ball`: with the belief fixed he decides the same whether the ball is really doing 5, 20 or 40 m/s, and the decision flips with the believed speed.
+2. **P2, fixed for the dive; the stretch deferred.** The outfielder decides once, when a dive first offers, and before the wait for the closest tick; having decided to go he goes (`Fielder::will_dive`, cleared when the ball changes). Test `an_outfielder_who_has_decided_to_dive_goes` uses the review's descending ball, with hands set so the first tick is over an even chance and the next under. Deferred: a stretch's gain check and the dive read can still change his mind during the wait. Both answers come from his read saying he now has the ball on his feet, which is a change of mind a fielder can have, and the standing catch follows; no case of a lost ball was found. No test covers it.
+3. **P2, accepted; partly done, the rest deferred.** The note now gives a sensitivity table (stretch 0, 0.2, 0.4, 0.6 m) and separates reach from recovery (0.4 m with a dive's 1.5 s cost): runs fall about 0.2 per 0.1 m, and about 0.4 of the 0.87-run drop is the quicker recovery. It says the stretch's size and cost are placeholders and the lower run total unconfirmed. Deferred: validating the stretch against charted plays (how often, how often held, how late the throw). Listed in TASKS.md.
+4. **P3, fixed.** The 24% is attributed to second basemen, the unsupported "19 in a season" is gone (replaced by the article's 140 dives in three seasons), the note says SIS counts outs while the probe counts the ball in the glove, and "2 to 3 a game" is marked an estimate, not a band.
+5. **P3, fixed.** The 7.3 was from 100 games. The table now gives 7.5 a game over seeds 0–299 on the fixed build (the review counted 7.43 on the build it read).
+
+Also from the review's notes: the outfielder rule's blindness to the game situation is stated in the note. The probe's air/ground label after a deflection, and the missing tests it lists (airborne `dive_gains`, stretch misses, the low-catch height for a stretch), are deferred as low risk.
