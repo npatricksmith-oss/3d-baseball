@@ -18,6 +18,7 @@ fn main() {
     // The race on these plays (agent-models §6.4): by catch depth (m from home, 15 m bins),
     // outcome counts; and the times from the catch of each leg.
     let mut by_depth: BTreeMap<u32, [u32; 3]> = BTreeMap::new();
+    let mut plate: Vec<(f64, bool, Option<f64>, bool, Option<f64>)> = Vec::new();
     let (mut run_home, mut of_release, mut flight, mut catcher_to_home_touch) = (Vec::new(), Vec::new(), Vec::new(), Vec::new());
     for seed in first..first + n {
         let mut g = Game::new(seed, true);
@@ -59,6 +60,19 @@ fn main() {
                     _ => None,
                 });
                 if sc || ot {
+                    // At the plate: where the catcher took the throw home, whether it bounced,
+                    // how long from his catch to the tag, and the outcome.
+                    if let Some((tc, cx, cy)) = p.facts.iter().find_map(|f| match *f {
+                        Input::GloveSecured { t, fielder, x, y } if fielder & 0x7f == 2 && t > t_catch => Some((t, x, y)),
+                        _ => None,
+                    }) {
+                        let bounced = p.facts.iter().any(|f| matches!(*f, Input::BallTouched { t, what: bb_rules::Touch::Ground { .. } } if t > t_catch && t < tc));
+                        let tag = p.facts.iter().find_map(|f| match *f {
+                            Input::TagContact { t, runner, .. } if runner == id && t >= tc => Some(t),
+                            _ => None,
+                        });
+                        plate.push((cx.hypot(cy), bounced, tag.map(|t| t - tc), ot, home.map(|h| h - tc)));
+                    }
                     if let Some(h) = home {
                         run_home.push(h - t_catch);
                     }
@@ -86,6 +100,10 @@ fn main() {
         println!("  {:>8}  {:3} {:3} {:3}   ({:.0}%, {:.0}%)", names[*bin as usize], c[0], c[1], c[2], 100.0 * sent as f64 / (sent + c[2]).max(1) as f64, 100.0 * c[0] as f64 / sent.max(1) as f64);
     }
     println!("outfield total {}: scored {:.1}%, put out {:.1}%, held {:.1}%; scored per team-game {:.3}", n_of, 100.0 * tot[0] as f64 / n_of, 100.0 * tot[1] as f64 / n_of, 100.0 * tot[2] as f64 / n_of, tot[0] as f64 / (2.0 * n as f64));
+    println!("throws home taken by the catcher on these plays: {}", plate.len());
+    for (d, b, tag, out, home) in &plate {
+        println!("  caught {d:.2} m from the plate{} | tag {} | runner {} | runner touched home {}", if *b { ", after a bounce" } else { "" }, tag.map(|t| format!("{t:+.2} s after the catch")).unwrap_or("none".into()), if *out { "OUT" } else { "safe" }, home.map(|t| format!("{t:+.2} s")).unwrap_or("-".into()));
+    }
     println!("runner went: catch to home touch {:.2} s (n {}); catch to outfielder's release {:.2} s (n {}); release to the catcher's catch {:.2} s (n {}); catcher's catch to the runner's touch {:+.2} s (n {})",
         mean(&run_home), run_home.len(), mean(&of_release), of_release.len(), mean(&flight), flight.len(), mean(&catcher_to_home_touch), catcher_to_home_touch.len());
 }

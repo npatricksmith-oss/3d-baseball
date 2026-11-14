@@ -2490,7 +2490,14 @@ impl<'a> Sim<'a> {
                 let (p, _) = self.ball_at(self.t);
                 let mean = FielderAttrs::average(*by);
                 let err = rng(self.inp.seed, self.inp.play, self.r[k].id, Purpose::RunnerPerception, ARM_READ_SUB + *by as u32).truncated_normal(4.0);
-                let ready = (self.secured_at + mean.transfer).max(self.t);
+                // His set-up as the runner sees it: the position's transfer, plus the turn
+                // and footwork a throw to this base needs from the way he took the ball
+                // (both visible), after any get-up (§5.5, §6.4).
+                let fd = &self.f[*by];
+                let to = target - fd.pos;
+                let turn = fd.face.map(|f| throwing::turn_extra_s(f, to, fd.a.throws)).unwrap_or(0.0);
+                let su = SetUp::new(if fd.face.is_some() { mean.transfer } else { RELAY_TRANSFER_FRAC * mean.transfer }, turn, throwing::footwork_s(fd.catch_vel, to, fd.took_diving));
+                let ready = (fd.up_at + su.set_s).max(self.t);
                 ready + read_throw_time(mean.arm + ARM_READ_SIGMA_MPS * err, m::hypot(target.x - p.x, target.y - p.y))
             }
             Ball::Thrown { .. } => {
