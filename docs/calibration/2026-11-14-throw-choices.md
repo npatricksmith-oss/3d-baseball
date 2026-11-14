@@ -240,3 +240,105 @@ and hear teammates, and can hold beliefs about all of these. He must never be
 told the actual future path, realized execution noise, or a runner's private
 planned destination. The diagnostic's retrospective state audit grants none
 of that information to gameplay.
+
+## Fix (2026-11-14): priorities 2, 1 and 3
+
+Priorities 4 and 5 (score and situation value, `TWO_OUT_TAG_W`, the 0.3 cutoff,
+route choice) are untouched. Spec: agent-models §5.5 "A4 carries", §5.6 "A4
+implementation contract", §5.7 "A4 destination gate". Commits `98c58ed` (Sol,
+priority 2), Sol's WIP `3d76e3b` reworked in `fe4b7cd` and `c2c58cb`, measured
+on main `69826e4` merged (main `00445f5` changes only the client side).
+
+**2. Targets from what the fielder can see.** A runner's out destination comes
+from his path position and signed current velocity (`ChoiceParams::runner_target`).
+Within `on_bag_m` = 0.05 m of a bag, or under `moving_mps` = 0.5 m/s, he offers no
+moving-runner play; between bags positive motion targets the next bag, negative the
+one behind. The world now zeroes a stopping runner's speed on his arrival tick,
+which removes the stale arrival speed that produced the error (positions are
+unchanged; the next tick zeroed it before). The private `goal` is read only by the
+probe's retrospective audit. The same gate feeds the cutoff/relay target and the
+holder's force-touch check, which had read `r.goal >= base`.
+
+**1. One comparison.** `live/holder.rs` builds a table with, for every visibly
+moving runner, a carry (within `carry_max_m` = 8 m) and a direct-or-relay throw,
+each with its own completion time, in the existing Φ(·/0.12 s), p > 0.3, p² × w
+rule. Carries come before throws in the table, so an exact tie keeps the carry
+(no throw for the same out). A force beyond first with fewer than two out adds
+`continuation_weight` (1.0) × p₁² × p₂² × w₂ for the force on the batter at first,
+from the next holder's own throw (a carrier keeps his set-up clock, a receiver
+needs 0.7 × transfer). The table is rebuilt every tick; a holder who gives up a
+carry brakes (`Fielder::carry_to`), anyone else keeps his target. The automatic
+nearby carry and the automatic swap of a throw within 6 m for a carry are gone.
+
+**3. Non-force carries.** Implemented differently from the first A4 spec text,
+which allowed a non-force carry only inside the 1.2 m tag reach. On main `52d6632`,
+37 sustained non-force carries started farther out and **36 were tag outs at that
+bag** (31 at second, mostly batters stretching a single, the middle infielder 1.3–
+7.8 m from the bag). A ban gives those away. A carry to an unforced runner's bag is
+now a tag plan weighed as a tag (two out: 0.9 against a force's 1.0; no
+continuation) inside the same comparison, so it can no longer bypass a force. The
+spec records the deviation. A counterfactual build with the strict rule gave the
+same runs (5.06 against 5.07, seeds 0–299).
+
+### The classes before and after (seeds 0–255)
+
+Same probe, same classes. Before is main `69826e4` (arm strength by position and
+A10 merged, so it differs from the 256 games in the Results table above). Games
+diverge after the first changed choice, so a row compares rates, not the same plays.
+
+| Class | Before | After | What is left |
+|---|---:|---:|---|
+| Ahead of a stopped runner | 148 (103 home, 45 third) | **0** | — |
+| … of which through the cutoff | 23 | **0** | — |
+| Carry behind a sure lead out | 129, all from the shortcut; 73 plays got two outs | 120 | 119 are double plays the holder weighed (continuation p₂ > 0.3); 111 of the 120 plays got two outs. The one other is 197/122: second 1.09 against third 1.08 |
+| Non-force carry over a sure force | 23 | **1** | 187/132: none out, tag plan at third 6.45 m away with 1.4 s in hand against the force at first; the lead runner is tagged out. The weights intend this |
+| Non-force carries starting beyond 1.2 m | (37 sustained on `52d6632`, 36 tag outs) | 44 | 40 tagged out at that bag |
+| Risky lead over a sure trailing out | 2 | 2 | 63/108 and 102/36: weighed home tags at +0.15 / +0.12 s against a sure force at first (p² × 1.3 beats 0.9). Both outs made at home. Priority 4 |
+| Early/leading home gamble | 0 | 2 | The same two plays |
+| Late close-score home bypassed | 2 | 2 | 231/223 and 248/232: weighed double plays, two outs, no run |
+| Speculative throw (margin < 0) | 132 | 100 | Priority 4; unchanged rule |
+| Two-out home tag over a force; no-chance throw; slower cutoff route | 0 / 0 / 0 | 0 / 0 / 0 | — |
+| Flagged commitments | 426 | 223 | |
+
+Commitments 14,158 → 14,069: nearby-carry episodes 1,713 + 44 replacement
+carries → 1,438 weighed carries; throws 5,678 → 5,876. Traced and untraced logs and
+digests match on all 256 seeds in both builds.
+
+The shadow formulas are retired: `choice_trace::skipped_throw_options` and the
+`unweighed_throw` rows are gone, because every option in the trace is now one the
+holder weighed (`selected_option` names it). The probe reports the sub-counts above.
+
+### Tests
+
+`tests/throw_choices.rs` replays the frozen contacts. 1/64: no throw home. 17/203:
+no option toward third for the runner already back on second; throw first. 70/157:
+carry second for the double play; with `continuation_weight` 0 the same play goes
+home instead. 13/140: no carry to first; a lead force with at least 0.25 s in hand.
+Since arm-by-position the first baseman is 9.1 m from his bag when he can throw, and
+the comparison picks a 3-6-3 double play that ends the inning, so the fixture checks
+the lead force, not home. The literal case (a sure force home beats carrying first)
+is a constructed unit test, and so is the non-force weighing (two out: throw first;
+none out: tag at third). `ChoiceParams::runner_target` has its own geometry test.
+
+### What it did to the game
+
+Standard run, main `69826e4` → this branch, seeds 0–299 [1000–1299]: runs
+5.41 → 5.07 [5.62 → 5.28]; double plays (probe, seeds 0–255) 2.30 → 2.75 a game.
+Counterfactuals on seeds 0–299: continuation weight 0 gives 5.27, the strict
+non-force rule 5.06, both 5.26. So the **double-play continuation is −0.20 runs**
+(grounders with 2+ outs .079 → .097), and **the visible-target gate plus the common
+comparison is −0.14**. In that second share, lead forces are now taken instead of
+the batter at first (fielder's choice on grounders .039 → .048 without the
+continuation). How much of the −0.14 is the lead forces and how much the 148
+throws at stopped runners is not separated. Nothing was tuned to bring runs back.
+
+**Open.** Double plays 2.75 a game against MLB's about 1.7. The continuation values
+a double play at its full worth; the excess is more likely in how quickly the pivot
+and the throw to first happen than in the choice, but this is not measured.
+Line-drive and fly-ball 2+ outs fell (.011 → .006 [.011 → .008]; .014 → .007
+[.013 → .006]) in every variant, continuation or not. In the probe sample,
+outs at a runner's own base went 12 → 3, but 8 of main's 12 were batter-runners
+standing on first with stale arrival speed, called out with no base play (base 0)
+on the same tick as a nearby carry; they were not traced further. Genuine
+doubled-off runners were 4 → 3. The line-drive and fly-ball drop is **not
+explained**.

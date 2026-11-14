@@ -294,13 +294,6 @@ pub fn encode(step: &PitchStep, st: &RulesState, rosters: &crate::roster::Roster
         mk.extend(path.bounces.iter().map(|&(t, x, y)| (t, MarkerKind::Bounce, Vec3::new(x, y, 0.0))));
         mk.extend(path.walls.iter().map(|&(t, x, y)| (t, MarkerKind::WallHit, Vec3::new(x, y, 0.0))));
     }
-    // The ball left the playing field (rules-spec §5.8): where its track ends, so a client
-    // can cut back to the field.
-    for f in &step.facts {
-        if let bb_rules::Input::BallTouched { t, what: bb_rules::Touch::OutOfPlay { x, y, .. } } = *f {
-            mk.push((t, MarkerKind::BallDead, Vec3::new(x, y, 0.0)));
-        }
-    }
     // Possession: who secured the ball and when, and each throw's release, by agent.
     let mut mk: Vec<(f64, MarkerKind, Vec3, u16)> = mk.into_iter().map(|(t, k, p)| (t, k, p, 0)).collect();
     mk.extend(step.viz.secured.iter().map(|&(t, id)| (t, MarkerKind::Catch, Vec3::ZERO, id)));
@@ -322,6 +315,23 @@ pub fn encode(step: &PitchStep, st: &RulesState, rosters: &crate::roster::Roster
             &mut fbb,
             &tl::MarkerArgs { t: c.t_call() as f32, kind: MarkerKind::UmpireCall, agent: c.runner, base: c.base, p: Some(&pv), margin_s: c.margin_s.min(f32::MAX as f64) as f32 },
         ));
+    }
+    // The ball left the playing field (rules-spec §5.8): when it was dead, the ground point
+    // where it left, and why in `base` (the event log's `DeadBallReason`: 1 out of play, a
+    // foul or a throw; 2 home run; 3 ground-rule double), so a client can cut back to the field.
+    let reason = step.rules_events.iter().find_map(|e| match e {
+        bb_rules::Event::BallDead { reason } => Some(match reason {
+            bb_rules::DeadBall::OutOfPlay => 1u8,
+            bb_rules::DeadBall::HomeRun => 2,
+            bb_rules::DeadBall::GroundRuleDouble => 3,
+        }),
+        _ => None,
+    });
+    for f in &step.facts {
+        if let bb_rules::Input::BallTouched { t, what: bb_rules::Touch::OutOfPlay { x, y, .. } } = *f {
+            let pv = v3f(Vec3::new(x, y, 0.0));
+            marks.push(tl::Marker::create(&mut fbb, &tl::MarkerArgs { t: t as f32, kind: MarkerKind::BallDead, agent: 0, base: reason.unwrap_or(0), p: Some(&pv), margin_s: 0.0 }));
+        }
     }
     let markv = fbb.create_vector(&marks);
 

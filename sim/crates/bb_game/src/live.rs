@@ -24,6 +24,7 @@ use crate::play::{FielderAttrs, RunnerIn, base_pos, home_positions, run_dist, ru
 
 /// Opt-in, read-only A4 evidence. Never consulted by the option evaluation.
 pub mod choice_trace;
+mod holder;
 
 const DT: f64 = 1.0 / 60.0;
 const REPLAN_S: f64 = 0.4;
@@ -330,6 +331,9 @@ struct Fielder {
     /// the catch from, short of where his own read has it coming down. Kept across re-calls
     /// he is not part of, until the ball comes down or he is given another job.
     peel: Option<Vec3>,
+    /// The bag he is carrying the ball to (agent-models §5.5 A4), so that abandoning the
+    /// carry for a throw or for no play brakes him instead of leaving him running at it.
+    carry_to: Option<u8>,
 }
 
 #[derive(Clone, Debug)]
@@ -339,6 +343,9 @@ struct Runner {
     /// Distance along the base path from home, m (base k at k·BASE_L).
     s: f64,
     v: f64,
+    /// Last physical movement direction. Public signed velocity is direction × v;
+    /// private `goal` is never offered to the fielder's target builder.
+    direction: f64,
     vmax: f64,
     /// Base the runner is heading for (may be behind it on a retreat).
     goal: u8,
@@ -515,9 +522,8 @@ fn phi(x: f64) -> f64 {
 }
 
 /// The base a moving runner is visibly heading for: the next one in his direction of motion.
-fn visible_target(r: &Runner) -> u8 {
-    let q = r.s / BASE_L;
-    if r.goal as f64 * BASE_L < r.s { q.ceil() as u8 - 1 } else { (q.floor() as u8 + 1).min(4) }
+fn visible_target(r: &Runner, params: throwing::ChoiceParams) -> Option<u8> {
+    params.runner_target(r.s, r.direction * r.v, BASE_L)
 }
 
 /// Position on the base path at distance `s` from home.
@@ -1573,7 +1579,9 @@ impl<'a> Sim<'a> {
         let on = |b: u8| self.r.iter().any(|r| r.start == b && !r.out && !r.scored);
         let mut b = if on(2) || on(3) { 4 } else if on(1) || deep { 3 } else { 2 };
         for r in self.r.iter().filter(|r| !r.out && !r.scored) {
-            b = b.max(visible_target(r).min(4));
+            if let Some(target) = visible_target(r, self.f[fielder].a.throw_choice) {
+                b = b.max(target);
+            }
         }
         let who = if deep {
             if from.x <= 10.0 { 5 } else { 3 }
@@ -2084,6 +2092,7 @@ impl<'a> Sim<'a> {
                 // Having caught it, he plants: his run dies out where braking stops him, not
                 // back at the spot he planned (which a running catch has carried him past).
                 fd.target = stop_point(fd);
+                fd.carry_to = None;
                 // No longer racing the ball: he brakes onto that spot.
                 fd.t_int = f64::INFINITY;
                 if let Ball::Thrown { to_base, relay, .. } = self.ball {
@@ -2516,6 +2525,7 @@ impl<'a> Sim<'a> {
                 r.v = 0.0;
                 continue;
             }
+            r.direction = dir;
             if r.v == 0.0 {
                 r.moving_since = self.t;
             }
@@ -2565,6 +2575,13 @@ impl<'a> Sim<'a> {
                     }
                 }
             }
+            // End the physical stop on arrival, before the next holder reads its
+            // speed. Protected overruns retain the crossing speed for braking.
+            let r = &mut self.r[k];
+            let stop_s = r.hold_s.unwrap_or(r.goal as f64 * BASE_L);
+            if r.overrun == OverrunPhase::None && (stop_s - r.s).abs() < 1e-6 {
+                r.v = 0.0;
+            }
         }
     }
 
@@ -2603,12 +2620,9 @@ impl<'a> Sim<'a> {
         }
     }
 
-    fn trace_choice(&self, by: usize, action: &'static str, base: u8, through: bool, mut options: Vec<choice_trace::OptionEstimate>) {
+    fn trace_choice(&self, by: usize, action: &'static str, base: u8, through: bool, selected_option: Option<usize>, options: &[holder::HolderOption]) {
         if !choice_trace::enabled() {
             return;
-        }
-        if action == "near_carry" {
-            options.extend(choice_trace::skipped_throw_options(self, by));
         }
         choice_trace::push(choice_trace::Choice {
             play: self.inp.play,
@@ -2626,10 +2640,11 @@ impl<'a> Sim<'a> {
             base,
             through,
             runners: self.r.iter().map(|r| choice_trace::RunnerView {
-                id: r.id, start: r.start, s: r.s, speed: r.v, goal: visible_target(r), intended_goal: r.goal,
+                id: r.id, start: r.start, s: r.s, speed: r.v, goal: visible_target(r, self.f[by].a.throw_choice).unwrap_or((r.s / BASE_L).round() as u8), intended_goal: r.goal,
                 out: r.out, scored: r.scored, protected_overrun: r.overrun != OverrunPhase::None,
             }).collect(),
-            options,
+            selected_option,
+            options: options.iter().map(|o| o.evidence(self)).collect(),
         });
     }
 
@@ -2646,7 +2661,7 @@ impl<'a> Sim<'a> {
                 continue;
             }
             let on_base = (r.s / BASE_L - (r.s / BASE_L).round()).abs() * BASE_L < 0.3;
-            if !on_base && (self.runner_pos(r) - fd.pos).norm() < 1.2 {
+            if !on_base && (self.runner_pos(r) - fd.pos).norm() < fd.a.throw_choice.tag_reach_m {
                 let id = r.id;
                 self.emit(Input::TagContact { t: self.t, fielder: fd.id, runner: id, holding_ball: true });
                 if self.done {
@@ -2658,7 +2673,7 @@ impl<'a> Sim<'a> {
         for b in 1..=4u8 {
             if (base_pos(b) - fd.pos).norm() < 0.6 {
                 let base = if b == 4 { 4 } else { b };
-                let pending = self.r.iter().any(|r| !r.out && !r.scored && r.goal >= base && r.s < base as f64 * BASE_L - 0.1)
+                let pending = self.r.iter().enumerate().any(|(k, r)| !r.out && !r.scored && self.forced(k) && r.start + 1 == base && r.s < base as f64 * BASE_L - 0.1)
                     || self.r.iter().any(|r| !r.out && r.start == base && r.s > base as f64 * BASE_L + 0.1);
                 if pending && !self.out.facts.iter().any(|f| matches!(f, Input::BaseTouched { agent, base: bb, holding_ball: true, .. } if *agent == fd.id && *bb == base)) {
                     self.emit(Input::BaseTouched { t: self.t, agent: fd.id, base, holding_ball: true });
@@ -2668,118 +2683,48 @@ impl<'a> Sim<'a> {
                 }
             }
         }
-        // A forced runner heading for a base this fielder is closer to: run it there now
-        // (stepping on a bag needs no transfer).
-        let tracing = choice_trace::enabled();
-        let mut carry_options = Vec::new();
-        for (k, r) in self.r.iter().enumerate() {
-            if r.out || r.scored || r.v < 0.5 || r.overrun != OverrunPhase::None {
-                continue;
-            }
-            let goal = visible_target(r);
-            let tgt = base_pos(goal);
-            let d_me = (tgt - fd.pos).norm();
-            let t_me = run_time(d_me, fd.a.speed, fd.a.tau_a);
-            let t_runner = runner_eta((goal as f64 * BASE_L - r.s).abs(), r.v);
-            if tracing {
-                carry_options.push(choice_trace::OptionEstimate {
-                    runner: r.id, base: goal, kind: "near_carry", force: self.forced(k) && goal == r.start + 1 && r.s < goal as f64 * BASE_L,
-                    runner_at: self.t + t_runner, ball_at: self.t + t_me,
-                    direct_at: None, via_at: None, set_at: None, receiver: None, receiver_at: None,
-                    p_out: None, weight: None, value: None, through: false, distance: d_me,
-                });
-            }
-            if d_me < 8.0 && t_me + 0.1 < t_runner {
-                self.trace_choice(by, "near_carry", goal, false, carry_options);
-                self.f[by].target = tgt;
+        // Carry and throw are alternatives in ONE table. In particular, taking
+        // the nearby bag cannot bypass an available lead force or double play.
+        let options = self.holder_options(by);
+        let best = options.iter().enumerate().filter(|(_, o)| o.p_out > 0.3)
+            .fold(None, |best: Option<usize>, (i, o)| if best.is_none_or(|j| o.value > options[j].value) { Some(i) } else { best });
+        if debug_throw() {
+            eprintln!("t {:.2} holder {} best {:?}; options {:?}", self.t, by, best, options);
+        }
+        let (b, through, margins) = if let Some(i) = best {
+            let o = options[i];
+            if o.carry {
+                // Running with the ball needs no transfer, only his feet (a diver's get-up).
+                let ready = if fd.dove { fd.ready_at } else { fd.up_at };
+                if self.t >= ready {
+                    self.trace_choice(by, "carry", o.base, false, Some(i), &options);
+                    self.f[by].target = base_pos(o.base);
+                    self.f[by].carry_to = Some(o.base);
+                    // Scorer evidence (rules-spec §10.2): he is carrying the ball to put a runner out.
+                    if !self.out.scorer_carries.iter().any(|c| c.fielder == fd.id && c.base == o.base) {
+                        let batter_goal = self.r.iter().find(|r| r.start == 0).map(|r| r.goal).unwrap_or(0);
+                        self.out.scorer_carries.push(ScorerCarryFact { fielder: fd.id, t: self.t, base: o.base, batter_goal });
+                    }
+                }
                 return;
             }
-        }
+            (o.base, o.through, Some((o.runner_at - o.ball_at, o.runner_at - o.set_ball_at)))
+        } else if m::hypot(fd.pos.x, fd.pos.y) >= INFIELD_R {
+            // No play: get the ball back to second base, the quicker way.
+            (2, self.throw_race(by, 2).through, None)
+        } else {
+            self.abandon_carry(by);
+            return;
+        };
+        // He plants for the throw: a carry he gave up does not keep him running at its bag
+        // while his set-up clock runs (§5.6 A4).
+        self.abandon_carry(by);
         if self.t < fd.up_at {
             return;
         }
-        // His set-up, and what letting go at time `at` (now, or later) gives him: when the
-        // ball leaves at the soonest, and how fast (he knows what hurrying costs his arm).
-        let release = |tgt: Vec3, at: f64| -> (f64, f64) {
-            let su = self.set_up_for(by, tgt);
-            let t_rel = at.max(fd.up_at + su.earliest_s);
-            (t_rel, THROW_EFFORT * fd.a.arm * su.speed_mult(su.hurry(t_rel - fd.up_at)))
-        };
-        let set_at = |tgt: Vec3| fd.up_at + self.set_up_for(by, tgt).set_s;
-        // A cutoff or relay man between the holder and the bases, if there is one: the throw
-        // can go through him when that gets it there sooner (a long throw slows with drag,
-        // agent-models §5.5) or when the holder cannot reach the base on the fly.
-        let relay = (0..9).find(|&i| i != by && matches!(self.f[i].role, Role::Relay(_)) && (self.f[i].pos - fd.pos).norm() > 10.0);
-        // When the ball reaches base `b` thrown straight there, and through the relay man,
-        // let go at `at` or as soon after as he can.
-        let direct = |b: u8, at: f64| -> f64 {
-            let (t_rel, v) = release(base_pos(b), at);
-            t_rel + throw_time(v, (base_pos(b) - fd.pos).norm())
-        };
-        let via = |b: u8, at: f64| -> f64 {
-            let Some(i) = relay else { return f64::INFINITY };
-            let rp = self.f[i].pos;
-            if (base_pos(b) - rp).norm() >= (base_pos(b) - fd.pos).norm() {
-                return f64::INFINITY; // not between the holder and this base
-            }
-            let (t_rel, v) = release(rp, at);
-            t_rel + throw_time(v, (rp - fd.pos).norm()) + RELAY_TRANSFER_FRAC * self.f[i].a.transfer + throw_time(THROW_EFFORT * self.f[i].a.arm, (base_pos(b) - rp).norm())
-        };
-        // Options: each base a running runner is heading to. For the best one he keeps how
-        // much time he has on the runner letting go now, and waiting until he is set.
-        let mut best: Option<(f64, u8, bool, f64, f64)> = None;
-        let mut options = Vec::new();
-        for (k, r) in self.r.iter().enumerate() {
-            if r.out || r.scored || r.v < 0.5 || r.overrun != OverrunPhase::None {
-                continue; // standing runners are not a play, nor is an overrun of first
-            }
-            // The base a moving runner is heading for, and when he gets there at his
-            // current speed (both visible).
-            let goal = visible_target(r);
-            let t_runner = self.t + runner_eta((goal as f64 * BASE_L - r.s).abs(), r.v);
-            // The ball beats the runner only once someone is at the bag to take it.
-            let recv = self.receiver_for(by, goal);
-            let recv_ready = self.receiver_ready(recv, goal);
-            let (t_direct, t_via) = (direct(goal, self.t), via(goal, self.t));
-            let through = t_via < t_direct;
-            let t_ball = t_direct.min(t_via).max(recv_ready) + 0.05;
-            // The same throw from a full set-up.
-            let leg = if through { relay.map(|i| self.f[i].pos).unwrap_or(base_pos(goal)) } else { base_pos(goal) };
-            let at_set = set_at(leg).max(self.t);
-            let t_ball_set = if through { via(goal, at_set) } else { direct(goal, at_set) }.max(recv_ready) + 0.05;
-            let p_out = phi((t_runner - t_ball) / 0.12);
-            let w = self.out_weight(k, goal);
-            if tracing {
-                options.push(choice_trace::OptionEstimate {
-                    runner: r.id, base: goal, kind: "throw", force: self.forced(k) && goal == r.start + 1 && r.s < goal as f64 * BASE_L,
-                    runner_at: t_runner, ball_at: t_ball,
-                    direct_at: Some(t_direct), via_at: Some(t_via), set_at: Some(t_ball_set),
-                    receiver: Some(self.f[recv].id), receiver_at: Some(recv_ready),
-                    p_out: Some(p_out), weight: Some(w), value: Some(p_out * p_out * w), through,
-                    distance: (base_pos(goal) - fd.pos).norm(),
-                });
-            }
-            // Take the sure out: an uncertain play on a lead runner loses to a certain one
-            // elsewhere (the chance is squared before the base's weight is applied).
-            if p_out > 0.3 && best.map(|b| p_out * p_out * w > b.0).unwrap_or(true) {
-                best = Some((p_out * p_out * w, goal, through, t_runner - t_ball, t_runner - t_ball_set));
-            }
-        }
-        let infield = m::hypot(fd.pos.x, fd.pos.y) < INFIELD_R;
-        if debug_throw() {
-            eprintln!("t {:.2} holder {} at ({:.1},{:.1}) best {:?}; runners {:?}", self.t, by, fd.pos.x, fd.pos.y, best, self.r.iter().map(|r| (r.start, r.s, r.goal, r.out, r.scored)).collect::<Vec<_>>());
-        }
-        // (base, through the relay man, time in hand now and from a full set-up)
-        let target_base = match best {
-            Some((_, b, through, now, set)) => Some((b, through, Some((now, set)))),
-            // No play: get the ball back to second base, the quicker way: straight there, or
-            // through the cutoff man when that is quicker or the throw cannot carry.
-            None if !infield => Some((2, via(2, self.t) < direct(2, self.t), None)),
-            None => None,
-        };
-        let Some((b, through, margins)) = target_base else { return };
+        let race = self.throw_race(by, b);
         let tgt = base_pos(b);
-        let leg = match relay {
+        let leg = match race.relay {
             Some(i) if through => self.f[i].pos,
             _ => tgt,
         };
@@ -2787,20 +2732,6 @@ impl<'a> Sim<'a> {
         // gets set. Short of time he lets go as soon as waiting longer would cost him his
         // margin, and as soon as he can if he has none; but only if that gets the ball
         // there sooner (not when it would wait for the man covering the bag anyway).
-        if !through && (tgt - fd.pos).norm() < 6.0 {
-            // Closer to take it himself: no throw, so no set-up for one; he goes once he
-            // has the ball in hand (his plain transfer, as before hurried throws: Codex
-            // hurried-throws review #2).
-            if self.t >= fd.ready_at {
-                self.trace_choice(by, "carry", b, through, options);
-                self.f[by].target = tgt;
-                if margins.is_some() && !self.out.scorer_carries.iter().any(|c| c.fielder == fd.id && c.base == b) {
-                    let batter_goal = self.r.iter().find(|r| r.start == 0).map(|r| r.goal).unwrap_or(0);
-                    self.out.scorer_carries.push(ScorerCarryFact { fielder: fd.id, t: self.t, base: b, batter_goal });
-                }
-            }
-            return;
-        }
         let su = self.set_up_for(by, leg);
         let since = self.t - fd.up_at;
         if since < su.earliest_s {
@@ -2815,21 +2746,20 @@ impl<'a> Sim<'a> {
                 return;
             }
         }
-        if through {
-            if let Some(i) = relay {
-                self.trace_choice(by, if margins.is_some() { "throw" } else { "return" }, b, true, options);
-                self.throw_to(by, leg, b, i, true);
-                if let Some(fact) = self.out.scorer_throws.last_mut() { fact.attempted_out = margins.is_some(); }
-                return;
-            }
+        let action = if margins.is_some() { "throw" } else { "return" };
+        if let (true, Some(i)) = (through, race.relay) {
+            self.trace_choice(by, action, b, true, best, &options);
+            self.throw_to(by, leg, b, i, true);
+            if let Some(fact) = self.out.scorer_throws.last_mut() { fact.attempted_out = margins.is_some(); }
+            return;
         }
-        let receiver = self.receiver_for(by, b);
-        // Time the release so the ball arrives when the receiver can be at the bag.
-        if direct(b, self.t) < self.receiver_ready(receiver, b) - 0.05 {
+        let receiver = race.receiver;
+        // Preserve the existing release gate for a receiver still covering.
+        if race.direct < race.receiver_at - 0.05 {
             self.f[receiver].target = tgt;
             return;
         }
-        self.trace_choice(by, if margins.is_some() { "throw" } else { "return" }, b, false, options);
+        self.trace_choice(by, action, b, false, best, &options);
         self.throw_to(by, tgt, b, receiver, false);
         if let Some(fact) = self.out.scorer_throws.last_mut() { fact.attempted_out = margins.is_some(); }
         self.f[receiver].target = tgt;
@@ -2840,6 +2770,14 @@ impl<'a> Sim<'a> {
             }
         }
         self.back_up_throw(fd.pos, b);
+    }
+
+    /// A holder who gives up a carry pulls up where braking stops him (agent-models §5.6 A4);
+    /// any other target (a receiver's step to his bag, the catch's own stop) is left alone.
+    fn abandon_carry(&mut self, by: usize) {
+        if self.f[by].carry_to.take().is_some() {
+            self.f[by].target = stop_point(&self.f[by]);
+        }
     }
 
     /// Fielder `by`'s set-up for a throw to ground point `tgt` with the ball he holds: the
@@ -3001,6 +2939,7 @@ fn new_sim<'a>(inp: &'a LiveInput<'a>, st: &'a mut RulesState) -> Sim<'a> {
                 took_diving: false,
                 backs: None,
                 peel: None,
+                carry_to: None,
             }
         })
         .collect();
@@ -3012,6 +2951,7 @@ fn new_sim<'a>(inp: &'a LiveInput<'a>, st: &'a mut RulesState) -> Sim<'a> {
             start: x.base,
             s: if x.base == 0 { 0.0 } else { lead_s(x.base) },
             v: 0.0,
+            direction: 1.0,
             vmax: x.speed,
             goal: x.base,
             out: false,
@@ -5318,11 +5258,76 @@ mod tests {
         sim.f[0].pos = base_pos(1);
         let fd = &mut sim.f[2];
         (fd.up_at, fd.ready_at, fd.set_base, fd.face) = (1.0, 1.65, 0.65, Some(Vec3::new(0.0, -1.0, 0.0)));
-        // The batter 1.2 s from first: too close for the sure-thing run check, a play all the same.
-        (sim.r[0].s, sim.r[0].v, sim.r[0].goal) = (BASE_L - 8.2 * 1.2, 8.2, 1);
+        // A4: a genuinely safe carry. A 1.2 s runner instead makes the throw the
+        // better option; proximity no longer overrides that comparison.
+        (sim.r[0].s, sim.r[0].v, sim.r[0].goal) = (BASE_L - 8.2 * 3.0, 8.2, 1);
         assert!((sim.set_up_for(2, base_pos(1)).set_s - 0.77).abs() < 1e-9);
         sim.holder_act();
         assert!((sim.f[2].target - base_pos(1)).norm() < 1e-9, "target {:?}", sim.f[2].target);
+    }
+
+    /// Third baseman 3 m from third with the ball at 2.0 s, on his feet since 1.0; the first
+    /// baseman on his bag; the batter 4 m out of the box and an unforced runner (first is
+    /// open) 10 m past second, both running at 6 m/s. Both outs are sure by any timing: the
+    /// runner needs about 2.3 s to third against about 0.6 s for the holder, the batter
+    /// about 3.3 s to first against a 38 m throw.
+    fn third_baseman_with_an_unforced_runner_coming(outs: u8) -> Sim<'static> {
+        let fx: &'static Fixture = Box::leak(Box::new(fixture(&[(7, 2)])));
+        let inp: &'static LiveInput<'static> = Box::leak(Box::new(input(fx, vec![RunnerIn { id: fx.st.batter, base: 0, speed: 8.2 }, RunnerIn { id: 7, base: 2, speed: 8.2 }])));
+        let st: &'static mut RulesState = Box::leak(Box::new(fx.st.clone()));
+        st.outs = outs;
+        let mut sim = new_sim(inp, st);
+        sim.t = 2.0;
+        held_at(&mut sim, 4, base_pos(3) + Vec3::new(3.0, 0.0, 0.0));
+        sim.f[2].pos = base_pos(1);
+        sim.f[4].up_at = 1.0;
+        (sim.r[0].s, sim.r[0].v, sim.r[0].goal) = (4.0, 6.0, 1);
+        (sim.r[1].s, sim.r[1].v, sim.r[1].goal) = (2.0 * BASE_L + 10.0, 6.0, 3);
+        sim.holder_act();
+        sim
+    }
+
+    // agent-models §5.6 A4: carrying to an unforced runner's bag is a tag plan weighed as a
+    // tag, in the same comparison as the throws. With two out a sure force beats a sure tag
+    // (1.0 against `TWO_OUT_TAG_W` 0.9): he throws to first. With fewer than two out the
+    // lead runner at third is worth more than the batter (1.1 against 0.9), and a fielder
+    // 3 m from the bag with the runner 17 m away tags him there.
+    #[test]
+    fn an_unforced_runner_is_a_tag_weighed_against_the_force() {
+        let sim = third_baseman_with_an_unforced_runner_coming(2);
+        assert!(matches!(sim.ball, Ball::Thrown { to_base: 1, .. }), "two out: the force at first");
+        let sim = third_baseman_with_an_unforced_runner_coming(0);
+        assert!(matches!(sim.ball, Ball::Held { by: 4 }), "none out: he keeps the ball");
+        assert_eq!(sim.f[4].carry_to, Some(3));
+        assert!((sim.f[4].target - base_pos(3)).norm() < 1e-9, "and takes it to third for the tag");
+    }
+
+    // agent-models §5.6 A4 (the measuring note's seed 13 / play 140): bases loaded, one out,
+    // the first baseman 3 m from his bag. Carrying it there is a near-sure out on the batter,
+    // but it takes the force off every other base. The runner from third is 24 m from home
+    // and the catcher is on the plate: a sure force there is worth 1.3 against first's 0.9.
+    // The old proximity shortcut ran to first without looking at home.
+    #[test]
+    fn a_sure_force_at_home_beats_carrying_first() {
+        let fx = fixture(&[(5, 1), (6, 2), (7, 3)]);
+        let runners = vec![RunnerIn { id: fx.st.batter, base: 0, speed: 8.2 }, RunnerIn { id: 5, base: 1, speed: 8.2 }, RunnerIn { id: 6, base: 2, speed: 8.2 }, RunnerIn { id: 7, base: 3, speed: 8.2 }];
+        let inp = input(&fx, runners);
+        let mut st = fx.st.clone();
+        st.outs = 1;
+        let mut sim = new_sim(&inp, &mut st);
+        sim.t = 2.0;
+        held_at(&mut sim, 2, base_pos(1) + Vec3::new(-1.0, 2.8, 0.0));
+        sim.f[1].pos = base_pos(4);
+        sim.f[2].up_at = 0.5;
+        // The batter 1.2 s from first: no time for a second out there after any force.
+        (sim.r[0].s, sim.r[0].v, sim.r[0].goal) = (BASE_L - 8.2 * 1.2, 8.2, 1);
+        for k in 1..4 {
+            let r = &mut sim.r[k];
+            (r.s, r.v, r.goal) = (r.start as f64 * BASE_L + 3.0, 6.0, r.start + 1);
+        }
+        sim.holder_act();
+        assert_eq!(sim.f[2].carry_to, None, "he must not run it to first");
+        assert!(matches!(sim.ball, Ball::Thrown { to_base: 4, .. }), "the force at home");
     }
 
     /// The shortstop holds the ball at (−8, 38) at time 1.0, on his feet, having taken it
