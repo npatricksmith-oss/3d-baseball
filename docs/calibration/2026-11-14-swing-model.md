@@ -6,7 +6,7 @@ Branch `work/swing-model`, cut from main `bcbb91f`. Not merged: the owner rules 
 
 ## 1. The claims, checked on main `bcbb91f`
 
-Sources for MLB: a Baseball Savant pitch-level sample I pulled for this note (regular season 2025, six dates: Apr 22, May 20, Jun 17, Jul 22, Aug 19, Sep 16; 26,489 pitches, 12,180 tracked swings, 11,238 competitive by Savant's definition: a batter's fastest 90% plus any 60+ mph swing with a 90+ mph exit speed; same query template as [R13](../research/r13-foul-direction.md)). Analysis scripts: `analysis/statcast/` (the CSVs are not committed; §8 has the query). R13's 2025 sample (12 other dates) gives the same means to within 0.3.
+Sources for MLB: a Baseball Savant pitch-level sample I pulled for this note (regular season 2025, six dates: Apr 22, May 20, Jun 17, Jul 22, Aug 19, Sep 16; 26,489 pitches, 12,180 tracked swings, 11,238 competitive by Savant's definition: a batter's fastest 90% plus any 60+ mph swing with a 90+ mph exit speed; same query template as [R13](../research/r13-foul-direction.md)). Analysis scripts: `analysis/statcast/` (the CSVs are not committed; §8 has the query). R13's 2025 sample (12 dates, these six among them) gives the same means to within 0.3 (bat speed 69.9 against 69.7, swing length 7.2 against 7.2, attack angle 9.0 against 9.0, tilt 32 against 32.2).
 
 **Claim 1, bat speed grows with reach: confirmed.**
 
