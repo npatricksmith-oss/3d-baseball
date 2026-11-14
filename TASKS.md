@@ -1,13 +1,28 @@
 # Task List
 
-**Last updated:** 2026-11-13 (dives shown in the client, the get-up after a rimmed dive, two-out throws; before that, the overrun of first and runner position samples; before that, foul measures, sources and the correction experiment; pushed; the spray experiment parked for later; before that, the read knows the ball started at the plate; before that, called-off infielders back up the catch; before that, pop-up calls on `fix/popup-calls`; before that, owner's observations merged into the "Owner backlog" section; before that, the coordinator run on `coord/review-fixes`)
+**Last updated:** 2026-11-13 (the dive rate judged and fixed, A5; before that, dives shown in the client, the get-up after a rimmed dive, two-out throws; before that, the overrun of first and runner position samples; before that, foul measures, sources and the correction experiment; pushed; the spray experiment parked for later; before that, the read knows the ball started at the plate; before that, called-off infielders back up the catch; before that, pop-up calls on `fix/popup-calls`; before that, owner's observations merged into the "Owner backlog" section; before that, the coordinator run on `coord/review-fixes`)
 The live to-do list for the project. [PLAN.md](PLAN.md) holds decisions and design. This file holds what is next and what is done. Update it at the end of every work session.
 
 Status: `[ ]` not started · `[~]` in progress · `[x]` done · `[?]` needs an owner decision
 
 ---
 
-## Resume here (2026-11-13, seventh session: dives, from the owner watching seed 7475)
+## Resume here (2026-11-13, eighth session: the dive rate, A5)
+
+Branch `claude/a15-de1824` (from main at `328e51b`). `cargo test --workspace --release`: all pass.
+
+**Waiting on a review:** the Codex review of the dive-rate change (`docs/reviews/2026-11-13-codex-dive-rate-review.md`) was started in the background at the end of the session. Commit it, fix or defer every finding, and write its Resolution before anything else.
+
+Done ([note](docs/calibration/2026-11-13-dive-rate.md), agent-models §5.3–§5.4):
+- **Judged: the dive rate was not believable.** 22 dives a game against 2 to 3 in real games (Sports Info Solutions: a team's shortstops dive 36 times a season; the sim's dove 4.4 times a game for both teams, and its outfielders 8 times a game).
+- **Fixed by when a fielder leaves his feet**, not by a rate: a dive must gain him something by his own read (no dive at a roller he is about to pick up); a dive needs its lunge time from when he knew he must dive (the pitcher cannot lay out for 0.7 s after contact); a ball just past reach is taken with a stretch on his feet (0.4 m, 0.3 s off balance); the further out, the harder the catch; an outfielder dives only when he gives himself an even chance. **3.1–3.5 dives a game, 42–44% caught.**
+- **Run environment moved, not by tuning:** runs/team-game 5.48 → 4.77 (seeds 0–299) and 5.71 → 4.94 (seeds 1000–1299); GB hits .425 → .332 (MLB .24). The stretch does it (without it: 5.63 runs, 7.3 dives a game). Fly-ball hits rose on one seed set (.131 → .160) and not on the other.
+- New diagnostic: `cargo run --release -p bb_game --example dive_probe -- 300 1000` (add `list` to print each dive).
+
+Not done: real dive and get-up clips; the stretch has no animation; not watched in the client after this change. The shortstop still dives about 2.5 times the real rate (all batters are right-handed until A1, and near misses from the earliest-point fielding plan). The four new parameters are estimates [E].
+
+## Previous: 2026-11-13, seventh session: dives, from the owner watching seed 7475
+
 
 Branch `claude/cf-misplay-analysis-98b93b` (from main at `2355c34`). `cargo test --workspace --release`: all pass.
 
@@ -19,7 +34,7 @@ Done (the owner watched seed 7475 and reported three plays; the traces are in th
 - **Dives are shown in the client** (A5, play 58: the shortstop's diving stop looked like him standing with the ball for 2 s). In the sim a dive carries the body over a 0.3 s lunge (`DIVE_LUNGE_S` [E]), and the timeline gets `Dive`/`DiveUp` markers. `BbFrame.dives` reports dives under way. The client lays the figure out toward the ball (a stock leap clip, tipped 45° and dropped to the turf), holds him there, and stands him up through the landing clip's crouch. Check it headlessly with `client/run.sh 7 -RenderOffscreen -BbDiveShots=3`; `-BbAnimTest=dive` previews pose candidates.
 - Measured: fielders dive about 23 times a game (both teams). Most dives start at the edge of dive range (2.25–2.5 m), and about 60% are caught. The owner accepts dives ("it's fine if he dives").
 
-Not done: real dive and get-up clips (the stand-ins are the mannequin's leap and landing). A18 (outfielders block hard singles instead of diving) is still open.
+Not done: real dive and get-up clips (the stand-ins are the mannequin's leap and landing). A18 (outfielders block hard singles instead of diving) was done with the dive rate in the eighth session.
 
 ## Previous: 2026-11-13, sixth session: the overrun of first
 
@@ -328,7 +343,7 @@ On the field (sim):
 - [ ] A2. **Rosters: player names, numbers, positions** [W9, part of W5]. Most of the items below need it (the home-run display, the box score, uniforms, handedness per player).
 - [ ] A3. **Throwing ratings and hurried throws.** Each player has ratings for arm speed, accuracy, and set-up time. A hurried throw loses accuracy and speed; a fielder with time to get balanced gains both. Have: the spec's `ArmStrength`, `ArmAccuracy`, `Transfer` and its rush and off-balance noise terms (agent-models §5.5); in code each fielder has an arm speed and a fixed transfer time. Missing: no throw is ever hurried (the rush terms are not built), and the spec gives a rushed throw no speed loss, so §5.5 needs that added.
 - [ ] A4. **Smarter throw choices from the outs and the runners.** The owner's example: runner on third, two outs, the fielders should take the force at first or second, not throw home. Collect plays where the choice is wrong before changing the option evaluation (agent-models §5.5).
-- [~] A5. **Dives that extend range, with a real cost to get up and throw.** Have: chasers dive (1.5 m extra reach, 1.5 s to get up, harder capture). The body lunges toward the ball, and since 2026-11-13 the client shows the dive, lying down, and the get-up with stand-in clips. Measured 2026-11-13: about 23 dives a game, 60% caught, most started at the edge of dive range. Missing: real dive and get-up animation, and a judgment of whether that dive rate is believable (A18 is one part of it).
+- [~] A5. **Dives that extend range, with a real cost to get up and throw.** Have: chasers dive (up to 1.5 m extra reach, 1.5 s to get up, harder the further out), the client shows the dive and the get-up with stand-in clips, and since 2026-11-13 the rate is believable: about 3 a game against 22 before and 2 to 3 in real games ([note](docs/calibration/2026-11-13-dive-rate.md)). A ball just past reach is taken with a stretch on his feet; outfielders dive only when they like their chances (this was "A18"). Missing: real dive and get-up animation, a stretch animation, and the owner watching it.
 - [ ] A6. **Runners slide** when the play calls for it (agent-models §6.2; was in M5). Not built.
 - [ ] A7. **Windup vs. stretch** [W2]: a full windup with the bases empty, the stretch with runners on; the stretch shortens the delivery, which matters to steals. Owner's references: [Am J Sports Med 2024 study](https://journals.sagepub.com/doi/abs/10.1177/03635465241247543), [Umpire Bible: pitching positions](https://umpirebible.com/pitching-positions/), and a search for "pitching stretch vs windup visualization". Not built (one delivery; agent-models §2.6 sketches the slide step).
 - [ ] A8. **Runners lead off only once the pitcher is set; pickoffs.** The owner saw runners leading before the pitcher was on the mound, where a real pitcher would pick them off. Have: fixed leads of 5.5 / 6.5 / 4.5 m from first, second, third (`LEAD_M` in `live.rs`). Missing: lead timing tied to the pitcher coming set, leads chosen from the runner's belief of pickoff risk, and the pickoff itself (agent-models §2.6, §6.1).

@@ -379,6 +379,13 @@ A kinematic point with heading:
 - Dive: if the gap at the predicted catch time is between arm reach and arm reach + 1.5 m [E], the fielder may dive; a dive adds reach, inflates glove σ (§5.4), and costs 1.5 s [E] to get up before a throw.
   *Built 2026-11-13 (`try_captures`, `fielder_step`):* a dive carries the body: over 0.3 s (`DIVE_LUNGE_S` [E]) he travels toward the ball until his glove is at it (arm's reach short of the ball, at most the 1.5 m of dive extension), then lies there, still, until he is up. The lunge never crosses the wall: the body stops 0.3 m short of it (`BODY_R` [E]), which matters where the fair and foul fences meet at an inward corner. He throws from where he landed. A ball he holds while down is by the turf (0.3 m), not at chest height. The get-up runs from the dive. Until he is up the fielder cannot dive again, but he can still grab a ball that comes within arm's reach at or below dive height (1.2 m). A ball rimmed off his glove that stays close is the usual case (§5.4: bobbles that stay close can be re-fielded). Whichever attempt secures the ball, he can throw only once he is up: at the end of the get-up plus his transfer (for a thrown ball he takes, the receiver's shorter transfer, also from when he is up). After a rimmed ball he may try again 0.5 s later; after a clean miss, not until he is up. Before this, a fielder who rimmed a dive could dive again from the ground half a second later, and that catch started a second full get-up. On seed 7475 play 25, the CF held a single 2.4 s while the runner went from first to third.
 
+  *When he dives, rebuilt 2026-11-13 (owner backlog A5; docs/calibration/2026-11-13-dive-rate.md):* fielders had dived 22 times a game against 2 to 3 in real games. Past his reach (1.0 m) a chasing fielder now has two ways to a batted or loose ball:
+  - **A stretch on his feet**, up to `STRETCH` 0.4 m [E] further, at any catchable height. He stays up, and it costs him `STRETCH_COST_S` 0.3 s [E] before he can throw (he is off balance, §5.5).
+  - **A dive**, up to 1.5 m further, for a ball at or below 1.2 m. The body takes 0.3 s to lay out, so he has only the extension that the time since he knew he must dive allows: every 0.1 s, with the ball within 15 m, he asks whether going for it gains him anything (`Sim::dive_gains`), and the answer has to have held without a break. The pitcher, finishing his delivery, cannot lay out until `PITCHER_RECOVER_S` 0.7 s [E] after contact.
+  - **Whether it gains him anything** is his own judgment, from his own read and his own running. A ball still in the air: only a catch is an out, so it does unless he can catch it on his feet before it comes down. A ball on the ground: only if staying on his feet would get him the ball later than the cost (the 1.5 s get-up for a dive, the 0.3 s for a stretch). So nobody dives at a roller he is about to pick up.
+  - **An outfielder has nobody behind him.** He knows his own hands: he dives only when he gives himself at least `OF_DIVE_MIN_P` 0.5 [E] of the ball (the §5.4 σ, with the ball's speed and how far out he would be); otherwise he plays it on his feet. Infielders always go.
+  - Either way the glove meets the ball where it passes closest, as for a standing catch.
+
 ### 5.4 Capture
 
 The glove moves toward the predicted ball position at capture time, limited by a hand speed of 6 m/s [E] within the reach envelope (arm length 0.42·H [E] plus lean and dive extension).
@@ -397,6 +404,7 @@ At the capture instant, the glove pocket center has a Gaussian error in the plan
 | `reach_frac` | fraction of maximum reach used | k_reach = 0.6 |
 | `short_hop` | 1 if the ball bounced within 1 m before capture | k_hop = 1.0 |
 | `diving` | 1 if diving | k_dive = 1.0 |
+| extension (built 2026-11-13) | off his feet or stretching: how far past reach the glove is, as a fraction of the 1.5 m dive | `K_EXTEND` = 1.5 [E], added with k_dive; a stretch counts as `diving` = 1 |
 
 **Outcome (pure geometry):** with `d` the distance from ball center to pocket center in that plane:
 - `d ≤ r_pocket` (0.06 m [E]): **catch**.
