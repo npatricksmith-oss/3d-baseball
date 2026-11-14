@@ -29,24 +29,25 @@ Numbers are only comparable within one seed set and game count. The standard set
 
 ## 1. Where the numbers stand
 
-After hurried throws (A3), main at `a69dd50`, 300 games, seeds 0–299 (MLB column approximate, from the calibration notes):
+After the limits of the play area (A10), `980a7dc` (main `52d6632` merged with A10), 300 games, seeds 0–299 [1000–1299] (MLB column approximate, from the calibration notes):
 
 | | now | MLB |
 |---|---|---|
-| runs / team-game | 5.54 (TASKS says 5.53 after the review fixes) | about 4.4–4.6 |
-| K% | 15.4 | 22 |
-| BB% | 6.9 | 8.5 |
-| HR / PA | 5.12% | 3% |
-| reached on BIP | 32.5% | |
-| GB hits | .352 | .24 |
-| LD hits | .724 | about .68 |
-| FB hits | .127 | .13 |
-| PU hits | .014 | about .02 |
+| runs / team-game | 5.41 [5.62] | about 4.4–4.6 |
+| K% | 16.3 [15.8] | 22 |
+| BB% | 7.1 [7.4] | 8.5 |
+| HR / PA | 5.18% [5.09%] | 3% |
+| reached on BIP | 33.9% [33.2%] | |
+| GB hits | .353 [.353] | .24 |
+| LD hits | .714 [.708] | about .68 |
+| FB hits | .135 [.130] | .13 |
+| PU hits | .019 [.021] | about .02 |
+| foul outs a game | 2.18 [2.23] | about 1.4 (2017) |
 | foul share of contact | 23.7% (3,000 PAs, measured 2026-11-13, right-handed only) | 51% |
 | dives a game | 3.8 (seeds 1000–1299, after handedness) | 2–3 |
 | double plays a game | 2.0 (measured 2026-11-11, not since) | about 1.7 |
 
-Seeds 1000–1299 were last measured after handedness: 5.43 runs. A3 was measured on seeds 0–299 only.
+The foul share, dives and double plays were not remeasured for A10.
 
 ## 2. The run environment in one line per step
 
@@ -88,6 +89,8 @@ Runs per team-game. A break in the table means the sample changed and the next n
 | 11-13 | Dive rate (A5): the stretch | `56dd244`, `65efea2` | 4.73 [4.89] | near misses become pick-ups; **unvalidated length** |
 | 11-13 | Handedness (A1) | `cb3d243` | 5.35 [5.43] | half of PAs now opposite-handed; K% −2.6, HR/PA +1.1 points |
 | 11-13 | Hurried throws (A3) | `c493b81`, `a69dd50` | 5.54 | footwork +0.37, hurrying and the turn −0.18 |
+| 11-14 | Arm strength by position | `4937cb8` | 5.40 [5.53] | the two sets traded values; mean unchanged |
+| 11-14 | Limits of the play area (A10) | `980a7dc` | 5.41 [5.62] | 1.6 fewer foul outs a game; +0.01 [+0.09] (on `a69dd50`: +0.15 [+0.35]) |
 
 The "5.48" at the top of the last block is a coincidence of two samples: the dive-fix review's 3 × 200-game endpoint was 5.4783 and the 300-game seeds 0–299 figure before A5 was also 5.48. Nobody reconciled them.
 
@@ -99,6 +102,7 @@ Hit rates are per ball in play of that type. "Seed 5" and "seed 2" mean `sim-cli
 
 | Task | Commit | What changed | Numbers (before → after) | Cause | Open |
 |---|---|---|---|---|---|
+| **A10 limits of the play area** | `e7916f0`..`c428b35`, merged with main at `980a7dc`; [note](calibration/2026-11-14-play-area.md) | Backstop (60 ft, 9 m screen), foul-territory walls (50 ft off the lines, 4 ft, closing in to the poles from 100 ft), dugout openings (20–80 ft along the lines); a ball that leaves the field is dead and ends the play; a thrown ball out of play gets two bases (time of pitch or of throw, rules-spec §7.2); fielders stop at walls. Before, foul ground reached the fence's 330 ft all round. Every digest changed | Main `52d6632` → `980a7dc`, seeds 0–299 [1000–1299]: runs 5.40 → 5.41 [5.53 → 5.62]; K% 15.3 → 16.3 [14.8 → 15.8]; BB% 7.0 → 7.1 [7.2 → 7.4]; HR/PA 5.14% → 5.18% [4.97% → 5.09%]; reached on BIP 32.4% → 33.9% [32.7% → 33.2%]; GB .348 → .353 [.353 → .353]; LD .713 → .714 [.721 → .708]; FB .128 → .135 [.132 → .130]; PU .011 → .019 [.015 → .021], PU share 11.1% → 8.7% [10.9% → 9.1%]; PA/team-game 38.2 → 38.4 [38.8 → 39.0]; pitches/game 219 → 223 [221 → 226]; fouls a game 11.8 → 14.0 [11.8 → 14.1]; **foul outs a game 3.71 → 2.18 [3.91 → 2.23]** (MLB about 1.4, 2017); foul balls out of play 0.52 → 10.49 [0.55 → 10.59]; throws out of play 0 → 0.18 [0 → 0.11], all into a dugout. On the branch's own base `a69dd50` the same change gave runs 5.53 → 5.68 [5.40 → 5.75], HR/PA 5.12% → 5.26% [4.88% → 5.31%] | Foul pops caught 30–100 m from the plate now leave the field: 1.6 fewer outs a game, so longer PAs (K% up, pitches up), more PAs, and caught foul pops gone from the balls in play (PU share down; reached on BIP up 1.1–1.5 points by composition, 33.5% predicted). Runs: about +0.22 expected from the outs; measured +0.01 [+0.09] here and +0.15 [+0.35] on `a69dd50`, mean of the four +0.15, each pair's σ about 0.18. A build with the walls moved out of reach reproduced the old numbers (5.48 [5.36] against 5.53 [5.40] on `a69dd50`) | **HR/PA rise larger than the extra PAs explain** (§5). Netting, rolling caroms off walls, glove deflections not modeled. Nothing was tuned to bring runs back |
 | **Arm strength by position** | `4937cb8`; [note](calibration/2026-11-14-arm-by-position.md) | Grade-50 `ArmStrength` per position from Statcast's positional means (m/s): 1B 35.45, 2B 35.36, 3B 37.95, SS 38.49, LF 39.07, CF 40.05, RF 40.55; pitcher and catcher keep 36. Was 36 for every infielder and 39 for every outfielder. Every digest changed | Seeds 0–299 [1000–1299]: runs 5.53 → 5.40 [5.40 → 5.53] (mean of the two sets 5.465 → 5.465); K% 15.3 → 15.3 [15.1 → 14.8]; BB% 6.9 → 7.0 [7.3 → 7.2]; HR/PA 5.12% → 5.14% [4.88% → 4.97%]; reached on BIP 32.5% → 32.4% [32.5% → 32.7%]; GB .351 → .348 [.349 → .353]; LD .723 → .713 [.727 → .721]; FB .127 → .128 [.137 → .132]; PU .014 → .011 [.015 → .015]. Throw probe (seeds 0–299): 71.1 → 70.9 balls in play a game; outs per ball in play .590 → .591; throws taken in the air 96.3% → 96.1%; hurried over 2/3 1.95 → 1.97 a game; SS throws 7.70 → 7.91, 2B 8.16 → 8.02, LF 7.20 → 7.00 | Every throw leaves at a different speed, so every game diverges at its first throw and the two sample sets reshuffle; the two sets traded values (5.53/5.40 → 5.40/5.53), about the 0.1–0.2 spread between sets (header of this section), and their mean did not move. The per-position probe moves are in the direction of the change (the SS arm is 2.5 m/s stronger, so more of the plays that go to SS end in a throw; 2B and LF are 0.7 and 0.1 m/s weaker or less used) but no shift here is larger than the sets' own noise | **Not explained, and not resolved at 600 games:** whether the small drops in LD (.723 → .713, .727 → .721) and PU are an effect of stronger infield arms or noise. Nothing was tuned to bring any number back |
 
 ### 2026-11-13 (owner backlog A-items; 300 games, seeds 0–299 and 1000–1299)
@@ -194,7 +198,8 @@ Cases where one thing masked another. These are the pattern to look for when a n
 5. **A fielder read the world's truth.** The first Anticipation cue used the ball's true direction; the honest cue is worth half, and derived from vision almost nothing (`cdd473c` → `ab32316` → `4b5e324`).
 6. **Idle fielders were catching pop-ups by accident.** Stopping them raised PU hits from .005 to .044 and exposed the outfielders' depth misread (`077aab5`).
 7. **A second dive from the ground was turning hits into outs.** Removing it: +0.37 runs (`7a3c5b0`).
-8. **Calibration knobs fitted on a population that no longer exists.** `K_perception` 2.7 and Discipline 0.5/+0.9 were set with every PA right-on-right and 22 dives a game; both conditions have changed since.
+8. **Foul territory without walls inflated foul outs from the first day.** Foul ground reached the fence's 330 ft all round, so fielders caught foul pops 30–100 m from the plate: 3.7–3.9 foul outs a game against MLB's about 1.4. Walls (A10) cut it to 2.2 and handed the batters about 0.8 PAs a team-game back; every calibration before 2026-11-14 was made with those extra outs (`980a7dc`).
+9. **Calibration knobs fitted on a population that no longer exists.** `K_perception` 2.7 and Discipline 0.5/+0.9 were set with every PA right-on-right and 22 dives a game; both conditions have changed since.
 
 ## 5. Open leads
 
@@ -205,6 +210,7 @@ Unexplained or unvalidated, most consequential first.
 - **Ground-ball hits .35 against .24**, the oldest gap in the file (.58 on the first day). Every fielding fix has moved it; none has closed it.
 - **Foul share 24% against 51%**, structural, in the contact geometry. Low-angle contact stays fair far too often.
 - **K% 15 against 22, HR/PA 5.1% against 3%**: both moved the wrong way with handedness.
+- **HR/PA rose more than A10 explains.** The walls should add about 0.1 point (the PAs that used to end on a caught foul pop, about 5% of them home runs). Measured: +0.14 [+0.43] on `a69dd50`, +0.04 [+0.12] on `52d6632`; mean of the four +0.18. A walls-out-of-reach build matched the old HR/PA, so it is the walls or noise; most likely noise (σ about 0.2 points per pair), not resolved.
 - **Platoon gap twice the real size.**
 - **Triples: 7% of line drives.**
 - **Relay men cost the defense runs** (0.06–0.15). Never explained.
