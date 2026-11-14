@@ -2862,8 +2862,10 @@ impl<'a> Sim<'a> {
                 f.set_base = RELAY_TRANSFER_FRAC * f.a.transfer;
             }
             let on_bag = (base_pos(2) - f.pos).norm() < 0.6;
-            let carried = !f.pivot && f.carry_to == Some(2) && force_at_second;
-            if on_bag && (f.pivot_wait_bag || carried) {
+            // (A carrier to second caught nothing there: he keeps the set-up he spent holding
+            // the ball, agent-models §5.6, and is an ordinary holder on the bag. Gemini pivot
+            // review P2-2.)
+            if on_bag && f.pivot_wait_bag {
                 let moving = (m::hypot(f.vel.x, f.vel.y) > FACE_MIN_MPS).then(|| Vec3::new(f.vel.x, f.vel.y, 0.0));
                 f.face = moving.or(f.face);
                 f.catch_vel = f.vel;
@@ -6703,6 +6705,56 @@ mod tests {
         let (_, caught, on_bag, released) = feed_to_shortstop(base_pos(2) + Vec3::new(-2.0, 0.0, 0.0), 6.0);
         assert!(on_bag > caught, "he caught it off the bag ({caught:.3}) and got there at {on_bag:.3}");
         assert!(released - on_bag >= 0.80 - 0.12 - 1e-9 && released - caught > 0.80 + DT, "caught {caught:.3}, on the bag {on_bag:.3}, released {released:.3}");
+    }
+
+    /// Gemini pivot review P2-2, agent-models §5.6: a shortstop who carries the ball to second
+    /// himself (6U-3) caught nothing there, and "a carrier retains setup time already spent
+    /// holding the ball". He fielded it a second before he touches the bag, longer than his
+    /// 0.65 s transfer, so on the touch he has nothing left to wait for but his turn: he lets
+    /// go within 0.4 s of the touch (a turn at most 0.12 s less or more than the quarter turn,
+    /// and the 0.05 s of a release tick), not after a fresh 0.80 s pivot. Bug caught: the touch
+    /// restarting his clock with the full catch-to-release pivot (0.68 s or more).
+    #[test]
+    fn a_carrier_to_second_keeps_the_set_up_he_spent_running_with_the_ball() {
+        const SS: usize = 5;
+        let fx = fixture(&[(5, 1)]);
+        let inp = input(&fx, vec![RunnerIn { id: fx.st.batter, base: 0, speed: 8.2 }, RunnerIn { id: 5, base: 1, speed: 8.2 }]);
+        let mut st = fx.st.clone();
+        let mut sim = new_sim(&inp, &mut st);
+        sim.t = 2.0;
+        let ss_id = sim.f[SS].id;
+        sim.emit(Input::BallTouched { t: 0.6, what: Touch::Ground { x: -5.0, y: 33.0 } });
+        sim.emit(Input::GloveSecured { t: 1.0, fielder: ss_id, x: -5.0, y: 36.0 });
+        for fd in sim.f.iter_mut() {
+            (fd.vel, fd.role) = (Vec3::ZERO, Role::Idle);
+            fd.target = fd.pos;
+        }
+        held_at(&mut sim, SS, Vec3::new(-5.0, 36.0, 0.0));
+        let fd = &mut sim.f[SS];
+        (fd.up_at, fd.set_base, fd.face, fd.catch_vel) = (1.0, fd.a.transfer, None, Vec3::ZERO);
+        fd.carry_to = Some(2);
+        fd.target = base_pos(2);
+        let (b, r1) = (sim.r.iter().position(|r| r.start == 0).unwrap(), sim.r.iter().position(|r| r.start == 1).unwrap());
+        (sim.r[b].s, sim.r[b].v, sim.r[b].goal, sim.r[b].direction) = (BASE_L - 8.2 * 2.6, 8.2, 1, 1.0);
+        (sim.r[r1].s, sim.r[r1].v, sim.r[r1].goal, sim.r[r1].direction) = (1.5 * BASE_L, 8.2, 2, 1.0);
+        let mut on_bag = f64::NAN;
+        for _ in 0..400 {
+            if on_bag.is_nan() && (base_pos(2) - sim.f[SS].pos).norm() < 0.6 {
+                on_bag = sim.t;
+            }
+            sim.holder_act();
+            if matches!(sim.ball, Ball::Thrown { .. }) {
+                assert!(!on_bag.is_nan(), "threw before the bag");
+                assert!(sim.t - on_bag < 0.4, "touched at {on_bag:.3}, let go at {:.3}: a fresh pivot (pivot {} carry {:?} up_at {:.2} set_base {:.2})", sim.t, sim.f[SS].pivot, sim.f[SS].carry_to, sim.f[SS].up_at, sim.f[SS].set_base);
+                return;
+            }
+            for k in [b, r1] {
+                let goal = sim.r[k].goal as f64 * BASE_L;
+                sim.r[k].s = (sim.r[k].s + 8.2 * DT).min(goal);
+            }
+            world_tick(&mut sim);
+        }
+        panic!("never threw: {:?}", sim.ball);
     }
 
     /// agent-models §5.5: the holder's estimate of a double play uses the pivot model the
