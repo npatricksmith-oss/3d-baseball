@@ -1,7 +1,7 @@
 //! A4 measuring only. `-- [games=256] [first_seed=0] [records.jsonl]`.
 //! JSONL includes EVERY throw/carry commitment, its original estimates, and outcome.
-//! Consecutive carry ticks coalesce; options are from the FIRST tick. `unweighed_throw`
-//! is a diagnostic shadow of the loop bypassed by `near_carry`, not a weighed option.
+//! Consecutive carry ticks coalesce; options are from the FIRST tick. All options
+//! come from the actual common comparison; the A4 shadow formulas are retired.
 //! Each seed is replayed without tracing and both log bytes and digest must match.
 use bb_game::game::{Game, PitchStep};
 use bb_game::live::choice_trace::{Choice, OptionEstimate, capture};
@@ -32,6 +32,9 @@ fn margin(o: &OptionEstimate) -> f64 {
     o.runner_at - o.ball_at
 }
 fn chosen(c: &Choice) -> Option<&OptionEstimate> {
+    if let Some(i) = c.selected_option {
+        return c.options.get(i);
+    }
     if c.action == "return" {
         None
     } else if c.action == "near_carry" {
@@ -95,7 +98,8 @@ fn option_json(o: &OptionEstimate) -> Value {
         "runner_at_s":o.runner_at,"ball_at_s":o.ball_at,"margin_s":margin(o),
         "direct_at_s":o.direct_at,"via_at_s":o.via_at,"set_ball_at_s":o.set_at,
         "receiver":o.receiver,"receiver_at_s":o.receiver_at,"p_out":o.p_out,
-        "weight":o.weight,"value":o.value,"through":o.through,"distance_m":o.distance})
+        "weight":o.weight,"value":o.value,"through":o.through,"distance_m":o.distance,
+        "second_out_p":o.second_out_p,"second_ball_at_s":o.second_ball_at})
 }
 
 fn record(seed: u64, c: &Choice, step: &PitchStep, labels: &[&str]) -> Value {
@@ -247,6 +251,8 @@ mod tests {
             value: None,
             through: false,
             distance: 20.0,
+            second_out_p: None,
+            second_ball_at: None,
         }
     }
     fn choice() -> Choice {
@@ -266,6 +272,7 @@ mod tests {
             base: 4,
             through: false,
             runners: vec![],
+            selected_option: None,
             options: vec![option(4, false, 0.1), option(1, true, 0.4)],
         }
     }

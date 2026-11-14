@@ -20,6 +20,10 @@ fn vec3(v: &Value) -> Vec3 {
 }
 
 fn replay(text: &str) -> (LiveOutput, Vec<Choice>, RulesState) {
+    replay_with(text, bb_agents::throwing::ChoiceParams::default())
+}
+
+fn replay_with(text: &str, params: bb_agents::throwing::ChoiceParams) -> (LiveOutput, Vec<Choice>, RulesState) {
     let v: Value = serde_json::from_str(text).unwrap();
     let seed = v["seed"].as_u64().unwrap();
     let g = Game::new(seed, false);
@@ -42,7 +46,7 @@ fn replay(text: &str) -> (LiveOutput, Vec<Choice>, RulesState) {
     let tc = v["t_contact"].as_f64().unwrap();
     step(&mut st, &Input::BatContact { t: tc });
     let side = st.half.batting();
-    let fattrs = core::array::from_fn(|i| FielderAttrs { throws: g.rosters.teams[1 - side].players[i].throws, ..FielderAttrs::average(i) });
+    let fattrs = core::array::from_fn(|i| FielderAttrs { throws: g.rosters.teams[1 - side].players[i].throws, throw_choice: params, ..FielderAttrs::average(i) });
     let mut runners = vec![RunnerIn { id: st.batter, base: 0, speed: 8.2 }];
     runners.extend(st.bases.iter().enumerate().filter_map(|(i, id)| id.map(|id| RunnerIn { id, base: i as u8 + 1, speed: 8.2 })));
     let env = FlightEnv::default_env();
@@ -75,4 +79,39 @@ fn seed_1_play_64_never_projects_the_stopped_third_base_runner_home() {
     let (_, choices, _) = replay(include_str!("fixtures/a4/1-64.json"));
     assert!(!choices.is_empty());
     assert!(choices.iter().all(|c| c.action != "throw" || c.base != 4), "{choices:#?}");
+}
+
+#[test]
+fn seed_13_play_140_takes_the_sure_home_force_instead_of_automatic_first() {
+    // Tied sixth, loaded, one out: a routine home force preserves the run and
+    // leaves first available. Original shortcut took first and allowed a run.
+    let (_, choices, _) = replay(include_str!("fixtures/a4/13-140.json"));
+    let first = &choices[0];
+    assert_eq!((first.action, first.base), ("throw", 4), "{first:#?}");
+    assert!(first.options.iter().any(|o| o.base == 1 && o.kind == "carry" && o.force), "first was compared");
+    assert!(first.options[first.selected_option.unwrap()].force);
+}
+
+#[test]
+fn seed_70_play_157_keeps_the_force_double_play_against_a_single_home_tag() {
+    // §5.6: two likely outs (second then first) beat a single home tag. With
+    // continuation disabled the unchanged first-out weights instead favour home.
+    let (out, choices, _) = replay(include_str!("fixtures/a4/70-157.json"));
+    assert_eq!((choices[0].action, choices[0].base), ("carry", 2), "{:#?}", choices[0]);
+    assert_eq!(out.calls.iter().map(|c| c.base).collect::<Vec<_>>(), vec![2, 1]);
+    let params = bb_agents::throwing::ChoiceParams { continuation_weight: 0.0, ..Default::default() };
+    let (_, single_out_choices, _) = replay_with(include_str!("fixtures/a4/70-157.json"), params);
+    assert_eq!(single_out_choices[0].base, 4, "single-out destination weights still favour home");
+}
+
+#[test]
+fn seed_17_play_203_never_carries_to_unforced_third_outside_tag_reach() {
+    let (_, choices, _) = replay(include_str!("fixtures/a4/17-203.json"));
+    assert_eq!((choices[0].action, choices[0].base), ("throw", 1));
+    for c in &choices {
+        if c.action == "carry" {
+            let o = &c.options[c.selected_option.unwrap()];
+            assert!(o.force || o.distance <= 1.2, "outside tag reach an unforced bag is not a carry out");
+        }
+    }
 }
