@@ -196,12 +196,20 @@ const RELAY_TRANSFER_FRAC: f64 = 0.7;
 /// [E]: an equally sure tag loses to the force (a run can score ahead of a tag for the
 /// third out, never ahead of a force), but a sure tag still beats a doubtful force.
 const TWO_OUT_TAG_W: f64 = 0.9;
+/// The radial infield/outfield boundary, m [C]: the edge of the infield dirt on the line
+/// through second base. The grass line is an arc of 95 ft about the pitcher's plate, whose
+/// front is 60.5 ft from home (OBR 2.01, diagram 1), so 155.5 ft = 47.40 m. It sets the settle
+/// rule (rules-spec §5.8), infield or outfield backups, the no-play return throw and the
+/// runner's deep-fly read; the scorer's outfield boundary is the same value
+/// (`bb_stats::scorer::DEFAULT_OUTFIELD_RADIUS_M`). It was 45 m, which left a second
+/// baseman at his deepest Savant spot (46.60 m) outside the infield, then briefly the
+/// break range below (Opus infield-fixes review P2-2: that tied a rules boundary to the
+/// alignment table and reached 4 m onto the grass).
+const INFIELD_R: f64 = 155.5 * 0.3048;
 /// How far behind the deepest Savant pre-pitch infield position
-/// ([`crate::play::MAX_INFIELD_DEPTH_M`], 152.9 ft = 46.60 m) a ball still belongs to
-/// infield range (secondary ground-ball break, settle rule, infield backups, runner
-/// deep-fly read), m [E].
+/// ([`crate::play::MAX_INFIELD_DEPTH_M`], 152.9 ft = 46.60 m) a ground ball is still in a
+/// secondary infielder's range, m [E].
 const INFIELD_DEPTH_MARGIN_M: f64 = 5.0;
-const INFIELD_R: f64 = crate::play::MAX_INFIELD_DEPTH_M + INFIELD_DEPTH_MARGIN_M;
 /// The secondary ground-ball break's range (agent-models §5.7): an infielder who is not the
 /// chaser breaks for a ground ball he believes he can field within this distance of home.
 const INFIELD_BREAK_R: f64 = crate::play::MAX_INFIELD_DEPTH_M + INFIELD_DEPTH_MARGIN_M;
@@ -7262,6 +7270,29 @@ mod tests {
         assert!(matches!(sim.ball, Ball::Held { by: 3 }), "no return throw from Savant 2B depth: {:?}", sim.ball);
     }
 
+    // Opus infield-fixes review P2-2: the settle rule's boundary is the edge of the infield
+    // dirt (155.5 ft = 47.3964 m on the line through second), not the break range. A second
+    // baseman holding the ball on the grass 49 m out, inside the break range, does not settle
+    // the play; and the scorer's outfield boundary is the same line.
+    #[test]
+    fn the_settle_boundary_is_the_infield_dirt_not_the_break_range() {
+        assert!((INFIELD_R - 47.3964).abs() < 1e-3, "{INFIELD_R}");
+        assert_eq!(INFIELD_R, bb_stats::scorer::DEFAULT_OUTFIELD_RADIUS_M);
+        assert!(crate::play::MAX_INFIELD_DEPTH_M < INFIELD_R && INFIELD_R < INFIELD_BREAK_R);
+        let fx = fixture(&[]);
+        let mut st = fx.st.clone();
+        let inp = input(&fx, vec![RunnerIn { id: fx.st.batter, base: 0, speed: 8.2 }]);
+        let mut sim = new_sim(&inp, &mut st);
+        let at = Vec3::new(5.0, 48.7, 0.0);
+        assert!(m::hypot(at.x, at.y) < INFIELD_BREAK_R);
+        sim.r[0].s = BASE_L;
+        sim.r[0].goal = 1;
+        sim.r[0].v = 0.0;
+        held_at(&mut sim, 3, at);
+        sim.t = sim.f[3].ready_at + 1.0;
+        assert!(!sim.settled(), "a fielder on the grass at {:.2} m is in the outfield", m::hypot(at.x, at.y));
+    }
+
     #[test]
     fn first_baseman_breaks_on_right_side_infield_grounder() {
         let fx = fixture(&[]);
@@ -7277,7 +7308,7 @@ mod tests {
         sim.assign();
         assert_ne!(sim.primary, 2, "setup expects 2B primary on this grounder (t_int_1b={:.3})", sim.f[2].t_int);
         assert_eq!(sim.f[2].role, Role::Chase, "1B must break for reachable right-side infield grounder: primary={}, t_int={:.3}, bounce={:?}, target={:?}", sim.primary, sim.f[2].t_int, sim.f[2].belief.as_ref().and_then(|p| p.first_bounce()), sim.f[2].target);
-        assert!(m::hypot(sim.f[2].target.x, sim.f[2].target.y) < INFIELD_R, "1B intercept inside infield: {:?}", sim.f[2].target);
+        assert!(m::hypot(sim.f[2].target.x, sim.f[2].target.y) < INFIELD_BREAK_R, "1B intercept inside infield: {:?}", sim.f[2].target);
         assert!((0..9).any(|i| sim.f[i].role == Role::Cover(1)), "another fielder (P) must cover first");
     }
 
