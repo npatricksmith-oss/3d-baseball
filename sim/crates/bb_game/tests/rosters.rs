@@ -65,8 +65,64 @@ fn the_log_header_carries_the_rosters() {
             assert_eq!((e.player_id(), e.uniform_number(), e.position().0, e.batting_order()), (p.player_id, p.number, p.position, p.batting_order));
             assert_eq!((e.agent_id(), e.field_agent_id()), (((side as u16) << 8) | p.batting_order as u16, ((side as u16) << 8) | 0x80 | p.position as u16));
             assert_eq!(e.name_origin(), p.origin as u8);
-            // Until backlog A1, everyone is right-handed.
-            assert_eq!((e.bats(), e.throws()), (bb_schema::Hand::Right, bb_schema::Hand::Right));
+            let bats = match p.bats {
+                bb_observe::Bats::Left => bb_schema::Hand::Left,
+                bb_observe::Bats::Right => bb_schema::Hand::Right,
+                bb_observe::Bats::Switch => bb_schema::Hand::Switch,
+            };
+            let throws = if p.throws == bb_observe::Hand::Left { bb_schema::Hand::Left } else { bb_schema::Hand::Right };
+            assert_eq!((e.bats(), e.throws()), (bats, throws));
         }
     }
+}
+
+/// Hands on the field (owner backlog A1): every pitch leaves the hand of the fielding side's
+/// pitcher (a right-hander lets go on the third-base side of the rubber, x < 0; a left-hander
+/// on the first-base side), and the batter stands on his own side of the plate (a
+/// right-handed batter in the third-base-side box, x < 0), a switch hitter on the side
+/// opposite the pitcher's hand. Seeds chosen so that both teams' pitchers' hands, and a
+/// switch hitter, are seen.
+#[test]
+fn pitchers_and_batters_play_from_their_own_sides() {
+    use bb_observe::{Bats, Hand};
+    let (mut lhp, mut rhp, mut lhb, mut rhb, mut switch_l, mut switch_r) = (0, 0, 0, 0, 0, 0);
+    for seed in 0..12u64 {
+        let rosters = Rosters::generate(seed);
+        let mut g = Game::new(seed, true);
+        let mut n = 0;
+        loop {
+            let side = if g.st.half == Half::Top { 0 } else { 1 };
+            let Some(step) = g.step_pitch() else { break };
+            let throws = rosters.teams[1 - side].players[0].throws;
+            let x_release = step.record.release.r.x;
+            assert_eq!(x_release > 0.0, throws == Hand::Left, "seed {seed} play {}: {throws:?} released at x {x_release:.2}", step.play);
+            assert!(x_release.abs() > 0.2);
+            let batter = rosters.player(step.batter).unwrap();
+            let stands = match (batter.bats, throws) {
+                (Bats::Left, _) | (Bats::Switch, Hand::Right) => Hand::Left,
+                (Bats::Right, _) | (Bats::Switch, Hand::Left) => Hand::Right,
+            };
+            let x_box = step.viz.standing.iter().find(|(id, _)| *id == step.batter).expect("the batter stands somewhere").1.x;
+            assert_eq!(x_box > 0.0, stands == Hand::Left, "seed {seed} play {}: {:?} against {throws:?} stood at x {x_box:.2}", step.play, batter.bats);
+            assert!(x_box.abs() > 0.5);
+            match throws {
+                Hand::Left => lhp += 1,
+                Hand::Right => rhp += 1,
+            }
+            match stands {
+                Hand::Left => lhb += 1,
+                Hand::Right => rhb += 1,
+            }
+            if batter.bats == Bats::Switch {
+                if stands == Hand::Left { switch_l += 1 } else { switch_r += 1 }
+            }
+            n += 1;
+            // The first three innings or so are enough to see every batter.
+            if n > 120 {
+                break;
+            }
+        }
+    }
+    assert!(lhp > 100 && rhp > 100 && lhb > 100 && rhb > 100, "{lhp} {rhp} {lhb} {rhb}");
+    assert!(switch_l > 10 && switch_r > 10, "switch hitters batted left {switch_l} and right {switch_r} times");
 }

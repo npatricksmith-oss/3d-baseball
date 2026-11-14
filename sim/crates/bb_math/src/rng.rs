@@ -34,6 +34,9 @@ pub enum Purpose {
     /// Names, numbers and the batting order of a generated game roster (data-formats §2.4).
     /// Drawn before the first pitch; decides who the players are, never what happens.
     RosterGeneration = 12,
+    /// The throwing hand and batting side of a generated player (data-formats §2.4). Like
+    /// `RosterGeneration`, drawn before the first pitch.
+    RosterHands = 13,
 }
 
 /// The full key of one random stream.

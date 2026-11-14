@@ -5,7 +5,7 @@
 //! Until the league generator exists (M7), a roster is generated from the game seed alone.
 
 use bb_math::{KeyedRng, Purpose, RngKey};
-use bb_observe::Hand;
+use bb_observe::{Bats, Hand};
 use bb_rules::AgentId;
 
 /// Which pool a name came from, kept so a player's look can match his name later (L2).
@@ -90,9 +90,9 @@ pub struct Player {
     pub position: u8,
     /// Place in the batting order, 1–9.
     pub batting_order: u8,
-    /// Handedness: the slot backlog A1 fills. Until then everyone is right-handed, which is
-    /// what the sim plays.
-    pub bats: Hand,
+    /// The side he bats from; a switch hitter takes the side opposite the pitcher's hand.
+    pub bats: Bats,
+    /// The hand he throws with; his glove is on the other.
     pub throws: Hand,
 }
 
@@ -107,6 +107,19 @@ impl Player {
         POSITION_CODE[self.position as usize - 1]
     }
 }
+
+/// Share of players at each position (1–9) who throw left-handed [E]. Catchers, second and
+/// third basemen and shortstops throw right: a left-hander there has to turn his body to
+/// throw across the infield, so teams do not play one. About a quarter of pitchers and
+/// outfielders and a third of first basemen throw left.
+pub const THROWS_LEFT: [f64; 9] = [0.27, 0.0, 0.35, 0.0, 0.0, 0.0, 0.25, 0.20, 0.25];
+
+/// The batting side given the throwing hand, as shares (left, switch; the rest bat right)
+/// [E]. Most players bat from the side they throw from, but many right-handed throwers bat
+/// left or both ways, and few left-handed throwers bat right. With `THROWS_LEFT` this puts
+/// about 32% of position players on the left side, 13% switch and 55% on the right.
+pub const BATS_GIVEN_THROWS_RIGHT: (f64, f64) = (0.24, 0.14);
+pub const BATS_GIVEN_THROWS_LEFT: (f64, f64) = (0.88, 0.04);
 
 /// Scorer's abbreviations for positions 1–9.
 pub const POSITION_CODE: [&str; 9] = ["P", "C", "1B", "2B", "3B", "SS", "LF", "CF", "RF"];
@@ -194,8 +207,20 @@ impl Rosters {
                     })
                     .expect("99 numbers for nine players");
                 numbers.push(number);
+                // Hands: the throwing hand from his position, then the batting side from it.
+                let mut rng = KeyedRng::new(RngKey { game_seed: seed, play_index: 0, agent_id: agent, purpose: Purpose::RosterHands, sub_index: 0 });
+                let throws = if rng.uniform() < THROWS_LEFT[i] { Hand::Left } else { Hand::Right };
+                let (left, switch) = if throws == Hand::Left { BATS_GIVEN_THROWS_LEFT } else { BATS_GIVEN_THROWS_RIGHT };
+                let u = rng.uniform();
+                let bats = if u < left {
+                    Bats::Left
+                } else if u < left + switch {
+                    Bats::Switch
+                } else {
+                    Bats::Right
+                };
                 let batting_order = if position == 1 { 9 } else { order.iter().position(|&p| p == position).expect("every position player bats") as u8 + 1 };
-                Player { player_id: side as u32 * 9 + position as u32, given, family, origin, number, position, batting_order, bats: Hand::Right, throws: Hand::Right }
+                Player { player_id: side as u32 * 9 + position as u32, given, family, origin, number, position, batting_order, bats, throws }
             });
             TeamRoster { side, name: if side == 0 { "Away" } else { "Home" }, players }
         });
@@ -213,6 +238,11 @@ impl Rosters {
     /// The player behind an agent id, batting or fielding.
     pub fn player(&self, agent: AgentId) -> Option<&Player> {
         self.find(agent).map(|x| x.1)
+    }
+
+    /// The hand a side's pitcher throws with.
+    pub fn pitcher_throws(&self, side: usize) -> Hand {
+        self.teams[side].players[0].throws
     }
 
     /// Each side's batting ids in batting order, as the rules state takes them.
@@ -322,10 +352,79 @@ mod tests {
         for side in 0..2 {
             let got = r.teams[side].batting_order().map(|p| (p.batting_order, p.position_code(), p.number, p.given, p.family));
             assert_eq!(got, want[side], "side {side}");
-            assert!(r.teams[side].players.iter().all(|p| (p.bats, p.throws) == (Hand::Right, Hand::Right)));
+        }
+        // Hands, in batting order: batting side then throwing hand.
+        let hands = ["S/R R/R S/R S/R L/L R/R L/R R/R S/R", "R/R S/R L/R S/R R/R L/R R/R R/R R/R"];
+        for side in 0..2 {
+            let got: Vec<String> = r.teams[side]
+                .batting_order()
+                .iter()
+                .map(|p| {
+                    let b = match p.bats {
+                        Bats::Left => 'L',
+                        Bats::Right => 'R',
+                        Bats::Switch => 'S',
+                    };
+                    format!("{b}/{}", if p.throws == Hand::Left { 'L' } else { 'R' })
+                })
+                .collect();
+            assert_eq!(got.join(" "), hands[side], "side {side}");
         }
         // Player ids: away 1–9 and home 10–18, in position order.
         assert_eq!(r.teams.iter().flat_map(|t| t.players.iter().map(|p| p.player_id)).collect::<Vec<_>>(), (1..=18).collect::<Vec<_>>());
+    }
+
+    /// Hands follow data-formats §2.4: nobody throws left at catcher, second, third or short;
+    /// elsewhere the share is the position's; and the batting sides come out at the shares
+    /// worked by hand from the two tables (position players: 13.125% throw left, so
+    /// left 0.13125 × 0.88 + 0.86875 × 0.24 = 32.4%, switch 0.13125 × 0.04 + 0.86875 × 0.14 =
+    /// 12.7%, right 54.9%).
+    #[test]
+    fn hands_follow_the_position_and_the_batting_side_follows_the_hand() {
+        let n_seeds = 3000u64;
+        let mut left = [0u32; 9];
+        let mut bats = [0u32; 3];
+        let (mut lefty_bats_right, mut lefties) = (0u32, 0u32);
+        for seed in 0..n_seeds {
+            for t in &Rosters::generate(seed).teams {
+                for (i, p) in t.players.iter().enumerate() {
+                    left[i] += (p.throws == Hand::Left) as u32;
+                    if i > 0 {
+                        bats[match p.bats {
+                            Bats::Left => 0,
+                            Bats::Switch => 1,
+                            Bats::Right => 2,
+                        }] += 1;
+                        lefties += (p.throws == Hand::Left) as u32;
+                        lefty_bats_right += (p.throws == Hand::Left && p.bats == Bats::Right) as u32;
+                    }
+                }
+            }
+        }
+        let n = (2 * n_seeds) as f64;
+        for (i, want) in [0.27, 0.0, 0.35, 0.0, 0.0, 0.0, 0.25, 0.20, 0.25].into_iter().enumerate() {
+            let got = left[i] as f64 / n;
+            // 6000 players a position: one sd is at most 0.6 points.
+            assert!(if want == 0.0 { left[i] == 0 } else { (got - want).abs() < 0.025 }, "position {}: {got:.3} throw left, want {want}", i + 1);
+        }
+        let total = 8.0 * n;
+        for (k, want) in [0.324, 0.127, 0.549].into_iter().enumerate() {
+            let got = bats[k] as f64 / total;
+            assert!((got - want).abs() < 0.01, "batting side {k}: {got:.3}, want {want}");
+        }
+        // A left-handed thrower who bats right is rare (8%), not absent.
+        let share = lefty_bats_right as f64 / lefties as f64;
+        assert!((share - 0.08).abs() < 0.02, "{share:.3}");
+    }
+
+    #[test]
+    fn a_switch_hitter_bats_opposite_the_pitchers_hand() {
+        assert_eq!(Bats::Switch.against(Hand::Right), Hand::Left);
+        assert_eq!(Bats::Switch.against(Hand::Left), Hand::Right);
+        for h in [Hand::Left, Hand::Right] {
+            assert_eq!(Bats::Left.against(h), Hand::Left);
+            assert_eq!(Bats::Right.against(h), Hand::Right);
+        }
     }
 
     /// The pools as data-formats §2.4 describes them.

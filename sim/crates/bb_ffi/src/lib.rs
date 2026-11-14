@@ -84,7 +84,8 @@ pub struct BbPlayer {
     pub position: u8,
     /// Place in the batting order, 1–9.
     pub batting_order: u8,
-    /// Hands: 1 left, 2 right (3 = switch hitter, `bats` only, once backlog A1 adds them).
+    /// Hands: 1 left, 2 right; `bats` may also be 3, a switch hitter, who bats from the side
+    /// opposite the pitcher's hand (`BbPlayInfo.batter_side` says which on a given play).
     pub bats: u8,
     pub throws: u8,
     pub _pad: [u8; 2],
@@ -106,6 +107,11 @@ fn player(team: &bb_game::roster::TeamRoster, p: &bb_game::roster::Player) -> Bb
         bb_observe::Hand::Left => 1,
         bb_observe::Hand::Right => 2,
     };
+    let bats = match p.bats {
+        bb_observe::Bats::Left => 1,
+        bb_observe::Bats::Right => 2,
+        bb_observe::Bats::Switch => 3,
+    };
     BbPlayer {
         player_id: p.player_id,
         bat_agent: team.bat_agent(p),
@@ -114,7 +120,7 @@ fn player(team: &bb_game::roster::TeamRoster, p: &bb_game::roster::Player) -> Bb
         number: p.number,
         position: p.position,
         batting_order: p.batting_order,
-        bats: hand(p.bats),
+        bats,
         throws: hand(p.throws),
         _pad: [0; 2],
         given: name_field(p.given),
@@ -546,7 +552,13 @@ mod tests {
                 assert_eq!((text(&p.given), text(&p.family)), (w.given, w.family));
                 assert_eq!((p.player_id, p.side as u32, p.number, p.position, p.batting_order as usize), (w.player_id, side, w.number, w.position, slot + 1));
                 assert_eq!((p.bat_agent, p.field_agent), (((side as u16) << 8) | (slot as u16 + 1), ((side as u16) << 8) | 0x80 | w.position as u16));
-                assert_eq!((p.bats, p.throws), (2, 2));
+                // Hands as the header documents them: 1 left, 2 right, 3 a switch hitter.
+                let bats = match w.bats {
+                    bb_observe::Bats::Left => 1,
+                    bb_observe::Bats::Right => 2,
+                    bb_observe::Bats::Switch => 3,
+                };
+                assert_eq!((p.bats, p.throws), (bats, if w.throws == bb_observe::Hand::Left { 1 } else { 2 }));
                 for id in [p.bat_agent, p.field_agent] {
                     let mut q: BbPlayer = unsafe { std::mem::zeroed() };
                     assert_eq!(unsafe { bb_game_player(g, id, &mut q) }, 1);

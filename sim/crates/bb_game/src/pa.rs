@@ -85,9 +85,17 @@ const BODY_R: f64 = 0.16;
 
 impl Matchup {
     pub fn average() -> Self {
+        Self::for_hands(bb_observe::Hand::Right, bb_observe::Hand::Right)
+    }
+
+    /// An average pitcher who throws with `throws` against an average batter standing on
+    /// the `bats` side. A left-hander is the right-hander's mirror image: his release point
+    /// and his pitches' spin are mirrored (agent-models §2.2), and the batter's eyes, swing
+    /// and body are on the other side of the plate.
+    pub fn for_hands(throws: bb_observe::Hand, bats: bb_observe::Hand) -> Self {
         let env = FlightEnv::default_env();
-        let pitcher = PitcherAttrs::average_rhp();
-        let batter = BatterAttrs::average_rhb();
+        let pitcher = PitcherAttrs { throws, ..PitcherAttrs::average_rhp() };
+        let batter = BatterAttrs { bats, ..BatterAttrs::average_rhb() };
         let arsenal = standard_arsenal();
         let zone = Zone::for_batter(batter.height, &ZoneRule::default());
         let scouting = build_scouting(&env, &pitcher, &arsenal, &zone);

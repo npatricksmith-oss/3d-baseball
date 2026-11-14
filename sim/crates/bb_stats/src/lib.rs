@@ -33,6 +33,10 @@ pub struct BatterLine {
     pub position: u8,
     /// Place in the batting order, 1–9.
     pub batting_order: u8,
+    /// The side he bats from and the hand he throws with: 'L', 'R', or 'S' for a switch
+    /// hitter ('?' if the log gave none).
+    pub bats: char,
+    pub throws: char,
     pub pa: u32,
     pub runs: u32,
     pub k: u32,
@@ -64,6 +68,12 @@ pub struct BoxScore {
 
 /// Build the box score from a finished log.
 pub fn box_score(bytes: &[u8]) -> Result<BoxScore, LogError> {
+    let hand = |h: bb_schema::Hand| match h {
+        bb_schema::Hand::Left => 'L',
+        bb_schema::Hand::Right => 'R',
+        bb_schema::Hand::Switch => 'S',
+        _ => '?',
+    };
     let v = log::read(bytes)?;
     let mut b = BoxScore::default();
     if let Some(cfg) = v.header.config() {
@@ -79,6 +89,8 @@ pub fn box_score(bytes: &[u8]) -> Result<BoxScore, LogError> {
                     number: e.uniform_number(),
                     position: e.position().0,
                     batting_order: e.batting_order(),
+                    bats: hand(e.bats()),
+                    throws: hand(e.throws()),
                     ..Default::default()
                 })
                 .collect();

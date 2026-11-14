@@ -70,6 +70,26 @@ impl Hand {
     }
 }
 
+/// The side a player bats from: left, right, or whichever is opposite the pitcher's throwing
+/// hand (a switch hitter).
+#[derive(Clone, Copy, Debug, PartialEq, Eq, Hash)]
+pub enum Bats {
+    Left,
+    Right,
+    Switch,
+}
+
+impl Bats {
+    /// The side of the plate he stands on against a pitcher who throws with `pitcher`: a
+    /// switch hitter takes the opposite side.
+    pub fn against(self, pitcher: Hand) -> Hand {
+        match (self, pitcher) {
+            (Bats::Left, _) | (Bats::Switch, Hand::Right) => Hand::Left,
+            (Bats::Right, _) | (Bats::Switch, Hand::Left) => Hand::Right,
+        }
+    }
+}
+
 use bb_math::Vec3;
 
 /// What a batter perceives at the pitcher's release (agent-models §3.2).

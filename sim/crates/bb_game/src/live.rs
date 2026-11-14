@@ -94,6 +94,21 @@ const THROW_EFFORT: f64 = 1.0;
 /// Release and catch heights of a throw, m.
 const THROW_RELEASE_Z: f64 = 1.8;
 const THROW_CATCH_Z: f64 = 1.3;
+/// How far to his throwing-arm side of his body's centre a fielder lets go of a throw, m [E]
+/// (a three-quarter arm: the hand is about a forearm outside the shoulder).
+pub const THROW_ARM_OFFSET_M: f64 = 0.35;
+
+/// Where a fielder standing at `pos` releases a throw toward `tgt`: at release height, off
+/// to his throwing-arm side. He faces his target, so a right-hander's hand is to the right
+/// of the line to it and a left-hander's to the left.
+pub fn throw_release_point(pos: Vec3, tgt: Vec3, throws: bb_observe::Hand) -> Vec3 {
+    let h = Vec3::new(tgt.x - pos.x, tgt.y - pos.y, 0.0);
+    let n = h.norm();
+    // The right of a man facing along h (unit): h × Z.
+    let right = if n > 1e-9 { Vec3::new(h.y / n, -h.x / n, 0.0) } else { Vec3::ZERO };
+    let side = if throws == bb_observe::Hand::Right { 1.0 } else { -1.0 };
+    Vec3::new(pos.x, pos.y, pos.z + THROW_RELEASE_Z) + right * (side * THROW_ARM_OFFSET_M)
+}
 /// How often a receiver re-reads a throw coming to him, s [E].
 const RECEIVE_REPLAN_S: f64 = 0.25;
 /// Lowest a receiver takes a throw in the air (a scoop), m [E].
@@ -2619,7 +2634,7 @@ impl<'a> Sim<'a> {
         self.f[by].throws += 1;
         // Aim with the thrower's own throw physics (drag and backspin, agent-models §5.5);
         // a throw beyond his reach on the fly goes at the steepest useful angle and bounces.
-        let r0 = fd.pos + Vec3::new(0.0, 0.0, THROW_RELEASE_Z);
+        let r0 = throw_release_point(fd.pos, tgt, fd.a.throws);
         let v_aim = THROW_EFFORT * fd.a.arm;
         let d = m::hypot(tgt.x - r0.x, tgt.y - r0.y);
         let elev = solve_throw(self.inp.env, THROW_RELEASE_Z, THROW_CATCH_Z, d, v_aim).map(|s| s.elev).unwrap_or(THROW_MAX_ELEV);
@@ -4991,5 +5006,25 @@ mod tests {
         assert!(on_line.iter().all(|(_, p)| (p.x - p.y).abs() < 1e-9), "{on_line:?}");
         // And no step along the way is longer than a sprinter covers in 0.1 s.
         assert!(track.windows(2).all(|w| (w[1].1 - w[0].1).norm() <= 11.0 * (w[1].0 - w[0].0) + 1e-9));
+    }
+
+    /// The ball leaves the throwing hand (owner backlog A1): facing his target, a
+    /// right-hander's hand is on his right and a left-hander's on his left, `THROW_ARM_OFFSET_M`
+    /// out, at release height. Worked in the sim frame (+X first base, +Y center field).
+    #[test]
+    fn a_throw_leaves_the_throwing_hand() {
+        use bb_observe::Hand;
+        let at = Vec3::new(5.0, 30.0, 0.0);
+        // Toward center field (+Y): his right is first-base side (+X).
+        let r = throw_release_point(at, Vec3::new(5.0, 60.0, 0.0), Hand::Right);
+        assert!((r - Vec3::new(5.35, 30.0, 1.8)).norm() < 1e-12, "{r:?}");
+        let l = throw_release_point(at, Vec3::new(5.0, 60.0, 0.0), Hand::Left);
+        assert!((l - Vec3::new(4.65, 30.0, 1.8)).norm() < 1e-12, "{l:?}");
+        // Across the diamond toward first (+X), as from third: his right is toward the plate (−Y).
+        let r = throw_release_point(at, Vec3::new(25.0, 30.0, 0.0), Hand::Right);
+        assert!((r - Vec3::new(5.0, 29.65, 1.8)).norm() < 1e-12, "{r:?}");
+        // Home (toward −Y from the outfield): his right is third-base side (−X).
+        let r = throw_release_point(at, Vec3::new(5.0, 0.0, 0.0), Hand::Right);
+        assert!((r - Vec3::new(4.65, 30.0, 1.8)).norm() < 1e-12, "{r:?}");
     }
 }

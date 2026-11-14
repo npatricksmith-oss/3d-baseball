@@ -56,6 +56,8 @@ pub struct FielderAttrs {
     /// How hard he commits to his read before he has seen the ball off the bat (1: as the
     /// odds justify; 0: he waits, no jump), [E].
     pub jump_gain: f64,
+    /// The hand he throws with; his glove is on the other (not graded).
+    pub throws: bb_observe::Hand,
 }
 
 impl FielderAttrs {
@@ -80,6 +82,7 @@ impl FielderAttrs {
             swing_sigma: bat_read_sigma(BAT_READ_TIME_SIGMA_50_S),
             lead_sigma: LEAD_READ_TIME_SIGMA_50_S,
             jump_gain: 1.0,
+            throws: bb_observe::Hand::Right,
         }
     }
 

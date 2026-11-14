@@ -19,6 +19,11 @@ pub fn header(game_seed: u64, rosters: &Rosters) -> Vec<u8> {
         bb_observe::Hand::Left => bb_schema::Hand::Left,
         bb_observe::Hand::Right => bb_schema::Hand::Right,
     };
+    let bats = |b: bb_observe::Bats| match b {
+        bb_observe::Bats::Left => bb_schema::Hand::Left,
+        bb_observe::Bats::Right => bb_schema::Hand::Right,
+        bb_observe::Bats::Switch => bb_schema::Hand::Switch,
+    };
     let teams = [0, 1].map(|s| {
         let t = &rosters.teams[s];
         let entries: Vec<_> = t
@@ -39,7 +44,7 @@ pub fn header(game_seed: u64, rosters: &Rosters) -> Vec<u8> {
                         position: bb_schema::Position(p.position),
                         batting_order: p.batting_order,
                         uniform_number: p.number,
-                        bats: hand(p.bats),
+                        bats: bats(p.bats),
                         throws: hand(p.throws),
                         ..Default::default()
                     },

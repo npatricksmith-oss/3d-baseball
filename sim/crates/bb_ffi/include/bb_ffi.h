@@ -54,7 +54,9 @@ typedef struct {
  * without bit 0x80, a batter or runner, low 7 bits = place in the batting order 1-9. A player
  * has one id of each kind; bb_game_player resolves either. */
 /* Who a player is (identity only): names are NUL-terminated ASCII; position 1 = pitcher ...
- * 9 = right field; hands 1 = left, 2 = right (bats may become 3 = switch). */
+ * 9 = right field; hands 1 = left, 2 = right; bats may also be 3, a switch hitter,
+ * who stands on the side opposite the pitcher's hand (his box is on the first-base side, sim
+ * x > 0, when he bats left). A fielder throws with `throws` and wears his glove on the other. */
 #define BB_NAME_LEN 32
 typedef struct {
   uint32_t player_id; uint16_t bat_agent, field_agent;

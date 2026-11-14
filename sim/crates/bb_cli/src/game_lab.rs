@@ -42,13 +42,13 @@ fn batting_lines(r: &GameResult) {
         Err(e) => return println!("box score unavailable: {e:?}"),
     };
     for (side, team) in ["Away", "Home"].iter().enumerate() {
-        println!("\n{:<32}{:>3}{:>3}{:>3}{:>3}{:>4}{:>3}{:>4}", format!("{team} batting"), "PA", "R", "K", "BB", "HBP", "HR", "BIP");
+        println!("\n{:<36}{:>3}{:>3}{:>3}{:>3}{:>4}{:>3}{:>4}", format!("{team} batting (bats/throws)"), "PA", "R", "K", "BB", "HBP", "HR", "BIP");
         for l in &b.batting[side] {
-            let who = format!("{} {:<2} #{:<2} {}", l.batting_order, l.position_code(), l.number, l.name);
-            println!("{who:<32}{:>3}{:>3}{:>3}{:>3}{:>4}{:>3}{:>4}", l.pa, l.runs, l.k, l.bb, l.hbp, l.hr, l.batted);
+            let who = format!("{} {:<2} #{:<2} {}/{} {}", l.batting_order, l.position_code(), l.number, l.bats, l.throws, l.name);
+            println!("{who:<36}{:>3}{:>3}{:>3}{:>3}{:>4}{:>3}{:>4}", l.pa, l.runs, l.k, l.bb, l.hbp, l.hr, l.batted);
         }
         let t = &b.teams[side];
-        println!("{:<32}{:>3}{:>3}{:>3}{:>3}{:>4}{:>3}{:>4}   LOB {}", "Totals", t.pa, t.runs, t.k, t.bb, t.hbp, t.hr, t.batted, t.left_on_base);
+        println!("{:<36}{:>3}{:>3}{:>3}{:>3}{:>4}{:>3}{:>4}   LOB {}", "Totals", t.pa, t.runs, t.k, t.bb, t.hbp, t.hr, t.batted, t.left_on_base);
     }
     println!();
 }

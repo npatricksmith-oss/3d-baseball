@@ -132,7 +132,10 @@ pub struct PitchStep {
 /// A game that advances one pitch at a time (the engine behind `simulate_game` and the
 /// client API, data-formats §6.4).
 pub struct Game {
-    mu: Matchup,
+    /// One matchup per pairing of pitcher's hand and batter's side that this game has.
+    mus: Vec<Matchup>,
+    /// The matchup of each batting slot, `[batting side][slot]`, as an index into `mus`.
+    mu_ix: [[usize; 9]; 2],
     /// Who the players are (data-formats §2.4). Identity only: no play reads it.
     pub rosters: Rosters,
     field: Field,
@@ -143,7 +146,8 @@ pub struct Game {
     pending_rules: Vec<Event>,
     sc: Vec<Vec<Scouting>>,
     bs: Vec<f64>,
-    fattrs: [FielderAttrs; 9],
+    /// Each side's fielders, `[side][position − 1]`.
+    fattrs: [[FielderAttrs; 9]; 2],
     play: u32,
     prev: Option<PitchType>,
     last_v: Option<f64>,
@@ -154,14 +158,29 @@ pub struct Game {
 
 impl Game {
     pub fn new(seed: u64, record: bool) -> Game {
-        let mut mu = Matchup::average();
-        mu.knobs = Knobs::calibrated_m3();
         let rosters = Rosters::generate(seed);
+        // Each batter faces the other side's pitcher from his own side of the plate (a
+        // switch hitter from the side opposite the pitcher's hand). Abilities are still
+        // average; only the hands differ.
+        let mut mus: Vec<Matchup> = Vec::new();
+        let mu_ix: [[usize; 9]; 2] = core::array::from_fn(|side| {
+            let throws = rosters.pitcher_throws(1 - side);
+            rosters.teams[side].batting_order().map(|p| {
+                let bats = p.bats.against(throws);
+                mus.iter().position(|m| m.pitcher.throws == throws && m.batter.bats == bats).unwrap_or_else(|| {
+                    let mut mu = Matchup::for_hands(throws, bats);
+                    mu.knobs = Knobs::calibrated_m3();
+                    mus.push(mu);
+                    mus.len() - 1
+                })
+            })
+        });
         let mut st = RulesState::new(rosters.lineups(), bb_rules::RulesOptions::default());
         let log = step(&mut st, &Input::StartGame);
         // Scouting per batting slot, built once per game (model error per batter–pitcher pair).
-        let sc: Vec<Vec<Scouting>> = (0..2u32).map(|side| (0..9u32).map(|slot| scouting_for_pa(&mu, seed, 9_000_000 + side * 100 + slot).into_owned()).collect()).collect();
-        let bs = vec![mu.perception.break_sigma; mu.arsenal.len()];
+        let sc: Vec<Vec<Scouting>> = (0..2u32).map(|side| (0..9u32).map(|slot| scouting_for_pa(&mus[mu_ix[side as usize][slot as usize]], seed, 9_000_000 + side * 100 + slot).into_owned()).collect()).collect();
+        let bs = vec![mus[0].perception.break_sigma; mus[0].arsenal.len()];
+        let fattrs = core::array::from_fn(|side| core::array::from_fn(|i| FielderAttrs { throws: rosters.teams[side].players[i].throws, ..FielderAttrs::average(i) }));
         Game {
             field: Field::default(),
             res: GameResult { complete: true, ..Default::default() },
@@ -171,7 +190,7 @@ impl Game {
             rosters,
             sc,
             bs,
-            fattrs: core::array::from_fn(FielderAttrs::average),
+            fattrs,
             play: 0,
             prev: None,
             last_v: None,
@@ -179,13 +198,15 @@ impl Game {
             seed,
             record,
             st,
-            mu,
+            mus,
+            mu_ix,
         }
     }
 
     /// The same game with these fielders on both sides (labs; agent-models §10 grades).
     pub fn with_fielders(mut self, fattrs: [FielderAttrs; 9]) -> Game {
-        self.fattrs = fattrs;
+        // Each man keeps his own throwing hand.
+        self.fattrs = core::array::from_fn(|side| core::array::from_fn(|i| FielderAttrs { throws: self.rosters.teams[side].players[i].throws, ..fattrs[i] }));
         self
     }
 
@@ -203,9 +224,10 @@ impl Game {
             self.res.complete = false;
             return None;
         }
-        let (mu, st, seed, play, record) = (&self.mu, &mut self.st, self.seed, self.play, self.record);
+        let (st, seed, play, record) = (&mut self.st, self.seed, self.play, self.record);
         let side = st.half.batting();
         let slot = st.next_up[side];
+        let mu = &self.mus[self.mu_ix[side][slot]];
         let batter = st.batter;
         if st.batter != self.last_batter {
             self.prev = None;
@@ -293,7 +315,7 @@ impl Game {
             // forward (world truth, read with each fielder's error, agent-models §5.10).
             let swing_lead = rec.swing.map(|s| t_plate - s.t_start());
             let out = crate::live::simulate_live(
-                &crate::live::LiveInput { env: &mu.env, field: &self.field, ball, t_contact: t_c, runners, fielders, fattrs: self.fattrs, batter_box: { let p = mu.template.pivot(&mu.batter); bb_math::Vec3::new(p.x, p.y, 0.0) }, bats: mu.batter.bats, pitch_x: rec.plate.map(|p| p.x).or(Some(ball.r.x)), bat_yaw, swing_lead, seed, play, record },
+                &crate::live::LiveInput { env: &mu.env, field: &self.field, ball, t_contact: t_c, runners, fielders, fattrs: self.fattrs[fside as usize], batter_box: { let p = mu.template.pivot(&mu.batter); bb_math::Vec3::new(p.x, p.y, 0.0) }, bats: mu.batter.bats, pitch_x: rec.plate.map(|p| p.x).or(Some(ball.r.x)), bat_yaw, swing_lead, seed, play, record },
                 st,
             );
             if record {
