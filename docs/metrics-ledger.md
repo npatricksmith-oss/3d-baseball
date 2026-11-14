@@ -29,47 +29,55 @@ Numbers are only comparable within one seed set and game count. The standard set
 
 ## 1. Where the numbers stand
 
-**Not yet measured together.** The two builds below were each measured on main `f3dc029`; main now has both, plus the scorer and recheck fixes. A combined measurement is in progress (`work/ledger-state`).
+Measured together on main `a9a95b2` (2026-11-14; includes the infield alignment, the double-play pivot, the scorer and both review fixes, the tag-up work and runner τ 0.68 s), 300 games per set, seeds 0–299 [1000–1299]. Nothing was changed for this measurement. "Real" is the 2024 MLB season from [sources](calibration/2026-11-14-sources.md) (Savant and Baseball-Reference totals), [run-environment diagnosis](calibration/2026-11-14-run-environment-diagnosis.md) and [tag-ups](calibration/2026-11-14-tag-ups.md); the batted-ball rows marked "approx." are the CLI's printed MLB column, not a sourced table.
 
-After the double-play pivot, `eb2812e` on `work/dp-pivot` (main `f3dc029`, with the Savant infield alignment, merged), 300 games, seeds 0–299 [1000–1299] (MLB column approximate, from the calibration notes):
-
-| | now | MLB |
+| | now | real |
 |---|---|---|
-| runs / team-game | 5.33 [5.60] | about 4.4–4.6 |
-| K% | 16.1 [15.9] | 22 |
-| BB% | 7.2 [7.3] | 8.5 |
-| HR / PA | 5.02% [5.43%] | 3% |
-| reached on BIP | 33.8% [33.6%] | |
-| GB hits | .323 [.316] | .24 |
-| LD hits | .703 [.715] | about .68 |
-| FB hits | .142 [.144] | .13 |
-| PU hits | .019 [.021] | about .02 |
-| foul outs a game | 2.07 [2.11] | about 1.4 (2017) |
-| foul share of contact | 23.7% (3,000 PAs, measured 2026-11-13, right-handed only) | 51% |
-| dives a game | 3.8 (seeds 1000–1299, after handedness) | 2–3 |
-| double plays a game | 2.16 plays with two or more outs, 1.98 of them grounder double plays (`dp_probe`, seeds 0–255; 15.3% per opportunity against 9.8%; pivot 0.75 s) | about 1.7 |
+| runs / team-game | 5.84 [6.11] | 4.39 (Baseball-Reference 2024) |
+| K% | 16.0 [15.9] | 22.58 |
+| BB% | 7.0 [7.5] | 8.18 |
+| HR / PA | 5.24% [5.34%] | 2.99% |
+| reached on BIP | 33.7% [34.7%] | |
+| GB hits (CLI) | .327 [.337] | .245 (2024 starters' average against; medium confidence, not HR-matched) |
+| LD hits | .711 [.706] | .624 (same source, includes some HR) / about .68 approx. |
+| FB hits | .133 [.142] | about .13 approx. (the sourced .251 includes home runs, not comparable) |
+| PU hits | .017 [.020] | about .02 approx. |
+| PA / team-game, pitches / game | 38.6, 224 [39.2, 227] | |
+| foul outs a game | 2.19 [2.21] | about 1.4 (2017) |
+| foul share of contact | 21.8% by the PA model's call, 22.2% in games (`foul_in_games`, seeds 0–299) | 52.5% with caught fouls counted ([foul measures](calibration/2026-11-13-foul-measures.md)) |
+| dives a game | 3.0 (`dive_probe`, seeds 1000–1299; 44% caught) | 2–3; SIS shortstop 0.44/game against the sim's SS 0.78 (sources, medium) |
+| double plays a game | 1.76 plays with 2+ outs, 1.57 grounder double plays; 12.5% of PA opportunities (runner on first, <2 out); 34.3% of double-play-chance grounders converted (`dp_probe`, seeds 0–255); pivot catch-to-release 0.756 s | about 1.7 a game; 9.8% per opportunity |
+| sacrifice flies a team-game | 0.242 (`sf_probe`: 56.4% of outfield catches with a runner on third and <2 out scored, 1.6% put out; scorer: 146 [119] SF per 300 games) | 0.24–0.27 (75–80% of such flies score, 2–3% out) |
+| runner, home to first | 4.250 s (`dp_probe`) | 4.26–4.30 s |
+| runner, third to home from the catch | 4.10 s (`sf_probe`, n = 145) | about 3.9–4.3 s |
+| hurried throws over 2/3 | 1.82 a game, 93.8% taken in the air (`throw_probe`, seeds 0–299) | unsourced |
+| throws out of play a game | 0.177 [0.117] | |
+| scorer: batting average / BABIP | .306 [.313] / .319 [.327] (`scorer_audit`; BABIP by type GB .321 [.330], LD .710 [.704], FB .132 [.141], PU .017 [.020]) | not in the calibration sources |
+| fielder's choices on grounders | .054 [.062] (CLI's provisional column) | |
 
-After the tag-up work and τ 0.68 s, `33d43ff` on `work/a4-throw-choices` (main `f3dc029` merged, which has the Savant infield alignment), 300 games, seeds 0–299 [1000–1299] (MLB column approximate, from the calibration notes):
+`throw_choice_probe` (256 games, seeds 0–255), as flagged counts a game: throws behind a sure lead 0.32, speculative throws 0.47, non-force carries over a sure force 0.035, two-out home over a force 0.008, none ahead of a stopped runner or without a chance. The probe's digests match with and without tracing for all 256 games.
 
-| | now | MLB |
-|---|---|---|
-| runs / team-game | 5.66 [6.14] | about 4.4–4.6 |
-| K% | 16.3 [16.0] | 22 |
-| BB% | 7.0 [7.5] | 8.5 |
-| HR / PA | 5.16% [5.33%] | 3% |
-| reached on BIP | 33.1% [34.2%] | |
-| GB hits | .327 [.338] | .24 |
-| LD hits | .711 [.714] | about .68 |
-| FB hits | .139 [.148] | .13 |
-| PU hits | .017 [.021] | about .02 |
-| foul outs a game | 2.14 [2.15] | about 1.4 (2017) |
-| sacrifice flies a team-game | 0.205 (`sf_probe`, seeds 0–299: 53.9% of outfield catches with a runner on third and <2 out scored, 1.8% put out) | 0.24–0.27 (75–80%, 2–3.5%) |
-| home to first | 4.25 s (average runner) | 4.26–4.30 s |
-| foul share of contact | 23.7% (3,000 PAs, measured 2026-11-13, right-handed only) | 51% |
-| dives a game | 3.8 (seeds 1000–1299, after handedness) | 2–3 |
-| double plays a game | 2.30 plays with two or more outs, 2.10 of them grounder double plays (`dp_probe`, seeds 0–255; 17.0% per opportunity against 9.8%) | about 1.7 |
+**How the night adds up** (runs / team-game, seeds 0–299 [1000–1299]; each row's own before → after, from §3):
 
-The main `f3dc029` standard run (with the infield alignment, before the pivot) was 5.11 [5.47]. The foul share and dives were not remeasured for A10, A4, either review's fixes, the alignment or the pivot.
+- **Start of the night, the first row of 2026-11-14 (arm strength by position):** 5.53 → 5.40 [5.40 → 5.53]. The two sets traded values and their mean did not move (5.465), so the real start is about 5.47 on both.
+- **A10 play area** (on main `52d6632`): 5.40 → 5.41 [5.53 → 5.62] (+0.01 [+0.09]).
+- **A4 throw choices:** 5.41 → 5.07 [5.62 → 5.28] (−0.34 [−0.34]), the one large fall of the night.
+- **A10 review fixes:** 5.07 → 5.19 [5.28 → 5.46] (+0.12 [+0.18]), from the fielders' wall braking.
+- **A4 review fixes:** 5.19 → 5.20 [5.46 → 5.47] (+0.01). **Infield alignment:** 5.19 → 5.10 [5.46 → 5.51] (−0.09 [+0.05]). The scorer rows change nothing in play.
+- Together these give 5.11 [5.52] against the measured main `f3dc029` of 5.11 [5.47]: set 0 exact, set 1000 off by 0.05.
+- **Double-play pivot** (on `f3dc029`): 5.11 → 5.33 [5.47 → 5.60] (+0.22 [+0.13]). **A10 recheck:** 5.11 → 5.14 [5.47 → 5.35] (+0.03 [−0.12]). **Runner τ and tag-ups:** 5.19 → 5.66 [5.46 → 6.14] over the two rows (+0.47 [+0.68]).
+- Added to `f3dc029`: 5.11 + 0.22 + 0.03 + 0.47 = 5.83 [5.47 + 0.13 − 0.12 + 0.68 = 6.16], against 5.84 [6.11] measured together. The changes add up to the combined build within 0.01 on set 0 and 0.05 on set 1000.
+- **Net:** about +0.4 [+0.6] from the start of the night, now 1.45 [1.72] above the real 4.39. A4's fall of 0.34 was undone by the wall braking (+0.12 [+0.18]) and then far exceeded by the tag-up work (+0.47 [+0.68]), which made runners sounder (faster to base, safe on tag-ups) and, with the pivot, removed double plays; the pivot's own +0.22 is the other source.
+
+What does not add up, or is not explained:
+
+- **The tag-up rows' "before" is not `f3dc029`.** They quote 5.19 [5.46] as main `f3dc029`, which measured 5.11 [5.47] on set 0 (5.19 is the earlier base `a791a9e`, before the alignment). I used their deltas, not their endpoints. Their sum with the others lands on the measured value, so the error is in the label, not the arithmetic.
+- **The two seed sets now differ by 0.27** (5.84 against 6.11), twice the 0.1–0.2 the ledger has quoted. It was 0.07 at the start of the night and grew with each merge that touched baserunning (tag-ups: 0.31 apart). The cause is not known; one reading is that fewer double plays and more runners scoring make runs more sensitive to the particular games.
+- **The recheck's runs (+0.03, −0.12) have opposite signs**; it is noise-sized, so it adds nothing to the reconciliation but cannot be shown to add nothing.
+- **Grounder hits fell .024 with tag-ups and are not explained** (§3), then returned to .327 [.337] in the combination: the combination's GB hits (.327 [.337]) are about the level of the start of the night (.348 [.353] before alignment, then .318 after), so the alignment's fall, tag-ups' fall and the pivot's and τ's rises roughly cancel. This is a description of the sum, not an explanation.
+- **HR/PA is 5.24% [5.34%]** against 5.0–5.1% at most points of the night with no batting change; it varies by 0.1–0.3 points with each merge because games diverge (already noted under tag-ups). The gap to real (2.99%) is unchanged in kind.
+- **Runs are 1.45 [1.72] above real** and K% 6.6 points below, with every cause listed in [§5](#5-open-questions) still open. Nothing here was tuned.
+- **Not remeasured before tonight and not independent of the night's changes:** the foul share (21.8% against 23.7% in 3,000 PAs on 2026-11-13, right-handed only: a different sample), dives (3.0 against 3.8 after handedness), and the per-opportunity double-play rate (12.5% here is the `dp_probe` PA-opportunity line; earlier rows quoted 15.3% and 17.0% "per opportunity", which I did not confirm are the same line).
 
 ## 2. The run environment in one line per step
 
