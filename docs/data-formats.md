@@ -237,7 +237,6 @@ Grouped by producer. "Physical" events record what the world did. "Rules" events
 | :--- | :--- |
 | `ScorerRuling` | hit kind (1B/2B/3B/HR) or error (agent, kind: fielding/throwing) or fielder's choice, earned/unearned run marks, wild pitch / passed ball, sacrifice. `scorer_version` |
 | `ScorerEvidence` | the numbers behind each ruling, such as the counterfactual time margin of an ordinary clean play. Lets a later scorer version re-rule from the log without re-simulating (PLAN §4.3) |
-
 | `ManagerCommandApplied` | the full `Command` (§6) as accepted, the issuing manager, human or AI |
 | `Substitution` | out agent, in agent (new slot), new position, batting-order slot; pitching changes included |
 | `AlignmentChanged` | team, infield and outfield alignment, each fielder's assigned home position |
@@ -259,6 +258,11 @@ reference throw that lands short continues through the noise-free bounce model; 
 never reaches the bag has a negative-infinite margin.
 Runner outs and their destination bases are recorded by `RunnerOut`. Errors are not yet ruled.
 
+The scorer also reads, from the same play record: `BallDead` with reason `OutOfPlay` (a thrown
+ball left the field and bases were awarded; the batter reaches only by that award unless
+`first_touch_s` precedes the last throw's `t_release`), `RunnerAdvanced.cause = Award`, and
+`PlateAppearanceEnded.result`. `ScorerRuling` is not written yet: rulings are derived on read
+(`bb_stats::scorer`, `scorer_version` 1), so a better scorer re-rules old logs.
 
 ### 4.4 Determinism digest
 

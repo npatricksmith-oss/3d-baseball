@@ -90,7 +90,7 @@ pub fn describe_scored(call: Call, launch_deg: Option<f64>, events: &[Event], fa
                 }
                 // Bases given for a throw out of play: not a hit, and (until the sim has
                 // fielding errors) not ruled an error either.
-                _ if ruling.is_some_and(|r| r.outcome == bb_stats::scorer::Outcome::ReachedOnThrowAward) => format!("{multi}Reached on a throw out of play, bases awarded{to}"),
+                _ if ruling.is_some_and(|r| r.outcome == bb_stats::scorer::Outcome::ReachedOnThrowAward) => format!("{multi}Reached on a throw out of play, bases awarded (ball hit{to})"),
                 _ if reached => {
                     let runner_out = outs.iter().find(|(runner, _, _)| *runner != batter).map(|(_, _, base)| {
                         let place = match base { 1 => "first", 2 => "second", 3 => "third", 4 => "home", _ => "a base" };
@@ -101,9 +101,14 @@ pub fn describe_scored(call: Call, launch_deg: Option<f64>, events: &[Event], fa
                 // The batter was not put out but never reached: the inning ended on another
                 // runner, forced or tagged.
                 _ if outs.iter().any(|(r, k, _)| *r != batter && *k == OutKind::Force) => format!("{multi}Force out{to}"),
-                _ => {
-                    let at = outs.iter().find(|(r, _, _)| *r != batter).map(|(_, _, base)| match base { 1 => "first", 2 => "second", 3 => "third", 4 => "home", _ => "a base" }).unwrap_or("a base");
-                    format!("{multi}Ball hit{to}, runner tagged out at {at}")
+                _ => match outs.iter().find(|(r, _, _)| *r != batter) {
+                    Some((_, _, base)) => {
+                        let at = match base { 1 => "first", 2 => "second", 3 => "third", 4 => "home", _ => "a base" };
+                        format!("{multi}Ball hit{to}, runner tagged out at {at}")
+                    }
+                    // A walk-off that ended before anyone could be put out or the batter
+                    // reached first: the scorer leaves the play unruled (rules-spec §10.2).
+                    None => format!("{multi}Ball hit{to}"),
                 },
             }
         }
@@ -164,7 +169,9 @@ mod tests {
         // Bases awarded on a throw out of play are not a hit.
         let thrown = bb_stats::scorer::PlayRuling { batter: B, outcome: bb_stats::scorer::Outcome::ReachedOnThrowAward, sacrifice_fly: false, rbi: 0 };
         let awarded = Event::RunnerAdvanced { runner: B, from: 0, to: 2, cause: bb_rules::AdvanceCause::Award };
-        assert_eq!(describe_scored(Call::InPlay, Some(-3.0), &[awarded, ended(PaResult::BattedBall)], &[by(6)], None, Some(thrown)), "Reached on a throw out of play, bases awarded to short");
+        assert_eq!(describe_scored(Call::InPlay, Some(-3.0), &[awarded, ended(PaResult::BattedBall)], &[by(6)], None, Some(thrown)), "Reached on a throw out of play, bases awarded (ball hit to short)");
+        // A walk-off that ends the game before the batter reaches first: nobody was put out.
+        assert_eq!(describe(Call::InPlay, Some(5.0), &[Event::RunScored { runner: R }, ended(PaResult::BattedBall)], &[by(6)], None), "Ball hit to short, 1 run scores");
         assert_eq!(describe(Call::InPlay, Some(28.0), &[ended(PaResult::HomeRun), Event::RunScored { runner: B }], &[], None), "Home run, 1 run scores");
     }
 }

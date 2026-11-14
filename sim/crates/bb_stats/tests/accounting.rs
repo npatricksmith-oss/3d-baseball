@@ -34,7 +34,9 @@ fn identities_hold_over_many_games() {
             let outs = b.outs_by_half.iter().skip(side).step_by(2).sum::<u32>();
             assert_eq!(t.pa, t.runs + t.left_on_base + outs, "I1 seed side {side}, line {t:?}");
             assert_eq!(t.h, t.singles + t.doubles + t.triples + t.hr, "I7");
-            assert_eq!(t.undetermined, 0, "unresolved rulings");
+            // The only unruled play is a walk-off that ends before the batter touches first
+            // (rules-spec §10.2): at most one, by the home team.
+            assert!(t.undetermined == 0 || (side == 1 && t.undetermined == 1), "unresolved rulings, side {side}: {}", t.undetermined);
         }
         assert_eq!(b.teams[0].pa + b.teams[1].pa, g.pa);
         // Pitches seen = log records.

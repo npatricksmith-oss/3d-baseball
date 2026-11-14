@@ -430,6 +430,18 @@ The batter's running goal at an attempted throw to another base is recorded: ext
 chosen only afterward are provisionally treated as on the throw. This is an observable
 heuristic, not a full counterfactual of how far he would have run absent the throw.
 
+**Error seam (provisional until A17).** The sim has no fielding errors, and the scorer rules
+none. The one place the sim already hands out bases for a bad act is a **thrown ball out of
+play** (§7.2). Its award is not a hit (OBR 5.06(b)(4)(G) gives the bases; 9.12 charges the
+thrower). Under scorer version 1 such a batter is ruled `ReachedOnThrowAward`: an at-bat
+with no hit, no RBI for a run the award itself scores, and no error charged. If he had
+touched first before the last throw's release, the play is judged as any other (hit,
+fielder's choice) and the award is left out of the hit's value. Without this rule the
+award, which the log carries as `RunnerAdvanced{Award}`, was counted as a hit worth
+its bases (43 of 53 such plays in 300 games). When A17 adds errors, this case becomes
+*reached on error* (§10.2 step 1) and `ReachedOnThrowAward` goes away; every other place a rule says
+"error" waits for that fact too (§10.3 extra bases, unearned runs §10.6, dropped fouls).
+
 ### 10.3 Errors on runners and extra bases
 
 A misplay that is ordinary and lets any runner (including the batter-runner after reaching) advance one or more bases that the reference play would have prevented, by ≥ `m_err`, is an error. A wild throw that does not change any outcome is not an error [S: OBR 9.12(d) on mental mistakes and no-effect misplays].
