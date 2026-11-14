@@ -176,15 +176,89 @@ const BATTER_START: f64 = 0.30;
 /// Rounding a base costs this much time [E].
 const ROUND_S: f64 = 0.15;
 
-/// Standard positions, normal alignment: polar (distance m, angle rad from +Y, + = 1B side),
-/// indexed by position number − 1 (P, C, 1B, 2B, 3B, SS, LF, CF, RF).
-pub fn home_positions() -> [Vec3; 9] {
-    let p = |d_ft: f64, deg: f64| {
-        let d = d_ft * 0.3048;
-        let a = deg.to_radians();
-        Vec3::new(d * m::sin(a), d * m::cos(a), 0.0)
+/// Pre-pitch infield alignment selected from base-out state (agent-models §5.9).
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub enum InfieldAlignment {
+    /// Standard alignment (no runner on first, or two outs; Savant `firstBase=0`).
+    Standard,
+    /// Double-play depth with a runner on first and fewer than two out (Savant `firstBase=1`).
+    DoublePlay,
+}
+
+/// League-average MLB infield starting positions `(depth_ft, angle_deg)` for `(1B, 2B, 3B, SS)`,
+/// where `0°` = CF (`+Y`), `-45°` = 3B line, `+45°` = 1B line.
+///
+/// Source: Baseball Savant Fielder Positioning (`season=2024`, `shift=0` = `Shaded: No` standard
+/// non-shifted alignment under the 2023+ two-infielders-per-side rule, PA-weighted across all
+/// fielders with `attempts=1`), <https://baseballsavant.mlb.com/visuals/fielder-positioning>.
+/// - RHB Standard (`batSide=R&firstBase=0&shift=0`, n=53,775)
+/// - RHB DP       (`batSide=R&firstBase=1&shift=0`, n=17,792)
+/// - LHB Standard (`batSide=L&firstBase=0&shift=0`, n=19,287)
+/// - LHB DP       (`batSide=L&firstBase=1&shift=0`, n=6,172)
+///
+/// Note: Savant `firstBase=1` pools 0/1/2 outs (applied here when `runner_on_first && outs < 2`).
+/// `Infield In` has no separate published Savant filter and is omitted rather than guessed.
+pub const SAVANT_INFIELD_RHB_STANDARD: [(f64, f64); 4] = [
+    (114.1, 29.6),  // 1B
+    (152.9, 6.8),   // 2B
+    (122.0, -36.4), // 3B
+    (148.3, -18.3), // SS
+];
+pub const SAVANT_INFIELD_RHB_DP: [(f64, f64); 4] = [
+    (88.0, 40.5),   // 1B holding runner near 1B bag
+    (148.7, 6.7),   // 2B
+    (118.8, -36.5), // 3B
+    (144.8, -17.3), // SS
+];
+pub const SAVANT_INFIELD_LHB_STANDARD: [(f64, f64); 4] = [
+    (123.9, 37.6),  // 1B
+    (148.2, 19.1),  // 2B
+    (116.1, -27.1), // 3B
+    (152.6, -6.2),  // SS
+];
+pub const SAVANT_INFIELD_LHB_DP: [(f64, f64); 4] = [
+    (88.9, 41.0),   // 1B holding runner near 1B bag
+    (143.1, 19.0),  // 2B
+    (113.8, -27.2), // 3B
+    (148.8, -5.7),  // SS
+];
+
+fn polar_m(d_ft: f64, deg: f64) -> Vec3 {
+    let d = d_ft * 0.3048;
+    let a = deg.to_radians();
+    Vec3::new(d * m::sin(a), d * m::cos(a), 0.0)
+}
+
+/// Pre-pitch positions indexed by position number − 1 (P, C, 1B, 2B, 3B, SS, LF, CF, RF)
+/// for batter plate side `bats` and base-out state `(runner_on_first, outs)` (agent-models §5.9).
+pub fn home_positions_for(bats: bb_observe::Hand, runner_on_first: bool, outs: u8) -> [Vec3; 9] {
+    let align = if runner_on_first && outs < 2 {
+        InfieldAlignment::DoublePlay
+    } else {
+        InfieldAlignment::Standard
     };
-    [p(60.0, 0.0), Vec3::new(0.0, -0.9, 0.0), p(105.0, 38.0), p(150.0, 13.0), p(110.0, -36.0), p(150.0, -13.0), p(290.0, -30.0), p(320.0, 0.0), p(290.0, 30.0)]
+    let inf = match (bats, align) {
+        (bb_observe::Hand::Right, InfieldAlignment::Standard) => SAVANT_INFIELD_RHB_STANDARD,
+        (bb_observe::Hand::Right, InfieldAlignment::DoublePlay) => SAVANT_INFIELD_RHB_DP,
+        (bb_observe::Hand::Left, InfieldAlignment::Standard) => SAVANT_INFIELD_LHB_STANDARD,
+        (bb_observe::Hand::Left, InfieldAlignment::DoublePlay) => SAVANT_INFIELD_LHB_DP,
+    };
+    [
+        polar_m(60.0, 0.0),          // P
+        Vec3::new(0.0, -0.9, 0.0),   // C
+        polar_m(inf[0].0, inf[0].1), // 1B
+        polar_m(inf[1].0, inf[1].1), // 2B
+        polar_m(inf[2].0, inf[2].1), // 3B
+        polar_m(inf[3].0, inf[3].1), // SS
+        polar_m(290.0, -30.0),       // LF
+        polar_m(320.0, 0.0),         // CF
+        polar_m(290.0, 30.0),        // RF
+    ]
+}
+
+/// Standard pre-pitch positions for a neutral right-handed batter with bases empty.
+pub fn home_positions() -> [Vec3; 9] {
+    home_positions_for(bb_observe::Hand::Right, false, 0)
 }
 
 /// Distance covered in time `t` from a standing start (the curve [`run_time`] inverts).
@@ -324,7 +398,7 @@ pub fn simulate_play(inp: &PlayInput) -> PlayOutput {
         (surf.roughness * r.truncated_normal(4.0), surf.roughness * r.truncated_normal(4.0))
     });
     let mut facts: Vec<(f64, Input)> = Vec::new();
-    let home = home_positions();
+    let home = home_positions_for(bb_observe::Hand::Right, inp.runners.iter().any(|r| r.base == 1), inp.outs);
 
     // Ball facts from the path: ground touches, fence.
     for &(t, x, y) in &path.bounces {
@@ -705,5 +779,99 @@ mod attr_tests {
         assert!((a.lead_sigma - 0.075).abs() < 1e-12);
         assert!((a.with_anticipation(80.0).lead_sigma - 0.0384).abs() < 1e-9);
         assert!((a.with_anticipation(20.0).lead_sigma - 0.146484375).abs() < 1e-9);
+    }
+
+    // agent-models §5.9: Baseball Savant 2024 league-average infield positions (`shift=0`),
+    // converted from (depth ft, angle deg) via d = depth_ft * 0.3048, x = d*sin(a), y = d*cos(a).
+    //
+    // Worked by hand (RHB Standard, firstBase=0):
+    //   1B (114.1 ft, +29.6°): d = 34.7777 m, x = +17.1782 m, y = 30.2390 m (sin +0.493942, cos 0.869495)
+    //   2B (152.9 ft,  +6.8°): d = 46.6039 m, x =  +5.5181 m, y = 46.2761 m (sin +0.118404, cos 0.992966)
+    //   3B (122.0 ft, -36.4°): d = 37.1856 m, x = -22.0666 m, y = 29.9305 m (sin -0.593419, cos 0.804894)
+    //   SS (148.3 ft, -18.3°): d = 45.2018 m, x = -14.1930 m, y = 42.9158 m (sin -0.313992, cos 0.949425)
+    //
+    // Worked by hand (LHB Standard, firstBase=0):
+    //   1B (123.9 ft, +37.6°): d = 37.7647 m, x = +23.0420 m, y = 29.9206 m (sin +0.610145, cos 0.792290)
+    //   2B (148.2 ft, +19.1°): d = 45.1714 m, x = +14.7809 m, y = 42.6846 m (sin +0.327218, cos 0.944949)
+    //   3B (116.1 ft, -27.1°): d = 35.3873 m, x = -16.1205 m, y = 31.5022 m (sin -0.455545, cos 0.890213)
+    //   SS (152.6 ft,  -6.2°): d = 46.5125 m, x =  -5.0233 m, y = 46.2404 m (sin -0.107999, cos 0.994151)
+    #[test]
+    fn savant_standard_positions_match_hand_conversions() {
+        let rhb = home_positions_for(bb_observe::Hand::Right, false, 0);
+        assert_eq!(rhb, home_positions());
+        let want_rhb = [
+            (2, 17.1782, 30.2390),
+            (3, 5.5181, 46.2761),
+            (4, -22.0666, 29.9305),
+            (5, -14.1930, 42.9158),
+        ];
+        for (i, wx, wy) in want_rhb {
+            assert!((rhb[i].x - wx).abs() < 1e-3 && (rhb[i].y - wy).abs() < 1e-3 && rhb[i].z == 0.0,
+                "RHB pos {i}: ({:.4}, {:.4}), want ({wx:.4}, {wy:.4})", rhb[i].x, rhb[i].y);
+        }
+
+        let lhb = home_positions_for(bb_observe::Hand::Left, false, 0);
+        let want_lhb = [
+            (2, 23.0420, 29.9206),
+            (3, 14.7809, 42.6846),
+            (4, -16.1205, 31.5022),
+            (5, -5.0233, 46.2404),
+        ];
+        for (i, wx, wy) in want_lhb {
+            assert!((lhb[i].x - wx).abs() < 1e-3 && (lhb[i].y - wy).abs() < 1e-3 && lhb[i].z == 0.0,
+                "LHB pos {i}: ({:.4}, {:.4}), want ({wx:.4}, {wy:.4})", lhb[i].x, lhb[i].y);
+        }
+
+        // Every infielder shades further toward LF (-X) vs RHB than vs LHB.
+        for i in 2..=5 {
+            assert!(rhb[i].x < lhb[i].x, "infielder {i} pull shade: rhb x {} vs lhb x {}", rhb[i].x, lhb[i].x);
+        }
+        // P, C, and outfield positions stay identical across batter side and base state.
+        let lhb_dp = home_positions_for(bb_observe::Hand::Left, true, 1);
+        for i in [0, 1, 6, 7, 8] {
+            assert_eq!(rhb[i], lhb[i]);
+            assert_eq!(rhb[i], lhb_dp[i]);
+        }
+    }
+
+    // Worked by hand (Double-Play Depth with runner on 1B and < 2 out, Savant firstBase=1):
+    //   RHB 1B ( 88.0 ft, +40.5°): d = 26.8224 m, x = +17.4198 m, y = 20.3959 m (2.215 m from 1B bag (19.3974, 19.3974))
+    //   RHB 2B (148.7 ft,  +6.7°): d = 45.3238 m, x =  +5.2880 m, y = 45.0142 m
+    //   RHB 3B (118.8 ft, -36.5°): d = 36.2102 m, x = -21.5387 m, y = 29.1078 m
+    //   RHB SS (144.8 ft, -17.3°): d = 44.1350 m, x = -13.1247 m, y = 42.1384 m
+    //   LHB 1B ( 88.9 ft, +41.0°): d = 27.0967 m, x = +17.7770 m, y = 20.4502 m (1.932 m from 1B bag)
+    //   LHB 2B (143.1 ft, +19.0°): d = 43.6169 m, x = +14.2003 m, y = 41.2406 m
+    //   LHB 3B (113.8 ft, -27.2°): d = 34.6862 m, x = -15.8550 m, y = 30.8505 m
+    //   LHB SS (148.8 ft,  -5.7°): d = 45.3542 m, x =  -4.5046 m, y = 45.1300 m
+    #[test]
+    fn savant_dp_depth_holds_first_and_shortens_middle_only_before_two_outs() {
+        let bag1 = base_pos(1);
+        for (bats, want, std_want_d) in [
+            (
+                bb_observe::Hand::Right,
+                [(2, 17.4198, 20.3959), (3, 5.2880, 45.0142), (4, -21.5387, 29.1078), (5, -13.1247, 42.1384)],
+                SAVANT_INFIELD_RHB_STANDARD,
+            ),
+            (
+                bb_observe::Hand::Left,
+                [(2, 17.7770, 20.4502), (3, 14.2003, 41.2406), (4, -15.8550, 30.8505), (5, -4.5046, 45.1300)],
+                SAVANT_INFIELD_LHB_STANDARD,
+            ),
+        ] {
+            let std_p = home_positions_for(bats, false, 0);
+            let dp_0 = home_positions_for(bats, true, 0);
+            let dp_1 = home_positions_for(bats, true, 1);
+            let two_out = home_positions_for(bats, true, 2);
+            assert_eq!(dp_0, dp_1);
+            assert_eq!(two_out, std_p, "two outs reverts to standard depth");
+            for (i, wx, wy) in want {
+                assert!((dp_0[i].x - wx).abs() < 1e-3 && (dp_0[i].y - wy).abs() < 1e-3,
+                    "{bats:?} DP pos {i}: ({:.4}, {:.4}), want ({wx:.4}, {wy:.4})", dp_0[i].x, dp_0[i].y);
+                assert!(dp_0[i].norm() < std_want_d[i - 2].0 * 0.3048, "infielder {i} plays shallower at DP depth");
+            }
+            // 1B holds near 1B bag (~1.9–2.2 m vs ~11 m standard).
+            assert!((dp_0[2] - bag1).norm() < 2.3);
+            assert!((std_p[2] - bag1).norm() > 10.5);
+        }
     }
 }
