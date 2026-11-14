@@ -1,6 +1,6 @@
 # The collision off a sloped barrel: sources and diagnosis (2026-11-14, Stage 1)
 
-Branch `work/collision` (from `work/swing-recalib` at `f46ea5a`). Owner's ruling D20 (PLAN §1): the bat–ball collision off a sloped barrel is reopened as a sourced physics question, spec and oracle first, with no tuning toward a run total. **Stage 1 only: no physics code is changed here.** The one counterfactual run in games used a temporary edit, reverted (the tree is clean).
+Branch `work/collision` (from `work/swing-recalib` at `f46ea5a`). **Stage 2 (owner ruled Option A, 2026-11-14): the speed-dependent e_t is built; §8.** Owner's ruling D20 (PLAN §1): the bat–ball collision off a sloped barrel is reopened as a sourced physics question, spec and oracle first, with no tuning toward a run total. **Stage 1 only: no physics code is changed here.** The one counterfactual run in games used a temporary edit, reverted (the tree is clean).
 
 **The question** (recalibration report §3.1; bat-angle note §3; [collision targets](2026-11-14-collision-targets.md), Sonnet, `work/collision-targets` `a7a6fe9`). Off a barrel sloped about 30° down and met under the ball's center, the sim's ball goes too far toward the tip side and spins too much. Fly balls land at −19.8° (pull-positive) against MLB's −2.6°, and sidespin is 3,720 rpm at a 27° launch.
 
@@ -206,6 +206,81 @@ All twenty combinations are in `sim/out/collision/face_path.txt`.
 
 It would not touch the slope (the sloped barrel's geometry, §4) or the spin (e_t, §5.2).
 
+## 8. Stage 2: tangential restitution against impact speed (owner, 2026-11-14: Option A)
+
+### 8.1 What was built
+
+| Step | Commit | What |
+|---|---|---|
+| PLAN | `f710d9f` | D20 records the ruling: Option A for the spin; the direction gap stays known and unexplained |
+| Spec | `217aebb` | physics-spec §8.2.1: e_t(|c_n|) = 0.405 up to 34 m/s, linear to 0 at 65 m/s, constant beyond. Four named [E] parameters (`e_t_lab`, `v_t_lab`, `e_t_game`, `v_t_game`) with their sources; the ramp's shape is stated as unsourced. Tests A10a–A10d and A14 in §14.2; open items 8 (direction) and 9 (e_x at game speed) |
+| Oracle | `972fc3f` | `bbphys.tangential_restitution`, `bat_ball_collision`; fixture `golden/tangential_restitution.json`: the law at 13 speeds and five bat–ball contacts (two tee cases below the ramp, one at 45.8 m/s inside it, two at game speed, 64.3 and 70.5 m/s). The oracle checks the tee cases against KNS Eq. (8) to 1e-9. The existing fixtures regenerate byte-identical |
+| Code | `cbb80c8` | `BatBallParams::e_t(cn_abs)`, used by `resolve_contact` at the first impulse's normal speed (a second impulse reuses it, as for e_n). Linear interpolation only: no transcendental math. `with_constant_e_t` for counterfactuals (`foul_diag et=`, `collision_anatomy`) |
+| Tests | `cbb80c8` | A14 against the oracle (law to 1e-15, contacts to 1e-9); A10a, the KNS tee: spin about the bat's axis equals Eq. (8) at the lab e_t to 1e-9, and 184 rpm per degree of launch against KNS's measured 179 ± 18; A10b/A10c in the cage (`bb_game/tests/batted_spin.rs`). With the old constant 0.40, A10b and A10c fail (4,205 rpm, −110 rpm/°). Workspace: 338 tests pass |
+
+**Both anchors hold, so no stop was needed.** At KNS's 77 mph the tee's normal speed is 34.4·cos ψ, at most 34.3 m/s, so e_t stays at 0.405 (≥ 0.401 at ψ 5°). The game contact that makes a 27–30° fly ball (3 cm under) meets the bat at 64.3 m/s, so e_t is 0.009 there and 0 for anything squarer.
+
+### 8.2 What it does
+
+**Cage** (`collision_anatomy`, `sim/out/collision/anatomy_law.txt`):
+
+| | e_t 0.40 (before) | e_t(|c_n|) | e_t 0 | Published |
+|---|---|---|---|---|
+| Tee, rpm per ° of θ | 183 | 184 | (131) | 179 (KNS Fig. 3) |
+| Backspin, LA 25–30°, EV 90+ (A10b) | 4,205 | **2,465** | 2,364 | about 2,300 (Nathan Fig. 4) |
+| Sidespin per ° of adjusted spray (A10c) | −110 | **−80** | −73 | about −65 (Fig. 2) |
+| Sidespin zero (A10d, report only) | −1.9° | −1.0° | −1.8° | about −10° |
+| 3 cm under: LA, EV | 27.3°, 97.7 mph | 30.4°, 98.6 mph | | |
+| Landing spray − AD per ° of LA, on time | −1.17 | −1.21 | −1.21 | MLB −0.37 (all contact) |
+
+**Games** (standard run, `cbb80c8` against `4254e73`, seeds 0–299 [1000–1299]; ledger §3): runs 4.82 → 5.76 [4.50 → 5.78]; HR/PA 1.04% → 2.36% [0.98% → 2.24%]; K% 15.6 → 16.8 [15.8 → 16.7]; BB% 7.3 → 7.7 [7.6 → 7.7]; LD hits .676 → .763; FB hits .172 → .221; fouls a game 17.8 → 21.1 [17.5 → 21.4].
+- **Why the fouls rose.** In the PA model (`foul_diag 10000`, R/R) foul share of contact goes 26.0% → 29.2%, nearly all opposite-side (18.5 → 21.3). An undercut ball keeps more of its tangential velocity up the face and launches about 3° higher, so more contact lands at 40–60°, where the sim's foul rate is highest. Longer counts follow: +10 pitches a game, K% +1.
+- **What it does not move: the direction.** Spray − AD per degree of launch changes by 0.03–0.05 (§7.1). The known gap stays: about 12° level offset toward the opposite field plus about 0.24° per degree of excess slope. **It is recorded as known and unexplained** (physics-spec §17 item 8, ledger §5), and nothing was changed for it.
+
+### 8.3 The refit: two sweep rounds, nothing adopted
+
+Targets (calibration-targets; 2024 MLB): runs 4.39, K% 22.6, BB% 8.2, HR/PA 3.0%; exit speed none over 125 mph (§4.4); LA SD about 27° [20–35]. Each row is `run_env_diag 100 0` with the e_t law (`sim/out/et/env_*.txt`). Over 100 games (seeds 0–99) the base runs 0.4 above the 300-game standard run (6.18 against 5.76), so read the rows against the base row.
+
+| Noise scales | runs | K% | BB% | HR/PA | mean EV | max EV | LA mean ± SD | foul/contact |
+|---|---|---|---|---|---|---|---|---|
+| base: perception 2.7, swing 1.0 | 6.18 | 16.5 | 7.7 | 2.64% | 90.5 | 118.1 | 12.0 ± 26.3 | 26.2 |
+| swing 1.4 | 5.46 | 18.2 | 7.8 | 2.68% | 90.0 | 120.3 | 10.7 ± 28.2 | 27.7 |
+| swing 1.8 | 5.21 | 20.4 | 8.3 | 2.95% | 89.4 | **128.0** | 9.6 ± 30.0 | 29.9 |
+| swing 2.0 | 5.24 | 21.2 | 8.8 | 2.59% | 89.0 | **131.6** | 8.4 ± 30.5 | 31.1 |
+| perception 3.5 | 3.62 | 31.1 | 8.9 | 1.66% | 87.8 | 116.2 | 9.8 ± 29.5 | 26.3 |
+| swing 1.8, perception 2.9 | 4.65 | 24.1 | 8.4 | 2.31% | 88.8 | **128.0** | 9.0 ± 30.2 | 30.3 |
+| swing 2.0, perception 2.9 | 4.39 | 25.4 | 8.9 | 2.56% | 88.2 | **131.6** | 8.0 ± 31.2 | 30.7 |
+
+- **The swing-noise knob can reach runs, K and HR together, but it breaks the exit-speed tail.** `Knobs::swing` scales `BatControl` and timing σ and also the effort σ, so at 1.8 the fastest ball is 128 mph against "none over 125". The recalibration report (§2.3) turned it down for the same reason at 1.5. It is not adopted.
+- **Perception alone is clean but costs home runs.** At 3.5 it overshoots K (31%) and runs (3.6). By interpolation about 3.0 gives K about 21–22% and runs near the target in the standard run, but HR/PA falls to about 2.2%, against 3.0%.
+- **Why it needs more than a sweep.** The runs surplus is mostly hits on balls in play (GB .34, LD .76, FB .22 against .245, .68, .13: fielding's, `live.rs`, which this job may not touch). The HR deficit is the exit-speed tail and the opposite-field carry of the direction gap. No single noise scale lowers the first and raises the second.
+
+**Refit plan (for the lead; nothing applied):**
+1. **Split the swing knob** (a code change to `bb_agents::motor` and `pa.rs`, specs first): scale the vertical miss and timing (`BatControl`, timing σ) separately from the effort σ. That way the miss can widen without lengthening the exit-speed tail. Then sweep the miss scale alone, 1.4–1.8. Expected: K +2–4 points, runs −0.6 to −0.9, max EV about 120.
+2. **Perception 2.7 → about 2.9–3.0** to carry K% to about 22. Check chase rate (sim about 24% against 29%) and BB% (target 8.2).
+3. **Leave HR/PA where it lands (about 2.3–2.6%)** and record the deficit against the direction gap: fly balls sliced 20° toward the opposite field lose carry (recalibration report §2.2: about 29 ft from the sidespin at 3,720 rpm, now about 2,500). Do not raise bat speed: its mean (32.0 m/s) and spread are sourced.
+4. **Then the standard run and a ledger row**, with the calibration report naming each change's band and mechanism (calibration-targets §2.3–§2.4).
+5. The runs surplus on balls in play belongs to the fielding work (ledger §5, ground-ball hits).
+
+### 8.4 State at handoff
+
+- **Done and committed on `work/collision`:**
+  - the ruling (PLAN D20);
+  - the spec (physics-spec §8.2.1, A10a–d, A14, open items 8–9);
+  - the oracle and its fixture;
+  - the code (`BatBallParams::e_t`);
+  - the tests (338 pass);
+  - the measured ledger row with causes, and the direction gap in ledger §5;
+  - two refit sweep rounds (§8.3).
+- **Measured:**
+  - Standard run: runs 5.76 [5.78], K% 16.8 [16.7], BB% 7.7 [7.7], HR/PA 2.36% [2.24%], fouls 21.1 [21.4] a game.
+  - Cage: backspin 2,465 rpm at 25–30°, sidespin −80 rpm/°, tee 184 rpm/°.
+- **Remains:**
+  - The refit (plan in §8.3; it needs the swing knob split, a code change, before any sweep can be adopted).
+  - A Codex review of `f710d9f..` (standard protocol; not run).
+  - The direction gap (known, unexplained).
+  - Nothing is merged; `work/collision` is not on main.
+
 ## 6. Reproduction
 
-`cargo run --release -p bb_game --example collision_anatomy` (Parts A–F; output in `sim/out/collision/anatomy.txt`, untracked). §7: `foul_diag -- 10000 et=0.40` and `et=0` (`sim/out/collision/foul_et*.txt`); `face_path_probe` (`sim/out/collision/face_path.txt`). The games counterfactual is `bb_physics::bat` `e_t` 0.40 → 0.0, then `run_env_diag -- 100 0`, then reverted (`sim/out/collision/et0_env.txt`, `base_env.txt`). Nathan 2020's figures were read from the PDF rendered at 110 dpi. The six-date Savant CSVs (attack angle by launch) are the swing note's; Sonnet's twelve-date tables are in `work/collision-targets`.
+`cargo run --release -p bb_game --example collision_anatomy` (Parts A–F; output in `sim/out/collision/anatomy.txt`, untracked). §7: `foul_diag -- 10000 et=0.40` and `et=0` (`sim/out/collision/foul_et*.txt`); `face_path_probe` (`sim/out/collision/face_path.txt`). The games counterfactual is `bb_physics::bat` `e_t` 0.40 → 0.0, then `run_env_diag -- 100 0`, then reverted (`sim/out/collision/et0_env.txt`, `base_env.txt`). §8: `collision_anatomy` (`sim/out/collision/anatomy_law.txt`); `cargo test -p bb_game --test batted_spin -- --nocapture`; standard runs `sim/out/et/law-seed*.txt`; `foul_diag 10000` and `et=0.40` (`sim/out/et/foul_*.txt`); refit sweeps `BB_K_SWING=… BB_K_PERCEPTION=… run_env_diag 100 0` (`sim/out/et/env_*.txt`). Nathan 2020's figures were read from the PDF rendered at 110 dpi. The six-date Savant CSVs (attack angle by launch) are the swing note's; Sonnet's twelve-date tables are in `work/collision-targets`.
