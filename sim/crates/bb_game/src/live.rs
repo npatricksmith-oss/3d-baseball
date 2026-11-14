@@ -963,6 +963,46 @@ fn run_gap(fd: &Fielder, goal: Vec3, t: f64, reach: f64) -> f64 {
     left - reach - run_dist_from(t - t_turn, u_end, vmax, tau)
 }
 
+/// Seconds the wall costs a fielder running at `goal`, to be added to his unbraked run. He
+/// sees the wall and knows what `move_fielders` will do: his speed into it is capped at
+/// √(2·[`BRAKE`]·clearance) of his body, so a stand point (`reach` short of `goal`) near the
+/// wall is reached late. Into a wall at normal speed v with clearance c at the stand point, the
+/// cap bites from v²/(2·BRAKE) − c out, and the time lost against running on is
+/// v/(2·BRAKE) − √(2c/BRAKE) + c/v (v/(2·BRAKE) at the wall itself: 0.67 s at 8 m/s). The
+/// speed is the normal component of his top speed along the line to the stand point, held
+/// to what he can build up over the distance he has (a late start is not braked from 8 m/s);
+/// only the normal component is capped, so a run along the wall loses nothing. Checked
+/// against the stepped movement in `the_plan_includes_the_slow_down_for_the_wall`.
+fn wall_delay(field: &Field, fd: &Fielder, goal: Vec3, reach: f64) -> f64 {
+    let to = Vec3::new(goal.x - fd.pos.x, goal.y - fd.pos.y, 0.0);
+    let d = to.norm();
+    if d <= reach + 1e-9 {
+        return 0.0;
+    }
+    let dir = to * (1.0 / d);
+    let stand = Vec3::new(goal.x - dir.x * reach, goal.y - dir.y * reach, 0.0);
+    let w = field.body_clearance(stand.x, stand.y, BODY_R);
+    let cos = -dir.dot(w.inward);
+    if cos <= 0.0 {
+        return 0.0;
+    }
+    // Speed into the wall: top speed, or what he builds over the way (initial acceleration
+    // v_max/τ) if that is less, but never less than he already carries into it.
+    let carried = (-fd.vel.dot(w.inward)).max(0.0);
+    let built = m::sqrt(2.0 * fd.a.speed / fd.a.tau_a * (d - reach) * cos);
+    let v = (fd.a.speed * cos).min(built.max(carried));
+    let c = w.dist.max(0.0);
+    if v <= 0.0 || c >= v * v / (2.0 * BRAKE) {
+        return 0.0;
+    }
+    v / (2.0 * BRAKE) - m::sqrt(2.0 * c / BRAKE) + c / v
+}
+
+/// Highest ball a fielder can take where it is: he can leap at a wall (agent-models §5.4).
+fn catch_ceiling(field: &Field, p: Vec3) -> f64 {
+    if field.body_clearance(p.x, p.y, 0.0).dist < 3.0 { WALL_CATCH_MAX_Z } else { CATCH_MAX_Z }
+}
+
 /// Time for a fielder to come within `reach` of `goal` from his current motion: the first
 /// zero of [`run_gap`].
 fn run_time_to(fd: &Fielder, goal: Vec3, reach: f64) -> f64 {
@@ -1310,7 +1350,8 @@ impl<'a> Sim<'a> {
         let mut dive = None;
         // Shortfall at time `t` for a ball at `b`: how far short of the ball's line the
         // fielder still is (≤ 0: he can field it standing, with the planning reach).
-        let gap = |t: f64, b: Vec3| run_gap(fd, b, (t - start).max(0.0), REACH * 0.7);
+        // The wall he must slow for is part of the plan (Gemini play-area recheck P2-1).
+        let gap = |t: f64, b: Vec3| run_gap(fd, b, (t - start - wall_delay(self.inp.field, fd, b, REACH * 0.7)).max(0.0), REACH * 0.7);
         // The dive's extra reach over the standing plan.
         let dive_extra = REACH + 0.6 * DIVE - REACH * 0.7;
         const STEP: f64 = 0.12;
@@ -1340,7 +1381,7 @@ impl<'a> Sim<'a> {
             for (t, b, g) in pts {
                 // Players see the walls: no intercept past a wall, beyond his reach over it
                 // (Gemini play-area review P2-3).
-                if b.z > CATCH_MAX_Z || t < start || beyond_reach_over_wall(self.inp.field, b) > 0.0 {
+                if b.z > catch_ceiling(self.inp.field, b) || t < start || beyond_reach_over_wall(self.inp.field, b) > 0.0 {
                     continue;
                 }
                 // Head for the ball's line itself, not the edge of reach.
@@ -1497,7 +1538,7 @@ impl<'a> Sim<'a> {
         let in_air = ti.is_finite() && pred.first_bounce().map(|b| ti < b.0).unwrap_or(true);
         if in_air {
             let (fd, start) = self.planning_state(i);
-            let spare = ti - (start + run_time_to(&fd, pt, REACH * 0.7));
+            let spare = ti - (start + run_time_to(&fd, pt, REACH * 0.7) + wall_delay(self.inp.field, &fd, pt, REACH * 0.7));
             if spare >= CALL_SLACK_S {
                 // Where he believes the ball is now, and how long he has watched it.
                 let view = (self.t - self.inp.t_contact - fd.a.reaction).max(0.0);
@@ -1936,7 +1977,7 @@ impl<'a> Sim<'a> {
         };
         // Catchable height where the ball is: a fielder at the wall can leap.
         let field = self.inp.field;
-        let zmax_at = |p: Vec3| if field.body_clearance(p.x, p.y, 0.0).dist < 3.0 { WALL_CATCH_MAX_Z } else { CATCH_MAX_Z };
+        let zmax_at = |p: Vec3| catch_ceiling(field, p);
         let zmax = zmax_at(b);
         for i in 0..9 {
             let fd = &self.f[i];
@@ -3772,6 +3813,149 @@ mod tests {
         }
         let (t_int, _) = sim.intercept(SS, &path);
         assert!(first.is_finite() && (t_int - first).abs() <= 0.03, "scan {t_int:.3} s, fine search {first:.3} s");
+    }
+
+    // Gemini play-area recheck P2-1. A fielder sees the wall and knows he must slow for it
+    // (physics-spec §9.5; `move_fielders` caps his speed into it at √(2·BRAKE·clearance), and
+    // BRAKE = 6 m/s²). By hand, for a stand point 0.3 m clear of the wall reached at top speed
+    // v = 8 m/s: he must be down to √(2·6·0.3) = 1.90 m/s there; braking starts v²/(2·6) − 0.3 =
+    // 5.03 m out, and the time lost against running on is ∫dx/√(12(0.3+x)) over those 5.03 m,
+    // minus 5.03/8: 2(√(0.3+5.03) − √0.3)/√12 − 0.629 = 1.017 − 0.629 = 0.39 s. At the wall
+    // itself (clearance 0) it is v/(2·BRAKE) = 0.667 s. The plan must include that, or he
+    // promises a catch (and calls teammates off) about half a second before he can make it.
+    // Bug caught: planning with the unbraked run (plan early by ~0.4 s).
+    #[test]
+    fn the_plan_includes_the_slow_down_for_the_wall() {
+        let fx = fixture(&[]);
+        let inp = input(&fx, vec![RunnerIn { id: fx.st.batter, base: 0, speed: 8.2 }]);
+        let field = &fx.field;
+        // The stand point on the center-field line whose body is `c` clear of the wall.
+        let stand_y = |c: f64| {
+            let (mut lo, mut hi) = (60.0, 200.0);
+            for _ in 0..60 {
+                let mid = 0.5 * (lo + hi);
+                if field.body_clearance(0.0, mid, BODY_R).dist > c { lo = mid } else { hi = mid }
+            }
+            0.5 * (lo + hi)
+        };
+        for &c in &[0.3, 1.0, 3.0] {
+            let mut st = fx.st.clone();
+            let mut sim = new_sim(&inp, &mut st);
+            sim.t = 2.0;
+            let y = stand_y(c);
+            let v = sim.f[CF].a.speed;
+            sim.f[CF].pos = Vec3::new(0.0, y - 40.0, 0.0);
+            sim.f[CF].vel = Vec3::new(0.0, v, 0.0);
+            sim.f[CF].target = Vec3::new(0.0, y + REACH * 0.7, 0.0);
+            sim.f[CF].role = Role::Chase;
+            sim.f[CF].t_int = 0.0;
+            let goal = sim.f[CF].target;
+            let plan = run_time_to(&sim.f[CF], goal, REACH * 0.7) + wall_delay(field, &sim.f[CF], goal, REACH * 0.7);
+            let mut truth = f64::NAN;
+            for k in 1..4000 {
+                sim.move_fielders();
+                sim.t += DT;
+                if (goal - sim.f[CF].pos).norm() <= REACH * 0.7 + 0.02 {
+                    truth = k as f64 * DT;
+                    break;
+                }
+            }
+            assert!(truth.is_finite(), "never arrived with {c} m clear");
+            assert!((plan - truth).abs() < 0.12, "{c} m clear: plan {plan:.3} s, the movement step {truth:.3} s");
+        }
+        // The hand figure at the wall itself.
+        let mut st = fx.st.clone();
+        let mut sim = new_sim(&inp, &mut st);
+        let v = sim.f[CF].a.speed;
+        let y = stand_y(0.0);
+        sim.f[CF].pos = Vec3::new(0.0, y - 40.0, 0.0);
+        sim.f[CF].vel = Vec3::new(0.0, v, 0.0);
+        let d = wall_delay(field, &sim.f[CF], Vec3::new(0.0, y + REACH * 0.7, 0.0), REACH * 0.7);
+        assert!((d - v / 12.0).abs() < 0.03, "at the wall {d:.3} s, expected v/(2·BRAKE) = {:.3} s", v / 12.0);
+    }
+
+    // Gemini play-area recheck P2-1, the other half: `try_captures` lets a fielder within 3 m of
+    // a wall take a ball up to WALL_CATCH_MAX_Z = 3.0 m (he leaps; agent-models §5.4), so the
+    // plan must too. A fly coming down 1 m short of the center-field fence, with the center
+    // fielder already standing on its line at the wall: the first moment he can take it is when
+    // it passes 3.0 m, not 2.4 m. Bug caught: planning the wall catch with the open-field
+    // ceiling (he plans for the ball lower down, 0.1–0.2 s later, than the one he can catch).
+    #[test]
+    fn a_fielder_plans_a_leaping_catch_at_the_wall() {
+        let fx = fixture(&[]);
+        let field = &fx.field;
+        let fence = field.fence_at(0.0);
+        let mut lo = 20.0;
+        let mut hi = 90.0;
+        let mut inp = input(&fx, vec![RunnerIn { id: fx.st.batter, base: 0, speed: 8.2 }]);
+        let mut path = None;
+        for _ in 0..40 {
+            let v = 0.5 * (lo + hi);
+            let dir = Vec3::new(0.0, 0.4, 0.92).normalized();
+            inp.ball = BallState { r: Vec3::new(0.0, 0.5, 1.0), v: dir * v, w: Vec3::ZERO };
+            let p = batted_path(&fx.env, field, inp.ball, inp.t_contact, |_, _| (0.0, 0.0));
+            let (land, _) = p.at(p.first_bounce().map(|b| b.0).unwrap_or(p.t_end()));
+            if land.y < fence - 1.0 { lo = v } else { hi = v }
+            path = Some(p);
+        }
+        let path = path.unwrap();
+        let (land, _) = path.at(path.first_bounce().expect("it lands").0);
+        assert!((land.y - (fence - 1.0)).abs() < 0.3 && field.body_clearance(land.x, land.y, 0.0).dist < 3.0, "fixture: lands at y {:.1}, fence {fence:.1}", land.y);
+        let mut st = fx.st.clone();
+        let mut sim = new_sim(&inp, &mut st);
+        // He waits where the ball passes 2.7 m on the way down (within 3 m of the wall).
+        let mut t = path.t_start();
+        while path.at(t).0.z > 2.7 || path.at(t).1.z > 0.0 {
+            t += 0.001;
+        }
+        sim.f[CF].pos = Vec3::new(0.0, path.at(t).0.y, 0.0);
+        sim.f[CF].vel = Vec3::ZERO;
+        // The scan samples the path every 0.12 s and the ball falls a couple of metres in that,
+        // so move the phase of the samples a few ms at a time: some land between 2.4 and 3.0 m.
+        let mut heights = Vec::new();
+        for k in 0..24 {
+            sim.t = path.t_start() + 1.0 + 0.005 * k as f64;
+            let (t_int, _) = sim.intercept(CF, &path);
+            heights.push(path.at(t_int).0.z);
+        }
+        assert!(heights.iter().all(|&z| z <= WALL_CATCH_MAX_Z + 1e-9), "planned above the leap: {heights:?}");
+        assert!(heights.iter().any(|&z| z > CATCH_MAX_Z + 0.02), "never planned a catch above {CATCH_MAX_Z} m: {heights:?}");
+    }
+
+    // Gemini play-area recheck P2-1, the call: a fielder calls a ball only on the time he will
+    // really have (agent-models §5.7: a call needs CALL_SLACK_S = 0.3 s to spare). Running at
+    // top speed at a stand point 0.3 m from the wall he arrives 0.39 s later than the open run
+    // (see above), so a ball he could take with 0.45 s to spare in the open leaves him 0.06 s
+    // at the wall and he must not call it, while the same run in the open field is a call.
+    // Bug caught: the call counting the unbraked run (he calls off a teammate, then is late).
+    #[test]
+    fn a_fielder_does_not_call_a_ball_the_wall_would_make_him_late_for() {
+        let fx = fixture(&[]);
+        let field = &fx.field;
+        let mut inp = input(&fx, vec![RunnerIn { id: fx.st.batter, base: 0, speed: 8.2 }]);
+        inp.ball = BallState { r: Vec3::new(0.0, 0.5, 1.0), v: Vec3::new(0.0, 5.0, 55.0), w: Vec3::ZERO };
+        let path = batted_path(&fx.env, field, inp.ball, inp.t_contact, |_, _| (0.0, 0.0));
+        let (mut lo, mut hi) = (60.0, 200.0);
+        for _ in 0..60 {
+            let mid = 0.5 * (lo + hi);
+            if field.body_clearance(0.0, mid, BODY_R).dist > 0.3 { lo = mid } else { hi = mid }
+        }
+        let y_wall = 0.5 * (lo + hi);
+        let tier = |y_stand: f64, x_dir: f64| {
+            let mut st = fx.st.clone();
+            let mut sim = new_sim(&inp, &mut st);
+            sim.t = 3.0;
+            let v = sim.f[CF].a.speed;
+            sim.f[CF].pos = Vec3::new(0.0, y_stand - 40.0 * x_dir, 0.0);
+            sim.f[CF].vel = Vec3::new(0.0, v * x_dir, 0.0);
+            let goal = Vec3::new(0.0, y_stand + REACH * 0.7 * x_dir, 0.0);
+            let (fd, start) = sim.planning_state(CF);
+            let open = start + run_time_to(&fd, goal, REACH * 0.7);
+            sim.call_value(CF, &path, open + 0.45, goal, 0.0).0
+        };
+        // Toward the wall: no call. The same run toward home plate's side, in the open: a call.
+        assert_eq!(tier(y_wall, 1.0), 0, "called a ball the wall makes him late for");
+        assert!(tier(60.0, 1.0) >= 1, "fixture: the same run in the open is a call");
     }
 
     // Codex momentum review #3: the planner's reach time must follow the movement step, also
