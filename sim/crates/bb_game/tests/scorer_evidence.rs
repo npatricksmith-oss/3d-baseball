@@ -27,7 +27,10 @@ fn live_contacts_and_throws_survive_log_round_trip() {
                 let at = e.secured_at().unwrap(); assert_eq!((at.x(), at.y()), (x, y));
                 assert!(e.has_handling()); assert!(e.handling_s() <= t);
             }
-            if e.has_margin() { assert!(touch.is_some() && secured.is_some()); assert!(!e.clean_play_margin_s().is_nan()); margins += 1; }
+            // The batter's arrival is his touch, or his estimated one when the play ended before it.
+            assert!(!(e.has_batter_eta() && touch.is_some()));
+            if e.has_batter_eta() { assert!(e.batter_eta_s() > 0.0 && e.batter_eta_s().is_finite()); }
+            if e.has_margin() { assert!((touch.is_some() || e.has_batter_eta()) && secured.is_some()); assert!(!e.clean_play_margin_s().is_nan()); margins += 1; }
             let released: Vec<_> = e.throws().unwrap().iter().map(|t| {
                 let (origin, target) = (t.origin().unwrap(), t.target().unwrap());
                 assert!(origin.x().is_finite() && origin.y().is_finite() && origin.z().is_finite());
