@@ -3010,10 +3010,12 @@ impl<'a> Sim<'a> {
             return;
         }
         self.trace_choice(by, action, b, false, best, &options);
-        // As hard as the play needs and no harder (agent-models §5.5): with no play, the
-        // floor; for an out, the least effort that still keeps the safe margin by his own
-        // read of the race, else everything he has.
+        // As hard as the play needs and no harder (agent-models §5.5). With no out to try
+        // for, a runner he can see moving could still take a base on the throw: that is the
+        // play, full effort; with every runner standing, the floor. For an out, the least
+        // effort that still keeps the safe margin by his own read of the race, else everything.
         let effort = match best.filter(|_| margins.is_some()).map(|i| options[i]) {
+            None if self.r.iter().any(|r| !r.out && !r.scored && (r.overrun != OverrunPhase::None || r.v > SEEN_MOVING_MPS)) => 1.0,
             None => throwing::EFFORT_MIN,
             Some(o) => {
                 let v = THROW_EFFORT * fd.a.arm * su.speed_mult(su.hurry(since));
