@@ -89,9 +89,9 @@ Each candidate reads the ball and makes his own call. Then he decides alone:
 
 *Rewritten 2026-11-14 for the Codex review of this change (P2-3): the first version of this section combined counterfactuals from different revisions and attributed the rise to the relay man more firmly than its numbers allowed. The table now names each build and intervention exactly.*
 
-*Updated for the Codex recheck (`faf2737`).*
+*Restated 2026-11-14 on main `57f12b7` (swing v2, the spin change, the swing-noise split and the refit), merged into this branch at `b994182` with no behaviour change of its own.* Standard run, main `57f12b7` → `b994182`, seeds 0–299 [1000–1299]: runs 4.31 → 4.70 [4.68 → 4.72]; reached on BIP 38.6% → 39.5% [39.1% → 39.6%]; grounder hits .322 → .325 [.326 → .317]; fly-ball hits .212 → .234 [.215 → .242]. On 1,000 games from seed 5: 4.60 → 4.68. The same build with `CALL_HEARD_S` = 0 (nothing else changed): 4.46 [4.45], 1,000 games 4.51. So on 1,000 games the 0.3 s delay is worth about +0.17 runs and the rest of the change about −0.09; on 300 games +0.24 [+0.27] and +0.15 [−0.23], noisier than their difference and not used. Full row: [metrics ledger](../metrics-ledger.md), "Fielder communication". The rows below were measured on the old main (`5ba6750`, before swing v2) and are kept as the record of each step; compare within a main only.
 
-Standard run, main `5ba6750` (sim code identical to `c3a2714`) → `faf2737`, seeds 0–299 [1000–1299]: runs 5.86 → 6.21 [6.18 → 6.34]; reached on BIP 33.5% → 34.4% [34.2% → 35.1%]; grounder hits .327 → .324 [.329 → .329]. On 1,000 games from seed 5: 6.03 → 6.30. Full row: [metrics ledger](../metrics-ledger.md), "Fielder communication".
+*On the old main (`faf2737`):* standard run, main `5ba6750` (sim code identical to `c3a2714`) → `faf2737`, seeds 0–299 [1000–1299]: runs 5.86 → 6.21 [6.18 → 6.34]; reached on BIP 33.5% → 34.4% [34.2% → 35.1%]; grounder hits .327 → .324 [.329 → .329]. On 1,000 games from seed 5: 6.03 → 6.30.
 
 | Build and intervention | Seeds 0–299 [1000–1299] | 1,000 games from 5 |
 |---|---|---|
@@ -105,8 +105,11 @@ Standard run, main `5ba6750` (sim code identical to `c3a2714`) → `faf2737`, se
 | `636366d`, every use instant except the decisions | — | 6.07 |
 | `48bcb9d` (the first review's fixes) | 6.17 [6.22] | 6.21 |
 | `48bcb9d`, `CALL_HEARD_S` = 0 (nothing else changed) | 5.66 [5.87] | 5.99 |
-| **`faf2737`** (the recheck's fixes) | **6.21 [6.34]** | **6.30** |
-| **`faf2737`, `CALL_HEARD_S` = 0** (nothing else changed) | **5.93 [6.14]** | **6.14** |
+| `faf2737` (the recheck's fixes) | 6.21 [6.34] | 6.30 |
+| `faf2737`, `CALL_HEARD_S` = 0 (nothing else changed) | 5.93 [6.14] | 6.14 |
+| *new main* `57f12b7` | 4.31 [4.68] | 4.60 |
+| **`b994182`** (`faf2737` merged with main `57f12b7`) | **4.70 [4.72]** | **4.68** |
+| **`b994182`, `CALL_HEARD_S` = 0** (nothing else changed) | **4.46 [4.45]** | **4.51** |
 
 The rows for `636366d` were measured before the review's fixes and are kept as a record only; the `636366d` interventions were not saved as patches. The zero-delay rows are reproducible: on that revision, `sed -i 's/^const CALL_HEARD_S: f64 = 0.3;/const CALL_HEARD_S: f64 = 0.0;/' sim/crates/bb_game/src/live.rs` and the standard run. With `CALL_HEARD_S` = 0 a teammate's choice is known one tick (1/60 s) later, never in the tick it is made.
 
@@ -128,7 +131,21 @@ The rows for `636366d` were measured before the review's fixes and are kept as a
 | Plays with all nine starting a chase twice or more | 0 | 26 | 0 |
 | Live plays | 3,706 | 3,736 | 3,710 |
 
-These are missing jobs, not the run to a covered bag, and identical seeds play different games on each build, so this compares distributions, not plays. First base now never goes without an assigned cover for more than 0.3 s, as on main. Second does more often than on main (26 against 7), third less (33 against 43); half the second-base cases are both middle infielders going for a fly neither is sure of, the rest a middle infielder out as the cutoff. A real fielder would know sooner that a teammate is going when he sees him break toward the ball: the owner approved this on 2026-11-14 (agent-models §5.7), to be built after this branch merges; the recovery here does not depend on it.
+These are missing jobs, not the run to a covered bag, and identical seeds play different games on each build, so this compares distributions, not plays. Restated on main `57f12b7` (main's own `live.rs` with the same read-only trace added; this branch at `b994182`):
+
+| Seeds 0–49, loose ball, on main `57f12b7` | Main `57f12b7` | This branch, `b994182` |
+|---|---:|---:|
+| First uncovered > 0.3 s (longest) | 0 | 2 (1.02 s) |
+| Second uncovered > 0.3 s (longest) | 11 (1.42 s) | 18 (1.33 s) |
+| Third uncovered > 0.3 s (longest) | 68 (2.95 s) | 29 (2.42 s) |
+| First uncovered on grounders > 0.3 s | 0 | 1 |
+| Two covering one base > 0.3 s | 0 | 0 |
+| No known lead > 0.3 s (longest) | 0 | 59 (0.60 s) |
+| Nobody going for the ball > 0.3 s | 0 | 0 |
+| Plays with all nine starting a chase twice or more | 0 | 0 |
+| Live plays | 3,781 | 3,790 |
+
+**Second base, the remaining cases** (`b994182`, 18): 5 are a ground ball up the middle on which both middle infielders break at the once-a-second re-call; one of them was covering second, and each, seeing the other known not to be going, judges that his partner will not field it (the partner rule leaves out a partner known not to be going), neither counting the pitcher, who is often the man known to be going (the shared order picked him on a mutual deferral, though the ball passes him). 4 more are both breaking at a first read or a hearing, 4 are both going for a fly neither is sure of, 3 have a middle infielder out as the cutoff while the other goes for the ball, 2 other. In every case one goes back to second 0.3–0.6 s after hearing the other. This is the both-break mix-up two real middle infielders can make; it is not changed here. Two rules it comes from are candidates if it matters: the partner rule's exclusion of a partner merely known not to be going (not on another job), and the shared order's ignoring of when the ball arrives. **First base, the two cases** (1.0 s each, seeds 35 and 37): a throw gets away at first; the first baseman and the catcher both go for the loose ball, the pitcher is given home (the catcher is known to be going) and the second baseman second, and nobody is given first until the catcher's stop is known and the pitcher moves to first. Not changed in this step (no behaviour changes); a candidate: on a loose ball near first, first's table might come before home's. First base now never goes without an assigned cover for more than 0.3 s, as on main. Second does more often than on main (26 against 7), third less (33 against 43); half the second-base cases are both middle infielders going for a fly neither is sure of, the rest a middle infielder out as the cutoff. A real fielder would know sooner that a teammate is going when he sees him break toward the ball: the owner approved this on 2026-11-14 (agent-models §5.7), to be built after this branch merges; the recovery here does not depend on it.
 
 **Before the review's fixes:** the first version cost +0.35 [+0.16]: outfielders whose 60 m read put a ball within an infielder's reach left it to him, nobody went in 4.5% of first calls (seed 0, 100 games), and triples rose 919 → 1055 (seeds 0–299); fixed in `636366d`. Nothing was tuned back at any step.
 
