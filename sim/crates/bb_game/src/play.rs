@@ -60,6 +60,23 @@ pub struct FielderAttrs {
     pub throws: bb_observe::Hand,
 }
 
+/// Grade-50 `ArmStrength` by position, mph: the league means of Statcast's arm-strength
+/// leaderboard (Baseball Savant, 2026 as displayed; docs/calibration/2026-11-14-sources.md),
+/// which is each player's mean over his max-effort throws (the top 10% of his throws), at the
+/// release point. Indexed P0 C1 1B2 2B3 3B4 SS5 LF6 CF7 RF8. `None`: the leaderboard has no
+/// pitcher, and catchers are on a separate one, so those two keep [`ARM_UNSOURCED_MPS`]. The
+/// sim's value is a full-effort throw (agent-models §5.5), so the conversion is only the unit
+/// change (agent-models §10, "Arm strength by position").
+pub const ARM_MEAN_MPH: [Option<f64>; 9] = [None, None, Some(79.3), Some(79.1), Some(84.9), Some(86.1), Some(87.4), Some(89.6), Some(90.7)];
+/// `ArmStrength` of a pitcher or catcher at grade 50, m/s [E]: the infield value used before
+/// the positional means, with no measured replacement.
+pub const ARM_UNSOURCED_MPS: f64 = 36.0;
+
+/// The grade-50 `ArmStrength` of position `pos` (zero-based), m/s.
+pub fn arm_strength_50_mps(pos: usize) -> f64 {
+    ARM_MEAN_MPH[pos].map_or(ARM_UNSOURCED_MPS, bb_math::units::mph_to_mps)
+}
+
 impl FielderAttrs {
     pub fn average(pos: usize) -> Self {
         // `pos` is the zero-based index used everywhere (P0 C1 1B2 2B3 3B4 SS5 LF6 CF7 RF8).
@@ -73,7 +90,7 @@ impl FielderAttrs {
             // An outfielder needs longer to read a ball off the bat before his first step [E].
             reaction: if outfield { 0.35 } else { 0.25 },
             hands: 0.018,
-            arm: if outfield { 39.0 } else { 36.0 },
+            arm: arm_strength_50_mps(pos),
             arm_sigma: 1.2f64.to_radians(),
             transfer: if outfield { 0.85 } else { 0.65 },
             tau_read: 0.6,
@@ -634,12 +651,35 @@ mod attr_tests {
     // outfielders share the outfield values and no infielder has them.
     #[test]
     fn all_three_outfielders_get_outfield_values() {
+        // (They differ in arm: each position has its own measured mean.)
         let cf = FielderAttrs::average(7);
-        assert_eq!(FielderAttrs::average(6), cf);
-        assert_eq!(FielderAttrs::average(8), cf);
+        for i in [6, 8] {
+            assert_eq!(FielderAttrs { arm: cf.arm, ..FielderAttrs::average(i) }, cf);
+        }
         for i in 0..6 {
             assert_ne!(FielderAttrs::average(i).read_sigma0, cf.read_sigma0, "position index {i}");
         }
+    }
+
+    // agent-models §10, "Arm strength by position": the positional means of Statcast's
+    // leaderboard (mph) × 0.44704 m/s per mph, worked by hand:
+    //   1B 79.3 → 35.450   2B 79.1 → 35.361   3B 84.9 → 37.954   SS 86.1 → 38.490
+    //   LF 87.4 → 39.071   CF 89.6 → 40.055   RF 90.7 → 40.547
+    // (e.g. CF: 89 × 0.44704 = 39.787, 0.6 × 0.44704 = 0.268, total 40.055). The pitcher and the
+    // catcher have no entry and keep 36 m/s. Pitcher is index 0, catcher 1.
+    #[test]
+    fn arm_strength_follows_the_published_positional_means() {
+        let want = [36.0, 36.0, 35.450, 35.361, 37.954, 38.490, 39.071, 40.055, 40.547];
+        for (i, w) in want.iter().enumerate() {
+            let a = FielderAttrs::average(i).arm;
+            assert!((a - w).abs() < 5e-4, "position {i}: {a:.4} m/s, want {w}");
+        }
+        // The order the leaderboard shows: first and second weakest, then third, short,
+        // left, center, right strongest.
+        let arm = |i| FielderAttrs::average(i).arm;
+        assert!(arm(3) < arm(2) && arm(2) < arm(4) && arm(4) < arm(5) && arm(5) < arm(6) && arm(6) < arm(7) && arm(7) < arm(8));
+        // A grade-50 `with_throwing` leaves the positional mean alone (grade 50 = 37.0 generic).
+        assert!((FielderAttrs::average(8).with_throwing(50.0, 50.0, 50.0).arm - arm(8)).abs() < 1e-12);
     }
 
     // agent-models §5.10 and §10 (the bat-read derivation, 2026-11-13): the bat-angle read σ is
