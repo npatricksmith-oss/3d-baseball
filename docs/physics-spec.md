@@ -203,6 +203,8 @@ The swing model (`agent-models.md`) supplies the bat's world pose `T_bat(t) = (p
 - linear velocity **V**(t) of the center of mass, angular velocity **Ω**(t)
 - the velocity of any bat point **p**: **V** + **Ω** × (**p** − **c**)
 
+The swing model's v2 (agent-models §3.6, 2026-11-14) moves the knob on an arc while the bat turns about it, so **V** carries the hands' velocity as well as the bat's rotation: **V** = **K̇** + **Ω** × (u_cm·**â**), with **K̇** the knob's velocity and **Ω** = θ̇·**n̂** the bat's angular velocity in the swing plane.
+
 **Free-bat approximation** [S, standard in the literature]: during the ~1 ms collision, the hands' influence is ignored. After contact, the bat's own path is cosmetic; the swing model may apply the recoil impulse or ignore it.
 
 ---

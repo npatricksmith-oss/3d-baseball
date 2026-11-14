@@ -283,18 +283,53 @@ logit(P̃) = c_D · logit(P) + b_D
 
 ### 3.6 Swing model
 
-A **template in a contact-relative frame** (PLAN §8.3), authored and tuned in M2.
+A **template in a contact-relative frame** (PLAN §8.3): the batter plans where the sweet spot meets the ball, which way it is moving then, and how fast; the hand path and the bat's lag are laid out backward and forward in time from that instant. *v2, specified 2026-11-14 (docs/calibration/2026-11-14-swing-model.md); it replaces v1, a rigid bat turning about a fixed pivot at a fixed angular speed, whose sweet-spot speed grew with reach (64 mph on inside pitches against 84 on outside ones, where Statcast has 71–72 at both).*
 
-**Template** (per batting side), phase `s ∈ [0, 1]`:
-- Hand (knob) path `H(s)`: an arc in the **swing plane**, radius ρ_h ≈ 0.30·H_scale [E], sweeping angle φ_h(s).
-- Bat direction `D(s)`: in the swing plane at angle `φ_h(s) + λ(s)`, where the lag λ(s) releases smoothly from λ₀ ≈ −90° [E] to 0 at the contact phase s_c ≈ 0.75 [E], plus a small out-of-plane tilt.
-- Scaled per batter by height and bat length.
+**Kinematics: hands on an arc, a bat that lags and releases.** A kinematic double pendulum: the motion a double pendulum's proximal-to-distal sequencing produces is prescribed, not integrated from torques (a justified simplification; a torque-driven model can replace it behind the same interface).
+- Everything moves in one **swing plane** Π with unit normal **n̂**, the direction of the swing's angular velocity (up-ish for a right-handed batter, down-ish for a left-hander). The out-of-plane tilt of the first draft is left out.
+- The **hands** (the knob) move on a circle of radius ρ about the **hand-arc center C** in Π: `K(t) = C + ρ·ê(φ(t))`, where ê(φ) is the in-plane unit vector at angle φ, measured in the swing's direction of rotation.
+- The **bat** points along `â(t) = ê(θ(t))`. The lag is `λ(t) = θ(t) − φ(t)`. A bat station u (from the knob) is at `K + u·â`.
+- At the nominal contact time t_c the lag is λ_c = 0 [E]: the hands, the knob and the sweet spot lie on one line from C (the release is complete). Away from t_c the lag is not zero, so the bat's face (⊥ to â) and the sweet spot's path differ: out front the barrel has turned past the hands (hooked), deep it trails them (sliced). That is how early and late contact send the ball off the barrel's path.
 
-**Timing profile:** `s(t) = S((t − t₀) / T_swing)` with S a monotone quintic whose rate peaks near s_c. The phase-speed profile is scaled so the sweet-spot speed at s_c equals `BatSpeed`. Contact away from s_c (jammed or out in front) happens at lower bat speed and at a different point on the bat. That is how getting jammed physically weakens contact.
+**Timing profile.** The hands' and the bat's angular rates are Gaussian bumps about t_c, the hands' peaking before the bat's (τ = t − t_c):
+```
+φ̇(τ) = k·q·exp(−(τ − τ_h)² / 2w_h²) / exp(−τ_h² / 2w_h²)
+θ̇(τ) = k·exp(−(τ − τ_b)² / 2w_b²) / exp(−τ_b² / 2w_b²)
+```
+so φ̇(0) = k·q and θ̇(0) = k. Angles are their integrals from t_c (closed forms in erf).
+- **Speed is set per swing, not per radius.** With λ_c = 0 the sweet spot's speed at t_c is `(q·ρ + u_ss)·k`, so `k = BatSpeed / (q·ρ + u_ss)`: every planned swing meets its aim point at the batter's `BatSpeed`, whatever its reach. A long reach turns more slowly. Statcast (2025 sample, competitive swings) has 70.1 / 72.1 / 71.4 mph on outside / middle / inside pitches; v1 had 83.5 / 72.5 / 64.0.
+- Contact away from t_c meets the ball at another speed and another station: on the rising side (late, deep) slower, on the falling side (early, out front) slower again after the bat's peak at τ_b. That is how getting jammed or caught out front weakens contact.
+- **Swing start** is when the hands reach 10% of their peak rate: `t_start = t_c + τ_h − 2.146·w_h`, and it is set to `t_c − T_swing` (`QuickHands`). So `τ_h = 2.146·w_h − T_swing`. All four time constants scale with T_swing / 0.150 s.
 
-**Placement** `θ = (planeTilt α, verticalOffset δ_v, reach δ_r, startTime t₀)`.
-- Contact depth `y_c(x*)` is a template function: inside pitches are met out front (larger y), outside pitches deeper. Horizontal location is handled mainly through timing (PLAN §8.3).
-- **Inverse:** given the aim point and t*, find θ so that the sweet spot `u_ss` passes through `(x*, y_c(x*), z*)` at time t*. A per-template table over (x*, z*) gives the initial θ; one or two Newton steps refine it. Microseconds.
+| Parameter | Value at grade 50 | Status / source |
+| :--- | :--- | :--- |
+| T_swing (start to contact) | 0.150 s | `QuickHands` (§10); Blast's time to contact 0.149 s (vendor) |
+| w_h, hands' bump width | 0.055 s | [E], with w_b and τ_b chosen so the sweet spot travels about 7.2 ft over the last 150 ms (Statcast swing length, mean 7.2–7.3 ft) |
+| τ_h, hands' peak | −0.032 s (derived) | hands peak before contact and slow down as the bat releases (proximal-to-distal) |
+| w_b, bat's bump width | 0.055 s | [E] |
+| τ_b, bat's peak | +0.010 s | [E]; Statcast's bat speed rises with contact depth out to about 6–12 in in front of a batter's mean |
+| q = φ̇/θ̇ at t_c | 0.32 | [E]; hands at about 14 mph when the sweet spot is at 71.5 (ρ = 0.555 m). No sourced MLB hand speed at contact was found |
+| λ_c, lag at contact | 0 | [E] |
+| ρ at a middle-middle aim | about 0.30·H (derived from C's lateral position) | [E] |
+| ρ range | 0.15·H to 0.46·H | [E] hands in tight to arms fully extended |
+
+Derived at grade 50 (checks, not inputs): hands turn about 76° and the bat about 123° from the start to contact, so the bat starts about 47° behind the hands' line (the first draft's "λ₀ ≈ −90°" was an estimate); the sweet spot's direction turns at about 1.8° per ms at t_c.
+
+**The contact pose (the inverse).** Given the aim point **A** (the sweet spot's position at t_c) and t_c, the plan is closed-form:
+1. **Plane tilt** β (Statcast's swing path tilt, the arc's angle to the ground over the last 40 ms): `β = β₀ + β_h·(h − ½) + β_x·x_in` with h the aim's height in the batter's zone (0 at the bottom, 1 at the top) and x_in its distance inside of the plate's center (toward the batter, m). β₀ = 32°, β_h = −9.9° per zone height, β_x = +11° per m inside [E from the Statcast 2025 sample: tilt 34.8 / 32.2 / 28.2° by zone third, 29.7 / 32.3 / 35.1° outside / middle / inside].
+2. **Attack angle** α (the sweet spot's elevation at t_c): `α = α₀ + α_h·(h − ½)`, α₀ = 8°, α_h = −8.7° per zone height [E from the same sample: 11.9 / 7.8 / 6.1° by third]. Execution's plane-tilt noise adds to α.
+3. **Attack direction** ψ (horizontal direction of the sweet spot's velocity, pull-positive): `ψ = ψ₀ + ψ_x·x_in`, ψ₀ = 0, ψ_x = +16.6° per m inside [E from the sample's means: −1.6 / +0.6 / +6.5° outside / middle / inside].
+4. **Velocity direction** `V̂ = cos α·ĥ + sin α·ẑ`, ĥ the horizontal unit vector at ψ (toward the pull side for positive ψ).
+5. **Plane normal.** Up-normal `ν̂ = cos β·ẑ + sin β·(cos κ·ĥ + sin κ·p̂)` with `p̂ = ẑ × ĥ`, `cos κ = −tan α / tan β` (so ν̂ ⊥ V̂; requires |α| < β, else β is raised to |α| + 1°), and sin κ chosen so the plane falls away from the batter toward the plate (`sin κ = −side·√(1 − cos²κ)`, side = +1 for a right-handed batter). **n̂ = side·ν̂**.
+6. **Bat axis** at t_c: `â_c = V̂ × n̂` (in the plane, ⊥ to the path, pointing knob to tip). The vertical bat angle `asin(â_c·ẑ)` comes out of α and β alone: about −30° at a middle aim, steeper low and flatter high (Blast: −25° to −35° for professionals, vendor).
+7. **Hand radius.** C sits on the line through the knob along −â_c: `C = A − (u_ss + ρ)·â_c`, with C's lateral position fixed at `x_C = side·center_x` (center_x = −1.10 m for a right-handed batter [E]: puts ρ near 0.30·H at a middle aim). So `ρ = (A.x − x_C)/â_c.x − u_ss`, clamped to the ρ range; a clamped swing keeps x_C and comes up short or long along â_c, and the world decides what that does (contact off the sweet spot, or a miss). Inside pitches are met with the hands in, outside pitches with the arms extended, at the same bat speed (Statcast: the intercept moves 17 in further from the batter from inside to outside with no rise in bat speed).
+8. **Contact depth** `y_c(x*) = y₀ + k·x_in`, y₀ = 0.35 m [E], k = 0.125 [E from the sample: intercept depth 29.4 in outside to 31.8 in inside; v1's 0.6 was authored for its radial bat].
+
+C is the center of the hands' effective arc, not the spine; it moves up and down with the pitch's height (the shoulders tilt). Its range is reported in the measurement note.
+
+**Placement** `θ = (planeTilt α, verticalOffset δ_v, reach δ_r, startTime t₀)` keeps its meaning: δ_v moves the whole swing vertically, δ_r moves it along â_c (the ball meets another station), the plane tilt adds to the planned attack angle and the plane is rebuilt, t₀ moves t_c. Execution never changes the speed scale k.
+
+**Measured against Statcast** (each a check of the geometry, not a fitted value except where marked): sweet-spot speed by horizontal location and by contact depth; swing length (fitted through w_b, τ_b); attack angle and its slope against attack direction (MLB +0.41° per degree); attack direction's slope against intercept depth (MLB +1.48° per inch out front); swing path tilt (set from the sample); vertical bat angle by height (Blast, vendor). The tables are in docs/calibration/2026-11-14-swing-model.md.
 
 **Execution noise** (purpose `SwingExecution`) on θ, from §10:
 
@@ -663,7 +698,7 @@ Defaults for an MLB-like population. **All values [E]** unless marked; `calibrat
 | `ArmSlot` | release arm angle | deg | 45 | σ 12 | (style, not graded) | |
 | `DeliveryTime` | first move → release, from the stretch | s | 0.98 | ρ 1.06 | 0.82 | 1.17 |
 | `Stamina` | effort budget | pitch-eq. | 95 (starters), 30 (relievers) | σ 12 / 6 | | |
-| `BatSpeed` | sweet-spot speed at s_c | m/s | 32.0 (71.5 mph) | σ 1.1 | 35.3 | 28.7 |
+| `BatSpeed` | sweet-spot speed at the nominal contact instant, any aim (§3.6 v2) | m/s | 32.0 (71.6 mph; Statcast average 71.5) | σ 1.1 | 35.3 | 28.7 |
 | `QuickHands` | T_swing | s | 0.150 | ρ 1.05 | 0.130 | 0.174 |
 | `BatControl` | σ of δ_v | cm | 1.2 | ρ 1.25 | 0.61 | 2.3 |
 | `Timing` | σ of t₀ | ms | 6.0 | ρ 1.25 | 3.1 | 11.7 |
