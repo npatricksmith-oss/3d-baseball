@@ -5189,11 +5189,17 @@ mod tests {
     /// first at full speed. Steps the holder and the runner until the ball is thrown; returns
     /// the sim and how long after he had the ball he let go.
     fn shortstop_to_first(eta_s: f64, catch_vel: Vec3) -> (Sim<'static>, f64) {
+        shortstop_to_first_by(eta_s, catch_vel, bb_observe::Hand::Right)
+    }
+
+    /// [`shortstop_to_first`] for a shortstop who throws with `hand`.
+    fn shortstop_to_first_by(eta_s: f64, catch_vel: Vec3, hand: bb_observe::Hand) -> (Sim<'static>, f64) {
         const SS: usize = 5;
         let fx: &'static Fixture = Box::leak(Box::new(fixture(&[])));
         let inp: &'static LiveInput<'static> = Box::leak(Box::new(input(fx, vec![RunnerIn { id: fx.st.batter, base: 0, speed: 8.2 }])));
         let st: &'static mut RulesState = Box::leak(Box::new(fx.st.clone()));
         let mut sim = new_sim(inp, st);
+        sim.f[SS].a.throws = hand;
         sim.t = 1.0;
         held_at(&mut sim, SS, Vec3::new(-8.0, 38.0, 0.0));
         sim.f[2].pos = base_pos(1);
@@ -5322,5 +5328,168 @@ mod tests {
         // Home (toward −Y from the outfield): his right is third-base side (−X).
         let r = throw_release_point(at, Vec3::new(5.0, 0.0, 0.0), Hand::Right);
         assert!((r - Vec3::new(4.65, 30.0, 1.8)).norm() < 1e-12, "{r:?}");
+    }
+
+    // Handedness of a live throw (Codex handedness review: no left-handed thrower had been
+    // checked through a play). agent-models §5.5: the ball leaves 0.35 m to his arm side of
+    // his body's centre, facing his target. The shortstop at (-8, 38) throws to first base
+    // at (d, d), d = 27.432/√2 = 19.3978 m. By hand: the line is (27.3978, -18.6022), length
+    // 33.115 m, unit (0.82734, -0.56174). A man facing along (hx, hy) has his right at
+    // (hy, -hx), here (-0.56174, -0.82734). Right-hander: (-8, 38) + 0.35·that =
+    // (-8.19661, 37.71043); left-hander, the mirror about the body's centre:
+    // (-7.80339, 38.28957). Release height 1.8 m (`THROW_RELEASE_Z`).
+    #[test]
+    fn a_left_handed_fielder_releases_from_his_left_and_a_right_handed_one_from_his_right() {
+        use bb_observe::Hand;
+        let ss = Vec3::new(-8.0, 38.0, 0.0);
+        let release = |hand| {
+            let (sim, _) = shortstop_to_first_by(3.0, Vec3::ZERO, hand);
+            let Ball::Thrown { path, .. } = &sim.ball else { unreachable!() };
+            path.at(sim.t).0
+        };
+        let (r, l) = (release(Hand::Right), release(Hand::Left));
+        assert!((r - Vec3::new(-8.19661, 37.71043, 1.8)).norm() < 2e-5, "right-hander {r:?}");
+        assert!((l - Vec3::new(-7.80339, 38.28957, 1.8)).norm() < 2e-5, "left-hander {l:?}");
+        // Mirrored about his centre, each 0.35 m out.
+        assert!(((r + l) * 0.5 - Vec3::new(ss.x, ss.y, 1.8)).norm() < 1e-9);
+        assert!((m::hypot(r.x - ss.x, r.y - ss.y) - 0.35).abs() < 1e-9);
+    }
+
+    /// The center fielder (hands σ `hands`, average otherwise) standing at (0, 80) with a
+    /// ground ball crossing in front of him at 20 m/s, `pass_m` away at its closest, first
+    /// seen `lead_s` before it. His belief is the true path, replaced by `swap` (a ball he
+    /// would take on his feet) at the first tick the ball is within `swap_within_m` of him.
+    fn crossing_with_mind_change(pass_m: f64, lead_s: f64, hands: Option<f64>, swap_within_m: f64, easy_from_m: f64, swap: bool) -> Sim<'static> {
+        let fx: &'static Fixture = Box::leak(Box::new(fixture(&[])));
+        let mut inp = input(fx, vec![RunnerIn { id: fx.st.batter, base: 0, speed: 8.2 }]);
+        if let Some(h) = hands {
+            inp.fattrs[CF].hands = h;
+        }
+        let inp: &'static LiveInput<'static> = Box::leak(Box::new(inp));
+        let st: &'static mut RulesState = Box::leak(Box::new(fx.st.clone()));
+        let mut sim = new_sim(inp, st);
+        let (t0, at) = (1.5, Vec3::new(0.0, 80.0, 0.0));
+        sim.f[CF].pos = at;
+        // The ball he would rather believe in: rolling straight down on him from
+        // `easy_from_m` out at 10 m/s, so he has it on his feet in about easy_from_m/10 s.
+        loose_ball(&mut sim, t0, at + Vec3::new(0.0, easy_from_m, 0.04), Vec3::new(0.0, -10.0, 0.0));
+        let Ball::Free { path: easy, .. } = &sim.ball else { unreachable!() };
+        let easy = easy.clone();
+        loose_ball(&mut sim, t0, Vec3::new(-20.0 * lead_s, 80.0 - pass_m, 0.04), Vec3::new(20.0, 0.0, 0.0));
+        sim.f[CF].role = Role::Chase;
+        sim.f[CF].belief = Some(sim.predict(CF));
+        let mut swapped = !swap;
+        for _ in 0..48 {
+            let (b, _) = sim.ball_at(sim.t);
+            if !swapped && m::hypot(b.x - at.x, b.y - at.y) <= swap_within_m {
+                sim.f[CF].belief = Some(easy.clone());
+                swapped = true;
+            }
+            world_tick(&mut sim);
+        }
+        sim
+    }
+
+    // agent-models §5.3: "A stretch on his feet, up to STRETCH 0.4 m further" and "Whether it
+    // gains him anything is his own judgment". A ball passing 1.3 m away (reach 1.0 + 0.4)
+    // is stretched for. Having started to wait for the closest tick, a fielder whose read
+    // then says he has the ball on his feet no longer stretches (it would gain him nothing):
+    // the ball goes by. Without the change of mind he stretches (the control).
+    #[test]
+    fn a_stretch_is_dropped_when_his_read_changes_during_the_wait() {
+        let kept = crossing_with_mind_change(1.3, 0.15, None, 1.4, 3.0, false);
+        assert!(secured_at(&kept).is_some() && kept.out.dives.is_empty(), "control: no stretch");
+        let changed = crossing_with_mind_change(1.3, 0.15, None, 1.4, 3.0, true);
+        // He does not stretch as it goes by (a stretch costs 0.3 s, a dive's get-up 1.5 s). The
+        // ball, now past his stretch, is then reached by a dive a few ticks later (his dive
+        // read from before the change still stood): the glove closes after the control's.
+        let (t_kept, t_changed) = (secured_at(&kept).unwrap(), secured_at(&changed).expect("he lets it go for good"));
+        assert!(t_changed > t_kept, "kept {t_kept:.3}, changed {t_changed:.3}");
+        let ready = |s: &Sim| s.f[CF].ready_at - secured_at(s).unwrap() - s.f[CF].a.transfer;
+        assert!(ready(&kept).abs() < 1e-9 + 0.3, "control owes a stretch: {}", ready(&kept));
+        assert!(ready(&changed) > 0.3 + 1e-9, "after the change: a dive's get-up, not a stretch: {}", ready(&changed));
+    }
+
+    // The dive read (§5.3: "every 0.1 s, with the ball within 15 m, he asks whether going
+    // for it gains him anything, and the answer has to have held without a break"). A ball
+    // 2.2 m away needs 1.2 m of the lunge; seen 0.4 s ahead he dives (a_dive_needs_its_lunge
+    // _time). If one of his reads (0.1 s apart) says he has it on his feet, the clock
+    // restarts and the lunge is too late: no dive.
+    #[test]
+    fn a_dive_read_that_changes_resets_the_lunge() {
+        let held = crossing_with_mind_change(2.2, 0.4, None, 1e9, 8.0, false);
+        assert_eq!(held.out.dives.len(), 1, "control: he dives");
+        // The read flips once the ball is within 4.5 m (0.2 s on): the real ball is by him
+        // 0.2 s later, too late to lay out 1.2 m (0.24 s) from the restart.
+        let flipped = crossing_with_mind_change(2.2, 0.4, None, 4.5, 8.0, true);
+        assert!(flipped.out.dives.is_empty(), "dived after a break in his read: {:?}", flipped.out.dives);
+    }
+
+    // agent-models §5.4: a stretch outside the pocket and rim is a miss ("the ball continues").
+    // Hands this poor (σ 1 m a side) miss a 1.3 m stretch every time: nothing is secured,
+    // no dive is made, he does not go down (`dove` stays false) and the ball is still loose.
+    #[test]
+    fn a_missed_stretch_leaves_the_ball_loose_and_the_fielder_on_his_feet() {
+        let sim = crossing_with_mind_change(1.3, 0.15, Some(1.0), 1e9, 3.0, false);
+        assert!(secured_at(&sim).is_none(), "poor hands secured it");
+        assert!(sim.out.dives.is_empty() && !sim.f[CF].dove);
+        assert!(matches!(sim.ball, Ball::Free { .. }));
+        assert!(sim.f[CF].attempts >= 1, "he never tried");
+    }
+
+    /// Fielder CF at (0, 80), a fly or roller in the air or on the ground believed to be
+    /// the world's own, seen at time `t`.
+    fn believing_the_truth(r: Vec3, v: Vec3, t: f64) -> Sim<'static> {
+        let fx: &'static Fixture = Box::leak(Box::new(fixture(&[])));
+        let mut inp = input(fx, vec![RunnerIn { id: fx.st.batter, base: 0, speed: 8.2 }]);
+        inp.fattrs = core::array::from_fn(FielderAttrs::average);
+        let inp: &'static LiveInput<'static> = Box::leak(Box::new(inp));
+        let st: &'static mut RulesState = Box::leak(Box::new(fx.st.clone()));
+        let mut sim = new_sim(inp, st);
+        sim.f[CF].pos = Vec3::new(0.0, 80.0, 0.0);
+        loose_ball(&mut sim, t, r, v);
+        sim.f[CF].role = Role::Chase;
+        sim.f[CF].belief = Some(sim.predict(CF));
+        sim
+    }
+
+    // agent-models §5.3: "A ball still in the air: only a catch is an out, so [going for it
+    // gains him something] unless he can catch it on his feet before it comes down." By
+    // hand, ignoring drag (a fly of 10 m/s up from 2 m comes down at 2.2 s):
+    //   - from 3 m behind him, 3 m of running in 2.2 s is easy: standing play, no gain;
+    //   - from 40 m out, 40 m in 2.2 s is beyond a man of ~8 m/s: no standing play, gain.
+    #[test]
+    fn going_for_a_fly_gains_only_when_he_cannot_catch_it_on_his_feet() {
+        let near = believing_the_truth(Vec3::new(0.0, 83.0, 2.0), Vec3::new(0.0, 0.0, 10.0), 2.0);
+        assert!(near.ball_still_up());
+        assert!(!near.dive_gains(CF, DIVE_GETUP_S), "he can wait under it");
+        assert!(!near.dive_gains(CF, STRETCH_COST_S));
+        let far = believing_the_truth(Vec3::new(0.0, 120.0, 2.0), Vec3::new(0.0, 0.0, 10.0), 2.0);
+        assert!(far.ball_still_up());
+        assert!(far.dive_gains(CF, DIVE_GETUP_S) && far.dive_gains(CF, STRETCH_COST_S), "he cannot get there on his feet");
+    }
+
+    // agent-models §5.3: "A ball on the ground: only if staying on his feet would get him
+    // the ball later than the cost (the 1.5 s get-up for a dive, the 0.3 s for a stretch)."
+    // A roller coming straight at him from about 10 m: he has it on his feet within about
+    // a second (bracketed from the ball's own path in the test), before a dive's 1.5 s is
+    // paid (no gain) but not within a stretch's 0.3 s (gain).
+    #[test]
+    fn going_for_a_roller_gains_only_when_the_cost_is_less_than_the_wait() {
+        // Already rolling (first bounce long past), so the ground branch is the one tested.
+        let mut sim = believing_the_truth(Vec3::new(0.0, 93.8, 0.3), Vec3::new(0.0, -10.0, 0.0), 1.0);
+        sim.t = 2.0;
+        let Ball::Free { path, .. } = &sim.ball else { unreachable!() };
+        // The wait on his feet is bracketed from the ball's own path: no sooner than the
+        // distance to his planning reach (0.7 of 1.0 m) over the ball's speed now plus his
+        // top speed of 8.5 m/s (he runs flat out at it), no later than the ball takes to
+        // reach that point with him standing still.
+        let (d, v0) = (path.at(2.0).0.y - 80.0 - 0.7, path.at(2.0).1.norm());
+        let t_up = (0..400).map(|k| 2.0 + 0.005 * k as f64).find(|&t| path.at(t).0.y - 80.0 <= 0.7).expect("it reaches him") - 2.0;
+        let t_low = d / (v0 + 8.5);
+        assert!(t_low > STRETCH_COST_S && t_up < DIVE_GETUP_S, "fixture: wait between {t_low:.2} and {t_up:.2} s");
+        assert!(!sim.ball_still_up(), "fixture: on the ground");
+        assert!(!sim.dive_gains(CF, DIVE_GETUP_S), "a roller he can run down is not worth a dive");
+        assert!(sim.dive_gains(CF, STRETCH_COST_S), "he would not have it within a stretch's 0.3 s");
     }
 }
