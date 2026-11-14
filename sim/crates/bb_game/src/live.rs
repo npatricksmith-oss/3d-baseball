@@ -77,9 +77,12 @@ const RUNNER_READ_SIGMA0: f64 = 2.0;
 const AGENT_DT: f64 = 0.1;
 const BASE_L: f64 = 27.432;
 const BATTER_START: f64 = 0.25;
-/// Time constant of a runner's acceleration, s [E]. With the batter's start delay an
-/// average runner (8.2 m/s) reaches first 4.45 s after contact (MLB averages about 4.4).
-const RUNNER_TAU: f64 = 0.85;
+/// Time constant of a runner's acceleration, s, fitted to measurements (tag-up sources note
+/// §1, §5): at 8.2 m/s a standing 90 ft then takes 4.02 s, the mean 90-ft split of runners
+/// on third in sacrifice-fly situations (4.03 s, Statcast 2017–2020, n = 848), and with
+/// the batter's start delay an average runner reaches first about 4.28 s after contact
+/// (2016 means 4.26 s left-handed, 4.30 s right-handed). Was 0.85 s (4.19 s; 4.45 s).
+const RUNNER_TAU: f64 = 0.68;
 /// A batter-runner who stops at first runs through the bag down the line and brakes at this
 /// rate, m/s² [E] (agent-models §6.2): from 8.2 m/s he pulls up 8.4 m (28 ft) past the bag.
 const OVERRUN_DECEL: f64 = 4.0;

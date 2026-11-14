@@ -101,14 +101,14 @@ fn seed_13_play_140_takes_a_sure_lead_force_instead_of_automatic_first() {
 
 #[test]
 fn seed_70_play_157_keeps_the_force_double_play_against_a_single_home_tag() {
-    // §5.6: two likely outs (second then first) beat a single home tag. With
-    // continuation disabled the unchanged first-out weights instead favour home.
+    // §5.6: two likely outs (second then first) beat a single home tag. The carry is
+    // weighed with its likely second out. (Since the tag takes 0.25 s and runners start
+    // with τ 0.68 s, §6.4, the home tag is no longer the single-out favourite either.)
     let (out, choices, _) = replay(include_str!("fixtures/a4/70-157.json"));
     assert_eq!((choices[0].action, choices[0].base), ("carry", 2), "{:#?}", choices[0]);
     assert_eq!(out.calls.iter().map(|c| c.base).collect::<Vec<_>>(), vec![2, 1]);
-    let params = bb_agents::throwing::ChoiceParams { continuation_weight: 0.0, ..Default::default() };
-    let (_, single_out_choices, _) = replay_with(include_str!("fixtures/a4/70-157.json"), params);
-    assert_eq!(single_out_choices[0].base, 4, "single-out destination weights still favour home");
+    let chosen = &choices[0].options[choices[0].selected_option.unwrap()];
+    assert!(chosen.second_out_p.is_some_and(|p| p > 0.5), "{chosen:#?}");
 }
 
 #[test]
