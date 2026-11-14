@@ -145,7 +145,7 @@ Targets: each pitch type's population mean within ±2 mph, ±250 rpm, ±3 in of 
 | Metric | Target [R] | Envelope |
 | :--- | :--- | :--- |
 | Mean bat speed (competitive swings) | 71.5–72 mph | 67–76 mph |
-| Bat speed spread across hitters (SD of player means) | ~2.5 mph | 1.5–4 mph |
+| Bat speed spread across hitters (SD of player means) | ~2.8 mph (Savant 2025 sample, sampling error removed; D19) | 1.5–4 mph |
 | Swing length | ~7.3 ft | 6–8.5 ft |
 | Attack angle at contact | ~10° | 5–16° |
 | Commit-to-contact time | ~0.15 s | 0.12–0.19 s |

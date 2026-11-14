@@ -12,3 +12,6 @@ workspace = true
 bb_math.workspace = true
 bb_physics.workspace = true
 bb_observe.workspace = true
+
+[dev-dependencies]
+serde_json.workspace = true

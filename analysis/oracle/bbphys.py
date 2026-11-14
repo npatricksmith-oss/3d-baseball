@@ -393,6 +393,66 @@ def collision(m, inv_I1, v, w, r1, inv_M2, inv_I2, V, W, r2, n, e_n, e_t, mu):
     return result
 
 
+# Physics-spec §8.2.1: tangential restitution against the normal approach speed |c_n|.
+E_T_LAB = 0.405   # KNS 2017, all bats with baseballs, tee at 77 mph
+V_T_LAB = 34.0    # m/s
+E_T_GAME = 0.0    # Statcast batted spin read through the model (Nathan 2020 Figs. 2, 4)
+V_T_GAME = 65.0   # m/s
+
+
+def tangential_restitution(cn_abs, e_lab=E_T_LAB, v_lab=V_T_LAB, e_game=E_T_GAME, v_game=V_T_GAME):
+    """Section 8.2.1: e_lab up to v_lab, linear in |c_n| to e_game at v_game, constant beyond."""
+    if not v_lab < v_game:
+        raise ValueError('the ramp needs v_lab < v_game')
+    if cn_abs <= v_lab:
+        return e_lab
+    if cn_abs >= v_game:
+        return e_game
+    return e_lab + (e_game-e_lab)*(cn_abs-v_lab)/(v_game-v_lab)
+
+
+def bat_ball_collision(m, inv_I1, v, w, r1, inv_M2, inv_I2, V, W, r2, n, e_n, mu):
+    """Section 8.1 with e_t from section 8.2.1 at this contact's normal approach speed."""
+    cn_abs = abs(dot(sub(add(v, cross(w, r1)), add(V, cross(W, r2))), n))
+    e_t = tangential_restitution(cn_abs)
+    result = collision(m, inv_I1, v, w, r1, inv_M2, inv_I2, V, W, r2, n, e_n, e_t, mu)
+    result['cn_abs'] = cn_abs
+    result['e_t'] = e_t
+    return result
+
+
+def bat_ball_contact(ball_r, ball_v, ball_w, knob, axis, v_cm, omega, n, e_n, mu,
+                     ss_from_tip=0.15, bat=None):
+    """Sections 7 (steps 5 and 7) and 8.2.1 from a contact state rather than from bodies.
+
+    The bat is the default 34-in bat, rigid, with its knob at `knob`, unit axis `axis`, center
+    of mass moving at `v_cm` and angular velocity `omega`; the ball's center is at `ball_r`.
+    Contact point on the ball r_b = -R n; on the bat r_B = (b - R n) - c. Both restitutions are
+    set by the first impulse's normal approach speed; if the contact point is still approaching
+    after it, one more impulse with the same e_n and e_t (at most two). e_n is given, not
+    computed. Also returns the sweet-spot velocity (u_ss = L - ss_from_tip) for bat speed.
+    """
+    bat = bat or bat_mass_properties()
+    a = unit(axis)
+    c = add(knob, scale(a, bat['u_cm']))
+    r1 = scale(n, -RADIUS)
+    r2 = sub(sub(ball_r, scale(n, RADIUS)), c)
+    inv1 = diagonal(1/BALL_INERTIA)
+    inv2 = bat_inverse_inertia(a, bat['I_cm'], bat['I_ax'])
+    first = bat_ball_collision(MASS, inv1, ball_v, ball_w, r1, 1/bat['M'], inv2, v_cm, omega, r2, n, e_n, mu)
+    state = first
+    impulses = 1
+    cn_after = dot(sub(add(state['v'], cross(state['w'], r1)), add(state['V'], cross(state['W'], r2))), n)
+    if cn_after < 0.0:
+        state = collision(MASS, inv1, state['v'], state['w'], r1, 1/bat['M'], inv2, state['V'], state['W'],
+                          r2, n, e_n, first['e_t'], mu)
+        impulses = 2
+    vss = add(v_cm, cross(omega, scale(a, bat['L']-ss_from_tip-bat['u_cm'])))
+    return dict(v=state['v'], w=state['w'], V=state['V'], W=state['W'], cn_abs=first['cn_abs'],
+                e_t=first['e_t'], impulses=impulses, bat_speed=norm(vss),
+                attack_angle=math.atan2(vss[2], math.hypot(vss[0], vss[1])))
+
+
 def plate_strike(position, batter_height, radius=RADIUS):
     """Circle/rectangle overlap at the midpoint plane, including rounded corners."""
     dx = max(abs(position[0])-0.2159, 0.0)

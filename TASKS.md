@@ -7,40 +7,32 @@ Status: `[ ]` not started · `[~]` in progress · `[x]` done · `[?]` needs an o
 
 ---
 
-## Swing and collision work (lead "Fable Swing", 2026-11-14, paused late afternoon; its own block, separate from the fielding handoff below)
+## Swing and collision work (merged into main 2026-11-14 on the owner's word: swing v2, the spin change of D20, the swing-noise split and the refit)
 
-**Not on main. Do not merge it without the owner's word** (PLAN §1 D19, D20). Everything is on **`work/collision`** (`be66dab`, pushed), which contains `work/swing-recalib` (`f46ea5a`: swing v2, per-player bat speed, main `dae1b7a`) and `work/collision-targets`. 338 tests pass (worker's run).
+**Reviews first:** the [Codex spin review](docs/reviews/2026-11-14-codex-collision-spin-review.md) is resolved (P2-1: A14 now runs the production `resolve_contact` against oracle contact states, including a sloped rotating bat mid-ramp, and a wrong 34–60 m/s ramp fails it; P3-1: the e_t 0 tee slope is 116 rpm/°, not 131). The [Codex refit review](docs/reviews/2026-11-14-codex-swing-refit-review.md) of `7ace606..375e3f9` is resolved: no P1; three record fixes, docs only (the HR deficit's attribution is a hypothesis, the barrel reference, plate-discipline bands crossed).
 
-**Unresolved, first:**
-- **No Codex review yet of the spin change** (`f710d9f..be66dab` on `work/collision`). Standard protocol; run it before anything else is built on it.
-- **The refit is not done.** Plan in [the collision note §8.3 on the branch](docs/calibration/2026-11-14-collision-sloped-barrel.md): split the swing-noise knob so the miss can widen without lengthening the exit-speed tail (a code change, spec first), then perception 2.7 → about 2.9–3.0. Two sweep rounds adopted nothing: swing noise 1.8 reaches runs and K but gives a 128 mph ball.
+Where it stands (`dfeb54a`; [collision note](docs/calibration/2026-11-14-collision-sloped-barrel.md) §8–§9; ledger §3):
+- **Tangential restitution e_t(|c_n|)** (PLAN D20 Option A): built, tested (A10a–c, A14), cage spin anchors met.
+- **The swing knob is split** (agent-models §3.6): `Knobs::swing_miss` (placement and timing σ, also the batter's `OwnExecution`) and `Knobs::swing_effort` (bat-speed σ, held at 1, sourced). With both at one value the games are unchanged (digests checked).
+- **Adopted:** perception 2.7 → 2.9, miss 1.0 → 1.4. Standard run: runs 5.76 → 4.31 [5.78 → 4.68] (real 4.39), K% 16.8 → 21.5 [same] (22.6), BB% 7.9 [8.4] (8.2), HR/PA 2.36% → 1.78% [1.77%] (3.0), max EV 116.8 mph, p99 109.8, hard-hit 38.2%.
+
+Open:
+- **HR/PA 1.78% against 3.0%:** barrels 4.4% of BIP against Savant 2024's 7.8% (per barrel 47%, steady). The old combined knob held HR up only through a wider effort that is not Statcast's. Not separated: the short upper exit-speed tail (≥ 105 mph 5.5% of fair balls against 10.2% in the Savant 2025 sample), the launch-angle spread (SD 29°) and the direction gap (known, PLAN D20). Next: joint EV × LA bins and HR per bin against a matched real sample. Not chased with bat speed (sourced).
+- **Plate discipline:** newly outside, O-Contact 42.8% (45–68) and swinging strikes 16.1% (8–15); further below, Contact% 65.9% (70–83) and Z-Contact 72.9% (79–91); pitches/PA 3.11 (3.5–4.3); chase 24.5% against 29%.
+- **Runs sit at real only because K rose while ball-in-play hits are still high** (GB .322 against .245). When the fielding work lowers those, runs fall below 4.39: look at the batter's knobs again then, not before.
+- **For the fielding side: seed 5, play 201.** The first baseman, one metre from the bag with the ball, throws to the pitcher on it instead of stepping on the bag. Traced by the Codex refit review: he first chooses to carry, then at 4.025 s switches to the throw, because the two near-certain outs (values 0.9999927 carry, 0.9999971 throw; arrival 4.127 s against 4.104 s) differ by more than the 1e-9 tie threshold at `live.rs:3042`, so the carry preference does not apply. The throw-choice model is sensitive to tiny differences between near-certain options. The `bb_ffi` timeline test now accepts a throw another fielder already holds; that is correct for short tosses, and does not fix the choice.
+- The direction gap (spray minus attack direction) stays a known gap; nothing changed for it.
 
 **Owner's rulings this session:**
 - D19: v2 is the swing, off main until recalibrated; per-player bat speed yes; vertical aim re-checked (left at −2.0 cm); collision efficiency not now.
 - D20: the collision was reopened as sourced physics, and **Option A** was chosen for the spin: tangential restitution 0.405 up to 34 m/s normal impact speed, linear to 0 at 65 m/s (physics-spec §8.2.1). It matches the lab (KNS tee, 184 rpm/° against 179) and Statcast (backspin 2,465 rpm at 25–30° against about 2,300).
 - **Driveline OpenBiomechanics data: not to be used** (licence excludes commercial use). Removed from the branch history; nothing in the repository derives from it.
-- The direction gap stays a recorded, unexplained gap; nothing is changed for it.
-
-**Where the numbers stand** (standard run, seeds 0–299 [1000–1299]; ledger rows on the branch):
-
-| | main `dae1b7a` | v2 before the spin change | `work/collision` | real |
-|---|---|---|---|---|
-| Runs / team-game | 5.86 [6.18] | 4.82 [4.50] | 5.76 [5.78] | 4.39 |
-| HR / PA | 5.13% [5.30%] | 1.04% [0.98%] | 2.36% [2.24%] | 3.0% |
-| K% | 15.8 [16.0] | 15.6 [15.8] | 16.8 [16.7] | 22.6 |
-| Fouls / game | | 17.8 [17.5] | 21.1 [21.4] | |
-
-The runs surplus is mostly hits on balls in play (GB .34, LD .76, FB .22 against .245, .68, .13), which is the fielding's.
 
 **The direction gap (known, unexplained; physics-spec §17 item 8, ledger §5):**
 - Sim: spray minus attack direction sits about 12° toward the opposite field at all launch angles, with a slope against launch angle about twice the real one. The spin setting does not move it; the collision's parameters do not; a sweep of the bat's angle at contact could, but only with hands far faster than published.
-- Real (Savant, [collision-targets note](docs/calibration/2026-11-14-collision-targets.md) on the branch): with the barrel travelling within 3° of straight up the middle, the ball leaves to the pull side by about 22° at launch 0–10°, 9° at 10–25°, and −1.5° at 25–35°. So the offset is in square contact itself and depends on launch angle. Not yet compared with the sim band by band.
-
-**Waiting for the owner:** whether to merge v2 with the spin change into main, after the review and the refit.
+- Real (Savant, [collision-targets note](docs/calibration/2026-11-14-collision-targets.md)): with the barrel travelling within 3° of straight up the middle, the ball leaves to the pull side by about 22° at launch 0–10°, 9° at 10–25°, and −1.5° at 25–35°. So the offset is in square contact itself and depends on launch angle. Not yet compared with the sim band by band.
 
 **Open, not the swing's:** batters are 17 ms early on outside pitches and 2 ms inside (perception); v2's attack-angle slope against direction is 0.53 (Statcast 0.41).
-
-**Housekeeping:** worktrees `swing` (on `work/collision`), `swing-tests` (`work/collision-targets`, merged into `work/collision`), `swing-lambda`, `swing-chores` (`work/swing-chores`, Haiku's note check, not merged), `swing-tasks`, `live-comm` are left in place. Workers ran in the Herdr desktop app (`herdr-app`, `hc`); the worker tabs are closed.
 
 ## Resume here (2026-11-14, overnight lead session, 00:00 to 06:00)
 

@@ -14,15 +14,23 @@ pub struct PaArgs {
     k_perception: f64,
     #[arg(long, default_value_t = 1.0)]
     k_command: f64,
+    /// The swing's miss scale and effort scale together (agent-models §3.6).
     #[arg(long, default_value_t = 1.0)]
     k_swing: f64,
+    /// Overrides `k_swing` for the miss scale alone (placement and timing σ).
+    #[arg(long)]
+    k_miss: Option<f64>,
+    /// Overrides `k_swing` for the effort scale alone (bat-speed σ).
+    #[arg(long)]
+    k_effort: Option<f64>,
 }
 
 pub fn pa(a: PaArgs) {
     let mut mu = Matchup::average();
     mu.knobs.perception = a.k_perception;
     mu.knobs.command = a.k_command;
-    mu.knobs.swing = a.k_swing;
+    mu.knobs.swing_miss = a.k_miss.unwrap_or(a.k_swing);
+    mu.knobs.swing_effort = a.k_effort.unwrap_or(a.k_swing);
     let t0 = std::time::Instant::now();
     let mut rep = B1Report::default();
     // Out-of-zone pitches by how far the ball's edge missed the zone: (pitches, swings) for

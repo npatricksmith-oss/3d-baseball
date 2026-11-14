@@ -17,6 +17,14 @@ pub fn grade_from_ratio(value: f64, value_50: f64, rho: f64) -> f64 {
     50.0 - 10.0 * bb_math::m::ln(value / value_50) / bb_math::m::ln(rho)
 }
 
+/// `BatSpeed` at grade 50, m/s (agent-models §10): Statcast's league mean of batters' mean
+/// competitive bat speed, 71.7 mph (2025 sample; 71.5 league-wide).
+pub const BAT_SPEED_MU_MPS: f64 = 32.0;
+/// `BatSpeed` σ_pop, m/s per 10 grade points [R] (agent-models §10, owner ruling D19): the SD of
+/// batters' true mean competitive bat speed, 2.81 mph = 1.256 m/s (2025 Savant sample, 216
+/// batters: SD of means 2.90 mph less sampling error 0.72; `analysis/statcast/savant_sd.py`).
+pub const BAT_SPEED_SIGMA_POP_MPS: f64 = 1.25;
+
 /// Display clamp (stored values are never clamped).
 pub fn display_grade(g: f64) -> f64 {
     g.clamp(20.0, 80.0)
@@ -64,7 +72,7 @@ impl Default for BatterGrades {
 impl BatterGrades {
     /// Apply to physical attributes, keeping height and handedness.
     pub fn apply(&self, b: &mut BatterAttrs, p: &mut Perception, d: &mut Discipline) {
-        b.bat_speed = linear_from_grade(self.bat_speed, 32.0, 1.1);
+        b.bat_speed = linear_from_grade(self.bat_speed, BAT_SPEED_MU_MPS, BAT_SPEED_SIGMA_POP_MPS);
         b.t_swing = ratio_from_grade(self.quick_hands, 0.150, 1.05);
         b.bat_control = ratio_from_grade(self.bat_control, 0.012, 1.25);
         b.timing = ratio_from_grade(self.timing, 0.006, 1.25);

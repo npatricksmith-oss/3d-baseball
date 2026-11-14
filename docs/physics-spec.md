@@ -203,6 +203,8 @@ The swing model (`agent-models.md`) supplies the bat's world pose `T_bat(t) = (p
 - linear velocity **V**(t) of the center of mass, angular velocity **Ω**(t)
 - the velocity of any bat point **p**: **V** + **Ω** × (**p** − **c**)
 
+The swing model's v2 (agent-models §3.6, 2026-11-14) moves the knob on an arc while the bat turns about it, so **V** carries the hands' velocity as well as the bat's rotation: **V** = **K̇** + **Ω** × (u_cm·**â**), with **K̇** the knob's velocity and **Ω** = θ̇·**n̂** the bat's angular velocity in the swing plane.
+
 **Free-bat approximation** [S, standard in the literature]: during the ~1 ms collision, the hands' influence is ignored. After contact, the bat's own path is cosmetic; the swing model may apply the recoil impulse or ignore it.
 
 ---
@@ -260,8 +262,30 @@ K = (1/m + 1/M)·𝟙  −  [r₁]× I₁⁻¹ [r₁]×  −  [r₂]× I₂⁻¹
 | u_ss | L − 0.15 m (about 6 in from the tip) | [E] Statcast also defines bat speed 6 in from the tip |
 | e_peak | **Tuned so q = 0.20 ± 0.01 at u_ss** for the default bat at game-speed relative velocity (~150–165 mph). The cross-check needs **e_peak ≈ 0.44–0.47** depending on exact u_ss. | [S] q ≈ 0.2 for wood at the sweet spot (Nathan); e derived [D] |
 | Speed dependence | e_peak(c_n) = e_ref − s_e·(|c_n| − v_ref), s_e > 0 | [E] COR falls with impact speed (sign [S], magnitude to calibrate) |
-| e_t (tangential restitution, e_x in KNS) | 0.40 | [S] KNS 2017 fit: 0.405 ± 0.010 average, wood bat 0.464. Cross & Nathan 2006 found 0.17 in a different setup. Range 0.15–0.46; calibrate against spin-vs-undercut |
+| e_t(c_n) (tangential restitution, e_x in KNS) | 0.405 at |c_n| ≤ 34 m/s, falling linearly to 0 at |c_n| = 65 m/s, 0 above | Speed-dependent (§8.2.1; owner, 2026-11-14, PLAN D20 Option A). Tee value [S] KNS 2017; game value [S] from Statcast's batted spin; the shape between them is [E] with no source |
 | μ (ball-bat friction) | 0.50 | [S] value used by KNS and earlier work; KNS lower bound only ≥ 0.15 |
+
+#### 8.2.1 Tangential restitution against impact speed *(added 2026-11-14, PLAN D20)*
+
+e_t is a function of the same normal approach speed |c_n| that sets e_n (§8.1, the contact-point relative velocity along n̂ at the first impulse; a second impulse reuses both values):
+
+```
+e_t(|c_n|) = e_t_lab                                                 for |c_n| ≤ v_t_lab
+           = e_t_lab + (e_t_game − e_t_lab)·(|c_n| − v_t_lab)/(v_t_game − v_t_lab)   between
+           = e_t_game                                                for |c_n| ≥ v_t_game
+```
+
+| Parameter | Default | Status / source |
+| :--- | :--- | :--- |
+| e_t_lab | 0.405 | [S] Kensrud, Nathan & Smith 2017 (KNS), ⟨e_x⟩ = 0.405 ± 0.010 over all bats with baseballs (wood alone 0.464 ± 0.014), from a ball at rest on a tee struck at 63–88 mph at the impact point, normalized to 77 mph |
+| v_t_lab | 34 m/s | [E] anchored on KNS's normalized speed: 77 mph is 34.4 m/s, and across the barrel at offset ψ the normal speed is 34.4·cos ψ, at most 34.3 m/s for KNS's ψ ≥ 5° |
+| e_t_game | 0.0 | [S, derived] Statcast/Trackman batted spin. With e_t = 0 the model gives backspin about 2,300 rpm at 25–30° launch over the middle of the field and sidespin about −73 rpm per degree of adjusted spray, against Nathan 2020's Fig. 4 (about 2,300) and Fig. 2 (about −65, Sonnet's reading −80 ± 30%). With 0.40 it gives 4,250 and −110. Trackman measures total spin and infers the axis, so both components are derived. Nathan's own 3D collision model, with KNS-like parameters, gives 4,000–5,000 rpm at 25–30° (Fig. 5), the same excess |
+| v_t_game | 65 m/s | [E] anchored on the game contact that produces a 25–30° fly ball: an average four-seamer and bat speed met about 3 cm under the ball's center has |c_n| ≈ 64 m/s (head-on, 70 m/s) |
+
+- **The shape between the anchors has no source.** No measurement of e_x exists between KNS's 34 m/s and game speeds. Linear in |c_n| is the simplest form through the two observations; it is an assumption, not a finding. KNS normalized their data to 77 mph and published no speed trend; their raw speed range (28–39 m/s) reaches into the ramp, where the law gives 0.34 at 39 m/s.
+- **Why the speed, and why downward.** Cross & Nathan 2006 measured e_x 0.16 at 4 m/s and KNS 0.405 at 34 m/s, so e_x rose with speed at low speeds. Nothing measured says it falls at game speed; the only evidence is Statcast's spin, read through this model. The law therefore anchors two physical observations of one quantity (calibration-targets §2.2) and does not claim a mechanism.
+- **What it moves.** Less spin at game speed, so less energy goes into rotation: oblique contacts leave faster (about +1.8 mph mean exit speed in games at e_t 0) and fly balls carry differently. Head-on contacts (A7, A8) are unchanged: they have no tangential velocity.
+- **What it does not move.** The direction of the ball relative to the swing's path (spray against launch angle) barely changes with e_t (collision note §7.1); that gap is open and unrelated (§17 item 8).
 
 **Collision-efficiency cross-check** [D] (default bat, 85 mph pitch at the plate, 75 mph bat at the contact point):
 
@@ -439,6 +463,11 @@ An **independent Python reference implementation** (`analysis/oracle/`, written 
 | A8 | Default bat at u_ss, game speeds | q = 0.20 ± 0.01; EV 105–109 mph for an 85 mph plate speed and 75 mph bat | [S] q≈0.2 |
 | A9 | Gripping oblique impact on a stationary ball | Spin and tangential speed match the KNS formulas (§8.1) | [S] KNS 2017 |
 | A10 | Spin vs undercut sweep | Backspin rises with undercut, topspin with overcut; magnitudes within published ranges | [S] Nathan et al. batted-ball spin work (pull exact values in M2) |
+| A10a | Tee: level default bat, 77 mph at b = 6.8 in past the center of mass, ball at rest, offset ψ 5–30° | Spin about the bat's axis equals KNS Eq. (8) with e_t_lab at the across-barrel relative speed (ψ 10–30°, normal speed below v_t_lab); fitted total spin per degree of launch θ 179 ± 18 rpm/° | [S] KNS 2017 Eq. (8), Fig. 3 |
+| A10b | Game: average RHP four-seamer at the middle, on time, met under the ball to launch 25–30°, exit speed 90+ | Backspin 2,300 ± 600 rpm | [S, derived] Nathan 2020 Fig. 4 |
+| A10c | Same contacts swept over timing ±15 ms and 1.5–4.5 cm under | Sidespin −65 ± 30 rpm per degree of adjusted spray (+ = opposite field) | [S, derived] Nathan 2020 Fig. 2 |
+| A10d | Same sweep | Sidespin zero at −10 ± 5° of adjusted spray | [S] Nathan 2020 Fig. 2. **Report only** (the direction gap, §17 item 8) |
+| A14 | e_t(|c_n|) law | Oracle values at low speed, mid-ramp and game speed; collisions resolved with the law's e_t match the oracle, both as bodies and through the production contact resolution from §7 contact states (a sloped, rotating bat on the barrel and on the taper among them, e_n held at the fixture value); a wrong ramp (34–60 m/s) applied at contact fails | §8.2.1 |
 | A11 | Energy guard | No collision increases total kinetic energy | Physical |
 | A12 | Bat mass properties of default profile | Match §6.2 values; inside validation bands | [D] |
 | A13 | Ball at rest on flat ground; rolling deceleration | Exactly μ_r·g; stops at the predicted distance | Analytic |
@@ -475,7 +504,7 @@ Additional batted-ball cross-check points (same model, calculator atmosphere):
 | Aero | cd0, cdspin, cl0, cl1, cl2, τ₁₀₀ | `physics.toml` |
 | Integration | Δt per phase, event tolerance | `physics.toml` |
 | Bat | Profile table, ρ_w, cup option; per-player bat selection | Equipment config |
-| Bat-ball | f(u) profile, u_ss, e_ref, v_ref, s_e, e_t, μ, second-contact limit | `physics.toml` |
+| Bat-ball | f(u) profile, u_ss, e_ref, v_ref, s_e, e_t_lab, v_t_lab, e_t_game, v_t_game, μ, second-contact limit | `physics.toml` |
 | Surfaces | e_ref, k_s, μ, e_t, μ_r, σ_n per surface | Park config (with defaults) |
 | Field objects | Wall segments (height, material), poles, bases, backstop | Park config |
 | Zone | 0.27 / 0.535 height fractions, plane depth | League rules config |
@@ -490,6 +519,7 @@ Additional batted-ball cross-check points (same model, calculator atmosphere):
 - `pybbda` trajectory module, a third-party port of the calculator. Coefficient defaults and air-density formula. https://pybbda.readthedocs.io/en/latest/modules/analysis/trajectories.html
 - J. Kensrud, A. M. Nathan, L. Smith, "Oblique Collisions of Baseballs and Softballs with a Bat," *Am. J. Phys.* (2017). e_x, μ, gripping relations. https://arxiv.org/abs/1610.03464
 - R. Cross and A. M. Nathan, "Scattering of a Baseball by a Bat," *Am. J. Phys.* 74, 896 (2006). https://arxiv.org/abs/physics/0605040
+- A. M. Nathan, "Why Does a Fly Ball Carry Better to Centerfield?" (preprint, 2020). Statcast backspin by launch angle (Fig. 4), sidespin against spray (Fig. 2), his 3D collision model (Fig. 5). https://baseball.physics.illinois.edu/carry-v2.pdf
 - A. M. Nathan, "The effect of spin on the flight of a baseball," *Am. J. Phys.* 76, 119 (2008).
 - A. M. Nathan, Physics of Baseball site (bat COR, collision efficiency q, aerodynamics). https://baseball.physics.illinois.edu/
 - MLB, 2026 ABS challenge-system zone definition (27% / 53.5% of height, measured at plate midpoint). https://www.mlb.com/amp/news/ball-strike-challenge-system-2026.html
@@ -504,3 +534,5 @@ Additional batted-ball cross-check points (same model, calculator atmosphere):
 5. Confirm the ball's moment-of-inertia factor α for a real baseball.
 6. Confirm the exact ABS edge rule ("any part of the ball") if the league ever wants strict ABS parity. It doesn't need to; the league is fictional.
 7. Tune the default bat profile to a typical MLB 34-in mass (about 31–32 oz) and add 2–3 more stock bats (lighter/longer, heavier/end-loaded) for player variety.
+8. **Direction off a sloped barrel (open, unexplained).** Spray minus attack direction against launch angle: the sim sits about 12° toward the opposite field at 0–25° launch and falls about 0.75° per degree of launch against MLB's 0.51 (games, docs/calibration/2026-11-14-collision-sloped-barrel.md §7). The rigid-body model is the published one; no source measures the direction. Nothing is tuned for it (PLAN D20).
+9. **e_x at game speeds.** No laboratory value exists above 34 m/s; §8.2.1's ramp shape is assumed. A measurement would replace it.

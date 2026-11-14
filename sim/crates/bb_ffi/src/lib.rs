@@ -1008,8 +1008,9 @@ mod tests {
                     if f.release_in_s > 0.0 && f.release_in_s < 0.1 && t + f.release_in_s + 0.3 < info.duration_s {
                         let mut g = BbFrame::default();
                         unsafe { bb_timeline_sample(p, len, t + f.release_in_s + 0.3, &mut g) };
-                        // Gone from him: well away, or already in a teammate's glove (a flip of
-                        // two or three metres to a man covering the bag).
+                        // It left him: the ball is away from him, or another fielder has it (a
+                        // toss of a metre or two to a teammate on the bag is caught well inside
+                        // 0.3 s; seed 5 play 201 under the 2026-11-14 refit knobs).
                         let caught_by_other = g.holder >= 0 && g.holder != f.holder;
                         g.holder = f.holder;
                         assert!(caught_by_other || near(&g) > 3.0, "play {} at {t:.2} s: the announced throw did not leave", info.play_index);

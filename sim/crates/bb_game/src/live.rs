@@ -239,28 +239,30 @@ const PLATE_SPIN_M: f64 = 1.5;
 /// Below this speed a fielder reaching his spot simply stops on it (one tick's step), m/s [E].
 const SETTLE_V: f64 = 0.5;
 /// The batter's typical pull: how far to his pull side of straightaway his balls in play go
-/// on average, degrees (right-handers −5.0° in `examples/spray_by_location.rs`) [E].
-const MEAN_PULL_DEG: f64 = 5.0;
+/// on average, degrees (batter-relative −1.23° in `examples/spray_by_location.rs`, 96 games,
+/// refit for the v2 swing 2026-11-14; was 5.0 on the v1 swing) [E].
+const MEAN_PULL_DEG: f64 = 1.23;
 /// The scatter of balls in play about the direction a pitch location suggests, degrees
-/// (σ within a 10 cm bin, `examples/spray_by_location.rs`) [E].
-const SPRAY_SCATTER_DEG: f64 = 22.0;
+/// (σ within a 10 cm bin, `examples/spray_by_location.rs`; 19.4–22.0° on the v2 swing, 2026-11-14) [E].
+const SPRAY_SCATTER_DEG: f64 = 20.5;
 /// A fielder's belief about what the bat's angle at contact says about the ball's direction
 /// (agent-models §5.10): spray ≈ `SWING_SPRAY_A_DEG` + `SWING_SPRAY_B` × face, with
 /// `SWING_SPRAY_RESID_DEG` of scatter about the line, batter-relative (negative = his pull
 /// side). The face is the barrel's yaw less 90° (mirrored for a left-hander). Least-squares
-/// fit to 5,386 fair balls in play, `examples/spray_by_bat_angle.rs` (96 games, 2026-11-12);
-/// refit when the swing or contact model changes [E].
-const SWING_SPRAY_A_DEG: f64 = 5.2;
-const SWING_SPRAY_B: f64 = 1.36;
-const SWING_SPRAY_RESID_DEG: f64 = 18.6;
+/// fit to 5,521 fair balls in play, `examples/spray_by_bat_angle.rs` (96 games), refit for the
+/// v2 swing 2026-11-14 (v1: 5.2° + 1.36 × face, 18.6°); refit when the swing or contact model
+/// changes [E].
+const SWING_SPRAY_A_DEG: f64 = 6.91;
+const SWING_SPRAY_B: f64 = 0.939;
+const SWING_SPRAY_RESID_DEG: f64 = 18.0;
 /// A fielder's belief about what the swing's lead says about the bat's face at contact
 /// (agent-models §5.10): face ≈ `LEAD_FACE_A_DEG` + `LEAD_FACE_B_DPS` × lead (s), with
-/// `LEAD_FACE_RESID_DEG` of scatter, batter-relative. Least-squares fit to 11,588 fair balls in
-/// play, `examples/spray_cues.rs` (200 games, 2026-11-13); refit when the swing model changes
-/// [E].
-const LEAD_FACE_A_DEG: f64 = 161.93;
-const LEAD_FACE_B_DPS: f64 = -1063.1;
-const LEAD_FACE_RESID_DEG: f64 = 3.6;
+/// `LEAD_FACE_RESID_DEG` of scatter, batter-relative. Least-squares fit to 11,603 fair balls in
+/// play, `examples/spray_cues.rs` (200 games, left-handers mirrored), refit for the v2 swing
+/// 2026-11-14 (v1: 161.93° − 1,063.1°/s × lead, 3.6°); refit when the swing model changes [E].
+const LEAD_FACE_A_DEG: f64 = 184.10;
+const LEAD_FACE_B_DPS: f64 = -1213.3;
+const LEAD_FACE_RESID_DEG: f64 = 3.1;
 /// A fielder jumps only for a ball he expects within this angle of his line from home,
 /// degrees (infield, outfield) [E].
 const JUMP_ZONE_DEG: [f64; 2] = [20.0, 25.0];
@@ -927,11 +929,12 @@ pub fn read_prediction(env: &FlightEnv, field: &Field, truth: (Vec3, Vec3), t: f
 /// the pitch is (agent-models §5.10): degrees of spray (+ = pulled more), against the pitch's
 /// distance toward the batter from the middle of the plate, m (+ = inside). A fielder's
 /// belief about the contact model: means by 10 cm bin from `examples/spray_by_location.rs`
-/// (96 games of right-handed batters, 2026-11-12) less the overall mean (−5.0°), linear
-/// between bin centres, flat beyond the last. Refit when the contact model changes.
+/// (96 games, left-handers mirrored; refit for the v2 swing 2026-11-14, v1's table ran
+/// −6.5° to +7.7°) less the overall mean (−1.23°), linear between bin centres, flat beyond the
+/// last. Refit when the contact model changes.
 fn anticipated_pull_deg(x_inside: f64) -> f64 {
     const X: [f64; 7] = [-0.30, -0.20, -0.10, 0.0, 0.10, 0.20, 0.30];
-    const PULL: [f64; 7] = [-6.5, -4.5, -3.6, 0.0, 3.4, 7.2, 7.7];
+    const PULL: [f64; 7] = [-2.8, -0.5, 0.1, 0.6, 0.4, 0.2, -0.7];
     let x = x_inside.clamp(X[0], X[6]);
     let k = (((x - X[0]) / 0.10).floor() as usize).min(5);
     let f = (x - X[k]) / 0.10;
@@ -5222,15 +5225,17 @@ mod tests {
 
     // agent-models §5.10, worked by hand. Fielders' lines from home, from a fixed symmetric
     // test layout (1B 38°, 2B 13°, SS −13°, 3B −36°, LF −30°, CF 0°, RF 30° of spray). Perfect reads. A
-    // right-hander, pitch down the middle: the prior is his typical pull, −5°, σ 22°. A bat
-    // read at yaw 60.4412° (face −29.5588°) is a cue at 5.2 + 1.36 × (−29.5588) = −35.0°, with
-    // σ 18.6° (the scatter about the fit; no read error). k = 22²/(22² + 18.6²) = 0.58316, so
-    // the estimate is −5 − 0.58316 × 30 = −22.495°, σ = 22 × 18.6 / √(22² + 18.6²) = 14.204°.
-    // Offsets against 2σ = 28.408° (zones 20° infield, 25° outfield): 3B +13.505° → +0.4754;
-    // SS −9.495° → −0.3342; LF +7.505° → +0.2642; CF −22.495° → −0.7919; 1B, 2B and RF outside
-    // their zones; the pitcher and catcher never. A left-hander's mirror image (yaw −60.4412°,
-    // prior +5°) gives +22.495°: 1B −0.5458, 2B +0.3342, CF +0.7919, RF −0.2642, the rest 0.
-    // With no bat read, the prior alone: the shortstop, 8° off it, at 8/(2·22) = 0.1818.
+    // right-hander, pitch down the middle: the prior is his typical pull plus the middle
+    // bin's, −(1.23 + 0.6) = −1.83°, σ 20.5° (v2 swing refit, 2026-11-14). A bat read at yaw
+    // 60.4412° (face −29.5588°) is a cue at 6.91 + 0.939 × (−29.5588) = −20.8457°, with σ 18.0°
+    // (the scatter about the fit; no read error). k = 20.5²/(20.5² + 18²) = 0.564662, so the
+    // estimate is −1.83 − 0.564662 × 19.0157 = −12.5675°, σ = 20.5 × 18 / √(20.5² + 18²) =
+    // 13.5259°. Offsets against 2σ = 27.0518° (zones 20° infield, 25° outfield): SS +0.4325° →
+    // +0.0160; LF +17.4325° → +0.6444; CF −12.5675° → −0.4646; 1B, 2B, 3B (23.43°) and RF
+    // outside their zones; the pitcher and catcher never. A left-hander's mirror image (yaw
+    // −60.4412°, prior +1.83°) gives +12.5675°: 2B −0.0160, CF +0.4646, RF −0.6444, the rest 0.
+    // With no bat read, the prior alone: the shortstop, 11.17° off it, at 11.17/(2·20.5) =
+    // 0.2724. (Worked by `analysis/oracle/anticipation_jumps.py`, from §5.10.)
     fn symmetric_jump_test_positions() -> [Vec3; 9] {
         let p = |d_ft: f64, deg: f64| {
             let d = d_ft * 0.3048;
@@ -5259,11 +5264,11 @@ mod tests {
         let jumps = |inp: &LiveInput| -> Vec<f64> { (0..9).map(|i| jump_at_contact(inp, i, home[i]).dot(toward_rf(i)) / inp.fattrs[i].speed).collect() };
         inp.bat_yaw = Some(60.4412_f64.to_radians());
         let rhb = jumps(&inp);
-        let expect_r = [0.0, 0.0, 0.0, 0.0, 0.4754, -0.3342, 0.2642, -0.7919, 0.0];
+        let expect_r = [0.0, 0.0, 0.0, 0.0, 0.0, 0.0160, 0.6444, -0.4646, 0.0];
         inp.bats = bb_observe::Hand::Left;
         inp.bat_yaw = Some((-60.4412_f64).to_radians());
         let lhb = jumps(&inp);
-        let expect_l = [0.0, 0.0, -0.5458, 0.3342, 0.0, 0.0, 0.0, 0.7919, -0.2642];
+        let expect_l = [0.0, 0.0, 0.0, -0.0160, 0.0, 0.0, 0.0, 0.4646, -0.6444];
         for i in 0..9 {
             assert!((rhb[i] - expect_r[i]).abs() < 1e-3, "right-hander, fielder {i}: {:.4}", rhb[i]);
             assert!((lhb[i] - expect_l[i]).abs() < 1e-3, "left-hander, fielder {i}: {:.4}", lhb[i]);
@@ -5271,7 +5276,7 @@ mod tests {
         inp.bats = bb_observe::Hand::Right;
         inp.bat_yaw = None;
         let blind = jumps(&inp);
-        assert!((blind[5] - 8.0 / 44.0).abs() < 1e-3, "shortstop on the prior alone: {:.4}", blind[5]);
+        assert!((blind[5] - 11.17 / 41.0).abs() < 1e-3, "shortstop on the prior alone: {:.4}", blind[5]);
     }
 
     // Codex anticipation review #1: before his reaction time a fielder reads the bat, not the
@@ -5305,15 +5310,15 @@ mod tests {
 
     // agent-models §5.10, the swing's lead, worked by hand like
     // `fielders_jump_toward_the_side_they_read`. Perfect pitch read, no bat-angle read, the
-    // lead read perfectly: 0.180123 s says face = 161.93° − 1063.1 × 0.180123 = −29.5588°, with
-    // the fit's 3.6° of scatter; that face is a cue at −35.0° (as there), σ = √((1.36 × 3.6)² +
-    // 18.6²) = 19.2336°. Against the −5° prior (σ 22°): k = 0.56678, estimate −22.0037°, σ
-    // 14.4801°, 2σ = 28.9602°: 3B +0.4833, SS −0.3109, LF +0.2761, CF −0.7598, the rest 0. The
-    // left-hander's mirror image (the lead is the same for either side; prior +5°): 1B −0.5524,
-    // 2B +0.3109, CF +0.7598, RF −0.2761. With the bat-angle read too, at the same face and σ
-    // 10°, the two face reads fuse to σ = 10 × 3.6 / √(10² + 3.6²) = 3.3872°: estimate −22.0586°,
-    // σ 14.4495°: 3B +0.4824, SS −0.3135, LF +0.2748, CF −0.7633. One read of the face, not two
-    // cues: had the bat read been fused as a second spray cue the estimate would be −25.7°.
+    // lead read perfectly: 0.176097 s says face = 184.10° − 1213.3 × 0.176097 = −29.5585°, with
+    // the fit's 3.1° of scatter; that face is a cue at −20.8454°, σ = √((0.939 × 3.1)² + 18²) =
+    // 18.2348°. Against the −1.83° prior (σ 20.5°): estimate −12.4464°, σ 13.6243°, 2σ =
+    // 27.2486°: SS +0.0203, LF +0.6442, CF −0.4568, the rest 0. The left-hander's mirror image
+    // (the lead is the same for either side; prior +1.83°): 2B −0.0203, CF +0.4568, RF −0.6442.
+    // With the bat-angle read too, at the same face and σ 10°, the two face reads fuse to σ =
+    // 10 × 3.1 / √(10² + 3.1²) = 2.9610°: estimate −12.4569°, σ 13.6158°: SS +0.0199, LF
+    // +0.6442, CF −0.4574. One read of the face, not two cues: had the bat read been fused as a
+    // second spray cue the estimate would be −15.05°. (v2 swing refit, 2026-11-14.)
     #[test]
     fn the_swing_lead_moves_the_jump_toward_the_side_it_reads() {
         let fx = fixture(&[]);
@@ -5324,7 +5329,7 @@ mod tests {
             a.swing_sigma = 10.0_f64.to_radians();
         }
         inp.pitch_x = Some(0.0);
-        inp.swing_lead = Some(0.180123);
+        inp.swing_lead = Some(0.176097);
         let home = symmetric_jump_test_positions();
         let deg = [0.0, 0.0, 38.0, 13.0, -36.0, -13.0, -30.0, 0.0, 30.0];
         let toward_rf = |i: usize| {
@@ -5337,23 +5342,23 @@ mod tests {
                 assert!((got[i] - want[i]).abs() < 1e-3, "{what}, fielder {i}: {:.4} (want {:.4})", got[i], want[i]);
             }
         };
-        check(&jumps(&inp), [0.0, 0.0, 0.0, 0.0, 0.4833, -0.3109, 0.2761, -0.7598, 0.0], "right-hander, lead alone");
+        check(&jumps(&inp), [0.0, 0.0, 0.0, 0.0, 0.0, 0.0203, 0.6442, -0.4568, 0.0], "right-hander, lead alone");
         inp.bats = bb_observe::Hand::Left;
-        check(&jumps(&inp), [0.0, 0.0, -0.5524, 0.3109, 0.0, 0.0, 0.0, 0.7598, -0.2761], "left-hander, lead alone");
+        check(&jumps(&inp), [0.0, 0.0, 0.0, -0.0203, 0.0, 0.0, 0.0, 0.4568, -0.6442], "left-hander, lead alone");
         // The belief side directly: a bat read that landed exactly on 60.4412°, believed to
         // carry 10° of error (through `jump_at_contact` the read itself would be scattered).
-        let reads = JumpReads { pitch_x: 0.0, bat_yaw: Some(60.4412_f64.to_radians()), lead: Some(0.180123), bats: bb_observe::Hand::Right };
+        let reads = JumpReads { pitch_x: 0.0, bat_yaw: Some(60.4412_f64.to_radians()), lead: Some(0.176097), bats: bb_observe::Hand::Right };
         let both: Vec<f64> = (0..9).map(|i| jump_from_reads(&reads, &inp.fattrs[i], i, home[i]).dot(toward_rf(i)) / inp.fattrs[i].speed).collect();
-        check(&both, [0.0, 0.0, 0.0, 0.0, 0.4824, -0.3135, 0.2748, -0.7633, 0.0], "right-hander, lead and bat");
+        check(&both, [0.0, 0.0, 0.0, 0.0, 0.0, 0.0199, 0.6442, -0.4574, 0.0], "right-hander, lead and bat");
     }
 
     // The back-half policy, revised 2026-11-13: a read that by itself puts the ball behind the
     // batter is discarded and the fielder falls back on his other reads, instead of standing
     // still. (a) A bat read perfectly at 179.999° (barrel at the catcher) and no lead: the jump
-    // is the pitch prior's alone, the shortstop at 8 / (2 × 22) = 0.1818 as in
-    // `fielders_jump_toward_the_side_they_read`. (b) A wild lead read (0.40 s: face −263°)
-    // beside a good bat read: the bat read alone decides (−0.3342 for the shortstop, from that
-    // test). (c) The good lead read beside the bad bat read: the lead alone decides (−0.3109,
+    // is the pitch prior's alone, the shortstop at 11.17 / (2 × 20.5) = 0.2724 as in
+    // `fielders_jump_toward_the_side_they_read`. (b) A wild lead read (0.40 s: face −301°)
+    // beside a good bat read: the bat read alone decides (+0.0160 for the shortstop, from that
+    // test). (c) The good lead read beside the bad bat read: the lead alone decides (+0.0203,
     // from `the_swing_lead_moves_the_jump_toward_the_side_it_reads`).
     #[test]
     fn an_implausible_read_is_discarded_for_the_other_reads() {
@@ -5370,17 +5375,17 @@ mod tests {
         let ss = |inp: &LiveInput| jump_at_contact(inp, SS, home[SS]).dot(toward_rf) / inp.fattrs[SS].speed;
         inp.bat_yaw = None;
         let prior_only = ss(&inp);
-        assert!((prior_only - 8.0 / 44.0).abs() < 1e-3, "prior alone: {prior_only:.4}");
+        assert!((prior_only - 11.17 / 41.0).abs() < 1e-3, "prior alone: {prior_only:.4}");
         inp.bat_yaw = Some(179.999_f64.to_radians());
         assert_eq!(ss(&inp), prior_only, "a bat read behind the batter is discarded, not a reason to stand still");
         inp.bat_yaw = Some(60.4412_f64.to_radians());
         inp.swing_lead = Some(0.40);
         let got = ss(&inp);
-        assert!((got + 0.3342).abs() < 1e-3, "the wild lead is discarded, the bat read decides: {got:.4}");
+        assert!((got - 0.0160).abs() < 1e-3, "the wild lead is discarded, the bat read decides: {got:.4}");
         inp.bat_yaw = Some(179.999_f64.to_radians());
-        inp.swing_lead = Some(0.180123);
+        inp.swing_lead = Some(0.176097);
         let got = ss(&inp);
-        assert!((got + 0.3109).abs() < 1e-3, "the bad bat read is discarded, the lead decides: {got:.4}");
+        assert!((got - 0.0203).abs() < 1e-3, "the bad bat read is discarded, the lead decides: {got:.4}");
     }
 
     // Codex anticipation review #3. (a) Fusion on the circle has no seam: fusing a prior at
@@ -5393,8 +5398,8 @@ mod tests {
     // draws for both), some reads land in the forward half and move a jump off the prior's,
     // and the jumps must still agree to within what 0.002° can change (the first version's
     // linear fusion swung a third baseman from no jump to 3.6 m/s here). (c) The cue's model: a
-    // right-hander's bat square to the pitch line (yaw 90°) says +5.2° (the fit's intercept);
-    // a left-hander's mirror image (−90°) says −5.2°.
+    // right-hander's bat square to the pitch line (yaw 90°) says +6.91° (the fit's intercept);
+    // a left-hander's mirror image (−90°) says −6.91°.
     #[test]
     fn anticipation_has_no_seam_behind_the_plate() {
         let r = f64::to_radians;
@@ -5433,7 +5438,7 @@ mod tests {
         assert!(leaned, "the noisy reads put someone in the forward half (the continuity case)");
         let (c_r, _) = swing_spray_cue(r(90.0), bb_observe::Hand::Right, 0.0).unwrap();
         let (c_l, _) = swing_spray_cue(r(-90.0), bb_observe::Hand::Left, 0.0).unwrap();
-        assert!((c_r.to_degrees() - 5.2).abs() < 1e-9 && (c_l.to_degrees() + 5.2).abs() < 1e-9, "{c_r} {c_l}");
+        assert!((c_r.to_degrees() - 6.91).abs() < 1e-9 && (c_l.to_degrees() + 6.91).abs() < 1e-9, "{c_r} {c_l}");
         assert!(swing_spray_cue(r(179.999), bb_observe::Hand::Right, 0.0).is_none());
     }
 

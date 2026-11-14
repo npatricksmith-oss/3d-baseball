@@ -4,7 +4,7 @@
 //! cue, its spread, its correlation with spray, the spray scatter left after a straight-line
 //! fit, and what is left after a joint fit with the pitch's horizontal location (the existing
 //! prior), so a cue's *added* information shows. Batter-relative signs: negative spray = pull
-//! side (every game batter is right-handed, so this is the raw spray).
+//! side; a left-handed batter is mirrored in x.
 //! `cargo run --release -p bb_game --example spray_cues -- [games]`
 use bb_math::{m, KeyedRng, Purpose, RngKey};
 use bb_physics::contact::BatPose;
@@ -93,15 +93,21 @@ fn main() {
             }
             let (Some(sw), Some((t_c, st))) = (r.swing, r.contact_state) else { continue };
             let Some(p) = r.plate.or(Some(st.r)) else { continue };
+            // Batter-relative: a left-hander's swing (hand-arc center on +x) is mirrored in x,
+            // so the face and the spray are negative toward his pull side too (since A1
+            // handedness, 2026-11-13, game batters bat from both sides).
+            let lefty = sw.pivot.x > 0.0;
+            let mir = if lefty { -1.0 } else { 1.0 };
             let a = sw.at(t_c).axis;
-            let face = m::atan2(a.x, a.y).to_degrees() - 90.0;
+            let face = m::atan2(mir * a.x, a.y).to_degrees() - 90.0;
+            let (spray, p) = (mir * spray, bb_math::Vec3::new(mir * p.x, p.y, p.z));
             let t_plate = r.t_plate.unwrap_or(t_c);
             rows.push(Row {
                 spray: spray.to_degrees(),
                 cues: vec![
                     p.x,
                     p.z,
-                    r.target.0,
+                    mir * r.target.0,
                     r.target.1,
                     r.release.v.norm(),
                     face,
@@ -279,7 +285,7 @@ fn honest(rows: &[Row], y: &[f64]) {
             rows.iter().map(|row| row.cues[col] + sd * r.normal()).collect()
         };
         let px = noisy(0, 0, spx);
-        let face = noisy(1, 5, 1.915 * st_ms);
+        let face = noisy(1, 5, bb_game::play::BAT_YAW_RATE_DPS / 1000.0 * st_ms);
         let depth = noisy(2, 7, 0.038 * st_ms);
         let onset = noisy(3, 8, st_ms);
         let onset_rel = noisy(4, 14, st_ms);

@@ -43,23 +43,33 @@ pub fn standard_arsenal() -> Vec<ArsenalPitch> {
 pub struct Knobs {
     pub perception: f64,
     pub command: f64,
-    pub swing: f64,
+    /// The swing's miss scale (agent-models §3.6 `K_swing`, calibration-targets `K_swingplane`):
+    /// σ of vertical offset, plane tilt, reach and timing, in the motor and in the batter's
+    /// own-execution model alike.
+    pub swing_miss: f64,
+    /// The swing's effort scale (agent-models §3.6 `K_effort`): σ of the bat speed about
+    /// `BatSpeed` alone. Held at 1 in calibration (the 4.5% is sourced).
+    pub swing_effort: f64,
 }
 
 impl Default for Knobs {
     fn default() -> Self {
-        Self { perception: 1.0, command: 1.0, swing: 1.0 }
+        Self { perception: 1.0, command: 1.0, swing_miss: 1.0, swing_effort: 1.0 }
     }
 }
 
 impl Knobs {
-    /// Interim M3 calibration (docs/calibration/2026-10-31-m3-interim.md).
+    /// Interim M3 calibration (docs/calibration/2026-10-31-m3-interim.md); perception 2.7 → 2.9
+    /// and the swing's miss scale 1.0 → 1.4 in the refit after the tangential-restitution law
+    /// (docs/calibration/2026-11-14-collision-sloped-barrel.md §9: K% toward 22.6 with the
+    /// exit-speed tail kept). The effort scale stays 1 (sourced σ).
     pub fn calibrated_m3() -> Self {
-        Self { perception: 2.7, command: 0.8, swing: 1.0 }
+        Self { perception: 2.9, command: 0.8, swing_miss: 1.4, swing_effort: 1.0 }
     }
 }
 
 /// Everything fixed for a batter–pitcher matchup.
+#[derive(Clone)]
 pub struct Matchup {
     pub env: FlightEnv,
     pub pitcher: PitcherAttrs,
@@ -477,8 +487,8 @@ pub fn simulate_pitch_ctx(mu: &Matchup, sc: &Scouting, count: Count, seed: u64, 
     // Expected correction between now and the cutoff (60 ms before the believed arrival).
     let t_left = (bank.t_release + aim.mean.z - mu.template.adj_cutoff_s - t_now).max(0.0);
     let own = OwnExecution {
-        vertical: mu.batter.bat_control * mu.knobs.swing,
-        timing: mu.batter.timing * mu.knobs.swing,
+        vertical: mu.batter.bat_control * mu.knobs.swing_miss,
+        timing: mu.batter.timing * mu.knobs.swing_miss,
         correct_z: batter::CORRECTION_CREDIT * mu.batter.adjustability * t_left,
         correct_t: batter::CORRECTION_CREDIT * mu.template.adj_phase_frac * (t_left + mu.template.adj_cutoff_s - pc.latency).max(0.0),
     };
@@ -507,9 +517,12 @@ pub fn simulate_pitch_ctx(mu: &Matchup, sc: &Scouting, count: Count, seed: u64, 
         let (mut cur, mut t_aim) = aim_of(&bank, &aim);
         commit_error = truth_err(cur, t_aim);
         let off = Vec3::new(0.0, 0.0, mu.template.aim_offset_z);
-        let planner = |p: Vec3, t: f64| plan_swing(&mu.batter, &mu.template, &mu.bat.profile, &mu.bat.mass, mu.bat.contact.ss_from_tip, p + off, t, mu.template.attack_angle);
-        let sn = SwingNoise::new(&mu.batter, mu.knobs.swing);
-        let ex = execute_swing(&planner(cur, t_aim), &sn, &mut rng(seed, play, BATTER, Purpose::SwingExecution, 0));
+        let planner = |p: Vec3, t: f64| {
+            let a = p + off;
+            plan_swing(&mu.batter, &mu.template, &mu.bat.profile, &mu.bat.mass, mu.bat.contact.ss_from_tip, a, t, mu.template.attack_angle_at(&mu.batter, a))
+        };
+        let sn = SwingNoise::new(&mu.batter, mu.knobs.swing_miss, mu.knobs.swing_effort);
+        let ex = execute_swing(&planner(cur, t_aim), &sn, &mut rng(seed, play, BATTER, Purpose::SwingExecution, 0), &mut rng(seed, play, BATTER, Purpose::SwingEffort, 0));
         let t_commit = t_now;
         let mut swing = ex.swing;
         swing.start_no_earlier_than(t_commit);

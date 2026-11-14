@@ -9,6 +9,7 @@ use bb_rules::{Event, Input, PaResult, RulesState, Status, step};
 
 use crate::pa::{Knobs, Matchup, scouting_for_pa, simulate_pitch_ctx};
 use crate::play::{FielderAttrs, RunnerIn};
+use crate::population::Population;
 use crate::roster::Rosters;
 
 /// Noise-free flight time for a set reference throw. When the ball cannot reach first
@@ -184,7 +185,7 @@ pub struct PitchStep {
 /// A game that advances one pitch at a time (the engine behind `simulate_game` and the
 /// client API, data-formats §6.4).
 pub struct Game {
-    /// One matchup per pairing of pitcher's hand and batter's side that this game has.
+    /// One matchup per batting slot (each batter has his own `BatSpeed`, D19).
     mus: Vec<Matchup>,
     /// The matchup of each batting slot, `[batting side][slot]`, as an index into `mus`.
     mu_ix: [[usize; 9]; 2],
@@ -211,21 +212,32 @@ pub struct Game {
 
 impl Game {
     pub fn new(seed: u64, record: bool) -> Game {
+        Self::with_population(seed, record, &Population::default())
+    }
+
+    /// A game whose batters' abilities are drawn from `pop` (data-formats §2.4 step 5).
+    pub fn with_population(seed: u64, record: bool, pop: &Population) -> Game {
         let rosters = Rosters::generate(seed);
         // Each batter faces the other side's pitcher from his own side of the plate (a
-        // switch hitter from the side opposite the pitcher's hand). Abilities are still
-        // average; only the hands differ.
+        // switch hitter from the side opposite the pitcher's hand), with his own `BatSpeed`
+        // (D19). Every other ability is still average.
+        let mut hands: Vec<Matchup> = Vec::new();
         let mut mus: Vec<Matchup> = Vec::new();
         let mu_ix: [[usize; 9]; 2] = core::array::from_fn(|side| {
             let throws = rosters.pitcher_throws(1 - side);
-            rosters.teams[side].batting_order().map(|p| {
+            let team = &rosters.teams[side];
+            team.batting_order().map(|p| {
                 let bats = p.bats.against(throws);
-                mus.iter().position(|m| m.pitcher.throws == throws && m.batter.bats == bats).unwrap_or_else(|| {
+                let h = hands.iter().position(|m| m.pitcher.throws == throws && m.batter.bats == bats).unwrap_or_else(|| {
                     let mut mu = Matchup::for_hands(throws, bats);
                     mu.knobs = Knobs::calibrated_m3();
-                    mus.push(mu);
-                    mus.len() - 1
-                })
+                    hands.push(mu);
+                    hands.len() - 1
+                });
+                let mut mu = hands[h].clone();
+                mu.batter.bat_speed = pop.bat_speed(seed, team.field_agent(p));
+                mus.push(mu);
+                mus.len() - 1
             })
         });
         let mut st = RulesState::new(rosters.lineups(), bb_rules::RulesOptions::default());
@@ -254,6 +266,18 @@ impl Game {
             mus,
             mu_ix,
         }
+    }
+
+    /// The same game with every batting slot's matchup changed by `f` (labs and
+    /// counterfactuals: a template parameter, a knob).
+    pub fn map_matchups(mut self, f: impl Fn(&mut Matchup)) -> Game {
+        self.mus.iter_mut().for_each(f);
+        self
+    }
+
+    /// A batting slot's `BatSpeed`, m/s (`side` 0 away, 1 home; `slot` 0–8 in batting order).
+    pub fn bat_speed(&self, side: usize, slot: usize) -> f64 {
+        self.mus[self.mu_ix[side][slot]].batter.bat_speed
     }
 
     /// The same game with these fielders on both sides (labs; agent-models §10 grades).

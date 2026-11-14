@@ -175,8 +175,18 @@ pub struct BatBallParams {
     pub v_ref: f64,
     /// COR decrease per m/s of extra normal speed (sign [S], size [E]).
     pub s_e: f64,
-    /// Tangential restitution [S] KNS 2017 range.
-    pub e_t: f64,
+    /// Tangential restitution at and below `v_t_lab` normal speed (physics-spec §8.2.1) [S]:
+    /// KNS 2017's ⟨e_x⟩ for baseballs, from a ball at rest on a tee at 77 mph.
+    pub e_t_lab: f64,
+    /// Normal approach speed, m/s, up to which `e_t_lab` holds [E], anchored on KNS's 77 mph.
+    pub v_t_lab: f64,
+    /// Tangential restitution at and above `v_t_game` [S, derived]: Statcast's batted backspin
+    /// and sidespin (Nathan 2020 Figs. 2, 4) read through this model.
+    pub e_t_game: f64,
+    /// Normal approach speed, m/s, from which `e_t_game` holds [E], anchored on the game
+    /// contact that makes a 25–30° fly ball. Between the two anchors e_t is linear in |c_n|:
+    /// an assumption with no source.
+    pub v_t_game: f64,
     /// Ball–bat friction [S].
     pub mu: f64,
 }
@@ -193,7 +203,10 @@ impl Default for BatBallParams {
             e_ref: 0.442,
             v_ref: 70.0,
             s_e: 0.001,
-            e_t: 0.40,
+            e_t_lab: 0.405,
+            v_t_lab: 34.0,
+            e_t_game: 0.0,
+            v_t_game: 65.0,
             mu: 0.50,
         }
     }
@@ -213,6 +226,23 @@ impl BatBallParams {
             1.0 - (1.0 - self.f_taper) * s * s
         };
         f.max(self.f_handle)
+    }
+
+    /// Tangential restitution e_t(|c_n|) (physics-spec §8.2.1): `e_t_lab` up to `v_t_lab`,
+    /// linear in the normal approach speed to `e_t_game` at `v_t_game`, constant beyond.
+    pub fn e_t(&self, cn_abs: f64) -> f64 {
+        if cn_abs <= self.v_t_lab {
+            self.e_t_lab
+        } else if cn_abs >= self.v_t_game {
+            self.e_t_game
+        } else {
+            self.e_t_lab + (self.e_t_game - self.e_t_lab) * (cn_abs - self.v_t_lab) / (self.v_t_game - self.v_t_lab)
+        }
+    }
+
+    /// The same parameters with one e_t at every speed (counterfactuals and diagnostics).
+    pub fn with_constant_e_t(self, e_t: f64) -> Self {
+        Self { e_t_lab: e_t, e_t_game: e_t, ..self }
     }
 
     /// Normal COR e_n(u, c_n) = e_peak(c_n)·f(u).
