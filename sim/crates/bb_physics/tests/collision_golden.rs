@@ -257,6 +257,63 @@ fn a14_tangential_restitution_law_matches_oracle() {
     assert_eq!(regimes.len(), 3, "the fixture covers the lab value, the ramp and the game value");
 }
 
+/// A14 through the production entry point: each oracle contact state (`contacts` in
+/// `tangential_restitution.json`) is rebuilt as a `ContactPoint` and resolved by
+/// `resolve_contact`, which selects e_t from the contact point's own normal approach speed.
+/// e_n is held at the fixture's 0.45 (no location falloff, no speed slope), since the oracle
+/// is given e_n rather than computing it. Returns the worst ball-velocity and ball-spin
+/// errors, each relative to 1 + |oracle value|, and the number of contacts in the ramp.
+fn a14_contact_errors(params: &BatBallParams) -> (f64, f64, usize) {
+    let g = golden("tangential_restitution.json");
+    let prof = BatProfile::default_34in();
+    let mp = prof.mass_props();
+    let ball = BallParams::default();
+    let (mut ev, mut ew, mut ramp) = (0.0_f64, 0.0_f64, 0);
+    for c in g["contacts"].as_array().unwrap() {
+        let name = c["name"].as_str().unwrap();
+        let e_n = c["e_n"].as_f64().unwrap();
+        let held = BatBallParams { e_ref: e_n, s_e: 0.0, f_tip: 1.0, f_taper: 1.0, f_handle: 1.0, mu: c["mu"].as_f64().unwrap(), ..*params };
+        let bat = BatKinematics { knob: v3(&c["knob"]), axis: v3(&c["axis"]), v_cm: v3(&c["v_cm"]), omega: v3(&c["omega"]) };
+        let cp = ContactPoint {
+            t: 0.0,
+            u: c["u"].as_f64().unwrap(),
+            n: v3(&c["n"]),
+            ball: BallState { r: v3(&c["ball_r"]), v: v3(&c["ball_v"]), w: v3(&c["ball_w"]) },
+            bat,
+        };
+        let r = resolve_contact(&cp, &prof, &mp, &held, &ball);
+        let res = &c["result"];
+        assert_eq!(r.e_n, e_n, "{name}: e_n held");
+        assert_eq!(r.impulses as u64, res["impulses"].as_u64().unwrap(), "{name}: impulses");
+        assert!((r.bat_speed - res["bat_speed"].as_f64().unwrap()).abs() < 1e-9, "{name}: bat speed");
+        assert!((r.attack_angle - res["attack_angle"].as_f64().unwrap()).abs() < 1e-9, "{name}: attack angle");
+        let rel = |a: Vec3, b: &Value| (a - v3(b)).norm() / (1.0 + v3(b).norm());
+        ev = ev.max(rel(r.ball_after.v, &res["v"]));
+        ew = ew.max(rel(r.ball_after.w, &res["w"]));
+        let cn = res["cn_abs"].as_f64().unwrap();
+        if cn > 34.0 && cn < 65.0 {
+            ramp += 1;
+        }
+    }
+    (ev, ew, ramp)
+}
+
+#[test]
+fn a14_resolve_contact_matches_oracle() {
+    // Codex spin review P2-1: the law must be applied by `resolve_contact` itself, at the
+    // contact point's normal speed, not only by the standalone function.
+    let (ev, ew, ramp) = a14_contact_errors(&BatBallParams::default());
+    println!("A14 contacts: worst relative error, ball v {ev:.2e}, ball ω {ew:.2e}; {ramp} in the ramp");
+    assert!(ev < 1e-9 && ew < 1e-9, "resolve_contact against the oracle: v {ev:.2e}, ω {ew:.2e}");
+    assert!(ramp >= 3, "the fixture puts at least three contacts inside the ramp, rotating bats among them");
+    // Counterfactual: the same contacts resolved with a wrong ramp (34–60 m/s, which the
+    // review showed passes A10a–c) must fail. 1e-6 is a thousand times the tolerance above.
+    let wrong = BatBallParams { v_t_game: 60.0, ..BatBallParams::default() };
+    let (ev, ew, _) = a14_contact_errors(&wrong);
+    println!("A14 contacts, wrong 34-60 ramp: ball v {ev:.2e}, ball ω {ew:.2e}");
+    assert!(ev > 1e-6 || ew > 1e-6, "a 34–60 m/s ramp would pass A14's contact check");
+}
+
 #[test]
 fn a10a_kns_tee_spin() {
     // physics-spec §14.2 A10a: KNS 2017's tee. A level default bat swung about its knob at

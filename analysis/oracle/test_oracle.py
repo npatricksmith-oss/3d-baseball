@@ -264,6 +264,34 @@ class OracleTests(unittest.TestCase):
                     self.assertAlmostEqual(r['w'][0]/kns, 1.0, delta=1e-9)
         self.assertEqual(seen, {'below', 'ramp', 'above'})
 
+    def test_tangential_restitution_from_contact_state(self):
+        # Section 7 step 5 from a contact state: the five body-level collisions restated as a
+        # bat and a ball center give the same result, and every contact obeys both
+        # restitutions at the contact point it defines.
+        et = self.corpus['tangential_restitution']
+        bodies = {c['name']: c['result'] for c in et['collisions']}
+        bat = self.corpus['bat_default']
+        ramp = 0
+        for c in et['contacts']:
+            with self.subTest(name=c['name']):
+                r = c['result']
+                if c['name'] in bodies:
+                    for k in ('v', 'w', 'V', 'W'):
+                        self.assertVectorClose(r[k], bodies[c['name']][k], tolerance=1e-12)
+                self.assertAlmostEqual(p.norm(c['axis']), 1.0, delta=1e-15)
+                cm = p.add(c['knob'], p.scale(c['axis'], bat['u_cm']))
+                r1 = p.scale(c['n'], -p.RADIUS)
+                r2 = p.sub(p.sub(c['ball_r'], p.scale(c['n'], p.RADIUS)), cm)
+                old = p.sub(p.add(c['ball_v'], p.cross(c['ball_w'], r1)), p.add(c['v_cm'], p.cross(c['omega'], r2)))
+                new = p.sub(p.add(r['v'], p.cross(r['w'], r1)), p.add(r['V'], p.cross(r['W'], r2)))
+                cn = p.dot(old, c['n'])
+                self.assertEqual(r['impulses'], 1)
+                self.assertAlmostEqual(p.dot(new, c['n']), -c['e_n']*cn, delta=1e-10)
+                if 34.0 < -cn < 65.0:
+                    ramp += 1
+                    self.assertAlmostEqual(r['e_t'], 0.405*(65.0+cn)/31.0, delta=1e-15)
+        self.assertGreaterEqual(ramp, 3, 'at least three contacts inside the ramp')
+
     def test_bat_profile_and_quadrature(self):
         for station, diameter in [(0, 1.35), (.5, 1.35), (.75, 1.14),
                                    (1, .93), (11, .93), (22, 2.5), (34, 2.5)]:

@@ -467,7 +467,7 @@ An **independent Python reference implementation** (`analysis/oracle/`, written 
 | A10b | Game: average RHP four-seamer at the middle, on time, met under the ball to launch 25–30°, exit speed 90+ | Backspin 2,300 ± 600 rpm | [S, derived] Nathan 2020 Fig. 4 |
 | A10c | Same contacts swept over timing ±15 ms and 1.5–4.5 cm under | Sidespin −65 ± 30 rpm per degree of adjusted spray (+ = opposite field) | [S, derived] Nathan 2020 Fig. 2 |
 | A10d | Same sweep | Sidespin zero at −10 ± 5° of adjusted spray | [S] Nathan 2020 Fig. 2. **Report only** (the direction gap, §17 item 8) |
-| A14 | e_t(|c_n|) law | Oracle values at low speed, mid-ramp and game speed; collisions resolved with the law's e_t match the oracle | §8.2.1 |
+| A14 | e_t(|c_n|) law | Oracle values at low speed, mid-ramp and game speed; collisions resolved with the law's e_t match the oracle, both as bodies and through the production contact resolution from §7 contact states (a sloped, rotating bat on the barrel and on the taper among them, e_n held at the fixture value); a wrong ramp (34–60 m/s) applied at contact fails | §8.2.1 |
 | A11 | Energy guard | No collision increases total kinetic energy | Physical |
 | A12 | Bat mass properties of default profile | Match §6.2 values; inside validation bands | [D] |
 | A13 | Ball at rest on flat ground; rolling deceleration | Exactly μ_r·g; stops at the predicted distance | Analytic |

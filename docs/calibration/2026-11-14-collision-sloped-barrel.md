@@ -71,7 +71,7 @@ Everything below is on-time contact on a middle four-seamer from the average RHP
 
 | Check | Published | Code (e_t 0.40) | e_t 0 (counterfactual) |
 |---|---|---|---|
-| Tee: spin per ° of θ (KNS Fig. 3) | 179 rpm/° | **183** | about 131 (×1/1.4, by Eq. 8) |
+| Tee: spin per ° of θ (KNS Fig. 3) | 179 rpm/° | **183** | about 116 (measured: tee sweep ψ 5–30° at constant e_t 0, Codex spin review P3-1) |
 | Tee: spin vs KNS Eq. (8) | analytic | within 1% | within 1% (same formula) |
 | Backspin at 25–30° launch, middle (Nathan Fig. 4) | about 2,300 rpm | **4,249** (27°) | **2,293** |
 | Sidespin per ° of adjusted spray, LA 25–30°, EV 90+ (Fig. 2) | about −65 (−80 ± 30%) | −110 | **−73** |
@@ -226,12 +226,14 @@ It would not touch the slope (the sloped barrel's geometry, §4) or the spin (e_
 
 | | e_t 0.40 (before) | e_t(|c_n|) | e_t 0 | Published |
 |---|---|---|---|---|
-| Tee, rpm per ° of θ | 183 | 184 | (131) | 179 (KNS Fig. 3) |
+| Tee, rpm per ° of θ | 183 | 184 | (116) | 179 (KNS Fig. 3) |
 | Backspin, LA 25–30°, EV 90+ (A10b) | 4,205 | **2,465** | 2,364 | about 2,300 (Nathan Fig. 4) |
 | Sidespin per ° of adjusted spray (A10c) | −110 | **−80** | −73 | about −65 (Fig. 2) |
 | Sidespin zero (A10d, report only) | −1.9° | −1.0° | −1.8° | about −10° |
 | 3 cm under: LA, EV | 27.3°, 97.7 mph | 30.4°, 98.6 mph | | |
 | Landing spray − AD per ° of LA, on time | −1.17 | −1.21 | −1.21 | MLB −0.37 (all contact) |
+
+The e_t 0 tee slope (116) is measured: the Codex spin review's six-point tee sweep at ψ 5–30° gives 115.6 rpm/° (184.0 with the law). It replaces an earlier 131, which scaled 183 by Eq. (8)'s spin ratio at a fixed contact angle; that is wrong because e_t also moves the launch angle, the slope's other variable.
 
 **Games** (standard run, `cbb80c8` against `4254e73`, seeds 0–299 [1000–1299]; ledger §3): runs 4.82 → 5.76 [4.50 → 5.78]; HR/PA 1.04% → 2.36% [0.98% → 2.24%]; K% 15.6 → 16.8 [15.8 → 16.7]; BB% 7.3 → 7.7 [7.6 → 7.7]; LD hits .676 → .763; FB hits .172 → .221; fouls a game 17.8 → 21.1 [17.5 → 21.4].
 - **Why the fouls rose.** In the PA model (`foul_diag 10000`, R/R) foul share of contact goes 26.0% → 29.2%, nearly all opposite-side (18.5 → 21.3). An undercut ball keeps more of its tangential velocity up the face and launches about 3° higher, so more contact lands at 40–60°, where the sim's foul rate is highest. Longer counts follow: +10 pitches a game, K% +1.

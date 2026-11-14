@@ -141,7 +141,55 @@ def tangential_restitution_inputs():
             r1=p.scale(n, -p.RADIUS), inv_M2=1/bat['M'], inv_I2=inv2,
             V=(0.0, rate*bat['u_cm'], 0.0), W=(0.0, 0.0, rate),
             r2=p.add((u-bat['u_cm'], 0.0, 0.0), p.scale(n, rb)), n=n, e_n=.45, mu=.5))
-    return dict(law=law, collisions=cases)
+    return dict(law=law, collisions=cases, contacts=contact_inputs(cases, bat, u, rb))
+
+
+def contact_inputs(collisions, bat, u_kns, rb_kns):
+    """Section 7 contact states for `bat_ball_contact` (the production entry point's inputs).
+
+    The five collisions above, restated as a bat (knob at the origin, axis +X) and a ball
+    center on the normal; then two general contacts in the ramp: a bat sloped 28 degrees down,
+    translating and rotating about a tilted axis, met under the ball's center on the barrel and
+    on the taper (normal tilted by the profile slope, section 7 step 4), the ball spinning about
+    all three axes.
+    """
+    out = []
+    for c in collisions:
+        center = p.add((u_kns, 0.0, 0.0), p.scale(c['n'], rb_kns+p.RADIUS))
+        out.append(dict(name=c['name'], u=u_kns, ball_r=center, ball_v=c['v'], ball_w=c['w'],
+                        knob=p.ZERO, axis=(1.0, 0.0, 0.0), v_cm=c['V'], omega=c['W'],
+                        n=c['n'], e_n=c['e_n'], mu=c['mu']))
+    tilt = math.radians(28.0)
+    axis = p.unit((math.cos(tilt), 0.12, -math.sin(tilt)))
+    knob = (-0.55, 0.05, 0.95)
+    # The swing's rotation: about the normal to the bat and a path rising 9 degrees toward
+    # the pitcher, plus a roll about the bat's own axis.
+    path = p.unit((0.0, math.cos(math.radians(9.0)), math.sin(math.radians(9.0))))
+    w_hat = p.unit(p.cross(axis, path))
+    for name, u_in, psi_deg, rate, roll, v_cm, pitch, spin in [
+        ('tilted_bat_barrel_mid_ramp', 28.0, 30.0, 48.0, 6.0, (1.4, 17.5, 1.8),
+         (0.6, -36.5, -3.2), (-205.0, 30.0, 40.0)),
+        ('tilted_bat_taper_mid_ramp', 19.0, 18.0, 40.0, -4.0, (0.9, 13.0, 1.0),
+         (-0.8, -33.0, -4.5), (-150.0, -60.0, 120.0)),
+    ]:
+        u = u_in*p.INCH
+        rb = p.bat_radius(u)
+        x = (u_in-11.0)/11.0
+        slope = 0.5*1.57*1.6/11.0*x**0.6 if 11.0 < u_in < 22.0 else 0.0  # dR/du, section 6.1 profile
+        # Radial direction: the part of `path` normal to the axis, turned by psi toward the
+        # upper side of the bat (the ball met below its center, so n points up).
+        d1 = p.unit(p.sub(path, p.scale(axis, p.dot(path, axis))))
+        d2 = p.cross(d1, axis)
+        if d2[2] < 0:
+            d2 = p.scale(d2, -1.0)
+        psi = math.radians(psi_deg)
+        radial = p.add(p.scale(d1, math.cos(psi)), p.scale(d2, math.sin(psi)))
+        n = p.unit(p.sub(radial, p.scale(axis, slope)))
+        omega = p.add(p.scale(w_hat, rate), p.scale(axis, roll))
+        center = p.add(p.add(knob, p.scale(axis, u)), p.add(p.scale(radial, rb), p.scale(n, p.RADIUS)))
+        out.append(dict(name=name, u=u, ball_r=center, ball_v=pitch, ball_w=spin, knob=knob,
+                        axis=axis, v_cm=v_cm, omega=omega, n=n, e_n=.45, mu=.5))
+    return out
 
 
 def spin_inputs():
@@ -169,6 +217,8 @@ def build_corpus(progress=None):
     et = tangential_restitution_inputs()
     for c in et['collisions']:
         c['result'] = p.bat_ball_collision(**{k: v for k, v in c.items() if k != 'name'})
+    for c in et['contacts']:
+        c['result'] = p.bat_ball_contact(**{k: v for k, v in c.items() if k not in ('name', 'u')})
     return {'air_density': air_cases(), 'flight': flights, 'bat_default': p.bat_mass_properties(),
             'collision': collisions, 'spin_axis': spins, 'tangential_restitution': et}
 
