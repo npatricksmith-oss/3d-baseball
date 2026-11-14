@@ -1,0 +1,212 @@
+# Metrics ledger: what each task did to the game's numbers
+
+One row per piece of work, in order, with the game-level numbers before and after it, the stated cause, and anything left unexplained. Its job is to give leads later: when a number is off and nobody remembers why, find the row where it moved.
+
+This file is a record, not a target list. Bands and targets live in [calibration-targets.md](calibration-targets.md); the reasoning behind a calibration change lives in its note under [calibration/](calibration/). Each row here points at the commit and, where one exists, the note.
+
+## How to add a row (every task, from 2026-11-14)
+
+1. **Before you change sim code**, measure the build you are starting from with the standard run below, unless the last row here already has those numbers for that exact commit.
+2. **After the task (and after its review fixes)**, measure again with the same seeds.
+3. Add one row to the newest section of §3: date, task id, commit, what changed in one sentence, the numbers before → after, the cause as far as you know it, and what is open. Say "not explained" when it is not; an unexplained shift is the most useful thing this file can hold.
+4. If game digests are identical before and after, say so in one line under "No effect on games" and skip the measurement.
+5. If a number moved and nothing was meant to move it, or a fix exposed something an older bug was hiding, add it to §4.
+6. Update §1 (the current numbers) when the row changes them.
+7. Client-only, tooling and docs work gets no row.
+
+**Standard run** (about 300 games per seed set; the two sets differ by about 0.1–0.2 runs, so always quote both):
+
+```bash
+cd sim && cargo run --release -p bb_cli -- games --n 300 --seed 0
+cargo run --release -p bb_cli -- games --n 300 --seed 1000
+```
+
+`--seed 0` is seeds 0–299. `--seed 1000` is what the notes call "seeds 1000–1299"; the CLI multiplies the argument by 1,000,003, so its real game seeds start at 1,000,003,000 (the `dive_probe` example takes the first seed directly). Use the commands as written and the label as the notes use it.
+
+Record at least: runs/team-game, K%, BB%, HR/PA, reached on BIP, hit rate by type (GB, LD, FB, PU), PA/team-game, pitches/game. Add dives a game (`--example dive_probe`), hurried throws (`--example throw_probe`) or the foul share (`--example foul_in_games`) when the task touches them.
+
+Numbers are only comparable within one seed set and game count. The standard set has changed three times (§2); never read a difference across a change of set as an effect.
+
+## 1. Where the numbers stand
+
+After hurried throws (A3), main at `a69dd50`, 300 games, seeds 0–299 (MLB column approximate, from the calibration notes):
+
+| | now | MLB |
+|---|---|---|
+| runs / team-game | 5.54 (TASKS says 5.53 after the review fixes) | about 4.4–4.6 |
+| K% | 15.4 | 22 |
+| BB% | 6.9 | 8.5 |
+| HR / PA | 5.12% | 3% |
+| reached on BIP | 32.5% | |
+| GB hits | .352 | .24 |
+| LD hits | .724 | about .68 |
+| FB hits | .127 | .13 |
+| PU hits | .014 | about .02 |
+| foul share of contact | 23.7% (3,000 PAs, measured 2026-11-13, right-handed only) | 51% |
+| dives a game | 3.8 (seeds 1000–1299, after handedness) | 2–3 |
+| double plays a game | 2.0 (measured 2026-11-11, not since) | about 1.7 |
+
+Seeds 1000–1299 were last measured after handedness: 5.43 runs. A3 was measured on seeds 0–299 only.
+
+## 2. The run environment in one line per step
+
+Runs per team-game. A break in the table means the sample changed and the next number cannot be compared with the one above it.
+
+| Date | Step | Commit | Runs | Moved by |
+|---|---|---|---|---|
+| **128 games, seed not recorded** | | | | |
+| 10-31 | Causal live-ball simulator replaces the play skeleton | `8abbd00` | about 6.8 | first number |
+| 10-31 | Standing-first intercept planning | `fcae2bb` | 5.6 | grounder hit rate 67% → 58% |
+| 10-31 | Runners read from their own observations | `0c2585d` | 5.08 | **a bug**: trailing runners ran into outs |
+| 10-31 | Runners retouch, wait, retreat | `3fd7757` | 5.64 | the bug above fixed |
+| 10-31 | Aim solve in two stages | `b791120` | 5.68 | solver lands on slightly different points |
+| 10-31 | Batter filter with direct derivatives | `a767b50` | 5.63 | borderline decisions flip |
+| **512 games, seed 2** | | | | |
+| 10-31 | 0.1 s agent flight step | `08cc1b9` | 5.82 | (5.81 against 5.82, no effect) |
+| 10-31 | Catch at closest approach; throws timed for the receiver | `1b64f9b` | 4.91 | 6% of routine catches had failed at the glove's edge |
+| 11-11 | Before the planner fixes (as quoted in the planner note; the handoff the day before said 4.91) | | 4.98 | not attributed |
+| 11-11 | Three fielding planner bugs | `82dbdf7` | 3.87 | grounders through the infield 1,108 → 681 |
+| 11-11 | Left field gets outfield values; refit | `2c1d4ef` | 4.29 | the fit above had used two of three outfielders |
+| 11-11 | Runner leads, halfway rule, 4.45 s to first (scoring rose to 5.7), then `K_perception` 2.7 and Discipline 0.5/+0.9 | `31d57bb` | 4.48 | leads raised scoring; two knobs brought it back |
+| 11-11 | Watch-fixes review | `37dbe2a` | 4.32 | not explained |
+| 11-12 | Throws with drag and backspin | `dbaae0a` | 4.99 | long throws take a few tenths longer |
+| 11-12 | Cutoff and relay men | `8c430e9` | 5.05 | not explained (should help the defense) |
+| 11-12 | Throws/relays review fixes | `1a0eaef` | 5.14 | solver edge fix made some long throws possible |
+| **1,024 games, seed 5** (seed 2 alongside) | | | | |
+| 11-12 | Fielder momentum and its review | `74679a6` | 5.34 (seed 2: 5.22) | no per-change attribution |
+| 11-12 | Anticipation, first version (reads the ball's true direction) | `cdd473c` | 5.18 | fielders got a jump from information they should not have |
+| 11-13 | Anticipation reads the bat instead | `ab32316` | 5.27 | the honest cue is worth half as much |
+| 11-13 | Idle fielders stop | `077aab5` | 5.48 | **exposed a hidden bug**: pop-ups drop (PU .005 → .044) |
+| 11-13 | Pitcher backs up third | `0fd51d5` | 5.49 | nothing |
+| 11-13 | Bat-read error derived; swing-lead cue | `4b5e324`, `f16cd37` | 5.55 | the jump is now worth 0.05 runs or less |
+| 11-13 | Sure calls on balls in the air | `bdd7f03` | 5.47 | PU .047 → .018 |
+| 11-13 | Called-off infielder backs up | `7ad2c77` | 5.44 | PU .018 → .008 |
+| 11-13 | Plate cue; outfield read 3.0 → 3.5 m | `c0c2b3f` | 5.36 | fly-ball reads sharper, then refit |
+| 11-13 | Overrun of first; no swing before the decision | `a36034c`, `5c82bda` | 5.39 | within noise (about ±0.07) |
+| **300 games, seeds 0–299** (seeds 1000–1299 in brackets) | | | | |
+| 11-13 | No second dive from the ground | `7a3c5b0` | 5.48 [5.71] | 3 × 200 games: 5.48 → 5.85; the double dive had been turning hits into outs |
+| 11-13 | Dive rate (A5): the stretch | `56dd244`, `65efea2` | 4.73 [4.89] | near misses become pick-ups; **unvalidated length** |
+| 11-13 | Handedness (A1) | `cb3d243` | 5.35 [5.43] | half of PAs now opposite-handed; K% −2.6, HR/PA +1.1 points |
+| 11-13 | Hurried throws (A3) | `c493b81`, `a69dd50` | 5.54 | footwork +0.37, hurrying and the turn −0.18 |
+
+The "5.48" at the top of the last block is a coincidence of two samples: the dive-fix review's 3 × 200-game endpoint was 5.4783 and the 300-game seeds 0–299 figure before A5 was also 5.48. Nobody reconciled them.
+
+## 3. The rows
+
+Hit rates are per ball in play of that type. "Seed 5" and "seed 2" mean `sim-cli games --seed` with 1,024 games unless a row says otherwise.
+
+### 2026-11-13 (owner backlog A-items; 300 games, seeds 0–299 and 1000–1299)
+
+| Task | Commit | What changed | Numbers (before → after) | Cause | Open |
+|---|---|---|---|---|---|
+| **A3 hurried throws** | `c493b81`, `a69dd50`; [note](calibration/2026-11-13-throwing.md) | Set-up = transfer + turn + footwork; a fielder can let go early, slower and wilder; throwing ratings as grades | Seeds 0–299: runs 5.35 → 5.54; K% 15.3 → 15.4; BB% 7.0 → 6.9; HR/PA 5.21% → 5.12%; reached on BIP 32.0% → 32.5%; GB .346 → .352; LD .718 → .724; FB .124 → .127; PU .010 → .014. About 2.5 hurried throws a game. Counterfactuals: no footwork 5.17, no turn 5.59, never hurrying 5.57, all off 5.35 (digests match the old build). Grade-80 arms .606 outs per ball in play, grade 20 .548 | Footwork owed moving away (0.2 s) or after a dive (0.3 s) costs 0.37 runs; hurrying and the turn give back 0.18 | The outfield's 0.85 s transfer may already contain some of that footwork (double count). Eleven new [E] parameters with no source. Not measured on seeds 1000–1299 |
+| **A1 handedness** | `cb3d243`, `a4c8219`; [note](calibration/2026-11-13-handedness.md) | Players have throwing and batting hands; each batter stands on his own side; fielders release 0.35 m to the arm side. Every digest changed | Seeds 0–299 [1000–1299]: runs 4.73 → 5.35 [4.89 → 5.43]; K% 17.8 → 15.3 [17.8 → 15.1]; BB% 7.2 → 7.0 [7.7 → 7.4]; HR/PA 4.09% → 5.21% [4.22% → 5.26%]; GB share 53.0% → 50.9%; GB .333 → .346; FB .162 → .124 [.138 → .133]; reached on BIP 33.9% → 32.0%; dives 3.1 → 3.8 a game (SS 0.98, 2B 0.90) | 49.8% of PAs are opposite-handed (were none); those batters strike out less and hit more in the air. Cause of the gap: the pitches' sideways movement meeting a batter who sees and swings from one side (Codex's interventions; not one parameter) | Platoon K gap 5.4 points (19.8% same, 14.4% opposite), about twice MLB's (unsourced). Interim PA knobs were fitted right-on-right; recalibration held until A3, A4, A17 land. Spray beliefs fitted on right-handers and mirrored |
+| **A5 dive rate** | `56dd244`, `65efea2`; [note](calibration/2026-11-13-dive-rate.md) | A dive must gain something by the fielder's own read; it needs its lunge time; a ball up to 0.4 m past reach is taken standing (0.3 s cost); an outfielder with nobody behind dives only at an even chance | Dives a game 22.1 → 3.3–3.7, caught 61% → 41–45%. Seeds 0–299 [1000–1299]: runs 5.48 → 4.73 [5.71 → 4.89]; GB .425 → .333; FB .131 → .162 on one set only; reached on BIP 39.4% → 33.7%; PA/team-game 40.2 → 37.9. Stretch sweep (seeds 0–299): none 5.60 runs / 7.5 dives; 0.2 m 5.29 / 5.3; 0.4 m 4.73 / 3.7; 0.6 m 4.41 / 2.3 | The stretch: a near miss that was a dive and a 1.5 s get-up is now a pick-up and a throw. Of the 0.87 runs, about 0.4 is the quicker recovery, the rest reach | **Stretch length is unmeasured and moves runs 0.2 per 0.1 m.** Treat the drop as unconfirmed. Shortstop still dives about 2.5× the real rate. FB rise on one seed set not explained |
+| No second dive from the ground; two-out throw choice | `7a3c5b0`, `f4d3167`; [review](reviews/2026-11-13-codex-dive-and-two-out-throw-review.md) | A fielder down from a dive can only grab a low ball within arm's reach; with two out the holder takes the sure force | 3 × 200 games: runs 5.4783 → 5.8492; GB .413 → .436. 200 games, default seed: runs 5.16 → 5.78 (dive fix alone 5.71); FB .116 → .129. About 23 dives a game, 60% caught | The second dive had been converting hits into outs; 97% of the rise is the dive fix (Codex) | The two-out throw choice was never measured alone |
+
+### 2026-11-13 (items 1–3: pop-ups, fouls, overrun; seed 5 and seed 2, 1,024 games)
+
+| Task | Commit | What changed | Numbers (before → after) | Cause | Open |
+|---|---|---|---|---|---|
+| Overrun of first; runner position samples; swing start | `a36034c`, `5c82bda`; [note](calibration/2026-11-13-overrun-and-samples.md) | Batter-runner runs through first, brakes (4 m/s², 8.4 m) and walks back; a swing cannot start before the decision | Seed 5: runs 5.36 → 5.39; HR/PA 4.08% → 4.13%; GB .413 → .414; FB .128 → .129. Seed 2: 5.21 → 5.23. Swings starting early: 13 of 8,199 → 0. 512 games: 8,421 of 19,826 batter-runners ran through | Within run-to-run noise (about ±0.07) | Braking rate and walk speed are first guesses. A play that leaves the batter on first now runs about 6 s longer |
+| Foul work (measures, sources, correction experiment) | `77aba6e`, `818a0a9`, `7735bca`, `87a4fb0`; [note](calibration/2026-11-13-foul-measures.md) | **No sim change.** Diagnostics; correction limits named (digests identical) | Foul share of contact 23.7% (3,000 PAs; 22.9% in full games). Bat at −30°: 23.7 → 27.5%. Correction with no limits: 23.7 → 26.1%, K% 19.8 → 8.4, contact 64.7 → 81.1%. At well-timed contact: foul 20.4% (MLB about 40), whiff 15.9% (MLB about 11). Below 25° launch: 3–11% foul (MLB 22–57%) | Extra correction saves swings as fair contact, not fouls. Fooled early means aimed high (r = −0.78) | **The foul gap (24% against 51%) is in the contact itself.** Sim swing 9.5 ft long against 7.2; plane 24° against 32°; contact rate 64.7% in this run against 76%. Spray experiment parked |
+| Plate cue; outfield read refit | `c0c2b3f`, `bcd7305`; [note](calibration/2026-11-13-plate-cue.md) | A fielder knows the ball started at the plate and weighs that against what he sees | Seed 5 / seed 2: runs 5.44 → 5.36 / 5.26 → 5.21; LD .724 → .718 / .715 → .710; FB .120 → .128 / .119 → .131; PU .008 / .009. Game time +6%. With the old σ₀ (3.0): runs 5.26, FB .090. σ₀ sweep: 4.0 → FB .160, 5.0 → .239, 6.0 → .338 | First-look depth error for a ball 15 m from home fell from about 26 m to about 7 m. **Knob:** outfield read σ₀ 3.0 → 3.5 m at 30 m | **Triples: about 7% of line drives and 2% of grounders, before and after** (MLB well under 1% of balls in play). Fly-ball hits are steeply sensitive to σ₀ |
+| Called-off infielder backs up | `7ad2c77`, `5da8633`; [note](calibration/2026-11-13-peel-off-backup.md) | He goes to 5 m short of his own read's landing point | Seed 5 / seed 2: runs 5.47 → 5.44 / 5.27 → 5.26; PU .018 → .008 both. Uncaught pop-ups in 128 games 12 → 7 | He used to stand 20 m away | PU hits now below MLB (.008 against about .02) |
+| Sure calls on balls in the air | `bdd7f03`; [note](calibration/2026-11-13-popup-read-and-calls.md) | A fielder calls only when his spare time covers one σ of his own depth error | Seed 5: runs 5.55 → 5.47; FB .134 → .122; PU .047 → .018. Uncaught pop-ups in 128 games 28 → 12. `CALL_SURE_SIGMAS` 2.0 → PU .007, 3.0 → .004 (kept 1.0) | The called outfielder misjudged depth on pop-ups 55–65 m out and kept the call | Second base uncovered when both middle infielders go (17 times in 1,024 games); deferred by the owner |
+| Swing-lead cue | `f16cd37`; [note](calibration/2026-11-13-anticipation-cue.md) | A second honest read of the bat's face; implausible reads discarded | Seed 5, 1,024 games: grade 50 5.52 → 5.55; PU .042 → .047. 4,096 games: no jump 5.55; grades 20 / 50 / 80 / 160: 5.56 / 5.58 / 5.51 / 5.49 | Batters' timing varies 4–8 ms; a fielder's eye is 20–80 ms | **No honest cue makes Anticipation rank.** Waits on batters being fooled by off-speed pitches |
+| Bat-read error derived from vision | `4b5e324`; [note](calibration/2026-11-13-bat-read-derivation.md) | σ = bat yaw rate (1,915°/s) × the fielder's timing error (40 ms at grade 50) | Swing σ grade 50: 15° → 77°; grade 80: 7.7° → 39°; grade 20: 29° → 150°. Game table is in the note (not legible in the session record) | A fielder cannot see the bat's angle at contact well enough for it to matter | The jump is worth 0.05 runs or less |
+| Pitcher backs up third | `0fd51d5` | A job on bases-empty outfield balls | Seed 5: runs 5.48 → 5.49; everything else unchanged to the third digit | — | — |
+| Every path into Idle brakes | `bdb887f` | One helper for all transitions | Seed 5: FB .131 → .132; K% 17.6 → 17.7; runs unchanged | — | — |
+| **Idle fielders stop** (pitcher in the outfield, Part A) | `077aab5`; [note](calibration/2026-11-13-idle-fielder-target.md) | An Idle fielder pulls up instead of chasing his own intercept | Seed 5: runs 5.27 → 5.48; PA/team-game 39.7 → 40.1; reached on BIP 41.5% → 42.3%; FB .122 → .131; **PU .005 → .044**. Pitcher far out on 13.7% → 0.3% of balls in play | Idle infielders had been catching, by accident, pop-ups the called outfielder misjudged | Led to the three pop-up rows above |
+| Anticipation reads the bat, not the ball | `ab32316`; [note](calibration/2026-11-12-anticipation-review-fixes.md) | The cue is a noisy read of the bat's angle, not the true outgoing direction | Seed 5: grade 50 5.18 → 5.27; grade 80 5.02 → 5.16; grade 20 5.28 → 5.30; no jump 5.34. GB .401 → .409 | The first version read the world's truth. Against no jump, grade 50 saves 0.07 runs (was 0.16) | — |
+
+### 2026-11-12 (512 games, seed 2, then 1,024 games)
+
+| Task | Commit | What changed | Numbers (before → after) | Cause | Open |
+|---|---|---|---|---|---|
+| Anticipation, first version | `cdd473c` | Fielders start toward where they read the ball going | 2,048 games, seed 5: no jump 5.35; grades 20 / 50 / 80: 5.31 / 5.22 / 5.03; GB .408 → .399 at grade 50 | Superseded: it read the true direction | — |
+| Fielder momentum and review | `21a4535`, `74679a6`; [note](calibration/2026-11-12-fielder-momentum.md) | Velocity is a vector; braking 6 m/s², turning 7 m/s². Six planner bugs it exposed were fixed | 512 games, seed 2: GB .385 → .400; LD .716 → .727; FB .141 → .110; PU .017 → .005. 1,024 games after review: seed 2 5.22, seed 5 5.34. **Knobs:** velocity read fraction 0.06 → 0.04 (GB .441 → .394); outfield read σ₀ 2.5 → 3.0 m (FB .081 → .110) | Instant turns at full speed had hidden the planner bugs. With perfect reads the turn limit alone moves grounders: GB .448 at 7 m/s², .374 at 50 | GB hits .40–.41 against MLB .24. A reverted trial where chasers paced themselves to arrive just in time cost 0.9 runs |
+| Throws/relays review fixes | `1a0eaef` | Receivers read throws; solver edge fixed | Runs 5.05 → 5.03 → 5.02 → 5.14 (the last step is the solver fix) | Some strong-armed long throws had been called impossible | — |
+| Cutoff and relay men | `8c430e9` | An infielder lines up between ball and base | Runs 4.99 → 5.05; PU .016 → .029 → .019 after a pop-up fix. Seed 5: 4.91 without relays, 5.03–5.06 with | Traced to moving an infielder to the cutoff spot, not to routing throws through him | **Relays cost the defense 0.06–0.15 runs and should help.** Never explained |
+| Throws with drag and backspin | `dbaae0a` | Real trajectories at full arm strength replace vacuum throws at 0.92 × arm | Runs 4.32 → 4.99; HR/PA 3.93% → 4.23%; GB .374 → .380; LD .707 → .714; FB .132 → .136; K% 17.5 → 17.3 | Long throws take a few tenths longer; the 0.92 factor had hidden it | HR/PA rose with a throwing change: not explained |
+
+### 2026-11-11 (512 games, seed 2)
+
+| Task | Commit | What changed | Numbers (before → after) | Cause | Open |
+|---|---|---|---|---|---|
+| Motions review fixes | `1f7ca4c` | Backups wait for a catchable throw; batter runs out of the box in the live sim | Runs 4.32 → 4.32; all hit rates unchanged | — | — |
+| Watch-fixes review | `37dbe2a` | Catcher returns home; backups catch overthrows; runners hold leads | Runs 4.48 → 4.32; HR/PA 4.02% → 3.93%; GB .377 → .374 | Not explained | — |
+| Relay exchange | `bbb2002` | 0.7 × transfer time, was a flat 0.25 s | Triple plays 5 → 1 per 40 games | Relays were too quick | — |
+| **Runner leads, halfway rule, time to first; calibration pair** | `31d57bb`; [note](calibration/2026-11-11-owner-watch-notes.md) | Leads of 5.5 / 6.5 / 4.5 m; runners go halfway on flies; 4.63 → 4.45 s to first | Double plays 3.6 → 2.0 a game; runs to 5.7, then 4.48 after the knobs; K% 12.0 → 17.4; BB% 9.4 → 7.4; GB share 56% → 53%; GB .311 → .377. In `pa`: K% 14.1 → 24.2 (perception alone) → 19.8 (with Discipline); swing rate 36% → 48% | **Knobs:** `K_perception` 2.25 → 2.7; Discipline grade-50 c 1.0 → 0.5, b 0.0 → +0.9; runner time constant 1.0 → 0.85 s; batter start delay 0.30 → 0.25 s | GB hits .377 recorded, not chased. These two knobs are the ones handedness has since made stale |
+| Left field gets outfield values; refit | `2c1d4ef`; [review](reviews/2026-11-11-codex-fielding-review.md) | A position-index bug: left field had infielder values | Runs 3.87 → 4.29; GB .287 → .311; LD .691 → .702; routine grounders converted 94.2% → 92.3%. **Knobs:** outfield reaction 0.40 → 0.35 s; chase speed 8.0 → 8.2 m/s; read error 3.0 → 2.5 m | The fit before it used two of three outfielders | — |
+| Three planner bugs | `82dbdf7`; [note](calibration/2026-11-11-fielding-planner.md) | Replans keep speed; the intercept scan tests between samples; chasers arrive at speed | Runs 4.98 → 3.87 (3.42 before the outfield refit, FB .065); routine grounders converted 88.6% → 94.2%; through the infield 1,108 → 681 in 128 games. **Knobs:** outfield reaction 0.25 → 0.40 s; chase speed 8.4 → 8.0; read error 1.5 → 3.0 m | Outfielder values had been set while the planner was costing them time | — |
+| Foul share diagnosis | `42f4571`; [note](calibration/2026-11-11-foul-share-diagnosis.md) | No change | Foul/contact 21.2%; timing noise 6 → 24 ms raises it to 30.2% and drops contact 75.2 → 62.4% | Timing error mostly makes whiffs | Ceiling about 30% from noise alone |
+| Chase rate diagnosis (O1) | `f3749b2`; [note](calibration/2026-11-11-chase-diagnosis.md) | No change (overconfidence trial reverted) | `pa`, 3,000 PAs: K% 14.1, BB% 10.1, P/PA 3.1, contact 75.2%, O-Swing 10.9% | A batter who trusts his eyes fully still chases only 18% | Chase far below MLB's 29% |
+| Day-review fixes | `c31b227` | Retouch settled once; hit labels from ordered facts | 5.08 → 5.64 quoted for the runner-bug chain (128 games) | See §4 | — |
+
+### 2026-10-31 (first day; samples small and seeds mostly unrecorded)
+
+Runs per game were not printed until late in the day; the early rows have PA per team-game and reached-on-BIP instead. Hashes are matched from commit subjects.
+
+| Task | Commit | What changed | Numbers (before → after) | Cause / open |
+|---|---|---|---|---|
+| Catch at closest approach; throws timed for the receiver | `1b64f9b` | | 512 games, seed 2: runs 5.82 → 4.91; GB .357 → .331; LD .622 → .615; FB .137 → .126; PU .026 → .018 | About 6% of routine catches failed at the glove's edge; throws sailed into the outfield. Routine grounders 88.7% (target 96%) |
+| Speed work | `b791120`, `a767b50`, `08cc1b9` | Coarser solves and agent flight step (0.02 → 0.04 → 0.1 s) | 128 games: runs 5.64 → 5.68 → 5.63; 512 games 5.82 against 5.81 | Tiny numerical differences flip borderline decisions. Not bit-identical, by design |
+| Runner fixes after the live review | `3fd7757` | Retouch, wait for the runner ahead, retreat | 128 games: runs 5.08 → 5.64; two-runners-on-base warnings 86 → 0; reached on BIP 42.3% → 46.2% | The 5.08 was a bug (§4) |
+| Runners read from observations | `0c2585d` | | 128 games: runs about 5.6 → 5.08; K% 12.6; BB% 10.0; HR/PA 3.92% | See above |
+| Standing-first intercepts | `fcae2bb` | Dive only when no standing play exists; swing aim offset −0.013 m; glove factors | Reached on BIP 52.9% → 48.5%; grounder hits 67% → 58%; runs 5.6 | — |
+| Live fielding iterations (uncommitted steps inside `8abbd00`..`fcae2bb`) | | Replan 0.25 → 0.4 s; loose-ball recall; receiver reach 1.3 → 1.5 m; outfield assign bias −0.15 | Reached on BIP wandered 51.9% → 59.2% → 55.2% → 55.6% | Each step moved reached-on-BIP by several points; none was attributed |
+| Causal live-ball simulator | `8abbd00` | 60 Hz ticks; fielders predict from noisy observations | 64 games: PA/team-game 42.7 → 44.1; reached on BIP 46.0% → 51.9%; runs about 6.8 | — |
+| Play skeleton: dive gate, first step | `cfb75fc`, `f4f52d2` | Dive only when the ball will not come within standing reach in 0.3 s; infielders' ready position | PA/team-game 63.4 → 45.7 → 42.5; reached on BIP 63.6% → 49.5% → 45.2% | The dive gate was the largest single early move |
+| Ground bounces and rolling | `582ff4b` | Rolling resistance: dirt 0.09 → 0.22, grass 0.12 → 0.28 | PA/team-game 52.7 → 57.7; reached on BIP 58.2% → 63.2% | Spec values let a 25 m/s grounder roll 250 m. **Deviates from physics-spec §9.1** |
+| M3 plate appearances | `a8e90ec` … `ef6b123`; [note](calibration/2026-10-31-m3-interim.md) | Batter hypothesis bank, perception, knob grid | First run: K% 14.0, BB% 17.6, foul/contact 11.6%. Interim point (3,000 PAs, seed 2): K% 14.5, BB% 10.2, P/PA 3.1, contact 79.5%, foul/contact 22.7%. After the M3 review: K% 13.2, foul/contact 18.3%. **Knobs** `calibrated_m3`: perception 2.5 → 2.25, swing 1.5 → 1.0, command 0.8 | O-Swing about 10% against 29%, foul share and P/PA out of band from the first day |
+| Velocity anchoring | `5bd80c7` | Expected speed anchors 20% toward the last perceived speed | Sensitivity base contact 79.55% → 73.84% | The base shift was not explained |
+
+### No effect on games (measured)
+
+| Date | Task | Commit | Check |
+|---|---|---|---|
+| 11-13 | Rosters (A2): names, numbers, order | `5ab0b51`..`050bd15` | Digests identical, seeds 1, 2, 3, 42 |
+| 11-13 | Rules: overrun, two on a base, passing | `25a56c1` | 512 games, seed 2: digests identical; zero passing outs |
+| 11-13 | Rules-passing review, five fixes | `8a46f67`..`0f3c0c6` | Only change: 10 of 512 games count one more runner left on base |
+| 11-13 | Coord-review P3s | `29d4b67`, `92cfee6` | 1,024 games, seed 5: unchanged at printed precision |
+| 11-13 | Correction limits named | `7735bca`, `87a4fb0` | Digests identical |
+| 11-12 | Umpire calls | `0d81821` | Observation only; 1,079 calls over 20 seeds matched |
+| 11-12 | Runner who crossed home before a catch goes back | `1c723ae` | 2,000 games: 79 such runners on inning-ending catches, 2 with the inning alive. No run totals compared |
+| 10-31 | Steppable `Game` | `724469e` | Digests identical, seeds 1, 2, 3, 42 |
+
+## 4. Hidden factors found so far
+
+Cases where one thing masked another. These are the pattern to look for when a number is off.
+
+1. **A bug that lowered scoring looked like progress.** Runs fell 5.6 → 5.08 when runners began reading from observations; the drop was trailing runners running into outs at held bases. Fixing it restored 5.64 (`0c2585d` → `3fd7757`).
+2. **A fit made on top of a bug.** Outfielder values were set while three planner bugs cost fielders time (`82dbdf7`), then refitted when left field turned out to be using infielder values (`2c1d4ef`). Three sets of values in one day.
+3. **A fudge factor hid a physical cost.** Vacuum throws at 0.92 × arm hid that real long throws take a few tenths longer: +0.67 runs when replaced (`dbaae0a`).
+4. **Instant turning hid six planner bugs** (`21a4535`). The turn limit by itself is worth .07 of ground-ball hit rate.
+5. **A fielder read the world's truth.** The first Anticipation cue used the ball's true direction; the honest cue is worth half, and derived from vision almost nothing (`cdd473c` → `ab32316` → `4b5e324`).
+6. **Idle fielders were catching pop-ups by accident.** Stopping them raised PU hits from .005 to .044 and exposed the outfielders' depth misread (`077aab5`).
+7. **A second dive from the ground was turning hits into outs.** Removing it: +0.37 runs (`7a3c5b0`).
+8. **Calibration knobs fitted on a population that no longer exists.** `K_perception` 2.7 and Discipline 0.5/+0.9 were set with every PA right-on-right and 22 dives a game; both conditions have changed since.
+
+## 5. Open leads
+
+Unexplained or unvalidated, most consequential first.
+
+- **Runs are about 1 above MLB and no knob has been touched since 2026-11-11.** Recalibration is held until A4 and A17 land. Inputs that moved since the fit: handedness (+0.6), the stretch (−0.75), no double dive (+0.37), footwork (+0.37).
+- **The stretch (0.4 m)** is an unmeasured length worth 0.2 runs per 0.1 m.
+- **Ground-ball hits .35 against .24**, the oldest gap in the file (.58 on the first day). Every fielding fix has moved it; none has closed it.
+- **Foul share 24% against 51%**, structural, in the contact geometry. Low-angle contact stays fair far too often.
+- **K% 15 against 22, HR/PA 5.1% against 3%**: both moved the wrong way with handedness.
+- **Platoon gap twice the real size.**
+- **Triples: 7% of line drives.**
+- **Relay men cost the defense runs** (0.06–0.15). Never explained.
+- **Outfield transfer 0.85 s** may double-count the footwork A3 added.
+- **Anticipation does not rank fielders**; needs batters fooled by off-speed pitches.
+- **Chase rate about 11–24% against 29%**; contact rate has drifted (79.5% → 75.2% → 64.7% across three `pa` measurements under different knobs); nobody tracks it per task.
+- **Rolling resistance** deviates from the physics spec (0.22/0.28 against 0.09/0.12).
+- **HR/PA rose 0.3 points with the drag-throws change** and reached-on-BIP wandered several points per fielding tweak on the first day: unattributed.
+- **Double plays** were last counted on 2026-11-11.
+
+## 6. Where this came from
+
+Rows up to A3 were rebuilt on 2026-11-14 from the 53 session transcripts on disk, then checked against the commit log, TASKS.md, and the calibration notes and reviews. Where a note exists it is the authority; numbers found only in a session are in the 2026-10-31 section and the "uncommitted steps" row, and have no way to be re-derived except by checking out the commit and running it. Seed sets and game counts are as the sessions recorded them; "seed not recorded" means exactly that.

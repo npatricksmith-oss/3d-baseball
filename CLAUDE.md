@@ -33,7 +33,7 @@ A 3D baseball management game where **every outcome comes from players' physical
 
 ```text
 PLAN.md, TASKS.md, CLAUDE.md
-docs/                  specs (physics, agents, data formats, calibration, rules) and reviews/
+docs/                  specs (physics, agents, data formats, calibration, rules) and reviews/; metrics-ledger.md (what each task did to the game's numbers)
 analysis/oracle/       independent Python physics oracle (stdlib only) + golden JSON fixtures
 analysis/plots/        uv-run plotting scripts (PEP 723 headers)
 sim/                   Cargo workspace
@@ -97,6 +97,7 @@ Game logic in C++; Blueprints only for thin visual wiring. Script asset setup wi
 ## Workflow
 
 - Update [TASKS.md](TASKS.md) at the end of every work session.
+- **Metrics ledger (owner, 2026-11-14):** every task that changes sim code adds a row to [docs/metrics-ledger.md](docs/metrics-ledger.md): the standard run (`sim-cli games --n 300 --seed 0` and `--seed 1000`) on the commit before and the commit after, the cause of any movement, and what is unexplained. Identical digests get one line under "No effect on games". An unintended or unexplained shift also goes in its §4 or §5. Client-only, tooling and docs work gets no row.
 - Commit in small, described steps. The remote is `origin` on GitHub; ask the owner before pushing, and never force-push or push to `main` without their OK.
 - Record owner-relevant choices you make in the relevant spec or PLAN §1 (as "Proposed" if the owner has not ruled).
 - **Standard review protocol (owner, 2026-10-31):** every substantive change set (a milestone step, a risky subsystem, or the end of a work session with code changes) gets an independent review by Codex Sol before it is considered done. Run it in the background and do not poll:
