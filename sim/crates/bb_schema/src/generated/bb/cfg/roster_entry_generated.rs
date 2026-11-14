@@ -27,6 +27,10 @@ impl<'a> RosterEntry<'a> {
   pub const VT_THROWS: ::flatbuffers::VOffsetT = 16;
   pub const VT_HEIGHT_M: ::flatbuffers::VOffsetT = 18;
   pub const VT_BAT_MODEL_ID: ::flatbuffers::VOffsetT = 20;
+  pub const VT_UNIFORM_NUMBER: ::flatbuffers::VOffsetT = 22;
+  pub const VT_FIELD_AGENT_ID: ::flatbuffers::VOffsetT = 24;
+  pub const VT_FAMILY_NAME: ::flatbuffers::VOffsetT = 26;
+  pub const VT_NAME_ORIGIN: ::flatbuffers::VOffsetT = 28;
 
   #[inline]
   pub unsafe fn init_from_table(table: ::flatbuffers::Table<'a>) -> Self {
@@ -38,11 +42,15 @@ impl<'a> RosterEntry<'a> {
     args: &'args RosterEntryArgs<'args>
   ) -> ::flatbuffers::WIPOffset<RosterEntry<'bldr>> {
     let mut builder = RosterEntryBuilder::new(_fbb);
+    if let Some(x) = args.family_name { builder.add_family_name(x); }
     builder.add_height_m(args.height_m);
     if let Some(x) = args.name { builder.add_name(x); }
     builder.add_player_id(args.player_id);
+    builder.add_field_agent_id(args.field_agent_id);
     builder.add_bat_model_id(args.bat_model_id);
     builder.add_agent_id(args.agent_id);
+    builder.add_name_origin(args.name_origin);
+    builder.add_uniform_number(args.uniform_number);
     builder.add_throws(args.throws);
     builder.add_bats(args.bats);
     builder.add_batting_order(args.batting_order);
@@ -114,6 +122,34 @@ impl<'a> RosterEntry<'a> {
     // which contains a valid value in this slot
     unsafe { self._tab.get::<u16>(RosterEntry::VT_BAT_MODEL_ID, Some(0)).unwrap()}
   }
+  #[inline]
+  pub fn uniform_number(&self) -> u8 {
+    // Safety:
+    // Created from valid Table for this object
+    // which contains a valid value in this slot
+    unsafe { self._tab.get::<u8>(RosterEntry::VT_UNIFORM_NUMBER, Some(0)).unwrap()}
+  }
+  #[inline]
+  pub fn field_agent_id(&self) -> u16 {
+    // Safety:
+    // Created from valid Table for this object
+    // which contains a valid value in this slot
+    unsafe { self._tab.get::<u16>(RosterEntry::VT_FIELD_AGENT_ID, Some(0)).unwrap()}
+  }
+  #[inline]
+  pub fn family_name(&self) -> Option<&'a str> {
+    // Safety:
+    // Created from valid Table for this object
+    // which contains a valid value in this slot
+    unsafe { self._tab.get::<::flatbuffers::ForwardsUOffset<&str>>(RosterEntry::VT_FAMILY_NAME, None)}
+  }
+  #[inline]
+  pub fn name_origin(&self) -> u8 {
+    // Safety:
+    // Created from valid Table for this object
+    // which contains a valid value in this slot
+    unsafe { self._tab.get::<u8>(RosterEntry::VT_NAME_ORIGIN, Some(0)).unwrap()}
+  }
 }
 
 impl ::flatbuffers::Verifiable for RosterEntry<'_> {
@@ -131,6 +167,10 @@ impl ::flatbuffers::Verifiable for RosterEntry<'_> {
      .visit_field::<super::Hand>("throws", Self::VT_THROWS, false)?
      .visit_field::<f32>("height_m", Self::VT_HEIGHT_M, false)?
      .visit_field::<u16>("bat_model_id", Self::VT_BAT_MODEL_ID, false)?
+     .visit_field::<u8>("uniform_number", Self::VT_UNIFORM_NUMBER, false)?
+     .visit_field::<u16>("field_agent_id", Self::VT_FIELD_AGENT_ID, false)?
+     .visit_field::<::flatbuffers::ForwardsUOffset<&str>>("family_name", Self::VT_FAMILY_NAME, false)?
+     .visit_field::<u8>("name_origin", Self::VT_NAME_ORIGIN, false)?
      .finish();
     Ok(())
   }
@@ -145,6 +185,10 @@ pub struct RosterEntryArgs<'a> {
     pub throws: super::Hand,
     pub height_m: f32,
     pub bat_model_id: u16,
+    pub uniform_number: u8,
+    pub field_agent_id: u16,
+    pub family_name: Option<::flatbuffers::WIPOffset<&'a str>>,
+    pub name_origin: u8,
 }
 impl<'a> Default for RosterEntryArgs<'a> {
   #[inline]
@@ -159,6 +203,10 @@ impl<'a> Default for RosterEntryArgs<'a> {
       throws: super::Hand::Unknown,
       height_m: 0.0,
       bat_model_id: 0,
+      uniform_number: 0,
+      field_agent_id: 0,
+      family_name: None,
+      name_origin: 0,
     }
   }
 }
@@ -205,6 +253,22 @@ impl<'a: 'b, 'b, A: ::flatbuffers::Allocator + 'a> RosterEntryBuilder<'a, 'b, A>
     self.fbb_.push_slot::<u16>(RosterEntry::VT_BAT_MODEL_ID, bat_model_id, 0);
   }
   #[inline]
+  pub fn add_uniform_number(&mut self, uniform_number: u8) {
+    self.fbb_.push_slot::<u8>(RosterEntry::VT_UNIFORM_NUMBER, uniform_number, 0);
+  }
+  #[inline]
+  pub fn add_field_agent_id(&mut self, field_agent_id: u16) {
+    self.fbb_.push_slot::<u16>(RosterEntry::VT_FIELD_AGENT_ID, field_agent_id, 0);
+  }
+  #[inline]
+  pub fn add_family_name(&mut self, family_name: ::flatbuffers::WIPOffset<&'b  str>) {
+    self.fbb_.push_slot_always::<::flatbuffers::WIPOffset<_>>(RosterEntry::VT_FAMILY_NAME, family_name);
+  }
+  #[inline]
+  pub fn add_name_origin(&mut self, name_origin: u8) {
+    self.fbb_.push_slot::<u8>(RosterEntry::VT_NAME_ORIGIN, name_origin, 0);
+  }
+  #[inline]
   pub fn new(_fbb: &'b mut ::flatbuffers::FlatBufferBuilder<'a, A>) -> RosterEntryBuilder<'a, 'b, A> {
     let start = _fbb.start_table();
     RosterEntryBuilder {
@@ -231,6 +295,10 @@ impl ::core::fmt::Debug for RosterEntry<'_> {
       ds.field("throws", &self.throws());
       ds.field("height_m", &self.height_m());
       ds.field("bat_model_id", &self.bat_model_id());
+      ds.field("uniform_number", &self.uniform_number());
+      ds.field("field_agent_id", &self.field_agent_id());
+      ds.field("family_name", &self.family_name());
+      ds.field("name_origin", &self.name_origin());
       ds.finish()
   }
 }

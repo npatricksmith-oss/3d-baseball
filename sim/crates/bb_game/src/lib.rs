@@ -7,5 +7,6 @@ pub mod game;
 pub mod live;
 pub mod pa;
 pub mod play;
+pub mod roster;
 pub mod timeline;
 pub mod umpire;
