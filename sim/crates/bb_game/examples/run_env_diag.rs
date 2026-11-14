@@ -4,6 +4,7 @@
 //! Q3: Ground-ball hit decomposition (H-to-1B, gap geometry, fielder timelines, dives/stretches/throws).
 //!
 //! Usage: `cargo run --release -p bb_game --example run_env_diag -- [games] [seed0]`
+//! (env `BB_BAT_SPEED_SIGMA` m/s, `BB_AIM_OFFSET_Z` m: counterfactual population and aim)
 
 use bb_agents::batter::count_group;
 use bb_game::game::{Game, classify_bip};
@@ -409,7 +410,17 @@ fn main() {
     let mut routine_outs = 0u32;
 
     for seed in seed0..seed0 + games {
-        let mut g = Game::new(seed, true);
+        // Counterfactuals (docs/calibration/2026-11-14-swing-recalibration.md): BB_BAT_SPEED_SIGMA
+        // sets the population's BatSpeed σ_pop (m/s), BB_AIM_OFFSET_Z the batters' aim offset (m).
+        let var = |k: &str| std::env::var(k).ok().and_then(|v| v.parse::<f64>().ok());
+        let mut pop = bb_game::population::Population::default();
+        if let Some(sig) = var("BB_BAT_SPEED_SIGMA") {
+            pop.bat_speed_sigma_mps = sig;
+        }
+        let mut g = Game::with_population(seed, true, &pop);
+        if let Some(off) = var("BB_AIM_OFFSET_Z") {
+            g = g.map_matchups(|mu| mu.template.aim_offset_z = off);
+        }
         while let Some(st) = g.step_pitch() {
             let batting_side = (st.batter >> 8) as usize;
             let field_side = 1 - batting_side;

@@ -60,6 +60,7 @@ impl Knobs {
 }
 
 /// Everything fixed for a batter–pitcher matchup.
+#[derive(Clone)]
 pub struct Matchup {
     pub env: FlightEnv,
     pub pitcher: PitcherAttrs,

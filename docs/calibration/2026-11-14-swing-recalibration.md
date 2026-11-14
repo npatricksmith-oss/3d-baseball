@@ -60,3 +60,37 @@ K% 15.3 against 22.6 comes from the foul share (23% of contact against 52%) and 
 ### 1.7 What would stop this
 
 If home runs stay far short after B and C without a fudge factor, the remaining gap is the collision's (q, D) or the batted ball's spin (§2.4 below), both Tier A. That is a result to report, not a reason to tune a Tier B knob against it.
+
+## 2. Results (in progress)
+
+### 2.1 B: per-player `BatSpeed` (`run_env_diag -- 100 0`; outputs in `sim/out/recalib/`)
+
+Built: `bb_game::population` (stream `RosterAbilities` = 15, one truncated-normal z per batter at ±3, `BatSpeed = 32.0 + σ_pop·z`), one matchup per batting slot, `Game::with_population` and the lab hook `Game::map_matchups`; `run_env_diag` reads `BB_BAT_SPEED_SIGMA` and `BB_AIM_OFFSET_Z`. σ_pop = 0 reproduces `9f71441`'s output line for line (checked by diff).
+
+| σ_pop, m/s | runs | K% | HR/PA | EV mean / SD | p90 / p99 / max | ≥ 105 / ≥ 110 | LA mean / SD | barrels | bat on fair BIP mean / p90; on HRs |
+|---|---|---|---|---|---|---|---|---|---|
+| 0 (`9f71441`) | 4.57 | 15.8 | 0.49% | 89.0 / 12.4 | 102.0 / 107.4 / 113.1 | 3.4 / 0.2% | 11.1 / 25.5 | 3.15% | 71.3 / 75.5; 76.6 |
+| 1.10 (old §10) | 4.62 | 16.0 | 0.82% | 89.5 / 12.7 | 103.1 / 109.6 / 118.6 | 5.6 / 0.7% | 11.6 / 25.1 | 4.37% | 71.4 / 76.7; 78.4 |
+| **1.25** (D19) | 4.54 | 15.8 | **0.96%** | 89.6 / 12.6 | 103.2 / 109.8 / 119.6 | 6.5 / 1.0% | 11.8 / 25.1 | 4.55% | 71.4 / 77.1; 77.7 |
+| MLB | 4.39 | 22.6 | 3.0% | 89.5 | 105.2 / 111.0 / 116.7 | 10.6 / 2.1% | 12.2 / 29.1 | ≈ 8.7% | 71.7; HRs 75.4 |
+
+B doubles home runs, as the proxy said, and leaves runs where they were (within noise). The sim's home runs need a faster swing than MLB's (77.7 against 75.4 mph).
+
+### 2.2 The cage: offset under the ball (`aim_offset_probe`, four-seamer, middle height, on time)
+
+| offset cm | 0 | −1 | −2 | −2.5 | −3 | −4 |
+|---|---|---|---|---|---|---|
+| EV mph | 103.2 | 102.9 | 101.1 | 99.6 | 97.7 | 92.6 |
+| LA ° | 2.8 | 10.9 | 19.0 | 23.1 | 27.3 | 35.8 |
+| carry ft | 88 | 280 | 356 | 357 | 346 | 305 |
+| backspin rpm | 1,190 | 2,258 | 4,028 | 4,954 | 5,890 | 7,773 |
+| carry at 2,500 rpm, ft | 82 | 283 | 360 | 373 | 375 | 353 |
+
+About 8° of launch per cm. A perfectly squared-up average swing in the barrel window (27°) leaves at 97.7 mph, just under the barrel line. **Batted backspin is about twice the published range** (≈ 5,900 rpm at 27°, where Statcast-era measurements put fly balls near 2,500): it costs 15–30 ft of carry at 23–27°. That is the collision's tangential behaviour (physics-spec §8, e_t 0.40, test A10 "values pending"), Tier A, outside B and C; it goes with D as a sourcing question.
+
+### 2.3 Attack angle by zone third (step 4)
+
+The Savant sample (re-run, `savant_bat.py`, competitive swings) gives 11.9 / 7.8 / 6.1° bottom / middle / top (17.4 below, 6.0 above): the spec's text quotes the data correctly. The linear formula 8 − 8.7·(h − ½) gives 10.9 / 8.0 / 5.1° at the thirds' centers, about 1° low at both ends (the data are convex in height). To settle: re-fit α₀ and α_h by least squares over swings, or state that the fit is a line through a convex curve; a change to α₀/α_h changes games, so it is not part of the digest-neutral step.
+
+### Next
+C sweep (`BB_AIM_OFFSET_Z` −1.5 / −2.5 / −3.0 cm with σ_pop 1.25), spray diagnostics (c), spec edits for B (agent-models §10 σ_pop 1.1 → 1.25, data-formats §2.3 purpose 15 and §2.4 step 5, calibration-targets §4.3), tests, standard runs, ledger row, the named literals.
