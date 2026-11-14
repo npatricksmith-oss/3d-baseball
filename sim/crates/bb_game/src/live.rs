@@ -6040,4 +6040,77 @@ mod tests {
         assert!(p2 < 0.3, "fixture: the relay cannot beat him ({p2})");
         assert!((step.value - step.p_out * step.p_out * step.weight).abs() < 1e-12, "value {} with p2 {p2}", step.value);
     }
+
+    /// Gemini A4 review P3-6: the comparison is p² × w (agent-models §5.6), not p × w. Bases
+    /// loaded, one out, the first baseman 1 m from his bag with the batter 1.0 s away: the
+    /// carry to first is sure, 1.0² × 0.9 = 0.9. The runners from first and second are 0.1 s
+    /// from their bases (no play). The runner from third is placed so the force at home is
+    /// about 0.8 sure: 0.8² × 1.3 ≈ 0.83 < 0.9, so he takes first. Linear weighing would
+    /// give 0.8 × 1.3 = 1.04 > 0.9 and throw home.
+    #[test]
+    fn the_holder_weighs_p_squared_times_w() {
+        const B1: usize = 2;
+        let fx = fixture(&[(5, 1), (6, 2), (7, 3)]);
+        let runners = vec![RunnerIn { id: fx.st.batter, base: 0, speed: 8.2 }, RunnerIn { id: 5, base: 1, speed: 8.2 }, RunnerIn { id: 6, base: 2, speed: 8.2 }, RunnerIn { id: 7, base: 3, speed: 8.2 }];
+        let inp = input(&fx, runners);
+        let mut st = fx.st.clone();
+        st.outs = 1;
+        let mut sim = new_sim(&inp, &mut st);
+        sim.t = 2.0;
+        held_at(&mut sim, B1, base_pos(1) + Vec3::new(-0.7, 0.7, 0.0));
+        sim.f[1].pos = base_pos(4);
+        let fd = &mut sim.f[B1];
+        (fd.up_at, fd.set_base, fd.face, fd.catch_vel) = (1.0, fd.a.transfer, None, Vec3::ZERO);
+        (sim.r[0].s, sim.r[0].v, sim.r[0].goal) = (BASE_L - 8.2, 8.2, 1);
+        for k in 1..3 {
+            let r = &mut sim.r[k];
+            (r.s, r.v, r.goal) = ((r.start + 1) as f64 * BASE_L - 0.82, 8.2, r.start + 1);
+        }
+        // Put the runner from third where the force at home has a 0.1 s margin (p ≈ 0.80).
+        (sim.r[3].s, sim.r[3].v, sim.r[3].goal) = (3.0 * BASE_L + 10.0, 8.2, 4);
+        for _ in 0..6 {
+            let home = *sim.holder_options(B1).iter().find(|o| !o.carry && o.base == 4).expect("a throw home");
+            sim.r[3].s -= 8.2 * (0.101 - (home.runner_at - home.ball_at));
+        }
+        let opts = sim.holder_options(B1);
+        let home = opts.iter().find(|o| !o.carry && o.base == 4).unwrap();
+        let first = opts.iter().find(|o| o.carry && o.base == 1).expect("a carry to first");
+        assert!((0.75..0.85).contains(&home.p_out) && first.p_out > 0.999, "fixture: home {} first {}", home.p_out, first.p_out);
+        assert!(home.p_out * home.weight > first.p_out * first.weight, "fixture: linear weighing would go home");
+        sim.holder_act();
+        assert_eq!(sim.f[B1].carry_to, Some(1), "he takes the sure out at first: {:?}", sim.ball);
+    }
+
+    /// Gemini A4 review P3-6: no attempt below p = 0.3 (agent-models §5.6). The shortstop of
+    /// `shortstop_to_first` with the batter where the throw has a −0.08 s margin (p ≈ 0.25)
+    /// holds the ball; at −0.03 s (p ≈ 0.40) he throws.
+    #[test]
+    fn no_throw_is_attempted_below_p_of_0_3() {
+        const SS: usize = 5;
+        for (margin, attempt) in [(-0.08, false), (-0.03, true)] {
+            let fx = fixture(&[]);
+            let inp = input(&fx, vec![RunnerIn { id: fx.st.batter, base: 0, speed: 8.2 }]);
+            let mut st = fx.st.clone();
+            let mut sim = new_sim(&inp, &mut st);
+            sim.t = 1.0;
+            held_at(&mut sim, SS, Vec3::new(-8.0, 38.0, 0.0));
+            sim.f[2].pos = base_pos(1);
+            let fd = &mut sim.f[SS];
+            (fd.up_at, fd.set_base, fd.face, fd.catch_vel) = (1.0, fd.a.transfer, None, Vec3::ZERO);
+            (sim.r[0].s, sim.r[0].v, sim.r[0].goal) = (BASE_L - 8.2 * eta_for_margin(margin, false), 8.2, 1);
+            let p = sim.holder_options(SS).iter().find(|o| !o.carry && o.base == 1).unwrap().p_out;
+            assert!((p > 0.3) == attempt, "fixture: p {p} at margin {margin}");
+            let mut thrown = false;
+            for _ in 0..60 {
+                sim.holder_act();
+                if matches!(sim.ball, Ball::Thrown { .. }) {
+                    thrown = true;
+                    break;
+                }
+                sim.r[0].s += 8.2 * DT;
+                sim.t += DT;
+            }
+            assert_eq!(thrown, attempt, "margin {margin}, p {p}");
+        }
+    }
 }
