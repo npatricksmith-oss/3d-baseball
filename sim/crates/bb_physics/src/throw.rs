@@ -44,6 +44,13 @@ pub fn fly_throw(env: &FlightEnv, s0: BallState, t0: f64, t_max: f64) -> Traject
     fly(env, s0, t0, THROW_DT, &[Crossing::ZBelow(env.ball.radius)], t_max)
 }
 
+/// A throw in flight inside the park: until it reaches the ground (`stop` 0) or the boundary
+/// of the playing field (`stop` 1: a wall to carom off or leave over, physics-spec §9.5).
+pub fn fly_throw_in(env: &FlightEnv, field: &crate::ground::Field, s0: BallState, t0: f64, t_max: f64) -> Trajectory {
+    let r = env.ball.radius;
+    fly(env, s0, t0, THROW_DT, &[Crossing::ZBelow(r), Crossing::Boundary { field: *field, r }], t_max)
+}
+
 #[derive(Clone, Copy, Debug, PartialEq)]
 pub struct ThrowSolution {
     /// Launch elevation, rad.

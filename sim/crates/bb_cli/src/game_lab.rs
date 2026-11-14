@@ -164,6 +164,15 @@ pub fn games(a: GamesArgs) {
             by[k].3 as f64 / n
         );
     }
+    println!(
+        "per game: fouls {:.1}, foul outs {:.2}; out of play: foul {:.2}, home run {:.2}, fair after a bounce {:.2}, after a throw {:.3}",
+        sum(&|r| r.fouls as f64) / n,
+        sum(&|r| r.foul_outs as f64) / n,
+        sum(&|r| r.out_of_play.foul as f64) / n,
+        sum(&|r| r.out_of_play.home_run as f64) / n,
+        sum(&|r| r.out_of_play.fair_bounced as f64) / n,
+        sum(&|r| r.out_of_play.thrown as f64) / n
+    );
     let mut w: std::collections::BTreeMap<&str, usize> = Default::default();
     for r in &rs {
         for x in &r.warnings {
