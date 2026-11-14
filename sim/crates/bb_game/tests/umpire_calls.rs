@@ -84,7 +84,7 @@ fn every_out_is_called_promptly_and_close_plays_at_once() {
                 }
             }
             // A viewer sees every call before the clip ends.
-            let tl = bb_game::timeline::encode(&s, &g.st);
+            let tl = bb_game::timeline::encode(&s, &g.st, &g.rosters);
             let tl = flatbuffers::root::<bb_schema::tl::PlayTimeline>(&tl).unwrap();
             for c in &s.calls {
                 assert!(c.t_call() as f32 <= tl.duration_s() + 1e-4);

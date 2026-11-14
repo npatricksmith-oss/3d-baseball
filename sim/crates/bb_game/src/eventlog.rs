@@ -8,15 +8,56 @@ use bb_schema::{ProducerInfo, ProducerInfoArgs, vec3d};
 use flatbuffers::{FlatBufferBuilder, WIPOffset};
 
 use crate::pa::PitchRecord;
+use crate::roster::Rosters;
 
-pub fn header(game_seed: u64) -> Vec<u8> {
+/// The log header: producer, seed, and the game's configuration, which today is its rosters
+/// (data-formats §2.4, §4.1). The header is outside the digest (§4.4).
+pub fn header(game_seed: u64, rosters: &Rosters) -> Vec<u8> {
+    use bb_schema::cfg;
     let mut fbb = FlatBufferBuilder::new();
+    let hand = |h: bb_observe::Hand| match h {
+        bb_observe::Hand::Left => bb_schema::Hand::Left,
+        bb_observe::Hand::Right => bb_schema::Hand::Right,
+    };
+    let teams = [0, 1].map(|s| {
+        let t = &rosters.teams[s];
+        let entries: Vec<_> = t
+            .players
+            .iter()
+            .map(|p| {
+                let name = fbb.create_string(&p.full_name());
+                let family = fbb.create_string(p.family);
+                cfg::RosterEntry::create(
+                    &mut fbb,
+                    &cfg::RosterEntryArgs {
+                        agent_id: t.bat_agent(p),
+                        field_agent_id: t.field_agent(p),
+                        player_id: p.player_id,
+                        name: Some(name),
+                        family_name: Some(family),
+                        name_origin: p.origin as u8,
+                        position: bb_schema::Position(p.position),
+                        batting_order: p.batting_order,
+                        uniform_number: p.number,
+                        bats: hand(p.bats),
+                        throws: hand(p.throws),
+                        ..Default::default()
+                    },
+                )
+            })
+            .collect();
+        let roster = fbb.create_vector(&entries);
+        let name = fbb.create_string(t.name);
+        let pitcher = t.players.iter().find(|p| p.position == 1).map(|p| t.field_agent(p)).unwrap_or(0);
+        cfg::TeamConfig::create(&mut fbb, &cfg::TeamConfigArgs { name: Some(name), roster: Some(roster), starting_pitcher: pitcher, ..Default::default() })
+    });
+    let config = cfg::GameConfig::create(&mut fbb, &cfg::GameConfigArgs { game_seed, away: Some(teams[0]), home: Some(teams[1]), ..Default::default() });
     let sv = fbb.create_string(env!("CARGO_PKG_VERSION"));
     let p = ProducerInfo::create(
         &mut fbb,
         &ProducerInfoArgs { schema_major: bb_schema::SCHEMA_MAJOR, schema_minor: bb_schema::SCHEMA_MINOR, sim_version: Some(sv), ..Default::default() },
     );
-    let h = ev::LogHeader::create(&mut fbb, &ev::LogHeaderArgs { producer: Some(p), game_id: 0, game_seed, config: None });
+    let h = ev::LogHeader::create(&mut fbb, &ev::LogHeaderArgs { producer: Some(p), game_id: 0, game_seed, config: Some(config) });
     fbb.finish_size_prefixed(h, Some(log::HEADER_ID));
     fbb.finished_data().to_vec()
 }

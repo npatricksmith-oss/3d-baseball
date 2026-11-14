@@ -38,7 +38,7 @@ pub fn stance_pose(at: Vec3) -> (Vec3, Vec3) {
 }
 
 /// Encode one pitch's timeline as a finished `BBTL` FlatBuffer.
-pub fn encode(step: &PitchStep, st: &RulesState) -> Vec<u8> {
+pub fn encode(step: &PitchStep, st: &RulesState, rosters: &crate::roster::Rosters) -> Vec<u8> {
     let mut fbb = FlatBufferBuilder::with_capacity(16 * 1024);
     let rec = &step.record;
     // Ball track: the pitch, then each batted-ball segment.
@@ -359,7 +359,7 @@ pub fn encode(step: &PitchStep, st: &RulesState) -> Vec<u8> {
         },
     );
     let duration = t_end as f32;
-    let text = crate::describe::describe(rec.call, rec.batted.map(|b| b.1.to_degrees()), &step.rules_events, &step.facts);
+    let text = crate::describe::describe(rec.call, rec.batted.map(|b| b.1.to_degrees()), &step.rules_events, &step.facts, Some(rosters));
     let summary = fbb.create_string(&text);
     let root = tl::PlayTimeline::create(
         &mut fbb,
@@ -370,6 +370,7 @@ pub fn encode(step: &PitchStep, st: &RulesState) -> Vec<u8> {
             bat,
             actors,
             summary: Some(summary),
+            batter: step.batter,
             markers: Some(markv),
             telemetry: Some(telem),
             view_after: Some(view),

@@ -486,6 +486,7 @@ dependencies = [
  "bb_math",
  "bb_observe",
  "bb_physics",
+ "bb_stats",
  "bb_world",
  "clap",
  "rerun",
@@ -497,6 +498,7 @@ name = "bb_ffi"
 version = "0.1.0"
 dependencies = [
  "bb_game",
+ "bb_observe",
  "bb_schema",
  "flatbuffers",
 ]

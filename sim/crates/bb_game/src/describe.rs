@@ -6,6 +6,7 @@
 use bb_rules::{AgentId, Event, Input, OutKind, PaResult};
 
 use crate::pa::Call;
+use crate::roster::Rosters;
 
 const POSITION: [&str; 9] = ["the pitcher", "the catcher", "first", "second", "third", "short", "left", "center", "right"];
 
@@ -23,8 +24,10 @@ fn runs_phrase(n: usize) -> String {
     }
 }
 
-/// Describe one pitch. `launch_deg` is the batted ball's launch angle, if it was hit.
-pub fn describe(call: Call, launch_deg: Option<f64>, events: &[Event], facts: &[Input]) -> String {
+/// Describe one pitch. `launch_deg` is the batted ball's launch angle, if it was hit. With
+/// the game's rosters, a line that ends a plate appearance starts with the batter's family
+/// name ("Ramirez: Single to left"; family names are unique in a game, data-formats §2.4).
+pub fn describe(call: Call, launch_deg: Option<f64>, events: &[Event], facts: &[Input], rosters: Option<&Rosters>) -> String {
     let runs = events.iter().filter(|e| matches!(e, Event::RunScored { .. })).count();
     let outs: Vec<(AgentId, OutKind)> = events.iter().filter_map(|e| if let Event::RunnerOut { runner, kind, .. } = e { Some((*runner, *kind)) } else { None }).collect();
     let ended = events.iter().find_map(|e| if let Event::PlateAppearanceEnded { batter, result } = e { Some((*batter, *result)) } else { None });
@@ -81,7 +84,8 @@ pub fn describe(call: Call, launch_deg: Option<f64>, events: &[Event], facts: &[
             }
         }
     };
-    format!("{line}{}", runs_phrase(runs))
+    let who = rosters.and_then(|r| r.player(batter)).map(|p| format!("{}: ", p.family)).unwrap_or_default();
+    format!("{who}{line}{}", runs_phrase(runs))
 }
 
 #[cfg(test)]
@@ -106,26 +110,26 @@ mod tests {
     // The expected strings are how a radio announcer would call each play.
     #[test]
     fn plays_read_the_way_they_are_called() {
-        assert_eq!(describe(Call::Ball, None, &[], &[]), "Ball");
-        assert_eq!(describe(Call::Foul, Some(40.0), &[], &[]), "Foul");
-        assert_eq!(describe(Call::CalledStrike, None, &[out(B, OutKind::Strikeout), ended(PaResult::Strikeout)], &[]), "Strikeout looking");
-        assert_eq!(describe(Call::SwingingStrike, None, &[out(B, OutKind::Strikeout), ended(PaResult::Strikeout)], &[]), "Strikeout swinging");
-        assert_eq!(describe(Call::Ball, None, &[ended(PaResult::Walk)], &[]), "Walk");
-        assert_eq!(describe(Call::InPlay, Some(-5.0), &[out(B, OutKind::Force), ended(PaResult::BattedBall)], &[by(6)]), "Ground out to short");
-        assert_eq!(describe(Call::InPlay, Some(32.0), &[out(B, OutKind::FlyOut), ended(PaResult::BattedBall)], &[by(8)]), "Fly out to center");
-        assert_eq!(describe(Call::InPlay, Some(65.0), &[out(B, OutKind::FlyOut), ended(PaResult::BattedBall)], &[by(4)]), "Pop out to second");
-        assert_eq!(describe(Call::InPlay, Some(12.0), &[out(B, OutKind::FlyOut), ended(PaResult::BattedBall)], &[by(5)]), "Line out to third");
+        assert_eq!(describe(Call::Ball, None, &[], &[], None), "Ball");
+        assert_eq!(describe(Call::Foul, Some(40.0), &[], &[], None), "Foul");
+        assert_eq!(describe(Call::CalledStrike, None, &[out(B, OutKind::Strikeout), ended(PaResult::Strikeout)], &[], None), "Strikeout looking");
+        assert_eq!(describe(Call::SwingingStrike, None, &[out(B, OutKind::Strikeout), ended(PaResult::Strikeout)], &[], None), "Strikeout swinging");
+        assert_eq!(describe(Call::Ball, None, &[ended(PaResult::Walk)], &[], None), "Walk");
+        assert_eq!(describe(Call::InPlay, Some(-5.0), &[out(B, OutKind::Force), ended(PaResult::BattedBall)], &[by(6)], None), "Ground out to short");
+        assert_eq!(describe(Call::InPlay, Some(32.0), &[out(B, OutKind::FlyOut), ended(PaResult::BattedBall)], &[by(8)], None), "Fly out to center");
+        assert_eq!(describe(Call::InPlay, Some(65.0), &[out(B, OutKind::FlyOut), ended(PaResult::BattedBall)], &[by(4)], None), "Pop out to second");
+        assert_eq!(describe(Call::InPlay, Some(12.0), &[out(B, OutKind::FlyOut), ended(PaResult::BattedBall)], &[by(5)], None), "Line out to third");
         // A sacrifice fly.
-        assert_eq!(describe(Call::InPlay, Some(30.0), &[out(B, OutKind::FlyOut), Event::RunScored { runner: R }, ended(PaResult::BattedBall)], &[by(9)]), "Fly out to right, 1 run scores");
+        assert_eq!(describe(Call::InPlay, Some(30.0), &[out(B, OutKind::FlyOut), Event::RunScored { runner: R }, ended(PaResult::BattedBall)], &[by(9)], None), "Fly out to right, 1 run scores");
         let adv = |to| Event::RunnerAdvanced { runner: B, from: 0, to, cause: bb_rules::AdvanceCause::OnPlay };
-        assert_eq!(describe(Call::InPlay, Some(15.0), &[adv(1), ended(PaResult::BattedBall)], &[first(4.2), by(7)]), "Single to left");
-        assert_eq!(describe(Call::InPlay, Some(18.0), &[adv(2), Event::RunScored { runner: R }, Event::RunScored { runner: 6 }, ended(PaResult::BattedBall)], &[first(4.2), by(8)]), "Double to center, 2 runs score");
-        assert_eq!(describe(Call::InPlay, Some(-3.0), &[out(R, OutKind::Force), out(B, OutKind::Force), ended(PaResult::BattedBall)], &[by(6)]), "Double play: ground out to short");
-        assert_eq!(describe(Call::InPlay, Some(-3.0), &[out(R, OutKind::Force), adv(1), ended(PaResult::BattedBall)], &[by(6), first(4.3)]), "Fielder's choice to short");
+        assert_eq!(describe(Call::InPlay, Some(15.0), &[adv(1), ended(PaResult::BattedBall)], &[first(4.2), by(7)], None), "Single to left");
+        assert_eq!(describe(Call::InPlay, Some(18.0), &[adv(2), Event::RunScored { runner: R }, Event::RunScored { runner: 6 }, ended(PaResult::BattedBall)], &[first(4.2), by(8)], None), "Double to center, 2 runs score");
+        assert_eq!(describe(Call::InPlay, Some(-3.0), &[out(R, OutKind::Force), out(B, OutKind::Force), ended(PaResult::BattedBall)], &[by(6)], None), "Double play: ground out to short");
+        assert_eq!(describe(Call::InPlay, Some(-3.0), &[out(R, OutKind::Force), adv(1), ended(PaResult::BattedBall)], &[by(6), first(4.3)], None), "Fielder's choice to short");
         // The third out made on another runner before the batter reached first: a force at
         // second, or (seed 7475 play 26) a tag on the runner from third at home.
-        assert_eq!(describe(Call::InPlay, Some(-50.0), &[out(R, OutKind::Force), ended(PaResult::BattedBall)], &[by(1)]), "Force out to the pitcher");
-        assert_eq!(describe(Call::InPlay, Some(-54.0), &[out(R, OutKind::Tag), ended(PaResult::BattedBall)], &[by(1)]), "Fielder's choice to the pitcher, runner tagged out");
-        assert_eq!(describe(Call::InPlay, Some(28.0), &[ended(PaResult::HomeRun), Event::RunScored { runner: B }], &[]), "Home run, 1 run scores");
+        assert_eq!(describe(Call::InPlay, Some(-50.0), &[out(R, OutKind::Force), ended(PaResult::BattedBall)], &[by(1)], None), "Force out to the pitcher");
+        assert_eq!(describe(Call::InPlay, Some(-54.0), &[out(R, OutKind::Tag), ended(PaResult::BattedBall)], &[by(1)], None), "Fielder's choice to the pitcher, runner tagged out");
+        assert_eq!(describe(Call::InPlay, Some(28.0), &[ended(PaResult::HomeRun), Event::RunScored { runner: B }], &[], None), "Home run, 1 run scores");
     }
 }
