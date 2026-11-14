@@ -5566,4 +5566,47 @@ mod tests {
         assert!(!sim.dive_gains(CF, DIVE_GETUP_S), "a roller he can run down is not worth a dive");
         assert!(sim.dive_gains(CF, STRETCH_COST_S), "he would not have it within a stretch's 0.3 s");
     }
+
+    /// The center fielder at (0, 80) with an exact read (his belief is the world's own path)
+    /// of a fly passing him 1.3 m away at 20 m/s, 1.5 s in, when it is `z0` m up at 0.15 s
+    /// before closest approach. Runs 0.8 s of world ticks.
+    fn stretch_for_a_fly(z0: f64) -> Sim<'static> {
+        let fx: &'static Fixture = Box::leak(Box::new(fixture(&[])));
+        let inp: &'static LiveInput<'static> = Box::leak(Box::new(input(fx, vec![RunnerIn { id: fx.st.batter, base: 0, speed: 8.2 }])));
+        let st: &'static mut RulesState = Box::leak(Box::new(fx.st.clone()));
+        let mut sim = new_sim(inp, st);
+        sim.f[CF].pos = Vec3::new(0.0, 80.0, 0.0);
+        loose_ball(&mut sim, 1.5, Vec3::new(-3.0, 78.7, z0), Vec3::new(20.0, 0.0, 0.0));
+        let Ball::Free { path, .. } = &sim.ball else { unreachable!() };
+        let exact = path.clone();
+        sim.f[CF].role = Role::Chase;
+        sim.f[CF].belief = Some(exact);
+        for _ in 0..48 {
+            world_tick(&mut sim);
+        }
+        sim
+    }
+
+    // agent-models §5.3–§5.4 and rules-spec (visible out calls): "A caught fly is routine unless
+    // the catch was diving or below z_low_catch = 0.4 m (margin 0)." A stretch is upright, so
+    // it counts as low only by its height. By hand, the fly (20 m/s across, falling under
+    // gravity from z0) passes the fielder at x = 0 after 3 m / 20 m/s = 0.15 s, having fallen
+    // ½·9.80665·0.15² = 0.110 m (drag changes it by well under a centimetre): from 0.65 m it is
+    // caught at about 0.54 m, from 0.45 m at about 0.34 m. Upright, above the line, the out is
+    // routine (margin ∞); upright, below it, a shoestring catch (margin 0).
+    #[test]
+    fn an_upright_stretch_is_a_low_catch_only_below_the_low_catch_height() {
+        for (z0, low) in [(0.65, false), (0.45, true)] {
+            let sim = stretch_for_a_fly(z0);
+            let t = secured_at(&sim).expect("he got it");
+            let Ball::Held { .. } = sim.ball else { panic!("not held") };
+            // The world's own height of the ball at the catch, from its path before it was held.
+            let z_catch = z0 - 0.5 * 9.80665 * (t - 1.5) * (t - 1.5);
+            assert!((z_catch < 0.4) == low && (z_catch - 0.4).abs() > 0.05, "fixture: caught at about {z_catch:.2} m");
+            assert!(sim.out.dives.is_empty(), "an upright stretch, not a dive");
+            let outs: Vec<_> = sim.out.calls.iter().collect();
+            assert_eq!(outs.len(), 1, "one out, the batter's: {outs:?}");
+            assert_eq!(outs[0].margin_s, if low { 0.0 } else { f64::INFINITY }, "caught at {z_catch:.2} m");
+        }
+    }
 }
