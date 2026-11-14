@@ -148,6 +148,64 @@ The rigid-body model is the published one, and no source gives a direction measu
 
 Until then A10d and A10e are reported, and the spray offset stays a known gap (it is partly offset in games by the batters' early timing, recalibration report §2.4).
 
+## 7. Two more diagnostics (2026-11-14, after the lead's read; defaults unchanged)
+
+### 7.1 Like with like: the PA model's contact by Sonnet's launch bands
+
+`foul_diag 10000` (all swings of the average R/R matchup, with perception and execution noise; fair contact only). New this section: Sonnet's bands, the launch direction (exit velocity) beside the landing spray, and an `et=` flag (counterfactual; the default stays 0.40). MLB is right-handed batters from the collision-targets note (twelve 2025 dates). Pull-positive degrees.
+
+| Launch band | n | spray, sim (MLB) | spray − AD, sim (MLB) | gap in spray − AD | launch dir − AD | in-flight curve |
+|---|---|---|---|---|---|---|
+| < 0° | 2,704 | +12.0 (+13.3) | +9.5 (+17.3) | −7.8 | +16.0 | −6.5 |
+| 0–10° | 1,096 | +1.1 (+9.2) | −0.5 (+11.3) | **−11.8** | +0.1 | −0.6 |
+| 10–25° | 1,610 | −7.7 (+5.3) | −10.2 (+5.1) | **−15.3** | −6.2 | −4.0 |
+| 25–35° | 817 | −18.1 (−0.5) | −21.8 (−1.4) | −20.4 | −13.1 | −8.6 |
+| 35–50° | 694 | −21.9 (−4.7) | −28.6 (−7.7) | −20.9 | −18.7 | −10.0 |
+| 50°+ | 208 | −26.1 (−18.8) | −38.0 (−17.0) | −21.0 | −26.7 | −11.3 |
+| same, e_t 0: 0–10° / 10–25° / 25–35° / 35–50° | | +2.1 / −7.1 / −16.3 / −19.9 | +0.5 / −9.3 / −19.9 / −26.5 | −10.8 / −14.4 / −18.5 / −18.8 | | −0.4 / −3.6 / −7.8 / −9.6 |
+
+**Level and slope, separated.**
+- **Slope** of spray − AD across the four bands from 0° to 50°, from band means: sim −0.75° per degree of launch angle (−0.72 at e_t 0); MLB −0.51. The regressions over individual balls (0–50°) are sim −0.81, of which the launch direction contributes −0.53 and the in-flight curve −0.28. The excess slope is about −0.24° per degree, so roughly −9° from 0–10° to 35–50°.
+- **Level**: the curve sits **11.8° to the opposite field at 0–10° and 15.3° at 10–25°** (spray − AD), and 7.8° for grounders below 0°.
+- **The lead's suspicion holds: the level is the larger part** at every band. At fly-ball launch (25–35°, gap −20.4) it is about −12 of level plus about −6 of excess slope, with about −2 left over.
+- In raw spray (not minus AD) the level is hidden at the low end by the batters' early timing, which pulls the sim's AD 2–10° (recalibration report §2.4): ground balls match MLB (+12.0 against +13.3), and the gap grows to −13 at 10–25° and −17 at 25–50°.
+- **e_t's part is small.** e_t 0 lowers the slope by 0.03–0.05° per degree, and the curve's share by 0.014 (−0.277 → −0.263). The in-flight curve does carry about a third of the slope, but at a given launch angle it barely depends on e_t: less sidespin comes with less backspin and a flatter, shorter flight. e_t also moves the level by about 1°.
+- **So e_t is the spin question only.** The spray gap is a level offset of about 12° (§7.2) plus the sloped barrel's geometric slope (§4).
+
+### 7.2 The face ahead of the path, with faster hands (`face_path_probe`)
+
+The hands' speed at contact is set through q (the hands' rate over the bat's at t_c, an unsourced [E] value, swing note Open 7), solved per case so the knob moves at the target speed at t_c. The default (λ_c 0, q 0.32) is 14.4 mph. Bat speed stays at `BatSpeed` by construction (71.5–71.9 mph). Cage, middle four-seamer, on time; "squared up" means the ball's center was the aim (launch 1–3°), "2 cm under" means launch 16–19°. The planned AD is +0.1°.
+
+| λ_c | hands mph | q | swing length ft | actual AD | **face − AD** | AA actual | EV squared / 2 cm | spray − AD, squared: launch / land | spray − AD, 2 cm under: launch / land |
+|---|---|---|---|---|---|---|---|---|---|
+| 0° | 14 | 0.31 | 7.00 | −1.4 | −0.2 | 6.8 | 103.2 / 101.1 | −2.6 / −3.5 | −12.4 / −24.4 |
+| 0° | 24 | 0.64 | 8.19 | −1.2 | −0.2 | 6.9 | 103.4 / 101.4 | −2.5 / −3.2 | −12.3 / −24.0 |
+| 15° | 14 | 0.30 | 7.22 | −4.0 | +2.3 | 5.3 | 103.2 / 101.1 | −0.8 / −1.0 | −10.6 / −21.3 |
+| 15° | 24 | 0.61 | 8.22 | −5.5 | +4.1 | 4.3 | 103.2 / 101.3 | +0.6 / +1.1 | −9.2 / −18.6 |
+| 30° | 14 | 0.26 | 7.39 | −6.4 | +4.6 | 3.8 | 103.1 / 101.0 | +0.9 / +1.3 | −8.9 / −18.3 |
+| 30° | 21 | 0.44 | 8.11 | −8.6 | +7.1 | 2.4 | 102.8 / 100.8 | +2.7 / +3.8 | −7.1 / −14.8 |
+| 30° | 24 | 0.53 | 8.31 | −9.6 | +8.1 | 1.8 | 102.5 / 100.7 | +3.5 / +4.8 | −6.3 / −13.3 |
+| 45° | 14 | 0.21 | 7.55 | −8.5 | +6.7 | 2.5 | 102.9 / 100.8 | +2.4 / +3.2 | −7.5 / −15.7 |
+| 45° | 18 | 0.28 | 8.00 | −10.3 | +8.6 | 1.4 | 102.5 / 100.5 | +3.8 / +5.1 | −6.1 / −12.9 |
+| 45° | 21 | 0.34 | 8.27 | −11.7 | +10.1 | 0.5 | 102.1 / 100.2 | +4.9 / +6.4 | −5.0 / −10.8 |
+| 45° | 24 | 0.41 | 8.49 | −13.1 | **+11.6** | −0.3 | 101.6 / 99.8 | +6.0 / **+7.7** | −4.0 / −8.7 |
+| 60° | 14–24 | 0.19–0.36 | 7.76–8.69 | −10.0 to −15.9 | +8.3 to +14.3 | 1.6 to −2.0 | **74–79** / 76–79 | +2.4 to +6.3 (land) | −13.6 to −7.2 (land) |
+
+All twenty combinations are in `sim/out/collision/face_path.txt`.
+- **Hand speed alone does nothing** (λ_c 0: face − AD −0.2 at 14 and at 24 mph): the hands must move along the bat to turn its face against its path.
+- **Together the two do.** Face − AD reaches +4 to +8 at λ_c 30° and +7 to +12 at λ_c 45° for hands at 14–24 mph. Squared-up spray − AD moves from −3.5 to as much as +7.7, and 2 cm under from −24.4 to −8.7.
+- **At λ_c 60° the planned contact falls off the sweet spot** (exit speed 74–79 mph): outside what the contact-relative plan handles without a refit, so not a candidate.
+
+**What closing the level offset would need.** The gap at 0–10° (−11.8) and 10–25° (−15.3) is about the shift the cage shows for **λ_c ≈ 45° with the hands at about 21–24 mph** (+10 to +11 squared up, +14 to +16 at 2 cm under). λ_c 30° with 24 mph gives about two-thirds of it. Sonnet is looking for measured values (hand speed at contact, the bat's angle to its path); none is adopted here. The lead quotes Blast's peak pro hand speed in the low-to-mid 20s mph; I have not read that source, and it is the peak, not the speed at contact. Taking it would require refitting:
+1. **Swing length.** It grows from 7.0 to 8.3–8.5 ft (Statcast 7.2–7.3), so the time constants (w_h, w_b, τ_b) need refitting, as for v2's first fit.
+2. **Attack angle.** The actual AA falls by 6–7° (6.8 → 0.5 or −0.3), so α₀ needs refitting to keep Statcast's attack angle by height.
+3. **Attack direction.** The actual AD moves 10–13° to the opposite field of the plan, so ψ₀ (and ψ_x, by location) needs refitting to keep Statcast's AD. Spray − AD, which is what the table reports, is what survives that refit.
+4. **The bat speed normalization** needs nothing: k is solved from the full sweet-spot velocity.
+5. **Hand speed itself** becomes a sourced Statcast/Blast-style check, if a source gives it at contact.
+6. **Downstream refits.** The fielders' spray beliefs and `BAT_YAW_RATE_DPS` (`live.rs`/`play.rs`, refit mechanically as for v2), and the swing oracle's fixture (it uses λ_c 0).
+
+It would not touch the slope (the sloped barrel's geometry, §4) or the spin (e_t, §5.2).
+
 ## 6. Reproduction
 
-`cargo run --release -p bb_game --example collision_anatomy` (Parts A–F; output in `sim/out/collision/anatomy.txt`, untracked). The games counterfactual is `bb_physics::bat` `e_t` 0.40 → 0.0, then `run_env_diag -- 100 0`, then reverted (`sim/out/collision/et0_env.txt`, `base_env.txt`). Nathan 2020's figures were read from the PDF rendered at 110 dpi. The six-date Savant CSVs (attack angle by launch) are the swing note's; Sonnet's twelve-date tables are in `work/collision-targets`.
+`cargo run --release -p bb_game --example collision_anatomy` (Parts A–F; output in `sim/out/collision/anatomy.txt`, untracked). §7: `foul_diag -- 10000 et=0.40` and `et=0` (`sim/out/collision/foul_et*.txt`); `face_path_probe` (`sim/out/collision/face_path.txt`). The games counterfactual is `bb_physics::bat` `e_t` 0.40 → 0.0, then `run_env_diag -- 100 0`, then reverted (`sim/out/collision/et0_env.txt`, `base_env.txt`). Nathan 2020's figures were read from the PDF rendered at 110 dpi. The six-date Savant CSVs (attack angle by launch) are the swing note's; Sonnet's twelve-date tables are in `work/collision-targets`.

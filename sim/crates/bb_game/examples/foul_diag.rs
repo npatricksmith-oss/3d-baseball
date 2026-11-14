@@ -79,6 +79,8 @@ struct Sw {
     ev: f64,
     la: f64,
     land_dir: f64,
+    /// Launch direction (exit velocity), pull-positive, degrees.
+    launch_dir: f64,
     /// Whiff only, judged against the bat's axis extended past the tip (the world's
     /// closest-approach station is clamped to the bat, so "closest at the tip" alone does not
     /// say whether a longer bat would have hit): 1 = a longer barrel would have hit, 2 = inside
@@ -195,7 +197,7 @@ fn measure(mu: &Matchup, p: &PitchRecord) -> Option<Sw> {
     let h_aim_cm = p.aim_error.map_or(f64::NAN, |e| 100.0 * e.y);
     let h_off_cm = 100.0 * mu.template.aim_offset_z;
     let est_z_cm = p.est_error.map_or(f64::NAN, |e| 100.0 * e.y);
-    let (out, ev, la, land_dir) = match contact {
+    let (out, ev, la, land_dir, launch_dir) = match contact {
         Some(b) => {
             let land = b.flight.last().s.r;
             // Pulled or opposite by where the ball comes down (R13 uses the hit coordinates;
@@ -208,11 +210,11 @@ fn measure(mu: &Matchup, p: &PitchRecord) -> Option<Sw> {
             } else {
                 Outcome::FairOppo
             };
-            (out, b.exit_speed / 0.44704, b.launch_angle * DEG, m::atan2(-side * land.x, land.y) * DEG)
+            (out, b.exit_speed / 0.44704, b.launch_angle * DEG, m::atan2(-side * land.x, land.y) * DEG, -side * b.spray_angle * DEG)
         }
-        None => (Outcome::Whiff, f64::NAN, f64::NAN, f64::NAN),
+        None => (Outcome::Whiff, f64::NAN, f64::NAN, f64::NAN, f64::NAN),
     };
-    Some(Sw { out, ty: p.ty, h, x_in, ad, aa, vba, tilt, length_ft: len / 0.3048, bat_mph: v.norm() / 0.44704, y, ev, la, land_dir, miss, clear_cm, past_tip_cm, dt_ms, t_err_ms, h_nom_cm, h_aim_cm, h_off_cm, h_int_cm, read_ok, gap_z_cm, gap_t_ms, est_z_cm })
+    Some(Sw { out, ty: p.ty, h, x_in, ad, aa, vba, tilt, length_ft: len / 0.3048, bat_mph: v.norm() / 0.44704, y, ev, la, land_dir, launch_dir, miss, clear_cm, past_tip_cm, dt_ms, t_err_ms, h_nom_cm, h_aim_cm, h_off_cm, h_int_cm, read_ok, gap_z_cm, gap_t_ms, est_z_cm })
 }
 
 fn main() {
@@ -246,6 +248,12 @@ fn main() {
     }
     if let Some(v) = flag("phase") {
         mu.template.adj_phase_frac = v;
+    }
+    // Tangential restitution e_t of the bat–ball collision, a counterfactual (default 0.40;
+    // docs/calibration/2026-11-14-collision-sloped-barrel.md §7).
+    if let Some(v) = flag("et") {
+        mu.bat.contact.e_t = v;
+        println!("bat–ball tangential restitution e_t {v:.3} (counterfactual)");
     }
     // The bat's lag at contact λ_c, degrees (docs/calibration/2026-11-14-bat-angle-at-contact.md).
     if let Some(v) = flag("lag") {
@@ -472,6 +480,35 @@ fn statcast_tables(sws: &[Sw]) {
     }
     let fair: Vec<&Sw> = sws.iter().filter(|s| matches!(s.out, Outcome::FairPull | Outcome::FairOppo)).collect();
     println!("  all fair: n {}  spray {:+5.1} (MLB +6.1 to +8.1 by pair)  spray − AD {:+5.1} (MLB +7.2 R/R, +8.9 all)", fair.len(), mean(&fair.iter().map(|s| s.land_dir).collect::<Vec<_>>()), mean(&fair.iter().map(|s| s.land_dir - s.ad).collect::<Vec<_>>()));
+    // Sonnet's launch-angle bands (docs/calibration/2026-11-14-collision-targets.md §2, right-handed
+    // batters, twelve 2025 dates): spray and spray − AD, pull-positive; MLB in brackets. Here also the
+    // launch direction against AD and the in-flight curve (landing − launch), which MLB does not give.
+    println!("Fair spray by Sonnet's launch bands (R/R; MLB right-handed batters in brackets): n | spray (MLB) | spray − AD (MLB) | launch dir − AD | curve (land − launch)");
+    for (lo, hi, m_sp, m_sad) in [(-90.0, 0.0, "+13.3", "+17.3"), (0.0, 10.0, "+9.2", "+11.3"), (10.0, 25.0, "+5.3", "+5.1"), (25.0, 35.0, "-0.5", "-1.4"), (35.0, 50.0, "-4.7", "-7.7"), (50.0, 90.0, "-18.8", "-17.0")] {
+        let b: Vec<&&Sw> = fair.iter().filter(|s| s.la >= lo && s.la < hi).collect();
+        let m = |g: &dyn Fn(&Sw) -> f64| mean(&b.iter().map(|s| g(s)).collect::<Vec<_>>());
+        println!(
+            "  [{lo:+3.0}, {hi:+3.0}): n {:5} | {:+6.1} ({m_sp}) | {:+6.1} ({m_sad}) | {:+6.1} | {:+6.1}",
+            b.len(),
+            m(&|s| s.land_dir),
+            m(&|s| s.land_dir - s.ad),
+            m(&|s| s.launch_dir - s.ad),
+            m(&|s| s.land_dir - s.launch_dir)
+        );
+    }
+    let band: Vec<&&Sw> = fair.iter().filter(|s| s.la >= 0.0 && s.la < 50.0).collect();
+    let fit = |g: &dyn Fn(&Sw) -> f64| {
+        let n = band.len() as f64;
+        let mx = band.iter().map(|s| s.la).sum::<f64>() / n;
+        let my = band.iter().map(|s| g(s)).sum::<f64>() / n;
+        let b = band.iter().map(|s| (s.la - mx) * (g(s) - my)).sum::<f64>() / band.iter().map(|s| (s.la - mx).powi(2)).sum::<f64>();
+        (b, my + b * (5.0 - mx), my + b * (17.5 - mx))
+    };
+    let (b1, a1, c1) = fit(&|s| s.land_dir);
+    let (b2, a2, c2) = fit(&|s| s.land_dir - s.ad);
+    let (b3, a3, c3) = fit(&|s| s.launch_dir - s.ad);
+    let (b4, a4, c4) = fit(&|s| s.land_dir - s.launch_dir);
+    println!("  fits over launch 0–50° (slope per °; value at 5° / 17.5°): spray {b1:+.3} ({a1:+.1} / {c1:+.1}; MLB R −0.386); spray − AD {b2:+.3} ({a2:+.1} / {c2:+.1}); launch dir − AD {b3:+.3} ({a3:+.1} / {c3:+.1}); curve {b4:+.3} ({a4:+.1} / {c4:+.1})");
     // Bat speed by intercept depth relative to the mean (Statcast's depth bins, inches).
     let ym = mean(&sws.iter().map(|s| s.y).collect::<Vec<_>>());
     println!("Bat speed by intercept depth relative to the mean (in, + = out front): sim (MLB)");
