@@ -176,6 +176,7 @@ Runs per game were not printed until late in the day; the early rows have PA per
 
 | Date | Task | Commit | Check |
 |---|---|---|---|
+| 11-14 | A10 client half: `BallDead` marker carries the reason, `bb_ffi` decodes it (`BbPlayInfo.dead_s`, `dead_at`, `dead_reason`) | `39db36c`, `834a335` | Digests identical, seeds 1, 2, 3, 42 (`dbcf92c` against `834a335`; the change is in the timeline encoding only) |
 | 11-14 | A4 evidence: throw-choice trace and `throw_choice_probe` (hooks in `live.rs`, off by default) | `886ab88`..`cb5782b` | 256 games, seeds 0–255, traced and untraced: digests identical (2,880 runs, 56,455 pitches); 8 pre-hook digests match |
 | 11-14 | Tests the reviews deferred (dives, set-up times, left-handed release, a log without rosters) | `92b3128`, `7104cd5` | Tests only; digests identical, seeds 1, 2, 3, 42 (the worker's check; Codex review pending) |
 | 11-13 | Rosters (A2): names, numbers, order | `5ab0b51`..`050bd15` | Digests identical, seeds 1, 2, 3, 42 |
