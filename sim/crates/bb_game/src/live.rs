@@ -1587,7 +1587,7 @@ impl<'a> Sim<'a> {
             Ball::Free { path, .. } => path.bounces.first().map(|x| x.0 <= self.t).unwrap_or(false),
             _ => true,
         };
-        let on = |b: u8| self.r.iter().any(|r| r.start == b && !r.out && !r.scored);
+        let on = |b: u8| self.occupied(b);
         let mut b = if on(2) || on(3) { 4 } else if on(1) || deep { 3 } else { 2 };
         for r in self.r.iter().filter(|r| !r.out && !r.scored) {
             if let Some(target) = visible_target(r, self.f[fielder].a.throw_choice) {
@@ -1691,7 +1691,8 @@ impl<'a> Sim<'a> {
         let from = self.f[pi].target;
         let depth = m::hypot(from.x, from.y);
         let outfield_hit = depth > INFIELD_R;
-        let on = |b: u8| self.r.iter().any(|r| r.start == b && !r.out && !r.scored);
+        let occ = [self.occupied(1), self.occupied(2), self.occupied(3)];
+        let on = |b: u8| occ[(b - 1) as usize];
         let empty = !(on(1) || on(2) || on(3));
         for i in 0..9 {
             self.f[i].backs = None;
@@ -2417,6 +2418,14 @@ impl<'a> Sim<'a> {
         } else {
             [0.9, 1.0, 1.1, 1.3][(goal as usize).saturating_sub(1).min(3)]
         }
+    }
+
+    /// Whether a runner is at base `b` now, on it or between it and the next (a visible fact;
+    /// Gemini A4 review P2-3: the cutoff and backups read the bases runners started from,
+    /// so a runner from first standing on third no longer drew the cutoff to the home line
+    /// once a stopped runner stopped offering a visible target).
+    fn occupied(&self, b: u8) -> bool {
+        self.r.iter().any(|r| !r.out && !r.scored && (r.s / BASE_L + 1e-6).floor() as u8 == b)
     }
 
     /// Whether a runner ahead of runner `k` holds base `b`: he is at or short of it and not
@@ -5984,5 +5993,25 @@ mod tests {
         assert!(first.p_out > 0.999 && step.p_out > 0.999, "fixture: both sure ({} and {})", first.p_out, step.p_out);
         sim.holder_act();
         assert!(matches!(sim.ball, Ball::Held { by: SS }) && sim.f[SS].carry_to == Some(2), "he steps on second: {:?} carry {:?}", sim.ball, sim.f[SS].carry_to);
+    }
+
+    /// Gemini A4 review P2-3: the cutoff lines up for the base the lead runner threatens now.
+    /// A runner who started on first and stands on third, with the ball held in left field
+    /// 70 m out, threatens home: the cutoff goes to the home line. (It used to read where
+    /// runners started, which a stopped runner's missing visible target no longer covered.)
+    #[test]
+    fn the_cutoff_lines_up_for_home_with_a_runner_standing_on_third() {
+        const LF: usize = 6;
+        let fx = fixture(&[(5, 1)]);
+        let inp = input(&fx, vec![RunnerIn { id: fx.st.batter, base: 0, speed: 8.2 }, RunnerIn { id: 5, base: 1, speed: 8.2 }]);
+        let mut st = fx.st.clone();
+        let mut sim = new_sim(&inp, &mut st);
+        sim.t = 5.0;
+        (sim.r[0].s, sim.r[0].v, sim.r[0].goal) = (BASE_L, 0.0, 1);
+        (sim.r[1].s, sim.r[1].v, sim.r[1].goal) = (3.0 * BASE_L, 0.0, 3);
+        let from = Vec3::new(-35.0, 60.0, 0.0);
+        held_at(&mut sim, LF, from);
+        let job = sim.relay_job(from);
+        assert_eq!(job.map(|j| j.1), Some(4), "cutoff {job:?}");
     }
 }
