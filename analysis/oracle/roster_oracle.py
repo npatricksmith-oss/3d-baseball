@@ -8,6 +8,7 @@ are read out of `sim/crates/bb_game/src/roster.rs` so there is one copy.
 
     python3 roster_oracle.py search      # seeds that reject a family name and a number
     python3 roster_oracle.py show SEED   # the rosters of one seed, with the rejections
+    python3 roster_oracle.py batspeed SEED   # each player's BatSpeed (m/s), [side][position]
 """
 import re
 import sys
@@ -32,7 +33,7 @@ def philox4x32_10(ctr, key):
 # Random123 known-answer test: counter 0, key 0.
 assert philox4x32_10([0, 0, 0, 0], [0, 0]) == [0x6627E8D5, 0xE169C58D, 0xBC57AC4C, 0x9B00DBD8]
 
-ROSTER_GENERATION, ROSTER_HANDS = 12, 13
+ROSTER_GENERATION, ROSTER_HANDS, ROSTER_ABILITIES = 12, 13, 15
 
 
 class Stream:
@@ -60,6 +61,24 @@ class Stream:
 
     def index(self, n):
         return min(int(self.uniform() * n), n - 1)
+
+    def normal(self):
+        """Box-Muller: two uniforms u1, u2 give sqrt(-2 ln u1) * cos(2 pi u2) first, then the
+        sine branch on the next call (data-formats §2.4 step 5)."""
+        if getattr(self, "spare", None) is not None:
+            z, self.spare = self.spare, None
+            return z
+        import math
+        u1, u2 = self.uniform(), self.uniform()
+        r, th = math.sqrt(-2.0 * math.log(u1)), 2.0 * math.pi * u2
+        self.spare = r * math.sin(th)
+        return r * math.cos(th)
+
+    def truncated_normal(self, k):
+        while True:
+            z = self.normal()
+            if abs(z) <= k:
+                return z
 
 
 def pools():
@@ -128,8 +147,29 @@ def generate(seed):
     return teams, log
 
 
+BAT_SPEED_MU, BAT_SPEED_SIGMA_POP = 32.0, 1.25  # m/s (agent-models §10, D19)
+
+
+def bat_speeds(seed, sigma=BAT_SPEED_SIGMA_POP):
+    """data-formats §2.4 step 5: per player, stream (fielding id, RosterAbilities, sub 0); the
+    BatSpeed grade is 50 + 10 z, z standard normal truncated at +-3; the value 32.0 + sigma (g - 50) / 10.
+    Returns [side][position - 1] in m/s."""
+    out = []
+    for side in (0, 1):
+        row = []
+        for position in range(1, 10):
+            agent = (side << 8) | 0x80 | position
+            g = 50.0 + 10.0 * Stream(seed, agent, ROSTER_ABILITIES, 0).truncated_normal(3.0)
+            row.append(BAT_SPEED_MU + sigma * (g - 50.0) / 10.0)
+        out.append(row)
+    return out
+
+
 if __name__ == "__main__":
-    if sys.argv[1] == "search":
+    if sys.argv[1] == "batspeed":
+        for side, row in enumerate(bat_speeds(int(sys.argv[2]))):
+            print(side, " ".join(f"{v:.12f}" for v in row))
+    elif sys.argv[1] == "search":
         for seed in range(0, 200):
             _, log = generate(seed)
             if log["family_rejections"] and log["number_rejections"]:

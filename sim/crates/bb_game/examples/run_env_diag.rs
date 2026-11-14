@@ -4,7 +4,7 @@
 //! Q3: Ground-ball hit decomposition (H-to-1B, gap geometry, fielder timelines, dives/stretches/throws).
 //!
 //! Usage: `cargo run --release -p bb_game --example run_env_diag -- [games] [seed0]`
-//! (env `BB_BAT_SPEED_SIGMA` m/s, `BB_AIM_OFFSET_Z` m: counterfactual population and aim)
+//! (env `BB_BAT_SPEED_SIGMA` m/s, `BB_AIM_OFFSET_Z` m, `BB_K_SWING`: counterfactual population, aim and swing noise)
 
 use bb_agents::batter::count_group;
 use bb_game::game::{Game, classify_bip};
@@ -420,6 +420,9 @@ fn main() {
         let mut g = Game::with_population(seed, true, &pop);
         if let Some(off) = var("BB_AIM_OFFSET_Z") {
             g = g.map_matchups(|mu| mu.template.aim_offset_z = off);
+        }
+        if let Some(k) = var("BB_K_SWING") {
+            g = g.map_matchups(|mu| mu.knobs.swing = k);
         }
         while let Some(st) = g.step_pitch() {
             let batting_side = (st.batter >> 8) as usize;

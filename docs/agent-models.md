@@ -715,7 +715,7 @@ Defaults for an MLB-like population. **All values [E]** unless marked; `calibrat
 | `ArmSlot` | release arm angle | deg | 45 | σ 12 | (style, not graded) | |
 | `DeliveryTime` | first move → release, from the stretch | s | 0.98 | ρ 1.06 | 0.82 | 1.17 |
 | `Stamina` | effort budget | pitch-eq. | 95 (starters), 30 (relievers) | σ 12 / 6 | | |
-| `BatSpeed` | sweet-spot speed at the nominal contact instant, any aim (§3.6 v2) | m/s | 32.0 (71.6 mph; Statcast average 71.5) | σ 1.1 | 35.3 | 28.7 |
+| `BatSpeed` | sweet-spot speed at the nominal contact instant, any aim (§3.6 v2) | m/s | 32.0 (71.6 mph; Statcast average 71.5) | σ 1.25 [R: SD of batters' true mean competitive bat speed, 2.81 mph, Savant 2025 sample (SD of 216 means 2.90 less sampling error 0.72); owner ruling D19, 2026-11-14; was 1.1] | 35.75 | 28.25 |
 | `QuickHands` | T_swing | s | 0.150 | ρ 1.05 | 0.130 | 0.174 |
 | `BatControl` | σ of δ_v | cm | 1.2 | ρ 1.25 | 0.61 | 2.3 |
 | `Timing` | σ of t₀ | ms | 6.0 | ρ 1.25 | 3.1 | 11.7 |

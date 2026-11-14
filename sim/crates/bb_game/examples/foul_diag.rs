@@ -439,6 +439,15 @@ fn statcast_tables(sws: &[Sw]) {
             "{name:>9}: n {:5}  bat {:5.1} ({m_bat})  AD {:+5.1} ({m_ad})  tilt {:4.1} ({m_tilt})  length {:4.2} ({m_len})  fair spray {:+5.1} ({m_spray}, n {})  timing err {:+5.1} ms",
             b.len(), f(&|s| s.bat_mph), f(&|s| s.ad), f(&|s| s.tilt), f(&|s| s.length_ft), mean(&spray), spray.len(), f(&|s| s.t_err_ms)
         );
+        // Spray against the sweet spot's path, all fair contact and contact within ±5 ms of on
+        // time (recalibration report §2.4: does the batters' timing flatten the location trend?).
+        let fair: Vec<&&Sw> = b.iter().filter(|s| matches!(s.out, Outcome::FairPull | Outcome::FairOppo)).collect();
+        let on: Vec<&&Sw> = fair.iter().copied().filter(|s| s.t_err_ms.abs() <= 5.0).collect();
+        let m = |v: &[&&Sw], g: &dyn Fn(&Sw) -> f64| mean(&v.iter().map(|s| g(s)).collect::<Vec<_>>());
+        println!(
+            "{:>9}  fair: spray − AD {:+5.1} | on time (±5 ms, n {:4}): spray {:+5.1}, AD {:+5.1}, spray − AD {:+5.1}",
+            "", m(&fair, &|s| s.land_dir - s.ad), on.len(), m(&on, &|s| s.land_dir), m(&on, &|s| s.ad), m(&on, &|s| s.land_dir - s.ad)
+        );
     }
     // Bat speed by intercept depth relative to the mean (Statcast's depth bins, inches).
     let ym = mean(&sws.iter().map(|s| s.y).collect::<Vec<_>>());

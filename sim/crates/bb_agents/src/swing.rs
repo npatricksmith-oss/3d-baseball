@@ -84,7 +84,9 @@ pub struct SwingTemplate {
     pub zone_bottom_frac: f64,
     pub zone_top_frac: f64,
     /// Vertical offset of the aim point from the predicted ball center, m (negative = aim
-    /// under the ball to lift it) [E, authored against mean launch angle, calibration §4.4].
+    /// under the ball to lift it) [E, authored against mean launch angle, calibration §4.4;
+    /// re-checked on v2 with per-player bat speed, docs/calibration/2026-11-14-swing-recalibration.md
+    /// §2.3: −2.0 cm gives 11.8° in games against Statcast's 12.2°].
     pub aim_offset_z: f64,
     /// Mid-swing adjustment stops this long before the aim time, s [E] (agent-models §3.6
     /// `t_cut`; PLAN range 50–80 ms).
