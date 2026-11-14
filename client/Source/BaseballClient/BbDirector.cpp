@@ -7,6 +7,7 @@
 #include "Async/Async.h"
 #include "Camera/CameraActor.h"
 #include "Camera/CameraComponent.h"
+#include "Camera/PlayerCameraManager.h"
 #include "Components/DirectionalLightComponent.h"
 #include "Components/SkyAtmosphereComponent.h"
 #include "Components/SkyLightComponent.h"
@@ -394,6 +395,11 @@ void ABbDirector::BeginPlay()
 	FParse::Value(Cmd, TEXT("BbShotStart="), NextShot);
 	FParse::Value(Cmd, TEXT("BbBenchSeconds="), BenchSeconds);
 	FParse::Value(Cmd, TEXT("BbDiveShots="), DiveShotsLeft);
+	{
+		int32 Cut = 1;
+		FParse::Value(Cmd, TEXT("BbSideCut="), Cut);
+		bSideCut = Cut != 0;
+	}
 	bStagingLog = FParse::Param(Cmd, TEXT("BbStagingLog"));
 	if (FParse::Param(Cmd, TEXT("BbClipSpeeds")))
 	{
@@ -495,6 +501,36 @@ void ABbDirector::BeginPlay()
 	UE_LOG(LogBb, Display, TEXT("Sim loaded from %s, seed %llu"), *Lib, Seed);
 	// The first pitch, like every other, resolves on a worker; Tick starts it when it is ready.
 	RequestNext();
+}
+
+float ABbDirector::SideCutFade()
+{
+	if (!bSideCutPlanned)
+	{
+		return 0.f;
+	}
+	const float BackAt = ResetDuration - SideCutTailS;
+	if (!bSideCutJumped)
+	{
+		const float Out = FMath::Clamp((ResetTime - SideCutLeadS) / SideCutFadeS, 0.f, 1.f);
+		if (Out < 1.f)
+		{
+			return Out;
+		}
+		// Black: skip the middle of the jog. The movers (on ResetTime) and the players going
+		// off (on ExitClock) jump together, so everyone is where the full changeover would
+		// have him SideCutHoldS before the picture returns.
+		const float Skip = FMath::Max(0.f, BackAt - SideCutHoldS - ResetTime);
+		ResetTime += Skip;
+		ExitClock += Skip;
+		bSideCutJumped = true;
+		if (bStagingLog)
+		{
+			UE_LOG(LogBb, Display, TEXT("BB_SIDECUT play=%u skipped=%.2f of %.2f s back_at=%.2f"), NextPlay.Info.play_index, Skip, ResetDuration, BackAt);
+		}
+		return 1.f;
+	}
+	return 1.f - FMath::Clamp((ResetTime - BackAt) / SideCutFadeS, 0.f, 1.f);
 }
 
 void ABbDirector::RequestNext()
@@ -812,6 +848,9 @@ bool ABbDirector::StartReset(const FBbPlay& Next)
 			ResetDuration = FMath::Max3(ResetDuration, ResetThrowAt + ResetFlight + 0.3f, M.Depart + TravelSeconds(Walk, M.SpeedMps, ResetAccelMps2));
 		}
 	}
+	// Worth cutting only if there is a middle to skip.
+	bSideCutPlanned = bSideCut && bSideChange && ResetDuration > SideCutLeadS + 2.f * SideCutFadeS + SideCutHoldS + SideCutTailS + 2.f;
+	bSideCutJumped = false;
 	if (bStagingLog)
 	{
 		UE_LOG(LogBb, Display, TEXT("BB_RESET play=%u side_change=%d staying=%d leaving=%d duration=%.2f throw_at=%.2f"),
@@ -1375,13 +1414,30 @@ void ABbDirector::Tick(float DeltaSeconds)
 		{
 			bPaused = !bPaused;
 		}
+		// The speeds the keys step through (owner, 2026-11-14). -BbSpeed= may start anywhere,
+		// for unattended checks; the first key press moves to the next step up or down.
+		static const float SpeedSteps[] = { 0.25f, 0.5f, 1.f, 1.5f, 2.f, 4.f, 8.f, 16.f };
 		if (PC->WasInputKeyJustPressed(EKeys::Equals))
 		{
-			Speed = FMath::Min(Speed * 1.5f, 16.f);
+			for (float Step : SpeedSteps)
+			{
+				if (Step > Speed + 1e-3f)
+				{
+					Speed = Step;
+					break;
+				}
+			}
 		}
 		if (PC->WasInputKeyJustPressed(EKeys::Hyphen))
 		{
-			Speed = FMath::Max(Speed / 1.5f, 0.1f);
+			for (int32 I = UE_ARRAY_COUNT(SpeedSteps) - 1; I >= 0; --I)
+			{
+				if (SpeedSteps[I] < Speed - 1e-3f)
+				{
+					Speed = SpeedSteps[I];
+					break;
+				}
+			}
 		}
 		if (PC->WasInputKeyJustPressed(EKeys::C))
 		{
@@ -1426,6 +1482,31 @@ void ABbDirector::Tick(float DeltaSeconds)
 		if (bReset)
 		{
 			ResetTime += SimDt;
+			const float Black = SideCutFade();
+			if (APlayerController* PC = GetWorld()->GetFirstPlayerController())
+			{
+				if (PC->PlayerCameraManager)
+				{
+					PC->PlayerCameraManager->SetManualCameraFade(Black, FLinearColor::Black, false);
+				}
+				if (ABbHUD* CardHud = Cast<ABbHUD>(PC->GetHUD()))
+				{
+					CardHud->CardAlpha = Black;
+					if (Black > 0.f && CardHud->Card.IsEmpty())
+					{
+						// The half just played is the board before the last play.
+						static const TCHAR* Ord[] = { TEXT("th"), TEXT("st"), TEXT("nd"), TEXT("rd") };
+						const int32 N = Before.inning;
+						const TCHAR* Suffix = (N % 100 >= 11 && N % 100 <= 13) || N % 10 > 3 ? Ord[0] : Ord[N % 10];
+						CardHud->Card = FString::Printf(TEXT("%s of the %d%s"), Before.top ? TEXT("Middle") : TEXT("End"), N, Suffix);
+						CardHud->CardScore = FString::Printf(TEXT("AWAY %d     HOME %d"), Current.Info.away_runs, Current.Info.home_runs);
+					}
+					else if (Black <= 0.f)
+					{
+						CardHud->Card.Reset();
+					}
+				}
+			}
 			ResetFrame(ResetTime, Frame, bBallShown);
 			bHave = true;
 		}
@@ -1681,6 +1762,19 @@ void ABbDirector::Tick(float DeltaSeconds)
 					}
 				}
 				bReset = false;
+				bSideCutPlanned = false;
+				if (APlayerController* PC = GetWorld()->GetFirstPlayerController())
+				{
+					if (PC->PlayerCameraManager)
+					{
+						PC->PlayerCameraManager->SetManualCameraFade(0.f, FLinearColor::Black, false);
+					}
+					if (ABbHUD* CardHud = Cast<ABbHUD>(PC->GetHUD()))
+					{
+						CardHud->CardAlpha = 0.f;
+						CardHud->Card.Reset();
+					}
+				}
 				BeginPlayback(MoveTemp(NextPlay));
 				NextPlay = FBbPlay();
 			}
