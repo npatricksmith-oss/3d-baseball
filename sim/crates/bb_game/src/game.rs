@@ -125,6 +125,8 @@ pub struct PitchStep {
     /// The batted ball's full path, if there was contact.
     pub batted: Option<bb_physics::ground::BallPath>,
     pub rules_events: Vec<Event>,
+    /// Scorer's ruling from this pitch's persisted record, when recording presentation.
+    pub scorer_ruling: Option<bb_stats::scorer::PlayRuling>,
     /// Every fact sent to the rules engine for this pitch.
     pub facts: Vec<Input>,
     /// Every out on this pitch, in time order, as the umpire calls it.
@@ -233,6 +235,7 @@ impl Game {
         let slot = st.next_up[side];
         let mu = &self.mus[self.mu_ix[side][slot]];
         let batter = st.batter;
+        let outs_before = st.outs as u32;
         if st.batter != self.last_batter {
             self.prev = None;
             self.last_v = None;
@@ -340,12 +343,13 @@ impl Game {
                 let target = crate::play::base_pos(1);
                 let origin = crate::live::throw_release_point(at, target, self.fattrs[fside as usize][pos].throws);
                 let distance = bb_math::m::hypot(target.x - origin.x, target.y - origin.y);
-                let flight = bb_physics::throw::solve_throw(&mu.env, origin.z, 1.3, distance, avg.arm)?.t_flight;
+                let flight = bb_physics::throw::solve_throw(&mu.env, origin.z, 1.3, distance, avg.arm).map(|s| s.t_flight).unwrap_or(f64::INFINITY);
                 Some(touch - (t + avg.transfer + flight))
             });
+            let touches = out.facts.iter().filter_map(|f| match f { Input::BaseTouched { t, agent, base, holding_ball: false } => Some((*agent, *base, *t)), _ => None }).collect();
             scorer_evidence = Some(crate::eventlog::ScorerPlayEvidence {
                 batter, runners: scorer_runners, first_touch, first_handling: out.first_handling,
-                secured, margin, throws: out.scorer_throws.clone(),
+                secured, margin, throws: out.scorer_throws.clone(), carries: out.scorer_carries.clone(), touches,
             });
             if record {
                 // Every other tick, and always the last one (the instant the play ended).
@@ -405,6 +409,7 @@ impl Game {
         }
         let pitcher = ((1 - side as u16) << 8) | 0x81;
         crate::eventlog::write_pitch(&mut self.writer, play, pitcher, &rec, &self.pending_rules, scorer_evidence.as_ref());
+        let scorer_ruling = if record { self.writer.latest_play().and_then(|p| bb_stats::scorer::score_play(p, outs_before, bb_stats::scorer::DEFAULT_CHOICE_MARGIN_S)) } else { None };
         let rules_events = std::mem::take(&mut self.pending_rules);
         if let Some((ev_, la, spray)) = rec.batted {
             if let Some(Event::PlateAppearanceEnded { batter, result: PaResult::BattedBall }) = rules_events.iter().find(|e| matches!(e, Event::PlateAppearanceEnded { .. })) {
@@ -415,7 +420,7 @@ impl Game {
             }
         }
         self.play += 1;
-        Some(PitchStep { play, batter, record: rec, pitch_flight, batted, rules_events, facts, calls, viz })
+        Some(PitchStep { play, batter, record: rec, pitch_flight, batted, rules_events, scorer_ruling, facts, calls, viz })
     }
 
     /// Close the log and tally the result from the rules events (event sourcing, PLAN §4.3).

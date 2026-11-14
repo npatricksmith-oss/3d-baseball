@@ -382,7 +382,7 @@ The rules engine also publishes the **legal-command set** at each decision point
 
 ## 10. Official Scorer
 
-The scorer is a **pure function of the event log** (PLAN §4.3), versioned by `scorer_version`, living in `bb_stats` with its decision helpers in `bb_rules`. Every ruling writes `ScorerRuling` plus `ScorerEvidence` (data-formats §4.3) so a later scorer version can re-rule from the log.
+The scorer is a **pure function of the event log** (PLAN §4.3), versioned by `scorer_version`, living in `bb_stats` with its decision helpers in `bb_rules`. The event writer records `ScorerEvidence` (data-formats §4.3); rulings are derived when the log is read, so a later scorer version can re-rule without re-simulation.
 
 ### 10.1 The counterfactual test
 
@@ -410,12 +410,13 @@ touch when it occurs, and each throw's release time, origin and target. The refe
 is computed in `bb_game` after the play, never exposed to agents: from the first secure
 possession's location and time, a set grade-50 fielder uses the position's average transfer
 and arm, the actual environment, and the throw physics to first. The margin is actual batter
-first-touch time minus reference arrival; a missing touch, possession, or feasible throw is
-explicitly marked unavailable. For a play ending before first is touched there is no actual
+first-touch time minus reference arrival; a missing touch or possession is explicitly marked unavailable. A throw that cannot reach
+first on the fly has a negative-infinite margin. For a play ending before first is touched there is no actual
 time to first and no fabricated margin. These facts support re-ruling without simulation.
 Fielding-error rulings remain provisional until A17: do not invent an error from a miss.
-Hit value on advances after a throw and sacrifice-fly territorial judgment remain provisional
-where the logged facts cannot determine the necessary scorer judgment.
+The batter's running goal at an attempted throw to another base is recorded: extra bases
+chosen only afterward are provisionally treated as on the throw. This is an observable
+heuristic, not a full counterfactual of how far he would have run absent the throw.
 
 ### 10.3 Errors on runners and extra bases
 
@@ -458,7 +459,7 @@ Checked by `bb_stats` tests on every generated game (calibration-targets: 1,000-
 | I5 | Σ batters faced by pitchers = opponent PA |
 | I6 | Runs = count of `RunScored` = Σ inning line score |
 | I7 | H = 1B + 2B + 3B + HR |
-| I8 | Pitches = balls + strikes + in-play pitches (strikes include fouls and foul tips) |
+| I8 | Pitches = balls + strikes + in-play pitches + hit-by-pitch outcomes (strikes include fouls and foul tips; the sim logs HBP separately) |
 | I9 | Earned runs ≤ runs per pitcher; team ER ≤ team R |
 | I10 | Every runner who reached base ends the half-inning scored, out, or left on base, exactly once |
 | I11 | Assists and putouts: every out has exactly one putout; total chances = PO + A + E |

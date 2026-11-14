@@ -77,6 +77,13 @@ impl LogWriter {
         self.digest
     }
 
+    /// Decode the most recently written play for presentation, without finalizing the log.
+    pub fn latest_play(&self) -> Option<PlayRecord<'_>> {
+        let frame = frames(&self.out).ok()?.into_iter().last()?;
+        if !flatbuffers::buffer_has_identifier(frame, FILE_ID, true) { return None; }
+        flatbuffers::size_prefixed_root::<PlayRecord>(frame).ok()
+    }
+
     pub fn digest(&self) -> Digest {
         self.digest
     }

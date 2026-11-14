@@ -359,7 +359,7 @@ pub fn encode(step: &PitchStep, st: &RulesState, rosters: &crate::roster::Roster
         },
     );
     let duration = t_end as f32;
-    let text = crate::describe::describe(rec.call, rec.batted.map(|b| b.1.to_degrees()), &step.rules_events, &step.facts, Some(rosters));
+    let text = crate::describe::describe_scored(rec.call, rec.batted.map(|b| b.1.to_degrees()), &step.rules_events, &step.facts, Some(rosters), step.scorer_ruling);
     let summary = fbb.create_string(&text);
     let root = tl::PlayTimeline::create(
         &mut fbb,

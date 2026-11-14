@@ -247,11 +247,15 @@ Grouped by producer. "Physical" events record what the world did. "Rules" events
 
 For each live ball `ScorerEvidence` records the batter and starting runners, the first
 handling (including a glove deflection), the first secure possession and its location,
-the batter's actual first-base touch when present, and the origin, target, base and time
-of each throw. `has_margin` distinguishes a computed reference margin from absent evidence;
+each runner's actual base touches (including the batter's first-base touch when present),
+and the origin, target, base and time
+of each throw, including whether the defense chose it as an attempted out rather than a
+routine return, and the batter's running goal at release. A fielder's attempt to carry
+the ball to another base is recorded separately from throws. `has_margin` distinguishes a computed reference margin from absent evidence;
 `clean_play_margin_s` is actual first touch minus the arrival of the set grade-50 reference
 throw. It is computed after the play from the first secure possession, not used by agents.
-No margin is asserted when the batter never touched first or the reference cannot be solved.
+No margin is asserted when the batter never touched first or the ball was not secured. A
+reference throw unable to reach first on the fly has a negative-infinite margin.
 Runner outs and their destination bases are recorded by `RunnerOut`. Errors are not yet ruled.
 
 

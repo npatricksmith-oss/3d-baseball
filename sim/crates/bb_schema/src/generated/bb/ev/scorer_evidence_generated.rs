@@ -34,6 +34,8 @@ impl<'a> ScorerEvidence<'a> {
   pub const VT_SECURED_AT: ::flatbuffers::VOffsetT = 30;
   pub const VT_HAS_MARGIN: ::flatbuffers::VOffsetT = 32;
   pub const VT_THROWS: ::flatbuffers::VOffsetT = 34;
+  pub const VT_CARRIES: ::flatbuffers::VOffsetT = 36;
+  pub const VT_TOUCHES: ::flatbuffers::VOffsetT = 38;
 
   #[inline]
   pub unsafe fn init_from_table(table: ::flatbuffers::Table<'a>) -> Self {
@@ -49,6 +51,8 @@ impl<'a> ScorerEvidence<'a> {
     builder.add_handling_s(args.handling_s);
     builder.add_first_touch_s(args.first_touch_s);
     builder.add_clean_play_margin_s(args.clean_play_margin_s);
+    if let Some(x) = args.touches { builder.add_touches(x); }
+    if let Some(x) = args.carries { builder.add_carries(x); }
     if let Some(x) = args.throws { builder.add_throws(x); }
     if let Some(x) = args.secured_at { builder.add_secured_at(x); }
     if let Some(x) = args.runners { builder.add_runners(x); }
@@ -177,6 +181,20 @@ impl<'a> ScorerEvidence<'a> {
     // which contains a valid value in this slot
     unsafe { self._tab.get::<::flatbuffers::ForwardsUOffset<::flatbuffers::Vector<'a, ::flatbuffers::ForwardsUOffset<ScorerThrow>>>>(ScorerEvidence::VT_THROWS, None)}
   }
+  #[inline]
+  pub fn carries(&self) -> Option<::flatbuffers::Vector<'a, ::flatbuffers::ForwardsUOffset<ScorerCarry<'a>>>> {
+    // Safety:
+    // Created from valid Table for this object
+    // which contains a valid value in this slot
+    unsafe { self._tab.get::<::flatbuffers::ForwardsUOffset<::flatbuffers::Vector<'a, ::flatbuffers::ForwardsUOffset<ScorerCarry>>>>(ScorerEvidence::VT_CARRIES, None)}
+  }
+  #[inline]
+  pub fn touches(&self) -> Option<::flatbuffers::Vector<'a, ::flatbuffers::ForwardsUOffset<ScorerTouch<'a>>>> {
+    // Safety:
+    // Created from valid Table for this object
+    // which contains a valid value in this slot
+    unsafe { self._tab.get::<::flatbuffers::ForwardsUOffset<::flatbuffers::Vector<'a, ::flatbuffers::ForwardsUOffset<ScorerTouch>>>>(ScorerEvidence::VT_TOUCHES, None)}
+  }
 }
 
 impl ::flatbuffers::Verifiable for ScorerEvidence<'_> {
@@ -201,6 +219,8 @@ impl ::flatbuffers::Verifiable for ScorerEvidence<'_> {
      .visit_field::<super::Vec3d>("secured_at", Self::VT_SECURED_AT, false)?
      .visit_field::<bool>("has_margin", Self::VT_HAS_MARGIN, false)?
      .visit_field::<::flatbuffers::ForwardsUOffset<::flatbuffers::Vector<'_, ::flatbuffers::ForwardsUOffset<ScorerThrow>>>>("throws", Self::VT_THROWS, false)?
+     .visit_field::<::flatbuffers::ForwardsUOffset<::flatbuffers::Vector<'_, ::flatbuffers::ForwardsUOffset<ScorerCarry>>>>("carries", Self::VT_CARRIES, false)?
+     .visit_field::<::flatbuffers::ForwardsUOffset<::flatbuffers::Vector<'_, ::flatbuffers::ForwardsUOffset<ScorerTouch>>>>("touches", Self::VT_TOUCHES, false)?
      .finish();
     Ok(())
   }
@@ -222,6 +242,8 @@ pub struct ScorerEvidenceArgs<'a> {
     pub secured_at: Option<&'a super::Vec3d>,
     pub has_margin: bool,
     pub throws: Option<::flatbuffers::WIPOffset<::flatbuffers::Vector<'a, ::flatbuffers::ForwardsUOffset<ScorerThrow<'a>>>>>,
+    pub carries: Option<::flatbuffers::WIPOffset<::flatbuffers::Vector<'a, ::flatbuffers::ForwardsUOffset<ScorerCarry<'a>>>>>,
+    pub touches: Option<::flatbuffers::WIPOffset<::flatbuffers::Vector<'a, ::flatbuffers::ForwardsUOffset<ScorerTouch<'a>>>>>,
 }
 impl<'a> Default for ScorerEvidenceArgs<'a> {
   #[inline]
@@ -243,6 +265,8 @@ impl<'a> Default for ScorerEvidenceArgs<'a> {
       secured_at: None,
       has_margin: false,
       throws: None,
+      carries: None,
+      touches: None,
     }
   }
 }
@@ -317,6 +341,14 @@ impl<'a: 'b, 'b, A: ::flatbuffers::Allocator + 'a> ScorerEvidenceBuilder<'a, 'b,
     self.fbb_.push_slot_always::<::flatbuffers::WIPOffset<_>>(ScorerEvidence::VT_THROWS, throws);
   }
   #[inline]
+  pub fn add_carries(&mut self, carries: ::flatbuffers::WIPOffset<::flatbuffers::Vector<'b , ::flatbuffers::ForwardsUOffset<ScorerCarry<'b >>>>) {
+    self.fbb_.push_slot_always::<::flatbuffers::WIPOffset<_>>(ScorerEvidence::VT_CARRIES, carries);
+  }
+  #[inline]
+  pub fn add_touches(&mut self, touches: ::flatbuffers::WIPOffset<::flatbuffers::Vector<'b , ::flatbuffers::ForwardsUOffset<ScorerTouch<'b >>>>) {
+    self.fbb_.push_slot_always::<::flatbuffers::WIPOffset<_>>(ScorerEvidence::VT_TOUCHES, touches);
+  }
+  #[inline]
   pub fn new(_fbb: &'b mut ::flatbuffers::FlatBufferBuilder<'a, A>) -> ScorerEvidenceBuilder<'a, 'b, A> {
     let start = _fbb.start_table();
     ScorerEvidenceBuilder {
@@ -350,6 +382,8 @@ impl ::core::fmt::Debug for ScorerEvidence<'_> {
       ds.field("secured_at", &self.secured_at());
       ds.field("has_margin", &self.has_margin());
       ds.field("throws", &self.throws());
+      ds.field("carries", &self.carries());
+      ds.field("touches", &self.touches());
       ds.finish()
   }
 }

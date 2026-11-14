@@ -1,7 +1,7 @@
 //! One line a viewer can read for each pitch: the call, and what happened if the plate
 //! appearance ended. Built only from the pitch record, the rules events, and the facts of
-//! the play. The hit / fielder's-choice wording uses the provisional ruling
-//! [`crate::game::classify_bip`]; the official scorer will replace it.
+//! the play. Timeline captions use the scorer's log-backed ruling; callers without a
+//! persisted ruling retain the provisional laboratory classification.
 
 use bb_rules::{AgentId, Event, Input, OutKind, PaResult};
 
@@ -28,6 +28,11 @@ fn runs_phrase(n: usize) -> String {
 /// the game's rosters, a line that ends a plate appearance starts with the batter's family
 /// name ("Ramirez: Single to left"; family names are unique in a game, data-formats §2.4).
 pub fn describe(call: Call, launch_deg: Option<f64>, events: &[Event], facts: &[Input], rosters: Option<&Rosters>) -> String {
+    describe_scored(call, launch_deg, events, facts, rosters, None)
+}
+
+/// As `describe`, but use the ruling reconstructed from this play's event log.
+pub fn describe_scored(call: Call, launch_deg: Option<f64>, events: &[Event], facts: &[Input], rosters: Option<&Rosters>, ruling: Option<bb_stats::scorer::PlayRuling>) -> String {
     let runs = events.iter().filter(|e| matches!(e, Event::RunScored { .. })).count();
     let outs: Vec<(AgentId, OutKind, u8)> = events.iter().filter_map(|e| if let Event::RunnerOut { runner, kind, base } = e { Some((*runner, *kind, *base)) } else { None }).collect();
     let ended = events.iter().find_map(|e| if let Event::PlateAppearanceEnded { batter, result } = e { Some((*batter, *result)) } else { None });
@@ -52,7 +57,11 @@ pub fn describe(call: Call, launch_deg: Option<f64>, events: &[Event], facts: &[
             let la = launch_deg.unwrap_or(0.0);
             let to = fielded_to(facts).map(|t| format!(" {t}")).unwrap_or_default();
             let batter_out = outs.iter().find(|(r, _, _)| *r == batter).map(|x| x.1);
-            let (reached, hit) = crate::game::classify_bip(batter, events, facts);
+            let (reached, hit) = match ruling.map(|r| r.outcome) {
+                Some(bb_stats::scorer::Outcome::Hit(_)) => (true, true),
+                Some(bb_stats::scorer::Outcome::FieldersChoice) => (true, false),
+                _ => crate::game::classify_bip(batter, events, facts),
+            };
             let multi = match outs.len() {
                 2 => "Double play: ",
                 3 => "Triple play: ",
@@ -66,7 +75,10 @@ pub fn describe(call: Call, launch_deg: Option<f64>, events: &[Event], facts: &[
                 Some(_) if !reached => format!("{multi}{}{to}", if multi.is_empty() { "Ground out" } else { "ground out" }),
                 _ if hit => {
                     // The furthest base the batter reached safely names the hit.
-                    let bases = events.iter().filter_map(|e| if let Event::RunnerAdvanced { runner, to, .. } = e { (*runner == batter).then_some(*to) } else { None }).max().unwrap_or(1);
+                    let bases = match ruling.map(|r| r.outcome) {
+                        Some(bb_stats::scorer::Outcome::Hit(bases)) => bases,
+                        _ => events.iter().filter_map(|e| if let Event::RunnerAdvanced { runner, to, .. } = e { (*runner == batter).then_some(*to) } else { None }).max().unwrap_or(1),
+                    };
                     let name = match bases {
                         2 => "Double",
                         3 => "Triple",
@@ -111,6 +123,13 @@ mod tests {
     }
     fn first(t: f64) -> Input {
         Input::BaseTouched { t, agent: B, base: 1, holding_ball: false }
+    }
+
+    #[test]
+    fn caption_uses_log_scorer_when_provisional_classifier_disagrees() {
+        let events = [Event::RunnerOut { runner: R, base: 3, kind: OutKind::Tag }, Event::RunnerAdvanced { runner: B, from: 0, to: 1, cause: bb_rules::AdvanceCause::OnPlay }, ended(PaResult::BattedBall)];
+        let ruling = bb_stats::scorer::PlayRuling { batter: B, outcome: bb_stats::scorer::Outcome::Hit(1), sacrifice_fly: false, rbi: 0 };
+        assert_eq!(describe_scored(Call::InPlay, Some(5.0), &events, &[by(6), first(4.3)], None, Some(ruling)), "Single to short, runner out on the bases");
     }
 
     // The expected strings are how a radio announcer would call each play.

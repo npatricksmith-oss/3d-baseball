@@ -417,9 +417,16 @@ pub struct ScorerThrowFact {
     pub origin: Vec3,
     pub target: Vec3,
     pub base: u8,
+    /// The throw was selected as a play on a runner, not a routine return.
+    pub attempted_out: bool,
+    pub batter_goal: u8,
 }
 
+#[derive(Clone, Copy, Debug)]
+pub struct ScorerCarryFact { pub fielder: AgentId, pub t: f64, pub base: u8, pub batter_goal: u8 }
+
 pub struct LiveOutput {
+    pub scorer_carries: Vec<ScorerCarryFact>,
     /// First glove contact with the batted ball, including a deflection.
     pub first_handling: Option<(f64, AgentId)>,
     /// Physical releases, independent of visualization recording.
@@ -2687,6 +2694,10 @@ impl<'a> Sim<'a> {
             // hurried-throws review #2).
             if self.t >= fd.ready_at {
                 self.f[by].target = tgt;
+                if margins.is_some() && !self.out.scorer_carries.iter().any(|c| c.fielder == fd.id && c.base == b) {
+                    let batter_goal = self.r.iter().find(|r| r.start == 0).map(|r| r.goal).unwrap_or(0);
+                    self.out.scorer_carries.push(ScorerCarryFact { fielder: fd.id, t: self.t, base: b, batter_goal });
+                }
             }
             return;
         }
@@ -2707,6 +2718,7 @@ impl<'a> Sim<'a> {
         if through {
             if let Some(i) = relay {
                 self.throw_to(by, leg, b, i, true);
+                if let Some(fact) = self.out.scorer_throws.last_mut() { fact.attempted_out = margins.is_some(); }
                 return;
             }
         }
@@ -2717,6 +2729,7 @@ impl<'a> Sim<'a> {
             return;
         }
         self.throw_to(by, tgt, b, receiver, false);
+        if let Some(fact) = self.out.scorer_throws.last_mut() { fact.attempted_out = margins.is_some(); }
         self.f[receiver].target = tgt;
         // A throw that goes past the cutoff man ends his job: he pulls up, free to back it up.
         for i in 0..9 {
@@ -2757,7 +2770,8 @@ impl<'a> Sim<'a> {
         let h = Vec3::new(tgt.x - r0.x, tgt.y - r0.y, 0.0).normalized().rotate(Vec3::Z, ex.yaw_err);
         self.launch_throw(throw_state(r0, h, ex.speed, elev), tgt, b, receiver, relay);
         self.out.released.push((self.t, fd.id));
-        self.out.scorer_throws.push(ScorerThrowFact { thrower: fd.id, t: self.t, origin: r0, target: tgt, base: b });
+        let batter_goal = self.r.iter().find(|r| r.start == 0).map(|r| r.goal).unwrap_or(0);
+        self.out.scorer_throws.push(ScorerThrowFact { thrower: fd.id, t: self.t, origin: r0, target: tgt, base: b, attempted_out: false, batter_goal });
         self.out.hurry.push((hurry, su.off_balance));
     }
 
@@ -2920,7 +2934,7 @@ fn new_sim<'a>(inp: &'a LiveInput<'a>, st: &'a mut RulesState) -> Sim<'a> {
         f,
         r,
         primary: 0,
-        out: LiveOutput { first_handling: None, scorer_throws: Vec::new(), facts: Vec::new(), events: Vec::new(), path, ball_track: Vec::new(), actors, secured: Vec::new(), released: Vec::new(), hurry: Vec::new(), dives: Vec::new(), calls: Vec::new() },
+        out: LiveOutput { scorer_carries: Vec::new(), first_handling: None, scorer_throws: Vec::new(), facts: Vec::new(), events: Vec::new(), path, ball_track: Vec::new(), actors, secured: Vec::new(), released: Vec::new(), hurry: Vec::new(), dives: Vec::new(), calls: Vec::new() },
         bounce_k: 1000,
         done: false,
         last_fact_t: t_c,
