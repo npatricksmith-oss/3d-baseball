@@ -3,6 +3,7 @@
 #include "CoreMinimal.h"
 #include "GameFramework/GameModeBase.h"
 #include "GameFramework/HUD.h"
+#include "bb_ffi.h"
 #include "BbGameMode.generated.h"
 
 /** Spawns the director, which builds the field and plays the game. No pawn. */
@@ -48,4 +49,21 @@ public:
 	FString HomeRunKind;
 	/** 0 hidden, 1 fully shown. */
 	float HomeRunAlpha = 0.f;
+	/** The box score (A12): a newspaper box over the field. Held with Tab during a game, over
+	 *  a dimmed field with what has happened so far; at the end of the game it fades in over
+	 *  black and stays until the player quits. */
+	BbBoxScore Box{};
+	/** Box holds a score read from the sim. */
+	bool bBoxData = false;
+	/** The linescore's second line and the title: "FINAL", or "GAME IN PROGRESS". */
+	FString BoxTitle;
+	FString BoxSubtitle;
+	/** 0 hidden, 1 fully shown. */
+	float BoxAlpha = 0.f;
+	/** How dark the field is behind the paper (Tab dims it; the final box sits on black). */
+	float BoxDim = 0.f;
+
+private:
+	/** Draws the box score on the paper rectangle; S is the screen's scale (height / 720). */
+	void DrawBox(float S);
 };

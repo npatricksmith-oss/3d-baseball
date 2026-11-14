@@ -89,4 +89,163 @@ void ABbHUD::DrawHUD()
 		DrawRect(FLinearColor(0.f, 0.f, 0.f, 0.6f), X - 18.f * S, Y - 8.f * S, W + 36.f * S, H + 16.f * S);
 		DrawText(Umpire, bUmpireClose ? FLinearColor(1.f, 0.35f, 0.3f) : FLinearColor::White, X, Y, Font, Scale);
 	}
+	if (bBoxData && BoxAlpha > 0.f)
+	{
+		DrawBox(S);
+	}
+}
+
+namespace
+{
+	const TCHAR* PositionCode(int32 Pos)
+	{
+		static const TCHAR* Codes[] = { TEXT(""), TEXT("P"), TEXT("C"), TEXT("1B"), TEXT("2B"), TEXT("3B"), TEXT("SS"), TEXT("LF"), TEXT("CF"), TEXT("RF") };
+		return Pos >= 1 && Pos <= 9 ? Codes[Pos] : TEXT("");
+	}
+
+	/** "Davis 2, Hayes" for the batters with a count in Pick; empty if none. */
+	template <typename F>
+	FString NoteList(const BbBoxTeam& T, F Pick)
+	{
+		FString Out;
+		for (uint32 I = 0; I < T.n_lines; ++I)
+		{
+			const int32 N = Pick(T.lines[I]);
+			if (N > 0)
+			{
+				Out += FString::Printf(TEXT("%s%s%s"), Out.IsEmpty() ? TEXT("") : TEXT(", "), UTF8_TO_TCHAR(T.lines[I].family), N > 1 ? *FString::Printf(TEXT(" %d"), N) : TEXT(""));
+			}
+		}
+		return Out;
+	}
+}
+
+void ABbHUD::DrawBox(float S)
+{
+	UFont* Font = GEngine->GetLargeFont();
+	const float A = BoxAlpha;
+	const float W = Canvas->ClipX;
+	const float H = Canvas->ClipY;
+	// The field behind the paper.
+	DrawRect(FLinearColor(0.f, 0.f, 0.f, BoxDim * A), 0.f, 0.f, W, H);
+	// Newspaper stock and ink. One reference unit is S pixels; the layout is drawn for 1280 x 720.
+	const FLinearColor Paper(0.93f, 0.90f, 0.80f, A);
+	const FLinearColor Ink(0.09f, 0.08f, 0.07f, A);
+	const FLinearColor Faint(0.09f, 0.08f, 0.07f, 0.72f * A);
+	const float RefW = W / S;
+	const float PaperX = FMath::Max(20.f, (RefW - 1220.f) * 0.5f);
+	const float PaperW = RefW - 2.f * PaperX;
+	DrawRect(Paper, PaperX * S, 18.f * S, PaperW * S, 684.f * S);
+	DrawRect(Ink, (PaperX + 8.f) * S, 26.f * S, (PaperW - 16.f) * S, 2.f * S);
+	DrawRect(Ink, (PaperX + 8.f) * S, 31.f * S, (PaperW - 16.f) * S, 1.f * S);
+
+	const float TextScale = 1.0f * S;
+	auto Right = [&](const FString& Str, float RightEdge, float Y, const FLinearColor& Col, float Scale)
+	{
+		float TW = 0.f, TH = 0.f;
+		GetTextSize(Str, TW, TH, Font, Scale);
+		DrawText(Str, Col, RightEdge * S - TW, Y * S, Font, Scale);
+	};
+	auto Centered = [&](const FString& Str, float CenterX, float Y, const FLinearColor& Col, float Scale)
+	{
+		float TW = 0.f, TH = 0.f;
+		GetTextSize(Str, TW, TH, Font, Scale);
+		DrawText(Str, Col, CenterX * S - TW * 0.5f, Y * S, Font, Scale);
+	};
+
+	// Title: the score in words, and whether the game is over.
+	Centered(BoxTitle, RefW * 0.5f, 36.f, Ink, 2.1f * S);
+	Centered(BoxSubtitle, RefW * 0.5f, 84.f, Faint, 1.1f * S);
+
+	// The linescore: a row per side, an inning to a column, then runs and hits. The innings
+	// shown start at Box.first_inning; at least nine columns, as in the paper.
+	const int32 Cols = FMath::Max<int32>(9, FMath::Max<int32>(Box.teams[0].n_batted, Box.teams[1].n_batted));
+	const float ColW = Cols > 12 ? 30.f : 38.f;
+	const float NameW = 120.f, RHW = 46.f, Gap = 22.f;
+	const float LineW = NameW + Cols * ColW + Gap + 2.f * RHW;
+	float X0 = (RefW - LineW) * 0.5f;
+	float Y = 116.f;
+	const float RowH = 29.f;
+	for (int32 C = 0; C < Cols; ++C)
+	{
+		Right(FString::FromInt(Box.first_inning + C), X0 + NameW + (C + 1) * ColW - 6.f, Y, Faint, TextScale);
+	}
+	Right(TEXT("R"), X0 + NameW + Cols * ColW + Gap + RHW - 6.f, Y, Ink, TextScale);
+	Right(TEXT("H"), X0 + NameW + Cols * ColW + Gap + 2.f * RHW - 6.f, Y, Ink, TextScale);
+	DrawRect(Ink, X0 * S, (Y + RowH - 2.f) * S, LineW * S, 1.5f * S);
+	static const TCHAR* TeamName[2] = { TEXT("AWAY"), TEXT("HOME") };
+	for (int32 Side = 0; Side < 2; ++Side)
+	{
+		const BbBoxTeam& T = Box.teams[Side];
+		const float RowY = Y + RowH * (Side + 1);
+		DrawText(TeamName[Side], Ink, X0 * S, RowY * S, Font, TextScale);
+		for (int32 C = 0; C < Cols; ++C)
+		{
+			// A side that did not bat an inning shows a dash ("x" if the game ended without the
+			// home half of the last inning).
+			const FString Cell = C < T.n_batted ? FString::FromInt(T.runs[C]) : (Side == 1 && Box.is_final && C == Box.innings - Box.first_inning ? TEXT("x") : TEXT("-"));
+			Right(Cell, X0 + NameW + (C + 1) * ColW - 6.f, RowY, C < T.n_batted ? Ink : Faint, TextScale);
+		}
+		Right(FString::FromInt(T.totals.r), X0 + NameW + Cols * ColW + Gap + RHW - 6.f, RowY, Ink, TextScale);
+		Right(FString::FromInt(T.totals.h), X0 + NameW + Cols * ColW + Gap + 2.f * RHW - 6.f, RowY, Ink, TextScale);
+	}
+	DrawRect(Faint, X0 * S, (Y + RowH * 3.f + 2.f) * S, LineW * S, 1.f * S);
+
+	// The batting lines, one table a side, Away on the left.
+	const float TableY = Y + RowH * 3.f + 14.f;
+	const float TableW = FMath::Min(580.f, (PaperW - 48.f) * 0.5f);
+	const float StatW = 50.f, PosW = 46.f;
+	const float TableNameW = TableW - PosW - 6.f * StatW;
+	static const TCHAR* Heads[6] = { TEXT("AB"), TEXT("R"), TEXT("H"), TEXT("RBI"), TEXT("BB"), TEXT("K") };
+	for (int32 Side = 0; Side < 2; ++Side)
+	{
+		const BbBoxTeam& T = Box.teams[Side];
+		const float TX = Side == 0 ? PaperX + 24.f : PaperX + PaperW - 24.f - TableW;
+		DrawText(Side == 0 ? TEXT("AWAY") : TEXT("HOME"), Ink, TX * S, TableY * S, Font, 1.15f * S);
+		Right(FString::Printf(TEXT("LOB %d"), T.totals.lob), TX + TableW - 6.f, TableY + 3.f, Faint, TextScale);
+		const float HeadY = TableY + 30.f;
+		for (int32 K = 0; K < 6; ++K)
+		{
+			Right(Heads[K], TX + TableNameW + PosW + (K + 1) * StatW - 6.f, HeadY, Faint, TextScale);
+		}
+		DrawRect(Ink, TX * S, (HeadY + RowH - 3.f) * S, TableW * S, 1.5f * S);
+		const float RowTop = HeadY + RowH;
+		for (uint32 I = 0; I < T.n_lines; ++I)
+		{
+			const BbBatLine& L = T.lines[I];
+			const float RY = RowTop + I * 27.f;
+			DrawText(FString::Printf(TEXT("%s"), UTF8_TO_TCHAR(L.family)), Ink, TX * S, RY * S, Font, TextScale);
+			DrawText(PositionCode(L.position), Faint, (TX + TableNameW) * S, RY * S, Font, TextScale);
+			const int32 Vals[6] = { L.ab, L.r, L.h, L.rbi, L.bb, L.k };
+			for (int32 K = 0; K < 6; ++K)
+			{
+				// A hit or a run batted in is what the eye looks for: ink; a zero is quieter.
+				Right(FString::FromInt(Vals[K]), TX + TableNameW + PosW + (K + 1) * StatW - 6.f, RY, Vals[K] > 0 ? Ink : Faint, TextScale);
+			}
+		}
+		const float TotY = RowTop + T.n_lines * 27.f + 2.f;
+		DrawRect(Ink, TX * S, (TotY - 2.f) * S, TableW * S, 1.5f * S);
+		DrawText(TEXT("Totals"), Ink, TX * S, (TotY + 1.f) * S, Font, TextScale);
+		const int32 Tot[6] = { T.totals.ab, T.totals.r, T.totals.h, T.totals.rbi, T.totals.bb, T.totals.k };
+		for (int32 K = 0; K < 6; ++K)
+		{
+			Right(FString::FromInt(Tot[K]), TX + TableNameW + PosW + (K + 1) * StatW - 6.f, TotY + 1.f, Ink, TextScale);
+		}
+		// Notes in the paper's way: the extra-base hits, sacrifice flies, hit batters, and men left on.
+		float NY = TotY + 33.f;
+		const float NoteScale = 0.82f * S;
+		auto Note = [&](const TCHAR* Label, const FString& Names)
+		{
+			if (!Names.IsEmpty())
+			{
+				DrawText(FString::Printf(TEXT("%s  %s"), Label, *Names), Ink, TX * S, NY * S, Font, NoteScale);
+				NY += 22.f;
+			}
+		};
+		Note(TEXT("2B"), NoteList(T, [](const BbBatLine& L) { return (int32)L.doubles; }));
+		Note(TEXT("3B"), NoteList(T, [](const BbBatLine& L) { return (int32)L.triples; }));
+		Note(TEXT("HR"), NoteList(T, [](const BbBatLine& L) { return (int32)L.hr; }));
+		Note(TEXT("SF"), NoteList(T, [](const BbBatLine& L) { return (int32)L.sf; }));
+		Note(TEXT("HBP"), NoteList(T, [](const BbBatLine& L) { return (int32)L.hbp; }));
+	}
 }
