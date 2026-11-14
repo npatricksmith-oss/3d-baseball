@@ -59,7 +59,7 @@ K% 15.3 against 22.6 comes from the foul share (23% of contact against 52%) and 
 
 ### 1.7 What would stop this
 
-If home runs stay far short after B and C without a fudge factor, the remaining gap is the collision's (q, D) or the batted ball's spin (§2.4 below), both Tier A. That is a result to report, not a reason to tune a Tier B knob against it.
+If home runs stay far short after B and C without a fudge factor, the remaining gap is the collision's (q, D) or the batted ball's spin (§2.2 below), both Tier A. That is a result to report, not a reason to tune a Tier B knob against it.
 
 ## 2. Results
 
@@ -83,10 +83,25 @@ B doubles home runs, as the proxy said, and leaves runs where they were (within 
 | EV mph | 103.2 | 102.9 | 101.1 | 99.6 | 97.7 | 92.6 |
 | LA ° | 2.8 | 10.9 | 19.0 | 23.1 | 27.3 | 35.8 |
 | carry ft | 88 | 280 | 356 | 357 | 346 | 305 |
-| backspin rpm | 1,190 | 2,258 | 4,028 | 4,954 | 5,890 | 7,773 |
-| carry at 2,500 rpm, ft | 82 | 283 | 360 | 373 | 375 | 353 |
+| spin rpm, total ω | 1,190 | 2,258 | 4,028 | 4,954 | 5,890 | 7,773 |
+| backspin component | −338 | 1,316 | 2,904 | 3,655 | 4,364 | 5,572 |
+| sidespin component | 443 | 1,430 | 2,497 | 3,083 | 3,720 | 5,222 |
+| gyrospin component | −1,051 | −1,149 | −1,247 | −1,296 | −1,346 | −1,448 |
+| spin about the vertical, ω_z | −494 | −1,621 | −2,767 | −3,344 | −3,923 | −5,082 |
+| spray ° (+ = opposite field for a right-hander) | 4.1 | 8.7 | 13.7 | 16.5 | 19.6 | 27.1 |
+| carry, whole vector scaled to 2,500 rpm, ft | 82 | 283 | 360 | 373 | 375 | 353 |
+| carry, backspin alone set to 2,500 rpm, ft | 196 | 320 | 351 | 350 | 340 | 304 |
+| carry, sidespin and gyro zeroed (backspin kept), ft | 87 | 303 | 392 | 392 | 379 | 330 |
+| carry, sidespin alone zeroed, ft | 87 | 299 | 387 | 388 | 376 | 328 |
+| carry, gyro alone zeroed, ft | 88 | 280 | 358 | 360 | 349 | 307 |
 
-About 8° of launch per cm. A perfectly squared-up average swing in the barrel window (27°) leaves at 97.7 mph, just under the barrel line. **Batted backspin is about twice the published range** (≈ 5,900 rpm at 27°, where Statcast-era measurements put fly balls near 2,500): it costs 15–30 ft of carry at 23–27°. That is the collision's tangential behaviour (physics-spec §8, e_t 0.40, test A10 "values pending"), Tier A, outside B and C; it goes with D as a sourcing question.
+Components are along the exit velocity v (gyro, ω·v̂), the horizontal axis ⊥ to it (backspin, ω·normalize(v.y, −v.x, 0): +X for a ball moving +Y, which is physics-spec §1.3's backspin), and the third axis (sidespin, ω·(v̂ × backspin axis): −Z for a ball moving +Y, so positive is clockwise seen from above, a ball breaking toward the right-field line). `ω_z` is the spin about the vertical; it differs from the sidespin by the launch angle's projection. The Codex review's figures at −3 cm (backspin 4,364, gyro −1,346, ω_z −3,923 rpm; carry 346.4 → 375.2 whole-vector, → 340.4 backspin alone) are reproduced exactly; `aim_offset_probe` prints them, and the zero-offset "1,190" in the earlier version of this table was the total, whose backspin is −338 rpm (topspin).
+
+About 8° of launch per cm. A perfectly squared-up average swing in the barrel window (27°) leaves at 97.7 mph, just under the barrel line. **What the decomposition shows.** The 5,890 rpm is a vector sum: 4,364 backspin, 3,720 sidespin and −1,346 gyro. Setting the whole vector to 2,500 rpm (the old row) gains 29 ft at −3 cm, but that is mostly the sidespin leaving, not the backspin shrinking: zeroing the sidespin alone gains 29.1 ft (375.5), zeroing the gyro alone 2.7 (349.1), and setting the backspin alone to 2,500 rpm *loses* 6 ft (340.4). So the carry the model gives up at 23–27° follows the **sidespin**; the backspin, at 4,364 rpm, is past the point where more of it adds carry, and reducing it does not recover distance. The earlier text ("backspin about twice the published range, costs 15–30 ft") attributed to backspin what the whole-vector scaling did to the sidespin.
+
+**Comparators (published; the figures are read off the paper, not recomputed).** Nathan, "Why Does a Fly Ball Carry Better to Centerfield?" (2020 preprint, baseball.physics.illinois.edu/carry-v2.pdf), uses Statcast fly balls with exit speed near 100 mph, launch angle 25–30° and backspin 2,000–3,000 rpm (a selection window for the figures, not a measured distribution of batted backspin; Trackman measures the total spin and infers its axis, footnote 2). His Fig. 1 shows sidespin spanning about ±2,000 rpm and distance falling from about 400 ft at zero sidespin to about 375 at ±2,000; Fig. 2 shows sidespin running from zero near −10° spray (slightly pulled) to roughly −2,000 to −2,500 rpm for right-handed batters' opposite-field balls near +10° to +25°. His model run (100 mph, 27.5°, 2,500 rpm backspin) loses 12 ft to 1,500 rpm of sidespin, about 8 ft per 1,000 rpm; the sim's 29 ft for 3,720 rpm is 7.8 ft per 1,000. Nathan's "Using Statcast Data To Study The Flight of a Baseball" (2016 article, baseball.physics.illinois.edu/THT-Fly-Ball-Distances-Statcast.pdf) tabulates the model's carry against backspin at 103 mph and 27°: 336 ft at 0 rpm, 395 at 1,500, 400 at 2,000, 403 at 2,500 and 3,000, so carry saturates above about 1,500–2,500 rpm: there is little to gain from backspin and nothing from scaling it down. **No published batted-ball backspin or sidespin distribution by launch angle was found**; the 2,000–3,000 rpm window is the nearest comparator, and the sim's backspin (4,364 rpm at 27°) is outside it. **The sim's sidespin (3,720 rpm at +19.6° spray) is above the Statcast range** (about 2,000–2,500 at that spray angle) by 1.5–1.9 times, and it gets there by the same route as Nathan's §IV: sidespin comes from the bat's horizontal angle to the pitch and from the bat's downward tilt, which "reduces the backspin and result[s] in a slicing sidespin", and the sim's bat is tilted about 28–31° below horizontal at contact (swing note §3, matching Blast's −25 to −35°). In the probe the sidespin and the opposite-field spray rise together with the undercut (about 1,200 rpm and 5° per cm), the same geometry as the spray offset of §2.4; that they are one cause is Nathan's mechanism plus this co-variation, not something the probe isolates (a λ_c or zero-tilt counterfactual would).
+
+That is the collision's tangential and normal behaviour at an undercut contact on a tilted cylinder (physics-spec §8, e_t 0.40, test A10 "values pending"), Tier A, outside B and C; it goes with D as a sourcing question, and the question is the **sidespin**, not the backspin. Nothing was changed.
 
 ### 2.3 C: the aim offset in games (`run_env_diag -- 100 0`, σ_pop 1.25; `BB_AIM_OFFSET_Z`)
 
@@ -149,7 +164,7 @@ The Savant sample (re-run, `savant_bat.py`, competitive swings) gives 11.9 / 7.8
 
 1. **Home runs: 1.0% of PA against 3.0%.** B was worth what the proxy said, and C has no home runs to give: the aim's sweep moves launch, not exit speed. What is left is outside the swing's abilities:
    - **Collision efficiency** (D, ruled "not now"): the sim's squared-up average swing leaves at 103 mph, Statcast's squared-up formula would give about 107.5 at the same bat and pitch speeds.
-   - **Batted backspin** (§2.2): about twice the published values at home-run launch angles, costing 15–30 ft of carry. A Tier A question for the collision (physics-spec §8: e_t 0.40 from KNS 2017; test A10's magnitudes still pending). The swing note's counterfactual (q 0.23, plus the spread proxy) reached 3.06% HR, but with mean exit speed 93 against 89.5. Lower spin would add carry without raising exit speed, so **the sourcing question for D should take spin first**. Nothing here was changed: per the ruling, a sourcing question, not a knob.
+   - **Batted sidespin** (§2.2): 3,720 rpm at the 27° barrel launch, against about 2,000–2,500 in Statcast's opposite-field fly balls (Nathan 2020), costing about 29 ft of carry at 7.8 ft per 1,000 rpm, the same rate as Nathan's model. The backspin (4,364 rpm) is past the saturation of carry and costs nothing: scaling it to 2,500 rpm loses 6 ft. The sidespin goes with the opposite-field spray offset (§2.4) in the bat's tilt at contact, so the sourcing question for D is the collision's behaviour on an undercut, tilted bat (physics-spec §8: e_t 0.40 from KNS 2017; test A10's magnitudes still pending), and it should be taken together with λ_c. The swing note's counterfactual (q 0.23, plus the spread proxy) reached 3.06% HR, but with mean exit speed 93 against 89.5. Lower sidespin would add carry without raising exit speed. Nothing here was changed: per the ruling, a sourcing question, not a knob.
    - The sim's home runs need faster swings than MLB's (77.7 against 75.4 mph): the same two causes, read from the other side.
 2. **Runs are right for the wrong reasons**, still: 4.79 [4.50] against 4.39, with a third of the home runs. The surplus is hits on balls in play: grounders (.36 against .245, fielding's) and the over-concentrated launch angles (too many line drives, §2.3).
 3. **Spray** (§2.4): the bat's face at contact (λ_c) and the batters' timing by location, together. Proposal for the owner.
