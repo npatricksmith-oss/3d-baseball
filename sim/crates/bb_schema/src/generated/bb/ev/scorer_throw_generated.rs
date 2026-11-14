@@ -25,6 +25,7 @@ impl<'a> ScorerThrow<'a> {
   pub const VT_BASE: ::flatbuffers::VOffsetT = 12;
   pub const VT_ATTEMPTED_OUT: ::flatbuffers::VOffsetT = 14;
   pub const VT_BATTER_GOAL: ::flatbuffers::VOffsetT = 16;
+  pub const VT_RUNNER: ::flatbuffers::VOffsetT = 18;
 
   #[inline]
   pub unsafe fn init_from_table(table: ::flatbuffers::Table<'a>) -> Self {
@@ -39,6 +40,7 @@ impl<'a> ScorerThrow<'a> {
     builder.add_t_release(args.t_release);
     if let Some(x) = args.target { builder.add_target(x); }
     if let Some(x) = args.origin { builder.add_origin(x); }
+    builder.add_runner(args.runner);
     builder.add_thrower(args.thrower);
     builder.add_batter_goal(args.batter_goal);
     builder.add_attempted_out(args.attempted_out);
@@ -96,6 +98,13 @@ impl<'a> ScorerThrow<'a> {
     // which contains a valid value in this slot
     unsafe { self._tab.get::<u8>(ScorerThrow::VT_BATTER_GOAL, Some(0)).unwrap()}
   }
+  #[inline]
+  pub fn runner(&self) -> u16 {
+    // Safety:
+    // Created from valid Table for this object
+    // which contains a valid value in this slot
+    unsafe { self._tab.get::<u16>(ScorerThrow::VT_RUNNER, Some(0)).unwrap()}
+  }
 }
 
 impl ::flatbuffers::Verifiable for ScorerThrow<'_> {
@@ -111,6 +120,7 @@ impl ::flatbuffers::Verifiable for ScorerThrow<'_> {
      .visit_field::<u8>("base", Self::VT_BASE, false)?
      .visit_field::<bool>("attempted_out", Self::VT_ATTEMPTED_OUT, false)?
      .visit_field::<u8>("batter_goal", Self::VT_BATTER_GOAL, false)?
+     .visit_field::<u16>("runner", Self::VT_RUNNER, false)?
      .finish();
     Ok(())
   }
@@ -123,6 +133,7 @@ pub struct ScorerThrowArgs<'a> {
     pub base: u8,
     pub attempted_out: bool,
     pub batter_goal: u8,
+    pub runner: u16,
 }
 impl<'a> Default for ScorerThrowArgs<'a> {
   #[inline]
@@ -135,6 +146,7 @@ impl<'a> Default for ScorerThrowArgs<'a> {
       base: 0,
       attempted_out: false,
       batter_goal: 0,
+      runner: 0,
     }
   }
 }
@@ -173,6 +185,10 @@ impl<'a: 'b, 'b, A: ::flatbuffers::Allocator + 'a> ScorerThrowBuilder<'a, 'b, A>
     self.fbb_.push_slot::<u8>(ScorerThrow::VT_BATTER_GOAL, batter_goal, 0);
   }
   #[inline]
+  pub fn add_runner(&mut self, runner: u16) {
+    self.fbb_.push_slot::<u16>(ScorerThrow::VT_RUNNER, runner, 0);
+  }
+  #[inline]
   pub fn new(_fbb: &'b mut ::flatbuffers::FlatBufferBuilder<'a, A>) -> ScorerThrowBuilder<'a, 'b, A> {
     let start = _fbb.start_table();
     ScorerThrowBuilder {
@@ -197,6 +213,7 @@ impl ::core::fmt::Debug for ScorerThrow<'_> {
       ds.field("base", &self.base());
       ds.field("attempted_out", &self.attempted_out());
       ds.field("batter_goal", &self.batter_goal());
+      ds.field("runner", &self.runner());
       ds.finish()
   }
 }

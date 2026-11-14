@@ -264,6 +264,8 @@ table ScorerEvidence {
   throws: [ScorerThrow] (id: 15);
   carries: [ScorerCarry] (id: 16);
   touches: [ScorerTouch] (id: 17);
+  has_batter_eta: bool (id: 18);   // the batter had not touched first when the play ended
+  batter_eta_s: double (id: 19);   // when he would have, at his running speed then (world-side estimate)
 }
 
 table ScorerTouch {
@@ -277,6 +279,7 @@ table ScorerCarry {
   t: double (id: 1);
   base: ubyte (id: 2);
   batter_goal: ubyte (id: 3);
+  runner: ushort (id: 4);    // the runner the carry was meant to retire (0: unknown)
 }
 
 table ScorerThrow {
@@ -287,6 +290,7 @@ table ScorerThrow {
   base: ubyte (id: 4);
   attempted_out: bool (id: 5);
   batter_goal: ubyte (id: 6); // batter's running goal when released
+  runner: ushort (id: 7);     // the runner the throw was meant to retire (0: unknown or a routine return)
 }
 table ManagerCommandApplied {
   command: bb.cmd.CommandEnvelope (id: 0);

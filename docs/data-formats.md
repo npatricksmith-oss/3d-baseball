@@ -258,6 +258,8 @@ reference throw that lands short continues through the noise-free bounce model; 
 never reaches the bag has a negative-infinite margin.
 Runner outs and their destination bases are recorded by `RunnerOut`. Errors are not yet ruled.
 
+Added with the scorer review (2026-11-14): every `ScorerThrow` and `ScorerCarry` names the runner it was meant to retire (`runner`; 0 for a routine return or unknown), so the scorer can tell a play on a preceding runner from one on the batter-runner. `has_batter_eta` / `batter_eta_s` give, when the play ended before the batter touched first, when he would have touched it running as he was; `clean_play_margin_s` then uses that arrival. The reference fielder in the margin has the actual fielder's get-up, turn and footwork at the catch and a grade-50 transfer (`LiveOutput.ref_set_s`, not logged on its own). All appended fields; old logs read with them absent (`ScorerEvidence` without `runners` is treated as pre-A12 evidence and rulings from it are `Undetermined`, never outs).
+
 The scorer also reads, from the same play record: `BallDead` with reason `OutOfPlay` (a thrown
 ball left the field and bases were awarded; the batter reaches only by that award unless
 `first_touch_s` precedes the last throw's `t_release`), `RunnerAdvanced.cause = Award`, and

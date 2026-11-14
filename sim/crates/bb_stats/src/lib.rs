@@ -181,8 +181,11 @@ pub fn box_score_with_options(bytes: &[u8], options: scorer::ScorerOptions) -> R
                     l.pa += 1;
                     let play_outs = events.iter().filter(|e| e.body_type() == EventBody::RunnerOut).count() as u32;
                     let ruling = scorer::score_play_with_options(*play, outs_in_half.saturating_sub(play_outs), options).expect("PA event exists");
-                    let pending_walk_off = ruling.outcome == scorer::Outcome::Undetermined
-                        && events.iter().filter_map(|e| e.body_as_game_ended()).any(|g| g.reason() == ev::GameEndReason::WalkOff);
+                    // A walk-off that ends the game before the batter touches first: he is on base
+                    // when it ends (the scorer rules his hit from where he was running).
+                    let pending_walk_off = pa.result() == ev::PaResult::Unknown
+                        && events.iter().filter_map(|e| e.body_as_game_ended()).any(|g| g.reason() == ev::GameEndReason::WalkOff)
+                        && events.iter().filter_map(|e| e.body_as_scorer_evidence()).any(|sc| sc.batter() == pa.batter() && !sc.has_first_touch());
                     if (pending_walk_off || events.iter().filter_map(|e| e.body_as_scorer_evidence()).any(|sc| sc.batter() == pa.batter() && sc.has_first_touch()))
                         && !events.iter().filter_map(|e| e.body_as_runner_out()).any(|o| o.runner() == pa.batter())
                         && !events.iter().filter_map(|e| e.body_as_run_scored()).any(|r| r.runner() == pa.batter()) {

@@ -36,6 +36,8 @@ impl<'a> ScorerEvidence<'a> {
   pub const VT_THROWS: ::flatbuffers::VOffsetT = 34;
   pub const VT_CARRIES: ::flatbuffers::VOffsetT = 36;
   pub const VT_TOUCHES: ::flatbuffers::VOffsetT = 38;
+  pub const VT_HAS_BATTER_ETA: ::flatbuffers::VOffsetT = 40;
+  pub const VT_BATTER_ETA_S: ::flatbuffers::VOffsetT = 42;
 
   #[inline]
   pub unsafe fn init_from_table(table: ::flatbuffers::Table<'a>) -> Self {
@@ -47,6 +49,7 @@ impl<'a> ScorerEvidence<'a> {
     args: &'args ScorerEvidenceArgs<'args>
   ) -> ::flatbuffers::WIPOffset<ScorerEvidence<'bldr>> {
     let mut builder = ScorerEvidenceBuilder::new(_fbb);
+    builder.add_batter_eta_s(args.batter_eta_s);
     builder.add_secured_s(args.secured_s);
     builder.add_handling_s(args.handling_s);
     builder.add_first_touch_s(args.first_touch_s);
@@ -61,6 +64,7 @@ impl<'a> ScorerEvidence<'a> {
     builder.add_batter(args.batter);
     builder.add_note_code(args.note_code);
     builder.add_reference_fielder(args.reference_fielder);
+    builder.add_has_batter_eta(args.has_batter_eta);
     builder.add_has_margin(args.has_margin);
     builder.add_has_secured(args.has_secured);
     builder.add_has_handling(args.has_handling);
@@ -195,6 +199,20 @@ impl<'a> ScorerEvidence<'a> {
     // which contains a valid value in this slot
     unsafe { self._tab.get::<::flatbuffers::ForwardsUOffset<::flatbuffers::Vector<'a, ::flatbuffers::ForwardsUOffset<ScorerTouch>>>>(ScorerEvidence::VT_TOUCHES, None)}
   }
+  #[inline]
+  pub fn has_batter_eta(&self) -> bool {
+    // Safety:
+    // Created from valid Table for this object
+    // which contains a valid value in this slot
+    unsafe { self._tab.get::<bool>(ScorerEvidence::VT_HAS_BATTER_ETA, Some(false)).unwrap()}
+  }
+  #[inline]
+  pub fn batter_eta_s(&self) -> f64 {
+    // Safety:
+    // Created from valid Table for this object
+    // which contains a valid value in this slot
+    unsafe { self._tab.get::<f64>(ScorerEvidence::VT_BATTER_ETA_S, Some(0.0)).unwrap()}
+  }
 }
 
 impl ::flatbuffers::Verifiable for ScorerEvidence<'_> {
@@ -221,6 +239,8 @@ impl ::flatbuffers::Verifiable for ScorerEvidence<'_> {
      .visit_field::<::flatbuffers::ForwardsUOffset<::flatbuffers::Vector<'_, ::flatbuffers::ForwardsUOffset<ScorerThrow>>>>("throws", Self::VT_THROWS, false)?
      .visit_field::<::flatbuffers::ForwardsUOffset<::flatbuffers::Vector<'_, ::flatbuffers::ForwardsUOffset<ScorerCarry>>>>("carries", Self::VT_CARRIES, false)?
      .visit_field::<::flatbuffers::ForwardsUOffset<::flatbuffers::Vector<'_, ::flatbuffers::ForwardsUOffset<ScorerTouch>>>>("touches", Self::VT_TOUCHES, false)?
+     .visit_field::<bool>("has_batter_eta", Self::VT_HAS_BATTER_ETA, false)?
+     .visit_field::<f64>("batter_eta_s", Self::VT_BATTER_ETA_S, false)?
      .finish();
     Ok(())
   }
@@ -244,6 +264,8 @@ pub struct ScorerEvidenceArgs<'a> {
     pub throws: Option<::flatbuffers::WIPOffset<::flatbuffers::Vector<'a, ::flatbuffers::ForwardsUOffset<ScorerThrow<'a>>>>>,
     pub carries: Option<::flatbuffers::WIPOffset<::flatbuffers::Vector<'a, ::flatbuffers::ForwardsUOffset<ScorerCarry<'a>>>>>,
     pub touches: Option<::flatbuffers::WIPOffset<::flatbuffers::Vector<'a, ::flatbuffers::ForwardsUOffset<ScorerTouch<'a>>>>>,
+    pub has_batter_eta: bool,
+    pub batter_eta_s: f64,
 }
 impl<'a> Default for ScorerEvidenceArgs<'a> {
   #[inline]
@@ -267,6 +289,8 @@ impl<'a> Default for ScorerEvidenceArgs<'a> {
       throws: None,
       carries: None,
       touches: None,
+      has_batter_eta: false,
+      batter_eta_s: 0.0,
     }
   }
 }
@@ -349,6 +373,14 @@ impl<'a: 'b, 'b, A: ::flatbuffers::Allocator + 'a> ScorerEvidenceBuilder<'a, 'b,
     self.fbb_.push_slot_always::<::flatbuffers::WIPOffset<_>>(ScorerEvidence::VT_TOUCHES, touches);
   }
   #[inline]
+  pub fn add_has_batter_eta(&mut self, has_batter_eta: bool) {
+    self.fbb_.push_slot::<bool>(ScorerEvidence::VT_HAS_BATTER_ETA, has_batter_eta, false);
+  }
+  #[inline]
+  pub fn add_batter_eta_s(&mut self, batter_eta_s: f64) {
+    self.fbb_.push_slot::<f64>(ScorerEvidence::VT_BATTER_ETA_S, batter_eta_s, 0.0);
+  }
+  #[inline]
   pub fn new(_fbb: &'b mut ::flatbuffers::FlatBufferBuilder<'a, A>) -> ScorerEvidenceBuilder<'a, 'b, A> {
     let start = _fbb.start_table();
     ScorerEvidenceBuilder {
@@ -384,6 +416,8 @@ impl ::core::fmt::Debug for ScorerEvidence<'_> {
       ds.field("throws", &self.throws());
       ds.field("carries", &self.carries());
       ds.field("touches", &self.touches());
+      ds.field("has_batter_eta", &self.has_batter_eta());
+      ds.field("batter_eta_s", &self.batter_eta_s());
       ds.finish()
   }
 }

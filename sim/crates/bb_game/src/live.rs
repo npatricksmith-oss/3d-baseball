@@ -435,15 +435,24 @@ pub struct ScorerThrowFact {
     /// The throw was selected as a play on a runner, not a routine return.
     pub attempted_out: bool,
     pub batter_goal: u8,
+    /// The runner it was meant to retire (0: a routine return, or unknown).
+    pub runner: AgentId,
 }
 
 #[derive(Clone, Copy, Debug)]
-pub struct ScorerCarryFact { pub fielder: AgentId, pub t: f64, pub base: u8, pub batter_goal: u8 }
+pub struct ScorerCarryFact { pub fielder: AgentId, pub t: f64, pub base: u8, pub batter_goal: u8, pub runner: AgentId }
 
 pub struct LiveOutput {
     pub scorer_carries: Vec<ScorerCarryFact>,
     /// First glove contact with the batted ball, including a deflection.
     pub first_handling: Option<(f64, AgentId)>,
+    /// The batter had not touched first when the play ended: when he would have, running as he
+    /// was (a world-side estimate for the scorer; no agent reads it).
+    pub batter_first_eta: Option<f64>,
+    /// For the first fielding of a batted ball: seconds after he secures it until a grade-50
+    /// fielder in his place is set to throw to first (the get-up after a dive, transfer, turn,
+    /// footwork), noise-free. Scorer evidence; no agent reads it.
+    pub ref_set_s: Option<f64>,
     /// Physical releases, independent of visualization recording.
     pub scorer_throws: Vec<ScorerThrowFact>,
     pub facts: Vec<Input>,
@@ -2116,6 +2125,15 @@ impl<'a> Sim<'a> {
                 fd.set_base = fd.a.transfer;
                 fd.catch_vel = fd.vel;
                 fd.face = Some(toward(fd.vel).or(toward(-bv)).unwrap_or(Vec3::new(-fd.pos.x, -fd.pos.y, 0.0)));
+                if matches!(self.ball, Ball::Free { .. }) && self.out.ref_set_s.is_none() {
+                    // The reference play's set-up for a throw to first: the grade-50 fielder of
+                    // this position, from this catch (rules-spec §10.2).
+                    let avg = FielderAttrs::average(((fd.id & 0x7f) as usize).clamp(1, 9) - 1);
+                    let to = base_pos(1) - fd.pos;
+                    let turn = fd.face.map(|f| throwing::turn_extra_s(f, to, fd.a.throws)).unwrap_or(0.0);
+                    let su = SetUp::new(avg.transfer, turn, throwing::footwork_s(fd.catch_vel, to, fd.took_diving));
+                    self.out.ref_set_s = Some(up_at - self.t + su.set_s);
+                }
                 // Having caught it, he plants: his run dies out where braking stops him, not
                 // back at the spot he planned (which a running catch has carried him past).
                 fd.target = stop_point(fd);
@@ -2787,7 +2805,7 @@ impl<'a> Sim<'a> {
         if debug_throw() {
             eprintln!("t {:.2} holder {} best {:?}; options {:?}", self.t, by, best, options);
         }
-        let (b, through, margins) = if let Some(i) = best {
+        let (b, through, margins, target_runner) = if let Some(i) = best {
             let o = options[i];
             if o.carry {
                 // Running with the ball needs no transfer, only his feet (a diver's get-up).
@@ -2799,15 +2817,15 @@ impl<'a> Sim<'a> {
                     // Scorer evidence (rules-spec §10.2): he is carrying the ball to put a runner out.
                     if !self.out.scorer_carries.iter().any(|c| c.fielder == fd.id && c.base == o.base) {
                         let batter_goal = self.r.iter().find(|r| r.start == 0).map(|r| r.goal).unwrap_or(0);
-                        self.out.scorer_carries.push(ScorerCarryFact { fielder: fd.id, t: self.t, base: o.base, batter_goal });
+                        self.out.scorer_carries.push(ScorerCarryFact { fielder: fd.id, t: self.t, base: o.base, batter_goal, runner: self.r[o.runner].id });
                     }
                 }
                 return;
             }
-            (o.base, o.through, Some((o.runner_at - o.ball_at, o.runner_at - o.set_ball_at)))
+            (o.base, o.through, Some((o.runner_at - o.ball_at, o.runner_at - o.set_ball_at)), self.r[o.runner].id)
         } else if m::hypot(fd.pos.x, fd.pos.y) >= INFIELD_R {
             // No play: get the ball back to second base, the quicker way.
-            (2, self.throw_race(by, 2).through, None)
+            (2, self.throw_race(by, 2).through, None, 0)
         } else {
             self.abandon_carry(by);
             return;
@@ -2850,7 +2868,7 @@ impl<'a> Sim<'a> {
         if let (true, Some(i)) = (through, race.relay) {
             self.trace_choice(by, action, b, true, best, &options);
             self.throw_to(by, leg, b, i, true);
-            if let Some(fact) = self.out.scorer_throws.last_mut() { fact.attempted_out = margins.is_some(); }
+            if let Some(fact) = self.out.scorer_throws.last_mut() { fact.attempted_out = margins.is_some(); fact.runner = if margins.is_some() { target_runner } else { 0 }; }
             return;
         }
         let receiver = race.receiver;
@@ -2861,7 +2879,7 @@ impl<'a> Sim<'a> {
         }
         self.trace_choice(by, action, b, false, best, &options);
         self.throw_to(by, tgt, b, receiver, false);
-        if let Some(fact) = self.out.scorer_throws.last_mut() { fact.attempted_out = margins.is_some(); }
+        if let Some(fact) = self.out.scorer_throws.last_mut() { fact.attempted_out = margins.is_some(); fact.runner = if margins.is_some() { target_runner } else { 0 }; }
         self.f[receiver].target = tgt;
         // A throw that goes past the cutoff man ends his job: he pulls up, free to back it up.
         for i in 0..9 {
@@ -2914,7 +2932,7 @@ impl<'a> Sim<'a> {
         self.launch_throw(throw_state(r0, h, ex.speed, elev), tgt, b, receiver, relay);
         self.out.released.push((self.t, fd.id));
         let batter_goal = self.r.iter().find(|r| r.start == 0).map(|r| r.goal).unwrap_or(0);
-        self.out.scorer_throws.push(ScorerThrowFact { thrower: fd.id, t: self.t, origin: r0, target: tgt, base: b, attempted_out: false, batter_goal });
+        self.out.scorer_throws.push(ScorerThrowFact { thrower: fd.id, t: self.t, origin: r0, target: tgt, base: b, attempted_out: false, batter_goal, runner: 0 });
         // The rules engine needs the release for a throw that goes out of play (rules-spec §7.2);
         // fielders 0–5 are P, C, 1B, 2B, 3B, SS.
         let t_rel = self.t.max(self.last_fact_t);
@@ -3085,7 +3103,7 @@ fn new_sim<'a>(inp: &'a LiveInput<'a>, st: &'a mut RulesState) -> Sim<'a> {
         f,
         r,
         primary: 0,
-        out: LiveOutput { scorer_carries: Vec::new(), first_handling: None, scorer_throws: Vec::new(), facts: Vec::new(), events: Vec::new(), path, ball_track: Vec::new(), actors, secured: Vec::new(), released: Vec::new(), hurry: Vec::new(), dives: Vec::new(), calls: Vec::new() },
+        out: LiveOutput { scorer_carries: Vec::new(), first_handling: None, scorer_throws: Vec::new(), batter_first_eta: None, ref_set_s: None, facts: Vec::new(), events: Vec::new(), path, ball_track: Vec::new(), actors, secured: Vec::new(), released: Vec::new(), hurry: Vec::new(), dives: Vec::new(), calls: Vec::new() },
         bounce_k: 1000,
         done: false,
         last_fact_t: t_c,
@@ -3252,6 +3270,14 @@ fn simulate_live_inner(inp: &LiveInput, st: &mut RulesState) -> LiveOutput {
     if inp.record {
         // The tick that ended the play (the catch, the force, the ball leaving the park).
         sim.record(true);
+    }
+    // The batter-runner, if the play ended before he touched first: when he would have.
+    if let Some(r) = sim.r.iter().find(|r| r.start == 0) {
+        let touched = sim.out.facts.iter().any(|f| matches!(f, Input::BaseTouched { agent, base: 1, holding_ball: false, .. } if *agent == r.id));
+        if !touched && !r.out && r.s < BASE_L {
+            let along = r.v.max(0.0) * r.direction.max(0.0);
+            sim.out.batter_first_eta = Some(sim.t + run_time_from(BASE_L - r.s, along, r.vmax, RUNNER_TAU));
+        }
     }
     sim.out
 }
