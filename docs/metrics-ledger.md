@@ -172,6 +172,7 @@ Runs per game were not printed until late in the day; the early rows have PA per
 
 | Date | Task | Commit | Check |
 |---|---|---|---|
+| 11-14 | Second round of deferred tests (low-catch boundary, golden roster seeds from a Python oracle, rules-passing scenarios with `known_gap`, ignored pop-up fixtures) | `486866f`..`0deb559` | Tests, scenarios and the scenario harness only; no sim code changed |
 | 11-14 | A4 evidence: throw-choice trace and `throw_choice_probe` (hooks in `live.rs`, off by default) | `886ab88`..`cb5782b` | 256 games, seeds 0–255, traced and untraced: digests identical (2,880 runs, 56,455 pitches); 8 pre-hook digests match |
 | 11-14 | Tests the reviews deferred (dives, set-up times, left-handed release, a log without rosters) | `92b3128`, `7104cd5` | Tests only; digests identical, seeds 1, 2, 3, 42 (the worker's check; Codex review pending) |
 | 11-13 | Rosters (A2): names, numbers, order | `5ab0b51`..`050bd15` | Digests identical, seeds 1, 2, 3, 42 |
