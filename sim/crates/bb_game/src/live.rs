@@ -6014,4 +6014,30 @@ mod tests {
         let job = sim.relay_job(from);
         assert_eq!(job.map(|j| j.1), Some(4), "cutoff {job:?}");
     }
+
+    /// Gemini A4 review P1-2 (4): the double-play continuation counts a second out only if
+    /// its throw would be attempted, the holder's own p > 0.3 rule. One out, a runner from
+    /// first 2 s from second, the shortstop a step from the bag, the batter 0.6 s from
+    /// first: no relay can beat him, so stepping on second is worth its own out, p² × 1.0.
+    #[test]
+    fn a_double_play_nobody_would_throw_for_adds_nothing() {
+        const SS: usize = 5;
+        let fx = fixture(&[(5, 1)]);
+        let inp = input(&fx, vec![RunnerIn { id: fx.st.batter, base: 0, speed: 8.2 }, RunnerIn { id: 5, base: 1, speed: 8.2 }]);
+        let mut st = fx.st.clone();
+        st.outs = 1;
+        let mut sim = new_sim(&inp, &mut st);
+        sim.t = 2.0;
+        held_at(&mut sim, SS, base_pos(2) + Vec3::new(-1.0, 0.0, 0.0));
+        sim.f[2].pos = base_pos(1);
+        let fd = &mut sim.f[SS];
+        (fd.up_at, fd.set_base, fd.face, fd.catch_vel) = (1.0, fd.a.transfer, None, Vec3::ZERO);
+        (sim.r[0].s, sim.r[0].v, sim.r[0].goal) = (BASE_L - 8.2 * 0.6, 8.2, 1);
+        (sim.r[1].s, sim.r[1].v, sim.r[1].goal) = (2.0 * BASE_L - 8.2 * 2.0, 8.2, 2);
+        let opts = sim.holder_options(SS);
+        let step = opts.iter().find(|o| o.carry && o.base == 2).expect("a carry to second");
+        let p2 = step.continuation.expect("a continuation is estimated").0;
+        assert!(p2 < 0.3, "fixture: the relay cannot beat him ({p2})");
+        assert!((step.value - step.p_out * step.p_out * step.weight).abs() < 1e-12, "value {} with p2 {p2}", step.value);
+    }
 }
