@@ -187,6 +187,7 @@ Runs per game were not printed until late in the day; the early rows have PA per
 | Date | Task | Commit | Check |
 |---|---|---|---|
 | 11-14 | Second round of deferred tests (low-catch boundary, golden roster seeds from a Python oracle, rules-passing scenarios with `known_gap`, ignored pop-up fixtures) | `486866f`..`0deb559` | Tests, scenarios and the scenario harness only; no sim code changed |
+| 11-14 | A16 home runs on screen: projected distance carried to the timeline and `BbPlayInfo` (from the world's own unobstructed flight at contact), home-run trot at 4.8 m/s in the timeline (presentation), client cut and card | `323e05e`..`bd69a04` | Digests identical, seeds 1, 2, 3, 42 (main `d1f6b46` against `bd69a04`); the event log's `BattedBall.projected_distance_m` is still 0 |
 | 11-14 | A10 client half: `BallDead` marker carries the reason, `bb_ffi` decodes it (`BbPlayInfo.dead_s`, `dead_at`, `dead_reason`) | `39db36c`, `834a335` | Digests identical, seeds 1, 2, 3, 42 (`dbcf92c` against `834a335`; the change is in the timeline encoding only) |
 | 11-14 | A12/B5 partial: isolated scorer helper and captions naming the out base | `555b32c` and follow-up | Game digests identical to `db5c012` for seeds 0, 1, 7, 42; captions changed, event logs did not. Official scorer and audit remain incomplete |
 | 11-14 | A4 evidence: throw-choice trace and `throw_choice_probe` (hooks in `live.rs`, off by default) | `886ab88`..`cb5782b` | 256 games, seeds 0–255, traced and untraced: digests identical (2,880 runs, 56,455 pitches); 8 pre-hook digests match |

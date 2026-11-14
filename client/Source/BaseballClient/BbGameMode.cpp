@@ -51,6 +51,24 @@ void ABbHUD::DrawHUD()
 		DrawText(Card, FLinearColor(1.f, 1.f, 1.f, CardAlpha), (Canvas->ClipX - W) * 0.5f, Y, Font, 3.0f * S);
 		DrawText(CardScore, FLinearColor(1.f, 0.95f, 0.6f, CardAlpha), (Canvas->ClipX - W2) * 0.5f, Y + H + 14.f * S, Font, 2.2f * S);
 	}
+	if (HomeRunAlpha > 0.f && !HomeRunName.IsEmpty())
+	{
+		// The home-run card: low and centered, over the view of the trot.
+		float W1 = 0.f, H1 = 0.f, W2 = 0.f, H2 = 0.f, W3 = 0.f, H3 = 0.f;
+		GetTextSize(HomeRunName, W1, H1, Font, 2.6f * S);
+		GetTextSize(HomeRunLine, W2, H2, Font, 1.8f * S);
+		GetTextSize(HomeRunKind, W3, H3, Font, 1.5f * S);
+		const float W = FMath::Max3(W1, W2, W3) + 48.f * S;
+		const float H = H1 + H2 + H3 + 40.f * S;
+		const float X = (Canvas->ClipX - W) * 0.5f;
+		const float Y = Canvas->ClipY - H - 70.f * S;
+		const float A = HomeRunAlpha;
+		DrawRect(FLinearColor(0.02f, 0.05f, 0.15f, 0.8f * A), X, Y, W, H);
+		DrawRect(FLinearColor(1.f, 0.85f, 0.1f, A), X, Y, W, 4.f * S);
+		DrawText(HomeRunName, FLinearColor(1.f, 1.f, 1.f, A), (Canvas->ClipX - W1) * 0.5f, Y + 12.f * S, Font, 2.6f * S);
+		DrawText(HomeRunLine, FLinearColor(1.f, 0.95f, 0.6f, A), (Canvas->ClipX - W2) * 0.5f, Y + 16.f * S + H1, Font, 1.8f * S);
+		DrawText(HomeRunKind, FLinearColor(0.85f, 0.9f, 1.f, A), (Canvas->ClipX - W3) * 0.5f, Y + 20.f * S + H1 + H2, Font, 1.5f * S);
+	}
 	if (!Call.IsEmpty())
 	{
 		float W = 0.f, H = 0.f;

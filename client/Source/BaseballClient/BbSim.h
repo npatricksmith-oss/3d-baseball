@@ -26,6 +26,9 @@ public:
 	/** True if the player behind this agent id (batting or fielding) throws left-handed.
 	 *  Read once at the start of the game, so it is safe on any thread. */
 	bool ThrowsLeft(uint16 Agent) const { return LeftHanded.Contains(Agent); }
+	/** The family name of the player behind this agent id (either kind), or empty. Read once
+	 *  at the start of the game like ThrowsLeft. */
+	FString FamilyName(uint16 Agent) const { const FString* N = Family.Find(Agent); return N ? *N : FString(); }
 
 private:
 	void* Handle = nullptr;
@@ -39,4 +42,6 @@ private:
 	int32 (*FnRoster)(const BbGame*, uint32, uint32, BbPlayer*) = nullptr;
 	/** Both agent ids of every left-handed thrower. */
 	TSet<uint16> LeftHanded;
+	/** Family names by both agent ids. */
+	TMap<uint16, FString> Family;
 };

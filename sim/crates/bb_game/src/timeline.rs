@@ -139,6 +139,11 @@ pub fn encode(step: &PitchStep, st: &RulesState, rosters: &crate::roster::Roster
     // play): the runners jog to them after the play. This is presentation only: the rules
     // have already put them there, and nothing here feeds back into the game.
     const JOG_MPS: f64 = 6.0;
+    // A home run is a trot, not a jog to a base: 109.7 m in about 23 s, a typical major-league
+    // home-run trot (A16; the client's jog clip reads 6 m/s as a run).
+    const HR_TROT_MPS: f64 = 4.8;
+    let home_run = step.rules_events.iter().any(|e| matches!(e, bb_rules::Event::PlateAppearanceEnded { result: bb_rules::PaResult::HomeRun, .. }));
+    let pace = if home_run { HR_TROT_MPS } else { JOG_MPS };
     const BASE_L: f64 = 27.432;
     // On ball four or a hit batter nobody moves until the umpire's call: it comes when the
     // catcher has the ball (the pitch's end), reaches the players after the signal latency
@@ -178,11 +183,11 @@ pub fn encode(step: &PitchStep, st: &RulesState, rosters: &crate::roster::Roster
         // this knot he would drift toward the base path from the moment of release), then
         // steps onto the path and jogs along it.
         track.push((t_jog, here));
-        let t_on = t_jog + (crate::live::path_pos(s0) - here).norm() / JOG_MPS;
+        let t_on = t_jog + (crate::live::path_pos(s0) - here).norm() / pace;
         track.push((t_on, crate::live::path_pos(s0)));
         let mut k = 1;
         loop {
-            let s = (s0 + JOG_MPS * 0.1 * k as f64).min(s_hi);
+            let s = (s0 + pace * 0.1 * k as f64).min(s_hi);
             track.push((t_on + 0.1 * k as f64, crate::live::path_pos(s)));
             if s >= s_hi {
                 break;
@@ -343,6 +348,7 @@ pub fn encode(step: &PitchStep, st: &RulesState, rosters: &crate::roster::Roster
         &mut fbb,
         &tl::TelemetryArgs {
             release_speed_mps: rec.release.v.norm() as f32,
+            projected_distance_m: rec.projected_distance_m.unwrap_or(0.0) as f32,
             spin_radps: Some(&spin),
             plate_x_m: plate.x as f32,
             plate_z_m: plate.z as f32,
