@@ -334,6 +334,11 @@ struct Fielder {
     /// The bag he is carrying the ball to (agent-models §5.5 A4), so that abandoning the
     /// carry for a throw or for no play brakes him instead of leaving him running at it.
     carry_to: Option<u8>,
+    /// His set-up is a double-play pivot at second (agent-models §5.5): its own time, turn
+    /// and footwork from how he got the bag, no early release.
+    pivot: bool,
+    /// A pivot man who took the feed off the bag: his pivot starts when he reaches it.
+    pivot_wait_bag: bool,
 }
 
 #[derive(Clone, Debug)]
@@ -1937,6 +1942,8 @@ impl<'a> Sim<'a> {
         // Catchable height where the ball is: a fielder at the wall can leap.
         let field = self.inp.field;
         let zmax_at = |p: Vec3| if field.body_clearance(p.x, p.y, 0.0).dist < 3.0 { WALL_CATCH_MAX_Z } else { CATCH_MAX_Z };
+        // A force at second still to be made: a feed there is a double-play pivot (§5.5).
+        let force_at_second = self.force_pending_at_second();
         let zmax = zmax_at(b);
         for i in 0..9 {
             let fd = &self.f[i];
@@ -2113,6 +2120,7 @@ impl<'a> Sim<'a> {
                 // back at the spot he planned (which a running catch has carried him past).
                 fd.target = stop_point(fd);
                 fd.carry_to = None;
+                (fd.pivot, fd.pivot_wait_bag) = (false, false);
                 // No longer racing the ball: he brakes onto that spot.
                 fd.t_int = f64::INFINITY;
                 if let Ball::Thrown { to_base, relay, .. } = self.ball {
@@ -2127,6 +2135,15 @@ impl<'a> Sim<'a> {
                     fd.ready_at = up_at + RELAY_TRANSFER_FRAC * fd.a.transfer;
                     fd.set_base = RELAY_TRANSFER_FRAC * fd.a.transfer;
                     fd.face = None;
+                    if !relay && to_base == 2 && force_at_second {
+                        // The feed at second: a double-play pivot (agent-models §5.5). He faces
+                        // the way he is moving, or the feed coming to him; his pivot starts
+                        // when he has the bag.
+                        fd.pivot = true;
+                        fd.set_base = throwing::pivot_s(fd.a.transfer);
+                        fd.face = Some(toward(fd.vel).unwrap_or(Vec3::new(-bv.x, -bv.y, 0.0)));
+                        fd.pivot_wait_bag = (base_pos(2) - fd.pos).norm() >= 0.6;
+                    }
                 }
                 let id = fd.id;
                 self.ball = Ball::Held { by: i };
@@ -2428,6 +2445,12 @@ impl<'a> Sim<'a> {
         self.r.iter().any(|r| !r.out && !r.scored && (r.s / BASE_L + 1e-6).floor() as u8 == b)
     }
 
+    /// A runner forced to second who has not yet reached it (a force there is still to be
+    /// made, §5.4): what makes a feed to second a double-play pivot.
+    fn force_pending_at_second(&self) -> bool {
+        (0..self.r.len()).any(|k| !self.r[k].out && self.r[k].start == 1 && self.forced(k) && self.r[k].s < 2.0 * BASE_L - 0.1)
+    }
+
     /// Whether a runner ahead of runner `k` holds base `b`: he is at or short of it and not
     /// visibly moving forward (standing, or going back). Direction of motion is visible.
     fn base_held_ahead(&self, k: usize, b: u8) -> bool {
@@ -2686,6 +2709,31 @@ impl<'a> Sim<'a> {
     /// The fielder holding the ball: throw, run it to a base, tag a runner, or hold.
     fn holder_act(&mut self) {
         let Ball::Held { by } = self.ball else { return };
+        // Getting the bag at second with the ball starts a double-play pivot (agent-models
+        // §5.5): for a man who took the feed off the bag, and for one who carried it there
+        // himself (he plants, turns and throws; no release on the touch tick).
+        {
+            let t = self.t;
+            let force_at_second = self.force_pending_at_second();
+            let f = &mut self.f[by];
+            // With the force at second gone before he got the bag (taken off), there is no
+            // pivot: he is an ordinary receiver, set up from his catch.
+            if f.pivot_wait_bag && !force_at_second {
+                (f.pivot, f.pivot_wait_bag) = (false, false);
+                f.set_base = RELAY_TRANSFER_FRAC * f.a.transfer;
+            }
+            let on_bag = (base_pos(2) - f.pos).norm() < 0.6;
+            let carried = !f.pivot && f.carry_to == Some(2) && force_at_second;
+            if on_bag && (f.pivot_wait_bag || carried) {
+                let moving = (m::hypot(f.vel.x, f.vel.y) > FACE_MIN_MPS).then(|| Vec3::new(f.vel.x, f.vel.y, 0.0));
+                f.face = moving.or(f.face);
+                f.catch_vel = f.vel;
+                f.took_diving = false;
+                f.set_base = throwing::pivot_s(f.a.transfer);
+                f.up_at = f.up_at.max(t);
+                (f.pivot, f.pivot_wait_bag) = (true, false);
+            }
+        }
         let fd = self.f[by].clone();
         // Tag any runner within reach who is off a base.
         for k in 0..self.r.len() {
@@ -2764,6 +2812,10 @@ impl<'a> Sim<'a> {
             self.abandon_carry(by);
             return;
         };
+        // A pivot man who took the feed off the bag throws only once he has it.
+        if fd.pivot_wait_bag {
+            return;
+        }
         // He plants for the throw: a carry he gave up does not keep him running at its bag
         // while his set-up clock runs (§5.6 A4).
         self.abandon_carry(by);
@@ -2835,7 +2887,8 @@ impl<'a> Sim<'a> {
         let fd = &self.f[by];
         let to = tgt - fd.pos;
         let turn = fd.face.map(|f| throwing::turn_extra_s(f, to, fd.a.throws)).unwrap_or(0.0);
-        SetUp::new(fd.set_base, turn, throwing::footwork_s(fd.catch_vel, to, fd.took_diving))
+        let footwork = throwing::footwork_s(fd.catch_vel, to, fd.took_diving);
+        if fd.pivot { SetUp::pivot(fd.set_base, turn, footwork) } else { SetUp::new(fd.set_base, turn, footwork) }
     }
 
     /// Fielder `by` throws to ground point `tgt` for `receiver` (the ball is headed for base
@@ -2854,7 +2907,9 @@ impl<'a> Sim<'a> {
         let d = m::hypot(tgt.x - r0.x, tgt.y - r0.y);
         let elev = solve_throw(self.inp.env, THROW_RELEASE_Z, THROW_CATCH_Z, d, v_aim).map(|s| s.elev).unwrap_or(THROW_MAX_ELEV);
         // Execution noise: speed 3%, then direction (the draw order of the vacuum model).
-        let ex = execute_throw(v_aim, &ThrowNoise::new(fd.a.arm_sigma * su.sigma_mult(hurry)), &mut r);
+        // A pivot man's throw: the slide's seam (nothing until A6 builds slides).
+        let slide = if fd.pivot { throwing::PIVOT_SLIDE_SIGMA_MULT } else { 1.0 };
+        let ex = execute_throw(v_aim, &ThrowNoise::new(fd.a.arm_sigma * su.sigma_mult(hurry) * slide), &mut r);
         let h = Vec3::new(tgt.x - r0.x, tgt.y - r0.y, 0.0).normalized().rotate(Vec3::Z, ex.yaw_err);
         self.launch_throw(throw_state(r0, h, ex.speed, elev), tgt, b, receiver, relay);
         self.out.released.push((self.t, fd.id));
@@ -2988,6 +3043,8 @@ fn new_sim<'a>(inp: &'a LiveInput<'a>, st: &'a mut RulesState) -> Sim<'a> {
                 backs: None,
                 peel: None,
                 carry_to: None,
+                pivot: false,
+                pivot_wait_bag: false,
             }
         })
         .collect();
@@ -6122,5 +6179,154 @@ mod tests {
             }
             assert_eq!(thrown, attempt, "margin {margin}, p {p}");
         }
+    }
+
+    /// A feed from the second baseman's side (12, 40) to the shortstop at `at`, standing,
+    /// with a runner forced from first and the batter `batter_eta_s` from first. Steps the
+    /// world until the shortstop has let go of the ball for first; returns the sim, when he
+    /// caught it, when he reached the bag with it, and when he let go.
+    fn feed_to_shortstop(at: Vec3, batter_eta_s: f64) -> (Sim<'static>, f64, f64, f64) {
+        const SS: usize = 5;
+        let fx: &'static Fixture = Box::leak(Box::new(fixture(&[(5, 1)])));
+        let inp: &'static LiveInput<'static> = Box::leak(Box::new(input(fx, vec![RunnerIn { id: fx.st.batter, base: 0, speed: 8.2 }, RunnerIn { id: 5, base: 1, speed: 8.2 }])));
+        let st: &'static mut RulesState = Box::leak(Box::new(fx.st.clone()));
+        let mut sim = new_sim(inp, st);
+        sim.t = 2.0;
+        for fd in sim.f.iter_mut() {
+            (fd.vel, fd.role) = (Vec3::ZERO, Role::Idle);
+            fd.target = fd.pos;
+        }
+        (sim.f[SS].pos, sim.f[SS].target) = (at, at);
+        (sim.f[2].pos, sim.f[2].target) = (base_pos(1), base_pos(1));
+        let (b, r1) = (sim.r.iter().position(|r| r.start == 0).unwrap(), sim.r.iter().position(|r| r.start == 1).unwrap());
+        (sim.r[b].s, sim.r[b].v, sim.r[b].goal, sim.r[b].direction) = (BASE_L - 8.2 * batter_eta_s, 8.2, 1, 1.0);
+        (sim.r[r1].s, sim.r[r1].v, sim.r[r1].goal, sim.r[r1].direction) = (1.5 * BASE_L, 8.2, 2, 1.0);
+        // The second baseman fielded a ground ball at (12, 40) and throws to second.
+        let fielder_2b = sim.f[3].id;
+        sim.emit(Input::BallTouched { t: 1.2, what: Touch::Ground { x: 10.0, y: 36.0 } });
+        sim.emit(Input::GloveSecured { t: 1.7, fielder: fielder_2b, x: 12.0, y: 40.0 });
+        sim.emit(Input::BallReleasedFromGlove { t: 2.0, fielder: fielder_2b, kind: ReleaseKind::Throw, infielder: true });
+        let from = Vec3::new(12.0, 40.0, 1.5);
+        let to = Vec3::new(at.x, at.y, 1.2);
+        let h = Vec3::new(to.x - from.x, to.y - from.y, 0.0);
+        let tf = h.norm() / 25.0;
+        let v = h.normalized() * 25.0 + Vec3::new(0.0, 0.0, (to.z - from.z + 0.5 * 9.81 * tf * tf) / tf);
+        sim.launch_throw(BallState { r: from, v, w: Vec3::ZERO }, to, 2, SS, false);
+        let (mut caught, mut on_bag) = (f64::NAN, f64::NAN);
+        for _ in 0..400 {
+            sim.update_thrown();
+            if caught.is_nan() && matches!(sim.ball, Ball::Held { by: SS }) {
+                caught = sim.t;
+            }
+            if !caught.is_nan() {
+                if on_bag.is_nan() && (base_pos(2) - sim.f[SS].pos).norm() < 0.6 {
+                    on_bag = sim.t;
+                }
+                sim.holder_act();
+                if matches!(sim.ball, Ball::Thrown { to_base: 1, .. }) {
+                    let t = sim.t;
+                    return (sim, caught, on_bag, t);
+                }
+            }
+            let b = sim.r.iter().position(|r| r.start == 0).unwrap();
+            sim.r[b].s = (sim.r[b].s + 8.2 * DT).min(BASE_L);
+            world_tick(&mut sim);
+        }
+        panic!("no pivot throw: {:?}", sim.ball);
+    }
+
+    /// agent-models §5.5: a grade-50 pivot man on the bag lets go 0.80 s after the feed plus
+    /// §5.5's turn. Standing, he faces the feed, which comes from the second baseman's side
+    /// (12, 40): his glove side (a right-hander's left) is then about north and first base is
+    /// southeast of the bag, φ ≈ 135° off it, so the turn is 0.12·(φ − 90°)/90° ≈ +0.06 s.
+    /// With the batter 2.4 s from first at the feed (about 0.16 s in hand at the pivot man's
+    /// set release, under the 0.25 s at which the general rule would hurry the throw) he still
+    /// takes his full pivot: no early release.
+    #[test]
+    fn a_pivot_man_on_the_bag_lets_go_after_his_pivot_time() {
+        let (sim, caught, _, released) = feed_to_shortstop(base_pos(2), 2.4);
+        let feed = Vec3::new(12.0 - base_pos(2).x, 40.0 - base_pos(2).y, 0.0).normalized();
+        let glove = Vec3::new(-feed.y, feed.x, 0.0);
+        let to_first = (base_pos(1) - base_pos(2)).normalized();
+        let phi = glove.dot(to_first).clamp(-1.0, 1.0).acos();
+        let expected = 0.80 + 0.12 * (phi - core::f64::consts::FRAC_PI_2) / core::f64::consts::FRAC_PI_2;
+        assert!((released - caught - expected).abs() <= 0.02 + DT, "pivot {:.3} s, expected {expected:.3}", released - caught);
+        assert_eq!(sim.out.hurry.last().copied(), Some((0.0, false)), "released set, not hurried");
+    }
+
+    /// agent-models §5.5: he must have the bag. Taking the feed 2 m off it, his pivot starts
+    /// when he reaches it: he lets go at least 0.68 s after he gets there (the 0.80 s pivot
+    /// less the most a turn can save, 0.12 s), and more than 0.80 s after the catch.
+    #[test]
+    fn a_pivot_off_the_bag_starts_when_he_gets_it() {
+        let (_, caught, on_bag, released) = feed_to_shortstop(base_pos(2) + Vec3::new(-2.0, 0.0, 0.0), 6.0);
+        assert!(on_bag > caught, "he caught it off the bag ({caught:.3}) and got there at {on_bag:.3}");
+        assert!(released - on_bag >= 0.80 - 0.12 - 1e-9 && released - caught > 0.80 + DT, "caught {caught:.3}, on the bag {on_bag:.3}, released {released:.3}");
+    }
+
+    /// agent-models §5.5: the holder's estimate of a double play uses the pivot model the
+    /// world uses. The shortstop fields a ground ball at (−7, 35) with a runner forced from
+    /// first and the second baseman standing on the bag. As he lets the feed go, the pivot he
+    /// predicts (from the second baseman having the ball to letting it go) is the one the
+    /// world then makes, to a tick; and the relay reaches first within 0.15 s of his estimate
+    /// (each estimated arrival carries the 0.05 s handling allowance of every throw estimate,
+    /// two here, and the flight model's difference).
+    #[test]
+    fn the_holder_predicts_the_pivot_the_world_makes() {
+        const SS: usize = 5;
+        const B2: usize = 3;
+        const B1: usize = 2;
+        let fx = fixture(&[(5, 1)]);
+        let inp = input(&fx, vec![RunnerIn { id: fx.st.batter, base: 0, speed: 8.2 }, RunnerIn { id: 5, base: 1, speed: 8.2 }]);
+        let mut st = fx.st.clone();
+        let mut sim = new_sim(&inp, &mut st);
+        sim.t = 1.5;
+        let ss_id = sim.f[SS].id;
+        sim.emit(Input::BallTouched { t: 0.9, what: Touch::Ground { x: -5.0, y: 30.0 } });
+        sim.emit(Input::GloveSecured { t: 1.5, fielder: ss_id, x: -7.0, y: 35.0 });
+        held_at(&mut sim, SS, Vec3::new(-7.0, 35.0, 0.0));
+        for fd in sim.f.iter_mut() {
+            (fd.vel, fd.role) = (Vec3::ZERO, Role::Idle);
+            fd.target = fd.pos;
+        }
+        (sim.f[B2].pos, sim.f[B2].target) = (base_pos(2), base_pos(2));
+        (sim.f[B1].pos, sim.f[B1].target) = (base_pos(1), base_pos(1));
+        let fd = &mut sim.f[SS];
+        (fd.up_at, fd.set_base, fd.face, fd.catch_vel) = (1.5, fd.a.transfer, None, Vec3::ZERO);
+        let (b, r1) = (sim.r.iter().position(|r| r.start == 0).unwrap(), sim.r.iter().position(|r| r.start == 1).unwrap());
+        (sim.r[b].s, sim.r[b].v, sim.r[b].goal, sim.r[b].direction) = (5.0, 8.2, 1, 1.0);
+        (sim.r[r1].s, sim.r[r1].v, sim.r[r1].goal, sim.r[r1].direction) = (BASE_L + 5.0, 8.2, 2, 1.0);
+        let (mut predicted, mut caught, mut released) = (None, f64::NAN, f64::NAN);
+        for _ in 0..600 {
+            if matches!(sim.ball, Ball::Held { by: SS }) {
+                let opts = sim.holder_options(SS);
+                predicted = opts.iter().find(|o| !o.carry && o.base == 2).and_then(|o| {
+                    let pivot = sim.pivot_release(B2, sim.f[SS].pos, o.ball_at, false) - o.ball_at;
+                    o.continuation.map(|c| (pivot, c.1))
+                });
+            }
+            let pivoting = matches!(sim.ball, Ball::Held { by: B2 });
+            sim.update_thrown();
+            sim.holder_act();
+            if pivoting && released.is_nan() && matches!(sim.ball, Ball::Thrown { .. }) {
+                released = sim.t;
+            }
+            if matches!(sim.ball, Ball::Held { by: B1 }) {
+                let (pivot, at_first) = predicted.expect("a continuation was estimated");
+                assert!((released - caught - pivot).abs() <= DT + 1e-6, "pivot {:.3} s, predicted {pivot:.3}", released - caught);
+                assert!((sim.t - at_first).abs() <= 0.15, "first base has it at {:.3}, predicted {at_first:.3}", sim.t);
+                return;
+            }
+            for k in [b, r1] {
+                let goal = sim.r[k].goal as f64 * BASE_L;
+                sim.r[k].s = (sim.r[k].s + 8.2 * DT).min(goal);
+            }
+            let before = matches!(sim.ball, Ball::Held { by: B2 });
+            world_tick(&mut sim);
+            if !before && matches!(sim.ball, Ball::Held { by: B2 }) {
+                caught = sim.t - DT;
+            }
+        }
+        panic!("no double play attempt: {:?}", sim.ball);
     }
 }

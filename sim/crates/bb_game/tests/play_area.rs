@@ -46,10 +46,13 @@ fn balls_out_of_play_end_the_play_and_fielders_stay_inside_the_walls() {
             let marked = tl.markers().and_then(|m| m.iter().find(|m| m.kind() == bb_schema::tl::MarkerKind::BallDead && (m.t() as f64 - t_out).abs() < 1e-3));
             let m = marked.unwrap_or_else(|| panic!("seed {seed} play {}: no BallDead marker at {t_out:.3}", s.play));
             // Its point is where the ball crossed the boundary: a ball's radius inside a wall's
-            // plane or on the fence's curve, at or above the ground.
+            // plane or on the fence's curve, at or above the ground. Or, for a ball knocked
+            // off a glove reaching over a wall (out of play where it starts, physics-spec §9.5),
+            // no farther past the wall than a glove reaches: 1.0 m from a body that stops 0.3 m
+            // inside it, plus the ball's radius.
             let p = m.p().unwrap();
             let w = field.ball_clearance(p.x() as f64, p.y() as f64, 0.036888);
-            assert!(w.dist.abs() < 2e-3 && p.z() >= 0.0, "seed {seed} play {}: dead at ({:.2}, {:.2}, {:.2}): {w:?}", s.play, p.x(), p.y(), p.z());
+            assert!(w.dist < 2e-3 && w.dist > -(0.7 + 0.036888 + 1e-3) && p.z() >= 0.0, "seed {seed} play {}: dead at ({:.2}, {:.2}, {:.2}): {w:?}", s.play, p.x(), p.y(), p.z());
         }
     }
     assert!(out_of_play > 20 && foul_out_of_play > 0 && tracks > 1000, "{out_of_play} out of play ({foul_out_of_play} foul), {tracks} fielder tracks");
