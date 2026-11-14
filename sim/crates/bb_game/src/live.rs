@@ -354,7 +354,7 @@ struct Runner {
     /// Holding at a base until a catch is made (tag-up).
     tag_up: bool,
     /// He tagged up and is going on the catch: when his first step comes. Until he next
-    /// stops he runs from the set start (agent-models §6.6); no earlier speed carries over.
+    /// stops he runs from the set start (agent-models §6.4); no earlier speed carries over.
     set_start: Option<f64>,
     moving_since: f64,
     last_base: u8,
@@ -420,7 +420,7 @@ pub struct LiveInput<'a> {
     pub play: u32,
     /// Record ball and actor tracks (timelines and visualization only).
     pub record: bool,
-    /// How runners who tag up start, and what they believe of the tag (agent-models §6.6).
+    /// How runners who tag up start, and what they believe of the tag (agent-models §6.4).
     pub tag_up: bb_agents::running::TagUpParams,
 }
 
@@ -578,7 +578,7 @@ fn run_time_from(d: f64, v0: f64, v_max: f64, tau: f64) -> f64 {
 }
 
 /// How long a runner leaving from a tag-up needs to cover `d` m: the wait for his first step,
-/// then the speed law from rest with the set start's time constant (agent-models §6.6). His
+/// then the speed law from rest with the set start's time constant (agent-models §6.4). His
 /// decision uses this and his legs run the same law; no earlier speed carries over.
 fn tag_up_time(tag: bb_agents::running::TagUpParams, wait_s: f64, d: f64, v_max: f64) -> f64 {
     wait_s + run_time(d, v_max, tag.tau_s)
@@ -2458,7 +2458,7 @@ impl<'a> Sim<'a> {
         let r = &self.r[k];
         let d_run = (next as f64 * BASE_L - r.s).max(0.0);
         let t_run = match r.set_start {
-            // Going from a tag-up: the same start his legs will run (§6.6).
+            // Going from a tag-up: the same start his legs will run (§6.4).
             Some(leave) => tag_up_time(self.inp.tag_up, (leave - self.t).max(0.0), d_run, r.vmax),
             None => run_time(d_run, r.vmax, RUNNER_TAU) * if r.v > 1.0 { 0.75 } else { 1.0 },
         };
@@ -2532,8 +2532,9 @@ impl<'a> Sim<'a> {
                     let b = self.r[k].last_base;
                     self.emit(Input::BaseTouched { t: self.t, agent: self.r[k].id, base: b, holding_ball: false });
                     // Set on the bag and watching the catch, he leaves on it: an anticipated
-                    // start, judged with the same model his legs then run (§6.6).
+                    // start, judged with the same model his legs then run (§6.4).
                     self.r[k].set_start = Some(self.t + self.inp.tag_up.react_s);
+                    self.r[k].v = 0.0; // standing on the bag: no earlier speed carries over
                     self.runner_decide(k, b);
                     if self.r[k].goal <= b {
                         self.r[k].set_start = None;
@@ -2722,7 +2723,7 @@ impl<'a> Sim<'a> {
                 continue;
             }
             let on_base = (r.s / BASE_L - (r.s / BASE_L).round()).abs() * BASE_L < 0.3;
-            // A tag takes him `tag_apply_s` from securing the ball (agent-models §6.6).
+            // A tag takes him `tag_apply_s` from securing the ball (agent-models §6.4).
             if !on_base && self.t >= self.secured_at + fd.a.tag_apply_s && (self.runner_pos(r) - fd.pos).norm() < fd.a.throw_choice.tag_reach_m {
                 let id = r.id;
                 self.emit(Input::TagContact { t: self.t, fielder: fd.id, runner: id, holding_ball: true });
@@ -3622,6 +3623,113 @@ mod tests {
         assert_eq!(count(&sim, |f| matches!(f, Input::BaseTouched { agent: R, base: 3, .. })), 1);
         assert_eq!(count(&sim, |f| matches!(f, Input::BaseLeft { agent: R, base: 3, .. })), 1);
         assert!(!sim.out.events.iter().any(|e| matches!(e, Event::RulesWarning { .. })));
+    }
+
+    /// A runner standing on third, tagging up, with `tag` for his start; the ball caught by
+    /// the center fielder `cf_y` m out at 5.0 s. Runs the runners only.
+    fn tag_up_from_third(tag: bb_agents::running::TagUpParams, cf_y: f64, v_before: f64) -> (Sim<'static>, Vec<f64>) {
+        const R: AgentId = 0x0007;
+        let fx: &'static Fixture = Box::leak(Box::new(fixture(&[(R, 3)])));
+        let mut inp = input(fx, vec![RunnerIn { id: fx.st.batter, base: 0, speed: 8.2 }, RunnerIn { id: R, base: 3, speed: 8.2 }]);
+        inp.tag_up = tag;
+        let inp: &'static LiveInput<'static> = Box::leak(Box::new(inp));
+        let st: &'static mut RulesState = Box::leak(Box::new(fx.st.clone()));
+        let mut sim = new_sim(inp, st);
+        (sim.r[1].s, sim.r[1].v, sim.r[1].goal, sim.r[1].tag_up, sim.r[1].hold_s) = (3.0 * BASE_L, v_before, 3, true, None);
+        sim.t = 5.0;
+        sim.f[CF].pos = Vec3::new(0.0, cf_y, 0.0);
+        let id = sim.f[CF].id;
+        sim.emit(Input::GloveSecured { t: 5.0, fielder: id, x: 0.0, y: cf_y });
+        sim.ball = Ball::Held { by: CF };
+        sim.secured_at = 5.0;
+        let mut speeds = Vec::new();
+        for _ in 0..720 {
+            if sim.done {
+                break;
+            }
+            sim.move_runners();
+            speeds.push(sim.r[1].v);
+            sim.t += DT;
+        }
+        (sim, speeds)
+    }
+
+    fn home_touch(sim: &Sim) -> Option<f64> {
+        sim.out.facts.iter().find_map(|f| match *f {
+            Input::BaseTouched { t, agent: 0x0007, base: 4, .. } => Some(t),
+            _ => None,
+        })
+    }
+
+    // agent-models §6.4: from the set start his legs run the law his decision assumed. With
+    // a 0.2 s first step and τ 0.6 s, 90 ft at 8.2 m/s from rest takes t with
+    // t − 0.6·(1 − e^(−t/0.6)) = 27.432/8.2 = 3.34537, so t = 3.94453 (hand iteration): he
+    // touches home 0.2 + 3.94453 s after the 5.0 s catch, within the 60 Hz step's error.
+    #[test]
+    fn a_tag_up_runs_the_set_start_he_judged() {
+        let tag = bb_agents::running::TagUpParams { react_s: 0.2, tau_s: 0.6, typical_tag_s: 0.0 };
+        // A throw from 140 m needs a relay: the run is clearly on, whatever his timing draw.
+        let (sim, _) = tag_up_from_third(tag, 140.0, 0.0);
+        let t = home_touch(&sim).expect("he went");
+        assert!((t - (5.0 + 0.2 + 3.94453)).abs() < 2.0 * DT, "home at {t:.4}");
+        assert!((tag_up_time(tag, 0.2, BASE_L, 8.2) - (0.2 + 3.94453)).abs() < 1e-3);
+    }
+
+    // §6.4: standing on the bag he has no speed, whatever the state said before (before A4 a
+    // tagging runner kept 6.19 m/s from coming back to third). His first moving tick starts
+    // from rest: v = 8.2 · DT / τ.
+    #[test]
+    fn no_speed_carries_over_into_a_tag_up() {
+        let tag = bb_agents::running::TagUpParams::default();
+        let (_, speeds) = tag_up_from_third(tag, 140.0, 6.19);
+        assert!((speeds[0] - 8.2 * DT / tag.tau_s).abs() < 1e-9, "first tick {:.4} m/s", speeds[0]);
+    }
+
+    // §6.4: his decision uses his own start. A runner who would need 3 s more to get going
+    // does not try it on a ball caught 95 m out; with a 0.2 s first step he does.
+    #[test]
+    fn the_decision_uses_the_set_start() {
+        let quick = bb_agents::running::TagUpParams { react_s: 0.2, tau_s: 0.6, typical_tag_s: 0.0 };
+        let slow = bb_agents::running::TagUpParams { react_s: 3.2, ..quick };
+        assert!(home_touch(&tag_up_from_third(quick, 140.0, 0.0).0).is_some());
+        assert!(home_touch(&tag_up_from_third(slow, 95.0, 0.0).0).is_none(), "he should hold");
+    }
+
+    /// The catcher on the plate takes the ball at 2.0 s with an unforced runner 1.0 m from it,
+    /// coming in at 8 m/s; the catcher needs `tag_s` to put a tag on.
+    fn tag_at_home(tag_s: f64) -> Sim<'static> {
+        const R: AgentId = 0x0007;
+        let fx: &'static Fixture = Box::leak(Box::new(fixture(&[(R, 3)])));
+        let mut inp = input(fx, vec![RunnerIn { id: fx.st.batter, base: 0, speed: 8.2 }, RunnerIn { id: R, base: 3, speed: 8.2 }]);
+        inp.fattrs[1].tag_apply_s = tag_s;
+        let inp: &'static LiveInput<'static> = Box::leak(Box::new(inp));
+        let st: &'static mut RulesState = Box::leak(Box::new(fx.st.clone()));
+        let mut sim = new_sim(inp, st);
+        sim.t = 2.0;
+        held_at(&mut sim, 1, base_pos(4));
+        sim.secured_at = 2.0;
+        (sim.r[1].s, sim.r[1].v, sim.r[1].goal, sim.r[1].hold_s) = (4.0 * BASE_L - 1.0, 8.0, 4, None);
+        for _ in 0..30 {
+            if sim.done {
+                break;
+            }
+            sim.holder_act();
+            sim.move_runners();
+            sim.t += DT;
+        }
+        sim
+    }
+
+    // §6.4: a tag is not instant. With none needed he is tagged on the catch; given 0.3 s,
+    // the runner covers his last metre in 1/8 s and is home first (hand calculation).
+    #[test]
+    fn a_tag_needs_its_time() {
+        let tags = |sim: &Sim| count(sim, |f| matches!(f, Input::TagContact { runner: 0x0007, .. }));
+        let instant = tag_at_home(0.0);
+        assert!(tags(&instant) >= 1, "tagged on the catch");
+        let real = tag_at_home(0.3);
+        assert_eq!(tags(&real), 0);
+        assert!(home_touch(&real).is_some_and(|t| t < 2.0 + 0.3));
     }
 
     // A runner caught off his base by the catch goes back, retouches once, and is then free:

@@ -156,7 +156,7 @@ impl Sim<'_> {
             // weighed as a tag (`out_weight`, no force continuation), never as a touch.
             if distance < params.carry_max_m {
                 let ready = if fd.dove { fd.ready_at } else { fd.up_at };
-                // A tag (not a force) also needs the time to put it on (§6.6).
+                // A tag (not a force) also needs the time to put it on (§6.4).
                 let tag = if force { 0.0 } else { fd.a.tag_apply_s };
                 let ball_at = self.t.max(ready) + run_time_to(fd, target, 0.6) + tag;
                 add(true, ball_at, ball_at);

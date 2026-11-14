@@ -571,6 +571,19 @@ advance if  P̂(safe) · ΔRE_safe + (1 − P̂(safe)) · ΔRE_out  >  ΔRE_hold
 - **Fly balls:** the runner estimates P(catch) from the fielder's position and the ball (own estimate). High P(catch) → return and tag up; uncertain → go halfway; a likely hit → run.
 - **Batter-runner** always runs; rounding first depends on the same rule.
 
+### 6.4 Tag-ups and tags (2026-11-14; values pending)
+
+*Why.* Before A4 a runner who came back to his base to tag up kept the speed he arrived with while standing on it (a stale 6.19 m/s on the traced plays). At the catch he judged the advance with the interim rule's running-start factor (run time × 0.75 when v > 1 m/s: third to home 3.14 s) and his legs left at that speed. A4 zeroed a stopping runner's speed on arrival, which is right, and he became a runner caught flat-footed (4.19 s): caught flies with a run scoring fell from about 60 to 16 per 100 games (docs/calibration/2026-11-14-throw-choices.md, "Diagnosis" and follow-up §C). Neither start is what a tagging runner does.
+
+*The model (built, `live.rs`; parameters `bb_agents::running::TagUpParams` in `LiveInput::tag_up`, and `FielderAttrs::tag_apply_s`).*
+- A runner who tags up stands on the bag with no speed, watching the catch. He knows when it comes, so he leaves on it: his first step comes `react_s` [E, pending] after the catch (an anticipated start, not a reaction to a surprise), and he accelerates from rest as v = v_max(1 − e^(−t/τ)) with `tau_s` [E, pending], his set start's time constant, until he next stops or turns back. No speed from before the catch carries over.
+- He decides with the same start: t̂_self = react_s + the run time from rest under `tau_s` (`tag_up_time`), against his own read of the throw (§6.3: the fielder's typical transfer and a typical throw, relayed when quicker). The running-start factor of the interim rule does not apply to him.
+- An unforced runner must beat the tag, not only the ball: he adds `typical_tag_s` [E, pending], his belief of the time a fielder needs to put the tag on, to the ball's time.
+- *The ball's side.* A fielder who has just secured the ball can tag a runner only from `tag_apply_s` [E, pending, per fielder] after securing it (the catch, the sweep of the glove). The holder's own estimate of a tag option (§5.6) adds the tagger's `tag_apply_s`; forces need none. Before this the tag landed on the tick the ball was secured.
+- *Defaults are neutral* (react 0, τ 0.85 s, typical tag 0, tag apply 0) and reproduce the game before the model exactly (digests of seeds 1, 2, 3, 42 and the 300-game standard run on seeds 0–299 identical). Values come from docs/calibration/2026-11-14-tag-ups.md: tag-up times third to home, sacrifice-fly outcomes by fly depth, outfield throw-home times, the catcher's tag. Both sides of the race are checked against it before any value is set (the runner's 4.19 s from a standing start; the ball's 3.8–4.2 s from the catch: outfielder catch-to-release with the footwork of a throw home, a throw that may take a hop, the catcher's catch and tag); the fix goes on whichever side is physically off.
+- *Tests* (`live.rs`): the legs reach home at react_s + the hand-solved run time from rest (0.2 + 3.94453 s at 8.2 m/s, τ 0.6 s) within the 60 Hz step; a runner standing on the bag with a stale 6.19 m/s starts from rest (first tick v = 8.2·DT/τ); a runner who needs 3.2 s to get going holds on a ball caught 95 m out where a 0.2 s start goes; with `tag_apply_s` 0.3 s a runner 1 m from the plate at 8 m/s scores before the catcher can tag, with 0 he is tagged. When the sources land, the measured values get their own tests: the sourced third-to-home tag-up time, and the probe's sacrifice-fly rate by fly depth against the sourced table.
+- *Not yet:* a coach's send; a runner who leaves early (appeal); a throw cut off to hold the trailing runner; sliding around a tag.
+
 ---
 
 ## 7. AI Manager

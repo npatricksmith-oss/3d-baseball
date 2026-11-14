@@ -1,8 +1,8 @@
-//! Runners' starts (agent-models §6.6): parameters only; the live simulator runs the legs
+//! Runners' starts (agent-models §6.4): parameters only; the live simulator runs the legs
 //! and the runner's decision from the same start model (`bb_game::live`).
 
 /// A runner who has tagged up: set on his bag, watching the catch, leaving on it
-/// (agent-models §6.6). [E], **values pending** the tag-up sources note
+/// (agent-models §6.4). [E], **values pending** the tag-up sources note
 /// (docs/calibration/2026-11-14-tag-ups.md). The defaults are neutral: they reproduce the
 /// game as it was before the tag-up model (he leaves on the catch tick and accelerates
 /// like any runner from rest; no time allowed for the tag).

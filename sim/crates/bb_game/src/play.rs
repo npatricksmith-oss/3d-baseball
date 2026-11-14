@@ -61,7 +61,7 @@ pub struct FielderAttrs {
     /// Configurable A4 option/observation thresholds [E] (agent-models §5.5–5.7).
     pub throw_choice: bb_agents::throwing::ChoiceParams,
     /// From securing the ball to the earliest tag he can put on a runner, s [E], **value
-    /// pending** the tag-up sources note (agent-models §6.6); 0 (neutral) reproduces the game
+    /// pending** the tag-up sources note (agent-models §6.4); 0 (neutral) reproduces the game
     /// before the tag-up model, where a tag landed on the tick the ball was secured.
     pub tag_apply_s: f64,
 }
