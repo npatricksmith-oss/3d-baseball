@@ -1,11 +1,44 @@
 # Task List
 
-**Last updated:** 2026-11-13 (hurried throws, A3; before that, handedness, A1; before that, the dive rate judged and fixed, A5, and rosters, A2, merged; before that, dives shown in the client, the get-up after a rimmed dive, two-out throws; before that, the overrun of first and runner position samples; before that, foul measures, sources and the correction experiment; pushed; the spray experiment parked for later; before that, the read knows the ball started at the plate; before that, called-off infielders back up the catch; before that, pop-up calls on `fix/popup-calls`; before that, owner's observations merged into the "Owner backlog" section; before that, the coordinator run on `coord/review-fixes`)
+**Last updated:** 2026-11-14 (the swing block below, from the second lead session; before that, hurried throws, A3; before that, handedness, A1; before that, the dive rate judged and fixed, A5, and rosters, A2, merged; before that, dives shown in the client, the get-up after a rimmed dive, two-out throws; before that, the overrun of first and runner position samples; before that, foul measures, sources and the correction experiment; pushed; the spray experiment parked for later; before that, the read knows the ball started at the plate; before that, called-off infielders back up the catch; before that, pop-up calls on `fix/popup-calls`; before that, owner's observations merged into the "Owner backlog" section; before that, the coordinator run on `coord/review-fixes`)
 The live to-do list for the project. [PLAN.md](PLAN.md) holds decisions and design. This file holds what is next and what is done. Update it at the end of every work session.
 
 Status: `[ ]` not started · `[~]` in progress · `[x]` done · `[?]` needs an owner decision
 
 ---
+
+## Swing work (lead "Fable Swing", 2026-11-14 midday; its own block, separate from the fielding handoff below)
+
+**Not on main.** Everything is on `work/swing-recalib` (`f46ea5a`; `work/swing-model` points at the same commit), which contains main `dae1b7a`. `cargo test --workspace --release`: 335 pass, 3 ignored. Merging the v2 swing into main waits for the owner's word (PLAN §1 D19).
+
+**Owner's ruling on the swing note's proposals (D19):** A, v2 is the swing, off main until recalibrated; B, per-player bat speed, yes; C, re-check the vertical aim, yes; D, collision efficiency, not now.
+
+**Where the numbers stand** (standard run, seeds 0–299 [1000–1299]; main `dae1b7a` → branch; [ledger](docs/metrics-ledger.md) rows on the branch):
+
+| | main | branch | real |
+|---|---|---|---|
+| Runs / team-game | 5.86 [6.18] | 4.82 [4.50] | 4.39 |
+| HR / PA | 5.13% [5.30%] | 1.04% [0.98%] | 3.0% |
+| K% | 15.8 [16.0] | 15.6 [15.8] | 22.6 |
+| Ground-ball hits | .327 [.329] | .368 [.353] | .245 |
+
+Runs are near real for the wrong reasons: a third of the home runs, too many hits on balls in play.
+
+**Done on the branch** (notes are on the branch, under `docs/calibration/`):
+- Main merged in twice; the fielding files differ from main only by the swing's refit spray-belief constants.
+- **B: each batter has his own bat speed** (`bb_game::population`, RNG purpose `RosterAbilities` = 15, spread 1.25 m/s = Statcast's 2.8 mph). Home runs 0.57% → 1.0% of PA. `2026-11-14-swing-recalibration.md`.
+- **C: the vertical aim was swept and left at −2.0 cm** (mean launch 11.8° against 12.2°, inside its band). The aim moves launch angle, not home runs: they are limited by exit speed.
+- **The bat's angle at contact (λ_c) was swept and left at 0**: about 0.2° of spray per degree, and it moves the measured path, not the ball. `2026-11-14-bat-angle-at-contact.md`.
+- Statcast-anchored tests of v2 (`bb_agents/tests/swing_statcast.rs`), the v2 literals named, the note's figures checked and corrected (`2026-11-14-swing-note-check.md` is on `work/swing-chores`, not merged).
+- **[Codex Sol review](docs/reviews/2026-11-14-codex-swing-v2-recalib-review.md): resolved** (on the branch). No P1; the P2 (carry loss wrongly put down to backspin) and three P3s are fixed. It reproduced the kinematics against the oracle and its own probes, the digests, and the seed-0 standard run.
+
+**Waiting for the owner:**
+- **Whether to merge v2 into main as it stands** (truer swing, home runs a third of real).
+- **Whether to open the collision question** (it reopens D). The swing's abilities are exhausted as a way to recover home runs and spray. Both remaining gaps point to one thing (recalibration report §3.1): off a barrel sloped 28° down and met under the ball's center, the collision sends the ball too far toward the tip side with too much sidespin (3,720 rpm at a 27° launch against about 2,000–2,500 in Nathan's Statcast figures; fly balls −19.8° against MLB's −2.8°). The report lists the numbers a sourced collision change would have to meet. Tier A physics: specs and the oracle first.
+
+**Open, not the swing's:** the batters are 17 ms early on outside pitches and 2 ms inside (perception); launch angles are too bunched (SD 25.1° against 29.1°); K% and the foul share did not move. On a mix of swings v2's attack-angle slope against direction is 0.53 and v1's 0.36 (Statcast 0.41): a v2 shortfall, recorded in the report.
+
+**Housekeeping:** worktrees `swing`, `swing-tests`, `swing-lambda`, `swing-chores`, `swing-tasks` and their `work/swing-*` branches are left in place. Workers ran in the Herdr desktop app (`herdr-app`, `hc`), not the terminal server.
 
 ## Resume here (2026-11-14, overnight lead session, 00:00 to 06:00)
 
