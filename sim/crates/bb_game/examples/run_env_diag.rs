@@ -19,6 +19,7 @@ use bb_physics::ground::{Field, Segment, SegmentEnd, batted_path};
 use bb_physics::zone::{HALF_WIDTH, Zone, ZoneRule};
 use bb_physics::BallState;
 use bb_rules::{Event, Input, PaResult};
+use bb_stats::scorer::Outcome;
 
 fn pitch_idx(ty: PitchType) -> usize {
     match ty {
@@ -356,6 +357,30 @@ fn main() {
     let mut gb_spray_rhb = [[0u32; 3]; 18];
     let mut gb_spray_lhb = [[0u32; 3]; 18];
 
+    // Official-scorer BIP outcome counts (1B/2B/3B/HR/FC/Out) and line doubles (<= -35/-30, >= +35/+30)
+    #[derive(Default, Clone, Copy)]
+    struct LineDoubleStats {
+        bip: u32,
+        hits: u32,
+        singles: u32,
+        doubles: u32,
+        triples: u32,
+        hrs: u32,
+        fc: u32,
+        outs: u32,
+        doubles_3b_35: u32,
+        doubles_3b_30: u32,
+        doubles_1b_35: u32,
+        doubles_1b_30: u32,
+        doubles_gb_3b_35: u32,
+        doubles_gb_3b_30: u32,
+        doubles_gb_1b_35: u32,
+        doubles_gb_1b_30: u32,
+    }
+    let mut ld_all = LineDoubleStats::default();
+    let mut ld_rhb = LineDoubleStats::default();
+    let mut ld_lhb = LineDoubleStats::default();
+
     // Detailed GB fielding timeline metrics per class (0=through, 1=ifh, 2=out) & routine
     #[derive(Default, Clone)]
     struct GbTimeStats {
@@ -543,6 +568,32 @@ fn main() {
                             t0: t_c,
                         });
 
+                        // Official scorer outcome & line-double breakdown
+                        if let Some(ruling) = st.scorer_ruling {
+                            let is_gb = res_pa == PaResult::BattedBall && la_deg < 10.0;
+                            let rec_ld = |s: &mut LineDoubleStats| {
+                                s.bip += 1;
+                                match ruling.outcome {
+                                    Outcome::Hit(1) => { s.hits += 1; s.singles += 1; }
+                                    Outcome::Hit(2) => {
+                                        s.hits += 1;
+                                        s.doubles += 1;
+                                        if spray_deg <= -35.0 { s.doubles_3b_35 += 1; if is_gb { s.doubles_gb_3b_35 += 1; } }
+                                        if spray_deg <= -30.0 { s.doubles_3b_30 += 1; if is_gb { s.doubles_gb_3b_30 += 1; } }
+                                        if spray_deg >= 35.0 { s.doubles_1b_35 += 1; if is_gb { s.doubles_gb_1b_35 += 1; } }
+                                        if spray_deg >= 30.0 { s.doubles_1b_30 += 1; if is_gb { s.doubles_gb_1b_30 += 1; } }
+                                    }
+                                    Outcome::Hit(3) => { s.hits += 1; s.triples += 1; }
+                                    Outcome::Hit(4) => { s.hits += 1; s.hrs += 1; }
+                                    Outcome::FieldersChoice | Outcome::ReachedOnThrowAward => { s.fc += 1; }
+                                    Outcome::Out => { s.outs += 1; }
+                                    _ => {}
+                                }
+                            };
+                            rec_ld(&mut ld_all);
+                            if bh_is_left { rec_ld(&mut ld_lhb); } else { rec_ld(&mut ld_rhb); }
+                        }
+
                         // H-to-1B check
                         let batter_touched_1b = st.facts.iter().find_map(|f| {
                             if let Input::BaseTouched { t, agent, base: 1, holding_ball: false } = f {
@@ -626,10 +677,20 @@ fn main() {
                                 gb_spray_rhb[sbin][class] += 1;
                             }
 
+                            let mut play_home = home;
+                            for &(id, p) in &st.viz.standing {
+                                if (id & 0x80) != 0 {
+                                    let idx = (id & 0x7F) as usize;
+                                    if (1..=9).contains(&idx) {
+                                        play_home[idx - 1] = p;
+                                    }
+                                }
+                            }
+
                             // Routine check (<95 mph & <= 3 m of home pos P,1B,2B,3B,SS)
                             let routine = ev_mph < 95.0
                                 && (0..6).filter(|&i| i != 1).any(|i| {
-                                    let h = home[i];
+                                    let h = play_home[i];
                                     let mut tt = path.t_start();
                                     let mut near = false;
                                     while tt < path.t_end() && !near {
@@ -712,10 +773,10 @@ fn main() {
                                 if first_sec.is_none() && if_dives > 0 {
                                     ts.rim_deflect += 1;
                                 }
-                                // Jump check: for nearest infielder at start to ball's y=home[i].y path
+                                // Jump check: for nearest infielder at start to ball's y=play_home[i].y path
                                 let (b_v, _) = (s0.v, s0.r);
                                 if let Some((ni, _, _)) = (2..6).filter_map(|i| {
-                                    let hp = home[i];
+                                    let hp = play_home[i];
                                     let d = hp.x.hypot(hp.y);
                                     // approximate lateral sign of ball relative to fielder at fielder dist
                                     let b_dir = Vec3::new(b_v.x, b_v.y, 0.0).normalized();
@@ -725,13 +786,13 @@ fn main() {
                                     let id_pos = ni as u16 + 1;
                                     if let Some((_, samples)) = st.viz.actors.iter().find(|(id, _)| (*id & 0x80 != 0) && (*id & 0x7F) == id_pos) {
                                         if let Some(p_25) = samples.iter().min_by(|a, b| (a.0 - (t_c + 0.25)).abs().total_cmp(&(b.0 - (t_c + 0.25)).abs())) {
-                                            let dp = p_25.1 - home[ni];
+                                            let dp = p_25.1 - play_home[ni];
                                             if dp.x.hypot(dp.y) > 0.05 {
                                                 ts.jump_moved += 1;
                                                 // dot with vector from fielder to ball's direction ray closest point
                                                 let b2 = Vec3::new(b_v.x, b_v.y, 0.0).normalized();
-                                                let proj = b2 * (home[ni].x * b2.x + home[ni].y * b2.y);
-                                                let want = proj - home[ni];
+                                                let proj = b2 * (play_home[ni].x * b2.x + play_home[ni].y * b2.y);
+                                                let want = proj - play_home[ni];
                                                 if dp.x * want.x + dp.y * want.y < 0.0 {
                                                     ts.jump_wrong += 1;
                                                 }
@@ -759,7 +820,7 @@ fn main() {
                                     p_pol(115.0, -32.0), // 3B off line
                                     p_pol(150.0, -14.5), // SS slightly wider
                                 ];
-                                let def_pos = [home[2], home[3], home[4], home[5]];
+                                let def_pos = [play_home[2], play_home[3], play_home[4], play_home[5]];
                                 let can_reach = |pos_list: &[Vec3; 4]| {
                                     let mut tt = path.t_start() + 0.25;
                                     while tt < path.t_end() {
@@ -1105,7 +1166,7 @@ fn main() {
         100.0 * thru_gap_2b1b as f64 / thru_tot.max(1) as f64,
         100.0 * thru_gap_3bss as f64 / thru_tot.max(1) as f64);
 
-    println!("GB by 5-deg spray bin (All / Through% / IFH% / Out%) | IF home angles: 3B=-36°, SS=-13°, 2B=+13°, 1B=+38°:");
+    println!("GB by 5-deg spray bin (All / Through% / IFH% / Out%):");
     for b in 0..18 {
         let lo = -45 + (b as i32) * 5;
         let hi = lo + 5;
@@ -1118,6 +1179,49 @@ fn main() {
             100.0 * gb_spray_all[b][1] as f64 / tot.max(1) as f64,
             100.0 * gb_spray_all[b][2] as f64 / tot.max(1) as f64,
             100.0 * (gb_spray_all[b][0] + gb_spray_all[b][1]) as f64 / tot.max(1) as f64);
+    }
+
+    println!("\nGB Through-the-hole & Hit% by Lane (ALL / RHB / LHB):");
+    let lanes: &[(&str, usize, usize)] = &[
+        ("3B line  [-45..-35°)", 0, 2),
+        ("3B-SS    [-35..-15°)", 2, 6),
+        ("SS-mid   [-15.. -5°)", 6, 8),
+        ("P/mid    [ -5.. +5°)", 8, 10),
+        ("mid-2B   [ +5..+15°)", 10, 12),
+        ("2B-1B    [+15..+35°)", 12, 16),
+        ("1B line  [+35..+45°]", 16, 18),
+    ];
+    for &(lbl, b0, b1) in lanes {
+        let sum_lane = |arr: &[[u32; 3]; 18]| -> (u32, u32, u32, u32) {
+            let mut s = [0u32; 3];
+            for b in b0..b1 {
+                for c in 0..3 { s[c] += arr[b][c]; }
+            }
+            (s[0] + s[1] + s[2], s[0], s[1], s[2])
+        };
+        let (an, at, ai, _) = sum_lane(&gb_spray_all);
+        let (rn, rt, ri, _) = sum_lane(&gb_spray_rhb);
+        let (ln, lt, li, _) = sum_lane(&gb_spray_lhb);
+        println!(
+            "  {lbl} | ALL n={an:4} Thru={at:3} ({:4.1}%) Hit={:4.1}% | RHB n={rn:4} Thru={rt:3} ({:4.1}%) Hit={:4.1}% | LHB n={ln:4} Thru={lt:3} ({:4.1}%) Hit={:4.1}%",
+            100.0 * at as f64 / an.max(1) as f64,
+            100.0 * (at + ai) as f64 / an.max(1) as f64,
+            100.0 * rt as f64 / rn.max(1) as f64,
+            100.0 * (rt + ri) as f64 / rn.max(1) as f64,
+            100.0 * lt as f64 / ln.max(1) as f64,
+            100.0 * (lt + li) as f64 / ln.max(1) as f64,
+        );
+    }
+
+    println!("\nScorer Hit Types & Line Doubles (from PlayRuling):");
+    for (lbl, s) in [("ALL", ld_all), ("RHB", ld_rhb), ("LHB", ld_lhb)] {
+        println!(
+            "  {lbl:3}: BIP {:4} | H {:4} ({:.3}) -> 1B {:4} 2B {:3} 3B {:2} HR {:3} | FC {:3} Out {:4} | 2B down 3B line: <=-35° {:2} (GB {:2}), <=-30° {:2} (GB {:2}) | down 1B line: >=+35° {:2} (GB {:2}), >=+30° {:2} (GB {:2})",
+            s.bip, s.hits, s.hits as f64 / s.bip.max(1) as f64,
+            s.singles, s.doubles, s.triples, s.hrs, s.fc, s.outs,
+            s.doubles_3b_35, s.doubles_gb_3b_35, s.doubles_3b_30, s.doubles_gb_3b_30,
+            s.doubles_1b_35, s.doubles_gb_1b_35, s.doubles_1b_30, s.doubles_gb_1b_30,
+        );
     }
 }
 
