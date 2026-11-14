@@ -136,7 +136,14 @@ impl Field {
         let taper_d = (k * (s_pole - s) - c) / norm;
         // Inward in (s, c) is (−k, −1)/norm; s = (1, 1)/√2 and c = (1, −1)/√2 on this side.
         let inward = Vec3::new(sg * (-k - 1.0), -k + 1.0, 0.0) * (1.0 / (r2 * norm));
-        let taper = WallAt { kind: WallKind::Taper, dist: taper_d, inward, s };
+        // The walls bound foul territory only (§9.5): beyond the pole the taper's line would
+        // cut into fair ground for a steep enough taper, so a point fair of the foul line is
+        // never outside it (inside the union of the taper's half-plane and fair ground).
+        let taper = if -c > taper_d {
+            WallAt { kind: WallKind::Taper, dist: -c, inward: Vec3::new(-sg, 1.0, 0.0) * (1.0 / r2), s }
+        } else {
+            WallAt { kind: WallKind::Taper, dist: taper_d, inward, s }
+        };
         [fence, back, side, taper]
     }
 
@@ -604,6 +611,27 @@ mod tests {
         // it meets the wall 50 ft off the line 71 ft along it, inside the 20–80 ft opening).
         let gb = batted_path(&env, &f, launch(60.0, -8.0, -80.0, 0.0), 0.0, |_, _| (0.0, 0.0));
         assert_eq!(gb.end(), SegmentEnd::OverFence { fair: false }, "{:?}", gb.at(gb.t_end()));
+    }
+
+    /// The walls bound foul territory only: every fair point inside the fence is inside the
+    /// field, for the reference park and for one with a steep taper (stands 300 ft off the
+    /// lines closing in over the last 30 ft before the poles), physics-spec §9.5.
+    #[test]
+    fn foul_walls_never_cut_fair_ground() {
+        let steep = Field { foul_clear_m: 300.0 * FT, foul_taper_m: 300.0 * FT, ..Field::default() };
+        for f in [Field::default(), steep] {
+            for i in 0..=200 {
+                let th = (-45.0 + 0.45 * i as f64) * core::f64::consts::PI / 180.0;
+                let fence = f.fence_at(th);
+                for j in 1..=100 {
+                    let rho = fence * j as f64 / 100.0 - 1e-6;
+                    let (x, y) = (rho * m::sin(th), rho * m::cos(th));
+                    let w = f.body_clearance(x, y, 0.0);
+                    assert!(w.dist >= -1e-9, "fair ({x:.2}, {y:.2}) outside by {:?}", w);
+                    assert!(w.kind == WallKind::Fence || w.dist > 0.0);
+                }
+            }
+        }
     }
 
     #[test]
