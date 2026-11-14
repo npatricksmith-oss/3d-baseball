@@ -2157,7 +2157,19 @@ impl<'a> Sim<'a> {
                 match path.end() {
                     SegmentEnd::OverFence { .. } => {
                         let in_flight = path.bounces.is_empty();
-                        facts.push(Input::BallTouched { t: path.t_end().max(floor), what: Touch::OutOfPlay { x: p.x, y: p.y, in_flight } });
+                        // Where it left the field (fair or foul is judged there, rules-spec
+                        // §5.2), though it is dead only once it is down in the seats.
+                        let r = self.inp.env.ball.radius;
+                        let exit = match path.segments.last() {
+                            Some(bb_physics::ground::Segment::Flight { tr, .. }) => tr.find(bb_physics::flight::Crossing::Boundary { field: *self.inp.field, r }).map(|tc| tr.at(tc).0).or_else(|| {
+                                // A path that starts at the wall (a throw over it): it left there.
+                                let a = tr.first().s.r;
+                                (self.inp.field.ball_clearance(a.x, a.y, r).dist <= 1e-6).then_some(a)
+                            }),
+                            _ => None,
+                        };
+                        let q = exit.unwrap_or(p);
+                        facts.push(Input::BallTouched { t: path.t_end().max(floor), what: Touch::OutOfPlay { x: q.x, y: q.y, in_flight } });
                     }
                     SegmentEnd::Rest => facts.push(Input::BallSettled { t: path.t_end().max(floor), x: p.x, y: p.y }),
                     _ => {}
@@ -5406,13 +5418,15 @@ mod tests {
         assert!(ev.contains(&Event::BallDead { reason: bb_rules::DeadBall::OutOfPlay }), "{ev:?}");
         assert!(ev.contains(&Event::RunnerAdvanced { runner: 2, from: 1, to: 3, cause: bb_rules::AdvanceCause::Award }), "{ev:?}");
         assert!(ev.contains(&Event::RunnerAdvanced { runner: fx.st.batter, from: 0, to: 2, cause: bb_rules::AdvanceCause::Award }), "{ev:?}");
-        // It went into the seats: the out-of-play point is past the wall, in foul ground.
+        // It left over the wall: the out-of-play point is where it crossed, its center one
+        // ball radius short of the wall's plane, 50 ft off the line.
         let oop = sim.out.facts.iter().find_map(|f| match f {
             Input::BallTouched { what: Touch::OutOfPlay { x, y, .. }, .. } => Some((*x, *y)),
             _ => None,
         });
         let (x, y) = oop.expect("an out-of-play fact");
-        assert!((x - y) / core::f64::consts::SQRT_2 > 50.0 * bb_math::units::FT, "({x:.1}, {y:.1})");
+        let c = (x - y) / core::f64::consts::SQRT_2;
+        assert!((c - (50.0 * bb_math::units::FT - fx.env.ball.radius)).abs() < 1e-3, "({x:.2}, {y:.2}): {c:.4} m off the line");
     }
 
     /// The same throw from 1.0 m, flatter (35 m/s, rising 2 m/s), meets the wall about 0.3 m
