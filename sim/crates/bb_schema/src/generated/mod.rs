@@ -174,6 +174,8 @@ pub mod bb {
     pub use self::scorer_ruling_generated::*;
     mod scorer_evidence_generated;
     pub use self::scorer_evidence_generated::*;
+    mod scorer_throw_generated;
+    pub use self::scorer_throw_generated::*;
     mod manager_command_applied_generated;
     pub use self::manager_command_applied_generated::*;
     mod substitution_generated;

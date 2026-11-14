@@ -404,13 +404,18 @@ For each batter-runner reaching base on a fair ball:
 - **Infield hit:** the ball was fielded cleanly but the reference throw was late.
 - **Ground-rule double**, **HR** by award. A walk-off hit is limited per §4.1.
 
-**Implementation status (2026-11-14):** the current event writer does not persist first-base
-contacts, first fielding, throws, or a reference-play margin. The existing `classify_bip`
-is a provisional display/lab diagnostic, not an official ruling and not sufficient to
-reconstruct hits from a log. Fielding errors are not simulated; when added, error rulings
-must use the ordinary-chance and reference-play evidence above rather than treating every
-failed play as an error. Until that evidence is recorded, failed choices and advances on
-a throw cannot be scored reliably.
+**Evidence implementation:** for each live ball the log records each runner's starting base,
+first glove handling (including a deflection), first secure possession, batter's first-base
+touch when it occurs, and each throw's release time, origin and target. The reference throw
+is computed in `bb_game` after the play, never exposed to agents: from the first secure
+possession's location and time, a set grade-50 fielder uses the position's average transfer
+and arm, the actual environment, and the throw physics to first. The margin is actual batter
+first-touch time minus reference arrival; a missing touch, possession, or feasible throw is
+explicitly marked unavailable. For a play ending before first is touched there is no actual
+time to first and no fabricated margin. These facts support re-ruling without simulation.
+Fielding-error rulings remain provisional until A17: do not invent an error from a miss.
+Hit value on advances after a throw and sacrifice-fly territorial judgment remain provisional
+where the logged facts cannot determine the necessary scorer judgment.
 
 ### 10.3 Errors on runners and extra bases
 

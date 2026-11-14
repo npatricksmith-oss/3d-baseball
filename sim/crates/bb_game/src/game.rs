@@ -273,6 +273,7 @@ impl Game {
             facts.push(Input::PitchCrossed { t: t_plate, in_zone: rec.in_zone, bounced: rec.bounced });
         }
         let mut batted = None;
+        let mut scorer_evidence = None;
         if rec.hit_batter {
             facts.push(Input::BallTouched { t: t_plate, what: bb_rules::Touch::Batter });
             facts.push(Input::SwingMeasured { t: t_plate + 0.03, swung: rec.swung });
@@ -306,6 +307,7 @@ impl Game {
                     runners.push(RunnerIn { id: *r, base: (i + 1) as u8, speed: 8.2 });
                 }
             }
+            let scorer_runners = runners.clone();
             let fside = 1 - side as u16;
             let fielders: [u16; 9] = core::array::from_fn(|i| (fside << 8) | 0x80 | (i as u16 + 1));
             // What the fielders can see of the swing: the bat's horizontal angle at the instant
@@ -322,6 +324,29 @@ impl Game {
                 &crate::live::LiveInput { env: &mu.env, field: &self.field, ball, t_contact: t_c, runners, fielders, fattrs: self.fattrs[fside as usize], batter_box: { let p = mu.template.pivot(&mu.batter); bb_math::Vec3::new(p.x, p.y, 0.0) }, bats: mu.batter.bats, pitch_x: rec.plate.map(|p| p.x).or(Some(ball.r.x)), bat_yaw, swing_lead, seed, play, record },
                 st,
             );
+            let first_touch = out.facts.iter().find_map(|f| match f {
+                Input::BaseTouched { t, agent, base: 1, holding_ball: false } if *agent == batter => Some(*t),
+                _ => None,
+            });
+            let secured = out.facts.iter().find_map(|f| match f {
+                Input::GloveSecured { t, fielder, x, y } => Some((*t, *fielder, bb_math::Vec3::new(*x, *y, 0.0))),
+                _ => None,
+            });
+            // The clean play is scorer evidence only. It cannot influence the live simulation.
+            let margin = first_touch.zip(secured).and_then(|(touch, (t, fielder, at))| {
+                let pos = (fielder & 0x7f).checked_sub(1)? as usize;
+                if pos >= 9 { return None; }
+                let avg = FielderAttrs::average(pos);
+                let target = crate::play::base_pos(1);
+                let origin = crate::live::throw_release_point(at, target, self.fattrs[fside as usize][pos].throws);
+                let distance = bb_math::m::hypot(target.x - origin.x, target.y - origin.y);
+                let flight = bb_physics::throw::solve_throw(&mu.env, origin.z, 1.3, distance, avg.arm)?.t_flight;
+                Some(touch - (t + avg.transfer + flight))
+            });
+            scorer_evidence = Some(crate::eventlog::ScorerPlayEvidence {
+                batter, runners: scorer_runners, first_touch, first_handling: out.first_handling,
+                secured, margin, throws: out.scorer_throws.clone(),
+            });
             if record {
                 // Every other tick, and always the last one (the instant the play ended).
                 let n = out.ball_track.len();
@@ -379,7 +404,7 @@ impl Game {
             self.pending_rules.extend(ev);
         }
         let pitcher = ((1 - side as u16) << 8) | 0x81;
-        crate::eventlog::write_pitch(&mut self.writer, play, pitcher, &rec, &self.pending_rules);
+        crate::eventlog::write_pitch(&mut self.writer, play, pitcher, &rec, &self.pending_rules, scorer_evidence.as_ref());
         let rules_events = std::mem::take(&mut self.pending_rules);
         if let Some((ev_, la, spray)) = rec.batted {
             if let Some(Event::PlateAppearanceEnded { batter, result: PaResult::BattedBall }) = rules_events.iter().find(|e| matches!(e, Event::PlateAppearanceEnded { .. })) {

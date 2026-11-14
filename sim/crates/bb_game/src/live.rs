@@ -409,7 +409,21 @@ pub struct LiveInput<'a> {
     pub record: bool,
 }
 
+/// Physical throw facts retained for the scorer, not passed to an agent.
+#[derive(Clone, Copy, Debug)]
+pub struct ScorerThrowFact {
+    pub thrower: AgentId,
+    pub t: f64,
+    pub origin: Vec3,
+    pub target: Vec3,
+    pub base: u8,
+}
+
 pub struct LiveOutput {
+    /// First glove contact with the batted ball, including a deflection.
+    pub first_handling: Option<(f64, AgentId)>,
+    /// Physical releases, independent of visualization recording.
+    pub scorer_throws: Vec<ScorerThrowFact>,
     pub facts: Vec<Input>,
     pub events: Vec<Event>,
     /// The batted ball's free path at contact (for timelines).
@@ -2026,6 +2040,9 @@ impl<'a> Sim<'a> {
                 let (id, from) = (fd.id, fd.pos);
                 self.out.dives.push((self.t, id, from, land));
             }
+            if d <= RIM && self.out.first_handling.is_none() {
+                self.out.first_handling = Some((self.t, fd.id));
+            }
             if d <= POCKET {
                 // Up off the ground first (the get-up runs from his dive, whichever attempt
                 // secured the ball), then the transfer.
@@ -2740,6 +2757,7 @@ impl<'a> Sim<'a> {
         let h = Vec3::new(tgt.x - r0.x, tgt.y - r0.y, 0.0).normalized().rotate(Vec3::Z, ex.yaw_err);
         self.launch_throw(throw_state(r0, h, ex.speed, elev), tgt, b, receiver, relay);
         self.out.released.push((self.t, fd.id));
+        self.out.scorer_throws.push(ScorerThrowFact { thrower: fd.id, t: self.t, origin: r0, target: tgt, base: b });
         self.out.hurry.push((hurry, su.off_balance));
     }
 
@@ -2902,7 +2920,7 @@ fn new_sim<'a>(inp: &'a LiveInput<'a>, st: &'a mut RulesState) -> Sim<'a> {
         f,
         r,
         primary: 0,
-        out: LiveOutput { facts: Vec::new(), events: Vec::new(), path, ball_track: Vec::new(), actors, secured: Vec::new(), released: Vec::new(), hurry: Vec::new(), dives: Vec::new(), calls: Vec::new() },
+        out: LiveOutput { first_handling: None, scorer_throws: Vec::new(), facts: Vec::new(), events: Vec::new(), path, ball_track: Vec::new(), actors, secured: Vec::new(), released: Vec::new(), hurry: Vec::new(), dives: Vec::new(), calls: Vec::new() },
         bounce_k: 1000,
         done: false,
         last_fact_t: t_c,

@@ -237,12 +237,23 @@ Grouped by producer. "Physical" events record what the world did. "Rules" events
 | :--- | :--- |
 | `ScorerRuling` | hit kind (1B/2B/3B/HR) or error (agent, kind: fielding/throwing) or fielder's choice, earned/unearned run marks, wild pitch / passed ball, sacrifice. `scorer_version` |
 | `ScorerEvidence` | the numbers behind each ruling, such as the counterfactual time margin of an ordinary clean play. Lets a later scorer version re-rule from the log without re-simulating (PLAN §4.3) |
+
 | `ManagerCommandApplied` | the full `Command` (§6) as accepted, the issuing manager, human or AI |
 | `Substitution` | out agent, in agent (new slot), new position, batting-order slot; pitching changes included |
 | `AlignmentChanged` | team, infield and outfield alignment, each fielder's assigned home position |
 | `MoundVisit` | team, visits used |
 | `WarmupState` | pitcher, state (cold, warming, ready, overwarmed), pitches thrown in the pen. Emitted on change |
 | `PhysicalLoad` | agent, kind (pitch effort, sprint, dive, collision, HBP energy), amount in J or a defined load unit. Feeds fatigue now and injuries later (PLAN §11, D18) |
+
+For each live ball `ScorerEvidence` records the batter and starting runners, the first
+handling (including a glove deflection), the first secure possession and its location,
+the batter's actual first-base touch when present, and the origin, target, base and time
+of each throw. `has_margin` distinguishes a computed reference margin from absent evidence;
+`clean_play_margin_s` is actual first touch minus the arrival of the set grade-50 reference
+throw. It is computed after the play from the first secure possession, not used by agents.
+No margin is asserted when the batter never touched first or the reference cannot be solved.
+Runner outs and their destination bases are recorded by `RunnerOut`. Errors are not yet ruled.
+
 
 ### 4.4 Determinism digest
 
