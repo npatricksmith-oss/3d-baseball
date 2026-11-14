@@ -1587,7 +1587,7 @@ impl<'a> Sim<'a> {
             Ball::Free { path, .. } => path.bounces.first().map(|x| x.0 <= self.t).unwrap_or(false),
             _ => true,
         };
-        let on = |b: u8| self.r.iter().any(|r| r.start == b && !r.out && !r.scored);
+        let on = |b: u8| self.occupied(b);
         let mut b = if on(2) || on(3) { 4 } else if on(1) || deep { 3 } else { 2 };
         for r in self.r.iter().filter(|r| !r.out && !r.scored) {
             if let Some(target) = visible_target(r, self.f[fielder].a.throw_choice) {
@@ -1691,7 +1691,8 @@ impl<'a> Sim<'a> {
         let from = self.f[pi].target;
         let depth = m::hypot(from.x, from.y);
         let outfield_hit = depth > INFIELD_R;
-        let on = |b: u8| self.r.iter().any(|r| r.start == b && !r.out && !r.scored);
+        let occ = [self.occupied(1), self.occupied(2), self.occupied(3)];
+        let on = |b: u8| occ[(b - 1) as usize];
         let empty = !(on(1) || on(2) || on(3));
         for i in 0..9 {
             self.f[i].backs = None;
@@ -2419,6 +2420,14 @@ impl<'a> Sim<'a> {
         }
     }
 
+    /// Whether a runner is at base `b` now, on it or between it and the next (a visible fact;
+    /// Gemini A4 review P2-3: the cutoff and backups read the bases runners started from,
+    /// so a runner from first standing on third no longer drew the cutoff to the home line
+    /// once a stopped runner stopped offering a visible target).
+    fn occupied(&self, b: u8) -> bool {
+        self.r.iter().any(|r| !r.out && !r.scored && (r.s / BASE_L + 1e-6).floor() as u8 == b)
+    }
+
     /// Whether a runner ahead of runner `k` holds base `b`: he is at or short of it and not
     /// visibly moving forward (standing, or going back). Direction of motion is visible.
     fn base_held_ahead(&self, k: usize, b: u8) -> bool {
@@ -2712,8 +2721,21 @@ impl<'a> Sim<'a> {
         // Carry and throw are alternatives in ONE table. In particular, taking
         // the nearby bag cannot bypass an available lead force or double play.
         let options = self.holder_options(by);
+        // Equal values (p_out saturates to 1.0 for a second or more in hand, and with two out
+        // every out weighs the same) go to the carry, which has no throw to miss, then to the
+        // larger margin (Gemini A4 review P1-1: the first option listed, a throw to first,
+        // used to win, though a force was a step away).
+        let better = |o: &holder::HolderOption, cur: &holder::HolderOption| {
+            if (o.value - cur.value).abs() > 1e-9 {
+                o.value > cur.value
+            } else if o.carry != cur.carry {
+                o.carry
+            } else {
+                o.runner_at - o.ball_at > cur.runner_at - cur.ball_at
+            }
+        };
         let best = options.iter().enumerate().filter(|(_, o)| o.p_out > 0.3)
-            .fold(None, |best: Option<usize>, (i, o)| if best.is_none_or(|j| o.value > options[j].value) { Some(i) } else { best });
+            .fold(None, |best: Option<usize>, (i, o)| if best.is_none_or(|j| better(o, &options[j])) { Some(i) } else { best });
         if debug_throw() {
             eprintln!("t {:.2} holder {} best {:?}; options {:?}", self.t, by, best, options);
         }
@@ -5944,4 +5966,151 @@ mod tests {
         assert!(worst.0 <= 2.05 + 0.6, "a fielder reached the wall at {:.2} m/s (ball {:.1} m into the seats)", worst.0, worst.1);
     }
 
+
+    /// Gemini A4 review P1-1: with two out every out ends the inning, and p_out saturates to
+    /// 1.0 for any margin over a second, so a sure force a step away and a sure throw across
+    /// the diamond tie exactly. A fielder a step from the bag takes the force with his foot
+    /// rather than throw 27 m to first (the throw is the one that can go wrong).
+    #[test]
+    fn with_two_out_a_sure_force_a_step_away_beats_a_sure_throw_across() {
+        const SS: usize = 5;
+        let fx = fixture(&[(5, 1)]);
+        let inp = input(&fx, vec![RunnerIn { id: fx.st.batter, base: 0, speed: 8.2 }, RunnerIn { id: 5, base: 1, speed: 8.2 }]);
+        let mut st = fx.st.clone();
+        st.outs = 2;
+        let mut sim = new_sim(&inp, &mut st);
+        sim.t = 2.0;
+        held_at(&mut sim, SS, base_pos(2) + Vec3::new(-1.0, 0.0, 0.0));
+        sim.f[2].pos = base_pos(1);
+        let fd = &mut sim.f[SS];
+        (fd.up_at, fd.set_base, fd.face, fd.catch_vel) = (1.0, fd.a.transfer, None, Vec3::ZERO);
+        // The batter 2.6 s from first, the runner from first 2.0 s from second: both outs sure.
+        (sim.r[0].s, sim.r[0].v, sim.r[0].goal) = (BASE_L - 8.2 * 2.6, 8.2, 1);
+        (sim.r[1].s, sim.r[1].v, sim.r[1].goal) = (2.0 * BASE_L - 8.2 * 2.0, 8.2, 2);
+        let opts = sim.holder_options(SS);
+        let first = opts.iter().find(|o| !o.carry && o.base == 1).expect("a throw to first");
+        let step = opts.iter().find(|o| o.carry && o.base == 2).expect("a carry to second");
+        assert!(first.p_out > 0.999 && step.p_out > 0.999, "fixture: both sure ({} and {})", first.p_out, step.p_out);
+        sim.holder_act();
+        assert!(matches!(sim.ball, Ball::Held { by: SS }) && sim.f[SS].carry_to == Some(2), "he steps on second: {:?} carry {:?}", sim.ball, sim.f[SS].carry_to);
+    }
+
+    /// Gemini A4 review P2-3: the cutoff lines up for the base the lead runner threatens now.
+    /// A runner who started on first and stands on third, with the ball held in left field
+    /// 70 m out, threatens home: the cutoff goes to the home line. (It used to read where
+    /// runners started, which a stopped runner's missing visible target no longer covered.)
+    #[test]
+    fn the_cutoff_lines_up_for_home_with_a_runner_standing_on_third() {
+        const LF: usize = 6;
+        let fx = fixture(&[(5, 1)]);
+        let inp = input(&fx, vec![RunnerIn { id: fx.st.batter, base: 0, speed: 8.2 }, RunnerIn { id: 5, base: 1, speed: 8.2 }]);
+        let mut st = fx.st.clone();
+        let mut sim = new_sim(&inp, &mut st);
+        sim.t = 5.0;
+        (sim.r[0].s, sim.r[0].v, sim.r[0].goal) = (BASE_L, 0.0, 1);
+        (sim.r[1].s, sim.r[1].v, sim.r[1].goal) = (3.0 * BASE_L, 0.0, 3);
+        let from = Vec3::new(-35.0, 60.0, 0.0);
+        held_at(&mut sim, LF, from);
+        let job = sim.relay_job(from);
+        assert_eq!(job.map(|j| j.1), Some(4), "cutoff {job:?}");
+    }
+
+    /// Gemini A4 review P1-2 (4): the double-play continuation counts a second out only if
+    /// its throw would be attempted, the holder's own p > 0.3 rule. One out, a runner from
+    /// first 2 s from second, the shortstop a step from the bag, the batter 0.6 s from
+    /// first: no relay can beat him, so stepping on second is worth its own out, p² × 1.0.
+    #[test]
+    fn a_double_play_nobody_would_throw_for_adds_nothing() {
+        const SS: usize = 5;
+        let fx = fixture(&[(5, 1)]);
+        let inp = input(&fx, vec![RunnerIn { id: fx.st.batter, base: 0, speed: 8.2 }, RunnerIn { id: 5, base: 1, speed: 8.2 }]);
+        let mut st = fx.st.clone();
+        st.outs = 1;
+        let mut sim = new_sim(&inp, &mut st);
+        sim.t = 2.0;
+        held_at(&mut sim, SS, base_pos(2) + Vec3::new(-1.0, 0.0, 0.0));
+        sim.f[2].pos = base_pos(1);
+        let fd = &mut sim.f[SS];
+        (fd.up_at, fd.set_base, fd.face, fd.catch_vel) = (1.0, fd.a.transfer, None, Vec3::ZERO);
+        (sim.r[0].s, sim.r[0].v, sim.r[0].goal) = (BASE_L - 8.2 * 0.6, 8.2, 1);
+        (sim.r[1].s, sim.r[1].v, sim.r[1].goal) = (2.0 * BASE_L - 8.2 * 2.0, 8.2, 2);
+        let opts = sim.holder_options(SS);
+        let step = opts.iter().find(|o| o.carry && o.base == 2).expect("a carry to second");
+        let p2 = step.continuation.expect("a continuation is estimated").0;
+        assert!(p2 < 0.3, "fixture: the relay cannot beat him ({p2})");
+        assert!((step.value - step.p_out * step.p_out * step.weight).abs() < 1e-12, "value {} with p2 {p2}", step.value);
+    }
+
+    /// Gemini A4 review P3-6: the comparison is p² × w (agent-models §5.6), not p × w. Bases
+    /// loaded, one out, the first baseman 1 m from his bag with the batter 1.0 s away: the
+    /// carry to first is sure, 1.0² × 0.9 = 0.9. The runners from first and second are 0.1 s
+    /// from their bases (no play). The runner from third is placed so the force at home is
+    /// about 0.8 sure: 0.8² × 1.3 ≈ 0.83 < 0.9, so he takes first. Linear weighing would
+    /// give 0.8 × 1.3 = 1.04 > 0.9 and throw home.
+    #[test]
+    fn the_holder_weighs_p_squared_times_w() {
+        const B1: usize = 2;
+        let fx = fixture(&[(5, 1), (6, 2), (7, 3)]);
+        let runners = vec![RunnerIn { id: fx.st.batter, base: 0, speed: 8.2 }, RunnerIn { id: 5, base: 1, speed: 8.2 }, RunnerIn { id: 6, base: 2, speed: 8.2 }, RunnerIn { id: 7, base: 3, speed: 8.2 }];
+        let inp = input(&fx, runners);
+        let mut st = fx.st.clone();
+        st.outs = 1;
+        let mut sim = new_sim(&inp, &mut st);
+        sim.t = 2.0;
+        held_at(&mut sim, B1, base_pos(1) + Vec3::new(-0.7, 0.7, 0.0));
+        sim.f[1].pos = base_pos(4);
+        let fd = &mut sim.f[B1];
+        (fd.up_at, fd.set_base, fd.face, fd.catch_vel) = (1.0, fd.a.transfer, None, Vec3::ZERO);
+        (sim.r[0].s, sim.r[0].v, sim.r[0].goal) = (BASE_L - 8.2, 8.2, 1);
+        for k in 1..3 {
+            let r = &mut sim.r[k];
+            (r.s, r.v, r.goal) = ((r.start + 1) as f64 * BASE_L - 0.82, 8.2, r.start + 1);
+        }
+        // Put the runner from third where the force at home has a 0.1 s margin (p ≈ 0.80).
+        (sim.r[3].s, sim.r[3].v, sim.r[3].goal) = (3.0 * BASE_L + 10.0, 8.2, 4);
+        for _ in 0..6 {
+            let home = *sim.holder_options(B1).iter().find(|o| !o.carry && o.base == 4).expect("a throw home");
+            sim.r[3].s -= 8.2 * (0.101 - (home.runner_at - home.ball_at));
+        }
+        let opts = sim.holder_options(B1);
+        let home = opts.iter().find(|o| !o.carry && o.base == 4).unwrap();
+        let first = opts.iter().find(|o| o.carry && o.base == 1).expect("a carry to first");
+        assert!((0.75..0.85).contains(&home.p_out) && first.p_out > 0.999, "fixture: home {} first {}", home.p_out, first.p_out);
+        assert!(home.p_out * home.weight > first.p_out * first.weight, "fixture: linear weighing would go home");
+        sim.holder_act();
+        assert_eq!(sim.f[B1].carry_to, Some(1), "he takes the sure out at first: {:?}", sim.ball);
+    }
+
+    /// Gemini A4 review P3-6: no attempt below p = 0.3 (agent-models §5.6). The shortstop of
+    /// `shortstop_to_first` with the batter where the throw has a −0.08 s margin (p ≈ 0.25)
+    /// holds the ball; at −0.03 s (p ≈ 0.40) he throws.
+    #[test]
+    fn no_throw_is_attempted_below_p_of_0_3() {
+        const SS: usize = 5;
+        for (margin, attempt) in [(-0.08, false), (-0.03, true)] {
+            let fx = fixture(&[]);
+            let inp = input(&fx, vec![RunnerIn { id: fx.st.batter, base: 0, speed: 8.2 }]);
+            let mut st = fx.st.clone();
+            let mut sim = new_sim(&inp, &mut st);
+            sim.t = 1.0;
+            held_at(&mut sim, SS, Vec3::new(-8.0, 38.0, 0.0));
+            sim.f[2].pos = base_pos(1);
+            let fd = &mut sim.f[SS];
+            (fd.up_at, fd.set_base, fd.face, fd.catch_vel) = (1.0, fd.a.transfer, None, Vec3::ZERO);
+            (sim.r[0].s, sim.r[0].v, sim.r[0].goal) = (BASE_L - 8.2 * eta_for_margin(margin, false), 8.2, 1);
+            let p = sim.holder_options(SS).iter().find(|o| !o.carry && o.base == 1).unwrap().p_out;
+            assert!((p > 0.3) == attempt, "fixture: p {p} at margin {margin}");
+            let mut thrown = false;
+            for _ in 0..60 {
+                sim.holder_act();
+                if matches!(sim.ball, Ball::Thrown { .. }) {
+                    thrown = true;
+                    break;
+                }
+                sim.r[0].s += 8.2 * DT;
+                sim.t += DT;
+            }
+            assert_eq!(thrown, attempt, "margin {margin}, p {p}");
+        }
+    }
 }
