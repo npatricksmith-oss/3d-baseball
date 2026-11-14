@@ -95,6 +95,12 @@ The "5.48" at the top of the last block is a coincidence of two samples: the div
 
 Hit rates are per ball in play of that type. "Seed 5" and "seed 2" mean `sim-cli games --seed` with 1,024 games unless a row says otherwise.
 
+### 2026-11-14 (300 games, seeds 0–299 and 1000–1299)
+
+| Task | Commit | What changed | Numbers (before → after) | Cause | Open |
+|---|---|---|---|---|---|
+| **Arm strength by position** | `4937cb8`; [note](calibration/2026-11-14-arm-by-position.md) | Grade-50 `ArmStrength` per position from Statcast's positional means (m/s): 1B 35.45, 2B 35.36, 3B 37.95, SS 38.49, LF 39.07, CF 40.05, RF 40.55; pitcher and catcher keep 36. Was 36 for every infielder and 39 for every outfielder. Every digest changed | Seeds 0–299 [1000–1299]: runs 5.53 → 5.40 [5.40 → 5.53] (mean of the two sets 5.465 → 5.465); K% 15.3 → 15.3 [15.1 → 14.8]; BB% 6.9 → 7.0 [7.3 → 7.2]; HR/PA 5.12% → 5.14% [4.88% → 4.97%]; reached on BIP 32.5% → 32.4% [32.5% → 32.7%]; GB .351 → .348 [.349 → .353]; LD .723 → .713 [.727 → .721]; FB .127 → .128 [.137 → .132]; PU .014 → .011 [.015 → .015]. Throw probe (seeds 0–299): 71.1 → 70.9 balls in play a game; outs per ball in play .590 → .591; throws taken in the air 96.3% → 96.1%; hurried over 2/3 1.95 → 1.97 a game; SS throws 7.70 → 7.91, 2B 8.16 → 8.02, LF 7.20 → 7.00 | Every throw leaves at a different speed, so every game diverges at its first throw and the two sample sets reshuffle; the two sets traded values (5.53/5.40 → 5.40/5.53), about the 0.1–0.2 spread between sets (header of this section), and their mean did not move. The per-position probe moves are in the direction of the change (the SS arm is 2.5 m/s stronger, so more of the plays that go to SS end in a throw; 2B and LF are 0.7 and 0.1 m/s weaker or less used) but no shift here is larger than the sets' own noise | **Not explained, and not resolved at 600 games:** whether the small drops in LD (.723 → .713, .727 → .721) and PU are an effect of stronger infield arms or noise. Nothing was tuned to bring any number back |
+
 ### 2026-11-13 (owner backlog A-items; 300 games, seeds 0–299 and 1000–1299)
 
 | Task | Commit | What changed | Numbers (before → after) | Cause | Open |
