@@ -41,6 +41,7 @@ fn fact_time(input: &Input) -> Option<f64> {
         | Input::BallSettled { t, .. }
         | Input::PlayTimeout { t }
         | Input::GloveSecured { t, .. }
+        | Input::BallReleasedFromGlove { t, .. }
         | Input::BaseTouched { t, .. }
         | Input::BaseLeft { t, .. }
         | Input::TagContact { t, .. }
@@ -317,6 +318,18 @@ fn step_input(st: &mut RulesState, input: &Input) -> Vec<Event> {
             }
         }
         Input::GloveSecured { t, fielder, x, y } => glove(st, t, fielder, x, y, &mut ev),
+        Input::BallReleasedFromGlove { t, kind, infielder, .. } => {
+            // Only throws matter so far: they fix what a throw out of play would award
+            // (rules-spec §7.2). Drops and knocked balls have no producer yet.
+            if let (ReleaseKind::Throw, PlayState::Live(lp)) = (kind, &mut st.play) {
+                let advanced = lp.runners.iter().filter(|r| !r.out).all(|r| r.scored_at.is_some() || r.last_base > r.start_base);
+                let first_play = lp.throws == 0 && lp.outs.is_empty();
+                let from_pitch = infielder && first_play && !advanced;
+                let from = lp.runners.iter().map(|r| (r.runner, if from_pitch { r.start_base } else if r.scored_at.is_some() { 4 } else { r.at })).collect();
+                lp.throws = lp.throws.saturating_add(1);
+                lp.throw = Some(ThrowAward { t, from_pitch, from });
+            }
+        }
         Input::BaseTouched { t, agent, base, holding_ball } => base_touched(st, t, agent, base, holding_ball, &mut ev),
         Input::BaseLeft { t, agent, base } => {
             if let PlayState::Live(lp) = &mut st.play {
@@ -612,6 +625,8 @@ fn new_live_play(st: &RulesState) -> LivePlay {
         last_t: 0.0,
         pending_passes: Vec::new(),
         sampled: false,
+        throws: 0,
+        throw: None,
     }
 }
 
@@ -664,6 +679,7 @@ fn live_touch(st: &mut RulesState, _t: f64, what: Touch, ev: &mut Vec<Event>) {
                 home_run(st, ev);
             }
         }
+        Touch::OutOfPlay { .. } if lp.throw.is_some() => throw_out_of_play(st, ev),
         Touch::OutOfPlay { x, y, in_flight } => {
             let fair = match lp.fair {
                 FairFoul::Fair => true,
@@ -673,14 +689,22 @@ fn live_touch(st: &mut RulesState, _t: f64, what: Touch, ev: &mut Vec<Event>) {
                 }
             };
             if !fair {
+                ev.push(Event::BallDead { reason: DeadBall::OutOfPlay });
                 if lp.fair == FairFoul::Pending {
                     decide(st, false, ev);
+                } else if lp.caught {
+                    // A caught foul fly that then left the field without a throw: the batter is
+                    // out and runners stay where they are.
+                    let lp = lp.clone();
+                    close_play(st, &lp, ev);
                 } else {
                     st.play = PlayState::Dead;
                 }
-            } else if in_flight && !lp.grounded {
+            } else if in_flight && !lp.grounded && (lp.fair == FairFoul::Pending || fair_air(x, y)) {
                 home_run(st, ev);
             } else {
+                // Includes a fly already ruled fair that a fielder deflected out over foul
+                // ground: two bases (rules-spec §7.2; OBR 5.05(a)(8)).
                 if lp.fair == FairFoul::Pending {
                     decide(st, true, ev);
                 }
@@ -695,6 +719,7 @@ fn home_run(st: &mut RulesState, ev: &mut Vec<Event>) {
     let PlayState::Live(_) = st.play else { return };
     ev.push(Event::FairFoulDecided { fair: true });
     ev.push(Event::PitchResult { call: PitchCall::InPlay, balls: st.balls, strikes: st.strikes });
+    ev.push(Event::BallDead { reason: DeadBall::HomeRun });
     // A pass made before the ball left the park stands (rules-spec §5.5); passing on the trot
     // itself is deferred.
     judge_pending_passes(st, ev);
@@ -723,6 +748,7 @@ fn home_run(st: &mut RulesState, ev: &mut Vec<Event>) {
 fn ground_rule_double(st: &mut RulesState, ev: &mut Vec<Event>) {
     let PlayState::Live(lp) = st.play.clone() else { return };
     st.play = PlayState::Dead;
+    ev.push(Event::BallDead { reason: DeadBall::GroundRuleDouble });
     // Two bases from the time of the pitch (rules-spec §7.2).
     let mut order: Vec<&RunnerState> = lp.runners.iter().filter(|r| !r.out).collect();
     order.sort_by_key(|r| core::cmp::Reverse(r.start_base));
@@ -739,8 +765,55 @@ fn ground_rule_double(st: &mut RulesState, ev: &mut Vec<Event>) {
     end_pa(st, PaResult::BattedBall, ev);
 }
 
+/// A thrown ball left the playing field (rules-spec §7.2): two bases from the time of the pitch
+/// or of the throw, as fixed at the release; lead runner first, and a following runner never
+/// reaches the base awarded to the runner ahead of him unless that runner scores.
+fn throw_out_of_play(st: &mut RulesState, ev: &mut Vec<Event>) {
+    let PlayState::Live(lp) = st.play.clone() else { return };
+    let Some(award) = lp.throw.clone() else { return };
+    ev.push(Event::BallDead { reason: DeadBall::OutOfPlay });
+    if lp.fair == FairFoul::Pending {
+        // Not reachable from the sim (a throw follows a fielder securing the ball, which rules
+        // on the ball); a harness that sends one gets a fair ball.
+        ev.push(Event::RulesWarning { code: "throw_while_pending" });
+        ev.push(Event::FairFoulDecided { fair: true });
+        apply_call(st, PitchCall::InPlay, ev);
+    }
+    st.play = PlayState::Dead;
+    let mut order: Vec<(&RunnerState, Base)> = lp
+        .runners
+        .iter()
+        .filter(|r| !r.out)
+        .map(|r| (r, award.from.iter().find(|(id, _)| *id == r.runner).map(|&(_, b)| b).unwrap_or(r.at)))
+        .collect();
+    // Lead runner first (ties: the runner who started ahead).
+    order.sort_by_key(|&(r, b)| (core::cmp::Reverse(b), core::cmp::Reverse(r.start_base)));
+    st.bases = [None; 3];
+    let mut ahead: Option<Base> = None;
+    for (r, from) in order {
+        let mut to = (from + 2).min(4);
+        if let Some(a) = ahead
+            && a < 4
+        {
+            to = to.min(a - 1).max(from);
+        }
+        ahead = Some(to);
+        if to != r.start_base {
+            ev.push(Event::RunnerAdvanced { runner: r.runner, from: r.start_base, to, cause: AdvanceCause::Award });
+        }
+        if to == 4 {
+            score_run(st, r.runner, ev);
+        } else if to >= 1 {
+            st.bases[(to - 1) as usize] = Some(r.runner);
+        }
+    }
+    end_pa(st, PaResult::BattedBall, ev);
+}
+
 fn glove(st: &mut RulesState, t: f64, fielder: AgentId, x: f64, y: f64, ev: &mut Vec<Event>) {
     let PlayState::Live(lp) = &mut st.play else { return };
+    // Secured: the ball is no longer a thrown ball (rules-spec §7.2).
+    lp.throw = None;
     if !lp.grounded && !lp.caught {
         // Catch: the batter is out whether the fly is fair or foul (rules-spec §5.3).
         lp.caught = true;

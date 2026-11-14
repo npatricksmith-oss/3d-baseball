@@ -115,6 +115,20 @@ pub struct LivePlay {
     /// A `RunnerPosition` sample has arrived in this play: the orchestrator is sampling, so
     /// positions can be waited for (rules-spec §5.5 overrun of first).
     pub sampled: bool,
+    /// Throws made so far in this play.
+    pub throws: u8,
+    /// The ball is a thrown ball: released by a throw and not secured since (rules-spec §7.2).
+    pub throw: Option<ThrowAward>,
+}
+
+/// What a thrown ball out of play would award, fixed at the throw's release (rules-spec §7.2).
+#[derive(Clone, Debug, PartialEq)]
+pub struct ThrowAward {
+    pub t: f64,
+    /// Two bases from the time of the pitch (an infielder's first play), else of the throw.
+    pub from_pitch: bool,
+    /// Each runner's base to count two from (4: he had already touched home).
+    pub from: Vec<(AgentId, Base)>,
 }
 
 /// A pass made while the batted ball was in doubt (rules-spec §5.5).
@@ -182,7 +196,27 @@ pub enum Event {
     /// `RunnerOut` that follows carries `OutKind::Tag`, the same time play for run counting
     /// (rules-spec §5.5, §6.4).
     RunnerPassed { runner: AgentId, passed: AgentId },
+    /// The ball left the playing field and is dead; the awards it brings follow (rules-spec
+    /// §5.8, §7.2).
+    BallDead { reason: DeadBall },
     RulesWarning { code: &'static str },
+}
+
+/// Why the ball became dead (rules-spec §5.8; data-formats §4.3 `BallDead`).
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub enum DeadBall {
+    HomeRun,
+    GroundRuleDouble,
+    /// Out of play otherwise: a foul ball, or a throw.
+    OutOfPlay,
+}
+
+/// How a fielder let go of the ball (rules-spec §2 `BallReleasedFromGlove`).
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub enum ReleaseKind {
+    Throw,
+    Drop,
+    Knocked,
 }
 
 /// Where a ball touched (rules-spec §2 `BallTouched`).
@@ -216,6 +250,9 @@ pub enum Input {
     PlayTimeout { t: f64 },
     /// A fielder secured the ball at (x, y) (rules-spec §5.3).
     GloveSecured { t: f64, fielder: AgentId, x: f64, y: f64 },
+    /// A fielder let go of the ball; `infielder`: he plays P, C, 1B, 2B, 3B or SS (rules-spec
+    /// §2, §7.2: the thrown-ball award).
+    BallReleasedFromGlove { t: f64, fielder: AgentId, kind: ReleaseKind, infielder: bool },
     BaseTouched { t: f64, agent: AgentId, base: Base, holding_ball: bool },
     BaseLeft { t: f64, agent: AgentId, base: Base },
     TagContact { t: f64, fielder: AgentId, runner: AgentId, holding_ball: bool },

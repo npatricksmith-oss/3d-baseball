@@ -1,0 +1,26 @@
+id = "awards-013"
+title = "Batted ball off the backstop: foul and dead, though the ball stays on the field"
+rules = ["rules-spec 5.2"]
+milestone = "M4"
+tags = ["fairfoul", "foul", "backstop"]
+[initial]
+inning = 1
+half = "top"
+count = [0, 2]
+batter = "A.1"
+
+[[step]]
+fact = "PitchDelivered"
+t = 0.0
+[[step]]
+fact = "BatContact"
+t = 0.42
+[[step]]
+fact = "BallTouched"
+t = 0.9
+what = "Wall"
+pos = [1.0, -18.25]
+expect_events = [{ event = "FairFoulDecided", fair = false }, { event = "PitchResult", call = "Foul", balls = 0, strikes = 2 }]
+[expect]
+strikes = 2
+batter = "A.1"

@@ -66,6 +66,26 @@ pub struct GameResult {
     pub complete: bool,
     /// Every ball in play, in order.
     pub bip_detail: Vec<BipDetail>,
+    /// Pitches called foul (caught foul flies are outs, not fouls).
+    pub fouls: u32,
+    /// Foul flies caught for an out.
+    pub foul_outs: u32,
+    /// Balls that left the playing field (a lab diagnostic for the play area, A10).
+    pub out_of_play: OutOfPlayTally,
+}
+
+/// Balls that left the playing field, by what they were (a lab diagnostic: read from the
+/// play's facts, not the event log).
+#[derive(Clone, Copy, Debug, Default, PartialEq)]
+pub struct OutOfPlayTally {
+    /// A batted ball ruled foul.
+    pub foul: u32,
+    /// A fair fly out of the park (home run).
+    pub home_run: u32,
+    /// A fair batted ball that left after touching the ground, a wall, or a fielder.
+    pub fair_bounced: u32,
+    /// A ball that left after a throw in the same play.
+    pub thrown: u32,
 }
 
 /// One ball in play and what the defense did with it.
@@ -391,6 +411,21 @@ impl Game {
                 viz.hurry = out.hurry.clone();
                 viz.dives = out.dives.clone();
             }
+            // Balls out of play, by what they were (lab diagnostic).
+            for f in &out.facts {
+                if let Input::BallTouched { t, what: bb_rules::Touch::OutOfPlay { .. } } = *f {
+                    let tally = &mut self.res.out_of_play;
+                    if out.released.iter().any(|&(tr, _)| tr <= t) {
+                        tally.thrown += 1;
+                    } else if out.events.iter().any(|e| matches!(e, Event::PlateAppearanceEnded { result: PaResult::HomeRun, .. })) {
+                        tally.home_run += 1;
+                    } else if out.events.iter().any(|e| matches!(e, Event::FairFoulDecided { fair: false })) {
+                        tally.foul += 1;
+                    } else {
+                        tally.fair_bounced += 1;
+                    }
+                }
+            }
             calls.extend(out.calls.iter().copied());
             self.pending_rules.extend(out.events.iter().cloned());
             self.log.extend(out.events);
@@ -473,10 +508,12 @@ impl Game {
                     pa_events.clear();
                 }
                 Event::GameEnded { walk_off, .. } => res.walk_off = *walk_off,
+                Event::PitchResult { call: bb_rules::PitchCall::Foul, .. } => res.fouls += 1,
                 Event::RulesWarning { code } => res.warnings.push(code),
                 other => pa_events.push(other.clone()),
             }
         }
+        res.foul_outs = self.log.windows(2).filter(|w| matches!(w[0], Event::Catch { .. }) && matches!(w[1], Event::FairFoulDecided { fair: false })).count() as u32;
         res.linescore = self.st.runs_by_inning.clone();
         res.runs = self.st.score();
         let (bytes, digest) = self.writer.finish(res.runs[0].min(255) as u8, res.runs[1].min(255) as u8);
@@ -503,6 +540,7 @@ fn fact_t(f: &Input) -> Option<f64> {
         | Input::BallSettled { t, .. }
         | Input::PlayTimeout { t }
         | Input::GloveSecured { t, .. }
+        | Input::BallReleasedFromGlove { t, .. }
         | Input::BaseTouched { t, .. }
         | Input::BaseLeft { t, .. }
         | Input::TagContact { t, .. }

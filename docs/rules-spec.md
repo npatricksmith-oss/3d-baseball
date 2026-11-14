@@ -53,11 +53,11 @@ The complete vocabulary `bb_game` may send. Each is a plain record; positions in
 | `PitchCrossed` | t, ball center at the judgment plane (x, z), zone top/bottom, `bounced_before_plane` | Physics spec §10 |
 | `SwingMeasured` | max bat-yaw angle reached, t_contact or none, `offered_bunt` | End of swing (agent-models §3.6) |
 | `BatContact` | t, contact point | Physics spec §7 |
-| `BallTouched` | t, what (`Ground{surface}`, `Wall{segment}`, `FoulPole`, `Base{n}`, `Body{agent}`, `Glove{agent}`, `Umpire`, `OutOfPlay{area}`), ball position, ball radius-edge distance to each foul line | Every ball contact |
+| `BallTouched` | t, what (`Ground{surface}`, `Wall{segment}`, `FoulPole`, `Base{n}`, `Body{agent}`, `Glove{agent}`, `Umpire`, `OutOfPlay{area}`), ball position, ball radius-edge distance to each foul line | `Wall`: any wall of the playing-field boundary below its top, the backstop and foul-territory walls included. `OutOfPlay`: the ball crossed the boundary over a wall's top or into a dugout (physics-spec §9.5), with the exit point and `in_flight` (no ground touch since the bat or the last throw's release) | Every ball contact |
 | `BallPassedBase` | t, base (1 or 3), side (fair/foul) | Ball center crosses the line through 1B or 3B perpendicular to the foul line, while on or near the ground |
 | `BallSettled` | t, position | Ball at rest |
 | `GloveSecured` | t, fielder, `ball_in_hand_or_glove` | Capture held continuously for `t_secure` = 0.3 s [E] after capture (agent-models §5.4) |
-| `BallReleasedFromGlove` | t, fielder, kind (`Throw`, `Drop`, `Knocked`) | Loss of possession |
+| `BallReleasedFromGlove` | t, fielder, kind (`Throw`, `Drop`, `Knocked`), `infielder` (the fielder plays P, C, 1B, 2B, 3B or SS) | Loss of possession. The live sim sends `Throw` at every throw's release (since 2026-11-14, for §7.2); `Drop` and `Knocked` have no producer yet |
 | `BaseTouched` / `BaseLeft` | t, agent, base | Body capsule enters or leaves the base volume (physics spec §9.4) |
 | `TagContact` | t, fielder, runner, `holding_ball` | Glove or ball-holding hand touches a runner capsule |
 | `RunnerPosition` | t, runner, ground point (x, y) | About 30 Hz per runner while a play is live, every runner at the same tick times (§5.5 compares samples with equal t); for the overrun of first and passing (§5.5), later the base-path check (M5). In `bb_rules` it is its own type (`RunnerPosition`), not an `Input` variant; `step` takes either. (Changed 2026-11-13 from "nearest base path point, heading": the engine projects the point itself, and no rule needs the heading.) |
@@ -182,7 +182,7 @@ A live play ends (§5.8) when the ball becomes dead or "time" is in effect.
 | Ball first touches the ground, a fielder, the umpire, or a runner **beyond** first or third base (distance along the foul line from home > the base's distance) | Fair or foul by the ball's position **at that first touch** |
 | Ball still in the infield region (not beyond 1B/3B) | **Pending** until one of: it **settles** (`BallSettled`) → judged where it rests; it is **touched** by a fielder, umpire, or runner → judged at the touch; it **passes** 1B or 3B (`BallPassedBase`) → judged by the side it passed on; it touches the base itself → fair |
 | Batted ball touches the batter while the batter is still in the batter's box (body contact before any other touch) | Foul [C: OBR 6.03(a)(3) treats a batted ball striking the batter in the box as foul] |
-| Ball touches a foul-territory object (backstop, stands, dugout) first | Foul |
+| Ball touches a foul-territory object (backstop, stands, dugout) first | Foul. The backstop and the foul-territory walls stand at least 50 ft off the lines except where they close in on the foul poles (physics-spec §9.5), so a `Wall` or `OutOfPlay` touch there is judged by the same position test as any touch and comes out foul |
 
 A pending ground ball that rolls foul then back fair before reaching a base is fair if it settles, is touched, or passes the base fair. This is the physical behavior the rule describes, and it falls out of judging only at those events.
 
@@ -238,7 +238,7 @@ Only one appeal is in v1: **leaving early on a caught fly.** It is resolved auto
 ### 5.8 Ending the play ("time")
 
 The play ends at the first of:
-1. **Ball dead:** foul (uncaught), out of play, home run, HBP, batter hit by own batted ball, §5.7 cases, ball lodged (not modeled).
+1. **Ball dead:** foul (uncaught), out of play, home run, HBP, batter hit by own batted ball, §5.7 cases, ball lodged (not modeled). "Out of play" is a `BallTouched{OutOfPlay}` fact: the ball left the playing field (physics-spec §9.5). The engine then emits `BallDead { reason }` (`HomeRun`, `GroundRuleDouble`, or `OutOfPlay` for a foul ball or a throw leaving the field) before the awards, and the play is over: no later fact changes it. The orchestrator stops the play at that fact, and the play's timeline carries a `BallDead` marker at that time and exit point (data-formats §5.4) so a client can cut away from a ball in the seats. (Added 2026-11-14, A10; before, foul ground had no walls and a ball out of play after a throw was ruled a ground-rule double.)
 2. **Third out** made and no run is still being decided by §6.4 (a runner touching home in the same fact window still gets judged by time).
 3. **Settled play:** a fielder holds the ball (secured) **inside the infield** (within 45 m of home [C]; changed from 30 m on 2026-10-31 because 30 m excluded second base, 38.8 m from home, where a fielder with no play returns the ball; the infield dirt reaches about 45 m), and every runner is either touching a base or has had no movement toward the next base for `t_settle` = 1.0 s [E]. A runner caught between bases when time is called returns to the last base legally touched.
 4. **Play timeout:** sim time since contact (or since the pitch, for non-batted plays) exceeds `T_play_max` = 60 s [E]. Runners return to the last base touched; `PlayTimeout` is emitted. A timeout is a liveness bug; calibration W7 checks it never happens.
@@ -283,14 +283,23 @@ When a batter is awarded first (walk, IBB, HBP, catcher's interference, §5.7 ca
 | Event | Award | Measured from |
 | :--- | :--- | :--- |
 | Fair ball out of park in flight | Home for batter and all runners | — |
-| Fair ball bounces out of play / over the fence (**ground-rule double**) | Two bases | Runners' positions at the time of the pitch [S: OBR 5.05(a)(6), 5.06(b)(4)(F)] |
-| Thrown ball out of play, first play by an infielder | Two bases | Time of the **pitch** [S: OBR 5.06(b)(4)(G)] |
-| Thrown ball out of play, any other throw | Two bases | Time of the **throw** (base last legally touched, plus the base being advanced to if already passed it — v1 uses the base each runner had touched at throw release) [C] |
+| Fair ball bounces out of play / over the fence (**ground-rule double**), including a fair ball that leaves the field after touching a fielder or a wall | Two bases | Runners' positions at the time of the pitch [S: OBR 5.05(a)(6), 5.06(b)(4)(F)] |
+| Fair fly deflected by a fielder out of the field in flight | Over fair territory: home run. Over foul territory: two bases | Time of the pitch [S: OBR 5.05(a)(8)–(9); numbering to verify, R11]. The sim sends no glove-deflection fact yet, so a deflected fly still pending fair/foul is judged by where it leaves; the foul-side row applies only once the ball has been ruled fair |
+| Thrown ball out of play, first play by an infielder | Two bases | Time of the **pitch** [S: OBR 5.06(b)(4)(G)], unless every runner, the batter-runner included, had advanced at least one base when the throw was released: then the time of the throw [S: the rule's Approved Ruling] |
+| Thrown ball out of play, any other throw | Two bases | Time of the **throw** [S: OBR 5.06(b)(4)(G)] (base last legally touched at release — v1 uses the base each runner had last touched then, `at`, not crediting a base he was past but had not reached) [C] |
 | Pitch or pickoff throw by the pitcher from the rubber out of play | One base | Time of the pitch/throw [S] |
 | Balk (M5) | One base, all runners | — |
 | Catcher's interference (M5) | Batter first; others only if forced or stealing | — |
 
 Awarded runners are placed with `RunnerAdvanced{cause: Award}`. Runs forced in by an award score immediately.
+
+**Thrown ball out of play, in detail** (added 2026-11-14, A10):
+- **A thrown ball** is one released by a `BallReleasedFromGlove{Throw}` and not secured by a fielder since (`GloveSecured`). A throw that bounces, caroms off a wall, or rolls before leaving the field is still the throw.
+- **Infielder:** the thrower plays P, C, 1B, 2B, 3B or SS [C: OBR 5.06(b)(4)(G) says "infielder"; MLB practice counts the pitcher and catcher; verify, R11]. The pitcher's throw from the rubber (one base, §7.2) is a pickoff and comes with M5.
+- **First play:** the play's first throw, made with no out yet recorded on the play [C: a fielder's force or tag out is a play, so a wild relay on a double play is from the time of the throw, as in the common interpretation]. On a caught fly the catch is the first out, so every throw after it is from the time of the throw.
+- **Who has advanced:** at the release, every runner not out (the batter-runner included) has touched the base after the one he held at the pitch, or has scored.
+- **The award:** each runner gets two bases from his base (time of the pitch: the base he held then; time of the throw: the base he had last touched at the release), and a runner who had touched home before the release scores. Runners are awarded from the lead runner back, and a following runner gets at most the base before the one awarded to the runner ahead of him unless that runner scores (two runners cannot hold one base; OBR 5.06(b)(4)(G) comment, where a runner held between first and second goes to third and the batter-runner who came round first behind him is held at second). Runs score in that order; a runner who owes a retouch after a catch is awarded like any other (the appeal on a dead ball is deferred, §5.6).
+- The batter's plate appearance ends with the award (result `BattedBall`; the scorer charges the error later, §10).
 
 ### 7.3 Ball dead with no award
 
@@ -575,7 +584,7 @@ At least **150 scenarios** by the M4 gate, at least one per row below; M5 and M6
 | `twoonbase` | preceding runner entitled; following runner forced there; force at the next base; force removed first; caught fly ends the forces; liability ends when one leaves; batter-runner forced onto first | 7 |
 | `passing` | by base touch; by position (level is not past); time play counts / not counts; lead runner's actions (OBR comment play, retreat to second, retreat after a home touch before a catch); passer's home touch scores nothing; out or scored runner cannot be passed; force removed by the passing out; both on one base; fly in doubt lands foul | 12 |
 | `runs` | time play counts / not counts; third out a force; batter out before first | 10 |
-| `awards` | walk with bases loaded; ground-rule double from time of pitch; throw out of play (infielder first play vs other) | 12 |
+| `awards` | walk with bases loaded; ground-rule double from time of pitch; throw out of play (infielder first play vs other; first play when all have advanced; after an out; runner held behind a lead runner; after a caught fly); foul ball out of play; fair deflected fly out over foul ground | 12 |
 | `interference` | fair ball hits runner; hits umpire before/after passing an infielder | 6 |
 | `gameflow` | home leads after top 9; walk-off single with runner from 2nd (batter credited with 1B); walk-off HR all score; extra innings | 10 |
 | `subs` | pinch hitter with two strikes → K charged; relief mid-count walk charged; three-batter minimum accept/reject incl. inning boundary; second mound visit; DH-loss rejection; double switch batch; re-entry rejected | 20 |

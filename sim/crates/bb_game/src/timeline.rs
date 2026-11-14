@@ -294,6 +294,13 @@ pub fn encode(step: &PitchStep, st: &RulesState, rosters: &crate::roster::Roster
         mk.extend(path.bounces.iter().map(|&(t, x, y)| (t, MarkerKind::Bounce, Vec3::new(x, y, 0.0))));
         mk.extend(path.walls.iter().map(|&(t, x, y)| (t, MarkerKind::WallHit, Vec3::new(x, y, 0.0))));
     }
+    // The ball left the playing field (rules-spec §5.8): where its track ends, so a client
+    // can cut back to the field.
+    for f in &step.facts {
+        if let bb_rules::Input::BallTouched { t, what: bb_rules::Touch::OutOfPlay { x, y, .. } } = *f {
+            mk.push((t, MarkerKind::BallDead, Vec3::new(x, y, 0.0)));
+        }
+    }
     // Possession: who secured the ball and when, and each throw's release, by agent.
     let mut mk: Vec<(f64, MarkerKind, Vec3, u16)> = mk.into_iter().map(|(t, k, p)| (t, k, p, 0)).collect();
     mk.extend(step.viz.secured.iter().map(|&(t, id)| (t, MarkerKind::Catch, Vec3::ZERO, id)));

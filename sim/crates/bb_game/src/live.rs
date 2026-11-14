@@ -12,10 +12,10 @@
 //! or collisions; coverage follows a small fixed table.
 
 use bb_math::{KeyedRng, Mat3, Purpose, RngKey, Vec3, m};
-use bb_physics::ground::{BallPath, Field, SegmentEnd, batted_path, batted_path_dt};
-use bb_physics::throw::{THROW_MAX_ELEV, THROW_SPIN_RPM, ThrowTable, fly_throw, solve_throw, throw_state};
+use bb_physics::ground::{BallPath, Field, SegmentEnd, WallContact, batted_path, batted_path_dt, over_the_wall, wall_contact};
+use bb_physics::throw::{THROW_MAX_ELEV, THROW_SPIN_RPM, ThrowTable, fly_throw, fly_throw_in, solve_throw, throw_state};
 use bb_physics::{BallState, FlightEnv, Trajectory};
-use bb_rules::{AgentId, Event, Input, OutKind, PlayState, RulesState, RunnerPosition, Touch, step};
+use bb_rules::{AgentId, Event, Input, OutKind, PlayState, ReleaseKind, RulesState, RunnerPosition, Touch, step};
 
 use bb_agents::motor::{ThrowNoise, execute_throw};
 use bb_agents::throwing::{self, SetUp};
@@ -502,6 +502,7 @@ fn fact_time(f: &Input) -> Option<f64> {
         | Input::BallSettled { t, .. }
         | Input::PlayTimeout { t }
         | Input::GloveSecured { t, .. }
+        | Input::BallReleasedFromGlove { t, .. }
         | Input::BaseTouched { t, .. }
         | Input::BaseLeft { t, .. }
         | Input::TagContact { t, .. }
@@ -1846,11 +1847,22 @@ impl<'a> Sim<'a> {
 
     fn move_fielders(&mut self) {
         let (t, t_contact) = (self.t, self.inp.t_contact);
+        let field = self.inp.field;
         for fd in self.f.iter_mut() {
             if fd.dove && t >= fd.ready_at {
                 fd.dove = false; // recovered
             }
             (fd.pos, fd.vel) = fielder_step(fd, t, t_contact);
+            // Nobody runs through a wall (physics-spec §9.5): he stops at it, losing the speed
+            // he had into it.
+            let w = field.body_clearance(fd.pos.x, fd.pos.y, BODY_R);
+            if w.dist < 0.0 {
+                fd.pos = field.keep_inside(fd.pos, BODY_R);
+                let vn = fd.vel.dot(w.inward);
+                if vn < 0.0 {
+                    fd.vel = fd.vel - w.inward * vn;
+                }
+            }
         }
     }
 
@@ -1896,7 +1908,7 @@ impl<'a> Sim<'a> {
         };
         // Catchable height where the ball is: a fielder at the wall can leap.
         let field = self.inp.field;
-        let zmax_at = |p: Vec3| if field.fence_at(m::atan2(p.x, p.y)) - m::hypot(p.x, p.y) < 3.0 { WALL_CATCH_MAX_Z } else { CATCH_MAX_Z };
+        let zmax_at = |p: Vec3| if field.body_clearance(p.x, p.y, 0.0).dist < 3.0 { WALL_CATCH_MAX_Z } else { CATCH_MAX_Z };
         let zmax = zmax_at(b);
         for i in 0..9 {
             let fd = &self.f[i];
@@ -2035,7 +2047,7 @@ impl<'a> Sim<'a> {
                 // fences meet at an inward corner a straight lunge can cut; Codex dive
                 // animation review #1).
                 let field = self.inp.field;
-                let inside = |p: Vec3| m::hypot(p.x, p.y) <= field.fence_at(m::atan2(p.x, p.y)) - BODY_R;
+                let inside = |p: Vec3| field.body_clearance(p.x, p.y, BODY_R).dist >= 0.0;
                 let from = fd.pos;
                 let mut ok = from;
                 for j in 1..=LUNGE_CHECKS {
@@ -2172,7 +2184,19 @@ impl<'a> Sim<'a> {
                 match path.end() {
                     SegmentEnd::OverFence { .. } => {
                         let in_flight = path.bounces.is_empty();
-                        facts.push(Input::BallTouched { t: path.t_end().max(floor), what: Touch::OutOfPlay { x: p.x, y: p.y, in_flight } });
+                        // Where it left the field (fair or foul is judged there, rules-spec
+                        // §5.2), though it is dead only once it is down in the seats.
+                        let r = self.inp.env.ball.radius;
+                        let exit = match path.segments.last() {
+                            Some(bb_physics::ground::Segment::Flight { tr, .. }) => tr.find(bb_physics::flight::Crossing::Boundary { field: *self.inp.field, r }).map(|tc| tr.at(tc).0).or_else(|| {
+                                // A path that starts at the wall (a throw over it): it left there.
+                                let a = tr.first().s.r;
+                                (self.inp.field.ball_clearance(a.x, a.y, r).dist <= 1e-6).then_some(a)
+                            }),
+                            _ => None,
+                        };
+                        let q = exit.unwrap_or(p);
+                        facts.push(Input::BallTouched { t: path.t_end().max(floor), what: Touch::OutOfPlay { x: q.x, y: q.y, in_flight } });
                     }
                     SegmentEnd::Rest => facts.push(Input::BallSettled { t: path.t_end().max(floor), x: p.x, y: p.y }),
                     _ => {}
@@ -2191,7 +2215,8 @@ impl<'a> Sim<'a> {
 
     /// Put a throw aimed at ground point `aim` in the air from launch state `s0` now.
     fn launch_throw(&mut self, s0: BallState, aim: Vec3, to_base: u8, receiver: usize, relay: bool) {
-        let path = fly_throw(self.inp.env, s0, self.t, 15.0);
+        // The throw flies inside the park: it ends at the ground or at a wall (physics-spec §9.5).
+        let path = fly_throw_in(self.inp.env, self.inp.field, s0, self.t, 15.0);
         // The receiver's read errors for this throw: a fresh look per throw, keyed by how
         // many throws the play has seen (sub-index 0 is his read of the batted ball).
         let mut r = rng(self.inp.seed, self.inp.play, self.f[receiver].id, Purpose::FielderPerception, 1 + self.out.released.len() as u32);
@@ -2270,9 +2295,28 @@ impl<'a> Sim<'a> {
         let on_bag = !*relay && (1..=4).contains(to_base) && near(catch_at) && near(read_at);
         self.f[*receiver].target = if on_bag { Vec3::new(bag.x, bag.y, 0.0) } else { Vec3::new(catch_at.x, catch_at.y, 0.0) };
         if self.t >= path.last().t {
+            let (s, t_end, at_wall) = (path.last().s, path.last().t, path.stop == Some(1));
+            if at_wall {
+                // The throw reached a wall in the air (physics-spec §9.5): off it, or over it
+                // and out of play.
+                match wall_contact(self.inp.field, s, self.inp.env.ball.radius) {
+                    (WallContact::Out, _) => {
+                        let path = over_the_wall(self.inp.env, self.inp.field, s, t_end);
+                        self.ball = Ball::Free { path, next_touch: 0, next_wall: 0, settled_sent: false };
+                    }
+                    (WallContact::Carom(ns), _) => {
+                        let floor = self.last_fact_t;
+                        self.emit(Input::BallTouched { t: t_end.max(floor), what: Touch::Wall { x: s.r.x, y: s.r.y } });
+                        if !self.done {
+                            self.set_free(ns);
+                        }
+                    }
+                }
+                return;
+            }
             // The throw reached the ground: continue from there with the bounce model (a
             // short hop or a throw that got by).
-            let mut s = path.last().s;
+            let mut s = s;
             s.r.z = s.r.z.max(self.inp.env.ball.radius);
             self.set_free(s);
         }
@@ -2830,6 +2874,10 @@ impl<'a> Sim<'a> {
         self.out.released.push((self.t, fd.id));
         let batter_goal = self.r.iter().find(|r| r.start == 0).map(|r| r.goal).unwrap_or(0);
         self.out.scorer_throws.push(ScorerThrowFact { thrower: fd.id, t: self.t, origin: r0, target: tgt, base: b, attempted_out: false, batter_goal });
+        // The rules engine needs the release for a throw that goes out of play (rules-spec §7.2);
+        // fielders 0–5 are P, C, 1B, 2B, 3B, SS.
+        let t_rel = self.t.max(self.last_fact_t);
+        self.emit(Input::BallReleasedFromGlove { t: t_rel, fielder: fd.id, kind: ReleaseKind::Throw, infielder: by < 6 });
         self.out.hurry.push((hurry, su.off_balance));
     }
 
@@ -3756,9 +3804,12 @@ mod tests {
                     let mut st = fx.st.clone();
                     let mut sim = new_sim(&inp, &mut st);
                     sim.t = 2.0;
-                    sim.f[SS].pos = Vec3::ZERO;
+                    // On open fair ground, clear of every wall (physics-spec §9.5 stops a
+                    // fielder at a wall; the movement step is what is measured here).
+                    let o = Vec3::new(-20.0, 60.0, 0.0);
+                    sim.f[SS].pos = o;
                     sim.f[SS].vel = Vec3::new(u, w, 0.0);
-                    sim.f[SS].target = Vec3::new(d, 0.0, 0.0);
+                    sim.f[SS].target = o + Vec3::new(d, 0.0, 0.0);
                     sim.f[SS].role = Role::Chase;
                     sim.f[SS].t_int = 0.0;
                     let est = run_time_to(&sim.f[SS], sim.f[SS].target, REACH * 0.7);
@@ -5419,6 +5470,111 @@ mod tests {
         // Home (toward −Y from the outfield): his right is third-base side (−X).
         let r = throw_release_point(at, Vec3::new(5.0, 0.0, 0.0), Hand::Right);
         assert!((r - Vec3::new(4.65, 30.0, 1.8)).norm() < 1e-12, "{r:?}");
+    }
+
+    /// A ball fielded fair by the shortstop (index 5) with a runner (id 2) on first, who has
+    /// not left yet; the batter has not reached first.
+    fn fielded_by_ss(fx: &Fixture) -> Sim<'_> {
+        let inp = Box::leak(Box::new(input(fx, vec![RunnerIn { id: fx.st.batter, base: 0, speed: 8.2 }, RunnerIn { id: 2, base: 1, speed: 8.2 }])));
+        let st = Box::leak(Box::new(fx.st.clone()));
+        let mut sim = new_sim(inp, st);
+        sim.emit(Input::BallTouched { t: 1.0, what: Touch::Ground { x: 0.0, y: 40.0 } });
+        let ss = sim.f[5].id;
+        sim.emit(Input::GloveSecured { t: 1.5, fielder: ss, x: -10.0, y: 38.0 });
+        sim.ball = Ball::Held { by: 5 };
+        sim.t = 2.0;
+        sim
+    }
+
+    /// From (15, 25), 2.5 m up and fair, a throw at 30 m/s straight off the first-base line
+    /// rising at 3 m/s reaches the stands wall (50 ft off the line, 4 ft high; 22.3 m away,
+    /// at s = 28.3 m, past the dugout) after about 0.75 s at about 2 m: over the top. That is
+    /// a thrown ball out of play on the shortstop's first play with the batter not yet at
+    /// first: two bases from the time of the pitch, runner to third, batter to second
+    /// (rules-spec §7.2; physics-spec §9.5).
+    #[test]
+    fn a_throw_over_the_stands_wall_is_dead_with_two_bases_from_the_pitch() {
+        let fx = fixture(&[(2, 1)]);
+        let mut sim = fielded_by_ss(&fx);
+        let ss = sim.f[5].id;
+        sim.emit(Input::BallReleasedFromGlove { t: 2.0, fielder: ss, kind: ReleaseKind::Throw, infielder: true });
+        let out = Vec3::new(1.0, -1.0, 0.0).normalized();
+        sim.launch_throw(BallState { r: Vec3::new(15.0, 25.0, 2.5), v: out * 30.0 + Vec3::new(0.0, 0.0, 3.0), w: Vec3::ZERO }, Vec3::new(40.0, 0.0, 0.0), 1, 2, false);
+        for _ in 0..400 {
+            sim.update_thrown();
+            if sim.done {
+                break;
+            }
+            world_tick(&mut sim);
+            if sim.done {
+                break;
+            }
+        }
+        assert!(sim.done, "the play ends when the ball is dead");
+        let ev = &sim.out.events;
+        assert!(ev.contains(&Event::BallDead { reason: bb_rules::DeadBall::OutOfPlay }), "{ev:?}");
+        assert!(ev.contains(&Event::RunnerAdvanced { runner: 2, from: 1, to: 3, cause: bb_rules::AdvanceCause::Award }), "{ev:?}");
+        assert!(ev.contains(&Event::RunnerAdvanced { runner: fx.st.batter, from: 0, to: 2, cause: bb_rules::AdvanceCause::Award }), "{ev:?}");
+        // It left over the wall: the out-of-play point is where it crossed, its center one
+        // ball radius short of the wall's plane, 50 ft off the line.
+        let oop = sim.out.facts.iter().find_map(|f| match f {
+            Input::BallTouched { what: Touch::OutOfPlay { x, y, .. }, .. } => Some((*x, *y)),
+            _ => None,
+        });
+        let (x, y) = oop.expect("an out-of-play fact");
+        let c = (x - y) / core::f64::consts::SQRT_2;
+        assert!((c - (50.0 * bb_math::units::FT - fx.env.ball.radius)).abs() < 1e-3, "({x:.2}, {y:.2}): {c:.4} m off the line");
+    }
+
+    /// The same throw from 1.0 m, flatter (35 m/s, rising 2 m/s), meets the wall about 0.3 m
+    /// up: below the 4-ft top it caroms off with 0.35 of its speed into the wall (the stands
+    /// wall's restitution) and stays live.
+    #[test]
+    fn a_low_throw_caroms_off_the_stands_wall_and_stays_live() {
+        let fx = fixture(&[(2, 1)]);
+        let mut sim = fielded_by_ss(&fx);
+        let ss = sim.f[5].id;
+        sim.emit(Input::BallReleasedFromGlove { t: 2.0, fielder: ss, kind: ReleaseKind::Throw, infielder: true });
+        let out = Vec3::new(1.0, -1.0, 0.0).normalized();
+        sim.launch_throw(BallState { r: Vec3::new(15.0, 25.0, 1.0), v: out * 35.0 + Vec3::new(0.0, 0.0, 2.0), w: Vec3::ZERO }, Vec3::new(40.0, 0.0, 0.0), 1, 2, false);
+        let Ball::Thrown { path, .. } = &sim.ball else { panic!("a throw in flight") };
+        assert_eq!(path.stop, Some(1), "the throw ends at the wall, not the ground");
+        let v_in = path.last().s.v.dot(out);
+        for _ in 0..200 {
+            sim.update_thrown();
+            if matches!(sim.ball, Ball::Free { .. }) {
+                break;
+            }
+            world_tick(&mut sim);
+        }
+        assert!(!sim.done, "a carom is not out of play");
+        assert!(sim.out.facts.iter().any(|f| matches!(f, Input::BallTouched { what: Touch::Wall { .. }, .. })));
+        let (_, v) = sim.ball_at(sim.t);
+        assert!((v.dot(out) / v_in + 0.35).abs() < 0.02, "rebound {:.2} of {v_in:.1} m/s", v.dot(out) / v_in);
+    }
+
+    /// A fielder sent after a ball in the seats stops at the stands wall: his center 0.3 m (his
+    /// body radius) inside it, 50 ft off the line (physics-spec §9.5).
+    #[test]
+    fn a_fielder_chasing_into_the_seats_stops_at_the_wall() {
+        let fx = fixture(&[]);
+        let inp = input(&fx, vec![RunnerIn { id: fx.st.batter, base: 0, speed: 8.2 }]);
+        let mut st = fx.st.clone();
+        let mut sim = new_sim(&inp, &mut st);
+        sim.t = 2.0;
+        const B1: usize = 2;
+        sim.f[B1].pos = Vec3::new(22.0, 20.0, 0.0);
+        sim.f[B1].vel = Vec3::ZERO;
+        sim.f[B1].role = Role::Cover(1);
+        sim.f[B1].target = Vec3::new(45.0, 0.0, 0.0);
+        for _ in 0..300 {
+            sim.move_fielders();
+            sim.t += DT;
+        }
+        let p = sim.f[B1].pos;
+        let c = (p.x - p.y) / core::f64::consts::SQRT_2;
+        assert!((c - (50.0 * bb_math::units::FT - 0.3)).abs() < 1e-3, "{c:.4} m off the line at {p:?}");
+        assert!(sim.f[B1].vel.dot(Vec3::new(1.0, -1.0, 0.0).normalized()) <= 1e-9, "{:?}", sim.f[B1].vel);
     }
 
     // Handedness of a live throw (Codex handedness review: no left-handed thrower had been
