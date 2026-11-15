@@ -175,7 +175,7 @@ Built in `live.rs` (`believed_spin`, `fly_back`, `read_shrink`, `read_prediction
 
 ## 3. Measurements (main `dc1ce82` ≡ `50ed674` → `a94a7a2`)
 
-**Standard run**, `sim-cli games --n 300`, seeds 0–299 [1000–1299]:
+**Standard run**, `sim-cli games --n 300`, seeds 0–299 [`--seed 1000`, game seeds 1,000,003,000 on]:
 
 | | Before | After | Real |
 |---|---|---|---|
@@ -251,3 +251,7 @@ filter on the ball's state, with the unseen spin as a slowly learned acceleratio
 the plate cue and the frozen-draw read: the principled fix, a few days with tests and the
 isolation harness; (b) leave it, since the catch rate is in band. **Recommendation: (a), as its
 own job**, after Q1's diagnosis, since what the owner sees (drift) is the read, not the rate.
+
+## Added after the Codex review (lead, 2026-11-15)
+
+The review ([docs/reviews/2026-11-15-codex-outfield-read-review.md](../reviews/2026-11-15-codex-outfield-read-review.md)) found no P1 and calls this an interim read model. Two statements above are withdrawn or qualified by it. (1) "The last two points are not the read" and the suggestion that the outfielders' legs are elite: not established. Its probe measures the nearest outfielder covering 33.6 ft in the first 3 s on plays needing at least 60 ft (MLB's worked example implies a 34.8 ft baseline) with a 26.9 ft/s cap (MLB average sprint speed 27 ft/s); the cause of flies falling .10 against .13 is unresolved between the read's late precision and movement. (2) The deep drift on high flies (23080/8: 12.9 m at 3.59 s) is the read keeping no track of what it has seen; fixing it is a separate job (assimilating successive observations). The spin belief must be refit when the contact model changes (`work/collision-q`).
