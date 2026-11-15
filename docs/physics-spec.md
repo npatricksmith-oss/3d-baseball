@@ -376,7 +376,7 @@ Protective netting above the side walls is not modeled (deferred): a ball that w
 
 **Throws** fly inside the same boundary: a thrown ball that reaches a wall in the air caroms or leaves the field by the same rules, and one that reaches the ground continues with the bounce model (§9.2) inside the boundary.
 
-**Players** stay inside it: a fielder's body center stays at least its radius (0.3 m, the body radius used for dives) inside every wall. A fielder who runs at a wall stops at it, losing the velocity component into it; one at the wall can still reach above its top for a catch (the wall leap height applies within 3 m of any wall, as at the outfield fence).
+**Players** stay inside it: a fielder's body center stays at least its radius (0.3 m, the body radius used for dives) inside every wall. A fielder who runs at a wall stops at it, losing the velocity component into it; one at the wall can still reach above its top for a catch (the wall leap height applies within 3 m of any wall, as at the outfield fence). **Reach over a wall:** the glove gets at most `REACH` − body radius = 1.0 − 0.3 = **0.7 m** past a wall's plane (his body stops 0.3 m inside it), standing, stretching or diving, for plans and captures alike (agent-models §5.3, `OVER_WALL_REACH_M`). **Speed at a wall:** a fielder's speed toward the nearest wall is capped at √(v_c² + 2·a·d), d his body's clearance, a = 4.75 m/s² (the measured maximal deceleration of team-sport athletes, 4.2–5.0 m/s²; Harper et al. 2020 [S]) and v_c = 2.0 m/s [E, unsourced: no public measurement of speed at wall contact; owner's choice, 2026-11-15].
 
 ---
 

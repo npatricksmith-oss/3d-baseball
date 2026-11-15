@@ -6740,7 +6740,7 @@ mod tests {
             sim.move_fielders();
             sim.t += DT;
         }
-        assert!(sim.f[B2].vel.norm() < 1e-9 && (sim.f[B2].pos - start).norm() < 5.0, "2B at {:?} moving {:?}", sim.f[B2].pos, sim.f[B2].vel);
+        assert!(sim.f[B2].vel.norm() < 1e-9 && (sim.f[B2].pos - start).norm() < 49.0 / 9.5 + 0.1, "2B at {:?} moving {:?}", sim.f[B2].pos, sim.f[B2].vel);
     }
 
     /// A ball hit from the plate with velocity `v`, every fielder reading it without error
