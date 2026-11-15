@@ -708,6 +708,8 @@ pub unsafe extern "C" fn bb_game_box_score(g: *const BbGame, through_plays: u32,
 
 #[cfg(test)]
 mod tests {
+    /// How far beyond a wall a fielder can reach over it (the receiving reach, `live.rs`), m.
+    const RECEIVE_REACH_M: f64 = 1.5;
     use super::*;
 
     #[test]
@@ -738,7 +740,10 @@ mod tests {
                 // Where it crossed: on the boundary (a ball radius inside a wall's plane, or on
                 // the fence's curve), at or above the ground.
                 let w = bb_physics::ground::Field::default().ball_clearance(info.dead_at[0] as f64, info.dead_at[1] as f64, 0.036888);
-                assert!(w.dist.abs() < 2e-3 && info.dead_at[2] >= 0.0, "dead at {:?}: {w:?}", info.dead_at);
+                // (A ball knocked off a glove reaching over a wall starts outside it, up to the
+                // fielder's reach beyond the wall, and is out of play from there: physics
+                // `over_the_wall`, seed 3 play 234 once the runners looked again.)
+                assert!((w.dist.abs() < 2e-3 || (-RECEIVE_REACH_M..0.0).contains(&w.dist)) && info.dead_at[2] >= 0.0, "dead at {:?}: {w:?}", info.dead_at);
                 if info.dead_reason == 2 {
                     // Over the 8-ft wall in flight, it would have come down beyond the fence.
                     let fence = bb_physics::ground::Field::default().fence_at((info.dead_at[0] as f64).atan2(info.dead_at[1] as f64));
