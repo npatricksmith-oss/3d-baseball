@@ -3509,10 +3509,12 @@ impl<'a> Sim<'a> {
         let n = self.r[k].decisions;
         let r = &self.r[k];
         let (d_on, d_back) = (next as f64 * BASE_L - r.s, r.s - from as f64 * BASE_L);
-        // Going on he keeps his speed (as in `runner_decide`); going back he must stop and
-        // reverse, which running the distance from rest stands in for.
-        let t_on = run_time(d_on, r.vmax, RUNNER_TAU) * if r.v > 1.0 { 0.75 } else { 1.0 };
-        let t_back = run_time(d_back, r.vmax, RUNNER_TAU);
+        // From his own signed velocity (forward positive): with a running start only if he is
+        // moving that way; moving the other way the time includes the stop, as the movement
+        // step makes him brake (`run_time_from`, the same laws and `BRAKE`).
+        let v_fwd = r.direction * r.v;
+        let t_on = run_time_from(d_on, v_fwd, r.vmax, RUNNER_TAU);
+        let t_back = run_time_from(d_back, -v_fwd, r.vmax, RUNNER_TAU);
         // Unforced, he must beat the tag at either base, not only the ball.
         let tag_s = self.inp.tag_up.typical_tag_s;
         let ball_on = self.ball_time_to(k, next, 2 * n + 1) + tag_s;
@@ -3657,14 +3659,23 @@ impl<'a> Sim<'a> {
                 Some(leave) if now < leave => continue,
                 _ => {}
             }
-            r.direction = dir;
+            // Turning round takes a stop: moving the other way he brakes at `BRAKE` (the
+            // fielders' figure) through zero, then accelerates toward the goal on the usual
+            // curve; he never flips his direction at speed (agent-models §6.4).
+            let against = r.v > 1e-9 && r.direction != dir;
+            let mdir = if against { r.direction } else { dir };
+            r.direction = mdir;
             if r.v == 0.0 {
                 r.moving_since = now;
             }
             let tau = if r.set_start.is_some() { tag.tau_s } else { RUNNER_TAU };
-            r.v += (r.vmax - r.v) * (DT / tau);
+            if against {
+                r.v = (r.v - BRAKE * DT).max(0.0);
+            } else {
+                r.v += (r.vmax - r.v) * (DT / tau);
+            }
             let prev = r.s;
-            let nxt = prev + dir * r.v * DT;
+            let nxt = prev + mdir * r.v * DT;
             let crossed = |b: u8| {
                 let bs = b as f64 * BASE_L;
                 (prev < bs && nxt >= bs) || (prev > bs && nxt <= bs)
@@ -3677,14 +3688,14 @@ impl<'a> Sim<'a> {
             }
             // Leaving a base.
             let left = (0..=3u8).find(|&b| (prev - b as f64 * BASE_L).abs() < 1e-9 && b >= 1);
-            r.s = if (dir > 0.0 && nxt >= goal_s) || (dir < 0.0 && nxt <= goal_s) { goal_s } else { nxt };
+            r.s = if !against && ((dir > 0.0 && nxt >= goal_s) || (dir < 0.0 && nxt <= goal_s)) { goal_s } else { nxt };
             let id = r.id;
             if let Some(b) = left {
                 self.emit(Input::BaseLeft { t: self.t, agent: id, base: b });
             }
             if let Some(b) = touched {
                 let r = &mut self.r[k];
-                r.last_base = if dir > 0.0 { b } else { b };
+                r.last_base = b;
                 if b == 4 {
                     r.scored = true;
                 }
@@ -3692,17 +3703,22 @@ impl<'a> Sim<'a> {
                 if self.done {
                     return;
                 }
-                let retouched = dir < 0.0 && self.r[k].retouch && b == self.r[k].start;
+                let retouched = mdir < 0.0 && self.r[k].retouch && b == self.r[k].start;
                 if retouched {
                     self.r[k].retouch = false;
                 }
-                if b < 4 && (dir > 0.0 || retouched) && b == self.r[k].goal {
+                if b < 4 && (mdir > 0.0 || retouched) && b == self.r[k].goal {
                     // Arrived where it was going (or retouched after a catch): decide whether
                     // to keep going (leaving the base is reported on the next step).
                     self.runner_decide(k, b);
-                    // A batter-runner stopping at first runs through it (agent-models §6.2).
+                    // A runner back on the base he retouched who goes on again plants on it
+                    // first: no earlier speed carries over a turn (§6.4).
                     let r = &mut self.r[k];
-                    if r.start == 0 && b == 1 && dir > 0.0 && r.goal == 1 {
+                    if mdir < 0.0 && r.goal > b {
+                        r.v = 0.0;
+                    }
+                    // A batter-runner stopping at first runs through it (agent-models §6.2).
+                    if r.start == 0 && b == 1 && mdir > 0.0 && r.goal == 1 {
                         r.overrun = OverrunPhase::Out;
                         r.over_m = 0.0;
                     }
@@ -8036,6 +8052,74 @@ mod tests {
         assert!(sim.runner_relook(1), "the ball is secured ahead of him");
         assert_eq!(sim.r[1].goal, 2, "he cannot beat the ball to third, and goes back");
         assert!(!sim.runner_relook(1), "one look per event");
+    }
+
+    // Codex runner-reads review P2-2: turning back is a stop and a restart. A runner 8 m past
+    // second at +7 m/s who turns back does not move backward in the first tick, brakes at
+    // `BRAKE` through zero, and gets to second when his own estimate says (`run_time_from`).
+    #[test]
+    fn a_runner_who_turns_back_stops_first_and_arrives_when_he_expected() {
+        let fx = fixture(&[(0x0007, 2)]);
+        let inp = input(&fx, vec![RunnerIn { id: fx.st.batter, base: 0, speed: 8.2 }, RunnerIn { id: 0x0007, base: 2, speed: 8.2 }]);
+        let mut st = fx.st.clone();
+        let mut sim = new_sim(&inp, &mut st);
+        sim.t = 6.0;
+        let s0 = 2.0 * BASE_L + 8.0;
+        sim.r[1].s = s0;
+        sim.r[1].v = 7.0;
+        sim.r[1].direction = 1.0;
+        sim.r[1].goal = 3;
+        sim.r[1].hold_s = None;
+        sim.f[4].pos = base_pos(3);
+        sim.f[4].target = base_pos(3);
+        sim.ball = Ball::Held { by: 4 };
+        sim.out.secured.push((6.0, sim.f[4].id));
+        sim.r[1].v = 7.0;
+        assert!(sim.runner_relook(1));
+        assert_eq!(sim.r[1].goal, 2);
+        let expected = run_time_from(8.0, -7.0, sim.r[1].vmax, RUNNER_TAU);
+        let t0 = sim.t;
+        sim.move_runners();
+        sim.t += DT;
+        assert!(sim.r[1].s >= s0, "no backward step in the first tick: {} against {s0}", sim.r[1].s);
+        assert!((sim.r[1].v - (7.0 - BRAKE * DT)).abs() < 1e-9, "braking: v = {}", sim.r[1].v);
+        let mut peak = sim.r[1].s;
+        let mut ticks = 1;
+        while sim.r[1].s > 2.0 * BASE_L + 1e-9 && ticks < 600 {
+            sim.move_runners();
+            sim.t += DT;
+            peak = peak.max(sim.r[1].s);
+            ticks += 1;
+        }
+        assert!((peak - s0 - 49.0 / 12.0).abs() < 0.1, "he drifts v²/2·BRAKE = 4.08 m on before reversing: {}", peak - s0);
+        assert!(((sim.t - t0) - expected).abs() < 3.0 * DT, "took {:.3} s, expected {expected:.3} s", sim.t - t0);
+    }
+
+    // The same second look while he is already returning: his signed velocity is used on both
+    // sides of the race (going on from here would mean a stop first), so he keeps coming back.
+    #[test]
+    fn a_second_look_while_returning_counts_the_stop() {
+        let fx = fixture(&[(0x0007, 2)]);
+        let inp = input(&fx, vec![RunnerIn { id: fx.st.batter, base: 0, speed: 8.2 }, RunnerIn { id: 0x0007, base: 2, speed: 8.2 }]);
+        let mut st = fx.st.clone();
+        let mut sim = new_sim(&inp, &mut st);
+        sim.t = 6.0;
+        sim.r[1].s = 2.0 * BASE_L + 4.0;
+        sim.r[1].v = 6.0;
+        sim.r[1].direction = -1.0;
+        sim.r[1].goal = 2;
+        sim.r[1].hold_s = None;
+        // The ball is thrown (a release) from third toward second as he comes back.
+        sim.f[4].pos = base_pos(3);
+        sim.f[4].target = base_pos(3);
+        sim.ball = Ball::Held { by: 4 };
+        sim.out.released.push((6.0, sim.f[4].id));
+        assert!(sim.runner_relook(1));
+        assert_eq!(sim.r[1].goal, 2, "on the way back, going on means stopping first: he keeps coming");
+        // Moving back at 6 m/s, the time on includes the stop and the 4 m given up.
+        let on = run_time_from(BASE_L - 4.0, -6.0, sim.r[1].vmax, RUNNER_TAU);
+        let from_rest = run_time_from(BASE_L - 4.0, 0.0, sim.r[1].vmax, RUNNER_TAU);
+        assert!(on > from_rest + 0.9, "{on} against {from_rest}");
     }
 
     // Seed 1000003226 play 194 (bases loaded, the force at second made, the throw home): the
