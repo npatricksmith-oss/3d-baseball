@@ -1893,7 +1893,11 @@ impl<'a> Sim<'a> {
             }
             let k = prev.map_or(0, |tr| tr.looks);
             let (d, u, a, b) = sight_frame(fd.pos + Vec3::new(0.0, 0.0, EYE_H), bp);
-            let scale = if k == 0 { 1.0 } else { LOOK_SCALE };
+            // His first look is the snapshot read's first read, its shrink included (for a ball
+            // about to come down, the closing of `READ_CLOSE_S`: a grounder before its first
+            // bounce is read as sharply as before); later looks, `LOOK_SCALE` of the plain σ.
+            let view = (t - t_c - fd.a.reaction).max(0.0);
+            let scale = if k == 0 { read_shrink((bp, bv), view, fd.a.tau_read, Some((since, p0))) } else { LOOK_SCALE };
             let mut g = rng(self.inp.seed, self.inp.play, fd.id, Purpose::FielderLook, k);
             let (fresh, bias) = look_noise();
             let e: [f64; 6] = core::array::from_fn(|_| fresh * g.truncated_normal(4.0));
