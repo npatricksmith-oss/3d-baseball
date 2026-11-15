@@ -457,6 +457,9 @@ void ABbDirector::BeginPlay()
 	FParse::Value(Cmd, TEXT("BbSpeed="), Speed);
 	FParse::Value(Cmd, TEXT("BbCamera="), CameraMode);
 	FParse::Value(Cmd, TEXT("BbShots="), ShotsLeft);
+	FParse::Value(Cmd, TEXT("BbRushAt="), RushAt);
+	FParse::Value(Cmd, TEXT("BbReplayAt="), ReplayAt);
+	SeedShown = Seed;
 	FParse::Value(Cmd, TEXT("BbShotEvery="), ShotEvery);
 	FParse::Value(Cmd, TEXT("BbShotStart="), NextShot);
 	FParse::Value(Cmd, TEXT("BbBenchSeconds="), BenchSeconds);
@@ -615,6 +618,14 @@ void ABbDirector::RequestNext()
 
 void ABbDirector::BeginPlayback(FBbPlay&& Play)
 {
+	// The next pitch is ready: a skip asked for with Enter ends here.
+	if (bRush && RushClock > 0.f)
+	{
+		UE_LOG(LogBb, Display, TEXT("BB_RUSH off at=%.2f s"), RushClock);
+	}
+	bRush = false;
+	bReplay = false;
+	const BbPlayInfo BoardBefore = Before;
 	// The board as this play starts: as the last one left it (top of the first, before the
 	// first pitch). The board stays on the outgoing half inning until here.
 	if (Current.bValid)
@@ -644,7 +655,13 @@ void ABbDirector::BeginPlayback(FBbPlay&& Play)
 	ThrowsSampledTo = -1.f;
 	if (Current.Blob)
 	{
-		Sim->Release(Current);
+		// Kept for the replay keys; the oldest goes when there are too many.
+		History.Add({ Current, BoardBefore });
+		if (History.Num() > HistoryMax)
+		{
+			Sim->Release(History[0].Play);
+			History.RemoveAt(0);
+		}
 	}
 	Current = MoveTemp(Play);
 	// Each pitch opens with the wind-up: play time runs from −PreRoll to the release at 0.
@@ -684,6 +701,86 @@ void ABbDirector::BeginPlayback(FBbPlay&& Play)
 	{
 		HoldAfter = HrHoldS;
 	}
+}
+
+void ABbDirector::ShowReplay(int32 Index)
+{
+	ReplayIdx = FMath::Clamp(Index, 0, History.Num());
+	const bool bLive = ReplayIdx == History.Num();
+	Current = bLive ? LivePlay : History[ReplayIdx].Play;
+	Before = bLive ? LiveBefore : History[ReplayIdx].Before;
+	// The pitch from its wind-up, as BeginPlayback starts one.
+	Throws.Reset();
+	ThrowsSampledTo = -1.f;
+	PlayTime = -PreRoll;
+	bBallInPlay = false;
+	bBallDead = false;
+	bDeadCut = false;
+	bHomeRunCut = false;
+	CallsLogged = 0;
+	bRush = false;
+	BbFrame Start;
+	if (Sim->Sample(Current, 0.f, Start))
+	{
+		PurgeExits(Start);
+	}
+	bHomeRun = Current.Info.dead_reason == 2;
+	HoldAfter = bHomeRun ? HrHoldS : Current.Info.exit_velocity_mps > 0.f ? 2.5f : 0.7f;
+	UE_LOG(LogBb, Display, TEXT("BB_REPLAY show play=%u live=%d kept=%d"), Current.Info.play_index, bLive ? 1 : 0, History.Num());
+}
+
+void ABbDirector::ReplayBack()
+{
+	if (!Current.bValid || bGameOver || !Sim)
+	{
+		return;
+	}
+	bool bSame = PlayTime > -PreRoll + ReplayBackS;
+	if (!bReplay)
+	{
+		// Leaving the live game: the pitch on screen is kept aside, and a walk back into
+		// place under way is dropped (the next pitch stays in NextPlay and is staged again
+		// when the replay comes back to the end of this one).
+		LivePlay = Current;
+		LiveBefore = Before;
+		ReplayIdx = History.Num();
+		bReplay = true;
+		if (bReset)
+		{
+			bSame = true;
+			bReset = false;
+			bSideCutPlanned = false;
+			if (APlayerController* PC = GetWorld()->GetFirstPlayerController())
+			{
+				if (PC->PlayerCameraManager)
+				{
+					PC->PlayerCameraManager->SetManualCameraFade(0.f, FLinearColor::Black, false);
+				}
+				if (ABbHUD* CardHud = Cast<ABbHUD>(PC->GetHUD()))
+				{
+					CardHud->CardAlpha = 0.f;
+					CardHud->Card.Reset();
+				}
+			}
+		}
+	}
+	ShowReplay(bSame ? ReplayIdx : ReplayIdx - 1);
+}
+
+void ABbDirector::ReplayForward()
+{
+	if (!bReplay)
+	{
+		return;
+	}
+	if (ReplayIdx >= History.Num())
+	{
+		// Already on the live pitch: carry on from here.
+		bReplay = false;
+		UE_LOG(LogBb, Display, TEXT("BB_REPLAY end play=%u"), Current.Info.play_index);
+		return;
+	}
+	ShowReplay(ReplayIdx + 1);
 }
 
 void ABbDirector::NoteThrows(float From, float To)
@@ -1281,7 +1378,9 @@ void ABbDirector::PoseFigure(int32 Slot, const BbActor& A, const BbFrame& Frame,
 		Manual = AnimThrow;
 		ClipTime = In.ThrowClip;
 		WantYaw = In.ThrowYaw;
-		bMirror = bLefty;
+		// The stand-in throw clip strikes with the left arm (owner, 2026-11-15: right-handed
+		// infielders looked left-handed), so it is the right-hander who gets the mirror.
+		bMirror = bThrowClipLeftArm ? !bLefty : bLefty;
 	}
 	if (bMotions && !Manual && bFielder && Position == 2 && bStill && !In.bStaged && PlayTime < 0.6f && AnimCrouch)
 	{
@@ -1493,9 +1592,14 @@ void ABbDirector::PlaceBallShadow(const BbFrame& Frame, bool bShown)
 	// distance stands in for the camera-space depth, which is close enough near the aim.
 	const float HalfFov = FMath::DegreesToRadians(Camera->GetCameraComponent()->FieldOfView * 0.5f);
 	const float ViewM = 2.f * DistM * FMath::Tan(HalfFov);
-	// It shrinks to about half as the ball climbs to 30 m, so height reads too.
+	// Height reads from the size (owner, 2026-11-15): nothing under a ball on the ground or
+	// rolling, a small shadow that closes up as the ball comes down to the grass, and a
+	// larger one the higher the ball is.
 	const float H = FMath::Max(0.f, Frame.ball[2]);
-	const float Climb = FMath::Lerp(1.f, 0.55f, FMath::Clamp(H / 30.f, 0.f, 1.f));
+	const float Near = FMath::Clamp((H - BallShadowNoneM) / (BallShadowFullM - BallShadowNoneM), 0.f, 1.f);
+	const float High = FMath::Clamp((H - BallShadowFullM) / (BallShadowHighM - BallShadowFullM), 0.f, 1.f);
+	const float Climb = Near * FMath::Lerp(1.f, BallShadowHighScale, High);
+	bShown = bShown && Climb > 0.f;
 	const float Across = FMath::Max(BallShadowM, ViewM * BallShadowViewShare) * Climb;
 	// Seen from above at angle E, a disc shows sin E of its width in height. Lengthen it along
 	// the line of sight by 1/sqrt(sin E), at most BallShadowMaxStretch.
@@ -1552,6 +1656,20 @@ void ABbDirector::Tick(float DeltaSeconds)
 				}
 			}
 		}
+		// Enter: run at RushSpeed (or the chosen speed, if faster) until the next pitch is
+		// ready to be thrown, then back to the chosen speed (owner, 2026-11-15). Again: stop.
+		if (PC->WasInputKeyJustPressed(EKeys::Enter))
+		{
+			bRush = !bRush;
+		}
+		if (PC->WasInputKeyJustPressed(EKeys::R))
+		{
+			ReplayBack();
+		}
+		if (PC->WasInputKeyJustPressed(EKeys::F))
+		{
+			ReplayForward();
+		}
 		if (PC->WasInputKeyJustPressed(EKeys::C))
 		{
 			CameraMode = (CameraMode + 1) % 3;
@@ -1585,7 +1703,28 @@ void ABbDirector::Tick(float DeltaSeconds)
 
 	if (Current.bValid && Sim)
 	{
-		const float SimDt = bPaused ? 0.f : DeltaSeconds * Speed;
+		// -BbReplayAt=<s>: R twice, then F six seconds later, for an unattended check.
+		if (ReplayAt >= 0.f && (RushClock += RushAt >= 0.f ? 0.f : DeltaSeconds) >= ReplayAt + (ReplayAuto == 2 ? 6.f : 0.f))
+		{
+			if (ReplayAuto < 2)
+			{
+				ReplayBack();
+				++ReplayAuto;
+			}
+			else
+			{
+				ReplayForward();
+				ReplayAt = -1.f;
+			}
+		}
+		// -BbRushAt=<s>: Enter, pressed for an unattended check that many seconds in.
+		if (RushAt >= 0.f && (RushClock += DeltaSeconds) >= RushAt)
+		{
+			RushAt = -1.f;
+			bRush = true;
+			UE_LOG(LogBb, Display, TEXT("BB_RUSH on play=%u play_time=%.2f reset=%d"), Current.Info.play_index, PlayTime, bReset ? 1 : 0);
+		}
+		const float SimDt = bPaused ? 0.f : DeltaSeconds * (bRush ? FMath::Max(Speed, RushSpeed) : Speed);
 		PlayTime += SimDt;
 		ExitClock += SimDt;
 		const float T = FMath::Clamp(PlayTime, 0.f, Current.Info.duration_s);
@@ -1874,7 +2013,8 @@ void ABbDirector::Tick(float DeltaSeconds)
 				}
 			}
 			static const TCHAR* CamNames[3] = { TEXT("broadcast"), TEXT("behind home"), TEXT("overhead") };
-			Hud->Footer = FString::Printf(TEXT("Space: %s    - / =: speed %.2gx    C: camera (%s)    Esc or Q: quit"), bPaused ? TEXT("paused") : TEXT("pause"), Speed, CamNames[CameraMode]);
+			Hud->Replay = bReplay ? FString::Printf(TEXT("REPLAY    seed %llu    play %u"), SeedShown, Current.Info.play_index) : FString();
+			Hud->Footer = FString::Printf(TEXT("Space: %s    - / =: speed %.2gx    Enter: %s    R / F: replay back / forward    C: camera (%s)    Esc or Q: quit"), bPaused ? TEXT("paused") : TEXT("pause"), Speed, bRush ? TEXT("skipping to the next pitch") : TEXT("skip to the next pitch"), CamNames[CameraMode]);
 			// The outs on the board are the ones called so far. Runs, count and bases change
 			// when the play is known. A play that ends the half inning leaves it on the board,
 			// at three outs, until the next pitch (BeginPlayback).
@@ -1893,7 +2033,21 @@ void ABbDirector::Tick(float DeltaSeconds)
 				? FString::Printf(TEXT("Pitch %.0f mph   Exit %.0f mph at %.0f deg"), Mph, In.exit_velocity_mps * 2.23694f, FMath::RadiansToDegrees(In.launch_angle_rad))
 				: FString::Printf(TEXT("Pitch %.0f mph"), Mph);
 		}
-		if (bReset)
+		if (bReplay && ReplayIdx >= History.Num() && PlayTime >= Current.Info.duration_s)
+		{
+			// The replay has run through the live pitch: the game carries on.
+			bReplay = false;
+			UE_LOG(LogBb, Display, TEXT("BB_REPLAY end play=%u"), Current.Info.play_index);
+		}
+		if (bReplay && ReplayIdx < History.Num())
+		{
+			// A replayed pitch runs straight on into the next one.
+			if (PlayTime >= Current.Info.duration_s + HoldAfter)
+			{
+				ShowReplay(ReplayIdx + 1);
+			}
+		}
+		else if (bReset)
 		{
 			if (ResetTime >= ResetDuration)
 			{
@@ -1919,6 +2073,20 @@ void ABbDirector::Tick(float DeltaSeconds)
 						CardHud->Card.Reset();
 					}
 				}
+				BeginPlayback(MoveTemp(NextPlay));
+				NextPlay = FBbPlay();
+			}
+		}
+		else if (PlayTime >= Current.Info.duration_s + HoldAfter && NextPlay.bValid)
+		{
+			// The next pitch was already in hand when a replay began: stage the walk to it again.
+			if (StartReset(NextPlay))
+			{
+				bReset = true;
+				ResetTime = 0.f;
+			}
+			else
+			{
 				BeginPlayback(MoveTemp(NextPlay));
 				NextPlay = FBbPlay();
 			}
@@ -2102,6 +2270,19 @@ void ABbDirector::EndPlay(const EEndPlayReason::Type Reason)
 		}
 		bPending = false;
 	}
+	if (bReplay)
+	{
+		// The pitch on screen may be one of the kept ones: release each blob once.
+		Current = LivePlay;
+	}
+	for (FShown& Old : History)
+	{
+		if (Sim && Old.Play.Blob)
+		{
+			Sim->Release(Old.Play);
+		}
+	}
+	History.Reset();
 	if (Sim && Current.Blob)
 	{
 		Sim->Release(Current);

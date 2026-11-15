@@ -29,6 +29,8 @@ class UMaterialInterface;
  *               -BbBenchSeconds=<s> (log frame rate and memory, then quit)
  *               -BbStagingLog (log each reset, each player leaving the field and each throw's
  *               first animation phase as BB_RESET / BB_EXIT / BB_THROW, and a BB_STAGING summary)
+ *               -BbRushAt=<s> (press Enter once, that many seconds in; logs BB_RUSH)
+ *               -BbReplayAt=<s> (press R twice that many seconds in, F six seconds later; logs BB_REPLAY)
  *               -BbClipSpeeds (log the ground speed each gait clip is animated for as BB_CLIP)
  */
 UCLASS()
@@ -321,11 +323,20 @@ private:
 	static constexpr float BallShadowM = BallDrawnM;
 	/** With the ball on the ground, a far shadow keeps at least this share of the view's width
 	 *  across (about 11 px of a 1600 px view), so it can still be seen deep in the outfield.
-	 *  The climb then shrinks it like the 15 cm floor. Sized so the shadow is never larger on
+	 *  The ball's height then scales it like the 15 cm floor (below). Sized so the shadow is never larger on
 	 *  screen than the 50 cm disc the owner found too big (2026-11-12): from the follow camera
 	 *  a ball in the near infield gets about 11 x 6.5 px against that disc's 18 x 6; at the
 	 *  pitch camera's long lens the 15 cm floor governs. */
 	static constexpr float BallShadowViewShare = 0.007f;
+	/** The shadow's size follows the ball's height (owner, 2026-11-15). At or below
+	 *  BallShadowNoneM (the ball's centre resting or rolling on the ground, with a little room
+	 *  for low skips) there is none; it opens to the sizes above by BallShadowFullM, and grows
+	 *  to BallShadowHighScale times that by BallShadowHighM, so a high fly's shadow is the
+	 *  largest and closes up as the ball comes down. */
+	static constexpr float BallShadowNoneM = 0.12f;
+	static constexpr float BallShadowFullM = 2.0f;
+	static constexpr float BallShadowHighM = 30.0f;
+	static constexpr float BallShadowHighScale = 2.5f;
 	/** Most the shadow is drawn longer along the line of sight than across it. A camera low
 	 *  over a far ball sees the disc nearly edge-on (19 m up and 155 m away it shows an eighth
 	 *  of its width); the length makes up the square root of that, so the shadow still reads
@@ -382,6 +393,43 @@ private:
 	int32 CameraMode = 0;
 	int32 ShownCam = -1;
 	bool bPaused = false;
+	/** Replay (owner, 2026-11-15), for looking at a play again. The pitches already shown are
+	 *  kept (the newest HistoryMax), each with the board as it stood before it. R goes back:
+	 *  to the start of the pitch on screen, or, within ReplayBackS of its start, to the pitch
+	 *  before. F goes forward a pitch; from the newest one it leaves the replay. A replayed
+	 *  pitch runs on into the next, up to the live one, and the game carries on from there.
+	 *  The speed keys, pause and Enter work as always. */
+	struct FShown
+	{
+		FBbPlay Play;
+		BbPlayInfo Before{};
+	};
+	TArray<FShown> History;
+	static constexpr int32 HistoryMax = 80;
+	static constexpr float ReplayBackS = 1.0f;
+	bool bReplay = false;
+	/** Which pitch is on screen during a replay: an index into History, or History.Num() for
+	 *  the live pitch (LivePlay), which is not in History until the next one begins. */
+	int32 ReplayIdx = 0;
+	FBbPlay LivePlay;
+	BbPlayInfo LiveBefore{};
+	uint64 SeedShown = 0;
+	void ReplayBack();
+	void ReplayForward();
+	void ShowReplay(int32 Index);
+	/** -BbReplayAt=<s>: seconds of real time after which R is pressed twice and, 6 s later, F
+	 *  once (unattended check; logs BB_REPLAY). */
+	float ReplayAt = -1.f;
+	int32 ReplayAuto = 0;
+	/** The stand-in throw clip (MM_Attack_02) swings its left arm; the pitch clip its right. */
+	static constexpr bool bThrowClipLeftArm = true;
+	/** Set by Enter: play at RushSpeed (or Speed, if that is faster) until the next pitch is
+	 *  ready to be thrown (BeginPlayback), then return to Speed. Enter again cancels it. */
+	bool bRush = false;
+	static constexpr float RushSpeed = 4.f;
+	/** -BbRushAt=<s>: seconds of real time after which Enter is pressed once (unattended check). */
+	float RushAt = -1.f;
+	float RushClock = 0.f;
 
 	// Unattended checks.
 	int32 ShotsLeft = 0;
