@@ -30,6 +30,7 @@ class UMaterialInterface;
  *               -BbStagingLog (log each reset, each player leaving the field and each throw's
  *               first animation phase as BB_RESET / BB_EXIT / BB_THROW, and a BB_STAGING summary)
  *               -BbRushAt=<s> (press Enter once, that many seconds in; logs BB_RUSH)
+ *               -BbReplayAt=<s> (press R twice that many seconds in, F six seconds later; logs BB_REPLAY)
  *               -BbClipSpeeds (log the ground speed each gait clip is animated for as BB_CLIP)
  */
 UCLASS()
@@ -392,6 +393,34 @@ private:
 	int32 CameraMode = 0;
 	int32 ShownCam = -1;
 	bool bPaused = false;
+	/** Replay (owner, 2026-11-15), for looking at a play again. The pitches already shown are
+	 *  kept (the newest HistoryMax), each with the board as it stood before it. R goes back:
+	 *  to the start of the pitch on screen, or, within ReplayBackS of its start, to the pitch
+	 *  before. F goes forward a pitch; from the newest one it leaves the replay. A replayed
+	 *  pitch runs on into the next, up to the live one, and the game carries on from there.
+	 *  The speed keys, pause and Enter work as always. */
+	struct FShown
+	{
+		FBbPlay Play;
+		BbPlayInfo Before{};
+	};
+	TArray<FShown> History;
+	static constexpr int32 HistoryMax = 80;
+	static constexpr float ReplayBackS = 1.0f;
+	bool bReplay = false;
+	/** Which pitch is on screen during a replay: an index into History, or History.Num() for
+	 *  the live pitch (LivePlay), which is not in History until the next one begins. */
+	int32 ReplayIdx = 0;
+	FBbPlay LivePlay;
+	BbPlayInfo LiveBefore{};
+	uint64 SeedShown = 0;
+	void ReplayBack();
+	void ReplayForward();
+	void ShowReplay(int32 Index);
+	/** -BbReplayAt=<s>: seconds of real time after which R is pressed twice and, 6 s later, F
+	 *  once (unattended check; logs BB_REPLAY). */
+	float ReplayAt = -1.f;
+	int32 ReplayAuto = 0;
 	/** Set by Enter: play at RushSpeed (or Speed, if that is faster) until the next pitch is
 	 *  ready to be thrown (BeginPlayback), then return to Speed. Enter again cancels it. */
 	bool bRush = false;

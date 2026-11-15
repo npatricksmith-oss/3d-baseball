@@ -29,6 +29,10 @@ void ABbHUD::DrawHUD()
 	DrawRect(FLinearColor(0.f, 0.f, 0.f, 0.55f), 20.f * S, 20.f * S, 520.f * S, 78.f * S);
 	DrawText(Scoreboard, FLinearColor::White, 32.f * S, 28.f * S, Font, 1.6f * S);
 	DrawText(PitchLine, FLinearColor(0.85f, 0.9f, 1.f), 32.f * S, 62.f * S, Font, 1.2f * S);
+	if (!Replay.IsEmpty())
+	{
+		DrawText(Replay, FLinearColor(1.f, 0.85f, 0.2f), 32.f * S, 92.f * S, Font, 1.6f * S);
+	}
 	// Runners on: a small diamond, lit bases in yellow.
 	const FVector2D Diamond(470.f * S, 60.f * S);
 	const FVector2D Offsets[3] = { FVector2D(18.f, 0.f), FVector2D(0.f, -18.f), FVector2D(-18.f, 0.f) };
