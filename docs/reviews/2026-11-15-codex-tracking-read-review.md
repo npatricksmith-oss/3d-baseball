@@ -50,4 +50,21 @@ When stepping gets within reach before the queried horizon, `left <= reach` ente
 
 ## Resolution
 
-Open.
+All three P2s fixed by the author (2026-11-15) in `c93288e`, with the spec (agent-models §5.1, §5.2) in the same commit. Then one test pass (all pass) and one measurement (note §3a).
+
+- **P2-1 (landing doubt omits the acceleration): fixed.** `track_doubt` differentiates the landing point with respect to all nine state components, including the learned acceleration, and carries the full covariance with every cross term. The spec's incorrect sentence is replaced.
+  - `a_tracked_doubt_carries_the_learned_acceleration`: a belief uncertain only in the acceleration, 1 m/s² per axis, has the doubt a ±1 m/s² change gives the landing point, within 15% on each axis.
+  - `the_tracking_doubt_matches_the_spread_of_tracked_reads` is the independent calibration. It uses 86 balls from games 0–5 with their real spins, each tracked from 12 m short. RMS doubt is 1.10 m against an RMS miss of 0.78 m 2 s out, and 0.62 against 0.53 m 1 s out. The required band is a factor of 1.5 either way. The doubt is now on the cautious side; before the fix it was 3–4× too small early in flight, by the review's probe.
+- **P2-2 (the first-look shrink leaves an unshrunk grounder floor): fixed.** The first look's persistent part takes the shrink with its fresh part; later looks keep the plain σ. The spec's two statements are reconciled.
+  - `a_grounders_first_look_is_read_as_sharply_as_the_snapshot_read` reproduces the review's case: the shortstop at his gate, a grounder at 36 m/s with vz −1, 0 and +2, lateral draws at one σ, fresh noise off.
+  - The tracked position is 0.002–0.009 m off, against the snapshot read's 0.010–0.051 m; it was 0.074 m.
+  - Grounder hits afterwards are .300 [.316], against .298 [.303] before. So the mechanism is fixed, but the aggregate did not fall back: the `--seed 1000` set's +.013 is not explained.
+- **P2-3 (a reach found while stepping is discarded): fixed, beyond the suggestion.**
+  - Within 5 m, moving, the estimate steps the movement until he is within reach (at most 2.5 s), with the walls applied as in `move_fielders` (`wall_rule`, now shared); `wall_delay` adds nothing there.
+  - `run_time_to` takes that first entry. Otherwise it scans the first 3 s at 0.05 s for the first crossing before bracketing.
+  - `run_gap` and `run_time_to` now take the field.
+  - The test `reach_estimate_tracks_the_movement_step_below_two_metres_and_at_a_wall` covers 0.75–1.9 m and every oblique motion up to 8 m/s, on open ground and into the centre-field wall, within ±0.35 s; the worst is 0.18 s.
+  - The review's case (1 m, (4, −4) m/s) now matches the movement. Switching to the closed form when he was heading for the goal had also failed at the wall: 1.39 s against 0.68 s, because the stepped run went through the wall's line. That is why the walls are now in the step.
+- **Verification.** One workspace test pass (all test groups pass), then one standard run on both seed sets and `fly_misses 0 300`.
+  - Routine flies caught .965 (in the owner's band; `LOOK_SCALE` and `TRACK_BIAS_FRAC` not refitted).
+  - Runs 3.83 [4.23]; no rules warnings.
