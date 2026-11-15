@@ -67,4 +67,9 @@ This code path is also present in `6ef084a`; it is a newly discovered retained d
 
 ## Resolution
 
-Open.
+P1-3 fixed; the four earlier findings were confirmed fixed by this recheck.
+
+- **Scorer:** a `RunnerAdvanced` to home no longer removes a runner from the survivors; only `RunScored` or `RunnerOut` does (`bb_stats/src/lib.rs`). I checked the other uses of `RunnerAdvanced` in `scorer.rs` (batter award and base reached); they read the batter's bases, not survivors, and do not infer scoring or outs.
+- **Engine:** `try_walk_off` stops after the winning run; later pending touches emit no advance (`bb_rules/src/engine.rs`). Spec §4.1 says so (OBR 5.08(b), 9.02(g)). Award walk-offs were already correct.
+- **Tests:** scenario `lob/lob-005` (two pending touches, expects no `RunnerAdvanced` for the trailer; failed before); `bb_stats/tests/walkoff_lob.rs`: Codex's complete scripted game asserts LOB 2 and I1 on the home line (failed before: 29 against 28), and a second test asserts LOB for awards-014 (2), awards-015 (2), gameflow-005 (3) and gameflow-007 (2).
+- **Measured:** `cargo test --workspace --release` passes; `scorer_audit 300 0` and `300 1000` pass; game digests of seeds 0–299 and 1000–1299 are identical before and after the fix, and `sim-cli games --n 300 --seed 0` is unchanged apart from the timing line.
