@@ -160,15 +160,94 @@ Built in `live.rs` (`believed_spin`, `fly_back`, `read_shrink`, `read_prediction
   plate-cue σ held for the whole flight, an observer who knows where the ball is to 0.3 m at
   3 s); carrying that best read forward as the plate cue carries the contact point (velocity
   error × elapsed time, plus `PLATE_SPIN_M` × Δ^1.5) barely bound (the carried σ grows as fast as
-  the direct read's). Both removed. The mid-flight degradation is real in the model and is now
-  covered by the closing, which reaches the top of a high fly (T at the apex of a 40 m fly is
-  2.9 s); a proper fix is a filter on the whole observed track, which would learn the ball's
-  curvature (its spin) as it flies. Not built; see §5.
-- *`READ_CLOSE_S` 1.5–2.5 s.* 2.5 s gave grade 50 .944–.946 and still missed 23080/8. 3.5 s
-  gave .976.
+  the direct read's). Both removed. The mid-flight degradation is still in the model (§4); the
+  closing now starts near the top of a high fly (T at the apex of a 40 m fly is 2.9 s in a
+  vacuum) and pulls the read back in time. A proper fix is a filter on the whole observed
+  track, which would learn the ball's curvature (its spin) as it flies. Not built; §5 Q2.
+- *`READ_CLOSE_S` 1.5–2.5 s.* 2.5 s missed 23080/8; over seeds 0–299 it gives grade 50 .949 of
+  routine flies, fly-ball hits .109, runs 3.42 (seed set 0 only). 3.5 s gave .976 on 120 games.
 - *ρ 1.4 or 1.1 for `ReadSkill`.* 1.4 put grade 20 at .536 (the catch rate is steep in the read
   error); 1.1 put it at .85–.86. The old §10 ρ 1.2 on τ_read alone held grade 20 near .87.
 - *Re-fitting `PLATE_SPIN_M` with the new belief.* Re-measured (`examples/plate_cue.rs`, 48
   games): 0.6 m at 0.5 s, 2.0 m at 1 s, 4–8 m at 2 s, as before. The plate cue's floor is the
   spread of spins and their side component, which the median does not remove. Unchanged.
 - *The dive rule, the call, the replan clock alone.* Not where the misses came from (§1).
+
+## 3. Measurements (main `dc1ce82` ≡ `50ed674` → `a94a7a2`)
+
+**Standard run**, `sim-cli games --n 300`, seeds 0–299 [1000–1299]:
+
+| | Before | After | Real |
+|---|---|---|---|
+| Runs / team-game | 4.42 [4.59] | **3.32 [3.42]** | 4.39 |
+| PA / team-game | 39.0 [39.2] | 37.1 [37.0] | |
+| K% / BB% | 21.6 / 8.1 [21.9 / 8.4] | 21.5 / 8.2 [22.0 / 8.4] | |
+| HR / PA | 1.87% [1.91%] | 1.88% [1.87%] | |
+| Reached on BIP | 39.1% [39.1%] | 32.4% [33.0%] | |
+| GB hits | .322 [.319] | .293 [.304] | ≈ .24 |
+| LD hits | .762 [.774] | .653 [.659] | ≈ .68 |
+| **FB hits** | .219 [.228] | **.099 [.102]** | ≈ .13 |
+| PU hits | .030 [.033] | .011 [.011] | ≈ .02 |
+
+**Routine flies** (`fly_misses 0 300`, §1's definition), grade 50: **.824 → .967** (25–35°
+.629 → .950; 35–50° .871 → .972; 50°+ .927 → .973). Every fly in the park off the wall: .213 →
+.083 fall. By `ReadSkill` (every fielder at the grade, seeds 0–119): grade 20 .917, grade 50
+.960, grade 80 .983. Seed 23080 play 8 is caught (glove at 6.54 s; it would land at 6.55 s).
+The read's error on routine flies at 2.0 / 1.0 / 0.5 s before landing (sd in depth): 2.2–2.9 /
+0.7–0.9 / 0.2–0.4 m (was 3.4–4.2 / 2.0–3.1 / 1.3–1.8); with no draws the bias is now under
+0.35 m at 2 s.
+
+**The 60 routine misses left** (of 1,799): 31 within 1.4–2.5 m of the ball without a dive; 19
+read well late but too far to make up; 5 reached and not held (the glove, A17's); 3 left to a
+teammate who missed; 2 read errors late. None of the causes is now dominant.
+
+**Mechanism of the fall in runs.** Every fly that is now caught is an out that used to be a
+hit: fly-ball hits fall by .12 of 22.5% of balls in play and pop-up hits by .02; reached on BIP
+falls 6.7 points. Grounders (.322 → .293) and liners (.762 → .653) fall too, from the same two
+changes: the typical-spin table's topspin side moved as much as its backspin side (−7,060 →
+−4,856 rpm at −25°), so infielders' and outfielders' reads of grounders and liners lost a bias
+as well, and a liner's whole flight is inside `READ_CLOSE_S`. Nothing was compensated anywhere.
+The paired fly replay was not run.
+
+## 4. What is still off
+
+1. **Flies now fall too rarely: .099 [.102] against a real .13**, and pop-ups .011 against
+   .02. Lowering `READ_CLOSE_S` to 2.5 s gives .109 and leaves grade 50's routine rate .949, so
+   the read is not the main lever. The research note's estimate (§3 there) is that the sim's
+   average outfielder already covers in 3 s what an elite real one does (35 ft against
+   29–38 ft for real season means); with the read fixed that may now show. Not measured here.
+2. **The read still degrades in mid-flight on high flies.** On 23080/8 the left fielder's read
+   goes from 4.6 m off at his first look to 12.9 m off at the top (2.4 s before it lands) and
+   comes back only as the closing takes hold; he drifts 9 m deep and gets back just in time.
+   The cause is in the model, not in the draw: the plate cue fades with the unseen spin
+   (`PLATE_SPIN_M`·s^1.5) while the direct read's depth error is that of a ball 40 m away. A
+   real fielder keeps all he has seen; a filter over the observed track would (Q2).
+3. **High flies are not harder than low ones on routine plays** (.973 against .950 at 25–35°),
+   which is the reverse of the owner's "a high ball is harder to judge". Early in the flight the
+   high fly's read is the looser one (test), but routine high flies also give the fielder
+   longer, and the 25–35° flies include balls with less hang time. Not pursued.
+4. **Runs 3.32 [3.42] against a real 4.39.** They sat near real because errors offset each
+   other; this removes one. Grounders are still too often hits (.293 against .24).
+5. The read's rating (`READ_RHO` 1.06) is fitted with every fielder at one grade; with a
+   population of ratings it should be refit.
+
+## 5. Questions for the owner
+
+**Q1. Fly balls now fall .10 of the time against .13 in MLB. What happens now:** the
+outfielder's read is fixed by your target (a routine fly caught 90–99% by ability; grade 50
+.967) and runs fell to 3.32 [3.42]. **Problem:** the last two points of fly-ball hits are not the
+read (a looser read, 2.5 s, still gives .109). **Options:** (a) leave it and diagnose the
+outfielders' speed and first step against Statcast's feet covered in 3 s next (the research
+note's P7, which it rated unlikely before the read was fixed); (b) loosen the read until flies
+fall .13 (grade 50's routine rate would drop below .95); (c) tune runs back elsewhere.
+**Recommendation: (a).** The owner's band for the read is met; (b) would put error back into
+the one mechanism just measured against it; (c) is against the calibration rules (no
+compensating knobs).
+
+**Q2. A fielder's read still gets worse in mid-flight on high flies (§4.2). What happens now:**
+the closing read pulls it back late, so the catch is made, but the man drifts the wrong way at
+the top of the flight. **Options:** (a) a filter over the whole observed track (a Kalman
+filter on the ball's state, with the unseen spin as a slowly learned acceleration), replacing
+the plate cue and the frozen-draw read: the principled fix, a few days with tests and the
+isolation harness; (b) leave it, since the catch rate is in band. **Recommendation: (a), as its
+own job**, after Q1's diagnosis, since what the owner sees (drift) is the read, not the rate.

@@ -144,6 +144,12 @@ The "5.48" at the top of the last block is a coincidence of two samples: the div
 
 Hit rates are per ball in play of that type. "Seed 5" and "seed 2" mean `sim-cli games --seed` with 1,024 games unless a row says otherwise.
 
+### 2026-11-15 (300 games, seeds 0–299 and 1000–1299)
+
+| Task | Commit | What changed | Numbers (before → after) | Cause | Open |
+|---|---|---|---|---|---|
+| **Outfield read** (owner, 2026-11-15: outfielders miss routine flies; **branch only, `work/outfield-read`**, §1 not updated) | `a94a7a2` (diagnosis `50ed674`, spec `4579f9a`); [note](calibration/2026-11-15-outfield-read.md); agent-models §5.1, §5.2, §10 | The fielders' typical-spin belief refit for swing v2 (it was 60% too much backspin, so every fly was read too deep), with the launch angle from the back-flight and the spin decayed; the read's error closes as the ball comes down (× T/3.0 s, T its fall time now); chasers replan faster late; `ReadSkill` per fielder (ρ 1.06; all grade 50) | Main `dc1ce82` (≡ `50ed674`) → `a94a7a2`: **runs 4.42 → 3.32 [4.59 → 3.42]**; reached on BIP 39.1 → 32.4% [39.1 → 33.0%]; GB .322 → .293 [.319 → .304]; LD .762 → .653 [.774 → .659]; **FB .219 → .099 [.228 → .102]**; PU .030 → .011 [.033 → .011]; K%, BB%, HR/PA unchanged within the sets' spread; PA/team-game 39.0 → 37.1 [39.2 → 37.0]. Routine flies (`fly_misses 0 300`) caught .824 → .967 | Flies that were hits are caught; grounders and liners lose the same spin-belief bias on their topspin side, and a liner's whole flight is inside the closing | FB hits now under the real .13 and runs 3.32 against 4.39: the note's Q1 recommends diagnosing the outfielders' speed next, not loosening the read (at 2.5 s FB .109, runs 3.42). The read still degrades mid-flight on high flies (Q2) |
+
 ### 2026-11-14 (300 games, seeds 0–299 and 1000–1299)
 
 | Task | Commit | What changed | Numbers (before → after) | Cause | Open |
