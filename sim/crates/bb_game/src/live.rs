@@ -1483,35 +1483,73 @@ fn jump_at_contact(inp: &LiveInput, i: usize, home: Vec3) -> Vec3 {
 /// included. Checked against the stepped movement in `reach_estimate_tracks_the_movement_step`.
 ///
 /// Within `STEP_REACH_M` of the goal, moving, he is stepped with the movement step itself
-/// ([`step_toward`], as a late chaser) until he is heading for it (within 25°) or there, then
-/// the closed form from that state (agent-models §5.2; Opus wall-braking review P3-1: the
+/// ([`step_toward`], as a late chaser) until he is within reach, for at most `STEP_REACH_CAP_S`;
+/// the closed form only from there (agent-models §5.2; Opus wall-braking review P3-1: the
 /// closed form turns in the goal's frame and the step brakes along the velocity, so a man
-/// close to the ball and moving away from it was planned up to 0.42 s early).
-fn run_gap(fd: &Fielder, goal: Vec3, t: f64, reach: f64) -> f64 {
-    let d = m::hypot(goal.x - fd.pos.x, goal.y - fd.pos.y);
-    if d < STEP_REACH_M && t > 0.0 && fd.vel.norm() > 1e-6 {
-        let (mut pos, mut vel, mut tt) = (fd.pos, fd.vel, 0.0);
-        let cos_ok = m::cos(25f64.to_radians());
-        for _ in 0..150 {
-            let to = Vec3::new(goal.x - pos.x, goal.y - pos.y, 0.0);
-            let dn = to.norm();
-            let sp = vel.norm();
-            if dn <= reach || sp < 0.5 || vel.dot(to) >= cos_ok * sp * dn || tt >= t - 1e-12 {
-                break;
-            }
-            (pos, vel) = step_toward(pos, vel, goal, &fd.a, false, 0.0);
-            tt += DT;
-        }
+/// close to the ball and moving away from it was planned up to 0.42 s early; Codex
+/// tracking-read review P2-3: switching to the closed form once he was heading for it, close
+/// to it, let its sideways drift turn him round again).
+fn run_gap(field: &Field, fd: &Fielder, goal: Vec3, t: f64, reach: f64) -> f64 {
+    if stepped_reach(fd, goal) && t > 0.0 {
+        let (tt, pos, vel, reached) = step_short(field, fd, goal, reach, t);
         let left = m::hypot(goal.x - pos.x, goal.y - pos.y);
-        if tt >= t - 1e-12 || left <= reach {
-            // Stepped to his time, or within reach on the way: how far short he is then.
-            if tt >= t - 1e-12 {
-                return left - reach;
-            }
+        // Within reach by `t` (he has got there), or stepped to his time: how far short then.
+        if reached || tt >= t - 1e-12 {
+            return left - reach;
         }
         return closed_gap(pos, vel, &fd.a, goal, t - tt, reach);
     }
     closed_gap(fd.pos, fd.vel, &fd.a, goal, t, reach)
+}
+
+/// The walls in a fielder's movement step (agent-models §5.3): he sees the wall and never comes
+/// at it faster than he can stop before it at the braking limit (Gemini play-area review
+/// P2-3: chasers ran into it at full speed); nobody runs through a wall (physics-spec §9.5):
+/// he stops at it, losing the speed he had into it.
+fn wall_rule(field: &Field, pos: Vec3, vel: Vec3) -> (Vec3, Vec3) {
+    let (mut pos, mut vel) = (pos, vel);
+    let w = field.body_clearance(pos.x, pos.y, BODY_R);
+    let into = -vel.dot(w.inward);
+    let allowed = wall_speed_cap(w.dist);
+    if into > allowed {
+        vel = vel + w.inward * (into - allowed);
+    }
+    let w = field.body_clearance(pos.x, pos.y, BODY_R);
+    if w.dist < 0.0 {
+        pos = field.keep_inside(pos, BODY_R);
+        let vn = vel.dot(w.inward);
+        if vn < 0.0 {
+            vel = vel - w.inward * vn;
+        }
+    }
+    (pos, vel)
+}
+
+/// The most a short reach estimate steps the movement, s [E: a 5 m run from any motion is
+/// within reach well inside it].
+const STEP_REACH_CAP_S: f64 = 2.5;
+
+/// A fielder stepped toward `goal` as a late chaser, walls and all ([`wall_rule`]), until within `reach`, for at most `t` and
+/// `STEP_REACH_CAP_S`: the time stepped, where he is then, how he is moving, and whether he
+/// got within reach.
+fn step_short(field: &Field, fd: &Fielder, goal: Vec3, reach: f64, t: f64) -> (f64, Vec3, Vec3, bool) {
+    let (mut pos, mut vel, mut tt) = (fd.pos, fd.vel, 0.0);
+    while tt < t.min(STEP_REACH_CAP_S) - 1e-12 {
+        if m::hypot(goal.x - pos.x, goal.y - pos.y) <= reach {
+            return (tt, pos, vel, true);
+        }
+        (pos, vel) = step_toward(pos, vel, goal, &fd.a, false, 0.0);
+        (pos, vel) = wall_rule(field, pos, vel);
+        tt += DT;
+    }
+    let reached = m::hypot(goal.x - pos.x, goal.y - pos.y) <= reach;
+    (tt, pos, vel, reached)
+}
+
+/// Whether [`run_gap`] steps the movement for this run (and [`wall_delay`] adds nothing: the
+/// walls are in the step): within `STEP_REACH_M`, moving.
+fn stepped_reach(fd: &Fielder, goal: Vec3) -> bool {
+    m::hypot(goal.x - fd.pos.x, goal.y - fd.pos.y) < STEP_REACH_M && fd.vel.norm() > 1e-6
 }
 
 /// [`run_gap`]'s closed form, from a body at `pos` moving `vel` with abilities `a`.
@@ -1561,7 +1599,7 @@ fn wall_speed_cap(dist: f64) -> f64 {
 fn wall_delay(field: &Field, fd: &Fielder, goal: Vec3, reach: f64) -> f64 {
     let to = Vec3::new(goal.x - fd.pos.x, goal.y - fd.pos.y, 0.0);
     let d = to.norm();
-    if d <= reach + 1e-9 {
+    if d <= reach + 1e-9 || stepped_reach(fd, goal) {
         return 0.0;
     }
     let dir = to * (1.0 / d);
@@ -1592,18 +1630,34 @@ fn catch_ceiling(field: &Field, p: Vec3) -> f64 {
 
 /// Time for a fielder to come within `reach` of `goal` from his current motion: the first
 /// zero of [`run_gap`].
-fn run_time_to(fd: &Fielder, goal: Vec3, reach: f64) -> f64 {
-    if run_gap(fd, goal, 0.0, reach) <= 0.0 {
+///
+/// The first crossing: the gap is not monotone in time for a man turning round close to his
+/// goal (he can be within reach, run on, and come back), so the first three seconds are
+/// scanned at `RUN_SCAN_S` before the bracket doubles (Codex tracking-read review P2-3).
+fn run_time_to(field: &Field, fd: &Fielder, goal: Vec3, reach: f64) -> f64 {
+    const RUN_SCAN_S: f64 = 0.05;
+    if run_gap(field, fd, goal, 0.0, reach) <= 0.0 {
         return 0.0;
     }
-    let (mut lo, mut hi) = (0.0, 1.0);
-    while run_gap(fd, goal, hi, reach) > 0.0 && hi < 120.0 {
+    // A short run from motion: the first tick he is within reach, stepped.
+    if stepped_reach(fd, goal) {
+        let (tt, _, _, reached) = step_short(field, fd, goal, reach, STEP_REACH_CAP_S);
+        if reached {
+            return tt;
+        }
+    }
+    let (mut lo, mut hi) = (0.0, RUN_SCAN_S);
+    while run_gap(field, fd, goal, hi, reach) > 0.0 && hi < 3.0 {
+        lo = hi;
+        hi += RUN_SCAN_S;
+    }
+    while run_gap(field, fd, goal, hi, reach) > 0.0 && hi < 120.0 {
         lo = hi;
         hi *= 2.0;
     }
     for _ in 0..40 {
         let mid = 0.5 * (lo + hi);
-        if run_gap(fd, goal, mid, reach) > 0.0 { lo = mid } else { hi = mid }
+        if run_gap(field, fd, goal, mid, reach) > 0.0 { lo = mid } else { hi = mid }
     }
     hi
 }
@@ -1904,6 +1958,10 @@ impl<'a> Sim<'a> {
             let (bias, err) = (bias * TRACK_BIAS_FRAC, fd.err);
             let base_p = fd.a.read_sigma0 * d / READ_REF_DIST;
             let sp = base_p * scale;
+            // The persistent part is at a single look's σ, the first look's shrink included
+            // (Codex tracking-read review P2-2: unshrunk, it left a grounder's first read up to
+            // eight times worse than the old first read).
+            let bias = bias * if k == 0 { scale } else { 1.0 };
             let zp = bp + u * (DEPTH_STRETCH * (sp * e[0] + bias * base_p * err[0])) + a * (sp * e[1] + bias * base_p * err[1]) + b * (sp * e[2]);
             let base_v = fd.a.read_vel_frac * bv.norm();
             let sv = base_v * scale;
@@ -1949,14 +2007,15 @@ impl<'a> Sim<'a> {
     }
 
     /// Fielder `i`'s doubt about where the ball comes down (agent-models §5.1): the σ along his
-    /// line of sight from `from`, of his estimate's covariance carried to the landing point by
-    /// his own physics (linearised: each of the six state components moved and flown), plus
-    /// what his persistent error can do (a one-σ draw in each of its four directions at a single
-    /// look's σ): a belief about himself, not about the ball.
+    /// line of sight from `from`, of his estimate's full covariance (position, velocity and the
+    /// learned acceleration, with every cross term) carried to the landing point by his own
+    /// physics (linearised: each of the nine state components moved and flown; Codex
+    /// tracking-read review P2-1), plus what his persistent error can do (a one-σ draw in each
+    /// of its four directions at a single look's σ): a belief about himself, not the ball.
     fn track_doubt(&self, i: usize, tr: &Track, from: Vec3) -> f64 {
         let fd = &self.f[i];
-        let land = |r: Vec3, v: Vec3| {
-            let p = self.fly_estimate(r, v, tr.x[2]);
+        let land_a = |r: Vec3, v: Vec3, acc: Vec3| {
+            let p = self.fly_estimate(r, v, acc);
             match p.first_bounce() {
                 Some((_, x, y)) => Vec3::new(x, y, 0.0),
                 None => {
@@ -1965,21 +2024,26 @@ impl<'a> Sim<'a> {
                 }
             }
         };
+        let land = |r: Vec3, v: Vec3| land_a(r, v, tr.x[2]);
         let (r, v) = (tr.r(), tr.v());
         let base = land(r, v);
         let los = Vec3::new(r.x - from.x, r.y - from.y, 0.0).normalized();
         let unit = [Vec3::new(1.0, 0.0, 0.0), Vec3::new(0.0, 1.0, 0.0), Vec3::new(0.0, 0.0, 1.0)];
         let h = 0.5;
-        let mut jr = [0.0; 3];
-        let mut jv = [0.0; 3];
+        let mut j = [[0.0; 3]; 3];
         for k in 0..3 {
-            jr[k] = (land(r + unit[k] * h, v) - base).dot(los) / h;
-            jv[k] = (land(r, v + unit[k] * h) - base).dot(los) / h;
+            j[0][k] = (land(r + unit[k] * h, v) - base).dot(los) / h;
+            j[1][k] = (land(r, v + unit[k] * h) - base).dot(los) / h;
+            j[2][k] = (land_a(r, v, tr.x[2] + unit[k] * h) - base).dot(los) / h;
         }
-        let (jr, jv) = (Vec3::new(jr[0], jr[1], jr[2]), Vec3::new(jv[0], jv[1], jv[2]));
-        // The learned acceleration's own share is left out: over the time left it moves the
-        // landing point as a velocity error does, and its covariance with r and v carries it.
-        let mut var = jr.dot(tr.p[0][0] * jr) + 2.0 * jr.dot(tr.p[0][1] * jv) + jv.dot(tr.p[1][1] * jv);
+        let jb: [Vec3; 3] = core::array::from_fn(|b| Vec3::new(j[b][0], j[b][1], j[b][2]));
+        let mut var = 0.0;
+        for a_ in 0..3 {
+            for b_ in 0..3 {
+                var += jb[a_].dot(tr.p[a_][b_] * jb[b_]);
+            }
+        }
+        let (jr, jv) = (jb[0], jb[1]);
         let (d, u, a, _) = sight_frame(from + Vec3::new(0.0, 0.0, EYE_H), r);
         let base_p = TRACK_BIAS_FRAC * fd.a.read_sigma0 * d / READ_REF_DIST;
         let base_v = TRACK_BIAS_FRAC * fd.a.read_vel_frac * v.norm();
@@ -2062,7 +2126,7 @@ impl<'a> Sim<'a> {
         let (fd, start) = self.planning_state(i);
         let t_end = pred.t_end();
         let (rest, _) = pred.at(t_end);
-        (t_end.max(start + run_time_to(&fd, rest, 0.0)), Vec3::new(rest.x, rest.y, 0.0))
+        (t_end.max(start + run_time_to(self.inp.field, &fd, rest, 0.0)), Vec3::new(rest.x, rest.y, 0.0))
     }
 
     /// Where a fielder's plans start from (agent-models §5.10, Codex anticipation review #2):
@@ -2105,7 +2169,7 @@ impl<'a> Sim<'a> {
         // Shortfall at time `t` for a ball at `b`: how far short of the ball's line the
         // fielder still is (≤ 0: he can field it standing, with the planning reach).
         // The wall he must slow for is part of the plan (Gemini play-area recheck P2-1).
-        let gap = |t: f64, b: Vec3| run_gap(fd, b, (t - start - wall_delay(self.inp.field, fd, b, REACH * 0.7)).max(0.0), REACH * 0.7);
+        let gap = |t: f64, b: Vec3| run_gap(self.inp.field, fd, b, (t - start - wall_delay(self.inp.field, fd, b, REACH * 0.7)).max(0.0), REACH * 0.7);
         // The dive's extra reach over the standing plan.
         let dive_extra = REACH + 0.6 * DIVE - REACH * 0.7;
         const STEP: f64 = 0.12;
@@ -2535,7 +2599,7 @@ impl<'a> Sim<'a> {
         standing.or(dive).unwrap_or_else(|| {
             let t_end = pred.t_end();
             let (rest, _) = pred.at(t_end);
-            (t_end.max(start + run_time_to(fd, rest, 0.0)), Vec3::new(rest.x, rest.y, 0.0))
+            (t_end.max(start + run_time_to(self.inp.field, fd, rest, 0.0)), Vec3::new(rest.x, rest.y, 0.0))
         })
     }
 
@@ -2543,7 +2607,7 @@ impl<'a> Sim<'a> {
     /// reaction time, then his run from his visible position and velocity at his known speed.
     fn eta(&self, j: usize, pt: Vec3) -> f64 {
         let fd = &self.f[j];
-        (self.inp.t_contact + fd.a.reaction - self.t).max(0.0) + run_time_to(fd, pt, REACH * 0.7) + wall_delay(self.inp.field, fd, pt, REACH * 0.7)
+        (self.inp.t_contact + fd.a.reaction - self.t).max(0.0) + run_time_to(self.inp.field, fd, pt, REACH * 0.7) + wall_delay(self.inp.field, fd, pt, REACH * 0.7)
     }
 
     /// What fielder `j`'s teammates know of him now (agent-models §5.7): whether he is going
@@ -2754,7 +2818,7 @@ impl<'a> Sim<'a> {
         let in_air = ti.is_finite() && pred.first_bounce().map(|b| ti < b.0).unwrap_or(true);
         if in_air {
             let (fd, start) = self.planning_state(i);
-            let spare = ti - (start + run_time_to(&fd, pt, REACH * 0.7) + wall_delay(self.inp.field, &fd, pt, REACH * 0.7));
+            let spare = ti - (start + run_time_to(self.inp.field, &fd, pt, REACH * 0.7) + wall_delay(self.inp.field, &fd, pt, REACH * 0.7));
             if spare >= CALL_SLACK_S {
                 // Where he believes the ball is now, and how long he has watched it.
                 let view = (self.t - self.inp.t_contact - fd.a.reaction).max(0.0);
@@ -3316,24 +3380,7 @@ impl<'a> Sim<'a> {
                 fd.dove = false; // recovered
             }
             (fd.pos, fd.vel) = fielder_step(fd, t, t_contact);
-            // He sees the wall: never coming at it faster than he can stop before it at the
-            // braking limit (Gemini play-area review P2-3: chasers ran into it at full speed).
-            let w = field.body_clearance(fd.pos.x, fd.pos.y, BODY_R);
-            let into = -fd.vel.dot(w.inward);
-            let allowed = wall_speed_cap(w.dist);
-            if into > allowed {
-                fd.vel = fd.vel + w.inward * (into - allowed);
-            }
-            // Nobody runs through a wall (physics-spec §9.5): he stops at it, losing the speed
-            // he had into it.
-            let w = field.body_clearance(fd.pos.x, fd.pos.y, BODY_R);
-            if w.dist < 0.0 {
-                fd.pos = field.keep_inside(fd.pos, BODY_R);
-                let vn = fd.vel.dot(w.inward);
-                if vn < 0.0 {
-                    fd.vel = fd.vel - w.inward * vn;
-                }
-            }
+            (fd.pos, fd.vel) = wall_rule(field, fd.pos, fd.vel);
         }
     }
 
@@ -6210,7 +6257,7 @@ mod tests {
             sim.f[CF].role = Role::Chase;
             sim.f[CF].t_int = 0.0;
             let goal = sim.f[CF].target;
-            let plan = run_time_to(&sim.f[CF], goal, REACH * 0.7) + wall_delay(field, &sim.f[CF], goal, REACH * 0.7);
+            let plan = run_time_to(field, &sim.f[CF], goal, REACH * 0.7) + wall_delay(field, &sim.f[CF], goal, REACH * 0.7);
             let mut truth = f64::NAN;
             for k in 1..4000 {
                 sim.move_fielders();
@@ -6311,7 +6358,7 @@ mod tests {
             sim.f[CF].vel = Vec3::new(0.0, v * x_dir, 0.0);
             let goal = Vec3::new(0.0, y_stand + REACH * 0.7 * x_dir, 0.0);
             let (fd, start) = sim.planning_state(CF);
-            let open = start + run_time_to(&fd, goal, REACH * 0.7);
+            let open = start + run_time_to(inp.field, &fd, goal, REACH * 0.7);
             sim.call_value(CF, &path, open + 0.45, goal, 0.0).0
         };
         // Toward the wall: no call. The same run toward home plate's side, in the open: a call.
@@ -6345,7 +6392,7 @@ mod tests {
                     sim.f[SS].target = o + Vec3::new(d, 0.0, 0.0);
                     sim.f[SS].role = Role::Chase;
                     sim.f[SS].t_int = 0.0;
-                    let est = run_time_to(&sim.f[SS], sim.f[SS].target, REACH * 0.7);
+                    let est = run_time_to(inp.field, &sim.f[SS], sim.f[SS].target, REACH * 0.7);
                     let mut truth = f64::NAN;
                     for k in 1..2000 {
                         sim.move_fielders();
@@ -7774,6 +7821,186 @@ mod tests {
         }
         assert!((lands[0] - lands[1]).norm() > 3.0, "the spin matters: {lands:?}");
         assert_eq!(plans[0], plans[1]);
+    }
+
+    // Agent-models §5.1, the tracking read's doubt (Codex tracking-read review P2-1): a belief
+    // whose only uncertainty is the learned acceleration, one m/s² per axis, has the doubt that
+    // acceleration's effect on the landing point gives: per axis, a ±1 m/s² change flown with
+    // his own physics moves the landing point along his line of sight by what the doubt adds.
+    #[test]
+    fn a_tracked_doubt_carries_the_learned_acceleration() {
+        let fx = fixture(&[]);
+        let r = 45f64.to_radians();
+        let inp = hit(&fx, Vec3::new(0.0, 43.0 * m::cos(r), 43.0 * m::sin(r)));
+        let mut st = fx.st.clone();
+        let mut sim = new_sim(&inp, &mut st);
+        sim.t = inp.t_contact + 2.0;
+        let (b, bv) = sim.ball_at(sim.t);
+        let from = Vec3::new(0.0, 85.0, 0.0);
+        let bare = Track { ball: sim.ball_gen, t: sim.t, x: [b, bv, Vec3::ZERO], p: [[Mat3::ZERO; 3]; 3], looks: 1, next_look: sim.t + LOOK_S };
+        let d0 = sim.track_doubt(CF, &bare, from);
+        let los = Vec3::new(b.x - from.x, b.y - from.y, 0.0).normalized();
+        let land = |acc: Vec3| {
+            let p = sim.fly_estimate(b, bv, acc);
+            let (_, x, y) = p.first_bounce().unwrap();
+            Vec3::new(x, y, 0.0).dot(los)
+        };
+        for k in 0..3 {
+            let mut e = [0.0; 3];
+            e[k] = 1.0;
+            let unit = Vec3::new(e[0], e[1], e[2]);
+            let shift = (land(unit) - land(unit * -1.0)) / 2.0;
+            let mut tr = bare;
+            tr.p[2][2] = Mat3::outer(unit, unit);
+            let d = sim.track_doubt(CF, &tr, from);
+            let added = m::sqrt((d * d - d0 * d0).max(0.0));
+            assert!((added - shift.abs()).abs() < 0.15 * shift.abs().max(0.2), "axis {k}: the doubt adds {added:.3} m, a ±1 m/s² change moves the landing {shift:.3} m");
+        }
+    }
+
+    // Agent-models §5.1, the tracking read's doubt against the spread of his reads (Codex
+    // tracking-read review P2-1: the old doubt test exercises only the snapshot read). Batted
+    // balls from games 0–5 (their real spins, which his model does not know) with at least
+    // 3.5 s in the air, each tracked by an average outfielder standing 12 m short of where it
+    // comes down: the RMS of his doubt against the RMS of his read's miss along his line of
+    // sight, 2 s and 1 s before it lands, within a factor of 1.5 either way.
+    #[test]
+    fn the_tracking_doubt_matches_the_spread_of_tracked_reads() {
+        let fx = fixture(&[]);
+        let mut balls = Vec::new();
+        for seed in 0..6 {
+            let mut g = crate::game::Game::new(seed, false);
+            while let Some(step) = g.step_pitch() {
+                let (Some((_, la, _)), Some(path)) = (step.record.batted, &step.batted) else { continue };
+                let Some(bb_physics::ground::Segment::Flight { tr, .. }) = path.segments.first() else { continue };
+                if (25.0..60.0).contains(&la.to_degrees()) {
+                    balls.push(tr.first().s);
+                }
+            }
+        }
+        let mut sums = [[0.0; 2]; 2];
+        let mut n = 0.0;
+        for (k, ball) in balls.iter().enumerate() {
+            let mut inp = input(&fx, vec![RunnerIn { id: fx.st.batter, base: 0, speed: 8.2 }]);
+            inp.ball = BallState { r: Vec3::new(0.0, 0.5, 1.0), ..*ball };
+            inp.play = k as u32;
+            let mut st = fx.st.clone();
+            let mut sim = new_sim(&inp, &mut st);
+            let Ball::Free { path, .. } = &sim.ball else { unreachable!() };
+            let Some((t_land, lx, ly)) = path.first_bounce() else { continue };
+            if t_land - inp.t_contact < 3.5 || path.walls.first().is_some_and(|w| w.0 < t_land) {
+                continue;
+            }
+            let land = Vec3::new(lx, ly, 0.0);
+            let from = land - land.normalized() * 12.0;
+            sim.f[CF].pos = from;
+            let when = [t_land - 2.0, t_land - 1.0];
+            let mut next = 0;
+            sim.t = inp.t_contact;
+            while next < 2 && sim.t < t_land {
+                sim.take_looks();
+                if sim.t + DT > when[next] {
+                    let tr = sim.track_now(CF).unwrap();
+                    let los = Vec3::new(tr.r().x - from.x, tr.r().y - from.y, 0.0).normalized();
+                    let p = sim.predict(CF);
+                    let q = p.first_bounce().map_or_else(|| p.at(p.t_end()).0, |(_, x, y)| Vec3::new(x, y, 0.0));
+                    let miss = (Vec3::new(q.x, q.y, 0.0) - land).dot(los);
+                    let doubt = sim.track_doubt(CF, &tr, from);
+                    sums[next][0] += miss * miss;
+                    sums[next][1] += doubt * doubt;
+                    next += 1;
+                }
+                sim.t += DT;
+            }
+            n += 1.0;
+        }
+        for (k, label) in ["2 s", "1 s"].iter().enumerate() {
+            let (miss, doubt) = (m::sqrt(sums[k][0] / n), m::sqrt(sums[k][1] / n));
+            println!("{label} before landing, {n} balls: RMS miss {miss:.2} m, RMS doubt {doubt:.2} m");
+            assert!(n >= 40.0 && doubt > miss / 1.5 && doubt < miss * 1.5, "{label}: RMS miss {miss:.2} m, RMS doubt {doubt:.2} m ({n} balls)");
+        }
+    }
+
+    // Agent-models §5.1, a grounder's first look (Codex tracking-read review P2-2): the first
+    // look is the snapshot read's first read, its shrink included, persistent part and all.
+    // The shortstop at his reaction gate, a grounder at 36 m/s (−1, 0 and +2 m/s up), his
+    // lateral draws one σ and fresh noise off: his tracked position is no worse than the
+    // snapshot read's, within 10% (its plate cue and contact prior are the same weighing).
+    #[test]
+    fn a_grounders_first_look_is_read_as_sharply_as_the_snapshot_read() {
+        const SS: usize = 5;
+        LOOK_NOISE.with(|c| c.set((0.0, 1.0)));
+        let fx = fixture(&[]);
+        for vz in [-1.0, 0.0, 2.0] {
+            let inp = hit(&fx, Vec3::new(5.0, 36.0, vz));
+            let mut st = fx.st.clone();
+            let mut sim = new_sim(&inp, &mut st);
+            sim.f[SS].err = [0.0, 1.0, 0.0, 1.0];
+            sim.t = inp.t_contact + sim.f[SS].a.reaction;
+            let (b, v) = sim.ball_at(sim.t);
+            assert!(sim.off_bat().is_some(), "vz {vz}: still in the air at his first look");
+            let fd = &sim.f[SS];
+            let old = read_prediction_k(inp.env, inp.field, (b, v), sim.t, fd.pos, fd.a.read_sigma0, fd.a.read_vel_frac, fd.a.tau_read, 0.0, fd.err, sim.off_bat());
+            let old_err = (old.at(sim.t).0 - b).norm();
+            sim.take_looks();
+            let new_err = (sim.track_now(SS).unwrap().r() - b).norm();
+            println!("vz {vz}: snapshot {old_err:.4} m, tracked {new_err:.4} m");
+            assert!(new_err <= 1.1 * old_err + 1e-3, "vz {vz}: snapshot {old_err:.4} m, tracked {new_err:.4} m");
+        }
+        LOOK_NOISE.with(|c| c.set((1.0, 1.0)));
+    }
+
+    // Codex tracking-read review P2-3: below 2 m the reach estimate (`run_time_to`, with
+    // `wall_delay`) against the movement itself, a late chaser stepped by `move_fielders` until
+    // within the planning reach: every mix of oblique motion up to 8 m/s on open ground, and
+    // running into the centre-field wall. Within ±0.35 s, as the main grid.
+    #[test]
+    fn reach_estimate_tracks_the_movement_step_below_two_metres_and_at_a_wall() {
+        let fx = fixture(&[]);
+        let inp = input(&fx, vec![RunnerIn { id: fx.st.batter, base: 0, speed: 8.2 }]);
+        const SS: usize = 5;
+        let fence = fx.field.fence_at(0.0);
+        let mut worst = (0.0f64, String::new());
+        for wall in [false, true] {
+            for &d in &[0.75, 1.0, 1.5, 1.9] {
+                for &vx in &[-8.0, -4.0, 0.0, 4.0, 8.0] {
+                    for &vy in &[-8.0, -4.0, 0.0, 4.0, 8.0] {
+                        if vx * vx + vy * vy > 70.0 {
+                            continue;
+                        }
+                        let mut st = fx.st.clone();
+                        let mut sim = new_sim(&inp, &mut st);
+                        sim.t = 2.0;
+                        // On open ground, or with the goal on the centre-field wall's line, his
+                        // body clear of it, coming at it from d short.
+                        let goal = if wall { Vec3::new(0.0, fence - BODY_R, 0.0) } else { Vec3::new(-20.0, 60.0, 0.0) };
+                        let o = if wall { goal - Vec3::new(0.0, d, 0.0) } else { goal - Vec3::new(d, 0.0, 0.0) };
+                        sim.f[SS].pos = o;
+                        sim.f[SS].vel = Vec3::new(vx, vy, 0.0);
+                        sim.f[SS].target = goal;
+                        sim.f[SS].role = Role::Chase;
+                        sim.f[SS].t_int = 0.0;
+                        let est = run_time_to(inp.field, &sim.f[SS], goal, REACH * 0.7) + wall_delay(inp.field, &sim.f[SS], goal, REACH * 0.7);
+                        let mut truth = f64::NAN;
+                        for k in 1..2000 {
+                            sim.move_fielders();
+                            sim.t += DT;
+                            if (goal - sim.f[SS].pos).norm() <= REACH * 0.7 {
+                                truth = k as f64 * DT;
+                                break;
+                            }
+                        }
+                        assert!(truth.is_finite(), "never arrived: wall {wall} d {d} v ({vx}, {vy})");
+                        let e = est - truth;
+                        if e.abs() > worst.0 {
+                            worst = (e.abs(), format!("wall {wall} d {d} v ({vx}, {vy}): estimate {est:.3} s, movement {truth:.3} s"));
+                        }
+                    }
+                }
+            }
+        }
+        println!("worst: {}", worst.1);
+        assert!(worst.0 < 0.35, "worst: {}", worst.1);
     }
 
     // A fielder's belief about how far off his landing point is (`landing_depth_sigma`, used
