@@ -3,6 +3,7 @@
 #include "Algo/Reverse.h"
 #include "Async/ParallelFor.h"
 #include "BbLook.h"
+#include "BbText.h"
 #include "Components/DirectionalLightComponent.h"
 #include "Components/InstancedStaticMeshComponent.h"
 #include "Components/PostProcessComponent.h"
@@ -19,6 +20,7 @@
 #include "Kismet/GameplayStatics.h"
 #include "Materials/Material.h"
 #include "Materials/MaterialExpressionConstant.h"
+#include "Materials/MaterialExpressionMultiply.h"
 #include "Materials/MaterialExpressionScalarParameter.h"
 #include "Materials/MaterialExpressionVectorParameter.h"
 #include "Materials/MaterialExpressionTextureSampleParameter2D.h"
@@ -29,6 +31,16 @@
 DEFINE_LOG_CATEGORY_STATIC(LogBbPark, Log, All);
 
 using BbFrameConv::ToUE;
+
+/** A flat upright face showing a picture, or a share of one: centred at Mid (sim frame), W
+ *  wide along Right and H high, seen from the side Face points to; U0 to U1 of the picture's
+ *  width runs across it. */
+struct FBbFace
+{
+	FVector Mid;
+	FVector2D Right, Face;
+	double W, H, U0, U1;
+};
 
 namespace
 {
@@ -86,6 +98,10 @@ namespace
 	const double PoleHigh = 12.0, PoleScreen = 0.8;
 	// The distance figures on the fence.
 	const double MarkW = 2.4, MarkH = 1.3, MarkZ = 1.2;
+	// The sponsors' signs on the fence: each at least this long, following the fence round,
+	// a plain piece of padding between one and the next, this much padding above and below.
+	const double SignLong = 7.5, SignEdge = 0.3;
+	const int32 SignPxW = 1024, SignPxH = 256;
 	// The near picture of the ground: the infield, where the chalk has to be sharp.
 	const double NearX0 = -28.0, NearY0 = -8.0, NearSize = 56.0;
 
@@ -528,6 +544,8 @@ void ABbPark::Build(const BbPark& Desc)
 	Cube = LoadObject<UStaticMesh>(nullptr, TEXT("/Engine/BasicShapes/Cube.Cube"));
 	Cylinder = LoadObject<UStaticMesh>(nullptr, TEXT("/Engine/BasicShapes/Cylinder.Cylinder"));
 	Plane = LoadObject<UStaticMesh>(nullptr, TEXT("/Engine/BasicShapes/Plane.Plane"));
+	Sphere = LoadObject<UStaticMesh>(nullptr, TEXT("/Engine/BasicShapes/Sphere.Sphere"));
+	Cone = LoadObject<UStaticMesh>(nullptr, TEXT("/Engine/BasicShapes/Cone.Cone"));
 	FlatMaterial = LoadObject<UMaterialInterface>(nullptr, TEXT("/Engine/BasicShapes/BasicShapeMaterial.BasicShapeMaterial"));
 #if WITH_EDITOR
 	{
@@ -589,6 +607,28 @@ void ABbPark::Build(const BbPark& Desc)
 			M->PostEditChange();
 			NetMaterial = M;
 		}
+		{
+			// The scoreboard's face: unlit, a picture of lamps that give their own light.
+			UMaterial* M = NewObject<UMaterial>(GetTransientPackage(), NAME_None, RF_Transient);
+			M->SetShadingModel(MSM_Unlit);
+			UMaterialExpressionTextureSampleParameter2D* Tex = NewObject<UMaterialExpressionTextureSampleParameter2D>(M);
+			Tex->ParameterName = TEXT("Tex");
+			Tex->Texture = LoadObject<UTexture2D>(nullptr, TEXT("/Engine/EngineResources/WhiteSquareTexture.WhiteSquareTexture"));
+			Tex->SamplerType = SAMPLERTYPE_Color;
+			UMaterialExpressionScalarParameter* Glow = NewObject<UMaterialExpressionScalarParameter>(M);
+			Glow->ParameterName = TEXT("Glow");
+			Glow->DefaultValue = BbLook::BoardGlow;
+			UMaterialExpressionMultiply* Lit = NewObject<UMaterialExpressionMultiply>(M);
+			Lit->A.Connect(0, Tex);
+			Lit->B.Connect(0, Glow);
+			for (UMaterialExpression* E : { (UMaterialExpression*)Tex, (UMaterialExpression*)Glow, (UMaterialExpression*)Lit })
+			{
+				M->GetExpressionCollection().AddExpression(E);
+			}
+			M->GetEditorOnlyData()->EmissiveColor.Connect(0, Lit);
+			M->PostEditChange();
+			BoardMaterial = M;
+		}
 	}
 #endif
 	Ground = MakeUnique<FBbGround>(Desc);
@@ -598,6 +638,8 @@ void ABbPark::Build(const BbPark& Desc)
 	BuildDugouts();
 	BuildOutfield();
 	BuildStands();
+	BuildBoard();
+	BuildBackdrop();
 	FlushInst();
 	UE_LOG(LogBbPark, Display, TEXT("BB_PARK built in %.2f s: %u wall pieces, ground %.0f m square from (%.0f, %.0f)"),
 		FPlatformTime::Seconds() - Began, Desc.n_wall, Ground->Size, Ground->X0, Ground->Y0);
@@ -623,55 +665,67 @@ UTexture2D* ABbPark::PaintGround(double TexX0, double TexY0, double TexSize, int
 			Top[J * N + I] = Sum.ToFColor(true);
 		}
 	});
-	return MakeTexture(MoveTemp(Top), N);
+	return MakeTexture(MoveTemp(Top), N, N);
 }
 
-UTexture2D* ABbPark::MakeTexture(TArray<FColor>&& Top, int32 N)
+UTexture2D* ABbPark::MakeTexture(TArray<FColor>&& Top, int32 W, int32 H)
 {
-	UTexture2D* T = UTexture2D::CreateTransient(N, N, PF_B8G8R8A8);
+	UTexture2D* T = UTexture2D::CreateTransient(W, H, PF_B8G8R8A8);
 	T->SRGB = true;
 	T->NeverStream = true;
 	T->LODGroup = TEXTUREGROUP_World;
 	T->AddressX = TA_Clamp;
 	T->AddressY = TA_Clamp;
+	FillTexture(T, MoveTemp(Top), W, H);
+	Textures.Add(T);
+	return T;
+}
+
+void ABbPark::FillTexture(UTexture2D* T, TArray<FColor>&& Top, int32 W, int32 H)
+{
 	FTexturePlatformData* Data = T->GetPlatformData();
+	auto Put = [Data](int32 Level, const TArray<FColor>& Px, int32 Mw, int32 Mh)
 	{
-		void* P = Data->Mips[0].BulkData.Lock(LOCK_READ_WRITE);
-		FMemory::Memcpy(P, Top.GetData(), (SIZE_T)N * N * 4);
-		Data->Mips[0].BulkData.Unlock();
-	}
+		if (!Data->Mips.IsValidIndex(Level))
+		{
+			Data->Mips.Add(new FTexture2DMipMap(Mw, Mh, 1));
+		}
+		FByteBulkData& Bulk = Data->Mips[Level].BulkData;
+		Bulk.Lock(LOCK_READ_WRITE);
+		void* P = Bulk.Realloc((int64)Mw * Mh * 4);
+		FMemory::Memcpy(P, Px.GetData(), (SIZE_T)Mw * Mh * 4);
+		Bulk.Unlock();
+	};
+	Put(0, Top, W, H);
 	// The smaller copies a far or slanting view reads from, each the mean of four texels of
 	// the one before, again in linear light: without them the chalk and the mowing shimmer.
 	TArray<FColor> Cur = MoveTemp(Top);
-	for (int32 W = N / 2; W >= 1; W /= 2)
+	int32 Cw = W, Ch = H;
+	for (int32 Level = 1; Cw > 1 || Ch > 1; ++Level)
 	{
+		const int32 Nw = FMath::Max(1, Cw / 2), Nh = FMath::Max(1, Ch / 2);
 		TArray<FColor> Next;
-		Next.SetNumUninitialized(W * W);
-		ParallelFor(W, [&](int32 J)
+		Next.SetNumUninitialized(Nw * Nh);
+		ParallelFor(Nh, [&](int32 J)
 		{
-			for (int32 I = 0; I < W; ++I)
+			for (int32 I = 0; I < Nw; ++I)
 			{
 				FLinearColor Sum(0, 0, 0, 0);
 				for (int32 K = 0; K < 4; ++K)
 				{
-					Sum += FLinearColor(Cur[(2 * J + (K >> 1)) * 2 * W + 2 * I + (K & 1)]);
+					Sum += FLinearColor(Cur[FMath::Min(2 * J + (K >> 1), Ch - 1) * Cw + FMath::Min(2 * I + (K & 1), Cw - 1)]);
 				}
 				Sum *= 0.25f;
 				Sum.A = 1.f;
-				Next[J * W + I] = Sum.ToFColor(true);
+				Next[J * Nw + I] = Sum.ToFColor(true);
 			}
 		});
-		FTexture2DMipMap* Mip = new FTexture2DMipMap(W, W, 1);
-		Data->Mips.Add(Mip);
-		Mip->BulkData.Lock(LOCK_READ_WRITE);
-		void* P = Mip->BulkData.Realloc((int64)W * W * 4);
-		FMemory::Memcpy(P, Next.GetData(), (SIZE_T)W * W * 4);
-		Mip->BulkData.Unlock();
+		Put(Level, Next, Nw, Nh);
 		Cur = MoveTemp(Next);
+		Cw = Nw;
+		Ch = Nh;
 	}
 	T->UpdateResource();
-	Textures.Add(T);
-	return T;
 }
 
 void ABbPark::AddGround(int32 Section, double GX0, double GY0, double Cell, int32 Nx, int32 Ny, TFunctionRef<bool(const FVector2D&)> Skip, UTexture2D* Tex, double TexX0, double TexY0, double TexSize)
@@ -994,6 +1048,7 @@ void ABbPark::BuildOutfield()
 		return;
 	}
 	const double Bearings[5] = { -90.0, -22.5, 0.0, 22.5, 90.0 };
+	TArray<int32> Marked;
 	for (int32 K = 0; K < 5; ++K)
 	{
 		// The fence's piece nearest the bearing (the lines: the first and the last).
@@ -1026,7 +1081,85 @@ void ABbPark::BuildOutfield()
 		UTexture2D* Tex = PaintNumber(FMath::RoundToInt32(Metres / FT), MarkW, MarkH, BbLook::MarkerInk, BbLook::WallPad.Color);
 		// Seen from the field the fence runs left to right the way the loop does.
 		Sign(FVector(BestMid.X, BestMid.Y, FMath::Min(MarkZ, D.wall[Best].top_m * 0.5)) - FVector(Out.X, Out.Y, 0.0) * 0.01, Along, -Out, W, H, Tex, BbLook::WallPad.Rough);
+		Marked.Add(Best);
 	}
+	// The sponsors' signs: along the fence wherever it carries no figure, clear of the
+	// batter's eye, each over as many pieces as make its length and bending with them.
+	TArray<FBbFace> Faces;
+	double RunL = 0.0;
+	int32 Next = 0;
+	bool bGap = false;
+	for (int32 I = 0; I < N; ++I)
+	{
+		const bool bFree = D.wall[I].kind == 0 && G.Behind[I] != FBbGround::Eye && !Marked.Contains(I) && D.wall[I].top_m > 4.0 * SignEdge;
+		if (!bFree || bGap)
+		{
+			Faces.Reset();
+			RunL = 0.0;
+			bGap = false;
+			continue;
+		}
+		const FVector2D A(D.wall[I].from[0], D.wall[I].from[1]), B(D.wall[(I + 1) % N].from[0], D.wall[(I + 1) % N].from[1]);
+		const FVector2D Along = (B - A).GetSafeNormal(), Out(-Along.Y, Along.X), Mid = (A + B) * 0.5 - Out * 0.01;
+		const double L = (B - A).Size(), Top = D.wall[I].top_m;
+		if (Faces.Num() > 0 && FMath::Abs(Faces[0].H - (Top - 2.0 * SignEdge)) > 0.01)
+		{
+			Faces.Reset();
+			RunL = 0.0;
+		}
+		// Until the sign is whole, U0 and U1 are metres along it.
+		Faces.Add(FBbFace{ FVector(Mid.X, Mid.Y, Top * 0.5), Along, -Out, L, Top - 2.0 * SignEdge, RunL, RunL + L });
+		RunL += L;
+		if (RunL >= SignLong)
+		{
+			for (FBbFace& F : Faces)
+			{
+				F.U0 /= RunL;
+				F.U1 /= RunL;
+			}
+			const BbLook::FBbSponsor& S = BbLook::Sponsors[Next++ % UE_ARRAY_COUNT(BbLook::Sponsors)];
+			Picture(Faces, PaintSign(S, RunL, Faces[0].H), 0.7f);
+			Faces.Reset();
+			RunL = 0.0;
+			bGap = true;
+		}
+	}
+}
+
+UTexture2D* ABbPark::PaintSign(const BbLook::FBbSponsor& S, double W, double H)
+{
+	FBbCanvas C(SignPxW, SignPxH, S.Back);
+	// A pixel is not square on the wall: Ax pixels across are as long as one pixel up.
+	const double Ax = (H / SignPxH) / (W / SignPxW);
+	const FString Top(S.Top), Bottom(S.Bottom ? S.Bottom : TEXT(""));
+	const int32 Lines = Bottom.IsEmpty() ? 1 : 2, Longest = FMath::Max(Top.Len(), Bottom.Len());
+	const int32 PadY = 30, PadX = FMath::RoundToInt32(PadY * Ax);
+	// The largest dots with which the lines fit: seven dots to a line and two between lines.
+	int32 Sy = (SignPxH - 2 * PadY) / (Lines == 2 ? 16 : 7), Sx = 1;
+	for (; Sy > 1; --Sy)
+	{
+		Sx = FMath::Max(1, FMath::RoundToInt32(Sy * Ax));
+		if ((Longest * 6 - 1) * Sx <= SignPxW - 2 * PadX)
+		{
+			break;
+		}
+	}
+	// A line round it, inside the edge.
+	const int32 Ey = 10, Ty = 5, Ex = FMath::Max(1, FMath::RoundToInt32(Ey * Ax)), Tx = FMath::Max(1, FMath::RoundToInt32(Ty * Ax));
+	C.Box(Ex, Ey, SignPxW - Ex, Ey + Ty, S.Ink);
+	C.Box(Ex, SignPxH - Ey - Ty, SignPxW - Ex, SignPxH - Ey, S.Ink);
+	C.Box(Ex, Ey, Ex + Tx, SignPxH - Ey, S.Ink);
+	C.Box(SignPxW - Ex - Tx, Ey, SignPxW - Ex, SignPxH - Ey, S.Ink);
+	if (Lines == 1)
+	{
+		C.Text(Top, SignPxW / 2, SignPxH / 2, Sx, Sy, S.Ink);
+	}
+	else
+	{
+		C.Text(Top, SignPxW / 2, SignPxH / 2 - (9 * Sy) / 2, Sx, Sy, S.Ink);
+		C.Text(Bottom, SignPxW / 2, SignPxH / 2 + (9 * Sy) / 2, Sx, Sy, S.Ink);
+	}
+	return MakeTexture(MoveTemp(C.Px), SignPxW, SignPxH);
 }
 
 UTexture2D* ABbPark::PaintNumber(int32 Value, double W, double H, const FLinearColor& Ink, const FLinearColor& Back)
@@ -1074,10 +1207,16 @@ UTexture2D* ABbPark::PaintNumber(int32 Value, double W, double H, const FLinearC
 			Top[J * N + I] = C.ToFColor(true);
 		}
 	}
-	return MakeTexture(MoveTemp(Top), N);
+	return MakeTexture(MoveTemp(Top), N, N);
 }
 
 void ABbPark::Sign(const FVector& Mid, const FVector2D& Right, const FVector2D& Face, double W, double H, UTexture2D* Tex, float Rough)
+{
+	const FBbFace F{ Mid, Right, Face, W, H, 0.0, 1.0 };
+	Picture(MakeArrayView(&F, 1), Tex, Rough);
+}
+
+UMaterialInstanceDynamic* ABbPark::Picture(TConstArrayView<FBbFace> Faces, UTexture2D* Tex, float Rough, UMaterialInterface* Base)
 {
 	if (!Signs)
 	{
@@ -1088,31 +1227,44 @@ void ABbPark::Sign(const FVector& Mid, const FVector2D& Right, const FVector2D& 
 		Signs->SetCastShadow(false);
 		Signs->RegisterComponent();
 	}
-	// Top left, top right, bottom left, bottom right, as the picture's rows run.
-	TArray<FVector> Verts;
-	for (int32 K = 0; K < 4; ++K)
-	{
-		const double U = (K & 1) ? 0.5 : -0.5, V = (K >> 1) ? -0.5 : 0.5;
-		Verts.Add(ToUE(Mid.X + Right.X * U * W, Mid.Y + Right.Y * U * W, Mid.Z + V * H));
-	}
-	const FVector Normal = ToUE(Face.X, Face.Y, 0.0).GetSafeNormal();
-	TArray<int32> Tris = { 0, 1, 2, 2, 1, 3 };
-	// The side that shows is the one the corners run round the way the ground's do (AddGround).
-	if ((((Verts[1] - Verts[0]) ^ (Verts[2] - Verts[0])) | Normal) > 0.0)
-	{
-		Tris = { 0, 2, 1, 2, 3, 1 };
-	}
-	const TArray<FVector> Normals = { Normal, Normal, Normal, Normal };
-	const TArray<FVector2D> UVs = { FVector2D(0, 0), FVector2D(1, 0), FVector2D(0, 1), FVector2D(1, 1) };
-	const FVector Tan = ToUE(Right.X, Right.Y, 0.0).GetSafeNormal();
+	TArray<FVector> Verts, Normals;
+	TArray<int32> Tris;
+	TArray<FVector2D> UVs;
 	TArray<FProcMeshTangent> Tangents;
-	Tangents.Init(FProcMeshTangent(Tan, false), 4);
+	for (const FBbFace& F : Faces)
+	{
+		// Top left, top right, bottom left, bottom right, as the picture's rows run.
+		const int32 B = Verts.Num();
+		for (int32 K = 0; K < 4; ++K)
+		{
+			const double U = (K & 1) ? 0.5 : -0.5, V = (K >> 1) ? -0.5 : 0.5;
+			Verts.Add(ToUE(F.Mid.X + F.Right.X * U * F.W, F.Mid.Y + F.Right.Y * U * F.W, F.Mid.Z + V * F.H));
+			UVs.Add(FVector2D((K & 1) ? F.U1 : F.U0, K >> 1));
+		}
+		const FVector Normal = ToUE(F.Face.X, F.Face.Y, 0.0).GetSafeNormal();
+		// The side that shows is the one the corners run round the way the ground's do (AddGround).
+		if ((((Verts[B + 1] - Verts[B]) ^ (Verts[B + 2] - Verts[B])) | Normal) > 0.0)
+		{
+			Tris.Append({ B, B + 2, B + 1, B + 2, B + 3, B + 1 });
+		}
+		else
+		{
+			Tris.Append({ B, B + 1, B + 2, B + 2, B + 1, B + 3 });
+		}
+		const FProcMeshTangent Tan(ToUE(F.Right.X, F.Right.Y, 0.0).GetSafeNormal(), false);
+		for (int32 K = 0; K < 4; ++K)
+		{
+			Normals.Add(Normal);
+			Tangents.Add(Tan);
+		}
+	}
 	const int32 Section = SignCount++;
 	Signs->CreateMeshSection_LinearColor(Section, Verts, Tris, Normals, UVs, TArray<FLinearColor>(), Tangents, false);
-	UMaterialInstanceDynamic* M = UMaterialInstanceDynamic::Create(TexturedMaterial, this);
+	UMaterialInstanceDynamic* M = UMaterialInstanceDynamic::Create(Base ? Base : TexturedMaterial.Get(), this);
 	M->SetTextureParameterValue(TEXT("Tex"), Tex);
 	M->SetScalarParameterValue(TEXT("Rough"), Rough);
 	Signs->SetMaterial(Section, M);
+	return M;
 }
 
 /** Flat faces gathered for one paint, drawn as one piece of the bowl's mesh. */
@@ -1591,6 +1743,304 @@ void ABbPark::BuildStands()
 	UE_LOG(LogBbPark, Display, TEXT("BB_PARK seats: %d"), Seats);
 }
 
+namespace
+{
+	// The scoreboard, the flags and the land beyond (park-visuals step 5). None of it is in
+	// the sim; the board's figures are the sim's.
+	// The board stands behind the right-centre bullpen, by its bearing from home (degrees from
+	// centre field), turned to the infield; the flag court stands at the same bearing in left.
+	const double BoardDeg = (PenFromDeg + PenToDeg) * 0.5;
+	const double BoardWide = 17.2, BoardHigh = 9.0, BoardFoot = 7.5, BoardDeep = 1.0, BoardRim = 0.4;
+	const double BoardBehind = 1.5, BoardLeg = 0.8;
+	const int32 BoardPxW = 1024, BoardPxH = 512;
+	const double FlagLong = 3.2, FlagHigh = 1.9, FlagPoleWide = 0.18;
+	const double CourtPole[3] = { 15.0, 18.0, 15.0 }, CourtApart = 5.0;
+	// Hills: two rings round the middle of the field. Each ridge's height wanders with the
+	// bearing (a base and three waves: metres, turns of the ring, phase).
+	const double HillStepDeg = 3.0;
+	const double HillAt[2] = { 650.0, 1150.0 }, HillRun[2] = { 160.0, 280.0 }, HillBase[2] = { 26.0, 70.0 };
+	const double HillWave[2][3][3] = {
+		{ { 12.0, 3.0, 1.0 }, { 7.0, 7.0, 2.3 }, { 4.0, 13.0, 0.4 } },
+		{ { 30.0, 2.0, 0.5 }, { 16.0, 5.0, 4.0 }, { 8.0, 11.0, 2.0 } },
+	};
+	// Trees: in clumps, no nearer the playing field's boundary than TreeClear (the stands and
+	// what is behind them) and within TreeBand of it.
+	const double TreeClear = 32.0, TreeBand = 150.0, ClumpWide = 14.0;
+	const int32 TreeClumps = 110, ClumpMin = 3, ClumpMax = 9;
+	const double ConiferShare = 0.3;
+
+	/** Where the line from home at a bearing (degrees from centre field) meets the fence:
+	 *  the point, the way out of the field there, and the fence's piece. */
+	bool FenceAt(const BbPark& D, double Deg, FVector2D& Hit, FVector2D& Out, int32& Piece)
+	{
+		const double Th = FMath::DegreesToRadians(Deg);
+		const FVector2D Ray(FMath::Sin(Th), FMath::Cos(Th));
+		const int32 N = D.n_wall;
+		for (int32 I = 0; I < N; ++I)
+		{
+			if (D.wall[I].kind != 0)
+			{
+				continue;
+			}
+			const FVector2D A(D.wall[I].from[0], D.wall[I].from[1]), B(D.wall[(I + 1) % N].from[0], D.wall[(I + 1) % N].from[1]);
+			const FVector2D E = B - A;
+			const double Den = Cross2(Ray, E);
+			if (FMath::Abs(Den) < 1e-9)
+			{
+				continue;
+			}
+			const double U = Cross2(A, E) / Den, T = Cross2(A, Ray) / Den;
+			if (U <= 0.0 || T < 0.0 || T >= 1.0)
+			{
+				continue;
+			}
+			const FVector2D Along = E.GetSafeNormal();
+			Hit = A + E * T;
+			Out = FVector2D(-Along.Y, Along.X);
+			Piece = I;
+			return true;
+		}
+		return false;
+	}
+}
+
+void ABbPark::BuildBoard()
+{
+	const FBbGround& G = *Ground;
+	const BbPark& D = G.Desc;
+	const double Wind = FMath::DegreesToRadians(BbLook::FlagBearingDeg);
+	const FVector2D Fly(FMath::Sin(Wind), FMath::Cos(Wind));
+	// A pole with a flag at its top: a plain field with a band across it.
+	auto Flag = [&](const FVector2D& P, double Z0, double Z1, int32 Which)
+	{
+		Inst(Cylinder, ToUE(P.X, P.Y, (Z0 + Z1) * 0.5), FVector(FlagPoleWide, FlagPoleWide, Z1 - Z0), BbLook::FlagPole);
+		const FVector2D A = P + Fly * (FlagPoleWide * 0.5), B = A + Fly * FlagLong;
+		const double Top = Z1 - 0.15;
+		InstPanel(A, B, 0.04, Top - FlagHigh, Top, BbLook::Flags[Which % 3], false);
+		InstPanel(A, B, 0.06, Top - FlagHigh * 0.62, Top - FlagHigh * 0.38, BbLook::FlagBand, false);
+	};
+	// How far behind the fence whatever stands there reaches.
+	auto Reach = [&](int32 Piece, bool bLeft)
+	{
+		return G.Behind[Piece] == FBbGround::Pen ? PenDeep + WallThick : bLeft ? OutWalk + BermRun + BermPath : OutWalk + BenchRows * BenchRun + BenchWalk + RailThick;
+	};
+	const FVector2D Infield(0.0, D.rubber_m);
+	FVector2D Hit, Out;
+	int32 Piece = 0;
+	if (FenceAt(D, BoardDeg, Hit, Out, Piece))
+	{
+		const FVector2D P = Hit + Out * (Reach(Piece, false) + BoardBehind + BoardDeep * 0.5);
+		const FVector2D F = (Infield - P).GetSafeNormal(), Right(-F.Y, F.X);
+		const double Top = BoardFoot + BoardHigh;
+		for (double S : { -1.0, 1.0 })
+		{
+			const FVector2D L = P + Right * (S * BoardWide * 0.3);
+			InstPanel(L - Right * (BoardLeg * 0.5), L + Right * (BoardLeg * 0.5), BoardLeg, LandZ, BoardFoot, BbLook::Steel);
+			Flag(P + Right * (S * (BoardWide * 0.5 - 0.5)), Top, Top + 4.5, S < 0.0 ? 0 : 1);
+		}
+		InstPanel(P - Right * (BoardWide * 0.5), P + Right * (BoardWide * 0.5), BoardDeep, BoardFoot, Top, BbLook::BoardCase);
+		if (BoardMaterial)
+		{
+			FBbCanvas Blank(BoardPxW, BoardPxH, BbLook::BoardBack);
+			BoardTex = MakeTexture(MoveTemp(Blank.Px), BoardPxW, BoardPxH);
+			const FVector2D Front = P + F * (BoardDeep * 0.5 + 0.02);
+			const FBbFace Face{ FVector(Front.X, Front.Y, BoardFoot + BoardHigh * 0.5), Right, F, BoardWide - 2.0 * BoardRim, BoardHigh - 2.0 * BoardRim, 0.0, 1.0 };
+			UMaterialInstanceDynamic* M = Picture(MakeArrayView(&Face, 1), BoardTex, 1.f, BoardMaterial);
+			M->SetScalarParameterValue(TEXT("Glow"), BbLook::BoardGlow);
+			BbBoxScore Empty;
+			FMemory::Memzero(Empty);
+			ShowBoard(Empty, 1, true, 0, 0, 0);
+		}
+	}
+	// The flag court: three poles in a row across the line of sight from the infield.
+	if (FenceAt(D, -BoardDeg, Hit, Out, Piece))
+	{
+		const FVector2D P = Hit + Out * (Reach(Piece, true) + BoardBehind + 1.0);
+		const FVector2D F = (Infield - P).GetSafeNormal(), Right(-F.Y, F.X);
+		for (int32 K = 0; K < 3; ++K)
+		{
+			Flag(P + Right * ((K - 1) * CourtApart), LandZ, CourtPole[K], K + 2);
+		}
+	}
+}
+
+void ABbPark::ShowBoard(const BbBoxScore& Box, int32 Inning, bool bTop, int32 Balls, int32 Strikes, int32 Outs)
+{
+	if (!BoardTex)
+	{
+		return;
+	}
+	// Nine innings fit: in extra innings, the last nine.
+	const int32 First = FMath::Max<int32>(1, Box.first_inning), From = FMath::Max(First, (int32)Box.innings - 8);
+	// What is shown, to tell whether anything has changed: 255 = an inning not batted.
+	uint8 Cell[2][9];
+	TArray<uint8> Key = { (uint8)From, (uint8)Inning, (uint8)bTop, (uint8)Balls, (uint8)Strikes, (uint8)Outs };
+	for (int32 T = 0; T < 2; ++T)
+	{
+		for (int32 C = 0; C < 9; ++C)
+		{
+			const int32 Idx = From + C - First;
+			Cell[T][C] = Idx < Box.teams[T].n_batted && Idx < BB_BOX_MAX_INNINGS ? FMath::Min<uint8>(Box.teams[T].runs[Idx], 254) : 255;
+		}
+		Key.Append(Cell[T], 9);
+		Key.Append({ (uint8)(Box.teams[T].totals.r & 255), (uint8)(Box.teams[T].totals.r >> 8), (uint8)(Box.teams[T].totals.h & 255), (uint8)(Box.teams[T].totals.h >> 8) });
+	}
+	if (Key == BoardKey)
+	{
+		return;
+	}
+	BoardKey = Key;
+
+	using namespace BbLook;
+	FBbCanvas C(BoardPxW, BoardPxH, BoardBack);
+	// The park's name, a line under it, the line score, a line, and the count in lamps.
+	C.Text(ParkName, BoardPxW / 2, 50, 5, 5, BoardTitle, 1);
+	C.Box(24, 92, BoardPxW - 24, 95, BoardDim);
+	const int32 Col0 = 222, ColStep = 62, ColR = 822, ColH = 922;
+	const int32 RowY[3] = { 138, 208, 288 };
+	for (int32 K = 0; K < 9; ++K)
+	{
+		C.Text(FString::FromInt(From + K), Col0 + K * ColStep, RowY[0], 4, 4, BoardDim, 1);
+	}
+	C.Text(TEXT("R"), ColR, RowY[0], 4, 4, BoardDim, 1);
+	C.Text(TEXT("H"), ColH, RowY[0], 4, 4, BoardDim, 1);
+	for (int32 T = 0; T < 2; ++T)
+	{
+		const int32 Y = RowY[T + 1];
+		// A lamp beside the side at bat.
+		C.Box(18, Y - 9, 36, Y + 9, (T == 0) == bTop ? BoardTitle : LampOff);
+		C.Text(T == 0 ? TEXT("AWAY") : TEXT("HOME"), 48 + FBbCanvas::TextW(TEXT("AWAY"), 5) / 2, Y, 5, 5, BoardInk, 1);
+		for (int32 K = 0; K < 9; ++K)
+		{
+			if (Cell[T][K] != 255)
+			{
+				const int32 S = Cell[T][K] > 9 ? 4 : 6;
+				C.Text(FString::FromInt(Cell[T][K]), Col0 + K * ColStep, Y, S, S, BoardInk, 1);
+			}
+		}
+		C.Text(FString::FromInt(Box.teams[T].totals.r), ColR, Y, 6, 6, BoardTitle, 1);
+		C.Text(FString::FromInt(Box.teams[T].totals.h), ColH, Y, 6, 6, BoardInk, 1);
+	}
+	C.Box(24, 338, BoardPxW - 24, 341, BoardDim);
+	const int32 LampY = 424;
+	auto Lamps = [&](const TCHAR* Word, int32 X, int32 Count, int32 Lit, const FLinearColor& On)
+	{
+		const int32 Wd = FBbCanvas::TextW(Word, 5);
+		C.Text(Word, X + Wd / 2, LampY, 5, 5, BoardInk, 1);
+		for (int32 K = 0; K < Count; ++K)
+		{
+			C.Disc(X + Wd + 44 + K * 54, LampY, 20.0, K < Lit ? On : LampOff);
+		}
+		return X + Wd + 44 + Count * 54 + 16;
+	};
+	int32 X = 40;
+	X = Lamps(TEXT("BALL"), X, 3, Balls, LampBall);
+	X = Lamps(TEXT("STRIKE"), X, 2, Strikes, LampStrike);
+	Lamps(TEXT("OUT"), X, 2, Outs, LampOut);
+	FillTexture(BoardTex, MoveTemp(C.Px), BoardPxW, BoardPxH);
+}
+
+void ABbPark::BuildBackdrop()
+{
+	const FBbGround& G = *Ground;
+	const BbPark& D = G.Desc;
+	const int32 N = D.n_wall;
+	double MinX = 0, MaxX = 0, MinY = 0, MaxY = 0;
+	for (int32 I = 0; I < N; ++I)
+	{
+		MinX = FMath::Min(MinX, (double)D.wall[I].from[0]);
+		MaxX = FMath::Max(MaxX, (double)D.wall[I].from[0]);
+		MinY = FMath::Min(MinY, (double)D.wall[I].from[1]);
+		MaxY = FMath::Max(MaxY, (double)D.wall[I].from[1]);
+	}
+	const FVector2D Mid((MinX + MaxX) * 0.5, (MinY + MaxY) * 0.5);
+
+	// ---- Hills --------------------------------------------------------------------------
+	// Each ring is a slope seen from inside: from the land up to its ridge.
+	for (int32 Ring = 0; Ring < 2; ++Ring)
+	{
+		FBbSolid Hills;
+		auto High = [Ring](double Deg)
+		{
+			const double Turn = FMath::DegreesToRadians(Deg);
+			double H = HillBase[Ring];
+			for (const double* W : HillWave[Ring])
+			{
+				H += W[0] * FMath::Sin(W[1] * Turn + W[2]);
+			}
+			return H;
+		};
+		for (double Deg = 0.0; Deg < 360.0 - 1e-6; Deg += HillStepDeg)
+		{
+			const double T0 = FMath::DegreesToRadians(Deg), T1 = FMath::DegreesToRadians(Deg + HillStepDeg), Tm = (T0 + T1) * 0.5;
+			const FVector2D R0(FMath::Sin(T0), FMath::Cos(T0)), R1(FMath::Sin(T1), FMath::Cos(T1)), Rm(FMath::Sin(Tm), FMath::Cos(Tm));
+			const double H0 = High(Deg), H1 = High(Deg + HillStepDeg), Hm = (H0 + H1) * 0.5;
+			const FVector2D In0 = Mid + R0 * (HillAt[Ring] - HillRun[Ring]), In1 = Mid + R1 * (HillAt[Ring] - HillRun[Ring]);
+			const FVector2D Out0 = Mid + R0 * HillAt[Ring], Out1 = Mid + R1 * HillAt[Ring];
+			Hills.Quad(FVector(In0.X, In0.Y, LandZ), FVector(In1.X, In1.Y, LandZ), FVector(Out0.X, Out0.Y, H0), FVector(Out1.X, Out1.Y, H1),
+				FVector(-Rm.X * Hm, -Rm.Y * Hm, HillRun[Ring]));
+		}
+		AddSolid(Hills, Ring == 0 ? BbLook::HillNear : BbLook::HillFar);
+	}
+
+	// ---- Trees --------------------------------------------------------------------------
+	// How far outside the playing field a point is (negative inside it).
+	auto Outside = [&](const FVector2D& P)
+	{
+		double Best = TNumericLimits<double>::Max();
+		bool bIn = false;
+		for (int32 I = 0; I < N; ++I)
+		{
+			const FVector2D A(D.wall[I].from[0], D.wall[I].from[1]), B(D.wall[(I + 1) % N].from[0], D.wall[(I + 1) % N].from[1]);
+			const FVector2D E = B - A;
+			const double T = FMath::Clamp(((P - A) | E) / E.SizeSquared(), 0.0, 1.0);
+			Best = FMath::Min(Best, (P - A - E * T).SizeSquared());
+			if ((A.Y > P.Y) != (B.Y > P.Y) && P.X < A.X + E.X * (P.Y - A.Y) / E.Y)
+			{
+				bIn = !bIn;
+			}
+		}
+		return FMath::Sqrt(Best) * (bIn ? -1.0 : 1.0);
+	};
+	FRandomStream Rng(BbLook::TreeSeed);
+	const double HalfX = (MaxX - MinX) * 0.5 + TreeBand, HalfY = (MaxY - MinY) * 0.5 + TreeBand;
+	int32 Trees = 0;
+	for (int32 Clump = 0, Try = 0; Clump < TreeClumps && Try < 20000; ++Try)
+	{
+		const FVector2D C = Mid + FVector2D(Rng.FRandRange(-HalfX, HalfX), Rng.FRandRange(-HalfY, HalfY));
+		const double Off = Outside(C);
+		if (Off < TreeClear + ClumpWide * 0.5 || Off > TreeBand)
+		{
+			continue;
+		}
+		++Clump;
+		const bool bConifer = Rng.FRand() < ConiferShare;
+		const int32 Count = Rng.RandRange(ClumpMin, ClumpMax);
+		for (int32 K = 0; K < Count; ++K)
+		{
+			const FVector2D P = C + FVector2D(Rng.FRandRange(-ClumpWide, ClumpWide), Rng.FRandRange(-ClumpWide, ClumpWide));
+			if (Outside(P) < TreeClear)
+			{
+				continue;
+			}
+			++Trees;
+			if (bConifer)
+			{
+				const double Tall = Rng.FRandRange(10.0, 17.0), Wide = Tall * Rng.FRandRange(0.30, 0.40), Trunk = 1.6;
+				Inst(Cylinder, ToUE(P.X, P.Y, (LandZ + Trunk) * 0.5), FVector(0.5, 0.5, Trunk - LandZ), BbLook::TreeTrunk);
+				Inst(Cone, ToUE(P.X, P.Y, Trunk + Tall * 0.5), FVector(Wide, Wide, Tall), BbLook::Conifer);
+			}
+			else
+			{
+				const double Wide = Rng.FRandRange(6.0, 10.5), Tall = Wide * Rng.FRandRange(0.85, 1.2), Trunk = Rng.FRandRange(2.5, 4.5);
+				Inst(Cylinder, ToUE(P.X, P.Y, (LandZ + Trunk + Tall * 0.3) * 0.5), FVector(0.6, 0.6, Trunk + Tall * 0.3 - LandZ), BbLook::TreeTrunk);
+				Inst(Sphere, ToUE(P.X, P.Y, Trunk + Tall * 0.5), FVector(Wide, Wide, Tall), BbLook::TreeCrown[Rng.RandRange(0, 2)]);
+			}
+		}
+	}
+	UE_LOG(LogBbPark, Display, TEXT("BB_PARK backdrop: %d trees"), Trees);
+}
+
 FVector2D ABbPark::DugoutDoor(double Side) const
 {
 	if (Ground)
@@ -1637,5 +2087,13 @@ TArray<FBbParkSpot> ABbPark::Spots(const BbPark& Desc)
 	const float PlanFov = 50.f;
 	const double High = Half / (FMath::Tan(FMath::DegreesToRadians(PlanFov * 0.5)) * 9.0 / 16.0);
 	S.Add(FBbParkSpot{ TEXT("plan"), ToUE(0, MidY, High), FRotator(-90.f, 0.f, 0.f), PlanFov });
+	// The scoreboard, from the outfield grass in front of it.
+	FVector2D Hit, Out;
+	int32 Piece = 0;
+	if (FenceAt(Desc, BoardDeg, Hit, Out, Piece))
+	{
+		const FVector2D Eye = Hit * (1.0 - 55.0 / Hit.Size()), Board = Hit + Out * 9.0;
+		S.Add(At(TEXT("board"), ToUE(Eye.X, Eye.Y, 6.0), ToUE(Board.X, Board.Y, 9.5), 40.f));
+	}
 	return S;
 }

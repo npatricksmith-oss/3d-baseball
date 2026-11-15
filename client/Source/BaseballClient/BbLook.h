@@ -59,6 +59,66 @@ namespace BbLook
 	inline const FLinearColor Net(0.030f, 0.030f, 0.035f);
 	inline const float NetOpacity = 0.14f;
 
+	// The scoreboard: lamps on a dark face, in a dark case on steel legs. The lamps give
+	// their own light (BoardGlow times their colour), so the board reads in the shade.
+	inline const TCHAR* const ParkName = TEXT("CEDAR HOLLOW PARK");
+	inline const FBbPaint BoardCase{ FLinearColor(0.035f, 0.050f, 0.045f), 0.7f };
+	inline const FLinearColor BoardBack(0.004f, 0.005f, 0.005f);
+	inline const FLinearColor BoardInk(1.000f, 0.860f, 0.560f);
+	inline const FLinearColor BoardDim(0.330f, 0.300f, 0.230f);
+	inline const FLinearColor BoardTitle(1.000f, 0.560f, 0.080f);
+	inline const FLinearColor LampBall(0.080f, 0.900f, 0.140f);
+	inline const FLinearColor LampStrike(1.000f, 0.100f, 0.050f);
+	inline const FLinearColor LampOut(1.000f, 0.100f, 0.050f);
+	inline const FLinearColor LampOff(0.030f, 0.030f, 0.030f);
+	inline const float BoardGlow = 5.f;
+
+	// The signs on the fence: invented names, none of them a real firm's. Dark grounds, so a
+	// white ball still shows in front of them.
+	struct FBbSponsor
+	{
+		const TCHAR* Top;
+		/** A second line, or null. */
+		const TCHAR* Bottom;
+		FLinearColor Back, Ink;
+	};
+	inline const FBbSponsor Sponsors[] = {
+		{ TEXT("HARBOR"), TEXT("SAVINGS BANK"), FLinearColor(0.015f, 0.030f, 0.120f), FLinearColor(0.800f, 0.760f, 0.600f) },
+		{ TEXT("OAK STREET"), TEXT("DINER"), FLinearColor(0.180f, 0.016f, 0.014f), FLinearColor(0.820f, 0.780f, 0.620f) },
+		{ TEXT("NORTHSIDE"), TEXT("AUTO REPAIR"), FLinearColor(0.030f, 0.032f, 0.036f), FLinearColor(0.850f, 0.640f, 0.060f) },
+		{ TEXT("RIVERBEND"), TEXT("DAIRY"), FLinearColor(0.010f, 0.085f, 0.095f), FLinearColor(0.780f, 0.800f, 0.760f) },
+		{ TEXT("TALLY'S TIRES"), nullptr, FLinearColor(0.020f, 0.020f, 0.022f), FLinearColor(0.850f, 0.300f, 0.040f) },
+		{ TEXT("LANTERN"), TEXT("BOOKS"), FLinearColor(0.085f, 0.016f, 0.080f), FLinearColor(0.820f, 0.760f, 0.600f) },
+		{ TEXT("STONY CREEK"), TEXT("FEED & SEED"), FLinearColor(0.110f, 0.050f, 0.018f), FLinearColor(0.820f, 0.780f, 0.620f) },
+		{ TEXT("BLUE HERON"), TEXT("COFFEE"), FLinearColor(0.030f, 0.060f, 0.110f), FLinearColor(0.700f, 0.800f, 0.860f) },
+		{ TEXT("UNION"), TEXT("PRINT CO."), FLinearColor(0.045f, 0.055f, 0.016f), FLinearColor(0.850f, 0.700f, 0.100f) },
+		{ TEXT("KESTREL"), TEXT("RADIO 1040"), FLinearColor(0.130f, 0.014f, 0.040f), FLinearColor(0.800f, 0.780f, 0.720f) },
+	};
+
+	// Beyond the park: two lines of hills, the far one paler and bluer, and trees.
+	inline const FBbPaint HillNear{ FLinearColor(0.040f, 0.115f, 0.045f), 0.95f };
+	inline const FBbPaint HillFar{ FLinearColor(0.075f, 0.135f, 0.130f), 0.95f };
+	inline const FBbPaint TreeCrown[3] = {
+		{ FLinearColor(0.030f, 0.120f, 0.030f), 0.9f },
+		{ FLinearColor(0.045f, 0.150f, 0.035f), 0.9f },
+		{ FLinearColor(0.060f, 0.135f, 0.025f), 0.9f },
+	};
+	inline const FBbPaint Conifer{ FLinearColor(0.016f, 0.075f, 0.035f), 0.9f };
+	inline const FBbPaint TreeTrunk{ FLinearColor(0.085f, 0.055f, 0.035f), 0.9f };
+	/** The same wood every time the park is built. */
+	inline const int32 TreeSeed = 5;
+
+	// Flags: plain fields with a band across, on white poles. They fly toward this bearing
+	// (as the sun's: from +Y round toward +X); a look only, the sim has no wind.
+	inline const FBbPaint FlagPole{ FLinearColor(0.800f, 0.800f, 0.780f), 0.4f };
+	inline const FBbPaint Flags[3] = {
+		{ FLinearColor(0.450f, 0.020f, 0.020f), 0.8f },
+		{ FLinearColor(0.020f, 0.060f, 0.300f), 0.8f },
+		{ FLinearColor(0.750f, 0.560f, 0.030f), 0.8f },
+	};
+	inline const FBbPaint FlagBand{ FLinearColor(0.850f, 0.850f, 0.820f), 0.8f };
+	inline const float FlagBearingDeg = 60.f;
+
 	// ---- The light: a clear mid-afternoon ------------------------------------------------
 	// Where the sun stands, in the sim frame: the bearing on the ground from +Y (centre
 	// field) round toward +X (first base), and the height above the horizon. Over the

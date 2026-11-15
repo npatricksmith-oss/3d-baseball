@@ -15,6 +15,7 @@ class UTexture2D;
 class UProceduralMeshComponent;
 class UMaterialInstanceDynamic;
 struct FBbSolid;
+struct FBbFace;
 
 /** A fixed place to look at the park from (park-visuals §4): the same spots before and after
  *  every change to its looks. */
@@ -94,6 +95,9 @@ public:
 	/** A step inside the dugout of a side (+1 first base, -1 third base): where a player
 	 *  walking off disappears under the roof. */
 	FVector2D DugoutDoor(double Side) const;
+	/** What the outfield board shows: the line score from the sim's box score, the half inning,
+	 *  the count and the outs. Repainted only when one of them has changed. */
+	void ShowBoard(const BbBoxScore& Box, int32 Inning, bool bTop, int32 Balls, int32 Strikes, int32 Outs);
 
 	/** The fixed camera spots for this park: behind home, centre field looking in, high on the
 	 *  first-base side, the stands behind third, low at the mound, and straight down. */
@@ -110,6 +114,8 @@ private:
 	void BuildDugouts();
 	void BuildOutfield();
 	void BuildStands();
+	void BuildBoard();
+	void BuildBackdrop();
 	/** One of many alike (a seat, a post, a lamp): drawn together with every other shape of
 	 *  its mesh and paint, once FlushInst has run. Sizes in metres, as Shape's. */
 	void Inst(UStaticMesh* Mesh, const FVector& Location, const FVector& Scale, const FBbPaint& Paint, const FRotator& Rotation = FRotator::ZeroRotator, bool bShadow = true);
@@ -122,10 +128,17 @@ private:
 	/** A flat picture standing on a wall: centred at Mid (sim frame), W wide along Right and
 	 *  H high, seen from the side Face points to. */
 	void Sign(const FVector& Mid, const FVector2D& Right, const FVector2D& Face, double W, double H, UTexture2D* Tex, float Rough);
+	/** One picture over several flat faces (a sign that follows the fence round), each
+	 *  showing its own share of the picture's width. Base: the material, the lit one if null. */
+	UMaterialInstanceDynamic* Picture(TConstArrayView<FBbFace> Faces, UTexture2D* Tex, float Rough, UMaterialInterface* Base = nullptr);
+	/** A sponsor's sign, W by H metres: its name in block capitals inside a line. */
+	UTexture2D* PaintSign(const BbLook::FBbSponsor& S, double W, double H);
 	/** A whole number in block figures, W by H metres, on a ground colour. */
 	UTexture2D* PaintNumber(int32 Value, double W, double H, const FLinearColor& Ink, const FLinearColor& Back);
-	/** A square picture with its smaller copies. */
-	UTexture2D* MakeTexture(TArray<FColor>&& Top, int32 N);
+	/** A picture (sides powers of two, rows from the top) with its smaller copies. */
+	UTexture2D* MakeTexture(TArray<FColor>&& Top, int32 W, int32 H);
+	/** Paints a picture of MakeTexture's over again. */
+	void FillTexture(UTexture2D* T, TArray<FColor>&& Top, int32 W, int32 H);
 	/** The ground's colours over a square, painted in code, with its smaller copies. */
 	UTexture2D* PaintGround(double TexX0, double TexY0, double TexSize, int32 N);
 	/** One piece of the ground mesh: a grid of cells whose heights follow the drawn ground,
@@ -139,6 +152,10 @@ private:
 	TObjectPtr<UStaticMesh> Cylinder;
 	UPROPERTY()
 	TObjectPtr<UStaticMesh> Plane;
+	UPROPERTY()
+	TObjectPtr<UStaticMesh> Sphere;
+	UPROPERTY()
+	TObjectPtr<UStaticMesh> Cone;
 	/** Paint: a colour and how matt it is (parameters "Color", "Rough"), built in code. */
 	UPROPERTY()
 	TObjectPtr<UMaterialInterface> PaintMaterial;
@@ -151,6 +168,13 @@ private:
 	/** A lit material showing a texture (parameters "Tex", "Rough"), built in code at start-up. */
 	UPROPERTY()
 	TObjectPtr<UMaterialInterface> TexturedMaterial;
+	/** Unlit and giving its own light (parameters "Tex", "Glow"): the scoreboard's face. */
+	UPROPERTY()
+	TObjectPtr<UMaterialInterface> BoardMaterial;
+	UPROPERTY()
+	TObjectPtr<UTexture2D> BoardTex;
+	/** What the board last showed. */
+	TArray<uint8> BoardKey;
 	UPROPERTY()
 	TArray<TObjectPtr<UTexture2D>> Textures;
 	UPROPERTY()

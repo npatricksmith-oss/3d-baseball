@@ -377,6 +377,10 @@ private:
 	BbBoxScore Box{};
 	bool bBoxValid = false;
 	uint32 BoxThrough = 0;
+	/** The same reading for the outfield board: through the pitches whose result is known. */
+	BbBoxScore BoardBox{};
+	uint32 BoardThrough = 0xFFFFFFFEu;
+	bool bBoardValid = false;
 	/** How far the Tab view is up (0 to 1; it comes and goes in BoxPeekS). */
 	float BoxPeek = 0.f;
 	static constexpr float BoxPeekS = 0.15f;

@@ -1,6 +1,6 @@
 # Park visuals: field and stadium
 
-**Status:** plan agreed with the owner 2026-11-15 (twelve questions, answers in §1). **Step 1 (park export and field surface) is built** (§6), **step 2 (light and materials)** (§7), **step 3 (walls and field furniture)** (§8) and **step 4 (the seating bowl)** (§9); steps 5 and 6 are not. This is the first part of the graphics stage; players and game graphics (HUD) get their own plans afterwards.
+**Status:** plan agreed with the owner 2026-11-15 (twelve questions, answers in §1). **Step 1 (park export and field surface) is built** (§6), **step 2 (light and materials)** (§7), **step 3 (walls and field furniture)** (§8), **step 4 (the seating bowl)** (§9) and **step 5 (scoreboard, signs, backdrop)** (§10); step 6, the crowd, is not. This is the first part of the graphics stage; players and game graphics (HUD) get their own plans afterwards.
 
 **Why now:** Codex's weekly limit is nearly used, so the physics and behaviour work, which needs outside reviews, pauses. The owner moved the looks forward from the polish milestone (PLAN D13, revised the same day). This stage runs without Codex reviews.
 
@@ -131,3 +131,22 @@ Client only; nothing in the sim changed. The placeholder blocks are gone. Everyt
 **Not done.** No rail along the aisles or the front of the deck. The stands at each pole end square, leaving a wedge of open ground between the deck and the bank or benches. The towers are plain poles, not lattice.
 
 **Checked** from the six spots and six pictures of play (`client/Saved/Shots/step3_after/` is the before, `step4_after/` the after; untracked): the pitch camera sees the ball against the seats behind home as easily as before, and the camera behind home is clear of the roof. **Cost:** 207 frames a second unattended against 221; memory 2.6 GB, unchanged. Drawing step 3's shapes instanced did not win the frames back as expected (207 with and without), so the cost is not the number of actors; shadows are the likely place to look if it matters.
+
+## 10. Step 5 as built (2026-11-15)
+
+Client only; nothing in the sim changed. Everything is placed by rule from the exported park; the measures are named constants in `BbPark.cpp`, the colours, the park's name and the sponsors' names in `BbLook.h`.
+
+- **Letters.** `BbText.h`: a canvas of pixels painted in code, with block capitals, figures and a few marks from a five-by-seven dot alphabet. No font or picture is loaded from a file. Pictures need no longer be square, and one can be painted over again (`FillTexture`).
+- **The scoreboard.** Behind the right-centre bullpen (15° off centre field), turned to the infield: a dark case 17 m by 9 m on two steel legs, its foot 7.5 m up, clear of the batter's eye. Its face is a picture of lamps that give their own light (a fourth material built in code, unlit), so it reads though the afternoon sun is behind it. It shows the park's name, **the line score from the sim's box score** (nine innings, the last nine in extra innings; runs and hits), a lamp beside the side at bat, and the count and the outs as lamps (three balls, two strikes, two outs). The director reads the box score once a pitch, through the pitches whose result is known, and gives the board the same inning, count and outs as the text line at the top of the screen; the picture is repainted only when something on it has changed.
+- **The park's name: Cedar Hollow Park** (invented; a constant in `BbLook.h`).
+- **Sponsors' signs.** Ten invented names (none a real firm's), each a dark ground with pale block capitals inside a line. They run along the fence wherever it carries no distance figure, clear of the batter's eye: each at least 7.5 m long over as many pieces of the fence as that takes, bending with it, a plain piece of padding between one and the next, 0.3 m of padding above and below. Twelve signs in this park.
+- **Flags.** Two on the scoreboard and a court of three poles at the same bearing in left-centre, behind the pen: plain fields with a pale band. They stand stiff toward one bearing; the sim has no wind.
+- **Trees.** About 650 in 110 clumps, broadleaf (a ball on a trunk, three greens) and conifer (a cone), from 32 m outside the field's boundary (behind the stands and what stands with them) out to 150 m. The same wood every time (a fixed seed in `BbLook.h`; this is the client's decoration, not the sim's randomness).
+- **Hills.** Two rings round the park, 650 m and 1,150 m out, the far one higher, paler and bluer; each ridge's height wanders with the bearing.
+- **A seventh camera spot,** `park_7_board`: the scoreboard from the outfield grass in front of it. The other six are unchanged.
+
+**The lead's choices, for the owner to overrule if he likes:** the park's name and the sponsors' names; the board in right-centre and the flags in left-centre; the board's layout (no errors column, no pitch speed, no batter's name); the inning now being batted shows its runs so far (0 at first) rather than a blank.
+
+**Not done.** The flags do not move. The home side's unplayed last half shows a blank, not an "X". Trees are balls and cones on sticks. The signs' letters are the same dot alphabet as the board's, so they are blocky.
+
+**Checked** from the seven spots and six pictures of play (`client/Saved/Shots/step4_after/` is the before, `step5_after/` the after; untracked): the board showed the count the text line showed; the pitch camera's view is unchanged, and from behind home a ball in the air is now against dark trees and hills rather than a flat horizon. **Cost:** 209 frames a second unattended against 207; memory 2.7 GB (2.6).

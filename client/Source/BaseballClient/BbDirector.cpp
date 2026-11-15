@@ -1856,6 +1856,18 @@ void ABbDirector::Tick(float DeltaSeconds)
 				const int32 Outs = FMath::Min<int32>(Before.outs + Called, 3);
 				Hud->Bases = Src.bases;
 				Hud->Scoreboard = FString::Printf(TEXT("AWAY %d   HOME %d    %s %d    %d out    %d-%d"), Src.away_runs, Src.home_runs, Half.top ? TEXT("Top") : TEXT("Bot"), Half.inning, Outs, bHalfOver && bKnown ? 0 : Src.balls, bHalfOver && bKnown ? 0 : Src.strikes);
+				// The board in the outfield shows the same, with the line score read from the
+				// sim's log once a pitch.
+				const uint32 Through = In.play_index + (bKnown ? 1u : 0u);
+				if (Sim && BoardThrough != Through)
+				{
+					bBoardValid = Sim->BoxScore(Through, BoardBox);
+					BoardThrough = Through;
+				}
+				if (bBoardValid)
+				{
+					Park->ShowBoard(BoardBox, Half.inning, Half.top != 0, bHalfOver && bKnown ? 0 : Src.balls, bHalfOver && bKnown ? 0 : Src.strikes, Outs);
+				}
 			}
 			const float Mph = In.release_speed_mps * 2.23694f;
 			// Contact measurements only once the bat has met the ball: before that they would
