@@ -27,14 +27,19 @@ fn identities_hold_over_many_games() {
                 assert!(o <= 3);
             }
         }
+        // The engine's own count in the log agrees with the scorer's, half by half (the scorer
+        // recomputes from the events; the field is the engine's claim, rules-spec §4.1).
+        for (i, (s, e)) in b.lob_by_half.iter().zip(&b.engine_lob_by_half).enumerate() {
+            if let Some(e) = e { assert_eq!(s, e, "half-inning {i}: scorer LOB {s}, engine {e}"); }
+        }
         // PA = K + BB + HBP + HR + batted balls; PA matches the sim's own count.
         for (side, t) in b.teams.iter().enumerate() {
             assert_eq!(t.pa, t.k + t.bb + t.hbp + t.hr + t.batted);
             assert_eq!(t.pa, t.ab + t.bb + t.hbp + t.sf + t.sh, "I2 seed side {side}");
             let outs = b.outs_by_half.iter().skip(side).step_by(2).sum::<u32>();
             // I1 in its own words (rules-spec §11): AB + BB + HBP + SH + SF = R + LOB + opposing
-            // putouts. (The batter-runner left short of first when a preceding runner makes the
-            // third out is in LOB, 9.02(g).)
+            // putouts. (LOB is every runner who reached and neither scored nor was out, wherever he
+            // is at the third out, the batter-runner included: OBR 9.02(g).)
             assert_eq!(t.ab + t.bb + t.hbp + t.sh + t.sf, t.runs + t.left_on_base + outs, "I1 seed side {side}, line {t:?}");
             // Review P2-4: facts the scorer's own arithmetic cannot make true by itself.
             assert!(t.rbi <= t.runs, "more RBI than runs, side {side}");
@@ -178,6 +183,27 @@ fn live_ball_runner_terminal_events_are_disjoint() {
                     assert!(live.remove(&runner), "duplicate or unregistered terminal runner {runner}, seed {seed}, play {}", play.play_index());
                 }
             }
+        }
+    }
+}
+
+/// Logs written before the LOB change carry the old undercount in `HalfInningEnded`; the scorer
+/// recomputes from the events, so they still balance (I1) with the LOB they had at `80b54c1`.
+#[test]
+fn committed_fixture_logs_balance_with_their_old_lob() {
+    // (fixture, per side [away, home]: LOB, from the box scores at 80b54c1)
+    let fixtures: [(&[u8], [u32; 2]); 3] = [
+        (include_bytes!("fixtures/game_3.bblog"), [0, 3]),
+        (include_bytes!("fixtures/game_7.bblog"), [8, 0]),
+        (include_bytes!("fixtures/game_1001.bblog"), [7, 7]),
+    ];
+    for (i, (bytes, lob)) in fixtures.iter().enumerate() {
+        let b = box_score(bytes).unwrap();
+        for side in 0..2 {
+            let t = &b.teams[side];
+            let outs = b.outs_by_half.iter().skip(side).step_by(2).sum::<u32>();
+            assert_eq!(t.ab + t.bb + t.hbp + t.sh + t.sf, t.runs + t.left_on_base + outs, "I1 fixture {i} side {side}");
+            if lob[side] != 0 { assert_eq!(t.left_on_base, lob[side], "LOB fixture {i} side {side}"); }
         }
     }
 }

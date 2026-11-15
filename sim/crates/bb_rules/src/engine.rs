@@ -1028,6 +1028,11 @@ fn try_walk_off(st: &mut RulesState, ev: &mut Vec<Event>) {
         let from = lp_runners.iter().find(|x| x.runner == r).map(|x| x.start_base).unwrap_or(0);
         ev.push(Event::RunnerAdvanced { runner: r, from, to: 4, cause: AdvanceCause::OnPlay });
         score_run(st, r, ev);
+        // The game ends with the winning run: later pending touches did not complete and are
+        // not reported as advances (rules-spec §4.1; OBR 5.08(b)). Those runners are left on base.
+        if st.walk_off {
+            break;
+        }
     }
     st.play = PlayState::Dead;
     end_pa(st, PaResult::BattedBall, ev);
@@ -1073,6 +1078,7 @@ fn third_out(st: &mut RulesState, t: f64, start: Base, kind: OutKind, ev: &mut V
     // caught fly (the batter is retired before reaching first) (OBR 5.08(a)).
     let no_runs = kind == OutKind::Force || kind == OutKind::FlyOut || batter_before_first;
     st.play = PlayState::Dead;
+    let mut credited: Vec<AgentId> = Vec::new();
     if !no_runs {
         // Time play: runs whose home touch was delivered before this out count, including
         // equal timestamps (input order is the tie-break, rules-spec §1.2).
@@ -1082,19 +1088,28 @@ fn third_out(st: &mut RulesState, t: f64, start: Base, kind: OutKind, ev: &mut V
         let mut runs: Vec<(f64, AgentId)> = lp.runs_pending.iter().cloned().filter(|(ts, id)| *ts <= t && !following(*id)).collect();
         runs.sort_by(|a, b| a.0.total_cmp(&b.0));
         for (_, r) in runs {
+            if !st.walk_off {
+                credited.push(r);
+            }
             score_run(st, r, ev);
         }
     }
-    // Left on base: the runners actually standing on bases now, counted by identity (two runners
-    // sharing a base are both left on it, OBR 5.06(a)(2)); the one-slot-per-base `bases` keeps
-    // the later one for the record.
+    // Left on base (OBR 9.02(g), rules-spec §4.1): every runner on this play who reached base (the
+    // batter-runner included) and neither scored nor was put out, counted once by identity,
+    // wherever he is: on a base (two runners sharing one are both counted, OBR 5.06(a)(2)),
+    // between bases, or home with a run that did not count.
     st.bases = [None; 3];
     let mut lob = 0u8;
     for r in &lp.runners {
-        // An overrunning batter-runner still protected is entitled to first (§5.5).
-        if !r.out && r.scored_at.is_none() && (1..=3).contains(&r.at) && (r.on_base == Some(r.at) || r.overrun == Overrun::Protected) {
+        // "Put out" means an out recorded through the third out (`lp.outs`); `r.out` is also the
+        // removal flag of a held pass whose out is ignored after the third (rules-spec §6.3).
+        if lp.outs.iter().any(|o| o.1 == r.runner) || credited.contains(&r.runner) {
+            continue;
+        }
+        lob += 1;
+        // The one-slot-per-base `bases` keeps the later runner standing on a base, for the record.
+        if (1..=3).contains(&r.at) && r.scored_at.is_none() && (r.on_base == Some(r.at) || r.overrun == Overrun::Protected) {
             st.bases[(r.at - 1) as usize] = Some(r.runner);
-            lob += 1;
         }
     }
     end_pa_lob(st, PaResult::BattedBall, Some(lob), ev);

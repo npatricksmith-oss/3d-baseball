@@ -1,0 +1,31 @@
+id = "lob-004"
+title = "Two out, bases loaded, a fly in doubt: the runner from first passes the runner on third at home (6.0 s, the third out), and the runner from second passes him at 7.0 s; the ball drops fair: only the first pass is an out, so the batter, the runner from second and the runner from third are left on base, 3"
+# OBR 5.09(b)(9): out for passing, at the moment of the pass. The first such out is the third
+# out; the later pass is not an out (outs after the third are ignored, rules-spec 6.3), so that
+# runner neither scored nor was put out. OBR 9.02(g): LOB, three runners. Proof 9.03(c): the
+# batter (reached on the play) plus A.3, A.5 already on base minus A.4 (out) = 3. Codex LOB
+# review P1-1.
+rules = ["OBR 5.09(b)(9)", "OBR 5.06(c)(5)", "OBR 9.02(g)", "OBR 9.03(c)", "rules-spec 6.3", "rules-spec 4.1", "rules-spec 11 I10"]
+milestone = "M4"
+tags = ["lob", "passing", "pending-ball", "ignored-out"]
+initial = { inning = 5, outs = 2, batter = "A.6", bases = { first = "A.4", second = "A.5", third = "A.3" } }
+step = [
+  { fact = "PitchDelivered", t = 0.0 },
+  { fact = "BatContact", t = 0.4 },
+  { fact = "BaseLeft", t = 0.5, agent = "A.5", base = 2 },
+  { fact = "BaseLeft", t = 0.5, agent = "A.4", base = 1 },
+  { fact = "BaseTouched", t = 2.0, agent = "A.4", base = 2 },
+  { fact = "BaseLeft", t = 2.1, agent = "A.4", base = 2 },
+  { fact = "BaseTouched", t = 3.0, agent = "A.6", base = 1 },
+  { fact = "BaseTouched", t = 4.0, agent = "A.5", base = 3 },
+  { fact = "BaseTouched", t = 4.1, agent = "A.4", base = 3 },
+  { fact = "BaseLeft", t = 5.0, agent = "A.4", base = 3 },
+  { fact = "BaseTouched", t = 6.0, agent = "A.4", base = 4 },
+  { fact = "BaseLeft", t = 6.5, agent = "A.5", base = 3 },
+  { fact = "BaseTouched", t = 7.0, agent = "A.5", base = 4 },
+  { fact = "BallTouched", t = 8.0, what = "Ground", pos = [20.0, 70.0], expect_events = [
+    { event = "RunnerOut", runner = "A.4", base = 4, kind = "Tag" },
+    { event = "HalfInningEnded", runs = 0, left_on_base = 3 },
+  ] },
+]
+expect = { score = [0, 0], inning = 5, half = "bottom", outs = 0 }
