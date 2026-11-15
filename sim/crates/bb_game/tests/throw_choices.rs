@@ -47,8 +47,8 @@ fn replay_with(text: &str, params: bb_agents::throwing::ChoiceParams) -> (LiveOu
     step(&mut st, &Input::BatContact { t: tc });
     let side = st.half.batting();
     let fattrs = core::array::from_fn(|i| FielderAttrs { throws: g.rosters.teams[1 - side].players[i].throws, throw_choice: params, ..FielderAttrs::average(i) });
-    let mut runners = vec![RunnerIn { id: st.batter, base: 0, speed: 8.2 }];
-    runners.extend(st.bases.iter().enumerate().filter_map(|(i, id)| id.map(|id| RunnerIn { id, base: i as u8 + 1, speed: 8.2 })));
+    let mut runners = vec![RunnerIn { id: st.batter, base: 0, speed: 8.2, tau_s: bb_agents::running::LEAGUE_TAU_S }];
+    runners.extend(st.bases.iter().enumerate().filter_map(|(i, id)| id.map(|id| RunnerIn { id, base: i as u8 + 1, speed: 8.2, tau_s: bb_agents::running::LEAGUE_TAU_S })));
     let env = FlightEnv::default_env();
     let field = Field::default();
     let inp = LiveInput {

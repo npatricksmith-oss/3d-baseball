@@ -13,7 +13,7 @@ fn main() {
     let (l, s) = (0.0 * DEG, -15.0 * DEG);
     let v = Vec3::new(m::sin(s) * m::cos(l), m::cos(s) * m::cos(l), m::sin(l)) * (90.0 * MPH);
     let ball = BallState { r: Vec3::new(0.0, 0.4, 0.9), v, w: Vec3::new(m::cos(s), -m::sin(s), 0.0) * (-800.0 * RPM) };
-    let out = simulate_play(&PlayInput { env: &env, field: &field, ball, t_contact: 0.45, runners: vec![RunnerIn { id: 1, base: 0, speed: 8.2 }], outs: 0, bats: bb_observe::Hand::Right, fielders, fattrs, seed: 1, play: 5 });
+    let out = simulate_play(&PlayInput { env: &env, field: &field, ball, t_contact: 0.45, runners: vec![RunnerIn { id: 1, base: 0, speed: 8.2, tau_s: bb_agents::running::LEAGUE_TAU_S }], outs: 0, bats: bb_observe::Hand::Right, fielders, fattrs, seed: 1, play: 5 });
     for t in [0.6, 0.8, 1.0, 1.2, 1.5, 2.0, 3.0] {
         let (p, v) = out.path.at(t);
         println!("t {t:.1}: ball ({:6.1},{:6.1},{:4.2}) speed {:4.1}", p.x, p.y, p.z, v.norm());

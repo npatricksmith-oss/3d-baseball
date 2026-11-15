@@ -81,13 +81,16 @@ const RUNNER_READ_SIGMA0: f64 = 2.0;
 /// Agents' internal flight step, s.
 const AGENT_DT: f64 = 0.1;
 const BASE_L: f64 = 27.432;
-const BATTER_START: f64 = 0.25;
-/// Time constant of a runner's acceleration, s, fitted to measurements (tag-up sources note
-/// §1, §5): at 8.2 m/s a standing 90 ft then takes 4.02 s, the mean 90-ft split of runners
-/// on third in sacrifice-fly situations (4.03 s, Statcast 2017–2020, n = 848), and with
-/// the batter's start delay an average runner reaches first about 4.28 s after contact
-/// (2016 means 4.26 s left-handed, 4.30 s right-handed). Was 0.85 s (4.19 s; 4.45 s).
-const RUNNER_TAU: f64 = 0.68;
+/// From contact to the batter's first step out of the box, s [E]: he finishes his swing and
+/// drops the bat. Fitted with the league τ and the boxes' real distances to first (27.98 m
+/// right-handed, 26.58 m left-handed) so the average runner's home to first is 4.37 s
+/// right-handed and 4.20 s left-handed, mean 4.29 s (2016 means 4.30 s and 4.26 s; the scouting
+/// scale's average is 4.3 and 4.2). Was 0.25 s with both charged 27.43 m.
+const BATTER_START: f64 = 0.20;
+/// The league-typical time constant of a runner's acceleration, s: what a fielder assumes of
+/// a runner (he does not know the runner's own). A runner's legs and his own judgment use
+/// his own `Runner::tau`.
+const RUNNER_TAU: f64 = bb_agents::running::LEAGUE_TAU_S;
 /// A batter-runner who stops at first runs through the bag down the line and brakes at this
 /// rate, m/s² [E] (agent-models §6.2): from 8.2 m/s he pulls up 8.4 m (28 ft) past the bag.
 const OVERRUN_DECEL: f64 = 4.0;
@@ -211,8 +214,6 @@ fn reference_env() -> &'static FlightEnv {
 }
 
 const RECEIVE_REACH: f64 = 1.5;
-/// Running distance over which the batter leaves his box and joins the base path, m [E].
-const BOX_EXIT_M: f64 = 4.0;
 /// How far behind a base its backup stands, on the line of the throw, m [E] (coaching
 /// guides give 15–18 m for an outfielder; foul ground allows less).
 const BACKUP_M: f64 = 13.0;
@@ -686,6 +687,8 @@ struct Runner {
     /// private `goal` is never offered to the fielder's target builder.
     direction: f64,
     vmax: f64,
+    /// His own acceleration time constant, s.
+    tau: f64,
     /// Base the runner is heading for (may be behind it on a retreat).
     goal: u8,
     out: bool,
@@ -937,6 +940,19 @@ fn visible_target(r: &Runner, params: throwing::ChoiceParams) -> Option<u8> {
 }
 
 /// Position on the base path at distance `s` from home.
+/// How far up the first-base line the batter joins it from his box, m [E].
+const BOX_EXIT_M: f64 = 4.0;
+
+/// The batter's path coordinate in his box. He runs straight from the box to the point
+/// `BOX_EXIT_M` up the first-base line, and his coordinate there is `BOX_EXIT_M`, so he
+/// starts that straight line's length short of it. A right-handed batter starts behind the
+/// plate's zero (about −0.55 m: 27.98 m to first), a left-handed one ahead of it (about
+/// +0.85 m: 26.58 m): the left-handed batter's 1.4 m shorter run (tag-up review P2-3).
+pub(crate) fn batter_start_s(batter_box: Vec3) -> f64 {
+    let d = path_pos(BOX_EXIT_M) - Vec3::new(batter_box.x, batter_box.y, 0.0);
+    BOX_EXIT_M - m::sqrt(d.x * d.x + d.y * d.y)
+}
+
 pub(crate) fn path_pos(s: f64) -> Vec3 {
     let s = s.clamp(0.0, 4.0 * BASE_L);
     let k = ((s / BASE_L).floor() as u8).min(3);
@@ -1060,8 +1076,8 @@ const MAX_TURNS: u8 = 1;
 /// How long a runner leaving from a tag-up needs to cover `d` m: the wait for his first step,
 /// then the speed law from rest with the set start's time constant (agent-models §6.4). His
 /// decision uses this and his legs run the same law; no earlier speed carries over.
-fn tag_up_time(tag: bb_agents::running::TagUpParams, wait_s: f64, d: f64, v_max: f64) -> f64 {
-    wait_s + run_time(d, v_max, tag.tau_s)
+fn tag_up_time(tag: bb_agents::running::TagUpParams, wait_s: f64, d: f64, v_max: f64, tau: f64) -> f64 {
+    wait_s + run_time(d, v_max, tau * tag.tau_gain)
 }
 
 /// A fielder's estimate of how long a runner needs to cover `d` metres: he sees the runner's
@@ -4062,8 +4078,8 @@ impl<'a> Sim<'a> {
         let d_run = (next as f64 * BASE_L - r.s).max(0.0);
         let t_run = match r.set_start {
             // Going from a tag-up: the same start his legs will run (§6.4).
-            Some(leave) => tag_up_time(self.inp.tag_up, (leave - self.t).max(0.0), d_run, r.vmax),
-            None => run_time(d_run, r.vmax, RUNNER_TAU) * if r.v > 1.0 { 0.75 } else { 1.0 },
+            Some(leave) => tag_up_time(self.inp.tag_up, (leave - self.t).max(0.0), d_run, r.vmax, r.tau),
+            None => run_time(d_run, r.vmax, r.tau) * if r.v > 1.0 { 0.75 } else { 1.0 },
         };
         // Unforced, he must beat the tag, not only the ball: his belief of the time it takes.
         let tag_s = if forced { 0.0 } else { self.inp.tag_up.typical_tag_s };
@@ -4247,8 +4263,8 @@ impl<'a> Sim<'a> {
         // moving that way; moving the other way the time includes the stop, as the movement
         // step makes him brake (`run_time_from`, the same laws and `BRAKE`).
         let v_fwd = r.direction * r.v;
-        let t_on = run_time_from(d_on, v_fwd, r.vmax, RUNNER_TAU);
-        let t_back = run_time_to_stop(d_back, -v_fwd, r.vmax, RUNNER_TAU);
+        let t_on = run_time_from(d_on, v_fwd, r.vmax, r.tau);
+        let t_back = run_time_to_stop(d_back, -v_fwd, r.vmax, r.tau);
         // Unforced, he must beat the tag at either base, not only the ball.
         let tag_s = self.inp.tag_up.typical_tag_s;
         let ball_on = self.ball_time_to(k, next, 2 * n + 1) + tag_s;
@@ -4417,7 +4433,7 @@ impl<'a> Sim<'a> {
             if r.v == 0.0 {
                 r.moving_since = now;
             }
-            let tau = if r.set_start.is_some() { tag.tau_s } else { RUNNER_TAU };
+            let tau = if r.set_start.is_some() { r.tau * tag.tau_gain } else { r.tau };
             if against {
                 r.v = (r.v - BRAKE * DT).max(0.0);
             } else if dir < 0.0 {
@@ -4513,7 +4529,7 @@ impl<'a> Sim<'a> {
                 }
             }
             OverrunPhase::Back => {
-                r.v += (OVERRUN_RETURN_MPS - r.v) * (DT / RUNNER_TAU);
+                r.v += (OVERRUN_RETURN_MPS - r.v) * (DT / r.tau);
                 r.over_m -= r.v * DT;
                 if r.over_m <= 0.0 {
                     r.over_m = 0.0;
@@ -4861,22 +4877,21 @@ impl<'a> Sim<'a> {
     }
 
     /// Where a runner is. Runners move along the base path (`path_pos`), except that the
-    /// batter starts in his box, off the path: his offset from the plate shrinks linearly to
-    /// nothing over his first `BOX_EXIT_M` of running. Tags, his own view of the ball, and the
-    /// recorded track all use this one position. The distance he is charged for is still the
-    /// base-path distance, which is within a few centimetres of this route's length. On his
-    /// overrun of first he is past the bag on the first-base line.
+    /// batter starts in his box, off the path, and runs straight to the point `BOX_EXIT_M`
+    /// up the first-base line. His path coordinate starts at [`batter_start_s`], so the
+    /// distance he is charged is the length of the route he runs. Tags, his own view of the ball, and the recorded track all use
+    /// this one position. On his overrun of first he is past the bag on the first-base line.
     fn runner_pos(&self, r: &Runner) -> Vec3 {
         if r.overrun != OverrunPhase::None {
             // Past first, straight down the first-base line.
             return base_pos(1) * (1.0 + r.over_m / BASE_L);
         }
-        let p = path_pos(r.s);
         if r.start == 0 && r.s < BOX_EXIT_M {
             let b = self.inp.batter_box;
-            p + Vec3::new(b.x, b.y, 0.0) * (1.0 - r.s / BOX_EXIT_M)
+            let (b, s0) = (Vec3::new(b.x, b.y, 0.0), batter_start_s(b));
+            b + (path_pos(BOX_EXIT_M) - b) * ((r.s - s0) / (BOX_EXIT_M - s0)).clamp(0.0, 1.0)
         } else {
-            p
+            path_pos(r.s)
         }
     }
 
@@ -4974,10 +4989,11 @@ fn new_sim<'a>(inp: &'a LiveInput<'a>, st: &'a mut RulesState) -> Sim<'a> {
         .map(|x| Runner {
             id: x.id,
             start: x.base,
-            s: if x.base == 0 { 0.0 } else { lead_s(x.base) },
+            s: if x.base == 0 { batter_start_s(inp.batter_box) } else { lead_s(x.base) },
             v: 0.0,
             direction: 1.0,
             vmax: x.speed,
+            tau: x.tau_s,
             goal: x.base,
             out: false,
             scored: false,
@@ -5341,7 +5357,7 @@ fn simulate_live_inner(inp: &LiveInput, st: &mut RulesState) -> LiveOutput {
         let touched = sim.out.facts.iter().any(|f| matches!(f, Input::BaseTouched { agent, base: 1, holding_ball: false, .. } if *agent == r.id));
         if !touched && !r.out && r.s < BASE_L {
             let along = r.v.max(0.0) * r.direction.max(0.0);
-            sim.out.batter_first_eta = Some(sim.t + run_time_from(BASE_L - r.s, along, r.vmax, RUNNER_TAU));
+            sim.out.batter_first_eta = Some(sim.t + run_time_from(BASE_L - r.s, along, r.vmax, r.tau));
         }
     }
     sim.out
@@ -5464,7 +5480,7 @@ mod tests {
     #[test]
     fn second_base_cover_does_not_read_a_private_target() {
         let fx = fixture(&[(0x0007, 1)]);
-        let inp = input(&fx, vec![RunnerIn { id: fx.st.batter, base: 0, speed: 8.2 }, RunnerIn { id: 0x0007, base: 1, speed: 8.2 }]);
+        let inp = input(&fx, vec![RunnerIn { id: fx.st.batter, base: 0, speed: 8.2, tau_s: bb_agents::running::LEAGUE_TAU_S }, RunnerIn { id: 0x0007, base: 1, speed: 8.2, tau_s: bb_agents::running::LEAGUE_TAU_S }]);
         let mut cover2 = Vec::new();
         for x in [-40.0, 40.0] {
             let mut st = fx.st.clone();
@@ -5487,7 +5503,7 @@ mod tests {
         const LF: usize = 6;
         const RF: usize = 8;
         let fx = fixture(&[]);
-        let inp = input(&fx, vec![RunnerIn { id: fx.st.batter, base: 0, speed: 8.2 }]);
+        let inp = input(&fx, vec![RunnerIn { id: fx.st.batter, base: 0, speed: 8.2, tau_s: bb_agents::running::LEAGUE_TAU_S }]);
         let mut rf = Vec::new();
         for lf_chasing in [false, true] {
             let mut st = fx.st.clone();
@@ -5516,7 +5532,7 @@ mod tests {
         const B2: usize = 3;
         const SS: usize = 5;
         let fx = fixture(&[]);
-        let inp = input(&fx, vec![RunnerIn { id: fx.st.batter, base: 0, speed: 8.2 }]);
+        let inp = input(&fx, vec![RunnerIn { id: fx.st.batter, base: 0, speed: 8.2, tau_s: bb_agents::running::LEAGUE_TAU_S }]);
         let mut seen = Vec::new();
         for t_int in [0.8, 20.0] {
             let mut st = fx.st.clone();
@@ -5539,7 +5555,7 @@ mod tests {
     #[test]
     fn fly_catchable_just_before_the_wall_is_caught() {
         let mut fx = fixture(&[]);
-        let inp = input(&fx, vec![RunnerIn { id: fx.st.batter, base: 0, speed: 8.2 }]);
+        let inp = input(&fx, vec![RunnerIn { id: fx.st.batter, base: 0, speed: 8.2, tau_s: bb_agents::running::LEAGUE_TAU_S }]);
         let fence = fx.field.fence_at(0.0);
         let mut st = fx.st.clone();
         let mut sim = new_sim(&inp, &mut st);
@@ -5558,7 +5574,7 @@ mod tests {
     #[test]
     fn ball_in_reach_of_a_fielder_moving_away_is_caught_now() {
         let fx = fixture(&[]);
-        let inp = input(&fx, vec![RunnerIn { id: fx.st.batter, base: 0, speed: 8.2 }]);
+        let inp = input(&fx, vec![RunnerIn { id: fx.st.batter, base: 0, speed: 8.2, tau_s: bb_agents::running::LEAGUE_TAU_S }]);
         let mut st = fx.st.clone();
         let mut sim = new_sim(&inp, &mut st);
         sim.f[CF].pos = Vec3::new(0.0, 80.0, 0.0);
@@ -5576,7 +5592,7 @@ mod tests {
     #[test]
     fn standing_catch_happens_at_closest_approach() {
         let fx = fixture(&[]);
-        let inp = input(&fx, vec![RunnerIn { id: fx.st.batter, base: 0, speed: 8.2 }]);
+        let inp = input(&fx, vec![RunnerIn { id: fx.st.batter, base: 0, speed: 8.2, tau_s: bb_agents::running::LEAGUE_TAU_S }]);
         let mut st = fx.st.clone();
         let mut sim = new_sim(&inp, &mut st);
         sim.f[CF].pos = Vec3::new(0.0, 80.0, 0.0);
@@ -5594,7 +5610,7 @@ mod tests {
     /// ball rolling across in front of him at 6 m/s, passing `pass_m` from him at time 2.0.
     fn down_after_dive(pass_m: f64) -> (Vec<Input>, f64) {
         let fx = fixture(&[]);
-        let inp = input(&fx, vec![RunnerIn { id: fx.st.batter, base: 0, speed: 8.2 }]);
+        let inp = input(&fx, vec![RunnerIn { id: fx.st.batter, base: 0, speed: 8.2, tau_s: bb_agents::running::LEAGUE_TAU_S }]);
         let mut st = fx.st.clone();
         let mut sim = new_sim(&inp, &mut st);
         sim.f[CF].pos = Vec3::new(0.0, 80.0, 0.0);
@@ -5624,7 +5640,7 @@ mod tests {
     /// it appears at time `t0`. Runs 0.8 s of world ticks.
     fn crossing_ball(i: usize, pass_m: f64, lead_s: f64, t0: f64, sure: bool) -> (Sim<'static>, f64) {
         let fx: &'static Fixture = Box::leak(Box::new(fixture(&[])));
-        let mut inp = input(fx, vec![RunnerIn { id: fx.st.batter, base: 0, speed: 8.2 }]);
+        let mut inp = input(fx, vec![RunnerIn { id: fx.st.batter, base: 0, speed: 8.2, tau_s: bb_agents::running::LEAGUE_TAU_S }]);
         if !sure {
             inp.fattrs = core::array::from_fn(FielderAttrs::average);
         }
@@ -5686,7 +5702,7 @@ mod tests {
     /// ball moving `believed_v`. Runs `ticks` world ticks.
     fn weighed_dive(hands: f64, r: Vec3, world_v: Vec3, believed_v: Vec3, ticks: usize) -> usize {
         let fx = fixture(&[]);
-        let mut inp = input(&fx, vec![RunnerIn { id: fx.st.batter, base: 0, speed: 8.2 }]);
+        let mut inp = input(&fx, vec![RunnerIn { id: fx.st.batter, base: 0, speed: 8.2, tau_s: bb_agents::running::LEAGUE_TAU_S }]);
         inp.fattrs[CF].hands = hands;
         let mut st = fx.st.clone();
         let mut sim = new_sim(&inp, &mut st);
@@ -5755,7 +5771,7 @@ mod tests {
     #[test]
     fn nobody_dives_at_a_ball_he_is_about_to_run_down() {
         let fx = fixture(&[]);
-        let inp = input(&fx, vec![RunnerIn { id: fx.st.batter, base: 0, speed: 8.2 }]);
+        let inp = input(&fx, vec![RunnerIn { id: fx.st.batter, base: 0, speed: 8.2, tau_s: bb_agents::running::LEAGUE_TAU_S }]);
         let mut st = fx.st.clone();
         let mut sim = new_sim(&inp, &mut st);
         sim.f[CF].pos = Vec3::new(0.0, 80.0, 0.0);
@@ -5779,7 +5795,7 @@ mod tests {
     #[test]
     fn a_dive_never_carries_the_body_through_the_wall() {
         let fx = fixture(&[]);
-        let inp = input(&fx, vec![RunnerIn { id: fx.st.batter, base: 0, speed: 8.2 }]);
+        let inp = input(&fx, vec![RunnerIn { id: fx.st.batter, base: 0, speed: 8.2, tau_s: bb_agents::running::LEAGUE_TAU_S }]);
         let mut st = fx.st.clone();
         let mut sim = new_sim(&inp, &mut st);
         let at = |th: f64, inset: f64| {
@@ -5814,7 +5830,7 @@ mod tests {
     #[test]
     fn a_fielder_down_from_a_dive_takes_a_rising_ball_while_it_is_low() {
         let fx = fixture(&[]);
-        let inp = input(&fx, vec![RunnerIn { id: fx.st.batter, base: 0, speed: 8.2 }]);
+        let inp = input(&fx, vec![RunnerIn { id: fx.st.batter, base: 0, speed: 8.2, tau_s: bb_agents::running::LEAGUE_TAU_S }]);
         let mut st = fx.st.clone();
         let mut sim = new_sim(&inp, &mut st);
         sim.f[CF].pos = Vec3::new(0.0, 80.0, 0.0);
@@ -5865,7 +5881,7 @@ mod tests {
     fn legal_tag_up_from_third_scores() {
         const R: AgentId = 0x0007;
         let fx = fixture(&[(R, 3)]);
-        let inp = input(&fx, vec![RunnerIn { id: fx.st.batter, base: 0, speed: 8.2 }, RunnerIn { id: R, base: 3, speed: 12.0 }]);
+        let inp = input(&fx, vec![RunnerIn { id: fx.st.batter, base: 0, speed: 8.2, tau_s: bb_agents::running::LEAGUE_TAU_S }, RunnerIn { id: R, base: 3, speed: 12.0, tau_s: bb_agents::running::LEAGUE_TAU_S }]);
         let mut st = fx.st.clone();
         let mut sim = new_sim(&inp, &mut st);
         sim.r[1].tag_up = true;
@@ -5882,7 +5898,7 @@ mod tests {
     fn tag_up_from_third(tag: bb_agents::running::TagUpParams, cf_y: f64, v_before: f64) -> (Sim<'static>, Vec<f64>) {
         const R: AgentId = 0x0007;
         let fx: &'static Fixture = Box::leak(Box::new(fixture(&[(R, 3)])));
-        let mut inp = input(fx, vec![RunnerIn { id: fx.st.batter, base: 0, speed: 8.2 }, RunnerIn { id: R, base: 3, speed: 8.2 }]);
+        let mut inp = input(fx, vec![RunnerIn { id: fx.st.batter, base: 0, speed: 8.2, tau_s: bb_agents::running::LEAGUE_TAU_S }, RunnerIn { id: R, base: 3, speed: 8.2, tau_s: bb_agents::running::LEAGUE_TAU_S }]);
         inp.tag_up = tag;
         let inp: &'static LiveInput<'static> = Box::leak(Box::new(inp));
         let st: &'static mut RulesState = Box::leak(Box::new(fx.st.clone()));
@@ -5919,12 +5935,12 @@ mod tests {
     // touches home 0.2 + 3.94453 s after the 5.0 s catch, within the 60 Hz step's error.
     #[test]
     fn a_tag_up_runs_the_set_start_he_judged() {
-        let tag = bb_agents::running::TagUpParams { react_s: 0.2, tau_s: 0.6, typical_tag_s: 0.0 };
+        let tag = bb_agents::running::TagUpParams { react_s: 0.2, tau_gain: 0.6 / RUNNER_TAU, typical_tag_s: 0.0 };
         // A throw from 140 m needs a relay: the run is clearly on, whatever his timing draw.
         let (sim, _) = tag_up_from_third(tag, 140.0, 0.0);
         let t = home_touch(&sim).expect("he went");
         assert!((t - (5.0 + 0.2 + 3.94453)).abs() < 2.0 * DT, "home at {t:.4}");
-        assert!((tag_up_time(tag, 0.2, BASE_L, 8.2) - (0.2 + 3.94453)).abs() < 1e-3);
+        assert!((tag_up_time(tag, 0.2, BASE_L, 8.2, RUNNER_TAU) - (0.2 + 3.94453)).abs() < 1e-3);
     }
 
     // §6.4: standing on the bag he has no speed, whatever the state said before (before A4 a
@@ -5934,14 +5950,14 @@ mod tests {
     fn no_speed_carries_over_into_a_tag_up() {
         let tag = bb_agents::running::TagUpParams::default();
         let (_, speeds) = tag_up_from_third(tag, 140.0, 6.19);
-        assert!((speeds[0] - 8.2 * DT / tag.tau_s).abs() < 1e-9, "first tick {:.4} m/s", speeds[0]);
+        assert!((speeds[0] - 8.2 * DT / (RUNNER_TAU * tag.tau_gain)).abs() < 1e-9, "first tick {:.4} m/s", speeds[0]);
     }
 
     // §6.4: his decision uses his own start. A runner who would need 3 s more to get going
     // does not try it on a ball caught 95 m out; with a 0.2 s first step he does.
     #[test]
     fn the_decision_uses_the_set_start() {
-        let quick = bb_agents::running::TagUpParams { react_s: 0.2, tau_s: 0.6, typical_tag_s: 0.0 };
+        let quick = bb_agents::running::TagUpParams { react_s: 0.2, tau_gain: 0.6 / RUNNER_TAU, typical_tag_s: 0.0 };
         let slow = bb_agents::running::TagUpParams { react_s: 3.2, ..quick };
         assert!(home_touch(&tag_up_from_third(quick, 140.0, 0.0).0).is_some());
         assert!(home_touch(&tag_up_from_third(slow, 95.0, 0.0).0).is_none(), "he should hold");
@@ -5952,7 +5968,7 @@ mod tests {
     fn tag_at_home(tag_s: f64) -> Sim<'static> {
         const R: AgentId = 0x0007;
         let fx: &'static Fixture = Box::leak(Box::new(fixture(&[(R, 3)])));
-        let mut inp = input(fx, vec![RunnerIn { id: fx.st.batter, base: 0, speed: 8.2 }, RunnerIn { id: R, base: 3, speed: 8.2 }]);
+        let mut inp = input(fx, vec![RunnerIn { id: fx.st.batter, base: 0, speed: 8.2, tau_s: bb_agents::running::LEAGUE_TAU_S }, RunnerIn { id: R, base: 3, speed: 8.2, tau_s: bb_agents::running::LEAGUE_TAU_S }]);
         inp.fattrs[1].tag_apply_s = tag_s;
         let inp: &'static LiveInput<'static> = Box::leak(Box::new(inp));
         let st: &'static mut RulesState = Box::leak(Box::new(fx.st.clone()));
@@ -6007,7 +6023,7 @@ mod tests {
     #[test]
     fn the_base_ahead_is_held_by_what_the_runner_sees() {
         let fx = fixture(&[(6, 1), (7, 2)]);
-        let inp = input(&fx, vec![RunnerIn { id: fx.st.batter, base: 0, speed: 8.2 }, RunnerIn { id: 6, base: 1, speed: 8.2 }, RunnerIn { id: 7, base: 2, speed: 8.2 }]);
+        let inp = input(&fx, vec![RunnerIn { id: fx.st.batter, base: 0, speed: 8.2, tau_s: bb_agents::running::LEAGUE_TAU_S }, RunnerIn { id: 6, base: 1, speed: 8.2, tau_s: bb_agents::running::LEAGUE_TAU_S }, RunnerIn { id: 7, base: 2, speed: 8.2, tau_s: bb_agents::running::LEAGUE_TAU_S }]);
         let mut st = fx.st.clone();
         let mut sim = new_sim(&inp, &mut st);
         sim.t = 3.0;
@@ -6032,7 +6048,7 @@ mod tests {
     #[test]
     fn a_runner_ahead_breaking_forward_does_not_turn_the_runner_behind_back() {
         let fx = fixture(&[(6, 1), (7, 2)]);
-        let inp = input(&fx, vec![RunnerIn { id: fx.st.batter, base: 0, speed: 8.2 }, RunnerIn { id: 6, base: 1, speed: 8.2 }, RunnerIn { id: 7, base: 2, speed: 8.2 }]);
+        let inp = input(&fx, vec![RunnerIn { id: fx.st.batter, base: 0, speed: 8.2, tau_s: bb_agents::running::LEAGUE_TAU_S }, RunnerIn { id: 6, base: 1, speed: 8.2, tau_s: bb_agents::running::LEAGUE_TAU_S }, RunnerIn { id: 7, base: 2, speed: 8.2, tau_s: bb_agents::running::LEAGUE_TAU_S }]);
         let mut st = fx.st.clone();
         let mut sim = new_sim(&inp, &mut st);
         sim.t = 3.0;
@@ -6051,7 +6067,7 @@ mod tests {
     // Statcast 2017–2020). The decision's start model, at its set values, must land there.
     #[test]
     fn the_tag_up_time_is_inside_the_measured_range() {
-        let t = tag_up_time(bb_agents::running::TagUpParams::default(), 0.0, BASE_L, 8.2);
+        let t = tag_up_time(bb_agents::running::TagUpParams::default(), 0.0, BASE_L, 8.2, RUNNER_TAU);
         assert!((3.9..=4.3).contains(&t), "third to home {t:.3} s");
     }
 
@@ -6064,7 +6080,7 @@ mod tests {
     fn runner_off_base_at_the_catch_retouches_once_then_advances() {
         const R: AgentId = 0x0007;
         let fx = fixture(&[(R, 2)]);
-        let inp = input(&fx, vec![RunnerIn { id: fx.st.batter, base: 0, speed: 8.2 }, RunnerIn { id: R, base: 2, speed: 16.0 }]);
+        let inp = input(&fx, vec![RunnerIn { id: fx.st.batter, base: 0, speed: 8.2, tau_s: bb_agents::running::LEAGUE_TAU_S }, RunnerIn { id: R, base: 2, speed: 16.0, tau_s: bb_agents::running::LEAGUE_TAU_S }]);
         let mut st = fx.st.clone();
         let mut sim = new_sim(&inp, &mut st);
         sim.emit(Input::BaseLeft { t: 4.0, agent: R, base: 2 });
@@ -6089,7 +6105,7 @@ mod tests {
     fn runner_home_before_the_catch_goes_back_and_touches_again() {
         const R: AgentId = 0x0007;
         let fx = fixture(&[(R, 3)]);
-        let inp = input(&fx, vec![RunnerIn { id: fx.st.batter, base: 0, speed: 8.2 }, RunnerIn { id: R, base: 3, speed: 16.0 }]);
+        let inp = input(&fx, vec![RunnerIn { id: fx.st.batter, base: 0, speed: 8.2, tau_s: bb_agents::running::LEAGUE_TAU_S }, RunnerIn { id: R, base: 3, speed: 16.0, tau_s: bb_agents::running::LEAGUE_TAU_S }]);
         let mut st = fx.st.clone();
         let mut sim = new_sim(&inp, &mut st);
         sim.emit(Input::BaseLeft { t: 1.0, agent: R, base: 3 });
@@ -6125,7 +6141,7 @@ mod tests {
     #[test]
     fn catch_is_not_deferred_out_of_the_wall_leap_zone() {
         let fx = fixture(&[]);
-        let inp = input(&fx, vec![RunnerIn { id: fx.st.batter, base: 0, speed: 8.2 }]);
+        let inp = input(&fx, vec![RunnerIn { id: fx.st.batter, base: 0, speed: 8.2, tau_s: bb_agents::running::LEAGUE_TAU_S }]);
         let fence = fx.field.fence_at(0.0);
         let mut st = fx.st.clone();
         let mut sim = new_sim(&inp, &mut st);
@@ -6152,7 +6168,7 @@ mod tests {
     #[test]
     fn intercept_finds_a_grounder_passing_between_scan_samples() {
         let fx = fixture(&[]);
-        let inp = input(&fx, vec![RunnerIn { id: fx.st.batter, base: 0, speed: 8.2 }]);
+        let inp = input(&fx, vec![RunnerIn { id: fx.st.batter, base: 0, speed: 8.2, tau_s: bb_agents::running::LEAGUE_TAU_S }]);
         for phase in 0..12 {
             let mut st = fx.st.clone();
             let mut sim = new_sim(&inp, &mut st);
@@ -6173,7 +6189,7 @@ mod tests {
     #[test]
     fn replan_counts_the_speed_the_fielder_already_has() {
         let fx = fixture(&[]);
-        let inp = input(&fx, vec![RunnerIn { id: fx.st.batter, base: 0, speed: 8.2 }]);
+        let inp = input(&fx, vec![RunnerIn { id: fx.st.batter, base: 0, speed: 8.2, tau_s: bb_agents::running::LEAGUE_TAU_S }]);
         let mut st = fx.st.clone();
         let mut sim = new_sim(&inp, &mut st);
         sim.t = inp.t_contact + 1.0;
@@ -6197,7 +6213,7 @@ mod tests {
     #[test]
     fn intercept_finds_the_first_reachable_moment_on_a_slowing_ball() {
         let fx = fixture(&[]);
-        let inp = input(&fx, vec![RunnerIn { id: fx.st.batter, base: 0, speed: 8.2 }]);
+        let inp = input(&fx, vec![RunnerIn { id: fx.st.batter, base: 0, speed: 8.2, tau_s: bb_agents::running::LEAGUE_TAU_S }]);
         let mut st = fx.st.clone();
         let mut sim = new_sim(&inp, &mut st);
         sim.t = 2.0;
@@ -6234,7 +6250,7 @@ mod tests {
     #[test]
     fn the_plan_includes_the_slow_down_for_the_wall() {
         let fx = fixture(&[]);
-        let inp = input(&fx, vec![RunnerIn { id: fx.st.batter, base: 0, speed: 8.2 }]);
+        let inp = input(&fx, vec![RunnerIn { id: fx.st.batter, base: 0, speed: 8.2, tau_s: bb_agents::running::LEAGUE_TAU_S }]);
         let field = &fx.field;
         // The stand point on the center-field line whose body is `c` clear of the wall.
         let stand_y = |c: f64| {
@@ -6295,7 +6311,7 @@ mod tests {
         let fence = field.fence_at(0.0);
         let mut lo = 20.0;
         let mut hi = 90.0;
-        let mut inp = input(&fx, vec![RunnerIn { id: fx.st.batter, base: 0, speed: 8.2 }]);
+        let mut inp = input(&fx, vec![RunnerIn { id: fx.st.batter, base: 0, speed: 8.2, tau_s: bb_agents::running::LEAGUE_TAU_S }]);
         let mut path = None;
         for _ in 0..40 {
             let v = 0.5 * (lo + hi);
@@ -6340,7 +6356,7 @@ mod tests {
     fn a_fielder_does_not_call_a_ball_the_wall_would_make_him_late_for() {
         let fx = fixture(&[]);
         let field = &fx.field;
-        let mut inp = input(&fx, vec![RunnerIn { id: fx.st.batter, base: 0, speed: 8.2 }]);
+        let mut inp = input(&fx, vec![RunnerIn { id: fx.st.batter, base: 0, speed: 8.2, tau_s: bb_agents::running::LEAGUE_TAU_S }]);
         inp.ball = BallState { r: Vec3::new(0.0, 0.5, 1.0), v: Vec3::new(0.0, 5.0, 55.0), w: Vec3::ZERO };
         let path = batted_path(&fx.env, field, inp.ball, inp.t_contact, |_, _| (0.0, 0.0));
         let (mut lo, mut hi) = (60.0, 200.0);
@@ -6373,7 +6389,7 @@ mod tests {
     #[test]
     fn reach_estimate_tracks_the_movement_step() {
         let fx = fixture(&[]);
-        let inp = input(&fx, vec![RunnerIn { id: fx.st.batter, base: 0, speed: 8.2 }]);
+        let inp = input(&fx, vec![RunnerIn { id: fx.st.batter, base: 0, speed: 8.2, tau_s: bb_agents::running::LEAGUE_TAU_S }]);
         let (mut worst_early, mut worst_late, mut sq, mut n) = (0.0f64, 0.0f64, 0.0, 0.0);
         for &d in &[2.0, 5.0, 10.0, 20.0, 40.0] {
             for &u in &[-6.0, -3.0, 0.0, 3.0, 7.0] {
@@ -6444,7 +6460,7 @@ mod tests {
     #[test]
     fn fielders_jump_toward_the_side_they_read() {
         let fx = fixture(&[]);
-        let mut inp = input(&fx, vec![RunnerIn { id: fx.st.batter, base: 0, speed: 8.2 }]);
+        let mut inp = input(&fx, vec![RunnerIn { id: fx.st.batter, base: 0, speed: 8.2, tau_s: bb_agents::running::LEAGUE_TAU_S }]);
         for a in inp.fattrs.iter_mut() {
             a.antic_sigma = 0.0;
             a.swing_sigma = 0.0;
@@ -6483,7 +6499,7 @@ mod tests {
     #[test]
     fn the_jump_reads_the_bat_not_the_ball() {
         let fx = fixture(&[]);
-        let mut inp = input(&fx, vec![RunnerIn { id: fx.st.batter, base: 0, speed: 8.2 }]);
+        let mut inp = input(&fx, vec![RunnerIn { id: fx.st.batter, base: 0, speed: 8.2, tau_s: bb_agents::running::LEAGUE_TAU_S }]);
         inp.pitch_x = Some(-0.1);
         inp.bat_yaw = Some(80.0_f64.to_radians());
         inp.swing_lead = Some(0.165);
@@ -6518,7 +6534,7 @@ mod tests {
     #[test]
     fn the_swing_lead_moves_the_jump_toward_the_side_it_reads() {
         let fx = fixture(&[]);
-        let mut inp = input(&fx, vec![RunnerIn { id: fx.st.batter, base: 0, speed: 8.2 }]);
+        let mut inp = input(&fx, vec![RunnerIn { id: fx.st.batter, base: 0, speed: 8.2, tau_s: bb_agents::running::LEAGUE_TAU_S }]);
         for a in inp.fattrs.iter_mut() {
             a.antic_sigma = 0.0;
             a.lead_sigma = 0.0;
@@ -6559,7 +6575,7 @@ mod tests {
     #[test]
     fn an_implausible_read_is_discarded_for_the_other_reads() {
         let fx = fixture(&[]);
-        let mut inp = input(&fx, vec![RunnerIn { id: fx.st.batter, base: 0, speed: 8.2 }]);
+        let mut inp = input(&fx, vec![RunnerIn { id: fx.st.batter, base: 0, speed: 8.2, tau_s: bb_agents::running::LEAGUE_TAU_S }]);
         for a in inp.fattrs.iter_mut() {
             a.antic_sigma = 0.0;
             a.swing_sigma = 0.0;
@@ -6605,7 +6621,7 @@ mod tests {
         assert!((e2.to_degrees() - 6.663).abs() < 1e-3, "rotated: {:.4}°", e2.to_degrees());
         assert!((s1 - s2).abs() < 1e-12 && (s1.to_degrees() - 14.204).abs() < 1e-3);
         let fx = fixture(&[]);
-        let mut inp = input(&fx, vec![RunnerIn { id: fx.st.batter, base: 0, speed: 8.2 }]);
+        let mut inp = input(&fx, vec![RunnerIn { id: fx.st.batter, base: 0, speed: 8.2, tau_s: bb_agents::running::LEAGUE_TAU_S }]);
         inp.pitch_x = Some(0.0);
         let home = home_positions();
         let mut leaned = false;
@@ -6648,7 +6664,7 @@ mod tests {
     #[test]
     fn plans_before_the_gate_count_the_rest_of_the_jump() {
         let fx = fixture(&[]);
-        let mut inp = input(&fx, vec![RunnerIn { id: fx.st.batter, base: 0, speed: 8.2 }]);
+        let mut inp = input(&fx, vec![RunnerIn { id: fx.st.batter, base: 0, speed: 8.2, tau_s: bb_agents::running::LEAGUE_TAU_S }]);
         inp.fattrs[CF].reaction = 0.6;
         let mut st = fx.st.clone();
         let mut sim = new_sim(&inp, &mut st);
@@ -6684,7 +6700,7 @@ mod tests {
     #[test]
     fn the_projected_jump_is_timed_by_the_tick_that_produced_it() {
         let fx = fixture(&[]);
-        let mut inp = input(&fx, vec![RunnerIn { id: fx.st.batter, base: 0, speed: 8.2 }]);
+        let mut inp = input(&fx, vec![RunnerIn { id: fx.st.batter, base: 0, speed: 8.2, tau_s: bb_agents::running::LEAGUE_TAU_S }]);
         inp.fattrs[CF].reaction = 0.607;
         let mut st = fx.st.clone();
         let mut sim = new_sim(&inp, &mut st);
@@ -6727,7 +6743,7 @@ mod tests {
     #[test]
     fn a_lean_the_right_way_gains_ground_and_the_wrong_way_costs() {
         let fx = fixture(&[]);
-        let inp = input(&fx, vec![RunnerIn { id: fx.st.batter, base: 0, speed: 8.2 }]);
+        let inp = input(&fx, vec![RunnerIn { id: fx.st.batter, base: 0, speed: 8.2, tau_s: bb_agents::running::LEAGUE_TAU_S }]);
         let mut st = fx.st.clone();
         let mut sim = new_sim(&inp, &mut st);
         sim.t = inp.t_contact + sim.f[SS].a.reaction;
@@ -6748,7 +6764,7 @@ mod tests {
     #[test]
     fn running_the_wrong_way_costs_the_turn() {
         let fx = fixture(&[]);
-        let inp = input(&fx, vec![RunnerIn { id: fx.st.batter, base: 0, speed: 8.2 }]);
+        let inp = input(&fx, vec![RunnerIn { id: fx.st.batter, base: 0, speed: 8.2, tau_s: bb_agents::running::LEAGUE_TAU_S }]);
         let mut st = fx.st.clone();
         let mut sim = new_sim(&inp, &mut st);
         sim.t = 2.0;
@@ -6781,7 +6797,7 @@ mod tests {
     #[test]
     fn a_turn_carries_the_fielder_on_a_curve() {
         let fx = fixture(&[]);
-        let inp = input(&fx, vec![RunnerIn { id: fx.st.batter, base: 0, speed: 8.2 }]);
+        let inp = input(&fx, vec![RunnerIn { id: fx.st.batter, base: 0, speed: 8.2, tau_s: bb_agents::running::LEAGUE_TAU_S }]);
         let mut st = fx.st.clone();
         let mut sim = new_sim(&inp, &mut st);
         sim.t = 2.0;
@@ -6808,7 +6824,7 @@ mod tests {
     #[test]
     fn stopped_fielders_have_no_speed_and_running_ones_keep_it() {
         let fx = fixture(&[]);
-        let inp = input(&fx, vec![RunnerIn { id: fx.st.batter, base: 0, speed: 8.2 }]);
+        let inp = input(&fx, vec![RunnerIn { id: fx.st.batter, base: 0, speed: 8.2, tau_s: bb_agents::running::LEAGUE_TAU_S }]);
         let mut st = fx.st.clone();
         let mut sim = new_sim(&inp, &mut st);
         sim.t = 2.0;
@@ -6896,7 +6912,7 @@ mod tests {
     fn cutoff_and_relay_men_line_up_between_the_ball_and_the_base() {
         const R: AgentId = 0x0007;
         let fx = fixture(&[(R, 2)]);
-        let inp = input(&fx, vec![RunnerIn { id: fx.st.batter, base: 0, speed: 8.2 }, RunnerIn { id: R, base: 2, speed: 8.2 }]);
+        let inp = input(&fx, vec![RunnerIn { id: fx.st.batter, base: 0, speed: 8.2, tau_s: bb_agents::running::LEAGUE_TAU_S }, RunnerIn { id: R, base: 2, speed: 8.2, tau_s: bb_agents::running::LEAGUE_TAU_S }]);
         // Single to right-center with a runner on second: the first baseman is the cutoff to
         // home, short of the plate on the throw's line; the second baseman takes first and the
         // shortstop second.
@@ -6939,7 +6955,7 @@ mod tests {
     fn relay_man_goes_out_early_on_a_deep_fly() {
         const R: AgentId = 0x0007;
         let fx = fixture(&[(R, 2)]);
-        let mut inp = input(&fx, vec![RunnerIn { id: fx.st.batter, base: 0, speed: 8.2 }, RunnerIn { id: R, base: 2, speed: 8.2 }]);
+        let mut inp = input(&fx, vec![RunnerIn { id: fx.st.batter, base: 0, speed: 8.2, tau_s: bb_agents::running::LEAGUE_TAU_S }, RunnerIn { id: R, base: 2, speed: 8.2, tau_s: bb_agents::running::LEAGUE_TAU_S }]);
         inp.ball = BallState { r: Vec3::new(0.0, 0.5, 1.0), v: Vec3::new(-4.0, 28.0, 22.0), w: Vec3::ZERO };
         let mut st = fx.st.clone();
         let mut sim = new_sim(&inp, &mut st);
@@ -6959,7 +6975,7 @@ mod tests {
         let relays: Vec<usize> = (0..9).filter(|&i| sim.f[i].role == Role::Relay(4)).collect();
         assert!(relays == [3] || relays == [5], "relay men {relays:?}: {:?}", sim.f.iter().map(|f| f.role).collect::<Vec<_>>());
         // A short fly an infielder can catch keeps him on the ball.
-        let mut inp = input(&fx, vec![RunnerIn { id: fx.st.batter, base: 0, speed: 8.2 }, RunnerIn { id: R, base: 2, speed: 8.2 }]);
+        let mut inp = input(&fx, vec![RunnerIn { id: fx.st.batter, base: 0, speed: 8.2, tau_s: bb_agents::running::LEAGUE_TAU_S }, RunnerIn { id: R, base: 2, speed: 8.2, tau_s: bb_agents::running::LEAGUE_TAU_S }]);
         inp.ball = BallState { r: Vec3::new(0.0, 0.5, 1.0), v: Vec3::new(-2.0, 14.0, 24.0), w: Vec3::ZERO };
         let mut st = fx.st.clone();
         let mut sim = new_sim(&inp, &mut st);
@@ -6975,7 +6991,7 @@ mod tests {
     #[test]
     fn receiver_plans_from_his_read_not_the_throws_future() {
         let fx = fixture(&[]);
-        let inp = input(&fx, vec![RunnerIn { id: fx.st.batter, base: 0, speed: 8.2 }]);
+        let inp = input(&fx, vec![RunnerIn { id: fx.st.batter, base: 0, speed: 8.2, tau_s: bb_agents::running::LEAGUE_TAU_S }]);
         let from = Vec3::new(0.0, 100.0, 0.0);
         let second = base_pos(2);
         let d = (second - from).norm();
@@ -7007,7 +7023,7 @@ mod tests {
     #[test]
     fn a_throw_passing_beyond_reach_of_the_bag_draws_the_receiver_off_it() {
         let fx = fixture(&[]);
-        let inp = input(&fx, vec![RunnerIn { id: fx.st.batter, base: 0, speed: 8.2 }]);
+        let inp = input(&fx, vec![RunnerIn { id: fx.st.batter, base: 0, speed: 8.2, tau_s: bb_agents::running::LEAGUE_TAU_S }]);
         let mut st = fx.st.clone();
         let mut sim = new_sim(&inp, &mut st);
         sim.t = 5.0;
@@ -7042,7 +7058,7 @@ mod tests {
     #[test]
     fn a_carom_off_the_wall_is_not_read_as_straight_off_the_bat() {
         let fx = fixture(&[]);
-        let mut inp = input(&fx, vec![RunnerIn { id: fx.st.batter, base: 0, speed: 8.2 }]);
+        let mut inp = input(&fx, vec![RunnerIn { id: fx.st.batter, base: 0, speed: 8.2, tau_s: bb_agents::running::LEAGUE_TAU_S }]);
         inp.ball = BallState { r: Vec3::new(0.0, 110.0, 1.0), v: Vec3::new(0.0, 25.0, 3.0), w: Vec3::ZERO };
         let mut st = fx.st.clone();
         let mut sim = new_sim(&inp, &mut st);
@@ -7062,7 +7078,7 @@ mod tests {
     fn a_throw_beyond_the_arm_goes_through_the_relay_man() {
         const R: AgentId = 0x0007;
         let fx = fixture(&[(R, 2)]);
-        let mut inp = input(&fx, vec![RunnerIn { id: fx.st.batter, base: 0, speed: 8.2 }, RunnerIn { id: R, base: 2, speed: 8.2 }]);
+        let mut inp = input(&fx, vec![RunnerIn { id: fx.st.batter, base: 0, speed: 8.2, tau_s: bb_agents::running::LEAGUE_TAU_S }, RunnerIn { id: R, base: 2, speed: 8.2, tau_s: bb_agents::running::LEAGUE_TAU_S }]);
         const B2: usize = 3;
         inp.fattrs[CF].arm = 30.0;
         inp.fattrs[CF].arm_sigma = 0.0;
@@ -7101,7 +7117,7 @@ mod tests {
         const R1: AgentId = 0x0007;
         const R3: AgentId = 0x0008;
         let fx = fixture(&[(R1, 1), (R3, 3)]);
-        let mut inp = input(&fx, vec![RunnerIn { id: fx.st.batter, base: 0, speed: 8.2 }, RunnerIn { id: R1, base: 1, speed: 8.2 }, RunnerIn { id: R3, base: 3, speed: 8.2 }]);
+        let mut inp = input(&fx, vec![RunnerIn { id: fx.st.batter, base: 0, speed: 8.2, tau_s: bb_agents::running::LEAGUE_TAU_S }, RunnerIn { id: R1, base: 1, speed: 8.2, tau_s: bb_agents::running::LEAGUE_TAU_S }, RunnerIn { id: R3, base: 3, speed: 8.2, tau_s: bb_agents::running::LEAGUE_TAU_S }]);
         inp.fattrs[0].arm_sigma = 0.0;
         let mut st = fx.st.clone();
         st.outs = outs;
@@ -7136,7 +7152,7 @@ mod tests {
     fn a_runner_back_to_a_base_he_reached_is_a_tag_play() {
         const R1: AgentId = 0x0007;
         let fx = fixture(&[(R1, 1)]);
-        let inp = input(&fx, vec![RunnerIn { id: fx.st.batter, base: 0, speed: 8.2 }, RunnerIn { id: R1, base: 1, speed: 8.2 }]);
+        let inp = input(&fx, vec![RunnerIn { id: fx.st.batter, base: 0, speed: 8.2, tau_s: bb_agents::running::LEAGUE_TAU_S }, RunnerIn { id: R1, base: 1, speed: 8.2, tau_s: bb_agents::running::LEAGUE_TAU_S }]);
         let mut st = fx.st.clone();
         st.outs = 2;
         let mut sim = new_sim(&inp, &mut st);
@@ -7173,7 +7189,7 @@ mod tests {
     // the owner's reference). Indices: P 0, C 1, 1B 2, 2B 3, 3B 4, SS 5, LF 6, CF 7, RF 8.
     #[test]
     fn idle_fielders_back_up_the_play() {
-        let batter = |fx: &Fixture| RunnerIn { id: fx.st.batter, base: 0, speed: 8.2 };
+        let batter = |fx: &Fixture| RunnerIn { id: fx.st.batter, base: 0, speed: 8.2, tau_s: bb_agents::running::LEAGUE_TAU_S };
         // Grounder to short, nobody on: the catcher trails the batter to back up first.
         let fx = fixture(&[]);
         let inp = input(&fx, vec![batter(&fx)]);
@@ -7220,7 +7236,7 @@ mod tests {
         // right fielder still backs up second, and the catcher stays home.
         const R: AgentId = 0x0007;
         let fx = fixture(&[(R, 1)]);
-        let inp = input(&fx, vec![batter(&fx), RunnerIn { id: R, base: 1, speed: 8.2 }]);
+        let inp = input(&fx, vec![batter(&fx), RunnerIn { id: R, base: 1, speed: 8.2, tau_s: bb_agents::running::LEAGUE_TAU_S }]);
         let mut st = fx.st.clone();
         let mut sim = new_sim(&inp, &mut st);
         jobs(&mut sim, 6, at);
@@ -7248,7 +7264,7 @@ mod tests {
     #[test]
     fn idle_fielders_do_not_chase_the_ball() {
         let fx = fixture(&[]);
-        let inp = input(&fx, vec![RunnerIn { id: fx.st.batter, base: 0, speed: 8.2 }]);
+        let inp = input(&fx, vec![RunnerIn { id: fx.st.batter, base: 0, speed: 8.2, tau_s: bb_agents::running::LEAGUE_TAU_S }]);
         let mut st = fx.st.clone();
         let mut sim = new_sim(&inp, &mut st);
         let at = Vec3::new(62.0, 88.0, 0.0);
@@ -7289,7 +7305,7 @@ mod tests {
     /// (the tests below are about the call rule, not the draws), at the outfielders'
     /// reaction time.
     fn hit(fx: &Fixture, v: Vec3) -> LiveInput<'_> {
-        let mut inp = input(fx, vec![RunnerIn { id: fx.st.batter, base: 0, speed: 8.2 }]);
+        let mut inp = input(fx, vec![RunnerIn { id: fx.st.batter, base: 0, speed: 8.2, tau_s: bb_agents::running::LEAGUE_TAU_S }]);
         // The spin fielders expect at this launch angle, so their reads match the ball.
         let h = Vec3::new(v.x, v.y, 0.0).normalized();
         let rpm = typical_batted_spin_rpm(m::atan2(v.z, m::hypot(v.x, v.y)));
@@ -7585,7 +7601,7 @@ mod tests {
         step(&mut st, &Input::PitchDelivered { t: 0.0 });
         step(&mut st, &Input::BatContact { t: t_c });
         let fx = Fixture { env: FlightEnv::default_env(), field: Field::default(), st };
-        let mut inp = input(&fx, vec![RunnerIn { id: fx.st.batter, base: 0, speed: 8.2 }]);
+        let mut inp = input(&fx, vec![RunnerIn { id: fx.st.batter, base: 0, speed: 8.2, tau_s: bb_agents::running::LEAGUE_TAU_S }]);
         inp.fattrs = core::array::from_fn(FielderAttrs::average);
         inp.ball = BallState {
             r: Vec3::new(-0.06743612629505924, 0.7480339821824925, 0.9004703517124966),
@@ -7881,7 +7897,7 @@ mod tests {
         let mut sums = [[0.0; 2]; 2];
         let mut n = 0.0;
         for (k, ball) in balls.iter().enumerate() {
-            let mut inp = input(&fx, vec![RunnerIn { id: fx.st.batter, base: 0, speed: 8.2 }]);
+            let mut inp = input(&fx, vec![RunnerIn { id: fx.st.batter, base: 0, speed: 8.2, tau_s: bb_agents::running::LEAGUE_TAU_S }]);
             inp.ball = BallState { r: Vec3::new(0.0, 0.5, 1.0), ..*ball };
             inp.play = k as u32;
             let mut st = fx.st.clone();
@@ -7957,7 +7973,7 @@ mod tests {
     #[test]
     fn reach_estimate_tracks_the_movement_step_below_two_metres_and_at_a_wall() {
         let fx = fixture(&[]);
-        let inp = input(&fx, vec![RunnerIn { id: fx.st.batter, base: 0, speed: 8.2 }]);
+        let inp = input(&fx, vec![RunnerIn { id: fx.st.batter, base: 0, speed: 8.2, tau_s: bb_agents::running::LEAGUE_TAU_S }]);
         const SS: usize = 5;
         let fence = fx.field.fence_at(0.0);
         let mut worst = (0.0f64, String::new());
@@ -8163,7 +8179,7 @@ mod tests {
     #[test]
     fn a_ball_everyone_left_goes_to_one_man_and_first_stays_covered() {
         let fx = fixture(&[]);
-        let inp = input(&fx, vec![RunnerIn { id: fx.st.batter, base: 0, speed: 8.2 }]);
+        let inp = input(&fx, vec![RunnerIn { id: fx.st.batter, base: 0, speed: 8.2, tau_s: bb_agents::running::LEAGUE_TAU_S }]);
         let mut st = fx.st.clone();
         let mut sim = new_sim(&inp, &mut st);
         everyone_left_it(&mut sim, false);
@@ -8189,7 +8205,7 @@ mod tests {
     fn two_chasers_who_each_think_the_other_is_first_do_not_both_stop() {
         const LF: usize = 6;
         let fx = fixture(&[]);
-        let inp = input(&fx, vec![RunnerIn { id: fx.st.batter, base: 0, speed: 8.2 }]);
+        let inp = input(&fx, vec![RunnerIn { id: fx.st.batter, base: 0, speed: 8.2, tau_s: bb_agents::running::LEAGUE_TAU_S }]);
         let mut st = fx.st.clone();
         let mut sim = new_sim(&inp, &mut st);
         loose_ball(&mut sim, 1.0, Vec3::new(-20.0, 60.0, 0.05), Vec3::new(-3.0, 4.0, 0.0));
@@ -8233,7 +8249,7 @@ mod tests {
     #[test]
     fn the_man_sent_for_a_ball_nobody_took_can_get_to_it() {
         let fx = fixture(&[]);
-        let inp = input(&fx, vec![RunnerIn { id: fx.st.batter, base: 0, speed: 8.2 }]);
+        let inp = input(&fx, vec![RunnerIn { id: fx.st.batter, base: 0, speed: 8.2, tau_s: bb_agents::running::LEAGUE_TAU_S }]);
         let mut st = fx.st.clone();
         let mut sim = new_sim(&inp, &mut st);
         loose_ball(&mut sim, 1.0, Vec3::new(0.0, 30.0, 0.05), Vec3::new(0.0, 2.0, 0.0));
@@ -8255,7 +8271,7 @@ mod tests {
     #[test]
     fn a_tie_for_a_pop_up_nobody_took_does_not_go_to_the_pitcher() {
         let fx = fixture(&[]);
-        let inp = input(&fx, vec![RunnerIn { id: fx.st.batter, base: 0, speed: 8.2 }]);
+        let inp = input(&fx, vec![RunnerIn { id: fx.st.batter, base: 0, speed: 8.2, tau_s: bb_agents::running::LEAGUE_TAU_S }]);
         let mut st = fx.st.clone();
         let mut sim = new_sim(&inp, &mut st);
         let th = 75.0_f64.to_radians();
@@ -8277,7 +8293,7 @@ mod tests {
     #[test]
     fn the_shared_order_follows_a_change_of_velocity() {
         let fx = fixture(&[]);
-        let inp = input(&fx, vec![RunnerIn { id: fx.st.batter, base: 0, speed: 8.2 }]);
+        let inp = input(&fx, vec![RunnerIn { id: fx.st.batter, base: 0, speed: 8.2, tau_s: bb_agents::running::LEAGUE_TAU_S }]);
         let mut st = fx.st.clone();
         let mut sim = new_sim(&inp, &mut st);
         loose_ball(&mut sim, 1.0, Vec3::new(-8.0, 30.0, 0.05), Vec3::new(-1.0, 2.0, 0.0));
@@ -8296,7 +8312,7 @@ mod tests {
     #[test]
     fn the_man_sent_for_a_fly_nobody_took_is_an_outfielder() {
         let fx = fixture(&[]);
-        let mut inp = input(&fx, vec![RunnerIn { id: fx.st.batter, base: 0, speed: 8.2 }]);
+        let mut inp = input(&fx, vec![RunnerIn { id: fx.st.batter, base: 0, speed: 8.2, tau_s: bb_agents::running::LEAGUE_TAU_S }]);
         let (ev, la, spray) = (34.753, 34.008_f64.to_radians(), (-9.505_f64).to_radians());
         inp.ball = BallState { r: Vec3::new(0.0, 0.5, 1.0), v: Vec3::new(ev * m::cos(la) * m::sin(spray), ev * m::cos(la) * m::cos(spray), ev * m::sin(la)), w: Vec3::ZERO };
         let mut st = fx.st.clone();
@@ -8319,7 +8335,7 @@ mod tests {
         let mut fx = fixture(&[(5, 1)]);
         fx.st.outs = 1;
         let mut st = fx.st.clone();
-        let mut inp = input(&fx, vec![RunnerIn { id: fx.st.batter, base: 0, speed: 8.2 }, RunnerIn { id: 5, base: 1, speed: 8.2 }]);
+        let mut inp = input(&fx, vec![RunnerIn { id: fx.st.batter, base: 0, speed: 8.2, tau_s: bb_agents::running::LEAGUE_TAU_S }, RunnerIn { id: 5, base: 1, speed: 8.2, tau_s: bb_agents::running::LEAGUE_TAU_S }]);
         inp.ball = BallState { r: Vec3::new(0.0, 0.5, 0.5), v: Vec3::new(-1.5, 24.0, -3.0), w: Vec3::ZERO };
         let mut sim = new_sim(&inp, &mut st);
         for f in sim.f.iter_mut() {
@@ -8773,7 +8789,7 @@ mod tests {
     fn a_holders_call_to_the_bag_is_heard_before_it_is_heeded() {
         const LF: usize = 6;
         let fx = fixture(&[]);
-        let inp = input(&fx, vec![RunnerIn { id: fx.st.batter, base: 0, speed: 8.2 }]);
+        let inp = input(&fx, vec![RunnerIn { id: fx.st.batter, base: 0, speed: 8.2, tau_s: bb_agents::running::LEAGUE_TAU_S }]);
         let mut st = fx.st.clone();
         let mut sim = new_sim(&inp, &mut st);
         sim.t = 3.0;
@@ -8800,7 +8816,7 @@ mod tests {
     #[test]
     fn isolation_a_private_cutoff_retiring_moves_nobody() {
         let fx = fixture(&[(0x0007, 2)]);
-        let inp = input(&fx, vec![RunnerIn { id: fx.st.batter, base: 0, speed: 8.2 }, RunnerIn { id: 0x0007, base: 2, speed: 8.2 }]);
+        let inp = input(&fx, vec![RunnerIn { id: fx.st.batter, base: 0, speed: 8.2, tau_s: bb_agents::running::LEAGUE_TAU_S }, RunnerIn { id: 0x0007, base: 2, speed: 8.2, tau_s: bb_agents::running::LEAGUE_TAU_S }]);
         let mut jobs = Vec::new();
         for role in [Role::Idle, Role::Relay(4)] {
             let mut st = fx.st.clone();
@@ -8826,7 +8842,7 @@ mod tests {
     fn the_holders_route_does_not_read_an_unheard_cutoff() {
         const B2: usize = 3;
         let fx = fixture(&[(0x0007, 2)]);
-        let inp = input(&fx, vec![RunnerIn { id: fx.st.batter, base: 0, speed: 8.2 }, RunnerIn { id: 0x0007, base: 2, speed: 8.2 }]);
+        let inp = input(&fx, vec![RunnerIn { id: fx.st.batter, base: 0, speed: 8.2, tau_s: bb_agents::running::LEAGUE_TAU_S }, RunnerIn { id: 0x0007, base: 2, speed: 8.2, tau_s: bb_agents::running::LEAGUE_TAU_S }]);
         let mut races = Vec::new();
         for role in [Role::Idle, Role::Relay(4)] {
             let mut st = fx.st.clone();
@@ -8851,7 +8867,7 @@ mod tests {
         const B1: usize = 2;
         const SS: usize = 5;
         let fx = fixture(&[(0x0007, 2)]);
-        let inp = input(&fx, vec![RunnerIn { id: fx.st.batter, base: 0, speed: 8.2 }, RunnerIn { id: 0x0007, base: 2, speed: 8.2 }]);
+        let inp = input(&fx, vec![RunnerIn { id: fx.st.batter, base: 0, speed: 8.2, tau_s: bb_agents::running::LEAGUE_TAU_S }, RunnerIn { id: 0x0007, base: 2, speed: 8.2, tau_s: bb_agents::running::LEAGUE_TAU_S }]);
         let mut jobs = Vec::new();
         for role in [Role::Idle, Role::Relay(4)] {
             let mut st = fx.st.clone();
@@ -8875,7 +8891,7 @@ mod tests {
     #[test]
     fn a_peel_ending_does_not_move_teammates() {
         let fx = fixture(&[]);
-        let inp = input(&fx, vec![RunnerIn { id: fx.st.batter, base: 0, speed: 8.2 }]);
+        let inp = input(&fx, vec![RunnerIn { id: fx.st.batter, base: 0, speed: 8.2, tau_s: bb_agents::running::LEAGUE_TAU_S }]);
         let mut seen = Vec::new();
         for peeled in [false, true] {
             let mut st = fx.st.clone();
@@ -8899,7 +8915,7 @@ mod tests {
     #[test]
     fn a_second_new_ball_in_one_tick_is_read_again() {
         let fx = fixture(&[]);
-        let inp = input(&fx, vec![RunnerIn { id: fx.st.batter, base: 0, speed: 8.2 }]);
+        let inp = input(&fx, vec![RunnerIn { id: fx.st.batter, base: 0, speed: 8.2, tau_s: bb_agents::running::LEAGUE_TAU_S }]);
         let mut st = fx.st.clone();
         let mut sim = new_sim(&inp, &mut st);
         sim.t = 1.0;
@@ -8920,7 +8936,7 @@ mod tests {
     #[test]
     fn a_grounded_throw_rimmed_in_the_same_tick_is_read_again() {
         let fx = fixture(&[]);
-        let inp = input(&fx, vec![RunnerIn { id: fx.st.batter, base: 0, speed: 8.2 }]);
+        let inp = input(&fx, vec![RunnerIn { id: fx.st.batter, base: 0, speed: 8.2, tau_s: bb_agents::running::LEAGUE_TAU_S }]);
         let mut st = fx.st.clone();
         let mut sim = new_sim(&inp, &mut st);
         sim.t = 1.0;
@@ -9066,7 +9082,7 @@ mod tests {
     #[test]
     fn a_ball_deflected_in_the_tick_of_a_read_is_read_again() {
         let fx = fixture(&[]);
-        let inp = input(&fx, vec![RunnerIn { id: fx.st.batter, base: 0, speed: 8.2 }]);
+        let inp = input(&fx, vec![RunnerIn { id: fx.st.batter, base: 0, speed: 8.2, tau_s: bb_agents::running::LEAGUE_TAU_S }]);
         let mut st = fx.st.clone();
         let mut sim = new_sim(&inp, &mut st);
         at_first_read(&mut sim);
@@ -9127,7 +9143,7 @@ mod tests {
         const R: AgentId = 0x0007;
         const B1: usize = 2;
         let fx = fixture(&[(R, 2)]);
-        let inp = input(&fx, vec![RunnerIn { id: fx.st.batter, base: 0, speed: 8.2 }, RunnerIn { id: R, base: 2, speed: 8.2 }]);
+        let inp = input(&fx, vec![RunnerIn { id: fx.st.batter, base: 0, speed: 8.2, tau_s: bb_agents::running::LEAGUE_TAU_S }, RunnerIn { id: R, base: 2, speed: 8.2, tau_s: bb_agents::running::LEAGUE_TAU_S }]);
         let rf_at = Vec3::new(25.0, 62.0, 0.0);
         for (case, run) in [(0, 0.0), (1, 0.0), (2, 0.0), (0, 7.0), (2, 7.0)] {
             let mut st = fx.st.clone();
@@ -9182,7 +9198,7 @@ mod tests {
     fn catcher_returns_backup_catches_and_runners_hold_their_leads() {
         const R: AgentId = 0x0007;
         let fx = fixture(&[]);
-        let inp = input(&fx, vec![RunnerIn { id: fx.st.batter, base: 0, speed: 8.2 }]);
+        let inp = input(&fx, vec![RunnerIn { id: fx.st.batter, base: 0, speed: 8.2, tau_s: bb_agents::running::LEAGUE_TAU_S }]);
         let mut st = fx.st.clone();
         let mut sim = new_sim(&inp, &mut st);
         jobs(&mut sim, 6, Vec3::new(-40.0, 65.0, 0.0));
@@ -9222,7 +9238,7 @@ mod tests {
 
         // A runner on first stays at his lead until the runners read the ball at +0.5 s.
         let fx = fixture(&[(R, 1)]);
-        let inp = input(&fx, vec![RunnerIn { id: fx.st.batter, base: 0, speed: 8.2 }, RunnerIn { id: R, base: 1, speed: 8.2 }]);
+        let inp = input(&fx, vec![RunnerIn { id: fx.st.batter, base: 0, speed: 8.2, tau_s: bb_agents::running::LEAGUE_TAU_S }, RunnerIn { id: R, base: 1, speed: 8.2, tau_s: bb_agents::running::LEAGUE_TAU_S }]);
         let mut st = fx.st.clone();
         let mut sim = new_sim(&inp, &mut st);
         for _ in 0..25 {
@@ -9239,7 +9255,7 @@ mod tests {
     fn runner_leads_off_and_goes_halfway_on_a_fly() {
         const R: AgentId = 0x0007;
         let fx = fixture(&[(R, 1)]);
-        let inp = input(&fx, vec![RunnerIn { id: fx.st.batter, base: 0, speed: 8.2 }, RunnerIn { id: R, base: 1, speed: 8.2 }]);
+        let inp = input(&fx, vec![RunnerIn { id: fx.st.batter, base: 0, speed: 8.2, tau_s: bb_agents::running::LEAGUE_TAU_S }, RunnerIn { id: R, base: 1, speed: 8.2, tau_s: bb_agents::running::LEAGUE_TAU_S }]);
         let mut st = fx.st.clone();
         let out = simulate_live(&LiveInput { record: true, ..inp }, &mut st);
         let track = &out.actors.iter().find(|(id, _)| *id == R).unwrap().1;
@@ -9264,7 +9280,7 @@ mod tests {
     #[test]
     fn chaser_arrives_on_the_plans_schedule() {
         let fx = fixture(&[]);
-        let inp = input(&fx, vec![RunnerIn { id: fx.st.batter, base: 0, speed: 8.2 }]);
+        let inp = input(&fx, vec![RunnerIn { id: fx.st.batter, base: 0, speed: 8.2, tau_s: bb_agents::running::LEAGUE_TAU_S }]);
         let arrive = |role: Role| {
             let mut st = fx.st.clone();
             let mut sim = new_sim(&inp, &mut st);
@@ -9299,7 +9315,7 @@ mod tests {
     fn repeated_runner_decisions_draw_fresh_noise() {
         const R: AgentId = 0x0007;
         let fx = fixture(&[(R, 1)]);
-        let inp = input(&fx, vec![RunnerIn { id: fx.st.batter, base: 0, speed: 8.2 }, RunnerIn { id: R, base: 1, speed: 8.2 }]);
+        let inp = input(&fx, vec![RunnerIn { id: fx.st.batter, base: 0, speed: 8.2, tau_s: bb_agents::running::LEAGUE_TAU_S }, RunnerIn { id: R, base: 1, speed: 8.2, tau_s: bb_agents::running::LEAGUE_TAU_S }]);
         let mut st = fx.st.clone();
         let mut sim = new_sim(&inp, &mut st);
         sim.t = 1.0;
@@ -9334,7 +9350,7 @@ mod tests {
     #[test]
     fn a_runner_reads_the_base_a_throw_is_coming_down_at() {
         let fx = fixture(&[]);
-        let inp = input(&fx, vec![RunnerIn { id: fx.st.batter, base: 0, speed: 8.2 }]);
+        let inp = input(&fx, vec![RunnerIn { id: fx.st.batter, base: 0, speed: 8.2, tau_s: bb_agents::running::LEAGUE_TAU_S }]);
         let origins = [("left", Vec3::new(-40.0, 55.0, 0.0)), ("center", Vec3::new(0.0, 80.0, 0.0)), ("right", Vec3::new(40.0, 55.0, 0.0))];
         for (name, from) in origins {
             for b in [2u8, 3, 4] {
@@ -9357,7 +9373,7 @@ mod tests {
     #[test]
     fn a_default_arm_throw_from_shallow_right_field_is_read_as_going_to_third() {
         let fx = fixture(&[]);
-        let inp = input(&fx, vec![RunnerIn { id: fx.st.batter, base: 0, speed: 8.2 }]);
+        let inp = input(&fx, vec![RunnerIn { id: fx.st.batter, base: 0, speed: 8.2, tau_s: bb_agents::running::LEAGUE_TAU_S }]);
         let mut st = fx.st.clone();
         let mut sim = new_sim(&inp, &mut st);
         let arm = FielderAttrs::average(8).arm;
@@ -9371,7 +9387,7 @@ mod tests {
     #[test]
     fn a_throw_over_third_on_its_way_home_is_not_catchable_at_third() {
         let fx = fixture(&[]);
-        let inp = input(&fx, vec![RunnerIn { id: fx.st.batter, base: 0, speed: 8.2 }]);
+        let inp = input(&fx, vec![RunnerIn { id: fx.st.batter, base: 0, speed: 8.2, tau_s: bb_agents::running::LEAGUE_TAU_S }]);
         let mut st = fx.st.clone();
         let mut sim = new_sim(&inp, &mut st);
         throw_to_base(&mut sim, Vec3::new(-40.0, 45.0, 0.0), 4, 40.0);
@@ -9387,7 +9403,7 @@ mod tests {
     #[test]
     fn a_throw_that_hops_before_home_is_read_as_going_home() {
         let fx = fixture(&[]);
-        let inp = input(&fx, vec![RunnerIn { id: fx.st.batter, base: 0, speed: 8.2 }]);
+        let inp = input(&fx, vec![RunnerIn { id: fx.st.batter, base: 0, speed: 8.2, tau_s: bb_agents::running::LEAGUE_TAU_S }]);
         let mut st = fx.st.clone();
         let mut sim = new_sim(&inp, &mut st);
         let from = Vec3::new(0.0, 80.0, 0.0);
@@ -9415,7 +9431,7 @@ mod tests {
     #[test]
     fn a_runner_reads_throws_across_the_outfield_and_arms() {
         let fx = fixture(&[]);
-        let inp = input(&fx, vec![RunnerIn { id: fx.st.batter, base: 0, speed: 8.2 }]);
+        let inp = input(&fx, vec![RunnerIn { id: fx.st.batter, base: 0, speed: 8.2, tau_s: bb_agents::running::LEAGUE_TAU_S }]);
         let (mut n, mut bad) = (0, Vec::new());
         for x in [-60.0f64, -40.0, -20.0, 0.0, 20.0, 40.0, 60.0] {
             for y in [45.0, 55.0, 65.0, 80.0, 95.0, 105.0] {
@@ -9454,7 +9470,7 @@ mod tests {
     #[test]
     fn a_throw_from_center_is_timed_to_the_base_it_goes_to() {
         let fx = fixture(&[]);
-        let inp = input(&fx, vec![RunnerIn { id: fx.st.batter, base: 0, speed: 8.2 }]);
+        let inp = input(&fx, vec![RunnerIn { id: fx.st.batter, base: 0, speed: 8.2, tau_s: bb_agents::running::LEAGUE_TAU_S }]);
         let from = Vec3::new(0.0, 84.0, 0.0);
         // When the throw's true path is nearest the base: its flight time there.
         let flight = |sim: &Sim, b: u8| {
@@ -9487,7 +9503,7 @@ mod tests {
     #[test]
     fn a_throw_passing_a_base_low_can_be_caught_there() {
         let fx = fixture(&[]);
-        let inp = input(&fx, vec![RunnerIn { id: fx.st.batter, base: 0, speed: 8.2 }]);
+        let inp = input(&fx, vec![RunnerIn { id: fx.st.batter, base: 0, speed: 8.2, tau_s: bb_agents::running::LEAGUE_TAU_S }]);
         // A hard throw home from 25 m out in center passes second, 11 m from it on the line,
         // at about chest height: it can be taken there on the way.
         let mut st = fx.st.clone();
@@ -9520,7 +9536,7 @@ mod tests {
     #[test]
     fn a_batter_does_not_run_into_a_throw_to_second_from_center() {
         let fx = fixture(&[]);
-        let inp = input(&fx, vec![RunnerIn { id: fx.st.batter, base: 0, speed: 8.2 }]);
+        let inp = input(&fx, vec![RunnerIn { id: fx.st.batter, base: 0, speed: 8.2, tau_s: bb_agents::running::LEAGUE_TAU_S }]);
         let mut st = fx.st.clone();
         let mut sim = new_sim(&inp, &mut st);
         throw_to_base(&mut sim, Vec3::new(3.4, 84.5, 0.0), 2, 40.0);
@@ -9539,7 +9555,7 @@ mod tests {
     fn a_runner_between_bases_looks_again_when_the_ball_is_secured_ahead() {
         // Runner from second, 8 m past it, the third baseman standing on third with the ball.
         let fx = fixture(&[(0x0007, 2)]);
-        let inp = input(&fx, vec![RunnerIn { id: fx.st.batter, base: 0, speed: 8.2 }, RunnerIn { id: 0x0007, base: 2, speed: 8.2 }]);
+        let inp = input(&fx, vec![RunnerIn { id: fx.st.batter, base: 0, speed: 8.2, tau_s: bb_agents::running::LEAGUE_TAU_S }, RunnerIn { id: 0x0007, base: 2, speed: 8.2, tau_s: bb_agents::running::LEAGUE_TAU_S }]);
         let mut st = fx.st.clone();
         let mut sim = new_sim(&inp, &mut st);
         sim.t = 6.0;
@@ -9564,7 +9580,7 @@ mod tests {
     #[test]
     fn a_runner_who_turns_back_stops_first_and_arrives_when_he_expected() {
         let fx = fixture(&[(0x0007, 2)]);
-        let inp = input(&fx, vec![RunnerIn { id: fx.st.batter, base: 0, speed: 8.2 }, RunnerIn { id: 0x0007, base: 2, speed: 8.2 }]);
+        let inp = input(&fx, vec![RunnerIn { id: fx.st.batter, base: 0, speed: 8.2, tau_s: bb_agents::running::LEAGUE_TAU_S }, RunnerIn { id: 0x0007, base: 2, speed: 8.2, tau_s: bb_agents::running::LEAGUE_TAU_S }]);
         let mut st = fx.st.clone();
         let mut sim = new_sim(&inp, &mut st);
         sim.t = 6.0;
@@ -9605,7 +9621,7 @@ mod tests {
     #[test]
     fn a_runner_turns_round_once_between_bases() {
         let fx = fixture(&[(0x0007, 2)]);
-        let inp = input(&fx, vec![RunnerIn { id: fx.st.batter, base: 0, speed: 8.2 }, RunnerIn { id: 0x0007, base: 2, speed: 8.2 }]);
+        let inp = input(&fx, vec![RunnerIn { id: fx.st.batter, base: 0, speed: 8.2, tau_s: bb_agents::running::LEAGUE_TAU_S }, RunnerIn { id: 0x0007, base: 2, speed: 8.2, tau_s: bb_agents::running::LEAGUE_TAU_S }]);
         let mut st = fx.st.clone();
         let mut sim = new_sim(&inp, &mut st);
         sim.t = 6.0;
@@ -9631,7 +9647,7 @@ mod tests {
     #[test]
     fn the_turn_cap_does_not_refuse_a_base_he_believes_safe() {
         let fx = fixture(&[(7, 2)]);
-        let inp = input(&fx, vec![RunnerIn { id: fx.st.batter, base: 0, speed: 8.2 }, RunnerIn { id: 7, base: 2, speed: 8.2 }]);
+        let inp = input(&fx, vec![RunnerIn { id: fx.st.batter, base: 0, speed: 8.2, tau_s: bb_agents::running::LEAGUE_TAU_S }, RunnerIn { id: 7, base: 2, speed: 8.2, tau_s: bb_agents::running::LEAGUE_TAU_S }]);
         let mut st = fx.st.clone();
         let mut sim = traffic_sim(&inp, &mut st);
         (sim.r[1].s, sim.r[1].v, sim.r[1].direction, sim.r[1].goal) = (3.0 * BASE_L - 0.5, 1.0, -1.0, 2);
@@ -9652,7 +9668,7 @@ mod tests {
     #[test]
     fn a_runner_retouching_a_base_brakes_into_it_and_leaves_from_rest() {
         let fx = fixture(&[(7, 2)]);
-        let inp = input(&fx, vec![RunnerIn { id: fx.st.batter, base: 0, speed: 8.2 }, RunnerIn { id: 7, base: 2, speed: 8.2 }]);
+        let inp = input(&fx, vec![RunnerIn { id: fx.st.batter, base: 0, speed: 8.2, tau_s: bb_agents::running::LEAGUE_TAU_S }, RunnerIn { id: 7, base: 2, speed: 8.2, tau_s: bb_agents::running::LEAGUE_TAU_S }]);
         let mut st = fx.st.clone();
         let mut sim = new_sim(&inp, &mut st);
         sim.t = 6.0;
@@ -9691,7 +9707,7 @@ mod tests {
     #[test]
     fn a_second_look_while_returning_counts_the_stop() {
         let fx = fixture(&[(0x0007, 2)]);
-        let inp = input(&fx, vec![RunnerIn { id: fx.st.batter, base: 0, speed: 8.2 }, RunnerIn { id: 0x0007, base: 2, speed: 8.2 }]);
+        let inp = input(&fx, vec![RunnerIn { id: fx.st.batter, base: 0, speed: 8.2, tau_s: bb_agents::running::LEAGUE_TAU_S }, RunnerIn { id: 0x0007, base: 2, speed: 8.2, tau_s: bb_agents::running::LEAGUE_TAU_S }]);
         let mut st = fx.st.clone();
         let mut sim = new_sim(&inp, &mut st);
         sim.t = 6.0;
@@ -9722,7 +9738,7 @@ mod tests {
     #[test]
     fn a_trailing_runner_arriving_after_the_look_does_not_leave_two_on_a_base() {
         let fx = fixture(&[(8, 1), (7, 2)]);
-        let inp = input(&fx, vec![RunnerIn { id: fx.st.batter, base: 0, speed: 8.2 }, RunnerIn { id: 8, base: 1, speed: 8.2 }, RunnerIn { id: 7, base: 2, speed: 8.2 }]);
+        let inp = input(&fx, vec![RunnerIn { id: fx.st.batter, base: 0, speed: 8.2, tau_s: bb_agents::running::LEAGUE_TAU_S }, RunnerIn { id: 8, base: 1, speed: 8.2, tau_s: bb_agents::running::LEAGUE_TAU_S }, RunnerIn { id: 7, base: 2, speed: 8.2, tau_s: bb_agents::running::LEAGUE_TAU_S }]);
         let mut st = fx.st.clone();
         let mut sim = new_sim(&inp, &mut st);
         sim.emit(Input::BallTouched { t: 0.5, what: Touch::Ground { x: 0.0, y: 1.0 } });
@@ -9757,7 +9773,7 @@ mod tests {
     #[test]
     fn a_trailing_runner_gives_way_to_a_lead_runner_coming_back() {
         let fx = fixture(&[(8, 1), (7, 2)]);
-        let inp = input(&fx, vec![RunnerIn { id: fx.st.batter, base: 0, speed: 8.2 }, RunnerIn { id: 8, base: 1, speed: 8.2 }, RunnerIn { id: 7, base: 2, speed: 8.2 }]);
+        let inp = input(&fx, vec![RunnerIn { id: fx.st.batter, base: 0, speed: 8.2, tau_s: bb_agents::running::LEAGUE_TAU_S }, RunnerIn { id: 8, base: 1, speed: 8.2, tau_s: bb_agents::running::LEAGUE_TAU_S }, RunnerIn { id: 7, base: 2, speed: 8.2, tau_s: bb_agents::running::LEAGUE_TAU_S }]);
         let mut st = fx.st.clone();
         let mut sim = new_sim(&inp, &mut st);
         sim.t = 6.0;
@@ -9808,7 +9824,7 @@ mod tests {
     #[test]
     fn three_runners_do_not_settle_two_on_second() {
         let fx = fixture(&[(9, 1), (8, 2), (7, 3)]);
-        let inp = input(&fx, vec![RunnerIn { id: fx.st.batter, base: 0, speed: 8.2 }, RunnerIn { id: 9, base: 1, speed: 8.2 }, RunnerIn { id: 8, base: 2, speed: 8.2 }, RunnerIn { id: 7, base: 3, speed: 8.2 }]);
+        let inp = input(&fx, vec![RunnerIn { id: fx.st.batter, base: 0, speed: 8.2, tau_s: bb_agents::running::LEAGUE_TAU_S }, RunnerIn { id: 9, base: 1, speed: 8.2, tau_s: bb_agents::running::LEAGUE_TAU_S }, RunnerIn { id: 8, base: 2, speed: 8.2, tau_s: bb_agents::running::LEAGUE_TAU_S }, RunnerIn { id: 7, base: 3, speed: 8.2, tau_s: bb_agents::running::LEAGUE_TAU_S }]);
         let mut st = fx.st.clone();
         let mut sim = traffic_sim(&inp, &mut st);
         sim.emit(Input::BaseTouched { t: 5.0, agent: 9, base: 2, holding_ball: false });
@@ -9835,7 +9851,7 @@ mod tests {
     #[test]
     fn a_distant_batter_does_not_crowd_the_return_to_second() {
         let fx = fixture(&[(7, 2)]);
-        let inp = input(&fx, vec![RunnerIn { id: fx.st.batter, base: 0, speed: 8.2 }, RunnerIn { id: 7, base: 2, speed: 8.2 }]);
+        let inp = input(&fx, vec![RunnerIn { id: fx.st.batter, base: 0, speed: 8.2, tau_s: bb_agents::running::LEAGUE_TAU_S }, RunnerIn { id: 7, base: 2, speed: 8.2, tau_s: bb_agents::running::LEAGUE_TAU_S }]);
         let mut st = fx.st.clone();
         let mut sim = new_sim(&inp, &mut st);
         sim.t = 6.0;
@@ -9873,8 +9889,8 @@ mod tests {
         let ids: Vec<AgentId> = bases.iter().map(|b| 0x0010 + *b as AgentId).collect();
         let on: Vec<(AgentId, u8)> = ids.iter().copied().zip(bases.iter().copied()).collect();
         let fx = fixture(&on);
-        let mut runners = vec![RunnerIn { id: fx.st.batter, base: 0, speed: 8.2 }];
-        runners.extend(on.iter().map(|&(id, b)| RunnerIn { id, base: b, speed: 7.0 + 2.0 * rnd() }));
+        let mut runners = vec![RunnerIn { id: fx.st.batter, base: 0, speed: 8.2, tau_s: bb_agents::running::LEAGUE_TAU_S }];
+        runners.extend(on.iter().map(|&(id, b)| RunnerIn { id, base: b, speed: 7.0 + 2.0 * rnd(), tau_s: bb_agents::running::LEAGUE_TAU_S }));
         let inp = input(&fx, runners);
         let mut st = fx.st.clone();
         let mut sim = new_sim(&inp, &mut st);
@@ -10012,7 +10028,7 @@ mod tests {
     #[test]
     fn a_runner_does_not_go_back_to_a_base_a_trailing_runner_stands_on() {
         let fx = fixture(&[(0x0008, 1), (0x0007, 2)]);
-        let inp = input(&fx, vec![RunnerIn { id: fx.st.batter, base: 0, speed: 8.2 }, RunnerIn { id: 0x0008, base: 1, speed: 8.2 }, RunnerIn { id: 0x0007, base: 2, speed: 8.2 }]);
+        let inp = input(&fx, vec![RunnerIn { id: fx.st.batter, base: 0, speed: 8.2, tau_s: bb_agents::running::LEAGUE_TAU_S }, RunnerIn { id: 0x0008, base: 1, speed: 8.2, tau_s: bb_agents::running::LEAGUE_TAU_S }, RunnerIn { id: 0x0007, base: 2, speed: 8.2, tau_s: bb_agents::running::LEAGUE_TAU_S }]);
         let mut st = fx.st.clone();
         let mut sim = new_sim(&inp, &mut st);
         sim.t = 6.0;
@@ -10038,7 +10054,7 @@ mod tests {
     fn a_forced_runner_between_bases_goes_on_when_the_ball_is_secured_ahead() {
         // Runner from first, forced by the batter, 8 m toward second; the second baseman has the ball on the bag.
         let fx = fixture(&[(0x0007, 1)]);
-        let inp = input(&fx, vec![RunnerIn { id: fx.st.batter, base: 0, speed: 8.2 }, RunnerIn { id: 0x0007, base: 1, speed: 8.2 }]);
+        let inp = input(&fx, vec![RunnerIn { id: fx.st.batter, base: 0, speed: 8.2, tau_s: bb_agents::running::LEAGUE_TAU_S }, RunnerIn { id: 0x0007, base: 1, speed: 8.2, tau_s: bb_agents::running::LEAGUE_TAU_S }]);
         let mut st = fx.st.clone();
         let mut sim = new_sim(&inp, &mut st);
         sim.t = 6.0;
@@ -10061,7 +10077,7 @@ mod tests {
     #[test]
     fn backup_in_front_of_the_receiver_leaves_him_the_throw() {
         let fx = fixture(&[]);
-        let inp = input(&fx, vec![RunnerIn { id: fx.st.batter, base: 0, speed: 8.2 }]);
+        let inp = input(&fx, vec![RunnerIn { id: fx.st.batter, base: 0, speed: 8.2, tau_s: bb_agents::running::LEAGUE_TAU_S }]);
         let mut st = fx.st.clone();
         let mut sim = new_sim(&inp, &mut st);
         let second = base_pos(2);
@@ -10092,7 +10108,7 @@ mod tests {
     fn overrun_with_tag(fx: &Fixture, samples: bool) -> (bool, f64, f64, bool, Vec<Input>, Vec<Event>) {
         const FB: usize = 2;
         let bat = fx.st.batter;
-        let inp = input(fx, vec![RunnerIn { id: bat, base: 0, speed: 8.2 }]);
+        let inp = input(fx, vec![RunnerIn { id: bat, base: 0, speed: 8.2, tau_s: bb_agents::running::LEAGUE_TAU_S }]);
         let mut st = fx.st.clone();
         let mut sim = new_sim(&inp, &mut st);
         sim.emit(Input::BallTouched { t: 0.8, what: Touch::Ground { x: -8.0, y: 30.0 } });
@@ -10187,7 +10203,7 @@ mod tests {
     #[test]
     fn batter_runs_out_of_his_box_onto_the_line() {
         let fx = fixture(&[]);
-        let inp = input(&fx, vec![RunnerIn { id: fx.st.batter, base: 0, speed: 8.2 }]);
+        let inp = input(&fx, vec![RunnerIn { id: fx.st.batter, base: 0, speed: 8.2, tau_s: bb_agents::running::LEAGUE_TAU_S }]);
         let mut st = fx.st.clone();
         let out = simulate_live(&LiveInput { record: true, ..inp }, &mut st);
         let track = &out.actors.iter().find(|(id, _)| *id == fx.st.batter).unwrap().1;
@@ -10201,6 +10217,35 @@ mod tests {
         assert!(track.windows(2).all(|w| (w[1].1 - w[0].1).norm() <= 11.0 * (w[1].0 - w[0].0) + 1e-9));
     }
 
+    // Q1 (tag-up review P2-3). The league-average runner (8.2 m/s, τ 0.76 s) covers a standing
+    // 90 ft in 4.10 s: t − 0.76·(1 − e^(−t/0.76)) = 27.432/8.2 = 3.34537 gives t = 4.1019. And
+    // each batter is charged his own route: from the right-handed box (−0.95, 0.30) to the
+    // line's 4 m point (2.8284, 2.8284) is √(3.7784² + 2.5284²) = 4.5464 m, from the
+    // left-handed box (0.95, 0.30) √(1.8784² + 2.5284²) = 3.1499 m, so they start 0.5464 m
+    // behind and 0.8501 m ahead of the plate's zero and the left-hander's run is 1.3965 m
+    // shorter. A runner with a quicker τ of his own gets there sooner.
+    #[test]
+    fn runners_start_by_their_own_tau_and_batters_from_their_own_box() {
+        assert!((run_time(BASE_L, 8.2, bb_agents::running::LEAGUE_TAU_S) - 4.1019).abs() < 1e-3);
+        assert!((batter_start_s(Vec3::new(-0.95, 0.30, 0.0)) + 0.5464).abs() < 1e-3);
+        assert!((batter_start_s(Vec3::new(0.95, 0.30, 0.0)) - 0.8501).abs() < 1e-3);
+        let first_touch = |bx: f64, tau_s: f64| {
+            let fx = fixture(&[]);
+            let mut inp = input(&fx, vec![RunnerIn { id: fx.st.batter, base: 0, speed: 8.2, tau_s }]);
+            inp.batter_box = Vec3::new(bx, 0.30, 0.0);
+            let mut st = fx.st.clone();
+            let out = simulate_live(&LiveInput { record: true, ..inp }, &mut st);
+            let track = &out.actors.iter().find(|(id, _)| *id == fx.st.batter).unwrap().1;
+            // The first recorded instant he is within a stride of the bag.
+            track.iter().find(|(_, p)| (*p - base_pos(1)).norm() < 0.5).map(|(t, _)| *t).expect("he reaches first")
+        };
+        let (right, left, quick) = (first_touch(-0.95, 0.76), first_touch(0.95, 0.76), first_touch(-0.95, 0.60));
+        // 1.3965 m at 8.2 m/s is 0.170 s; the track is sampled every 0.1 s.
+        assert!((right - left - 0.170).abs() < 0.11, "right {right:.2} s, left {left:.2} s");
+        // τ 0.16 s less is 0.16 s sooner once he is at full speed.
+        assert!((right - quick - 0.16).abs() < 0.11, "τ 0.76 {right:.2} s, τ 0.60 {quick:.2} s");
+    }
+
     /// The ball leaves the throwing hand (owner backlog A1): facing his target, a
     /// right-hander's hand is on his right and a left-hander's on his left, `THROW_ARM_OFFSET_M`
     /// out, at release height. Worked in the sim frame (+X first base, +Y center field).
@@ -10210,7 +10255,7 @@ mod tests {
     /// holder, movement) until he throws; returns the sim and the release time.
     fn center_fielder_takes_a_roller(up_s: f64, x0: f64) -> (Sim<'static>, f64) {
         let fx: &'static Fixture = Box::leak(Box::new(fixture(&[])));
-        let inp: &'static LiveInput<'static> = Box::leak(Box::new(input(fx, vec![RunnerIn { id: fx.st.batter, base: 0, speed: 8.2 }])));
+        let inp: &'static LiveInput<'static> = Box::leak(Box::new(input(fx, vec![RunnerIn { id: fx.st.batter, base: 0, speed: 8.2, tau_s: bb_agents::running::LEAGUE_TAU_S }])));
         let st: &'static mut RulesState = Box::leak(Box::new(fx.st.clone()));
         let mut sim = new_sim(inp, st);
         sim.f[CF].pos = Vec3::new(0.0, 80.0, 0.0);
@@ -10258,7 +10303,7 @@ mod tests {
     #[test]
     fn carrying_the_ball_to_the_bag_waits_for_no_throw_set_up() {
         let fx = fixture(&[]);
-        let inp = input(&fx, vec![RunnerIn { id: fx.st.batter, base: 0, speed: 8.2 }]);
+        let inp = input(&fx, vec![RunnerIn { id: fx.st.batter, base: 0, speed: 8.2, tau_s: bb_agents::running::LEAGUE_TAU_S }]);
         let mut st = fx.st.clone();
         let mut sim = new_sim(&inp, &mut st);
         sim.t = 1.0 + 0.66;
@@ -10282,7 +10327,7 @@ mod tests {
     /// about 3.3 s to first against a 38 m throw.
     fn third_baseman_with_an_unforced_runner_coming(outs: u8) -> Sim<'static> {
         let fx: &'static Fixture = Box::leak(Box::new(fixture(&[(7, 2)])));
-        let inp: &'static LiveInput<'static> = Box::leak(Box::new(input(fx, vec![RunnerIn { id: fx.st.batter, base: 0, speed: 8.2 }, RunnerIn { id: 7, base: 2, speed: 8.2 }])));
+        let inp: &'static LiveInput<'static> = Box::leak(Box::new(input(fx, vec![RunnerIn { id: fx.st.batter, base: 0, speed: 8.2, tau_s: bb_agents::running::LEAGUE_TAU_S }, RunnerIn { id: 7, base: 2, speed: 8.2, tau_s: bb_agents::running::LEAGUE_TAU_S }])));
         let st: &'static mut RulesState = Box::leak(Box::new(fx.st.clone()));
         st.outs = outs;
         let mut sim = new_sim(inp, st);
@@ -10319,7 +10364,7 @@ mod tests {
     #[test]
     fn a_sure_force_at_home_beats_carrying_first() {
         let fx = fixture(&[(5, 1), (6, 2), (7, 3)]);
-        let runners = vec![RunnerIn { id: fx.st.batter, base: 0, speed: 8.2 }, RunnerIn { id: 5, base: 1, speed: 8.2 }, RunnerIn { id: 6, base: 2, speed: 8.2 }, RunnerIn { id: 7, base: 3, speed: 8.2 }];
+        let runners = vec![RunnerIn { id: fx.st.batter, base: 0, speed: 8.2, tau_s: bb_agents::running::LEAGUE_TAU_S }, RunnerIn { id: 5, base: 1, speed: 8.2, tau_s: bb_agents::running::LEAGUE_TAU_S }, RunnerIn { id: 6, base: 2, speed: 8.2, tau_s: bb_agents::running::LEAGUE_TAU_S }, RunnerIn { id: 7, base: 3, speed: 8.2, tau_s: bb_agents::running::LEAGUE_TAU_S }];
         let inp = input(&fx, runners);
         let mut st = fx.st.clone();
         st.outs = 1;
@@ -10363,7 +10408,7 @@ mod tests {
     fn shortstop_to_first_by(eta_s: f64, catch_vel: Vec3, hand: bb_observe::Hand) -> (Sim<'static>, f64) {
         const SS: usize = 5;
         let fx: &'static Fixture = Box::leak(Box::new(fixture(&[])));
-        let inp: &'static LiveInput<'static> = Box::leak(Box::new(input(fx, vec![RunnerIn { id: fx.st.batter, base: 0, speed: 8.2 }])));
+        let inp: &'static LiveInput<'static> = Box::leak(Box::new(input(fx, vec![RunnerIn { id: fx.st.batter, base: 0, speed: 8.2, tau_s: bb_agents::running::LEAGUE_TAU_S }])));
         let st: &'static mut RulesState = Box::leak(Box::new(fx.st.clone()));
         let mut sim = new_sim(inp, st);
         sim.f[SS].a.throws = hand;
@@ -10466,7 +10511,7 @@ mod tests {
     #[test]
     fn a_left_handed_first_baseman_is_set_sooner_for_second() {
         let fx = fixture(&[]);
-        let inp = input(&fx, vec![RunnerIn { id: fx.st.batter, base: 0, speed: 8.2 }]);
+        let inp = input(&fx, vec![RunnerIn { id: fx.st.batter, base: 0, speed: 8.2, tau_s: bb_agents::running::LEAGUE_TAU_S }]);
         let mut st = fx.st.clone();
         let mut sim = new_sim(&inp, &mut st);
         // Placed where the turn is exact: facing −Y at (38.8, 38.8), second base (0, 38.8)
@@ -10501,7 +10546,7 @@ mod tests {
     /// A ball fielded fair by the shortstop (index 5) with a runner (id 2) on first, who has
     /// not left yet; the batter has not reached first.
     fn fielded_by_ss(fx: &Fixture) -> Sim<'_> {
-        let inp = Box::leak(Box::new(input(fx, vec![RunnerIn { id: fx.st.batter, base: 0, speed: 8.2 }, RunnerIn { id: 2, base: 1, speed: 8.2 }])));
+        let inp = Box::leak(Box::new(input(fx, vec![RunnerIn { id: fx.st.batter, base: 0, speed: 8.2, tau_s: bb_agents::running::LEAGUE_TAU_S }, RunnerIn { id: 2, base: 1, speed: 8.2, tau_s: bb_agents::running::LEAGUE_TAU_S }])));
         let st = Box::leak(Box::new(fx.st.clone()));
         let mut sim = new_sim(inp, st);
         sim.emit(Input::BallTouched { t: 1.0, what: Touch::Ground { x: 0.0, y: 40.0 } });
@@ -10590,7 +10635,7 @@ mod tests {
     #[test]
     fn a_fielder_chasing_into_the_seats_stops_at_the_wall() {
         let fx = fixture(&[]);
-        let inp = input(&fx, vec![RunnerIn { id: fx.st.batter, base: 0, speed: 8.2 }]);
+        let inp = input(&fx, vec![RunnerIn { id: fx.st.batter, base: 0, speed: 8.2, tau_s: bb_agents::running::LEAGUE_TAU_S }]);
         let mut st = fx.st.clone();
         let mut sim = new_sim(&inp, &mut st);
         sim.t = 2.0;
@@ -10641,7 +10686,7 @@ mod tests {
     /// would take on his feet) at the first tick the ball is within `swap_within_m` of him.
     fn crossing_with_mind_change(pass_m: f64, lead_s: f64, hands: Option<f64>, swap_within_m: f64, easy_from_m: f64, swap: bool) -> Sim<'static> {
         let fx: &'static Fixture = Box::leak(Box::new(fixture(&[])));
-        let mut inp = input(fx, vec![RunnerIn { id: fx.st.batter, base: 0, speed: 8.2 }]);
+        let mut inp = input(fx, vec![RunnerIn { id: fx.st.batter, base: 0, speed: 8.2, tau_s: bb_agents::running::LEAGUE_TAU_S }]);
         if let Some(h) = hands {
             inp.fattrs[CF].hands = h;
         }
@@ -10722,7 +10767,7 @@ mod tests {
     /// path itself, so fixtures built on this leave wide margins.
     fn believing_the_truth(r: Vec3, v: Vec3, t: f64) -> Sim<'static> {
         let fx: &'static Fixture = Box::leak(Box::new(fixture(&[])));
-        let mut inp = input(fx, vec![RunnerIn { id: fx.st.batter, base: 0, speed: 8.2 }]);
+        let mut inp = input(fx, vec![RunnerIn { id: fx.st.batter, base: 0, speed: 8.2, tau_s: bb_agents::running::LEAGUE_TAU_S }]);
         inp.fattrs = core::array::from_fn(FielderAttrs::average);
         let inp: &'static LiveInput<'static> = Box::leak(Box::new(inp));
         let st: &'static mut RulesState = Box::leak(Box::new(fx.st.clone()));
@@ -10792,7 +10837,7 @@ mod tests {
     /// before closest approach. Runs 0.8 s of world ticks.
     fn stretch_for_a_fly(z0: f64) -> Sim<'static> {
         let fx: &'static Fixture = Box::leak(Box::new(fixture(&[])));
-        let inp: &'static LiveInput<'static> = Box::leak(Box::new(input(fx, vec![RunnerIn { id: fx.st.batter, base: 0, speed: 8.2 }])));
+        let inp: &'static LiveInput<'static> = Box::leak(Box::new(input(fx, vec![RunnerIn { id: fx.st.batter, base: 0, speed: 8.2, tau_s: bb_agents::running::LEAGUE_TAU_S }])));
         let st: &'static mut RulesState = Box::leak(Box::new(fx.st.clone()));
         let mut sim = new_sim(inp, st);
         sim.f[CF].pos = Vec3::new(0.0, 80.0, 0.0);
@@ -10907,7 +10952,7 @@ mod tests {
         let fx = fixture(&[]);
         let mut worst = (0.0f64, 0.0f64);
         for k in 0..8 {
-            let mut inp = input(&fx, vec![RunnerIn { id: fx.st.batter, base: 0, speed: 8.2 }]);
+            let mut inp = input(&fx, vec![RunnerIn { id: fx.st.batter, base: 0, speed: 8.2, tau_s: bb_agents::running::LEAGUE_TAU_S }]);
             // Up 35 m and out toward the first-base seats, a little farther each time.
             let dir = Vec3::new(0.80, 0.25, 0.0).normalized();
             inp.ball = BallState { r: Vec3::new(0.0, 0.5, 1.0), v: dir * (11.0 + 0.5 * k as f64) + Vec3::new(0.0, 0.0, 26.0), w: Vec3::ZERO };
@@ -10957,7 +11002,7 @@ mod tests {
         assert!((OVER_WALL_REACH_M - 0.7).abs() < 1e-12, "the spec's 0.7 m");
         let fx = fixture(&[]);
         let field = &fx.field;
-        let inp = input(&fx, vec![RunnerIn { id: fx.st.batter, base: 0, speed: 8.2 }]);
+        let inp = input(&fx, vec![RunnerIn { id: fx.st.batter, base: 0, speed: 8.2, tau_s: bb_agents::running::LEAGUE_TAU_S }]);
         let r2 = core::f64::consts::SQRT_2;
         // First-base stands wall, 27 m along the line (past the dugout's 6–24 m, before the taper's 30.5 m): the plane is where
         // c = (x − y)/√2 is the foul clearance, the way in is (−1, 1)/√2.
@@ -10997,7 +11042,7 @@ mod tests {
     #[test]
     fn a_fielder_running_at_the_wall_arrives_at_the_contact_speed() {
         let fx = fixture(&[]);
-        let inp = input(&fx, vec![RunnerIn { id: fx.st.batter, base: 0, speed: 8.2 }]);
+        let inp = input(&fx, vec![RunnerIn { id: fx.st.batter, base: 0, speed: 8.2, tau_s: bb_agents::running::LEAGUE_TAU_S }]);
         let field = &fx.field;
         let mut st = fx.st.clone();
         let mut sim = new_sim(&inp, &mut st);
@@ -11047,7 +11092,7 @@ mod tests {
     fn with_two_out_a_sure_force_a_step_away_beats_a_sure_throw_across() {
         const SS: usize = 5;
         let fx = fixture(&[(5, 1)]);
-        let inp = input(&fx, vec![RunnerIn { id: fx.st.batter, base: 0, speed: 8.2 }, RunnerIn { id: 5, base: 1, speed: 8.2 }]);
+        let inp = input(&fx, vec![RunnerIn { id: fx.st.batter, base: 0, speed: 8.2, tau_s: bb_agents::running::LEAGUE_TAU_S }, RunnerIn { id: 5, base: 1, speed: 8.2, tau_s: bb_agents::running::LEAGUE_TAU_S }]);
         let mut st = fx.st.clone();
         st.outs = 2;
         let mut sim = new_sim(&inp, &mut st);
@@ -11075,7 +11120,7 @@ mod tests {
     fn the_cutoff_lines_up_for_home_with_a_runner_standing_on_third() {
         const LF: usize = 6;
         let fx = fixture(&[(5, 1)]);
-        let inp = input(&fx, vec![RunnerIn { id: fx.st.batter, base: 0, speed: 8.2 }, RunnerIn { id: 5, base: 1, speed: 8.2 }]);
+        let inp = input(&fx, vec![RunnerIn { id: fx.st.batter, base: 0, speed: 8.2, tau_s: bb_agents::running::LEAGUE_TAU_S }, RunnerIn { id: 5, base: 1, speed: 8.2, tau_s: bb_agents::running::LEAGUE_TAU_S }]);
         let mut st = fx.st.clone();
         let mut sim = new_sim(&inp, &mut st);
         sim.t = 5.0;
@@ -11095,7 +11140,7 @@ mod tests {
     fn a_double_play_nobody_would_throw_for_adds_nothing() {
         const SS: usize = 5;
         let fx = fixture(&[(5, 1)]);
-        let inp = input(&fx, vec![RunnerIn { id: fx.st.batter, base: 0, speed: 8.2 }, RunnerIn { id: 5, base: 1, speed: 8.2 }]);
+        let inp = input(&fx, vec![RunnerIn { id: fx.st.batter, base: 0, speed: 8.2, tau_s: bb_agents::running::LEAGUE_TAU_S }, RunnerIn { id: 5, base: 1, speed: 8.2, tau_s: bb_agents::running::LEAGUE_TAU_S }]);
         let mut st = fx.st.clone();
         st.outs = 1;
         let mut sim = new_sim(&inp, &mut st);
@@ -11123,7 +11168,7 @@ mod tests {
     fn the_holder_weighs_p_squared_times_w() {
         const B1: usize = 2;
         let fx = fixture(&[(5, 1), (6, 2), (7, 3)]);
-        let runners = vec![RunnerIn { id: fx.st.batter, base: 0, speed: 8.2 }, RunnerIn { id: 5, base: 1, speed: 8.2 }, RunnerIn { id: 6, base: 2, speed: 8.2 }, RunnerIn { id: 7, base: 3, speed: 8.2 }];
+        let runners = vec![RunnerIn { id: fx.st.batter, base: 0, speed: 8.2, tau_s: bb_agents::running::LEAGUE_TAU_S }, RunnerIn { id: 5, base: 1, speed: 8.2, tau_s: bb_agents::running::LEAGUE_TAU_S }, RunnerIn { id: 6, base: 2, speed: 8.2, tau_s: bb_agents::running::LEAGUE_TAU_S }, RunnerIn { id: 7, base: 3, speed: 8.2, tau_s: bb_agents::running::LEAGUE_TAU_S }];
         let inp = input(&fx, runners);
         let mut st = fx.st.clone();
         st.outs = 1;
@@ -11161,7 +11206,7 @@ mod tests {
         const SS: usize = 5;
         for (margin, attempt) in [(-0.08, false), (-0.03, true)] {
             let fx = fixture(&[]);
-            let inp = input(&fx, vec![RunnerIn { id: fx.st.batter, base: 0, speed: 8.2 }]);
+            let inp = input(&fx, vec![RunnerIn { id: fx.st.batter, base: 0, speed: 8.2, tau_s: bb_agents::running::LEAGUE_TAU_S }]);
             let mut st = fx.st.clone();
             let mut sim = new_sim(&inp, &mut st);
             sim.t = 1.0;
@@ -11193,7 +11238,7 @@ mod tests {
     fn feed_to_shortstop(at: Vec3, batter_eta_s: f64) -> (Sim<'static>, f64, f64, f64) {
         const SS: usize = 5;
         let fx: &'static Fixture = Box::leak(Box::new(fixture(&[(5, 1)])));
-        let inp: &'static LiveInput<'static> = Box::leak(Box::new(input(fx, vec![RunnerIn { id: fx.st.batter, base: 0, speed: 8.2 }, RunnerIn { id: 5, base: 1, speed: 8.2 }])));
+        let inp: &'static LiveInput<'static> = Box::leak(Box::new(input(fx, vec![RunnerIn { id: fx.st.batter, base: 0, speed: 8.2, tau_s: bb_agents::running::LEAGUE_TAU_S }, RunnerIn { id: 5, base: 1, speed: 8.2, tau_s: bb_agents::running::LEAGUE_TAU_S }])));
         let st: &'static mut RulesState = Box::leak(Box::new(fx.st.clone()));
         let mut sim = new_sim(inp, st);
         sim.t = 2.0;
@@ -11280,7 +11325,7 @@ mod tests {
     fn a_carrier_to_second_keeps_the_set_up_he_spent_running_with_the_ball() {
         const SS: usize = 5;
         let fx = fixture(&[(5, 1)]);
-        let inp = input(&fx, vec![RunnerIn { id: fx.st.batter, base: 0, speed: 8.2 }, RunnerIn { id: 5, base: 1, speed: 8.2 }]);
+        let inp = input(&fx, vec![RunnerIn { id: fx.st.batter, base: 0, speed: 8.2, tau_s: bb_agents::running::LEAGUE_TAU_S }, RunnerIn { id: 5, base: 1, speed: 8.2, tau_s: bb_agents::running::LEAGUE_TAU_S }]);
         let mut st = fx.st.clone();
         let mut sim = new_sim(&inp, &mut st);
         sim.t = 2.0;
@@ -11325,7 +11370,7 @@ mod tests {
     fn off_bag_receiver(batter_eta_s: f64, r1_short_m: f64, off_m: f64) -> (Sim<'static>, usize, usize) {
         const SS: usize = 5;
         let fx: &'static Fixture = Box::leak(Box::new(fixture(&[(5, 1)])));
-        let inp: &'static LiveInput<'static> = Box::leak(Box::new(input(fx, vec![RunnerIn { id: fx.st.batter, base: 0, speed: 8.2 }, RunnerIn { id: 5, base: 1, speed: 8.2 }])));
+        let inp: &'static LiveInput<'static> = Box::leak(Box::new(input(fx, vec![RunnerIn { id: fx.st.batter, base: 0, speed: 8.2, tau_s: bb_agents::running::LEAGUE_TAU_S }, RunnerIn { id: 5, base: 1, speed: 8.2, tau_s: bb_agents::running::LEAGUE_TAU_S }])));
         let st: &'static mut RulesState = Box::leak(Box::new(fx.st.clone()));
         let mut sim = new_sim(inp, st);
         sim.t = 2.0;
@@ -11406,7 +11451,7 @@ mod tests {
     fn only_a_throw_to_first_is_a_pivot() {
         const B2: usize = 3;
         let fx = fixture(&[(5, 1)]);
-        let inp = input(&fx, vec![RunnerIn { id: fx.st.batter, base: 0, speed: 8.2 }, RunnerIn { id: 5, base: 1, speed: 8.2 }]);
+        let inp = input(&fx, vec![RunnerIn { id: fx.st.batter, base: 0, speed: 8.2, tau_s: bb_agents::running::LEAGUE_TAU_S }, RunnerIn { id: 5, base: 1, speed: 8.2, tau_s: bb_agents::running::LEAGUE_TAU_S }]);
         let mut st = fx.st.clone();
         let mut sim = new_sim(&inp, &mut st);
         sim.f[B2].pos = base_pos(2);
@@ -11436,7 +11481,7 @@ mod tests {
     fn a_pivot_man_braking_onto_the_bag_faces_the_way_he_is_moving() {
         const B2: usize = 3;
         let fx = fixture(&[(5, 1)]);
-        let inp = input(&fx, vec![RunnerIn { id: fx.st.batter, base: 0, speed: 8.2 }, RunnerIn { id: 5, base: 1, speed: 8.2 }]);
+        let inp = input(&fx, vec![RunnerIn { id: fx.st.batter, base: 0, speed: 8.2, tau_s: bb_agents::running::LEAGUE_TAU_S }, RunnerIn { id: 5, base: 1, speed: 8.2, tau_s: bb_agents::running::LEAGUE_TAU_S }]);
         let mut st = fx.st.clone();
         let mut sim = new_sim(&inp, &mut st);
         sim.t = 2.0;
@@ -11475,7 +11520,7 @@ mod tests {
         const B2: usize = 3;
         const B1: usize = 2;
         let fx = fixture(&[(5, 1)]);
-        let inp = input(&fx, vec![RunnerIn { id: fx.st.batter, base: 0, speed: 8.2 }, RunnerIn { id: 5, base: 1, speed: 8.2 }]);
+        let inp = input(&fx, vec![RunnerIn { id: fx.st.batter, base: 0, speed: 8.2, tau_s: bb_agents::running::LEAGUE_TAU_S }, RunnerIn { id: 5, base: 1, speed: 8.2, tau_s: bb_agents::running::LEAGUE_TAU_S }]);
         let mut st = fx.st.clone();
         let mut sim = new_sim(&inp, &mut st);
         sim.t = 1.5;
@@ -11533,7 +11578,7 @@ mod tests {
         for bats in [bb_observe::Hand::Right, bb_observe::Hand::Left] {
             let fx_e = fixture(&[]);
             let mut st_e = fx_e.st.clone();
-            let mut inp_e = input(&fx_e, vec![RunnerIn { id: 0x0001, base: 0, speed: 8.2 }]);
+            let mut inp_e = input(&fx_e, vec![RunnerIn { id: 0x0001, base: 0, speed: 8.2, tau_s: bb_agents::running::LEAGUE_TAU_S }]);
             inp_e.bats = bats;
             let sim_empty = new_sim(&inp_e, &mut st_e);
 
@@ -11541,9 +11586,9 @@ mod tests {
             fx13.st.outs = 1;
             let mut st13 = fx13.st.clone();
             let mut inp13 = input(&fx13, vec![
-                RunnerIn { id: fx13.st.batter, base: 0, speed: 8.2 },
-                RunnerIn { id: 5, base: 1, speed: 8.2 },
-                RunnerIn { id: 7, base: 3, speed: 8.2 },
+                RunnerIn { id: fx13.st.batter, base: 0, speed: 8.2, tau_s: bb_agents::running::LEAGUE_TAU_S },
+                RunnerIn { id: 5, base: 1, speed: 8.2, tau_s: bb_agents::running::LEAGUE_TAU_S },
+                RunnerIn { id: 7, base: 3, speed: 8.2, tau_s: bb_agents::running::LEAGUE_TAU_S },
             ]);
             inp13.bats = bats;
             let sim_13 = new_sim(&inp13, &mut st13);
@@ -11556,8 +11601,8 @@ mod tests {
                 let mut fx = fixture(&on_base);
                 fx.st.outs = 1;
                 let mut st = fx.st.clone();
-                let mut runners = vec![RunnerIn { id: fx.st.batter, base: 0, speed: 8.2 }];
-                runners.extend(on_base.iter().map(|&(id, base)| RunnerIn { id, base, speed: 8.2 }));
+                let mut runners = vec![RunnerIn { id: fx.st.batter, base: 0, speed: 8.2, tau_s: bb_agents::running::LEAGUE_TAU_S }];
+                runners.extend(on_base.iter().map(|&(id, base)| RunnerIn { id, base, speed: 8.2, tau_s: bb_agents::running::LEAGUE_TAU_S }));
                 let mut inp = input(&fx, runners);
                 inp.bats = bats;
                 let sim = new_sim(&inp, &mut st);
@@ -11573,7 +11618,7 @@ mod tests {
     fn middle_infielder_past_45m_breaks_for_infield_grounder() {
         let fx = fixture(&[]);
         let mut st = fx.st.clone();
-        let mut inp = input(&fx, vec![RunnerIn { id: fx.st.batter, base: 0, speed: 8.2 }]);
+        let mut inp = input(&fx, vec![RunnerIn { id: fx.st.batter, base: 0, speed: 8.2, tau_s: bb_agents::running::LEAGUE_TAU_S }]);
         inp.fattrs[0].speed = 14.0;
         inp.fattrs[0].reaction = 0.05;
         inp.fattrs[3].reaction = 0.50;
@@ -11595,8 +11640,8 @@ mod tests {
             fx.st.outs = 1;
             let mut st = fx.st.clone();
             let mut inp = input(&fx, vec![
-                RunnerIn { id: fx.st.batter, base: 0, speed: 8.2 },
-                RunnerIn { id: 5, base: 1, speed: 8.2 },
+                RunnerIn { id: fx.st.batter, base: 0, speed: 8.2, tau_s: bb_agents::running::LEAGUE_TAU_S },
+                RunnerIn { id: 5, base: 1, speed: 8.2, tau_s: bb_agents::running::LEAGUE_TAU_S },
             ]);
             if make_p_primary {
                 inp.fattrs[0].speed = 14.0;
@@ -11617,7 +11662,7 @@ mod tests {
     fn infielder_at_savant_depth_settles_without_return_throw() {
         let fx = fixture(&[]);
         let mut st = fx.st.clone();
-        let mut inp = input(&fx, vec![RunnerIn { id: fx.st.batter, base: 0, speed: 8.2 }]);
+        let mut inp = input(&fx, vec![RunnerIn { id: fx.st.batter, base: 0, speed: 8.2, tau_s: bb_agents::running::LEAGUE_TAU_S }]);
         inp.bats = bb_observe::Hand::Right;
         let mut sim = new_sim(&inp, &mut st);
         let at = sim.f[3].pos;
@@ -11643,7 +11688,7 @@ mod tests {
         assert!(crate::play::MAX_INFIELD_DEPTH_M < INFIELD_R && INFIELD_R < INFIELD_BREAK_R);
         let fx = fixture(&[]);
         let mut st = fx.st.clone();
-        let inp = input(&fx, vec![RunnerIn { id: fx.st.batter, base: 0, speed: 8.2 }]);
+        let inp = input(&fx, vec![RunnerIn { id: fx.st.batter, base: 0, speed: 8.2, tau_s: bb_agents::running::LEAGUE_TAU_S }]);
         let mut sim = new_sim(&inp, &mut st);
         let at = Vec3::new(5.0, 48.7, 0.0);
         assert!(m::hypot(at.x, at.y) < INFIELD_BREAK_R);
@@ -11659,7 +11704,7 @@ mod tests {
     fn first_baseman_breaks_on_right_side_infield_grounder() {
         let fx = fixture(&[]);
         let mut st = fx.st.clone();
-        let mut inp = input(&fx, vec![RunnerIn { id: fx.st.batter, base: 0, speed: 8.2 }]);
+        let mut inp = input(&fx, vec![RunnerIn { id: fx.st.batter, base: 0, speed: 8.2, tau_s: bb_agents::running::LEAGUE_TAU_S }]);
         inp.bats = bb_observe::Hand::Right;
         inp.fattrs[3].speed = 26.0;
         inp.fattrs[3].reaction = 0.05;
@@ -11678,7 +11723,7 @@ mod tests {
     fn first_baseman_at_standard_depth_carries_when_faster_than_pitcher() {
         let fx = fixture(&[]);
         let mut st = fx.st.clone();
-        let mut inp = input(&fx, vec![RunnerIn { id: fx.st.batter, base: 0, speed: 8.2 }]);
+        let mut inp = input(&fx, vec![RunnerIn { id: fx.st.batter, base: 0, speed: 8.2, tau_s: bb_agents::running::LEAGUE_TAU_S }]);
         inp.bats = bb_observe::Hand::Right;
         let mut sim = new_sim(&inp, &mut st);
         let std_1b = sim.f[2].pos;
@@ -11705,8 +11750,8 @@ mod tests {
         let fx = fixture(&[(5, 2)]);
         let mut st_r = fx.st.clone();
         let mut inp_r = input(&fx, vec![
-            RunnerIn { id: fx.st.batter, base: 0, speed: 8.2 },
-            RunnerIn { id: 5, base: 2, speed: 8.2 },
+            RunnerIn { id: fx.st.batter, base: 0, speed: 8.2, tau_s: bb_agents::running::LEAGUE_TAU_S },
+            RunnerIn { id: 5, base: 2, speed: 8.2, tau_s: bb_agents::running::LEAGUE_TAU_S },
         ]);
         inp_r.bats = bb_observe::Hand::Right;
         let mut sim_r = new_sim(&inp_r, &mut st_r);
@@ -11718,8 +11763,8 @@ mod tests {
         let fx_l = fixture(&[(5, 2)]);
         let mut st_l = fx_l.st.clone();
         let mut inp_l = input(&fx_l, vec![
-            RunnerIn { id: fx_l.st.batter, base: 0, speed: 8.2 },
-            RunnerIn { id: 5, base: 2, speed: 8.2 },
+            RunnerIn { id: fx_l.st.batter, base: 0, speed: 8.2, tau_s: bb_agents::running::LEAGUE_TAU_S },
+            RunnerIn { id: 5, base: 2, speed: 8.2, tau_s: bb_agents::running::LEAGUE_TAU_S },
         ]);
         inp_l.bats = bb_observe::Hand::Left;
         let mut sim_l = new_sim(&inp_l, &mut st_l);
@@ -11731,8 +11776,8 @@ mod tests {
         let fx_1 = fixture(&[(5, 1)]);
         let mut st_1 = fx_1.st.clone();
         let mut inp_1 = input(&fx_1, vec![
-            RunnerIn { id: fx_1.st.batter, base: 0, speed: 8.2 },
-            RunnerIn { id: 5, base: 1, speed: 8.2 },
+            RunnerIn { id: fx_1.st.batter, base: 0, speed: 8.2, tau_s: bb_agents::running::LEAGUE_TAU_S },
+            RunnerIn { id: 5, base: 1, speed: 8.2, tau_s: bb_agents::running::LEAGUE_TAU_S },
         ]);
         inp_1.bats = bb_observe::Hand::Right;
         let mut sim_1 = new_sim(&inp_1, &mut st_1);
@@ -11752,9 +11797,9 @@ mod tests {
             fx.st.outs = outs;
             let mut st = fx.st.clone();
             let mut inp = input(&fx, vec![
-                RunnerIn { id: fx.st.batter, base: 0, speed: 8.2 },
-                RunnerIn { id: 5, base: 1, speed: 8.2 },
-                RunnerIn { id: 7, base: 3, speed: 8.2 },
+                RunnerIn { id: fx.st.batter, base: 0, speed: 8.2, tau_s: bb_agents::running::LEAGUE_TAU_S },
+                RunnerIn { id: 5, base: 1, speed: 8.2, tau_s: bb_agents::running::LEAGUE_TAU_S },
+                RunnerIn { id: 7, base: 3, speed: 8.2, tau_s: bb_agents::running::LEAGUE_TAU_S },
             ]);
             inp.bats = bb_observe::Hand::Right;
             let mut sim = new_sim(&inp, &mut st);
@@ -11788,9 +11833,9 @@ mod tests {
             fx0.st.outs = outs;
             let mut st0 = fx0.st.clone();
             let mut inp0 = input(&fx0, vec![
-                RunnerIn { id: fx0.st.batter, base: 0, speed: 8.2 },
-                RunnerIn { id: 5, base: 1, speed: 8.2 },
-                RunnerIn { id: 7, base: 3, speed: 8.2 },
+                RunnerIn { id: fx0.st.batter, base: 0, speed: 8.2, tau_s: bb_agents::running::LEAGUE_TAU_S },
+                RunnerIn { id: 5, base: 1, speed: 8.2, tau_s: bb_agents::running::LEAGUE_TAU_S },
+                RunnerIn { id: 7, base: 3, speed: 8.2, tau_s: bb_agents::running::LEAGUE_TAU_S },
             ]);
             inp0.bats = bb_observe::Hand::Right;
             inp0.fattrs[B2].throw_choice.continuation_weight = 0.0;
@@ -11822,9 +11867,9 @@ mod tests {
         fx.st.outs = 0;
         let mut st = fx.st.clone();
         let mut inp = input(&fx, vec![
-            RunnerIn { id: fx.st.batter, base: 0, speed: 8.2 },
-            RunnerIn { id: 5, base: 1, speed: 8.2 },
-            RunnerIn { id: 6, base: 2, speed: 8.2 },
+            RunnerIn { id: fx.st.batter, base: 0, speed: 8.2, tau_s: bb_agents::running::LEAGUE_TAU_S },
+            RunnerIn { id: 5, base: 1, speed: 8.2, tau_s: bb_agents::running::LEAGUE_TAU_S },
+            RunnerIn { id: 6, base: 2, speed: 8.2, tau_s: bb_agents::running::LEAGUE_TAU_S },
         ]);
         inp.bats = bb_observe::Hand::Right;
         let mut sim = new_sim(&inp, &mut st);
@@ -11874,7 +11919,7 @@ mod tests {
         for bats in [bb_observe::Hand::Right, bb_observe::Hand::Left] {
             let fx = fixture(&[]);
             let mut st = fx.st.clone();
-            let mut inp = input(&fx, vec![RunnerIn { id: fx.st.batter, base: 0, speed: 8.2 }]);
+            let mut inp = input(&fx, vec![RunnerIn { id: fx.st.batter, base: 0, speed: 8.2, tau_s: bb_agents::running::LEAGUE_TAU_S }]);
             inp.bats = bats;
             inp.fattrs[0].speed = 14.0;
             inp.fattrs[0].reaction = 0.05;
@@ -11897,7 +11942,7 @@ mod tests {
     fn first_baseman_stays_with_the_bag_when_nobody_else_can_take_first() {
         let fx = fixture(&[]);
         let mut st = fx.st.clone();
-        let mut inp = input(&fx, vec![RunnerIn { id: fx.st.batter, base: 0, speed: 8.2 }]);
+        let mut inp = input(&fx, vec![RunnerIn { id: fx.st.batter, base: 0, speed: 8.2, tau_s: bb_agents::running::LEAGUE_TAU_S }]);
         inp.bats = bb_observe::Hand::Right;
         inp.fattrs[0].speed = 14.0;
         inp.fattrs[0].reaction = 0.05;
@@ -11924,7 +11969,7 @@ mod tests {
         for first_taken in [false, true] {
             let fx = fixture(&[]);
             let mut st = fx.st.clone();
-            let inp = input(&fx, vec![RunnerIn { id: fx.st.batter, base: 0, speed: 8.2 }]);
+            let inp = input(&fx, vec![RunnerIn { id: fx.st.batter, base: 0, speed: 8.2, tau_s: bb_agents::running::LEAGUE_TAU_S }]);
             let mut sim = new_sim(&inp, &mut st);
             sim.t = inp.t_contact + 2.0;
             held_at(&mut sim, 0, Vec3::new(-5.0, 14.0, 0.0));
