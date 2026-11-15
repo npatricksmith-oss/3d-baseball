@@ -247,6 +247,7 @@ Runs per game were not printed until late in the day; the early rows have PA per
 
 | Date | Task | Commit | Check |
 |---|---|---|---|
+| 11-15 | Collision-efficiency counterfactual ([note](calibration/2026-11-15-q-counterfactual.md); new example `q_contact` and a Python script only; `e_ref` varied by a local, uncommitted patch) | this commit | No sim source touched; `q_contact` baseline digests repeat power-mix's (seed 0 `ee562b47…`, seed 1000 `10c56db3…`) |
 | 11-15 | Batter power-mix measurement ([note](calibration/2026-11-15-power-mix.md); new example `ev_bat` and a Python script only) | `34c51e1` | No sim source touched; the example's digest fold repeats and its fair-ball counts equal `ev_la_bins`' (15,869 [15,988]) |
 | 11-15 | Exit speed × launch angle measurement ([note](calibration/2026-11-15-ev-la-bins.md); new example `ev_la_bins` and a Python script only) | `c4ae4fd` | No sim source touched, so every game is unchanged; the example reproduces HR/PA 1.776% [1.774%] and 105+ mph 5.5% |
 | 11-14 | Scorer fixes from the Codex unreviewed-merges review (P1-1 to P2-2; `bb_stats` only; **branch `work/scorer-recheck-fixes`**) | `5c015a4` | Statistics only, no game logic touched. `scorer_audit 300` seeds 0 and 1000: output identical before and after (AB 21,247 [21,090], H 6,160 [6,208], HR 512 [541], SF 99 [138], zero unresolved); the cases are latent in generated games. Doubles are not in the audit print |
