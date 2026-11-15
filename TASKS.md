@@ -47,7 +47,9 @@ Main is `3f8ee60`, pushed. `cargo test --workspace --release` on it: 400 pass. S
 - `work/outfield-read`: the typical-spin belief refit, a read that closes over the last 3 s, `ReadSkill` per fielder. Routine flies .824 → .967; alone it takes runs to 3.32 [3.42] and fly-ball hits to .099. Codex: no P1, sound as an interim model. Resolution written.
 - When both merge: **refit the fielders' spin belief on the combined contact population** (outfield review P3-1) and take one full test pass and one standard run on the combination (`integrate/trio` was a trial merge only, made before the runner branch's last round).
 
-**Running:** `work/wall-braking` (Sonnet): Q5, BRAKE 4.75 m/s² and wall-contact speed about 2 m/s [E], with the wall-reach contract (collision review P2-2).
+- `work/wall-braking` (Q5): BRAKE 4.75 m/s² (sourced) for every braking use, wall-contact speed 2 m/s [E], one over-the-wall reach (0.7 m) for plans and captures. [Opus review](docs/reviews/2026-11-15-opus-wall-braking-review.md) on the branch (Codex was at 75% of its window): no P1, merge. Alone it takes runs 5.05 → 4.94 [4.97 → 5.24], fly-ball hits .225 → .236, pop-up hits .035 → .046 [.031 → .057]. **Held to go in with the outfield read** (alone it makes fly defence worse on main). Its review's follow-ups, for the fielding work: **(a) arriving under a high ball:** with time to spare a chaser should get there early and under control with a margin for how far his read can still move, not sprint to a read 4 m off and overshoot (pop-up hits 44 → 78 on one seed set; `seed 1000003040 play 5`); **(b) an on-time caller displaced by a teammate whose own estimate is later than the ball** (`seed 1000003096 play 88`); **(c) a receiver on a bag has no stretch** for a throw more than 1.5–1.7 m wide; **(d)** `run_gap` is 0.42 s optimistic for a fielder close to the ball and moving away (step `fielder_step` itself under about 5 m).
+
+**Running:** nothing heavy; the wall-braking worker is closing its review's small items.
 
 **Next, in order (one `live.rs` job at a time; two Claude workers at most):**
 1. After Q7: integrate the two held branches as above.
