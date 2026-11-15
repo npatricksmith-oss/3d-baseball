@@ -3525,7 +3525,11 @@ impl<'a> Sim<'a> {
         let go_back = margin(ball_back, t_back) > 0.35;
         // Safe at neither: he turns toward the base the ball is farther from (a rundown is
         // not modelled; either way he is probably out).
-        let goal = if go_on {
+        // The base behind him is no refuge once a runner who started behind him stands on it
+        // or has passed it (two on a base; the force is off, but he is not alone on the path).
+        let id = r.id;
+        let crowded = self.r.iter().any(|o| o.id != id && !o.out && !o.scored && o.start < start && o.s + 1e-6 >= from as f64 * BASE_L);
+        let goal = if go_on || crowded {
             next
         } else if go_back || ball_back >= ball_on {
             from
@@ -8032,6 +8036,35 @@ mod tests {
         assert!(sim.runner_relook(1), "the ball is secured ahead of him");
         assert_eq!(sim.r[1].goal, 2, "he cannot beat the ball to third, and goes back");
         assert!(!sim.runner_relook(1), "one look per event");
+    }
+
+    // Seed 1000003226 play 194 (bases loaded, the force at second made, the throw home): the
+    // runner from third looked again and went back to third as the runner from second reached
+    // it, two on one base (rules warning). The base behind him is no refuge when a runner who
+    // started behind him is on it.
+    #[test]
+    fn a_runner_does_not_go_back_to_a_base_a_trailing_runner_stands_on() {
+        let fx = fixture(&[(0x0008, 1), (0x0007, 2)]);
+        let inp = input(&fx, vec![RunnerIn { id: fx.st.batter, base: 0, speed: 8.2 }, RunnerIn { id: 0x0008, base: 1, speed: 8.2 }, RunnerIn { id: 0x0007, base: 2, speed: 8.2 }]);
+        let mut st = fx.st.clone();
+        let mut sim = new_sim(&inp, &mut st);
+        sim.t = 6.0;
+        // The batter is out, so no force: the lead runner, 8 m past second, with the trailing
+        // runner standing on second behind him and the third baseman holding the ball on third.
+        sim.r[0].out = true;
+        sim.r[1].s = 2.0 * BASE_L;
+        sim.r[1].v = 0.0;
+        sim.r[2].s = 2.0 * BASE_L + 8.0;
+        sim.r[2].v = 7.0;
+        sim.r[2].goal = 3;
+        sim.r[2].hold_s = None;
+        sim.f[4].pos = base_pos(3);
+        sim.f[4].target = base_pos(3);
+        sim.ball = Ball::Held { by: 4 };
+        sim.out.secured.push((6.0, sim.f[4].id));
+        assert!(!sim.forced(2));
+        assert!(sim.runner_relook(2));
+        assert_eq!(sim.r[2].goal, 3, "second is no refuge with a runner standing on it");
     }
 
     #[test]
