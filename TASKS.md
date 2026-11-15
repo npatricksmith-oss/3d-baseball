@@ -1,6 +1,6 @@
 # Task List
 
-**Last updated:** 2026-11-15, 11:15 (fifth lead session: runner acceleration, Q1, merged; before that, 09:45, handoff at the pause of the fourth lead session: all held work merged; before that, night: "Resume here" rewritten by the fourth lead session; before that, 2026-11-14 evening: "Resume here" rewritten as the handoff from the third lead session: the Codex rerun on `work/live-comm` comes first; before that, the swing and collision block below and the fielder-communication line, at the pause of the second lead session; before that, hurried throws, A3; before that, handedness, A1; before that, the dive rate judged and fixed, A5, and rosters, A2, merged; before that, dives shown in the client, the get-up after a rimmed dive, two-out throws; before that, the overrun of first and runner position samples; before that, foul measures, sources and the correction experiment; pushed; the spray experiment parked for later; before that, the read knows the ball started at the plate; before that, called-off infielders back up the catch; before that, pop-up calls on `fix/popup-calls`; before that, owner's observations merged into the "Owner backlog" section; before that, the coordinator run on `coord/review-fixes`)
+**Last updated:** 2026-11-15, 15:20 (sixth lead session: runner decision model, first part, merged; before that, 11:15, fifth lead session: runner acceleration, Q1, merged; before that, 09:45, handoff at the pause of the fourth lead session: all held work merged; before that, night: "Resume here" rewritten by the fourth lead session; before that, 2026-11-14 evening: "Resume here" rewritten as the handoff from the third lead session: the Codex rerun on `work/live-comm` comes first; before that, the swing and collision block below and the fielder-communication line, at the pause of the second lead session; before that, hurried throws, A3; before that, handedness, A1; before that, the dive rate judged and fixed, A5, and rosters, A2, merged; before that, dives shown in the client, the get-up after a rimmed dive, two-out throws; before that, the overrun of first and runner position samples; before that, foul measures, sources and the correction experiment; pushed; the spray experiment parked for later; before that, the read knows the ball started at the plate; before that, called-off infielders back up the catch; before that, pop-up calls on `fix/popup-calls`; before that, owner's observations merged into the "Owner backlog" section; before that, the coordinator run on `coord/review-fixes`)
 The live to-do list for the project. [PLAN.md](PLAN.md) holds decisions and design. This file holds what is next and what is done. Update it at the end of every work session.
 
 Status: `[ ]` not started · `[~]` in progress · `[x]` done · `[?]` needs an owner decision
@@ -34,7 +34,17 @@ Open:
 
 **Open, not the swing's:** batters are 17 ms early on outside pitches and 2 ms inside (perception); v2's attack-angle slope against direction is 0.53 (Statcast 0.41).
 
-## Resume here (2026-11-15, about 11:15; fifth lead session, Claude Fable 5.2 at medium effort)
+## Resume here (2026-11-15, about 15:20; sixth lead session, Claude Fable 5.2)
+
+**Merged: the runner decision model, first part** (owner's Q2, Q8, Q9; item 2 of the list below), `work/runner-decision`. Runners go by run value against a cautious read of the race; they expect the defense's best play before a throw is in the air; no stop at third behind a scoring runner (and no passing him); no tag-up with two out. [Note §9](docs/calibration/2026-11-15-runner-decision-model.md), agent-models §6.3 "Built 2026-11-15", [Codex review](docs/reviews/2026-11-15-codex-runner-decision-review.md) (one P1, one P2, one P3, all fixed; two small points deferred to the rundown work), ledger row, probe `cargo run --release -p bb_game --example runner_rates -- 300 0`. Tests 429 pass, 0 fail, 4 ignored. Standard run: **runs 4.11 [4.19]** (3.85 [3.99] before), K 22.1% [22.1], BB 8.2% [8.4], HR/PA 2.86% [2.72%], hits GB/LD/FB/PU .308/.668/.125/.010 [.312/.663/.111/.011], outs on the bases 0.27 a team-game (0.50; MLB 0.268), no rules warnings. Nothing is running, nothing is waiting for the owner, no review is open.
+
+**What the first part did not do, and the next task: the extra bases taken did not move** (second to home on a single 34% against 61.7%; first to third 23% against 31.7%). The decision rule is not what holds them: on traced singles the runner from second mostly loses the race home by under 0.5 s. Every runner's first look is a flat 0.5 s after contact from a standstill at his lead (`sim.t >= t_c + 0.5` in `simulate_live`; no secondary lead, no moving start, nothing to read with two out), and the outfield has the ball in hand or thrown when he reaches third (3.78 s; home 7.13 s). **Next, in order:** (1) source and refit the runner's start (Statcast first step, secondary lead; go on contact with two out) and check the outfield's field-and-throw times against sources; (2) then fit `AdvanceParams::caution_z` to MLB's attempt and success rates (now 1.0, fitted only to outs on the bases); (3) the coach's read for a ball behind the runner (Q10 a); (4) the rundown (Q11) on its own branch.
+
+**Open from it:** doubles with a runner on first and two out nearly doubled (88 → 167 [79 → 153] in 300 games): unexplained, the scorer's single-or-double ruling when the batter takes second on the throw home is the suspect. First to home on a double is 53% against 38%. Per-runner caution waits for ratings.
+
+**Housekeeping:** `work/runner-decision` and its worktree are merged and removable.
+
+### The fifth lead session's handoff (11:15)
 
 **Merged since the block below was written: runner acceleration (Q1), `work/runner-accel`.** League τ 0.76 s (standing 90 ft 4.10 s), carried per runner (`RunnerIn::tau_s`); batters charged their own route from the box (27.98 m right-handed, 26.58 m left-handed); `BATTER_START` 0.20 s. [Note](docs/calibration/2026-11-15-runner-acceleration.md), [Codex review](docs/reviews/2026-11-15-codex-runner-acceleration-review.md) (one P1 and one P2 fixed, two P2 recorded), ledger row. Tests 420 pass, 0 fail, 4 ignored. Standard run now: **runs 3.85 [3.99]**, K 22.3% [22.2], BB 8.2% [8.5], HR/PA 2.72% [2.75%], hits GB/LD/FB/PU .310/.667/.116/.011 [.310/.650/.113/.009], no rules warnings. Nothing moved beyond the seed sets' spread.
 
@@ -42,7 +52,7 @@ Open:
 
 **Owner, 2026-11-15:** any Fable model may merge and push on its own judgment; Opus only at high effort (CLAUDE.md updated).
 
-**Next: item 2 below, the runner decision model** (item 1 is done). Nothing is running, nothing is waiting for the owner, no review is open.
+(Item 2 below, the runner decision model, is what the block above reports.)
 
 ### The fourth lead session's handoff (09:45), still current except where the block above says otherwise
 

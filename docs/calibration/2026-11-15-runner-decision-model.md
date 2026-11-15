@@ -316,3 +316,42 @@ def be(hold, safe, out): return (hold - out) / (safe - out)
 ```
 
 Rates from the B-R table (`1stS` 8,241; `1stS2` 5,534; `1stS3` 2,615; `1stD` 2,455; `1stD3` 1,457; `1stDH` 936; `2ndS` 4,881; `2ndS3` 1,711; `2ndSH` 3,010): taken = `…3` or `…H` over opportunities; out going = opportunities − stopped − taken; attempts = taken + out going. OOB per team-game = 1,302 / 4,860.
+
+---
+
+# Part 3: What was built and what it did (2026-11-15, branch `work/runner-decision`)
+
+## 9. The first part: the decision by run value and the expected play
+
+Owner's rulings applied: Q2 and Q8 (c) (the run table's break-even plus a caution fitted to MLB), Q9 (a) (a small scoreboard weight), and "the situation first" for the throw. Not built here: the coach's read (Q10), the rundown (Q11), per-runner caution (it arrives with ratings; the parameter is `AdvanceParams::caution_z`).
+
+**Built** (spec: agent-models §6.3, "Built 2026-11-15"):
+
+1. `bb_agents::running`: the run-expectancy table of §1.5, `AdvanceValues` and its break-even (the table of §1.5 is the unit test), `run_weight(inning, margin)`, `AdvanceParams { sigma_race_s 0.20, caution_z 1.0 }`.
+2. `runner_decide` and `runner_relook` use it in place of the flat 0.35 s margin. The runner's own time is his law of motion from his speed now (the 0.75 running-start factor is gone).
+3. `with_expected_play`: before a throw is in the air the runner runs the fielders' rule on what he sees and expects the throw to go to the best play; his own base then gets the ball by a cut or a second throw.
+4. Two faults found by tracing single plays, both mistakes no real runner makes: a runner arriving at third **stopped** behind a runner a few strides from scoring (he waited for home to be "cleared", then restarted from rest, 0.75 s lost); and with **two out** a runner went back to tag up on a fly he expected to be caught.
+
+**Differences from §3 above, and why:** the caution is in spreads of the race, not in probability or runs (a fixed amount added to a 94% break-even is "never"); the scoreboard weight scales the gain of the base instead of the run (`V_safe = RE_safe + w` would stop a runner far behind at third on a ball at the wall); the expected play is a single best play at the runner's own noisy reads, not a distribution.
+
+**Measured** (`cargo run --release -p bb_game --example runner_rates -- 300 <seed>`; main `a9b3341` → branch, seeds 0–299 [1000–1299]):
+
+| | main | branch | MLB |
+|---|---|---|---|
+| 1st → 3rd on a single: took / put out | 25.7 / 2.4 % [23.4 / 1.7] | 23.5 / 0.9 % [21.3 / 1.8] | 31.7 / 1.1 % |
+| 2nd → home on a single | 34.6 / 1.2 % [32.2 / 2.5] | 34.2 / 0.2 % [33.4 / 1.1] | 61.7 / 3.3 % |
+| 1st → home on a double | 52.9 / 0.7 % [44.2 / 1.0] | 54.5 / 0.4 % [52.0 / 1.0] | 38.1 / 2.5 % |
+| tag from third scores, fly caught beyond 55 m, 0 / 1 out | 31 / 34 % [39 / 35] | 35 / 37 % [37 / 46] | 75–80 % of all outfield catches |
+| outs on the bases, a team-game (tags and appeals, and forces after a catch) | 0.497 [0.507] | **0.273 [0.280]** | 0.268 |
+| of which on a hit: batter / other runners | 0.125 / 0.057 [0.155 / 0.058] | 0.063 / 0.022 [0.047 / 0.050] | 0.065 for the three advances |
+| runs a team-game (standard run) | 3.85 [3.99] | **4.11 [4.19]** | 4.39 |
+
+(The tag-up line is this probe's own denominator, every fly caught more than 55 m from the plate; the 53.9 % of the tag-ups note counted differently and the two are not comparable.)
+
+**Reading.**
+
+- **Outs on the bases halved, to MLB's figure**, and runs rose about a quarter of a run: the runners who went on the old rule and were out were the cost.
+- **The extra bases taken did not move.** Caution 0.5 in place of 1.0 was tried (seeds 0–299): second to home 34.0 %, outs on the bases 0.318. So the rate is not held down by the threshold.
+- **It is held down by the race.** In 60 traced games, of 106 singles with a runner on second, he scored on 40. Of the 66 he did not: 15 never reached third on the play (infield singles and the like), 26 believed they would lose the race home by less than 0.5 s, 10 by 0.5–1.0 s, 10 by more, 5 believed they had it by too little. A race 0.5 s kinder to the runner would send about 70 of 106 (66 %; MLB 62–65 % attempts). The sim's runner from second touches third 3.78 s after contact and home at 7.13 s: every runner's first look is a flat 0.5 s after contact, from a standstill at his lead (no secondary lead, no moving start, and with two out nothing to read), and the ball is in an outfielder's hand or already thrown when he reaches third. Which side holds the 0.5 s (the runner's start, or the outfield's time to field and throw, which the tag-ups note already found quick) is not settled here: it needs sources (Statcast first-step and secondary-lead figures, outfield exchange times), and it is the next piece of work, ahead of fitting the caution.
+- **By outs** the model orders the decisions where the race is close (unit and live tests), but the rates by outs above are flat for the same reason: few races are close enough for the break-even to matter.
+- **First to home on a double is still too frequent** (about 53 % against 38 %) and nearly never an out: these are balls to the wall on which the runner is right to go; the count of doubles with a runner on first, two out, nearly doubled on the branch (88 → 167 [79 → 153]). Not explained: either the scorer credits a double where the batter took second on the throw home (he now expects that throw), or running on contact with two out changes how those plays end. Open (ledger §5).
