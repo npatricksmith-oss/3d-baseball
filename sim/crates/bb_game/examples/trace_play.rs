@@ -14,7 +14,13 @@ fn main() {
             println!("ball t {t:.2} ({:.1},{:.1},{:.1})", p[0], p[1], p[2]);
         }
         for (id, tr) in &v.actors {
-            if id & 0x80 == 0 { continue; }
+            if id & 0x80 == 0 {
+                if std::env::var("RUNNERS").is_ok() {
+                    let s: Vec<String> = tr.iter().filter(|(t, _)| *t >= 7.0 && *t < 30.0).step_by(6).map(|(t, p)| format!("{t:.1}:({:.0},{:.0})", p.x, p.y)).collect();
+                    println!("runner {id} {}", s.join(" "));
+                }
+                continue;
+            }
             let s: Vec<String> = tr.iter().step_by(3).map(|(t, p)| format!("{t:.1}:({:.0},{:.0})", p.x, p.y)).collect();
             println!("f{} {}", id & 0x7F, s.join(" "));
         }

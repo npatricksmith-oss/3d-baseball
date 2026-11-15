@@ -521,6 +521,8 @@ struct Runner {
     /// `RunnerPerception` sub-index 2n and its read of a free ball from 2n + 1; sub-index 1
     /// is the first read at contact (tag up or go).
     decisions: u32,
+    /// Times he has turned round between bases since he last stood on one (`MAX_TURNS`).
+    turns: u8,
     /// How many times the ball had been secured and thrown when he last looked at the play
     /// (his last decision): a change is something new to see (agent-models §6.4).
     looked: (usize, usize),
@@ -784,6 +786,11 @@ const PASS_MAX_Z: f64 = 3.0;
 /// A catch at a base on the way, s [E, unsourced]: the receiver's handling before he can
 /// act on the ball (the receiving model's 0.05 s, with a tag-less margin).
 const PASS_CATCH_S: f64 = 0.1;
+/// How often a runner turns round between two bases on a fresh look at the play, per stretch
+/// between bases [E]. A rundown is not modelled (the fielders do not close on him), and a
+/// runner who turned at every throw played catch with them for the whole 40 s; so he turns
+/// once, then commits to the base he is going back to or on to (agent-models §6.4).
+const MAX_TURNS: u8 = 1;
 
 /// How long a runner leaving from a tag-up needs to cover `d` m: the wait for his first step,
 /// then the speed law from rest with the set start's time constant (agent-models §6.4). His
@@ -3632,6 +3639,15 @@ impl<'a> Sim<'a> {
         };
         let r = &mut self.r[k];
         r.last_timing_draw = draw;
+        // He turns round only so often between bases: past that he stays committed.
+        let heading_on = r.goal as f64 * BASE_L > r.s;
+        let turning = (goal > from) != heading_on;
+        if turning && r.turns >= MAX_TURNS {
+            return true;
+        }
+        if turning {
+            r.turns += 1;
+        }
         r.goal = goal;
         true
     }
@@ -3795,6 +3811,9 @@ impl<'a> Sim<'a> {
                 self.emit(Input::BaseTouched { t: self.t, agent: id, base: b, holding_ball: false });
                 if self.done {
                     return;
+                }
+                if b == self.r[k].goal {
+                    self.r[k].turns = 0;
                 }
                 let retouched = mdir < 0.0 && self.r[k].retouch && b == self.r[k].start;
                 if retouched {
@@ -4330,6 +4349,7 @@ fn new_sim<'a>(inp: &'a LiveInput<'a>, st: &'a mut RulesState) -> Sim<'a> {
             catch_seen: false,
             decisions: 0,
             looked: (0, 0),
+            turns: 0,
             overrun: OverrunPhase::None,
             over_m: 0.0,
         })
@@ -7436,25 +7456,10 @@ mod tests {
         r
     }
 
-    // Codex fielder-communication fourth review P1-1, its first counterexample: seed 1 play
-    // 195, the centre fielder holds the ball and waits on a man for second. The left fielder,
-    // known to be backing up second, was sent to the bag (13 m) by the holder's private
-    // choice, before any throw or call.
-    #[test]
-    fn a_holders_private_choice_moves_nobody_seed_1_play_195() {
-        let (seen, leaks) = holder_snapshot_leaks(1, 195, 7.2195, 0.05);
-        assert!(seen > 0, "the snapshot was not reached");
-        assert!(leaks.is_empty(), "{}", leaks.join("\n"));
-    }
-
-    // Fourth review P1-1, its second counterexample: seed 8 play 121 from t = 4.1646 s, the
-    // centre fielder's set-up clock decided, tick after tick, whether the second baseman out
-    // as the cutoff to third was sent to second (then the idle shortstop).
-    // (The play moved when runners began looking again, 2026-11-15, so it is found afresh: the
-    // first time in the game an outfielder holds the ball with a cutoff man out, the same
-    // situation.)
-    #[test]
-    fn a_holders_private_choice_moves_nobody_seed_8_outfield_holder_with_a_cutoff() {
+    /// The first (play, time) in real game `seed` at a `holder_act` where `pred` holds of the
+    /// sim: how the pinned snapshots below are found again when a change to the runners moves
+    /// the games under them.
+    fn first_holder_act(seed: u64, pred: impl Fn(&Sim<'_>) -> bool + 'static) -> (u32, f64) {
         use std::cell::RefCell;
         use std::rc::Rc;
         let first: Rc<RefCell<Option<(u32, f64)>>> = Rc::default();
@@ -7462,14 +7467,39 @@ mod tests {
         ISO_HOOK.with(|h| {
             *h.borrow_mut() = Some(Box::new(move |sim: &Sim<'_>, step: &'static str| {
                 let mut f = f2.borrow_mut();
-                if f.is_none() && sim.inp.seed == 8 && step == "holder_act" && matches!(sim.ball, Ball::Held { by } if by >= 6) && sim.f.iter().any(|x| matches!(x.role, Role::Relay(_))) {
+                if f.is_none() && sim.inp.seed == seed && step == "holder_act" && pred(sim) {
                     *f = Some((sim.inp.play, sim.t));
                 }
             }));
         });
-        crate::game::simulate_game(8);
+        crate::game::simulate_game(seed);
         ISO_HOOK.with(|h| *h.borrow_mut() = None);
-        let (play, t) = first.borrow().expect("an outfielder holds the ball with a cutoff man out");
+        let r = first.borrow().expect("the situation arises in the game");
+        r
+    }
+
+    // Codex fielder-communication fourth review P1-1, its first counterexample: seed 1 play
+    // 195, the centre fielder holds the ball and waits on a man for second. The left fielder,
+    // known to be backing up second, was sent to the bag (13 m) by the holder's private
+    // choice, before any throw or call. (Found afresh 2026-11-15, when the runners' looking
+    // again moved the game: the first time in seed 1 an outfielder holds the ball with a
+    // fielder backing up.)
+    #[test]
+    fn a_holders_private_choice_moves_nobody_seed_1_outfield_holder_with_a_backup() {
+        let (play, t) = first_holder_act(1, |sim| matches!(sim.ball, Ball::Held { by } if by >= 6) && sim.f.iter().any(|x| matches!(x.role, Role::Backup)));
+        let (seen, leaks) = holder_snapshot_leaks(1, play, t, 0.05);
+        assert!(seen > 0, "the snapshot was not reached");
+        assert!(leaks.is_empty(), "play {play} from {t:.4}: {}", leaks.join("\n"));
+    }
+
+    // Fourth review P1-1, its second counterexample: seed 8 play 121 from t = 4.1646 s, the
+    // centre fielder's set-up clock decided, tick after tick, whether the second baseman out
+    // as the cutoff to third was sent to second (then the idle shortstop). (Found afresh
+    // 2026-11-15, when the play moved: the first time in the game an outfielder holds the
+    // ball with a cutoff man out, the same situation.)
+    #[test]
+    fn a_holders_private_choice_moves_nobody_seed_8_outfield_holder_with_a_cutoff() {
+        let (play, t) = first_holder_act(8, |sim| matches!(sim.ball, Ball::Held { by } if by >= 6) && sim.f.iter().any(|x| matches!(x.role, Role::Relay(_))));
         let (seen, leaks) = holder_snapshot_leaks(8, play, t, 0.2);
         assert!(seen > 0, "the snapshot was not reached");
         assert!(leaks.is_empty(), "play {play} from {t:.4}: {}", leaks.join("\n"));
@@ -8305,6 +8335,31 @@ mod tests {
         }
         assert!((peak - s0 - 49.0 / 12.0).abs() < 0.1, "he drifts v²/2·BRAKE = 4.08 m on before reversing: {}", peak - s0);
         assert!(((sim.t - t0) - expected).abs() < 3.0 * DT, "took {:.3} s, expected {expected:.3} s", sim.t - t0);
+    }
+
+    // A rundown is not modelled, and a runner who turned at every throw played catch with
+    // the defense for the 40 s limit (91 plays in 300 games before this rule): between two
+    // bases he turns round once, then stays committed.
+    #[test]
+    fn a_runner_turns_round_once_between_bases() {
+        let fx = fixture(&[(0x0007, 2)]);
+        let inp = input(&fx, vec![RunnerIn { id: fx.st.batter, base: 0, speed: 8.2 }, RunnerIn { id: 0x0007, base: 2, speed: 8.2 }]);
+        let mut st = fx.st.clone();
+        let mut sim = new_sim(&inp, &mut st);
+        sim.t = 6.0;
+        sim.r[1].s = 2.0 * BASE_L + 8.0;
+        sim.r[1].v = 7.0;
+        sim.r[1].direction = 1.0;
+        sim.r[1].goal = 3;
+        sim.r[1].hold_s = None;
+        sim.f[4].pos = base_pos(3);
+        sim.f[4].target = base_pos(3);
+        sim.ball = Ball::Held { by: 4 };
+        sim.out.secured.push((6.0, sim.f[4].id));
+        sim.r[1].turns = MAX_TURNS;
+        assert!(sim.runner_relook(1));
+        assert_eq!(sim.r[1].goal, 3, "he has turned once already: he stays committed");
+        assert_eq!(sim.r[1].turns, MAX_TURNS);
     }
 
     // The same second look while he is already returning: his signed velocity is used on both
