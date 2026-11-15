@@ -182,7 +182,7 @@ impl Sim<'_> {
             };
             let carry_ready = if fd.dove { fd.ready_at } else { fd.up_at };
             let carry_tag = if force { 0.0 } else { fd.a.tag_apply_s };
-            let carry_ball_at = self.t.max(carry_ready) + run_time_to(fd, target, 0.6) + carry_tag;
+            let carry_ball_at = self.t.max(carry_ready) + run_time_to(self.inp.field, fd, target, 0.6) + carry_tag;
             let throw_tag = if force { 0.0 } else { self.f[race.receiver].a.tag_apply_s };
             let throw_ball_at = race.ball_at + throw_tag;
             // A carry to a forced runner's bag is a force touch. To an unforced runner's bag

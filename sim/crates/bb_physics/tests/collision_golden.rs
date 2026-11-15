@@ -117,19 +117,82 @@ fn a7_head_on_analytic() {
 
 #[test]
 fn a8_sweet_spot_efficiency() {
-    // Tune e so q = 0.20 at u_ss for the default bat, and check the §6.3 sanity anchor:
-    // 85 mph pitch, 75 mph bat at the contact point → ~107 mph.
+    // physics-spec §8.2 / §14.2 A8 (2026-11-15): the default bat's sweet-spot collision
+    // efficiency at game speed is the sourced q = 0.215, inside the range 0.21–0.23 (lab q of
+    // 34-in wood bats 0.214 and 0.227, Nathan et al. 2010 Table I; best 1999 MLB wood bat
+    // 0.228, NCAA BESR; real Statcast p90 squared-up ratio, docs/calibration/2026-11-15-
+    // collision-efficiency-sources.md). The default parameters are checked, not a derived e.
+    // Game speed: an 85 mph pitch at the plate and a 75 mph bat, head-on (160 mph closing).
     let ball = BallParams::default();
     let mp = BatProfile::default_34in().mass_props();
+    let params = BatBallParams::default();
     let u = sweet_spot(mp.length);
-    let r = ball.mass * mp.inv_eff_mass(u);
-    let e = 0.20 * (1.0 + r) + r;
+    let cn = (85.0 + 75.0) * MPH;
+    let e = params.e_n(u, mp.length, cn);
     let q = collision_efficiency(e, ball.mass, mp.inv_eff_mass(u));
     let ev = q * 85.0 + (1.0 + q) * 75.0;
-    println!("A8: u_ss {:.2} in, r {r:.3}, e_peak needed {e:.3}, EV {ev:.1} mph", u / INCH);
-    assert!((q - 0.20).abs() < 0.01);
-    assert!((105.0..=109.0).contains(&ev));
-    assert!((0.40..=0.52).contains(&e), "e_peak {e} outside the spec's plausible range");
+    println!("A8: u_ss {:.2} in, e {e:.4}, q {q:.4}, EV {ev:.1} mph", u / INCH);
+    assert!((0.21..=0.23).contains(&q), "sweet-spot q {q} outside the sourced 0.21–0.23");
+    assert!((107.5..=111.0).contains(&ev), "EV {ev}");
+    // At the COR's reference speed the target is the sourced central value itself.
+    let q_ref = collision_efficiency(params.e_n(u, mp.length, params.v_ref), ball.mass, mp.inv_eff_mass(u));
+    assert!((q_ref - 0.215).abs() < 0.002, "q at v_ref {q_ref}");
+}
+
+#[test]
+fn a8_lab_bbcor_at_29_in() {
+    // Lab cross-check (physics-spec §8.2): Nathan, Smith, Faber & Russell 2010 (arXiv:1009.2549)
+    // measured the ball–bat COR of 34-in wood bats 29 in from the knob, a ball fired at about
+    // 110 mph onto a bat at rest: 0.490 and 0.494 for two bats, 0.489 (SD 0.009) over 54
+    // impacts on four. The model's e_n there and at that normal speed must sit within 0.02 of
+    // 0.489 (the band allows the unmeasured speed slope and the rigid-bat profile). The old
+    // value (e_ref 0.442, q 0.20) gives 0.460 and fails, which was the sourcing gap.
+    let mp = BatProfile::default_34in().mass_props();
+    let e = BatBallParams::default().e_n(29.0 * INCH, mp.length, 110.0 * MPH);
+    assert!((e - 0.489).abs() <= 0.02, "lab BBCOR at 29 in {e}");
+    let old = BatBallParams { e_ref: 0.442, ..BatBallParams::default() }.e_n(29.0 * INCH, mp.length, 110.0 * MPH);
+    assert!((old - 0.489).abs() > 0.02, "the check must separate the old value ({old})");
+}
+
+/// Exit speed along the barrel for a bat swung like Nathan 2000's (§III C): rigid rotation about a
+/// point 9/84 of the length from the knob, 31 m/s at 13/84 of the length from the end (his 71 m/s
+/// impact speed with a 40 m/s pitch), normal approach speed 71 m/s for the COR.
+fn swung_exit_speed(params: &BatBallParams, u: f64) -> f64 {
+    let ball = BallParams::default();
+    let mp = BatProfile::default_34in().mass_props();
+    let (len, pivot) = (mp.length, mp.length * 9.0 / 84.0);
+    let omega = 31.0 / (len - len * 13.0 / 84.0 - pivot);
+    let q = collision_efficiency(params.e_n(u, len, 71.0), ball.mass, mp.inv_eff_mass(u));
+    q * 40.0 + (1.0 + q) * omega * (u - pivot)
+}
+
+#[test]
+fn f_profile_matches_nathan_2000() {
+    // physics-spec §8.2 f(u), inboard side [S, derived]: Nathan 2000 (Am. J. Phys. 68, 979,
+    // §III C, Fig. 10) finds the swung wood bat's exit speed equal to the rigid-bat value only
+    // within about ±3 cm (68–74 cm) of its peak, and 25% below it 11.5 cm (4.5 in) inboard.
+    // The rigid comparison is the same model with f ≡ 1 (no vibrational loss).
+    let len = BatProfile::default_34in().mass_props().length;
+    let flexible = BatBallParams::default();
+    let rigid = BatBallParams { f_tip: 1.0, f_taper: 1.0, f_handle: 1.0, ..flexible };
+    let ratio = |p: &BatBallParams, u: f64| swung_exit_speed(p, u) / swung_exit_speed(&rigid, u);
+    let peak_of = |p: &BatBallParams| {
+        (0..400).map(|i| len - 0.0005 * i as f64).fold((0.0, f64::MIN), |b, u| {
+            let v = swung_exit_speed(p, u);
+            if v > b.1 { (u, v) } else { b }
+        }).0
+    };
+    let peak = peak_of(&flexible);
+    let inboard = ratio(&flexible, peak - 4.5 * INCH);
+    println!("peak {:.2} in from the tip; 4.5 in inboard {inboard:.3}", (len - peak) / INCH);
+    assert!((inboard - 0.75).abs() <= 0.03, "exit speed 4.5 in inboard of the peak is {inboard:.3} of rigid (Nathan 0.75)");
+    for d in [-1.2, 1.2] {
+        let r = ratio(&flexible, peak + d * INCH);
+        assert!(r >= 0.97, "{d:+} in from the peak: {r:.3} of rigid (Nathan: close to rigid over 68–74 cm)");
+    }
+    // The former profile (f_taper 0.55) kept 0.84 there: the check separates them.
+    let old = BatBallParams { f_taper: 0.55, ..flexible };
+    assert!(ratio(&old, peak_of(&old) - 4.5 * INCH) > 0.80);
 }
 
 #[test]

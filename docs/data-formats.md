@@ -71,6 +71,7 @@ key = (game_seed: u64, play_index: u32, agent_id: u16, purpose: u16, sub_index: 
 | `RosterHands` | 13 | The throwing hand and batting side of a generated player (§2.4). Like `RosterGeneration`, drawn before the first pitch |
 | `SwingEffort` | 14 | The swing's effort: its sweet-spot speed relative to the batter's `BatSpeed`, one truncated-normal draw per swing (agent-models §3.6 v2, 2026-11-14) |
 | `RosterAbilities` | 15 | A generated player's abilities (§2.4 step 5; owner ruling D19, 2026-11-14). Like `RosterHands`, drawn before the first pitch |
+| `FielderLook` | 16 | A fielder's look at a batted ball on its first flight (agent-models §5.1, the tracking read, 2026-11-15): six truncated normals per look (position along, across horizontal, across vertical; then velocity the same), `sub_index` = the look's number |
 
 The game seed is `derive(season_seed, game_id)` (PLAN §4.2). Because the RNG is counter-based, **no RNG state is ever saved**. Snapshots (§7) need only the seed and the indices.
 
