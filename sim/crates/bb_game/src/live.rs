@@ -7337,11 +7337,29 @@ mod tests {
     // Fourth review P1-1, its second counterexample: seed 8 play 121 from t = 4.1646 s, the
     // centre fielder's set-up clock decided, tick after tick, whether the second baseman out
     // as the cutoff to third was sent to second (then the idle shortstop).
+    // (The play moved when runners began looking again, 2026-11-15, so it is found afresh: the
+    // first time in the game an outfielder holds the ball with a cutoff man out, the same
+    // situation.)
     #[test]
-    fn a_holders_private_choice_moves_nobody_seed_8_play_121() {
-        let (seen, leaks) = holder_snapshot_leaks(8, 121, 4.1645, 0.2);
+    fn a_holders_private_choice_moves_nobody_seed_8_outfield_holder_with_a_cutoff() {
+        use std::cell::RefCell;
+        use std::rc::Rc;
+        let first: Rc<RefCell<Option<(u32, f64)>>> = Rc::default();
+        let f2 = first.clone();
+        ISO_HOOK.with(|h| {
+            *h.borrow_mut() = Some(Box::new(move |sim: &Sim<'_>, step: &'static str| {
+                let mut f = f2.borrow_mut();
+                if f.is_none() && sim.inp.seed == 8 && step == "holder_act" && matches!(sim.ball, Ball::Held { by } if by >= 6) && sim.f.iter().any(|x| matches!(x.role, Role::Relay(_))) {
+                    *f = Some((sim.inp.play, sim.t));
+                }
+            }));
+        });
+        crate::game::simulate_game(8);
+        ISO_HOOK.with(|h| *h.borrow_mut() = None);
+        let (play, t) = first.borrow().expect("an outfielder holds the ball with a cutoff man out");
+        let (seen, leaks) = holder_snapshot_leaks(8, play, t, 0.2);
         assert!(seen > 0, "the snapshot was not reached");
-        assert!(leaks.is_empty(), "{}", leaks.join("\n"));
+        assert!(leaks.is_empty(), "play {play} from {t:.4}: {}", leaks.join("\n"));
     }
 
     // Fourth review P1-1, the call itself: the holder waits on a man for second and calls
