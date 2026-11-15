@@ -81,7 +81,8 @@ def collision_inputs():
         case(f'A7_head_on_{station:g}in', r2=(station*p.INCH-bat['u_cm'], 0, 0))
     ss = bat['L']-.15
     ratio = p.MASS*(1/bat['M'] + (ss-bat['u_cm'])**2/bat['I_cm'])
-    case('A8_sweet_spot_q020', r2=(ss-bat['u_cm'], 0, 0), e_n=.2+1.2*ratio)
+    # A8 (physics-spec §8.2, 2026-11-15): the sourced sweet-spot q = 0.215, e = q(1 + r) + r.
+    case('A8_sweet_spot_q0215', r2=(ss-bat['u_cm'], 0, 0), e_n=.215+1.215*ratio)
     case('oblique_stick', v=(3, -35, -2), w=(-40, 12, 20),
          r2=(.12, p.bat_radius(28*p.INCH), 0), mu=.8)
     case('oblique_stick_rotating_bat', v=(-2, -39, 1), w=(20, -30, 15),

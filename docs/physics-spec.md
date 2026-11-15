@@ -258,10 +258,10 @@ K = (1/m + 1/M)·𝟙  −  [r₁]× I₁⁻¹ [r₁]×  −  [r₂]× I₂⁻¹
 | Parameter | Default | Status / note |
 | :--- | :--- | :--- |
 | e_n(u*, c_n) | `e_peak(c_n) · f(u*)` | Normal COR: profile × speed dependence |
-| f(u) | 1 at the sweet spot u_ss; quadratic falloff to f_tip = 0.75 at u = L and f_taper = 0.55 at the taper start; 0.35 in the handle | [E] Models vibrational energy loss off the sweet spot. Calibrate against published COR-vs-impact-location data in M2 |
+| f(u) | 1 at the sweet spot u_ss; quadratic falloff to f_tip = 0.75 at u = L and f_taper = **0.27** at the taper start (22 in), never below f_handle = 0.35 (so the floor holds over the last ~0.4 in before the taper and in the handle) | Models vibrational energy loss off the sweet spot (the rigid M_eff of §8.1 is right only there). **Inboard side [S, derived], 2026-11-15:** Nathan 2000 ("Dynamics of the baseball-bat collision", Am. J. Phys. 68, 979, §III C, Fig. 10: 84 cm wood bat swung about a point 9 cm from the knob, 90 mph pitch, 160 mph impact speed) finds the exit speed equal to the rigid-bat value only over 68–74 cm from the knob, peaked at 71–72 cm, and **25% below the rigid value at 60 cm, 11.5 cm (4.5 in) inboard of the peak**. f_taper is set so the default bat, swung the same way, gives that ratio (0.75) 4.5 in inboard of its own peak, and stays ≥ 0.97 within ±1.2 in of it (the 68–74 cm band). The former 0.55 gave 0.84, a barrel that forgave jammed contact. *Tip side [E]:* the same paper says only that the exit speed "drops off rapidly" beyond 80 cm (3.3 in outboard of the peak), with no number; f_tip is unchanged (0.75 gives 0.89 of the rigid value 1 in from the tip). Test: `f_profile_matches_nathan_2000` |
 | u_ss | L − 0.15 m (about 6 in from the tip) | [E] Statcast also defines bat speed 6 in from the tip |
-| e_peak | **Tuned so q = 0.20 ± 0.01 at u_ss** for the default bat at game-speed relative velocity (~150–165 mph). The cross-check needs **e_peak ≈ 0.44–0.47** depending on exact u_ss. | [S] q ≈ 0.2 for wood at the sweet spot (Nathan); e derived [D] |
-| Speed dependence | e_peak(c_n) = e_ref − s_e·(|c_n| − v_ref), s_e > 0 | [E] COR falls with impact speed (sign [S], magnitude to calibrate) |
+| e_peak | **Set so q = 0.215 at u_ss** for the default bat at |c_n| = v_ref = 70 m/s (game-speed closing, ~150–165 mph): e_ref = q(1 + r) + r = **0.460** with r = m/M_eff = 0.2015. Sourced range q 0.21–0.23 (e_ref 0.454–0.478). *Owner, 2026-11-15 (Q6); was q = 0.20, e_ref 0.442.* | [S] lab q of MLB-type 34-in wood bats 0.214 and 0.227 (BBCOR 0.490 and 0.494 at 29 in, ~110 mph; Nathan, Smith, Faber & Russell 2010, arXiv:1009.2549, Table I) and 0.228 (best MLB wood bat of 1999, NCAA BESR white paper 2004); the game-speed value allows an unmeasured fall of 0–0.02 with speed; the real Statcast p90 squared-up ratio implies a ceiling near 0.215 (docs/calibration/2026-11-15-collision-efficiency-sources.md §2–§3, §5); e derived [D] |
+| Speed dependence | e_peak(c_n) = e_ref − s_e·(|c_n| − v_ref), s_e = 0.001 per m/s, v_ref = 70 m/s | [E] COR falls with impact speed (sign [S]; Nathan 2000 finds the bat's effective COR "only weakly dependent" on speed). Lab check: at 29 in and a 110 mph ball on a bat at rest (|c_n| 49 m/s) the model gives e_n = 0.478 against the measured 0.489 (SD 0.009, 54 impacts; arXiv:1009.2549), within the band 0.469–0.509 the A8 lab test holds; e_ref 0.442 gave 0.460 |
 | e_t(c_n) (tangential restitution, e_x in KNS) | 0.405 at |c_n| ≤ 34 m/s, falling linearly to 0 at |c_n| = 65 m/s, 0 above | Speed-dependent (§8.2.1; owner, 2026-11-14, PLAN D20 Option A). Tee value [S] KNS 2017; game value [S] from Statcast's batted spin; the shape between them is [E] with no source |
 | μ (ball-bat friction) | 0.50 | [S] value used by KNS and earlier work; KNS lower bound only ≥ 0.15 |
 
@@ -289,13 +289,13 @@ e_t(|c_n|) = e_t_lab                                                 for |c_n| �
 
 **Collision-efficiency cross-check** [D] (default bat, 85 mph pitch at the plate, 75 mph bat at the contact point):
 
-| Impact u (from knob) | M_eff | r | e_n needed for q = 0.20 |
-| :--- | :--- | :--- | :--- |
-| 26 in | 0.877 kg | 0.166 | 0.399 |
-| 28 in | 0.728 kg | 0.200 | 0.440 |
-| 30 in | 0.573 kg | 0.253 | 0.504 |
+| Impact u (from knob) | M_eff | r | e_n needed for q = 0.20 | for q = 0.215 |
+| :--- | :--- | :--- | :--- | :--- |
+| 26 in | 0.877 kg | 0.166 | 0.399 | 0.417 |
+| 28 in | 0.728 kg | 0.200 | 0.440 | 0.458 |
+| 30 in | 0.573 kg | 0.253 | 0.504 | 0.522 |
 
-At q = 0.20 the sanity anchor gives **≈ 107 mph exit velocity**. Off-sweet-spot impacts lose q quickly: near the tip (32.5 in, e = 0.40) the model gives q ≈ 0.04, about 81 mph. That matches the expected "end of the bat" weak contact.
+At q = 0.215 the sanity anchor gives **≈ 109.4 mph exit velocity** (107 at the former q = 0.20). With e_ref 0.460 the defaults give q = 0.214 at this 160 mph closing speed (A8). Off-sweet-spot impacts lose q quickly: near the tip (32.5 in, e = 0.40) the model gives q ≈ 0.04, about 81 mph. That matches the expected "end of the bat" weak contact.
 
 ### 8.3 Scale of contact sensitivity
 For offset D between the ball's center and the bat axis (perpendicular to the swing direction), the normal tilts by asin(D / (R + R_bat)). With R + R_bat ≈ 0.0687 m for a 2.5-in barrel, that is **≈ 0.83° per mm** near center. Launch angle also depends on the bat's attack angle, the pitch's descent angle, and friction. **M2 deliverable:** the measured map from (vertical offset, horizontal offset, timing) to (exit velocity, launch angle, spray angle, spin), used to size swing-noise parameters in `agent-models.md`.
@@ -460,7 +460,7 @@ An **independent Python reference implementation** (`analysis/oracle/`, written 
 | A5 | Spin sign table §1.3 | Magnus directions as listed | Analytic |
 | A6 | Mirror symmetry: sidespin ±, x₀ ± | Mirrored trajectories | Analytic |
 | A7 | Head-on bat impact, no spin | Outgoing speed = q·v_pitch + (1+q)·v_bat with q = (e−r)/(1+r) to 1e-9 | Analytic (§8.1) |
-| A8 | Default bat at u_ss, game speeds | q = 0.20 ± 0.01; EV 105–109 mph for an 85 mph plate speed and 75 mph bat | [S] q≈0.2 |
+| A8 | Default bat and **default parameters** at u_ss, game speeds (85 mph plate speed, 75 mph bat, head-on) | q within the sourced 0.21–0.23, and 0.215 ± 0.002 at |c_n| = v_ref; EV 107.5–111 mph. Lab cross-check: e_n at 29 in for a 110 mph ball on a bat at rest within 0.02 of the measured 0.489 | [S] arXiv:1009.2549 Table I and §8.2's sources (2026-11-15; was q = 0.20 ± 0.01, EV 105–109) |
 | A9 | Gripping oblique impact on a stationary ball | Spin and tangential speed match the KNS formulas (§8.1) | [S] KNS 2017 |
 | A10 | Spin vs undercut sweep | Backspin rises with undercut, topspin with overcut; magnitudes within published ranges | [S] Nathan et al. batted-ball spin work (pull exact values in M2) |
 | A10a | Tee: level default bat, 77 mph at b = 6.8 in past the center of mass, ball at rest, offset ψ 5–30° | Spin about the bat's axis equals KNS Eq. (8) with e_t_lab at the across-barrel relative speed (ψ 10–30°, normal speed below v_t_lab); fitted total spin per degree of launch θ 179 ± 18 rpm/° | [S] KNS 2017 Eq. (8), Fig. 3 |

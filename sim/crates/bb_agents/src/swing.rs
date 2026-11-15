@@ -59,6 +59,11 @@ pub struct SwingTemplate {
     /// Hand radius limits as fractions of height (hands in tight, arms fully extended).
     pub rho_min_frac: f64,
     pub rho_max_frac: f64,
+    /// Partial reach adjustment g (agent-models §3.6 step 7) [E]: the batter changes his hand
+    /// radius from the one a middle-middle aim needs by this fraction of the change the aim
+    /// needs; the rest moves the planned contact along the bat (jammed inside, toward the tip
+    /// outside). 1 = every aim met at the sweet spot.
+    pub reach_gain: f64,
     /// Hands' angular rate over the bat's at t_c (q).
     pub hand_rate_ratio: f64,
     /// Lag θ − φ at t_c, rad (λ_c).
@@ -108,6 +113,9 @@ impl Default for SwingTemplate {
             center_x: -1.10,
             rho_min_frac: 0.15,
             rho_max_frac: 0.46,
+            // [E], Proposed 2026-11-15 (agent-models §3.6 step 7; docs/calibration/
+            // 2026-11-15-collision-q-and-poor-contact.md).
+            reach_gain: 0.6,
             hand_rate_ratio: 0.32,
             lag_c: 0.0,
             hand_width: 0.055,
@@ -348,6 +356,9 @@ pub struct SwingGeometry {
     pub center_x: f64,
     pub rho_min: f64,
     pub rho_max: f64,
+    /// The hand radius a middle-middle aim needs (step 7's reference), m, and the reach gain.
+    pub rho_ref: f64,
+    pub reach_gain: f64,
     pub u_ss: f64,
     pub bat_speed: f64,
     pub hand_rate_ratio: f64,
@@ -381,7 +392,10 @@ fn contact_pose(g: &SwingGeometry, alpha: f64) -> (Vec3, Vec3, Vec3, f64, Vec3, 
     let x_c = g.side * g.center_x;
     // With λ_c = 0 the knob and the sweet spot lie on the line from C along the axis. In
     // general the sweet spot is C + ρ·hand + u_ss·axis; solve ρ from the lateral constraint.
-    let rho_raw = (g.aim.x - x_c - g.u_ss * axis.x) / hand.x;
+    let rho_aim = (g.aim.x - x_c - g.u_ss * axis.x) / hand.x;
+    // Partial reach (step 7): only the fraction g of the change from the middle-middle radius.
+    // With g = 1 this is exactly ρ_aim.
+    let rho_raw = rho_aim - (1.0 - g.reach_gain) * (rho_aim - g.rho_ref);
     let rho = rho_raw.clamp(g.rho_min, g.rho_max);
     let c = g.aim - hand * rho - axis * g.u_ss;
     // A clamped swing keeps C's lateral position: it is short or long along the bat axis.
@@ -408,6 +422,30 @@ fn build(g: &SwingGeometry, alpha: f64, hands: (f64, f64), bat: (f64, f64), t_c:
     }
 }
 
+/// The unclamped hand radius a middle-middle aim needs (agent-models §3.6 step 7's reference):
+/// x = 0, the middle of the batter's zone, the template's own tilt, direction and attack
+/// angle there. The aim's depth does not enter the radius; `y` is passed only to place it.
+fn reference_rho(b: &BatterAttrs, tpl: &SwingTemplate, u_ss: f64, y: f64) -> f64 {
+    let z = (tpl.zone_bottom_frac + 0.5 * (tpl.zone_top_frac - tpl.zone_bottom_frac)) * b.height;
+    let aim = Vec3::new(0.0, y, z);
+    let g = SwingGeometry {
+        aim,
+        tilt: tpl.tilt_at(b, aim),
+        direction: tpl.direction_at(b, aim),
+        side: SwingTemplate::side(b.bats),
+        center_x: tpl.center_x,
+        rho_min: f64::NEG_INFINITY,
+        rho_max: f64::INFINITY,
+        rho_ref: 0.0,
+        reach_gain: 1.0,
+        u_ss,
+        bat_speed: b.bat_speed,
+        hand_rate_ratio: tpl.hand_rate_ratio,
+        lag_c: tpl.lag_c,
+    };
+    contact_pose(&g, tpl.attack_angle_at(b, aim)).3
+}
+
 /// Inverse: plan a swing whose sweet spot passes through `aim` at time `t_aim`, with the
 /// given attack angle (agent-models §3.6; callers use [`SwingTemplate::attack_angle_at`]).
 /// Reach limits are respected, so an aim point out of reach yields a swing that misses its
@@ -423,6 +461,8 @@ pub fn plan_swing(
     attack_angle: f64,
 ) -> IntendedSwing {
     let side = SwingTemplate::side(b.bats);
+    let u_ss = profile.length() - ss_from_tip;
+    let rho_ref = if tpl.reach_gain == 1.0 { 0.0 } else { reference_rho(b, tpl, u_ss, aim.y) };
     let geometry = SwingGeometry {
         aim,
         tilt: tpl.tilt_at(b, aim),
@@ -431,7 +471,9 @@ pub fn plan_swing(
         center_x: tpl.center_x,
         rho_min: tpl.rho_min_frac * b.height,
         rho_max: tpl.rho_max_frac * b.height,
-        u_ss: profile.length() - ss_from_tip,
+        rho_ref,
+        reach_gain: tpl.reach_gain,
+        u_ss,
         bat_speed: b.bat_speed,
         hand_rate_ratio: tpl.hand_rate_ratio,
         lag_c: tpl.lag_c,
@@ -483,11 +525,13 @@ mod tests {
         m::atan2(-v.x, v.y)
     }
 
-    // §3.6: every planned swing meets its aim at BatSpeed, with the planned attack angle,
-    // attack direction and plane tilt, wherever the aim is (v1's speed grew with reach).
+    // §3.6: with full reach adjustment (g = 1) every planned swing meets its aim at BatSpeed,
+    // with the planned attack angle, attack direction and plane tilt, wherever the aim is (v1's
+    // speed grew with reach). With the default partial reach only the station changes (below).
     #[test]
     fn sweet_spot_meets_every_aim_at_bat_speed() {
         let (b, tpl, prof, mp) = setup();
+        let tpl = SwingTemplate { reach_gain: 1.0, ..tpl };
         let h = |z: f64| (z - 0.27 * 1.85) / (0.265 * 1.85);
         for (x, z) in [(-0.22, 0.75), (0.0, 0.75), (0.22, 0.75), (0.0, 0.55), (0.0, 0.95)] {
             let aim = Vec3::new(x, tpl.contact_y(&b, x), z);
@@ -567,10 +611,46 @@ mod tests {
         assert!(sp(0.37) < sp(0.4) && sp(0.43) < sp(0.4));
     }
 
+    // §3.6 step 7, partial reach (2026-11-15): the batter moves his hands only the fraction g
+    // of the way from a middle-middle radius toward the one the aim needs. The aim stays on the
+    // bat's line at BatSpeed and C keeps its lateral position; the ball meets the bat (1 − g) of
+    // the radius change away from the sweet spot: inboard on inside pitches (jammed), toward
+    // the tip on outside ones, nowhere else at a middle-middle aim. The radii come from plans
+    // with g = 1 (the full adjustment the spec defines the partial one against).
+    #[test]
+    fn partial_reach_jams_inside_and_reaches_outside() {
+        let (b, tpl, prof, mp) = setup();
+        assert!(tpl.reach_gain < 1.0);
+        let full = SwingTemplate { reach_gain: 1.0, ..tpl };
+        let mid_z = (0.27 + 0.5 * 0.265) * 1.85;
+        let at = |x: f64| Vec3::new(x, tpl.contact_y(&b, x), mid_z);
+        let rho_ref = plan(&b, &full, &prof, &mp, at(0.0), 0.4).swing.rho;
+        let mut last = f64::NEG_INFINITY;
+        for x in [-0.20, -0.10, 0.0, 0.10, 0.20] {
+            let aim = at(x);
+            let need = plan(&b, &full, &prof, &mp, aim, 0.4).swing.rho;
+            let s = plan(&b, &tpl, &prof, &mp, aim, 0.4).swing;
+            let (p, v) = ss_vel(&s, &prof, &mp, 0.4);
+            let d = aim - p;
+            let station = d.dot(s.axis_c); // + toward the tip
+            assert!((d - s.axis_c * station).norm() < 1e-9, "x {x}: the aim is off the bat's line");
+            assert!((station - (1.0 - tpl.reach_gain) * (need - rho_ref)).abs() < 1e-9, "x {x}: station {station}");
+            assert!((v.norm() - 32.0).abs() < 1e-9 && (s.pivot.x - tpl.center_x).abs() < 1e-12);
+            assert!(station > last, "x {x}: the station must move toward the tip as the aim moves out");
+            last = station;
+            if x == 0.0 {
+                assert!(station.abs() < 1e-9);
+            } else {
+                assert!(station.abs() > 0.02 && station.signum() == x.signum(), "x {x}: {station}");
+            }
+        }
+    }
+
     // §3.6 step 7: beyond the arms' reach the swing keeps C and comes up short along the bat.
     #[test]
     fn out_of_reach_comes_up_short() {
         let (b, tpl, prof, mp) = setup();
+        let tpl = SwingTemplate { reach_gain: 1.0, ..tpl };
         let aim = Vec3::new(0.55, 0.3, 0.75);
         let s = plan(&b, &tpl, &prof, &mp, aim, 0.4).swing;
         assert!((s.rho - 0.46 * 1.85).abs() < 1e-12);
@@ -585,6 +665,7 @@ mod tests {
     #[test]
     fn plane_tilt_changes_attack_angle_with_sign() {
         let (b, tpl, prof, mp) = setup();
+        let tpl = SwingTemplate { reach_gain: 1.0, ..tpl };
         let aim = Vec3::new(0.0, 0.35, 0.8);
         let i = plan(&b, &tpl, &prof, &mp, aim, 0.4);
         let aa = |tilt: f64| {

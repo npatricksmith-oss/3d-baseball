@@ -17,6 +17,9 @@ TEMPLATE = dict(
     alpha0=8.0 * DEG, alpha_h=-8.7 * DEG,
     psi0=0.0, psi_x=16.6 * DEG,
     zone_bottom_frac=0.27, zone_top_frac=0.535,
+    # Partial reach adjustment (agent-models §3.6 step 7, 2026-11-15): the fraction of the
+    # aim's hand-radius change from the middle-middle one that the batter makes.
+    reach_gain=0.6,
 )
 START_WIDTHS = math.sqrt(2.0 * math.log(10.0))
 
@@ -83,6 +86,15 @@ class Plan:
         x_c = side * T['center_x']
         rho = (aim[0] - x_c) / self.a_c[0] - u_ss
         self.rho_raw = rho
+        # Step 7: he moves his hands only part of the way from the radius a middle-middle aim
+        # needs (x = 0, middle height, the template's own angles there; the aim's depth does
+        # not enter the radius) toward the radius this aim needs.
+        g = T['reach_gain']
+        if g != 1.0:
+            ref = Plan((0.0, aim[1], bottom + 0.5 * (top - bottom)), t_c, side, height, u_ss, bat_speed,
+                       tpl=dict(T, reach_gain=1.0))
+            self.rho_ref = ref.rho_raw
+            rho = rho - (1.0 - g) * (rho - self.rho_ref)
         rho = min(max(rho, T['rho_min_frac'] * height), T['rho_max_frac'] * height)
         self.rho = rho
         # C keeps its lateral position; a clamped swing is short or long along a_c.

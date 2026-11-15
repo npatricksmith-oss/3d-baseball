@@ -149,8 +149,10 @@ class OracleTests(unittest.TestCase):
                 expected = q*(-c['v'][1])+(1+q)*c['V'][1]
                 self.assertAlmostEqual(c['result']['v'][1], expected, delta=1e-9)
                 self.assertVectorClose(c['result']['w'], p.ZERO)
-        sweet = self.collisions['A8_sweet_spot_q020']
-        self.assertAlmostEqual(sweet['result']['v'][1]/p.MPH, 107, delta=1e-10)
+        # A8: q = 0.215 at the sweet spot, 85 mph pitch and 75 mph bat at the plate:
+        # 0.215 x 85 + 1.215 x 75 = 109.4 mph exactly (physics-spec §8.2).
+        sweet = self.collisions['A8_sweet_spot_q0215']
+        self.assertAlmostEqual(sweet['result']['v'][1]/p.MPH, 109.4, delta=1e-10)
 
     def test_A9_gripping_relation(self):
         c = self.collisions['A9_stationary_ball_oblique']
