@@ -49,3 +49,13 @@ fn choice_evidence_does_not_change_the_game_or_leak_between_captures() {
     assert_eq!(plain.log, other.log);
     assert!(local.is_empty());
 }
+
+#[test]
+fn runners_looking_again_replay_from_the_seed() {
+    // Runners decide again when the ball is secured or thrown (agent-models §6.4): each look
+    // has its own keyed draws, so the same seed replays to the same digest, thread to thread.
+    let a = simulate_game(24583);
+    let b = std::thread::spawn(|| simulate_game(24583)).join().unwrap();
+    assert_eq!(a.digest, b.digest);
+    assert_eq!(a.log, b.log);
+}

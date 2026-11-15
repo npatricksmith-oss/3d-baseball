@@ -173,6 +173,53 @@ fn typical_throw_time(d: f64) -> f64 {
     let v = THROW_EFFORT * TYPICAL_ARM;
     throw_time(v, d).min(2.0 * throw_time(v, 0.5 * d) + RELAY_TRANSFER_FRAC * TYPICAL_TRANSFER)
 }
+
+/// Where a runner sees a throw coming down, from its position and velocity now: the
+/// horizontal point where it falls to `RUNNER_READ_CATCH_Z` on a ballistic path (drag and spin
+/// ignored: over a throw's length they shorten it by a metre or two, well inside the spacing
+/// of the bases), and the horizontal distance and time it needs to get there. A throw already
+/// below that height and falling is taken to be coming down where it is.
+fn throw_landing(p: Vec3, v: Vec3) -> (Vec3, f64) {
+    let (g, dz) = (bb_math::units::G, p.z - RUNNER_READ_CATCH_Z);
+    // z(t) = dz + vz t − g t²/2 = 0, the later root (the ball coming down through the height).
+    let disc = v.z * v.z + 2.0 * g * dz;
+    let t = if disc < 0.0 { 0.0 } else { ((v.z + m::sqrt(disc)) / g).max(0.0) };
+    (Vec3::new(p.x + v.x * t, p.y + v.y * t, 0.0), t)
+}
+
+/// The base a throw is going to, as a runner sees it: the one nearest where it comes down
+/// (`throw_landing`). One function so that a situational expectation (agent-models §6.4, the
+/// throw the defense should make from the outs, runners and fielder) can later feed it.
+fn throw_destination(p: Vec3, v: Vec3) -> u8 {
+    let (q, _) = throw_landing(p, v);
+    (1..=4u8)
+        .min_by(|&a, &c| {
+            let da = m::hypot(base_pos(a).x - q.x, base_pos(a).y - q.y);
+            let dc = m::hypot(base_pos(c).x - q.x, base_pos(c).y - q.y);
+            da.total_cmp(&dc)
+        })
+        .unwrap()
+}
+
+/// How long a throw in flight needs to reach the neighbourhood of base `b` along its own line,
+/// if that line passes within `PASS_REACH_M` of the bag at no more than `PASS_MAX_Z` and the
+/// ball has not already gone by (ballistic path, as in `throw_landing`).
+fn throw_passes_base(p: Vec3, v: Vec3, b: u8) -> Option<f64> {
+    let vh = m::hypot(v.x, v.y);
+    if vh < 1e-6 {
+        return None;
+    }
+    let (ux, uy) = (v.x / vh, v.y / vh);
+    let bp = base_pos(b);
+    let along = (bp.x - p.x) * ux + (bp.y - p.y) * uy;
+    if along < 0.0 {
+        return None;
+    }
+    let off = ((bp.x - p.x) * uy - (bp.y - p.y) * ux).abs();
+    let tau = along / vh;
+    let z = p.z + v.z * tau - 0.5 * bb_math::units::G * tau * tau;
+    (off <= PASS_REACH_M && (0.0..=PASS_MAX_Z).contains(&z)).then_some(tau)
+}
 const RECEIVE_REACH: f64 = 1.5;
 /// Running distance over which the batter leaves his box and joins the base path, m [E].
 const BOX_EXIT_M: f64 = 4.0;
@@ -489,6 +536,9 @@ struct Runner {
     /// `RunnerPerception` sub-index 2n and its read of a free ball from 2n + 1; sub-index 1
     /// is the first read at contact (tag up or go).
     decisions: u32,
+    /// How many times the ball had been secured and thrown when he last looked at the play
+    /// (his last decision): a change is something new to see (agent-models §6.4).
+    looked: (usize, usize),
     /// The batter-runner's overrun of first (agent-models §6.2): his phase, and how far past
     /// the bag down the first-base line he is, m (his `s` stays at first meanwhile).
     overrun: OverrunPhase,
@@ -734,6 +784,19 @@ const SEEN_MOVING_MPS: f64 = 0.5;
 /// the base ahead is held, s [E, unsourced: a visual reaction time]. A runner who has just
 /// decided to go is still under `SEEN_MOVING_MPS` for about three ticks.
 const HOLD_READ_S: f64 = 0.2;
+/// Height at which a runner takes a throw in the air to come down, m [E]: chest height at the
+/// receiver, where throws are aimed (`THROW_CATCH_Z`). His read of where it is going is the
+/// ballistic projection of its position and velocity to this height (agent-models §6.4).
+const RUNNER_READ_CATCH_Z: f64 = THROW_CATCH_Z;
+/// How near a throw's line must pass a base for him to take it that it can be caught there on
+/// the way, m [E, unsourced]: a receiver's reach (`RECEIVE_REACH`) and a step.
+const PASS_REACH_M: f64 = 2.5;
+/// How high the ball may be over that base for a fielder to take it, m [E]: a leap over the
+/// catching ceiling's usual reach (`CATCH_MAX_Z` is the fielder-side figure).
+const PASS_MAX_Z: f64 = 3.0;
+/// A catch at a base on the way, s [E, unsourced]: the receiver's handling before he can
+/// act on the ball (the receiving model's 0.05 s, with a tag-less margin).
+const PASS_CATCH_S: f64 = 0.1;
 
 /// How long a runner leaving from a tag-up needs to cover `d` m: the wait for his first step,
 /// then the speed law from rest with the set start's time constant (agent-models §6.4). His
@@ -3301,17 +3364,15 @@ impl<'a> Sim<'a> {
                 let (p, v) = self.ball_at(self.t);
                 let vh = m::hypot(v.x, v.y).max(5.0);
                 let to = |q: Vec3| m::hypot(q.x - p.x, q.y - p.y);
-                let heading = Vec3::new(v.x, v.y, 0.0).normalized();
-                // The base the throw is going to: the one most nearly along its heading.
-                let dest = (1..=4u8)
-                    .max_by(|&a, &c| {
-                        let da = (base_pos(a) - p).normalized().dot(heading);
-                        let dc = (base_pos(c) - p).normalized().dot(heading);
-                        da.total_cmp(&dc)
-                    })
-                    .unwrap();
+                let dest = throw_destination(p, v);
                 let arrive = self.t + to(base_pos(dest)) / vh;
-                if dest == b { arrive } else { arrive + 0.6 + typical_throw_time((target - base_pos(dest)).norm()) }
+                let est = if dest == b { arrive } else { arrive + 0.6 + typical_throw_time((target - base_pos(dest)).norm()) };
+                // Whatever its destination, a throw whose line passes this base at catchable
+                // height can be caught there on the way (agent-models §6.4).
+                match throw_passes_base(p, v, b) {
+                    Some(tau) => est.min(self.t + tau + PASS_CATCH_S),
+                    None => est,
+                }
             }
             Ball::Free { .. } => {
                 let t0 = prof::enabled().then(std::time::Instant::now);
@@ -3385,6 +3446,7 @@ impl<'a> Sim<'a> {
         }
         // Every decision is a new look at the play: its own noise draws (data-formats §2.3).
         self.r[k].decisions += 1;
+        self.r[k].looked = (self.out.secured.len(), self.out.released.len());
         let n = self.r[k].decisions;
         let r = &self.r[k];
         let d_run = (next as f64 * BASE_L - r.s).max(0.0);
@@ -3416,6 +3478,64 @@ impl<'a> Sim<'a> {
 
     fn caught(&self) -> bool {
         self.catch_made
+    }
+
+    /// A runner between bases looks again when the play has changed under him: the ball
+    /// secured by a fielder, or a throw released, since he last looked (agent-models §6.4).
+    /// He is between bases, on his way (a runner at a base, tagging up, waiting on one
+    /// ahead of him, holding on a ball in the air, or coming back to retouch has his own
+    /// rules). Returns whether he decided.
+    fn runner_relook(&mut self, k: usize) -> bool {
+        let seen = (self.out.secured.len(), self.out.released.len());
+        let r = &self.r[k];
+        if r.looked == seen {
+            return false;
+        }
+        let nearest = (r.s / BASE_L).round();
+        let between = (r.s - nearest * BASE_L).abs() > 1e-6;
+        if !between || r.tag_up || r.retouch || r.waiting || r.hold_s.is_some() || r.turned_back.is_some() || r.overrun != OverrunPhase::None || r.set_start.is_some() {
+            return false;
+        }
+        let (start, s_now) = (r.start, r.s);
+        self.r[k].looked = seen;
+        let from = (s_now / BASE_L).floor() as u8;
+        let next = from + 1;
+        // Forced to the next base, he has no choice (the force is on him as long as it is the
+        // base after his own); a runner ahead who has not cleared it also leaves him no go.
+        if next > 4 || (next == start + 1 && self.forced(k)) || self.base_uncleared_ahead(k, next) {
+            return false;
+        }
+        self.r[k].decisions += 1;
+        let n = self.r[k].decisions;
+        let r = &self.r[k];
+        let (d_on, d_back) = (next as f64 * BASE_L - r.s, r.s - from as f64 * BASE_L);
+        // Going on he keeps his speed (as in `runner_decide`); going back he must stop and
+        // reverse, which running the distance from rest stands in for.
+        let t_on = run_time(d_on, r.vmax, RUNNER_TAU) * if r.v > 1.0 { 0.75 } else { 1.0 };
+        let t_back = run_time(d_back, r.vmax, RUNNER_TAU);
+        // Unforced, he must beat the tag at either base, not only the ball.
+        let tag_s = self.inp.tag_up.typical_tag_s;
+        let ball_on = self.ball_time_to(k, next, 2 * n + 1) + tag_s;
+        let ball_back = self.ball_time_to(k, from, 2 * n + 1) + tag_s;
+        let mut rr = rng(self.inp.seed, self.inp.play, r.id, Purpose::RunnerPerception, 2 * n);
+        let draw = rr.truncated_normal(4.0);
+        let noise = 0.15 * draw;
+        let margin = |t_ball: f64, t_self: f64| t_ball - (self.t + t_self) + noise;
+        let go_on = margin(ball_on, t_on) > 0.35;
+        let go_back = margin(ball_back, t_back) > 0.35;
+        // Safe at neither: he turns toward the base the ball is farther from (a rundown is
+        // not modelled; either way he is probably out).
+        let goal = if go_on {
+            next
+        } else if go_back || ball_back >= ball_on {
+            from
+        } else {
+            next
+        };
+        let r = &mut self.r[k];
+        r.last_timing_draw = draw;
+        r.goal = goal;
+        true
     }
 
     fn move_runners(&mut self) {
@@ -3501,6 +3621,8 @@ impl<'a> Sim<'a> {
                     self.runner_decide(k, b);
                 }
             }
+            // Something new to see since his last look: he decides again, from where he is.
+            self.runner_relook(k);
             // Heading for a base a runner ahead has stopped at (or is retreating to): go back,
             // unless this is a forced advance (then the runner ahead is forced too).
             let g = self.r[k].goal;
@@ -4094,6 +4216,7 @@ fn new_sim<'a>(inp: &'a LiveInput<'a>, st: &'a mut RulesState) -> Sim<'a> {
             last_timing_draw: 0.0,
             catch_seen: false,
             decisions: 0,
+            looked: (0, 0),
             overrun: OverrunPhase::None,
             over_m: 0.0,
         })
@@ -7767,6 +7890,151 @@ mod tests {
                 assert_ne!(draws[i], draws[j], "decisions {j} and {i} used the same timing draw");
             }
         }
+    }
+
+    /// A throw from `from` aimed at base `b` (chest height there), at `speed`, released at 5.0 s
+    /// by the fielder at `thrower`.
+    fn throw_to_base(sim: &mut Sim, from: Vec3, b: u8, speed: f64) {
+        let to = base_pos(b);
+        let d = m::hypot(to.x - from.x, to.y - from.y);
+        let s = solve_throw(sim.inp.env, THROW_RELEASE_Z, THROW_CATCH_Z, d, speed).unwrap_or_else(|| panic!("a {d:.0} m throw is in reach at {speed} m/s"));
+        let s0 = throw_state(from + Vec3::new(0.0, 0.0, THROW_RELEASE_Z), to - from, speed, s.elev);
+        sim.t = 5.0;
+        sim.launch_throw(s0, to, b, 3, false);
+    }
+
+    // Owner's play (seed 24583, play 81): from center field second base and home lie on one
+    // line, so a runner who took a throw's destination to be the base most nearly along its
+    // heading read a throw to second as going home. He judges where it comes down from what
+    // he sees of it (agent-models §6.4), whoever throws and wherever it goes, early in its
+    // flight and late.
+    #[test]
+    fn a_runner_reads_the_base_a_throw_is_coming_down_at() {
+        let fx = fixture(&[]);
+        let inp = input(&fx, vec![RunnerIn { id: fx.st.batter, base: 0, speed: 8.2 }]);
+        let origins = [("left", Vec3::new(-40.0, 55.0, 0.0)), ("center", Vec3::new(0.0, 80.0, 0.0)), ("right", Vec3::new(40.0, 55.0, 0.0))];
+        for (name, from) in origins {
+            for b in [2u8, 3, 4] {
+                let mut st = fx.st.clone();
+                let mut sim = new_sim(&inp, &mut st);
+                throw_to_base(&mut sim, from, b, 40.0);
+                for dt in [0.0, 0.3, 0.8] {
+                    let (p, v) = sim.ball_at(5.0 + dt);
+                    assert_eq!(throw_destination(p, v), b, "a throw from {name} field to base {b}, {dt} s after release");
+                }
+            }
+        }
+    }
+
+    // The time the runner believes the ball needs follows from that: a throw from center to
+    // second reaches second in about its flight time (no relay home and back, which the old
+    // reading added: 8.8 s against the true 5.6 s on the owner's play), and a throw home on
+    // the fly reaches home in its flight time, second only by a relay.
+    #[test]
+    fn a_throw_from_center_is_timed_to_the_base_it_goes_to() {
+        let fx = fixture(&[]);
+        let inp = input(&fx, vec![RunnerIn { id: fx.st.batter, base: 0, speed: 8.2 }]);
+        let from = Vec3::new(0.0, 84.0, 0.0);
+        let flight = |sim: &Sim, b: u8| {
+            let (p, v) = sim.ball_at(sim.t);
+            m::hypot(base_pos(b).x - p.x, base_pos(b).y - p.y) / m::hypot(v.x, v.y)
+        };
+        let mut st = fx.st.clone();
+        let mut sim = new_sim(&inp, &mut st);
+        throw_to_base(&mut sim, from, 2, 40.0);
+        let (to_second, to_home) = (sim.ball_time_to(0, 2, 1) - 5.0, sim.ball_time_to(0, 4, 1) - 5.0);
+        assert!((to_second - flight(&sim, 2)).abs() < 0.05, "second: {to_second:.2} s, flight {:.2} s", flight(&sim, 2));
+        assert!(to_home > to_second + 0.6, "home {to_home:.2} s must be a relay after second's {to_second:.2} s");
+        let mut st = fx.st.clone();
+        let mut sim = new_sim(&inp, &mut st);
+        throw_to_base(&mut sim, from, 4, 40.0);
+        let (to_home, to_second) = (sim.ball_time_to(0, 4, 1) - 5.0, sim.ball_time_to(0, 2, 1) - 5.0);
+        assert!((to_home - flight(&sim, 4)).abs() < 0.05, "home: {to_home:.2} s, flight {:.2} s", flight(&sim, 4));
+        // It passes second 8 m up in the air: nobody can take it there.
+        assert!(to_second > to_home + 0.6, "second {to_second:.2} s is a relay after home's {to_home:.2} s");
+    }
+
+    // A throw whose line passes a base within reach at catchable height can be caught there on
+    // the way: a throw aimed home from the right-field corner that comes through the infield
+    // at head height past third is taken to reach third at the time it gets there.
+    #[test]
+    fn a_throw_passing_a_base_low_can_be_caught_there() {
+        let p = Vec3::new(0.0, 60.0, 3.0);
+        let v = Vec3::new(0.0, -30.0, 0.0);
+        // Second base is 38.8 m out on that line: 0.71 s on, the ball has fallen 2.5 m.
+        let tau = throw_passes_base(p, v, 2).expect("passes second");
+        assert!((tau - (60.0 - base_pos(2).y) / 30.0).abs() < 1e-9);
+        // Lobbed over it, 8 m up, it cannot be caught there.
+        assert!(throw_passes_base(Vec3::new(0.0, 60.0, 8.0), v, 2).is_none());
+        // Already past it, or well to the side of it, it is no threat.
+        assert!(throw_passes_base(Vec3::new(0.0, 30.0, 3.0), v, 2).is_none());
+        assert!(throw_passes_base(Vec3::new(9.0, 60.0, 3.0), v, 2).is_none());
+    }
+
+    // Regression from the owner's play (seed 24583, play 81; the game moves under any change
+    // to the runner, so it is rebuilt from its facts): a clean single to center, the batter
+    // touches first 0.35 s after the center fielder's throw to second is released. He holds at
+    // first rather than running into the tag at second.
+    #[test]
+    fn a_batter_does_not_run_into_a_throw_to_second_from_center() {
+        let fx = fixture(&[]);
+        let inp = input(&fx, vec![RunnerIn { id: fx.st.batter, base: 0, speed: 8.2 }]);
+        let mut st = fx.st.clone();
+        let mut sim = new_sim(&inp, &mut st);
+        throw_to_base(&mut sim, Vec3::new(3.4, 84.5, 0.0), 2, 40.0);
+        sim.t = 5.0 + 0.35;
+        sim.r[0].s = BASE_L;
+        sim.r[0].v = 8.0;
+        sim.r[0].goal = 1;
+        sim.runner_decide(0, 1);
+        assert_eq!(sim.r[0].goal, 1, "he stops at first");
+    }
+
+    // Looking again (agent-models §6.4): an unforced runner between bases with the ball
+    // secured by a fielder at the base ahead turns back; a forced runner has no choice and
+    // goes on.
+    #[test]
+    fn a_runner_between_bases_looks_again_when_the_ball_is_secured_ahead() {
+        // Runner from second, 8 m past it, the third baseman standing on third with the ball.
+        let fx = fixture(&[(0x0007, 2)]);
+        let inp = input(&fx, vec![RunnerIn { id: fx.st.batter, base: 0, speed: 8.2 }, RunnerIn { id: 0x0007, base: 2, speed: 8.2 }]);
+        let mut st = fx.st.clone();
+        let mut sim = new_sim(&inp, &mut st);
+        sim.t = 6.0;
+        sim.r[1].s = 2.0 * BASE_L + 8.0;
+        sim.r[1].v = 7.0;
+        sim.r[1].goal = 3;
+        sim.r[1].hold_s = None;
+        sim.f[4].pos = base_pos(3);
+        sim.f[4].target = base_pos(3);
+        sim.ball = Ball::Held { by: 4 };
+        assert!(!sim.runner_relook(1), "nothing new to see: he keeps going");
+        assert_eq!(sim.r[1].goal, 3);
+        sim.out.secured.push((6.0, sim.f[4].id));
+        assert!(sim.runner_relook(1), "the ball is secured ahead of him");
+        assert_eq!(sim.r[1].goal, 2, "he cannot beat the ball to third, and goes back");
+        assert!(!sim.runner_relook(1), "one look per event");
+    }
+
+    #[test]
+    fn a_forced_runner_between_bases_goes_on_when_the_ball_is_secured_ahead() {
+        // Runner from first, forced by the batter, 8 m toward second; the second baseman has the ball on the bag.
+        let fx = fixture(&[(0x0007, 1)]);
+        let inp = input(&fx, vec![RunnerIn { id: fx.st.batter, base: 0, speed: 8.2 }, RunnerIn { id: 0x0007, base: 1, speed: 8.2 }]);
+        let mut st = fx.st.clone();
+        let mut sim = new_sim(&inp, &mut st);
+        sim.t = 6.0;
+        sim.r[1].s = BASE_L + 8.0;
+        sim.r[1].v = 7.0;
+        sim.r[1].goal = 2;
+        sim.r[1].hold_s = None;
+        sim.f[3].pos = base_pos(2);
+        sim.f[3].target = base_pos(2);
+        sim.ball = Ball::Held { by: 3 };
+        sim.out.secured.push((6.0, sim.f[3].id));
+        assert!(sim.forced(1));
+        assert!(!sim.runner_relook(1), "he has no choice");
+        assert_eq!(sim.r[1].goal, 2);
     }
 
     // Review of 2026-11-11 (motions), finding 1: a backup standing between the base and the
