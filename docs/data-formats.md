@@ -204,7 +204,7 @@ Grouped by producer. "Physical" events record what the world did. "Rules" events
 | `HalfInningStarted` | inning, top/bottom |
 | `PlateAppearanceStarted` | batter, pitcher, catcher, base-out state, score, batter height (sets the zone) |
 | `PlateAppearanceEnded` | result code (§4.5), outs recorded, runs scored, RBI |
-| `HalfInningEnded` | runs, left on base |
+| `HalfInningEnded` | runs, left on base (every runner who reached and neither scored nor was out, OBR 9.02; rules-spec §4.1) |
 | `GameEnded` | final score, innings, reason (regulation, walk-off, extra innings) |
 
 **Pitch (physical, then rules)**

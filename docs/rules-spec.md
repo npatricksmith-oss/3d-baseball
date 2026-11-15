@@ -101,7 +101,7 @@ Pregame ─▶ HalfInningStart ─▶ PlateAppearance ⟲ ─▶ HalfInningEnd �
 
 - **Pregame:** validate both lineups (§9.1). Emit `GameStarted`.
 - **HalfInningStart:** outs = 0, bases empty (classic extra innings: no automatic runner, D10). Reset `pitcher_obligation.half_inning_started_with` (§9.3).
-- **HalfInningEnd:** on the third out, after run-scoring resolution (§6.4). Emit `HalfInningEnded` with LOB: the number of **runners**, by identity, left standing on a base (a protected overrunner counts on first, §5.5), so two runners sharing a base at the third out are 2, not 1 [S: OBR 5.06(a)(2); I1, I10] (fixed 2026-11-13, Codex rules-passing review #5: LOB was counted from one slot per base; 10 of 512 games had such a third out).
+- **HalfInningEnd:** on the third out, after run-scoring resolution (§6.4). Emit `HalfInningEnded` with LOB: the number of **runners, by identity, who reached base and, when the half-inning ends, have neither scored nor been put out**, wherever each one is: standing on a base (two runners sharing one are 2, OBR 5.06(a)(2); a protected overrunner, §5.5), **between bases**, or home with a run that did not count (a force third out, §6.4; a cancelled pending run, §5.3; a touch after the third out). Each is counted exactly once [S: OBR 9.02, the team left-on-base definition; I1, I10]. **The batter-runner** counts as a runner who reached base when his batted ball is in play and he is not out: a batter still short of first when a preceding runner makes the third out reached on a fielder's choice (or a hit) and is left on base, as the box score counts him (the scorer's ruling and the engine use the same rule); a batter put out (a force at first, a caught fly) is not. (Rewritten 2026-11-14, owner's ruling: LOB follows the official scoring rule. Before it, only runners standing on a base were counted: a runner between bases, a runner home with a nullified run and a batter short of first were in neither R nor LOB, and the box score patched the batter. Earlier fix 2026-11-13, Codex rules-passing review #5: LOB was counted from one slot per base.)
 - **Game end** [S: OBR 7.01]:
   - After the top of the 9th or any later inning, if the home team leads: **Final**, bottom not played.
   - After the bottom of the 9th or later, if the score is not tied: **Final**.
@@ -269,6 +269,8 @@ A run scores when a runner legally touches home before the third out, **except**
 - a **preceding** runner put out on appeal for leaving early on a caught fly: no **following** runner (one who started behind him, including the batter) scores on the play [S: OBR 5.09(d)]. Runners ahead of the appealed runner are judged as a time play.
 
 Otherwise it is a **time play**: the run counts if the home-plate `BaseTouched` precedes the third-out fact (a tag, or an appeal on a caught fly for the runners ahead of the appealed runner; by the OBR comment, an appeal out for leaving early on a fly is a time play). (Corrected 2026-11-12, runner-return review #2: this sentence used to make every caught-fly appeal a time play for all runners.) Fourth-out appeals (OBR 5.09(c)) are not modeled: a run by a runner who still owes a retouch when another out ends the inning stands.
+
+**Runners whose run does not count are left on base** (§4.1): a runner who touched home but whose run the rules above refuse (a force third out, the batter-runner before first, a time play lost, a pending run cancelled by a retouch, a touch after the third out) has neither scored nor been put out, so he is in LOB, not nowhere. (Added 2026-11-14, owner's ruling.)
 
 ---
 
