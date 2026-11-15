@@ -89,6 +89,8 @@ Each candidate reads the ball and makes his own call. Then he decides alone:
 
 *Rewritten 2026-11-14 for the Codex review of this change (P2-3): the first version of this section combined counterfactuals from different revisions and attributed the rise to the relay man more firmly than its numbers allowed. The table now names each build and intervention exactly.*
 
+*After the third review (`74ea51b`), on main `57f12b7`:* standard run, seeds 0–299 [1000–1299]: runs 4.31 → 4.46 [4.68 → 4.58]; reached on BIP 38.6% → 39.0% [39.1% → 39.6%]; grounder hits .322 → .321 [.326 → .319]; fly-ball hits .212 → .222 [.215 → .231]. On 1,000 games from seed 5: 4.60 → 4.60. With `CALL_HEARD_S` = 0 (nothing else changed): 4.28 [4.26], 1,000 games 4.41. On 1,000 games the delay is worth about +0.19 and the rest of the change about −0.19; the third review's fixes took about 0.08 off (4.68 → 4.60 on 1,000 games against `b994182`), most of the fly-ball rise with it. Coverage on seeds 0–49 (as below): first 3 gaps over 0.3 s (main 0; up to 1.02 s, two of them on grounders), second 15 (main 11), third 31 (main 68); nothing else over 0.3 s except the known lead (62, at most 0.6 s).
+
 *Restated 2026-11-14 on main `57f12b7` (swing v2, the spin change, the swing-noise split and the refit), merged into this branch at `b994182` with no behaviour change of its own.* Standard run, main `57f12b7` → `b994182`, seeds 0–299 [1000–1299]: runs 4.31 → 4.70 [4.68 → 4.72]; reached on BIP 38.6% → 39.5% [39.1% → 39.6%]; grounder hits .322 → .325 [.326 → .317]; fly-ball hits .212 → .234 [.215 → .242]. On 1,000 games from seed 5: 4.60 → 4.68. The same build with `CALL_HEARD_S` = 0 (nothing else changed): 4.46 [4.45], 1,000 games 4.51. So on 1,000 games the 0.3 s delay is worth about +0.17 runs and the rest of the change about −0.09; on 300 games +0.24 [+0.27] and +0.15 [−0.23], noisier than their difference and not used. Full row: [metrics ledger](../metrics-ledger.md), "Fielder communication". The rows below were measured on the old main (`5ba6750`, before swing v2) and are kept as the record of each step; compare within a main only.
 
 *On the old main (`faf2737`):* standard run, main `5ba6750` (sim code identical to `c3a2714`) → `faf2737`, seeds 0–299 [1000–1299]: runs 5.86 → 6.21 [6.18 → 6.34]; reached on BIP 33.5% → 34.4% [34.2% → 35.1%]; grounder hits .327 → .324 [.329 → .329]. On 1,000 games from seed 5: 6.03 → 6.30.
@@ -108,8 +110,10 @@ Each candidate reads the ball and makes his own call. Then he decides alone:
 | `faf2737` (the recheck's fixes) | 6.21 [6.34] | 6.30 |
 | `faf2737`, `CALL_HEARD_S` = 0 (nothing else changed) | 5.93 [6.14] | 6.14 |
 | *new main* `57f12b7` | 4.31 [4.68] | 4.60 |
-| **`b994182`** (`faf2737` merged with main `57f12b7`) | **4.70 [4.72]** | **4.68** |
-| **`b994182`, `CALL_HEARD_S` = 0** (nothing else changed) | **4.46 [4.45]** | **4.51** |
+| `b994182` (`faf2737` merged with main `57f12b7`) | 4.70 [4.72] | 4.68 |
+| `b994182`, `CALL_HEARD_S` = 0 (nothing else changed) | 4.46 [4.45] | 4.51 |
+| **`74ea51b`** (the third review's fixes) | **4.46 [4.58]** | **4.60** |
+| **`74ea51b`, `CALL_HEARD_S` = 0** (nothing else changed) | **4.28 [4.26]** | **4.41** |
 
 The rows for `636366d` were measured before the review's fixes and are kept as a record only; the `636366d` interventions were not saved as patches. The zero-delay rows are reproducible: on that revision, `sed -i 's/^const CALL_HEARD_S: f64 = 0.3;/const CALL_HEARD_S: f64 = 0.0;/' sim/crates/bb_game/src/live.rs` and the standard run. With `CALL_HEARD_S` = 0 a teammate's choice is known one tick (1/60 s) later, never in the tick it is made.
 
