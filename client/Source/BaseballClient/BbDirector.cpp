@@ -457,6 +457,7 @@ void ABbDirector::BeginPlay()
 	FParse::Value(Cmd, TEXT("BbSpeed="), Speed);
 	FParse::Value(Cmd, TEXT("BbCamera="), CameraMode);
 	FParse::Value(Cmd, TEXT("BbShots="), ShotsLeft);
+	FParse::Value(Cmd, TEXT("BbRushAt="), RushAt);
 	FParse::Value(Cmd, TEXT("BbShotEvery="), ShotEvery);
 	FParse::Value(Cmd, TEXT("BbShotStart="), NextShot);
 	FParse::Value(Cmd, TEXT("BbBenchSeconds="), BenchSeconds);
@@ -615,6 +616,12 @@ void ABbDirector::RequestNext()
 
 void ABbDirector::BeginPlayback(FBbPlay&& Play)
 {
+	// The next pitch is ready: a skip asked for with Enter ends here.
+	if (bRush && RushClock > 0.f)
+	{
+		UE_LOG(LogBb, Display, TEXT("BB_RUSH off at=%.2f s"), RushClock);
+	}
+	bRush = false;
 	// The board as this play starts: as the last one left it (top of the first, before the
 	// first pitch). The board stays on the outgoing half inning until here.
 	if (Current.bValid)
@@ -1557,6 +1564,12 @@ void ABbDirector::Tick(float DeltaSeconds)
 				}
 			}
 		}
+		// Enter: run at RushSpeed (or the chosen speed, if faster) until the next pitch is
+		// ready to be thrown, then back to the chosen speed (owner, 2026-11-15). Again: stop.
+		if (PC->WasInputKeyJustPressed(EKeys::Enter))
+		{
+			bRush = !bRush;
+		}
 		if (PC->WasInputKeyJustPressed(EKeys::C))
 		{
 			CameraMode = (CameraMode + 1) % 3;
@@ -1590,7 +1603,14 @@ void ABbDirector::Tick(float DeltaSeconds)
 
 	if (Current.bValid && Sim)
 	{
-		const float SimDt = bPaused ? 0.f : DeltaSeconds * Speed;
+		// -BbRushAt=<s>: Enter, pressed for an unattended check that many seconds in.
+		if (RushAt >= 0.f && (RushClock += DeltaSeconds) >= RushAt)
+		{
+			RushAt = -1.f;
+			bRush = true;
+			UE_LOG(LogBb, Display, TEXT("BB_RUSH on play=%u play_time=%.2f reset=%d"), Current.Info.play_index, PlayTime, bReset ? 1 : 0);
+		}
+		const float SimDt = bPaused ? 0.f : DeltaSeconds * (bRush ? FMath::Max(Speed, RushSpeed) : Speed);
 		PlayTime += SimDt;
 		ExitClock += SimDt;
 		const float T = FMath::Clamp(PlayTime, 0.f, Current.Info.duration_s);
@@ -1879,7 +1899,7 @@ void ABbDirector::Tick(float DeltaSeconds)
 				}
 			}
 			static const TCHAR* CamNames[3] = { TEXT("broadcast"), TEXT("behind home"), TEXT("overhead") };
-			Hud->Footer = FString::Printf(TEXT("Space: %s    - / =: speed %.2gx    C: camera (%s)    Esc or Q: quit"), bPaused ? TEXT("paused") : TEXT("pause"), Speed, CamNames[CameraMode]);
+			Hud->Footer = FString::Printf(TEXT("Space: %s    - / =: speed %.2gx    Enter: %s    C: camera (%s)    Esc or Q: quit"), bPaused ? TEXT("paused") : TEXT("pause"), Speed, bRush ? TEXT("skipping to the next pitch") : TEXT("skip to the next pitch"), CamNames[CameraMode]);
 			// The outs on the board are the ones called so far. Runs, count and bases change
 			// when the play is known. A play that ends the half inning leaves it on the board,
 			// at three outs, until the next pitch (BeginPlayback).

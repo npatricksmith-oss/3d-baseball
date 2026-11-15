@@ -29,6 +29,7 @@ class UMaterialInterface;
  *               -BbBenchSeconds=<s> (log frame rate and memory, then quit)
  *               -BbStagingLog (log each reset, each player leaving the field and each throw's
  *               first animation phase as BB_RESET / BB_EXIT / BB_THROW, and a BB_STAGING summary)
+ *               -BbRushAt=<s> (press Enter once, that many seconds in; logs BB_RUSH)
  *               -BbClipSpeeds (log the ground speed each gait clip is animated for as BB_CLIP)
  */
 UCLASS()
@@ -391,6 +392,13 @@ private:
 	int32 CameraMode = 0;
 	int32 ShownCam = -1;
 	bool bPaused = false;
+	/** Set by Enter: play at RushSpeed (or Speed, if that is faster) until the next pitch is
+	 *  ready to be thrown (BeginPlayback), then return to Speed. Enter again cancels it. */
+	bool bRush = false;
+	static constexpr float RushSpeed = 4.f;
+	/** -BbRushAt=<s>: seconds of real time after which Enter is pressed once (unattended check). */
+	float RushAt = -1.f;
+	float RushClock = 0.f;
 
 	// Unattended checks.
 	int32 ShotsLeft = 0;
