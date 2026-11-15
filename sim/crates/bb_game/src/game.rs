@@ -375,10 +375,10 @@ impl Game {
         }
         if let (Some((t_c, ball)), bb_rules::PlayState::Live(_)) = (rec.contact_state, &st.play) {
             // Runners: batter plus those on base (ids from the rules state).
-            let mut runners = vec![RunnerIn { id: st.batter, base: 0, speed: 8.2 }];
+            let mut runners = vec![RunnerIn { id: st.batter, base: 0, speed: 8.2, tau_s: bb_agents::running::LEAGUE_TAU_S }];
             for (i, r) in st.bases.iter().enumerate() {
                 if let Some(r) = r {
-                    runners.push(RunnerIn { id: *r, base: (i + 1) as u8, speed: 8.2 });
+                    runners.push(RunnerIn { id: *r, base: (i + 1) as u8, speed: 8.2, tau_s: bb_agents::running::LEAGUE_TAU_S });
                 }
             }
             let scorer_runners = runners.clone();

@@ -1,6 +1,6 @@
 # Task List
 
-**Last updated:** 2026-11-15, 09:45 (handoff at the pause of the fourth lead session: all held work merged; before that, night: "Resume here" rewritten by the fourth lead session; before that, 2026-11-14 evening: "Resume here" rewritten as the handoff from the third lead session: the Codex rerun on `work/live-comm` comes first; before that, the swing and collision block below and the fielder-communication line, at the pause of the second lead session; before that, hurried throws, A3; before that, handedness, A1; before that, the dive rate judged and fixed, A5, and rosters, A2, merged; before that, dives shown in the client, the get-up after a rimmed dive, two-out throws; before that, the overrun of first and runner position samples; before that, foul measures, sources and the correction experiment; pushed; the spray experiment parked for later; before that, the read knows the ball started at the plate; before that, called-off infielders back up the catch; before that, pop-up calls on `fix/popup-calls`; before that, owner's observations merged into the "Owner backlog" section; before that, the coordinator run on `coord/review-fixes`)
+**Last updated:** 2026-11-15, 11:15 (fifth lead session: runner acceleration, Q1, merged; before that, 09:45, handoff at the pause of the fourth lead session: all held work merged; before that, night: "Resume here" rewritten by the fourth lead session; before that, 2026-11-14 evening: "Resume here" rewritten as the handoff from the third lead session: the Codex rerun on `work/live-comm` comes first; before that, the swing and collision block below and the fielder-communication line, at the pause of the second lead session; before that, hurried throws, A3; before that, handedness, A1; before that, the dive rate judged and fixed, A5, and rosters, A2, merged; before that, dives shown in the client, the get-up after a rimmed dive, two-out throws; before that, the overrun of first and runner position samples; before that, foul measures, sources and the correction experiment; pushed; the spray experiment parked for later; before that, the read knows the ball started at the plate; before that, called-off infielders back up the catch; before that, pop-up calls on `fix/popup-calls`; before that, owner's observations merged into the "Owner backlog" section; before that, the coordinator run on `coord/review-fixes`)
 The live to-do list for the project. [PLAN.md](PLAN.md) holds decisions and design. This file holds what is next and what is done. Update it at the end of every work session.
 
 Status: `[ ]` not started · `[~]` in progress · `[x]` done · `[?]` needs an owner decision
@@ -34,7 +34,17 @@ Open:
 
 **Open, not the swing's:** batters are 17 ms early on outside pitches and 2 ms inside (perception); v2's attack-angle slope against direction is 0.53 (Statcast 0.41).
 
-## Resume here (2026-11-15, about 09:45; fourth lead session paused on the owner's word)
+## Resume here (2026-11-15, about 11:15; fifth lead session, Claude Fable 5.2 at medium effort)
+
+**Merged since the block below was written: runner acceleration (Q1), `work/runner-accel`.** League τ 0.76 s (standing 90 ft 4.10 s), carried per runner (`RunnerIn::tau_s`); batters charged their own route from the box (27.98 m right-handed, 26.58 m left-handed); `BATTER_START` 0.20 s. [Note](docs/calibration/2026-11-15-runner-acceleration.md), [Codex review](docs/reviews/2026-11-15-codex-runner-acceleration-review.md) (one P1 and one P2 fixed, two P2 recorded), ledger row. Tests 420 pass, 0 fail, 4 ignored. Standard run now: **runs 3.85 [3.99]**, K 22.3% [22.2], BB 8.2% [8.5], HR/PA 2.72% [2.75%], hits GB/LD/FB/PU .310/.667/.116/.011 [.310/.650/.113/.009], no rules warnings. Nothing moved beyond the seed sets' spread.
+
+**Left open by it (small, not blocking):** the left/right home-to-first gap is 0.17 s against 0.09 s for switch hitters (first steps out of the box; with batter animation and ratings); the 4.10 s target's size has no verified source, so refit τ to Statcast 90-ft splits by sprint speed when speed ratings arrive; league top speed is still 8.2 m/s (27.0 ft/s is 8.23).
+
+**Owner, 2026-11-15:** any Fable model may merge and push on its own judgment; Opus only at high effort (CLAUDE.md updated).
+
+**Next: item 2 below, the runner decision model** (item 1 is done). Nothing is running, nothing is waiting for the owner, no review is open.
+
+### The fourth lead session's handoff (09:45), still current except where the block above says otherwise
 
 **Lead for the next session (owner, 2026-11-15): Claude Opus 5.5 at high effort**, to spare the shared usage pool. It follows the "Usage budget" section of [CLAUDE.md](CLAUDE.md).
 
@@ -65,7 +75,7 @@ Main is the merge of `work/tracking-read` (which carried `work/collision-q`, `wo
 **Owner's standing word:** keep it steady, do not overtest, let small things go. Decisions for him are numbered questions with context. Near Codex's limit (last read 75% of the 5-hour window, 73% of the week, week resets 21 Nov), review with a Claude model that is not the author. Fixes that only conform to the official rules need no question.
 
 **Next, in order (one `live.rs` job at a time; two Claude workers at most; branch from main):**
-1. **Runner acceleration** (Q1: τ about 0.75 s, per-runner parameters, the batter's box offset).
+1. ~~**Runner acceleration** (Q1: τ about 0.75 s, per-runner parameters, the batter's box offset).~~ **Done 2026-11-15**, merged (block at the top).
 2. **The runner decision model** (Q2, Q8–Q10, the owner's anticipation guidance: situation first, then react to the ball), replacing the interim retreat rules; second to home on a single is 35% against about 60%. Then **the rundown** (Q11).
 3. **Fielding left open by today's work:** grounder hits .300 [.316] against .245 (the second seed set's +.013 after the review fixes is unexplained); dives not taken are 27 of 61 routine fly misses (`OF_DIVE_MIN_P`); the late lateral read error (0.6–0.9 m half a second out; two-eye depth); no lost-ball state; the fly-hit deficit against matched catch-probability bins; a receiver on a bag has no stretch for a wide throw; an on-time caller displaced by a later teammate.
 4. **Outfield throws** (wrong base, missed cutoffs), **infield judgment on the double play**, **the "seen him break" rule**.

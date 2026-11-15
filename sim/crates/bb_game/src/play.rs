@@ -391,6 +391,9 @@ pub struct RunnerIn {
     pub id: AgentId,
     pub base: u8,
     pub speed: f64,
+    /// Time constant of his acceleration, s: v = speed·(1 − e^(−t/τ)). His own value;
+    /// the league average is `bb_agents::running::LEAGUE_TAU_S`.
+    pub tau_s: f64,
 }
 
 pub struct PlayInput<'a> {
@@ -964,7 +967,7 @@ mod attr_tests {
         let ball = BallState { r: Vec3::new(0.0, 0.5, 0.5), v: Vec3::new(26.5, 35.0, -3.5), w: Vec3::ZERO };
         let run = |bats| simulate_play(&PlayInput {
             env: &env, field: &field, ball, t_contact: 0.4,
-            runners: vec![RunnerIn { id: 1, base: 0, speed: 8.2 }], outs: 0, bats,
+            runners: vec![RunnerIn { id: 1, base: 0, speed: 8.2, tau_s: bb_agents::running::LEAGUE_TAU_S }], outs: 0, bats,
             fielders, fattrs, seed: 1, play: 1,
         });
         let secured_at = |out: &PlayOutput| out.facts.iter().find_map(|f| match f {
