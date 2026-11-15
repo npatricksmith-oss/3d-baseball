@@ -7110,7 +7110,8 @@ mod tests {
     // that changes a job are checked every time, others every `stride`-th call. The default
     // run is short (seeds 0–3); `isolation_many_seeds` (ignored) runs 0–49:
     //   cd sim && taskset -c 0-7 nice cargo test --release -p bb_game --lib isolation_many_seeds -- --ignored --nocapture
-    // `ISO_SEEDS=a..b`, `ISO_STRIDE=n` change either.
+    // `ISO_SEEDS=a..b`, `ISO_STRIDE=n` change either; `ISO_REVERT=1` with the ignored run
+    // makes it the negative control.
     #[test]
     fn isolation_no_private_state_reaches_a_teammate_in_real_games() {
         let (seeds, stride) = iso_settings(0..2, 400);
@@ -7136,6 +7137,8 @@ mod tests {
     #[test]
     #[ignore = "long: the isolation harness over seeds 0-49 (about an hour on one core)"]
     fn isolation_many_seeds() {
+        // `ISO_REVERT=1` runs it as the negative control (`ISO_REVERT_GATE`): it must fail.
+        ISO_REVERT_GATE.with(|c| c.set(std::env::var("ISO_REVERT").is_ok()));
         let (seeds, stride) = iso_settings(0..50, 200);
         iso_assert(seeds, stride, 500_000);
     }
