@@ -34,25 +34,32 @@ Open:
 
 **Open, not the swing's:** batters are 17 ms early on outside pitches and 2 ms inside (perception); v2's attack-angle slope against direction is 0.53 (Statcast 0.41).
 
-## Resume here (2026-11-15, about 01:50; fourth lead session, owner asleep, lead still running)
+## Resume here (2026-11-15, about 05:10; fourth lead session, owner asleep, lead still running)
 
-Main is `ecd2bf7`, pushed. `cargo test --workspace --release` on it: 377 pass. Standard run: runs 4.42 [4.59] (real 4.39), K 21.6% [21.9], HR/PA 1.87% [1.91] (3.0), fly-ball hits .219 [.228] (.13), ground-ball hits .322 [.319] (.245).
+Main is `3f8ee60`, pushed. `cargo test --workspace --release` on it: 400 pass. Standard run on main: runs **5.05 [4.97]** (real 4.39), batters tagged out after a hit 113 [114] per 300 games (was 438 [475]).
 
-**Owner's standing word for this stretch (2026-11-15):** keep going, steady; do not overtest; let small things go to keep moving. Near Codex's limit, review with a Claude model that is not the author (Codex was at 87% of its 5-hour window at 01:21; it resets 03:12).
+**Owner's standing word for this stretch (2026-11-15):** keep going, steady; do not overtest; let small things go to keep moving. Near Codex's limit, review with a Claude model that is not the author.
 
-**Merged tonight:** fielder communication (`work/live-comm`; fifth Codex review: no P1); left on base by the official rule (Q4); the measurement and research notes (exit speed × launch angle, power mix, collision-efficiency sources and counterfactual, wall approach speed, outfield pursuit and throws); client: ball shadow that grows with height, Enter to skip to the next pitch, R/F replay with seed and play number, right-handers throw right-handed, a held ball drawn in the hand.
+**Merged tonight:** fielder communication; left on base by the official rule (Q4); **the runner reads** (`work/runner-reads`: a throw is read from where it comes down with the runner's own flight model; a runner looks again when the ball is secured or thrown, brakes to turn back, never shares a base; a tag going back is recorded at the base returned to; Codex [review](docs/reviews/2026-11-15-codex-runner-reads-review.md) and [recheck](docs/reviews/2026-11-15-codex-runner-reads-recheck.md), the recheck's findings fixed and merged on the lead's check without a third review); the measurement and research notes; the client work (shadow, Enter, R/F replay, right-handed throws, the ball in the hand).
 
-**Running (workers, each in its own worktree and Herdr-app tab):**
-- `work/collision-q` (Opus high): Q6, the sourced collision efficiency q 0.215 with the poor-contact mechanism. Stays off main until HR and runs are both in range; then a review.
-- `work/runner-reads` (Sonnet high): the two runner fixes from seed 24583 play 81. Then one review, ledger row, merge.
-- `work/live-comm` (Opus, docs only): the fifth review's P3-1 and Resolution, the 50-seed harness result. Merge those docs commits when done.
+**Built, reviewed, NOT merged: waiting for the owner's Q7 (below).**
+- `work/collision-q` (Q6): sourced q 0.215, Nathan 2000's inboard falloff, partial reach g 0.6 [E]. Codex: no P1, sound as physics. Resolution written.
+- `work/outfield-read`: the typical-spin belief refit, a read that closes over the last 3 s, `ReadSkill` per fielder. Routine flies .824 → .967; alone it takes runs to 3.32 [3.42] and fly-ball hits to .099. Codex: no P1, sound as an interim model. Resolution written.
+- When both merge: **refit the fielders' spin belief on the combined contact population** (outfield review P3-1) and take one full test pass and one standard run on the combination (`integrate/trio` was a trial merge only, made before the runner branch's last round).
 
-**Next, in order (one `live.rs` job at a time beside the collision job; two Claude workers at most):**
-1. **The outfield read** (Opus high): fly-ball misses; seed 23080 play 8; the owner's guidance (high flies stay harder; routine ones caught 90–99% by ability; errors are separate). Diagnosis by play first, short; then the model change, spec first, review. See the entry below and `docs/calibration/2026-11-15-outfield-pursuit-and-throws.md`.
-2. **Q5 wall braking** (small): BRAKE 4.75 m/s², wall-contact speed about 2 m/s [E].
-3. **Q1 runner acceleration** (τ about 0.75 s, per-runner parameters), then **the runner decision model**: Q2's run-expectancy rule with the owner's anticipation guidance (situation first, then react to the ball).
-4. **Outfield throws** (wrong base, missed cutoffs) and **the "seen him break" rule** (owner approved 2026-11-14; agent-models §5.7).
-5. The rest of the Codex live-play review's P2s (listed in the block below).
+**Running:** `work/wall-braking` (Sonnet): Q5, BRAKE 4.75 m/s² and wall-contact speed about 2 m/s [E], with the wall-reach contract (collision review P2-2).
+
+**Next, in order (one `live.rs` job at a time; two Claude workers at most):**
+1. After Q7: integrate the two held branches as above.
+2. **Q1 runner acceleration** (τ about 0.75 s, per-runner parameters), then **the runner decision model**: Q2's run-expectancy rule with the owner's anticipation guidance (situation first, then react), which replaces tonight's interim retreat rules and the one-turn stand-in; a real **rundown**; second to home on a single is 35% against about 60%.
+3. **The outfield read, second step:** the fielder keeps a track of what he has seen (outfield review P2-1; the deep drift on 23080/8 remains); the fly-hit deficit's cause (read precision or movement) against matched catch-probability bins (P2-2); high flies should stay harder than low ones (owner).
+4. **Outfield throws** (wrong base, missed cutoffs), **infield judgment on the double play**, **the "seen him break" rule**.
+5. The contact shape by pitch location and O-Contact (collision review P2-1); swing timing and batter styles (owner's idea; with batter ratings).
+6. The rest of the Codex live-play review's P2s (listed in the block below).
+
+**Unmerged branches:** `work/collision-q`, `work/outfield-read` (held for Q7); `work/wall-braking` (running); `integrate/trio` (trial, discard); `work/pitcher-fielding`, `work/integrate-agy-calib` (held, as before); `work/swing-chores`, `work/review-*` (harmless leftovers). Merged and removable: the other `work/*` and `integrate/live-comm`.
+
+**Machine:** restarted at 00:05 (orderly); a heat guard runs from the lead's scratchpad (gone after a reboot: rewrite it). The lead's status cue lives in `~/.claude/dev-mods/<session id>/codex-review-status`.
 
 **Measured together, 2026-11-15 04:30 (trial merge `integrate/trio` = main + `work/runner-reads` + `work/collision-q` + `work/outfield-read`; standard run, no full test pass yet):** runs **3.78 [3.85]** (real 4.39), K 22.4% [22.0] (22.6), BB 8.3% [8.6] (8.2), HR/PA 2.68% [2.56] (3.0), ground-ball hits .284 [.301] (.24), liners .671 [.657] (.68), fly balls .105 [.107] (.13), pop-ups .019 [.009] (.02), reached on balls in play 34.4% [35.3], no rules warnings. Every component rate is within reach of real; runs are about 0.55 low. The lead's accounting of the gap, not yet measured piece by piece: home runs 0.4 points short; no errors (A17), stolen bases, wild pitches or passed balls in the game yet, which in MLB carry a few tenths of a run; second to home on a single 38% against about 60%; outs on the bases 0.24–0.31 a team-game against about 0.1. Separately the three give: runners +0.43, collision +0.3, outfield read −1.1.
 
