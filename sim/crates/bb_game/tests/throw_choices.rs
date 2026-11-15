@@ -98,9 +98,12 @@ fn seed_23_play_109_takes_a_sure_lead_force_instead_of_automatic_first() {
     // The feed home has a force at first behind it, so it goes at full effort however
     // unlikely the first baseman reads that second out (here p 0.11; Opus infield-fixes
     // review P2-1: easing it to 0.85 cost the catcher 0.18 s and the double play), and the
-    // 3-2-3 is completed.
+    // catcher goes on to first for the 3-2-3. (Until 2026-11-15 it was completed; the batter
+    // is left-handed, and charged his own 26.58 m from the box instead of 27.43 m he beats
+    // the relay by about 0.05 s. The out at home stands.)
     assert_eq!(out.effort.first(), Some(&1.0), "feed home at full effort: {:?}", out.effort);
-    assert_eq!(out.calls.iter().map(|c| c.base).collect::<Vec<_>>(), vec![4, 1]);
+    assert_eq!(out.calls.first().map(|c| c.base), Some(4));
+    assert!(choices.get(1).is_some_and(|c| c.action == "throw" && c.base == 1), "{:#?}", choices.get(1));
 }
 
 #[test]
