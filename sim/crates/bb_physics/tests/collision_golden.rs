@@ -154,6 +154,47 @@ fn a8_lab_bbcor_at_29_in() {
     assert!((old - 0.489).abs() > 0.02, "the check must separate the old value ({old})");
 }
 
+/// Exit speed along the barrel for a bat swung like Nathan 2000's (§III C): rigid rotation about a
+/// point 9/84 of the length from the knob, 31 m/s at 13/84 of the length from the end (his 71 m/s
+/// impact speed with a 40 m/s pitch), normal approach speed 71 m/s for the COR.
+fn swung_exit_speed(params: &BatBallParams, u: f64) -> f64 {
+    let ball = BallParams::default();
+    let mp = BatProfile::default_34in().mass_props();
+    let (len, pivot) = (mp.length, mp.length * 9.0 / 84.0);
+    let omega = 31.0 / (len - len * 13.0 / 84.0 - pivot);
+    let q = collision_efficiency(params.e_n(u, len, 71.0), ball.mass, mp.inv_eff_mass(u));
+    q * 40.0 + (1.0 + q) * omega * (u - pivot)
+}
+
+#[test]
+fn f_profile_matches_nathan_2000() {
+    // physics-spec §8.2 f(u), inboard side [S, derived]: Nathan 2000 (Am. J. Phys. 68, 979,
+    // §III C, Fig. 10) finds the swung wood bat's exit speed equal to the rigid-bat value only
+    // within about ±3 cm (68–74 cm) of its peak, and 25% below it 11.5 cm (4.5 in) inboard.
+    // The rigid comparison is the same model with f ≡ 1 (no vibrational loss).
+    let len = BatProfile::default_34in().mass_props().length;
+    let flexible = BatBallParams::default();
+    let rigid = BatBallParams { f_tip: 1.0, f_taper: 1.0, f_handle: 1.0, ..flexible };
+    let ratio = |p: &BatBallParams, u: f64| swung_exit_speed(p, u) / swung_exit_speed(&rigid, u);
+    let peak_of = |p: &BatBallParams| {
+        (0..400).map(|i| len - 0.0005 * i as f64).fold((0.0, f64::MIN), |b, u| {
+            let v = swung_exit_speed(p, u);
+            if v > b.1 { (u, v) } else { b }
+        }).0
+    };
+    let peak = peak_of(&flexible);
+    let inboard = ratio(&flexible, peak - 4.5 * INCH);
+    println!("peak {:.2} in from the tip; 4.5 in inboard {inboard:.3}", (len - peak) / INCH);
+    assert!((inboard - 0.75).abs() <= 0.03, "exit speed 4.5 in inboard of the peak is {inboard:.3} of rigid (Nathan 0.75)");
+    for d in [-1.2, 1.2] {
+        let r = ratio(&flexible, peak + d * INCH);
+        assert!(r >= 0.97, "{d:+} in from the peak: {r:.3} of rigid (Nathan: close to rigid over 68–74 cm)");
+    }
+    // The former profile (f_taper 0.55) kept 0.84 there: the check separates them.
+    let old = BatBallParams { f_taper: 0.55, ..flexible };
+    assert!(ratio(&old, peak_of(&old) - 4.5 * INCH) > 0.80);
+}
+
 #[test]
 fn a9_kns_gripping_spin() {
     // Stationary ball struck obliquely by a bat moving +Y; the contact normal is tilted by ψ

@@ -167,7 +167,9 @@ pub struct BatBallParams {
     /// Station where the barrel starts to taper toward the handle, m from the knob; f falls
     /// to `f_taper` there.
     pub u_taper: f64,
+    /// f at the tip [E] (no number in Nathan 2000 beyond "drops off rapidly").
     pub f_tip: f64,
+    /// f's quadratic value at `u_taper` [S, derived]: Nathan 2000's inboard falloff (physics-spec §8.2).
     pub f_taper: f64,
     pub f_handle: f64,
     /// Normal COR at the sweet spot at `v_ref` relative normal speed [S, derived]: set so the
@@ -198,7 +200,10 @@ impl Default for BatBallParams {
             ss_from_tip: 0.15,
             u_taper: 22.0 * INCH,
             f_tip: 0.75,
-            f_taper: 0.55,
+            // Inboard falloff [S, derived] (physics-spec §8.2, 2026-11-15; was 0.55): swung like
+            // Nathan 2000's bat (§III C, Fig. 10), the exit speed 4.5 in inboard of the peak is 75%
+            // of the rigid-bat value, as his flexible-bat model finds.
+            f_taper: 0.27,
             f_handle: 0.35,
             // A8 (physics-spec §8.2): the sourced sweet-spot collision efficiency q = 0.215
             // (range 0.21–0.23; docs/calibration/2026-11-15-collision-efficiency-sources.md)
