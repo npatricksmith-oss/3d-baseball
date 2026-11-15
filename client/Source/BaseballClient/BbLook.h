@@ -41,6 +41,14 @@ namespace BbLook
 	/** A dugout's walls and steps, and its bench. */
 	inline const FBbPaint DugoutWall{ FLinearColor(0.170f, 0.175f, 0.180f), 0.9f };
 	inline const FBbPaint Bench{ FLinearColor(0.330f, 0.200f, 0.100f), 0.7f };
+	/** The grass bank beyond the left-field fence, and the benches beyond the right. */
+	inline const FBbPaint Berm{ FLinearColor(0.062f, 0.210f, 0.046f), 0.95f };
+	inline const FBbPaint Bench2{ FLinearColor(0.600f, 0.620f, 0.640f), 0.4f };
+	/** The pressbox: its walls and its band of glass. */
+	inline const FBbPaint Pressbox{ FLinearColor(0.560f, 0.540f, 0.500f), 0.85f };
+	inline const FBbPaint Glass{ FLinearColor(0.015f, 0.030f, 0.045f), 0.12f };
+	/** The lamps on the light towers, unlit. */
+	inline const FBbPaint Lamp{ FLinearColor(0.780f, 0.780f, 0.740f), 0.35f };
 	/** The line along the top of the outfield wall: over it is a home run. */
 	inline const FBbPaint WallCap{ FLinearColor(0.900f, 0.720f, 0.060f), 0.5f };
 	/** The distance figures on the wall. */

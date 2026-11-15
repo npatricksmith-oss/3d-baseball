@@ -1,6 +1,6 @@
 # Park visuals: field and stadium
 
-**Status:** plan agreed with the owner 2026-11-15 (twelve questions, answers in §1). **Step 1 (park export and field surface) is built** (§6), **step 2 (light and materials)** (§7) and **step 3 (walls and field furniture)** (§8); steps 4 to 6 are not. This is the first part of the graphics stage; players and game graphics (HUD) get their own plans afterwards.
+**Status:** plan agreed with the owner 2026-11-15 (twelve questions, answers in §1). **Step 1 (park export and field surface) is built** (§6), **step 2 (light and materials)** (§7), **step 3 (walls and field furniture)** (§8) and **step 4 (the seating bowl)** (§9); steps 5 and 6 are not. This is the first part of the graphics stage; players and game graphics (HUD) get their own plans afterwards.
 
 **Why now:** Codex's weekly limit is nearly used, so the physics and behaviour work, which needs outside reviews, pauses. The owner moved the looks forward from the polish milestone (PLAN D13, revised the same day). This stage runs without Codex reviews.
 
@@ -112,3 +112,22 @@ Client only; nothing in the sim changed. Everything is placed by rule from the e
 **Not done, and why.** The dugout has no rail in front: the sim's opening is open, and a ball passing through a drawn rail would look wrong. The pens' mounds are flat dirt circles, not raised. The pens are decoration: nobody warms up in them yet.
 
 **Checked** from the six spots and six pictures of play (`client/Saved/Shots/step3_before/`, `step3_after/`, untracked): the pitch camera's view is clear of the batter's eye, and the ball is as easy to see as before. **Cost:** 221 frames a second unattended against 257 (about a hundred more small shapes, each its own actor, and the net; step 4's instancing is the place to win it back); memory 2.6 GB, unchanged.
+
+## 9. Step 4 as built (2026-11-15)
+
+Client only; nothing in the sim changed. The placeholder blocks are gone. Everything follows the exported boundary by rule; the measures are named constants above `BuildStands` in `BbPark.cpp`, the colours in `BbLook.h`.
+
+- **How it is made.** A cross-section (distance behind the wall, height) is carried along each piece of the boundary into one generated mesh; where two pieces meet at a corner both end on the line that halves it, so rows turn the corner without a gap. Seats, steps, posts, benches and lamps are instanced shapes. The same now holds for step 3's walls and furniture (they were an actor each).
+- **The deck.** 18 rows behind every wall of foul ground, pole to pole: 0.84 m deep, 0.36 m up each, the wall's top a parapet in front of the first row. 7,038 seats (a bottom and a back each), in sections of about 9 m between aisles with a half step on every row, and an aisle at every corner. Behind the top row a concourse, a rail, and the back wall down to the land.
+- **Over the dugouts** the first five rows are left out: the dugout's roof is there, and the seats start behind it, as the sim has it (a ball over the roof goes into the seats).
+- **Roof.** A slab over the concourse and the last six rows, higher at the front, on posts at the aisles. It stops where the stands close in to the poles, so the seats down the lines are open.
+- **Pressbox.** On the roof behind home: a room with a band of glass toward the field, and its building behind the concourse.
+- **Beyond the fence.** Left field: a grass bank with a path along its top. Right field: ten rows of benches. Both leave the batter's eye and the pens clear.
+- **Light towers.** Six, unlit: 32 m poles behind the stands at 32°, 78° and 125° either side of centre field, each with a rack of lamps turned to the middle of the field.
+- **The third-base camera spot moved** into the seats, half-way up the deck (a light tower and the roof now stand where it was). The other five are unchanged.
+
+**The lead's choices, for the owner to overrule if he likes:** the bank in left and the benches in right (it could be either on both sides); the roof stopping short of the poles; seats one colour.
+
+**Not done.** No rail along the aisles or the front of the deck. The stands at each pole end square, leaving a wedge of open ground between the deck and the bank or benches. The towers are plain poles, not lattice.
+
+**Checked** from the six spots and six pictures of play (`client/Saved/Shots/step3_after/` is the before, `step4_after/` the after; untracked): the pitch camera sees the ball against the seats behind home as easily as before, and the camera behind home is clear of the roof. **Cost:** 207 frames a second unattended against 221; memory 2.6 GB, unchanged. Drawing step 3's shapes instanced did not win the frames back as expected (207 with and without), so the cost is not the number of actors; shadows are the likely place to look if it matters.

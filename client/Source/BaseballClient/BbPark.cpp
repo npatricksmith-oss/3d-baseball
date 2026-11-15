@@ -4,6 +4,7 @@
 #include "Async/ParallelFor.h"
 #include "BbLook.h"
 #include "Components/DirectionalLightComponent.h"
+#include "Components/InstancedStaticMeshComponent.h"
 #include "Components/PostProcessComponent.h"
 #include "Components/SkyAtmosphereComponent.h"
 #include "Components/SkyLightComponent.h"
@@ -426,12 +427,12 @@ AStaticMeshActor* ABbPark::Shape(UStaticMesh* Mesh, const FVector& Location, con
 	return A;
 }
 
-AStaticMeshActor* ABbPark::Panel(const FVector2D& A, const FVector2D& B, double Depth, double Z0, double Z1, const FBbPaint& Paint)
+void ABbPark::Panel(const FVector2D& A, const FVector2D& B, double Depth, double Z0, double Z1, const FBbPaint& Paint, bool bShadow)
 {
 	// Engine primitives are 100 cm across. The cube's X is turned to run from A to B.
 	const FVector2D Mid = (A + B) * 0.5;
 	const FVector Dir = ToUE(B.X - A.X, B.Y - A.Y, 0).GetSafeNormal();
-	return Shape(Cube, ToUE(Mid.X, Mid.Y, (Z0 + Z1) * 0.5), FVector((B - A).Size() + 0.05, Depth, Z1 - Z0), Paint, Dir.Rotation());
+	Inst(Cube, ToUE(Mid.X, Mid.Y, (Z0 + Z1) * 0.5), FVector((B - A).Size() + 0.05, Depth, Z1 - Z0), Paint, Dir.Rotation(), bShadow);
 }
 
 void ABbPark::BuildLights()
@@ -544,6 +545,7 @@ void ABbPark::Build(const BbPark& Desc)
 			M->GetEditorOnlyData()->BaseColor.Connect(0, Color);
 			M->GetEditorOnlyData()->Roughness.Connect(0, Rough);
 			M->GetEditorOnlyData()->Specular.Connect(0, Spec);
+			M->bUsedWithInstancedStaticMeshes = true;
 			M->PostEditChange();
 		};
 		{
@@ -596,6 +598,7 @@ void ABbPark::Build(const BbPark& Desc)
 	BuildDugouts();
 	BuildOutfield();
 	BuildStands();
+	FlushInst();
 	UE_LOG(LogBbPark, Display, TEXT("BB_PARK built in %.2f s: %u wall pieces, ground %.0f m square from (%.0f, %.0f)"),
 		FPlatformTime::Seconds() - Began, Desc.n_wall, Ground->Size, Ground->X0, Ground->Y0);
 }
@@ -802,11 +805,11 @@ void ABbPark::BuildFurniture()
 	const FVector2D At[3] = { B1 + In1 * (BaseSide * 0.5), B2, B3 + In3 * (BaseSide * 0.5) };
 	for (const FVector2D& P : At)
 	{
-		Shape(Cube, ToUE(P.X, P.Y, 0.038), FVector(BaseSide, BaseSide, 0.076), BbLook::Rubber, FRotator(0, 45, 0));
+		Inst(Cube, ToUE(P.X, P.Y, 0.038), FVector(BaseSide, BaseSide, 0.076), BbLook::Rubber, FRotator(0, 45, 0));
 	}
 	// The rubber: 24 by 6 in, its front edge where the sim has it, on the mound's table.
 	const double RubY = D.rubber_m + 0.25 * FT;
-	Shape(Cube, ToUE(0, RubY, Ground->Height(0, RubY) + 0.005), FVector(0.5 * FT, 2.0 * FT, 0.03), BbLook::Rubber);
+	Inst(Cube, ToUE(0, RubY, Ground->Height(0, RubY) + 0.005), FVector(0.5 * FT, 2.0 * FT, 0.03), BbLook::Rubber);
 	// Foul poles, each with its screen: a ladder of rungs on the fair side, from above the
 	// fence to the top, running along the fence.
 	int32 FenceFirst = -1, FenceLast = -1;
@@ -821,7 +824,7 @@ void ABbPark::BuildFurniture()
 	for (int32 I = 0; I < 2; ++I)
 	{
 		const FVector2D P(D.poles[I][0], D.poles[I][1]);
-		Shape(Cylinder, ToUE(P.X, P.Y, PoleHigh * 0.5), FVector(0.3, 0.3, PoleHigh), BbLook::FoulPole);
+		Inst(Cylinder, ToUE(P.X, P.Y, PoleHigh * 0.5), FVector(0.3, 0.3, PoleHigh), BbLook::FoulPole);
 		if (FenceFirst < 0)
 		{
 			continue;
@@ -832,7 +835,7 @@ void ABbPark::BuildFurniture()
 		const FVector2D Fair = (I == 0 ? To - From : From - To).GetSafeNormal();
 		const double Z0 = D.fence_height_m + 0.6, Z1 = PoleHigh - 0.1;
 		const FVector2D Edge = P + Fair * PoleScreen;
-		Shape(Cylinder, ToUE(Edge.X, Edge.Y, (Z0 + Z1) * 0.5), FVector(0.07, 0.07, Z1 - Z0), BbLook::FoulPole);
+		Inst(Cylinder, ToUE(Edge.X, Edge.Y, (Z0 + Z1) * 0.5), FVector(0.07, 0.07, Z1 - Z0), BbLook::FoulPole);
 		for (double Z = Z0; Z <= Z1 + 0.01; Z += (Z1 - Z0) / 12.0)
 		{
 			Panel(P, Edge, 0.05, Z - 0.025, Z + 0.025, BbLook::FoulPole);
@@ -874,14 +877,17 @@ void ABbPark::BuildWalls()
 			for (int32 K = 0; K <= Bays; ++K)
 			{
 				const FVector2D Q = FMath::Lerp(Am, Bm, (double)K / Bays);
-				Shape(Cylinder, ToUE(Q.X, Q.Y, P.top_m * 0.5), FVector(0.12, 0.12, P.top_m), BbLook::Steel);
+				Inst(Cylinder, ToUE(Q.X, Q.Y, P.top_m * 0.5), FVector(0.12, 0.12, P.top_m), BbLook::Steel);
 			}
 			Panel(Am, Bm, 0.08, P.top_m - 0.04, P.top_m + 0.04, BbLook::Steel);
 			const double MidZ = (D.foul_wall_height_m + P.top_m) * 0.5;
-			Panel(Am, Bm, 0.025, MidZ - 0.0125, MidZ + 0.0125, BbLook::Steel)->GetStaticMeshComponent()->SetCastShadow(false);
+			Panel(Am, Bm, 0.025, MidZ - 0.0125, MidZ + 0.0125, BbLook::Steel, false);
 			if (NetMaterial)
 			{
-				UStaticMeshComponent* Net = Panel(Am, Bm, 0.02, D.foul_wall_height_m, P.top_m, BbLook::Steel)->GetStaticMeshComponent();
+				// The one shape here with a material of its own, so an actor of its own.
+				const FVector2D Mid = (Am + Bm) * 0.5;
+				UStaticMeshComponent* Net = Shape(Cube, ToUE(Mid.X, Mid.Y, (D.foul_wall_height_m + P.top_m) * 0.5), FVector((Bm - Am).Size() + 0.05, 0.02, P.top_m - D.foul_wall_height_m),
+					BbLook::Steel, ToUE(Along.X, Along.Y, 0).GetSafeNormal().Rotation())->GetStaticMeshComponent();
 				UMaterialInstanceDynamic* M = UMaterialInstanceDynamic::Create(NetMaterial, this);
 				M->SetVectorParameterValue(TEXT("Color"), BbLook::Net);
 				M->SetScalarParameterValue(TEXT("Opacity"), BbLook::NetOpacity);
@@ -907,12 +913,11 @@ void ABbPark::BuildDugouts()
 	for (const FBbRun& R : Ground->Dugouts)
 	{
 		// A box from A0 to A1 along the opening and O0 to O1 back from it.
-		auto Box = [&](double A0, double A1, double O0, double O1, double Z0, double Z1, const FBbPaint& Paint)
+		auto Box = [&](double A0, double A1, double O0, double O1, double Z0, double Z1, const FBbPaint& Paint, bool bShadow = true)
 		{
 			const FVector2D Mid = R.Out * ((O0 + O1) * 0.5);
 			// (Panel adds 5 cm to a piece's length to close the walls' joints; not wanted here.)
-			AStaticMeshActor* Made = Panel(R.A + R.Along * (A0 + 0.025) + Mid, R.A + R.Along * (A1 - 0.025) + Mid, O1 - O0, Z0, Z1, Paint);
-			return Made->GetStaticMeshComponent();
+			Panel(R.A + R.Along * (A0 + 0.025) + Mid, R.A + R.Along * (A1 - 0.025) + Mid, O1 - O0, Z0, Z1, Paint, bShadow);
 		};
 		Box(-PitWall, R.L + PitWall, 0.0, PitDeep + PitWall, PitFloor - 0.2, PitFloor, BbLook::DugoutFloor);
 		for (int32 K = 0; K + 1 < PitSteps; ++K)
@@ -920,7 +925,7 @@ void ABbPark::BuildDugouts()
 			Box(0.0, R.L, K * StepRun, (K + 1) * StepRun, PitFloor, -StepRise * (K + 1), BbLook::Concrete);
 		}
 		// The lip along the field's edge: the top step's riser, and a concrete strip on the field.
-		Box(-PitWall, R.L + PitWall, -PitWall, 0.0, PitFloor, 0.012, BbLook::Concrete)->SetCastShadow(false);
+		Box(-PitWall, R.L + PitWall, -PitWall, 0.0, PitFloor, 0.012, BbLook::Concrete, false);
 		// The end walls, behind the stands' wall and under it; the rear wall; the roof, its top
 		// where the sim has it.
 		for (double A0 : { -PitWall, R.L })
@@ -935,7 +940,7 @@ void ABbPark::BuildDugouts()
 		for (int32 K = 1; K < Bays; ++K)
 		{
 			const FVector2D Q = R.A + R.Along * (R.L * K / Bays) + R.Out * 0.06;
-			Shape(Cylinder, ToUE(Q.X, Q.Y, (Roof - RoofThick - StepRise) * 0.5), FVector(0.08, 0.08, Roof - RoofThick + StepRise), BbLook::Steel);
+			Inst(Cylinder, ToUE(Q.X, Q.Y, (Roof - RoofThick - StepRise) * 0.5), FVector(0.08, 0.08, Roof - RoofThick + StepRise), BbLook::Steel);
 		}
 		// The bench.
 		Box(0.6, R.L - 0.6, PitDeep - 0.5, PitDeep - 0.05, PitFloor, PitFloor + 0.45, BbLook::Bench);
@@ -979,8 +984,8 @@ void ABbPark::BuildOutfield()
 		// The pitch runs from the mound to its plate; the rubber and the plate lie across it.
 		const FVector2D M = G.PenMounds[K], H = G.PenPlates[K];
 		const FVector2D Dir = (H - M).GetSafeNormal(), Across(-Dir.Y, Dir.X);
-		Panel(M - Across * 0.28, M + Across * 0.28, 0.5 * FT, 0.0, 0.03, BbLook::Rubber)->GetStaticMeshComponent()->SetCastShadow(false);
-		Panel(H - Across * 0.19, H + Across * 0.19, 2.0 * PlateHalf, 0.0, 0.012, BbLook::Rubber)->GetStaticMeshComponent()->SetCastShadow(false);
+		Panel(M - Across * 0.28, M + Across * 0.28, 0.5 * FT, 0.0, 0.03, BbLook::Rubber, false);
+		Panel(H - Across * 0.19, H + Across * 0.19, 2.0 * PlateHalf, 0.0, 0.012, BbLook::Rubber, false);
 	}
 	// Distance figures, in feet: at each line (the pole's distance), in each alley and at
 	// centre (the fence's distance where the figure stands), each in the middle of a piece.
@@ -1110,39 +1115,480 @@ void ABbPark::Sign(const FVector& Mid, const FVector2D& Right, const FVector2D& 
 	Signs->SetMaterial(Section, M);
 }
 
+/** Flat faces gathered for one paint, drawn as one piece of the bowl's mesh. */
+struct FBbSolid
+{
+	TArray<FVector> V, N;
+	TArray<int32> T;
+	/** A flat four-cornered face (sim frame, metres): P0 to P1 is one edge and P2 to P3 the one
+	 *  opposite; it shows from the side Normal points to. */
+	void Quad(const FVector& P0, const FVector& P1, const FVector& P2, const FVector& P3, const FVector& Normal)
+	{
+		const int32 B = V.Num();
+		for (const FVector& P : { P0, P1, P2, P3 })
+		{
+			V.Add(ToUE(P.X, P.Y, P.Z));
+		}
+		const FVector Nu = ToUE(Normal.X, Normal.Y, Normal.Z).GetSafeNormal();
+		N.Append({ Nu, Nu, Nu, Nu });
+		// The side that shows is the one the corners run round the way the ground's do (AddGround).
+		if ((((V[B + 1] - V[B]) ^ (V[B + 2] - V[B])) | Nu) > 0.0)
+		{
+			T.Append({ B, B + 2, B + 1, B + 2, B + 3, B + 1 });
+		}
+		else
+		{
+			T.Append({ B, B + 1, B + 2, B + 2, B + 1, B + 3 });
+		}
+	}
+};
+
+namespace
+{
+	// The seating bowl (park-visuals step 4). None of it is in the sim: the sim has the wall
+	// the seats stand behind, and everything here follows that wall by rule.
+	const double LandZ = -0.3;                  // the land outside the park
+	const int32 BowlRows = 18;
+	const double RowRun = 0.84, RowRise = 0.36; // a row's depth and its step up
+	const double Parapet = 0.85;                // the wall's top above the first row's floor
+	const double Concourse = 3.6, RailHigh = 1.1, RailThick = 0.25;
+	const double SectionLong = 9.0, AisleHalf = 0.6;
+	const double SeatPitch = 0.52, SeatWide = 0.44, SeatDeep = 0.42, SeatHigh = 0.42, SeatBack = 0.45;
+	// The roof over the concourse and the last rows: how far forward of the top row it
+	// reaches, its height above the concourse at its front and rear edges, how far it runs
+	// past the back wall.
+	const double RoofOver = 5.5, RoofFront = 5.0, RoofRear = 4.2, RoofSlab = 0.25, RoofPast = 0.8;
+	const double PostWide = 0.16;
+	// The pressbox, on the roof behind home.
+	const double PressHigh = 3.6, PressWideMax = 26.0, PressFront = 2.0, PressBehind = 3.0;
+	// Beyond the fence: a walk at its foot, then a grass bank in left field and benches in right.
+	const double OutWalk = 2.5;
+	const double BermFoot = 0.9, BermRun = 12.0, BermTop = 5.2, BermPath = 2.5;
+	const int32 BenchRows = 10;
+	const double BenchRun = 0.8, BenchRise = 0.42, BenchFoot = 1.6, BenchWalk = 2.0;
+	const int32 BenchAisleEvery = 5;            // an aisle at every fifth joint of the fence
+	// Light towers, by their bearing from home (degrees from centre field, either side).
+	const double TowerDeg[3] = { 32.0, 78.0, 125.0 };
+	const double TowerHigh = 32.0, TowerBehind = 2.5, TowerWide = 0.9;
+	const double RackWide = 7.0, RackHigh = 4.5;
+	const int32 LampRows = 3, LampCols = 6;
+
+	/** A straight piece of something that follows the boundary. A point D metres behind the
+	 *  wall is A + MA * D at one end and B + MB * D at the other: where two pieces meet at a
+	 *  corner both ends lie on the line that halves it, so they close without a gap. */
+	struct FBbPiece
+	{
+		FVector2D A, B, Along, Out, MA, MB;
+		double L;
+		bool bCapA, bCapB;
+		FVector2D Row(double D, double T) const { return FMath::Lerp(A + MA * D, B + MB * D, T); }
+	};
+
+	/** The faces of a section (points of distance behind the wall and height) carried along a
+	 *  piece. Each face shows from the left of the way the section is drawn. */
+	void Extrude(FBbSolid& S, const FBbPiece& P, TConstArrayView<FVector2D> Prof)
+	{
+		for (int32 I = 0; I + 1 < Prof.Num(); ++I)
+		{
+			const FVector2D& U = Prof[I];
+			const FVector2D& W = Prof[I + 1];
+			const FVector2D Nm = FVector2D(U.Y - W.Y, W.X - U.X).GetSafeNormal();
+			if (Nm.IsZero())
+			{
+				continue;
+			}
+			const FVector2D A0 = P.A + P.MA * U.X, B0 = P.B + P.MB * U.X, A1 = P.A + P.MA * W.X, B1 = P.B + P.MB * W.X;
+			S.Quad(FVector(A0.X, A0.Y, U.Y), FVector(B0.X, B0.Y, U.Y), FVector(A1.X, A1.Y, W.Y), FVector(B1.X, B1.Y, W.Y), FVector(P.Out.X * Nm.X, P.Out.Y * Nm.X, Nm.Y));
+		}
+	}
+
+	/** The end of a section that stands on the ground: closed from the section down to the land. */
+	void CapDown(FBbSolid& S, const FVector2D& Base, const FVector2D& M, TConstArrayView<FVector2D> Prof, const FVector2D& Face)
+	{
+		for (int32 I = 0; I + 1 < Prof.Num(); ++I)
+		{
+			const FVector2D& U = Prof[I];
+			const FVector2D& W = Prof[I + 1];
+			if (FMath::Abs(W.X - U.X) < 1e-6)
+			{
+				continue;
+			}
+			const FVector2D P0 = Base + M * U.X, P1 = Base + M * W.X;
+			S.Quad(FVector(P0.X, P0.Y, LandZ), FVector(P1.X, P1.Y, LandZ), FVector(P0.X, P0.Y, U.Y), FVector(P1.X, P1.Y, W.Y), FVector(Face.X, Face.Y, 0.0));
+		}
+	}
+
+	double Cross2(const FVector2D& A, const FVector2D& B)
+	{
+		return A.X * B.Y - A.Y * B.X;
+	}
+}
+
+void ABbPark::Inst(UStaticMesh* Mesh, const FVector& Location, const FVector& Scale, const FBbPaint& Paint, const FRotator& Rotation, bool bShadow)
+{
+	FBbBatch* Found = Batches.FindByPredicate([&](const FBbBatch& B)
+	{
+		return B.Mesh == Mesh && B.bShadow == bShadow && B.Paint.Color == Paint.Color && B.Paint.Rough == Paint.Rough;
+	});
+	if (!Found)
+	{
+		Found = &Batches.Add_GetRef(FBbBatch{ Mesh, Paint, bShadow, {} });
+	}
+	Found->At.Add(FTransform(Rotation, Location, Scale));
+}
+
+void ABbPark::InstPanel(const FVector2D& A, const FVector2D& B, double Depth, double Z0, double Z1, const FBbPaint& Paint, bool bShadow)
+{
+	const FVector2D Mid = (A + B) * 0.5;
+	const FVector Dir = ToUE(B.X - A.X, B.Y - A.Y, 0).GetSafeNormal();
+	Inst(Cube, ToUE(Mid.X, Mid.Y, (Z0 + Z1) * 0.5), FVector((B - A).Size(), Depth, Z1 - Z0), Paint, Dir.Rotation(), bShadow);
+}
+
+UMaterialInstanceDynamic* ABbPark::PaintOf(const FBbPaint& Paint)
+{
+	UMaterialInterface* Base = PaintMaterial ? PaintMaterial.Get() : FlatMaterial.Get();
+	if (!Base)
+	{
+		return nullptr;
+	}
+	UMaterialInstanceDynamic* M = UMaterialInstanceDynamic::Create(Base, this);
+	M->SetVectorParameterValue(TEXT("Color"), Paint.Color);
+	M->SetScalarParameterValue(TEXT("Rough"), Paint.Rough);
+	return M;
+}
+
+void ABbPark::FlushInst()
+{
+	int32 Count = 0;
+	for (const FBbBatch& B : Batches)
+	{
+		UInstancedStaticMeshComponent* C = NewObject<UInstancedStaticMeshComponent>(this);
+		C->SetupAttachment(RootComponent);
+		C->SetMobility(EComponentMobility::Movable);
+		C->SetStaticMesh(B.Mesh);
+		C->SetCollisionEnabled(ECollisionEnabled::NoCollision);
+		C->SetCastShadow(B.bShadow);
+		if (UMaterialInstanceDynamic* M = PaintOf(B.Paint))
+		{
+			C->SetMaterial(0, M);
+		}
+		C->RegisterComponent();
+		C->AddInstances(B.At, false, true);
+		Count += B.At.Num();
+	}
+	UE_LOG(LogBbPark, Display, TEXT("BB_PARK stands: %d shapes in %d batches, %d faces"), Count, Batches.Num(), BowlFaces);
+	Batches.Reset();
+}
+
+void ABbPark::AddSolid(const FBbSolid& S, const FBbPaint& Paint)
+{
+	if (S.V.Num() == 0)
+	{
+		return;
+	}
+	if (!Bowl)
+	{
+		Bowl = NewObject<UProceduralMeshComponent>(this);
+		Bowl->SetupAttachment(RootComponent);
+		Bowl->SetMobility(EComponentMobility::Movable);
+		Bowl->SetCollisionEnabled(ECollisionEnabled::NoCollision);
+		Bowl->RegisterComponent();
+	}
+	const int32 Section = BowlSections++;
+	Bowl->CreateMeshSection_LinearColor(Section, S.V, S.T, S.N, TArray<FVector2D>(), TArray<FLinearColor>(), TArray<FProcMeshTangent>(), false);
+	if (UMaterialInstanceDynamic* M = PaintOf(Paint))
+	{
+		Bowl->SetMaterial(Section, M);
+	}
+	BowlFaces += S.V.Num() / 4;
+}
+
 void ABbPark::BuildStands()
 {
-	// Seating as plain blocks, so the park reads as a park (the seating bowl proper is
-	// park-visuals step 4): two tiers stepping up and back from every wall. None of it is in
-	// the sim.
-	const BbPark& D = Ground->Desc;
+	// One deck of seats behind the walls of foul ground, a roof over its concourse, the
+	// pressbox behind home, a grass bank beyond the left-field fence and benches beyond the
+	// right, and six light towers (unlit). None of it is in the sim.
+	const FBbGround& G = *Ground;
+	const BbPark& D = G.Desc;
 	const int32 N = D.n_wall;
+	TArray<FVector2D> At, Along, Out;
+	TArray<double> Len;
 	for (int32 I = 0; I < N; ++I)
 	{
-		const BbWallPiece& P = D.wall[I];
-		const FVector2D A(P.from[0], P.from[1]), B(D.wall[(I + 1) % N].from[0], D.wall[(I + 1) % N].from[1]);
-		const FVector2D Along = (B - A).GetSafeNormal(), Out(-Along.Y, Along.X);
-		const bool bFence = P.kind == 0;
-		// Nothing where the batter's eye or a pen is, and nothing reaching into one from the
-		// pieces beside it.
-		if (Ground->Behind[I] != FBbGround::Plain)
+		const FVector2D A(D.wall[I].from[0], D.wall[I].from[1]), B(D.wall[(I + 1) % N].from[0], D.wall[(I + 1) % N].from[1]);
+		At.Add(A);
+		Along.Add((B - A).GetSafeNormal());
+		Out.Add(FVector2D(-Along[I].Y, Along[I].X));
+		Len.Add((B - A).Size());
+	}
+	// A piece that is joined to its neighbour at an end shares the corner with it; one that
+	// is not ends square.
+	auto Make = [&](int32 I, bool bJoinA, bool bJoinB)
+	{
+		const int32 P = (I + N - 1) % N, Q = (I + 1) % N;
+		FBbPiece R;
+		R.A = At[I];
+		R.B = At[Q];
+		R.Along = Along[I];
+		R.Out = Out[I];
+		R.L = Len[I];
+		R.MA = bJoinA ? (Out[P] + Out[I]) / (1.0 + (Out[P] | Out[I])) : Out[I];
+		R.MB = bJoinB ? (Out[Q] + Out[I]) / (1.0 + (Out[Q] | Out[I])) : Out[I];
+		R.bCapA = !bJoinA;
+		R.bCapB = !bJoinB;
+		return R;
+	};
+	FBbSolid Concrete, Grass, RoofFaces;
+
+	// ---- The deck -----------------------------------------------------------------------
+	// Rows step up and back from the wall, whose top is a parapet in front of the first row.
+	// Over a dugout the first rows are left out: its roof is there, and the seats start
+	// behind it (the sim: a ball over the roof goes into the seats).
+	const double Z0 = D.foul_wall_height_m - Parapet;
+	const double DTop = WallThick + BowlRows * RowRun, ZTop = Z0 + BowlRows * RowRise, DBack = DTop + Concourse;
+	const int32 DugRow = FMath::Min(BowlRows - 1, FMath::CeilToInt32((PitDeep + PitWall - WallThick) / RowRun));
+	auto Foul = [&D, N](int32 I) { return D.wall[(I + N) % N].kind != 0; };
+	auto Dug = [&D, N](int32 I) { return D.wall[(I + N) % N].kind == 4; };
+	auto Roofed = [&D, N](int32 I) { const uint8 K = D.wall[(I + N) % N].kind; return K != 0 && K != 3; };
+	const double RoofD0 = DTop - RoofOver, RoofD1 = DBack + RoofPast;
+	auto RoofUnder = [&](double Dd) { return ZTop + FMath::Lerp(RoofFront, RoofRear, (Dd - RoofD0) / (RoofD1 - RoofD0)); };
+	int32 Seats = 0;
+	for (int32 I = 0; I < N; ++I)
+	{
+		if (!Foul(I))
 		{
 			continue;
 		}
-		const double ReachA = Ground->Behind[(I + N - 1) % N] != FBbGround::Plain ? 0.0 : 1.0, ReachB = Ground->Behind[(I + 1) % N] != FBbGround::Plain ? 0.0 : 1.0;
-		for (int32 Tier = 0; Tier < 2; ++Tier)
+		const bool bDug = Dug(I);
+		const int32 K0 = bDug ? DugRow : 0;
+		FBbPiece R = Make(I, Foul(I - 1), Foul(I + 1));
+		R.bCapA |= Dug(I - 1) != bDug;
+		R.bCapB |= Dug(I + 1) != bDug;
+		TArray<FVector2D> Prof;
+		if (bDug)
 		{
-			// Beyond the fence the bank starts close; in foul ground it starts behind the
-			// dugouts' roofs.
-			const double Back = bFence ? 5.0 + 7.0 * Tier : 8.0 + 8.0 * Tier;
-			const double Depth = bFence ? 7.0 : 8.0;
-			const double High = bFence ? 5.0 + 4.5 * Tier : 5.0 + 5.0 * Tier;
-			// Each block reaches a little past its piece's ends, so the tiers close up round
-			// the outside of a corner.
-			const FVector2D Reach = Along * (Back * 0.42);
-			Panel(A + Out * Back - Reach * ReachA, B + Out * Back + Reach * ReachB, Depth, 0.0, High, Tier == 0 ? BbLook::Seats : BbLook::Concrete);
+			Prof.Add(FVector2D(PitDeep + PitWall - 0.02, D.dugout_roof_m));
+			Prof.Add(FVector2D(WallThick + K0 * RowRun, D.dugout_roof_m));
+		}
+		for (int32 K = K0; K < BowlRows; ++K)
+		{
+			Prof.Add(FVector2D(WallThick + K * RowRun, Z0 + K * RowRise));
+			Prof.Add(FVector2D(WallThick + (K + 1) * RowRun, Z0 + K * RowRise));
+		}
+		// The concourse behind the top row, its rail, and the back wall down to the land.
+		Prof.Append({ FVector2D(DTop, ZTop), FVector2D(DBack, ZTop), FVector2D(DBack, ZTop + RailHigh), FVector2D(DBack + RailThick, ZTop + RailHigh), FVector2D(DBack + RailThick, LandZ) });
+		Extrude(Concrete, R, Prof);
+		if (R.bCapA)
+		{
+			CapDown(Concrete, R.A, R.MA, Prof, -R.Along);
+		}
+		if (R.bCapB)
+		{
+			CapDown(Concrete, R.B, R.MB, Prof, R.Along);
+		}
+		// Sections of seats between aisles; an aisle at every corner too. Each seat is a
+		// bottom and a back; each aisle has a half step on every row.
+		const int32 Sections = FMath::Max(1, FMath::RoundToInt32(R.L / SectionLong));
+		const FRotator Rot = ToUE(R.Along.X, R.Along.Y, 0).GetSafeNormal().Rotation();
+		for (int32 K = K0; K < BowlRows; ++K)
+		{
+			const double Dk = WallThick + K * RowRun, Zk = Z0 + K * RowRise;
+			const double Ds = Dk + 0.45, Lr = (R.Row(Ds, 1.0) - R.Row(Ds, 0.0)).Size();
+			for (int32 J = 0; J < Sections; ++J)
+			{
+				const double S0 = Lr * J / Sections + AisleHalf, S1 = Lr * (J + 1) / Sections - AisleHalf;
+				const int32 Count = FMath::FloorToInt32((S1 - S0) / SeatPitch);
+				for (int32 C = 0; C < Count; ++C)
+				{
+					const FVector2D P = R.Row(Ds, ((S0 + S1) * 0.5 + (C - (Count - 1) * 0.5) * SeatPitch) / Lr);
+					const FVector2D Pb = P + R.Out * (SeatDeep * 0.5);
+					Inst(Cube, ToUE(P.X, P.Y, Zk + SeatHigh), FVector(SeatWide, SeatDeep, 0.06), BbLook::Seats, Rot, false);
+					Inst(Cube, ToUE(Pb.X, Pb.Y, Zk + SeatHigh + SeatBack * 0.5), FVector(SeatWide, 0.06, SeatBack), BbLook::Seats, Rot, false);
+					++Seats;
+				}
+			}
+			const double Dh = Dk + RowRun - 0.21, Lh = (R.Row(Dh, 1.0) - R.Row(Dh, 0.0)).Size();
+			for (int32 J = 0; J <= Sections; ++J)
+			{
+				const double S = FMath::Clamp(Lh * J / Sections, AisleHalf * 0.5, Lh - AisleHalf * 0.5);
+				const double Wide = (J == 0 || J == Sections) ? AisleHalf : 2.0 * AisleHalf;
+				const FVector2D P = R.Row(Dh, S / Lh);
+				Inst(Cube, ToUE(P.X, P.Y, Zk + RowRise * 0.25), FVector(Wide, 0.42, RowRise * 0.5), BbLook::Concrete, Rot, false);
+			}
+		}
+		// The roof: a slab higher at the front, on posts at the aisles. It stops where the
+		// stands close in to the poles.
+		if (!Roofed(I))
+		{
+			continue;
+		}
+		const FBbPiece T = Make(I, Roofed(I - 1), Roofed(I + 1));
+		const FVector2D Slab[5] = { FVector2D(RoofD0, RoofUnder(RoofD0) + RoofSlab), FVector2D(RoofD1, RoofUnder(RoofD1) + RoofSlab), FVector2D(RoofD1, RoofUnder(RoofD1)), FVector2D(RoofD0, RoofUnder(RoofD0)), FVector2D(RoofD0, RoofUnder(RoofD0) + RoofSlab) };
+		Extrude(RoofFaces, T, Slab);
+		for (int32 E = 0; E < 2; ++E)
+		{
+			if (!(E == 0 ? T.bCapA : T.bCapB))
+			{
+				continue;
+			}
+			FVector C[4];
+			for (int32 K = 0; K < 4; ++K)
+			{
+				const FVector2D P = T.Row(Slab[K].X, E);
+				C[K] = FVector(P.X, P.Y, Slab[K].Y);
+			}
+			RoofFaces.Quad(C[0], C[1], C[3], C[2], FVector(T.Along.X, T.Along.Y, 0.0) * (E == 0 ? -1.0 : 1.0));
+		}
+		for (int32 J = 0; J < Sections + (T.bCapB ? 1 : 0); ++J)
+		{
+			for (int32 Rear = 0; Rear < 2; ++Rear)
+			{
+				const double Dd = Rear ? DBack + RailThick * 0.5 : DTop + 0.25;
+				const double Zf = ZTop + (Rear ? RailHigh : 0.0), Zr = RoofUnder(Dd);
+				const FVector2D P = T.Row(Dd, (double)J / Sections);
+				Inst(Cylinder, ToUE(P.X, P.Y, (Zf + Zr) * 0.5), FVector(PostWide, PostWide, Zr - Zf), BbLook::Steel, FRotator::ZeroRotator, false);
+			}
 		}
 	}
+
+	// ---- The pressbox ---------------------------------------------------------------------
+	// On the roof behind home, on the backstop's piece nearest the line through the plate: a
+	// room with a band of glass toward the field, and its building behind the concourse.
+	int32 Home = -1;
+	for (int32 I = 0; I < N; ++I)
+	{
+		if (D.wall[I].kind == 1 && (Home < 0 || FMath::Abs(At[I].X + At[(I + 1) % N].X) < FMath::Abs(At[Home].X + At[(Home + 1) % N].X)))
+		{
+			Home = I;
+		}
+	}
+	if (Home >= 0)
+	{
+		const FBbPiece R = Make(Home, Foul(Home - 1), Foul(Home + 1));
+		const double D0 = DTop - PressFront, D1 = RoofD1, D2 = RoofD1 + PressBehind;
+		const double Wide = FMath::Min(PressWideMax, (R.Row(D0, 1.0) - R.Row(D0, 0.0)).Size() - 1.0);
+		const double Zb = RoofUnder(RoofD1), Zt = RoofUnder(D0) + RoofSlab + PressHigh;
+		auto Slab = [&](double Da, double Db, double W, double Za, double Zc, const FBbPaint& Paint, bool bShadow = true)
+		{
+			const FVector2D C = R.Row((Da + Db) * 0.5, 0.5);
+			InstPanel(C - R.Along * (W * 0.5), C + R.Along * (W * 0.5), Db - Da, Za, Zc, Paint, bShadow);
+		};
+		if (Wide > 4.0)
+		{
+			Slab(D0, D1, Wide, Zb, Zt, BbLook::Pressbox);
+			Slab(DBack + RailThick, D2, Wide, LandZ, Zt, BbLook::Pressbox);
+			Slab(D0 - 0.4, D2 + 0.4, Wide + 0.8, Zt, Zt + 0.2, BbLook::Roof);
+			Slab(D0 - 0.04, D0, Wide - 1.0, Zt - 2.3, Zt - 0.7, BbLook::Glass, false);
+		}
+	}
+
+	// ---- Beyond the fence -----------------------------------------------------------------
+	// Left field: a grass bank to sit on, a path along its top. Right field: benches. Both
+	// leave the batter's eye and the pens clear, and end square beside them and at the poles.
+	for (int32 Side = 0; Side < 2; ++Side)
+	{
+		auto Here = [&](int32 I)
+		{
+			I = (I + N) % N;
+			return D.wall[I].kind == 0 && G.Behind[I] == FBbGround::Plain && ((At[I].X + At[(I + 1) % N].X < 0.0) == (Side == 0));
+		};
+		for (int32 I = 0; I < N; ++I)
+		{
+			if (!Here(I))
+			{
+				continue;
+			}
+			const FBbPiece R = Make(I, Here(I - 1), Here(I + 1));
+			TArray<FVector2D> Prof;
+			if (Side == 0)
+			{
+				const double Dt = OutWalk + BermRun;
+				Prof = { FVector2D(OutWalk, LandZ), FVector2D(OutWalk, BermFoot), FVector2D(Dt, BermTop), FVector2D(Dt + BermPath, BermTop), FVector2D(Dt + BermPath, LandZ) };
+				Extrude(Concrete, R, MakeArrayView(Prof.GetData(), 2));
+				Extrude(Grass, R, MakeArrayView(Prof.GetData() + 1, 2));
+				Extrude(Concrete, R, MakeArrayView(Prof.GetData() + 2, 3));
+			}
+			else
+			{
+				Prof.Add(FVector2D(OutWalk, LandZ));
+				for (int32 K = 0; K < BenchRows; ++K)
+				{
+					Prof.Add(FVector2D(OutWalk + K * BenchRun, BenchFoot + K * BenchRise));
+					Prof.Add(FVector2D(OutWalk + (K + 1) * BenchRun, BenchFoot + K * BenchRise));
+				}
+				const double Dt = OutWalk + BenchRows * BenchRun, Zt = BenchFoot + BenchRows * BenchRise;
+				Prof.Append({ FVector2D(Dt, Zt), FVector2D(Dt + BenchWalk, Zt), FVector2D(Dt + BenchWalk, Zt + RailHigh), FVector2D(Dt + BenchWalk + RailThick, Zt + RailHigh), FVector2D(Dt + BenchWalk + RailThick, LandZ) });
+				Extrude(Concrete, R, Prof);
+				// A bench along each row, broken for an aisle at every few joints and at the ends.
+				const double GapA = (R.bCapA || I % BenchAisleEvery == 0) ? AisleHalf : 0.0, GapB = (R.bCapB || (I + 1) % BenchAisleEvery == 0) ? AisleHalf : 0.0;
+				for (int32 K = 0; K < BenchRows; ++K)
+				{
+					const double Dd = OutWalk + K * BenchRun + 0.42, Zk = BenchFoot + K * BenchRise;
+					const double Lr = (R.Row(Dd, 1.0) - R.Row(Dd, 0.0)).Size();
+					if (Lr > GapA + GapB + 0.3)
+					{
+						InstPanel(R.Row(Dd, GapA / Lr), R.Row(Dd, 1.0 - GapB / Lr), 0.28, Zk + 0.42, Zk + 0.47, BbLook::Bench2, false);
+					}
+				}
+			}
+			if (R.bCapA)
+			{
+				CapDown(Concrete, R.A, R.MA, Prof, -R.Along);
+			}
+			if (R.bCapB)
+			{
+				CapDown(Concrete, R.B, R.MB, Prof, R.Along);
+			}
+		}
+	}
+
+	// ---- Light towers (unlit: night games are a later stage) -------------------------------
+	// Behind whatever stands at each bearing from home: a pole, and at its top a rack of
+	// lamps turned to the middle of the field.
+	const FVector2D Middle(0.0, D.rubber_m + 15.0);
+	for (double Deg : TowerDeg)
+	{
+		for (double Hand : { -1.0, 1.0 })
+		{
+			const double Th = FMath::DegreesToRadians(Deg * Hand);
+			const FVector2D Ray(FMath::Sin(Th), FMath::Cos(Th));
+			for (int32 I = 0; I < N; ++I)
+			{
+				const FVector2D E = At[(I + 1) % N] - At[I];
+				const double Den = Cross2(Ray, E);
+				if (FMath::Abs(Den) < 1e-9)
+				{
+					continue;
+				}
+				const double U = Cross2(At[I], E) / Den, T = Cross2(At[I], Ray) / Den;
+				if (U <= 0.0 || T < 0.0 || T >= 1.0)
+				{
+					continue;
+				}
+				const double Behind = D.wall[I].kind == 0 ? OutWalk + BermRun + BermPath : DBack + RailThick;
+				const FVector2D P = At[I] + E * T + Out[I] * (Behind + TowerBehind);
+				const FVector2D F = (Middle - P).GetSafeNormal(), Across(-F.Y, F.X);
+				Inst(Cylinder, ToUE(P.X, P.Y, (TowerHigh + LandZ) * 0.5), FVector(TowerWide, TowerWide, TowerHigh - LandZ), BbLook::Steel);
+				const FVector2D C = P + F * (TowerWide * 0.5 + 0.2);
+				InstPanel(C - Across * (RackWide * 0.5), C + Across * (RackWide * 0.5), 0.4, TowerHigh - RackHigh, TowerHigh, BbLook::Roof);
+				for (int32 Row = 0; Row < LampRows; ++Row)
+				{
+					for (int32 Col = 0; Col < LampCols; ++Col)
+					{
+						const FVector2D L = C + F * 0.25 + Across * ((Col - (LampCols - 1) * 0.5) * RackWide / LampCols);
+						const double Z = TowerHigh - RackHigh * (Row + 0.5) / LampRows;
+						InstPanel(L - Across * 0.4, L + Across * 0.4, 0.12, Z - 0.45, Z + 0.45, BbLook::Lamp, false);
+					}
+				}
+				break;
+			}
+		}
+	}
+
+	AddSolid(Concrete, BbLook::Concrete);
+	AddSolid(Grass, BbLook::Berm);
+	AddSolid(RoofFaces, BbLook::Roof);
+	UE_LOG(LogBbPark, Display, TEXT("BB_PARK seats: %d"), Seats);
 }
 
 FVector2D ABbPark::DugoutDoor(double Side) const
@@ -1181,7 +1627,9 @@ TArray<FBbParkSpot> ABbPark::Spots(const BbPark& Desc)
 	S.Add(At(TEXT("home"), ToUE(0, -30, 16), ToUE(0, 35, 0), 60.f));
 	S.Add(At(TEXT("center"), ToUE(0, Deep + 8, 14), ToUE(0, 20, 0), 40.f));
 	S.Add(At(TEXT("first_high"), ToUE(Wide, -5, 38), ToUE(0, 42, 0), 60.f));
-	S.Add(At(TEXT("third_stands"), ToUE(-45, -15, 18), ToUE(5, 30, 0), 65.f));
+	// From a seat half-way up the deck behind third (the roof and a light tower stand where
+	// this spot was before the seating bowl was built).
+	S.Add(At(TEXT("third_stands"), ToUE(-31, -3, 5.4), ToUE(5, 25, 0), 65.f));
 	S.Add(At(TEXT("mound"), ToUE(4.5, Desc.rubber_m - 7.0, 0.9), ToUE(0, Desc.rubber_m - 0.3, 0.35), 40.f));
 	// Straight down, centre field at the top of the picture, the whole park in a 16:9 frame.
 	const double MidY = (Deep - 20.0) * 0.5;

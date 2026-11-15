@@ -13,6 +13,8 @@ class UStaticMesh;
 class UMaterialInterface;
 class UTexture2D;
 class UProceduralMeshComponent;
+class UMaterialInstanceDynamic;
+struct FBbSolid;
 
 /** A fixed place to look at the park from (park-visuals §4): the same spots before and after
  *  every change to its looks. */
@@ -99,14 +101,24 @@ public:
 
 private:
 	AStaticMeshActor* Shape(UStaticMesh* Mesh, const FVector& Location, const FVector& Scale, const FBbPaint& Paint, const FRotator& Rotation = FRotator::ZeroRotator);
-	/** A box standing on the line from A to B (sim frame), Depth across and from Z0 to Z1. */
-	AStaticMeshActor* Panel(const FVector2D& A, const FVector2D& B, double Depth, double Z0, double Z1, const FBbPaint& Paint);
+	/** A box standing on the line from A to B (sim frame), Depth across and from Z0 to Z1,
+	 *  a touch longer than the line so that walls close at their joints. Drawn as Inst's are. */
+	void Panel(const FVector2D& A, const FVector2D& B, double Depth, double Z0, double Z1, const FBbPaint& Paint, bool bShadow = true);
 	void BuildSurface();
 	void BuildFurniture();
 	void BuildWalls();
 	void BuildDugouts();
 	void BuildOutfield();
 	void BuildStands();
+	/** One of many alike (a seat, a post, a lamp): drawn together with every other shape of
+	 *  its mesh and paint, once FlushInst has run. Sizes in metres, as Shape's. */
+	void Inst(UStaticMesh* Mesh, const FVector& Location, const FVector& Scale, const FBbPaint& Paint, const FRotator& Rotation = FRotator::ZeroRotator, bool bShadow = true);
+	/** Panel's box at exactly the line's length. */
+	void InstPanel(const FVector2D& A, const FVector2D& B, double Depth, double Z0, double Z1, const FBbPaint& Paint, bool bShadow = true);
+	void FlushInst();
+	/** Faces gathered for one paint become one piece of the bowl's mesh. */
+	void AddSolid(const FBbSolid& S, const FBbPaint& Paint);
+	UMaterialInstanceDynamic* PaintOf(const FBbPaint& Paint);
 	/** A flat picture standing on a wall: centred at Mid (sim frame), W wide along Right and
 	 *  H high, seen from the side Face points to. */
 	void Sign(const FVector& Mid, const FVector2D& Right, const FVector2D& Face, double W, double H, UTexture2D* Tex, float Rough);
@@ -147,4 +159,16 @@ private:
 	UPROPERTY()
 	TObjectPtr<UProceduralMeshComponent> Signs;
 	int32 SignCount = 0;
+	/** The stands' generated faces: risers, banks, roofs. */
+	UPROPERTY()
+	TObjectPtr<UProceduralMeshComponent> Bowl;
+	int32 BowlSections = 0, BowlFaces = 0;
+	struct FBbBatch
+	{
+		UStaticMesh* Mesh;
+		FBbPaint Paint;
+		bool bShadow;
+		TArray<FTransform> At;
+	};
+	TArray<FBbBatch> Batches;
 };
