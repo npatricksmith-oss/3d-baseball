@@ -618,6 +618,42 @@ pub mod prof {
     }
 }
 
+/// Read tracing for diagnostics (`examples/fly_misses.rs`): while a batted ball is on its
+/// first flight, one record per fielder per tick of what he believes and does. Off unless a
+/// diagnostic turns it on for its own thread; written only, never read by any decision.
+pub mod read_trace {
+    use bb_math::Vec3;
+    use std::cell::{Cell, RefCell};
+    #[derive(Clone, Debug)]
+    pub struct Rec {
+        pub t: f64,
+        pub i: usize,
+        /// 0 idle, 1 chase, 2 cover, 3 relay, 4 backup.
+        pub role: u8,
+        pub pos: Vec3,
+        pub vel: Vec3,
+        /// Where his latest read has the ball coming down (time, x, y).
+        pub land: Option<(f64, f64, f64)>,
+        pub read_at: f64,
+        pub target: Vec3,
+        pub call: u8,
+        pub peel: bool,
+        pub must_dive_since: f64,
+        pub dove: bool,
+    }
+    thread_local! {
+        pub static ON: Cell<bool> = const { Cell::new(false) };
+        pub static RECS: RefCell<Vec<Rec>> = const { RefCell::new(Vec::new()) };
+    }
+    pub fn on() -> bool {
+        ON.with(|x| x.get())
+    }
+    /// Takes this thread's records (the last play's, if the caller clears between plays).
+    pub fn take() -> Vec<Rec> {
+        RECS.with(|r| std::mem::take(&mut *r.borrow_mut()))
+    }
+}
+
 /// Throw-decision tracing (BB_DEBUG_THROW), checked once per thread: `holder_act` runs
 /// every tick the ball is held.
 fn debug_throw() -> bool {
@@ -4384,6 +4420,23 @@ fn simulate_live_inner(inp: &LiveInput, st: &mut RulesState) -> LiveOutput {
         }
         if assigned {
             sim.publish();
+        }
+        if read_trace::on() && sim.off_bat().is_some() {
+            let recs: Vec<read_trace::Rec> = sim.f.iter().enumerate().map(|(i, fd)| read_trace::Rec {
+                t: sim.t,
+                i,
+                role: match fd.role { Role::Idle => 0, Role::Chase => 1, Role::Cover(_) => 2, Role::Relay(_) => 3, Role::Backup => 4 },
+                pos: fd.pos,
+                vel: fd.vel,
+                land: fd.belief.as_ref().and_then(|p| p.first_bounce()),
+                read_at: fd.read_at,
+                target: fd.target,
+                call: fd.call,
+                peel: fd.peel.is_some(),
+                must_dive_since: fd.must_dive_since,
+                dove: fd.dove,
+            }).collect();
+            read_trace::RECS.with(|r| r.borrow_mut().extend(recs));
         }
         if cover_trace && assigned {
             let (phase, holder) = match sim.ball {
