@@ -1378,7 +1378,9 @@ void ABbDirector::PoseFigure(int32 Slot, const BbActor& A, const BbFrame& Frame,
 		Manual = AnimThrow;
 		ClipTime = In.ThrowClip;
 		WantYaw = In.ThrowYaw;
-		bMirror = bLefty;
+		// The stand-in throw clip strikes with the left arm (owner, 2026-11-15: right-handed
+		// infielders looked left-handed), so it is the right-hander who gets the mirror.
+		bMirror = bThrowClipLeftArm ? !bLefty : bLefty;
 	}
 	if (bMotions && !Manual && bFielder && Position == 2 && bStill && !In.bStaged && PlayTime < 0.6f && AnimCrouch)
 	{

@@ -421,6 +421,8 @@ private:
 	 *  once (unattended check; logs BB_REPLAY). */
 	float ReplayAt = -1.f;
 	int32 ReplayAuto = 0;
+	/** The stand-in throw clip (MM_Attack_02) swings its left arm; the pitch clip its right. */
+	static constexpr bool bThrowClipLeftArm = true;
 	/** Set by Enter: play at RushSpeed (or Speed, if that is faster) until the next pitch is
 	 *  ready to be thrown (BeginPlayback), then return to Speed. Enter again cancels it. */
 	bool bRush = false;
