@@ -53,6 +53,9 @@ pub struct RunnerState {
     pub overrun: Overrun,
     /// Latest `RunnerPosition` sample: (time, path progress in bases, rules-spec §5.5).
     pub sample: Option<(f64, f64)>,
+    /// The sample before the latest one: with it a tag tells a runner going back from one
+    /// going on (the base the out is made at, §4.3 event contract).
+    pub sample_prev: Option<(f64, f64)>,
 }
 
 /// The batter-runner's protection after overrunning or oversliding first base (rules-spec

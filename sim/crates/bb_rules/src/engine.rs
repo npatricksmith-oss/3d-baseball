@@ -123,6 +123,7 @@ fn step_position(st: &mut RulesState, p: &RunnerPosition) -> Vec<Event> {
         None if r.overrun == Overrun::Protected => 1.0,
         None => path_progress(r.at, p.x, p.y),
     };
+    r.sample_prev = r.sample;
     r.sample = Some((p.t, s));
     // Compare with every runner whose position is known at this instant: standing on a base,
     // or sampled at the same time. Every pass is an out: one at a time in runner order,
@@ -399,7 +400,10 @@ fn step_input(st: &mut RulesState, input: &Input) -> Vec<Event> {
                 // Overran first and is coming straight back (OBR 5.09(b)(4) exception).
                 return ev;
             }
-            let base = r.at + 1;
+            // The base the play is made at: the one he is heading for. Samples tell a runner
+            // going back (his path progress falling) from one going on; with none he is going on.
+            let going_back = r.at >= 1 && matches!((r.sample_prev, r.sample), (Some((_, a)), Some((_, b))) if b < a - 1e-9);
+            let base = if going_back { r.at } else { r.at + 1 };
             // A tag on a runner still forced to that base is a force out for run counting
             // (rules-spec §5.4, §6.4).
             let kind = if r.forced_to == Some(base) && r.at < base { OutKind::Force } else { OutKind::Tag };
@@ -598,6 +602,7 @@ fn new_live_play(st: &RulesState) -> LivePlay {
         scored_at: None,
         overrun: Overrun::NotSeen,
         sample: None,
+        sample_prev: None,
     }];
     let occ = st.bases.map(|b| b.is_some());
     for (i, r) in st.bases.iter().enumerate() {
@@ -619,6 +624,7 @@ fn new_live_play(st: &RulesState) -> LivePlay {
                 scored_at: None,
                 overrun: Overrun::NotSeen,
                 sample: None,
+        sample_prev: None,
             });
         }
     }
