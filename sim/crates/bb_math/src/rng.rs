@@ -43,6 +43,9 @@ pub enum Purpose {
     /// A generated batter's abilities (data-formats §2.4 step 5, owner ruling D19, 2026-11-14):
     /// drawn before the first pitch, like `RosterHands`.
     RosterAbilities = 15,
+    /// A fielder's look at a batted ball on its first flight (agent-models §5.1, the tracking
+    /// read, 2026-11-15): six truncated normals per look, `sub_index` = the look's number.
+    FielderLook = 16,
 }
 
 /// The full key of one random stream.

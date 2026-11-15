@@ -25,11 +25,15 @@ pub struct FlightEnv {
     pub rho: f64,
     /// Air velocity, m/s (zero in v1).
     pub wind: Vec3,
+    /// An extra constant acceleration, m/s²: zero in the world. An observer's model of a ball
+    /// adds what he has learned his model is missing (the curvature of a spin he cannot see;
+    /// agent-models §5.1, the tracking read).
+    pub extra: Vec3,
 }
 
 impl FlightEnv {
     pub fn new(rho: f64) -> Self {
-        Self { ball: BallParams::default(), aero: AeroParams::default(), rho, wind: Vec3::ZERO }
+        Self { ball: BallParams::default(), aero: AeroParams::default(), rho, wind: Vec3::ZERO, extra: Vec3::ZERO }
     }
     /// Calculator-default atmosphere with default aero (spin decay on).
     pub fn default_env() -> Self {
@@ -42,12 +46,13 @@ impl FlightEnv {
             aero: AeroParams::calculator(),
             rho: crate::atmosphere::air_density(&Default::default()),
             wind: Vec3::ZERO,
+            extra: Vec3::ZERO,
         }
     }
 
     /// Total acceleration (physics-spec §4.2).
     pub fn accel(&self, v: Vec3, w: Vec3) -> Vec3 {
-        let g = Vec3::new(0.0, 0.0, -bb_math::units::G);
+        let g = Vec3::new(0.0, 0.0, -bb_math::units::G) + self.extra;
         let u_vec = v - self.wind;
         let u = u_vec.norm();
         if u == 0.0 || self.rho == 0.0 {
