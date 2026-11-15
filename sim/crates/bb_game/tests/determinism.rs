@@ -59,3 +59,15 @@ fn runners_looking_again_replay_from_the_seed() {
     assert_eq!(a.digest, b.digest);
     assert_eq!(a.log, b.log);
 }
+
+#[test]
+fn no_two_runners_end_up_on_one_base_in_real_games() {
+    // Codex runner-reads review P1-1: a runner who looks again and goes back must never settle
+    // on a base a trailing runner reaches, which the rules engine reports as
+    // `two_runners_on_base` (and erases one of them). Games that included it before the fix:
+    // seed 1000003226 (play 194).
+    for seed in [1_000_003_226u64, 24583, 3, 8, 21, 55, 144, 377, 610, 987] {
+        let g = simulate_game(seed);
+        assert!(!g.warnings.contains(&"two_runners_on_base"), "seed {seed}: {:?}", g.warnings);
+    }
+}

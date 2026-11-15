@@ -3428,7 +3428,13 @@ impl<'a> Sim<'a> {
     fn base_held_ahead(&self, k: usize, b: u8) -> bool {
         let r = &self.r[k];
         self.r.iter().any(|o| {
-            o.id != r.id && !o.out && !o.scored && o.start > r.start && o.s <= b as f64 * BASE_L + 0.5 && o.still_since.is_some_and(|t0| self.t - t0 >= HOLD_READ_S - 1e-9)
+            o.id != r.id
+                && !o.out
+                && !o.scored
+                && o.start > r.start
+                && ((o.s <= b as f64 * BASE_L + 0.5 && o.still_since.is_some_and(|t0| self.t - t0 >= HOLD_READ_S - 1e-9))
+                    // Visibly coming back to it from beyond: it is his.
+                    || (o.direction * o.v < -SEEN_MOVING_MPS && (o.s / BASE_L).floor() as u8 == b))
         })
     }
 
@@ -3480,6 +3486,71 @@ impl<'a> Sim<'a> {
         self.catch_made
     }
 
+    /// Two runners never settle on one base. A runner heading back to a base behind him
+    /// (not a retouch after a catch) who finds it no refuge, a trailing runner on it or past
+    /// the point where he can stop, turns and goes on instead. A trailing runner heading for
+    /// a base a lead runner is visibly coming back to gives way: he stops and goes back to
+    /// his own base if it is free (agent-models §6.4).
+    fn runner_traffic(&mut self, k: usize) {
+        let r = &self.r[k];
+        if r.out || r.scored || r.retouch || r.tag_up || r.overrun != OverrunPhase::None || r.hold_s.is_some() {
+            return;
+        }
+        let from = (r.s / BASE_L).floor() as u8;
+        let between = (r.s - from as f64 * BASE_L).abs() > 1e-6;
+        // The lead runner returning.
+        if between && r.goal as f64 * BASE_L < r.s - 1e-6 && r.turned_back.is_none() && self.return_crowded(k, r.goal) {
+            self.r[k].goal = from + 1;
+            return;
+        }
+        // The trailing runner giving way: a lead runner visibly coming back to the base he is
+        // heading for.
+        let heading = (r.goal as f64 * BASE_L > r.s + 1e-6).then_some(r.goal);
+        let Some(g) = heading else { return };
+        let (id, start, s) = (r.id, r.start, r.s);
+        let coming_back = self.r.iter().any(|o| {
+            o.id != id && !o.out && !o.scored && o.start > start && o.direction * o.v < -SEEN_MOVING_MPS && o.s > s && ((o.s / BASE_L).floor() as u8) == g
+        });
+        let forced_here = g == start + 1 && self.forced(k);
+        if coming_back && !forced_here && between && !self.no_way_back(k) {
+            self.r[k].goal = from;
+            self.r[k].turned_back = Some(g);
+        }
+    }
+
+    /// Whether base `b`, behind runner `k`, is no refuge for him: a runner who started behind
+    /// him stands on it, or is coming at it and cannot stop short of it, or is coming at it
+    /// with nowhere to go back to. Everything here is what he can see of the bodies: positions
+    /// and speeds, not goals (agent-models §6.4). A trailing runner who can stop is expected
+    /// to give way (`runner_yields`); one who cannot leaves the lead runner no return.
+    fn return_crowded(&self, k: usize, b: u8) -> bool {
+        let lead = &self.r[k];
+        let bs = b as f64 * BASE_L;
+        self.r.iter().enumerate().any(|(j, o)| {
+            if j == k || o.out || o.scored || o.start >= lead.start {
+                return false;
+            }
+            if o.s + 1e-6 >= bs {
+                return true;
+            }
+            let v_fwd = o.direction * o.v;
+            if v_fwd <= SEEN_MOVING_MPS {
+                return false;
+            }
+            // He reads the lead runner's turn after `HOLD_READ_S`, then brakes at `BRAKE`.
+            let stop = o.s + v_fwd * HOLD_READ_S + v_fwd * v_fwd / (2.0 * BRAKE);
+            stop + 0.3 >= bs || self.no_way_back(j)
+        })
+    }
+
+    /// Whether runner `j`, between bases, has no base to go back to: the batter-runner (home
+    /// is not his), or one with another runner standing on the base he left.
+    fn no_way_back(&self, j: usize) -> bool {
+        let o = &self.r[j];
+        let f = (o.s / BASE_L).floor();
+        o.start == 0 && f < 1.0 || self.r.iter().enumerate().any(|(i, x)| i != j && !x.out && !x.scored && (x.s - f * BASE_L).abs() < 0.5)
+    }
+
     /// A runner between bases looks again when the play has changed under him: the ball
     /// secured by a fielder, or a throw released, since he last looked (agent-models §6.4).
     /// He is between bases, on his way (a runner at a base, tagging up, waiting on one
@@ -3529,8 +3600,7 @@ impl<'a> Sim<'a> {
         // not modelled; either way he is probably out).
         // The base behind him is no refuge once a runner who started behind him stands on it
         // or has passed it (two on a base; the force is off, but he is not alone on the path).
-        let id = r.id;
-        let crowded = self.r.iter().any(|o| o.id != id && !o.out && !o.scored && o.start < start && o.s + 1e-6 >= from as f64 * BASE_L);
+        let crowded = self.return_crowded(k, from);
         let goal = if go_on || crowded {
             next
         } else if go_back || ball_back >= ball_on {
@@ -3629,6 +3699,7 @@ impl<'a> Sim<'a> {
             }
             // Something new to see since his last look: he decides again, from where he is.
             self.runner_relook(k);
+            self.runner_traffic(k);
             // Heading for a base a runner ahead has stopped at (or is retreating to): go back,
             // unless this is a forced advance (then the runner ahead is forced too).
             let g = self.r[k].goal;
@@ -8120,6 +8191,67 @@ mod tests {
         let on = run_time_from(BASE_L - 4.0, -6.0, sim.r[1].vmax, RUNNER_TAU);
         let from_rest = run_time_from(BASE_L - 4.0, 0.0, sim.r[1].vmax, RUNNER_TAU);
         assert!(on > from_rest + 0.9, "{on} against {from_rest}");
+    }
+
+    // Codex runner-reads review P1-1 (its probe `review_late_crowding`): runners from first and
+    // second, the batter out, the third baseman holding the ball on third. The lead runner
+    // is 8 m past second at 7 m/s; the trailing runner is 0.2 m short of second at 8.2 m/s
+    // and arrives after the lead runner's look. Both used to stop on second and the rules
+    // engine kept one. The trailing runner cannot stop short of the base, so the lead
+    // runner cannot come back to it and goes on: no two on a base.
+    #[test]
+    fn a_trailing_runner_arriving_after_the_look_does_not_leave_two_on_a_base() {
+        let fx = fixture(&[(8, 1), (7, 2)]);
+        let inp = input(&fx, vec![RunnerIn { id: fx.st.batter, base: 0, speed: 8.2 }, RunnerIn { id: 8, base: 1, speed: 8.2 }, RunnerIn { id: 7, base: 2, speed: 8.2 }]);
+        let mut st = fx.st.clone();
+        let mut sim = new_sim(&inp, &mut st);
+        sim.emit(Input::BallTouched { t: 0.5, what: Touch::Ground { x: 0.0, y: 1.0 } });
+        sim.emit(Input::BallPassedBase { t: 0.55, fair: true });
+        sim.emit(Input::BaseLeft { t: 0.6, agent: 8, base: 1 });
+        sim.emit(Input::BaseLeft { t: 0.6, agent: 7, base: 2 });
+        sim.emit(Input::TagContact { t: 1.0, fielder: sim.f[4].id, runner: fx.st.batter, holding_ball: true });
+        sim.t = 6.0;
+        assert!(sim.r[0].out);
+        for r in &mut sim.r {
+            r.hold_s = None;
+        }
+        (sim.r[1].s, sim.r[1].v, sim.r[1].goal) = (2.0 * BASE_L - 0.2, 8.2, 2);
+        (sim.r[2].s, sim.r[2].v, sim.r[2].goal) = (2.0 * BASE_L + 8.0, 7.0, 3);
+        sim.f[4].pos = base_pos(3);
+        sim.ball = Ball::Held { by: 4 };
+        sim.out.secured.push((sim.t, sim.f[4].id));
+        for _ in 0..400 {
+            sim.move_runners();
+            sim.t += DT;
+            if sim.done {
+                break;
+            }
+        }
+        let t = sim.t;
+        sim.emit(Input::PlayEndCheck { t });
+        assert!(!sim.out.events.iter().any(|e| matches!(e, Event::RulesWarning { code } if *code == "two_runners_on_base")), "events {:?}", sim.out.events);
+    }
+
+    // The other side of it: a trailing runner far enough back to stop gives way to a lead
+    // runner visibly coming back, and goes back to his own base if it is free.
+    #[test]
+    fn a_trailing_runner_gives_way_to_a_lead_runner_coming_back() {
+        let fx = fixture(&[(8, 1), (7, 2)]);
+        let inp = input(&fx, vec![RunnerIn { id: fx.st.batter, base: 0, speed: 8.2 }, RunnerIn { id: 8, base: 1, speed: 8.2 }, RunnerIn { id: 7, base: 2, speed: 8.2 }]);
+        let mut st = fx.st.clone();
+        let mut sim = new_sim(&inp, &mut st);
+        sim.t = 6.0;
+        sim.r[0].out = true;
+        for r in &mut sim.r {
+            r.hold_s = None;
+        }
+        // Trailing runner 20 m short of second heading there; the lead runner 3 m past it,
+        // already coming back at 5 m/s.
+        (sim.r[1].s, sim.r[1].v, sim.r[1].direction, sim.r[1].goal) = (BASE_L + 7.0, 8.0, 1.0, 2);
+        (sim.r[2].s, sim.r[2].v, sim.r[2].direction, sim.r[2].goal) = (2.0 * BASE_L + 3.0, 5.0, -1.0, 2);
+        sim.move_runners();
+        assert_eq!(sim.r[1].goal, 1, "he goes back to first, which is free");
+        assert_eq!(sim.r[2].goal, 2);
     }
 
     // Seed 1000003226 play 194 (bases loaded, the force at second made, the throw home): the
