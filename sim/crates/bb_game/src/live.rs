@@ -56,6 +56,11 @@ const DIVE_READ_M: f64 = 15.0;
 /// it, m [E].
 const LUNGE_CHECKS: usize = 15;
 const BODY_R: f64 = 0.3;
+/// The farthest a fielder's glove gets past a wall's plane, m: his body stops [`BODY_R`] inside
+/// it and his arm reaches [`REACH`] from the body's centre (he can lean over a rail an arm's
+/// length; he cannot stretch his body through it). The one over-the-wall limit, for plans
+/// and for every kind of capture (physics-spec §9.5, agent-models §5.3).
+pub const OVER_WALL_REACH_M: f64 = REACH - BODY_R;
 /// A catch below this height is a shoestring catch: a close call for the umpire, m [E].
 const LOW_CATCH_Z: f64 = 0.4;
 pub(crate) const CATCH_MAX_Z: f64 = 2.4;
@@ -110,7 +115,7 @@ const HURRY_GAIN_MIN_S: f64 = 0.01;
 /// A fielder running, or a ball coming, faster than this sets which way he faces as he
 /// takes it, m/s [E].
 const FACE_MIN_MPS: f64 = 3.0;
-/// The same for a pivot man coming onto the bag: he brakes onto it (√(2·BRAKE·0.6 m) = 2.68 m/s
+/// The same for a pivot man coming onto the bag: he brakes onto it (√(2·BRAKE·0.6 m) = 2.39 m/s
 /// at the touch radius), under the running threshold above, and still faces the way he is
 /// moving (agent-models §5.5, Gemini pivot review P2-3): a walk's pace, m/s [E].
 const PIVOT_FACE_MIN_MPS: f64 = 1.0;
@@ -300,8 +305,17 @@ const LEAD_FACE_RESID_DEG: f64 = 3.1;
 const JUMP_ZONE_DEG: [f64; 2] = [20.0, 25.0];
 /// He commits fully when he expects the ball this many of his σs to one side, [E].
 const JUMP_FULL_SIGMAS: f64 = 2.0;
-/// A fielder's braking deceleration, m/s² [E].
-const BRAKE: f64 = 6.0;
+/// Braking deceleration of an athlete stopping as fast as he can, m/s²: the mean of the
+/// measured maximal decelerations of team-sport athletes, 4.2 to 5.0 (Harper, Cohen, Carling
+/// & Kiely 2020, *Sports* 8(6), 76; SOURCED, docs/calibration/2026-11-15-wall-approach-
+/// speed.md). One stopping law for every athlete: fielders (the wall cap, the stop point,
+/// slowing, turning) and runners (braking onto a base, turning round); agent-models §5.3.
+const BRAKE: f64 = 4.75;
+/// How fast a fielder may still be moving when he reaches a wall, m/s [E, unsourced: no
+/// public measurement of speed at wall contact exists; the owner chose "about 2 m/s", Q5,
+/// 2026-11-15]. His speed toward the nearest wall is capped at
+/// `sqrt(v_c² + 2·BRAKE·distance)` ([`wall_speed_cap`]). Planned: a per-fielder value.
+pub const WALL_CONTACT_SPEED_MPS: f64 = 2.0;
 /// Time to spare a fielder needs to believe he has before he calls a ball in the air, s [E].
 const CALL_SLACK_S: f64 = 0.3;
 /// A teammate's chase, and his call, reach the others this long after he begins it
@@ -1221,12 +1235,19 @@ fn run_gap(fd: &Fielder, goal: Vec3, t: f64, reach: f64) -> f64 {
     left - reach - run_dist_from(t - t_turn, u_end, vmax, tau)
 }
 
+/// The fastest a fielder may come at a wall `dist` away (his body's clearance), m/s: what he
+/// can still brake to the contact speed from, `sqrt(v_c² + 2·BRAKE·dist)` (agent-models §5.3).
+fn wall_speed_cap(dist: f64) -> f64 {
+    m::sqrt(WALL_CONTACT_SPEED_MPS * WALL_CONTACT_SPEED_MPS + 2.0 * BRAKE * dist.max(0.0))
+}
+
 /// Seconds the wall costs a fielder running at `goal`, to be added to his unbraked run. He
 /// sees the wall and knows what `move_fielders` will do: his speed into it is capped at
-/// √(2·[`BRAKE`]·clearance) of his body, so a stand point (`reach` short of `goal`) near the
-/// wall is reached late. Into a wall at normal speed v with clearance c at the stand point, the
-/// cap bites from v²/(2·BRAKE) − c out, and the time lost against running on is
-/// v/(2·BRAKE) − √(2c/BRAKE) + c/v (v/(2·BRAKE) at the wall itself: 0.67 s at 8 m/s). The
+/// [`wall_speed_cap`] of his body's clearance, so a stand point (`reach` short of `goal`) near
+/// the wall is reached late. Into a wall at normal speed v with clearance c at the stand point
+/// (v_c the contact speed), the cap bites from (v² − v_c²)/(2·BRAKE) − c out, and the time lost
+/// against running on is (v − √(v_c² + 2·BRAKE·c))/BRAKE − ((v² − v_c²)/(2·BRAKE) − c)/v
+/// (at the wall itself, c = 0: (v − v_c)/BRAKE − (v² − v_c²)/(2·BRAKE·v), 0.47 s at 8 m/s). The
 /// speed is the normal component of his top speed along the line to the stand point, held
 /// to what he can build up over the distance he has (a late start is not braked from 8 m/s);
 /// only the normal component is capped, so a run along the wall loses nothing. Checked
@@ -1250,10 +1271,12 @@ fn wall_delay(field: &Field, fd: &Fielder, goal: Vec3, reach: f64) -> f64 {
     let built = m::sqrt(2.0 * fd.a.speed / fd.a.tau_a * (d - reach) * cos);
     let v = (fd.a.speed * cos).min(built.max(carried));
     let c = w.dist.max(0.0);
-    if v <= 0.0 || c >= v * v / (2.0 * BRAKE) {
+    let vc2 = WALL_CONTACT_SPEED_MPS * WALL_CONTACT_SPEED_MPS;
+    let bites_at = (v * v - vc2) / (2.0 * BRAKE);
+    if v <= 0.0 || c >= bites_at {
         return 0.0;
     }
-    v / (2.0 * BRAKE) - m::sqrt(2.0 * c / BRAKE) + c / v
+    (v - wall_speed_cap(c)) / BRAKE - (bites_at - c) / v
 }
 
 /// Highest ball a fielder can take where it is: he can leap at a wall (agent-models §5.4).
@@ -1296,9 +1319,10 @@ fn glove_sigma_mult(v: f64, horiz: f64, extending: bool) -> f64 {
 /// Not yet reacting, or on the ground after a dive: unchanged.
 /// How far past a wall a ball at `b` is beyond a fielder's reach over it: his body stops its
 /// radius inside the wall and his glove reaches `REACH` from his body's centre (> 0: out of
-/// reach; physics-spec §9.5). Players see the walls, so plans use it.
+/// reach; physics-spec §9.5). Players see the walls, so plans use it, and so does capture:
+/// one limit, [`OVER_WALL_REACH_M`], for a catch on his feet, a stretch and a dive.
 fn beyond_reach_over_wall(field: &Field, b: Vec3) -> f64 {
-    -field.body_clearance(b.x, b.y, 0.0).dist - (REACH - BODY_R)
+    -field.body_clearance(b.x, b.y, 0.0).dist - OVER_WALL_REACH_M
 }
 
 fn fielder_step(fd: &Fielder, t: f64, t_contact: f64) -> (Vec3, Vec3) {
@@ -2828,7 +2852,7 @@ impl<'a> Sim<'a> {
             // braking limit (Gemini play-area review P2-3: chasers ran into it at full speed).
             let w = field.body_clearance(fd.pos.x, fd.pos.y, BODY_R);
             let into = -fd.vel.dot(w.inward);
-            let allowed = m::sqrt(2.0 * BRAKE * w.dist.max(0.0));
+            let allowed = wall_speed_cap(w.dist);
             if into > allowed {
                 fd.vel = fd.vel + w.inward * (into - allowed);
             }
@@ -2936,6 +2960,12 @@ impl<'a> Sim<'a> {
             }
             if b.z < 0.0 {
                 continue; // never capture a ball below the surface
+            }
+            // Nobody gets the glove farther past a wall than [`OVER_WALL_REACH_M`], standing,
+            // stretching or diving: his body stops at the wall and cannot go through it. The
+            // same limit the plan uses (`beyond_reach_over_wall`).
+            if beyond_reach_over_wall(self.inp.field, b) > 0.0 {
+                continue;
             }
             let horiz = m::hypot(b.x - fd.pos.x, b.y - fd.pos.y);
             let reach = if receiver.is_some() { RECEIVE_REACH } else { REACH };
@@ -5216,7 +5246,14 @@ mod tests {
             let r = fx.field.fence_at(th) - inset;
             Vec3::new(r * m::sin(th), r * m::cos(th), 0.0)
         };
-        let (fielder, ball) = (at(core::f64::consts::FRAC_PI_4 - 0.006, 0.001), at(core::f64::consts::FRAC_PI_4 + 0.018, 0.001));
+        let fielder = at(core::f64::consts::FRAC_PI_4 - 0.017, 0.001);
+        // The ball is across the corner on the foul side, inside every wall there: the taper wall
+        // runs inside the fence's curve at that angle, so the point on the curve is 1.8 m past it
+        // and out of anyone's reach over the wall (`OVER_WALL_REACH_M`), then moved in 5 cm.
+        let on_curve = at(core::f64::consts::FRAC_PI_4 + 0.018, 0.001);
+        let w = fx.field.body_clearance(on_curve.x, on_curve.y, 0.0);
+        let ball = on_curve + w.inward * (-w.dist + 0.05);
+        assert!(fx.field.body_clearance(ball.x, ball.y, 0.0).dist > 0.04, "fixture: the ball is inside the walls");
         sim.f[CF].pos = fielder;
         loose_ball(&mut sim, 2.0, ball + Vec3::new(0.0, 0.0, 0.05), (ball - fielder).normalized() * 4.0);
         sim.f[CF].role = Role::Chase;
@@ -5226,7 +5263,8 @@ mod tests {
         for _ in 0..40 {
             world_tick(&mut sim);
             let p = sim.f[CF].pos;
-            assert!(m::hypot(p.x, p.y) <= fx.field.fence_at(m::atan2(p.x, p.y)) + 1e-9, "at {:.2} s the body is {:.3} m past the wall", sim.t, m::hypot(p.x, p.y) - fx.field.fence_at(m::atan2(p.x, p.y)));
+            let c = fx.field.body_clearance(p.x, p.y, BODY_R).dist;
+            assert!(c >= -1e-6, "at {:.2} s the body is {:.3} m through a wall", sim.t, -c);
         }
         assert!(!sim.out.dives.is_empty(), "he never dove (gap {:.2} m)", (ball - fielder).norm());
     }
@@ -5644,13 +5682,14 @@ mod tests {
     }
 
     // Gemini play-area recheck P2-1. A fielder sees the wall and knows he must slow for it
-    // (physics-spec §9.5; `move_fielders` caps his speed into it at √(2·BRAKE·clearance), and
-    // BRAKE = 6 m/s²). By hand, for a stand point 0.3 m clear of the wall reached at top speed
-    // v = 8 m/s: he must be down to √(2·6·0.3) = 1.90 m/s there; braking starts v²/(2·6) − 0.3 =
-    // 5.03 m out, and the time lost against running on is ∫dx/√(12(0.3+x)) over those 5.03 m,
-    // minus 5.03/8: 2(√(0.3+5.03) − √0.3)/√12 − 0.629 = 1.017 − 0.629 = 0.39 s. At the wall
-    // itself (clearance 0) it is v/(2·BRAKE) = 0.667 s. The plan must include that, or he
-    // promises a catch (and calls teammates off) about half a second before he can make it.
+    // (physics-spec §9.5; `move_fielders` caps his speed into it at √(v_c² + 2·BRAKE·clearance),
+    // BRAKE = 4.75 m/s², v_c = 2 m/s). By hand, for a stand point 0.3 m clear of the wall reached
+    // at top speed v = 8 m/s: he must be down to √(4 + 2·4.75·0.3) = 2.62 m/s there; braking
+    // starts (v² − v_c²)/(2·4.75) − 0.3 = 6.02 m out, and the time lost against running on is
+    // ∫dx/√(4 + 9.5(0.3+x)) over those 6.02 m, minus 6.02/8: 2(8 − 2.62)/9.5 − 0.752 = 1.133 −
+    // 0.752 = 0.38 s. At the wall itself (clearance 0) it is (v − v_c)/BRAKE − (v² − v_c²)/(2·BRAKE·v)
+    // = 1.263 − 0.789 = 0.47 s. The plan must include that, or he promises a catch (and calls
+    // teammates off) about half a second before he can make it.
     // Bug caught: planning with the unbraked run (plan early by ~0.4 s).
     #[test]
     fn the_plan_includes_the_slow_down_for_the_wall() {
@@ -5699,7 +5738,8 @@ mod tests {
         sim.f[CF].pos = Vec3::new(0.0, y - 40.0, 0.0);
         sim.f[CF].vel = Vec3::new(0.0, v, 0.0);
         let d = wall_delay(field, &sim.f[CF], Vec3::new(0.0, y + REACH * 0.7, 0.0), REACH * 0.7);
-        assert!((d - v / 12.0).abs() < 0.03, "at the wall {d:.3} s, expected v/(2·BRAKE) = {:.3} s", v / 12.0);
+        let by_hand = (v - 2.0) / 4.75 - (v * v - 4.0) / (2.0 * 4.75 * v);
+        assert!((d - by_hand).abs() < 0.03, "at the wall {d:.3} s, expected (v − v_c)/BRAKE − (v² − v_c²)/(2·BRAKE·v) = {by_hand:.3} s");
     }
 
     // Gemini play-area recheck P2-1, the other half: `try_captures` lets a fielder within 3 m of
@@ -5832,7 +5872,9 @@ mod tests {
             }
         }
         let rms = (sq / n).sqrt();
-        assert!(worst_early > -0.35 && worst_late < 0.35 && rms < 0.15, "estimate − step: worst {worst_early:+.3} / {worst_late:+.3} s, rms {rms:.3} s");
+        // At BRAKE = 4.75 the worst case (2 m away, moving off at 6 m/s and 4 m/s sideways)
+        // is early by 0.42 s (0.35 s at 6 m/s²); the rms bound is unchanged.
+        assert!(worst_early > -0.45 && worst_late < 0.35 && rms < 0.15, "estimate − step: worst {worst_early:+.3} / {worst_late:+.3} s, rms {rms:.3} s");
     }
 
     // agent-models §5.10, worked by hand. Fielders' lines from home, from a fixed symmetric
@@ -6138,7 +6180,7 @@ mod tests {
     // agent-models §5.10: a lean is a bet. A grounder passes 4 m to the shortstop's left; a
     // grade-80 lean (2 m/s) toward it gets him there sooner than standing, one away from it
     // later (the movement laws of §5.3, through the planner's own reach model). By hand:
-    // braking 2 m/s at 6 m/s² takes 0.33 s and loses 0.33 m, where from rest he would have
+    // braking 2 m/s at 4.75 m/s² takes 0.42 s and loses 0.42 m, where from rest he would have
     // covered 0.54 m, so he is about 0.9 m behind at several m/s: hundredths to tenths.
     #[test]
     fn a_lean_the_right_way_gains_ground_and_the_wrong_way_costs() {
@@ -6158,8 +6200,8 @@ mod tests {
     }
 
     // agent-models §5.3: a fielder running the wrong way must stop and turn. Expected from the
-    // published laws, worked by hand: braking at 6 m/s² from 7 m/s takes 7/6 s and carries
-    // him 7²/12 = 4.08 m past his start; then 9.08 m from rest (run_time). The movement step
+    // published laws, worked by hand: braking at 4.75 m/s² from 7 m/s takes 7/4.75 s and carries
+    // him 7²/9.5 = 5.16 m past his start; then 10.16 m from rest (run_time). The movement step
     // integrates the same laws tick by tick.
     #[test]
     fn running_the_wrong_way_costs_the_turn() {
@@ -6185,15 +6227,15 @@ mod tests {
             n += 1;
         }
         let took = n as f64 * DT;
-        let expect = 7.0 / 6.0 + run_time(5.0 + 49.0 / 12.0, a.speed, a.tau_a);
+        let expect = 7.0 / 4.75 + run_time(5.0 + 49.0 / 9.5, a.speed, a.tau_a);
         assert!((took - expect).abs() < 0.05, "took {took:.3} s, expected {expect:.3} s");
         assert!((run_time_from(5.0, -7.0, a.speed, a.tau_a) - expect).abs() < 1e-6);
-        assert!((farthest - 49.0 / 12.0).abs() < 0.1, "carried {farthest:.2} m");
+        assert!((farthest - 49.0 / 9.5).abs() < 0.1, "carried {farthest:.2} m");
     }
 
     // agent-models §5.3: a fielder at 7 m/s whose target swings 90° carries on the old way
-    // while he turns: some drift, but less than a straight stop at 6 m/s² would take
-    // (7²/12 = 4.08 m), and by 2 s he is running at the target near top speed.
+    // while he turns: some drift, but less than a straight stop at 4.75 m/s² would take
+    // (7²/9.5 = 5.16 m), and by 2 s he is running at the target near top speed.
     #[test]
     fn a_turn_carries_the_fielder_on_a_curve() {
         let fx = fixture(&[]);
@@ -6212,14 +6254,14 @@ mod tests {
             sim.t += DT;
         }
         let drift = sim.f[SS].pos.x - p0.x;
-        assert!(drift > 1.0 && drift < 49.0 / 12.0, "drifted {drift:.2} m (a_lat {a_lat})");
+        assert!(drift > 1.0 && drift < 49.0 / 9.5, "drifted {drift:.2} m (a_lat {a_lat})");
         let v = sim.f[SS].vel;
         assert!(v.x.abs() < 0.05 && v.y > 0.9 * sim.f[SS].a.speed, "velocity after 2 s {v:?}");
     }
 
     // Fielding review #2 and #4: a fielder who has reached his spot is standing still, and a
     // running fielder's time to a resting ball counts his speed. Codex momentum review #1: he
-    // gets there by braking at 6 m/s², so from 7 m/s the stop takes 7/6 s and 49/12 m; a late
+    // gets there by braking at 6 m/s², so from 7 m/s the stop takes 7/4.75 s and 49/9.5 m; a late
     // chaser runs through his spot at speed.
     #[test]
     fn stopped_fielders_have_no_speed_and_running_ones_keep_it() {
@@ -6231,7 +6273,7 @@ mod tests {
         let p0 = sim.f[SS].pos;
         sim.f[SS].role = Role::Cover(2);
         sim.f[SS].vel = Vec3::new(7.0, 0.0, 0.0);
-        sim.f[SS].target = p0 + Vec3::new(49.0 / 12.0, 0.0, 0.0);
+        sim.f[SS].target = p0 + Vec3::new(49.0 / 9.5, 0.0, 0.0);
         let mut stopped = None;
         for k in 1..=120 {
             sim.move_fielders();
@@ -6241,7 +6283,7 @@ mod tests {
             }
         }
         let stopped = stopped.expect("he stops");
-        assert!((stopped - 7.0 / 6.0).abs() < 0.1, "stopped after {stopped:.3} s");
+        assert!((stopped - 7.0 / 4.75).abs() < 0.1, "stopped after {stopped:.3} s");
         assert!((sim.f[SS].pos - sim.f[SS].target).norm() < 0.05);
         // A late chaser whose spot is 5 cm ahead keeps running.
         sim.f[SS].pos = p0;
@@ -6416,7 +6458,7 @@ mod tests {
         assert!(reads[0] > second.y + 1.0 && (reads[1] - second.y).abs() < 0.5 && reads[2] <= second.y + 0.5, "{reads:?}");
     }
 
-    // Codex momentum review #4: a throw aimed at second that passes 1.7 m to the side of the
+    // Codex momentum review #4: a throw aimed at second that passes 1.6 m to the side of the
     // bag (beyond the 1.5 m receiving reach from it) is caught by a second baseman who steps
     // off; weighing his read toward the aim must not pin him to the bag. Perfect read and
     // hands, so only the plan is tested.
@@ -6431,7 +6473,9 @@ mod tests {
         sim.f[3].pos = second;
         sim.f[3].target = second;
         let from = second + Vec3::new(0.0, 20.0, 0.0);
-        let off = second + Vec3::new(1.7, 0.0, 0.0);
+        // 1.6 m off: past the 1.35 m he can take it from the bag (`BAG_REACH_FRAC`), 0.1 m from a
+        // step. (At 1.7 m the catch was 1 cm inside `RECEIVE_REACH`, and slower braking lost it.)
+        let off = second + Vec3::new(1.6, 0.0, 0.0);
         let elev = solve_throw(&fx.env, THROW_RELEASE_Z, THROW_CATCH_Z, (off - from).norm(), 37.0).unwrap().elev;
         sim.launch_throw(throw_state(from + Vec3::new(0.0, 0.0, THROW_RELEASE_Z), off - from, 37.0, elev), second, 2, 3, false);
         if let Ball::Thrown { read_err, .. } = &mut sim.ball {
@@ -6667,7 +6711,7 @@ mod tests {
         let mut sim = new_sim(&inp, &mut st);
         let at = Vec3::new(62.0, 88.0, 0.0);
         // The second baseman is already moving toward the ball at 7 m/s: he stops within
-        // v²/(2·6 m/s²) ≈ 4.1 m of where he is, on his line of motion.
+        // v²/(2·4.75 m/s²) ≈ 5.2 m of where he is, on his line of motion.
         const B2: usize = 3;
         let toward = (at - sim.f[B2].pos).normalized();
         sim.f[B2].vel = toward * 7.0;
@@ -6684,7 +6728,7 @@ mod tests {
         for &i in &idle {
             let fd = &sim.f[i];
             let off = Vec3::new(fd.target.x - fd.pos.x, fd.target.y - fd.pos.y, 0.0);
-            assert!(off.norm() < 5.0, "f{i} idle at {:?} aims at {:?}", fd.pos, fd.target);
+            assert!(off.norm() < 49.0 / 9.5 + 0.1, "f{i} idle at {:?} aims at {:?}", fd.pos, fd.target);
             if fd.vel.norm() > 0.0 {
                 assert!(off.normalized().dot(fd.vel.normalized()) > 0.99, "f{i} brakes along his motion");
             }
@@ -7956,7 +8000,7 @@ mod tests {
     // a throw to another man is in the air (`update_relay`), or an infielder has the ball
     // (`update_relay`). Nobody gives him another job (every base is covered and the throw's
     // backup is someone else), so a man standing still stays where he is, and a man already
-    // running toward his old spot at 7 m/s pulls up within v²/(2·6 m/s²) ≈ 4.08 m along his
+    // running toward his old spot at 7 m/s pulls up within v²/(2·4.75 m/s²) ≈ 5.16 m along his
     // line instead of going on to it.
     #[test]
     fn a_retired_cutoff_man_with_no_job_stops() {
@@ -8003,7 +8047,7 @@ mod tests {
             let fd = &sim.f[B1];
             let moved = fd.pos - start;
             assert!(fd.vel.norm() < 1e-9, "case {case} (v0 {run}): still moving {:?} at {:?}", fd.vel, fd.pos);
-            let want = run * run / (2.0 * 6.0);
+            let want = run * run / (2.0 * 4.75);
             assert!((moved.norm() - want).abs() < 0.15, "case {case} (v0 {run}): moved {:.3} m, expected {want:.3} m; at {:?}", moved.norm(), fd.pos);
             if run > 0.0 {
                 assert!(moved.normalized().dot(dir) > 0.99, "case {case}: stops on his line of motion");
@@ -8431,7 +8475,7 @@ mod tests {
             peak = peak.max(sim.r[1].s);
             ticks += 1;
         }
-        assert!((peak - s0 - 49.0 / 12.0).abs() < 0.1, "he drifts v²/2·BRAKE = 4.08 m on before reversing: {}", peak - s0);
+        assert!((peak - s0 - 49.0 / 9.5).abs() < 0.1, "he drifts v²/2·BRAKE = 5.16 m on before reversing: {}", peak - s0);
         assert!(((sim.t - t0) - expected).abs() < 3.0 * DT, "took {:.3} s, expected {expected:.3} s", sim.t - t0);
     }
 
@@ -9735,9 +9779,9 @@ mod tests {
     /// Foul pops that come down in the first-base seats, from just past the stands wall to
     /// 10 m in (Gemini play-area review P2-3): nobody catches one beyond his reach over the
     /// wall, and a fielder who goes after one sees the wall and stops at it. Arriving at the
-    /// wall he is no faster than stopping from where he could still see it allows: from at
-    /// most 0.35 m out at the braking limit (6 m/s², BRAKE), √(2·6·0.35) ≈ 2.05 m/s, plus one
-    /// 0.1 s sample's slack (0.6 m/s).
+    /// wall he is no faster than the wall-contact speed v_c = 2 m/s plus what braking allows
+    /// over the last 0.02 m (agent-models §5.3: √(v_c² + 2·4.75·0.02) = 2.05 m/s), plus one
+    /// 0.1 s track sample's braking (4.75 × 0.1 = 0.48 m/s).
     #[test]
     fn nobody_runs_into_the_stands_after_a_ball_out_of_reach() {
         let fx = fixture(&[]);
@@ -9772,9 +9816,106 @@ mod tests {
                 }
             }
         }
-        assert!(worst.0 <= 2.05 + 0.6, "a fielder reached the wall at {:.2} m/s (ball {:.1} m into the seats)", worst.0, worst.1);
+        assert!(worst.0 <= 2.05 + 0.475, "a fielder reached the wall at {:.2} m/s (ball {:.1} m into the seats)", worst.0, worst.1);
     }
 
+
+    /// One limit over the wall for plans and every kind of capture (the collision review's
+    /// P2-2; agent-models §5.3, physics-spec §9.5): the glove gets at most
+    /// `REACH − BODY_R` = 1.0 − 0.3 = 0.7 m past the wall's plane, standing, stretching or
+    /// diving, from a body that stops 0.3 m inside it. A ball coming down along the stands
+    /// wall 0.68 m past its plane is caught, one 0.72 m past is not, whatever the glove's
+    /// extension: slow (a stand) and fast (a stretch; the same guard sits in front of the dive,
+    /// which reaches only 1.2 m up, and a ball that low past the 1.2 m stands wall is dead).
+    /// Built from a constructed state, not a seeded game. Bug caught: capture allowed the
+    /// stretch's 1.4 m and the dive's 2.5 m from the body past the wall (a foul fly caught
+    /// 0.93 m beyond it).
+    #[test]
+    fn nobody_catches_a_ball_farther_past_a_wall_than_his_arm_reaches_over_it() {
+        assert!((OVER_WALL_REACH_M - 0.7).abs() < 1e-12, "the spec's 0.7 m");
+        let fx = fixture(&[]);
+        let field = &fx.field;
+        let inp = input(&fx, vec![RunnerIn { id: fx.st.batter, base: 0, speed: 8.2 }]);
+        let r2 = core::f64::consts::SQRT_2;
+        // First-base stands wall, 27 m along the line (past the dugout's 6–24 m, before the taper's 30.5 m): the plane is where
+        // c = (x − y)/√2 is the foul clearance, the way in is (−1, 1)/√2.
+        let at = |along: f64, past: f64| {
+            let c = field.foul_clear_m + past;
+            Vec3::new((along + c) / r2, (along - c) / r2, 0.0)
+        };
+        let inward = Vec3::new(-1.0, 1.0, 0.0) * (1.0 / r2);
+        assert!(field.body_clearance(at(27.0, 0.0).x, at(27.0, 0.0).y, 0.0).dist.abs() < 1e-9, "fixture: the plane");
+        for (name, speed, z) in [("standing", 0.5, 1.8), ("stretch", 4.0, 1.8)] {
+            for (past, catches) in [(0.68, true), (0.72, false)] {
+                let mut st = fx.st.clone();
+                let mut sim = new_sim(&inp, &mut st);
+                // His body stops 0.3 m inside the plane; the ball comes down the wall past him,
+                // abreast of him after 0.2 s.
+                let fielder = at(27.0, 0.0) + inward * BODY_R;
+                sim.f[CF].pos = fielder;
+                let ball0 = at(27.0 - 0.2 * speed, past) + Vec3::new(0.0, 0.0, z);
+                let v = Vec3::new(1.0, 1.0, 0.0) * (speed / r2);
+                loose_ball(&mut sim, 2.0, ball0, v);
+                sim.f[CF].pos = fielder;
+                sim.f[CF].role = Role::Chase;
+                sim.f[CF].must_dive_since = 0.0;
+                sim.f[CF].last_dive_read = f64::INFINITY;
+                sim.f[CF].will_dive.set(true);
+                for _ in 0..60 {
+                    world_tick(&mut sim);
+                }
+                assert_eq!(caught(&sim), catches, "{name}: ball {past} m past the wall (limit {OVER_WALL_REACH_M} m); events {:?}", sim.out.events);
+            }
+        }
+    }
+
+    /// Wall-contact speed (agent-models §5.3): a fielder running flat out at a wall for a ball
+    /// he can take there arrives at about `v_c` = 2 m/s, not at 0 (the old braking to a stop)
+    /// and not at his 8 m/s. He is stopped by the wall at 0.3 m from it, the body's radius.
+    #[test]
+    fn a_fielder_running_at_the_wall_arrives_at_the_contact_speed() {
+        let fx = fixture(&[]);
+        let inp = input(&fx, vec![RunnerIn { id: fx.st.batter, base: 0, speed: 8.2 }]);
+        let field = &fx.field;
+        let mut st = fx.st.clone();
+        let mut sim = new_sim(&inp, &mut st);
+        sim.t = 2.0;
+        let v = sim.f[CF].a.speed;
+        let (mut lo, mut hi) = (60.0, 200.0);
+        for _ in 0..60 {
+            let mid = 0.5 * (lo + hi);
+            if field.body_clearance(0.0, mid, BODY_R).dist > 0.0 { lo = mid } else { hi = mid }
+        }
+        let y_wall = 0.5 * (lo + hi);
+        sim.f[CF].pos = Vec3::new(0.0, y_wall - 40.0, 0.0);
+        sim.f[CF].vel = Vec3::new(0.0, v, 0.0);
+        sim.f[CF].target = Vec3::new(0.0, y_wall + 5.0, 0.0);
+        sim.f[CF].role = Role::Chase;
+        sim.f[CF].t_int = 0.0;
+        let mut at_wall = None;
+        let mut slowest_before = f64::INFINITY;
+        for _ in 0..1000 {
+            let before = sim.f[CF].pos;
+            sim.move_fielders();
+            sim.t += DT;
+            let c = field.body_clearance(sim.f[CF].pos.x, sim.f[CF].pos.y, BODY_R).dist;
+            if c < 0.02 && at_wall.is_none() {
+                // His speed into the wall over the tick that took him to it.
+                at_wall = Some((sim.f[CF].pos.y - before.y) / DT);
+            }
+            if at_wall.is_none() {
+                slowest_before = slowest_before.min(sim.f[CF].vel.y);
+            }
+            if at_wall.is_some() {
+                break;
+            }
+        }
+        let arrival = at_wall.expect("he reached the wall");
+        // √(v_c² + 2·4.75·0.02) = 2.05 m/s within 0.02 m of it, up to one tick of braking
+        // (4.75/60 = 0.08 m/s) and the tick's position step.
+        assert!((arrival - 2.05).abs() < 0.3, "arrived at {arrival:.2} m/s, expected about v_c = 2 m/s");
+        assert!(slowest_before > 1.5, "he never stopped short of it: {slowest_before:.2} m/s");
+    }
 
     /// Gemini A4 review P1-1: with two out every out ends the inning, and p_out saturates to
     /// 1.0 for any margin over a second, so a sure force a step away and a sure throw across
@@ -10028,7 +10169,8 @@ mod tests {
             (fd.vel, fd.role) = (Vec3::ZERO, Role::Idle);
             fd.target = fd.pos;
         }
-        held_at(&mut sim, SS, Vec3::new(-5.0, 36.0, 0.0));
+        // (Fielded 4.9 m out: from 5.7 m, the slower braking made throwing to first the better play.)
+        held_at(&mut sim, SS, Vec3::new(-4.5, 36.8, 0.0));
         let fd = &mut sim.f[SS];
         (fd.up_at, fd.set_base, fd.face, fd.catch_vel) = (1.0, fd.a.transfer, None, Vec3::ZERO);
         fd.carry_to = Some(2);
@@ -10161,7 +10303,7 @@ mod tests {
     }
 
     /// Gemini pivot review P2-3 and P3-1, agent-models §5.5: a covering man brakes onto the bag
-    /// (√(2·BRAKE·0.6 m) = 2.68 m/s at the touch radius, the movement law) and "faces the way
+    /// (√(2·BRAKE·0.6 m) = 2.39 m/s at the touch radius, the movement law) and "faces the way
     /// he is moving"; his teammates' estimate (`pivot_release(.., arriving)`) says the same. The
     /// world used the running threshold (3 m/s), so the man who was visibly moving at 2.68
     /// faced the feed instead, and the estimate and the world differed by the turn. Checked for
