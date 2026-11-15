@@ -96,4 +96,11 @@ It is pessimistic for small corrections from low speed (a 2 m/s lean, small adju
 
 ## Resolution
 
-Open.
+Resolved 2026-11-15 by the lead, on `work/wall-braking`:
+
+- **P2-1 (pop-up hits lost at the edge of range): deferred** to a follow-up fielding job recorded in TASKS.md: chasers arrive under a high ball early and under control (the `early` path), and an on-time caller is not displaced by a teammate whose own estimate is late (play 88). The two traced plays become constructed-state regressions there. Not caused by this branch; the ledger row now carries the evidence (44 → 78 pop-up hits on seed set 1000; a reversal from 8 m/s 1.68 s and 6.7 m at 4.75 against 1.33 s and 5.3 m at 6).
+- **P2-2 (a receiver has no stretch for a throw outside `RECEIVE_REACH`): deferred** to a follow-up fielding job in TASKS.md (give the receiver `STRETCH` with its balance cost; a test that sweeps the offset). Not caused by this branch (main misses from 1.8 m, this branch from 1.7 m).
+- **P3-1 (`run_gap` against `fielder_step` under 5 m): deferred** to the same follow-up (step `fielder_step` itself for short runs, then restore the −0.35 s bound).
+- **P3-2 (the standing half of the over-wall regression proves nothing): fixed.** The test keeps only the stretch case; its comment says why standing is limited by geometry and why there is no dive case.
+- **P3-3 (0.7 m is conservative over a waist-high rail) and P3-4 (one braking figure for small corrections): deferred** to the wall-awareness and agility work (a limit that depends on wall height; a speed-dependent braking figure).
+- **P3-5 (stale text): fixed.** agent-models §6.4 (4.1 → 5.16 m), the `stopped_fielders…` comment (6 → 4.75 m/s²), the pivot test docstring (2.68 → 2.39 m/s), and the carrier test's `GloveSecured` fact moved to (−4.5, 36.8) with the fielder.

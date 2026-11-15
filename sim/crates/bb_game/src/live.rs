@@ -6261,7 +6261,7 @@ mod tests {
 
     // Fielding review #2 and #4: a fielder who has reached his spot is standing still, and a
     // running fielder's time to a resting ball counts his speed. Codex momentum review #1: he
-    // gets there by braking at 6 m/s², so from 7 m/s the stop takes 7/4.75 s and 49/9.5 m; a late
+    // gets there by braking at 4.75 m/s², so from 7 m/s the stop takes 7/4.75 s and 49/9.5 m; a late
     // chaser runs through his spot at speed.
     #[test]
     fn stopped_fielders_have_no_speed_and_running_ones_keep_it() {
@@ -9825,8 +9825,10 @@ mod tests {
     /// `REACH − BODY_R` = 1.0 − 0.3 = 0.7 m past the wall's plane, standing, stretching or
     /// diving, from a body that stops 0.3 m inside it. A ball coming down along the stands
     /// wall 0.68 m past its plane is caught, one 0.72 m past is not, whatever the glove's
-    /// extension: slow (a stand) and fast (a stretch; the same guard sits in front of the dive,
-    /// which reaches only 1.2 m up, and a ball that low past the 1.2 m stands wall is dead).
+    /// extension. Only the fast ball (over 3 m/s: a stretch) exercises the guard: a catch on his
+    /// feet is limited to 0.7 m by geometry alone (1.0 m reach from a body 0.3 m inside the wall),
+    /// so a slow ball proves nothing. The same guard sits in front of the dive, which reaches only
+    /// 1.2 m up, and a ball that low past the 1.2 m stands wall is dead (no dive case).
     /// Built from a constructed state, not a seeded game. Bug caught: capture allowed the
     /// stretch's 1.4 m and the dive's 2.5 m from the body past the wall (a foul fly caught
     /// 0.93 m beyond it).
@@ -9845,7 +9847,7 @@ mod tests {
         };
         let inward = Vec3::new(-1.0, 1.0, 0.0) * (1.0 / r2);
         assert!(field.body_clearance(at(27.0, 0.0).x, at(27.0, 0.0).y, 0.0).dist.abs() < 1e-9, "fixture: the plane");
-        for (name, speed, z) in [("standing", 0.5, 1.8), ("stretch", 4.0, 1.8)] {
+        for (name, speed, z) in [("stretch", 4.0, 1.8)] {
             for (past, catches) in [(0.68, true), (0.72, false)] {
                 let mut st = fx.st.clone();
                 let mut sim = new_sim(&inp, &mut st);
@@ -10164,7 +10166,7 @@ mod tests {
         sim.t = 2.0;
         let ss_id = sim.f[SS].id;
         sim.emit(Input::BallTouched { t: 0.6, what: Touch::Ground { x: -5.0, y: 33.0 } });
-        sim.emit(Input::GloveSecured { t: 1.0, fielder: ss_id, x: -5.0, y: 36.0 });
+        sim.emit(Input::GloveSecured { t: 1.0, fielder: ss_id, x: -4.5, y: 36.8 });
         for fd in sim.f.iter_mut() {
             (fd.vel, fd.role) = (Vec3::ZERO, Role::Idle);
             fd.target = fd.pos;
@@ -10305,7 +10307,7 @@ mod tests {
     /// Gemini pivot review P2-3 and P3-1, agent-models §5.5: a covering man brakes onto the bag
     /// (√(2·BRAKE·0.6 m) = 2.39 m/s at the touch radius, the movement law) and "faces the way
     /// he is moving"; his teammates' estimate (`pivot_release(.., arriving)`) says the same. The
-    /// world used the running threshold (3 m/s), so the man who was visibly moving at 2.68
+    /// world used the running threshold (3 m/s), so the man who was visibly moving at 2.39
     /// faced the feed instead, and the estimate and the world differed by the turn. Checked for
     /// a second baseman coming across from the left (−1, −0.3), the case the review measured:
     /// he faces his approach, and the pivot he is credited with is the one predicted for him.
