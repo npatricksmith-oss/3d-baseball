@@ -1836,7 +1836,35 @@ void ABbDirector::Tick(float DeltaSeconds)
 		}
 		if (bHave)
 		{
-			Ball->SetActorLocation(ToUE(Frame.ball));
+			// A held ball is drawn in the holder's hand, not at the sim's holding point over his
+			// feet (owner, 2026-11-15: the ball hung in the air through the catcher's throw). The
+			// sim's ball is still the truth: the drawn one eases into the hand when he takes it
+			// and back onto the sim's path just after he lets go.
+			FVector BallAt = ToUE(Frame.ball);
+			bool bInHand = false;
+			if (Frame.holder >= 0)
+			{
+				for (int32 I = 0; I < FigureState.Num() && I < Figures.Num(); ++I)
+				{
+					if (FigureState[I].Agent == (uint16)Frame.holder && Figures[I] && !Figures[I]->IsHidden())
+					{
+						// The throw clip swings the left arm (mirrored for a right-hander, so it
+						// shows on his right); otherwise he carries it in his throwing hand.
+						const bool bLeftBone = FigureState[I].Manual == AnimThrow ? bThrowClipLeftArm : Sim->ThrowsLeft((uint16)Frame.holder);
+						const FVector Hand = Figures[I]->GetSkeletalMeshComponent()->GetSocketLocation(bLeftBone ? TEXT("hand_l") : TEXT("hand_r"));
+						HeldOffset = Hand - BallAt;
+						bInHand = true;
+						break;
+					}
+				}
+			}
+			HeldBlend = FMath::Clamp(HeldBlend + (bInHand ? SimDt / HeldTakeS : -SimDt / HeldLetGoS), 0.f, 1.f);
+			if (!bBallShown)
+			{
+				HeldBlend = 0.f;
+			}
+			BallAt += HeldOffset * HeldBlend;
+			Ball->SetActorLocation(BallAt);
 			Ball->SetActorHiddenInGame(!bBallShown);
 			Bat->SetActorHiddenInGame(Frame.has_bat == 0);
 			if (Frame.has_bat != 0)

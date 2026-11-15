@@ -421,6 +421,14 @@ private:
 	 *  once (unattended check; logs BB_REPLAY). */
 	float ReplayAt = -1.f;
 	int32 ReplayAuto = 0;
+	/** Drawing a held ball in the hand: the hand's offset from the sim's ball (cm), kept from
+	 *  the last frame it was held, and how much of it is applied (1 in the hand, 0 on the
+	 *  sim's path). It eases in over HeldTakeS when a fielder takes the ball and out over
+	 *  HeldLetGoS once it is thrown, in play time. */
+	FVector HeldOffset = FVector::ZeroVector;
+	float HeldBlend = 0.f;
+	static constexpr float HeldTakeS = 0.15f;
+	static constexpr float HeldLetGoS = 0.12f;
 	/** The stand-in throw clip (MM_Attack_02) swings its left arm; the pitch clip its right. */
 	static constexpr bool bThrowClipLeftArm = true;
 	/** Set by Enter: play at RushSpeed (or Speed, if that is faster) until the next pitch is
