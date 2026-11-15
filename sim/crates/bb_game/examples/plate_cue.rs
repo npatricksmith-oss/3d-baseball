@@ -39,7 +39,7 @@ fn main() {
                 }
                 let (p, v) = path.at(t);
                 let wt = tr.knots.iter().min_by(|a, b| (a.t - t).abs().total_cmp(&(b.t - t).abs())).unwrap().s.w;
-                let est = if true_spin { position_from_plate(&env, s0.s.r, v, wt, s) } else { position_from_plate(&env, s0.s.r, v, believed_spin(v, Some(s)), s) };
+                let est = if true_spin { position_from_plate(&env, s0.s.r, v, wt, s) } else { position_from_plate(&env, s0.s.r, v, believed_spin(&env, v, Some(s)), s) };
                 acc[k][j].push((est - p).norm());
             }
         }

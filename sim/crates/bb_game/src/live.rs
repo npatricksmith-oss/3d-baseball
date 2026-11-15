@@ -261,7 +261,21 @@ const BAG_REACH_FRAC: f64 = 0.9;
 /// A fielder's first read of the ball's velocity is off by this fraction of its speed per
 /// axis (stretched in depth like the position error), shrinking with viewing time like it;
 /// interim stand-in for §5.1's launch-state errors, refitted with momentum 2026-11-12 [E].
-const READ_VEL_FRAC: f64 = 0.04;
+pub(crate) const READ_VEL_FRAC: f64 = 0.04;
+/// The read closes as the ball comes down (agent-models §5.1, 2026-11-15): for a ball on its
+/// first flight off the bat, every term of the read error is scaled by T/`READ_CLOSE_S` (at
+/// most 1), T the time the ball needs to come down from where it is and how it is moving now
+/// (in a vacuum). A threshold on the optical acceleration of the ball's image (Chapman 1968;
+/// Fink, Foo & Warren 2009) makes the landing miss a fielder can tell apart shrink with the
+/// square of the time left; the velocity term flown over T and scaled by T does that. Where
+/// the closing starts is fitted to the owner's band for a routine fly (90–99% by fielding
+/// ability; docs/calibration/2026-11-15-outfield-read.md §2), s [E].
+const READ_CLOSE_S: f64 = 3.0;
+/// A chaser's reads come faster as the ball comes down (agent-models §5.2, 2026-11-15): the
+/// next one after this fraction of the time his own read leaves before it comes down, between
+/// `REPLAN_MIN_S` and `REPLAN_S` [E].
+const REPLAN_FRAC: f64 = 0.25;
+const REPLAN_MIN_S: f64 = 0.1;
 /// What an observer allows for the spin he cannot see when he works out where a ball must be
 /// from the plate (agent-models §5.1): σ per axis, m, at 1 s since contact, growing as s^1.5.
 /// `examples/plate_cue.rs` (2026-11-13): flying the true velocity back with typical spin
@@ -655,6 +669,42 @@ pub mod prof {
     }
 }
 
+/// Read tracing for diagnostics (`examples/fly_misses.rs`): while a batted ball is on its
+/// first flight, one record per fielder per tick of what he believes and does. Off unless a
+/// diagnostic turns it on for its own thread; written only, never read by any decision.
+pub mod read_trace {
+    use bb_math::Vec3;
+    use std::cell::{Cell, RefCell};
+    #[derive(Clone, Debug)]
+    pub struct Rec {
+        pub t: f64,
+        pub i: usize,
+        /// 0 idle, 1 chase, 2 cover, 3 relay, 4 backup.
+        pub role: u8,
+        pub pos: Vec3,
+        pub vel: Vec3,
+        /// Where his latest read has the ball coming down (time, x, y).
+        pub land: Option<(f64, f64, f64)>,
+        pub read_at: f64,
+        pub target: Vec3,
+        pub call: u8,
+        pub peel: bool,
+        pub must_dive_since: f64,
+        pub dove: bool,
+    }
+    thread_local! {
+        pub static ON: Cell<bool> = const { Cell::new(false) };
+        pub static RECS: RefCell<Vec<Rec>> = const { RefCell::new(Vec::new()) };
+    }
+    pub fn on() -> bool {
+        ON.with(|x| x.get())
+    }
+    /// Takes this thread's records (the last play's, if the caller clears between plays).
+    pub fn take() -> Vec<Rec> {
+        RECS.with(|r| std::mem::take(&mut *r.borrow_mut()))
+    }
+}
+
 /// Throw-decision tracing (BB_DEBUG_THROW), checked once per thread: `holder_act` runs
 /// every tick the ball is held.
 fn debug_throw() -> bool {
@@ -866,39 +916,55 @@ fn go_idle(fd: &mut Fielder) {
 
 /// The backspin (rpm; negative: topspin) a batted ball typically has at launch angle `la`
 /// (rad): a fielder's belief about the contact model. Medians by 10° launch-angle bin from
-/// `examples/batted_spin.rs` (48 games, 2026-11-12), interpolated linearly at the bin
-/// centres; refit when the contact model changes.
+/// `examples/batted_spin.rs` (48 games), interpolated linearly at the bin centres; refit when
+/// the contact model changes. Refit 2026-11-15 for swing v2 (docs/calibration/
+/// 2026-11-15-outfield-read.md §1): the 2026-11-12 table (v1 swing: 3,290 rpm at 25°, 4,800 at
+/// 35°, 5,990 at 45°) gave every fly 60% too much backspin, so every fly was read to carry.
 fn typical_batted_spin_rpm(la: f64) -> f64 {
     const DEG: [f64; 9] = [-25.0, -15.0, -5.0, 5.0, 15.0, 25.0, 35.0, 45.0, 55.0];
-    const RPM: [f64; 9] = [-7060.0, -4750.0, -2820.0, -710.0, 1330.0, 3290.0, 4800.0, 5990.0, 6470.0];
+    const RPM: [f64; 9] = [-4856.0, -3077.0, -1783.0, -477.0, 606.0, 1916.0, 3013.0, 3819.0, 4558.0];
     let x = la.to_degrees().clamp(DEG[0], DEG[8]);
     let k = (((x - DEG[0]) / 10.0).floor() as usize).min(7);
     let f = (x - DEG[k]) / 10.0;
     RPM[k] + (RPM[k + 1] - RPM[k]) * f
 }
 
-/// The spin an observer believes a ball has (agent-models §5.1): straight off the bat, the
-/// spin the contact model typically gives a ball at the launch angle he estimates (his read of
-/// its velocity `ve` with gravity's pull over the `off_bat_since` seconds since contact added
-/// back); after a bounce or a deflection, a little topspin.
-pub fn believed_spin(ve: Vec3, off_bat_since: Option<f64>) -> Vec3 {
+/// The spin an observer believes a ball has now (agent-models §5.1). Straight off the bat:
+/// the spin the contact model typically gives at the launch angle he estimates, decayed since
+/// contact as his own physics decays it. He estimates the launch angle by flying his read of
+/// the velocity now (`ve`) back the `off_bat_since` seconds to the plate with his own physics
+/// ([`fly_back`]; drag and gravity act on the velocity alone), first with the spin a launch
+/// angle of atan2(v_z + g·s, v_h) would give (the first guess), then looks the table up at the
+/// angle that back-flight leaves the bat at and scales it by the decay the same back-flight
+/// undid (2026-11-15; docs/calibration/2026-11-15-outfield-read.md: the first guess alone is
+/// too steep by mid-flight, since drag has slowed the ball along, and the launch spin is more
+/// than the ball still has: both read every fly too deep). After a bounce or a deflection, a
+/// little topspin.
+pub fn believed_spin(env: &FlightEnv, ve: Vec3, off_bat_since: Option<f64>) -> Vec3 {
     let h = Vec3::new(ve.x, ve.y, 0.0).normalized();
     let axis = Vec3::new(h.y, -h.x, 0.0);
     let rpm = match off_bat_since {
         Some(since) => {
-            let la = m::atan2(ve.z + bb_math::units::G * since, m::hypot(ve.x, ve.y));
-            typical_batted_spin_rpm(la)
+            let la0 = m::atan2(ve.z + bb_math::units::G * since, m::hypot(ve.x, ve.y));
+            let rpm0 = typical_batted_spin_rpm(la0);
+            if since <= 0.0 || rpm0 == 0.0 {
+                rpm0
+            } else {
+                let w0 = axis * (rpm0 * core::f64::consts::PI / 30.0);
+                let launch = fly_back(env, ve, w0, since);
+                let la = m::atan2(launch.v.z, m::hypot(launch.v.x, launch.v.y));
+                let decay = w0.norm() / launch.w.norm().max(1e-9);
+                typical_batted_spin_rpm(la) * decay
+            }
         }
         None => -600.0,
     };
     axis * (rpm * core::f64::consts::PI / 30.0)
 }
 
-/// Where a ball going `ve` now (spin `w`) must be if it left `p0` `s` seconds ago: its
-/// velocity flown backward through those seconds with the observer's own physics (drag and
-/// gravity act on the velocity alone, not on where the ball is), adding up the distance.
-/// The knowledge that a batted ball started at the plate (agent-models §5.1).
-pub fn position_from_plate(env: &FlightEnv, p0: Vec3, ve: Vec3, w: Vec3, s: f64) -> Vec3 {
+/// A ball going `ve` now with spin `w`, flown backward `s` seconds with the observer's own
+/// physics: its state then, relative to where it is now (`r` is the displacement back).
+fn fly_back(env: &FlightEnv, ve: Vec3, w: Vec3, s: f64) -> BallState {
     let mut st = BallState { r: Vec3::ZERO, v: ve, w };
     let mut left = s;
     while left > 1e-9 {
@@ -906,7 +972,15 @@ pub fn position_from_plate(env: &FlightEnv, p0: Vec3, ve: Vec3, w: Vec3, s: f64)
         st = env.step(&st, -h);
         left -= h;
     }
-    p0 - st.r
+    st
+}
+
+/// Where a ball going `ve` now (spin `w`) must be if it left `p0` `s` seconds ago: its
+/// velocity flown backward through those seconds with the observer's own physics (drag and
+/// gravity act on the velocity alone, not on where the ball is), adding up the distance.
+/// The knowledge that a batted ball started at the plate (agent-models §5.1).
+pub fn position_from_plate(env: &FlightEnv, p0: Vec3, ve: Vec3, w: Vec3, s: f64) -> Vec3 {
+    p0 - fly_back(env, ve, w, s).r
 }
 
 /// An observer's error covariance for a read of a ball's position or velocity whose σ per
@@ -939,6 +1013,22 @@ fn plate_weighing(los: Vec3, sp: f64, sv: f64, s: f64) -> (Mat3, f64, f64) {
     (gain, m::sqrt((post * los).dot(los).max(0.0)), (gain * los).dot(los))
 }
 
+/// How much of an observer's read error is left (agent-models §5.1): his viewing time `view`
+/// against `tau_read` shrinks it as 1/√(1 + view/τ_read); for a ball still on its first
+/// flight off the bat (`off_bat`), it also closes as the ball comes down: × T/`READ_CLOSE_S`
+/// (at most 1), T the time it takes to fall from its height now with its vertical velocity
+/// now, in a vacuum (both seen now, nothing of its future).
+fn read_shrink(truth: (Vec3, Vec3), view: f64, tau_read: f64, off_bat: Option<(f64, Vec3)>) -> f64 {
+    let base = 1.0 / m::sqrt(1.0 + view / tau_read);
+    if off_bat.is_none() {
+        return base;
+    }
+    let (p, v) = truth;
+    let g = bb_math::units::G;
+    let t_down = (v.z + m::sqrt(v.z * v.z + 2.0 * g * p.z.max(0.0))) / g;
+    base * (t_down.max(0.0) / READ_CLOSE_S).min(1.0)
+}
+
 /// The σ of an observer's read of where the ball comes down along his line of sight, m: a
 /// fielder's knowledge of how good his own read is (a belief about himself, not about the
 /// ball; agent-models §5.7 calls). He runs his own read ([`read_prediction`]) from what he
@@ -951,9 +1041,9 @@ fn plate_weighing(los: Vec3, sp: f64, sv: f64, s: f64) -> (Mat3, f64, f64) {
 /// #1: the first version added a position term and a straight-line velocity term in
 /// quadrature, which missed the coupling and ignored drag).
 #[allow(clippy::too_many_arguments)]
-pub fn landing_depth_sigma(env: &FlightEnv, field: &Field, belief: (Vec3, Vec3), t: f64, from: Vec3, sigma0: f64, tau_read: f64, view: f64, off_bat: Option<(f64, Vec3)>) -> f64 {
+pub fn landing_depth_sigma(env: &FlightEnv, field: &Field, belief: (Vec3, Vec3), t: f64, from: Vec3, sigma0: f64, vel_frac: f64, tau_read: f64, view: f64, off_bat: Option<(f64, Vec3)>) -> f64 {
     let land = |err: [f64; 4]| {
-        let path = read_prediction(env, field, belief, t, from, sigma0, tau_read, view, err, off_bat);
+        let path = read_prediction_k(env, field, belief, t, from, sigma0, vel_frac, tau_read, view, err, off_bat);
         match path.first_bounce() {
             Some((_, x, y)) => Vec3::new(x, y, 0.0),
             None => path.at(path.t_end()).0,
@@ -972,9 +1062,9 @@ pub fn landing_depth_sigma(env: &FlightEnv, field: &Field, belief: (Vec3, Vec3),
     if let Some((s, _)) = off_bat
         && s > 0.0
     {
-        let shrink = 1.0 / m::sqrt(1.0 + view / tau_read);
+        let shrink = read_shrink(belief, view, tau_read, off_bat);
         let sp = sigma0 * (m::hypot(p.x - from.x, p.y - from.y).max(1.0) / READ_REF_DIST) * shrink;
-        let (_, _, k) = plate_weighing(los, sp, READ_VEL_FRAC * v.norm() * shrink, s);
+        let (_, _, k) = plate_weighing(los, sp, vel_frac * v.norm() * shrink, s);
         let spin = k * PLATE_SPIN_M * s * m::sqrt(s);
         var += spin * spin;
     }
@@ -997,18 +1087,25 @@ pub fn landing_depth_sigma(env: &FlightEnv, field: &Field, belief: (Vec3, Vec3),
 /// comes nearer his direct read takes over.
 #[allow(clippy::too_many_arguments)]
 pub fn read_prediction(env: &FlightEnv, field: &Field, truth: (Vec3, Vec3), t: f64, from: Vec3, sigma0: f64, tau_read: f64, view: f64, err: [f64; 4], off_bat: Option<(f64, Vec3)>) -> BallPath {
+    read_prediction_k(env, field, truth, t, from, sigma0, READ_VEL_FRAC, tau_read, view, err, off_bat)
+}
+
+/// [`read_prediction`] by an observer whose first read of the ball's velocity is off by
+/// `vel_frac` of its speed per axis (a fielder's own read rating, agent-models §10).
+#[allow(clippy::too_many_arguments)]
+pub fn read_prediction_k(env: &FlightEnv, field: &Field, truth: (Vec3, Vec3), t: f64, from: Vec3, sigma0: f64, vel_frac: f64, tau_read: f64, view: f64, err: [f64; 4], off_bat: Option<(f64, Vec3)>) -> BallPath {
     let (p, v) = truth;
     let dist = m::hypot(p.x - from.x, p.y - from.y).max(1.0);
-    let shrink = 1.0 / m::sqrt(1.0 + view / tau_read);
+    let shrink = read_shrink(truth, view, tau_read, off_bat);
     let sp = sigma0 * (dist / READ_REF_DIST) * shrink;
     let los = Vec3::new(p.x - from.x, p.y - from.y, 0.0).normalized();
     let lat = Vec3::new(-los.y, los.x, 0.0);
     // Height is read with the lateral precision (an angular measurement).
     let mut pe = p + los * (err[0] * sp * DEPTH_STRETCH) + lat * (err[1] * sp) + Vec3::new(0.0, 0.0, err[1] * sp * 0.5);
-    let sv = READ_VEL_FRAC * v.norm() * shrink;
+    let sv = vel_frac * v.norm() * shrink;
     let ve = v + los * (err[2] * sv * DEPTH_STRETCH * 0.5) + lat * (err[3] * sv) + Vec3::new(0.0, 0.0, err[3] * sv * 0.5);
     let off_bat_since = off_bat.map(|(s, _)| s);
-    let w = believed_spin(ve, off_bat_since);
+    let w = believed_spin(env, ve, off_bat_since);
     if let Some((s, p0)) = off_bat
         && s > 0.0
     {
@@ -1494,19 +1591,14 @@ impl<'a> Sim<'a> {
     /// The fielder's noisy estimate of the ball's current state, then its own prediction
     /// (smooth ground, typical spin for the trajectory) — never the true future.
     fn predict(&self, i: usize) -> BallPath {
-        if !prof::enabled() {
-            return self.predict_inner(i);
-        }
-        let t0 = std::time::Instant::now();
-        let r = self.predict_inner(i);
-        prof::add(&prof::PRED, t0.elapsed().as_nanos() as u64);
-        r
-    }
-
-    fn predict_inner(&self, i: usize) -> BallPath {
+        let t0 = prof::enabled().then(std::time::Instant::now);
         let fd = &self.f[i];
         let view = (self.t - self.inp.t_contact - fd.a.reaction).max(0.0);
-        self.predict_from(fd.pos, fd.a.read_sigma0, fd.a.tau_read, view, fd.err)
+        let r = read_prediction_k(self.inp.env, self.inp.field, self.ball_at(self.t), self.t, fd.pos, fd.a.read_sigma0, fd.a.read_vel_frac, fd.a.tau_read, view, fd.err, self.off_bat());
+        if let Some(t0) = t0 {
+            prof::add(&prof::PRED, t0.elapsed().as_nanos() as u64);
+        }
+        r
     }
 
     /// An observer's prediction of the ball from where he stands: [`read_prediction`] of its
@@ -1711,8 +1803,11 @@ impl<'a> Sim<'a> {
         }
         let p = self.predict(i);
         let (ti, pt) = self.intercept(i, &p);
+        // His reads come faster as his own read has the ball coming down sooner.
+        let down = p.first_bounce().map_or(p.t_end(), |b| b.0) - t;
+        let every = (REPLAN_FRAC * down).clamp(REPLAN_MIN_S, REPLAN_S);
         let fd = &mut self.f[i];
-        (fd.t_int, fd.int_pt, fd.belief, fd.read_at, fd.read_ball, fd.next_plan) = (ti, pt, Some(p), t, ball, t + REPLAN_S);
+        (fd.t_int, fd.int_pt, fd.belief, fd.read_at, fd.read_ball, fd.next_plan) = (ti, pt, Some(p), t, ball, t + every);
     }
 
     /// A chaser's replan from a fresh read: he runs at his own new intercept, and his call
@@ -1892,7 +1987,7 @@ impl<'a> Sim<'a> {
     /// physics and no bounce scatter, as a read with no error is (`read_prediction`).
     fn public_path(&self) -> BallPath {
         let (b, v) = self.ball_at(self.t);
-        let w = believed_spin(v, self.off_bat().map(|x| x.0));
+        let w = believed_spin(self.inp.env, v, self.off_bat().map(|x| x.0));
         batted_path_dt(self.inp.env, self.inp.field, BallState { r: b, v, w }, self.t, AGENT_DT, |_, _| (0.0, 0.0))
     }
 
@@ -2273,7 +2368,7 @@ impl<'a> Sim<'a> {
             if spare >= CALL_SLACK_S {
                 // Where he believes the ball is now, and how long he has watched it.
                 let view = (self.t - self.inp.t_contact - fd.a.reaction).max(0.0);
-                let sigma = landing_depth_sigma(self.inp.env, self.inp.field, pred.at(self.t), self.t, fd.pos, fd.a.read_sigma0, fd.a.tau_read, view, self.off_bat());
+                let sigma = landing_depth_sigma(self.inp.env, self.inp.field, pred.at(self.t), self.t, fd.pos, fd.a.read_sigma0, fd.a.read_vel_frac, fd.a.tau_read, view, self.off_bat());
                 let doubt = CALL_SURE_SIGMAS * sigma / fd.a.speed;
                 if spare < CALL_SLACK_S + doubt {
                     return (1, spare);
@@ -3264,7 +3359,7 @@ impl<'a> Sim<'a> {
         let los = Vec3::new(p.x - fd.pos.x, p.y - fd.pos.y, 0.0).normalized();
         let lat = Vec3::new(-los.y, los.x, 0.0);
         let pe = p + los * (err[0] * sp * DEPTH_STRETCH) + lat * (err[1] * sp) + Vec3::new(0.0, 0.0, err[1] * sp * 0.5);
-        let sv = READ_VEL_FRAC * v.norm() * shrink;
+        let sv = fd.a.read_vel_frac * v.norm() * shrink;
         let ve = v + los * (err[2] * sv * DEPTH_STRETCH * 0.5) + lat * (err[3] * sv) + Vec3::new(0.0, 0.0, err[3] * sv * 0.5);
         // He assumes a throw's typical backspin.
         let w = Vec3::new(ve.x, ve.y, 0.0).normalized().cross(Vec3::Z) * bb_math::units::rpm_to_radps(THROW_SPIN_RPM);
@@ -4738,6 +4833,23 @@ fn simulate_live_inner(inp: &LiveInput, st: &mut RulesState) -> LiveOutput {
         }
         if assigned {
             sim.publish();
+        }
+        if read_trace::on() && sim.off_bat().is_some() {
+            let recs: Vec<read_trace::Rec> = sim.f.iter().enumerate().map(|(i, fd)| read_trace::Rec {
+                t: sim.t,
+                i,
+                role: match fd.role { Role::Idle => 0, Role::Chase => 1, Role::Cover(_) => 2, Role::Relay(_) => 3, Role::Backup => 4 },
+                pos: fd.pos,
+                vel: fd.vel,
+                land: fd.belief.as_ref().and_then(|p| p.first_bounce()),
+                read_at: fd.read_at,
+                target: fd.target,
+                call: fd.call,
+                peel: fd.peel.is_some(),
+                must_dive_since: fd.must_dive_since,
+                dove: fd.dove,
+            }).collect();
+            read_trace::RECS.with(|r| r.borrow_mut().extend(recs));
         }
         if cover_trace && assigned {
             let (phase, holder) = match sim.ball {
@@ -6729,6 +6841,7 @@ mod tests {
         Vec3::new(path.bounces[0].1, path.bounces[0].2, 0.0)
     }
 
+
     // Agent-models §5.7, calls: a fielder calls a ball in the air only when his time to spare
     // also covers his read's depth error. A pop-up to short right-center, about 70 m out: the
     // right fielder, some 85 m from the ball at his first look, reads its depth to about
@@ -6741,7 +6854,7 @@ mod tests {
         const B2: usize = 3;
         const RF: usize = 8;
         let fx = fixture(&[]);
-        let inp = hit(&fx, Vec3::new(7.0, 22.0, 26.0));
+        let inp = hit(&fx, Vec3::new(6.62, 20.81, 25.48));
         let mut st = fx.st.clone();
         let mut sim = new_sim(&inp, &mut st);
         at_first_read(&mut sim);
@@ -6755,7 +6868,7 @@ mod tests {
         assert_eq!(sim.f[B2].role, Role::Chase);
         assert_ne!(sim.f[RF].role, Role::Chase, "the infielder has called it");
         // A fly hit at the centre fielder he has only to wait for: he calls it at once.
-        let inp = hit(&fx, Vec3::new(0.0, 33.0, 22.0));
+        let inp = hit(&fx, Vec3::new(0.0, 31.1, 22.0));
         let mut st = fx.st.clone();
         let mut sim = new_sim(&inp, &mut st);
         at_first_read(&mut sim);
@@ -6777,7 +6890,7 @@ mod tests {
     fn until_someone_is_sure_everyone_who_can_catch_it_goes() {
         const RF: usize = 8;
         let fx = fixture(&[]);
-        let inp = hit(&fx, Vec3::new(9.0, 34.0, 24.0));
+        let inp = hit(&fx, Vec3::new(8.50, 32.10, 24.17));
         let mut st = fx.st.clone();
         let mut sim = new_sim(&inp, &mut st);
         at_first_read(&mut sim);
@@ -6823,7 +6936,7 @@ mod tests {
                 }
                 let back = position_from_plate(&env, p0, st.v, st.w, s);
                 assert!((back - st.r).norm() < 1e-3, "v {v:?} at {s} s: {back:?} against {:?}", st.r);
-                let typical = position_from_plate(&env, p0, st.v, believed_spin(st.v, Some(s)), s);
+                let typical = position_from_plate(&env, p0, st.v, believed_spin(&env, st.v, Some(s)), s);
                 let floor = PLATE_SPIN_M * s * m::sqrt(s);
                 assert!((typical - st.r).norm() < 4.0 * floor, "typical spin at {s} s misses by {:.2} m", (typical - st.r).norm());
             }
@@ -6849,6 +6962,195 @@ mod tests {
         for (a, b) in [(Vec3::X, Vec3::X), (Vec3::Y, Vec3::Z), (Vec3::Z, Vec3::Z), (Vec3::X, Vec3::Y), (Vec3::X, Vec3::Z)] {
             assert!(((c * a).dot(b) - (acc * a).dot(b)).abs() < 1e-12, "{a:?}·{b:?}");
         }
+    }
+
+
+    /// The spread (σ, m) of where a fielder at `from` reads `inp`'s ball to come down, along
+    /// his line of sight, `before` seconds before it lands, over 600 draws as the simulator
+    /// draws them; and the mean miss with every draw at zero.
+    fn landing_spread(inp: &LiveInput, a: &FielderAttrs, from: Vec3, before: f64) -> (f64, f64) {
+        let mut st = RulesState::default_fixture();
+        step(&mut st, &Input::StartGame);
+        let sim = new_sim(inp, &mut st);
+        let Ball::Free { path, .. } = &sim.ball else { unreachable!() };
+        let (t_land, lx, ly) = path.first_bounce().unwrap();
+        let land = Vec3::new(lx, ly, 0.0);
+        let t = t_land - before;
+        let s = t - inp.t_contact;
+        let (p, v) = path.at(t);
+        let los = Vec3::new(p.x - from.x, p.y - from.y, 0.0).normalized();
+        let view = (s - a.reaction).max(0.0);
+        let read = |err: [f64; 4]| {
+            let path = read_prediction_k(inp.env, inp.field, (p, v), t, from, a.read_sigma0, a.read_vel_frac, a.tau_read, view, err, Some((s, inp.ball.r)));
+            let q = path.first_bounce().map_or_else(|| path.at(path.t_end()).0, |(_, x, y)| Vec3::new(x, y, 0.0));
+            Vec3::new(q.x, q.y, 0.0)
+        };
+        let mut d = Vec::new();
+        for k in 0..600 {
+            let mut r = rng(91, 0, 0, Purpose::FielderPerception, k);
+            let err = [r.truncated_normal(4.0), r.truncated_normal(4.0), r.truncated_normal(4.0), r.truncated_normal(4.0)];
+            d.push(read(err).dot(los));
+        }
+        let mean = d.iter().sum::<f64>() / d.len() as f64;
+        let sd = m::sqrt(d.iter().map(|x| (x - mean) * (x - mean)).sum::<f64>() / d.len() as f64);
+        (sd, (read([0.0; 4]) - land).norm())
+    }
+
+    // Agent-models §5.1, the read closes as the ball comes down (2026-11-15): a 45° fly and a
+    // 28° fly to centre, each read by an average outfielder from 12 m short of where it lands.
+    // Bands from the spec: the high fly's read is the looser one early (1 s after contact, the
+    // velocity error is flown over a longer flight); a second before landing both are within
+    // about a metre and a half (σ), half a second before within half a metre: the
+    // optical-acceleration threshold (Chapman 1968; Fink, Foo & Warren 2009) closes the miss he
+    // can tell apart as the square of the time left. Before the closing read the 0.5 s spread
+    // was 1.3–1.8 m in games. With no draws at all the read misses by under 1.5 m 2 s out (the
+    // launch angle from the back-flight and the decayed spin, §5.1: this ball has the table's
+    // spin, so the table's own bias, 1–3 m in games, is the next test's).
+    #[test]
+    fn the_read_closes_as_the_ball_comes_down() {
+        let fx = fixture(&[]);
+        let a = FielderAttrs::average(CF);
+        let mut early = Vec::new();
+        for (la, speed) in [(45.0f64, 43.0), (28.0, 41.0)] {
+            let r = la.to_radians();
+            let inp = hit(&fx, Vec3::new(0.0, speed * m::cos(r), speed * m::sin(r)));
+            let mut st = fx.st.clone();
+            let sim = new_sim(&inp, &mut st);
+            let Ball::Free { path, .. } = &sim.ball else { unreachable!() };
+            let (t_land, lx, ly) = path.first_bounce().unwrap();
+            let from = Vec3::new(lx, ly - 12.0, 0.0);
+            let hang = t_land - inp.t_contact;
+            let (s_early, _) = landing_spread(&inp, &a, from, hang - 1.0);
+            let (s1, _) = landing_spread(&inp, &a, from, 1.0);
+            let (s05, _) = landing_spread(&inp, &a, from, 0.5);
+            let (_, bias2) = landing_spread(&inp, &a, from, 2.0);
+            println!("LA {la}: hang {hang:.2} s; spread 1 s after contact {s_early:.2} m, 1 s before landing {s1:.2}, 0.5 s before {s05:.2}; no-draw miss 2 s before {bias2:.2}");
+            assert!(s1 < 1.5, "LA {la}: {s1:.2} m a second before landing");
+            assert!(s05 < 0.5, "LA {la}: {s05:.2} m half a second before landing");
+            assert!(s05 < s1 && s1 < s_early, "LA {la}: the read closes");
+            assert!(bias2 < 1.5, "LA {la}: no-draw miss {bias2:.2} m 2 s out");
+            early.push(s_early);
+        }
+        assert!(early[0] > early[1], "the high fly is the harder read early: {early:?}");
+    }
+
+    // Agent-models §5.1: the typical spin is a belief about the contact model and must follow
+    // it. The median backspin of batted balls in six games, by 10° launch-angle bin from 20° to
+    // 60° (the bins the table is fitted on), against the table at the bin's centre: within 15%.
+    // (The 2026-11-12 table, fitted on the v1 swing, was 42–72% high against swing v2.)
+    #[test]
+    fn the_typical_spin_belief_follows_the_contact_model() {
+        let mut bins: Vec<Vec<f64>> = vec![Vec::new(); 4];
+        for seed in 0..6 {
+            let mut g = crate::game::Game::new(seed, false);
+            while let Some(step) = g.step_pitch() {
+                let (Some((_, la, _)), Some(path)) = (step.record.batted, &step.batted) else { continue };
+                let Some(bb_physics::ground::Segment::Flight { tr, .. }) = path.segments.first() else { continue };
+                let s0 = tr.first().s;
+                let h = Vec3::new(s0.v.x, s0.v.y, 0.0).normalized();
+                let back = s0.w.dot(Vec3::new(h.y, -h.x, 0.0)) * 30.0 / core::f64::consts::PI;
+                let la = la.to_degrees();
+                if (20.0..60.0).contains(&la) {
+                    bins[((la - 20.0) / 10.0) as usize].push(back);
+                }
+            }
+        }
+        for (k, v) in bins.iter_mut().enumerate() {
+            v.sort_by(|a, b| a.total_cmp(b));
+            let median = v[v.len() / 2];
+            let centre = 25.0 + 10.0 * k as f64;
+            let belief = typical_batted_spin_rpm(centre.to_radians());
+            assert!(v.len() >= 30, "bin {centre}°: {} balls", v.len());
+            assert!((belief / median - 1.0).abs() < 0.15, "{centre}°: belief {belief:.0} rpm, contact model {median:.0} (n {})", v.len());
+        }
+    }
+
+    // The owner's play (2026-11-15): seed 23080 play 8, 91 mph at 46°, 6.2 s in the air, the
+    // left fielder 48 ft from where it comes down. A routine fly: it is caught.
+    #[test]
+    fn seed_23080_play_8_is_caught() {
+        let mut g = crate::game::Game::new(23080, false);
+        while let Some(step) = g.step_pitch() {
+            if step.play == 8 {
+                assert!(step.rules_events.iter().any(|e| matches!(e, Event::Catch { .. })), "not caught: {:?}", step.facts);
+                return;
+            }
+        }
+        panic!("play 8 not reached");
+    }
+
+    // Agent-models §10, `ReadSkill`: one set of fly balls, chosen by geometry alone (in the air
+    // at least 4 s, coming down in the park 12–20 m from the nearest outfielder's spot: the
+    // routine-but-running plays of docs/calibration/2026-11-15-outfield-read.md), each played
+    // with four sets of read draws: an outfield of grade 20 catches fewer than one of grade
+    // 80. Perfect hands (`input`), so only the read differs.
+    #[test]
+    fn a_poor_reader_misses_more_flies_than_a_good_one() {
+        let fx = fixture(&[]);
+        let home = home_positions();
+        let mut flies = Vec::new();
+        for d in (-40..=40).step_by(4) {
+            for la in [28.0f64, 35.0, 42.0, 50.0] {
+                for speed in (36..=46).step_by(2) {
+                    let (d, l, sp) = ((d as f64).to_radians(), la.to_radians(), speed as f64);
+                    let v = Vec3::new(sp * m::cos(l) * m::sin(d), sp * m::cos(l) * m::cos(d), sp * m::sin(l));
+                    let inp = hit(&fx, v);
+                    let mut st = fx.st.clone();
+                    let sim = new_sim(&inp, &mut st);
+                    let Ball::Free { path, .. } = &sim.ball else { unreachable!() };
+                    let Some((t, x, y)) = path.first_bounce() else { continue };
+                    let near = (6..9).map(|i| m::hypot(home[i].x - x, home[i].y - y)).fold(f64::INFINITY, f64::min);
+                    if t - inp.t_contact >= 4.0 && (12.0..20.0).contains(&near) && path.walls.is_empty() {
+                        flies.push(v);
+                    }
+                }
+            }
+        }
+        assert!(flies.len() >= 40, "{} flies", flies.len());
+        let catches = |grade: f64| {
+            let mut n = 0;
+            for &v in &flies {
+                for k in 0..4u32 {
+                    let mut inp = hit(&fx, v);
+                    for (i, a) in inp.fattrs.iter_mut().enumerate() {
+                        *a = FielderAttrs { hands: 0.0, ..FielderAttrs::average(i).with_read(grade) };
+                    }
+                    inp.seed = 500 + k as u64;
+                    let mut st = fx.st.clone();
+                    let out = simulate_live(&inp, &mut st);
+                    n += out.events.iter().any(|e| matches!(e, Event::Catch { .. })) as u32;
+                }
+            }
+            n
+        };
+        let (poor, good) = (catches(20.0), catches(80.0));
+        println!("caught of {}: grade 20 {poor}, grade 80 {good}", 4 * flies.len());
+        assert!(good > poor, "grade 20 caught {poor}, grade 80 {good}");
+    }
+
+    // A fielder never reads the ball's future (agent-models §1.1, §5.1): two balls in the same
+    // place, moving the same way, one with the contact model's typical backspin and one with
+    // twice it, come down metres apart, but the centre fielder's read and his intercept are the
+    // same for both.
+    #[test]
+    fn the_read_does_not_see_the_true_spin() {
+        let fx = fixture(&[]);
+        let mut plans = Vec::new();
+        let mut lands = Vec::new();
+        for spin in [1.0, 2.0] {
+            let mut inp = hit(&fx, Vec3::new(4.0, 30.0, 26.0));
+            inp.ball.w = inp.ball.w * spin;
+            inp.fattrs[CF].reaction = 0.0;
+            let mut st = fx.st.clone();
+            let mut sim = new_sim(&inp, &mut st);
+            sim.t = inp.t_contact;
+            sim.f[CF].err = [1.0, -0.5, 0.7, 0.3];
+            lands.push(landing(&sim));
+            sim.read(CF);
+            plans.push((sim.f[CF].int_pt, sim.f[CF].t_int, sim.f[CF].belief.as_ref().and_then(|p| p.first_bounce())));
+        }
+        assert!((lands[0] - lands[1]).norm() > 3.0, "the spin matters: {lands:?}");
+        assert_eq!(plans[0], plans[1]);
     }
 
     // A fielder's belief about how far off his landing point is (`landing_depth_sigma`, used
@@ -6881,10 +7183,10 @@ mod tests {
             }
             let mean = depths.iter().sum::<f64>() / depths.len() as f64;
             let spread = m::sqrt(depths.iter().map(|d| (d - mean) * (d - mean)).sum::<f64>() / depths.len() as f64);
-            let belief = landing_depth_sigma(inp.env, inp.field, (p, v), t, cf, a.read_sigma0, a.tau_read, view, Some((s, inp.ball.r)));
+            let belief = landing_depth_sigma(inp.env, inp.field, (p, v), t, cf, a.read_sigma0, a.read_vel_frac, a.tau_read, view, Some((s, inp.ball.r)));
             // This ball has the typical spin, so the spread has no spin error; the belief
             // also allows for the spin he cannot see, in the plate's share of his depth.
-            let shrink = 1.0 / m::sqrt(1.0 + view / a.tau_read);
+            let shrink = read_shrink((p, v), view, a.tau_read, Some((s, inp.ball.r)));
             let sp = a.read_sigma0 * m::hypot(p.x - cf.x, p.y - cf.y) / READ_REF_DIST * shrink;
             let (_, _, k) = plate_weighing(los, sp, READ_VEL_FRAC * v.norm() * shrink, s);
             let expect = m::hypot(spread, k * PLATE_SPIN_M * s * m::sqrt(s));
@@ -6912,7 +7214,7 @@ mod tests {
         const B2: usize = 3;
         const RF: usize = 8;
         let fx = fixture(&[]);
-        let inp = hit(&fx, Vec3::new(7.0, 12.5, 28.0));
+        let inp = hit(&fx, Vec3::new(6.61, 11.81, 27.38));
         let mut st = fx.st.clone();
         let mut sim = new_sim(&inp, &mut st);
         at_first_read(&mut sim);
@@ -7527,6 +7829,7 @@ mod tests {
         assert!(d.is_empty(), "{}", d.join("; "));
     }
 
+
     /// Fourth review P1-1: in real game `seed`, at each `holder_act` of play `play` from
     /// `t_from` for `span` seconds, only the holder's private set-up clock changes (no motion,
     /// nothing shown). While the ball is in his hands in both forks, no teammate may change.
@@ -7926,7 +8229,7 @@ mod tests {
         const B1: usize = 2;
         const B2: usize = 3;
         let fx = fixture(&[]);
-        let inp = hit(&fx, Vec3::new(7.0, 12.5, 28.0));
+        let inp = hit(&fx, Vec3::new(6.61, 11.81, 27.38));
         let mut st = fx.st.clone();
         let mut sim = new_sim(&inp, &mut st);
         at_first_read(&mut sim);

@@ -94,6 +94,10 @@ pub struct GamesArgs {
     arm_accuracy: Option<f64>,
     #[arg(long)]
     transfer: Option<f64>,
+    /// Every fielder's `ReadSkill` grade (20–80; default 50): how well he reads a ball in the
+    /// air (agent-models §5.1, §10).
+    #[arg(long)]
+    read: Option<f64>,
     /// Fielders get no jump: they wait for their read of the ball (agent-models §5.10 off).
     #[arg(long)]
     no_jump: bool,
@@ -111,6 +115,9 @@ pub fn games(a: GamesArgs) {
             }
             if a.arm_strength.is_some() || a.arm_accuracy.is_some() || a.transfer.is_some() {
                 *f = f.with_throwing(a.arm_strength.unwrap_or(50.0), a.arm_accuracy.unwrap_or(50.0), a.transfer.unwrap_or(50.0));
+            }
+            if let Some(g) = a.read {
+                *f = f.with_read(g);
             }
             if a.no_jump {
                 f.jump_gain = 0.0;
