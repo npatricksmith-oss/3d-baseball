@@ -138,8 +138,10 @@ pub struct AdvanceParams {
     /// Caution: how many of those spreads of cushion he wants beyond the break-even [E].
     /// Major-league runners are safe 94–97% of the time they go, at every number of outs,
     /// though the run table's break-evens run from 34% to 94% (note §1.5): they are more
-    /// careful than the table. Fitted to the league's attempt and success rates (owner's Q8
-    /// (c)); a team's and a runner's aggressiveness lower it, timidity raises it.
+    /// careful than the table. Provisional: 1.0 puts outs on the bases at the league's 0.27
+    /// a team-game; the fit to the league's attempt and success rates (owner's Q8 (c)) waits
+    /// for the race itself to be right (note §9). A team's and a runner's aggressiveness
+    /// lower it, timidity raises it.
     pub caution_z: f64,
 }
 
