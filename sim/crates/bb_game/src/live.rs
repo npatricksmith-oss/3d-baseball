@@ -764,6 +764,34 @@ fn run_time_from(d: f64, v0: f64, v_max: f64, tau: f64) -> f64 {
     0.5 * (lo + hi)
 }
 
+/// The slowest a runner holds on his way to a base he will stop at, m/s [E]: he does not
+/// crawl the last metre. The speed at which he arrives, then planted.
+const APPROACH_MIN_MPS: f64 = 1.0;
+
+/// One tick of a runner's speed on his way back to a base he will stop on, `rem` m from it:
+/// the speed law, but never faster than he can brake from (`sqrt(2·BRAKE·rem)`, like a
+/// fielder at a wall), and slowing by at most `BRAKE` a tick when he is already too fast
+/// (agent-models §6.4, Codex recheck P2-2).
+fn approach_speed(v: f64, v_max: f64, tau: f64, rem: f64) -> f64 {
+    let free = v + (v_max - v) * (DT / tau);
+    let cap = m::sqrt(2.0 * BRAKE * rem.max(0.0)).max(APPROACH_MIN_MPS);
+    free.min((v - BRAKE * DT).max(cap))
+}
+
+/// How long a runner moving at `v0` toward a base `d` m ahead (negative: away from it) needs
+/// to arrive at it and stop there, by the movement step's own laws: braking through zero if
+/// he is moving away, then the speed law limited by his braking distance. Stepped at the
+/// sim's tick so the estimate and the legs agree.
+fn run_time_to_stop(d: f64, v0: f64, v_max: f64, tau: f64) -> f64 {
+    let (mut s, mut v, mut t) = (0.0, v0, 0.0);
+    while s < d - 1e-9 && t < 60.0 {
+        v = if v < 0.0 { (v + BRAKE * DT).min(0.0) } else { approach_speed(v, v_max, tau, d - s) };
+        s += v * DT;
+        t += DT;
+    }
+    t
+}
+
 /// A runner moving forward faster than this is seen to be advancing, m/s [E] (the fielders'
 /// `ChoiceParams::moving_mps`, agent-models §5.6).
 const SEEN_MOVING_MPS: f64 = 0.5;
@@ -3675,7 +3703,7 @@ impl<'a> Sim<'a> {
         // step makes him brake (`run_time_from`, the same laws and `BRAKE`).
         let v_fwd = r.direction * r.v;
         let t_on = run_time_from(d_on, v_fwd, r.vmax, RUNNER_TAU);
-        let t_back = run_time_from(d_back, -v_fwd, r.vmax, RUNNER_TAU);
+        let t_back = run_time_to_stop(d_back, -v_fwd, r.vmax, RUNNER_TAU);
         // Unforced, he must beat the tag at either base, not only the ball.
         let tag_s = self.inp.tag_up.typical_tag_s;
         let ball_on = self.ball_time_to(k, next, 2 * n + 1) + tag_s;
@@ -3847,6 +3875,9 @@ impl<'a> Sim<'a> {
             let tau = if r.set_start.is_some() { tag.tau_s } else { RUNNER_TAU };
             if against {
                 r.v = (r.v - BRAKE * DT).max(0.0);
+            } else if dir < 0.0 {
+                // Going back to a base he will stop on: he comes in under his own braking.
+                r.v = approach_speed(r.v, r.vmax, tau, r.s - goal_s);
             } else {
                 r.v += (r.vmax - r.v) * (DT / tau);
             }
@@ -3888,14 +3919,14 @@ impl<'a> Sim<'a> {
                 }
                 if b < 4 && (mdir > 0.0 || retouched) && b == self.r[k].goal {
                     // Arrived where it was going (or retouched after a catch): decide whether
-                    // to keep going (leaving the base is reported on the next step).
-                    self.runner_decide(k, b);
-                    // A runner back on the base he retouched who goes on again plants on it
-                    // first: no earlier speed carries over a turn (§6.4).
-                    let r = &mut self.r[k];
-                    if mdir < 0.0 && r.goal > b {
-                        r.v = 0.0;
+                    // to keep going (leaving the base is reported on the next step). Coming
+                    // back he braked into the bag, and is planted on it: his next leg starts
+                    // from rest, in the estimate and in his legs (§6.4).
+                    if mdir < 0.0 {
+                        self.r[k].v = 0.0;
                     }
+                    self.runner_decide(k, b);
+                    let r = &mut self.r[k];
                     // A batter-runner stopping at first runs through it (agent-models §6.2).
                     if r.start == 0 && b == 1 && mdir > 0.0 && r.goal == 1 {
                         r.overrun = OverrunPhase::Out;
@@ -8386,7 +8417,7 @@ mod tests {
         sim.r[1].v = 7.0;
         assert!(sim.runner_relook(1));
         assert_eq!(sim.r[1].goal, 2);
-        let expected = run_time_from(8.0, -7.0, sim.r[1].vmax, RUNNER_TAU);
+        let expected = run_time_to_stop(8.0, -7.0, sim.r[1].vmax, RUNNER_TAU);
         let t0 = sim.t;
         sim.move_runners();
         sim.t += DT;
@@ -8448,6 +8479,47 @@ mod tests {
         sim.out.secured.push((sim.t, sim.f[3].id));
         assert!(sim.runner_relook(1));
         assert_eq!(sim.r[1].goal, 3, "a sure base is not a rundown");
+    }
+
+    // Codex runner-reads recheck P2-2 (`review_retouch_plant`): a runner coming back to retouch
+    // brakes into the bag. He never loses more than BRAKE a tick, arrives at no more than
+    // the approach speed, and is planted there (v = 0) when the next leg is decided, so
+    // its estimate starts from rest.
+    #[test]
+    fn a_runner_retouching_a_base_brakes_into_it_and_leaves_from_rest() {
+        let fx = fixture(&[(7, 2)]);
+        let inp = input(&fx, vec![RunnerIn { id: fx.st.batter, base: 0, speed: 8.2 }, RunnerIn { id: 7, base: 2, speed: 8.2 }]);
+        let mut st = fx.st.clone();
+        let mut sim = new_sim(&inp, &mut st);
+        sim.t = 6.0;
+        sim.r[0].out = true;
+        sim.catch_made = true;
+        sim.r[1].catch_seen = true;
+        sim.r[1].retouch = true;
+        (sim.r[1].s, sim.r[1].v, sim.r[1].direction, sim.r[1].goal, sim.r[1].hold_s) = (2.0 * BASE_L + 12.0, 7.0, -1.0, 2, None);
+        sim.f[6].pos = Vec3::new(-120.0, 150.0, 0.0);
+        sim.ball = Ball::Held { by: 6 };
+        let (mut v_prev, mut worst_drop, mut v_in) = (7.0, 0.0f64, f64::NAN);
+        let t0 = sim.t;
+        for _ in 0..400 {
+            let s_before = sim.r[1].s;
+            sim.move_runners();
+            sim.t += DT;
+            let v = sim.r[1].v;
+            if sim.r[1].s - 2.0 * BASE_L > 1e-6 {
+                worst_drop = worst_drop.max(v_prev - v);
+                v_in = v;
+            } else if s_before - 2.0 * BASE_L > 1e-6 {
+                break;
+            }
+            v_prev = v;
+        }
+        assert!(worst_drop <= BRAKE * DT + 1e-9, "braked {worst_drop} m/s in a tick");
+        assert!(v_in <= APPROACH_MIN_MPS + BRAKE * DT, "arrived at {v_in} m/s");
+        assert_eq!(sim.r[1].v, 0.0, "planted on the bag");
+        // His estimate of the trip is the trip: braking in, from 7 m/s and 12 m out.
+        let expected = run_time_to_stop(12.0, 7.0, sim.r[1].vmax, RUNNER_TAU);
+        assert!(((sim.t - t0) - expected).abs() < 3.0 * DT, "took {:.3} s, expected {expected:.3} s", sim.t - t0);
     }
 
     // The same second look while he is already returning: his signed velocity is used on both
