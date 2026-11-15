@@ -51,7 +51,7 @@ sim/                   Cargo workspace
     bb_ffi             C ABI for engine clients (include/bb_ffi.h; c/run_smoke.sh links a C client)
     bb_league          (later milestones)
     bb_cli             `sim-cli` lab binary (Rerun output behind the default `rerun` feature)
-client/                Unreal Engine 5.8 project, C++ only, no binary assets (docs/unreal-spike.md); `client/run.sh`; `BbPark` builds everything that stands still from the sim's park (`bb_game_park`, docs/park-visuals.md), `BbDirector` plays the game
+client/                Unreal Engine 5.8 project, C++ only, no binary assets (docs/unreal-spike.md); `client/run.sh`; `BbPark` builds everything that stands still from the sim's park (`bb_game_park`, docs/park-visuals.md) with every colour and light setting in `BbLook.h`, `BbDirector` plays the game
 bin/                   owner's desktop launcher: play.sh (Unreal client, or the Rerun viewer when the engine is absent), install_launcher.sh
 ```
 

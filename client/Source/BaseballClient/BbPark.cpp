@@ -1,7 +1,9 @@
 #include "BbPark.h"
 #include "BbFrame.h"
 #include "Async/ParallelFor.h"
+#include "BbLook.h"
 #include "Components/DirectionalLightComponent.h"
+#include "Components/PostProcessComponent.h"
 #include "Components/SkyAtmosphereComponent.h"
 #include "Components/SkyLightComponent.h"
 #include "Components/StaticMeshComponent.h"
@@ -15,6 +17,8 @@
 #include "Kismet/GameplayStatics.h"
 #include "Materials/Material.h"
 #include "Materials/MaterialExpressionConstant.h"
+#include "Materials/MaterialExpressionScalarParameter.h"
+#include "Materials/MaterialExpressionVectorParameter.h"
 #include "Materials/MaterialExpressionTextureSampleParameter2D.h"
 #include "Materials/MaterialInstanceDynamic.h"
 #include "ProceduralMeshComponent.h"
@@ -29,14 +33,12 @@ namespace
 	const double FT = 0.3048;
 	const double R2 = 1.4142135623730951;
 
-	// The palette (park-visuals step 2 gathers the whole park's in one place).
-	const FLinearColor GrassLight(0.068f, 0.24f, 0.047f);
-	const FLinearColor GrassDark(0.058f, 0.21f, 0.041f);
-	const FLinearColor Dirt(0.4f, 0.235f, 0.125f);
-	const FLinearColor Track(0.33f, 0.18f, 0.1f);
-	const FLinearColor Chalk(0.9f, 0.9f, 0.88f);
-	const FLinearColor Concrete(0.4f, 0.4f, 0.41f);
-	const FLinearColor WallColor(0.02f, 0.08f, 0.2f);
+	// The ground's colours come from the park's one palette (BbLook.h).
+	using BbLook::GrassLight;
+	using BbLook::GrassDark;
+	using BbLook::Dirt;
+	using BbLook::Track;
+	using BbLook::Chalk;
 
 	// The Official Baseball Rules' field diagram (Appendix 1-3), the same in every park.
 	const double ChalkW = 4.0 / 12.0 * FT;       // foul lines
@@ -188,7 +190,7 @@ FLinearColor FBbGround::Color(double X, double Y) const
 	Lookup(X, Y, SdHere, FenceHere);
 	if (SdHere < 0.f)
 	{
-		return Concrete;
+		return BbLook::Concrete.Color;
 	}
 	const double Ax = FMath::Abs(X);
 	// Along a foul line and off it into foul ground, on the point's own side of the field.
@@ -265,7 +267,7 @@ ABbPark::ABbPark()
 	RootComponent = CreateDefaultSubobject<USceneComponent>(TEXT("Root"));
 }
 
-AStaticMeshActor* ABbPark::Shape(UStaticMesh* Mesh, const FVector& Location, const FVector& Scale, const FLinearColor& Color, const FRotator& Rotation)
+AStaticMeshActor* ABbPark::Shape(UStaticMesh* Mesh, const FVector& Location, const FVector& Scale, const FBbPaint& Paint, const FRotator& Rotation)
 {
 	AStaticMeshActor* A = GetWorld()->SpawnActor<AStaticMeshActor>(Location, Rotation);
 	UStaticMeshComponent* C = A->GetStaticMeshComponent();
@@ -273,27 +275,29 @@ AStaticMeshActor* ABbPark::Shape(UStaticMesh* Mesh, const FVector& Location, con
 	C->SetStaticMesh(Mesh);
 	C->SetCollisionEnabled(ECollisionEnabled::NoCollision);
 	A->SetActorScale3D(Scale);
-	if (FlatMaterial)
+	if (UMaterialInterface* Base = PaintMaterial ? PaintMaterial.Get() : FlatMaterial.Get())
 	{
-		UMaterialInstanceDynamic* M = UMaterialInstanceDynamic::Create(FlatMaterial, A);
-		M->SetVectorParameterValue(TEXT("Color"), Color);
+		UMaterialInstanceDynamic* M = UMaterialInstanceDynamic::Create(Base, A);
+		M->SetVectorParameterValue(TEXT("Color"), Paint.Color);
+		M->SetScalarParameterValue(TEXT("Rough"), Paint.Rough);
 		C->SetMaterial(0, M);
 	}
 	return A;
 }
 
-AStaticMeshActor* ABbPark::Panel(const FVector2D& A, const FVector2D& B, double Depth, double Z0, double Z1, const FLinearColor& Color)
+AStaticMeshActor* ABbPark::Panel(const FVector2D& A, const FVector2D& B, double Depth, double Z0, double Z1, const FBbPaint& Paint)
 {
 	// Engine primitives are 100 cm across. The cube's X is turned to run from A to B.
 	const FVector2D Mid = (A + B) * 0.5;
 	const FVector Dir = ToUE(B.X - A.X, B.Y - A.Y, 0).GetSafeNormal();
-	return Shape(Cube, ToUE(Mid.X, Mid.Y, (Z0 + Z1) * 0.5), FVector((B - A).Size() + 0.05, Depth, Z1 - Z0), Color, Dir.Rotation());
+	return Shape(Cube, ToUE(Mid.X, Mid.Y, (Z0 + Z1) * 0.5), FVector((B - A).Size() + 0.05, Depth, Z1 - Z0), Paint, Dir.Rotation());
 }
 
 void ABbPark::BuildLights()
 {
 	UWorld* W = GetWorld();
-	// The template map may bring its own sky and sun; only add what is missing.
+	// The template map may bring its own sky and sun. Whatever is there is set to the park's
+	// light (BbLook.h); what is missing is added.
 	TArray<AActor*> Found;
 	// No distance haze: the pitch camera looks down 140 m of field through a long lens.
 	UGameplayStatics::GetAllActorsOfClass(W, AExponentialHeightFog::StaticClass(), Found);
@@ -301,23 +305,33 @@ void ABbPark::BuildLights()
 	{
 		A->Destroy();
 	}
+	// The sun's rays run from where it stands down to the field.
+	const double Bearing = FMath::DegreesToRadians(BbLook::SunBearingDeg), Height = FMath::DegreesToRadians(BbLook::SunHeightDeg);
+	const FRotator Rays = (-ToUE(FMath::Sin(Bearing) * FMath::Cos(Height), FMath::Cos(Bearing) * FMath::Cos(Height), FMath::Sin(Height))).Rotation();
 	Found.Reset();
 	UGameplayStatics::GetAllActorsOfClass(W, ADirectionalLight::StaticClass(), Found);
-	// An early-afternoon sun over the third-base side lights both camera angles.
-	for (AActor* A : Found)
-	{
-		A->SetActorRotation(FRotator(-55.f, 100.f, 0.f));
-	}
 	if (Found.Num() == 0)
 	{
-		ADirectionalLight* Sun = W->SpawnActor<ADirectionalLight>(FVector(0, 0, 5000), FRotator(-55.f, 100.f, 0.f));
-		Sun->GetLightComponent()->SetMobility(EComponentMobility::Movable);
-		Sun->GetLightComponent()->SetIntensity(6.f);
-		if (UDirectionalLightComponent* D = Cast<UDirectionalLightComponent>(Sun->GetLightComponent()))
+		Found.Add(W->SpawnActor<ADirectionalLight>(FVector(0, 0, 5000), Rays));
+	}
+	for (AActor* A : Found)
+	{
+		UDirectionalLightComponent* D = Cast<UDirectionalLightComponent>(CastChecked<ADirectionalLight>(A)->GetLightComponent());
+		if (!D)
 		{
-			D->SetAtmosphereSunLight(true);
-			D->DynamicShadowDistanceMovableLight = 30000.f;
+			continue;
 		}
+		D->SetMobility(EComponentMobility::Movable);
+		A->SetActorRotation(Rays);
+		D->SetIntensity(BbLook::SunLux);
+		D->SetUseTemperature(false);
+		D->SetLightColor(BbLook::SunColor);
+		D->SetAtmosphereSunLight(true);
+		D->SetDynamicShadowDistanceMovableLight(BbLook::ShadowReachM * 100.f);
+		D->SetDynamicShadowCascades(BbLook::ShadowCascades);
+		D->SetCascadeDistributionExponent(BbLook::ShadowCascadeExponent);
+		D->SetCascadeTransitionFraction(0.15f);
+		D->SetShadowDistanceFadeoutFraction(0.05f);
 	}
 	Found.Reset();
 	UGameplayStatics::GetAllActorsOfClass(W, ASkyLight::StaticClass(), Found);
@@ -327,12 +341,43 @@ void ABbPark::BuildLights()
 		USkyAtmosphereComponent* Sky = NewObject<USkyAtmosphereComponent>(Atmosphere);
 		Atmosphere->SetRootComponent(Sky);
 		Sky->RegisterComponent();
-		ASkyLight* SkyLight = W->SpawnActor<ASkyLight>();
-		SkyLight->GetLightComponent()->SetMobility(EComponentMobility::Movable);
-		SkyLight->GetLightComponent()->bRealTimeCapture = true;
-		SkyLight->GetLightComponent()->SetIntensity(1.2f);
-		SkyLight->GetLightComponent()->RecaptureSky();
+		Found.Add(W->SpawnActor<ASkyLight>());
 	}
+	for (AActor* A : Found)
+	{
+		USkyLightComponent* S = CastChecked<ASkyLight>(A)->GetLightComponent();
+		S->SetMobility(EComponentMobility::Movable);
+		S->bRealTimeCapture = true;
+		S->SetIntensity(BbLook::SkyFill);
+		// From below, the light that comes back up off the grass rather than a black floor.
+		S->bLowerHemisphereIsBlack = true;
+		S->SetLowerHemisphereColor(BbLook::GroundBounce);
+		S->MarkRenderStateDirty();
+		S->RecaptureSky();
+	}
+	// The picture, for every camera: fixed exposure, a little shade where surfaces meet, and
+	// a light grade.
+	UPostProcessComponent* P = NewObject<UPostProcessComponent>(this);
+	P->SetupAttachment(RootComponent);
+	P->bUnbound = true;
+	FPostProcessSettings& S = P->Settings;
+	S.bOverride_AutoExposureBias = true;
+	S.AutoExposureBias = BbLook::ExposureStops;
+	S.bOverride_AmbientOcclusionIntensity = true;
+	S.AmbientOcclusionIntensity = BbLook::AoIntensity;
+	S.bOverride_AmbientOcclusionRadius = true;
+	S.AmbientOcclusionRadius = BbLook::AoRadiusCm;
+	S.bOverride_AmbientOcclusionQuality = true;
+	S.AmbientOcclusionQuality = 70.f;
+	S.bOverride_ColorSaturation = true;
+	S.ColorSaturation = FVector4(BbLook::Saturation, BbLook::Saturation, BbLook::Saturation, 1.0);
+	S.bOverride_ColorContrast = true;
+	S.ColorContrast = FVector4(BbLook::Contrast, BbLook::Contrast, BbLook::Contrast, 1.0);
+	S.bOverride_BloomIntensity = true;
+	S.BloomIntensity = BbLook::BloomIntensity;
+	S.bOverride_VignetteIntensity = true;
+	S.VignetteIntensity = BbLook::Vignette;
+	P->RegisterComponent();
 }
 
 void ABbPark::Build(const BbPark& Desc)
@@ -344,26 +389,44 @@ void ABbPark::Build(const BbPark& Desc)
 	FlatMaterial = LoadObject<UMaterialInterface>(nullptr, TEXT("/Engine/BasicShapes/BasicShapeMaterial.BasicShapeMaterial"));
 #if WITH_EDITOR
 	{
-		// The engine's shape material takes one flat colour. The ground needs a picture, so a
-		// lit material with a texture parameter is put together here (park-visuals §2): in
-		// code, nothing saved, no asset in the repository.
-		UMaterial* M = NewObject<UMaterial>(GetTransientPackage(), NAME_None, RF_Transient);
-		UMaterialExpressionTextureSampleParameter2D* Tex = NewObject<UMaterialExpressionTextureSampleParameter2D>(M);
-		Tex->ParameterName = TEXT("Tex");
-		Tex->Texture = LoadObject<UTexture2D>(nullptr, TEXT("/Engine/EngineResources/WhiteSquareTexture.WhiteSquareTexture"));
-		Tex->SamplerType = SAMPLERTYPE_Color;
-		UMaterialExpressionConstant* Rough = NewObject<UMaterialExpressionConstant>(M);
-		Rough->R = 0.95f;
-		UMaterialExpressionConstant* Spec = NewObject<UMaterialExpressionConstant>(M);
-		Spec->R = 0.05f;
-		M->GetExpressionCollection().AddExpression(Tex);
-		M->GetExpressionCollection().AddExpression(Rough);
-		M->GetExpressionCollection().AddExpression(Spec);
-		M->GetEditorOnlyData()->BaseColor.Connect(0, Tex);
-		M->GetEditorOnlyData()->Roughness.Connect(0, Rough);
-		M->GetEditorOnlyData()->Specular.Connect(0, Spec);
-		M->PostEditChange();
-		TexturedMaterial = M;
+		// The engine's shape material takes one flat colour and nothing else. The park needs
+		// two of its own (park-visuals §2), put together here in code, nothing saved, no asset
+		// in the repository: paint (a colour and how matt it is) and the ground (a picture).
+		auto Finish = [](UMaterial* M, UMaterialExpression* Color, UMaterialExpression* Rough)
+		{
+			UMaterialExpressionConstant* Spec = NewObject<UMaterialExpressionConstant>(M);
+			Spec->R = 0.3f;
+			for (UMaterialExpression* E : { Color, Rough, (UMaterialExpression*)Spec })
+			{
+				M->GetExpressionCollection().AddExpression(E);
+			}
+			M->GetEditorOnlyData()->BaseColor.Connect(0, Color);
+			M->GetEditorOnlyData()->Roughness.Connect(0, Rough);
+			M->GetEditorOnlyData()->Specular.Connect(0, Spec);
+			M->PostEditChange();
+		};
+		{
+			UMaterial* M = NewObject<UMaterial>(GetTransientPackage(), NAME_None, RF_Transient);
+			UMaterialExpressionVectorParameter* Color = NewObject<UMaterialExpressionVectorParameter>(M);
+			Color->ParameterName = TEXT("Color");
+			Color->DefaultValue = FLinearColor(0.5f, 0.5f, 0.5f);
+			UMaterialExpressionScalarParameter* Rough = NewObject<UMaterialExpressionScalarParameter>(M);
+			Rough->ParameterName = TEXT("Rough");
+			Rough->DefaultValue = 0.9f;
+			Finish(M, Color, Rough);
+			PaintMaterial = M;
+		}
+		{
+			UMaterial* M = NewObject<UMaterial>(GetTransientPackage(), NAME_None, RF_Transient);
+			UMaterialExpressionTextureSampleParameter2D* Tex = NewObject<UMaterialExpressionTextureSampleParameter2D>(M);
+			Tex->ParameterName = TEXT("Tex");
+			Tex->Texture = LoadObject<UTexture2D>(nullptr, TEXT("/Engine/EngineResources/WhiteSquareTexture.WhiteSquareTexture"));
+			Tex->SamplerType = SAMPLERTYPE_Color;
+			UMaterialExpressionConstant* Rough = NewObject<UMaterialExpressionConstant>(M);
+			Rough->R = BbLook::GroundRough;
+			Finish(M, Tex, Rough);
+			TexturedMaterial = M;
+		}
 	}
 #endif
 	Ground = MakeUnique<FBbGround>(Desc);
@@ -513,8 +576,8 @@ void ABbPark::BuildSurface()
 	const FBox2D NearBox(FVector2D(NearX0, NearY0), FVector2D(NearX0 + NearSize, NearY0 + NearSize));
 	AddGround(0, NearX0, NearY0, 0.25, FMath::RoundToInt32(NearSize / 0.25), FMath::RoundToInt32(NearSize / 0.25), FBox2D(ForceInit), Near, NearX0, NearY0, NearSize);
 	AddGround(1, G.X0, G.Y0, 2.0, FMath::RoundToInt32(G.Size / 2.0), FMath::RoundToInt32(G.Size / 2.0), NearBox, Far, G.X0, G.Y0, G.Size);
-	// The land the park stands on, a step below the field.
-	Shape(Plane, ToUE(G.X0 + G.Size * 0.5, G.Y0 + G.Size * 0.5, -0.3), FVector(6.0 * G.Size, 6.0 * G.Size, 1), GrassDark)->GetStaticMeshComponent()->SetCastShadow(false);
+	// The land the park stands on, a step below the field, out to the horizon.
+	Shape(Plane, ToUE(G.X0 + G.Size * 0.5, G.Y0 + G.Size * 0.5, -0.3), FVector(60.0 * G.Size, 60.0 * G.Size, 1), BbLook::Land)->GetStaticMeshComponent()->SetCastShadow(false);
 }
 
 void ABbPark::BuildFurniture()
@@ -527,15 +590,15 @@ void ABbPark::BuildFurniture()
 	const FVector2D At[3] = { B1 + In1 * (BaseSide * 0.5), B2, B3 + In3 * (BaseSide * 0.5) };
 	for (const FVector2D& P : At)
 	{
-		Shape(Cube, ToUE(P.X, P.Y, 0.038), FVector(BaseSide, BaseSide, 0.076), Chalk, FRotator(0, 45, 0));
+		Shape(Cube, ToUE(P.X, P.Y, 0.038), FVector(BaseSide, BaseSide, 0.076), BbLook::Rubber, FRotator(0, 45, 0));
 	}
 	// The rubber: 24 by 6 in, its front edge where the sim has it, on the mound's table.
 	const double RubY = D.rubber_m + 0.25 * FT;
-	Shape(Cube, ToUE(0, RubY, Ground->Height(0, RubY) + 0.005), FVector(0.5 * FT, 2.0 * FT, 0.03), Chalk);
+	Shape(Cube, ToUE(0, RubY, Ground->Height(0, RubY) + 0.005), FVector(0.5 * FT, 2.0 * FT, 0.03), BbLook::Rubber);
 	// Foul poles.
 	for (int32 I = 0; I < 2; ++I)
 	{
-		Shape(Cylinder, ToUE(D.poles[I][0], D.poles[I][1], 6.0), FVector(0.3, 0.3, 12.0), FLinearColor(0.9f, 0.8f, 0.1f));
+		Shape(Cylinder, ToUE(D.poles[I][0], D.poles[I][1], 6.0), FVector(0.3, 0.3, 12.0), BbLook::FoulPole);
 	}
 }
 
@@ -543,7 +606,6 @@ void ABbPark::BuildWalls()
 {
 	// Every wall stands where the sim has it (physics-spec §9.5), as high as the sim has it.
 	const BbPark& D = Ground->Desc;
-	const FLinearColor Shade(0.03f, 0.03f, 0.035f);
 	const int32 N = D.n_wall;
 	for (int32 I = 0; I < N; ++I)
 	{
@@ -555,23 +617,23 @@ void ABbPark::BuildWalls()
 		{
 			// A dugout: a dark bay behind the opening, under a roof.
 			const double Deep = 3.5;
-			Panel(A + Out * (Deep * 0.5), B + Out * (Deep * 0.5), Deep, -0.01, 0.01, Shade)->GetStaticMeshComponent()->SetCastShadow(false);
-			Panel(A + Out * (Deep * 0.5 + 0.3), B + Out * (Deep * 0.5 + 0.3), Deep - 0.6, 2.3, 2.5, WallColor);
+			Panel(A + Out * (Deep * 0.5), B + Out * (Deep * 0.5), Deep, -0.01, 0.01, BbLook::DugoutFloor)->GetStaticMeshComponent()->SetCastShadow(false);
+			Panel(A + Out * (Deep * 0.5 + 0.3), B + Out * (Deep * 0.5 + 0.3), Deep - 0.6, 2.3, 2.5, BbLook::Roof);
 		}
 		else if (P.kind != 0 && P.top_m > D.foul_wall_height_m + 0.01f)
 		{
 			// Behind home the walls carry the screen: a low wall, and the screen drawn as its
 			// posts and top rail only (the net itself is see-through).
-			Panel(A, B, 0.3, 0.0, D.foul_wall_height_m, WallColor);
+			Panel(A, B, 0.3, 0.0, D.foul_wall_height_m, BbLook::WallPad);
 			for (const FVector2D& Q : { A, B })
 			{
-				Shape(Cylinder, ToUE(Q.X, Q.Y, P.top_m * 0.5), FVector(0.12, 0.12, P.top_m), Chalk);
+				Shape(Cylinder, ToUE(Q.X, Q.Y, P.top_m * 0.5), FVector(0.12, 0.12, P.top_m), BbLook::Steel);
 			}
-			Panel(A, B, 0.08, P.top_m - 0.04, P.top_m + 0.04, Chalk);
+			Panel(A, B, 0.08, P.top_m - 0.04, P.top_m + 0.04, BbLook::Steel);
 		}
 		else
 		{
-			Panel(A, B, 0.3, 0.0, P.top_m, WallColor);
+			Panel(A, B, 0.3, 0.0, P.top_m, BbLook::WallPad);
 		}
 	}
 }
@@ -582,8 +644,6 @@ void ABbPark::BuildStands()
 	// park-visuals step 4): two tiers stepping up and back from every wall. None of it is in
 	// the sim.
 	const BbPark& D = Ground->Desc;
-	const FLinearColor Seats(0.2f, 0.22f, 0.28f);
-	const FLinearColor ConcreteTier(0.45f, 0.45f, 0.47f);
 	const int32 N = D.n_wall;
 	for (int32 I = 0; I < N; ++I)
 	{
@@ -601,7 +661,7 @@ void ABbPark::BuildStands()
 			// Each block reaches a little past its piece's ends, so the tiers close up round
 			// the outside of a corner.
 			const FVector2D Reach = Along * (Back * 0.42);
-			Panel(A + Out * Back - Reach, B + Out * Back + Reach, Depth, 0.0, High, Tier == 0 ? Seats : ConcreteTier)->GetStaticMeshComponent()->SetCastShadow(false);
+			Panel(A + Out * Back - Reach, B + Out * Back + Reach, Depth, 0.0, High, Tier == 0 ? BbLook::Seats : BbLook::Concrete);
 		}
 	}
 }

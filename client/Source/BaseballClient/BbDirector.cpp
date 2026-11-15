@@ -220,9 +220,7 @@ void ABbDirector::BeginPlay()
 	ShownCam = 0;
 	Camera->GetCameraComponent()->SetFieldOfView(8.5f);
 	Camera->GetCameraComponent()->bConstrainAspectRatio = false;
-	// Fixed exposure, a little under the default: daylight on flat colors.
-	Camera->GetCameraComponent()->PostProcessSettings.bOverride_AutoExposureBias = true;
-	Camera->GetCameraComponent()->PostProcessSettings.AutoExposureBias = -0.7f;
+	// Exposure and the grade are the park's, for every camera (ABbPark::BuildLights).
 	CamLook = ToUE(0, 6, 1.0);
 	if (APlayerController* PC = GetWorld()->GetFirstPlayerController())
 	{

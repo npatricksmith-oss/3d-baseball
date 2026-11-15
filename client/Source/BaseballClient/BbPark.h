@@ -5,6 +5,7 @@
 #include "CoreMinimal.h"
 #include "GameFramework/Actor.h"
 #include "bb_ffi.h"
+#include "BbLook.h"
 #include "BbPark.generated.h"
 
 class AStaticMeshActor;
@@ -80,9 +81,9 @@ public:
 	static TArray<FBbParkSpot> Spots(const BbPark& Desc);
 
 private:
-	AStaticMeshActor* Shape(UStaticMesh* Mesh, const FVector& Location, const FVector& Scale, const FLinearColor& Color, const FRotator& Rotation = FRotator::ZeroRotator);
+	AStaticMeshActor* Shape(UStaticMesh* Mesh, const FVector& Location, const FVector& Scale, const FBbPaint& Paint, const FRotator& Rotation = FRotator::ZeroRotator);
 	/** A box standing on the line from A to B (sim frame), Depth across and from Z0 to Z1. */
-	AStaticMeshActor* Panel(const FVector2D& A, const FVector2D& B, double Depth, double Z0, double Z1, const FLinearColor& Color);
+	AStaticMeshActor* Panel(const FVector2D& A, const FVector2D& B, double Depth, double Z0, double Z1, const FBbPaint& Paint);
 	void BuildSurface();
 	void BuildFurniture();
 	void BuildWalls();
@@ -100,7 +101,10 @@ private:
 	TObjectPtr<UStaticMesh> Cylinder;
 	UPROPERTY()
 	TObjectPtr<UStaticMesh> Plane;
-	/** The engine's flat-colour material (parameter "Color"). */
+	/** Paint: a colour and how matt it is (parameters "Color", "Rough"), built in code. */
+	UPROPERTY()
+	TObjectPtr<UMaterialInterface> PaintMaterial;
+	/** The engine's flat-colour material (parameter "Color"): what is used without the above. */
 	UPROPERTY()
 	TObjectPtr<UMaterialInterface> FlatMaterial;
 	/** A lit material showing a texture (parameter "Tex"), built in code at start-up. */

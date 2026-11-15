@@ -1,6 +1,6 @@
 # Park visuals: field and stadium
 
-**Status:** plan agreed with the owner 2026-11-15 (twelve questions, answers in §1). **Step 1 (park export and field surface) is built** (§6); steps 2 to 6 are not. This is the first part of the graphics stage; players and game graphics (HUD) get their own plans afterwards.
+**Status:** plan agreed with the owner 2026-11-15 (twelve questions, answers in §1). **Step 1 (park export and field surface) is built** (§6), and **step 2 (light and materials)** (§7); steps 3 to 6 are not. This is the first part of the graphics stage; players and game graphics (HUD) get their own plans afterwards.
 
 **Why now:** Codex's weekly limit is nearly used, so the physics and behaviour work, which needs outside reviews, pauses. The owner moved the looks forward from the polish milestone (PLAN D13, revised the same day). This stage runs without Codex reviews.
 
@@ -76,3 +76,21 @@ Later, outside this plan: night games (towers lit), crowd reaction, per-team col
 - **Q14, the dirt:** the physics takes the drawn layout (skin, infield grass, warning track) when reviews return, with a ledger row and a review.
 
 **Left for later steps:** the palette and light (step 2); real walls, padding, the screen's net, dugouts (step 3); the placeholder seating blocks, which now simply follow every wall (step 4). The grey ground beyond the stands is the edge of the ground picture.
+
+## 7. Step 2 as built (2026-11-15)
+
+Client only; nothing in the sim changed.
+
+**One place for the look: `client/Source/BaseballClient/BbLook.h`.** Every colour of anything that stands still, the sun, the sky's fill, the shadows and the grade are named constants there. `BbPark.cpp` names no colour of its own any more.
+
+- **Palette.** Grass (two mowing shades), dirt, warning track, chalk, the land outside; and, each with a colour and how matt it is: bases and rubber, wall padding, painted steel, foul poles, seats, concrete, roofs, dugout floors. **Proposed (the lead's choice, the owner has not ruled):** wall padding is dark green (it was navy) so the white ball shows against it, and the seats are a muted blue.
+- **Materials.** A second material built in code at start-up beside the ground's: paint, with a colour and a roughness (the engine's shape material has only a colour). Steel and seats take a slight sheen; ground, concrete and chalk are matt.
+- **Sun.** Mid-afternoon: 42° above the horizon (it was 55°), over the third-base side and a little toward the outfield, slightly warm. Shadows fall toward first base, about as long as a player is tall, and both the camera behind home and the one in centre field see lit faces. The template map's own sun and sky are now set to these values rather than left as they came.
+- **Sky.** The sky's fill is about twice what it was, with green light coming back up off the grass, so faces turned from the sun are shaded, not black.
+- **Shadows.** Four cascades reaching 320 m at 4096 texels (three at 2048 before). The seating blocks now cast shadows; in the afternoon the third-base stands shade their own foul ground and the left-field track.
+- **Picture.** One unbound post-process component on the park, so every camera gets the same: fixed exposure (−0.75 stops; the director's camera no longer sets its own), ambient occlusion (0.6, 90 cm), saturation ×1.07, contrast ×1.05, low bloom, a slight vignette.
+- **The land** now runs to the horizon (the dark band under the sky in step 1's pictures was the edge of it).
+
+**Checked** from the six spots and six pictures of play (`client/Saved/Shots/step2_before/`, `step2_after/`, untracked). The ball against the green wall, the blue seats, grass and dirt from the centre-field camera: easy to see. **Cost:** 257 frames a second unattended against 272; memory 2.6 GB, unchanged.
+
+**Not done here:** shadows seen through the centre-field camera's long lens have soft edges (the far cascade); grass and dirt are still flat colour with no grain. Both can be taken up when the walls and seats are real (steps 3 and 4), if the owner wants them.
