@@ -272,9 +272,17 @@ const JUMP_FULL_SIGMAS: f64 = 2.0;
 const BRAKE: f64 = 6.0;
 /// Time to spare a fielder needs to believe he has before he calls a ball in the air, s [E].
 const CALL_SLACK_S: f64 = 0.3;
-/// On a re-call, a fielder in the chaser's tier takes the ball only with this much more time
-/// to spare (or an earlier intercept), s [E]: calls are not traded on noise.
-const RECALL_MARGIN_S: f64 = 0.3;
+/// A teammate's chase, and his call, reach the others this long after he begins it
+/// (agent-models §5.7 `T_call`): the call is heard, or he is seen to go, s [E].
+/// docs/calibration/2026-11-14-fielder-communication.md.
+const CALL_HEARD_S: f64 = 0.3;
+/// Who keeps a ball when two sure calls of the same tier meet (agent-models §5.7, the
+/// priority table) [E]: CF over the corner outfielders; SS, 2B, 3B, 1B, C, P in the infield.
+/// Indexed P C 1B 2B 3B SS LF CF RF; compared only within a tier.
+const CALL_PRIORITY: [u8; 9] = [0, 1, 3, 5, 4, 6, 1, 2, 1];
+/// A fielder re-decides, when what he knows of his teammates changes, only on a read of the
+/// ball this recent, s [E]: an older read is not his view of the ball now.
+const HEAR_READ_AGE_S: f64 = 1.0;
 /// How sure a fielder is before he calls a ball in the air (agent-models §5.7): the time to
 /// spare must also cover this many σ of his read's depth error where it comes down
 /// ([`landing_depth_sigma`]), run off at his speed [E].
@@ -293,6 +301,15 @@ const RELAY_DEEP_M: f64 = 80.0;
 const RELAY_OF_THROW_M: f64 = 45.0;
 const CUTOFF_M: f64 = 14.0;
 
+/// Whether sure call `a` = (fielder, tier) outranks call `b` (agent-models §5.7): the higher
+/// tier, then the priority table (`CALL_PRIORITY`), then, between the corner outfielders who
+/// share a priority, the lower position number (left field over right), a convention every
+/// fielder knows before the pitch (Codex fielder-communication review P2-2: two sure corner
+/// calls both kept going).
+fn outranks(a: (usize, u8), b: (usize, u8)) -> bool {
+    (a.1, CALL_PRIORITY[a.0], std::cmp::Reverse(a.0)) > (b.1, CALL_PRIORITY[b.0], std::cmp::Reverse(b.0))
+}
+
 #[derive(Clone, Debug)]
 enum Ball {
     /// Following physics (batted, deflected, or a throw that got away).
@@ -306,6 +323,20 @@ enum Ball {
     Thrown { path: Trajectory, aim: Vec3, catch_at: Vec3, read_at: Vec3, read_err: [f64; 4], next_read: f64, to_base: u8, receiver: usize, relay: bool },
 }
 
+/// A fielder's own decision on a loose ball (`Sim::decide`).
+#[derive(Clone, Copy, Debug, PartialEq)]
+enum Decision {
+    /// He goes for it.
+    Go,
+    /// He leaves it to a sure call he has heard.
+    Yield,
+    /// He leaves it: by his own estimate someone else gets to it first, or it is not his.
+    Stay,
+    /// A middle infielder leaves a ground ball to his partner, who by his own estimate fields
+    /// it, and covers second.
+    CoverSecond,
+}
+
 #[derive(Clone, Copy, Debug, PartialEq)]
 enum Role {
     Chase,
@@ -314,6 +345,20 @@ enum Role {
     Relay(u8),
     Backup,
     Idle,
+}
+
+/// What a fielder shows his teammates from time `at` (agent-models §5.7): the job he is
+/// running to do (where he is going is visible; a chase also by his call), the base whose
+/// throws he backs up, and his call tier while chasing. Teammates know it `CALL_HEARD_S` later.
+#[derive(Clone, Copy, Debug, PartialEq)]
+struct Shown {
+    at: f64,
+    role: Role,
+    backs: Option<u8>,
+    tier: u8,
+    /// A holder's call for a man to get to a bag for his throw ("two!", pointing): the base
+    /// and the man (agent-models §5.7). Only while he holds the ball.
+    asks: Option<(u8, usize)>,
 }
 
 #[derive(Clone, Debug)]
@@ -341,6 +386,21 @@ struct Fielder {
     belief: Option<BallPath>,
     /// Believed intercept time.
     t_int: f64,
+    /// His own intercept point from that read (his `target` may be a base or a backup spot).
+    int_pt: Vec3,
+    /// When he last read the ball (`belief`, `t_int`, `int_pt`).
+    read_at: f64,
+    /// Which ball that read was of (`Sim::ball_gen` then): a ball that comes loose again in
+    /// the same tick (a deflection, or a throw that comes down and then comes off a glove) is
+    /// a new ball to read (Codex fielder-communication review P2-1, recheck P2-1).
+    read_ball: u64,
+    /// His own call on the ball from his latest call read (agent-models §5.7): 3 or 2 a sure
+    /// call (outfielder, infielder), 1 going for a ball in the air without calling it, 0 no
+    /// catch in the air.
+    call: u8,
+    /// What he has shown his teammates, one entry whenever it changed (`Sim::publish`).
+    /// Others know it `CALL_HEARD_S` later (`Sim::known`, `Sim::seen`).
+    shown: Vec<Shown>,
     /// Last close-range re-read of the ball.
     last_close_read: f64,
     /// Since when his read has said, without a break, that only a dive gets this ball
@@ -373,6 +433,10 @@ struct Fielder {
     /// The bag he is carrying the ball to (agent-models §5.5 A4), so that abandoning the
     /// carry for a throw or for no play brakes him instead of leaving him running at it.
     carry_to: Option<u8>,
+    /// Holding the ball and waiting on a teammate to get to the bag he means to throw to: the
+    /// base and the man he calls to it (agent-models §5.7). Private until published; the man
+    /// acts on it only when he hears it (`Sim::heed_requests`).
+    asks: Option<(u8, usize)>,
     /// His set-up is a double-play pivot at second (agent-models §5.5): its own time, turn
     /// and footwork from how he got the bag, no early release.
     pivot: bool,
@@ -493,6 +557,7 @@ pub struct ScorerThrowFact {
 #[derive(Clone, Copy, Debug)]
 pub struct ScorerCarryFact { pub fielder: AgentId, pub t: f64, pub base: u8, pub batter_goal: u8, pub runner: AgentId }
 
+#[derive(Clone)]
 pub struct LiveOutput {
     pub scorer_carries: Vec<ScorerCarryFact>,
     /// First glove contact with the batted ball, including a deflection.
@@ -557,6 +622,12 @@ pub mod prof {
 /// every tick the ball is held.
 fn debug_throw() -> bool {
     thread_local! { static ON: bool = std::env::var("BB_DEBUG_THROW").is_ok(); }
+    ON.with(|x| *x)
+}
+
+/// Fielder-communication tracing (BB_DEBUG_COMM): each decision and what each man knows.
+fn debug_comm() -> bool {
+    thread_local! { static ON: bool = std::env::var("BB_DEBUG_COMM").is_ok(); }
     ON.with(|x| *x)
 }
 
@@ -1232,7 +1303,17 @@ struct Sim<'a> {
     home: [Vec3; 9],
     f: Vec<Fielder>,
     r: Vec<Runner>,
-    primary: usize,
+    /// When the ball now loose became loose: calls made before it do not rank (a new ball, a
+    /// new call; `set_free`).
+    ball_since: f64,
+    /// Counts the loose balls of this play (`set_free`): which ball a read was of.
+    ball_gen: u64,
+    /// `public_rank` for all nine at (time, ball, positions).
+    rank_cache: std::cell::RefCell<Option<(f64, u64, [Vec3; 9], [Vec3; 9], [f64; 9])>>,
+    /// What each fielder's teammates knew of him at the last tick (`hear` acts on changes):
+    /// his chase and call, and the job he was seen going to.
+    last_known: Vec<(bool, u8, bool)>,
+    last_jobs: Vec<(Role, Option<u8>)>,
     out: LiveOutput,
     bounce_k: u32,
     done: bool,
@@ -1446,7 +1527,12 @@ impl<'a> Sim<'a> {
     #[allow(clippy::type_complexity)]
     fn intercept_scan(&self, i: usize, pred: &BallPath) -> (Option<(f64, Vec3)>, Option<(f64, Vec3)>) {
         let (fd, start) = self.planning_state(i);
-        let fd: &Fielder = &fd;
+        self.scan_from(&fd, start, pred)
+    }
+
+    /// [`Self::intercept_scan`] for a body in state `fd` that can start at `start`.
+    #[allow(clippy::type_complexity)]
+    fn scan_from(&self, fd: &Fielder, start: f64, pred: &BallPath) -> (Option<(f64, Vec3)>, Option<(f64, Vec3)>) {
         let t_end = pred.t_end();
         let mut dive = None;
         // Shortfall at time `t` for a ball at `b`: how far short of the ball's line the
@@ -1466,20 +1552,25 @@ impl<'a> Sim<'a> {
             // fielder's reach. The shortfall cannot fall faster than the ball moves plus the
             // fielder runs, so an interval is searched at a finer step (on the predicted path
             // itself) only when the shortfall at its start is within that bound.
-            let mut pts: Vec<(f64, Vec3, f64)> = Vec::new();
+            // At most SUB points (SUB − 1 between samples, then the sample): a fixed buffer, no
+            // allocation per sample (Codex fielder-communication recheck P3-1).
+            let mut pts = [(0.0, Vec3::ZERO, 0.0); SUB as usize];
+            let mut n = 0;
             if let Some((tp, bp, gp)) = prev {
                 let travel = m::hypot(b.x - bp.x, b.y - bp.y) + fd.a.speed * (t - tp);
                 if gp - dive_extra <= travel {
                     for k in 1..SUB {
                         let ts = tp + (t - tp) * k as f64 / SUB as f64;
                         let (bs, _) = pred.at(ts);
-                        pts.push((ts, bs, gap(ts, bs)));
+                        pts[n] = (ts, bs, gap(ts, bs));
+                        n += 1;
                     }
                 }
             }
-            pts.push((t, b, g));
+            pts[n] = (t, b, g);
+            n += 1;
             prev = Some((t, b, g));
-            for (t, b, g) in pts {
+            for &(t, b, g) in &pts[..n] {
                 // Players see the walls: no intercept past a wall, beyond his reach over it
                 // (Gemini play-area review P2-3).
                 if b.z > catch_ceiling(self.inp.field, b) || t < start || beyond_reach_over_wall(self.inp.field, b) > 0.0 {
@@ -1499,161 +1590,586 @@ impl<'a> Sim<'a> {
         (None, dive)
     }
 
-    /// Who chases: everyone predicts; the earliest believed intercept takes it (calls, §5.7;
-    /// outfielders win ties against infielders on balls in between). Others cover or back up.
+    /// The first read of the ball: every fielder reads it and decides for himself
+    /// (agent-models §5.7; docs/calibration/2026-11-14-fielder-communication.md).
     fn assign(&mut self) {
-        self.assign_among((0..9).collect(), None);
+        self.assign_among((0..9).collect());
     }
 
-    /// Re-call among the current chaser and the four fielders nearest the ball. Runs right
-    /// after the chaser's replan in the same tick, so his fresh prediction is reused.
+    /// Once a second while the ball is loose and the man known to be going for it is far
+    /// from it: the four fielders nearest where everyone sees it being fielded (the ball
+    /// itself while nobody is known to be going for it), and every man going for it, read it
+    /// again and decide again.
     fn recall(&mut self) {
-        // The fielders nearest where the chaser is going (which everyone can see), not the
-        // ball's position now: a pop-up is over the infield while it climbs.
-        let b = self.f[self.primary].target;
+        let b = self.fielding_point().unwrap_or_else(|| self.ball_at(self.t).0);
+        let b = Vec3::new(b.x, b.y, 0.0);
         let mut idx: Vec<usize> = (0..9).collect();
-        idx.sort_by(|&a, &c| {
-            let da = (Vec3::new(b.x, b.y, 0.0) - self.f[a].pos).norm();
-            let dc = (Vec3::new(b.x, b.y, 0.0) - self.f[c].pos).norm();
-            da.total_cmp(&dc).then(a.cmp(&c))
-        });
+        idx.sort_by(|&a, &c| (b - self.f[a].pos).norm().total_cmp(&(b - self.f[c].pos).norm()).then(a.cmp(&c)));
         let mut cands: Vec<usize> = idx.into_iter().take(4).collect();
-        if !cands.contains(&self.primary) {
-            cands.push(self.primary);
+        for i in 0..9 {
+            if self.f[i].role == Role::Chase && !cands.contains(&i) {
+                cands.push(i);
+            }
         }
-        self.assign_among(cands, Some(self.primary));
+        self.assign_among(cands);
     }
 
-    /// `fresh`: a fielder whose belief, intercept, and target were computed this tick from
-    /// the same observation (reused instead of predicted again).
-    fn assign_among(&mut self, cands: Vec<usize>, fresh: Option<usize>) {
-        let mut best = (f64::INFINITY, self.primary);
-        // Calls on a ball in the air (agent-models §5.7): (tier, value) per candidate.
-        let mut calls: Vec<(usize, (u8, f64))> = Vec::new();
-        for i in cands {
-            let reuse = if fresh == Some(i) { self.f[i].belief.take() } else { None };
-            let (p, ti, pt) = match reuse {
-                Some(p) => (p, self.f[i].t_int, self.f[i].target),
-                None => {
-                    let p = self.predict(i);
-                    let (ti, pt) = self.intercept(i, &p);
-                    (p, ti, pt)
+    /// Fielder `i` reads the ball (agent-models §5.1) and plans his intercept (§5.2). A read
+    /// already made this tick of this same ball is reused: it depends only on where he is,
+    /// the tick and the ball.
+    fn read(&mut self, i: usize) {
+        let (t, ball) = (self.t, self.ball_gen);
+        if self.f[i].read_at == t && self.f[i].read_ball == ball && self.f[i].belief.is_some() {
+            return;
+        }
+        let p = self.predict(i);
+        let (ti, pt) = self.intercept(i, &p);
+        let fd = &mut self.f[i];
+        (fd.t_int, fd.int_pt, fd.belief, fd.read_at, fd.read_ball, fd.next_plan) = (ti, pt, Some(p), t, ball, t + REPLAN_S);
+    }
+
+    /// A chaser's replan from a fresh read: he runs at his own new intercept, and his call
+    /// follows the read (`refresh_call`).
+    fn replan(&mut self, i: usize) {
+        self.read(i);
+        self.f[i].target = self.f[i].int_pt;
+        self.refresh_call(i);
+    }
+
+    /// A chaser's call follows his own latest read (agent-models §5.7; Codex
+    /// fielder-communication fourth review P2-2): a man whose fresh read no longer has him
+    /// sure, or no longer has him catching it in the air, stops calling it, and one who has
+    /// become sure calls it. Teammates hear the change `CALL_HEARD_S` later (`publish`).
+    fn refresh_call(&mut self, i: usize) {
+        let fd = &self.f[i];
+        let Some(belief) = fd.belief.as_ref() else { return };
+        let bias = if i >= 6 { -0.15 } else { 0.0 };
+        self.f[i].call = self.call_value(i, belief, fd.t_int, fd.int_pt, bias).0;
+    }
+
+    /// Each chaser re-reads the ball on his own clock and runs at his new intercept; close to
+    /// a slow ball, a chaser simply goes to it (seen directly at short range).
+    fn replan_chasers(&mut self) {
+        for i in 0..9 {
+            if self.f[i].role == Role::Chase && self.t >= self.f[i].next_plan {
+                self.replan(i);
+            }
+        }
+        let (b, bv) = self.ball_at(self.t);
+        if bv.norm() < 3.0 {
+            for fd in self.f.iter_mut() {
+                if fd.role == Role::Chase && (Vec3::new(b.x, b.y, 0.0) - fd.pos).norm() < 5.0 {
+                    fd.target = Vec3::new(b.x, b.y, 0.0);
                 }
-            };
+            }
+        }
+    }
+
+    /// Each candidate reads the ball, makes his own call on it, and decides alone whether to
+    /// go for it (`decide`). Then the staff's tables give the others their jobs.
+    fn assign_among(&mut self, cands: Vec<usize>) {
+        for &i in &cands {
+            self.read(i);
+            let fd = &self.f[i];
             let bias = if i >= 6 { -0.15 } else { 0.0 };
-            if ti + bias < best.0 {
-                best = (ti + bias, i);
-            }
-            calls.push((i, self.call_value(i, &p, ti, pt, bias)));
-            self.f[i].t_int = ti;
-            self.f[i].target = pt;
-            self.f[i].belief = Some(p);
-            self.f[i].next_plan = self.t + REPLAN_S;
+            let call = self.call_value(i, fd.belief.as_ref().expect("just read"), fd.t_int, fd.int_pt, bias).0;
+            self.f[i].call = call;
         }
-        // The best call: a sure catch in the air (outfielders first, then the most time to
-        // spare), then a catch in the air nobody is sure of yet (the most time to spare), over
-        // everything else; otherwise the earliest intercept. On a re-call the
-        // chaser keeps the ball unless someone calls it in a higher tier, or in his tier with
-        // `RECALL_MARGIN_S` more to spare.
-        let key = |c: &(usize, (u8, f64))| c.1;
-        let top = calls.iter().copied().max_by(|a, b| key(a).0.cmp(&key(b).0).then(key(a).1.total_cmp(&key(b).1)).then(b.0.cmp(&a.0)));
-        let mut chosen = top.map(|c| c.0).unwrap_or(best.1);
-        if let (Some(cur), Some(top)) = (fresh.and_then(|p| calls.iter().copied().find(|c| c.0 == p)), top) {
-            if top.0 != cur.0 && top.1.0 == cur.1.0 && top.1.1 <= cur.1.1 + RECALL_MARGIN_S {
-                chosen = cur.0;
-            }
+        let decisions: Vec<(usize, Decision)> = cands.iter().map(|&i| (i, self.decide(i))).collect();
+        // Each man's own choice to cover second, for his own view of the table only.
+        let second: Vec<usize> = decisions.iter().filter(|d| d.1 == Decision::CoverSecond).map(|d| d.0).collect();
+        if debug_comm() {
+            eprintln!("comm t {:.3} play {} call: {:?}", self.t, self.inp.play, decisions.iter().map(|&(i, d)| (i, self.f[i].call, d, (self.f[i].t_int * 100.0).round() / 100.0)).collect::<Vec<_>>());
         }
-        self.primary = chosen;
-        // Each fielder's own intercept, before cover jobs replace some targets with bases.
-        let own: Vec<Vec3> = self.f.iter().map(|fd| fd.target).collect();
-        self.cover_roles();
-        // Ground balls: every infielder who believes he can get to it in the infield breaks
-        // for it at once; nobody waits for a call (agent-models §5.7, ground-ball case). Each
-        // judges from his own read: that it is a ground ball (it comes down within 25 m in
-        // the first `GROUNDER_BOUNCE_S`; an infield pop-up also lands in the infield, seconds
-        // later) and that his intercept is in the infield. He runs at that intercept, not at
-        // the base the cover step just gave him.
-        let mut broke = false;
-        let t_c = self.inp.t_contact;
-        // A ball in the air that nobody has called (the chaser is not sure of it): everyone
-        // else who believes he catches it in the air keeps going for it too, until someone
-        // is sure and calls it; then the others peel off (agent-models §5.7).
-        if calls.iter().any(|c| c.0 == chosen && c.1.0 == 1) {
-            for c in &calls {
-                if c.0 != chosen && c.1.0 == 1 {
-                    self.f[c.0].role = Role::Chase;
-                    self.f[c.0].target = own[c.0];
-                    broke = true;
-                }
-            }
+        for (i, d) in decisions {
+            self.apply(i, d);
         }
-        // A sure call: an infielder who was going for it himself (he believes he catches it in
-        // the air) hears it and peels off to back up the catch (agent-models §5.7). He stops
-        // `PEEL_BACKUP_M` short of where his own read has it coming down, on the side he is
-        // coming from; `assign_backups` gives him the job unless a cover job took him first.
-        // Each infielder in this call is judged afresh: with no sure call, nobody is called off;
-        // a man in it who no longer believes he catches it keeps the spot he had.
-        let sure = calls.iter().any(|c| c.0 == chosen && c.1.0 >= 2);
-        self.f[chosen].peel = None;
-        for c in &calls {
-            let i = c.0;
-            if i == chosen || i >= 6 {
-                continue;
-            }
-            if !sure {
-                self.f[i].peel = None;
-            } else if c.1.0 >= 1 {
-                let fd = &self.f[i];
-                let at = Vec3::new(own[i].x, own[i].y, 0.0);
-                let back = Vec3::new(fd.pos.x - at.x, fd.pos.y - at.y, 0.0);
-                let dir = if back.norm() > 1e-6 { back.normalized() } else { Vec3::new(-at.x, -at.y, 0.0).normalized() };
-                self.f[i].peel = Some(at + dir * PEEL_BACKUP_M);
-            }
-        }
-        // Check non-Cover(2) infielders (1B, 3B, and the on-side idle middle infielder) first,
-        // then let a Role::Cover(2) middle infielder break only if his partner (3 or 5) is not
-        // already chasing, so second base is never left uncovered.
-        for cover2_pass in [false, true] {
-            for i in [2usize, 3, 4, 5] {
-                let is_cover2 = self.f[i].role == Role::Cover(2);
-                if is_cover2 != cover2_pass {
-                    continue;
-                }
-                if is_cover2 {
-                    let other_mi = if i == 3 { 5 } else { 3 };
-                    if self.f[other_mi].role == Role::Chase {
-                        continue;
-                    }
-                }
-                let fd = &self.f[i];
-                let grounder = fd.belief.as_ref().and_then(|p| p.first_bounce()).map(|b| m::hypot(b.1, b.2) < 25.0 && b.0 - t_c < GROUNDER_BOUNCE_S).unwrap_or(false);
-                // Only a fielder who read the ball for this call (Codex momentum review #5: another's
-                // saved target may be a base from an earlier job).
-                let fresh_read = calls.iter().any(|c| c.0 == i);
-                // The first baseman leaves his bag only for a ball on the first-base side of
-                // the line through the mound, the side on which the pitcher's job is to cover
-                // first (agent-models §5.7; Opus infield-fixes review P1-1). On a ball to the
-                // left of the mound he goes to the bag.
-                let side_ok = i != 2 || own[i].x > 0.0;
-                if i != self.primary && fresh_read && grounder && side_ok && fd.t_int.is_finite() && m::hypot(own[i].x, own[i].y) < INFIELD_BREAK_R {
-                    self.f[i].role = Role::Chase;
-                    self.f[i].target = own[i];
-                    broke = true;
-                }
-            }
-        }
-        if broke {
-            self.cover_roles_after_chasers();
-            // He breaks only if first base will still be covered: when the pitcher and the
-            // second baseman are both taken (the pitcher fields it, the second baseman chases
-            // or holds second), he stays with the bag (Opus infield-fixes review P1-1).
-            if self.primary != 2 && self.f[2].role == Role::Chase && !(0..9).any(|i| self.f[i].role == Role::Cover(1)) {
-                self.f[2].role = Role::Cover(1);
-                self.f[2].target = base_pos(1);
-            }
-        }
+        self.cover_roles(&second);
         self.assign_relay();
         self.assign_backups();
+        if debug_comm() {
+            eprintln!("comm t {:.3}   roles {:?} side {:.1}", self.t, self.f.iter().map(|f| f.role).collect::<Vec<_>>(), self.ball_side_x());
+        }
+    }
+
+    /// Fielder `i`'s own decision on the ball (agent-models §5.7), from his own read and call,
+    /// the calls he has heard, and his own estimates of his teammates from where they are and
+    /// how they are moving. Never from a teammate's plan.
+    ///
+    /// A ball he believes he catches in the air (call tier ≥ 1): he goes, unless he has heard
+    /// a sure call that outranks his ([`outranks`]). A ball he cannot catch in the air: he
+    /// leaves it to any sure call he has heard; otherwise an infielder breaks under the
+    /// ground-ball rule (the first baseman whom it sends back to his bag stays there). A man
+    /// not yet going goes if by his own estimate he gets to it before every teammate not known
+    /// to be on another job. A man already going keeps going unless a teammate known to be
+    /// going for it both gets there first by his own estimate and is ahead of him by the order
+    /// everyone can work out (`ahead_of`). The man first in that order is never stopped by the
+    /// others, so two men who each think the other is first do not both stop (Codex
+    /// fielder-communication recheck P1-2: a chase was dropped whenever more men became
+    /// known to be going, and all could stop at once).
+    fn decide(&self, i: usize) -> Decision {
+        let tier = self.f[i].call;
+        let heard = self.heard_call(i);
+        if tier >= 1 {
+            return match heard {
+                Some(h) if outranks(h, (i, tier)) => Decision::Yield,
+                _ => Decision::Go,
+            };
+        }
+        if heard.is_some() {
+            return Decision::Yield;
+        }
+        // A first baseman going for a ball the pitcher is known to be going for too, ahead of
+        // him by the order both can work out, goes back to his bag: one of the two covers first
+        // (recheck P1-2). The pitcher, behind, stops by the general rule below.
+        if i == 2 && self.f[i].role == Role::Chase && self.ahead_of(0, 2) {
+            return Decision::Stay;
+        }
+        if (2..=5).contains(&i) {
+            // A middle infielder's estimate of his partner, made once for both rules.
+            let partner = (i == 3 || i == 5).then(|| self.partner_fields_it(i));
+            match self.grounder_break(i, partner) {
+                Some(true) => return Decision::Go,
+                // The first-base rule leaves this ground ball to someone else: he stays with
+                // his bag (recheck P1-2: he used to fall through to the general rule).
+                Some(false) if i == 2 => return Decision::Stay,
+                _ => {}
+            }
+            if partner == Some(true) {
+                return Decision::CoverSecond;
+            }
+        }
+        let goes = if self.f[i].role == Role::Chase { !(0..9).any(|j| self.ahead_of(j, i) && self.beats_by_own_estimate(i, j)) } else { self.first_by_own_estimate(i) };
+        if goes { Decision::Go } else { Decision::Stay }
+    }
+
+    /// By fielder `i`'s own read, teammate `j` gets to the ball before he does (his estimate of
+    /// `j` from where he is and how he moves, `seen_intercept`; outfielders win near-ties of
+    /// 0.15 s; a dead heat to the lower index).
+    fn beats_by_own_estimate(&self, i: usize, j: usize) -> bool {
+        let fd = &self.f[i];
+        let Some(pred) = fd.belief.as_ref() else { return false };
+        let bias = |k: usize| if k >= 6 { -0.15 } else { 0.0 };
+        let (mine, theirs) = (fd.t_int + bias(i), self.seen_intercept(j, pred).0 + bias(j));
+        theirs < mine || (theirs == mine && j < i)
+    }
+
+    /// Fielder `j`, known to be going for this ball, has it ahead of chaser `i` by an order
+    /// every fielder can work out from what all can see (`public_rank`; a dead heat to the
+    /// call priority, `publicly_before`). As in `first_by_own_estimate`, an outfielder
+    /// weighs only outfielders.
+    fn ahead_of(&self, j: usize, i: usize) -> bool {
+        if j == i || (i >= 6 && j < 6) || !matches!(self.known(j), (true, _, true)) {
+            return false;
+        }
+        self.publicly_before(j, i)
+    }
+
+    /// How soon fielder `j` can field the loose ball, as every teammate can work it out alike
+    /// (agent-models §5.7): his earliest standing intercept, or dive, of `public_path` (the
+    /// ball as all see it now, run on with the agreed model: its descent and where it stops),
+    /// from where he is and how he is moving, at his known speed after what is left of his
+    /// known reaction (`seen_intercept`). Never the world's future or anyone's own read.
+    /// Computed once a tick for all nine and kept while the ball and bodies are unchanged.
+    /// (Codex fielder-communication third review P1-2: the first version measured his run to
+    /// the ball's ground line, unbounded, so a man standing on that line 60 m past where a slow
+    /// ball stops, or the pitcher under an outfield fly's line, ranked first.)
+    fn public_rank(&self, j: usize) -> f64 {
+        let pos: [Vec3; 9] = core::array::from_fn(|k| self.f[k].pos);
+        let vel: [Vec3; 9] = core::array::from_fn(|k| self.f[k].vel);
+        if let Some((t, g, p, v, r)) = *self.rank_cache.borrow() {
+            if t == self.t && g == self.ball_gen && p == pos && v == vel {
+                return r[j];
+            }
+        }
+        let path = self.public_path();
+        let r: [f64; 9] = core::array::from_fn(|k| self.seen_intercept(k, &path).0);
+        *self.rank_cache.borrow_mut() = Some((self.t, self.ball_gen, pos, vel, r));
+        r[j]
+    }
+
+    /// The shared order for the loose ball (agent-models §5.7): `j` comes before `i` when
+    /// his `public_rank` is sooner; a dead heat (the intercept scan's grid makes exact ties,
+    /// most often on pop-ups) goes by the call priority everyone knows before the pitch, an
+    /// outfielder over an infielder and then `CALL_PRIORITY`, so the pitcher is the last
+    /// choice (Opus fourth review P3-1: the tie went to the lower position number, the
+    /// pitcher, on a pop-up over the mound), then the lower position.
+    fn publicly_before(&self, j: usize, i: usize) -> bool {
+        let key = |k: usize| (std::cmp::Reverse(k >= 6), std::cmp::Reverse(CALL_PRIORITY[k]), k);
+        let (rj, ri) = (self.public_rank(j), self.public_rank(i));
+        rj < ri || (rj == ri && key(j) < key(i))
+    }
+
+    /// The loose ball as every fielder can work it out alike: its position and velocity now,
+    /// the typical spin for how it is moving (`believed_spin`), run on with the fielders' own
+    /// physics and no bounce scatter, as a read with no error is (`read_prediction`).
+    fn public_path(&self) -> BallPath {
+        let (b, v) = self.ball_at(self.t);
+        let w = believed_spin(v, self.off_bat().map(|x| x.0));
+        batted_path_dt(self.inp.env, self.inp.field, BallState { r: b, v, w }, self.t, AGENT_DT, |_, _| (0.0, 0.0))
+    }
+
+    /// Who goes for a loose ball that every fielder has left to another (agent-models §5.7;
+    /// Codex fielder-communication recheck P1-2). Once every man is known not to be going for
+    /// it, the man first by `public_rank`, which each works out alike, goes; nobody else
+    /// moves. A man known to be covering first is left out, so first stays covered. Before
+    /// this every man with a recent read decided again with every teammate known not to be
+    /// going left out of his comparison, so all nine went, then all stopped, every 0.6 s.
+    fn fallback_chaser(&self) -> Option<usize> {
+        if !(0..9).all(|j| matches!(self.known(j), (false, _, true))) {
+            return None;
+        }
+        (0..9).filter(|&j| self.known_job(j).0 != Role::Cover(1)).reduce(|best, j| if self.publicly_before(j, best) { j } else { best })
+    }
+
+    /// Carry out fielder `i`'s decision. A man who goes runs at his own intercept. A chaser who
+    /// stops leaves the ball: an infielder who yields a ball in the air to a sure call backs up
+    /// the catch from `PEEL_BACKUP_M` short of where his own read has it coming down, on his
+    /// side of it (`assign_backups` gives him the job unless a cover job takes him); a middle
+    /// infielder who leaves a ground ball to his partner covers second (the man who does not
+    /// field it covers); anyone else waits for the tables to give him a job.
+    fn apply(&mut self, i: usize, d: Decision) {
+        match d {
+            Decision::Go => {
+                let fd = &mut self.f[i];
+                fd.role = Role::Chase;
+                fd.target = fd.int_pt;
+                fd.peel = None;
+            }
+            Decision::CoverSecond => {
+                let fd = &mut self.f[i];
+                if fd.role != Role::Cover(2) {
+                    go_idle(fd);
+                    fd.role = Role::Cover(2);
+                    fd.target = base_pos(2);
+                }
+                fd.peel = None;
+            }
+            Decision::Yield | Decision::Stay => {
+                let was_chasing = self.f[i].role == Role::Chase;
+                let fd = &mut self.f[i];
+                if d == Decision::Stay {
+                    fd.peel = None;
+                } else if i < 6 && fd.call >= 1 {
+                    let at = Vec3::new(fd.int_pt.x, fd.int_pt.y, 0.0);
+                    let back = Vec3::new(fd.pos.x - at.x, fd.pos.y - at.y, 0.0);
+                    let dir = if back.norm() > 1e-6 { back.normalized() } else { Vec3::new(-at.x, -at.y, 0.0).normalized() };
+                    fd.peel = Some(at + dir * PEEL_BACKUP_M);
+                }
+                if was_chasing {
+                    go_idle(fd);
+                }
+            }
+        }
+    }
+
+    /// A ground ball, by this read: it comes down within 25 m in the first
+    /// `GROUNDER_BOUNCE_S` (an infield pop-up also lands within 25 m, seconds later).
+    fn is_grounder(&self, p: &BallPath) -> bool {
+        p.first_bounce().is_some_and(|b| m::hypot(b.1, b.2) < 25.0 && b.0 - self.inp.t_contact < GROUNDER_BOUNCE_S)
+    }
+
+    /// Infielders break for a ground ball without a call (agent-models §5.7), each from his own
+    /// recent read: it is a ground ball and his intercept is in the infield. He runs at that
+    /// intercept. The first baseman goes only for a ball on the first-base side of the line
+    /// through the mound (the side on which the pitcher's job is to cover first), and not
+    /// when by his own estimate the pitcher gets to it first (the pitcher who fields it
+    /// cannot cover first; Opus infield-fixes review P1-1). A middle infielder goes only if
+    /// his partner does not field it by his own estimate (`partner_fields_it`); if the partner
+    /// does, he covers second, in range or not (the man who does not field it covers;
+    /// `Decision::CoverSecond`). Each judges this himself,
+    /// at once, without waiting to see the other go (Opus infield-fixes review P2-3). A
+    /// teammate known to be on another job does not count. `partner`: for a middle
+    /// infielder, his `partner_fields_it`. `None` when the rule does not apply (not a ground
+    /// ball he can reach in the infield by a recent read), else whether he breaks.
+    fn grounder_break(&self, i: usize, partner: Option<bool>) -> Option<bool> {
+        let fd = &self.f[i];
+        let pred = fd.belief.as_ref()?;
+        let recent = self.t - fd.read_at <= HEAR_READ_AGE_S;
+        if !(recent && self.is_grounder(pred) && fd.t_int.is_finite() && m::hypot(fd.int_pt.x, fd.int_pt.y) < INFIELD_BREAK_R) {
+            return None;
+        }
+        // By his own read, `j` gets to the ball before he does (a dead heat to the lower index),
+        // and is not known to be doing something else.
+        let beats_me = |j: usize| {
+            let (chasing, _, this_ball) = self.known(j);
+            let theirs = self.seen_intercept(j, pred).0;
+            !(this_ball && !chasing) && (theirs < fd.t_int || (theirs == fd.t_int && j < i))
+        };
+        Some(match i {
+            2 => fd.int_pt.x > 0.0 && !beats_me(0),
+            3 | 5 => partner == Some(false),
+            _ => true,
+        })
+    }
+
+    /// By middle infielder `i`'s own recent read, a ground ball his partner fields: the
+    /// partner (not known to be on another job) gets to it in the infield, and before `i`
+    /// does (a dead heat to the lower index). Then `i` covers second.
+    fn partner_fields_it(&self, i: usize) -> bool {
+        let fd = &self.f[i];
+        let Some(pred) = fd.belief.as_ref() else { return false };
+        if self.t - fd.read_at > HEAR_READ_AGE_S || !self.is_grounder(pred) {
+            return false;
+        }
+        let partner = 8 - i;
+        // A partner known to be on a job he cannot leave for it (another base, the cutoff)
+        // does not field it; one idle, backing up, or covering second may, on the same reread
+        // (Codex fielder-communication third review P2-1: leaving out every partner not known
+        // to be going sent both, with second empty, even on error-free reads).
+        if matches!(self.known_job(partner).0, Role::Cover(b) if b != 2) || matches!(self.known_job(partner).0, Role::Relay(_)) {
+            return false;
+        }
+        let (tp, pp) = self.seen_intercept(partner, pred);
+        m::hypot(pp.x, pp.y) < INFIELD_BREAK_R && (tp < fd.t_int || (tp == fd.t_int && partner < i))
+    }
+
+    /// By fielder `i`'s own read, he fields the ball before every teammate who could (his
+    /// estimate of each from where that man is and how he is moving, at his known speed,
+    /// after what is left of his known reaction; outfielders win near-ties of 0.15 s on balls
+    /// in between). A teammate known to be on another job does not count. An outfielder
+    /// weighs only the other outfielders: he comes in on any ball hit his way and does not
+    /// stop for an infielder his own read, from 60 m and more, says might reach it (the
+    /// infielder, near it, judges that himself; if he fields it the outfielder's run is the
+    /// backup). Weighing the infielders too, outfielders left 4.5% of balls to an infielder
+    /// whose own read had no play, and nobody went for them until the 0.3 s had passed (docs/
+    /// calibration/2026-11-14-fielder-communication.md §7).
+    fn first_by_own_estimate(&self, i: usize) -> bool {
+        let fd = &self.f[i];
+        let Some(pred) = fd.belief.as_ref() else { return false };
+        let bias = |j: usize| if j >= 6 { -0.15 } else { 0.0 };
+        let mine = fd.t_int + bias(i);
+        (0..9).filter(|&j| j != i && (i < 6 || j >= 6)).all(|j| {
+            let (chasing, _, this_ball) = self.known(j);
+            if this_ball && !chasing {
+                return true;
+            }
+            let theirs = self.seen_intercept(j, pred).0 + bias(j);
+            let first = mine < theirs || (mine == theirs && i < j);
+            if !first && debug_comm() {
+                eprintln!("comm t {:.3} play {} f{i} ({mine:.2}) defers to f{j} ({theirs:.2}) at {:?}", self.t, self.inp.play, self.seen_intercept(j, pred).1);
+            }
+            first
+        })
+    }
+
+    /// Fielder `j`'s earliest intercept as a teammate judges it, on the teammate's read
+    /// `pred`: from `j`'s visible position and velocity, at his known speed, starting once his
+    /// known reaction time is over. Nothing of `j`'s own plan is used.
+    fn seen_intercept(&self, j: usize, pred: &BallPath) -> (f64, Vec3) {
+        let fd = &self.f[j];
+        let start = self.t.max(self.inp.t_contact + fd.a.reaction);
+        let (standing, dive) = self.scan_from(fd, start, pred);
+        standing.or(dive).unwrap_or_else(|| {
+            let t_end = pred.t_end();
+            let (rest, _) = pred.at(t_end);
+            (t_end.max(start + run_time_to(fd, rest, 0.0)), Vec3::new(rest.x, rest.y, 0.0))
+        })
+    }
+
+    /// Seconds a teammate judges fielder `j` needs to get to `pt`: what is left of his known
+    /// reaction time, then his run from his visible position and velocity at his known speed.
+    fn eta(&self, j: usize, pt: Vec3) -> f64 {
+        let fd = &self.f[j];
+        (self.inp.t_contact + fd.a.reaction - self.t).max(0.0) + run_time_to(fd, pt, REACH * 0.7) + wall_delay(self.inp.field, fd, pt, REACH * 0.7)
+    }
+
+    /// What fielder `j`'s teammates know of him now (agent-models §5.7): whether he is going
+    /// for the ball and his call tier, as he showed it `CALL_HEARD_S` ago, and whether that
+    /// was on the ball now loose. A call made on an earlier ball does not rank (tier 0).
+    /// Before he has shown anything he is known only to be at his spot.
+    fn known(&self, j: usize) -> (bool, u8, bool) {
+        match self.shown_then(j) {
+            Some(e) => {
+                let this_ball = e.at + 1e-9 >= self.ball_since;
+                (e.role == Role::Chase, if this_ball { e.tier } else { 0 }, this_ball)
+            }
+            None => (false, 0, false),
+        }
+    }
+
+    /// What fielder `j` showed `CALL_HEARD_S` ago: all his teammates can know of him now.
+    fn shown_then(&self, j: usize) -> Option<&Shown> {
+        let horizon = self.t - CALL_HEARD_S + 1e-9;
+        self.f[j].shown.iter().rev().find(|e| e.at <= horizon)
+    }
+
+    /// The job fielder `j` is known to be doing (and the base he backs up), as he showed it
+    /// `CALL_HEARD_S` ago; before he has shown anything, none.
+    fn known_job(&self, j: usize) -> (Role, Option<u8>) {
+        self.shown_then(j).map(|e| (e.role, e.backs)).unwrap_or((Role::Idle, None))
+    }
+
+    /// Fielder `j`'s job as fielder `o` knows it (Codex fielder-communication review P1-1):
+    /// his own job when `j` is himself, a teammate's as it is known (`known_job`). Every
+    /// table a fielder works out for himself (covers, backups, the receiver of a throw) uses
+    /// this, never a teammate's choice not yet seen or heard.
+    fn seen(&self, o: usize, j: usize) -> (Role, Option<u8>) {
+        if o == j { (self.f[o].role, self.f[o].backs) } else { self.known_job(j) }
+    }
+
+    /// The best sure call fielder `i` has heard from a teammate: (who, tier).
+    fn heard_call(&self, i: usize) -> Option<(usize, u8)> {
+        (0..9)
+            .filter(|&j| j != i)
+            .filter_map(|j| {
+                let (chasing, tier, _) = self.known(j);
+                (chasing && tier >= 2).then_some((j, tier))
+            })
+            .max_by(|&a, &b| if outranks(a, b) { std::cmp::Ordering::Greater } else { std::cmp::Ordering::Less })
+    }
+
+    /// End of a tick: each fielder shows his teammates what he is doing (heard or seen
+    /// `CALL_HEARD_S` later): whether he is going for the ball and his call, or the base he
+    /// is covering, the cutoff he is going out to, the backup he is running to. Everyone
+    /// shows himself once on each new ball, so that teammates come to know who is not going
+    /// for it.
+    fn publish(&mut self) {
+        let (t, since) = (self.t, self.ball_since);
+        let holder = match self.ball {
+            Ball::Held { by } => Some(by),
+            _ => None,
+        };
+        for (i, fd) in self.f.iter_mut().enumerate() {
+            let tier = if fd.role == Role::Chase { fd.call } else { 0 };
+            // A man's call for a teammate to a bag stands only while he has the ball.
+            let asks = if holder == Some(i) { fd.asks } else { None };
+            let push = match fd.shown.last() {
+                Some(e) => e.at + 1e-9 < since || (e.role, e.backs, e.tier, e.asks) != (fd.role, fd.backs, tier, asks),
+                None => true,
+            };
+            if push {
+                fd.shown.push(Shown { at: t, role: fd.role, backs: fd.backs, tier, asks });
+            }
+        }
+    }
+
+    /// When what the fielders know of each other changes (a call heard, a man seen going or
+    /// stopping), each chaser decides again whether to yield, a man with a recent read whether
+    /// to go (see below), and the tables fill the bases and backups with what is now known.
+    /// A change only in the jobs men are known to be doing (a cover, a cutoff, a backup) has
+    /// each man work out his own cover and backup jobs again.
+    fn hear(&mut self) {
+        let now: Vec<(bool, u8, bool)> = (0..9).map(|j| self.known(j)).collect();
+        let jobs: Vec<(Role, Option<u8>)> = (0..9).map(|j| self.known_job(j)).collect();
+        let calls = now != self.last_known;
+        if !calls && jobs == self.last_jobs {
+            return;
+        }
+        self.last_known = now;
+        self.last_jobs = jobs;
+        if !matches!(self.ball, Ball::Free { .. }) {
+            // With the ball in a fielder's hands the bases are still re-worked (a cover man
+            // seen going out as the cutoff is replaced at his base).
+            if matches!(self.ball, Ball::Held { .. }) {
+                self.cover_roles_after_chasers();
+            }
+            return;
+        }
+        if !calls {
+            self.cover_roles_after_chasers();
+            self.assign_backups();
+            return;
+        }
+        // A man not going for it reconsiders a ball in the air he believes he catches (a call
+        // that outranked his may be gone). A ball every man has left to another is sent to
+        // one man by the shared convention below (`fallback_chaser`).
+        let decisions: Vec<(usize, Decision)> = (0..9)
+            .filter(|&i| {
+                let fd = &self.f[i];
+                let recent = self.t - fd.read_at <= HEAR_READ_AGE_S;
+                fd.belief.is_some() && (fd.role == Role::Chase || (recent && fd.call >= 1))
+            })
+            .map(|i| (i, self.decide(i)))
+            .collect();
+        if debug_comm() {
+            eprintln!("comm t {:.3} play {} hear: known {:?} decide {:?}", self.t, self.inp.play, self.last_known, decisions);
+        }
+        for (i, d) in decisions {
+            // A man not chasing who stays out of it keeps the job he has.
+            if self.f[i].role == Role::Chase || d == Decision::Go {
+                self.apply(i, d);
+            }
+        }
+        if let Some(f) = self.fallback_chaser() {
+            if self.f[f].role != Role::Chase {
+                if debug_comm() {
+                    eprintln!("comm t {:.3} play {} nobody going: f{f} goes by the convention", self.t, self.inp.play);
+                }
+                self.read(f);
+                self.apply(f, Decision::Go);
+            }
+        }
+        self.cover_roles_after_chasers();
+        self.assign_backups();
+        if debug_comm() {
+            eprintln!("comm t {:.3}   roles {:?} lead {:?}", self.t, self.f.iter().map(|f| f.role).collect::<Vec<_>>(), self.lead());
+        }
+    }
+
+    /// The man the defense knows is going for the ball (the lead chaser): of those known to be
+    /// chasing, the highest known call, then (sure calls) the order of [`outranks`], then the
+    /// one nearest the ball now. `None` until someone's chase is known.
+    fn lead(&self) -> Option<usize> {
+        let (b, _) = self.ball_at(self.t);
+        let d = |j: usize| m::hypot(b.x - self.f[j].pos.x, b.y - self.f[j].pos.y);
+        (0..9)
+            .filter_map(|j| {
+                let (chasing, tier, _) = self.known(j);
+                chasing.then_some((j, (tier, if tier >= 2 { (CALL_PRIORITY[j], 9 - j) } else { (0, 0) })))
+            })
+            .max_by(|a, c| a.1.cmp(&c.1).then(d(c.0).total_cmp(&d(a.0))).then(c.0.cmp(&a.0)))
+            .map(|x| x.0)
+    }
+
+    /// Where the ball is being fielded, as everyone sees it: the holder; while it is loose,
+    /// the point on the ball's ground track (where it is now, on along its ground velocity)
+    /// nearest the man known to be going for it: at his feet when he is camped under a fly,
+    /// where his path meets its line when he is cutting it off. `None` while it is loose and
+    /// nobody is known to be going for it, or in flight as a throw.
+    fn fielding_point(&self) -> Option<Vec3> {
+        match self.ball {
+            Ball::Held { by } => Some(self.f[by].pos),
+            Ball::Free { .. } => self.lead().map(|l| self.track_point(self.f[l].pos)),
+            Ball::Thrown { .. } => None,
+        }
+    }
+
+    /// The point of the loose ball's ground track nearest `p`.
+    fn track_point(&self, p: Vec3) -> Vec3 {
+        let (b, v) = self.ball_at(self.t);
+        let g = Vec3::new(b.x, b.y, 0.0);
+        let h = Vec3::new(v.x, v.y, 0.0);
+        if h.norm() < 0.5 {
+            return g;
+        }
+        let u = h.normalized();
+        g + u * Vec3::new(p.x - g.x, p.y - g.y, 0.0).dot(u).max(0.0)
+    }
+
+    /// Which side the ball is on, as everyone sees it (x < 0: the left side): where it is
+    /// being fielded once that is known, else where it is heading (its ground position and
+    /// one second of its ground velocity).
+    fn ball_side_x(&self) -> f64 {
+        if let Some(p) = self.fielding_point() {
+            return p.x;
+        }
+        let (b, v) = self.ball_at(self.t);
+        b.x + v.x
+    }
+
+    /// The pitcher's own read says the first baseman will go for this ball: a ground ball
+    /// the first baseman (by the pitcher's estimate of him) reaches in the infield on the
+    /// first-base side of the mound. The pitcher then breaks for first at once, as the
+    /// convention has him do, without waiting to see the first baseman go.
+    fn pitcher_expects_first_baseman_break(&self) -> bool {
+        let p = &self.f[0];
+        let Some(pred) = p.belief.as_ref() else { return false };
+        if self.t - p.read_at > HEAR_READ_AGE_S || !self.is_grounder(pred) {
+            return false;
+        }
+        let (_, pt) = self.seen_intercept(2, pred);
+        pt.x > 0.0 && m::hypot(pt.x, pt.y) < INFIELD_BREAK_R
     }
 
     /// A fielder's call on the ball from his own read (agent-models §5.7). He believes he
@@ -1703,7 +2219,8 @@ impl<'a> Sim<'a> {
                 _ => None,
             };
             go_idle(&mut self.f[i]);
-            if let Some(b) = base.filter(|&b| !(0..9).any(|j| j != by && self.f[j].role == Role::Cover(b))) {
+            // Nobody he knows of is covering it (a cover taken this instant is not yet seen).
+            if let Some(b) = base.filter(|&b| !(0..9).any(|j| j != by && j != i && self.seen(i, j).0 == Role::Cover(b))) {
                 self.f[i].role = Role::Cover(b);
                 self.f[i].target = base_pos(b);
             }
@@ -1720,41 +2237,43 @@ impl<'a> Sim<'a> {
     }
 
     /// A called-off infielder's backup job ends when the ball comes down, is caught, or is
-    /// thrown (Codex peel-off review #2): he is free again, and a loose ball is re-called at
-    /// once (after the chaser's replan, as the once-a-second re-call does), so the man who
-    /// was backing it up can field it.
+    /// thrown (Codex peel-off review #2): he is free again, and on a loose ball he reads it
+    /// at once and takes his own job (`retake`), so the man who was backing it up can field
+    /// it. Only he does: his backup was his own, and his teammates' reads and jobs do not
+    /// hang on it (Codex fielder-communication recheck P1-1; it used to re-call the men near
+    /// the ball whenever someone's backup ended).
     fn expire_peels(&mut self) {
-        if self.ball_still_up() || !self.f.iter().any(|fd| fd.peel.is_some()) {
+        if self.ball_still_up() {
             return;
         }
-        for fd in self.f.iter_mut() {
-            if fd.peel.take().is_some() && fd.role == Role::Backup && fd.backs.is_none() {
+        let ended: Vec<usize> = (0..9).filter(|&i| self.f[i].peel.is_some()).collect();
+        for &i in &ended {
+            let fd = &mut self.f[i];
+            fd.peel = None;
+            if fd.role == Role::Backup && fd.backs.is_none() {
                 go_idle(fd);
             }
         }
         if matches!(self.ball, Ball::Free { .. }) {
-            self.replan_primary();
-            self.recall();
+            for i in ended {
+                if self.f[i].role == Role::Idle {
+                    self.retake(i);
+                }
+            }
         }
     }
 
-    /// The chaser's replan from a fresh read.
-    fn replan_primary(&mut self) {
-        let pi = self.primary;
-        let p = self.predict(pi);
-        let (ti, pt) = self.intercept(pi, &p);
-        self.f[pi].t_int = ti;
-        self.f[pi].target = pt;
-        self.f[pi].belief = Some(p);
-        self.f[pi].next_plan = self.t + REPLAN_S;
-    }
-
-    /// Where the ball is being fielded, as the defense sees it: the holder, or the chaser's
-    /// intercept point while it is loose.
-    fn fielding_point(&self) -> Vec3 {
-        match self.ball {
-            Ball::Held { by } => self.f[by].pos,
-            _ => self.f[self.primary].target,
+    /// Fielder `i`, with no job, reads the ball, makes his call and decides alone whether to
+    /// go for it; if not, he takes the cover or backup job his own working of the tables
+    /// gives him (`cover_after_chasers`, `backup_job`).
+    fn retake(&mut self, i: usize) {
+        self.read(i);
+        let fd = &self.f[i];
+        let bias = if i >= 6 { -0.15 } else { 0.0 };
+        self.f[i].call = self.call_value(i, fd.belief.as_ref().expect("just read"), fd.t_int, fd.int_pt, bias).0;
+        match self.decide(i) {
+            d @ (Decision::Go | Decision::CoverSecond) => self.apply(i, d),
+            _ => self.take_own_job(i),
         }
     }
 
@@ -1767,7 +2286,7 @@ impl<'a> Sim<'a> {
         // himself, or a middle infielder on a shallow fly), nobody else goes out.
         let fielder = match self.ball {
             Ball::Held { by } => by,
-            _ => self.primary,
+            _ => self.lead()?,
         };
         if fielder < 6 {
             return None;
@@ -1815,9 +2334,9 @@ impl<'a> Sim<'a> {
             return None;
         }
         // While the ball is loose he plays it himself if his own read says he gets there
-        // before the man chasing it (a grounder he can cut off before it reaches the
-        // outfield): the relay job is for a ball that is past him.
-        if matches!(self.ball, Ball::Free { .. }) && self.f[who].t_int <= self.f[self.primary].t_int {
+        // before the man chasing it could get to the same spot (a grounder he can cut off
+        // before it reaches the outfield): the relay job is for a ball that is past him.
+        if matches!(self.ball, Ball::Free { .. }) && self.f[who].t_int <= self.t + self.eta(fielder, self.f[who].int_pt) {
             return None;
         }
         Some((who, b))
@@ -1832,67 +2351,93 @@ impl<'a> Sim<'a> {
         base + line.normalized() * s
     }
 
-    /// Give the cutoff or relay job to its man (taking him off any base he was covering,
-    /// which someone else then covers).
+    /// Give the cutoff or relay job to its man (taking him off any base he was covering;
+    /// his teammates learn it when his new job is known, `hear`, and one of them covers it:
+    /// his private change of job refreshes nobody else's; Codex fielder-communication third
+    /// review P1-1).
     fn assign_relay(&mut self) {
-        let Some((i, b)) = self.relay_job(self.fielding_point()) else { return };
-        let was_cover = matches!(self.f[i].role, Role::Cover(_));
+        let Some(from) = self.fielding_point() else { return };
+        let Some((i, b)) = self.relay_job(from) else { return };
         self.f[i].role = Role::Relay(b);
         self.f[i].backs = None;
-        self.f[i].target = Self::relay_spot(self.fielding_point(), b);
-        if was_cover {
+        self.f[i].target = Self::relay_spot(from, b);
+    }
+
+    /// Fielder `i`, with no job now, takes the cover or backup job his own working of the
+    /// tables gives him (`cover_after_chasers`, `backup_job`), and nobody else is moved.
+    fn take_own_job(&mut self, i: usize) {
+        if let Some(b) = self.cover_after_chasers(i) {
+            self.f[i].role = Role::Cover(b);
+            self.f[i].target = base_pos(b);
+        } else if let Some((target, backs)) = self.fielding_point().and_then(|from| self.backup_job(i, from)) {
+            self.f[i].role = Role::Backup;
+            self.f[i].target = target;
+            self.f[i].backs = backs;
+        }
+    }
+
+    /// Each tick each man works out the cutoff job for himself (`relay_job`: from what
+    /// everyone sees, and for its man his own chase and read): its man takes it, or keeps to
+    /// its line as the fielding point and the runners' intentions change; a man who had it
+    /// and is no longer its man goes back to covering. A throw to someone else that goes by
+    /// him ends it; a throw coming to him keeps it. Whether another man privately has the
+    /// job does not enter (Codex fielder-communication recheck P1-1: the first cutoff man
+    /// found used to decide who else was looked at), nor does a man's leaving it or taking it
+    /// refresh anyone else's job: the man leaving takes his own next job, and his teammates
+    /// re-work theirs when his change is known (`hear`; third review P1-1: it used to re-work
+    /// everyone's cover at once).
+    fn update_relay(&mut self) {
+        let from = self.fielding_point();
+        let job = match self.ball {
+            Ball::Thrown { .. } => None,
+            _ => from.and_then(|f| self.relay_job(f)),
+        };
+        for i in 0..9 {
+            if !matches!(self.f[i].role, Role::Relay(_)) {
+                continue;
+            }
+            match self.ball {
+                Ball::Thrown { receiver, .. } if receiver == i => continue,
+                // A throw to someone else has gone by him (see `holder_act`).
+                Ball::Thrown { .. } => {
+                    go_idle(&mut self.f[i]);
+                    continue;
+                }
+                _ => {}
+            }
+            // Nobody known to be going for the ball just now: he holds his line.
+            if from.is_some() && !matches!(job, Some((who, _)) if who == i) {
+                go_idle(&mut self.f[i]);
+                self.take_own_job(i);
+                // The isolation harness's negative control: `f3d9e7a` re-worked every
+                // teammate's cover here, on this man's private retirement.
+                #[cfg(test)]
+                if ISO_REVERT_GATE.with(|c| c.get()) {
+                    self.cover_roles_after_chasers();
+                }
+            }
+        }
+        let (Some(from), Some((who, b))) = (from, job) else { return };
+        #[cfg(test)]
+        let was_cover = matches!(self.f[who].role, Role::Cover(_));
+        self.f[who].role = Role::Relay(b);
+        self.f[who].backs = None;
+        self.f[who].target = Self::relay_spot(from, b);
+        #[cfg(test)]
+        if was_cover && ISO_REVERT_GATE.with(|c| c.get()) {
             self.cover_roles_after_chasers();
         }
     }
 
-    /// Each tick the cutoff man keeps to the line as the fielding point and the runners'
-    /// intentions change (not while a throw is coming to him).
-    fn update_relay(&mut self) {
-        let Some(i) = (0..9).find(|&i| matches!(self.f[i].role, Role::Relay(_))) else {
-            // The job may begin now (the ball has come down in the outfield).
-            if !matches!(self.ball, Ball::Thrown { .. }) {
-                self.assign_relay();
-            }
-            return;
-        };
-        match self.ball {
-            Ball::Thrown { receiver, .. } if receiver == i => return,
-            // A throw to someone else has gone by him (see `holder_act`).
-            Ball::Thrown { .. } => {
-                go_idle(&mut self.f[i]);
-                return;
-            }
-            _ => {}
-        }
-        let from = self.fielding_point();
-        let b = match self.relay_job(from) {
-            Some((who, b)) if who == i => b,
-            // His job is over (or someone else's): he goes back to covering.
-            _ => {
-                go_idle(&mut self.f[i]);
-                self.cover_roles_after_chasers();
-                if matches!(self.ball, Ball::Free { .. }) {
-                    self.assign_relay();
-                }
-                return;
-            }
-        };
-        self.f[i].role = Role::Relay(b);
-        self.f[i].target = Self::relay_spot(from, b);
-    }
-
     /// Fielders with no part in the play back it up (agent-models §5.7): one behind the man
     /// fielding the ball, and one behind each base a throw is likely to go to, on the line
-    /// of that throw. One backup per base. Decided from what every fielder can see: where
-    /// the ball is being fielded and which bases are occupied.
+    /// of that throw. One backup per base. Each man works out his own job (`backup_job`) from
+    /// what he can see and know: where the ball is being fielded, which bases are occupied,
+    /// and who is known to be free. Until someone is known to be going for a loose ball nobody
+    /// knows where that is, and only the called-off infielders' jobs are given.
     fn assign_backups(&mut self) {
-        let pi = self.primary;
-        let from = self.f[pi].target;
-        let depth = m::hypot(from.x, from.y);
-        let outfield_hit = depth > INFIELD_R;
-        let occ = [self.occupied(1), self.occupied(2), self.occupied(3)];
-        let on = |b: u8| occ[(b - 1) as usize];
-        let empty = !(on(1) || on(2) || on(3));
+        let fp = self.fielding_point();
+        let empty = !(self.occupied(1) || self.occupied(2) || self.occupied(3));
         for i in 0..9 {
             self.f[i].backs = None;
             if self.f[i].role == Role::Backup {
@@ -1917,15 +2462,35 @@ impl<'a> Sim<'a> {
         if empty && self.f[1].role == Role::Cover(4) {
             go_idle(&mut self.f[1]);
         }
-        let mut free: Vec<usize> = (0..9).filter(|&i| self.f[i].role == Role::Idle).collect();
+        let Some(from) = fp else { return };
+        let jobs: Vec<(usize, Vec3, Option<u8>)> = (0..9).filter(|&o| self.f[o].role == Role::Idle).filter_map(|o| self.backup_job(o, from).map(|(t, b)| (o, t, b))).collect();
+        for (o, target, backs) in jobs {
+            self.f[o].target = target;
+            self.f[o].role = Role::Backup;
+            self.f[o].backs = backs;
+        }
+    }
+
+    /// The backup job free fielder `o` takes, as he works out the staff's table himself
+    /// (Codex fielder-communication review P1-1): the men free for it are he and every
+    /// teammate he knows to have no other job (known idle, or known backing up: backups are
+    /// dealt again here). A teammate's chase or cover not yet seen counts him as free. The
+    /// spot and, for a base, which base.
+    fn backup_job(&self, o: usize, from: Vec3) -> Option<(Vec3, Option<u8>)> {
+        let occ = [self.occupied(1), self.occupied(2), self.occupied(3)];
+        let on = |b: u8| occ[(b - 1) as usize];
+        let depth = m::hypot(from.x, from.y);
+        let outfield_hit = depth > INFIELD_R;
+        let mut free: Vec<usize> = (0..9).filter(|&j| j == o || matches!(self.seen(o, j).0, Role::Idle | Role::Backup)).collect();
         // Behind the fielder: the nearest free outfielder gets into the ball's line beyond
         // him (deeper than the chase point, and no shallower than he already is).
         let line = Vec3::new(from.x, from.y, 0.0).normalized();
         let ofs: Vec<usize> = free.iter().copied().filter(|&i| i >= 6).collect();
         if let Some(&i) = ofs.iter().min_by(|&&a, &&c| (self.f[a].pos - from).norm().total_cmp(&(self.f[c].pos - from).norm()).then(a.cmp(&c))) {
-            let own = m::hypot(self.f[i].pos.x, self.f[i].pos.y);
-            self.f[i].target = line * (depth + 8.0).max(own * 0.85);
-            self.f[i].role = Role::Backup;
+            if i == o {
+                let own = m::hypot(self.f[i].pos.x, self.f[i].pos.y);
+                return Some((line * (depth + 8.0).max(own * 0.85), None));
+            }
             free.retain(|&x| x != i);
         }
         // Behind the bases. The likeliest throw first; candidates in order of preference
@@ -1959,21 +2524,22 @@ impl<'a> Sim<'a> {
         }
         for (base, cands) in jobs {
             let Some(&i) = cands.iter().find(|c| free.contains(c)) else { continue };
-            // A throw to first with nobody on comes from the infield or from second base's
-            // side; other throws come from where the ball is fielded.
-            let origin = if base == 1 && outfield_hit { base_pos(2) } else { from };
-            self.f[i].target = backup_spot(origin, base);
-            self.f[i].role = Role::Backup;
-            self.f[i].backs = Some(base);
+            if i == o {
+                // A throw to first with nobody on comes from the infield or from second base's
+                // side; other throws come from where the ball is fielded.
+                let origin = if base == 1 && outfield_hit { base_pos(2) } else { from };
+                return Some((backup_spot(origin, base), Some(base)));
+            }
             free.retain(|&x| x != i);
         }
+        None
     }
 
     /// With the bases empty the catcher left home to back up first. Once any runner has
     /// rounded first he is a threat to score, and the catcher goes back (a visible fact:
     /// where the runners are).
     fn cover_home_again(&mut self) {
-        if (0..9).any(|i| self.f[i].role == Role::Cover(4)) || matches!(self.ball, Ball::Held { by: 1 }) || self.f[1].role == Role::Chase {
+        if (0..9).any(|i| self.seen(1, i).0 == Role::Cover(4)) || matches!(self.ball, Ball::Held { by: 1 }) || self.f[1].role == Role::Chase {
             return;
         }
         if self.r.iter().any(|r| !r.out && !r.scored && r.s > 1.25 * BASE_L) {
@@ -1983,16 +2549,27 @@ impl<'a> Sim<'a> {
         }
     }
 
-    /// A throw has been released toward `base`: its backup lines up with the real throw. If
-    /// nobody has that job, the nearest fielder with nothing to do takes it.
+    /// A throw has been released toward `base` (a visible fact): its backup lines up with the
+    /// real throw. A man with nothing to do who knows of nobody with that job, and is the
+    /// nearest to its spot of the men he knows to be free, takes it himself.
     fn back_up_throw(&mut self, from: Vec3, base: u8) {
         let spot = backup_spot(from, base);
-        let who = (0..9).find(|&i| self.f[i].backs == Some(base) && self.f[i].role == Role::Backup).or_else(|| {
-            (0..9)
-                .filter(|&i| matches!(self.f[i].role, Role::Idle | Role::Backup) && self.f[i].backs.is_none())
-                .min_by(|&a, &c| (self.f[a].pos - spot).norm().total_cmp(&(self.f[c].pos - spot).norm()).then(a.cmp(&c)))
-        });
-        if let Some(i) = who {
+        let free = |o: usize, j: usize| {
+            let (role, backs) = self.seen(o, j);
+            matches!(role, Role::Idle | Role::Backup) && backs.is_none()
+        };
+        let takers: Vec<usize> = (0..9)
+            .filter(|&o| {
+                if self.f[o].role == Role::Backup && self.f[o].backs == Some(base) {
+                    return true;
+                }
+                if !free(o, o) || (0..9).any(|j| j != o && self.seen(o, j) == (Role::Backup, Some(base))) {
+                    return false;
+                }
+                (0..9).filter(|&j| free(o, j)).min_by(|&a, &c| (self.f[a].pos - spot).norm().total_cmp(&(self.f[c].pos - spot).norm()).then(a.cmp(&c))) == Some(o)
+            })
+            .collect();
+        for i in takers {
             self.f[i].target = spot;
             self.f[i].role = Role::Backup;
             self.f[i].backs = Some(base);
@@ -2000,72 +2577,154 @@ impl<'a> Sim<'a> {
         }
     }
 
-    /// Re-assign base coverage among fielders who are not chasing.
-    fn cover_roles_after_chasers(&mut self) {
-        let busy = |f: &Vec<Fielder>, i: usize| matches!(f[i].role, Role::Chase | Role::Relay(_));
-        let left = self.f[self.primary].target.x < 0.0;
-        let mut taken: Vec<usize> = (0..9).filter(|&i| busy(&self.f, i)).collect();
-        // The first baseman out as the cutoff to home: on a ball to the right side the second
-        // baseman takes first and the pitcher stays free to back up home; to the left side
-        // the second baseman is needed at second, so the pitcher takes first.
-        let first = match (matches!(self.f[2].role, Role::Relay(_)), left) {
-            (true, false) => vec![3, 0],
-            (true, true) => vec![0, 3],
-            _ => vec![2, 0, 3],
-        };
-        let order: [(u8, Vec<usize>); 4] = [
-            (1, first),
-            (2, if left { vec![3, 5] } else { vec![5, 3] }),
-            (3, vec![4, 5, 0]),
-            (4, vec![1, 0]),
-        ];
-        // Reserve kept non-chasing covers first so base 1's fallback never steals Cover(2).
-        let mut kept = [false; 4];
-        for (slot, (base, _)) in order.iter().enumerate() {
-            if let Some(c) = (0..9).find(|&i| self.f[i].role == Role::Cover(*base) && !taken.contains(&i)) {
-                taken.push(c);
-                kept[slot] = true;
-            }
+    /// Whether fielder `o`, working out the tables, counts `j` as going for the ball: a
+    /// teammate as he is known to be, himself as he is. A man who has just stopped takes his
+    /// table job at once; a teammate who still counts him as going may head for the same bag
+    /// for up to `CALL_HEARD_S`, and the man earlier in the table's order keeps it. (A first
+    /// version kept him out of his own table until his stop was known; on fly balls that
+    /// several infielders start after, that left bases with nobody assigned for 0.6 s:
+    /// Codex fielder-communication recheck P1-2.)
+    fn chasing_as_known_by(&self, o: usize, j: usize) -> bool {
+        if o == j { self.f[o].role == Role::Chase } else { self.known(j).0 }
+    }
+
+    /// The staff's coverage table (agent-models §5.7) as fielder `o` works it out for himself:
+    /// from the side the ball is on, who he knows is going for it, and a middle infielder he
+    /// knows is going to second; for himself, his own choice (`own_second`: he has left a
+    /// ground ball to his partner and covers second; Codex fielder-communication review P1-1,
+    /// Opus infield-fixes review P2-3). Each base's man, first base to home. Teammates work it
+    /// out alike from what they know, so nobody has to be told it; what nobody can know is a
+    /// choice not yet seen or heard, and the table may name such a man (he goes on with his
+    /// own choice, and the base waits until it is known).
+    fn cover_table(&self, o: usize, own_second: bool) -> [Option<usize>; 4] {
+        let left = self.ball_side_x() < 0.0;
+        // First base's last man, the second baseman, is dealt after the other bases: he takes
+        // first only when second is someone else's (recheck P1-2: while the first baseman and
+        // pitcher were still counted as going, he went to first and left second open).
+        let order: [(usize, &[usize]); 5] = [(0, &[2, 0]), (1, if left { &[3, 5] } else { &[5, 3] }), (2, &[4, 5]), (3, &[1, 0]), (0, &[3])];
+        let mut second: Vec<usize> = Vec::new();
+        if own_second {
+            second.push(o);
         }
-        for (slot, (base, cands)) in order.iter().enumerate() {
-            if kept[slot] {
+        second.extend([3usize, 5].into_iter().filter(|&c| c != o && self.seen(o, c).0 == Role::Cover(2)));
+        let mut taken: Vec<usize> = second.clone();
+        let mut out = [None; 4];
+        for &(k, cands) in order.iter() {
+            if out[k].is_some() {
                 continue;
             }
-            if let Some(&c) = cands.iter().find(|c| !taken.contains(c)) {
-                self.f[c].role = Role::Cover(*base);
-                self.f[c].target = base_pos(*base);
+            if k == 1 && !second.is_empty() {
+                out[1] = Some(second[0]);
+                continue;
+            }
+            if let Some(c) = cands.iter().copied().find(|&c| !self.chasing_as_known_by(o, c) && !taken.contains(&c)) {
                 taken.push(c);
+                out[k] = Some(c);
+            }
+        }
+        out
+    }
+
+    /// Re-assign base coverage among fielders who are not chasing, keeping the covers already
+    /// given. Each man works out his own job (`cover_after_chasers`) from what he knows of
+    /// the others, not from a choice one of them made a moment ago.
+    /// The man holding the ball keeps what he is doing.
+    fn cover_roles_after_chasers(&mut self) {
+        let holder = match self.ball {
+            Ball::Held { by } => Some(by),
+            _ => None,
+        };
+        let jobs: Vec<(usize, Option<u8>)> = (0..9).filter(|&o| Some(o) != holder && !matches!(self.f[o].role, Role::Chase | Role::Relay(_))).map(|o| (o, self.cover_after_chasers(o))).collect();
+        for (o, b) in jobs {
+            match b {
+                Some(b) if self.f[o].role != Role::Cover(b) => {
+                    self.f[o].role = Role::Cover(b);
+                    self.f[o].target = base_pos(b);
+                }
+                // A teammate he now knows of has his base: he leaves it.
+                None if matches!(self.f[o].role, Role::Cover(_)) => go_idle(&mut self.f[o]),
+                _ => {}
             }
         }
     }
 
-    fn cover_roles(&mut self) {
-        let pi = self.primary;
-        let left = self.f[pi].target.x < 0.0;
-        let pick = |cands: &[usize], taken: &[usize]| cands.iter().copied().find(|c| *c != pi && !taken.contains(c));
-        let mut taken: Vec<usize> = Vec::new();
-        let set = |base: u8, cands: &[usize], f: &mut Vec<Fielder>, taken: &mut Vec<usize>| {
-            if let Some(c) = pick(cands, taken) {
-                f[c].role = Role::Cover(base);
-                f[c].target = base_pos(base);
+    /// The base fielder `o` (not chasing, not the cutoff man) covers by the table kept as he
+    /// knows it: the covers already taken stand, the man first in the table's order for a
+    /// base keeping it when two are known to be on their way to one bag; open bases go to the
+    /// first free man in their order.
+    fn cover_after_chasers(&self, o: usize) -> Option<u8> {
+        let job = |j: usize| self.seen(o, j).0;
+        let left = self.ball_side_x() < 0.0;
+        let mut taken: Vec<usize> = (0..9).filter(|&i| self.chasing_as_known_by(o, i) || matches!(job(i), Role::Relay(_))).collect();
+        // The first baseman out as the cutoff to home: on a ball to the right side the second
+        // baseman takes first and the pitcher stays free to back up home; to the left side
+        // the second baseman is needed at second, so the pitcher takes first.
+        // With the first baseman not out as the cutoff, the second baseman is first base's
+        // last man and is dealt after the other bases (see `cover_table`).
+        let (first, first_last) = match (matches!(job(2), Role::Relay(_)), left) {
+            (true, false) => (vec![3, 0], vec![]),
+            (true, true) => (vec![0, 3], vec![]),
+            _ => (vec![2, 0], vec![3]),
+        };
+        let order: [(u8, Vec<usize>); 5] = [
+            (1, first),
+            (2, if left { vec![3, 5] } else { vec![5, 3] }),
+            (3, vec![4, 5, 0]),
+            (4, vec![1, 0]),
+            (1, first_last),
+        ];
+        // Reserve kept non-chasing covers first so base 1's fallback never steals Cover(2).
+        let mut filled = [false; 5];
+        for base in 1..=4u8 {
+            let cands: Vec<usize> = order.iter().filter(|e| e.0 == base).flat_map(|e| e.1.iter().copied()).collect();
+            let rank = |i: usize| cands.iter().position(|&c| c == i).unwrap_or(cands.len());
+            if let Some(c) = (0..9).filter(|&i| job(i) == Role::Cover(base) && !taken.contains(&i)).min_by_key(|&i| (rank(i), i)) {
+                if c == o {
+                    return Some(base);
+                }
+                taken.push(c);
+                filled[base as usize] = true;
+            }
+        }
+        for (base, cands) in order.iter() {
+            if filled[*base as usize] {
+                continue;
+            }
+            filled[*base as usize] = cands.iter().any(|c| !taken.contains(c));
+            if let Some(&c) = cands.iter().find(|c| !taken.contains(c)) {
+                // A man whose chase is not known yet goes on with it; the base waits.
+                if c == o {
+                    return Some(*base);
+                }
                 taken.push(c);
             }
-        };
-        // Indices are position − 1: P0 C1 1B2 2B3 3B4 SS5 LF6 CF7 RF8.
-        set(1, &[2, 0, 3], &mut self.f, &mut taken);
-        set(2, if left { &[3, 5] } else { &[5, 3] }, &mut self.f, &mut taken);
-        set(3, &[4, 5], &mut self.f, &mut taken);
-        set(4, &[1, 0], &mut self.f, &mut taken);
-        for i in 0..9 {
-            if i == pi {
-                self.f[i].role = Role::Chase;
-            } else if !taken.contains(&i) {
-                // Fielders with no job yet; `assign_backups` gives most of them one. Until
-                // then he pulls up where braking stops him: `assign_among` left his own
-                // intercept of the ball in `target`, and a man with no job does not chase it
-                // (agent-models §5.7; docs/calibration/2026-11-12-pitcher-outfield-diagnosis.md).
-                // The ground-ball break reads its own saved copy of the intercepts.
-                go_idle(&mut self.f[i]);
+        }
+        None
+    }
+
+    /// The tables' cover jobs after a call (`cover_table`), each man by his own working of
+    /// the table. A man who has just chosen to chase keeps chasing; a middle infielder in
+    /// `second` keeps the bag he chose. The pitcher breaks for first on a ground ball his own
+    /// read says the first baseman will go for. Everyone else with no job pulls up where
+    /// braking stops him until `assign_backups` gives him one (agent-models §5.7;
+    /// docs/calibration/2026-11-12-pitcher-outfield-diagnosis.md).
+    fn cover_roles(&mut self, second: &[usize]) {
+        let jobs: Vec<(usize, Option<u8>)> = (0..9)
+            .filter(|&o| self.f[o].role != Role::Chase)
+            .map(|o| {
+                let table = self.cover_table(o, second.contains(&o));
+                let base = table.iter().position(|&c| c == Some(o)).map(|k| k as u8 + 1);
+                let breaks_for_first = o == 0 && base.is_none() && table[0] == Some(2) && self.pitcher_expects_first_baseman_break();
+                (o, if breaks_for_first { Some(1) } else { base })
+            })
+            .collect();
+        for (o, base) in jobs {
+            match base {
+                Some(b) => {
+                    self.f[o].role = Role::Cover(b);
+                    self.f[o].target = base_pos(b);
+                }
+                None => go_idle(&mut self.f[o]),
             }
         }
     }
@@ -2099,8 +2758,9 @@ impl<'a> Sim<'a> {
         }
     }
 
-    /// Glove contact test for any fielder the ball passes (agent-models §5.4).
-    fn try_captures(&mut self) {
+    /// At close range a chaser re-reads the ball (perception error scales with distance),
+    /// runs at his new intercept and makes his call again from it.
+    fn close_reads(&mut self) {
         // At close range a chaser re-reads the ball (perception error scales with distance).
         if let Ball::Free { .. } = self.ball {
             let (b, _) = self.ball_at(self.t);
@@ -2111,13 +2771,18 @@ impl<'a> Sim<'a> {
                         self.f[i].last_close_read = self.t;
                         let p = self.predict(i);
                         let (ti, pt) = self.intercept(i, &p);
-                        self.f[i].t_int = ti;
-                        self.f[i].target = pt;
-                        self.f[i].belief = Some(p);
+                        let (t, ball) = (self.t, self.ball_gen);
+                        let fd = &mut self.f[i];
+                        (fd.t_int, fd.int_pt, fd.target, fd.belief, fd.read_at, fd.read_ball) = (ti, pt, pt, Some(p), t, ball);
+                        self.refresh_call(i);
                     }
                 }
             }
         }
+    }
+
+    /// A chaser near the ball keeps asking whether he can still take it on his feet.
+    fn dive_reads(&mut self) {
         // A chaser near the ball keeps asking whether he can still take it on his feet. Once
         // his read says no, he may leave them; the answer has to hold until the ball arrives.
         if let Ball::Free { .. } = self.ball {
@@ -2133,6 +2798,16 @@ impl<'a> Sim<'a> {
                 fd.must_dive_since = if must { fd.must_dive_since.min(self.t) } else { f64::INFINITY };
             }
         }
+    }
+
+    /// Glove contact test for any fielder the ball passes (agent-models §5.4).
+    fn try_captures(&mut self) {
+        #[cfg(test)]
+        iso_check(self, "close_reads");
+        self.close_reads();
+        #[cfg(test)]
+        iso_check(self, "dive_reads");
+        self.dive_reads();
         let (b, bv) = self.ball_at(self.t);
         let receiver = match self.ball {
             Ball::Thrown { receiver, .. } => Some(receiver),
@@ -2409,12 +3084,16 @@ impl<'a> Sim<'a> {
         self.bounce_k += path.bounces.len() as u32 + 1;
         self.ball = Ball::Free { path, next_touch: 0, next_wall: 0, settled_sent: false };
         // A new ball (off a glove, or a throw on the ground): any call off the old one is over.
+        self.ball_since = self.t;
+        self.ball_gen += 1;
         for fd in self.f.iter_mut() {
             fd.peel = None;
             fd.must_dive_since = f64::INFINITY;
             fd.last_dive_read = f64::NEG_INFINITY;
             fd.will_dive.set(false);
         }
+        #[cfg(test)]
+        iso_check(self, "new_ball_assign");
         self.assign();
     }
 
@@ -2526,7 +3205,9 @@ impl<'a> Sim<'a> {
         (if m::hypot(at.x - aim.x, at.y - aim.y) < 0.5 { aim } else { at }, raw)
     }
 
-    fn update_thrown(&mut self) {
+    /// The receiver of a throw watches it and goes to where he believes he can take it,
+    /// re-reading it as it comes (he starts on the spot it was thrown to).
+    fn receiver_reads(&mut self) {
         // The receiver watches the throw and goes to where he believes he can take it,
         // re-reading it as it comes (he starts on the spot it was thrown to).
         if let Ball::Thrown { path, aim, read_err, next_read, receiver, .. } = &self.ball {
@@ -2540,7 +3221,7 @@ impl<'a> Sim<'a> {
                 }
             }
         }
-        let Ball::Thrown { path, catch_at, read_at, receiver, to_base, relay, .. } = &self.ball else { return };
+        let Ball::Thrown { catch_at, read_at, receiver, to_base, relay, .. } = &self.ball else { return };
         // Taking a throw at a bag, he keeps his foot on it and stretches for any throw he
         // believes he can reach from there (agent-models §5.8); he leaves it only for one
         // he cannot.
@@ -2551,6 +3232,13 @@ impl<'a> Sim<'a> {
         let near = |p: &Vec3| m::hypot(p.x - bag.x, p.y - bag.y) <= BAG_REACH_FRAC * RECEIVE_REACH;
         let on_bag = !*relay && (1..=4).contains(to_base) && near(catch_at) && near(read_at);
         self.f[*receiver].target = if on_bag { Vec3::new(bag.x, bag.y, 0.0) } else { Vec3::new(catch_at.x, catch_at.y, 0.0) };
+    }
+
+    fn update_thrown(&mut self) {
+        #[cfg(test)]
+        iso_check(self, "receiver_reads");
+        self.receiver_reads();
+        let Ball::Thrown { path, .. } = &self.ball else { return };
         if self.t >= path.last().t {
             let (s, t_end, at_wall) = (path.last().s, path.last().t, path.stop == Some(1));
             if at_wall {
@@ -2998,6 +3686,8 @@ impl<'a> Sim<'a> {
                 (f.pivot, f.pivot_wait_bag) = (true, false);
             }
         }
+        // His call for a man to a bag stands only while he is waiting on that man (below).
+        self.f[by].asks = None;
         let fd = self.f[by].clone();
         // Tag any runner within reach who is off a base.
         for k in 0..self.r.len() {
@@ -3122,9 +3812,12 @@ impl<'a> Sim<'a> {
             return;
         }
         let receiver = race.receiver;
-        // Preserve the existing release gate for a receiver still covering.
+        // His man is not at the bag yet: he waits for him and calls him to it ("two!",
+        // pointing). The call is his to make, but it reaches the man only when heard
+        // (`heed_requests`, `CALL_HEARD_S`); his private choice moves nobody (Codex
+        // fielder-communication fourth review P1-1).
         if race.direct < race.receiver_at - 0.05 {
-            self.f[receiver].target = tgt;
+            self.f[by].asks = Some((b, receiver));
             return;
         }
         self.trace_choice(by, action, b, false, best, &options);
@@ -3158,7 +3851,27 @@ impl<'a> Sim<'a> {
                 go_idle(&mut self.f[i]);
             }
         }
+        #[cfg(test)]
+        iso_check(self, "back_up_throw");
         self.back_up_throw(fd.pos, b);
+    }
+
+    /// A man the holder has called to a bag for his throw goes to it once he hears the call
+    /// (`CALL_HEARD_S` after it was made, agent-models §5.7), while that man still has the
+    /// ball and still calls for him. Until then he does his own job; when the call is
+    /// withdrawn he keeps the bag until his job is re-worked. Reads only what was shown.
+    fn heed_requests(&mut self) {
+        let Ball::Held { by } = self.ball else { return };
+        let Some(e) = self.shown_then(by) else { return };
+        // A call he made with the ball before he last secured it is not this one.
+        if e.at + 1e-9 < self.ball_since.max(self.secured_at) {
+            return;
+        }
+        if let Some((b, r)) = e.asks {
+            if r != by {
+                self.f[r].target = base_pos(b);
+            }
+        }
     }
 
     /// A holder who gives up a carry pulls up where braking stops him (agent-models §5.6 A4);
@@ -3223,9 +3936,13 @@ impl<'a> Sim<'a> {
     /// not the cutoff man (he keeps to his line).
     fn receiver_for(&self, by: usize, b: u8) -> usize {
         let tgt = base_pos(b);
-        (0..9).find(|&i| i != by && self.f[i].role == Role::Cover(b)).unwrap_or_else(|| {
+        // Two men can be on their way to one bag for a moment (a chase not yet known, the
+        // pitcher breaking for first): he throws to the one nearer it.
+        let bag = base_pos(b);
+        // He knows a teammate's cover or cutoff job as it is known (`seen`).
+        (0..9).filter(|&i| i != by && self.seen(by, i).0 == Role::Cover(b)).min_by(|&a, &c| (self.f[a].pos - bag).norm().total_cmp(&(self.f[c].pos - bag).norm()).then(a.cmp(&c))).unwrap_or_else(|| {
             (0..9)
-                .filter(|&i| i != by && !matches!(self.f[i].role, Role::Relay(_)))
+                .filter(|&i| i != by && !matches!(self.seen(by, i).0, Role::Relay(_)))
                 .min_by(|&a, &c| (self.f[a].pos - tgt).norm().total_cmp(&(self.f[c].pos - tgt).norm()).then(a.cmp(&c)))
                 .unwrap()
         })
@@ -3327,6 +4044,11 @@ fn new_sim<'a>(inp: &'a LiveInput<'a>, st: &'a mut RulesState) -> Sim<'a> {
                 lunge: None,
                 belief: None,
                 t_int: f64::INFINITY,
+                int_pt: home[i],
+                read_at: f64::NEG_INFINITY,
+                read_ball: u64::MAX,
+                call: 0,
+                shown: Vec::new(),
                 last_close_read: 0.0,
                 must_dive_since: f64::INFINITY,
                 last_dive_read: f64::NEG_INFINITY,
@@ -3340,6 +4062,7 @@ fn new_sim<'a>(inp: &'a LiveInput<'a>, st: &'a mut RulesState) -> Sim<'a> {
                 backs: None,
                 peel: None,
                 carry_to: None,
+                asks: None,
                 pivot: false,
                 pivot_wait_bag: false,
             }
@@ -3385,7 +4108,11 @@ fn new_sim<'a>(inp: &'a LiveInput<'a>, st: &'a mut RulesState) -> Sim<'a> {
         home,
         f,
         r,
-        primary: 0,
+        ball_since: t_c,
+        ball_gen: 0,
+        rank_cache: Default::default(),
+        last_known: vec![(false, 0, false); 9],
+        last_jobs: vec![(Role::Idle, None); 9],
         out: LiveOutput { scorer_carries: Vec::new(), first_handling: None, scorer_throws: Vec::new(), batter_first_eta: None, ref_set_s: None, facts: Vec::new(), events: Vec::new(), path, ball_track: Vec::new(), actors, secured: Vec::new(), released: Vec::new(), hurry: Vec::new(), effort: Vec::new(), dives: Vec::new(), calls: Vec::new() },
         bounce_k: 1000,
         done: false,
@@ -3393,6 +4120,107 @@ fn new_sim<'a>(inp: &'a LiveInput<'a>, st: &'a mut RulesState) -> Sim<'a> {
         secured_at: f64::INFINITY,
         catch_made: false,
         low_catch: false,
+    }
+}
+
+// Information-isolation harness (tests only; Codex fielder-communication third review
+// P1-1): a hook called before each coordination step of a live play, with the simulation as
+// it stands. `tests::isolation_*` forks it, changes one man's private state, runs the step
+// on both forks and compares everyone else.
+#[cfg(test)]
+type IsoHook = Box<dyn FnMut(&Sim<'_>, &'static str)>;
+#[cfg(test)]
+thread_local! { static ISO_HOOK: std::cell::RefCell<Option<IsoHook>> = const { std::cell::RefCell::new(None) }; }
+// The harness's negative control (`isolation_harness_finds_the_third_reviews_gate`): with
+// this set, `update_relay` behaves as on `f3d9e7a`, re-working every teammate's cover when one
+// man privately leaves or takes the cutoff job (Codex third review P1-1).
+#[cfg(test)]
+thread_local! { static ISO_REVERT_GATE: std::cell::Cell<bool> = const { std::cell::Cell::new(false) }; }
+#[cfg(test)]
+fn iso_check(sim: &Sim<'_>, step: &'static str) {
+    // The hook is taken out while it runs: steps it runs on its forks reach their own hooks
+    // (a release's backup inside `holder_act`), which must do nothing then.
+    let hook = ISO_HOOK.with(|h| h.borrow_mut().take());
+    if let Some(mut f) = hook {
+        f(sim, step);
+        ISO_HOOK.with(|h| *h.borrow_mut() = Some(f));
+    }
+}
+
+#[cfg(test)]
+impl<'a> Sim<'a> {
+    /// A copy of the simulation with its own rules state, for the isolation harness.
+    fn fork<'b>(&'b self, st: &'b mut RulesState) -> Sim<'b> {
+        Sim {
+            inp: self.inp,
+            last_fact_t: self.last_fact_t,
+            secured_at: self.secured_at,
+            catch_made: self.catch_made,
+            low_catch: self.low_catch,
+            st,
+            t: self.t,
+            ball: self.ball.clone(),
+            home: self.home,
+            f: self.f.clone(),
+            r: self.r.clone(),
+            ball_since: self.ball_since,
+            ball_gen: self.ball_gen,
+            rank_cache: Default::default(),
+            last_known: self.last_known.clone(),
+            last_jobs: self.last_jobs.clone(),
+            // The recorded tracks are written only by `record`, never read by a decision:
+            // left out to keep forks cheap.
+            out: {
+                let o = &self.out;
+                LiveOutput {
+                    scorer_carries: o.scorer_carries.clone(),
+                    first_handling: o.first_handling,
+                    batter_first_eta: o.batter_first_eta,
+                    ref_set_s: o.ref_set_s,
+                    scorer_throws: o.scorer_throws.clone(),
+                    facts: o.facts.clone(),
+                    events: o.events.clone(),
+                    path: o.path.clone(),
+                    ball_track: Vec::new(),
+                    actors: Vec::new(),
+                    secured: o.secured.clone(),
+                    released: o.released.clone(),
+                    hurry: o.hurry.clone(),
+                    effort: o.effort.clone(),
+                    dives: o.dives.clone(),
+                    calls: o.calls.clone(),
+                }
+            },
+            bounce_k: self.bounce_k,
+            done: self.done,
+        }
+    }
+
+    /// Run the named coordination step (as `simulate_live_inner` does).
+    fn run_step(&mut self, step: &str) {
+        match step {
+            "assign" | "new_ball_assign" => self.assign(),
+            "replan_chasers" => self.replan_chasers(),
+            "close_reads" => self.close_reads(),
+            "dive_reads" => self.dive_reads(),
+            "receiver_reads" => self.receiver_reads(),
+            "back_up_throw" => {
+                // Just after a release in `holder_act`: the thrower and the base of his throw.
+                let Ball::Thrown { to_base, .. } = self.ball else { unreachable!("back_up_throw without a throw") };
+                let id = self.out.released.last().expect("a release").1;
+                let by = (0..9).find(|&i| self.f[i].id == id).expect("the thrower");
+                self.back_up_throw(self.f[by].pos, to_base)
+            }
+            "recall" => self.recall(),
+            "expire_peels" => self.expire_peels(),
+            "chasers_see_the_ball_secured" => self.chasers_see_the_ball_secured(),
+            "holder_act" => self.holder_act(),
+            "heed_requests" => self.heed_requests(),
+            "cover_home_again" => self.cover_home_again(),
+            "hear" => self.hear(),
+            "update_relay" => self.update_relay(),
+            _ => unreachable!("{step}"),
+        }
     }
 }
 
@@ -3414,12 +4242,16 @@ fn simulate_live_inner(inp: &LiveInput, st: &mut RulesState) -> LiveOutput {
     let mut runners_started = false;
     let mut next_recall = t_c + 1.0;
     let mut tick: u64 = 0;
+    // Coverage trace (`BB_COVER_TRACE`; `examples/coverage_trace.rs`, `analysis/coverage_gaps.py`):
+    // one line per change of the defense's jobs. Reads only; changes no decision.
+    let cover_trace = std::env::var("BB_COVER_TRACE").is_ok();
+    let mut cover_last = String::new();
     while !sim.done {
         if sim.t - t_c > PLAY_LIMIT_S {
             if std::env::var("BB_DEBUG_LIVE").is_ok() {
                 eprintln!("timeout play {}: ball {:?}", play, match &sim.ball { Ball::Free { .. } => "free".to_string(), Ball::Held { by } => format!("held by {} at {:?} ready {}", by, sim.f[*by].pos, sim.f[*by].ready_at), Ball::Thrown { to_base, receiver, .. } => format!("thrown to {to_base} recv {receiver}") });
                 let (bp, bv) = sim.ball_at(sim.t);
-                eprintln!("  ball at ({:.2},{:.2},{:.2}) v ({:.2},{:.2},{:.2}); primary {} blocked_until {:.2} dove {} next_plan {:.2}", bp.x, bp.y, bp.z, bv.x, bv.y, bv.z, sim.primary, sim.f[sim.primary].blocked_until, sim.f[sim.primary].dove, sim.f[sim.primary].next_plan);
+                eprintln!("  ball at ({:.2},{:.2},{:.2}) v ({:.2},{:.2},{:.2}); lead {:?}", bp.x, bp.y, bp.z, bv.x, bv.y, bv.z, sim.lead());
                 if let Ball::Thrown { path, .. } = &sim.ball { eprintln!("  throw from {:?} at {:.2}, lands {:.2}; now {:.2}", path.first().s.r, path.first().t, path.last().t, sim.t); }
                 for r in &sim.r {
                     eprintln!("  runner {} start {} s {:.1} goal {} v {:.1} out {} scored {} tag_up {}", r.id, r.start, r.s, r.goal, r.v, r.out, r.scored, r.tag_up);
@@ -3433,6 +4265,8 @@ fn simulate_live_inner(inp: &LiveInput, st: &mut RulesState) -> LiveOutput {
             break;
         }
         if !assigned && sim.t >= t_c + react {
+            #[cfg(test)]
+            iso_check(&sim, "assign");
             sim.assign();
             assigned = true;
         }
@@ -3473,36 +4307,19 @@ fn simulate_live_inner(inp: &LiveInput, st: &mut RulesState) -> LiveOutput {
                 sim.r[k].goal = 1;
             }
         }
-        // Close to a slow ball, the chaser simply goes to it (seen directly at short range).
         if assigned && matches!(sim.ball, Ball::Free { .. }) {
-            let (b, bv) = sim.ball_at(sim.t);
-            let pi = sim.primary;
-            if bv.norm() < 3.0 && (Vec3::new(b.x, b.y, 0.0) - sim.f[pi].pos).norm() < 5.0 {
-                sim.f[pi].target = Vec3::new(b.x, b.y, 0.0);
-            }
-        }
-        // Other chasers re-aim at their own predictions as the ball comes on.
-        if assigned && matches!(sim.ball, Ball::Free { .. }) {
-            for i in 0..9 {
-                if i != sim.primary && sim.f[i].role == Role::Chase && sim.t >= sim.f[i].next_plan {
-                    let p = sim.predict(i);
-                    let (ti, pt) = sim.intercept(i, &p);
-                    sim.f[i].t_int = ti;
-                    sim.f[i].target = pt;
-                    sim.f[i].belief = Some(p);
-                    sim.f[i].next_plan = sim.t + REPLAN_S;
-                }
-            }
-        }
-        // Replans for the primary, and reassignment when the ball is loose again.
-        if assigned && sim.t >= sim.f[sim.primary].next_plan && matches!(sim.ball, Ball::Free { .. }) {
-            sim.replan_primary();
-            let pi = sim.primary;
-            // Once a second, a ball the chaser is still far from is re-called by the defense
-            // (calls, agent-models §5.7).
+            #[cfg(test)]
+            iso_check(&sim, "replan_chasers");
+            sim.replan_chasers();
             let (b, _) = sim.ball_at(sim.t);
-            if sim.t >= next_recall && (Vec3::new(b.x, b.y, 0.0) - sim.f[pi].pos).norm() > 8.0 {
+            // Once a second, while the man known to be going for the ball is still far from it
+            // (or nobody is known to be), the men near it read it again and decide again
+            // (calls, agent-models §5.7).
+            let far = sim.lead().is_none_or(|l| (Vec3::new(b.x, b.y, 0.0) - sim.f[l].pos).norm() > 8.0);
+            if sim.t >= next_recall && far {
                 next_recall = sim.t + 1.0;
+                #[cfg(test)]
+                iso_check(&sim, "recall");
                 sim.recall();
             }
         }
@@ -3511,7 +4328,11 @@ fn simulate_live_inner(inp: &LiveInput, st: &mut RulesState) -> LiveOutput {
             break;
         }
         if assigned {
+            #[cfg(test)]
+            iso_check(&sim, "expire_peels");
             sim.expire_peels();
+            #[cfg(test)]
+            iso_check(&sim, "chasers_see_the_ball_secured");
             sim.chasers_see_the_ball_secured();
         }
         sim.update_thrown();
@@ -3519,11 +4340,25 @@ fn simulate_live_inner(inp: &LiveInput, st: &mut RulesState) -> LiveOutput {
         if sim.done {
             break;
         }
+        #[cfg(test)]
+        iso_check(&sim, "holder_act");
         sim.holder_act();
         if sim.done {
             break;
         }
+        #[cfg(test)]
+        iso_check(&sim, "heed_requests");
+        sim.heed_requests();
+        #[cfg(test)]
+        iso_check(&sim, "cover_home_again");
         sim.cover_home_again();
+        if assigned {
+            #[cfg(test)]
+            iso_check(&sim, "hear");
+            sim.hear();
+        }
+        #[cfg(test)]
+        iso_check(&sim, "update_relay");
         sim.update_relay();
         sim.move_fielders();
         sim.move_runners();
@@ -3547,9 +4382,31 @@ fn simulate_live_inner(inp: &LiveInput, st: &mut RulesState) -> LiveOutput {
         if inp.record {
             sim.record(false);
         }
+        if assigned {
+            sim.publish();
+        }
+        if cover_trace && assigned {
+            let (phase, holder) = match sim.ball {
+                Ball::Free { .. } => ("F", -1),
+                Ball::Held { by } => ("H", by as i32),
+                Ball::Thrown { .. } => ("T", -1),
+            };
+            let grounder = sim.out.path.first_bounce().is_some_and(|b| m::hypot(b.1, b.2) < 25.0 && b.0 - inp.t_contact < GROUNDER_BOUNCE_S);
+            let counts: Vec<usize> = (1..=4).map(|b| sim.f.iter().filter(|f| f.role == Role::Cover(b)).count()).collect();
+            let chasing: u16 = (0..9).filter(|&i| sim.f[i].role == Role::Chase).map(|i| 1u16 << i).sum();
+            let roles: Vec<i32> = sim.f.iter().map(|f| match f.role { Role::Idle => 0, Role::Chase => 1, Role::Cover(b) => 10 + b as i32, Role::Relay(b) => 20 + b as i32, Role::Backup => 30 }).collect();
+            let key = format!("{:.6},{},{},{},{},{},{},{},{},{},{:?}", sim.ball_since, phase, holder, sim.lead().map(|i| i as i32).unwrap_or(-1), grounder as u8, counts[0], counts[1], counts[2], counts[3], chasing, roles);
+            if key != cover_last {
+                eprintln!("R,{},{},{:.6},{}", inp.seed, inp.play, sim.t, key);
+                cover_last = key;
+            }
+        }
         prof::TICKS.with(|c| c.set(c.get() + 1));
         tick += 1;
         sim.t += DT;
+    }
+    if cover_trace {
+        eprintln!("E,{},{},{:.6}", inp.seed, inp.play, sim.t);
     }
     if inp.record {
         // The tick that ended the play (the catch, the force, the ball leaving the park).
@@ -3640,6 +4497,117 @@ mod tests {
 
     fn caught(sim: &Sim) -> bool {
         sim.out.events.iter().any(|e| matches!(e, Event::Catch { .. }))
+    }
+
+    /// Fielder `i` going for the ball with call `tier`, shown long enough ago that his
+    /// teammates know it (`Sim::known`).
+    fn known_chaser(sim: &mut Sim, i: usize, tier: u8) {
+        sim.f[i].role = Role::Chase;
+        sim.f[i].call = tier;
+        let at = sim.t - CALL_HEARD_S - DT;
+        sim.ball_since = sim.ball_since.min(at);
+        sim.f[i].shown.push(Shown { at, role: Role::Chase, backs: None, tier, asks: None });
+    }
+
+    /// Fielder `i` doing job `role`, shown long enough ago that his teammates know it
+    /// (`Sim::seen`).
+    fn known_doing(sim: &mut Sim, i: usize, role: Role) {
+        sim.f[i].role = role;
+        if let Role::Cover(b) = role {
+            sim.f[i].target = base_pos(b);
+        }
+        let at = sim.t - CALL_HEARD_S - DT;
+        let backs = sim.f[i].backs;
+        sim.f[i].shown.push(Shown { at, role, backs, tier: 0, asks: None });
+    }
+
+    /// Let `CALL_HEARD_S` pass with the coordination steps of a tick (`simulate_live_inner`):
+    /// each fielder shows what he is doing, hears what the others did, and moves.
+    fn let_calls_be_heard(sim: &mut Sim) {
+        let until = sim.t + CALL_HEARD_S + DT;
+        while sim.t < until {
+            sim.publish();
+            sim.move_fielders();
+            sim.t += DT;
+            sim.hear();
+            sim.update_relay();
+        }
+    }
+
+    /// Codex live-play review P1-1 probe: everything visible held fixed, only the centre
+    /// fielder's private target moved from left-centre to right-centre. Who covers second
+    /// must not change: nobody can see where another man means to go.
+    #[test]
+    fn second_base_cover_does_not_read_a_private_target() {
+        let fx = fixture(&[(0x0007, 1)]);
+        let inp = input(&fx, vec![RunnerIn { id: fx.st.batter, base: 0, speed: 8.2 }, RunnerIn { id: 0x0007, base: 1, speed: 8.2 }]);
+        let mut cover2 = Vec::new();
+        for x in [-40.0, 40.0] {
+            let mut st = fx.st.clone();
+            let mut sim = new_sim(&inp, &mut st);
+            sim.t = 1.0;
+            known_chaser(&mut sim, CF, 0);
+            sim.f[CF].target = Vec3::new(x, 85.0, 0.0);
+            sim.cover_roles(&[]);
+            cover2.push((0..9).find(|&i| sim.f[i].role == Role::Cover(2)));
+        }
+        assert_eq!(cover2[0], cover2[1], "second's cover followed the centre fielder's private target");
+    }
+
+    /// Codex fielder-communication review P1-1, first probe: the centre fielder's chase is
+    /// known; the left fielder has just chosen to chase too, but nobody can know that yet.
+    /// The right fielder's backup job is the same whether or not the left fielder has
+    /// privately chosen to go: he cannot hear a choice before it is shown.
+    #[test]
+    fn a_backup_job_does_not_read_an_unheard_chase() {
+        const LF: usize = 6;
+        const RF: usize = 8;
+        let fx = fixture(&[]);
+        let inp = input(&fx, vec![RunnerIn { id: fx.st.batter, base: 0, speed: 8.2 }]);
+        let mut rf = Vec::new();
+        for lf_chasing in [false, true] {
+            let mut st = fx.st.clone();
+            let mut sim = new_sim(&inp, &mut st);
+            sim.t = 1.0;
+            sim.f[CF].pos = Vec3::new(0.0, 85.0, 0.0);
+            sim.f[LF].pos = Vec3::new(0.0, 80.0, 0.0);
+            sim.f[RF].pos = Vec3::new(10.0, 80.0, 0.0);
+            known_chaser(&mut sim, CF, 0);
+            if lf_chasing {
+                sim.f[LF].role = Role::Chase;
+            }
+            assert_eq!(sim.known(LF), (false, 0, false), "the left fielder's choice is not shown");
+            sim.assign_backups();
+            rf.push((sim.f[RF].role, sim.f[RF].target));
+        }
+        assert_eq!(rf[0], rf[1], "the right fielder's backup job followed the left fielder's unheard chase");
+    }
+
+    /// Codex fielder-communication review P1-1, second probe (and Opus infield-fixes review
+    /// P2-3): a ground ball up the middle. Only the second baseman's private intercept time
+    /// changes, which turns his own choice from going for it to covering second. Nobody can
+    /// know that choice yet, so the shortstop's job must not change with it.
+    #[test]
+    fn second_base_cover_does_not_read_a_partners_unheard_choice() {
+        const B2: usize = 3;
+        const SS: usize = 5;
+        let fx = fixture(&[]);
+        let inp = input(&fx, vec![RunnerIn { id: fx.st.batter, base: 0, speed: 8.2 }]);
+        let mut seen = Vec::new();
+        for t_int in [0.8, 20.0] {
+            let mut st = fx.st.clone();
+            let mut sim = new_sim(&inp, &mut st);
+            sim.f[SS].pos = Vec3::new(1.0, 25.0, 0.0);
+            loose_ball(&mut sim, 0.4, Vec3::new(0.0, 0.5, 0.5), Vec3::new(1.5, 24.0, -3.0));
+            sim.f[B2].t_int = t_int;
+            let d = sim.decide(B2);
+            assert_eq!(sim.known(B2), (false, 0, false), "the second baseman's choice is not shown");
+            // Only he reads the ball again (a re-call, `recall`); the shortstop keeps out of it.
+            sim.assign_among(vec![B2]);
+            seen.push((d, sim.f[SS].role));
+        }
+        assert_eq!((seen[0].0, seen[1].0), (Decision::Go, Decision::CoverSecond), "the probe's premise: his own choice changes");
+        assert_eq!(seen[0].1, seen[1].1, "the shortstop's job followed the second baseman's unheard choice");
     }
 
     // Codex day review #2: a fly a fielder can catch just before it reaches the wall is an out,
@@ -4947,15 +5915,35 @@ mod tests {
         sim.launch_throw(s0, to, 2, 3, false);
     }
 
-    /// The ball in fielder `holder`'s hands at `at`, the defense's jobs set as at assignment.
+    /// The ball in fielder `holder`'s hands at `at`, the defense's jobs set as at assignment
+    /// and then, once every man's job is known to the others, re-worked as `hear` does.
     fn held_at(sim: &mut Sim, holder: usize, at: Vec3) {
-        sim.primary = holder;
+        known_chaser(sim, holder, 0);
         sim.f[holder].pos = at;
         sim.f[holder].target = at;
         sim.ball = Ball::Held { by: holder };
-        sim.cover_roles();
+        sim.cover_roles(&[]);
         sim.assign_relay();
         sim.assign_backups();
+        jobs_become_known(sim);
+    }
+
+    /// Every fielder's present job, shown long enough ago that his teammates know it, and
+    /// what they then do about it (`Sim::hear`), until the jobs settle.
+    fn jobs_become_known(sim: &mut Sim) {
+        let at = sim.t - CALL_HEARD_S - DT;
+        for _ in 0..4 {
+            let before: Vec<Role> = sim.f.iter().map(|f| f.role).collect();
+            for fd in sim.f.iter_mut() {
+                let tier = if fd.role == Role::Chase { fd.call } else { 0 };
+                fd.shown.push(Shown { at, role: fd.role, backs: fd.backs, tier, asks: None });
+            }
+            sim.hear();
+            if sim.f.iter().map(|f| f.role).eq(before) {
+                return;
+            }
+        }
+        panic!("the jobs did not settle: {:?}", sim.f.iter().map(|f| f.role).collect::<Vec<_>>());
     }
 
     /// Point `p` lies on the segment a–b (within 1 cm of the line, between the ends).
@@ -5021,10 +6009,17 @@ mod tests {
         sim.assign();
         let Ball::Free { path, .. } = &sim.ball else { unreachable!() };
         assert!(path.bounces[0].0 > sim.t + 2.0, "the ball must still be well up");
-        assert!(m::hypot(sim.fielding_point().x, sim.fielding_point().y) > RELAY_DEEP_M);
-        // Against RHB (Savant standard: 2B +6.8 deg, SS -18.3 deg), 2B starts closer to this
-        // straightaway CF relay spot (~ -2 m, 45 m) than SS and goes out early.
-        assert_eq!(sim.f[3].role, Role::Relay(4));
+        // The relay man goes once he knows who is going for it.
+        let_calls_be_heard(&mut sim);
+        let fp = sim.fielding_point().expect("the centre fielder's chase is known");
+        assert!(m::hypot(fp.x, fp.y) > RELAY_DEEP_M, "fielded at {fp:?}");
+        let Ball::Free { path, .. } = &sim.ball else { unreachable!() };
+        assert!(path.bounces[0].0 > sim.t + 1.5, "still well up");
+        // A middle infielder goes out as the relay man to home (runner on second) before it
+        // lands. (Which one depends on the line from home to where the centre fielder takes
+        // it, against the two men's pre-pitch spots.)
+        let relays: Vec<usize> = (0..9).filter(|&i| sim.f[i].role == Role::Relay(4)).collect();
+        assert!(relays == [3] || relays == [5], "relay men {relays:?}: {:?}", sim.f.iter().map(|f| f.role).collect::<Vec<_>>());
         // A short fly an infielder can catch keeps him on the ball.
         let mut inp = input(&fx, vec![RunnerIn { id: fx.st.batter, base: 0, speed: 8.2 }, RunnerIn { id: R, base: 2, speed: 8.2 }]);
         inp.ball = BallState { r: Vec3::new(0.0, 0.5, 1.0), v: Vec3::new(-2.0, 14.0, 24.0), w: Vec3::ZERO };
@@ -5032,6 +6027,7 @@ mod tests {
         let mut sim = new_sim(&inp, &mut st);
         sim.t = 1.0;
         sim.assign();
+        let_calls_be_heard(&mut sim);
         assert!(!(0..9).any(|i| matches!(sim.f[i].role, Role::Relay(_))));
     }
 
@@ -5218,9 +6214,10 @@ mod tests {
     }
 
     fn jobs(sim: &mut Sim, fielder: usize, at: Vec3) {
-        sim.primary = fielder;
-        sim.f[fielder].target = at;
-        sim.cover_roles();
+        known_chaser(sim, fielder, 0);
+        (sim.f[fielder].pos, sim.f[fielder].target) = (at, at);
+        sim.ball = Ball::Held { by: fielder };
+        sim.cover_roles(&[]);
         sim.assign_backups();
     }
 
@@ -5323,8 +6320,10 @@ mod tests {
         for fd in sim.f.iter_mut() {
             fd.target = at;
         }
-        sim.primary = 8;
-        sim.cover_roles();
+        known_chaser(&mut sim, 8, 0);
+        (sim.f[8].pos, sim.f[8].target) = (at, at);
+        sim.ball = Ball::Held { by: 8 };
+        sim.cover_roles(&[]);
         sim.assign_backups();
         let idle: Vec<usize> = (0..9).filter(|&i| sim.f[i].role == Role::Idle).collect();
         assert!(idle.contains(&B2) && !idle.contains(&0), "idle: {idle:?}");
@@ -5396,7 +6395,10 @@ mod tests {
         assert!((land - Vec3::new(21.0, 67.0, 0.0)).norm() < 3.0, "lands at {land:?}");
         assert_eq!((tier(&sim, B2), tier(&sim, RF)), (2, 1));
         sim.assign();
-        assert_eq!(sim.primary, B2);
+        assert_eq!(sim.f[B2].role, Role::Chase);
+        // Until he hears the call, the right fielder goes for it too.
+        let_calls_be_heard(&mut sim);
+        assert_eq!(sim.f[B2].role, Role::Chase);
         assert_ne!(sim.f[RF].role, Role::Chase, "the infielder has called it");
         // A fly hit at the centre fielder he has only to wait for: he calls it at once.
         let inp = hit(&fx, Vec3::new(0.0, 33.0, 22.0));
@@ -5407,7 +6409,7 @@ mod tests {
         assert!((land - sim.f[CF].pos).norm() < 4.0, "lands at {land:?}");
         assert_eq!(tier(&sim, CF), 3);
         sim.assign();
-        assert_eq!(sim.primary, CF);
+        assert_eq!(sim.f[CF].role, Role::Chase);
         assert_eq!((0..9).filter(|&i| sim.f[i].role == Role::Chase).count(), 1);
     }
 
@@ -5438,13 +6440,10 @@ mod tests {
             sim.move_fielders();
             sim.t += DT;
         }
-        let pi = sim.primary;
-        let p = sim.predict(pi);
-        (sim.f[pi].t_int, sim.f[pi].target) = sim.intercept(pi, &p);
-        sim.f[pi].belief = Some(p);
         sim.recall();
-        assert_eq!(sim.primary, CF);
         assert_eq!(tier(&sim, CF), 3);
+        assert_eq!(sim.f[RF].role, Role::Chase, "he has not heard the call yet");
+        let_calls_be_heard(&mut sim);
         assert_eq!(sim.f[CF].role, Role::Chase);
         assert_ne!(sim.f[RF].role, Role::Chase, "called off");
     }
@@ -5539,16 +6538,25 @@ mod tests {
         }
     }
 
-    // Agent-models §5.7, "peels off to back up": a pop-up coming down at (20, 36) m, between
-    // first and second, that both the first and second basemen are sure of. The first baseman, nearer, has more time to
-    // spare and calls it; the second baseman, with no base to cover (the shortstop takes
-    // second on a ball to the right side), does not stop where he is but backs up the catch
-    // from 5 m short of where his own read has it coming down, on his side of it. A re-call he
-    // is not part of leaves him that job; once the ball is down it ends.
+    // Agent-models §5.7, "peels off to back up". Part 1: a pop-up coming down at (20, 36) m,
+    // between first and second, that both the first and second basemen are sure of. Both call
+    // it and go for it until each hears the other (`CALL_HEARD_S`); then the priority table
+    // keeps it with the second baseman (neither can hear how much time the other has to
+    // spare). The first baseman, called off, takes first base at once: a cover job takes a
+    // called-off infielder, and first is his by the table (recheck P1-2: a man's own stop is
+    // instant in his own table).
+    //
+    // Part 2: a fly to shallow right that the second baseman is sure of, with the right
+    // fielder's sure call (tier 3) already heard. The second baseman yields, and his table
+    // gives him no base (first is the first baseman's, second the shortstop's), so he backs
+    // up the catch from 5 m short of where his own read has it coming down, on his side of it.
+    // A re-call he is not part of leaves him that job; while the call stands he makes no glove
+    // attempt; once the ball is down the job ends.
     #[test]
-    fn a_called_off_infielder_backs_up_the_catch() {
+    fn a_called_off_infielder_covers_his_base_or_backs_up_the_catch() {
         const B1: usize = 2;
         const B2: usize = 3;
+        const RF: usize = 8;
         let fx = fixture(&[]);
         let inp = hit(&fx, Vec3::new(7.0, 12.5, 28.0));
         let mut st = fx.st.clone();
@@ -5556,13 +6564,22 @@ mod tests {
         at_first_read(&mut sim);
         let land = landing(&sim);
         assert!((land - Vec3::new(20.0, 36.0, 0.0)).norm() < 2.0, "lands at {land:?}");
-        assert!((sim.f[B1].pos - land).norm() < (sim.f[B2].pos - land).norm(), "1B nearer");
         assert_eq!((tier(&sim, B1), tier(&sim, B2)), (2, 2), "both sure");
         sim.assign();
-        assert_eq!(sim.primary, B1);
-        assert_eq!(sim.f[5].role, Role::Cover(2));
+        assert_eq!((sim.f[B1].role, sim.f[B2].role), (Role::Chase, Role::Chase), "neither has heard the other yet");
+        let_calls_be_heard(&mut sim);
+        assert_eq!((sim.f[B1].role, sim.f[B2].role), (Role::Cover(1), Role::Chase), "the first baseman, called off, covers first");
+
+        let inp = hit(&fx, Vec3::new(7.0, 17.0, 22.0));
+        let mut st = fx.st.clone();
+        let mut sim = new_sim(&inp, &mut st);
+        at_first_read(&mut sim);
+        let land = landing(&sim);
+        assert_eq!((tier(&sim, B2), tier(&sim, 0), tier(&sim, 5)), (2, 0, 0), "the second baseman is sure, the pitcher and shortstop are not");
+        known_chaser(&mut sim, RF, 3);
+        sim.assign();
         let fd = &sim.f[B2];
-        assert_eq!(fd.role, Role::Backup, "2B");
+        assert_eq!(fd.role, Role::Backup, "2B: {:?}", sim.f.iter().map(|f| f.role).collect::<Vec<_>>());
         // Error-free read: his read of where it comes down is where it does (to the
         // intercept's 0.12 s sampling and the planning reach).
         let off = fd.target - land;
@@ -5571,29 +6588,983 @@ mod tests {
         assert!(off.normalized().dot(side) > 0.9, "on his side of it");
         // A re-call among others leaves him the job.
         let spot = fd.target;
-        sim.assign_among(vec![B1, 0, 1], Some(B1));
+        sim.assign_among(vec![RF, 0, 1]);
         assert_eq!((sim.f[B2].role, sim.f[B2].target), (Role::Backup, spot));
         // While the call stands he leaves the ball alone, even one that comes within his reach
         // (a misread can put him under it: Codex peel-off review #1): no glove attempt. The
-        // first baseman is moved away so that only the second baseman could reach it.
+        // right fielder is moved away so that only the second baseman could reach it.
         let Ball::Free { path, .. } = &sim.ball else { unreachable!() };
         let t_down = path.bounces[0].0;
         sim.t = t_down - 0.05;
         let (b, _) = sim.ball_at(sim.t);
         assert!(b.z > 0.0 && b.z < CATCH_MAX_Z, "ball at {b:?}");
         let b2_at = sim.f[B2].pos;
-        sim.f[B1].pos = Vec3::new(b.x + 10.0, b.y, 0.0);
+        sim.f[RF].pos = Vec3::new(b.x + 10.0, b.y, 0.0);
         sim.f[B2].pos = Vec3::new(b.x, b.y, 0.0);
         sim.try_captures();
         assert_eq!((sim.f[B2].attempts, matches!(sim.ball, Ball::Free { .. })), (0, true));
         // Once the ball is down, the tick's expiry step ends the job (Codex peel-off review
-        // #2): he has no spot to go to any more, and the ball is re-called among the fielders
-        // near it, so he can field it.
+        // #2): he has no spot to go to any more, and he reads the ball and takes his own job,
+        // so he can field it.
         sim.f[B2].pos = b2_at;
         sim.t = t_down + DT;
         sim.expire_peels();
         assert_eq!(sim.f[B2].peel, None);
         assert_ne!((sim.f[B2].role, sim.f[B2].target), (Role::Backup, spot));
+    }
+
+    /// A slow ball loose on the left side of the infield grass at 1 s, every fielder's job
+    /// dealt from nobody known to be going, and every job (none of them a chase) shown on this
+    /// ball long enough ago to be known: every man has left the ball to another.
+    fn everyone_left_it(sim: &mut Sim, chasing: bool) {
+        loose_ball(sim, 1.0, Vec3::new(-8.0, 30.0, 0.05), Vec3::new(-1.0, 2.0, 0.0));
+        sim.cover_roles(&[]);
+        if chasing {
+            for fd in sim.f.iter_mut() {
+                fd.role = Role::Chase;
+                fd.target = fd.int_pt;
+            }
+        }
+        sim.t += CALL_HEARD_S + 2.0 * DT;
+        let at = sim.t - CALL_HEARD_S - DT;
+        for fd in sim.f.iter_mut() {
+            let tier = if fd.role == Role::Chase { fd.call } else { 0 };
+            fd.shown.push(Shown { at, role: fd.role, backs: fd.backs, tier, asks: None });
+        }
+    }
+
+    /// Run the coordination steps of `simulate_live_inner` for `secs`, recording each tick's
+    /// jobs after the hearing.
+    fn hearing_cycles(sim: &mut Sim, secs: f64) -> Vec<Vec<Role>> {
+        let mut roles = Vec::new();
+        let until = sim.t + secs;
+        while sim.t < until {
+            sim.hear();
+            sim.update_relay();
+            roles.push(sim.f.iter().map(|f| f.role).collect());
+            sim.publish();
+            sim.move_fielders();
+            sim.t += DT;
+        }
+        roles
+    }
+
+    // Codex fielder-communication recheck P1-2: every man has left the ball to another and
+    // all know it. One man goes, by a convention all can work out (agent-models §5.7), and
+    // keeps going through repeated hearings over 3 s; nobody else starts, and first base,
+    // covered before, stays covered every tick. (It used to send all nine, then stop all
+    // nine, every 0.6 s, with the bases left open.)
+    #[test]
+    fn a_ball_everyone_left_goes_to_one_man_and_first_stays_covered() {
+        let fx = fixture(&[]);
+        let inp = input(&fx, vec![RunnerIn { id: fx.st.batter, base: 0, speed: 8.2 }]);
+        let mut st = fx.st.clone();
+        let mut sim = new_sim(&inp, &mut st);
+        everyone_left_it(&mut sim, false);
+        assert!(sim.f.iter().any(|f| f.role == Role::Cover(1)), "first is covered to start with");
+        assert!(sim.f.iter().all(|f| f.role != Role::Chase));
+        let roles = hearing_cycles(&mut sim, 3.0);
+        let chasers = |r: &Vec<Role>| (0..9).filter(|&i| r[i] == Role::Chase).collect::<Vec<_>>();
+        let first = chasers(&roles[0]);
+        assert_eq!(first.len(), 1, "one man goes: {:?}", roles[0]);
+        for (k, r) in roles.iter().enumerate() {
+            assert_eq!(chasers(r), first, "tick {k}: {r:?}");
+            assert!(r.contains(&Role::Cover(1)), "tick {k}: first uncovered: {r:?}");
+        }
+    }
+
+    // Recheck P1-2, a chase not dropped only because more men became known to be going: the
+    // left and centre fielders are both going for a ball nobody catches in the air, both known
+    // to be, and each one's own read has the other getting there first. They do not both
+    // stop: the man first in the order they share keeps going through 3 s of hearings, and
+    // nobody who stops starts again. (By their own estimates alone both stopped, nobody was
+    // going, and every man decided again.)
+    #[test]
+    fn two_chasers_who_each_think_the_other_is_first_do_not_both_stop() {
+        const LF: usize = 6;
+        let fx = fixture(&[]);
+        let inp = input(&fx, vec![RunnerIn { id: fx.st.batter, base: 0, speed: 8.2 }]);
+        let mut st = fx.st.clone();
+        let mut sim = new_sim(&inp, &mut st);
+        loose_ball(&mut sim, 1.0, Vec3::new(-20.0, 60.0, 0.05), Vec3::new(-3.0, 4.0, 0.0));
+        sim.cover_roles(&[]);
+        for i in [LF, CF] {
+            sim.f[i].role = Role::Chase;
+            sim.f[i].t_int = 100.0;
+        }
+        sim.t += CALL_HEARD_S + 2.0 * DT;
+        let at = sim.t - CALL_HEARD_S - DT;
+        for fd in sim.f.iter_mut() {
+            fd.shown.push(Shown { at, role: fd.role, backs: fd.backs, tier: 0, asks: None });
+        }
+        assert!(sim.beats_by_own_estimate(LF, CF) && sim.beats_by_own_estimate(CF, LF), "each thinks the other is first");
+        let roles = hearing_cycles(&mut sim, 3.0);
+        for (k, r) in roles.iter().enumerate() {
+            assert!(r[LF] == Role::Chase || r[CF] == Role::Chase, "tick {k}: neither is going: {r:?}");
+        }
+        for i in 0..9 {
+            if let Some(k) = roles.iter().position(|r| r[i] != Role::Chase) {
+                assert!(roles[k..].iter().all(|r| r[i] != Role::Chase), "fielder {i} stopped at tick {k} and started again");
+            }
+        }
+    }
+
+    /// Every man known, on this ball, to be doing the job he has now and none going for it.
+    fn all_known_not_going(sim: &mut Sim) {
+        let at = sim.t - CALL_HEARD_S - DT;
+        assert!(at >= sim.ball_since);
+        for fd in sim.f.iter_mut() {
+            assert_ne!(fd.role, Role::Chase);
+            fd.shown.push(Shown { at, role: fd.role, backs: fd.backs, tier: 0, asks: None });
+        }
+    }
+
+    // Codex fielder-communication third review P1-2, its slow-ball probe: a ball dying on the
+    // infield grass at (0, 30) m, every man known to have left it to another, first covered.
+    // The man sent is the one who can get to it soonest, the pitcher (2.1 s by the review's
+    // estimate of his run to where it stops), not the centre fielder standing on its line
+    // 60 m past where it stops (rank 0 under the first order).
+    #[test]
+    fn the_man_sent_for_a_ball_nobody_took_can_get_to_it() {
+        let fx = fixture(&[]);
+        let inp = input(&fx, vec![RunnerIn { id: fx.st.batter, base: 0, speed: 8.2 }]);
+        let mut st = fx.st.clone();
+        let mut sim = new_sim(&inp, &mut st);
+        loose_ball(&mut sim, 1.0, Vec3::new(0.0, 30.0, 0.05), Vec3::new(0.0, 2.0, 0.0));
+        sim.cover_roles(&[]);
+        sim.t += CALL_HEARD_S + 2.0 * DT;
+        all_known_not_going(&mut sim);
+        let Ball::Free { path, .. } = &sim.ball else { unreachable!() };
+        let rest = path.at(path.t_end()).0;
+        let nearest = (0..9).filter(|&j| sim.known_job(j).0 != Role::Cover(1)).min_by(|&a, &c| sim.eta(a, rest).total_cmp(&sim.eta(c, rest))).unwrap();
+        assert_eq!(nearest, 0, "the pitcher is nearest where it stops");
+        assert_eq!(sim.fallback_chaser(), Some(0), "the man sent");
+    }
+
+    // Opus fielder-communication fourth review P3-1: a pop-up over the mound (22 m/s at 75°
+    // from the plate, the review's probe), every man known to have left it to another. The
+    // shared order ties the pitcher, catcher and first baseman on the intercept scan's grid;
+    // the pitcher is the last choice on a pop-up (agent-models §5.7's priority table), so
+    // the tie does not go to him.
+    #[test]
+    fn a_tie_for_a_pop_up_nobody_took_does_not_go_to_the_pitcher() {
+        let fx = fixture(&[]);
+        let inp = input(&fx, vec![RunnerIn { id: fx.st.batter, base: 0, speed: 8.2 }]);
+        let mut st = fx.st.clone();
+        let mut sim = new_sim(&inp, &mut st);
+        let th = 75.0_f64.to_radians();
+        loose_ball(&mut sim, 1.0, Vec3::new(0.0, 0.5, 1.0), Vec3::new(0.0, 22.0 * m::cos(th), 22.0 * m::sin(th)));
+        sim.cover_roles(&[]);
+        sim.t += CALL_HEARD_S + 2.0 * DT;
+        all_known_not_going(&mut sim);
+        let ranks: Vec<f64> = (0..9).map(|j| sim.public_rank(j)).collect();
+        let best = ranks.iter().cloned().fold(f64::INFINITY, f64::min);
+        assert_eq!(ranks[0], best, "the pitcher ties for first: {ranks:?}");
+        let sent = sim.fallback_chaser().expect("someone goes");
+        assert_eq!(ranks[sent], best);
+        assert_ne!(sent, 0, "ranks {ranks:?}");
+    }
+
+    // Opus fourth review P3-4: the shared order depends on each man's velocity as well as his
+    // position, so a change of velocity alone, in the same tick, is not answered from the
+    // cache of the order.
+    #[test]
+    fn the_shared_order_follows_a_change_of_velocity() {
+        let fx = fixture(&[]);
+        let inp = input(&fx, vec![RunnerIn { id: fx.st.batter, base: 0, speed: 8.2 }]);
+        let mut st = fx.st.clone();
+        let mut sim = new_sim(&inp, &mut st);
+        loose_ball(&mut sim, 1.0, Vec3::new(-8.0, 30.0, 0.05), Vec3::new(-1.0, 2.0, 0.0));
+        let before = sim.public_rank(4);
+        sim.f[4].vel = Vec3::new(6.0, -6.0, 0.0);
+        let path = sim.public_path();
+        let fresh = sim.seen_intercept(4, &path).0;
+        assert!(fresh != before, "the velocity changes his intercept ({before} both)");
+        assert_eq!(sim.public_rank(4), fresh);
+    }
+
+    // Third review P1-2, its fly: raw seed 2 play 140 (EV 34.75 m/s, launch 34.0°, spray
+    // −9.5°), a fly to left-centre that the centre fielder catches on main. If every man has
+    // left it to another, the man sent is an outfielder, not the pitcher (whom the first
+    // order sent, his own intercept 12 s, and the ball fell for a hit).
+    #[test]
+    fn the_man_sent_for_a_fly_nobody_took_is_an_outfielder() {
+        let fx = fixture(&[]);
+        let mut inp = input(&fx, vec![RunnerIn { id: fx.st.batter, base: 0, speed: 8.2 }]);
+        let (ev, la, spray) = (34.753, 34.008_f64.to_radians(), (-9.505_f64).to_radians());
+        inp.ball = BallState { r: Vec3::new(0.0, 0.5, 1.0), v: Vec3::new(ev * m::cos(la) * m::sin(spray), ev * m::cos(la) * m::cos(spray), ev * m::sin(la)), w: Vec3::ZERO };
+        let mut st = fx.st.clone();
+        let mut sim = new_sim(&inp, &mut st);
+        sim.t = inp.t_contact + 0.55;
+        sim.cover_roles(&[]);
+        all_known_not_going(&mut sim);
+        let sent = sim.fallback_chaser().expect("someone is sent");
+        assert!(sent >= 6, "sent f{sent}");
+    }
+
+    // Third review P2-1: the double-play pivot grounder with error-free reads; the second
+    // baseman known idle and the shortstop known covering second, on this ball. Their reads
+    // agree on who gets to it first, so one goes and the other stays at second (both used to
+    // go, leaving their partner out because he was not known to be going).
+    #[test]
+    fn error_free_middle_infielders_keep_one_at_second() {
+        const B2: usize = 3;
+        const SS: usize = 5;
+        let mut fx = fixture(&[(5, 1)]);
+        fx.st.outs = 1;
+        let mut st = fx.st.clone();
+        let mut inp = input(&fx, vec![RunnerIn { id: fx.st.batter, base: 0, speed: 8.2 }, RunnerIn { id: 5, base: 1, speed: 8.2 }]);
+        inp.ball = BallState { r: Vec3::new(0.0, 0.5, 0.5), v: Vec3::new(-1.5, 24.0, -3.0), w: Vec3::ZERO };
+        let mut sim = new_sim(&inp, &mut st);
+        for f in sim.f.iter_mut() {
+            f.err = [0.0; 4];
+        }
+        sim.t = inp.t_contact + 0.6;
+        known_doing(&mut sim, B2, Role::Idle);
+        known_doing(&mut sim, SS, Role::Cover(2));
+        for i in [B2, SS] {
+            sim.read(i);
+            sim.f[i].call = 0;
+        }
+        let d = (sim.decide(B2), sim.decide(SS));
+        assert!(matches!(d, (Decision::Go, Decision::CoverSecond) | (Decision::CoverSecond, Decision::Go)), "2B, SS: {d:?} (fielding times {:.3}, {:.3})", sim.f[B2].t_int, sim.f[SS].t_int);
+    }
+
+    /// What the isolation harness compares of fielder `k` after a step: everything he is,
+    /// does and has shown (his job, target, backup, call, plans and clocks, his publications),
+    /// with his read sampled where the ball is now and where his read has it end. Compared as
+    /// values; formatted only to report a difference.
+    #[allow(clippy::type_complexity)]
+    fn iso_fielder(sim: &Sim, k: usize) -> impl PartialEq + std::fmt::Debug {
+        let f = &sim.f[k];
+        (
+            (f.pos, f.vel, f.jump, f.role, f.target, f.next_plan, f.err, f.attempts, f.blocked_until, f.ready_at, f.dove, f.lunge),
+            (f.t_int, f.int_pt, f.read_at, f.read_ball, f.call, f.shown.clone(), f.last_close_read, f.must_dive_since, f.last_dive_read, f.will_dive.get(), f.throws, f.up_at),
+            (f.set_base, f.face, f.catch_vel, f.took_diving, f.backs, f.peel, f.carry_to, f.asks, f.pivot, f.pivot_wait_bag),
+            f.belief.as_ref().map(|p| (p.at(sim.t), p.at(p.t_end()), p.t_end())),
+        )
+    }
+
+    /// `iso_fielder` as text (for the reported differences and the third review's probes).
+    fn iso_state(sim: &Sim, k: usize) -> String {
+        format!("{:?}", iso_fielder(sim, k))
+    }
+
+    /// The ball as the isolation harness compares it: loose (its path sampled, and its
+    /// bookkeeping), held by whom, or thrown (the whole throw: its path's ends, its aim, its
+    /// receiver's read of it and the base and man it is for).
+    fn iso_ball(sim: &Sim) -> String {
+        match &sim.ball {
+            Ball::Free { path, next_touch, next_wall, settled_sent } => format!("free {:?} {:?}", (path.at(sim.t), path.at(path.t_end()), path.t_end()), (next_touch, next_wall, settled_sent)),
+            Ball::Held { by } => format!("held {by}"),
+            Ball::Thrown { path, aim, catch_at, read_at, read_err, next_read, to_base, receiver, relay } => {
+                format!("thrown {:?} {:?}", (path.first(), path.last()), (aim, catch_at, read_at, read_err, next_read, to_base, receiver, relay))
+            }
+        }
+    }
+
+    /// Everything the harness compares after a step but fielder `j`: every other man (as
+    /// `iso_fielder`), the ball, the runners, and (at the holder's step, for another man's
+    /// change) the holder's options. Kept as the step left it; compared field by field.
+    struct IsoWorld<'s, 'a> {
+        sim: Sim<'s>,
+        j: usize,
+        step: &'static str,
+        _st: std::marker::PhantomData<&'a ()>,
+    }
+
+    impl IsoWorld<'_, '_> {
+        fn holder_options(&self) -> Option<String> {
+            match self.sim.ball {
+                Ball::Held { by } if self.step == "holder_act" && by != self.j => Some(format!("{:?}", self.sim.holder_options(by))),
+                _ => None,
+            }
+        }
+
+        /// The differences from `o`, as `name: self -> o`.
+        fn diff(&self, o: &IsoWorld) -> Vec<String> {
+            let mut d: Vec<String> = (0..9)
+                .filter(|&k| k != self.j && iso_fielder(&self.sim, k) != iso_fielder(&o.sim, k))
+                .map(|k| format!("f{k}: {} -> {}", iso_state(&self.sim, k), iso_state(&o.sim, k)))
+                .collect();
+            let (ba, bb) = (iso_ball(&self.sim), iso_ball(&o.sim));
+            if ba != bb {
+                d.push(format!("ball: {ba} -> {bb}"));
+            }
+            let (ra, rb) = (format!("{:?}", self.sim.r), format!("{:?}", o.sim.r));
+            if ra != rb {
+                d.push(format!("runners: {ra} -> {rb}"));
+            }
+            let (ha, hb) = (self.holder_options(), o.holder_options());
+            if ha != hb {
+                d.push(format!("holder options: {ha:?} -> {hb:?}"));
+            }
+            d
+        }
+    }
+
+    type IsoFlip = Box<dyn Fn(&mut Fielder)>;
+
+    /// The private changes the harness makes to fielder `j`, one at a time. None of them is
+    /// shown: his publications stay as they are. Every job and backup he could have; where he
+    /// is going and his plan; his backup of a catch; each call; his read cleared, or replaced
+    /// by another valid read of the ball now (perfect, or with his error draws at ±2 σ, with
+    /// the call it gives), which can put him on either side of the thresholds the decisions
+    /// use; his error draws; his planning clocks (replan, close read, dive read); a dive
+    /// decided; a carry; a holder's set-up clocks and his call for a man to a bag.
+    fn iso_flips(sim: &Sim, j: usize) -> Vec<(String, IsoFlip)> {
+        let mut v: Vec<(String, IsoFlip)> = Vec::new();
+        let roles = [Role::Idle, Role::Chase, Role::Cover(1), Role::Cover(2), Role::Cover(3), Role::Cover(4), Role::Relay(1), Role::Relay(2), Role::Relay(3), Role::Relay(4), Role::Backup];
+        for r in roles {
+            if r != sim.f[j].role {
+                v.push((format!("role {r:?}"), Box::new(move |f: &mut Fielder| f.role = r)));
+            }
+        }
+        for b in [None, Some(1), Some(2), Some(3), Some(4)] {
+            if b != sim.f[j].backs {
+                v.push((format!("backs {b:?}"), Box::new(move |f: &mut Fielder| f.backs = b)));
+            }
+        }
+        v.push(("target".into(), Box::new(|f: &mut Fielder| f.target = f.target + Vec3::new(5.0, 5.0, 0.0))));
+        v.push(("plan".into(), Box::new(|f: &mut Fielder| {
+            f.int_pt = f.int_pt + Vec3::new(5.0, 0.0, 0.0);
+            f.t_int += 1.0;
+        })));
+        v.push(("peel".into(), Box::new(|f: &mut Fielder| f.peel = if f.peel.is_some() { None } else { Some(f.pos) })));
+        for c in 0..=3u8 {
+            if c != sim.f[j].call {
+                v.push((format!("call {c}"), Box::new(move |f: &mut Fielder| f.call = c)));
+            }
+        }
+        v.push(("read cleared".into(), Box::new(|f: &mut Fielder| {
+            f.belief = None;
+            f.t_int = f64::INFINITY;
+            f.read_at = f64::NEG_INFINITY;
+        })));
+        if matches!(sim.ball, Ball::Free { .. }) {
+            for (name, err) in [("perfect", [0.0; 4]), ("+2σ", [2.0; 4]), ("-2σ", [-2.0; 4])] {
+                let mut st = sim.st.clone();
+                let mut g = sim.fork(&mut st);
+                g.f[j].err = err;
+                let p = g.predict(j);
+                let (ti, pt) = g.intercept(j, &p);
+                let bias = if j >= 6 { -0.15 } else { 0.0 };
+                let call = g.call_value(j, &p, ti, pt, bias).0;
+                let (t, ball) = (sim.t, sim.ball_gen);
+                v.push((format!("read {name} (call {call})"), Box::new(move |f: &mut Fielder| {
+                    (f.belief, f.t_int, f.int_pt, f.call, f.read_at, f.read_ball) = (Some(p.clone()), ti, pt, call, t, ball);
+                })));
+            }
+        }
+        v.push(("err".into(), Box::new(|f: &mut Fielder| f.err = [4.0; 4])));
+        v.push(("read_ball".into(), Box::new(|f: &mut Fielder| f.read_ball = u64::MAX)));
+        v.push(("next_plan now".into(), Box::new(|f: &mut Fielder| f.next_plan = f64::NEG_INFINITY)));
+        v.push(("next_plan never".into(), Box::new(|f: &mut Fielder| f.next_plan = f64::INFINITY)));
+        v.push(("close read due".into(), Box::new(|f: &mut Fielder| f.last_close_read = f64::NEG_INFINITY)));
+        v.push(("close read not due".into(), Box::new(|f: &mut Fielder| f.last_close_read = f64::INFINITY)));
+        v.push(("dive read due".into(), Box::new(|f: &mut Fielder| f.last_dive_read = f64::NEG_INFINITY)));
+        v.push(("must dive".into(), Box::new(|f: &mut Fielder| f.must_dive_since = if f.must_dive_since.is_finite() { f64::INFINITY } else { f64::NEG_INFINITY })));
+        v.push(("will dive".into(), Box::new(|f: &mut Fielder| f.will_dive.set(!f.will_dive.get()))));
+        v.push(("jump".into(), Box::new(|f: &mut Fielder| f.jump = f.jump + Vec3::new(3.0, -3.0, 0.0))));
+        v.push(("carry_to".into(), Box::new(|f: &mut Fielder| f.carry_to = if f.carry_to.is_some() { None } else { Some(4) })));
+        v.push(("set_base".into(), Box::new(|f: &mut Fielder| f.set_base += 1.0)));
+        v.push(("up_at".into(), Box::new(|f: &mut Fielder| f.up_at += 0.5)));
+        v.push(("asks".into(), Box::new(|f: &mut Fielder| f.asks = if f.asks.is_some() { None } else { Some((2, 5)) })));
+        v
+    }
+
+    /// Run `step` on a fork of `sim` (with its own rules state `st`), with `flip` applied to
+    /// fielder `j` first. Also whether he still holds the ball.
+    fn iso_run<'s>(sim: &'s Sim, st: &'s mut RulesState, step: &'static str, j: usize, flip: Option<&dyn Fn(&mut Fielder)>) -> (IsoWorld<'s, 's>, bool) {
+        let mut b = sim.fork(st);
+        if let Some(flip) = flip {
+            flip(&mut b.f[j]);
+        }
+        b.run_step(step);
+        let held = matches!(b.ball, Ball::Held { by } if by == j);
+        (IsoWorld { sim: b, j, step, _st: std::marker::PhantomData }, held)
+    }
+
+    /// Fork `sim`, apply `flip` to fielder `j` in one fork, run `step` on both, and say what
+    /// else came out differently.
+    fn iso_compare(sim: &Sim, step: &'static str, j: usize, flip: &dyn Fn(&mut Fielder)) -> Vec<String> {
+        let (mut sa, mut sb) = (sim.st.clone(), sim.st.clone());
+        let (a, _) = iso_run(sim, &mut sa, step, j, None);
+        let (b, _) = iso_run(sim, &mut sb, step, j, Some(flip));
+        a.diff(&b)
+    }
+
+    /// `iso_compare` for the holder at his own step: differences count only when the ball is
+    /// still in his hands in both forks (a release is a public event).
+    fn iso_compare_pre_release(sim: &Sim, step: &'static str, j: usize, flip: &dyn Fn(&mut Fielder)) -> Vec<String> {
+        let (mut sa, mut sb) = (sim.st.clone(), sim.st.clone());
+        let (a, held_a) = iso_run(sim, &mut sa, step, j, None);
+        let (b, held_b) = iso_run(sim, &mut sb, step, j, Some(flip));
+        if !held_a || !held_b {
+            return Vec::new();
+        }
+        a.diff(&b)
+    }
+
+    /// What a step changed of the jobs: anyone's role, backup, call, backup of a catch, call
+    /// for a man to a bag, publications, or the ball (not a target, which a cutoff man's line
+    /// moves every tick). A step that changes them is a transition, checked every time.
+    fn iso_jobs(sim: &Sim) -> String {
+        format!("{:?} {}", sim.f.iter().map(|f| (f.role, f.backs, f.call, f.peel, f.asks, f.shown.len())).collect::<Vec<_>>(), iso_ball(sim))
+    }
+
+    /// Steps the harness checks at every call: rare, and each one a transition.
+    const ISO_DENSE_STEPS: [&str; 3] = ["new_ball_assign", "back_up_throw", "recall"];
+
+    /// Run games `seeds` with the harness: before each decision step of a live play, at every
+    /// `stride`-th call of the step, at every call of a rare step (`ISO_DENSE_STEPS`), and
+    /// at every call that changes anyone's job (a transition), for every fielder and every
+    /// private change (`iso_flips`), nothing else (`iso_world`) may change in that step. The
+    /// holder's own change at his step may decide his throw: what follows a release is public
+    /// (`iso_compare_pre_release`). Returns the checks made, the snapshots checked by step,
+    /// and the violations.
+    fn isolation_run(seeds: std::ops::Range<u64>, plays: std::ops::Range<u32>, stride: u64) -> (u64, std::collections::BTreeMap<&'static str, u64>, Vec<String>) {
+        use std::cell::RefCell;
+        use std::rc::Rc;
+        let found: Rc<RefCell<(u64, Vec<String>)>> = Rc::new(RefCell::new((0, Vec::new())));
+        let calls: Rc<RefCell<std::collections::BTreeMap<&'static str, u64>>> = Rc::default();
+        let snaps: Rc<RefCell<std::collections::BTreeMap<&'static str, u64>>> = Rc::default();
+        let (f2, c2, s2) = (found.clone(), calls.clone(), snaps.clone());
+        ISO_HOOK.with(|h| {
+            *h.borrow_mut() = Some(Box::new(move |sim: &Sim<'_>, step: &'static str| {
+                if !plays.contains(&sim.inp.play) {
+                    return;
+                }
+                let n = {
+                    let mut c = c2.borrow_mut();
+                    let e = c.entry(step).or_insert(0);
+                    *e += 1;
+                    *e
+                };
+                let due = n % stride == 0 || ISO_DENSE_STEPS.contains(&step) || {
+                    let mut st = sim.st.clone();
+                    let mut a = sim.fork(&mut st);
+                    a.run_step(step);
+                    iso_jobs(&a) != iso_jobs(sim)
+                };
+                if !due {
+                    return;
+                }
+                *s2.borrow_mut().entry(step).or_insert(0) += 1;
+                let holder = match sim.ball {
+                    Ball::Held { by } => Some(by),
+                    _ => None,
+                };
+                for j in 0..9 {
+                    // One unchanged run per man (it leaves him out of the comparison).
+                    let mut sa = sim.st.clone();
+                    let (a, held_a) = iso_run(sim, &mut sa, step, j, None);
+                    let own_throw = step == "holder_act" && holder == Some(j);
+                    for (what, flip) in iso_flips(sim, j) {
+                        let mut sb = sim.st.clone();
+                        let (b, held_b) = iso_run(sim, &mut sb, step, j, Some(flip.as_ref()));
+                        let d = if own_throw && (!held_a || !held_b) { Vec::new() } else { a.diff(&b) };
+                        let mut fr = f2.borrow_mut();
+                        fr.0 += 1;
+                        if !d.is_empty() {
+                            let first: String = d[0].chars().take(240).collect();
+                            fr.1.push(format!("seed {} play {} t {:.6} {step}: f{j} {what}: {} change(s), {first}", sim.inp.seed, sim.inp.play, sim.t, d.len()));
+                        }
+                    }
+                }
+            }));
+        });
+        for seed in seeds {
+            crate::game::simulate_game(seed);
+        }
+        ISO_HOOK.with(|h| *h.borrow_mut() = None);
+        let r = found.borrow().clone();
+        let s = snaps.borrow().clone();
+        (r.0, s, r.1)
+    }
+
+    /// The harness's settings from the environment: `ISO_SEEDS=a..b`, `ISO_STRIDE=n`.
+    fn iso_settings(seeds: std::ops::Range<u64>, stride: u64) -> (std::ops::Range<u64>, u64) {
+        let seeds = std::env::var("ISO_SEEDS").ok().and_then(|s| s.split_once("..").map(|(a, b)| a.parse().unwrap()..b.parse().unwrap())).unwrap_or(seeds);
+        let stride = std::env::var("ISO_STRIDE").ok().map(|s| s.parse().unwrap()).unwrap_or(stride);
+        (seeds, stride)
+    }
+
+    fn iso_assert(seeds: std::ops::Range<u64>, stride: u64, min_checks: u64) {
+        let (checks, snaps, bad) = isolation_run(seeds.clone(), 0..u32::MAX, stride);
+        // Violations by step, and the snapshots (seed, play, time, step) they occurred at.
+        let mut by_step: std::collections::BTreeMap<&str, u64> = Default::default();
+        let mut at: std::collections::BTreeSet<&str> = Default::default();
+        for b in &bad {
+            let head = b.split(": f").next().unwrap_or(b);
+            at.insert(head);
+            *by_step.entry(head.rsplit(' ').next().unwrap_or("")).or_insert(0) += 1;
+        }
+        eprintln!("isolation seeds {seeds:?} stride {stride}: {checks} checks, {} violations at {} snapshots, by step {by_step:?}; snapshots checked by step {snaps:?}", bad.len(), at.len());
+        assert!(checks > min_checks, "only {checks} checks");
+        let shown: Vec<&String> = bad.iter().take(12).collect();
+        assert!(bad.is_empty(), "{} of {checks} checks leaked, e.g.:\n{}", bad.len(), shown.iter().map(|s| s.as_str()).collect::<Vec<_>>().join("\n"));
+    }
+
+    // Codex fielder-communication third review P1-1, widened after the fourth reviews (Codex
+    // P2-1, Opus P2-2): the general isolation harness on real games. Before every decision
+    // step of a live play (the first read; a new loose ball's read; the chasers' replans; the
+    // close and dive reads; the re-call; the end of a backup of a catch; a chaser seeing the
+    // ball secured; the receiver's read of a throw; the holder's choice; his call heeded; the
+    // backup of a released throw; the catcher's return home; hearing; the cutoff job), each
+    // man's private state is changed in turn (`iso_flips`; never what he has shown) and
+    // nothing else (`iso_world`: every other man's whole state and publications, the ball,
+    // the runners, the holder's options) may change in that step. Rare steps and every step
+    // that changes a job are checked every time, others every `stride`-th call. The default
+    // run is short (seeds 0–3); `isolation_many_seeds` (ignored) runs 0–49:
+    //   cd sim && taskset -c 0-7 nice cargo test --release -p bb_game --lib isolation_many_seeds -- --ignored --nocapture
+    // `ISO_SEEDS=a..b`, `ISO_STRIDE=n` change either; `ISO_REVERT=1` with the ignored run
+    // makes it the negative control.
+    #[test]
+    fn isolation_no_private_state_reaches_a_teammate_in_real_games() {
+        let (seeds, stride) = iso_settings(0..2, 400);
+        iso_assert(seeds, stride, 100_000);
+    }
+
+    // The harness's negative control (fourth review P2-1): with the cutoff step behaving as
+    // on `f3d9e7a` (a man's private leaving or taking of the cutoff job re-works every
+    // teammate's cover, Codex third review P1-1), the harness must find leaks, on the first
+    // 30 plays of seed 0 at its default stride.
+    #[test]
+    fn isolation_harness_finds_the_third_reviews_gate() {
+        ISO_REVERT_GATE.with(|c| c.set(true));
+        let (checks, snaps, bad) = isolation_run(0..1, 0..30, 400);
+        ISO_REVERT_GATE.with(|c| c.set(false));
+        eprintln!("negative control: {checks} checks, {} violations; snapshots by step {snaps:?}", bad.len());
+        let first: Vec<&str> = bad.iter().take(3).map(|s| s.as_str()).collect();
+        eprintln!("{}", first.join("\n"));
+        assert!(!bad.is_empty(), "the harness missed the restored gate in {checks} checks");
+        assert!(bad.iter().all(|b| b.contains("update_relay")), "leaks outside the cutoff step: {:?}", bad.iter().find(|b| !b.contains("update_relay")));
+    }
+
+    #[test]
+    #[ignore = "long: the isolation harness over seeds 0-49 (about an hour on one core)"]
+    fn isolation_many_seeds() {
+        // `ISO_REVERT=1` runs it as the negative control (`ISO_REVERT_GATE`): it must fail.
+        ISO_REVERT_GATE.with(|c| c.set(std::env::var("ISO_REVERT").is_ok()));
+        let (seeds, stride) = iso_settings(0..50, 200);
+        iso_assert(seeds, stride, 500_000);
+    }
+
+    // Third review P1-1, its real-game probe: seed 0, play 0, just before the cutoff step at
+    // t = 1.998 s, only the second baseman's private job changes, idle or cutoff to home.
+    // Nobody else's job may change with it (it used to send the catcher to cover home).
+    #[test]
+    fn isolation_seed_0_play_0_a_private_cutoff_job_moves_nobody() {
+        use std::cell::RefCell;
+        use std::rc::Rc;
+        let hit: Rc<RefCell<Option<Vec<String>>>> = Rc::default();
+        let h2 = hit.clone();
+        ISO_HOOK.with(|h| {
+            *h.borrow_mut() = Some(Box::new(move |sim: &Sim<'_>, step: &'static str| {
+                if sim.inp.seed == 0 && sim.inp.play == 0 && step == "update_relay" && (sim.t - 1.998330571).abs() < 1e-6 {
+                    *h2.borrow_mut() = Some(iso_compare(sim, step, 3, &|f: &mut Fielder| f.role = Role::Relay(4)));
+                }
+            }));
+        });
+        crate::game::simulate_game(0);
+        ISO_HOOK.with(|h| *h.borrow_mut() = None);
+        let d = hit.borrow().clone().expect("the snapshot was reached");
+        assert!(d.is_empty(), "{}", d.join("; "));
+    }
+
+    /// Fourth review P1-1: in real game `seed`, at each `holder_act` of play `play` from
+    /// `t_from` for `span` seconds, only the holder's private set-up clock changes (no motion,
+    /// nothing shown). While the ball is in his hands in both forks, no teammate may change.
+    /// Returns the snapshots seen and the leaks.
+    fn holder_snapshot_leaks(seed: u64, play: u32, t_from: f64, span: f64) -> (u32, Vec<String>) {
+        use std::cell::RefCell;
+        use std::rc::Rc;
+        let found: Rc<RefCell<(u32, Vec<String>)>> = Rc::default();
+        let f2 = found.clone();
+        ISO_HOOK.with(|h| {
+            *h.borrow_mut() = Some(Box::new(move |sim: &Sim<'_>, step: &'static str| {
+                if sim.inp.seed != seed || sim.inp.play != play || step != "holder_act" || sim.t < t_from - 1e-6 || sim.t > t_from + span {
+                    return;
+                }
+                let Ball::Held { by } = sim.ball else { return };
+                let d = iso_compare_pre_release(sim, step, by, &|f: &mut Fielder| f.set_base += 1.0);
+                let mut fr = f2.borrow_mut();
+                fr.0 += 1;
+                fr.1.extend(d.into_iter().map(|x| format!("t {:.9} holder f{by}: {x}", sim.t)));
+            }));
+        });
+        crate::game::simulate_game(seed);
+        ISO_HOOK.with(|h| *h.borrow_mut() = None);
+        let r = found.borrow().clone();
+        r
+    }
+
+    // Codex fielder-communication fourth review P1-1, its first counterexample: seed 1 play
+    // 195, the centre fielder holds the ball and waits on a man for second. The left fielder,
+    // known to be backing up second, was sent to the bag (13 m) by the holder's private
+    // choice, before any throw or call.
+    #[test]
+    fn a_holders_private_choice_moves_nobody_seed_1_play_195() {
+        let (seen, leaks) = holder_snapshot_leaks(1, 195, 7.2195, 0.05);
+        assert!(seen > 0, "the snapshot was not reached");
+        assert!(leaks.is_empty(), "{}", leaks.join("\n"));
+    }
+
+    // Fourth review P1-1, its second counterexample: seed 8 play 121 from t = 4.1646 s, the
+    // centre fielder's set-up clock decided, tick after tick, whether the second baseman out
+    // as the cutoff to third was sent to second (then the idle shortstop).
+    #[test]
+    fn a_holders_private_choice_moves_nobody_seed_8_play_121() {
+        let (seen, leaks) = holder_snapshot_leaks(8, 121, 4.1645, 0.2);
+        assert!(seen > 0, "the snapshot was not reached");
+        assert!(leaks.is_empty(), "{}", leaks.join("\n"));
+    }
+
+    // Fourth review P1-1, the call itself: the holder waits on a man for second and calls
+    // him. The man goes to the bag only once the call is heard, `CALL_HEARD_S` later.
+    #[test]
+    fn a_holders_call_to_the_bag_is_heard_before_it_is_heeded() {
+        const LF: usize = 6;
+        let fx = fixture(&[]);
+        let inp = input(&fx, vec![RunnerIn { id: fx.st.batter, base: 0, speed: 8.2 }]);
+        let mut st = fx.st.clone();
+        let mut sim = new_sim(&inp, &mut st);
+        sim.t = 3.0;
+        sim.ball = Ball::Held { by: CF };
+        sim.secured_at = 2.5;
+        sim.f[LF].role = Role::Backup;
+        let spot = Vec3::new(-5.0, 27.0, 0.0);
+        sim.f[LF].target = spot;
+        sim.f[CF].asks = Some((2, LF));
+        sim.publish();
+        sim.heed_requests();
+        assert_eq!(sim.f[LF].target, spot, "he heard nothing yet");
+        sim.t += CALL_HEARD_S - 2.0 * DT;
+        sim.heed_requests();
+        assert_eq!(sim.f[LF].target, spot, "he heard nothing yet");
+        sim.t += 3.0 * DT;
+        sim.heed_requests();
+        assert_eq!(sim.f[LF].target, base_pos(2), "he heard the call and goes to second");
+    }
+
+    // Third review P1-1, its constructed probe: the third baseman holds the ball, the first
+    // baseman is known to be chasing, the pitcher idle. Only the shortstop's private job
+    // changes, idle or cutoff to home (he is known idle): the pitcher's job must not change.
+    #[test]
+    fn isolation_a_private_cutoff_retiring_moves_nobody() {
+        let fx = fixture(&[(0x0007, 2)]);
+        let inp = input(&fx, vec![RunnerIn { id: fx.st.batter, base: 0, speed: 8.2 }, RunnerIn { id: 0x0007, base: 2, speed: 8.2 }]);
+        let mut jobs = Vec::new();
+        for role in [Role::Idle, Role::Relay(4)] {
+            let mut st = fx.st.clone();
+            let mut sim = new_sim(&inp, &mut st);
+            sim.t = 2.0;
+            sim.ball = Ball::Held { by: 4 };
+            sim.f[4].pos = Vec3::new(-20.0, 25.0, 0.0);
+            known_chaser(&mut sim, 2, 0);
+            sim.f[0].role = Role::Idle;
+            sim.f[5].role = role;
+            assert_eq!(sim.known_job(5), (Role::Idle, None));
+            sim.update_relay();
+            jobs.push((sim.f[0].role, sim.f[0].target));
+        }
+        assert_eq!(jobs[0], jobs[1], "the pitcher's job followed the shortstop's unheard cutoff job");
+    }
+
+    // Codex fielder-communication recheck P1-1, first probe: the centre fielder holds the ball
+    // deep, the second baseman stands between him and home, a runner on second. Only the
+    // second baseman's private job changes, idle or cutoff to home, and nobody knows it yet:
+    // the holder's choice of route home must not change with it.
+    #[test]
+    fn the_holders_route_does_not_read_an_unheard_cutoff() {
+        const B2: usize = 3;
+        let fx = fixture(&[(0x0007, 2)]);
+        let inp = input(&fx, vec![RunnerIn { id: fx.st.batter, base: 0, speed: 8.2 }, RunnerIn { id: 0x0007, base: 2, speed: 8.2 }]);
+        let mut races = Vec::new();
+        for role in [Role::Idle, Role::Relay(4)] {
+            let mut st = fx.st.clone();
+            let mut sim = new_sim(&inp, &mut st);
+            sim.t = 1.0;
+            sim.ball = Ball::Held { by: CF };
+            sim.f[CF].pos = Vec3::new(0.0, 125.0, 0.0);
+            sim.f[B2].pos = Vec3::new(0.0, 60.0, 0.0);
+            sim.f[B2].role = role;
+            assert_eq!(sim.known_job(B2), (Role::Idle, None), "his job is not known");
+            let r = sim.throw_race(CF, 4);
+            races.push((r.relay, r.through, r.ball_at, r.via));
+        }
+        assert_eq!(races[0], races[1], "the holder's route read the second baseman's unheard cutoff job");
+    }
+
+    // Codex fielder-communication recheck P1-1, second probe: the centre fielder holds the ball
+    // at (45, 55) with a runner on second. Only the shortstop's private job changes, idle or
+    // cutoff to home, and nobody knows it yet: the first baseman's job must not change with it.
+    #[test]
+    fn the_cutoff_job_does_not_read_an_unheard_cutoff() {
+        const B1: usize = 2;
+        const SS: usize = 5;
+        let fx = fixture(&[(0x0007, 2)]);
+        let inp = input(&fx, vec![RunnerIn { id: fx.st.batter, base: 0, speed: 8.2 }, RunnerIn { id: 0x0007, base: 2, speed: 8.2 }]);
+        let mut jobs = Vec::new();
+        for role in [Role::Idle, Role::Relay(4)] {
+            let mut st = fx.st.clone();
+            let mut sim = new_sim(&inp, &mut st);
+            sim.t = 1.0;
+            sim.ball = Ball::Held { by: CF };
+            sim.f[CF].pos = Vec3::new(45.0, 55.0, 0.0);
+            sim.cover_roles(&[]);
+            assert_eq!(sim.known_job(SS), (Role::Idle, None), "his job is not known");
+            sim.f[SS].role = role;
+            sim.update_relay();
+            jobs.push((sim.f[B1].role, sim.f[B1].target));
+        }
+        assert_eq!(jobs[0], jobs[1], "the first baseman's job read the shortstop's unheard cutoff job");
+    }
+
+    // Codex fielder-communication recheck P1-1, third probe: a ball on the ground; the
+    // pitcher is backing up, and only whether that backup is a called-off man's peel (his
+    // private marker; the job shown is the same) changes. His teammates' reads and jobs must
+    // not change with it.
+    #[test]
+    fn a_peel_ending_does_not_move_teammates() {
+        let fx = fixture(&[]);
+        let inp = input(&fx, vec![RunnerIn { id: fx.st.batter, base: 0, speed: 8.2 }]);
+        let mut seen = Vec::new();
+        for peeled in [false, true] {
+            let mut st = fx.st.clone();
+            let mut sim = new_sim(&inp, &mut st);
+            loose_ball(&mut sim, 1.0, Vec3::new(0.0, 25.0, 0.05), Vec3::new(1.0, 10.0, -2.0));
+            sim.t += 0.2;
+            sim.f[0].role = Role::Backup;
+            if peeled {
+                sim.f[0].peel = Some(Vec3::new(0.0, 20.0, 0.0));
+            }
+            assert!(!sim.ball_still_up());
+            assert_eq!(sim.known_job(0), (Role::Idle, None));
+            sim.expire_peels();
+            seen.push((1..9).map(|i| (sim.f[i].role, sim.f[i].target, sim.f[i].read_at)).collect::<Vec<_>>());
+        }
+        assert_eq!(seen[0], seen[1], "the pitcher's private peel moved his teammates");
+    }
+
+    // Codex fielder-communication recheck P2-1: two new loose balls in one tick (a throw that
+    // comes down, then a rim off a glove) are two balls to read, though they share the tick.
+    #[test]
+    fn a_second_new_ball_in_one_tick_is_read_again() {
+        let fx = fixture(&[]);
+        let inp = input(&fx, vec![RunnerIn { id: fx.st.batter, base: 0, speed: 8.2 }]);
+        let mut st = fx.st.clone();
+        let mut sim = new_sim(&inp, &mut st);
+        sim.t = 1.0;
+        let b = Vec3::new(0.0, 35.0, 0.05);
+        sim.set_free(BallState { r: b, v: Vec3::new(0.0, 25.0, -1.0), w: Vec3::ZERO });
+        assert!(sim.f[CF].int_pt.y > 45.0, "the first ball goes deep: {:?}", sim.f[CF].int_pt);
+        sim.set_free(BallState { r: b, v: Vec3::new(0.0, 1.0, 1.0), w: Vec3::ZERO });
+        let Ball::Free { path, .. } = &sim.ball else { unreachable!() };
+        assert!(path.at(path.t_end()).0.y < 40.0);
+        assert!(sim.f[CF].int_pt.y < 40.0, "the second ball was not read: {:?}", sim.f[CF].int_pt);
+    }
+
+    // The same through the production path (recheck P2-1): a throw that comes down short
+    // becomes a loose ball (`update_thrown`), and in the same tick the pitcher, standing where
+    // it is, gets a glove on it and it comes off the rim (`try_captures`; his hands are set so
+    // the keyed glove placement lands on the rim). The centre fielder's plan must be for the
+    // ball off the rim.
+    #[test]
+    fn a_grounded_throw_rimmed_in_the_same_tick_is_read_again() {
+        let fx = fixture(&[]);
+        let inp = input(&fx, vec![RunnerIn { id: fx.st.batter, base: 0, speed: 8.2 }]);
+        let mut st = fx.st.clone();
+        let mut sim = new_sim(&inp, &mut st);
+        sim.t = 1.0;
+        sim.launch_throw(BallState { r: Vec3::new(0.0, 20.0, 1.7), v: Vec3::new(0.0, 25.0, -5.0), w: Vec3::ZERO }, Vec3::new(0.0, 35.0, 0.0), 2, 3, false);
+        let (at, b) = match &sim.ball {
+            Ball::Thrown { path, .. } => (path.last().t, path.last().s.r),
+            _ => unreachable!(),
+        };
+        sim.t = at;
+        sim.f[0].pos = Vec3::new(b.x, b.y, 0.0);
+        sim.f[0].vel = Vec3::ZERO;
+        sim.update_thrown();
+        let first = match &sim.ball {
+            Ball::Free { path, .. } => path.at(path.t_end()).0,
+            _ => panic!("the throw did not come loose"),
+        };
+        let (bp, bv) = sim.ball_at(sim.t);
+        sim.f[0].pos = Vec3::new(bp.x, bp.y, 0.0);
+        let mut r = rng(inp.seed, inp.play, sim.f[0].id, Purpose::GlovePlacement, sim.f[0].attempts);
+        let (ex, ez) = (r.truncated_normal(4.0), r.truncated_normal(4.0));
+        sim.f[0].a.hands = 0.5 * (POCKET + RIM) / (glove_sigma_mult(bv.norm(), 0.0, false) * m::hypot(ex, ez));
+        sim.try_captures();
+        assert_eq!(sim.f[0].attempts, 1, "a glove attempt");
+        let second = match &sim.ball {
+            Ball::Free { path, .. } => path.at(path.t_end()).0,
+            _ => panic!("expected the ball off the rim"),
+        };
+        assert!((first - second).norm() > 10.0, "two different loose balls: {first:?} {second:?}");
+        let pt = sim.f[CF].int_pt;
+        assert!((Vec3::new(pt.x, pt.y, 0.0) - Vec3::new(second.x, second.y, 0.0)).norm() < (Vec3::new(pt.x, pt.y, 0.0) - Vec3::new(first.x, first.y, 0.0)).norm(), "his plan {pt:?} is for the first ball {first:?}, not the one off the rim {second:?}");
+    }
+
+    // Codex fielder-communication review P2-2: a fly to straightaway centre with the centre
+    // fielder far away, and the two corner outfielders 10 m apart under it, both reading it
+    // without error. Both are sure (tier 3) and share a priority, so the convention decides
+    // (agent-models §5.7: left field over right). Until the calls are heard both go; once each
+    // has heard the other, exactly one goes on (the left fielder), and the right fielder,
+    // the nearest free outfielder, backs him up. It stays so.
+    #[test]
+    fn two_sure_corner_outfielders_resolve_their_calls() {
+        const LF: usize = 6;
+        const RF: usize = 8;
+        let fx = fixture(&[]);
+        let mut inp = hit(&fx, Vec3::new(0.0, 33.0, 22.0));
+        inp.fattrs[LF].read_sigma0 = 0.01;
+        inp.fattrs[RF].read_sigma0 = 0.01;
+        let mut st = fx.st.clone();
+        let mut sim = new_sim(&inp, &mut st);
+        sim.f[LF].pos = Vec3::new(-5.0, 92.0, 0.0);
+        sim.f[RF].pos = Vec3::new(5.0, 92.0, 0.0);
+        sim.f[CF].pos = Vec3::new(70.0, 60.0, 0.0);
+        for fd in sim.f.iter_mut() {
+            fd.jump = Vec3::ZERO;
+        }
+        at_first_read(&mut sim);
+        sim.t = sim.inp.t_contact + 0.6;
+        assert_eq!((tier(&sim, LF), tier(&sim, RF)), (3, 3), "both sure");
+        sim.assign();
+        assert_eq!((sim.f[LF].role, sim.f[RF].role), (Role::Chase, Role::Chase), "neither has heard the other yet");
+        let_calls_be_heard(&mut sim);
+        assert_eq!((sim.f[LF].role, sim.f[RF].role), (Role::Chase, Role::Backup), "one goes on, the other backs him up");
+        let_calls_be_heard(&mut sim);
+        let_calls_be_heard(&mut sim);
+        assert_eq!((sim.f[LF].role, sim.f[RF].role), (Role::Chase, Role::Backup), "and it stays so");
+    }
+
+    // Codex fielder-communication fourth review P2-2: the left fielder sure-calls the fly of
+    // `two_sure_corner_outfielders_resolve_their_calls` and the right fielder backs him up.
+    // Then the left fielder is 45 m off it (as if he had broken the wrong way): his next read
+    // has no catch in the air for him, and by agent-models §5.7 a man calls only a ball he
+    // believes he catches in the air, so he stops calling it. The right fielder still hears
+    // the old call until `CALL_HEARD_S` has passed, and keeps backing up; then, nobody's
+    // sure call standing and his own read still sure, he goes for it.
+    #[test]
+    fn a_sure_caller_who_loses_his_air_play_withdraws_his_call_and_the_backup_takes_it() {
+        const LF: usize = 6;
+        const RF: usize = 8;
+        let fx = fixture(&[]);
+        let mut inp = hit(&fx, Vec3::new(0.0, 33.0, 22.0));
+        inp.fattrs[LF].read_sigma0 = 0.01;
+        inp.fattrs[RF].read_sigma0 = 0.01;
+        let mut st = fx.st.clone();
+        let mut sim = new_sim(&inp, &mut st);
+        sim.f[LF].pos = Vec3::new(-5.0, 92.0, 0.0);
+        sim.f[RF].pos = Vec3::new(5.0, 92.0, 0.0);
+        sim.f[CF].pos = Vec3::new(70.0, 60.0, 0.0);
+        for fd in sim.f.iter_mut() {
+            fd.jump = Vec3::ZERO;
+        }
+        at_first_read(&mut sim);
+        sim.t = sim.inp.t_contact + 0.6;
+        sim.assign();
+        let_calls_be_heard(&mut sim);
+        assert_eq!((sim.f[LF].role, sim.f[LF].call, sim.f[RF].role), (Role::Chase, 3, Role::Backup));
+        // His fresh read, 45 m off the ball.
+        sim.f[LF].pos = Vec3::new(-50.0, 92.0, 0.0);
+        sim.f[LF].vel = Vec3::ZERO;
+        sim.replan(LF);
+        assert_eq!(sim.f[LF].call, 0, "his own read has no catch in the air for him");
+        let withdrawn = sim.t;
+        sim.publish();
+        let mut took = None;
+        while sim.t < withdrawn + 0.6 && took.is_none() {
+            sim.move_fielders();
+            sim.t += DT;
+            sim.hear();
+            if sim.f[RF].role == Role::Chase {
+                took = Some(sim.t - withdrawn);
+            } else {
+                assert_eq!(sim.known(LF).1, 3, "the old call is still what is heard at {:.3} s", sim.t - withdrawn);
+            }
+            sim.publish();
+        }
+        let dt = took.expect("the right fielder takes the ball once the call is withdrawn");
+        assert!(dt > CALL_HEARD_S - 1e-9 && dt < CALL_HEARD_S + DT + 1e-9, "took it {dt:.3} s after the withdrawal");
+    }
+
+    // Fourth review P2-2, the other way: a chaser going for a ball without calling it (tier
+    // 1) whose fresh close read makes him sure calls it.
+    #[test]
+    fn a_chaser_who_becomes_sure_calls_it() {
+        let fx = fixture(&[]);
+        let mut inp = hit(&fx, Vec3::new(0.0, 33.0, 22.0));
+        inp.fattrs[CF].read_sigma0 = 0.01;
+        let mut st = fx.st.clone();
+        let mut sim = new_sim(&inp, &mut st);
+        for fd in sim.f.iter_mut() {
+            fd.jump = Vec3::ZERO;
+        }
+        at_first_read(&mut sim);
+        sim.t = sim.inp.t_contact + 0.6;
+        sim.assign();
+        assert_eq!((sim.f[CF].role, sim.f[CF].call), (Role::Chase, 3), "sure with a near-perfect read");
+        sim.f[CF].call = 1;
+        sim.replan(CF);
+        assert_eq!(sim.f[CF].call, 3, "his fresh read makes him sure again");
+    }
+
+    // Codex fielder-communication review P2-1: the centre fielder reads the fly at its first
+    // look; in the same tick the ball is deflected (off a glove), keeping 30% of its ground
+    // speed and rising at 1 m/s. That is a new ball: his plan must be for it, which comes down
+    // within about 45 m of the plate, not for the old one, which was going 99 m.
+    #[test]
+    fn a_ball_deflected_in_the_tick_of_a_read_is_read_again() {
+        let fx = fixture(&[]);
+        let inp = input(&fx, vec![RunnerIn { id: fx.st.batter, base: 0, speed: 8.2 }]);
+        let mut st = fx.st.clone();
+        let mut sim = new_sim(&inp, &mut st);
+        at_first_read(&mut sim);
+        sim.read(CF);
+        assert!(sim.f[CF].int_pt.y > 90.0, "first read: {:?}", sim.f[CF].int_pt);
+        let (b, v) = sim.ball_at(sim.t);
+        sim.set_free(BallState { r: b, v: Vec3::new(0.3 * v.x, 0.3 * v.y, 1.0), w: Vec3::ZERO });
+        let Ball::Free { path, .. } = &sim.ball else { unreachable!() };
+        let rest = path.at(path.t_end()).0;
+        assert!(m::hypot(rest.x, rest.y) < 45.0, "the deflected ball stops at {rest:?}");
+        let pt = sim.f[CF].int_pt;
+        assert!(pt.y < 45.0, "his plan after the deflection is still for the old ball: {pt:?}");
+    }
+
+    // Agent-models §5.7: "A call reaches teammates after T_call = 0.3 s." The first and
+    // second basemen are both sure of the pop-up of `a_called_off_infielder_covers_his_base_or_backs_up_the_catch`
+    // and both call it; the second baseman has priority. The first baseman goes on for it
+    // until the second baseman's call could be heard, and gives it up at the first tick after.
+    #[test]
+    fn a_call_is_not_heard_before_its_delay() {
+        const B1: usize = 2;
+        const B2: usize = 3;
+        let fx = fixture(&[]);
+        let inp = hit(&fx, Vec3::new(7.0, 12.5, 28.0));
+        let mut st = fx.st.clone();
+        let mut sim = new_sim(&inp, &mut st);
+        at_first_read(&mut sim);
+        assert_eq!((tier(&sim, B1), tier(&sim, B2)), (2, 2), "both sure");
+        sim.assign();
+        let t_call = sim.t;
+        sim.publish();
+        let mut gave_up = None;
+        while sim.t < t_call + 0.6 && gave_up.is_none() {
+            sim.move_fielders();
+            sim.t += DT;
+            sim.hear();
+            if sim.f[B1].role != Role::Chase {
+                gave_up = Some(sim.t - t_call);
+            }
+            assert_eq!(sim.f[B2].role, Role::Chase, "at {:.3} s", sim.t - t_call);
+            sim.publish();
+        }
+        let dt = gave_up.expect("the first baseman gives it up");
+        assert!(dt > 0.3 - 1e-9 && dt < 0.3 + DT + 1e-9, "gave it up {dt:.3} s after the call");
     }
 
     // Codex idle-fielder review #1: every way into `Role::Idle` brakes the fielder, not only
@@ -6633,9 +8604,9 @@ mod tests {
     fn a_chaser_outside_the_recall_keeps_going_until_someone_is_sure() {
         let mut sim = popup_after_the_first_call(95.0, 38.0, -35.0, 0, &[(7, Vec3::new(-40.0, 80.0, 0.0))]);
         assert_eq!((call_of(&sim, 6).0, call_of(&sim, 7).0), (1, 1), "fixture: both outfielders are tier 1");
-        assert!(sim.primary == 6 && sim.f[7].role == Role::Chase, "fixture: left field has it and center field chases too");
-        sim.replan_primary();
-        sim.assign_among(vec![6, 5, 4, 3], Some(6));
+        assert!(sim.f[6].role == Role::Chase && sim.f[7].role == Role::Chase, "fixture: left field and center field both chase");
+        sim.replan(6);
+        sim.assign_among(vec![6, 5, 4, 3]);
         assert!(sim.f[7].role == Role::Chase, "called off with nobody sure: {:?}", sim.f[7].role);
     }
 
@@ -7225,7 +9196,7 @@ mod tests {
         for f in sim.f.iter_mut() { f.err = [0.0; 4]; }
         sim.t = inp.t_contact + 0.19;
         sim.assign();
-        assert_ne!(sim.primary, 3, "setup expects P to be primary");
+        assert_eq!(sim.f[0].role, Role::Chase, "setup expects P to go for it");
         assert!(sim.f[3].t_int.is_finite() && sim.f[3].target.norm() > 45.0,
             "2B intercept should lie past 45 m: {:?}", sim.f[3].target);
         assert_eq!(sim.f[3].role, Role::Chase, "2B starting at 46.6 m must still break for infield grounder");
@@ -7251,8 +9222,8 @@ mod tests {
             sim.t = inp.t_contact + 0.19;
             sim.assign();
             assert!((0..9).any(|i| sim.f[i].role == Role::Cover(2)),
-                "make_p_primary={make_p_primary}: second base left uncovered (primary={}, roles={:?})",
-                sim.primary, sim.f.iter().map(|f| f.role).collect::<Vec<_>>());
+                "make_p_primary={make_p_primary}: second base left uncovered (roles={:?})",
+                sim.f.iter().map(|f| f.role).collect::<Vec<_>>());
         }
     }
 
@@ -7311,8 +9282,8 @@ mod tests {
         for f in sim.f.iter_mut() { f.err = [0.0; 4]; }
         sim.t = inp.t_contact + 0.19;
         sim.assign();
-        assert_ne!(sim.primary, 2, "setup expects 2B primary on this grounder (t_int_1b={:.3})", sim.f[2].t_int);
-        assert_eq!(sim.f[2].role, Role::Chase, "1B must break for reachable right-side infield grounder: primary={}, t_int={:.3}, bounce={:?}, target={:?}", sim.primary, sim.f[2].t_int, sim.f[2].belief.as_ref().and_then(|p| p.first_bounce()), sim.f[2].target);
+        assert_eq!(sim.f[3].role, Role::Chase, "setup expects 2B to go for this grounder (t_int_1b={:.3})", sim.f[2].t_int);
+        assert_eq!(sim.f[2].role, Role::Chase, "1B must break for reachable right-side infield grounder: t_int={:.3}, bounce={:?}, target={:?}", sim.f[2].t_int, sim.f[2].belief.as_ref().and_then(|p| p.first_bounce()), sim.f[2].target);
         assert!(m::hypot(sim.f[2].target.x, sim.f[2].target.y) < INFIELD_BREAK_R, "1B intercept inside infield: {:?}", sim.f[2].target);
         assert!((0..9).any(|i| sim.f[i].role == Role::Cover(1)), "another fielder (P) must cover first");
     }
@@ -7528,7 +9499,7 @@ mod tests {
             sim.t = inp.t_contact + 0.19;
             sim.assign();
             let (ti, pt) = own_intercept(&sim, 2);
-            assert_eq!(sim.primary, 0, "{bats:?}: setup expects the pitcher to field it");
+            assert_eq!(sim.f[0].role, Role::Chase, "{bats:?}: setup expects the pitcher to field it");
             assert!(ti.is_finite() && m::hypot(pt.x, pt.y) < INFIELD_BREAK_R && pt.x < 0.0, "{bats:?}: setup expects a 1B intercept left of the mound in range: {ti:.2} {pt:?}");
             assert_eq!(sim.f[2].role, Role::Cover(1), "{bats:?}: 1B must take his bag, roles {:?}", sim.f.iter().map(|f| f.role).collect::<Vec<_>>());
         }
@@ -7554,7 +9525,7 @@ mod tests {
         sim.assign();
         let (ti, pt) = own_intercept(&sim, 2);
         let roles: Vec<Role> = sim.f.iter().map(|f| f.role).collect();
-        assert_eq!(sim.primary, 0, "setup expects the pitcher to field it: {roles:?}");
+        assert_eq!(sim.f[0].role, Role::Chase, "setup expects the pitcher to field it: {roles:?}");
         assert!(ti.is_finite() && m::hypot(pt.x, pt.y) < INFIELD_BREAK_R && pt.x > 0.0, "setup expects a 1B intercept right of the mound in range: {ti:.2} {pt:?}");
         assert!(matches!(sim.f[3].role, Role::Chase | Role::Cover(2)), "setup expects the 2B taken: {roles:?}");
         assert_eq!(sim.f[2].role, Role::Cover(1), "1B must stay with first: {roles:?}");
@@ -7579,8 +9550,7 @@ mod tests {
                 }
             }
             if first_taken {
-                sim.f[3].role = Role::Cover(1);
-                sim.f[3].target = base_pos(1);
+                known_doing(&mut sim, 3, Role::Cover(1));
             }
             sim.f[2].role = Role::Chase;
             sim.f[2].pos = Vec3::new(16.2, 29.3, 0.0);
