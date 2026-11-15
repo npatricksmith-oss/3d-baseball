@@ -174,52 +174,37 @@ fn typical_throw_time(d: f64) -> f64 {
     throw_time(v, d).min(2.0 * throw_time(v, 0.5 * d) + RELAY_TRANSFER_FRAC * TYPICAL_TRANSFER)
 }
 
-/// Where a runner sees a throw coming down, from its position and velocity now: the
-/// horizontal point where it falls to `RUNNER_READ_CATCH_Z` on a ballistic path (drag and spin
-/// ignored: over a throw's length they shorten it by a metre or two, well inside the spacing
-/// of the bases), and the horizontal distance and time it needs to get there. A throw already
-/// below that height and falling is taken to be coming down where it is.
-fn throw_landing(p: Vec3, v: Vec3) -> (Vec3, f64) {
-    let (g, dz) = (bb_math::units::G, p.z - RUNNER_READ_CATCH_Z);
-    // z(t) = dz + vz t − g t²/2 = 0, the later root (the ball coming down through the height).
-    let disc = v.z * v.z + 2.0 * g * dz;
-    let t = if disc < 0.0 { 0.0 } else { ((v.z + m::sqrt(disc)) / g).max(0.0) };
-    (Vec3::new(p.x + v.x * t, p.y + v.y * t, 0.0), t)
+/// A runner's read of a throw in the air: his own prediction of its flight from what he sees
+/// of it now (position and velocity), a typical throw's backspin and the reference
+/// atmosphere's drag, and one bounce if it comes down short (agent-models §6.4). Never the
+/// throw's true spin, destination, receiver or future path.
+struct ThrownRead {
+    /// The base he takes it to be going to: the one nearest where it comes to catching height.
+    dest: u8,
+    /// When it gets there.
+    t_arrive: f64,
+    /// His predicted track up to then: time and position.
+    track: Vec<(f64, Vec3)>,
 }
 
-/// The base a throw is going to, as a runner sees it: the one nearest where it comes down
-/// (`throw_landing`). One function so that a situational expectation (agent-models §6.4, the
-/// throw the defense should make from the outs, runners and fielder) can later feed it.
-fn throw_destination(p: Vec3, v: Vec3) -> u8 {
-    let (q, _) = throw_landing(p, v);
-    (1..=4u8)
-        .min_by(|&a, &c| {
-            let da = m::hypot(base_pos(a).x - q.x, base_pos(a).y - q.y);
-            let dc = m::hypot(base_pos(c).x - q.x, base_pos(c).y - q.y);
-            da.total_cmp(&dc)
-        })
-        .unwrap()
+impl ThrownRead {
+    /// When the throw can be caught at base `b` on its way, if its predicted track passes
+    /// within `PASS_REACH_M` of the bag, at its closest, no higher than `PASS_MAX_Z` and not
+    /// underground: the time of that closest pass plus `PASS_CATCH_S`.
+    fn pass_time(&self, b: u8) -> Option<f64> {
+        let bp = base_pos(b);
+        let (t, q, d) = self.track.iter().map(|&(t, q)| (t, q, m::hypot(q.x - bp.x, q.y - bp.y))).min_by(|x, y| x.2.total_cmp(&y.2))?;
+        (d <= PASS_REACH_M && (0.0..=PASS_MAX_Z).contains(&q.z)).then_some(t + PASS_CATCH_S)
+    }
 }
 
-/// How long a throw in flight needs to reach the neighbourhood of base `b` along its own line,
-/// if that line passes within `PASS_REACH_M` of the bag at no more than `PASS_MAX_Z` and the
-/// ball has not already gone by (ballistic path, as in `throw_landing`).
-fn throw_passes_base(p: Vec3, v: Vec3, b: u8) -> Option<f64> {
-    let vh = m::hypot(v.x, v.y);
-    if vh < 1e-6 {
-        return None;
-    }
-    let (ux, uy) = (v.x / vh, v.y / vh);
-    let bp = base_pos(b);
-    let along = (bp.x - p.x) * ux + (bp.y - p.y) * uy;
-    if along < 0.0 {
-        return None;
-    }
-    let off = ((bp.x - p.x) * uy - (bp.y - p.y) * ux).abs();
-    let tau = along / vh;
-    let z = p.z + v.z * tau - 0.5 * bb_math::units::G * tau * tau;
-    (off <= PASS_REACH_M && (0.0..=PASS_MAX_Z).contains(&z)).then_some(tau)
+/// The atmosphere a runner believes in when he predicts a throw (a reference, not the
+/// world's air).
+fn reference_env() -> &'static FlightEnv {
+    static E: std::sync::OnceLock<FlightEnv> = std::sync::OnceLock::new();
+    E.get_or_init(FlightEnv::default_env)
 }
+
 const RECEIVE_REACH: f64 = 1.5;
 /// Running distance over which the batter leaves his box and joins the base path, m [E].
 const BOX_EXIT_M: f64 = 4.0;
@@ -788,6 +773,8 @@ const HOLD_READ_S: f64 = 0.2;
 /// receiver, where throws are aimed (`THROW_CATCH_Z`). His read of where it is going is the
 /// ballistic projection of its position and velocity to this height (agent-models §6.4).
 const RUNNER_READ_CATCH_Z: f64 = THROW_CATCH_Z;
+/// How far ahead a runner flies his read of a throw, s [E]: far more than any throw takes.
+const THROW_READ_S: f64 = 6.0;
 /// How near a throw's line must pass a base for him to take it that it can be caught there on
 /// the way, m [E, unsourced]: a receiver's reach (`RECEIVE_REACH`) and a step.
 const PASS_REACH_M: f64 = 2.5;
@@ -3336,6 +3323,45 @@ impl<'a> Sim<'a> {
         }
     }
 
+    /// The runner's read of the throw in the air now (`ThrownRead`). One place that names the
+    /// base a throw is going to, where a situational expectation (agent-models §6.4: the
+    /// throw the defense should make from the outs, the runners and the fielder) can later
+    /// feed it.
+    fn thrown_read(&self) -> ThrownRead {
+        let env = reference_env();
+        let (p, v) = self.ball_at(self.t);
+        let w = Vec3::new(v.x, v.y, 0.0).normalized().cross(Vec3::Z) * bb_math::units::rpm_to_radps(THROW_SPIN_RPM);
+        let s0 = BallState { r: Vec3::new(p.x, p.y, p.z.max(env.ball.radius)), v, w };
+        let tr = fly_throw(env, s0, self.t, THROW_READ_S);
+        let mut track: Vec<(f64, Vec3)> = tr.knots.iter().map(|k| (k.t, k.s.r)).collect();
+        // He takes it where it comes down through catching height; a throw that never gets
+        // above it lands short, hops once, and he takes it where the hop ends.
+        let down = (1..track.len()).find(|&i| track[i].1.z <= RUNNER_READ_CATCH_Z && track[i - 1].1.z > RUNNER_READ_CATCH_Z);
+        let arrive = match down {
+            Some(i) => i,
+            None => {
+                let last = *tr.last();
+                let surf = self.inp.field.surface_at(last.s.r.x, last.s.r.y);
+                let nb = bb_physics::ground::bounce(env, last.s, &surf, (0.0, 0.0));
+                if nb.v.z > 0.0 {
+                    let hop = fly_throw(env, nb, last.t, THROW_READ_S);
+                    track.extend(hop.knots.iter().map(|k| (k.t, k.s.r)));
+                }
+                track.len() - 1
+            }
+        };
+        track.truncate(arrive + 1);
+        let (t_arrive, q) = track[arrive];
+        let dest = (1..=4u8)
+            .min_by(|&a, &c| {
+                let da = m::hypot(base_pos(a).x - q.x, base_pos(a).y - q.y);
+                let dc = m::hypot(base_pos(c).x - q.x, base_pos(c).y - q.y);
+                da.total_cmp(&dc)
+            })
+            .unwrap();
+        ThrownRead { dest, t_arrive, track }
+    }
+
     /// Runners' believed time for the ball to reach base `b` (they watch the ball and the
     /// fielders; agent-models §6.3).
     fn ball_time_to(&self, k: usize, b: u8, read_sub: u32) -> f64 {
@@ -3360,17 +3386,13 @@ impl<'a> Sim<'a> {
                 ready + read_throw_time(fd.a.arm + ARM_READ_SIGMA_MPS * err, m::hypot(target.x - p.x, target.y - p.y))
             }
             Ball::Thrown { .. } => {
-                // A throw in the air: where it is and how fast it is coming.
-                let (p, v) = self.ball_at(self.t);
-                let vh = m::hypot(v.x, v.y).max(5.0);
-                let to = |q: Vec3| m::hypot(q.x - p.x, q.y - p.y);
-                let dest = throw_destination(p, v);
-                let arrive = self.t + to(base_pos(dest)) / vh;
-                let est = if dest == b { arrive } else { arrive + 0.6 + typical_throw_time((target - base_pos(dest)).norm()) };
-                // Whatever its destination, a throw whose line passes this base at catchable
-                // height can be caught there on the way (agent-models §6.4).
-                match throw_passes_base(p, v, b) {
-                    Some(tau) => est.min(self.t + tau + PASS_CATCH_S),
+                // A throw in the air: where he predicts it comes down, and when.
+                let read = self.thrown_read();
+                let est = if read.dest == b { read.t_arrive } else { read.t_arrive + 0.6 + typical_throw_time((target - base_pos(read.dest)).norm()) };
+                // Whatever its destination, a throw whose predicted track passes this base at
+                // catchable height can be caught there on the way (agent-models §6.4).
+                match read.pass_time(b) {
+                    Some(t) => est.min(t),
                     None => est,
                 }
             }
@@ -8028,11 +8050,109 @@ mod tests {
                 let mut sim = new_sim(&inp, &mut st);
                 throw_to_base(&mut sim, from, b, 40.0);
                 for dt in [0.0, 0.3, 0.8] {
-                    let (p, v) = sim.ball_at(5.0 + dt);
-                    assert_eq!(throw_destination(p, v), b, "a throw from {name} field to base {b}, {dt} s after release");
+                    sim.t = 5.0 + dt;
+                    assert_eq!(sim.thrown_read().dest, b, "a throw from {name} field to base {b}, {dt} s after release");
                 }
             }
         }
+    }
+
+    // Codex runner-reads review P2-1: the first reader ignored lift and drag, and the error was
+    // not a metre or two. These are its counterexamples, each read from release.
+    // (a) From shallow right field, (20, 55), a chest-high throw to third at the default
+    // right fielder's arm (40.546528 m/s) comes down 13.9 m short of third on a ballistic
+    // path, nearer second; with his own drag and backspin he reads third.
+    #[test]
+    fn a_default_arm_throw_from_shallow_right_field_is_read_as_going_to_third() {
+        let fx = fixture(&[]);
+        let inp = input(&fx, vec![RunnerIn { id: fx.st.batter, base: 0, speed: 8.2 }]);
+        let mut st = fx.st.clone();
+        let mut sim = new_sim(&inp, &mut st);
+        let arm = FielderAttrs::average(8).arm;
+        assert!((arm - 40.546528).abs() < 1e-5, "the default right fielder's arm: {arm}");
+        throw_to_base(&mut sim, Vec3::new(20.0, 55.0, 0.0), 3, arm);
+        assert_eq!(sim.thrown_read().dest, 3);
+    }
+
+    // (b) From (−40, 45) to home at 40 m/s the throw passes third 4.2 m up: it cannot be
+    // taken there, and so is not timed to third on the way (the ballistic bound said 0.83 s).
+    #[test]
+    fn a_throw_over_third_on_its_way_home_is_not_catchable_at_third() {
+        let fx = fixture(&[]);
+        let inp = input(&fx, vec![RunnerIn { id: fx.st.batter, base: 0, speed: 8.2 }]);
+        let mut st = fx.st.clone();
+        let mut sim = new_sim(&inp, &mut st);
+        throw_to_base(&mut sim, Vec3::new(-40.0, 45.0, 0.0), 4, 40.0);
+        let read = sim.thrown_read();
+        assert_eq!(read.dest, 4);
+        assert!(read.pass_time(3).is_none(), "it is {:?} over third", read.track.iter().min_by(|a, c| m::hypot(a.1.x - base_pos(3).x, a.1.y - base_pos(3).y).total_cmp(&m::hypot(c.1.x - base_pos(3).x, c.1.y - base_pos(3).y))).map(|x| x.1.z));
+        assert!(sim.ball_time_to(0, 3, 1) > read.t_arrive + 0.5, "third by relay, after home");
+    }
+
+    // (c) A throw from center that hops 5 m before home reaches it after one bounce, 0.5 m
+    // up; read as a flat ballistic throw it landed far short of home and was taken for
+    // second's. His own prediction, with the bounce, reads home.
+    #[test]
+    fn a_throw_that_hops_before_home_is_read_as_going_home() {
+        let fx = fixture(&[]);
+        let inp = input(&fx, vec![RunnerIn { id: fx.st.batter, base: 0, speed: 8.2 }]);
+        let mut st = fx.st.clone();
+        let mut sim = new_sim(&inp, &mut st);
+        let from = Vec3::new(0.0, 80.0, 0.0);
+        let to = base_pos(4);
+        let env = sim.inp.env;
+        // The elevation that brings it down 5 m short of home.
+        let short = 5.0;
+        let d = m::hypot(to.x - from.x, to.y - from.y) - short;
+        let (mut lo, mut hi) = (-0.3f64, 0.5f64);
+        let land = |elev: f64| fly_throw(env, throw_state(from + Vec3::new(0.0, 0.0, THROW_RELEASE_Z), to - from, 40.0, elev), 0.0, 8.0).last().s.r.y;
+        for _ in 0..60 {
+            let mid = 0.5 * (lo + hi);
+            if land(mid) > 80.0 - d { lo = mid } else { hi = mid }
+        }
+        let s0 = throw_state(from + Vec3::new(0.0, 0.0, THROW_RELEASE_Z), to - from, 40.0, 0.5 * (lo + hi));
+        sim.t = 5.0;
+        sim.launch_throw(s0, to, 4, 1, false);
+        assert!((land(0.5 * (lo + hi)) - (80.0 - d)).abs() < 0.05);
+        assert_eq!(sim.thrown_read().dest, 4);
+    }
+
+    // A sweep of the review's kind: throws from the valid outfield (and shallow, where the
+    // throws are hardest to read) to second, third and home at several arms, read at release
+    // and 25, 50 and 75% of the way. He reads the base each is going to.
+    #[test]
+    fn a_runner_reads_throws_across_the_outfield_and_arms() {
+        let fx = fixture(&[]);
+        let inp = input(&fx, vec![RunnerIn { id: fx.st.batter, base: 0, speed: 8.2 }]);
+        let (mut n, mut bad) = (0, Vec::new());
+        for x in [-60.0f64, -40.0, -20.0, 0.0, 20.0, 40.0, 60.0] {
+            for y in [45.0, 55.0, 65.0, 80.0, 95.0, 105.0] {
+                if x.abs() > y || fx.field.ball_clearance(x, y, 0.037).dist < 0.5 {
+                    continue;
+                }
+                let from = Vec3::new(x, y, 0.0);
+                let pos = if x < -15.0 { 6 } else if x > 15.0 { 8 } else { 7 };
+                for b in [2u8, 3, 4] {
+                    for speed in [FielderAttrs::average(pos).arm, 40.0, 45.0] {
+                        let d = m::hypot(base_pos(b).x - x, base_pos(b).y - y);
+                        let Some(sol) = solve_throw(&fx.env, THROW_RELEASE_Z, THROW_CATCH_Z, d, speed) else { continue };
+                        for frac in [0.0, 0.25, 0.5, 0.75] {
+                            let mut st = fx.st.clone();
+                            let mut sim = new_sim(&inp, &mut st);
+                            throw_to_base(&mut sim, from, b, speed);
+                            sim.t = 5.0 + frac * sol.t_flight;
+                            n += 1;
+                            let got = sim.thrown_read().dest;
+                            if got != b {
+                                bad.push(format!("({x},{y}) to {b} at {speed:.1} m/s, {frac}: read {got}"));
+                            }
+                        }
+                    }
+                }
+            }
+        }
+        assert!(n > 300, "{n} samples");
+        assert!(bad.is_empty(), "{} of {n} misread: {}", bad.len(), bad.join("; "));
     }
 
     // The time the runner believes the ball needs follows from that: a throw from center to
@@ -8044,21 +8164,27 @@ mod tests {
         let fx = fixture(&[]);
         let inp = input(&fx, vec![RunnerIn { id: fx.st.batter, base: 0, speed: 8.2 }]);
         let from = Vec3::new(0.0, 84.0, 0.0);
+        // When the throw's true path is nearest the base: its flight time there.
         let flight = |sim: &Sim, b: u8| {
-            let (p, v) = sim.ball_at(sim.t);
-            m::hypot(base_pos(b).x - p.x, base_pos(b).y - p.y) / m::hypot(v.x, v.y)
+            let Ball::Thrown { path, .. } = &sim.ball else { unreachable!() };
+            let d = |t: f64| {
+                let (p, _) = path.at(t);
+                m::hypot(base_pos(b).x - p.x, base_pos(b).y - p.y)
+            };
+            let t = (0..800).map(|i| 5.0 + i as f64 * 0.005).min_by(|&x, &y| d(x).total_cmp(&d(y))).unwrap();
+            t - 5.0
         };
         let mut st = fx.st.clone();
         let mut sim = new_sim(&inp, &mut st);
         throw_to_base(&mut sim, from, 2, 40.0);
         let (to_second, to_home) = (sim.ball_time_to(0, 2, 1) - 5.0, sim.ball_time_to(0, 4, 1) - 5.0);
-        assert!((to_second - flight(&sim, 2)).abs() < 0.05, "second: {to_second:.2} s, flight {:.2} s", flight(&sim, 2));
+        assert!((to_second - flight(&sim, 2)).abs() < 0.1, "second: {to_second:.2} s, flight {:.2} s", flight(&sim, 2));
         assert!(to_home > to_second + 0.6, "home {to_home:.2} s must be a relay after second's {to_second:.2} s");
         let mut st = fx.st.clone();
         let mut sim = new_sim(&inp, &mut st);
         throw_to_base(&mut sim, from, 4, 40.0);
         let (to_home, to_second) = (sim.ball_time_to(0, 4, 1) - 5.0, sim.ball_time_to(0, 2, 1) - 5.0);
-        assert!((to_home - flight(&sim, 4)).abs() < 0.05, "home: {to_home:.2} s, flight {:.2} s", flight(&sim, 4));
+        assert!((to_home - flight(&sim, 4)).abs() < 0.1, "home: {to_home:.2} s, flight {:.2} s", flight(&sim, 4));
         // It passes second 8 m up in the air: nobody can take it there.
         assert!(to_second > to_home + 0.6, "second {to_second:.2} s is a relay after home's {to_home:.2} s");
     }
@@ -8068,16 +8194,31 @@ mod tests {
     // at head height past third is taken to reach third at the time it gets there.
     #[test]
     fn a_throw_passing_a_base_low_can_be_caught_there() {
-        let p = Vec3::new(0.0, 60.0, 3.0);
-        let v = Vec3::new(0.0, -30.0, 0.0);
-        // Second base is 38.8 m out on that line: 0.71 s on, the ball has fallen 2.5 m.
-        let tau = throw_passes_base(p, v, 2).expect("passes second");
-        assert!((tau - (60.0 - base_pos(2).y) / 30.0).abs() < 1e-9);
-        // Lobbed over it, 8 m up, it cannot be caught there.
-        assert!(throw_passes_base(Vec3::new(0.0, 60.0, 8.0), v, 2).is_none());
-        // Already past it, or well to the side of it, it is no threat.
-        assert!(throw_passes_base(Vec3::new(0.0, 30.0, 3.0), v, 2).is_none());
-        assert!(throw_passes_base(Vec3::new(9.0, 60.0, 3.0), v, 2).is_none());
+        let fx = fixture(&[]);
+        let inp = input(&fx, vec![RunnerIn { id: fx.st.batter, base: 0, speed: 8.2 }]);
+        // A hard throw home from 25 m out in center passes second, 11 m from it on the line,
+        // at about chest height: it can be taken there on the way.
+        let mut st = fx.st.clone();
+        let mut sim = new_sim(&inp, &mut st);
+        throw_to_base(&mut sim, Vec3::new(0.0, 50.0, 0.0), 4, 40.0);
+        let read = sim.thrown_read();
+        let tau = read.pass_time(2).expect("passes second low") - PASS_CATCH_S - 5.0;
+        assert!(tau > 0.1 && tau < 0.5, "{tau}");
+        assert!(sim.ball_time_to(0, 2, 1) < sim.ball_time_to(0, 4, 1), "second before home");
+        // Lobbed, it comes over second high, and cannot be caught there.
+        let mut st = fx.st.clone();
+        let mut sim = new_sim(&inp, &mut st);
+        let from = Vec3::new(0.0, 50.0, 0.0);
+        sim.t = 5.0;
+        let s0 = throw_state(from + Vec3::new(0.0, 0.0, THROW_RELEASE_Z), base_pos(4) - from, 30.0, 0.7);
+        sim.launch_throw(s0, base_pos(4), 4, 1, false);
+        assert!(sim.thrown_read().pass_time(2).is_none());
+        // Already past it, or wide of it, the ball is no threat there: a throw from the right
+        // field corner to first does not pass third.
+        let mut st = fx.st.clone();
+        let mut sim = new_sim(&inp, &mut st);
+        throw_to_base(&mut sim, Vec3::new(40.0, 55.0, 0.0), 1, 38.0);
+        assert!(sim.thrown_read().pass_time(3).is_none());
     }
 
     // Regression from the owner's play (seed 24583, play 81; the game moves under any change
