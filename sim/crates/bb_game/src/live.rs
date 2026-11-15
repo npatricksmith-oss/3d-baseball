@@ -4449,7 +4449,9 @@ impl<'a> Sim<'a> {
                 (prev < bs && nxt >= bs) || (prev > bs && nxt <= bs)
             };
             let mut touched: Option<u8> = None;
-            for b in 0..=4u8 {
+            // Bases one to home: coordinate zero is only where the batter's distance is counted
+            // from, not a bag he touches on his way out of the box (Codex review P2-1).
+            for b in 1..=4u8 {
                 if b as f64 * BASE_L != prev && crossed(b) {
                     touched = Some(b);
                 }
@@ -4610,7 +4612,10 @@ impl<'a> Sim<'a> {
             if r.out || r.scored || r.overrun != OverrunPhase::None {
                 continue;
             }
-            let on_base = (r.s / BASE_L - (r.s / BASE_L).round()).abs() * BASE_L < 0.3;
+            // On a bag: first, second or third. Coordinate zero protects nobody; the batter
+            // passes it leaving his box (Codex runner-acceleration review P1-1).
+            let nearest = (r.s / BASE_L).round();
+            let on_base = nearest >= 1.0 && (r.s / BASE_L - nearest).abs() * BASE_L < 0.3;
             // A tag takes him `tag_apply_s` from securing the ball (agent-models §6.4).
             if !on_base && self.t + 1e-9 >= self.secured_at + fd.a.tag_apply_s && (self.runner_pos(r) - fd.pos).norm() < fd.a.throw_choice.tag_reach_m {
                 let id = r.id;
@@ -10244,6 +10249,36 @@ mod tests {
         assert!((right - left - 0.170).abs() < 0.11, "right {right:.2} s, left {left:.2} s");
         // τ 0.16 s less is 0.16 s sooner once he is at full speed.
         assert!((right - quick - 0.16).abs() < 0.11, "τ 0.76 {right:.2} s, τ 0.60 {quick:.2} s");
+    }
+
+    // Codex runner-acceleration review P1-1, P2-1. A right-handed batter's coordinate passes
+    // zero about half a second after contact, 0.78 m from the plate (review probe). Zero is
+    // not a bag: a catcher holding the ball on the plate, his tag ready and the batter within
+    // his reach, tags him, and the batter's run out of the box records no base touched.
+    #[test]
+    fn the_batter_passing_coordinate_zero_is_on_no_base() {
+        let fx = fixture(&[]);
+        let inp = input(&fx, vec![RunnerIn { id: fx.st.batter, base: 0, speed: 8.2, tau_s: 0.76 }]);
+        let mut st = fx.st.clone();
+        let mut sim = new_sim(&inp, &mut st);
+        sim.r[0].goal = 1;
+        sim.t = inp.t_contact;
+        sim.emit(Input::BallTouched { t: sim.t, what: Touch::Ground { x: 0.0, y: 0.5 } });
+        sim.emit(Input::GloveSecured { t: sim.t, fielder: sim.f[1].id, x: 0.0, y: 0.0 });
+        sim.ball = Ball::Held { by: 1 };
+        sim.secured_at = sim.t;
+        sim.f[1].pos = Vec3::ZERO;
+        assert!(sim.r[0].s < 0.0);
+        while sim.r[0].s < 0.0 {
+            sim.move_runners();
+            sim.t += DT;
+        }
+        assert!(!sim.out.facts.iter().any(|f| matches!(f, Input::BaseTouched { .. })), "{:?}", sim.out.facts);
+        assert!(sim.runner_pos(&sim.r[0]).norm() < sim.f[1].a.throw_choice.tag_reach_m);
+        assert!(sim.t >= sim.secured_at + sim.f[1].a.tag_apply_s);
+        sim.holder_act();
+        assert!(sim.out.facts.iter().any(|f| matches!(f, Input::TagContact { .. })), "{:?}", sim.out.facts);
+        assert!(sim.r[0].out);
     }
 
     /// The ball leaves the throwing hand (owner backlog A1): facing his target, a

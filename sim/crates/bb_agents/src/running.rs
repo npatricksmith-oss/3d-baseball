@@ -6,11 +6,11 @@
 /// and what a fielder assumes of a runner he does not know.
 pub const LEAGUE_TOP_SPEED_MPS: f64 = 8.2;
 /// League-average time constant of a runner's acceleration, s [E]: v = v_max(1 − e^(−t/τ)).
-/// Fitted so the league-average runner covers a standing 90 ft in 4.10 s: Statcast 2017–2020
-/// runners on third in sacrifice-fly situations average 4.03 s at a mean sprint speed of
-/// 27.62 ft/s, and the sample's slope of −0.115 s per ft/s puts a 27.0 ft/s runner at 4.10 s
-/// (docs/calibration/2026-11-14-tag-ups.md §1; 2026-11-15-runner-acceleration.md). Was 0.68 s
-/// (4.02 s), fitted to the sample mean as if it were the league-average runner. Each runner
+/// Set so the league-average runner covers a standing 90 ft in 4.10 s, the owner's target
+/// (Q1, 2026-11-14). The published figure is a 4.03 s mean for runners on third in
+/// sacrifice-fly situations, who are faster than average; how much slower the average
+/// runner is has no verified source (docs/calibration/2026-11-15-runner-acceleration.md §2).
+/// Was 0.68 s (4.02 s), fitted to that mean as if it were the average runner. Each runner
 /// carries his own τ (`RunnerIn::tau_s`); this is today's default for all of them.
 pub const LEAGUE_TAU_S: f64 = 0.76;
 
