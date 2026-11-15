@@ -786,10 +786,12 @@ const PASS_MAX_Z: f64 = 3.0;
 /// A catch at a base on the way, s [E, unsourced]: the receiver's handling before he can
 /// act on the ball (the receiving model's 0.05 s, with a tag-less margin).
 const PASS_CATCH_S: f64 = 0.1;
-/// How often a runner turns round between two bases on a fresh look at the play, per stretch
-/// between bases [E]. A rundown is not modelled (the fielders do not close on him), and a
-/// runner who turned at every throw played catch with them for the whole 40 s; so he turns
-/// once, then commits to the base he is going back to or on to (agent-models §6.4).
+/// How often a runner who believes himself trapped (safe at neither base) turns round between
+/// two bases on a fresh look at the play, per stretch between bases [E]. A rundown is not
+/// modelled (the fielders do not close on him), and a runner who turned at every throw played
+/// catch with them for the whole 40 s; so he turns once, then commits to the base he is going
+/// back to or on to (agent-models §6.4). A look that finds a base he believes he reaches
+/// safely is not counted against him.
 const MAX_TURNS: u8 = 1;
 
 /// How long a runner leaving from a tag-up needs to cover `d` m: the wait for his first step,
@@ -3698,10 +3700,13 @@ impl<'a> Sim<'a> {
         };
         let r = &mut self.r[k];
         r.last_timing_draw = draw;
-        // He turns round only so often between bases: past that he stays committed.
+        // Trapped (he believes he reaches neither base safely), he turns round only so often
+        // between bases: past that he stays committed. A look that finds a base he believes
+        // he reaches is not a rundown, and he may take it.
         let heading_on = r.goal as f64 * BASE_L > r.s;
         let turning = (goal > from) != heading_on;
-        if turning && r.turns >= MAX_TURNS {
+        let trapped = !go_on && !go_back && !crowded;
+        if turning && trapped && r.turns >= MAX_TURNS {
             return true;
         }
         if turning {
@@ -8422,6 +8427,27 @@ mod tests {
         assert!(sim.runner_relook(1));
         assert_eq!(sim.r[1].goal, 3, "he has turned once already: he stays committed");
         assert_eq!(sim.r[1].turns, MAX_TURNS);
+    }
+
+    // Codex runner-reads recheck P2-4 (`review_cap_refuses_believed_safe_escape`): a runner
+    // who has used his turn, retreating toward second where the ball is held, 0.5 m short of
+    // third at 1 m/s, finds third a sure thing (0.5 s to run it against the ball's 1.1 s). The
+    // one-turn cap is for a trapped runner; he takes third.
+    #[test]
+    fn the_turn_cap_does_not_refuse_a_base_he_believes_safe() {
+        let fx = fixture(&[(7, 2)]);
+        let inp = input(&fx, vec![RunnerIn { id: fx.st.batter, base: 0, speed: 8.2 }, RunnerIn { id: 7, base: 2, speed: 8.2 }]);
+        let mut st = fx.st.clone();
+        let mut sim = traffic_sim(&inp, &mut st);
+        (sim.r[1].s, sim.r[1].v, sim.r[1].direction, sim.r[1].goal) = (3.0 * BASE_L - 0.5, 1.0, -1.0, 2);
+        sim.r[1].turns = MAX_TURNS;
+        sim.f[3].pos = base_pos(2);
+        sim.f[3].target = base_pos(2);
+        sim.ball = Ball::Held { by: 3 };
+        sim.secured_at = 5.0;
+        sim.out.secured.push((sim.t, sim.f[3].id));
+        assert!(sim.runner_relook(1));
+        assert_eq!(sim.r[1].goal, 3, "a sure base is not a rundown");
     }
 
     // The same second look while he is already returning: his signed velocity is used on both
