@@ -1,5 +1,6 @@
 //! Diagnostic: routine fly balls the outfield does not catch, and why (agent-models §5.1;
-//! docs/calibration/2026-11-15-outfield-read.md). `-- [first seed] [games] [list]`
+//! docs/calibration/2026-11-15-outfield-read.md). `-- [first seed] [games] [list|-] [ReadSkill grade]`
+//! (the grade, default 50, is given to every fielder).
 //!
 //! A fly is a fair batted ball launched at 25° or more that comes down in the park, in the
 //! outfield (beyond the infield dirt), not within 3 m of a wall. It is *routine* when the
@@ -15,7 +16,7 @@
 //! + = believed deeper), seconds since his last read at landing, his speed then, his role,
 //! how close his body came to the ball's track below 2.4 m, and whether he dove.
 use bb_game::live::read_trace::{self, Rec};
-use bb_game::live::read_prediction;
+use bb_game::live::read_prediction_k;
 use bb_math::Vec3;
 use bb_rules::{Event, Input};
 
@@ -31,6 +32,11 @@ fn main() {
     let first: u64 = a.first().and_then(|s| s.parse().ok()).unwrap_or(0);
     let games: u64 = a.get(1).and_then(|s| s.parse().ok()).unwrap_or(300);
     let list = a.get(2).is_some_and(|s| s == "list");
+    let grade: Option<f64> = a.get(3).and_then(|s| s.parse().ok());
+    let fattrs: [bb_game::play::FielderAttrs; 9] = core::array::from_fn(|i| {
+        let f = bb_game::play::FielderAttrs::average(i);
+        grade.map_or(f, |g| f.with_read(g))
+    });
     let field = bb_physics::ground::Field::default();
     read_trace::ON.with(|x| x.set(true));
     // [bin] -> (routine flies, caught)
@@ -39,12 +45,12 @@ fn main() {
     let mut causes: std::collections::BTreeMap<&'static str, u32> = Default::default();
     let mut all_flies = [0u32; 2];
     let mut zero: Vec<Vec<Vec<f64>>> = vec![vec![Vec::new(); 3]; 3];
-    let of = bb_game::play::FielderAttrs::average(7);
+    let of = fattrs[7];
     let mu = bb_game::pa::Matchup::average();
     let mut signed: Vec<Vec<Vec<f64>>> = vec![vec![Vec::new(); 3]; 3];
     let mut lateral: Vec<Vec<Vec<f64>>> = vec![vec![Vec::new(); 3]; 3];
     for seed in first..first + games {
-        let mut g = bb_game::game::Game::new(seed, false);
+        let mut g = bb_game::game::Game::new(seed, false).with_fielders(fattrs);
         loop {
             read_trace::take();
             let Some(step) = g.step_pitch() else { break };
@@ -88,7 +94,7 @@ fn main() {
                     if let Some(rr) = r {
                         let t = t_land - dt;
                         let view = (t - t_c - of.reaction).max(0.0);
-                        let p0 = read_prediction(&mu.env, &field, path.at(t), t, rr.pos, of.read_sigma0, of.tau_read, view, [0.0; 4], Some((t - t_c, contact)));
+                        let p0 = read_prediction_k(&mu.env, &field, path.at(t), t, rr.pos, of.read_sigma0, of.read_vel_frac, of.tau_read, view, [0.0; 4], Some((t - t_c, contact)));
                         if let Some((_, x, y)) = p0.first_bounce() {
                             zero[k][j].push((Vec3::new(x, y, 0.0) - land).dot(out));
                         }

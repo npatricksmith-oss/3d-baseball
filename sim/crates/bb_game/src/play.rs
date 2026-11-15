@@ -43,6 +43,9 @@ pub struct FielderAttrs {
     pub tau_read: f64,
     /// Lateral read error at the start, m; depth error is `DEPTH_STRETCH` times larger.
     pub read_sigma0: f64,
+    /// His first read of a batted ball's velocity is off by this fraction of its speed per
+    /// axis (agent-models §5.1, §10 `ReadSkill`).
+    pub read_vel_frac: f64,
     /// `Anticipation` (agent-models §5.10): σ of his read of where the pitch crosses the
     /// plate (horizontal), m.
     pub antic_sigma: f64,
@@ -102,6 +105,7 @@ impl FielderAttrs {
             transfer: if outfield { 0.85 } else { 0.65 },
             tau_read: 0.6,
             read_sigma0: if outfield { 3.5 } else { 0.3 },
+            read_vel_frac: crate::live::READ_VEL_FRAC,
             antic_sigma: ANTIC_SIGMA_50,
             swing_sigma: bat_read_sigma(BAT_READ_TIME_SIGMA_50_S),
             lead_sigma: LEAD_READ_TIME_SIGMA_50_S,
@@ -125,6 +129,19 @@ impl FielderAttrs {
         }
     }
 
+    /// The same average fielder with `ReadSkill` at `grade` (20–80 scale, agent-models §10):
+    /// his read's position and velocity error σs by [`READ_RHO`] and his τ_read by
+    /// [`TAU_READ_RHO`] (all less is better), from his position's grade-50 values.
+    pub fn with_read(self, grade: f64) -> Self {
+        use bb_agents::attributes::ratio_from_grade;
+        Self {
+            read_sigma0: ratio_from_grade(grade, self.read_sigma0, READ_RHO),
+            read_vel_frac: ratio_from_grade(grade, self.read_vel_frac, READ_RHO),
+            tau_read: ratio_from_grade(grade, self.tau_read, TAU_READ_RHO),
+            ..self
+        }
+    }
+
     /// The same fielder with `Anticipation` at `grade` (20–80 scale, agent-models §10): all
     /// three read σs by the ρ rule (less is better).
     pub fn with_anticipation(self, grade: f64) -> Self {
@@ -136,6 +153,16 @@ impl FielderAttrs {
         }
     }
 }
+
+/// `ReadSkill` (agent-models §10): ratio per 10 grades of the read's position and velocity
+/// error σs, less is better [E]. Chosen so that on the routine flies of
+/// docs/calibration/2026-11-15-outfield-read.md an outfield of grade 20 catches about 92%,
+/// grade 50 96% and grade 80 98% (the owner's band for a routine fly is 90–99% by fielding
+/// ability, 2026-11-15). The catch rate is steep in the read's error: ρ 1.4 put grade 20 at 54%.
+pub const READ_RHO: f64 = 1.06;
+/// `ReadSkill`: ratio per 10 grades of τ_read, the viewing time over which the read sharpens
+/// (agent-models §10; was 1.2 in the table, never used, lowered with [`READ_RHO`]) [E].
+pub const TAU_READ_RHO: f64 = 1.06;
 
 /// `Anticipation` at grade 50: pitch-location read σ, m [E].
 pub const ANTIC_SIGMA_50: f64 = 0.15;

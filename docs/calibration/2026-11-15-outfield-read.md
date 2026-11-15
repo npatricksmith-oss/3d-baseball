@@ -112,3 +112,63 @@ that removes a bias every fielder and runner shares. (2) Make the read's uncerta
 the ball comes down, as the research says real fielders' does, and give it a per-fielder rating
 so grade 50 lands in the owner's 90–99% band. The dive rule, the replan clock and the call are
 not where the misses come from.
+
+## 2. The change (agent-models §5.1, §5.2, §10)
+
+Built in `live.rs` (`believed_spin`, `fly_back`, `read_shrink`, `read_prediction_k`,
+`Sim::read`) and `play.rs` (`FielderAttrs::read_vel_frac`, `with_read`, `READ_RHO`,
+`TAU_READ_RHO`). Specs: agent-models §5.1 ("The typical spin refit", "The read closes"), §5.2
+(replans), §10 (`ReadSkill`).
+
+1. **The typical-spin belief follows the contact model again.** The table is refit to swing v2
+   (medians by 10° bin, `examples/batted_spin.rs`, 48 games). The launch angle it is looked up
+   at is now the angle at which his velocity read, flown back to the plate with his own physics,
+   leaves the bat (not atan2(v_z + g·s, v_h) of the velocity now), and the spin he believes
+   the ball has now is that launch spin decayed as the same back-flight undoes it. With no
+   noise the read 2 s before landing now misses by −0.1 to +0.3 m (it was +0.7 to +3.2 m).
+   This is a belief about the contact model, not a tuning: §5.1 says the table is refit when
+   the contact model changes. Runners' reads and the fielders' shared view of a loose ball
+   (`public_path`) use the same belief and move with it.
+2. **The read closes as the ball comes down.** For a ball on its first flight, every term of the
+   read error is scaled by c = min(1, T/`READ_CLOSE_S`), T the time it takes to fall from its
+   height now with its vertical velocity now, in a vacuum (what he sees now; nothing of its
+   future). *Mechanism and source:* fielders are continuously coupled to the ball and the
+   information about where it lands sharpens late (optical acceleration cancellation: Chapman
+   1968; Fink, Foo & Warren 2009, J. Vision 9(13):14, research note §1). With a threshold on the
+   optical acceleration he can perceive, the landing miss he can tell apart shrinks with the
+   square of the time left; the velocity term, flown over T and scaled by T, does that.
+   `READ_CLOSE_S` = 3.0 s [E] is where the closing starts. It is fitted to the owner's band; no
+   source gives it. A high fly keeps its larger early error (1 s after contact a 45° fly's
+   landing spread is 5.5 m against 4.9 m for a 28° fly, test
+   `the_read_closes_as_the_ball_comes_down`) and the first steps still follow the first read.
+3. **Faster replans late.** A chaser reads again after a quarter of the time his own read leaves
+   before the ball comes down, between 0.1 and 0.4 s (`REPLAN_FRAC`, `REPLAN_MIN_S`), so a read
+   that sharpens late is used late. (The spec's 30 Hz is still not built; the diagnosis showed
+   the stale replan was not a cause of misses on its own.)
+4. **`ReadSkill`, a per-fielder rating.** `read_sigma0`, `read_vel_frac` and `tau_read` are
+   per-fielder values (the grade-50 values are the old constants); `FielderAttrs::with_read(g)`
+   scales all three by ρ = 1.06 per 10 grades; `sim-cli games --read <g>` gives every fielder
+   grade g. Every rostered player is still grade 50.
+
+**What was tried and rejected.**
+- *A read that never gets worse ("what he has seen he does not unsee").* Seed 23080 play 8's
+  left fielder reads the ball well at first (4.6 m off) and *worse* at the top of the flight
+  (13 m off at 2.4 s before landing; `examples/read_track.rs 23080 8 7`): the plate cue fades as
+  the spin he cannot see adds up over the back-flight, and his direct read's depth error is that
+  of a ball 40 m away. Two forms: capping his position error at the best σ he has had made
+  grade 50 catch .989 of routine flies with no closing at all and grade 20 .970 (the early
+  plate-cue σ held for the whole flight, an observer who knows where the ball is to 0.3 m at
+  3 s); carrying that best read forward as the plate cue carries the contact point (velocity
+  error × elapsed time, plus `PLATE_SPIN_M` × Δ^1.5) barely bound (the carried σ grows as fast as
+  the direct read's). Both removed. The mid-flight degradation is real in the model and is now
+  covered by the closing, which reaches the top of a high fly (T at the apex of a 40 m fly is
+  2.9 s); a proper fix is a filter on the whole observed track, which would learn the ball's
+  curvature (its spin) as it flies. Not built; see §5.
+- *`READ_CLOSE_S` 1.5–2.5 s.* 2.5 s gave grade 50 .944–.946 and still missed 23080/8. 3.5 s
+  gave .976.
+- *ρ 1.4 or 1.1 for `ReadSkill`.* 1.4 put grade 20 at .536 (the catch rate is steep in the read
+  error); 1.1 put it at .85–.86. The old §10 ρ 1.2 on τ_read alone held grade 20 near .87.
+- *Re-fitting `PLATE_SPIN_M` with the new belief.* Re-measured (`examples/plate_cue.rs`, 48
+  games): 0.6 m at 0.5 s, 2.0 m at 1 s, 4–8 m at 2 s, as before. The plate cue's floor is the
+  spread of spins and their side component, which the median does not remove. Unchanged.
+- *The dive rule, the call, the replan clock alone.* Not where the misses came from (§1).
