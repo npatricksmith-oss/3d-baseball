@@ -1309,7 +1309,7 @@ struct Sim<'a> {
     /// Counts the loose balls of this play (`set_free`): which ball a read was of.
     ball_gen: u64,
     /// `public_rank` for all nine at (time, ball, positions).
-    rank_cache: std::cell::RefCell<Option<(f64, u64, [Vec3; 9], [f64; 9])>>,
+    rank_cache: std::cell::RefCell<Option<(f64, u64, [Vec3; 9], [Vec3; 9], [f64; 9])>>,
     /// What each fielder's teammates knew of him at the last tick (`hear` acts on changes):
     /// his chase and call, and the job he was seen going to.
     last_known: Vec<(bool, u8, bool)>,
@@ -1647,6 +1647,24 @@ impl<'a> Sim<'a> {
         self.f[i].call = self.call_value(i, belief, fd.t_int, fd.int_pt, bias).0;
     }
 
+    /// Each chaser re-reads the ball on his own clock and runs at his new intercept; close to
+    /// a slow ball, a chaser simply goes to it (seen directly at short range).
+    fn replan_chasers(&mut self) {
+        for i in 0..9 {
+            if self.f[i].role == Role::Chase && self.t >= self.f[i].next_plan {
+                self.replan(i);
+            }
+        }
+        let (b, bv) = self.ball_at(self.t);
+        if bv.norm() < 3.0 {
+            for fd in self.f.iter_mut() {
+                if fd.role == Role::Chase && (Vec3::new(b.x, b.y, 0.0) - fd.pos).norm() < 5.0 {
+                    fd.target = Vec3::new(b.x, b.y, 0.0);
+                }
+            }
+        }
+    }
+
     /// Each candidate reads the ball, makes his own call on it, and decides alone whether to
     /// go for it (`decide`). Then the staff's tables give the others their jobs.
     fn assign_among(&mut self, cands: Vec<usize>) {
@@ -1738,13 +1756,13 @@ impl<'a> Sim<'a> {
 
     /// Fielder `j`, known to be going for this ball, has it ahead of chaser `i` by an order
     /// every fielder can work out from what all can see (`public_rank`; a dead heat to the
-    /// lower index). As in `first_by_own_estimate`, an outfielder weighs only outfielders.
+    /// call priority, `publicly_before`). As in `first_by_own_estimate`, an outfielder
+    /// weighs only outfielders.
     fn ahead_of(&self, j: usize, i: usize) -> bool {
         if j == i || (i >= 6 && j < 6) || !matches!(self.known(j), (true, _, true)) {
             return false;
         }
-        let (rj, ri) = (self.public_rank(j), self.public_rank(i));
-        rj < ri || (rj == ri && j < i)
+        self.publicly_before(j, i)
     }
 
     /// How soon fielder `j` can field the loose ball, as every teammate can work it out alike
@@ -1758,15 +1776,28 @@ impl<'a> Sim<'a> {
     /// ball stops, or the pitcher under an outfield fly's line, ranked first.)
     fn public_rank(&self, j: usize) -> f64 {
         let pos: [Vec3; 9] = core::array::from_fn(|k| self.f[k].pos);
-        if let Some((t, g, p, r)) = *self.rank_cache.borrow() {
-            if t == self.t && g == self.ball_gen && p == pos {
+        let vel: [Vec3; 9] = core::array::from_fn(|k| self.f[k].vel);
+        if let Some((t, g, p, v, r)) = *self.rank_cache.borrow() {
+            if t == self.t && g == self.ball_gen && p == pos && v == vel {
                 return r[j];
             }
         }
         let path = self.public_path();
         let r: [f64; 9] = core::array::from_fn(|k| self.seen_intercept(k, &path).0);
-        *self.rank_cache.borrow_mut() = Some((self.t, self.ball_gen, pos, r));
+        *self.rank_cache.borrow_mut() = Some((self.t, self.ball_gen, pos, vel, r));
         r[j]
+    }
+
+    /// The shared order for the loose ball (agent-models §5.7): `j` comes before `i` when
+    /// his `public_rank` is sooner; a dead heat (the intercept scan's grid makes exact ties,
+    /// most often on pop-ups) goes by the call priority everyone knows before the pitch, an
+    /// outfielder over an infielder and then `CALL_PRIORITY`, so the pitcher is the last
+    /// choice (Opus fourth review P3-1: the tie went to the lower position number, the
+    /// pitcher, on a pop-up over the mound), then the lower position.
+    fn publicly_before(&self, j: usize, i: usize) -> bool {
+        let key = |k: usize| (std::cmp::Reverse(k >= 6), std::cmp::Reverse(CALL_PRIORITY[k]), k);
+        let (rj, ri) = (self.public_rank(j), self.public_rank(i));
+        rj < ri || (rj == ri && key(j) < key(i))
     }
 
     /// The loose ball as every fielder can work it out alike: its position and velocity now,
@@ -1788,7 +1819,7 @@ impl<'a> Sim<'a> {
         if !(0..9).all(|j| matches!(self.known(j), (false, _, true))) {
             return None;
         }
-        (0..9).filter(|&j| self.known_job(j).0 != Role::Cover(1)).min_by(|&a, &c| self.public_rank(a).total_cmp(&self.public_rank(c)).then(a.cmp(&c)))
+        (0..9).filter(|&j| self.known_job(j).0 != Role::Cover(1)).reduce(|best, j| if self.publicly_before(j, best) { j } else { best })
     }
 
     /// Carry out fielder `i`'s decision. A man who goes runs at his own intercept. A chaser who
@@ -2378,12 +2409,24 @@ impl<'a> Sim<'a> {
             if from.is_some() && !matches!(job, Some((who, _)) if who == i) {
                 go_idle(&mut self.f[i]);
                 self.take_own_job(i);
+                // The isolation harness's negative control: `f3d9e7a` re-worked every
+                // teammate's cover here, on this man's private retirement.
+                #[cfg(test)]
+                if ISO_REVERT_GATE.with(|c| c.get()) {
+                    self.cover_roles_after_chasers();
+                }
             }
         }
         let (Some(from), Some((who, b))) = (from, job) else { return };
+        #[cfg(test)]
+        let was_cover = matches!(self.f[who].role, Role::Cover(_));
         self.f[who].role = Role::Relay(b);
         self.f[who].backs = None;
         self.f[who].target = Self::relay_spot(from, b);
+        #[cfg(test)]
+        if was_cover && ISO_REVERT_GATE.with(|c| c.get()) {
+            self.cover_roles_after_chasers();
+        }
     }
 
     /// Fielders with no part in the play back it up (agent-models §5.7): one behind the man
@@ -2715,8 +2758,9 @@ impl<'a> Sim<'a> {
         }
     }
 
-    /// Glove contact test for any fielder the ball passes (agent-models §5.4).
-    fn try_captures(&mut self) {
+    /// At close range a chaser re-reads the ball (perception error scales with distance),
+    /// runs at his new intercept and makes his call again from it.
+    fn close_reads(&mut self) {
         // At close range a chaser re-reads the ball (perception error scales with distance).
         if let Ball::Free { .. } = self.ball {
             let (b, _) = self.ball_at(self.t);
@@ -2735,6 +2779,10 @@ impl<'a> Sim<'a> {
                 }
             }
         }
+    }
+
+    /// A chaser near the ball keeps asking whether he can still take it on his feet.
+    fn dive_reads(&mut self) {
         // A chaser near the ball keeps asking whether he can still take it on his feet. Once
         // his read says no, he may leave them; the answer has to hold until the ball arrives.
         if let Ball::Free { .. } = self.ball {
@@ -2750,6 +2798,16 @@ impl<'a> Sim<'a> {
                 fd.must_dive_since = if must { fd.must_dive_since.min(self.t) } else { f64::INFINITY };
             }
         }
+    }
+
+    /// Glove contact test for any fielder the ball passes (agent-models §5.4).
+    fn try_captures(&mut self) {
+        #[cfg(test)]
+        iso_check(self, "close_reads");
+        self.close_reads();
+        #[cfg(test)]
+        iso_check(self, "dive_reads");
+        self.dive_reads();
         let (b, bv) = self.ball_at(self.t);
         let receiver = match self.ball {
             Ball::Thrown { receiver, .. } => Some(receiver),
@@ -3034,6 +3092,8 @@ impl<'a> Sim<'a> {
             fd.last_dive_read = f64::NEG_INFINITY;
             fd.will_dive.set(false);
         }
+        #[cfg(test)]
+        iso_check(self, "new_ball_assign");
         self.assign();
     }
 
@@ -3145,7 +3205,9 @@ impl<'a> Sim<'a> {
         (if m::hypot(at.x - aim.x, at.y - aim.y) < 0.5 { aim } else { at }, raw)
     }
 
-    fn update_thrown(&mut self) {
+    /// The receiver of a throw watches it and goes to where he believes he can take it,
+    /// re-reading it as it comes (he starts on the spot it was thrown to).
+    fn receiver_reads(&mut self) {
         // The receiver watches the throw and goes to where he believes he can take it,
         // re-reading it as it comes (he starts on the spot it was thrown to).
         if let Ball::Thrown { path, aim, read_err, next_read, receiver, .. } = &self.ball {
@@ -3159,7 +3221,7 @@ impl<'a> Sim<'a> {
                 }
             }
         }
-        let Ball::Thrown { path, catch_at, read_at, receiver, to_base, relay, .. } = &self.ball else { return };
+        let Ball::Thrown { catch_at, read_at, receiver, to_base, relay, .. } = &self.ball else { return };
         // Taking a throw at a bag, he keeps his foot on it and stretches for any throw he
         // believes he can reach from there (agent-models §5.8); he leaves it only for one
         // he cannot.
@@ -3170,6 +3232,13 @@ impl<'a> Sim<'a> {
         let near = |p: &Vec3| m::hypot(p.x - bag.x, p.y - bag.y) <= BAG_REACH_FRAC * RECEIVE_REACH;
         let on_bag = !*relay && (1..=4).contains(to_base) && near(catch_at) && near(read_at);
         self.f[*receiver].target = if on_bag { Vec3::new(bag.x, bag.y, 0.0) } else { Vec3::new(catch_at.x, catch_at.y, 0.0) };
+    }
+
+    fn update_thrown(&mut self) {
+        #[cfg(test)]
+        iso_check(self, "receiver_reads");
+        self.receiver_reads();
+        let Ball::Thrown { path, .. } = &self.ball else { return };
         if self.t >= path.last().t {
             let (s, t_end, at_wall) = (path.last().s, path.last().t, path.stop == Some(1));
             if at_wall {
@@ -3782,6 +3851,8 @@ impl<'a> Sim<'a> {
                 go_idle(&mut self.f[i]);
             }
         }
+        #[cfg(test)]
+        iso_check(self, "back_up_throw");
         self.back_up_throw(fd.pos, b);
     }
 
@@ -4060,13 +4131,20 @@ fn new_sim<'a>(inp: &'a LiveInput<'a>, st: &'a mut RulesState) -> Sim<'a> {
 type IsoHook = Box<dyn FnMut(&Sim<'_>, &'static str)>;
 #[cfg(test)]
 thread_local! { static ISO_HOOK: std::cell::RefCell<Option<IsoHook>> = const { std::cell::RefCell::new(None) }; }
+// The harness's negative control (`isolation_harness_finds_the_third_reviews_gate`): with
+// this set, `update_relay` behaves as on `f3d9e7a`, re-working every teammate's cover when one
+// man privately leaves or takes the cutoff job (Codex third review P1-1).
+#[cfg(test)]
+thread_local! { static ISO_REVERT_GATE: std::cell::Cell<bool> = const { std::cell::Cell::new(false) }; }
 #[cfg(test)]
 fn iso_check(sim: &Sim<'_>, step: &'static str) {
-    ISO_HOOK.with(|h| {
-        if let Some(f) = h.borrow_mut().as_mut() {
-            f(sim, step)
-        }
-    })
+    // The hook is taken out while it runs: steps it runs on its forks reach their own hooks
+    // (a release's backup inside `holder_act`), which must do nothing then.
+    let hook = ISO_HOOK.with(|h| h.borrow_mut().take());
+    if let Some(mut f) = hook {
+        f(sim, step);
+        ISO_HOOK.with(|h| *h.borrow_mut() = Some(f));
+    }
 }
 
 #[cfg(test)]
@@ -4090,7 +4168,29 @@ impl<'a> Sim<'a> {
             rank_cache: Default::default(),
             last_known: self.last_known.clone(),
             last_jobs: self.last_jobs.clone(),
-            out: self.out.clone(),
+            // The recorded tracks are written only by `record`, never read by a decision:
+            // left out to keep forks cheap.
+            out: {
+                let o = &self.out;
+                LiveOutput {
+                    scorer_carries: o.scorer_carries.clone(),
+                    first_handling: o.first_handling,
+                    batter_first_eta: o.batter_first_eta,
+                    ref_set_s: o.ref_set_s,
+                    scorer_throws: o.scorer_throws.clone(),
+                    facts: o.facts.clone(),
+                    events: o.events.clone(),
+                    path: o.path.clone(),
+                    ball_track: Vec::new(),
+                    actors: Vec::new(),
+                    secured: o.secured.clone(),
+                    released: o.released.clone(),
+                    hurry: o.hurry.clone(),
+                    effort: o.effort.clone(),
+                    dives: o.dives.clone(),
+                    calls: o.calls.clone(),
+                }
+            },
             bounce_k: self.bounce_k,
             done: self.done,
         }
@@ -4099,7 +4199,18 @@ impl<'a> Sim<'a> {
     /// Run the named coordination step (as `simulate_live_inner` does).
     fn run_step(&mut self, step: &str) {
         match step {
-            "assign" => self.assign(),
+            "assign" | "new_ball_assign" => self.assign(),
+            "replan_chasers" => self.replan_chasers(),
+            "close_reads" => self.close_reads(),
+            "dive_reads" => self.dive_reads(),
+            "receiver_reads" => self.receiver_reads(),
+            "back_up_throw" => {
+                // Just after a release in `holder_act`: the thrower and the base of his throw.
+                let Ball::Thrown { to_base, .. } = self.ball else { unreachable!("back_up_throw without a throw") };
+                let id = self.out.released.last().expect("a release").1;
+                let by = (0..9).find(|&i| self.f[i].id == id).expect("the thrower");
+                self.back_up_throw(self.f[by].pos, to_base)
+            }
             "recall" => self.recall(),
             "expire_peels" => self.expire_peels(),
             "chasers_see_the_ball_secured" => self.chasers_see_the_ball_secured(),
@@ -4197,21 +4308,10 @@ fn simulate_live_inner(inp: &LiveInput, st: &mut RulesState) -> LiveOutput {
             }
         }
         if assigned && matches!(sim.ball, Ball::Free { .. }) {
-            // Each chaser re-reads the ball on his own clock and runs at his new intercept.
-            for i in 0..9 {
-                if sim.f[i].role == Role::Chase && sim.t >= sim.f[i].next_plan {
-                    sim.replan(i);
-                }
-            }
-            // Close to a slow ball, a chaser simply goes to it (seen directly at short range).
-            let (b, bv) = sim.ball_at(sim.t);
-            if bv.norm() < 3.0 {
-                for fd in sim.f.iter_mut() {
-                    if fd.role == Role::Chase && (Vec3::new(b.x, b.y, 0.0) - fd.pos).norm() < 5.0 {
-                        fd.target = Vec3::new(b.x, b.y, 0.0);
-                    }
-                }
-            }
+            #[cfg(test)]
+            iso_check(&sim, "replan_chasers");
+            sim.replan_chasers();
+            let (b, _) = sim.ball_at(sim.t);
             // Once a second, while the man known to be going for the ball is still far from it
             // (or nobody is known to be), the men near it read it again and decide again
             // (calls, agent-models §5.7).
@@ -6641,6 +6741,48 @@ mod tests {
         assert_eq!(sim.fallback_chaser(), Some(0), "the man sent");
     }
 
+    // Opus fielder-communication fourth review P3-1: a pop-up over the mound (22 m/s at 75°
+    // from the plate, the review's probe), every man known to have left it to another. The
+    // shared order ties the pitcher, catcher and first baseman on the intercept scan's grid;
+    // the pitcher is the last choice on a pop-up (agent-models §5.7's priority table), so
+    // the tie does not go to him.
+    #[test]
+    fn a_tie_for_a_pop_up_nobody_took_does_not_go_to_the_pitcher() {
+        let fx = fixture(&[]);
+        let inp = input(&fx, vec![RunnerIn { id: fx.st.batter, base: 0, speed: 8.2 }]);
+        let mut st = fx.st.clone();
+        let mut sim = new_sim(&inp, &mut st);
+        let th = 75.0_f64.to_radians();
+        loose_ball(&mut sim, 1.0, Vec3::new(0.0, 0.5, 1.0), Vec3::new(0.0, 22.0 * m::cos(th), 22.0 * m::sin(th)));
+        sim.cover_roles(&[]);
+        sim.t += CALL_HEARD_S + 2.0 * DT;
+        all_known_not_going(&mut sim);
+        let ranks: Vec<f64> = (0..9).map(|j| sim.public_rank(j)).collect();
+        let best = ranks.iter().cloned().fold(f64::INFINITY, f64::min);
+        assert_eq!(ranks[0], best, "the pitcher ties for first: {ranks:?}");
+        let sent = sim.fallback_chaser().expect("someone goes");
+        assert_eq!(ranks[sent], best);
+        assert_ne!(sent, 0, "ranks {ranks:?}");
+    }
+
+    // Opus fourth review P3-4: the shared order depends on each man's velocity as well as his
+    // position, so a change of velocity alone, in the same tick, is not answered from the
+    // cache of the order.
+    #[test]
+    fn the_shared_order_follows_a_change_of_velocity() {
+        let fx = fixture(&[]);
+        let inp = input(&fx, vec![RunnerIn { id: fx.st.batter, base: 0, speed: 8.2 }]);
+        let mut st = fx.st.clone();
+        let mut sim = new_sim(&inp, &mut st);
+        loose_ball(&mut sim, 1.0, Vec3::new(-8.0, 30.0, 0.05), Vec3::new(-1.0, 2.0, 0.0));
+        let before = sim.public_rank(4);
+        sim.f[4].vel = Vec3::new(6.0, -6.0, 0.0);
+        let path = sim.public_path();
+        let fresh = sim.seen_intercept(4, &path).0;
+        assert!(fresh != before, "the velocity changes his intercept ({before} both)");
+        assert_eq!(sim.public_rank(4), fresh);
+    }
+
     // Third review P1-2, its fly: raw seed 2 play 140 (EV 34.75 m/s, launch 34.0°, spray
     // −9.5°), a fly to left-centre that the centre fielder catches on main. If every man has
     // left it to another, the man sent is an outfielder, not the pitcher (whom the first
@@ -6688,32 +6830,99 @@ mod tests {
         assert!(matches!(d, (Decision::Go, Decision::CoverSecond) | (Decision::CoverSecond, Decision::Go)), "2B, SS: {d:?} (fielding times {:.3}, {:.3})", sim.f[B2].t_int, sim.f[SS].t_int);
     }
 
-    /// What the isolation harness compares of fielder `k` after a step: his job, where he is
-    /// going, the base he backs up, his backup of a catch, his call, when he last read the ball
-    /// and his plan from it.
-    fn iso_state(sim: &Sim, k: usize) -> String {
+    /// What the isolation harness compares of fielder `k` after a step: everything he is,
+    /// does and has shown (his job, target, backup, call, plans and clocks, his publications),
+    /// with his read sampled where the ball is now and where his read has it end. Compared as
+    /// values; formatted only to report a difference.
+    #[allow(clippy::type_complexity)]
+    fn iso_fielder(sim: &Sim, k: usize) -> impl PartialEq + std::fmt::Debug {
         let f = &sim.f[k];
-        format!("{:?} {:?} {:?} {:?} {} {} {} {:?}", f.role, f.target, f.backs, f.peel, f.call, f.read_at, f.t_int, f.int_pt)
+        (
+            (f.pos, f.vel, f.jump, f.role, f.target, f.next_plan, f.err, f.attempts, f.blocked_until, f.ready_at, f.dove, f.lunge),
+            (f.t_int, f.int_pt, f.read_at, f.read_ball, f.call, f.shown.clone(), f.last_close_read, f.must_dive_since, f.last_dive_read, f.will_dive.get(), f.throws, f.up_at),
+            (f.set_base, f.face, f.catch_vel, f.took_diving, f.backs, f.peel, f.carry_to, f.asks, f.pivot, f.pivot_wait_bag),
+            f.belief.as_ref().map(|p| (p.at(sim.t), p.at(p.t_end()), p.t_end())),
+        )
     }
 
-    /// The ball as the isolation harness compares it: loose, held by whom, or thrown to which
-    /// base and man.
+    /// `iso_fielder` as text (for the reported differences and the third review's probes).
+    fn iso_state(sim: &Sim, k: usize) -> String {
+        format!("{:?}", iso_fielder(sim, k))
+    }
+
+    /// The ball as the isolation harness compares it: loose (its path sampled, and its
+    /// bookkeeping), held by whom, or thrown (the whole throw: its path's ends, its aim, its
+    /// receiver's read of it and the base and man it is for).
     fn iso_ball(sim: &Sim) -> String {
         match &sim.ball {
-            Ball::Free { .. } => "free".into(),
+            Ball::Free { path, next_touch, next_wall, settled_sent } => format!("free {:?} {:?}", (path.at(sim.t), path.at(path.t_end()), path.t_end()), (next_touch, next_wall, settled_sent)),
             Ball::Held { by } => format!("held {by}"),
-            Ball::Thrown { to_base, receiver, relay, .. } => format!("thrown {to_base} {receiver} {relay}"),
+            Ball::Thrown { path, aim, catch_at, read_at, read_err, next_read, to_base, receiver, relay } => {
+                format!("thrown {:?} {:?}", (path.first(), path.last()), (aim, catch_at, read_at, read_err, next_read, to_base, receiver, relay))
+            }
         }
     }
 
-    /// The private changes the harness makes to fielder `j`, one at a time: each other job,
-    /// where he is going, his plan, his backup of a catch, his call, and his read. None of
-    /// them is shown: his publications stay as they are.
-    fn iso_flips(sim: &Sim, j: usize) -> Vec<(String, Box<dyn Fn(&mut Fielder)>)> {
-        let mut v: Vec<(String, Box<dyn Fn(&mut Fielder)>)> = Vec::new();
-        for r in [Role::Idle, Role::Chase, Role::Cover(1), Role::Cover(2), Role::Relay(4), Role::Backup] {
+    /// Everything the harness compares after a step but fielder `j`: every other man (as
+    /// `iso_fielder`), the ball, the runners, and (at the holder's step, for another man's
+    /// change) the holder's options. Kept as the step left it; compared field by field.
+    struct IsoWorld<'s, 'a> {
+        sim: Sim<'s>,
+        j: usize,
+        step: &'static str,
+        _st: std::marker::PhantomData<&'a ()>,
+    }
+
+    impl IsoWorld<'_, '_> {
+        fn holder_options(&self) -> Option<String> {
+            match self.sim.ball {
+                Ball::Held { by } if self.step == "holder_act" && by != self.j => Some(format!("{:?}", self.sim.holder_options(by))),
+                _ => None,
+            }
+        }
+
+        /// The differences from `o`, as `name: self -> o`.
+        fn diff(&self, o: &IsoWorld) -> Vec<String> {
+            let mut d: Vec<String> = (0..9)
+                .filter(|&k| k != self.j && iso_fielder(&self.sim, k) != iso_fielder(&o.sim, k))
+                .map(|k| format!("f{k}: {} -> {}", iso_state(&self.sim, k), iso_state(&o.sim, k)))
+                .collect();
+            let (ba, bb) = (iso_ball(&self.sim), iso_ball(&o.sim));
+            if ba != bb {
+                d.push(format!("ball: {ba} -> {bb}"));
+            }
+            let (ra, rb) = (format!("{:?}", self.sim.r), format!("{:?}", o.sim.r));
+            if ra != rb {
+                d.push(format!("runners: {ra} -> {rb}"));
+            }
+            let (ha, hb) = (self.holder_options(), o.holder_options());
+            if ha != hb {
+                d.push(format!("holder options: {ha:?} -> {hb:?}"));
+            }
+            d
+        }
+    }
+
+    type IsoFlip = Box<dyn Fn(&mut Fielder)>;
+
+    /// The private changes the harness makes to fielder `j`, one at a time. None of them is
+    /// shown: his publications stay as they are. Every job and backup he could have; where he
+    /// is going and his plan; his backup of a catch; each call; his read cleared, or replaced
+    /// by another valid read of the ball now (perfect, or with his error draws at ±2 σ, with
+    /// the call it gives), which can put him on either side of the thresholds the decisions
+    /// use; his error draws; his planning clocks (replan, close read, dive read); a dive
+    /// decided; a carry; a holder's set-up clocks and his call for a man to a bag.
+    fn iso_flips(sim: &Sim, j: usize) -> Vec<(String, IsoFlip)> {
+        let mut v: Vec<(String, IsoFlip)> = Vec::new();
+        let roles = [Role::Idle, Role::Chase, Role::Cover(1), Role::Cover(2), Role::Cover(3), Role::Cover(4), Role::Relay(1), Role::Relay(2), Role::Relay(3), Role::Relay(4), Role::Backup];
+        for r in roles {
             if r != sim.f[j].role {
                 v.push((format!("role {r:?}"), Box::new(move |f: &mut Fielder| f.role = r)));
+            }
+        }
+        for b in [None, Some(1), Some(2), Some(3), Some(4)] {
+            if b != sim.f[j].backs {
+                v.push((format!("backs {b:?}"), Box::new(move |f: &mut Fielder| f.backs = b)));
             }
         }
         v.push(("target".into(), Box::new(|f: &mut Fielder| f.target = f.target + Vec3::new(5.0, 5.0, 0.0))));
@@ -6722,87 +6931,143 @@ mod tests {
             f.t_int += 1.0;
         })));
         v.push(("peel".into(), Box::new(|f: &mut Fielder| f.peel = if f.peel.is_some() { None } else { Some(f.pos) })));
-        v.push(("call".into(), Box::new(|f: &mut Fielder| f.call = if f.call == 0 { 3 } else { 0 })));
-        v.push(("read".into(), Box::new(|f: &mut Fielder| {
+        for c in 0..=3u8 {
+            if c != sim.f[j].call {
+                v.push((format!("call {c}"), Box::new(move |f: &mut Fielder| f.call = c)));
+            }
+        }
+        v.push(("read cleared".into(), Box::new(|f: &mut Fielder| {
             f.belief = None;
             f.t_int = f64::INFINITY;
             f.read_at = f64::NEG_INFINITY;
         })));
-        // A holder's private clocks and his unpublished call for a man to a bag.
+        if matches!(sim.ball, Ball::Free { .. }) {
+            for (name, err) in [("perfect", [0.0; 4]), ("+2σ", [2.0; 4]), ("-2σ", [-2.0; 4])] {
+                let mut st = sim.st.clone();
+                let mut g = sim.fork(&mut st);
+                g.f[j].err = err;
+                let p = g.predict(j);
+                let (ti, pt) = g.intercept(j, &p);
+                let bias = if j >= 6 { -0.15 } else { 0.0 };
+                let call = g.call_value(j, &p, ti, pt, bias).0;
+                let (t, ball) = (sim.t, sim.ball_gen);
+                v.push((format!("read {name} (call {call})"), Box::new(move |f: &mut Fielder| {
+                    (f.belief, f.t_int, f.int_pt, f.call, f.read_at, f.read_ball) = (Some(p.clone()), ti, pt, call, t, ball);
+                })));
+            }
+        }
+        v.push(("err".into(), Box::new(|f: &mut Fielder| f.err = [4.0; 4])));
+        v.push(("read_ball".into(), Box::new(|f: &mut Fielder| f.read_ball = u64::MAX)));
+        v.push(("next_plan now".into(), Box::new(|f: &mut Fielder| f.next_plan = f64::NEG_INFINITY)));
+        v.push(("next_plan never".into(), Box::new(|f: &mut Fielder| f.next_plan = f64::INFINITY)));
+        v.push(("close read due".into(), Box::new(|f: &mut Fielder| f.last_close_read = f64::NEG_INFINITY)));
+        v.push(("close read not due".into(), Box::new(|f: &mut Fielder| f.last_close_read = f64::INFINITY)));
+        v.push(("dive read due".into(), Box::new(|f: &mut Fielder| f.last_dive_read = f64::NEG_INFINITY)));
+        v.push(("must dive".into(), Box::new(|f: &mut Fielder| f.must_dive_since = if f.must_dive_since.is_finite() { f64::INFINITY } else { f64::NEG_INFINITY })));
+        v.push(("will dive".into(), Box::new(|f: &mut Fielder| f.will_dive.set(!f.will_dive.get()))));
+        v.push(("jump".into(), Box::new(|f: &mut Fielder| f.jump = f.jump + Vec3::new(3.0, -3.0, 0.0))));
+        v.push(("carry_to".into(), Box::new(|f: &mut Fielder| f.carry_to = if f.carry_to.is_some() { None } else { Some(4) })));
         v.push(("set_base".into(), Box::new(|f: &mut Fielder| f.set_base += 1.0)));
         v.push(("up_at".into(), Box::new(|f: &mut Fielder| f.up_at += 0.5)));
         v.push(("asks".into(), Box::new(|f: &mut Fielder| f.asks = if f.asks.is_some() { None } else { Some((2, 5)) })));
         v
     }
 
-    /// Fork `sim`, apply `flip` to fielder `j` in one fork, run `step` on both, and say which
-    /// other fielders (or the ball) came out differently.
-    fn iso_compare(sim: &Sim, step: &'static str, j: usize, flip: &dyn Fn(&mut Fielder)) -> Vec<String> {
-        let (mut st_a, mut st_b) = (sim.st.clone(), sim.st.clone());
-        let mut a = sim.fork(&mut st_a);
-        let mut b = sim.fork(&mut st_b);
-        flip(&mut b.f[j]);
-        a.run_step(step);
-        b.run_step(step);
-        let mut diff: Vec<String> = (0..9).filter(|&k| k != j).filter(|&k| iso_state(&a, k) != iso_state(&b, k)).map(|k| format!("f{k}: {} -> {}", iso_state(&a, k), iso_state(&b, k))).collect();
-        if iso_ball(&a) != iso_ball(&b) {
-            diff.push(format!("ball: {} -> {}", iso_ball(&a), iso_ball(&b)));
+    /// Run `step` on a fork of `sim` (with its own rules state `st`), with `flip` applied to
+    /// fielder `j` first. Also whether he still holds the ball.
+    fn iso_run<'s>(sim: &'s Sim, st: &'s mut RulesState, step: &'static str, j: usize, flip: Option<&dyn Fn(&mut Fielder)>) -> (IsoWorld<'s, 's>, bool) {
+        let mut b = sim.fork(st);
+        if let Some(flip) = flip {
+            flip(&mut b.f[j]);
         }
-        diff
+        b.run_step(step);
+        let held = matches!(b.ball, Ball::Held { by } if by == j);
+        (IsoWorld { sim: b, j, step, _st: std::marker::PhantomData }, held)
+    }
+
+    /// Fork `sim`, apply `flip` to fielder `j` in one fork, run `step` on both, and say what
+    /// else came out differently.
+    fn iso_compare(sim: &Sim, step: &'static str, j: usize, flip: &dyn Fn(&mut Fielder)) -> Vec<String> {
+        let (mut sa, mut sb) = (sim.st.clone(), sim.st.clone());
+        let (a, _) = iso_run(sim, &mut sa, step, j, None);
+        let (b, _) = iso_run(sim, &mut sb, step, j, Some(flip));
+        a.diff(&b)
     }
 
     /// `iso_compare` for the holder at his own step: differences count only when the ball is
     /// still in his hands in both forks (a release is a public event).
     fn iso_compare_pre_release(sim: &Sim, step: &'static str, j: usize, flip: &dyn Fn(&mut Fielder)) -> Vec<String> {
-        let (mut st_a, mut st_b) = (sim.st.clone(), sim.st.clone());
-        let mut a = sim.fork(&mut st_a);
-        let mut b = sim.fork(&mut st_b);
-        flip(&mut b.f[j]);
-        a.run_step(step);
-        b.run_step(step);
-        let held = |s: &Sim| matches!(s.ball, Ball::Held { by } if by == j);
-        if !held(&a) || !held(&b) {
+        let (mut sa, mut sb) = (sim.st.clone(), sim.st.clone());
+        let (a, held_a) = iso_run(sim, &mut sa, step, j, None);
+        let (b, held_b) = iso_run(sim, &mut sb, step, j, Some(flip));
+        if !held_a || !held_b {
             return Vec::new();
         }
-        (0..9).filter(|&k| k != j).filter(|&k| iso_state(&a, k) != iso_state(&b, k)).map(|k| format!("f{k}: {} -> {}", iso_state(&a, k), iso_state(&b, k))).collect()
+        a.diff(&b)
     }
 
-    /// Run games `seeds` with the harness on every `stride`-th call of each coordination step:
-    /// for every fielder and every private change, no other fielder's job, target, backup,
-    /// call, read or plan, and not the ball, may change in that step. The holder's own change
-    /// may decide his throw (`holder_act`), which is his to make. Returns the violations.
-    fn isolation_run(seeds: std::ops::Range<u64>, stride: u64) -> (u64, Vec<String>) {
+    /// What a step changed of the jobs: anyone's role, backup, call, backup of a catch, call
+    /// for a man to a bag, publications, or the ball (not a target, which a cutoff man's line
+    /// moves every tick). A step that changes them is a transition, checked every time.
+    fn iso_jobs(sim: &Sim) -> String {
+        format!("{:?} {}", sim.f.iter().map(|f| (f.role, f.backs, f.call, f.peel, f.asks, f.shown.len())).collect::<Vec<_>>(), iso_ball(sim))
+    }
+
+    /// Steps the harness checks at every call: rare, and each one a transition.
+    const ISO_DENSE_STEPS: [&str; 3] = ["new_ball_assign", "back_up_throw", "recall"];
+
+    /// Run games `seeds` with the harness: before each decision step of a live play, at every
+    /// `stride`-th call of the step, at every call of a rare step (`ISO_DENSE_STEPS`), and
+    /// at every call that changes anyone's job (a transition), for every fielder and every
+    /// private change (`iso_flips`), nothing else (`iso_world`) may change in that step. The
+    /// holder's own change at his step may decide his throw: what follows a release is public
+    /// (`iso_compare_pre_release`). Returns the checks made, the snapshots checked by step,
+    /// and the violations.
+    fn isolation_run(seeds: std::ops::Range<u64>, plays: std::ops::Range<u32>, stride: u64) -> (u64, std::collections::BTreeMap<&'static str, u64>, Vec<String>) {
         use std::cell::RefCell;
         use std::rc::Rc;
         let found: Rc<RefCell<(u64, Vec<String>)>> = Rc::new(RefCell::new((0, Vec::new())));
         let calls: Rc<RefCell<std::collections::BTreeMap<&'static str, u64>>> = Rc::default();
-        let (f2, c2) = (found.clone(), calls.clone());
+        let snaps: Rc<RefCell<std::collections::BTreeMap<&'static str, u64>>> = Rc::default();
+        let (f2, c2, s2) = (found.clone(), calls.clone(), snaps.clone());
         ISO_HOOK.with(|h| {
             *h.borrow_mut() = Some(Box::new(move |sim: &Sim<'_>, step: &'static str| {
+                if !plays.contains(&sim.inp.play) {
+                    return;
+                }
                 let n = {
                     let mut c = c2.borrow_mut();
                     let e = c.entry(step).or_insert(0);
                     *e += 1;
                     *e
                 };
-                if n % stride != 0 {
+                let due = n % stride == 0 || ISO_DENSE_STEPS.contains(&step) || {
+                    let mut st = sim.st.clone();
+                    let mut a = sim.fork(&mut st);
+                    a.run_step(step);
+                    iso_jobs(&a) != iso_jobs(sim)
+                };
+                if !due {
                     return;
                 }
+                *s2.borrow_mut().entry(step).or_insert(0) += 1;
                 let holder = match sim.ball {
                     Ball::Held { by } => Some(by),
                     _ => None,
                 };
                 for j in 0..9 {
+                    // One unchanged run per man (it leaves him out of the comparison).
+                    let mut sa = sim.st.clone();
+                    let (a, held_a) = iso_run(sim, &mut sa, step, j, None);
+                    let own_throw = step == "holder_act" && holder == Some(j);
                     for (what, flip) in iso_flips(sim, j) {
-                        // The holder's own change may decide his throw (`holder_act`), which
-                        // is his to make: once the ball is released in either fork, what
-                        // follows is public. Before a release, nothing he privately decides
-                        // may reach a teammate (fourth review P1-1).
-                        let d = if step == "holder_act" && holder == Some(j) { iso_compare_pre_release(sim, step, j, flip.as_ref()) } else { iso_compare(sim, step, j, flip.as_ref()) };
+                        let mut sb = sim.st.clone();
+                        let (b, held_b) = iso_run(sim, &mut sb, step, j, Some(flip.as_ref()));
+                        let d = if own_throw && (!held_a || !held_b) { Vec::new() } else { a.diff(&b) };
                         let mut fr = f2.borrow_mut();
                         fr.0 += 1;
-                        if !d.is_empty() && fr.1.len() < 12 {
-                            let first: String = d[0].chars().take(160).collect();
+                        if !d.is_empty() {
+                            let first: String = d[0].chars().take(240).collect();
                             fr.1.push(format!("seed {} play {} t {:.6} {step}: f{j} {what}: {} change(s), {first}", sim.inp.seed, sim.inp.play, sim.t, d.len()));
                         }
                     }
@@ -6814,23 +7079,65 @@ mod tests {
         }
         ISO_HOOK.with(|h| *h.borrow_mut() = None);
         let r = found.borrow().clone();
-        r
+        let s = snaps.borrow().clone();
+        (r.0, s, r.1)
     }
 
-    // Codex fielder-communication third review P1-1: the general isolation harness. Real
-    // games, seeds 0–49, a sample of the ticks of every play: before each coordination step
-    // (the first read, the re-call, the end of a backup of a catch, a chaser seeing the ball
-    // secured, the holder's choice, the catcher's return home, hearing, the cutoff job), each
-    // man's private state is changed in turn (his job, target, plan, backup of a catch, call,
-    // read; never what he has shown) and no other man's job, target, backup, call, read or
-    // plan, nor the ball, may change in that step. `ISO_SEEDS=a..b`, `ISO_STRIDE=n` widen it.
+    /// The harness's settings from the environment: `ISO_SEEDS=a..b`, `ISO_STRIDE=n`.
+    fn iso_settings(seeds: std::ops::Range<u64>, stride: u64) -> (std::ops::Range<u64>, u64) {
+        let seeds = std::env::var("ISO_SEEDS").ok().and_then(|s| s.split_once("..").map(|(a, b)| a.parse().unwrap()..b.parse().unwrap())).unwrap_or(seeds);
+        let stride = std::env::var("ISO_STRIDE").ok().map(|s| s.parse().unwrap()).unwrap_or(stride);
+        (seeds, stride)
+    }
+
+    fn iso_assert(seeds: std::ops::Range<u64>, stride: u64, min_checks: u64) {
+        let (checks, snaps, bad) = isolation_run(seeds.clone(), 0..u32::MAX, stride);
+        eprintln!("isolation seeds {seeds:?} stride {stride}: {checks} checks, {} violations; snapshots by step {snaps:?}", bad.len());
+        assert!(checks > min_checks, "only {checks} checks");
+        let shown: Vec<&String> = bad.iter().take(12).collect();
+        assert!(bad.is_empty(), "{} of {checks} checks leaked, e.g.:\n{}", bad.len(), shown.iter().map(|s| s.as_str()).collect::<Vec<_>>().join("\n"));
+    }
+
+    // Codex fielder-communication third review P1-1, widened after the fourth reviews (Codex
+    // P2-1, Opus P2-2): the general isolation harness on real games. Before every decision
+    // step of a live play (the first read; a new loose ball's read; the chasers' replans; the
+    // close and dive reads; the re-call; the end of a backup of a catch; a chaser seeing the
+    // ball secured; the receiver's read of a throw; the holder's choice; his call heeded; the
+    // backup of a released throw; the catcher's return home; hearing; the cutoff job), each
+    // man's private state is changed in turn (`iso_flips`; never what he has shown) and
+    // nothing else (`iso_world`: every other man's whole state and publications, the ball,
+    // the runners, the holder's options) may change in that step. Rare steps and every step
+    // that changes a job are checked every time, others every `stride`-th call. The default
+    // run is short (seeds 0–3); `isolation_many_seeds` (ignored) runs 0–49:
+    //   cd sim && taskset -c 0-7 nice cargo test --release -p bb_game --lib isolation_many_seeds -- --ignored --nocapture
+    // `ISO_SEEDS=a..b`, `ISO_STRIDE=n` change either.
     #[test]
     fn isolation_no_private_state_reaches_a_teammate_in_real_games() {
-        let seeds = std::env::var("ISO_SEEDS").ok().and_then(|s| s.split_once("..").map(|(a, b)| a.parse().unwrap()..b.parse().unwrap())).unwrap_or(0..50);
-        let stride = std::env::var("ISO_STRIDE").ok().map(|s| s.parse().unwrap()).unwrap_or(200);
-        let (checks, bad) = isolation_run(seeds, stride);
-        assert!(checks > 10_000, "only {checks} checks");
-        assert!(bad.is_empty(), "{} of {checks} checks leaked, e.g.:\n{}", bad.len(), bad.join("\n"));
+        let (seeds, stride) = iso_settings(0..2, 400);
+        iso_assert(seeds, stride, 100_000);
+    }
+
+    // The harness's negative control (fourth review P2-1): with the cutoff step behaving as
+    // on `f3d9e7a` (a man's private leaving or taking of the cutoff job re-works every
+    // teammate's cover, Codex third review P1-1), the harness must find leaks, on the first
+    // 30 plays of seed 0 at its default stride.
+    #[test]
+    fn isolation_harness_finds_the_third_reviews_gate() {
+        ISO_REVERT_GATE.with(|c| c.set(true));
+        let (checks, snaps, bad) = isolation_run(0..1, 0..30, 400);
+        ISO_REVERT_GATE.with(|c| c.set(false));
+        eprintln!("negative control: {checks} checks, {} violations; snapshots by step {snaps:?}", bad.len());
+        let first: Vec<&str> = bad.iter().take(3).map(|s| s.as_str()).collect();
+        eprintln!("{}", first.join("\n"));
+        assert!(!bad.is_empty(), "the harness missed the restored gate in {checks} checks");
+        assert!(bad.iter().all(|b| b.contains("update_relay")), "leaks outside the cutoff step: {:?}", bad.iter().find(|b| !b.contains("update_relay")));
+    }
+
+    #[test]
+    #[ignore = "long: the isolation harness over seeds 0-49 (about an hour on one core)"]
+    fn isolation_many_seeds() {
+        let (seeds, stride) = iso_settings(0..50, 200);
+        iso_assert(seeds, stride, 500_000);
     }
 
     // Third review P1-1, its real-game probe: seed 0, play 0, just before the cutoff step at
