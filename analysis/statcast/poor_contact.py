@@ -66,6 +66,9 @@ def load_real(d):
     rows = []
     for f in sorted(glob.glob(d + '/sc_*.csv')):
         rows.extend(csv.DictReader(open(f)))
+    global REAL_FAIR
+    REAL_FAIR = [r for r in rows if r['description'].startswith('hit_into_play') and num(r['launch_speed']) is not None
+                 and num(r['launch_angle']) is not None]
     swings = []
     for r in rows:
         bat = num(r['bat_speed'])
@@ -178,6 +181,11 @@ def main():
     summary('real (tracked)', rf)
     for lab, (_, allr) in sims:
         summary(lab, [s for s in allr if s['fair']])
+    print('\nHR per fair ball: real %.2f%% (%d fair balls)' % (
+        100 * sum(r['events'] == 'home_run' for r in REAL_FAIR) / len(REAL_FAIR), len(REAL_FAIR)))
+    for lab, (_, allr) in sims:
+        f = [s for s in allr if s['fair']]
+        print('  %s %.2f%%' % (lab, 100 * sum(s['hr'] for s in f) / len(f)))
     by_bat('real', [s for s in rf if s['bat'] >= 60])
     for lab, (_, allr) in sims:
         by_bat(lab, [s for s in allr if s['fair'] and s['bat'] >= 60])
