@@ -19,6 +19,11 @@ int main(void) {
         }
     }
     { BbPlayer p; if (bb_game_roster(g, 2, 0, &p) != 0 || bb_game_roster(g, 0, 9, &p) != 0 || bb_game_player(g, 0x0200, &p) != 0) { fprintf(stderr, "bad miss\n"); return 1; } }
+    /* The park: a closed boundary that starts at the left-field pole (layout check of BbPark). */
+    { BbPark park; if (bb_game_park(g, &park) != 1 || park.n_wall < 8 || park.n_wall > BB_PARK_MAX_WALL || park.wall[0].kind != 0
+          || park.wall[0].from[0] != park.poles[0][0] || park.poles[0][0] >= 0 || park.poles[1][0] <= 0 || park.bases[1][0] != 0
+          || park.rubber_m < 18 || park.rubber_m > 19 || park.dugout_roof_m <= 0) { fprintf(stderr, "bad park\n"); return 1; }
+      printf("C client: park of %u wall pieces, poles at %.1f m\n", park.n_wall, park.poles[1][0] * 1.41421356f); }
     /* The box score of a game not yet begun: nine empty lines a side, no innings. */
     BbBoxScore box;
     if (bb_game_box_score(g, UINT32_MAX, &box) != 1 || box.is_final || box.teams[0].n_lines != 9 || box.teams[1].n_lines != 9 || box.teams[0].n_batted != 0) { fprintf(stderr, "bad empty box\n"); return 1; }

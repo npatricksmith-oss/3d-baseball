@@ -706,6 +706,130 @@ pub unsafe extern "C" fn bb_game_box_score(g: *const BbGame, through_plays: u32,
     1
 }
 
+/// Most pieces [`BbPark::wall`] can hold.
+pub const BB_PARK_MAX_WALL: usize = 96;
+/// Straight pieces the outfield fence's curve is cut into for [`BbPark::wall`].
+pub const BB_PARK_FENCE_PIECES: usize = 64;
+
+/// One straight piece of the playing field's boundary: it runs from `from` to the next
+/// piece's `from` (the last one back to the first).
+#[repr(C)]
+#[derive(Clone, Copy, Debug, Default, PartialEq)]
+pub struct BbWallPiece {
+    /// Where the piece starts (sim frame, m).
+    pub from: [f32; 2],
+    /// Height of its top above the field, m: 0 at a dugout's opening.
+    pub top_m: f32,
+    /// 0 outfield fence, 1 backstop, 2 side wall (parallel to a foul line), 3 the stands
+    /// closing in to a foul pole, 4 a dugout's opening in the side wall.
+    pub kind: u8,
+    pub _pad: [u8; 3],
+}
+
+/// The park as the physics has it (`bb_physics::ground::Field`, physics-spec §9.5), for a
+/// client to draw: nothing here is decided by the client, and nothing a client does with it
+/// reaches the game.
+#[repr(C)]
+#[derive(Clone, Copy, Debug, PartialEq)]
+pub struct BbPark {
+    /// The boundary as a closed loop of `n_wall` straight pieces, clockwise seen from above
+    /// (the field is on the right of each piece): from the left-field pole along the fence
+    /// to the right-field pole, down the first-base side, across the backstop and up the
+    /// third-base side. The fence's curve is cut into chords whose ends are on it.
+    pub n_wall: u32,
+    pub wall: [BbWallPiece; BB_PARK_MAX_WALL],
+    /// The foot of each foul pole (left field, right field).
+    pub poles: [[f32; 2]; 2],
+    /// First, second and third base (the corner of the infield square each one marks).
+    pub bases: [[f32; 2]; 3],
+    /// Front edge of the pitcher's rubber, m from the rear point of home along +Y.
+    pub rubber_m: f32,
+    /// The ground is infield dirt within this distance of the rear point of home, grass beyond.
+    pub dirt_radius_m: f32,
+    /// Heights, m: the outfield fence, the stands' wall in foul ground, the screen over the
+    /// walls behind home, and a dugout's roof (a ball under it goes into the dugout).
+    pub fence_height_m: f32,
+    pub foul_wall_height_m: f32,
+    pub backstop_height_m: f32,
+    pub dugout_roof_m: f32,
+}
+
+/// The ground point `s` along a foul line and `c` off it into foul ground, on the first-base
+/// side (`side` +1) or the third-base side (−1).
+fn line_point(side: f64, s: f64, c: f64) -> [f64; 2] {
+    let r = core::f64::consts::FRAC_1_SQRT_2;
+    [side * (s + c) * r, (s - c) * r]
+}
+
+fn park_of(f: &bb_physics::ground::Field) -> BbPark {
+    let mut wall = [BbWallPiece::default(); BB_PARK_MAX_WALL];
+    let mut n = 0;
+    let mut put = |p: [f64; 2], top: f64, kind: u8| {
+        wall[n] = BbWallPiece { from: [p[0] as f32, p[1] as f32], top_m: top as f32, kind, _pad: [0; 3] };
+        n += 1;
+    };
+    let poles = [line_point(-1.0, f.fence_lf, 0.0), line_point(1.0, f.fence_rf, 0.0)];
+    // The fence, pole to pole. Its ends are the poles themselves (the same points the walls
+    // of foul ground close in to), not a rounding of them.
+    for i in 0..BB_PARK_FENCE_PIECES {
+        let p = if i == 0 {
+            poles[0]
+        } else {
+            let th = core::f64::consts::FRAC_PI_2 * (i as f64 / BB_PARK_FENCE_PIECES as f64 - 0.5);
+            let r = f.fence_at(th);
+            [r * th.sin(), r * th.cos()]
+        };
+        put(p, f.wall_height, 0);
+    }
+    // Where a side wall meets the backstop, as a distance along the line (behind home).
+    let corner_s = f.foul_clear_m - f.backstop_m * core::f64::consts::SQRT_2;
+    // First-base side, from the pole down to the backstop.
+    put(poles[1], f.foul_wall_height, 3);
+    put(line_point(1.0, f.foul_taper_m, f.foul_clear_m), f.foul_wall_height, 2);
+    put(line_point(1.0, f.dugout_to_m, f.foul_clear_m), 0.0, 4);
+    put(line_point(1.0, f.dugout_from_m, f.foul_clear_m), f.foul_wall_height, 2);
+    put(line_point(1.0, 0.0, f.foul_clear_m), f.backstop_height, 2);
+    put(line_point(1.0, corner_s, f.foul_clear_m), f.backstop_height, 1);
+    // Third-base side, from the backstop up to the pole.
+    put(line_point(-1.0, corner_s, f.foul_clear_m), f.backstop_height, 2);
+    put(line_point(-1.0, 0.0, f.foul_clear_m), f.foul_wall_height, 2);
+    put(line_point(-1.0, f.dugout_from_m, f.foul_clear_m), 0.0, 4);
+    put(line_point(-1.0, f.dugout_to_m, f.foul_clear_m), f.foul_wall_height, 2);
+    put(line_point(-1.0, f.foul_taper_m, f.foul_clear_m), f.foul_wall_height, 3);
+    let xy = |p: [f64; 2]| [p[0] as f32, p[1] as f32];
+    let base = |b: u8| {
+        let p = bb_game::play::base_pos(b);
+        [p.x as f32, p.y as f32]
+    };
+    BbPark {
+        n_wall: n as u32,
+        wall,
+        poles: [xy(poles[0]), xy(poles[1])],
+        bases: [base(1), base(2), base(3)],
+        rubber_m: bb_physics::pitch::RUBBER_Y as f32,
+        dirt_radius_m: f.dirt_radius as f32,
+        fence_height_m: f.wall_height as f32,
+        foul_wall_height_m: f.foul_wall_height as f32,
+        backstop_height_m: f.backstop_height as f32,
+        dugout_roof_m: f.dugout_roof_m as f32,
+    }
+}
+
+/// The park the game is played in. Fills `*out` and returns 1; −1 on a null argument or a
+/// freed game. Read-only: it never changes the game.
+///
+/// # Safety
+/// `g` must come from [`bb_game_create`]; `out` must be a valid pointer.
+#[unsafe(no_mangle)]
+pub unsafe extern "C" fn bb_game_park(g: *const BbGame, out: *mut BbPark) -> i32 {
+    if g.is_null() || out.is_null() {
+        return -1;
+    }
+    let Some(game) = unsafe { &*g }.game.as_ref() else { return -1 };
+    unsafe { *out = park_of(game.field()) };
+    1
+}
+
 #[cfg(test)]
 mod tests {
     /// How far beyond a wall a fielder can reach over it (the receiving reach, `live.rs`), m.
@@ -1209,4 +1333,98 @@ mod tests {
         }
         unsafe { bb_game_free(g) };
     }
+    /// The park a client draws is the park the physics plays in: every piece of the exported
+    /// boundary lies on the physics' own boundary, is the kind and height the physics says
+    /// it is there, and the loop closes around the field with the field on its right.
+    #[test]
+    fn the_exported_park_is_the_one_the_physics_uses() {
+        use bb_physics::ground::{Field, WallKind};
+        let g = bb_game_create(11);
+        let before = unsafe { &*g }.game.as_ref().unwrap().log_through(u32::MAX);
+        let mut park: BbPark = unsafe { std::mem::zeroed() };
+        assert_eq!(unsafe { bb_game_park(g, &mut park) }, 1);
+        assert_eq!(unsafe { bb_game_park(std::ptr::null(), &mut park) }, -1);
+        assert_eq!(unsafe { bb_game_park(g, std::ptr::null_mut()) }, -1);
+        assert_eq!(unsafe { &*g }.game.as_ref().unwrap().log_through(u32::MAX), before, "reading the park changed the game");
+        let f = Field::default();
+        let n = park.n_wall as usize;
+        assert!(n > BB_PARK_FENCE_PIECES && n <= BB_PARK_MAX_WALL);
+        let mut turned = 0.0;
+        let mut kinds = [0usize; 5];
+        for i in 0..n {
+            let (a, b) = (park.wall[i], park.wall[(i + 1) % n]);
+            let (ax, ay, bx, by) = (a.from[0] as f64, a.from[1] as f64, b.from[0] as f64, b.from[1] as f64);
+            let len = (bx - ax).hypot(by - ay);
+            assert!(len > 0.5, "piece {i} has no length");
+            kinds[a.kind as usize] += 1;
+            // Both ends are on the boundary: no clearance either way (f32 positions; the
+            // fence's distance is along the ray from home, so its chord ends are exact too).
+            for (x, y) in [(ax, ay), (bx, by)] {
+                let d = f.ball_clearance(x, y, 0.0).dist;
+                assert!(d.abs() < 2e-4, "piece {i} end ({x:.3}, {y:.3}) is {d:.5} m off the boundary");
+            }
+            // A step into the field from the middle of the piece (to its right) is inside by
+            // about that step, and the nearest boundary there is this piece's kind and height.
+            let (mx, my) = ((ax + bx) * 0.5, (ay + by) * 0.5);
+            let (rx, ry) = ((by - ay) / len, -(bx - ax) / len);
+            let step = 0.25;
+            let w = f.ball_clearance(mx + rx * step, my + ry * step, 0.0);
+            // A fence chord sags inside the curve by under 3 cm (checked below), and the
+            // physics measures the fence along the ray from home, which near a pole crosses
+            // the fence up to 29° off square: up to 1.14 times the square distance.
+            let (sag, slant) = if a.kind == 0 { (0.03, 1.14) } else { (1e-4, 1.0) };
+            assert!(w.dist > step - 1e-3 && w.dist < step * slant + sag + 1e-3, "piece {i} (kind {}): {:.4} m inside, stepped {step}", a.kind, w.dist);
+            let out = f.ball_clearance(mx - rx * (step + sag), my - ry * (step + sag), 0.0);
+            assert!(out.dist < 0.0, "piece {i}: a step to its left is still in the field");
+            let kind = match w.kind {
+                WallKind::Fence => 0,
+                WallKind::Backstop => 1,
+                WallKind::Side if f.is_dugout(&w) => 4,
+                WallKind::Side => 2,
+                WallKind::Taper => 3,
+            };
+            assert_eq!(a.kind, kind, "piece {i} at ({mx:.2}, {my:.2})");
+            assert!((a.top_m as f64 - f.wall_top(&w)).abs() < 1e-6, "piece {i}: top {} against the physics' {}", a.top_m, f.wall_top(&w));
+            // Clockwise all the way round: the turn at each corner sums to one full turn.
+            let c = park.wall[(i + 2) % n];
+            let (ux, uy, vx, vy) = (bx - ax, by - ay, c.from[0] as f64 - bx, c.from[1] as f64 - by);
+            turned += (ux * vy - uy * vx).atan2(ux * vx + uy * vy);
+        }
+        assert!((turned + 2.0 * std::f64::consts::PI).abs() < 1e-6, "the loop turns {turned:.4} rad, not one clockwise turn");
+        assert_eq!(kinds, [BB_PARK_FENCE_PIECES, 1, 6, 2, 2]);
+        // The fence's chords follow the curve at every angle, not only at their ends: a point
+        // on the physics' fence is never more than a chord's sag from the drawn one.
+        for k in 0..=900 {
+            let th = (k as f64 / 900.0 - 0.5) * std::f64::consts::FRAC_PI_2;
+            let r = f.fence_at(th);
+            let (x, y) = (r * th.sin(), r * th.cos());
+            let near = (0..BB_PARK_FENCE_PIECES)
+                .map(|i| {
+                    let (a, b) = (park.wall[i].from, park.wall[i + 1].from);
+                    let (ax, ay, dx, dy) = (a[0] as f64, a[1] as f64, (b[0] - a[0]) as f64, (b[1] - a[1]) as f64);
+                    let t = (((x - ax) * dx + (y - ay) * dy) / (dx * dx + dy * dy)).clamp(0.0, 1.0);
+                    (x - ax - t * dx).hypot(y - ay - t * dy)
+                })
+                .fold(f64::INFINITY, f64::min);
+            assert!(near < 0.03, "the fence at {th:.3} rad is {near:.3} m from the drawn one");
+        }
+        // Poles, bases, rubber and the dirt are where the game has them.
+        let d = 90.0 * 0.3048 / std::f64::consts::SQRT_2;
+        for (got, want) in park.bases.iter().zip([[d, d], [0.0, 2.0 * d], [-d, d]]) {
+            assert!((got[0] as f64 - want[0]).abs() < 1e-5 && (got[1] as f64 - want[1]).abs() < 1e-5, "{got:?} {want:?}");
+        }
+        for (pole, side) in park.poles.iter().zip([-1.0, 1.0]) {
+            let (x, y) = (pole[0] as f64, pole[1] as f64);
+            assert!((x - side * y).abs() < 1e-4 && (x.hypot(y) - 330.0 * 0.3048).abs() < 1e-4, "pole at ({x}, {y})");
+        }
+        assert_eq!(park.poles[0], park.wall[0].from);
+        assert_eq!(park.poles[1], park.wall[BB_PARK_FENCE_PIECES].from);
+        assert!((park.rubber_m as f64 - 60.5 * 0.3048).abs() < 1e-3);
+        let edge = park.dirt_radius_m as f64;
+        assert_eq!(f.surface_at(0.0, edge - 0.01), bb_physics::ground::DIRT);
+        assert_eq!(f.surface_at(0.0, edge + 0.01), bb_physics::ground::GRASS);
+        assert_eq!((park.fence_height_m, park.foul_wall_height_m, park.backstop_height_m, park.dugout_roof_m), (f.wall_height as f32, f.foul_wall_height as f32, f.backstop_height as f32, f.dugout_roof_m as f32));
+        unsafe { bb_game_free(g) };
+    }
+
 }

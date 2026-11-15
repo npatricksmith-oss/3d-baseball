@@ -115,6 +115,31 @@ typedef struct {
   BbBoxTeam teams[2];
 } BbBoxScore;
 int32_t bb_game_box_score(const BbGame *g, uint32_t through_plays, BbBoxScore *out);
+/* The park as the physics has it (bb_physics::ground::Field), for a client to draw. Read-only.
+ * The boundary of the playing field is a closed loop of n_wall straight pieces, clockwise seen
+ * from above (the field is on the right of each piece): from the left-field pole along the
+ * fence to the right-field pole, down the first-base side, across the backstop and up the
+ * third-base side. Piece i runs from wall[i].from to wall[(i + 1) % n_wall].from. The fence's
+ * curve is cut into chords whose ends are on it. Sim frame, metres. */
+typedef struct {
+  float from[2];
+  float top_m;  /* height of the piece's top above the field; 0 at a dugout's opening */
+  uint8_t kind; /* 0 outfield fence, 1 backstop, 2 side wall, 3 stands closing in to a pole, 4 dugout opening */
+  uint8_t _pad[3];
+} BbWallPiece;
+#define BB_PARK_MAX_WALL 96
+typedef struct {
+  uint32_t n_wall; BbWallPiece wall[BB_PARK_MAX_WALL];
+  float poles[2][2];   /* the foot of each foul pole: left field, right field */
+  float bases[3][2];   /* first, second, third: the corner of the infield square each marks */
+  float rubber_m;      /* front edge of the pitcher's rubber, from the rear point of home along +Y */
+  float dirt_radius_m; /* infield dirt within this distance of the rear point of home, grass beyond */
+  /* Heights: the outfield fence, the stands' wall in foul ground, the screen over the walls
+   * behind home, a dugout's roof (a ball under it goes into the dugout). */
+  float fence_height_m, foul_wall_height_m, backstop_height_m, dugout_roof_m;
+} BbPark;
+/* 1 = *out filled, -1 = bad args. */
+int32_t bb_game_park(const BbGame *g, BbPark *out);
 /* blob/len must be a readable allocation of that length (normally one from bb_game_advance).
  * Summary of a timeline blob: 1 = ok, -1 = bad args or not a timeline. */
 int32_t bb_timeline_info(const uint8_t *blob, size_t len, BbPlayInfo *out);
