@@ -77,7 +77,8 @@ specified shapes exactly. The computed-results section below is regenerated.
   normal +Y (the slender-bat analytic check). A finite radial component of r2
   generally couples the normal/tangent constraints and changes that reduction.
   Separate oblique cases use finite barrel-radius offsets. A8 chooses the
-  restitution derived from the computed mass properties to yield q = 0.20;
+  restitution derived from the computed mass properties to yield q = 0.215
+  (the sourced sweet-spot value, physics-spec §8.2, 2026-11-15; it was 0.20);
   it does not implement or tune the unspecified speed/location COR profile.
 - For the A9 tangential check, the bat contact offset is along +X and the
   normal is +Y. With tangent +Z, define
