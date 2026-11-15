@@ -34,6 +34,13 @@ struct FBbParkSpot
  * (the sim's ground is flat) and the shape of the infield dirt (the sim's is a disc around
  * home). Neither is read back by anything.
  */
+/** A straight piece of the boundary: from A for L metres along Along; Out points out of the field. */
+struct FBbRun
+{
+	FVector2D A, Along, Out;
+	double L;
+};
+
 struct FBbGround
 {
 	explicit FBbGround(const BbPark& Desc);
@@ -51,6 +58,16 @@ struct FBbGround
 	double BaseL = 0.0;
 	double PoleS[2] = { 0.0, 0.0 };
 	FVector2D MoundC = FVector2D::ZeroVector, SkinC = FVector2D::ZeroVector, OnDeck[2];
+	/** The dugouts' openings. Behind each the ground steps down to the dugout's floor. */
+	TArray<FBbRun> Dugouts;
+	/** What stands behind each piece of the fence: nothing of the field's, the batter's eye,
+	 *  or a bullpen. Decided by rule from the piece's bearing, so any park gets them. */
+	enum : uint8 { Plain, Eye, Pen };
+	uint8 Behind[BB_PARK_MAX_WALL];
+	/** The fence's pieces with a bullpen behind them, and where each pen's two mounds and
+	 *  two plates are (empty if the park has no room for a pen). */
+	TArray<FBbRun> Pens;
+	TArray<FVector2D> PenMounds, PenPlates;
 
 private:
 	void Lookup(double X, double Y, float& Sd, float& Fence) const;
@@ -87,12 +104,21 @@ private:
 	void BuildSurface();
 	void BuildFurniture();
 	void BuildWalls();
+	void BuildDugouts();
+	void BuildOutfield();
 	void BuildStands();
+	/** A flat picture standing on a wall: centred at Mid (sim frame), W wide along Right and
+	 *  H high, seen from the side Face points to. */
+	void Sign(const FVector& Mid, const FVector2D& Right, const FVector2D& Face, double W, double H, UTexture2D* Tex, float Rough);
+	/** A whole number in block figures, W by H metres, on a ground colour. */
+	UTexture2D* PaintNumber(int32 Value, double W, double H, const FLinearColor& Ink, const FLinearColor& Back);
+	/** A square picture with its smaller copies. */
+	UTexture2D* MakeTexture(TArray<FColor>&& Top, int32 N);
 	/** The ground's colours over a square, painted in code, with its smaller copies. */
 	UTexture2D* PaintGround(double TexX0, double TexY0, double TexSize, int32 N);
 	/** One piece of the ground mesh: a grid of cells whose heights follow the drawn ground,
-	 *  leaving out the cells inside Hole (if it has any size). */
-	void AddGround(int32 Section, double GX0, double GY0, double Cell, int32 Nx, int32 Ny, const FBox2D& Hole, UTexture2D* Tex, double TexX0, double TexY0, double TexSize);
+	 *  leaving out the cells whose middle Skip says to. */
+	void AddGround(int32 Section, double GX0, double GY0, double Cell, int32 Nx, int32 Ny, TFunctionRef<bool(const FVector2D&)> Skip, UTexture2D* Tex, double TexX0, double TexY0, double TexSize);
 
 	TUniquePtr<FBbGround> Ground;
 	UPROPERTY()
@@ -107,11 +133,18 @@ private:
 	/** The engine's flat-colour material (parameter "Color"): what is used without the above. */
 	UPROPERTY()
 	TObjectPtr<UMaterialInterface> FlatMaterial;
-	/** A lit material showing a texture (parameter "Tex"), built in code at start-up. */
+	/** See-through and unlit (parameters "Color", "Opacity"): the backstop's net. */
+	UPROPERTY()
+	TObjectPtr<UMaterialInterface> NetMaterial;
+	/** A lit material showing a texture (parameters "Tex", "Rough"), built in code at start-up. */
 	UPROPERTY()
 	TObjectPtr<UMaterialInterface> TexturedMaterial;
 	UPROPERTY()
 	TArray<TObjectPtr<UTexture2D>> Textures;
 	UPROPERTY()
 	TObjectPtr<UProceduralMeshComponent> Surface;
+	/** Flat pictures on the walls: the distance figures (and, later, the signs). */
+	UPROPERTY()
+	TObjectPtr<UProceduralMeshComponent> Signs;
+	int32 SignCount = 0;
 };

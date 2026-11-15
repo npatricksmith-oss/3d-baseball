@@ -1,6 +1,6 @@
 # Park visuals: field and stadium
 
-**Status:** plan agreed with the owner 2026-11-15 (twelve questions, answers in §1). **Step 1 (park export and field surface) is built** (§6), and **step 2 (light and materials)** (§7); steps 3 to 6 are not. This is the first part of the graphics stage; players and game graphics (HUD) get their own plans afterwards.
+**Status:** plan agreed with the owner 2026-11-15 (twelve questions, answers in §1). **Step 1 (park export and field surface) is built** (§6), **step 2 (light and materials)** (§7) and **step 3 (walls and field furniture)** (§8); steps 4 to 6 are not. This is the first part of the graphics stage; players and game graphics (HUD) get their own plans afterwards.
 
 **Why now:** Codex's weekly limit is nearly used, so the physics and behaviour work, which needs outside reviews, pauses. The owner moved the looks forward from the polish milestone (PLAN D13, revised the same day). This stage runs without Codex reviews.
 
@@ -94,3 +94,21 @@ Client only; nothing in the sim changed.
 **Checked** from the six spots and six pictures of play (`client/Saved/Shots/step2_before/`, `step2_after/`, untracked). The ball against the green wall, the blue seats, grass and dirt from the centre-field camera: easy to see. **Cost:** 257 frames a second unattended against 272; memory 2.6 GB, unchanged.
 
 **Not done here:** shadows seen through the centre-field camera's long lens have soft edges (the far cascade); grass and dirt are still flat colour with no grain. Both can be taken up when the walls and seats are real (steps 3 and 4), if the owner wants them.
+
+## 8. Step 3 as built (2026-11-15)
+
+Client only; nothing in the sim changed. Everything is placed by rule from the exported park, so another park would get the same furniture in its own places. The measures are named constants at the top of `BbPark.cpp`; the colours are in `BbLook.h`.
+
+- **Walls.** Every wall's face toward the field is now exactly on the sim's boundary, with its thickness behind (before, the walls were centred on the line, so a ball at the wall sank 15 cm into the padding).
+- **Outfield wall.** Padding, with a yellow line along the top at the sim's height: over it is a home run.
+- **Distance figures,** in feet, white block figures painted in code: at each line (the pole's distance, 330), in each alley (the fence's distance where the figure stands, 381) and at centre (400).
+- **Foul poles** carry a screen on the fair side: a ladder of rungs from above the fence to the top.
+- **Batter's eye.** A dark matt wall 11 m high behind the fence, 8° either side of dead centre.
+- **Bullpens.** One behind the fence in each alley, from 8° to 22° off centre, 7 m deep: grass, two mounds and two plates 60 ft 6 in apart along the fence, a bench, a padded wall round it. A park whose fence has no room there gets none.
+- **Dugouts.** The sim has the opening in the stands' wall and a roof 4 ft above the field (a ball under it goes in), so the dugout is sunk: three steps down along the whole opening to a floor 0.9 m below the field, walls, a bench against the rear wall, the roof with its top where the sim has it, posts under its front edge, and a concrete lip along the field's edge. The ground mesh is open over the pit, and the drawn ground's height has the steps, so a player walking off goes down them and under the roof.
+- **Backstop.** The low padded wall, posts every 7 m or so, a top rail, a cable half-way up, and the net: a see-through unlit sheet (a third material built in code) that greys a little what is behind it.
+- **Placeholder stands** stay (step 4 replaces them), but leave the batter's eye and the pens clear.
+
+**Not done, and why.** The dugout has no rail in front: the sim's opening is open, and a ball passing through a drawn rail would look wrong. The pens' mounds are flat dirt circles, not raised. The pens are decoration: nobody warms up in them yet.
+
+**Checked** from the six spots and six pictures of play (`client/Saved/Shots/step3_before/`, `step3_after/`, untracked): the pitch camera's view is clear of the batter's eye, and the ball is as easy to see as before. **Cost:** 221 frames a second unattended against 257 (about a hundred more small shapes, each its own actor, and the net; step 4's instancing is the place to win it back); memory 2.6 GB, unchanged.

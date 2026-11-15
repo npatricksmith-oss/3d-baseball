@@ -38,6 +38,18 @@ namespace BbLook
 	inline const FBbPaint Roof{ FLinearColor(0.110f, 0.130f, 0.140f), 0.6f };
 	/** The dark of a dugout's floor. */
 	inline const FBbPaint DugoutFloor{ FLinearColor(0.030f, 0.030f, 0.035f), 0.95f };
+	/** A dugout's walls and steps, and its bench. */
+	inline const FBbPaint DugoutWall{ FLinearColor(0.170f, 0.175f, 0.180f), 0.9f };
+	inline const FBbPaint Bench{ FLinearColor(0.330f, 0.200f, 0.100f), 0.7f };
+	/** The line along the top of the outfield wall: over it is a home run. */
+	inline const FBbPaint WallCap{ FLinearColor(0.900f, 0.720f, 0.060f), 0.5f };
+	/** The distance figures on the wall. */
+	inline const FLinearColor MarkerInk(0.880f, 0.880f, 0.850f);
+	/** The batter's eye: a dark matt wall behind centre field, for the batter to see the ball against. */
+	inline const FBbPaint BatterEye{ FLinearColor(0.010f, 0.040f, 0.026f), 0.97f };
+	/** The backstop's net: how dark it is and how much of what is behind it it hides. */
+	inline const FLinearColor Net(0.030f, 0.030f, 0.035f);
+	inline const float NetOpacity = 0.14f;
 
 	// ---- The light: a clear mid-afternoon ------------------------------------------------
 	// Where the sun stands, in the sim frame: the bearing on the ground from +Y (centre

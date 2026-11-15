@@ -1,5 +1,6 @@
 #include "BbPark.h"
 #include "BbFrame.h"
+#include "Algo/Reverse.h"
 #include "Async/ParallelFor.h"
 #include "BbLook.h"
 #include "Components/DirectionalLightComponent.h"
@@ -63,6 +64,27 @@ namespace
 	const double TrackFence = 15.0 * FT;      // warning track under the outfield fence
 	const double TrackWall = 10.0 * FT;       // and along the walls of foul ground
 	const double Mow = 15.0 * FT;             // mown stripes in the outfield, running home to centre
+	// A dugout (none of it in the sim but the opening and the roof's height): three steps down
+	// from the field to a floor the roof clears by two metres.
+	const double PitDeep = 3.2;               // from the opening back to the rear wall
+	const double StepRun = 0.4, StepRise = 0.3;
+	const int32 PitSteps = 3;
+	const double PitFloor = -StepRise * PitSteps;
+	const double PitWall = 0.5;               // its walls, and the lip along the field's edge
+	const double RoofThick = 0.12;
+	// The field's walls are this thick, their faces where the sim has the boundary.
+	const double WallThick = 0.3;
+	// Behind the fence: the batter's eye either side of dead centre, and a bullpen in each
+	// alley, by the fence's bearing from home (degrees from centre field).
+	const double EyeHalfDeg = 8.0, EyeHigh = 11.0, EyeBack = 1.5;
+	const double PenFromDeg = EyeHalfDeg, PenToDeg = 22.0;
+	const double PenDeep = 7.0;               // from the fence back to the pen's own wall
+	const double PenLane[2] = { 2.0, 5.0 };   // the two mounds, this far behind the fence
+	const double PenPitch = 60.5 * FT, PenMoundR = 2.2, PenPlateR = 1.6;
+	// Foul poles and their screens.
+	const double PoleHigh = 12.0, PoleScreen = 0.8;
+	// The distance figures on the fence.
+	const double MarkW = 2.4, MarkH = 1.3, MarkZ = 1.2;
 	// The near picture of the ground: the infield, where the chalk has to be sharp.
 	const double NearX0 = -28.0, NearY0 = -8.0, NearSize = 56.0;
 
@@ -109,6 +131,87 @@ FBbGround::FBbGround(const BbPark& InDesc)
 	const double C = Clear * 0.66, S = FMath::Sqrt(FMath::Max(0.0, FMath::Square(37.0 * FT) - C * C));
 	OnDeck[0] = FVector2D(-(S + C) / R2, (S - C) / R2);
 	OnDeck[1] = FVector2D((S + C) / R2, (S - C) / R2);
+
+	// The dugouts' openings, and what stands behind each piece of the fence.
+	FMemory::Memzero(Behind);
+	TArray<FBbRun> PenSide[2];
+	for (uint32 I = 0; I < Desc.n_wall; ++I)
+	{
+		const BbWallPiece& P = Desc.wall[I];
+		const BbWallPiece& Q = Desc.wall[(I + 1) % Desc.n_wall];
+		const FVector2D A(P.from[0], P.from[1]), B(Q.from[0], Q.from[1]);
+		const FVector2D Along = (B - A).GetSafeNormal();
+		const FBbRun Run{ A, Along, FVector2D(-Along.Y, Along.X), (B - A).Size() };
+		if (P.kind == 4)
+		{
+			Dugouts.Add(Run);
+		}
+		else if (P.kind == 0)
+		{
+			const FVector2D Mid = (A + B) * 0.5;
+			const double Deg = FMath::RadiansToDegrees(FMath::Atan2(Mid.X, Mid.Y));
+			if (FMath::Abs(Deg) < EyeHalfDeg)
+			{
+				Behind[I] = Eye;
+			}
+			else if (FMath::Abs(Deg) >= PenFromDeg && FMath::Abs(Deg) <= PenToDeg)
+			{
+				Behind[I] = Pen;
+				PenSide[Deg < 0.0 ? 0 : 1].Add(Run);
+			}
+		}
+	}
+	for (int32 Side = 0; Side < 2; ++Side)
+	{
+		// Along the fence from the pen's end nearer centre field. The loop runs from the
+		// left-field pole to the right, so the left pen's pieces are turned round.
+		TArray<FBbRun> Out = PenSide[Side];
+		if (Side == 0)
+		{
+			Algo::Reverse(Out);
+			for (FBbRun& R : Out)
+			{
+				R.A += R.Along * R.L;
+				R.Along = -R.Along;
+			}
+		}
+		double Total = 0.0;
+		for (const FBbRun& R : Out)
+		{
+			Total += R.L;
+		}
+		// Room for the pitch and three metres behind each end, or no pen.
+		if (Total < PenPitch + 6.0)
+		{
+			for (uint32 I = 0; I < Desc.n_wall; ++I)
+			{
+				const bool bThisSide = (Desc.wall[I].from[0] + Desc.wall[(I + 1) % Desc.n_wall].from[0] < 0.f) == (Side == 0);
+				if (Behind[I] == Pen && bThisSide)
+				{
+					Behind[I] = Plain;
+				}
+			}
+			continue;
+		}
+		auto At = [&Out](double S, double Depth)
+		{
+			for (const FBbRun& R : Out)
+			{
+				if (S <= R.L)
+				{
+					return R.A + R.Along * S + R.Out * Depth;
+				}
+				S -= R.L;
+			}
+			return Out.Last().A + Out.Last().Along * Out.Last().L + Out.Last().Out * Depth;
+		};
+		for (double Lane : PenLane)
+		{
+			PenMounds.Add(At((Total - PenPitch) * 0.5, Lane));
+			PenPlates.Add(At((Total + PenPitch) * 0.5, Lane));
+		}
+		Pens.Append(PenSide[Side]);
+	}
 
 	// Distance to the boundary on a 0.25 m grid: its sign from whether the point is inside the
 	// loop, and the distance to the fence's pieces alone (for the warning track).
@@ -175,6 +278,16 @@ double FBbGround::Height(double X, double Y) const
 	const double E = MoundR - FMath::Sqrt(Dist2(X, Y, MoundC));
 	if (E <= 0.0)
 	{
+		// Behind a dugout's opening: the steps down to its floor.
+		for (const FBbRun& R : Dugouts)
+		{
+			const FVector2D P(X - R.A.X, Y - R.A.Y);
+			const double A = P | R.Along, O = P | R.Out;
+			if (A >= 0.0 && A <= R.L && O > 0.0 && O <= PitDeep)
+			{
+				return -StepRise * FMath::Min(PitSteps, 1 + FMath::FloorToInt32(O / StepRun));
+			}
+		}
 		return 0.0;
 	}
 	const double Rub = Desc.rubber_m;
@@ -190,6 +303,34 @@ FLinearColor FBbGround::Color(double X, double Y) const
 	Lookup(X, Y, SdHere, FenceHere);
 	if (SdHere < 0.f)
 	{
+		// A bullpen behind the fence: grass, with dirt round its mounds and plates.
+		if (FenceHere < PenDeep + 0.5f)
+		{
+			for (const FBbRun& R : Pens)
+			{
+				const FVector2D P(X - R.A.X, Y - R.A.Y);
+				const double A = P | R.Along, O = P | R.Out;
+				if (A < -0.15 || A > R.L + 0.15 || O <= 0.0 || O > PenDeep)
+				{
+					continue;
+				}
+				for (const FVector2D& M : PenMounds)
+				{
+					if (Dist2(X, Y, M) < PenMoundR * PenMoundR)
+					{
+						return Dirt;
+					}
+				}
+				for (const FVector2D& H : PenPlates)
+				{
+					if (Dist2(X, Y, H) < PenPlateR * PenPlateR)
+					{
+						return Dirt;
+					}
+				}
+				return GrassLight;
+			}
+		}
 		return BbLook::Concrete.Color;
 	}
 	const double Ax = FMath::Abs(X);
@@ -422,10 +563,29 @@ void ABbPark::Build(const BbPark& Desc)
 			Tex->ParameterName = TEXT("Tex");
 			Tex->Texture = LoadObject<UTexture2D>(nullptr, TEXT("/Engine/EngineResources/WhiteSquareTexture.WhiteSquareTexture"));
 			Tex->SamplerType = SAMPLERTYPE_Color;
-			UMaterialExpressionConstant* Rough = NewObject<UMaterialExpressionConstant>(M);
-			Rough->R = BbLook::GroundRough;
+			UMaterialExpressionScalarParameter* Rough = NewObject<UMaterialExpressionScalarParameter>(M);
+			Rough->ParameterName = TEXT("Rough");
+			Rough->DefaultValue = BbLook::GroundRough;
 			Finish(M, Tex, Rough);
 			TexturedMaterial = M;
+		}
+		{
+			// The net: unlit and see-through, so it only greys a little what is behind it.
+			UMaterial* M = NewObject<UMaterial>(GetTransientPackage(), NAME_None, RF_Transient);
+			M->BlendMode = BLEND_Translucent;
+			M->SetShadingModel(MSM_Unlit);
+			UMaterialExpressionVectorParameter* Color = NewObject<UMaterialExpressionVectorParameter>(M);
+			Color->ParameterName = TEXT("Color");
+			Color->DefaultValue = BbLook::Net;
+			UMaterialExpressionScalarParameter* Opacity = NewObject<UMaterialExpressionScalarParameter>(M);
+			Opacity->ParameterName = TEXT("Opacity");
+			Opacity->DefaultValue = BbLook::NetOpacity;
+			M->GetExpressionCollection().AddExpression(Color);
+			M->GetExpressionCollection().AddExpression(Opacity);
+			M->GetEditorOnlyData()->EmissiveColor.Connect(0, Color);
+			M->GetEditorOnlyData()->Opacity.Connect(0, Opacity);
+			M->PostEditChange();
+			NetMaterial = M;
 		}
 	}
 #endif
@@ -433,6 +593,8 @@ void ABbPark::Build(const BbPark& Desc)
 	BuildSurface();
 	BuildFurniture();
 	BuildWalls();
+	BuildDugouts();
+	BuildOutfield();
 	BuildStands();
 	UE_LOG(LogBbPark, Display, TEXT("BB_PARK built in %.2f s: %u wall pieces, ground %.0f m square from (%.0f, %.0f)"),
 		FPlatformTime::Seconds() - Began, Desc.n_wall, Ground->Size, Ground->X0, Ground->Y0);
@@ -458,6 +620,11 @@ UTexture2D* ABbPark::PaintGround(double TexX0, double TexY0, double TexSize, int
 			Top[J * N + I] = Sum.ToFColor(true);
 		}
 	});
+	return MakeTexture(MoveTemp(Top), N);
+}
+
+UTexture2D* ABbPark::MakeTexture(TArray<FColor>&& Top, int32 N)
+{
 	UTexture2D* T = UTexture2D::CreateTransient(N, N, PF_B8G8R8A8);
 	T->SRGB = true;
 	T->NeverStream = true;
@@ -504,7 +671,7 @@ UTexture2D* ABbPark::PaintGround(double TexX0, double TexY0, double TexSize, int
 	return T;
 }
 
-void ABbPark::AddGround(int32 Section, double GX0, double GY0, double Cell, int32 Nx, int32 Ny, const FBox2D& Hole, UTexture2D* Tex, double TexX0, double TexY0, double TexSize)
+void ABbPark::AddGround(int32 Section, double GX0, double GY0, double Cell, int32 Nx, int32 Ny, TFunctionRef<bool(const FVector2D&)> Skip, UTexture2D* Tex, double TexX0, double TexY0, double TexSize)
 {
 	TArray<FVector> Verts, Normals;
 	TArray<FVector2D> UVs;
@@ -532,7 +699,7 @@ void ABbPark::AddGround(int32 Section, double GX0, double GY0, double Cell, int3
 		for (int32 I = 0; I < Nx; ++I)
 		{
 			const FVector2D Mid(GX0 + (I + 0.5) * Cell, GY0 + (J + 0.5) * Cell);
-			if (Hole.bIsValid && Hole.IsInside(Mid))
+			if (Skip(Mid))
 			{
 				continue;
 			}
@@ -574,8 +741,53 @@ void ABbPark::BuildSurface()
 	// The infield in 0.25 m cells, so the mound has its shape; the rest, which is level, in
 	// 2 m cells with the infield's square left out.
 	const FBox2D NearBox(FVector2D(NearX0, NearY0), FVector2D(NearX0 + NearSize, NearY0 + NearSize));
-	AddGround(0, NearX0, NearY0, 0.25, FMath::RoundToInt32(NearSize / 0.25), FMath::RoundToInt32(NearSize / 0.25), FBox2D(ForceInit), Near, NearX0, NearY0, NearSize);
-	AddGround(1, G.X0, G.Y0, 2.0, FMath::RoundToInt32(G.Size / 2.0), FMath::RoundToInt32(G.Size / 2.0), NearBox, Far, G.X0, G.Y0, G.Size);
+	// The ground is left open over each dugout, a little wider than the pit so that no cell
+	// reaches into it; the dugout's walls and the lip along the field's edge cover the rest.
+	// Round each pit the ground is in fine cells, so the opening keeps its shape.
+	auto InPit = [&G](const FVector2D& P)
+	{
+		for (const FBbRun& R : G.Dugouts)
+		{
+			const double A = (P - R.A) | R.Along, O = (P - R.A) | R.Out;
+			if (A > -0.25 && A < R.L + 0.25 && O > -0.25 && O < PitDeep + 0.25)
+			{
+				return true;
+			}
+		}
+		return false;
+	};
+	TArray<FBox2D> PitBoxes;
+	for (const FBbRun& R : G.Dugouts)
+	{
+		FBox2D Box(ForceInit);
+		for (int32 K = 0; K < 4; ++K)
+		{
+			Box += R.A + R.Along * ((K & 1) ? R.L : 0.0) + R.Out * ((K >> 1) ? PitDeep : 0.0);
+		}
+		Box = Box.ExpandBy(1.0);
+		PitBoxes.Add(FBox2D(FVector2D(2.0 * FMath::FloorToDouble(Box.Min.X / 2.0), 2.0 * FMath::FloorToDouble(Box.Min.Y / 2.0)),
+			FVector2D(2.0 * FMath::CeilToDouble(Box.Max.X / 2.0), 2.0 * FMath::CeilToDouble(Box.Max.Y / 2.0))));
+	}
+	auto InPitBox = [&PitBoxes](const FVector2D& P)
+	{
+		for (const FBox2D& B : PitBoxes)
+		{
+			if (B.IsInside(P))
+			{
+				return true;
+			}
+		}
+		return false;
+	};
+	AddGround(0, NearX0, NearY0, 0.25, FMath::RoundToInt32(NearSize / 0.25), FMath::RoundToInt32(NearSize / 0.25), InPit, Near, NearX0, NearY0, NearSize);
+	AddGround(1, G.X0, G.Y0, 2.0, FMath::RoundToInt32(G.Size / 2.0), FMath::RoundToInt32(G.Size / 2.0),
+		[&](const FVector2D& P) { return NearBox.IsInside(P) || InPitBox(P); }, Far, G.X0, G.Y0, G.Size);
+	for (int32 I = 0; I < PitBoxes.Num(); ++I)
+	{
+		const FBox2D& B = PitBoxes[I];
+		AddGround(2 + I, B.Min.X, B.Min.Y, 0.25, FMath::RoundToInt32((B.Max.X - B.Min.X) / 0.25), FMath::RoundToInt32((B.Max.Y - B.Min.Y) / 0.25),
+			[&](const FVector2D& P) { return NearBox.IsInside(P) || InPit(P); }, Far, G.X0, G.Y0, G.Size);
+	}
 	// The land the park stands on, a step below the field, out to the horizon.
 	Shape(Plane, ToUE(G.X0 + G.Size * 0.5, G.Y0 + G.Size * 0.5, -0.3), FVector(60.0 * G.Size, 60.0 * G.Size, 1), BbLook::Land)->GetStaticMeshComponent()->SetCastShadow(false);
 }
@@ -595,47 +807,307 @@ void ABbPark::BuildFurniture()
 	// The rubber: 24 by 6 in, its front edge where the sim has it, on the mound's table.
 	const double RubY = D.rubber_m + 0.25 * FT;
 	Shape(Cube, ToUE(0, RubY, Ground->Height(0, RubY) + 0.005), FVector(0.5 * FT, 2.0 * FT, 0.03), BbLook::Rubber);
-	// Foul poles.
+	// Foul poles, each with its screen: a ladder of rungs on the fair side, from above the
+	// fence to the top, running along the fence.
+	int32 FenceFirst = -1, FenceLast = -1;
+	for (uint32 I = 0; I < D.n_wall; ++I)
+	{
+		if (D.wall[I].kind == 0)
+		{
+			FenceFirst = FenceFirst < 0 ? (int32)I : FenceFirst;
+			FenceLast = (int32)I;
+		}
+	}
 	for (int32 I = 0; I < 2; ++I)
 	{
-		Shape(Cylinder, ToUE(D.poles[I][0], D.poles[I][1], 6.0), FVector(0.3, 0.3, 12.0), BbLook::FoulPole);
+		const FVector2D P(D.poles[I][0], D.poles[I][1]);
+		Shape(Cylinder, ToUE(P.X, P.Y, PoleHigh * 0.5), FVector(0.3, 0.3, PoleHigh), BbLook::FoulPole);
+		if (FenceFirst < 0)
+		{
+			continue;
+		}
+		// Toward fair ground: along the fence's piece that starts (left) or ends (right) here.
+		const int32 W = I == 0 ? FenceFirst : FenceLast;
+		const FVector2D From(D.wall[W].from[0], D.wall[W].from[1]), To(D.wall[(W + 1) % D.n_wall].from[0], D.wall[(W + 1) % D.n_wall].from[1]);
+		const FVector2D Fair = (I == 0 ? To - From : From - To).GetSafeNormal();
+		const double Z0 = D.fence_height_m + 0.6, Z1 = PoleHigh - 0.1;
+		const FVector2D Edge = P + Fair * PoleScreen;
+		Shape(Cylinder, ToUE(Edge.X, Edge.Y, (Z0 + Z1) * 0.5), FVector(0.07, 0.07, Z1 - Z0), BbLook::FoulPole);
+		for (double Z = Z0; Z <= Z1 + 0.01; Z += (Z1 - Z0) / 12.0)
+		{
+			Panel(P, Edge, 0.05, Z - 0.025, Z + 0.025, BbLook::FoulPole);
+		}
 	}
 }
 
 void ABbPark::BuildWalls()
 {
-	// Every wall stands where the sim has it (physics-spec §9.5), as high as the sim has it.
+	// Every wall stands where the sim has it (physics-spec §9.5), as high as the sim has it,
+	// its face toward the field on the sim's boundary and its thickness behind.
 	const BbPark& D = Ground->Desc;
 	const int32 N = D.n_wall;
+	const double Half = WallThick * 0.5;
 	for (int32 I = 0; I < N; ++I)
 	{
 		const BbWallPiece& P = D.wall[I];
 		const FVector2D A(P.from[0], P.from[1]), B(D.wall[(I + 1) % N].from[0], D.wall[(I + 1) % N].from[1]);
 		// Out of the field: to the left of the piece's direction.
 		const FVector2D Along = (B - A).GetSafeNormal(), Out(-Along.Y, Along.X);
+		const FVector2D Am = A + Out * Half, Bm = B + Out * Half;
 		if (P.kind == 4)
 		{
-			// A dugout: a dark bay behind the opening, under a roof.
-			const double Deep = 3.5;
-			Panel(A + Out * (Deep * 0.5), B + Out * (Deep * 0.5), Deep, -0.01, 0.01, BbLook::DugoutFloor)->GetStaticMeshComponent()->SetCastShadow(false);
-			Panel(A + Out * (Deep * 0.5 + 0.3), B + Out * (Deep * 0.5 + 0.3), Deep - 0.6, 2.3, 2.5, BbLook::Roof);
+			continue; // a dugout's opening: BuildDugouts
 		}
-		else if (P.kind != 0 && P.top_m > D.foul_wall_height_m + 0.01f)
+		if (P.kind == 0)
 		{
-			// Behind home the walls carry the screen: a low wall, and the screen drawn as its
-			// posts and top rail only (the net itself is see-through).
-			Panel(A, B, 0.3, 0.0, D.foul_wall_height_m, BbLook::WallPad);
-			for (const FVector2D& Q : { A, B })
+			// The outfield wall: padding, and along its top the line a home run clears.
+			const double CapH = 0.12, CapW = WallThick + 0.04;
+			Panel(Am, Bm, WallThick, 0.0, P.top_m - CapH, BbLook::WallPad);
+			Panel(A + Out * (CapW * 0.5), B + Out * (CapW * 0.5), CapW, P.top_m - CapH, P.top_m, BbLook::WallCap);
+		}
+		else if (P.top_m > D.foul_wall_height_m + 0.01f)
+		{
+			// Behind home the walls carry the screen: a low padded wall, and over it the net
+			// on its posts, with a rail along the top and a cable half-way up.
+			Panel(Am, Bm, WallThick, 0.0, D.foul_wall_height_m, BbLook::WallPad);
+			const int32 Bays = FMath::Max(1, FMath::RoundToInt32((B - A).Size() / 7.0));
+			for (int32 K = 0; K <= Bays; ++K)
 			{
+				const FVector2D Q = FMath::Lerp(Am, Bm, (double)K / Bays);
 				Shape(Cylinder, ToUE(Q.X, Q.Y, P.top_m * 0.5), FVector(0.12, 0.12, P.top_m), BbLook::Steel);
 			}
-			Panel(A, B, 0.08, P.top_m - 0.04, P.top_m + 0.04, BbLook::Steel);
+			Panel(Am, Bm, 0.08, P.top_m - 0.04, P.top_m + 0.04, BbLook::Steel);
+			const double MidZ = (D.foul_wall_height_m + P.top_m) * 0.5;
+			Panel(Am, Bm, 0.025, MidZ - 0.0125, MidZ + 0.0125, BbLook::Steel)->GetStaticMeshComponent()->SetCastShadow(false);
+			if (NetMaterial)
+			{
+				UStaticMeshComponent* Net = Panel(Am, Bm, 0.02, D.foul_wall_height_m, P.top_m, BbLook::Steel)->GetStaticMeshComponent();
+				UMaterialInstanceDynamic* M = UMaterialInstanceDynamic::Create(NetMaterial, this);
+				M->SetVectorParameterValue(TEXT("Color"), BbLook::Net);
+				M->SetScalarParameterValue(TEXT("Opacity"), BbLook::NetOpacity);
+				Net->SetMaterial(0, M);
+				Net->SetCastShadow(false);
+			}
 		}
 		else
 		{
-			Panel(A, B, 0.3, 0.0, P.top_m, BbLook::WallPad);
+			Panel(Am, Bm, WallThick, 0.0, P.top_m, BbLook::WallPad);
 		}
 	}
+}
+
+void ABbPark::BuildDugouts()
+{
+	// The sim has the opening and the roof's height, 4 ft above the field: a ball under the
+	// roof goes into the dugout. So the dugout is sunk: steps down from the field along the
+	// whole opening, a floor, a bench against the rear wall. The ground mesh is open over the
+	// pit (BuildSurface) and FBbGround::Height has the steps, so a player walks down them.
+	const BbPark& D = Ground->Desc;
+	const double Roof = D.dugout_roof_m;
+	for (const FBbRun& R : Ground->Dugouts)
+	{
+		// A box from A0 to A1 along the opening and O0 to O1 back from it.
+		auto Box = [&](double A0, double A1, double O0, double O1, double Z0, double Z1, const FBbPaint& Paint)
+		{
+			const FVector2D Mid = R.Out * ((O0 + O1) * 0.5);
+			// (Panel adds 5 cm to a piece's length to close the walls' joints; not wanted here.)
+			AStaticMeshActor* Made = Panel(R.A + R.Along * (A0 + 0.025) + Mid, R.A + R.Along * (A1 - 0.025) + Mid, O1 - O0, Z0, Z1, Paint);
+			return Made->GetStaticMeshComponent();
+		};
+		Box(-PitWall, R.L + PitWall, 0.0, PitDeep + PitWall, PitFloor - 0.2, PitFloor, BbLook::DugoutFloor);
+		for (int32 K = 0; K + 1 < PitSteps; ++K)
+		{
+			Box(0.0, R.L, K * StepRun, (K + 1) * StepRun, PitFloor, -StepRise * (K + 1), BbLook::Concrete);
+		}
+		// The lip along the field's edge: the top step's riser, and a concrete strip on the field.
+		Box(-PitWall, R.L + PitWall, -PitWall, 0.0, PitFloor, 0.012, BbLook::Concrete)->SetCastShadow(false);
+		// The end walls, behind the stands' wall and under it; the rear wall; the roof, its top
+		// where the sim has it.
+		for (double A0 : { -PitWall, R.L })
+		{
+			Box(A0, A0 + PitWall, WallThick + 0.01, PitDeep + PitWall, PitFloor, Roof, BbLook::DugoutWall);
+			Box(A0, A0 + PitWall, 0.0, WallThick + 0.01, PitFloor, -0.002, BbLook::DugoutWall);
+		}
+		Box(0.0, R.L, PitDeep, PitDeep + PitWall, PitFloor, Roof - RoofThick, BbLook::DugoutWall);
+		Box(0.0, R.L, 0.0, PitDeep + PitWall, Roof - RoofThick, Roof, BbLook::Roof);
+		// Posts under the roof's front edge, standing on the top step.
+		const int32 Bays = FMath::Max(1, FMath::RoundToInt32(R.L / 4.5));
+		for (int32 K = 1; K < Bays; ++K)
+		{
+			const FVector2D Q = R.A + R.Along * (R.L * K / Bays) + R.Out * 0.06;
+			Shape(Cylinder, ToUE(Q.X, Q.Y, (Roof - RoofThick - StepRise) * 0.5), FVector(0.08, 0.08, Roof - RoofThick + StepRise), BbLook::Steel);
+		}
+		// The bench.
+		Box(0.6, R.L - 0.6, PitDeep - 0.5, PitDeep - 0.05, PitFloor, PitFloor + 0.45, BbLook::Bench);
+	}
+}
+
+void ABbPark::BuildOutfield()
+{
+	// What stands behind the fence, and the figures on it. None of it is in the sim.
+	const FBbGround& G = *Ground;
+	const BbPark& D = G.Desc;
+	const int32 N = D.n_wall;
+	// The pens: a wall round each, a bench at the back, the rubbers and the plates.
+	for (int32 I = 0; I < N; ++I)
+	{
+		const BbWallPiece& P = D.wall[I];
+		const FVector2D A(P.from[0], P.from[1]), B(D.wall[(I + 1) % N].from[0], D.wall[(I + 1) % N].from[1]);
+		const FVector2D Along = (B - A).GetSafeNormal(), Out(-Along.Y, Along.X);
+		if (G.Behind[I] == FBbGround::Eye)
+		{
+			Panel(A + Out * EyeBack - Along * 0.1, B + Out * EyeBack + Along * 0.1, 0.4, 0.0, EyeHigh, BbLook::BatterEye);
+		}
+		else if (G.Behind[I] == FBbGround::Pen)
+		{
+			const double Back = PenDeep + WallThick * 0.5;
+			Panel(A + Out * Back - Along * 0.2, B + Out * Back + Along * 0.2, WallThick, 0.0, D.fence_height_m, BbLook::WallPad);
+			Panel(A + Out * (PenDeep - 0.5) + Along * 0.2, B + Out * (PenDeep - 0.5) - Along * 0.2, 0.4, 0.0, 0.45, BbLook::Bench);
+			// Its ends: where the pieces either side have no pen.
+			if (G.Behind[(I + N - 1) % N] != FBbGround::Pen)
+			{
+				Panel(A + Out * WallThick, A + Out * PenDeep, WallThick, 0.0, D.fence_height_m, BbLook::WallPad);
+			}
+			if (G.Behind[(I + 1) % N] != FBbGround::Pen)
+			{
+				Panel(B + Out * WallThick, B + Out * PenDeep, WallThick, 0.0, D.fence_height_m, BbLook::WallPad);
+			}
+		}
+	}
+	for (int32 K = 0; K < G.PenMounds.Num(); ++K)
+	{
+		// The pitch runs from the mound to its plate; the rubber and the plate lie across it.
+		const FVector2D M = G.PenMounds[K], H = G.PenPlates[K];
+		const FVector2D Dir = (H - M).GetSafeNormal(), Across(-Dir.Y, Dir.X);
+		Panel(M - Across * 0.28, M + Across * 0.28, 0.5 * FT, 0.0, 0.03, BbLook::Rubber)->GetStaticMeshComponent()->SetCastShadow(false);
+		Panel(H - Across * 0.19, H + Across * 0.19, 2.0 * PlateHalf, 0.0, 0.012, BbLook::Rubber)->GetStaticMeshComponent()->SetCastShadow(false);
+	}
+	// Distance figures, in feet: at each line (the pole's distance), in each alley and at
+	// centre (the fence's distance where the figure stands), each in the middle of a piece.
+	if (!TexturedMaterial)
+	{
+		return;
+	}
+	const double Bearings[5] = { -90.0, -22.5, 0.0, 22.5, 90.0 };
+	for (int32 K = 0; K < 5; ++K)
+	{
+		// The fence's piece nearest the bearing (the lines: the first and the last).
+		int32 Best = -1;
+		double BestOff = 1e9;
+		FVector2D BestMid = FVector2D::ZeroVector;
+		for (int32 I = 0; I < N; ++I)
+		{
+			if (D.wall[I].kind != 0)
+			{
+				continue;
+			}
+			const FVector2D Mid = (FVector2D(D.wall[I].from[0], D.wall[I].from[1]) + FVector2D(D.wall[(I + 1) % N].from[0], D.wall[(I + 1) % N].from[1])) * 0.5;
+			const double Off = FMath::Abs(FMath::RadiansToDegrees(FMath::Atan2(Mid.X, Mid.Y)) - Bearings[K]);
+			if (Off < BestOff)
+			{
+				BestOff = Off;
+				Best = I;
+				BestMid = Mid;
+			}
+		}
+		if (Best < 0)
+		{
+			continue;
+		}
+		const FVector2D A(D.wall[Best].from[0], D.wall[Best].from[1]), B(D.wall[(Best + 1) % N].from[0], D.wall[(Best + 1) % N].from[1]);
+		const FVector2D Along = (B - A).GetSafeNormal(), Out(-Along.Y, Along.X);
+		const double Metres = K == 0 ? G.PoleS[0] : K == 4 ? G.PoleS[1] : BestMid.Size();
+		const double W = FMath::Min(MarkW, (B - A).Size() - 0.1), H = MarkH * W / MarkW;
+		UTexture2D* Tex = PaintNumber(FMath::RoundToInt32(Metres / FT), MarkW, MarkH, BbLook::MarkerInk, BbLook::WallPad.Color);
+		// Seen from the field the fence runs left to right the way the loop does.
+		Sign(FVector(BestMid.X, BestMid.Y, FMath::Min(MarkZ, D.wall[Best].top_m * 0.5)) - FVector(Out.X, Out.Y, 0.0) * 0.01, Along, -Out, W, H, Tex, BbLook::WallPad.Rough);
+	}
+}
+
+UTexture2D* ABbPark::PaintNumber(int32 Value, double W, double H, const FLinearColor& Ink, const FLinearColor& Back)
+{
+	// Block figures of seven strokes each (top, upper right, lower right, bottom, lower left,
+	// upper left, middle), the strokes square-ended so the corners close.
+	static const uint8 Strokes[10] = { 63, 6, 91, 79, 102, 109, 125, 7, 127, 111 };
+	const FString Text = FString::FromInt(FMath::Max(0, Value));
+	const int32 Count = Text.Len();
+	const double Dh = H * 0.78, Dw = Dh * 0.55, Gap = Dw * 0.4, T = Dh * 0.17;
+	const double X0 = (W - Count * Dw - (Count - 1) * Gap) * 0.5, Y0 = (H - Dh) * 0.5;
+	auto Inked = [&](double X, double Y)
+	{
+		const double U = (X - X0) / (Dw + Gap);
+		const int32 K = FMath::FloorToInt32(U);
+		if (K < 0 || K >= Count || Y < Y0 || Y > Y0 + Dh)
+		{
+			return false;
+		}
+		const double Lx = X - X0 - K * (Dw + Gap), Ly = Y - Y0;
+		if (Lx > Dw)
+		{
+			return false;
+		}
+		const uint8 S = Strokes[Text[K] - TEXT('0')];
+		const bool bLeft = Lx <= T, bRight = Lx >= Dw - T, bUpper = Ly >= Dh * 0.5, bLower = Ly <= Dh * 0.5;
+		return ((S & 1) && Ly >= Dh - T) || ((S & 2) && bRight && bUpper) || ((S & 4) && bRight && bLower) || ((S & 8) && Ly <= T)
+			|| ((S & 16) && bLeft && bLower) || ((S & 32) && bLeft && bUpper) || ((S & 64) && FMath::Abs(Ly - Dh * 0.5) <= T * 0.5);
+	};
+	const int32 N = 256;
+	TArray<FColor> Top;
+	Top.SetNumUninitialized(N * N);
+	for (int32 J = 0; J < N; ++J)
+	{
+		for (int32 I = 0; I < N; ++I)
+		{
+			int32 Hit = 0;
+			for (int32 K = 0; K < 16; ++K)
+			{
+				// The picture's first row is its top.
+				Hit += Inked((I + 0.125 + 0.25 * (K & 3)) * W / N, H - (J + 0.125 + 0.25 * (K >> 2)) * H / N) ? 1 : 0;
+			}
+			FLinearColor C = FMath::Lerp(Back, Ink, Hit / 16.f);
+			C.A = 1.f;
+			Top[J * N + I] = C.ToFColor(true);
+		}
+	}
+	return MakeTexture(MoveTemp(Top), N);
+}
+
+void ABbPark::Sign(const FVector& Mid, const FVector2D& Right, const FVector2D& Face, double W, double H, UTexture2D* Tex, float Rough)
+{
+	if (!Signs)
+	{
+		Signs = NewObject<UProceduralMeshComponent>(this);
+		Signs->SetupAttachment(RootComponent);
+		Signs->SetMobility(EComponentMobility::Movable);
+		Signs->SetCollisionEnabled(ECollisionEnabled::NoCollision);
+		Signs->SetCastShadow(false);
+		Signs->RegisterComponent();
+	}
+	// Top left, top right, bottom left, bottom right, as the picture's rows run.
+	TArray<FVector> Verts;
+	for (int32 K = 0; K < 4; ++K)
+	{
+		const double U = (K & 1) ? 0.5 : -0.5, V = (K >> 1) ? -0.5 : 0.5;
+		Verts.Add(ToUE(Mid.X + Right.X * U * W, Mid.Y + Right.Y * U * W, Mid.Z + V * H));
+	}
+	const FVector Normal = ToUE(Face.X, Face.Y, 0.0).GetSafeNormal();
+	TArray<int32> Tris = { 0, 1, 2, 2, 1, 3 };
+	// The side that shows is the one the corners run round the way the ground's do (AddGround).
+	if ((((Verts[1] - Verts[0]) ^ (Verts[2] - Verts[0])) | Normal) > 0.0)
+	{
+		Tris = { 0, 2, 1, 2, 3, 1 };
+	}
+	const TArray<FVector> Normals = { Normal, Normal, Normal, Normal };
+	const TArray<FVector2D> UVs = { FVector2D(0, 0), FVector2D(1, 0), FVector2D(0, 1), FVector2D(1, 1) };
+	const FVector Tan = ToUE(Right.X, Right.Y, 0.0).GetSafeNormal();
+	TArray<FProcMeshTangent> Tangents;
+	Tangents.Init(FProcMeshTangent(Tan, false), 4);
+	const int32 Section = SignCount++;
+	Signs->CreateMeshSection_LinearColor(Section, Verts, Tris, Normals, UVs, TArray<FLinearColor>(), Tangents, false);
+	UMaterialInstanceDynamic* M = UMaterialInstanceDynamic::Create(TexturedMaterial, this);
+	M->SetTextureParameterValue(TEXT("Tex"), Tex);
+	M->SetScalarParameterValue(TEXT("Rough"), Rough);
+	Signs->SetMaterial(Section, M);
 }
 
 void ABbPark::BuildStands()
@@ -651,6 +1123,13 @@ void ABbPark::BuildStands()
 		const FVector2D A(P.from[0], P.from[1]), B(D.wall[(I + 1) % N].from[0], D.wall[(I + 1) % N].from[1]);
 		const FVector2D Along = (B - A).GetSafeNormal(), Out(-Along.Y, Along.X);
 		const bool bFence = P.kind == 0;
+		// Nothing where the batter's eye or a pen is, and nothing reaching into one from the
+		// pieces beside it.
+		if (Ground->Behind[I] != FBbGround::Plain)
+		{
+			continue;
+		}
+		const double ReachA = Ground->Behind[(I + N - 1) % N] != FBbGround::Plain ? 0.0 : 1.0, ReachB = Ground->Behind[(I + 1) % N] != FBbGround::Plain ? 0.0 : 1.0;
 		for (int32 Tier = 0; Tier < 2; ++Tier)
 		{
 			// Beyond the fence the bank starts close; in foul ground it starts behind the
@@ -661,7 +1140,7 @@ void ABbPark::BuildStands()
 			// Each block reaches a little past its piece's ends, so the tiers close up round
 			// the outside of a corner.
 			const FVector2D Reach = Along * (Back * 0.42);
-			Panel(A + Out * Back - Reach, B + Out * Back + Reach, Depth, 0.0, High, Tier == 0 ? BbLook::Seats : BbLook::Concrete);
+			Panel(A + Out * Back - Reach * ReachA, B + Out * Back + Reach * ReachB, Depth, 0.0, High, Tier == 0 ? BbLook::Seats : BbLook::Concrete);
 		}
 	}
 }
