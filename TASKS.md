@@ -1,6 +1,6 @@
 # Task List
 
-**Last updated:** 2026-11-14, evening ("Resume here" rewritten as the handoff from the third lead session: the Codex rerun on `work/live-comm` comes first; before that, the swing and collision block below and the fielder-communication line, at the pause of the second lead session; before that, hurried throws, A3; before that, handedness, A1; before that, the dive rate judged and fixed, A5, and rosters, A2, merged; before that, dives shown in the client, the get-up after a rimmed dive, two-out throws; before that, the overrun of first and runner position samples; before that, foul measures, sources and the correction experiment; pushed; the spray experiment parked for later; before that, the read knows the ball started at the plate; before that, called-off infielders back up the catch; before that, pop-up calls on `fix/popup-calls`; before that, owner's observations merged into the "Owner backlog" section; before that, the coordinator run on `coord/review-fixes`)
+**Last updated:** 2026-11-15, night ("Resume here" rewritten by the fourth lead session; before that, 2026-11-14 evening: "Resume here" rewritten as the handoff from the third lead session: the Codex rerun on `work/live-comm` comes first; before that, the swing and collision block below and the fielder-communication line, at the pause of the second lead session; before that, hurried throws, A3; before that, handedness, A1; before that, the dive rate judged and fixed, A5, and rosters, A2, merged; before that, dives shown in the client, the get-up after a rimmed dive, two-out throws; before that, the overrun of first and runner position samples; before that, foul measures, sources and the correction experiment; pushed; the spray experiment parked for later; before that, the read knows the ball started at the plate; before that, called-off infielders back up the catch; before that, pop-up calls on `fix/popup-calls`; before that, owner's observations merged into the "Owner backlog" section; before that, the coordinator run on `coord/review-fixes`)
 The live to-do list for the project. [PLAN.md](PLAN.md) holds decisions and design. This file holds what is next and what is done. Update it at the end of every work session.
 
 Status: `[ ]` not started · `[~]` in progress · `[x]` done · `[?]` needs an owner decision
@@ -34,7 +34,39 @@ Open:
 
 **Open, not the swing's:** batters are 17 ms early on outside pitches and 2 ms inside (perception); v2's attack-angle slope against direction is 0.53 (Statcast 0.41).
 
-## Resume here (2026-11-14, evening; handoff from the third lead session)
+## Resume here (2026-11-15, about 01:50; fourth lead session, owner asleep, lead still running)
+
+Main is `ecd2bf7`, pushed. `cargo test --workspace --release` on it: 377 pass. Standard run: runs 4.42 [4.59] (real 4.39), K 21.6% [21.9], HR/PA 1.87% [1.91] (3.0), fly-ball hits .219 [.228] (.13), ground-ball hits .322 [.319] (.245).
+
+**Owner's standing word for this stretch (2026-11-15):** keep going, steady; do not overtest; let small things go to keep moving. Near Codex's limit, review with a Claude model that is not the author (Codex was at 87% of its 5-hour window at 01:21; it resets 03:12).
+
+**Merged tonight:** fielder communication (`work/live-comm`; fifth Codex review: no P1); left on base by the official rule (Q4); the measurement and research notes (exit speed × launch angle, power mix, collision-efficiency sources and counterfactual, wall approach speed, outfield pursuit and throws); client: ball shadow that grows with height, Enter to skip to the next pitch, R/F replay with seed and play number, right-handers throw right-handed, a held ball drawn in the hand.
+
+**Running (workers, each in its own worktree and Herdr-app tab):**
+- `work/collision-q` (Opus high): Q6, the sourced collision efficiency q 0.215 with the poor-contact mechanism. Stays off main until HR and runs are both in range; then a review.
+- `work/runner-reads` (Sonnet high): the two runner fixes from seed 24583 play 81. Then one review, ledger row, merge.
+- `work/live-comm` (Opus, docs only): the fifth review's P3-1 and Resolution, the 50-seed harness result. Merge those docs commits when done.
+
+**Next, in order (one `live.rs` job at a time beside the collision job; two Claude workers at most):**
+1. **The outfield read** (Opus high): fly-ball misses; seed 23080 play 8; the owner's guidance (high flies stay harder; routine ones caught 90–99% by ability; errors are separate). Diagnosis by play first, short; then the model change, spec first, review. See the entry below and `docs/calibration/2026-11-15-outfield-pursuit-and-throws.md`.
+2. **Q5 wall braking** (small): BRAKE 4.75 m/s², wall-contact speed about 2 m/s [E].
+3. **Q1 runner acceleration** (τ about 0.75 s, per-runner parameters), then **the runner decision model**: Q2's run-expectancy rule with the owner's anticipation guidance (situation first, then react to the ball).
+4. **Outfield throws** (wrong base, missed cutoffs) and **the "seen him break" rule** (owner approved 2026-11-14; agent-models §5.7).
+5. The rest of the Codex live-play review's P2s (listed in the block below).
+
+**Measured together, 2026-11-15 04:30 (trial merge `integrate/trio` = main + `work/runner-reads` + `work/collision-q` + `work/outfield-read`; standard run, no full test pass yet):** runs **3.78 [3.85]** (real 4.39), K 22.4% [22.0] (22.6), BB 8.3% [8.6] (8.2), HR/PA 2.68% [2.56] (3.0), ground-ball hits .284 [.301] (.24), liners .671 [.657] (.68), fly balls .105 [.107] (.13), pop-ups .019 [.009] (.02), reached on balls in play 34.4% [35.3], no rules warnings. Every component rate is within reach of real; runs are about 0.55 low. The lead's accounting of the gap, not yet measured piece by piece: home runs 0.4 points short; no errors (A17), stolen bases, wild pitches or passed balls in the game yet, which in MLB carry a few tenths of a run; second to home on a single 38% against about 60%; outs on the bases 0.24–0.31 a team-game against about 0.1. Separately the three give: runners +0.43, collision +0.3, outfield read −1.1.
+
+**Waiting for the owner: Q7, now about the three together.** Merge the three (each after its review is clean) and accept scoring near 3.8 until home runs, errors and the running game are in; or hold some. The lead recommends merging all three: each removes play that is plainly wrong, and the rates that make up scoring are now honest. Detail on the collision branch alone follows.
+
+**Q7, as first asked about the collision branch.** `work/collision-q` (Q6: sourced q 0.215, Nathan 2000's inboard barrel falloff, partial reach g 0.6 [E] Proposed) is built and its [Codex review](docs/reviews/2026-11-15-codex-collision-q-review.md) (on the branch) found no P1 and calls the three changes sound as physics. Measured on its base `4fe04d7`: HR/PA 2.51% [2.79%] (real 3.0; main 1.78), runs 4.62 [4.92] (real 4.39; main then 4.31 [4.68]), under 80 mph 23.4% (25.0), hard-hit 40.1% (40.3), 105+ 8.3% (9.9), K 22.4% (22.6). The owner's condition was "home runs and runs both in range": is this close enough to merge (lead recommends yes: the run excess is fielding's), or hold until the outfield read lands, or keep working on home runs? Not merged until he answers. Deferred from that review: the contact shape by pitch location and O-Contact 39.7% (band 45–68): diagnose timing, height and lateral aim errors jointly by location; **wall reach** (capture allows a 1.4 m stretch, the planner and `play_area` assume 1.0 m; seed 4 play 191 on the old contact settings): fix with Q5 wall braking.
+
+**Waiting for the owner, small:** nothing else. (Asked, unanswered and not blocking: whether the infielder throws now look right-handed; whether the shadow's 2.5× at height suits.)
+
+**Unmerged branches:** `work/collision-q`, `work/runner-reads` (in progress); `work/pitcher-fielding` and `work/integrate-agy-calib` (held, as before); `work/swing-chores`, `work/review-*` (harmless leftovers). Merged and removable: `work/lob-official`, `work/live-comm` (after its docs), `work/ev-la-bins`, `work/power-mix`, `work/q-counterfactual`, `work/collision-q-research`, `work/wall-speed-research`, `work/outfield-research`, `integrate/live-comm`.
+
+**Machine:** the laptop was restarted at 00:05 (orderly); workers were resumed from their saved sessions. A heat guard runs from the lead's scratchpad (gone after a reboot: rewrite it). The lead's status cue lives in `~/.claude/dev-mods/<session id>/codex-review-status`.
+
+## Earlier: handoff of 2026-11-14 evening (third lead session), with the 2026-11-15 rulings and new tasks added in its "Owner's rulings" list
 
 Main is `99de8fb`, pushed. `cargo test --workspace --release` passes there (347 tests). Standard run on main: runs 4.31 [4.68] (real 4.39), K 21.5% (22.6), BB 7.9% [8.4] (8.2), HR/PA 1.78% [1.77%] (3.0), ground-ball hits .322 [.326] (.245). Ledger: [docs/metrics-ledger.md](docs/metrics-ledger.md).
 
