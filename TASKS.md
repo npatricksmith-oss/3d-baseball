@@ -36,6 +36,8 @@ Open:
 
 ## Resume here (2026-11-15, about 09:45; fourth lead session paused on the owner's word)
 
+**Lead for the next session (owner, 2026-11-15): Claude Opus 5.5 at high effort**, to spare the shared usage pool. It follows the "Usage budget" section of [CLAUDE.md](CLAUDE.md).
+
 **State: everything built is merged into main and pushed. Nothing is running, nothing is waiting for the owner, no review is open.**
 
 Main is the merge of `work/tracking-read` (which carried `work/collision-q`, `work/outfield-read`, `work/wall-braking` and the tracking read; owner's Q7: yes, all of it). `cargo test --workspace --release` on the merged tree: **418 pass, 0 fail, 4 ignored.** The sim code on main is identical to the branch head `385038d`, so its standard run stands for main (seeds 0–299 [1000–1299]):

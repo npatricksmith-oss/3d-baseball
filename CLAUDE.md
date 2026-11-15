@@ -106,3 +106,15 @@ Game logic in C++; Blueprints only for thin visual wiring. Script asset setup wi
   codex exec -m gpt-6.1-sol -c model_reasoning_effort="high" -s workspace-write -C "<repo root>" - < prompt.md
   ```
   The prompt names the commit range, the files and questions ranked by risk, and the invariants above. It tells Codex to verify claims by running tests or probes, edit no source, test, spec, or TASKS file, and write only `docs/reviews/<date>-codex-<topic>-review.md`, with findings ranked P1–P3, a Verification section, and `## Resolution` set to "Open." Afterwards: commit the review, fix or defer every finding, write the Resolution, and list unresolved findings first in TASKS.md "Resume here".
+
+## Usage budget (owner, 2026-11-15)
+
+Claude usage is a weekly pool shared by all models, and the owner's other services depend on it. Running out of Fable alone is acceptable; running out of the shared pool is not. Every lead session follows these:
+
+- **Short lead sessions.** A long session re-sends its whole history on every request. When a task is merged, update TASKS.md "Resume here" and tell the owner it is a good point to `/clear`; a new session restarts from that section.
+- **Workers off the Claude pool where possible.** Codex workers bill against a separate service: give them the implementation jobs that suit them. Claude workers only for what needs them, **one at a time**, and on Sonnet for mechanical work (ledger runs, doc updates, review fixes).
+- **Close finished worker tabs** once their work is merged. Resuming an old one re-reads its whole context at full price.
+- **Reviews are unchanged:** Codex Sol first, a non-author Claude model near the Codex limit. Waiting for Codex every time is too slow.
+- **Lean context.** This project uses none of the Gmail, Slack, Todoist, Trello, Dropbox or Google connectors; they should stay disabled here. Send long command output to a file and read the summary, not the whole run.
+- **No long idle gaps mid-session.** After about an hour idle, the next request re-reads everything uncached. When a build or review will take longer than that, hand off in TASKS.md and end the session instead of waiting in it.
+- **Effort to match the job.** High effort for design, physics and merge decisions; medium for ledger rows, task updates and other routine steps.
