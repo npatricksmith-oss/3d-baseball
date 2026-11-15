@@ -356,6 +356,9 @@ struct Shown {
     role: Role,
     backs: Option<u8>,
     tier: u8,
+    /// A holder's call for a man to get to a bag for his throw ("two!", pointing): the base
+    /// and the man (agent-models §5.7). Only while he holds the ball.
+    asks: Option<(u8, usize)>,
 }
 
 #[derive(Clone, Debug)]
@@ -430,6 +433,10 @@ struct Fielder {
     /// The bag he is carrying the ball to (agent-models §5.5 A4), so that abandoning the
     /// carry for a throw or for no play brakes him instead of leaving him running at it.
     carry_to: Option<u8>,
+    /// Holding the ball and waiting on a teammate to get to the bag he means to throw to: the
+    /// base and the man he calls to it (agent-models §5.7). Private until published; the man
+    /// acts on it only when he hears it (`Sim::heed_requests`).
+    asks: Option<(u8, usize)>,
     /// His set-up is a double-play pivot at second (agent-models §5.5): its own time, turn
     /// and footwork from how he got the bag, no early release.
     pivot: bool,
@@ -1975,14 +1982,20 @@ impl<'a> Sim<'a> {
     /// for it.
     fn publish(&mut self) {
         let (t, since) = (self.t, self.ball_since);
-        for fd in self.f.iter_mut() {
+        let holder = match self.ball {
+            Ball::Held { by } => Some(by),
+            _ => None,
+        };
+        for (i, fd) in self.f.iter_mut().enumerate() {
             let tier = if fd.role == Role::Chase { fd.call } else { 0 };
+            // A man's call for a teammate to a bag stands only while he has the ball.
+            let asks = if holder == Some(i) { fd.asks } else { None };
             let push = match fd.shown.last() {
-                Some(e) => e.at + 1e-9 < since || (e.role, e.backs, e.tier) != (fd.role, fd.backs, tier),
+                Some(e) => e.at + 1e-9 < since || (e.role, e.backs, e.tier, e.asks) != (fd.role, fd.backs, tier, asks),
                 None => true,
             };
             if push {
-                fd.shown.push(Shown { at: t, role: fd.role, backs: fd.backs, tier });
+                fd.shown.push(Shown { at: t, role: fd.role, backs: fd.backs, tier, asks });
             }
         }
     }
@@ -3590,6 +3603,8 @@ impl<'a> Sim<'a> {
                 (f.pivot, f.pivot_wait_bag) = (true, false);
             }
         }
+        // His call for a man to a bag stands only while he is waiting on that man (below).
+        self.f[by].asks = None;
         let fd = self.f[by].clone();
         // Tag any runner within reach who is off a base.
         for k in 0..self.r.len() {
@@ -3714,9 +3729,12 @@ impl<'a> Sim<'a> {
             return;
         }
         let receiver = race.receiver;
-        // Preserve the existing release gate for a receiver still covering.
+        // His man is not at the bag yet: he waits for him and calls him to it ("two!",
+        // pointing). The call is his to make, but it reaches the man only when heard
+        // (`heed_requests`, `CALL_HEARD_S`); his private choice moves nobody (Codex
+        // fielder-communication fourth review P1-1).
         if race.direct < race.receiver_at - 0.05 {
-            self.f[receiver].target = tgt;
+            self.f[by].asks = Some((b, receiver));
             return;
         }
         self.trace_choice(by, action, b, false, best, &options);
@@ -3751,6 +3769,24 @@ impl<'a> Sim<'a> {
             }
         }
         self.back_up_throw(fd.pos, b);
+    }
+
+    /// A man the holder has called to a bag for his throw goes to it once he hears the call
+    /// (`CALL_HEARD_S` after it was made, agent-models §5.7), while that man still has the
+    /// ball and still calls for him. Until then he does his own job; when the call is
+    /// withdrawn he keeps the bag until his job is re-worked. Reads only what was shown.
+    fn heed_requests(&mut self) {
+        let Ball::Held { by } = self.ball else { return };
+        let Some(e) = self.shown_then(by) else { return };
+        // A call he made with the ball before he last secured it is not this one.
+        if e.at + 1e-9 < self.ball_since.max(self.secured_at) {
+            return;
+        }
+        if let Some((b, r)) = e.asks {
+            if r != by {
+                self.f[r].target = base_pos(b);
+            }
+        }
     }
 
     /// A holder who gives up a carry pulls up where braking stops him (agent-models §5.6 A4);
@@ -3941,6 +3977,7 @@ fn new_sim<'a>(inp: &'a LiveInput<'a>, st: &'a mut RulesState) -> Sim<'a> {
                 backs: None,
                 peel: None,
                 carry_to: None,
+                asks: None,
                 pivot: false,
                 pivot_wait_bag: false,
             }
@@ -4053,6 +4090,7 @@ impl<'a> Sim<'a> {
             "expire_peels" => self.expire_peels(),
             "chasers_see_the_ball_secured" => self.chasers_see_the_ball_secured(),
             "holder_act" => self.holder_act(),
+            "heed_requests" => self.heed_requests(),
             "cover_home_again" => self.cover_home_again(),
             "hear" => self.hear(),
             "update_relay" => self.update_relay(),
@@ -4194,6 +4232,9 @@ fn simulate_live_inner(inp: &LiveInput, st: &mut RulesState) -> LiveOutput {
         if sim.done {
             break;
         }
+        #[cfg(test)]
+        iso_check(&sim, "heed_requests");
+        sim.heed_requests();
         #[cfg(test)]
         iso_check(&sim, "cover_home_again");
         sim.cover_home_again();
@@ -4351,7 +4392,7 @@ mod tests {
         sim.f[i].call = tier;
         let at = sim.t - CALL_HEARD_S - DT;
         sim.ball_since = sim.ball_since.min(at);
-        sim.f[i].shown.push(Shown { at, role: Role::Chase, backs: None, tier });
+        sim.f[i].shown.push(Shown { at, role: Role::Chase, backs: None, tier, asks: None });
     }
 
     /// Fielder `i` doing job `role`, shown long enough ago that his teammates know it
@@ -4363,7 +4404,7 @@ mod tests {
         }
         let at = sim.t - CALL_HEARD_S - DT;
         let backs = sim.f[i].backs;
-        sim.f[i].shown.push(Shown { at, role, backs, tier: 0 });
+        sim.f[i].shown.push(Shown { at, role, backs, tier: 0, asks: None });
     }
 
     /// Let `CALL_HEARD_S` pass with the coordination steps of a tick (`simulate_live_inner`):
@@ -5781,7 +5822,7 @@ mod tests {
             let before: Vec<Role> = sim.f.iter().map(|f| f.role).collect();
             for fd in sim.f.iter_mut() {
                 let tier = if fd.role == Role::Chase { fd.call } else { 0 };
-                fd.shown.push(Shown { at, role: fd.role, backs: fd.backs, tier });
+                fd.shown.push(Shown { at, role: fd.role, backs: fd.backs, tier, asks: None });
             }
             sim.hear();
             if sim.f.iter().map(|f| f.role).eq(before) {
@@ -6474,7 +6515,7 @@ mod tests {
         let at = sim.t - CALL_HEARD_S - DT;
         for fd in sim.f.iter_mut() {
             let tier = if fd.role == Role::Chase { fd.call } else { 0 };
-            fd.shown.push(Shown { at, role: fd.role, backs: fd.backs, tier });
+            fd.shown.push(Shown { at, role: fd.role, backs: fd.backs, tier, asks: None });
         }
     }
 
@@ -6540,7 +6581,7 @@ mod tests {
         sim.t += CALL_HEARD_S + 2.0 * DT;
         let at = sim.t - CALL_HEARD_S - DT;
         for fd in sim.f.iter_mut() {
-            fd.shown.push(Shown { at, role: fd.role, backs: fd.backs, tier: 0 });
+            fd.shown.push(Shown { at, role: fd.role, backs: fd.backs, tier: 0, asks: None });
         }
         assert!(sim.beats_by_own_estimate(LF, CF) && sim.beats_by_own_estimate(CF, LF), "each thinks the other is first");
         let roles = hearing_cycles(&mut sim, 3.0);
@@ -6560,7 +6601,7 @@ mod tests {
         assert!(at >= sim.ball_since);
         for fd in sim.f.iter_mut() {
             assert_ne!(fd.role, Role::Chase);
-            fd.shown.push(Shown { at, role: fd.role, backs: fd.backs, tier: 0 });
+            fd.shown.push(Shown { at, role: fd.role, backs: fd.backs, tier: 0, asks: None });
         }
     }
 
@@ -6673,6 +6714,10 @@ mod tests {
             f.t_int = f64::INFINITY;
             f.read_at = f64::NEG_INFINITY;
         })));
+        // A holder's private clocks and his unpublished call for a man to a bag.
+        v.push(("set_base".into(), Box::new(|f: &mut Fielder| f.set_base += 1.0)));
+        v.push(("up_at".into(), Box::new(|f: &mut Fielder| f.up_at += 0.5)));
+        v.push(("asks".into(), Box::new(|f: &mut Fielder| f.asks = if f.asks.is_some() { None } else { Some((2, 5)) })));
         v
     }
 
@@ -6690,6 +6735,22 @@ mod tests {
             diff.push(format!("ball: {} -> {}", iso_ball(&a), iso_ball(&b)));
         }
         diff
+    }
+
+    /// `iso_compare` for the holder at his own step: differences count only when the ball is
+    /// still in his hands in both forks (a release is a public event).
+    fn iso_compare_pre_release(sim: &Sim, step: &'static str, j: usize, flip: &dyn Fn(&mut Fielder)) -> Vec<String> {
+        let (mut st_a, mut st_b) = (sim.st.clone(), sim.st.clone());
+        let mut a = sim.fork(&mut st_a);
+        let mut b = sim.fork(&mut st_b);
+        flip(&mut b.f[j]);
+        a.run_step(step);
+        b.run_step(step);
+        let held = |s: &Sim| matches!(s.ball, Ball::Held { by } if by == j);
+        if !held(&a) || !held(&b) {
+            return Vec::new();
+        }
+        (0..9).filter(|&k| k != j).filter(|&k| iso_state(&a, k) != iso_state(&b, k)).map(|k| format!("f{k}: {} -> {}", iso_state(&a, k), iso_state(&b, k))).collect()
     }
 
     /// Run games `seeds` with the harness on every `stride`-th call of each coordination step:
@@ -6718,11 +6779,12 @@ mod tests {
                     _ => None,
                 };
                 for j in 0..9 {
-                    if step == "holder_act" && holder == Some(j) {
-                        continue;
-                    }
                     for (what, flip) in iso_flips(sim, j) {
-                        let d = iso_compare(sim, step, j, flip.as_ref());
+                        // The holder's own change may decide his throw (`holder_act`), which
+                        // is his to make: once the ball is released in either fork, what
+                        // follows is public. Before a release, nothing he privately decides
+                        // may reach a teammate (fourth review P1-1).
+                        let d = if step == "holder_act" && holder == Some(j) { iso_compare_pre_release(sim, step, j, flip.as_ref()) } else { iso_compare(sim, step, j, flip.as_ref()) };
                         let mut fr = f2.borrow_mut();
                         fr.0 += 1;
                         if !d.is_empty() && fr.1.len() < 12 {
@@ -6777,6 +6839,81 @@ mod tests {
         ISO_HOOK.with(|h| *h.borrow_mut() = None);
         let d = hit.borrow().clone().expect("the snapshot was reached");
         assert!(d.is_empty(), "{}", d.join("; "));
+    }
+
+    /// Fourth review P1-1: in real game `seed`, at each `holder_act` of play `play` from
+    /// `t_from` for `span` seconds, only the holder's private set-up clock changes (no motion,
+    /// nothing shown). While the ball is in his hands in both forks, no teammate may change.
+    /// Returns the snapshots seen and the leaks.
+    fn holder_snapshot_leaks(seed: u64, play: u32, t_from: f64, span: f64) -> (u32, Vec<String>) {
+        use std::cell::RefCell;
+        use std::rc::Rc;
+        let found: Rc<RefCell<(u32, Vec<String>)>> = Rc::default();
+        let f2 = found.clone();
+        ISO_HOOK.with(|h| {
+            *h.borrow_mut() = Some(Box::new(move |sim: &Sim<'_>, step: &'static str| {
+                if sim.inp.seed != seed || sim.inp.play != play || step != "holder_act" || sim.t < t_from - 1e-6 || sim.t > t_from + span {
+                    return;
+                }
+                let Ball::Held { by } = sim.ball else { return };
+                let d = iso_compare_pre_release(sim, step, by, &|f: &mut Fielder| f.set_base += 1.0);
+                let mut fr = f2.borrow_mut();
+                fr.0 += 1;
+                fr.1.extend(d.into_iter().map(|x| format!("t {:.9} holder f{by}: {x}", sim.t)));
+            }));
+        });
+        crate::game::simulate_game(seed);
+        ISO_HOOK.with(|h| *h.borrow_mut() = None);
+        let r = found.borrow().clone();
+        r
+    }
+
+    // Codex fielder-communication fourth review P1-1, its first counterexample: seed 1 play
+    // 195, the centre fielder holds the ball and waits on a man for second. The left fielder,
+    // known to be backing up second, was sent to the bag (13 m) by the holder's private
+    // choice, before any throw or call.
+    #[test]
+    fn a_holders_private_choice_moves_nobody_seed_1_play_195() {
+        let (seen, leaks) = holder_snapshot_leaks(1, 195, 7.2195, 0.05);
+        assert!(seen > 0, "the snapshot was not reached");
+        assert!(leaks.is_empty(), "{}", leaks.join("\n"));
+    }
+
+    // Fourth review P1-1, its second counterexample: seed 8 play 121 from t = 4.1646 s, the
+    // centre fielder's set-up clock decided, tick after tick, whether the second baseman out
+    // as the cutoff to third was sent to second (then the idle shortstop).
+    #[test]
+    fn a_holders_private_choice_moves_nobody_seed_8_play_121() {
+        let (seen, leaks) = holder_snapshot_leaks(8, 121, 4.1645, 0.2);
+        assert!(seen > 0, "the snapshot was not reached");
+        assert!(leaks.is_empty(), "{}", leaks.join("\n"));
+    }
+
+    // Fourth review P1-1, the call itself: the holder waits on a man for second and calls
+    // him. The man goes to the bag only once the call is heard, `CALL_HEARD_S` later.
+    #[test]
+    fn a_holders_call_to_the_bag_is_heard_before_it_is_heeded() {
+        const LF: usize = 6;
+        let fx = fixture(&[]);
+        let inp = input(&fx, vec![RunnerIn { id: fx.st.batter, base: 0, speed: 8.2 }]);
+        let mut st = fx.st.clone();
+        let mut sim = new_sim(&inp, &mut st);
+        sim.t = 3.0;
+        sim.ball = Ball::Held { by: CF };
+        sim.secured_at = 2.5;
+        sim.f[LF].role = Role::Backup;
+        let spot = Vec3::new(-5.0, 27.0, 0.0);
+        sim.f[LF].target = spot;
+        sim.f[CF].asks = Some((2, LF));
+        sim.publish();
+        sim.heed_requests();
+        assert_eq!(sim.f[LF].target, spot, "he heard nothing yet");
+        sim.t += CALL_HEARD_S - 2.0 * DT;
+        sim.heed_requests();
+        assert_eq!(sim.f[LF].target, spot, "he heard nothing yet");
+        sim.t += 3.0 * DT;
+        sim.heed_requests();
+        assert_eq!(sim.f[LF].target, base_pos(2), "he heard the call and goes to second");
     }
 
     // Third review P1-1, its constructed probe: the third baseman holds the ball, the first
