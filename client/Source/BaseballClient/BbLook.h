@@ -59,6 +59,50 @@ namespace BbLook
 	inline const FLinearColor Net(0.030f, 0.030f, 0.035f);
 	inline const float NetOpacity = 0.14f;
 
+	// The crowd (park-visuals step 6): how many came, and what they wear. Attendance is the
+	// one number; the places fill by how sought-after they are (low rows near the plate
+	// first, the bank last), the same way every time the park is built.
+	inline const int32 Attendance = 6200;
+	inline const int32 CrowdSeed = 11;
+	/** Shirts: mostly mid and dark, one pale in the lot, so a ball in front of the seats shows. */
+	inline const FBbPaint Shirts[] = {
+		{ FLinearColor(0.420f, 0.030f, 0.030f), 0.85f },
+		{ FLinearColor(0.020f, 0.045f, 0.200f), 0.85f },
+		{ FLinearColor(0.030f, 0.130f, 0.420f), 0.85f },
+		{ FLinearColor(0.040f, 0.200f, 0.075f), 0.85f },
+		{ FLinearColor(0.600f, 0.440f, 0.050f), 0.85f },
+		{ FLinearColor(0.560f, 0.180f, 0.030f), 0.85f },
+		{ FLinearColor(0.260f, 0.265f, 0.280f), 0.85f },
+		{ FLinearColor(0.500f, 0.500f, 0.490f), 0.85f },
+		{ FLinearColor(0.740f, 0.740f, 0.710f), 0.85f },
+		{ FLinearColor(0.020f, 0.020f, 0.025f), 0.85f },
+		{ FLinearColor(0.030f, 0.230f, 0.260f), 0.85f },
+		{ FLinearColor(0.180f, 0.045f, 0.270f), 0.85f },
+		{ FLinearColor(0.560f, 0.230f, 0.280f), 0.85f },
+		{ FLinearColor(0.400f, 0.310f, 0.190f), 0.85f },
+	};
+	inline const FBbPaint Skin[] = {
+		{ FLinearColor(0.600f, 0.390f, 0.280f), 0.7f },
+		{ FLinearColor(0.440f, 0.265f, 0.170f), 0.7f },
+		{ FLinearColor(0.290f, 0.165f, 0.100f), 0.7f },
+		{ FLinearColor(0.115f, 0.062f, 0.040f), 0.7f },
+	};
+	/** What is on the head: hair (four), or a cap (three). */
+	inline const FBbPaint Heads[] = {
+		{ FLinearColor(0.012f, 0.010f, 0.010f), 0.8f },
+		{ FLinearColor(0.085f, 0.048f, 0.024f), 0.8f },
+		{ FLinearColor(0.460f, 0.350f, 0.140f), 0.8f },
+		{ FLinearColor(0.380f, 0.380f, 0.380f), 0.8f },
+		{ FLinearColor(0.020f, 0.045f, 0.200f), 0.85f },
+		{ FLinearColor(0.420f, 0.030f, 0.030f), 0.85f },
+		{ FLinearColor(0.700f, 0.700f, 0.670f), 0.85f },
+	};
+	inline const FBbPaint Trousers[] = {
+		{ FLinearColor(0.045f, 0.085f, 0.190f), 0.9f },
+		{ FLinearColor(0.400f, 0.320f, 0.210f), 0.9f },
+		{ FLinearColor(0.030f, 0.030f, 0.035f), 0.9f },
+	};
+
 	// The scoreboard: lamps on a dark face, in a dark case on steel legs. The lamps give
 	// their own light (BoardGlow times their colour), so the board reads in the shade.
 	inline const TCHAR* const ParkName = TEXT("CEDAR HOLLOW PARK");

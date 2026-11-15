@@ -16,6 +16,8 @@ class UProceduralMeshComponent;
 class UMaterialInstanceDynamic;
 struct FBbSolid;
 struct FBbFace;
+struct FBbPlace;
+struct FRandomStream;
 
 /** A fixed place to look at the park from (park-visuals §4): the same spots before and after
  *  every change to its looks. */
@@ -114,6 +116,8 @@ private:
 	void BuildDugouts();
 	void BuildOutfield();
 	void BuildStands();
+	/** The crowd: BbLook::Attendance figures over the places BuildStands found. */
+	void BuildCrowd(TArray<FBbPlace>& Places, FRandomStream& Rng);
 	void BuildBoard();
 	void BuildBackdrop();
 	/** One of many alike (a seat, a post, a lamp): drawn together with every other shape of

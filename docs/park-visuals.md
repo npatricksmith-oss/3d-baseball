@@ -1,6 +1,6 @@
 # Park visuals: field and stadium
 
-**Status:** plan agreed with the owner 2026-11-15 (twelve questions, answers in §1). **Step 1 (park export and field surface) is built** (§6), **step 2 (light and materials)** (§7), **step 3 (walls and field furniture)** (§8), **step 4 (the seating bowl)** (§9) and **step 5 (scoreboard, signs, backdrop)** (§10); step 6, the crowd, is not. This is the first part of the graphics stage; players and game graphics (HUD) get their own plans afterwards.
+**Status:** plan agreed with the owner 2026-11-15 (twelve questions, answers in §1). **Step 1 (park export and field surface) is built** (§6), **step 2 (light and materials)** (§7), **step 3 (walls and field furniture)** (§8), **step 4 (the seating bowl)** (§9), **step 5 (scoreboard, signs, backdrop)** (§10) and **step 6 (the crowd)** (§11): the plan is complete. This is the first part of the graphics stage; players and game graphics (HUD) get their own plans afterwards.
 
 **Why now:** Codex's weekly limit is nearly used, so the physics and behaviour work, which needs outside reviews, pauses. The owner moved the looks forward from the polish milestone (PLAN D13, revised the same day). This stage runs without Codex reviews.
 
@@ -150,3 +150,19 @@ Client only; nothing in the sim changed. Everything is placed by rule from the e
 **Not done.** The flags do not move. The home side's unplayed last half shows a blank, not an "X". Trees are balls and cones on sticks. The signs' letters are the same dot alphabet as the board's, so they are blocky.
 
 **Checked** from the seven spots and six pictures of play (`client/Saved/Shots/step4_after/` is the before, `step5_after/` the after; untracked): the board showed the count the text line showed; the pitch camera's view is unchanged, and from behind home a ball in the air is now against dark trees and hills rather than a flat horizon. **Cost:** 209 frames a second unattended against 207; memory 2.7 GB (2.6).
+
+## 11. Step 6 as built (2026-11-15)
+
+Client only; nothing in the sim changed. The measures are named constants above `BuildStands` in `BbPark.cpp`; the attendance, the seed and the clothes' colours are in `BbLook.h`.
+
+- **Attendance is one number: 6,200** (`BbLook::Attendance`), in 8,114 places: the 7,038 seats, a place every 0.55 m along the benches beyond right field, and places scattered over the grass bank beyond left.
+- **Who sits where.** Each place has a weight for how sought-after it is: a seat counts for more in the low rows (the top row 0.45 of the first) and near the plate (falling to 0.4 far down the lines); a bench place 0.55, a place on the bank 0.4. The places are filled by weighted draw without replacement until the attendance is reached, so exactly that many figures are drawn and the empty seats are mostly high and far. The same crowd every time (a fixed seed; this is the client's decoration, not the sim's randomness).
+- **A figure** is five boxes: shins, thighs, a body, a head, and hair or a cap. Fourteen shirt colours, four skins, seven heads (four hair, three caps), three trousers; each figure is a little taller or shorter and turned a few degrees. On the bank the legs lie down the slope. All are instanced: 31,000 boxes in 28 more batches.
+- **No animation, no shadows cast** (as the seats).
+- The seat the third-base camera spot sits in, and those within 1.7 m, stay empty.
+
+**The lead's choices, for the owner to overrule if he likes:** the attendance (about three quarters full); one pale shirt colour in fourteen, the rest mid or dark; no home-team colours in the crowd.
+
+**Not done.** Nobody stands, walks the concourse or sits in the dugouts or pens. No reaction to the play. Heads are boxes; close to the camera (the third-base spot) the figures are plainly blocks.
+
+**Checked** from the seven spots and six pictures of play (`client/Saved/Shots/step5_after/` is the before, `step6_after/` the after; untracked). From the pitch camera the ball crosses grass, dirt and the dark wall, below the crowd, and is as easy to see as before. A high fly seen against the seats is now against many colours rather than plain blue; not judged from a picture yet, to be watched in play. **Cost:** 193 frames a second unattended against 209; memory 2.6 GB (2.7).

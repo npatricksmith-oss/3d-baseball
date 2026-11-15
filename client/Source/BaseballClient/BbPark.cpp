@@ -1325,6 +1325,19 @@ namespace
 	const double RackWide = 7.0, RackHigh = 4.5;
 	const int32 LampRows = 3, LampCols = 6;
 
+	// The crowd (park-visuals step 6). A seated figure of five boxes: shins, thighs, a body,
+	// a head, and hair or a cap. On the bank the legs lie down the slope.
+	const double BenchPitch = 0.55;             // a place on a bench
+	const double BankRows = 1.4, BankPitch = 1.0, BankStray = 0.3; // places on the grass bank
+	// How sought-after a place is. A seat: more in the low rows, more near the plate.
+	const double WantRowTop = 0.45;             // the top row against the first (1)
+	const double WantFar = 0.4, WantNearM = 75.0; // far from the plate against at it (1); the fall-off
+	const double WantBench = 0.55, WantBank = 0.4;
+	const double FigureSmall = 0.88, FigureTall = 1.06, FigureTurnDeg = 12.0;
+	// The seat the camera of the third-base spot sits in (and those around it stay empty).
+	const FVector2D SpotSeat(-31.0, -3.0);
+	const double SpotClear = 1.7;
+
 	/** A straight piece of something that follows the boundary. A point D metres behind the
 	 *  wall is A + MA * D at one end and B + MB * D at the other: where two pieces meet at a
 	 *  corner both ends lie on the line that halves it, so they close without a gap. */
@@ -1375,6 +1388,15 @@ namespace
 		return A.X * B.Y - A.Y * B.X;
 	}
 }
+
+/** A place for one of the crowd: the middle of what is sat on (sim frame) and the height of
+ *  its top; Out is behind the sitter. Slope: the ground's rise per metre toward Out (the
+ *  bank; 0 on a seat). Want: a place of twice the Want fills about twice as soon. */
+struct FBbPlace
+{
+	FVector2D P, Along, Out;
+	double Z, Slope, Want;
+};
 
 void ABbPark::Inst(UStaticMesh* Mesh, const FVector& Location, const FVector& Scale, const FBbPaint& Paint, const FRotator& Rotation, bool bShadow)
 {
@@ -1505,6 +1527,8 @@ void ABbPark::BuildStands()
 	const double RoofD0 = DTop - RoofOver, RoofD1 = DBack + RoofPast;
 	auto RoofUnder = [&](double Dd) { return ZTop + FMath::Lerp(RoofFront, RoofRear, (Dd - RoofD0) / (RoofD1 - RoofD0)); };
 	int32 Seats = 0;
+	TArray<FBbPlace> Places;
+	FRandomStream Rng(BbLook::CrowdSeed);
 	for (int32 I = 0; I < N; ++I)
 	{
 		if (!Foul(I))
@@ -1556,6 +1580,12 @@ void ABbPark::BuildStands()
 					const FVector2D Pb = P + R.Out * (SeatDeep * 0.5);
 					Inst(Cube, ToUE(P.X, P.Y, Zk + SeatHigh), FVector(SeatWide, SeatDeep, 0.06), BbLook::Seats, Rot, false);
 					Inst(Cube, ToUE(Pb.X, Pb.Y, Zk + SeatHigh + SeatBack * 0.5), FVector(SeatWide, 0.06, SeatBack), BbLook::Seats, Rot, false);
+					if ((P - SpotSeat).Size() > SpotClear)
+					{
+						const double Far = P.Size() / WantNearM;
+						Places.Add(FBbPlace{ P, R.Along, R.Out, Zk + SeatHigh + 0.03, 0.0,
+							FMath::Lerp(1.0, WantRowTop, (double)K / (BowlRows - 1)) * FMath::Lerp(WantFar, 1.0, FMath::Exp(-Far * Far)) });
+					}
 					++Seats;
 				}
 			}
@@ -1659,6 +1689,18 @@ void ABbPark::BuildStands()
 				Extrude(Concrete, R, MakeArrayView(Prof.GetData(), 2));
 				Extrude(Grass, R, MakeArrayView(Prof.GetData() + 1, 2));
 				Extrude(Concrete, R, MakeArrayView(Prof.GetData() + 2, 3));
+				const double Rise = (BermTop - BermFoot) / BermRun;
+				for (double Dd = OutWalk + 1.2; Dd < Dt - 0.6; Dd += BankRows)
+				{
+					const double Lr = (R.Row(Dd, 1.0) - R.Row(Dd, 0.0)).Size();
+					const int32 Count = FMath::FloorToInt32(Lr / BankPitch);
+					for (int32 C = 0; C < Count; ++C)
+					{
+						const double Du = Dd + Rng.FRandRange(-BankStray, BankStray);
+						const FVector2D P = R.Row(Du, (C + 0.5 + Rng.FRandRange(-BankStray, BankStray)) / Count);
+						Places.Add(FBbPlace{ P, R.Along, R.Out, BermFoot + (Du - OutWalk) * Rise, Rise, WantBank });
+					}
+				}
 			}
 			else
 			{
@@ -1680,6 +1722,12 @@ void ABbPark::BuildStands()
 					if (Lr > GapA + GapB + 0.3)
 					{
 						InstPanel(R.Row(Dd, GapA / Lr), R.Row(Dd, 1.0 - GapB / Lr), 0.28, Zk + 0.42, Zk + 0.47, BbLook::Bench2, false);
+						const int32 Count = FMath::FloorToInt32((Lr - GapA - GapB) / BenchPitch);
+						for (int32 C = 0; C < Count; ++C)
+						{
+							const FVector2D P = R.Row(Dd, ((Lr + GapA - GapB) * 0.5 + (C - (Count - 1) * 0.5) * BenchPitch) / Lr);
+							Places.Add(FBbPlace{ P, R.Along, R.Out, Zk + 0.47, 0.0, WantBench });
+						}
 					}
 				}
 			}
@@ -1741,6 +1789,52 @@ void ABbPark::BuildStands()
 	AddSolid(Grass, BbLook::Berm);
 	AddSolid(RoofFaces, BbLook::Roof);
 	UE_LOG(LogBbPark, Display, TEXT("BB_PARK seats: %d"), Seats);
+	BuildCrowd(Places, Rng);
+}
+
+void ABbPark::BuildCrowd(TArray<FBbPlace>& Places, FRandomStream& Rng)
+{
+	// Who gets a place: each place draws a number that is the higher the more it is wanted,
+	// and the highest BbLook::Attendance of them are taken. Not the sim's randomness: this
+	// is decoration, from its own fixed seed.
+	TArray<TPair<double, int32>> Order;
+	Order.Reserve(Places.Num());
+	for (int32 I = 0; I < Places.Num(); ++I)
+	{
+		Order.Emplace(FMath::Pow(FMath::Max(Rng.FRand(), 1e-6f), 1.0 / Places[I].Want), I);
+	}
+	Order.Sort([](const TPair<double, int32>& A, const TPair<double, int32>& B) { return A.Key > B.Key; });
+	const int32 Came = FMath::Min(BbLook::Attendance, Places.Num());
+	for (int32 I = 0; I < Came; ++I)
+	{
+		const FBbPlace& Pl = Places[Order[I].Value];
+		const FBbPaint& Shirt = BbLook::Shirts[Rng.RandHelper(UE_ARRAY_COUNT(BbLook::Shirts))];
+		const FBbPaint& Skin = BbLook::Skin[Rng.RandHelper(UE_ARRAY_COUNT(BbLook::Skin))];
+		const FBbPaint& Head = BbLook::Heads[Rng.RandHelper(UE_ARRAY_COUNT(BbLook::Heads))];
+		const FBbPaint& Legs = BbLook::Trousers[Rng.RandHelper(UE_ARRAY_COUNT(BbLook::Trousers))];
+		const double S = Rng.FRandRange(FigureSmall, FigureTall);
+		const FRotator Square = ToUE(Pl.Along.X, Pl.Along.Y, 0).GetSafeNormal().Rotation();
+		FRotator Turned = Square;
+		Turned.Yaw += Rng.FRandRange(-FigureTurnDeg, FigureTurnDeg);
+		auto At = [&Pl](double Back, double Up) { const FVector2D Q = Pl.P + Pl.Out * Back; return ToUE(Q.X, Q.Y, Pl.Z + Up); };
+		if (Pl.Slope > 0.0)
+		{
+			// On the grass: the legs lie down the slope in front.
+			const double Cs = 1.0 / FMath::Sqrt(1.0 + Pl.Slope * Pl.Slope), Sn = Pl.Slope * Cs;
+			const FRotator Lying = FRotationMatrix::MakeFromXY(ToUE(Pl.Along.X, Pl.Along.Y, 0), ToUE(Pl.Out.X * Cs, Pl.Out.Y * Cs, Sn)).Rotator();
+			Inst(Cube, At(-0.42 * S * Cs - 0.065 * Sn, -0.42 * S * Sn + 0.065 * Cs), FVector(0.34 * S, 0.80 * S, 0.13), Legs, Lying, false);
+		}
+		else
+		{
+			Inst(Cube, At(-0.29 * S, -0.21), FVector(0.32 * S, 0.13, 0.42), Legs, Square, false);
+			Inst(Cube, At(-0.16 * S, 0.07), FVector(0.34 * S, 0.38 * S, 0.14), Legs, Square, false);
+		}
+		const double Body = 0.56 * S;
+		Inst(Cube, At(0.06, Body * 0.5), FVector(0.40 * S, 0.22, Body), Shirt, Turned, false);
+		Inst(Cube, At(0.05, Body + 0.115), FVector(0.17, 0.20, 0.21), Skin, Turned, false);
+		Inst(Cube, At(0.06, Body + 0.25), FVector(0.185, 0.215, 0.07), Head, Turned, false);
+	}
+	UE_LOG(LogBbPark, Display, TEXT("BB_PARK crowd: %d in %d places"), Came, Places.Num());
 }
 
 namespace
@@ -2079,7 +2173,7 @@ TArray<FBbParkSpot> ABbPark::Spots(const BbPark& Desc)
 	S.Add(At(TEXT("first_high"), ToUE(Wide, -5, 38), ToUE(0, 42, 0), 60.f));
 	// From a seat half-way up the deck behind third (the roof and a light tower stand where
 	// this spot was before the seating bowl was built).
-	S.Add(At(TEXT("third_stands"), ToUE(-31, -3, 5.4), ToUE(5, 25, 0), 65.f));
+	S.Add(At(TEXT("third_stands"), ToUE(SpotSeat.X, SpotSeat.Y, 5.4), ToUE(5, 25, 0), 65.f));
 	S.Add(At(TEXT("mound"), ToUE(4.5, Desc.rubber_m - 7.0, 0.9), ToUE(0, Desc.rubber_m - 0.3, 0.35), 40.f));
 	// Straight down, centre field at the top of the picture, the whole park in a 16:9 frame.
 	const double MidY = (Deep - 20.0) * 0.5;
