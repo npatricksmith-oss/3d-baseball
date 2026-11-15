@@ -76,8 +76,13 @@ fn every_out_is_called_promptly_and_close_plays_at_once() {
                 if (1..=3).contains(&c.base) && c.margin_s.is_finite() && c.margin_s < 1.0 {
                     if let Some(track) = s.viz.actors.iter().find(|(id, _)| *id == c.runner).map(|x| &x.1) {
                         if let Some(p) = track_at(track, c.t_out) {
+                            // (A runner tagged on his way back to the base he left, now that
+                            // runners turn round, is judged against that base: seed 0 play 17,
+                            // the batter caught returning to first with the engine's base 2.)
                             let d = (p - base_xy(c.base)).norm();
-                            assert!((d - c.margin_s * 8.2).abs() < 1.5, "play {}: runner {d:.2} m from base {} but margin {:.2} s", s.play, c.base, c.margin_s);
+                            let back = (c.base > 1).then(|| (p - base_xy(c.base - 1)).norm());
+                            let ok = (d - c.margin_s * 8.2).abs() < 1.5 || back.is_some_and(|b| (b - c.margin_s * 8.2).abs() < 1.5);
+                            assert!(ok, "seed {seed} play {}: runner {d:.2} m from base {} (and {back:?} from the one behind) but margin {:.2} s", s.play, c.base, c.margin_s);
                             checked_margin += 1;
                         }
                     }

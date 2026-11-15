@@ -138,11 +138,18 @@ fn seed_3_play_140_keeps_the_force_double_play_against_a_single_home_tag() {
 }
 
 #[test]
-fn seed_17_play_203_does_not_run_at_third_for_a_runner_stopped_at_second() {
-    // Main's third baseman ran a tick toward third, 2.56 m away, for the runner
-    // from second, who was already back on second with his arrival speed still
-    // live. Nothing visible moves toward third: no option there; take first.
+fn seed_17_play_203_does_not_run_at_third_for_a_runner_who_is_not_moving_toward_it() {
+    // Main's third baseman ran a tick toward third, 2.56 m away, for the runner from second,
+    // who was already back on second with his arrival speed still live. Nothing visible
+    // moves toward third: no option there; take first. (Repinned 2026-11-15: runners now look
+    // again and turn round physically, so this play no longer has him back on second; he goes
+    // on to third, visibly moving that way, and the carry to third is the right play. What
+    // the test keeps is the rule: a base is an option only if its runner is visibly moving
+    // toward it.)
     let (_, choices, _) = replay(include_str!("fixtures/a4/17-203.json"));
-    assert_eq!((choices[0].action, choices[0].base), ("throw", 1), "{:#?}", choices[0]);
-    assert!(choices[0].options.iter().all(|o| o.base != 3), "{:#?}", choices[0]);
+    let c = &choices[0];
+    for o in c.options.iter().filter(|o| o.base == 3) {
+        let r = c.runners.iter().find(|r| r.id == o.runner).expect("the runner of the option");
+        assert!(r.speed > 0.5, "an option at third for a runner moving at {:.2} m/s: {c:#?}", r.speed);
+    }
 }
