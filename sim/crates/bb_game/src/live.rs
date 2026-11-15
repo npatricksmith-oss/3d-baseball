@@ -7092,7 +7092,15 @@ mod tests {
 
     fn iso_assert(seeds: std::ops::Range<u64>, stride: u64, min_checks: u64) {
         let (checks, snaps, bad) = isolation_run(seeds.clone(), 0..u32::MAX, stride);
-        eprintln!("isolation seeds {seeds:?} stride {stride}: {checks} checks, {} violations; snapshots by step {snaps:?}", bad.len());
+        // Violations by step, and the snapshots (seed, play, time, step) they occurred at.
+        let mut by_step: std::collections::BTreeMap<&str, u64> = Default::default();
+        let mut at: std::collections::BTreeSet<&str> = Default::default();
+        for b in &bad {
+            let head = b.split(": f").next().unwrap_or(b);
+            at.insert(head);
+            *by_step.entry(head.rsplit(' ').next().unwrap_or("")).or_insert(0) += 1;
+        }
+        eprintln!("isolation seeds {seeds:?} stride {stride}: {checks} checks, {} violations at {} snapshots, by step {by_step:?}; snapshots checked by step {snaps:?}", bad.len(), at.len());
         assert!(checks > min_checks, "only {checks} checks");
         let shown: Vec<&String> = bad.iter().take(12).collect();
         assert!(bad.is_empty(), "{} of {checks} checks leaked, e.g.:\n{}", bad.len(), shown.iter().map(|s| s.as_str()).collect::<Vec<_>>().join("\n"));
