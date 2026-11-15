@@ -1,0 +1,22 @@
+id = "lob-005"
+title = "Bottom ninth, tied, runners on second and third, both touch home while the ball is in doubt and the batter reaches first; the ball is ruled fair: the game ends with the first run only, the trailing runner and the batter are left on base (2), and no advance home is reported for the trailer"
+rules = ["OBR 5.08(b)", "OBR 7.01(e)(3)", "OBR 9.02(g)", "OBR 9.03(c)", "rules-spec 4.1"]
+milestone = "M4"
+tags = ["lob", "walk-off", "pending-ball"]
+initial = { inning = 9, half = "bottom", outs = 0, score = [2, 2], batter = "H.4", bases = { second = "H.2", third = "H.3" } }
+step = [
+ { fact = "PitchDelivered", t = 0.0 },
+ { fact = "BatContact", t = 0.4 },
+ { fact = "BaseLeft", t = 0.5, agent = "H.3", base = 3 },
+ { fact = "BaseLeft", t = 0.5, agent = "H.2", base = 2 },
+ { fact = "BaseTouched", t = 2.0, agent = "H.3", base = 4 },
+ { fact = "BaseTouched", t = 2.1, agent = "H.2", base = 3 },
+ { fact = "BaseLeft", t = 2.2, agent = "H.2", base = 3 },
+ { fact = "BaseTouched", t = 2.4, agent = "H.2", base = 4 },
+ { fact = "BaseTouched", t = 2.5, agent = "H.4", base = 1 },
+ { fact = "BallTouched", t = 3.0, what = "Ground", pos = [20.0, 70.0], expect_events = [
+   { event = "RunScored", runner = "H.3" },
+   { event = "GameEnded", away = 2, home = 3, walk_off = "true" }
+ ], expect_no_events = [{ event = "RunScored", runner = "H.2" }, { event = "RunnerAdvanced", runner = "H.2" }] }
+]
+expect = { status = "Final", score = [2, 3] }

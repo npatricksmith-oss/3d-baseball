@@ -174,7 +174,9 @@ pub fn box_score_with_options(bytes: &[u8], options: scorer::ScorerOptions) -> R
                 }
                 EventBody::RunnerAdvanced => {
                     let a = e.body_as_runner_advanced().unwrap();
-                    if (1..=3).contains(&a.to_base()) { runners.insert(a.runner()); } else { runners.remove(&a.runner()); }
+                    // Only `RunScored` or `RunnerOut` ends a runner's trip: an advance to home is not a run
+                    // (a walk-off's later pending touches never complete, OBR 5.08(b), 9.02(g)).
+                    if (1..=3).contains(&a.to_base()) { runners.insert(a.runner()); }
                 }
                 EventBody::RunnerOut => {
                     outs_in_half += 1;

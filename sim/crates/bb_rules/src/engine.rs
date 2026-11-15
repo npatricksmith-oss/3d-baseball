@@ -1028,6 +1028,11 @@ fn try_walk_off(st: &mut RulesState, ev: &mut Vec<Event>) {
         let from = lp_runners.iter().find(|x| x.runner == r).map(|x| x.start_base).unwrap_or(0);
         ev.push(Event::RunnerAdvanced { runner: r, from, to: 4, cause: AdvanceCause::OnPlay });
         score_run(st, r, ev);
+        // The game ends with the winning run: later pending touches did not complete and are
+        // not reported as advances (rules-spec §4.1; OBR 5.08(b)). Those runners are left on base.
+        if st.walk_off {
+            break;
+        }
     }
     st.play = PlayState::Dead;
     end_pa(st, PaResult::BattedBall, ev);
