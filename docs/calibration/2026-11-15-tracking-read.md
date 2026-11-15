@@ -7,7 +7,7 @@ Branch `work/tracking-read`, from `integrate/held` `2657f65` (the three held bra
 | `45fc8b2` | Spec |
 | `9d80e98` | Code and tests |
 | `0db39d9` | The first look keeps the old first read's shrink |
-| `c93288e` | Fixes from the Codex review (§6) |
+| `c93288e` | Fixes from the Codex review (§3a) |
 
 ## 1. Diagnosis (seed 23080 play 8)
 
