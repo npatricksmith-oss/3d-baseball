@@ -1089,14 +1089,16 @@ fn third_out(st: &mut RulesState, t: f64, start: Base, kind: OutKind, ev: &mut V
             score_run(st, r, ev);
         }
     }
-    // Left on base (OBR 9.02, rules-spec §4.1): every runner on this play who reached base (the
+    // Left on base (OBR 9.02(g), rules-spec §4.1): every runner on this play who reached base (the
     // batter-runner included) and neither scored nor was put out, counted once by identity,
     // wherever he is: on a base (two runners sharing one are both counted, OBR 5.06(a)(2)),
     // between bases, or home with a run that did not count.
     st.bases = [None; 3];
     let mut lob = 0u8;
     for r in &lp.runners {
-        if r.out || credited.contains(&r.runner) {
+        // "Put out" means an out recorded through the third out (`lp.outs`); `r.out` is also the
+        // removal flag of a held pass whose out is ignored after the third (rules-spec §6.3).
+        if lp.outs.iter().any(|o| o.1 == r.runner) || credited.contains(&r.runner) {
             continue;
         }
         lob += 1;

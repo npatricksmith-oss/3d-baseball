@@ -1,11 +1,11 @@
 id = "twoonbase-008"
 title = "Two out: the runner from third comes back to third and the runner from second arrives there too; the batter is retired before first: both runners on third are left on base (2, not 1)"
 # OBR 5.06(a)(2): two runners may not occupy a base, but neither is out merely for sharing it
-# (only the one not entitled is out, and only when tagged). OBR 9.02(a)(3) / rules-spec I1, I10:
+# (only the one not entitled is out, and only when tagged). OBR 9.02(g) / rules-spec I1, I10:
 # left on base counts every runner who reached and neither scored nor was put out. The
 # batter's force at first is the third out (OBR 5.08(a)(1)): no run. Codex rules-passing
 # review #5 (pre-existing: LOB was counted from one slot per base).
-rules = ["OBR 5.06(a)(2)", "OBR 9.02(a)(3)", "rules-spec 5.5", "rules-spec 11 I10"]
+rules = ["OBR 5.06(a)(2)", "OBR 9.02(g)", "rules-spec 5.5", "rules-spec 11 I10"]
 milestone = "M4"
 tags = ["two-on-base", "lob"]
 initial = { inning = 5, outs = 2, batter = "A.6", bases = { second = "A.4", third = "A.5" } }

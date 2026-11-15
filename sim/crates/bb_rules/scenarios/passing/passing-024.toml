@@ -3,7 +3,7 @@ title = "Two out, runner on third: the batter is forced out at first, and the ru
 # OBR 5.08(a)(1): no run scores if the third out is the batter-runner put out at first; the
 # runner's later touch of home (3.5, after the third out at 3.0) is the next half-inning's
 # fact, where a stray touch must not score. (How he is counted in LOB is passing-023's gap.)
-rules = ["OBR 5.08(a)", "OBR 9.02(a)(3)", "rules-spec 6.4", "rules-spec 11 I10"]
+rules = ["OBR 5.08(a)", "OBR 9.02(g)", "rules-spec 6.4", "rules-spec 11 I10"]
 milestone = "M4"
 tags = ["runs", "after-third-out"]
 initial = { inning = 5, outs = 2, batter = "A.6", bases = { third = "A.4" } }

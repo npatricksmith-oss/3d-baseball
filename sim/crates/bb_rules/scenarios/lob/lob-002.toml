@@ -1,8 +1,8 @@
 id = "lob-002"
-title = "Two out, runner on first: the runner is forced out at second (the third out) while the batter is still short of first: the batter reached on a fielder's choice and is left on base, 1"
-# OBR 9.02: the batter-runner whose batted ball put another runner out for the third out is
-# counted left on base (he reached first on a fielder's choice). No run on a force third out.
-rules = ["OBR 5.08(a)", "OBR 9.02", "rules-spec 4.1", "rules-spec 11 I1"]
+title = "Two out, runner on first: the runner is forced out at second (the third out) while the batter is still short of first: the batter, still short of first, is left on base by the explicit batter-runner clause, 1"
+# OBR 9.02(g): the batter-runner whose batted ball put another runner out for the third out is
+# counted left on base (9.02(g)'s explicit clause; he has not yet touched first, and the box score counts him as a plate appearance that is neither a run nor a putout, 9.03(c)). No run on a force third out.
+rules = ["OBR 5.08(a)", "OBR 9.02(g)", "rules-spec 4.1", "rules-spec 11 I1"]
 milestone = "M4"
 tags = ["lob", "batter-runner"]
 initial = { inning = 5, outs = 2, batter = "A.6", bases = { first = "A.4" } }

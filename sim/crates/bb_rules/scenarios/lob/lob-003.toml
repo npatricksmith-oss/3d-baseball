@@ -1,9 +1,9 @@
 id = "lob-003"
 title = "One out, runners on third and first, a caught fly: the runner from third touches home early, returns and retouches third (the pending run is cancelled), leaves again, and is between third and home when the runner from first is doubled off first for the third out: no run, and he is left on base, 1"
 # OBR 5.09(b)(5): the run of a runner who touched home before the catch and returns to retouch
-# does not count unless he touches home again (rules-spec 5.3). OBR 9.02: he neither scored nor
+# does not count unless he touches home again (rules-spec 5.3). OBR 9.02(g): he neither scored nor
 # was out, so he is left on base although he is between bases.
-rules = ["OBR 5.09(b)(5)", "OBR 5.08(a)", "OBR 9.02", "rules-spec 5.3", "rules-spec 4.1", "rules-spec 11 I10"]
+rules = ["OBR 5.09(b)(5)", "OBR 5.08(a)", "OBR 9.02(g)", "rules-spec 5.3", "rules-spec 4.1", "rules-spec 11 I10"]
 milestone = "M4"
 tags = ["lob", "between-bases", "pending-run-cancelled"]
 initial = { inning = 5, outs = 1, batter = "A.6", bases = { first = "A.5", third = "A.4" } }

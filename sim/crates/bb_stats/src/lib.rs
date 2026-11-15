@@ -91,6 +91,12 @@ pub struct BoxScore {
     pub hits_by_inning: [Vec<u32>; 2],
     /// Outs recorded per half-inning, in order (index = half-inning number).
     pub outs_by_half: Vec<u32>,
+    /// Runners left on base per half-inning as the scorer counts them from the events (OBR
+    /// 9.02(g)), parallel to `outs_by_half`.
+    pub lob_by_half: Vec<u32>,
+    /// What the engine claimed in `HalfInningEnded.left_on_base` for each half (`None` where the
+    /// game ended first). Readers do not use it; tests cross-check it against `lob_by_half`.
+    pub engine_lob_by_half: Vec<Option<u32>>,
     pub final_score: Option<(u32, u32)>,
     pub innings: u32,
 }
@@ -135,6 +141,7 @@ pub fn box_score_with_options(bytes: &[u8], options: scorer::ScorerOptions) -> R
     let mut outs_in_half = 0u32;
     let mut runners = std::collections::BTreeSet::new();
     let mut half_ended = true;
+    let mut stranded_batter = false;
     for play in &v.plays {
         let Some(events) = play.events() else { continue };
         for e in events.iter() {
@@ -145,10 +152,13 @@ pub fn box_score_with_options(bytes: &[u8], options: scorer::ScorerOptions) -> R
                     b.linescore[side].push(0);
                     b.hits_by_inning[side].push(0);
                     b.outs_by_half.push(0);
+                    b.lob_by_half.push(0);
+                    b.engine_lob_by_half.push(None);
                     b.innings = b.innings.max(h.inning() as u32);
                     outs_in_half = 0;
                     runners.clear();
                     half_ended = false;
+                    stranded_batter = false;
                 }
                 EventBody::PitchReleased => b.teams[side].pitches_seen += 1,
                 EventBody::RunScored => {
@@ -192,6 +202,12 @@ pub fn box_score_with_options(bytes: &[u8], options: scorer::ScorerOptions) -> R
                         && !events.iter().filter_map(|e| e.body_as_run_scored()).any(|r| r.runner() == pa.batter()) {
                         runners.insert(pa.batter());
                     }
+                    // OBR box-score LOB includes a batter still short of first when a
+                    // preceding runner makes the third out (9.02(g)), even though the
+                    // rules engine's occupied-base count does not.
+                    stranded_batter = outs_in_half >= 3 && ruling.outcome == scorer::Outcome::Out
+                        && pa.result() == ev::PaResult::Unknown
+                        && !events.iter().filter_map(|e| e.body_as_runner_out()).any(|o| o.runner() == pa.batter());
                     if ruling.sacrifice_fly { t.sf += 1; l.sf += 1; }
                     t.rbi += ruling.rbi;
                     l.rbi += ruling.rbi;
@@ -221,14 +237,19 @@ pub fn box_score_with_options(bytes: &[u8], options: scorer::ScorerOptions) -> R
                     }
                 }
                 EventBody::HalfInningEnded => {
-                    // The rules engine counts every runner who reached and neither scored nor was out
-                    // (OBR 9.02, rules-spec §4.1); I1 in the accounting tests checks that independently.
-                    b.teams[side].left_on_base += u32::from(e.body_as_half_inning_ended().unwrap().left_on_base());
+                    let lob = runners.len() as u32 + u32::from(stranded_batter);
+                    b.teams[side].left_on_base += lob;
+                    if let Some(x) = b.lob_by_half.last_mut() { *x = lob; }
+                    if let Some(x) = b.engine_lob_by_half.last_mut() { *x = Some(e.body_as_half_inning_ended().unwrap().left_on_base() as u32); }
                     half_ended = true;
                 }
                 EventBody::GameEnded => {
                     let g = e.body_as_game_ended().unwrap();
-                    if !half_ended { b.teams[side].left_on_base += runners.len() as u32; half_ended = true; }
+                    if !half_ended {
+                        b.teams[side].left_on_base += runners.len() as u32;
+                        if let Some(x) = b.lob_by_half.last_mut() { *x = runners.len() as u32; }
+                        half_ended = true;
+                    }
                     b.final_score = Some((g.score_away() as u32, g.score_home() as u32));
                 }
                 _ => {}

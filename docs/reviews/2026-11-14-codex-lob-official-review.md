@@ -83,4 +83,11 @@ No separate P2 findings.
 
 ## Resolution
 
-Open.
+All four findings fixed on `work/lob-official`.
+
+- **P1-1 fixed.** `third_out` now treats a runner as put out only if he has an out recorded through the third out (`lp.outs`), not by the held-pass removal flag `r.out`. New scenario `lob/lob-004` (two held passes at 6.0 and 7.0 across the third out, LOB 3 derived from 9.02(g)/9.03(c)); it failed before the fix with `left_on_base: 2` and passes after.
+- **P1-2 fixed, by the lead's design.** `bb_stats` computes LOB itself from the events again (reached, `RunScored`, `RunnerOut`, plus the stranded batter-runner of 9.02(g)) and no longer reads `HalfInningEnded.left_on_base`, which stays in the log as the engine's claim. `Box` gained `lob_by_half` and `engine_lob_by_half`; `accounting.rs` asserts they agree half by half in newly generated games, and `committed_fixture_logs_balance_with_their_old_lob` asserts I1 and the old LOB (8 for `game_7` away, 7/7 for `game_1001`, 3 for `game_3` home) on the three committed fixtures. `data-formats.md` says readers recompute and old logs carry the undercount; the field's meaning did not change, so no schema or behavior version moves (the table at lines 536-542 requires a bump only for a changed meaning).
+- **P3-1 fixed.** Citations now read OBR 9.02(g), with 9.03(c) for the proof, in scenarios, spec, comments and ledger; `lob-002` describes the batter as short of first, counted by the explicit batter-runner clause.
+- **P3-2 fixed.** The ledger row gives the exact commands and separates direct game seeds from the CLI's `--seed` mapping.
+
+Verification: `cargo test --workspace --release` passes; `scorer_audit 300 0` and `300 1000` (600 games) complete with I1 asserted on every team.

@@ -204,7 +204,7 @@ Grouped by producer. "Physical" events record what the world did. "Rules" events
 | `HalfInningStarted` | inning, top/bottom |
 | `PlateAppearanceStarted` | batter, pitcher, catcher, base-out state, score, batter height (sets the zone) |
 | `PlateAppearanceEnded` | result code (§4.5), outs recorded, runs scored, RBI |
-| `HalfInningEnded` | runs, left on base (every runner who reached and neither scored nor was out, OBR 9.02; rules-spec §4.1) |
+| `HalfInningEnded` | runs, left on base (the engine's own claim of runners left on base, OBR 9.02(g), rules-spec §4.1; **readers recompute** LOB from `RunScored`/`RunnerOut` and do not trust it; logs written before 2026-11-14 carry the old undercount there. The field's meaning is unchanged, only its engine value became correct, so no schema or behavior version moves.) |
 | `GameEnded` | final score, innings, reason (regulation, walk-off, extra innings) |
 
 **Pitch (physical, then rules)**

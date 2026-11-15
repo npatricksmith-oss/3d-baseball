@@ -1,9 +1,9 @@
 id = "passing-023"
 title = "Two out, runner on first: the batter is forced out at first (the third out) while the runner from first is between first and second: he is left on base, 1, not 0"
-# Third out a force at first: no run (OBR 5.08(a)). LOB: OBR 9.02(a)(3) and rules-spec I1/I10
+# Third out a force at first: no run (OBR 5.08(a)). LOB: OBR 9.02(g) and rules-spec I1/I10
 # count every runner who reached base and neither scored nor was put out, exactly once; a runner
 # between bases at the third out is one of them. Codex rules-passing review, "Not done".
-rules = ["OBR 5.08(a)", "OBR 9.02(a)(3)", "rules-spec 6.4", "rules-spec 11 I1", "rules-spec 11 I10"]
+rules = ["OBR 5.08(a)", "OBR 9.02(g)", "rules-spec 6.4", "rules-spec 11 I1", "rules-spec 11 I10"]
 milestone = "M4"
 tags = ["lob", "between-bases"]
 initial = { inning = 5, outs = 2, batter = "A.6", bases = { first = "A.4" } }
