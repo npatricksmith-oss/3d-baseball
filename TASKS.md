@@ -63,7 +63,20 @@ Main is `3f8ee60`, pushed. `cargo test --workspace --release` on it: 400 pass. S
 
 **Machine:** restarted at 00:05 (orderly); a heat guard runs from the lead's scratchpad (gone after a reboot: rewrite it). The lead's status cue lives in `~/.claude/dev-mods/<session id>/codex-review-status`.
 
-**Measured together, 2026-11-15 04:30 (trial merge `integrate/trio` = main + `work/runner-reads` + `work/collision-q` + `work/outfield-read`; standard run, no full test pass yet):** runs **3.78 [3.85]** (real 4.39), K 22.4% [22.0] (22.6), BB 8.3% [8.6] (8.2), HR/PA 2.68% [2.56] (3.0), ground-ball hits .284 [.301] (.24), liners .671 [.657] (.68), fly balls .105 [.107] (.13), pop-ups .019 [.009] (.02), reached on balls in play 34.4% [35.3], no rules warnings. Every component rate is within reach of real; runs are about 0.55 low. The lead's accounting of the gap, not yet measured piece by piece: home runs 0.4 points short; no errors (A17), stolen bases, wild pitches or passed balls in the game yet, which in MLB carry a few tenths of a run; second to home on a single 38% against about 60%; outs on the bases 0.24–0.31 a team-game against about 0.1. Separately the three give: runners +0.43, collision +0.3, outfield read −1.1.
+**The merge candidate, measured 2026-11-15 06:40: `integrate/held`** (`2657f65`) = main `1a06d22` + `work/collision-q` + `work/outfield-read` + `work/wall-braking`, the fielders' spin belief refit on the combined contact; 1 full test pass, 1 standard run ([note](docs/calibration/2026-11-15-integration-of-the-held-branches.md) on that branch):
+
+| | main | candidate | real |
+|---|---|---|---|
+| runs / team-game | 5.05 [4.97] | 3.88 [3.92] | 4.39 |
+| K% / BB% | 21.9 / 8.2 | 22.3 / 8.3 [8.8] | 22.6 / 8.2 |
+| HR / PA | 2.00% | 2.57% [2.65%] | 3.0% |
+| hits: GB / LD / FB / PU | .331 / .758 / .225 / .035 | .291 / .668 / .112 / .028 [.018] | .245 / .68 / .13 / .02 |
+| routine flies caught | .824 (older main) | .956 | 90–99% by ability |
+| under 80 mph / hard-hit / 105+ | 19.6 / 39.1 / 5.5% | 23.2 / 39.9 / 8.2% | 25.0 / 40.3 / 9.9% |
+
+**Known on the candidate:** the owner's own play (seed 23080 play 8) is a different, harder ball there (98.5 mph at 45°) and **is dropped**: the read drifts 9 m deep in mid-flight and slower braking makes the turn cost more; its test is ignored with that reason. Runs about half a run low (HR short; no errors, steals or wild pitches in the game; second to home on a single 35% against 62%); ground-ball hits still .29.
+
+**Running:** `work/tracking-read` (Opus high, in the `integrate-held` worktree, branched from the candidate): the fielder keeps a track of what he has seen and arrives under control (outfield review P2-1, wall-braking review P2-1 and P3-1; un-ignores 23080/8).
 
 **Waiting for the owner: Q8–Q11, the runner decision model** ([research and design note](docs/calibration/2026-11-15-runner-decision-model.md) §5, where they are numbered Q1–Q4; not blocking, the model is not started). **Q8:** runners go at the run-table break-even exactly, or at the break-even plus a margin fitted so the sim reproduces MLB's attempt and success rates (real runners are safe 94–97% when they go, more careful than the table rewards), with the margin a per-runner and per-team aggressiveness (lead and the note recommend the last). **Q9:** score and inning through a small weight table now, replaced by the learned win-expectancy table later (recommended), or wait. **Q10:** the third-base coach: for now the coach's read stands in for the runner's when the ball is behind him (recommended), a coach on the field with the animation work later. **Q11:** a rundown after the decision model, on its own branch, the one-turn stand-in meanwhile (recommended), or together.
 
