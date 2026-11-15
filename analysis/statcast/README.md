@@ -21,3 +21,4 @@ Attack direction's CSV sign is taken as negative = pulled (inside pitches and ou
 - `savant_slope_by_tilt.py`: slope of spray − attack direction on launch angle (0–50°) by terciles of the swing's tilt, the batter's mean tilt and the swing's attack angle, with standard errors.
 - `savant_square_contact_spray.py` — spray by launch angle for swings with attack direction near zero (square contact), and the offset spray minus attack direction across the attack-direction ladder. Usage: `python3 -I analysis/statcast/savant_square_contact_spray.py sim/target/data/savant [window_deg]`.
 - `ev_la_bins.py`: exit speed × launch angle table, sim against Savant, HR-deficit decomposition and direction check (`docs/calibration/2026-11-15-ev-la-bins.md`).
+- `power_mix.py`: who supplies the 105+ mph contact, real batters by bat-speed fifth against the sim's batters (needs `ev_bat` example output; `docs/calibration/2026-11-15-power-mix.md`).
