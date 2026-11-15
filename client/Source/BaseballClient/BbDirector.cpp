@@ -1493,9 +1493,14 @@ void ABbDirector::PlaceBallShadow(const BbFrame& Frame, bool bShown)
 	// distance stands in for the camera-space depth, which is close enough near the aim.
 	const float HalfFov = FMath::DegreesToRadians(Camera->GetCameraComponent()->FieldOfView * 0.5f);
 	const float ViewM = 2.f * DistM * FMath::Tan(HalfFov);
-	// It shrinks to about half as the ball climbs to 30 m, so height reads too.
+	// Height reads from the size (owner, 2026-11-15): nothing under a ball on the ground or
+	// rolling, a small shadow that closes up as the ball comes down to the grass, and a
+	// larger one the higher the ball is.
 	const float H = FMath::Max(0.f, Frame.ball[2]);
-	const float Climb = FMath::Lerp(1.f, 0.55f, FMath::Clamp(H / 30.f, 0.f, 1.f));
+	const float Near = FMath::Clamp((H - BallShadowNoneM) / (BallShadowFullM - BallShadowNoneM), 0.f, 1.f);
+	const float High = FMath::Clamp((H - BallShadowFullM) / (BallShadowHighM - BallShadowFullM), 0.f, 1.f);
+	const float Climb = Near * FMath::Lerp(1.f, BallShadowHighScale, High);
+	bShown = bShown && Climb > 0.f;
 	const float Across = FMath::Max(BallShadowM, ViewM * BallShadowViewShare) * Climb;
 	// Seen from above at angle E, a disc shows sin E of its width in height. Lengthen it along
 	// the line of sight by 1/sqrt(sin E), at most BallShadowMaxStretch.

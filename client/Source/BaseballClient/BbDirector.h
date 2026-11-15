@@ -321,11 +321,20 @@ private:
 	static constexpr float BallShadowM = BallDrawnM;
 	/** With the ball on the ground, a far shadow keeps at least this share of the view's width
 	 *  across (about 11 px of a 1600 px view), so it can still be seen deep in the outfield.
-	 *  The climb then shrinks it like the 15 cm floor. Sized so the shadow is never larger on
+	 *  The ball's height then scales it like the 15 cm floor (below). Sized so the shadow is never larger on
 	 *  screen than the 50 cm disc the owner found too big (2026-11-12): from the follow camera
 	 *  a ball in the near infield gets about 11 x 6.5 px against that disc's 18 x 6; at the
 	 *  pitch camera's long lens the 15 cm floor governs. */
 	static constexpr float BallShadowViewShare = 0.007f;
+	/** The shadow's size follows the ball's height (owner, 2026-11-15). At or below
+	 *  BallShadowNoneM (the ball's centre resting or rolling on the ground, with a little room
+	 *  for low skips) there is none; it opens to the sizes above by BallShadowFullM, and grows
+	 *  to BallShadowHighScale times that by BallShadowHighM, so a high fly's shadow is the
+	 *  largest and closes up as the ball comes down. */
+	static constexpr float BallShadowNoneM = 0.12f;
+	static constexpr float BallShadowFullM = 2.0f;
+	static constexpr float BallShadowHighM = 30.0f;
+	static constexpr float BallShadowHighScale = 2.5f;
 	/** Most the shadow is drawn longer along the line of sight than across it. A camera low
 	 *  over a far ball sees the disc nearly edge-on (19 m up and 155 m away it shows an eighth
 	 *  of its width); the length makes up the square root of that, so the shadow still reads
