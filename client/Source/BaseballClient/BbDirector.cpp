@@ -1,5 +1,6 @@
 #include "BbDirector.h"
 #include "BbFrame.h"
+#include "BbPark.h"
 #include "BbGameMode.h"
 #include "Animation/AnimSequence.h"
 #include "Animation/SkeletalMeshActor.h"
@@ -36,36 +37,6 @@ using BbFrameConv::ToUE;
 
 namespace
 {
-	// The sim's reference park (bb_physics::ground::Field::default): 330 / 400 / 330 ft, 8 ft wall.
-	const double FT = 0.3048;
-	const double BASE = 27.432;
-	double FenceAt(double Theta)
-	{
-		const double S = FMath::Clamp(Theta / (PI / 4.0), -1.0, 1.0);
-		return 400.0 * FT + (330.0 - 400.0) * FT * S * S;
-	}
-	// Foul territory's walls (physics-spec §9.5, Field::default): the backstop 60 ft behind the
-	// apex with a 9 m screen over the walls behind home, the stands' 4-ft wall 50 ft off each
-	// line closing in to the pole from 100 ft along it, and a dugout opening 20-80 ft along it.
-	const double BackstopM = 60.0 * FT;
-	const double FoulClearM = 50.0 * FT;
-	const double FoulTaperM = 100.0 * FT;
-	const double FoulWallH = 4.0 * FT;
-	const double ScreenH = 9.0;
-	const double DugoutFromM = 20.0 * FT;
-	const double DugoutToM = 80.0 * FT;
-	/** The sim-frame ground point `S` along a foul line and `C` off it into foul ground, on the
-	 *  first-base side (Side +1) or the third-base side (-1). */
-	FVector2D LinePoint(double Side, double S, double C)
-	{
-		return FVector2D(Side * (S + C) * 0.70710678, (S - C) * 0.70710678);
-	}
-	/** Where the side wall meets the backstop, as a distance along the line (negative). */
-	const double BackstopCornerS = FoulClearM - BackstopM * 1.41421356;
-	const FLinearColor Grass(0.05f, 0.22f, 0.05f);
-	const FLinearColor Dirt(0.35f, 0.2f, 0.1f);
-	const FLinearColor Chalk(0.9f, 0.9f, 0.9f);
-	const FLinearColor WallColor(0.02f, 0.08f, 0.2f);
 	const int32 MaxActors = BB_MAX_ACTORS;
 	/** Where an Unreal-frame figure at Foot looks to face the plate. */
 	float YawToPlate(const FVector& Foot)
@@ -162,198 +133,6 @@ AStaticMeshActor* ABbDirector::Shape(UStaticMesh* Mesh, const FVector& Location,
 	return A;
 }
 
-void ABbDirector::BuildLights()
-{
-	UWorld* W = GetWorld();
-	// The template map may bring its own sky and sun; only add what is missing.
-	TArray<AActor*> Found;
-	// No distance haze: the pitch camera looks down 140 m of field through a long lens.
-	UGameplayStatics::GetAllActorsOfClass(W, AExponentialHeightFog::StaticClass(), Found);
-	for (AActor* A : Found)
-	{
-		A->Destroy();
-	}
-	Found.Reset();
-	UGameplayStatics::GetAllActorsOfClass(W, ADirectionalLight::StaticClass(), Found);
-	// An early-afternoon sun over the third-base side lights both camera angles.
-	for (AActor* A : Found)
-	{
-		A->SetActorRotation(FRotator(-55.f, 100.f, 0.f));
-	}
-	if (Found.Num() == 0)
-	{
-		ADirectionalLight* Sun = W->SpawnActor<ADirectionalLight>(FVector(0, 0, 5000), FRotator(-55.f, 100.f, 0.f));
-		Sun->GetLightComponent()->SetMobility(EComponentMobility::Movable);
-		Sun->GetLightComponent()->SetIntensity(6.f);
-		if (UDirectionalLightComponent* D = Cast<UDirectionalLightComponent>(Sun->GetLightComponent()))
-		{
-			D->SetAtmosphereSunLight(true);
-			D->DynamicShadowDistanceMovableLight = 30000.f;
-		}
-	}
-	Found.Reset();
-	UGameplayStatics::GetAllActorsOfClass(W, ASkyLight::StaticClass(), Found);
-	if (Found.Num() == 0)
-	{
-		AActor* Atmosphere = W->SpawnActor<AActor>(AActor::StaticClass());
-		USkyAtmosphereComponent* Sky = NewObject<USkyAtmosphereComponent>(Atmosphere);
-		Atmosphere->SetRootComponent(Sky);
-		Sky->RegisterComponent();
-		ASkyLight* SkyLight = W->SpawnActor<ASkyLight>();
-		SkyLight->GetLightComponent()->SetMobility(EComponentMobility::Movable);
-		SkyLight->GetLightComponent()->bRealTimeCapture = true;
-		SkyLight->GetLightComponent()->SetIntensity(1.2f);
-		SkyLight->GetLightComponent()->RecaptureSky();
-	}
-}
-
-void ABbDirector::BuildField()
-{
-	// Engine primitives are 100 cm across (the plane is 100 × 100 cm).
-	// Ground layers from the bottom, a centimetre or two apart so none of them fight; they
-	// cast no shadows, so their edges do not show as dark rims.
-	auto Flat = [this](UStaticMesh* Mesh, const FVector& At, const FVector& Scale, const FLinearColor& Color, const FRotator& Rot = FRotator::ZeroRotator)
-	{
-		Shape(Mesh, At, Scale, Color, Rot)->GetStaticMeshComponent()->SetCastShadow(false);
-	};
-	Flat(Plane, ToUE(0, 60, -0.06), FVector(400, 400, 1), Grass);
-	// Infield dirt: a flat disc of the sim's dirt radius (95 ft).
-	Flat(Cylinder, ToUE(0, 0, -0.045), FVector(2 * 95 * FT, 2 * 95 * FT, 0.02), Dirt);
-	// Grass inside the base paths, then the home-plate circle and the mound.
-	Flat(Cube, ToUE(0, BASE * 0.7071, -0.03), FVector(BASE * 0.82, BASE * 0.82, 0.02), Grass, FRotator(0, 45, 0));
-	Flat(Cylinder, ToUE(0, 0, -0.015), FVector(8.0, 8.0, 0.02), Dirt);
-	Flat(Cylinder, ToUE(0, 18.44, -0.005), FVector(5.5, 5.5, 0.02), Dirt);
-	// Bases and home plate.
-	const double Bx[4] = { 0, BASE * 0.7071, 0, -BASE * 0.7071 };
-	const double By[4] = { 0, BASE * 0.7071, BASE * 1.4142, BASE * 0.7071 };
-	for (int32 I = 0; I < 4; ++I)
-	{
-		Shape(Cube, ToUE(Bx[I], By[I], 0.04), FVector(0.4, 0.4, 0.08), Chalk, FRotator(0, 45, 0));
-	}
-	Shape(Cube, ToUE(0, 18.44, 0.27), FVector(0.15, 0.6, 0.03), Chalk);
-	// Foul lines to the fence.
-	const double LineLen = 330.0 * FT;
-	for (int32 Side = -1; Side <= 1; Side += 2)
-	{
-		const double Mx = Side * LineLen * 0.5 * 0.7071;
-		const double My = LineLen * 0.5 * 0.7071;
-		Shape(Cube, ToUE(Mx, My, 0.01), FVector(LineLen, 0.1, 0.01), Chalk, FRotator(0, Side * 45.f, 0));
-		// Foul poles.
-		Shape(Cylinder, ToUE(Side * LineLen * 0.7071, LineLen * 0.7071, 6.0), FVector(0.3, 0.3, 12.0), FLinearColor(0.9f, 0.8f, 0.1f));
-	}
-	// Outfield wall: short straight panels along the fence curve.
-	const int32 Panels = 48;
-	for (int32 I = 0; I < Panels; ++I)
-	{
-		const double T0 = -PI / 4 + (PI / 2) * I / Panels;
-		const double T1 = -PI / 4 + (PI / 2) * (I + 1) / Panels;
-		const FVector2D A(FenceAt(T0) * FMath::Sin(T0), FenceAt(T0) * FMath::Cos(T0));
-		const FVector2D B(FenceAt(T1) * FMath::Sin(T1), FenceAt(T1) * FMath::Cos(T1));
-		const FVector2D Mid = (A + B) * 0.5;
-		const double Len = (B - A).Size();
-		// Panel long axis: the cube's X, turned to run from A to B (in Unreal's frame).
-		const FVector Dir = ToUE(B.X - A.X, B.Y - A.Y, 0).GetSafeNormal();
-		Shape(Cube, ToUE(Mid.X, Mid.Y, 4.0 * FT), FVector(Len + 0.05, 0.3, 8.0 * FT), WallColor, Dir.Rotation());
-	}
-	// Foul territory's walls, where the sim has them (physics-spec §9.5): a panel of height H
-	// from A to B (sim frame), standing on the wall's line.
-	auto Panel = [this](const FVector2D& A, const FVector2D& B, double H)
-	{
-		const FVector2D Mid = (A + B) * 0.5;
-		const FVector Dir = ToUE(B.X - A.X, B.Y - A.Y, 0).GetSafeNormal();
-		Shape(Cube, ToUE(Mid.X, Mid.Y, H * 0.5), FVector((B - A).Size() + 0.05, 0.3, H), WallColor, Dir.Rotation());
-	};
-	const FLinearColor Shade(0.03f, 0.03f, 0.035f);
-	const double Pole = 330.0 * FT;
-	// The backstop: a low wall under the screen, which is drawn as its posts and top rail
-	// only (the net itself is see-through).
-	const FVector2D BL = LinePoint(-1, BackstopCornerS, FoulClearM), BR = LinePoint(1, BackstopCornerS, FoulClearM);
-	Panel(BL, BR, FoulWallH);
-	for (int32 Side = -1; Side <= 1; Side += 2)
-	{
-		// Behind home the side walls carry the screen too (s < 0): posts at the backstop
-		// corner and where the screen ends, and its top rail.
-		const FVector2D Corner = LinePoint(Side, BackstopCornerS, FoulClearM);
-		const FVector2D ScreenEnd = LinePoint(Side, 0.0, FoulClearM);
-		Panel(Corner, ScreenEnd, FoulWallH);
-		for (const FVector2D& P : { Corner, ScreenEnd })
-		{
-			Shape(Cylinder, ToUE(P.X, P.Y, ScreenH * 0.5), FVector(0.12, 0.12, ScreenH), Chalk);
-		}
-		const FVector2D Mid = (Corner + ScreenEnd) * 0.5;
-		Shape(Cube, ToUE(Mid.X, Mid.Y, ScreenH), FVector((ScreenEnd - Corner).Size(), 0.08, 0.08), Chalk, ToUE(ScreenEnd.X - Corner.X, ScreenEnd.Y - Corner.Y, 0).Rotation());
-		// The stands' wall, open at the dugout, then closing in to the pole.
-		Panel(ScreenEnd, LinePoint(Side, DugoutFromM, FoulClearM), FoulWallH);
-		Panel(LinePoint(Side, DugoutToM, FoulClearM), LinePoint(Side, FoulTaperM, FoulClearM), FoulWallH);
-		Panel(LinePoint(Side, FoulTaperM, FoulClearM), LinePoint(Side, Pole, 0.0), FoulWallH);
-		// The dugout: a dark bay sunk behind the opening, under a roof.
-		const double Deep = 3.5;
-		const FVector2D Floor = (LinePoint(Side, DugoutFromM, FoulClearM + Deep * 0.5) + LinePoint(Side, DugoutToM, FoulClearM + Deep * 0.5)) * 0.5;
-		const FRotator Along = ToUE(Side * 0.70710678, 0.70710678, 0).Rotation();
-		Flat(Cube, ToUE(Floor.X, Floor.Y, 0.0), FVector(DugoutToM - DugoutFromM, Deep, 0.02), Shade, Along);
-		const FVector2D Roof = (LinePoint(Side, DugoutFromM, FoulClearM + Deep * 0.5 + 0.3) + LinePoint(Side, DugoutToM, FoulClearM + Deep * 0.5 + 0.3)) * 0.5;
-		Shape(Cube, ToUE(Roof.X, Roof.Y, 2.4), FVector(DugoutToM - DugoutFromM, Deep - 0.6, 0.2), WallColor, Along);
-	}
-}
-
-void ABbDirector::BuildStands()
-{
-	// Seating as plain blocks, so the park reads as a park: a bank beyond the outfield wall,
-	// a grandstand down each foul line, and a curve behind home. None of it is in the sim.
-	const FLinearColor Seats(0.2f, 0.22f, 0.28f);
-	const FLinearColor Concrete(0.45f, 0.45f, 0.47f);
-	auto Block = [this](const FVector2D& A, const FVector2D& B, double Depth, double Height, const FLinearColor& Color)
-	{
-		const FVector2D Mid = (A + B) * 0.5;
-		const FVector Dir = ToUE(B.X - A.X, B.Y - A.Y, 0).GetSafeNormal();
-		Shape(Cube, ToUE(Mid.X, Mid.Y, Height * 0.5), FVector((B - A).Size() + 0.2, Depth, Height), Color, Dir.Rotation())->GetStaticMeshComponent()->SetCastShadow(false);
-	};
-	const int32 N = 24;
-	for (int32 I = 0; I < N; ++I)
-	{
-		const double T0 = -PI / 4 + (PI / 2) * I / N;
-		const double T1 = -PI / 4 + (PI / 2) * (I + 1) / N;
-		// Two tiers stepping up and back from the wall.
-		for (int32 Tier = 0; Tier < 2; ++Tier)
-		{
-			const double Out = 5.0 + 7.0 * Tier;
-			const FVector2D A((FenceAt(T0) + Out) * FMath::Sin(T0), (FenceAt(T0) + Out) * FMath::Cos(T0));
-			const FVector2D B((FenceAt(T1) + Out) * FMath::Sin(T1), (FenceAt(T1) + Out) * FMath::Cos(T1));
-			Block(A, B, 7.0, 5.0 + 4.5 * Tier, Tier == 0 ? Seats : Concrete);
-		}
-	}
-	// Foul-line grandstands: behind the stands' wall (physics-spec §9.5), parallel to the
-	// line past the dugout and then following the wall in to the pole; the first tier starts
-	// 4 m behind the wall (behind the dugouts' roofs), the second 8 m farther.
-	for (int32 Side = -1; Side <= 1; Side += 2)
-	{
-		const double Pole = 330.0 * FT;
-		// The wall's pieces in (along, off) on this side, each with its outward normal.
-		const double Seg[2][4] = { { 0.0, FoulClearM, FoulTaperM, FoulClearM }, { FoulTaperM, FoulClearM, Pole, 0.0 } };
-		for (const auto& W : Seg)
-		{
-			const FVector2D D(W[2] - W[0], W[3] - W[1]);
-			const FVector2D Out = FVector2D(-D.Y, D.X).GetSafeNormal();
-			for (int32 Tier = 0; Tier < 2; ++Tier)
-			{
-				const double Back = 8.0 + 8.0 * Tier;
-				const FVector2D A = LinePoint(Side, W[0] + Out.X * Back, W[1] + Out.Y * Back);
-				const FVector2D B = LinePoint(Side, W[2] + Out.X * Back, W[3] + Out.Y * Back);
-				Block(A, B, 8.0, 5.0 + 5.0 * Tier, Tier == 0 ? Seats : Concrete);
-			}
-		}
-	}
-	// Behind home: a curve of seats joining the two grandstands (the backstop and its
-	// screen are with the field's walls).
-	const int32 M = 10;
-	for (int32 I = 0; I < M; ++I)
-	{
-		const double T0 = PI * 0.75 + (PI * 0.5) * I / M;
-		const double T1 = PI * 0.75 + (PI * 0.5) * (I + 1) / M;
-		Block(FVector2D(24.0 * FMath::Sin(T0), 24.0 * FMath::Cos(T0)), FVector2D(24.0 * FMath::Sin(T1), 24.0 * FMath::Cos(T1)), 6.0, 5.0, Seats);
-	}
-}
-
 void ABbDirector::BeginPlay()
 {
 	Super::BeginPlay();
@@ -371,9 +150,10 @@ void ABbDirector::BeginPlay()
 		A->Destroy();
 	}
 
-	BuildLights();
-	BuildField();
-	BuildStands();
+	// The park (BbPark): the sun and sky now, the field and stands once the sim has said what
+	// park the game is in.
+	Park = GetWorld()->SpawnActor<ABbPark>();
+	Park->BuildLights();
 
 	// Players. Human figures if the mannequin assets are in Content (client/run.sh copies
 	// them from the engine's templates; they are not in the repository).
@@ -454,6 +234,15 @@ void ABbDirector::BeginPlay()
 	FParse::Value(Cmd, TEXT("BbSimLib="), Lib);
 	uint64 Seed = 7;
 	FParse::Value(Cmd, TEXT("BbSeed="), Seed);
+	// The game is started here, before anything is drawn, because the park comes from it.
+	TUniquePtr<FBbSim> Started = MakeUnique<FBbSim>();
+	if (!Started->Start(Lib, Seed))
+	{
+		bGameOver = true;
+		return;
+	}
+	UE_LOG(LogBb, Display, TEXT("Sim loaded from %s, seed %llu"), *Lib, Seed);
+	Park->Build(Started->Park());
 	FParse::Value(Cmd, TEXT("BbSpeed="), Speed);
 	FParse::Value(Cmd, TEXT("BbCamera="), CameraMode);
 	FParse::Value(Cmd, TEXT("BbShots="), ShotsLeft);
@@ -466,6 +255,8 @@ void ABbDirector::BeginPlay()
 	FParse::Value(Cmd, TEXT("BbDiveShots="), DiveShotsLeft);
 	FParse::Value(Cmd, TEXT("BbBoxShots="), BoxShotAtPlay);
 	FParse::Value(Cmd, TEXT("BbBoxHold="), BoxHoldS);
+	FParse::Value(Cmd, TEXT("BbParkShotsAt="), ParkShotsAt);
+	ParkShot = FParse::Param(Cmd, TEXT("BbParkShots")) ? 0 : -1;
 	{
 		int32 Cut = 1;
 		FParse::Value(Cmd, TEXT("BbSideCut="), Cut);
@@ -562,14 +353,8 @@ void ABbDirector::BeginPlay()
 		return;
 	}
 
-	Sim = MakeUnique<FBbSim>();
-	if (!Sim->Start(Lib, Seed))
-	{
-		Sim.Reset();
-		bGameOver = true;
-		return;
-	}
-	UE_LOG(LogBb, Display, TEXT("Sim loaded from %s, seed %llu"), *Lib, Seed);
+	// (The animation checks above return without a game: they need only the park.)
+	Sim = MoveTemp(Started);
 	// The first pitch, like every other, resolves on a worker; Tick starts it when it is ready.
 	RequestNext();
 }
@@ -688,7 +473,7 @@ void ABbDirector::BeginPlayback(FBbPlay&& Play)
 	++PlaysShown;
 	// Anyone still walking off who is in this pitch after all (only when no reset was staged).
 	BbFrame Start;
-	if (Sim->Sample(Current, 0.f, Start))
+	if (SampleDrawn(Current, 0.f, Start))
 	{
 		PurgeExits(Start);
 	}
@@ -720,7 +505,7 @@ void ABbDirector::ShowReplay(int32 Index)
 	CallsLogged = 0;
 	bRush = false;
 	BbFrame Start;
-	if (Sim->Sample(Current, 0.f, Start))
+	if (SampleDrawn(Current, 0.f, Start))
 	{
 		PurgeExits(Start);
 	}
@@ -795,7 +580,7 @@ void ABbDirector::NoteThrows(float From, float To)
 	{
 		const float At = FMath::Min(S, To);
 		BbFrame F;
-		if (Sim->Sample(Current, At, F) && F.holder >= 0 && F.release_in_s >= 0.f)
+		if (SampleDrawn(Current, At, F) && F.holder >= 0 && F.release_in_s >= 0.f)
 		{
 			const uint16 Agent = (uint16)F.holder;
 			const float ReleaseAt = At + F.release_in_s;
@@ -808,7 +593,7 @@ void ABbDirector::NoteThrows(float From, float To)
 				N.ReleaseAt = ReleaseAt;
 				BbFrame AtRelease, InFlight;
 				FVector Foot = FVector::ZeroVector;
-				if (Sim->Sample(Current, ReleaseAt, AtRelease))
+				if (SampleDrawn(Current, ReleaseAt, AtRelease))
 				{
 					for (uint32 I = 0; I < AtRelease.n_actors; ++I)
 					{
@@ -818,7 +603,7 @@ void ABbDirector::NoteThrows(float From, float To)
 						}
 					}
 				}
-				N.Yaw = Sim->Sample(Current, ReleaseAt + 0.35f, InFlight) ? (ToUE(InFlight.ball) - Foot).Rotation().Yaw : YawToPlate(Foot);
+				N.Yaw = SampleDrawn(Current, ReleaseAt + 0.35f, InFlight) ? (ToUE(InFlight.ball) - Foot).Rotation().Yaw : YawToPlate(Foot);
 				Throws.Add(N);
 			}
 		}
@@ -829,13 +614,29 @@ void ABbDirector::NoteThrows(float From, float To)
 	}
 }
 
-FVector2D ABbDirector::Dugout(uint16 Agent)
+FVector2D ABbDirector::Dugout(uint16 Agent) const
 {
-	// The dugouts are the sim's openings in the stands' wall (physics-spec §9.5, 20-80 ft along
-	// each line): home on the first-base side, away on the third-base side. A player walking
-	// off goes in at the middle of the opening and disappears under the roof.
-	const double Side = (Agent >> 8) != 0 ? 1.0 : -1.0;
-	return LinePoint(Side, (DugoutFromM + DugoutToM) * 0.5, FoulClearM + 1.5);
+	// The dugouts are the sim's openings in the stands' wall (physics-spec §9.5): home on the
+	// first-base side, away on the third-base side. A player walking off goes in at the middle
+	// of the opening and disappears under the roof.
+	return Park->DugoutDoor((Agent >> 8) != 0 ? 1.0 : -1.0);
+}
+
+bool ABbDirector::SampleDrawn(const FBbPlay& Play, float T, BbFrame& Out) const
+{
+	if (!Sim->Sample(Play, T, Out))
+	{
+		return false;
+	}
+	// The sim's ground is level; the drawn field has the mound's height (park-visuals §2).
+	// The ball is never drawn under the drawn ground: a ball in the air is where the sim has
+	// it. (Players are stood on the drawn ground where they are posed, in Tick.)
+	const float Under = (float)Park->GroundZ(Out.ball[0], Out.ball[1]);
+	if (Under > 0.f)
+	{
+		Out.ball[2] = FMath::Max(Out.ball[2], Under + 0.037f);
+	}
+	return true;
 }
 
 void ABbDirector::CarryFigure(const TArray<FFigureState>& Old, int32 Slot, uint16 Agent)
@@ -865,7 +666,7 @@ void ABbDirector::CarryFigure(const TArray<FFigureState>& Old, int32 Slot, uint1
 bool ABbDirector::StartReset(const FBbPlay& Next)
 {
 	BbFrame From, To;
-	if (!Sim->Sample(Current, Current.Info.duration_s, From) || !Sim->Sample(Next, 0.f, To) || To.n_actors == 0)
+	if (!SampleDrawn(Current, Current.Info.duration_s, From) || !SampleDrawn(Next, 0.f, To) || To.n_actors == 0)
 	{
 		return false;
 	}
@@ -991,7 +792,7 @@ bool ABbDirector::StartReset(const FBbPlay& Next)
 	ResetThrower = -1;
 	ResetThrowFirstClip = -1.f;
 	ResetBallFrom = FVector(From.ball[0], From.ball[1], From.ball[2]);
-	ResetBallTo = Pitcher ? FVector(Pitcher->pos[0], Pitcher->pos[1], 1.4) : FVector(0.0, 18.44, 1.4);
+	ResetBallTo = Pitcher ? FVector(Pitcher->pos[0], Pitcher->pos[1], 1.4) : FVector(0.0, Sim->Park().rubber_m, 1.4);
 	if (!bSideChange && Pitcher)
 	{
 		int32 Thrower = -1;
@@ -1583,8 +1384,9 @@ void ABbDirector::UpdateCamera(const BbFrame& Frame, float DeltaSeconds)
 
 void ABbDirector::PlaceBallShadow(const BbFrame& Frame, bool bShown)
 {
-	// Above every ground layer (the mound's top is at 5 mm), below anything else.
-	const FVector At = ToUE(Frame.ball[0], Frame.ball[1], 0.012);
+	// Just above the drawn ground (which rises at the mound), below anything else.
+	const float GroundM = (float)Park->GroundZ(Frame.ball[0], Frame.ball[1]);
+	const FVector At = ToUE(Frame.ball[0], Frame.ball[1], GroundM + 0.012);
 	const FVector Look = At - Camera->GetActorLocation();
 	const float DistM = Look.Size() / 100.f;
 	// Width of the view at the shadow's distance, m: a far shadow is drawn larger so it keeps
@@ -1595,7 +1397,7 @@ void ABbDirector::PlaceBallShadow(const BbFrame& Frame, bool bShown)
 	// Height reads from the size (owner, 2026-11-15): nothing under a ball on the ground or
 	// rolling, a small shadow that closes up as the ball comes down to the grass, and a
 	// larger one the higher the ball is.
-	const float H = FMath::Max(0.f, Frame.ball[2]);
+	const float H = FMath::Max(0.f, Frame.ball[2] - GroundM);
 	const float Near = FMath::Clamp((H - BallShadowNoneM) / (BallShadowFullM - BallShadowNoneM), 0.f, 1.f);
 	const float High = FMath::Clamp((H - BallShadowFullM) / (BallShadowHighM - BallShadowFullM), 0.f, 1.f);
 	const float Climb = Near * FMath::Lerp(1.f, BallShadowHighScale, High);
@@ -1765,7 +1567,7 @@ void ABbDirector::Tick(float DeltaSeconds)
 		}
 		else
 		{
-			bHave = Sim->Sample(Current, T, Frame);
+			bHave = SampleDrawn(Current, T, Frame);
 			// -BbDiveShots: each dive photographed in the air, lying, and getting up.
 			for (uint32 D = 0; bHave && DiveShotsLeft > 0 && D < Frame.n_dives; ++D)
 			{
@@ -1943,6 +1745,9 @@ void ABbDirector::Tick(float DeltaSeconds)
 					In = StagedInput(M, ExitClock);
 					In.bExiting = true;
 				}
+				// Everyone stands on the ground that is drawn, wherever the play or the reset
+				// has put him: on the mound that is up to 10 in above the sim's level field.
+				A.pos[2] += (float)Park->GroundZ(A.pos[0], A.pos[1]);
 				Bodies[I]->SetActorHiddenInGame(!bShow || bFigure);
 				Heads[I]->SetActorHiddenInGame(!bShow || bFigure);
 				if (bFigure)
@@ -2151,6 +1956,40 @@ void ABbDirector::Tick(float DeltaSeconds)
 		if (--ShotsLeft == 0)
 		{
 			BenchSeconds = FMath::Max(BenchSeconds, (float)Wall + 2.f);
+		}
+	}
+	// -BbParkShots: the camera goes round the park's fixed spots, a picture from each.
+	if (ParkShot >= 0 && Sim && Wall >= ParkShotsAt)
+	{
+		const TArray<FBbParkSpot> Spots = ABbPark::Spots(Sim->Park());
+		if (ParkShot >= Spots.Num())
+		{
+			if (Wall >= ParkShotSince + 1.0)
+			{
+				Finish();
+			}
+		}
+		else
+		{
+			const FBbParkSpot& Spot = Spots[ParkShot];
+			Camera->SetActorLocationAndRotation(Spot.Eye, Spot.Look);
+			Camera->GetCameraComponent()->SetFieldOfView(Spot.Fov);
+			ShownCam = -1;
+			if (ParkShotSince == 0.0)
+			{
+				ParkShotSince = Wall;
+			}
+			if (!bParkShotAsked && Wall >= ParkShotSince + 1.0)
+			{
+				FScreenshotRequest::RequestScreenshot(FPaths::Combine(FPaths::ProjectSavedDir(), TEXT("Shots"), FString::Printf(TEXT("park_%d_%s.png"), ParkShot + 1, Spot.Name)), false, false);
+				bParkShotAsked = true;
+			}
+			else if (bParkShotAsked && Wall >= ParkShotSince + 1.5)
+			{
+				++ParkShot;
+				ParkShotSince = Wall;
+				bParkShotAsked = false;
+			}
 		}
 	}
 	UpdateBoxScreen(DeltaSeconds, bTabHeld);

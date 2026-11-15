@@ -36,6 +36,8 @@ public:
 	/** The family name of the player behind this agent id (either kind), or empty. Read once
 	 *  at the start of the game like ThrowsLeft. */
 	FString FamilyName(uint16 Agent) const { const FString* N = Family.Find(Agent); return N ? *N : FString(); }
+	/** The park the game is played in, as the physics has it. Read once at the start. */
+	const BbPark& Park() const { return ParkDesc; }
 
 private:
 	void* Handle = nullptr;
@@ -55,4 +57,6 @@ private:
 	TSet<uint16> LeftHanded;
 	/** Family names by both agent ids. */
 	TMap<uint16, FString> Family;
+	int32 (*FnPark)(const BbGame*, BbPark*) = nullptr;
+	BbPark ParkDesc{};
 };

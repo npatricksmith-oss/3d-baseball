@@ -7,6 +7,7 @@
 #include "BbDirector.generated.h"
 
 class AStaticMeshActor;
+class ABbPark;
 class ASkeletalMeshActor;
 class USkeletalMesh;
 class UAnimSequence;
@@ -15,13 +16,15 @@ class UStaticMesh;
 class UMaterialInterface;
 
 /**
- * Builds the field from engine primitives, then plays the sim's timelines: capsule players,
+ * Plays the sim's timelines in the park that BbPark builds: capsule players,
  * the ball, a broadcast camera, and the scoreboard. The sim runs on a worker thread, one
  * pitch ahead; nothing here decides anything about the game (PLAN §3.4, D4).
  *
  * Command line: -BbSimLib=<path to libbb_ffi.so> -BbSeed=<n> -BbSpeed=<x>
  *               -BbCamera=<0 broadcast | 1 behind home | 2 overhead>
  *               -BbShots=<n> (take n screenshots, then quit) -BbShotEvery=<seconds> -BbShotStart=<seconds>
+ *               -BbParkShots (photograph the park from its fixed spots as park_<spot>.png, then quit;
+ *               -BbParkShotsAt=<seconds> when to start)
  *               -BbBoxShots=<n> (photograph the Tab box at pitch n and the final box, then quit)
  *               -BbDiveShots=<n> (photograph n dives: in the air, lying, getting up; then quit)
  *               -BbAnimTest (stock clips looping) or -BbAnimTest=dive (dive pose candidates;
@@ -46,9 +49,8 @@ public:
 
 private:
 	AStaticMeshActor* Shape(UStaticMesh* Mesh, const FVector& Location, const FVector& Scale, const FLinearColor& Color, const FRotator& Rotation = FRotator::ZeroRotator);
-	void BuildField();
-	void BuildLights();
-	void BuildStands();
+	/** The sim's frame of a play at T as it is drawn: on the drawn ground (the mound). */
+	bool SampleDrawn(const FBbPlay& Play, float T, BbFrame& Out) const;
 	void RequestNext();
 	void BeginPlayback(FBbPlay&& Play);
 	void UpdateCamera(const BbFrame& Frame, float DeltaSeconds);
@@ -82,6 +84,9 @@ private:
 	/** Seconds shown before each pitch's release: the pitcher's wind-up. */
 	float PreRoll = 1.0f;
 
+	/** Everything that stands still: field, walls, stands, lights (BbPark). */
+	UPROPERTY()
+	TObjectPtr<ABbPark> Park;
 	UPROPERTY()
 	TObjectPtr<UStaticMesh> Cube;
 	UPROPERTY()
@@ -299,7 +304,7 @@ private:
 	FVector2D ExitAt(const FResetMover& M) const;
 	/** Copies a figure's place, facing and speed from the slot that showed Agent until now. */
 	void CarryFigure(const TArray<FFigureState>& Old, int32 Slot, uint16 Agent);
-	static FVector2D Dugout(uint16 Agent);
+	FVector2D Dugout(uint16 Agent) const;
 	/** Index into Movers of whoever returns the ball, or -1 when no ball is thrown back. */
 	int32 ResetThrower = -1;
 	FVector ResetBallFrom = FVector::ZeroVector; // sim frame, metres
@@ -447,6 +452,12 @@ private:
 	int32 DiveShotIndex = 0;
 	float ShotEvery = 4.f;
 	float NextShot = 3.f;
+	/** -BbParkShots: the spot now being photographed, or -1; when its picture is asked for
+	 *  (the camera sits there a moment first, so the picture is settled), and when it is taken. */
+	int32 ParkShot = -1;
+	float ParkShotsAt = 12.f;
+	double ParkShotSince = 0.0;
+	bool bParkShotAsked = false;
 	float BenchSeconds = 0.f;
 	double Wall = 0.0;
 	int32 Frames = 0;
