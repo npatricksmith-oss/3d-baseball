@@ -62,7 +62,7 @@ fn main() {
                 la.to_degrees(),
                 hr as u8,
                 (u - u_ss) / 0.0254,
-                cosang.acos().to_degrees(),
+                bb_math::m::acos(cosang).to_degrees(),
                 ball.r.y / 0.0254,
                 (ball.r.x - sw.pivot.x).abs() / 0.0254,
                 (tc - sw.t_c) * 1000.0,
