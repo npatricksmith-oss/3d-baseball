@@ -62,11 +62,12 @@ Main is `99de8fb`, pushed. `cargo test --workspace --release` passes there (347 
 - Not traced: infield hits with no throw rose 257 → 338 over 300 games after the infield alignment fixes, probably holders at 45–47.4 m who no longer make a return throw.
 - The client has not been rebuilt or run against the new main. The speed keys, the side-change cut and the box-score screen have not been watched by a person.
 
-**Waiting for the owner:**
-- **Runner acceleration.** Merged at 0.68 s (fits home to first, 4.25 s against 4.26 to 4.30). The Gemini tag-up review says the 90-ft sample was of faster-than-average runners and league speed gives about 0.75 s. Left- and right-handed batters start 1 m apart along the line and get the same time.
-- **The tag-up decision rule** asks for a 99% chance of being safe (0.35 s margin, 0.15 s noise); flies caught at 225 to 275 ft are never sent (real about 40%). Replacing it with agent-models §6.3's run-expectancy rule is a model change.
-- **Wall braking** costs 0.08 to 0.18 runs and has no sourced value (play-area recheck, Judgment Point 3).
-- **Left-on-base counting:** two `known_gap` rules scenarios (runners between bases, a held pass).
+**Owner's rulings, 2026-11-14 late evening (fourth lead session). Nothing is waiting for the owner.**
+- **Q1, runner acceleration: refit.** Slow the start so a league-average runner (27.0 ft/s) runs the standing 90 ft in about 4.10 s (τ near 0.75 s; tag-up review P2-3), keeping home to first in the real band. Owner: per-player speed ratings are coming, so the curve's parameters (top speed, τ) must be per-runner values with the league average as today's default, not constants. Fix the 1 m box offset between left- and right-handed batters in the same job. Not started; after `work/live-comm` merges.
+- **Q2, tag-up rule: replace** the 99%-safe margin with agent-models §6.3's run-expectancy rule (the runner weighs the run against the out, given outs and score, from his own read). Same note on speed ratings: the runner's belief about his own time comes from his own speed, not a league constant. Own branch, measurement, Codex review. Not started; after Q1.
+- **Q3, wall braking: research first.** A worker looks for sourced data on how fast outfielders reach the wall; decide the value after. `work/wall-speed-research`.
+- **Q4, left on base: fix to the official rule** (OBR 9.02(a)(3)): runners between bases at the third out, and the held-pass case, count as left on base; `passing-023` and `passing-025` lose `known_gap`. Queued for a Sonnet worker.
+- **Standing rule proposed to the owner, no answer yet:** fixes that only bring the game in line with the official rules are the lead's to make without asking.
 
 **Held by the owner: the pitcher change** (`work/pitcher-fielding`; [note on that branch](docs/calibration/2026-11-14-pitcher-fielding.md)). The pitcher starts from his follow-through and waits 0.55 s to recover; he then fields 8% of infield grounders, as in MLB, in place of 20%. It raised ground-ball hits sharply when measured (.396 [.405] with the first infield fixes), so it stays off main until the middle infield is recalibrated. No review yet. `work/integrate-agy-calib` is an old combination kept for reference only.
 
