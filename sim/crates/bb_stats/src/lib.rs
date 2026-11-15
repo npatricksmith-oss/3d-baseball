@@ -135,7 +135,6 @@ pub fn box_score_with_options(bytes: &[u8], options: scorer::ScorerOptions) -> R
     let mut outs_in_half = 0u32;
     let mut runners = std::collections::BTreeSet::new();
     let mut half_ended = true;
-    let mut stranded_batter = false;
     for play in &v.plays {
         let Some(events) = play.events() else { continue };
         for e in events.iter() {
@@ -150,7 +149,6 @@ pub fn box_score_with_options(bytes: &[u8], options: scorer::ScorerOptions) -> R
                     outs_in_half = 0;
                     runners.clear();
                     half_ended = false;
-                    stranded_batter = false;
                 }
                 EventBody::PitchReleased => b.teams[side].pitches_seen += 1,
                 EventBody::RunScored => {
@@ -194,12 +192,6 @@ pub fn box_score_with_options(bytes: &[u8], options: scorer::ScorerOptions) -> R
                         && !events.iter().filter_map(|e| e.body_as_run_scored()).any(|r| r.runner() == pa.batter()) {
                         runners.insert(pa.batter());
                     }
-                    // OBR box-score LOB includes a batter still short of first when a
-                    // preceding runner makes the third out (9.02(g)), even though the
-                    // rules engine's occupied-base count does not.
-                    stranded_batter = outs_in_half >= 3 && ruling.outcome == scorer::Outcome::Out
-                        && pa.result() == ev::PaResult::Unknown
-                        && !events.iter().filter_map(|e| e.body_as_runner_out()).any(|o| o.runner() == pa.batter());
                     if ruling.sacrifice_fly { t.sf += 1; l.sf += 1; }
                     t.rbi += ruling.rbi;
                     l.rbi += ruling.rbi;
@@ -229,7 +221,9 @@ pub fn box_score_with_options(bytes: &[u8], options: scorer::ScorerOptions) -> R
                     }
                 }
                 EventBody::HalfInningEnded => {
-                    b.teams[side].left_on_base += runners.len() as u32 + u32::from(stranded_batter);
+                    // The rules engine counts every runner who reached and neither scored nor was out
+                    // (OBR 9.02, rules-spec §4.1); I1 in the accounting tests checks that independently.
+                    b.teams[side].left_on_base += u32::from(e.body_as_half_inning_ended().unwrap().left_on_base());
                     half_ended = true;
                 }
                 EventBody::GameEnded => {

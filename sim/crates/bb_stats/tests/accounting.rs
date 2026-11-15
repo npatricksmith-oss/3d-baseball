@@ -33,8 +33,8 @@ fn identities_hold_over_many_games() {
             assert_eq!(t.pa, t.ab + t.bb + t.hbp + t.sf + t.sh, "I2 seed side {side}");
             let outs = b.outs_by_half.iter().skip(side).step_by(2).sum::<u32>();
             // I1 in its own words (rules-spec §11): AB + BB + HBP + SH + SF = R + LOB + opposing
-            // putouts. (The batter-runner left short of first when a preceding runner makes the
-            // third out is in LOB, 9.02(g).)
+            // putouts. (LOB is every runner who reached and neither scored nor was out, wherever he
+            // is at the third out, the batter-runner included: OBR 9.02.)
             assert_eq!(t.ab + t.bb + t.hbp + t.sh + t.sf, t.runs + t.left_on_base + outs, "I1 seed side {side}, line {t:?}");
             // Review P2-4: facts the scorer's own arithmetic cannot make true by itself.
             assert!(t.rbi <= t.runs, "more RBI than runs, side {side}");
