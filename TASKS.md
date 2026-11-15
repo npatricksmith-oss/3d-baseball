@@ -67,7 +67,7 @@ Main is `99de8fb`, pushed. `cargo test --workspace --release` passes there (347 
 - **Q2, tag-up rule: replace** the 99%-safe margin with agent-models §6.3's run-expectancy rule (the runner weighs the run against the out, given outs and score, from his own read). Same note on speed ratings: the runner's belief about his own time comes from his own speed, not a league constant. Own branch, measurement, Codex review. Not started; after Q1.
 - **Q3, wall braking: research first.** A worker looks for sourced data on how fast outfielders reach the wall; decide the value after. `work/wall-speed-research`.
 - **Q4, left on base: fix to the official rule** (OBR 9.02(a)(3)): runners between bases at the third out, and the held-pass case, count as left on base; `passing-023` and `passing-025` lose `known_gap`. Queued for a Sonnet worker.
-- **Standing rule proposed to the owner, no answer yet:** fixes that only bring the game in line with the official rules are the lead's to make without asking.
+- **Standing rule (owner, 2026-11-14):** fixes that only bring the game in line with the official rules are the lead's to make without asking.
 
 **Held by the owner: the pitcher change** (`work/pitcher-fielding`; [note on that branch](docs/calibration/2026-11-14-pitcher-fielding.md)). The pitcher starts from his follow-through and waits 0.55 s to recover; he then fields 8% of infield grounders, as in MLB, in place of 20%. It raised ground-ball hits sharply when measured (.396 [.405] with the first infield fixes), so it stays off main until the middle infield is recalibrated. No review yet. `work/integrate-agy-calib` is an old combination kept for reference only.
 
