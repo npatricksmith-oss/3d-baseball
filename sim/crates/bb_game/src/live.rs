@@ -1628,10 +1628,23 @@ impl<'a> Sim<'a> {
         (fd.t_int, fd.int_pt, fd.belief, fd.read_at, fd.read_ball, fd.next_plan) = (ti, pt, Some(p), t, ball, t + REPLAN_S);
     }
 
-    /// A chaser's replan from a fresh read: he runs at his own new intercept.
+    /// A chaser's replan from a fresh read: he runs at his own new intercept, and his call
+    /// follows the read (`refresh_call`).
     fn replan(&mut self, i: usize) {
         self.read(i);
         self.f[i].target = self.f[i].int_pt;
+        self.refresh_call(i);
+    }
+
+    /// A chaser's call follows his own latest read (agent-models §5.7; Codex
+    /// fielder-communication fourth review P2-2): a man whose fresh read no longer has him
+    /// sure, or no longer has him catching it in the air, stops calling it, and one who has
+    /// become sure calls it. Teammates hear the change `CALL_HEARD_S` later (`publish`).
+    fn refresh_call(&mut self, i: usize) {
+        let fd = &self.f[i];
+        let Some(belief) = fd.belief.as_ref() else { return };
+        let bias = if i >= 6 { -0.15 } else { 0.0 };
+        self.f[i].call = self.call_value(i, belief, fd.t_int, fd.int_pt, bias).0;
     }
 
     /// Each candidate reads the ball, makes his own call on it, and decides alone whether to
@@ -2717,6 +2730,7 @@ impl<'a> Sim<'a> {
                         let (t, ball) = (self.t, self.ball_gen);
                         let fd = &mut self.f[i];
                         (fd.t_int, fd.int_pt, fd.target, fd.belief, fd.read_at, fd.read_ball) = (ti, pt, pt, Some(p), t, ball);
+                        self.refresh_call(i);
                     }
                 }
             }
@@ -7107,6 +7121,78 @@ mod tests {
         let_calls_be_heard(&mut sim);
         let_calls_be_heard(&mut sim);
         assert_eq!((sim.f[LF].role, sim.f[RF].role), (Role::Chase, Role::Backup), "and it stays so");
+    }
+
+    // Codex fielder-communication fourth review P2-2: the left fielder sure-calls the fly of
+    // `two_sure_corner_outfielders_resolve_their_calls` and the right fielder backs him up.
+    // Then the left fielder is 45 m off it (as if he had broken the wrong way): his next read
+    // has no catch in the air for him, and by agent-models §5.7 a man calls only a ball he
+    // believes he catches in the air, so he stops calling it. The right fielder still hears
+    // the old call until `CALL_HEARD_S` has passed, and keeps backing up; then, nobody's
+    // sure call standing and his own read still sure, he goes for it.
+    #[test]
+    fn a_sure_caller_who_loses_his_air_play_withdraws_his_call_and_the_backup_takes_it() {
+        const LF: usize = 6;
+        const RF: usize = 8;
+        let fx = fixture(&[]);
+        let mut inp = hit(&fx, Vec3::new(0.0, 33.0, 22.0));
+        inp.fattrs[LF].read_sigma0 = 0.01;
+        inp.fattrs[RF].read_sigma0 = 0.01;
+        let mut st = fx.st.clone();
+        let mut sim = new_sim(&inp, &mut st);
+        sim.f[LF].pos = Vec3::new(-5.0, 92.0, 0.0);
+        sim.f[RF].pos = Vec3::new(5.0, 92.0, 0.0);
+        sim.f[CF].pos = Vec3::new(70.0, 60.0, 0.0);
+        for fd in sim.f.iter_mut() {
+            fd.jump = Vec3::ZERO;
+        }
+        at_first_read(&mut sim);
+        sim.t = sim.inp.t_contact + 0.6;
+        sim.assign();
+        let_calls_be_heard(&mut sim);
+        assert_eq!((sim.f[LF].role, sim.f[LF].call, sim.f[RF].role), (Role::Chase, 3, Role::Backup));
+        // His fresh read, 45 m off the ball.
+        sim.f[LF].pos = Vec3::new(-50.0, 92.0, 0.0);
+        sim.f[LF].vel = Vec3::ZERO;
+        sim.replan(LF);
+        assert_eq!(sim.f[LF].call, 0, "his own read has no catch in the air for him");
+        let withdrawn = sim.t;
+        sim.publish();
+        let mut took = None;
+        while sim.t < withdrawn + 0.6 && took.is_none() {
+            sim.move_fielders();
+            sim.t += DT;
+            sim.hear();
+            if sim.f[RF].role == Role::Chase {
+                took = Some(sim.t - withdrawn);
+            } else {
+                assert_eq!(sim.known(LF).1, 3, "the old call is still what is heard at {:.3} s", sim.t - withdrawn);
+            }
+            sim.publish();
+        }
+        let dt = took.expect("the right fielder takes the ball once the call is withdrawn");
+        assert!(dt > CALL_HEARD_S - 1e-9 && dt < CALL_HEARD_S + DT + 1e-9, "took it {dt:.3} s after the withdrawal");
+    }
+
+    // Fourth review P2-2, the other way: a chaser going for a ball without calling it (tier
+    // 1) whose fresh close read makes him sure calls it.
+    #[test]
+    fn a_chaser_who_becomes_sure_calls_it() {
+        let fx = fixture(&[]);
+        let mut inp = hit(&fx, Vec3::new(0.0, 33.0, 22.0));
+        inp.fattrs[CF].read_sigma0 = 0.01;
+        let mut st = fx.st.clone();
+        let mut sim = new_sim(&inp, &mut st);
+        for fd in sim.f.iter_mut() {
+            fd.jump = Vec3::ZERO;
+        }
+        at_first_read(&mut sim);
+        sim.t = sim.inp.t_contact + 0.6;
+        sim.assign();
+        assert_eq!((sim.f[CF].role, sim.f[CF].call), (Role::Chase, 3), "sure with a near-perfect read");
+        sim.f[CF].call = 1;
+        sim.replan(CF);
+        assert_eq!(sim.f[CF].call, 3, "his fresh read makes him sure again");
     }
 
     // Codex fielder-communication review P2-1: the centre fielder reads the fly at its first
