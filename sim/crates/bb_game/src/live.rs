@@ -112,6 +112,12 @@ const CUT_EXTRA_S: f64 = 0.9;
 /// How far ahead of him, in time at the plate, a runner going home must be for the runner
 /// behind to follow him in, s [E].
 const FOLLOW_GAP_S: f64 = 0.3;
+/// From contact to a runner's first look at the ball, s [E]: his read of where it is going
+/// (no published value; Statcast's "first step" is not released as a league figure).
+const RUNNER_READ_DELAY_S: f64 = 0.5;
+/// From contact to a runner's first move when he runs whatever is hit (two out), s [E]: a
+/// plain reaction to the bat, an infielder's 0.25 s.
+const RUNNER_CONTACT_REACT_S: f64 = 0.25;
 /// The error of a runner's read of a race, one draw per look, s [E] (agent-models §6.3).
 const RUNNER_TIMING_SIGMA_S: f64 = 0.15;
 const PLAY_LIMIT_S: f64 = 40.0;
@@ -5341,11 +5347,21 @@ fn simulate_live_inner(inp: &LiveInput, st: &mut RulesState) -> LiveOutput {
             sim.assign();
             assigned = true;
         }
-        if assigned && !runners_started && sim.t >= t_c + 0.5 {
+        // With two out there is nothing to read: a catch or a force ends the inning, so every
+        // runner goes at the crack of the bat, after a plain reaction. Otherwise the first
+        // look is the read of the ball.
+        let two_out = sim.st.outs >= 2;
+        if assigned && !runners_started && sim.t >= t_c + if two_out { RUNNER_CONTACT_REACT_S } else { RUNNER_READ_DELAY_S } {
             runners_started = true;
+            if two_out {
+                for r in sim.r.iter_mut() {
+                    r.hold_s = None;
+                    r.goal = r.start + 1;
+                }
+            }
             let (b, bv) = sim.ball_at(sim.t);
             let airborne = matches!(sim.ball, Ball::Free { .. }) && (b.z > 1.5 || bv.z > 0.0);
-            for k in 0..sim.r.len() {
+            for k in 0..if two_out { 0 } else { sim.r.len() } {
                 sim.r[k].hold_s = None;
                 // Each runner reads the ball himself. If a visible fielder can get under it
                 // before it lands, he expects a catch and goes back to tag up. If it is a
@@ -9859,10 +9875,16 @@ mod tests {
             let mut st = fx.st.clone();
             let out = simulate_live(&inp, &mut st);
             let caught = out.facts.iter().find_map(|f| if let Input::GloveSecured { t, .. } = f { Some(*t) } else { None }).expect("the fly is caught");
-            out.facts.iter().any(|f| matches!(f, Input::BaseTouched { t, agent: 0x0007, base: 3, .. } if *t < caught))
+            out.facts.iter().find_map(|f| match f {
+                Input::BaseTouched { t, agent: 0x0007, base: 3, .. } if *t < caught => Some(*t - inp.t_contact),
+                _ => None,
+            })
         };
-        assert!(touched_third(2));
-        assert!(!touched_third(0));
+        // He goes at the crack of the bat: a reaction (0.25 s), then 20.9 m from a standing
+        // lead by the league's legs (20.9 / 8.2 + 0.76 = 3.31 s), 3.56 s in all.
+        let t = touched_third(2).expect("he runs");
+        assert!((t - 3.56).abs() < 0.08, "third {t:.2} s after contact");
+        assert!(touched_third(0).is_none());
     }
 
     // Codex runner-reads review P2-2: turning back is a stop and a restart. A runner 8 m past
