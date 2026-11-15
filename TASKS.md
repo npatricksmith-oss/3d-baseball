@@ -44,12 +44,13 @@ Open:
 
 **Next: step 2, light and materials.** The afternoon sun angle, sky, shadow quality and reach, exposure, ambient occlusion, colour grading, and one palette for the whole park held in one place (the colours are now constants at the top of `BbPark.cpp`). Then steps 3 to 6: walls and field furniture, seating bowl, scoreboard and backdrop, crowd. Players and the HUD get their own plans after the park.
 
-**For the owner, not blocking (answer when the physics work resumes; the drawing stands either way):**
+**Owner's rulings, 2026-11-15 (after step 1):**
 
-- **Q13. Should the sim's ground have a mound?** Now: the sim's field is level everywhere; the pitcher's release height is a number, not a place he stands. The client draws the rules' 10-in mound and stands players on it, and a ball rolling over it is drawn on top of it. The problem: a grounder up the middle is drawn climbing a mound it never met, and a real mound deflects such a ball. Options: (a) leave it as a drawing; (b) give the physics the mound's height so bounces and fielders' footing meet it. Recommendation: (a) for now, (b) with the fielding work, since it changes comebackers and needs a review.
-- **Q14. Should the sim's dirt take the real field's shape?** Now: the sim's dirt is a disc 95 ft round home plate, so it has dirt where a real infield has grass and grass where the shortstop and second baseman stand; the client draws the real layout. The problem: a ball is drawn on one surface and bounces by the other (the two differ a little: restitution 0.50 against 0.45, rolling 0.22 against 0.28). Options: (a) leave it; (b) give the physics the drawn layout (skin, infield grass, warning track), which will move grounder hit rates a little and needs a ledger row and a review. Recommendation: (b) when reviews return; it is the cheaper of the two and makes the overhead picture true.
+- **Mowing changed** (client only): the infield grass is one shade; everything outside the infield square is cut in plain 15-ft stripes running from home toward centre field. Built and checked with `-BbParkShots`.
+- **Q13, the mound: as recommended.** It stays a drawing for now; the physics gets the mound's height with the fielding work (it changes comebackers; needs a review). Queued with the paused physics work.
+- **Q14, the dirt: as recommended.** The physics takes the drawn layout (skin, infield grass, warning track) when reviews return, with a ledger row and a review. Queued with the paused physics work.
 
-**Paused, to pick up when Codex reviews return:** everything in the sixth session's block below (the runner's start, `work/runner-start` held unmerged, `caution_z`, the coach's read, the rundown).
+**Paused, to pick up when Codex reviews return:** Q14 (the sim's dirt takes the drawn layout) and, with the fielding work, Q13 (the sim's ground gets the mound); and everything in the sixth session's block below (the runner's start, `work/runner-start` held unmerged, `caution_z`, the coach's read, the rundown).
 
 ### The sixth lead session's handoff (about 15:20)
 

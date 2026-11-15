@@ -60,7 +60,7 @@ namespace
 	// Groundskeeping that the rules leave to the park.
 	const double TrackFence = 15.0 * FT;      // warning track under the outfield fence
 	const double TrackWall = 10.0 * FT;       // and along the walls of foul ground
-	const double Mow = 15.0 * FT;             // mown bands: six to a base path
+	const double Mow = 15.0 * FT;             // mown stripes in the outfield, running home to centre
 	// The near picture of the ground: the infield, where the chalk has to be sharp.
 	const double NearX0 = -28.0, NearY0 = -8.0, NearSize = 56.0;
 
@@ -250,10 +250,14 @@ FLinearColor FBbGround::Color(double X, double Y) const
 	{
 		return Track;
 	}
-	// Mown bands along both base lines, six to a base path (twelve on the infield).
-	const double W = bSquare ? Mow * 0.5 : Mow;
-	const int32 Band = FMath::FloorToInt32(S1 / W) + FMath::FloorToInt32(S3 / W);
-	return (Band & 1) ? GrassDark : GrassLight;
+	// Mowing (owner, 2026-11-15): the infield grass is one shade; everything outside the
+	// square is cut in plain stripes running from home toward centre field, one centred on
+	// the line through the plate and second base.
+	if (bSquare)
+	{
+		return GrassLight;
+	}
+	return (FMath::FloorToInt32(X / Mow + 0.5) & 1) ? GrassDark : GrassLight;
 }
 
 ABbPark::ABbPark()
