@@ -934,9 +934,13 @@ fn go_idle(fd: &mut Fielder) {
 /// the contact model changes. Refit 2026-11-15 for swing v2 (docs/calibration/
 /// 2026-11-15-outfield-read.md §1): the 2026-11-12 table (v1 swing: 3,290 rpm at 25°, 4,800 at
 /// 35°, 5,990 at 45°) gave every fly 60% too much backspin, so every fly was read to carry.
+/// Refit again 2026-11-15 on the integration of the held branches (sourced collision q, the
+/// inboard falloff and partial reach change how balls leave the bat; docs/calibration/
+/// 2026-11-15-integration-of-the-held-branches.md): the medians moved by under 3% at 25°–55°
+/// and under 5% elsewhere except 5° and 15° (−477 → −577, 606 → 688 rpm).
 fn typical_batted_spin_rpm(la: f64) -> f64 {
     const DEG: [f64; 9] = [-25.0, -15.0, -5.0, 5.0, 15.0, 25.0, 35.0, 45.0, 55.0];
-    const RPM: [f64; 9] = [-4856.0, -3077.0, -1783.0, -477.0, 606.0, 1916.0, 3013.0, 3819.0, 4558.0];
+    const RPM: [f64; 9] = [-4699.0, -2998.0, -1732.0, -577.0, 688.0, 1909.0, 2949.0, 3770.0, 4504.0];
     let x = la.to_degrees().clamp(DEG[0], DEG[8]);
     let k = (((x - DEG[0]) / 10.0).floor() as usize).min(7);
     let f = (x - DEG[k]) / 10.0;
@@ -7079,33 +7083,60 @@ mod tests {
     }
 
     // Agent-models §5.1: the typical spin is a belief about the contact model and must follow
-    // it. The median backspin of batted balls in six games, by 10° launch-angle bin from 20° to
-    // 60° (the bins the table is fitted on), against the table at the bin's centre: within 15%.
-    // (The 2026-11-12 table, fitted on the v1 swing, was 42–72% high against swing v2.)
+    // it. The median backspin of batted balls in 24 games outside the table's fitting sample
+    // (seeds 100–123; the table is fitted on 0–47), by 10° launch-angle bin from 20° to 60°,
+    // against the table at the bin's centre: within 15%. (The 2026-11-12 table, fitted on the
+    // v1 swing, was 42–72% high against swing v2.) Then by exit speed as well (Codex
+    // outfield-read review P3-1: a contact change can move spin within an angle bin and leave
+    // the bin's median alone): in each group of under and over 85 mph by 25–35°, 35–45° and
+    // 45–55°, the balls' median backspin against the median of what the belief gives them at
+    // their own launch angles, within 35%. The belief is by angle alone and cannot follow the
+    // speed: on the 2026-11-15 integration it is 11–29% high for contact under 85 mph and 5–16%
+    // low over it (three samples of 24–48 games; docs/calibration/
+    // 2026-11-15-integration-of-the-held-branches.md); 35% still catches a table as stale as
+    // 2026-11-12's. (A no-draw landing-bias check was tried and rejected: the read has closed
+    // by 2 s before landing, and a table 60% high moved the mean miss there by under 0.5 m.)
     #[test]
     fn the_typical_spin_belief_follows_the_contact_model() {
         let mut bins: Vec<Vec<f64>> = vec![Vec::new(); 4];
-        for seed in 0..6 {
+        // [under 85 mph, 85 and over][LA 25–35, 35–45, 45–55]: (backspin, belief), rpm.
+        let mut groups: Vec<Vec<Vec<(f64, f64)>>> = vec![vec![Vec::new(); 3]; 2];
+        for seed in 100..124 {
             let mut g = crate::game::Game::new(seed, false);
             while let Some(step) = g.step_pitch() {
-                let (Some((_, la, _)), Some(path)) = (step.record.batted, &step.batted) else { continue };
+                let (Some((ev, la, _)), Some(path)) = (step.record.batted, &step.batted) else { continue };
                 let Some(bb_physics::ground::Segment::Flight { tr, .. }) = path.segments.first() else { continue };
                 let s0 = tr.first().s;
                 let h = Vec3::new(s0.v.x, s0.v.y, 0.0).normalized();
                 let back = s0.w.dot(Vec3::new(h.y, -h.x, 0.0)) * 30.0 / core::f64::consts::PI;
-                let la = la.to_degrees();
-                if (20.0..60.0).contains(&la) {
-                    bins[((la - 20.0) / 10.0) as usize].push(back);
+                let deg = la.to_degrees();
+                if (20.0..60.0).contains(&deg) {
+                    bins[((deg - 20.0) / 10.0) as usize].push(back);
+                }
+                if (25.0..55.0).contains(&deg) {
+                    groups[(ev >= 85.0 * MPH) as usize][((deg - 25.0) / 10.0) as usize].push((back, typical_batted_spin_rpm(la)));
                 }
             }
         }
-        for (k, v) in bins.iter_mut().enumerate() {
+        let median = |mut v: Vec<f64>| {
             v.sort_by(|a, b| a.total_cmp(b));
-            let median = v[v.len() / 2];
+            v[v.len() / 2]
+        };
+        for (k, v) in bins.iter().enumerate() {
             let centre = 25.0 + 10.0 * k as f64;
             let belief = typical_batted_spin_rpm(centre.to_radians());
             assert!(v.len() >= 30, "bin {centre}°: {} balls", v.len());
-            assert!((belief / median - 1.0).abs() < 0.15, "{centre}°: belief {belief:.0} rpm, contact model {median:.0} (n {})", v.len());
+            let med = median(v.clone());
+            assert!((belief / med - 1.0).abs() < 0.15, "{centre}°: belief {belief:.0} rpm, contact model {med:.0} (n {})", v.len());
+        }
+        for (e, row) in groups.iter().enumerate() {
+            for (k, v) in row.iter().enumerate() {
+                let group = format!("{} 85 mph, LA {}-{}°", ["under", "over"][e], 25 + 10 * k, 35 + 10 * k);
+                assert!(v.len() >= 30, "{group}: {} balls", v.len());
+                let (spin, belief) = (median(v.iter().map(|x| x.0).collect()), median(v.iter().map(|x| x.1).collect()));
+                println!("{group}: n {}, backspin {spin:.0} rpm, belief {belief:.0}", v.len());
+                assert!((belief / spin - 1.0).abs() < 0.35, "{group}: belief {belief:.0} rpm, contact model {spin:.0} (n {})", v.len());
+            }
         }
     }
 
