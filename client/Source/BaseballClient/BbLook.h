@@ -16,10 +16,13 @@ namespace BbLook
 {
 	// ---- The palette --------------------------------------------------------------------
 	// The ground (painted into the ground's pictures; all of it matt).
-	inline const FLinearColor GrassLight(0.070f, 0.235f, 0.050f);
-	inline const FLinearColor GrassDark(0.056f, 0.200f, 0.042f);
-	inline const FLinearColor Dirt(0.400f, 0.240f, 0.130f);
-	inline const FLinearColor Track(0.330f, 0.185f, 0.105f);
+	// Grass darkened by 17% and dirt by 20% (owner, 2026-11-16) so the white ball stands out;
+	// before: grass (0.070, 0.235, 0.050) and (0.056, 0.200, 0.042), dirt (0.400, 0.240, 0.130),
+	// track (0.330, 0.185, 0.105).
+	inline const FLinearColor GrassLight(0.058f, 0.195f, 0.042f);
+	inline const FLinearColor GrassDark(0.046f, 0.166f, 0.035f);
+	inline const FLinearColor Dirt(0.320f, 0.192f, 0.104f);
+	inline const FLinearColor Track(0.264f, 0.148f, 0.084f);
 	inline const FLinearColor Chalk(0.880f, 0.880f, 0.850f);
 	inline const float GroundRough = 0.95f;
 	/** The land outside the park. */
