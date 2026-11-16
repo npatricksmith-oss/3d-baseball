@@ -1,0 +1,14 @@
+# A play saved from the instant replay (client BbSavePlay).
+# See it again: client/run.sh 47638, then R back to play 0 once it has been shown.
+seed = 47638
+play = 0
+inning = 1
+half = "top"
+# The board before the pitch.
+outs = 0
+count = "0-0"
+score = "away 0, home 0"
+saved = 2026-11-16T11:48:40
+comment = """
+there was no attempt to throw the runner out from the 1st basemen to the pitcher. Should have made an attempt
+"""

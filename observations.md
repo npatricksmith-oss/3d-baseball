@@ -93,6 +93,7 @@ Throws:
 - [ ] 56, 107, 142, 32. Fielders should not throw on the run unless there is no time to get set; a throw on the run should be slower. 32: the third baseman with plenty of time takes a split second to step and throw strong and accurate, judging how long the runner will take. *(98 and 99, a long throw and a slow roller, you found right.)*
 - [ ] 68. The outfielder judges whether to throw behind a runner who didn't tag up, or throw safely to the cutoff.
 - [ ] 26. A pitcher who catches a hot liner with runners on looks to double one of them off.
+- [ ] Seed 47638, play 0 (saved 11:48). "There was no attempt to throw the runner out from the 1st baseman to the pitcher. Should have made an attempt." *Not looked at yet.*
 
 Covering and calling:
 - [ ] 19. The first baseman holding a runner still goes for the grounder, unless it is near enough to second for the second baseman to take it; then he goes back to first for the throw.
