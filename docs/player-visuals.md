@@ -1,6 +1,6 @@
 # Player visuals: figures, motions, kit
 
-**Status:** plan agreed with the owner 2026-11-15 (seven questions, Q15–Q21, all as recommended; §1). Steps 1 (the figure), 2 (the kit), 3 (the delivery and the catcher) and 4 (the swing) are built; steps 5–7 are not. This is the second part of the graphics stage, after [the park](park-visuals.md) and before [the HUD](hud.md).
+**Status:** plan agreed with the owner 2026-11-15 (seven questions, Q15–Q21, all as recommended; §1). Steps 1 (the figure), 2 (the kit), 3 (the delivery and the catcher), 4 (the swing) and 5 (throws and catches in the field) are built; steps 6 and 7 are not. This is the second part of the graphics stage, after [the park](park-visuals.md) and before [the HUD](hud.md).
 
 **Where it starts.** Every player is the engine's grey mannequin (`SKM_Manny_Simple`) with a team tint, moved by stock clips standing in for baseball: a charged punch for the delivery, an attack for the throw and the stance, a landing for the catcher's crouch, a wall jump for the dive (`BbDirector.cpp`, `LoadAssets`). The bat is a block. There are no gloves, caps, numbers, umpires or coaches.
 
@@ -87,7 +87,7 @@ The first motions written as poses in code. `BbPose.{h,cpp}` holds all of it.
 - **Checks added:** `-BbMotionShots` photographs the second pitch from beside the pitcher, the third from the plate and the fourth beside the catcher, each held on its named moments, as `motion_<pitch>_<n>_<what>.png` (20 pictures); `-BbStagingLog` adds `BB_RELEASE` and `BB_RECEIVE` lines.
 - **Pictures:** `client/Saved/Shots/players3_after/` (untracked): the strips and six of play. Before: `players2_after/`.
 - **Cost:** 187 fps (seed 7, `-BbShots=6 -BbUncapped`), against 174 at step 2 on a busier machine: nothing measurable.
-- **Left for later:** a throw that begins while a motion is still going out cuts to the throw clip at once (step 5 redoes throws); a left-hander's figure flips out of its mirror as the motion ends; the feet of a figure coming out of a motion slide a short way instead of stepping; no wind-up, only the stretch; the catcher gives the same target every pitch (the sim does not export where the pitcher is aiming); no sign-giving, no throw back from the crouch.
+- **Left for later:** a throw that begins while a motion is still going out cuts to the throw clip at once (step 5 redoes throws); a left-hander's figure flips out of its mirror as the motion ends (both done in step 5: §10); the feet of a figure coming out of a motion slide a short way instead of stepping; no wind-up, only the stretch; the catcher gives the same target every pitch (the sim does not export where the pitcher is aiming); no sign-giving, no throw back from the crouch.
 
 ## 9. Step 4 as built (2026-11-16): the swing
 
@@ -104,7 +104,27 @@ The batter holds his bat and swings it. `BbMotion::Swing` in `BbPose.{h,cpp}`; t
 - **Cost:** 166 fps against 173 for step 3 run on the same machine minutes apart (seed 7, `-BbShots=6 -BbUncapped`, other work going on): nothing measurable.
 - **Left for later:** a new batter walks up without a bat and has one when he stands in (carrying it needs a pose over the walk); no dropped bat lying on the ground; the hands are plain shapes that do not close round the handle; the arms are straight at the start of the swing because the sim's hands start 0.57 m back; every batter has the same stance and stride; no check-swing or bunt look of its own; after a swing the feet stay wide until the next pitch is near.
 
-## 10. Records
+## 10. Step 5 as built (2026-11-16): throws and catches in the field
+
+Every fielder gets ready, puts his glove on the ball, brings it in to his hand and throws it. `BbMotion::Field` in `BbPose.{h,cpp}`; who catches and throws when is read from the timeline in `BbDirector` (`NoteCatches`, `AddThrow`).
+
+- **One pose from several parts,** as the swing is, not a clip on a clock: the ready position, the glove's reach, the ball carried in both hands, and the throw are each a pose, laid one over another by how much of each is on. So a quick throw runs straight on from the catch, and nothing cuts.
+- **Ready.** Infielders and outfielders are down and set as the pitcher comes set (feet wide, knees bent, hands in front of the knees) and stay so until the ball is past the batter or 0.3 s after it is hit.
+- **The glove to the ball.** The whole timeline is read as the pitch comes up, so each catch is known ahead: the glove sets out 0.36 s before and is on the ball where the sim has it taken (invariant 4). He bends and gets down for a ball on the ground, goes up for one over his head (the sim has catches to 2.5 m), lunges and steps for one away from him. The sim has most balls taken over the fielder's own feet; he gives ground so that it is caught a forearm in front of him. **A man going slower than 3 m/s turns to face the ball** and his feet are the pose's; faster, he takes it on the run facing where he runs.
+- **On the run only the trunk and arms are posed.** `UBbPoseAnim::LowerWeight`: the hips and legs stay the running clip's and the trunk is built on the clip's own hips, so a man running under a fly keeps running while his glove goes up. A ball on the ground or overhead takes the legs too.
+- **The ball in his hands.** It sits in the glove's pocket as he takes it and passes to the throwing hand over the next third of a second. The timeline's ball jumps to the sim's holding point over his feet in the last sixtieth of a second before a catch; the drawn ball is carried on along its own line into the glove instead.
+- **The throw** is seven key poses on the sim's clock from 0.45 s before the release to 0.5 s after: gather, side on with the hands breaking, front foot down and the arm cocked, the arm laid back, release, follow-through, finish. **The hand is on the sim's release point as the ball goes** (1.8 m up and 0.35 m to his throwing side; a man on the mound stands above the sim's level field and sinks to it). The ball leaves his hand on the sim's path with nothing to ease. The stock throw clip and its left-arm mirror are gone (they remain under `-BbStockMotions`).
+- **The first baseman's stretch** is as far as the sim has one, which is not far: the sim's receiver has no stretch (TASKS, fielding left open), so he takes throws near his feet. A man taking a ball away from him steps to it with the foot on that side, and that is all the stretch there is.
+- **Between pitches** the ball's returner makes the same throw (his hand at 1.8 m, where the lob now starts) and the pitcher puts his glove up for it.
+- **A left-handed fielder is in a mirror the whole time he is in the field,** not only while a motion shows, so he no longer flips as a motion ends (left over from step 3).
+- **Reaches are exact now.** What a hand holds sits on along the forearm, which is not the line from the shoulder when the elbow is bent; the solver moves the wrist until the held thing is on the point. The pitcher's release, 2.3–2.4 cm off in step 3, is 0.1 cm.
+- **Measured** (`-BbStagingLog`, `BB_CATCH` and `BB_LETGO`, the play held on each catch and release; 200 s each of seeds 7 and 6 at six times speed, 232 pitches): 111 catches, the glove's pocket on the ball to within 3 cm in 108 and 10 cm off at worst (ground balls taken more than a metre from his feet); 52 throws, the hand within 0.5 cm of the sim's release point in every one, left-handers included.
+- **Checks added:** `-BbMotionShots` goes on to the first ball fielded and thrown by one man (`motion_7_*`: ready, coming, reach, catch, in, step, cocked, laid back, release, follow) and the next throw taken (`motion_8_*`): 53 pictures in all. The camera goes with the man, in front of him until he has the ball and beside him for the throw.
+- **Pictures:** `client/Saved/Shots/players5_after/` (untracked): the strips and six of play. Before: `players4_after/`.
+- **Cost:** 150 fps against 153 with the stock clips, the same build minutes apart (seed 7, `-BbShots=6 -BbUncapped`; the machine gave lower figures all round than on the day of step 4).
+- **Left for later:** fly balls are taken at the belt because that is where the sim has them caught; a throw made on the run turns the whole figure to the target, legs and all; a pitcher or catcher who goes from his own motion into a catch within a third of a second passes through standing; a fielder who gives ground for a ball slides his feet rather than stepping; the hands do not close on the ball; no tag is shown, and no foot on the bag; relay men and cut-offs stand as anyone does.
+
+## 11. Records
 
 - PLAN D13 (revised 2026-11-15) covers this stage.
 - TASKS.md "Resume here" carries the step reached; a `/clear` point after each merged step.

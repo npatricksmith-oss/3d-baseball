@@ -29,10 +29,11 @@ class UMaterialInterface;
  *               through eight angles, and the kit, as figure_<n>_<what>.png, then quit; no game
  *               is played);
  *               -BbMannequin (the grey mannequin instead of the figures);
- *               -BbStockMotions (the stock clips in place of the coded delivery, crouch and swing);
+ *               -BbStockMotions (the stock clips in place of the coded delivery, crouch, swing,
+ *               catch and throw);
  *               -BbMotionShots (the delivery, the catcher's receive, a ball hit, a swing and a
- *               miss and a pitch taken photographed at their named moments as
- *               motion_<strip>_<n>_<what>.png, then quit);
+ *               miss, a pitch taken, a ball fielded and thrown and a throw taken photographed
+ *               at their named moments as motion_<strip>_<n>_<what>.png, then quit);
  *               -BbParkShots (photograph the park from its fixed spots as park_<spot>.png, then quit;
  *               -BbParkShotsAt=<seconds> when to start)
  *               -BbBoxShots=<n> (photograph the Tab box at pitch n and the final box, then quit)
@@ -157,16 +158,21 @@ private:
 		// The clip being driven by hand (null while the gait clips play on their own).
 		const UAnimSequence* Manual = nullptr;
 		// A coded motion (BbPose.h): which (0 none, 1 the delivery, 2 the catcher's crouch,
-		// 3 the batter at the plate), how much of it shows over the clip, and the delivery's
-		// moment last shown.
+		// 3 the batter at the plate, 4 a fielder's ready, catch and throw), how much of it
+		// shows over the clip, and the delivery's moment last shown.
 		int32 Motion = 0;
 		float MotionW = 0.f;
 		float MotionT = 0.f;
+		/** A fielder (motion 4): how far down in the ready position he is, how much he is
+		 *  carrying the ball in his hands, and how much his legs are the pose's rather than
+		 *  the running clip's. Eased on play time. */
+		float Ready = 0.f, Carry = 0.f, Lower = 1.f;
 		/** Where the figure is drawn from the sim's position, cm on the ground: a motion can
 		 *  carry him off it (the pitcher finishes down the mound, the catcher sits back of
 		 *  his spot), and he steps back in his own time. */
 		FVector2D Off = FVector2D::ZeroVector;
-		/** The ball in the pitcher's hand before he lets go, when the pose has it. */
+		/** The ball in his hand (or glove) when the pose has it: the pitcher's before he lets
+		 *  go, a fielder's from the catch to the throw. */
 		bool bHand = false;
 		FVector Hand = FVector::ZeroVector;
 	};
@@ -200,9 +206,12 @@ private:
 	int32 MotionShotNext = 0;
 	/** Which strip the pitch on screen is photographed for, or -1: 0 to 2 as above; then 3
 	 *  the first swing, from in front of the batter; 4 the next swing, from the mound's side;
-	 *  5 the first pitch taken. */
+	 *  5 the first pitch taken; 6 the first ball fielded and thrown, from beside the fielder;
+	 *  7 the next throw taken by a fielder, from beside him. */
 	int32 MotionStrip = -1;
-	bool bStripDone[6] = { false, false, false, false, false, false };
+	bool bStripDone[8] = { false, false, false, false, false, false, false, false };
+	/** The catch and the throw that strips 6 and 7 are about (indices into Catches, Throws). */
+	int32 StripCatch = -1, StripThrow = -1;
 	TArray<FFigureState> FigureState;
 	/** What PoseFigure knows beyond the frame: the client's own plan for a staged move, and
 	 *  a throw whose release time is known (so its clip phase never depends on which frames
@@ -223,6 +232,18 @@ private:
 		/** Seconds into AnimThrow (its release is ThrowReleaseS in), or negative for no throw. */
 		float ThrowClip = -1.f;
 		float ThrowYaw = 0.f; // Unreal yaw, degrees
+		/** The coded throw: seconds from the release, and where the sim lets the ball go. */
+		bool bThrow = false;
+		float ThrowT = 0.f;
+		bool bThrowFrom = false;
+		FVector ThrowFrom = FVector::ZeroVector;
+		/** A catch of his near in time: seconds since it (negative before), and where the
+		 *  ball is as he takes it. */
+		bool bCatch = false;
+		float CatchDt = 0.f;
+		FVector CatchAt = FVector::ZeroVector;
+		/** He has the ball. */
+		bool bHolds = false;
 		/** Down from a dive (the sim's BbDive): seconds since he left his feet, or negative
 		 *  for none; seconds until he is up; which way he dove (Unreal yaw, if bDiveDir). */
 		float DiveSince = -1.f;
@@ -262,8 +283,42 @@ private:
 		float ReleaseAt = 0.f; // play time
 		float Yaw = 0.f;       // Unreal yaw toward the ball's flight
 		float FirstClip = -1.f; // the clip time first drawn (for -BbStagingLog), or -1
+		/** Where the sim lets the ball go (the ball's place as its flight starts). */
+		bool bFrom = false;
+		FVector From = FVector::ZeroVector;
 	};
 	TArray<FThrowNote> Throws;
+	/** A fielder taking the ball in the current timeline (a batted ball or a throw): when,
+	 *  and where the ball is at that moment. Read from the whole timeline as the pitch comes
+	 *  up (NoteCatches), so the glove can be on its way before the ball is there. */
+	struct FCatchNote
+	{
+		uint16 Agent = 0;
+		float T = 0.f;
+		FVector At = FVector::ZeroVector;
+		/** The ball one step of the sim earlier (SimTickS): from there the timeline's ball
+		 *  jumps to the sim's holding point over his feet, so the drawn ball is carried on
+		 *  along its own line into the glove instead. */
+		FVector Prev = FVector::ZeroVector;
+		/** It was thrown to him (someone held it before). */
+		bool bThrown = false;
+	};
+	TArray<FCatchNote> Catches;
+	void NoteCatches();
+	/** The live sim's step, s: the timeline has the ball at each one (bb_game::live DT). */
+	static constexpr float SimTickS = 1.f / 60.f;
+	void AddThrow(uint16 Agent, float ReleaseAt);
+	/** The fielders stay down in the ready position until this play time. */
+	float ReadyUntil = 0.8f;
+	/** The glove sets out for the ball this long before the catch and is there this long
+	 *  before it; it stays this long after, and has come in to the hands by GloveInS. */
+	static constexpr float GloveOutS = 0.36f;
+	static constexpr float GloveThereS = 0.04f;
+	static constexpr float GloveStayS = 0.10f;
+	static constexpr float GloveInS = 0.32f;
+	/** Slower than this as the ball arrives, he turns to face it; faster, he takes it on
+	 *  the run, facing where he runs, cm/s. */
+	static constexpr float SettleMaxCmps = 300.f;
 	/** Play time of the last frame sampled for throws; frames between it and the next are
 	 *  sampled too, so fast playback cannot step over a throw. */
 	float ThrowsSampledTo = 0.f;
@@ -364,6 +419,8 @@ private:
 	/** Index into Movers of whoever returns the ball, or -1 when no ball is thrown back. */
 	int32 ResetThrower = -1;
 	FVector ResetBallFrom = FVector::ZeroVector; // sim frame, metres
+	/** Where the returner lets the ball go: beside his head on his throwing side. */
+	FVector ResetHand = FVector::ZeroVector;
 	FVector ResetBallTo = FVector::ZeroVector;
 	float ResetThrowAt = 0.f;
 	float ResetFlight = 0.f;

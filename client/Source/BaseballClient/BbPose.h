@@ -65,6 +65,13 @@ struct FBbSkeleton
 	/** The ankle joint's height when the foot is flat on the ground, cm. */
 	double AnkleCm() const { return AnkleZ; }
 	double ArmCm() const { return UpperArm + ForeArm; }
+	/** Which bones are the trunk, head and arms (the rest: the hips, the legs and the root),
+	 *  by the mesh's bone index; and which bone is the pelvis. A motion made on the run lays
+	 *  only the upper ones over the clip, so the legs keep running (UBbPoseAnim::LowerWeight). */
+	TArray<bool> UpperBones() const;
+	int32 PelvisBone() const { return PelvisIndex; }
+	/** Which way hips face and stand, given the pelvis bone's transform in the figure's frame. */
+	void PelvisFacing(const FTransform& Bone, FVector& OutFwd, FVector& OutUp) const;
 
 private:
 	enum ERole : uint8 { Free, Pelvis, Spine, Neck, Head, UpperArm0, LowerArm0, Hand0, Thigh0, Calf0, Foot0 };
@@ -81,6 +88,7 @@ private:
 	};
 	TArray<FBone> Bones;
 	double UpperArm = 27.0, ForeArm = 27.0, Thigh = 43.0, Calf = 42.0, AnkleZ = 8.0;
+	int32 PelvisIndex = INDEX_NONE;
 	bool bOk = false;
 };
 
@@ -152,6 +160,44 @@ namespace BbMotion
 	/** The bat at ease between pitches, on the back shoulder: knob and direction, his frame. */
 	const FVector RestKnob(-14.0, -8.0, 100.0);
 	const FVector RestAxis(0.35, -0.45, 0.82);
+
+	/** What a fielder's pose is made from (player-visuals §10). Everything is in the frame of
+	 *  the figure as it is drawn: +Y the way he faces. A right-handed thrower, the glove on
+	 *  his left hand; a left-hander is the same shown in a mirror. */
+	struct FFieldIn
+	{
+		/** The ready position as the pitch is thrown: 0 standing easy to 1 down and set. */
+		float Ready = 0.f;
+		/** The glove to the ball: where the ball is to be caught, and how much of the reach is
+		 *  on (1 as the ball arrives). */
+		FVector GloveAt = FVector(0, 40, 110);
+		float Glove = 0.f;
+		/** He has the ball: hands together in front of him. */
+		float Carry = 0.f;
+		/** The throw, toward +Y: seconds from the sim's release, and how much of it shows. */
+		float ThrowT = 0.f, Throw = 0.f;
+		/** How far he sinks to throw, cm: the sim's release point is at one height over its
+		 *  level field, and a man on the mound stands above that. */
+		float ThrowSink = 0.f;
+		/** What he is watching. */
+		FVector Look = FVector(0, 1000, 150);
+		/** How much the legs and hips are the pose's (1, standing) or the clip's (0, running);
+		 *  and the hips as the clip has them, which the trunk is then built on. */
+		float Lower = 1.f;
+		FVector ClipPelvis = FVector(0, 2, 96), ClipFwd = FVector(0, 1, 0), ClipUp = FVector(0, 0, 1);
+	};
+	/** The fielder: ready, the glove to the ball, the ball brought in to the throwing hand,
+	 *  the throw. OutReach puts the glove's pocket on GloveAt; the caller adds the throwing
+	 *  hand's reach to the sim's release point (ThrowReach). OutPocket: which way the glove's
+	 *  fingers point, the ball sitting BallInMittCm that way from the wrist. */
+	FBbStick Field(const FFieldIn& In, const FBbSkeleton& Skel, const FBbMotionGround& Ground, FBbReach& OutReach, FVector& OutPocket);
+	/** How much of the sim's release point the throwing hand takes at T: all of it at 0. */
+	float ThrowReach(float T);
+	/** How far off the ground he goes for a ball this high over his feet, cm. */
+	double JumpForCm(double BallZ);
+	/** The throw's first and last moments, s from release. */
+	constexpr float ThrowStartS = -0.45f;
+	constexpr float ThrowEndS = 0.5f;
 }
 
 /** The single-clip player with a pose laid over it. */
@@ -162,7 +208,13 @@ struct FBbPoseProxy : public FAnimSingleNodeInstanceProxy
 	virtual bool Evaluate(FPoseContext& Output) override;
 
 	TArray<FTransform> Local;
+	TArray<bool> Upper;
 	float Weight = 0.f;
+	float LowerWeight = 1.f;
+	int32 PelvisBone = INDEX_NONE;
+	/** The pelvis as the clip alone has it, in the figure's frame, from the last evaluation. */
+	FTransform ClipPelvis = FTransform::Identity;
+	bool bClipPelvis = false;
 };
 
 UCLASS(Transient)
@@ -175,6 +227,15 @@ public:
 	 *  the clip, and how much: 0 the clip alone, 1 the pose alone. */
 	TArray<FTransform> PoseLocal;
 	float PoseWeight = 0.f;
+	/** How much of the pose the hips and legs take, as a share of PoseWeight: 1 the whole
+	 *  figure, 0 the trunk, head and arms only (UpperBones says which those are). */
+	float LowerWeight = 1.f;
+	TArray<bool> UpperBones;
+	int32 PelvisBone = INDEX_NONE;
+	/** The pelvis as the clip alone had it when the figure was last worked out, in the
+	 *  figure's frame; false until it has been. */
+	FTransform ClipPelvis = FTransform::Identity;
+	bool bClipPelvis = false;
 
 protected:
 	virtual FAnimInstanceProxy* CreateAnimInstanceProxy() override;

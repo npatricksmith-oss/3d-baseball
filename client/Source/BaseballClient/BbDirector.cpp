@@ -734,6 +734,8 @@ void ABbDirector::NotePitch()
 			MotionStrip = 5;
 		}
 	}
+	NoteCatches();
+	ReadyUntil = Current.bValid && Current.Info.contact_s >= 0.f ? Current.Info.contact_s + 0.3f : 0.8f;
 	BbFrame Start;
 	if (!Sim || !Current.bValid || !SampleDrawn(Current, 0.f, Start))
 	{
@@ -789,34 +791,155 @@ void ABbDirector::NoteThrows(float From, float To)
 		BbFrame F;
 		if (SampleDrawn(Current, At, F) && F.holder >= 0 && F.release_in_s >= 0.f)
 		{
-			const uint16 Agent = (uint16)F.holder;
-			const float ReleaseAt = At + F.release_in_s;
-			if (!Throws.ContainsByPredicate([&](const FThrowNote& N) { return N.Agent == Agent && FMath::Abs(N.ReleaseAt - ReleaseAt) < 0.05f; }))
-			{
-				// He turns toward where the ball goes: from his feet at the release to the
-				// ball a moment into its flight.
-				FThrowNote N;
-				N.Agent = Agent;
-				N.ReleaseAt = ReleaseAt;
-				BbFrame AtRelease, InFlight;
-				FVector Foot = FVector::ZeroVector;
-				if (SampleDrawn(Current, ReleaseAt, AtRelease))
-				{
-					for (uint32 I = 0; I < AtRelease.n_actors; ++I)
-					{
-						if (AtRelease.actors[I].agent == Agent)
-						{
-							Foot = ToUE(AtRelease.actors[I].pos);
-						}
-					}
-				}
-				N.Yaw = SampleDrawn(Current, ReleaseAt + 0.35f, InFlight) ? (ToUE(InFlight.ball) - Foot).Rotation().Yaw : YawToPlate(Foot);
-				Throws.Add(N);
-			}
+			AddThrow((uint16)F.holder, At + F.release_in_s);
 		}
 		if (At >= To)
 		{
 			break;
+		}
+	}
+}
+
+void ABbDirector::AddThrow(uint16 Agent, float ReleaseAt)
+{
+	if (Throws.ContainsByPredicate([&](const FThrowNote& N) { return N.Agent == Agent && FMath::Abs(N.ReleaseAt - ReleaseAt) < 0.05f; }))
+	{
+		return;
+	}
+	// He turns toward where the ball goes: from his feet at the release to the ball a moment
+	// into its flight.
+	FThrowNote N;
+	N.Agent = Agent;
+	N.ReleaseAt = ReleaseAt;
+	BbFrame AtRelease, InFlight, Gone;
+	FVector Foot = FVector::ZeroVector;
+	if (SampleDrawn(Current, ReleaseAt, AtRelease))
+	{
+		for (uint32 I = 0; I < AtRelease.n_actors; ++I)
+		{
+			if (AtRelease.actors[I].agent == Agent)
+			{
+				Foot = ToUE(AtRelease.actors[I].pos);
+			}
+		}
+	}
+	N.Yaw = SampleDrawn(Current, ReleaseAt + 0.35f, InFlight) ? (ToUE(InFlight.ball) - Foot).Rotation().Yaw : YawToPlate(Foot);
+	// Where the sim lets it go: the ball as its flight starts (two moments on, carried back).
+	BbFrame Later;
+	if (SampleDrawn(Current, ReleaseAt + 0.004f, Gone) && SampleDrawn(Current, ReleaseAt + 0.008f, Later) && Gone.holder < 0 && Later.holder < 0)
+	{
+		const FVector A = ToUE(Gone.ball), B = ToUE(Later.ball);
+		N.From = A - (B - A);
+		N.bFrom = (N.From - Foot).Size() < 350.0;
+	}
+	Throws.Add(N);
+}
+
+void ABbDirector::NoteCatches()
+{
+	// The whole pitch, a fiftieth of a second at a time: each moment the ball passes into a
+	// fielder's hands (found to the millisecond), and each throw he then has to make.
+	Catches.Reset();
+	StripCatch = -1;
+	StripThrow = -1;
+	if (!Sim || !Current.bValid)
+	{
+		return;
+	}
+	const float End = Current.Info.duration_s;
+	int32 Prev = -1, LastHolder = -1;
+	float PrevT = 0.f;
+	for (float T = 0.f;; T += 0.02f)
+	{
+		const float At = FMath::Min(T, End);
+		BbFrame F;
+		if (!SampleDrawn(Current, At, F))
+		{
+			break;
+		}
+		if (F.holder >= 0 && F.holder != Prev)
+		{
+			float Lo = PrevT, Hi = At;
+			BbFrame M, Free = F;
+			bool bFree = false;
+			for (int32 K = 0; K < 6 && Hi - Lo > 0.0008f; ++K)
+			{
+				const float Mid = 0.5f * (Lo + Hi);
+				if (SampleDrawn(Current, Mid, M) && M.holder == F.holder)
+				{
+					Hi = Mid;
+				}
+				else
+				{
+					Lo = Mid;
+					Free = M;
+					bFree = true;
+				}
+			}
+			if (!bFree)
+			{
+				bFree = At > 0.f && SampleDrawn(Current, Lo, Free) && Free.holder != F.holder;
+			}
+			// Where the ball is as he takes it: the timeline has the ball at each step of the
+			// sim, and in the step that ends with the catch it jumps to his holding point. So
+			// the two steps before, carried on one more.
+			BbFrame One, Two;
+			if (bFree && Free.holder < 0 && Lo > 2.f * SimTickS && SampleDrawn(Current, Lo - SimTickS, One) && SampleDrawn(Current, Lo - 2.f * SimTickS, Two) && One.holder < 0 && Two.holder < 0)
+			{
+				FCatchNote N;
+				N.Agent = (uint16)F.holder;
+				N.T = Hi;
+				N.Prev = ToUE(One.ball);
+				N.At = N.Prev + (N.Prev - ToUE(Two.ball));
+				N.At.Z = FMath::Max(N.At.Z, 4.0);
+				N.bThrown = LastHolder >= 0;
+				Catches.Add(N);
+			}
+			if (F.release_in_s >= 0.f)
+			{
+				AddThrow((uint16)F.holder, At + F.release_in_s);
+			}
+		}
+		if (F.holder >= 0)
+		{
+			LastHolder = F.holder;
+		}
+		Prev = F.holder;
+		PrevT = At;
+		if (At >= End)
+		{
+			break;
+		}
+	}
+	if (bMotionShots && MotionStrip < 0 && Current.Info.play_index > 3)
+	{
+		// The strips of the field: a batted ball taken and thrown by the same man (not the
+		// pitcher or the catcher); then, another pitch, a throw taken.
+		for (int32 C = 0; C < Catches.Num() && MotionStrip < 0; ++C)
+		{
+			const FCatchNote& N = Catches[C];
+			if ((N.Agent & 0x7F) < 3)
+			{
+				continue;
+			}
+			if (!N.bThrown && !bStripDone[6])
+			{
+				for (int32 W = 0; W < Throws.Num(); ++W)
+				{
+					if (Throws[W].Agent == N.Agent && Throws[W].bFrom && Throws[W].ReleaseAt > N.T && Throws[W].ReleaseAt < N.T + 3.f)
+					{
+						MotionStrip = 6;
+						StripCatch = C;
+						StripThrow = W;
+						break;
+					}
+				}
+			}
+			else if (N.bThrown && bStripDone[6] && !bStripDone[7])
+			{
+				MotionStrip = 7;
+				StripCatch = C;
+			}
 		}
 	}
 }
@@ -1033,6 +1156,10 @@ bool ABbDirector::StartReset(const FBbPlay& Next)
 			const float PitcherArrives = PitcherMove ? PitcherMove->Depart + TravelSeconds((PitcherMove->To - PitcherMove->From).Size(), PitcherMove->SpeedMps, ResetAccelMps2) : 0.f;
 			const float Dist = (ResetBallTo - FVector(M.From.X, M.From.Y, 1.2)).Size();
 			ResetThrower = Thrower;
+			// He lets it go as the sim's fielders do: 1.8 m up, off to his throwing side.
+			const FVector2D Line = (FVector2D(ResetBallTo.X, ResetBallTo.Y) - M.From).GetSafeNormal();
+			const double ArmSide = Sim->ThrowsLeft(M.Agent) ? -0.35 : 0.35;
+			ResetHand = FVector(M.From.X + Line.Y * ArmSide, M.From.Y - Line.X * ArmSide, 1.8);
 			ResetFlight = FMath::Clamp(Dist / ResetThrowMps, 0.35f, 2.5f);
 			ResetThrowAt = FMath::Max(0.55f, PitcherArrives - ResetFlight);
 			// He stands for the throw and its follow-through (turning to go as it ends), then
@@ -1257,9 +1384,8 @@ void ABbDirector::ResetFrame(float T, BbFrame& Out, bool& bBallShown) const
 	bBallShown = false;
 	if (ResetThrower >= 0)
 	{
-		// The thrower stands still until the ball is gone, holding it as the sim does: 1.2 m
-		// above his feet.
-		const FVector Hand(Movers[ResetThrower].From.X, Movers[ResetThrower].From.Y, 1.2);
+		// The thrower stands still until the ball is gone, and lets it go beside his head.
+		const FVector Hand = ResetHand;
 		const float U = (T - ResetThrowAt) / ResetFlight;
 		if (U < 0.f)
 		{
@@ -1373,6 +1499,9 @@ void ABbDirector::PoseFigure(int32 Slot, const BbActor& A, const BbFrame& Frame,
 		St.Motion = 0;
 		St.MotionW = 0.f;
 		St.Off = FVector2D::ZeroVector;
+		St.Ready = 0.f;
+		St.Carry = 0.f;
+		St.Lower = 1.f;
 	}
 	else if (SimDt > 1e-5f)
 	{
@@ -1416,17 +1545,31 @@ void ABbDirector::PoseFigure(int32 Slot, const BbActor& A, const BbFrame& Frame,
 	// The stand-in clips are right-handed. A left-hander's delivery, throw or stance is the
 	// same clip in a mirror: the figure is flipped across his own facing (owner backlog A1).
 	const bool bLefty = Sim && Sim->ThrowsLeft(A.agent);
-	bool bMirror = false;
 	// The coded motions (BbPose.h): the pitcher's delivery and the catcher's crouch. Each
 	// begins in the last moments of the reset (he comes set, the catcher squats), so the
 	// pitch opens on it.
 	UBbPoseAnim* Coded = Skel.Ok() ? Cast<UBbPoseAnim>(C->GetAnimInstance()) : nullptr;
-	const bool bThrowing = In.ThrowClip >= 0.f && In.ThrowClip <= ThrowClipS;
+	if (Coded && Coded->PelvisBone == INDEX_NONE)
+	{
+		Coded->UpperBones = Skel.UpperBones();
+		Coded->PelvisBone = Skel.PelvisBone();
+	}
+	// The coded motions are right-handed, so a left-handed fielder is shown in a mirror the
+	// whole time he is out there (his glove then sits on the hand the viewer expects).
+	bool bMirror = Coded && bFielder && bLefty;
 	int32 Motion = 0;
 	float MotionT = St.MotionT;
-	if (Coded && bMotions && bFielder && In.DiveSince < 0.f && !bThrowing)
+	const bool bSetUp = bReset && In.bStaged && !In.bMoving && ResetDuration - ResetTime < SetLeadS;
+	// A fielder away from the battery is down and set as the pitch is thrown.
+	const bool bReadyNow = bFielder && Position >= 3 && bStill && (bSetUp || (!bReset && PlayTime < ReadyUntil));
+	St.Ready = FMath::FInterpConstantTo(St.Ready, bReadyNow ? 1.f : 0.f, SimDt, 1.f / 0.35f);
+	St.Carry = FMath::FInterpConstantTo(St.Carry, In.bHolds ? 1.f : 0.f, SimDt, 1.f / 0.2f);
+	// A man settling under a ball or stepping to a throw, short of a run, squares up to it:
+	// he faces the ball and his feet are the pose's. (At a run he takes it going away.)
+	const bool bSettle = In.bCatch && In.CatchDt < 0.15f && St.SpeedCm < SettleMaxCmps;
+	St.Lower = FMath::FInterpConstantTo(St.Lower, (St.SpeedCm < 60.f || bSettle) && !(In.bStaged && In.bMoving) ? 1.f : 0.f, SimDt, 1.f / 0.25f);
+	if (Coded && bMotions && bFielder && In.DiveSince < 0.f)
 	{
-		const bool bSetUp = bReset && In.bStaged && !In.bMoving && ResetDuration - ResetTime < SetLeadS;
 		if (Position == 1 && !bReset && PlayTime < BbMotion::DeliveryEndS)
 		{
 			Motion = 1;
@@ -1440,6 +1583,12 @@ void ABbDirector::PoseFigure(int32 Slot, const BbActor& A, const BbFrame& Frame,
 		else if (Position == 2 && bStill && (bSetUp || (!bReset && PlayTime < CrouchUntil)))
 		{
 			Motion = 2;
+		}
+		// A throw to make, a ball to take, the ball in his hands, or the ready position (the
+		// catcher's crouch takes the pitch itself).
+		if (In.bThrow || (Motion != 2 && In.bCatch) || (Motion == 0 && (In.bHolds || bReadyNow)))
+		{
+			Motion = 4;
 		}
 	}
 	// The batter at the plate, from the moment he stands in: at ease between pitches, in his
@@ -1481,7 +1630,7 @@ void ABbDirector::PoseFigure(int32 Slot, const BbActor& A, const BbFrame& Frame,
 			WantYaw = In.DiveYaw;
 		}
 	}
-	else if (bMotions && bFielder && AnimThrow && In.ThrowClip >= 0.f && In.ThrowClip <= ThrowClipS)
+	else if (!Coded && bMotions && bFielder && AnimThrow && In.ThrowClip >= 0.f && In.ThrowClip <= ThrowClipS)
 	{
 		// A throw: the clip's release (ThrowReleaseS in) lands on the known release time, and
 		// its phase follows from that time every frame, follow-through included. He turns
@@ -1539,11 +1688,27 @@ void ABbDirector::PoseFigure(int32 Slot, const BbActor& A, const BbFrame& Frame,
 	if (St.MotionW > 0.f)
 	{
 		// (The batter is posed facing the pitcher; which side he bats from is where he stands.)
-		WantYaw = St.Motion == 3 ? ToUE(0.0, 1.0, 0.0).Rotation().Yaw : YawToPlate(Foot);
+		if (St.Motion != 4)
+		{
+			WantYaw = St.Motion == 3 ? ToUE(0.0, 1.0, 0.0).Rotation().Yaw : YawToPlate(Foot);
+		}
+		else if (In.bThrow)
+		{
+			// He turns to throw where the ball is going.
+			WantYaw = In.ThrowYaw;
+		}
+		else if (bSettle && In.CatchDt < 0.f && (ToUE(Frame.ball) - Foot).SizeSquared2D() > 900.0)
+		{
+			WantYaw = (ToUE(Frame.ball) - Foot).Rotation().Yaw;
+		}
+		else if (bSettle)
+		{
+			WantYaw = St.Yaw;
+		}
 		bMirror = St.Motion == 3 ? Bn.bLeftBox : bLefty;
 	}
 	// Turns ease on play time, so a pause holds them and fast playback keeps up.
-	St.Yaw = FMath::RInterpTo(FRotator(0, St.Yaw, 0), FRotator(0, WantYaw, 0), SimDt, Manual ? 18.f : TurnRate).Yaw;
+	St.Yaw = FMath::RInterpTo(FRotator(0, St.Yaw, 0), FRotator(0, WantYaw, 0), SimDt, Manual || (St.Motion == 4 && In.bThrow) ? 18.f : TurnRate).Yaw;
 	St.Pos = Foot;
 	// A dive lays him out: tipped forward from the feet over DiveFallS, coming down onto the
 	// turf as he lands (late, so he is in the air first), flat until he gets up.
@@ -1604,10 +1769,11 @@ void ABbDirector::PoseFigure(int32 Slot, const BbActor& A, const BbFrame& Frame,
 	else
 	{
 		// Left off his spot by a motion: gathered in as he runs, stepped back between pitches.
-		const float Rate = St.SpeedCm > 40.f ? GatherCmps : bReset ? StepBackCmps : 0.f;
+		// (A pitcher with a play to make is where the sim has him.)
+		const float Rate = St.SpeedCm > 40.f || (St.Motion == 4 && Motion == 4) ? GatherCmps : bReset ? StepBackCmps : 0.f;
 		St.Off = FMath::Vector2DInterpConstantTo(St.Off, FVector2D::ZeroVector, SimDt, Rate);
 	}
-	const bool bStepBack = bReset && St.SpeedCm <= 40.f && St.Motion == 1 && !St.Off.IsNearlyZero(1.0);
+	const bool bStepBack = bReset && St.SpeedCm <= 40.f && bFielder && Position == 1 && !St.Off.IsNearlyZero(1.0);
 	if (St.MotionW <= 0.f && St.Off.IsNearlyZero(0.01))
 	{
 		St.Motion = 0;
@@ -1620,9 +1786,19 @@ void ABbDirector::PoseFigure(int32 Slot, const BbActor& A, const BbFrame& Frame,
 	if (Coded)
 	{
 		Coded->PoseWeight = 0.f;
+		Coded->LowerWeight = 1.f;
 		if (MotionShown > 0.f && St.Motion != 0)
 		{
 			const FTransform Own(FacingQ, At, Scale);
+			// (The fielder's motion is laid out about the figure as it is drawn.)
+			const double GroundAtOwn = Park->GroundZ(At.Y / 100.0, At.X / 100.0);
+			auto GroundOwnFn = [&](double X, double Y)
+			{
+				const FVector Wd = Own.TransformPosition(FVector(X, Y, 0.0));
+				return (Park->GroundZ(Wd.Y / 100.0, Wd.X / 100.0) - GroundAtOwn) * 100.0 / FMath::Abs(Scale.Z);
+			};
+			const FBbMotionGround GroundOwn{ GroundOwnFn };
+			FVector Pocket(0, 0, 1);
 			auto GroundFn = [&](double X, double Y)
 			{
 				const FVector Wd = Base.TransformPosition(FVector(X, Y, 0.0));
@@ -1638,6 +1814,54 @@ void ABbDirector::PoseFigure(int32 Slot, const BbActor& A, const BbFrame& Frame,
 				Reach.At[1] = Own.InverseTransformPosition(PitchFrom);
 				Reach.Weight[1] = bReset ? 0.f : BbMotion::DeliveryReach(St.MotionT);
 				Reach.Past[1] = BbMotion::BallInHandCm;
+			}
+			else if (St.Motion == 4)
+			{
+				// A fielder (player-visuals §10): ready, the glove to the ball where the sim
+				// has it caught, the ball brought in to his hand, the throw with the hand on
+				// the sim's release point as the ball goes.
+				BbMotion::FFieldIn Fi;
+				Fi.Ready = St.Ready;
+				Fi.Carry = St.Carry;
+				Fi.Lower = St.Lower;
+				if (In.bCatch)
+				{
+					Fi.GloveAt = Own.InverseTransformPosition(In.CatchAt);
+					Fi.Glove = FMath::SmoothStep(-GloveOutS, -GloveThereS, In.CatchDt) * (1.f - FMath::SmoothStep(GloveStayS, GloveInS, In.CatchDt));
+				}
+				if (In.bThrow)
+				{
+					Fi.ThrowT = In.ThrowT;
+					Fi.Throw = FMath::SmoothStep(BbMotion::ThrowStartS, BbMotion::ThrowStartS + 0.15f, In.ThrowT) * (1.f - FMath::SmoothStep(BbMotion::ThrowEndS - 0.2f, BbMotion::ThrowEndS, In.ThrowT));
+					if (In.bCatch && In.CatchDt > -0.05f)
+					{
+						// A quick one: the throw waits for the ball to be in the glove.
+						Fi.Throw *= FMath::SmoothStep(0.04f, 0.2f, In.CatchDt);
+					}
+					if (In.bThrowFrom)
+					{
+						Reach.At[1] = Own.InverseTransformPosition(In.ThrowFrom);
+						Reach.Weight[1] = BbMotion::ThrowReach(In.ThrowT) * Fi.Throw;
+						Reach.Past[1] = BbMotion::BallInHandCm;
+						Fi.ThrowSink = (float)FMath::Clamp(168.0 - Reach.At[1].Z, 0.0, 30.0);
+					}
+				}
+				// His eyes: on the ball until he has it, then on where it is to go.
+				Fi.Look = In.bHolds || In.bThrow || bReset ? FVector(0.0, 1500.0, 150.0) : Own.InverseTransformPosition(ToUE(Frame.ball));
+				if (Coded->bClipPelvis)
+				{
+					Fi.ClipPelvis = Coded->ClipPelvis.GetLocation();
+					Skel.PelvisFacing(Coded->ClipPelvis, Fi.ClipFwd, Fi.ClipUp);
+				}
+				else
+				{
+					Fi.Lower = 1.f;
+				}
+				// A low ball taken on the run: he gets down to it, legs and all.
+				// One over his head he leaves his feet for.
+				Fi.Lower = FMath::Max3(Fi.Lower, Fi.Glove * (1.f - FMath::SmoothStep(45.f, 95.f, (float)Fi.GloveAt.Z)), Fi.Glove * FMath::SmoothStep(0.f, 8.f, (float)BbMotion::JumpForCm(Fi.GloveAt.Z)));
+				Coded->LowerWeight = Fi.Lower;
+				S = BbMotion::Field(Fi, Skel, GroundOwn, Reach, Pocket);
 			}
 			else if (St.Motion == 3)
 			{
@@ -1714,10 +1938,36 @@ void ABbDirector::PoseFigure(int32 Slot, const BbActor& A, const BbFrame& Frame,
 			// From the motion's frame to the figure's own, wherever it is drawn.
 			for (FVector* P : { &S.Pelvis, &S.Ankle[0], &S.Ankle[1] })
 			{
-				*P = Own.InverseTransformPosition(Base.TransformPosition(*P));
+				if (St.Motion != 4)
+				{
+					*P = Own.InverseTransformPosition(Base.TransformPosition(*P));
+				}
 			}
 			FVector Hold[2], Wrist[2];
 			Skel.Solve(S, Reach, Coded->PoseLocal, Hold, Wrist);
+			if (St.Motion == 4)
+			{
+				// The ball he has: in the glove's pocket as he takes it, then in his hand.
+				const FVector InGlove = Wrist[0] + Pocket * BbMotion::BallInMittCm;
+				if (In.bHolds && MotionShown >= 0.5f)
+				{
+					const float ToHand = In.bCatch && In.CatchDt >= 0.f ? FMath::SmoothStep(GloveStayS, GloveInS - 0.04f, In.CatchDt) : 1.f;
+					St.bHand = true;
+					St.Hand = Own.TransformPosition(FMath::Lerp(InGlove, Hold[1], (double)ToHand));
+				}
+				// -BbStagingLog: the glove's pocket from the ball as he takes it, and his hand
+				// from the sim's release point as he lets it go (the play is held on each).
+				if (bStagingLog && In.bCatch && In.CatchDt == 0.f)
+				{
+					UE_LOG(LogBb, Display, TEXT("BB_CATCH play=%u agent=0x%03x staged=%d left=%d ball=(%.2f, %.2f, %.2f) m from feet, glove_off=%.1f cm lower=%.2f shown=%.2f"), Current.Info.play_index, A.agent, bReset ? 1 : 0, bLefty ? 1 : 0,
+						(In.CatchAt.Y - At.Y) / 100.0, (In.CatchAt.X - At.X) / 100.0, (In.CatchAt.Z - At.Z) / 100.0, (Own.TransformPosition(InGlove) - In.CatchAt).Size(), Coded->LowerWeight, MotionShown);
+				}
+				if (bStagingLog && In.bThrow && In.ThrowT == 0.f && In.bThrowFrom)
+				{
+					UE_LOG(LogBb, Display, TEXT("BB_LETGO play=%u agent=0x%03x staged=%d left=%d hand_off=%.1f cm lower=%.2f shown=%.2f point=(%.0f, %.0f, %.0f) cm his frame, weight=%.2f yaw_off=%.0f deg"), Current.Info.play_index, A.agent, bReset ? 1 : 0, bLefty ? 1 : 0,
+						(Own.TransformPosition(Hold[1]) - In.ThrowFrom).Size(), St.Lower, MotionShown, Reach.At[1].X, Reach.At[1].Y, Reach.At[1].Z, Reach.Weight[1], FRotator::NormalizeAxis(St.Yaw - In.ThrowYaw));
+				}
+			}
 			// -BbStagingLog: how far the hand is from the sim's release point as the ball goes
 			// (the play is held on that moment), and the mitt from the ball once it is caught.
 			if (bStagingLog && St.Motion == 1 && !bReset && PlayTime == 0.f)
@@ -2047,6 +2297,30 @@ void ABbDirector::Tick(float DeltaSeconds)
 		{
 			PlayTime = Current.Info.contact_s;
 		}
+		// And on each catch and each throw's release, for the glove's and the hand's distances.
+		if (bStagingLog && !bReset)
+		{
+			float HoldAt = -1.f;
+			auto Crossed = [&](float At)
+			{
+				if (PlayTime >= At && PlayTime - SimDt < At && (HoldAt < 0.f || At < HoldAt))
+				{
+					HoldAt = At;
+				}
+			};
+			for (const FCatchNote& N : Catches)
+			{
+				Crossed(N.T);
+			}
+			for (const FThrowNote& N : Throws)
+			{
+				Crossed(N.ReleaseAt);
+			}
+			if (HoldAt >= 0.f)
+			{
+				PlayTime = HoldAt;
+			}
+		}
 		// -BbMotionShots: the first pitch from beside the pitcher, the second from the plate,
 		// the third beside the catcher; then the batter: the first ball hit, the first swing
 		// and miss, the first pitch taken. Each held on its named moments and photographed.
@@ -2065,8 +2339,36 @@ void ABbDirector::Tick(float DeltaSeconds)
 			// (Not the first pitch: the picture is still settling. A ball hit has the batter
 			// running once his swing is done, so its strip stops at the finish.)
 			const int32 Which = MotionStrip;
-			const FMark* Marks = Which < 2 ? Pitch : Which == 2 ? Catch : Which < 5 ? Swing : Take;
-			const int32 Count = Which < 2 ? UE_ARRAY_COUNT(Pitch) : Which == 2 ? UE_ARRAY_COUNT(Catch) : Which == 3 ? UE_ARRAY_COUNT(Swing) - 2 : Which == 4 ? UE_ARRAY_COUNT(Swing) : UE_ARRAY_COUNT(Take);
+			// The field: a ball taken and thrown; a throw taken.
+			TArray<FMark, TInlineAllocator<10>> Field;
+			if (Which >= 6 && Catches.IsValidIndex(StripCatch))
+			{
+				const float Tc = Catches[StripCatch].T;
+				Field.Add({ 0.05f, TEXT("ready") });
+				Field.Add({ Tc - 0.5f, TEXT("coming") });
+				Field.Add({ Tc - 0.12f, TEXT("reach") });
+				Field.Add({ Tc, TEXT("catch") });
+				if (Which == 6 && Throws.IsValidIndex(StripThrow))
+				{
+					const float Tr = Throws[StripThrow].ReleaseAt;
+					Field.Add({ Tc + 0.22f, TEXT("in") });
+					Field.Add({ Tr - 0.27f, TEXT("step") });
+					Field.Add({ Tr - 0.12f, TEXT("cocked") });
+					Field.Add({ Tr - 0.04f, TEXT("laid_back") });
+					Field.Add({ Tr, TEXT("release") });
+					Field.Add({ Tr + 0.18f, TEXT("follow") });
+				}
+				else
+				{
+					Field.Add({ Tc + 0.3f, TEXT("in") });
+				}
+				for (int32 K = 1; K < Field.Num(); ++K)
+				{
+					Field[K].T = FMath::Max(Field[K].T, Field[K - 1].T + 0.01f);
+				}
+			}
+			const FMark* Marks = Which >= 6 ? Field.GetData() : Which < 2 ? Pitch : Which == 2 ? Catch : Which < 5 ? Swing : Take;
+			const int32 Count = Which >= 6 ? Field.Num() : Which < 2 ? UE_ARRAY_COUNT(Pitch) : Which == 2 ? UE_ARRAY_COUNT(Catch) : Which == 3 ? UE_ARRAY_COUNT(Swing) - 2 : Which == 4 ? UE_ARRAY_COUNT(Swing) : UE_ARRAY_COUNT(Take);
 			// (No moment later than the pitch stays on screen.)
 			const float At = MotionShotNext < Count ? FMath::Min(Marks[MotionShotNext].T, Current.Info.duration_s + HoldAfter - 0.05f) : 0.f;
 			if (MotionShotNext < Count && PlayTime >= At)
@@ -2077,7 +2379,7 @@ void ABbDirector::Tick(float DeltaSeconds)
 				if (++MotionShotNext == Count)
 				{
 					bStripDone[Which] = true;
-					if (bStripDone[2] && bStripDone[3] && bStripDone[4] && bStripDone[5])
+					if (bStripDone[2] && bStripDone[3] && bStripDone[4] && bStripDone[5] && bStripDone[6] && bStripDone[7])
 					{
 						BenchSeconds = FMath::Max(BenchSeconds, (float)Wall + 2.f);
 					}
@@ -2193,36 +2495,6 @@ void ABbDirector::Tick(float DeltaSeconds)
 		}
 		if (bHave)
 		{
-			// A held ball is drawn in the holder's hand, not at the sim's holding point over his
-			// feet (owner, 2026-11-15: the ball hung in the air through the catcher's throw). The
-			// sim's ball is still the truth: the drawn one eases into the hand when he takes it
-			// and back onto the sim's path just after he lets go.
-			FVector BallAt = ToUE(Frame.ball);
-			bool bInHand = false;
-			if (Frame.holder >= 0)
-			{
-				for (int32 I = 0; I < FigureState.Num() && I < Figures.Num(); ++I)
-				{
-					if (FigureState[I].Agent == (uint16)Frame.holder && Figures[I] && !Figures[I]->IsHidden())
-					{
-						// The throw clip swings the left arm (mirrored for a right-hander, so it
-						// shows on his right); otherwise he carries it in his throwing hand.
-						const bool bLeftBone = FigureState[I].Manual == AnimThrow ? bThrowClipLeftArm : Sim->ThrowsLeft((uint16)Frame.holder);
-						const FVector Hand = Figures[I]->GetSkeletalMeshComponent()->GetSocketLocation(bLeftBone ? TEXT("hand_l") : TEXT("hand_r"));
-						HeldOffset = Hand - BallAt;
-						bInHand = true;
-						break;
-					}
-				}
-			}
-			HeldBlend = FMath::Clamp(HeldBlend + (bInHand ? SimDt / HeldTakeS : -SimDt / HeldLetGoS), 0.f, 1.f);
-			if (!bBallShown)
-			{
-				HeldBlend = 0.f;
-			}
-			BallAt += HeldOffset * HeldBlend;
-			Ball->SetActorLocation(BallAt);
-			Ball->SetActorHiddenInGame(!bBallShown);
 			if (!Skel.Ok())
 			{
 				// Without the coded motions the bat is the sim's alone, in nobody's hands.
@@ -2273,8 +2545,27 @@ void ABbDirector::Tick(float DeltaSeconds)
 					if (bShow && bReset && I < Movers.Num())
 					{
 						In = StagedInput(Movers[I], ResetTime);
+						if (ResetThrower >= 0 && I != ResetThrower && (A.agent & 0xFF) == 0x81)
+						{
+							// The pitcher takes the ball thrown back to him.
+							const float Dt = ResetTime - (ResetThrowAt + ResetFlight);
+							if (Dt >= -0.45f && Dt <= GloveInS + 0.03f)
+							{
+								In.bCatch = true;
+								In.CatchDt = Dt;
+								In.CatchAt = ToUE(ResetBallTo.X, ResetBallTo.Y, ResetBallTo.Z);
+							}
+						}
 						if (I == ResetThrower)
 						{
+							const float Tt = ResetTime - ResetThrowAt;
+							if (Tt >= BbMotion::ThrowStartS && Tt <= BbMotion::ThrowEndS)
+							{
+								In.bThrow = true;
+								In.ThrowT = Tt;
+								In.bThrowFrom = true;
+								In.ThrowFrom = ToUE(ResetHand.X, ResetHand.Y, ResetHand.Z);
+							}
 							// The return throw's clip phase from its known release, every frame.
 							In.ThrowClip = ResetTime - (ResetThrowAt - ThrowReleaseS);
 							In.ThrowYaw = (ToUE(ResetBallTo.X, ResetBallTo.Y, 0.0) - ToUE(Movers[I].From.X, Movers[I].From.Y, 0.0)).Rotation().Yaw;
@@ -2309,8 +2600,29 @@ void ABbDirector::Tick(float DeltaSeconds)
 									N.FirstClip = Clip;
 								}
 							}
+							const float Tt = PlayTime - N.ReleaseAt;
+							if (N.Agent == A.agent && Tt >= BbMotion::ThrowStartS && Tt <= BbMotion::ThrowEndS)
+							{
+								In.bThrow = true;
+								In.ThrowT = Tt;
+								In.ThrowYaw = N.Yaw;
+								In.bThrowFrom = N.bFrom;
+								In.ThrowFrom = N.From;
+							}
+						}
+						// The catch of his nearest in time.
+						for (const FCatchNote& N : Catches)
+						{
+							const float Dt = PlayTime - N.T;
+							if (N.Agent == A.agent && Dt >= -0.45f && Dt <= GloveInS + 0.03f && (!In.bCatch || FMath::Abs(Dt) < FMath::Abs(In.CatchDt)))
+							{
+								In.bCatch = true;
+								In.CatchDt = Dt;
+								In.CatchAt = N.At;
+							}
 						}
 					}
+					In.bHolds = bShow && Frame.holder == (int32)A.agent;
 				}
 				else if (Exits[I - MaxActors].bActive)
 				{
@@ -2380,6 +2692,66 @@ void ABbDirector::Tick(float DeltaSeconds)
 			{
 				bBallInPlay = true;
 			}
+			// A held ball is drawn in the holder's hand, not at the sim's holding point over his
+			// feet (owner, 2026-11-15: the ball hung in the air through the catcher's throw). The
+			// sim's ball is still the truth: the drawn one eases into the glove when he takes it,
+			// and it leaves his hand on the sim's path, his hand being on the release point.
+			FVector BallAt = ToUE(Frame.ball);
+			bool bInHand = false;
+			if (Frame.holder >= 0)
+			{
+				for (int32 I = 0; I < FigureState.Num() && I < Figures.Num(); ++I)
+				{
+					if (FigureState[I].Agent == (uint16)Frame.holder && Figures[I] && !Figures[I]->IsHidden())
+					{
+						// Where his pose has it; failing a pose, his throwing hand. (The stock
+						// throw clip swings the left arm, mirrored for a right-hander; with the
+						// coded motions a left-hander is in a mirror, so it is the right bone.)
+						const bool bLeftBone = Skel.Ok() ? false : FigureState[I].Manual == AnimThrow ? bThrowClipLeftArm : Sim->ThrowsLeft((uint16)Frame.holder);
+						const FVector Hand = FigureState[I].bHand ? FigureState[I].Hand : Figures[I]->GetSkeletalMeshComponent()->GetSocketLocation(bLeftBone ? TEXT("hand_l") : TEXT("hand_r"));
+						HeldOffset = Hand - BallAt;
+						bInHand = true;
+						if (FigureState[I].bHand)
+						{
+							// (His glove was on the ball as he took it: nothing to ease.)
+							HeldBlend = 1.f;
+						}
+						break;
+					}
+				}
+			}
+			else if (!bReset)
+			{
+				// The last step into a glove, on the ball's own line (FCatchNote::Prev).
+				for (const FCatchNote& N : Catches)
+				{
+					if (PlayTime > N.T - SimTickS && PlayTime < N.T)
+					{
+						BallAt = FMath::Lerp(N.Prev, N.At, (double)((PlayTime - (N.T - SimTickS)) / SimTickS));
+					}
+				}
+			}
+			HeldBlend = FMath::Clamp(HeldBlend + (bInHand ? SimDt / HeldTakeS : -SimDt / HeldLetGoS), 0.f, 1.f);
+			if (!bInHand && Skel.Ok() && HeldBlend > 0.f)
+			{
+				// Just thrown by a coded throw: nothing to ease, the hand was where the flight starts.
+				bool bThrown = bReset && ResetThrower >= 0 && ResetTime >= ResetThrowAt;
+				for (const FThrowNote& N : Throws)
+				{
+					bThrown = bThrown || (!bReset && N.bFrom && PlayTime >= N.ReleaseAt && PlayTime - N.ReleaseAt < 0.25f);
+				}
+				if (bThrown)
+				{
+					HeldBlend = 0.f;
+				}
+			}
+			if (!bBallShown)
+			{
+				HeldBlend = 0.f;
+			}
+			BallAt += HeldOffset * HeldBlend;
+			Ball->SetActorLocation(BallAt);
+			Ball->SetActorHiddenInGame(!bBallShown);
 			// Through the wind-up the ball is in the pitcher's hand, where his pose has it.
 			for (int32 I = 0; !bReset && PlayTime < 0.f && I < MaxActors && I < FigureState.Num(); ++I)
 			{
@@ -2390,7 +2762,7 @@ void ABbDirector::Tick(float DeltaSeconds)
 				}
 			}
 			UpdateCamera(Frame, DeltaSeconds);
-			if (bMotionShots && !bReset && MotionStrip >= 3)
+			if (bMotionShots && !bReset && MotionStrip >= 3 && MotionStrip <= 5)
 			{
 				// The batter: from across the plate, in front of him (a ball hit, a pitch taken);
 				// from the mound's side of him (a swing and a miss).
@@ -2399,6 +2771,43 @@ void ABbDirector::Tick(float DeltaSeconds)
 				const FVector Look = ToUE(BatNote.Spot.X * (MotionStrip == 4 ? 0.7 : 1.0), BatNote.Spot.Y, MotionStrip == 4 ? 0.85 : 1.0);
 				Camera->SetActorLocationAndRotation(Eye, (Look - Eye).Rotation());
 				Camera->GetCameraComponent()->SetFieldOfView(MotionStrip == 4 ? 36.f : 48.f);
+				ShownCam = -1;
+			}
+			else if (bMotionShots && !bReset && MotionStrip >= 6 && Catches.IsValidIndex(StripCatch))
+			{
+				// The field. The camera goes with the man, 6 m off: in front of him and a little
+				// to his glove side until he has the ball (so the glove shows), then on the side
+				// his chest turns to as he throws.
+				const FCatchNote& Cn = Catches[StripCatch];
+				FVector Feet = FVector(Cn.At.X, Cn.At.Y, 0.0);
+				for (uint32 I = 0; I < Frame.n_actors; ++I)
+				{
+					if (Frame.actors[I].agent == Cn.Agent)
+					{
+						Feet = ToUE(Frame.actors[I].pos);
+					}
+				}
+				const double Side = Sim->ThrowsLeft(Cn.Agent) ? -1.0 : 1.0;
+				FVector Eye;
+				if (MotionStrip == 6 && Throws.IsValidIndex(StripThrow) && PlayTime > Cn.T + 0.1f)
+				{
+					const FVector Line = FRotator(0.f, Throws[StripThrow].Yaw, 0.f).Vector();
+					Eye = Feet + FVector(-Line.Y, Line.X, 0.0) * (600.0 * Side) + Line * 120.0 + FVector(0.0, 0.0, 140.0);
+				}
+				else
+				{
+					// Where the ball comes from: along its line if that has any length on the
+					// ground (a throw, a grounder), else from the plate (a fly).
+					FVector Line = (Cn.At - Cn.Prev).GetSafeNormal2D();
+					if ((Cn.At - Cn.Prev).Size2D() < 0.3 * (Cn.At - Cn.Prev).Size())
+					{
+						Line = (Feet - ToUE(0.0, 0.0, 0.0)).GetSafeNormal2D();
+					}
+					Eye = Feet - Line * 500.0 - FVector(-Line.Y, Line.X, 0.0) * (330.0 * Side) + FVector(0.0, 0.0, 150.0);
+				}
+				const FVector Look = Feet + FVector(0.0, 0.0, 105.0);
+				Camera->SetActorLocationAndRotation(Eye, (Look - Eye).Rotation());
+				Camera->GetCameraComponent()->SetFieldOfView(40.f);
 				ShownCam = -1;
 			}
 			else if (bMotionShots && !bReset && MotionStrip >= 0)

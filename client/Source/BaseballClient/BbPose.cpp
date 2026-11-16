@@ -105,7 +105,7 @@ bool FBbSkeleton::Init(const USkeletalMesh* Mesh)
 		}
 		return I;
 	};
-	Mark(TEXT("pelvis"), Pelvis, 0, 0.f, FString());
+	PelvisIndex = Mark(TEXT("pelvis"), Pelvis, 0, 0.f, FString());
 	for (int32 K = 1; K <= 5; ++K)
 	{
 		Mark(FString::Printf(TEXT("spine_%02d"), K), Spine, 0, K / 5.f, FString());
@@ -138,6 +138,25 @@ bool FBbSkeleton::Init(const USkeletalMesh* Mesh)
 	UE_LOG(LogBbPose, Display, TEXT("BB_POSE skeleton: %d bones; upper arm %.1f forearm %.1f thigh %.1f calf %.1f ankle %.1f cm"), N, UpperArm, ForeArm, Thigh, Calf, AnkleZ);
 	bOk = bAll;
 	return bOk;
+}
+
+TArray<bool> FBbSkeleton::UpperBones() const
+{
+	// Everything from the first bone of the spine up and out.
+	TArray<bool> Out;
+	Out.SetNum(Bones.Num());
+	for (int32 I = 0; I < Bones.Num(); ++I)
+	{
+		Out[I] = Bones[I].Role == Spine || (Bones[I].Parent >= 0 && Out[Bones[I].Parent]);
+	}
+	return Out;
+}
+
+void FBbSkeleton::PelvisFacing(const FTransform& Bone, FVector& OutFwd, FVector& OutUp) const
+{
+	const FQuat D = Bones.IsValidIndex(PelvisIndex) ? Bone.GetRotation() * Bones[PelvisIndex].Ref.GetRotation().Inverse() : FQuat::Identity;
+	OutFwd = D.RotateVector(FVector(0, 1, 0));
+	OutUp = D.RotateVector(FVector(0, 0, 1));
 }
 
 void FBbSkeleton::Solve(const FBbStick& S, const FBbReach& Reach, TArray<FTransform>& OutLocal, FVector OutHold[2], FVector OutWrist[2]) const
@@ -192,6 +211,14 @@ void FBbSkeleton::Solve(const FBbStick& S, const FBbReach& Reach, TArray<FTransf
 					}
 				}
 				TwoBone(Shoulder, Want, UpperArm, ForeArm, Dc.RotateVector(S.Elbow[Sd]), Mid[0][Sd], End[0][Sd]);
+				// What he holds sits on along the forearm, which is not the line from the
+				// shoulder when the elbow is bent: the wrist is moved until it is on the point.
+				for (int32 K = 0; K < 3 && W > 0.f && Reach.Past[Sd] > 0.f; ++K)
+				{
+					const FVector At = Reach.At[Sd] - (End[0][Sd] - Mid[0][Sd]).GetSafeNormal() * Reach.Past[Sd];
+					Want = FMath::Lerp(Shoulder + Dc.RotateVector(S.Wrist[Sd]), At, (double)W);
+					TwoBone(Shoulder, Want, UpperArm, ForeArm, Dc.RotateVector(S.Elbow[Sd]), Mid[0][Sd], End[0][Sd]);
+				}
 				TurnA[0][Sd] = FQuat::FindBetweenNormals(Dc.RotateVector(B.Along), (Mid[0][Sd] - Shoulder).GetSafeNormal()) * Dc;
 				Cs[I] = FTransform(TurnA[0][Sd] * Ref, Shoulder);
 				break;
@@ -241,8 +268,8 @@ void FBbSkeleton::Solve(const FBbStick& S, const FBbReach& Reach, TArray<FTransf
 				break;
 			}
 		}
-		// (Not far, and hardly down at all: a man reaching does not sit down to do it.)
-		Shift.Z = FMath::Max(Shift.Z, -6.0);
+		// (Not far, and not far down: a man reaching does not sit down to do it.)
+		Shift.Z = FMath::Max(Shift.Z, -14.0);
 		Shift = Shift.GetClampedToMaxSize(24.0);
 		if (Shift.IsNearlyZero(0.01))
 		{
@@ -619,11 +646,337 @@ FBbStick BbMotion::Swing(const FSwingIn& In, const FBbSkeleton& Skel, const FBbM
 	return S;
 }
 
+namespace
+{
+	FBbStick Mix(const FBbStick& A, const FBbStick& B, double W)
+	{
+		if (W <= 0.0)
+		{
+			return A;
+		}
+		if (W >= 1.0)
+		{
+			return B;
+		}
+		FBbStick Out;
+		for (int32 K = 0; K < FBbStick::Num; ++K)
+		{
+			Out.V()[K] = FMath::Lerp(A.V()[K], B.V()[K], W);
+		}
+		return Out;
+	}
+
+	/** His eyes on a point, as far round as a neck turns from the chest. */
+	FVector Watch(const FBbStick& S, const FVector& Look, double MostDeg)
+	{
+		const FVector Eye(S.Pelvis.X, S.Pelvis.Y, S.Pelvis.Z + 68.0);
+		FVector See = (Look - Eye).GetSafeNormal(1e-6, FVector(0, 1, 0));
+		const FVector Front = S.ChestFwd.GetSafeNormal(1e-6, FVector(0, 1, 0));
+		FVector Round;
+		double Angle = 0.0;
+		FQuat::FindBetweenNormals(Front, See).ToAxisAndAngle(Round, Angle);
+		const double Most = FMath::DegreesToRadians(MostDeg);
+		if (Angle > Most)
+		{
+			See = FQuat(Round, Most).RotateVector(Front);
+		}
+		See.Z = FMath::Clamp(See.Z, -0.7, 0.8);
+		return See;
+	}
+
+	/** A fielder's throw (BbMotion::Field), toward +Y: a right-hander turns side on (chest to
+	 *  -X, glove shoulder at the target), steps at it and throws three-quarter. The stride is
+	 *  laid out about where he stands, so that he ends the throw near the same spot. */
+	const TArray<FKey>& ThrowKeys()
+	{
+		static TArray<FKey> Keys;
+		if (Keys.Num() > 0)
+		{
+			return Keys;
+		}
+		auto Add = [&](float T, TFunctionRef<void(FBbStick&)> Fill)
+		{
+			FKey K;
+			K.T = T;
+			Fill(K.S);
+			Keys.Add(K);
+		};
+		const int32 L = 0, R = 1;
+		// The gather: the ball brought in to the hand, the body starting to turn.
+		Add(BbMotion::ThrowStartS, [&](FBbStick& S)
+		{
+			S.Pelvis = { 0, -8, 91 };
+			S.PelvisFwd = { -0.5, 0.85, 0 };
+			S.ChestFwd = { -0.5, 0.85, -0.1 };
+			S.HeadFwd = { 0, 1, 0 };
+			S.Wrist[R] = { 15, 25, -26 };
+			S.Wrist[L] = { -15, 25, -26 };
+			S.Elbow[R] = { -1, -0.2, -0.6 };
+			S.Elbow[L] = { 1, -0.2, -0.6 };
+			S.Ankle[R] = { -12, -18, 0 };
+			S.Ankle[L] = { 12, -4, 0 };
+			S.Knee[R] = { -0.5, 0.85, 0 };
+			S.Knee[L] = { -0.5, 0.85, 0 };
+			S.Toe[R] = { -0.5, 0.85, 0 };
+			S.Toe[L] = { -0.5, 0.85, 0 };
+		});
+		// Side on, the weight on the back foot, the hands breaking, the front foot coming up.
+		Add(-0.27f, [&](FBbStick& S)
+		{
+			S.Pelvis = { 0, -22, 88 };
+			S.PelvisFwd = { -1, 0.1, 0 };
+			S.ChestFwd = { -1, 0, -0.05 };
+			S.ChestUp = { 0, -0.1, 1 };
+			S.HeadFwd = { -0.3, 1, 0 };
+			S.Wrist[R] = { -16, -4, -44 };
+			S.Elbow[R] = { -1, -0.5, 0.1 };
+			S.Wrist[L] = { 32, 16, -10 };
+			S.Elbow[L] = { 0.3, -0.3, -1 };
+			S.Ankle[R] = { -2, -40, 0 };
+			S.Knee[R] = { -0.9, 0.4, 0 };
+			S.Toe[R] = { -1, 0.1, 0 };
+			S.Ankle[L] = { -4, -6, 12 };
+			S.Knee[L] = { -0.6, 1, 0.3 };
+			S.Toe[L] = { -0.5, 1, -0.2 };
+		});
+		// The front foot down, the hips opening, the chest still closed, the arm up and cocked.
+		Add(-0.12f, [&](FBbStick& S)
+		{
+			S.Pelvis = { -1, -4, 84 };
+			S.PelvisFwd = { -0.75, 0.65, 0 };
+			S.ChestFwd = { -1, 0.15, 0 };
+			S.ChestUp = { 0, -0.08, 1 };
+			S.HeadFwd = { -0.1, 1, 0 };
+			S.Wrist[R] = { -26, -6, 26 };
+			S.Elbow[R] = { -1, -0.2, -1 };
+			S.Wrist[L] = { 30, 18, -10 };
+			S.Elbow[L] = { 0.3, -0.3, -1 };
+			S.Ankle[R] = { 0, -40, 2 };
+			S.Knee[R] = { -0.5, 1, -0.2 };
+			S.Toe[R] = { -0.8, 0.4, -0.3 };
+			S.Ankle[L] = { 0, 34, 0 };
+			S.Knee[L] = { -0.1, 1, 0.3 };
+			S.Toe[L] = { -0.2, 1, 0 };
+		});
+		// The arm laid back: the chest square to the target, the elbow leading the hand.
+		Add(-0.04f, [&](FBbStick& S)
+		{
+			S.Pelvis = { -2, 6, 84 };
+			S.PelvisFwd = { -0.1, 1, 0 };
+			S.ChestFwd = { -0.35, 1, -0.1 };
+			S.ChestUp = { 0.08, 0.1, 1 };
+			S.HeadFwd = { 0, 1, 0 };
+			S.Wrist[R] = { -27, -20, 16 };
+			S.Elbow[R] = { -1, 0.5, -0.5 };
+			S.Wrist[L] = { 8, 18, -24 };
+			S.Elbow[L] = { 1, -0.3, -0.6 };
+			S.Ankle[R] = { -4, -32, 6 };
+			S.Knee[R] = { -0.2, 1, -0.5 };
+			S.Toe[R] = { -0.4, 0.6, -0.6 };
+			S.Ankle[L] = { 0, 34, 0 };
+			S.Knee[L] = { -0.1, 1, 0.3 };
+			S.Toe[L] = { -0.2, 1, 0 };
+		});
+		// The release: over the front leg, the arm out and up.
+		Add(0.f, [&](FBbStick& S)
+		{
+			S.Pelvis = { -2, 12, 85 };
+			S.PelvisFwd = { 0.15, 1, 0 };
+			S.ChestFwd = { 0.35, 1, -0.3 };
+			S.ChestUp = { 0.2, 0.25, 1 };
+			S.HeadFwd = { 0, 1, -0.05 };
+			S.HeadUp = { 0.12, 0.05, 1 };
+			S.Wrist[R] = { -38, 22, 28 };
+			S.Elbow[R] = { -1, -0.2, -0.6 };
+			S.Wrist[L] = { 6, 16, -26 };
+			S.Elbow[L] = { 1, -0.3, -0.6 };
+			S.Ankle[R] = { -8, -20, 10 };
+			S.Knee[R] = { -0.1, 1, -0.6 };
+			S.Toe[R] = { -0.2, 0.6, -0.8 };
+			S.Ankle[L] = { 0, 34, 0 };
+			S.Knee[L] = { 0, 1, 0.2 };
+			S.Toe[L] = { -0.2, 1, 0 };
+		});
+		// The follow-through: the arm down across him, the back leg coming through.
+		Add(0.18f, [&](FBbStick& S)
+		{
+			S.Pelvis = { -2, 18, 86 };
+			S.PelvisFwd = { 0.4, 1, 0 };
+			S.ChestFwd = { 0.6, 0.8, -0.6 };
+			S.ChestUp = { 0.15, 0.5, 0.9 };
+			S.HeadFwd = { 0, 1, -0.1 };
+			S.Wrist[R] = { 28, 30, -34 };
+			S.Elbow[R] = { -0.6, 0.2, -1 };
+			S.Wrist[L] = { 10, 10, -24 };
+			S.Elbow[L] = { 1, -0.3, -0.6 };
+			S.Ankle[R] = { -20, 8, 14 };
+			S.Knee[R] = { -0.3, 1, 0 };
+			S.Toe[R] = { 0, 0.8, -0.6 };
+			S.Ankle[L] = { 0, 34, 0 };
+			S.Knee[L] = { 0, 1, 0.2 };
+			S.Toe[L] = { -0.2, 1, 0 };
+		});
+		// The finish: both feet down, square to where the ball went.
+		Add(BbMotion::ThrowEndS, [&](FBbStick& S)
+		{
+			S.Pelvis = { -4, 22, 93 };
+			S.ChestFwd = { 0, 1, -0.1 };
+			S.Wrist[R] = { -4, 10, -48 };
+			S.Wrist[L] = { 4, 10, -48 };
+			S.Ankle[R] = { -18, 20, 0 };
+			S.Ankle[L] = { 10, 34, 0 };
+		});
+		return Keys;
+	}
+}
+
+FBbStick BbMotion::Field(const FFieldIn& In, const FBbSkeleton& Skel, const FBbMotionGround& Ground, FBbReach& OutReach, FVector& OutPocket)
+{
+	const int32 L = 0, R = 1;
+	// Standing easy, and down and set as the pitch is thrown: feet wide, knees bent, the
+	// trunk forward, hands hanging in front of the knees.
+	FBbStick S;
+	{
+		FBbStick Set;
+		Set.Pelvis = { 0, -6, 81 };
+		Set.ChestFwd = { 0, 1, -0.5 };
+		Set.ChestUp = { 0, 0.5, 1 };
+		Set.Ankle[L] = { 27, 0, 0 };
+		Set.Ankle[R] = { -27, 0, 0 };
+		Set.Knee[L] = { 0.35, 1, 0 };
+		Set.Knee[R] = { -0.35, 1, 0 };
+		Set.Toe[L] = { 0.25, 1, 0 };
+		Set.Toe[R] = { -0.25, 1, 0 };
+		Set.Wrist[L] = { 0, 20, -44 };
+		Set.Wrist[R] = { 0, 20, -44 };
+		Set.Elbow[L] = { 1, -0.3, -0.2 };
+		Set.Elbow[R] = { -1, -0.3, -0.2 };
+		S = Mix(S, Set, Smooth(0.0, 1.0, In.Ready));
+	}
+	// With the ball: hands together in front of his chest.
+	{
+		FBbStick Has;
+		Has.ChestFwd = { 0, 1, -0.08 };
+		Has.Wrist[R] = { 15, 25, -26 };
+		Has.Wrist[L] = { -15, 25, -26 };
+		Has.Elbow[R] = { -1, -0.2, -0.6 };
+		Has.Elbow[L] = { 1, -0.2, -0.6 };
+		S = Mix(S, Has, FMath::Clamp((double)In.Carry, 0.0, 1.0));
+	}
+	// The glove to the ball. He bends for a low one and reaches up for a high one, turns his
+	// chest to it, and steps toward one that is away from him with the foot on that side.
+	OutPocket = FVector(0, 0.3, 1).GetSafeNormal();
+	const double Throw = FMath::Clamp((double)In.Throw, 0.0, 1.0);
+	if (In.Glove > 0.f)
+	{
+		// The sim has many a ball caught over the man's own feet. He takes it in front of
+		// him: he gives ground until it is a forearm ahead of his middle.
+		const double Back = FMath::Clamp(34.0 - In.GloveAt.Y, 0.0, 50.0) * (1.0 - Smooth(40.0, 70.0, FMath::Abs(In.GloveAt.X)));
+		const FVector2D Flat(In.GloveAt.X, In.GloveAt.Y + Back);
+		const double Dist = Flat.Size();
+		// (Which way a ball close in lies means little; one away from him he turns and leans to.)
+		const double Away = Smooth(25.0, 60.0, Dist);
+		const FVector2D Dir = (Dist > 1.0 ? Flat / Dist : FVector2D(0.0, 1.0)) * Away + FVector2D(0.0, 1.0 - Away);
+		const double Low = 1.0 - Smooth(25.0, 95.0, In.GloveAt.Z);
+		const double High = Smooth(170.0, 240.0, In.GloveAt.Z);
+		const double Far = Smooth(45.0, 110.0, Dist);
+		FBbStick G;
+		// (One over his head he goes up for: BbMotion::JumpForCm.)
+		const double Jump = JumpForCm(In.GloveAt.Z);
+		G.Pelvis = { Dir.X * 18.0 * Far, 2.0 + Dir.Y * 18.0 * Far - 14.0 * Low, 96.0 - 58.0 * Low - 4.0 * Far + Jump };
+		G.ChestFwd = FVector(Dir.X * 0.6, 0.6 + Dir.Y * 0.6, -0.15 - 1.7 * Low + 0.3 * High);
+		G.ChestUp = FVector(Dir.X * 0.3 * Far, 0.2 + 1.0 * Low + Dir.Y * 0.3 * Far, 1.0);
+		const double Wide = 14.0 + 14.0 * Low;
+		G.Ankle[L] = { Wide, 0, Jump };
+		G.Ankle[R] = { -Wide, -4, Jump };
+		if (Jump > 0.0)
+		{
+			G.Toe[L] = G.Toe[R] = FVector(0.0, 1.0, -FMath::Min(Jump / 15.0, 1.2));
+		}
+		const int32 Near = Dir.X >= 0.0 ? L : R;
+		G.Ankle[Near] += FVector(Dir.X, Dir.Y, 0.0) * (45.0 * Far);
+		G.Toe[Near] = FVector(Dir.X * Far, 1.0 - Far + Dir.Y * Far, 0.0).GetSafeNormal(1e-6, FVector(0, 1, 0));
+		G.Knee[L] = { 0.3, 1, 0 };
+		G.Knee[R] = { -0.3, 1, 0 };
+		G.Knee[Near] = FMath::Lerp(G.Knee[Near], FVector(Dir.X, Dir.Y, 0.0), 0.7 * Far);
+		G.Wrist[L] = { -4, 34, -20 };
+		G.Elbow[L] = { 1, -0.2, -0.8 };
+		G.Pelvis.Y -= Back;
+		G.Ankle[L].Y -= Back;
+		G.Ankle[R].Y -= Back;
+		// The bare hand beside the glove for a ball in front of him, out of the way otherwise.
+		const double Two = (1.0 - Far) * (1.0 - High);
+		G.Wrist[R] = FMath::Lerp(FVector(-6, 6, -50), FVector(4, 30, -28 - 14 * Low), Two);
+		G.Elbow[R] = { -1, -0.3, -0.5 };
+		// The glove's fingers point away from his middle: up above the belt, down below it,
+		// out to the side for a wide one.
+		const FVector From(In.GloveAt.X, 0.0, In.GloveAt.Z - 100.0);
+		FVector Point = From + FVector(0, 0, 1) * 14.0 * FMath::Exp(-From.Size() / 14.0);
+		Point = Point.GetSafeNormal(1e-6, FVector(0, 0, 1)) + FVector(0, 0.3, 0);
+		Point.Normalize();
+		G.Fingers[L] = Point;
+		OutPocket = Point;
+		// What the bend, the turn and the step leave short, the whole of him makes up: he
+		// lunges at one away from him, gets down to one on the ground, leaves his feet for
+		// one overhead.
+		{
+			const FVector Shoulder = G.Pelvis + G.ChestUp.GetSafeNormal() * 46.0 + G.ChestFwd.GetSafeNormal() * 6.0;
+			const FVector Need = In.GloveAt - Point * BallInMittCm - Shoulder;
+			const double Short = Need.Size() - 0.9 * Skel.ArmCm();
+			if (Short > 0.0)
+			{
+				const FVector Go = Need.GetSafeNormal() * FMath::Min(Short, 90.0);
+				const double Up = FMath::Max(Go.Z, 0.0), Down = FMath::Max(-Go.Z, 0.0);
+				G.Pelvis += FVector(Go.X, Go.Y, Up - FMath::Min(Down, FMath::Max(G.Pelvis.Z - 34.0, 0.0)));
+				G.Ankle[Near] += FVector(Go.X, Go.Y, 0.0);
+				G.Ankle[L].Z += Up;
+				G.Ankle[R].Z += Up;
+			}
+		}
+		OutReach.At[L] = In.GloveAt - Point * BallInMittCm;
+		OutReach.Weight[L] = (float)(FMath::Clamp((double)In.Glove, 0.0, 1.0) * (1.0 - Throw));
+		S = Mix(S, G, Smooth(0.0, 1.0, In.Glove));
+	}
+	if (Throw > 0.0)
+	{
+		FBbStick Th = Through(ThrowKeys(), In.ThrowT);
+		Th.Pelvis.Z -= In.ThrowSink;
+		S = Mix(S, Th, Throw);
+	}
+	// On the run the hips are the clip's, and the trunk is built on them.
+	const double Lower = FMath::Clamp((double)In.Lower, 0.0, 1.0);
+	S.Pelvis = FMath::Lerp(In.ClipPelvis, S.Pelvis, Lower);
+	S.PelvisFwd = FMath::Lerp(In.ClipFwd, S.PelvisFwd, Lower);
+	S.PelvisUp = FMath::Lerp(In.ClipUp, S.PelvisUp, Lower);
+	// His eyes on the ball; through the throw, on where it is going.
+	S.HeadFwd = FMath::Lerp(Watch(S, In.Look, 80.0), S.HeadFwd, Throw);
+	Stand(S, Skel, Ground);
+	return S;
+}
+
+double BbMotion::JumpForCm(double BallZ)
+{
+	return FMath::Clamp(BallZ - 212.0, 0.0, 55.0);
+}
+
+float BbMotion::ThrowReach(float T)
+{
+	return (float)(Smooth(-0.11, -0.01, T) * (1.0 - Smooth(0.0, 0.07, T)));
+}
+
 void FBbPoseProxy::PreUpdate(UAnimInstance* InAnimInstance, float DeltaSeconds)
 {
 	FAnimSingleNodeInstanceProxy::PreUpdate(InAnimInstance, DeltaSeconds);
-	const UBbPoseAnim* Anim = CastChecked<UBbPoseAnim>(InAnimInstance);
+	UBbPoseAnim* Anim = CastChecked<UBbPoseAnim>(InAnimInstance);
+	Anim->ClipPelvis = ClipPelvis;
+	Anim->bClipPelvis = bClipPelvis;
 	Weight = Anim->PoseWeight;
+	LowerWeight = Anim->LowerWeight;
+	PelvisBone = Anim->PelvisBone;
+	if (Upper.Num() != Anim->UpperBones.Num())
+	{
+		Upper = Anim->UpperBones;
+	}
 	if (Weight > 0.f)
 	{
 		Local = Anim->PoseLocal;
@@ -633,23 +986,41 @@ void FBbPoseProxy::PreUpdate(UAnimInstance* InAnimInstance, float DeltaSeconds)
 bool FBbPoseProxy::Evaluate(FPoseContext& Output)
 {
 	const bool bDone = FAnimSingleNodeInstanceProxy::Evaluate(Output);
+	const FBoneContainer& Container = Output.Pose.GetBoneContainer();
+	// Where the clip alone has the hips: a motion made on the run builds the trunk on them.
+	bClipPelvis = false;
+	if (PelvisBone != INDEX_NONE)
+	{
+		FCompactPoseBoneIndex I = Container.MakeCompactPoseIndex(FMeshPoseBoneIndex(PelvisBone));
+		if (I.GetInt() != INDEX_NONE)
+		{
+			FTransform T = Output.Pose[I];
+			for (I = Container.GetParentBoneIndex(I); I.GetInt() != INDEX_NONE; I = Container.GetParentBoneIndex(I))
+			{
+				T = T * Output.Pose[I];
+			}
+			T.NormalizeRotation();
+			ClipPelvis = T;
+			bClipPelvis = true;
+		}
+	}
 	if (Weight > 0.f && Local.Num() > 0)
 	{
-		const FBoneContainer& Container = Output.Pose.GetBoneContainer();
 		for (const FCompactPoseBoneIndex I : Output.Pose.ForEachBoneIndex())
 		{
 			const int32 M = Container.MakeMeshPoseIndex(I).GetInt();
 			if (Local.IsValidIndex(M))
 			{
+				const float W = Upper.IsValidIndex(M) && !Upper[M] ? Weight * LowerWeight : Weight;
 				FTransform& Bone = Output.Pose[I];
-				if (Weight >= 1.f)
+				if (W >= 1.f)
 				{
 					Bone = Local[M];
 				}
-				else
+				else if (W > 0.f)
 				{
 					Bone.NormalizeRotation();
-					Bone.BlendWith(Local[M], Weight);
+					Bone.BlendWith(Local[M], W);
 					Bone.NormalizeRotation();
 				}
 			}
