@@ -1,6 +1,6 @@
 # Player visuals: figures, motions, kit
 
-**Status:** plan agreed with the owner 2026-11-15 (seven questions, Q15–Q21, all as recommended; §1). Steps 1 (the figure) and 2 (the kit) are built; steps 3–7 are not. This is the second part of the graphics stage, after [the park](park-visuals.md) and before [the HUD](hud.md).
+**Status:** plan agreed with the owner 2026-11-15 (seven questions, Q15–Q21, all as recommended; §1). Steps 1 (the figure), 2 (the kit) and 3 (the delivery and the catcher) are built; steps 4–7 are not. This is the second part of the graphics stage, after [the park](park-visuals.md) and before [the HUD](hud.md).
 
 **Where it starts.** Every player is the engine's grey mannequin (`SKM_Manny_Simple`) with a team tint, moved by stock clips standing in for baseball: a charged punch for the delivery, an attack for the throw and the stance, a landing for the catcher's crouch, a wall jump for the dive (`BbDirector.cpp`, `LoadAssets`). The bat is a block. There are no gloves, caps, numbers, umpires or coaches.
 
@@ -74,7 +74,22 @@ Nine more pieces a figure (32 in all), each worn or not by what he is doing (`AB
 - **Cost, measured this time** (seed 7, `-BbShots=6 -BbUncapped`, a browser busy on the machine): 174 fps with figures and kit, 190 with the bare mannequin in the same build, against 193 before the players. So the figures cost about a tenth. Not acted on; the first thing to try is still not moving the pieces of hidden figures.
 - **Left for later:** the mask is a solid shape, not a cage; the first baseman has an ordinary glove; a glove is one shape without a thumb or web; nobody holds the bat yet (the hands meet it with the swing, step 4); batting gloves and the batter's shin guard are not made.
 
-## 8. Records
+## 8. Step 3 as built (2026-11-15): the delivery and the catcher
+
+The first motions written as poses in code. `BbPose.{h,cpp}` holds all of it.
+
+- **A pose is a stick figure** (`FBbStick`): where the hips are and which way they face, which way the chest and head face, each wrist from its own shoulder (in the chest's frame, so an arm goes round with the trunk), each ankle, and which way each elbow and knee points. `FBbSkeleton::Solve` turns one into the mannequin's bone transforms: the spine and neck share out the turn between hips, chest and head; each limb is two-bone IK. A hand can be told a point it must reach (`FBbReach`): the body moves up to 24 cm for the arm to get there.
+- **Poses over clips.** `UBbPoseAnim` is the engine's single-clip player with a pose laid over the clip by a weight, so a figure goes from standing into a motion and back in 0.3 s. Every figure has one; the stock clips play through it as before. `-BbStockMotions` turns the coded motions off.
+- **The delivery** (`BbMotion::Delivery`): eight key poses on the sim's clock, from the stretch: set (−1.4 s), leg lift (−0.84), stride (−0.48), plant (−0.16), the arm laid back (−0.045), release (0), follow-through (+0.2), finish (+0.6), joined by a curve that keeps its speed through each key. Round the release the throwing hand is put on the sim's release point (the ball's place at time 0), so **the ball leaves the hand where and when the sim says**. Through the wind-up the ball is drawn in his hand. The wind-up shown before each pitch is 1.4 s now (was 1.0). A left-hander is the same motion in a mirror.
+- **Where he finishes.** The delivery carries him 1.3 m down the mound and he stands there, as a pitcher does; the sim still has him on the rubber. The figure is drawn off the sim's position by that much (`FFigureState::Off`): gathered in at 3 m/s once a play has him running, backed up the mound at 1.3 m/s between pitches. He comes set in the last 0.8 s of the reset.
+- **The catcher** (`BbMotion::Crouch`): a squat on the balls of his feet, knees wide, bare hand behind his right leg, sitting 66 cm behind the sim's spot for him so that the mitt is out in front. The mitt is held for a target, goes to where the sim has the pitch caught over the last quarter second, and holds the ball there for 0.7 s; its fingers point away from his middle (up for a high pitch, down for a low one), and he bends to a low one. On a hit ball the mitt goes to where the pitch was heading and he is up at once. He squats in the last 0.8 s of the reset.
+- **Measured** (`-BbStagingLog`, 66 pitches of seed 7, and seed 6 for a left-hander): at release the ball in the pitcher's hand is 2.3–2.4 cm from the sim's release point, right- or left-handed, at two heights of pitcher; the mitt's wrist is where it was asked to be on the median pitch and 11 cm short at worst (pitches in the dirt).
+- **Checks added:** `-BbMotionShots` photographs the second pitch from beside the pitcher, the third from the plate and the fourth beside the catcher, each held on its named moments, as `motion_<pitch>_<n>_<what>.png` (20 pictures); `-BbStagingLog` adds `BB_RELEASE` and `BB_RECEIVE` lines.
+- **Pictures:** `client/Saved/Shots/players3_after/` (untracked): the strips and six of play. Before: `players2_after/`.
+- **Cost:** 187 fps (seed 7, `-BbShots=6 -BbUncapped`), against 174 at step 2 on a busier machine: nothing measurable.
+- **Left for later:** a throw that begins while a motion is still going out cuts to the throw clip at once (step 5 redoes throws); a left-hander's figure flips out of its mirror as the motion ends; the feet of a figure coming out of a motion slide a short way instead of stepping; no wind-up, only the stretch; the catcher gives the same target every pitch (the sim does not export where the pitcher is aiming); no sign-giving, no throw back from the crouch.
+
+## 9. Records
 
 - PLAN D13 (revised 2026-11-15) covers this stage.
 - TASKS.md "Resume here" carries the step reached; a `/clear` point after each merged step.

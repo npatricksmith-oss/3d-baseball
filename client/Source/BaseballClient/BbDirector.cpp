@@ -2,6 +2,7 @@
 #include "BbFigure.h"
 #include "BbFrame.h"
 #include "BbPark.h"
+#include "BbPose.h"
 #include "BbGameMode.h"
 #include "Animation/AnimSequence.h"
 #include "Animation/SkeletalMeshActor.h"
@@ -44,6 +45,19 @@ namespace
 	{
 		return (ToUE(0, 0.3, 0) - Foot).Rotation().Yaw;
 	}
+
+	/** Starts a clip on a figure from its beginning (the figure's animation instance stays
+	 *  the one that can lay a coded pose over the clip, BbPose.h). */
+	void PlayClip(USkeletalMeshComponent* C, UAnimSequence* Clip, bool bLoop)
+	{
+		C->SetAnimation(Clip);
+		C->Play(bLoop);
+	}
+
+	/** Where the catcher takes a pitch, from the rear point of the plate, m (the sim ends a
+	 *  taken pitch there), and where he holds his mitt for a target. */
+	const float MittPlaneY = -1.2f;
+	const float MittTargetZ = 0.55f;
 
 	/** A bone's place in the clip's component space at Time, cm (its parents composed). */
 	FVector ClipBoneAt(const UAnimSequence* Clip, const FReferenceSkeleton& Ref, int32 Bone, double Time)
@@ -171,6 +185,10 @@ void ABbDirector::BeginPlay()
 	AnimWalkLeft = LoadObject<UAnimSequence>(nullptr, TEXT("/Game/Characters/Mannequins/Anims/Unarmed/Walk/MF_Unarmed_Walk_Left.MF_Unarmed_Walk_Left"));
 	AnimWalkRight = LoadObject<UAnimSequence>(nullptr, TEXT("/Game/Characters/Mannequins/Anims/Unarmed/Walk/MF_Unarmed_Walk_Right.MF_Unarmed_Walk_Right"));
 	const bool bFigures = FigureMesh && AnimIdle && AnimWalk && AnimJog;
+	if (bFigures && !FParse::Param(FCommandLine::Get(), TEXT("BbStockMotions")))
+	{
+		Skel.Init(FigureMesh);
+	}
 	if (!bFigures)
 	{
 		UE_LOG(LogBb, Warning, TEXT("Mannequin assets not found under /Game/Characters/Mannequins: drawing players as cylinders. Run client/run.sh once to copy them."));
@@ -186,7 +204,10 @@ void ABbDirector::BeginPlay()
 		C->SetMobility(EComponentMobility::Movable);
 		C->SetSkeletalMeshAsset(FigureMesh);
 		C->SetCollisionEnabled(ECollisionEnabled::NoCollision);
-		C->SetAnimationMode(EAnimationMode::AnimationSingleNode);
+		// One clip at a time, with a coded pose laid over it when a motion calls for one.
+		C->SetAnimInstanceClass(UBbPoseAnim::StaticClass());
+		// The director poses the figures; they work their bones out after it has.
+		C->AddTickPrerequisiteActor(this);
 		// Animate even when a figure is small or briefly off screen: the camera cuts often.
 		C->VisibilityBasedAnimTickOption = EVisibilityBasedAnimTickOption::AlwaysTickPoseAndRefreshBones;
 		F->SetActorHiddenInGame(true);
@@ -283,6 +304,7 @@ void ABbDirector::BeginPlay()
 		bSideCut = Cut != 0;
 	}
 	bStagingLog = FParse::Param(Cmd, TEXT("BbStagingLog"));
+	bMotionShots = FParse::Param(Cmd, TEXT("BbMotionShots"));
 	if (FParse::Param(Cmd, TEXT("BbClipSpeeds")))
 	{
 		// The pace each gait clip is animated for, to check the staging speeds against.
@@ -328,7 +350,7 @@ void ABbDirector::BeginPlay()
 			{
 				UE_LOG(LogBb, Display, TEXT("BB_ANIM %d %s length %.2f s, held at %.2f s"), I, Clips[I], Clip->GetPlayLength(), Frac * Clip->GetPlayLength());
 				USkeletalMeshComponent* C = F->GetSkeletalMeshComponent();
-				C->PlayAnimation(Clip, false);
+				PlayClip(C, Clip, false);
 				C->SetPlayRate(0.f);
 				C->SetPosition(Frac * Clip->GetPlayLength(), false);
 			}
@@ -363,7 +385,7 @@ void ABbDirector::BeginPlay()
 			if (Clip)
 			{
 				UE_LOG(LogBb, Display, TEXT("clip %d %s length %.2f s"), I, Clips[I], Clip->GetPlayLength());
-				F->GetSkeletalMeshComponent()->PlayAnimation(Clip, true);
+				PlayClip(F->GetSkeletalMeshComponent(), Clip, true);
 				F->GetSkeletalMeshComponent()->SetPlayRate(0.25f);
 			}
 		}
@@ -486,6 +508,8 @@ void ABbDirector::BeginPlayback(FBbPlay&& Play)
 	Current = MoveTemp(Play);
 	// Each pitch opens with the wind-up: play time runs from −PreRoll to the release at 0.
 	PlayTime = -PreRoll;
+	MotionShotNext = 0;
+	NotePitch();
 	bBallInPlay = false;
 	bBallDead = false;
 	bDeadCut = false;
@@ -533,6 +557,7 @@ void ABbDirector::ShowReplay(int32 Index)
 	Throws.Reset();
 	ThrowsSampledTo = -1.f;
 	PlayTime = -PreRoll;
+	NotePitch();
 	bBallInPlay = false;
 	bBallDead = false;
 	bDeadCut = false;
@@ -601,6 +626,51 @@ void ABbDirector::ReplayForward()
 		return;
 	}
 	ShowReplay(ReplayIdx + 1);
+}
+
+void ABbDirector::NotePitch()
+{
+	PitchEndT = -1.f;
+	CrouchUntil = 0.6f;
+	BbFrame Start;
+	if (!Sim || !Current.bValid || !SampleDrawn(Current, 0.f, Start))
+	{
+		return;
+	}
+	PitchFrom = ToUE(Start.ball);
+	const float Contact = Current.Info.contact_s;
+	if (Contact >= 0.f)
+	{
+		// Hit: the mitt goes to where the pitch was heading, and he is up at once.
+		CrouchUntil = Contact + 0.12f;
+		const float Ta = FMath::Max(Contact - 0.03f, 0.f), Tb = FMath::Max(Contact - 0.004f, 0.f);
+		BbFrame A, B;
+		if (Tb > Ta && SampleDrawn(Current, Ta, A) && SampleDrawn(Current, Tb, B) && B.ball[1] < A.ball[1] - 1e-3f)
+		{
+			const float K = (MittPlaneY - B.ball[1]) / (B.ball[1] - A.ball[1]);
+			PitchEndAt = ToUE(B.ball[0] + K * (B.ball[0] - A.ball[0]), MittPlaneY, FMath::Max(0.05f, B.ball[2] + K * (B.ball[2] - A.ball[2])));
+			PitchEndT = Tb + K * (Tb - Ta);
+		}
+		return;
+	}
+	// Taken or missed: the ball stops in the mitt. When it first gets there:
+	BbFrame Last;
+	if (!SampleDrawn(Current, Current.Info.duration_s, Last) || FMath::Abs(Last.ball[1] - MittPlaneY) > 0.4f)
+	{
+		return;
+	}
+	const FVector End = ToUE(Last.ball);
+	for (float T = 0.2f; T <= Current.Info.duration_s + 0.005f; T += 0.005f)
+	{
+		BbFrame F;
+		if (SampleDrawn(Current, T, F) && (ToUE(F.ball) - End).SizeSquared() < 9.0)
+		{
+			PitchEndT = T;
+			PitchEndAt = End;
+			CrouchUntil = T + ReceiveHoldS;
+			break;
+		}
+	}
 }
 
 void ABbDirector::NoteThrows(float From, float To)
@@ -693,6 +763,10 @@ void ABbDirector::CarryFigure(const TArray<FFigureState>& Old, int32 Slot, uint1
 			St.SpeedCm = Old[J].SpeedCm;
 			St.Gait = -1;
 			St.Manual = nullptr;
+			St.Motion = Old[J].Motion;
+			St.MotionW = Old[J].MotionW;
+			St.MotionT = Old[J].MotionT;
+			St.Off = Old[J].Off;
 		}
 		return;
 	}
@@ -1164,7 +1238,7 @@ void ABbDirector::ArrangeFigureShot(int32 Step)
 		const float Yaw = bTurn ? -90.f + 45.f * I : (Step == 2 || Step == 3 || Step == 7 ? 90.f : -90.f);
 		PlaceDiver(F, ToUE(0.0, Y, Park->GroundZ(0.0, Y)), Yaw, 0.f, 0.f);
 		USkeletalMeshComponent* C = F->GetSkeletalMeshComponent();
-		C->PlayAnimation(AnimIdle, true);
+		PlayClip(C, AnimIdle, true);
 	}
 	Bat->SetActorHiddenInGame(!bKitBat);
 	if (bKitBat)
@@ -1193,6 +1267,9 @@ void ABbDirector::PoseFigure(int32 Slot, const BbActor& A, const BbFrame& Frame,
 		St.SpeedCm = 0.f;
 		St.Gait = -1;
 		St.Yaw = In.bFacePath ? PathYaw : YawToPlate(Foot);
+		St.Motion = 0;
+		St.MotionW = 0.f;
+		St.Off = FVector2D::ZeroVector;
 	}
 	else if (SimDt > 1e-5f)
 	{
@@ -1237,8 +1314,33 @@ void ABbDirector::PoseFigure(int32 Slot, const BbActor& A, const BbFrame& Frame,
 	// same clip in a mirror: the figure is flipped across his own facing (owner backlog A1).
 	const bool bLefty = Sim && Sim->ThrowsLeft(A.agent);
 	bool bMirror = false;
+	// The coded motions (BbPose.h): the pitcher's delivery and the catcher's crouch. Each
+	// begins in the last moments of the reset (he comes set, the catcher squats), so the
+	// pitch opens on it.
+	UBbPoseAnim* Coded = Skel.Ok() ? Cast<UBbPoseAnim>(C->GetAnimInstance()) : nullptr;
+	const bool bThrowing = In.ThrowClip >= 0.f && In.ThrowClip <= ThrowClipS;
+	int32 Motion = 0;
+	float MotionT = St.MotionT;
+	if (Coded && bMotions && bFielder && In.DiveSince < 0.f && !bThrowing)
+	{
+		const bool bSetUp = bReset && In.bStaged && !In.bMoving && ResetDuration - ResetTime < SetLeadS;
+		if (Position == 1 && !bReset && PlayTime < BbMotion::DeliveryEndS)
+		{
+			Motion = 1;
+			MotionT = PlayTime;
+		}
+		else if (Position == 1 && bSetUp && St.Off.IsNearlyZero(2.0))
+		{
+			Motion = 1;
+			MotionT = BbMotion::DeliveryStartS;
+		}
+		else if (Position == 2 && bStill && (bSetUp || (!bReset && PlayTime < CrouchUntil)))
+		{
+			Motion = 2;
+		}
+	}
 	// (A pitcher who dives on an early comebacker is diving, not finishing his delivery.)
-	if (bMotions && bFielder && Position == 1 && !In.bStaged && PlayTime < 0.8f && AnimPitch && In.DiveSince < 0.f)
+	if (!Coded && bMotions && bFielder && Position == 1 && !In.bStaged && PlayTime < 0.8f && AnimPitch && In.DiveSince < 0.f)
 	{
 		// The delivery: the clip's strike (1.0 s in) lands on the release (play time 0).
 		Manual = AnimPitch;
@@ -1281,7 +1383,7 @@ void ABbDirector::PoseFigure(int32 Slot, const BbActor& A, const BbFrame& Frame,
 		// infielders looked left-handed), so it is the right-hander who gets the mirror.
 		bMirror = bThrowClipLeftArm ? !bLefty : bLefty;
 	}
-	if (bMotions && !Manual && bFielder && Position == 2 && bStill && !In.bStaged && PlayTime < 0.6f && AnimCrouch)
+	if (!Coded && bMotions && !Manual && bFielder && Position == 2 && bStill && !In.bStaged && PlayTime < 0.6f && AnimCrouch)
 	{
 		// The catcher squats to receive the pitch.
 		Manual = AnimCrouch;
@@ -1307,6 +1409,27 @@ void ABbDirector::PoseFigure(int32 Slot, const BbActor& A, const BbFrame& Frame,
 			}
 		}
 	}
+	// A coded motion: how much of it shows. It comes in and goes out over MotionBlendS; a
+	// throw or a dive takes over at once. The motions are right-handed, so a left-hander is
+	// shown in a mirror for as long as any of one shows.
+	if (Manual || In.DiveSince >= 0.f || !Coded)
+	{
+		St.MotionW = 0.f;
+		Motion = 0;
+	}
+	if (Motion != 0 && Motion != St.Motion)
+	{
+		St.Motion = Motion;
+		St.MotionW = 0.f;
+	}
+	St.MotionW = FMath::FInterpConstantTo(St.MotionW, Motion != 0 ? 1.f : 0.f, SimDt, 1.f / MotionBlendS);
+	St.MotionT = MotionT;
+	const float MotionShown = St.MotionW * St.MotionW * (3.f - 2.f * St.MotionW);
+	if (St.MotionW > 0.f)
+	{
+		WantYaw = YawToPlate(Foot);
+		bMirror = bLefty;
+	}
 	// Turns ease on play time, so a pause holds them and fast playback keeps up.
 	St.Yaw = FMath::RInterpTo(FRotator(0, St.Yaw, 0), FRotator(0, WantYaw, 0), SimDt, Manual ? 18.f : TurnRate).Yaw;
 	St.Pos = Foot;
@@ -1329,7 +1452,6 @@ void ABbDirector::PoseFigure(int32 Slot, const BbActor& A, const BbFrame& Frame,
 		Tilt = DiveTiltDeg * Ease;
 		Lift = DiveDropCm * Ease;
 	}
-	PlaceDiver(F, Foot, St.Yaw, Tilt, Lift);
 	// The mannequin faces +Y in its own frame, so its left and right are its X.
 	ABbFigure* Dressed = FigureShop ? Cast<ABbFigure>(F) : nullptr;
 	if (Dressed)
@@ -1352,6 +1474,97 @@ void ABbDirector::PoseFigure(int32 Slot, const BbActor& A, const BbFrame& Frame,
 	{
 		++MirroredFrames;
 	}
+	// Where he is drawn. A motion's positions are measured from the sim's place for him
+	// (Base); the figure itself may be drawn off it (St.Off): the delivery carries the
+	// pitcher down the mound and leaves him there, the catcher sits back of his spot.
+	const FQuat FacingQ(FRotator(0.f, St.Yaw - 90.f, 0.f));
+	const FVector Scale = F->GetActorScale3D();
+	const FTransform Base(FacingQ, Foot, Scale);
+	auto OnGround = [&](const FVector2D& V) { return FVector2D(Base.TransformVector(FVector(V.X, V.Y, 0.0))); };
+	if (St.Motion == 1 && Motion == 1 && !bReset)
+	{
+		St.Off = OnGround(BbMotion::DeliveryTravel(PlayTime));
+	}
+	else if (St.Motion == 2)
+	{
+		St.Off = OnGround(BbMotion::CrouchBack) * MotionShown;
+	}
+	else
+	{
+		// Left off his spot by a motion: gathered in as he runs, stepped back between pitches.
+		const float Rate = St.SpeedCm > 40.f ? GatherCmps : bReset ? StepBackCmps : 0.f;
+		St.Off = FMath::Vector2DInterpConstantTo(St.Off, FVector2D::ZeroVector, SimDt, Rate);
+	}
+	const bool bStepBack = bReset && St.SpeedCm <= 40.f && St.Motion == 1 && !St.Off.IsNearlyZero(1.0);
+	if (St.MotionW <= 0.f && St.Off.IsNearlyZero(0.01))
+	{
+		St.Motion = 0;
+	}
+	FVector At = Foot + FVector(St.Off.X, St.Off.Y, 0.0);
+	const double GroundAtFoot = Park->GroundZ(A.pos[0], A.pos[1]);
+	At.Z += 100.0 * (Park->GroundZ(At.Y / 100.0, At.X / 100.0) - GroundAtFoot);
+	PlaceDiver(F, At, St.Yaw, Tilt, Lift);
+	St.bHand = false;
+	if (Coded)
+	{
+		Coded->PoseWeight = 0.f;
+		if (MotionShown > 0.f && St.Motion != 0)
+		{
+			const FTransform Own(FacingQ, At, Scale);
+			auto GroundFn = [&](double X, double Y)
+			{
+				const FVector Wd = Base.TransformPosition(FVector(X, Y, 0.0));
+				return (Park->GroundZ(Wd.Y / 100.0, Wd.X / 100.0) - GroundAtFoot) * 100.0 / FMath::Abs(Scale.Z);
+			};
+			const FBbMotionGround Ground{ GroundFn };
+			FBbReach Reach;
+			FBbStick S;
+			if (St.Motion == 1)
+			{
+				S = BbMotion::Delivery(St.MotionT, Skel, Ground);
+				// The hand to the sim's release point as the ball goes.
+				Reach.At[1] = Own.InverseTransformPosition(PitchFrom);
+				Reach.Weight[1] = bReset ? 0.f : BbMotion::DeliveryReach(St.MotionT);
+				Reach.Past[1] = BbMotion::BallInHandCm;
+			}
+			else
+			{
+				// The mitt: held for a target, then to the ball where the sim has it caught.
+				FVector Mitt = ToUE(0.0, MittPlaneY, MittTargetZ);
+				if (!bReset && PitchEndT >= 0.f)
+				{
+					const float U = FMath::Clamp((PlayTime - (PitchEndT - ReceiveEarlyS - ReceiveMoveS)) / ReceiveMoveS, 0.f, 1.f);
+					Mitt = FMath::Lerp(Mitt, PitchEndAt, (double)(U * U * (3.f - 2.f * U)));
+				}
+				S = BbMotion::Crouch(Own.InverseTransformPosition(Mitt), Skel, Ground, Reach);
+			}
+			// From the motion's frame to the figure's own, wherever it is drawn.
+			for (FVector* P : { &S.Pelvis, &S.Ankle[0], &S.Ankle[1] })
+			{
+				*P = Own.InverseTransformPosition(Base.TransformPosition(*P));
+			}
+			FVector Hold[2], Wrist[2];
+			Skel.Solve(S, Reach, Coded->PoseLocal, Hold, Wrist);
+			// -BbStagingLog: how far the hand is from the sim's release point as the ball goes
+			// (the play is held on that moment), and the mitt from the ball once it is caught.
+			if (bStagingLog && St.Motion == 1 && !bReset && PlayTime == 0.f)
+			{
+				UE_LOG(LogBb, Display, TEXT("BB_RELEASE play=%u agent=0x%03x left=%d height=%.3f hand_off=%.1f cm shown=%.2f"), Current.Info.play_index, A.agent, bLefty ? 1 : 0,
+					FMath::Abs(Scale.Z), (Own.TransformPosition(Hold[1]) - PitchFrom).Size(), MotionShown);
+			}
+			if (bStagingLog && St.Motion == 2 && !bReset && PitchEndT >= 0.f && Current.Info.contact_s < 0.f && PlayTime >= PitchEndT + 0.05f && PlayTime - SimDt < PitchEndT + 0.05f)
+			{
+				UE_LOG(LogBb, Display, TEXT("BB_RECEIVE play=%u agent=0x%03x left=%d ball=(%.2f, %.2f) wrist_off=%.1f cm shown=%.2f"), Current.Info.play_index, A.agent, bLefty ? 1 : 0,
+					PitchEndAt.Y / 100.0, PitchEndAt.Z / 100.0, (Wrist[0] - Reach.At[0]).Size() * FMath::Abs(Scale.Z), MotionShown);
+			}
+			Coded->PoseWeight = MotionShown;
+			if (St.Motion == 1 && !bReset && PlayTime < 0.f && MotionShown >= 0.99f)
+			{
+				St.bHand = true;
+				St.Hand = Own.TransformPosition(Hold[1]);
+			}
+		}
+	}
 
 	if (Manual)
 	{
@@ -1359,7 +1572,7 @@ void ABbDirector::PoseFigure(int32 Slot, const BbActor& A, const BbFrame& Frame,
 		{
 			St.Manual = Manual;
 			St.Gait = -1;
-			C->PlayAnimation(const_cast<UAnimSequence*>(Manual), false);
+			PlayClip(C, const_cast<UAnimSequence*>(Manual), false);
 		}
 		C->SetPlayRate(0.f);
 		C->SetPosition(FMath::Clamp(ClipTime, 0.f, Manual->GetPlayLength() - 0.02f), false);
@@ -1393,11 +1606,16 @@ void ABbDirector::PoseFigure(int32 Slot, const BbActor& A, const BbFrame& Frame,
 	{
 		Gait = St.SpeedCm < 40.f ? 0 : (St.SpeedCm < 250.f ? 1 : 2);
 	}
+	// A pitcher going back up to the rubber backs up the mound, watching the plate.
+	if (bStepBack && Gait == 0 && AnimWalkBack)
+	{
+		Gait = 3;
+	}
 	if (!Manual && Gait != St.Gait)
 	{
 		UAnimSequence* Clips[6] = { AnimIdle, AnimWalk, AnimJog, AnimWalkBack, AnimWalkLeft, AnimWalkRight };
 		St.Gait = Gait;
-		C->PlayAnimation(Clips[Gait], true);
+		PlayClip(C, Clips[Gait], true);
 	}
 	// The jog clip covers JogClipMps; the walk clips are played as covering about 2.3 m/s
 	// (their root bones travel 3.0 m/s, but the walk was not retuned with the jog). Play
@@ -1405,7 +1623,7 @@ void ABbDirector::PoseFigure(int32 Slot, const BbActor& A, const BbFrame& Frame,
 	if (!Manual)
 	{
 		const float Floor = In.bStaged ? 0.4f : 0.6f;
-		const float Rate = Gait == 0 ? 1.f : FMath::Clamp(St.SpeedCm / (Gait == 2 ? JogClipMps * 100.f : 230.f), Floor, 1.9f);
+		const float Rate = Gait == 0 ? 1.f : FMath::Clamp((bStepBack ? StepBackCmps : St.SpeedCm) / (Gait == 2 ? JogClipMps * 100.f : 230.f), Floor, 1.9f);
 		C->SetPlayRate(SimDt <= 1e-5f ? 0.f : Rate * (SimDt / FMath::Max(DeltaSeconds, 1e-5f)));
 	}
 
@@ -1639,6 +1857,35 @@ void ABbDirector::Tick(float DeltaSeconds)
 		const float SimDt = bPaused ? 0.f : DeltaSeconds * (bRush ? FMath::Max(Speed, RushSpeed) : Speed);
 		PlayTime += SimDt;
 		ExitClock += SimDt;
+		// The play is held on the moment of release for a frame when the motions are checked.
+		if ((bStagingLog || bMotionShots) && !bReset && PlayTime >= 0.f && PlayTime - SimDt < 0.f)
+		{
+			PlayTime = 0.f;
+		}
+		// -BbMotionShots: the first pitch from beside the pitcher, the second from the plate,
+		// the third beside the catcher, each held on its named moments and photographed.
+		if (bMotionShots && !bReset && Current.bValid)
+		{
+			struct FMark { float T; const TCHAR* Name; };
+			const float E = PitchEndT >= 0.f ? PitchEndT : 0.45f;
+			const FMark Pitch[] = { { -1.3f, TEXT("set") }, { -0.84f, TEXT("lift") }, { -0.48f, TEXT("stride") }, { -0.16f, TEXT("plant") },
+				{ -0.045f, TEXT("laid_back") }, { 0.f, TEXT("release") }, { 0.2f, TEXT("follow") }, { 0.6f, TEXT("finish") } };
+			const FMark Catch[] = { { -0.6f, TEXT("target") }, { E - 0.12f, TEXT("reach") }, { E + 0.01f, TEXT("receive") }, { E + 0.5f, TEXT("hold") } };
+			// (Not the first pitch: the picture is still settling.)
+			const int32 Which = (int32)Current.Info.play_index - 1;
+			const FMark* Marks = Which < 2 ? Pitch : Catch;
+			const int32 Count = Which < 2 ? UE_ARRAY_COUNT(Pitch) : UE_ARRAY_COUNT(Catch);
+			if (Which >= 0 && Which < 3 && MotionShotNext < Count && PlayTime >= Marks[MotionShotNext].T)
+			{
+				PlayTime = Marks[MotionShotNext].T;
+				const FString Name = FPaths::Combine(FPaths::ProjectSavedDir(), TEXT("Shots"), FString::Printf(TEXT("motion_%d_%d_%s.png"), Which + 1, MotionShotNext + 1, Marks[MotionShotNext].Name));
+				FScreenshotRequest::RequestScreenshot(Name, false, false);
+				if (++MotionShotNext == Count && Which == 2)
+				{
+					BenchSeconds = FMath::Max(BenchSeconds, (float)Wall + 2.f);
+				}
+			}
+		}
 		const float T = FMath::Clamp(PlayTime, 0.f, Current.Info.duration_s);
 		BbFrame Frame;
 		bool bHave = false;
@@ -1868,6 +2115,7 @@ void ABbDirector::Tick(float DeltaSeconds)
 					else
 					{
 						FigureState[I].Agent = 0xFFFF;
+						FigureState[I].bHand = false;
 					}
 					continue;
 				}
@@ -1894,7 +2142,46 @@ void ABbDirector::Tick(float DeltaSeconds)
 			{
 				bBallInPlay = true;
 			}
+			// Through the wind-up the ball is in the pitcher's hand, where his pose has it.
+			for (int32 I = 0; !bReset && PlayTime < 0.f && I < MaxActors && I < FigureState.Num(); ++I)
+			{
+				if (FigureState[I].bHand && FigureState[I].Agent != 0xFFFF)
+				{
+					Ball->SetActorLocation(FigureState[I].Hand);
+					Ball->SetActorHiddenInGame(false);
+				}
+			}
 			UpdateCamera(Frame, DeltaSeconds);
+			if (bMotionShots && !bReset && Current.Info.play_index >= 1 && Current.Info.play_index < 4)
+			{
+				// Beside the pitcher (the third-base side, which a right-hander's chest faces),
+				// then from the plate, then beside the catcher, away from the batter.
+				FVector Eye = ToUE(-7.5, 17.4, 1.5), Look = ToUE(0.0, 17.2, 1.05);
+				float Fov = 34.f;
+				if (Current.Info.play_index == 2)
+				{
+					Eye = ToUE(0.9, 8.6, 1.3);
+					Look = ToUE(0.0, 16.9, 0.95);
+					Fov = 26.f;
+				}
+				else if (Current.Info.play_index == 3)
+				{
+					float BatterX = 1.f;
+					for (uint32 I = 0; I < Frame.n_actors; ++I)
+					{
+						if ((Frame.actors[I].agent & 0x80) == 0 && FMath::Abs(Frame.actors[I].pos[1]) < 1.5f)
+						{
+							BatterX = Frame.actors[I].pos[0];
+						}
+					}
+					Eye = ToUE(BatterX > 0.f ? -2.4 : 2.4, 1.5, 1.1);
+					Look = ToUE(0.0, -1.5, 0.6);
+					Fov = 42.f;
+				}
+				Camera->SetActorLocationAndRotation(Eye, (Look - Eye).Rotation());
+				Camera->GetCameraComponent()->SetFieldOfView(Fov);
+				ShownCam = -1;
+			}
 			// -BbDiveShots: the camera on the diver, from his side, while he is down.
 			if (DiveShotsLeft > 0 && !bReset && Frame.n_dives > 0)
 			{

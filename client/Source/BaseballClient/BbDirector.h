@@ -4,6 +4,7 @@
 #include "GameFramework/Actor.h"
 #include "Async/Future.h"
 #include "BbSim.h"
+#include "BbPose.h"
 #include "BbDirector.generated.h"
 
 class AStaticMeshActor;
@@ -28,6 +29,9 @@ class UMaterialInterface;
  *               through eight angles, and the kit, as figure_<n>_<what>.png, then quit; no game
  *               is played);
  *               -BbMannequin (the grey mannequin instead of the figures);
+ *               -BbStockMotions (the stock clips in place of the coded delivery and crouch);
+ *               -BbMotionShots (the delivery and the catcher's receive photographed at their
+ *               named moments as motion_<pitch>_<n>_<what>.png, then quit);
  *               -BbParkShots (photograph the park from its fixed spots as park_<spot>.png, then quit;
  *               -BbParkShotsAt=<seconds> when to start)
  *               -BbBoxShots=<n> (photograph the Tab box at pitch n and the final box, then quit)
@@ -87,7 +91,7 @@ private:
 	/** Calls of the current play already logged (BB_CALL). */
 	int32 CallsLogged = 0;
 	/** Seconds shown before each pitch's release: the pitcher's wind-up. */
-	float PreRoll = 1.0f;
+	float PreRoll = -BbMotion::DeliveryStartS;
 
 	/** Everything that stands still: field, walls, stands, lights (BbPark). */
 	UPROPERTY()
@@ -151,7 +155,47 @@ private:
 		int32 Team = -1;
 		// The clip being driven by hand (null while the gait clips play on their own).
 		const UAnimSequence* Manual = nullptr;
+		// A coded motion (BbPose.h): which (0 none, 1 the delivery, 2 the catcher's crouch),
+		// how much of it shows over the clip, and the delivery's moment last shown.
+		int32 Motion = 0;
+		float MotionW = 0.f;
+		float MotionT = 0.f;
+		/** Where the figure is drawn from the sim's position, cm on the ground: a motion can
+		 *  carry him off it (the pitcher finishes down the mound, the catcher sits back of
+		 *  his spot), and he steps back in his own time. */
+		FVector2D Off = FVector2D::ZeroVector;
+		/** The ball in the pitcher's hand before he lets go, when the pose has it. */
+		bool bHand = false;
+		FVector Hand = FVector::ZeroVector;
 	};
+	/** The mannequin's joints, for the coded motions. */
+	FBbSkeleton Skel;
+	/** How long a figure takes to go into a coded motion or come out of one, s of play time. */
+	static constexpr float MotionBlendS = 0.3f;
+	/** The pitcher comes set, and the catcher squats, this long before the reset ends. */
+	static constexpr float SetLeadS = 0.8f;
+	/** A pitcher off the rubber after his delivery steps back at this pace between pitches,
+	 *  and is gathered in this fast once the play has him running, cm/s. */
+	static constexpr float StepBackCmps = 130.f;
+	static constexpr float GatherCmps = 300.f;
+	/** The pitch on screen: where the ball is let go; where and when it ends in the mitt (or
+	 *  would have, had it not been hit); until when the catcher stays down. */
+	FVector PitchFrom = FVector::ZeroVector;
+	FVector PitchEndAt = FVector::ZeroVector;
+	float PitchEndT = -1.f;
+	float CrouchUntil = 0.6f;
+	void NotePitch();
+	/** The catcher holds the ball he caught this long before he comes up, s. */
+	static constexpr float ReceiveHoldS = 0.7f;
+	/** The mitt goes from its target to the ball over this long, ending this long before the
+	 *  ball is there, s. */
+	static constexpr float ReceiveMoveS = 0.22f;
+	static constexpr float ReceiveEarlyS = 0.03f;
+	/** -BbMotionShots: the first pitches photographed at the motions' named moments, from
+	 *  beside the pitcher, from the plate, and beside the catcher, as motion_<pitch>_<n>_<what>.png;
+	 *  then quit. The play is held on each moment exactly. */
+	bool bMotionShots = false;
+	int32 MotionShotNext = 0;
 	TArray<FFigureState> FigureState;
 	/** What PoseFigure knows beyond the frame: the client's own plan for a staged move, and
 	 *  a throw whose release time is known (so its clip phase never depends on which frames
