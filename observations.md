@@ -45,7 +45,7 @@ Fielding and throwing:
 - [x] A. Team uniforms.
 - [x] A. Limits of play area (I saw a foul ball go back out of play and continued on). After the ball goes out of the stadium, cut back to field of play. *Since 2026-11-16, after a foul into the seats the game goes straight to the next pitch.*
 - [ ] A. Runners are leading off before the pitcher gets set on the mound. In the real world the pitcher would pick them off.
-- [~] A. Post game box score. *The sim keeps the box score; there is no screen for it yet (it comes with the HUD work).*
+- [~] A. Post game box score. *There is a box score page: it comes up at the end of the game, and Tab shows it during one. It gets the new look in the last HUD step. The broadcast-style score bug and play caption went in on 2026-11-16.*
 - [ ] C. Post game highlights.
 
 # Handedness

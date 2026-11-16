@@ -4,6 +4,7 @@
 #include "GameFramework/GameModeBase.h"
 #include "GameFramework/HUD.h"
 #include "bb_ffi.h"
+#include "BbHud.h"
 #include "BbGameMode.generated.h"
 
 /** Spawns the director, which builds the field and plays the game. No pawn. */
@@ -17,7 +18,8 @@ public:
 	virtual void StartPlay() override;
 };
 
-/** Scoreboard and last-pitch line, drawn as text. */
+/** The game graphics (docs/hud.md): the score bug, the caption and the cards, drawn by
+ *  BbHud from what the director puts here; and the box score. */
 UCLASS()
 class ABbHUD : public AHUD
 {
@@ -25,7 +27,11 @@ class ABbHUD : public AHUD
 
 public:
 	virtual void DrawHUD() override;
-	FString Scoreboard;
+	/** For the panels in BbHud, which draw on it. */
+	UCanvas* GetCanvas() const { return Canvas; }
+	/** The score bug: clubs, runs, inning, bases, outs, count. */
+	FBbBugInfo Bug;
+	/** Under the bug: the last pitch's speed, and the ball's off the bat once it is hit. */
 	FString PitchLine;
 	/** While an earlier pitch is being replayed: "REPLAY   seed 7   play 123". */
 	FString Replay;
@@ -37,13 +43,12 @@ public:
 	FString Umpire;
 	/** That out was a bang-bang play: the umpire sells it. */
 	bool bUmpireClose = false;
-	/** Runners on base: bit 0 first, bit 1 second, bit 2 third. */
-	uint8 Bases = 0;
 	/** Key help and playback state, bottom left. */
 	FString Footer;
 	/** Between innings, while the picture is cut away: "Middle of the 3rd" and the score. */
 	FString Card;
-	FString CardScore;
+	/** The runs on the card: [0] the visitors, [1] the home side. */
+	int32 CardRuns[2] = { 0, 0 };
 	/** 0 hidden, 1 fully shown. */
 	float CardAlpha = 0.f;
 	/** A home run (A16): the batter's family name, "412 ft   108 mph", and what it scored
@@ -51,6 +56,8 @@ public:
 	FString HomeRunName;
 	FString HomeRunLine;
 	FString HomeRunKind;
+	/** The hitter's side, for his club's colour on the card. */
+	int32 HomeRunSide = 0;
 	/** 0 hidden, 1 fully shown. */
 	float HomeRunAlpha = 0.f;
 	/** The box score (A12): a newspaper box over the field. Held with Tab during a game, over
@@ -66,6 +73,9 @@ public:
 	float BoxAlpha = 0.f;
 	/** How dark the field is behind the paper (Tab dims it; the final box sits on black). */
 	float BoxDim = 0.f;
+	/** -BbHudHold: every panel stays up (made-up words where the game has none yet) so a still
+	 *  catches them all (hud.md §4). */
+	bool bHold = false;
 
 private:
 	/** Draws the box score on the paper rectangle; S is the screen's scale (height / 720). */

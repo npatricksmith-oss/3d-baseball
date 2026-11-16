@@ -1,6 +1,6 @@
 # HUD: game graphics
 
-**Status:** plan agreed with the owner 2026-11-15 (three questions, Q22–Q24, all as recommended; §1). Nothing built yet. Third part of the graphics stage, after [the park](park-visuals.md) and [the players](player-visuals.md).
+**Status:** plan agreed with the owner 2026-11-15 (three questions, Q22–Q24, all as recommended; §1). **Step 1 built 2026-11-16** (twenty-fourth lead session; §5). Third part of the graphics stage, after [the park](park-visuals.md) and [the players](player-visuals.md).
 
 **Where it starts.** `ABbHUD::DrawHUD` (`BbGameMode.cpp`) draws a dark strip with one line of score text, one line about the last pitch, a three-square runners diamond, a footer of keys, the between-innings card and the home-run card. All of it is the engine's large font on the canvas.
 
@@ -34,3 +34,14 @@ Carried over from the park plan: the lead builds alone in short sessions, shows 
 - `client/run.sh 7 -RenderOffscreen -BbShots=6`, read at 720 lines and at 1080.
 - A flag that holds each panel on screen for a still, so a panel that shows for two seconds can be photographed without hunting for the moment.
 - The bug must not cover the ball's usual paths from the broadcast camera.
+
+## 5. Built
+
+**Step 1, the bug and the caption (2026-11-16).** `BbHud.{h,cpp}` draws the panels; `ABbHUD` (`BbGameMode.cpp`) only places them, and still draws the box score itself (step 4 will move it). Colours are `BbLook::Hud*`, given in sRGB.
+- **The bug,** top left, 292 × 64 reference units: each club's row with its colour down the edge ("COLLIERS" visitors above, "LARKS" home below; the trims lifted, since the uniforms' navy and dark red are near black on a dark panel), the runs in a lighter box, the bases as three diamonds lit gold, the outs as three squares under them, and the inning with an up or down arrow over the count. Filled from `FBbBugInfo`, which the director sets from the same play record as before (runs, count and bases when the play is known, outs as the umpire calls them). Under it, slim lines for the pitch's speed (exit speed once hit), the replay tag in gold and a saved-play note.
+- **The caption,** low and centred above the keys, edged in the batting side's colour: the sim's summary of the play, at the same moment as before. It was at the top centre, over the field.
+- **Above the caption,** one at a time: the umpire's out signal (edged white, or red with red letters on a bang-bang play) or the home-run card (edged gold, the hitter's club down its side: what it scored, the name, distance and speed).
+- **Between innings:** "MIDDLE OF THE 3RD" over both clubs' full names and runs, on the black.
+- **`-BbHudHold`** keeps every panel on screen, with made-up words where the game has none yet (hud.md §4). Use it with `-BbShots`. `-ForceRes` makes the offscreen shots 1600 × 900; without it they come out 888 × 500.
+- Pictures: `client/Saved/Shots/hud1_before/`, `hud1_after/`, `hud1_hold/` (untracked).
+- **For the owner to overrule if he likes:** the clubs by nickname on the bug; the caption at the bottom; three out marks, not two.

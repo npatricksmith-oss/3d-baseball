@@ -200,6 +200,22 @@ namespace BbLook
 	inline const int32 UmpireSide = 2;
 	/** The uniform of a side: 0 the visitors, 1 the home side, 2 the umpires. */
 	inline const FBbClub& Club(int32 Side) { return Side == UmpireSide ? Umpires : Clubs[Side & 1]; }
+	// ---- The game graphics (docs/hud.md) ------------------------------------------------
+	// Given as the sRGB a paint program would show. The clubs' panel colours are their trims,
+	// lifted: the uniforms' navy and dark red are too near black to read on a dark panel.
+	inline const FLinearColor HudPanel = FLinearColor::FromSRGBColor(FColor(16, 20, 28, 240));
+	inline const FLinearColor HudPanelLight = FLinearColor::FromSRGBColor(FColor(36, 42, 54, 240));
+	inline const FLinearColor HudText = FLinearColor::FromSRGBColor(FColor(246, 246, 242));
+	inline const FLinearColor HudDim = FLinearColor::FromSRGBColor(FColor(150, 158, 172));
+	/** Lit bases, the replay tag, the home run's edge. */
+	inline const FLinearColor HudGold = FLinearColor::FromSRGBColor(FColor(244, 196, 48));
+	/** An empty base, an out not yet made. */
+	inline const FLinearColor HudOff = FLinearColor::FromSRGBColor(FColor(66, 74, 90));
+	/** A bang-bang out. */
+	inline const FLinearColor HudClose = FLinearColor::FromSRGBColor(FColor(222, 64, 52));
+	/** [0] the visitors, [1] the home side, as in Clubs. */
+	inline const FLinearColor HudClub[2] = { FLinearColor::FromSRGBColor(FColor(150, 30, 28)), FLinearColor::FromSRGBColor(FColor(30, 56, 132)) };
+
 	// The benches (step 7): reserves and a manager in each dugout besides the nine.
 	inline const int32 BenchReserves = 4;
 	inline const FBbPaint Shoe{ FLinearColor(0.012f, 0.012f, 0.014f), 0.5f };

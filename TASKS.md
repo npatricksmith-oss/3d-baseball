@@ -34,7 +34,10 @@ Open:
 
 **Open, not the swing's:** batters are 17 ms early on outside pitches and 2 ms inside (perception); v2's attack-angle slope against direction is 0.53 (Statcast 0.41).
 
-## Resume here (2026-11-16, late afternoon; twenty-third lead session, Claude Fable 5.2)
+## Resume here (2026-11-16, evening; twenty-fourth lead session, Claude Opus 5.5)
+
+**HUD step 1 is built: the bug and the caption** ([hud.md §5](docs/hud.md)). New `BbHud.{h,cpp}` draws a broadcast-style score bug at the top left: the clubs in their colours, the runs, the bases, the outs, the inning and the count. The play caption is now low and centred, edged in the batting side's colour. The umpire's out signal or the home-run card stacks above it, and the between-innings card is restyled to match. `-BbHudHold` keeps every panel up for stills. Client only: no sim change, no ledger row. Built clean, and checked in stills at 900 lines (`client/Saved/Shots/hud1_*`). **Not seen moving yet.** **Next: HUD step 2**, the batter card and the pitch readout. It needs the pitch's type and the pitcher's pitch count as read-only exports (hud.md §2). **Also waiting:** the owner's saved play, seed 47638 play 0 (no throw from first to the pitcher), in observations.md; it goes with the seed 5 play 201 fielding question when that work reopens.
+
 
 **Ball size (owner, 2026-11-16, after the twenty-third session):** settled. The ball is drawn 1.5625 times real size, 11.7 cm (`BallDrawnScale` in `BbDirector.h`), which the owner found fine; the ground shadow's smallest size follows `BallDrawnM`. A floor on its on-screen size (0.4% of the view's width) was tried and he found it too big, so it is removed: do not add one back without asking. Built clean. **Then, same day:** still hard to see, so the grass is 17% darker and the dirt and warning track 20% darker in `BbLook.h` (old values in a comment there); on screen that is about 8–10% darker (grass 71,148,54 to 62,134,49; dirt 192,150,99 to 176,134,86 in seed-7 shot 2). Built clean. He then asked for the dirt darker still: dirt and track are now 32% darker than the original (0.270, 0.162, 0.088 and 0.223, 0.125, 0.071; a Haiku worker made the edit and built it clean; no shot taken). His to judge.
 

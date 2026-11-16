@@ -2870,7 +2870,8 @@ void ABbDirector::Tick(float DeltaSeconds)
 	{
 		if (ABbHUD* Hud = GetWorld()->GetFirstPlayerController() ? Cast<ABbHUD>(GetWorld()->GetFirstPlayerController()->GetHUD()) : nullptr)
 		{
-			Hud->Scoreboard = TEXT("Warming up");
+			Hud->Bug = FBbBugInfo();
+			Hud->Call = TEXT("Warming up");
 		}
 	}
 
@@ -3041,7 +3042,8 @@ void ABbDirector::Tick(float DeltaSeconds)
 						const int32 N = Before.inning;
 						const TCHAR* Suffix = (N % 100 >= 11 && N % 100 <= 13) || N % 10 > 3 ? Ord[0] : Ord[N % 10];
 						CardHud->Card = FString::Printf(TEXT("%s of the %d%s"), Before.top ? TEXT("Middle") : TEXT("End"), N, Suffix);
-						CardHud->CardScore = FString::Printf(TEXT("AWAY %d     HOME %d"), Current.Info.away_runs, Current.Info.home_runs);
+						CardHud->CardRuns[0] = Current.Info.away_runs;
+						CardHud->CardRuns[1] = Current.Info.home_runs;
 					}
 					else if (Black <= 0.f)
 					{
@@ -3544,6 +3546,7 @@ void ABbDirector::Tick(float DeltaSeconds)
 			Hud->HomeRunName = HrName;
 			Hud->HomeRunLine = HrLine;
 			Hud->HomeRunKind = HrKind;
+			Hud->HomeRunSide = Before.top ? 0 : 1;
 			Hud->HomeRunAlpha = bHomeRunCut && !bReset ? FMath::Clamp((PlayTime - In.dead_s) / 0.4f, 0.f, 1.f) : 0.f;
 			// The call appears when a viewer would know it: at the umpire's call if the pitch
 			// was not hit, at the end of the play if it was (the sim says when: call_s), and
@@ -3587,8 +3590,16 @@ void ABbDirector::Tick(float DeltaSeconds)
 				const bool bHalfOver = In.inning != Before.inning || In.top != Before.top;
 				const BbPlayInfo& Half = bHalfOver ? Before : Src;
 				const int32 Outs = FMath::Min<int32>(Before.outs + Called, 3);
-				Hud->Bases = Src.bases;
-				Hud->Scoreboard = FString::Printf(TEXT("AWAY %d   HOME %d    %s %d    %d out    %d-%d"), Src.away_runs, Src.home_runs, Half.top ? TEXT("Top") : TEXT("Bot"), Half.inning, Outs, bHalfOver && bKnown ? 0 : Src.balls, bHalfOver && bKnown ? 0 : Src.strikes);
+				FBbBugInfo& Bug = Hud->Bug;
+				Bug.bValid = true;
+				Bug.Runs[0] = Src.away_runs;
+				Bug.Runs[1] = Src.home_runs;
+				Bug.Inning = Half.inning;
+				Bug.bTop = Half.top != 0;
+				Bug.Outs = Outs;
+				Bug.Balls = bHalfOver && bKnown ? 0 : Src.balls;
+				Bug.Strikes = bHalfOver && bKnown ? 0 : Src.strikes;
+				Bug.Bases = Src.bases;
 				// The board in the outfield shows the same, with the line score read from the
 				// sim's log once a pitch.
 				const uint32 Through = In.play_index + (bKnown ? 1u : 0u);
