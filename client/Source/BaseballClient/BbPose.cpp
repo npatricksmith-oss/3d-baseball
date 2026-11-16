@@ -954,6 +954,282 @@ FBbStick BbMotion::Field(const FFieldIn& In, const FBbSkeleton& Skel, const FBbM
 	return S;
 }
 
+namespace
+{
+	FKey Key(float T, TFunctionRef<void(FBbStick&)> Fill)
+	{
+		FKey K;
+		K.T = T;
+		Fill(K.S);
+		return K;
+	}
+
+	/** Lying on his front where the dive left him, the glove arm out ahead. */
+	void DiveDown(FBbStick& S)
+	{
+		const int32 L = 0, R = 1;
+		S.Pelvis = { 0, -12, 15 };
+		S.PelvisUp = { 0, 1, 0.05 };
+		S.PelvisFwd = { 0, 0.05, -1 };
+		S.ChestUp = { 0, 1, 0.22 };
+		S.ChestFwd = { 0, 0.22, -1 };
+		S.HeadFwd = { 0, 1, -0.25 };
+		S.HeadUp = { 0, 0.5, 1 };
+		S.Ankle[L] = { 13, -96, 0 };
+		S.Ankle[R] = { -13, -96, 0 };
+		S.Knee[L] = { 0.1, 0, -1 };
+		S.Knee[R] = { -0.1, 0, -1 };
+		S.Toe[L] = { 0.4, -1, -0.1 };
+		S.Toe[R] = { -0.4, -1, -0.1 };
+		S.Wrist[L] = { 4, 4, 52 };
+		S.Elbow[L] = { 1, -0.3, 0 };
+		S.Fingers[L] = { 0, 1, 0.1 };
+		S.Wrist[R] = { -24, 16, 14 };
+		S.Elbow[R] = { -1, -0.6, 0 };
+	}
+
+	/** The fall, by seconds since he left his feet. */
+	const TArray<FKey>& DiveKeys()
+	{
+		static TArray<FKey> Keys;
+		if (Keys.Num() > 0)
+		{
+			return Keys;
+		}
+		const int32 L = 0, R = 1;
+		// The drive: off the back foot, the trunk going over, the glove leading.
+		Keys.Add(Key(0.f, [&](FBbStick& S)
+		{
+			S.Pelvis = { 0, -14, 74 };
+			S.PelvisUp = { 0, 0.5, 1 };
+			S.PelvisFwd = { 0, 1, -0.5 };
+			S.ChestUp = { 0, 0.9, 1 };
+			S.ChestFwd = { 0, 1, -0.9 };
+			S.HeadFwd = { 0, 1, -0.3 };
+			S.Ankle[L] = { 12, -30, 0 };
+			S.Ankle[R] = { -12, -58, 4 };
+			S.Knee[L] = { 0.2, 1, 0 };
+			S.Knee[R] = { -0.2, 1, -0.3 };
+			S.Toe[R] = { 0, 0.6, -0.8 };
+			S.Wrist[L] = { 6, 14, 40 };
+			S.Elbow[L] = { 1, -0.3, 0 };
+			S.Fingers[L] = { 0, 1, 0.1 };
+			S.Wrist[R] = { -12, 20, -18 };
+			S.Elbow[R] = { -1, -0.6, 0 };
+		}));
+		// Laid out in the air.
+		Keys.Add(Key(0.16f, [&](FBbStick& S)
+		{
+			DiveDown(S);
+			S.Pelvis = { 0, -12, 50 };
+			S.PelvisUp = { 0, 1, 0.12 };
+			S.PelvisFwd = { 0, 0.12, -1 };
+			S.ChestUp = { 0, 1, 0.2 };
+			S.ChestFwd = { 0, 0.2, -1 };
+			S.Ankle[L] = { 12, -95, 36 };
+			S.Ankle[R] = { -12, -95, 42 };
+			S.Wrist[R] = { -22, 10, 22 };
+		}));
+		Keys.Add(Key(BbMotion::DiveFallS, DiveDown));
+		return Keys;
+	}
+
+	/** Getting up, by seconds since he began to. */
+	const TArray<FKey>& RiseKeys()
+	{
+		static TArray<FKey> Keys;
+		if (Keys.Num() > 0)
+		{
+			return Keys;
+		}
+		const int32 L = 0, R = 1;
+		Keys.Add(Key(0.f, DiveDown));
+		// Onto his hands and knees, the glove coming in under him.
+		Keys.Add(Key(0.3f, [&](FBbStick& S)
+		{
+			S.Pelvis = { 0, -30, 48 };
+			S.PelvisUp = { 0, 1, 0.25 };
+			S.PelvisFwd = { 0, 0.25, -1 };
+			S.ChestUp = { 0, 1, 0.45 };
+			S.ChestFwd = { 0, 0.45, -1 };
+			S.HeadFwd = { 0, 1, -0.3 };
+			S.HeadUp = { 0, 0.4, 1 };
+			S.Ankle[L] = { 13, -78, 0 };
+			S.Ankle[R] = { -13, -78, 0 };
+			S.Knee[L] = { 0.1, 1, -0.7 };
+			S.Knee[R] = { -0.1, 1, -0.7 };
+			S.Toe[L] = { 0.3, -1, -0.2 };
+			S.Toe[R] = { -0.3, -1, -0.2 };
+			S.Wrist[L] = { 8, 30, 10 };
+			S.Elbow[L] = { 1, -0.4, 0 };
+			S.Wrist[R] = { -20, 42, 6 };
+			S.Elbow[R] = { -1, -0.4, 0 };
+		}));
+		// One foot under him, the other knee still down, the hands coming together.
+		Keys.Add(Key(0.6f, [&](FBbStick& S)
+		{
+			S.Pelvis = { 0, -12, 60 };
+			S.PelvisUp = { 0, 0.3, 1 };
+			S.PelvisFwd = { 0, 1, -0.3 };
+			S.ChestUp = { 0, 0.35, 1 };
+			S.ChestFwd = { 0, 1, -0.35 };
+			S.Ankle[R] = { -15, 22, 0 };
+			S.Knee[R] = { -0.2, 1, 0.4 };
+			S.Ankle[L] = { 14, -62, 2 };
+			S.Knee[L] = { 0.1, 1, -0.6 };
+			S.Toe[L] = { 0.3, -1, -0.2 };
+			S.Wrist[L] = { -4, 28, -18 };
+			S.Elbow[L] = { 1, -0.2, -0.6 };
+			S.Wrist[R] = { 4, 26, -20 };
+			S.Elbow[R] = { -1, -0.2, -0.6 };
+		}));
+		// Up, the ball in both hands.
+		Keys.Add(Key(BbMotion::DiveRiseS, [&](FBbStick& S)
+		{
+			S.ChestFwd = { 0, 1, -0.08 };
+			S.Wrist[R] = { 15, 25, -26 };
+			S.Wrist[L] = { -15, 25, -26 };
+			S.Elbow[R] = { -1, -0.2, -0.6 };
+			S.Elbow[L] = { 1, -0.2, -0.6 };
+		}));
+		return Keys;
+	}
+
+	/** The slide, by seconds from his arrival at the bag. */
+	const TArray<FKey>& SlideKeys()
+	{
+		static TArray<FKey> Keys;
+		if (Keys.Num() > 0)
+		{
+			return Keys;
+		}
+		const int32 L = 0, R = 1;
+		// Still running: a last stride, the right leg forward.
+		Keys.Add(Key(BbMotion::SlideStartS, [&](FBbStick& S)
+		{
+			S.Pelvis = { 0, 0, 92 };
+			S.Ankle[R] = { -10, 36, 4 };
+			S.Ankle[L] = { 10, -32, 18 };
+			S.Knee[L] = { 0, 1, -0.2 };
+			S.Wrist[L] = { 8, 22, -30 };
+			S.Wrist[R] = { -8, -14, -36 };
+		}));
+		// Going down: he sits back, the left leg folding under, the right reaching.
+		Keys.Add(Key(-0.3f, [&](FBbStick& S)
+		{
+			S.Pelvis = { 0, -22, 60 };
+			S.PelvisUp = { 0, -0.35, 1 };
+			S.PelvisFwd = { 0, 1, 0.35 };
+			S.ChestUp = { 0, -0.2, 1 };
+			S.ChestFwd = { 0, 1, 0.2 };
+			S.Ankle[R] = { -10, 52, 10 };
+			S.Knee[R] = { -0.1, 1, 0.6 };
+			S.Toe[R] = { 0, 1, 0.4 };
+			S.Ankle[L] = { 12, 4, 4 };
+			S.Knee[L] = { 0.7, 1, 0.1 };
+			S.Toe[L] = { -0.5, 1, 0 };
+			S.Wrist[L] = { 34, 6, -8 };
+			S.Elbow[L] = { 1, -0.4, -0.5 };
+			S.Wrist[R] = { -34, 6, -8 };
+			S.Elbow[R] = { -1, -0.4, -0.5 };
+		}));
+		// Down and sliding: on his left hip, leaning back, hands up off the dirt.
+		auto Down = [&](FBbStick& S)
+		{
+			S.Pelvis = { 4, -58, 21 };
+			S.PelvisUp = { 0.1, -0.8, 1 };
+			S.PelvisFwd = { 0, 1, 0.8 };
+			S.ChestUp = { 0.05, -0.5, 1 };
+			S.ChestFwd = { 0, 1, 0.5 };
+			S.HeadFwd = { 0, 1, -0.15 };
+			S.Ankle[R] = { -8, 24, 6 };
+			S.Knee[R] = { -0.1, 0.2, 1 };
+			S.Toe[R] = { 0, 0.5, 1 };
+			S.Ankle[L] = { -4, -28, 0 };
+			S.Knee[L] = { 1, 0.6, 0.1 };
+			S.Toe[L] = { -1, 0.3, 0 };
+			S.Wrist[L] = { 44, 12, -2 };
+			S.Elbow[L] = { 0.6, -0.5, -1 };
+			S.Wrist[R] = { -44, 12, -2 };
+			S.Elbow[R] = { -0.6, -0.5, -1 };
+		};
+		Keys.Add(Key(-0.16f, Down));
+		// The foot on the bag.
+		auto There = [&](FBbStick& S)
+		{
+			Down(S);
+			S.Pelvis = { 4, -64, 20 };
+			S.Ankle[R] = { -6, 14, 5 };
+			S.Knee[R] = { -0.1, 0.1, 1 };
+		};
+		Keys.Add(Key(0.f, There));
+		// He sits up.
+		Keys.Add(Key(0.35f, [&](FBbStick& S)
+		{
+			There(S);
+			S.PelvisUp = { 0.05, -0.45, 1 };
+			S.PelvisFwd = { 0, 1, 0.45 };
+			S.ChestUp = { 0, 0.05, 1 };
+			S.ChestFwd = { 0, 1, -0.05 };
+			S.Wrist[L] = { 26, 12, -30 };
+			S.Wrist[R] = { -26, 12, -30 };
+		}));
+		// Up over the bag foot, pushing off the other.
+		Keys.Add(Key(0.8f, [&](FBbStick& S)
+		{
+			S.Pelvis = { 0, -26, 62 };
+			S.PelvisUp = { 0, 0.3, 1 };
+			S.PelvisFwd = { 0, 1, -0.3 };
+			S.ChestUp = { 0, 0.4, 1 };
+			S.ChestFwd = { 0, 1, -0.4 };
+			S.Ankle[R] = { -8, 8, 0 };
+			S.Knee[R] = { -0.2, 1, 0.3 };
+			S.Ankle[L] = { 13, -50, 2 };
+			S.Knee[L] = { 0.4, 1, -0.3 };
+			S.Toe[L] = { 0.3, 1, -0.5 };
+			S.Wrist[L] = { 14, 24, -30 };
+			S.Wrist[R] = { -14, 24, -30 };
+		}));
+		// Standing on the bag.
+		Keys.Add(Key(BbMotion::SlideEndS, [&](FBbStick& S) {}));
+		return Keys;
+	}
+}
+
+FBbStick BbMotion::Dive(float Since, float UpIn, const FVector& GloveAt, float Glove, const FVector& Look, const FBbSkeleton& Skel, const FBbMotionGround& Ground, FBbReach& OutReach, FVector& OutPocket)
+{
+	const int32 L = 0;
+	FBbStick S = UpIn < DiveRiseS ? Through(RiseKeys(), DiveRiseS - UpIn) : Through(DiveKeys(), Since);
+	// The glove's fingers lead: toward the ball if there is one to take.
+	FVector Point = FVector(GloveAt.X * 0.6, 60.0, FMath::Max(GloveAt.Z - 30.0, 0.0) * 0.6).GetSafeNormal();
+	const double W = FMath::Clamp((double)Glove, 0.0, 1.0);
+	if (W > 0.0)
+	{
+		S.Fingers[L] = FMath::Lerp(S.Fingers[L], Point, W);
+		OutReach.At[L] = GloveAt - Point * BallInMittCm;
+		OutReach.Weight[L] = (float)W;
+		// A ball farther off than his arm: he is that much farther on his way to it (the
+		// sim has the ball in his glove first and his body travelling after).
+		const double Lean = FMath::Clamp(GloveAt.Y - 100.0, 0.0, 60.0) * W;
+		S.Pelvis.Y += Lean;
+		S.Ankle[0].Y += Lean;
+		S.Ankle[1].Y += Lean;
+	}
+	OutPocket = S.Fingers[L].GetSafeNormal(1e-6, FVector(0, 1, 0));
+	// While he is down his eyes are on the ball; as he gets up, where he is going.
+	const double Down = UpIn < DiveRiseS ? Smooth(0.3, 0.6, UpIn) : 1.0;
+	S.HeadFwd = FMath::Lerp(S.HeadFwd, Watch(S, Look, 60.0), 0.6 * Down);
+	Stand(S, Skel, Ground);
+	return S;
+}
+
+FBbStick BbMotion::Slide(float T, const FBbSkeleton& Skel, const FBbMotionGround& Ground)
+{
+	FBbStick S = Through(SlideKeys(), T);
+	Stand(S, Skel, Ground);
+	return S;
+}
+
 double BbMotion::JumpForCm(double BallZ)
 {
 	return FMath::Clamp(BallZ - 212.0, 0.0, 55.0);

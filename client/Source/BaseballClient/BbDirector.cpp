@@ -369,6 +369,7 @@ void ABbDirector::BeginPlay()
 	FParse::Value(Cmd, TEXT("BbShotStart="), NextShot);
 	FParse::Value(Cmd, TEXT("BbBenchSeconds="), BenchSeconds);
 	FParse::Value(Cmd, TEXT("BbDiveShots="), DiveShotsLeft);
+	FParse::Value(Cmd, TEXT("BbSlideShots="), SlideShotsLeft);
 	FParse::Value(Cmd, TEXT("BbBoxShots="), BoxShotAtPlay);
 	FParse::Value(Cmd, TEXT("BbBoxHold="), BoxHoldS);
 	FParse::Value(Cmd, TEXT("BbParkShotsAt="), ParkShotsAt);
@@ -946,6 +947,7 @@ void ABbDirector::NotePitch()
 		}
 	}
 	NoteCatches();
+	NoteSlides();
 	ReadyUntil = Current.bValid && Current.Info.contact_s >= 0.f ? Current.Info.contact_s + 0.3f : 0.8f;
 	BbFrame Start;
 	if (!Sim || !Current.bValid || !SampleDrawn(Current, 0.f, Start))
@@ -1617,6 +1619,138 @@ void ABbDirector::ResetFrame(float T, BbFrame& Out, bool& bBallShown) const
 	Out.ball[2] = B.Z;
 }
 
+void ABbDirector::NoteSlides()
+{
+	// The whole pitch again (after NoteCatches: the ball's takers are known). The timeline has
+	// everyone's place every tenth of a second, so a runner who runs into a base and stops
+	// shows as full speed up to one of those moments and still from it.
+	Slides.Reset();
+	ExtraShots.Reset();
+	ExtraShotNext = 0;
+	ShotDiver = -1;
+	if (!Sim || !Current.bValid || Current.Info.contact_s < 0.f)
+	{
+		return;
+	}
+	const double L = 27.432 / UE_SQRT_2;
+	const FVector2D Bags[3] = { FVector2D(0.0, 2.0 * L), FVector2D(-L, L), FVector2D(0.0, 0.0) };
+	const float End = Current.Info.duration_s, Step = 0.02f;
+	TArray<BbFrame> Seen;
+	for (float T = 0.f; T < End + Step; T += Step)
+	{
+		BbFrame F;
+		if (!SampleDrawn(Current, FMath::Min(T, End), F))
+		{
+			break;
+		}
+		Seen.Add(F);
+	}
+	auto Find = [&](int32 K, uint16 Agent, FVector2D& Out)
+	{
+		const BbFrame& F = Seen[FMath::Clamp(K, 0, Seen.Num() - 1)];
+		for (uint32 I = 0; I < F.n_actors; ++I)
+		{
+			if (F.actors[I].agent == Agent)
+			{
+				Out = FVector2D(F.actors[I].pos[0], F.actors[I].pos[1]);
+				return true;
+			}
+		}
+		return false;
+	};
+	for (int32 K = 15; K < Seen.Num(); ++K)
+	{
+		const BbFrame& F = Seen[K];
+		for (uint32 I = 0; I < F.n_actors; ++I)
+		{
+			const uint16 Agent = F.actors[I].agent;
+			if ((Agent & 0x80) != 0)
+			{
+				continue;
+			}
+			const FVector2D P(F.actors[I].pos[0], F.actors[I].pos[1]);
+			for (int32 B = 0; B < 3; ++B)
+			{
+				FVector2D Was, Prior, Earlier, Later;
+				// Just there, having come at a run, and stopping (not rounding it).
+				if ((P - Bags[B]).Size() > 0.04 || !Find(K - 1, Agent, Was) || (Was - Bags[B]).Size() <= 0.04
+					|| !Find(K - 5, Agent, Prior) || !Find(K - 15, Agent, Earlier)
+					|| (Find(K + 10, Agent, Later) && (Later - Bags[B]).Size() > 0.1))
+				{
+					continue;
+				}
+				const float T = K * Step;
+				const double Mps = (Prior - Earlier).Size() / (10 * Step);
+				// Is a play being made on him there?
+				bool bPlay = false;
+				for (const FCatchNote& N : Catches)
+				{
+					bPlay |= FMath::Abs(N.T - T) < SlidePlayS && (FVector2D(N.At.Y, N.At.X) / 100.0 - Bags[B]).Size() < SlidePlayM;
+				}
+				for (uint32 C = 0; C < Current.Info.n_calls; ++C)
+				{
+					bPlay |= Current.Info.calls[C].runner == Agent && Current.Info.calls[C].base == B + 2;
+				}
+				FVector2D Holder;
+				bPlay |= F.holder >= 0 && Find(K, (uint16)F.holder, Holder) && (Holder - Bags[B]).Size() < SlidePlayM;
+				const bool bSlide = bPlay && Mps >= SlideMinMps;
+				if (bStagingLog)
+				{
+					UE_LOG(LogBb, Display, TEXT("BB_SLIDE play=%u agent=0x%03x base=%d t=%.2f of %.2f s in=%.1f m/s play_on_him=%d slides=%d"), Current.Info.play_index, Agent, B + 2, T, End, Mps, bPlay ? 1 : 0, bSlide ? 1 : 0);
+				}
+				if (bSlide)
+				{
+					FSlideNote N;
+					N.Agent = Agent;
+					N.T = T;
+					N.Base = B + 2;
+					N.Yaw = ToUE(Prior.X - Earlier.X, Prior.Y - Earlier.Y, 0.0).Rotation().Yaw;
+					N.At = ToUE(Bags[B].X, Bags[B].Y, 0.0);
+					Slides.Add(N);
+				}
+			}
+		}
+	}
+	// What -BbSlideShots and -BbDiveShots photograph of this pitch: its first slide going
+	// down, sliding, at the bag, sitting up and getting up; its first dive driving off, in the
+	// air, down, on hands and knees and getting up.
+	const bool bWantSlides = SlideShotsLeft > 0, bWantDives = DiveShotsLeft > 0;
+	if (bWantSlides && Slides.Num() > 0)
+	{
+		const float Marks[5] = { -0.3f, -0.15f, 0.f, 0.4f, 0.8f };
+		for (int32 M = 0; M < 5; ++M)
+		{
+			ExtraShots.Emplace(Slides[0].T + Marks[M], FString::Printf(TEXT("slide_%02d_%d.png"), SlideShotIndex, M + 1));
+		}
+		ShotSlide = 0;
+		++SlideShotIndex;
+		--SlideShotsLeft;
+	}
+	else
+	{
+		ShotSlide = -1;
+	}
+	for (int32 K = 0; bWantDives && K < Seen.Num() && ShotDiver < 0; ++K)
+	{
+		if (Seen[K].n_dives > 0)
+		{
+			const BbDive& Dv = Seen[K].dives[0];
+			const float T0 = K * Step - Dv.since_s, Up = T0 + Dv.since_s + Dv.up_in_s;
+			const float Marks[5] = { T0 - 0.13f, T0, T0 + 0.25f, Up - 0.6f, Up - 0.3f };
+			for (int32 M = 0; M < 5; ++M)
+			{
+				ExtraShots.Emplace(Marks[M], FString::Printf(TEXT("dive_%02d_%d.png"), DiveShotIndex, M + 1));
+			}
+			ShotDiver = Dv.agent;
+			ShotDiveFrom = T0;
+			ShotDiveYaw = ToUE(Dv.dir[0], Dv.dir[1], 0.0).Rotation().Yaw;
+			++DiveShotIndex;
+			--DiveShotsLeft;
+		}
+	}
+	ExtraShots.Sort([](const TPair<float, FString>& A, const TPair<float, FString>& B) { return A.Key < B.Key; });
+}
+
 void ABbDirector::PlaceDiver(ASkeletalMeshActor* F, const FVector& Foot, float Yaw, float TiltDeg, float LiftCm) const
 {
 	// The mannequin's mesh faces +Y in its own frame. A tilt tips him forward about the axis
@@ -1802,6 +1936,12 @@ void ABbDirector::PoseFigure(int32 Slot, const BbActor& A, const BbFrame& Frame,
 			Motion = 4;
 		}
 	}
+	// A dive (player-visuals §11): as the sim has it, he leaves his feet toward the ball,
+	// lies where he landed, and is back up when the sim says.
+	if (Coded && bMotions && bFielder && In.DiveSince >= 0.f)
+	{
+		Motion = 5;
+	}
 	// The batter at the plate, from the moment he stands in: at ease between pitches, in his
 	// stance as the pitcher comes set, and whatever the bat does from there.
 	const FBatNote& Bn = bReset ? NextBatNote : BatNote;
@@ -1809,6 +1949,12 @@ void ABbDirector::PoseFigure(int32 Slot, const BbActor& A, const BbFrame& Frame,
 		&& FMath::Square(A.pos[0] - Bn.Spot.X) + FMath::Square(A.pos[1] - Bn.Spot.Y) < 0.04)
 	{
 		Motion = 3;
+	}
+	// A runner sliding into a base.
+	if (Coded && bMotions && !bFielder && In.bSlide && !bReset)
+	{
+		Motion = 6;
+		MotionT = In.SlideT;
 	}
 	// (A pitcher who dives on an early comebacker is diving, not finishing his delivery.)
 	if (!Coded && bMotions && bFielder && Position == 1 && !In.bStaged && PlayTime < 0.8f && AnimPitch && In.DiveSince < 0.f)
@@ -1819,7 +1965,7 @@ void ABbDirector::PoseFigure(int32 Slot, const BbActor& A, const BbFrame& Frame,
 		WantYaw = YawToPlate(Foot);
 		bMirror = bLefty;
 	}
-	else if (bMotions && bFielder && AnimDive && AnimCrouch && In.DiveSince >= 0.f)
+	else if (!Coded && bMotions && bFielder && AnimDive && AnimCrouch && In.DiveSince >= 0.f)
 	{
 		// A dive, as the sim has it: he leaves his feet toward the ball (the sim carries his
 		// body there), lies where he landed, and is back up when the sim says. Stand-ins:
@@ -1880,26 +2026,39 @@ void ABbDirector::PoseFigure(int32 Slot, const BbActor& A, const BbFrame& Frame,
 			}
 		}
 	}
-	// A coded motion: how much of it shows. It comes in and goes out over MotionBlendS; a
-	// throw or a dive takes over at once. The motions are right-handed, so a left-hander is
-	// shown in a mirror for as long as any of one shows.
-	if (Manual || In.DiveSince >= 0.f || !Coded)
+	// A coded motion: how much of it shows. It comes in and goes out over MotionBlendS (a
+	// dive or a slide comes in faster: he is down in a third of a second). The motions are
+	// right-handed, so a left-hander is shown in a mirror for as long as any of one shows.
+	if (Manual || !Coded)
 	{
 		St.MotionW = 0.f;
 		Motion = 0;
 	}
 	if (Motion != 0 && Motion != St.Motion)
 	{
+		// (A dive ends standing with the ball in his hands, as the fielder's pose has him.)
+		if (!(St.Motion == 5 && Motion == 4))
+		{
+			St.MotionW = 0.f;
+		}
 		St.Motion = Motion;
-		St.MotionW = 0.f;
 	}
-	St.MotionW = FMath::FInterpConstantTo(St.MotionW, Motion != 0 ? 1.f : 0.f, SimDt, 1.f / MotionBlendS);
+	St.MotionW = FMath::FInterpConstantTo(St.MotionW, Motion != 0 ? 1.f : 0.f, SimDt, 1.f / (Motion >= 5 ? 0.12f : MotionBlendS));
 	St.MotionT = MotionT;
 	const float MotionShown = St.MotionW * St.MotionW * (3.f - 2.f * St.MotionW);
 	if (St.MotionW > 0.f)
 	{
 		// (The batter is posed facing the pitcher; which side he bats from is where he stands.)
-		if (St.Motion != 4)
+		if (St.Motion == 5)
+		{
+			// He faces the way he dove.
+			WantYaw = In.DiveSince >= 0.f && In.bDiveDir ? In.DiveYaw : St.Yaw;
+		}
+		else if (St.Motion == 6)
+		{
+			WantYaw = In.bSlide ? In.SlideYaw : St.Yaw;
+		}
+		else if (St.Motion != 4)
 		{
 			WantYaw = St.Motion == 3 ? ToUE(0.0, 1.0, 0.0).Rotation().Yaw : YawToPlate(Foot);
 		}
@@ -1916,10 +2075,10 @@ void ABbDirector::PoseFigure(int32 Slot, const BbActor& A, const BbFrame& Frame,
 		{
 			WantYaw = St.Yaw;
 		}
-		bMirror = St.Motion == 3 ? Bn.bLeftBox : bLefty;
+		bMirror = St.Motion == 3 ? Bn.bLeftBox : St.Motion == 6 ? false : bLefty;
 	}
 	// Turns ease on play time, so a pause holds them and fast playback keeps up.
-	St.Yaw = FMath::RInterpTo(FRotator(0, St.Yaw, 0), FRotator(0, WantYaw, 0), SimDt, Manual || (St.Motion == 4 && In.bThrow) ? 18.f : TurnRate).Yaw;
+	St.Yaw = FMath::RInterpTo(FRotator(0, St.Yaw, 0), FRotator(0, WantYaw, 0), SimDt, Manual || (St.Motion == 4 && In.bThrow) || (St.MotionW > 0.f && St.Motion >= 5) ? 18.f : TurnRate).Yaw;
 	St.Pos = Foot;
 	// A dive lays him out: tipped forward from the feet over DiveFallS, coming down onto the
 	// turf as he lands (late, so he is in the air first), flat until he gets up.
@@ -2074,6 +2233,24 @@ void ABbDirector::PoseFigure(int32 Slot, const BbActor& A, const BbFrame& Frame,
 				Coded->LowerWeight = Fi.Lower;
 				S = BbMotion::Field(Fi, Skel, GroundOwn, Reach, Pocket);
 			}
+			else if (St.Motion == 5)
+			{
+				// A dive: the glove to the ball if he gets one. (Going out, he is on his feet.)
+				FVector GloveAt(0.0, 95.0, 20.0);
+				float Glove = 0.f;
+				if (In.bCatch)
+				{
+					GloveAt = Own.InverseTransformPosition(In.CatchAt);
+					// (The glove stays on the ball while the rest of him comes down behind it.)
+					Glove = FMath::SmoothStep(-GloveOutS, -GloveThereS, In.CatchDt) * (1.f - FMath::SmoothStep(0.2f, GloveInS + 0.02f, In.CatchDt));
+				}
+				const bool bDown = In.DiveSince >= 0.f;
+				S = BbMotion::Dive(bDown ? In.DiveSince : 9.f, bDown ? In.DiveUpIn : 0.f, GloveAt, Glove, Own.InverseTransformPosition(ToUE(Frame.ball)), Skel, GroundOwn, Reach, Pocket);
+			}
+			else if (St.Motion == 6)
+			{
+				S = BbMotion::Slide(St.MotionT, Skel, GroundOwn);
+			}
 			else if (St.Motion == 3)
 			{
 				// The batter. The bat is the sim's while the sim has it. Otherwise it is his
@@ -2149,7 +2326,7 @@ void ABbDirector::PoseFigure(int32 Slot, const BbActor& A, const BbFrame& Frame,
 			// From the motion's frame to the figure's own, wherever it is drawn.
 			for (FVector* P : { &S.Pelvis, &S.Ankle[0], &S.Ankle[1] })
 			{
-				if (St.Motion != 4)
+				if (St.Motion < 4)
 				{
 					*P = Own.InverseTransformPosition(Base.TransformPosition(*P));
 				}
@@ -2177,6 +2354,21 @@ void ABbDirector::PoseFigure(int32 Slot, const BbActor& A, const BbFrame& Frame,
 				{
 					UE_LOG(LogBb, Display, TEXT("BB_LETGO play=%u agent=0x%03x staged=%d left=%d hand_off=%.1f cm lower=%.2f shown=%.2f point=(%.0f, %.0f, %.0f) cm his frame, weight=%.2f yaw_off=%.0f deg"), Current.Info.play_index, A.agent, bReset ? 1 : 0, bLefty ? 1 : 0,
 						(Own.TransformPosition(Hold[1]) - In.ThrowFrom).Size(), St.Lower, MotionShown, Reach.At[1].X, Reach.At[1].Y, Reach.At[1].Z, Reach.Weight[1], FRotator::NormalizeAxis(St.Yaw - In.ThrowYaw));
+				}
+			}
+			if (St.Motion == 5)
+			{
+				// The ball he dove for and got stays in his glove until he is up.
+				const FVector InGlove = Wrist[0] + Pocket * BbMotion::BallInMittCm;
+				if (In.bHolds && MotionShown >= 0.5f)
+				{
+					St.bHand = true;
+					St.Hand = Own.TransformPosition(InGlove);
+				}
+				if (bStagingLog && In.bCatch && In.CatchDt == 0.f)
+				{
+					UE_LOG(LogBb, Display, TEXT("BB_CATCH play=%u agent=0x%03x dive=1 since=%.2f left=%d ball=(%.2f, %.2f, %.2f) m from him, glove_off=%.1f cm shown=%.2f"), Current.Info.play_index, A.agent, In.DiveSince, bLefty ? 1 : 0,
+						Reach.At[0].X / 100.0, Reach.At[0].Y / 100.0, Reach.At[0].Z / 100.0, (Own.TransformPosition(InGlove) - In.CatchAt).Size(), MotionShown);
 				}
 			}
 			// -BbStagingLog: how far the hand is from the sim's release point as the ball goes
@@ -2624,6 +2816,23 @@ void ABbDirector::Tick(float DeltaSeconds)
 				}
 			}
 		}
+		// -BbSlideShots, -BbDiveShots: the play held on each of the slide's or the dive's
+		// moments (NoteSlides lists them) and photographed.
+		if (!bReset && Current.bValid && ExtraShotNext < ExtraShots.Num())
+		{
+			const float At = FMath::Min(ExtraShots[ExtraShotNext].Key, Current.Info.duration_s + HoldAfter - 0.05f);
+			if (PlayTime >= At)
+			{
+				PlayTime = At;
+				const FString Name = FPaths::Combine(FPaths::ProjectSavedDir(), TEXT("Shots"), ExtraShots[ExtraShotNext].Value);
+				FScreenshotRequest::RequestScreenshot(Name, false, false);
+				UE_LOG(LogBb, Display, TEXT("BB_EXTRA_SHOT %s play %u t %.2f"), *Name, Current.Info.play_index, At);
+				if (++ExtraShotNext == ExtraShots.Num() && SlideShotsLeft <= 0 && DiveShotsLeft <= 0)
+				{
+					BenchSeconds = FMath::Max(BenchSeconds, (float)Wall + 2.f);
+				}
+			}
+		}
 		const float T = FMath::Clamp(PlayTime, 0.f, Current.Info.duration_s);
 		BbFrame Frame;
 		bool bHave = false;
@@ -2663,37 +2872,6 @@ void ABbDirector::Tick(float DeltaSeconds)
 		else
 		{
 			bHave = SampleDrawn(Current, T, Frame);
-			// -BbDiveShots: each dive photographed in the air, lying, and getting up.
-			for (uint32 D = 0; bHave && DiveShotsLeft > 0 && D < Frame.n_dives; ++D)
-			{
-				const BbDive& Dv = Frame.dives[D];
-				const float Marks[3] = { 0.12f, 0.8f, Dv.since_s + Dv.up_in_s - 0.3f };
-				for (int32 M = 0; M < 3; ++M)
-				{
-					if (Dv.since_s >= Marks[M] && Dv.since_s - SimDt < Marks[M])
-					{
-						const FString Name = FPaths::Combine(FPaths::ProjectSavedDir(), TEXT("Shots"), FString::Printf(TEXT("dive_%02d_%d.png"), DiveShotIndex, M));
-						FScreenshotRequest::RequestScreenshot(Name, true, false);
-						float FigYaw = 0.f;
-						for (int32 Q = 0; Q < FigureState.Num(); ++Q)
-						{
-							if (FigureState[Q].Agent == Dv.agent)
-							{
-								FigYaw = FigureState[Q].Yaw;
-							}
-						}
-						UE_LOG(LogBb, Display, TEXT("BB_DIVE_SHOT %s play %u t %.2f agent %#x dir (%.2f, %.2f) dive yaw %.0f figure yaw %.0f"), *Name, Current.Info.play_index, T, Dv.agent, Dv.dir[0], Dv.dir[1], ToUE(Dv.dir[0], Dv.dir[1], 0.0).Rotation().Yaw, FigYaw);
-						if (M == 2)
-						{
-							++DiveShotIndex;
-							if (--DiveShotsLeft == 0)
-							{
-								BenchSeconds = FMath::Max(BenchSeconds, (float)Wall + 2.f);
-							}
-						}
-					}
-				}
-			}
 			// Throws coming up, from every frame since the last one drawn.
 			NoteThrows(ThrowsSampledTo, T);
 			ThrowsSampledTo = FMath::Max(ThrowsSampledTo, T);
@@ -2815,15 +2993,34 @@ void ABbDirector::Tick(float DeltaSeconds)
 					}
 					else if (bShow && !bReset)
 					{
+						// The sim has a diving fielder take the ball at the moment he leaves his
+						// feet and travel after it; a man laid out has left his feet already. So
+						// the drawn dive runs DiveLeadS ahead of the sim's: he is in the air, the
+						// glove on the ball, as the sim has it caught.
 						for (uint32 D = 0; D < Frame.n_dives; ++D)
 						{
 							const BbDive& Dv = Frame.dives[D];
 							if (Dv.agent == A.agent)
 							{
-								In.DiveSince = Dv.since_s;
+								In.DiveSince = Dv.since_s + DiveLeadS;
 								In.DiveUpIn = Dv.up_in_s;
 								In.bDiveDir = Dv.dir[0] != 0.f || Dv.dir[1] != 0.f;
 								In.DiveYaw = ToUE(Dv.dir[0], Dv.dir[1], 0.0).Rotation().Yaw;
+							}
+						}
+						BbFrame Ahead;
+						if (In.DiveSince < 0.f && bFigure && PlayTime + DiveLeadS <= Current.Info.duration_s && SampleDrawn(Current, PlayTime + DiveLeadS, Ahead))
+						{
+							for (uint32 D = 0; D < Ahead.n_dives; ++D)
+							{
+								const BbDive& Dv = Ahead.dives[D];
+								if (Dv.agent == A.agent)
+								{
+									In.DiveSince = Dv.since_s;
+									In.DiveUpIn = Dv.up_in_s + DiveLeadS;
+									In.bDiveDir = Dv.dir[0] != 0.f || Dv.dir[1] != 0.f;
+									In.DiveYaw = ToUE(Dv.dir[0], Dv.dir[1], 0.0).Rotation().Yaw;
+								}
 							}
 						}
 						for (FThrowNote& N : Throws)
@@ -2858,6 +3055,16 @@ void ABbDirector::Tick(float DeltaSeconds)
 								In.CatchDt = Dt;
 								In.CatchAt = N.At;
 							}
+						}
+					}
+					for (const FSlideNote& N : Slides)
+					{
+						const float Tt = PlayTime - N.T;
+						if (bShow && !bReset && N.Agent == A.agent && Tt >= BbMotion::SlideStartS && Tt <= BbMotion::SlideEndS)
+						{
+							In.bSlide = true;
+							In.SlideT = Tt;
+							In.SlideYaw = N.Yaw;
 						}
 					}
 					In.bHolds = bShow && Frame.holder == (int32)A.agent;
@@ -3078,19 +3285,29 @@ void ABbDirector::Tick(float DeltaSeconds)
 				Camera->GetCameraComponent()->SetFieldOfView(Fov);
 				ShownCam = -1;
 			}
-			// -BbDiveShots: the camera on the diver, from his side, while he is down.
-			if (DiveShotsLeft > 0 && !bReset && Frame.n_dives > 0)
+			// -BbSlideShots: the camera beside the bag from a little before he slides.
+			if (!bReset && Slides.IsValidIndex(ShotSlide) && PlayTime > Slides[ShotSlide].T - 1.f)
+			{
+				const FSlideNote& N = Slides[ShotSlide];
+				const FVector Dir = FRotator(0.f, N.Yaw, 0.f).Vector();
+				const FVector Eye = N.At - Dir * 120.f + FVector(-Dir.Y, Dir.X, 0.f) * 520.f + FVector(0, 0, 170.f);
+				Camera->SetActorLocationAndRotation(Eye, (N.At - Dir * 60.f + FVector(0, 0, 60.f) - Eye).Rotation());
+				Camera->GetCameraComponent()->SetFieldOfView(50.f);
+				ShownCam = -1;
+			}
+			// -BbDiveShots: the camera on the diver, from his side, from a little before he goes.
+			if (!bReset && ShotDiver >= 0 && PlayTime > ShotDiveFrom - 0.7f && PlayTime < ShotDiveFrom + 2.5f)
 			{
 				for (uint32 I = 0; I < Frame.n_actors; ++I)
 				{
-					if (Frame.actors[I].agent == Frame.dives[0].agent)
+					if (Frame.actors[I].agent == ShotDiver)
 					{
 						const FVector P = ToUE(Frame.actors[I].pos);
-						const FVector Dir = ToUE(Frame.dives[0].dir[0], Frame.dives[0].dir[1], 0.0);
-						const FVector Side = Dir.IsNearlyZero() ? FVector(1, 0, 0) : FVector(-Dir.Y, Dir.X, 0.0).GetSafeNormal();
-						const FVector Eye = P + Side * 700.f + FVector(0, 0, 250.f);
-						Camera->SetActorLocation(Eye);
-						Camera->SetActorRotation((P + FVector(0, 0, 50.f) - Eye).Rotation());
+						const FVector Dir = FRotator(0.f, ShotDiveYaw, 0.f).Vector();
+						const FVector Eye = P + FVector(-Dir.Y, Dir.X, 0.f) * 560.f + Dir * 60.f + FVector(0, 0, 170.f);
+						Camera->SetActorLocationAndRotation(Eye, (P + Dir * 30.f + FVector(0, 0, 50.f) - Eye).Rotation());
+						Camera->GetCameraComponent()->SetFieldOfView(50.f);
+						ShownCam = -1;
 					}
 				}
 			}

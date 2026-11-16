@@ -36,7 +36,7 @@ Fielding and throwing:
 - [x] A. Implement rosters (player names, player numbers, player positions). *Numbers are on the backs of the uniforms.*
 - [ ] B. Team lineups (vs left vs right batting orders).
 - [ ] B. Implement a game settings screen.
-- [ ] A. Implement baserunners sliding at appropriate times. *Next in the graphics work is drawing the slide; the sim does not yet decide when a runner slides.*
+- [~] A. Implement baserunners sliding at appropriate times. *Since 2026-11-16 a runner slides feet-first into second, third or home when a play is being made on him there. Left: with no play on him he still stops dead standing (the sim stops him dead; slowing into the base is sim work), and a runner put out before the bag is not seen sliding into the tag. You have not seen it moving yet.*
 - [ ] A. Implement stolen bases.
 - [~] A. Variety of body shapes, nationalities, ethnicities, skin color. *Height, build and skin tone vary by player; names do not yet follow nationality.*
 - [x] A. Team uniforms.
@@ -60,7 +60,7 @@ Fielding and throwing:
 - [x] A. A hurried throw loses accuracy and speed. If a player has time to get balanced, then the throw can gain accuracy and speed. *See below: fielders still choose to hurry too often.*
 - [~] A. Each player has throwing ratings (accuracy, speed, throwing set-up time). *The ratings exist in the model; every player is average until players get their own ratings.*
 - [~] A. Smarter player decisions based on runners on base and number of outs. E.g. with a runner on 3rd and 2 outs, fielders play to get the force out at first or second instead of throwing home. *Throw choices weigh outs and runners; more cases are in your saved plays below.*
-- [~] A. Players dive for balls, increasing range. Takes effort to rise back up to throw if the catch or grounder has been gotten. *Dives and the get-up work in the sim at a realistic rate; they are still drawn with stand-in clips (the new dive motion comes with the slide).*
+- [~] A. Players dive for balls, increasing range. Takes effort to rise back up to throw if the catch or grounder has been gotten. *Dives and the get-up work in the sim at a realistic rate. Since 2026-11-16 the dive is its own motion: laid out with the glove on the ball, down, up through hands and knees. Left: every dive is head-first straight at the ball. You have not seen it moving yet.*
 
 # Hitting
 - [x] A. Ball shadow after hit can't be seen.

@@ -198,6 +198,26 @@ namespace BbMotion
 	/** The throw's first and last moments, s from release. */
 	constexpr float ThrowStartS = -0.45f;
 	constexpr float ThrowEndS = 0.5f;
+
+	/** A fielder's dive (player-visuals §11): he drives off, is laid out in the air, lands on
+	 *  his front and lies there, then gets up through his hands and knees. Since: seconds
+	 *  since he left his feet; UpIn: seconds until the sim has him up. The figure faces the
+	 *  way he dove and its origin is the sim's place for him, which is his middle as he lies.
+	 *  GloveAt and Glove as for Field: OutReach puts the glove's pocket on the ball. */
+	FBbStick Dive(float Since, float UpIn, const FVector& GloveAt, float Glove, const FVector& Look, const FBbSkeleton& Skel, const FBbMotionGround& Ground, FBbReach& OutReach, FVector& OutPocket);
+	/** How long the fall takes and how long the getting up, s. */
+	constexpr float DiveFallS = 0.3f;
+	constexpr float DiveRiseS = 0.9f;
+
+	/** A runner's feet-first slide (player-visuals §11), by seconds from the moment the sim
+	 *  has him at the bag (negative before): he drops onto his left hip with that leg folded
+	 *  under, the right foot out in front for the bag, sits there a moment and stands up on
+	 *  it. The figure faces the way he ran; its origin is the sim's place for him, which is
+	 *  his leading foot once he is down. */
+	FBbStick Slide(float T, const FBbSkeleton& Skel, const FBbMotionGround& Ground);
+	/** The slide's first and last moments, s from his arrival. */
+	constexpr float SlideStartS = -0.42f;
+	constexpr float SlideEndS = 1.2f;
 }
 
 /** The single-clip player with a pose laid over it. */

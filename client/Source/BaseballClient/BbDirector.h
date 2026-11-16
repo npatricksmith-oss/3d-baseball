@@ -37,7 +37,10 @@ class UMaterialInterface;
  *               -BbParkShots (photograph the park from its fixed spots as park_<spot>.png, then quit;
  *               -BbParkShotsAt=<seconds> when to start)
  *               -BbBoxShots=<n> (photograph the Tab box at pitch n and the final box, then quit)
- *               -BbDiveShots=<n> (photograph n dives: in the air, lying, getting up; then quit)
+ *               -BbDiveShots=<n> (photograph n dives: driving off, in the air, down, on hands
+ *               and knees, getting up; then quit)
+ *               -BbSlideShots=<n> (photograph n slides: going down, sliding, at the bag, sitting
+ *               up, getting up; then quit; with -BbStagingLog each slide is logged as BB_SLIDE)
  *               -BbAnimTest (stock clips looping) or -BbAnimTest=dive (dive pose candidates;
  *               -BbAnimFrac=<0..1> -BbAnimTilt=<degrees>)
  *               -BbBenchSeconds=<s> (log frame rate and memory, then quit)
@@ -159,8 +162,8 @@ private:
 		// The clip being driven by hand (null while the gait clips play on their own).
 		const UAnimSequence* Manual = nullptr;
 		// A coded motion (BbPose.h): which (0 none, 1 the delivery, 2 the catcher's crouch,
-		// 3 the batter at the plate, 4 a fielder's ready, catch and throw), how much of it
-		// shows over the clip, and the delivery's moment last shown.
+		// 3 the batter at the plate, 4 a fielder's ready, catch and throw, 5 a dive, 6 a
+		// slide), how much of it shows over the clip, and the motion's moment last shown.
 		int32 Motion = 0;
 		float MotionW = 0.f;
 		float MotionT = 0.f;
@@ -251,6 +254,10 @@ private:
 		float DiveUpIn = 0.f;
 		bool bDiveDir = false;
 		float DiveYaw = 0.f;
+		/** A runner's slide: seconds from his arrival at the bag, and which way he came. */
+		bool bSlide = false;
+		float SlideT = 0.f;
+		float SlideYaw = 0.f;
 	};
 	void PoseFigure(int32 Slot, const BbActor& A, const BbFrame& Frame, const FPoseInput& In, float SimDt, float DeltaSeconds);
 	/** A dive's layout (client presentation): he tips forward to DiveTiltDeg from the feet
@@ -258,6 +265,8 @@ private:
 	 *  (the leap clip, held DiveClipFrac through, has him in the air and leaning 45° already),
 	 *  lies there, and gets up over the last DiveRiseS before the sim has him up. Tipped
 	 *  flat, his middle is DiveBodyBackCm from his feet. Check with -BbDiveShots. */
+	/** The drawn dive begins this long before the sim's (PoseFigure's caller says why), s. */
+	static constexpr float DiveLeadS = 0.17f;
 	float DiveFallS = 0.3f;
 	float DiveRiseS = 0.6f;
 	float DiveTiltDeg = 45.f;
@@ -306,6 +315,27 @@ private:
 	};
 	TArray<FCatchNote> Catches;
 	void NoteCatches();
+	/** A runner who slides in the current timeline (player-visuals §11). The sim has no
+	 *  slide: a runner going on to a base he stops at runs into it at full speed and is still
+	 *  from the next moment. Where a play is being made on him at second, third or home that
+	 *  stop is drawn as a feet-first slide (the client's choice of how to show what the sim
+	 *  did; nothing feeds back). */
+	struct FSlideNote
+	{
+		uint16 Agent = 0;
+		float T = 0.f;   // play time the sim has him at the bag
+		float Yaw = 0.f; // Unreal yaw of his run into it
+		int32 Base = 0;  // 2, 3 or 4 (home)
+		FVector At = FVector::ZeroVector;
+	};
+	TArray<FSlideNote> Slides;
+	void NoteSlides();
+	/** He slides if he comes in at least this fast, m/s, and the ball is taken within
+	 *  SlidePlayM of the bag within SlidePlayS of his getting there (or is already held
+	 *  there, or he is called out there). */
+	static constexpr float SlideMinMps = 5.f;
+	static constexpr float SlidePlayM = 5.f;
+	static constexpr float SlidePlayS = 1.5f;
 	/** The live sim's step, s: the timeline has the ball at each one (bb_game::live DT). */
 	static constexpr float SimTickS = 1.f / 60.f;
 	void AddThrow(uint16 Agent, float ReleaseAt);
@@ -638,9 +668,20 @@ private:
 	// Unattended checks.
 	int32 ShotsLeft = 0;
 	int32 ShotIndex = 0;
-	/** -BbDiveShots=<n>: photograph the next n dives (in the air, lying, getting up), then quit. */
+	/** -BbDiveShots=<n>: photograph the next n dives at five moments each, then quit. */
 	int32 DiveShotsLeft = 0;
 	int32 DiveShotIndex = 0;
+	/** -BbSlideShots=<n>: the same for the next n slides. */
+	int32 SlideShotsLeft = 0;
+	int32 SlideShotIndex = 0;
+	/** The moments of the pitch on screen that those two photograph (play time, file name),
+	 *  in time order, and the next to take; which slide and which diver the camera is on. */
+	TArray<TPair<float, FString>> ExtraShots;
+	int32 ExtraShotNext = 0;
+	int32 ShotSlide = -1;
+	int32 ShotDiver = -1;
+	float ShotDiveFrom = 0.f;
+	float ShotDiveYaw = 0.f;
 	float ShotEvery = 4.f;
 	float NextShot = 3.f;
 	/** -BbParkShots: the spot now being photographed, or -1; when its picture is asked for
