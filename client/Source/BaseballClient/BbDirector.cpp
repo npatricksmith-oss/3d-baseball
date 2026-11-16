@@ -2804,30 +2804,24 @@ void ABbDirector::Tick(float DeltaSeconds)
 		{
 			bPaused = !bPaused;
 		}
-		// The speeds the keys step through (owner, 2026-11-14). -BbSpeed= may start anywhere,
-		// for unattended checks; the first key press moves to the next step up or down.
-		static const float SpeedSteps[] = { 0.25f, 0.5f, 1.f, 1.5f, 2.f, 4.f, 8.f, 16.f };
-		if (PC->WasInputKeyJustPressed(EKeys::Equals))
+		// Speed keys (owner, 2026-11-16): 1 to 5 jump to 1x, 2x, 4x, 6x and 10x; minus slows
+		// down a quarter at a time (to 0.25x at least), equals speeds up the same way.
+		static const FKey SpeedKeys[] = { EKeys::One, EKeys::Two, EKeys::Three, EKeys::Four, EKeys::Five };
+		static const float SpeedJumps[] = { 1.f, 2.f, 4.f, 6.f, 10.f };
+		for (int32 I = 0; I < UE_ARRAY_COUNT(SpeedKeys); ++I)
 		{
-			for (float Step : SpeedSteps)
+			if (PC->WasInputKeyJustPressed(SpeedKeys[I]))
 			{
-				if (Step > Speed + 1e-3f)
-				{
-					Speed = Step;
-					break;
-				}
+				Speed = SpeedJumps[I];
 			}
 		}
 		if (PC->WasInputKeyJustPressed(EKeys::Hyphen))
 		{
-			for (int32 I = UE_ARRAY_COUNT(SpeedSteps) - 1; I >= 0; --I)
-			{
-				if (SpeedSteps[I] < Speed - 1e-3f)
-				{
-					Speed = SpeedSteps[I];
-					break;
-				}
-			}
+			Speed = FMath::Max(0.25f, Speed - 0.25f);
+		}
+		if (PC->WasInputKeyJustPressed(EKeys::Equals))
+		{
+			Speed = FMath::Min(10.f, Speed + 0.25f);
 		}
 		// Enter: run at RushSpeed (or the chosen speed, if faster) until the next pitch is
 		// ready to be thrown, then back to the chosen speed (owner, 2026-11-15). Again: stop.
@@ -3581,7 +3575,7 @@ void ABbDirector::Tick(float DeltaSeconds)
 			static const TCHAR* CamNames[3] = { TEXT("broadcast"), TEXT("behind home"), TEXT("overhead") };
 			Hud->Replay = bReplay ? FString::Printf(TEXT("REPLAY    seed %llu    play %u"), SeedShown, Current.Info.play_index) : FString();
 			Hud->Notice = Wall < SavedUntil ? SavedNote : FString();
-			Hud->Footer = FString::Printf(TEXT("Space: %s    - / =: speed %.2gx    Enter: %s    R / F: replay back / forward    S: save play    C: camera (%s)    Esc or Q: quit"), bPaused ? TEXT("paused") : TEXT("pause"), Speed, bRush ? TEXT("skipping to the next pitch") : TEXT("skip to the next pitch"), CamNames[CameraMode]);
+			Hud->Footer = FString::Printf(TEXT("Space: %s    Speed %.2fx: 1-5 for 1/2/4/6/10x, - / = by 0.25x    Enter: %s    R / F: replay    S: save play    C: camera (%s)    Q: quit"), bPaused ? TEXT("paused") : TEXT("pause"), Speed, bRush ? TEXT("skipping") : TEXT("next pitch"), CamNames[CameraMode]);
 			// The outs on the board are the ones called so far. Runs, count and bases change
 			// when the play is known. A play that ends the half inning leaves it on the board,
 			// at three outs, until the next pitch (BeginPlayback).
@@ -3608,6 +3602,60 @@ void ABbDirector::Tick(float DeltaSeconds)
 					bBoardValid = Sim->BoxScore(Through, BoardBox);
 					BoardThrough = Through;
 				}
+				// The pitcher and the batter under the score (owner, 2026-11-16): names and
+				// numbers from the roster, the pitch count and the batter's game from the box
+				// score through what has been shown. The pitch in flight counts once thrown.
+				Bug.Pitcher.Reset();
+				Bug.Batter.Reset();
+				if (bBoardValid)
+				{
+					const int32 Fielding = Half.top ? 1 : 0;
+					const int32 NP = BoardBox.n_pitchers[Fielding];
+					if (NP > 0)
+					{
+						const BbPitchLine& P = BoardBox.pitchers[Fielding][NP - 1];
+						Bug.Pitcher = FString(UTF8_TO_TCHAR(P.family)).ToUpper();
+						Bug.PitcherNumber = P.number;
+						Bug.Pitches = P.pitches + (!bKnown && PlayTime >= 0.f ? 1 : 0);
+					}
+					const BbBoxTeam& Batting = BoardBox.teams[1 - Fielding];
+					for (uint32 I = 0; I < Batting.n_lines; ++I)
+					{
+						const BbBatLine& L = Batting.lines[I];
+						if (L.agent != In.batter)
+						{
+							continue;
+						}
+						static const TCHAR* Pos[] = { TEXT(""), TEXT("P"), TEXT("C"), TEXT("1B"), TEXT("2B"), TEXT("3B"), TEXT("SS"), TEXT("LF"), TEXT("CF"), TEXT("RF") };
+						Bug.Batter = FString(UTF8_TO_TCHAR(L.family)).ToUpper();
+						Bug.BatterNumber = L.number;
+						Bug.BatterPosition = L.position <= 9 ? Pos[L.position] : TEXT("");
+						// "1-2, HR, 2 RBI": hits for at-bats, then what stands out.
+						FString Day;
+						if (L.pa == 0)
+						{
+							Day = TEXT("first time up");
+						}
+						else
+						{
+							Day = FString::Printf(TEXT("%d-%d"), L.h, L.ab);
+							auto Add = [&Day](int32 N, const TCHAR* What)
+							{
+								if (N > 0)
+								{
+									Day += N > 1 ? FString::Printf(TEXT(", %d %s"), N, What) : FString::Printf(TEXT(", %s"), What);
+								}
+							};
+							Add(L.hr, TEXT("HR"));
+							Add(L.triples, TEXT("3B"));
+							Add(L.doubles, TEXT("2B"));
+							Add(L.rbi, TEXT("RBI"));
+							Add(L.bb, TEXT("BB"));
+							Add(L.k, TEXT("K"));
+						}
+						Bug.BatterToday = Day;
+					}
+				}
 				if (bBoardValid)
 				{
 					Park->ShowBoard(BoardBox, Half.inning, Half.top != 0, bHalfOver && bKnown ? 0 : Src.balls, bHalfOver && bKnown ? 0 : Src.strikes, Outs);
@@ -3616,9 +3664,23 @@ void ABbDirector::Tick(float DeltaSeconds)
 			const float Mph = In.release_speed_mps * 2.23694f;
 			// Contact measurements only once the bat has met the ball: before that they would
 			// say he is going to swing and hit it.
-			Hud->PitchLine = In.exit_velocity_mps > 0.f && In.contact_s >= 0.f && PlayTime >= In.contact_s
-				? FString::Printf(TEXT("Pitch %.0f mph   Exit %.0f mph at %.0f deg"), Mph, In.exit_velocity_mps * 2.23694f, FMath::RadiansToDegrees(In.launch_angle_rad))
-				: FString::Printf(TEXT("Pitch %.0f mph"), Mph);
+			// The pitch's speed and type once it has reached the plate (or the bat), not
+			// before: then the ball off the bat once it is hit.
+			static const TCHAR* Types[] = { TEXT(""), TEXT("Four-seam"), TEXT("Sinker"), TEXT("Cutter"), TEXT("Slider"), TEXT("Sweeper"), TEXT("Slurve"), TEXT("Curveball"), TEXT("Knuckle curve"), TEXT("Changeup"), TEXT("Splitter") };
+			const TCHAR* Type = In.pitch_type <= 10 ? Types[In.pitch_type] : TEXT("");
+			const float Arrived = In.contact_s >= 0.f ? In.contact_s : In.call_s - 0.2f;
+			if (PlayTime < Arrived)
+			{
+				Hud->PitchLine.Reset();
+			}
+			else if (In.exit_velocity_mps > 0.f && In.contact_s >= 0.f)
+			{
+				Hud->PitchLine = FString::Printf(TEXT("%.0f mph %s    Off the bat %.0f mph, %.0f deg"), Mph, Type, In.exit_velocity_mps * 2.23694f, FMath::RadiansToDegrees(In.launch_angle_rad));
+			}
+			else
+			{
+				Hud->PitchLine = FString::Printf(TEXT("%.0f mph %s"), Mph, Type);
+			}
 		}
 		if (bReplay && ReplayIdx >= History.Num() && PlayTime >= Current.Info.duration_s)
 		{

@@ -85,6 +85,26 @@ namespace
 	}
 }
 
+namespace
+{
+	/** A row under the bug: club colour, position, number and name, and a figure at the
+	 *  right ("42 P", "1-2, 2B"). Returns its bottom edge (reference units). */
+	float PersonRow(ABbHUD& Hud, float S, float Top, int32 Side, const FString& Position, int32 Number, const FString& Name, const FString& Right)
+	{
+		const float H = 27.f;
+		const float X = BugX * S, Y = Top * S;
+		Hud.DrawRect(BbLook::HudPanel, X, Y, BugW * S, H * S);
+		Hud.DrawRect(BbLook::HudClub[Side & 1], X, Y, ChipW * S, H * S);
+		Hud.DrawRect(BbLook::HudPanelLight, X + ChipW * S, Y + (H - 1.f) * S, (BugW - ChipW) * S, 1.f * S);
+		const float Mid = Y + H * 0.5f * S;
+		TextMid(Hud, Position, X + (ChipW + 10.f) * S, Mid, BbLook::HudDim, 0.9f * S);
+		const FString Who = Number > 0 ? FString::Printf(TEXT("%d  %s"), Number, *Name) : Name;
+		TextMid(Hud, Who, X + (ChipW + 44.f) * S, Mid, BbLook::HudText, 0.95f * S);
+		TextRight(Hud, Right, X + (BugW - 10.f) * S, Mid, BbLook::HudGold, 0.95f * S);
+		return Top + H;
+	}
+}
+
 float BbHud::DrawBug(ABbHUD& Hud, float S, const FBbBugInfo& Bug)
 {
 	const float X = BugX * S, Y = BugY * S;
@@ -135,7 +155,18 @@ float BbHud::DrawBug(ABbHUD& Hud, float S, const FBbBugInfo& Bug)
 	TextMid(Hud, Inning, AX + 2.f * A + 4.f * S, RowMid, BbLook::HudText, 1.3f * S);
 	const FString Count = Bug.bValid ? FString::Printf(TEXT("%d-%d"), Bug.Balls, Bug.Strikes) : TEXT("0-0");
 	TextCentre(Hud, Count, MidX, Y + RowH * 1.5f * S, BbLook::HudText, 1.3f * S);
-	return BugY + 2.f * RowH;
+	float Bottom = BugY + 2.f * RowH;
+	// Who is facing whom: the pitcher in his club's colour, then the batter in his.
+	const int32 Fielding = Bug.bTop ? 1 : 0;
+	if (!Bug.Pitcher.IsEmpty())
+	{
+		Bottom = PersonRow(Hud, S, Bottom, Fielding, TEXT("P"), Bug.PitcherNumber, Bug.Pitcher, FString::Printf(TEXT("%d P"), Bug.Pitches));
+	}
+	if (!Bug.Batter.IsEmpty())
+	{
+		Bottom = PersonRow(Hud, S, Bottom, 1 - Fielding, Bug.BatterPosition, Bug.BatterNumber, Bug.Batter, Bug.BatterToday);
+	}
+	return Bottom;
 }
 
 float BbHud::DrawTag(ABbHUD& Hud, float S, float Y, const FString& Text, const FLinearColor& TextColor)

@@ -132,6 +132,8 @@ table Telemetry {
   projected_distance_m: float (id: 14);
   hang_time_s: float (id: 15);
   apex_m: float (id: 16);
+  // The pitch thrown, as the world has it (the event log's PitchReleased.pitch_type), for display.
+  pitch_type: bb.PitchType (id: 17);
 }
 
 table PlayTimeline {

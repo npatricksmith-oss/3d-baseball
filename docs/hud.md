@@ -1,6 +1,6 @@
 # HUD: game graphics
 
-**Status:** plan agreed with the owner 2026-11-15 (three questions, Q22–Q24, all as recommended; §1). **Step 1 built 2026-11-16** (twenty-fourth lead session; §5). Third part of the graphics stage, after [the park](park-visuals.md) and [the players](player-visuals.md).
+**Status:** plan agreed with the owner 2026-11-15 (three questions, Q22–Q24, all as recommended; §1). **Steps 1 and 2 built 2026-11-16** (twenty-fourth lead session; §5). Third part of the graphics stage, after [the park](park-visuals.md) and [the players](player-visuals.md).
 
 **Where it starts.** `ABbHUD::DrawHUD` (`BbGameMode.cpp`) draws a dark strip with one line of score text, one line about the last pitch, a three-square runners diamond, a footer of keys, the between-innings card and the home-run card. All of it is the engine's large font on the canvas.
 
@@ -45,3 +45,11 @@ Carried over from the park plan: the lead builds alone in short sessions, shows 
 - **`-BbHudHold`** keeps every panel on screen, with made-up words where the game has none yet (hud.md §4). Use it with `-BbShots`. `-ForceRes` makes the offscreen shots 1600 × 900; without it they come out 888 × 500.
 - Pictures: `client/Saved/Shots/hud1_before/`, `hud1_after/`, `hud1_hold/` (untracked).
 - **For the owner to overrule if he likes:** the clubs by nickname on the bug; the caption at the bottom; three out marks, not two.
+
+**Step 2, the pitcher, the batter and the pitch (2026-11-16).** The owner asked, while it was being built, for the names on the bug itself: so instead of a batter card that comes and goes, **two rows under the score stay up** (owner, 2026-11-16).
+- **The pitcher's row,** in the fielding club's colour: "P", his number and name, and the pitches he has thrown ("42 P"). The count goes up as the pitch leaves his hand.
+- **The batter's row,** in the batting club's colour: his position, number and name, and his game so far: hits for at-bats, then home runs, triples, doubles, runs batted in, walks and strikeouts ("1-3, HR, 2 RBI"), or "first time up". It changes when the result is known, not before.
+- **The pitch readout** under them: speed and type ("87 mph Slider") once the pitch reaches the plate or the bat, not before (it used to show the speed during the wind-up); then the ball's speed and angle off the bat.
+- **Read from the sim:** names, numbers and positions from the box score's lines; the pitch count from new pitcher lines in the box score (`bb_stats::PitcherLine`, counted from `PitchReleased`, so a function of the event log; `BbBoxScore.pitchers`); the pitch type from the timeline's telemetry (`Telemetry.pitch_type`, the type the log records as thrown; `BbPlayInfo.pitch_type`, in a byte that was padding). Game digests unchanged; test `pitch_type_and_pitch_count_agree_with_what_the_client_was_handed` (bb_ffi).
+- **Speed keys (owner, same day):** 1 to 5 jump to 1x, 2x, 4x, 6x and 10x; minus slows down by 0.25x at a time (down to 0.25x), equals speeds up the same way (up to 10x). The middle steps are the lead's choice; the owner asked only for 1x to 10x.
+- Pictures: `client/Saved/Shots/hud2_after/` (untracked).

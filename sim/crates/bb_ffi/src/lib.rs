@@ -306,7 +306,10 @@ pub struct BbPlayInfo {
     /// log's `DeadBallReason`); 4 a foul ball out of play (the log's 1; told apart here so a
     /// client can go straight to the next pitch).
     pub dead_reason: u8,
-    pub _pad2: [u8; 3],
+    /// The pitch thrown (the schema's `PitchType`: 1 four-seam, 2 sinker, 3 cutter, 4 slider,
+    /// 5 sweeper, 6 slurve, 7 curveball, 8 knuckle curve, 9 changeup, 10 splitter; 0 unknown).
+    pub pitch_type: u8,
+    pub _pad2: [u8; 2],
     /// On contact, the projected distance (physics-spec §12): from home to where the batted
     /// ball would have come down to field level unobstructed, m; 0 without contact.
     pub projected_distance_m: f32,
@@ -379,6 +382,7 @@ pub unsafe extern "C" fn bb_timeline_info(blob: *const u8, len: usize, out: *mut
         info.exit_velocity_mps = t.exit_velocity_mps();
         info.launch_angle_rad = t.launch_angle_rad();
         info.projected_distance_m = t.projected_distance_m();
+        info.pitch_type = t.pitch_type().0;
     }
     let contact = tl.markers().and_then(|m| m.iter().find(|m| m.kind() == MarkerKind::Contact)).map(|m| m.t());
     info.contact_s = contact.unwrap_or(-1.0);
@@ -614,6 +618,28 @@ pub struct BbBoxScore {
     pub first_inning: u8,
     pub _pad: u8,
     pub teams: [BbBoxTeam; 2],
+    /// Pitcher lines filled in `pitchers[side]`, in the order they first pitched.
+    pub n_pitchers: [u8; 2],
+    pub _pad2: [u8; 2],
+    pub pitchers: [[BbPitchLine; BB_BOX_MAX_PITCHERS]; 2],
+}
+
+/// Most pitchers a side's [`BbBoxScore::pitchers`] holds.
+pub const BB_BOX_MAX_PITCHERS: usize = 8;
+
+/// One pitcher's line in the box score.
+#[repr(C)]
+#[derive(Clone, Copy)]
+pub struct BbPitchLine {
+    /// The id he fields under.
+    pub agent: u16,
+    pub number: u8,
+    pub _pad: u8,
+    /// Pitches thrown (capped at 65535).
+    pub pitches: u16,
+    pub _pad2: u16,
+    pub given: [u8; BB_NAME_LEN],
+    pub family: [u8; BB_NAME_LEN],
 }
 
 fn sat8(x: u32) -> u8 {
@@ -701,6 +727,19 @@ pub unsafe extern "C" fn bb_game_box_score(g: *const BbGame, through_plays: u32,
         for i in 0..t.n_batted as usize {
             t.runs[i] = sat8(runs[first + i]);
             t.hits[i] = sat8(hits.get(first + i).copied().unwrap_or(0));
+        }
+        let n = b.pitching[side].len().min(BB_BOX_MAX_PITCHERS);
+        box_.n_pitchers[side] = n as u8;
+        for (dst, l) in box_.pitchers[side].iter_mut().zip(&b.pitching[side][..n]) {
+            *dst = BbPitchLine {
+                agent: l.agent,
+                number: l.number,
+                _pad: 0,
+                pitches: sat16(l.pitches),
+                _pad2: 0,
+                given: name_field(l.name.strip_suffix(l.family.as_str()).unwrap_or(&l.name).trim_end()),
+                family: name_field(&l.family),
+            };
         }
     }
     unsafe { *out = box_ };
@@ -1249,6 +1288,61 @@ mod tests {
         assert_eq!(active_dives(&marks, 1.2)[0].dir, [1.0, 0.0]);
         assert!(active_dives(&marks, 4.0).is_empty());
     }
+    /// What a client shows of the pitcher (hud.md step 2): each timeline's pitch type is the
+    /// one the event log records as thrown, and the box score's pitch count for a side is
+    /// the number of timelines the client was handed with that side in the field, at any
+    /// point in the game, with the pitcher's name from the roster.
+    #[test]
+    fn pitch_type_and_pitch_count_agree_with_what_the_client_was_handed() {
+        let g = bb_game_create(5);
+        let (mut blob, mut len) = (std::ptr::null_mut(), 0usize);
+        let mut types = Vec::new();
+        let mut thrown = [0u32; 2];
+        while unsafe { bb_game_advance(g, &mut blob, &mut len) } == 1 {
+            let mut info = BbPlayInfo::default();
+            assert_eq!(unsafe { bb_timeline_info(blob, len, &mut info) }, 1);
+            unsafe { bb_blob_free(blob, len) };
+            types.push(info.pitch_type);
+            // The view is after the pitch; a pitch that ends a half shows the next half, so
+            // the fielding side is read from the log below, not from here.
+            let n = types.len() as u32;
+            if n % 37 == 0 || n < 3 {
+                let mut b: BbBoxScore = unsafe { std::mem::zeroed() };
+                assert_eq!(unsafe { bb_game_box_score(g, n, &mut b) }, 1);
+                let total: u32 = (0..2).map(|s| (0..b.n_pitchers[s] as usize).map(|i| b.pitchers[s][i].pitches as u32).sum::<u32>()).sum();
+                assert_eq!(total, n, "every pitch handed out is some pitcher's");
+            }
+        }
+        let game = unsafe { &*g }.game.as_ref().unwrap();
+        let bytes = game.log_through(u32::MAX);
+        let log = bb_schema::log::read(&bytes).unwrap();
+        let mut logged = Vec::new();
+        for play in &log.plays {
+            for e in play.events().into_iter().flatten() {
+                if let Some(p) = e.body_as_pitch_released() {
+                    logged.push(p.pitch_type().0);
+                    thrown[(p.pitcher() >> 8) as usize & 1] += 1;
+                }
+            }
+        }
+        assert_eq!(types, logged);
+        assert!(types.iter().all(|&t| (1..=10).contains(&t)), "every pitch has a type");
+        assert!(types.iter().collect::<std::collections::BTreeSet<_>>().len() >= 3, "a pitcher mixes his pitches");
+        let mut b: BbBoxScore = unsafe { std::mem::zeroed() };
+        assert_eq!(unsafe { bb_game_box_score(g, u32::MAX, &mut b) }, 1);
+        for side in 0..2 {
+            assert_eq!(b.n_pitchers[side], 1, "no substitutions yet");
+            let l = &b.pitchers[side][0];
+            assert_eq!(l.pitches as u32, thrown[side]);
+            assert_eq!(l.agent, ((side as u16) << 8) | 0x81);
+            let mut who: BbPlayer = unsafe { std::mem::zeroed() };
+            assert_eq!(unsafe { bb_game_player(g, l.agent, &mut who) }, 1);
+            assert_eq!((l.number, l.family), (who.number, who.family));
+            assert!(l.family[0] != 0);
+        }
+        unsafe { bb_game_free(g) };
+    }
+
     /// The box score across the ABI is `bb_stats::box_score` of the same log (a pure function
     /// of the log, computed when asked), however often it is asked, and it adds up: lines to
     /// totals, innings to the score, and the same numbers at the end as from the finished game.

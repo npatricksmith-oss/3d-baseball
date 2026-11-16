@@ -21,6 +21,16 @@ struct FBbBugInfo
 	int32 Strikes = 0;
 	/** Runners on base: bit 0 first, bit 1 second, bit 2 third. */
 	uint8 Bases = 0;
+	/** The two rows under the score (owner, 2026-11-16): the pitcher with the pitches he has
+	 *  thrown, and the batter with his game so far ("1-2, 2B, RBI"). Empty names: no rows. */
+	FString Pitcher;
+	int32 PitcherNumber = 0;
+	int32 Pitches = 0;
+	FString Batter;
+	int32 BatterNumber = 0;
+	/** "CF". */
+	FString BatterPosition;
+	FString BatterToday;
 };
 
 namespace BbHud

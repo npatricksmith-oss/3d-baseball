@@ -58,7 +58,10 @@ typedef struct {
    * until then, rules-spec 5.3), so dead_s is that landing time (the clip's end), after the
    * ball passed dead_at. Sampling the ball at dead_s gives its place in the seats, not dead_at. For a
    * home run, a ground-rule double and a throw over a wall the two coincide. */
-  float dead_s; float dead_at[3]; uint8_t dead_reason; uint8_t _pad2[3];
+  float dead_s; float dead_at[3]; uint8_t dead_reason;
+  /* The pitch thrown (bb.PitchType): 1 four-seam, 2 sinker, 3 cutter, 4 slider, 5 sweeper,
+   * 6 slurve, 7 curveball, 8 knuckle curve, 9 changeup, 10 splitter; 0 unknown. */
+  uint8_t pitch_type; uint8_t _pad2[2];
   /* On contact, the projected distance (physics-spec 12): from home to where the batted ball
    * would have come down to field level unobstructed, m; 0 without contact. */
   float projected_distance_m;
@@ -108,12 +111,21 @@ typedef struct {
   BbBatLine lines[BB_BOX_MAX_BATTERS];
   uint8_t runs[BB_BOX_MAX_INNINGS], hits[BB_BOX_MAX_INNINGS];
 } BbBoxTeam;
+/* A pitcher's line: pitches thrown, counted from the log. agent = the id he fields under. */
+#define BB_BOX_MAX_PITCHERS 8
+typedef struct {
+  uint16_t agent; uint8_t number, _pad; uint16_t pitches, _pad2;
+  char given[BB_NAME_LEN], family[BB_NAME_LEN];
+} BbPitchLine;
 typedef struct {
   uint8_t is_final;     /* 1 once the log holds the end of the game */
   uint8_t innings;      /* innings played or begun */
   uint8_t first_inning; /* inning number of runs[0]: 1 unless the game ran past BB_BOX_MAX_INNINGS */
   uint8_t _pad;
   BbBoxTeam teams[2];
+  uint8_t n_pitchers[2]; /* pitchers[side][0..n_pitchers[side]), in the order they first pitched */
+  uint8_t _pad2[2];
+  BbPitchLine pitchers[2][BB_BOX_MAX_PITCHERS];
 } BbBoxScore;
 int32_t bb_game_box_score(const BbGame *g, uint32_t through_plays, BbBoxScore *out);
 /* The park as the physics has it (bb_physics::ground::Field), for a client to draw. Read-only.

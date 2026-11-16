@@ -11,6 +11,8 @@ The owner's list of what he has seen and wants, with where each stands. The lett
 Screen:
 - [x] Reduce ball, bat and glove (owner: the ball only; leave the glove and bat as they are). *Done 2026-11-16: the ball was cut to its real size, 7.5 cm (it was 15). You still could not see it, nor a quarter larger, so it is now 11.7 cm, which you found fine. (A smallest size on screen was tried and taken out again: too big.) Still hard to see, so the grass and dirt are a little darker now, to set the white ball off.*
 - [x] Ball shadow should be half as big and 30% more blurred when hit. *Done 2026-11-16: half the size, and its edge now fades out over the outer 30% of it (before, the edge was hard). Not yet built or seen.*
+- [x] The score card should have the pitcher's and batter's names, the pitcher's total pitch count, and the batter's results in this game. *Done 2026-11-16: two rows under the score, the pitcher with his pitches ("42 P") and the batter with his game ("1-3, HR, 2 RBI"). The pitch's speed and type show under them once it reaches the plate.*
+- [x] Speed keys: 1 to 5 for 1x to 10x, minus slows down by 0.25x. *Done 2026-11-16: 1 to 5 give 1x, 2x, 4x, 6x and 10x (the middle steps are my pick; say if you want others); minus slows by 0.25x down to 0.25x, equals speeds up by 0.25x.*
 - [ ] Runners in the mini base map should be according to the real runners. *Today the map shows the bases as they were before the pitch until the play ends, then jumps to the result.*
 
 Fielding:

@@ -80,12 +80,27 @@ impl BatterLine {
     }
 }
 
+/// One pitcher's line: who he is (from the roster in the log's header) and the pitches he
+/// has thrown, counted from `PitchReleased` events.
+#[derive(Clone, Debug, Default, PartialEq, Eq)]
+pub struct PitcherLine {
+    /// The id he fields under (the event's `pitcher`).
+    pub agent: u16,
+    /// Full name, given name first; empty if the log's roster has no pitcher for his side.
+    pub name: String,
+    pub family: String,
+    pub number: u8,
+    pub pitches: u32,
+}
+
 #[derive(Clone, Debug, Default, PartialEq, Eq)]
 pub struct BoxScore {
     pub scorer_version: u16,
     pub teams: [TeamLine; 2],
     /// Each side's batters in batting order (away, home); empty if the log has no rosters.
     pub batting: [Vec<BatterLine>; 2],
+    /// Each side's pitchers in the order they first pitched (away, home).
+    pub pitching: [Vec<PitcherLine>; 2],
     pub linescore: [Vec<u32>; 2],
     /// Hits by inning, parallel to `linescore` (one entry per half-inning the side batted).
     pub hits_by_inning: [Vec<u32>; 2],
@@ -160,7 +175,29 @@ pub fn box_score_with_options(bytes: &[u8], options: scorer::ScorerOptions) -> R
                     half_ended = false;
                     stranded_batter = false;
                 }
-                EventBody::PitchReleased => b.teams[side].pitches_seen += 1,
+                EventBody::PitchReleased => {
+                    b.teams[side].pitches_seen += 1;
+                    // The fielding side's pitcher. Who he is comes from the roster: the man
+                    // listed at pitcher on his side (there are no substitutions yet).
+                    let pitcher = e.body_as_pitch_released().unwrap().pitcher();
+                    let fielding = 1 - side;
+                    let lines = &mut b.pitching[fielding];
+                    let at = match lines.iter().position(|l| l.agent == pitcher) {
+                        Some(i) => i,
+                        None => {
+                            let who = b.batting[fielding].iter().find(|l| l.position == 1);
+                            lines.push(PitcherLine {
+                                agent: pitcher,
+                                name: who.map(|l| l.name.clone()).unwrap_or_default(),
+                                family: who.map(|l| l.family.clone()).unwrap_or_default(),
+                                number: who.map_or(0, |l| l.number),
+                                pitches: 0,
+                            });
+                            lines.len() - 1
+                        }
+                    };
+                    lines[at].pitches += 1;
+                }
                 EventBody::RunScored => {
                     let runner = e.body_as_run_scored().unwrap().runner();
                     runners.remove(&runner);

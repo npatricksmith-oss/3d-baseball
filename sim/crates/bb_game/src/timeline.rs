@@ -366,6 +366,7 @@ pub fn encode(step: &PitchStep, st: &RulesState, rosters: &crate::roster::Roster
             exit_velocity_mps: ev_ as f32,
             launch_angle_rad: la as f32,
             spray_angle_rad: spray as f32,
+            pitch_type: bb_schema::PitchType(rec.ty as u8),
             ..Default::default()
         },
     );

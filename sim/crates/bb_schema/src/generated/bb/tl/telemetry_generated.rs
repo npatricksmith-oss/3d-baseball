@@ -35,6 +35,7 @@ impl<'a> Telemetry<'a> {
   pub const VT_PROJECTED_DISTANCE_M: ::flatbuffers::VOffsetT = 32;
   pub const VT_HANG_TIME_S: ::flatbuffers::VOffsetT = 34;
   pub const VT_APEX_M: ::flatbuffers::VOffsetT = 36;
+  pub const VT_PITCH_TYPE: ::flatbuffers::VOffsetT = 38;
 
   #[inline]
   pub unsafe fn init_from_table(table: ::flatbuffers::Table<'a>) -> Self {
@@ -63,6 +64,7 @@ impl<'a> Telemetry<'a> {
     if let Some(x) = args.spin_radps { builder.add_spin_radps(x); }
     builder.add_plate_speed_mps(args.plate_speed_mps);
     builder.add_release_speed_mps(args.release_speed_mps);
+    builder.add_pitch_type(args.pitch_type);
     builder.finish()
   }
 
@@ -186,6 +188,13 @@ impl<'a> Telemetry<'a> {
     // which contains a valid value in this slot
     unsafe { self._tab.get::<f32>(Telemetry::VT_APEX_M, Some(0.0)).unwrap()}
   }
+  #[inline]
+  pub fn pitch_type(&self) -> super::PitchType {
+    // Safety:
+    // Created from valid Table for this object
+    // which contains a valid value in this slot
+    unsafe { self._tab.get::<super::PitchType>(Telemetry::VT_PITCH_TYPE, Some(super::PitchType::Unknown)).unwrap()}
+  }
 }
 
 impl ::flatbuffers::Verifiable for Telemetry<'_> {
@@ -211,6 +220,7 @@ impl ::flatbuffers::Verifiable for Telemetry<'_> {
      .visit_field::<f32>("projected_distance_m", Self::VT_PROJECTED_DISTANCE_M, false)?
      .visit_field::<f32>("hang_time_s", Self::VT_HANG_TIME_S, false)?
      .visit_field::<f32>("apex_m", Self::VT_APEX_M, false)?
+     .visit_field::<super::PitchType>("pitch_type", Self::VT_PITCH_TYPE, false)?
      .finish();
     Ok(())
   }
@@ -233,6 +243,7 @@ pub struct TelemetryArgs<'a> {
     pub projected_distance_m: f32,
     pub hang_time_s: f32,
     pub apex_m: f32,
+    pub pitch_type: super::PitchType,
 }
 impl<'a> Default for TelemetryArgs<'a> {
   #[inline]
@@ -255,6 +266,7 @@ impl<'a> Default for TelemetryArgs<'a> {
       projected_distance_m: 0.0,
       hang_time_s: 0.0,
       apex_m: 0.0,
+      pitch_type: super::PitchType::Unknown,
     }
   }
 }
@@ -333,6 +345,10 @@ impl<'a: 'b, 'b, A: ::flatbuffers::Allocator + 'a> TelemetryBuilder<'a, 'b, A> {
     self.fbb_.push_slot::<f32>(Telemetry::VT_APEX_M, apex_m, 0.0);
   }
   #[inline]
+  pub fn add_pitch_type(&mut self, pitch_type: super::PitchType) {
+    self.fbb_.push_slot::<super::PitchType>(Telemetry::VT_PITCH_TYPE, pitch_type, super::PitchType::Unknown);
+  }
+  #[inline]
   pub fn new(_fbb: &'b mut ::flatbuffers::FlatBufferBuilder<'a, A>) -> TelemetryBuilder<'a, 'b, A> {
     let start = _fbb.start_table();
     TelemetryBuilder {
@@ -367,6 +383,7 @@ impl ::core::fmt::Debug for Telemetry<'_> {
       ds.field("projected_distance_m", &self.projected_distance_m());
       ds.field("hang_time_s", &self.hang_time_s());
       ds.field("apex_m", &self.apex_m());
+      ds.field("pitch_type", &self.pitch_type());
       ds.finish()
   }
 }
