@@ -18,8 +18,8 @@ public:
 	virtual void StartPlay() override;
 };
 
-/** The game graphics (docs/hud.md): the score bug, the caption and the cards, drawn by
- *  BbHud from what the director puts here; and the box score. */
+/** The game graphics (docs/hud.md): the score bug, the caption, the cards and the box
+ *  score, drawn by BbHud from what the director puts here. */
 UCLASS()
 class ABbHUD : public AHUD
 {
@@ -54,6 +54,10 @@ public:
 	int32 CardRuns[2] = { 0, 0 };
 	/** 0 hidden, 1 fully shown. */
 	float CardAlpha = 0.f;
+	/** The line score on that card: the sim's box score through the pitches shown (the same
+	 *  one the scoreboard in the park reads). Without it the card shows the runs alone. */
+	BbBoxScore LineBox{};
+	bool bLineBox = false;
 	/** A home run (A16): the batter's family name, "412 ft   108 mph", and what it scored
 	 *  ("Two-run home run"), as a card low on the screen while he circles the bases. */
 	FString HomeRunName;
@@ -63,9 +67,9 @@ public:
 	int32 HomeRunSide = 0;
 	/** 0 hidden, 1 fully shown. */
 	float HomeRunAlpha = 0.f;
-	/** The box score (A12): a newspaper box over the field. Held with Tab during a game, over
-	 *  a dimmed field with what has happened so far; at the end of the game it fades in over
-	 *  black and stays until the player quits. */
+	/** The box score (A12; hud.md step 4): a full-screen panel in the HUD's look. Held with Tab
+	 *  during a game, over a dimmed field with what has happened so far; at the end of the game
+	 *  it fades in over black and stays until the player quits. */
 	BbBoxScore Box{};
 	/** Box holds a score read from the sim. */
 	bool bBoxData = false;
@@ -74,13 +78,9 @@ public:
 	FString BoxSubtitle;
 	/** 0 hidden, 1 fully shown. */
 	float BoxAlpha = 0.f;
-	/** How dark the field is behind the paper (Tab dims it; the final box sits on black). */
+	/** How dark the field is behind the panel (Tab dims it; the final box sits on black). */
 	float BoxDim = 0.f;
 	/** -BbHudHold: every panel stays up (made-up words where the game has none yet) so a still
 	 *  catches them all (hud.md §4). */
 	bool bHold = false;
-
-private:
-	/** Draws the box score on the paper rectangle; S is the screen's scale (height / 720). */
-	void DrawBox(float S);
 };

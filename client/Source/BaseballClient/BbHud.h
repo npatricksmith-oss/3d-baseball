@@ -4,6 +4,7 @@
 #pragma once
 
 #include "CoreMinimal.h"
+#include "bb_ffi.h"
 
 class ABbHUD;
 
@@ -69,6 +70,11 @@ namespace BbHud
 	void DrawHomeRun(ABbHUD& Hud, float S, const FString& Name, const FString& Line, const FString& Kind, int32 Side, float Alpha, float Lift = 0.f);
 	/** The strike-zone box at the top right. */
 	void DrawZone(ABbHUD& Hud, float S, const FBbZoneInfo& Zone);
-	/** Between innings, on the black: "Middle of the 3rd" and the two clubs' runs. */
-	void DrawInningCard(ABbHUD& Hud, float S, const FString& Title, const int32 Runs[2], float Alpha);
+	/** Between innings, on the black: "Middle of the 3rd" over the line score (an inning to a
+	 *  column, then runs and hits), read from the sim's box score. Without a box score (Box
+	 *  null) it shows the two clubs' runs alone. */
+	void DrawInningCard(ABbHUD& Hud, float S, const FString& Title, const int32 Runs[2], const BbBoxScore* Box, float Alpha);
+	/** The box score, full screen (step 4): the score in words, the line score, each club's
+	 *  batting lines and the notes under them. Dim is how dark the field behind it goes. */
+	void DrawBoxScore(ABbHUD& Hud, float S, const BbBoxScore& Box, const FString& Title, const FString& Subtitle, float Alpha, float Dim);
 }

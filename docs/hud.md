@@ -1,6 +1,6 @@
 # HUD: game graphics
 
-**Status:** plan agreed with the owner 2026-11-15 (three questions, Q22–Q24, all as recommended; §1). **Steps 1 to 3 built 2026-11-16** (twenty-fourth lead session; §5). Third part of the graphics stage, after [the park](park-visuals.md) and [the players](player-visuals.md).
+**Status:** plan agreed with the owner 2026-11-15 (three questions, Q22–Q24, all as recommended; §1). **All four steps built 2026-11-16** (§5); the HUD plan is complete. Third part of the graphics stage, after [the park](park-visuals.md) and [the players](player-visuals.md).
 
 **Where it starts.** `ABbHUD::DrawHUD` (`BbGameMode.cpp`) draws a dark strip with one line of score text, one line about the last pitch, a three-square runners diamond, a footer of keys, the between-innings card and the home-run card. All of it is the engine's large font on the canvas.
 
@@ -58,3 +58,12 @@ Carried over from the park plan: the lead builds alone in short sessions, shows 
 - **Read from the sim:** the crossing point, the zone and the call, from the timeline's telemetry (`Telemetry.zone_bottom_m`, `zone_top_m`, `zone_half_width_m`, `plate_crossed`, `pitch_call`, beside the `plate_x_m`/`plate_z_m` that were there) into `BbPlayInfo` (appended; the struct grew). The zone is carried on `PitchRecord.zone`. The at-bat's earlier pitches come from the client's play history, so a replay shows the at-bat as it stood. Digests unchanged; test `a_taken_pitch_is_called_by_where_it_crossed_the_exported_zone` (bb_ffi) checks every taken pitch's call against the ball touching the exported zone.
 - Pictures: `client/Saved/Shots/hud3_after/` (untracked).
 - **For the owner to overrule if he likes:** the pitcher's-side view (the umpire's view flips it), the colours, the box on by default.
+
+**Step 4, the line score and the box score (2026-11-16).** The last step.
+- **Between innings,** the card on the black is now the line score: "MIDDLE OF THE 3RD" over a row per club, an inning to a column (nine at least, more and narrower in extra innings), then runs and hits. An inning not batted yet is empty. It reads the same box score as the scoreboard in the park (`ABbHUD::LineBox`, copied when the director refreshes the board once a pitch), so the two agree. If the sim hands over no box score the card falls back to the two clubs' runs.
+- **The box score** (Tab during the game, and at the end over black) is in the HUD's look instead of the newspaper page: the score in words with the clubs' nicknames, the winner first at the end ("LARKS 3, COLLIERS 0", "FINAL - 11 INNINGS"); the same line score; each club's batting lines under its full name and colour, with the men left on; under each table the doubles, triples, home runs, sacrifice flies and hit batters, and the club's pitchers with the pitches each threw.
+- **Moved:** the box is drawn by `BbHud::DrawBoxScore` (it was `ABbHUD::DrawBox` in `BbGameMode.cpp`); the game mode's HUD now only places panels. Client only: no sim change, no ledger row.
+- **Checks:** `-BbBoxShots=<n>` photographs the Tab box at pitch n and the final box (`box_midgame.png`, `box_final.png`); `-BbHudHold` shows the card.
+- Pictures: `client/Saved/Shots/hud4_after/` (untracked).
+- **Not shown, because the sim does not export them:** errors in the line score (R and H only), and the pitchers' innings, hits, runs and strikeouts (pitches only). Both would be read-only exports from the event log.
+- **For the owner to overrule if he likes:** the dark panel in place of the newspaper page; nicknames in the title and the line score.

@@ -3605,6 +3605,9 @@ void ABbDirector::Tick(float DeltaSeconds)
 				{
 					bBoardValid = Sim->BoxScore(Through, BoardBox);
 					BoardThrough = Through;
+					// The between-innings card shows this line score too (hud.md step 4).
+					Hud->LineBox = BoardBox;
+					Hud->bLineBox = bBoardValid;
 				}
 				// The pitcher and the batter under the score (owner, 2026-11-16): names and
 				// numbers from the roster, the pitch count and the batter's game from the box
@@ -3930,16 +3933,16 @@ void ABbDirector::RefreshBox(uint32 Through)
 
 void ABbDirector::BoxTitles(FString& Title, FString& Subtitle) const
 {
-	const int32 Away = Box.teams[0].totals.r;
-	const int32 Home = Box.teams[1].totals.r;
+	// The clubs by nickname, as on the bug; at the end the winner comes first.
+	const int32 Runs[2] = { Box.teams[0].totals.r, Box.teams[1].totals.r };
+	const int32 First = Box.is_final && Runs[1] > Runs[0] ? 1 : 0;
+	Title = FString::Printf(TEXT("%s %d, %s %d"), BbLook::Clubs[First].Name, Runs[First], BbLook::Clubs[1 - First].Name, Runs[1 - First]);
 	if (Box.is_final)
 	{
-		Title = Away > Home ? FString::Printf(TEXT("AWAY %d, HOME %d"), Away, Home) : FString::Printf(TEXT("HOME %d, AWAY %d"), Home, Away);
 		Subtitle = Box.innings == 9 ? FString(TEXT("FINAL")) : FString::Printf(TEXT("FINAL  -  %d INNINGS"), Box.innings);
 	}
 	else
 	{
-		Title = FString::Printf(TEXT("AWAY %d, HOME %d"), Away, Home);
 		Subtitle = TEXT("GAME IN PROGRESS");
 	}
 }

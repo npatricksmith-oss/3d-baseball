@@ -217,22 +217,223 @@ void BbHud::DrawHomeRun(ABbHUD& Hud, float S, const FString& Name, const FString
 	Hud.DrawText(Line, Faded(BbLook::HudDim, Alpha), CX - W2 * 0.5f, Y, Font(), 1.5f * S);
 }
 
-void BbHud::DrawInningCard(ABbHUD& Hud, float S, const FString& Title, const int32 Runs[2], float Alpha)
+namespace
 {
-	// Two club rows under a title, centred on the black.
-	const float NameWide = 330.f, ScoreWide = 64.f, Row = 48.f, TitleH = 50.f;
+	// The line score's layout (reference units): the club, an inning to a column, runs, hits.
+	constexpr float LineNameW = 150.f, LineRHW = 46.f, LineGap = 12.f, LineHeadH = 26.f;
+
+	/** At least nine columns, as on a scoreboard; more once the game runs long. */
+	int32 LineCols(const BbBoxScore& Box)
+	{
+		return FMath::Max<int32>(9, FMath::Max<int32>(Box.teams[0].n_batted, Box.teams[1].n_batted));
+	}
+
+	float LineColW(int32 Cols) { return Cols > 12 ? 27.f : 36.f; }
+
+	float LineScoreW(const BbBoxScore& Box)
+	{
+		const int32 Cols = LineCols(Box);
+		return ChipW + LineNameW + Cols * LineColW(Cols) + LineGap + 2.f * LineRHW;
+	}
+
+	/** The line score with its left edge at X and its top at Top (reference units): a row of
+	 *  headings, then a row per club RowTall high. Returns its bottom edge. */
+	float LineScore(ABbHUD& Hud, float S, float X, float Top, const BbBoxScore& Box, float RowTall, float Alpha)
+	{
+		const int32 Cols = LineCols(Box);
+		const float ColW = LineColW(Cols);
+		const float W = LineScoreW(Box);
+		const float CellsX = X + ChipW + LineNameW;
+		const float RX = CellsX + Cols * ColW + LineGap;
+		const FLinearColor Text = Faded(BbLook::HudText, Alpha), Dim = Faded(BbLook::HudDim, Alpha);
+		const float HeadMid = (Top + LineHeadH * 0.5f) * S;
+		for (int32 C = 0; C < Cols; ++C)
+		{
+			TextCentre(Hud, FString::FromInt(Box.first_inning + C), (CellsX + (C + 0.5f) * ColW) * S, HeadMid, Dim, 0.85f * S);
+		}
+		TextCentre(Hud, TEXT("R"), (RX + LineRHW * 0.5f) * S, HeadMid, Text, 0.9f * S);
+		TextCentre(Hud, TEXT("H"), (RX + LineRHW * 1.5f) * S, HeadMid, Dim, 0.9f * S);
+		for (int32 Side = 0; Side < 2; ++Side)
+		{
+			const BbBoxTeam& T = Box.teams[Side];
+			const float Y = Top + LineHeadH + Side * RowTall;
+			const float Mid = (Y + RowTall * 0.5f) * S;
+			Hud.DrawRect(Faded(BbLook::HudClub[Side], Alpha), X * S, Y * S, ChipW * S, RowTall * S);
+			Hud.DrawRect(Faded(BbLook::HudPanelLight, Alpha), RX * S, Y * S, LineRHW * S, RowTall * S);
+			TextMid(Hud, BbLook::Clubs[Side].Name, (X + ChipW + 10.f) * S, Mid, Text, 1.1f * S);
+			for (int32 C = 0; C < Cols; ++C)
+			{
+				// An inning not batted yet is left empty; "x" for the home half of the last
+				// inning that the home side did not need.
+				FString Cell;
+				if (C < T.n_batted)
+				{
+					Cell = FString::FromInt(T.runs[C]);
+				}
+				else if (Side == 1 && Box.is_final && C == Box.innings - Box.first_inning)
+				{
+					Cell = TEXT("x");
+				}
+				TextCentre(Hud, Cell, (CellsX + (C + 0.5f) * ColW) * S, Mid, C < T.n_batted && T.runs[C] > 0 ? Text : Dim, 1.05f * S);
+			}
+			TextCentre(Hud, FString::FromInt(T.totals.r), (RX + LineRHW * 0.5f) * S, Mid, Text, 1.3f * S);
+			TextCentre(Hud, FString::FromInt(T.totals.h), (RX + LineRHW * 1.5f) * S, Mid, Dim, 1.1f * S);
+		}
+		// A hair under the headings and between the clubs.
+		Hud.DrawRect(Faded(BbLook::HudOff, Alpha), X * S, (Top + LineHeadH - 1.f) * S, W * S, 1.f * S);
+		Hud.DrawRect(Faded(BbLook::HudPanel, Alpha), X * S, (Top + LineHeadH + RowTall - 1.f) * S, W * S, 2.f * S);
+		return Top + LineHeadH + 2.f * RowTall;
+	}
+
+	const TCHAR* PositionCode(int32 Pos)
+	{
+		static const TCHAR* Codes[] = { TEXT(""), TEXT("P"), TEXT("C"), TEXT("1B"), TEXT("2B"), TEXT("3B"), TEXT("SS"), TEXT("LF"), TEXT("CF"), TEXT("RF") };
+		return Pos >= 1 && Pos <= 9 ? Codes[Pos] : TEXT("");
+	}
+
+	/** "Davis 2, Hayes" for the batters with a count in Pick; empty if none. */
+	template <typename F>
+	FString NoteList(const BbBoxTeam& T, F Pick)
+	{
+		FString Out;
+		for (uint32 I = 0; I < T.n_lines; ++I)
+		{
+			const int32 N = Pick(T.lines[I]);
+			if (N > 0)
+			{
+				Out += FString::Printf(TEXT("%s%s%s"), Out.IsEmpty() ? TEXT("") : TEXT(", "), UTF8_TO_TCHAR(T.lines[I].family), N > 1 ? *FString::Printf(TEXT(" %d"), N) : TEXT(""));
+			}
+		}
+		return Out;
+	}
+}
+
+void BbHud::DrawInningCard(ABbHUD& Hud, float S, const FString& Title, const int32 Runs[2], const BbBoxScore* Box, float Alpha)
+{
+	const float TitleH = 50.f;
+	const float CX = Hud.GetCanvas()->ClipX * 0.5f;
+	if (Box)
+	{
+		// The line score under the title, centred on the black.
+		const float Row = 44.f, Pad = 14.f;
+		const float W = LineScoreW(*Box) + 2.f * Pad;
+		const float H = TitleH + LineHeadH + 2.f * Row + Pad;
+		const float Top = CentredPanel(Hud, S, W, H, 360.f + H * 0.5f, BbLook::HudGold, Alpha);
+		TextCentre(Hud, Title.ToUpper(), CX, (Top + 4.f + (TitleH - 4.f) * 0.5f) * S, Faded(BbLook::HudText, Alpha), 1.5f * S);
+		LineScore(Hud, S, CX / S - W * 0.5f + Pad, Top + TitleH, *Box, Row, Alpha);
+		return;
+	}
+	// Two club rows under a title.
+	const float NameWide = 330.f, ScoreWide = 64.f, Row = 48.f;
 	const float W = ChipW + NameWide + ScoreWide;
 	const float H = TitleH + 2.f * Row;
 	const float Bottom = 360.f + H * 0.5f;
 	const float Top = CentredPanel(Hud, S, W, H, Bottom, BbLook::HudGold, Alpha);
-	const float X = Hud.GetCanvas()->ClipX * 0.5f - W * 0.5f * S;
-	TextCentre(Hud, Title.ToUpper(), Hud.GetCanvas()->ClipX * 0.5f, (Top + 4.f + (TitleH - 4.f) * 0.5f) * S, Faded(BbLook::HudText, Alpha), 1.5f * S);
+	const float X = CX - W * 0.5f * S;
+	TextCentre(Hud, Title.ToUpper(), CX, (Top + 4.f + (TitleH - 4.f) * 0.5f) * S, Faded(BbLook::HudText, Alpha), 1.5f * S);
 	for (int32 Side = 0; Side < 2; ++Side)
 	{
 		const FString Name = FString::Printf(TEXT("%s %s"), BbLook::Clubs[Side].Place, BbLook::Clubs[Side].Name);
 		ClubRow(Hud, S, X, (Top + TitleH + Side * Row) * S, NameWide, ScoreWide, Row, Side, *Name, Runs[Side], 1.35f, 1.9f, Alpha);
 	}
 	Hud.DrawRect(Faded(BbLook::HudPanel, Alpha), X, (Top + TitleH + Row - 1.f) * S, W * S, 2.f * S);
+}
+
+void BbHud::DrawBoxScore(ABbHUD& Hud, float S, const BbBoxScore& Box, const FString& Title, const FString& Subtitle, float Alpha, float Dim)
+{
+	const float ClipW = Hud.GetCanvas()->ClipX, ClipH = Hud.GetCanvas()->ClipY;
+	const FLinearColor Text = Faded(BbLook::HudText, Alpha), Quiet = Faded(BbLook::HudDim, Alpha);
+	const FLinearColor Gold = Faded(BbLook::HudGold, Alpha), Hair = Faded(BbLook::HudOff, Alpha);
+	// The field behind the panel. The layout is drawn for 1280 x 720.
+	Hud.DrawRect(FLinearColor(0.f, 0.f, 0.f, Dim * Alpha), 0.f, 0.f, ClipW, ClipH);
+	const float RefW = ClipW / S;
+	const float PX = FMath::Max(20.f, (RefW - 1220.f) * 0.5f);
+	const float PW = RefW - 2.f * PX;
+	Hud.DrawRect(Faded(BbLook::HudPanel, Alpha), PX * S, 18.f * S, PW * S, 684.f * S);
+	Hud.DrawRect(Gold, PX * S, 18.f * S, PW * S, 4.f * S);
+
+	// The score in words, and whether the game is over.
+	TextCentre(Hud, Title, ClipW * 0.5f, 56.f * S, Text, 2.1f * S);
+	TextCentre(Hud, Subtitle, ClipW * 0.5f, 92.f * S, Gold, 1.05f * S);
+
+	// The line score.
+	const float LineRow = 30.f;
+	const float LineBottom = LineScore(Hud, S, (RefW - LineScoreW(Box)) * 0.5f, 110.f, Box, LineRow, Alpha);
+
+	// The batting lines, one table a side, the visitors on the left.
+	const float TableY = LineBottom + 16.f;
+	const float TableW = FMath::Min(580.f, (PW - 48.f) * 0.5f);
+	const float StatW = 50.f, PosW = 46.f, RowTall = 27.f, HeadH = 30.f;
+	const float StatsX = TableW - 6.f * StatW;
+	static const TCHAR* Heads[6] = { TEXT("AB"), TEXT("R"), TEXT("H"), TEXT("RBI"), TEXT("BB"), TEXT("K") };
+	for (int32 Side = 0; Side < 2; ++Side)
+	{
+		const BbBoxTeam& T = Box.teams[Side];
+		const float TX = Side == 0 ? PX + 24.f : PX + PW - 24.f - TableW;
+		auto Stat = [&](int32 K, const FString& Str, float Mid, const FLinearColor& Col)
+		{
+			TextRight(Hud, Str, (TX + StatsX + (K + 1) * StatW - 8.f) * S, Mid * S, Col, 1.f * S);
+		};
+		// The club in its colour, and the men it left on.
+		Hud.DrawRect(Faded(BbLook::HudPanelLight, Alpha), TX * S, TableY * S, TableW * S, HeadH * S);
+		Hud.DrawRect(Faded(BbLook::HudClub[Side], Alpha), TX * S, TableY * S, ChipW * S, HeadH * S);
+		const float HeadMid = TableY + HeadH * 0.5f;
+		TextMid(Hud, FString::Printf(TEXT("%s %s"), BbLook::Clubs[Side].Place, BbLook::Clubs[Side].Name), (TX + ChipW + 10.f) * S, HeadMid * S, Text, 1.1f * S);
+		TextRight(Hud, FString::Printf(TEXT("LOB %d"), T.totals.lob), (TX + TableW - 8.f) * S, HeadMid * S, Quiet, 0.9f * S);
+		const float ColsMid = TableY + HeadH + RowTall * 0.5f;
+		for (int32 K = 0; K < 6; ++K)
+		{
+			Stat(K, Heads[K], ColsMid, Quiet);
+		}
+		const float RowTop = TableY + HeadH + RowTall;
+		Hud.DrawRect(Hair, TX * S, (RowTop - 2.f) * S, TableW * S, 1.f * S);
+		for (uint32 I = 0; I < T.n_lines; ++I)
+		{
+			const BbBatLine& L = T.lines[I];
+			const float Mid = RowTop + (I + 0.5f) * RowTall;
+			TextMid(Hud, PositionCode(L.position), (TX + ChipW + 2.f) * S, Mid * S, Quiet, 0.9f * S);
+			TextMid(Hud, UTF8_TO_TCHAR(L.family), (TX + ChipW + 2.f + PosW) * S, Mid * S, Text, 1.f * S);
+			const int32 Vals[6] = { L.ab, L.r, L.h, L.rbi, L.bb, L.k };
+			for (int32 K = 0; K < 6; ++K)
+			{
+				// A hit or a run batted in is what the eye looks for; a zero is quieter.
+				Stat(K, FString::FromInt(Vals[K]), Mid, Vals[K] > 0 ? Text : Quiet);
+			}
+		}
+		const float TotTop = RowTop + T.n_lines * RowTall + 2.f;
+		Hud.DrawRect(Hair, TX * S, (TotTop - 2.f) * S, TableW * S, 1.f * S);
+		const float TotMid = TotTop + RowTall * 0.5f;
+		TextMid(Hud, TEXT("Totals"), (TX + ChipW + 2.f + PosW) * S, TotMid * S, Text, 1.f * S);
+		const int32 Tot[6] = { T.totals.ab, T.totals.r, T.totals.h, T.totals.rbi, T.totals.bb, T.totals.k };
+		for (int32 K = 0; K < 6; ++K)
+		{
+			Stat(K, FString::FromInt(Tot[K]), TotMid, Text);
+		}
+		// Under the table: the extra-base hits, sacrifice flies and hit batters, then the
+		// club's pitchers with the pitches each threw.
+		float NY = TotTop + RowTall + 16.f;
+		auto Note = [&](const TCHAR* Label, const FString& Names)
+		{
+			if (!Names.IsEmpty())
+			{
+				TextMid(Hud, Label, (TX + ChipW + 2.f) * S, NY * S, Gold, 0.82f * S);
+				TextMid(Hud, Names, (TX + ChipW + 2.f + PosW) * S, NY * S, Text, 0.82f * S);
+				NY += 21.f;
+			}
+		};
+		Note(TEXT("2B"), NoteList(T, [](const BbBatLine& L) { return (int32)L.doubles; }));
+		Note(TEXT("3B"), NoteList(T, [](const BbBatLine& L) { return (int32)L.triples; }));
+		Note(TEXT("HR"), NoteList(T, [](const BbBatLine& L) { return (int32)L.hr; }));
+		Note(TEXT("SF"), NoteList(T, [](const BbBatLine& L) { return (int32)L.sf; }));
+		Note(TEXT("HBP"), NoteList(T, [](const BbBatLine& L) { return (int32)L.hbp; }));
+		FString Arms;
+		for (int32 I = 0; I < Box.n_pitchers[Side]; ++I)
+		{
+			const BbPitchLine& P = Box.pitchers[Side][I];
+			Arms += FString::Printf(TEXT("%s%s %d pitches"), I > 0 ? TEXT(", ") : TEXT(""), UTF8_TO_TCHAR(P.family), (int32)P.pitches);
+		}
+		Note(TEXT("P"), Arms);
+	}
 }
 
 namespace
