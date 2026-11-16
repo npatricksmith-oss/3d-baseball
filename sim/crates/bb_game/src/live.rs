@@ -3759,12 +3759,18 @@ impl<'a> Sim<'a> {
         self.assign();
     }
 
-    /// Emit ground, wall, fence, and settle facts as the free ball reaches them.
+    /// Emit ground, wall, fence, settle and passed-the-base facts as the free ball reaches them.
     fn ball_facts(&mut self) {
         let t = self.t;
         let floor = self.last_fact_t;
         let mut facts = Vec::new();
+        let pending = matches!(&self.st.play, bb_rules::PlayState::Live(lp) if lp.fair == bb_rules::FairFoul::Pending);
         if let Ball::Free { path, next_touch, next_wall, settled_sent } = &mut self.ball {
+            if pending {
+                if let Some(f) = passed_base(path, (t - DT).max(floor), t.min(path.t_end()), self.inp.env.ball.radius) {
+                    facts.push(f);
+                }
+            }
             while *next_touch < path.bounces.len() && path.bounces[*next_touch].0 <= t {
                 let (tb, x, y) = path.bounces[*next_touch];
                 facts.push(Input::BallTouched { t: tb.max(floor), what: Touch::Ground { x, y } });
@@ -5064,6 +5070,50 @@ impl<'a> Sim<'a> {
 
 /// Simulate one live-ball play, stepping the rules engine as facts occur. The caller has
 /// already sent `PitchDelivered` and `BatContact`.
+/// The `BallPassedBase` fact (rules-spec §2, §5.2) for a batted ball that has touched the
+/// ground and, between `t0` and `t1`, passes first or third base: its center crosses the line
+/// through the bag square to that foul line, on the bag's side of the field. Fair or foul is
+/// judged where it crosses: by the contact point if it is rolling, by any part of the ball if
+/// it is in the air on a bound (OBR "Fair Ball", "Foul Ball": "bounds past first or third base
+/// on or over fair/foul territory"). Before this the sim judged such a ball only where it came
+/// to rest, so a roller past third in foul ground stayed live until it stopped.
+fn passed_base(path: &BallPath, t0: f64, t1: f64, r_ball: f64) -> Option<Input> {
+    let Some(&(t_bounce, _, _)) = path.bounces.first() else { return None };
+    let t0 = t0.max(t_bounce);
+    if t1 <= t0 {
+        return None;
+    }
+    // Distance past each bag along its own foul line, counted only on that bag's side.
+    let past = |t: f64, side: f64| {
+        let p = path.at(t).0;
+        if p.x * side < 0.0 {
+            return f64::NEG_INFINITY;
+        }
+        (p.y + side * p.x) / core::f64::consts::SQRT_2 - BASE_L
+    };
+    for side in [1.0, -1.0] {
+        if past(t0, side) >= 0.0 || past(t1, side) < 0.0 {
+            continue;
+        }
+        // Bisect for the crossing (within a tick the ball's speed barely changes).
+        let (mut a, mut b) = (t0, t1);
+        for _ in 0..40 {
+            let m = 0.5 * (a + b);
+            if past(m, side) >= 0.0 {
+                b = m;
+            } else {
+                a = m;
+            }
+        }
+        let p = path.at(b).0;
+        let line = (p.y - p.x.abs()) / core::f64::consts::SQRT_2;
+        let airborne = p.z > r_ball + 0.01;
+        let fair = if airborne { line >= -r_ball } else { line >= 0.0 };
+        return Some(Input::BallPassedBase { t: b, fair });
+    }
+    None
+}
+
 pub fn simulate_live(inp: &LiveInput, st: &mut RulesState) -> LiveOutput {
     if !prof::enabled() {
         return simulate_live_inner(inp, st);
@@ -5537,6 +5587,40 @@ mod tests {
         step(&mut st, &Input::BatContact { t: 0.4 });
         assert!(matches!(st.play, PlayState::Live(_)));
         Fixture { env: FlightEnv::default_env(), field: Field::default(), st }
+    }
+
+    // Owner's play, seed 3647 play 15: a bouncer that rolled past third in foul ground stayed
+    // live until it stopped 40 m on, 5.3 s after contact, and only then was called foul. The
+    // rules call it as it passes the bag (rules-spec §5.2, OBR "Foul Ball"). Three bouncers off
+    // the plate along the third-base side, judged by the line they pass the bag on: foul,
+    // fair, and one that never comes near the bag. Expectations from the geometry: the bag is
+    // 27.432 m down the line, and a ball on the ray at angle θ from the line is foul when θ
+    // points outside it.
+    #[test]
+    fn a_ball_rolling_past_third_is_judged_as_it_passes_the_bag() {
+        let fx = fixture(&[]);
+        let judge = |dir_deg: f64, speed: f64| {
+            // Heading measured from +Y toward −X (third-base side); the line is at 45°.
+            let h = dir_deg.to_radians();
+            let d = Vec3::new(-h.sin(), h.cos(), 0.0);
+            let ball = BallState { r: Vec3::new(0.0, 0.6, 0.6), v: d * speed + Vec3::new(0.0, 0.0, -4.0), w: Vec3::ZERO };
+            let path = batted_path(&fx.env, &fx.field, ball, 0.4, |_, _| (0.0, 0.0));
+            let mut t = 0.4;
+            while t < path.t_end() {
+                if let Some(f) = passed_base(&path, t, (t + DT).min(path.t_end()), fx.env.ball.radius) {
+                    let Input::BallPassedBase { t: tp, fair } = f else { unreachable!() };
+                    let p = path.at(tp).0;
+                    let along = (p.y - p.x) / core::f64::consts::SQRT_2;
+                    assert!((along - BASE_L).abs() < 1e-6, "crossing {along} m down the line, not at the bag");
+                    return Some(fair);
+                }
+                t += DT;
+            }
+            None
+        };
+        assert_eq!(judge(48.0, 30.0), Some(false), "3° outside the third-base line");
+        assert_eq!(judge(42.0, 30.0), Some(true), "3° inside it");
+        assert_eq!(judge(42.0, 3.0), None, "a dribbler that stops short of the bag");
     }
 
     /// A fly ball to center; perfect hands, so glove noise decides nothing in these tests.

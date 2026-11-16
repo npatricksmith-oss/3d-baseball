@@ -328,9 +328,13 @@ pub fn encode(step: &PitchStep, st: &RulesState, rosters: &crate::roster::Roster
     }
     // The ball left the playing field (rules-spec §5.8): when it was dead, the point where it
     // crossed the boundary, and why in `base` (the event log's `DeadBallReason`: 1 out of play, a
-    // foul or a throw; 2 home run; 3 ground-rule double), so a client can cut back to the field.
+    // throw; 2 home run; 3 ground-rule double; and, for presentation only, 4 a foul ball out of
+    // play, which the log records as 1), so a client can cut back to the field, or after a foul
+    // straight to the next pitch (owner's play, seed 3647 play 62).
+    let foul = step.rules_events.iter().any(|e| matches!(e, bb_rules::Event::FairFoulDecided { fair: false }));
     let reason = step.rules_events.iter().find_map(|e| match e {
         bb_rules::Event::BallDead { reason } => Some(match reason {
+            bb_rules::DeadBall::OutOfPlay if foul => 4u8,
             bb_rules::DeadBall::OutOfPlay => 1u8,
             bb_rules::DeadBall::HomeRun => 2,
             bb_rules::DeadBall::GroundRuleDouble => 3,

@@ -29,6 +29,8 @@ Numbers are only comparable within one seed set and game count. The standard set
 
 ## 1. Where the numbers stand
 
+*Update 2026-11-16: the fair/foul-at-the-bag fix (official rules) stands at runs 4.13 [4.24], GB/LD/FB/PU hits .310/.668/.127/.010 [.316/.664/.112/.010], HR/PA 2.92% [2.78%]; its row is the newest in §3.*
+
 *Update 2026-11-15, later: the runner acceleration refit (Q1) stands at runs 3.85 [3.99], GB/LD/FB/PU hits .310/.667/.116/.011 [.310/.650/.113/.009], HR/PA 2.72% [2.75%]; its row is the newest in §3.*
 
 *Update 2026-11-15: **merged into main on the owner's Q7** (collision, outfield read, wall braking, then the tracking read on top). Main now stands at the tracking-read row after its review fixes: runs 3.83 [4.23], GB/LD/FB/PU hits .300/.666/.120/.014 [.316/.657/.112/.008], routine flies caught .965. The table below is the step before the tracking read (`integrate/held`, [note](calibration/2026-11-15-integration-of-the-held-branches.md)). Seeds 0–299 [1000–1299]; real MLB in the last column:*
@@ -161,6 +163,12 @@ The "5.48" at the top of the last block is a coincidence of two samples: the div
 ## 3. The rows
 
 Hit rates are per ball in play of that type. "Seed 5" and "seed 2" mean `sim-cli games --seed` with 1,024 games unless a row says otherwise.
+
+### 2026-11-16 (300 games, seeds 0–299 and 1000–1299)
+
+| Task | Commit | What changed | Numbers (before → after) | Cause | Open |
+|---|---|---|---|---|---|
+| **A ball is called fair or foul as it passes first or third** (official rules: OBR "Foul Ball", rules-spec §5.2; owner's saved plays seed 3647 plays 15 and 20) | this commit, on main `7bbf734` | `live.rs` now sends the rules the `BallPassedBase` fact the spec always had: a batted ball that has touched the ground and crosses the line through first or third base square to its foul line, on that bag's side, judged by its contact point if rolling and by any part of it on a bound. Before, a pending ball was judged only where it touched beyond the bag or came to rest, so a roller past third in foul ground stayed live to the end (play 15: called at 5.34 s, now 1.53 s), and one that went past the bag foul and curled back fair was fair. Also, presentation only: the caption says "Foul" when the rules ruled foul after the pitch's landing guess said in play (play 20), and the timeline marks a foul into the seats as dead-ball kind 4 so the client goes straight to the next pitch (play 62). Every digest changed | Before = the runner-decision row's after (main's sim since then is digest-identical: its review fixes and `stance_pose`), seeds 0–299 [1000–1299]: runs 4.11 → 4.13 [4.19 → 4.24]; K% 22.1 → 22.0 [22.1 → 22.0]; BB% 8.2 → 8.1 [8.4 → 8.4]; HR/PA 2.86% → 2.92% [2.72% → 2.78%]; reached on BIP 35.1% → 35.3% [35.1% → 35.4%]; GB .308 → .310 [.312 → .316]; LD .668 → .668 [.663 → .664]; FB .125 → .127 [.111 → .112]; PU .010 → .010 [.011 → .010]; PA/team-game 38.3 → 38.3 [38.7 → 38.7]; pitches/game 241 → 241 [241 → 240]; foul balls out of play 14.71 [14.72] a game; rules warnings none | Every movement is inside the seed sets' spread (0.1–0.2 runs). The rule changes which fouls end and when, which reshuffles every later random draw in a game, so the games differ throughout | Not traced play by play (owner: do not overtest); how many grounders a game the bag decides, and whether any foul-then-fair balls existed, is unmeasured |
 
 ### 2026-11-15 (300 games, seeds 0–299 and 1000–1299)
 

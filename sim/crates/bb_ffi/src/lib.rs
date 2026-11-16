@@ -302,8 +302,9 @@ pub struct BbPlayInfo {
     /// Where it left: the ball's centre as it crossed the wall or fence (sim
     /// frame, m; zeros if it never left).
     pub dead_at: [f32; 3],
-    /// Why: 0 it never left; 1 out of play (a foul ball or a throw); 2 home run; 3 ground-rule
-    /// double (the event log's `DeadBallReason`).
+    /// Why: 0 it never left; 1 a throw out of play; 2 home run; 3 ground-rule double (the event
+    /// log's `DeadBallReason`); 4 a foul ball out of play (the log's 1; told apart here so a
+    /// client can go straight to the next pitch).
     pub dead_reason: u8,
     pub _pad2: [u8; 3],
     /// On contact, the projected distance (physics-spec §12): from home to where the batted
@@ -840,7 +841,7 @@ mod tests {
     fn plays_a_game_through_the_abi() {
         let g = bb_game_create(3);
         let mut n = 0;
-        let mut dead = [0u32; 4];
+        let mut dead = [0u32; 5];
         loop {
             let (mut p, mut len) = (std::ptr::null_mut(), 0usize);
             let r = unsafe { bb_game_advance(g, &mut p, &mut len) };
@@ -858,7 +859,7 @@ mod tests {
             assert_eq!(unsafe { bb_timeline_info(p, len, &mut info) }, 1);
             if info.dead_s >= 0.0 {
                 dead[info.dead_reason as usize] += 1;
-                assert!((1..=3).contains(&info.dead_reason) && info.dead_s <= info.duration_s + 1e-4, "{}", info.dead_s);
+                assert!((1..=4).contains(&info.dead_reason) && info.dead_s <= info.duration_s + 1e-4, "{}", info.dead_s);
                 let last = tl.ball().unwrap().segments().unwrap().iter().filter_map(|s| s.knots()).flat_map(|k| k.iter()).map(|k| k.t()).fold(0.0f32, f32::max);
                 assert!(last >= info.dead_s - 0.05, "the track ends at {last} before the ball was dead at {}", info.dead_s);
                 // Where it crossed: on the boundary (a ball radius inside a wall's plane, or on
@@ -889,10 +890,11 @@ mod tests {
         let r = bb_game::game::simulate_game(3);
         assert_eq!((a, h), (r.runs[0], r.runs[1]));
         assert!(n > 150);
-        // A game has about ten foul balls into the seats. (Home runs, when there are any, are
-        // checked above; whether this one game has one changes with the game, and home runs
-        // are covered over many games by `bb_game/tests/home_run_trot.rs`.)
-        assert!(dead[1] >= 3, "dead balls by reason {dead:?}");
+        // A game has about ten foul balls into the seats, each marked as a foul (4), not as a
+        // throw out of play (1). (Home runs, when there are any, are checked above; whether this
+        // one game has one changes with the game, and home runs are covered over many games by
+        // `bb_game/tests/home_run_trot.rs`.)
+        assert!(dead[4] >= 3, "dead balls by reason {dead:?}");
     }
 
     fn text(field: &[u8]) -> &str {
