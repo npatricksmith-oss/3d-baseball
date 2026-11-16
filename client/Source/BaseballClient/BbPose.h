@@ -118,6 +118,40 @@ namespace BbMotion
 	/** How far past the wrist the ball sits in a hand, and in a mitt's pocket, cm. */
 	constexpr double BallInHandCm = 9.0;
 	constexpr double BallInMittCm = 14.0;
+
+	/** What the batter's pose is made from (player-visuals §9). Everything is in his own
+	 *  frame as he is shown at the plate: facing the pitcher (+Y), the plate on his right
+	 *  (-X), standing on the sim's spot for him. That is a right-handed batter; a left-handed
+	 *  one is the same shown in a mirror. */
+	struct FSwingIn
+	{
+		/** The bat he is holding: the sim's while the sim has one, cm. */
+		FVector Knob = FVector::ZeroVector, Tip = FVector(0, 0, 1);
+		/** What he is watching. */
+		FVector Look = FVector(0, 1700, 170);
+		/** How far round his hands have come since the swing began, degrees (HandsDeg now less
+		 *  HandsDeg at its least); and how much of a swing is on, 0 standing to 1 swinging. */
+		float TurnDeg = 0.f, Swing = 0.f;
+		/** The front foot's step toward the pitcher, 0 in the stance to 1 planted. */
+		float Stride = 0.f;
+		/** 0 in the stance, 1 at ease between pitches. */
+		float Rest = 0.f;
+	};
+	/** The batter: stance, stride, the turn of hips and shoulders after the bat, both hands on
+	 *  the handle. The body follows the bat, never the other way (invariant 4): OutReach puts
+	 *  the lower hand (his left) and the upper hand on the handle wherever the bat is. */
+	FBbStick Swing(const FSwingIn& In, const FBbSkeleton& Skel, const FBbMotionGround& Ground, FBbReach& OutReach);
+	/** Where his hands are round him, seen from above, degrees: 0 on the plate's side of him,
+	 *  +90 toward the pitcher, -90 toward the catcher. */
+	double HandsDeg(const FVector& Knob, const FVector& Tip);
+	/** Where on the handle each hand is, from the knob, and how far the handle sits past a
+	 *  wrist, cm. */
+	constexpr double GripLowCm = 6.0;
+	constexpr double GripHighCm = 15.0;
+	constexpr double GripPastCm = 7.0;
+	/** The bat at ease between pitches, on the back shoulder: knob and direction, his frame. */
+	const FVector RestKnob(-14.0, -8.0, 100.0);
+	const FVector RestAxis(0.35, -0.45, 0.82);
 }
 
 /** The single-clip player with a pose laid over it. */

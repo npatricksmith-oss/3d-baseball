@@ -29,9 +29,10 @@ class UMaterialInterface;
  *               through eight angles, and the kit, as figure_<n>_<what>.png, then quit; no game
  *               is played);
  *               -BbMannequin (the grey mannequin instead of the figures);
- *               -BbStockMotions (the stock clips in place of the coded delivery and crouch);
- *               -BbMotionShots (the delivery and the catcher's receive photographed at their
- *               named moments as motion_<pitch>_<n>_<what>.png, then quit);
+ *               -BbStockMotions (the stock clips in place of the coded delivery, crouch and swing);
+ *               -BbMotionShots (the delivery, the catcher's receive, a ball hit, a swing and a
+ *               miss and a pitch taken photographed at their named moments as
+ *               motion_<strip>_<n>_<what>.png, then quit);
  *               -BbParkShots (photograph the park from its fixed spots as park_<spot>.png, then quit;
  *               -BbParkShotsAt=<seconds> when to start)
  *               -BbBoxShots=<n> (photograph the Tab box at pitch n and the final box, then quit)
@@ -155,8 +156,9 @@ private:
 		int32 Team = -1;
 		// The clip being driven by hand (null while the gait clips play on their own).
 		const UAnimSequence* Manual = nullptr;
-		// A coded motion (BbPose.h): which (0 none, 1 the delivery, 2 the catcher's crouch),
-		// how much of it shows over the clip, and the delivery's moment last shown.
+		// A coded motion (BbPose.h): which (0 none, 1 the delivery, 2 the catcher's crouch,
+		// 3 the batter at the plate), how much of it shows over the clip, and the delivery's
+		// moment last shown.
 		int32 Motion = 0;
 		float MotionW = 0.f;
 		float MotionT = 0.f;
@@ -196,6 +198,11 @@ private:
 	 *  then quit. The play is held on each moment exactly. */
 	bool bMotionShots = false;
 	int32 MotionShotNext = 0;
+	/** Which strip the pitch on screen is photographed for, or -1: 0 to 2 as above; then 3
+	 *  the first swing, from in front of the batter; 4 the next swing, from the mound's side;
+	 *  5 the first pitch taken. */
+	int32 MotionStrip = -1;
+	bool bStripDone[6] = { false, false, false, false, false, false };
 	TArray<FFigureState> FigureState;
 	/** What PoseFigure knows beyond the frame: the client's own plan for a staged move, and
 	 *  a throw whose release time is known (so its clip phase never depends on which frames
@@ -401,6 +408,40 @@ private:
 	/** The bat is the figure shop's turned one (its knob at its origin), not the cylinder. */
 	bool bTurnedBat = false;
 	void PlaceBat(const FVector& Knob, const FVector& Tip);
+	/** The bat through one pitch, read from its timeline when the pitch comes up (NoteBat):
+	 *  who stands where with it, how he holds it in the stance, and, if he swings, when the
+	 *  bat leaves the stance, when his hands are furthest back (and where round him they are
+	 *  then, BbMotion::HandsDeg), and when and where the sim's bat comes to rest. */
+	struct FBatNote
+	{
+		bool bBat = false;
+		/** Where the batter stands, sim m, and whether it is the first-base side's box (a
+		 *  left-handed batter: shown in a mirror). */
+		FVector2D Spot = FVector2D::ZeroVector;
+		bool bLeftBox = false;
+		FVector StanceKnob = FVector::ZeroVector, StanceTip = FVector::ZeroVector;
+		bool bSwing = false;
+		float StartT = -1.f, LaunchT = -1.f, EndT = -1.f;
+		float LaunchDeg = 0.f;
+		FVector EndKnob = FVector::ZeroVector, EndTip = FVector::ZeroVector;
+	};
+	FBatNote BatNote, NextBatNote;
+	void NoteBat(const FBbPlay& Play, FBatNote& Out) const;
+	/** A sim point in the batter's own frame (BbMotion::FSwingIn), cm, without the figure. */
+	static FVector BatterFrame(const float P[3], const FBatNote& N);
+	/** The bat as drawn this frame. The sim's while the sim has it in his hands (bBatSim);
+	 *  the batter's own to carry otherwise, as long as he stands at the plate (bBatHeld): back
+	 *  from the end of his swing to his shoulder, at ease between pitches, up into the stance. */
+	FVector BatKnob = FVector::ZeroVector, BatTip = FVector(0, 0, 86);
+	bool bBatSim = false, bBatHeld = false;
+	uint16 BatHolder = 0xFFFF;
+	/** How much of a swing is on, the front foot's step, how much he is at ease (FSwingIn),
+	 *  and the point his eyes are on (eased, so his head does not snap round after a pitch). */
+	float BatSwingW = 0.f, BatStride = 0.f, BatRest = 1.f;
+	FVector BatLook = FVector::ZeroVector;
+	/** After a swing the bat comes back to his shoulder over this long, s. */
+	static constexpr float BatReturnS = 0.8f;
+	static constexpr double BatLenCm = 86.36;
 	UPROPERTY()
 	TObjectPtr<ACameraActor> Camera;
 

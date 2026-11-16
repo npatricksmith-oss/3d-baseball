@@ -628,10 +628,112 @@ void ABbDirector::ReplayForward()
 	ShowReplay(ReplayIdx + 1);
 }
 
+FVector ABbDirector::BatterFrame(const float P[3], const FBatNote& N)
+{
+	// He is shown facing the pitcher with the plate on his right; a left-handed batter (the
+	// first-base side's box, sim x > 0) is that in a mirror.
+	return FVector((N.bLeftBox ? 1.0 : -1.0) * (P[0] - N.Spot.X) * 100.0, (P[1] - N.Spot.Y) * 100.0, P[2] * 100.0);
+}
+
+void ABbDirector::NoteBat(const FBbPlay& Play, FBatNote& Out) const
+{
+	Out = FBatNote();
+	BbFrame F0;
+	if (!Sim || !Play.bValid || !Sim->Sample(Play, 0.f, F0) || F0.has_bat == 0)
+	{
+		return;
+	}
+	// The batter: whoever of the side at bat stands by the bat.
+	double Best = 1.6 * 1.6;
+	for (uint32 I = 0; I < F0.n_actors; ++I)
+	{
+		const BbActor& A = F0.actors[I];
+		const double D = FMath::Square(A.pos[0] - F0.bat_knob[0]) + FMath::Square(A.pos[1] - F0.bat_knob[1]);
+		if ((A.agent & 0x80) == 0 && D < Best)
+		{
+			Best = D;
+			Out.bBat = true;
+			Out.Spot = FVector2D(A.pos[0], A.pos[1]);
+		}
+	}
+	if (!Out.bBat)
+	{
+		return;
+	}
+	Out.bLeftBox = Out.Spot.X > 0.0;
+	Out.StanceKnob = Out.EndKnob = ToUE(F0.bat_knob);
+	Out.StanceTip = Out.EndTip = ToUE(F0.bat_tip);
+	// The swing, if there is one: the sim's bat track every 5 ms. It ends when the bat has
+	// stopped moving (the sim holds its last pose a moment, then has no bat at all).
+	const float Until = FMath::Min(Play.Info.duration_s, 1.5f);
+	float LeastDeg = 1e9f, LastMove = 0.f;
+	BbFrame Prev = F0;
+	for (float T = 0.005f; T <= Until; T += 0.005f)
+	{
+		BbFrame F;
+		if (!Sim->Sample(Play, T, F) || F.has_bat == 0)
+		{
+			break;
+		}
+		const bool bMoved = FMemory::Memcmp(F.bat_knob, Prev.bat_knob, sizeof(F.bat_knob)) != 0 || FMemory::Memcmp(F.bat_tip, Prev.bat_tip, sizeof(F.bat_tip)) != 0;
+		if (bMoved && !Out.bSwing)
+		{
+			Out.bSwing = true;
+			Out.StartT = T - 0.005f;
+		}
+		if (bMoved)
+		{
+			LastMove = T;
+			Out.EndKnob = ToUE(F.bat_knob);
+			Out.EndTip = ToUE(F.bat_tip);
+		}
+		if (Out.bSwing)
+		{
+			const float Deg = (float)BbMotion::HandsDeg(BatterFrame(F.bat_knob, Out), BatterFrame(F.bat_tip, Out));
+			if (Deg < LeastDeg)
+			{
+				LeastDeg = Deg;
+				Out.LaunchT = T;
+			}
+		}
+		Prev = F;
+	}
+	if (Out.bSwing)
+	{
+		Out.LaunchDeg = LeastDeg;
+		Out.EndT = LastMove;
+	}
+}
+
 void ABbDirector::NotePitch()
 {
 	PitchEndT = -1.f;
 	CrouchUntil = 0.6f;
+	NoteBat(Current, BatNote);
+	MotionStrip = -1;
+	if (bMotionShots && Current.bValid)
+	{
+		// The first three pitches for the pitcher and the catcher; then the first ball hit,
+		// the first swing and miss, and the first pitch taken, for the batter.
+		const int32 Index = (int32)Current.Info.play_index;
+		const bool bHit = Current.Info.contact_s >= 0.f;
+		if (Index >= 1 && Index <= 3)
+		{
+			MotionStrip = Index - 1;
+		}
+		else if (Index > 3 && BatNote.bSwing && bHit && !bStripDone[3])
+		{
+			MotionStrip = 3;
+		}
+		else if (Index > 3 && BatNote.bSwing && !bHit && !bStripDone[4])
+		{
+			MotionStrip = 4;
+		}
+		else if (Index > 3 && BatNote.bBat && !BatNote.bSwing && !bStripDone[5])
+		{
+			MotionStrip = 5;
+		}
+	}
 	BbFrame Start;
 	if (!Sim || !Current.bValid || !SampleDrawn(Current, 0.f, Start))
 	{
@@ -779,6 +881,7 @@ bool ABbDirector::StartReset(const FBbPlay& Next)
 	{
 		return false;
 	}
+	NoteBat(Next, NextBatNote);
 	auto Find = [](const BbFrame& F, uint16 Agent) -> const BbActor*
 	{
 		for (uint32 I = 0; I < F.n_actors; ++I)
@@ -1339,6 +1442,14 @@ void ABbDirector::PoseFigure(int32 Slot, const BbActor& A, const BbFrame& Frame,
 			Motion = 2;
 		}
 	}
+	// The batter at the plate, from the moment he stands in: at ease between pitches, in his
+	// stance as the pitcher comes set, and whatever the bat does from there.
+	const FBatNote& Bn = bReset ? NextBatNote : BatNote;
+	if (Coded && bMotions && !bFielder && Bn.bBat && bStill && (!bReset || (In.bStaged && !In.bMoving))
+		&& FMath::Square(A.pos[0] - Bn.Spot.X) + FMath::Square(A.pos[1] - Bn.Spot.Y) < 0.04)
+	{
+		Motion = 3;
+	}
 	// (A pitcher who dives on an early comebacker is diving, not finishing his delivery.)
 	if (!Coded && bMotions && bFielder && Position == 1 && !In.bStaged && PlayTime < 0.8f && AnimPitch && In.DiveSince < 0.f)
 	{
@@ -1389,7 +1500,7 @@ void ABbDirector::PoseFigure(int32 Slot, const BbActor& A, const BbFrame& Frame,
 		Manual = AnimCrouch;
 		ClipTime = 0.1f;
 	}
-	if (bMotions && !bFielder && Frame.has_bat != 0 && AnimStance)
+	if (!Coded && bMotions && !bFielder && Frame.has_bat != 0 && AnimStance)
 	{
 		// The batter: whoever is at the bat's knob. Hands up in a stance; as the bat comes
 		// around, his body turns with it.
@@ -1427,8 +1538,9 @@ void ABbDirector::PoseFigure(int32 Slot, const BbActor& A, const BbFrame& Frame,
 	const float MotionShown = St.MotionW * St.MotionW * (3.f - 2.f * St.MotionW);
 	if (St.MotionW > 0.f)
 	{
-		WantYaw = YawToPlate(Foot);
-		bMirror = bLefty;
+		// (The batter is posed facing the pitcher; which side he bats from is where he stands.)
+		WantYaw = St.Motion == 3 ? ToUE(0.0, 1.0, 0.0).Rotation().Yaw : YawToPlate(Foot);
+		bMirror = St.Motion == 3 ? Bn.bLeftBox : bLefty;
 	}
 	// Turns ease on play time, so a pause holds them and fast playback keeps up.
 	St.Yaw = FMath::RInterpTo(FRotator(0, St.Yaw, 0), FRotator(0, WantYaw, 0), SimDt, Manual ? 18.f : TurnRate).Yaw;
@@ -1527,6 +1639,67 @@ void ABbDirector::PoseFigure(int32 Slot, const BbActor& A, const BbFrame& Frame,
 				Reach.Weight[1] = bReset ? 0.f : BbMotion::DeliveryReach(St.MotionT);
 				Reach.Past[1] = BbMotion::BallInHandCm;
 			}
+			else if (St.Motion == 3)
+			{
+				// The batter. The bat is the sim's while the sim has it. Otherwise it is his
+				// to carry, in his own frame:
+				auto Put = [&](const FVector& K, const FVector& Axis, FVector& OutKnob, FVector& OutTip)
+				{
+					OutKnob = Base.TransformPosition(K);
+					OutTip = OutKnob + Base.TransformVector(Axis).GetSafeNormal() * BatLenCm;
+				};
+				if (!bBatSim && !bReset && Bn.bSwing && PlayTime > Bn.EndT)
+				{
+					// back to his shoulder from where the swing left it. A full swing has it
+					// round in front of him: it is unwound there, the barrel dropping past
+					// the plate and coming up behind, not drawn back through his chest.
+					const FVector K0 = Base.InverseTransformPosition(Bn.EndKnob);
+					const FVector A0 = (Base.InverseTransformPosition(Bn.EndTip) - K0).GetSafeNormal();
+					const FVector A3 = BbMotion::RestAxis.GetSafeNormal();
+					const float U = FMath::SmoothStep(0.f, 1.f, (PlayTime - Bn.EndT) / BatReturnS);
+					FVector K = FMath::Lerp(K0, BbMotion::RestKnob, (double)U), Ax = FMath::Lerp(A0, A3, (double)U);
+					if (A0.X > 0.2)
+					{
+						const FVector A1(0.0, 1.0, -0.1), A2(-0.75, 0.25, -0.6);
+						const double V = U * 3.0;
+						Ax = V < 1.0 ? FMath::Lerp(A0, A1, V) : V < 2.0 ? FMath::Lerp(A1, A2, V - 1.0) : FMath::Lerp(A2, A3, V - 2.0);
+						K.Z -= 8.0 * FMath::Sin(PI * U);
+					}
+					Put(K, Ax, BatKnob, BatTip);
+				}
+				else if (!bBatSim)
+				{
+					// at ease on his shoulder between pitches, up into the next pitch's
+					// stance as the pitcher comes set.
+					FVector WantKnob = Bn.StanceKnob, WantTip = Bn.StanceTip;
+					if (bReset && ResetDuration - ResetTime >= SetLeadS)
+					{
+						Put(BbMotion::RestKnob, BbMotion::RestAxis, WantKnob, WantTip);
+					}
+					if (BatHolder != A.agent)
+					{
+						BatKnob = WantKnob;
+						BatTip = WantTip;
+					}
+					else
+					{
+						BatKnob = FMath::VInterpTo(BatKnob, WantKnob, SimDt, 6.f);
+						BatTip = FMath::VInterpTo(BatTip, WantTip, SimDt, 6.f);
+						BatTip = BatKnob + (BatTip - BatKnob).GetSafeNormal() * BatLenCm;
+					}
+				}
+				BatHolder = A.agent;
+				bBatHeld = true;
+				BbMotion::FSwingIn Sw;
+				Sw.Knob = Own.InverseTransformPosition(BatKnob);
+				Sw.Tip = Own.InverseTransformPosition(BatTip);
+				Sw.Look = Own.InverseTransformPosition(BatLook);
+				Sw.Swing = BatSwingW;
+				Sw.Stride = BatStride;
+				Sw.Rest = BatRest;
+				Sw.TurnDeg = !bReset && Bn.bSwing && PlayTime >= Bn.LaunchT ? (float)BbMotion::HandsDeg(Sw.Knob, Sw.Tip) - Bn.LaunchDeg : 0.f;
+				S = BbMotion::Swing(Sw, Skel, Ground, Reach);
+			}
 			else
 			{
 				// The mitt: held for a target, then to the ball where the sim has it caught.
@@ -1556,6 +1729,13 @@ void ABbDirector::PoseFigure(int32 Slot, const BbActor& A, const BbFrame& Frame,
 			{
 				UE_LOG(LogBb, Display, TEXT("BB_RECEIVE play=%u agent=0x%03x left=%d ball=(%.2f, %.2f) wrist_off=%.1f cm shown=%.2f"), Current.Info.play_index, A.agent, bLefty ? 1 : 0,
 					PitchEndAt.Y / 100.0, PitchEndAt.Z / 100.0, (Wrist[0] - Reach.At[0]).Size() * FMath::Abs(Scale.Z), MotionShown);
+			}
+			// And each hand from the handle as the bat meets the ball (0: on it).
+			if (bStagingLog && St.Motion == 3 && !bReset && Current.Info.contact_s >= 0.f && PlayTime == Current.Info.contact_s)
+			{
+				UE_LOG(LogBb, Display, TEXT("BB_SWING play=%u agent=0x%03x left=%d height=%.3f low_off=%.1f high_off=%.1f cm launch=%.3f s turn=%.0f deg shown=%.2f"), Current.Info.play_index, A.agent, Bn.bLeftBox ? 1 : 0,
+					FMath::Abs(Scale.Z), ((Wrist[0] - Reach.At[0]).Size() - Reach.Past[0]) * FMath::Abs(Scale.Z), ((Wrist[1] - Reach.At[1]).Size() - Reach.Past[1]) * FMath::Abs(Scale.Z),
+					Bn.LaunchT, BbMotion::HandsDeg(Own.InverseTransformPosition(BatKnob), Own.InverseTransformPosition(BatTip)) - Bn.LaunchDeg, MotionShown);
 			}
 			Coded->PoseWeight = MotionShown;
 			if (St.Motion == 1 && !bReset && PlayTime < 0.f && MotionShown >= 0.99f)
@@ -1862,27 +2042,45 @@ void ABbDirector::Tick(float DeltaSeconds)
 		{
 			PlayTime = 0.f;
 		}
+		// And on the moment of contact, for the hands' distance from the handle.
+		if (bStagingLog && !bReset && Current.Info.contact_s >= 0.f && PlayTime >= Current.Info.contact_s && PlayTime - SimDt < Current.Info.contact_s)
+		{
+			PlayTime = Current.Info.contact_s;
+		}
 		// -BbMotionShots: the first pitch from beside the pitcher, the second from the plate,
-		// the third beside the catcher, each held on its named moments and photographed.
-		if (bMotionShots && !bReset && Current.bValid)
+		// the third beside the catcher; then the batter: the first ball hit, the first swing
+		// and miss, the first pitch taken. Each held on its named moments and photographed.
+		if (bMotionShots && !bReset && Current.bValid && MotionStrip >= 0)
 		{
 			struct FMark { float T; const TCHAR* Name; };
 			const float E = PitchEndT >= 0.f ? PitchEndT : 0.45f;
+			const FBatNote& B = BatNote;
+			const float C = Current.Info.contact_s >= 0.f ? Current.Info.contact_s : B.LaunchT + 0.15f;
+			const FMark Swing[] = { { -0.5f, TEXT("stance") }, { 0.f, TEXT("stride") }, { B.LaunchT, TEXT("launch") }, { 0.5f * (B.LaunchT + C), TEXT("turn") }, { C, TEXT("contact") },
+				{ C + 0.05f, TEXT("through") }, { B.EndT, TEXT("finish") }, { B.EndT + 0.4f * BatReturnS, TEXT("back") }, { B.EndT + BatReturnS + 0.1f, TEXT("rest") } };
+			const FMark Take[] = { { 0.17f, TEXT("stride_down") }, { E + 0.15f, TEXT("take") } };
 			const FMark Pitch[] = { { -1.3f, TEXT("set") }, { -0.84f, TEXT("lift") }, { -0.48f, TEXT("stride") }, { -0.16f, TEXT("plant") },
 				{ -0.045f, TEXT("laid_back") }, { 0.f, TEXT("release") }, { 0.2f, TEXT("follow") }, { 0.6f, TEXT("finish") } };
 			const FMark Catch[] = { { -0.6f, TEXT("target") }, { E - 0.12f, TEXT("reach") }, { E + 0.01f, TEXT("receive") }, { E + 0.5f, TEXT("hold") } };
-			// (Not the first pitch: the picture is still settling.)
-			const int32 Which = (int32)Current.Info.play_index - 1;
-			const FMark* Marks = Which < 2 ? Pitch : Catch;
-			const int32 Count = Which < 2 ? UE_ARRAY_COUNT(Pitch) : UE_ARRAY_COUNT(Catch);
-			if (Which >= 0 && Which < 3 && MotionShotNext < Count && PlayTime >= Marks[MotionShotNext].T)
+			// (Not the first pitch: the picture is still settling. A ball hit has the batter
+			// running once his swing is done, so its strip stops at the finish.)
+			const int32 Which = MotionStrip;
+			const FMark* Marks = Which < 2 ? Pitch : Which == 2 ? Catch : Which < 5 ? Swing : Take;
+			const int32 Count = Which < 2 ? UE_ARRAY_COUNT(Pitch) : Which == 2 ? UE_ARRAY_COUNT(Catch) : Which == 3 ? UE_ARRAY_COUNT(Swing) - 2 : Which == 4 ? UE_ARRAY_COUNT(Swing) : UE_ARRAY_COUNT(Take);
+			// (No moment later than the pitch stays on screen.)
+			const float At = MotionShotNext < Count ? FMath::Min(Marks[MotionShotNext].T, Current.Info.duration_s + HoldAfter - 0.05f) : 0.f;
+			if (MotionShotNext < Count && PlayTime >= At)
 			{
-				PlayTime = Marks[MotionShotNext].T;
+				PlayTime = At;
 				const FString Name = FPaths::Combine(FPaths::ProjectSavedDir(), TEXT("Shots"), FString::Printf(TEXT("motion_%d_%d_%s.png"), Which + 1, MotionShotNext + 1, Marks[MotionShotNext].Name));
 				FScreenshotRequest::RequestScreenshot(Name, false, false);
-				if (++MotionShotNext == Count && Which == 2)
+				if (++MotionShotNext == Count)
 				{
-					BenchSeconds = FMath::Max(BenchSeconds, (float)Wall + 2.f);
+					bStripDone[Which] = true;
+					if (bStripDone[2] && bStripDone[3] && bStripDone[4] && bStripDone[5])
+					{
+						BenchSeconds = FMath::Max(BenchSeconds, (float)Wall + 2.f);
+					}
 				}
 			}
 		}
@@ -2025,12 +2223,37 @@ void ABbDirector::Tick(float DeltaSeconds)
 			BallAt += HeldOffset * HeldBlend;
 			Ball->SetActorLocation(BallAt);
 			Ball->SetActorHiddenInGame(!bBallShown);
-			Bat->SetActorHiddenInGame(Frame.has_bat == 0);
-			if (Frame.has_bat != 0)
+			if (!Skel.Ok())
 			{
-				const FVector Knob = ToUE(Frame.bat_knob);
-				const FVector Tip = ToUE(Frame.bat_tip);
-				PlaceBat(Knob, Tip);
+				// Without the coded motions the bat is the sim's alone, in nobody's hands.
+				Bat->SetActorHiddenInGame(Frame.has_bat == 0);
+				if (Frame.has_bat != 0)
+				{
+					PlaceBat(ToUE(Frame.bat_knob), ToUE(Frame.bat_tip));
+				}
+			}
+			// The bat (player-visuals §9). It is the sim's for as long as the sim's bat is in
+			// his hands and moving or waiting to: through the stance and the swing. After the
+			// swing, and between pitches, it is the batter's own to carry (PoseFigure).
+			bBatHeld = false;
+			bBatSim = !bReset && Frame.has_bat != 0 && (!BatNote.bSwing || PlayTime <= BatNote.EndT);
+			if (bBatSim)
+			{
+				BatKnob = ToUE(Frame.bat_knob);
+				BatTip = ToUE(Frame.bat_tip);
+			}
+			{
+				// What the batter's body goes by besides the bat. In a pitch these follow from
+				// play time alone, so a held or replayed moment shows the same pose.
+				const bool bSwinging = !bReset && BatNote.bSwing && PlayTime >= BatNote.StartT && PlayTime <= BatNote.EndT;
+				BatSwingW = bSwinging ? FMath::SmoothStep(BatNote.StartT, FMath::Max(BatNote.LaunchT, BatNote.StartT + 0.01f), PlayTime) : FMath::FInterpConstantTo(BatSwingW, 0.f, SimDt, 1.f / 0.45f);
+				// He strides at every pitch, swing or no: up as the ball is let go, down 0.17 s on.
+				BatStride = !bReset && PlayTime > -0.2f ? FMath::SmoothStep(-0.2f, 0.17f, PlayTime) : FMath::FInterpConstantTo(BatStride, 0.f, SimDt, 2.f);
+				const bool bEase = bReset ? ResetDuration - ResetTime >= SetLeadS : BatNote.bSwing && PlayTime > BatNote.EndT + 0.3f;
+				BatRest = FMath::FInterpConstantTo(BatRest, bEase ? 1.f : 0.f, SimDt, 2.f);
+				// His eyes: on the pitcher, then on the ball (not all the way back into the mitt).
+				const FVector See = bReset || PlayTime < 0.f || !bBallShown ? ToUE(0.0, 17.0, 1.8) : ToUE(Frame.ball[0], FMath::Max(Frame.ball[1], -0.5f), Frame.ball[2]);
+				BatLook = BatLook.IsZero() ? See : FMath::VInterpTo(BatLook, See, SimDt, 12.f);
 			}
 			// Slots below MaxActors show the frame's actors; the rest, players walking off.
 			const int32 Pool = Bodies.Num();
@@ -2136,6 +2359,21 @@ void ABbDirector::Tick(float DeltaSeconds)
 					M->SetVectorParameterValue(TEXT("Color"), Col);
 				}
 			}
+			if (Skel.Ok())
+			{
+				// The bat is drawn while someone holds it, and through the swing wherever the
+				// sim has it. A batter who has left the plate has dropped it.
+				const bool bShowBat = bBatHeld || (bBatSim && (BatNote.bSwing || PlayTime < 0.5f));
+				Bat->SetActorHiddenInGame(!bShowBat);
+				if (bShowBat)
+				{
+					PlaceBat(BatKnob, BatTip);
+				}
+				if (!bBatHeld)
+				{
+					BatHolder = 0xFFFF;
+				}
+			}
 			// In play: the ball has been hit and is heading out (contact telemetry present
 			// and the ball is in front of the plate after the pitch has arrived).
 			if (Current.Info.exit_velocity_mps > 0.f && T > 0.35f && Frame.ball[1] > 1.5f)
@@ -2152,7 +2390,18 @@ void ABbDirector::Tick(float DeltaSeconds)
 				}
 			}
 			UpdateCamera(Frame, DeltaSeconds);
-			if (bMotionShots && !bReset && Current.Info.play_index >= 1 && Current.Info.play_index < 4)
+			if (bMotionShots && !bReset && MotionStrip >= 3)
+			{
+				// The batter: from across the plate, in front of him (a ball hit, a pitch taken);
+				// from the mound's side of him (a swing and a miss).
+				const double Side = BatNote.bLeftBox ? 1.0 : -1.0;
+				const FVector Eye = MotionStrip == 4 ? ToUE(-Side * 1.3, 5.2, 1.5) : ToUE(-Side * 3.4, 0.9, 1.25);
+				const FVector Look = ToUE(BatNote.Spot.X * (MotionStrip == 4 ? 0.7 : 1.0), BatNote.Spot.Y, MotionStrip == 4 ? 0.85 : 1.0);
+				Camera->SetActorLocationAndRotation(Eye, (Look - Eye).Rotation());
+				Camera->GetCameraComponent()->SetFieldOfView(MotionStrip == 4 ? 36.f : 48.f);
+				ShownCam = -1;
+			}
+			else if (bMotionShots && !bReset && MotionStrip >= 0)
 			{
 				// Beside the pitcher (the third-base side, which a right-hander's chest faces),
 				// then from the plate, then beside the catcher, away from the batter.

@@ -539,6 +539,86 @@ FBbStick BbMotion::Crouch(const FVector& MittAt, const FBbSkeleton& Skel, const 
 	return S;
 }
 
+double BbMotion::HandsDeg(const FVector& Knob, const FVector& Tip)
+{
+	const FVector H = Knob + (Tip - Knob).GetSafeNormal() * (0.5 * (GripLowCm + GripHighCm));
+	return FMath::RadiansToDegrees(FMath::Atan2(H.Y, -H.X));
+}
+
+FBbStick BbMotion::Swing(const FSwingIn& In, const FBbSkeleton& Skel, const FBbMotionGround& Ground, FBbReach& OutReach)
+{
+	const int32 L = 0, R = 1;
+	// A direction seen from above, by degrees round from the plate's side toward the pitcher.
+	auto Dir = [](double Deg, double Z)
+	{
+		const double A = FMath::DegreesToRadians(Deg);
+		return FVector(-FMath::Cos(A), FMath::Sin(A), Z);
+	};
+	const FVector Axis = (In.Tip - In.Knob).GetSafeNormal(1e-6, FVector(0, 0, 1));
+	const FVector Hands = In.Knob + Axis * (0.5 * (GripLowCm + GripHighCm));
+	const double W = FMath::Clamp((double)In.Swing, 0.0, 1.0);
+	const double Turn = FMath::Max(0.0, (double)In.TurnDeg) * W;
+	const double Step = FMath::Clamp((double)In.Stride, 0.0, 1.0);
+	const double Up = FMath::Sin(PI * Step);
+	// The hips go first and are nearly open by contact (the hands about 90 degrees round);
+	// the shoulders start turned in and come round with the hands.
+	const double Hip = 95.0 * (1.0 - FMath::Exp(-Turn / 45.0));
+	const double Still = FMath::Lerp(-20.0, -8.0, (double)In.Rest);
+	const double Chest = FMath::Lerp(Still, FMath::Min(-40.0 + 1.08 * Turn, 105.0), W);
+	const double Round = FMath::Clamp(Turn / 90.0, 0.0, 1.0);
+	// How far he has to go for it: out over the plate, or down.
+	const double Far = Smooth(30.0, 75.0, FVector2D(Hands.X, Hands.Y).Size()) * W;
+	const double Low = (1.0 - Smooth(85.0, 115.0, Hands.Z)) * W;
+	const FVector2D To = FVector2D(Hands.X, Hands.Y).GetSafeNormal();
+
+	FBbStick S;
+	S.PelvisFwd = Dir(Hip, 0.0);
+	// The weight goes back as the front foot comes up, and through against the front leg
+	// as he turns; he sits a little as he strides, more for a low one.
+	S.Pelvis = { 5.0 - 3.0 * Round, 3.0 * Step - 9.0 * Up + 7.0 * Round, 88.0 - 6.0 * Step - 5.0 * Low };
+	// Bent over the plate; in the swing toward the hands, and the head staying back.
+	S.ChestFwd = Dir(Chest, -0.12 - 0.2 * Far - 0.2 * Low);
+	S.ChestUp = FVector(-0.16 - 0.2 * Low, -0.18 * Round, 1.0) + FVector(To.X, To.Y, 0.0) * (0.35 * Far);
+	// The back foot turns on its toe as the hips come round, the heel up and the knee in.
+	S.Ankle[R] = { 0.0, -27.0 + 4.0 * Round, 6.0 * Round };
+	S.Toe[R] = Dir(0.85 * Hip, -0.55 * Round);
+	S.Knee[R] = Dir(0.9 * Hip, -0.25 * Round);
+	// The front foot: up, toward the pitcher, down part open, and firm from then on.
+	S.Ankle[L] = { -2.0 * Step, 27.0 + 16.0 * Step, 9.0 * Up };
+	S.Toe[L] = Dir(35.0 * Step, -0.3 * Up);
+	S.Knee[L] = Dir(25.0 * Step + 20.0 * Round, 0.0);
+	// His eyes on the ball, as far round as a neck turns from the chest.
+	{
+		const FVector Eye(S.Pelvis.X - 6.0, S.Pelvis.Y, S.Pelvis.Z + 68.0);
+		FVector See = (In.Look - Eye).GetSafeNormal(1e-6, FVector(0, 1, 0));
+		const FVector Front = S.ChestFwd.GetSafeNormal();
+		FVector Round3;
+		double Angle = 0.0;
+		FQuat::FindBetweenNormals(Front, See).ToAxisAndAngle(Round3, Angle);
+		const double Most = FMath::DegreesToRadians(105.0);
+		if (Angle > Most)
+		{
+			See = FQuat(Round3, Most).RotateVector(Front);
+		}
+		See.Z = FMath::Clamp(See.Z, -0.6, 0.35);
+		S.HeadFwd = See;
+		S.HeadUp = { -0.08, 0.0, 1.0 };
+	}
+	// Both hands on the handle, his left below his right. The back elbow is out behind him
+	// in the stance and comes in to his side as he turns.
+	OutReach.At[L] = In.Knob + Axis * GripLowCm;
+	OutReach.At[R] = In.Knob + Axis * GripHighCm;
+	for (int32 Sd = 0; Sd < 2; ++Sd)
+	{
+		OutReach.Weight[Sd] = 1.f;
+		OutReach.Past[Sd] = (float)GripPastCm;
+	}
+	S.Elbow[L] = { 0.4, 0.3, -1.0 };
+	S.Elbow[R] = FMath::Lerp(FVector(-1.0, -0.5, -0.25), FVector(-0.5, -0.6, -1.0), Round);
+	Stand(S, Skel, Ground);
+	return S;
+}
+
 void FBbPoseProxy::PreUpdate(UAnimInstance* InAnimInstance, float DeltaSeconds)
 {
 	FAnimSingleNodeInstanceProxy::PreUpdate(InAnimInstance, DeltaSeconds);

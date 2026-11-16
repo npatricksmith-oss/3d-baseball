@@ -31,10 +31,15 @@ pub const AWARD_REACTION_S: f64 = 0.4;
 pub const LOAD_S: f64 = 0.05;
 
 /// The bat in the stance, for a batter standing at `at`: knob and axis (knob → tip), the bat
-/// upright at the back shoulder and tipped a little back toward the catcher.
+/// upright and tipped a little back toward the catcher, the hands just in front of the back
+/// shoulder: 0.40 m toward the catcher from where he stands and 0.10 m toward the plate, where
+/// a figure standing on that spot can hold it with both hands (player-visuals §9; until
+/// 2026-11-16 the knob was 0.15 m back and over the spot itself, inside his chest). The
+/// swing's own first pose is about 0.57 m back, so the load has less far to go too.
+/// Presentation only.
 pub fn stance_pose(at: Vec3) -> (Vec3, Vec3) {
     let back = if at.x < 0.0 { -1.0 } else { 1.0 };
-    (at + Vec3::new(0.0, -0.15, 1.25), Vec3::new(0.15 * back, -0.25, 1.0).normalized())
+    (at + Vec3::new(-0.10 * back, -0.40, 1.30), Vec3::new(0.15 * back, -0.25, 1.0).normalized())
 }
 
 /// Encode one pitch's timeline as a finished `BBTL` FlatBuffer.

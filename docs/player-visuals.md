@@ -1,6 +1,6 @@
 # Player visuals: figures, motions, kit
 
-**Status:** plan agreed with the owner 2026-11-15 (seven questions, Q15–Q21, all as recommended; §1). Steps 1 (the figure), 2 (the kit) and 3 (the delivery and the catcher) are built; steps 4–7 are not. This is the second part of the graphics stage, after [the park](park-visuals.md) and before [the HUD](hud.md).
+**Status:** plan agreed with the owner 2026-11-15 (seven questions, Q15–Q21, all as recommended; §1). Steps 1 (the figure), 2 (the kit), 3 (the delivery and the catcher) and 4 (the swing) are built; steps 5–7 are not. This is the second part of the graphics stage, after [the park](park-visuals.md) and before [the HUD](hud.md).
 
 **Where it starts.** Every player is the engine's grey mannequin (`SKM_Manny_Simple`) with a team tint, moved by stock clips standing in for baseball: a charged punch for the delivery, an attack for the throw and the stance, a landing for the catcher's crouch, a wall jump for the dive (`BbDirector.cpp`, `LoadAssets`). The bat is a block. There are no gloves, caps, numbers, umpires or coaches.
 
@@ -72,7 +72,7 @@ Nine more pieces a figure (32 in all), each worn or not by what he is doing (`AB
 - **Checks added:** `-BbFigureShots` now takes nine pictures: `figure_7_kit_field` (the home nine as they take the field), `figure_8_kit_field_mirrored_back` (the same in a mirror, from behind), `figure_9_kit_bat` (eight visitors in helmets through eight angles, a bat stood among them).
 - **Pictures:** `client/Saved/Shots/players2_before/` (six of play) and `players2_after/` (untracked).
 - **Cost, measured this time** (seed 7, `-BbShots=6 -BbUncapped`, a browser busy on the machine): 174 fps with figures and kit, 190 with the bare mannequin in the same build, against 193 before the players. So the figures cost about a tenth. Not acted on; the first thing to try is still not moving the pieces of hidden figures.
-- **Left for later:** the mask is a solid shape, not a cage; the first baseman has an ordinary glove; a glove is one shape without a thumb or web; nobody holds the bat yet (the hands meet it with the swing, step 4); batting gloves and the batter's shin guard are not made.
+- **Left for later:** the mask is a solid shape, not a cage; the first baseman has an ordinary glove; a glove is one shape without a thumb or web; (the hands met the bat with the swing, step 4: §9); batting gloves and the batter's shin guard are not made.
 
 ## 8. Step 3 as built (2026-11-15): the delivery and the catcher
 
@@ -89,7 +89,22 @@ The first motions written as poses in code. `BbPose.{h,cpp}` holds all of it.
 - **Cost:** 187 fps (seed 7, `-BbShots=6 -BbUncapped`), against 174 at step 2 on a busier machine: nothing measurable.
 - **Left for later:** a throw that begins while a motion is still going out cuts to the throw clip at once (step 5 redoes throws); a left-hander's figure flips out of its mirror as the motion ends; the feet of a figure coming out of a motion slide a short way instead of stepping; no wind-up, only the stretch; the catcher gives the same target every pitch (the sim does not export where the pitcher is aiming); no sign-giving, no throw back from the crouch.
 
-## 9. Records
+## 9. Step 4 as built (2026-11-16): the swing
+
+The batter holds his bat and swings it. `BbMotion::Swing` in `BbPose.{h,cpp}`; the bat's handling is in `BbDirector`.
+
+- **The body follows the bat.** The swing is not a table of key poses on a clock: every frame the pose is worked out from where the bat is. Both hands are put on the handle (his lower hand 6 cm up from the knob, the upper 15 cm); the hips and shoulders turn by how far round him his hands have come since the swing began (the hips first, nearly open at contact; the shoulders turned in at the start and coming round with the hands); the back foot turns on its toe with the hips; he bends toward a ball away from him or low; his eyes are on the ball. So a checked swing stops the body when the bat stops, a late swing is late all over, and **the barrel is at the sim's contact point because the bat is the sim's** (invariant 4).
+- **The timeline's bat was enough (Q21): no new export.** It already has the knob and the direction every 5 ms through the swing. One presentation value in the sim moved: the made-up stance (`bb_game::timeline::stance_pose`) had the knob over the batter's own spot, inside his chest; it is now 0.40 m toward the catcher, 0.10 m toward the plate and 1.30 m up, in front of his back shoulder. Game digests are unchanged (ledger, "No effect on games"). What the swings ask of the hands was measured first with a new example, `cargo run --release -p bb_game --example swing_pose_probe` (1,042 swings: the knob 0.57 m behind his spot as the swing starts, 0.34 m toward the plate at contact, the hands' arc 0.56 m in radius).
+- **The stride** is on the clock, and the same at every pitch whether he swings or not, so it gives nothing away: the front foot comes up as the ball is let go and is down 16 cm nearer the pitcher 0.17 s later.
+- **The bat between swings is his to carry.** The sim's bat track ends 0.12 s after contact. After a swing and a miss or a foul he brings the bat back to his shoulder over 0.8 s (unwound in front of him, not drawn back through his chest), stands at ease with it between pitches, and lifts it into the stance as the pitcher comes set. A batter who runs has dropped it: it is no longer drawn (it used to hang in the air for a quarter of a second, and through the whole of a walk).
+- **A left-handed batter** is the same in a mirror, by which box he stands in (so a switch hitter is right).
+- **Measured** (`-BbStagingLog`, `BB_SWING`, six balls hit in seed 7, right- and left-handed): both hands on the handle at contact, 0.0 cm off.
+- **Checks added:** `-BbMotionShots` now goes on after its first three pitches to the first ball hit (`motion_4_*`: stance, stride, launch, turn, contact, through, finish, from across the plate), the first swing and miss (`motion_5_*`: the same and the bat coming back, from the mound's side) and the first pitch taken (`motion_6_*`): 38 pictures in all.
+- **Pictures:** `client/Saved/Shots/players4_after/` (untracked): the strips and six of play. Before: `players3_after/`.
+- **Cost:** 166 fps against 173 for step 3 run on the same machine minutes apart (seed 7, `-BbShots=6 -BbUncapped`, other work going on): nothing measurable.
+- **Left for later:** a new batter walks up without a bat and has one when he stands in (carrying it needs a pose over the walk); no dropped bat lying on the ground; the hands are plain shapes that do not close round the handle; the arms are straight at the start of the swing because the sim's hands start 0.57 m back; every batter has the same stance and stride; no check-swing or bunt look of its own; after a swing the feet stay wide until the next pitch is near.
+
+## 10. Records
 
 - PLAN D13 (revised 2026-11-15) covers this stage.
 - TASKS.md "Resume here" carries the step reached; a `/clear` point after each merged step.
