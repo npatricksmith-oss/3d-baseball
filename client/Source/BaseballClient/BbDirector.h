@@ -73,7 +73,7 @@ private:
 	void RequestNext();
 	void BeginPlayback(FBbPlay&& Play);
 	void UpdateCamera(const BbFrame& Frame, float DeltaSeconds);
-	/** Puts the ball's shadow under the ball, sized for the camera as it now stands. */
+	/** Sizes the ball for the camera as it now stands and puts its shadow under it, sized likewise. */
 	void PlaceBallShadow(const BbFrame& Frame, bool bShown);
 	void Finish();
 	/** Reads the box score of the first Through pitches from the sim (A12), once per change. */
@@ -480,12 +480,17 @@ private:
 	TObjectPtr<AStaticMeshActor> Ball;
 	UPROPERTY()
 	TObjectPtr<AStaticMeshActor> BallShadow;
-	/** Diameter the ball is drawn at, m: BallDrawnScale times its real size, 7.5 cm. (It was
-	 *  twice real size until 2026-11-16, then real size, which the owner could not see; a
-	 *  quarter larger since, owner, 2026-11-16.) Engine primitives are 1 m across at scale 1. */
+	/** Smallest diameter the ball is drawn at, m: BallDrawnScale times its real size, 7.5 cm.
+	 *  (It was twice real size until 2026-11-16, then real size, then a quarter larger, and the
+	 *  owner could see none of those from the broadcast camera; another quarter larger since,
+	 *  with the floor below; owner, 2026-11-16.) Engine primitives are 1 m across at scale 1. */
 	static constexpr float BallRealM = 0.075f;
-	static constexpr float BallDrawnScale = 1.25f;
+	static constexpr float BallDrawnScale = 1.5625f;
 	static constexpr float BallDrawnM = BallRealM * BallDrawnScale;
+	/** A far ball keeps at least this share of the view's width across (about 7.7 px of a
+	 *  1920 px view), as its shadow does (BallShadowViewShare). Close to the camera the ball
+	 *  stays BallDrawnM. */
+	static constexpr float BallViewShare = 0.004f;
 	/** Smallest diameter of the ball's ground shadow with the ball on the ground, m: the drawn
 	 *  ball's own size, as the sun's shadow of a ball is. Close to the camera it stays this size. */
 	static constexpr float BallShadowM = BallDrawnM;

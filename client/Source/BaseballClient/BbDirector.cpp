@@ -291,7 +291,8 @@ void ABbDirector::BeginPlay()
 		Bodies.Add(Body);
 		Heads.Add(Head);
 	}
-	// The ball a quarter larger than life (BallDrawnScale; owner, 2026-11-16).
+	// The ball larger than life (BallDrawnScale), and never under BallViewShare of the view
+	// across (PlaceBallShadow sizes it each frame; owner, 2026-11-16).
 	Ball = Shape(Sphere, FVector::ZeroVector, FVector(BallDrawnM), FLinearColor(1.f, 1.f, 0.9f));
 	// The ball's shadow as a viewer reads it: a dark disc on the ground straight under the
 	// ball (the sun's own shadow of so small a ball is lost at a distance and falls well
@@ -2728,6 +2729,12 @@ void ABbDirector::UpdateCamera(const BbFrame& Frame, float DeltaSeconds)
 
 void ABbDirector::PlaceBallShadow(const BbFrame& Frame, bool bShown)
 {
+	// The ball itself: never smaller on screen than BallViewShare of the view's width.
+	{
+		const float BallDistM = (Ball->GetActorLocation() - Camera->GetActorLocation()).Size() / 100.f;
+		const float BallViewM = 2.f * BallDistM * FMath::Tan(FMath::DegreesToRadians(Camera->GetCameraComponent()->FieldOfView * 0.5f));
+		Ball->SetActorScale3D(FVector(FMath::Max(BallDrawnM, BallViewM * BallViewShare)));
+	}
 	// Just above the drawn ground (which rises at the mound), below anything else.
 	const float GroundM = (float)Park->GroundZ(Frame.ball[0], Frame.ball[1]);
 	const FVector At = ToUE(Frame.ball[0], Frame.ball[1], GroundM + 0.012);

@@ -18,7 +18,7 @@ Build parallelism is capped at 6 actions in `~/.config/Unreal Engine/UnrealBuild
 
 ## What was built
 
-- `client/`: a C++-only Unreal project. **No binary assets**, so Git LFS is still not needed. The field (grass, infield dirt, mound, bases, foul lines and poles, the outfield wall on the sim's fence curve) is built at start-up from the engine's basic shapes; players are a cylinder and a sphere each, colored by team; the ball is drawn 1.25 times its real size (three times until 2026-11-12, which the owner found too big; twice until 2026-11-16; real size was too small to see).
+- `client/`: a C++-only Unreal project. **No binary assets**, so Git LFS is still not needed. The field (grass, infield dirt, mound, bases, foul lines and poles, the outfield wall on the sim's fence curve) is built at start-up from the engine's basic shapes; players are a cylinder and a sphere each, colored by team; the ball is drawn 1.5625 times its real size and never under 0.4% of the view's width across (three times real size until 2026-11-12, which the owner found too big; twice until 2026-11-16; real size and 1.25 times were too small to see).
 - The sim is loaded at run time (`libbb_ffi.so`, `BbSim.cpp`) and runs on a worker thread, one pitch ahead of what is on screen. Since 2026-11-13 the first pitch does too: the park stands empty, the scoreboard reading "Warming up", until the worker has it. The client decides nothing about the game.
 - `BbFrame.h` is the only place sim coordinates become Unreal coordinates (`ue = 100 × (y, x, z)`).
 - A text scoreboard (score, inning, outs, count, pitch speed, exit speed and launch angle).
