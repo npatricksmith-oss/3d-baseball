@@ -1,4 +1,5 @@
 #include "BbDirector.h"
+#include "BbFigure.h"
 #include "BbFrame.h"
 #include "BbPark.h"
 #include "BbGameMode.h"
@@ -180,7 +181,7 @@ void ABbDirector::BeginPlay()
 	Exits.SetNum(MaxExiting);
 	for (int32 I = 0; bFigures && I < Pool; ++I)
 	{
-		ASkeletalMeshActor* F = GetWorld()->SpawnActor<ASkeletalMeshActor>(FVector::ZeroVector, FRotator::ZeroRotator);
+		ASkeletalMeshActor* F = GetWorld()->SpawnActor<ABbFigure>(FVector::ZeroVector, FRotator::ZeroRotator);
 		USkeletalMeshComponent* C = F->GetSkeletalMeshComponent();
 		C->SetMobility(EComponentMobility::Movable);
 		C->SetSkeletalMeshAsset(FigureMesh);
@@ -241,6 +242,23 @@ void ABbDirector::BeginPlay()
 	}
 	UE_LOG(LogBb, Display, TEXT("Sim loaded from %s, seed %llu"), *Lib, Seed);
 	Park->Build(Started->Park());
+	// The figures are dressed with the park's paints, so they are built after it.
+	bMannequin = FParse::Param(FCommandLine::Get(), TEXT("BbMannequin"));
+	if (bFigures && !bMannequin)
+	{
+		FigureShop = NewObject<UBbFigureShop>(this);
+		if (FigureShop->Init(FigureMesh, Park))
+		{
+			for (ASkeletalMeshActor* F : Figures)
+			{
+				CastChecked<ABbFigure>(F)->Build(FigureShop);
+			}
+		}
+		else
+		{
+			FigureShop = nullptr;
+		}
+	}
 	FParse::Value(Cmd, TEXT("BbSpeed="), Speed);
 	FParse::Value(Cmd, TEXT("BbCamera="), CameraMode);
 	FParse::Value(Cmd, TEXT("BbShots="), ShotsLeft);
@@ -351,7 +369,22 @@ void ABbDirector::BeginPlay()
 		return;
 	}
 
-	// (The animation checks above return without a game: they need only the park.)
+	// Figure check (-BbFigureShots): both nines in a row, front and back, then one player
+	// turned through eight angles, plain and in a mirror. No game is played.
+	if (FParse::Param(Cmd, TEXT("BbFigureShots")) && Figures.Num() >= 9)
+	{
+		for (uint16 Side = 0; Side < 2; ++Side)
+		{
+			for (uint16 Order = 1; Order <= 9; ++Order)
+			{
+				const BbPlayer* P = Started->Player((uint16)(Side << 8 | Order));
+				ShotPlayers.Add(P ? *P : BbPlayer{});
+			}
+		}
+		FigureShot = 0;
+		return;
+	}
+	// (The checks above return without a game: they need only the park.)
 	Sim = MoveTemp(Started);
 	// The first pitch, like every other, resolves on a worker; Tick starts it when it is ready.
 	RequestNext();
@@ -1078,6 +1111,42 @@ void ABbDirector::PlaceDiver(ASkeletalMeshActor* F, const FVector& Foot, float Y
 	F->SetActorLocationAndRotation(Foot - Ahead * (DiveBodyBackCm * S) + FVector(0, 0, LiftCm), Facing * Tip);
 }
 
+void ABbDirector::ArrangeFigureShot(int32 Step)
+{
+	// A row along the line from second base to centre field, on the outfield grass. The sun
+	// is over the third-base side, so the row faces that way to be photographed from the
+	// front and turns its back to the same camera for the numbers.
+	// The last picture is the turn again with every figure shown in a mirror, as a
+	// left-hander's motions are: the lettering must still read.
+	const bool bTurn = Step >= 4;
+	const int32 Count = bTurn ? 8 : 9;
+	const double Gap = bTurn ? 1.05 : 0.95, Y0 = 50.0 - Gap * (Count - 1) * 0.5;
+	for (int32 I = 0; I < Figures.Num(); ++I)
+	{
+		ASkeletalMeshActor* F = Figures[I];
+		F->SetActorHiddenInGame(I >= Count);
+		if (I >= Count)
+		{
+			continue;
+		}
+		const BbPlayer& P = ShotPlayers[bTurn ? 9 : (Step % 2) * 9 + I];
+		if (ABbFigure* Dressed = FigureShop ? Cast<ABbFigure>(F) : nullptr)
+		{
+			Dressed->Dress(&P, P.side);
+			Dressed->SetMirror(Step == 5);
+		}
+		const double Y = Y0 + Gap * I;
+		const float Yaw = bTurn ? -90.f + 45.f * I : (Step >= 2 ? 90.f : -90.f);
+		PlaceDiver(F, ToUE(0.0, Y, Park->GroundZ(0.0, Y)), Yaw, 0.f, 0.f);
+		USkeletalMeshComponent* C = F->GetSkeletalMeshComponent();
+		C->PlayAnimation(AnimIdle, true);
+	}
+	const FVector Eye = ToUE(-8.6, 50.0, 1.35);
+	Camera->SetActorLocationAndRotation(Eye, (ToUE(0.0, 50.0, 0.95) - Eye).Rotation());
+	Camera->GetCameraComponent()->SetFieldOfView(54.f);
+	ShownCam = -1;
+}
+
 void ABbDirector::PoseFigure(int32 Slot, const BbActor& A, const BbFrame& Frame, const FPoseInput& In, float SimDt, float DeltaSeconds)
 {
 	ASkeletalMeshActor* F = Figures[Slot];
@@ -1231,11 +1300,21 @@ void ABbDirector::PoseFigure(int32 Slot, const BbActor& A, const BbFrame& Frame,
 	}
 	PlaceDiver(F, Foot, St.Yaw, Tilt, Lift);
 	// The mannequin faces +Y in its own frame, so its left and right are its X.
-	const FVector Scale = F->GetActorScale3D();
-	const float WantX = FMath::Abs(Scale.X) * (bMirror ? -1.f : 1.f);
-	if (Scale.X != WantX)
+	ABbFigure* Dressed = FigureShop ? Cast<ABbFigure>(F) : nullptr;
+	if (Dressed)
 	{
-		F->SetActorScale3D(FVector(WantX, Scale.Y, Scale.Z));
+		// Who he is: his club's uniform, his number, his own height and build.
+		Dressed->Dress(Sim ? Sim->Player(A.agent) : nullptr, A.agent >> 8);
+		Dressed->SetMirror(bMirror);
+	}
+	else
+	{
+		const FVector Scale = F->GetActorScale3D();
+		const float WantX = FMath::Abs(Scale.X) * (bMirror ? -1.f : 1.f);
+		if (Scale.X != WantX)
+		{
+			F->SetActorScale3D(FVector(WantX, Scale.Y, Scale.Z));
+		}
 	}
 	if (bMirror)
 	{
@@ -1298,10 +1377,11 @@ void ABbDirector::PoseFigure(int32 Slot, const BbActor& A, const BbFrame& Frame,
 		C->SetPlayRate(SimDt <= 1e-5f ? 0.f : Rate * (SimDt / FMath::Max(DeltaSeconds, 1e-5f)));
 	}
 
-	// Uniform colors: home white, away blue; fielders a shade apart from batters and runners.
+	// The bare mannequin (-BbMannequin): home white, away blue; fielders a shade apart from
+	// batters and runners.
 	const bool bHome = (A.agent >> 8) != 0;
 	const int32 Team = (bHome ? 2 : 0) + (bFielder ? 1 : 0);
-	if (Team != St.Team)
+	if (!Dressed && Team != St.Team)
 	{
 		St.Team = Team;
 		const FLinearColor Col = bHome ? (bFielder ? FLinearColor(0.8f, 0.8f, 0.85f) : FLinearColor(0.95f, 0.95f, 0.95f)) : (bFielder ? FLinearColor(0.08f, 0.12f, 0.4f) : FLinearColor(0.15f, 0.2f, 0.6f));
@@ -1999,6 +2079,32 @@ void ABbDirector::Tick(float DeltaSeconds)
 				++ParkShot;
 				ParkShotSince = Wall;
 				bParkShotAsked = false;
+			}
+		}
+	}
+	// -BbFigureShots: each arrangement of figures stands a second, is photographed, and
+	// gives way to the next.
+	if (FigureShot >= 0 && Wall >= 8.0)
+	{
+		static const TCHAR* const Names[6] = { TEXT("away_front"), TEXT("home_front"), TEXT("away_back"), TEXT("home_back"), TEXT("turn"), TEXT("turn_mirrored") };
+		if (ParkShotSince == 0.0)
+		{
+			ArrangeFigureShot(FigureShot);
+			ParkShotSince = Wall;
+		}
+		if (!bParkShotAsked && Wall >= ParkShotSince + 1.0)
+		{
+			FScreenshotRequest::RequestScreenshot(FPaths::Combine(FPaths::ProjectSavedDir(), TEXT("Shots"), FString::Printf(TEXT("figure_%d_%s.png"), FigureShot + 1, Names[FigureShot])), false, false);
+			bParkShotAsked = true;
+		}
+		else if (bParkShotAsked && Wall >= ParkShotSince + 1.5)
+		{
+			bParkShotAsked = false;
+			ParkShotSince = 0.0;
+			if (++FigureShot == 6)
+			{
+				FigureShot = -1;
+				Finish();
 			}
 		}
 	}

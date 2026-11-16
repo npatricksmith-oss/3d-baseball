@@ -105,6 +105,15 @@ public:
 	 *  first-base side, the stands behind third, low at the mound, and straight down. */
 	static TArray<FBbParkSpot> Spots(const BbPark& Desc);
 
+	// What the figures (BbFigure) share with the park: its paint and its pictures.
+	/** A paint of the park's kind: a colour and how matt it is. */
+	UMaterialInstanceDynamic* PaintOf(const FBbPaint& Paint);
+	/** A picture (sides powers of two, rows from the top) with its smaller copies. */
+	UTexture2D* MakeTexture(TArray<FColor>&& Top, int32 W, int32 H);
+	/** The materials themselves (after Build): paint, and the lit one that shows a picture. */
+	UMaterialInterface* PaintBase() const { return PaintMaterial ? PaintMaterial.Get() : FlatMaterial.Get(); }
+	UMaterialInterface* PictureBase() const { return TexturedMaterial.Get(); }
+
 private:
 	AStaticMeshActor* Shape(UStaticMesh* Mesh, const FVector& Location, const FVector& Scale, const FBbPaint& Paint, const FRotator& Rotation = FRotator::ZeroRotator);
 	/** A box standing on the line from A to B (sim frame), Depth across and from Z0 to Z1,
@@ -128,7 +137,6 @@ private:
 	void FlushInst();
 	/** Faces gathered for one paint become one piece of the bowl's mesh. */
 	void AddSolid(const FBbSolid& S, const FBbPaint& Paint);
-	UMaterialInstanceDynamic* PaintOf(const FBbPaint& Paint);
 	/** A flat picture standing on a wall: centred at Mid (sim frame), W wide along Right and
 	 *  H high, seen from the side Face points to. */
 	void Sign(const FVector& Mid, const FVector2D& Right, const FVector2D& Face, double W, double H, UTexture2D* Tex, float Rough);
@@ -139,8 +147,6 @@ private:
 	UTexture2D* PaintSign(const BbLook::FBbSponsor& S, double W, double H);
 	/** A whole number in block figures, W by H metres, on a ground colour. */
 	UTexture2D* PaintNumber(int32 Value, double W, double H, const FLinearColor& Ink, const FLinearColor& Back);
-	/** A picture (sides powers of two, rows from the top) with its smaller copies. */
-	UTexture2D* MakeTexture(TArray<FColor>&& Top, int32 W, int32 H);
 	/** Paints a picture of MakeTexture's over again. */
 	void FillTexture(UTexture2D* T, TArray<FColor>&& Top, int32 W, int32 H);
 	/** The ground's colours over a square, painted in code, with its smaller copies. */

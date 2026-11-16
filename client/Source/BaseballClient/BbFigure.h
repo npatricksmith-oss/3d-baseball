@@ -1,0 +1,127 @@
+// What a player is made of (docs/player-visuals.md, step 1): shaped pieces riding on the
+// bones of the engine's mannequin, which stays as an unseen driver so that every motion
+// that moved the mannequin moves the figure. The pieces are generated here in code, as the
+// park is; the uniform's colours and the sizes of bodies are in BbLook.h.
+#pragma once
+
+#include "CoreMinimal.h"
+#include "Animation/SkeletalMeshActor.h"
+#include "bb_ffi.h"
+#include "BbFigure.generated.h"
+
+class ABbPark;
+class UStaticMesh;
+class UStaticMeshComponent;
+class UMaterialInstanceDynamic;
+class UTexture2D;
+class USkeletalMesh;
+
+/** What a piece is dressed in. */
+enum class EBbCloth : uint8
+{
+	Jersey,
+	/** The chest: the jersey with the club's name on the front and the number on the back. */
+	Chest,
+	Pants,
+	Socks,
+	Belt,
+	Cap,
+	Bill,
+	Shoe,
+	Skin,
+	Hair,
+};
+
+/** One ring of a piece turned about its own axis: where along the axis (cm), its half-widths
+ *  across and front to back, and how far its centre sits off the axis toward the front. */
+struct FBbRing
+{
+	double Z, Rx, Ry, Oy;
+};
+
+/** A piece as every figure has it: its mesh, the bone it rides on and where it sits there. */
+struct FBbPiece
+{
+	FName Bone;
+	FTransform OnBone;
+	EBbCloth Cloth;
+	/** Thicker on a heavier man. */
+	bool bBuild;
+	int32 Mesh;
+};
+
+/** The pieces, paints and jerseys shared by every figure: made once, from the mannequin's
+ *  own skeleton, so a piece runs from joint to joint wherever the joints are. */
+UCLASS()
+class UBbFigureShop : public UObject
+{
+	GENERATED_BODY()
+
+public:
+	/** False (with a warning logged) if the skeleton lacks a bone the figure needs. */
+	bool Init(USkeletalMesh* Skeleton, ABbPark* InPark);
+	const TArray<FBbPiece>& Pieces() const { return Parts; }
+	UStaticMesh* MeshOf(const FBbPiece& P) const { return Meshes[P.Mesh]; }
+	/** The paint for a piece of a side's uniform (0 away, 1 home) on a body. */
+	UMaterialInstanceDynamic* PaintFor(EBbCloth Cloth, int32 Side, int32 Skin, int32 Hair) const;
+	/** The chest's picture: Number 0 leaves the back plain. bMirror: for a figure shown in a
+	 *  mirror (a left-hander's motion), painted backwards so that it still reads. */
+	UTexture2D* Jersey(int32 Side, int32 Number, bool bMirror);
+	UMaterialInstanceDynamic* NewChest(UObject* Outer) const;
+	/** The mannequin's standing height, cm: what an actor scale of 1 gives. */
+	double StandingCm() const { return Standing; }
+
+private:
+	UStaticMesh* Lathe(const TArray<FBbRing>& Rings, int32 Sides);
+
+	UPROPERTY()
+	TObjectPtr<ABbPark> Park;
+	UPROPERTY()
+	TArray<TObjectPtr<UStaticMesh>> Meshes;
+	/** Club paints: [side][cloth]. */
+	UPROPERTY()
+	TArray<TObjectPtr<UMaterialInstanceDynamic>> ClubPaints;
+	UPROPERTY()
+	TArray<TObjectPtr<UMaterialInstanceDynamic>> SkinPaints;
+	UPROPERTY()
+	TArray<TObjectPtr<UMaterialInstanceDynamic>> HairPaints;
+	UPROPERTY()
+	TObjectPtr<UMaterialInstanceDynamic> ShoePaint;
+	UPROPERTY()
+	TObjectPtr<UMaterialInstanceDynamic> BeltPaint;
+	UPROPERTY()
+	TMap<int32, TObjectPtr<UTexture2D>> Jerseys;
+	TArray<FBbPiece> Parts;
+	double Standing = 180.0;
+};
+
+UCLASS()
+class ABbFigure : public ASkeletalMeshActor
+{
+	GENERATED_BODY()
+
+public:
+	/** Puts the pieces on the bones and hides the mannequin. */
+	void Build(UBbFigureShop* InShop);
+	/** Dresses the figure as a player: his club's uniform, his number, and a height, build
+	 *  and skin tone that follow from his id (the same every time). Without a player, a
+	 *  plain uniform of the side. Does nothing if he is dressed so already. */
+	void Dress(const BbPlayer* Player, int32 Side);
+	/** Shown in a mirror across his own facing (a left-hander's motion from a right-handed
+	 *  one). The lettering is repainted so that it does not read backwards. */
+	void SetMirror(bool bMirror);
+
+private:
+	void Apply();
+
+	UPROPERTY()
+	TObjectPtr<UBbFigureShop> Shop;
+	UPROPERTY()
+	TArray<TObjectPtr<UStaticMeshComponent>> Parts;
+	UPROPERTY()
+	TObjectPtr<UMaterialInstanceDynamic> ChestPaint;
+	uint32 Dressed = 0;
+	int32 Side = 1, Number = 0;
+	float Height = 1.f;
+	bool bMirrored = false;
+};

@@ -163,6 +163,41 @@ namespace BbLook
 	inline const FBbPaint FlagBand{ FLinearColor(0.850f, 0.850f, 0.820f), 0.8f };
 	inline const float FlagBearingDeg = 60.f;
 
+	// ---- The players (docs/player-visuals.md) ---------------------------------------------
+	// Two invented clubs: the home side in white, the visitors in grey, each with a trim
+	// colour for its lettering, number, socks and cap. Neither white nor grey is as bright
+	// as the ball, so the ball still shows in front of a uniform.
+	struct FBbClub
+	{
+		const TCHAR* Place;
+		const TCHAR* Name;
+		/** Across the chest: the name at home, the place on the road. */
+		const TCHAR* Chest;
+		FBbPaint Jersey, Pants, Socks, Cap, Bill;
+		/** Lettering, number, collar. */
+		FLinearColor Trim;
+	};
+	/** [0] the visitors, [1] the home side (the sim's sides). */
+	inline const FBbClub Clubs[2] = {
+		{ TEXT("STONEBRIDGE"), TEXT("COLLIERS"), TEXT("STONEBRIDGE"),
+			{ FLinearColor(0.300f, 0.310f, 0.325f), 0.85f }, { FLinearColor(0.300f, 0.310f, 0.325f), 0.85f },
+			{ FLinearColor(0.200f, 0.012f, 0.010f), 0.85f }, { FLinearColor(0.022f, 0.022f, 0.026f), 0.8f },
+			{ FLinearColor(0.200f, 0.012f, 0.010f), 0.7f }, FLinearColor(0.200f, 0.012f, 0.010f) },
+		{ TEXT("CEDAR HOLLOW"), TEXT("LARKS"), TEXT("LARKS"),
+			{ FLinearColor(0.720f, 0.720f, 0.690f), 0.85f }, { FLinearColor(0.720f, 0.720f, 0.690f), 0.85f },
+			{ FLinearColor(0.006f, 0.014f, 0.075f), 0.85f }, { FLinearColor(0.006f, 0.014f, 0.075f), 0.8f },
+			{ FLinearColor(0.006f, 0.014f, 0.075f), 0.7f }, FLinearColor(0.006f, 0.014f, 0.075f) },
+	};
+	inline const FBbPaint Shoe{ FLinearColor(0.012f, 0.012f, 0.014f), 0.5f };
+	inline const FBbPaint Belt{ FLinearColor(0.015f, 0.015f, 0.018f), 0.45f };
+	/** Players' skin tones are the crowd's (Skin); their hair is the crowd's first three Heads. */
+	inline const int32 HairTones = 3;
+	// Bodies, until the roster carries its own (owner's Q18): standing height and build are
+	// drawn from these ranges by the player's id, bunched toward the middle.
+	inline const float HeightMinCm = 177.f, HeightMaxCm = 197.f;
+	/** How thick the trunk and limbs are, against the middle build. */
+	inline const float BuildMin = 0.92f, BuildMax = 1.14f;
+
 	// ---- The light: a clear mid-afternoon ------------------------------------------------
 	// Where the sun stands, in the sim frame: the bearing on the ground from +Y (centre
 	// field) round toward +X (first base), and the height above the horizon. Over the

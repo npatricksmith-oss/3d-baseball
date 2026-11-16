@@ -67,6 +67,8 @@ bool FBbSim::Start(const FString& LibraryPath, uint64 Seed)
 			const FString Name = UTF8_TO_TCHAR(P.family);
 			Family.Add(P.bat_agent, Name);
 			Family.Add(P.field_agent, Name);
+			Players.Add(P.bat_agent, P);
+			Players.Add(P.field_agent, P);
 		}
 	}
 	return true;

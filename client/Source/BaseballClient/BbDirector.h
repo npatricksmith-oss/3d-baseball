@@ -8,6 +8,7 @@
 
 class AStaticMeshActor;
 class ABbPark;
+class UBbFigureShop;
 class ASkeletalMeshActor;
 class USkeletalMesh;
 class UAnimSequence;
@@ -23,6 +24,9 @@ class UMaterialInterface;
  * Command line: -BbSimLib=<path to libbb_ffi.so> -BbSeed=<n> -BbSpeed=<x>
  *               -BbCamera=<0 broadcast | 1 behind home | 2 overhead>
  *               -BbShots=<n> (take n screenshots, then quit) -BbShotEvery=<seconds> -BbShotStart=<seconds>
+ *               -BbFigureShots (both nines stood in a row, front and back, and one figure turned
+ *               through eight angles, as figure_<n>_<what>.png, then quit; no game is played);
+ *               -BbMannequin (the grey mannequin instead of the figures);
  *               -BbParkShots (photograph the park from its fixed spots as park_<spot>.png, then quit;
  *               -BbParkShotsAt=<seconds> when to start)
  *               -BbBoxShots=<n> (photograph the Tab box at pitch n and the final box, then quit)
@@ -459,6 +463,15 @@ private:
 	/** -BbParkShots: the spot now being photographed, or -1; when its picture is asked for
 	 *  (the camera sits there a moment first, so the picture is settled), and when it is taken. */
 	int32 ParkShot = -1;
+	/** -BbFigureShots: the figures stood in rows and photographed, no game played: which
+	 *  picture is being taken, or -1. */
+	int32 FigureShot = -1;
+	TArray<BbPlayer> ShotPlayers;
+	void ArrangeFigureShot(int32 Step);
+	/** -BbMannequin: the grey mannequin as it was before the figures, for comparison. */
+	bool bMannequin = false;
+	UPROPERTY()
+	TObjectPtr<UBbFigureShop> FigureShop;
 	float ParkShotsAt = 12.f;
 	double ParkShotSince = 0.0;
 	bool bParkShotAsked = false;
