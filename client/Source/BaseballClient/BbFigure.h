@@ -30,6 +30,42 @@ enum class EBbCloth : uint8
 	Shoe,
 	Skin,
 	Hair,
+	/** The kit (step 2): a hard hat in the cap's colour, the catcher's gear in the club's
+	 *  trim, his mask, a glove's leather. */
+	Helmet,
+	Gear,
+	Mask,
+	Leather,
+};
+
+/** When a piece is worn. */
+enum class EBbWear : uint8
+{
+	Always,
+	/** The cap and its bill: off under a helmet. */
+	Cap,
+	/** The helmet's shell and ear flaps: a batter, a runner, the catcher. */
+	Helmet,
+	/** The helmet's bill: a batter or runner (the catcher's has none, under the mask). */
+	HelmetBill,
+	/** Mask, chest protector, shin guards. */
+	Catcher,
+	/** A glove on the bone of that name's hand. */
+	GloveL,
+	GloveR,
+};
+
+/** What a figure is on the field to do, which decides his kit. */
+enum class EBbRole : uint8
+{
+	/** Cap, bare hands. */
+	Plain,
+	/** Cap and glove. */
+	Fielder,
+	/** Helmet, mask, chest protector, shin guards, a larger glove. */
+	Catcher,
+	/** A batter or runner: helmet, bare hands. */
+	Batter,
 };
 
 /** One ring of a piece turned about its own axis: where along the axis (cm), its half-widths
@@ -48,6 +84,7 @@ struct FBbPiece
 	/** Thicker on a heavier man. */
 	bool bBuild;
 	int32 Mesh;
+	EBbWear Wear = EBbWear::Always;
 };
 
 /** The pieces, paints and jerseys shared by every figure: made once, from the mannequin's
@@ -70,6 +107,10 @@ public:
 	UMaterialInstanceDynamic* NewChest(UObject* Outer) const;
 	/** The mannequin's standing height, cm: what an actor scale of 1 gives. */
 	double StandingCm() const { return Standing; }
+	/** The bat, turned on the same lathe: its knob at the origin, BatCm long along Z. */
+	UStaticMesh* BatMesh() const { return Bat; }
+	UMaterialInstanceDynamic* BatPaint() const { return WoodPaint; }
+	static constexpr double BatCm = 86.0;
 
 private:
 	UStaticMesh* Lathe(const TArray<FBbRing>& Rings, int32 Sides);
@@ -90,6 +131,14 @@ private:
 	UPROPERTY()
 	TObjectPtr<UMaterialInstanceDynamic> BeltPaint;
 	UPROPERTY()
+	TObjectPtr<UMaterialInstanceDynamic> MaskPaint;
+	UPROPERTY()
+	TObjectPtr<UMaterialInstanceDynamic> LeatherPaint;
+	UPROPERTY()
+	TObjectPtr<UMaterialInstanceDynamic> WoodPaint;
+	UPROPERTY()
+	TObjectPtr<UStaticMesh> Bat;
+	UPROPERTY()
 	TMap<int32, TObjectPtr<UTexture2D>> Jerseys;
 	TArray<FBbPiece> Parts;
 	double Standing = 180.0;
@@ -107,12 +156,16 @@ public:
 	 *  and skin tone that follow from his id (the same every time). Without a player, a
 	 *  plain uniform of the side. Does nothing if he is dressed so already. */
 	void Dress(const BbPlayer* Player, int32 Side);
+	/** His kit for what he is doing (docs/player-visuals.md, step 2). The glove goes on the
+	 *  hand he does not throw with, as the viewer sees it, mirror or no mirror. */
+	void SetRole(EBbRole InRole);
 	/** Shown in a mirror across his own facing (a left-hander's motion from a right-handed
 	 *  one). The lettering is repainted so that it does not read backwards. */
 	void SetMirror(bool bMirror);
 
 private:
 	void Apply();
+	void ApplyKit();
 
 	UPROPERTY()
 	TObjectPtr<UBbFigureShop> Shop;
@@ -124,4 +177,6 @@ private:
 	int32 Side = 1, Number = 0;
 	float Height = 1.f;
 	bool bMirrored = false;
+	bool bThrowsLeft = false;
+	EBbRole Role = EBbRole::Plain;
 };

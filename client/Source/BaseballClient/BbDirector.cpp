@@ -253,6 +253,10 @@ void ABbDirector::BeginPlay()
 			{
 				CastChecked<ABbFigure>(F)->Build(FigureShop);
 			}
+			// The turned bat in place of the cylinder: its knob at its origin.
+			Bat->GetStaticMeshComponent()->SetStaticMesh(FigureShop->BatMesh());
+			Bat->GetStaticMeshComponent()->SetMaterial(0, FigureShop->BatPaint());
+			bTurnedBat = true;
 		}
 		else
 		{
@@ -1111,6 +1115,22 @@ void ABbDirector::PlaceDiver(ASkeletalMeshActor* F, const FVector& Foot, float Y
 	F->SetActorLocationAndRotation(Foot - Ahead * (DiveBodyBackCm * S) + FVector(0, 0, LiftCm), Facing * Tip);
 }
 
+void ABbDirector::PlaceBat(const FVector& Knob, const FVector& Tip)
+{
+	// Either shape's long axis is its local Z: the cylinder's middle is its origin, the
+	// turned bat's knob is.
+	Bat->SetActorRotation(FRotationMatrix::MakeFromZ(Tip - Knob).Rotator());
+	if (bTurnedBat)
+	{
+		Bat->SetActorLocation(Knob);
+		Bat->SetActorScale3D(FVector(BbLook::BatThick, BbLook::BatThick, (Tip - Knob).Size() / UBbFigureShop::BatCm));
+	}
+	else
+	{
+		Bat->SetActorLocation((Knob + Tip) * 0.5);
+	}
+}
+
 void ABbDirector::ArrangeFigureShot(int32 Step)
 {
 	// A row along the line from second base to centre field, on the outfield grass. The sun
@@ -1118,7 +1138,11 @@ void ABbDirector::ArrangeFigureShot(int32 Step)
 	// front and turns its back to the same camera for the numbers.
 	// The last picture is the turn again with every figure shown in a mirror, as a
 	// left-hander's motions are: the lettering must still read.
-	const bool bTurn = Step >= 4;
+	// Then the kit (step 2): the home nine as they take the field, from the front and (every
+	// one in a mirror, which must leave each glove on the same hand) from behind; and eight
+	// visitors in batting helmets turned through eight angles, a bat stood beside the first.
+	const bool bKitField = Step == 6 || Step == 7, bKitBat = Step == 8;
+	const bool bTurn = Step == 4 || Step == 5 || bKitBat;
 	const int32 Count = bTurn ? 8 : 9;
 	const double Gap = bTurn ? 1.05 : 0.95, Y0 = 50.0 - Gap * (Count - 1) * 0.5;
 	for (int32 I = 0; I < Figures.Num(); ++I)
@@ -1129,17 +1153,24 @@ void ABbDirector::ArrangeFigureShot(int32 Step)
 		{
 			continue;
 		}
-		const BbPlayer& P = ShotPlayers[bTurn ? 9 : (Step % 2) * 9 + I];
+		const BbPlayer& P = ShotPlayers[bKitBat ? I : bKitField ? 9 + I : bTurn ? 9 : (Step % 2) * 9 + I];
 		if (ABbFigure* Dressed = FigureShop ? Cast<ABbFigure>(F) : nullptr)
 		{
 			Dressed->Dress(&P, P.side);
-			Dressed->SetMirror(Step == 5);
+			Dressed->SetMirror(Step == 5 || Step == 7);
+			Dressed->SetRole(bKitBat ? EBbRole::Batter : !bKitField ? EBbRole::Plain : P.position == 2 ? EBbRole::Catcher : EBbRole::Fielder);
 		}
 		const double Y = Y0 + Gap * I;
-		const float Yaw = bTurn ? -90.f + 45.f * I : (Step >= 2 ? 90.f : -90.f);
+		const float Yaw = bTurn ? -90.f + 45.f * I : (Step == 2 || Step == 3 || Step == 7 ? 90.f : -90.f);
 		PlaceDiver(F, ToUE(0.0, Y, Park->GroundZ(0.0, Y)), Yaw, 0.f, 0.f);
 		USkeletalMeshComponent* C = F->GetSkeletalMeshComponent();
 		C->PlayAnimation(AnimIdle, true);
+	}
+	Bat->SetActorHiddenInGame(!bKitBat);
+	if (bKitBat)
+	{
+		const double Y = Y0 + Gap * 0.5, G = Park->GroundZ(-0.9, Y);
+		PlaceBat(ToUE(-0.9, Y, G + 0.87), ToUE(-0.9, Y, G + 0.01));
 	}
 	const FVector Eye = ToUE(-8.6, 50.0, 1.35);
 	Camera->SetActorLocationAndRotation(Eye, (ToUE(0.0, 50.0, 0.95) - Eye).Rotation());
@@ -1306,6 +1337,7 @@ void ABbDirector::PoseFigure(int32 Slot, const BbActor& A, const BbFrame& Frame,
 		// Who he is: his club's uniform, his number, his own height and build.
 		Dressed->Dress(Sim ? Sim->Player(A.agent) : nullptr, A.agent >> 8);
 		Dressed->SetMirror(bMirror);
+		Dressed->SetRole(!bFielder ? EBbRole::Batter : Position == 2 ? EBbRole::Catcher : EBbRole::Fielder);
 	}
 	else
 	{
@@ -1751,9 +1783,7 @@ void ABbDirector::Tick(float DeltaSeconds)
 			{
 				const FVector Knob = ToUE(Frame.bat_knob);
 				const FVector Tip = ToUE(Frame.bat_tip);
-				Bat->SetActorLocation((Knob + Tip) * 0.5);
-				// The cylinder's long axis is its local Z.
-				Bat->SetActorRotation(FRotationMatrix::MakeFromZ(Tip - Knob).Rotator());
+				PlaceBat(Knob, Tip);
 			}
 			// Slots below MaxActors show the frame's actors; the rest, players walking off.
 			const int32 Pool = Bodies.Num();
@@ -2086,7 +2116,8 @@ void ABbDirector::Tick(float DeltaSeconds)
 	// gives way to the next.
 	if (FigureShot >= 0 && Wall >= 8.0)
 	{
-		static const TCHAR* const Names[6] = { TEXT("away_front"), TEXT("home_front"), TEXT("away_back"), TEXT("home_back"), TEXT("turn"), TEXT("turn_mirrored") };
+		static const TCHAR* const Names[9] = { TEXT("away_front"), TEXT("home_front"), TEXT("away_back"), TEXT("home_back"), TEXT("turn"), TEXT("turn_mirrored"),
+			TEXT("kit_field"), TEXT("kit_field_mirrored_back"), TEXT("kit_bat") };
 		if (ParkShotSince == 0.0)
 		{
 			ArrangeFigureShot(FigureShot);
@@ -2101,7 +2132,7 @@ void ABbDirector::Tick(float DeltaSeconds)
 		{
 			bParkShotAsked = false;
 			ParkShotSince = 0.0;
-			if (++FigureShot == 6)
+			if (++FigureShot == 9)
 			{
 				FigureShot = -1;
 				Finish();

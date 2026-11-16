@@ -1,6 +1,6 @@
 # Player visuals: figures, motions, kit
 
-**Status:** plan agreed with the owner 2026-11-15 (seven questions, Q15–Q21, all as recommended; §1). Step 1 (the figure) is built; steps 2–7 are not. This is the second part of the graphics stage, after [the park](park-visuals.md) and before [the HUD](hud.md).
+**Status:** plan agreed with the owner 2026-11-15 (seven questions, Q15–Q21, all as recommended; §1). Steps 1 (the figure) and 2 (the kit) are built; steps 3–7 are not. This is the second part of the graphics stage, after [the park](park-visuals.md) and before [the HUD](hud.md).
 
 **Where it starts.** Every player is the engine's grey mannequin (`SKM_Manny_Simple`) with a team tint, moved by stock clips standing in for baseball: a charged punch for the delivery, an attack for the throw and the stance, a landing for the catcher's crouch, a wall jump for the dive (`BbDirector.cpp`, `LoadAssets`). The bat is a block. There are no gloves, caps, numbers, umpires or coaches.
 
@@ -39,7 +39,7 @@ Carried over from the park plan without asking again: the lead builds alone, one
 
 ## 4. Checking the look
 
-- `client/run.sh 7 -RenderOffscreen -BbShots=6` for play; `-BbParkShots` for the seven fixed spots. Step 1 adds **figure spots** that do not depend on the play: a line-up of both nines front and back at close range, and one figure turned through eight angles.
+- `client/run.sh 7 -RenderOffscreen -BbShots=6` for play; `-BbParkShots` for the seven fixed spots. Steps 1 and 2 add **figure spots** that do not depend on the play: a line-up of both nines front and back at close range, and one figure turned through eight angles.
 - Motions are checked as strips: the same motion photographed at its named moments (as `-BbDiveShots` does for the dive), with the ball in the frame at release and at contact.
 - The ball must stay easy to see against the uniforms, the white ones above all.
 
@@ -61,7 +61,20 @@ Carried over from the park plan without asking again: the lead builds alone, one
 - **Cost: not yet measured cleanly.** The owner's own game was running on the laptop throughout, so the 193 fps figure could not be repeated. Under that shared load, same run (`-BbShots=6`, seed 7): 73 fps with the mannequin, 65 and 52 with the figures (two runs). Memory 2.6 GB, unchanged. Measure again on a free machine at the start of step 2; if the cost is real, the first thing to try is not moving the pieces of figures that are hidden (40 figures are kept, at most 16 shown).
 - **Left for later:** the shirt's hem shows a slightly ragged edge where the chest overlaps the middle piece; hands are plain rounded shapes (step 2 gives one of them a glove).
 
-## 7. Records
+## 7. Step 2 as built (2026-11-15): the kit
+
+Nine more pieces a figure (32 in all), each worn or not by what he is doing (`ABbFigure::SetRole`), and a turned bat. Sizes and colours are in `BbLook.h`.
+
+- **Glove:** a leather shape over the hand he does not throw with (the roster's `throws`), about 26 cm long, larger than life as the ball and bat are. A figure shown in a mirror moves it to the other bone, so it stays on the same hand as the viewer sees it (checked by `figure_8`). Every fielder wears one; the catcher's is 18% larger.
+- **Batting helmet:** a shiny shell in the cap's colour with flaps over both ears and a short bill, in place of the cap, for every batter and runner.
+- **The catcher:** the same shell without a bill, a dark mask over the face, a chest protector in the club's trim, dark shin guards (dark so that they show against the sock).
+- **The bat:** turned on the figures' lathe (knob, handle, barrel), 35% thicker than real so the swing reads, stretched between the sim's knob and tip as the block was. With `-BbMannequin` the block stays.
+- **Checks added:** `-BbFigureShots` now takes nine pictures: `figure_7_kit_field` (the home nine as they take the field), `figure_8_kit_field_mirrored_back` (the same in a mirror, from behind), `figure_9_kit_bat` (eight visitors in helmets through eight angles, a bat stood among them).
+- **Pictures:** `client/Saved/Shots/players2_before/` (six of play) and `players2_after/` (untracked).
+- **Cost, measured this time** (seed 7, `-BbShots=6 -BbUncapped`, a browser busy on the machine): 174 fps with figures and kit, 190 with the bare mannequin in the same build, against 193 before the players. So the figures cost about a tenth. Not acted on; the first thing to try is still not moving the pieces of hidden figures.
+- **Left for later:** the mask is a solid shape, not a cage; the first baseman has an ordinary glove; a glove is one shape without a thumb or web; nobody holds the bat yet (the hands meet it with the swing, step 4); batting gloves and the batter's shin guard are not made.
+
+## 8. Records
 
 - PLAN D13 (revised 2026-11-15) covers this stage.
 - TASKS.md "Resume here" carries the step reached; a `/clear` point after each merged step.

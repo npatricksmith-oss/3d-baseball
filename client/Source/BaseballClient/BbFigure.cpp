@@ -16,7 +16,7 @@ DEFINE_LOG_CATEGORY_STATIC(LogBbFigure, Log, All);
 
 namespace
 {
-	const int32 ClubCloths = 6;
+	const int32 ClubCloths = 8;
 	/** Where a club's paint for a cloth is kept, or -1 if the cloth is not the club's. */
 	int32 ClubSlot(EBbCloth C)
 	{
@@ -28,6 +28,8 @@ namespace
 		case EBbCloth::Cap: return 3;
 		case EBbCloth::Bill: return 4;
 		case EBbCloth::Chest: return 5;
+		case EBbCloth::Helmet: return 6;
+		case EBbCloth::Gear: return 7;
 		default: return -1;
 		}
 	}
@@ -206,7 +208,7 @@ bool UBbFigureShop::Init(USkeletalMesh* Skeleton, ABbPark* InPark)
 		}
 		return Cs[I].GetLocation();
 	};
-	auto Add = [&](const FString& Bone, const FVector& From, const FVector& Axis, const TArray<FBbRing>& Rings, EBbCloth Cloth, bool bBuild, int32 Sides = 14)
+	auto Add = [&](const FString& Bone, const FVector& From, const FVector& Axis, const TArray<FBbRing>& Rings, EBbCloth Cloth, bool bBuild, int32 Sides = 14, EBbWear Wear = EBbWear::Always)
 	{
 		const int32 I = Ref.FindBoneIndex(FName(*Bone));
 		if (I == INDEX_NONE)
@@ -228,6 +230,7 @@ bool UBbFigureShop::Init(USkeletalMesh* Skeleton, ABbPark* InPark)
 		P.OnBone = FTransform(X, Y, Z, From).GetRelativeTransform(Cs[I]);
 		P.Cloth = Cloth;
 		P.bBuild = bBuild;
+		P.Wear = Wear;
 		P.Mesh = Meshes.Num();
 		Lathe(Rings, Sides);
 		Parts.Add(P);
@@ -274,10 +277,25 @@ bool UBbFigureShop::Init(USkeletalMesh* Skeleton, ABbPark* InPark)
 	// The head, hair showing below the cap at the back and sides, and the cap with its bill.
 	Add(TEXT("head"), Head, Up, Egg(9.0, 8.0, 9.6, 11.6, Fwd * 1.5), EBbCloth::Skin, false, 16);
 	Add(TEXT("head"), Head, Up, Egg(9.0, 8.3, 9.7, 11.4, Fwd * 0.2, -0.55, 0.3), EBbCloth::Hair, false, 16);
-	Add(TEXT("head"), Head, Up, Egg(9.0, 8.75, 10.3, 12.3, Fwd * 1.3, 0.22, 1.0), EBbCloth::Cap, false, 16);
+	Add(TEXT("head"), Head, Up, Egg(9.0, 8.75, 10.3, 12.3, Fwd * 1.3, 0.22, 1.0), EBbCloth::Cap, false, 16, EBbWear::Cap);
 	{
 		const double Out = Fwd * 13.4;
-		Add(TEXT("head"), Head + Up * 11.8, Up, { { 0, 0, 0, Out }, { 0, 8.0, 6.1, Out }, { 1.0, 7.8, 5.9, Out }, { 1.0, 0, 0, Out } }, EBbCloth::Bill, false, 16);
+		Add(TEXT("head"), Head + Up * 11.8, Up, { { 0, 0, 0, Out }, { 0, 8.0, 6.1, Out }, { 1.0, 7.8, 5.9, Out }, { 1.0, 0, 0, Out } }, EBbCloth::Bill, false, 16, EBbWear::Cap);
+		// The helmet (step 2): a shell over the crown, flaps over the ears and the back of the
+		// head that stop short of the face, and a short bill.
+		Add(TEXT("head"), Head, Up, Egg(9.0, 9.3, 10.9, 12.9, Fwd * 1.3, 0.10, 1.0), EBbCloth::Helmet, false, 16, EBbWear::Helmet);
+		Add(TEXT("head"), Head, Up, Egg(9.0, 9.3, 8.6, 12.9, -Fwd * 1.0, -0.50, 0.12), EBbCloth::Helmet, false, 16, EBbWear::Helmet);
+		const double Brim = Fwd * 12.6;
+		Add(TEXT("head"), Head + Up * 11.2, Up, { { 0, 0, 0, Brim }, { 0, 8.2, 5.4, Brim }, { 1.2, 8.0, 5.2, Brim }, { 1.2, 0, 0, Brim } }, EBbCloth::Helmet, false, 16, EBbWear::HelmetBill);
+		// The catcher's mask: a dark cage over the face, from the brow to under the chin.
+		Add(TEXT("head"), Head, Up, Egg(7.2, 7.2, 6.4, 10.2, Fwd * 6.6, -0.95, 0.62), EBbCloth::Mask, false, 14, EBbWear::Catcher);
+	}
+	{
+		// His chest protector: a plate hung in front of the chest and down over the belly.
+		const double L = (Neck - Spine3).Size(), Oy = Fwd * 10.4;
+		Add(TEXT("spine_04"), Spine3, Neck - Spine3,
+			{ { -17, 0, 0, Oy }, { -17, 9.0, 2.4, Oy }, { -9, 13.0, 3.0, Oy }, { L * 0.5, 15.0, 3.3, Oy }, { L * 0.8, 13.0, 3.0, Oy }, { L * 0.96, 7.0, 2.4, Oy }, { L * 0.96, 0, 0, Oy } },
+			EBbCloth::Gear, true, 16, EBbWear::Catcher);
 	}
 	for (const TCHAR* S : { TEXT("_l"), TEXT("_r") })
 	{
@@ -295,9 +313,22 @@ bool UBbFigureShop::Init(USkeletalMesh* Skeleton, ABbPark* InPark)
 		const int32 Knuckle = Ref.FindBoneIndex(FName(*(FString(TEXT("middle_01")) + S)));
 		const FVector Reach = Knuckle != INDEX_NONE ? Cs[Knuckle].GetLocation() - Wrist : Wrist - Elbow;
 		Add(FString(TEXT("hand")) + S, Wrist, Reach, Egg(5.0, 3.4, 3.4, 5.8, 0.0), EBbCloth::Skin, false, 10);
+		// A glove over the hand (step 2), drawn a little large so that it reads from the
+		// stands, as the ball and the bat are. Worn on one hand only (ABbFigure::ApplyKit).
+		Add(FString(TEXT("hand")) + S, Wrist, Reach, Egg(9.5, BbLook::GloveThickCm, BbLook::GloveWideCm, BbLook::GloveLongCm, 0.0, -0.8, 1.0), EBbCloth::Leather, false, 14,
+			S[1] == TEXT('l') ? EBbWear::GloveL : EBbWear::GloveR);
 		// The leg: trousers to the knee, the sock, the shoe.
 		Add(FString(TEXT("thigh")) + S, Hip, Knee - Hip, Tube(0.0, (Knee - Hip).Size(), 9.8, 6.9, true, true), EBbCloth::Pants, true, 14);
 		Add(FString(TEXT("calf")) + S, Knee, Ankle - Knee, Tube(0.0, (Ankle - Knee).Size(), 6.3, 4.6, true, true), EBbCloth::Socks, true, 12);
+		{
+			// The catcher's shin guard: over the knee and down the front of the shin, dark like
+			// the mask so that it shows against the sock. (This
+			// piece's own Y points to the back, its axis running down the leg.)
+			const double L = (Ankle - Knee).Size(), Oy = -Fwd * 3.2;
+			Add(FString(TEXT("calf")) + S, Knee, Ankle - Knee,
+				{ { -7, 0, 0, Oy }, { -7, 5.0, 3.6, Oy }, { -2, 6.9, 5.0, Oy }, { 5, 6.3, 4.3, Oy }, { L - 2, 5.0, 3.8, Oy }, { L - 2, 0, 0, Oy } },
+				EBbCloth::Mask, true, 12, EBbWear::Catcher);
+		}
 		{
 			// The shoe lies along the foot from ankle to ball and on past it to the toe. Its
 			// frame's Y points down, so an offset of Oy lowers a ring's centre: each ring is
@@ -329,7 +360,8 @@ bool UBbFigureShop::Init(USkeletalMesh* Skeleton, ABbPark* InPark)
 	for (int32 Side = 0; Side < 2; ++Side)
 	{
 		const BbLook::FBbClub& C = BbLook::Clubs[Side];
-		for (const FBbPaint& P : { C.Jersey, C.Pants, C.Socks, C.Cap, C.Bill, C.Jersey })
+		const FBbPaint Helmet{ C.Cap.Color, BbLook::HelmetRough }, Gear{ C.Trim, BbLook::GearRough };
+		for (const FBbPaint& P : { C.Jersey, C.Pants, C.Socks, C.Cap, C.Bill, C.Jersey, Helmet, Gear })
 		{
 			ClubPaints.Add(Park->PaintOf(P));
 		}
@@ -344,6 +376,15 @@ bool UBbFigureShop::Init(USkeletalMesh* Skeleton, ABbPark* InPark)
 	}
 	ShoePaint = Park->PaintOf(BbLook::Shoe);
 	BeltPaint = Park->PaintOf(BbLook::Belt);
+	MaskPaint = Park->PaintOf(BbLook::Mask);
+	LeatherPaint = Park->PaintOf(BbLook::Leather);
+	WoodPaint = Park->PaintOf(BbLook::Wood);
+	// The bat: a knob, a thin handle swelling to the barrel, a rounded end.
+	{
+		const double L = BatCm;
+		Bat = Lathe({ { 0, 0, 0, 0 }, { 0, 2.3, 2.3, 0 }, { 1.0, 2.6, 2.6, 0 }, { 2.0, 2.3, 2.3, 0 }, { 3.2, 1.3, 1.3, 0 }, { L * 0.30, 1.3, 1.3, 0 }, { L * 0.50, 1.8, 1.8, 0 },
+			{ L * 0.68, 2.9, 2.9, 0 }, { L * 0.80, 3.3, 3.3, 0 }, { L - 1.6, 3.3, 3.3, 0 }, { L - 0.5, 2.8, 2.8, 0 }, { L, 1.6, 1.6, 0 }, { L, 0, 0, 0 } }, 14);
+	}
 	UE_LOG(LogBbFigure, Display, TEXT("BB_FIGURE %d pieces a figure"), Parts.Num());
 	return bOk;
 }
@@ -356,6 +397,8 @@ UMaterialInstanceDynamic* UBbFigureShop::PaintFor(EBbCloth Cloth, int32 Side, in
 	case EBbCloth::Hair: return HairPaints[Hair % HairPaints.Num()];
 	case EBbCloth::Shoe: return ShoePaint;
 	case EBbCloth::Belt: return BeltPaint;
+	case EBbCloth::Mask: return MaskPaint;
+	case EBbCloth::Leather: return LeatherPaint;
 	default: return ClubPaints[(Side & 1) * ClubCloths + ClubSlot(Cloth)];
 	}
 }
@@ -454,6 +497,7 @@ void ABbFigure::Dress(const BbPlayer* Player, int32 InSide)
 	Dressed = Key;
 	Side = Player ? Player->side & 1 : InSide & 1;
 	Number = Player ? Player->number : 0;
+	bThrowsLeft = Player && Player->throws == 1;
 	// The body: from the player's id, the same every time (owner's Q18). Two draws averaged
 	// bunch heights and builds toward the middle.
 	FRandomStream Rng((int32)((Player ? Player->player_id : 0u) * 7919u + 13u));
@@ -476,6 +520,49 @@ void ABbFigure::Dress(const BbPlayer* Player, int32 InSide)
 		Parts[I]->SetRelativeScale3D(P.bBuild ? FVector(Build, Build, 1.f) : FVector::OneVector);
 	}
 	Apply();
+	ApplyKit();
+}
+
+void ABbFigure::SetRole(EBbRole InRole)
+{
+	if (InRole != Role)
+	{
+		Role = InRole;
+		ApplyKit();
+	}
+}
+
+void ABbFigure::ApplyKit()
+{
+	if (!Shop)
+	{
+		return;
+	}
+	const bool bGlove = Role == EBbRole::Fielder || Role == EBbRole::Catcher;
+	const bool bHelmet = Role == EBbRole::Batter || Role == EBbRole::Catcher;
+	// The glove goes on the hand he does not throw with. In a mirror the bones' left is the
+	// viewer's right, so it changes bones to stay on the same hand.
+	const bool bOnLeftBone = bThrowsLeft == bMirrored;
+	const TArray<FBbPiece>& Pieces = Shop->Pieces();
+	for (int32 I = 0; I < Parts.Num(); ++I)
+	{
+		bool bWorn = true;
+		switch (Pieces[I].Wear)
+		{
+		case EBbWear::Always: continue;
+		case EBbWear::Cap: bWorn = !bHelmet; break;
+		case EBbWear::Helmet: bWorn = bHelmet; break;
+		case EBbWear::HelmetBill: bWorn = Role == EBbRole::Batter; break;
+		case EBbWear::Catcher: bWorn = Role == EBbRole::Catcher; break;
+		case EBbWear::GloveL: bWorn = bGlove && bOnLeftBone; break;
+		case EBbWear::GloveR: bWorn = bGlove && !bOnLeftBone; break;
+		}
+		Parts[I]->SetVisibility(bWorn);
+		if (Pieces[I].Cloth == EBbCloth::Leather)
+		{
+			Parts[I]->SetRelativeScale3D(FVector(Role == EBbRole::Catcher ? BbLook::MittScale : 1.f));
+		}
+	}
 }
 
 void ABbFigure::SetMirror(bool bMirror)
@@ -484,6 +571,7 @@ void ABbFigure::SetMirror(bool bMirror)
 	{
 		bMirrored = bMirror;
 		Apply();
+		ApplyKit();
 		// A mirror turns every face over. The engine keeps a piece's drawing orders from
 		// when it was made, facing included, so they are made again; otherwise the figure
 		// is drawn inside out (seen in figure_6_turn_mirrored, 2026-11-15).

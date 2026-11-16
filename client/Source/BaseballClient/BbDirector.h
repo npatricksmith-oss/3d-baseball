@@ -24,8 +24,9 @@ class UMaterialInterface;
  * Command line: -BbSimLib=<path to libbb_ffi.so> -BbSeed=<n> -BbSpeed=<x>
  *               -BbCamera=<0 broadcast | 1 behind home | 2 overhead>
  *               -BbShots=<n> (take n screenshots, then quit) -BbShotEvery=<seconds> -BbShotStart=<seconds>
- *               -BbFigureShots (both nines stood in a row, front and back, and one figure turned
- *               through eight angles, as figure_<n>_<what>.png, then quit; no game is played);
+ *               -BbFigureShots (both nines stood in a row, front and back, one figure turned
+ *               through eight angles, and the kit, as figure_<n>_<what>.png, then quit; no game
+ *               is played);
  *               -BbMannequin (the grey mannequin instead of the figures);
  *               -BbParkShots (photograph the park from its fixed spots as park_<spot>.png, then quit;
  *               -BbParkShotsAt=<seconds> when to start)
@@ -353,6 +354,9 @@ private:
 	static constexpr float BallShadowMaxStretch = 2.5f;
 	UPROPERTY()
 	TObjectPtr<AStaticMeshActor> Bat;
+	/** The bat is the figure shop's turned one (its knob at its origin), not the cylinder. */
+	bool bTurnedBat = false;
+	void PlaceBat(const FVector& Knob, const FVector& Tip);
 	UPROPERTY()
 	TObjectPtr<ACameraActor> Camera;
 

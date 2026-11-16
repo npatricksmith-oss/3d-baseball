@@ -190,6 +190,19 @@ namespace BbLook
 	};
 	inline const FBbPaint Shoe{ FLinearColor(0.012f, 0.012f, 0.014f), 0.5f };
 	inline const FBbPaint Belt{ FLinearColor(0.015f, 0.015f, 0.018f), 0.45f };
+	// The kit (player-visuals step 2). A helmet is the cap's colour with a shine; the
+	// catcher's chest protector and shin guards are the club's trim.
+	inline const float HelmetRough = 0.22f, GearRough = 0.6f;
+	inline const FBbPaint Mask{ FLinearColor(0.014f, 0.014f, 0.016f), 0.45f };
+	inline const FBbPaint Leather{ FLinearColor(0.150f, 0.062f, 0.022f), 0.7f };
+	inline const FBbPaint Wood{ FLinearColor(0.520f, 0.330f, 0.150f), 0.45f };
+	/** A glove, cm: half its thickness (palm to back), half its width, half its length. Larger
+	 *  than life (a real one is about 30 long), as the ball and the bat are drawn. */
+	inline const float GloveThickCm = 4.0f, GloveWideCm = 9.0f, GloveLongCm = 13.0f;
+	/** The catcher's mitt against a fielder's glove. */
+	inline const float MittScale = 1.18f;
+	/** The bat is drawn this much thicker than real so that the swing reads from the stands. */
+	inline const float BatThick = 1.35f;
 	/** Players' skin tones are the crowd's (Skin); their hair is the crowd's first three Heads. */
 	inline const int32 HairTones = 3;
 	// Bodies, until the roster carries its own (owner's Q18): standing height and build are
