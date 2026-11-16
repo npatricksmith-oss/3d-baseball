@@ -37,6 +37,15 @@
 #include "HAL/PlatformMemory.h"
 #include "Kismet/GameplayStatics.h"
 #include "Materials/MaterialInstanceDynamic.h"
+#include "Materials/Material.h"
+#include "Materials/MaterialExpressionConstant2Vector.h"
+#include "Materials/MaterialExpressionDistance.h"
+#include "Materials/MaterialExpressionDivide.h"
+#include "Materials/MaterialExpressionMultiply.h"
+#include "Materials/MaterialExpressionOneMinus.h"
+#include "Materials/MaterialExpressionSaturate.h"
+#include "Materials/MaterialExpressionTextureCoordinate.h"
+#include "Materials/MaterialExpressionVectorParameter.h"
 #include "Misc/CommandLine.h"
 #include "Misc/Parse.h"
 #include "Misc/Paths.h"
@@ -131,6 +140,53 @@ namespace
 		Detail = FString::Printf(TEXT("length=%.3f s root_motion=%d planted_foot_passes_root=%.2f m/s planted_foot_slides=%.2f m/s"),
 			Len, Clip->HasRootMotion() ? 1 : 0, Count ? PassSum / Count / 100.0 : 0.0, Count ? SlideSum / Count / 100.0 : 0.0);
 		return RootCmps;
+	}
+}
+
+namespace
+{
+	/** A dark disc on the engine's 1 m plane, solid in the middle and fading to nothing over the
+	 *  outer SoftFrac of its radius: the ball's shadow, soft-edged (owner, 2026-11-16). Built in
+	 *  code like the park's materials; null outside the editor build, where the hard disc stays. */
+	UMaterialInterface* SoftDiscMaterial(float SoftFrac)
+	{
+#if WITH_EDITOR
+		UMaterial* M = NewObject<UMaterial>(GetTransientPackage(), NAME_None, RF_Transient);
+		M->BlendMode = BLEND_Translucent;
+		M->SetShadingModel(MSM_Unlit);
+		UMaterialExpressionVectorParameter* Color = NewObject<UMaterialExpressionVectorParameter>(M);
+		Color->ParameterName = TEXT("Color");
+		Color->DefaultValue = FLinearColor(0.02f, 0.03f, 0.02f);
+		UMaterialExpressionTextureCoordinate* Uv = NewObject<UMaterialExpressionTextureCoordinate>(M);
+		UMaterialExpressionConstant2Vector* Mid = NewObject<UMaterialExpressionConstant2Vector>(M);
+		Mid->R = 0.5f;
+		Mid->G = 0.5f;
+		// Distance from the middle as a share of the radius: 0 at the centre, 1 at the rim.
+		UMaterialExpressionDistance* Dist = NewObject<UMaterialExpressionDistance>(M);
+		Dist->A.Connect(0, Uv);
+		Dist->B.Connect(0, Mid);
+		UMaterialExpressionMultiply* Share = NewObject<UMaterialExpressionMultiply>(M);
+		Share->A.Connect(0, Dist);
+		Share->ConstB = 2.f;
+		// Opacity (1 − share) / SoftFrac, held to 0..1: solid inside, a linear fade at the rim.
+		UMaterialExpressionOneMinus* Inward = NewObject<UMaterialExpressionOneMinus>(M);
+		Inward->Input.Connect(0, Share);
+		UMaterialExpressionDivide* Ramp = NewObject<UMaterialExpressionDivide>(M);
+		Ramp->A.Connect(0, Inward);
+		Ramp->ConstB = FMath::Max(SoftFrac, 1e-3f);
+		UMaterialExpressionSaturate* Opacity = NewObject<UMaterialExpressionSaturate>(M);
+		Opacity->Input.Connect(0, Ramp);
+		for (UMaterialExpression* E : { (UMaterialExpression*)Color, (UMaterialExpression*)Uv, (UMaterialExpression*)Mid, (UMaterialExpression*)Dist, (UMaterialExpression*)Share, (UMaterialExpression*)Inward, (UMaterialExpression*)Ramp, (UMaterialExpression*)Opacity })
+		{
+			M->GetExpressionCollection().AddExpression(E);
+		}
+		M->GetEditorOnlyData()->EmissiveColor.Connect(0, Color);
+		M->GetEditorOnlyData()->Opacity.Connect(0, Opacity);
+		M->PostEditChange();
+		return M;
+#else
+		return nullptr;
+#endif
 	}
 }
 
@@ -232,12 +288,21 @@ void ABbDirector::BeginPlay()
 		Bodies.Add(Body);
 		Heads.Add(Head);
 	}
-	// The ball is drawn twice its real size (7.4 cm) so it can be seen from the stands.
+	// The ball at its real size (owner, 2026-11-16; it was drawn at twice that).
 	Ball = Shape(Sphere, FVector::ZeroVector, FVector(BallDrawnM), FLinearColor(1.f, 1.f, 0.9f));
 	// The ball's shadow as a viewer reads it: a dark disc on the ground straight under the
 	// ball (the sun's own shadow of so small a ball is lost at a distance and falls well
-	// to the side of a high fly). It shrinks as the ball climbs, so height reads too.
-	BallShadow = Shape(Cylinder, FVector::ZeroVector, FVector(BallShadowM, BallShadowM, 0.002), FLinearColor(0.02f, 0.03f, 0.02f));
+	// to the side of a high fly), its rim faded (BallShadowSoftFrac). Its size follows the
+	// ball's height, so height reads too.
+	if (UMaterialInterface* Soft = SoftDiscMaterial(BallShadowSoftFrac))
+	{
+		BallShadow = Shape(Plane, FVector::ZeroVector, FVector(BallShadowM, BallShadowM, 1.0), FLinearColor(0.02f, 0.03f, 0.02f));
+		BallShadow->GetStaticMeshComponent()->SetMaterial(0, Soft);
+	}
+	else
+	{
+		BallShadow = Shape(Cylinder, FVector::ZeroVector, FVector(BallShadowM, BallShadowM, 0.002), FLinearColor(0.02f, 0.03f, 0.02f));
+	}
 	BallShadow->GetStaticMeshComponent()->SetCastShadow(false);
 	// The bat: a cylinder stretched between the knob and the tip the sim reports, drawn a
 	// little thicker than real so the swing reads from the stands.
@@ -555,6 +620,13 @@ void ABbDirector::BeginPlayback(FBbPlay&& Play)
 	{
 		HoldAfter = HrHoldS;
 	}
+	// A foul into the seats: a moment on the field, then straight to everyone set for the next
+	// pitch, with no walk back (owner's play, seed 3647 play 62).
+	bFoulOut = Current.Info.dead_reason == 4;
+	if (bFoulOut)
+	{
+		HoldAfter = FoulOutHoldS;
+	}
 }
 
 void ABbDirector::ShowReplay(int32 Index)
@@ -580,7 +652,8 @@ void ABbDirector::ShowReplay(int32 Index)
 		PurgeExits(Start);
 	}
 	bHomeRun = Current.Info.dead_reason == 2;
-	HoldAfter = bHomeRun ? HrHoldS : Current.Info.exit_velocity_mps > 0.f ? 2.5f : 0.7f;
+	bFoulOut = Current.Info.dead_reason == 4;
+	HoldAfter = bHomeRun ? HrHoldS : bFoulOut ? FoulOutHoldS : Current.Info.exit_velocity_mps > 0.f ? 2.5f : 0.7f;
 	UE_LOG(LogBb, Display, TEXT("BB_REPLAY show play=%u live=%d kept=%d"), Current.Info.play_index, bLive ? 1 : 0, History.Num());
 }
 
@@ -2305,7 +2378,7 @@ void ABbDirector::PlaceBallShadow(const BbFrame& Frame, bool bShown)
 	// The cylinder's local X lies along the line of sight on the ground.
 	const float Yaw = FMath::RadiansToDegrees(FMath::Atan2(Look.Y, Look.X));
 	BallShadow->SetActorLocationAndRotation(At, FRotator(0.f, Yaw, 0.f));
-	BallShadow->SetActorScale3D(FVector(Along, Across, 0.002));
+	BallShadow->SetActorScale3D(FVector(Along, Across, BallShadow->GetActorScale3D().Z));
 	BallShadow->SetActorHiddenInGame(!bShown);
 }
 
@@ -3143,7 +3216,7 @@ void ABbDirector::Tick(float DeltaSeconds)
 		else if (PlayTime >= Current.Info.duration_s + HoldAfter && NextPlay.bValid)
 		{
 			// The next pitch was already in hand when a replay began: stage the walk to it again.
-			if (StartReset(NextPlay))
+			if (!bFoulOut && StartReset(NextPlay))
 			{
 				bReset = true;
 				ResetTime = 0.f;
@@ -3158,7 +3231,7 @@ void ABbDirector::Tick(float DeltaSeconds)
 		{
 			FBbPlay Next = Pending.Get();
 			bPending = false;
-			if (Next.bValid && StartReset(Next))
+			if (Next.bValid && !bFoulOut && StartReset(Next))
 			{
 				// The next pitch waits while everyone gets back into place.
 				NextPlay = MoveTemp(Next);

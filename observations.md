@@ -9,8 +9,8 @@ The owner's list of what he has seen and wants, with where each stands. The lett
 # Added 2026-11-16
 
 Screen:
-- [ ] Reduce ball, bat and glove. *They are drawn larger than life so they show up on a TV-style camera (the ball twice its real size).*
-- [ ] Ball shadow should be half as big and 30% more blurred when hit.
+- [x] Reduce ball, bat and glove (owner: the ball only; leave the glove and bat as they are). *Done 2026-11-16: the ball is drawn at its real size, 7.5 cm (it was 15). Not yet built or seen.*
+- [x] Ball shadow should be half as big and 30% more blurred when hit. *Done 2026-11-16: half the size, and its edge now fades out over the outer 30% of it (before, the edge was hard). Not yet built or seen.*
 - [ ] Runners in the mini base map should be according to the real runners. *Today the map shows the bases as they were before the pitch until the play ends, then jumps to the result.*
 
 Rules:

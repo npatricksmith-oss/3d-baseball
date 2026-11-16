@@ -434,19 +434,23 @@ private:
 	TObjectPtr<AStaticMeshActor> Ball;
 	UPROPERTY()
 	TObjectPtr<AStaticMeshActor> BallShadow;
-	/** Diameter the ball is drawn at, m: twice the real 7.4 cm (engine primitives are 1 m
-	 *  across at scale 1). */
-	static constexpr float BallDrawnM = 0.15f;
+	/** Diameter the ball is drawn at, m: its real size, 7.4 cm (owner, 2026-11-16; it was twice
+	 *  that). Engine primitives are 1 m across at scale 1. */
+	static constexpr float BallDrawnM = 0.075f;
 	/** Smallest diameter of the ball's ground shadow with the ball on the ground, m: the drawn
 	 *  ball's own size, as the sun's shadow of a ball is. Close to the camera it stays this size. */
 	static constexpr float BallShadowM = BallDrawnM;
 	/** With the ball on the ground, a far shadow keeps at least this share of the view's width
-	 *  across (about 11 px of a 1600 px view), so it can still be seen deep in the outfield.
+	 *  across (about 5.6 px of a 1600 px view; it was twice that until the owner asked for
+	 *  half the size, 2026-11-16), so it can still be seen deep in the outfield.
 	 *  The ball's height then scales it like the 15 cm floor (below). Sized so the shadow is never larger on
 	 *  screen than the 50 cm disc the owner found too big (2026-11-12): from the follow camera
 	 *  a ball in the near infield gets about 11 x 6.5 px against that disc's 18 x 6; at the
 	 *  pitch camera's long lens the 15 cm floor governs. */
-	static constexpr float BallShadowViewShare = 0.007f;
+	static constexpr float BallShadowViewShare = 0.0035f;
+	/** The shadow's rim: it fades from solid to nothing over this share of its radius (owner,
+	 *  2026-11-16: half as big as before and 30% more blurred; before, the edge was hard). */
+	static constexpr float BallShadowSoftFrac = 0.3f;
 	/** The shadow's size follows the ball's height (owner, 2026-11-15). At or below
 	 *  BallShadowNoneM (the ball's centre resting or rolling on the ground, with a little room
 	 *  for low skips) there is none; it opens to the sizes above by BallShadowFullM, and grows
@@ -514,6 +518,11 @@ private:
 	 *  the fence; the timeline then has the batter and runners trot round the bases to home
 	 *  (bb_game::timeline, presentation only), and the play's duration covers it. */
 	bool bHomeRun = false;
+	/** A foul ball into the seats (BbPlayInfo.dead_reason 4): no walk back after it; the next
+	 *  pitch starts with everyone already in place. */
+	bool bFoulOut = false;
+	/** How long the field is shown after a foul into the seats before the next pitch, s. */
+	static constexpr float FoulOutHoldS = 1.0f;
 	/** The ball is over the wall: the camera is in center field and the card is up. */
 	bool bHomeRunCut = false;
 	/** The trot's view: from beyond center field, looking in at the diamond, wide enough for
