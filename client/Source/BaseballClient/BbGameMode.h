@@ -29,6 +29,8 @@ public:
 	FString PitchLine;
 	/** While an earlier pitch is being replayed: "REPLAY   seed 7   play 123". */
 	FString Replay;
+	/** A short note under it, such as where a saved play went. */
+	FString Notice;
 	/** The call on the current pitch, shown large once it is known. */
 	FString Call;
 	/** The umpire's signal of the latest out ("OUT at first"), shown as he makes it. */

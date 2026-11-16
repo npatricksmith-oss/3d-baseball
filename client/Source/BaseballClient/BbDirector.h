@@ -45,6 +45,7 @@ class UMaterialInterface;
  *               first animation phase as BB_RESET / BB_EXIT / BB_THROW, and a BB_STAGING summary)
  *               -BbRushAt=<s> (press Enter once, that many seconds in; logs BB_RUSH)
  *               -BbReplayAt=<s> (press R twice that many seconds in, F six seconds later; logs BB_REPLAY)
+ *               -BbSaveAt=<s> (press S that many seconds in and Save a second later; logs BB_SAVE)
  *               -BbClipSpeeds (log the ground speed each gait clip is animated for as BB_CLIP)
  */
 UCLASS()
@@ -580,6 +581,31 @@ private:
 	 *  once (unattended check; logs BB_REPLAY). */
 	float ReplayAt = -1.f;
 	int32 ReplayAuto = 0;
+	/** Saving a play (owner, 2026-11-15; BbSavePlay.h). During a replay a "Save this play"
+	 *  button shows at the top right and the mouse is free to click it; it, or S at any
+	 *  time, opens the dialog for the pitch on screen. The game pauses while it is open. */
+	TSharedPtr<SWidget> SaveButtonLayer;
+	TSharedPtr<SWidget> SaveDialogLayer;
+	TSharedPtr<class SBbSavePlayDialog> SaveDialog;
+	bool bSaveOpen = false;
+	bool bPausedBeforeSave = false;
+	/** The input mode last set: -1 none yet, 0 game only, 1 game and UI (replay), 2 UI only (dialog). */
+	int32 InputModeSet = -1;
+	/** The dialog's buttons close it on the next tick, not from inside their own click:
+	 *  0 nothing, 1 cancel, 2 save SaveComment. */
+	int32 SaveClose = 0;
+	FString SaveComment;
+	/** "Saved: saved-plays/seed7-play12-....toml" under the REPLAY line, until SavedUntil (Wall). */
+	FString SavedNote;
+	double SavedUntil = 0.0;
+	void OpenSaveDialog();
+	void CloseSaveDialog(bool bSave);
+	/** Shows the mouse and lets Slate have clicks during a replay; hides it otherwise. */
+	void SyncCursor();
+	/** -BbSaveAt=<s>: seconds of real time after which S is pressed and, 1 s later, Save with a
+	 *  test comment (unattended check; logs BB_SAVE). */
+	float SaveAt = -1.f;
+	int32 SaveAuto = 0;
 	/** Drawing a held ball in the hand: the hand's offset from the sim's ball (cm), kept from
 	 *  the last frame it was held, and how much of it is applied (1 in the hand, 0 on the
 	 *  sim's path). It eases in over HeldTakeS when a fielder takes the ball and out over

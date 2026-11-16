@@ -4,7 +4,16 @@
 #include "BbPark.h"
 #include "BbPose.h"
 #include "BbGameMode.h"
+#include "BbSavePlay.h"
 #include "Animation/AnimSequence.h"
+#include "Engine/GameViewportClient.h"
+#include "Framework/Application/SlateApplication.h"
+#include "Styling/CoreStyle.h"
+#include "Widgets/Input/SButton.h"
+#include "Widgets/Input/SMultiLineEditableTextBox.h"
+#include "Widgets/Layout/SBorder.h"
+#include "Widgets/SOverlay.h"
+#include "Widgets/Text/STextBlock.h"
 #include "Animation/SkeletalMeshActor.h"
 #include "Animation/Skeleton.h"
 #include "Async/Async.h"
@@ -289,6 +298,7 @@ void ABbDirector::BeginPlay()
 	FParse::Value(Cmd, TEXT("BbShots="), ShotsLeft);
 	FParse::Value(Cmd, TEXT("BbRushAt="), RushAt);
 	FParse::Value(Cmd, TEXT("BbReplayAt="), ReplayAt);
+	FParse::Value(Cmd, TEXT("BbSaveAt="), SaveAt);
 	SeedShown = Seed;
 	FParse::Value(Cmd, TEXT("BbShotEvery="), ShotEvery);
 	FParse::Value(Cmd, TEXT("BbShotStart="), NextShot);
@@ -626,6 +636,131 @@ void ABbDirector::ReplayForward()
 		return;
 	}
 	ShowReplay(ReplayIdx + 1);
+}
+
+void ABbDirector::SyncCursor()
+{
+	APlayerController* PC = GetWorld()->GetFirstPlayerController();
+	if (!PC || !GEngine || !GEngine->GameViewport)
+	{
+		return;
+	}
+	if (!SaveButtonLayer.IsValid())
+	{
+		// The replay's button, top right; it shows only while a replay runs.
+		TWeakObjectPtr<ABbDirector> Self(this);
+		SaveButtonLayer = SNew(SOverlay)
+			+ SOverlay::Slot().HAlign(HAlign_Right).VAlign(VAlign_Top).Padding(FMargin(0.f, 24.f, 28.f, 0.f))
+			[
+				SNew(SButton)
+				.IsFocusable(false)
+				.ContentPadding(FMargin(14.f, 5.f))
+				.Visibility_Lambda([Self]() { return Self.IsValid() && Self->bReplay && !Self->bSaveOpen ? EVisibility::Visible : EVisibility::Collapsed; })
+				.OnClicked_Lambda([Self]() { if (Self.IsValid()) { Self->OpenSaveDialog(); } return FReply::Handled(); })
+				[
+					SNew(STextBlock).Text(FText::FromString(TEXT("Save this play  (S)"))).Font(FCoreStyle::GetDefaultFontStyle("Bold", 14))
+				]
+			];
+		GEngine->GameViewport->AddViewportWidgetContent(SaveButtonLayer.ToSharedRef(), 50);
+	}
+	const int32 Want = bSaveOpen ? 2 : bReplay ? 1 : 0;
+	if (Want == InputModeSet)
+	{
+		return;
+	}
+	InputModeSet = Want;
+	PC->bShowMouseCursor = Want != 0;
+	if (Want == 2 && SaveDialog.IsValid())
+	{
+		FInputModeUIOnly Mode;
+		Mode.SetWidgetToFocus(SaveDialog->Box);
+		Mode.SetLockMouseToViewportBehavior(EMouseLockMode::DoNotLock);
+		PC->SetInputMode(Mode);
+		FSlateApplication::Get().SetKeyboardFocus(SaveDialog->Box);
+	}
+	else if (Want == 1)
+	{
+		FInputModeGameAndUI Mode;
+		Mode.SetHideCursorDuringCapture(false);
+		Mode.SetLockMouseToViewportBehavior(EMouseLockMode::DoNotLock);
+		PC->SetInputMode(Mode);
+	}
+	else
+	{
+		PC->SetInputMode(FInputModeGameOnly());
+	}
+}
+
+void ABbDirector::OpenSaveDialog()
+{
+	if (bSaveOpen || !Current.bValid || !GEngine || !GEngine->GameViewport)
+	{
+		return;
+	}
+	bSaveOpen = true;
+	SaveClose = 0;
+	bPausedBeforeSave = bPaused;
+	bPaused = true;
+	TWeakObjectPtr<ABbDirector> Self(this);
+	const FText Title = FText::FromString(FString::Printf(TEXT("[SEED %llu    PLAY %u]"), SeedShown, Current.Info.play_index));
+	SaveDialogLayer = SNew(SOverlay)
+		+ SOverlay::Slot()
+		[
+			// The field dimmed behind the dialog.
+			SNew(SBorder)
+			.BorderImage(FCoreStyle::Get().GetBrush("WhiteBrush"))
+			.BorderBackgroundColor(FLinearColor(0.f, 0.f, 0.f, 0.45f))
+		]
+		+ SOverlay::Slot().HAlign(HAlign_Center).VAlign(VAlign_Center)
+		[
+			SAssignNew(SaveDialog, SBbSavePlayDialog)
+			.Title(Title)
+			.OnCancel_Lambda([Self]() { if (Self.IsValid()) { Self->SaveClose = 1; } })
+			.OnSave_Lambda([Self](const FString& Comment) { if (Self.IsValid()) { Self->SaveComment = Comment; Self->SaveClose = 2; } })
+		];
+	GEngine->GameViewport->AddViewportWidgetContent(SaveDialogLayer.ToSharedRef(), 100);
+	SyncCursor();
+	UE_LOG(LogBb, Display, TEXT("BB_SAVE open seed=%llu play=%u"), SeedShown, Current.Info.play_index);
+}
+
+void ABbDirector::CloseSaveDialog(bool bSave)
+{
+	if (!bSaveOpen)
+	{
+		return;
+	}
+	if (bSave)
+	{
+		BbSavePlay::FWhat What;
+		What.Seed = SeedShown;
+		What.Play = Current.Info.play_index;
+		What.Inning = Before.inning;
+		What.bTop = Before.top != 0;
+		What.Outs = Before.outs;
+		What.Balls = Before.balls;
+		What.Strikes = Before.strikes;
+		What.AwayRuns = Before.away_runs;
+		What.HomeRuns = Before.home_runs;
+		const FString Path = BbSavePlay::Write(What, SaveComment);
+		SavedNote = Path.IsEmpty() ? FString(TEXT("Could not save the play")) : FString::Printf(TEXT("Saved: saved-plays/%s"), *FPaths::GetCleanFilename(Path));
+		SavedUntil = Wall + 4.0;
+		UE_LOG(LogBb, Display, TEXT("BB_SAVE %s seed=%llu play=%u path=%s"), Path.IsEmpty() ? TEXT("failed") : TEXT("saved"), SeedShown, What.Play, *Path);
+	}
+	else
+	{
+		UE_LOG(LogBb, Display, TEXT("BB_SAVE cancel"));
+	}
+	if (GEngine && GEngine->GameViewport && SaveDialogLayer.IsValid())
+	{
+		GEngine->GameViewport->RemoveViewportWidgetContent(SaveDialogLayer.ToSharedRef());
+	}
+	SaveDialogLayer.Reset();
+	SaveDialog.Reset();
+	SaveComment.Reset();
+	SaveClose = 0;
+	bSaveOpen = false;
+	bPaused = bPausedBeforeSave;
+	SyncCursor();
 }
 
 FVector ABbDirector::BatterFrame(const float P[3], const FBatNote& N)
@@ -2185,8 +2320,35 @@ void ABbDirector::Tick(float DeltaSeconds)
 	// Keys: Space pauses, - and = change speed, C changes camera, Tab holds the box score,
 	// Esc or Q quits.
 	bool bTabHeld = false;
-	if (APlayerController* PC = GetWorld()->GetFirstPlayerController())
+	// The save dialog (BbSavePlay): its buttons close it here, a tick after their click.
+	if (SaveClose != 0)
 	{
+		CloseSaveDialog(SaveClose == 2);
+	}
+	// -BbSaveAt=<s>: S, then Save a second later, for an unattended check.
+	if (SaveAt >= 0.f && Current.bValid && Wall >= SaveAt + (SaveAuto == 1 ? 1.f : 0.f))
+	{
+		if (SaveAuto == 0)
+		{
+			OpenSaveDialog();
+			++SaveAuto;
+		}
+		else
+		{
+			SaveComment = TEXT("Unattended check (-BbSaveAt): \"quotes\", a back\\slash\nand a second line.");
+			CloseSaveDialog(true);
+			SaveAt = -1.f;
+		}
+	}
+	SyncCursor();
+	APlayerController* KeysPC = bSaveOpen ? nullptr : GetWorld()->GetFirstPlayerController();
+	if (APlayerController* PC = KeysPC)
+	{
+		// S: save the pitch on screen, with a comment (BbSavePlay).
+		if (PC->WasInputKeyJustPressed(EKeys::S) && Current.bValid)
+		{
+			OpenSaveDialog();
+		}
 		if (PC->WasInputKeyJustPressed(EKeys::SpaceBar))
 		{
 			bPaused = !bPaused;
@@ -2900,7 +3062,8 @@ void ABbDirector::Tick(float DeltaSeconds)
 			}
 			static const TCHAR* CamNames[3] = { TEXT("broadcast"), TEXT("behind home"), TEXT("overhead") };
 			Hud->Replay = bReplay ? FString::Printf(TEXT("REPLAY    seed %llu    play %u"), SeedShown, Current.Info.play_index) : FString();
-			Hud->Footer = FString::Printf(TEXT("Space: %s    - / =: speed %.2gx    Enter: %s    R / F: replay back / forward    C: camera (%s)    Esc or Q: quit"), bPaused ? TEXT("paused") : TEXT("pause"), Speed, bRush ? TEXT("skipping to the next pitch") : TEXT("skip to the next pitch"), CamNames[CameraMode]);
+			Hud->Notice = Wall < SavedUntil ? SavedNote : FString();
+			Hud->Footer = FString::Printf(TEXT("Space: %s    - / =: speed %.2gx    Enter: %s    R / F: replay back / forward    S: save play    C: camera (%s)    Esc or Q: quit"), bPaused ? TEXT("paused") : TEXT("pause"), Speed, bRush ? TEXT("skipping to the next pitch") : TEXT("skip to the next pitch"), CamNames[CameraMode]);
 			// The outs on the board are the ones called so far. Runs, count and bases change
 			// when the play is known. A play that ends the half inning leaves it on the board,
 			// at three outs, until the next pitch (BeginPlayback).
@@ -3229,6 +3392,20 @@ void ABbDirector::EndPlay(const EEndPlayReason::Type Reason)
 		}
 		bPending = false;
 	}
+	if (GEngine && GEngine->GameViewport)
+	{
+		if (SaveDialogLayer.IsValid())
+		{
+			GEngine->GameViewport->RemoveViewportWidgetContent(SaveDialogLayer.ToSharedRef());
+		}
+		if (SaveButtonLayer.IsValid())
+		{
+			GEngine->GameViewport->RemoveViewportWidgetContent(SaveButtonLayer.ToSharedRef());
+		}
+	}
+	SaveDialogLayer.Reset();
+	SaveDialog.Reset();
+	SaveButtonLayer.Reset();
 	if (bReplay)
 	{
 		// The pitch on screen may be one of the kept ones: release each blob once.
