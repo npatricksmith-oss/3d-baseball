@@ -1,6 +1,6 @@
 # Park visuals: field and stadium
 
-**Status:** plan agreed with the owner 2026-11-15 (twelve questions, answers in §1). **Step 1 (park export and field surface) is built** (§6), **step 2 (light and materials)** (§7), **step 3 (walls and field furniture)** (§8), **step 4 (the seating bowl)** (§9), **step 5 (scoreboard, signs, backdrop)** (§10) and **step 6 (the crowd)** (§11): the plan is complete. This is the first part of the graphics stage; players and game graphics (HUD) get their own plans afterwards.
+**Status:** plan agreed with the owner 2026-11-15 (twelve questions, answers in §1). **Step 1 (park export and field surface) is built** (§6), **step 2 (light and materials)** (§7), **step 3 (walls and field furniture)** (§8), **step 4 (the seating bowl)** (§9), **step 5 (scoreboard, signs, backdrop)** (§10) and **step 6 (the crowd)** (§11): the plan is complete. This is the first part of the graphics stage; the players ([player-visuals.md](player-visuals.md)) and the game graphics ([hud.md](hud.md)) have their own plans.
 
 **Why now:** Codex's weekly limit is nearly used, so the physics and behaviour work, which needs outside reviews, pauses. The owner moved the looks forward from the polish milestone (PLAN D13, revised the same day). This stage runs without Codex reviews.
 
