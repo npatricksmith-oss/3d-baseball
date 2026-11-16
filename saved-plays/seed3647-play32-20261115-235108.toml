@@ -1,0 +1,14 @@
+# A play saved from the instant replay (client BbSavePlay).
+# See it again: client/run.sh 3647, then R back to play 32 once it has been shown.
+seed = 3647
+play = 32
+inning = 2
+half = "top"
+# The board before the pitch.
+outs = 0
+count = "0-0"
+score = "away 2, home 0"
+saved = 2026-11-15T23:51:08
+comment = """
+The third basement gets the ball right away with plenty of time to throw the runner out. With no one else on base, a real thirdbasemen takes a split second to step and throw to make sure to make a strong, accurate throw. They can visually estimate how long the runner will take and if they have plenty of time then they will do this.
+"""

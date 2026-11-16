@@ -1,0 +1,14 @@
+# A play saved from the instant replay (client BbSavePlay).
+# See it again: client/run.sh 3647, then R back to play 40 once it has been shown.
+seed = 3647
+play = 40
+inning = 2
+half = "top"
+# The board before the pitch.
+outs = 2
+count = "0-2"
+score = "away 2, home 0"
+saved = 2026-11-15T23:53:28
+comment = """
+when there is a pop foul to the catcher, they will take their mask off and toss it out of the way so they can see the ball better. Let's do this for visual realism but not for physical realism.
+"""

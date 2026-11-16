@@ -1,0 +1,14 @@
+# A play saved from the instant replay (client BbSavePlay).
+# See it again: client/run.sh 3647, then R back to play 15 once it has been shown.
+seed = 3647
+play = 15
+inning = 1
+half = "bottom"
+# The board before the pitch.
+outs = 0
+count = "1-1"
+score = "away 2, home 0"
+saved = 2026-11-15T23:41:03
+comment = """
+Foul balls should be called at the right time. Look online for foul ball rules. As soon as the ball is deemed foul, it should be called by the umpire.
+"""

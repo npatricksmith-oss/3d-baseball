@@ -1,0 +1,14 @@
+# A play saved from the instant replay (client BbSavePlay).
+# See it again: client/run.sh 3647, then R back to play 26 once it has been shown.
+seed = 3647
+play = 26
+inning = 1
+half = "bottom"
+# The board before the pitch.
+outs = 1
+count = "0-0"
+score = "away 2, home 0"
+saved = 2026-11-15T23:46:44
+comment = """
+The pitcher catches a hot liner back to him with runners on base. He should look at the runners after to see if they are far enough away to double one of them up. 
+"""

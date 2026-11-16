@@ -1,0 +1,14 @@
+# A play saved from the instant replay (client BbSavePlay).
+# See it again: client/run.sh 3647, then R back to play 159 once it has been shown.
+seed = 3647
+play = 159
+inning = 8
+half = "top"
+# The board before the pitch.
+outs = 1
+count = "1-0"
+score = "away 3, home 2"
+saved = 2026-11-16T00:30:09
+comment = """
+at this point the 1st basemen knows he is going to run to first himself so he should put his hand out to signal \"stop\" to the pitcher, to tell the picther \"I got it\"
+"""

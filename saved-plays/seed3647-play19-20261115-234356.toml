@@ -1,0 +1,14 @@
+# A play saved from the instant replay (client BbSavePlay).
+# See it again: client/run.sh 3647, then R back to play 19 once it has been shown.
+seed = 3647
+play = 19
+inning = 1
+half = "bottom"
+# The board before the pitch.
+outs = 0
+count = "2-0"
+score = "away 2, home 0"
+saved = 2026-11-15T23:43:56
+comment = """
+even though the 1st basement was correctly holding the runner close to 1st, he should try to go for the grounder anyway, unless it is close enough to 2nd base where the 1st basemen might think that the 2nd basement might get it and throw to 1st (where he should be). In that case he would go back to 1st to get ready for a potential throw.
+"""

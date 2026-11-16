@@ -1,0 +1,14 @@
+# A play saved from the instant replay (client BbSavePlay).
+# See it again: client/run.sh 3647, then R back to play 68 once it has been shown.
+seed = 3647
+play = 68
+inning = 3
+half = "bottom"
+# The board before the pitch.
+outs = 1
+count = "0-0"
+score = "away 2, home 0"
+saved = 2026-11-16T00:05:43
+comment = """
+Runner doesn't know yet if the ball will be caught yet. Runner should go a little ways along the basepath, then stop at an appropriate distance in an athletic stance, watching the ball and outfielder to judge if it will be a hit  or out. Once he believes it will be an out, then he should go back to the base to potentially tag up and run to the next base.
+"""
