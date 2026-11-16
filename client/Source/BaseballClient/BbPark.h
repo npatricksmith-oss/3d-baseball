@@ -97,6 +97,10 @@ public:
 	/** A step inside the dugout of a side (+1 first base, -1 third base): where a player
 	 *  walking off disappears under the roof. */
 	FVector2D DugoutDoor(double Side) const;
+	/** The bench in the dugout of a side: the front edge's start, which way it runs and how
+	 *  far, which way a man sitting on it faces, and the heights of the seat and of the floor
+	 *  his feet are on (m, sim frame). False before Build or without such a dugout. */
+	bool Bench(double Side, FVector2D& From, FVector2D& Along, FVector2D& Face, double& Length, double& SeatZ, double& FloorZ) const;
 	/** What the outfield board shows: the line score from the sim's box score, the half inning,
 	 *  the count and the outs. Repainted only when one of them has changed. */
 	void ShowBoard(const BbBoxScore& Box, int32 Inning, bool bTop, int32 Balls, int32 Strikes, int32 Outs);

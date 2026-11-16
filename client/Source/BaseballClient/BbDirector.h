@@ -5,6 +5,7 @@
 #include "Async/Future.h"
 #include "BbSim.h"
 #include "BbPose.h"
+#include "BbCrew.h"
 #include "BbDirector.generated.h"
 
 class AStaticMeshActor;
@@ -37,6 +38,9 @@ class UMaterialInterface;
  *               -BbParkShots (photograph the park from its fixed spots as park_<spot>.png, then quit;
  *               -BbParkShotsAt=<seconds> when to start)
  *               -BbBoxShots=<n> (photograph the Tab box at pitch n and the final box, then quit)
+ *               -BbCrewShots (the umpires set and signalling, a base coach and both benches
+ *               photographed as crew_<n>_<what>.png, then quit; no game is played);
+ *               -BbNoCrew (no umpires, coaches or benches);
  *               -BbDiveShots=<n> (photograph n dives: driving off, in the air, down, on hands
  *               and knees, getting up; then quit)
  *               -BbSlideShots=<n> (photograph n slides: going down, sliding, at the bag, sitting
@@ -330,6 +334,18 @@ private:
 	};
 	TArray<FSlideNote> Slides;
 	void NoteSlides();
+	/** The umpires, the base coaches and the benches (player-visuals §12), and the calls of
+	 *  the pitch now shown for the umpires to signal: strikes, fouls and outs from the sim's
+	 *  record (NoteSignals), and "safe" where a play was made on a runner who was not out
+	 *  (NoteSlides, which knows the plays at the bases). */
+	UPROPERTY()
+	TObjectPtr<UBbCrew> Crew;
+	TArray<FBbSignal> Signals;
+	void NoteSignals();
+	/** -BbCrewShots: which picture is being taken, or -1, and what the crew is told for it. */
+	int32 CrewShot = -1;
+	FBbCrewTick CrewShotTick;
+	void ArrangeCrewShot(int32 Step);
 	/** He slides if he comes in at least this fast, m/s, and the ball is taken within
 	 *  SlidePlayM of the bag within SlidePlayS of his getting there (or is already held
 	 *  there, or he is called out there). */

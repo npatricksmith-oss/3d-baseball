@@ -357,9 +357,9 @@ bool UBbFigureShop::Init(USkeletalMesh* Skeleton, ABbPark* InPark)
 	}
 
 	// The paints: one of each, shared by every figure that wears it.
-	for (int32 Side = 0; Side < 2; ++Side)
+	for (int32 Side = 0; Side < 3; ++Side)
 	{
-		const BbLook::FBbClub& C = BbLook::Clubs[Side];
+		const BbLook::FBbClub& C = BbLook::Club(Side);
 		const FBbPaint Helmet{ C.Cap.Color, BbLook::HelmetRough }, Gear{ C.Trim, BbLook::GearRough };
 		for (const FBbPaint& P : { C.Jersey, C.Pants, C.Socks, C.Cap, C.Bill, C.Jersey, Helmet, Gear })
 		{
@@ -399,7 +399,7 @@ UMaterialInstanceDynamic* UBbFigureShop::PaintFor(EBbCloth Cloth, int32 Side, in
 	case EBbCloth::Belt: return BeltPaint;
 	case EBbCloth::Mask: return MaskPaint;
 	case EBbCloth::Leather: return LeatherPaint;
-	default: return ClubPaints[(Side & 1) * ClubCloths + ClubSlot(Cloth)];
+	default: return ClubPaints[FMath::Clamp(Side, 0, 2) * ClubCloths + ClubSlot(Cloth)];
 	}
 }
 
@@ -417,14 +417,14 @@ UMaterialInstanceDynamic* UBbFigureShop::NewChest(UObject* Outer) const
 
 UTexture2D* UBbFigureShop::Jersey(int32 Side, int32 Number, bool bMirror)
 {
-	const int32 Key = (Side & 1) | (bMirror ? 2 : 0) | (Number << 2);
+	const int32 Key = FMath::Clamp(Side, 0, 2) | (bMirror ? 4 : 0) | (Number << 3);
 	if (TObjectPtr<UTexture2D>* Found = Jerseys.Find(Key))
 	{
 		return *Found;
 	}
 	// The picture wraps once round the chest from under one arm: the front is centred a
 	// quarter of the way across, the back three quarters. Top row: the collar.
-	const BbLook::FBbClub& C = BbLook::Clubs[Side & 1];
+	const BbLook::FBbClub& C = BbLook::Club(FMath::Clamp(Side, 0, 2));
 	const int32 W = 1024, H = 256;
 	FBbCanvas Cv(W, H, C.Jersey.Color);
 	const int32 Front = W / 4, Back = 3 * W / 4;
@@ -437,8 +437,11 @@ UTexture2D* UBbFigureShop::Jersey(int32 Side, int32 Number, bool bMirror)
 	// about 10 dots to the centimetre round the chest and 6 up it.)
 	const int32 Sx = FMath::Clamp(315 / FMath::Max(1, Word.Len() * 6 - 1), 3, 7), Sy = 6;
 	const int32 WordY = 92;
+	if (!Word.IsEmpty())
+	{
 	Cv.Box(Front - FBbCanvas::TextW(Word, Sx) / 2 - 6, WordY - 4 * Sy, Front + FBbCanvas::TextW(Word, Sx) / 2 + 6, WordY + 4 * Sy, C.Jersey.Color);
 	Cv.Text(Word, Front, WordY, Sx, Sy, C.Trim);
+	}
 	// The number, on the back.
 	if (Number > 0)
 	{
@@ -489,13 +492,13 @@ void ABbFigure::Build(UBbFigureShop* InShop)
 
 void ABbFigure::Dress(const BbPlayer* Player, int32 InSide)
 {
-	const uint32 Key = Player ? (Player->player_id | 0x40000000u) : (0x80000000u | (uint32)(InSide & 1));
+	const uint32 Key = Player ? (Player->player_id | 0x40000000u) : (0x80000000u | (uint32)FMath::Clamp(InSide, 0, 2));
 	if (Key == Dressed || !Shop)
 	{
 		return;
 	}
 	Dressed = Key;
-	Side = Player ? Player->side & 1 : InSide & 1;
+	Side = FMath::Clamp(Player ? (int32)Player->side : InSide, 0, 2);
 	Number = Player ? Player->number : 0;
 	bThrowsLeft = Player && Player->throws == 1;
 	// The body: from the player's id, the same every time (owner's Q18). Two draws averaged
@@ -553,7 +556,7 @@ void ABbFigure::ApplyKit()
 		case EBbWear::Cap: bWorn = !bHelmet; break;
 		case EBbWear::Helmet: bWorn = bHelmet; break;
 		case EBbWear::HelmetBill: bWorn = Role == EBbRole::Batter; break;
-		case EBbWear::Catcher: bWorn = Role == EBbRole::Catcher; break;
+		case EBbWear::Catcher: bWorn = Role == EBbRole::Catcher || (Role == EBbRole::PlateUmpire && Pieces[I].Cloth == EBbCloth::Mask); break;
 		case EBbWear::GloveL: bWorn = bGlove && bOnLeftBone; break;
 		case EBbWear::GloveR: bWorn = bGlove && !bOnLeftBone; break;
 		}
@@ -562,6 +565,14 @@ void ABbFigure::ApplyKit()
 		{
 			Parts[I]->SetRelativeScale3D(FVector(Role == EBbRole::Catcher ? BbLook::MittScale : 1.f));
 		}
+	}
+}
+
+void ABbFigure::SetShadows(bool bCast)
+{
+	for (UStaticMeshComponent* C : Parts)
+	{
+		C->SetCastShadow(bCast);
 	}
 }
 

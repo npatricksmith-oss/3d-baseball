@@ -218,6 +218,31 @@ namespace BbMotion
 	/** The slide's first and last moments, s from his arrival. */
 	constexpr float SlideStartS = -0.42f;
 	constexpr float SlideEndS = 1.2f;
+
+	/** The people who are not playing (player-visuals §12): umpires, base coaches, the men
+	 *  on the bench. Everything is in the figure's own frame, +Y the way he faces. */
+	enum class ESignal : uint8 { None, Strike, Out, Safe, Foul };
+	struct FCrewIn
+	{
+		/** 0 standing easy to 1 down for the pitch, hands on his knees. */
+		float Set = 0.f;
+		/** The plate umpire's set is lower, behind the catcher. */
+		bool bPlate = false;
+		/** Standing easy with his hands on his hips (a coach, a manager) instead of at his sides. */
+		float Hips = 0.f;
+		/** An umpire's signal and the seconds since it began. */
+		ESignal Signal = ESignal::None;
+		float SignalT = 0.f;
+		/** What he is watching. */
+		FVector Look = FVector(0, 1000, 150);
+	};
+	FBbStick Crew(const FCrewIn& In, const FBbSkeleton& Skel, const FBbMotionGround& Ground);
+	/** How long a signal is held, s. */
+	constexpr float SignalS = 1.5f;
+	/** A man sitting on a bench SeatCm above the floor he has his feet on; the figure's origin
+	 *  is on the floor under the bench's front edge. Variant: forearms on his thighs, sitting
+	 *  up with his hands on his thighs, or leaning back with his arms folded. */
+	FBbStick Seated(int32 Variant, double SeatCm, const FVector& Look, const FBbSkeleton& Skel);
 }
 
 /** The single-clip player with a pose laid over it. */

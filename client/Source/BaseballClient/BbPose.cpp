@@ -1240,6 +1240,182 @@ float BbMotion::ThrowReach(float T)
 	return (float)(Smooth(-0.11, -0.01, T) * (1.0 - Smooth(0.0, 0.07, T)));
 }
 
+namespace
+{
+	/** A direction given in the figure's frame, as the chest (which may be bent over) has it:
+	 *  wrists and elbows are told to the solver that way. */
+	FVector InChest(const FBbStick& S, const FVector& V)
+	{
+		const FVector Fwd = S.ChestFwd.GetSafeNormal(1e-6, FVector(0, 1, 0));
+		const FVector Up = (S.ChestUp - Fwd * FVector::DotProduct(S.ChestUp, Fwd)).GetSafeNormal(1e-6, FVector(0, 0, 1));
+		const FVector Left = FVector::CrossProduct(Fwd, Up);
+		return FVector(FVector::DotProduct(V, Left), FVector::DotProduct(V, Fwd), FVector::DotProduct(V, Up));
+	}
+
+	/** A hand put at a point of the figure's frame (given for the left; the right is its
+	 *  mirror): the wrist from its shoulder as the chest has it. */
+	void HandAt(FBbStick& S, int32 Sd, const FVector& At, const FVector& Elbow)
+	{
+		const double Sign = Sd == 0 ? 1.0 : -1.0;
+		const FVector Fwd = S.ChestFwd.GetSafeNormal(1e-6, FVector(0, 1, 0));
+		const FVector Up = (S.ChestUp - Fwd * FVector::DotProduct(S.ChestUp, Fwd)).GetSafeNormal(1e-6, FVector(0, 0, 1));
+		// (The shoulder is about 46 cm up the trunk from the pelvis and 18 out.)
+		const FVector Shoulder = S.Pelvis + Up * 46.0 + FVector(Sign * 18.0, 0, 0);
+		S.Wrist[Sd] = InChest(S, FVector(Sign * At.X, At.Y, At.Z) - Shoulder);
+		S.Elbow[Sd] = FVector(Sign * Elbow.X, Elbow.Y, Elbow.Z);
+	}
+}
+
+FBbStick BbMotion::Crew(const FCrewIn& In, const FBbSkeleton& Skel, const FBbMotionGround& Ground)
+{
+	const int32 L = 0, R = 1;
+	// Standing easy: his hands at his sides, or on his hips.
+	FBbStick Easy;
+	Easy.Ankle[L] = { 15, 0, 0 };
+	Easy.Ankle[R] = { -15, 0, 0 };
+	Easy.Toe[L] = { 0.2, 1, 0 };
+	Easy.Toe[R] = { -0.2, 1, 0 };
+	if (In.Hips > 0.f)
+	{
+		FBbStick H = Easy;
+		H.Wrist[L] = { 4, 3, -40 };
+		H.Wrist[R] = { -4, 3, -40 };
+		H.Elbow[L] = { 1, -0.7, 0 };
+		H.Elbow[R] = { -1, -0.7, 0 };
+		Easy = Mix(Easy, H, In.Hips);
+	}
+	// Down for the pitch: feet wide, knees bent, bent over with his hands on his knees. The
+	// plate umpire squats lower and stays more upright, to see over the catcher.
+	FBbStick Down;
+	const double Wide = In.bPlate ? 30.0 : 27.0;
+	Down.Pelvis = In.bPlate ? FVector(0, -16, 66) : FVector(0, -18, 80);
+	Down.ChestFwd = In.bPlate ? FVector(0, 1, -0.45) : FVector(0, 1, -0.75);
+	Down.ChestUp = In.bPlate ? FVector(0, 0.45, 1) : FVector(0, 0.75, 1);
+	Down.Ankle[L] = { Wide, 0, 0 };
+	Down.Ankle[R] = { -Wide, 0, 0 };
+	Down.Knee[L] = { 0.35, 1, 0 };
+	Down.Knee[R] = { -0.35, 1, 0 };
+	Down.Toe[L] = { 0.3, 1, 0 };
+	Down.Toe[R] = { -0.3, 1, 0 };
+	for (int32 Sd = 0; Sd < 2; ++Sd)
+	{
+		HandAt(Down, Sd, FVector(Wide + 2.0, In.bPlate ? 22.0 : 14.0, In.bPlate ? 52.0 : 58.0), FVector(1, -0.4, 0.2));
+	}
+	FBbStick S = Mix(Easy, Down, FMath::Clamp((double)In.Set, 0.0, 1.0));
+	if (In.Signal != ESignal::None && In.SignalT >= 0.f && In.SignalT < SignalS)
+	{
+		const double T = In.SignalT;
+		// Into the signal's first shape, on to its second, held, and let go.
+		const double Go = Smooth(0.12, 0.34, T);
+		FBbStick A = Easy, B;
+		A.Wrist[L] = { 4, 4, -48 };
+		A.Wrist[R] = { -4, 4, -48 };
+		switch (In.Signal)
+		{
+		case ESignal::Strike:
+			// He comes up, turns to his right and points that arm straight out to the side.
+			A.Wrist[R] = { -16, 14, 10 };
+			A.Elbow[R] = { -1, -0.4, -0.3 };
+			B = A;
+			B.ChestFwd = { -0.35, 1, 0 };
+			B.Wrist[R] = { -50, 12, 2 };
+			B.Elbow[R] = { -0.2, -0.3, -1 };
+			break;
+		case ESignal::Out:
+			// The fist up beside his head, then punched forward.
+			A.Wrist[R] = { -12, 10, 34 };
+			A.Elbow[R] = { -1, -0.2, -0.4 };
+			B = A;
+			B.ChestFwd = { 0.15, 1, -0.18 };
+			B.ChestUp = { 0, 0.18, 1 };
+			B.Wrist[R] = { -6, 36, 10 };
+			B.Elbow[R] = { -0.8, -0.3, -0.6 };
+			B.Wrist[L] = { 8, 6, -40 };
+			break;
+		case ESignal::Safe:
+			// Arms crossed in front of his chest, then swept out flat to both sides.
+			A.Wrist[L] = { -20, 30, -6 };
+			A.Wrist[R] = { 20, 30, -4 };
+			A.Elbow[L] = { 0.6, -0.3, -1 };
+			A.Elbow[R] = { -0.6, -0.3, -1 };
+			A.Pelvis = { 0, -4, 90 };
+			A.ChestFwd = { 0, 1, -0.25 };
+			A.ChestUp = { 0, 0.25, 1 };
+			A.Ankle[L] = { 24, 0, 0 };
+			A.Ankle[R] = { -24, 0, 0 };
+			B = A;
+			B.Wrist[L] = { 51, 8, -3 };
+			B.Wrist[R] = { -51, 8, -3 };
+			B.Elbow[L] = { 0, -0.5, -1 };
+			B.Elbow[R] = { 0, -0.5, -1 };
+			break;
+		default:
+			// Foul: both arms up and out.
+			A.Wrist[L] = { 20, 14, 20 };
+			A.Wrist[R] = { -20, 14, 20 };
+			A.Elbow[L] = { 1, -0.3, -0.5 };
+			A.Elbow[R] = { -1, -0.3, -0.5 };
+			B = A;
+			B.Wrist[L] = { 24, 6, 46 };
+			B.Wrist[R] = { -24, 6, 46 };
+			B.Elbow[L] = { 1, -0.4, 0 };
+			B.Elbow[R] = { -1, -0.4, 0 };
+			break;
+		}
+		const double W = Smooth(0.0, 0.16, T) * (1.0 - Smooth(SignalS - 0.35, SignalS, T));
+		S = Mix(S, Mix(A, B, Go), W);
+	}
+	S.HeadFwd = Watch(S, In.Look, 70.0);
+	Stand(S, Skel, Ground);
+	return S;
+}
+
+FBbStick BbMotion::Seated(int32 Variant, double SeatCm, const FVector& Look, const FBbSkeleton& Skel)
+{
+	const int32 L = 0, R = 1;
+	FBbStick S;
+	// Sitting on the front of the bench: thighs level, shins down, feet flat on the floor.
+	S.Pelvis = { 0, -12, SeatCm + 9.0 };
+	S.Ankle[L] = { 15, 34, Skel.AnkleCm() };
+	S.Ankle[R] = { -15, 34, Skel.AnkleCm() };
+	S.Knee[L] = { 0.15, 1, 0.8 };
+	S.Knee[R] = { -0.15, 1, 0.8 };
+	const double KneeY = 30.0, KneeZ = SeatCm + 12.0;
+	switch (((Variant % 3) + 3) % 3)
+	{
+	case 0:
+		// Leaning forward, forearms on his thighs.
+		S.ChestFwd = { 0, 1, -0.7 };
+		S.ChestUp = { 0, 0.7, 1 };
+		for (int32 Sd = 0; Sd < 2; ++Sd)
+		{
+			HandAt(S, Sd, FVector(8, KneeY + 6, KneeZ + 4), FVector(1, -0.2, 0));
+		}
+		break;
+	case 1:
+		// Sitting up, a hand on each thigh.
+		S.ChestFwd = { 0, 1, -0.12 };
+		S.ChestUp = { 0, 0.12, 1 };
+		for (int32 Sd = 0; Sd < 2; ++Sd)
+		{
+			HandAt(S, Sd, FVector(15, 12, KneeZ + 5), FVector(1, -1, 0));
+		}
+		break;
+	default:
+		// Leaning back against the wall, arms folded.
+		S.Pelvis = { 0, -16, SeatCm + 9.0 };
+		S.ChestFwd = { 0, 1, 0.22 };
+		S.ChestUp = { 0, -0.22, 1 };
+		S.Ankle[L] = { 17, 44, Skel.AnkleCm() };
+		S.Ankle[R] = { -17, 44, Skel.AnkleCm() };
+		HandAt(S, L, FVector(-9, 6, SeatCm + 36.0), FVector(1, 0.2, -1));
+		HandAt(S, R, FVector(-9, 8, SeatCm + 33.0), FVector(1, 0.2, -1));
+		break;
+	}
+	S.HeadFwd = Watch(S, Look, 60.0);
+	return S;
+}
+
 void FBbPoseProxy::PreUpdate(UAnimInstance* InAnimInstance, float DeltaSeconds)
 {
 	FAnimSingleNodeInstanceProxy::PreUpdate(InAnimInstance, DeltaSeconds);

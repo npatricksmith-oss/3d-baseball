@@ -74,6 +74,9 @@ namespace
 
 	/** Where the catcher takes a pitch, from the rear point of the plate, m (the sim ends a
 	 *  taken pitch there), and where he holds his mitt for a target. */
+	/** An umpire calls a runner safe this long after he is at the bag; a throw taken at first
+	 *  within this long of the batter's getting there is a play on him. */
+	const float SafeCallS = 0.3f, SafePlayS = 1.2f;
 	const float MittPlaneY = -1.2f;
 	const float MittTargetZ = 0.55f;
 
@@ -471,6 +474,18 @@ void ABbDirector::BeginPlay()
 		return;
 	}
 
+	// The people who are not playing: umpires, base coaches, the benches (player-visuals §12).
+	if (FigureShop && Skel.Ok() && !FParse::Param(Cmd, TEXT("BbNoCrew")))
+	{
+		Crew = NewObject<UBbCrew>(this);
+		Crew->Init(this, Park, FigureShop, &Skel, FigureMesh, AnimIdle, *Started);
+		UE_LOG(LogBb, Display, TEXT("BB_CREW %d figures besides the players"), Crew->Num());
+	}
+	if (Crew && FParse::Param(Cmd, TEXT("BbCrewShots")))
+	{
+		CrewShot = 0;
+		return;
+	}
 	// Figure check (-BbFigureShots): both nines in a row, front and back, then one player
 	// turned through eight angles, plain and in a mirror. No game is played.
 	if (FParse::Param(Cmd, TEXT("BbFigureShots")) && Figures.Num() >= 9)
@@ -947,7 +962,20 @@ void ABbDirector::NotePitch()
 		}
 	}
 	NoteCatches();
+	NoteSignals();
 	NoteSlides();
+	if (Crew)
+	{
+		Crew->SetSignals(Signals);
+	}
+	if (bStagingLog)
+	{
+		static const TCHAR* const Kinds[5] = { TEXT("none"), TEXT("strike"), TEXT("out"), TEXT("safe"), TEXT("foul") };
+		for (const FBbSignal& S : Signals)
+		{
+			UE_LOG(LogBb, Display, TEXT("BB_SIGNAL play=%u t=%.2f of %.2f umpire=%d %s at=(%.1f, %.1f) \"%s\""), Current.Info.play_index, S.T, Current.Info.duration_s, S.Umpire, Kinds[(int32)S.Kind], S.At.X, S.At.Y, UTF8_TO_TCHAR(Current.Info.summary));
+		}
+	}
 	ReadyUntil = Current.bValid && Current.Info.contact_s >= 0.f ? Current.Info.contact_s + 0.3f : 0.8f;
 	BbFrame Start;
 	if (!Sim || !Current.bValid || !SampleDrawn(Current, 0.f, Start))
@@ -1619,6 +1647,123 @@ void ABbDirector::ResetFrame(float T, BbFrame& Out, bool& bBallShown) const
 	Out.ball[2] = B.Z;
 }
 
+void ABbDirector::NoteSignals()
+{
+	// What the umpires signal on this pitch, from the sim's own record of it: a strike (the
+	// plate umpire), a foul ball (whoever's line it is), each out (the umpire at that base; a
+	// caught fly, the umpire nearest it). "Safe" is added by NoteSlides.
+	Signals.Reset();
+	if (!Sim || !Current.bValid)
+	{
+		return;
+	}
+	using BbMotion::ESignal;
+	const BbPlayInfo& Info = Current.Info;
+	const FString Words(UTF8_TO_TCHAR(Info.summary));
+	const double L = 27.432 / UE_SQRT_2;
+	const FVector2D Bags[5] = { FVector2D(0.0, 0.0), FVector2D(L, L), FVector2D(0.0, 2.0 * L), FVector2D(-L, L), FVector2D(0.0, 0.0) };
+	auto Near = [](const FVector2D& P, bool bLinesOnly)
+	{
+		const double R = P.Size();
+		return R < 15.0 || P.Y < 0.0 ? 0 : P.X > 0.35 * R ? 1 : P.X < -0.35 * R ? 3 : bLinesOnly ? 0 : 2;
+	};
+	auto BallAt = [&](float T)
+	{
+		BbFrame F;
+		return SampleDrawn(Current, FMath::Clamp(T, 0.f, Info.duration_s), F) ? FVector(F.ball[0], F.ball[1], F.ball[2]) : FVector::ZeroVector;
+	};
+	const bool bContact = Info.contact_s >= 0.f;
+	if (Words.Contains(TEXT("trike")))
+	{
+		Signals.Add(FBbSignal{ bContact ? Info.contact_s + 0.5f : Info.call_s, 0, ESignal::Strike, FVector2D(0.0, 18.0) });
+	}
+	else if (bContact && Words.EndsWith(TEXT("Foul")))
+	{
+		// Called when it comes down (or leaves the field).
+		float T = Info.dead_s >= 0.f ? Info.dead_s : Info.duration_s;
+		for (float At = Info.contact_s + 0.1f; At < T; At += 0.05f)
+		{
+			if (BallAt(At).Z < 0.12)
+			{
+				T = At;
+				break;
+			}
+		}
+		const FVector B = BallAt(T);
+		Signals.Add(FBbSignal{ FMath::Min(T + 0.15f, Info.duration_s), Near(FVector2D(B.X, B.Y), true), ESignal::Foul, FVector2D(B.X, B.Y) });
+	}
+	for (uint32 C = 0; C < Info.n_calls; ++C)
+	{
+		const BbCall& Call = Info.calls[C];
+		if (Call.base == 0)
+		{
+			// A strikeout is the strike's signal; a caught fly is called by whoever is nearest.
+			if (bContact)
+			{
+				const FVector B = BallAt(Call.t_s);
+				Signals.Add(FBbSignal{ Call.t_s, Near(FVector2D(B.X, B.Y), false), ESignal::Out, FVector2D(B.X, B.Y) });
+			}
+		}
+		else if (Call.base <= 4)
+		{
+			Signals.Add(FBbSignal{ Call.t_s, Call.base == 4 ? 0 : (int32)Call.base, ESignal::Out, Bags[Call.base] });
+		}
+	}
+}
+
+void ABbDirector::ArrangeCrewShot(int32 Step)
+{
+	// No game: the crew alone, told what to do. The plate umpire set and calling a strike; the
+	// first-base umpire calling out, safe and foul, and set; the coach at first; the benches;
+	// everyone from behind home.
+	using BbMotion::ESignal;
+	FBbCrewTick T;
+	T.Batting = 0;
+	T.BatterX = -0.8;
+	T.bSet = Step == 0 || Step == 5 || Step == 6;
+	T.Force = Step == 1 ? ESignal::Strike : Step == 2 ? ESignal::Out : Step == 3 ? ESignal::Safe : Step == 4 ? ESignal::Foul : ESignal::None;
+	CrewShotTick = T;
+	FVector Eye, Look;
+	float Fov = 40.f;
+	if (Step <= 1)
+	{
+		const FVector2D U = Crew->UmpireAt(0, T);
+		Eye = ToUE(U.X + 4.6, U.Y + 3.6, 1.5);
+		Look = ToUE(U.X, U.Y, 1.05);
+	}
+	else if (Step <= 5)
+	{
+		const FVector2D U = Crew->UmpireAt(1, T);
+		Eye = ToUE(U.X * 0.78, U.Y * 0.78 - 1.5, 1.4);
+		Look = ToUE(U.X, U.Y, 1.0);
+	}
+	else if (Step == 6)
+	{
+		const FVector2D U = UBbCrew::CoachAt(1.0);
+		Eye = ToUE(U.X * 0.72, U.Y * 0.72, 1.4);
+		Look = ToUE(U.X, U.Y, 1.0);
+	}
+	else if (Step <= 8)
+	{
+		FVector2D From, Along, Face;
+		double Length = 0.0, SeatZ = 0.0, FloorZ = 0.0;
+		Park->Bench(Step == 7 ? 1.0 : -1.0, From, Along, Face, Length, SeatZ, FloorZ);
+		const FVector2D Mid = From + Along * (Length * 0.5), At = Mid + Face * 10.0;
+		Eye = ToUE(At.X, At.Y, 1.7);
+		Look = ToUE(Mid.X, Mid.Y, 0.0);
+		Fov = 70.f;
+	}
+	else
+	{
+		Eye = ToUE(0.0, -16.0, 9.0);
+		Look = ToUE(0.0, 16.0, 0.0);
+		Fov = 75.f;
+	}
+	Camera->SetActorLocationAndRotation(Eye, (Look - Eye).Rotation());
+	Camera->GetCameraComponent()->SetFieldOfView(Fov);
+	ShownCam = -1;
+}
+
 void ABbDirector::NoteSlides()
 {
 	// The whole pitch again (after NoteCatches: the ball's takers are known). The timeline has
@@ -1694,6 +1839,16 @@ void ABbDirector::NoteSlides()
 				FVector2D Holder;
 				bPlay |= F.holder >= 0 && Find(K, (uint16)F.holder, Holder) && (Holder - Bags[B]).Size() < SlidePlayM;
 				const bool bSlide = bPlay && Mps >= SlideMinMps;
+				// A play on him and no out: the umpire there has him safe.
+				bool bOutThere = false;
+				for (uint32 C = 0; C < Current.Info.n_calls; ++C)
+				{
+					bOutThere |= Current.Info.calls[C].runner == Agent && Current.Info.calls[C].base == B + 2;
+				}
+				if (bPlay && !bOutThere)
+				{
+					Signals.Add(FBbSignal{ T + SafeCallS, B == 0 ? 2 : B == 1 ? 3 : 0, BbMotion::ESignal::Safe, Bags[B] });
+				}
 				if (bStagingLog)
 				{
 					UE_LOG(LogBb, Display, TEXT("BB_SLIDE play=%u agent=0x%03x base=%d t=%.2f of %.2f s in=%.1f m/s play_on_him=%d slides=%d"), Current.Info.play_index, Agent, B + 2, T, End, Mps, bPlay ? 1 : 0, bSlide ? 1 : 0);
@@ -1708,6 +1863,34 @@ void ABbDirector::NoteSlides()
 					N.At = ToUE(Bags[B].X, Bags[B].Y, 0.0);
 					Slides.Add(N);
 				}
+			}
+		}
+	}
+	// The batter at first: a throw taken at the bag about when he gets there, and no out.
+	{
+		const FVector2D First(L, L);
+		const uint16 Batter = Current.Info.batter;
+		bool bOutThere = false;
+		for (uint32 C = 0; C < Current.Info.n_calls; ++C)
+		{
+			bOutThere |= Current.Info.calls[C].base == 1;
+		}
+		FVector2D P;
+		for (int32 K = 0; !bOutThere && K < Seen.Num(); ++K)
+		{
+			if (Find(K, Batter, P) && (P - First).Size() < 0.5)
+			{
+				const float T = K * Step;
+				bool bPlay = false;
+				for (const FCatchNote& N : Catches)
+				{
+					bPlay |= FMath::Abs(N.T - T) < SafePlayS && (FVector2D(N.At.Y, N.At.X) / 100.0 - First).Size() < 3.0;
+				}
+				if (bPlay)
+				{
+					Signals.Add(FBbSignal{ T + SafeCallS, 1, BbMotion::ESignal::Safe, First });
+				}
+				break;
 			}
 		}
 	}
@@ -3116,6 +3299,45 @@ void ABbDirector::Tick(float DeltaSeconds)
 					M->SetVectorParameterValue(TEXT("Color"), Col);
 				}
 			}
+			if (Crew)
+			{
+				// The people who are not playing: told where the play has got to, who is at bat
+				// and behind the plate, and who is out on the field (so not on his bench).
+				FBbCrewTick Ct;
+				Ct.PlayTime = PlayTime;
+				Ct.Dt = SimDt;
+				Ct.bPlay = !bReset;
+				Ct.bSet = bReset ? ResetDuration - ResetTime < SetLeadS : PlayTime < (Current.Info.contact_s >= 0.f ? Current.Info.contact_s : PitchEndT >= 0.f ? PitchEndT : 0.5f);
+				Ct.bBall = bBallShown;
+				Ct.Ball = FVector(Frame.ball[0], Frame.ball[1], Frame.ball[2]);
+				Ct.Batting = Current.bValid ? (Current.Info.top ? 0 : 1) : 0;
+				TSet<uint32> Shown;
+				double BatterAt = 4.0;
+				for (uint32 K = 0; K < Frame.n_actors; ++K)
+				{
+					const BbActor& A = Frame.actors[K];
+					const FVector2D P(A.pos[0], A.pos[1]);
+					if ((A.agent & 0x80) == 0)
+					{
+						Ct.Batting = A.agent >> 8;
+						if (P.Size() < BatterAt)
+						{
+							BatterAt = P.Size();
+							Ct.BatterX = P.X;
+						}
+					}
+				}
+				for (int32 I = 0; I < FigureState.Num() && I < Figures.Num(); ++I)
+				{
+					const BbPlayer* P = FigureState[I].Agent != 0xFFFF && !Figures[I]->IsHidden() ? Sim->Player(FigureState[I].Agent) : nullptr;
+					if (P)
+					{
+						Shown.Add(P->player_id);
+					}
+				}
+				Ct.Shown = &Shown;
+				Crew->Tick(Ct);
+			}
 			if (Skel.Ok())
 			{
 				// The bat is drawn while someone holds it, and through the swing wherever the
@@ -3510,6 +3732,34 @@ void ABbDirector::Tick(float DeltaSeconds)
 				++ParkShot;
 				ParkShotSince = Wall;
 				bParkShotAsked = false;
+			}
+		}
+	}
+	// -BbCrewShots: the crew alone, each arrangement held a while and photographed.
+	if (CrewShot >= 0 && Wall >= 8.0)
+	{
+		static const TCHAR* const Names[10] = { TEXT("plate_set"), TEXT("strike"), TEXT("out"), TEXT("safe"), TEXT("foul"), TEXT("base_set"), TEXT("coach"),
+			TEXT("bench_home"), TEXT("bench_away"), TEXT("all") };
+		if (ParkShotSince == 0.0)
+		{
+			ArrangeCrewShot(CrewShot);
+			ParkShotSince = Wall;
+		}
+		CrewShotTick.Dt = DeltaSeconds;
+		Crew->Tick(CrewShotTick);
+		if (!bParkShotAsked && Wall >= ParkShotSince + 1.5)
+		{
+			FScreenshotRequest::RequestScreenshot(FPaths::Combine(FPaths::ProjectSavedDir(), TEXT("Shots"), FString::Printf(TEXT("crew_%02d_%s.png"), CrewShot + 1, Names[CrewShot])), false, false);
+			bParkShotAsked = true;
+		}
+		else if (bParkShotAsked && Wall >= ParkShotSince + 2.0)
+		{
+			bParkShotAsked = false;
+			ParkShotSince = 0.0;
+			if (++CrewShot == 10)
+			{
+				CrewShot = -1;
+				Finish();
 			}
 		}
 	}

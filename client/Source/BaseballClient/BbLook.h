@@ -188,6 +188,17 @@ namespace BbLook
 			{ FLinearColor(0.006f, 0.014f, 0.075f), 0.85f }, { FLinearColor(0.006f, 0.014f, 0.075f), 0.8f },
 			{ FLinearColor(0.006f, 0.014f, 0.075f), 0.7f }, FLinearColor(0.006f, 0.014f, 0.075f) },
 	};
+	// The umpires (player-visuals step 7): a pale blue shirt, charcoal trousers to the shoe (the
+	// "sock" is the trousers' colour), a black cap. No lettering. Dressed as a third side.
+	inline const FBbClub Umpires = { TEXT(""), TEXT(""), TEXT(""),
+		{ FLinearColor(0.230f, 0.360f, 0.520f), 0.85f }, { FLinearColor(0.040f, 0.042f, 0.048f), 0.85f },
+		{ FLinearColor(0.040f, 0.042f, 0.048f), 0.85f }, { FLinearColor(0.012f, 0.012f, 0.014f), 0.8f },
+		{ FLinearColor(0.012f, 0.012f, 0.014f), 0.7f }, FLinearColor(0.180f, 0.290f, 0.430f) };
+	inline const int32 UmpireSide = 2;
+	/** The uniform of a side: 0 the visitors, 1 the home side, 2 the umpires. */
+	inline const FBbClub& Club(int32 Side) { return Side == UmpireSide ? Umpires : Clubs[Side & 1]; }
+	// The benches (step 7): reserves and a manager in each dugout besides the nine.
+	inline const int32 BenchReserves = 4;
 	inline const FBbPaint Shoe{ FLinearColor(0.012f, 0.012f, 0.014f), 0.5f };
 	inline const FBbPaint Belt{ FLinearColor(0.015f, 0.015f, 0.018f), 0.45f };
 	// The kit (player-visuals step 2). A helmet is the cap's colour with a shine; the

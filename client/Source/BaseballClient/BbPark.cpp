@@ -2135,6 +2135,29 @@ void ABbPark::BuildBackdrop()
 	UE_LOG(LogBbPark, Display, TEXT("BB_PARK backdrop: %d trees"), Trees);
 }
 
+bool ABbPark::Bench(double Side, FVector2D& From, FVector2D& Along, FVector2D& Face, double& Length, double& SeatZ, double& FloorZ) const
+{
+	if (!Ground)
+	{
+		return false;
+	}
+	for (const FBbRun& R : Ground->Dugouts)
+	{
+		if ((R.A + R.Along * (R.L * 0.5)).X * Side > 0.0)
+		{
+			// (As BuildDugouts lays the bench.)
+			From = R.A + R.Along * 0.6 + R.Out * (PitDeep - 0.5);
+			Along = R.Along;
+			Face = -R.Out;
+			Length = R.L - 1.2;
+			SeatZ = PitFloor + 0.45;
+			FloorZ = PitFloor;
+			return true;
+		}
+	}
+	return false;
+}
+
 FVector2D ABbPark::DugoutDoor(double Side) const
 {
 	if (Ground)

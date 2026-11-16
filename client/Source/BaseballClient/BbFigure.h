@@ -66,6 +66,8 @@ enum class EBbRole : uint8
 	Catcher,
 	/** A batter or runner: helmet, bare hands. */
 	Batter,
+	/** The umpire behind the plate: a cap and a mask. */
+	PlateUmpire,
 };
 
 /** One ring of a piece turned about its own axis: where along the axis (cm), its half-widths
@@ -162,6 +164,9 @@ public:
 	/** Shown in a mirror across his own facing (a left-hander's motion from a right-handed
 	 *  one). The lettering is repainted so that it does not read backwards. */
 	void SetMirror(bool bMirror);
+	/** Whether his pieces throw shadows. A man under a dugout's roof needs none, and they are
+	 *  a good part of what a figure costs to draw. */
+	void SetShadows(bool bCast);
 
 private:
 	void Apply();
