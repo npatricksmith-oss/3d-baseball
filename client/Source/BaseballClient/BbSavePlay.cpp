@@ -57,20 +57,22 @@ void SBbSavePlayDialog::Construct(const FArguments& InArgs)
 {
 	OnCancel = InArgs._OnCancel;
 	OnSave = InArgs._OnSave;
-	const FSlateFontInfo ButtonFont = FCoreStyle::GetDefaultFontStyle("Bold", 18);
-	const FSlateFontInfo TitleFont = FCoreStyle::GetDefaultFontStyle("Bold", 22);
-	const FSlateFontInfo LabelFont = FCoreStyle::GetDefaultFontStyle("Regular", 18);
-	const FSlateFontInfo TypeFont = FCoreStyle::GetDefaultFontStyle("Regular", 16);
+	Offset = InArgs._Offset;
+	const FSlateFontInfo ButtonFont = FCoreStyle::GetDefaultFontStyle("Bold", 15);
+	const FSlateFontInfo TitleFont = FCoreStyle::GetDefaultFontStyle("Bold", 18);
+	const FSlateFontInfo LabelFont = FCoreStyle::GetDefaultFontStyle("Regular", 15);
+	const FSlateFontInfo TypeFont = FCoreStyle::GetDefaultFontStyle("Regular", 14);
 	ChildSlot
 	[
 		SNew(SBox)
-		.WidthOverride(720.f)
-		.HeightOverride(520.f)
+		.WidthOverride(500.f)
+		.HeightOverride(340.f)
 		[
 			SNew(SBorder)
 			.BorderImage(FCoreStyle::Get().GetBrush("WhiteBrush"))
 			.BorderBackgroundColor(FLinearColor(0.06f, 0.07f, 0.09f, 0.96f))
-			.Padding(24.f)
+			.Padding(18.f)
+			.Cursor(EMouseCursor::CardinalCross)
 			[
 				SNew(SVerticalBox)
 				+ SVerticalBox::Slot().AutoHeight()
@@ -101,17 +103,18 @@ void SBbSavePlayDialog::Construct(const FArguments& InArgs)
 						]
 					]
 				]
-				+ SVerticalBox::Slot().AutoHeight().Padding(4.f, 20.f, 4.f, 0.f)
+				+ SVerticalBox::Slot().AutoHeight().Padding(4.f, 14.f, 4.f, 0.f)
 				[
 					SNew(STextBlock).Text(InArgs._Title).Font(TitleFont).ColorAndOpacity(FLinearColor(1.f, 0.85f, 0.2f))
 				]
-				+ SVerticalBox::Slot().AutoHeight().Padding(4.f, 18.f, 4.f, 8.f)
+				+ SVerticalBox::Slot().AutoHeight().Padding(4.f, 12.f, 4.f, 6.f)
 				[
 					SNew(STextBlock).Text(FText::FromString(TEXT("Comment:"))).Font(LabelFont).ColorAndOpacity(FLinearColor::White)
 				]
 				+ SVerticalBox::Slot().FillHeight(1.f)
 				[
 					SAssignNew(Box, SMultiLineEditableTextBox)
+					.Cursor(EMouseCursor::TextEditBeam)
 					.Font(TypeFont)
 					.AutoWrapText(true)
 					.HintText(FText::FromString(TEXT("What happened on this play?   (Ctrl+Enter saves, Esc cancels)")))
@@ -133,6 +136,40 @@ FReply SBbSavePlayDialog::OnKeyDown(const FGeometry& Geometry, const FKeyEvent& 
 		return Save();
 	}
 	return FReply::Unhandled();
+}
+
+FReply SBbSavePlayDialog::OnMouseButtonDown(const FGeometry& Geometry, const FPointerEvent& Mouse)
+{
+	// Reached only when no button or the text box took the click: the window's own surface.
+	if (Mouse.GetEffectingButton() != EKeys::LeftMouseButton)
+	{
+		return FReply::Unhandled();
+	}
+	bDragging = true;
+	return FReply::Handled().CaptureMouse(SharedThis(this));
+}
+
+FReply SBbSavePlayDialog::OnMouseMove(const FGeometry& Geometry, const FPointerEvent& Mouse)
+{
+	if (!bDragging || !HasMouseCapture())
+	{
+		return FReply::Unhandled();
+	}
+	// Screen pixels to Slate units; the offset is from the right edge, so X runs backwards.
+	const FVector2D D = Mouse.GetCursorDelta() / FMath::Max(Geometry.Scale, 0.01f);
+	Offset.X = FMath::Max(0.f, Offset.X - D.X);
+	Offset.Y = FMath::Max(0.f, Offset.Y + D.Y);
+	return FReply::Handled();
+}
+
+FReply SBbSavePlayDialog::OnMouseButtonUp(const FGeometry& Geometry, const FPointerEvent& Mouse)
+{
+	if (!bDragging)
+	{
+		return FReply::Unhandled();
+	}
+	bDragging = false;
+	return FReply::Handled().ReleaseMouseCapture();
 }
 
 FReply SBbSavePlayDialog::Cancel()

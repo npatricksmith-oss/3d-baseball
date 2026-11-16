@@ -38,12 +38,15 @@ namespace BbSavePlay
 DECLARE_DELEGATE_OneParam(FBbOnSavePlay, const FString& /*Comment*/);
 
 /** The dialog: Cancel and Save across the top, "[SEED 7   PLAY 123]", "Comment:", and the
- *  text box. Esc cancels, Ctrl+Enter saves; Enter alone starts a new line. */
+ *  text box. Esc cancels, Ctrl+Enter saves; Enter alone starts a new line. It floats: placed
+ *  by its Offset from the screen's right and top edges, and dragged by any part that is not
+ *  a button or the text box. */
 class SBbSavePlayDialog : public SCompoundWidget
 {
 public:
 	SLATE_BEGIN_ARGS(SBbSavePlayDialog) {}
 		SLATE_ARGUMENT(FText, Title)
+		SLATE_ARGUMENT(FVector2D, Offset)
 		SLATE_EVENT(FSimpleDelegate, OnCancel)
 		SLATE_EVENT(FBbOnSavePlay, OnSave)
 	SLATE_END_ARGS()
@@ -53,10 +56,18 @@ public:
 	TSharedPtr<SMultiLineEditableTextBox> Box;
 	virtual FReply OnKeyDown(const FGeometry& Geometry, const FKeyEvent& Key) override;
 	virtual bool SupportsKeyboardFocus() const override { return true; }
+	virtual FReply OnMouseButtonDown(const FGeometry& Geometry, const FPointerEvent& Mouse) override;
+	virtual FReply OnMouseMove(const FGeometry& Geometry, const FPointerEvent& Mouse) override;
+	virtual FReply OnMouseButtonUp(const FGeometry& Geometry, const FPointerEvent& Mouse) override;
+	/** Distance from the screen's right edge (X) and top edge (Y), never negative. */
+	FVector2D Offset = FVector2D::ZeroVector;
+	/** The overlay slot's padding that puts it there. */
+	FMargin Margin() const { return FMargin(0.f, Offset.Y, Offset.X, 0.f); }
 
 private:
 	FSimpleDelegate OnCancel;
 	FBbOnSavePlay OnSave;
+	bool bDragging = false;
 	FReply Cancel();
 	FReply Save();
 };

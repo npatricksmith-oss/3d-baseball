@@ -588,6 +588,8 @@ private:
 	TSharedPtr<SWidget> SaveDialogLayer;
 	TSharedPtr<class SBbSavePlayDialog> SaveDialog;
 	bool bSaveOpen = false;
+	/** Where the dialog was left: its distance from the screen's right and top edges (Slate units). */
+	FVector2D SaveDialogOffset = FVector2D(28.f, 76.f);
 	bool bPausedBeforeSave = false;
 	/** The input mode last set: -1 none yet, 0 game only, 1 game and UI (replay), 2 UI only (dialog). */
 	int32 InputModeSet = -1;

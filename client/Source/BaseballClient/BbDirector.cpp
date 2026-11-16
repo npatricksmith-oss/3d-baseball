@@ -703,18 +703,16 @@ void ABbDirector::OpenSaveDialog()
 	bPaused = true;
 	TWeakObjectPtr<ABbDirector> Self(this);
 	const FText Title = FText::FromString(FString::Printf(TEXT("[SEED %llu    PLAY %u]"), SeedShown, Current.Info.play_index));
+	// A floating window, not over the middle of the field: it opens at the top right, under
+	// the replay's button, where it was last left, and is dragged by any part that is not a
+	// button or the text box. The field is not dimmed.
 	SaveDialogLayer = SNew(SOverlay)
-		+ SOverlay::Slot()
-		[
-			// The field dimmed behind the dialog.
-			SNew(SBorder)
-			.BorderImage(FCoreStyle::Get().GetBrush("WhiteBrush"))
-			.BorderBackgroundColor(FLinearColor(0.f, 0.f, 0.f, 0.45f))
-		]
-		+ SOverlay::Slot().HAlign(HAlign_Center).VAlign(VAlign_Center)
+		+ SOverlay::Slot().HAlign(HAlign_Right).VAlign(VAlign_Top)
+		.Padding(TAttribute<FMargin>::CreateLambda([Self]() { return Self.IsValid() && Self->SaveDialog.IsValid() ? Self->SaveDialog->Margin() : FMargin(0.f); }))
 		[
 			SAssignNew(SaveDialog, SBbSavePlayDialog)
 			.Title(Title)
+			.Offset(SaveDialogOffset)
 			.OnCancel_Lambda([Self]() { if (Self.IsValid()) { Self->SaveClose = 1; } })
 			.OnSave_Lambda([Self](const FString& Comment) { if (Self.IsValid()) { Self->SaveComment = Comment; Self->SaveClose = 2; } })
 		];
@@ -749,6 +747,10 @@ void ABbDirector::CloseSaveDialog(bool bSave)
 	else
 	{
 		UE_LOG(LogBb, Display, TEXT("BB_SAVE cancel"));
+	}
+	if (SaveDialog.IsValid())
+	{
+		SaveDialogOffset = SaveDialog->Offset;
 	}
 	if (GEngine && GEngine->GameViewport && SaveDialogLayer.IsValid())
 	{
