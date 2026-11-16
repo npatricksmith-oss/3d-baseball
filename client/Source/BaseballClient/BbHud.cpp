@@ -234,3 +234,82 @@ void BbHud::DrawInningCard(ABbHUD& Hud, float S, const FString& Title, const int
 	}
 	Hud.DrawRect(Faded(BbLook::HudPanel, Alpha), X, (Top + TitleH + Row - 1.f) * S, W * S, 2.f * S);
 }
+
+namespace
+{
+	// The zone box's layout (reference units): metres to units, and what of the plane shows.
+	constexpr float ZoneK = 175.f;
+	constexpr float ZoneHalfSpanM = 0.44f, ZoneLowM = 0.22f, ZoneHighM = 1.36f;
+	/** A mark's radius: the ball is drawn half again as large as it is (its centre is where it
+	 *  crossed), so its number can be read. */
+	constexpr float ZoneMarkR = 1.5f * 0.0366f * ZoneK;
+	constexpr float ZonePad = 12.f, ZoneLegendH = 40.f;
+
+	FLinearColor CallColor(uint8 Call)
+	{
+		switch (Call)
+		{
+		case 1: return BbLook::HudBall;
+		case 2: return BbLook::HudClose;
+		case 6: return BbLook::HudInPlay;
+		case 7: return BbLook::HudDim;
+		default: return BbLook::HudGold; // swinging strike, foul, foul tip
+		}
+	}
+
+	void Disc(ABbHUD& Hud, FVector2D C, float R, const FLinearColor& Col)
+	{
+		Hud.GetCanvas()->K2_DrawPolygon(nullptr, C, FVector2D(R, R), 24, Col);
+	}
+}
+
+void BbHud::DrawZone(ABbHUD& Hud, float S, const FBbZoneInfo& Zone)
+{
+	if (!Zone.bValid)
+	{
+		return;
+	}
+	const float PlaneW = 2.f * ZoneHalfSpanM * ZoneK, PlaneH = (ZoneHighM - ZoneLowM) * ZoneK;
+	const float W = PlaneW + 2.f * ZonePad, H = PlaneH + 2.f * ZonePad + ZoneLegendH;
+	const float X0 = Hud.GetCanvas()->ClipX / S - 20.f - W, Y0 = BugY;
+	Hud.DrawRect(BbLook::HudPanel, X0 * S, Y0 * S, W * S, H * S);
+	// From the pitcher's side the first-base side (+x) is on the left.
+	const float CX = X0 + ZonePad + PlaneW * 0.5f;
+	auto At = [&](float X, float Z) { return FVector2D((CX - X * ZoneK) * S, (Y0 + ZonePad + (ZoneHighM - Z) * ZoneK) * S); };
+	// The zone: its thirds faint, its edge clear.
+	const FVector2D TL = At(Zone.HalfWidth, Zone.Top), BR = At(-Zone.HalfWidth, Zone.Bottom);
+	const float ZW = BR.X - TL.X, ZH = BR.Y - TL.Y, L = 1.5f * S;
+	Hud.DrawRect(BbLook::HudPanelLight, TL.X, TL.Y, ZW, ZH);
+	for (int32 I = 1; I < 3; ++I)
+	{
+		Hud.DrawRect(BbLook::HudOff, TL.X + ZW * I / 3.f, TL.Y, 1.f * S, ZH);
+		Hud.DrawRect(BbLook::HudOff, TL.X, TL.Y + ZH * I / 3.f, ZW, 1.f * S);
+	}
+	Hud.DrawRect(BbLook::HudText, TL.X, TL.Y, ZW, L);
+	Hud.DrawRect(BbLook::HudText, TL.X, BR.Y - L, ZW, L);
+	Hud.DrawRect(BbLook::HudText, TL.X, TL.Y, L, ZH);
+	Hud.DrawRect(BbLook::HudText, BR.X - L, TL.Y, L, ZH);
+	// The pitches, centred where they crossed; the newest ringed in white.
+	const float R = ZoneMarkR * S;
+	for (int32 I = 0; I < Zone.Marks.Num(); ++I)
+	{
+		const FBbZoneMark& M = Zone.Marks[I];
+		const FVector2D P = At(FMath::Clamp(M.X, -ZoneHalfSpanM, ZoneHalfSpanM), FMath::Clamp(M.Z, ZoneLowM, ZoneHighM));
+		if (I == Zone.Marks.Num() - 1)
+		{
+			Disc(Hud, P, R + 2.f * S, BbLook::HudText);
+		}
+		Disc(Hud, P, R, CallColor(M.Call));
+		TextCentre(Hud, FString::FromInt(I + 1), P.X, P.Y, BbLook::HudPanel, 0.72f * S);
+	}
+	// The key.
+	struct FKeyItem { uint8 Call; const TCHAR* Name; };
+	static const FKeyItem Keys[4] = { { 1, TEXT("Ball") }, { 2, TEXT("Called strike") }, { 3, TEXT("Swing, foul") }, { 6, TEXT("In play") } };
+	for (int32 I = 0; I < 4; ++I)
+	{
+		const float KX = X0 + ZonePad + (I % 2) * (W - 2.f * ZonePad) * 0.5f;
+		const float KY = Y0 + ZonePad + PlaneH + 8.f + (I / 2) * 16.f;
+		Disc(Hud, FVector2D((KX + 5.f) * S, (KY + 6.f) * S), 4.5f * S, CallColor(Keys[I].Call));
+		TextMid(Hud, Keys[I].Name, (KX + 14.f) * S, (KY + 6.f) * S, BbLook::HudDim, 0.68f * S);
+	}
+}

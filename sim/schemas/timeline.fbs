@@ -134,6 +134,16 @@ table Telemetry {
   apex_m: float (id: 16);
   // The pitch thrown, as the world has it (the event log's PitchReleased.pitch_type), for display.
   pitch_type: bb.PitchType (id: 17);
+  // The batter's strike zone the pitch was judged against (m above the ground; half-width
+  // across the plate), and whether plate_x_m/plate_z_m hold a crossing of the judgment plane
+  // (the plate's middle, physics-spec zone). For display.
+  zone_bottom_m: float (id: 18);
+  zone_top_m: float (id: 19);
+  zone_half_width_m: float (id: 20);
+  plate_crossed: bool (id: 21);
+  // The call on the pitch: 1 ball, 2 called strike, 3 swinging strike, 4 foul, 5 foul tip,
+  // 6 in play, 7 hit by pitch; 0 unknown.
+  pitch_call: ubyte (id: 22);
 }
 
 table PlayTimeline {

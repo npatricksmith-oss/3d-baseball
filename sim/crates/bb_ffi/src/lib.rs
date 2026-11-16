@@ -313,6 +313,20 @@ pub struct BbPlayInfo {
     /// On contact, the projected distance (physics-spec §12): from home to where the batted
     /// ball would have come down to field level unobstructed, m; 0 without contact.
     pub projected_distance_m: f32,
+    /// Where the pitch crossed the judgment plane (the middle of the plate): across the plate
+    /// (sim x, + toward first base) and up from the ground, m; valid when `plate_crossed` is 1.
+    pub plate_x_m: f32,
+    pub plate_z_m: f32,
+    /// The batter's strike zone the pitch was judged against: bottom and top above the ground
+    /// and half-width across the plate, m. A pitch is a strike when the ball touches it.
+    pub zone_bottom_m: f32,
+    pub zone_top_m: f32,
+    pub zone_half_width_m: f32,
+    pub plate_crossed: u8,
+    /// The call: 1 ball, 2 called strike, 3 swinging strike, 4 foul, 5 foul tip, 6 in play,
+    /// 7 hit by pitch; 0 unknown.
+    pub pitch_call: u8,
+    pub _pad3: [u8; 2],
 }
 
 /// One out as the umpire signals it (rules-spec §1.3).
@@ -383,6 +397,13 @@ pub unsafe extern "C" fn bb_timeline_info(blob: *const u8, len: usize, out: *mut
         info.launch_angle_rad = t.launch_angle_rad();
         info.projected_distance_m = t.projected_distance_m();
         info.pitch_type = t.pitch_type().0;
+        info.plate_x_m = t.plate_x_m();
+        info.plate_z_m = t.plate_z_m();
+        info.zone_bottom_m = t.zone_bottom_m();
+        info.zone_top_m = t.zone_top_m();
+        info.zone_half_width_m = t.zone_half_width_m();
+        info.plate_crossed = t.plate_crossed() as u8;
+        info.pitch_call = t.pitch_call();
     }
     let contact = tl.markers().and_then(|m| m.iter().find(|m| m.kind() == MarkerKind::Contact)).map(|m| m.t());
     info.contact_s = contact.unwrap_or(-1.0);
@@ -1288,6 +1309,38 @@ mod tests {
         assert_eq!(active_dives(&marks, 1.2)[0].dir, [1.0, 0.0]);
         assert!(active_dives(&marks, 4.0).is_empty());
     }
+    /// The strike-zone box (hud.md step 3): every taken pitch's call agrees with where the
+    /// exported crossing point puts the ball against the exported zone (the rule: a strike
+    /// when the ball touches the zone), and the zone is a batter's (knees to letters, the
+    /// plate's width).
+    #[test]
+    fn a_taken_pitch_is_called_by_where_it_crossed_the_exported_zone() {
+        let g = bb_game_create(9);
+        let (mut blob, mut len) = (std::ptr::null_mut(), 0usize);
+        let r = bb_physics::ball::BallParams::default().radius;
+        let (mut balls, mut strikes, mut swung) = (0, 0, 0);
+        while unsafe { bb_game_advance(g, &mut blob, &mut len) } == 1 {
+            let mut info = BbPlayInfo::default();
+            assert_eq!(unsafe { bb_timeline_info(blob, len, &mut info) }, 1);
+            unsafe { bb_blob_free(blob, len) };
+            assert!((1..=7).contains(&info.pitch_call), "every pitch has a call");
+            assert!((0.35..0.75).contains(&info.zone_bottom_m) && (0.85..1.30).contains(&info.zone_top_m), "{} {}", info.zone_bottom_m, info.zone_top_m);
+            assert!((info.zone_half_width_m as f64 - 8.5 * 0.0254).abs() < 1e-6);
+            if info.plate_crossed == 0 || !matches!(info.pitch_call, 1 | 2) {
+                swung += (info.pitch_call >= 3) as u32;
+                continue;
+            }
+            // The ball's circle against the rectangle, written out here from the rule.
+            let dx = (info.plate_x_m.abs() - info.zone_half_width_m).max(0.0) as f64;
+            let dz = (info.zone_bottom_m - info.plate_z_m).max(info.plate_z_m - info.zone_top_m).max(0.0) as f64;
+            let touches = dx * dx + dz * dz <= r * r * (1.0 + 1e-4);
+            if info.pitch_call == 2 { strikes += 1 } else { balls += 1 }
+            assert_eq!(touches, info.pitch_call == 2, "play {}: ({:.3}, {:.3}) in [{:.3}, {:.3}] call {}", info.play_index, info.plate_x_m, info.plate_z_m, info.zone_bottom_m, info.zone_top_m, info.pitch_call);
+        }
+        assert!(balls > 20 && strikes > 10 && swung > 20, "{balls} {strikes} {swung}");
+        unsafe { bb_game_free(g) };
+    }
+
     /// What a client shows of the pitcher (hud.md step 2): each timeline's pitch type is the
     /// one the event log records as thrown, and the box score's pitch count for a side is
     /// the number of timelines the client was handed with that side in the field, at any

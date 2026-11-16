@@ -211,6 +211,10 @@ namespace BbLook
 	inline const FLinearColor HudGold = FLinearColor::FromSRGBColor(FColor(244, 196, 48));
 	/** An empty base, an out not yet made. */
 	inline const FLinearColor HudOff = FLinearColor::FromSRGBColor(FColor(66, 74, 90));
+	/** The strike-zone box's marks: a ball, a ball put in play (a called strike is HudClose,
+	 *  a swing or a foul HudGold). */
+	inline const FLinearColor HudBall = FLinearColor::FromSRGBColor(FColor(84, 196, 120));
+	inline const FLinearColor HudInPlay = FLinearColor::FromSRGBColor(FColor(92, 150, 250));
 	/** A bang-bang out. */
 	inline const FLinearColor HudClose = FLinearColor::FromSRGBColor(FColor(222, 64, 52));
 	/** [0] the visitors, [1] the home side, as in Clubs. */

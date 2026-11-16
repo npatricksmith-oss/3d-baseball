@@ -2815,6 +2815,10 @@ void ABbDirector::Tick(float DeltaSeconds)
 				Speed = SpeedJumps[I];
 			}
 		}
+		if (PC->WasInputKeyJustPressed(EKeys::Z))
+		{
+			bZoneOn = !bZoneOn;
+		}
 		if (PC->WasInputKeyJustPressed(EKeys::Hyphen))
 		{
 			Speed = FMath::Max(0.25f, Speed - 0.25f);
@@ -3575,7 +3579,7 @@ void ABbDirector::Tick(float DeltaSeconds)
 			static const TCHAR* CamNames[3] = { TEXT("broadcast"), TEXT("behind home"), TEXT("overhead") };
 			Hud->Replay = bReplay ? FString::Printf(TEXT("REPLAY    seed %llu    play %u"), SeedShown, Current.Info.play_index) : FString();
 			Hud->Notice = Wall < SavedUntil ? SavedNote : FString();
-			Hud->Footer = FString::Printf(TEXT("Space: %s    Speed %.2fx: 1-5 for 1/2/4/6/10x, - / = by 0.25x    Enter: %s    R / F: replay    S: save play    C: camera (%s)    Q: quit"), bPaused ? TEXT("paused") : TEXT("pause"), Speed, bRush ? TEXT("skipping") : TEXT("next pitch"), CamNames[CameraMode]);
+			Hud->Footer = FString::Printf(TEXT("Space: %s    Speed %.2fx: 1-5 for 1/2/4/6/10x, - / = by 0.25x    Enter: %s    R / F: replay    S: save play    C: camera (%s)    Z: zone    Q: quit"), bPaused ? TEXT("paused") : TEXT("pause"), Speed, bRush ? TEXT("skipping") : TEXT("next pitch"), CamNames[CameraMode]);
 			// The outs on the board are the ones called so far. Runs, count and bases change
 			// when the play is known. A play that ends the half inning leaves it on the board,
 			// at three outs, until the next pitch (BeginPlayback).
@@ -3680,6 +3684,39 @@ void ABbDirector::Tick(float DeltaSeconds)
 			else
 			{
 				Hud->PitchLine = FString::Printf(TEXT("%.0f mph %s"), Mph, Type);
+			}
+			// The strike-zone box (hud.md step 3): this batter's zone, and the pitches of
+			// this at-bat. The ones before this pitch are the plays just before it in the
+			// history with the same batter (his id carries his side, and nobody bats twice
+			// running); this one goes in when it reaches the plate.
+			{
+				FBbZoneInfo& Zone = Hud->Zone;
+				Zone.bValid = In.zone_top_m > In.zone_bottom_m;
+				Zone.Bottom = In.zone_bottom_m;
+				Zone.Top = In.zone_top_m;
+				Zone.HalfWidth = In.zone_half_width_m;
+				Zone.Marks.Reset();
+				auto Mark = [&Zone](const BbPlayInfo& P)
+				{
+					if (P.plate_crossed)
+					{
+						Zone.Marks.Add({ P.plate_x_m, P.plate_z_m, P.pitch_call });
+					}
+				};
+				int32 First = bReplay ? ReplayIdx : History.Num();
+				while (First > 0 && History[First - 1].Play.Info.batter == In.batter)
+				{
+					--First;
+				}
+				for (int32 I = First; I < (bReplay ? ReplayIdx : History.Num()); ++I)
+				{
+					Mark(History[I].Play.Info);
+				}
+				if (PlayTime >= Arrived)
+				{
+					Mark(In);
+				}
+				Hud->bZoneShown = bZoneOn;
 			}
 		}
 		if (bReplay && ReplayIdx >= History.Num() && PlayTime >= Current.Info.duration_s)

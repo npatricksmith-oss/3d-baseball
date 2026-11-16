@@ -90,6 +90,8 @@ private:
 	bool bGameOver = false;
 	float PlayTime = 0.f;
 	float Speed = 1.f;
+	/** The strike-zone box is up (Z turns it off and on; hud.md step 3). */
+	bool bZoneOn = true;
 	float HoldAfter = 0.f;
 	/** The scoreboard as the current play started (the previous play's result). During a
 	 *  play the outs on it advance as the umpire calls each one. */

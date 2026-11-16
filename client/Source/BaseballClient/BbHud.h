@@ -33,6 +33,27 @@ struct FBbBugInfo
 	FString BatterToday;
 };
 
+/** One pitch in the strike-zone box: where it crossed (m: x across the plate in the sim's
+ *  frame, z up from the ground) and its call (BbPlayInfo.pitch_call). */
+struct FBbZoneMark
+{
+	float X = 0.f;
+	float Z = 0.f;
+	uint8 Call = 0;
+};
+
+/** The strike-zone box (step 3): the batter's zone from the sim and the pitches of this
+ *  at-bat, oldest first, numbered in that order. Seen from the pitcher's side, as the
+ *  centre-field camera sees it. */
+struct FBbZoneInfo
+{
+	bool bValid = false;
+	float Bottom = 0.f;
+	float Top = 0.f;
+	float HalfWidth = 0.f;
+	TArray<FBbZoneMark> Marks;
+};
+
 namespace BbHud
 {
 	/** The bug at the top left; returns its bottom edge in reference units. */
@@ -46,6 +67,8 @@ namespace BbHud
 	/** A home run: name, distance and speed, what it scored; above the caption, or Lift
 	 *  reference units higher still. */
 	void DrawHomeRun(ABbHUD& Hud, float S, const FString& Name, const FString& Line, const FString& Kind, int32 Side, float Alpha, float Lift = 0.f);
+	/** The strike-zone box at the top right. */
+	void DrawZone(ABbHUD& Hud, float S, const FBbZoneInfo& Zone);
 	/** Between innings, on the black: "Middle of the 3rd" and the two clubs' runs. */
 	void DrawInningCard(ABbHUD& Hud, float S, const FString& Title, const int32 Runs[2], float Alpha);
 }

@@ -367,6 +367,19 @@ pub fn encode(step: &PitchStep, st: &RulesState, rosters: &crate::roster::Roster
             launch_angle_rad: la as f32,
             spray_angle_rad: spray as f32,
             pitch_type: bb_schema::PitchType(rec.ty as u8),
+            zone_bottom_m: rec.zone.bottom as f32,
+            zone_top_m: rec.zone.top as f32,
+            zone_half_width_m: rec.zone.half_width as f32,
+            plate_crossed: rec.plate.is_some(),
+            pitch_call: match rec.call {
+                crate::pa::Call::Ball => 1,
+                crate::pa::Call::CalledStrike => 2,
+                crate::pa::Call::SwingingStrike => 3,
+                crate::pa::Call::Foul => 4,
+                crate::pa::Call::FoulTip => 5,
+                crate::pa::Call::InPlay => 6,
+                crate::pa::Call::HitByPitch => 7,
+            },
             ..Default::default()
         },
     );

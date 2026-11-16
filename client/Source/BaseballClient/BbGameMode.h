@@ -31,6 +31,9 @@ public:
 	UCanvas* GetCanvas() const { return Canvas; }
 	/** The score bug: clubs, runs, inning, bases, outs, count. */
 	FBbBugInfo Bug;
+	/** The strike-zone box, top right; Z hides and shows it. */
+	FBbZoneInfo Zone;
+	bool bZoneShown = true;
 	/** Under the bug: the last pitch's speed, and the ball's off the bat once it is hit. */
 	FString PitchLine;
 	/** While an earlier pitch is being replayed: "REPLAY   seed 7   play 123". */

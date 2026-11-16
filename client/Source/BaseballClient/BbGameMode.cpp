@@ -43,6 +43,10 @@ void ABbHUD::DrawHUD()
 	{
 		Y = BbHud::DrawTag(*this, S, Y, Notice, FLinearColor::FromSRGBColor(FColor(140, 230, 150)));
 	}
+	if (bZoneShown && CardAlpha <= 0.f)
+	{
+		BbHud::DrawZone(*this, S, Zone);
+	}
 	if (!Footer.IsEmpty())
 	{
 		DrawText(Footer, FLinearColor(1.f, 1.f, 1.f, 0.6f), 24.f * S, Canvas->ClipY - 30.f * S, Font, 0.9f * S);

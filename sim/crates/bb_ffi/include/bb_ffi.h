@@ -65,6 +65,14 @@ typedef struct {
   /* On contact, the projected distance (physics-spec 12): from home to where the batted ball
    * would have come down to field level unobstructed, m; 0 without contact. */
   float projected_distance_m;
+  /* Where the pitch crossed the judgment plane (the middle of the plate): plate_x_m across
+   * (sim x, + toward first base), plate_z_m up from the ground; valid when plate_crossed is 1.
+   * The batter's strike zone it was judged against: bottom and top above the ground and
+   * half-width across the plate, m (a strike when the ball touches it). pitch_call: 1 ball,
+   * 2 called strike, 3 swinging strike, 4 foul, 5 foul tip, 6 in play, 7 hit by pitch; 0 unknown. */
+  float plate_x_m, plate_z_m;
+  float zone_bottom_m, zone_top_m, zone_half_width_m;
+  uint8_t plate_crossed, pitch_call, _pad3[2];
 } BbPlayInfo;
 /* Agent ids: high byte = team (0 away, 1 home); bit 0x80 = fielder, low 7 bits = position 1-9;
  * without bit 0x80, a batter or runner, low 7 bits = place in the batting order 1-9. A player
