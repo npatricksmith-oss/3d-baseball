@@ -291,7 +291,7 @@ void ABbDirector::BeginPlay()
 		Bodies.Add(Body);
 		Heads.Add(Head);
 	}
-	// The ball at its real size (owner, 2026-11-16; it was drawn at twice that).
+	// The ball a quarter larger than life (BallDrawnScale; owner, 2026-11-16).
 	Ball = Shape(Sphere, FVector::ZeroVector, FVector(BallDrawnM), FLinearColor(1.f, 1.f, 0.9f));
 	// The ball's shadow as a viewer reads it: a dark disc on the ground straight under the
 	// ball (the sun's own shadow of so small a ball is lost at a distance and falls well

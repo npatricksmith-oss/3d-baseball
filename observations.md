@@ -9,7 +9,7 @@ The owner's list of what he has seen and wants, with where each stands. The lett
 # Added 2026-11-16
 
 Screen:
-- [x] Reduce ball, bat and glove (owner: the ball only; leave the glove and bat as they are). *Done 2026-11-16: the ball is drawn at its real size, 7.5 cm (it was 15). Not yet built or seen.*
+- [x] Reduce ball, bat and glove (owner: the ball only; leave the glove and bat as they are). *Done 2026-11-16: the ball was cut to its real size, 7.5 cm (it was 15). You still could not see it, so it is now a quarter larger, 9.4 cm.*
 - [x] Ball shadow should be half as big and 30% more blurred when hit. *Done 2026-11-16: half the size, and its edge now fades out over the outer 30% of it (before, the edge was hard). Not yet built or seen.*
 - [ ] Runners in the mini base map should be according to the real runners. *Today the map shows the bases as they were before the pitch until the play ends, then jumps to the result.*
 

@@ -480,9 +480,12 @@ private:
 	TObjectPtr<AStaticMeshActor> Ball;
 	UPROPERTY()
 	TObjectPtr<AStaticMeshActor> BallShadow;
-	/** Diameter the ball is drawn at, m: its real size, 7.4 cm (owner, 2026-11-16; it was twice
-	 *  that). Engine primitives are 1 m across at scale 1. */
-	static constexpr float BallDrawnM = 0.075f;
+	/** Diameter the ball is drawn at, m: BallDrawnScale times its real size, 7.5 cm. (It was
+	 *  twice real size until 2026-11-16, then real size, which the owner could not see; a
+	 *  quarter larger since, owner, 2026-11-16.) Engine primitives are 1 m across at scale 1. */
+	static constexpr float BallRealM = 0.075f;
+	static constexpr float BallDrawnScale = 1.25f;
+	static constexpr float BallDrawnM = BallRealM * BallDrawnScale;
 	/** Smallest diameter of the ball's ground shadow with the ball on the ground, m: the drawn
 	 *  ball's own size, as the sun's shadow of a ball is. Close to the camera it stays this size. */
 	static constexpr float BallShadowM = BallDrawnM;
