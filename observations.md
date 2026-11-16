@@ -13,6 +13,9 @@ Screen:
 - [x] Ball shadow should be half as big and 30% more blurred when hit. *Done 2026-11-16: half the size, and its edge now fades out over the outer 30% of it (before, the edge was hard). Not yet built or seen.*
 - [ ] Runners in the mini base map should be according to the real runners. *Today the map shows the bases as they were before the pitch until the play ends, then jumps to the result.*
 
+Fielding:
+- [ ] Seed 40580, play 15: "CF seriously misplayed the ball. Misjudgment? Bug?" *Found 2026-11-16: a fault in how fielders judge a fly, not a believable misjudgment. The center fielder called it and got there in time, but all the way down he thought it would land about 2 m to his right of where it did, and he still thought so half a second before it came down, with the ball 8 m from him. A real outfielder doesn't misjudge a ball's direction that late. So he stopped 1.6 m from it, realised too late to dive, and it rolled to the wall: an inside-the-park home run. The cause is in the sim's read of a fly: a small error that stays the same on every look gets trusted as if it were new information each time, so he grows sure of a wrong line and stops correcting it. With that error left out he reads it to 7 cm and makes the catch. The fix is fielding physics, which is paused, so it waits for reviews to come back (TASKS backlog).*
+
 Rules:
 - [~] Fielders must tag a runner out if the play is not a force play. *The rules engine already requires a tag on a non-force play. Nothing on screen shows the tag being made yet (no reach toward the runner). If you saw an out with no tag at all, its seed and play number would help.*
 
