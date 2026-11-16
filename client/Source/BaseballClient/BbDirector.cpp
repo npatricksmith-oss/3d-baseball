@@ -589,6 +589,7 @@ void ABbDirector::BeginPlayback(FBbPlay&& Play)
 	bBallDead = false;
 	bDeadCut = false;
 	bHomeRunCut = false;
+	bFoulOut = false;
 	CallsLogged = 0;
 	if (!Current.bValid)
 	{

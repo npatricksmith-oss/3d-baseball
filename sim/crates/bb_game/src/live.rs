@@ -3767,7 +3767,7 @@ impl<'a> Sim<'a> {
         let pending = matches!(&self.st.play, bb_rules::PlayState::Live(lp) if lp.fair == bb_rules::FairFoul::Pending);
         if let Ball::Free { path, next_touch, next_wall, settled_sent } = &mut self.ball {
             if pending {
-                if let Some(f) = passed_base(path, (t - DT).max(floor), t.min(path.t_end()), self.inp.env.ball.radius) {
+                if let Some(f) = passed_base(path, self.inp.field, (t - DT).max(floor), t.min(path.t_end()), self.inp.env.ball.radius) {
                     facts.push(f);
                 }
             }
@@ -5076,8 +5076,11 @@ impl<'a> Sim<'a> {
 /// judged where it crosses: by the contact point if it is rolling, by any part of the ball if
 /// it is in the air on a bound (OBR "Fair Ball", "Foul Ball": "bounds past first or third base
 /// on or over fair/foul territory"). Before this the sim judged such a ball only where it came
-/// to rest, so a roller past third in foul ground stayed live until it stopped.
-fn passed_base(path: &BallPath, t0: f64, t1: f64, r_ball: f64) -> Option<Input> {
+/// to rest, so a roller past third in foul ground stayed live until it stopped. A crossing
+/// made outside the playing field does not count: a bouncer that went into a dugout or over a
+/// foul-ground wall short of the bag is out of play where it left, and its path in the stands
+/// may still cross the bag's line before it ends (agy review 2026-11-16 P2-3).
+fn passed_base(path: &BallPath, field: &Field, t0: f64, t1: f64, r_ball: f64) -> Option<Input> {
     let Some(&(t_bounce, _, _)) = path.bounces.first() else { return None };
     let t0 = t0.max(t_bounce);
     if t1 <= t0 {
@@ -5106,6 +5109,9 @@ fn passed_base(path: &BallPath, t0: f64, t1: f64, r_ball: f64) -> Option<Input> 
             }
         }
         let p = path.at(b).0;
+        if field.ball_clearance(p.x, p.y, r_ball).dist < 0.0 {
+            return None;
+        }
         let line = (p.y - p.x.abs()) / core::f64::consts::SQRT_2;
         let airborne = p.z > r_ball + 0.01;
         let fair = if airborne { line >= -r_ball } else { line >= 0.0 };
@@ -5607,7 +5613,7 @@ mod tests {
             let path = batted_path(&fx.env, &fx.field, ball, 0.4, |_, _| (0.0, 0.0));
             let mut t = 0.4;
             while t < path.t_end() {
-                if let Some(f) = passed_base(&path, t, (t + DT).min(path.t_end()), fx.env.ball.radius) {
+                if let Some(f) = passed_base(&path, &fx.field, t, (t + DT).min(path.t_end()), fx.env.ball.radius) {
                     let Input::BallPassedBase { t: tp, fair } = f else { unreachable!() };
                     let p = path.at(tp).0;
                     let along = (p.y - p.x) / core::f64::consts::SQRT_2;
@@ -5621,6 +5627,47 @@ mod tests {
         assert_eq!(judge(48.0, 30.0), Some(false), "3° outside the third-base line");
         assert_eq!(judge(42.0, 30.0), Some(true), "3° inside it");
         assert_eq!(judge(42.0, 3.0), None, "a dribbler that stops short of the bag");
+    }
+
+    // agy review 2026-11-16 P2-3: a hard bouncer down the first-base side that leaves the field
+    // over the foul-ground wall short of the bag (the reviewer's ball: 35 m/s, 12° off the
+    // first-base axis toward foul ground, driven down). Its path past the wall crosses the
+    // bag's line in the stands; that crossing must not be sent, or the play ends as a foul
+    // without the ball ever being dead out of play.
+    #[test]
+    fn a_ball_gone_out_of_play_short_of_the_bag_does_not_pass_it() {
+        // The reviewer's ball, through the whole live play; whether it goes into the dugout and
+        // on past the bag's line there depends on the bounce tilts, so on the seed. Search seeds
+        // for plays of that shape (every bounce short of the bag, out of play, the path ending
+        // past the line) and check none sends a crossing from outside the field.
+        let fx = fixture(&[]);
+        let a = 12f64.to_radians();
+        let along = |x: f64, y: f64| (x + y) / core::f64::consts::SQRT_2;
+        let mut found = 0;
+        for seed in 0..300u64 {
+            let mut st = fx.st.clone();
+            let mut inp = input(&fx, vec![RunnerIn { id: fx.st.batter, base: 0, speed: 8.2, tau_s: bb_agents::running::LEAGUE_TAU_S }]);
+            inp.ball = BallState { r: Vec3::new(0.0, 0.5, 0.5), v: Vec3::new(35.0 * a.cos(), 35.0 * a.sin(), -14.0), w: Vec3::ZERO };
+            inp.seed = seed;
+            let path = batted_path(&fx.env, &fx.field, inp.ball, inp.t_contact, |k, surf| {
+                let mut r = rng(seed, inp.play, 0x0200, Purpose::SurfaceBounce, k);
+                (surf.roughness * r.truncated_normal(4.0), surf.roughness * r.truncated_normal(4.0))
+            });
+            let end = path.at(path.t_end()).0;
+            if !(matches!(path.end(), SegmentEnd::OverFence { .. }) && path.bounces.iter().all(|&(_, x, y)| along(x, y) < BASE_L) && along(end.x, end.y) > BASE_L) {
+                continue;
+            }
+            found += 1;
+            let out = simulate_live(&inp, &mut st);
+            for f in &out.facts {
+                if let Input::BallPassedBase { t, .. } = *f {
+                    let p = out.path.at(t).0;
+                    assert!(fx.field.ball_clearance(p.x, p.y, fx.env.ball.radius).dist >= 0.0, "seed {seed}: passed the bag at {t:.3} s from outside the field, {p:?}");
+                }
+            }
+            assert!(out.events.iter().any(|e| matches!(e, Event::BallDead { reason: bb_rules::DeadBall::OutOfPlay })), "seed {seed}: never dead out of play: {:?}", out.events);
+        }
+        assert!(found > 0, "no seed gave the reviewer's case");
     }
 
     /// A fly ball to center; perfect hands, so glove noise decides nothing in these tests.

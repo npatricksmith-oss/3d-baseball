@@ -331,7 +331,9 @@ pub fn encode(step: &PitchStep, st: &RulesState, rosters: &crate::roster::Roster
     // throw; 2 home run; 3 ground-rule double; and, for presentation only, 4 a foul ball out of
     // play, which the log records as 1), so a client can cut back to the field, or after a foul
     // straight to the next pitch (owner's play, seed 3647 play 62).
-    let foul = step.rules_events.iter().any(|e| matches!(e, bb_rules::Event::FairFoulDecided { fair: false }));
+    // An uncaught foul: only it scores a foul pitch (a caught foul fly is an out, and a throw
+    // after it that goes out of play is a throw, kind 1; agy review 2026-11-16 P2-2).
+    let foul = step.rules_events.iter().any(|e| matches!(e, bb_rules::Event::PitchResult { call: bb_rules::PitchCall::Foul, .. }));
     let reason = step.rules_events.iter().find_map(|e| match e {
         bb_rules::Event::BallDead { reason } => Some(match reason {
             bb_rules::DeadBall::OutOfPlay if foul => 4u8,
