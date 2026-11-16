@@ -1,58 +1,81 @@
+# Observations
 
+The owner's list of what he has seen and wants, with where each stands. The letter is his priority (A, B, C). Every lead session updates the boxes here when it finishes something, so this file is enough to follow progress; [TASKS.md](TASKS.md) has the detail.
+
+`[x]` done · `[~]` partly done (the note says what is left) · `[ ]` not started
+
+**Last updated:** 2026-11-16
 
 # General
-- A. Better Stadium and baseball diamond visuals. more realistic looking. For now, crowds can be something low resource and reworked later.
-- C. Implement better crowds.
-- B. Implement leagues/divisions/teams with rosters
-- C. Implement player development.
-- A. implement wind and weather conditions -affect on ball and players (rain = more fielding/running mistakes)
-- A. implement rosters (player names, player numbers, player positions)
-- B. team lineups (vs left vs right batting orders)
-- B. implement a game settings screen
-- A. implement baserunners sliding at appropriate times.
-- A. implement stolen bases.
-- A. variety of body shapes, nationalities, ethnicities, skin color
-- A. team uniforms
-- A. Limits of play area (i saw a foul ball go back out of play and continued on). After the ball goes out of the stadium, cut back to field of play.
-- A. Runners are leading off before the pitcher gets set on the mound. In the real world the pitcher would pick them off.
-- A. Post game box score
-- C. Post game highlights
+- [x] A. Better stadium and baseball diamond visuals, more realistic looking. For now, crowds can be something low resource and reworked later. *The park is built (field, walls, seats, scoreboard, signs, trees) with a seated crowd of 6,200.*
+- [ ] C. Implement better crowds. *Today's crowd sits still: no standing, no reactions.*
+- [ ] B. Implement leagues/divisions/teams with rosters. *Two invented clubs exist only for the look (Cedar Hollow Larks, Stonebridge Colliers).*
+- [ ] C. Implement player development.
+- [ ] A. Implement wind and weather conditions: effect on ball and players (rain = more fielding/running mistakes).
+- [x] A. Implement rosters (player names, player numbers, player positions). *Numbers are on the backs of the uniforms.*
+- [ ] B. Team lineups (vs left vs right batting orders).
+- [ ] B. Implement a game settings screen.
+- [ ] A. Implement baserunners sliding at appropriate times. *Next in the graphics work is drawing the slide; the sim does not yet decide when a runner slides.*
+- [ ] A. Implement stolen bases.
+- [~] A. Variety of body shapes, nationalities, ethnicities, skin color. *Height, build and skin tone vary by player; names do not yet follow nationality.*
+- [x] A. Team uniforms.
+- [x] A. Limits of play area (I saw a foul ball go back out of play and continued on). After the ball goes out of the stadium, cut back to field of play. *Since 2026-11-16, after a foul into the seats the game goes straight to the next pitch.*
+- [ ] A. Runners are leading off before the pitcher gets set on the mound. In the real world the pitcher would pick them off.
+- [~] A. Post game box score. *The sim keeps the box score; there is no screen for it yet (it comes with the HUD work).*
+- [ ] C. Post game highlights.
 
-
-
-
-# Handed-ness
-- A. implement player handed-ness for fielding, throwing, and batting.
-- A. right handed players throw with their right hand, and opposite with left handed.
-- A. Fielders need a "handed-ness" attribute. Each player either throws with their left or right hand. Generally fielding handedness matches  batting handedness but not always.
-- A. Some batters are switch hitters. They switch sides of the plate based on the handed-ness of the pitcher.
+# Handedness
+- [x] A. Implement player handedness for fielding, throwing, and batting.
+- [x] A. Right-handed players throw with their right hand, and opposite with left-handed.
+- [x] A. Fielders need a handedness attribute. Each player either throws with their left or right hand. Generally fielding handedness matches batting handedness but not always.
+- [x] A. Some batters are switch hitters. They switch sides of the plate based on the handedness of the pitcher.
 
 # Pitching
-
-- A. Pitchers stretch vs windup. 
-https://journals.sagepub.com/doi/abs/10.1177/03635465241247543
-https://umpirebible.com/pitching-positions/
-https://www.google.com/search?aep=21&udm=50&utm_source=google&utm_campaign=aim_aware&utm_content=oo-seaport-12360&q=pitching+stretch+vs+windup+visualization&authuser=0&mstk=AUtExfBuCpFx31GCoHpRB8KLO1qKWA6mUjhZD3v35ZKPAfq90ZzZyxUxiWRROr8viTTLcl75CqvM5YPbs3Ls9L-ROoyfA7T1brTey_neMfElpyMjs_EvfQLt_RWbpM86fOoITLh0k8ET8PQNZ94LU4gpzJMMIsfbEC1CxL5Au9AuEbjHkPVLq-Zx3BOyqPPRSpHzRN0Vji-EIP90T1Y-AyzGJQE-OYdhUSQ_B0uhO0pA_quDzZ8x-lh11TgYDZKwSHheN0GJt_G1Pz2mdl6mo4kBbE_MJrDxFOjT4vBn5uNs3sU-oSP2mqhrlr8OENG4ffgvcmBgWaPmw72jUw&csuir=1&mtid=fTz3asXBJdylptQPvdPU4A0
-
-https://www.google.com/search?aep=21&udm=50&utm_source=google&utm_campaign=aim_aware&utm_content=oo-seaport-12360&q=pitching+stretch+vs+windup+visualization&authuser=0&mtid=2Tz3at-4Cr2ZptQPmYKMoQM&sxsrf=AKL5yDidleqgWYTq9m6WMTo4dVGgffzysQ%3A1794587773614&peek_pws=0&mstk=AUtExfBU_-W-pZOq9ueCMDvgSCG0yQ0_e_tMTmk3tBByfW42KoeVH2ogDqD4fFRGVreU76EQvs3J8VeIJk2UYgiykHhF2jOyprGT8SkwUqzgTuwKvo8N4ioMEzJoA1gMnLOY-vVO1ukiVzpJawakgzWsgKJ3zLk9TbgGeKXsOfN-JPsRkcC5EzWQ9m7g7AmkcnJpbjCdsnL49J879cmKRYFb8-8Dfjyz30Hw73O4Skx1RW0nWc-Aqt0XcNBboNi0KwLFxttO86lz2SIS9tGdsb7G4NbASwnDlEvaV2cCsh9_APzZUMTAr4qhOh08YNqYu_e1sbvQvVm9_Mb7oQ&csuir=1
-
-
+- [~] A. Pitchers stretch vs windup. *The pitcher is drawn delivering from the stretch on every pitch; no windup yet, and the sim has one delivery time for both.* References: [Am J Sports Med 2024](https://journals.sagepub.com/doi/abs/10.1177/03635465241247543), [Umpire Bible: pitching positions](https://umpirebible.com/pitching-positions/), and a web search for "pitching stretch vs windup visualization".
 
 # Fielding
-- A. implement baseball gloves on players along with their team uniforms.
-- A. Throwing motion doesn't look realistic
-- A. A hurried throw loses accuracy and speed. If a player has time to get balanced, then the throw can gain accuracy and speed.
-- A. Each player has throwing ratings. (accuracy, speed, throwing set up time)
-- A. Smarter player decisions based on runners on base an number of outs. e.g. if a runner on 3rd with 2 outs, fielders play to get force out at first or second instead of throwing home.
-- A. players dive for balls increasing range. Takes effort to rise back up to throw if the catch or grounder has been gotten.
-
+- [x] A. Implement baseball gloves on players along with their team uniforms.
+- [x] A. Throwing motion doesn't look realistic. *Fielders now throw with a coded motion, hand on the ball's real release point. You have not seen it moving yet.*
+- [x] A. A hurried throw loses accuracy and speed. If a player has time to get balanced, then the throw can gain accuracy and speed. *See below: fielders still choose to hurry too often.*
+- [~] A. Each player has throwing ratings (accuracy, speed, throwing set-up time). *The ratings exist in the model; every player is average until players get their own ratings.*
+- [~] A. Smarter player decisions based on runners on base and number of outs. E.g. with a runner on 3rd and 2 outs, fielders play to get the force out at first or second instead of throwing home. *Throw choices weigh outs and runners; more cases are in your saved plays below.*
+- [~] A. Players dive for balls, increasing range. Takes effort to rise back up to throw if the catch or grounder has been gotten. *Dives and the get-up work in the sim at a realistic rate; they are still drawn with stand-in clips (the new dive motion comes with the slide).*
 
 # Hitting
-- A. ball shadow after hit can't be seen
-- A. once home run goes over the wall, move camera back to center to see runners moving around bases.
-- A. Hitting home runs brings up display with player name, how far ball was hit and mph.
-- A. Hitting animation needs work. Batting stance. Initial Load. Swing. Follow through.
+- [x] A. Ball shadow after hit can't be seen.
+- [x] A. Once a home run goes over the wall, move camera back to center to see runners moving around bases.
+- [x] A. Hitting home runs brings up display with player name, how far ball was hit and mph.
+- [x] A. Hitting animation needs work. Batting stance. Initial load. Swing. Follow through. *Coded stance, stride and swing, hands on the sim's bat. Different stances per player come later. You have not seen it moving yet.*
 
 # Stats
-- B. clarify what 'fielder's choice' means - i think the game uses it too liberally
-- B. implement statistics
+- [ ] B. Clarify what "fielder's choice" means; I think the game uses it too liberally.
+- [~] B. Implement statistics. *The sim works out batting lines and the box score from each game's record; no statistics screens yet.*
+
+# Saved plays, 2026-11-15 night (seed 3647)
+
+Watch any of them again with `client/run.sh 3647`, then R back to the play number.
+
+Umpire and camera:
+- [x] 15. Foul balls should be called at the right time, as soon as the ball is deemed foul. *Fixed 2026-11-16: a ball rolling past first or third in foul ground is now called as it passes the bag (play 15 at 1.5 s; it was 5.3 s).*
+- [x] 20. It's a foul ball but the umpire calls it "In play". *Fixed 2026-11-16.*
+- [x] 62. After a foul ball out of the stadium, just cut to the players already set up for the next pitch. *Done 2026-11-16.*
+
+Runners:
+- [ ] 65. Runner should be in an athletic stance when waiting for the pitch to be thrown.
+- [ ] 65, 67, 68. On a fly that might be caught, the runner goes part way (halfway), stops in an athletic stance and watches the ball and outfielder; if he judges it caught he goes back to tag up; even on a likely catch he comes off the base a little in case it is misplayed.
+- [ ] 156. Runner should run through first base as if he were safe, since he can't stop that quickly.
+
+Throws:
+- [ ] 56, 107, 142, 32. Fielders should not throw on the run unless there is no time to get set; a throw on the run should be slower. 32: the third baseman with plenty of time takes a split second to step and throw strong and accurate, judging how long the runner will take. *(98 and 99, a long throw and a slow roller, you found right.)*
+- [ ] 68. The outfielder judges whether to throw behind a runner who didn't tag up, or throw safely to the cutoff.
+- [ ] 26. A pitcher who catches a hot liner with runners on looks to double one of them off.
+
+Covering and calling:
+- [ ] 19. The first baseman holding a runner still goes for the grounder, unless it is near enough to second for the second baseman to take it; then he goes back to first for the throw.
+- [ ] 52, 63. The pitcher covers first on a ground ball to the right side.
+- [ ] 159. The first baseman who is taking the bag himself puts his hand up to tell the pitcher "I got it".
+- [ ] 86. The first baseman stretches: lead foot and glove out toward the throw, to shorten it.
+- [ ] 147. The right fielder should call off the center fielder, who peels off to back up. *(The caption "Fly out to center" names the fielder who caught it, as a scorer does.)*
+
+Catcher:
+- [ ] 40. On a pop foul the catcher takes his mask off and tosses it aside (for the look only).
