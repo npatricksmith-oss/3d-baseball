@@ -6,6 +6,27 @@ The owner's list of what he has seen and wants, with where each stands. The lett
 
 **Last updated:** 2026-11-16
 
+# Added 2026-11-16
+
+Screen:
+- [ ] Reduce ball, bat and glove. *They are drawn larger than life so they show up on a TV-style camera (the ball twice its real size).*
+- [ ] Ball shadow should be half as big and 30% more blurred when hit.
+- [ ] Runners in the mini base map should be according to the real runners. *Today the map shows the bases as they were before the pitch until the play ends, then jumps to the result.*
+
+Rules:
+- [~] Fielders must tag a runner out if the play is not a force play. *The rules engine already requires a tag on a non-force play. Nothing on screen shows the tag being made yet (no reach toward the runner). If you saw an out with no tag at all, its seed and play number would help.*
+
+Running:
+- [ ] Runner should round 1st base if the ball is being thrown in from the outfield to the cutoff man or another base, to get a jump if the ball is misplayed.
+- [ ] Need to work on rundowns. *There is a stand-in today; the real rundown is planned after the runner decision work.*
+
+Fielding and throwing:
+- [ ] After an out from deep outfield, throws should hit a cutoff person.
+- [~] A. When fielding on the run, fielders should plant their foot before the throw, otherwise a throwing penalty. *The sim already makes a throw slower and wilder when his feet are not under him; the motion does not show a plant yet, and how often they skip it is your saved plays 56, 107, 142, 32 below.*
+- [ ] B. Throwing across the body means a slight throwing penalty.
+- [ ] C. A good throw is plant or step, then throw. *(The throwing motion.)*
+- [~] D. Throws from deep in the outfield would generally not be exactly on target every time. Throws move fielders off the base, and may hit the ground or force the fielder to move. *Throws already scatter by the thrower's accuracy, receivers leave the bag or take a hop when they must, and a short throw bounces. Whether the scatter is as large as real outfield throws is unchecked.*
+
 # General
 - [x] A. Better stadium and baseball diamond visuals, more realistic looking. For now, crowds can be something low resource and reworked later. *The park is built (field, walls, seats, scoreboard, signs, trees) with a seated crowd of 6,200.*
 - [ ] C. Implement better crowds. *Today's crowd sits still: no standing, no reactions.*
