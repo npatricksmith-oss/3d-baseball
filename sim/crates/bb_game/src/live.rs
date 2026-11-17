@@ -8179,13 +8179,15 @@ mod tests {
     }
 
     // Agent-models §10, `ReadSkill`: one set of fly balls, chosen by geometry alone (in the air
-    // at least 4 s, coming down in the park 12–20 m from the nearest outfielder's spot: the
-    // routine-but-running plays of docs/calibration/2026-11-15-outfield-read.md), each played
-    // with four sets of read draws: an outfield of grade 20 catches fewer than one of grade
-    // 80. Perfect hands (`input`), so only the read differs. The balls are batted balls from
-    // games 0–23, with their real spins (since 2026-11-17: on balls given exactly the spin the
-    // fielder believes, an honest tracking read leaves nothing to misjudge on these runs, and
-    // both grades caught every one).
+    // at least 3.5 s, coming down in the park 18–28 m from the nearest outfielder's spot: the
+    // harder, running end of the plays of docs/calibration/2026-11-15-outfield-read.md), each
+    // played with four sets of read draws: an outfield of grade 20 catches fewer than one of
+    // grade 80. Perfect hands (`input`), so only the read differs. The balls are batted balls
+    // from games 0–23, with their real spins. *Changed 2026-11-17* (docs/calibration/
+    // 2026-11-17-track-bias.md): the set was constructed balls with exactly the spin the
+    // fielder believes, at least 4 s up and 12–20 m away; once the tracking read was honest
+    // about its persistent error, both grades caught every one of those (and of the same
+    // geometry from games), as an outfielder should on an easy fly; 266 against 280 of 296 here.
     #[test]
     fn a_poor_reader_misses_more_flies_than_a_good_one() {
         let fx = fixture(&[]);
@@ -8207,7 +8209,7 @@ mod tests {
                 let Ball::Free { path, .. } = &sim.ball else { unreachable!() };
                 let Some((t, x, y)) = path.first_bounce() else { continue };
                 let near = (6..9).map(|i| m::hypot(home[i].x - x, home[i].y - y)).fold(f64::INFINITY, f64::min);
-                if t - inp.t_contact >= 4.0 && (12.0..20.0).contains(&near) && path.walls.is_empty() {
+                if t - inp.t_contact >= 3.5 && (18.0..28.0).contains(&near) && path.walls.is_empty() {
                     flies.push(ball);
                 }
             }
