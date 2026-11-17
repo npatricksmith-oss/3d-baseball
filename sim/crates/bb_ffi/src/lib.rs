@@ -1093,7 +1093,9 @@ mod tests {
     // ball in play the batter-runner goes somewhere.
     #[test]
     fn timelines_sample_to_plausible_frames() {
-        let g = bb_game_create(5);
+        // Game 6: it has dives to sample (game 5 had none once the tracking read carried its
+        // persistent error as a state, 2026-11-17).
+        let g = bb_game_create(6);
         let (mut plays, mut moved, mut contacts, mut awards) = (0, 0, 0, 0);
         let mut any_on = false;
         let (mut held, mut thrown, mut dives) = (0u32, 0u32, 0u32);

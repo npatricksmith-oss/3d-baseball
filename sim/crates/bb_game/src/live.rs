@@ -308,7 +308,8 @@ const EYE_H: f64 = 1.7;
 /// How good one look after the first is, against the snapshot read's σ at the same distance
 /// (agent-models §5.1): an outfielder's look is good to 0.2 × 3.5 m at 30 m across his line of
 /// sight (1.3°), three times that along it. Fitted with `TRACK_BIAS_FRAC` to the owner's band
-/// for a routine fly (grade 50 .967 in 100 games; docs/calibration/2026-11-15-tracking-read.md) [E].
+/// for a routine fly (grade 50 .967 in 100 games; docs/calibration/2026-11-15-tracking-read.md);
+/// kept when `TRACK_BIAS_FRAC` was refitted (docs/calibration/2026-11-17-track-bias.md) [E].
 const LOOK_SCALE: f64 = 0.2;
 /// What his flight model may be missing, as an extra acceleration he can learn (agent-models
 /// §5.1): its prior σ per axis, m/s², the plate cue's spin allowance (`PLATE_SPIN_M` at 1 s)
@@ -321,9 +322,11 @@ const CURVE_DRIFT: f64 = CURVE_PRIOR * CURVE_PRIOR / 24.0;
 /// How well he knows where the ball was hit (he saw it), σ per axis, m [E].
 const TRACK_CONTACT_M: f64 = 0.3;
 /// The persistent part of a look's error (agent-models §5.1): this fraction of the play's
-/// fixed draws at a single look's σ, on every look; the rest is fresh each look. Fitted to
-/// the owner's band for a routine fly (90–99% by ability), [E].
-pub(crate) const TRACK_BIAS_FRAC: f64 = 0.2;
+/// fixed draws at the snapshot read's σ, on every look (a misjudged angle and fraction of the
+/// range); the rest is fresh each look. The filter carries it as a state. Refitted with that
+/// to the owner's band for a routine fly (90–99% by ability; grade 50 .964 on seeds 0–99;
+/// docs/calibration/2026-11-17-track-bias.md; was 0.2 when the filter took it as fresh) [E].
+pub(crate) const TRACK_BIAS_FRAC: f64 = 0.6;
 /// Arriving under control (agent-models §5.2): a chaser with time in hand keeps this many of
 /// his doubts (the σ of where he believes it comes down) between where he can stop and his
 /// spot [E].
@@ -465,23 +468,58 @@ struct Shown {
     asks: Option<(u8, usize)>,
 }
 
+/// The tracking read's state size: position, velocity and the learned acceleration (three
+/// each), then the persistent part of his looks' error (`TB` and on, four).
+const TN: usize = 13;
+/// Where the persistent error's four components start in the state: position along his line
+/// of sight, position across it (level), velocity along, velocity across, each in units of
+/// its own σ (agent-models §5.1).
+const TB: usize = 9;
+
 /// A fielder's running estimate of a batted ball on its first flight (agent-models §5.1, the
 /// tracking read): position, velocity and the extra acceleration his model is missing (the
-/// curvature of the spin he cannot see) at `t`, `x` = [r, v, a], with their covariance in
-/// 3×3 blocks `p[i][j]` (`p[j][i]` = `p[i][j]`ᵀ), kept while the ball is `ball`
-/// (`Sim::ball_gen`) and updated by each look.
+/// curvature of the spin he cannot see) at `t`, `x` = [r, v, a], and the persistent part of
+/// his own looks' error `b` (what stays the same on every look: a misjudged angle and range,
+/// in units of its σ), with the covariance of all thirteen, `p` (rows and columns 0–8 the
+/// ball's, `TB`.. his error's), kept while the ball is `ball` (`Sim::ball_gen`) and updated
+/// by each look.
 #[derive(Clone, Copy, Debug)]
 struct Track {
     ball: u64,
     t: f64,
     x: [Vec3; 3],
-    p: [[Mat3; 3]; 3],
+    b: [f64; 4],
+    p: [[f64; TN]; TN],
     /// Looks taken so far.
     looks: u32,
     next_look: f64,
 }
 
+fn comps(v: Vec3) -> [f64; 3] {
+    [v.x, v.y, v.z]
+}
+
 impl Track {
+    /// A new estimate: the ball's state `x` with covariance blocks `pb` (3×3 blocks of r, v and
+    /// a), and his persistent error unknown, one σ on each of its four components, independent
+    /// of the ball.
+    fn new(ball: u64, t: f64, x: [Vec3; 3], pb: [[Mat3; 3]; 3]) -> Track {
+        let mut p = [[0.0; TN]; TN];
+        for (bi, row) in pb.iter().enumerate() {
+            for (bj, m3) in row.iter().enumerate() {
+                for i in 0..3 {
+                    for j in 0..3 {
+                        p[3 * bi + i][3 * bj + j] = m3.r[i][j];
+                    }
+                }
+            }
+        }
+        for k in 0..4 {
+            p[TB + k][TB + k] = 1.0;
+        }
+        Track { ball, t, x, b: [0.0; 4], p, looks: 0, next_look: t }
+    }
+
     fn r(&self) -> Vec3 {
         self.x[0]
     }
@@ -489,10 +527,18 @@ impl Track {
         self.x[1]
     }
 
+    /// The covariance block of state blocks `i` and `j` (0 position, 1 velocity, 2 the
+    /// learned acceleration).
+    #[cfg(test)]
+    fn blk(&self, i: usize, j: usize) -> Mat3 {
+        Mat3::from_rows(core::array::from_fn(|a| core::array::from_fn(|c| self.p[3 * i + a][3 * j + c])))
+    }
+
     /// The estimate run on to `t` with the observer's own physics (the spin he believes for
     /// it, `believed_spin`) plus the extra acceleration he has learned, and its covariance:
-    /// F = [[I, h, h²/2], [0, I, h], [0, 0, I]] and that acceleration drifting as white noise
-    /// of intensity `CURVE_DRIFT` (agent-models §5.1).
+    /// F = [[I, h, h²/2], [0, I, h], [0, 0, I]] on the ball's part, that acceleration drifting
+    /// as white noise of intensity `CURVE_DRIFT`, and his persistent error unchanged
+    /// (agent-models §5.1).
     fn run_to(&self, env: &FlightEnv, t: f64, t_contact: f64) -> Track {
         let mut tr = *self;
         while t - tr.t > 1e-9 {
@@ -501,63 +547,82 @@ impl Track {
             let w = believed_spin(env, v, Some(tr.t - t_contact));
             let st = FlightEnv { extra: a, ..*env }.step(&BallState { r, v, w }, h);
             tr.x = [st.r, st.v, a];
-            let f = [[1.0, h, 0.5 * h * h], [0.0, 1.0, h], [0.0, 0.0, 1.0]];
-            let mut np = [[Mat3::ZERO; 3]; 3];
-            for i in 0..3 {
-                for j in 0..3 {
-                    let mut acc = Mat3::ZERO;
-                    for k in 0..3 {
-                        for l in 0..3 {
-                            let c = f[i][k] * f[j][l];
-                            if c != 0.0 {
-                                acc = acc + tr.p[k][l] * c;
-                            }
-                        }
-                    }
-                    np[i][j] = acc;
+            let p = &mut tr.p;
+            // F P, then (F P) Fᵀ.
+            for c in 0..TN {
+                for ax in 0..3 {
+                    let (pr, pv, pa) = (p[ax][c], p[3 + ax][c], p[6 + ax][c]);
+                    p[ax][c] = pr + h * pv + 0.5 * h * h * pa;
+                    p[3 + ax][c] = pv + h * pa;
+                }
+            }
+            for row in p.iter_mut() {
+                for ax in 0..3 {
+                    let (pr, pv, pa) = (row[ax], row[3 + ax], row[6 + ax]);
+                    row[ax] = pr + h * pv + 0.5 * h * h * pa;
+                    row[3 + ax] = pv + h * pa;
                 }
             }
             let q = CURVE_DRIFT;
-            np[0][0] = np[0][0] + Mat3::scale(q * h * h * h * h * h / 20.0);
-            np[0][1] = np[0][1] + Mat3::scale(q * h * h * h * h / 8.0);
-            np[0][2] = np[0][2] + Mat3::scale(q * h * h * h / 6.0);
-            np[1][1] = np[1][1] + Mat3::scale(q * h * h * h / 3.0);
-            np[1][2] = np[1][2] + Mat3::scale(q * h * h / 2.0);
-            np[2][2] = np[2][2] + Mat3::scale(q * h);
-            for i in 0..3 {
-                for j in 0..i {
-                    np[i][j] = np[j][i].transpose();
+            let qb = [
+                [q * h * h * h * h * h / 20.0, q * h * h * h * h / 8.0, q * h * h * h / 6.0],
+                [q * h * h * h * h / 8.0, q * h * h * h / 3.0, q * h * h / 2.0],
+                [q * h * h * h / 6.0, q * h * h / 2.0, q * h],
+            ];
+            for (bi, qrow) in qb.iter().enumerate() {
+                for (bj, &qv) in qrow.iter().enumerate() {
+                    for ax in 0..3 {
+                        p[3 * bi + ax][3 * bj + ax] += qv;
+                    }
                 }
             }
-            tr.p = np;
+            sym_n(p);
             tr.t += h;
         }
         tr
     }
 
-    /// A look at block `m` of the state (0 position, 1 velocity): `z` with error covariance
-    /// `rm` (a Kalman update).
-    fn see(&mut self, m_: usize, z: Vec3, rm: Mat3) {
-        let Some(si) = (self.p[m_][m_] + rm).inverse() else { return };
-        let k: [Mat3; 3] = core::array::from_fn(|i| self.p[i][m_] * si);
-        let e = z - self.x[m_];
-        for i in 0..3 {
-            self.x[i] = self.x[i] + k[i] * e;
+    /// A look at block `m` of the ball's state (0 position, 1 velocity): `z` with fresh error
+    /// covariance `rm`, plus his persistent error, whose two components for this block (along
+    /// his line of sight, then across it) move the look by `hb[0]` and `hb[1]` per σ (a Kalman
+    /// update with H = [I on block m, hb on those two]).
+    fn see(&mut self, m_: usize, z: Vec3, rm: Mat3, hb: [Vec3; 2]) {
+        let (i0, b0) = (3 * m_, TB + 2 * m_);
+        let (h0, h1) = (comps(hb[0]), comps(hb[1]));
+        let p = &self.p;
+        // P Hᵀ, TN × 3.
+        let pht: [[f64; 3]; TN] = core::array::from_fn(|i| core::array::from_fn(|ax| p[i][i0 + ax] + p[i][b0] * h0[ax] + p[i][b0 + 1] * h1[ax]));
+        let s = Mat3::from_rows(core::array::from_fn(|ax| core::array::from_fn(|bx| pht[i0 + ax][bx] + h0[ax] * pht[b0][bx] + h1[ax] * pht[b0 + 1][bx]))) + rm;
+        let Some(si) = s.inverse() else { return };
+        let zhat = self.x[m_] + hb[0] * self.b[2 * m_] + hb[1] * self.b[2 * m_ + 1];
+        let e = comps(z - zhat);
+        let k: [[f64; 3]; TN] = core::array::from_fn(|i| core::array::from_fn(|c| (0..3).map(|ax| pht[i][ax] * si.r[ax][c]).sum()));
+        let dx: [f64; TN] = core::array::from_fn(|i| k[i][0] * e[0] + k[i][1] * e[1] + k[i][2] * e[2]);
+        for (bi, xv) in self.x.iter_mut().enumerate() {
+            *xv = *xv + Vec3::new(dx[3 * bi], dx[3 * bi + 1], dx[3 * bi + 2]);
         }
-        let row = self.p[m_];
+        for (j, bv) in self.b.iter_mut().enumerate() {
+            *bv += dx[TB + j];
+        }
         let mut np = self.p;
-        for i in 0..3 {
-            for j in i..3 {
-                np[i][j] = self.p[i][j] - k[i] * row[j];
-            }
-            np[i][i] = sym(np[i][i]);
-        }
-        for i in 0..3 {
-            for j in 0..i {
-                np[i][j] = np[j][i].transpose();
+        for i in 0..TN {
+            for j in 0..TN {
+                np[i][j] -= k[i][0] * pht[j][0] + k[i][1] * pht[j][1] + k[i][2] * pht[j][2];
             }
         }
+        sym_n(&mut np);
         self.p = np;
+    }
+}
+
+/// A square matrix made exactly symmetric (the mean of it and its transpose).
+fn sym_n(p: &mut [[f64; TN]; TN]) {
+    for i in 0..TN {
+        for j in 0..i {
+            let s = 0.5 * (p[i][j] + p[j][i]);
+            p[i][j] = s;
+            p[j][i] = s;
+        }
     }
 }
 
@@ -577,10 +642,6 @@ fn look_noise() -> (f64, f64) {
     {
         (1.0, 1.0)
     }
-}
-
-fn sym(a: Mat3) -> Mat3 {
-    (a + a.transpose()) * 0.5
 }
 
 /// An observer's line of sight from `eye` to `ball` (agent-models §5.1): the distance, the
@@ -1996,20 +2057,38 @@ impl<'a> Sim<'a> {
             let base_v = fd.a.read_vel_frac * bv.norm();
             let sv = base_v * scale;
             let zv = bv + u * (0.5 * DEPTH_STRETCH * (sv * e[3] + bias * base_v * err[2])) + a * (sv * e[4] + bias * base_v * err[3]) + b * (sv * e[5]);
-            let rp = sight_cov(u, a, b, sp, DEPTH_STRETCH);
-            let rv = sight_cov(u, a, b, fd.a.read_vel_frac * zv.norm() * scale, 0.5 * DEPTH_STRETCH);
-            let mut tr = match prev {
-                Some(tr) => {
-                    let mut tr = tr.run_to(env, t, t_c);
-                    tr.see(0, zp, rp);
-                    tr.see(1, zv, rv);
+            // What he expects before this look: his estimate run on to now, or on his first
+            // look the velocity as seen and the position a ball going that fast must have,
+            // having left the plate `since` ago (the plate cue).
+            let w0 = believed_spin(env, zv, Some(since));
+            let prior = prev.map(|tr| tr.run_to(env, t, t_c));
+            let (re, ve) = match &prior {
+                Some(tr) => (tr.r(), tr.v()),
+                None => (position_from_plate(env, p0, zv, w0, since), zv),
+            };
+            // What he knows of his look, linearised about what he expects (the world draws it
+            // about the ball itself): its geometry, the fresh part's covariance, and how his
+            // persistent error moves it (along, across), per σ.
+            let (ds, us, as_, bs) = sight_frame(fd.pos + Vec3::new(0.0, 0.0, EYE_H), re);
+            let (bps, bvs) = (fd.a.read_sigma0 * ds / READ_REF_DIST, fd.a.read_vel_frac * ve.norm());
+            let rp = sight_cov(us, as_, bs, bps * scale, DEPTH_STRETCH);
+            let rv = sight_cov(us, as_, bs, bvs * scale, 0.5 * DEPTH_STRETCH);
+            let kb = TRACK_BIAS_FRAC * if k == 0 { scale } else { 1.0 };
+            let hp = [us * (DEPTH_STRETCH * kb * bps), as_ * (kb * bps)];
+            let hv = [us * (0.5 * DEPTH_STRETCH * kb * bvs), as_ * (kb * bvs)];
+            let mut tr = match prior {
+                Some(mut tr) => {
+                    tr.see(0, zp, rp, hp);
+                    tr.see(1, zv, rv, hv);
                     tr
                 }
                 None => {
-                    let w = believed_spin(env, zv, Some(since));
                     let c = TRACK_CONTACT_M * TRACK_CONTACT_M;
                     let pa = Mat3::scale(CURVE_PRIOR * CURVE_PRIOR);
                     let s2 = since * since;
+                    // His velocity read's error: the fresh part and the persistent part.
+                    let gg = Mat3::outer(hv[0], hv[0]) + Mat3::outer(hv[1], hv[1]);
+                    let rv = rv + gg;
                     let mut p = [[Mat3::ZERO; 3]; 3];
                     // Velocity as seen; position where a ball going that fast must be, having
                     // left the plate `since` ago; the extra acceleration unknown, and what it
@@ -2025,8 +2104,19 @@ impl<'a> Sim<'a> {
                             p[i][j] = p[j][i].transpose();
                         }
                     }
-                    let mut tr = Track { ball, t, x: [position_from_plate(env, p0, zv, w, since), zv, Vec3::ZERO], p, looks: 0, next_look: t };
-                    tr.see(0, zp, rp);
+                    let mut tr = Track::new(ball, t, [re, ve, Vec3::ZERO], p);
+                    // Both carry his persistent velocity error (his estimate of it is 0, its
+                    // error −b): the velocity by `hv`, the position by `hv` × `since`.
+                    for (c, h) in hv.iter().enumerate() {
+                        let (hc, hr) = (comps(*h * -1.0), comps(*h * -since));
+                        for ax in 0..3 {
+                            tr.p[3 + ax][TB + 2 + c] = hc[ax];
+                            tr.p[TB + 2 + c][3 + ax] = hc[ax];
+                            tr.p[ax][TB + 2 + c] = hr[ax];
+                            tr.p[TB + 2 + c][ax] = hr[ax];
+                        }
+                    }
+                    tr.see(0, zp, rp, hp);
                     tr
                 }
             };
@@ -2037,13 +2127,12 @@ impl<'a> Sim<'a> {
     }
 
     /// Fielder `i`'s doubt about where the ball comes down (agent-models §5.1): the σ along his
-    /// line of sight from `from`, of his estimate's full covariance (position, velocity and the
+    /// line of sight from `from`, of his estimate's covariance (position, velocity and the
     /// learned acceleration, with every cross term) carried to the landing point by his own
     /// physics (linearised: each of the nine state components moved and flown; Codex
-    /// tracking-read review P2-1), plus what his persistent error can do (a one-σ draw in each
-    /// of its four directions at a single look's σ): a belief about himself, not the ball.
-    fn track_doubt(&self, i: usize, tr: &Track, from: Vec3) -> f64 {
-        let fd = &self.f[i];
+    /// tracking-read review P2-1). What his persistent error can do is in that covariance
+    /// already: the filter carries it as a state, so it needs no term of its own.
+    fn track_doubt(&self, tr: &Track, from: Vec3) -> f64 {
         let land_a = |r: Vec3, v: Vec3, acc: Vec3| {
             let p = self.fly_estimate(r, v, acc);
             match p.first_bounce() {
@@ -2060,25 +2149,17 @@ impl<'a> Sim<'a> {
         let los = Vec3::new(r.x - from.x, r.y - from.y, 0.0).normalized();
         let unit = [Vec3::new(1.0, 0.0, 0.0), Vec3::new(0.0, 1.0, 0.0), Vec3::new(0.0, 0.0, 1.0)];
         let h = 0.5;
-        let mut j = [[0.0; 3]; 3];
+        let mut j = [0.0; 9];
         for k in 0..3 {
-            j[0][k] = (land(r + unit[k] * h, v) - base).dot(los) / h;
-            j[1][k] = (land(r, v + unit[k] * h) - base).dot(los) / h;
-            j[2][k] = (land_a(r, v, tr.x[2] + unit[k] * h) - base).dot(los) / h;
+            j[k] = (land(r + unit[k] * h, v) - base).dot(los) / h;
+            j[3 + k] = (land(r, v + unit[k] * h) - base).dot(los) / h;
+            j[6 + k] = (land_a(r, v, tr.x[2] + unit[k] * h) - base).dot(los) / h;
         }
-        let jb: [Vec3; 3] = core::array::from_fn(|b| Vec3::new(j[b][0], j[b][1], j[b][2]));
         let mut var = 0.0;
-        for a_ in 0..3 {
-            for b_ in 0..3 {
-                var += jb[a_].dot(tr.p[a_][b_] * jb[b_]);
+        for a_ in 0..9 {
+            for b_ in 0..9 {
+                var += j[a_] * tr.p[a_][b_] * j[b_];
             }
-        }
-        let (jr, jv) = (jb[0], jb[1]);
-        let (d, u, a, _) = sight_frame(from + Vec3::new(0.0, 0.0, EYE_H), r);
-        let base_p = TRACK_BIAS_FRAC * fd.a.read_sigma0 * d / READ_REF_DIST;
-        let base_v = TRACK_BIAS_FRAC * fd.a.read_vel_frac * v.norm();
-        for x in [jr.dot(u) * DEPTH_STRETCH * base_p, jr.dot(a) * base_p, jv.dot(u) * 0.5 * DEPTH_STRETCH * base_v, jv.dot(a) * base_v] {
-            var += x * x;
         }
         m::sqrt(var.max(0.0))
     }
@@ -2285,7 +2366,7 @@ impl<'a> Sim<'a> {
         }
         let p = self.predict(i);
         let (ti, pt) = self.intercept(i, &p);
-        let doubt = self.track_now(i).map_or(0.0, |tr| self.track_doubt(i, &tr, self.f[i].pos));
+        let doubt = self.track_now(i).map_or(0.0, |tr| self.track_doubt(&tr, self.f[i].pos));
         // His reads come faster as his own read has the ball coming down sooner.
         let down = p.first_bounce().map_or(p.t_end(), |b| b.0) - t;
         let every = (REPLAN_FRAC * down).clamp(REPLAN_MIN_S, REPLAN_S);
@@ -2856,7 +2937,7 @@ impl<'a> Sim<'a> {
                     // His running estimate's own doubt (agent-models §5.1), as worked out at
                     // this tick's read when there was one.
                     Some(tr) => {
-                        if self.f[i].doubt_at == self.t && self.f[i].read_ball == self.ball_gen { self.f[i].doubt } else { self.track_doubt(i, &tr, fd.pos) }
+                        if self.f[i].doubt_at == self.t && self.f[i].read_ball == self.ball_gen { self.f[i].doubt } else { self.track_doubt(&tr, fd.pos) }
                     }
                     None => landing_depth_sigma(self.inp.env, self.inp.field, pred.at(self.t), self.t, fd.pos, fd.a.read_sigma0, fd.a.read_vel_frac, fd.a.tau_read, view, self.off_bat()),
                 };
@@ -7961,6 +8042,58 @@ mod tests {
         }
     }
 
+    // Agent-models §5.1, the persistent part of a look's error (owner's saved play, seed 40580
+    // play 15): a filter is honest when the covariance it reports covers the error it actually
+    // has. On 120 plays of draws (each its own fixed and fresh draws, as in games) an average
+    // centre fielder, standing 12 m short of where a routine fly (38°, 41 m/s) comes down, tracks
+    // it. Across his line of sight, level, the mean of (his position error)² / (his own σ)² 2 s,
+    // 1 s and 0.6 s before it lands is that of a unit normal, 1, within a factor of two either
+    // way (its standard error over 120 plays is about 0.13; the spin he cannot see adds a little
+    // he does not model). An estimate that treats a fixed error as fresh on every look grows
+    // sure of a wrong line: that mean is many times 1.
+    #[test]
+    fn the_tracking_read_reports_a_covariance_that_covers_its_error() {
+        let fx = fixture(&[]);
+        let n = 120;
+        let mut nees = [0.0; 3];
+        let mut rms = [[0.0; 2]; 3];
+        for play in 0..n {
+            let r = 38f64.to_radians();
+            let mut inp = hit(&fx, Vec3::new(0.0, 41.0 * m::cos(r), 41.0 * m::sin(r)));
+            inp.play = play;
+            let mut st = fx.st.clone();
+            let mut sim = new_sim(&inp, &mut st);
+            let Ball::Free { path, .. } = &sim.ball else { unreachable!() };
+            let path = path.clone();
+            let (t_land, lx, ly) = path.first_bounce().unwrap();
+            sim.f[CF].pos = Vec3::new(lx, ly - 12.0, 0.0);
+            let when = [t_land - 2.0, t_land - 1.0, t_land - 0.6];
+            let mut next = 0;
+            sim.t = inp.t_contact;
+            while next < 3 && sim.t < t_land {
+                sim.take_looks();
+                while next < 3 && sim.t + DT > when[next] {
+                    let tr = sim.track_now(CF).unwrap();
+                    let b = path.at(sim.t).0;
+                    let (_, _, a, _) = sight_frame(sim.f[CF].pos + Vec3::new(0.0, 0.0, EYE_H), b);
+                    let e = (tr.r() - b).dot(a);
+                    let var = a.dot(tr.blk(0, 0) * a);
+                    nees[next] += e * e / var;
+                    rms[next][0] += e * e;
+                    rms[next][1] += var;
+                    next += 1;
+                }
+                sim.t += DT;
+            }
+        }
+        for (k, label) in ["2 s", "1 s", "0.6 s"].iter().enumerate() {
+            let q = nees[k] / n as f64;
+            let (miss, sd) = (m::sqrt(rms[k][0] / n as f64), m::sqrt(rms[k][1] / n as f64));
+            println!("{label} before landing: lateral RMS error {miss:.3} m, RMS σ {sd:.3} m, mean e²/σ² {q:.2}");
+            assert!(q > 0.5 && q < 2.0, "{label} before landing: mean e²/σ² {q:.2} (RMS error {miss:.3} m against σ {sd:.3} m)");
+        }
+    }
+
     // Agent-models §5.1, isolation: the tracking read is made of what he has seen. Two balls
     // from the same contact, one with twice the other's spin, come down far apart; a fielder
     // who has watched the first for two seconds plans exactly the same with the second ball
@@ -8049,35 +8182,43 @@ mod tests {
     // at least 4 s, coming down in the park 12–20 m from the nearest outfielder's spot: the
     // routine-but-running plays of docs/calibration/2026-11-15-outfield-read.md), each played
     // with four sets of read draws: an outfield of grade 20 catches fewer than one of grade
-    // 80. Perfect hands (`input`), so only the read differs.
+    // 80. Perfect hands (`input`), so only the read differs. The balls are batted balls from
+    // games 0–23, with their real spins (since 2026-11-17: on balls given exactly the spin the
+    // fielder believes, an honest tracking read leaves nothing to misjudge on these runs, and
+    // both grades caught every one).
     #[test]
     fn a_poor_reader_misses_more_flies_than_a_good_one() {
         let fx = fixture(&[]);
         let home = home_positions();
         let mut flies = Vec::new();
-        for d in (-40..=40).step_by(4) {
-            for la in [28.0f64, 35.0, 42.0, 50.0] {
-                for speed in (36..=46).step_by(2) {
-                    let (d, l, sp) = ((d as f64).to_radians(), la.to_radians(), speed as f64);
-                    let v = Vec3::new(sp * m::cos(l) * m::sin(d), sp * m::cos(l) * m::cos(d), sp * m::sin(l));
-                    let inp = hit(&fx, v);
-                    let mut st = fx.st.clone();
-                    let sim = new_sim(&inp, &mut st);
-                    let Ball::Free { path, .. } = &sim.ball else { unreachable!() };
-                    let Some((t, x, y)) = path.first_bounce() else { continue };
-                    let near = (6..9).map(|i| m::hypot(home[i].x - x, home[i].y - y)).fold(f64::INFINITY, f64::min);
-                    if t - inp.t_contact >= 4.0 && (12.0..20.0).contains(&near) && path.walls.is_empty() {
-                        flies.push(v);
-                    }
+        for seed in 0..24 {
+            let mut g = crate::game::Game::new(seed, false);
+            while let Some(step) = g.step_pitch() {
+                let (Some((_, la, _)), Some(path)) = (step.record.batted, &step.batted) else { continue };
+                let Some(bb_physics::ground::Segment::Flight { tr, .. }) = path.segments.first() else { continue };
+                if !(25.0..60.0).contains(&la.to_degrees()) {
+                    continue;
+                }
+                let ball = BallState { r: Vec3::new(0.0, 0.5, 1.0), ..tr.first().s };
+                let mut inp = hit(&fx, ball.v);
+                inp.ball = ball;
+                let mut st = fx.st.clone();
+                let sim = new_sim(&inp, &mut st);
+                let Ball::Free { path, .. } = &sim.ball else { unreachable!() };
+                let Some((t, x, y)) = path.first_bounce() else { continue };
+                let near = (6..9).map(|i| m::hypot(home[i].x - x, home[i].y - y)).fold(f64::INFINITY, f64::min);
+                if t - inp.t_contact >= 4.0 && (12.0..20.0).contains(&near) && path.walls.is_empty() {
+                    flies.push(ball);
                 }
             }
         }
         assert!(flies.len() >= 40, "{} flies", flies.len());
         let catches = |grade: f64| {
             let mut n = 0;
-            for &v in &flies {
+            for &ball in &flies {
                 for k in 0..4u32 {
-                    let mut inp = hit(&fx, v);
+                    let mut inp = hit(&fx, ball.v);
+                    inp.ball = ball;
                     for (i, a) in inp.fattrs.iter_mut().enumerate() {
                         *a = FielderAttrs { hands: 0.0, ..FielderAttrs::average(i).with_read(grade) };
                     }
@@ -8133,8 +8274,8 @@ mod tests {
         sim.t = inp.t_contact + 2.0;
         let (b, bv) = sim.ball_at(sim.t);
         let from = Vec3::new(0.0, 85.0, 0.0);
-        let bare = Track { ball: sim.ball_gen, t: sim.t, x: [b, bv, Vec3::ZERO], p: [[Mat3::ZERO; 3]; 3], looks: 1, next_look: sim.t + LOOK_S };
-        let d0 = sim.track_doubt(CF, &bare, from);
+        let bare = Track { looks: 1, next_look: sim.t + LOOK_S, ..Track::new(sim.ball_gen, sim.t, [b, bv, Vec3::ZERO], [[Mat3::ZERO; 3]; 3]) };
+        let d0 = sim.track_doubt(&bare, from);
         let los = Vec3::new(b.x - from.x, b.y - from.y, 0.0).normalized();
         let land = |acc: Vec3| {
             let p = sim.fly_estimate(b, bv, acc);
@@ -8147,8 +8288,13 @@ mod tests {
             let unit = Vec3::new(e[0], e[1], e[2]);
             let shift = (land(unit) - land(unit * -1.0)) / 2.0;
             let mut tr = bare;
-            tr.p[2][2] = Mat3::outer(unit, unit);
-            let d = sim.track_doubt(CF, &tr, from);
+            let uu = Mat3::outer(unit, unit);
+            for (a_, row) in uu.r.iter().enumerate() {
+                for (c, &x) in row.iter().enumerate() {
+                    tr.p[6 + a_][6 + c] = x;
+                }
+            }
+            let d = sim.track_doubt(&tr, from);
             let added = m::sqrt((d * d - d0 * d0).max(0.0));
             assert!((added - shift.abs()).abs() < 0.15 * shift.abs().max(0.2), "axis {k}: the doubt adds {added:.3} m, a ±1 m/s² change moves the landing {shift:.3} m");
         }
@@ -8201,7 +8347,7 @@ mod tests {
                     let p = sim.predict(CF);
                     let q = p.first_bounce().map_or_else(|| p.at(p.t_end()).0, |(_, x, y)| Vec3::new(x, y, 0.0));
                     let miss = (Vec3::new(q.x, q.y, 0.0) - land).dot(los);
-                    let doubt = sim.track_doubt(CF, &tr, from);
+                    let doubt = sim.track_doubt(&tr, from);
                     sums[next][0] += miss * miss;
                     sums[next][1] += doubt * doubt;
                     next += 1;
