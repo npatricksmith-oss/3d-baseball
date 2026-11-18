@@ -25,7 +25,7 @@ Status: `[ ]` not started · `[~]` partly done · `[?]` needs an owner decision
 
 **Next:** item 1 of "Open sim work" below, the runner's start.
 
-**Context pruning (this session; plan agreed with the owner).** Done: the memory folder and this file. On branch `prune/context` for the owner to read first: CLAUDE.md's stale lines. Still to do, in order:
+**Context pruning (this session; plan agreed with the owner).** Done: the memory folder, this file and CLAUDE.md's stale lines. Still to do, in order:
 1. PLAN.md §14, §18, §19 and each spec's open-items section checked against the code; a dead-link and dead-`§` check over CLAUDE.md, PLAN and this file.
 2. Code: comments that describe the past ("for now", "interim", "skeleton"), the 59 examples in `bb_game/examples` (keep those a doc or the ledger names), leftover `BB_DEBUG_*` switches. Digests must not move.
 3. Old calibration notes and reviews: a one-line "superseded" banner where the ledger has newer figures; review prompt files and the overnight report into `docs/archive/`.
