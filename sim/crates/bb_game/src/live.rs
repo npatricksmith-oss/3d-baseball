@@ -2634,6 +2634,26 @@ impl<'a> Sim<'a> {
         (0..9).filter(|&j| self.known_job(j).0 != Role::Cover(1)).reduce(|best, j| if self.publicly_before(j, best) { j } else { best })
     }
 
+    /// Back up a bounced ball that could go through the infield (agent-models §5.7).
+    /// If every outfielder is known to have left it and only infielders are known to be
+    /// chasing, the outfield's first man in the shared order reconsiders.
+    fn outfielder_to_reconsider(&self) -> Option<usize> {
+        if self.ball_still_up() || !(6..9).all(|j| matches!(self.known(j), (false, _, true))) {
+            return None;
+        }
+        if !(0..6).any(|j| matches!(self.known(j), (true, _, true))) {
+            return None;
+        }
+        let path = self.public_path();
+        let (end, _) = path.at(path.t_end());
+        if m::hypot(end.x, end.y) <= INFIELD_BREAK_R {
+            return None;
+        }
+        (6..9)
+            .filter(|&j| matches!(self.known_job(j).0, Role::Idle | Role::Backup))
+            .reduce(|best, j| if self.publicly_before(j, best) { j } else { best })
+    }
+
     /// Carry out fielder `i`'s decision. A man who goes runs at his own intercept. A chaser who
     /// stops leaves the ball: an infielder who yields a ball in the air to a sure call backs up
     /// the catch from `PEEL_BACKUP_M` short of where his own read has it coming down, on his
@@ -2884,18 +2904,15 @@ impl<'a> Sim<'a> {
             return;
         }
         // A man not going for it reconsiders a ball in the air he believes he catches (a call
-        // that outranked his may be gone). An outfielder not going, with no base or cutoff
-        // job, reconsiders any ball on a recent read of it: the outfielder he left it to may
-        // now be known not to be going (seed 65147 play 10: the centre and right fielders
-        // each read a chopper as the other's, both stayed, and the infielders chased a ball
-        // through the hole to the wall). A ball every man has left to another is sent to
-        // one man by the shared convention below (`fallback_chaser`).
+        // that outranked his may be gone). On a bounced ball that could get through, the
+        // shared order allows one outfielder to reconsider even with an infielder chasing.
+        let outfielder = self.outfielder_to_reconsider();
         let decisions: Vec<(usize, Decision)> = (0..9)
             .filter(|&i| {
                 let fd = &self.f[i];
                 let recent = self.t - fd.read_at <= HEAR_READ_AGE_S && fd.read_ball == self.ball_gen;
-                let of_free = i >= 6 && matches!(fd.role, Role::Idle | Role::Backup);
-                fd.belief.is_some() && (fd.role == Role::Chase || (recent && (fd.call >= 1 || of_free)))
+                let sent = outfielder == Some(i) && matches!(fd.role, Role::Idle | Role::Backup);
+                fd.belief.is_some() && (fd.role == Role::Chase || (recent && (fd.call >= 1 || sent)))
             })
             .map(|i| (i, self.decide(i)))
             .collect();
@@ -8763,6 +8780,23 @@ mod tests {
         }
     }
 
+    // The outfield already left a slow roller on the infield grass, and the pitcher is
+    // known to be going for it. The new hearing should leave the roller to him.
+    #[test]
+    fn the_outfield_leaves_a_short_roller_to_the_known_infield_chaser() {
+        let fx = fixture(&[]);
+        let inp = input(&fx, vec![RunnerIn { id: fx.st.batter, base: 0, speed: 8.2, tau_s: bb_agents::running::LEAGUE_TAU_S }]);
+        let mut st = fx.st.clone();
+        let mut sim = new_sim(&inp, &mut st);
+        everyone_left_it(&mut sim, false);
+        known_chaser(&mut sim, 0, 0);
+        let roles = hearing_cycles(&mut sim, 1.0);
+        for (k, r) in roles.iter().enumerate() {
+            assert_eq!(r[0], Role::Chase, "tick {k}: {r:?}");
+            assert!(!r[1..].contains(&Role::Chase), "tick {k}: {r:?}");
+        }
+    }
+
     // Recheck P1-2, a chase not dropped only because more men became known to be going: the
     // left and centre fielders are both going for a ball nobody catches in the air, both known
     // to be, and each one's own read has the other getting there first. They do not both
@@ -12702,14 +12736,9 @@ mod tests {
         assert_eq!(sim.f[2].role, Role::Cover(1), "1B must stay with first: {roles:?}");
     }
 
-    // P1-1: a first baseman who broke for a ball sees the pitcher secure it and, after his
-    // reaction time, goes back to his bag; with first already taken he pulls up instead.
-    // Agent-models §5.7, an outfielder who left the ball to another reconsiders when that man
-    // is known not to be going (the owner's saved play, seed 65147 play 10): a chopper off the
-    // plate goes through the right side. The centre and right fielders each read it as the
-    // other's and both stayed; the infielders chased it, and it rolled to the wall for an
-    // inside-the-park home run. The right fielder, 20 m off its line, cuts it off in front of
-    // the warning track.
+    // Agent-models §5.7, the owner's saved play (seed 65147 play 10): a chopper off the plate
+    // goes through the right side. The centre and right fielders each read it as the other's
+    // and both stayed. The right fielder now cuts it off in front of the warning track.
     #[test]
     fn an_outfielder_takes_a_grounder_through_the_hole_both_left_to_the_other() {
         let mut g = crate::game::Game::new(65147, false);
@@ -12722,13 +12751,19 @@ mod tests {
                 _ => None,
             });
             let (t, who, x, y) = first.expect("someone fields it");
-            assert_eq!(who & 0x7F, 9, "the right fielder fields it first, not {who} at ({x:.1}, {y:.1})");
-            assert!(m::hypot(x, y) < 100.0 && t - step.facts.iter().find_map(|f| if let Input::BatContact { t } = f { Some(*t) } else { None }).unwrap() < 6.0, "fielded at ({x:.1}, {y:.1}), {t:.2} s");
+            let contact = step.facts.iter().find_map(|f| match f {
+                Input::BatContact { t } => Some(*t),
+                _ => None,
+            }).expect("contact on play 10");
+            assert_eq!(who & 0x7F, 9, "fielder {who} secured it first at ({x:.1}, {y:.1})");
+            assert!(m::hypot(x, y) < 100.0 && t - contact < 6.0, "fielded at ({x:.1}, {y:.1}), {t:.2} s");
             return;
         }
         panic!("no play 10");
     }
 
+    // P1-1: a first baseman who broke for a ball sees the pitcher secure it and, after his
+    // reaction time, goes back to his bag; with first already taken he pulls up instead.
     #[test]
     fn a_chaser_who_sees_a_teammate_secure_the_ball_goes_to_his_base() {
         for first_taken in [false, true] {

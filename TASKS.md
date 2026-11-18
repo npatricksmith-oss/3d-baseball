@@ -54,6 +54,7 @@ One `live.rs` job at a time. Each job gets a ledger row and a review.
 ### 2. Fielding
 
 - [ ] Ground-ball hits .308 against .245.
+- [ ] **Depth read after the first bounce.** A distant outfielder's snapshot depth along the line of sight has σ = `3.5 m × d/30 m × DEPTH_STRETCH` (3), about 27 m at 77 m on a first read. `off_bat()` ends the plate cue and tracking after the first bounce. On a rolling ball, the angle below the horizon constrains the distance. Specify that perception change in agent-models §5.1 before implementing it. See seed 65147, play 10.
 - [ ] **Throw choice between near-certain options.** Seed 5 play 201: the first baseman, one metre from the bag with the ball, tosses to the pitcher. Two near-certain outs differ by more than the 1e-9 tie threshold (the carry preference in `live.rs`), so tiny differences decide. Owner's saved play seed 47638 play 0 (no throw from first to the pitcher covering) goes with it.
 - [ ] **"Seen him break"** (owner approved 2026-11-14; not built). A fielder sees a teammate start to move sooner than he hears his call. Move it in agent-models §5.7 from Proposed to decided; the time to notice is a named [E] parameter sourced from motion-onset data. Test case: seed 91689 play 5, where the centre and right fielders each pull up and the ball drops between them (`BB_DEBUG_COMM=1`, `examples/trace_play 91689 5`).
 - [ ] Dives not taken on routine fly misses (`OF_DIVE_MIN_P`): 27 of 61 before the track-bias fix; count again first.
