@@ -19,13 +19,13 @@ Status: `[ ]` not started · `[~]` partly done · `[?]` needs an owner decision
 
 **State.** Context pruning steps 1–4 are merged and pushed (docs audit, code comments and examples, superseded-figure banners, branch and worktree cleanup with the owner's OK as Q28: local branches left are main, `work/runner-start`, the held `work/pitcher-fielding` and `work/integrate-agy-calib`, and `work/swing-chores`). Codex was reset on 2026-11-17: Codex Sol reviews again.
 
-**Q27 answered (owner, 2026-11-18): A, and trace the 1.4 s.** Runners move at contact (secondary lead with speed, harder with two out; doubled-off cost from the physics); decision in agent-models §6.1. A Codex worker (gpt-6.2-sol high, herdr-app tab "Workers", terminal `t24`, brief `WORKER-Q27.md` in the worktree, untracked) does it on `work/runner-start` in `.claude/worktrees/runner-decision`: merge main, trace the 1.43 s of 0–1-out runner delay by ball type, build the moving start, fit to MLB extra-base rates, ledger row. Then the lead runs the tests and the standard run itself, a Codex Sol review covers the whole branch (two-out 0.25 s start, probe, moving start), and it is merged. [Probe note](docs/calibration/2026-11-17-runner-timing.md).
+**Q27 merged (2026-11-18).** Runners move at contact (agent-models §6.1; [timing note](docs/calibration/2026-11-17-runner-timing.md); ledger 2026-11-18): runs 4.30 [4.30]; second to home on singles 53.0% (MLB 61.7%), first to third 36.1% (31.7%). [Codex Sol review](docs/reviews/2026-11-18-codex-runner-start-review.md): no P1. **P2-1 is open and in progress:** the runner's first check after contact reads the true ball height, not his observation; Codex worker in herdr-app tab "Workers" (terminal `t24`) on `work/runner-contact-read`. When it reports: run tests and the standard run yourself, review, merge. Still open from the review: two-out sends to center 99% (band 75–91%) and double-offs on catches below 10° (79.5 per 300 games against 25.7); remeasure both after P2-1.
 
 **Lesson:** a worker once reported done on a stale test binary. Before merging a worker's branch, `touch` the changed source and run the tests and the standard run yourself.
 
 **Numbers on main** (standard run, seeds 0–299 [1000–1299]; ledger §1): runs 4.12 [4.14] against a real 4.39; hits on GB/LD/FB/PU .307/.683/.109/.006 [.308/.683/.098/.004] against about .245/.68/.13/.02; HR/PA 2.88% [2.82%] against 3.0%; routine flies caught .980.
 
-**Next:** the Q27 worker's branch, then item 1 of "Open sim work" below. Last pruning step: a check script that fails on dead paths and on this file growing past its cap. The [prune notes](docs/archive/2026-11-17-docs-prune-notes.md) list decisions (D1, D4, D6, D9, D17, D19/D20) that disagree with the code; put them to the owner as numbered questions (Q29 on).
+**Next:** the P2-1 branch, then item 1 of "Open sim work" below. Last pruning step: a check script that fails on dead paths and on this file growing past its cap. The [prune notes](docs/archive/2026-11-17-docs-prune-notes.md) list decisions (D1, D4, D6, D9, D17, D19/D20) that disagree with the code; put them to the owner as numbered questions (Q29 on).
 
 ---
 
@@ -35,9 +35,11 @@ One `sim/crates/bb_game/src/live.rs` job at a time. Each job gets a ledger row a
 
 ### 1. Runners (agent-models §6.3–§6.4; [decision-model note](docs/calibration/2026-11-15-runner-decision-model.md))
 
-- [~] **The runner's start (Q27).** Moving secondary leads are built on `work/runner-start`: +1.0 m at 3 m/s with 0–1 out, +1.5 m at 5 m/s with two out. All three bases use the contact state, and the live-ball timeline carries the shuffle from release. Early bounces respect the read clock. Runners brake for partway holds and returns, and the rules judge the retouch.
+- [~] **The runner's start (Q27).** Moving secondary leads are merged (2026-11-18): +1.0 m at 3 m/s with 0–1 out, +1.5 m at 5 m/s with two out. All three bases use the contact state, and the live-ball timeline carries the shuffle from release. Early bounces respect the read clock. Runners brake for partway holds and returns, and the rules judge the retouch.
   - In 600 games, second to home was 53.0% on all singles (MLB 61.7%), first to third 36.1% (MLB 31.7%), and two-out outfield sends from second were 86.4%. Airborne checks explain most of the remaining delay with fewer than two outs.
-  - Left for review: the high two-out sends to center and the many appeals on catches below 10°. Compare those very low catches to the MLB line-drive sample. [Q27 timing and checks](docs/calibration/2026-11-17-runner-timing.md#final-measurements).
+  - [~] Review P2-1 (in progress, `work/runner-contact-read`): the first check after contact gates on the true ball height; use the runner's observation and the ground-touch cue.
+  - Then: the high two-out sends to center (pickup depth and throw geometry) and the many appeals on catches below 10°. Compare those very low catches to the MLB line-drive sample.
+  - Deferred review P3s: the third-base route blend turns the lateral velocity in one tick (P3-1); the first decision sees one tick less coasting than its clock (P3-2). [Q27 timing and checks](docs/calibration/2026-11-17-runner-timing.md#final-measurements).
 - [ ] Fit `AdvanceParams::caution_z` to MLB's attempt and success rates (now 1.0, fitted only to outs on the bases).
 - [ ] The coach's read and send for a ball behind the runner (Q10 a). Model early-departure decisions on caught flies, slides around tags, a turn decision before the bag, and an overrun redirected after an overthrow.
 - [ ] The rundown (Q11), on its own branch. A stand-in exists. Two small points from the runner-decision review wait for it.
