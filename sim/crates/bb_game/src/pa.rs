@@ -1,4 +1,4 @@
-//! Plate appearances without fielders (M3 cage, calibration-targets §5 B1).
+//! Pitch-by-pitch plate appearances and lab rates (calibration-targets §5 B1).
 //!
 //! One pitch: the pitcher picks a type and target, releases with execution noise, the world
 //! flies the ball, the batter perceives it through noisy observations and decides, the swing
@@ -59,10 +59,8 @@ impl Default for Knobs {
 }
 
 impl Knobs {
-    /// Interim M3 calibration (docs/calibration/2026-10-31-m3-interim.md); perception 2.7 → 2.9
-    /// and the swing's miss scale 1.0 → 1.4 in the refit after the tangential-restitution law
-    /// (docs/calibration/2026-11-14-collision-sloped-barrel.md §9: K% toward 22.6 with the
-    /// exit-speed tail kept). The effort scale stays 1 (sourced σ).
+    /// Calibrated perception, command, and swing-miss scales used by games. Swing effort
+    /// uses the sourced σ at scale 1 (docs/calibration/2026-11-14-collision-sloped-barrel.md §9).
     pub fn calibrated_m3() -> Self {
         Self { perception: 2.9, command: 0.8, swing_miss: 1.4, swing_effort: 1.0 }
     }
@@ -88,7 +86,7 @@ pub struct Matchup {
     pub aim_seeds: Vec<(f64, f64, f64, f64, f64)>,
 }
 
-/// Body capsule for hit-by-pitch (agent-models §3.7, v1 without evasion): a vertical
+/// Body capsule for hit-by-pitch (agent-models §3.7): a vertical
 /// capsule on the batter's side of the plate.
 const BODY_X: f64 = 0.80;
 const BODY_R: f64 = 0.16;
@@ -854,7 +852,7 @@ pub fn run_pas(mu: &Matchup, n: u32, seed: u64) -> B1Report {
 }
 
 impl Matchup {
-    /// Average matchup with the interim M3 knobs, and the given grades applied.
+    /// Average matchup with calibrated knobs and the given grades applied.
     pub fn with_grades(b: &bb_agents::attributes::BatterGrades, p: &bb_agents::attributes::PitcherGrades) -> Matchup {
         let mut mu = Matchup::average();
         mu.knobs = Knobs::calibrated_m3();

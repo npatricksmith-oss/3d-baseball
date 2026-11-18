@@ -1,5 +1,5 @@
-//! Field surfaces, fence, bounces, and rolling (physics-spec §9, §11). M4 skeleton: flat
-//! ground, two surfaces (infield dirt, grass), a fence described by three distances.
+//! Field surfaces, wall contacts, bounces, and rolling (physics-spec §9, §11).
+//! The field has flat ground with infield dirt and grass, bounded by outfield and foul walls.
 
 use bb_math::units::{FT, G};
 use bb_math::{Vec3, m};
@@ -21,8 +21,8 @@ pub struct Surface {
     pub roughness: f64,
 }
 
-// Rolling resistance [E, M4]: physics-spec §9.1's 0.09/0.12 let a 25 m/s grounder roll
-// ~250 m; 0.22/0.28 gives ~110 m, closer to observed roll-outs (calibrate in M5, R4).
+// Rolling resistance [E]: 0.22 on dirt and 0.28 on grass give a 25 m/s grounder about
+// 110 m of roll. These values differ from physics-spec §9.1 (metrics ledger §5).
 pub const DIRT: Surface = Surface { e_ref: 0.50, k_s: 0.03, mu: 0.55, mu_r: 0.22, roughness: 0.026 };
 pub const GRASS: Surface = Surface { e_ref: 0.45, k_s: 0.03, mu: 0.45, mu_r: 0.28, roughness: 0.010 };
 
@@ -132,8 +132,7 @@ impl Field {
 
     /// The height a ball of radius `r` that has gone over (or into) the wall `w` at height `z`
     /// comes down to: the seats at the wall's top; at a dugout, its floor if it went in under
-    /// the roof, the seats on the roof if it went over (Gemini play-area review P2-1). The
-    /// fence skeleton ends a flight as it clears, so this is not asked for the fence.
+    /// the roof, or the seats on the roof if it went over.
     pub fn landing_top(&self, w: &WallAt, z: f64, r: f64) -> f64 {
         if self.is_dugout(w) {
             if z >= self.dugout_roof_m + r { self.dugout_roof_m } else { 0.0 }
@@ -151,9 +150,7 @@ impl Field {
 
     /// [`Field::pieces`] for something of radius `r_wall` against the walls and `r_fence`
     /// against the fence: each distance less the radius, and only then the fair-ground rule
-    /// for the taper, so a centre on fair ground is never against a foul-territory wall
-    /// (Gemini play-area review P1-1: the rule used to come first, and the radius then put the
-    /// taper's line 3.7 cm into fair ground for a ball and 0.3 m for a body).
+    /// for the taper. A center on fair ground remains clear of the foul-territory wall.
     fn pieces_for(&self, x: f64, y: f64, r_wall: f64, r_fence: f64) -> [WallAt; 4] {
         let r2 = core::f64::consts::SQRT_2;
         let sg = if x < 0.0 { -1.0 } else { 1.0 };
@@ -184,8 +181,8 @@ impl Field {
 
     /// The boundary piece a ball of radius `r` centered at (x, y) is nearest to touching, and
     /// its clearance (≥ 0 inside the field). A ball meets a wall when its center comes within
-    /// `r` of the plane; the outfield fence skeleton keeps using the center on its curve
-    /// (physics-spec §9.5).
+    /// `r` of the plane. The outfield fence measures clearance from the ball's center to
+    /// its curve (physics-spec §9.5).
     pub fn ball_clearance(&self, x: f64, y: f64, r: f64) -> WallAt {
         let mut best = WallAt { kind: WallKind::Fence, dist: f64::INFINITY, inward: Vec3::Y, s: 0.0 };
         for w in self.pieces_for(x, y, r, 0.0) {
@@ -251,8 +248,7 @@ pub fn wall_contact(field: &Field, s: BallState, r: f64) -> (WallContact, WallAt
         return (WallContact::Out, w);
     }
     let e = if w.kind == WallKind::Fence { field.wall_e } else { field.foul_wall_e };
-    // The normal velocity reverses with the wall's restitution; the fence skeleton reflects
-    // the radial velocity (its curve's normal is nearly radial).
+    // Reverse the normal component of velocity and scale it by the wall's restitution.
     let n = w.inward;
     let vn = s.v.dot(n);
     let v = if vn < 0.0 { s.v - n * ((1.0 + e) * vn) } else { s.v };
@@ -274,8 +270,7 @@ pub fn over_the_wall(env: &FlightEnv, field: &Field, s: BallState, t: f64) -> Ba
 }
 
 /// Fly a ball that has left the field over a wall until it comes down into the seats (to
-/// the wall top's height) or a dugout, or `t_max` passes. The fence skeleton ends at the
-/// fence instead (a home run is over when it clears).
+/// the wall top's height) or a dugout, or `t_max` passes.
 fn into_the_stands(env: &FlightEnv, s: BallState, t: f64, dt: f64, top: f64) -> Trajectory {
     let floor = top.max(0.0) + env.ball.radius;
     // Already down there (it went in low, or rolled in): out where it is.
@@ -442,7 +437,7 @@ pub fn batted_path_dt(env: &FlightEnv, field: &Field, s0: BallState, t0: f64, dt
                     let vh = Vec3::new(nb.v.x, nb.v.y, 0.0);
                     let decel = surf.mu_r * G;
                     let t_stop = t + vh.norm() / decel;
-                    // A rolling ball stops at the wall (skeleton: no carom off the base of the wall).
+                    // A rolling ball stops at the wall.
                     let r0 = Vec3::new(nb.r.x, nb.r.y, r);
                     let dir = vh.normalized();
                     let sp = vh.norm();

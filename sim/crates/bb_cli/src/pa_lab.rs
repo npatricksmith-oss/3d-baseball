@@ -1,4 +1,4 @@
-//! Plate-appearance lab (M3): B1 rates for a matchup.
+//! Plate-appearance lab: B1 rates for a matchup.
 
 use bb_game::pa::{B1Report, Matchup, simulate_pa};
 use clap::Args;

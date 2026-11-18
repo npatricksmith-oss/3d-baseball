@@ -1,15 +1,9 @@
-//! Live-ball plays, causal version (M4b): the world advances in fixed ticks; fielders and
-//! runners decide only from what they have observed so far; the rules engine is stepped
-//! with each fact as it happens, so players learn of outs the way they would on a field.
+//! Live-ball plays. The world advances in fixed ticks. Fielders and runners decide from
+//! their observations, and the rules engine judges each fact as it happens.
 //!
-//! Replaces the skeleton in `play.rs` (kept for the diagnostics examples), which planned from
-//! the realized future (Codex M4 review #5, #6, #9, #10, #21, #24).
-//!
-//! Remaining simplifications, documented for M5: fielder perception is a noisy estimate of
-//! the ball's current state fed into the agent's own physics (smooth ground, typical spin)
-//! rather than the full atlas model of agent-models §5.1; throws never choose a one-hop
-//! trajectory; one cutoff or relay man at most (no double cut); no slides, rundown tactics,
-//! or collisions; coverage follows a small fixed table.
+//! Fielders project observed ball states using their own physics (agent-models §5.1).
+//! The defense uses at most one cutoff or relay man, and coverage follows the assignments
+//! in agent-models §5.7.
 
 use bb_math::{KeyedRng, Mat3, Purpose, RngKey, Vec3, m};
 use bb_physics::ground::{BallPath, Field, SegmentEnd, WallContact, batted_path, batted_path_dt, over_the_wall, wall_contact};
@@ -237,10 +231,8 @@ const LEAD_M: [f64; 4] = [0.0, 5.5, 6.5, 4.5];
 pub(crate) fn lead_s(base: u8) -> f64 {
     base as f64 * BASE_L + LEAD_M[(base as usize).min(3)]
 }
-/// A fielder taking a throw already faces his next target: his catch-to-release is this
-/// fraction of his transfer time on a batted ball [E] (about 0.45 s for an infielder; it was
-/// a flat 0.25 s, which turned one double play in ten ground balls and a triple play every
-/// eight games).
+/// Catch-to-release time for a relay as a fraction of the fielder's batted-ball transfer
+/// time [E], about 0.45 s for an infielder.
 const RELAY_TRANSFER_FRAC: f64 = 0.7;
 /// With two out, a tag play's weight against a force's 1.0 when the holder picks his throw
 /// [E]: an equally sure tag loses to the force (a run can score ahead of a tag for the
@@ -251,10 +243,7 @@ const TWO_OUT_TAG_W: f64 = 0.9;
 /// front is 60.5 ft from home (OBR 2.01, diagram 1), so 155.5 ft = 47.40 m. It sets the settle
 /// rule (rules-spec §5.8), infield or outfield backups, the no-play return throw and the
 /// runner's deep-fly read; the scorer's outfield boundary is the same value
-/// (`bb_stats::scorer::DEFAULT_OUTFIELD_RADIUS_M`). It was 45 m, which left a second
-/// baseman at his deepest Savant spot (46.60 m) outside the infield, then briefly the
-/// break range below (Opus infield-fixes review P2-2: that tied a rules boundary to the
-/// alignment table and reached 4 m onto the grass).
+/// (`bb_stats::scorer::DEFAULT_OUTFIELD_RADIUS_M`).
 const INFIELD_R: f64 = 155.5 * 0.3048;
 /// How far behind the deepest Savant pre-pitch infield position
 /// ([`crate::play::MAX_INFIELD_DEPTH_M`], 152.9 ft = 46.60 m) a ground ball is still in a
@@ -277,8 +266,8 @@ const THROW_MISS_MIN_M: f64 = 0.5;
 /// receiving reach of it, [E].
 const BAG_REACH_FRAC: f64 = 0.9;
 /// A fielder's first read of the ball's velocity is off by this fraction of its speed per
-/// axis (stretched in depth like the position error), shrinking with viewing time like it;
-/// interim stand-in for §5.1's launch-state errors, refitted with momentum 2026-11-12 [E].
+/// axis [E]. The error is stretched in depth and shrinks with viewing time like the
+/// position error (agent-models §5.1).
 pub(crate) const READ_VEL_FRAC: f64 = 0.04;
 /// The read closes as the ball comes down (agent-models §5.1, 2026-11-15): for a ball on its
 /// first flight off the bat, every term of the read error is scaled by T/`READ_CLOSE_S` (at
@@ -325,8 +314,7 @@ const TRACK_CONTACT_M: f64 = 0.3;
 /// fixed draws at the snapshot read's σ, on every look (a misjudged angle and fraction of the
 /// range); the rest is fresh each look. The filter carries it as a state. Refitted with that
 /// to the owner's band for a routine fly (90–99% by ability; grade 50 .967 on seeds 0–99 when
-/// fitted, .979 with the look's full Jacobian; docs/calibration/2026-11-17-track-bias.md; was
-/// 0.2 when the filter took it as fresh) [E].
+/// fitted, .979 with the look's full Jacobian; docs/calibration/2026-11-17-track-bias.md) [E].
 pub(crate) const TRACK_BIAS_FRAC: f64 = 0.6;
 /// Arriving under control (agent-models §5.2): a chaser with time in hand keeps this many of
 /// his doubts (the σ of where he believes it comes down) between where he can stop and his
@@ -338,27 +326,25 @@ const STEP_REACH_M: f64 = 5.0;
 /// Below this speed a fielder reaching his spot simply stops on it (one tick's step), m/s [E].
 const SETTLE_V: f64 = 0.5;
 /// The batter's typical pull: how far to his pull side of straightaway his balls in play go
-/// on average, degrees (batter-relative −1.23° in `examples/spray_by_location.rs`, 96 games,
-/// refit for the v2 swing 2026-11-14; was 5.0 on the v1 swing) [E].
+/// on average, degrees (batter-relative −1.23° in `examples/spray_by_location.rs`, 96 games) [E].
 const MEAN_PULL_DEG: f64 = 1.23;
 /// The scatter of balls in play about the direction a pitch location suggests, degrees
-/// (σ within a 10 cm bin, `examples/spray_by_location.rs`; 19.4–22.0° on the v2 swing, 2026-11-14) [E].
+/// (σ within a 10 cm bin, 19.4–22.0° in `examples/spray_by_location.rs`) [E].
 const SPRAY_SCATTER_DEG: f64 = 20.5;
 /// A fielder's belief about what the bat's angle at contact says about the ball's direction
 /// (agent-models §5.10): spray ≈ `SWING_SPRAY_A_DEG` + `SWING_SPRAY_B` × face, with
 /// `SWING_SPRAY_RESID_DEG` of scatter about the line, batter-relative (negative = his pull
 /// side). The face is the barrel's yaw less 90° (mirrored for a left-hander). Least-squares
-/// fit to 5,521 fair balls in play, `examples/spray_by_bat_angle.rs` (96 games), refit for the
-/// v2 swing 2026-11-14 (v1: 5.2° + 1.36 × face, 18.6°); refit when the swing or contact model
-/// changes [E].
+/// fit to 5,521 fair balls in play, `examples/spray_by_bat_angle.rs` (96 games). Refit when the
+/// swing or contact model changes [E].
 const SWING_SPRAY_A_DEG: f64 = 6.91;
 const SWING_SPRAY_B: f64 = 0.939;
 const SWING_SPRAY_RESID_DEG: f64 = 18.0;
 /// A fielder's belief about what the swing's lead says about the bat's face at contact
 /// (agent-models §5.10): face ≈ `LEAD_FACE_A_DEG` + `LEAD_FACE_B_DPS` × lead (s), with
 /// `LEAD_FACE_RESID_DEG` of scatter, batter-relative. Least-squares fit to 11,603 fair balls in
-/// play, `examples/spray_cues.rs` (200 games, left-handers mirrored), refit for the v2 swing
-/// 2026-11-14 (v1: 161.93° − 1,063.1°/s × lead, 3.6°); refit when the swing model changes [E].
+/// play, `examples/spray_cues.rs` (200 games, left-handers mirrored). Refit when the swing
+/// model changes [E].
 const LEAD_FACE_A_DEG: f64 = 184.10;
 const LEAD_FACE_B_DPS: f64 = -1213.3;
 const LEAD_FACE_RESID_DEG: f64 = 3.1;
@@ -1256,13 +1242,8 @@ fn go_idle(fd: &mut Fielder) {
 /// The backspin (rpm; negative: topspin) a batted ball typically has at launch angle `la`
 /// (rad): a fielder's belief about the contact model. Medians by 10° launch-angle bin from
 /// `examples/batted_spin.rs` (48 games), interpolated linearly at the bin centres; refit when
-/// the contact model changes. Refit 2026-11-15 for swing v2 (docs/calibration/
-/// 2026-11-15-outfield-read.md §1): the 2026-11-12 table (v1 swing: 3,290 rpm at 25°, 4,800 at
-/// 35°, 5,990 at 45°) gave every fly 60% too much backspin, so every fly was read to carry.
-/// Refit again 2026-11-15 on the integration of the held branches (sourced collision q, the
-/// inboard falloff and partial reach change how balls leave the bat; docs/calibration/
-/// 2026-11-15-integration-of-the-held-branches.md): the medians moved by under 3% at 25°–55°
-/// and under 5% elsewhere except 5° and 15° (−477 → −577, 606 → 688 rpm).
+/// the contact model changes. The fit is in
+/// docs/calibration/2026-11-15-integration-of-the-held-branches.md.
 fn typical_batted_spin_rpm(la: f64) -> f64 {
     const DEG: [f64; 9] = [-25.0, -15.0, -5.0, 5.0, 15.0, 25.0, 35.0, 45.0, 55.0];
     const RPM: [f64; 9] = [-4699.0, -2998.0, -1732.0, -577.0, 688.0, 1909.0, 2949.0, 3770.0, 4504.0];
@@ -1380,9 +1361,7 @@ fn read_shrink(truth: (Vec3, Vec3), view: f64, tau_read: f64, off_bat: Option<(f
 /// where he predicts it comes down, along his line of sight to it; for a ball still on its
 /// first flight, with the spin he cannot see (`PLATE_SPIN_M`) in the plate's share of his
 /// depth estimate. Running his own physics carries the drag, the plate cue's use of the same
-/// velocity he flies forward, and the coupled lateral and height draws (Codex plate-cue review
-/// #1: the first version added a position term and a straight-line velocity term in
-/// quadrature, which missed the coupling and ignored drag).
+/// velocity he flies forward, and the coupling between lateral and height draws.
 #[allow(clippy::too_many_arguments)]
 pub fn landing_depth_sigma(env: &FlightEnv, field: &Field, belief: (Vec3, Vec3), t: f64, from: Vec3, sigma0: f64, vel_frac: f64, tau_read: f64, view: f64, off_bat: Option<(f64, Vec3)>) -> f64 {
     let land = |err: [f64; 4]| {
@@ -1414,7 +1393,7 @@ pub fn landing_depth_sigma(env: &FlightEnv, field: &Field, belief: (Vec3, Vec3),
     m::sqrt(var)
 }
 
-/// An observer's prediction of the ball (agent-models §5.1, interim model): a noisy estimate
+/// The snapshot read (agent-models §5.1): an observer's prediction from a noisy estimate
 /// of its state now (`truth` = position and velocity at `t`; the error grows with distance,
 /// shrinks with viewing time `view`, and is larger in depth), flown forward with the
 /// observer's own physics on smooth ground with typical spin. `err`: his error draws (depth,
@@ -1464,9 +1443,8 @@ pub fn read_prediction_k(env: &FlightEnv, field: &Field, truth: (Vec3, Vec3), t:
 /// the pitch is (agent-models §5.10): degrees of spray (+ = pulled more), against the pitch's
 /// distance toward the batter from the middle of the plate, m (+ = inside). A fielder's
 /// belief about the contact model: means by 10 cm bin from `examples/spray_by_location.rs`
-/// (96 games, left-handers mirrored; refit for the v2 swing 2026-11-14, v1's table ran
-/// −6.5° to +7.7°) less the overall mean (−1.23°), linear between bin centres, flat beyond the
-/// last. Refit when the contact model changes.
+/// (96 games, left-handers mirrored) less the overall mean (−1.23°), linear between
+/// bin centres and flat beyond the last. Refit when the contact model changes.
 fn anticipated_pull_deg(x_inside: f64) -> f64 {
     const X: [f64; 7] = [-0.30, -0.20, -0.10, 0.0, 0.10, 0.20, 0.30];
     const PULL: [f64; 7] = [-2.8, -0.5, 0.1, 0.6, 0.4, 0.2, -0.7];
@@ -1817,8 +1795,8 @@ fn run_time_to(field: &Field, fd: &Fielder, goal: Vec3, reach: f64) -> f64 {
 }
 
 /// The glove σ multiplier (agent-models §5.4 form) for a ball at speed `v` taken `horiz`
-/// from the body. k_v 0.25 and k_reach 0.3 [E, M4b]: the spec's 0.5/0.6 made routine catches
-/// fail ~8% of the time against the ≥ 98% routine-play band. Off his feet or off balance
+/// from the body. k_v = 0.25 and k_reach = 0.3 [E] fit the routine-play catch band.
+/// Off his feet or off balance
 /// (`extending`) the glove is harder to place, more so the further out (`K_EXTEND`).
 fn glove_sigma_mult(v: f64, horiz: f64, extending: bool) -> f64 {
     1.0 + 0.25 * v / 40.0 + 0.3 * (horiz / (REACH + DIVE)).min(1.0) + if extending { 1.0 + K_EXTEND * ((horiz - REACH) / DIVE).clamp(0.0, 1.0) } else { 0.0 }
@@ -2112,9 +2090,8 @@ impl<'a> Sim<'a> {
             let (bias, err) = (bias * TRACK_BIAS_FRAC, fd.err);
             let base_p = fd.a.read_sigma0 * d / READ_REF_DIST;
             let sp = base_p * scale;
-            // The persistent part is at a single look's σ, the first look's shrink included
-            // (Codex tracking-read review P2-2: unshrunk, it left a grounder's first read up to
-            // eight times worse than the old first read).
+            // Scale the persistent error by a single look's σ, including the first look's
+            // shrink so grounders get the same initial precision as the snapshot read.
             let bias = bias * if k == 0 { scale } else { 1.0 };
             let zp = bp + u * (DEPTH_STRETCH * (sp * e[0] + bias * base_p * err[0])) + a * (sp * e[1] + bias * base_p * err[1]) + b * (sp * e[2]);
             let base_v = fd.a.read_vel_frac * bv.norm();
@@ -2543,7 +2520,7 @@ impl<'a> Sim<'a> {
             match self.grounder_break(i, partner) {
                 Some(true) => return Decision::Go,
                 // The first-base rule leaves this ground ball to someone else: he stays with
-                // his bag (recheck P1-2: he used to fall through to the general rule).
+                // his bag.
                 Some(false) if i == 2 => return Decision::Stay,
                 _ => {}
             }
@@ -2583,9 +2560,6 @@ impl<'a> Sim<'a> {
     /// from where he is and how he is moving, at his known speed after what is left of his
     /// known reaction (`seen_intercept`). Never the world's future or anyone's own read.
     /// Computed once a tick for all nine and kept while the ball and bodies are unchanged.
-    /// (Codex fielder-communication third review P1-2: the first version measured his run to
-    /// the ball's ground line, unbounded, so a man standing on that line 60 m past where a slow
-    /// ball stops, or the pitcher under an outfield fly's line, ranked first.)
     fn public_rank(&self, j: usize) -> f64 {
         let pos: [Vec3; 9] = core::array::from_fn(|k| self.f[k].pos);
         let vel: [Vec3; 9] = core::array::from_fn(|k| self.f[k].vel);
@@ -3085,9 +3059,7 @@ impl<'a> Sim<'a> {
     /// A called-off infielder's backup job ends when the ball comes down, is caught, or is
     /// thrown (Codex peel-off review #2): he is free again, and on a loose ball he reads it
     /// at once and takes his own job (`retake`), so the man who was backing it up can field
-    /// it. Only he does: his backup was his own, and his teammates' reads and jobs do not
-    /// hang on it (Codex fielder-communication recheck P1-1; it used to re-call the men near
-    /// the ball whenever someone's backup ended).
+    /// it. His teammates keep their reads and jobs until they observe a change.
     fn expire_peels(&mut self) {
         if self.ball_still_up() {
             return;
@@ -3226,12 +3198,8 @@ impl<'a> Sim<'a> {
     /// everyone sees, and for its man his own chase and read): its man takes it, or keeps to
     /// its line as the fielding point and the runners' intentions change; a man who had it
     /// and is no longer its man goes back to covering. A throw to someone else that goes by
-    /// him ends it; a throw coming to him keeps it. Whether another man privately has the
-    /// job does not enter (Codex fielder-communication recheck P1-1: the first cutoff man
-    /// found used to decide who else was looked at), nor does a man's leaving it or taking it
-    /// refresh anyone else's job: the man leaving takes his own next job, and his teammates
-    /// re-work theirs when his change is known (`hear`; third review P1-1: it used to re-work
-    /// everyone's cover at once).
+    /// him ends it; a throw coming to him keeps it. The man leaving takes his own next job.
+    /// Teammates update their jobs when they learn of the change (`hear`).
     fn update_relay(&mut self) {
         let from = self.fielding_point();
         let job = match self.ball {
@@ -3353,8 +3321,7 @@ impl<'a> Sim<'a> {
             } else {
                 // Nobody on: the pitcher backs up third, the base a batter-runner stretching
                 // a hit in the gap or down a line goes for (owner, 2026-11-13; agent-models
-                // §5.7; pitcher-outfield diagnosis Part B). He is no longer a fallback for
-                // second, which left him without a job behind the far outfielder.
+                // §5.7; pitcher-outfield diagnosis Part B).
                 jobs.push((2, vec![far_of, 7]));
                 jobs.push((3, vec![0]));
                 jobs.push((1, vec![1]));
@@ -4087,10 +4054,8 @@ impl<'a> Sim<'a> {
                 // and out of play.
                 match wall_contact(self.inp.field, s, self.inp.env.ball.radius) {
                     (WallContact::Out, _) => {
-                        // A throw over the wall is dead as it crosses: nobody catches a throw
-                        // in the seats (Gemini play-area review P2-2: it used to stay live
-                        // until it came down there). The ball flies on into the seats for the
-                        // picture only.
+                        // A throw over the wall is dead as it crosses. Its flight into the
+                        // seats is for playback only.
                         let path = over_the_wall(self.inp.env, self.inp.field, s, t_end);
                         self.ball = Ball::Free { path, next_touch: 0, next_wall: 0, settled_sent: true };
                         let floor = self.last_fact_t;
@@ -4270,10 +4235,8 @@ impl<'a> Sim<'a> {
         }
     }
 
-    /// Whether a runner is at base `b` now, on it or between it and the next (a visible fact;
-    /// Gemini A4 review P2-3: the cutoff and backups read the bases runners started from,
-    /// so a runner from first standing on third no longer drew the cutoff to the home line
-    /// once a stopped runner stopped offering a visible target).
+    /// Whether a runner is on base `b` or between it and the next, used to choose cutoff
+    /// and backup assignments from visible runner positions.
     fn occupied(&self, b: u8) -> bool {
         self.r.iter().any(|r| !r.out && !r.scored && (r.s / BASE_L + 1e-6).floor() as u8 == b)
     }
@@ -4301,9 +4264,8 @@ impl<'a> Sim<'a> {
     }
 
     /// Whether a runner ahead of runner `k` has not yet passed base `b`. Nobody stops at
-    /// home: a runner ahead who is past third and visibly running in is not in the way (a
-    /// runner from second used to stop at third behind one a few strides from scoring),
-    /// provided he will be home first: by a typical runner's legs from where he is and how
+    /// home. A runner ahead who is past third and visibly running in is clear if he will be
+    /// home first: by a typical runner's legs from where he is and how
     /// fast he is moving, `FOLLOW_GAP_S` ahead of this runner's own best time there, so that
     /// following him is never passing him (Codex runner-decision review P1).
     fn base_uncleared_ahead(&self, k: usize, b: u8) -> bool {
@@ -4966,8 +4928,7 @@ impl<'a> Sim<'a> {
         let options = self.holder_options(by);
         // Equal values (p_out saturates to 1.0 for a second or more in hand, and with two out
         // every out weighs the same) go to the carry, which has no throw to miss, then to the
-        // larger margin (Gemini A4 review P1-1: the first option listed, a throw to first,
-        // used to win, though a force was a step away).
+        // larger margin.
         let better = |o: &holder::HolderOption, cur: &holder::HolderOption| {
             if (o.value - cur.value).abs() > 1e-9 {
                 o.value > cur.value
@@ -5070,9 +5031,7 @@ impl<'a> Sim<'a> {
             None => throwing::EFFORT_MIN,
             // A force with a second out possible behind it (a force continuation exists): the
             // feed is a race for that one, however unlikely he reads it, since easing the
-            // throw would only make it less likely (Opus infield-fixes review P2-1: at p 0.11
-            // he eased a throw home by 0.18 s and the 3-2-3, which full effort completed by
-            // 0.04 s, was lost).
+            // throw would only make it less likely.
             Some(o) if o.continuation.is_some() => 1.0,
             Some(o) => {
                 let v = THROW_EFFORT * fd.a.arm * su.speed_mult(su.hurry(since));
@@ -7017,10 +6976,9 @@ mod tests {
         check(&both, [0.0, 0.0, 0.0, 0.0, 0.0, 0.0199, 0.6442, -0.4574, 0.0], "right-hander, lead and bat");
     }
 
-    // The back-half policy, revised 2026-11-13: a read that by itself puts the ball behind the
-    // batter is discarded and the fielder falls back on his other reads, instead of standing
-    // still. (a) A bat read perfectly at 179.999° (barrel at the catcher) and no lead: the jump
-    // is the pitch prior's alone, the shortstop at 11.17 / (2 × 20.5) = 0.2724 as in
+    // A read that puts the ball behind the batter is discarded. The fielder falls back on
+    // his other reads. (a) A perfect bat read at 179.999° (barrel at the catcher) with no lead
+    // leaves the pitch prior alone, the shortstop at 11.17 / (2 × 20.5) = 0.2724 as in
     // `fielders_jump_toward_the_side_they_read`. (b) A wild lead read (0.40 s: face −301°)
     // beside a good bat read: the bat read alone decides (+0.0160 for the shortstop, from that
     // test). (c) The good lead read beside the bad bat read: the lead alone decides (+0.0203,
@@ -7112,8 +7070,7 @@ mod tests {
     // has to spare on a fly must not depend on whether he works it out then or at his own
     // gate, from where he actually is: nothing new has been read in between. Centre fielder,
     // 0.6 s reaction, leaning toward left field at full speed; the call is first made at the
-    // infielders' 0.25 s. The first version planned from his state at 0.25 s (0.35 s of lean
-    // missing) and was optimistic by tenths of a second.
+    // infielders' 0.25 s, so planning must account for the remaining 0.35 s of his jump.
     #[test]
     fn plans_before_the_gate_count_the_rest_of_the_jump() {
         let fx = fixture(&[]);
@@ -7148,8 +7105,7 @@ mod tests {
     // at full speed; the call is first made at the infielders' 0.25 s. Expected values come
     // from stepping the real movement up to his gate: his position, velocity and the clock
     // there. A fly he would reach at that spot 0.305 s after his gate is 0.295 s after that
-    // tick, inside `CALL_SLACK_S`: no confident call, early or at the gate (the first version
-    // timed the state at 1.007 s and called it with 0.305 s to spare).
+    // tick, inside `CALL_SLACK_S`, so neither estimate yields a confident call.
     #[test]
     fn the_projected_jump_is_timed_by_the_tick_that_produced_it() {
         let fx = fixture(&[]);
@@ -7826,9 +7782,6 @@ mod tests {
     // A fly into the right-center gap that the centre and right fielders both believe they
     // can run down, neither surely at first look: both go for it. A second and a half on, the
     // centre fielder's read has firmed up enough to call it, and the right fielder peels off.
-    // (Re-chosen 2026-11-13 with the plate cue of §5.1, which made the centre fielder sure of
-    // the old ball, landing at (18, 91), at once; the right fielder now clears the chase
-    // threshold by 0.4 s, where the old ball left him 30 ms.)
     #[test]
     fn until_someone_is_sure_everyone_who_can_catch_it_goes() {
         const RF: usize = 8;
@@ -7945,8 +7898,8 @@ mod tests {
     // velocity error is flown over a longer flight); a second before landing both are within
     // about a metre and a half (σ), half a second before within half a metre: the
     // optical-acceleration threshold (Chapman 1968; Fink, Foo & Warren 2009) closes the miss he
-    // can tell apart as the square of the time left. Before the closing read the 0.5 s spread
-    // was 1.3–1.8 m in games. With no draws at all the read misses by under 1.5 m 2 s out (the
+    // can tell apart as the square of the time left. With no draws, the read misses by
+    // under 1.5 m 2 s out (the
     // launch angle from the back-flight and the decayed spin, §5.1: this ball has the table's
     // spin, so the table's own bias, 1–3 m in games, is the next test's).
     #[test]
@@ -7980,18 +7933,15 @@ mod tests {
     // Agent-models §5.1: the typical spin is a belief about the contact model and must follow
     // it. The median backspin of batted balls in 24 games outside the table's fitting sample
     // (seeds 100–123; the table is fitted on 0–47), by 10° launch-angle bin from 20° to 60°,
-    // against the table at the bin's centre: within 15%. (The 2026-11-12 table, fitted on the
-    // v1 swing, was 42–72% high against swing v2.) Then by exit speed as well (Codex
-    // outfield-read review P3-1: a contact change can move spin within an angle bin and leave
+    // against the table at the bin's centre: within 15%. Check exit speed as well, since
+    // a contact change can move spin within an angle bin and leave
     // the bin's median alone): in each group of under and over 85 mph by 25–35°, 35–45° and
     // 45–55°, the balls' median backspin against the median of what the belief gives them at
     // their own launch angles: over 85 mph within 25%, under within 50%. The belief is by angle
     // alone and cannot follow the speed: it is 5–16% low over 85 mph, where spin is tight, and
     // 17–39% high under it, where soft contact's spin is spread wide and its median moves with
     // the sample (four samples of 24–48 games, 2026-11-15; docs/calibration/
-    // 2026-11-15-integration-of-the-held-branches.md, 2026-11-15-tracking-read.md). Both bounds
-    // still catch a table as stale as 2026-11-12's (60% high: about 1.45 and 1.9). (A no-draw landing-bias check was tried and rejected: the read has closed
-    // by 2 s before landing, and a table 60% high moved the mean miss there by under 0.5 m.)
+    // 2026-11-15-integration-of-the-held-branches.md, 2026-11-15-tracking-read.md).
     #[test]
     fn the_typical_spin_belief_follows_the_contact_model() {
         let mut bins: Vec<Vec<f64>> = vec![Vec::new(); 4];
@@ -8345,11 +8295,7 @@ mod tests {
     // harder, running end of the plays of docs/calibration/2026-11-15-outfield-read.md), each
     // played with four sets of read draws: an outfield of grade 20 catches fewer than one of
     // grade 80. Perfect hands (`input`), so only the read differs. The balls are batted balls
-    // from games 0–23, with their real spins. *Changed 2026-11-17* (docs/calibration/
-    // 2026-11-17-track-bias.md): the set was constructed balls with exactly the spin the
-    // fielder believes, at least 4 s up and 12–20 m away; once the tracking read was honest
-    // about its persistent error, both grades caught every one of those (and of the same
-    // geometry from games), as an outfielder should on an easy fly; 279 against 292 of 308 here.
+    // from games 0–23 and carry their simulated spins.
     #[test]
     fn a_poor_reader_misses_more_flies_than_a_good_one() {
         let fx = fixture(&[]);
@@ -8464,8 +8410,7 @@ mod tests {
         }
     }
 
-    // Agent-models §5.1, the tracking read's doubt against the spread of his reads (Codex
-    // tracking-read review P2-1: the old doubt test exercises only the snapshot read). Batted
+    // Agent-models §5.1, the tracking read's doubt against the spread of his reads. Batted
     // balls from games 0–5 (their real spins, which his model does not know) with at least
     // 3.5 s in the air, each tracked by an average outfielder standing 12 m short of where it
     // comes down: the RMS of his doubt against the RMS of his read's miss along his line of
@@ -8764,8 +8709,7 @@ mod tests {
     // Codex fielder-communication recheck P1-2: every man has left the ball to another and
     // all know it. One man goes, by a convention all can work out (agent-models §5.7), and
     // keeps going through repeated hearings over 3 s; nobody else starts, and first base,
-    // covered before, stays covered every tick. (It used to send all nine, then stop all
-    // nine, every 0.6 s, with the bases left open.)
+    // covered before, stays covered every tick.
     #[test]
     fn a_ball_everyone_left_goes_to_one_man_and_first_stays_covered() {
         let fx = fixture(&[]);
@@ -8933,8 +8877,7 @@ mod tests {
 
     // Third review P2-1: the double-play pivot grounder with error-free reads; the second
     // baseman known idle and the shortstop known covering second, on this ball. Their reads
-    // agree on who gets to it first, so one goes and the other stays at second (both used to
-    // go, leaving their partner out because he was not known to be going).
+    // agree on who gets to it first, so one goes and the other stays at second.
     #[test]
     fn error_free_middle_infielders_keep_one_at_second() {
         const B2: usize = 3;
@@ -9245,10 +9188,8 @@ mod tests {
     // nothing else (`iso_world`: every other man's whole state and publications, the ball,
     // the runners, the holder's options) may change in that step. Rare steps and every step
     // that changes a job are checked every time, others every `stride`-th call. The default
-    // run is short (seeds 0–3); `isolation_many_seeds` (ignored) runs 0–49:
-    //   cd sim && taskset -c 0-7 nice cargo test --release -p bb_game --lib isolation_many_seeds -- --ignored --nocapture
-    // `ISO_SEEDS=a..b`, `ISO_STRIDE=n` change either; `ISO_REVERT=1` with the ignored run
-    // makes it the negative control.
+    // test covers seeds 0–1. The ignored `isolation_many_seeds` test covers 0–49 and can
+    // run as a negative control with `ISO_REVERT=1`. Both take `ISO_SEEDS` and `ISO_STRIDE`.
     #[test]
     fn isolation_no_private_state_reaches_a_teammate_in_real_games() {
         let (seeds, stride) = iso_settings(0..2, 400);
@@ -9280,14 +9221,8 @@ mod tests {
         iso_assert(seeds, stride, 500_000);
     }
 
-    // Third review P1-1, its real-game probe: in seed 0, just before the cutoff step, only the
-    // second baseman's private job changes, idle or cutoff to home, while the catcher is backing
-    // up. Nobody else's job may change with it (it used to send the catcher to cover home).
-    // The review's snapshot was play 0 at t = 1.998 s; found afresh 2026-11-15 on the
-    // integration of the held branches, which moved the game: the first `update_relay` in seed
-    // 0 with the second baseman idle and the catcher backing up (play 3, t = 0.946 s). With the
-    // old gate restored (`ISO_REVERT_GATE`) the same snapshot leaks, the catcher to Cover(4),
-    // so it still tests what it was written for.
+    // In seed 0, change only the second baseman's private job just before the first cutoff
+    // update with him idle and the catcher backing up. Nobody else's job may change.
     #[test]
     fn isolation_seed_0_a_private_cutoff_job_moves_nobody() {
         use std::cell::RefCell;
@@ -9377,11 +9312,8 @@ mod tests {
         assert!(leaks.is_empty(), "play {play} from {t:.4}: {}", leaks.join("\n"));
     }
 
-    // Fourth review P1-1, its second counterexample: seed 8 play 121 from t = 4.1646 s, the
-    // centre fielder's set-up clock decided, tick after tick, whether the second baseman out
-    // as the cutoff to third was sent to second (then the idle shortstop). (Found afresh
-    // 2026-11-15, when the play moved: the first time in the game an outfielder holds the
-    // ball with a cutoff man out, the same situation.)
+    // In seed 8, check that an outfield holder's private set-up clock cannot send a cutoff
+    // man away from his assignment.
     #[test]
     fn a_holders_private_choice_moves_nobody_seed_8_outfield_holder_with_a_cutoff() {
         let (play, t) = first_holder_act(8, |sim| matches!(sim.ball, Ball::Held { by } if by >= 6) && sim.f.iter().any(|x| matches!(x.role, Role::Relay(_))));
@@ -10071,9 +10003,8 @@ mod tests {
     }
 
     // The time the runner believes the ball needs follows from that: a throw from center to
-    // second reaches second in about its flight time (no relay home and back, which the old
-    // reading added: 8.8 s against the true 5.6 s on the owner's play), and a throw home on
-    // the fly reaches home in its flight time, second only by a relay.
+    // second reaches second in about its flight time. A throw home on the fly reaches home
+    // in its flight time and can reach second by relay.
     #[test]
     fn a_throw_from_center_is_timed_to_the_base_it_goes_to() {
         let fx = fixture(&[]);
@@ -10364,9 +10295,8 @@ mod tests {
         assert!(((sim.t - t0) - expected).abs() < 3.0 * DT, "took {:.3} s, expected {expected:.3} s", sim.t - t0);
     }
 
-    // A rundown is not modelled, and a runner who turned at every throw played catch with
-    // the defense for the 40 s limit (91 plays in 300 games before this rule): between two
-    // bases he turns round once, then stays committed.
+    // Until the rundown (TASKS.md, Q11), a runner can reverse once between bases. This
+    // prevents the defense from keeping him between the same bases until the play times out.
     #[test]
     fn a_runner_turns_round_once_between_bases() {
         let fx = fixture(&[(0x0007, 2)]);
@@ -10481,9 +10411,8 @@ mod tests {
     // Codex runner-reads review P1-1 (its probe `review_late_crowding`): runners from first and
     // second, the batter out, the third baseman holding the ball on third. The lead runner
     // is 8 m past second at 7 m/s; the trailing runner is 0.2 m short of second at 8.2 m/s
-    // and arrives after the lead runner's look. Both used to stop on second and the rules
-    // engine kept one. The trailing runner cannot stop short of the base, so the lead
-    // runner cannot come back to it and goes on: no two on a base.
+    // and arrives after the lead runner's look. The trailing runner cannot stop short of
+    // the base, so the lead runner continues and keeps second clear.
     #[test]
     fn a_trailing_runner_arriving_after_the_look_does_not_leave_two_on_a_base() {
         let fx = fixture(&[(8, 1), (7, 2)]);
@@ -11139,7 +11068,6 @@ mod tests {
     // the first baseman 3 m from his bag. Carrying it there is a near-sure out on the batter,
     // but it takes the force off every other base. The runner from third is 24 m from home
     // and the catcher is on the plate: a sure force there is worth 1.3 against first's 0.9.
-    // The old proximity shortcut ran to first without looking at home.
     #[test]
     fn a_sure_force_at_home_beats_carrying_first() {
         let fx = fixture(&[(5, 1), (6, 2), (7, 3)]);
@@ -11816,8 +11744,8 @@ mod tests {
     }
 
     /// Wall-contact speed (agent-models §5.3): a fielder running flat out at a wall for a ball
-    /// he can take there arrives at about `v_c` = 2 m/s, not at 0 (the old braking to a stop)
-    /// and not at his 8 m/s. He is stopped by the wall at 0.3 m from it, the body's radius.
+    /// he can take there arrives at about `v_c` = 2 m/s. The wall stops him at 0.3 m,
+    /// the body's radius.
     #[test]
     fn a_fielder_running_at_the_wall_arrives_at_the_contact_speed() {
         let fx = fixture(&[]);
@@ -11893,8 +11821,7 @@ mod tests {
 
     /// Gemini A4 review P2-3: the cutoff lines up for the base the lead runner threatens now.
     /// A runner who started on first and stands on third, with the ball held in left field
-    /// 70 m out, threatens home: the cutoff goes to the home line. (It used to read where
-    /// runners started, which a stopped runner's missing visible target no longer covered.)
+    /// 70 m out, threatens home, so the cutoff lines up for home.
     #[test]
     fn the_cutoff_lines_up_for_home_with_a_runner_standing_on_third() {
         const LF: usize = 6;

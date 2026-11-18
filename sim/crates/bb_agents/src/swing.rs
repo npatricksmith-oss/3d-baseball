@@ -1,4 +1,4 @@
-//! Swing model (agent-models §3.6), v2 kinematics (2026-11-14).
+//! Swing kinematics (agent-models §3.6).
 //!
 //! A kinematic double pendulum in one swing plane: the hands (knob) move on an arc of radius ρ
 //! about the hand-arc center C while the bat turns about the knob, lagging the hands early and
@@ -6,8 +6,7 @@
 //! Gaussian bumps in time, the hands' peaking first. The contact pose is planned in a
 //! contact-relative frame (PLAN §8.3): the sweet spot passes through the aim point at t_c,
 //! moving in the planned attack angle and direction, in a plane of the planned tilt, at the
-//! batter's `BatSpeed` whatever the reach (v1 turned at a fixed angular speed, so its sweet-spot
-//! speed grew with reach). Early or late contact meets the ball at another speed, another station,
+//! batter's `BatSpeed` at any reach. Early or late contact meets the ball at another speed, another station,
 //! and with the bat's face turned against its path.
 
 use bb_math::units::DEG;
@@ -27,7 +26,7 @@ pub struct BatterAttrs {
     pub bats: Hand,
     /// Standing height, m.
     pub height: f64,
-    /// Sweet-spot speed at the nominal contact instant, m/s (`BatSpeed`; any aim, §3.6 v2).
+    /// Sweet-spot speed at the nominal contact instant, m/s (`BatSpeed`, §3.6).
     pub bat_speed: f64,
     /// Swing start (hands at 10% of their peak rate) to contact, s (`QuickHands`).
     pub t_swing: f64,
@@ -50,7 +49,7 @@ impl BatterAttrs {
 #[derive(Clone, Copy, Debug, PartialEq)]
 pub struct SwingTemplate {
     /// Stance reference (the batter's box, the client's stance pose): x from the plate's
-    /// center line, y, and z as a fraction of height. Not the swing's center in v2.
+    /// center line, y, and z as a fraction of height.
     pub pivot_x: f64,
     pub pivot_y: f64,
     pub pivot_z_frac: f64,
@@ -89,9 +88,8 @@ pub struct SwingTemplate {
     pub zone_bottom_frac: f64,
     pub zone_top_frac: f64,
     /// Vertical offset of the aim point from the predicted ball center, m (negative = aim
-    /// under the ball to lift it) [E, authored against mean launch angle, calibration §4.4;
-    /// re-checked on v2 with per-player bat speed, docs/calibration/2026-11-14-swing-recalibration.md
-    /// §2.3: −2.0 cm gives 11.8° in games against Statcast's 12.2°].
+    /// under the ball to lift it) [E]. The mean launch-angle fit is in
+    /// docs/calibration/2026-11-14-swing-recalibration.md §2.3.
     pub aim_offset_z: f64,
     /// Mid-swing adjustment stops this long before the aim time, s [E] (agent-models §3.6
     /// `t_cut`; PLAN range 50–80 ms).
@@ -526,8 +524,8 @@ mod tests {
     }
 
     // §3.6: with full reach adjustment (g = 1) every planned swing meets its aim at BatSpeed,
-    // with the planned attack angle, attack direction and plane tilt, wherever the aim is (v1's
-    // speed grew with reach). With the default partial reach only the station changes (below).
+    // with the planned attack angle, attack direction and plane tilt at any aim. With the
+    // default partial reach only the contact station changes.
     #[test]
     fn sweet_spot_meets_every_aim_at_bat_speed() {
         let (b, tpl, prof, mp) = setup();

@@ -1,8 +1,7 @@
 //! A4 measuring only. `-- [games=256] [first_seed=0] [records.jsonl]`.
 //! JSONL includes EVERY throw/carry commitment, its original estimates, and outcome.
-//! Consecutive carry ticks coalesce; options are from the FIRST tick. Since the A4
-//! fix every option is one the holder actually weighed (carries and throws in one
-//! table); the `unweighed_throw` shadow of the old nearby-carry shortcut is retired.
+//! Consecutive carry ticks coalesce. The options come from the holder's carry and throw
+//! table on the first tick.
 //! Each seed is replayed without tracing and both log bytes and digest must match.
 use bb_game::game::{Game, PitchStep};
 use bb_game::live::choice_trace::{Choice, OptionEstimate, capture};

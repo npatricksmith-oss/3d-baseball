@@ -239,8 +239,8 @@ namespace BbLook
 	inline const float BatThick = 1.35f;
 	/** Players' skin tones are the crowd's (Skin); their hair is the crowd's first three Heads. */
 	inline const int32 HairTones = 3;
-	// Bodies, until the roster carries its own (owner's Q18): standing height and build are
-	// drawn from these ranges by the player's id, bunched toward the middle.
+	// Standing height and build are drawn by player ID from these ranges, with values
+	// clustered near the middle.
 	inline const float HeightMinCm = 177.f, HeightMaxCm = 197.f;
 	/** How thick the trunk and limbs are, against the middle build. */
 	inline const float BuildMin = 0.92f, BuildMax = 1.14f;

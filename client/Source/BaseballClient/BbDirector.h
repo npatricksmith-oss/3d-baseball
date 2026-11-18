@@ -132,9 +132,7 @@ private:
 	TObjectPtr<UAnimSequence> AnimWalk;
 	UPROPERTY()
 	TObjectPtr<UAnimSequence> AnimJog;
-	// Stand-ins from the engine's stock clips until real baseball animation exists: a
-	// wind-up-and-strike for the pitcher's delivery, a punch for a fielder's throw, a landing
-	// crouch for the catcher, a guard stance for the batter.
+	// Stock fallback clips for delivery, throws, the catcher's crouch, and the batter's stance.
 	UPROPERTY()
 	TObjectPtr<UAnimSequence> AnimPitch;
 	UPROPERTY()
@@ -482,27 +480,18 @@ private:
 	TObjectPtr<AStaticMeshActor> Ball;
 	UPROPERTY()
 	TObjectPtr<AStaticMeshActor> BallShadow;
-	/** Diameter the ball is drawn at, m: BallDrawnScale times its real size, 7.5 cm. (It was
-	 *  twice real size until 2026-11-16, then real size and a quarter larger, neither of which
-	 *  the owner could see; this size he found fine. A floor on its on-screen size, 0.4% of the
-	 *  view's width, was tried the same day and he found it too big, so there is none; owner,
-	 *  2026-11-16.) Engine primitives are 1 m across at scale 1. */
+	/** Drawn ball diameter is BallDrawnScale times its real 7.5 cm diameter.
+	 *  Engine primitives are 1 m across at scale 1. */
 	static constexpr float BallRealM = 0.075f;
 	static constexpr float BallDrawnScale = 1.5625f;
 	static constexpr float BallDrawnM = BallRealM * BallDrawnScale;
 	/** Smallest diameter of the ball's ground shadow with the ball on the ground, m: the drawn
 	 *  ball's own size, as the sun's shadow of a ball is. Close to the camera it stays this size. */
 	static constexpr float BallShadowM = BallDrawnM;
-	/** With the ball on the ground, a far shadow keeps at least this share of the view's width
-	 *  across (about 5.6 px of a 1600 px view; it was twice that until the owner asked for
-	 *  half the size, 2026-11-16), so it can still be seen deep in the outfield.
-	 *  The ball's height then scales it like the 15 cm floor (below). Sized so the shadow is never larger on
-	 *  screen than the 50 cm disc the owner found too big (2026-11-12): from the follow camera
-	 *  a ball in the near infield gets about 11 x 6.5 px against that disc's 18 x 6; at the
-	 *  pitch camera's long lens the 15 cm floor governs. */
+	/** Minimum width of the shadow of a distant ball on the ground, as a share of the view
+	 *  width (about 5.6 px at 1600 px). The ball's height scales this floor. */
 	static constexpr float BallShadowViewShare = 0.0035f;
-	/** The shadow's rim: it fades from solid to nothing over this share of its radius (owner,
-	 *  2026-11-16: half as big as before and 30% more blurred; before, the edge was hard). */
+	/** Fraction of the shadow radius over which the rim fades to transparent. */
 	static constexpr float BallShadowSoftFrac = 0.3f;
 	/** The shadow's size follows the ball's height (owner, 2026-11-15). At or below
 	 *  BallShadowNoneM (the ball's centre resting or rolling on the ground, with a little room

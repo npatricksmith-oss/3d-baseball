@@ -23,7 +23,7 @@ pub struct FlightEnv {
     pub aero: AeroParams,
     /// Air density, kg/m³.
     pub rho: f64,
-    /// Air velocity, m/s (zero in v1).
+    /// Air velocity, m/s.
     pub wind: Vec3,
     /// An extra constant acceleration, m/s²: zero in the world. An observer's model of a ball
     /// adds what he has learned his model is missing (the curvature of a spin he cannot see;

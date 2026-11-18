@@ -1,23 +1,9 @@
-//! Exit speed from the v2 swing in the cage, against Statcast (swing note §1, §5).
+//! Exit speed in the cage against Statcast (swing note §1, §5).
 //!
-//! Perfect perception, a four-seamer at the inside, middle and outside thirds, the full swing
-//! and release execution noise (`Cage::swing_noisy`, `Cage::release_noisy`), 600 pitches per
-//! third. Needs under a second in release mode.
-//!
-//! Expectations (independent of the code):
-//! - Nothing leaves the bat faster than the real maximum band: MLB's fastest ball in play in
-//!   the 2025 sample was 116.7 mph, and the record in the Statcast era is about 122. v1's
-//!   outer-third swing (sweet spot 83.5 mph at the intercept) sent balls out at up to 136.2 mph
-//!   in 100 games (`run_env_diag`, note §1), so a ceiling of 122 fails it by 14 mph.
-//! - The exit speed does not climb with the reach. Statcast's exit speed peaks over the middle of
-//!   the plate (79.3 inside, 89.6, 93.1 middle, 90.9, 83.9 outside by bin; note §1); v1's grew from 84.0 inside to
-//!   99.0 outside (`platoon_diag`), 15 mph, with the outer third the best. The cage has no
-//!   perception error, so the test checks that the outer third is not better than the middle
-//!   by more than 3 mph, that the middle is the best third, as in Statcast, and that the
-//!   spread is below Statcast's own (13.8 mph from the inside bin to the middle). *Changed
-//!   2026-11-15:* it asked the thirds to agree within 4 mph, an assumption from before
-//!   agent-models §3.6 step 7's partial reach, which makes location matter as Statcast's
-//!   contact quality by location says it does (cage: about 91 / 97 / 94 mph).
+//! The cage uses perfect perception and execution noise on 600 four-seamers per plate third.
+//! The upper bound is about 122 mph, the Statcast-era record. The middle third should
+//! produce the fastest contact, within a 3 mph tolerance for the outer third, and the
+//! spread across thirds should stay below Statcast's 13.8 mph middle-to-inside gap.
 
 use bb_agents::pitcher::PitchIntent;
 use bb_game::cage::Cage;

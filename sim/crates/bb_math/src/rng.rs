@@ -38,7 +38,7 @@ pub enum Purpose {
     /// `RosterGeneration`, drawn before the first pitch.
     RosterHands = 13,
     /// The swing's effort: its sweet-spot speed against the batter's `BatSpeed`, one draw per
-    /// swing (agent-models §3.6, added 2026-11-14 with the v2 swing).
+    /// swing (agent-models §3.6).
     SwingEffort = 14,
     /// A generated batter's abilities (data-formats §2.4 step 5, owner ruling D19, 2026-11-14):
     /// drawn before the first pitch, like `RosterHands`.

@@ -2194,8 +2194,7 @@ TArray<FBbParkSpot> ABbPark::Spots(const BbPark& Desc)
 	S.Add(At(TEXT("home"), ToUE(0, -30, 16), ToUE(0, 35, 0), 60.f));
 	S.Add(At(TEXT("center"), ToUE(0, Deep + 8, 14), ToUE(0, 20, 0), 40.f));
 	S.Add(At(TEXT("first_high"), ToUE(Wide, -5, 38), ToUE(0, 42, 0), 60.f));
-	// From a seat half-way up the deck behind third (the roof and a light tower stand where
-	// this spot was before the seating bowl was built).
+	// From a seat half-way up the deck behind third.
 	S.Add(At(TEXT("third_stands"), ToUE(SpotSeat.X, SpotSeat.Y, 5.4), ToUE(5, 25, 0), 65.f));
 	S.Add(At(TEXT("mound"), ToUE(4.5, Desc.rubber_m - 7.0, 0.9), ToUE(0, Desc.rubber_m - 0.3, 0.35), 40.f));
 	// Straight down, centre field at the top of the picture, the whole park in a 16:9 frame.

@@ -421,8 +421,7 @@ fn main() {
         if let Some(off) = var("BB_AIM_OFFSET_Z") {
             g = g.map_matchups(|mu| mu.template.aim_offset_z = off);
         }
-        // BB_K_SWING is the old combined knob (miss and effort together, as before the split);
-        // BB_K_MISS and BB_K_EFFORT set one each and are applied after it.
+        // BB_K_SWING sets both scales. BB_K_MISS and BB_K_EFFORT override them individually.
         if let Some(k) = var("BB_K_SWING") {
             g = g.map_matchups(|mu| {
                 mu.knobs.swing_miss = k;

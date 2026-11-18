@@ -90,7 +90,7 @@ impl PitchDef {
         }
     }
 
-    /// Physical shape for this pitcher (no fatigue yet: M6).
+    /// Physical attributes used to plan and execute this pitcher's releases.
     pub fn shape(&self, p: &PitcherAttrs) -> PitchShape {
         let (tilt, gyro) = match p.throws {
             Hand::Right => (self.tilt_rhp, self.gyro_sign_rhp),

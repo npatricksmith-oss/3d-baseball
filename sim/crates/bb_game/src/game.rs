@@ -1,6 +1,6 @@
-//! A full game, pitch by pitch (M4 walking skeleton): the plate-appearance engine for each
-//! pitch, the live-ball play simulator for balls in play, and the rules engine judging every
-//! fact. AI vs AI, one pitcher per side, average players, no substitutions.
+//! Runs an AI-vs-AI game pitch by pitch. The plate-appearance engine resolves the pitch,
+//! the live-ball simulator handles contact, and the rules engine judges each fact.
+//! Each side uses one pitcher and a fixed batting order.
 
 use bb_agents::batter::Scouting;
 use bb_observe::PitchType;
@@ -51,8 +51,7 @@ pub struct GameResult {
     pub bb: u32,
     pub hbp: u32,
     pub hr: u32,
-    /// Batted-ball PAs where the batter reached safely (hits plus fielder's choices; the
-    /// official scorer comes later).
+    /// Batted-ball PAs where the batter reached first safely, as judged by [`classify_bip`].
     pub reached_bip: u32,
     pub bip: u32,
     pub walk_off: bool,
@@ -99,7 +98,7 @@ pub struct BipDetail {
     pub batter_safe: bool,
     /// The batter reached first base safely (he may have been put out later, stretching).
     pub reached_first: bool,
-    /// Interim hit ruling (see [`classify_bip`]); `reached_first && !hit` is a fielder's choice.
+    /// Lab hit ruling from [`classify_bip`]. `reached_first && !hit` counts as a fielder's choice.
     pub hit: bool,
     /// Outs recorded on the play (any runner).
     pub outs: u8,
@@ -112,10 +111,9 @@ impl BipDetail {
     }
 }
 
-/// Provisional hit / fielder's-choice ruling for one ball in play, from the play's facts and
-/// rules events: `(reached_first, hit)`. **A lab diagnostic, not a statistic:** it reads
-/// facts that are not in the event log, has no errors, and makes none of the scorer's
-/// judgments; the official scorer (rules-spec §10, with `ScorerEvidence`) replaces it.
+/// Lab hit and fielder's-choice ruling for one ball in play, from the play's facts and
+/// rules events. Returns `(reached_first, hit)`. Official statistics use `ScorerEvidence`
+/// and the scorer in `bb_stats` (rules-spec §10).
 ///
 /// - The batter **reached first** if he touched it (or was awarded it) without having been
 ///   put out on the way: not on a fly out, a force, or a tag short of the bag. A batter

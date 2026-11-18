@@ -1,4 +1,4 @@
-//! The v2 swing (agent-models §3.6) against Statcast, not against its own code.
+//! Swing kinematics (agent-models §3.6) checked against Statcast.
 //!
 //! Every expectation below is a figure from the swing note (`docs/calibration/2026-11-14-swing-model.md`
 //! §1 and §3: a Baseball Savant 2025 sample of competitive swings, with R13's twelve-date sample
@@ -9,10 +9,6 @@
 //! bat axis). `swing.rs`'s own tests already check the kinematics against hand calculations
 //! (speed = `BatSpeed` at every aim, the planned α, β, ψ, the vertical-angle formula), and
 //! `swing_oracle.rs` against the Python oracle; these tests add the Statcast comparison.
-//!
-//! For each test the comment gives the v1 swing's value (the note's §1 and §3 columns, measured
-//! on main `bcbb91f` by `foul_diag` / `platoon_diag`; v1 is not in this tree, so those numbers
-//! are quoted, not rerun), and the tolerance is chosen so that value fails (all but the attack-angle test, which v1 also passes; see it).
 //!
 //! The x axis is +X toward first base: for the right-handed batter, +x is outside and −x inside.
 
@@ -87,11 +83,8 @@ fn sd(v: &[f64]) -> f64 {
     m::sqrt(v.iter().map(|x| (x - mu) * (x - mu)).sum::<f64>() / v.len() as f64)
 }
 
-// Statcast: bat speed is flat across the plate within about ±2 mph (competitive swings, by
-// horizontal bin: 71.4 inside, 72.1 middle, 70.1 outside; note §1). v1 turned at a fixed
-// angular speed: sweet-spot speed 64.0 / 72.5 / 83.5 mph (note §1, `platoon_diag`), a 19.5 mph
-// range, so both the range check and the per-bin checks fail it. Here with the full execution
-// noise, 1,500 swings per third.
+// Statcast bat speed varies by about 2 mph across the plate: 71.4 mph inside,
+// 72.1 middle and 70.1 outside (note §1). Check 1,500 swings per third with execution noise.
 #[test]
 fn bat_speed_is_flat_across_the_plate() {
     let r = rig();
@@ -107,9 +100,8 @@ fn bat_speed_is_flat_across_the_plate() {
 
 // Statcast: the same batter's bat speed varies 3.2 mph SD (4.5%) swing to swing at a fixed
 // depth over the middle of the plate (note §1). The sim draws it as the swing's effort
-// (`EFFORT_SIGMA`, truncated at 4σ). v1 had no effort draw: at one aim its speed varied only
-// with the timing and placement noise, 0.74 mph SD (v2 with effort set to 0, measured when this
-// test was written), so a 3.2 mph SD fails it by a wide margin.
+// (`EFFORT_SIGMA`, truncated at 4σ). At a fixed aim, timing and placement noise alone
+// account for about 0.74 mph SD.
 #[test]
 fn bat_speed_spread_within_a_batter_is_statcasts() {
     let r = rig();
@@ -125,8 +117,7 @@ fn bat_speed_spread_within_a_batter_is_statcasts() {
 // (placement and timing σ ×1.8, the refit's range) leaves the bat-speed spread at Statcast's
 // 3.2 mph for swings met at the batter's usual depth (Statcast's sample keeps contacts within
 // 3 in of it, about 3 ms of timing; here the speed is read at each swing's own executed contact
-// instant), and the effort draws themselves unchanged (own stream). Under the old single knob,
-// 1.8 also took the effort σ to 8.1%, about 5.8 mph SD, which fails the band.
+// instant). The effort draws come from their own stream and must stay identical.
 #[test]
 fn wider_misses_keep_statcasts_bat_speed_spread() {
     let r = rig();
@@ -155,8 +146,7 @@ fn wider_misses_keep_statcasts_bat_speed_spread() {
 
 // Statcast swing length 7.2–7.3 ft (league average, ESPN; this sample's competitive swings
 // 7.2; foul_diag's MLB column) and longer on outside pitches than inside (7.45 outside, 7.13
-// inside by horizontal bin, note §3). v1: 9.5 ft mean (note §3), so the band fails it. The
-// sign check has no v1 figure by location in the note.
+// inside by horizontal bin, note §3).
 #[test]
 fn swing_length_is_statcasts_and_longer_outside() {
     let r = rig();
@@ -175,9 +165,8 @@ fn swing_length_is_statcasts_and_longer_outside() {
 
 // Swing path tilt by zone third, bottom / middle / top: Statcast 34.8 / 32.2 / 28.2° (this
 // sample; R13's twelve dates 37 / 32 / 25). Read from the built swing's plane normal, not from
-// the template's formula. v1: 28.2 / 22.9 / 16.7° (note §3), so ±1.5° fails every third.
-// Note the template's tilt is set from this sample: the match is by construction, and the test
-// guards that the built plane realizes it (guard clamps, mirroring, plane construction).
+// the template's formula. The built plane must preserve the fitted tilt after clamps
+// and mirroring.
 #[test]
 fn path_tilt_by_zone_third_is_statcasts() {
     let r = rig();
@@ -188,9 +177,8 @@ fn path_tilt_by_zone_third_is_statcasts() {
     }
 }
 
-// Vertical bat angle at contact −25 to −35° (Blast, vendor, via R13). v1: mean −18.5°, p10
-// −30.5°, p90 −6.6° (note §3), so most of its swings are outside the band, and the mean is.
-// Checked at every cell of a 3 × 3 grid (location × height), from the bat axis itself.
+// Vertical bat angle at contact −25 to −35° (Blast, vendor, via R13). Checked at every
+// cell of a 3 × 3 grid (location × height), from the bat axis itself.
 #[test]
 fn vertical_bat_angle_is_in_blasts_band() {
     let r = rig();
@@ -206,20 +194,9 @@ fn vertical_bat_angle_is_in_blasts_band() {
     assert!((-33.0..-27.0).contains(&mean(&angles)), "grid mean {:.1}° (v1 −18.5)", mean(&angles));
 }
 
-// Attack angle rises toward the pull side: Statcast's population slope is +0.41° per degree of
-// attack direction (R13, r 0.71). This test is a geometry and sign check on ONE swing's timing
-// sweep, not a population regression and not a v1 detector. The same swing met later in its arc
-// (the batter early on the ball) is more pulled and steeper, met earlier (the batter late) more
-// opposite and flatter; sweeping the contact instant ±12 ms about a middle-middle aim gives 0.58
-// for v2, and the band keeps it positive, of the right order and short of the extremes. v1's
-// single-swing sweep gives 0.378 (the Codex review of 2026-11-14, reproduced by compiling main's
-// `swing.rs` at bcbb91f in a temporary probe), inside the band, so v1 passes it.
-// A population version was tried and does not discriminate either: a 5 × 3 grid of aims times 41
-// contact times at normal quantiles, the timing SD set so the attack direction's SD is Statcast's
-// 18.7° (not tuned to the slope), gives 0.533 for v2 and 0.355 for v1 against Statcast's 0.41;
-// v1 is the nearer of the two, so no band around 0.41 rejects v1 without rejecting v2. It was not
-// added. The swing note's +0.26 (v1) against +0.44 (v2) in games presumably comes from the games' own
-// timing errors (perception) and location mix, not from the swing's geometry alone; not checked.
+// Statcast's population slope is +0.41° of attack angle per degree of attack direction
+// (R13, r 0.71). Sweep contact timing ±12 ms at one middle-middle aim to check the geometry:
+// later in the arc is steeper and more pulled, earlier is flatter and farther opposite.
 #[test]
 fn attack_angle_rises_toward_the_pull_side() {
     let r = rig();

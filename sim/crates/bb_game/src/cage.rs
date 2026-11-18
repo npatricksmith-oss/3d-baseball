@@ -1,9 +1,6 @@
-//! Batting cage (M2): one pitcher, one batter, one pitch at a time, no rules.
-//!
-//! In M2 the batter perceives the pitch perfectly: the aim point is the true ball position
-//! at the template's contact depth. M3 replaces this with the hypothesis bank
-//! (agent-models §3.3). Placement deviations can be injected directly for deterministic
-//! sweeps, or drawn by `motor::execute_swing`.
+//! Batting cage: one pitcher and one batter, one pitch at a time. The batter aims at the
+//! true ball position at the template's contact depth. Placement deviations can be
+//! injected for deterministic sweeps or drawn by `motor::execute_swing`.
 
 use bb_agents::motor::{ReleaseNoise, SwingNoise, execute_release, execute_swing};
 use bb_agents::pitcher::{PitchDef, PitchIntent, PitcherAttrs, plan_release};

@@ -1,4 +1,4 @@
-//! Pitch-flight lab commands (M1).
+//! Pitch-flight lab commands.
 
 use std::path::PathBuf;
 
