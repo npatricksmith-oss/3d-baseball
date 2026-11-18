@@ -2,7 +2,7 @@
 //!
 //! The bat is a solid of revolution about its long axis. `u` is the distance from the knob
 //! end (m). Mass properties are integrated from the profile and wood density so geometry and
-//! inertia always agree. v1 uses a flat end (no end-cap rounding or cup).
+//! inertia agree. The barrel has a flat end.
 
 use bb_math::m;
 use bb_math::units::INCH;

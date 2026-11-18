@@ -1,5 +1,7 @@
 # The sourced collision efficiency, and the poor contact that comes with it (2026-11-15)
 
+> Superseded figures: current numbers are in the [metrics ledger](../metrics-ledger.md) (§1).
+
 Branch `work/collision-q`, cut from main `4fe04d7`. The owner's ruling Q6 (2026-11-15, option c): the sourced sweet-spot q ≈ 0.215 is adopted on this branch together with the mechanism that gives real hitters more poor contact than ours; the branch merges only when home runs and runs are both in range. Background: [sources](2026-11-15-collision-efficiency-sources.md), [counterfactual](2026-11-15-q-counterfactual.md), [power-mix](2026-11-15-power-mix.md), [ev-la-bins](2026-11-15-ev-la-bins.md). Tools: example `sim/crates/bb_game/examples/poor_contact.rs` (one row per contact, fair or foul: station, off-centre offset, depth, lateral intercept, timing, effort) and `analysis/statcast/poor_contact.py` (every table below).
 
 ## Summary for the lead

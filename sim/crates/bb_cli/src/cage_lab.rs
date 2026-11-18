@@ -1,4 +1,4 @@
-//! Batting-cage lab commands (M2).
+//! Batting-cage lab commands.
 
 use std::fmt::Write as _;
 use std::path::PathBuf;

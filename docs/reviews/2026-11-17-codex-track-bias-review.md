@@ -1,5 +1,7 @@
 # Independent review: persistent tracking error
 
+> Superseded figures: current numbers are in the [metrics ledger](../metrics-ledger.md) (§1).
+
 Reviewed `f9e43ed..e9ff96c` on `work/track-bias`, after reading `CLAUDE.md` and agent-models §5.1. No P1 found. The principal fix works, including the owner's saved play, but one P2 filter-correctness issue remains. There is also a P3 correction to the reproduction metadata.
 
 ## Findings

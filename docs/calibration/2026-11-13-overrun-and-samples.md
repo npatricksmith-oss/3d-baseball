@@ -1,5 +1,7 @@
 # The overrun of first, and runner position samples (2026-11-13)
 
+> Superseded figures: current numbers are in the [metrics ledger](../metrics-ledger.md) (§1).
+
 Coordinator item 3 (TASKS "Next"): the rules engine has judged the overrun of first
 (OBR 5.09(b)(4)) and passing between bases from `RunnerPosition` samples since the
 rules-passing work (rules-spec §5.5), but the live sim sent no samples, and its batter-runner

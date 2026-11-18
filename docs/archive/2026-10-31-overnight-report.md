@@ -1,6 +1,6 @@
 # Overnight Development Report: 2026-10-31
 
-The owner asked for continuous autonomous development from 00:39 to 05:00, with Claude making the decisions and using Codex CLI (gpt-6.1-sol) for validation. This report says what now exists, how to run it, what was checked, and what needs the owner. The live to-do list is [TASKS.md](../TASKS.md); decisions waiting for you are at its top.
+The owner asked for continuous autonomous development from 00:39 to 05:00, with Claude making the decisions and using Codex CLI (gpt-6.1-sol) for validation. This report says what now exists, how to run it, what was checked, and what needs the owner. The live to-do list is [TASKS.md](../../TASKS.md); decisions waiting for you are at its top.
 
 ## Summary
 
@@ -41,7 +41,7 @@ The Rerun viewer is installed (`~/.local/bin/rerun`, version 0.41.0 to match the
 | Independent oracle (Codex, Python stdlib, written without seeing the Rust) | Flight within 3e-8 m; air density, spin axis, collisions, bat mass properties within 1e-9 |
 | Pitch shapes | All 10 types land in public MLB movement ranges; left-handers mirror right-handers exactly |
 | M1 gate: fastball and slider share early flight | A slider aimed through the fastball's tunnel point stays within 2–3 in for 30 ft, then separates to 11 in at the plate |
-| M2 gate: contact behaviors | Early pulls, late goes the other way, undercut gives backspin fly balls, overcut gives topspin grounders, off-barrel is weak. Map in [m2-contact-map.md](m2-contact-map.md) |
+| M2 gate: contact behaviors | Early pulls, late goes the other way, undercut gives backspin fly balls, overcut gives topspin grounders, off-barrel is weak. Map in [m2-contact-map.md](../m2-contact-map.md) |
 | M3: attribute directions | 9 of 10 attributes move their main stat the physical way (common-random-number sweeps) |
 | M3: times through the order | Emerges from in-game adaptation: contact +2.6 pp from the 1st to the 3rd time through; none with adaptation off |
 | M3: archetypes | Power, contact, patient, free-swinger, elite, and weak hitters produce distinct, sensible profiles |
@@ -49,11 +49,11 @@ The Rerun viewer is installed (`~/.local/bin/rerun`, version 0.41.0 to match the
 | Determinism (M0 exit gate) | Same seed gives the same game digest across runs and threads; logs read back and verify; recording visuals does not change the game |
 | Crate rule (D1 at compile time) | `bb_agents` cannot reach `bb_world` (test) |
 | Accounting (event sourcing) | Box scores rebuilt from the event logs alone match the sim over 80 games: runs, linescores, three outs per completed half-inning, PA totals |
-| Code review | Four independent Codex reviews (M1, M3, M4 rules + skeleton, causal live simulator): 10 + 19 + 24 + 19 findings, each fixed or explicitly deferred with reasons; all in [reviews/](reviews/) |
+| Code review | Four independent Codex reviews (M1, M3, M4 rules + skeleton, causal live simulator): 10 + 19 + 24 + 19 findings, each fixed or explicitly deferred with reasons; all in [reviews/](../reviews/) |
 
 ## Numbers to know
 
-**Plate-appearance calibration (interim, 13 of 20 metrics in band):** K% 13 (target 22.5), BB% 10, Swing% 43, Z-Contact% 84, O-Swing% 11 (target 29), mean exit velocity 89 mph, mean launch angle 7°, hard-hit 38%. Full report: [calibration/2026-10-31-m3-interim.md](calibration/2026-10-31-m3-interim.md).
+**Plate-appearance calibration (interim, 13 of 20 metrics in band):** K% 13 (target 22.5), BB% 10, Swing% 43, Z-Contact% 84, O-Swing% 11 (target 29), mean exit velocity 89 mph, mean launch angle 7°, hard-hit 38%. Full report: [calibration/2026-10-31-m3-interim.md](../calibration/2026-10-31-m3-interim.md).
 
 **Full games** (128 games, updated after the live-review fixes): about **5.6 runs per team-game** (MLB ≈ 4.5), K% 12.6, BB% 10.0, no rules warnings. Line drives (.67 vs .68), fly balls (.15 vs .13), and popups (.02 vs .02) fall in at MLB rates. Ground balls are too productive (.55 including fielder's choices vs ≈ .24), mostly because they get through the infield; the infield positions are a fixed table for now. About 155–170 ms per game on one thread after the day session's performance work (budget 200 ms; it was ~270 ms). 128 games take ~5 s on 16 threads, so a 972-game season would take under a minute.
 

@@ -1,5 +1,7 @@
 # Independent review: speed-dependent tangential restitution
 
+> Superseded figures: current numbers are in the [metrics ledger](../metrics-ledger.md) (§1).
+
 Reviewed 2026-11-14 on `work/collision`, HEAD `be66dab`. Read `CLAUDE.md` first and applied its invariants, PLAN D20 and §13, and physics-spec §8.1–§8.2.1. Scope is the requested `git log f710d9f^..be66dab` / `git diff f710d9f^..be66dab`: the decision, specification, Python oracle and fixtures, Rust collision/contact changes, A14 and A10a–c, diagnostic examples, collision note §8, and the metrics-ledger row. The five merged target-note commits were checked only for the observations this change relies on. No source, test, specification, ledger, or TASKS file was changed; no commit was made. All temporary probes and new outputs are under `sim/target/`.
 
 The implementation matches the owner's law and the impulse formulation. All 338 release workspace tests and 22 Python tests pass. The requested cage anchors, both standard runs, and all seven refit rows reproduce. There are two findings below: a regression-test coverage gap and an incorrect auxiliary table value. The empirical evidence supports fitting the spin anchors; it does not establish that actual restitution falls linearly with speed.

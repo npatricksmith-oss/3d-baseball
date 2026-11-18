@@ -1,4 +1,4 @@
-//! Cross-check of the v2 swing kinematics (agent-models §3.6) against the independent Python
+//! Cross-check of the swing kinematics (agent-models §3.6) against the independent Python
 //! oracle `analysis/oracle/swing_oracle.py` (fixture `golden/swing.json`), which integrates the
 //! rate bumps numerically and differentiates positions by finite differences.
 

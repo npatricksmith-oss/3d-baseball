@@ -1,5 +1,7 @@
 # Arm strength by position: independent review
 
+> Superseded figures: current numbers are in the [metrics ledger](../metrics-ledger.md) (§1).
+
 Reviewed `4937cb8` and `2f20f73`, comparing parent `9fdeec169a0ba522bf7b165da425e2d6274e1ea3` with `2f20f73a1a1ae5bc6567307111e67a803b81aadd`. Read `CLAUDE.md` first. Findings and line numbers refer to these revisions, not subsequent changes on main. No P1 findings; one P2 and two P3 findings.
 
 ## Findings

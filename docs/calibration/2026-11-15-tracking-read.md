@@ -1,5 +1,7 @@
 # The tracking read, and arriving under control (2026-11-15)
 
+> Superseded figures: current numbers are in the [metrics ledger](../metrics-ledger.md) (§1).
+
 Branch `work/tracking-read`, from `integrate/held` `2657f65` (the three held branches together; [integration note](2026-11-15-integration-of-the-held-branches.md)). Spec: agent-models §5.1 ("The tracking read") and §5.2. Commits:
 
 | Commit | What |

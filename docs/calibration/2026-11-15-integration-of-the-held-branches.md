@@ -1,5 +1,7 @@
 # The three held branches together (2026-11-15)
 
+> Superseded figures: current numbers are in the [metrics ledger](../metrics-ledger.md) (§1).
+
 Branch `integrate/held`: main `1a06d22` (the runner reads merged) plus `work/collision-q` (sourced q 0.215, the inboard barrel falloff, partial reach g = 0.6), `work/outfield-read` (the spin belief refit for swing v2, the closing read, `ReadSkill`) and `work/wall-braking` (`BRAKE` 4.75 m/s², wall-contact speed 2 m/s, one over-the-wall reach), merged by the lead, and on top of them two steps of this job:
 
 1. **Tests** (`f6cf457`). Every branch moves games, so tests that are pinned to a play are found again:

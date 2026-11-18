@@ -1,5 +1,7 @@
 P1 found; do not merge.
 
+> Superseded figures: current numbers are in the [metrics ledger](../metrics-ledger.md) (§1).
+
 Reviewed the four commits `dc1ce82..f38bed2`, against `CLAUDE.md`, agent-models §6.4, the metrics ledger, and the owner's 24583/81 report. The actual merge base is `ecd2bf7`; `dc1ce82` adds documentation on main, with identical sim sources. Its documentation-only differences are not branch regressions. No tracked implementation, test, spec, ledger, or TASKS file was changed during this review.
 
 ## Findings

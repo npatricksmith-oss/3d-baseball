@@ -1,6 +1,6 @@
 //! PlayTimeline encoding (data-formats §5): what a client needs to play back one pitch.
-//! M4 skeleton: ball track (Hermite knots), actor root tracks, markers, telemetry, and the
-//! view state after the play. Bat and belief tracks come later.
+//! Encodes the ball and actor root tracks, markers, telemetry, and the view state after
+//! the play.
 //!
 //! When the game records visualization data (`Game::new(seed, true)`), the ball track after
 //! contact is the **realized** ball (fielded, held, thrown) and every fielder and runner has a

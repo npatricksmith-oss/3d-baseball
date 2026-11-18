@@ -1,5 +1,7 @@
 No P1 found; merge.
 
+> Superseded figures: current numbers are in the [metrics ledger](../metrics-ledger.md) (§1).
+
 Reviewed `8fa55c6..d99a3f8`, particularly code `12cdb26`, `2969aee` and `3b7cb38`, against main `57f12b7`. Read `CLAUDE.md` first, both fourth reviews and their Resolutions, agent-models §5.7, and the calibration note. The checkout's additional `c21f9e8` is the review prompt only. Production source, committed tests, spec, ledger and TASKS were not edited. All instrumentation and counterfactual sources/builds are under `sim/target/codex5/`; no commit was made.
 
 ## Findings

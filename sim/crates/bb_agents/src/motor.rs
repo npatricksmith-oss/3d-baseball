@@ -91,7 +91,7 @@ impl SwingNoise {
 }
 
 /// Plane-tilt σ (rad) per meter of δ_v σ [E] (agent-models §3.6): 1.0° at grade 50 (δ_v σ
-/// 1.2 cm). An M2 engineering value, unsourced.
+/// 1.2 cm), an engineering estimate.
 pub const PLANE_TILT_PER_M: f64 = 1.5;
 /// Reach σ δ_r as a fraction of δ_v σ (`BatControl`) [E] (agent-models §3.6).
 pub const REACH_PER_BAT_CONTROL: f64 = 0.7;

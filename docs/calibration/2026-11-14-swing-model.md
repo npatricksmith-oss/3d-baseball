@@ -1,5 +1,7 @@
 # The swing model, v2: hands on an arc and a lagging bat (2026-11-14)
 
+> Superseded figures: current numbers are in the [metrics ledger](../metrics-ledger.md) (§1).
+
 Branch `work/swing-model`, cut from main `bcbb91f`. Not merged: the owner rules on a change this size. Spec: [agent-models §3.6](../agent-models.md) (v2) and [physics-spec §6.3](../physics-spec.md). This note gives the claims checked, what was built, the measurements on main and on the branch, and the open questions.
 
 **In one paragraph.** The Gemini diagnosis's first claim holds: v1's swing turned at a fixed angular speed, so its sweet spot ran 64 mph on inside pitches and 84 on outside ones, where Statcast has 71–72 at both, and the outer third was a home-run launchpad. v2 replaces it with a kinematic double pendulum laid out from the contact instant, at the batter's `BatSpeed` whatever the reach. It matches Statcast's swing length, path tilt, vertical bat angle, attack-angle slope and bat speed by location. With that, **home runs collapse from 5.1% of PAs to 0.56%** (MLB 3.0%) and **runs from 5.30 to 3.74** [5.51 → 3.86]. The missing home runs are the exit-speed tail; their causes are outside the swing (below). The second claim, that the swing shape makes the foul share low, is **not borne out**: the foul share moves 21.9 → 24.2% in games (MLB 52.5%), and K% and pitches per PA do not move. The early fouls MLB has come from timing, which v2 does not change.

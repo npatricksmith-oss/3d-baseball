@@ -285,7 +285,7 @@ e_t(|c_n|) = e_t_lab                                                 for |c_n| �
 - **The shape between the anchors has no source.** No measurement of e_x exists between KNS's 34 m/s and game speeds. Linear in |c_n| is the simplest form through the two observations; it is an assumption, not a finding. KNS normalized their data to 77 mph and published no speed trend; their raw speed range (28–39 m/s) reaches into the ramp, where the law gives 0.34 at 39 m/s.
 - **Why the speed, and why downward.** Cross & Nathan 2006 measured e_x 0.16 at 4 m/s and KNS 0.405 at 34 m/s, so e_x rose with speed at low speeds. Nothing measured says it falls at game speed; the only evidence is Statcast's spin, read through this model. The law therefore anchors two physical observations of one quantity (calibration-targets §2.2) and does not claim a mechanism.
 - **What it moves.** Less spin at game speed, so less energy goes into rotation: oblique contacts leave faster (about +1.8 mph mean exit speed in games at e_t 0) and fly balls carry differently. Head-on contacts (A7, A8) are unchanged: they have no tangential velocity.
-- **What it does not move.** The direction of the ball relative to the swing's path (spray against launch angle) barely changes with e_t (collision note §7.1); that gap is open and unrelated (§17 item 8).
+- **What it does not move.** The direction of the ball relative to the swing's path (spray against launch angle) barely changes with e_t ([collision note §7.1](calibration/2026-11-14-collision-sloped-barrel.md#71-like-with-like-the-pa-models-contact-by-sonnets-launch-bands)). The direction gap is tracked in [TASKS.md](../TASKS.md).
 
 **Collision-efficiency cross-check** [D] (default bat, 85 mph pitch at the plate, 75 mph bat at the contact point):
 
@@ -419,7 +419,7 @@ Every metric is computed from the event log and timeline (PLAN §4.3). Definitio
 | Plate speed | |v| at the plate-plane crossing |
 | Spin rate, spin efficiency | |ω|; |ω⊥| / |ω| at release |
 | Spin axis | Direction of the Magnus force from ω⊥ at release, as a clock-face tilt **from the pitcher's perspective** (12:00 = pure backspin) and as Savant's 0–360° `spin_axis`. Exact formulas and checks: [data-formats.md §9](data-formats.md) |
-| **Movement (internal definition)** | Displacement at the plate plane between the actual trajectory and a **no-Magnus twin** (same release state, drag and gravity only), over the **full flight**. Components: induced vertical break (z) and horizontal break (x). **Not identical** to Savant's pfx metrics, which use a 40-ft window. M1 also implements a Savant-comparable variant for sanity comparisons |
+| **Movement (internal definition)** | Displacement at the plate plane between the actual trajectory and a **no-Magnus twin** (same release state, drag and gravity only), over the **full flight**. Components: induced vertical break (z) and horizontal break (x). **Not identical** to Savant's pfx metrics, which use a 40-ft window. `movement_40ft` in `sim/crates/bb_physics/src/pitch.rs` computes the 40-ft variant |
 | Exit velocity | |v′| immediately after the bat impulse |
 | Launch angle | Elevation of v′ above horizontal |
 | Spray angle | Azimuth of v′ in the XY-plane from +Y; positive toward +X (first-base side) |
@@ -466,7 +466,7 @@ An **independent Python reference implementation** (`analysis/oracle/`, written 
 | A10a | Tee: level default bat, 77 mph at b = 6.8 in past the center of mass, ball at rest, offset ψ 5–30° | Spin about the bat's axis equals KNS Eq. (8) with e_t_lab at the across-barrel relative speed (ψ 10–30°, normal speed below v_t_lab); fitted total spin per degree of launch θ 179 ± 18 rpm/° | [S] KNS 2017 Eq. (8), Fig. 3 |
 | A10b | Game: average RHP four-seamer at the middle, on time, met under the ball to launch 25–30°, exit speed 90+ | Backspin 2,300 ± 600 rpm | [S, derived] Nathan 2020 Fig. 4 |
 | A10c | Same contacts swept over timing ±15 ms and 1.5–4.5 cm under | Sidespin −65 ± 30 rpm per degree of adjusted spray (+ = opposite field) | [S, derived] Nathan 2020 Fig. 2 |
-| A10d | Same sweep | Sidespin zero at −10 ± 5° of adjusted spray | [S] Nathan 2020 Fig. 2. **Report only** (the direction gap, §17 item 8) |
+| A10d | Same sweep | Sidespin zero at −10 ± 5° of adjusted spray | [S] Nathan 2020 Fig. 2. **Report only** (the direction gap described in §8.2.1) |
 | A14 | e_t(|c_n|) law | Oracle values at low speed, mid-ramp and game speed; collisions resolved with the law's e_t match the oracle, both as bodies and through the production contact resolution from §7 contact states (a sloped, rotating bat on the barrel and on the taper among them, e_n held at the fixture value); a wrong ramp (34–60 m/s) applied at contact fails | §8.2.1 |
 | A11 | Energy guard | No collision increases total kinetic energy | Physical |
 | A12 | Bat mass properties of default profile | Match §6.2 values; inside validation bands | [D] |
@@ -524,15 +524,3 @@ Additional batted-ball cross-check points (same model, calculator atmosphere):
 - A. M. Nathan, Physics of Baseball site (bat COR, collision efficiency q, aerodynamics). https://baseball.physics.illinois.edu/
 - MLB, 2026 ABS challenge-system zone definition (27% / 53.5% of height, measured at plate midpoint). https://www.mlb.com/amp/news/ball-strike-challenge-system-2026.html
 - Official Baseball Rules (field, ball, and bat specifications).
-
-## 17. Open Items
-
-1. Obtain Nathan's current Trajectory Calculator spreadsheet; confirm the C_D/C_L forms and coefficients match the `pybbda` port (§4.2), including whether the C_D spin term uses total or transverse spin.
-2. Pull published COR-versus-impact-location data for wood bats to set f(u) (§8.2) and the speed slope s_e.
-3. Pull spin-versus-undercut data from Nathan et al.'s batted-ball spin work for test A10.
-4. Find literature values for ball-turf and ball-dirt bounce (COR, friction) and rolling resistance to replace the [E] surface table (§9.1).
-5. Confirm the ball's moment-of-inertia factor α for a real baseball.
-6. Confirm the exact ABS edge rule ("any part of the ball") if the league ever wants strict ABS parity. It doesn't need to; the league is fictional.
-7. Tune the default bat profile to a typical MLB 34-in mass (about 31–32 oz) and add 2–3 more stock bats (lighter/longer, heavier/end-loaded) for player variety.
-8. **Direction off a sloped barrel (open, unexplained).** Spray minus attack direction against launch angle: the sim sits about 12° toward the opposite field at 0–25° launch and falls about 0.75° per degree of launch against MLB's 0.51 (games, docs/calibration/2026-11-14-collision-sloped-barrel.md §7). The rigid-body model is the published one; no source measures the direction. Nothing is tuned for it (PLAN D20).
-9. **e_x at game speeds.** No laboratory value exists above 34 m/s; §8.2.1's ramp shape is assumed. A measurement would replace it.

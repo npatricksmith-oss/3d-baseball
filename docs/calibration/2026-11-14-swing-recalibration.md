@@ -1,5 +1,7 @@
 # Swing v2 recalibration: per-player bat speed and the aim under the ball (2026-11-14)
 
+> Superseded figures: current numbers are in the [metrics ledger](../metrics-ledger.md) (§1).
+
 Branch `work/swing-recalib`, cut from `work/swing-model` at the merge `9f71441`. Owner's ruling on the swing note's proposals (PLAN §1 D19; [swing note §6](2026-11-14-swing-model.md)): B (per-player `BatSpeed`, Statcast between-batter SD 2.8 mph) and C (re-author `aim_offset_z`, check the launch-angle spread) go ahead; D (collision q 0.20 → 0.23) does not. Calibration rules: [calibration-targets §2.3–§2.4](../calibration-targets.md). Tier B numbers move only through population distributions and noise scales; an agent [E] parameter moves only when a Tier M band shows its mechanism is off.
 
 **Where it starts** (`9f71441`; standard run, seeds 0–299 [1000–1299]; MLB 2024 or the 2025 Savant sample of the swing note):

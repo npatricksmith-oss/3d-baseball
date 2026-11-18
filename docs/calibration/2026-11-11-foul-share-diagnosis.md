@@ -1,5 +1,7 @@
 # Foul share of contact: diagnosis, 2026-11-11
 
+> Superseded figures: current numbers are in the [metrics ledger](../metrics-ledger.md) (§1).
+
 Target B1.15: about 50% of contact goes foul (envelope 40–60%). The sim gives 21%. The owner asked for this to be fixed in the contact model ahead of the chase rate ([chase diagnosis](2026-11-11-chase-diagnosis.md)). **It is not fixed.** None of the noise settings swept here gets past about 30%, which points at the swing or contact geometry, though the sweeps do not prove a ceiling. No calibration values changed.
 
 Runs: `cargo run --release -p bb_game --example foul_diag -- 3000 [timing σ ms] [bat-control σ cm] [K_perception]` (average RHP vs average RHB, seed 1, otherwise `Knobs::calibrated_m3()`), and `sim-cli cage-map --type FF` with a wider timing axis.

@@ -1,5 +1,7 @@
 # Play Area (A10) Resolution & Client ABI Recheck
 
+> Superseded figures: current numbers are in the [metrics ledger](../metrics-ledger.md) (§1).
+
 **Reviewer:** Gemini  
 **Date:** 2026-11-14  
 **Branch:** `work/review-a10-fixes` (`870340f`, reviewing `0a17409..88cee6a` merged at `2eb4531` plus client ABI commits `39db36c`, `323e05e`, `bd69a04`)

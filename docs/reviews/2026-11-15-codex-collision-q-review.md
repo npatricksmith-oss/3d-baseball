@@ -1,5 +1,7 @@
 No P1; all three changes are sound to merge as physics/mechanism work, with g = 0.6 remaining a provisional [E] estimate and the runs/home-run acceptance gate left to the owner.
 
+> Superseded figures: current numbers are in the [metrics ledger](../metrics-ledger.md) (§1).
+
 ## Reviewed
 
 Reviewed `4fe04d7..5a8173c`: `c6acc53`, `ff7a227`, `e66f55d`, and `5a8173c`. Read `CLAUDE.md` first, the three requested calibration notes, physics-spec §8.2/A8, agent-models §3.6, and PLAN D19/D20. Inspected the complete diff, the decision/execution path, collision/oracle tests, diagnostic definitions, and wall handling. Checkout HEAD is `3ad6ba6`; its only addition beyond the requested range is the review prompt, so its simulation source is identical to `5a8173c`.

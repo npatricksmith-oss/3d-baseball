@@ -1,5 +1,7 @@
 # Codex rules review: first-base overruns, shared bases, and passing
 
+> Superseded figures: current numbers are in the [metrics ledger](../metrics-ledger.md) (§1).
+
 Reviewed `638871c..worktree-agent-aed39d3914e6c38bd` (`ac6e4d5`, `25a56c1`, `0026dd0`) in `coord/review-fixes`, at HEAD `b2d102392bfd6d1d44a227743a6512a6681b05b4`. Read `CLAUDE.md` first. The scoped rules sources, harness, scenarios, and spec are unchanged between the range endpoint and HEAD; later simulator changes are present. Probes and baseline builds were written under `/tmp/codex-rules-review/`; this report is the only repository file written. Locations below refer to HEAD. Findings 1–4 concern the new implementation; finding 5 is explicitly a pre-existing integration gap.
 
 ## Findings

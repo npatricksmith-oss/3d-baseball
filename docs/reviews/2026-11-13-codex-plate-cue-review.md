@@ -1,5 +1,7 @@
 # Plate-cue review — 2026-11-13
 
+> Superseded figures: current numbers are in the [metrics ledger](../metrics-ledger.md) (§1).
+
 Reviewed `5da8633..2caaa70686af0384dd777a6c458a7d06eb55cb65`, with `CLAUDE.md` read first. No P1 finding. Two P2 findings concern the uncertainty math; one P3 concerns the calibration diagnostic.
 
 ## P2 — Carry the position/velocity covariance into the call's uncertainty

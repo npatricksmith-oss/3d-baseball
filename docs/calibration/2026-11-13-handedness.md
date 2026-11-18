@@ -1,5 +1,7 @@
 # Handedness: what left-handers did to the game (owner backlog A1, 2026-11-13)
 
+> Superseded figures: current numbers are in the [metrics ledger](../metrics-ledger.md) (§1).
+
 **Nothing was tuned.** Games now have left-handed pitchers, left-handed batters and switch hitters (data-formats §2.4). A platoon advantage came out of the geometry with no setting for it, and it moved the run environment up, because the interim knobs were calibrated with every batter right-handed against a right-handed pitcher.
 
 ## The four pairings (`examples/platoon.rs`, 4,000 plate appearances each, calibrated knobs, average players)

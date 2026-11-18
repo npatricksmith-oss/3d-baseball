@@ -1,8 +1,5 @@
-//! Game rosters: who the players are (data-formats §2.4, owner backlog A2). Identity only:
-//! names, uniform numbers, positions, the batting order, and the handedness slot backlog A1
-//! fills. Nothing here gives a player any ability, and nothing in a play reads it.
-//!
-//! Until the league generator exists (M7), a roster is generated from the game seed alone.
+//! Game rosters are generated from the game seed (data-formats §2.4). They supply player
+//! identities, uniform numbers, positions, batting order, and handedness.
 
 use bb_math::{KeyedRng, Purpose, RngKey};
 use bb_observe::{Bats, Hand};

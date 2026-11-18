@@ -320,14 +320,13 @@ fn step_input(st: &mut RulesState, input: &Input) -> Vec<Event> {
         }
         Input::GloveSecured { t, fielder, x, y } => glove(st, t, fielder, x, y, &mut ev),
         Input::BallReleasedFromGlove { t, kind, infielder, .. } => {
-            // Only throws matter so far: they fix what a throw out of play would award
-            // (rules-spec §7.2). Drops and knocked balls have no producer yet.
+            // Record the runners' legal bases when the throw leaves for any subsequent
+            // out-of-play award (rules-spec §7.2).
             if let (ReleaseKind::Throw, PlayState::Live(lp)) = (kind, &mut st.play) {
                 // Each runner's base at the release, as the rules hold it: one who owes a retouch
                 // after a catch holds his own base until he has retouched it (rules-spec §5.3);
                 // one who has legally touched home has scored; anyone else is at the base he
-                // last touched (going back counts). (Gemini play-area review P1-3: the
-                // high-water mark and early touches used to count.)
+                // last touched, including on the way back.
                 let legal = |r: &RunnerState| if r.retouch_required && !r.retouched { r.start_base } else if r.scored_at.is_some() { 4 } else { r.at };
                 let advanced = lp.runners.iter().filter(|r| !r.out).all(|r| legal(r) > r.start_base);
                 let first_play = lp.throws == 0 && lp.outs.is_empty();
@@ -555,7 +554,7 @@ fn apply_call(st: &mut RulesState, call: PitchCall, ev: &mut Vec<Event>) {
         award_first(st, AdvanceCause::Walk, ev);
         end_pa(st, PaResult::Walk, ev);
     } else if st.strikes >= 3 {
-        // v1: strike three is caught (uncaught third strikes need the catcher model).
+        // A third strike ends the plate appearance with a strikeout.
         st.outs += 1;
         ev.push(Event::RunnerOut { runner: st.batter, base: 0, kind: OutKind::Strikeout });
         end_pa(st, PaResult::Strikeout, ev);
@@ -732,8 +731,7 @@ fn home_run(st: &mut RulesState, ev: &mut Vec<Event>) {
     ev.push(Event::FairFoulDecided { fair: true });
     ev.push(Event::PitchResult { call: PitchCall::InPlay, balls: st.balls, strikes: st.strikes });
     ev.push(Event::BallDead { reason: DeadBall::HomeRun });
-    // A pass made before the ball left the park stands (rules-spec §5.5); passing on the trot
-    // itself is deferred.
+    // Judge any pending pass made before the ball left the park (rules-spec §5.5).
     judge_pending_passes(st, ev);
     let PlayState::Live(lp) = st.play.clone() else { return };
     st.play = PlayState::Dead;
@@ -939,10 +937,8 @@ fn base_touched(st: &mut RulesState, t: f64, agent: AgentId, base: Base, holding
             }
             return;
         }
-        // He touched home before the catch and has come back to retouch (rules-spec §5.3):
-        // the pending run is cancelled, and he must touch home again for it to count. The
-        // bases between are not re-required in reverse order (missed-base appeals are
-        // deferred, §5.6), so his next home touch is the next base in order.
+        // Cancel the pending run when a runner who touched home before the catch returns
+        // to retouch (rules-spec §5.3). His next touch of home is the next base in order.
         r.scored_at = None;
         r.last_base = 3;
         lp.runs_pending.retain(|(_, id)| *id != agent);

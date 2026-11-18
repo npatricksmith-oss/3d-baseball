@@ -1,5 +1,7 @@
 # Pop-up calls review — 2026-11-13
 
+> Superseded figures: current numbers are in the [metrics ledger](../metrics-ledger.md) (§1).
+
 Reviewed `454d341..bdd7f03` on `fix/popup-calls`, with `CLAUDE.md` read first. No P1 finding.
 
 ## P2 — Extra chasers can remove every candidate to cover second

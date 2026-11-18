@@ -1,23 +1,15 @@
-//! Live-ball plays (M4 walking skeleton): the world's batted-ball path plus simple fielders,
-//! throws, and runners, reported to the rules engine as time-stamped facts (rules-spec §2).
-//!
-//! Every outcome is geometric or a race between physical times; randomness enters only as
-//! noise on perception, glove placement, and throws (keyed RNG), and as bounce roughness.
-//!
-//! **Skeleton simplifications (documented for M5):** a fielder's belief of the ball's path
-//! is the true path plus a smooth error that shrinks with viewing time (standing in for the
-//! batted-ball atlas and launch-estimate model of agent-models §5.1); one primary fielder
-//! chases (earliest believed intercept), others cover bases; throws travel in straight lines
-//! at a fixed fraction of arm strength; runners run straight segments with the §5.3
-//! acceleration model; no dives, relays, slides, or collisions.
+//! Shared fielding, running, and field-position types for the live-ball simulator.
+//! [`simulate_play`] is a simplified simulator for lab examples. Its pursuit estimate
+//! adds a shrinking error to the true batted-ball path, one fielder chases, and throws
+//! travel in straight lines at a fixed fraction of arm strength. It returns time-stamped
+//! facts for the rules engine (rules-spec §2).
 
 use bb_math::{KeyedRng, Purpose, RngKey, Vec3, m};
 use bb_physics::ground::{BallPath, Field, SegmentEnd, batted_path};
 use bb_physics::{BallState, FlightEnv};
 use bb_rules::{AgentId, Input, Touch};
 
-/// Base positions (corner of the base nearest the field's interior is close enough for the
-/// skeleton): 1B, 2B, 3B, home.
+/// Reference positions for first, second, third, and home, in the sim frame (m).
 pub fn base_pos(b: u8) -> Vec3 {
     let d = 27.432 / core::f64::consts::SQRT_2;
     match b {
@@ -155,18 +147,11 @@ impl FielderAttrs {
 }
 
 /// `ReadSkill` (agent-models §10): ratio per 10 grades of the read's position and velocity
-/// error σs, less is better [E]. Chosen so that on the routine flies of
-/// docs/calibration/2026-11-15-outfield-read.md an outfield of grade 20 catches about 92%,
-/// grade 50 96% and grade 80 98% (the owner's band for a routine fly is 90–99% by fielding
-/// ability, 2026-11-15). Refitted 2026-11-17 (docs/calibration/2026-11-17-track-bias.md):
-/// 1.06 was fitted on reads that could not correct a persistent error (the snapshot read,
-/// then the tracking read that took it as fresh), whose catch rate was steep in the read's
-/// error (ρ 1.4 put grade 20 at 54%); on the honest read 1.06 left grade 20 at .971, no worse
-/// than grade 50. With 1.15: grade 20 .915, 50 .967, 80 .984 (seeds 0–99), and .934 / .979 /
-/// .986 once the tracking read's looks took their full Jacobian.
+/// error σs, less is better [E]. Fitted to the owner's 90–99% catch-rate band on routine
+/// flies by fielding ability (docs/calibration/2026-11-17-track-bias.md).
 pub const READ_RHO: f64 = 1.15;
 /// `ReadSkill`: ratio per 10 grades of τ_read, the viewing time over which the read sharpens
-/// (agent-models §10; was 1.2 in the table, never used, lowered with [`READ_RHO`]) [E].
+/// (agent-models §10) [E].
 pub const TAU_READ_RHO: f64 = 1.06;
 
 /// `Anticipation` at grade 50: pitch-location read σ, m [E].
@@ -182,8 +167,7 @@ pub const BAT_READ_TIME_SIGMA_50_S: f64 = 0.040;
 /// 38 ms at grade 80 and 146 ms at grade 20 (agent-models §5.10, the swing's lead).
 pub const LEAD_READ_TIME_SIGMA_50_S: f64 = 0.075;
 /// How fast the bat's horizontal angle turns at contact, deg/s [E]: the mean over fair balls in
-/// play (sd 209; `examples/bat_read_geometry.rs`, 48 games, refit for the v2 swing 2026-11-14;
-/// v1 gave 1,915, sd 143). A property of the swing model: refit when it changes.
+/// play (sd 209; `examples/bat_read_geometry.rs`, 48 games). Refit when the swing model changes.
 pub const BAT_YAW_RATE_DPS: f64 = 2312.0;
 /// Ratio per 10 grades for every Anticipation read σ (less is better), [E].
 pub const ANTIC_RHO: f64 = 1.25;
@@ -198,7 +182,7 @@ pub fn bat_read_sigma(time_sigma_s: f64) -> f64 {
 const DEPTH_STRETCH: f64 = 3.0;
 /// Distance at which `read_sigma0` applies, m [E].
 const READ_REF_DIST: f64 = 30.0;
-/// Re-planning interval, s (agent-models §5.2 asks 20–50 Hz; the skeleton uses 5 Hz).
+/// Re-planning interval for the lab simulator, s.
 const REPLAN_S: f64 = 0.2;
 const REACH: f64 = 1.0;
 /// Extra reach from a dive or full lunge, m [E] (agent-models §5.3), and its costs.
@@ -836,7 +820,7 @@ mod attr_tests {
     }
 
     // agent-models §5.10 and §10 (the bat-read derivation, 2026-11-13): the bat-angle read σ is
-    // the bat's 2,312°/s at contact (v2 swing) times his timing σ for the contact instant, 40 ms
+    // the bat's 2,312°/s at contact times his timing σ for the contact instant, 40 ms
     // at grade 50 and a factor 1.25³ = 1.953125 per 30 grades. By hand: grade 50, 2312 × 0.040 =
     // 92.48°; grade 80, 92.48 / 1.953125 = 47.349760°; grade 20, 92.48 × 1.953125 = 180.625°.
     // The pitch-location read keeps its 0.15 m at grade 50.

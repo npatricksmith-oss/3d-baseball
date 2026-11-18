@@ -1,5 +1,7 @@
 # Anticipation after the Codex review fixes (2026-11-12)
 
+> Superseded figures: current numbers are in the [metrics ledger](../metrics-ledger.md) (§1).
+
 **Band and mechanism.** No knob was changed. This note records how the run environment moved when the fixes to the Codex anticipation review (docs/reviews/2026-11-12-codex-anticipation-review.md) changed what fielders know before they read the ball (agent-models §5.10). Per the owner's close-enough rule, nothing was tuned to recover the old jump.
 
 ## What changed

@@ -1,5 +1,7 @@
 # Fielding and diagnosis review — 2026-11-11
 
+> Superseded figures: current numbers are in the [metrics ledger](../metrics-ledger.md) (§1).
+
 Reviewed **`c31b227..411af1a`**, the four commits named in the request, after reading `CLAUDE.md`, the applicable specs, both diagnoses, and the day-fixes review's Resolution. Source locations below refer to `411af1a`. During this review, **`72dc6a1`** appeared in the shared checkout; it changes documentation only, records owner acceptance of the outfielder defaults, and partially addresses the spec discussion below. It is outside the requested range.
 
 The aggregate claims reproduce, and the new regression tests detect their principal intended regressions. There are still movement-state and intercept-planning inconsistencies. No new P1 finding was established; the earlier review's pending-home-run issue remains deferred, not repaired.

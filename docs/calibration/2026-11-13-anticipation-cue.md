@@ -1,5 +1,7 @@
 # A further honest anticipation cue: what carries spray information (2026-11-13)
 
+> Superseded figures: current numbers are in the [metrics ledger](../metrics-ledger.md) (§1).
+
 **Band and mechanism.** No calibration knob was turned toward a target. By owner decision (2026-11-13), elite fielders should get a further *honest* cue so that `Anticipation` matters, and (coordinator decision, following from it) a fielder whose read is implausible should fall back on his other reads instead of standing still. This note records which cues a fielder could honestly have, how much they tell him about the spray in this sim, the one chosen, and how the run environment moved. Every error is derived from perception, not fitted to a run total (agent-models §5.10).
 
 ## 1. Which cues carry information about spray

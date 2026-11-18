@@ -2,16 +2,15 @@
 //! and the runner's decision from the same start model (`bb_game::live`).
 
 /// League-average runner's top speed, m/s: Statcast's 27.0 ft/s sprint speed is 8.23 m/s
-/// (8.2 is 26.9 ft/s). Each runner carries his own; this is today's default for all of them
-/// and what a fielder assumes of a runner he does not know.
+/// (8.2 is 26.9 ft/s). The game initializes runners to this speed, and fielders use it
+/// for runners they do not know.
 pub const LEAGUE_TOP_SPEED_MPS: f64 = 8.2;
 /// League-average time constant of a runner's acceleration, s [E]: v = v_max(1 − e^(−t/τ)).
 /// Set so the league-average runner covers a standing 90 ft in 4.10 s, the owner's target
 /// (Q1, 2026-11-14). The published figure is a 4.03 s mean for runners on third in
 /// sacrifice-fly situations, who are faster than average; how much slower the average
 /// runner is has no verified source (docs/calibration/2026-11-15-runner-acceleration.md §2).
-/// Was 0.68 s (4.02 s), fitted to that mean as if it were the average runner. Each runner
-/// carries his own τ (`RunnerIn::tau_s`); this is today's default for all of them.
+/// The game initializes each runner's `RunnerIn::tau_s` to this value.
 pub const LEAGUE_TAU_S: f64 = 0.76;
 
 /// A runner who has tagged up: set on his bag, watching the catch, leaving on it

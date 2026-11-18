@@ -141,7 +141,7 @@ pub const PIVOT_S_50: f64 = 0.80;
 /// pivot time scales with his own `Transfer` against this.
 pub const INFIELD_TRANSFER_50_S: f64 = 0.65;
 /// What the runner from first's slide costs the pivot man (A6, not built): time, s, and a
-/// multiplier on his throw's direction σ. Set to nothing until slides exist.
+/// multiplier on his throw's direction σ. The game supplies zero slide clearance (TASKS.md, A6).
 pub const PIVOT_SLIDE_DELAY_S: f64 = 0.0;
 pub const PIVOT_SLIDE_SIGMA_MULT: f64 = 1.0;
 

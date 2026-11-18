@@ -1,4 +1,4 @@
-//! `sim-cli game` and `sim-cli games` (M4 walking skeleton).
+//! Single-game reporting and run-environment measurements.
 
 use bb_game::game::{GameResult, simulate_game_fielders};
 use clap::Args;

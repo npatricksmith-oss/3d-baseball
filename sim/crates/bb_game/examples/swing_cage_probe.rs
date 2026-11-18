@@ -1,4 +1,4 @@
-//! The v2 swing in the cage (agent-models §3.6): perfect perception, a four-seamer at three
+//! The swing in the cage (agent-models §3.6): perfect perception, a four-seamer at three
 //! horizontal locations, on time and with timing shifts. Prints the sweet spot's speed, attack
 //! direction and angle at contact, and the batted ball (exit speed, launch, spray,
 //! batter-relative: negative = pulled). `cargo run --release -p bb_game --example swing_cage_probe`

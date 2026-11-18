@@ -1,5 +1,7 @@
 # Opus review: infield alignment review fixes (`4d3bf1b`)
 
+> Superseded figures: current numbers are in the [metrics ledger](../metrics-ledger.md) (§1).
+
 - **Reviewed:** `git diff fb6dbf7 4d3bf1b`. That is `work/infield-review-fixes` (`41f7a3a`, written by the Gemini analyst) merged into main `fb6dbf7`, on `work/infield-fixes-on-main`.
 - **Claimed:** fixes for the findings of [the Gemini infield alignment review](2026-11-14-gemini-infield-alignment-review.md) (P2-1, P2-2, P2-3, P3-1).
 - **Reviewer:** Claude Opus 5.5, on `work/review-infield-fixes`. I wrote the speed-for-accuracy rule that question 3 involves, and finding P2-1 is against my own code.

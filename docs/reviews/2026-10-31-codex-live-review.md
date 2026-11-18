@@ -1,5 +1,7 @@
 # Codex live-ball review — 2026-10-31
 
+> Superseded figures: current numbers are in the [metrics ledger](../metrics-ledger.md) (§1).
+
 Reviewed `sim/crates/bb_game/src/live.rs` and its integration in `game.rs` against PLAN §4, agent-models §§5–6, rules-spec §§2, 5–6 (also its fact-ordering contract in §1.2), and the previous M4 review. No source files were edited by this review.
 
 The checkout was being edited and committed by another process during the review. **All line references below use the final review snapshots**, copied to `/tmp/codex-live-review/`, with these SHA-256 hashes:

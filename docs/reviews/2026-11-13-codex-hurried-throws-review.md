@@ -1,5 +1,7 @@
 # Hurried throws review
 
+> Superseded figures: current numbers are in the [metrics ledger](../metrics-ledger.md) (§1).
+
 Reviewed `a4c8219..fa2cf03ee283bf17732e93b675711762543d3010` against `CLAUDE.md`, PLAN's invariants, and `docs/agent-models.md` §5.5 and §10. No P1 findings. Two P2 findings and two P3 specification discrepancies remain.
 
 ## Findings

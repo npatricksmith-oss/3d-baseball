@@ -1,5 +1,7 @@
 # Idle fielders stop chasing the ball: effect on the run environment (2026-11-13)
 
+> Superseded figures: current numbers are in the [metrics ledger](../metrics-ledger.md) (§1).
+
 Change: Part A of docs/calibration/2026-11-12-pitcher-outfield-diagnosis.md. In
 `Sim::cover_roles` (`sim/crates/bb_game/src/live.rs`), a fielder left `Role::Idle` now gets
 `target = stop_point(..)` (he pulls up where braking stops him) instead of keeping the

@@ -1,5 +1,7 @@
 # Anticipation review
 
+> Superseded figures: current numbers are in the [metrics ledger](../metrics-ledger.md) (§1).
+
 Reviewed `74679a6..cdd473c` against `CLAUDE.md`, `docs/agent-models.md` §§5.1–5.3, 5.10 and 10, and the RNG registry. Line references refer to `cdd473c`. The checkout is `61ff69a`, whose only subsequent change is `TASKS.md`; the reviewed code is identical. No source, test, spec, or TASKS file was edited.
 
 No P1 finding was established. The published run-environment numbers reproduce. Two P2 defects and two P3 boundary/contract issues remain.

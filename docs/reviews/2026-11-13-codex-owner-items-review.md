@@ -1,5 +1,7 @@
 # Codex review: owner decisions of 2026-11-13
 
+> Superseded figures: current numbers are in the [metrics ledger](../metrics-ledger.md) (§1).
+
 Scope: `490c0e7..849f66e6069a94ded077c2bb06fdc9802b80bb21` on `coord/review-fixes`, covering workers J–M and the integration follow-ups. Read `CLAUDE.md` first. Locations below refer to HEAD. No existing source, test, specification, or TASKS file was changed; scratch probes and the K-era export live under `sim/target/codex-probes/`.
 
 ## Findings

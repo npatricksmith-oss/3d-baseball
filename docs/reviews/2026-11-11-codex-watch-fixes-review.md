@@ -1,5 +1,7 @@
 # Owner-watch fixes: independent review
 
+> Superseded figures: current numbers are in the [metrics ledger](../metrics-ledger.md) (§1).
+
 Reviewed `4ebe7fd..31d57bb` at `31d57bb`, after reading `CLAUDE.md`, PLAN's binding decisions, and the owner-watch notes. Focus: visible baseball and live-play correctness; no recommendation to tune percentages more closely. No P1 defect established. The findings below are ordered by practical impact.
 
 ## Findings

@@ -1,5 +1,7 @@
 # Outfielders miss routine fly balls: the read (2026-11-15)
 
+> Superseded figures: current numbers are in the [metrics ledger](../metrics-ledger.md) (§1).
+
 Branch `work/outfield-read`, from main `dc1ce82`. Owner's guidance (TASKS.md, "Outfielders miss
 easy-looking fly balls"): a high ball *is* harder to judge, keep that; but a real outfielder
 makes a play like seed 23080 play 8 (48 ft to cover, 6.2 s of hang time) 90–99% of the time,

@@ -1,5 +1,7 @@
 # Pitcher in the outfield: diagnosis (2026-11-12)
 
+> Superseded figures: current numbers are in the [metrics ledger](../metrics-ledger.md) (§1).
+
 Diagnosis only; nothing in `src/` is changed. Code references are to HEAD `638871c`
 (`sim/crates/bb_game/src/live.rs`). TASKS.md item: "Pitcher in the outfield (sim bug, open)".
 

@@ -1,5 +1,7 @@
 # Peel-off backup review — 2026-11-13
 
+> Superseded figures: current numbers are in the [metrics ledger](../metrics-ledger.md) (§1).
+
 Reviewed `a23f7c2..aedd492`, after reading `CLAUDE.md` and agent-models §5.7. No P1 findings. The reported game statistics reproduce. Two findings remain: the offset does not enforce leaving the caller's ball, and expiration depends on another assignment rather than the visible end of the job.
 
 ## Findings

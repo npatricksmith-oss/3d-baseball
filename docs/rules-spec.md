@@ -6,7 +6,7 @@
 
 This document defines the **rules engine** (`bb_rules`): the game state machine, every umpire judgment and the geometry or timing it rests on, base awards, substitution legality (including the DH and the three-batter minimum), the official scorer, the accounting identities, and the **scenario corpus** that tests all of it without physics.
 
-Status tags: **[S]** sourced (here, the Official Baseball Rules, "OBR", cited by rule number; numbers re-checked in task **R11**), **[D]** derived, **[E]** estimate (a named, configurable parameter), **[C]** design choice the owner may revisit.
+Status tags: **[S]** sourced (here, the Official Baseball Rules, "OBR", cited by rule number; citation audit tracked in [TASKS.md](../TASKS.md) as R11), **[D]** derived, **[E]** estimate (a named, configurable parameter), **[C]** design choice the owner may revisit.
 
 **D1 reminder.** The rules engine contains **no randomness at all**. It does not hold an RNG handle. Every call is a deterministic function of geometric and timing facts reported by the world. The umpire is exact (D11); a fallible human-umpire mode is deferred.
 
@@ -241,7 +241,7 @@ The play ends at the first of:
 1. **Ball dead:** foul (uncaught), out of play, home run, HBP, batter hit by own batted ball, §5.7 cases, ball lodged (not modeled). "Out of play" is a `BallTouched{OutOfPlay}` fact: the ball left the playing field (physics-spec §9.5). The engine then emits `BallDead { reason }` (`HomeRun`, `GroundRuleDouble`, or `OutOfPlay` for a foul ball or a throw leaving the field) before the awards, and the play is over: no later fact changes it. The orchestrator stops the play at that fact, and the play's timeline carries a `BallDead` marker at that time and exit point (data-formats §5.4) so a client can cut away from a ball in the seats. (Added 2026-11-14, A10; before, foul ground had no walls and a ball out of play after a throw was ruled a ground-rule double.)
 2. **Third out** made and no run is still being decided by §6.4 (a runner touching home in the same fact window still gets judged by time).
 3. **Settled play:** a fielder holds the ball (secured) **inside the infield** (within 47.40 m of home [C]: the edge of the infield dirt on the line through second base, an arc of 95 ft about the pitcher's plate, whose front is 60.5 ft from home, OBR 2.01 diagram 1, so 155.5 ft; changed from 30 m on 2026-10-31 because 30 m excluded second base, 38.8 m from home, where a fielder with no play returns the ball; then 45 m, the dirt's reach as first estimated, which left a second baseman at his deepest Savant pre-pitch spot, 46.60 m, outside; set to the dirt edge on 2026-11-14, Opus infield-fixes review P2-2), and every runner is either touching a base or has had no movement toward the next base for `t_settle` = 1.0 s [E]. A runner caught between bases when time is called returns to the last base legally touched.
-4. **Play timeout:** sim time since contact (or since the pitch, for non-batted plays) exceeds `T_play_max` = 60 s [E]. Runners return to the last base touched; `PlayTimeout` is emitted. A timeout is a liveness bug; calibration W7 checks it never happens.
+4. **Play timeout:** sim time since contact (or since the pitch, for non-batted plays) exceeds `T_play_max` = 60 s [E]. The engine handles `Input::PlayTimeout` in `play_timeout` and issues a `RulesWarning` with code `play_timeout`. A timeout is a liveness bug; calibration W7 checks it never happens.
 
 ---
 
@@ -286,7 +286,7 @@ When a batter is awarded first (walk, IBB, HBP, catcher's interference, §5.7 ca
 | :--- | :--- | :--- |
 | Fair ball out of park in flight | Home for batter and all runners | — |
 | Fair ball bounces out of play / over the fence (**ground-rule double**), including a fair ball that leaves the field after touching a fielder or a wall | Two bases | Runners' positions at the time of the pitch [S: OBR 5.05(a)(6), 5.06(b)(4)(F)] |
-| Fair fly deflected by a fielder out of the field in flight | Over fair territory: home run. Over foul territory: two bases | Time of the pitch [S: OBR 5.05(a)(8)–(9); numbering to verify, R11]. The sim sends no glove-deflection fact yet, so a deflected fly still pending fair/foul is judged by where it leaves; the foul-side row applies only once the ball has been ruled fair |
+| Fair fly deflected by a fielder out of the field in flight | Over fair territory: home run. Over foul territory: two bases | Time of the pitch [S: OBR 5.05(a)(8)–(9); numbering to see TASKS.md, R11]. The sim sends no glove-deflection fact yet, so a deflected fly still pending fair/foul is judged by where it leaves; the foul-side row applies only once the ball has been ruled fair |
 | Thrown ball out of play, first play by an infielder | Two bases | Time of the **pitch** [S: OBR 5.06(b)(4)(G)], unless every runner, the batter-runner included, had advanced at least one base when the throw was released: then the time of the throw [S: the rule's Approved Ruling] |
 | Thrown ball out of play, any other throw | Two bases | Time of the **throw** [S: OBR 5.06(b)(4)(G)] (base last legally touched at release — v1 uses the base each runner had last touched then, `at`, not crediting a base he was past but had not reached) [C] |
 | Pitch or pickoff throw by the pitcher from the rubber out of play | One base | Time of the pitch/throw [S] |
@@ -298,7 +298,7 @@ Awarded runners are placed with `RunnerAdvanced{cause: Award}`. Runs forced in b
 
 **Thrown ball out of play, in detail** (added 2026-11-14, A10):
 - **A thrown ball** is one released by a `BallReleasedFromGlove{Throw}` and not secured by a fielder since (`GloveSecured`). A throw that bounces, caroms off a wall, or rolls before leaving the field is still the throw.
-- **Infielder:** the thrower plays P, C, 1B, 2B, 3B or SS [C: OBR 5.06(b)(4)(G) says "infielder"; MLB practice counts the pitcher and catcher; verify, R11]. The pitcher's throw from the rubber (one base, §7.2) is a pickoff and comes with M5.
+- **Infielder:** the thrower plays P, C, 1B, 2B, 3B or SS [C: OBR 5.06(b)(4)(G) says "infielder"; MLB practice counts the pitcher and catcher; see TASKS.md, R11]. The pitcher's throw from the rubber (one base, §7.2) is a pickoff and comes with M5.
 - **First play:** the play's first throw, made with no out yet recorded on the play [C: a fielder's force or tag out is a play, so a wild relay on a double play is from the time of the throw, as in the common interpretation]. On a caught fly the catch is the first out, so every throw after it is from the time of the throw.
 - **A runner's base at the release:** the base he last touched (one who went back counts from the base he went back to), except that a runner who owes a retouch after a catch (§5.3) holds his time-of-pitch base until he has retouched it, and one who has legally touched home has scored [C, from OBR 5.09(b)(5): a base reached early on a caught fly is not legally held]. (Changed 2026-11-14, Gemini play-area review P1-3: the highest base ever touched and early touches used to count.)
 - **Who has advanced:** at the release, every runner not out (the batter-runner included) holds a base past the one he held at the pitch, or has scored.
@@ -387,7 +387,7 @@ Each command is validated against the current `RulesState` at a decision point. 
 | Player in `used`, or not on the roster | `PlayerUnavailable` |
 | Would lose the DH | `DhRule` |
 | Wrong team | `NotYourTeam` |
-| Batch leaves an invalid lineup | `LineupIncomplete` (new, §15) |
+| Batch leaves an invalid lineup | `LineupIncomplete` (§15) |
 
 The rules engine also publishes the **legal-command set** at each decision point, which feeds `ViewState` (data-formats §7.2) so the HUD greys out illegal options and the AI manager plans around D17.
 
@@ -521,7 +521,7 @@ The rules engine is tested **without physics**: each scenario is a scripted sequ
 
 ### 12.2 Location and format
 
-`sim/crates/bb_rules/scenarios/<category>/<id>.toml` [C: TOML, matching the other config files; one scenario per file]. A test harness loads every file, runs `step` for each input, and checks expectations.
+a category subfolder under `sim/crates/bb_rules/scenarios/` [C: TOML, matching the other config files; one scenario per file]. A test harness loads every file, runs `step` for each input, and checks expectations.
 
 ```toml
 id = "force-002"
@@ -624,7 +624,7 @@ At least **150 scenarios** by the M4 gate, at least one per row below; M5 and M6
 | `subs` | pinch hitter with two strikes → K charged; relief mid-count walk charged; three-batter minimum accept/reject incl. inning boundary; second mound visit; DH-loss rejection; double switch batch; re-entry rejected | 20 |
 | `scorer` | error vs hit by margin; FC vs hit; WP vs PB; defensive indifference; earned-run reconstruction; inherited runner after FC | 15 |
 
-### 12.4 Property tests
+### 12.4 Property-test design
 
 In addition to scenarios, a fuzzer generates random **well-formed** fact sequences (ordered times, physically consistent: a runner cannot touch base 3 before base 2) and checks the §3 invariants and identities I6, I10, I11 after every play. Any failing sequence is minimized and saved as a new scenario.
 
@@ -645,9 +645,9 @@ With physics and agents connected, `sim-cli game` runs assert after every play t
 
 ---
 
-## 14. Validation Summary
+## 14. Validation gates
 
-- Scenario corpus (§12): every scenario passes; coverage targets met at each milestone.
+- Scenario corpus (§12): 136 fixtures in `sim/crates/bb_rules/scenarios/`, run by `sim/crates/bb_rules/tests/scenarios.rs`. The milestone coverage targets are in §12.3.
 - Property fuzzing (§12.4): no invariant failures in 10⁶ random plays.
 - Accounting (§11): zero failures over 1,000 full games (M4) and over every calibration season (calibration-targets §9).
 - Determinism: `bb_rules` is RNG-free; a test asserts it does not depend on the RNG module (crate dependency check).
@@ -655,13 +655,8 @@ With physics and agents connected, `sim-cli game` runs assert after every play t
 
 ---
 
-## 15. Open Items
+## 15. Event schema additions
 
-1. **R11 (new):** verify every OBR rule number and wording cited here against the current Official Baseball Rules, and the MLB interpretations for: the three-batter minimum at inning boundaries (§9.3), mound-visit limits, and the walk-off base credit. **Before M4.**
-2. **Data-formats additions** (append-only, data-formats §8): events `BattedBallRuling` (fair/foul and catch decisions with the deciding fact), `PlayTimeout`, `RulesWarning`, `LivenessWarning`, `UmpireSignal`; reject reason `LineupIncomplete`; `RunnerAdvanced.cause = Award`; a `reason` field on `PitchingChange` for the future injury exception.
-3. **DH loss** (§9.4) is rejected in v1. Allowing it needs the pitcher-enters-the-order logic and AI-manager awareness.
-4. **Two-way players** (a pitcher who is also the DH) are unsupported.
-5. The reference-fielder definition (§10.1) and the ordinary-effort thresholds are first drafts; M5 reviews scorer rulings against watched plays.
-6. "Passed an infielder" (§5.7) and "attempt toward second" (§5.5) are geometric stand-ins for umpire judgment; tune in M5 if they produce calls that look wrong on replay.
-7. **Passing and overrun (2026-11-13).** `RunnerPassed { runner, passed }` is a new rules event; it needs a data-formats §8 append-only addition before the event log records it (today `bb_game` logs only the `RunnerOut`, kind `Tag`). An `OutKind::PassedRunner` would let the scorer and box score name the out; until then it is a tag. Simulator side done 2026-11-13: `bb_game::live` sends `RunnerPosition` samples at 30 Hz during live plays (§2), and a batter-runner who stops at first runs through it and walks back (agent-models §6.2). In 512 games, 8,421 batter-runners overran first and came back, protected; there were no passing outs and no rules warnings (`examples/overrun_probe.rs`).
-8. Infield-fly declaration timing (M5): real umpires call it near the apex; the rule uses the atlas prediction then. Check that agents' behavior (runners holding) matches.
+The following retains the item number cited in the FlatBuffers schemas.
+
+2. `sim/schemas/events.fbs` reserves `BattedBallRuling`, `PlayTimeout`, `RulesWarning`, `LivenessWarning`, `UmpireSignal`, `AdvanceCause::Award` and a substitution reason. `sim/schemas/commands.fbs` defines `LineupIncomplete` and `PitchingChange.reason`. The game log writes `BattedBallRuling`, `RulesWarning` and award advances in `sim/crates/bb_game/src/eventlog.rs`; the client reads visual out calls from timeline markers (data-formats §5.4).

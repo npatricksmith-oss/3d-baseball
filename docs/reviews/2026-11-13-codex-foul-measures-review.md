@@ -1,5 +1,7 @@
 # Foul measures review — 2026-11-13
 
+> Superseded figures: current numbers are in the [metrics ledger](../metrics-ledger.md) (§1).
+
 Reviewed `bcd7305..77aba6e` at `77aba6e1a03c179da32dcea1e9ef1b41c7a62d7d`, after reading `CLAUDE.md`. The default simulation behavior appears unchanged. The principal findings concern conclusions drawn from otherwise reproducible measurements.
 
 ## P1 — The all-contact results do not support “above 40° matches MLB”

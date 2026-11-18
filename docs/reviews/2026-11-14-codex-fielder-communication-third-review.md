@@ -1,5 +1,7 @@
 Found two P1 issues: an unpublished relay still schedules teammates’ cover decisions, and the public recovery order can send the wrong man and turn a catch into a hit. Do not merge yet.
 
+> Superseded figures: current numbers are in the [metrics ledger](../metrics-ledger.md) (§1).
+
 Reviewed `66196ba..f3d9e7a` on `work/live-comm`, principally `faf2737` and its integration with main `57f12b7`. Read `CLAUDE.md` first, the preceding review and recheck with their Resolutions, agent-models §5.7, the calibration note and metrics ledger. Main’s swing/refit work was examined only for merge preservation. No source, test, spec, ledger or TASKS file was edited; no commit was made. Scratch revisions and probes are under `sim/target/third/`.
 
 ## Findings

@@ -1,6 +1,5 @@
 //! Abilities of a generated game's players (data-formats §2.4 step 5; calibration-targets
-//! §11.1). Interim until the league generator (M7): only `BatSpeed` is drawn (owner ruling D19,
-//! 2026-11-14); every other ability stays at grade 50.
+//! §11.1). Game generation draws `BatSpeed` (PLAN D19) and gives every other ability grade 50.
 
 use bb_agents::attributes::{BAT_SPEED_MU_MPS, BAT_SPEED_SIGMA_POP_MPS, linear_from_grade};
 use bb_math::{KeyedRng, Purpose, RngKey};

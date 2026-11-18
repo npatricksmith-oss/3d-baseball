@@ -1,5 +1,7 @@
 # Integration review: anticipation and reset-staging fixes
 
+> Superseded figures: current numbers are in the [metrics ledger](../metrics-ledger.md) (§1).
+
 Reviewed `638871c..d280069` on `coord/review-fixes` in the `coord-integrate` checkout, after reading `CLAUDE.md`. Scope includes workers A and B, E's diagnosis/example, and D's research note; `80357ab` is excluded. Locations below refer to HEAD `d280069`. Only this review file was written in the checkout; experimental source and probes were confined to `/tmp`. No P1 or P2 finding was established.
 
 ## Findings

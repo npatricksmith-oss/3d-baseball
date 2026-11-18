@@ -1,5 +1,7 @@
 # Codex review: first-base overruns, runner samples, and swing starts
 
+> Superseded figures: current numbers are in the [metrics ledger](../metrics-ledger.md) (§1).
+
 Reviewed `4132571..a36034c` (`5c82bda`, `a36034c`). Read `CLAUDE.md` first and checked the binding invariants, changed specifications, calibration note, and downstream rules, game, statistics, and timeline code. This report is the only file written outside ignored scratch work under `sim/target/`. No source, existing test, spec, or TASKS file was edited.
 
 ## Findings

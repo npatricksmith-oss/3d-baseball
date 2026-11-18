@@ -1,9 +1,7 @@
 //! C ABI for engine clients (data-formats §6.4, PLAN §3.1). Opaque handles; every payload is
 //! a FlatBuffers blob owned by Rust and released with [`bb_blob_free`].
 //!
-//! M4 skeleton surface (the M0.8 Unreal spike decides the final list):
-//! `bb_game_create`, `bb_game_advance`, `bb_game_score`, `bb_blob_free`, `bb_game_free`.
-//! The header is `include/bb_ffi.h`.
+//! Engine entry points and ownership rules are listed in `include/bb_ffi.h`.
 #![allow(unsafe_code)]
 
 use bb_game::game::Game;

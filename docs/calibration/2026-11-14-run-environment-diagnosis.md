@@ -1,5 +1,7 @@
 # Run Environment Diagnosis: Average Players vs. 2024 MLB (2026-11-14)
 
+> Superseded figures: current numbers are in the [metrics ledger](../metrics-ledger.md) (§1).
+
 **Status:** Diagnosis only — **no simulation behavior, physics, specs, `TASKS.md`, or `docs/metrics-ledger.md` were modified.**  
 **Scope:** Current `main` baseline (through A3 hurried throws, A1 handedness, A5 dive rate, and positional arm strength, HEAD `8b3f491`) under `bb_game::pa::Knobs::calibrated_m3()` (`perception = 2.7, command = 0.8, swing = 1.0`).
 

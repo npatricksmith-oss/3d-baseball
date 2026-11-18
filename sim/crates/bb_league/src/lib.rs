@@ -1,1 +1,1 @@
-//! Placeholder; filled in by a later milestone (PLAN §15).
+//! Reserved for league generation (TASKS.md, B1).
