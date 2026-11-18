@@ -1017,13 +1017,6 @@ pub mod read_trace {
     }
 }
 
-/// Throw-decision tracing (BB_DEBUG_THROW), checked once per thread: `holder_act` runs
-/// every tick the ball is held.
-fn debug_throw() -> bool {
-    thread_local! { static ON: bool = std::env::var("BB_DEBUG_THROW").is_ok(); }
-    ON.with(|x| *x)
-}
-
 /// Fielder-communication tracing (BB_DEBUG_COMM): each decision and what each man knows.
 fn debug_comm() -> bool {
     thread_local! { static ON: bool = std::env::var("BB_DEBUG_COMM").is_ok(); }
@@ -1942,20 +1935,6 @@ impl<'a> Sim<'a> {
             self.last_fact_t = self.last_fact_t.max(t);
         }
         let evs = step(self.st, &fact);
-        if evs.iter().any(|e| matches!(e, Event::RulesWarning { .. })) && std::env::var("BB_DEBUG_ORDER").is_ok() {
-            eprintln!("warning after {fact:?} at sim t {:.3}: {:?}", self.t, evs);
-            if let Some(last) = self.out.facts.last() {
-                eprintln!("   previous fact {last:?}");
-            }
-            for r in &self.r {
-                eprintln!("   runner {} start {} s {:.2} goal {} v {:.1} out {} scored {} tag_up {} last {}", r.id, r.start, r.s, r.goal, r.v, r.out, r.scored, r.tag_up, r.last_base);
-            }
-            for f in &self.out.facts {
-                if matches!(f, Input::BaseTouched { .. } | Input::BaseLeft { .. } | Input::GloveSecured { .. }) {
-                    eprintln!("     {f:?}");
-                }
-            }
-        }
         let t_fact = fact_time(&fact).unwrap_or(self.t);
         self.out.facts.push(fact);
         self.absorb(evs, t_fact);
@@ -4940,9 +4919,6 @@ impl<'a> Sim<'a> {
         };
         let best = options.iter().enumerate().filter(|(_, o)| o.p_out > 0.3)
             .fold(None, |best: Option<usize>, (i, o)| if best.is_none_or(|j| better(o, &options[j])) { Some(i) } else { best });
-        if debug_throw() {
-            eprintln!("t {:.2} holder {} best {:?}; options {:?}", self.t, by, best, options);
-        }
         let (b, through, margins, target_runner) = if let Some(i) = best {
             let o = options[i];
             if o.carry {
@@ -5480,7 +5456,6 @@ impl<'a> Sim<'a> {
 
 fn simulate_live_inner(inp: &LiveInput, st: &mut RulesState) -> LiveOutput {
     let t_c = inp.t_contact;
-    let play = inp.play;
     let mut sim = new_sim(inp, st);
     // Runners are off their bases with their leads as the ball is hit: the rules hear of it.
     for k in 0..sim.r.len() {
@@ -5502,18 +5477,6 @@ fn simulate_live_inner(inp: &LiveInput, st: &mut RulesState) -> LiveOutput {
     let mut cover_last = String::new();
     while !sim.done {
         if sim.t - t_c > PLAY_LIMIT_S {
-            if std::env::var("BB_DEBUG_LIVE").is_ok() {
-                eprintln!("timeout play {}: ball {:?}", play, match &sim.ball { Ball::Free { .. } => "free".to_string(), Ball::Held { by } => format!("held by {} at {:?} ready {}", by, sim.f[*by].pos, sim.f[*by].ready_at), Ball::Thrown { to_base, receiver, .. } => format!("thrown to {to_base} recv {receiver}") });
-                let (bp, bv) = sim.ball_at(sim.t);
-                eprintln!("  ball at ({:.2},{:.2},{:.2}) v ({:.2},{:.2},{:.2}); lead {:?}", bp.x, bp.y, bp.z, bv.x, bv.y, bv.z, sim.lead());
-                if let Ball::Thrown { path, .. } = &sim.ball { eprintln!("  throw from {:?} at {:.2}, lands {:.2}; now {:.2}", path.first().s.r, path.first().t, path.last().t, sim.t); }
-                for r in &sim.r {
-                    eprintln!("  runner {} start {} s {:.1} goal {} v {:.1} out {} scored {} tag_up {}", r.id, r.start, r.s, r.goal, r.v, r.out, r.scored, r.tag_up);
-                }
-                for (i, fd) in sim.f.iter().enumerate() {
-                    eprintln!("  f{i} pos ({:.1},{:.1}) target ({:.1},{:.1}) role {:?}", fd.pos.x, fd.pos.y, fd.target.x, fd.target.y, fd.role);
-                }
-            }
             let t = sim.t;
             sim.emit(Input::PlayTimeout { t });
             break;
