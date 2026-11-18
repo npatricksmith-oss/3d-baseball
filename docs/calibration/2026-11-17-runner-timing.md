@@ -119,7 +119,7 @@ The merged base (`3b5dd55`) reproduced the original 290 losing holds from second
 
 The residual is about −0.01 s in each group. The historical projection uses a full-speed leg after the bag and a continuous curve from contact to the target. Walking the tick-by-tick ETA to the first touch uses the shorter leg to the intervening bag. A hold on that bag therefore adds zero to this particular deficit. It may still explain the decision to stay, and the projection is optimistic for any runner who has to stop there before going on.
 
-The ground-hold column is the result of the ordinary advance decision on a ball already down. The merged base had no separate rule for the ball hit in front of an unforced runner from second. Watching a ground ball in front until it gets through, checking a liner and giving way to a lead runner are baseball decisions. The false start on the early bounce is a separate timing fault, described below. [Todd Guilliams, runner on second](https://coachesinsider.com/baseball/baserunning-runner-on-second-base/).
+The merged base used the ordinary advance decision on a ball already down, including one hit in front of an unforced runner from second. The ground-hold column measures that decision. Watching a ground ball in front until it gets through, checking a liner and giving way to a lead runner are baseball decisions. The false start on the early bounce is a separate timing fault, described below. [Todd Guilliams, runner on second](https://coachesinsider.com/baseball/baserunning-runner-on-second-base/).
 
 Every sample can be reproduced with `runner_timing -- <seed> <play> <runner>`. These are changes in the 60 Hz samples. Positions are metres along the path from home, and times start at contact.
 
@@ -144,8 +144,27 @@ The initial experiments used the same direct game seeds 0–119. The scores belo
 | 1.5 / 3 and 1.5 / 5 | 165/429 (38.5%) | 122/213 (57.3%) | 79% / 100% / 77% |
 | 1.0 / 2.5 and 1.5 / 4.5 | 152/423 (35.9%) | 100/204 (49.0%) | 78% / 100% / 71% |
 
-The final fit keeps the smaller 1 m shuffle with 0–1 out and uses 3 m/s at contact. It takes the stronger trial's 1.5 m and 5 m/s with two out, which helped the right-field send without making the 0–1-out lead larger. These are empirical inputs. There is no change to the run-expectancy values, tag allowance, or throw times.
+The final fit keeps the smaller 1 m shuffle with 0–1 out and uses 3 m/s at contact. It takes the stronger trial's 1.5 m and 5 m/s with two out, which helped the right-field send without making the 0–1-out lead larger. These empirical inputs set the mechanical head start. For an uninterrupted run from second, the added distance, coasting and carried speed save about 0.58 s with 0–1 out and 0.80 s with two out compared with standing through the same read clock.
 
 ### MLB check for runners doubled off
 
 I counted **208 runners on 207 plays** across 2,429 regular-season games in Retrosheet's 2024 parsed play-by-play. That's **25.7 runners per 300 games**. The count uses `gametype=regular`, `hittype=L`, a catch coded with a single fielder number and a credited batting out, fewer than two outs, and a runner on base. For each runner, the advance field must show `1X1(...)`, `2X2(...)` or `3X3(...)`, with a recorded baserunning out in the corresponding `brout` column. There were 2,596 catches meeting the opportunity definition, of which 207 (8.0%) produced a double-off. Retrosheet labels line drives from play-by-play. The sim identifies them by launch angle, so the comparison also reports very low catches separately. [Retrosheet 2024 parsed play-by-play and field definitions](https://www.retrosheet.org/downloads/plays.html), [event coding](https://www.retrosheet.org/eventfile.htm).
+
+### Final measurements
+
+The final probe used 300 games starting at each of direct game seeds 0 and 1,000,003,000, which match the CLI's `--seed 0` and `--seed 1000`. The merged-base probe used 0 and 1000 as direct seeds. The before/after rows below use the shared 0–299 set. The combined final column uses both standard sets.
+
+| Scorer-credited outfield singles | Merged base, seeds 0–299 | Moving start, seeds 0–299 | Moving start, both sets |
+|---|---:|---:|---:|
+| Second to home, all outs, scored | 179/412 (43.4%) | 252/410 (61.5%) | 483/823 (58.7%) |
+| Second to home, 0–1 out, scored | 100/254 (39.4%) | 119/256 (46.5%) | 229/529 (43.3%) |
+| Second to home, two out, sent | 81/158 (51.3%) | 133/154 (86.4%) | 254/294 (86.4%) |
+| First to third, all outs, safe | 269/947 (28.4%) | 381/950 (40.1%) | 777/1,916 (40.6%) |
+
+On **all singles**, second to home was **536/1,011 (53.0%)** versus MLB's **61.7%**, and first to third was **823/2,279 (36.1%)** versus **31.7%**. With 0–1 out, second to home was 249/630 (39.5%), versus 1,395/2,841 (49.1%) in the 2024 Retrosheet sample. Restricting both to outfield singles gives 43.3% versus 55.6%. With two out, outfield sends from second were 72/88 (81.8%) to left, 109/110 (99.1%) to center and 73/96 (76.0%) to right. Left and right are within the published 75–91% band. Center is above it. [Published extra-base targets and send rates](2026-11-15-runner-decision-model.md#part-1-sources), [Retrosheet 2024 parsed play-by-play](https://www.retrosheet.org/downloads/plays.html).
+
+Of 228 remaining losing holds from second with 0–1 out, 127 were on liners and 29 on flies. Airborne checks and retreats cost those 228 runners **1.92 s on average**, with **1.11 s** mean deficit to the throw benchmark. The air-check portions for grounders through, liners and flies were **0.29, 2.18 and 4.85 s**. Ground holds and traffic each rounded to zero in that sample. The earlier motion improved the races the runners could win. Among the runners who still lost, giving up ground or waiting for the ball to drop remains the largest measured cost. These are different sets of plays, so the 1.92 s and the historical 1.45 s describe the remaining holds in each build.
+
+The sim recorded **14 double-offs per 300 games** in each seed set on caught balls launched at 10–25°. That is 28 in 410 chances (6.8%) across both sets, against MLB's 8.0% by Retrosheet's line-drive label. Including catches below 10° adds 75 and 56 runners in the two sets, raising the broader total to **79.5 per 300 games**. 130 of those 189 very low catches produced an appeal out. The narrower rate per chance is plausible. The broader count is high for MLB's recorded line-drive total, and how many of those very low catches correspond to MLB liners remains open. [Retrosheet field definitions](https://www.retrosheet.org/downloads/plays.html).
+
+The [metrics ledger](../metrics-ledger.md) records the standard run. The measured code is `95c8050`. The seed-0 probe matched the unrecorded game's digest.

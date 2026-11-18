@@ -29,6 +29,8 @@ Numbers are only comparable within one seed set and game count. The standard set
 
 ## 1. Where the numbers stand
 
+*Update 2026-11-18 (Q27, `work/runner-start`, `95c8050`). Runs are 4.30 [4.30]. GB/LD/FB/PU hits are .310/.672/.107/.008 [.311/.679/.095/.004]. HR/PA is 2.73% [2.77%], K% is 22.2 [22.4], and reached on BIP is 34.2% [33.9%]. [Runner timing and fit](calibration/2026-11-17-runner-timing.md#final-measurements).*
+
 *Update 2026-11-17 (`work/of-mutual-defer`, `75f50a9`). The outfield backup for a grounder through the infield stands at runs 4.12 [4.14], GB/LD/FB/PU hits .307/.683/.109/.006 [.308/.683/.098/.004], HR/PA 2.88% [2.82%], K% 21.9 [22.3] and reached on BIP 35.1% [35.0%]. See the newest row in §3.*
 
 *The tracking read's persistent error as a state (`work/track-bias`, after the Codex review) stood at runs 4.14 [4.16], GB/LD/FB/PU hits .308/.683/.109/.006 [.308/.682/.098/.004], HR/PA 2.87% [2.77%], and routine flies caught .980.*
@@ -167,6 +169,12 @@ The "5.48" at the top of the last block is a coincidence of two samples: the div
 ## 3. The rows
 
 Hit rates are per ball in play of that type. "Seed 5" and "seed 2" mean `sim-cli games --seed` with 1,024 games unless a row says otherwise.
+
+### 2026-11-18 (300 games each at `--seed 0` and `--seed 1000`)
+
+| Task | Commit | What changed | Numbers (before → after) | Cause | Open |
+|---|---|---|---|---|---|
+| **Q27: runners moving at contact** ([timing trace and fit](calibration/2026-11-17-runner-timing.md#q27-trace-before-moving-starts)) | `3b5dd55` → `95c8050` on `work/runner-start` | All three bases use moving secondary leads, +1.0 m at 3 m/s with 0–1 out and +1.5 m at 5 m/s with two out. Early bounces respect the read clock. Runners brake into partway holds and returns. | Seeds 0 [1000]. Runs 4.15 → 4.30 [4.13 → 4.30]; K% 22.0 → 22.2 [22.2 → 22.4]; BB% 8.3 → 8.3 [8.4 → 8.5]; HR/PA 2.87% → 2.73% [2.80% → 2.77%]; reached on BIP 35.2% → 34.2% [34.8% → 33.9%]; GB .308 → .310 [.305 → .311]; LD .682 → .672 [.682 → .679]; FB .108 → .107 [.100 → .095]; PU .006 → .008 [.004 → .004]; PA/team-game 38.1 → 38.2 [38.6 → 38.4]; pitches/game 239 → 241 [241 → 240]; rules warnings {} in all four runs. | The shorter race and carried speed let more runners score from second on outfield singles, 43.4% → 61.5% on the matched seed-0 set. Two-out outfield sends rise 51.3% → 86.4% there. More runs score despite fewer batters reaching on balls in play. Fewer provisional ground-ball fielder's choices (.062 → .051 [.064 → .050]) account for part of the reach drop. Caught runners have to brake and return, creating appeal outs. | Second to home on all singles is 53.0% against MLB's 61.7%, and first to third is 36.1% against 31.7%. Air checks explain most remaining runner delay. Center-field sends with two out are high. Double-offs on caught 10–25° liners are 14 per 300 against Retrosheet's 25.7 by its play-by-play label, or 79.5 if catches below 10° are included. The specific plays behind the drop in ground-ball choices and the residual batting-rate movement are unmeasured. |
 
 ### 2026-11-17 (300 games: `--seed 0`, game seeds 0–299, and `--seed 1000`, game seeds 1,000,003,000–1,000,003,299)
 
@@ -352,10 +360,13 @@ Cases where one thing masked another. These are the pattern to look for when a n
 10. **Calibration knobs fitted on a population that no longer exists.** `K_perception` 2.7 and Discipline 0.5/+0.9 were set with every PA right-on-right and 22 dives a game; both conditions have changed since.
 11. **Runners ran into outs and the run environment was tuned around them (2026-11-15).** Reading a throw by its heading made a batter on a single to centre run into the tag at second 1.5 times a game; the 4.4 runs of the calibration included that. Reading the throw from where it comes down and letting a runner look again took them away and runs went to 5.1 [5.1] (row 2026-11-15). The same shape as item 1.
 
+12. **An early bounce could bypass the runner's read.** The stationary lead and the partway air hold shared a state. A ground touch could release either one and prompt a decision within 50 ms of contact, followed by a second decision at the normal read. Seed 1040 play 326 reversed from −3.69 m/s on that second decision. Q27 gives the contact read its own clock. [60 Hz trace](calibration/2026-11-17-runner-timing.md#q27-trace-before-moving-starts).
+
 ## 5. Open leads
 
 Unexplained or unvalidated, most consequential first.
 
+- **Q27 runner outcomes.** The remaining 0–1-out scoring gap from second is concentrated on checked airborne balls in the timing probe. The count of appeal outs depends strongly on whether very low catches are grouped with line drives. Provisional ground-ball fielder's choices fell on both seed sets while 2+ outs rose (.065 → .071 [.062 → .066]). The exact play mix behind those shifts and the smaller batting-rate movements is unmeasured. [Final timing results](calibration/2026-11-17-runner-timing.md#final-measurements).
 - **Runs are about 1.2–1.6 above MLB (5.66 [6.14]) and no knob has been touched since 2026-11-11.** Recalibration is held until A17 lands. Inputs that moved since the fit: handedness (+0.6), the stretch (−0.75), no double dive (+0.37), footwork (+0.37), throw choices (−0.34: continuation −0.20, the tag-up start about −0.2), the 0.25 s tag and the runner's read of the holder (+0.16 [+0.31]), runner τ 0.68 s (+0.31 [+0.37]).
 - **Double plays 2.75 a game against about 1.7** after A4 valued the double play (2.30 before). Per opportunity 19.5% against 9.8% (Baseball-Reference 2024); the chances are right (14.1 against 13.6 a game), the conversion is not (52.5% of chance grounders against about a third, FanGraphs/Savant). Ranked causes (note, follow-up §B): infield exchanges about 0.5 s quicker than Statcast's second-base play set (0.70 s against 1.2 s); no slides and no pivot clearance; the continuation amplifying both; the pitcher fielding 20% of infield chances against 8%. Needs a pivot model and a pivot-time source; nothing changed.
 - **Sacrifice flies 0.205 a team-game against 0.24–0.27** after the tag-up work (A4 had taken them to 0.075; the stale-speed flying start had carried them at 0.30). Of outfield catches with a runner on third and <2 out, 53.9% score against 75–80%: beyond 300 ft the sim now matches MLB (sent 76–98%, safe 94–100%), but **225–300 ft almost always holds** (MLB: 225–275 sent about 40%, 275–300 about 90%). At 280 ft the sim's ball (release 0.93 s, flight 2.89 s at a 40.55 m/s arm, tag 0.25 s, about 4.07 s) and a 4.02 s runner are even; MLB outcomes imply a ball of about 4.4 s. Likely cause: every sim throw leaves at the Statcast top-10% arm speed (speed-for-accuracy is not modelled, agent-models §5.5). Model change; the 0.35 s margin was left alone (lowering it would add outs at the plate, not runs).
