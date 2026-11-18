@@ -2884,13 +2884,18 @@ impl<'a> Sim<'a> {
             return;
         }
         // A man not going for it reconsiders a ball in the air he believes he catches (a call
-        // that outranked his may be gone). A ball every man has left to another is sent to
+        // that outranked his may be gone). An outfielder not going, with no base or cutoff
+        // job, reconsiders any ball on a recent read of it: the outfielder he left it to may
+        // now be known not to be going (seed 65147 play 10: the centre and right fielders
+        // each read a chopper as the other's, both stayed, and the infielders chased a ball
+        // through the hole to the wall). A ball every man has left to another is sent to
         // one man by the shared convention below (`fallback_chaser`).
         let decisions: Vec<(usize, Decision)> = (0..9)
             .filter(|&i| {
                 let fd = &self.f[i];
-                let recent = self.t - fd.read_at <= HEAR_READ_AGE_S;
-                fd.belief.is_some() && (fd.role == Role::Chase || (recent && fd.call >= 1))
+                let recent = self.t - fd.read_at <= HEAR_READ_AGE_S && fd.read_ball == self.ball_gen;
+                let of_free = i >= 6 && matches!(fd.role, Role::Idle | Role::Backup);
+                fd.belief.is_some() && (fd.role == Role::Chase || (recent && (fd.call >= 1 || of_free)))
             })
             .map(|i| (i, self.decide(i)))
             .collect();
@@ -12699,6 +12704,31 @@ mod tests {
 
     // P1-1: a first baseman who broke for a ball sees the pitcher secure it and, after his
     // reaction time, goes back to his bag; with first already taken he pulls up instead.
+    // Agent-models §5.7, an outfielder who left the ball to another reconsiders when that man
+    // is known not to be going (the owner's saved play, seed 65147 play 10): a chopper off the
+    // plate goes through the right side. The centre and right fielders each read it as the
+    // other's and both stayed; the infielders chased it, and it rolled to the wall for an
+    // inside-the-park home run. The right fielder, 20 m off its line, cuts it off in front of
+    // the warning track.
+    #[test]
+    fn an_outfielder_takes_a_grounder_through_the_hole_both_left_to_the_other() {
+        let mut g = crate::game::Game::new(65147, false);
+        while let Some(step) = g.step_pitch() {
+            if step.play != 10 {
+                continue;
+            }
+            let first = step.facts.iter().find_map(|f| match f {
+                Input::GloveSecured { t, fielder, x, y } => Some((*t, *fielder, *x, *y)),
+                _ => None,
+            });
+            let (t, who, x, y) = first.expect("someone fields it");
+            assert_eq!(who & 0x7F, 9, "the right fielder fields it first, not {who} at ({x:.1}, {y:.1})");
+            assert!(m::hypot(x, y) < 100.0 && t - step.facts.iter().find_map(|f| if let Input::BatContact { t } = f { Some(*t) } else { None }).unwrap() < 6.0, "fielded at ({x:.1}, {y:.1}), {t:.2} s");
+            return;
+        }
+        panic!("no play 10");
+    }
+
     #[test]
     fn a_chaser_who_sees_a_teammate_secure_the_ball_goes_to_his_base() {
         for first_taken in [false, true] {
