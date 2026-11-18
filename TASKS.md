@@ -36,9 +36,8 @@ One `sim/crates/bb_game/src/live.rs` job at a time. Each job gets a ledger row a
 ### 1. Runners (agent-models §6.3–§6.4; [decision-model note](docs/calibration/2026-11-15-runner-decision-model.md))
 
 - [~] **The runner's start (Q27).** Moving secondary leads are merged (2026-11-18): +1.0 m at 3 m/s with 0–1 out, +1.5 m at 5 m/s with two out. All three bases use the contact state, and the live-ball timeline carries the shuffle from release. Early bounces respect the read clock. Runners brake for partway holds and returns, and the rules judge the retouch.
-  - In 600 games, second to home was 53.0% on all singles (MLB 61.7%), first to third 36.1% (MLB 31.7%), and two-out outfield sends from second were 86.4%. Airborne checks explain most of the remaining delay with fewer than two outs.
-  - [~] Review P2-1 (in progress, `work/runner-contact-read`): the first check after contact gates on the true ball height; use the runner's observation and the ground-touch cue.
-  - Then: the high two-out sends to center (pickup depth and throw geometry) and the many appeals on catches below 10°. Compare those very low catches to the MLB line-drive sample.
+  - Review P2-1 is fixed on `work/runner-contact-read`. The first catch check uses the runner's noisy projection and the public ground-touch cue. In the two 300-game sets, second to home was 52.4% on all singles (MLB 61.7%) and first to third was 35.8% (MLB 31.7%).
+  - Open after the recheck: two-out sends to center remain 99.1%, with a deeper pickup and a longer throw benchmark than at the corners. Double-offs below 10° fell from 65.5 to 59.5 runners per 300 games. Compare very low catches to the MLB line-drive sample. [Contact read recheck](docs/calibration/2026-11-17-runner-timing.md#p2-1-contact-read-follow-up).
   - Deferred review P3s: the third-base route blend turns the lateral velocity in one tick (P3-1); the first decision sees one tick less coasting than its clock (P3-2). [Q27 timing and checks](docs/calibration/2026-11-17-runner-timing.md#final-measurements).
 - [ ] Fit `AdvanceParams::caution_z` to MLB's attempt and success rates (now 1.0, fitted only to outs on the bases).
 - [ ] The coach's read and send for a ball behind the runner (Q10 a). Model early-departure decisions on caught flies, slides around tags, a turn decision before the bag, and an overrun redirected after an overthrow.
