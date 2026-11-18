@@ -110,8 +110,12 @@ const FOLLOW_GAP_S: f64 = 0.3;
 /// From contact to a runner's first look at the ball, s [E]: his read of where it is going
 /// (no published value; Statcast's "first step" is not released as a league figure).
 const RUNNER_READ_DELAY_S: f64 = 0.5;
-/// Allowance in the runner's catch read for an approximate fielder arrival, s [E].
-const RUNNER_CATCH_SLACK_S: f64 = 0.3;
+/// Reaction to a public catch or no-catch ruling, s [E].
+const RUNNER_CATCH_CALL_REACT_S: f64 = 0.25;
+/// Uncertainty in a runner's estimate of the margin to glove reach, m [E].
+const RUNNER_CATCH_SIGMA_M: f64 = 0.30;
+/// Confidence needed to commit to either outcome on the initial catch read [E].
+const RUNNER_CATCH_CONFIDENCE: f64 = 0.80;
 /// From contact to a two-out runner's break from shuffle speed into a full run, s [E].
 const RUNNER_CONTACT_REACT_S: f64 = 0.25;
 /// The error of a runner's read of a race, one draw per look, s [E] (agent-models §6.3).
@@ -194,12 +198,6 @@ const ARM_READ_SUB: u32 = 1 << 20;
 fn typical_throw_time(d: f64) -> f64 {
     let v = THROW_EFFORT * TYPICAL_ARM;
     throw_time(v, d).min(2.0 * throw_time(v, 0.5 * d) + RELAY_TRANSFER_FRAC * TYPICAL_TRANSFER)
-}
-
-#[derive(Clone, Copy)]
-enum RunnerIntercept {
-    Catch,
-    Pickup,
 }
 
 /// A runner's read of a throw in the air: his own prediction of its flight from what he sees
@@ -898,6 +896,8 @@ struct Runner {
     /// The runner has seen the catch and settled whether he owes a retouch (decided once:
     /// off his base at the catch ⇒ owes it; on it ⇒ free to leave).
     catch_seen: bool,
+    /// His own position on the catch tick was off his original bag.
+    off_base_at_catch: bool,
     /// Advance decisions made this play. Decision n (from 1) draws its timing error from
     /// `RunnerPerception` sub-index 2n and its read of a free ball from 2n + 1; sub-index 1
     /// is the first read at contact (tag up or go).
@@ -1962,8 +1962,10 @@ struct Sim<'a> {
     last_fact_t: f64,
     /// When the ball was last caught (a visible event).
     secured_at: f64,
-    /// A fly was caught (the rules engine signalled `Catch`).
-    catch_made: bool,
+    /// Public catch and no-catch ruling times. The rules take effect on the fact;
+    /// a runner who is still reading it carries his movement through his reaction.
+    caught_at: Option<f64>,
+    no_catch_at: Option<f64>,
     /// The latest catch was low or diving: a close call for the umpire.
     low_catch: bool,
     st: &'a mut RulesState,
@@ -1995,6 +1997,11 @@ impl<'a> Sim<'a> {
         }
         let evs = step(self.st, &fact);
         let t_fact = fact_time(&fact).unwrap_or(self.t);
+        if self.caught_at.is_none() && matches!(fact, Input::BallTouched {
+            what: Touch::Ground { .. } | Touch::Wall { .. }, ..
+        }) {
+            self.no_catch_at.get_or_insert(t_fact);
+        }
         self.out.facts.push(fact);
         self.absorb(evs, t_fact);
     }
@@ -2037,7 +2044,11 @@ impl<'a> Sim<'a> {
                 }
             }
             if matches!(e, Event::Catch { .. }) {
-                self.catch_made = true;
+                self.caught_at = Some(t_fact);
+                for runner in &mut self.r {
+                    runner.off_base_at_catch = runner.start > 0
+                        && (runner.s - runner.start as f64 * BASE_L).abs() > 1e-6;
+                }
             }
         }
         self.out.events.extend(evs);
@@ -2273,43 +2284,61 @@ impl<'a> Sim<'a> {
         self.predict_from(self.runner_pos(r), RUNNER_READ_SIGMA0, 0.6, view, err)
     }
 
-    /// Earliest point on the runner's own projection that a visible fielder could reach
-    /// with league-typical speed, within the caller's decision horizon.
-    fn believed_field_intercept(&self, pred: &BallPath, until: f64, kind: RunnerIntercept) -> Option<(f64, Vec3)> {
-        let step_s = match kind {
-            RunnerIntercept::Catch => DT,
-            RunnerIntercept::Pickup => 0.15,
-        };
+    /// Earliest pickup on the runner's own projection using typical fielder speed.
+    fn believed_field_intercept(&self, pred: &BallPath) -> Option<(f64, Vec3)> {
         let mut t = self.t + 0.05;
-        let t_end = pred.t_end().min(until);
-        let field = self.inp.field;
-        while t <= t_end {
+        while t <= pred.t_end() {
             let (b, _) = pred.at(t);
-            // Not where nobody can reach: farther past a wall than a fielder reaches over it.
-            if b.z <= CATCH_MAX_Z && beyond_reach_over_wall(field, b) <= 0.0 {
+            if b.z <= CATCH_MAX_Z && beyond_reach_over_wall(self.inp.field, b) <= 0.0 {
                 let reachable = self.f.iter().any(|fd| {
-                    let to = Vec3::new(b.x - fd.pos.x, b.y - fd.pos.y, 0.0);
-                    let d = m::hypot(to.x, to.y);
-                    if d <= REACH {
-                        return true;
-                    }
-                    // Close to a possible catch, the runner sees whether the fielder
-                    // is already moving toward it. At range he assumes a typical start.
-                    let dt = t - self.t;
-                    let travel = if matches!(kind, RunnerIntercept::Catch) && d <= STEP_REACH_M {
-                        run_dist_from(dt, fd.vel.dot(to) / d, TYPICAL_SPEED, 0.9)
-                    } else {
-                        run_dist(dt, TYPICAL_SPEED, 0.9)
-                    };
-                    travel >= d - REACH
+                    let d = m::hypot(b.x - fd.pos.x, b.y - fd.pos.y) - REACH;
+                    d <= 0.0 || run_dist(t - self.t, TYPICAL_SPEED, 0.9) >= d
                 });
                 if reachable {
                     return Some((t, Vec3::new(b.x, b.y, 0.0)));
                 }
             }
-            t += step_s;
+            t += 0.15;
         }
         None
+    }
+
+    /// The runner's catch belief from his own projection and visible fielder motion.
+    /// Use the best margin to glove reach, considering only the first flight.
+    fn runner_catch_probability(&self, pred: &BallPath) -> f64 {
+        let ground = pred.first_bounce().map_or(f64::INFINITY, |(t, ..)| t);
+        let wall = pred.walls.first().map_or(f64::INFINITY, |(t, ..)| *t);
+        let mut margin_m = f64::NEG_INFINITY;
+        let mut t = self.t;
+        while t <= pred.t_end() && t < ground.min(wall) {
+            let (b, _) = pred.at(t);
+            if b.z <= CATCH_MAX_Z && beyond_reach_over_wall(self.inp.field, b) <= 0.0 {
+                let dt = t - self.t;
+                for fd in &self.f {
+                    let to = Vec3::new(b.x - fd.pos.x, b.y - fd.pos.y, 0.0);
+                    let d = m::hypot(to.x, to.y);
+                    let travel = if d > 1e-9 && d <= STEP_REACH_M {
+                        run_dist_from(dt, fd.vel.dot(to) / d, TYPICAL_SPEED, 0.9)
+                    } else {
+                        run_dist(dt, TYPICAL_SPEED, 0.9)
+                    };
+                    margin_m = margin_m.max(REACH + travel - d);
+                }
+            }
+            t += DT;
+        }
+        phi(margin_m / RUNNER_CATCH_SIGMA_M)
+    }
+
+    fn read_contact(&mut self, k: usize, p_catch: f64) {
+        let base = self.r[k].start;
+        if p_catch >= RUNNER_CATCH_CONFIDENCE {
+            self.r[k].tag_up = true;
+        } else if p_catch > 1.0 - RUNNER_CATCH_CONFIDENCE {
+            self.r[k].hold_s = Some((lead_s(base) + HALFWAY_M).min((base as f64 + 0.6) * BASE_L));
+        } else {
+            self.runner_decide(k, base);
+        }
     }
 
     /// Earliest point on a predicted path the fielder can reach in time: (time, point).
@@ -4213,7 +4242,7 @@ impl<'a> Sim<'a> {
                 let t0 = prof::enabled().then(std::time::Instant::now);
                 let pred = self.runner_predict(k, read_sub);
                 let end = pred.t_end();
-                let (tf, at) = self.believed_field_intercept(&pred, end, RunnerIntercept::Pickup).unwrap_or_else(|| {
+                let (tf, at) = self.believed_field_intercept(&pred).unwrap_or_else(|| {
                     let (rest, _) = pred.at(end);
                     (end + 1.0, Vec3::new(rest.x, rest.y, 0.0))
                 });
@@ -4438,7 +4467,11 @@ impl<'a> Sim<'a> {
     }
 
     fn caught(&self) -> bool {
-        self.catch_made
+        self.caught_at.is_some()
+    }
+
+    fn no_catch_read(&self) -> bool {
+        self.no_catch_at.is_some_and(|call| self.t + 1e-9 >= call + RUNNER_CATCH_CALL_REACT_S)
     }
 
     /// Whether runner `j` is at the point of settling on base `b`, as the movement step sees
@@ -4646,18 +4679,13 @@ impl<'a> Sim<'a> {
         true
     }
 
-    /// The public ground touch which ends a runner's check for a catch.
-    fn ball_touched_ground(&self) -> bool {
-        self.out.facts.iter().any(|f| matches!(f, Input::BallTouched { what: Touch::Ground { .. }, .. }))
-    }
-
     fn trace_runner(&self, k: usize) {
         use runner_trace::{Cause, Tick};
         let r = &self.r[k];
         if !runner_trace::enabled() || r.start == 0 {
             return;
         }
-        let ball_down = self.ball_touched_ground();
+        let ball_down = self.no_catch_at.is_some();
         let cause = if r.reading_contact {
             Cause::Read
         } else if r.tag_up || r.hold_s.is_some() || r.retouch {
@@ -4698,20 +4726,28 @@ impl<'a> Sim<'a> {
             } else if r.still_since.is_none() {
                 r.still_since = Some(self.t);
             }
-            // The catch, seen once: a runner off his base at that moment owes a retouch; one
-            // standing on it (tagging up or not) owes nothing and may leave for good. That
-            // includes a runner who already crossed the plate: he goes back from home, is a
-            // live runner again (tags and throws can retire him), and must touch home again.
-            if self.caught() && !self.r[k].catch_seen {
+            // The rules judge the catch immediately. A runner reacts to the public
+            // call after carrying his old movement through the reaction window.
+            let at_start = (self.r[k].s - self.r[k].start as f64 * BASE_L).abs() < 1e-6;
+            if let Some(call) = self.caught_at
+                && !self.r[k].catch_seen
+                && (self.t + 1e-9 >= call + RUNNER_CATCH_CALL_REACT_S
+                    || (self.r[k].tag_up && at_start && !self.r[k].off_base_at_catch))
+            {
                 self.r[k].catch_seen = true;
                 self.r[k].reading_contact = false;
-                if self.r[k].start > 0 && self.r[k].s > self.r[k].start as f64 * BASE_L + 1e-6 {
+                let id = self.r[k].id;
+                let start = self.r[k].start;
+                let retouched = self.out.facts.iter().any(|f| matches!(f, Input::BaseTouched {
+                    t, agent, base, holding_ball: false
+                } if *t >= call && *agent == id && *base == start));
+                if self.r[k].off_base_at_catch && !retouched {
                     self.r[k].scored = false;
                     self.r[k].tag_up = false;
                     self.r[k].hold_s = None;
                     self.r[k].retouch = true;
                     self.r[k].waiting = false;
-                    self.r[k].goal = self.r[k].start;
+                    self.r[k].goal = start;
                 }
             }
             if self.r[k].scored {
@@ -4733,8 +4769,8 @@ impl<'a> Sim<'a> {
             // Tag-up: go back to the base and hold it until the catch, then decide.
             if self.r[k].tag_up {
                 let on_base = (self.r[k].s - self.r[k].start as f64 * BASE_L).abs() < 1e-6;
-                if self.caught() {
-                    // (A runner still off his base at the catch was sent back above.)
+                if self.r[k].catch_seen {
+                    // (A runner who still owes the retouch was sent back above.)
                     self.r[k].tag_up = false;
                     let b = self.r[k].last_base;
                     self.emit(Input::BaseTouched { t: self.t, agent: self.r[k].id, base: b, holding_ball: false });
@@ -4746,7 +4782,7 @@ impl<'a> Sim<'a> {
                     if self.r[k].goal <= b {
                         self.r[k].set_start = None;
                     }
-                } else if !matches!(self.ball, Ball::Free { .. }) || self.ball_touched_ground() {
+                } else if self.no_catch_read() {
                     // The ball dropped in: run.
                     self.r[k].tag_up = false;
                     let b = self.r[k].last_base;
@@ -4759,7 +4795,7 @@ impl<'a> Sim<'a> {
                 }
             }
             // A partway hold ends when the ball comes down. The contact read has its own clock.
-            if self.r[k].hold_s.is_some_and(|s| s > lead_s(self.r[k].start)) && !self.caught() && (!matches!(self.ball, Ball::Free { .. }) || self.ball_touched_ground()) {
+            if self.r[k].hold_s.is_some_and(|s| s > lead_s(self.r[k].start)) && self.no_catch_read() {
                 self.r[k].hold_s = None;
                 let b = self.r[k].start;
                 self.runner_decide(k, b);
@@ -4772,7 +4808,10 @@ impl<'a> Sim<'a> {
                 }
             }
             // Something new to see since his last look: he decides again, from where he is.
-            self.runner_relook(k);
+            let awaiting_catch_call = self.caught() && !self.r[k].catch_seen;
+            if !awaiting_catch_call {
+                self.runner_relook(k);
+            }
             self.runner_yields(k);
             // Heading for a base a runner ahead has stopped at (or is retreating to): go back,
             // unless this is a forced advance (then the runner ahead is forced too).
@@ -4864,7 +4903,7 @@ impl<'a> Sim<'a> {
                 if retouched {
                     self.r[k].retouch = false;
                 }
-                if b < 4 && (mdir > 0.0 || retouched) && b == self.r[k].goal {
+                if b < 4 && (mdir > 0.0 || retouched) && b == self.r[k].goal && !awaiting_catch_call {
                     // Arrived where it was going (or retouched after a catch): decide whether
                     // to keep going (leaving the base is reported on the next step). Coming
                     // back he braked into the bag, and is planted on it: his next leg starts
@@ -5254,7 +5293,12 @@ impl<'a> Sim<'a> {
     fn settled(&self) -> bool {
         let Ball::Held { by } = self.ball else { return false };
         let fd = &self.f[by];
-        let calm = self.r.iter().all(|r| r.out || r.scored || ((r.s - r.goal as f64 * BASE_L).abs() < 1e-6 && r.overrun == OverrunPhase::None));
+        let calm = self.r.iter().all(|r| {
+            r.out || ((!self.caught() || r.catch_seen) && (r.scored
+                || ((r.s - r.goal as f64 * BASE_L).abs() < 1e-6
+                    && r.overrun == OverrunPhase::None && !r.tag_up && !r.reading_contact
+                    && r.hold_s.is_none())))
+        });
         let in_infield = m::hypot(fd.pos.x, fd.pos.y) < INFIELD_R;
         calm && in_infield && self.t >= fd.ready_at
     }
@@ -5480,6 +5524,7 @@ fn new_sim<'a>(inp: &'a LiveInput<'a>, st: &'a mut RulesState) -> Sim<'a> {
             hold_s: if x.base == 0 { None } else { Some(lead_s(x.base)) },
             last_timing_draw: 0.0,
             catch_seen: false,
+            off_base_at_catch: false,
             decisions: 0,
             looked: (0, 0),
             turns: 0,
@@ -5507,7 +5552,8 @@ fn new_sim<'a>(inp: &'a LiveInput<'a>, st: &'a mut RulesState) -> Sim<'a> {
         done: false,
         last_fact_t: t_c,
         secured_at: f64::INFINITY,
-        catch_made: false,
+        caught_at: None,
+        no_catch_at: None,
         low_catch: false,
     }
 }
@@ -5544,7 +5590,8 @@ impl<'a> Sim<'a> {
             inp: self.inp,
             last_fact_t: self.last_fact_t,
             secured_at: self.secured_at,
-            catch_made: self.catch_made,
+            caught_at: self.caught_at,
+            no_catch_at: self.no_catch_at,
             low_catch: self.low_catch,
             st,
             t: self.t,
@@ -5673,40 +5720,24 @@ fn simulate_live_inner(inp: &LiveInput, st: &mut RulesState) -> LiveOutput {
         if sim.done {
             break;
         }
-        // The runners are already moving. Two outs leaves only the cue to break into
-        // a full run. With fewer outs their first look sets the intended movement.
-        if !runners_started && !sim.caught() && sim.t - t_c >= read_s - 1e-9 {
+        // A runner on a grounder that came down near his first look still has
+        // to react to the public ruling. Two outs leaves only the contact clock.
+        if !runners_started && !sim.caught() && sim.t - t_c >= read_s - 1e-9
+            && (two_out || sim.no_catch_at.is_none() || sim.no_catch_read())
+        {
             runners_started = true;
-            // A ground touch is visible even when a high hop is still in the air.
-            // Before that cue, each runner judges the possible catch from his own read.
-            let check_catch = !two_out && matches!(sim.ball, Ball::Free { .. }) && !sim.ball_touched_ground();
+            let check_catch = !two_out && sim.no_catch_at.is_none() && matches!(sim.ball, Ball::Free { .. });
             for k in 0..sim.r.len() {
-                let base = sim.r[k].start;
                 sim.r[k].reading_contact = false;
-                if base == 0 || two_out {
+                if sim.r[k].start == 0 || two_out {
                     continue;
                 }
-                // A catch he expects sends him back. An uncertain outfield ball sends
-                // him partway until it falls. On other balls he weighs his next base.
-                let (likely_catch, deep_fly) = if check_catch {
-                    let pred = sim.runner_predict(k, 1);
-                    let first = pred.first_bounce();
-                    let land = first.map(|x| x.0).unwrap_or(pred.t_end());
-                    // A hard liner can cross a fielder's whole reach between 0.15 s
-                    // race samples. Use the live tick spacing for this catch check.
-                    let likely_catch = sim.believed_field_intercept(&pred, land + RUNNER_CATCH_SLACK_S, RunnerIntercept::Catch).is_some();
-                    let deep_fly = first.is_none_or(|(_, x, y)| m::hypot(x, y) > INFIELD_R);
-                    (likely_catch, deep_fly)
+                let p_catch = if check_catch {
+                    sim.runner_catch_probability(&sim.runner_predict(k, 1))
                 } else {
-                    (false, false)
+                    0.0
                 };
-                if likely_catch {
-                    sim.r[k].tag_up = true;
-                } else if deep_fly {
-                    sim.r[k].hold_s = Some((lead_s(base) + HALFWAY_M).min((base as f64 + 0.6) * BASE_L));
-                } else {
-                    sim.runner_decide(k, base);
-                }
+                sim.read_contact(k, p_catch);
             }
         }
         if assigned {
@@ -6403,7 +6434,7 @@ mod tests {
         sim.emit(Input::GloveSecured { t: 5.0, fielder: id, x: 0.0, y: 120.0 });
         sim.ball = Ball::Held { by: CF };
         sim.secured_at = 5.0;
-        assert!(sim.catch_made);
+        assert!(sim.caught());
         for _ in 0..720 {
             if sim.done {
                 break;
@@ -10000,8 +10031,69 @@ mod tests {
         // Heading toward the spot at 3 m/s, he covers 0.2 m in under 0.07 s.
         for (vx, expected) in [(-3.0, false), (0.0, false), (3.0, true)] {
             sim.f[2].vel = Vec3::new(vx, 0.0, 0.0);
-            assert_eq!(sim.believed_field_intercept(&prediction, end, RunnerIntercept::Catch).is_some(), expected, "visible velocity {vx}");
+            assert_eq!(sim.runner_catch_probability(&prediction) > 0.5, expected, "visible velocity {vx}");
         }
+    }
+
+    #[test]
+    fn a_close_trap_holds_the_runner_partway_until_he_can_react_to_the_call() {
+        const R: AgentId = 0x0007;
+        let fx = fixture(&[(R, 1)]);
+        let inp = input(&fx, vec![
+            RunnerIn { id: fx.st.batter, base: 0, speed: 8.2, tau_s: RUNNER_TAU },
+            RunnerIn { id: R, base: 1, speed: 8.2, tau_s: RUNNER_TAU },
+        ]);
+        let mut st = fx.st.clone();
+        let mut sim = new_sim(&inp, &mut st);
+        sim.start_runners();
+        let look = inp.t_contact + 0.5;
+        sim.t = look;
+        sim.r[1].reading_contact = false;
+        for fd in &mut sim.f {
+            fd.pos = Vec3::new(-20.0, 30.0, 0.0);
+        }
+        let ball = BallState {
+            r: Vec3::new(0.0, 30.0, 0.8),
+            v: Vec3::new(0.0, 24.0, -4.0),
+            w: Vec3::ZERO,
+        };
+        let seen = batted_path(&fx.env, &fx.field, ball, look, |_, _| (0.0, 0.0));
+        let (bounce, x, y) = seen.first_bounce().unwrap();
+        assert!(bounce < look + 0.2);
+
+        // Two metres past the landing is outside a standing fielder's reach
+        // throughout this short flight. A fielder under the ball has it now.
+        sim.f[2].pos = Vec3::new(x, y + 2.0, 0.0);
+        assert!(sim.runner_catch_probability(&seen) < 0.05);
+        sim.f[2].pos = Vec3::new(ball.r.x, ball.r.y, 0.0);
+        assert!(sim.runner_catch_probability(&seen) > 0.95);
+
+        // One metre beyond the landing leaves about one glove length at the
+        // end of the flight. The catch is close and the runner remains off first.
+        sim.f[2].pos = Vec3::new(x, y + 1.0, 0.0);
+        let p = sim.runner_catch_probability(&seen);
+        assert!((0.20..0.80).contains(&p), "close catch belief {p:.2}");
+        sim.read_contact(1, p);
+        let hold = sim.r[1].hold_s.expect("the close read keeps him partway");
+        assert!(hold < 1.5 * BASE_L && !sim.r[1].tag_up);
+        let start = sim.r[1].s;
+        for _ in 0..12 {
+            sim.move_runners();
+            sim.t += DT;
+        }
+        assert!(sim.r[1].s >= start && sim.r[1].hold_s.is_some());
+
+        let call = sim.t;
+        sim.emit(Input::BallTouched { t: call, what: Touch::Ground { x, y } });
+        for tick in 0..15 {
+            sim.t = call + f64::from(tick) / 60.0;
+            sim.move_runners();
+            assert!(sim.r[1].hold_s.is_some(), "reacted before 250 ms");
+        }
+        sim.t = call + 0.25;
+        sim.move_runners();
+        assert!(sim.r[1].hold_s.is_none());
+        assert_eq!(sim.r[1].goal, 2, "the forced runner goes on the no-catch call");
     }
 
     #[test]
@@ -10536,8 +10628,17 @@ mod tests {
         let mut st = fx.st.clone();
         let mut sim = new_sim(&inp, &mut st);
         sim.start_runners();
-        sim.catch_made = true;
+        sim.caught_at = Some(sim.t);
+        sim.r[1].off_base_at_catch = true;
         let start = sim.r[1].s;
+        for _ in 0..14 {
+            sim.t += DT;
+            sim.move_runners();
+            assert!(sim.r[1].reading_contact);
+        }
+        // Fourteen steps at 2 m/s precede the fifteenth tick, the signal reaction.
+        assert!((sim.r[1].s - start - 14.0 * 2.0 / 60.0).abs() < 1e-9);
+        let reaction_pos = sim.r[1].s;
         for _ in 0..30 {
             sim.t += DT;
             sim.move_runners();
@@ -10548,7 +10649,7 @@ mod tests {
         // 2 m/s brakes to zero in 0.421 s after 0.421 m, to within one tick's
         // integration error. At 0.5 s he has begun returning.
         assert!(runner.direction < 0.0);
-        assert!((0.33..0.44).contains(&(runner.s - start)));
+        assert!((0.33..0.44).contains(&(runner.s - reaction_pos)));
     }
 
     // With two out a catch ends the inning: the runner on second runs on contact on a high
@@ -10673,7 +10774,8 @@ mod tests {
         let mut sim = new_sim(&inp, &mut st);
         sim.t = 6.0;
         sim.r[0].out = true;
-        sim.catch_made = true;
+        sim.caught_at = Some(sim.t - 0.25);
+        sim.r[1].off_base_at_catch = true;
         sim.r[1].catch_seen = true;
         sim.r[1].retouch = true;
         (sim.r[1].s, sim.r[1].v, sim.r[1].direction, sim.r[1].goal, sim.r[1].hold_s) = (2.0 * BASE_L + 12.0, 7.0, -1.0, 2, None);

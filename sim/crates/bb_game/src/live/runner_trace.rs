@@ -20,6 +20,7 @@ pub struct Tick {
     pub signed_mps: f64,
     pub goal: u8,
     pub cause: Cause,
+    /// The batted ball has visibly touched the ground or a wall.
     pub ball_down: bool,
 }
 
