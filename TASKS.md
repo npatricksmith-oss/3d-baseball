@@ -1,6 +1,6 @@
 # Task List
 
-**Last updated:** 2026-11-17 (twenty-seventh lead session, Claude Fable 5.2: this file pruned and rebuilt; no game change).
+**Last updated:** 2026-11-17 evening (lead, Opus 5.5 high: saved play 65147/10 traced, worker on `work/of-mutual-defer`).
 
 What is next and what is open. Other files hold the rest:
 
@@ -15,15 +15,15 @@ Status: `[ ]` not started · `[~]` partly done · `[?]` needs an owner decision
 
 ---
 
-## Resume here (2026-11-17)
+## Resume here (2026-11-17, evening)
 
-**State.** Everything built is on main and pushed. No review is open and nothing is waiting on the owner. The next owner question is **Q27**. The physics and behaviour work is running again (owner's Q26) with Codex reviews on `gpt-6.2-sol`.
+**State.** Main is pushed except this handoff. Nothing is waiting on the owner; the next owner question is **Q27**. **Codex shows 10% of its weekly limit left:** run the next review on a non-author Claude model (memory: Codex limit fallback).
 
-**Numbers on main** (standard run, seeds 0–299 [1000–1299]; ledger §1): runs 4.14 [4.16] against a real 4.39; hits on GB/LD/FB/PU .308/.683/.109/.006 against about .245/.68/.13/.02; HR/PA 2.87% [2.77%] against 3.0%; routine flies caught .980 (grade 20/50/80: .934/.979/.986).
+**In flight: worker in the herdr "Workers" tab** (Codex Sol high, terminal `t1x`), worktree `../bb-wt-of-defer`, branch `work/of-mutual-defer`. It covers the owner's saved play seed 65147 play 10 (the right fielder lets a grounder through the hole roll to the wall). Cause: the centre and right fielders each left it to the other on poor snapshot reads of a bounced ball, and `Sim::hear` never re-decided them. The fix in `1186254` has outfielders decide again at each hearing. Two old protocol tests fail with it; the worker is resolving them, then writing the ledger row and the TASKS item for the bounced-ball read (its brief: `WORKER-PROMPT.md` in the worktree). **Next lead:** read the branch, get it reviewed (Claude, not the author model, since Codex is low), merge, tick observations.md, close the worker's pane.
 
-**Last merged:** the tracking read's persistent error (`work/track-bias`; agent-models §5.1; [note](docs/calibration/2026-11-17-track-bias.md); [review](docs/reviews/2026-11-17-codex-track-bias-review.md), resolved).
+**Numbers on main** (standard run, seeds 0–299 [1000–1299]; ledger §1): runs 4.14 [4.16] against a real 4.39; hits on GB/LD/FB/PU .308/.683/.109/.006 against about .245/.68/.13/.02; HR/PA 2.87% [2.77%] against 3.0%; routine flies caught .980.
 
-**Next:** item 1 of "Open sim work" below, the runner's start.
+**After that:** item 1 of "Open sim work" below, the runner's start.
 
 **Context pruning (this session; plan agreed with the owner).** Done: the memory folder, this file and CLAUDE.md's stale lines. Still to do, in order:
 1. PLAN.md §14, §18, §19 and each spec's open-items section checked against the code; a dead-link and dead-`§` check over CLAUDE.md, PLAN and this file.
