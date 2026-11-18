@@ -115,4 +115,37 @@ Not rerun: baseline `--seed 1000`, the 300-game `fly_misses` population, the div
 
 ## Resolution
 
-Open.
+Both findings are fixed on `work/track-bias`. The code is in `dead272`, and the documents and measurements are in the commit that adds this section.
+
+**P2-1: fixed.** A look's expected value is now one function of the ball's state and the persistent error, `Look::expect(r, v, b)`: the ball's position or velocity, moved by b at the σ and in the sight directions of a look from his eyes at r (with |v| for velocity), together with the fresh covariance there.
+
+- `Track::see` evaluates it at the estimate as it stands. A velocity look therefore uses the position the position look has just corrected, which makes the sequential linearisation consistent.
+- H is the full Jacobian in r, v and b, by central differences. It includes the velocity look's dependence on position through the line of sight, and on speed.
+- No covariance multiplier was added.
+
+**New independent test:** `a_look_with_a_learned_persistent_error_reports_a_covariance_that_covers_its_error`, built like the review's probe.
+- The ball's position is known to 0.5 m and its velocity to 1 m/s; b is known exactly and not zero.
+- A position look and then a velocity look are drawn as the world draws them, about the true ball.
+- It covers three geometries (near and low; far and high; a liner to his side) and three biases (b0 = −2; b1 = +2 with b3 = −2; all four at ±2).
+
+Over 2,000 draws each, the mean error²/variance along, across and up his line of sight, for position and velocity, is 0.92–1.11 in all 54 cells; the test requires 0.85–1.15. With the identity Jacobian put back temporarily, case 0 with b0 = −2 gives 1.39 / 2.36 / 2.38 and the test fails, which reproduces the review's 2.4.
+
+**In flight:** `the_tracking_read_reports_a_covariance_that_covers_its_error` gives 0.83 / 1.14 / 1.36 at 2 / 1 / 0.6 s. The real-spin doubt test has RMS doubt 1.05 / 0.41 m against an RMS miss of 0.77 / 0.32 m (75 balls).
+
+**The fit was rechecked, not refitted** (it stays inside the band). Grades 20 / 50 / 80 on seeds 0–99 are .934 / .979 / .986 (were .915 / .967 / .984). `fly_misses 0 300` gives .980 (was .976; main .967), with 34 misses (14 "dive range, no dive"). Play 15 is still caught.
+
+**Standard run on the final build**, `--seed 0` [`--seed 1000`]:
+- runs 4.14 [4.16] (reviewed build 4.06 [4.19]; main 4.13 [4.24]);
+- hit rates GB / LD / FB / PU .308 / .683 / .109 / .006 [.308 / .682 / .098 / .004];
+- dives 2.3 a game, 45% caught.
+
+The ledger row, the note (§2a, §3–§6) and agent-models §5.1 and §10 are updated.
+
+**Not addressed** (outside P2-1, recorded in the note §2a and §6): the review's geometry probe found the shortstop's liner velocity component at 3.87, the same at bias 0.2, and very short grounders conservative. Coverage is shown for routine flies and for one look in isolation, not for every trajectory or moving observer.
+
+**P3-1: fixed.**
+- The ledger heading and row, and the note's §5, now say that `--seed 1000` runs game seeds 1,000,003,000–1,000,003,299, and that `dive_probe 150 1000` takes game seeds 1000–1149 directly. The older ledger rows keep the file's stated label convention, which its "Standard run" paragraph explains.
+- The saved play's landing point is now (−13.2, 105.0) m at 6.31 s, from `read_track 40580 15 8`. The (−12, 119) was the call's spot from the communication log.
+- The liner attribution is qualified with the review's matched-probe table (1–2 s 61 = 61, 2–3 s 134 → 123, ≥ 3 s 327 → 304). The loss is mostly on liners up 3 s or longer, where the now-worse early read sets a long route. The first version's "too short to correct" is withdrawn as the explanation, and the aggregate is not assigned to one mechanism.
+
+**Full workspace tests** (`cargo test --workspace --release --no-fail-fast`): 436 passed, 0 failed, 4 ignored. The ReadSkill direction test has grade 20 catching 279 of 308 and grade 80 292.

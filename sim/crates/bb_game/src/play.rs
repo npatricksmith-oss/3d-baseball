@@ -162,7 +162,8 @@ impl FielderAttrs {
 /// 1.06 was fitted on reads that could not correct a persistent error (the snapshot read,
 /// then the tracking read that took it as fresh), whose catch rate was steep in the read's
 /// error (ρ 1.4 put grade 20 at 54%); on the honest read 1.06 left grade 20 at .971, no worse
-/// than grade 50. With 1.15: grade 20 .915, 50 .967, 80 .984 (seeds 0–99).
+/// than grade 50. With 1.15: grade 20 .915, 50 .967, 80 .984 (seeds 0–99), and .934 / .979 /
+/// .986 once the tracking read's looks took their full Jacobian.
 pub const READ_RHO: f64 = 1.15;
 /// `ReadSkill`: ratio per 10 grades of τ_read, the viewing time over which the read sharpens
 /// (agent-models §10; was 1.2 in the table, never used, lowered with [`READ_RHO`]) [E].

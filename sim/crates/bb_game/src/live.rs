@@ -324,8 +324,9 @@ const TRACK_CONTACT_M: f64 = 0.3;
 /// The persistent part of a look's error (agent-models §5.1): this fraction of the play's
 /// fixed draws at the snapshot read's σ, on every look (a misjudged angle and fraction of the
 /// range); the rest is fresh each look. The filter carries it as a state. Refitted with that
-/// to the owner's band for a routine fly (90–99% by ability; grade 50 .964 on seeds 0–99;
-/// docs/calibration/2026-11-17-track-bias.md; was 0.2 when the filter took it as fresh) [E].
+/// to the owner's band for a routine fly (90–99% by ability; grade 50 .967 on seeds 0–99 when
+/// fitted, .979 with the look's full Jacobian; docs/calibration/2026-11-17-track-bias.md; was
+/// 0.2 when the filter took it as fresh) [E].
 pub(crate) const TRACK_BIAS_FRAC: f64 = 0.6;
 /// Arriving under control (agent-models §5.2): a chaser with time in hand keeps this many of
 /// his doubts (the σ of where he believes it comes down) between where he can stop and his
@@ -8321,7 +8322,7 @@ mod tests {
     // 2026-11-17-track-bias.md): the set was constructed balls with exactly the spin the
     // fielder believes, at least 4 s up and 12–20 m away; once the tracking read was honest
     // about its persistent error, both grades caught every one of those (and of the same
-    // geometry from games), as an outfielder should on an easy fly; 266 against 280 of 296 here.
+    // geometry from games), as an outfielder should on an easy fly; 279 against 292 of 308 here.
     #[test]
     fn a_poor_reader_misses_more_flies_than_a_good_one() {
         let fx = fixture(&[]);
