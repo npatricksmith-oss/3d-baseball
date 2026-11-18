@@ -211,3 +211,28 @@ For seed 5, play 183, I replayed the original contact and base state in isolatio
 The appeal rate rose despite slightly fewer low-catch chances. Most of the added double-offs below 25° came from the 10–25° band. The original liner replay shows one way a close hold and a reaction delay can change the return. The aggregate does not isolate the contribution of that timing from changed beliefs, throws or game progression. The sim's 120.5 below 25° remains high against 25.7 per 300 games for Retrosheet's play-by-play line-drive label. [Retrosheet sample and definitions](#mlb-check-for-runners-doubled-off).
 
 On two-out singles to center, the median split to third stayed at 2.75 s and the benchmark arrival home moved from 7.23 to 7.15 s. The two corner benchmarks were 6.56 s in left and 6.45 s in right after the change. The 62 opportunities shared by seed, play and runner had identical split, pickup and benchmark times. The runner was sent in both builds on all 62, with three of those runners now put out. The one hold in the before sample was on a play absent from the after sample. The center send rate remains above the 75–91% band. On all singles, second to home was 528/959 (55.1%) and first to third was 590/1,838 (32.1%). [Published extra-base targets](2026-11-15-runner-decision-model.md#part-1-sources), [before-and-after standard runs](../metrics-ledger.md#2026-11-18-300-games-each-at---seed-0-and---seed-1000).
+
+## Read error and return distance
+
+The catch belief above sent runners on balls the outfielders caught. On both standard sets, runners doubled off on 10–25° catches rose from 13.5 to 59.0 per 300 games. A probe over direct seeds 0–59 logged each runner's catch belief at his first look. Every runner doubled off at 10–25° had read a catch chance of 0.00, with a best margin of 1.4 to 12 m short of glove reach. The 0.30 m spread treated the look as exact. For seed 11, play 97, the runner's projection landed 13 m from the truth while his read errors at 2 σ moved it about 10 m along the velocity in depth and under 2 m along the other three axes. The rest of the miss was spin he cannot see: he flies the ball with typical spin. The left fielder caught it after a run his typical-speed model allows on the true path.
+
+Three changes on `work/runner-catch-read` follow the owner's rule that a close or uncertain catch keeps the runner near enough to get back. The catch belief averages over the runner's read error at the unscented transform's eight points. It allows the fielders' unseen-spin prior and the spread of fielder speed, including spin that may bring a ball he sees above catching height down to it (`fd5fb80`, `c90cc19`). The partway hold is now only as far off as he can get back from before a typical transfer and throw from his read's catch point (`fd5fb80`). A runner on second had held 11.5 m off the bag on catches in shallow left and lost the race back. [Agent models §6.3](../agent-models.md#63-advance-decisions).
+
+Two regressions found on the way stay as tests. The new test hits two liners at the left fielder over 24 perception keys. On the first, the previous code doubled the runner off on 19 of 23 catches. Neither liner doubles him off now. Letting the height doubt multiply low points as well as high ones also cost two double-offs. Near the end of a long flight, that doubt is about where the ball comes down, which the margin already carries.
+
+The standard sets ran on `c90cc19` with direct seeds 0–299 and 1,000,003,000 onward, against the recorded `258edae` cohorts (sim sources identical to `bc69e96`) and the `4422fde` tip.
+
+| Measure across both seed sets | `bc69e96` | `4422fde` | `c90cc19` |
+|---|---:|---:|---:|
+| Eligible catches below 10°, 0–1 out | 184 | 179 | 187 |
+| Runners doubled off below 10°, per 300 games | 59.5 | 61.5 | 59.5 (67 and 52) |
+| Eligible catches at 10–25°, 0–1 out | 413 | 411 | 441 |
+| Plays with an appeal out at 10–25° | 27 (6.5%) | 113 (27.5%) | 37 (8.4%) |
+| Runners doubled off at 10–25°, per 300 games | 13.5 | 59.0 | 19.0 (16 and 22) |
+| Runners doubled off below 25°, per 300 games | 73.0 | 120.5 | 78.5 |
+| Two-out sends from second on singles to center | 106/107 | 109/109 | 117/118 (99.2%) |
+| Scored on those sends | 106 | 104 | 112 |
+| Second to home on all singles | 527/1,005 (52.4%) | 528/959 (55.1%) | 558/984 (56.7%) |
+| First to third on all singles | 818/2,283 (35.8%) | 590/1,838 (32.1%) | 709/2,127 (33.3%) |
+
+Double-offs at 10–25° are back near the base and below Retrosheet's 25.7 for its line-drive label. Below 10°, most come on catches before the 0.5 s look, which the read cannot affect (Codex review, residual double-offs). On singles with 0–1 out, first to third went from 30.5% to 26.0%, because more runners now hold partway on outfield liners that fall. Second to home went from 38.7% to 44.0% with 0–1 out. The two-out rates hardly moved: 47.1% to 46.9% first to third, 75.3% to 74.7% second to home. The two-out send to center is the contact clock's decision, which these changes do not touch. It stays above the 75–91% band with a median benchmark of 7.26 s, against 6.57 s in left and 6.44 s in right. [Before-and-after standard runs](../metrics-ledger.md#2026-11-18-300-games-each-at---seed-0-and---seed-1000).

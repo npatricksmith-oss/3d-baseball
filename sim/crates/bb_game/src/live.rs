@@ -110,9 +110,12 @@ const FOLLOW_GAP_S: f64 = 0.3;
 /// From contact to a runner's first look at the ball, s [E]: his read of where it is going
 /// (no published value; Statcast's "first step" is not released as a league figure).
 const RUNNER_READ_DELAY_S: f64 = 0.5;
-/// Reaction to a public catch or no-catch ruling, s [E].
+/// Reaction to a public catch or no-catch ruling, s [E]: the same quarter second as the
+/// two-out contact cue (`RUNNER_CONTACT_REACT_S`).
 const RUNNER_CATCH_CALL_REACT_S: f64 = 0.25;
-/// Uncertainty in a runner's estimate of the margin to glove reach, m [E].
+/// Uncertainty in a runner's estimate of where a fielder's glove can get to, m [E, unsourced:
+/// about a glove's width]. His doubts about the fielder's speed, the ball's curve and his
+/// own look come on top (agent-models §6.3).
 const RUNNER_CATCH_SIGMA_M: f64 = 0.30;
 /// Where a runner weighs the reads his own error could have given him, in σ of each error
 /// axis: √n for the unscented transform with n = 4 axes and κ = 0 [E].
@@ -120,7 +123,10 @@ const RUNNER_CATCH_READ_POINT: f64 = 2.0;
 /// The spread of fielders' top speed about the typical speed a runner assumes, m/s [E]:
 /// Statcast sprint speeds spread about 1.5 ft/s about the league's 27 ft/s.
 const FIELDER_SPEED_SPREAD_MPS: f64 = 0.45;
-/// Confidence needed to commit to either outcome on the initial catch read [E].
+/// Confidence needed to commit to either outcome on the initial catch read [E]. Below
+/// 1 − this he goes: roughly the run-value break-even of a full start against a double-off
+/// from first (12% with none out, 18% with one; agent-models §6.3). The return side mirrors
+/// it, provisionally.
 const RUNNER_CATCH_CONFIDENCE: f64 = 0.80;
 /// From contact to a two-out runner's break from shuffle speed into a full run, s [E].
 const RUNNER_CONTACT_REACT_S: f64 = 0.25;
