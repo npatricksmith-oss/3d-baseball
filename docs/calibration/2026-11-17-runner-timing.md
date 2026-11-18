@@ -186,3 +186,28 @@ The recheck uses both standard 300-game seed sets, with direct seeds 0–299 and
 The low-catch sample shows fewer double-offs in both sets and a lower share of catches with an appeal. The regression shows how an earlier check can reduce a runner's momentum before the catch. The aggregate combines that mechanism with changes in which catches occurred. The broader count of 73.0 per 300 games remains high against the 25.7 Retrosheet line-drive count, which uses a play-by-play label.
 
 All 106 center-field sends scored. The median split to third stayed at 2.75 s and the benchmark arrival home stayed at 7.23 s. The contact check applies with 0–1 out, so the center-field remeasurement captures a new set of opportunities with the same two-out decision. On all singles, second to home was 527/1,005 (52.4%) and first to third was 818/2,283 (35.8%). [Before-and-after standard runs](../metrics-ledger.md#2026-11-18-300-games-each-at---seed-0-and---seed-1000).
+
+## Catch belief and throw reads
+
+The recheck uses `bc69e96` and `4422fde` on the standard 300-game sets, starting at direct game seeds 0 and 1,000,003,000. Both CLI sets ran fresh on both commits. The before timing sample uses the recorded `258edae` cohorts, which have identical sim sources to `bc69e96`.
+
+The catch scan starts at the current tick and uses the fielder's visible velocity within five metres. It ends before the runner's projected bounce or wall touch. The owner's 2026-11-18 rule turns the best apparent glove margin into a belief. A likely catch sends the runner back, a close catch holds him partway, and an unlikely catch lets him judge the advance. The catch event or public ground or wall touch resolves the decision. The reaction allowance is 0.25 s [E], with the existing set-start clock for a runner already planted and anticipating a tag-up. The trap test holds the runner past the projected landing and releases him only after the public no-catch fact and reaction. The forced runner in the low-liner fixture leaves the read and brakes before the first baseman takes the ball. [Agent models §6.3](../agent-models.md#63-advance-decisions).
+
+Runners also project throws from their own keyed noisy position and velocity samples, and estimate a holder's recovery from his visible stance. The two-out moving start is the same. Two-out races can change after the start when the runner sees a pickup or throw. [Contact read review and resolution](../reviews/2026-11-18-codex-contact-read-review.md#resolution).
+
+For seed 5, play 183, I replayed the original contact and base state in isolation because the new game had already diverged by that pitch. At 0.500 s, runner 259 now chooses the partway hold (`Air` in the trace). He is still approaching his hold point at 3.85 m/s when the first baseman catches the ball at 0.633 s. He starts braking into the hold by 0.717 s, then commits to return at 0.883 s, a quarter-second after the catch. The appeal still retires him at 2.850 s, compared with 2.700 s before. This was a close read. The separate low-liner fixture checks a likely catch and requires braking before it.
+
+| Measure across both seed sets | Before | After |
+|---|---:|---:|
+| Eligible catches below 10°, 0–1 out | 184 (101 and 83) | 179 (93 and 86) |
+| Plays with an appeal out below 10° | 119/184 (64.7%) | 122/179 (68.2%) |
+| Runners doubled off below 10°, per 300 games | 59.5 (69 and 50) | 61.5 (60 and 63) |
+| Plays with an appeal out at 10–25° | 27/413 (6.5%) | 113/411 (27.5%) |
+| Runners doubled off at 10–25°, per 300 games | 13.5 (13 and 14) | 59.0 (60 and 58) |
+| Runners doubled off below 25°, per 300 games | 73.0 | 120.5 |
+| Two-out sends from second to home on singles to center | 106/107 (99.1%) | 109/109 (100%) |
+| Scored on those sends | 106/106 | 104/109 (95.4%) |
+
+The appeal rate rose despite slightly fewer low-catch chances. Most of the added double-offs below 25° came from the 10–25° band. The original liner replay shows one way a close hold and a reaction delay can change the return. The aggregate does not isolate the contribution of that timing from changed beliefs, throws or game progression. The sim's 120.5 below 25° remains high against 25.7 per 300 games for Retrosheet's play-by-play line-drive label. [Retrosheet sample and definitions](#mlb-check-for-runners-doubled-off).
+
+On two-out singles to center, the median split to third stayed at 2.75 s and the benchmark arrival home moved from 7.23 to 7.15 s. The two corner benchmarks were 6.56 s in left and 6.45 s in right after the change. The center send rate remains above the 75–91% band. On all singles, second to home was 528/959 (55.1%) and first to third was 590/1,838 (32.1%). [Published extra-base targets](2026-11-15-runner-decision-model.md#part-1-sources), [before-and-after standard runs](../metrics-ledger.md#2026-11-18-300-games-each-at---seed-0-and---seed-1000).

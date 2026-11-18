@@ -45,3 +45,12 @@ Lead, 2026-11-18. No P1. My fresh `cargo test --workspace --release` passed 444,
 - **P2-2: open, next job.** `RUNNER_CATCH_SLACK_S` credits a pickup after the bounce as a catch. Remove it or limit it to flight time, and start the scan at the current tick.
 - **P2-3: open, next job.** `thrown_read` gives the runner the thrown ball's exact position and velocity, and the held-ball race uses the fielder's exact `up_at`. Both break the observation rule (pre-existing). Give the runner a noisy look and a visible readiness cue.
 - **P3-1: open, next job.** The low-liner test should also assert that the runner left `Read` and started braking before the catch.
+
+Worker follow-up on `work/runner-catch-read`, 2026-11-18.
+
+- **P2-1 fixed in `902cd73`.** At short range the runner credits the fielder's visible speed toward the catch point, including motion away. The test gives a fielder 150 ms to move 20 cm beyond glove reach. Running toward the ball makes the catch feasible, while standing still or moving away makes it unlikely.
+- **P2-2 fixed in `1f2dea0`.** The owner chose a graded belief and a public ruling. The scan starts at the current tick and ends before the projected first bounce or wall touch. The close-trap test holds the runner partway past the predicted landing. The forced runner goes on the public no-catch ruling after his reaction time. [Agent models §6.3](../agent-models.md#63-advance-decisions).
+- **P2-3 fixed in `88777c9`.** Each race uses a keyed noisy look at a throw. The holder estimate uses the visible secure and recovery posture. The tests vary the observation key, the holder's pose and the private recovery timer independently.
+- **P3-1 fixed in `4422fde`.** The test now requires the runner to exit `Read` and slow below his incoming 3 m/s before the first baseman catches the liner. Delaying the initial read to 1 s fails the new assertion.
+
+The isolated replay of seed 5, play 183 now shows a partway hold at the first look. The runner still loses the appeal. Across both standard seed sets, double-offs below 10° moved from 59.5 to 61.5 per 300 games. At 10–25° they rose from 13.5 to 59.0, and two-out sends to center rose from 106/107 to 109/109. The timing note records these open calibration issues. [Before and after](../calibration/2026-11-17-runner-timing.md#catch-belief-and-throw-reads).

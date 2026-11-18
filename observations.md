@@ -88,7 +88,7 @@ Umpire and camera:
 
 Runners:
 - [ ] 65. Runner should be in an athletic stance when waiting for the pitch to be thrown.
-- [~] 65, 67, 68. On a fly that might be caught, the runner goes part way (halfway), stops in an athletic stance and watches the ball and outfielder; if he judges it caught he goes back to tag up; even on a likely catch he comes off the base a little in case it is misplayed. *The runner starts with a moving lead and brakes into the halfway hold or the return. The waiting pose and saved-play checks are open.*
+- [~] 65, 67, 68. On a fly that might be caught, the runner goes part way (halfway), stops in an athletic stance and watches the ball and outfielder; if he judges it caught he goes back to tag up; even on a likely catch he comes off the base a little in case it is misplayed. *The runner starts with a moving lead. He brakes into a partway hold when the catch is close and reacts to the public ruling. The waiting pose and saved-play checks are open.*
 - [ ] 156. Runner should run through first base as if he were safe, since he can't stop that quickly.
 
 Throws:
