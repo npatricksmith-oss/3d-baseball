@@ -4738,9 +4738,9 @@ impl<'a> Sim<'a> {
             let tau = if r.set_start.is_some() { r.tau * tag.tau_gain } else { r.tau };
             if against {
                 r.v = (r.v - BRAKE * DT).max(0.0);
-            } else if dir < 0.0 {
-                // Going back to a base he will stop on: he comes in under his own braking.
-                r.v = approach_speed(r.v, r.vmax, tau, r.s - goal_s);
+            } else if dir < 0.0 || r.hold_s.is_some() {
+                // Brake into a return or a partway hold, both known stopping points.
+                r.v = approach_speed(r.v, r.vmax, tau, (goal_s - r.s).abs());
             } else {
                 r.v += (r.vmax - r.v) * (DT / tau);
             }
@@ -9816,6 +9816,37 @@ mod tests {
         let reading: Vec<_> = ticks.iter().filter(|t| t.runner == R && t.t < inp.t_contact + 0.49).collect();
         assert!(reading.len() >= 25 && reading.iter().any(|t| t.ball_down));
         assert!(reading.iter().all(|t| t.cause == runner_trace::Cause::Read));
+    }
+
+    #[test]
+    fn a_runner_brakes_into_a_partway_hold() {
+        const R: AgentId = 0x0007;
+        let fx = fixture(&[(R, 2)]);
+        let inp = input(&fx, vec![
+            RunnerIn { id: fx.st.batter, base: 0, speed: 8.2, tau_s: RUNNER_TAU },
+            RunnerIn { id: R, base: 2, speed: 8.2, tau_s: RUNNER_TAU },
+        ]);
+        let mut st = fx.st.clone();
+        let mut sim = new_sim(&inp, &mut st);
+        let stop_s = sim.r[1].s + 5.0;
+        sim.r[1].hold_s = Some(stop_s);
+        let mut prior = 0.0;
+        for _ in 0..180 {
+            sim.move_runners();
+            let runner = &sim.r[1];
+            assert!(runner.s <= stop_s);
+            if runner.s == stop_s {
+                // The established slow final step is 1 m/s, so the approach should
+                // be down to walking speed when he plants.
+                assert!(prior < 1.2, "planted from {prior:.2} m/s");
+                assert_eq!(runner.v, 0.0);
+                return;
+            }
+            assert!(prior - runner.v <= 4.75 / 60.0 + 1e-9);
+            prior = runner.v;
+            sim.t += DT;
+        }
+        panic!("runner never reached the hold point");
     }
 
     // Runners take leads, and on a fly that might drop with fewer than two out they go

@@ -660,7 +660,7 @@ advance if  P̂(safe) · ΔRE_safe + (1 − P̂(safe)) · ΔRE_out  >  ΔRE_hold
 - `t̂_self` uses the runner's own speed (known accurately). `t̂_ball` comes from observing the fielder and the ball, with noise from `BaserunningIQ`.
 - `θ_aggr` comes from the team's running-aggressiveness setting.
 - **Base coaches** make the send-or-hold call at third (and at second when the runner cannot see the ball), with a team coach perception σ [E, average] and the same rule. The runner follows the coach.
-- **Fly balls:** the runner estimates P(catch) from the fielder's position and the ball (own estimate). High P(catch) → return and tag up; uncertain → go halfway; a likely hit → run.
+- **Fly balls:** the runner estimates P(catch) from the fielder's position and the ball (own estimate). High P(catch) → return and tag up; uncertain → go partway and brake into the hold using the return approach law (§6.4); a likely hit → run.
 - **Batter-runner** always runs; rounding first depends on the same rule.
 
 **Built 2026-11-15 (`bb_agents::running`, `bb_game::live`; owner's Q2, Q8 (c), Q9 (a); sources and arithmetic in [the runner decision model note](calibration/2026-11-15-runner-decision-model.md)).** The rule above is built in this form, which differs from the formula in two named ways:
