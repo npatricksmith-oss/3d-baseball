@@ -4,7 +4,7 @@ Guidance for AI agents working in this repository. Load this every session. [PLA
 
 ## What this is
 
-A 3D baseball management game where **every outcome comes from players' physical and mental attributes, never from dice rolls** (PLAN §0). A headless, deterministic Rust sim core resolves each pitch and play; an Unreal Engine 5 client (later) plays back the resulting timelines.
+A 3D baseball management game where **every outcome comes from players' physical and mental attributes, never from dice rolls** (PLAN §0). A headless, deterministic Rust sim core resolves each pitch and play; an Unreal Engine 5 client plays back the resulting timelines.
 
 ## Invariants (never break these)
 
@@ -32,8 +32,8 @@ A 3D baseball management game where **every outcome comes from players' physical
 ## Repository layout
 
 ```text
-PLAN.md, TASKS.md, CLAUDE.md
-docs/                  specs (physics, agents, data formats, calibration, rules) and reviews/; metrics-ledger.md (what each task did to the game's numbers)
+PLAN.md, TASKS.md, CLAUDE.md, observations.md (the owner's checklist)
+docs/                  specs (physics, agents, data formats, calibration, rules), client docs (unreal-spike, park-visuals, player-visuals, hud), reviews/, calibration/ (dated notes: the ledger has the current figures), metrics-ledger.md (what each task did to the game's numbers), archive/ (history only: nothing there is a task or a current figure)
 analysis/oracle/       independent Python physics oracle (stdlib only) + golden JSON fixtures
 analysis/plots/        uv-run plotting scripts (PEP 723 headers)
 sim/                   Cargo workspace
@@ -46,12 +46,19 @@ sim/                   Cargo workspace
     bb_schema          generated FlatBuffers code + event-log container and BLAKE3 digest chain
     bb_world           true world: pitch resolution against the swing
     bb_rules           rules engine: pure step function over facts; scenarios/**/*.toml corpus
-    bb_game            orchestrator: cage, plate appearances (pa.rs), causal live-ball plays (live.rs; play.rs is the older skeleton kept for diagnostics), games (game.rs), rosters (roster.rs: who the players are and their hands; no abilities yet), event log, timelines
+    bb_game            orchestrator: cage, plate appearances (pa.rs), causal live-ball plays (live.rs; play.rs is the first play simulator, still the home of shared types such as `FielderAttrs`, `RunnerIn`, `base_pos`, `home_positions`), games (game.rs), rosters (roster.rs: who the players are and their hands; no abilities yet), event log, timelines
     bb_stats           statistics as pure functions of the event log (box score, accounting identities)
     bb_ffi             C ABI for engine clients (include/bb_ffi.h; c/run_smoke.sh links a C client)
     bb_league          (later milestones)
     bb_cli             `sim-cli` lab binary (Rerun output behind the default `rerun` feature)
-client/                Unreal Engine 5.8 project, C++ only, no binary assets (docs/unreal-spike.md); `client/run.sh`; `BbPark` builds everything that stands still from the sim's park (`bb_game_park`, docs/park-visuals.md) with every colour and light setting in `BbLook.h` and its lettering painted in code by `BbText.h`, `BbFigure` builds a player out of shaped pieces on the mannequin's bones, dresses him and gives him his kit (docs/player-visuals.md), `BbPose` holds the baseball motions written as poses in code (the solver, the delivery, the catcher's crouch, the batter's stance and swing, the fielder's ready position, catch and throw, the dive, the runner's slide), `BbCrew` is the people who are not playing (four umpires who signal the sim's calls, two base coaches, the benches), `BbHud` draws the game graphics (score bug, caption, cards, zone box, line score, box score; docs/hud.md) from structs the director fills, `BbDirector` plays the game
+client/                Unreal Engine 5.8 project, C++ only, no binary assets (docs/unreal-spike.md); `client/run.sh`
+  BbPark               everything that stands still, built from the sim's park (`bb_game_park`; docs/park-visuals.md)
+  BbLook.h, BbText.h   every colour and light setting; lettering painted in code
+  BbFigure             a player built of shaped pieces on the mannequin's bones, with uniform and kit (docs/player-visuals.md)
+  BbPose               the baseball motions written as poses in code (delivery, catcher, stance and swing, catch and throw, dive, slide)
+  BbCrew               umpires who signal the sim's calls, base coaches, the benches
+  BbHud                game graphics (score bug, caption, cards, zone box, line score, box score; docs/hud.md) from structs the director fills
+  BbDirector           plays the game
 bin/                   owner's desktop launcher: play.sh (Unreal client, or the Rerun viewer when the engine is absent), install_launcher.sh
 ```
 
@@ -62,7 +69,17 @@ bin/                   owner's desktop launcher: play.sh (Unreal client, or the 
 - Python: `uv` in `~/.local/bin`. The oracle uses only the stdlib (`python3 -m unittest analysis/oracle/test_oracle.py`). Plot scripts: `uv run analysis/plots/<script>.py`.
 - Rerun viewer 0.41.0: `uv tool install rerun-sdk==0.41.0`, then `rerun file.rrd`. The SDK crate is pinned to `=0.41.0` to match.
 - Codex CLI (`codex exec`) is available for independent validation/review passes.
-- Unreal Engine 5.8.4 (precompiled) belongs at `~/UnrealEngine/5.8.4`, outside the repository. (On 2026-11-12 it was found in the desktop Trash and restored; `bin/play.sh` says so and asks before falling back to Rerun.) Build the client with `Engine/Build/BatchFiles/Linux/Build.sh BaseballClientEditor Linux Development -project=<abs path>/client/BaseballClient.uproject` (6 s incremental). Check visual changes headlessly: `client/run.sh 7 -RenderOffscreen -BbShots=6`, then read the PNGs in `client/Saved/Shots`. For the park's looks, `-BbParkShots` instead: seven fixed spots, `park_<n>_<spot>.png` (park-visuals §4). For the figures and their kit, `-BbFigureShots`: nine pictures `figure_<n>_<what>.png`, no game played (player-visuals §6–§7). For the coded motions, `-BbMotionShots`: strips `motion_<strip>_<n>_<what>.png` of the delivery, the catcher's receive, a ball hit, a swing and a miss, a pitch taken, a ball fielded and thrown, and a throw taken; add `-BbStagingLog` for the hand's distance from the sim's release point, the batter's hands from the bat's handle at contact, the glove from the ball at each catch and the hand from the release point at each throw (player-visuals §8–§10). For the slide and the dive, `-BbSlideShots=<n>` and `-BbDiveShots=<n>` with `-BbSpeed=6`: five held moments of each as `slide_<k>_<m>.png` and `dive_<k>_<m>.png` (player-visuals §11). For the umpires, coaches and benches, `-BbCrewShots`: ten pictures `crew_<n>_<what>.png`, no game played; `-BbNoCrew` leaves them out (player-visuals §12).
+- Unreal Engine 5.8.4 (precompiled) belongs at `~/UnrealEngine/5.8.4`, outside the repository. `bin/play.sh` asks before falling back to Rerun when it is missing.
+- Build the client: `Engine/Build/BatchFiles/Linux/Build.sh BaseballClientEditor Linux Development -project=<abs path>/client/BaseballClient.uproject` (6 s incremental).
+- Check visual changes headlessly: `client/run.sh 7 -RenderOffscreen -BbShots=6`, then read the PNGs in `client/Saved/Shots`. Fixed sets of pictures, each described in the section named:
+
+  | Flag | What it shoots | Where it is described |
+  |---|---|---|
+  | `-BbParkShots` | the park from seven fixed spots | park-visuals §4 |
+  | `-BbFigureShots` | figures and kit, no game played | player-visuals §6–§7 |
+  | `-BbMotionShots` | strips of each coded motion; add `-BbStagingLog` for hand, glove and bat distances from the sim's points | player-visuals §8–§10 |
+  | `-BbSlideShots=<n>`, `-BbDiveShots=<n>` (with `-BbSpeed=6`) | held moments of a slide or a dive | player-visuals §11 |
+  | `-BbCrewShots` (`-BbNoCrew` leaves them out) | umpires, coaches and benches, no game played | player-visuals §12 |
 
 ## Commands
 
@@ -71,10 +88,10 @@ cd sim && cargo test --workspace          # all tests (unit, golden, oracle cros
 cargo run --release -p bb_cli -- arsenal  # pitch-type table for an average pitcher
 cargo run --release -p bb_cli -- pitch --type SL --n 20 --rrd out/sl.rrd
 cargo run --release -p bb_cli -- tunnel --with CU --json out/t.json
-cargo run --release -p bb_cli -- pa --n 3000 --k-perception 2.25 --k-command 0.8   # B1 rates (M3)
+cargo run --release -p bb_cli -- pa --n 3000 --k-perception 2.9 --k-command 0.8 --k-miss 1.4   # plate-appearance rates at the calibrated knobs
 cargo run --release -p bb_cli -- sensitivity          # one-attribute sweeps, direction checks
 cargo run --release -p bb_cli -- archetypes           # batter/pitcher archetype profiles
-cargo run --release -p bb_cli -- game --seed 7        # one full AI-vs-AI game (M4 skeleton)
+cargo run --release -p bb_cli -- game --seed 7        # one full AI-vs-AI game
 cargo run --release -p bb_cli -- games --n 200        # run environment over many games
 cargo test -p bb_rules --test scenarios -- --nocapture   # rules scenario corpus (TOML)
 ./schemas/gen.sh                          # after editing any .fbs
@@ -87,16 +104,17 @@ cargo test -p bb_rules --test scenarios -- --nocapture   # rules scenario corpus
 - **Tier B playability** (runs/game, K%, ...) is tuned only through ability distributions and noise scales, never through fudge factors (PLAN §13).
 - Parameters tagged [E] in the specs are named, configurable parameters, never literals buried in logic.
 - When you change physics, regenerate or extend the oracle fixtures from the spec, not from the Rust output.
-- Calibration changes go in a report under `docs/calibration/` naming the band and mechanism that justified each change (calibration-targets §2.3–§2.4). Interim global knobs live in `bb_game::pa::Knobs::calibrated_m3()`; `Knobs::default()` stays at 1.0.
+- Calibration changes go in a report under `docs/calibration/` naming the band and mechanism that justified each change (calibration-targets §2.3–§2.4). The calibrated global knobs live in `bb_game::pa::Knobs::calibrated_m3()` (the name is historical; games use it); `Knobs::default()` stays at 1.0.
 - Independent reviews by Codex go in `docs/reviews/`, each with a Resolution section saying what was fixed or deferred and why.
 
-## Unreal rules (from M0.8 on; PLAN §3.4)
+## Unreal rules (PLAN §3.4)
 
 Game logic in C++; Blueprints only for thin visual wiring. Script asset setup with the editor Python API. Automated screenshot capture for visual checks. The sim runs off the game thread; Unreal never steps gameplay physics. Low-RAM rules (14 GiB): precompiled engine only, capped build parallelism, no starter content.
 
 ## Workflow
 
-- Update [TASKS.md](TASKS.md) at the end of every work session.
+- Update [TASKS.md](TASKS.md) at the end of every work session. **A handoff replaces "Resume here"; never stack a new one above the old.** Finished work goes in the commit, the ledger and observations.md; a done item is deleted from TASKS.md, not kept ticked. Keep the file under about 30 KB.
+- **Stale text misleads the next agent.** When a change makes a comment, a doc line or a figure untrue, fix or delete it in the same commit. Notes under `docs/calibration/`, `docs/reviews/` and `docs/archive/` are dated records: read them for how something was found, and take current figures from the ledger and current tasks from TASKS.md.
 - **[observations.md](observations.md) is the owner's checklist (owner, 2026-11-16):** his own words, each with a box (`[x]` done, `[~]` partly, with a one-line plain note on what is left). When a session finishes or advances one of his items, tick it there in the same commit. New owner observations (including saved plays' comments) go there too, then into TASKS.md's backlog for the detail. He follows progress there instead of in TASKS.md.
 - **Metrics ledger (owner, 2026-11-14):** every task that changes sim code adds a row to [docs/metrics-ledger.md](docs/metrics-ledger.md): the standard run (`sim-cli games --n 300 --seed 0` and `--seed 1000`) on the commit before and the commit after, the cause of any movement, and what is unexplained. Identical digests get one line under "No effect on games". An unintended or unexplained shift also goes in its §4 or §5. Client-only, tooling and docs work gets no row.
 - Commit in small, described steps. The remote is `origin` on GitHub; the session's lead agent may merge tested work into `main` and push it on its own judgment (owner, 2026-11-14), and says what it pushed, **but only when that lead is a Claude Fable model (any effort; owner, 2026-11-15) or Claude Opus 5.5 at high effort**. Any other model, or Opus below high effort, asks the owner first. Worker agents do not merge into `main` or push. Never force-push without the owner's OK.
