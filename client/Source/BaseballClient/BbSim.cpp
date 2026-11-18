@@ -33,7 +33,8 @@ bool FBbSim::Start(const FString& LibraryPath, uint64 Seed)
 	FnRoster = reinterpret_cast<decltype(FnRoster)>(Sym(TEXT("bb_game_roster")));
 	// Optional: an older library without the box score still plays the game.
 	FnBoxScore = reinterpret_cast<decltype(FnBoxScore)>(Sym(TEXT("bb_game_box_score")));
-	if (!FnRoster || !FnCreate || !FnAdvance || !FnBlobFree || !FnGameFree || !FnInfo || !FnSample)
+	FnPark = reinterpret_cast<decltype(FnPark)>(Sym(TEXT("bb_game_park")));
+	if (!FnPark || !FnRoster || !FnCreate || !FnAdvance || !FnBlobFree || !FnGameFree || !FnInfo || !FnSample)
 	{
 		UE_LOG(LogBbSim, Error, TEXT("The sim library at %s is missing part of the C ABI"), *LibraryPath);
 		return false;
@@ -41,6 +42,11 @@ bool FBbSim::Start(const FString& LibraryPath, uint64 Seed)
 	Game = FnCreate(Seed);
 	if (!Game)
 	{
+		return false;
+	}
+	if (FnPark(Game, &ParkDesc) != 1 || ParkDesc.n_wall < 3)
+	{
+		UE_LOG(LogBbSim, Error, TEXT("The sim gave no park"));
 		return false;
 	}
 	// Who throws left: the rosters never change during a game, so read them once here.
@@ -61,6 +67,8 @@ bool FBbSim::Start(const FString& LibraryPath, uint64 Seed)
 			const FString Name = UTF8_TO_TCHAR(P.family);
 			Family.Add(P.bat_agent, Name);
 			Family.Add(P.field_agent, Name);
+			Players.Add(P.bat_agent, P);
+			Players.Add(P.field_agent, P);
 		}
 	}
 	return true;

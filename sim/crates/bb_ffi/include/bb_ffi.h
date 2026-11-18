@@ -51,16 +51,28 @@ typedef struct {
   uint16_t batter; uint16_t _pad; /* the batter the pitch was thrown to (his batting id) */
   /* The ball left the playing field (rules-spec 5.8): dead_s = play time it was dead, or -1
    * if it never left; dead_at = where it crossed the wall or fence (the ball's centre, sim frame); dead_reason
-   * 0 never left, 1 out of play (a foul ball or a throw), 2 home run, 3 ground-rule double.
+   * 0 never left, 1 a throw out of play, 2 home run, 3 ground-rule double, 4 a foul ball
+   * out of play (the event log records it as 1).
    * The two do not describe the same instant for a batted ball over a foul-territory wall or into a
    * dugout: it is dead only once it is down in the seats (a fielder at the rail may reach over for it
    * until then, rules-spec 5.3), so dead_s is that landing time (the clip's end), after the
    * ball passed dead_at. Sampling the ball at dead_s gives its place in the seats, not dead_at. For a
    * home run, a ground-rule double and a throw over a wall the two coincide. */
-  float dead_s; float dead_at[3]; uint8_t dead_reason; uint8_t _pad2[3];
+  float dead_s; float dead_at[3]; uint8_t dead_reason;
+  /* The pitch thrown (bb.PitchType): 1 four-seam, 2 sinker, 3 cutter, 4 slider, 5 sweeper,
+   * 6 slurve, 7 curveball, 8 knuckle curve, 9 changeup, 10 splitter; 0 unknown. */
+  uint8_t pitch_type; uint8_t _pad2[2];
   /* On contact, the projected distance (physics-spec 12): from home to where the batted ball
    * would have come down to field level unobstructed, m; 0 without contact. */
   float projected_distance_m;
+  /* Where the pitch crossed the judgment plane (the middle of the plate): plate_x_m across
+   * (sim x, + toward first base), plate_z_m up from the ground; valid when plate_crossed is 1.
+   * The batter's strike zone it was judged against: bottom and top above the ground and
+   * half-width across the plate, m (a strike when the ball touches it). pitch_call: 1 ball,
+   * 2 called strike, 3 swinging strike, 4 foul, 5 foul tip, 6 in play, 7 hit by pitch; 0 unknown. */
+  float plate_x_m, plate_z_m;
+  float zone_bottom_m, zone_top_m, zone_half_width_m;
+  uint8_t plate_crossed, pitch_call, _pad3[2];
 } BbPlayInfo;
 /* Agent ids: high byte = team (0 away, 1 home); bit 0x80 = fielder, low 7 bits = position 1-9;
  * without bit 0x80, a batter or runner, low 7 bits = place in the batting order 1-9. A player
@@ -107,14 +119,48 @@ typedef struct {
   BbBatLine lines[BB_BOX_MAX_BATTERS];
   uint8_t runs[BB_BOX_MAX_INNINGS], hits[BB_BOX_MAX_INNINGS];
 } BbBoxTeam;
+/* A pitcher's line: pitches thrown, counted from the log. agent = the id he fields under. */
+#define BB_BOX_MAX_PITCHERS 8
+typedef struct {
+  uint16_t agent; uint8_t number, _pad; uint16_t pitches, _pad2;
+  char given[BB_NAME_LEN], family[BB_NAME_LEN];
+} BbPitchLine;
 typedef struct {
   uint8_t is_final;     /* 1 once the log holds the end of the game */
   uint8_t innings;      /* innings played or begun */
   uint8_t first_inning; /* inning number of runs[0]: 1 unless the game ran past BB_BOX_MAX_INNINGS */
   uint8_t _pad;
   BbBoxTeam teams[2];
+  uint8_t n_pitchers[2]; /* pitchers[side][0..n_pitchers[side]), in the order they first pitched */
+  uint8_t _pad2[2];
+  BbPitchLine pitchers[2][BB_BOX_MAX_PITCHERS];
 } BbBoxScore;
 int32_t bb_game_box_score(const BbGame *g, uint32_t through_plays, BbBoxScore *out);
+/* The park as the physics has it (bb_physics::ground::Field), for a client to draw. Read-only.
+ * The boundary of the playing field is a closed loop of n_wall straight pieces, clockwise seen
+ * from above (the field is on the right of each piece): from the left-field pole along the
+ * fence to the right-field pole, down the first-base side, across the backstop and up the
+ * third-base side. Piece i runs from wall[i].from to wall[(i + 1) % n_wall].from. The fence's
+ * curve is cut into chords whose ends are on it. Sim frame, metres. */
+typedef struct {
+  float from[2];
+  float top_m;  /* height of the piece's top above the field; 0 at a dugout's opening */
+  uint8_t kind; /* 0 outfield fence, 1 backstop, 2 side wall, 3 stands closing in to a pole, 4 dugout opening */
+  uint8_t _pad[3];
+} BbWallPiece;
+#define BB_PARK_MAX_WALL 96
+typedef struct {
+  uint32_t n_wall; BbWallPiece wall[BB_PARK_MAX_WALL];
+  float poles[2][2];   /* the foot of each foul pole: left field, right field */
+  float bases[3][2];   /* first, second, third: the corner of the infield square each marks */
+  float rubber_m;      /* front edge of the pitcher's rubber, from the rear point of home along +Y */
+  float dirt_radius_m; /* infield dirt within this distance of the rear point of home, grass beyond */
+  /* Heights: the outfield fence, the stands' wall in foul ground, the screen over the walls
+   * behind home, a dugout's roof (a ball under it goes into the dugout). */
+  float fence_height_m, foul_wall_height_m, backstop_height_m, dugout_roof_m;
+} BbPark;
+/* 1 = *out filled, -1 = bad args. */
+int32_t bb_game_park(const BbGame *g, BbPark *out);
 /* blob/len must be a readable allocation of that length (normally one from bb_game_advance).
  * Summary of a timeline blob: 1 = ok, -1 = bad args or not a timeline. */
 int32_t bb_timeline_info(const uint8_t *blob, size_t len, BbPlayInfo *out);

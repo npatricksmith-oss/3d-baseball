@@ -31,10 +31,15 @@ pub const AWARD_REACTION_S: f64 = 0.4;
 pub const LOAD_S: f64 = 0.05;
 
 /// The bat in the stance, for a batter standing at `at`: knob and axis (knob → tip), the bat
-/// upright at the back shoulder and tipped a little back toward the catcher.
+/// upright and tipped a little back toward the catcher, the hands just in front of the back
+/// shoulder: 0.40 m toward the catcher from where he stands and 0.10 m toward the plate, where
+/// a figure standing on that spot can hold it with both hands (player-visuals §9; until
+/// 2026-11-16 the knob was 0.15 m back and over the spot itself, inside his chest). The
+/// swing's own first pose is about 0.57 m back, so the load has less far to go too.
+/// Presentation only.
 pub fn stance_pose(at: Vec3) -> (Vec3, Vec3) {
     let back = if at.x < 0.0 { -1.0 } else { 1.0 };
-    (at + Vec3::new(0.0, -0.15, 1.25), Vec3::new(0.15 * back, -0.25, 1.0).normalized())
+    (at + Vec3::new(-0.10 * back, -0.40, 1.30), Vec3::new(0.15 * back, -0.25, 1.0).normalized())
 }
 
 /// Encode one pitch's timeline as a finished `BBTL` FlatBuffer.
@@ -323,9 +328,15 @@ pub fn encode(step: &PitchStep, st: &RulesState, rosters: &crate::roster::Roster
     }
     // The ball left the playing field (rules-spec §5.8): when it was dead, the point where it
     // crossed the boundary, and why in `base` (the event log's `DeadBallReason`: 1 out of play, a
-    // foul or a throw; 2 home run; 3 ground-rule double), so a client can cut back to the field.
+    // throw; 2 home run; 3 ground-rule double; and, for presentation only, 4 a foul ball out of
+    // play, which the log records as 1), so a client can cut back to the field, or after a foul
+    // straight to the next pitch (owner's play, seed 3647 play 62).
+    // An uncaught foul: only it scores a foul pitch (a caught foul fly is an out, and a throw
+    // after it that goes out of play is a throw, kind 1; agy review 2026-11-16 P2-2).
+    let foul = step.rules_events.iter().any(|e| matches!(e, bb_rules::Event::PitchResult { call: bb_rules::PitchCall::Foul, .. }));
     let reason = step.rules_events.iter().find_map(|e| match e {
         bb_rules::Event::BallDead { reason } => Some(match reason {
+            bb_rules::DeadBall::OutOfPlay if foul => 4u8,
             bb_rules::DeadBall::OutOfPlay => 1u8,
             bb_rules::DeadBall::HomeRun => 2,
             bb_rules::DeadBall::GroundRuleDouble => 3,
@@ -355,6 +366,20 @@ pub fn encode(step: &PitchStep, st: &RulesState, rosters: &crate::roster::Roster
             exit_velocity_mps: ev_ as f32,
             launch_angle_rad: la as f32,
             spray_angle_rad: spray as f32,
+            pitch_type: bb_schema::PitchType(rec.ty as u8),
+            zone_bottom_m: rec.zone.bottom as f32,
+            zone_top_m: rec.zone.top as f32,
+            zone_half_width_m: rec.zone.half_width as f32,
+            plate_crossed: rec.plate.is_some(),
+            pitch_call: match rec.call {
+                crate::pa::Call::Ball => 1,
+                crate::pa::Call::CalledStrike => 2,
+                crate::pa::Call::SwingingStrike => 3,
+                crate::pa::Call::Foul => 4,
+                crate::pa::Call::FoulTip => 5,
+                crate::pa::Call::InPlay => 6,
+                crate::pa::Call::HitByPitch => 7,
+            },
             ..Default::default()
         },
     );

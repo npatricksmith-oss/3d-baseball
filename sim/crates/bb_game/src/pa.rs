@@ -317,6 +317,8 @@ pub struct PitchRecord {
     /// When the batter made his swing-or-take decision (his commit tick), s after release.
     /// Presentation keeps his stance unchanged until then.
     pub t_decide: f64,
+    /// The batter's strike zone the pitch was judged against (for display: hud.md step 3).
+    pub zone: Zone,
 }
 
 fn rng(seed: u64, play: u32, agent: u16, purpose: Purpose, sub: u32) -> KeyedRng {
@@ -643,6 +645,7 @@ pub fn simulate_pitch_ctx(mu: &Matchup, sc: &Scouting, count: Count, seed: u64, 
         t_plate,
         swing: swing_done,
         t_decide,
+        zone: mu.zone,
     }
 }
 

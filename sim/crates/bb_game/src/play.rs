@@ -158,8 +158,13 @@ impl FielderAttrs {
 /// error σs, less is better [E]. Chosen so that on the routine flies of
 /// docs/calibration/2026-11-15-outfield-read.md an outfield of grade 20 catches about 92%,
 /// grade 50 96% and grade 80 98% (the owner's band for a routine fly is 90–99% by fielding
-/// ability, 2026-11-15). The catch rate is steep in the read's error: ρ 1.4 put grade 20 at 54%.
-pub const READ_RHO: f64 = 1.06;
+/// ability, 2026-11-15). Refitted 2026-11-17 (docs/calibration/2026-11-17-track-bias.md):
+/// 1.06 was fitted on reads that could not correct a persistent error (the snapshot read,
+/// then the tracking read that took it as fresh), whose catch rate was steep in the read's
+/// error (ρ 1.4 put grade 20 at 54%); on the honest read 1.06 left grade 20 at .971, no worse
+/// than grade 50. With 1.15: grade 20 .915, 50 .967, 80 .984 (seeds 0–99), and .934 / .979 /
+/// .986 once the tracking read's looks took their full Jacobian.
+pub const READ_RHO: f64 = 1.15;
 /// `ReadSkill`: ratio per 10 grades of τ_read, the viewing time over which the read sharpens
 /// (agent-models §10; was 1.2 in the table, never used, lowered with [`READ_RHO`]) [E].
 pub const TAU_READ_RHO: f64 = 1.06;

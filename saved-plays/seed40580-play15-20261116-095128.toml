@@ -1,0 +1,14 @@
+# A play saved from the instant replay (client BbSavePlay).
+# See it again: client/run.sh 40580, then R back to play 15 once it has been shown.
+seed = 40580
+play = 15
+inning = 1
+half = "top"
+# The board before the pitch.
+outs = 2
+count = "0-0"
+score = "away 0, home 0"
+saved = 2026-11-16T09:51:28
+comment = """
+CF seriously misplayed the ball. Misjudgment? Bug?
+"""

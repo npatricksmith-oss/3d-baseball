@@ -1,0 +1,14 @@
+# A play saved from the instant replay (client BbSavePlay).
+# See it again: client/run.sh 3647, then R back to play 147 once it has been shown.
+seed = 3647
+play = 147
+inning = 7
+half = "bottom"
+# The board before the pitch.
+outs = 0
+count = "1-1"
+score = "away 2, home 2"
+saved = 2026-11-16T00:26:13
+comment = """
+the play called was \"Fly out to center\" but arguably the play was \"Fly out to right field\" 
+"""

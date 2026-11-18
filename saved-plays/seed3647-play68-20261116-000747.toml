@@ -1,0 +1,14 @@
+# A play saved from the instant replay (client BbSavePlay).
+# See it again: client/run.sh 3647, then R back to play 68 once it has been shown.
+seed = 3647
+play = 68
+inning = 3
+half = "bottom"
+# The board before the pitch.
+outs = 1
+count = "0-0"
+score = "away 2, home 0"
+saved = 2026-11-16T00:07:47
+comment = """
+outfielder should judge whether the runner could potentially be thrown out (to base behind the runner) because he didn't tag up, or safety throw the ball to the cutoff.
+"""

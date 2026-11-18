@@ -1,0 +1,14 @@
+# A play saved from the instant replay (client BbSavePlay).
+# See it again: client/run.sh 3647, then R back to play 56 once it has been shown.
+seed = 3647
+play = 56
+inning = 3
+half = "top"
+# The board before the pitch.
+outs = 0
+count = "2-1"
+score = "away 2, home 0"
+saved = 2026-11-15T23:56:35
+comment = """
+Fielders should not thow on the run unless their momemtum is too great to stop and get set first because they have to throw the ball quickly
+"""

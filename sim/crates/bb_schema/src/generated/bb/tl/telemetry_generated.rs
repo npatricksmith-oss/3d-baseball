@@ -35,6 +35,12 @@ impl<'a> Telemetry<'a> {
   pub const VT_PROJECTED_DISTANCE_M: ::flatbuffers::VOffsetT = 32;
   pub const VT_HANG_TIME_S: ::flatbuffers::VOffsetT = 34;
   pub const VT_APEX_M: ::flatbuffers::VOffsetT = 36;
+  pub const VT_PITCH_TYPE: ::flatbuffers::VOffsetT = 38;
+  pub const VT_ZONE_BOTTOM_M: ::flatbuffers::VOffsetT = 40;
+  pub const VT_ZONE_TOP_M: ::flatbuffers::VOffsetT = 42;
+  pub const VT_ZONE_HALF_WIDTH_M: ::flatbuffers::VOffsetT = 44;
+  pub const VT_PLATE_CROSSED: ::flatbuffers::VOffsetT = 46;
+  pub const VT_PITCH_CALL: ::flatbuffers::VOffsetT = 48;
 
   #[inline]
   pub unsafe fn init_from_table(table: ::flatbuffers::Table<'a>) -> Self {
@@ -46,6 +52,9 @@ impl<'a> Telemetry<'a> {
     args: &'args TelemetryArgs<'args>
   ) -> ::flatbuffers::WIPOffset<Telemetry<'bldr>> {
     let mut builder = TelemetryBuilder::new(_fbb);
+    builder.add_zone_half_width_m(args.zone_half_width_m);
+    builder.add_zone_top_m(args.zone_top_m);
+    builder.add_zone_bottom_m(args.zone_bottom_m);
     builder.add_apex_m(args.apex_m);
     builder.add_hang_time_s(args.hang_time_s);
     builder.add_projected_distance_m(args.projected_distance_m);
@@ -63,6 +72,9 @@ impl<'a> Telemetry<'a> {
     if let Some(x) = args.spin_radps { builder.add_spin_radps(x); }
     builder.add_plate_speed_mps(args.plate_speed_mps);
     builder.add_release_speed_mps(args.release_speed_mps);
+    builder.add_pitch_call(args.pitch_call);
+    builder.add_plate_crossed(args.plate_crossed);
+    builder.add_pitch_type(args.pitch_type);
     builder.finish()
   }
 
@@ -186,6 +198,48 @@ impl<'a> Telemetry<'a> {
     // which contains a valid value in this slot
     unsafe { self._tab.get::<f32>(Telemetry::VT_APEX_M, Some(0.0)).unwrap()}
   }
+  #[inline]
+  pub fn pitch_type(&self) -> super::PitchType {
+    // Safety:
+    // Created from valid Table for this object
+    // which contains a valid value in this slot
+    unsafe { self._tab.get::<super::PitchType>(Telemetry::VT_PITCH_TYPE, Some(super::PitchType::Unknown)).unwrap()}
+  }
+  #[inline]
+  pub fn zone_bottom_m(&self) -> f32 {
+    // Safety:
+    // Created from valid Table for this object
+    // which contains a valid value in this slot
+    unsafe { self._tab.get::<f32>(Telemetry::VT_ZONE_BOTTOM_M, Some(0.0)).unwrap()}
+  }
+  #[inline]
+  pub fn zone_top_m(&self) -> f32 {
+    // Safety:
+    // Created from valid Table for this object
+    // which contains a valid value in this slot
+    unsafe { self._tab.get::<f32>(Telemetry::VT_ZONE_TOP_M, Some(0.0)).unwrap()}
+  }
+  #[inline]
+  pub fn zone_half_width_m(&self) -> f32 {
+    // Safety:
+    // Created from valid Table for this object
+    // which contains a valid value in this slot
+    unsafe { self._tab.get::<f32>(Telemetry::VT_ZONE_HALF_WIDTH_M, Some(0.0)).unwrap()}
+  }
+  #[inline]
+  pub fn plate_crossed(&self) -> bool {
+    // Safety:
+    // Created from valid Table for this object
+    // which contains a valid value in this slot
+    unsafe { self._tab.get::<bool>(Telemetry::VT_PLATE_CROSSED, Some(false)).unwrap()}
+  }
+  #[inline]
+  pub fn pitch_call(&self) -> u8 {
+    // Safety:
+    // Created from valid Table for this object
+    // which contains a valid value in this slot
+    unsafe { self._tab.get::<u8>(Telemetry::VT_PITCH_CALL, Some(0)).unwrap()}
+  }
 }
 
 impl ::flatbuffers::Verifiable for Telemetry<'_> {
@@ -211,6 +265,12 @@ impl ::flatbuffers::Verifiable for Telemetry<'_> {
      .visit_field::<f32>("projected_distance_m", Self::VT_PROJECTED_DISTANCE_M, false)?
      .visit_field::<f32>("hang_time_s", Self::VT_HANG_TIME_S, false)?
      .visit_field::<f32>("apex_m", Self::VT_APEX_M, false)?
+     .visit_field::<super::PitchType>("pitch_type", Self::VT_PITCH_TYPE, false)?
+     .visit_field::<f32>("zone_bottom_m", Self::VT_ZONE_BOTTOM_M, false)?
+     .visit_field::<f32>("zone_top_m", Self::VT_ZONE_TOP_M, false)?
+     .visit_field::<f32>("zone_half_width_m", Self::VT_ZONE_HALF_WIDTH_M, false)?
+     .visit_field::<bool>("plate_crossed", Self::VT_PLATE_CROSSED, false)?
+     .visit_field::<u8>("pitch_call", Self::VT_PITCH_CALL, false)?
      .finish();
     Ok(())
   }
@@ -233,6 +293,12 @@ pub struct TelemetryArgs<'a> {
     pub projected_distance_m: f32,
     pub hang_time_s: f32,
     pub apex_m: f32,
+    pub pitch_type: super::PitchType,
+    pub zone_bottom_m: f32,
+    pub zone_top_m: f32,
+    pub zone_half_width_m: f32,
+    pub plate_crossed: bool,
+    pub pitch_call: u8,
 }
 impl<'a> Default for TelemetryArgs<'a> {
   #[inline]
@@ -255,6 +321,12 @@ impl<'a> Default for TelemetryArgs<'a> {
       projected_distance_m: 0.0,
       hang_time_s: 0.0,
       apex_m: 0.0,
+      pitch_type: super::PitchType::Unknown,
+      zone_bottom_m: 0.0,
+      zone_top_m: 0.0,
+      zone_half_width_m: 0.0,
+      plate_crossed: false,
+      pitch_call: 0,
     }
   }
 }
@@ -333,6 +405,30 @@ impl<'a: 'b, 'b, A: ::flatbuffers::Allocator + 'a> TelemetryBuilder<'a, 'b, A> {
     self.fbb_.push_slot::<f32>(Telemetry::VT_APEX_M, apex_m, 0.0);
   }
   #[inline]
+  pub fn add_pitch_type(&mut self, pitch_type: super::PitchType) {
+    self.fbb_.push_slot::<super::PitchType>(Telemetry::VT_PITCH_TYPE, pitch_type, super::PitchType::Unknown);
+  }
+  #[inline]
+  pub fn add_zone_bottom_m(&mut self, zone_bottom_m: f32) {
+    self.fbb_.push_slot::<f32>(Telemetry::VT_ZONE_BOTTOM_M, zone_bottom_m, 0.0);
+  }
+  #[inline]
+  pub fn add_zone_top_m(&mut self, zone_top_m: f32) {
+    self.fbb_.push_slot::<f32>(Telemetry::VT_ZONE_TOP_M, zone_top_m, 0.0);
+  }
+  #[inline]
+  pub fn add_zone_half_width_m(&mut self, zone_half_width_m: f32) {
+    self.fbb_.push_slot::<f32>(Telemetry::VT_ZONE_HALF_WIDTH_M, zone_half_width_m, 0.0);
+  }
+  #[inline]
+  pub fn add_plate_crossed(&mut self, plate_crossed: bool) {
+    self.fbb_.push_slot::<bool>(Telemetry::VT_PLATE_CROSSED, plate_crossed, false);
+  }
+  #[inline]
+  pub fn add_pitch_call(&mut self, pitch_call: u8) {
+    self.fbb_.push_slot::<u8>(Telemetry::VT_PITCH_CALL, pitch_call, 0);
+  }
+  #[inline]
   pub fn new(_fbb: &'b mut ::flatbuffers::FlatBufferBuilder<'a, A>) -> TelemetryBuilder<'a, 'b, A> {
     let start = _fbb.start_table();
     TelemetryBuilder {
@@ -367,6 +463,12 @@ impl ::core::fmt::Debug for Telemetry<'_> {
       ds.field("projected_distance_m", &self.projected_distance_m());
       ds.field("hang_time_s", &self.hang_time_s());
       ds.field("apex_m", &self.apex_m());
+      ds.field("pitch_type", &self.pitch_type());
+      ds.field("zone_bottom_m", &self.zone_bottom_m());
+      ds.field("zone_top_m", &self.zone_top_m());
+      ds.field("zone_half_width_m", &self.zone_half_width_m());
+      ds.field("plate_crossed", &self.plate_crossed());
+      ds.field("pitch_call", &self.pitch_call());
       ds.finish()
   }
 }

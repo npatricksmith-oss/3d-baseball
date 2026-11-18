@@ -1,0 +1,14 @@
+# A play saved from the instant replay (client BbSavePlay).
+# See it again: client/run.sh 3647, then R back to play 86 once it has been shown.
+seed = 3647
+play = 86
+inning = 4
+half = "top"
+# The board before the pitch.
+outs = 2
+count = "0-0"
+score = "away 2, home 0"
+saved = 2026-11-16T00:11:43
+comment = """
+1st basemen should put their lead foot out along with their glove to strech for the throw coming. This reduces the distance the throw must travel
+"""

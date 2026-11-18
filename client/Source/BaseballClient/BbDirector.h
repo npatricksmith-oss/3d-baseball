@@ -4,9 +4,13 @@
 #include "GameFramework/Actor.h"
 #include "Async/Future.h"
 #include "BbSim.h"
+#include "BbPose.h"
+#include "BbCrew.h"
 #include "BbDirector.generated.h"
 
 class AStaticMeshActor;
+class ABbPark;
+class UBbFigureShop;
 class ASkeletalMeshActor;
 class USkeletalMesh;
 class UAnimSequence;
@@ -15,15 +19,32 @@ class UStaticMesh;
 class UMaterialInterface;
 
 /**
- * Builds the field from engine primitives, then plays the sim's timelines: capsule players,
+ * Plays the sim's timelines in the park that BbPark builds: capsule players,
  * the ball, a broadcast camera, and the scoreboard. The sim runs on a worker thread, one
  * pitch ahead; nothing here decides anything about the game (PLAN §3.4, D4).
  *
  * Command line: -BbSimLib=<path to libbb_ffi.so> -BbSeed=<n> -BbSpeed=<x>
  *               -BbCamera=<0 broadcast | 1 behind home | 2 overhead>
  *               -BbShots=<n> (take n screenshots, then quit) -BbShotEvery=<seconds> -BbShotStart=<seconds>
+ *               -BbFigureShots (both nines stood in a row, front and back, one figure turned
+ *               through eight angles, and the kit, as figure_<n>_<what>.png, then quit; no game
+ *               is played);
+ *               -BbMannequin (the grey mannequin instead of the figures);
+ *               -BbStockMotions (the stock clips in place of the coded delivery, crouch, swing,
+ *               catch and throw);
+ *               -BbMotionShots (the delivery, the catcher's receive, a ball hit, a swing and a
+ *               miss, a pitch taken, a ball fielded and thrown and a throw taken photographed
+ *               at their named moments as motion_<strip>_<n>_<what>.png, then quit);
+ *               -BbParkShots (photograph the park from its fixed spots as park_<spot>.png, then quit;
+ *               -BbParkShotsAt=<seconds> when to start)
  *               -BbBoxShots=<n> (photograph the Tab box at pitch n and the final box, then quit)
- *               -BbDiveShots=<n> (photograph n dives: in the air, lying, getting up; then quit)
+ *               -BbCrewShots (the umpires set and signalling, a base coach and both benches
+ *               photographed as crew_<n>_<what>.png, then quit; no game is played);
+ *               -BbNoCrew (no umpires, coaches or benches);
+ *               -BbDiveShots=<n> (photograph n dives: driving off, in the air, down, on hands
+ *               and knees, getting up; then quit)
+ *               -BbSlideShots=<n> (photograph n slides: going down, sliding, at the bag, sitting
+ *               up, getting up; then quit; with -BbStagingLog each slide is logged as BB_SLIDE)
  *               -BbAnimTest (stock clips looping) or -BbAnimTest=dive (dive pose candidates;
  *               -BbAnimFrac=<0..1> -BbAnimTilt=<degrees>)
  *               -BbBenchSeconds=<s> (log frame rate and memory, then quit)
@@ -31,6 +52,7 @@ class UMaterialInterface;
  *               first animation phase as BB_RESET / BB_EXIT / BB_THROW, and a BB_STAGING summary)
  *               -BbRushAt=<s> (press Enter once, that many seconds in; logs BB_RUSH)
  *               -BbReplayAt=<s> (press R twice that many seconds in, F six seconds later; logs BB_REPLAY)
+ *               -BbSaveAt=<s> (press S that many seconds in and Save a second later; logs BB_SAVE)
  *               -BbClipSpeeds (log the ground speed each gait clip is animated for as BB_CLIP)
  */
 UCLASS()
@@ -46,9 +68,8 @@ public:
 
 private:
 	AStaticMeshActor* Shape(UStaticMesh* Mesh, const FVector& Location, const FVector& Scale, const FLinearColor& Color, const FRotator& Rotation = FRotator::ZeroRotator);
-	void BuildField();
-	void BuildLights();
-	void BuildStands();
+	/** The sim's frame of a play at T as it is drawn: on the drawn ground (the mound). */
+	bool SampleDrawn(const FBbPlay& Play, float T, BbFrame& Out) const;
 	void RequestNext();
 	void BeginPlayback(FBbPlay&& Play);
 	void UpdateCamera(const BbFrame& Frame, float DeltaSeconds);
@@ -69,6 +90,8 @@ private:
 	bool bGameOver = false;
 	float PlayTime = 0.f;
 	float Speed = 1.f;
+	/** The strike-zone box is up (Z turns it off and on; hud.md step 3). */
+	bool bZoneOn = true;
 	float HoldAfter = 0.f;
 	/** The scoreboard as the current play started (the previous play's result). During a
 	 *  play the outs on it advance as the umpire calls each one. */
@@ -80,8 +103,11 @@ private:
 	/** Calls of the current play already logged (BB_CALL). */
 	int32 CallsLogged = 0;
 	/** Seconds shown before each pitch's release: the pitcher's wind-up. */
-	float PreRoll = 1.0f;
+	float PreRoll = -BbMotion::DeliveryStartS;
 
+	/** Everything that stands still: field, walls, stands, lights (BbPark). */
+	UPROPERTY()
+	TObjectPtr<ABbPark> Park;
 	UPROPERTY()
 	TObjectPtr<UStaticMesh> Cube;
 	UPROPERTY()
@@ -141,7 +167,61 @@ private:
 		int32 Team = -1;
 		// The clip being driven by hand (null while the gait clips play on their own).
 		const UAnimSequence* Manual = nullptr;
+		// A coded motion (BbPose.h): which (0 none, 1 the delivery, 2 the catcher's crouch,
+		// 3 the batter at the plate, 4 a fielder's ready, catch and throw, 5 a dive, 6 a
+		// slide), how much of it shows over the clip, and the motion's moment last shown.
+		int32 Motion = 0;
+		float MotionW = 0.f;
+		float MotionT = 0.f;
+		/** A fielder (motion 4): how far down in the ready position he is, how much he is
+		 *  carrying the ball in his hands, and how much his legs are the pose's rather than
+		 *  the running clip's. Eased on play time. */
+		float Ready = 0.f, Carry = 0.f, Lower = 1.f;
+		/** Where the figure is drawn from the sim's position, cm on the ground: a motion can
+		 *  carry him off it (the pitcher finishes down the mound, the catcher sits back of
+		 *  his spot), and he steps back in his own time. */
+		FVector2D Off = FVector2D::ZeroVector;
+		/** The ball in his hand (or glove) when the pose has it: the pitcher's before he lets
+		 *  go, a fielder's from the catch to the throw. */
+		bool bHand = false;
+		FVector Hand = FVector::ZeroVector;
 	};
+	/** The mannequin's joints, for the coded motions. */
+	FBbSkeleton Skel;
+	/** How long a figure takes to go into a coded motion or come out of one, s of play time. */
+	static constexpr float MotionBlendS = 0.3f;
+	/** The pitcher comes set, and the catcher squats, this long before the reset ends. */
+	static constexpr float SetLeadS = 0.8f;
+	/** A pitcher off the rubber after his delivery steps back at this pace between pitches,
+	 *  and is gathered in this fast once the play has him running, cm/s. */
+	static constexpr float StepBackCmps = 130.f;
+	static constexpr float GatherCmps = 300.f;
+	/** The pitch on screen: where the ball is let go; where and when it ends in the mitt (or
+	 *  would have, had it not been hit); until when the catcher stays down. */
+	FVector PitchFrom = FVector::ZeroVector;
+	FVector PitchEndAt = FVector::ZeroVector;
+	float PitchEndT = -1.f;
+	float CrouchUntil = 0.6f;
+	void NotePitch();
+	/** The catcher holds the ball he caught this long before he comes up, s. */
+	static constexpr float ReceiveHoldS = 0.7f;
+	/** The mitt goes from its target to the ball over this long, ending this long before the
+	 *  ball is there, s. */
+	static constexpr float ReceiveMoveS = 0.22f;
+	static constexpr float ReceiveEarlyS = 0.03f;
+	/** -BbMotionShots: the first pitches photographed at the motions' named moments, from
+	 *  beside the pitcher, from the plate, and beside the catcher, as motion_<pitch>_<n>_<what>.png;
+	 *  then quit. The play is held on each moment exactly. */
+	bool bMotionShots = false;
+	int32 MotionShotNext = 0;
+	/** Which strip the pitch on screen is photographed for, or -1: 0 to 2 as above; then 3
+	 *  the first swing, from in front of the batter; 4 the next swing, from the mound's side;
+	 *  5 the first pitch taken; 6 the first ball fielded and thrown, from beside the fielder;
+	 *  7 the next throw taken by a fielder, from beside him. */
+	int32 MotionStrip = -1;
+	bool bStripDone[8] = { false, false, false, false, false, false, false, false };
+	/** The catch and the throw that strips 6 and 7 are about (indices into Catches, Throws). */
+	int32 StripCatch = -1, StripThrow = -1;
 	TArray<FFigureState> FigureState;
 	/** What PoseFigure knows beyond the frame: the client's own plan for a staged move, and
 	 *  a throw whose release time is known (so its clip phase never depends on which frames
@@ -162,12 +242,28 @@ private:
 		/** Seconds into AnimThrow (its release is ThrowReleaseS in), or negative for no throw. */
 		float ThrowClip = -1.f;
 		float ThrowYaw = 0.f; // Unreal yaw, degrees
+		/** The coded throw: seconds from the release, and where the sim lets the ball go. */
+		bool bThrow = false;
+		float ThrowT = 0.f;
+		bool bThrowFrom = false;
+		FVector ThrowFrom = FVector::ZeroVector;
+		/** A catch of his near in time: seconds since it (negative before), and where the
+		 *  ball is as he takes it. */
+		bool bCatch = false;
+		float CatchDt = 0.f;
+		FVector CatchAt = FVector::ZeroVector;
+		/** He has the ball. */
+		bool bHolds = false;
 		/** Down from a dive (the sim's BbDive): seconds since he left his feet, or negative
 		 *  for none; seconds until he is up; which way he dove (Unreal yaw, if bDiveDir). */
 		float DiveSince = -1.f;
 		float DiveUpIn = 0.f;
 		bool bDiveDir = false;
 		float DiveYaw = 0.f;
+		/** A runner's slide: seconds from his arrival at the bag, and which way he came. */
+		bool bSlide = false;
+		float SlideT = 0.f;
+		float SlideYaw = 0.f;
 	};
 	void PoseFigure(int32 Slot, const BbActor& A, const BbFrame& Frame, const FPoseInput& In, float SimDt, float DeltaSeconds);
 	/** A dive's layout (client presentation): he tips forward to DiveTiltDeg from the feet
@@ -175,6 +271,8 @@ private:
 	 *  (the leap clip, held DiveClipFrac through, has him in the air and leaning 45° already),
 	 *  lies there, and gets up over the last DiveRiseS before the sim has him up. Tipped
 	 *  flat, his middle is DiveBodyBackCm from his feet. Check with -BbDiveShots. */
+	/** The drawn dive begins this long before the sim's (PoseFigure's caller says why), s. */
+	static constexpr float DiveLeadS = 0.17f;
 	float DiveFallS = 0.3f;
 	float DiveRiseS = 0.6f;
 	float DiveTiltDeg = 45.f;
@@ -201,8 +299,75 @@ private:
 		float ReleaseAt = 0.f; // play time
 		float Yaw = 0.f;       // Unreal yaw toward the ball's flight
 		float FirstClip = -1.f; // the clip time first drawn (for -BbStagingLog), or -1
+		/** Where the sim lets the ball go (the ball's place as its flight starts). */
+		bool bFrom = false;
+		FVector From = FVector::ZeroVector;
 	};
 	TArray<FThrowNote> Throws;
+	/** A fielder taking the ball in the current timeline (a batted ball or a throw): when,
+	 *  and where the ball is at that moment. Read from the whole timeline as the pitch comes
+	 *  up (NoteCatches), so the glove can be on its way before the ball is there. */
+	struct FCatchNote
+	{
+		uint16 Agent = 0;
+		float T = 0.f;
+		FVector At = FVector::ZeroVector;
+		/** The ball one step of the sim earlier (SimTickS): from there the timeline's ball
+		 *  jumps to the sim's holding point over his feet, so the drawn ball is carried on
+		 *  along its own line into the glove instead. */
+		FVector Prev = FVector::ZeroVector;
+		/** It was thrown to him (someone held it before). */
+		bool bThrown = false;
+	};
+	TArray<FCatchNote> Catches;
+	void NoteCatches();
+	/** A runner who slides in the current timeline (player-visuals §11). The sim has no
+	 *  slide: a runner going on to a base he stops at runs into it at full speed and is still
+	 *  from the next moment. Where a play is being made on him at second, third or home that
+	 *  stop is drawn as a feet-first slide (the client's choice of how to show what the sim
+	 *  did; nothing feeds back). */
+	struct FSlideNote
+	{
+		uint16 Agent = 0;
+		float T = 0.f;   // play time the sim has him at the bag
+		float Yaw = 0.f; // Unreal yaw of his run into it
+		int32 Base = 0;  // 2, 3 or 4 (home)
+		FVector At = FVector::ZeroVector;
+	};
+	TArray<FSlideNote> Slides;
+	void NoteSlides();
+	/** The umpires, the base coaches and the benches (player-visuals §12), and the calls of
+	 *  the pitch now shown for the umpires to signal: strikes, fouls and outs from the sim's
+	 *  record (NoteSignals), and "safe" where a play was made on a runner who was not out
+	 *  (NoteSlides, which knows the plays at the bases). */
+	UPROPERTY()
+	TObjectPtr<UBbCrew> Crew;
+	TArray<FBbSignal> Signals;
+	void NoteSignals();
+	/** -BbCrewShots: which picture is being taken, or -1, and what the crew is told for it. */
+	int32 CrewShot = -1;
+	FBbCrewTick CrewShotTick;
+	void ArrangeCrewShot(int32 Step);
+	/** He slides if he comes in at least this fast, m/s, and the ball is taken within
+	 *  SlidePlayM of the bag within SlidePlayS of his getting there (or is already held
+	 *  there, or he is called out there). */
+	static constexpr float SlideMinMps = 5.f;
+	static constexpr float SlidePlayM = 5.f;
+	static constexpr float SlidePlayS = 1.5f;
+	/** The live sim's step, s: the timeline has the ball at each one (bb_game::live DT). */
+	static constexpr float SimTickS = 1.f / 60.f;
+	void AddThrow(uint16 Agent, float ReleaseAt);
+	/** The fielders stay down in the ready position until this play time. */
+	float ReadyUntil = 0.8f;
+	/** The glove sets out for the ball this long before the catch and is there this long
+	 *  before it; it stays this long after, and has come in to the hands by GloveInS. */
+	static constexpr float GloveOutS = 0.36f;
+	static constexpr float GloveThereS = 0.04f;
+	static constexpr float GloveStayS = 0.10f;
+	static constexpr float GloveInS = 0.32f;
+	/** Slower than this as the ball arrives, he turns to face it; faster, he takes it on
+	 *  the run, facing where he runs, cm/s. */
+	static constexpr float SettleMaxCmps = 300.f;
 	/** Play time of the last frame sampled for throws; frames between it and the next are
 	 *  sampled too, so fast playback cannot step over a throw. */
 	float ThrowsSampledTo = 0.f;
@@ -299,10 +464,12 @@ private:
 	FVector2D ExitAt(const FResetMover& M) const;
 	/** Copies a figure's place, facing and speed from the slot that showed Agent until now. */
 	void CarryFigure(const TArray<FFigureState>& Old, int32 Slot, uint16 Agent);
-	static FVector2D Dugout(uint16 Agent);
+	FVector2D Dugout(uint16 Agent) const;
 	/** Index into Movers of whoever returns the ball, or -1 when no ball is thrown back. */
 	int32 ResetThrower = -1;
 	FVector ResetBallFrom = FVector::ZeroVector; // sim frame, metres
+	/** Where the returner lets the ball go: beside his head on his throwing side. */
+	FVector ResetHand = FVector::ZeroVector;
 	FVector ResetBallTo = FVector::ZeroVector;
 	float ResetThrowAt = 0.f;
 	float ResetFlight = 0.f;
@@ -315,19 +482,28 @@ private:
 	TObjectPtr<AStaticMeshActor> Ball;
 	UPROPERTY()
 	TObjectPtr<AStaticMeshActor> BallShadow;
-	/** Diameter the ball is drawn at, m: twice the real 7.4 cm (engine primitives are 1 m
-	 *  across at scale 1). */
-	static constexpr float BallDrawnM = 0.15f;
+	/** Diameter the ball is drawn at, m: BallDrawnScale times its real size, 7.5 cm. (It was
+	 *  twice real size until 2026-11-16, then real size and a quarter larger, neither of which
+	 *  the owner could see; this size he found fine. A floor on its on-screen size, 0.4% of the
+	 *  view's width, was tried the same day and he found it too big, so there is none; owner,
+	 *  2026-11-16.) Engine primitives are 1 m across at scale 1. */
+	static constexpr float BallRealM = 0.075f;
+	static constexpr float BallDrawnScale = 1.5625f;
+	static constexpr float BallDrawnM = BallRealM * BallDrawnScale;
 	/** Smallest diameter of the ball's ground shadow with the ball on the ground, m: the drawn
 	 *  ball's own size, as the sun's shadow of a ball is. Close to the camera it stays this size. */
 	static constexpr float BallShadowM = BallDrawnM;
 	/** With the ball on the ground, a far shadow keeps at least this share of the view's width
-	 *  across (about 11 px of a 1600 px view), so it can still be seen deep in the outfield.
+	 *  across (about 5.6 px of a 1600 px view; it was twice that until the owner asked for
+	 *  half the size, 2026-11-16), so it can still be seen deep in the outfield.
 	 *  The ball's height then scales it like the 15 cm floor (below). Sized so the shadow is never larger on
 	 *  screen than the 50 cm disc the owner found too big (2026-11-12): from the follow camera
 	 *  a ball in the near infield gets about 11 x 6.5 px against that disc's 18 x 6; at the
 	 *  pitch camera's long lens the 15 cm floor governs. */
-	static constexpr float BallShadowViewShare = 0.007f;
+	static constexpr float BallShadowViewShare = 0.0035f;
+	/** The shadow's rim: it fades from solid to nothing over this share of its radius (owner,
+	 *  2026-11-16: half as big as before and 30% more blurred; before, the edge was hard). */
+	static constexpr float BallShadowSoftFrac = 0.3f;
 	/** The shadow's size follows the ball's height (owner, 2026-11-15). At or below
 	 *  BallShadowNoneM (the ball's centre resting or rolling on the ground, with a little room
 	 *  for low skips) there is none; it opens to the sizes above by BallShadowFullM, and grows
@@ -344,6 +520,43 @@ private:
 	static constexpr float BallShadowMaxStretch = 2.5f;
 	UPROPERTY()
 	TObjectPtr<AStaticMeshActor> Bat;
+	/** The bat is the figure shop's turned one (its knob at its origin), not the cylinder. */
+	bool bTurnedBat = false;
+	void PlaceBat(const FVector& Knob, const FVector& Tip);
+	/** The bat through one pitch, read from its timeline when the pitch comes up (NoteBat):
+	 *  who stands where with it, how he holds it in the stance, and, if he swings, when the
+	 *  bat leaves the stance, when his hands are furthest back (and where round him they are
+	 *  then, BbMotion::HandsDeg), and when and where the sim's bat comes to rest. */
+	struct FBatNote
+	{
+		bool bBat = false;
+		/** Where the batter stands, sim m, and whether it is the first-base side's box (a
+		 *  left-handed batter: shown in a mirror). */
+		FVector2D Spot = FVector2D::ZeroVector;
+		bool bLeftBox = false;
+		FVector StanceKnob = FVector::ZeroVector, StanceTip = FVector::ZeroVector;
+		bool bSwing = false;
+		float StartT = -1.f, LaunchT = -1.f, EndT = -1.f;
+		float LaunchDeg = 0.f;
+		FVector EndKnob = FVector::ZeroVector, EndTip = FVector::ZeroVector;
+	};
+	FBatNote BatNote, NextBatNote;
+	void NoteBat(const FBbPlay& Play, FBatNote& Out) const;
+	/** A sim point in the batter's own frame (BbMotion::FSwingIn), cm, without the figure. */
+	static FVector BatterFrame(const float P[3], const FBatNote& N);
+	/** The bat as drawn this frame. The sim's while the sim has it in his hands (bBatSim);
+	 *  the batter's own to carry otherwise, as long as he stands at the plate (bBatHeld): back
+	 *  from the end of his swing to his shoulder, at ease between pitches, up into the stance. */
+	FVector BatKnob = FVector::ZeroVector, BatTip = FVector(0, 0, 86);
+	bool bBatSim = false, bBatHeld = false;
+	uint16 BatHolder = 0xFFFF;
+	/** How much of a swing is on, the front foot's step, how much he is at ease (FSwingIn),
+	 *  and the point his eyes are on (eased, so his head does not snap round after a pitch). */
+	float BatSwingW = 0.f, BatStride = 0.f, BatRest = 1.f;
+	FVector BatLook = FVector::ZeroVector;
+	/** After a swing the bat comes back to his shoulder over this long, s. */
+	static constexpr float BatReturnS = 0.8f;
+	static constexpr double BatLenCm = 86.36;
 	UPROPERTY()
 	TObjectPtr<ACameraActor> Camera;
 
@@ -358,6 +571,11 @@ private:
 	 *  the fence; the timeline then has the batter and runners trot round the bases to home
 	 *  (bb_game::timeline, presentation only), and the play's duration covers it. */
 	bool bHomeRun = false;
+	/** A foul ball into the seats (BbPlayInfo.dead_reason 4): no walk back after it; the next
+	 *  pitch starts with everyone already in place. */
+	bool bFoulOut = false;
+	/** How long the field is shown after a foul into the seats before the next pitch, s. */
+	static constexpr float FoulOutHoldS = 1.0f;
 	/** The ball is over the wall: the camera is in center field and the card is up. */
 	bool bHomeRunCut = false;
 	/** The trot's view: from beyond center field, looking in at the diamond, wide enough for
@@ -372,6 +590,10 @@ private:
 	BbBoxScore Box{};
 	bool bBoxValid = false;
 	uint32 BoxThrough = 0;
+	/** The same reading for the outfield board: through the pitches whose result is known. */
+	BbBoxScore BoardBox{};
+	uint32 BoardThrough = 0xFFFFFFFEu;
+	bool bBoardValid = false;
 	/** How far the Tab view is up (0 to 1; it comes and goes in BoxPeekS). */
 	float BoxPeek = 0.f;
 	static constexpr float BoxPeekS = 0.15f;
@@ -421,6 +643,33 @@ private:
 	 *  once (unattended check; logs BB_REPLAY). */
 	float ReplayAt = -1.f;
 	int32 ReplayAuto = 0;
+	/** Saving a play (owner, 2026-11-15; BbSavePlay.h). During a replay a "Save this play"
+	 *  button shows at the top right and the mouse is free to click it; it, or S at any
+	 *  time, opens the dialog for the pitch on screen. The game pauses while it is open. */
+	TSharedPtr<SWidget> SaveButtonLayer;
+	TSharedPtr<SWidget> SaveDialogLayer;
+	TSharedPtr<class SBbSavePlayDialog> SaveDialog;
+	bool bSaveOpen = false;
+	/** Where the dialog was left: its distance from the screen's right and top edges (Slate units). */
+	FVector2D SaveDialogOffset = FVector2D(28.f, 76.f);
+	bool bPausedBeforeSave = false;
+	/** The input mode last set: -1 none yet, 0 game only, 1 game and UI (replay), 2 UI only (dialog). */
+	int32 InputModeSet = -1;
+	/** The dialog's buttons close it on the next tick, not from inside their own click:
+	 *  0 nothing, 1 cancel, 2 save SaveComment. */
+	int32 SaveClose = 0;
+	FString SaveComment;
+	/** "Saved: saved-plays/seed7-play12-....toml" under the REPLAY line, until SavedUntil (Wall). */
+	FString SavedNote;
+	double SavedUntil = 0.0;
+	void OpenSaveDialog();
+	void CloseSaveDialog(bool bSave);
+	/** Shows the mouse and lets Slate have clicks during a replay; hides it otherwise. */
+	void SyncCursor();
+	/** -BbSaveAt=<s>: seconds of real time after which S is pressed and, 1 s later, Save with a
+	 *  test comment (unattended check; logs BB_SAVE). */
+	float SaveAt = -1.f;
+	int32 SaveAuto = 0;
 	/** Drawing a held ball in the hand: the hand's offset from the sim's ball (cm), kept from
 	 *  the last frame it was held, and how much of it is applied (1 in the hand, 0 on the
 	 *  sim's path). It eases in over HeldTakeS when a fielder takes the ball and out over
@@ -442,11 +691,37 @@ private:
 	// Unattended checks.
 	int32 ShotsLeft = 0;
 	int32 ShotIndex = 0;
-	/** -BbDiveShots=<n>: photograph the next n dives (in the air, lying, getting up), then quit. */
+	/** -BbDiveShots=<n>: photograph the next n dives at five moments each, then quit. */
 	int32 DiveShotsLeft = 0;
 	int32 DiveShotIndex = 0;
+	/** -BbSlideShots=<n>: the same for the next n slides. */
+	int32 SlideShotsLeft = 0;
+	int32 SlideShotIndex = 0;
+	/** The moments of the pitch on screen that those two photograph (play time, file name),
+	 *  in time order, and the next to take; which slide and which diver the camera is on. */
+	TArray<TPair<float, FString>> ExtraShots;
+	int32 ExtraShotNext = 0;
+	int32 ShotSlide = -1;
+	int32 ShotDiver = -1;
+	float ShotDiveFrom = 0.f;
+	float ShotDiveYaw = 0.f;
 	float ShotEvery = 4.f;
 	float NextShot = 3.f;
+	/** -BbParkShots: the spot now being photographed, or -1; when its picture is asked for
+	 *  (the camera sits there a moment first, so the picture is settled), and when it is taken. */
+	int32 ParkShot = -1;
+	/** -BbFigureShots: the figures stood in rows and photographed, no game played: which
+	 *  picture is being taken, or -1. */
+	int32 FigureShot = -1;
+	TArray<BbPlayer> ShotPlayers;
+	void ArrangeFigureShot(int32 Step);
+	/** -BbMannequin: the grey mannequin as it was before the figures, for comparison. */
+	bool bMannequin = false;
+	UPROPERTY()
+	TObjectPtr<UBbFigureShop> FigureShop;
+	float ParkShotsAt = 12.f;
+	double ParkShotSince = 0.0;
+	bool bParkShotAsked = false;
 	float BenchSeconds = 0.f;
 	double Wall = 0.0;
 	int32 Frames = 0;

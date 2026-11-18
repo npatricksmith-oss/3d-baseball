@@ -37,7 +37,13 @@ pub fn describe_scored(call: Call, launch_deg: Option<f64>, events: &[Event], fa
     let outs: Vec<(AgentId, OutKind, u8)> = events.iter().filter_map(|e| if let Event::RunnerOut { runner, kind, base } = e { Some((*runner, *kind, *base)) } else { None }).collect();
     let ended = events.iter().find_map(|e| if let Event::PlateAppearanceEnded { batter, result } = e { Some((*batter, *result)) } else { None });
     let Some((batter, result)) = ended else {
-        // The plate appearance goes on (or a foul with two strikes).
+        // The plate appearance goes on (or a foul with two strikes). The pitch's own call
+        // guesses fair or foul from where the ball first lands; the rules decide it on the
+        // field, so a ball that lands fair and rolls foul before a base is a foul (owner's
+        // play, seed 3647 play 20, captioned "In play").
+        if events.iter().any(|e| matches!(e, Event::FairFoulDecided { fair: false })) {
+            return "Foul".to_string();
+        }
         return match call {
             Call::Ball => "Ball",
             Call::CalledStrike => "Called strike",
@@ -154,6 +160,9 @@ mod tests {
     fn plays_read_the_way_they_are_called() {
         assert_eq!(describe(Call::Ball, None, &[], &[], None), "Ball");
         assert_eq!(describe(Call::Foul, Some(40.0), &[], &[], None), "Foul");
+        // Landed fair, rolled foul before the bag: the rules' call, not the landing guess.
+        let rolled_foul = [Event::FairFoulDecided { fair: false }, Event::PitchResult { call: bb_rules::PitchCall::Foul, balls: 0, strikes: 1 }];
+        assert_eq!(describe(Call::InPlay, Some(-8.0), &rolled_foul, &[], None), "Foul");
         assert_eq!(describe(Call::CalledStrike, None, &[out(B, OutKind::Strikeout), ended(PaResult::Strikeout)], &[], None), "Strikeout looking");
         assert_eq!(describe(Call::SwingingStrike, None, &[out(B, OutKind::Strikeout), ended(PaResult::Strikeout)], &[], None), "Strikeout swinging");
         assert_eq!(describe(Call::Ball, None, &[ended(PaResult::Walk)], &[], None), "Walk");

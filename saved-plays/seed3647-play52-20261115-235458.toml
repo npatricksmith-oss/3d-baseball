@@ -1,0 +1,14 @@
+# A play saved from the instant replay (client BbSavePlay).
+# See it again: client/run.sh 3647, then R back to play 52 once it has been shown.
+seed = 3647
+play = 52
+inning = 2
+half = "bottom"
+# The board before the pitch.
+outs = 2
+count = "0-0"
+score = "away 2, home 0"
+saved = 2026-11-15T23:54:58
+comment = """
+with a ground ball and no one out, the pitcher expects a throw to 1st base so he should go back up 1st base.
+"""

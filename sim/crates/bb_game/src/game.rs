@@ -519,6 +519,12 @@ impl Game {
         Some(PitchStep { play, batter, record: rec, pitch_flight, batted, rules_events, scorer_ruling, facts, calls, viz })
     }
 
+    /// The park this game is played in: the one the physics resolves every batted ball and
+    /// throw against (read-only; for clients that draw it, park-visuals §2).
+    pub fn field(&self) -> &Field {
+        &self.field
+    }
+
     /// Close the log and tally the result from the rules events (event sourcing, PLAN §4.3).
     /// The event log through the first `plays` pitches (all so far if fewer), closed with a
     /// footer, without ending the game. A reader (`bb_stats::box_score`) takes it like a

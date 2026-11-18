@@ -302,13 +302,31 @@ pub struct BbPlayInfo {
     /// Where it left: the ball's centre as it crossed the wall or fence (sim
     /// frame, m; zeros if it never left).
     pub dead_at: [f32; 3],
-    /// Why: 0 it never left; 1 out of play (a foul ball or a throw); 2 home run; 3 ground-rule
-    /// double (the event log's `DeadBallReason`).
+    /// Why: 0 it never left; 1 a throw out of play; 2 home run; 3 ground-rule double (the event
+    /// log's `DeadBallReason`); 4 a foul ball out of play (the log's 1; told apart here so a
+    /// client can go straight to the next pitch).
     pub dead_reason: u8,
-    pub _pad2: [u8; 3],
+    /// The pitch thrown (the schema's `PitchType`: 1 four-seam, 2 sinker, 3 cutter, 4 slider,
+    /// 5 sweeper, 6 slurve, 7 curveball, 8 knuckle curve, 9 changeup, 10 splitter; 0 unknown).
+    pub pitch_type: u8,
+    pub _pad2: [u8; 2],
     /// On contact, the projected distance (physics-spec §12): from home to where the batted
     /// ball would have come down to field level unobstructed, m; 0 without contact.
     pub projected_distance_m: f32,
+    /// Where the pitch crossed the judgment plane (the middle of the plate): across the plate
+    /// (sim x, + toward first base) and up from the ground, m; valid when `plate_crossed` is 1.
+    pub plate_x_m: f32,
+    pub plate_z_m: f32,
+    /// The batter's strike zone the pitch was judged against: bottom and top above the ground
+    /// and half-width across the plate, m. A pitch is a strike when the ball touches it.
+    pub zone_bottom_m: f32,
+    pub zone_top_m: f32,
+    pub zone_half_width_m: f32,
+    pub plate_crossed: u8,
+    /// The call: 1 ball, 2 called strike, 3 swinging strike, 4 foul, 5 foul tip, 6 in play,
+    /// 7 hit by pitch; 0 unknown.
+    pub pitch_call: u8,
+    pub _pad3: [u8; 2],
 }
 
 /// One out as the umpire signals it (rules-spec §1.3).
@@ -378,6 +396,14 @@ pub unsafe extern "C" fn bb_timeline_info(blob: *const u8, len: usize, out: *mut
         info.exit_velocity_mps = t.exit_velocity_mps();
         info.launch_angle_rad = t.launch_angle_rad();
         info.projected_distance_m = t.projected_distance_m();
+        info.pitch_type = t.pitch_type().0;
+        info.plate_x_m = t.plate_x_m();
+        info.plate_z_m = t.plate_z_m();
+        info.zone_bottom_m = t.zone_bottom_m();
+        info.zone_top_m = t.zone_top_m();
+        info.zone_half_width_m = t.zone_half_width_m();
+        info.plate_crossed = t.plate_crossed() as u8;
+        info.pitch_call = t.pitch_call();
     }
     let contact = tl.markers().and_then(|m| m.iter().find(|m| m.kind() == MarkerKind::Contact)).map(|m| m.t());
     info.contact_s = contact.unwrap_or(-1.0);
@@ -613,6 +639,28 @@ pub struct BbBoxScore {
     pub first_inning: u8,
     pub _pad: u8,
     pub teams: [BbBoxTeam; 2],
+    /// Pitcher lines filled in `pitchers[side]`, in the order they first pitched.
+    pub n_pitchers: [u8; 2],
+    pub _pad2: [u8; 2],
+    pub pitchers: [[BbPitchLine; BB_BOX_MAX_PITCHERS]; 2],
+}
+
+/// Most pitchers a side's [`BbBoxScore::pitchers`] holds.
+pub const BB_BOX_MAX_PITCHERS: usize = 8;
+
+/// One pitcher's line in the box score.
+#[repr(C)]
+#[derive(Clone, Copy)]
+pub struct BbPitchLine {
+    /// The id he fields under.
+    pub agent: u16,
+    pub number: u8,
+    pub _pad: u8,
+    /// Pitches thrown (capped at 65535).
+    pub pitches: u16,
+    pub _pad2: u16,
+    pub given: [u8; BB_NAME_LEN],
+    pub family: [u8; BB_NAME_LEN],
 }
 
 fn sat8(x: u32) -> u8 {
@@ -701,8 +749,145 @@ pub unsafe extern "C" fn bb_game_box_score(g: *const BbGame, through_plays: u32,
             t.runs[i] = sat8(runs[first + i]);
             t.hits[i] = sat8(hits.get(first + i).copied().unwrap_or(0));
         }
+        let n = b.pitching[side].len().min(BB_BOX_MAX_PITCHERS);
+        box_.n_pitchers[side] = n as u8;
+        for (dst, l) in box_.pitchers[side].iter_mut().zip(&b.pitching[side][..n]) {
+            *dst = BbPitchLine {
+                agent: l.agent,
+                number: l.number,
+                _pad: 0,
+                pitches: sat16(l.pitches),
+                _pad2: 0,
+                given: name_field(l.name.strip_suffix(l.family.as_str()).unwrap_or(&l.name).trim_end()),
+                family: name_field(&l.family),
+            };
+        }
     }
     unsafe { *out = box_ };
+    1
+}
+
+/// Most pieces [`BbPark::wall`] can hold.
+pub const BB_PARK_MAX_WALL: usize = 96;
+/// Straight pieces the outfield fence's curve is cut into for [`BbPark::wall`].
+pub const BB_PARK_FENCE_PIECES: usize = 64;
+
+/// One straight piece of the playing field's boundary: it runs from `from` to the next
+/// piece's `from` (the last one back to the first).
+#[repr(C)]
+#[derive(Clone, Copy, Debug, Default, PartialEq)]
+pub struct BbWallPiece {
+    /// Where the piece starts (sim frame, m).
+    pub from: [f32; 2],
+    /// Height of its top above the field, m: 0 at a dugout's opening.
+    pub top_m: f32,
+    /// 0 outfield fence, 1 backstop, 2 side wall (parallel to a foul line), 3 the stands
+    /// closing in to a foul pole, 4 a dugout's opening in the side wall.
+    pub kind: u8,
+    pub _pad: [u8; 3],
+}
+
+/// The park as the physics has it (`bb_physics::ground::Field`, physics-spec §9.5), for a
+/// client to draw: nothing here is decided by the client, and nothing a client does with it
+/// reaches the game.
+#[repr(C)]
+#[derive(Clone, Copy, Debug, PartialEq)]
+pub struct BbPark {
+    /// The boundary as a closed loop of `n_wall` straight pieces, clockwise seen from above
+    /// (the field is on the right of each piece): from the left-field pole along the fence
+    /// to the right-field pole, down the first-base side, across the backstop and up the
+    /// third-base side. The fence's curve is cut into chords whose ends are on it.
+    pub n_wall: u32,
+    pub wall: [BbWallPiece; BB_PARK_MAX_WALL],
+    /// The foot of each foul pole (left field, right field).
+    pub poles: [[f32; 2]; 2],
+    /// First, second and third base (the corner of the infield square each one marks).
+    pub bases: [[f32; 2]; 3],
+    /// Front edge of the pitcher's rubber, m from the rear point of home along +Y.
+    pub rubber_m: f32,
+    /// The ground is infield dirt within this distance of the rear point of home, grass beyond.
+    pub dirt_radius_m: f32,
+    /// Heights, m: the outfield fence, the stands' wall in foul ground, the screen over the
+    /// walls behind home, and a dugout's roof (a ball under it goes into the dugout).
+    pub fence_height_m: f32,
+    pub foul_wall_height_m: f32,
+    pub backstop_height_m: f32,
+    pub dugout_roof_m: f32,
+}
+
+/// The ground point `s` along a foul line and `c` off it into foul ground, on the first-base
+/// side (`side` +1) or the third-base side (−1).
+fn line_point(side: f64, s: f64, c: f64) -> [f64; 2] {
+    let r = core::f64::consts::FRAC_1_SQRT_2;
+    [side * (s + c) * r, (s - c) * r]
+}
+
+fn park_of(f: &bb_physics::ground::Field) -> BbPark {
+    let mut wall = [BbWallPiece::default(); BB_PARK_MAX_WALL];
+    let mut n = 0;
+    let mut put = |p: [f64; 2], top: f64, kind: u8| {
+        wall[n] = BbWallPiece { from: [p[0] as f32, p[1] as f32], top_m: top as f32, kind, _pad: [0; 3] };
+        n += 1;
+    };
+    let poles = [line_point(-1.0, f.fence_lf, 0.0), line_point(1.0, f.fence_rf, 0.0)];
+    // The fence, pole to pole. Its ends are the poles themselves (the same points the walls
+    // of foul ground close in to), not a rounding of them.
+    for i in 0..BB_PARK_FENCE_PIECES {
+        let p = if i == 0 {
+            poles[0]
+        } else {
+            let th = core::f64::consts::FRAC_PI_2 * (i as f64 / BB_PARK_FENCE_PIECES as f64 - 0.5);
+            let r = f.fence_at(th);
+            [r * th.sin(), r * th.cos()]
+        };
+        put(p, f.wall_height, 0);
+    }
+    // Where a side wall meets the backstop, as a distance along the line (behind home).
+    let corner_s = f.foul_clear_m - f.backstop_m * core::f64::consts::SQRT_2;
+    // First-base side, from the pole down to the backstop.
+    put(poles[1], f.foul_wall_height, 3);
+    put(line_point(1.0, f.foul_taper_m, f.foul_clear_m), f.foul_wall_height, 2);
+    put(line_point(1.0, f.dugout_to_m, f.foul_clear_m), 0.0, 4);
+    put(line_point(1.0, f.dugout_from_m, f.foul_clear_m), f.foul_wall_height, 2);
+    put(line_point(1.0, 0.0, f.foul_clear_m), f.backstop_height, 2);
+    put(line_point(1.0, corner_s, f.foul_clear_m), f.backstop_height, 1);
+    // Third-base side, from the backstop up to the pole.
+    put(line_point(-1.0, corner_s, f.foul_clear_m), f.backstop_height, 2);
+    put(line_point(-1.0, 0.0, f.foul_clear_m), f.foul_wall_height, 2);
+    put(line_point(-1.0, f.dugout_from_m, f.foul_clear_m), 0.0, 4);
+    put(line_point(-1.0, f.dugout_to_m, f.foul_clear_m), f.foul_wall_height, 2);
+    put(line_point(-1.0, f.foul_taper_m, f.foul_clear_m), f.foul_wall_height, 3);
+    let xy = |p: [f64; 2]| [p[0] as f32, p[1] as f32];
+    let base = |b: u8| {
+        let p = bb_game::play::base_pos(b);
+        [p.x as f32, p.y as f32]
+    };
+    BbPark {
+        n_wall: n as u32,
+        wall,
+        poles: [xy(poles[0]), xy(poles[1])],
+        bases: [base(1), base(2), base(3)],
+        rubber_m: bb_physics::pitch::RUBBER_Y as f32,
+        dirt_radius_m: f.dirt_radius as f32,
+        fence_height_m: f.wall_height as f32,
+        foul_wall_height_m: f.foul_wall_height as f32,
+        backstop_height_m: f.backstop_height as f32,
+        dugout_roof_m: f.dugout_roof_m as f32,
+    }
+}
+
+/// The park the game is played in. Fills `*out` and returns 1; −1 on a null argument or a
+/// freed game. Read-only: it never changes the game.
+///
+/// # Safety
+/// `g` must come from [`bb_game_create`]; `out` must be a valid pointer.
+#[unsafe(no_mangle)]
+pub unsafe extern "C" fn bb_game_park(g: *const BbGame, out: *mut BbPark) -> i32 {
+    if g.is_null() || out.is_null() {
+        return -1;
+    }
+    let Some(game) = unsafe { &*g }.game.as_ref() else { return -1 };
+    unsafe { *out = park_of(game.field()) };
     1
 }
 
@@ -716,7 +901,7 @@ mod tests {
     fn plays_a_game_through_the_abi() {
         let g = bb_game_create(3);
         let mut n = 0;
-        let mut dead = [0u32; 4];
+        let mut dead = [0u32; 5];
         loop {
             let (mut p, mut len) = (std::ptr::null_mut(), 0usize);
             let r = unsafe { bb_game_advance(g, &mut p, &mut len) };
@@ -734,7 +919,7 @@ mod tests {
             assert_eq!(unsafe { bb_timeline_info(p, len, &mut info) }, 1);
             if info.dead_s >= 0.0 {
                 dead[info.dead_reason as usize] += 1;
-                assert!((1..=3).contains(&info.dead_reason) && info.dead_s <= info.duration_s + 1e-4, "{}", info.dead_s);
+                assert!((1..=4).contains(&info.dead_reason) && info.dead_s <= info.duration_s + 1e-4, "{}", info.dead_s);
                 let last = tl.ball().unwrap().segments().unwrap().iter().filter_map(|s| s.knots()).flat_map(|k| k.iter()).map(|k| k.t()).fold(0.0f32, f32::max);
                 assert!(last >= info.dead_s - 0.05, "the track ends at {last} before the ball was dead at {}", info.dead_s);
                 // Where it crossed: on the boundary (a ball radius inside a wall's plane, or on
@@ -765,10 +950,11 @@ mod tests {
         let r = bb_game::game::simulate_game(3);
         assert_eq!((a, h), (r.runs[0], r.runs[1]));
         assert!(n > 150);
-        // A game has about ten foul balls into the seats. (Home runs, when there are any, are
-        // checked above; whether this one game has one changes with the game, and home runs
-        // are covered over many games by `bb_game/tests/home_run_trot.rs`.)
-        assert!(dead[1] >= 3, "dead balls by reason {dead:?}");
+        // A game has about ten foul balls into the seats, each marked as a foul (4), not as a
+        // throw out of play (1). (Home runs, when there are any, are checked above; whether this
+        // one game has one changes with the game, and home runs are covered over many games by
+        // `bb_game/tests/home_run_trot.rs`.)
+        assert!(dead[4] >= 3, "dead balls by reason {dead:?}");
     }
 
     fn text(field: &[u8]) -> &str {
@@ -907,7 +1093,9 @@ mod tests {
     // ball in play the batter-runner goes somewhere.
     #[test]
     fn timelines_sample_to_plausible_frames() {
-        let g = bb_game_create(5);
+        // Game 6: it has dives to sample (game 5 had none once the tracking read carried its
+        // persistent error as a state, 2026-11-17).
+        let g = bb_game_create(6);
         let (mut plays, mut moved, mut contacts, mut awards) = (0, 0, 0, 0);
         let mut any_on = false;
         let (mut held, mut thrown, mut dives) = (0u32, 0u32, 0u32);
@@ -1123,6 +1311,93 @@ mod tests {
         assert_eq!(active_dives(&marks, 1.2)[0].dir, [1.0, 0.0]);
         assert!(active_dives(&marks, 4.0).is_empty());
     }
+    /// The strike-zone box (hud.md step 3): every taken pitch's call agrees with where the
+    /// exported crossing point puts the ball against the exported zone (the rule: a strike
+    /// when the ball touches the zone), and the zone is a batter's (knees to letters, the
+    /// plate's width).
+    #[test]
+    fn a_taken_pitch_is_called_by_where_it_crossed_the_exported_zone() {
+        let g = bb_game_create(9);
+        let (mut blob, mut len) = (std::ptr::null_mut(), 0usize);
+        let r = bb_physics::ball::BallParams::default().radius;
+        let (mut balls, mut strikes, mut swung) = (0, 0, 0);
+        while unsafe { bb_game_advance(g, &mut blob, &mut len) } == 1 {
+            let mut info = BbPlayInfo::default();
+            assert_eq!(unsafe { bb_timeline_info(blob, len, &mut info) }, 1);
+            unsafe { bb_blob_free(blob, len) };
+            assert!((1..=7).contains(&info.pitch_call), "every pitch has a call");
+            assert!((0.35..0.75).contains(&info.zone_bottom_m) && (0.85..1.30).contains(&info.zone_top_m), "{} {}", info.zone_bottom_m, info.zone_top_m);
+            assert!((info.zone_half_width_m as f64 - 8.5 * 0.0254).abs() < 1e-6);
+            if info.plate_crossed == 0 || !matches!(info.pitch_call, 1 | 2) {
+                swung += (info.pitch_call >= 3) as u32;
+                continue;
+            }
+            // The ball's circle against the rectangle, written out here from the rule.
+            let dx = (info.plate_x_m.abs() - info.zone_half_width_m).max(0.0) as f64;
+            let dz = (info.zone_bottom_m - info.plate_z_m).max(info.plate_z_m - info.zone_top_m).max(0.0) as f64;
+            let touches = dx * dx + dz * dz <= r * r * (1.0 + 1e-4);
+            if info.pitch_call == 2 { strikes += 1 } else { balls += 1 }
+            assert_eq!(touches, info.pitch_call == 2, "play {}: ({:.3}, {:.3}) in [{:.3}, {:.3}] call {}", info.play_index, info.plate_x_m, info.plate_z_m, info.zone_bottom_m, info.zone_top_m, info.pitch_call);
+        }
+        assert!(balls > 20 && strikes > 10 && swung > 20, "{balls} {strikes} {swung}");
+        unsafe { bb_game_free(g) };
+    }
+
+    /// What a client shows of the pitcher (hud.md step 2): each timeline's pitch type is the
+    /// one the event log records as thrown, and the box score's pitch count for a side is
+    /// the number of timelines the client was handed with that side in the field, at any
+    /// point in the game, with the pitcher's name from the roster.
+    #[test]
+    fn pitch_type_and_pitch_count_agree_with_what_the_client_was_handed() {
+        let g = bb_game_create(5);
+        let (mut blob, mut len) = (std::ptr::null_mut(), 0usize);
+        let mut types = Vec::new();
+        let mut thrown = [0u32; 2];
+        while unsafe { bb_game_advance(g, &mut blob, &mut len) } == 1 {
+            let mut info = BbPlayInfo::default();
+            assert_eq!(unsafe { bb_timeline_info(blob, len, &mut info) }, 1);
+            unsafe { bb_blob_free(blob, len) };
+            types.push(info.pitch_type);
+            // The view is after the pitch; a pitch that ends a half shows the next half, so
+            // the fielding side is read from the log below, not from here.
+            let n = types.len() as u32;
+            if n % 37 == 0 || n < 3 {
+                let mut b: BbBoxScore = unsafe { std::mem::zeroed() };
+                assert_eq!(unsafe { bb_game_box_score(g, n, &mut b) }, 1);
+                let total: u32 = (0..2).map(|s| (0..b.n_pitchers[s] as usize).map(|i| b.pitchers[s][i].pitches as u32).sum::<u32>()).sum();
+                assert_eq!(total, n, "every pitch handed out is some pitcher's");
+            }
+        }
+        let game = unsafe { &*g }.game.as_ref().unwrap();
+        let bytes = game.log_through(u32::MAX);
+        let log = bb_schema::log::read(&bytes).unwrap();
+        let mut logged = Vec::new();
+        for play in &log.plays {
+            for e in play.events().into_iter().flatten() {
+                if let Some(p) = e.body_as_pitch_released() {
+                    logged.push(p.pitch_type().0);
+                    thrown[(p.pitcher() >> 8) as usize & 1] += 1;
+                }
+            }
+        }
+        assert_eq!(types, logged);
+        assert!(types.iter().all(|&t| (1..=10).contains(&t)), "every pitch has a type");
+        assert!(types.iter().collect::<std::collections::BTreeSet<_>>().len() >= 3, "a pitcher mixes his pitches");
+        let mut b: BbBoxScore = unsafe { std::mem::zeroed() };
+        assert_eq!(unsafe { bb_game_box_score(g, u32::MAX, &mut b) }, 1);
+        for side in 0..2 {
+            assert_eq!(b.n_pitchers[side], 1, "no substitutions yet");
+            let l = &b.pitchers[side][0];
+            assert_eq!(l.pitches as u32, thrown[side]);
+            assert_eq!(l.agent, ((side as u16) << 8) | 0x81);
+            let mut who: BbPlayer = unsafe { std::mem::zeroed() };
+            assert_eq!(unsafe { bb_game_player(g, l.agent, &mut who) }, 1);
+            assert_eq!((l.number, l.family), (who.number, who.family));
+            assert!(l.family[0] != 0);
+        }
+        unsafe { bb_game_free(g) };
+    }
+
     /// The box score across the ABI is `bb_stats::box_score` of the same log (a pure function
     /// of the log, computed when asked), however often it is asked, and it adds up: lines to
     /// totals, innings to the score, and the same numbers at the end as from the finished game.
@@ -1209,4 +1484,98 @@ mod tests {
         }
         unsafe { bb_game_free(g) };
     }
+    /// The park a client draws is the park the physics plays in: every piece of the exported
+    /// boundary lies on the physics' own boundary, is the kind and height the physics says
+    /// it is there, and the loop closes around the field with the field on its right.
+    #[test]
+    fn the_exported_park_is_the_one_the_physics_uses() {
+        use bb_physics::ground::{Field, WallKind};
+        let g = bb_game_create(11);
+        let before = unsafe { &*g }.game.as_ref().unwrap().log_through(u32::MAX);
+        let mut park: BbPark = unsafe { std::mem::zeroed() };
+        assert_eq!(unsafe { bb_game_park(g, &mut park) }, 1);
+        assert_eq!(unsafe { bb_game_park(std::ptr::null(), &mut park) }, -1);
+        assert_eq!(unsafe { bb_game_park(g, std::ptr::null_mut()) }, -1);
+        assert_eq!(unsafe { &*g }.game.as_ref().unwrap().log_through(u32::MAX), before, "reading the park changed the game");
+        let f = Field::default();
+        let n = park.n_wall as usize;
+        assert!(n > BB_PARK_FENCE_PIECES && n <= BB_PARK_MAX_WALL);
+        let mut turned = 0.0;
+        let mut kinds = [0usize; 5];
+        for i in 0..n {
+            let (a, b) = (park.wall[i], park.wall[(i + 1) % n]);
+            let (ax, ay, bx, by) = (a.from[0] as f64, a.from[1] as f64, b.from[0] as f64, b.from[1] as f64);
+            let len = (bx - ax).hypot(by - ay);
+            assert!(len > 0.5, "piece {i} has no length");
+            kinds[a.kind as usize] += 1;
+            // Both ends are on the boundary: no clearance either way (f32 positions; the
+            // fence's distance is along the ray from home, so its chord ends are exact too).
+            for (x, y) in [(ax, ay), (bx, by)] {
+                let d = f.ball_clearance(x, y, 0.0).dist;
+                assert!(d.abs() < 2e-4, "piece {i} end ({x:.3}, {y:.3}) is {d:.5} m off the boundary");
+            }
+            // A step into the field from the middle of the piece (to its right) is inside by
+            // about that step, and the nearest boundary there is this piece's kind and height.
+            let (mx, my) = ((ax + bx) * 0.5, (ay + by) * 0.5);
+            let (rx, ry) = ((by - ay) / len, -(bx - ax) / len);
+            let step = 0.25;
+            let w = f.ball_clearance(mx + rx * step, my + ry * step, 0.0);
+            // A fence chord sags inside the curve by under 3 cm (checked below), and the
+            // physics measures the fence along the ray from home, which near a pole crosses
+            // the fence up to 29° off square: up to 1.14 times the square distance.
+            let (sag, slant) = if a.kind == 0 { (0.03, 1.14) } else { (1e-4, 1.0) };
+            assert!(w.dist > step - 1e-3 && w.dist < step * slant + sag + 1e-3, "piece {i} (kind {}): {:.4} m inside, stepped {step}", a.kind, w.dist);
+            let out = f.ball_clearance(mx - rx * (step + sag), my - ry * (step + sag), 0.0);
+            assert!(out.dist < 0.0, "piece {i}: a step to its left is still in the field");
+            let kind = match w.kind {
+                WallKind::Fence => 0,
+                WallKind::Backstop => 1,
+                WallKind::Side if f.is_dugout(&w) => 4,
+                WallKind::Side => 2,
+                WallKind::Taper => 3,
+            };
+            assert_eq!(a.kind, kind, "piece {i} at ({mx:.2}, {my:.2})");
+            assert!((a.top_m as f64 - f.wall_top(&w)).abs() < 1e-6, "piece {i}: top {} against the physics' {}", a.top_m, f.wall_top(&w));
+            // Clockwise all the way round: the turn at each corner sums to one full turn.
+            let c = park.wall[(i + 2) % n];
+            let (ux, uy, vx, vy) = (bx - ax, by - ay, c.from[0] as f64 - bx, c.from[1] as f64 - by);
+            turned += (ux * vy - uy * vx).atan2(ux * vx + uy * vy);
+        }
+        assert!((turned + 2.0 * std::f64::consts::PI).abs() < 1e-6, "the loop turns {turned:.4} rad, not one clockwise turn");
+        assert_eq!(kinds, [BB_PARK_FENCE_PIECES, 1, 6, 2, 2]);
+        // The fence's chords follow the curve at every angle, not only at their ends: a point
+        // on the physics' fence is never more than a chord's sag from the drawn one.
+        for k in 0..=900 {
+            let th = (k as f64 / 900.0 - 0.5) * std::f64::consts::FRAC_PI_2;
+            let r = f.fence_at(th);
+            let (x, y) = (r * th.sin(), r * th.cos());
+            let near = (0..BB_PARK_FENCE_PIECES)
+                .map(|i| {
+                    let (a, b) = (park.wall[i].from, park.wall[i + 1].from);
+                    let (ax, ay, dx, dy) = (a[0] as f64, a[1] as f64, (b[0] - a[0]) as f64, (b[1] - a[1]) as f64);
+                    let t = (((x - ax) * dx + (y - ay) * dy) / (dx * dx + dy * dy)).clamp(0.0, 1.0);
+                    (x - ax - t * dx).hypot(y - ay - t * dy)
+                })
+                .fold(f64::INFINITY, f64::min);
+            assert!(near < 0.03, "the fence at {th:.3} rad is {near:.3} m from the drawn one");
+        }
+        // Poles, bases, rubber and the dirt are where the game has them.
+        let d = 90.0 * 0.3048 / std::f64::consts::SQRT_2;
+        for (got, want) in park.bases.iter().zip([[d, d], [0.0, 2.0 * d], [-d, d]]) {
+            assert!((got[0] as f64 - want[0]).abs() < 1e-5 && (got[1] as f64 - want[1]).abs() < 1e-5, "{got:?} {want:?}");
+        }
+        for (pole, side) in park.poles.iter().zip([-1.0, 1.0]) {
+            let (x, y) = (pole[0] as f64, pole[1] as f64);
+            assert!((x - side * y).abs() < 1e-4 && (x.hypot(y) - 330.0 * 0.3048).abs() < 1e-4, "pole at ({x}, {y})");
+        }
+        assert_eq!(park.poles[0], park.wall[0].from);
+        assert_eq!(park.poles[1], park.wall[BB_PARK_FENCE_PIECES].from);
+        assert!((park.rubber_m as f64 - 60.5 * 0.3048).abs() < 1e-3);
+        let edge = park.dirt_radius_m as f64;
+        assert_eq!(f.surface_at(0.0, edge - 0.01), bb_physics::ground::DIRT);
+        assert_eq!(f.surface_at(0.0, edge + 0.01), bb_physics::ground::GRASS);
+        assert_eq!((park.fence_height_m, park.foul_wall_height_m, park.backstop_height_m, park.dugout_roof_m), (f.wall_height as f32, f.foul_wall_height as f32, f.backstop_height as f32, f.dugout_roof_m as f32));
+        unsafe { bb_game_free(g) };
+    }
+
 }
