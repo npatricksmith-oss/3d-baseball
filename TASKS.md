@@ -19,13 +19,22 @@ Status: `[ ]` not started · `[~]` partly done · `[?]` needs an owner decision
 
 **State.** Context pruning steps 1–4 are merged and pushed (docs audit, code comments and examples, superseded-figure banners, branch and worktree cleanup with the owner's OK as Q28: local branches left are main, `work/runner-start`, the held `work/pitcher-fielding` and `work/integrate-agy-calib`, and `work/swing-chores`). Codex was reset on 2026-11-17: Codex Sol reviews again.
 
-**Q27 merged (2026-11-18), with its review fix P2-1 (the runner's first check reads his own observation).** Runners move at contact (agent-models §6.1; [timing note](docs/calibration/2026-11-17-runner-timing.md); ledger 2026-11-18): runs 4.33 [4.31]; second to home on singles 53% (MLB 61.7%), first to third 36% (31.7%). **In progress:** the [contact-read review](docs/reviews/2026-11-18-codex-contact-read-review.md)'s P2-1, P2-2, P2-3 and P3-1, on `work/runner-catch-read`: the four fixes are committed by Codex (out of usage); a Claude worker (Opus 5.5 high, herdr-app tab "Workers", terminal `t28`, brief `WORKER-CLAUDE.md`) finishes it. **Regression to fix first:** double-offs on catches at 10–25° rose 13.5 → 59.0 per 300 games (MLB about 25.7). P2-3 is an observation-rule breach older than Q27 (a runner reads a thrown ball's exact state). When it reports: run tests and the standard run yourself, review, merge. Still open: two-out sends to center 99% (band 75–91%) and double-offs on catches below 10° (59.5 per 300 games against 25.7).
+**Q27 merged (2026-11-18), with its review fix P2-1 (the runner's first check reads his own observation).** Runners move at contact (agent-models §6.1; [timing note](docs/calibration/2026-11-17-runner-timing.md)).
+
+**Next session starts here: verify, review and merge `work/runner-catch-read`** (worktree `.claude/worktrees/runner-decision`, base `bc69e96`, tip `9871b05`). It fixes the [contact-read review](docs/reviews/2026-11-18-codex-contact-read-review.md)'s P2-1, P2-2, P2-3 and P3-1 (commits `902cd73`, `1f2dea0`, `88777c9`, `4422fde`, by Codex) and the owner's close-catch rule (agent-models §6.3: an uncertain runner holds partway until the umpire's catch call). A Claude worker then fixed the regression those caused (`fd5fb80`, `c90cc19`; docs `a055b44`, `9871b05`). Worker's figures, both seed sets, `bc69e96` → now:
+- doubled off on catches at 10–25°: 13.5 → 19.0 per 300 games (it was 59.0 at `4422fde`; MLB about 25.7); below 10°: 59.5 → 59.5;
+- second to home on singles 52.4% → 56.7% (MLB 61.7%); first to third 35.8% → 33.3% (31.7%); two-out sends to center 117/118 (MLB 75–91%);
+- runs 4.33 [4.31] → 4.38 [4.53]; fly balls with 2+ outs .002 [.003] → .006 [.005].
+
+Steps: (1) `touch` the changed sources, run `cargo test --workspace --release` and both standard runs yourself (`taskset -c 0-7 nice`); the worker's final full test count was not seen by the lead. (2) Review by a Claude model that wrote none of it (Codex was near its limit on 2026-11-18; use Codex Sol if it has reset). Ask it especially about seed 1000's +0.22 runs (untraced), the 20%/80% catch cut-offs and 0.30 m spread in §6.3, and the observation rule in P2-3's noisy throw look. (3) Resolution, merge, push. Workers files `WORKER-*.md` in the worktree are untracked; delete them after the merge. The worker pane is closed.
+
+Still open after it: two-out sends to center (the two-out contact clock); double-offs below 10° (59.5 against about 26); fly balls with 2+ outs above the base rate; a runner never dives back to a bag.
 
 **Lesson:** a worker once reported done on a stale test binary. Before merging a worker's branch, `touch` the changed source and run the tests and the standard run yourself.
 
 **Numbers on main** (standard run, seeds 0–299 [1000–1299]; ledger §1): runs 4.12 [4.14] against a real 4.39; hits on GB/LD/FB/PU .307/.683/.109/.006 [.308/.683/.098/.004] against about .245/.68/.13/.02; HR/PA 2.88% [2.82%] against 3.0%; routine flies caught .980.
 
-**Next:** the `work/runner-catch-read` branch, then item 1 of "Open sim work" below. Last pruning step: a check script that fails on dead paths and on this file growing past its cap. The [prune notes](docs/archive/2026-11-17-docs-prune-notes.md) list decisions (D1, D4, D6, D9, D17, D19/D20) that disagree with the code; put them to the owner as numbered questions (Q29 on).
+**Next:** the `work/runner-catch-read` branch (above), then item 1 of "Open sim work" below. Last pruning step: a check script that fails on dead paths and on this file growing past its cap. The [prune notes](docs/archive/2026-11-17-docs-prune-notes.md) list decisions (D1, D4, D6, D9, D17, D19/D20) that disagree with the code; put them to the owner as numbered questions (Q29 on).
 
 ---
 
