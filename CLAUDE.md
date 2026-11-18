@@ -102,9 +102,9 @@ Game logic in C++; Blueprints only for thin visual wiring. Script asset setup wi
 - Commit in small, described steps. The remote is `origin` on GitHub; the session's lead agent may merge tested work into `main` and push it on its own judgment (owner, 2026-11-14), and says what it pushed, **but only when that lead is a Claude Fable model (any effort; owner, 2026-11-15) or Claude Opus 5.5 at high effort**. Any other model, or Opus below high effort, asks the owner first. Worker agents do not merge into `main` or push. Never force-push without the owner's OK.
 - **Official rules (owner, 2026-11-14):** a fix that only brings the game in line with the Official Baseball Rules (scoring included) is the lead's to make without asking the owner. It still gets tests and a review like any change.
 - Record owner-relevant choices you make in the relevant spec or PLAN §1 (as "Proposed" if the owner has not ruled).
-- **Standard review protocol (owner, 2026-10-31):** every substantive change set (a milestone step, a risky subsystem, or the end of a work session with code changes) gets an independent review by Codex Sol before it is considered done. Run it in the background and do not poll:
+- **Standard review protocol (owner, 2026-10-31):** every substantive change set (a milestone step, a risky subsystem, or the end of a work session with code changes) gets an independent review by Codex Sol (`gpt-6.2-sol` since 2026-11-17, owner) before it is considered done. Run it in the background and do not poll:
   ```bash
-  codex exec -m gpt-6.1-sol -c model_reasoning_effort="high" -s workspace-write -C "<repo root>" - < prompt.md
+  codex exec -m gpt-6.2-sol -c model_reasoning_effort="high" -s workspace-write -C "<repo root>" - < prompt.md
   ```
   The prompt names the commit range, the files and questions ranked by risk, and the invariants above. It tells Codex to verify claims by running tests or probes, edit no source, test, spec, or TASKS file, and write only `docs/reviews/<date>-codex-<topic>-review.md`, with findings ranked P1–P3, a Verification section, and `## Resolution` set to "Open." Afterwards: commit the review, fix or defer every finding, write the Resolution, and list unresolved findings first in TASKS.md "Resume here".
 
