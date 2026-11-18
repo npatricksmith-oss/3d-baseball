@@ -71,7 +71,7 @@ bin/                   owner's desktop launcher: play.sh (Unreal client, or the 
 - Codex CLI (`codex exec`) is available for independent validation/review passes.
 - Unreal Engine 5.8.4 (precompiled) belongs at `~/UnrealEngine/5.8.4`, outside the repository. `bin/play.sh` asks before falling back to Rerun when it is missing.
 - Build the client: `Engine/Build/BatchFiles/Linux/Build.sh BaseballClientEditor Linux Development -project=<abs path>/client/BaseballClient.uproject` (6 s incremental).
-- Check visual changes headlessly: `client/run.sh 7 -RenderOffscreen -BbShots=6`, then read the PNGs in the generated Shots folder. Fixed sets of pictures, each described in the section named:
+- Check visual changes headlessly: `client/run.sh 7 -RenderOffscreen -BbShots=6`, then read the PNGs in `client/Saved/Shots` (made by the run). Fixed sets of pictures, each described in the section named:
 
   | Flag | What it shoots | Where it is described |
   |---|---|---|
@@ -125,7 +125,7 @@ Game logic in C++; Blueprints only for thin visual wiring. Script asset setup wi
   ```bash
   codex exec -m gpt-6.2-sol -c model_reasoning_effort="high" -s workspace-write -C "<repo root>" - < prompt.md
   ```
-  The prompt names the commit range, the files and questions ranked by risk, and the invariants above. It tells Codex to verify claims by running tests or probes, edit no source, test, spec, or TASKS file, and write only a dated Codex review Markdown file under `docs/reviews/`, with findings ranked P1–P3, a Verification section, and `## Resolution` set to "Open." Afterwards: commit the review, fix or defer every finding, write the Resolution, and list unresolved findings first in TASKS.md "Resume here".
+  The prompt names the commit range, the files and questions ranked by risk, and the invariants above. It tells Codex to verify claims by running tests or probes, edit no source, test, spec, or TASKS file, and write only `docs/reviews/<date>-codex-<topic>-review.md`, with findings ranked P1–P3, a Verification section, and `## Resolution` set to "Open." Afterwards: commit the review, fix or defer every finding, write the Resolution, and list unresolved findings first in TASKS.md "Resume here".
 
 ## Usage budget (owner, 2026-11-15)
 
