@@ -4675,8 +4675,9 @@ impl<'a> Sim<'a> {
                     self.r[k].goal = self.r[k].start;
                 }
             }
-            // Halfway on a ball in the air: once it is down (or fielded on a hop), decide.
-            if self.r[k].hold_s.is_some() && !self.caught() && (!matches!(self.ball, Ball::Free { .. }) || self.out.facts.iter().any(|f| matches!(f, Input::BallTouched { what: Touch::Ground { .. }, .. }))) {
+            // A partway hold ends when the ball comes down. The stationary hold at the
+            // primary lead belongs to the initial read clock, including on an early bounce.
+            if self.r[k].hold_s.is_some_and(|s| s > lead_s(self.r[k].start)) && !self.caught() && (!matches!(self.ball, Ball::Free { .. }) || self.out.facts.iter().any(|f| matches!(f, Input::BallTouched { what: Touch::Ground { .. }, .. }))) {
                 self.r[k].hold_s = None;
                 let b = self.r[k].start;
                 self.runner_decide(k, b);
@@ -9796,6 +9797,25 @@ mod tests {
             sim.t += DT;
         }
         assert!((sim.r[1].s - lead_s(1)).abs() < 1e-9, "runner drifted to {:.2} m", sim.r[1].s - BASE_L);
+    }
+
+    #[test]
+    fn an_early_bounce_does_not_skip_the_contact_read() {
+        const R: AgentId = 0x0007;
+        let fx = fixture(&[(R, 2)]);
+        let mut inp = input(&fx, vec![
+            RunnerIn { id: fx.st.batter, base: 0, speed: 8.2, tau_s: RUNNER_TAU },
+            RunnerIn { id: R, base: 2, speed: 8.2, tau_s: RUNNER_TAU },
+        ]);
+        inp.ball.v = Vec3::new(10.0, 30.0, -25.0);
+        let mut st = fx.st.clone();
+        let (out, ticks) = runner_trace::capture(|| simulate_live(&inp, &mut st));
+        assert!(out.facts.iter().any(|f| matches!(f,
+            Input::BallTouched { t, what: Touch::Ground { .. } } if *t < inp.t_contact + 0.10
+        )));
+        let reading: Vec<_> = ticks.iter().filter(|t| t.runner == R && t.t < inp.t_contact + 0.49).collect();
+        assert!(reading.len() >= 25 && reading.iter().any(|t| t.ball_down));
+        assert!(reading.iter().all(|t| t.cause == runner_trace::Cause::Read));
     }
 
     // Runners take leads, and on a fly that might drop with fewer than two out they go
