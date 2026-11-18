@@ -582,19 +582,42 @@ impl Track {
         tr
     }
 
-    /// A look at block `m` of the ball's state (0 position, 1 velocity): `z` with fresh error
-    /// covariance `rm`, plus his persistent error, whose two components for this block (along
-    /// his line of sight, then across it) move the look by `hb[0]` and `hb[1]` per σ (a Kalman
-    /// update with H = [I on block m, hb on those two]).
-    fn see(&mut self, m_: usize, z: Vec3, rm: Mat3, hb: [Vec3; 2]) {
-        let (i0, b0) = (3 * m_, TB + 2 * m_);
-        let (h0, h1) = (comps(hb[0]), comps(hb[1]));
+    /// A look `z` (agent-models §5.1): a Kalman update with what `look` says he should see
+    /// from the estimate as it stands now (so a velocity look taken after a position look is
+    /// worked out from the corrected position) and the fresh part's covariance there, with H
+    /// the full Jacobian of that expected look in the ball's position and velocity and in his
+    /// persistent error (the persistent error's size and directions depend on where the ball
+    /// is and how fast it goes; an extended Kalman update, the Jacobian by central
+    /// differences).
+    fn see(&mut self, look: &Look, z: Vec3) {
+        let (r, v, b) = (self.x[0], self.x[1], self.b);
+        let (zhat, rm) = look.expect(r, v, b);
+        // H, 3 × TN (the learned acceleration does not enter a look).
+        let mut h = [[0.0; TN]; 3];
+        let unit = [Vec3::new(1.0, 0.0, 0.0), Vec3::new(0.0, 1.0, 0.0), Vec3::new(0.0, 0.0, 1.0)];
+        for k in 0..3 {
+            let dr = unit[k] * LOOK_JAC_M;
+            let jr = comps((look.expect(r + dr, v, b).0 - look.expect(r - dr, v, b).0) * (0.5 / LOOK_JAC_M));
+            let jv = comps((look.expect(r, v + dr, b).0 - look.expect(r, v - dr, b).0) * (0.5 / LOOK_JAC_M));
+            for ax in 0..3 {
+                h[ax][k] = jr[ax];
+                h[ax][3 + k] = jv[ax];
+            }
+        }
+        for j in 0..4 {
+            let (mut bp, mut bm) = (b, b);
+            bp[j] += 1.0;
+            bm[j] -= 1.0;
+            let jb = comps((look.expect(r, v, bp).0 - look.expect(r, v, bm).0) * 0.5);
+            for ax in 0..3 {
+                h[ax][TB + j] = jb[ax];
+            }
+        }
         let p = &self.p;
         // P Hᵀ, TN × 3.
-        let pht: [[f64; 3]; TN] = core::array::from_fn(|i| core::array::from_fn(|ax| p[i][i0 + ax] + p[i][b0] * h0[ax] + p[i][b0 + 1] * h1[ax]));
-        let s = Mat3::from_rows(core::array::from_fn(|ax| core::array::from_fn(|bx| pht[i0 + ax][bx] + h0[ax] * pht[b0][bx] + h1[ax] * pht[b0 + 1][bx]))) + rm;
+        let pht: [[f64; 3]; TN] = core::array::from_fn(|i| core::array::from_fn(|ax| (0..TN).map(|j| p[i][j] * h[ax][j]).sum()));
+        let s = Mat3::from_rows(core::array::from_fn(|ax| core::array::from_fn(|bx| (0..TN).map(|j| h[ax][j] * pht[j][bx]).sum()))) + rm;
         let Some(si) = s.inverse() else { return };
-        let zhat = self.x[m_] + hb[0] * self.b[2 * m_] + hb[1] * self.b[2 * m_ + 1];
         let e = comps(z - zhat);
         let k: [[f64; 3]; TN] = core::array::from_fn(|i| core::array::from_fn(|c| (0..3).map(|ax| pht[i][ax] * si.r[ax][c]).sum()));
         let dx: [f64; TN] = core::array::from_fn(|i| k[i][0] * e[0] + k[i][1] * e[1] + k[i][2] * e[2]);
@@ -612,6 +635,45 @@ impl Track {
         }
         sym_n(&mut np);
         self.p = np;
+    }
+}
+
+/// The step for a look's Jacobian in the ball's position (m) and velocity (m/s) [E: numerical,
+/// small against every distance and speed a look sees].
+const LOOK_JAC_M: f64 = 1e-3;
+
+/// What a fielder knows about one of his looks (agent-models §5.1): from his eyes, at the
+/// ball's position (`vel` false) or its velocity (`vel` true), with the read's σ0 per metre
+/// of distance (`sigma0 / READ_REF_DIST`), its velocity fraction, the scale of the fresh part
+/// (`LOOK_SCALE`, or the first look's shrink) and of the persistent part (`TRACK_BIAS_FRAC`,
+/// times the first look's shrink on the first look).
+#[derive(Clone, Copy, Debug)]
+struct Look {
+    eye: Vec3,
+    vel: bool,
+    sigma_per_m: f64,
+    vel_frac: f64,
+    scale: f64,
+    kb: f64,
+}
+
+impl Look {
+    /// What he expects to see if the ball is at `r` going `v` and his persistent error is `b`
+    /// (in units of its σ): the ball's position (or velocity) moved by the persistent error
+    /// along his line of sight (×`DEPTH_STRETCH`; ×½ of it for velocity) and across it,
+    /// level, at the σ of a look there; and the fresh part's covariance there. The world
+    /// draws a look the same way about the true ball (`Sim::take_looks`).
+    fn expect(&self, r: Vec3, v: Vec3, b: [f64; 4]) -> (Vec3, Mat3) {
+        let (d, u, a, w) = sight_frame(self.eye, r);
+        if self.vel {
+            let base = self.vel_frac * v.norm();
+            let mean = v + u * (0.5 * DEPTH_STRETCH * self.kb * base * b[2]) + a * (self.kb * base * b[3]);
+            (mean, sight_cov(u, a, w, base * self.scale, 0.5 * DEPTH_STRETCH))
+        } else {
+            let base = self.sigma_per_m * d;
+            let mean = r + u * (DEPTH_STRETCH * self.kb * base * b[0]) + a * (self.kb * base * b[1]);
+            (mean, sight_cov(u, a, w, base * self.scale, DEPTH_STRETCH))
+        }
     }
 }
 
@@ -2066,27 +2128,29 @@ impl<'a> Sim<'a> {
                 Some(tr) => (tr.r(), tr.v()),
                 None => (position_from_plate(env, p0, zv, w0, since), zv),
             };
-            // What he knows of his look, linearised about what he expects (the world draws it
-            // about the ball itself): its geometry, the fresh part's covariance, and how his
-            // persistent error moves it (along, across), per σ.
-            let (ds, us, as_, bs) = sight_frame(fd.pos + Vec3::new(0.0, 0.0, EYE_H), re);
-            let (bps, bvs) = (fd.a.read_sigma0 * ds / READ_REF_DIST, fd.a.read_vel_frac * ve.norm());
-            let rp = sight_cov(us, as_, bs, bps * scale, DEPTH_STRETCH);
-            let rv = sight_cov(us, as_, bs, bvs * scale, 0.5 * DEPTH_STRETCH);
+            // What he knows of his looks (the world draws them about the ball itself).
+            let eye = fd.pos + Vec3::new(0.0, 0.0, EYE_H);
             let kb = TRACK_BIAS_FRAC * if k == 0 { scale } else { 1.0 };
-            let hp = [us * (DEPTH_STRETCH * kb * bps), as_ * (kb * bps)];
-            let hv = [us * (0.5 * DEPTH_STRETCH * kb * bvs), as_ * (kb * bvs)];
+            let lp = Look { eye, vel: false, sigma_per_m: fd.a.read_sigma0 / READ_REF_DIST, vel_frac: fd.a.read_vel_frac, scale, kb };
+            let lv = Look { vel: true, ..lp };
             let mut tr = match prior {
                 Some(mut tr) => {
-                    tr.see(0, zp, rp, hp);
-                    tr.see(1, zv, rv, hv);
+                    tr.see(&lp, zp);
+                    tr.see(&lv, zv);
                     tr
                 }
                 None => {
                     let c = TRACK_CONTACT_M * TRACK_CONTACT_M;
                     let pa = Mat3::scale(CURVE_PRIOR * CURVE_PRIOR);
                     let s2 = since * since;
-                    // His velocity read's error: the fresh part and the persistent part.
+                    // His velocity read's error: the fresh part and the persistent part (how
+                    // each of its two components moves the look, per σ).
+                    let (_, rv) = lv.expect(re, ve, [0.0; 4]);
+                    let hv: [Vec3; 2] = core::array::from_fn(|c| {
+                        let mut b = [0.0; 4];
+                        b[2 + c] = 1.0;
+                        lv.expect(re, ve, b).0 - ve
+                    });
                     let gg = Mat3::outer(hv[0], hv[0]) + Mat3::outer(hv[1], hv[1]);
                     let rv = rv + gg;
                     let mut p = [[Mat3::ZERO; 3]; 3];
@@ -2116,7 +2180,7 @@ impl<'a> Sim<'a> {
                             tr.p[TB + 2 + c][ax] = hr[ax];
                         }
                     }
-                    tr.see(0, zp, rp, hp);
+                    tr.see(&lp, zp);
                     tr
                 }
             };
@@ -8091,6 +8155,76 @@ mod tests {
             let (miss, sd) = (m::sqrt(rms[k][0] / n as f64), m::sqrt(rms[k][1] / n as f64));
             println!("{label} before landing: lateral RMS error {miss:.3} m, RMS σ {sd:.3} m, mean e²/σ² {q:.2}");
             assert!(q > 0.5 && q < 2.0, "{label} before landing: mean e²/σ² {q:.2} (RMS error {miss:.3} m against σ {sd:.3} m)");
+        }
+    }
+
+    // Agent-models §5.1, one look's update with a persistent error he has learned (Codex
+    // track-bias review P2-1). The persistent error's size and directions depend on where the
+    // ball is (its range, his line of sight) and how fast it goes, so once his estimate of it
+    // is not zero the look's Jacobian is not the identity. Isolated from flight: a belief with
+    // the ball's position known to σ 0.5 m per axis and its velocity to 1 m/s, his persistent
+    // error known exactly (and not zero), and the ball drawn from that belief; a position
+    // look and then a velocity look drawn as the world draws them (about the true ball, with
+    // fresh noise and that persistent error). Over 2,000 draws, along each direction of his
+    // line of sight (along it, across it level, across it upward) the mean of (error)² / (his
+    // own variance) after both looks, for position and for velocity, is that of a unit
+    // normal, 1, within 0.85–1.15 (the standard error over 2,000 is about 0.03), for three
+    // geometries (near and low, far and high, a liner to his side) and three persistent
+    // errors, among them a range error of −2σ (with the identity Jacobian that gave 2.4).
+    #[test]
+    fn a_look_with_a_learned_persistent_error_reports_a_covariance_that_covers_its_error() {
+        let eye = Vec3::new(0.0, 0.0, EYE_H);
+        let a = FielderAttrs::average(CF);
+        let cases = [
+            (Vec3::new(0.0, 10.0, 3.0), Vec3::new(1.0, -6.0, -9.0)),
+            (Vec3::new(6.0, 40.0, 22.0), Vec3::new(2.0, 18.0, 4.0)),
+            (Vec3::new(-9.0, 25.0, 1.5), Vec3::new(-12.0, 30.0, 2.0)),
+        ];
+        let biases = [[-2.0, 0.0, 0.0, 0.0], [0.0, 2.0, 0.0, -2.0], [2.0, -2.0, 2.0, 2.0]];
+        let n = 2000;
+        for (ci, &(r0, v0)) in cases.iter().enumerate() {
+            for (bi, &bias) in biases.iter().enumerate() {
+                let lp = Look { eye, vel: false, sigma_per_m: a.read_sigma0 / READ_REF_DIST, vel_frac: a.read_vel_frac, scale: LOOK_SCALE, kb: TRACK_BIAS_FRAC };
+                let lv = Look { vel: true, ..lp };
+                let (_, u, al, w) = sight_frame(eye, r0);
+                let dirs = [u, al, w];
+                let mut sums = [[0.0; 3]; 2];
+                for j in 0..n {
+                    let mut g = rng(4242, (ci * 3 + bi) as u32, 0, Purpose::FielderLook, j);
+                    let mut nrm = || g.truncated_normal(4.0);
+                    let r = r0 + Vec3::new(0.5 * nrm(), 0.5 * nrm(), 0.5 * nrm());
+                    let v = v0 + Vec3::new(nrm(), nrm(), nrm());
+                    // The world's look about the true ball: its own geometry, fresh and
+                    // persistent parts.
+                    let (d, ut, at, wt) = sight_frame(eye, r);
+                    let bp = a.read_sigma0 * d / READ_REF_DIST;
+                    let sp = bp * LOOK_SCALE;
+                    let zp = r + ut * (DEPTH_STRETCH * (sp * nrm() + TRACK_BIAS_FRAC * bp * bias[0])) + at * (sp * nrm() + TRACK_BIAS_FRAC * bp * bias[1]) + wt * (sp * nrm());
+                    let bv = a.read_vel_frac * v.norm();
+                    let sv = bv * LOOK_SCALE;
+                    let zv = v + ut * (0.5 * DEPTH_STRETCH * (sv * nrm() + TRACK_BIAS_FRAC * bv * bias[2])) + at * (sv * nrm() + TRACK_BIAS_FRAC * bv * bias[3]) + wt * (sv * nrm());
+                    let mut tr = Track::new(0, 0.0, [r0, v0, Vec3::ZERO], [[Mat3::scale(0.25), Mat3::ZERO, Mat3::ZERO], [Mat3::ZERO, Mat3::IDENTITY, Mat3::ZERO], [Mat3::ZERO, Mat3::ZERO, Mat3::IDENTITY]]);
+                    tr.b = bias;
+                    for k in 0..4 {
+                        tr.p[TB + k][TB + k] = 0.0;
+                    }
+                    tr.see(&lp, zp);
+                    tr.see(&lv, zv);
+                    for (m_, truth) in [(0, r), (1, v)] {
+                        let e = tr.x[m_] - truth;
+                        let pm = tr.blk(m_, m_);
+                        for (k, dir) in dirs.iter().enumerate() {
+                            let q = e.dot(*dir);
+                            sums[m_][k] += q * q / dir.dot(pm * *dir);
+                        }
+                    }
+                }
+                for (m_, what) in ["position", "velocity"].iter().enumerate() {
+                    let q = sums[m_].map(|x| x / n as f64);
+                    println!("case {ci}, bias {bias:?}: {what} mean e²/σ² along / across / up {q:.3?}");
+                    assert!(q.iter().all(|&x| x > 0.85 && x < 1.15), "case {ci}, bias {bias:?}: {what} mean e²/σ² {q:.3?}");
+                }
+            }
         }
     }
 
