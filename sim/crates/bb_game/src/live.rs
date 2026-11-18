@@ -8505,22 +8505,28 @@ mod tests {
         }
     }
 
-    // Agent-models §5.1, the tracking read's doubt against the spread of his reads. Batted
-    // balls from games 0–5 (their real spins, which his model does not know) with at least
-    // 3.5 s in the air, each tracked by an average outfielder standing 12 m short of where it
-    // comes down: the RMS of his doubt against the RMS of his read's miss along his line of
-    // sight, 2 s and 1 s before it lands, within a factor of 1.5 either way.
+    // Agent-models §5.1, the tracking read's doubt against the spread of his reads. Sample
+    // contact directly from plate appearances so baserunning and fielding cannot change
+    // the flights offered to the test. Track their real spins, unknown to the fielder,
+    // from 12 m short of where they land. The RMS of his doubt and of his line-of-sight
+    // miss, 2 s and 1 s before landing, agree within a factor of 1.5 either way.
     #[test]
     fn the_tracking_doubt_matches_the_spread_of_tracked_reads() {
         let fx = fixture(&[]);
+        use bb_observe::Hand::{Left, Right};
+        use crate::pa::{Knobs, Matchup, PA_PLAY_STRIDE, simulate_pa};
+
         let mut balls = Vec::new();
-        for seed in 0..6 {
-            let mut g = crate::game::Game::new(seed, false);
-            while let Some(step) = g.step_pitch() {
-                let (Some((_, la, _)), Some(path)) = (step.record.batted, &step.batted) else { continue };
-                let Some(bb_physics::ground::Segment::Flight { tr, .. }) = path.segments.first() else { continue };
-                if (25.0..60.0).contains(&la.to_degrees()) {
-                    balls.push(tr.first().s);
+        for (seed, bats) in [Right, Left].into_iter().enumerate() {
+            let mut matchup = Matchup::for_hands(Right, bats);
+            matchup.knobs = Knobs::calibrated_m3();
+            for pa in 0..600 {
+                let record = simulate_pa(&matchup, seed as u64, pa * PA_PLAY_STRIDE);
+                for pitch in record.pitches {
+                    let (Some((_, launch, _)), Some((_, ball))) = (pitch.batted, pitch.contact_state) else { continue };
+                    if (25.0..60.0).contains(&launch.to_degrees()) {
+                        balls.push(ball);
+                    }
                 }
             }
         }
