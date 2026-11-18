@@ -1,16 +1,21 @@
 //! One CSV row per runner on first or second on a scorer-credited outfield single.
 //! Run with no arguments for direct game seeds 0–299 and 1000–1299, or
 //! `-- <games> <first seed>` for one range, or `-- <seed> <play> <runner>` for
-//! one runner’s raw 60 Hz trace. Times are seconds from contact.
+//! one runner's raw 60 Hz trace. To try different leads, append metres and m/s for
+//! 0–1 outs and then two outs to the two-argument form. Times are seconds from contact.
 //! Actual tracks and an independent, noise-free throw benchmark are both reported.
 
 use bb_agents::running::LEAGUE_TAU_S;
 use bb_game::game::{Game, PitchStep, simulate_game_fielders};
-use bb_game::live::{choice_trace, runner_trace::{self, Cause, Tick}, throw_release_point};
+use bb_game::live::{
+    RunnerStartParams, SecondaryLead, choice_trace,
+    runner_trace::{self, Cause, Tick},
+    throw_release_point,
+};
 use bb_game::play::{FielderAttrs, base_pos, run_time};
 use bb_math::{Vec3, m, units::mps_to_mph};
 use bb_physics::{FlightEnv, throw::solve_throw};
-use bb_rules::{Event, Input, Touch};
+use bb_rules::{Event, Input, OutKind, Touch};
 use bb_stats::scorer::Outcome;
 use std::ops::Range;
 
@@ -48,9 +53,12 @@ fn run_from_speed(distance_m: f64, initial_mps: f64) -> f64 {
         // A runner going the wrong way must brake and make up his stopping distance.
         const BRAKE_MPS2: f64 = 4.75;
         let brake_s = -initial_mps / BRAKE_MPS2;
-        return brake_s + run_time(
-            distance_m - initial_mps * brake_s / 2.0, RUNNER_MPS, LEAGUE_TAU_S,
-        );
+        return brake_s
+            + run_time(
+                distance_m - initial_mps * brake_s / 2.0,
+                RUNNER_MPS,
+                LEAGUE_TAU_S,
+            );
     }
     if initial_mps == 0.0 {
         return run_time(distance_m, RUNNER_MPS, LEAGUE_TAU_S);
@@ -75,7 +83,10 @@ fn run_from_speed(distance_m: f64, initial_mps: f64) -> f64 {
 fn delay_by_cause(ticks: &[Tick], runner: u16, start: u8, split: f64) -> [f64; 7] {
     let target = (start + 1) as f64 * BAG_M;
     let remaining = |tick: &Tick| run_from_speed(target - tick.s, tick.signed_mps);
-    let mut ticks = ticks.iter().filter(|t| t.runner == runner && t.t <= split + 1e-9).peekable();
+    let mut ticks = ticks
+        .iter()
+        .filter(|t| t.runner == runner && t.t <= split + 1e-9)
+        .peekable();
     let mut delay = [0.0; 7];
     while let Some(tick) = ticks.next() {
         let next = ticks.peek().map_or(split, |next| next.t + remaining(next));
@@ -99,11 +110,23 @@ fn raw_trace(seed: u64, play: u32, runner: u16) {
         if step.play != play {
             continue;
         }
-        let contact = step.record.contact_state.expect("no contact on this pitch").0;
+        let contact = step
+            .record
+            .contact_state
+            .expect("no contact on this pitch")
+            .0;
         assert!(ticks.iter().any(|t| t.runner == runner), "runner absent");
         println!("time_s,path_m,signed_mps,goal,cause,ball_down");
         for t in ticks.iter().filter(|t| t.runner == runner) {
-            println!("{:.5},{:.5},{:.5},{},{:?},{}", t.t - contact, t.s, t.signed_mps, t.goal, t.cause, u8::from(t.ball_down));
+            println!(
+                "{:.5},{:.5},{:.5},{},{:?},{}",
+                t.t - contact,
+                t.s,
+                t.signed_mps,
+                t.goal,
+                t.cause,
+                u8::from(t.ball_down)
+            );
         }
         return;
     }
@@ -303,7 +326,7 @@ fn row(
             let runner = runners[(base - 1) as usize]?;
             let target = base + 2;
             let samples = track(step, runner);
-            let samples = &samples[samples.partition_point(|(t, _)| *t < contact) ..];
+            let samples = &samples[samples.partition_point(|(t, _)| *t < contact)..];
             let lead_m = (samples.first()?.1 - base_pos(base)).norm();
             let (first_move, first_forward) = movement(samples, base, contact);
             let touch = |at| {
@@ -348,7 +371,14 @@ fn row(
 
             let distance_m = 2.0 * BAG_M - lead_m;
             let from_rest = run_time(distance_m, RUNNER_MPS, LEAGUE_TAU_S);
-            let projected = split.map_or(read + from_rest, |t| t - contact + BAG_M / RUNNER_MPS);
+            let contact_mps = ticks
+                .iter()
+                .find(|t| t.runner == runner)
+                .map_or(0.0, |t| t.signed_mps);
+            let coast_m = contact_mps * read;
+            let from_read = run_from_speed(distance_m - coast_m, contact_mps);
+            let uninterrupted = read + from_read;
+            let projected = split.map_or(uninterrupted, |t| t - contact + BAG_M / RUNNER_MPS);
             let projected =
                 out.filter(|call| moved_past && past(call.at))
                     .map_or(projected, |call| {
@@ -407,9 +437,9 @@ fn row(
                     u8::from(eligible).to_string(),
                     u8::from(occupied).to_string(),
                     number(Some(read)),
-                    number(Some(lead_m / RUNNER_MPS)),
-                    number(Some(from_rest - distance_m / RUNNER_MPS)),
-                    number(Some(runner_s - (read + from_rest))),
+                    number(Some((lead_m + coast_m) / RUNNER_MPS)),
+                    number(Some(from_read - (distance_m - coast_m) / RUNNER_MPS)),
+                    number(Some(runner_s - uninterrupted)),
                     number(Some(benchmark.exchange_s)),
                     number(Some(benchmark.flight_s)),
                     u8::from(benchmark.cutoff).to_string(),
@@ -418,6 +448,8 @@ fn row(
                     number(Some(lead_gain)),
                     number(Some(rolling_gain)),
                     number(Some(joint_gain)),
+                    number(Some(contact_mps)),
+                    number(Some(coast_m)),
                 ]
                 .into_iter()
                 .chain((0..7).map(|i| number(delays.map(|d| d[i]))))
@@ -428,23 +460,99 @@ fn row(
         .collect()
 }
 
-fn run(seeds: Range<u64>) -> Vec<String> {
+#[derive(Default)]
+struct Counts {
+    // Starting base (first or second), then outs. Count opportunities and advances.
+    singles: [[(u64, u64); 3]; 2],
+    // Launch below 10°, then launch 10–25°. Catches with runners, plays with appeals,
+    // and runners retired on those appeals.
+    catches: [(u64, u64, u64); 2],
+}
+
+impl Counts {
+    fn observe(&mut self, step: &PitchStep, outs: u8, runners: [Option<u16>; 3]) {
+        if step
+            .scorer_ruling
+            .is_some_and(|r| r.outcome == Outcome::Hit(1))
+        {
+            for (i, runner) in runners[..2].iter().copied().enumerate() {
+                let Some(id) = runner else { continue };
+                let entry = &mut self.singles[i][outs as usize];
+                entry.0 += 1;
+                let safe = step.rules_events.iter().any(|e| match *e {
+                    Event::RunScored { runner } => runner == id,
+                    Event::RunnerAdvanced { runner, to, .. } => i == 0 && runner == id && to >= 3,
+                    _ => false,
+                });
+                entry.1 += u64::from(safe);
+            }
+        }
+
+        if outs >= 2
+            || !step
+                .rules_events
+                .iter()
+                .any(|e| matches!(e, Event::Catch { .. }))
+        {
+            return;
+        }
+        let Some((_, launch, _)) = step.record.batted else {
+            return;
+        };
+        let angle = launch.to_degrees();
+        if angle >= 25.0 {
+            return;
+        }
+        let doubled = step.rules_events.iter().filter(|e| matches!(e,
+            Event::RunnerOut { runner, kind: OutKind::Appeal, .. } if runners.contains(&Some(*runner))
+        )).count() as u64;
+        let entry = &mut self.catches[usize::from(angle >= 10.0)];
+        entry.0 += 1;
+        entry.1 += u64::from(doubled > 0);
+        entry.2 += doubled;
+    }
+
+    fn add(&mut self, other: Self) {
+        for (mine, theirs) in self
+            .singles
+            .iter_mut()
+            .flatten()
+            .zip(other.singles.into_iter().flatten())
+        {
+            mine.0 += theirs.0;
+            mine.1 += theirs.1;
+        }
+        for (mine, theirs) in self.catches.iter_mut().zip(other.catches) {
+            mine.0 += theirs.0;
+            mine.1 += theirs.1;
+            mine.2 += theirs.2;
+        }
+    }
+}
+
+fn run(seeds: Range<u64>, params: Option<RunnerStartParams>) -> (Vec<String>, Counts) {
     let env = FlightEnv::default_env();
     let mut rows = Vec::new();
+    let mut counts = Counts::default();
     for seed in seeds {
         let mut game =
             Game::new(seed, true).with_fielders(core::array::from_fn(FielderAttrs::average));
+        if let Some(params) = params {
+            game = game.with_runner_start(params);
+        }
         let mut singles = Vec::new();
         loop {
             let (outs, runners) = (game.st.outs, game.st.bases);
-            if runners[0].is_none() && runners[1].is_none() {
+            if runners.iter().all(Option::is_none) {
                 if game.step_pitch().is_none() {
                     break;
                 }
                 continue;
             }
-            let ((step, choices), ticks) = runner_trace::capture(|| choice_trace::capture(|| game.step_pitch()));
+            let ((step, choices), ticks) =
+                runner_trace::capture(|| choice_trace::capture(|| game.step_pitch()));
             let Some(step) = step else { break };
+            counts.observe(&step, outs, runners);
             if step
                 .scorer_ruling
                 .is_some_and(|r| r.outcome == Outcome::Hit(1))
@@ -471,7 +579,7 @@ fn run(seeds: Range<u64>) -> Vec<String> {
                 &env,
             ));
         }
-        if seed == 0 {
+        if seed == 0 && params.is_none() {
             let standard =
                 simulate_game_fielders(seed, core::array::from_fn(FielderAttrs::average));
             assert_eq!(standard.digest, result.digest, "tracing changed seed 0");
@@ -479,24 +587,45 @@ fn run(seeds: Range<u64>) -> Vec<String> {
             eprintln!("seed 0 digest {digest}");
         }
     }
-    rows
+    (rows, counts)
 }
 
 fn main() {
-    let args: Vec<u64> = std::env::args()
-        .skip(1)
-        .map(|arg| arg.parse().unwrap())
-        .collect();
+    let args: Vec<_> = std::env::args().skip(1).collect();
     if let [seed, play, runner] = args.as_slice() {
-        raw_trace(*seed, (*play).try_into().unwrap(), (*runner).try_into().unwrap());
+        raw_trace(
+            seed.parse().unwrap(),
+            play.parse().unwrap(),
+            runner.parse().unwrap(),
+        );
         return;
     }
-    let ranges = match args.as_slice() {
-        [] => vec![0..300, 1000..1300],
-        [n, first] => vec![*first..first + n],
-        _ => panic!("usage: runner_timing [games first_seed | seed play runner]"),
+    let range = |games: &str, first: &str| {
+        let first: u64 = first.parse().unwrap();
+        first..first + games.parse::<u64>().unwrap()
     };
-    let rows = std::thread::scope(|scope| {
+    let lead = |extra: &str, speed: &str| {
+        let extra_m: f64 = extra.parse().unwrap();
+        let speed_mps: f64 = speed.parse().unwrap();
+        assert!((0.5..=1.5).contains(&extra_m) && (1.0..=6.0).contains(&speed_mps));
+        SecondaryLead { extra_m, speed_mps }
+    };
+    let (ranges, params) = match args.as_slice() {
+        [] => (vec![0..300, 1000..1300], None),
+        [n, first] => (vec![range(n, first)], None),
+        [n, first, d1, v1, d2, v2] => (
+            vec![range(n, first)],
+            Some(RunnerStartParams {
+                fewer_than_two: lead(d1, v1),
+                two_out: lead(d2, v2),
+            }),
+        ),
+        _ => panic!(
+            "usage: runner_timing [games first_seed [lead01 speed01 lead2 speed2] | seed play runner]"
+        ),
+    };
+    let games: u64 = ranges.iter().map(|r| r.end - r.start).sum();
+    let (rows, counts) = std::thread::scope(|scope| {
         let jobs: Vec<_> = ranges
             .into_iter()
             .flat_map(|r| {
@@ -506,27 +635,36 @@ fn main() {
             .collect();
         // At most six games at a time, including outside the cargo build.
         let mut all = Vec::new();
+        let mut counts = Counts::default();
         for batch in jobs.chunks(6) {
             let handles: Vec<_> = batch
                 .iter()
                 .map(|range| {
                     let range = range.clone();
-                    scope.spawn(move || run(range))
+                    scope.spawn(move || run(range, params))
                 })
                 .collect();
             for handle in handles {
-                all.extend(handle.join().unwrap());
+                let (rows, totals) = handle.join().unwrap();
+                all.extend(rows);
+                counts.add(totals);
             }
         }
-        all
+        (all, counts)
     });
+    eprintln!("{games} games. All singles (opportunities, advances) by outs 0/1/2:");
+    eprintln!("  first to third: {:?}", counts.singles[0]);
+    eprintln!("  second to home: {:?}", counts.singles[1]);
+    eprintln!("Caught balls with runners and 0–1 out (catches, plays with appeals, doubled off):");
+    eprintln!("  launch below 10°: {:?}", counts.catches[0]);
+    eprintln!("  launch 10–25°: {:?}", counts.catches[1]);
     println!(concat!(
         "seed,play,runner,outs,start,field,ball,lead_m,move_s,forward_s,split_s,third_s,",
         "actual_runner_s,race_runner_s,land_s,first_touch_s,secure_s,charge_m,first_release_s,",
         "exchange_s,release_mph,first_throw_cutoff,target_release_s,actual_ball_s,actual_cutoff,",
         "actual_margin_s,sent,outcome,out_s,eligible,occupied,read_s,lead_saved_s,accel_cost_s,",
         "extra_runner_s,benchmark_exchange_s,benchmark_flight_s,benchmark_cutoff,",
-        "benchmark_ball_s,margin_s,lead_gain_s,rolling_gain_s,joint_gain_s,",
+        "benchmark_ball_s,margin_s,lead_gain_s,rolling_gain_s,joint_gain_s,contact_mps,coast_m,",
         "read_debt_s,air_debt_s,ground_hold_debt_s,traffic_debt_s,bag_hold_debt_s,other_hold_debt_s,run_debt_s"
     ));
     for line in rows {

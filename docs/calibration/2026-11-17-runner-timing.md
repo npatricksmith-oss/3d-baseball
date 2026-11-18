@@ -131,3 +131,21 @@ Every sample can be reproduced with `runner_timing -- <seed> <play> <runner>`. T
 | 1010 / 107 / 263 | Grounder / 1 | The 0.10 s tick sees the ground touch and sends him back. At 0.50 s the read is blocked by the runner ahead. At 1.12 s the path clears while he is moving −5.19 m/s. He stops and reverses at 2.22 s, reaches third at 6.30 s and holds. |
 
 Keep the liner and fly reads, and the traffic wait. Fix the premature bounce decision, which can send a runner back within 50 ms of contact and ask him to decide again at half a second. Also brake into the partway hold. A runner can choose to stop and wait in that spot, but he cannot lose 6.54 m/s in a single tick. The standing stop at the intervening bag is tracked separately in TASKS.md and contributes zero to the timing projection above.
+
+## Q27 moving-start fit
+
+The fit kept the primary leads of 5.5, 6.5 and 4.5 m. Each runner coasts at his contact speed for the read or reaction and then accelerates or brakes from that state. The runner on third shuffles in foul ground. The same contact parameters apply to all three bases. A force constrains the choice after the ball is read and ends on a catch.
+
+The initial experiments used the same direct game seeds 0–119. The scores below include **all scorer-credited singles**. The two-out sends from second use only singles first secured by an outfielder. In the first two trials the read used the live out count. The last trial and final run use the outs at contact throughout the initial read.
+
+| Additional metres / contact m/s, 0–1 out and 2 out | First to third safe | Second to home safe | Two-out outfield sends, LF / CF / RF |
+|---|---:|---:|---:|
+| 1.0 / 2 and 1.5 / 4 | 147/424 (34.7%) | 96/200 (48.0%) | 79% / 100% / 71% |
+| 1.5 / 3 and 1.5 / 5 | 165/429 (38.5%) | 122/213 (57.3%) | 79% / 100% / 77% |
+| 1.0 / 2.5 and 1.5 / 4.5 | 152/423 (35.9%) | 100/204 (49.0%) | 78% / 100% / 71% |
+
+The final fit keeps the smaller 1 m shuffle with 0–1 out and uses 3 m/s at contact. It takes the stronger trial's 1.5 m and 5 m/s with two out, which helped the right-field send without making the 0–1-out lead larger. These are empirical inputs. There is no change to the run-expectancy values, tag allowance, or throw times.
+
+### MLB check for runners doubled off
+
+I counted **208 runners on 207 plays** across 2,429 regular-season games in Retrosheet's 2024 parsed play-by-play. That's **25.7 runners per 300 games**. The count uses `gametype=regular`, `hittype=L`, a catch coded with a single fielder number and a credited batting out, fewer than two outs, and a runner on base. For each runner, the advance field must show `1X1(...)`, `2X2(...)` or `3X3(...)`, with a recorded baserunning out in the corresponding `brout` column. There were 2,596 catches meeting the opportunity definition, of which 207 (8.0%) produced a double-off. Retrosheet labels line drives from play-by-play. The sim identifies them by launch angle, so the comparison also reports very low catches separately. [Retrosheet 2024 parsed play-by-play and field definitions](https://www.retrosheet.org/downloads/plays.html), [event coding](https://www.retrosheet.org/eventfile.htm).

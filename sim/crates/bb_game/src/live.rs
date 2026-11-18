@@ -254,8 +254,8 @@ pub struct RunnerStartParams {
 impl Default for RunnerStartParams {
     fn default() -> Self {
         Self {
-            fewer_than_two: SecondaryLead { extra_m: 1.0, speed_mps: 2.0 },
-            two_out: SecondaryLead { extra_m: 1.5, speed_mps: 4.0 },
+            fewer_than_two: SecondaryLead { extra_m: 1.0, speed_mps: 3.0 },
+            two_out: SecondaryLead { extra_m: 1.5, speed_mps: 5.0 },
         }
     }
 }
@@ -5269,10 +5269,16 @@ impl<'a> Sim<'a> {
                 let track = &mut self.out.actors[9 + k].1;
                 for i in 0..steps {
                     let u = i as f64 / steps as f64;
-                    // Cubic with the primary lead at rest at release and the live
-                    // position and velocity at contact. The contact tick supplies the end.
-                    let d = u * u * ((3.0 - 2.0 * u) * lead.extra_m + (u - 1.0) * contact * r.v);
-                    track.push((u * contact, runner_path_pos(r.start, primary + d)));
+                    // A constant-acceleration approach joins the release position to
+                    // the contact position and speed. A long flight with a fast finish
+                    // uses a rising speed curve so the runner never backs up at release.
+                    let end_slope = contact * r.v;
+                    let distance = if end_slope <= 2.0 * lead.extra_m {
+                        u * (lead.extra_m + (1.0 - u) * (lead.extra_m - end_slope))
+                    } else {
+                        lead.extra_m * m::pow(u, end_slope / lead.extra_m)
+                    };
+                    track.push((u * contact, runner_path_pos(r.start, primary + distance)));
                 }
             }
         }
@@ -5591,6 +5597,8 @@ fn simulate_live_inner(inp: &LiveInput, st: &mut RulesState) -> LiveOutput {
     let react = inp.fattrs.iter().map(|a| a.reaction).fold(f64::INFINITY, f64::min);
     let mut assigned = false;
     let mut runners_started = false;
+    let two_out = sim.st.outs >= 2;
+    let read_s = if two_out { RUNNER_CONTACT_REACT_S } else { RUNNER_READ_DELAY_S };
     let mut next_recall = t_c + 1.0;
     let mut tick: u64 = 0;
     // Coverage trace (`BB_COVER_TRACE`; `examples/coverage_trace.rs`, `analysis/coverage_gaps.py`):
@@ -5616,8 +5624,6 @@ fn simulate_live_inner(inp: &LiveInput, st: &mut RulesState) -> LiveOutput {
         }
         // The runners are already moving. Two outs leaves only the cue to break into
         // a full run. With fewer outs their first look sets the intended movement.
-        let two_out = sim.st.outs >= 2;
-        let read_s = if two_out { RUNNER_CONTACT_REACT_S } else { RUNNER_READ_DELAY_S };
         if !runners_started && !sim.caught() && sim.t - t_c >= read_s - 1e-9 {
             runners_started = true;
             let (b, bv) = sim.ball_at(sim.t);

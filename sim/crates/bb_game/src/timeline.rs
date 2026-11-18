@@ -430,3 +430,48 @@ pub fn encode(step: &PitchStep, st: &RulesState, rosters: &crate::roster::Roster
     fbb.finish(root, Some("BBTL"));
     fbb.finished_data().to_vec()
 }
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use crate::game::Game;
+    use crate::live::{RunnerStartParams, SecondaryLead};
+
+    #[test]
+    fn the_encoded_runner_track_moves_during_the_pitch() {
+        let mut game = Game::new(0, true).with_runner_start(RunnerStartParams {
+            fewer_than_two: SecondaryLead { extra_m: 1.0, speed_mps: 2.0 },
+            two_out: SecondaryLead { extra_m: 1.5, speed_mps: 4.0 },
+        });
+        loop {
+            let bases = game.st.bases;
+            let outs = game.st.outs;
+            let step = game.step_pitch().expect("a batted ball with a runner on first");
+            let Some(runner) = bases[0] else { continue };
+            let Some((contact, _)) = step.record.contact_state else { continue };
+            let Some((_, live)) = step.viz.actors.iter().find(|(id, _)| *id == runner) else { continue };
+            assert!(!live.is_empty());
+            let bytes = encode(&step, &game.st, &game.rosters);
+            let timeline = flatbuffers::root::<tl::PlayTimeline>(&bytes).unwrap();
+            let track = timeline.actors().unwrap().iter().find(|a| a.agent() == runner).unwrap();
+            let knots: Vec<_> = track.root().unwrap().iter().collect();
+            assert_eq!(knots[0].t(), 0.0);
+            assert!(knots.windows(2).all(|w| w[1].t() > w[0].t()));
+            let end = knots.iter().position(|k| k.t() == contact as f32).unwrap();
+            assert!(end > 5);
+            // First to second goes (−1, +1) along the diamond. A displacement of
+            // one metre has components of magnitude √½ in each of those axes.
+            let dx = knots[end].p().x() - knots[0].p().x();
+            let dy = knots[end].p().y() - knots[0].p().y();
+            let extra_m = if outs == 2 { 1.5 } else { 1.0 };
+            assert!((dx + extra_m * core::f32::consts::FRAC_1_SQRT_2).abs() < 1e-5);
+            assert!((dy - extra_m * core::f32::consts::FRAC_1_SQRT_2).abs() < 1e-5);
+            let a = &knots[end - 1];
+            let b = &knots[end];
+            let speed = (b.p().x() - a.p().x()).hypot(b.p().y() - a.p().y()) / (b.t() - a.t());
+            let expected = if outs == 2 { 4.0 } else { 2.0 };
+            assert!((speed - expected).abs() < 0.25);
+            break;
+        }
+    }
+}
