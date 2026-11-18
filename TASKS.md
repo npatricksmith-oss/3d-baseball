@@ -35,9 +35,9 @@ One `sim/crates/bb_game/src/live.rs` job at a time. Each job gets a ledger row a
 
 ### 1. Runners (agent-models §6.3–§6.4; [decision-model note](docs/calibration/2026-11-15-runner-decision-model.md))
 
-- [~] **The runner's start.** Extra bases taken are short: second to home on a single 34% against 61.7%, first to third 23% against 31.7%. On traced singles the runner from second loses the race home by under 0.5 s. Every runner first looks 0.5 s after contact from a standstill at his lead (no secondary lead, no moving start).
-  - Held, tested, not reviewed: branch `work/runner-start` (`ea06488`). With two out every runner goes 0.25 s after contact. Second to home with two out 43% [45] (was 35 [37]; MLB 75–91%). Its ledger row and spec line are on the branch. Review it with the next piece, then merge.
-  - No published figure exists for the first-step delay, the secondary lead at second or outfield exchange time. So measure inside the sim: time from contact to the ball reaching home on outfield singles against the runner's 7.1 s. Then put to the owner whether runners should be moving at contact (a secondary lead with speed).
+- [~] **The runner's start (Q27).** Moving secondary leads are built on `work/runner-start`: +1.0 m at 3 m/s with 0–1 out, +1.5 m at 5 m/s with two out. All three bases use the contact state, and the live-ball timeline carries the shuffle from release. Early bounces respect the read clock. Runners brake for partway holds and returns, and the rules judge the retouch.
+  - In 600 games, second to home was 53.0% on all singles (MLB 61.7%), first to third 36.1% (MLB 31.7%), and two-out outfield sends from second were 86.4%. Airborne checks explain most of the remaining delay with fewer than two outs.
+  - Left for review: the high two-out sends to center and the many appeals on catches below 10°. Compare those very low catches to the MLB line-drive sample. [Q27 timing and checks](docs/calibration/2026-11-17-runner-timing.md#final-measurements).
 - [ ] Fit `AdvanceParams::caution_z` to MLB's attempt and success rates (now 1.0, fitted only to outs on the bases).
 - [ ] The coach's read and send for a ball behind the runner (Q10 a). Model early-departure decisions on caught flies, slides around tags, a turn decision before the bag, and an overrun redirected after an overthrow.
 - [ ] The rundown (Q11), on its own branch. A stand-in exists. Two small points from the runner-decision review wait for it.
