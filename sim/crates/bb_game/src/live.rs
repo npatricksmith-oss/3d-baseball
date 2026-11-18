@@ -10168,8 +10168,16 @@ mod tests {
             tick.runner == R && tick.t >= inp.t_contact + 0.5 - 1e-9 && tick.t < catch
         }).collect();
         assert!(after_read.len() >= 3 && after_read.iter().all(|tick| !tick.ball_down));
-        // Until the catch the runner may continue shuffling or brake. A force on
-        // the batter's live hit is no reason to accelerate on a catchable liner.
+        // The runner starts the read shuffling at 3 m/s. The descending liner
+        // should make him check that motion while it is still in the air.
+        assert!(
+            after_read.iter().all(|tick| tick.cause != runner_trace::Cause::Read),
+            "the runner was still in the contact read: {after_read:?}",
+        );
+        assert!(
+            after_read.iter().any(|tick| tick.signed_mps < 2.99),
+            "the runner never started braking before the catch: {after_read:?}",
+        );
         assert!(after_read.iter().all(|tick| tick.signed_mps <= 3.0 + 1e-9), "{after_read:?}");
     }
 
