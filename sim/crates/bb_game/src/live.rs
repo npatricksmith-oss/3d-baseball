@@ -196,6 +196,12 @@ fn typical_throw_time(d: f64) -> f64 {
     throw_time(v, d).min(2.0 * throw_time(v, 0.5 * d) + RELAY_TRANSFER_FRAC * TYPICAL_TRANSFER)
 }
 
+#[derive(Clone, Copy)]
+enum RunnerIntercept {
+    Catch,
+    Pickup,
+}
+
 /// A runner's read of a throw in the air: his own prediction of its flight from what he sees
 /// of it now (position and velocity), a typical throw's backspin and the reference
 /// atmosphere's drag, and one bounce if it comes down short (agent-models §6.4). Never the
@@ -2269,7 +2275,11 @@ impl<'a> Sim<'a> {
 
     /// Earliest point on the runner's own projection that a visible fielder could reach
     /// with league-typical speed, within the caller's decision horizon.
-    fn believed_field_intercept(&self, pred: &BallPath, until: f64, step_s: f64) -> Option<(f64, Vec3)> {
+    fn believed_field_intercept(&self, pred: &BallPath, until: f64, kind: RunnerIntercept) -> Option<(f64, Vec3)> {
+        let step_s = match kind {
+            RunnerIntercept::Catch => DT,
+            RunnerIntercept::Pickup => 0.15,
+        };
         let mut t = self.t + 0.05;
         let t_end = pred.t_end().min(until);
         let field = self.inp.field;
@@ -2278,8 +2288,20 @@ impl<'a> Sim<'a> {
             // Not where nobody can reach: farther past a wall than a fielder reaches over it.
             if b.z <= CATCH_MAX_Z && beyond_reach_over_wall(field, b) <= 0.0 {
                 let reachable = self.f.iter().any(|fd| {
-                    let d = m::hypot(b.x - fd.pos.x, b.y - fd.pos.y) - REACH;
-                    d <= 0.0 || run_dist(t - self.t, TYPICAL_SPEED, 0.9) >= d
+                    let to = Vec3::new(b.x - fd.pos.x, b.y - fd.pos.y, 0.0);
+                    let d = m::hypot(to.x, to.y);
+                    if d <= REACH {
+                        return true;
+                    }
+                    // Close to a possible catch, the runner sees whether the fielder
+                    // is already moving toward it. At range he assumes a typical start.
+                    let dt = t - self.t;
+                    let travel = if matches!(kind, RunnerIntercept::Catch) && d <= STEP_REACH_M {
+                        run_dist_from(dt, fd.vel.dot(to) / d, TYPICAL_SPEED, 0.9)
+                    } else {
+                        run_dist(dt, TYPICAL_SPEED, 0.9)
+                    };
+                    travel >= d - REACH
                 });
                 if reachable {
                     return Some((t, Vec3::new(b.x, b.y, 0.0)));
@@ -4191,7 +4213,7 @@ impl<'a> Sim<'a> {
                 let t0 = prof::enabled().then(std::time::Instant::now);
                 let pred = self.runner_predict(k, read_sub);
                 let end = pred.t_end();
-                let (tf, at) = self.believed_field_intercept(&pred, end, 0.15).unwrap_or_else(|| {
+                let (tf, at) = self.believed_field_intercept(&pred, end, RunnerIntercept::Pickup).unwrap_or_else(|| {
                     let (rest, _) = pred.at(end);
                     (end + 1.0, Vec3::new(rest.x, rest.y, 0.0))
                 });
@@ -5672,7 +5694,7 @@ fn simulate_live_inner(inp: &LiveInput, st: &mut RulesState) -> LiveOutput {
                     let land = first.map(|x| x.0).unwrap_or(pred.t_end());
                     // A hard liner can cross a fielder's whole reach between 0.15 s
                     // race samples. Use the live tick spacing for this catch check.
-                    let likely_catch = sim.believed_field_intercept(&pred, land + RUNNER_CATCH_SLACK_S, DT).is_some();
+                    let likely_catch = sim.believed_field_intercept(&pred, land + RUNNER_CATCH_SLACK_S, RunnerIntercept::Catch).is_some();
                     let deep_fly = first.is_none_or(|(_, x, y)| m::hypot(x, y) > INFIELD_R);
                     (likely_catch, deep_fly)
                 } else {
@@ -9950,6 +9972,36 @@ mod tests {
             sim.t += DT;
         }
         panic!("runner never reached the hold point");
+    }
+
+    #[test]
+    fn the_runner_credits_motion_toward_a_nearby_catch() {
+        use bb_physics::ground::Segment;
+
+        let fx = fixture(&[]);
+        let inp = input(&fx, Vec::new());
+        let mut st = fx.st.clone();
+        let mut sim = new_sim(&inp, &mut st);
+        let now = 1.0;
+        let end = now + 0.15;
+        sim.t = now;
+        for fd in &mut sim.f {
+            fd.pos = Vec3::new(-20.0, 30.0, 0.0);
+        }
+        sim.f[2].pos = Vec3::new(0.0, 30.0, 0.0);
+        let spot = BallState { r: Vec3::new(1.2, 30.0, 1.0), v: Vec3::ZERO, w: Vec3::ZERO };
+        let prediction = BallPath {
+            segments: vec![Segment::Flight { tr: Trajectory::single(end, spot), end: SegmentEnd::Timeout }],
+            bounces: Vec::new(),
+            walls: Vec::new(),
+        };
+        // The fielder needs 0.2 m beyond glove reach. From rest he covers less
+        // than 0.1 m in 0.15 s at his initial acceleration of about 9 m/s².
+        // Heading toward the spot at 3 m/s, he covers 0.2 m in under 0.07 s.
+        for (vx, expected) in [(-3.0, false), (0.0, false), (3.0, true)] {
+            sim.f[2].vel = Vec3::new(vx, 0.0, 0.0);
+            assert_eq!(sim.believed_field_intercept(&prediction, end, RunnerIntercept::Catch).is_some(), expected, "visible velocity {vx}");
+        }
     }
 
     #[test]
