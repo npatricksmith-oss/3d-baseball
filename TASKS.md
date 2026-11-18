@@ -17,18 +17,15 @@ Status: `[ ]` not started · `[~]` partly done · `[?]` needs an owner decision
 
 ## Resume here (2026-11-18)
 
-**State.** The outfield grounder rule (`work/of-mutual-defer`, saved play 65147/10) is merged into main after a Fable review (no P1; its P2 and one P3 are in "2. Fielding"). The next numbered owner question is **Q27**. **Codex shows about 10% of its weekly limit left:** run the next review on a non-author Claude model (memory: Codex limit fallback). No workers are running. Worktree `../bb-wt-of-defer` can be removed with the branch cleanup below.
+**State.** Context pruning steps 1–4 are merged and pushed (docs audit, code comments and examples, superseded-figure banners, branch and worktree cleanup with the owner's OK as Q28: local branches left are main, `work/runner-start`, the held `work/pitcher-fielding` and `work/integrate-agy-calib`, and `work/swing-chores`). Codex was reset on 2026-11-17: Codex Sol reviews again.
 
-**Lesson from that branch:** the worker reported its job done while its test binary was stale (built from an older `sim/crates/bb_game/src/live.rs`), so its own run showed the two target tests still failing and it moved on. Before merging a worker's branch, `touch` the changed source and run the tests and the standard run yourself.
+**Waiting on the owner: Q27, the runner's start.** The timing probe is on `work/runner-start` (`0282b56`, with main merged in): [note](docs/calibration/2026-11-17-runner-timing.md). A held runner from second loses the race home by a median 1.10 s with 0–1 out and 0.55 s with two out; a secondary lead moving at contact gains about 0.75 s and would turn roughly 72/311 (0–1 out) and 112/167 (two out) of those holds into won races. The larger loss with 0–1 out is 1.43 s of "other runner time" (checks, traffic) beyond the read and acceleration, not yet split by ball type: trace that whatever the owner rules. The branch (the two-out 0.25 s start plus the probe) is reviewed with the Q27 change, then merged.
 
-**Numbers on main** (standard run, seeds 0–299 [1000–1299]; ledger §1): runs 4.12 [4.14] against a real 4.39; hits on GB/LD/FB/PU .307/.683/.109/.006 [.308/.683/.098/.004] against about .245/.68/.13/.02; HR/PA 2.88% [2.82%] against 3.0%; routine flies caught .980 (measured before this merge).
+**Lesson:** a worker once reported done on a stale test binary. Before merging a worker's branch, `touch` the changed source and run the tests and the standard run yourself.
 
-**Next:** item 1 of "Open sim work" below, the runner's start (branch `work/runner-start` waits to be reviewed with its next piece).
+**Numbers on main** (standard run, seeds 0–299 [1000–1299]; ledger §1): runs 4.12 [4.14] against a real 4.39; hits on GB/LD/FB/PU .307/.683/.109/.006 [.308/.683/.098/.004] against about .245/.68/.13/.02; HR/PA 2.88% [2.82%] against 3.0%; routine flies caught .980.
 
-**Context pruning.** The [prune notes](docs/archive/2026-11-17-docs-prune-notes.md) record the plan and spec audit. Remaining work, in order:
-
-1. Show the owner the merged local branches and worktrees before removing any.
-2. Add a check script for dead paths and the TASKS.md size cap.
+**Next:** Q27 and item 1 of "Open sim work" below. Last pruning step: a check script that fails on dead paths and on this file growing past its cap. The [prune notes](docs/archive/2026-11-17-docs-prune-notes.md) list decisions (D1, D4, D6, D9, D17, D19/D20) that disagree with the code; put them to the owner as numbered questions after Q27.
 
 ---
 
