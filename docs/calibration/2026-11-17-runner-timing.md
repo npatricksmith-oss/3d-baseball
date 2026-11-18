@@ -168,3 +168,21 @@ Of 228 remaining losing holds from second with 0–1 out, 127 were on liners and
 The sim recorded **14 double-offs per 300 games** in each seed set on caught balls launched at 10–25°. That is 28 in 410 chances (6.8%) across both sets, against MLB's 8.0% by Retrosheet's line-drive label. Including catches below 10° adds 75 and 56 runners in the two sets, raising the broader total to **79.5 per 300 games**. 130 of those 189 very low catches produced an appeal out. The narrower rate per chance is plausible. The broader count is high for MLB's recorded line-drive total, and how many of those very low catches correspond to MLB liners remains open. [Retrosheet field definitions](https://www.retrosheet.org/downloads/plays.html).
 
 The [metrics ledger](../metrics-ledger.md) records the standard run. The measured code is `95c8050`. The seed-0 probe matched the unrecorded game's digest.
+
+## P2-1 contact read follow-up
+
+The first 0–1-out check now uses the runner's own noisy projection while the ball is loose and no public ground touch has been recorded. A ground touch on the read tick counts immediately. The catch check samples the projection at 60 Hz because a hard liner can cross a fielder's reach between the 150 ms throw-race samples. In the regression, a one-out runner on first faces a descending liner the first baseman catches at about 0.63 s. The old gate sent him at 0.50 s and his speed reached 3.75 m/s before the catch. He now checks his advance before the glove secures the ball. [Review P2-1](../reviews/2026-11-18-codex-runner-start-review.md#p2-1-the-contact-read-can-send-a-forced-runner-on-an-ungrounded-liner).
+
+The recheck uses both standard 300-game seed sets, with direct seeds 0–299 and 1,000,003,000–1,000,003,299. Fresh standard runs on `e537cf0` reproduced the original Q27 ledger. The baseline timing counts come from that identical sim build. The corrected build is `258edae`.
+
+| Measure across both seed sets | Merged Q27 | Contact read fixed |
+|---|---:|---:|
+| Eligible catches below 10°, 0–1 out | 189 | 184 |
+| Plays with an appeal out on those catches | 130/189 (68.8%) | 119/184 (64.7%) |
+| Runners doubled off below 10°, per 300 games | 65.5 (75 and 56) | 59.5 (69 and 50) |
+| Runners doubled off below 25°, per 300 games | 79.5 | 73.0 |
+| Two-out sends from second to home on singles to center | 109/110 (99.1%) | 106/107 (99.1%) |
+
+The low-catch sample shows fewer double-offs in both sets and a lower share of catches with an appeal. The regression shows how an earlier check can reduce a runner's momentum before the catch. The aggregate combines that mechanism with changes in which catches occurred. The broader count of 73.0 per 300 games remains high against the 25.7 Retrosheet line-drive count, which uses a play-by-play label.
+
+All 106 center-field sends scored. The median split to third stayed at 2.75 s and the benchmark arrival home stayed at 7.23 s. The contact check applies with 0–1 out, so the center-field remeasurement captures a new set of opportunities with the same two-out decision. On all singles, second to home was 527/1,005 (52.4%) and first to third was 818/2,283 (35.8%). [Before-and-after standard runs](../metrics-ledger.md#2026-11-18-300-games-each-at---seed-0-and---seed-1000).

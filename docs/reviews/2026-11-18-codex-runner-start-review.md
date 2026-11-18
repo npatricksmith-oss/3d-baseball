@@ -59,7 +59,7 @@ The final first-to-third result was 823/2,279 (36.1%) on all singles and 777/1,9
 
 Lead, 2026-11-18. No P1; my own fresh `cargo test --workspace --release` (443 passed) and both standard runs (4.30 [4.30]) matched the worker's ledger row. Merged into `main`.
 
-- **P2-1: open, next job.** The contact read gate reads the true ball height and vertical speed (agents must see only observations). It predates Q27, so it does not hold the merge. Assigned to the Codex worker on `work/runner-contact-read`: gate the first check on the runner's own observation (noisy ball state, ground-touch cue), then remeasure low-liner double-offs.
+- **P2-1 fixed on `work/runner-contact-read` in `258edae`.** The first catch check uses the runner's own noisy projection and the public ground-touch cue, with 60 Hz catch sampling. The low-liner regression verifies that a forced runner checks his advance before the first baseman's catch. Double-offs below 10° fell from 65.5 to 59.5 runners per 300 games. [Contact read recheck](../calibration/2026-11-17-runner-timing.md#p2-1-contact-read-follow-up).
 - **P3-1: deferred** (TASKS item 1). The third-base route blend's corner in lateral velocity; cosmetic for playback, no rules effect found.
 - **P3-2: deferred** (TASKS item 1). The first decision sees one tick less of coasting than its clock; 0.05 m at 3 m/s.
-- **Also open, not findings:** two-out sends to center 99% (pickup depth and throw geometry, pre-existing gap widened); double-offs on catches below 10° (79.5 per 300 games against 25.7), remeasured after P2-1.
+- **Also open:** two-out sends to center remain 99.1% in the P2-1 recheck. Pickup depth and throw geometry still explain the directional advantage in the benchmark. The combined double-off rate below 25° fell from 79.5 to 73.0 per 300 games. Retrosheet's 25.7 uses its line-drive label. [Contact read recheck](../calibration/2026-11-17-runner-timing.md#p2-1-contact-read-follow-up).
