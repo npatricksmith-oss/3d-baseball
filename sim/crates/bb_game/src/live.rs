@@ -2905,11 +2905,16 @@ impl<'a> Sim<'a> {
         }
         // A man not going for it reconsiders a ball in the air he believes he catches (a call
         // that outranked his may be gone). On a bounced ball that could get through, the
-        // shared order allows one outfielder to reconsider even with an infielder chasing.
+        // shared order allows one outfielder to reconsider even with an infielder chasing
+        // (`outfielder_to_reconsider`). A ball every man has left to another is sent to one
+        // man by the shared convention below (`fallback_chaser`).
         let outfielder = self.outfielder_to_reconsider();
         let decisions: Vec<(usize, Decision)> = (0..9)
             .filter(|&i| {
                 let fd = &self.f[i];
+                // The read must be of the ball now loose. This is a guard only: every new loose
+                // ball goes through `set_free` → `assign`, which has all nine read it, so games
+                // never reach this with a stale read (Fable review P3-2).
                 let recent = self.t - fd.read_at <= HEAR_READ_AGE_S && fd.read_ball == self.ball_gen;
                 let sent = outfielder == Some(i) && matches!(fd.role, Role::Idle | Role::Backup);
                 fd.belief.is_some() && (fd.role == Role::Chase || (recent && (fd.call >= 1 || sent)))

@@ -74,4 +74,11 @@ Suggested fix, on its own branch with its own ledger row: open the gate for a ba
 
 ## Resolution
 
-Open.
+Resolved by the lead (Opus 5.5), 2026-11-17. No re-review: every change below is a comment or docs edit, with no behaviour change.
+
+- **P2-1 (a ball still in the air): deferred.** It is not a regression (`d32d065` does the same). It needs its own branch, ledger row and review. It is in TASKS.md under "2. Fielding", next to the post-bounce read, and noted at the end of the agent-models §5.7 bullet.
+- **P3-1: fixed.** The agent-models §5.7 bullet now says that the man goes unless he has heard a sure call, that his read sets only where he runs, and that the rule is looked at only at a hearing. It gives the probe's size and names the ball-in-the-air gap.
+- **P3-2: kept, with a comment.** The guard is documented in `Sim::hear` as one games never reach. It is kept rather than dropped so that a later path to a stale read stays safe.
+- **P3-3: deferred.** The fixture twin of the roller test (one outfielder sent, the first by `publicly_before`, the others never chase) is in TASKS.md under "2. Fielding".
+- **P3-4: fixed.** The ledger row and the §5 line give the mechanism's size from this review; HR/PA is still listed as not traced.
+- **P3-5: fixed.** The `fallback_chaser` sentence is restored in `Sim::hear`'s comment.
