@@ -2343,7 +2343,7 @@ impl<'a> Sim<'a> {
             for sign in [-1.0, 1.0] {
                 let mut e = err;
                 e[axis] += sign * RUNNER_CATCH_READ_POINT;
-                p += phi(self.runner_catch_read(&self.predict_from(from, RUNNER_READ_SIGMA0, 0.6, view, e)).0);
+                p += self.runner_catch_read(&self.predict_from(from, RUNNER_READ_SIGMA0, 0.6, view, e)).0;
             }
         }
         // Where a catch would be, on the read he actually has.
@@ -2354,26 +2354,31 @@ impl<'a> Sim<'a> {
     /// The catch chance on one projection of the ball: [`Self::runner_catch_read`].
     #[cfg(test)]
     fn runner_catch_probability(&self, pred: &BallPath) -> f64 {
-        phi(self.runner_catch_read(pred).0)
+        self.runner_catch_read(pred).0
     }
 
-    /// The best margin to glove reach over a projection's first flight, from visible
-    /// fielder motion, in spreads of his doubt about the glove (`RUNNER_CATCH_SIGMA_M`),
-    /// about the fielder's speed (`FIELDER_SPEED_SPREAD_MPS` over the run) and about the
-    /// ball's curve from the spin he cannot see (`CURVE_PRIOR`); and where on the ground
-    /// that best chance is.
+    /// The best catch chance over a projection's first flight, and where on the ground it
+    /// is. At each point it is the chance a fielder's glove gets there, from visible fielder
+    /// motion, in spreads of his doubt about the glove (`RUNNER_CATCH_SIGMA_M`), about the
+    /// fielder's speed (`FIELDER_SPEED_SPREAD_MPS` over the run) and about the ball's curve
+    /// from the spin he cannot see (`CURVE_PRIOR`); where his projection has the ball above
+    /// catching height, times the chance the curve brings it down to it.
     fn runner_catch_read(&self, pred: &BallPath) -> (f64, Option<Vec3>) {
         let ground = pred.first_bounce().map_or(f64::INFINITY, |(t, ..)| t);
         let wall = pred.walls.first().map_or(f64::INFINITY, |(t, ..)| *t);
-        let (mut z, mut at) = (f64::NEG_INFINITY, None);
+        let (mut best, mut at) = (0.0, None);
         let mut t = self.t;
         while t <= pred.t_end() && t < ground.min(wall) {
             let (b, _) = pred.at(t);
-            if b.z <= CATCH_MAX_Z && beyond_reach_over_wall(self.inp.field, b) <= 0.0 {
+            if beyond_reach_over_wall(self.inp.field, b) <= 0.0 {
                 let dt = t - self.t;
                 // The spin he cannot see, as a fielder allows for it before his tracking
                 // learns it: a steady push of `CURVE_PRIOR` per axis from now.
                 let curve_m = 0.5 * CURVE_PRIOR * dt * dt;
+                // A ball he sees above catching height may still be down to it there, by
+                // the curve he cannot see. Lower, the doubt is about where it comes down,
+                // which the margin below carries.
+                let low = if b.z <= CATCH_MAX_Z { 1.0 } else { phi((CATCH_MAX_Z - b.z) / m::hypot(RUNNER_CATCH_SIGMA_M, curve_m)) };
                 for fd in &self.f {
                     let to = Vec3::new(b.x - fd.pos.x, b.y - fd.pos.y, 0.0);
                     let d = m::hypot(to.x, to.y);
@@ -2386,15 +2391,15 @@ impl<'a> Sim<'a> {
                     // The run is linear in top speed, so this is its exact spread.
                     let speed_m = travel(TYPICAL_SPEED + FIELDER_SPEED_SPREAD_MPS) - typical;
                     let sigma = m::sqrt(RUNNER_CATCH_SIGMA_M * RUNNER_CATCH_SIGMA_M + speed_m * speed_m + curve_m * curve_m);
-                    let zi = (REACH + typical - d) / sigma;
-                    if zi > z {
-                        (z, at) = (zi, Some(Vec3::new(b.x, b.y, 0.0)));
+                    let p = phi((REACH + typical - d) / sigma) * low;
+                    if p > best {
+                        (best, at) = (p, Some(Vec3::new(b.x, b.y, 0.0)));
                     }
                 }
             }
             t += DT;
         }
-        (z, at)
+        (best, at)
     }
 
     /// How far off his base a runner holds on a close catch (agent-models §6.3): as far as he
