@@ -1,11 +1,12 @@
 //! One CSV row per runner on first or second on a scorer-credited outfield single.
 //! Run with no arguments for direct game seeds 0–299 and 1000–1299, or
-//! `-- <games> <first seed>` for one range. Times are seconds from contact.
+//! `-- <games> <first seed>` for one range, or `-- <seed> <play> <runner>` for
+//! one runner’s raw 60 Hz trace. Times are seconds from contact.
 //! Actual tracks and an independent, noise-free throw benchmark are both reported.
 
 use bb_agents::running::LEAGUE_TAU_S;
 use bb_game::game::{Game, PitchStep, simulate_game_fielders};
-use bb_game::live::{choice_trace, throw_release_point};
+use bb_game::live::{choice_trace, runner_trace::{self, Cause, Tick}, throw_release_point};
 use bb_game::play::{FielderAttrs, base_pos, run_time};
 use bb_math::{Vec3, m, units::mps_to_mph};
 use bb_physics::{FlightEnv, throw::solve_throw};
@@ -40,6 +41,17 @@ fn position_at(samples: &[(f64, Vec3)], t: f64) -> Vec3 {
 }
 
 fn run_from_speed(distance_m: f64, initial_mps: f64) -> f64 {
+    if distance_m <= 0.0 {
+        return 0.0;
+    }
+    if initial_mps < 0.0 {
+        // A runner going the wrong way must brake and make up his stopping distance.
+        const BRAKE_MPS2: f64 = 4.75;
+        let brake_s = -initial_mps / BRAKE_MPS2;
+        return brake_s + run_time(
+            distance_m - initial_mps * brake_s / 2.0, RUNNER_MPS, LEAGUE_TAU_S,
+        );
+    }
     if initial_mps == 0.0 {
         return run_time(distance_m, RUNNER_MPS, LEAGUE_TAU_S);
     }
@@ -56,6 +68,46 @@ fn run_from_speed(distance_m: f64, initial_mps: f64) -> f64 {
         }
     }
     0.5 * (lo + hi)
+}
+
+// Each tick is charged the change in t + uninterrupted ETA to the next bag.
+// The differences telescope, including ground lost to a retreat and its recovery.
+fn delay_by_cause(ticks: &[Tick], runner: u16, start: u8, split: f64) -> [f64; 7] {
+    let target = (start + 1) as f64 * BAG_M;
+    let remaining = |tick: &Tick| run_from_speed(target - tick.s, tick.signed_mps);
+    let mut ticks = ticks.iter().filter(|t| t.runner == runner && t.t <= split + 1e-9).peekable();
+    let mut delay = [0.0; 7];
+    while let Some(tick) = ticks.next() {
+        let next = ticks.peek().map_or(split, |next| next.t + remaining(next));
+        let slot = match tick.cause {
+            Cause::Read => 0,
+            Cause::Air => 1,
+            Cause::GroundHold => 2,
+            Cause::Traffic => 3,
+            Cause::BagHold => 4,
+            Cause::OtherHold => 5,
+            Cause::Run => 6,
+        };
+        delay[slot] += next - (tick.t + remaining(tick));
+    }
+    delay
+}
+
+fn raw_trace(seed: u64, play: u32, runner: u16) {
+    let mut game = Game::new(seed, true).with_fielders(core::array::from_fn(FielderAttrs::average));
+    while let (Some(step), ticks) = runner_trace::capture(|| game.step_pitch()) {
+        if step.play != play {
+            continue;
+        }
+        let contact = step.record.contact_state.expect("no contact on this pitch").0;
+        assert!(ticks.iter().any(|t| t.runner == runner), "runner absent");
+        println!("time_s,path_m,signed_mps,goal,cause,ball_down");
+        for t in ticks.iter().filter(|t| t.runner == runner) {
+            println!("{:.5},{:.5},{:.5},{},{:?},{}", t.t - contact, t.s, t.signed_mps, t.goal, t.cause, u8::from(t.ball_down));
+        }
+        return;
+    }
+    panic!("play {play} absent in seed {seed}");
 }
 
 #[derive(Clone, Copy)]
@@ -181,6 +233,7 @@ fn row(
     outs: u8,
     bases: ([Option<u16>; 3], [Option<u16>; 3]),
     first_handling: Option<f64>,
+    ticks: &[Tick],
     env: &FlightEnv,
 ) -> Vec<String> {
     let (runners, bases_after) = bases;
@@ -316,6 +369,7 @@ fn row(
             let joint_gain =
                 read + from_rest - run_from_speed(distance_m - lead_add_m, initial_mps);
 
+            let delays = split.map(|t| delay_by_cause(ticks, runner, base, t));
             Some(
                 [
                     seed.to_string(),
@@ -364,6 +418,9 @@ fn row(
                     number(Some(rolling_gain)),
                     number(Some(joint_gain)),
                 ]
+                .into_iter()
+                .chain((0..7).map(|i| number(delays.map(|d| d[i]))))
+                .collect::<Vec<_>>()
                 .join(","),
             )
         })
@@ -385,18 +442,18 @@ fn run(seeds: Range<u64>) -> Vec<String> {
                 }
                 continue;
             }
-            let (step, choices) = choice_trace::capture(|| game.step_pitch());
+            let ((step, choices), ticks) = runner_trace::capture(|| choice_trace::capture(|| game.step_pitch()));
             let Some(step) = step else { break };
             if step
                 .scorer_ruling
                 .is_some_and(|r| r.outcome == Outcome::Hit(1))
             {
-                singles.push((step, choices, outs, (runners, game.st.bases)));
+                singles.push((step, choices, outs, (runners, game.st.bases), ticks));
             }
         }
         let result = game.finish();
         let log = bb_schema::log::read(&result.log).unwrap();
-        for (step, choices, outs, runners) in singles {
+        for (step, choices, outs, runners, ticks) in singles {
             let first_handling = log.plays[step.play as usize]
                 .events()
                 .and_then(|events| events.iter().find_map(|e| e.body_as_scorer_evidence()))
@@ -409,6 +466,7 @@ fn run(seeds: Range<u64>) -> Vec<String> {
                 outs,
                 runners,
                 first_handling,
+                &ticks,
                 &env,
             ));
         }
@@ -428,10 +486,14 @@ fn main() {
         .skip(1)
         .map(|arg| arg.parse().unwrap())
         .collect();
+    if let [seed, play, runner] = args.as_slice() {
+        raw_trace(*seed, (*play).try_into().unwrap(), (*runner).try_into().unwrap());
+        return;
+    }
     let ranges = match args.as_slice() {
         [] => vec![0..300, 1000..1300],
         [n, first] => vec![*first..first + n],
-        _ => panic!("usage: runner_timing [games first_seed]"),
+        _ => panic!("usage: runner_timing [games first_seed | seed play runner]"),
     };
     let rows = std::thread::scope(|scope| {
         let jobs: Vec<_> = ranges
@@ -463,7 +525,8 @@ fn main() {
         "exchange_s,release_mph,first_throw_cutoff,target_release_s,actual_ball_s,actual_cutoff,",
         "actual_margin_s,sent,outcome,out_s,eligible,occupied,read_s,lead_saved_s,accel_cost_s,",
         "extra_runner_s,benchmark_exchange_s,benchmark_flight_s,benchmark_cutoff,",
-        "benchmark_ball_s,margin_s,lead_gain_s,rolling_gain_s,joint_gain_s"
+        "benchmark_ball_s,margin_s,lead_gain_s,rolling_gain_s,joint_gain_s,",
+        "read_debt_s,air_debt_s,ground_hold_debt_s,traffic_debt_s,bag_hold_debt_s,other_hold_debt_s,run_debt_s"
     ));
     for line in rows {
         println!("{line}");

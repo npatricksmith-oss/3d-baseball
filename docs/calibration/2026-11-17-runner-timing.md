@@ -101,3 +101,33 @@ Each cell counts **held / out** runners whose margin crosses from behind to ahea
 **Two-out read alone, 0.50 → 0.25 s.** On the same plays, the current clock flips 33/368 second → home (9 holds, 0 outs) and 22/510 first → third (11 holds, 0 outs). An early ground touch caps the gain. The branch experiment on an earlier main, across all singles, raised two-out scoring from second from 35–37% to 43–45%. [Metrics ledger](../metrics-ledger.md).
 
 The moving starts are illustrative. The added distance gives contact leads of 6.0/7.0 m from first/second with fewer than two outs, and 6.5/7.5 m with two outs. These estimates keep delays up to the intervening bag and hold the defense clock fixed. The removal of the read is capped at the first recorded forward movement where that was earlier. An early ground touch can already release a runner before the named read. The counts measure physically winnable races against this throw benchmark. Send decisions, the defense’s response and the risk of being doubled off remain open. Contact position and speed by outs, comparable MLB pickup and exchange times, and the cost of returning on caught liners and flies are still unknown.
+
+## Q27 trace before moving starts
+
+The merged base (`3b5dd55`) reproduced the original 290 losing holds from second and 706 from first. The opt-in runner trace records path position, signed velocity, goal and active movement branch at 60 Hz. Each tick is charged the change in its projected uninterrupted arrival at the intervening bag. That captures the distance and speed lost to a retreat as well as the time spent standing. Results below are seconds per losing hold. In the bulk capture the initial stationary hold shared the air-hold label. The first ground-touch tick, capped at the scheduled half-second read, separates those clocks to within a tick. The probe now emits those two causes separately.
+
+| Start | Ball | n | Read vs 0.50 s | Air check | Ground hold | Traffic | Intervening bag | Other hold | Running step | Other runner time |
+|---|---|---:|---:|---:|---:|---:|---:|---:|---:|---:|
+| Second | Grounder through | 107 | −0.14 | 0.04 | 0.15 | 0.01 | 0.00 | 0.00 | −0.02 | 0.04 |
+| Second | Liner | 156 | 0.00 | 1.86 | 0.00 | <0.01 | 0.00 | 0.00 | −0.02 | 1.83 |
+| Second | Fly | 27 | 0.00 | 4.69 | 0.00 | 0.01 | 0.00 | 0.00 | −0.02 | 4.67 |
+| Second | All | 290 | −0.05 | 1.45 | 0.05 | 0.01 | 0.00 | 0.00 | −0.02 | **1.43** |
+| First | Grounder through | 314 | −0.20 | 0.01 | 0.00 | 0.00 | 0.00 | 0.00 | −0.03 | −0.22 |
+| First | Liner | 312 | 0.00 | 2.10 | 0.00 | 0.00 | 0.00 | 0.00 | −0.02 | 2.07 |
+| First | Fly | 80 | 0.00 | 4.38 | 0.00 | 0.00 | 0.00 | 0.00 | −0.02 | 4.35 |
+| First | All | 706 | −0.09 | 1.43 | 0.00 | 0.00 | 0.00 | 0.00 | −0.02 | **1.31** |
+
+The residual is about −0.01 s in each group. The historical projection uses a full-speed leg after the bag and a continuous curve from contact to the target. Walking the tick-by-tick ETA to the first touch uses the shorter leg to the intervening bag. A hold on that bag therefore adds zero to this particular deficit. It may still explain the decision to stay, and the projection is optimistic for any runner who has to stop there before going on.
+
+The ground-hold column is the result of the ordinary advance decision on a ball already down. The merged base had no separate rule for the ball hit in front of an unforced runner from second. Watching a ground ball in front until it gets through, checking a liner and giving way to a lead runner are baseball decisions. The false start on the early bounce is a separate timing fault, described below. [Todd Guilliams, runner on second](https://coachesinsider.com/baseball/baserunning-runner-on-second-base/).
+
+Every sample can be reproduced with `runner_timing -- <seed> <play> <runner>`. These are changes in the 60 Hz samples. Positions are metres along the path from home, and times start at contact.
+
+| Seed / play / runner | Ball / outs | Movement and decisions |
+|---|---|---|
+| 1040 / 326 / 3 | Grounder / 0 | Stationary at 61.36 m through 0.05 s. The ball bounces at 0.037 s and the 0.05 s tick commands a return. At 0.50 s the scheduled read changes the goal to third while he is still going −3.69 m/s. At 1.28 s he stops at 59.01 m, then goes forward. He touches third at 4.85 s and holds. |
+| 275 / 136 / 6 | Liner / 1 | At 0.50 s he chooses to go partway. At 1.70 s he is 0.02 m short of the hold point at 6.54 m/s. At 1.72 s he is stopped exactly on it. At 2.57 s, after the bounce at 2.558 s, he goes on. He touches third at 5.22 s and holds. |
+| 141 / 63 / 263 | Fly / 1 | The 0.50 s read sends him back to tag. He reaches second at 2.43 s and waits there until the 5.82 s tick sees the ball down. He touches third at 9.90 s and holds. |
+| 1010 / 107 / 263 | Grounder / 1 | The 0.10 s tick sees the ground touch and sends him back. At 0.50 s the read is blocked by the runner ahead. At 1.12 s the path clears while he is moving −5.19 m/s. He stops and reverses at 2.22 s, reaches third at 6.30 s and holds. |
+
+Keep the liner and fly reads, and the traffic wait. Fix the premature bounce decision, which can send a runner back within 50 ms of contact and ask him to decide again at half a second. Also brake into the partway hold. A runner can choose to stop and wait in that spot, but he cannot lose 6.54 m/s in a single tick. The standing stop at the intervening bag is tracked separately in TASKS.md and contributes zero to the timing projection above.

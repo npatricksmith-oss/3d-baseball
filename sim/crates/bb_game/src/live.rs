@@ -18,6 +18,7 @@ use crate::play::{FielderAttrs, RunnerIn, base_pos, home_positions_for, run_dist
 
 /// Opt-in, read-only A4 evidence. Never consulted by the option evaluation.
 pub mod choice_trace;
+pub mod runner_trace;
 mod holder;
 
 const DT: f64 = 1.0 / 60.0;
@@ -4574,6 +4575,35 @@ impl<'a> Sim<'a> {
         true
     }
 
+    fn trace_runner(&self, k: usize) {
+        use runner_trace::{Cause, Tick};
+        let r = &self.r[k];
+        if !runner_trace::enabled() || r.start == 0 {
+            return;
+        }
+        let ball_down = self.out.facts.iter().any(|f| matches!(f, Input::BallTouched { what: Touch::Ground { .. }, .. }));
+        let cause = if r.hold_s == Some(lead_s(r.start)) {
+            Cause::Read
+        } else if r.tag_up || r.hold_s.is_some() || r.retouch {
+            Cause::Air
+        } else if r.last_base > r.start && r.goal == r.last_base && (r.s - r.last_base as f64 * BASE_L).abs() < 1e-6 {
+            Cause::BagHold
+        } else if r.waiting || r.turned_back.is_some() {
+            Cause::Traffic
+        } else if r.goal <= r.start {
+            if r.decisions == 0 {
+                Cause::Read
+            } else if ball_down {
+                Cause::GroundHold
+            } else {
+                Cause::OtherHold
+            }
+        } else {
+            Cause::Run
+        };
+        runner_trace::push(Tick { runner: r.id, t: self.t, s: r.s, signed_mps: r.direction * r.v, goal: r.goal, cause, ball_down });
+    }
+
     fn move_runners(&mut self) {
         for k in 0..self.r.len() {
             // A runner who has touched home is done, unless the catch is still to be seen: his
@@ -4639,6 +4669,7 @@ impl<'a> Sim<'a> {
                     let b = self.r[k].last_base;
                     self.runner_decide(k, b);
                 } else if on_base {
+                    self.trace_runner(k);
                     continue;
                 } else {
                     self.r[k].goal = self.r[k].start;
@@ -4678,6 +4709,7 @@ impl<'a> Sim<'a> {
             }
             // The last word on where he may stop, whatever set his goal this tick.
             self.settle_guard(k);
+            self.trace_runner(k);
             let goal_s = self.r[k].hold_s.unwrap_or(self.r[k].goal as f64 * BASE_L);
             let (now, tag) = (self.t, self.inp.tag_up);
             let r = &mut self.r[k];
