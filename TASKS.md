@@ -1,6 +1,6 @@
 # Task List
 
-**Last updated:** 2026-11-17 night (lead, Opus 5.5: saved play 65147/10 fix reviewed by Fable and merged).
+**Last updated:** 2026-11-17 night (docs pruning, step 1).
 
 What is next and what is open. Other files hold the rest:
 
@@ -17,26 +17,25 @@ Status: `[ ]` not started · `[~]` partly done · `[?]` needs an owner decision
 
 ## Resume here (2026-11-17, night)
 
-**State.** The outfield grounder rule (`work/of-mutual-defer`, saved play 65147/10) is merged into main after a Fable review (no P1; its P2 and one P3 are in "2. Fielding"). Nothing is waiting on the owner; the next owner question is **Q27**. **Codex shows about 10% of its weekly limit left:** run the next review on a non-author Claude model (memory: Codex limit fallback). No workers are running. Worktree `../bb-wt-of-defer` can be removed with the branch cleanup (pruning step 4).
+**State.** The outfield grounder rule (`work/of-mutual-defer`, saved play 65147/10) is merged into main after a Fable review (no P1; its P2 and one P3 are in "2. Fielding"). The next numbered owner question is **Q27**. **Codex shows about 10% of its weekly limit left:** run the next review on a non-author Claude model (memory: Codex limit fallback). No workers are running. Worktree `../bb-wt-of-defer` can be removed with the branch cleanup below.
 
-**Lesson from that branch:** the worker reported its job done while its test binary was stale (built from an older `live.rs`), so its own run showed the two target tests still failing and it moved on. Before merging a worker's branch, `touch` the changed source and run the tests and the standard run yourself.
+**Lesson from that branch:** the worker reported its job done while its test binary was stale (built from an older `sim/crates/bb_game/src/live.rs`), so its own run showed the two target tests still failing and it moved on. Before merging a worker's branch, `touch` the changed source and run the tests and the standard run yourself.
 
 **Numbers on main** (standard run, seeds 0–299 [1000–1299]; ledger §1): runs 4.12 [4.14] against a real 4.39; hits on GB/LD/FB/PU .307/.683/.109/.006 [.308/.683/.098/.004] against about .245/.68/.13/.02; HR/PA 2.88% [2.82%] against 3.0%; routine flies caught .980 (measured before this merge).
 
 **Next:** item 1 of "Open sim work" below, the runner's start (branch `work/runner-start` waits to be reviewed with its next piece).
 
-**Context pruning (this session; plan agreed with the owner).** Done: the memory folder, this file and CLAUDE.md's stale lines. Still to do, in order:
-1. PLAN.md §14, §18, §19 and each spec's open-items section checked against the code; a dead-link and dead-`§` check over CLAUDE.md, PLAN and this file.
-2. Code: comments that describe the past ("for now", "interim", "skeleton"), the 59 examples in `bb_game/examples` (keep those a doc or the ledger names), leftover `BB_DEBUG_*` switches. Digests must not move.
-3. Old calibration notes and reviews: a one-line "superseded" banner where the ledger has newer figures; review prompt files and the overnight report into `docs/archive/`.
-4. Git: 65 of 87 local branches are merged into main, with 38 worktrees. Show the owner the list before removing any.
-5. A check script that fails on dead paths and on this file growing past its cap.
+**Context pruning (this session; plan agreed with the owner).** Done: memory, the task handoff, CLAUDE.md and the plan/spec audit (see [prune notes](docs/archive/2026-11-17-docs-prune-notes.md)). Still to do, in order:
+1. Code: comments that describe the past ("for now", "interim", "skeleton"), the 59 examples in `sim/crates/bb_game/examples` (keep those a doc or the ledger names), leftover `BB_DEBUG_*` switches. Digests must not move.
+2. Old calibration notes and reviews: a one-line "superseded" banner where the ledger has newer figures; review prompt files and the overnight report into `docs/archive/`.
+3. Git: 65 of 87 local branches are merged into main, with 38 worktrees. Show the owner the list before removing any.
+4. A check script that fails on dead paths and on this file growing past its cap.
 
 ---
 
 ## Open sim work, in order
 
-One `live.rs` job at a time. Each job gets a ledger row and a review.
+One `sim/crates/bb_game/src/live.rs` job at a time. Each job gets a ledger row and a review.
 
 ### 1. Runners (agent-models §6.3–§6.4; [decision-model note](docs/calibration/2026-11-15-runner-decision-model.md))
 
@@ -44,7 +43,7 @@ One `live.rs` job at a time. Each job gets a ledger row and a review.
   - Held, tested, not reviewed: branch `work/runner-start` (`ea06488`). With two out every runner goes 0.25 s after contact. Second to home with two out 43% [45] (was 35 [37]; MLB 75–91%). Its ledger row and spec line are on the branch. Review it with the next piece, then merge.
   - No published figure exists for the first-step delay, the secondary lead at second or outfield exchange time. So measure inside the sim: time from contact to the ball reaching home on outfield singles against the runner's 7.1 s. Then put to the owner whether runners should be moving at contact (a secondary lead with speed).
 - [ ] Fit `AdvanceParams::caution_z` to MLB's attempt and success rates (now 1.0, fitted only to outs on the bases).
-- [ ] The coach's read for a ball behind the runner (Q10 a).
+- [ ] The coach's read and send for a ball behind the runner (Q10 a). Model early-departure decisions on caught flies, slides around tags, a turn decision before the bag, and an overrun redirected after an overthrow.
 - [ ] The rundown (Q11), on its own branch. A stand-in exists. Two small points from the runner-decision review wait for it.
 - [ ] A runner stops dead standing at a base he holds, at 8 m/s (the sim brakes him only going back). A runner put out short of the bag leaves the picture, so there is no slide into a tag.
 - [ ] Unexplained: doubles with a runner on first and two out nearly doubled after the decision model (88 → 167 in 300 games). Suspect: the scorer's single-or-double ruling when the batter takes second on the throw home. First to home on a double is 53% against 38%.
@@ -54,13 +53,14 @@ One `live.rs` job at a time. Each job gets a ledger row and a review.
 ### 2. Fielding
 
 - [ ] Ground-ball hits .308 against .245.
+- [ ] Revisit the geometric routine-play gate using catch-probability bins (calibration-targets §4.6).
 - [ ] **Depth read after the first bounce.** A distant outfielder's snapshot depth along the line of sight has σ = `3.5 m × d/30 m × DEPTH_STRETCH` (3), about 27 m at 77 m on a first read. `off_bat()` ends the plate cue and tracking after the first bounce. On a rolling ball, the angle below the horizon constrains the distance. Specify that perception change in agent-models §5.1 before implementing it. See seed 65147, play 10.
 - [ ] **The misplay on a ball still in the air** ([Fable review](docs/reviews/2026-11-17-fable-of-grounder-backup-review.md) P2-1). The outfield grounder rule (`outfielder_to_reconsider`) is shut while the ball is up and is looked at only when a call changes. In seed 43 play 74, all three outfielders leave a low fly that lands at (18, 57) and the second baseman goes; right field goes only at the 2.47 s recall and fields it at the wall. Suggested: open the gate for a ball in the air whose public first bounce is beyond `INFIELD_BREAK_R`, and look at it again when the ball comes down. Own branch, own ledger row.
 - [ ] A fixture test for that rule's positive case (review P3-3): a hard grounder through the hole with a known infield chaser; exactly one outfielder, the first by `publicly_before`, chases through a second of hearings, and the other two never do.
-- [ ] **Throw choice between near-certain options.** Seed 5 play 201: the first baseman, one metre from the bag with the ball, tosses to the pitcher. Two near-certain outs differ by more than the 1e-9 tie threshold (the carry preference in `live.rs`), so tiny differences decide. Owner's saved play seed 47638 play 0 (no throw from first to the pitcher covering) goes with it.
-- [ ] **"Seen him break"** (owner approved 2026-11-14; not built). A fielder sees a teammate start to move sooner than he hears his call. Move it in agent-models §5.7 from Proposed to decided; the time to notice is a named [E] parameter sourced from motion-onset data. Test case: seed 91689 play 5, where the centre and right fielders each pull up and the ball drops between them (`BB_DEBUG_COMM=1`, `examples/trace_play 91689 5`).
+- [ ] **Throw choice between near-certain options.** Seed 5 play 201: the first baseman, one metre from the bag with the ball, tosses to the pitcher. Two near-certain outs differ by more than the 1e-9 tie threshold (the carry preference in `sim/crates/bb_game/src/live.rs`), so tiny differences decide. Owner's saved play seed 47638 play 0 (no throw from first to the pitcher covering) goes with it.
+- [ ] **"Seen him break"** (owner approved 2026-11-14; not built). A fielder sees a teammate start to move sooner than he hears his call. Move it in agent-models §5.7 from Proposed to decided; the time to notice is a named [E] parameter sourced from motion-onset data. Test case: seed 91689 play 5, where the centre and right fielders each pull up and the ball drops between them (`BB_DEBUG_COMM=1`, `cargo run -p bb_game --example trace_play -- 91689 5`).
 - [ ] Dives not taken on routine fly misses (`OF_DIVE_MIN_P`): 27 of 61 before the track-bias fix; count again first.
-- [ ] From the track-bias review: the shortstop's liner velocity is still overconfident (error²/var 3.9); very short grounders are read conservatively (note §6).
+- [ ] From the track-bias review: the shortstop's liner velocity is still overconfident (error²/var 3.9); very short grounders are read conservatively ([tracking note §6](docs/calibration/2026-11-17-track-bias.md#6-what-is-still-off)).
 - [ ] No lost-ball state. The fly-hit deficit against matched catch-probability bins. An on-time caller displaced by a later teammate.
 - [ ] A receiver on a bag has no stretch for a wide throw (owner's saved play 86).
 - [ ] Owner's saved plays on throws and covering (observations.md): 56, 107, 142, 32 (set before throwing when there is time; trace how hurried each throw was before changing anything), 19, 52, 63, 159, 26, 68, 147.
@@ -75,7 +75,7 @@ One `live.rs` job at a time. Each job gets a ledger row and a review.
 
 - Runs are about a quarter of a run low. Errors (A17), steals and wild pitches are not in the game.
 - [ ] **Plate discipline, last measured 2026-11-14: measure again before acting.** Then: O-Contact 42.8% (band 45–68), swinging strikes 16.1% (8–15), Contact% 65.9% (70–83), Z-Contact 72.9% (79–91), pitches/PA 3.11 (3.5–4.3), chase 24.5% against 29%. The old owner decision O1 (chase rate) is this item; perceptual overconfidence was tried and backed out ([diagnosis](docs/calibration/2026-11-11-chase-diagnosis.md)).
-- [ ] **The direction gap (known, unexplained;** physics-spec §17 item 8, ledger §5): spray minus attack direction sits about 12° toward the opposite field at every launch angle. Not yet compared band by band with the real figures in the [collision-targets note](docs/calibration/2026-11-14-collision-targets.md).
+- [ ] **The direction gap (known, unexplained;** physics-spec §8.2.1, ledger §5): spray minus attack direction sits about 12° toward the opposite field at every launch angle. Not yet compared band by band with the real figures in the [collision-targets note](docs/calibration/2026-11-14-collision-targets.md).
 - [ ] Batters are 17 ms early on outside pitches and 2 ms on inside ones (perception). Swing v2's attack-angle slope against direction is 0.53 (Statcast 0.41).
 - [ ] Not started: pitchers' zone targets and the tracking limit ([run-environment diagnosis](docs/calibration/2026-11-14-run-environment-diagnosis.md), ranks 4 and 5).
 - Waiting for batter ratings (owner's idea, 2026-11-15): swing timing as part of the sweet spot, and per-batter timing, extension, plane and stance (agent-models §3.6).
@@ -97,14 +97,32 @@ One `live.rs` job at a time. Each job gets a ledger row and a review.
 
 Check the code again before starting one.
 
-- [ ] Composure (leverage-scaled noise, agent-models §1.5): `motor.rs` takes the factor; nothing feeds it game state.
+- [ ] Composure (leverage-scaled noise, agent-models §1.5): `sim/crates/bb_agents/src/motor.rs` takes the factor; nothing feeds it game state.
 - [ ] Hit-by-pitch evasion (agent-models §3.7): the body capsule is "v1 without evasion".
-- [ ] SpinCapacity has no effect; SpinRecognition is weak; QuickHands is flat between 30 and 50 ([M3 report](docs/calibration/2026-10-31-m3-interim.md) §7.2).
+- [ ] SpinCapacity has no effect; SpinRecognition is weak; QuickHands is flat between 30 and 50 ([M3 report, adaptation and sensitivity addendum](docs/calibration/2026-10-31-m3-interim.md#addendum-in-game-adaptation-and-sensitivity-later-the-same-night)).
 - [ ] `Executed*` visibility isolation with a compile-fail test (none exists).
-- [ ] `criterion` benchmarks for the per-pitch budget (not in any `Cargo.toml`; the timing harness is `bb_game/examples/perf.rs`).
-- [ ] Rules corpus: 136 scenarios, toward 150 (rules-spec §12.3). Interference (§5.7) and a fielder-touch fact for the retouch reference were open; check the engine first.
-- [ ] Live play: atlas-based perception (agent-models §5.1), double cuts and one-hop throws, first-touch facts.
-- Research follow-ups are each spec's own open-items list: physics-spec §17, data-formats §10, agent-models §13, calibration-targets §13, rules-spec §15.
+- [ ] `criterion` benchmarks for the per-pitch budget (not in any `Cargo.toml`; the timing harness is `sim/crates/bb_game/examples/perf.rs`).
+- [ ] Rules corpus: 136 scenarios, toward 150 (rules-spec §12.3). Implement interference (rules-spec §5.7) and a separate first-fielder-touch fact for retouch timing on a deflected fly.
+- [ ] Live play: double cuts and deliberate one-hop throws.
+- [ ] **R8:** Check Savant `spin_axis` and `pfx_x` signs on real right- and left-handed four-seamers (data-formats §9.2–§9.3).
+- [ ] **R9:** Source angular perception error, velocity Weber fraction and the near-plate blanking distance from interception and time-to-contact studies (agent-models §3.2–§3.3).
+- [ ] **R10:** Refresh the calibration spec’s league reference values against the latest complete season and record the sources.
+- [ ] **R11:** Audit OBR citations and interpretations, including three-batter minimum at inning boundaries, mound visits, the infielder definition on throw awards and walk-off base credit.
+- [ ] Compare the flight coefficients to the current Trajectory Calculator spreadsheet, including total vs transverse spin in drag (physics-spec §4.2).
+- [ ] Source the wood-bat COR by contact station and impact speed, baseball inertia factor, and turf/dirt bounce and rolling parameters (physics-spec §2, §8.2, §9.1).
+- [ ] Validate the existing A10 undercut spin sweep against published measurements over its offset range (physics-spec §14.2).
+- [ ] Add lighter/longer and heavier/end-loaded stock bats and revisit the typical 34-inch bat mass (physics-spec §6).
+- [ ] Revisit tangential restitution between 34 and 65 m/s if direct measurements become available (physics-spec §8.2.1).
+- [ ] Fit correlated release and swing execution noise if supported by measurements (release elevation with speed and swing timing with plane).
+- [ ] Refit provisional agent estimates and elasticity gates as mechanisms and player ratings land (agent-models §10 and calibration-targets §7.2, §11).
+- [ ] When fielding errors land (A17), audit ordinary-effort thresholds and the reference-fielder model against watched plays (rules-spec §10.1).
+- [ ] Check first-base attempt and passed-infielder geometric thresholds against replay cases when their rulings are available (rules-spec §5.5, §5.7).
+- [ ] Log runner passing with its own event/out kind so the scorer can show the actual ruling (rules-spec §5.5). Complete the schema-backed log producers for timeout detail, liveness and umpire signals, and deciding evidence for batted-ball rulings (rules-spec §15).
+- [ ] Add infield fly and check the declaration time against runners’ hold behavior (rules-spec §13).
+- [ ] Finish catcher receiving/blocking and caught foul tips (agent-models §4), plus bunts and balks (rules-spec §8, §13).
+- [ ] Validate the dead-ball cut on a throw into the seats and a ground-rule double (physics-spec §9.5).
+- [ ] Fill in depth anticipation and cut-off throws to hold a trailing runner when those models are specified (agent-models §5.10, §6.4).
+- [ ] Add the real-sample Savant export and schema compatibility fixtures; wire up the machine-readable calibration bands, regression reports and gate runs (data-formats §8, §9.4 and calibration-targets §12).
 
 ---
 
@@ -122,7 +140,7 @@ Check the code again before starting one.
 - [~] **A5. Dives.** Rate and motion are in. Left: every dive is head-first straight at the ball.
 - [~] **A6. Slides.** Client only: a runner slides feet-first when a play is being made on him. The sim has no slide (agent-models §6.2); see item 1 above for the dead stop.
 - [ ] **A7. Windup and stretch** [W2]: a windup with the bases empty, the stretch with runners on, which shortens the delivery and matters to steals. One delivery time today (agent-models §2.6). References are in observations.md.
-- [ ] **A8. Leads only once the pitcher is set; pickoffs.** Fixed leads today (`LEAD_M` in `live.rs`). Missing: lead timing tied to the pitcher coming set, leads from the runner's belief of pickoff risk, the pickoff (agent-models §2.6, §6.1).
+- [ ] **A8. Leads only once the pitcher is set; pickoffs.** Fixed leads today (`LEAD_M` in `sim/crates/bb_game/src/live.rs`). Missing: lead timing tied to the pitcher coming set, leads from the runner's belief of pickoff risk, the pickoff (agent-models §2.6, §6.1).
 - [ ] **A9. Stolen bases** [W13]. Needs A7, A8, A6 and the catcher's throw (agent-models §4).
 - [ ] **A11. Wind and weather.** The flight model takes a wind vector (always zero) and an air density. Rain must act through physical causes (D1): a wet ball, wet ground; never a mistake rate.
 - [ ] **A17. Fielding errors** [W10], from physical causes only (a bobble, a bad throw; D1). Ties to the scorer's hit-or-error ruling (rules-spec §10). Do not use the read's noise as a stand-in for errors (owner, 2026-11-15).
@@ -137,14 +155,20 @@ Check the code again before starting one.
 - [ ] B2. Lineups by pitcher hand (a manager lever, M6).
 - [ ] B3. Game settings screen, with team selection [W6].
 - [~] B4. Player and team statistics [W11]: box score and batting lines exist; no statistics screens.
-- [ ] B5. "Fielder's choice" is used too freely (`classify_bip` in `game.rs`, after OBR 9.05). Audit a few hundred such plays, fix with the errors work, and make the text say what happened.
-- [ ] C1. Better crowds: today's sits still. C2. Player development and aging [W7], M7. C3. Post-game highlights (timelines are recorded, D9).
+- [ ] B5. "Fielder's choice" is used too freely (`classify_bip` in `sim/crates/bb_game/src/game.rs`, after OBR 9.05). Audit a few hundred such plays, fix with the errors work, and make the text say what happened.
+- [ ] C1. Better crowds: today's sits still. C2. Player development and aging [W7], M7. C3. Post-game highlights (disk retention of timelines, D9).
 
 ### Looks, later
 
 - [ ] L3. Batter stances and swings per player [W3]. The owner's examples: Pete Rose, Darryl Strawberry, Gary Carter.
 - [ ] Names that follow nationality; the catcher tossing his mask on a pop foul (saved play 40); a tag shown being made; the first baseman's "I got it" (159); a runner's athletic stance (65).
-- Small things if wanted: flags that move, an "X" for the home side's unplayed last half, people standing, crowd reaction, errors in the line score, full pitching lines in the box.
+- [ ] Park polish: night lighting, per-team colours, moving flags, aisle/front railings, pole-end gaps, lattice towers, turf grain and sharper distant shadows, more detailed trees/sign lettering, and crowd standing, concourse motion and reactions.
+- [ ] Figure and kit polish: shirt hem, finger and glove shapes, catcher’s cage mask, first-base mitt, batting gloves and shin guard.
+- [ ] Pitch/batting staging: pitcher’s target and signs, catcher’s return from the crouch, foot placement after motions, carrying and dropping the bat, grip, swing recovery, and distinct check-swing and bunt poses.
+- [ ] Fielding and running visuals: one visible jump/catch height matched to the sim’s track, throwing on the run, catch transitions and footwork, receiving foot on the bag, relay-ready poses, head-first and return slides, slide recovery, and dive variants and head turn. A receiver stretch and tags have tasks above.
+- [ ] Crew polish: coach and bench transitions and reactions, umpire movement, fair/time/infield-fly/home-run and third-strike signals, safe-call coverage and matching the result card’s timing. Recheck crew cost with frame-rate measurements if the figure budget changes.
+- [ ] Score displays: an "X" for the unplayed home half, errors in the line score, and full pitching lines via read-only exports.
+- [ ] Packaged client materials need cooking and validation (park-visuals §2).
 
 ---
 
@@ -152,18 +176,23 @@ Check the code again before starting one.
 
 - [ ] **M5** Deepen the field (much of it is under way above)
 - [ ] **M6** Live management (the primary experience)
-- [ ] **M7** League and season
+- [ ] M6 policy and calibration: manager personalities, full tactic set, fatigue and bullpen use bands; define elapsed-time gaps for warm-up and fatigue (data-formats §2.2).
+- [ ] M6 explanations and replay: implement belief snapshots and explanation facts, then settle highlight retention and fact importance (data-formats §5.1, §5.5–§5.6).
+- [ ] **M7** League and season. Generate more parks and add a run-factor check (0.85–1.15) for each.
 - [ ] **M8** Presentation polish. Revisit the RAM upgrade before this.
 
-Exit gates are in [PLAN.md §14](PLAN.md).
+- [?] **D6 sign-off:** Verify Unreal’s edit–compile–play loop inside the desktop editor and confirm the hardware gate with the owner. Agree any remaining watchability targets (calibration-targets §6.3).
+
+Exit gates are in [PLAN.md §14](PLAN.md#14-roadmap).
 
 ---
 
 ## Parked (decided "later")
 
-- [ ] **Foul share: the spray experiment** (owner, 2026-11-13). **Written before swing v2 replaced the swing (2026-11-14): measure the foul share again before anything else.** Then it was 23.7% of contact against MLB's about 51%. Read [the note](docs/calibration/2026-11-13-foul-measures.md) §5–§8 and its three Codex reviews first.
+- [ ] **Foul share: the spray experiment** (owner, 2026-11-13). **Written before swing v2 replaced the swing (2026-11-14): measure the foul share again before anything else.** Then it was 23.7% of contact against MLB's about 51%. Read [the foul-share note, sections 5–8](docs/calibration/2026-11-13-foul-measures.md#5-what-this-means) and its three Codex reviews first.
   - Ruled out or weak then: well-timed steep contact; the fair/foul call; mid-swing correction (23.7 → 26.1% even with no limits); bat angle alone.
   - The open hypothesis then: the swing holds the ball's spray too close to its attack direction (MLB contact at attack direction 12–20° fouls 54%, the sim's 8–12%). This is close to the direction gap in item 4 above.
   - Second question: on-time topped balls stay fair (MLB fouls 62% of well-timed contact below −30°); needs evidence before any Tier A change.
   - Tools: `foul_diag`, `foul_in_games`, `sim-cli cage-map`.
 - Injuries, physically grounded (D18), after M8.
+- Optional later models: perceived leverage errors, strict ABS parity if requested, and DH-loss substitutions and two-way players (rules-spec §9.4, §13).

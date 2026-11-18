@@ -1,7 +1,7 @@
 # Data Formats Specification
 
 **Last updated:** 2026-10-31
-**Status:** Draft v1. Gates milestone M0 (task M0.5 builds the `.fbs` files from this document).
+**Status:** Spectator formats are implemented in `sim/schemas/` and the C ABI in §6.4. This spec also defines the planned manager and save formats.
 **Parent:** [PLAN.md](../PLAN.md) §2, §3.1, §4, §10 · **Siblings:** [physics-spec.md](physics-spec.md), [agent-models.md](agent-models.md), `rules-spec.md` (to be written)
 
 This document defines every data format that crosses a boundary: the **event log** (source of truth for stats), the **`PlayTimeline`** (what the client plays back, including agent belief snapshots), **manager commands**, and **game-state snapshots**. It also fixes identifiers, the RNG key layout, the FlatBuffers conventions, versioning rules, and the mapping from the sim's spin vector to Baseball Savant's spin-axis and tilt conventions.
@@ -46,7 +46,7 @@ Status tags follow the physics spec: **[S]** sourced, **[D]** derived, **[E]** e
 
 ### 2.3 RNG key layout
 
-PLAN §4.2 requires a keyed, counter-based RNG. The **key layout** is fixed here because changing it changes every game. The generator algorithm is chosen in M0.4 and recorded in `CLAUDE.md`.
+PLAN §4.2 requires a keyed, counter-based RNG. The **key layout** is fixed here because changing it changes every game. The generator is Philox4x32-10 (`sim/crates/bb_math/src/rng.rs`).
 
 ```
 key = (game_seed: u64, play_index: u32, agent_id: u16, purpose: u16, sub_index: u32)
@@ -57,7 +57,7 @@ key = (game_seed: u64, play_index: u32, agent_id: u16, purpose: u16, sub_index: 
 | Purpose | Value | Used by |
 | :--- | :--- | :--- |
 | `PitchRelease` | 1 | Pitcher release-angle, speed, spin noise |
-| `PitchSelection` | 2 | Sampling from the pitcher's mixed strategy (§8.4 entropy term) |
+| `PitchSelection` | 2 | Sampling from the pitcher's mixed strategy (PLAN §8.4 entropy term) |
 | `BatterPerception` | 3 | Batter observation noise |
 | `SwingExecution` | 4 | Swing-placement and timing noise |
 | `FielderPerception` | 5 | Landing/intercept estimate noise |
@@ -124,12 +124,12 @@ All four formats are FlatBuffers. Schemas live in `sim/schemas/` and are compile
 
 | File | Namespace | Root type | `file_identifier` |
 | :--- | :--- | :--- | :--- |
-| `common.fbs` | `bb` | (none: shared structs, enums, `ProducerInfo`) | |
-| `events.fbs` | `bb.ev` | `PlayRecord` (and `LogHeader`, `LogFooter`) | `BBEV` (play frames); `BBEH` header and `BBEF` footer frames (§4.1) |
-| `timeline.fbs` | `bb.tl` | `PlayTimeline` | `BBTL` |
-| `commands.fbs` | `bb.cmd` | `CommandEnvelope`, `CommandResult` | `BBCM` |
-| `snapshot.fbs` | `bb.ss` | `SaveState`, `ViewState` | `BBSS` |
-| `config.fbs` | `bb.cfg` | `GameConfig` (rosters, park, rules options, seed) | `BBCF` |
+| `sim/schemas/common.fbs` | `bb` | (none: shared structs, enums, `ProducerInfo`) | |
+| `sim/schemas/events.fbs` | `bb.ev` | `PlayRecord` (and `LogHeader`, `LogFooter`) | `BBEV` (play frames); `BBEH` header and `BBEF` footer frames (§4.1) |
+| `sim/schemas/timeline.fbs` | `bb.tl` | `PlayTimeline` | `BBTL` |
+| `sim/schemas/commands.fbs` | `bb.cmd` | `CommandEnvelope`, `CommandResult` | `BBCM` |
+| `sim/schemas/snapshot.fbs` | `bb.ss` | `SaveState`, `ViewState` | `BBSS` |
+| `sim/schemas/config.fbs` | `bb.cfg` | `GameConfig` (rosters, park, rules options, seed) | `BBCF` |
 
 Rules for every schema:
 - **Every table field has an explicit `(id: N)`**, so reordering source lines can never change the binary layout.
@@ -293,9 +293,9 @@ ball left the field and bases were awarded; the batter reaches only by that awar
 
 One `PlayTimeline` per play, returned by the sim when the client advances (PLAN §2 live loop). It contains everything needed to animate the play, overlay telemetry, and explain it, without calling the sim again.
 
-**Retention [C]:**
-- Live game: the client keeps all timelines of the current game in memory for instant replay.
-- Saved: timelines are written to disk only for games the human managed or watched, and only for plays flagged as highlights (balls in play, strikeouts, scoring plays, any play the human bookmarks). Background games keep event logs only.
+**Retention:**
+- Live game: the director keeps a bounded pitch history in memory for instant replay (`HistoryMax` in `client/Source/BaseballClient/BbDirector.h`).
+- Saved: the client writes seed/play bookmarks today (`client/Source/BaseballClient/BbSavePlay.cpp`). The planned disk format retains timeline blobs for highlights from watched or managed games. Background games keep event logs only.
 - Size budget [E]: about 5 KB per pitch without a ball in play and 50–100 KB per ball in play. About 3–7 MB per fully stored game before zstd.
 
 ### 5.2 Structure
@@ -477,11 +477,13 @@ Each directive has a **scope**: `NextPitch`, `PlateAppearance`, or `UntilChanged
 | | `BullpenWarmup` | pitcher, action: Start, Stop |
 | Control | `DelegateToAi` | scope: None, UntilHalfInningEnd, UntilGameEnd, PlayersOnly. Lets the AI manager run the team while the human skips ahead (PLAN §10.2) [C] |
 
-Pacing (watch every pitch, skip to the end of the inning) is **not** a sim command. It is the client calling advance with a different stop condition (§6.4). Every pacing mode runs the same simulation.
+Pacing belongs to presentation. Manager pacing modes will use the stop conditions designed in §6.4. Every pacing mode runs the same simulation.
 
 ### 6.4 C ABI shape (informative)
 
-The real API is specified in M0 by the spike (`bb_ffi`). It is expected to look like this, with all payloads as FlatBuffers blobs:
+The spectator ABI in [bb_ffi.h](../sim/crates/bb_ffi/include/bb_ffi.h) creates a seeded game with `bb_game_create`, returns one FlatBuffers pitch timeline per `bb_game_advance`, exposes its summary and frame samples via `bb_timeline_info` and `bb_timeline_sample`, and frees it via `bb_blob_free`. Unreal calls advance on its thread pool (`client/Source/BaseballClient/BbDirector.cpp`).
+
+The manager and save API design extends the spectator ABI:
 
 | Call | Purpose |
 | :--- | :--- |
@@ -495,7 +497,7 @@ The real API is specified in M0 by the spike (`bb_ffi`). It is expected to look 
 
 **Added 2026-11-15:** `bb_game_park(game, &BbPark)` returns the park the game is played in, as the physics has it (boundary pieces with kind and height, poles, bases, rubber, dirt radius), for the client to draw (park-visuals §6). Read-only.
 
-**Built in `bb_ffi` (as of 2026-11-14), beyond the sketch above.** `bb_game_box_score(game, through_plays, &BbBoxScore)` (A12) fills a plain struct (`include/bb_ffi.h`, append-only) with the box score of the game so far: for each side, the batting lines in order (name, number, position, PA, AB, R, H, 2B, 3B, HR, RBI, BB, K, HBP, SF, SH), the team totals with runners left on base and any unruled batted balls, and the linescore with runs and hits by inning (`first_inning`, `n_batted`; a game past 30 innings keeps the last 30); `is_final` is set once the log holds `GameEnded`. It is a **pure function of the event log**: the library closes a copy of the log it has written (`bb_game::Game::log_through`, `bb_schema::LogWriter::snapshot`: the plays asked for, a footer carrying their digests, the game's own log untouched) and reads it with `bb_stats::box_score`, the same scorer a finished log gets. `through_plays` is the number of pitches to include (`BbPlayInfo.play_index` is the number before that pitch; `UINT32_MAX` is all so far), so a client that runs a pitch behind the sim shows only what it has shown. It costs a pass over the log, so a client asks when the box is shown, not every frame. The sim keeps no extra state for it and no statistic is counted during play.
+**Built in `bb_ffi` (as of 2026-11-14), beyond the sketch above.** `bb_game_box_score(game, through_plays, &BbBoxScore)` (A12) fills a plain struct (`sim/crates/bb_ffi/include/bb_ffi.h`, append-only) with the box score of the game so far: for each side, the batting lines in order (name, number, position, PA, AB, R, H, 2B, 3B, HR, RBI, BB, K, HBP, SF, SH), the team totals with runners left on base and any unruled batted balls, and the linescore with runs and hits by inning (`first_inning`, `n_batted`; a game past 30 innings keeps the last 30); `is_final` is set once the log holds `GameEnded`. It is a **pure function of the event log**: the library closes a copy of the log it has written (`bb_game::Game::log_through`, `bb_schema::LogWriter::snapshot`: the plays asked for, a footer carrying their digests, the game's own log untouched) and reads it with `bb_stats::box_score`, the same scorer a finished log gets. `through_plays` is the number of pitches to include (`BbPlayInfo.play_index` is the number before that pitch; `UINT32_MAX` is all so far), so a client that runs a pitch behind the sim shows only what it has shown. It costs a pass over the log, so a client asks when the box is shown, not every frame. The sim keeps no extra state for it and no statistic is counted during play.
 
 ---
 
@@ -541,7 +543,7 @@ What the client needs to draw the scoreboard and HUD **without** reading sim int
 
 - `schema_major.schema_minor` is one number pair shared by all six schema files [C]. It is simpler than tracking each file separately and the files evolve together.
 - Readers check the `file_identifier` and reject a newer major version with a clear error.
-- **Compatibility corpus:** `sim/schemas/compat/` holds one sample file per format from every released minor version. CI parses all of them with the current reader.
+- **Compatibility gate:** keep a sample per format and released minor version so CI can exercise them with the current reader.
 - `rules_version`, `scorer_version`, and `physics_params_hash` are separate from schema versions. They identify *behavior*, so they are what tells a reader whether two logs are comparable.
 
 ---
@@ -573,18 +575,18 @@ Checks, for a pitch traveling −Y:
 
 ### 9.3 Tilt (clock face)
 
-Tilt is the clock-hand direction of **m̂** **as seen from behind the pitcher** (the pitcher's perspective), with 12:00 = pure backspin. A right-handed four-seamer is about 1:00; a left-handed one about 11:00. [E: this is the common public usage and agrees with §9.2; R8 confirms it.]
+Tilt is the clock-hand direction of **m̂** **as seen from behind the pitcher** (the pitcher's perspective), with 12:00 = pure backspin. A right-handed four-seamer is about 1:00; a left-handed one about 11:00. [E: this is the common public usage and agrees with §9.2; R8 in TASKS.md tracks the real-sample check.]
 
 ```
 tilt_hours = ((spin_axis_deg − 180) / 30) mod 12      # 0 is shown as 12
 display    = h:mm, rounded to 15 minutes
 ```
 
-*Correction to physics-spec §12:* its row said "as seen by the batter". From the batter's or catcher's view the clock is mirrored (a right-hander's fastball would read 11:00). The pitcher's perspective is the convention, and §12 now points here.
+From the catcher’s view the clock is mirrored (a right-hander’s fastball would read 11:00). The telemetry in physics-spec §12 uses the pitcher’s view.
 
-**Required unit test (M1):** encode §9.2's four checks and the matching tilts. Also round-trip: generate **ω** from a (tilt, efficiency, rate, gyro sign) and recover tilt and efficiency.
+Spin-axis and tilt cases are checked by `sim/crates/bb_physics/tests/oracle_flight.rs`; `sim/crates/bb_physics/src/spin.rs` tests the axis and efficiency round trip.
 
-**Verification item (new R8):** download a small public Savant sample and confirm the sign of `spin_axis` and of `pfx_x` for right- and left-handed four-seamers against §9.2. Our derivation uses the Magnus direction from spin, as Savant's "spin-based" axis does. Savant also publishes an observed (movement-inferred) axis. With seam-shifted wake deferred, the sim's two axes are identical, so differences in real data are expected and are not a bug.
+Our derivation uses the Magnus direction from spin, as Savant’s spin-based axis does. Savant also publishes an observed (movement-inferred) axis. With seam-shifted wake deferred, the sim's two axes are identical, so differences in real data are expected and are not a bug.
 
 ### 9.4 Savant-compatible export
 
@@ -608,11 +610,3 @@ display    = h:mm, rounded to 15 minutes
 `plate_x` is evaluated at the plate's midpoint plane, which matches both Statcast from 2026 on and the strike call (physics spec §10). For comparisons with pre-2026 Savant data, use the front-edge crossing, which is also in the log.
 
 ---
-
-## 10. Open Items
-
-1. **R8** (§9.3): confirm Savant `spin_axis` and `pfx_x` signs against a real sample. Before M1 golden tests.
-2. The between-play time gaps (§2.2) belong in `rules-spec.md` as rules parameters once it exists.
-3. ~~Exact contents of each belief snapshot~~ Filled by [agent-models.md §9](agent-models.md).
-4. Highlight-retention policy (§5.1) and the explanation-fact importance scores are first guesses. Revisit at M6.
-5. The `bb_ffi` call list (§6.4) is confirmed or changed by the M0.8 Unreal spike.

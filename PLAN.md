@@ -106,7 +106,7 @@ flowchart LR
 
 The machine has an AMD RX 6700S/6800S-class GPU (8 GB, Vulkan via Mesa), 16 threads, and **14 GiB usable RAM**. Plenty for the Rust sim, Rerun, and simple Unreal scenes. **Epic recommends 32 GB for UE5 development.** The owner is not upgrading RAM for now, possibly later. Fedora is not one of Epic's primary test distros.
 
-**Why 14 GiB is probably workable until M8:** the Unreal client stays deliberately thin through M7. It has capsule players, primitive geometry, a timeline player, and HUD code; all game logic lives in Rust. The memory-hungry parts of Unreal (MetaHumans, dense environments, large animation sets) arrive only in M8. That is the natural point to revisit the RAM upgrade.
+**Why 14 GiB is probably workable until M8:** the Unreal client stays deliberately thin through M7. It has generated park geometry and player figures, a timeline player, and a HUD. Game logic lives in Rust. The memory-hungry parts of Unreal (MetaHumans, dense environments, large animation sets) arrive only in M8. That is the natural point to revisit the RAM upgrade.
 
 **Low-RAM working rules:**
 - Use Epic's **precompiled Linux engine binaries**. Never build the engine from source, which is the most memory-hungry step.
@@ -137,14 +137,14 @@ The machine has an AMD RX 6700S/6800S-class GPU (8 GB, Vulkan via Mesa), 16 thre
 | **World** | **Never** to decide outcomes. Randomness only as noise on physical inputs: release angles, swing-plane error, glove-placement error, perceptual samples, bounce-surface normals. | Ball flight, contact, capture, arrival timestamps, fair/foul, strike-zone geometry |
 | **Agents** (players, managers) | **Yes.** Beliefs, expected values, learned tables | "P(strike) = 0.62", "P(I beat the throw) = 0.4", run-expectancy tables |
 
-- Agents receive only noisy **observations**. They never hold world-state types. This is enforced by the crate dependency graph (§16): `bb_agents` cannot depend on `bb_world`.
+- Agents receive only noisy **observations**. They never hold world-state types. This is enforced by the crate dependency graph (§15): `bb_agents` cannot depend on `bb_world`.
 - Agents may use the *same physics equations* as internal prediction models, fed with their noisy estimates. Wrong inputs give wrong predictions, and that is how deception, misreads, and bad routes emerge.
 - The official scorer's counterfactuals (hit versus error) are bookkeeping. They never change what happened.
 
 ### 4.2 Determinism
 
-- **Guaranteed:** same build plus same seed gives the same game. Cross-platform identity is a goal, made realistic by `libm` and the no-FMA policy, and checked in CI later. Nothing depends on it, though; replays store timelines (D9).
-- **Keyed counter-based RNG:** `rng(gameSeed, playIndex, agentId, purpose, subIndex)` (layout fixed in [data-formats.md §2.3](docs/data-formats.md)). Adding a random draw anywhere never shifts unrelated draws. Any single pitch can be re-run with one noise source changed.
+- **Guaranteed:** same build plus same seed gives the same game. Cross-platform identity is a goal supported by `libm` and the no-FMA policy. D9 specifies recorded timelines for durable replays.
+- **Keyed counter-based RNG:** `rng(gameSeed, playIndex, agentId, purpose, subIndex)` (layout fixed in [data-formats.md §2.3](docs/data-formats.md#23-rng-key-layout)). Adding a random draw anywhere never shifts unrelated draws. Any single pitch can be re-run with one noise source changed.
 - No hash-map iteration order in sim logic (use ordered maps or index vectors).
 - Each game's seed derives from `(seasonSeed, gameId)`. League days run in parallel. Fatigue, injuries, and standings merge at day barriers.
 
@@ -386,17 +386,17 @@ A procedural world generator (league, divisions, schedule, **parametric ballpark
 
 | Milestone | Scope | Exit gate |
 | :--- | :--- | :--- |
-| **M0: Foundations** | Git + LFS; Cargo workspace (§16); vector math, units, keyed RNG; event-log and timeline FlatBuffers schemas; Rerun hello-world; `CLAUDE.md` with invariants and conventions. **Unreal spike:** install UE5 on this Fedora machine, link the Rust library through the C ABI, play a hand-built timeline with capsules; record RAM use and compile times. | Deterministic event-log hash across runs; **spike meets §3.3 pass criteria → D6 confirmed** (otherwise the engine decision returns to the owner) |
-| **M1: Pitch flight** | RK4 flight; pitch definitions; aiming solve plus release noise; Rerun pitch viewer (trails, zone, tunnels) | Tier A pitch golden tests pass; fastball and slider visibly share early flight |
-| **M2: Bat and contact** | Swing template plus inverse; swept contact; impulse model; batted-ball flight over a flat field; Rerun cage view | Tier A collision tests; scripted sweeps show early→pull, late→opposite field, undercut→backspin fly, overcut→topspin grounder, off-barrel→weak; offset→launch-angle map recorded |
-| **M3: Batter vs pitcher** | §7 attributes needed so far; hypothesis-bank perception; swing/take; check swing; heuristic pitcher AI; composure and adaptation; `cage` and `sensitivity`; perf measured | Archetypes produce distinct profiles; monotonicity suite passes; plate-appearance rates in rough Tier B bands; within budget |
-| **M4: Walking skeleton + Unreal client v0** | Flat field, fences, foul lines; simple fielders (reaction, noisy estimate, run, capture); ballistic throws; simple runners; v1 rules (§9); event-sourced box score; AI-vs-AI spectator mode in Unreal with capsules, a basic broadcast camera, a scoreboard | A full game plays end to end in the CLI and in Unreal; accounting holds over 1,000 games; **owner judges watchability** |
-| **M5: Deepen the field** | Surfaces, bounces, rolls, wall caroms, mound; full fielding including first base; relays and cutoffs; catcher blocking; leads, steals, tag-ups, rounding, slides; bunts; pickoffs; M5 rules | 10,000 balls in play, no stuck states; routine-play success above threshold; error and extra-base rates in envelope |
+| **M0: Foundations** | Cargo workspace and schemas (§15), keyed RNG (`sim/crates/bb_math/src/rng.rs`), deterministic event log (`sim/crates/bb_schema/src/log.rs`), and the [Unreal spike](docs/unreal-spike.md). | Deterministic event-log hash across runs. The offscreen spike passed; the desktop portion of §3.3 and formal D6 sign-off are tracked in [TASKS.md](TASKS.md). |
+| **M1: Pitch flight** | RK4 flight (`FlightEnv::step`), pitch shapes and aim solve (`sim/crates/bb_physics/src/pitch.rs`), release noise (`motor::execute_release`), and Rerun pitch/tunnel views (`sim/crates/bb_cli/src/pitch_lab.rs`). | Tier A pitch goldens; fastball and slider visibly share early flight. |
+| **M2: Bat and contact** | Swing, swept contact, impulse collision and batted-ball flight. Timing, placement and reach sweeps are in `sim/crates/bb_game/tests/cage_m2.rs`; the [M2 contact map](docs/m2-contact-map.md) is a historical baseline. | Tier A collision tests; early pulls, late goes opposite field, undercut gives backspin, overcut gives topspin, and off-barrel contact is weak. |
+| **M3: Batter vs pitcher** | Hypothesis-bank perception, swing/take, check swing, heuristic pitch selection and adaptation (`sim/crates/bb_game/src/pa.rs`); CLI cage, sensitivity and archetype reports. | Keep distinct archetype profiles, monotonicity, rough Tier B plate-appearance bands and the performance budget. [TASKS.md](TASKS.md) tracks composure, dead attributes and calibration gaps. |
+| **M4: Walking skeleton + Unreal client** | Full spectator games in the CLI and Unreal (`Game::step_pitch`, `ABbDirector::RequestNext`); fielding, running and rules feed the event-sourced box score (`bb_stats::box_score`). | End-to-end play; accounting over 1,000 games; owner judges watchability. See the [park](docs/park-visuals.md), [players](docs/player-visuals.md) and [HUD](docs/hud.md). |
+| **M5: Deepen the field** | Bounces, rolls and wall caroms use `bb_physics::ground::batted_path`. `bb_game::live` handles fielding, relays, cutoffs, leads and tag-ups. [TASKS.md](TASKS.md) tracks the mound, surface layout, catcher, running and rules work. | 10,000 balls in play, no stuck states; routine-play success above threshold; error and extra-base rates in envelope |
 | **M6: Live management** (primary experience) | Command API; human manager HUD; AI manager; pacing modes; fatigue; bullpen warm-ups; substitutions; causal explanations; first learned-belief tables | Human-vs-AI game is fun to manage; A/B sims show each tactic changes outcomes in the expected direction |
 | **M7: League** | Generator, schedules, parametric parks, recovery, saves, standings, leaderboards, parallel seasons, per-league belief tables | Full season playable; managed live games interleave with instant background days |
 | **M8: Presentation** | Characters, Motion Matching, IK, broadcast camera director, replays, audio | Owner's quality bar |
 
-**Deferred past M8:** seam-shifted wake, human-umpire mode and framing, swing styles, evolving mechanics, scouting inferred from behavior, injuries, online human-vs-human play (authoritative host streaming timelines). Weather and wind were on this list until 2026-11-13, when the owner made them priority A (TASKS.md, backlog A11).
+**Deferred past M8:** seam-shifted wake, human-umpire mode and framing, swing styles, evolving mechanics, scouting inferred from behavior, injuries, online human-vs-human play (authoritative host streaming timelines). Wind and weather are priority A11 in [TASKS.md](TASKS.md).
 
 ---
 
@@ -464,17 +464,9 @@ The `bb_agents` ↛ `bb_world` dependency rule makes D1's belief/world split a *
 
 ## 18. Open Questions
 
-None blocking. Pending items:
-- D6 is confirmed or reopened by the M0 spike (§3.3).
-- RAM upgrade: revisit before M8 (characters and visual polish).
+See [TASKS.md](TASKS.md) for pending decisions and checks.
 
-## 19. Next Planning Artifacts
+## 19. Specifications
 
-The live, checkbox-level task list is **[TASKS.md](TASKS.md)**. This section only names the documents.
-
-1. `docs/physics-spec.md`: gates M1–M2. **Draft v1 written 2026-10-30**; its open items are in its §17.
-2. `docs/data-formats.md`: gates M0. **Draft v1 written 2026-10-31**; its open items are in its §10.
-3. `docs/agent-models.md`: gates M3. **Draft v1 written 2026-10-31**; its open items are in its §13.
-4. `docs/calibration-targets.md`: gates M3–M5. **Draft v1 written 2026-10-31**; its open items are in its §13.
-5. `docs/rules-spec.md`: gates M4. **Draft v1 written 2026-10-31**; its open items are in its §15.
-6. `CLAUDE.md`: written in M0, from §1, §4, §5, §3.4, §16.
+- [Physics](docs/physics-spec.md), [data formats](docs/data-formats.md), [agent models](docs/agent-models.md), [calibration targets](docs/calibration-targets.md), and [rules](docs/rules-spec.md).
+- [CLAUDE.md](CLAUDE.md) covers repository invariants, conventions and workflow.

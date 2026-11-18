@@ -110,7 +110,7 @@ Each table is checked by the milestone named in its heading, using `sim-cli cage
 
 ### 4.1 Pitch shapes and release (M1, re-checked M3)
 
-Measured with Savant-definition movement through `sim-cli export --savant` (data-formats §9.4), right-handed pitchers; left-handers mirror horizontal break. Movement in inches; HB positive = arm side.
+The comparison uses Savant-definition movement (data-formats §9.4) for right-handed pitchers; left-handers mirror horizontal break. The CLI currently reports pitch shapes through `sim-cli arsenal` (`sim/crates/bb_cli/src/pitch_lab.rs`). Movement in inches; HB positive = arm side.
 
 | Pitch | Velo [R] (mph) | Spin [R] (rpm) | IVB [R] (in) | HB [R] (in) | Envelope |
 | :--- | :--- | :--- | :--- | :--- | :--- |
@@ -237,7 +237,7 @@ Measured in `sim-cli cage` with league-average and population-sampled matchups, 
 
 ## 6. Tier B: Ball-in-Play and Game Totals (M4–M5)
 
-Measured with `sim-cli season` on the reference park and a full generated league, **AI managers at default personality**, learned tables converged (§9.4). Per team-game unless stated.
+The current reference-park runs use `sim-cli games`; the full-league gate calls for default AI manager personalities and converged learned tables (§9.4). Per team-game unless stated.
 
 ### 6.1 Ball-in-play outcomes (B2)
 
@@ -334,7 +334,7 @@ These thresholds are [E] first guesses. M3 measures the real elasticities and th
 
 ### 7.3 Elasticity record
 
-`sim-cli sensitivity` writes, for each (attribute or knob, stat) pair, the slope per 10 grade points with a 95% interval. The record is versioned with the report (§12). A sign flip between two reports, or a slope change of more than 50% without a model change in the diff, is investigated before the gate.
+The elasticity gate calls for a slope per 10 grade points with a 95% interval for each attribute or knob and statistic pair. `sim-cli sensitivity` provides the attribute sweeps. The record is versioned with the report (§12). A sign flip between two reports, or a slope change of more than 50% without a model change in the diff, is investigated before the gate.
 
 ---
 
@@ -387,7 +387,7 @@ Per-game metrics are clustered (plays within a game are correlated), so their in
 
 ### 9.3 Seeds
 
-Calibration uses a fixed, versioned seed list (`calibration/seeds-v1.txt`). Gate runs use the first three; development runs may use any. A band that passes on one seed and fails on another is reported as failing.
+Use the two seed ranges in [the metrics ledger](metrics-ledger.md) for standard runs. A band that passes on one seed and fails on another is reported as failing.
 
 ### 9.4 Learned tables and calibration
 
@@ -479,12 +479,12 @@ B4.6 is the luck check: if halves agree almost perfectly, noise is too small and
 
 ### 12.1 Calibration report
 
-Every calibration run writes a directory `calibration/reports/<date>-<git-short-hash>/` with:
+Current figures go in [the metrics ledger](metrics-ledger.md) and dated reports go under `docs/calibration/`. The planned machine-readable report includes:
 - `metrics.parquet`: one row per metric ID with value, interval, sample size, target band, envelope, status (`pass`, `warn`, `fail`).
-- `summary.md`: failing and warning metrics first, then the full table, then knob values, population config hash, belief-table hash, seed list, and any §2.3 item-3 parameter changes with their justifying band.
+- Summary: failing and warning metrics first, then the full table, then knob values, population config hash, belief-table hash, seed list, and any §2.3 item-3 parameter changes with their justifying band.
 - `sensitivity.parquet` when Tier S ran.
 
-Bands are machine-readable in `calibration/bands.toml`, keyed by the metric IDs in this document (A1…, B1.1…, W1…). A test asserts that every ID in this document appears in `bands.toml` and the reverse, so the doc and the config cannot drift.
+A future machine-readable bands file needs a test that matches its IDs to the ones in this specification (A1…, B1.1…, W1…).
 
 ### 12.2 Continuous integration
 
@@ -493,12 +493,3 @@ Bands are machine-readable in `calibration/bands.toml`, keyed by the metric IDs 
 - **Gates:** the full run on three seeds; the report goes to the owner with the milestone.
 
 ---
-
-## 13. Open Items
-
-1. **R10 (new):** refresh every [R] value against FanGraphs league pages, Baseball Savant leaderboards, and Baseball-Reference for the latest complete season, and record the sources here. **Before M3.**
-2. All §7.2 thresholds, §11.2 shifts, and §11.3 correlations are [E] first guesses; M3 (batting and pitching) and M5 (fielding and running) revise them from measured elasticities.
-3. Watchability targets (§6.3) are set by the owner at M4 after watching games.
-4. Park effects: B3 bands assume the reference park. M7 adds a park-factor check (each parametric park's run factor between 0.85 and 1.15) once parks exist.
-5. Fatigue and bullpen usage bands (innings per start, reliever appearances) depend on the AI manager and are added at M6.
-6. The "routine play" definitions in §4.6 are geometric first drafts; M5 may replace them with a catch-probability model fitted from the sim's own output.

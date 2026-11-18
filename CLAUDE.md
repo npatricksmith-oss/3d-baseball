@@ -46,7 +46,7 @@ sim/                   Cargo workspace
     bb_schema          generated FlatBuffers code + event-log container and BLAKE3 digest chain
     bb_world           true world: pitch resolution against the swing
     bb_rules           rules engine: pure step function over facts; scenarios/**/*.toml corpus
-    bb_game            orchestrator: cage, plate appearances (pa.rs), causal live-ball plays (live.rs; play.rs is the first play simulator, still the home of shared types such as `FielderAttrs`, `RunnerIn`, `base_pos`, `home_positions`), games (game.rs), rosters (roster.rs: who the players are and their hands; no abilities yet), event log, timelines
+    bb_game            orchestrator: cage, plate appearances (pa.rs), causal live-ball plays (live.rs; play.rs is the first play simulator, still the home of shared types such as `FielderAttrs`, `RunnerIn`, `base_pos`, `home_positions`), games (game.rs), rosters (roster.rs: who the players are and their hands; with a per-player BatSpeed draw), event log, timelines
     bb_stats           statistics as pure functions of the event log (box score, accounting identities)
     bb_ffi             C ABI for engine clients (include/bb_ffi.h; c/run_smoke.sh links a C client)
     bb_league          (later milestones)
@@ -71,7 +71,7 @@ bin/                   owner's desktop launcher: play.sh (Unreal client, or the 
 - Codex CLI (`codex exec`) is available for independent validation/review passes.
 - Unreal Engine 5.8.4 (precompiled) belongs at `~/UnrealEngine/5.8.4`, outside the repository. `bin/play.sh` asks before falling back to Rerun when it is missing.
 - Build the client: `Engine/Build/BatchFiles/Linux/Build.sh BaseballClientEditor Linux Development -project=<abs path>/client/BaseballClient.uproject` (6 s incremental).
-- Check visual changes headlessly: `client/run.sh 7 -RenderOffscreen -BbShots=6`, then read the PNGs in `client/Saved/Shots`. Fixed sets of pictures, each described in the section named:
+- Check visual changes headlessly: `client/run.sh 7 -RenderOffscreen -BbShots=6`, then read the PNGs in the generated Shots folder. Fixed sets of pictures, each described in the section named:
 
   | Flag | What it shoots | Where it is described |
   |---|---|---|
@@ -116,7 +116,7 @@ Game logic in C++; Blueprints only for thin visual wiring. Script asset setup wi
 - Update [TASKS.md](TASKS.md) at the end of every work session. **A handoff replaces "Resume here"; never stack a new one above the old.** Finished work goes in the commit, the ledger and observations.md; a done item is deleted from TASKS.md, not kept ticked. Keep the file under about 30 KB.
 - **Stale text misleads the next agent.** When a change makes a comment, a doc line or a figure untrue, fix or delete it in the same commit. Notes under `docs/calibration/`, `docs/reviews/` and `docs/archive/` are dated records: read them for how something was found, and take current figures from the ledger and current tasks from TASKS.md.
 - **[observations.md](observations.md) is the owner's checklist (owner, 2026-11-16):** his own words, each with a box (`[x]` done, `[~]` partly, with a one-line plain note on what is left). When a session finishes or advances one of his items, tick it there in the same commit. New owner observations (including saved plays' comments) go there too, then into TASKS.md's backlog for the detail. He follows progress there instead of in TASKS.md.
-- **Metrics ledger (owner, 2026-11-14):** every task that changes sim code adds a row to [docs/metrics-ledger.md](docs/metrics-ledger.md): the standard run (`sim-cli games --n 300 --seed 0` and `--seed 1000`) on the commit before and the commit after, the cause of any movement, and what is unexplained. Identical digests get one line under "No effect on games". An unintended or unexplained shift also goes in its §4 or §5. Client-only, tooling and docs work gets no row.
+- **Metrics ledger (owner, 2026-11-14):** every task that changes sim code adds a row to [docs/metrics-ledger.md](docs/metrics-ledger.md): the standard run (`sim-cli games --n 300 --seed 0` and `--seed 1000`) on the commit before and the commit after, the cause of any movement, and what is unexplained. Identical digests get one line under "No effect on games". An unintended or unexplained shift also goes in ledger §4 or §5. Client-only, tooling and docs work gets no row.
 - **A Lead Agent runs in the owner's herdr pane (owner, 2026-11-17), as on the whole project so far.** The session he talks to is the lead: it reads the state, diagnoses, plans, and coordinates worker agents. It creates one herdr tab named "Workers" and gives each worker its own pane in that tab, so the owner can keep track of them there; the lead's own tab holds only the lead. It gives them the implementation, ledger runs, doc updates and reviews, then checks their branches and merges. It chooses the workers' models, effort and jobs itself, within the usage budget below. It does not sink its own session into long implementation work a worker could do.
 - Commit in small, described steps. The remote is `origin` on GitHub; the session's lead agent may merge tested work into `main` and push it on its own judgment (owner, 2026-11-14), and says what it pushed, **but only when that lead is a Claude Fable model (any effort; owner, 2026-11-15) or Claude Opus 5.5 at high effort**. Any other model, or Opus below high effort, asks the owner first. Worker agents do not merge into `main` or push. Never force-push without the owner's OK.
 - **Official rules (owner, 2026-11-14):** a fix that only brings the game in line with the Official Baseball Rules (scoring included) is the lead's to make without asking the owner. It still gets tests and a review like any change.
@@ -125,7 +125,7 @@ Game logic in C++; Blueprints only for thin visual wiring. Script asset setup wi
   ```bash
   codex exec -m gpt-6.2-sol -c model_reasoning_effort="high" -s workspace-write -C "<repo root>" - < prompt.md
   ```
-  The prompt names the commit range, the files and questions ranked by risk, and the invariants above. It tells Codex to verify claims by running tests or probes, edit no source, test, spec, or TASKS file, and write only `docs/reviews/<date>-codex-<topic>-review.md`, with findings ranked P1–P3, a Verification section, and `## Resolution` set to "Open." Afterwards: commit the review, fix or defer every finding, write the Resolution, and list unresolved findings first in TASKS.md "Resume here".
+  The prompt names the commit range, the files and questions ranked by risk, and the invariants above. It tells Codex to verify claims by running tests or probes, edit no source, test, spec, or TASKS file, and write only a dated Codex review Markdown file under `docs/reviews/`, with findings ranked P1–P3, a Verification section, and `## Resolution` set to "Open." Afterwards: commit the review, fix or defer every finding, write the Resolution, and list unresolved findings first in TASKS.md "Resume here".
 
 ## Usage budget (owner, 2026-11-15)
 
