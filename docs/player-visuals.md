@@ -2,8 +2,6 @@
 
 **Status:** plan agreed with the owner 2026-11-15 (seven questions, Q15–Q21, all as recommended; §1). All seven steps are built (§6–§12): the figure, the kit, the delivery and the catcher, the swing, throws and catches in the field, the slide and the dive, and the other people. The plan is complete. This is the second part of the graphics stage, after [the park](park-visuals.md) and before [the HUD](hud.md).
 
-**Where it starts.** Every player is the engine's grey mannequin (`SKM_Manny_Simple`) with a team tint, moved by stock clips standing in for baseball: a charged punch for the delivery, an attack for the throw and the stance, a landing for the catcher's crouch, a wall jump for the dive (`BbDirector.cpp`, `LoadAssets`). The bat is a block. There are no gloves, caps, numbers, umpires or coaches.
-
 ## 1. Decisions (owner, 2026-11-15)
 
 | # | Question | Ruling |
@@ -20,26 +18,20 @@ Carried over from the park plan without asking again: the lead builds alone, one
 
 ## 2. Approach
 
-- **A figure builder apart from the director.** New `BbFigure.{h,cpp}` owns what a player is made of: the pieces, their sizes, the uniform, the kit. `BbDirector` keeps who stands where and when. The look (club colours, skin tones, sizes of pieces) goes in `BbLook.h` with the park's.
-- **Pieces on bones.** Each figure keeps its skeletal mesh as an invisible driver; shaped pieces are attached to its bones (head, cap, chest, pelvis, upper and lower arms, hands, thighs, shins, feet). The pieces are generated meshes, as the park's are, so a forearm tapers and a cap has a bill. This is the open technical point of step 1: if attached pieces cost too much at 24 figures plus the extras, the fallback is one generated skinned mesh on the same skeleton.
+- **A figure builder apart from the director.** New `client/Source/BaseballClient/BbFigure.cpp` owns what a player is made of: the pieces, their sizes, the uniform, the kit. `BbDirector` keeps who stands where and when. The look (club colours, skin tones, sizes of pieces) goes in `client/Source/BaseballClient/BbLook.h` with the park's.
+- **Pieces on bones.** Each figure keeps its skeletal mesh as an invisible driver; shaped pieces are attached to its bones (head, cap, chest, pelvis, upper and lower arms, hands, thighs, shins, feet). The pieces are generated meshes, as the park's are, so a forearm tapers and a cap has a bill.
 - **Poses in code.** A motion is a short table of key poses (joint angles at named moments) blended over the sim's own times: the delivery ends with the hand at the sim's release point at release time; the swing puts the barrel at the sim's contact point at contact time; a throw releases when the sim's throw leaves. Hands and bat are placed by two-bone IK onto the physical point, so the motion can never disagree with the ball. Left-handers are the same tables mirrored (the director already mirrors figures).
 - **Stock clips stay where they are honest:** standing, walking, jogging, running.
-- **Numbers and lettering** are painted in code with `BbText.h`, as the wall's distance figures are.
+- **Numbers and lettering** are painted in code with `client/Source/BaseballClient/BbText.h`, as the wall's distance figures are.
 - **Budget.** 193 fps unattended after the crowd. Every step reports the frame rate from the same headless run.
 
 ## 3. Steps
 
-1. **The figure.** `BbFigure`; pieces on the skeleton; home whites and road greys with trim, cap, the number on the back; height, build and skin tone from the player's id. Motion is whatever it was.
-2. **Kit.** The glove on the glove hand, a turned bat, batting helmets for the batter and runners, the catcher's mask and chest protector.
-3. **The delivery and the catcher.** Set, leg lift, stride, release at the sim's point and time, follow-through; the catcher's crouch, target and receive.
-4. **The swing.** Stance, load, stride, the barrel to the sim's contact point (or through the zone on a miss), follow-through; the take. A read-only export of the bat's path goes here if the timeline lacks it (Q21).
-5. **Throws and catches in the field.** The fielder's ready position, the glove to the ball, the transfer, the throw with release at the sim's time; the first baseman's stretch as far as the sim has one.
-6. **The slide,** and the dive redone in the same way as the other motions.
-7. **Other people.** Four umpires with out, safe, strike and foul signals from the sim's calls; two base coaches; the benches.
+The seven built steps are the figure (§6), kit (§7), delivery and catcher (§8), swing (§9), throws and catches (§10), slide and dive (§11), and crew (§12). The client implementation lives in `client/Source/BaseballClient/BbFigure.cpp`, `client/Source/BaseballClient/BbPose.cpp` and `client/Source/BaseballClient/BbCrew.cpp`.
 
 ## 4. Checking the look
 
-- `client/run.sh 7 -RenderOffscreen -BbShots=6` for play; `-BbParkShots` for the seven fixed spots. Steps 1 and 2 add **figure spots** that do not depend on the play: a line-up of both nines front and back at close range, and one figure turned through eight angles.
+- `client/run.sh 7 -RenderOffscreen -BbShots=6` for play; `-BbParkShots` for the seven fixed spots. `-BbFigureShots` uses **figure spots** that do not depend on the play: a line-up of both nines front and back at close range, and one figure turned through eight angles.
 - Motions are checked as strips: the same motion photographed at its named moments (as `-BbDiveShots` does for the dive), with the ball in the frame at release and at contact.
 - The ball must stay easy to see against the uniforms, the white ones above all.
 
@@ -52,27 +44,21 @@ Carried over from the park plan without asking again: the lead builds alone, one
 
 ## 6. Step 1 as built (2026-11-15): the figure
 
-`BbFigure.{h,cpp}`. A figure is 23 pieces, each a shape turned about its own axis (a tapered limb with rounded joints, an egg for the head, flattened rings for the trunk) and generated once at start-up from the mannequin's own skeleton, so each runs from joint to joint wherever the joints are: hips, belt, the shirt's middle, the chest, neck, head, hair, cap and bill, and on each side a sleeve, upper arm, forearm, hand, thigh, sock and shoe. Each piece is a static mesh fixed to one bone; the mannequin still plays every clip and is not drawn. The chest carries a picture painted in code (`BbText.h`): collar, placket, the club's lettering on the front, the number on the back.
+`client/Source/BaseballClient/BbFigure.cpp`. A figure is 23 pieces, each a shape turned about its own axis (a tapered limb with rounded joints, an egg for the head, flattened rings for the trunk) and generated once at start-up from the mannequin's own skeleton, so each runs from joint to joint wherever the joints are: hips, belt, the shirt's middle, the chest, neck, head, hair, cap and bill, and on each side a sleeve, upper arm, forearm, hand, thigh, sock and shoe. Each piece is a static mesh fixed to one bone; the mannequin still plays every clip and is not drawn. The chest carries a picture painted in code (`client/Source/BaseballClient/BbText.h`): collar, placket, the club's lettering on the front, the number on the back.
 
-- **The open technical point of §2 is settled: pieces on bones are cheap enough.** No skinned mesh was needed.
 - **A figure shown in a mirror** (the director mirrors a left-hander's delivery and throw) has its lettering painted backwards so it still reads, and its pieces' drawing orders are remade when the mirror changes; without that the engine drew the figure inside out. The check picture `figure_6_turn_mirrored` found it.
 - **Checks added:** `-BbFigureShots` (no game: each nine in a row from the front and from behind, then one player turned through eight angles, plain and in a mirror, as `figure_<n>_<what>.png`); `-BbMannequin` (the old grey mannequin, for comparison). For pictures large enough to read the lettering, add `-ResX=1920 -ResY=1080 -ForceRes`.
-- **Pictures:** `client/Saved/Shots/players1_before/` and `players1_after/` (untracked): the six figure pictures and six of play each.
-- **Cost: not yet measured cleanly.** The owner's own game was running on the laptop throughout, so the 193 fps figure could not be repeated. Under that shared load, same run (`-BbShots=6`, seed 7): 73 fps with the mannequin, 65 and 52 with the figures (two runs). Memory 2.6 GB, unchanged. Measure again on a free machine at the start of step 2; if the cost is real, the first thing to try is not moving the pieces of figures that are hidden (40 figures are kept, at most 16 shown).
-- **Left for later:** the shirt's hem shows a slightly ragged edge where the chest overlaps the middle piece; hands are plain rounded shapes (step 2 gives one of them a glove).
 
 ## 7. Step 2 as built (2026-11-15): the kit
 
-Nine more pieces a figure (32 in all), each worn or not by what he is doing (`ABbFigure::SetRole`), and a turned bat. Sizes and colours are in `BbLook.h`.
+Nine more pieces a figure (32 in all), each worn or not by what he is doing (`ABbFigure::SetRole`), and a turned bat. Sizes and colours are in `client/Source/BaseballClient/BbLook.h`.
 
 - **Glove:** a leather shape over the hand he does not throw with (the roster's `throws`), about 26 cm long, larger than life as the ball and bat are. A figure shown in a mirror moves it to the other bone, so it stays on the same hand as the viewer sees it (checked by `figure_8`). Every fielder wears one; the catcher's is 18% larger.
 - **Batting helmet:** a shiny shell in the cap's colour with flaps over both ears and a short bill, in place of the cap, for every batter and runner.
 - **The catcher:** the same shell without a bill, a dark mask over the face, a chest protector in the club's trim, dark shin guards (dark so that they show against the sock).
 - **The bat:** turned on the figures' lathe (knob, handle, barrel), 35% thicker than real so the swing reads, stretched between the sim's knob and tip as the block was. With `-BbMannequin` the block stays.
 - **Checks added:** `-BbFigureShots` now takes nine pictures: `figure_7_kit_field` (the home nine as they take the field), `figure_8_kit_field_mirrored_back` (the same in a mirror, from behind), `figure_9_kit_bat` (eight visitors in helmets through eight angles, a bat stood among them).
-- **Pictures:** `client/Saved/Shots/players2_before/` (six of play) and `players2_after/` (untracked).
 - **Cost, measured this time** (seed 7, `-BbShots=6 -BbUncapped`, a browser busy on the machine): 174 fps with figures and kit, 190 with the bare mannequin in the same build, against 193 before the players. So the figures cost about a tenth. Not acted on; the first thing to try is still not moving the pieces of hidden figures.
-- **Left for later:** the mask is a solid shape, not a cage; the first baseman has an ordinary glove; a glove is one shape without a thumb or web; (the hands met the bat with the swing, step 4: §9); batting gloves and the batter's shin guard are not made.
 
 ## 8. Step 3 as built (2026-11-15): the delivery and the catcher
 
@@ -85,9 +71,7 @@ The first motions written as poses in code. `BbPose.{h,cpp}` holds all of it.
 - **The catcher** (`BbMotion::Crouch`): a squat on the balls of his feet, knees wide, bare hand behind his right leg, sitting 66 cm behind the sim's spot for him so that the mitt is out in front. The mitt is held for a target, goes to where the sim has the pitch caught over the last quarter second, and holds the ball there for 0.7 s; its fingers point away from his middle (up for a high pitch, down for a low one), and he bends to a low one. On a hit ball the mitt goes to where the pitch was heading and he is up at once. He squats in the last 0.8 s of the reset.
 - **Measured** (`-BbStagingLog`, 66 pitches of seed 7, and seed 6 for a left-hander): at release the ball in the pitcher's hand is 2.3–2.4 cm from the sim's release point, right- or left-handed, at two heights of pitcher; the mitt's wrist is where it was asked to be on the median pitch and 11 cm short at worst (pitches in the dirt).
 - **Checks added:** `-BbMotionShots` photographs the second pitch from beside the pitcher, the third from the plate and the fourth beside the catcher, each held on its named moments, as `motion_<pitch>_<n>_<what>.png` (20 pictures); `-BbStagingLog` adds `BB_RELEASE` and `BB_RECEIVE` lines.
-- **Pictures:** `client/Saved/Shots/players3_after/` (untracked): the strips and six of play. Before: `players2_after/`.
 - **Cost:** 187 fps (seed 7, `-BbShots=6 -BbUncapped`), against 174 at step 2 on a busier machine: nothing measurable.
-- **Left for later:** a throw that begins while a motion is still going out cuts to the throw clip at once (step 5 redoes throws); a left-hander's figure flips out of its mirror as the motion ends (both done in step 5: §10); the feet of a figure coming out of a motion slide a short way instead of stepping; no wind-up, only the stretch; the catcher gives the same target every pitch (the sim does not export where the pitcher is aiming); no sign-giving, no throw back from the crouch.
 
 ## 9. Step 4 as built (2026-11-16): the swing
 
@@ -100,9 +84,7 @@ The batter holds his bat and swings it. `BbMotion::Swing` in `BbPose.{h,cpp}`; t
 - **A left-handed batter** is the same in a mirror, by which box he stands in (so a switch hitter is right).
 - **Measured** (`-BbStagingLog`, `BB_SWING`, six balls hit in seed 7, right- and left-handed): both hands on the handle at contact, 0.0 cm off.
 - **Checks added:** `-BbMotionShots` now goes on after its first three pitches to the first ball hit (`motion_4_*`: stance, stride, launch, turn, contact, through, finish, from across the plate), the first swing and miss (`motion_5_*`: the same and the bat coming back, from the mound's side) and the first pitch taken (`motion_6_*`): 38 pictures in all.
-- **Pictures:** `client/Saved/Shots/players4_after/` (untracked): the strips and six of play. Before: `players3_after/`.
 - **Cost:** 166 fps against 173 for step 3 run on the same machine minutes apart (seed 7, `-BbShots=6 -BbUncapped`, other work going on): nothing measurable.
-- **Left for later:** a new batter walks up without a bat and has one when he stands in (carrying it needs a pose over the walk); no dropped bat lying on the ground; the hands are plain shapes that do not close round the handle; the arms are straight at the start of the swing because the sim's hands start 0.57 m back; every batter has the same stance and stride; no check-swing or bunt look of its own; after a swing the feet stay wide until the next pitch is near.
 
 ## 10. Step 5 as built (2026-11-16): throws and catches in the field
 
@@ -120,9 +102,7 @@ Every fielder gets ready, puts his glove on the ball, brings it in to his hand a
 - **Reaches are exact now.** What a hand holds sits on along the forearm, which is not the line from the shoulder when the elbow is bent; the solver moves the wrist until the held thing is on the point. The pitcher's release, 2.3–2.4 cm off in step 3, is 0.1 cm.
 - **Measured** (`-BbStagingLog`, `BB_CATCH` and `BB_LETGO`, the play held on each catch and release; 200 s each of seeds 7 and 6 at six times speed, 232 pitches): 111 catches, the glove's pocket on the ball to within 3 cm in 108 and 10 cm off at worst (ground balls taken more than a metre from his feet); 52 throws, the hand within 0.5 cm of the sim's release point in every one, left-handers included.
 - **Checks added:** `-BbMotionShots` goes on to the first ball fielded and thrown by one man (`motion_7_*`: ready, coming, reach, catch, in, step, cocked, laid back, release, follow) and the next throw taken (`motion_8_*`): 53 pictures in all. The camera goes with the man, in front of him until he has the ball and beside him for the throw.
-- **Pictures:** `client/Saved/Shots/players5_after/` (untracked): the strips and six of play. Before: `players4_after/`.
 - **Cost:** 150 fps against 153 with the stock clips, the same build minutes apart (seed 7, `-BbShots=6 -BbUncapped`; the machine gave lower figures all round than on the day of step 4).
-- **Left for later:** fly balls are taken at the belt because that is where the sim has them caught; a throw made on the run turns the whole figure to the target, legs and all; a pitcher or catcher who goes from his own motion into a catch within a third of a second passes through standing; a fielder who gives ground for a ball slides his feet rather than stepping; the hands do not close on the ball; no tag is shown, and no foot on the bag; relay men and cut-offs stand as anyone does.
 
 ## 11. Step 6 as built (2026-11-16): the slide and the dive
 
@@ -134,14 +114,12 @@ The last two stand-in clips are gone: a diving fielder and a sliding runner are 
 - **The slide itself** is seven key poses on the clock from 0.42 s before he is at the bag to 1.2 s after: a last stride, sitting back with the left leg folding under, down on his left hip with the right foot out and his hands off the dirt, the foot on the bag, sitting up, up over the bag foot, standing on it. The sim's place for him is his leading foot once he is down, so **the foot reaches the bag when the sim has him there** and his body trails 60 cm behind it. Feet-first and right leg leading every time.
 - **Measured** (`-BbStagingLog`, seed 7, 274 pitches at six times speed): 16 arrivals at a base to stop; 3 were walked back to; of the 13 at a run, 2 had a play on them and slid; the one diving catch had the glove 0.0 cm off the ball (96 cm before the lead).
 - **Checks added:** `-BbSlideShots=<n>` and `-BbDiveShots=<n>` hold the play on five moments of the next n slides and dives and photograph each from beside (`slide_<k>_<1..5>.png`: going down, sliding, at the bag, sitting up, getting up; `dive_<k>_<1..5>.png`: driving off, in the air at the sim's catch, down, hands and knees, getting up). They work at any playback speed, so `-BbSpeed=6` finds them quickly. `-BbStagingLog` logs each arrival as `BB_SLIDE` (speed in, whether a play was on him, whether he slid) and a diving catch as `BB_CATCH ... dive=1`.
-- **Pictures:** `client/Saved/Shots/players6_after/` (untracked): two slides and two dives, five moments each.
 - **Cost:** 161 fps (seed 7, `-BbShots=6 -BbUncapped`) against 150 at step 5: nothing measurable.
 - **For the owner to overrule if he likes:** a runner slides only when a play is being made on him; every slide is feet-first with the right leg; he sits a third of a second and stands up on the bag.
-- **Left for later:** 11 of the 13 running arrivals had no play near and still stop dead standing, because the sim stops them dead: a runner who slows into a base he will hold is sim work (with the paused runner work). A runner put out before he reaches the bag leaves the picture where he is, so no slide into a tag is seen, and no tag (step 5's list). No head-first slide, no dive back to a base, no slide at first. A play that ends within a second of the slide cuts the getting-up short as the walk-off begins. Every dive is head-first along the sim's direction; there is no backhand sprawl or leap. The man on hands and knees looks back over his shoulder at the ball too far.
 
 ## 12. Step 7 as built (2026-11-16): other people
 
-Four umpires, the batting side's two base coaches and the men in both dugouts (owner's Q20). They are the same figures as the players, posed in code; `BbCrew.{h,cpp}` owns them and `BbDirector` tells it each tick where the play has got to. All decoration: the sim knows none of them, nothing feeds back, and a ball goes through an umpire.
+Four umpires, the batting side's two base coaches and the men in both dugouts (owner's Q20). They are the same figures as the players, posed in code; `client/Source/BaseballClient/BbCrew.cpp` owns them and `BbDirector` tells it each tick where the play has got to. All decoration: the sim knows none of them, nothing feeds back, and a ball goes through an umpire.
 
 - **Umpires** wear a pale blue shirt, charcoal trousers and a black cap (`BbLook::Umpires`, dressed as a third side); the plate umpire also wears a mask. The plate umpire stands 1.45 m behind the catcher's place, a step toward the batter's side; the first- and third-base umpires 3.5 m past their bags, just foul; the second-base umpire on the grass 7 m behind the bag toward short. They go down with their hands on their knees as the pitch is thrown (the plate umpire squats lower), watch the ball once it is hit, and turn to the play they call.
 - **Signals come from the sim's own record of the pitch** (`NoteSignals`): a **strike** called or swung at (the plate umpire's arm out to his right; "ball" has no signal, as in life), a **foul** when the ball comes down (both arms up, by the plate umpire or the umpire on that line), each **out** from the sim's umpire calls (the fist; the umpire at that base, or the one nearest a caught fly). **Safe** (arms swept out flat) is the client's reading, as the slide is: a runner who stops at a base with a play made on him there and no out, or the batter reaching first as a throw is taken there. A signal lasts 1.5 s and runs on the play's clock, so a replay shows it again.
@@ -149,12 +127,9 @@ Four umpires, the batting side's two base coaches and the men in both dugouts (o
 - **The benches.** Each dugout seats that side's nine, each as himself (his number, his build), whenever he is not out on the field or walking off it, plus four reserves (`BbLook::BenchReserves`) in numbers the nine do not wear, and a manager standing at the end nearer the plate. Three ways of sitting, by the player's id; heads follow the ball. So the side at bat has a full bench and the side in the field a nearly empty one.
 - **Measured** (`-BbStagingLog`, seed 7, 94 pitches): 59 signals: 33 strikes, 17 outs, 7 fouls, 2 safes.
 - **Check added:** `-BbCrewShots` (no game played): ten pictures `crew_<n>_<what>.png`: the plate umpire set and calling a strike; the first-base umpire calling out, safe and foul, and set; the coach at first; each bench; everyone from behind home. `-BbStagingLog` logs each signal as `BB_SIGNAL`. `-BbNoCrew` leaves them all out.
-- **Pictures:** `client/Saved/Shots/players7_after/` (untracked): the ten, and six of play.
 - **Cost: about a sixth of the frame rate.** 141 fps with the crew against 170 without, the same build minutes apart (seed 7, `-BbShots=6 -BbUncapped`). It is 34 more figures of 32 pieces. Two savings are in: a man on the bench has his bones worked out only when his head turns (about once a second), and nobody under a dugout roof throws a shadow. Still above the 120 the game is watched at.
 - **For the owner to overrule if he likes:** the umpires' pale blue; the plate umpire signals swinging strikes too; the nine sit in batting order with the reserves beyond them.
-- **Left for later:** nobody here walks: coaches swap at the half inning in one frame, a player appears on the bench the moment his walking figure reaches the dugout door, umpires stand where they are while a ball or a fielder goes through them (the second-base umpire is the likeliest to be run through). No fair-ball point, no "time", no infield-fly or home-run signal, no punch-out for a called third strike different from any strike. A safe call needs a play at the bag, so a runner thrown at but arriving well ahead of the ball gets none. The umpire's signal and the result card on screen are timed separately. Benches do not react to the play.
 
 ## 13. Records
 
 - PLAN D13 (revised 2026-11-15) covers this stage.
-- TASKS.md "Resume here" carries the step reached; a `/clear` point after each merged step.
