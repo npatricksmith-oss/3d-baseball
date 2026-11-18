@@ -1,5 +1,7 @@
 P1 remains; do not merge.
 
+> Superseded figures: current numbers are in the [metrics ledger](../metrics-ledger.md) (§1).
+
 Rechecked `9ab85f5..ea1218d`, the first review and its Resolution, agent-models §6.4, and ledger row “Runner reads, after the Codex review.”
 
 ## Findings

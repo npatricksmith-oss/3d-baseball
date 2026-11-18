@@ -1,5 +1,7 @@
 # The fielder's bat read, derived (2026-11-13)
 
+> Superseded figures: current numbers are in the [metrics ledger](../metrics-ledger.md) (§1).
+
 **Band and mechanism.** No calibration knob was turned toward a target. By owner decision (2026-11-13), the σ of a fielder's read of the bat's angle at contact (`Anticipation`, agent-models §5.10 and §10) is now derived from what a fielder can perceive, and this note records how the run environment moved. The earlier values (15° at grade 50, 7.7° at 80, 29° at 20) were set for the first anticipation model, which read the ball's spray. They were never re-derived when the Anticipation review switched the read to the bat's angle (docs/calibration/2026-11-12-anticipation-review-fixes.md, "Not done").
 
 ## The derivation (agent-models §5.10, "How well the bat can be read")

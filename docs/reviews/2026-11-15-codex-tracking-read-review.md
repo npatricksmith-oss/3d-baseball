@@ -1,5 +1,7 @@
 No P1 found; do not merge.
 
+> Superseded figures: current numbers are in the [metrics ledger](../metrics-ledger.md) (§1).
+
 ## What was reviewed
 
 Reviewed `2657f65..801c7c1`, agent-models §5.1–5.2, the calibration note, and the metrics-ledger row. HEAD `1ae47d3` adds only the review prompt; its simulation code equals the candidate. Read `CLAUDE.md` first. No source, tests, specs, ledger, or TASKS edits; no commit. Diagnostic harnesses and logs are under `sim/target/`.

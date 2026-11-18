@@ -1,5 +1,7 @@
 # Independent review: fielder momentum
 
+> Superseded figures: current numbers are in the [metrics ledger](../metrics-ledger.md) (§1).
+
 Reviewed `1a0eaef..21a4535` against `CLAUDE.md`, `docs/agent-models.md` §§5.1–5.8, and `docs/calibration/2026-11-12-fielder-momentum.md`. Locations below refer to **21a4535**, not subsequent workspace changes. No P1 finding was established. The calibration endpoints reproduce, but the movement and receiving defects below remain.
 
 ## Findings

@@ -1,5 +1,7 @@
 # Independent Review: Baseball Savant 2024 Infield Alignment (`work/infield-alignment`)
 
+> Superseded figures: current numbers are in the [metrics ledger](../metrics-ledger.md) (§1).
+
 - **Branch reviewed:** `work/review-infield` at `f3dc029` (merge of `work/infield-alignment`: commits `f333496`, `6dfe643`, `d565cf6`, `306e06a` over `a791a9e`)
 - **Scope:** `docs/calibration/2026-11-14-infield-alignment.md`, `docs/metrics-ledger.md`, `docs/agent-models.md` (§5.9), `sim/crates/bb_game/src/play.rs` (`InfieldAlignment`, `SAVANT_INFIELD_*`, `polar_m`, `home_positions_for`), `sim/crates/bb_game/src/game.rs`, `sim/crates/bb_game/src/live.rs`, `sim/crates/bb_game/examples/run_env_diag.rs`, `sim/crates/bb_game/tests/throw_choices.rs`, and `sim/crates/bb_game/tests/fixtures/a4/`.
 

@@ -1,5 +1,7 @@
 # Pop-ups dropping in short right and center: the read, and who calls the ball (2026-11-13)
 
+> Superseded figures: current numbers are in the [metrics ledger](../metrics-ledger.md) (§1).
+
 TASKS "Next" item 1, following docs/calibration/2026-11-13-idle-fielder-target.md and the
 Codex idle-fielder review (finding #2 and its ranked causes). Two questions: why an
 outfielder's read of a ball launched above 50° is so far off, and when outfield priority

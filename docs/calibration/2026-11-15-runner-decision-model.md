@@ -1,5 +1,7 @@
 # The runner's decision model: sources, run-value arithmetic and a design proposal (2026-11-15)
 
+> Superseded figures: current numbers are in the [metrics ledger](../metrics-ledger.md) (§1).
+
 Research and design only. No sim code was changed, built or run for this note. Every number is tagged:
 **SOURCED** (the page was opened and read; the arithmetic, if any, is mine and shown),
 **CARRIED** (read and recorded in an earlier note of this repository; the earlier note is named),

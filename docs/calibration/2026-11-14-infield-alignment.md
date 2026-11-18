@@ -1,5 +1,7 @@
 # Rank 2 calibration step: Baseball Savant 2024 infield alignment
 
+> Superseded figures: current numbers are in the [metrics ledger](../metrics-ledger.md) (§1).
+
 - **Branch / commits:** `work/infield-alignment`, branched from `main` `a791a9e` (`f333496` diag, `6dfe643` spec, `d565cf6` alignment + tests)
 - **Target gap:** Ground-ball hit rate (`0.348` [0.347] provisional vs MLB ~`.24`), diagnosed in [run-environment-diagnosis.md](2026-11-14-run-environment-diagnosis.md#q3-ground-ball-hits) as `67.8%` of through-the-hole grounders passing through `23°`/`25°` corner holes left by symmetric `±13°/+38°/−36°` `home_positions()`.
 

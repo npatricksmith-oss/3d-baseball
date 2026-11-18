@@ -1,5 +1,7 @@
 # A called-off infielder backs up the catch (2026-11-13)
 
+> Superseded figures: current numbers are in the [metrics ledger](../metrics-ledger.md) (§1).
+
 Owner item 1 of 2026-11-13 (TASKS "Resume here"), from
 docs/calibration/2026-11-13-popup-read-and-calls.md, "Open": agent-models §5.7 says "a
 fielder who hears a higher-priority call peels off to back up", and that was not built. An

@@ -1,5 +1,7 @@
 # Day-session review — 2026-10-31
 
+> Superseded figures: current numbers are in the [metrics ledger](../metrics-ledger.md) (§1).
+
 Reviewed `a97783c..bafcd5f`, after reading `CLAUDE.md` and the relevant invariants/specs. Found one P1, three P2s, and one P3. Tests and the game sample pass, but legal tag-ups are repeatedly reversed, the closest-approach guard can discard catchable balls, and the new hit/FC labels are unreliable. No source, test, spec, or TASKS files were changed.
 
 ## Findings

@@ -1,5 +1,7 @@
 # Fielder communication: what a fielder knows about his teammates (2026-11-14)
 
+> Superseded figures: current numbers are in the [metrics ledger](../metrics-ledger.md) (§1).
+
 **Finding:** [Codex live-play review](../reviews/2026-11-14-codex-live-play-review.md) P1-1, with [Opus infield-fixes review](../reviews/2026-11-14-opus-infield-fixes-review.md) P2-3 and the `Cover(1)` check added on 2026-11-14. Defensive coordination in `live.rs` read a teammate's private plan: his intended intercept point (`target`), his believed intercept time (`t_int`), his call value, and a chase he had chosen in the same tick. agent-models §5.7 already said that a call reaches teammates after `T_call` = 0.3 s; the code did not implement this. This note gives the information model, the mechanism, and the replacement for each read.
 
 ## 1. What a fielder may use

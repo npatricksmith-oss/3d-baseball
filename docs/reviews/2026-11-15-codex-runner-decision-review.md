@@ -1,5 +1,7 @@
 Request changes: home clearance permits an avoidable passing out, and the advance values omit a lead run that a third out can erase.
 
+> Superseded figures: current numbers are in the [metrics ledger](../metrics-ledger.md) (§1).
+
 ## What was reviewed
 
 `a9b3341..b36a428` on `work/runner-decision` (implementation `0da6c5e`), after reading `CLAUDE.md`: agent-models §6.3's “Built 2026-11-15” paragraph; the design note §§3 and 9; the metrics ledger row; `running.rs`, the named runner functions and first-look gate in `live.rs`, `live/holder.rs::holder_options`, the probe, and the changed input construction sites. No implementation, test, spec, ledger, or TASKS file was edited.

@@ -1,5 +1,7 @@
 # Fielding: planner fixes and outfielder values, 2026-11-11
 
+> Superseded figures: current numbers are in the [metrics ledger](../metrics-ledger.md) (§1).
+
 Run-environment item 2(a0): grounders getting through the infield. Measured with `cargo run --release -p bb_game --example gb_through -- 128` and `sim-cli games --n 512 --seed 2`.
 
 ## 1. Three planner and movement bugs (mechanisms, not knobs)

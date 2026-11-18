@@ -1,5 +1,7 @@
 P1 found; do not merge.
 
+> Superseded figures: current numbers are in the [metrics ledger](../metrics-ledger.md) (§1).
+
 ## Reviewed
 
 Independent review of `b532a67..0c66ad6` on `work/runner-accel`, with `CLAUDE.md` read first. Reviewed the owner's Q1, agent-models §5.7 runners, §6.2 and §6.4, the acceleration calibration note and ledger row, the tag-up review's P2-3, and the complete diff. Traced `running.rs`, `live.rs` (including `live/holder.rs`), `play.rs::RunnerIn`, game inputs, changed tests/examples, and the receiving rules-engine code.

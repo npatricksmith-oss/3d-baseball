@@ -1,5 +1,7 @@
 # The collision off a sloped barrel: sources and diagnosis (2026-11-14, Stage 1)
 
+> Superseded figures: current numbers are in the [metrics ledger](../metrics-ledger.md) (§1).
+
 Branch `work/collision` (from `work/swing-recalib` at `f46ea5a`). **Stage 2 (owner ruled Option A, 2026-11-14): the speed-dependent e_t is built; §8.** Owner's ruling D20 (PLAN §1): the bat–ball collision off a sloped barrel is reopened as a sourced physics question, spec and oracle first, with no tuning toward a run total. **Stage 1 only: no physics code is changed here.** The one counterfactual run in games used a temporary edit, reverted (the tree is clean).
 
 **The question** (recalibration report §3.1; bat-angle note §3; [collision targets](2026-11-14-collision-targets.md), Sonnet, `work/collision-targets` `a7a6fe9`). Off a barrel sloped about 30° down and met under the ball's center, the sim's ball goes too far toward the tip side and spins too much. Fly balls land at −19.8° (pull-positive) against MLB's −2.6°, and sidespin is 3,720 rpm at a 27° launch.

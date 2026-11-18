@@ -1,5 +1,7 @@
 # Independent review: drag throws, cutoffs, relays, and client staging
 
+> Superseded figures: current numbers are in the [metrics ledger](../metrics-ledger.md) (§1).
+
 Reviewed `1f7ca4c..845a862` (`HEAD`), plus `StartReset` / `ResetFrame` and their playback integration in `1f7ca4c`, with the parent as context. Read `CLAUDE.md` first and applied its invariants and the relevant agent/physics specifications. Findings below are ordered by priority. No implementation, test, spec, or TASKS file was changed.
 
 ## Findings

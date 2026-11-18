@@ -1,5 +1,7 @@
 # The bat's angle at contact (λ_c) and the opposite-field offset (2026-11-14)
 
+> Superseded figures: current numbers are in the [metrics ledger](../metrics-ledger.md) (§1).
+
 Branch `work/swing-lambda`, from `work/swing-recalib` at `6bd5047`. Diagnostic only: **no game change is adopted**, and the default (λ_c = 0) is untouched. Question (owner's ruling, through the lead): with the bat head turned past the hands' line at contact (λ_c > 0, the face toward the pull side of its path), what angle makes on-time contact show Statcast's spray − attack direction (AD) of +7.2° (R/R) to +8.9° (all)? v2 gives −5 to −11° on time ([recalibration report §2.4](2026-11-14-swing-recalibration.md)).
 
 **Answer.** No believable angle does it, and no angle at all. λ_c turns the face against the path only through the hands' velocity along the bat, and the hands are slow (14 mph against the sweet spot's 71.5). The face therefore leads the path by about 0.2° per degree of λ_c, and could never lead it by more than about 11° even at 90°. In the PA model, λ_c = 15° moves spray − AD by +2.8°, mostly by moving the measured AD rather than where the ball goes. Nearly all of the offset comes from the collision: an undercut ball off a barrel sloped 28° down leaves toward the tip's side, and its sidespin carries it further the same way. A swing parameter cannot fix it.

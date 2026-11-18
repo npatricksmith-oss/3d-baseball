@@ -1,5 +1,7 @@
 One P1 remains: an unpublished holder decision moves a teammate. Do not merge.
 
+> Superseded figures: current numbers are in the [metrics ledger](../metrics-ledger.md) (§1).
+
 Reviewed `ae440b9..5cfb10e`, code `74ea51b`, against main `57f12b7`. Read `CLAUDE.md` first, the third review and its Resolution, agent-models §5.7, the calibration note and metrics ledger. Audited the live tick, coordination consumers, `live/holder.rs`, isolation harness and rank cache. The checkout actually starts at documentation-only `847b694`; its production `live.rs` and `live/holder.rs` are byte-identical to `5cfb10e`. The intervening Opus review was read as context, not used as verification. All instrumentation and counterfactual builds are under `sim/target/codex4/`. No production source, committed test, spec, ledger or TASKS file was edited, and no commit was made.
 
 ## Findings

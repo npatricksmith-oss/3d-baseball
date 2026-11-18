@@ -1,5 +1,7 @@
 # The tracking read's persistent error, carried as a state (2026-11-17)
 
+> Superseded figures: current numbers are in the [metrics ledger](../metrics-ledger.md) (§1).
+
 Branch `work/track-bias`, from main `f9e43ed`. Spec: agent-models §5.1, "The persistent error as a state". Owner's saved play: seed 40580, play 15 (observations.md).
 
 ## 1. Diagnosis (from TASKS.md, 2026-11-16)

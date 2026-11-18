@@ -1,5 +1,7 @@
 # Fielder momentum and the planner bugs it exposed (2026-11-12)
 
+> Superseded figures: current numbers are in the [metrics ledger](../metrics-ledger.md) (§1).
+
 Owner direction (2026-11-12): fielders should get a jump on the ball by anticipating from pitch location and batter handedness, with a rating for it (agent-models §5.10, next). A wrong guess must cost something, which needs momentum. Turning on honest momentum showed how much the fielding planner had leaned on fielders who could turn and reverse instantly at full speed. The owner chose to fix the movement and planning first ("full momentum first").
 
 All numbers: `sim-cli games --n 512 --seed 2`, runs per team-game and hit rate by batted-ball type (provisional lab ruling). MLB: about 4.5 runs; GB .24, LD .68, FB .13, PU .02.

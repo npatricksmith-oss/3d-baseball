@@ -1,5 +1,7 @@
 # Codex Sol review: idle fielders stop instead of chasing their own intercept
 
+> Superseded figures: current numbers are in the [metrics ledger](../metrics-ledger.md) (§1).
+
 Scope: `760afe8..fix/idle-fielder-target` (`077aab5`, `87344d1`), reviewed on branch `coord/review-fixes`, HEAD `ac26116`. Reviewed `live.rs`, agent-models §5.7, the pitcher-outfield diagnosis's “Part A applied,” and the idle-fielder calibration note. Locations below refer to HEAD. Read `CLAUDE.md` first and checked the binding PLAN invariants. Only this report changes the checkout; probes and source variants are under `/tmp`.
 
 ## Findings

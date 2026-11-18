@@ -1,5 +1,7 @@
 # Day-review fixes — independent review, 2026-11-11
 
+> Superseded figures: current numbers are in the [metrics ledger](../metrics-ledger.md) (§1).
+
 Reviewed **`9660aab..c31b227`**, after reading `CLAUDE.md`, the earlier day review and its Resolution, and the relevant specs. Locations below refer to **c31b227**, regardless of subsequent work in this shared checkout.
 
 The legal-tag-up loop and the two original capture examples are fixed. The reported aggregate numbers reproduce. However, the retouch repair still misses a runner who has crossed home and uses the wrong reference event after a deflection; capture deferral still has an available-catch loss; and the new scoring rule is neither OBR-correct nor reproducible from the persisted event log. Findings 1–3 identify remaining holes in the claimed repairs, including paths already present in the parent, rather than asserting that this commit introduced every underlying problem.

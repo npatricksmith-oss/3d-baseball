@@ -1,5 +1,7 @@
 # Codex review: dive animation and lunge
 
+> Superseded figures: current numbers are in the [metrics ledger](../metrics-ledger.md) (§1).
+
 Reviewed `f4d3167..009f31e`, with `HEAD` at `009f31eaad4dc7d728d6896cc0bc19461c14261c`, after reading `CLAUDE.md` and the preceding dive/two-out review. Locations refer to `009f31e`. No source, existing test, spec, or TASKS file was edited. `TASKS.md` was already modified when this review began. This document is the only authored repository file; diagnostic binaries and logs are under `sim/target/`.
 
 ## Findings

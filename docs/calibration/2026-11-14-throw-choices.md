@@ -1,5 +1,7 @@
 # A4: throw-choice evidence (2026-11-14)
 
+> Superseded figures: current numbers are in the [metrics ledger](../metrics-ledger.md) (§1).
+
 ## Measurement contract
 
 This is the measuring half of owner backlog A4, from `a69dd50`. No option,

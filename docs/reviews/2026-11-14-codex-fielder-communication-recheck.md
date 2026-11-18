@@ -1,5 +1,7 @@
 # Independent re-review: fielder communication
 
+> Superseded figures: current numbers are in the [metrics ledger](../metrics-ledger.md) (§1).
+
 Reviewed `c0976f3..e02ade8` on `work/live-comm`, principally `48bcb9d`; excluded the main merge `e675bbb`. Read `CLAUDE.md` first, the previous communication review and its Resolution, the Opus infield review, agent-models §5.7, the calibration note and ledger. Also followed the holder decision path into `live/holder.rs`.
 
 **P1-1 is not fully closed.** The two reported coverage/backup leaks are fixed, with meaningful regression tests. Other private-state paths remain, and sampled games contradict the claimed one-hearing-interval bound on coverage gaps. The revised numerical attribution reproduces. The ordinary same-tick deflection and corner-caller tie tests pass, but the ball cache still fails on two replacements in one tick.

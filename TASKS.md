@@ -1,6 +1,6 @@
 # Task List
 
-**Last updated:** 2026-11-17 night (docs pruning, step 1).
+**Last updated:** 2026-11-18 (context pruning, steps 2 and 3).
 
 What is next and what is open. Other files hold the rest:
 
@@ -15,7 +15,7 @@ Status: `[ ]` not started · `[~]` partly done · `[?]` needs an owner decision
 
 ---
 
-## Resume here (2026-11-17, night)
+## Resume here (2026-11-18)
 
 **State.** The outfield grounder rule (`work/of-mutual-defer`, saved play 65147/10) is merged into main after a Fable review (no P1; its P2 and one P3 are in "2. Fielding"). The next numbered owner question is **Q27**. **Codex shows about 10% of its weekly limit left:** run the next review on a non-author Claude model (memory: Codex limit fallback). No workers are running. Worktree `../bb-wt-of-defer` can be removed with the branch cleanup below.
 
@@ -25,11 +25,10 @@ Status: `[ ]` not started · `[~]` partly done · `[?]` needs an owner decision
 
 **Next:** item 1 of "Open sim work" below, the runner's start (branch `work/runner-start` waits to be reviewed with its next piece).
 
-**Context pruning (this session; plan agreed with the owner).** Done: memory, the task handoff, CLAUDE.md and the plan/spec audit (see [prune notes](docs/archive/2026-11-17-docs-prune-notes.md)). Still to do, in order:
-1. Code: comments that describe the past ("for now", "interim", "skeleton"), the 59 examples in `sim/crates/bb_game/examples` (keep those a doc or the ledger names), leftover `BB_DEBUG_*` switches. Digests must not move.
-2. Old calibration notes and reviews: a one-line "superseded" banner where the ledger has newer figures; review prompt files and the overnight report into `docs/archive/`.
-3. Git: 65 of 87 local branches are merged into main, with 38 worktrees. Show the owner the list before removing any.
-4. A check script that fails on dead paths and on this file growing past its cap.
+**Context pruning.** The [prune notes](docs/archive/2026-11-17-docs-prune-notes.md) record the plan and spec audit. Remaining work, in order:
+
+1. Show the owner the merged local branches and worktrees before removing any.
+2. Add a check script for dead paths and the TASKS.md size cap.
 
 ---
 
@@ -98,11 +97,11 @@ One `sim/crates/bb_game/src/live.rs` job at a time. Each job gets a ledger row a
 Check the code again before starting one.
 
 - [ ] Composure (leverage-scaled noise, agent-models §1.5): `sim/crates/bb_agents/src/motor.rs` takes the factor; nothing feeds it game state.
-- [ ] Hit-by-pitch evasion (agent-models §3.7): the body capsule is "v1 without evasion".
+- [ ] Hit-by-pitch evasion (agent-models §3.7): let the batter move the body capsule away from the pitch.
 - [ ] SpinCapacity has no effect; SpinRecognition is weak; QuickHands is flat between 30 and 50 ([M3 report, adaptation and sensitivity addendum](docs/calibration/2026-10-31-m3-interim.md#addendum-in-game-adaptation-and-sensitivity-later-the-same-night)).
 - [ ] `Executed*` visibility isolation with a compile-fail test (none exists).
 - [ ] `criterion` benchmarks for the per-pitch budget (not in any `Cargo.toml`; the timing harness is `sim/crates/bb_game/examples/perf.rs`).
-- [ ] Rules corpus: 136 scenarios, toward 150 (rules-spec §12.3). Implement interference (rules-spec §5.7) and a separate first-fielder-touch fact for retouch timing on a deflected fly.
+- [ ] Rules corpus: 136 scenarios, toward 150 (rules-spec §12.3). Implement interference (rules-spec §5.7) and a separate first-fielder-touch fact for retouch timing on a deflected fly. Missed-base appeals and passing during awards are open (rules-spec §5.5–§5.6).
 - [ ] Live play: double cuts and deliberate one-hop throws.
 - [ ] **R8:** Check Savant `spin_axis` and `pfx_x` signs on real right- and left-handed four-seamers (data-formats §9.2–§9.3).
 - [ ] **R9:** Source angular perception error, velocity Weber fraction and the near-plate blanking distance from interception and time-to-contact studies (agent-models §3.2–§3.3).
@@ -119,7 +118,7 @@ Check the code again before starting one.
 - [ ] Check first-base attempt and passed-infielder geometric thresholds against replay cases when their rulings are available (rules-spec §5.5, §5.7).
 - [ ] Log runner passing with its own event/out kind so the scorer can show the actual ruling (rules-spec §5.5). Complete the schema-backed log producers for timeout detail, liveness and umpire signals, and deciding evidence for batted-ball rulings (rules-spec §15).
 - [ ] Add infield fly and check the declaration time against runners’ hold behavior (rules-spec §13).
-- [ ] Finish catcher receiving/blocking and caught foul tips (agent-models §4), plus bunts and balks (rules-spec §8, §13).
+- [ ] Finish catcher receiving/blocking, uncaught third strikes, and caught foul tips (agent-models §4, rules-spec §4.4), plus bunts and balks (rules-spec §8, §13).
 - [ ] Validate the dead-ball cut on a throw into the seats and a ground-rule double (physics-spec §9.5).
 - [ ] Fill in depth anticipation and cut-off throws to hold a trailing runner when those models are specified (agent-models §5.10, §6.4).
 - [ ] Add the real-sample Savant export and schema compatibility fixtures; wire up the machine-readable calibration bands, regression reports and gate runs (data-formats §8, §9.4 and calibration-targets §12).
@@ -151,7 +150,7 @@ Check the code again before starting one.
 
 ### Priority B and C
 
-- [ ] B1. Leagues, divisions, teams with rosters [W5]. M7. (Two invented clubs exist for the look only.)
+- [ ] B1. Leagues, divisions, teams with rosters [W5]. M7. (Two invented clubs exist for the look only.) Use roster height and build for the client figures when ratings arrive (Q18).
 - [ ] B2. Lineups by pitcher hand (a manager lever, M6).
 - [ ] B3. Game settings screen, with team selection [W6].
 - [~] B4. Player and team statistics [W11]: box score and batting lines exist; no statistics screens.

@@ -1,5 +1,7 @@
 # Codex review: dive recovery and two-out throws
 
+> Superseded figures: current numbers are in the [metrics ledger](../metrics-ledger.md) (§1).
+
 Reviewed `2355c34..f4d3167` (`7a3c5b0`, `f4d3167`), after reading `CLAUDE.md`. Locations below refer to **`f4d3167`**, rather than concurrent, uncommitted work in this checkout. No source, existing test, spec, or TASKS file was edited. This review is the only authored repository file; build products and diagnostic logs are under `sim/target/`.
 
 ## Findings

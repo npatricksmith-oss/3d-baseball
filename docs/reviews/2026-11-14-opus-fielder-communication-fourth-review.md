@@ -1,5 +1,7 @@
 # Fielder communication, fourth review (Opus, standing in for Codex)
 
+> Superseded figures: current numbers are in the [metrics ledger](../metrics-ledger.md) (§1).
+
 **No P1. Merge.** Two P2 findings, both about the isolation guarantee rather than wrong results on this branch: one is a leak older than the branch that its harness cannot see, the other is a set of gaps in that harness. They should be recorded and fixed next, but they do not block the merge.
 
 ## What was reviewed

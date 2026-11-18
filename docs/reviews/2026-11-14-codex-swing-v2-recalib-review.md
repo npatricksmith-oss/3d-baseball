@@ -1,5 +1,7 @@
 # Independent review: swing v2 and recalibration
 
+> Superseded figures: current numbers are in the [metrics ledger](../metrics-ledger.md) (§1).
+
 Reviewed HEAD `6bd5047b80c77a523f368552e31f7e8778c87bda`, using `CLAUDE.md`'s invariants and PLAN D19. Scope: `git log --oneline main..HEAD` and `git diff main...HEAD`. Current `main` is `dae1b7a`; its merge base with HEAD is `f5f15a7`. No source, tests, specs, notes, ledger, or TASKS were edited.
 
 No P1 finding. The kinematics, population draw, sampled replay checks, and headline metrics pass. The main substantive finding concerns the report's attribution of carry loss to backspin.

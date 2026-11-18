@@ -1,5 +1,7 @@
 # Independent review: watch fixes and stand-in motions
 
+> Superseded figures: current numbers are in the [metrics ledger](../metrics-ledger.md) (§1).
+
 Reviewed `31d57bb..914a187`, after reading `CLAUDE.md`, PLAN §1, the owner-watch notes, and the previous review's Resolution. Priority is visible baseball and the binding invariants, without further percentage tuning. Locations below refer to `914a187`. No P1 finding established.
 
 ## Findings

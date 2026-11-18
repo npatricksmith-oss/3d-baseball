@@ -1,5 +1,7 @@
 # After the owner's first watch, 2026-11-11
 
+> Superseded figures: current numbers are in the [metrics ledger](../metrics-ledger.md) (§1).
+
 The owner watched client v0 and named four things: players look like cylinders, the window cannot be quit, too many double plays, and fielders with no part in a play should back up throws (references: Pro Baseball Insider's outfield backup article and the Spiders "Cutoff & Backup Responsibilities Guide"). This records what changed in the sim and where its numbers moved. Client changes are in docs/unreal-spike.md.
 
 ## Double plays

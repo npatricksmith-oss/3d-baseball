@@ -1,5 +1,7 @@
 No P1; sound to merge as an explicitly interim read model, with acceptance of the 3.32 [3.42] run level left to the owner.
 
+> Superseded figures: current numbers are in the [metrics ledger](../metrics-ledger.md) (§1).
+
 ## Reviewed
 
 `dc1ce82..cb42714`: diagnosis, spec, implementation, and measurements. Read `CLAUDE.md`, the owner's TASKS guidance, agent-models §5.1/§5.2/§10, and both calibration notes. Reviewed the changed examples, call fixtures, holder regression, rating plumbing, RNG, and diagnostic tracing. Review checkout `5598b7f` adds only the review prompt after the requested range. Current main `24b9f17` differs from `dc1ce82` only in TASKS documentation; its simulation code is the correct baseline for reproducing the fit.

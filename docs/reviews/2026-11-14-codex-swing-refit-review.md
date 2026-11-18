@@ -1,5 +1,7 @@
 # Independent review: swing-noise split and refit
 
+> Superseded figures: current numbers are in the [metrics ledger](../metrics-ledger.md) (§1).
+
 Reviewed `7ace606..375e3f9` on `work/collision`: `08b167c`, `f452845`, `dfeb54a`, and `375e3f9`. Read `CLAUDE.md` first and applied its invariants, PLAN §13, and calibration-targets §2.3–§2.4. Compared replay behavior with an archived, unmodified `be66dab` source tree. No source, tests, specifications, ledger, or TASKS were edited; temporary sources, builds, probes, and logs are under `sim/target/refit-review-*`. No commits made.
 
 No P1 finding. The motor split, sampled replay contract, adopted standard-run numbers, and spin-review fixes pass verification. The findings concern the interpretation and completeness of the calibration record.

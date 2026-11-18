@@ -1,5 +1,7 @@
 # Codex review: dive rate (owner backlog A5)
 
+> Superseded figures: current numbers are in the [metrics ledger](../metrics-ledger.md) (§1).
+
 Reviewed `328e51b..56dd244` on `claude/a15-de1824`, with HEAD at `56dd244`, after reading `CLAUDE.md`, the relevant PLAN invariants, agent-models, and calibration requirements. Locations below refer to `56dd244`. No source, existing test, spec, or TASKS file was edited. This is the only authored repository file; build products, an archived parent checkout, and diagnostic binaries/logs are under `sim/target/`. Diagnostic source variants were passed to `rustc` on stdin.
 
 ## Findings

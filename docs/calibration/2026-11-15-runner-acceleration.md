@@ -1,5 +1,7 @@
 # Runner acceleration refit and the batter's own route to first (owner's Q1)
 
+> Superseded figures: current numbers are in the [metrics ledger](../metrics-ledger.md) (§1).
+
 2026-11-15, branch `work/runner-accel`, on main `b532a67`. Source of the task: the tag-up review's P2-3 ([review](../reviews/2026-11-14-gemini-tag-up-review.md)) and the owner's ruling Q1. Spec: agent-models, the runners paragraph at the end of §5.7, §6.2, §6.4.
 
 ## 1. What changed

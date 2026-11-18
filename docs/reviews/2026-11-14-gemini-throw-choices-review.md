@@ -1,5 +1,7 @@
 # Independent Review: A4 — Throw Choices (`00445f5...0a17409`)
 
+> Superseded figures: current numbers are in the [metrics ledger](../metrics-ledger.md) (§1).
+
 Reviewer: Gemini  
 Date: 2026-11-14  
 Branch reviewed: `work/a4-throw-choices` at `0a17409` (`git diff 00445f5...0a17409`)

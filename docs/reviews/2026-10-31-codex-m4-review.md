@@ -1,5 +1,7 @@
 # Codex M4 review — 2026-10-31
 
+> Superseded figures: current numbers are in the [metrics ledger](../metrics-ledger.md) (§1).
+
 Reviewed PLAN §4.1–4.2, rules-spec §§1–7 and 12, agent-models §§5–6, all `bb_rules/src/*.rs`, the scenario harness and corpus, and `bb_game/src/play.rs` / `game.rs`. Line references below use source commit `724469e`. The checkout changed during this review; the wall-contact fix in `d2f4cd7` and the later steppable-game refactor were re-read. The fixed wall issue is recorded under Resolution. Unrelated edits/commits were left alone.
 
 Severity: **P1** changes outs/runs or violates the authoritative-physics boundary; **P2** is another correctness, accounting, or reproducibility-contract defect. Findings are ordered by severity. These are static findings, with predicted results traced through the code; the proposed scenarios were **not** installed or executed. TOML with `id`, `initial`, `step`, and `expect` uses the current corpus syntax, including its supported inline-table form. Blocks marked **descriptive fixture** document simulator inputs or missing fact vocabulary and are not runnable by the current rules harness.

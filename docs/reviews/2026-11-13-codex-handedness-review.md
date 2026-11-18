@@ -1,5 +1,7 @@
 # Handedness review — 2026-11-13
 
+> Superseded figures: current numbers are in the [metrics ledger](../metrics-ledger.md) (§1).
+
 Reviewed `3de5572..bdf19e9` (`claude/a1-173226`) after reading `CLAUDE.md`, the relevant specifications and TASKS “Resume here.” No P1/P2 simulation or client-code regression found. The release suite passes, the published pairing tables and current 300-game calibration reproduce, and independent probes confirm matchup selection, roster compatibility and mirror geometry. Two P3 documentation findings remain.
 
 ## P3 — The documented matchup shares do not follow the hand tables or measured games

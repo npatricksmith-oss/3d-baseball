@@ -1,5 +1,7 @@
 # Arm strength by position (2026-11-14)
 
+> Superseded figures: current numbers are in the [metrics ledger](../metrics-ledger.md) (§1).
+
 **Change.** `FielderAttrs::average(pos)` gave every infielder 36 m/s and every outfielder 39 m/s of grade-50 `ArmStrength`. It now takes the position's mean from Statcast's arm-strength leaderboard (`bb_game::play::ARM_MEAN_MPH`). Pitcher and catcher have no entry in that table and keep 36 m/s (`ARM_UNSOURCED_MPS`, [E]).
 
 **Definition (agent-models §10, "Arm strength by position"); the mapping to a set throw is an estimate [E], not settled (Codex review, P2).**

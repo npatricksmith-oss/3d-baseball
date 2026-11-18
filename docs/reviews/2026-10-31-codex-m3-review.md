@@ -1,5 +1,7 @@
 # M3 code review — 2026-10-31
 
+> Superseded figures: current numbers are in the [metrics ledger](../metrics-ledger.md) (§1).
+
 Reviewed the eight requested source files against PLAN §4.1, agent-models §§1, 3, 10, 11, physics-spec §§6–8, 12, and the interim calibration report. Rules-spec §§4.4–4.5 and 5.2 were consulted for pitch calls. Concurrent development continued during this review: the frozen copies of all eight reviewed files match commit `2e0ccb4118108ad63a1b386b2f6fd0b1a32da7af`. References below describe that snapshot. The adaptation findings concern code added during the review; that path was not responsible for the original interim report. No source files were edited by this review.
 
 The authorized workspace tests passed after relocating Zig's caches to `/tmp` (the initial attempts failed because its default cache was read-only). Two runs of the authorized 500-PA command produced identical displayed rates: O-Swing 10.1%, foul/contact 22.0%, called-K share 55.6%, pitches/PA 3.2, Zone 56.8%, K 16.2%, and 52 checks. This reproduces the principal calibration gaps, but is not a bitwise replay test or an experiment establishing how much each finding contributes. P1 = high priority; P2 = medium; P3 = low. Scenarios below are code-derived unless explicitly identified as observed runs.

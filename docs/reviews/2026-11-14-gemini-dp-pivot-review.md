@@ -1,5 +1,7 @@
 # Independent Review: The Double-Play Pivot (`work/dp-pivot`, `f3dc029..9643749`)
 
+> Superseded figures: current numbers are in the [metrics ledger](../metrics-ledger.md) (§1).
+
 - **Branch reviewed**: `work/review-pivot` at `9643749` (change set `git log f3dc029..9643749`: commits `aa916fc`, `1c550c6`, `4c67c58`, `37de814`, `eb2812e`, `c8d3cd3`, `9643749`)
 - **Reviewer**: Gemini (independent review)
 - **Date**: 2026-11-14

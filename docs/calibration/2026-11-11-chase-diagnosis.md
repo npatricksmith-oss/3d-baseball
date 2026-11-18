@@ -1,5 +1,7 @@
 # Chase rate (O1): diagnosis, 2026-11-11
 
+> Superseded figures: current numbers are in the [metrics ledger](../metrics-ledger.md) (§5).
+
 Owner decision O1 asked how to raise the average hitter's chase rate (O-Swing 11.6% vs MLB 29%). The owner approved trying **perceptual overconfidence**: the batter's filter believes its persistent biases are smaller than they are. It was implemented, measured, and **backed out**: it is the wrong lever. This report records why and what the measurements point to instead. No calibration values changed.
 
 All runs: `sim-cli pa --n 3000 --k-perception 2.25 --k-command 0.8` (average RHP vs average RHB, seed 1) and `cargo run --release -p bb_game --example chase_diag -- 3000 [c_D] [b_D]`.

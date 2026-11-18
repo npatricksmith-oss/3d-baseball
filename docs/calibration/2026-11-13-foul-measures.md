@@ -1,5 +1,7 @@
 # Foul share: Statcast-style measures and the bat-angle counterfactual (2026-11-13)
 
+> Superseded figures: current numbers are in the [metrics ledger](../metrics-ledger.md) (§1).
+
 TASKS "Next" item 2 (O1/R13), done as the owner directed: measure first, change no calibration. This note changes no simulation code or values. The sim gives 23.7% of contact foul (B1.15 target 50%, band 40–60%; MLB 51.2% with foul tips, [R13](../research/r13-foul-direction.md) F1).
 
 Tools:
