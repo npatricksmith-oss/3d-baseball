@@ -143,9 +143,9 @@ pub struct PlayViz {
     pub label: String,
     pub pitch: Vec<[f64; 4]>,
     pub batted: Vec<[f64; 4]>,
-    /// Fielder and runner positions (agent id, samples) during a live ball.
+    /// Live-ball actor tracks (agent id, samples). Existing runners start at pitch release.
     pub actors: Vec<(u16, Vec<(f64, bb_math::Vec3)>)>,
-    /// Where everyone stands as the pitch is thrown: nine fielders, runners on their bases,
+    /// Where everyone stands at release: nine fielders, runners at their primary leads,
     /// the batter in his box.
     pub standing: Vec<(u16, bb_math::Vec3)>,
     /// Possession during a live ball: when each fielder secured the ball, and each throw's release.
@@ -200,6 +200,7 @@ pub struct Game {
     bs: Vec<f64>,
     /// Each side's fielders, `[side][position − 1]`.
     fattrs: [[FielderAttrs; 9]; 2],
+    runner_start: crate::live::RunnerStartParams,
     play: u32,
     prev: Option<PitchType>,
     last_v: Option<f64>,
@@ -254,6 +255,7 @@ impl Game {
             sc,
             bs,
             fattrs,
+            runner_start: Default::default(),
             play: 0,
             prev: None,
             last_v: None,
@@ -282,6 +284,12 @@ impl Game {
     pub fn with_fielders(mut self, fattrs: [FielderAttrs; 9]) -> Game {
         // Each man keeps his own throwing hand.
         self.fattrs = core::array::from_fn(|side| core::array::from_fn(|i| FielderAttrs { throws: self.rosters.teams[side].players[i].throws, ..fattrs[i] }));
+        self
+    }
+
+    /// Run the same matchup with alternate secondary leads (calibration).
+    pub fn with_runner_start(mut self, params: crate::live::RunnerStartParams) -> Game {
+        self.runner_start = params;
         self
     }
 
@@ -321,8 +329,11 @@ impl Game {
             let fside = 1 - side as u16;
             let home = crate::play::home_positions_for(mu.batter.bats, st.bases[0].is_some(), st.bases[1].is_some(), st.outs);
             viz.standing.extend((0..9).map(|i| ((fside << 8) | 0x80 | (i as u16 + 1), home[i])));
-            // Runners stand off their bases with their leads.
-            viz.standing.extend(st.bases.iter().enumerate().filter_map(|(i, r)| r.map(|id| (id, crate::live::path_pos(crate::live::lead_s(i as u8 + 1))))));
+            // The runners' primary leads, where a secondary lead starts at release.
+            viz.standing.extend(st.bases.iter().enumerate().filter_map(|(i, r)| {
+                let base = i as u8 + 1;
+                r.map(|id| (id, crate::live::runner_path_pos(base, crate::live::lead_s(base))))
+            }));
             // The batter stands where his swing pivots (agent-models §3.6).
             let pivot = mu.template.pivot(&mu.batter);
             viz.standing.push((st.batter, bb_math::Vec3::new(pivot.x, pivot.y, 0.0)));
@@ -393,7 +404,7 @@ impl Game {
             // forward (world truth, read with each fielder's error, agent-models §5.10).
             let swing_lead = rec.swing.map(|s| t_plate - s.t_start());
             let out = crate::live::simulate_live(
-                &crate::live::LiveInput { env: &mu.env, field: &self.field, ball, t_contact: t_c, runners, fielders, fattrs: self.fattrs[fside as usize], batter_box: { let p = mu.template.pivot(&mu.batter); bb_math::Vec3::new(p.x, p.y, 0.0) }, bats: mu.batter.bats, pitch_x: rec.plate.map(|p| p.x).or(Some(ball.r.x)), bat_yaw, swing_lead, seed, play, record, tag_up: Default::default(), advance: Default::default() },
+                &crate::live::LiveInput { env: &mu.env, field: &self.field, ball, t_contact: t_c, runners, fielders, fattrs: self.fattrs[fside as usize], batter_box: { let p = mu.template.pivot(&mu.batter); bb_math::Vec3::new(p.x, p.y, 0.0) }, bats: mu.batter.bats, pitch_x: rec.plate.map(|p| p.x).or(Some(ball.r.x)), bat_yaw, swing_lead, seed, play, record, runner_start: self.runner_start, tag_up: Default::default(), advance: Default::default() },
                 st,
             );
             let first_touch = out.facts.iter().find_map(|f| match f {

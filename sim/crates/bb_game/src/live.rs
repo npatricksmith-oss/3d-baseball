@@ -110,8 +110,7 @@ const FOLLOW_GAP_S: f64 = 0.3;
 /// From contact to a runner's first look at the ball, s [E]: his read of where it is going
 /// (no published value; Statcast's "first step" is not released as a league figure).
 const RUNNER_READ_DELAY_S: f64 = 0.5;
-/// From contact to a runner's first move when he runs whatever is hit (two out), s [E]: a
-/// plain reaction to the bat, an infielder's 0.25 s.
+/// From contact to a two-out runner's break from shuffle speed into a full run, s [E].
 const RUNNER_CONTACT_REACT_S: f64 = 0.25;
 /// The error of a runner's read of a race, one draw per look, s [E] (agent-models §6.3).
 const RUNNER_TIMING_SIGMA_S: f64 = 0.15;
@@ -230,14 +229,55 @@ const RECEIVE_REACH: f64 = 1.5;
 /// How far behind a base its backup stands, on the line of the throw, m [E] (coaching
 /// guides give 15–18 m for an outfielder; foul ground allows less).
 const BACKUP_M: f64 = 13.0;
-/// A runner's distance off his base as the ball is hit, m [E]: his lead plus the shuffle he
-/// takes as the pitch is delivered. Index = base (none at home).
+/// A runner's primary lead at pitch release, m [E]. Index = base (none at home).
 const LEAD_M: [f64; 4] = [0.0, 5.5, 6.5, 4.5];
 
-/// Where a runner on `base` stands as the pitch is hit, as base-path distance from home.
+/// Where a runner on `base` starts his secondary lead, as base-path distance from home.
 pub(crate) fn lead_s(base: u8) -> f64 {
     base as f64 * BASE_L + LEAD_M[(base as usize).min(3)]
 }
+/// The secondary lead at contact (agent-models §6.1), independent of whether a force develops.
+#[derive(Clone, Copy, Debug)]
+pub struct SecondaryLead {
+    /// Distance beyond the primary lead, m [E].
+    pub extra_m: f64,
+    /// Forward speed on contact, m/s [E].
+    pub speed_mps: f64,
+}
+
+#[derive(Clone, Copy, Debug)]
+pub struct RunnerStartParams {
+    pub fewer_than_two: SecondaryLead,
+    pub two_out: SecondaryLead,
+}
+
+impl Default for RunnerStartParams {
+    fn default() -> Self {
+        Self {
+            fewer_than_two: SecondaryLead { extra_m: 1.0, speed_mps: 2.0 },
+            two_out: SecondaryLead { extra_m: 1.5, speed_mps: 4.0 },
+        }
+    }
+}
+
+/// Clearance from the third-base foul line during the lead, m [E].
+const THIRD_LEAD_FOUL_M: f64 = 0.6;
+/// Distance to blend between the foul-side lead and the line through the bags, m [E].
+const THIRD_LEAD_BLEND_M: f64 = 2.0;
+/// The foul-side route has joined the line this far from third, m [E].
+const THIRD_LEAD_END_M: f64 = 12.0;
+
+pub(crate) fn runner_path_pos(start: u8, s: f64) -> Vec3 {
+    let on_path = path_pos(s);
+    if start != 3 {
+        return on_path;
+    }
+    let from_third = s - 3.0 * BASE_L;
+    let blend = (from_third.min(THIRD_LEAD_END_M - from_third) / THIRD_LEAD_BLEND_M).clamp(0.0, 1.0);
+    let foul = THIRD_LEAD_FOUL_M * blend * core::f64::consts::FRAC_1_SQRT_2;
+    on_path - Vec3::new(foul, foul, 0.0)
+}
+
 /// Catch-to-release time for a relay as a fraction of the fielder's batted-ball transfer
 /// time [E], about 0.45 s for an infielder.
 const RELAY_TRANSFER_FRAC: f64 = 0.7;
@@ -840,6 +880,8 @@ struct Runner {
     retouch: bool,
     /// Holding at a base until the runner ahead clears the next one.
     waiting: bool,
+    /// Coasting at the secondary lead's speed while picking up the contact cue.
+    reading_contact: bool,
     /// Waiting partway to the next base (base-path distance) to see whether a ball in the
     /// air is caught.
     hold_s: Option<f64>,
@@ -903,6 +945,8 @@ pub struct LiveInput<'a> {
     pub play: u32,
     /// Record ball and actor tracks (timelines and visualization only).
     pub record: bool,
+    /// How runners arrive at contact with their secondary leads (agent-models §6.1).
+    pub runner_start: RunnerStartParams,
     /// How runners who tag up start, and what they believe of the tag (agent-models §6.4).
     pub tag_up: bb_agents::running::TagUpParams,
     /// How runners weigh a race against the run value of the base (agent-models §6.3).
@@ -4342,7 +4386,7 @@ impl<'a> Sim<'a> {
             Some(leave) => tag_up_time(self.inp.tag_up, (leave - self.t).max(0.0), d_run, r.vmax, r.tau),
             // From his own speed now, by the law his legs run (a runner arriving at a base
             // at speed carries it on; standing, it is a start from rest).
-            None => run_time_from(d_run, (r.direction * r.v).max(0.0), r.vmax, r.tau),
+            None => run_time_from(d_run, r.direction * r.v, r.vmax, r.tau),
         };
         // Unforced, he must beat the tag, not only the ball: his belief of the time it takes.
         let tag_s = if forced { 0.0 } else { self.inp.tag_up.typical_tag_s };
@@ -4582,7 +4626,7 @@ impl<'a> Sim<'a> {
             return;
         }
         let ball_down = self.out.facts.iter().any(|f| matches!(f, Input::BallTouched { what: Touch::Ground { .. }, .. }));
-        let cause = if r.hold_s == Some(lead_s(r.start)) {
+        let cause = if r.reading_contact {
             Cause::Read
         } else if r.tag_up || r.hold_s.is_some() || r.retouch {
             Cause::Air
@@ -4628,6 +4672,7 @@ impl<'a> Sim<'a> {
             // live runner again (tags and throws can retire him), and must touch home again.
             if self.caught() && !self.r[k].catch_seen {
                 self.r[k].catch_seen = true;
+                self.r[k].reading_contact = false;
                 if self.r[k].start > 0 && self.r[k].s > self.r[k].start as f64 * BASE_L + 1e-6 {
                     self.r[k].scored = false;
                     self.r[k].tag_up = false;
@@ -4638,6 +4683,12 @@ impl<'a> Sim<'a> {
                 }
             }
             if self.r[k].scored {
+                continue;
+            }
+            if self.r[k].reading_contact {
+                self.trace_runner(k);
+                let r = &mut self.r[k];
+                r.s += r.v * DT;
                 continue;
             }
             if self.r[k].overrun != OverrunPhase::None {
@@ -4675,8 +4726,7 @@ impl<'a> Sim<'a> {
                     self.r[k].goal = self.r[k].start;
                 }
             }
-            // A partway hold ends when the ball comes down. The stationary hold at the
-            // primary lead belongs to the initial read clock, including on an early bounce.
+            // A partway hold ends when the ball comes down. The contact read has its own clock.
             if self.r[k].hold_s.is_some_and(|s| s > lead_s(self.r[k].start)) && !self.caught() && (!matches!(self.ball, Ball::Free { .. }) || self.out.facts.iter().any(|f| matches!(f, Input::BallTouched { what: Touch::Ground { .. }, .. }))) {
                 self.r[k].hold_s = None;
                 let b = self.r[k].start;
@@ -5192,7 +5242,39 @@ impl<'a> Sim<'a> {
             let (b, s0) = (Vec3::new(b.x, b.y, 0.0), batter_start_s(b));
             b + (path_pos(BOX_EXIT_M) - b) * ((r.s - s0) / (BOX_EXIT_M - s0)).clamp(0.0, 1.0)
         } else {
-            path_pos(r.s)
+            runner_path_pos(r.start, r.s)
+        }
+    }
+
+    /// Give the runners their contact state and, when recording, the approach from release.
+    fn start_runners(&mut self) {
+        let lead = if self.st.outs >= 2 {
+            self.inp.runner_start.two_out
+        } else {
+            self.inp.runner_start.fewer_than_two
+        };
+        let contact = self.inp.t_contact;
+        for (k, r) in self.r.iter_mut().enumerate() {
+            r.goal = r.start + 1;
+            if r.start == 0 {
+                continue;
+            }
+            let primary = lead_s(r.start);
+            r.s = primary + lead.extra_m;
+            r.v = lead.speed_mps.min(r.vmax);
+            r.hold_s = None;
+            r.reading_contact = true;
+            if self.inp.record && contact > 0.0 {
+                let steps = (contact / DT).ceil() as usize;
+                let track = &mut self.out.actors[9 + k].1;
+                for i in 0..steps {
+                    let u = i as f64 / steps as f64;
+                    // Cubic with the primary lead at rest at release and the live
+                    // position and velocity at contact. The contact tick supplies the end.
+                    let d = u * u * ((3.0 - 2.0 * u) * lead.extra_m + (u - 1.0) * contact * r.v);
+                    track.push((u * contact, runner_path_pos(r.start, primary + d)));
+                }
+            }
         }
     }
 
@@ -5356,7 +5438,7 @@ fn new_sim<'a>(inp: &'a LiveInput<'a>, st: &'a mut RulesState) -> Sim<'a> {
             last_base: x.base,
             retouch: false,
             waiting: false,
-            // Until his first read of the ball he stays where his lead put him.
+            reading_contact: false,
             hold_s: if x.base == 0 { None } else { Some(lead_s(x.base)) },
             last_timing_draw: 0.0,
             catch_seen: false,
@@ -5496,6 +5578,7 @@ impl<'a> Sim<'a> {
 fn simulate_live_inner(inp: &LiveInput, st: &mut RulesState) -> LiveOutput {
     let t_c = inp.t_contact;
     let mut sim = new_sim(inp, st);
+    sim.start_runners();
     // Runners are off their bases with their leads as the ball is hit: the rules hear of it.
     for k in 0..sim.r.len() {
         if sim.r[k].start > 0 {
@@ -5531,27 +5614,23 @@ fn simulate_live_inner(inp: &LiveInput, st: &mut RulesState) -> LiveOutput {
             sim.assign();
             assigned = true;
         }
-        // With two out there is nothing to read: a catch or a force ends the inning, so every
-        // runner goes at the crack of the bat, after a plain reaction. Otherwise the first
-        // look is the read of the ball.
+        // The runners are already moving. Two outs leaves only the cue to break into
+        // a full run. With fewer outs their first look sets the intended movement.
         let two_out = sim.st.outs >= 2;
-        if assigned && !runners_started && sim.t >= t_c + if two_out { RUNNER_CONTACT_REACT_S } else { RUNNER_READ_DELAY_S } {
+        let read_s = if two_out { RUNNER_CONTACT_REACT_S } else { RUNNER_READ_DELAY_S };
+        if !runners_started && !sim.caught() && sim.t - t_c >= read_s - 1e-9 {
             runners_started = true;
-            if two_out {
-                for r in sim.r.iter_mut() {
-                    r.hold_s = None;
-                    r.goal = r.start + 1;
-                }
-            }
             let (b, bv) = sim.ball_at(sim.t);
             let airborne = matches!(sim.ball, Ball::Free { .. }) && (b.z > 1.5 || bv.z > 0.0);
-            for k in 0..if two_out { 0 } else { sim.r.len() } {
-                sim.r[k].hold_s = None;
-                // Each runner reads the ball himself. If a visible fielder can get under it
-                // before it lands, he expects a catch and goes back to tag up. If it is a
-                // fly or liner to the outfield that might drop, with fewer than two out, he
-                // goes partway and watches. Otherwise he decides now.
-                let (likely_catch, deep_fly) = if airborne && sim.r[k].start > 0 {
+            for k in 0..sim.r.len() {
+                let base = sim.r[k].start;
+                sim.r[k].reading_contact = false;
+                if base == 0 || two_out {
+                    continue;
+                }
+                // A catch he expects sends him back. An uncertain outfield ball sends
+                // him partway until it falls. On other balls he weighs his next base.
+                let (likely_catch, deep_fly) = if airborne {
                     let pred = sim.runner_predict(k, 1);
                     let first = pred.first_bounce();
                     let land = first.map(|x| x.0).unwrap_or(pred.t_end());
@@ -5559,24 +5638,13 @@ fn simulate_live_inner(inp: &LiveInput, st: &mut RulesState) -> LiveOutput {
                 } else {
                     (false, false)
                 };
-                if sim.r[k].start == 0 {
-                    sim.r[k].goal = 1;
-                } else if likely_catch && sim.st.outs < 2 {
-                    // (With two out a catch ends the inning: he runs on contact.)
+                if likely_catch {
                     sim.r[k].tag_up = true;
-                } else if deep_fly && sim.st.outs < 2 {
-                    let base = sim.r[k].start;
+                } else if deep_fly {
                     sim.r[k].hold_s = Some((lead_s(base) + HALFWAY_M).min((base as f64 + 0.6) * BASE_L));
                 } else {
-                    let b0 = sim.r[k].start;
-                    sim.runner_decide(k, b0);
+                    sim.runner_decide(k, base);
                 }
-            }
-        }
-        if !runners_started {
-            // Before decisions everyone forced still runs on contact: batter to first.
-            if let Some(k) = sim.r.iter().position(|r| r.start == 0) {
-                sim.r[k].goal = 1;
             }
         }
         if assigned && matches!(sim.ball, Ball::Free { .. }) {
@@ -5633,7 +5701,15 @@ fn simulate_live_inner(inp: &LiveInput, st: &mut RulesState) -> LiveOutput {
         iso_check(&sim, "update_relay");
         sim.update_relay();
         sim.move_fielders();
-        sim.move_runners();
+        if tick == 0 {
+            // The contact position is a real track sample. The first elapsed tick
+            // of runner movement comes after it.
+            for k in 0..sim.r.len() {
+                sim.trace_runner(k);
+            }
+        } else {
+            sim.move_runners();
+        }
         if sim.done {
             break;
         }
@@ -5836,6 +5912,7 @@ mod tests {
             seed: 11,
             play: 3,
             record: false,
+            runner_start: Default::default(),
             tag_up: Default::default(), advance: Default::default(),
         }
     }
@@ -10299,6 +10376,68 @@ mod tests {
         assert_eq!(sim.ball_time_to(0, 2, 1, sim.t + 0.75), straight);
     }
 
+    #[test]
+    fn the_secondary_lead_joins_the_live_runner_track_on_all_three_bases() {
+        let runners = [(0x0004, 1), (0x0005, 2), (0x0006, 3)];
+        let fx = fixture(&runners);
+        let mut entrants = vec![RunnerIn { id: fx.st.batter, base: 0, speed: 8.2, tau_s: RUNNER_TAU }];
+        entrants.extend(runners.map(|(id, base)| RunnerIn { id, base, speed: 8.2, tau_s: RUNNER_TAU }));
+        let mut inp = input(&fx, entrants);
+        inp.runner_start.fewer_than_two = SecondaryLead { extra_m: 1.0, speed_mps: 2.0 };
+        inp.record = true;
+        let mut st = fx.st.clone();
+        let (out, ticks) = runner_trace::capture(|| simulate_live(&inp, &mut st));
+        for (id, base) in runners {
+            let track = &out.actors.iter().find(|(agent, _)| *agent == id).unwrap().1;
+            let along = (base_pos(base + 1) - base_pos(base)).normalized();
+            let contact = track.iter().position(|(t, _)| *t == inp.t_contact).unwrap();
+            let (at_release, at_contact) = (track[0], track[contact]);
+            assert_eq!(at_release.0, 0.0);
+            assert!(track.windows(2).all(|pair| pair[0].0 < pair[1].0));
+            assert!(((at_contact.1 - at_release.1).dot(along) - 1.0).abs() < 1e-9);
+            let before = track[contact - 1];
+            let approach_mps = (at_contact.1 - before.1).dot(along) / (at_contact.0 - before.0);
+            assert!((approach_mps - 2.0).abs() < 0.2);
+            let start = ticks.iter().find(|tick| tick.runner == id).unwrap();
+            let later = ticks.iter().find(|tick| tick.runner == id && tick.t > inp.t_contact + 0.24).unwrap();
+            assert_eq!(start.signed_mps, 2.0);
+            // At the start of the 15th elapsed tick, fourteen ticks of the 2 m/s
+            // shuffle have passed. The runner has covered 14 × 2/60 m.
+            assert!((later.s - start.s - 14.0 * 2.0 / 60.0).abs() < 1e-9);
+            if base == 3 {
+                // The third-base line is x + y = 0. The contact position is
+                // 0.6 m to its foul side while the feet head parallel to it.
+                assert!((at_contact.1.x + at_contact.1.y + 0.6 * 2.0f64.sqrt()).abs() < 1e-9);
+            }
+        }
+    }
+
+    #[test]
+    fn a_catch_during_the_contact_read_sends_the_moving_runner_back() {
+        let fx = fixture(&[(0x0007, 2)]);
+        let mut inp = input(&fx, vec![
+            RunnerIn { id: fx.st.batter, base: 0, speed: 8.2, tau_s: RUNNER_TAU },
+            RunnerIn { id: 0x0007, base: 2, speed: 8.2, tau_s: RUNNER_TAU },
+        ]);
+        inp.runner_start.fewer_than_two = SecondaryLead { extra_m: 1.0, speed_mps: 2.0 };
+        let mut st = fx.st.clone();
+        let mut sim = new_sim(&inp, &mut st);
+        sim.start_runners();
+        sim.catch_made = true;
+        let start = sim.r[1].s;
+        for _ in 0..30 {
+            sim.t += DT;
+            sim.move_runners();
+        }
+        let runner = &sim.r[1];
+        assert!(runner.retouch && !runner.reading_contact);
+        assert_eq!(runner.goal, 2);
+        // 2 m/s brakes to zero in 0.421 s after 0.421 m, to within one tick's
+        // integration error. At 0.5 s he has begun returning.
+        assert!(runner.direction < 0.0);
+        assert!((0.33..0.44).contains(&(runner.s - start)));
+    }
+
     // With two out a catch ends the inning: the runner on second runs on contact on a high
     // fly to center and has touched third before it comes down. With none out he waits.
     #[test]
@@ -10306,7 +10445,8 @@ mod tests {
         let touched_third = |outs: u8| {
             let mut fx = fixture(&[(0x0007, 2)]);
             fx.st.outs = outs;
-            let inp = input(&fx, vec![RunnerIn { id: fx.st.batter, base: 0, speed: 8.2, tau_s: bb_agents::running::LEAGUE_TAU_S }, RunnerIn { id: 0x0007, base: 2, speed: 8.2, tau_s: bb_agents::running::LEAGUE_TAU_S }]);
+            let mut inp = input(&fx, vec![RunnerIn { id: fx.st.batter, base: 0, speed: 8.2, tau_s: bb_agents::running::LEAGUE_TAU_S }, RunnerIn { id: 0x0007, base: 2, speed: 8.2, tau_s: bb_agents::running::LEAGUE_TAU_S }]);
+            inp.runner_start.two_out = SecondaryLead { extra_m: 1.5, speed_mps: 4.0 };
             let mut st = fx.st.clone();
             let out = simulate_live(&inp, &mut st);
             let caught = out.facts.iter().find_map(|f| if let Input::GloveSecured { t, .. } = f { Some(*t) } else { None }).expect("the fly is caught");
@@ -10315,10 +10455,10 @@ mod tests {
                 _ => None,
             })
         };
-        // He goes at the crack of the bat: a reaction (0.25 s), then 20.9 m from a standing
-        // lead by the league's legs (20.9 / 8.2 + 0.76 = 3.31 s), 3.56 s in all.
+        // He coasts 1 m for 0.25 s, then needs 18.432 m starting at 4 m/s.
+        // Integrating the exponential speed curve gives 2.625 s for that leg.
         let t = touched_third(2).expect("he runs");
-        assert!((t - 3.56).abs() < 0.08, "third {t:.2} s after contact");
+        assert!((t - 2.875).abs() < 0.05, "third {t:.2} s after contact");
         assert!(touched_third(0).is_none());
     }
 

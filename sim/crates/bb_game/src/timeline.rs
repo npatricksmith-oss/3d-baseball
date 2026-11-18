@@ -117,9 +117,8 @@ pub fn encode(step: &PitchStep, st: &RulesState, rosters: &crate::roster::Roster
     let segv = fbb.create_vector(&segs);
     let ball = tl::BallTrack::create(&mut fbb, &tl::BallTrackArgs { segments: Some(segv) });
 
-    // Actors: a root track for everyone on the field. Those who moved during a live ball
-    // have their sampled track, preceded by where they stood until it starts (the batter in
-    // his box until contact); everyone else stands where he was at the pitch.
+    // The live runner tracks already include the shuffle from release. Other actors
+    // keep their starting positions until their sampled live-ball tracks begin.
     let mut tracks: Vec<(u16, Vec<(f64, Vec3)>)> = step
         .viz
         .standing
@@ -127,6 +126,9 @@ pub fn encode(step: &PitchStep, st: &RulesState, rosters: &crate::roster::Roster
         .map(|(id, at)| {
             let mut v = vec![(0.0, *at)];
             if let Some(s) = step.viz.actors.iter().find(|(a, s)| a == id && !s.is_empty()).map(|x| &x.1) {
+                if s[0].0 == 0.0 {
+                    return (*id, s.clone());
+                }
                 v.push(((s[0].0 - 0.02).max(0.0), *at));
                 // The realized positions, as the live simulator had them (the batter's run out
                 // of his box included: `live::Sim::runner_pos`).

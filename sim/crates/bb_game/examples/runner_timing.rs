@@ -303,6 +303,7 @@ fn row(
             let runner = runners[(base - 1) as usize]?;
             let target = base + 2;
             let samples = track(step, runner);
+            let samples = &samples[samples.partition_point(|(t, _)| *t < contact) ..];
             let lead_m = (samples.first()?.1 - base_pos(base)).norm();
             let (first_move, first_forward) = movement(samples, base, contact);
             let touch = |at| {

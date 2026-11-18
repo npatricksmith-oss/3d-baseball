@@ -67,6 +67,7 @@ fn replay_with(text: &str, params: bb_agents::throwing::ChoiceParams) -> (LiveOu
         seed,
         play: v["play"].as_u64().unwrap() as u32,
         record: true,
+        runner_start: Default::default(),
         tag_up: Default::default(), advance: Default::default(),
     };
     let (out, choices) = capture(|| simulate_live(&inp, &mut st));
