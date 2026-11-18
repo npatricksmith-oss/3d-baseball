@@ -19,13 +19,13 @@ Status: `[ ]` not started · `[~]` partly done · `[?]` needs an owner decision
 
 **State.** Context pruning steps 1–4 are merged and pushed (docs audit, code comments and examples, superseded-figure banners, branch and worktree cleanup with the owner's OK as Q28: local branches left are main, `work/runner-start`, the held `work/pitcher-fielding` and `work/integrate-agy-calib`, and `work/swing-chores`). Codex was reset on 2026-11-17: Codex Sol reviews again.
 
-**Waiting on the owner: Q27, the runner's start.** The timing probe is on `work/runner-start` (`0282b56`, with main merged in): [note](docs/calibration/2026-11-17-runner-timing.md). A held runner from second loses the race home by a median 1.10 s with 0–1 out and 0.55 s with two out; a secondary lead moving at contact gains about 0.75 s and would turn roughly 72/311 (0–1 out) and 112/167 (two out) of those holds into won races. The larger loss with 0–1 out is 1.43 s of "other runner time" (checks, traffic) beyond the read and acceleration, not yet split by ball type: trace that whatever the owner rules. The branch (the two-out 0.25 s start plus the probe) is reviewed with the Q27 change, then merged.
+**Q27 answered (owner, 2026-11-18): A, and trace the 1.4 s.** Runners move at contact (secondary lead with speed, harder with two out; doubled-off cost from the physics); decision in agent-models §6.1. A Codex worker (herdr tab "Workers") does it on `work/runner-start` in `.claude/worktrees/runner-decision`: merge main, trace the 1.43 s of 0–1-out runner delay by ball type, build the moving start, fit to MLB extra-base rates, ledger row. Then the lead runs the tests and the standard run itself, a Codex Sol review covers the whole branch (two-out 0.25 s start, probe, moving start), and it is merged. [Probe note](docs/calibration/2026-11-17-runner-timing.md).
 
 **Lesson:** a worker once reported done on a stale test binary. Before merging a worker's branch, `touch` the changed source and run the tests and the standard run yourself.
 
 **Numbers on main** (standard run, seeds 0–299 [1000–1299]; ledger §1): runs 4.12 [4.14] against a real 4.39; hits on GB/LD/FB/PU .307/.683/.109/.006 [.308/.683/.098/.004] against about .245/.68/.13/.02; HR/PA 2.88% [2.82%] against 3.0%; routine flies caught .980.
 
-**Next:** Q27 and item 1 of "Open sim work" below. Last pruning step: a check script that fails on dead paths and on this file growing past its cap. The [prune notes](docs/archive/2026-11-17-docs-prune-notes.md) list decisions (D1, D4, D6, D9, D17, D19/D20) that disagree with the code; put them to the owner as numbered questions after Q27.
+**Next:** the Q27 worker's branch, then item 1 of "Open sim work" below. Last pruning step: a check script that fails on dead paths and on this file growing past its cap. The [prune notes](docs/archive/2026-11-17-docs-prune-notes.md) list decisions (D1, D4, D6, D9, D17, D19/D20) that disagree with the code; put them to the owner as numbered questions (Q29 on).
 
 ---
 
