@@ -110,6 +110,8 @@ const FOLLOW_GAP_S: f64 = 0.3;
 /// From contact to a runner's first look at the ball, s [E]: his read of where it is going
 /// (no published value; Statcast's "first step" is not released as a league figure).
 const RUNNER_READ_DELAY_S: f64 = 0.5;
+/// Allowance in the runner's catch read for an approximate fielder arrival, s [E].
+const RUNNER_CATCH_SLACK_S: f64 = 0.3;
 /// From contact to a two-out runner's break from shuffle speed into a full run, s [E].
 const RUNNER_CONTACT_REACT_S: f64 = 0.25;
 /// The error of a runner's read of a race, one draw per look, s [E] (agent-models §6.3).
@@ -2265,11 +2267,11 @@ impl<'a> Sim<'a> {
         self.predict_from(self.runner_pos(r), RUNNER_READ_SIGMA0, 0.6, view, err)
     }
 
-    /// When the runner believes the defense can field the ball on `pred`: the earliest
-    /// point some visible fielder could reach with league-typical speed.
-    fn believed_field_time(&self, pred: &BallPath) -> (f64, Vec3) {
+    /// Earliest point on the runner's own projection that a visible fielder could reach
+    /// with league-typical speed, within the caller's decision horizon.
+    fn believed_field_intercept(&self, pred: &BallPath, until: f64, step_s: f64) -> Option<(f64, Vec3)> {
         let mut t = self.t + 0.05;
-        let t_end = pred.t_end();
+        let t_end = pred.t_end().min(until);
         let field = self.inp.field;
         while t <= t_end {
             let (b, _) = pred.at(t);
@@ -2280,13 +2282,12 @@ impl<'a> Sim<'a> {
                     d <= 0.0 || run_dist(t - self.t, TYPICAL_SPEED, 0.9) >= d
                 });
                 if reachable {
-                    return (t, Vec3::new(b.x, b.y, 0.0));
+                    return Some((t, Vec3::new(b.x, b.y, 0.0)));
                 }
             }
-            t += 0.15;
+            t += step_s;
         }
-        let (rest, _) = pred.at(t_end);
-        (t_end + 1.0, Vec3::new(rest.x, rest.y, 0.0))
+        None
     }
 
     /// Earliest point on a predicted path the fielder can reach in time: (time, point).
@@ -4189,7 +4190,11 @@ impl<'a> Sim<'a> {
             Ball::Free { .. } => {
                 let t0 = prof::enabled().then(std::time::Instant::now);
                 let pred = self.runner_predict(k, read_sub);
-                let (tf, at) = self.believed_field_time(&pred);
+                let end = pred.t_end();
+                let (tf, at) = self.believed_field_intercept(&pred, end, 0.15).unwrap_or_else(|| {
+                    let (rest, _) = pred.at(end);
+                    (end + 1.0, Vec3::new(rest.x, rest.y, 0.0))
+                });
                 if let Some(t0) = t0 {
                     prof::add(&prof::RUNNER, t0.elapsed().as_nanos() as u64);
                 }
@@ -4619,13 +4624,18 @@ impl<'a> Sim<'a> {
         true
     }
 
+    /// The public ground touch which ends a runner's check for a catch.
+    fn ball_touched_ground(&self) -> bool {
+        self.out.facts.iter().any(|f| matches!(f, Input::BallTouched { what: Touch::Ground { .. }, .. }))
+    }
+
     fn trace_runner(&self, k: usize) {
         use runner_trace::{Cause, Tick};
         let r = &self.r[k];
         if !runner_trace::enabled() || r.start == 0 {
             return;
         }
-        let ball_down = self.out.facts.iter().any(|f| matches!(f, Input::BallTouched { what: Touch::Ground { .. }, .. }));
+        let ball_down = self.ball_touched_ground();
         let cause = if r.reading_contact {
             Cause::Read
         } else if r.tag_up || r.hold_s.is_some() || r.retouch {
@@ -4714,7 +4724,7 @@ impl<'a> Sim<'a> {
                     if self.r[k].goal <= b {
                         self.r[k].set_start = None;
                     }
-                } else if !matches!(self.ball, Ball::Free { .. }) || self.out.facts.iter().any(|f| matches!(f, Input::BallTouched { what: Touch::Ground { .. }, .. })) {
+                } else if !matches!(self.ball, Ball::Free { .. }) || self.ball_touched_ground() {
                     // The ball dropped in: run.
                     self.r[k].tag_up = false;
                     let b = self.r[k].last_base;
@@ -4727,7 +4737,7 @@ impl<'a> Sim<'a> {
                 }
             }
             // A partway hold ends when the ball comes down. The contact read has its own clock.
-            if self.r[k].hold_s.is_some_and(|s| s > lead_s(self.r[k].start)) && !self.caught() && (!matches!(self.ball, Ball::Free { .. }) || self.out.facts.iter().any(|f| matches!(f, Input::BallTouched { what: Touch::Ground { .. }, .. }))) {
+            if self.r[k].hold_s.is_some_and(|s| s > lead_s(self.r[k].start)) && !self.caught() && (!matches!(self.ball, Ball::Free { .. }) || self.ball_touched_ground()) {
                 self.r[k].hold_s = None;
                 let b = self.r[k].start;
                 self.runner_decide(k, b);
@@ -5592,8 +5602,7 @@ fn simulate_live_inner(inp: &LiveInput, st: &mut RulesState) -> LiveOutput {
             sim.emit(Input::BaseLeft { t: t_c, agent: id, base });
         }
     }
-    // Reactions: the defense reads the ball after its reaction time; runners decide at once
-    // from what they see (a ball in the air that a fielder is settling under: tag up).
+    // Fielders and runners have separate reaction clocks.
     let react = inp.fattrs.iter().map(|a| a.reaction).fold(f64::INFINITY, f64::min);
     let mut assigned = false;
     let mut runners_started = false;
@@ -5622,37 +5631,6 @@ fn simulate_live_inner(inp: &LiveInput, st: &mut RulesState) -> LiveOutput {
             sim.assign();
             assigned = true;
         }
-        // The runners are already moving. Two outs leaves only the cue to break into
-        // a full run. With fewer outs their first look sets the intended movement.
-        if !runners_started && !sim.caught() && sim.t - t_c >= read_s - 1e-9 {
-            runners_started = true;
-            let (b, bv) = sim.ball_at(sim.t);
-            let airborne = matches!(sim.ball, Ball::Free { .. }) && (b.z > 1.5 || bv.z > 0.0);
-            for k in 0..sim.r.len() {
-                let base = sim.r[k].start;
-                sim.r[k].reading_contact = false;
-                if base == 0 || two_out {
-                    continue;
-                }
-                // A catch he expects sends him back. An uncertain outfield ball sends
-                // him partway until it falls. On other balls he weighs his next base.
-                let (likely_catch, deep_fly) = if airborne {
-                    let pred = sim.runner_predict(k, 1);
-                    let first = pred.first_bounce();
-                    let land = first.map(|x| x.0).unwrap_or(pred.t_end());
-                    (sim.believed_field_time(&pred).0 <= land + 0.3, first.map(|x| m::hypot(x.1, x.2) > INFIELD_R).unwrap_or(true))
-                } else {
-                    (false, false)
-                };
-                if likely_catch {
-                    sim.r[k].tag_up = true;
-                } else if deep_fly {
-                    sim.r[k].hold_s = Some((lead_s(base) + HALFWAY_M).min((base as f64 + 0.6) * BASE_L));
-                } else {
-                    sim.runner_decide(k, base);
-                }
-            }
-        }
         if assigned && matches!(sim.ball, Ball::Free { .. }) {
             #[cfg(test)]
             iso_check(&sim, "replan_chasers");
@@ -5672,6 +5650,42 @@ fn simulate_live_inner(inp: &LiveInput, st: &mut RulesState) -> LiveOutput {
         sim.ball_facts();
         if sim.done {
             break;
+        }
+        // The runners are already moving. Two outs leaves only the cue to break into
+        // a full run. With fewer outs their first look sets the intended movement.
+        if !runners_started && !sim.caught() && sim.t - t_c >= read_s - 1e-9 {
+            runners_started = true;
+            // A ground touch is visible even when a high hop is still in the air.
+            // Before that cue, each runner judges the possible catch from his own read.
+            let check_catch = !two_out && matches!(sim.ball, Ball::Free { .. }) && !sim.ball_touched_ground();
+            for k in 0..sim.r.len() {
+                let base = sim.r[k].start;
+                sim.r[k].reading_contact = false;
+                if base == 0 || two_out {
+                    continue;
+                }
+                // A catch he expects sends him back. An uncertain outfield ball sends
+                // him partway until it falls. On other balls he weighs his next base.
+                let (likely_catch, deep_fly) = if check_catch {
+                    let pred = sim.runner_predict(k, 1);
+                    let first = pred.first_bounce();
+                    let land = first.map(|x| x.0).unwrap_or(pred.t_end());
+                    // A hard liner can cross a fielder's whole reach between 0.15 s
+                    // race samples. Use the live tick spacing for this catch check.
+                    let likely_catch = sim.believed_field_intercept(&pred, land + RUNNER_CATCH_SLACK_S, DT).is_some();
+                    let deep_fly = first.is_none_or(|(_, x, y)| m::hypot(x, y) > INFIELD_R);
+                    (likely_catch, deep_fly)
+                } else {
+                    (false, false)
+                };
+                if likely_catch {
+                    sim.r[k].tag_up = true;
+                } else if deep_fly {
+                    sim.r[k].hold_s = Some((lead_s(base) + HALFWAY_M).min((base as f64 + 0.6) * BASE_L));
+                } else {
+                    sim.runner_decide(k, base);
+                }
+            }
         }
         if assigned {
             #[cfg(test)]
@@ -9936,6 +9950,41 @@ mod tests {
             sim.t += DT;
         }
         panic!("runner never reached the hold point");
+    }
+
+    #[test]
+    fn a_forced_runner_checks_a_low_liner_before_the_first_baseman_catches_it() {
+        const R: AgentId = 0x0007;
+        let mut fx = fixture(&[(R, 1)]);
+        fx.st.outs = 1;
+        let mut inp = input(&fx, vec![
+            RunnerIn { id: fx.st.batter, base: 0, speed: 8.2, tau_s: RUNNER_TAU },
+            RunnerIn { id: R, base: 1, speed: 8.2, tau_s: RUNNER_TAU },
+        ]);
+        // About 44 m/s toward the first baseman. Over the first half second, the
+        // 2.7 m/s upward launch gains about 1.35 m and gravity takes about 1.2 m.
+        // The descending ball is still catchable at a little over one metre high.
+        inp.ball = BallState {
+            r: Vec3::new(0.0, 0.5, 1.05),
+            v: Vec3::new(29.0, 33.5, 2.7),
+            w: Vec3::ZERO,
+        };
+        inp.runner_start.fewer_than_two = SecondaryLead { extra_m: 1.0, speed_mps: 3.0 };
+        let mut st = fx.st.clone();
+        let (out, ticks) = runner_trace::capture(|| simulate_live(&inp, &mut st));
+        let catch = out.facts.iter().find_map(|fact| match *fact {
+            Input::GloveSecured { t, fielder, .. } if fielder == inp.fielders[2] => Some(t),
+            _ => None,
+        }).expect("the first baseman catches the liner");
+        assert!(out.events.contains(&Event::Catch { fielder: inp.fielders[2] }));
+        assert!((0.55..0.75).contains(&(catch - inp.t_contact)));
+        let after_read: Vec<_> = ticks.iter().filter(|tick| {
+            tick.runner == R && tick.t >= inp.t_contact + 0.5 - 1e-9 && tick.t < catch
+        }).collect();
+        assert!(after_read.len() >= 3 && after_read.iter().all(|tick| !tick.ball_down));
+        // Until the catch the runner may continue shuffling or brake. A force on
+        // the batter's live hit is no reason to accelerate on a catchable liner.
+        assert!(after_read.iter().all(|tick| tick.signed_mps <= 3.0 + 1e-9), "{after_read:?}");
     }
 
     // Runners take leads, and on a fly that might drop with fewer than two out they go
