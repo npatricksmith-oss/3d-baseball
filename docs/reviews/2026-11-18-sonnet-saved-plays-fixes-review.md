@@ -136,4 +136,7 @@ Ran: the stamp script in a throwaway repository (clean → `ab94a9c`; untracked 
 
 ## Resolution
 
-Open.
+Coordinator, 2026-11-18.
+
+- **P2-1, P3-2, P3-6, P3-8: fixed** in `94133ea` (see "Worker follow-up (2)"). Not re-reviewed: small and covered by the check; the Coordinator rebuilt from touched sources and ran `-BbSavedPlayCheck` at `2aaa3ca` (PASS, 39 cases, exit 0, stamp `2aaa3ca` with no `-dirty`).
+- **P3-3, P3-4, P3-5, P3-7: deferred**, with a line in TASKS.md. Each needs a hand-edited save file or is a gap in the check's coverage, not a fault a normal save can reach.

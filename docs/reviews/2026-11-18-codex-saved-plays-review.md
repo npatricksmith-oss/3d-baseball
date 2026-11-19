@@ -46,4 +46,9 @@ A Claude worker fixed every P1 and P2 and P3-1 on `work/saved-plays` (2026-11-18
 
 ## Resolution
 
-Open.
+Coordinator, 2026-11-18. **All findings resolved; nothing open.**
+
+- **P1-1, P1-2, P1-3, P2-1, P2-2, P2-4, P3-1: fixed** by a Sonnet worker in `8c2c9f7`, `aaf4c72`, `2718730` (see "Worker follow-up"). The fixes were reviewed once more by Claude Sonnet ([2026-11-18-sonnet-saved-plays-fixes-review.md](2026-11-18-sonnet-saved-plays-fixes-review.md)); its P2 (the `-dirty` stamp) and three P3s were fixed in `94133ea`.
+- **P2-3: fixed** for the roster and the park (recorded in the save, applied before the park and figures are built). **Accepted limit:** the viewer still draws with today's poses, animation clips and camera logic; a save has no field for those, and D9 asks for the recorded play (the trajectories), which is kept.
+- **P3-2: kept, owner's ruling Q32 (a), 2026-11-18.** The startup camera aims at the plate.
+- Verified by the Coordinator at `2aaa3ca`: editor build from touched sources, `client/run.sh 7 -RenderOffscreen -BbSavedPlayCheck` PASS (39 cases, 652 frames equal, exit 0, stamp clean).
