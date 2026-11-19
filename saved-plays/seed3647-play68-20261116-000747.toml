@@ -2,6 +2,9 @@
 # See it again: client/run.sh 3647, then R back to play 68 once it has been shown.
 seed = 3647
 play = 68
+commit = "30634cf"
+# Worked out from the save time (git log -1 --before=2026-11-16T00:07:47 main); no recorded timeline.
+commit_inferred = true
 inning = 3
 half = "bottom"
 # The board before the pitch.
