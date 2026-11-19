@@ -1,6 +1,6 @@
 # Task List
 
-**Last updated:** 2026-11-18 23:55 (saved plays merged; catch-read fixes under Opus review).
+**Last updated:** 2026-11-19 00:40 (saved plays and catch-read fixes merged; no workers running).
 
 What is next and what is open. Other files hold the rest:
 
@@ -15,11 +15,13 @@ Status: `[ ]` not started · `[~]` partly done · `[?]` needs an owner decision
 
 ---
 
-## Resume here (2026-11-18, 23:40)
+## Resume here (2026-11-19, 00:40)
 
-**State (23:55).** One reviewer running. Tab "Workers" holds only `t2q`. Read a pane with `hc read <terminal>`; a new Coordinator session starts a background wait on `t2q` (CLAUDE.md, "Watch every worker").
+**State.** No workers running; the Workers tab is closed. Both branches are merged and pushed.
 
-**1. `work/catch-read-fixes`** (worktree `.claude/worktrees/runner-decision`). The fixes review's (on the branch, `2ec56a8`) 4 P1 and P2 are fixed with failing-first fixtures (`f5d3a14..9fdbf8d`, follow-up `155a874`); release workspace tests 462 passed; standard runs 4.48 [4.55] against main's 4.38 [4.53]. Two-out sends to center are still 122/123 (P3-1, measured, left open). The 25–50° double-offs (16.5 → 38.0 per 300 games) are traced: every one advanced at the first look on a deep fly he projected over the fence, and nothing makes a runner look again while the ball is in the air. **Opus reviewer `catch-fixes2-review` in `t2q`** reviews `2ec56a8..155a874` from untracked REVIEW-CATCH-FIXES2.md, writing its review as 2026-11-18-opus-catch-fixes2-review.md on the branch. When done: hand any P1/P2 to an Opus worker, write both reviews' Resolutions, touch `live.rs`, run the tests and both standard runs yourself, merge. Then the next `live.rs` job: **an in-flight relook for runners** (a runner who reads a deep fly as gone looks again while the ball is up and pulls up as the fielder settles; agent-models §6.3), with the catch cut-off calibration below.
+**Catch-read fixes merged (2026-11-19, `c313f6a`, Q27).** Runner catch reads, relooks, the holder's look, the hold for the call and the settle guard use only what the runner can see. Sacrifice flies from third 3 → 204 over 600 games; runs 4.38 → 4.48 [4.53 → 4.55]. Reviews resolved ([fixes review](docs/reviews/2026-11-18-codex-catch-read-fixes-review.md), [Opus re-review](docs/reviews/2026-11-18-opus-catch-fixes2-review.md)).
+
+**Next: one Opus `live.rs` job, the 25–50° double-offs** (16.5 → 38.0 per 300 games on this merge). In order: (1) the runner's first look reads 25–50° flies about 2.5 m long even with no read error, and 32 of 342 in-park flies landing past 100 m as home runs (Opus re-review P2-1): find whether the believed pure-backspin axis or the spin-drag nonlinearity causes it and fix the model, recheck the fielders' first look with the same probe (`sim/target/codex-probes/opus-fix2/zz_opus_carry_probe.rs`), and correct the runner-timing note's "does not show a population bias"; (2) an in-flight relook, so a runner who reads a deep fly as gone looks again while it is up and pulls up as the fielder settles (agent-models §6.3); (3) then the catch cut-off calibration below. Ledger row and one Opus review.
 
 **Saved plays merged (2026-11-18, `38ec67b`, Q30 (b), D9).** A save keeps the recorded timeline, its MD5, the roster, the park and the board; the viewer refuses damaged, swapped or legacy files. Both reviews resolved ([first](docs/reviews/2026-11-18-codex-saved-plays-review.md), [fixes](docs/reviews/2026-11-18-sonnet-saved-plays-fixes-review.md)). Deferred, P3: the fixes review's P3-3 (a park without a full roster is dropped silently), P3-4 (names with `"`/`;`/`=`/`\` are rewritten; park and player values unchecked), P3-5 (unreachable summary checks; `LoadRecorded`'s call to `InfoSane` untested), P3-7 (the check leaves `board_after`, 17 players and most park fields unasserted). All need a hand-edited save or are check coverage. Accepted limit: a saved play uses today's poses, clips and camera.
 
@@ -27,7 +29,7 @@ Status: `[ ]` not started · `[~]` partly done · `[?]` needs an owner decision
 
 **Owner's rulings, 2026-11-18** (recorded in PLAN §1): **Q29 (a)** a player may mix his own choices (pitch, spot); D1 reworded. **Q30 (b)** a saved play keeps the build's commit and the recorded play itself (D9). **Q31** Unreal decided outright (D6). D19/D20 now record the Q7 merge; D4 is covered by Q13/Q14; D17 waits for pitching changes in M6.
 
-**After that:** item 1 of "Open sim work" below.
+**After that:** the rest of item 1 of "Open sim work" below.
 
 ---
 
@@ -41,6 +43,7 @@ One `sim/crates/bb_game/src/live.rs` job at a time. Each job gets a ledger row a
   - The catch-read review follow-up is on `work/catch-read-fixes` for review. The catch and holder forecasts use observations, and the runners use the perceived force through the catch-call reaction. Holds account for signed speed and braking drift, an early legal retouch keeps its decision, and catch height varies continuously with the park's ceiling. The runner on third in seed 1000003000 play 82 is back before the catch and scores. [Review follow-up](docs/reviews/2026-11-18-codex-catch-read-review.md#worker-follow-up).
   - The standard cohorts still have 19.0 double-offs at 10–25° per 300 games. At 25–50° they rose from 16.5 to 38.0, with the extra appeals still to trace. Scored sacrifice flies from third rose from 3 to 204 over 600 games. On singles, second to home is 55.8% (MLB 61.7%) and first to third is 33.3% (MLB 31.7%). [Runner timing measurements](docs/calibration/2026-11-17-runner-timing.md#catch-read-review-fixes).
   - Open: the last two-out send measurement to center was 117/118 (99.2%, MLB 75–91%), with a longer throw benchmark than at the corners. The runner still uses a single noisy contact look for the catch forecast. Returns brake onto the bag. A dive back remains open.
+  - Deferred P3s from the Opus re-review of the catch-read fixes: a comment at `awaiting_call`'s no-catch clause (the rules cannot produce it today, and it would strand a planted tag-up runner); a test tagging a runner between bases after a non-goal crossing; a pending-catch variant of the 3,000-layout property test.
   - Deferred review P3s: the third-base route blend turns the lateral velocity in one tick (P3-1); the first decision sees one tick less coasting than its clock (P3-2). [Q27 timing and checks](docs/calibration/2026-11-17-runner-timing.md#final-measurements).
 - [ ] Calibrate the runner's catch cut-offs (`RUNNER_CATCH_CONFIDENCE` 80%, advance below 20%) across base/out states and catch types, after the catch-read fixes (deferred catch-read review P3-1).
 - [ ] Fit `AdvanceParams::caution_z` to MLB's attempt and success rates (now 1.0, fitted only to outs on the bases).
