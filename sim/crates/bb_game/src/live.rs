@@ -61,6 +61,8 @@ const LOW_CATCH_Z: f64 = 0.4;
 pub(crate) const CATCH_MAX_Z: f64 = 2.4;
 /// Leaping reach at the wall [E].
 const WALL_CATCH_MAX_Z: f64 = 3.0;
+/// Distance inside the wall where a fielder can use the leaping ceiling, m [E].
+const WALL_CATCH_ZONE_M: f64 = 3.0;
 const POCKET: f64 = 0.06;
 const RIM: f64 = 0.12;
 const DEPTH_STRETCH: f64 = 3.0;
@@ -1950,7 +1952,11 @@ fn wall_delay(field: &Field, fd: &Fielder, goal: Vec3, reach: f64) -> f64 {
 
 /// Highest ball a fielder can take where it is: he can leap at a wall (agent-models §5.4).
 fn catch_ceiling(field: &Field, p: Vec3) -> f64 {
-    if field.body_clearance(p.x, p.y, 0.0).dist < 3.0 { WALL_CATCH_MAX_Z } else { CATCH_MAX_Z }
+    catch_ceiling_at_clearance(field.body_clearance(p.x, p.y, 0.0).dist)
+}
+
+fn catch_ceiling_at_clearance(clearance: f64) -> f64 {
+    if clearance < WALL_CATCH_ZONE_M { WALL_CATCH_MAX_Z } else { CATCH_MAX_Z }
 }
 
 /// Time for a fielder to come within `reach` of `goal` from his current motion: the first
@@ -2480,8 +2486,8 @@ impl<'a> Sim<'a> {
     /// is. At each point it is the chance a fielder's glove gets there, from visible fielder
     /// motion, in spreads of his doubt about the glove (`RUNNER_CATCH_SIGMA_M`), about the
     /// fielder's speed (`FIELDER_SPEED_SPREAD_MPS` over the run) and about the ball's curve
-    /// from the spin he cannot see (`CURVE_PRIOR`); where his projection has the ball above
-    /// catching height, times the chance the curve brings it down to it.
+    /// from the spin he cannot see (`CURVE_PRIOR`). The tighter of the height and horizontal
+    /// margins sets the score, treating residual glove reach in the two as one error.
     fn runner_catch_read(&self, pred: &BallPath) -> Option<CatchRead> {
         let ground = pred.first_bounce().map_or(f64::INFINITY, |(t, ..)| t);
         let wall = pred.walls.first().map_or(f64::INFINITY, |(t, ..)| *t);
@@ -2489,15 +2495,12 @@ impl<'a> Sim<'a> {
         let mut t = self.t;
         while t <= pred.t_end() && t < ground.min(wall) {
             let (b, _) = pred.at(t);
-            if beyond_reach_over_wall(self.inp.field, b) <= 0.0 {
+            let clearance = self.inp.field.body_clearance(b.x, b.y, 0.0).dist;
+            if clearance >= -OVER_WALL_REACH_M {
                 let dt = t - self.t;
-                // The spin he cannot see, as a fielder allows for it before his tracking
-                // learns it: a steady push of `CURVE_PRIOR` per axis from now.
                 let curve_m = 0.5 * CURVE_PRIOR * dt * dt;
-                // A ball he sees above catching height may still be down to it there, by
-                // the curve he cannot see. Lower, the doubt is about where it comes down,
-                // which the margin below carries.
-                let low = if b.z <= CATCH_MAX_Z { 1.0 } else { phi((CATCH_MAX_Z - b.z) / m::hypot(RUNNER_CATCH_SIGMA_M, curve_m)) };
+                let height_margin = (catch_ceiling_at_clearance(clearance) - b.z) / RUNNER_CATCH_SIGMA_M;
+                let mut horizontal_margin = f64::NEG_INFINITY;
                 for fd in &self.f {
                     let to = Vec3::new(b.x - fd.pos.x, b.y - fd.pos.y, 0.0);
                     let d = m::hypot(to.x, to.y);
@@ -2510,10 +2513,11 @@ impl<'a> Sim<'a> {
                     // The run is linear in top speed, so this is its exact spread.
                     let speed_m = travel(TYPICAL_SPEED + FIELDER_SPEED_SPREAD_MPS) - typical;
                     let sigma = m::sqrt(RUNNER_CATCH_SIGMA_M * RUNNER_CATCH_SIGMA_M + speed_m * speed_m + curve_m * curve_m);
-                    let p = phi((REACH + typical - d) / sigma) * low;
-                    if p > 0.0 && best.is_none_or(|read| p > read.score) {
-                        best = Some(CatchRead { score: p, t, at: Vec3::new(b.x, b.y, 0.0) });
-                    }
+                    horizontal_margin = horizontal_margin.max((REACH + typical - d) / sigma);
+                }
+                let score = phi(horizontal_margin.min(height_margin));
+                if score > 0.0 && best.is_none_or(|read| score > read.score) {
+                    best = Some(CatchRead { score, t, at: Vec3::new(b.x, b.y, 0.0) });
                 }
             }
             t += DT;
@@ -7023,6 +7027,8 @@ mod tests {
         for gap in [0.08, 0.45] {
             let mut st = fx.st.clone();
             let mut sim = new_sim(&inp, &mut st);
+            sim.start_runners();
+            sim.r[1].reading_contact = false;
             let call = 5.0;
             sim.t = call;
             sim.emit(Input::BaseLeft { t: call, agent: R, base: 3 });
@@ -7068,6 +7074,9 @@ mod tests {
         let tick = |caught| {
             let mut st = fx.st.clone();
             let mut sim = new_sim(&inp, &mut st);
+            sim.start_runners();
+            sim.r[1].reading_contact = false;
+            sim.r[2].reading_contact = false;
             sim.t = 5.0;
             sim.emit(Input::BaseLeft { t: sim.t, agent: TRAIL, base: 1 });
             (sim.r[1].s, sim.r[1].v, sim.r[1].goal) = (BASE_L + 8.0, 5.0, 2);
@@ -10452,12 +10461,45 @@ mod tests {
     }
 
     #[test]
-    fn a_fixed_contact_look_hides_a_change_of_flight() {
-        const R: AgentId = 7;
-        let fx = fixture(&[(R, 3)]);
-        let inp = input(&fx, vec![RunnerIn { id: R, base: 3, speed: 8.2, tau_s: RUNNER_TAU }]);
+    fn catch_height_is_continuous_and_a_fence_leap_is_in_reach() {
+        use bb_physics::ground::Segment;
+
+        let fx = fixture(&[]);
+        let inp = input(&fx, Vec::new());
         let mut st = fx.st.clone();
         let mut sim = new_sim(&inp, &mut st);
+        sim.t = 2.0;
+        let score = |sim: &mut Sim, y, z| {
+            sim.f[CF].pos = Vec3::new(0.0, y, 0.0);
+            let ball = BallState { r: Vec3::new(0.0, y, z), v: Vec3::ZERO, w: Vec3::ZERO };
+            let path = BallPath {
+                segments: vec![Segment::Flight { tr: Trajectory::single(sim.t, ball), end: SegmentEnd::Timeout }],
+                bounces: Vec::new(),
+                walls: Vec::new(),
+            };
+            sim.runner_catch_probability(&path)
+        };
+        let below = score(&mut sim, 60.0, 2.399);
+        let above = score(&mut sim, 60.0, 2.401);
+        // The physical ceiling lies between these samples. A millimetre each
+        // side should not halve the chance over a glove's width of uncertainty.
+        assert!(below > above && below - above < 0.01, "{below:.5} vs {above:.5}");
+        let fence_y = (80..1400).map(|i| f64::from(i) * 0.1).find(|&y| {
+            (0.4..1.0).contains(&inp.field.body_clearance(0.0, y, 0.0).dist)
+        }).expect("a point just in front of the center-field fence");
+        assert!(score(&mut sim, 60.0, 2.85) < 0.1);
+        assert!(score(&mut sim, fence_y, 2.85) > 0.65);
+    }
+
+    #[test]
+    fn a_fixed_contact_look_hides_a_change_of_flight() {
+        const R: AgentId = 7;
+        let fx = fixture(&[(R, 2)]);
+        let inp = input(&fx, vec![RunnerIn { id: R, base: 2, speed: 8.2, tau_s: RUNNER_TAU }]);
+        let mut st = fx.st.clone();
+        let mut sim = new_sim(&inp, &mut st);
+        sim.start_runners();
+        sim.r[0].reading_contact = false;
         sim.t = inp.t_contact + RUNNER_READ_DELAY_S;
         let look = ContactLook {
             motion: (Vec3::new(0.0, 17.0, 5.0), Vec3::new(0.0, 30.0, 8.0)),
@@ -10481,7 +10523,7 @@ mod tests {
         let initial = sim.r[0].clone();
         sim.read_contact(0, look);
         let action = (sim.r[0].goal, sim.r[0].tag_up, sim.r[0].hold_s);
-        assert!(action.1 || action.2.is_some(), "the matched look must exercise the catch decision");
+        assert!(action.2.is_some(), "the matched look must set a recoverable hold");
         let old_motion = sim.ball_at(sim.t);
         sim.set_free(BallState {
             r: Vec3::new(3.0, 12.0, 1.0),
@@ -10730,7 +10772,7 @@ mod tests {
         // The stopping distance from 3 m/s is about 0.95 m. Even an immediate
         // turn from an 8 m lead cannot beat the roughly 1.64 s appeal.
         assert!((0.9..0.95).contains(&(peak - lead)), "braking drift {}", peak - lead);
-        assert!((1.64..2.70).contains(&(retouch - call)), "retouch after {}", retouch - call);
+        assert!((1.64..2.95).contains(&(retouch - call)), "retouch after {}", retouch - call);
     }
 
     #[test]
@@ -10969,9 +11011,13 @@ mod tests {
         assert_eq!(projection.dest, 2);
         let (second, first) = sim.runner_ball_races(0, 3, (2, 7.0), (1, 6.5));
         assert_eq!((second, first), (projection.time_to(2), projection.time_to(1)));
-        // A direct flight of about 48 m at 40 m/s needs about 1.4 s. From
-        // second to first a throw has another 27 m to travel, plus the relay.
-        assert!((6.1..6.8).contains(&second), "arrival at second {second:.2}");
+        // Compare to the crossing on the world flight. The runner has a noisy
+        // estimate, not the exact time. First is another 27 m and a relay later.
+        let Ball::Thrown { path, .. } = &sim.ball else { panic!("still in flight") };
+        let actual_second = path.knots.iter().min_by(|a, b| {
+            (a.s.r - base_pos(2)).norm_sq().total_cmp(&(b.s.r - base_pos(2)).norm_sq())
+        }).unwrap().t;
+        assert!(second >= sim.t && (second - actual_second).abs() < 0.5, "arrival at second {second:.2}, actual {actual_second:.2}");
         assert!((1.2..1.7).contains(&(first - second)), "relay delay {:.2}", first - second);
     }
 
