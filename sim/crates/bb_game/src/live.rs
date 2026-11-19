@@ -4976,7 +4976,10 @@ impl<'a> Sim<'a> {
         }
         let nearest = (r.s / BASE_L).round();
         let between = (r.s - nearest * BASE_L).abs() > 1e-6;
-        if !between || r.tag_up || r.retouch || r.waiting || r.hold_s.is_some() || r.turned_back.is_some() || r.overrun != OverrunPhase::None || r.set_start.is_some() {
+        // Behind his own base (carried past it coming back) he has no base behind him to
+        // choose: his own is ahead, and he goes on to it.
+        let behind_own = r.s < r.start as f64 * BASE_L - 1e-6;
+        if !between || behind_own || r.tag_up || r.retouch || r.waiting || r.hold_s.is_some() || r.turned_back.is_some() || r.overrun != OverrunPhase::None || r.set_start.is_some() {
             return false;
         }
         let (start, s_now) = (r.start, r.s);
@@ -5123,7 +5126,24 @@ impl<'a> Sim<'a> {
                         r.retouch = false;
                         r.turned_back = None;
                         self.runner_decide(k, start);
+                    } else {
+                        // He touched the bag legally while the call was pending but carried
+                        // on past it (catch-read fixes review P2-1). The touch stands; his
+                        // legs bring him back to plant, and the plant is where he decides.
+                        let r = &mut self.r[k];
+                        r.tag_up = false;
+                        r.hold_s = None;
+                        r.retouch = true;
+                        r.waiting = false;
+                        r.turned_back = None;
+                        r.goal = start;
                     }
+                } else if !self.r[k].tag_up && at_start && self.r[k].v == 0.0 {
+                    // Planted on his base at the catch without having set up a tag-up: he is
+                    // legally on it, and the out and the lifted force are a new play to judge.
+                    self.r[k].hold_s = None;
+                    self.r[k].waiting = false;
+                    self.runner_decide(k, start);
                 }
             }
             if self.r[k].scored {
@@ -5145,7 +5165,14 @@ impl<'a> Sim<'a> {
             // Tag-up: go back to the base and hold it until the catch, then decide.
             if self.r[k].tag_up {
                 let on_base = (self.r[k].s - self.r[k].start as f64 * BASE_L).abs() < 1e-6;
-                if self.r[k].catch_seen {
+                if self.r[k].catch_seen && !on_base {
+                    // Off the bag when he sees the call: back to it first; the plant is
+                    // where he decides (a touch is only reported where his body is).
+                    let r = &mut self.r[k];
+                    r.tag_up = false;
+                    r.retouch = true;
+                    r.goal = r.start;
+                } else if self.r[k].catch_seen {
                     // (A runner who still owes the retouch was sent back above.)
                     self.r[k].tag_up = false;
                     let b = self.r[k].last_base;
@@ -5194,7 +5221,8 @@ impl<'a> Sim<'a> {
             // unless this is a forced advance (then the runner ahead is forced too).
             let g = self.r[k].goal;
             let forced_here = g == self.r[k].start + 1 && self.runner_forced(k, k);
-            let back = (self.r[k].s / BASE_L).floor() as u8;
+            // (Never behind his own base: carried past it, that is the base he goes back to.)
+            let back = ((self.r[k].s / BASE_L).floor() as u8).max(self.r[k].start);
             if g as f64 * BASE_L > self.r[k].s && self.base_held_ahead(k, g) && !forced_here && !self.return_crowded(k, back) {
                 self.r[k].goal = back;
                 self.r[k].turned_back = Some(g);
@@ -5276,6 +5304,14 @@ impl<'a> Sim<'a> {
                 self.emit(Input::BaseTouched { t: self.t, agent: id, base: b, holding_ball: false });
                 if self.done {
                     return;
+                }
+                // Through the bag and on past it in the same tick: he has left it (the rules
+                // hold a runner who touched a bag on it until he leaves).
+                if b < 4 && (self.r[k].s - b as f64 * BASE_L).abs() > 1e-9 {
+                    self.emit(Input::BaseLeft { t: self.t, agent: id, base: b });
+                    if self.done {
+                        return;
+                    }
                 }
                 if b == self.r[k].goal {
                     self.r[k].turns = 0;
@@ -7100,6 +7136,81 @@ mod tests {
             assert_eq!(sim.r[1].decisions, 1);
             assert_eq!(sim.r[1].goal, 4, "the deep fly is an advance from third");
         }
+    }
+
+    /// Catch-read fixes review P2-1. A runner coming back to third at 2.5 m/s, 8 cm off at
+    /// the catch, touches it legally within a tick or two and carries on past it, with and
+    /// without an anticipated tag-up. Physics and the rules, independent of the planner: a
+    /// body crossing the bag and ending the tick off it has left it; a touch happens only on
+    /// a tick whose movement reaches the bag. His first touch is the legal retouch, and he
+    /// gets one advance decision, when he has come back and planted. A runner already
+    /// planted on third at the catch, with no tag-up set, also gets that one decision once
+    /// he sees the call.
+    #[test]
+    fn a_retouch_at_speed_keeps_one_touch_reports_the_departure_and_decides_at_the_plant() {
+        const R: AgentId = 7;
+        let fx = fixture(&[(R, 3)]);
+        let inp = input(&fx, vec![
+            RunnerIn { id: fx.st.batter, base: 0, speed: 8.2, tau_s: RUNNER_TAU },
+            RunnerIn { id: R, base: 3, speed: 9.6, tau_s: RUNNER_TAU },
+        ]);
+        let third = 3.0 * BASE_L;
+        let run = |gap: f64, speed: f64, tag_up: bool| {
+            let mut st = fx.st.clone();
+            let mut sim = new_sim(&inp, &mut st);
+            sim.start_runners();
+            sim.r[1].reading_contact = false;
+            let call = 5.0;
+            sim.t = call;
+            if gap > 0.0 {
+                sim.emit(Input::BaseLeft { t: call, agent: R, base: 3 });
+            }
+            let r = &mut sim.r[1];
+            (r.s, r.v, r.direction, r.goal, r.tag_up) = (third + gap, speed, -1.0, 3, tag_up);
+            sim.emit(Input::GloveSecured { t: call, fielder: sim.f[CF].id, x: 0.0, y: 120.0 });
+            assert!(sim.caught());
+            sim.ball = Ball::Held { by: CF };
+            sim.f[CF].pos = Vec3::new(0.0, 120.0, 0.0);
+            let mut decided_at = None;
+            for tick in 0..90 {
+                sim.t = call + f64::from(tick) * DT;
+                let (prev, facts) = (sim.r[1].s, sim.out.facts.len());
+                sim.move_runners();
+                let now = sim.r[1].s;
+                for fact in &sim.out.facts[facts..] {
+                    if let Input::BaseTouched { agent: R, base: 3, .. } = fact {
+                        assert!(prev.min(now) <= third + 1e-9 && prev.max(now) >= third - 1e-9, "touched third from {prev:.3} to {now:.3}, tag-up {tag_up}");
+                    }
+                }
+                if decided_at.is_none() && sim.r[1].decisions > 0 {
+                    decided_at = Some((sim.t, prev, sim.r[1].decisions));
+                }
+            }
+            let warned = sim.out.events.iter().any(|e| matches!(e, Event::RulesWarning { .. }));
+            (sim.out.facts.clone(), warned, sim.r[1].decisions, sim.r[1].goal, decided_at)
+        };
+        for tag_up in [false, true] {
+            let (facts, warned, decisions, _, decided) = run(0.08, 2.5, tag_up);
+            let touches: Vec<f64> = facts.iter().filter_map(|f| match *f {
+                Input::BaseTouched { agent: R, base: 3, t, .. } => Some(t),
+                _ => None,
+            }).collect();
+            let leaves: Vec<f64> = facts.iter().filter_map(|f| match *f {
+                Input::BaseLeft { agent: R, base: 3, t } => Some(t),
+                _ => None,
+            }).collect();
+            assert!(touches[0] > 5.0 && touches[0] < 5.1, "the legal retouch, tag-up {tag_up}: {touches:?}");
+            assert!(leaves.contains(&touches[0]), "the drift past the bag is a departure, tag-up {tag_up}: {leaves:?}");
+            let (t, from, n) = decided.expect("a decision once back on the bag");
+            assert_eq!(n, 1, "one decision, tag-up {tag_up}");
+            assert!(t >= 5.0 + RUNNER_CATCH_CALL_REACT_S - 1e-9, "after the call is seen");
+            assert!(from < third - 1e-6 && t > touches[0] + 0.1, "decided on coming back onto the bag from past it, not while drifting, tag-up {tag_up}: {decided:?}, touches {touches:?}");
+            assert_eq!(decisions, 1, "and no second decision, tag-up {tag_up}");
+            assert!(!warned);
+        }
+        let (_, _, _, goal, decided) = run(0.0, 0.0, false);
+        assert!(decided.is_some_and(|(t, _, n)| n == 1 && (t - 5.0 - RUNNER_CATCH_CALL_REACT_S).abs() < DT), "planted at the catch: {decided:?}");
+        assert_eq!(goal, 4, "the deep fly is an advance from third");
     }
 
     /// Catch-read fixes review P1-3: the same visible glove possession near third, with
