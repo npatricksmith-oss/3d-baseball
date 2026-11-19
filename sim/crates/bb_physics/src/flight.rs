@@ -29,11 +29,17 @@ pub struct FlightEnv {
     /// adds what he has learned his model is missing (the curvature of a spin he cannot see;
     /// agent-models §5.1, the tracking read).
     pub extra: Vec3,
+    /// Spin whose axis is unknown, rad/s: zero in the world. An observer's model of a batted
+    /// ball allows for the side and gyro spin he cannot see (agent-models §5.1, the typical
+    /// spin): it counts in the drag coefficient's spin, √(|ω|² + this²), but gives no Magnus
+    /// force (its direction is unknown, and its sideways push averages out). Held constant over
+    /// the flight.
+    pub unseen_spin: f64,
 }
 
 impl FlightEnv {
     pub fn new(rho: f64) -> Self {
-        Self { ball: BallParams::default(), aero: AeroParams::default(), rho, wind: Vec3::ZERO, extra: Vec3::ZERO }
+        Self { ball: BallParams::default(), aero: AeroParams::default(), rho, wind: Vec3::ZERO, extra: Vec3::ZERO, unseen_spin: 0.0 }
     }
     /// Calculator-default atmosphere with default aero (spin decay on).
     pub fn default_env() -> Self {
@@ -47,6 +53,7 @@ impl FlightEnv {
             rho: crate::atmosphere::air_density(&Default::default()),
             wind: Vec3::ZERO,
             extra: Vec3::ZERO,
+            unseen_spin: 0.0,
         }
     }
 
@@ -60,7 +67,9 @@ impl FlightEnv {
         }
         let uh = u_vec / u;
         let k = self.rho * self.ball.area() / (2.0 * self.ball.mass);
-        let rpm = bb_math::units::radps_to_rpm(w.norm());
+        // (The world's case keeps its own arithmetic: no unseen spin, |ω| as it always was.)
+        let spin = if self.unseen_spin == 0.0 { w.norm() } else { m::sqrt(w.dot(w) + self.unseen_spin * self.unseen_spin) };
+        let rpm = bb_math::units::radps_to_rpm(spin);
         let cd = self.aero.cd0 + self.aero.cdspin * (rpm / 1000.0);
         let mut a = g - uh * (k * cd * u * u);
         if self.aero.magnus {

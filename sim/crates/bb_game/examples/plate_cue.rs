@@ -5,7 +5,7 @@
 //! percentile of the miss, m, by launch angle. This is the floor under the plate cue's
 //! error (`PLATE_SPIN_M`): with the true spin the miss is 0, so all of it is the spin he
 //! cannot see. A real read adds his velocity error times `s`. `-- [games] [true]`
-use bb_game::live::{believed_spin, position_from_plate};
+use bb_game::live::{believed_flight, position_from_plate};
 
 fn q(v: &mut [f64], f: f64) -> f64 {
     v.sort_by(|a, b| a.total_cmp(b));
@@ -39,7 +39,7 @@ fn main() {
                 }
                 let (p, v) = path.at(t);
                 let wt = tr.knots.iter().min_by(|a, b| (a.t - t).abs().total_cmp(&(b.t - t).abs())).unwrap().s.w;
-                let est = if true_spin { position_from_plate(&env, s0.s.r, v, wt, s) } else { position_from_plate(&env, s0.s.r, v, believed_spin(&env, v, Some(s)), s) };
+                let est = if true_spin { position_from_plate(&env, s0.s.r, v, wt, s) } else { { let (benv, w) = believed_flight(&env, v, Some(s)); position_from_plate(&benv, s0.s.r, v, w, s) } };
                 acc[k][j].push((est - p).norm());
             }
         }
