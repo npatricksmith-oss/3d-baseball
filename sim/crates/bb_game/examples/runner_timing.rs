@@ -464,13 +464,15 @@ fn row(
 struct Counts {
     // Starting base (first or second), then outs. Count opportunities and advances.
     singles: [[(u64, u64); 3]; 2],
-    // Launch below 10°, then launch 10–25°. Catches with runners, plays with appeals,
-    // and runners retired on those appeals.
-    catches: [(u64, u64, u64); 2],
+    // Launch below 10°, 10–25°, 25–50° and 50° or more. Catches with runners, plays
+    // with appeals, and runners retired on those appeals.
+    catches: [(u64, u64, u64); 4],
+    // (seed, play, runner, launch °) for each runner doubled off a 25–50° catch.
+    doubled_25_50: Vec<(u64, u32, u16, f64)>,
 }
 
 impl Counts {
-    fn observe(&mut self, step: &PitchStep, outs: u8, runners: [Option<u16>; 3]) {
+    fn observe(&mut self, seed: u64, step: &PitchStep, outs: u8, runners: [Option<u16>; 3]) {
         if step
             .scorer_ruling
             .is_some_and(|r| r.outcome == Outcome::Hit(1))
@@ -500,13 +502,16 @@ impl Counts {
             return;
         };
         let angle = launch.to_degrees();
-        if angle >= 25.0 {
-            return;
+        let doubled_ids: Vec<u16> = step.rules_events.iter().filter_map(|e| match *e {
+            Event::RunnerOut { runner, kind: OutKind::Appeal, .. } if runners.contains(&Some(runner)) => Some(runner),
+            _ => None,
+        }).collect();
+        let doubled = doubled_ids.len() as u64;
+        let bin = [10.0, 25.0, 50.0].iter().filter(|&&edge| angle >= edge).count();
+        if bin == 2 {
+            self.doubled_25_50.extend(doubled_ids.iter().map(|&id| (seed, step.play, id, angle)));
         }
-        let doubled = step.rules_events.iter().filter(|e| matches!(e,
-            Event::RunnerOut { runner, kind: OutKind::Appeal, .. } if runners.contains(&Some(*runner))
-        )).count() as u64;
-        let entry = &mut self.catches[usize::from(angle >= 10.0)];
+        let entry = &mut self.catches[bin];
         entry.0 += 1;
         entry.1 += u64::from(doubled > 0);
         entry.2 += doubled;
@@ -527,6 +532,7 @@ impl Counts {
             mine.1 += theirs.1;
             mine.2 += theirs.2;
         }
+        self.doubled_25_50.extend(other.doubled_25_50);
     }
 }
 
@@ -552,7 +558,7 @@ fn run(seeds: Range<u64>, params: Option<RunnerStartParams>) -> (Vec<String>, Co
             let ((step, choices), ticks) =
                 runner_trace::capture(|| choice_trace::capture(|| game.step_pitch()));
             let Some(step) = step else { break };
-            counts.observe(&step, outs, runners);
+            counts.observe(seed, &step, outs, runners);
             if step
                 .scorer_ruling
                 .is_some_and(|r| r.outcome == Outcome::Hit(1))
@@ -658,6 +664,11 @@ fn main() {
     eprintln!("Caught balls with runners and 0–1 out (catches, plays with appeals, doubled off):");
     eprintln!("  launch below 10°: {:?}", counts.catches[0]);
     eprintln!("  launch 10–25°: {:?}", counts.catches[1]);
+    eprintln!("  launch 25–50°: {:?}", counts.catches[2]);
+    eprintln!("  launch 50° and above: {:?}", counts.catches[3]);
+    for (seed, play, runner, angle) in &counts.doubled_25_50 {
+        eprintln!("  doubled off at 25–50°: seed {seed} play {play} runner {runner} launch {angle:.1}°");
+    }
     println!(concat!(
         "seed,play,runner,outs,start,field,ball,lead_m,move_s,forward_s,split_s,third_s,",
         "actual_runner_s,race_runner_s,land_s,first_touch_s,secure_s,charge_m,first_release_s,",
