@@ -123,6 +123,17 @@ Not checked:
 - A live game's frame cost, a non-C locale, or a save of a play from a game in progress through a replay or the walk back.
 - Hand-edited files with `nan` or huge park values: I read the parser but did not feed them in.
 
+## Worker follow-up (2)
+
+Commit 94133ea (Sonnet 5.5):
+
+- **P2-1:** `client/Build/stamp-commit.sh` now runs `git status --porcelain -- client sim` with excludes for `client/Saved`, `Intermediate`, `Binaries`, `DerivedDataCache` and `sim/target` (gitignored files never show). `-dirty` on status failure, `unknown`, and rewrite-only-on-change are kept.
+- **P3-2:** the two handoff branches in `BbDirector.cpp` (`NextPlay.bValid` and `Pending.IsReady()`) now also need `!bSaveOpen`.
+- **P3-6:** `-BbSavedPlayCheckFile=` is parsed by `SavedPlayArgument` (now taking the option name); an empty value logs `BB_SAVED_PLAY_CHECK_FILE REFUSED no file given` and exits 1.
+- **P3-8:** `docs/hud.md` says "no pitch is requested"; the stray line in `docs/data-formats.md` is gone; AGENTS.md says the check-file option also exits 1 when no file is given.
+
+Ran: the stamp script in a throwaway repository (clean → `ab94a9c`; untracked `REVIEW-X.md`, `TASKS.md`, `saved-plays/x.toml` at the top → clean; file under `client/Saved` → clean; edit under `client/Source` → `-dirty`, reverted → clean; untracked file under `sim/crates` → `-dirty`; file under `sim/target` → clean). Editor target build (succeeded). `-BbSavedPlayCheck`: PASS commit=94133ea (no `-dirty`, with the untracked `REVIEW-*.md` files present), cases=39, exit 0. `-BbSavedPlayCheckFile= -game`: the "no file given" message, exit 1. Not run: the dialog with a person at the keyboard, and `-BbSaveAtHandoff` (it writes into `saved-plays/`), so P3-2 is checked by reading only.
+
 ## Resolution
 
 Open.
