@@ -134,3 +134,21 @@ A real runner would not take a third baseman who stepped 3 m off the bag to glov
 ## Resolution
 
 Open.
+
+### Worker follow-up (2026-11-19, `84a42d8` and the commit after it)
+
+- **P2-1.** Note §8 and the ledger row's Open column are restated:
+  - the review's fresh-seed table and the pooled counts per bin are added, with their small samples;
+  - the relay fix closed 275–300 ft within noise (pooled 83% against ≥ 86%);
+  - at 250–275 ft the direct throw home still beats more than half of the runners sent (15 of 27 and 8 of 14 out);
+  - the next step is the direct race (the outfielder's catch-to-release, the tag-up run time), which the owner's Q32 catch model on main covers, not `caution_z` alone.
+- **P2-2.** Relays 95 → 9 per 600 games and outfield assists at home 10 → 4 are recorded in the ledger row and note §8. The route choice is not changed: it belongs to Q32's next job.
+- **P3-1.** A runner reads a relay only from what he can see.
+  - A reception is a relay if the man visibly showed the cutoff job at the catch (`catch_shown_relay`, from his known job), or took it at least `RELAY_SEEN_M` = 6 m [E] from every bag.
+  - Any other reception is a feed: 0.7 of grade-50 `Transfer` and the turn from his visible heading.
+  - Test `a_runner_reads_a_relay_only_from_what_he_can_see` covers a third baseman 3 m off third (a feed), and the shortstop at the relay spot shown as the cutoff man, or with no job shown (a relay by distance). It also covers a shown cutoff man 5 m off second (a relay). The throw's private route plays no part. The test fails on `715295b`, which read the receiver off third as a relay.
+- **P3-2.** The in-flight read path (`ThrownRead::time_to`) is listed in agent-models §5.5's "What the players know" as known and deferred.
+- **P3-4.** Added `the_holder_predicts_the_relay_the_world_makes`: the relay man's hold in the holder's `throw_race` estimate matches the world's to a tick, and the ball reaches the catcher within 0.15 s of the estimate. The assertion messages of both relay tests now say which check is the sourced one (grade 70 against Tatis Jr.'s 0.62 s; the hold no quicker than 0.62 s).
+- **Sources.** Statcast's catcher exchange (mean 0.73 s, elite 0.64 s, poor 0.85 s) is added to §5.5 as a measured analogue.
+- **Left to the Coordinator, as asked:** P3-3 and P3-5.
+- **Checks.** `cargo test --workspace`: 469 passed, 0 failed, 4 ignored. Standard runs: 4.24 [4.47], unchanged from `cc7703e`. The read fix moved a few plays (seed 1000: K% 22.2 → 22.3, HR/PA 2.75% → 2.74%, LD .680 → .681); the ledger row is updated.
