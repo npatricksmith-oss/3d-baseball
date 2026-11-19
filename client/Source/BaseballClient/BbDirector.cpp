@@ -323,6 +323,7 @@ void ABbDirector::BeginPlay()
 	Camera->GetCameraComponent()->bConstrainAspectRatio = false;
 	// Exposure and the grade are the park's, for every camera (ABbPark::BuildLights).
 	CamLook = ToUE(0, 6, 1.0);
+	Camera->SetActorRotation((CamLook - Camera->GetActorLocation()).Rotation());
 	if (APlayerController* PC = GetWorld()->GetFirstPlayerController())
 	{
 		PC->SetViewTarget(Camera);
