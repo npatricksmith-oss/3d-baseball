@@ -1,5 +1,5 @@
 # A play saved from the instant replay (client BbSavePlay).
-# See it again: client/run.sh 40580, then R back to play 15 once it has been shown.
+# No recorded timeline, so this play cannot be replayed exactly: seed 40580 on today's build does not give the same game. Only commit 9a566a3 (inferred, below) would show it.
 seed = 40580
 play = 15
 commit = "9a566a3"

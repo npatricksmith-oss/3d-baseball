@@ -1,5 +1,5 @@
 # A play saved from the instant replay (client BbSavePlay).
-# See it again: client/run.sh 3647, then R back to play 68 once it has been shown.
+# No recorded timeline, so this play cannot be replayed exactly: seed 3647 on today's build does not give the same game. Only commit 30634cf (inferred, below) would show it.
 seed = 3647
 play = 68
 commit = "30634cf"
