@@ -43,6 +43,10 @@ void ABbHUD::DrawHUD()
 	{
 		Y = BbHud::DrawTag(*this, S, Y, Notice, FLinearColor::FromSRGBColor(FColor(140, 230, 150)));
 	}
+	if (!SavedComment.IsEmpty() || !SavedCommentTitle.IsEmpty())
+	{
+		Y = BbHud::DrawComment(*this, S, Y + 8.f, SavedCommentTitle, SavedComment, SavedErrorTitle.IsEmpty() ? BbLook::HudGold : BbLook::HudClose);
+	}
 	if (bZoneShown && CardAlpha <= 0.f)
 	{
 		BbHud::DrawZone(*this, S, Zone);
@@ -85,5 +89,9 @@ void ABbHUD::DrawHUD()
 	if (bBoxData && BoxAlpha > 0.f)
 	{
 		BbHud::DrawBoxScore(*this, S, Box, BoxTitle, BoxSubtitle, BoxAlpha, BoxDim);
+	}
+	if (!SavedErrorTitle.IsEmpty())
+	{
+		BbHud::DrawBanner(*this, S, SavedErrorTitle, SavedErrorBody, BbLook::HudClose);
 	}
 }

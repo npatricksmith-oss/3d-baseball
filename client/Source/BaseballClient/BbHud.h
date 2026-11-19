@@ -61,6 +61,10 @@ namespace BbHud
 	float DrawBug(ABbHUD& Hud, float S, const FBbBugInfo& Bug);
 	/** A slim line under the bug (the pitch, the replay, a note); returns its bottom edge. */
 	float DrawTag(ABbHUD& Hud, float S, float Y, const FString& Text, const FLinearColor& TextColor);
+	/** A word-wrapped note box under the bug and tags (saved-play comment); returns its bottom edge. */
+	float DrawComment(ABbHUD& Hud, float S, float Y, const FString& Title, const FString& Body, const FLinearColor& Edge);
+	/** A centred notice card for a saved play that cannot be played back (missing timeline). */
+	void DrawBanner(ABbHUD& Hud, float S, const FString& Title, const FString& Body, const FLinearColor& Edge);
 	/** The play caption: low and centred, edged in the batting side's colour. */
 	void DrawCaption(ABbHUD& Hud, float S, const FString& Text, int32 BattingSide);
 	/** The umpire's out signal, above the caption; a bang-bang play is edged in red. */

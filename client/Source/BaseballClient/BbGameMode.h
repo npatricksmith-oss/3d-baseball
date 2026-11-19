@@ -40,6 +40,12 @@ public:
 	FString Replay;
 	/** A short note under it, such as where a saved play went. */
 	FString Notice;
+	/** Saved play (-BbSavedPlay): comment under the bug/tags, and an error banner when the
+	 *  file has no recorded timeline. */
+	FString SavedCommentTitle;
+	FString SavedComment;
+	FString SavedErrorTitle;
+	FString SavedErrorBody;
 	/** The call on the current pitch, shown large once it is known. */
 	FString Call;
 	/** The umpire's signal of the latest out ("OUT at first"), shown as he makes it. */

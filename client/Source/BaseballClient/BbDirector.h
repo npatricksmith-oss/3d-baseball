@@ -6,6 +6,7 @@
 #include "BbSim.h"
 #include "BbPose.h"
 #include "BbCrew.h"
+#include "BbSavePlay.h"
 #include "BbDirector.generated.h"
 
 class AStaticMeshActor;
@@ -53,6 +54,8 @@ class UMaterialInterface;
  *               -BbRushAt=<s> (press Enter once, that many seconds in; logs BB_RUSH)
  *               -BbReplayAt=<s> (press R twice that many seconds in, F six seconds later; logs BB_REPLAY)
  *               -BbSaveAt=<s> (press S that many seconds in and Save a second later; logs BB_SAVE)
+ *               -BbSavedPlay=<path to .toml> (play back a saved timeline with no re-simulation)
+ *               -BbSavedPlayCheck (headless round-trip check of saving/reloading timelines)
  *               -BbClipSpeeds (log the ground speed each gait clip is animated for as BB_CLIP)
  */
 UCLASS()
@@ -628,6 +631,17 @@ private:
 	void ReplayBack();
 	void ReplayForward();
 	void ShowReplay(int32 Index);
+	/** Viewing one saved play (-BbSavedPlay=<path to .toml>): plays the recorded timeline
+	 *  with no re-simulation, or shows a notice if the TOML has no timeline. */
+	bool bSavedPlay = false;
+	bool bSavedPlayBroken = false;
+	bool bSavedPlayCheck = false;
+	FString SimLibPath;
+	BbSavePlay::FLoaded SavedPlay;
+	BbPlayInfo SavedBefore{};
+	FString SavedErrorTitle, SavedErrorBody;
+	void RestartSavedPlay();
+	bool RunSavedPlayCheck();
 	/** -BbReplayAt=<s>: seconds of real time after which R is pressed twice and, 6 s later, F
 	 *  once (unattended check; logs BB_REPLAY). */
 	float ReplayAt = -1.f;

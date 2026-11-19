@@ -15,8 +15,12 @@ if [ ! -f "$HERE/Content/Characters/Mannequins/Meshes/SKM_Manny_Simple.uasset" ]
   cp -r "$UE/Templates/TemplateResources/High/Characters/Content/Mannequins" "$HERE/Content/Characters/"
 fi
 "$UE/Engine/Build/BatchFiles/Linux/Build.sh" BaseballClientEditor Linux Development -project="$HERE/BaseballClient.uproject"
-SEED="${1:-7}"
-shift || true
+if [ -z "${1:-}" ] || [[ "${1:-}" == -* ]]; then
+  SEED=7
+else
+  SEED="$1"
+  shift
+fi
 # Capped at 120 fps for watching: uncapped it renders ~300 fps and keeps five cores busy.
 # Pass -BbUncapped to measure.
 CAP=(-ExecCmds="t.MaxFPS 120")

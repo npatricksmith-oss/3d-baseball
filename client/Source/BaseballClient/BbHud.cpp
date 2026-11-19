@@ -160,7 +160,7 @@ float BbHud::DrawBug(ABbHUD& Hud, float S, const FBbBugInfo& Bug)
 	const int32 Fielding = Bug.bTop ? 1 : 0;
 	if (!Bug.Pitcher.IsEmpty())
 	{
-		Bottom = PersonRow(Hud, S, Bottom, Fielding, TEXT("P"), Bug.PitcherNumber, Bug.Pitcher, FString::Printf(TEXT("%d P"), Bug.Pitches));
+		Bottom = PersonRow(Hud, S, Bottom, Fielding, TEXT("P"), Bug.PitcherNumber, Bug.Pitcher, Bug.Pitches >= 0 ? FString::Printf(TEXT("%d P"), Bug.Pitches) : FString());
 	}
 	if (!Bug.Batter.IsEmpty())
 	{
@@ -175,6 +175,127 @@ float BbHud::DrawTag(ABbHUD& Hud, float S, float Y, const FString& Text, const F
 	Hud.DrawRect(BbLook::HudPanel, BugX * S, Y * S, BugW * S, H * S);
 	TextMid(Hud, Text, (BugX + 10.f) * S, (Y + H * 0.5f) * S, TextColor, 0.95f * S);
 	return Y + H;
+}
+
+namespace
+{
+	TArray<FString> WrapText(ABbHUD& Hud, const FString& Body, float MaxPx, float Scale)
+	{
+		TArray<FString> Out;
+		FString Clean = Body;
+		Clean.ReplaceInline(TEXT("\r\n"), TEXT("\n"));
+		Clean.ReplaceInline(TEXT("\r"), TEXT("\n"));
+		TArray<FString> Paras;
+		Clean.ParseIntoArray(Paras, TEXT("\n"), false);
+		for (const FString& Para : Paras)
+		{
+			if (Para.IsEmpty())
+			{
+				Out.Add(FString());
+				continue;
+			}
+			TArray<FString> Words;
+			Para.ParseIntoArray(Words, TEXT(" "), true);
+			FString Line;
+			auto Width = [&](const FString& T)
+			{
+				float W = 0.f, H = 0.f;
+				Hud.GetTextSize(T, W, H, Font(), Scale);
+				return W;
+			};
+			for (const FString& Word : Words)
+			{
+				const FString Cand = Line.IsEmpty() ? Word : (Line + TEXT(" ") + Word);
+				if (!Line.IsEmpty() && Width(Cand) > MaxPx)
+				{
+					Out.Add(Line);
+					Line = Word;
+				}
+				else
+				{
+					Line = Cand;
+				}
+				while (!Line.IsEmpty() && Width(Line) > MaxPx)
+				{
+					int32 Cut = Line.Len();
+					while (Cut > 1 && Width(Line.Left(Cut)) > MaxPx)
+					{
+						--Cut;
+					}
+					Out.Add(Line.Left(Cut));
+					Line = Line.RightChop(Cut);
+				}
+			}
+			if (!Line.IsEmpty())
+			{
+				Out.Add(Line);
+			}
+		}
+		return Out;
+	}
+}
+
+float BbHud::DrawComment(ABbHUD& Hud, float S, float Y, const FString& Title, const FString& Body, const FLinearColor& Edge)
+{
+	const float TopBar = 4.f, PadX = 12.f, PadY = 10.f, Gap = 4.f;
+	const float TitleScale = 0.85f, BodyScale = 0.9f;
+	const float MaxPx = (BugW - 2.f * PadX) * S;
+	const TArray<FString> Lines = WrapText(Hud, Body, MaxPx, BodyScale * S);
+	float SampleW = 0.f, LinePx = 0.f, TitlePx = 0.f;
+	Hud.GetTextSize(TEXT("Ag"), SampleW, LinePx, Font(), BodyScale * S);
+	const float LineH = FMath::Max(LinePx / S, 14.f);
+	float TitleH = 0.f;
+	if (!Title.IsEmpty())
+	{
+		Hud.GetTextSize(Title, SampleW, TitlePx, Font(), TitleScale * S);
+		TitleH = FMath::Max(TitlePx / S, 14.f) + 6.f;
+	}
+	const float BodyH = Lines.Num() > 0 ? Lines.Num() * (LineH + Gap) - Gap : 0.f;
+	const float H = TopBar + PadY + TitleH + BodyH + PadY;
+	Hud.DrawRect(BbLook::HudPanel, BugX * S, Y * S, BugW * S, H * S);
+	Hud.DrawRect(Edge, BugX * S, Y * S, BugW * S, TopBar * S);
+	float CurY = Y + TopBar + PadY;
+	if (!Title.IsEmpty())
+	{
+		Hud.DrawText(Title, Edge, (BugX + PadX) * S, CurY * S, Font(), TitleScale * S);
+		CurY += TitleH;
+	}
+	for (const FString& L : Lines)
+	{
+		if (!L.IsEmpty())
+		{
+			Hud.DrawText(L, BbLook::HudText, (BugX + PadX) * S, CurY * S, Font(), BodyScale * S);
+		}
+		CurY += LineH + Gap;
+	}
+	return Y + H;
+}
+
+void BbHud::DrawBanner(ABbHUD& Hud, float S, const FString& Title, const FString& Body, const FLinearColor& Edge)
+{
+	const float W = 620.f, PadX = 28.f, PadY = 18.f, Gap = 6.f;
+	const float TitleScale = 1.45f, BodyScale = 1.05f;
+	const TArray<FString> Lines = WrapText(Hud, Body, (W - 2.f * PadX) * S, BodyScale * S);
+	float TW = 0.f, TitlePx = 0.f, BodyPx = 0.f;
+	Hud.GetTextSize(Title, TW, TitlePx, Font(), TitleScale * S);
+	Hud.GetTextSize(TEXT("Ag"), TW, BodyPx, Font(), BodyScale * S);
+	const float TitleH = FMath::Max(TitlePx / S, 24.f);
+	const float LineH = FMath::Max(BodyPx / S, 18.f);
+	const float BodyH = Lines.Num() > 0 ? Lines.Num() * (LineH + Gap) - Gap : 0.f;
+	const float H = 4.f + PadY + TitleH + (BodyH > 0.f ? 10.f + BodyH : 0.f) + PadY;
+	const float Top = CentredPanel(Hud, S, W, H, 360.f + H * 0.5f, Edge, 1.f);
+	const float CX = Hud.GetCanvas()->ClipX * 0.5f;
+	float CurY = Top + 4.f + PadY;
+	TextCentre(Hud, Title, CX, (CurY + TitleH * 0.5f) * S, Edge, TitleScale * S);
+	CurY += TitleH + 10.f;
+	for (const FString& L : Lines)
+	{
+		if (!L.IsEmpty())
+		{
+			TextCentre(Hud, L, CX, (CurY + LineH * 0.5f) * S, BbLook::HudText, BodyScale * S);
+		}
+		CurY += LineH + Gap;
+	}
 }
 
 void BbHud::DrawCaption(ABbHUD& Hud, float S, const FString& Text, int32 BattingSide)
