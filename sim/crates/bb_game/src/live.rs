@@ -218,12 +218,15 @@ fn typical_throw_time(d: f64) -> f64 {
     throw_time(v, d).min(2.0 * throw_time(v, 0.5 * d) + RELAY_TRANSFER_FRAC * TYPICAL_TRANSFER)
 }
 
-/// The runner's first look: noisy motion, viewpoint and the public contact clock.
+/// A runner's look at a loose ball (his first look and every relook): noisy motion,
+/// viewpoint, how long he has watched it since contact, and the public contact clock
+/// while no ground, wall or glove touch has been seen.
 #[derive(Clone, Copy)]
 struct ContactLook {
     motion: (Vec3, Vec3),
     from: Vec3,
     t: f64,
+    view: f64,
     contact_since: Option<f64>,
 }
 
@@ -231,7 +234,7 @@ impl ContactLook {
     fn scales(self, motion: (Vec3, Vec3)) -> (Vec3, f64, f64) {
         let to = Vec3::new(motion.0.x - self.from.x, motion.0.y - self.from.y, 0.0);
         let plate = self.contact_since.map(|s| (s, RUNNER_PLATE_PRIOR));
-        let shrink = read_shrink(motion, self.contact_since.unwrap_or(0.0), RUNNER_READ_TAU_S, plate);
+        let shrink = read_shrink(motion, self.view, RUNNER_READ_TAU_S, plate);
         let sp = RUNNER_READ_SIGMA0 * (to.norm().max(1.0) / READ_REF_DIST) * shrink;
         let sv = READ_VEL_FRAC * motion.1.norm() * shrink;
         (to.normalized(), sp, sv)
@@ -2404,12 +2407,6 @@ impl<'a> Sim<'a> {
         m::sqrt(var.max(0.0))
     }
 
-    /// An observer's prediction of the ball from where he stands: [`read_prediction`] of its
-    /// state now.
-    fn predict_from(&self, from: Vec3, sigma0: f64, tau_read: f64, view: f64, err: [f64; 4]) -> BallPath {
-        read_prediction(self.inp.env, self.inp.field, self.ball_at(self.t), self.t, from, sigma0, tau_read, view, err, self.off_bat())
-    }
-
     /// For a ball still on its first flight off the bat: the time since contact and the
     /// contact point. A carom off the wall counts as a deflection (Codex momentum review #6).
     fn off_bat(&self) -> Option<(f64, Vec3)> {
@@ -2430,9 +2427,18 @@ impl<'a> Sim<'a> {
         [g.truncated_normal(4.0), g.truncated_normal(4.0), g.truncated_normal(4.0), g.truncated_normal(4.0)]
     }
 
+    /// A runner's relook at a loose ball: the same observation boundary as his first look,
+    /// with this decision's draws (P1-1 of the catch-read fixes review).
     fn runner_predict(&self, k: usize, sub: u32) -> BallPath {
-        let view = (self.t - self.inp.t_contact).max(0.0);
-        self.predict_from(self.runner_pos(&self.r[k]), RUNNER_READ_SIGMA0, RUNNER_READ_TAU_S, view, self.runner_ball_errors(k, sub))
+        self.observe_ball(k, sub).project(self.inp.field, [0.0; 4])
+    }
+
+    /// Seconds since contact while the ball is visibly still on its first flight: no
+    /// ground or wall touch has been ruled and no glove has touched it. The world's own
+    /// path and the true contact point play no part.
+    fn public_contact_since(&self) -> Option<f64> {
+        (self.no_catch_at.is_none() && self.caught_at.is_none() && self.out.first_handling.is_none())
+            .then_some((self.t - self.inp.t_contact).max(0.0))
     }
 
     /// Earliest pickup on the runner's own projection using typical fielder speed.
@@ -2456,14 +2462,20 @@ impl<'a> Sim<'a> {
 
     /// World boundary: sample the four keyed errors once, then hand off the noisy motion.
     fn observe_contact(&self, k: usize) -> ContactLook {
+        self.observe_ball(k, 1)
+    }
+
+    /// One look at the loose ball, with the four draws of sub-index `sub`.
+    fn observe_ball(&self, k: usize, sub: u32) -> ContactLook {
         let mut look = ContactLook {
             motion: self.ball_at(self.t),
             from: self.runner_pos(&self.r[k]),
             t: self.t,
-            contact_since: self.no_catch_at.is_none().then_some((self.t - self.inp.t_contact).max(0.0)),
+            view: (self.t - self.inp.t_contact).max(0.0),
+            contact_since: self.public_contact_since(),
         };
         let (los, sp, sv) = look.scales(look.motion);
-        look.motion = noisy_ball_motion(look.motion, los, sp, sv, self.runner_ball_errors(k, 1));
+        look.motion = noisy_ball_motion(look.motion, los, sp, sv, self.runner_ball_errors(k, sub));
         look
     }
 
@@ -10507,6 +10519,7 @@ mod tests {
             motion: (Vec3::new(0.0, 17.0, 5.0), Vec3::new(0.0, 30.0, 8.0)),
             from: sim.runner_pos(&sim.r[0]),
             t: sim.t,
+            view: RUNNER_READ_DELAY_S,
             contact_since: Some(RUNNER_READ_DELAY_S),
         };
         for fd in &mut sim.f {
@@ -10538,6 +10551,62 @@ mod tests {
         assert_eq!(Sim::catch_score(&sim.runner_catch_paths(look)), belief);
         sim.read_contact(0, look);
         assert_eq!((sim.r[0].goal, sim.r[0].tag_up, sim.r[0].hold_s), action);
+    }
+
+    /// Catch-read fixes review P1-1: a runner's relook at a loose ball sees its motion now,
+    /// not where it was actually hit or whether the world's path began at contact. Three
+    /// worlds with identical ball position and velocity at the look: the batted flight, the
+    /// same flight with the contact point moved 15 cm across and up, and a replacement path
+    /// starting now with the same motion (as an unseen deflection would leave). No ground,
+    /// wall or glove touch is public in any of them, so the runner's prediction and his
+    /// pickup estimate at third must agree.
+    #[test]
+    fn a_loose_ball_relook_ignores_the_private_contact_point_and_path_origin() {
+        const R: AgentId = 7;
+        let fx = fixture(&[(R, 2)]);
+        let runners = vec![RunnerIn { id: R, base: 2, speed: 8.2, tau_s: RUNNER_TAU }];
+        let inp = input(&fx, runners.clone());
+        let mut moved = input(&fx, runners);
+        moved.ball.r += Vec3::new(0.15, 0.0, 0.15);
+        let now = inp.t_contact + 0.5;
+        let look = |sim: &Sim| {
+            let pred = sim.runner_predict(0, 3);
+            let land = pred.first_bounce().map(|(t, x, y)| (t, x, y));
+            (land, pred.at(pred.t_end()).0, sim.ball_time_to(0, 3, 3, now + 2.0))
+        };
+        let prepare = |sim: &mut Sim| {
+            sim.start_runners();
+            sim.r[0].reading_contact = false;
+            sim.t = now;
+        };
+
+        let mut st = fx.st.clone();
+        let mut batted = new_sim(&inp, &mut st);
+        prepare(&mut batted);
+        let motion = batted.ball_at(now);
+        let base = look(&batted);
+
+        let mut st = fx.st.clone();
+        let mut shifted = new_sim(&moved, &mut st);
+        prepare(&mut shifted);
+        shifted.ball = batted.ball.clone();
+        assert_eq!(shifted.ball_at(now), motion);
+        assert_eq!(look(&shifted), base, "the true contact point moved the relook");
+
+        let mut st = fx.st.clone();
+        let mut replaced = new_sim(&inp, &mut st);
+        prepare(&mut replaced);
+        let w = match &replaced.ball {
+            Ball::Free { path, .. } => match path.segments.first() {
+                Some(bb_physics::ground::Segment::Flight { tr, .. }) => tr.first().s.w,
+                _ => unreachable!(),
+            },
+            _ => unreachable!(),
+        };
+        replaced.set_free(BallState { r: motion.0, v: motion.1, w });
+        assert_eq!(replaced.ball_at(now), motion);
+        assert!(replaced.no_catch_at.is_none() && replaced.out.first_handling.is_none());
+        assert_eq!(look(&replaced), base, "a path replaced without a public touch moved the relook");
     }
 
     #[test]
