@@ -1,6 +1,6 @@
 # Task List
 
-**Last updated:** 2026-11-19 (Opus worker `fly-read` running on the 25–50° double-offs).
+**Last updated:** 2026-11-19 (`work/fly-read` done, under Opus review).
 
 What is next and what is open. Other files hold the rest:
 
@@ -17,7 +17,7 @@ Status: `[ ]` not started · `[~]` partly done · `[?]` needs an owner decision
 
 ## Resume here (2026-11-19)
 
-**State.** One worker running: **`fly-read`** (Opus, high), Workers tab, herdr-app terminal `t2v`, worktree `.claude/worktrees/runner-decision`, branch `work/fly-read` from `48f36a9`, job file `WORKER-FLYREAD.md` there (steps 1–3 below). Check: `git -C .claude/worktrees/runner-decision log --oneline main..work/fly-read`, its ledger row, and `hc read t2v`. When it is done: test and standard run once, then an Opus review of the branch. Nothing is waiting on the owner.
+**State.** `work/fly-read` is done (worktree `.claude/worktrees/runner-decision`, last commit `925f8ea`; [fly-read note](docs/calibration/2026-11-19-fly-read.md)) and **under Opus review**: reviewer `opus-flyread-review`, herdr-app terminal `t2w`, job file `REVIEW-FLYREAD.md` in that worktree, output `docs/reviews/2026-11-19-opus-fly-read-review.md` on the branch. The worker's pane (`t2v`, worker `fly-read`) is left open for the review fixes. Next: commit the review's Resolution, give the fixes to `fly-read`, then test and standard run once and merge. Nothing is waiting on the owner.
 
 **Catch-read fixes merged (2026-11-19, `c313f6a`, Q27).** Runner catch reads, relooks, the holder's look, the hold for the call and the settle guard use only what the runner can see. Sacrifice flies from third 3 → 204 over 600 games; runs 4.38 → 4.48 [4.53 → 4.55]. Reviews resolved ([fixes review](docs/reviews/2026-11-18-codex-catch-read-fixes-review.md), [Opus re-review](docs/reviews/2026-11-18-opus-catch-fixes2-review.md)).
 
