@@ -125,4 +125,7 @@ All runs used `CARGO_BUILD_JOBS=2 taskset -c 0-7 nice`, one at a time, built in 
 
 ## Resolution
 
-Open.
+Coordinator, 2026-11-19. Merged with no code change from this review.
+
+- **P2-1: open, the next `live.rs` job, step one.** Find the cause of the runner's first-look carry bias on 25–50° flies (spin axis or spin-drag nonlinearity) and fix the model before the in-flight relook and before calibrating the 20%/80% catch cut-offs; recheck the fielders' first look with the same probe; correct the runner-timing note's "does not show a population bias" sentence. Predates this branch.
+- **P3-1, P3-2, P3-3: deferred** with a line in TASKS.md: a comment at `awaiting_call`'s no-catch clause; a test tagging a runner between bases after a non-goal crossing; a pending-catch variant of the 3,000-layout property test.

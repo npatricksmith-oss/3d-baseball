@@ -69,4 +69,9 @@ Release workspace check on `9fdbf8d` after touching the changed source: 462 pass
 
 ## Resolution
 
-Open.
+Coordinator, 2026-11-19. **Every P1 and the P2 fixed; P3-1 measured and left open.**
+
+- **P1-1 to P1-4 and P2-1: fixed** by an Opus worker in `f5d3a14`, `2cdc419`, `bc61b7c`, `ace95f0`, `9fdbf8d` (see "Worker follow-up"). Each has a fixture that fails on its parent; an independent Opus review ([2026-11-18-opus-catch-fixes2-review.md](2026-11-18-opus-catch-fixes2-review.md)) confirmed all five fail on their parents and found no runner decision that still reads hidden state.
+- **P3-1: measured, open.** Two-out sends from second on singles to center are 122/123 (99.2%) on a fresh cohort, above the 75–91% band; left and right are inside it. Stays in TASKS.md under the runners' open items.
+- The 25–50° double-offs (16.5 → 38.0 per 300 games) are traced to the runner's first look and the lack of an in-flight relook; the next review's P2-1 adds a read bias. Both are the next `live.rs` job (TASKS.md).
+
