@@ -2121,6 +2121,9 @@ struct Sim<'a> {
     /// a runner who is still reading it carries his movement through his reaction.
     caught_at: Option<f64>,
     no_catch_at: Option<f64>,
+    /// The first glove possession with no ground or wall touch ruled before it: a possible
+    /// catch, visible to every runner, whose call he waits for whatever the ruling is.
+    flight_secured_at: Option<f64>,
     /// The latest catch was low or diving: a close call for the umpire.
     low_catch: bool,
     st: &'a mut RulesState,
@@ -2156,6 +2159,9 @@ impl<'a> Sim<'a> {
             what: Touch::Ground { .. } | Touch::Wall { .. }, ..
         }) {
             self.no_catch_at.get_or_insert(t_fact);
+        }
+        if matches!(fact, Input::GloveSecured { .. }) && self.no_catch_at.is_none() {
+            self.flight_secured_at.get_or_insert(t_fact);
         }
         self.out.facts.push(fact);
         self.absorb(evs, t_fact);
@@ -4624,8 +4630,18 @@ impl<'a> Sim<'a> {
         self.force_with(k, |r| r.out)
     }
 
+    /// The rules have recorded a catch runner `k` has not yet seen called: its out and the
+    /// force it removes are hidden from his reads.
     fn awaiting_catch_call(&self, k: usize) -> bool {
         self.caught() && !self.r[k].catch_seen
+    }
+
+    /// Runner `k` saw a glove take the ball in flight and has not yet reacted to the call,
+    /// whichever way it went: he holds new decisions until then (catch-read fixes review
+    /// P1-3). With no catch ruled, the call he sees is that possession was no catch.
+    fn awaiting_call(&self, k: usize) -> bool {
+        self.awaiting_catch_call(k)
+            || (!self.caught() && self.flight_secured_at.is_some_and(|ts| self.t + 1e-9 < ts + RUNNER_CATCH_CALL_REACT_S))
     }
 
     fn runner_sees_out(&self, k: usize, other: &Runner) -> bool {
@@ -4765,7 +4781,7 @@ impl<'a> Sim<'a> {
     }
 
     fn runner_decide_with_contact(&mut self, k: usize, at_base: u8, contact: Option<&BallPath>) {
-        if self.awaiting_catch_call(k) {
+        if self.awaiting_call(k) {
             return;
         }
         let forced = self.runner_forced(k, k);
@@ -5165,8 +5181,8 @@ impl<'a> Sim<'a> {
                 }
             }
             // Something new to see since his last look: he decides again, from where he is.
-            let awaiting_catch_call = self.awaiting_catch_call(k);
-            if !awaiting_catch_call {
+            let awaiting_call = self.awaiting_call(k);
+            if !awaiting_call {
                 self.runner_relook(k);
             }
             self.runner_yields(k);
@@ -5264,7 +5280,7 @@ impl<'a> Sim<'a> {
                 if retouched {
                     self.r[k].retouch = false;
                 }
-                if b < 4 && (!stopping && mdir > 0.0 || retouched) && b == self.r[k].goal && !awaiting_catch_call {
+                if b < 4 && (!stopping && mdir > 0.0 || retouched) && b == self.r[k].goal && !awaiting_call {
                     // Arrived where it was going (or retouched after a catch): decide whether
                     // to keep going (leaving the base is reported on the next step). Coming
                     // back he braked into the bag, and is planted on it: his next leg starts
@@ -5919,6 +5935,7 @@ fn new_sim<'a>(inp: &'a LiveInput<'a>, st: &'a mut RulesState) -> Sim<'a> {
         secured_at: f64::INFINITY,
         caught_at: None,
         no_catch_at: None,
+        flight_secured_at: None,
         low_catch: false,
     }
 }
@@ -5957,6 +5974,7 @@ impl<'a> Sim<'a> {
             secured_at: self.secured_at,
             caught_at: self.caught_at,
             no_catch_at: self.no_catch_at,
+            flight_secured_at: self.flight_secured_at,
             low_catch: self.low_catch,
             st,
             t: self.t,
@@ -7078,6 +7096,65 @@ mod tests {
             assert_eq!(sim.r[1].decisions, 1);
             assert_eq!(sim.r[1].goal, 4, "the deep fly is an advance from third");
         }
+    }
+
+    /// Catch-read fixes review P1-3: the same visible glove possession near third, with
+    /// and without the catch ruled (the second arm's ground touch reaches only the rules,
+    /// so nothing public differs). A runner 4 m off second going to third sees the ball
+    /// taken in flight either way and reacts only to the call, so his movement through
+    /// the reaction window must match. Once the window ends, the possession without a catch
+    /// is a new thing to see: he looks again.
+    #[test]
+    fn a_possession_in_flight_moves_runners_the_same_until_the_call_is_seen() {
+        const R: AgentId = 7;
+        const B3: usize = 4;
+        let fx = fixture(&[(R, 2)]);
+        let inp = input(&fx, vec![
+            RunnerIn { id: fx.st.batter, base: 0, speed: 8.2, tau_s: RUNNER_TAU },
+            RunnerIn { id: R, base: 2, speed: 8.2, tau_s: RUNNER_TAU },
+        ]);
+        let run = |ruled: bool| {
+            let mut st = fx.st.clone();
+            let mut sim = new_sim(&inp, &mut st);
+            sim.start_runners();
+            sim.r[0].reading_contact = false;
+            sim.r[1].reading_contact = false;
+            let call = 2.0;
+            sim.t = call;
+            sim.emit(Input::BaseLeft { t: call - 0.5, agent: R, base: 2 });
+            let r = &mut sim.r[1];
+            (r.s, r.v, r.direction, r.goal) = (2.0 * BASE_L + 4.0, 3.0, 1.0, 3);
+            if !ruled {
+                step(sim.st, &Input::BallTouched { t: call - 0.1, what: Touch::Ground { x: -20.0, y: 22.0 } });
+            }
+            let at = base_pos(3) + Vec3::new(2.0, 2.0, 0.0);
+            sim.f[B3].pos = at;
+            sim.emit(Input::GloveSecured { t: call, fielder: sim.f[B3].id, x: at.x, y: at.y });
+            sim.ball = Ball::Held { by: B3 };
+            sim.secured_at = call;
+            sim.out.secured.push((call, sim.f[B3].id));
+            assert_eq!(sim.caught(), ruled);
+            assert!(sim.no_catch_at.is_none());
+            let mut seen = Vec::new();
+            let mut tick = 0;
+            while sim.t + 1e-9 < call + RUNNER_CATCH_CALL_REACT_S {
+                sim.move_runners();
+                let r = &sim.r[1];
+                assert!(!r.catch_seen);
+                seen.push((r.s, r.v, r.direction, r.goal, r.decisions));
+                tick += 1;
+                sim.t = call + f64::from(tick) * DT;
+            }
+            sim.move_runners();
+            (seen, sim.r[1].decisions, sim.r[1].catch_seen)
+        };
+        let (with_catch, with_decisions, saw_catch) = run(true);
+        let (without, without_decisions, _) = run(false);
+        assert!(with_catch.len() >= 10);
+        assert!(with_catch.iter().all(|x| x.4 == 0), "no decision before the call is seen");
+        assert_eq!(with_catch, without);
+        assert!(saw_catch && with_decisions == 0, "the catch sends him back to retouch");
+        assert_eq!(without_decisions, 1, "possession without a catch is a new look once the call is seen");
     }
 
     #[test]
