@@ -1,6 +1,6 @@
 # Task List
 
-**Last updated:** 2026-11-19 (`work/fly-read` done, under Opus review).
+**Last updated:** 2026-11-19 (`work/fly-read` under review fixes).
 
 What is next and what is open. Other files hold the rest:
 
@@ -17,7 +17,7 @@ Status: `[ ]` not started · `[~]` partly done · `[?]` needs an owner decision
 
 ## Resume here (2026-11-19)
 
-**State.** `work/fly-read` is done (worktree `.claude/worktrees/runner-decision`, last commit `925f8ea`; the branch's fly-read note under docs/calibration) and **under Opus review**: reviewer `opus-flyread-review`, herdr-app terminal `t2w`, job file REVIEW-FLYREAD.md in that worktree, output the branch's docs/reviews/2026-11-19-opus-fly-read-review.md. The worker's pane (`t2v`, worker `fly-read`) is left open for the review fixes. Next: commit the review's Resolution, give the fixes to `fly-read`, then test and standard run once and merge. Nothing is waiting on the owner.
+**State.** `work/fly-read` (worktree `.claude/worktrees/runner-decision`) was reviewed by Opus (`eb0ff76` on the branch, the branch's docs/reviews/2026-11-19-opus-fly-read-review.md): no P1. **P2-1**: the 50% tag-up cut-off from second also applies with one out, where a tag gains about 0.03 runs and a ball that drops strands the runner (8% score against 38% holding partway); fix is to split it by outs. P3-1–P3-4 are small fixes (settle the spin-table fit, test bounds, a leftover env switch, docs). P3-5 is a record: double-offs on deep flies are now about 1 per 300 games against MLB's 4 (a deferred item for the backlog). The worker `fly-read` (herdr-app terminal `t2v`) is fixing P2-1 and P3-1–P3-4; when its review shows a "Worker follow-up" section: write the Resolution, add the P3-5 backlog line, test and standard run once, merge and push (re-review skipped unless P2-1's fix is large). Nothing is waiting on the owner.
 
 **Catch-read fixes merged (2026-11-19, `c313f6a`, Q27).** Runner catch reads, relooks, the holder's look, the hold for the call and the settle guard use only what the runner can see. Sacrifice flies from third 3 → 204 over 600 games; runs 4.38 → 4.48 [4.53 → 4.55]. Reviews resolved ([fixes review](docs/reviews/2026-11-18-codex-catch-read-fixes-review.md), [Opus re-review](docs/reviews/2026-11-18-opus-catch-fixes2-review.md)).
 
