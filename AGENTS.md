@@ -1,6 +1,6 @@
 # AGENTS.md
 
-Rules for every agent in this repository: the Claude lead, Claude workers and Codex workers and reviewers. The lead's own rules are in [CLAUDE.md](CLAUDE.md). [PLAN.md](PLAN.md) holds the decisions and design; [TASKS.md](TASKS.md) holds what is next. Where this file and PLAN.md disagree, PLAN.md wins; fix this file.
+Rules for every agent in this repository: the Claude lead and the Claude workers and reviewers. The lead's own rules are in [CLAUDE.md](CLAUDE.md). [PLAN.md](PLAN.md) holds the decisions and design; [TASKS.md](TASKS.md) holds what is next. Where this file and PLAN.md disagree, PLAN.md wins; fix this file.
 
 ## What this is
 
@@ -57,7 +57,6 @@ bb_cli       `sim-cli` lab binary
 - **The laptop crashes when hot.** `sim-cli games` starts 16 threads. Prefix sim runs and full test runs with `taskset -c 0-7 nice`, keep `CARGO_BUILD_JOBS=2`, and never run two measurement runs at once.
 - Python: `uv` in `~/.local/bin`. The oracle uses only the stdlib (`python3 -m unittest analysis/oracle/test_oracle.py`). Plot scripts: `uv run analysis/plots/<script>.py`.
 - Rerun viewer 0.41.0: `uv tool install rerun-sdk==0.41.0`, then `rerun file.rrd`. The SDK crate is pinned to `=0.41.0` to match.
-- Codex CLI (`codex exec`) is available for independent validation/review passes.
 - Unreal Engine 5.8.4 (precompiled) belongs at `~/UnrealEngine/5.8.4`, outside the repository. `bin/play.sh` asks before falling back to Rerun when it is missing.
 - Build the client: `Engine/Build/BatchFiles/Linux/Build.sh BaseballClientEditor Linux Development -project=<abs path>/client/BaseballClient.uproject` (6 s incremental).
 - Check visual changes headlessly: `client/run.sh 7 -RenderOffscreen -BbShots=6`, then read the PNGs in `client/Saved/Shots` (made by the run). Fixed picture sets without a game (`-BbParkShots`, `-BbFigureShots`, `-BbMotionShots`, `-BbSlideShots=<n>`, `-BbDiveShots=<n>`, `-BbCrewShots`) are described in park-visuals §4 and player-visuals §6–§12.
