@@ -1,6 +1,6 @@
 # Task List
 
-**Last updated:** 2026-11-18 23:40 (saved plays merged; catch-read fixes worker running).
+**Last updated:** 2026-11-18 23:55 (saved plays merged; catch-read fixes under Opus review).
 
 What is next and what is open. Other files hold the rest:
 
@@ -17,9 +17,9 @@ Status: `[ ]` not started · `[~]` partly done · `[?]` needs an owner decision
 
 ## Resume here (2026-11-18, 23:40)
 
-**State (23:40).** One worker running. Tab "Workers" holds only the Opus worker `catch-fixes` in `t2q`; the old Codex and agy panes and the saved-plays pane are closed. Read a pane with `hc read <terminal>`; a new Coordinator session starts a background wait on `t2q` (CLAUDE.md, "Watch every worker").
+**State (23:55).** One reviewer running. Tab "Workers" holds only `t2q`. Read a pane with `hc read <terminal>`; a new Coordinator session starts a background wait on `t2q` (CLAUDE.md, "Watch every worker").
 
-**1. `work/catch-read-fixes`** (worktree `.claude/worktrees/runner-decision`). The [catch-read review](docs/reviews/2026-11-18-codex-catch-read-review.md)'s six findings were fixed (`43bd29e..0b18e54`); the review of those fixes (committed `2ec56a8` on the branch) found 4 P1 (relooks still read the true contact point; a private pivot, an unpublished catch call and another runner's private goal still steer runners), 1 P2 (fast retouch duplicates the decision) and 1 P3 (send-rate cohort). **Opus worker `catch-fixes` in `t2q`** fixes them from untracked WORKER-FIXES2.md, and checks the adverse movement the review recorded (double-offs on 25–50° catches 16.5 → 38.0 per 300 games). The same review found the branch's main gain: sacrifice flies from third 3 → 204 over 600 games. When done: write the review's Resolution, skip a re-review only if the fixes are small and test-covered (else one Opus review in a pane), touch `live.rs`, run the tests and both standard runs yourself, merge.
+**1. `work/catch-read-fixes`** (worktree `.claude/worktrees/runner-decision`). The fixes review's (on the branch, `2ec56a8`) 4 P1 and P2 are fixed with failing-first fixtures (`f5d3a14..9fdbf8d`, follow-up `155a874`); release workspace tests 462 passed; standard runs 4.48 [4.55] against main's 4.38 [4.53]. Two-out sends to center are still 122/123 (P3-1, measured, left open). The 25–50° double-offs (16.5 → 38.0 per 300 games) are traced: every one advanced at the first look on a deep fly he projected over the fence, and nothing makes a runner look again while the ball is in the air. **Opus reviewer `catch-fixes2-review` in `t2q`** reviews `2ec56a8..155a874` from untracked REVIEW-CATCH-FIXES2.md, writing its review as 2026-11-18-opus-catch-fixes2-review.md on the branch. When done: hand any P1/P2 to an Opus worker, write both reviews' Resolutions, touch `live.rs`, run the tests and both standard runs yourself, merge. Then the next `live.rs` job: **an in-flight relook for runners** (a runner who reads a deep fly as gone looks again while the ball is up and pulls up as the fielder settles; agent-models §6.3), with the catch cut-off calibration below.
 
 **Saved plays merged (2026-11-18, `38ec67b`, Q30 (b), D9).** A save keeps the recorded timeline, its MD5, the roster, the park and the board; the viewer refuses damaged, swapped or legacy files. Both reviews resolved ([first](docs/reviews/2026-11-18-codex-saved-plays-review.md), [fixes](docs/reviews/2026-11-18-sonnet-saved-plays-fixes-review.md)). Deferred, P3: the fixes review's P3-3 (a park without a full roster is dropped silently), P3-4 (names with `"`/`;`/`=`/`\` are rewritten; park and player values unchecked), P3-5 (unreachable summary checks; `LoadRecorded`'s call to `InfoSane` untested), P3-7 (the check leaves `board_after`, 17 players and most park fields unasserted). All need a hand-edited save or are check coverage. Accepted limit: a saved play uses today's poses, clips and camera.
 
