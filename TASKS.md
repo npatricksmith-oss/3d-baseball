@@ -15,13 +15,11 @@ Status: `[ ]` not started · `[~]` partly done · `[?]` needs an owner decision
 
 ---
 
-## Resume here (2026-11-19)
+## Resume here (2026-11-19, handoff)
 
-**State.** No workers running; the Workers tab is closed. `work/fly-read` is merged (`87af140`) and pushed.
+**Running:** one worker, `throw-race` (Opus, high), in the Workers tab of herdr-app (terminal `t2x`), worktree `.claude/worktrees/runner-decision`, branch `work/throw-race` from main `e40ffd7`. Job file `WORKER-THROWRACE.md` there. It diagnoses why tag-ups fall short (runners on second take third on 17% / 10% of outfield catches with none / one out, MLB 37% / 26%; runners on third score on 59%, MLB 75–80%): the ball's time split into transfer, flight, receive and tag, each against a source, and whether top-10% arm speed is too fast for these throws. It writes `docs/calibration/2026-11-19-throw-race.md`. If the gap is mainly arm variation (waits for fielder ratings), the runner's late read, or needs an owner decision, it stops with the note and no sim change; otherwise it fixes the mechanism, with a ledger row against 4.27 [4.47].
 
-**Fly-read merged (2026-11-19, `87af140`, Q27).** Players' typical-spin belief now includes the drag of the side and gyro spin they cannot see, so a zero-error first look no longer reads deep flies about 3 m long. A runner who goes or holds partway looks again every 0.5 s while the ball is up. A runner on second goes back to tag from a 50% catch read with none out and 60% with one out. Runners doubled off on 25–50° catches 38.0 → 0 per 300 games; runs 4.48 → 4.27 [4.55 → 4.47], almost all from fielders reading liners without the long bias (LD hits .683 → .671). [Fly-read note](docs/calibration/2026-11-19-fly-read.md); [Opus review](docs/reviews/2026-11-19-opus-fly-read-review.md), resolved.
-
-**Next:** the rest of item 1 of "Open sim work" below, in order. Suggested first: the throw race that caps tag-ups and sacrifice flies (every sim throw leaves at the top-10% arm speed, [tag-up note](docs/calibration/2026-11-14-tag-ups.md)); runners on second tag to third on 17% / 10% of outfield catches with none / one out (MLB 37% / 26%), runners from third score on 59% (MLB 80%). Check whether it waits for fielder ratings before ordering it.
+**Next Coordinator:** check `git log main..work/throw-race` and the note. If a sim change: touch, tests, standard runs, then an Opus high review before merging. If diagnosis only: merge the note and raise any owner question with a number (next free is Q28). Fly-read is merged (`87af140`); its numbers are in the [fly-read note](docs/calibration/2026-11-19-fly-read.md).
 
 ---
 
