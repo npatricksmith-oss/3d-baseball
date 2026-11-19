@@ -36,11 +36,13 @@ Still open after it: two-out sends to center (the two-out contact clock); double
 
 **Also running: the docs check script.** Sonnet worker `docs-check` in tab "Workers" (terminal `t2g`), worktree `.claude/worktrees/docs-check`, branch `work/docs-check` from `7febdfb`, prompt in its untracked `WORKER-CHECK.md`. It writes `bin/check-docs.py` (dead links, anchors and paths in the working docs; TASKS.md over 30 KB) with tests, and fixes dead references except in TASKS.md, observations.md, the ledger and agent-models.md, which it lists for the lead. No sim change: no ledger row; run its tests and the script, merge.
 
-**Waiting on the owner (asked 2026-11-18), from the prune notes' decision-log mismatches:**
-- **Q29 (D1, pitch choice).** The pitcher picks his pitch and spot by a weighted draw, mixing like a real pitcher so he can't be sat on; D1's words say randomness enters only as physical noise. No outcome is ever drawn. Recommended: keep it and reword D1 to allow a player to mix his own choices.
-- **Q30 (D9, saved plays).** A saved play stores only seed and play number, not the build, so any sim change since can replay it differently. Recommended: save the build's commit and the recorded play itself, so the client shows it exactly as seen.
-- **Q31 (D6, Unreal).** Unreal is still "contingent on the spike passing"; it passed and he plays in it. Recommended: mark it decided.
-D19/D20 needed no question: PLAN §1 now records the Q7 merge. D4 is covered by Q13/Q14, and D17 (three-batter minimum) waits for pitching changes in M6.
+**Owner's rulings, 2026-11-18** (recorded in PLAN §1): **Q29 (a)** a player may mix his own choices (pitch, spot); D1 reworded. **Q30 (b)** a saved play keeps the build's commit and the recorded play itself (D9). **Q31** Unreal decided outright (D6). D19/D20 now record the Q7 merge; D4 is covered by Q13/Q14; D17 waits for pitching changes in M6.
+
+**Next worker after the catch-read merge: Q30, saved plays as recorded plays** (client, plus a build-commit stamp; no sim change, no ledger row). Held only for Codex headroom (52% of the 5-hour window at 22:10, with the catch-read review still to run). The job:
+- When a play is saved, write its timeline blob (the FlatBuffer the client already samples through `bb_timeline_sample`) next to the TOML, and add `commit = "<git sha>"` (stamped at build time; mark a dirty tree) to the TOML.
+- A way to open one: `client/run.sh --saved <file>` (or `-BbSavedPlay=`) plays the stored timeline exactly, on any later build, with its board and comment shown.
+- The 27 tracked files in `saved-plays/` have no commit: add the main commit at each file's `saved` time (from `git log --before`), marked as inferred. Their timelines can only be rebuilt by running that commit; record that, do not fake one.
+- A headless check: save, reload, and compare sampled frames bit for bit.
 
 **After that:** item 1 of "Open sim work" below.
 

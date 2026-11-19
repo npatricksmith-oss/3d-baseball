@@ -22,15 +22,15 @@ The human is the **manager**. They pick lineups, tactics, pitching changes, and 
 
 | ID | Decision | Status | Rationale (short) |
 | :--- | :--- | :--- | :--- |
-| D1 | **No outcome rolls.** Randomness enters only as physical/physiological noise on inputs. Agents may hold probabilistic *beliefs*; the world never consults them. | **Decided** | Core purpose. §4.1 |
+| D1 | **No outcome rolls.** Randomness enters only as physical/physiological noise on inputs, and as a player mixing his own choices (which pitch, where), as real players do so they cannot be predicted. Agents may hold probabilistic *beliefs*; the world never consults them and never draws an outcome. | **Decided**; the mixed choices added on the owner's Q29 (a), 2026-11-18 | Core purpose. §4.1 |
 | D2 | Headless simulation core, fully separate from presentation | **Decided** | Fast unattended games; engine independence |
 | D3 | One simulation for watched and background games; no "quick-sim" approximation | **Decided** | Background results must mean the same thing as live ones |
 | D4 | Physics is authoritative; animation conforms to physical trajectories | **Decided** | Purpose |
 | D5 | **Sim core language: Rust** | **Decided** (owner delegated "best") | §3 |
-| D6 | **Presentation engine: Unreal Engine 5** | **Decided as target**, contingent on the M0 spike passing on current hardware (14 GiB RAM, no upgrade for now) | Highest visual and animation ceiling, so no risk of being boxed in by the engine. §3, §3.3 |
+| D6 | **Presentation engine: Unreal Engine 5** | **Decided** (owner, Q31, 2026-11-18): the M0 spike passed on current hardware (14 GiB RAM) and the owner plays the game in it | Highest visual and animation ceiling, so no risk of being boxed in by the engine. §3, §3.3 |
 | D7 | No general rigid-body physics library in the sim core | **Decided** | Baseball physics is an ODE plus an analytic collision against static geometry. §6 |
 | D8 | The sim pre-solves each pitch/play into a `PlayTimeline`; the client plays it back | **Decided** | Managers act only between pitches |
-| D9 | Replays store recorded timelines, not seeds. All stats derive from the per-game event log | **Decided** | Re-simulation drifts as code changes. §4.3 |
+| D9 | Replays store recorded timelines, not seeds. All stats derive from the per-game event log. A saved play stores the build's commit and the recorded play itself, so the client shows it exactly as seen on any later build (owner, Q30 (b), 2026-11-18) | **Decided**; saved plays not yet built that way (TASKS) | Re-simulation drifts as code changes. §4.3 |
 | D10 | **Universal DH. Classic extra innings** (no automatic runner) | **Decided** (owner) | |
 | D11 | Strike zone: 2D plane at the plate's midpoint depth, top and bottom scaled to batter height (ABS-style), judged exactly | **Proposed** | Simple, testable, modern. Human-umpire mode later |
 | D12 | **Primary experience: managing live games.** League/season play is secondary | **Decided** (owner) | Manager layer (M6) comes before league (M7) |
