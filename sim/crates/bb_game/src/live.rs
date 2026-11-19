@@ -108,8 +108,10 @@ const HALFWAY_M: f64 = 5.0;
 const RELAY_READ_S: f64 = 0.6;
 /// A runner's belief of what a cut costs: how much later than a straight throw the ball
 /// reaches his base when the throw was sent to another base and the cutoff man takes it on
-/// the way and turns, s [E]: the relay man's 0.6 s and the longer way round.
-const CUT_EXTRA_S: f64 = 0.9;
+/// the way and turns, s [E]: the relay man's exchange (`throwing::RELAY_S_50`, 0.75 s) and the
+/// longer way round (0.3 s). It was 0.9 s with the relay man's 0.6 s, before his exchange was
+/// sourced (agent-models §5.5).
+const CUT_EXTRA_S: f64 = throwing::RELAY_S_50 + 0.3;
 /// How far ahead of him, in time at the plate, a runner going home must be for the runner
 /// behind to follow him in, s [E].
 const FOLLOW_GAP_S: f64 = 0.3;
@@ -221,15 +223,13 @@ fn throw_time(v: f64, d: f64) -> f64 {
     throw_table().time(v, d)
 }
 
-/// A runner's estimate of how long the defense needs to get the ball over horizontal
-/// distance `d` by throwing: a league-typical arm, relayed through a man halfway when that is
-/// quicker or the throw cannot carry.
 /// A runner's read of how long the man holding the ball needs to get it `d` m by throwing:
-/// his read of that fielder's arm, relayed through a man halfway (a league-typical arm) when
-/// that is quicker or the throw cannot carry (agent-models §6.4).
+/// his read of that fielder's arm, relayed through a man halfway (a league-typical arm and
+/// relay exchange, `throwing::RELAY_S_50`) when that is quicker or the throw cannot carry
+/// (agent-models §5.5, §6.4).
 fn read_throw_time(arm: f64, d: f64) -> f64 {
     let v = THROW_EFFORT * arm;
-    throw_time(v, d).min(throw_time(v, 0.5 * d) + RELAY_TRANSFER_FRAC * TYPICAL_TRANSFER + throw_time(THROW_EFFORT * TYPICAL_ARM, 0.5 * d))
+    throw_time(v, d).min(throw_time(v, 0.5 * d) + throwing::RELAY_S_50 + throw_time(THROW_EFFORT * TYPICAL_ARM, 0.5 * d))
 }
 
 /// A runner's read of a fielder's arm is his position's grade-50 arm (scouting-level
@@ -240,9 +240,12 @@ const ARM_READ_SIGMA_MPS: f64 = 1.1;
 /// base plus the fielder's position index (far above the per-decision subs 2n, 2n + 1).
 const ARM_READ_SUB: u32 = 1 << 20;
 
+/// A runner's estimate of how long the defense needs to get the ball over horizontal
+/// distance `d` by throwing: a league-typical arm, relayed through a man halfway (the league's
+/// relay exchange, `throwing::RELAY_S_50`) when that is quicker or the throw cannot carry.
 fn typical_throw_time(d: f64) -> f64 {
     let v = THROW_EFFORT * TYPICAL_ARM;
-    throw_time(v, d).min(2.0 * throw_time(v, 0.5 * d) + RELAY_TRANSFER_FRAC * TYPICAL_TRANSFER)
+    throw_time(v, d).min(2.0 * throw_time(v, 0.5 * d) + throwing::RELAY_S_50)
 }
 
 /// A runner's look at a loose ball (his first look and every relook): noisy motion,
@@ -310,8 +313,12 @@ impl HolderLook {
         let pivot = feed && near(2) && base == 1;
         let transfer = if pivot {
             throwing::pivot_s(mean.transfer)
-        } else if self.received_throw {
+        } else if feed {
             RELAY_TRANSFER_FRAC * mean.transfer
+        } else if self.received_throw {
+            // A reception away from the bags looks like a relay: the relay man's exchange, his
+            // turn included (agent-models §5.5, §6.4).
+            throwing::relay_s(mean.transfer)
         } else {
             mean.transfer
         };
@@ -421,8 +428,10 @@ pub(crate) fn runner_path_pos(start: u8, s: f64) -> Vec3 {
     on_path - Vec3::new(foul, foul, 0.0)
 }
 
-/// Catch-to-release time for a relay as a fraction of the fielder's batted-ball transfer
-/// time [E], about 0.45 s for an infielder.
+/// Catch-to-release of a fielder who takes a throw at a base and throws on, as a fraction of
+/// his batted-ball transfer time [E, unsourced], about 0.45 s for an infielder. The cutoff
+/// man taking a relay has his own sourced exchange (`throwing::relay_s`), and the pivot man
+/// his (`throwing::pivot_s`; agent-models §5.5).
 const RELAY_TRANSFER_FRAC: f64 = 0.7;
 /// With two out, a tag play's weight against a force's 1.0 when the holder picks his throw
 /// [E]: an equally sure tag loses to the force (a run can score ahead of a tag for the
@@ -994,6 +1003,9 @@ struct Fielder {
     pivot: bool,
     /// A pivot man who took the feed off the bag: his pivot starts when he reaches it.
     pivot_wait_bag: bool,
+    /// He took a relay as the cutoff man (agent-models §5.5, the relay man's exchange): his
+    /// set-up is `throwing::relay_s` from his catch, turn included, no early release.
+    relayed: bool,
 }
 
 #[derive(Clone, Debug)]
@@ -4315,7 +4327,7 @@ impl<'a> Sim<'a> {
                 // back at the spot he planned (which a running catch has carried him past).
                 fd.target = stop_point(fd);
                 fd.carry_to = None;
-                (fd.pivot, fd.pivot_wait_bag) = (false, false);
+                (fd.pivot, fd.pivot_wait_bag, fd.relayed) = (false, false, false);
                 // No longer racing the ball: he brakes onto that spot.
                 fd.t_int = f64::INFINITY;
                 if let Ball::Thrown { to_base, relay, .. } = self.ball {
@@ -4326,9 +4338,12 @@ impl<'a> Sim<'a> {
                     } else {
                         fd.target = base_pos(to_base);
                     }
-                    // (Taking it on the ground from a dive, he is up first.)
-                    fd.ready_at = up_at + RELAY_TRANSFER_FRAC * fd.a.transfer;
-                    fd.set_base = RELAY_TRANSFER_FRAC * fd.a.transfer;
+                    // (Taking it on the ground from a dive, he is up first.) A receiver at a
+                    // base needs 0.7 of his transfer; the cutoff man taking a relay has his own
+                    // exchange, turn included (agent-models §5.5).
+                    fd.set_base = if relay { throwing::relay_s(fd.a.transfer) } else { RELAY_TRANSFER_FRAC * fd.a.transfer };
+                    fd.ready_at = up_at + fd.set_base;
+                    fd.relayed = relay;
                     fd.face = None;
                     if !relay && to_base == 2 && force_at_second {
                         // The feed at second: a double-play pivot (agent-models §5.5). He faces
@@ -5787,6 +5802,9 @@ impl<'a> Sim<'a> {
         let footwork = throwing::footwork_s(fd.catch_vel, to, fd.took_diving);
         if pivot_throw(fd, tgt) {
             SetUp::pivot(fd.set_base, turn, footwork)
+        } else if fd.relayed {
+            // The relay man's exchange: turn included, no early release (agent-models §5.5).
+            SetUp::relay(fd.set_base, footwork)
         } else if fd.pivot {
             // At the bag with the feed, throwing elsewhere: an ordinary throw from his catch.
             SetUp::new(RELAY_TRANSFER_FRAC * fd.a.transfer, turn, footwork)
@@ -6059,6 +6077,7 @@ fn new_sim<'a>(inp: &'a LiveInput<'a>, st: &'a mut RulesState) -> Sim<'a> {
                 asks: None,
                 pivot: false,
                 pivot_wait_bag: false,
+                relayed: false,
             }
         })
         .collect();
@@ -8462,6 +8481,51 @@ mod tests {
         assert!(matches!(sim.ball, Ball::Held { by: 1 }), "ball: {:?}", match &sim.ball { Ball::Held { by } => format!("held by {by}"), _ => "loose".into() });
     }
 
+    /// agent-models §5.5, the relay man's exchange: on the throw home from the wall above, with
+    /// the runner racing from third, the cutoff man holds the ball for the sourced relay time,
+    /// 0.75 s at grade 50 (an analyst's figure for a big-league shortstop; 0.62 s is the one
+    /// measured elite relay), within a tick, and lets it go set (no hurry). Before, he could let
+    /// it go at 0.6 × 0.7 × 0.65 = 0.27 s, quicker than any relay on record.
+    #[test]
+    fn the_relay_man_holds_the_ball_for_the_sourced_exchange() {
+        const R: AgentId = 0x0007;
+        let fx = fixture(&[(R, 3)]);
+        let mut inp = input(&fx, vec![RunnerIn { id: fx.st.batter, base: 0, speed: 8.2, tau_s: bb_agents::running::LEAGUE_TAU_S }, RunnerIn { id: R, base: 3, speed: 8.2, tau_s: bb_agents::running::LEAGUE_TAU_S }]);
+        const B2: usize = 3;
+        inp.fattrs[CF].arm = 30.0;
+        inp.fattrs[CF].arm_sigma = 0.0;
+        inp.fattrs[B2].arm_sigma = 0.0;
+        let deep = Vec3::new(-5.0, 112.0, 0.0);
+        let mut st = fx.st.clone();
+        let mut sim = new_sim(&inp, &mut st);
+        sim.t = 5.0;
+        held_at(&mut sim, CF, deep);
+        sim.f[B2].pos = sim.f[B2].target;
+        sim.f[1].pos = base_pos(4);
+        // The runner left third on the catch and is a third of the way home at full speed: a
+        // race the relay man reads as close.
+        let k = sim.r.iter().position(|r| r.id == R).unwrap();
+        (sim.r[k].s, sim.r[k].goal, sim.r[k].v) = (3.0 * BASE_L + 6.0, 4, 8.0);
+        for _ in 0..600 {
+            sim.update_relay();
+            sim.update_thrown();
+            sim.try_captures();
+            sim.holder_act();
+            sim.move_fielders();
+            sim.t += DT;
+            if sim.out.released.len() >= 2 {
+                break;
+            }
+        }
+        let who: Vec<AgentId> = sim.out.released.iter().map(|x| x.1).collect();
+        assert_eq!(who, vec![sim.f[CF].id, sim.f[B2].id], "throws by {who:?}; facts {:?}", sim.out.facts);
+        let caught = sim.out.secured.iter().find(|x| x.1 == sim.f[B2].id).unwrap().0;
+        let hold = sim.out.released[1].0 - caught;
+        assert!((hold - throwing::RELAY_S_50).abs() <= DT + 1e-9, "relay man held it {hold:.3} s");
+        assert!(hold >= 0.62, "quicker than the quickest relay on record: {hold:.3} s");
+        assert_eq!(sim.out.hurry[1].0, 0.0, "a relay is let go set");
+    }
+
     /// Seed 7475 play 26 (2026-11-13): runners on first and third, a chopper to the
     /// pitcher. Where does he throw with `outs` out?
     fn pitcher_throws_to(outs: u8) -> u8 {
@@ -9960,7 +10024,7 @@ mod tests {
         (
             (f.pos, f.vel, f.jump, f.role, f.target, f.next_plan, f.err, f.attempts, f.blocked_until, f.ready_at, f.dove, f.lunge),
             (f.t_int, f.int_pt, f.read_at, f.read_ball, f.call, f.shown.clone(), f.last_close_read, f.must_dive_since, f.last_dive_read, f.will_dive.get(), f.throws, f.up_at),
-            (f.set_base, f.face, f.catch_vel, f.took_diving, f.catch_stretched, f.backs, f.peel, f.carry_to, f.asks, f.pivot, f.pivot_wait_bag),
+            (f.set_base, f.face, f.catch_vel, f.took_diving, f.catch_stretched, f.backs, f.peel, f.carry_to, f.asks, f.pivot, f.pivot_wait_bag, f.relayed),
             f.belief.as_ref().map(|p| (p.at(sim.t), p.at(p.t_end()), p.t_end())),
         )
     }

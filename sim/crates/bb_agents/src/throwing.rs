@@ -150,6 +150,19 @@ pub fn pivot_s(transfer_s: f64) -> f64 {
     PIVOT_S_50 * transfer_s / INFIELD_TRANSFER_50_S
 }
 
+/// The relay man's catch-to-release at a `Transfer` grade of 50, s (agent-models §5.5, the
+/// relay man's exchange) [E]: an MLB.com analyst's expectation for a big-league shortstop's
+/// relay throw home (0.75 s, "Rays' relay even more amazing under dissection"; snippet). Scaled
+/// by the `Transfer` grade it is 0.64 s at grade 70, near the one measured elite relay exchange
+/// (Tatis Jr., 0.62 s, MLB.com top defensive plays of 2021; snippet). It includes his turn to
+/// his next target. No split by relay man or by the base he throws to is known.
+pub const RELAY_S_50: f64 = 0.75;
+
+/// A relay man's own catch-to-release, turn included, from his `Transfer` (s).
+pub fn relay_s(transfer_s: f64) -> f64 {
+    RELAY_S_50 * transfer_s / INFIELD_TRANSFER_50_S
+}
+
 /// The set-up for one throw, in seconds after the fielder has the ball and is on his feet.
 #[derive(Clone, Copy, Debug, PartialEq)]
 pub struct SetUp {
@@ -174,6 +187,14 @@ impl SetUp {
     /// `base_s + turn + footwork` (and the slide's delay, nothing yet), at full arm.
     pub fn pivot(base_s: f64, turn_s: f64, footwork_s: f64) -> Self {
         let t = (base_s + turn_s).max(0.0) + footwork_s + PIVOT_SLIDE_DELAY_S;
+        Self { earliest_s: t, set_s: t, off_balance: footwork_s > 0.0 }
+    }
+
+    /// A relay man's throw on (agent-models §5.5, the relay man's exchange): like the pivot,
+    /// the measured relay exchanges are already the quick release of a relay race, so earliest
+    /// and set are both `base_s + footwork` (the turn is inside `relay_s`), at full arm.
+    pub fn relay(base_s: f64, footwork_s: f64) -> Self {
+        let t = base_s.max(0.0) + footwork_s;
         Self { earliest_s: t, set_s: t, off_balance: footwork_s > 0.0 }
     }
 
@@ -206,6 +227,18 @@ mod tests {
         assert!((pivot_s(0.65) - 0.80).abs() < 1e-12);
         let g70 = pivot_s(0.65 * transfer_scale(70.0));
         assert!((g70 - 0.80 / (1.08f64 * 1.08)).abs() < 1e-9 && (g70 - 0.67).abs() < 0.02, "{g70}");
+    }
+
+    /// agent-models §5.5, the relay man's exchange: 0.75 s at grade 50 (the analyst's figure for
+    /// a big-league shortstop), and at grade 70 within 0.03 s of the one measured elite relay
+    /// exchange (Tatis Jr., 0.62 s); no early release.
+    #[test]
+    fn relay_time_by_transfer_grade() {
+        assert!((relay_s(0.65) - 0.75).abs() < 1e-12);
+        let g70 = relay_s(0.65 * transfer_scale(70.0));
+        assert!((g70 - 0.62).abs() < 0.03, "{g70}");
+        let su = SetUp::relay(relay_s(0.65), 0.0);
+        assert!(su.earliest_s == su.set_s && su.hurry(su.earliest_s) == 0.0 && su.speed_mult(0.0) == 1.0);
     }
 
     /// agent-models §5.5: a pivot has no earlier release than its set one, and a release then is
