@@ -1,6 +1,6 @@
 # Observations
 
-The owner's list of what he has seen and wants, with where each stands. The letter is his priority (A, B, C). Every lead session updates the boxes here when it finishes something, so this file is enough to follow progress; [TASKS.md](TASKS.md) has the detail.
+The owner's list of what he has seen and wants, with where each stands. The letter is his priority (A, B, C). Every Coordinator session updates the boxes here when it finishes something, so this file is enough to follow progress; [TASKS.md](TASKS.md) has the detail.
 
 `[x]` done · `[~]` partly done (the note says what is left) · `[ ]` not started
 

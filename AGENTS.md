@@ -1,6 +1,6 @@
 # AGENTS.md
 
-Rules for every agent in this repository: the Claude lead and the Claude workers and reviewers. The lead's own rules are in [CLAUDE.md](CLAUDE.md). [PLAN.md](PLAN.md) holds the decisions and design; [TASKS.md](TASKS.md) holds what is next. Where this file and PLAN.md disagree, PLAN.md wins; fix this file.
+Rules for every agent in this repository: the Claude Coordinator and the Claude workers and reviewers. The Coordinator's own rules are in [CLAUDE.md](CLAUDE.md). [PLAN.md](PLAN.md) holds the decisions and design; [TASKS.md](TASKS.md) holds what is next. Where this file and PLAN.md disagree, PLAN.md wins; fix this file.
 
 ## What this is
 
@@ -98,7 +98,7 @@ Game logic in C++; Blueprints only for thin visual wiring. Script asset setup wi
 
 ## Workflow (every agent)
 
-- Work on your own `work/<topic>` branch in your own worktree. Commit early and in small, described steps (WIP commits are fine), so a usage cutoff never loses work. Workers never merge into `main` and never push; the lead does that.
+- Work on your own `work/<topic>` branch in your own worktree. Commit early and in small, described steps (WIP commits are fine), so a usage cutoff never loses work. Workers never merge into `main` and never push; the Coordinator does that.
 - Update [TASKS.md](TASKS.md) at the end of every work session, following the rules at its top (reviewers excepted: they write only their review file).
 - **Stale text misleads the next agent.** When a change makes a comment, a doc line or a figure untrue, fix or delete it in the same commit. Notes under `docs/calibration/`, `docs/reviews/` and `docs/archive/` are dated records: read them for how something was found, and take current figures from the ledger and current tasks from TASKS.md.
 - **[observations.md](observations.md) is the owner's checklist (owner, 2026-11-16):** his own words, each with a box (`[x]` done, `[~]` partly, with a one-line plain note on what is left). When work finishes or advances one of his items, tick it there in the same commit. New owner observations (including saved plays' comments) go there too, then into TASKS.md's backlog for the detail. He follows progress there instead of in TASKS.md.
