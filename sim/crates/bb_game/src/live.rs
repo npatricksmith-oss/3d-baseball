@@ -1208,6 +1208,14 @@ fn fact_time(f: &Input) -> Option<f64> {
     }
 }
 
+fn out_weight_at(goal: u8, outs: u8, force: bool) -> f64 {
+    if outs >= 2 {
+        if force { 1.0 } else { TWO_OUT_TAG_W }
+    } else {
+        [0.9, 1.0, 1.1, 1.3][(goal as usize).saturating_sub(1).min(3)]
+    }
+}
+
 fn phi(x: f64) -> f64 {
     0.5 * (1.0 + m::erf(x / core::f64::consts::SQRT_2))
 }
@@ -4517,15 +4525,15 @@ impl<'a> Sim<'a> {
         let tag = self.inp.tag_up.typical_tag_s;
         let value = |j: usize, base: u8, runner_at: f64, ball_at: f64| {
             let r = &self.r[j];
-            let force = self.forced(j) && base == r.start + 1 && r.s < base as f64 * BASE_L;
+            let force = self.runner_forced(k, j) && base == r.start + 1 && r.s < base as f64 * BASE_L;
             let p = phi((runner_at - ball_at - if force { 0.0 } else { tag }) / 0.12);
-            if p > 0.3 { p * p * self.out_weight(j, base) } else { 0.0 }
+            if p > 0.3 { p * p * out_weight_at(base, self.runner_outs(k), force) } else { 0.0 }
         };
         let mine = value(k, b, my_at, own);
         let params = throwing::ChoiceParams::default();
         let mut best: Option<(f64, u8)> = None;
         for (j, o) in self.r.iter().enumerate() {
-            if j == k || o.out || o.scored || o.overrun != OverrunPhase::None {
+            if j == k || self.runner_sees_out(k, o) || o.scored || o.overrun != OverrunPhase::None {
                 continue;
             }
             let Some(base) = visible_target(o, params) else { continue };
@@ -4544,11 +4552,31 @@ impl<'a> Sim<'a> {
     }
 
     /// Forced while the batter is still a runner and every base behind this runner is held by
-    /// a runner still in play (the runner sees outs as they are signalled).
+    /// a runner still legally in play.
     fn forced(&self, k: usize) -> bool {
-        let r = &self.r[k];
-        let batter_alive = self.r.iter().any(|x| x.start == 0 && !x.out);
-        r.start == 0 || (batter_alive && (1..r.start).all(|b| self.r.iter().any(|x| x.start == b && !x.out)))
+        self.force_with(k, |r| r.out)
+    }
+
+    fn awaiting_catch_call(&self, k: usize) -> bool {
+        self.caught() && !self.r[k].catch_seen
+    }
+
+    fn runner_sees_out(&self, k: usize, other: &Runner) -> bool {
+        other.out && !(other.start == 0 && self.awaiting_catch_call(k))
+    }
+
+    fn runner_outs(&self, k: usize) -> u8 {
+        self.st.outs.saturating_sub(u8::from(self.awaiting_catch_call(k)))
+    }
+
+    fn runner_forced(&self, observer: usize, k: usize) -> bool {
+        self.force_with(k, |r| self.runner_sees_out(observer, r))
+    }
+
+    fn force_with(&self, k: usize, is_out: impl Fn(&Runner) -> bool) -> bool {
+        let has_runner = |base| self.r.iter().any(|r| r.start == base && !is_out(r));
+        let start = self.r[k].start;
+        start == 0 || (0..start).all(has_runner)
     }
 
     /// How much the holder values an out on runner `k` at base `goal`. With fewer than two out
@@ -4558,11 +4586,7 @@ impl<'a> Sim<'a> {
     /// coming back to a base he has already reached must be tagged (Codex dive review #1).
     fn out_weight(&self, k: usize, goal: u8) -> f64 {
         let r = &self.r[k];
-        if self.st.outs >= 2 {
-            if self.forced(k) && goal == r.start + 1 && r.s < goal as f64 * BASE_L { 1.0 } else { TWO_OUT_TAG_W }
-        } else {
-            [0.9, 1.0, 1.1, 1.3][(goal as usize).saturating_sub(1).min(3)]
-        }
+        out_weight_at(goal, self.st.outs, self.forced(k) && goal == r.start + 1 && r.s < goal as f64 * BASE_L)
     }
 
     /// Whether a runner is on base `b` or between it and the next, used to choose cutoff
@@ -4584,7 +4608,7 @@ impl<'a> Sim<'a> {
         let r = &self.r[k];
         self.r.iter().any(|o| {
             o.id != r.id
-                && !o.out
+                && !self.runner_sees_out(k, o)
                 && !o.scored
                 && o.start > r.start
                 && ((o.s <= b as f64 * BASE_L + 0.5 && o.still_since.is_some_and(|t0| self.t - t0 >= HOLD_READ_S - 1e-9))
@@ -4603,7 +4627,7 @@ impl<'a> Sim<'a> {
         let mine = run_time_from((b as f64 * BASE_L - r.s).max(0.0), (r.direction * r.v).max(0.0), r.vmax, r.tau);
         self.r.iter().any(|o| {
             let running_home = b == 4 && o.s > 3.0 * BASE_L + 0.5 && o.direction * o.v > SEEN_MOVING_MPS && runner_eta(4.0 * BASE_L - o.s, o.v) + FOLLOW_GAP_S <= mine;
-            o.id != r.id && !o.out && !o.scored && o.start > r.start && o.s <= b as f64 * BASE_L + 0.5 && !running_home
+            o.id != r.id && !self.runner_sees_out(k, o) && !o.scored && o.start > r.start && o.s <= b as f64 * BASE_L + 0.5 && !running_home
         })
     }
 
@@ -4625,7 +4649,7 @@ impl<'a> Sim<'a> {
         // runner ahead whom his advance sends home.
         let state = |mine: u8| -> (u8, f64) {
             let (mut bits, mut runs) = (0u8, 0.0);
-            for o in self.r.iter().filter(|o| o.id != me.id && !o.out && !o.scored) {
+            for o in self.r.iter().filter(|o| o.id != me.id && !self.runner_sees_out(k, o) && !o.scored) {
                 let at = o.s / BASE_L;
                 let fwd = o.direction * o.v;
                 let seen = if fwd > SEEN_MOVING_MPS {
@@ -4648,7 +4672,7 @@ impl<'a> Sim<'a> {
                     bits |= 1 << (b - 1);
                 } else if seen < 4 {
                     runs += 1.0;
-                } else if mine != 0 || self.st.outs < 2 || self.t + runner_eta((4.0 * BASE_L - o.s).max(0.0), o.v) < out_at {
+                } else if mine != 0 || self.runner_outs(k) < 2 || self.t + runner_eta((4.0 * BASE_L - o.s).max(0.0), o.v) < out_at {
                     // Already heading home: his run counts unless the third out comes first.
                     runs += 1.0;
                 }
@@ -4658,7 +4682,7 @@ impl<'a> Sim<'a> {
             }
             (bits, runs)
         };
-        let outs = self.st.outs;
+        let outs = self.runner_outs(k);
         let value = |mine: u8, outs: u8| {
             let (bits, runs) = state(mine);
             run_expectancy(bits, outs) + runs
@@ -4674,7 +4698,10 @@ impl<'a> Sim<'a> {
     }
 
     fn runner_decide_with_contact(&mut self, k: usize, at_base: u8, contact: Option<&BallPath>) {
-        let forced = self.forced(k);
+        if self.awaiting_catch_call(k) {
+            return;
+        }
+        let forced = self.runner_forced(k, k);
         let next = at_base + 1;
         if next > 4 {
             return;
@@ -4701,7 +4728,7 @@ impl<'a> Sim<'a> {
         let mut rr = rng(self.inp.seed, self.inp.play, r.id, Purpose::RunnerPerception, 2 * n);
         let draw = rr.truncated_normal(4.0);
         let noise = RUNNER_TIMING_SIGMA_S * draw;
-        let must = forced && at_base == r.start && !self.caught();
+        let must = forced && at_base == r.start && !r.catch_seen;
         // A runner may only take a base once every runner ahead of him has visibly cleared it;
         // until then he waits at his base.
         let blocked = !must && self.base_uncleared_ahead(k, next);
@@ -4729,9 +4756,9 @@ impl<'a> Sim<'a> {
     /// it: standing on it with it as his goal (a holder), or heading for it as his goal and
     /// too near to stop short of it (his speed over `HOLD_READ_S`, then `BRAKE`, reaches it).
     /// Only bases 1–3: any number of runners may score.
-    fn settles_on(&self, j: usize, b: u8) -> bool {
+    fn settles_on(&self, k: usize, j: usize, b: u8) -> bool {
         let o = &self.r[j];
-        if o.out || o.scored || o.goal != b || !(1..=3).contains(&b) {
+        if self.runner_sees_out(k, o) || o.scored || o.goal != b || !(1..=3).contains(&b) {
             return false;
         }
         let bs = b as f64 * BASE_L;
@@ -4753,10 +4780,10 @@ impl<'a> Sim<'a> {
     fn settle_guard(&mut self, k: usize) {
         let b = self.r[k].goal;
         for _ in 0..4 {
-            if !self.settles_on(k, b) {
+            if !self.settles_on(k, k, b) {
                 return;
             }
-            let mut claim: Vec<usize> = (0..self.r.len()).filter(|&j| self.settles_on(j, b)).collect();
+            let mut claim: Vec<usize> = (0..self.r.len()).filter(|&j| self.settles_on(k, j, b)).collect();
             if claim.len() < 2 {
                 return;
             }
@@ -4766,7 +4793,7 @@ impl<'a> Sim<'a> {
             let mut moved = false;
             for &t in &claim[1..] {
                 let standing = (self.r[t].s - b as f64 * BASE_L).abs() < 1e-6;
-                let forced_to_b = b == self.r[t].start + 1 && self.forced(t);
+                let forced_to_b = b == self.r[t].start + 1 && self.runner_forced(t, t);
                 if standing && !forced_to_b && self.refuge_free(t, b) {
                     let r = &mut self.r[t];
                     r.goal = b - 1;
@@ -4791,7 +4818,7 @@ impl<'a> Sim<'a> {
     /// home (the batter-runner has none), and no other runner on it or going to it.
     fn refuge_free(&self, j: usize, b: u8) -> bool {
         let back = b - 1;
-        back >= 1 && !self.r.iter().enumerate().any(|(i, x)| i != j && !x.out && !x.scored && ((x.s - back as f64 * BASE_L).abs() < 0.5 || x.goal == back))
+        back >= 1 && !self.r.iter().enumerate().any(|(i, x)| i != j && !self.runner_sees_out(j, x) && !x.scored && ((x.s - back as f64 * BASE_L).abs() < 0.5 || x.goal == back))
     }
 
     /// Whether base `b`, behind runner `k`, is no refuge for him, as he can see it: a runner
@@ -4803,7 +4830,7 @@ impl<'a> Sim<'a> {
         let lead = &self.r[k];
         let bs = b as f64 * BASE_L;
         self.r.iter().enumerate().any(|(j, o)| {
-            if j == k || o.out || o.scored || o.start >= lead.start {
+            if j == k || self.runner_sees_out(k, o) || o.scored || o.start >= lead.start {
                 return false;
             }
             if o.s + 1e-6 >= bs {
@@ -4815,7 +4842,7 @@ impl<'a> Sim<'a> {
             }
             // He reads the lead runner's turn after `HOLD_READ_S`, then brakes at `BRAKE`.
             let stop = o.s + v_fwd * HOLD_READ_S + v_fwd * v_fwd / (2.0 * BRAKE);
-            stop + 0.3 >= bs || self.no_way_back(j)
+            stop + 0.3 >= bs || self.no_way_back(k, j)
         })
     }
 
@@ -4832,10 +4859,10 @@ impl<'a> Sim<'a> {
         let Some(g) = (r.goal as f64 * BASE_L > r.s + 1e-6).then_some(r.goal) else { return };
         let (id, start, s) = (r.id, r.start, r.s);
         let coming_back = self.r.iter().any(|o| {
-            o.id != id && !o.out && !o.scored && o.start > start && o.direction * o.v < -SEEN_MOVING_MPS && o.s > s && ((o.s / BASE_L).floor() as u8) == g
+            o.id != id && !self.runner_sees_out(k, o) && !o.scored && o.start > start && o.direction * o.v < -SEEN_MOVING_MPS && o.s > s && ((o.s / BASE_L).floor() as u8) == g
         });
-        let forced_here = g == start + 1 && self.forced(k);
-        if coming_back && !forced_here && between && !self.no_way_back(k) {
+        let forced_here = g == start + 1 && self.runner_forced(k, k);
+        if coming_back && !forced_here && between && !self.no_way_back(k, k) {
             self.r[k].goal = from;
             self.r[k].turned_back = Some(g);
         }
@@ -4843,10 +4870,10 @@ impl<'a> Sim<'a> {
 
     /// Whether runner `j`, between bases, has no base to go back to: the batter-runner (home
     /// is not his), or one with another runner standing on the base he left.
-    fn no_way_back(&self, j: usize) -> bool {
+    fn no_way_back(&self, k: usize, j: usize) -> bool {
         let o = &self.r[j];
         let f = (o.s / BASE_L).floor();
-        o.start == 0 && f < 1.0 || self.r.iter().enumerate().any(|(i, x)| i != j && !x.out && !x.scored && (x.s - f * BASE_L).abs() < 0.5)
+        o.start == 0 && f < 1.0 || self.r.iter().enumerate().any(|(i, x)| i != j && !self.runner_sees_out(k, x) && !x.scored && (x.s - f * BASE_L).abs() < 0.5)
     }
 
     /// A runner between bases looks again when the play has changed under him: the ball
@@ -4871,7 +4898,7 @@ impl<'a> Sim<'a> {
         let next = from + 1;
         // Forced to the next base, he has no choice (the force is on him as long as it is the
         // base after his own); a runner ahead who has not cleared it also leaves him no go.
-        if next > 4 || (next == start + 1 && self.forced(k)) || self.base_uncleared_ahead(k, next) {
+        if next > 4 || (next == start + 1 && self.runner_forced(k, k)) || self.base_uncleared_ahead(k, next) {
             return false;
         }
         self.r[k].decisions += 1;
@@ -5059,7 +5086,7 @@ impl<'a> Sim<'a> {
                 }
             }
             // Something new to see since his last look: he decides again, from where he is.
-            let awaiting_catch_call = self.caught() && !self.r[k].catch_seen;
+            let awaiting_catch_call = self.awaiting_catch_call(k);
             if !awaiting_catch_call {
                 self.runner_relook(k);
             }
@@ -5067,7 +5094,7 @@ impl<'a> Sim<'a> {
             // Heading for a base a runner ahead has stopped at (or is retreating to): go back,
             // unless this is a forced advance (then the runner ahead is forced too).
             let g = self.r[k].goal;
-            let forced_here = g == self.r[k].start + 1 && self.forced(k);
+            let forced_here = g == self.r[k].start + 1 && self.runner_forced(k, k);
             let back = (self.r[k].s / BASE_L).floor() as u8;
             if g as f64 * BASE_L > self.r[k].s && self.base_held_ahead(k, g) && !forced_here && !self.return_crowded(k, back) {
                 self.r[k].goal = back;
@@ -6922,6 +6949,37 @@ mod tests {
         assert_eq!(count(&sim, |f| matches!(f, Input::BaseTouched { agent: R, base: 3, holding_ball: false, .. })), 1, "facts: {:?}", sim.out.facts);
         assert_eq!(count(&sim, |f| matches!(f, Input::BaseLeft { agent: R, base: 2, .. })), 2);
         assert!(!sim.out.events.iter().any(|e| matches!(e, Event::RulesWarning { .. })));
+    }
+
+    #[test]
+    fn a_simultaneous_catch_does_not_remove_the_force_from_runner_traffic() {
+        const TRAIL: AgentId = 7;
+        const LEAD: AgentId = 8;
+        let fx = fixture(&[(TRAIL, 1), (LEAD, 2)]);
+        let inp = input(&fx, vec![
+            RunnerIn { id: fx.st.batter, base: 0, speed: 8.2, tau_s: RUNNER_TAU },
+            RunnerIn { id: TRAIL, base: 1, speed: 8.2, tau_s: RUNNER_TAU },
+            RunnerIn { id: LEAD, base: 2, speed: 8.2, tau_s: RUNNER_TAU },
+        ]);
+        let tick = |caught| {
+            let mut st = fx.st.clone();
+            let mut sim = new_sim(&inp, &mut st);
+            sim.t = 5.0;
+            sim.emit(Input::BaseLeft { t: sim.t, agent: TRAIL, base: 1 });
+            (sim.r[1].s, sim.r[1].v, sim.r[1].goal) = (BASE_L + 8.0, 5.0, 2);
+            (sim.r[2].s, sim.r[2].v, sim.r[2].goal) = (2.0 * BASE_L, 0.0, 2);
+            sim.r[2].still_since = Some(4.5);
+            if caught {
+                sim.emit(Input::GloveSecured { t: sim.t, fielder: sim.f[CF].id, x: 0.0, y: 95.0 });
+                sim.ball = Ball::Held { by: CF };
+                assert!(sim.r[0].out && !sim.forced(1), "the legal force is removed at the catch");
+            }
+            sim.move_runners();
+            let trail = &sim.r[1];
+            assert!(!trail.catch_seen && trail.goal == 2 && trail.v > 5.0);
+            (trail.s, trail.v, trail.goal, trail.decisions)
+        };
+        assert_eq!(tick(true), tick(false));
     }
 
     // Day-fixes review #1 (P1): a runner from third who crossed the plate before the catch
