@@ -31,7 +31,7 @@ A 3D baseball management game where **every outcome comes from players' physical
 
 ## Repository layout
 
-Top level: `PLAN.md`, `TASKS.md`, `observations.md` (the owner's checklist), `docs/` (specs, `reviews/`, `calibration/`, `metrics-ledger.md`, `archive/`), `analysis/` (the independent Python physics oracle with golden fixtures, plot scripts), `sim/` (Cargo workspace; `schemas/*.fbs`), `client/` (Unreal Engine 5.8 project, C++ only, no binary assets; docs/unreal-spike.md), `bin/play.sh` (the owner's launcher).
+Top level: `PLAN.md`, `TASKS.md`, `observations.md` (the owner's checklist), `docs/` (specs, `reviews/`, `calibration/`, `docs/metrics-ledger.md`, `archive/`), `analysis/` (the independent Python physics oracle with golden fixtures, plot scripts), `sim/` (Cargo workspace; `schemas/*.fbs`), `client/` (Unreal Engine 5.8 project, C++ only, no binary assets; docs/unreal-spike.md), `bin/play.sh` (the owner's launcher).
 
 Crates in `sim/crates/`:
 
@@ -66,6 +66,8 @@ bb_cli       `sim-cli` lab binary
 
 ```bash
 cd sim && cargo test --workspace          # all tests (unit, golden, oracle cross-checks)
+python3 bin/check-docs.py                # docs drift: dead links/anchors/paths, TASKS.md size cap (--all adds dated records)
+python3 -m unittest bin/test_check_docs.py  # tests for the docs check
 cargo run --release -p bb_cli -- arsenal  # pitch-type table for an average pitcher
 cargo run --release -p bb_cli -- pitch --type SL --n 20 --rrd out/sl.rrd
 cargo run --release -p bb_cli -- tunnel --with CU --json out/t.json
