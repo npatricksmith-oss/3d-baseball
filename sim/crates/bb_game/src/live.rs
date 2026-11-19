@@ -10756,7 +10756,7 @@ mod tests {
         sim.move_runners();
         assert!((sim.r[1].v - (3.0 - 4.75 / 60.0)).abs() < 1e-9);
         let mut peak = sim.r[1].s;
-        for tick in 1..180 {
+        for tick in 1..210 {
             sim.t = 0.9 + f64::from(tick) / 60.0;
             if tick == 9 {
                 sim.emit(Input::GloveSecured { t: call, fielder: sim.f[CF].id, x: at.x, y: at.y });
@@ -10774,7 +10774,9 @@ mod tests {
         // The stopping distance from 3 m/s is about 0.95 m. Even an immediate
         // turn from an 8 m lead cannot beat the roughly 1.64 s appeal.
         assert!((0.9..0.95).contains(&(peak - lead)), "braking drift {}", peak - lead);
-        assert!((1.64..2.95).contains(&(retouch - call)), "retouch after {}", retouch - call);
+        // Acceleration to about 6.4 m/s, braking, and the final slow step
+        // put the earliest return near 2.9 s after the catch.
+        assert!((2.7..3.1).contains(&(retouch - call)), "retouch after {}", retouch - call);
     }
 
     #[test]
