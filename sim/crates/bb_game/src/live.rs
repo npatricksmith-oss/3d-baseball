@@ -1316,13 +1316,15 @@ fn run_time_from(d: f64, v0: f64, v_max: f64, tau: f64) -> f64 {
 const APPROACH_MIN_MPS: f64 = 1.0;
 
 /// One tick of a runner's speed on his way back to a base he will stop on, `rem` m from it:
-/// the speed law, but never faster than he can brake from (`sqrt(2·BRAKE·rem)`, like a
-/// fielder at a wall), and slowing by at most `BRAKE` a tick when he is already too fast
+/// the speed law, limited by braking distance after this tick's movement, and slowing by
+/// at most `BRAKE` a tick when he is already too fast
 /// (agent-models §6.4, Codex recheck P2-2).
 fn approach_speed(v: f64, v_max: f64, tau: f64, rem: f64) -> f64 {
     let free = v + (v_max - v) * (DT / tau);
-    let cap = m::sqrt(2.0 * BRAKE * rem.max(0.0)).max(APPROACH_MIN_MPS);
-    free.min((v - BRAKE * DT).max(cap))
+    let brake_step = BRAKE * DT;
+    // Leave enough room after travelling v_next·DT to brake from v_next.
+    let cap = (m::sqrt(brake_step * brake_step + 2.0 * BRAKE * rem.max(0.0)) - brake_step).max(APPROACH_MIN_MPS);
+    free.min((v - brake_step).max(cap))
 }
 
 /// One step toward a stopping point. If a new goal is too close to brake for, the runner
