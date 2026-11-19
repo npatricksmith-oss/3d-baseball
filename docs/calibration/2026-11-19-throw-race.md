@@ -179,7 +179,7 @@ The runner's belief matches the world. The world's race is 0.3–0.5 s quicker f
   4. Give a tagging runner a rolling start (`tau_gain` below 1), unsourced. The tag-up note advised against it without a measurement.
 - *Recommendation:* option 1. Options 2–4 each fit a rate with a guessed number.
 
-**A separate sourced fix, not built here (scope):** the relay man's catch-to-release.
+**A separate sourced fix, not built here (scope):** the relay man's catch-to-release. *Built afterwards on `work/relay-exchange`: see §8.*
 - Model it on the pivot: about 0.75 s at a `Transfer` grade of 50, scaled by the grade rule (0.64 s at grade 70, near the measured elite 0.62 s), with no early release.
 - The runners' belief of a relay (`read_throw_time`, `typical_throw_time`) and the holder's own estimate of a relay route (`throw_race`) should follow, since they are league knowledge.
 - Expected effect:
@@ -193,6 +193,87 @@ The runner's belief matches the world. The world's race is 0.3–0.5 s quicker f
 - **The held runner never goes later.** A runner standing on third after deciding to hold never decides again while the ball is held: a runner on a base takes no relook (`runner_relook` returns early). A real runner goes when the outfielder throws to second. It did not show in these cases. Not measured.
 - **Tags from second have no MLB depth table and no thrown-out rate** here. A Retrosheet count of outs on runners advancing from second on outfield catches would give the latter.
 - **Statcast hit distance and the sim's catch point** may differ by a few feet (catch height on the descent, about 5 ft). They were compared directly.
+
+## 8. The relay fix, built (`work/relay-exchange`, from main `0f9850e`)
+
+**What was built** (agent-models §5.5, "The relay man's exchange"):
+- The cutoff man who takes a relay has `relay_s` = 0.75 s at a `Transfer` grade of 50 (`RELAY_S_50` [E]). It is scaled by the grade rule and has no early release. He used to be set at 0.455 s and could go at 0.27 s.
+- League knowledge follows: the holder's estimate of a relay route, the runners' league relay (0.525 → 0.75 s), their read of a reception they can tell is a relay, and `CUT_EXTRA_S` (0.9 → 1.05 s).
+- Tests:
+  - the grade table against the sourced 0.75 s and 0.62 s;
+  - a fixture relay home, with a runner racing in, is held 0.75 s and let go set (the old code allowed 0.27 s);
+  - after the review: the holder's relay-route estimate against the relay the world makes, and a runner's read of a receiver 3 m off third against a cutoff man at the relay spot.
+
+**Measured** (the same throwaway probes, direct seeds 0–299 and 1000–1299; `sim/target/codex-probes/relay/`).
+
+### Every tagging runner sent
+
+The throw-race counterfactual of §3, rerun with the fix:
+
+| From third, catch depth | Safe, before | Safe, after | Relayed throws that reached the catcher, before → after | Direct throws that reached the catcher, after (runner safe) | MLB, at least |
+|---|---:|---:|---|---:|---:|
+| 225–250 ft | 5 of 12 (42%) | 6 of 13 (46%) | 0 → 0 | 12 (6) | — |
+| 250–275 | 7 of 33 (21%) | 17 of 35 (49%) | 15 (held 0.38 s, ball in 3.54 s, 1 safe) → 3 (held 0.76 s, ball in 3.81 s, 3 safe) | 27 (12) | 42% |
+| 275–300 | 32 of 47 (68%) | 42 of 46 (91%) | 24 (held 0.28 s, ball in 3.83 s) → 0 | 6 (5) | 86% |
+
+**The Opus review reran it on fresh seeds** (2000–2199; [review](../reviews/2026-11-19-opus-relay-exchange-review.md) P2-1):
+
+| From third, catch depth | Review set, before | Review set, after: safe (direct throws home, safe) | Both sets pooled, after |
+|---|---:|---:|---:|
+| 250–275 ft | 6 of 21 (29%) | 10 of 23 (43%; direct 14, 6 safe) | 27 of 58 (47%) |
+| 275–300 ft | 13 of 23 (57%) | 13 of 20 (65%; direct 5, 1 safe) | 55 of 66 (83%) |
+
+The direction holds and the size does not: at 275–300 ft the gain is 91% on this note's seeds but 65% on the review's. Each bin holds only 20–46 runners per set, so either figure is good to about ±10 points.
+
+- **The relayed throws that remain arrive 0.27 s later.** That is fewer than the 0.35–0.45 s added at the relay man, because the outfielder's own release to the cutoff is unchanged. The probe's sample of relays after the fix is only 3.
+- **Relays almost vanish from the game** (review P2-2).
+  - The probe counts infielders who take an outfielder's throw away from the bags and throw on. Before: 95 in 600 games; after: 9.
+  - The review's trace of 100 games after the fix found one throw through the cutoff man in 658 outfield throws of 75–90 m to a base.
+  - The holder chooses the route by time alone, and with the sourced exchange the relay is seldom quicker. Outfield assists at home fell 10 → 4 with it.
+  - Real outfielders at the wall throw to the cutoff man. Time is one reason; the others are accuracy, a long throw's bounce, and the cutoff man's chance to redirect or hold.
+  - **The route choice is not changed here.** The owner has ruled on it in Q32 (agent-models §5.5, "The catch sets up the throw", on main): relay on deep balls, throw low through the cutoff on shallower ones. It belongs to the next job.
+- **At 275–300 ft the relay was the fault, and the fix closes the gap within sample noise.** Pooled over both sets, 83% are safe against MLB's implied ≥ 86%. Most holders there now judge an out at home unlikely (§5.6's p > 0.3) and make no throw home.
+- **At 250–275 ft the direct throw still decides the race, and it is too quick.**
+  - Of the runners sent there, most faced a direct throw home: 27 of 35 on this note's seeds and 14 of 23 on the review's. More than half of those were out (15 of 27 and 8 of 14).
+  - The throw reached the catcher 3.5–3.8 s after the catch, with release about 0.85 s after it, against the runner's 4.08 s.
+  - MLB's send rates imply about 5 in 6 are safe there. The pooled 47% meets the implied lower bound of 42%, but the races the defense does contest it mostly wins.
+  - So this note's first reading, that the direct throw no longer sets these races, holds at 275–300 ft only.
+
+From second, little changes. Throws to third are mostly direct: safe 42% / 46% / 63% at 250–275 / 275–300 / 300–350 ft, against 38% / 46% / 58% before.
+
+### As built: the runners' own decisions
+
+| Measure | Before (main `0f9850e`) | After | MLB |
+|---|---:|---:|---:|
+| Runner on third, outfield catch, 0–1 out: scored | 58.8% (243 of 413) | 61.7% (255 of 413) | 75–80% |
+| the same, none out / one out | 48.9% / 63.5% | 54.5% / 65.1% | 79% / 80% (THT) |
+| the same, put out at the plate | 5 (1.2%) | 1 (0.2%) | 2–3.5% |
+| Sent from third at 275–300 ft: put out | 5 of 20 | 1 of 23 | about 5% |
+| Scored from third per team-game (≈ sacrifice flies) | 0.203 | 0.213 | 0.24–0.27 |
+| Runner on second, third empty, outfield catch: advanced to third | 13.0% (85 of 656) | 14.2% (92 of 648) | 30.2% |
+| the same, none out / one out | 16.7% / 10.7% | 16.9% / 12.6% | 37.3% / 25.9% |
+| Singles: first to third (scorer) | 31.5% (687 of 2,184) | 31.9% (689 of 2,163) | 31.7% |
+| Singles: second to home | 54.8% (580 of 1,059) | 54.7% (567 of 1,037) | 61.7% |
+| Doubles: first to home | 76.4% (425 of 556) | 77.7% (424 of 546) | 38% (TASKS.md) |
+| Outfield assists per team-game (probe's count) | 0.250 (300) | 0.251 (301) | 0.133 (Retrosheet 2024: 647) |
+| the same, at home | 10 | 4 | — |
+| Doubles / triples per team-game | 1.98 / 0.84 | 1.95 / 0.86 | — |
+
+Notes on the table:
+- **First to home on a double** uses the scorer's ruling and the same counting as `extra_base_rates` and `runner_rates`. It does not match the 53% quoted in TASKS.md, which may be another build or a split by outs. Compare the before and after columns only.
+- **The probe's outfield-assist count is generous.** It counts any runner put out (not on the batter's own fly out) on a play where an outfielder threw before the putout. Retrosheet credits an assist only on the throw sequence of that out. The sim's level is not comparable to MLB's; its change is.
+- **Single-set movements** of a point or two in the hit rates are within run-to-run noise.
+
+### What limits the tag-ups now (restated after the review)
+
+- **The tag-up rate moved only a little: +3 points from third, +1 from second.** As the note's §6 said, a runner decides against his belief of the direct throw, and that did not change.
+- **At 275–300 ft that belief is cautious against the world.** He believes the ball, with the tag, arrives about 0.1 s before he does: 4.21 s against his 4.10 s (§2). With `caution_z` = 1 spread (0.2 s) on top, he goes on only 23 of 57 such catches, yet sent anyway he is safe on about 83% (pooled). The holder seldom makes a play on a runner already halfway home, and the runner does not model that choice.
+- **At 250–275 ft the caution is partly earned.** The direct throw home still beats more than half of the runners sent, against MLB's roughly 5 in 6 safe.
+- **So the next step is the direct race, not `caution_z` alone.**
+  - Its parts: the outfielder's catch-to-release on a throw home, and the tag-up run time.
+  - The owner's Q32 catch model, now on main (agent-models §5.5, "The catch sets up the throw"), covers how the catch sets up the throw.
+  - Fitting `caution_z` now (Q2's decision model calls it provisional) would fit it to a race that is still too quick at 250–275 ft.
+- **From second,** the read (a quarter of runners off the bag at the catch) and the direct race to third stand as in §6.
 
 ## Sources
 

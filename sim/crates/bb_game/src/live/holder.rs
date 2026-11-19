@@ -59,7 +59,7 @@ impl Sim<'_> {
                 return f64::INFINITY;
             }
             let (t, v) = release(rp, at);
-            t + throw_time(v, (rp - fd.pos).norm()) + RELAY_TRANSFER_FRAC * self.f[i].a.transfer + throw_time(THROW_EFFORT * self.f[i].a.arm, (base_pos(base) - rp).norm())
+            t + throw_time(v, (rp - fd.pos).norm()) + throwing::relay_s(self.f[i].a.transfer) + throw_time(THROW_EFFORT * self.f[i].a.arm, (base_pos(base) - rp).norm())
         };
         let d = direct(self.t);
         let v = via(self.t);
@@ -103,7 +103,8 @@ impl Sim<'_> {
             // The carrier still has the same setup clock after touching the bag.
             let to = base_pos(1) - base_pos(option.base);
             let turn = fd.face.map(|face| throwing::turn_extra_s(face, to, fd.a.throws)).unwrap_or(0.0);
-            let su = SetUp::new(fd.set_base, turn, throwing::footwork_s(fd.catch_vel, to, fd.took_diving));
+            let footwork = throwing::footwork_s(fd.catch_vel, to, fd.took_diving);
+            let su = if fd.relayed { SetUp::relay(fd.set_base, footwork) } else { SetUp::new(fd.set_base, turn, footwork) };
             let release_at = option.ball_at.max(fd.up_at + su.earliest_s);
             (by, release_at, THROW_EFFORT * fd.a.arm * su.speed_mult(su.hurry(release_at - fd.up_at)))
         } else {
