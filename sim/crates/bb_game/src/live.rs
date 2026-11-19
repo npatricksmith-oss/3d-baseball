@@ -144,12 +144,15 @@ const RUNNER_CATCH_CONFIDENCE: f64 = 0.80;
 ///   0.71 → 0.98, one out), and on a ball that drops he loses little from the bag (scoring
 ///   rather than stopping at third is worth 0.08 with the batter on first), so going back pays
 ///   from about even odds.
-/// - One out, 80%, as from first and third (Opus review 2026-11-19, P2-1). A tag that gains
-///   third is worth 0.05 runs (0.33 → 0.38, two out), while a ball that drops costs a runner
-///   back on the bag the run he scores from halfway (0.35: 1.54 against 1.19), so the
-///   break-even of going back is above 80%. His holding relook still sends him back on the
-///   deep flies he becomes sure of (major-league runners advance on 26% of these catches).
-const RUNNER_TAG_FROM_SECOND: [f64; 2] = [0.50, RUNNER_CATCH_CONFIDENCE];
+/// - One out, 60% [fitted 2026-11-19, fly-read note §4]. A tag that gains third is worth only
+///   0.05 runs (0.33 → 0.38, two out), while a ball that drops can cost a runner back on the
+///   bag the run he scores from halfway (0.35: 1.54 against 1.19), so the one-out value sits
+///   above the none-out one (Opus review 2026-11-19, P2-1: 50% with one out stranded runners
+///   on drops). Swept at 60/65/70/80% on 100 games: from 80% to 60% the one-out tag-advance
+///   rises from 1% to 10% of outfield catches (major-league runners: 26%), and the runners it
+///   sends back on balls that drop scored no less (they stop at third from a hold too), with
+///   second to home on singles unchanged.
+const RUNNER_TAG_FROM_SECOND: [f64; 2] = [0.50, 0.60];
 /// A runner who went at his first look, or holds partway, keeps looking at a ball still in the
 /// air this often, s
 /// (agent-models §6.3, the in-flight relook) [E, unsourced: the first look's own read time,
