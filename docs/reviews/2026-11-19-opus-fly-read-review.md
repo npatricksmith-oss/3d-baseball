@@ -132,10 +132,11 @@ All builds used `taskset -c 0-7 nice`, `CARGO_BUILD_JOBS=2`, and ran one at a ti
 
 By the fly-read worker (Claude Opus 5.5), on `work/fly-read`, one commit per finding. Figures are in the [fly-read note §4](../calibration/2026-11-19-fly-read.md#4-review-follow-up) and the ledger row.
 
-- **P2-1, fixed in `e8315a4`.** `RUNNER_TAG_FROM_SECOND` is [none out, one out] = [50%, 80%] [E], with the run-value reasoning in its doc comment and in agent-models §6.3. The close-catch fixture now takes the runner's own cut-off.
-  - **Second to home on singles:** 53.8% → 56.0%. With one out it is 42.2% → 45.8%; MLB is 61.7%.
-  - **Tag-ups from second to third, all outfield catches:** 17.0% with none out (MLB 37.3%) and 1.2% with one out (MLB 25.9%), against 15.7% pooled on the first build.
-  - **Not resolved:** at 80% the one-out tag-up nearly vanishes. A cut-off between 60% and 70% with one out was not swept. Either the coordinator or owner accepts this, or it becomes a question.
+- **P2-1, fixed in `e8315a4` and `11db934`.** `RUNNER_TAG_FROM_SECOND` is [none out, one out] [E], with the run-value reasoning in its doc comment and in agent-models §6.3. The close-catch fixture now takes the runner's own cut-off.
+  - **First value, 80% with one out:** the one-out tag-advance fell to 1.2% of outfield catches, against MLB's 25.9%.
+  - **The sweep:** the coordinator then had the one-out value swept at 60, 65, 70 and 80% on seeds 0–99 (note §4). The one-out tag-advance was 1.4, 4.1, 5.5 and 9.6% at 80, 70, 65 and 60%.
+  - **No cost on drops at any value:** one-out second to home on singles stayed at 23 of 51. Runners who saw the ball drop scored 13 at every value; those at 60% that changed from holding partway to going back would have stopped at third either way.
+  - **Set to 60%.** On 600 games, the one-out tag-advance from second is 10.5% (MLB 25.9%) and none-out 16.7% (MLB 37.3%). Second to home on singles is 55.1%, and 44.0% with one out (42.2% on the first build).
 - **P3-1, fixed in `af4948d`.** The fit sweeps until no cell moves by more than 50 rpm. That took five sweeps, the last moving 42 rpm, and both settled tables are pasted into live.rs.
 - **P3-2, fixed in `af4948d`.** The backspin bound is 15% again. The 15° row is checked, with 300 rpm and 4 m per cell, outside the pooled median. Its measured misses are +0.8 to +1.6 m, with backspin within 206 rpm. The liner fixture's floor is unchanged.
 - **P3-3, fixed in `c430d99`.**
@@ -143,8 +144,8 @@ By the fly-read worker (Claude Opus 5.5), on `work/fly-read`, one commit per fin
 - **P3-5:** a record only, so no change.
 
 **Verification.**
-- **Workspace tests:** touched `live.rs` and `flight.rs`, then ran `cargo test --workspace`: 465 passed, 0 failed, 4 ignored.
-- **Standard run:** seed 0 gives 4.28 (first build 4.29, main 4.48); seed 1000 gives 4.47 (4.52; main 4.55).
+- **Workspace tests:** touched `live.rs` and `flight.rs`, then ran `cargo test --workspace`: 465 passed, 0 failed, 4 ignored, at 80% and again at the final 60%.
+- **Standard run, final value (60%):** seed 0 gives 4.27 (first build 4.29, main 4.48); seed 1000 gives 4.47 (4.52; main 4.55). The 80% build gave 4.28 [4.47].
 - **Rules warnings:** none in either run.
 
 ## Resolution
