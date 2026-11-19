@@ -44,7 +44,7 @@ One `sim/crates/bb_game/src/live.rs` job at a time. Each job gets a ledger row a
 - [ ] The coach's read and send for a ball behind the runner (Q10 a). Model early-departure decisions on caught flies, slides around tags, a turn decision before the bag, and an overrun redirected after an overthrow.
 - [ ] The rundown (Q11), on its own branch. A stand-in exists. Two small points from the runner-decision review wait for it.
 - [ ] A runner stops dead standing at a base he holds, at 8 m/s (the sim brakes him only going back). A runner put out short of the bag leaves the picture, so there is no slide into a tag.
-- [ ] Unexplained: doubles with a runner on first and two out nearly doubled after the decision model (88 → 167 in 300 games). Suspect: the scorer's single-or-double ruling when the batter takes second on the throw home. First to home on a double is 53% against 38%.
+- [ ] Unexplained: doubles with a runner on first and two out nearly doubled after the decision model (88 → 167 in 300 games). Suspect: the scorer's single-or-double ruling when the batter takes second on the throw home. First to home on a double is 77% against MLB 38% (65 of 84, seeds 0–99, `extra_base_rates`, 2026-11-19; the 53% quoted before dated from 2026-11-15).
 - [ ] Owner's saved plays 65, 67, 68, 156 and "round first on a throw to the cutoff" (observations.md): going halfway on a fly, running through first, rounding first.
 - Waiting for ratings: per-runner caution and speed; τ refit to Statcast 90-ft splits (league top speed is 8.2 m/s; 27.0 ft/s is 8.23); the left/right home-to-first gap (0.17 s against 0.09 s).
 
@@ -66,7 +66,8 @@ One `sim/crates/bb_game/src/live.rs` job at a time. Each job gets a ledger row a
 
 ### 3. Throws and judgment (owner, 2026-11-15)
 
-- [ ] **The catch sets up the throw (Q32, decided 2026-11-19; agent-models §5.5).** Next after the relay fix: see "Resume here".
+- [ ] **The catch sets up the throw (Q32, decided 2026-11-19; agent-models §5.5).** Next after the relay fix: see "Resume here". It includes the route choice: since the relay man's sourced exchange, outfielders throw 75–90 m direct and relays fell 95 → 9 per 600 games ([relay review](docs/reviews/2026-11-19-opus-relay-exchange-review.md) P2-2), because the holder weighs only time. The owner's model sends deep balls (about 280 ft or more) to the relay man and shallower throws low through the cutoff; measure how often the sim's long direct throws bounce or go wide first. At 250–275 ft the direct throw home still beats more than half of the runners sent from third (review P2-1).
+- [ ] **A base receiver's catch-and-throw is unsourced** (relay review P3-3): 0.7 × `Transfer` with the general hurry, as quick as 0.28 s (27 of 71 receivers at a bag hurried per 100 games). Statcast's catcher exchange (mean 0.73 s, elite 0.64 s) is the nearest measured analogue; use it to replace `RELAY_TRANSFER_FRAC` and its hurry.
 - [ ] **Outfield throws to the wrong base or past the cutoff.** Measure by play: throws to a base with no play while a trailing runner advances; cutoff man in line and missed. Then the model change. Includes the owner's "after an out from deep outfield, hit a cutoff", and the cut-or-let-it-go call (Q32's cutoff part, agent-models §5.5).
 - [ ] **Infield judgment on the double play:** when to go for two, by score, inning, outs, the runners' speed and the fielder's set-up (agent-models §5). Third basemen convert 48% of double-play grounders against a real 38%.
 
