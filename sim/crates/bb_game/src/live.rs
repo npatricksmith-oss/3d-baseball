@@ -248,6 +248,14 @@ impl ContactLook {
     }
 }
 
+/// One observed path's best catch, with its time and appeal origin paired.
+#[derive(Clone, Copy, Debug, PartialEq)]
+struct CatchRead {
+    score: f64,
+    t: f64,
+    at: Vec3,
+}
+
 /// What the runner saw of the holder receiving or fielding the ball.
 #[derive(Clone, Copy, Debug, PartialEq)]
 struct HolderLook {
@@ -1315,15 +1323,32 @@ fn approach_speed(v: f64, v_max: f64, tau: f64, rem: f64) -> f64 {
     free.min((v - BRAKE * DT).max(cap))
 }
 
-/// How long a runner moving at `v0` toward a base `d` m ahead (negative: away from it) needs
-/// to arrive at it and stop there, by the movement step's own laws: braking through zero if
-/// he is moving away, then the speed law limited by his braking distance. Stepped at the
-/// sim's tick so the estimate and the legs agree.
+/// One step toward a stopping point. If a new goal is too close to brake for, the runner
+/// carries his remaining speed past it and comes back.
+fn step_to_stop(s: f64, signed_v: f64, goal: f64, vmax: f64, tau: f64) -> (f64, f64) {
+    let gap = goal - s;
+    if gap.abs() < 1e-9 && signed_v.abs() <= APPROACH_MIN_MPS {
+        return (goal, 0.0);
+    }
+    let dir = gap.signum();
+    let v = if gap.abs() < 1e-9 || signed_v * dir < 0.0 {
+        signed_v.signum() * (signed_v.abs() - BRAKE * DT).max(0.0)
+    } else {
+        dir * approach_speed(signed_v.abs(), vmax, tau, gap.abs())
+    };
+    let next = s + v * DT;
+    if v.abs() <= APPROACH_MIN_MPS && v * dir > 0.0 && (goal - next) * dir <= 0.0 {
+        (goal, 0.0)
+    } else {
+        (next, v)
+    }
+}
+
+/// Time to plant at a stopping point d metres ahead (v0 is signed toward it).
 fn run_time_to_stop(d: f64, v0: f64, v_max: f64, tau: f64) -> f64 {
     let (mut s, mut v, mut t) = (0.0, v0, 0.0);
-    while s < d - 1e-9 && t < 60.0 {
-        v = if v < 0.0 { (v + BRAKE * DT).min(0.0) } else { approach_speed(v, v_max, tau, d - s) };
-        s += v * DT;
+    while (s != d || v != 0.0) && t < 60.0 {
+        (s, v) = step_to_stop(s, v, d, v_max, tau);
         t += DT;
     }
     t
@@ -2434,23 +2459,21 @@ impl<'a> Sim<'a> {
         look
     }
 
-    /// Average the best catch scores over the eight alternatives to the noisy motion.
-    fn runner_catch_belief(&self, look: ContactLook) -> f64 {
-        let mut p = 0.0;
-        for axis in 0..4 {
-            for sign in [-1.0, 1.0] {
-                let mut e = [0.0; 4];
-                e[axis] = sign * RUNNER_CATCH_READ_POINT;
-                p += self.runner_catch_read(&look.project(self.inp.field, e)).0;
-            }
-        }
-        p / 8.0
+    fn runner_catch_paths(&self, look: ContactLook) -> [Option<CatchRead>; 8] {
+        core::array::from_fn(|i| {
+            let mut error = [0.0; 4];
+            error[i / 2] = [-RUNNER_CATCH_READ_POINT, RUNNER_CATCH_READ_POINT][i % 2];
+            self.runner_catch_read(&look.project(self.inp.field, error))
+        })
     }
 
-    /// The catch chance on one projection of the ball: [`Self::runner_catch_read`].
+    fn catch_score(paths: &[Option<CatchRead>; 8]) -> f64 {
+        paths.iter().flatten().map(|read| read.score).sum::<f64>() / paths.len() as f64
+    }
+
     #[cfg(test)]
     fn runner_catch_probability(&self, pred: &BallPath) -> f64 {
-        self.runner_catch_read(pred).0
+        self.runner_catch_read(pred).map_or(0.0, |read| read.score)
     }
 
     /// The best catch chance over a projection's first flight, and where on the ground it
@@ -2459,10 +2482,10 @@ impl<'a> Sim<'a> {
     /// fielder's speed (`FIELDER_SPEED_SPREAD_MPS` over the run) and about the ball's curve
     /// from the spin he cannot see (`CURVE_PRIOR`); where his projection has the ball above
     /// catching height, times the chance the curve brings it down to it.
-    fn runner_catch_read(&self, pred: &BallPath) -> (f64, Option<Vec3>) {
+    fn runner_catch_read(&self, pred: &BallPath) -> Option<CatchRead> {
         let ground = pred.first_bounce().map_or(f64::INFINITY, |(t, ..)| t);
         let wall = pred.walls.first().map_or(f64::INFINITY, |(t, ..)| *t);
-        let (mut best, mut at) = (0.0, None);
+        let mut best: Option<CatchRead> = None;
         let mut t = self.t;
         while t <= pred.t_end() && t < ground.min(wall) {
             let (b, _) = pred.at(t);
@@ -2488,69 +2511,91 @@ impl<'a> Sim<'a> {
                     let speed_m = travel(TYPICAL_SPEED + FIELDER_SPEED_SPREAD_MPS) - typical;
                     let sigma = m::sqrt(RUNNER_CATCH_SIGMA_M * RUNNER_CATCH_SIGMA_M + speed_m * speed_m + curve_m * curve_m);
                     let p = phi((REACH + typical - d) / sigma) * low;
-                    if p > best {
-                        (best, at) = (p, Some(Vec3::new(b.x, b.y, 0.0)));
+                    if p > 0.0 && best.is_none_or(|read| p > read.score) {
+                        best = Some(CatchRead { score: p, t, at: Vec3::new(b.x, b.y, 0.0) });
                     }
                 }
             }
             t += DT;
         }
-        (best, at)
+        best
     }
 
-    /// How far off his base a runner holds on a close catch (agent-models §6.3): as far as he
-    /// can still get back. From a catch at `at`, by his belief the ball reaches his base after
-    /// a typical transfer and throw; he needs his reaction to the call and a run from a stand
-    /// that stops on the bag (his own legs' law), with his usual caution in spreads of the
-    /// race. On the bag if even that is too far; never past `HALFWAY_M` beyond his lead or
-    /// 0.6 of the way.
-    fn catch_hold_s(&self, k: usize, at: Vec3) -> f64 {
+    fn catch_hold_s(&self, k: usize, paths: &[Option<CatchRead>]) -> Option<f64> {
         let r = &self.r[k];
+        let bag_s = r.start as f64 * BASE_L;
+        let off = r.s - bag_s;
+        let speed = r.v * r.direction;
         let bag = base_pos(r.start);
-        let ball_s = TYPICAL_TRANSFER + typical_throw_time(m::hypot(at.x - bag.x, at.y - bag.y));
         let adv = &self.inp.advance;
-        let budget = ball_s - RUNNER_CATCH_CALL_REACT_S - adv.caution_z * adv.sigma_race_s;
-        let far = (lead_s(r.start) + HALFWAY_M).min((r.start as f64 + 0.6) * BASE_L) - r.start as f64 * BASE_L;
-        let back = |d: f64| run_time_to_stop(d, 0.0, r.vmax, r.tau);
-        let off = if back(far) <= budget {
-            far
-        } else if budget <= 0.0 {
-            0.0
-        } else {
-            let (mut lo, mut hi) = (0.0, far);
-            for _ in 0..20 {
-                let mid = 0.5 * (lo + hi);
-                if back(mid) <= budget { lo = mid } else { hi = mid }
+        let caution = adv.caution_z * adv.sigma_race_s;
+        let far = (lead_s(r.start) + HALFWAY_M).min((r.start as f64 + 0.6) * BASE_L);
+        let plausible = paths.iter().flatten().filter(|read| read.score >= 1.0 - RUNNER_CATCH_CONFIDENCE);
+        if r.start == 3 {
+            let tag = self.inp.tag_up;
+            let to_home = tag_up_time(tag, tag.react_s, BASE_L, r.vmax, r.tau);
+            let to_bag = run_time_to_stop(off, -speed, r.vmax, r.tau);
+            if plausible.clone().any(|read| {
+                read.t - self.t >= to_bag
+                    && TYPICAL_TRANSFER + typical_throw_time(read.at.norm()) + tag.typical_tag_s >= to_home
+            }) {
+                return None;
             }
-            lo
-        };
-        r.start as f64 * BASE_L + off
+        }
+
+        let races: Vec<_> = plausible.map(|read| {
+            let appeal = TYPICAL_TRANSFER + typical_throw_time((read.at - bag).norm());
+            (read.t, appeal - caution - RUNNER_CATCH_CALL_REACT_S)
+        }).collect();
+        if races.is_empty() {
+            return None;
+        }
+        let recoverable = |target: f64| races.iter().all(|&(catch, budget)| {
+            let mut s = r.s;
+            let mut v = speed;
+            // Carry the intended hold through the catch and the reaction. The first
+            // step in the return then uses whatever signed speed remains.
+            let mut t = self.t;
+            let react = catch + RUNNER_CATCH_CALL_REACT_S;
+            while t < react - 1e-9 && (s != target || v != 0.0) {
+                (s, v) = step_to_stop(s, v, target, r.vmax, r.tau);
+                t += DT;
+            }
+            run_time_to_stop(s - bag_s, -v, r.vmax, r.tau) <= budget
+        });
+
+        if recoverable(far) {
+            return Some(far);
+        }
+        if !recoverable(bag_s) {
+            return None;
+        }
+        let (mut lo, mut hi) = (bag_s, far);
+        for _ in 0..20 {
+            let mid = 0.5 * (lo + hi);
+            if recoverable(mid) { lo = mid } else { hi = mid }
+        }
+        (lo > bag_s + 1e-6).then_some(lo)
     }
 
     fn read_contact(&mut self, k: usize, look: ContactLook) {
-        let p_catch = self.runner_catch_belief(look);
-        let pred = look.project(self.inp.field, [0.0; 4]);
-        let (_, at) = self.runner_catch_read(&pred);
-        self.act_on_contact(k, p_catch, at, &pred);
+        let paths = self.runner_catch_paths(look);
+        let score = Self::catch_score(&paths);
+        if score >= RUNNER_CATCH_CONFIDENCE {
+            self.r[k].tag_up = true;
+        } else if score > 1.0 - RUNNER_CATCH_CONFIDENCE {
+            self.set_catch_hold(k, &paths);
+        } else {
+            let pred = look.project(self.inp.field, [0.0; 4]);
+            self.runner_decide_with_contact(k, self.r[k].start, Some(&pred));
+        }
     }
 
-    fn act_on_contact(&mut self, k: usize, p_catch: f64, at: Option<Vec3>, pred: &BallPath) {
-        let base = self.r[k].start;
-        if p_catch >= RUNNER_CATCH_CONFIDENCE {
+    fn set_catch_hold(&mut self, k: usize, paths: &[Option<CatchRead>]) {
+        let hold = self.catch_hold_s(k, paths);
+        self.r[k].hold_s = hold;
+        if hold.is_none() {
             self.r[k].tag_up = true;
-        } else if p_catch > 1.0 - RUNNER_CATCH_CONFIDENCE {
-            let hold = match at {
-                Some(at) => self.catch_hold_s(k, at),
-                None => (lead_s(base) + HALFWAY_M).min((base as f64 + 0.6) * BASE_L),
-            };
-            if hold <= base as f64 * BASE_L + 1e-6 {
-                // No room to stand off the bag: he goes back to it, as on a likely catch.
-                self.r[k].tag_up = true;
-            } else {
-                self.r[k].hold_s = Some(hold);
-            }
-        } else {
-            self.runner_decide_with_contact(k, base, Some(pred));
         }
     }
 
@@ -5113,8 +5158,10 @@ impl<'a> Sim<'a> {
             let goal_s = self.r[k].hold_s.unwrap_or(self.r[k].goal as f64 * BASE_L);
             let (now, tag) = (self.t, self.inp.tag_up);
             let r = &mut self.r[k];
-            let dir = (goal_s - r.s).signum();
-            if (goal_s - r.s).abs() < 1e-6 {
+            let gap = goal_s - r.s;
+            let dir = gap.signum();
+            let stopping = r.hold_s.is_some() || r.tag_up || r.retouch || dir < 0.0;
+            if gap.abs() < 1e-6 && (!stopping || r.v == 0.0) {
                 r.v = 0.0;
                 continue;
             }
@@ -5125,26 +5172,28 @@ impl<'a> Sim<'a> {
                 Some(leave) if now < leave => continue,
                 _ => {}
             }
-            // Turning round takes a stop: moving the other way he brakes at `BRAKE` (the
-            // fielders' figure) through zero, then accelerates toward the goal on the usual
-            // curve; he never flips his direction at speed (agent-models §6.4).
-            let against = r.v > 1e-9 && r.direction != dir;
-            let mdir = if against { r.direction } else { dir };
-            r.direction = mdir;
             if r.v == 0.0 {
                 r.moving_since = now;
             }
             let tau = if r.set_start.is_some() { r.tau * tag.tau_gain } else { r.tau };
-            if against {
-                r.v = (r.v - BRAKE * DT).max(0.0);
-            } else if dir < 0.0 || r.hold_s.is_some() {
-                // Brake into a return or a partway hold, both known stopping points.
-                r.v = approach_speed(r.v, r.vmax, tau, (goal_s - r.s).abs());
-            } else {
-                r.v += (r.vmax - r.v) * (DT / tau);
-            }
             let prev = r.s;
-            let nxt = prev + mdir * r.v * DT;
+            let (nxt, stop_speed) = if stopping {
+                step_to_stop(prev, r.direction * r.v, goal_s, r.vmax, tau)
+            } else {
+                // For a running arrival, keep his crossing speed. If turning, brake in the
+                // old direction until he stops, then accelerate toward the new goal.
+                let signed = if r.v > 1e-9 && r.direction != dir {
+                    r.direction * (r.v - BRAKE * DT).max(0.0)
+                } else {
+                    dir * (r.v + (r.vmax - r.v) * (DT / tau))
+                };
+                (prev + signed * DT, signed)
+            };
+            let mdir = (nxt - prev).signum();
+            if mdir != 0.0 {
+                r.direction = mdir;
+            }
+            r.v = stop_speed.abs();
             let crossed = |b: u8| {
                 let bs = b as f64 * BASE_L;
                 (prev < bs && nxt >= bs) || (prev > bs && nxt <= bs)
@@ -5158,8 +5207,8 @@ impl<'a> Sim<'a> {
                 }
             }
             // Leaving a base.
-            let left = (0..=3u8).find(|&b| (prev - b as f64 * BASE_L).abs() < 1e-9 && b >= 1);
-            r.s = if !against && ((dir > 0.0 && nxt >= goal_s) || (dir < 0.0 && nxt <= goal_s)) { goal_s } else { nxt };
+            let left = (1..=3u8).find(|&b| nxt != prev && (prev - b as f64 * BASE_L).abs() < 1e-9);
+            r.s = if !stopping && mdir == dir && crossed(r.goal) { goal_s } else { nxt };
             let id = r.id;
             if let Some(b) = left {
                 self.emit(Input::BaseLeft { t: self.t, agent: id, base: b });
@@ -5177,11 +5226,11 @@ impl<'a> Sim<'a> {
                 if b == self.r[k].goal {
                     self.r[k].turns = 0;
                 }
-                let retouched = mdir < 0.0 && self.r[k].retouch && b == self.r[k].start;
+                let retouched = self.r[k].retouch && b == self.r[k].start && self.r[k].v == 0.0;
                 if retouched {
                     self.r[k].retouch = false;
                 }
-                if b < 4 && (mdir > 0.0 || retouched) && b == self.r[k].goal && !awaiting_catch_call {
+                if b < 4 && (!stopping && mdir > 0.0 || retouched) && b == self.r[k].goal && !awaiting_catch_call {
                     // Arrived where it was going (or retouched after a catch): decide whether
                     // to keep going (leaving the base is reported on the next step). Coming
                     // back he braked into the bag, and is planted on it: his next leg starts
@@ -5202,7 +5251,7 @@ impl<'a> Sim<'a> {
             // speed. Protected overruns retain the crossing speed for braking.
             let r = &mut self.r[k];
             let stop_s = r.hold_s.unwrap_or(r.goal as f64 * BASE_L);
-            if r.overrun == OverrunPhase::None && (stop_s - r.s).abs() < 1e-6 {
+            if r.overrun == OverrunPhase::None && (stop_s - r.s).abs() < 1e-6 && (!stopping || r.v == 0.0) {
                 r.v = 0.0;
                 r.set_start = None;
                 r.turned_back = None;
@@ -10370,7 +10419,7 @@ mod tests {
         let (_, x, y) = flight.first_bounce().unwrap();
         let belief = (0..300).find_map(|offset| {
             sim.f[6].pos = Vec3::new(x + f64::from(offset) * 0.1, y, 0.0);
-            let p = sim.runner_catch_belief(look);
+            let p = Sim::catch_score(&sim.runner_catch_paths(look));
             (0.25..0.75).contains(&p).then_some(p)
         }).expect("a close catch between the fielder and the gap");
 
@@ -10387,7 +10436,7 @@ mod tests {
         assert_ne!(sim.ball_at(sim.t), old_motion);
         assert!(sim.no_catch_at.is_none());
         sim.r[0] = initial;
-        assert_eq!(sim.runner_catch_belief(look), belief);
+        assert_eq!(Sim::catch_score(&sim.runner_catch_paths(look)), belief);
         sim.read_contact(0, look);
         assert_eq!((sim.r[0].goal, sim.r[0].tag_up, sim.r[0].hold_s), action);
     }
@@ -10430,7 +10479,9 @@ mod tests {
         sim.f[2].pos = Vec3::new(x, y + 1.0, 0.0);
         let p = sim.runner_catch_probability(&seen);
         assert!((0.20..0.80).contains(&p), "close catch belief {p:.2}");
-        sim.act_on_contact(1, p, None, &seen);
+        sim.r[1].s = BASE_L + 0.8;
+        sim.r[1].v = 0.0;
+        sim.set_catch_hold(1, &[sim.runner_catch_read(&seen)]);
         let hold = sim.r[1].hold_s.expect("the close read keeps him partway");
         assert!(hold < 1.5 * BASE_L && !sim.r[1].tag_up);
         let start = sim.r[1].s;
@@ -10554,10 +10605,11 @@ mod tests {
         let mut sim = new_sim(&inp, &mut st);
         sim.start_runners();
         let bag = 2.0 * BASE_L;
-        let deep = sim.catch_hold_s(1, Vec3::new(-50.0, 110.0, 0.0));
+        let read_at = |at| [Some(CatchRead { score: 0.5, t: 5.0, at })];
+        let deep = sim.catch_hold_s(1, &read_at(Vec3::new(-50.0, 110.0, 0.0))).unwrap();
         assert!((deep - (lead_s(2) + HALFWAY_M)).abs() < 1e-9, "deep hold {:.2} m off", deep - bag);
         let at = Vec3::new(-15.0, 45.0, 0.0);
-        let shallow = sim.catch_hold_s(1, at);
+        let shallow = sim.catch_hold_s(1, &read_at(at)).unwrap();
         assert!(shallow > bag + 1.0 && shallow < lead_s(2), "shallow hold {:.2} m off", shallow - bag);
 
         let call = 5.0;
@@ -10578,6 +10630,76 @@ mod tests {
         let spare = ball - back;
         let caution = inp.advance.caution_z * inp.advance.sigma_race_s;
         assert!(spare >= caution - DT && spare <= caution + 0.1, "back in {back:.3} s, ball in {ball:.3} s");
+    }
+
+    #[test]
+    fn a_close_early_catch_sends_the_standard_moving_lead_back_immediately() {
+        const R: AgentId = 7;
+        let fx = fixture(&[(R, 1)]);
+        let inp = input(&fx, vec![
+            RunnerIn { id: fx.st.batter, base: 0, speed: 8.2, tau_s: RUNNER_TAU },
+            RunnerIn { id: R, base: 1, speed: 8.2, tau_s: RUNNER_TAU },
+        ]);
+        let mut st = fx.st.clone();
+        let mut sim = new_sim(&inp, &mut st);
+        sim.start_runners();
+        sim.r[1].s += 0.5 * sim.r[1].v;
+        sim.r[1].reading_contact = false;
+        sim.t = 0.9;
+        let call = 1.05;
+        let at = base_pos(1) - Vec3::X * 30.0;
+        let paths = [Some(CatchRead { score: 0.5, t: call, at })];
+        let lead = sim.r[1].s;
+        assert!((lead - BASE_L - 8.0).abs() < 1e-9);
+        sim.set_catch_hold(1, &paths);
+        assert!(sim.r[1].tag_up && sim.r[1].hold_s.is_none());
+        sim.emit(Input::BaseLeft { t: sim.t, agent: R, base: 1 });
+        sim.move_runners();
+        assert!((sim.r[1].v - (3.0 - 4.75 / 60.0)).abs() < 1e-9);
+        let mut peak = sim.r[1].s;
+        for tick in 1..180 {
+            sim.t = 0.9 + f64::from(tick) / 60.0;
+            if tick == 9 {
+                sim.emit(Input::GloveSecured { t: call, fielder: sim.f[CF].id, x: at.x, y: at.y });
+                assert!(sim.caught());
+                sim.ball = Ball::Held { by: CF };
+                sim.f[CF].pos = at;
+            }
+            sim.move_runners();
+            peak = peak.max(sim.r[1].s);
+        }
+        let retouch = sim.out.facts.iter().find_map(|fact| match *fact {
+            Input::BaseTouched { agent: R, base: 1, t, holding_ball: false } if t > call => Some(t),
+            _ => None,
+        }).expect("legally retouched");
+        // The stopping distance from 3 m/s is about 0.95 m. Even an immediate
+        // turn from an 8 m lead cannot beat the roughly 1.64 s appeal.
+        assert!((0.9..0.95).contains(&(peak - lead)), "braking drift {}", peak - lead);
+        assert!((1.64..2.70).contains(&(retouch - call)), "retouch after {}", retouch - call);
+    }
+
+    #[test]
+    fn a_runner_does_not_plant_at_a_hold_inside_his_braking_distance() {
+        const R: AgentId = 7;
+        let fx = fixture(&[(R, 1)]);
+        let inp = input(&fx, vec![RunnerIn { id: R, base: 1, speed: 8.2, tau_s: RUNNER_TAU }]);
+        let mut st = fx.st.clone();
+        let mut sim = new_sim(&inp, &mut st);
+        sim.t = 0.9;
+        let r = &mut sim.r[0];
+        let start = BASE_L + 8.0;
+        let target = start + 0.13;
+        (r.s, r.v, r.hold_s) = (start, 2.84, Some(target));
+        let mut peak = start;
+        for tick in 0..120 {
+            sim.t = 0.9 + f64::from(tick) / 60.0;
+            sim.move_runners();
+            peak = peak.max(sim.r[0].s);
+        }
+        // From 2.84 m/s the ideal braking distance is 0.85 m. At 60 Hz it
+        // is about 0.82 m, so planting 0.13 m ahead is physically impossible.
+        assert!((0.80..0.85).contains(&(peak - start)), "braking drift {}", peak - start);
+        assert_eq!((sim.r[0].s, sim.r[0].v), (target, 0.0));
     }
 
     // Runners take leads, and on a fly that might drop with fewer than two out they go
