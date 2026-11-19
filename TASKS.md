@@ -1,6 +1,6 @@
 # Task List
 
-**Last updated:** 2026-11-19 00:40 (saved plays and catch-read fixes merged; no workers running).
+**Last updated:** 2026-11-19 (Opus worker `fly-read` running on the 25–50° double-offs).
 
 What is next and what is open. Other files hold the rest:
 
@@ -15,13 +15,13 @@ Status: `[ ]` not started · `[~]` partly done · `[?]` needs an owner decision
 
 ---
 
-## Resume here (2026-11-19, 00:40)
+## Resume here (2026-11-19)
 
-**State.** No workers running; the Workers tab is closed. Both branches are merged and pushed.
+**State.** One worker running: **`fly-read`** (Opus, high), Workers tab, herdr-app terminal `t2v`, worktree `.claude/worktrees/runner-decision`, branch `work/fly-read` from `48f36a9`, job file `WORKER-FLYREAD.md` there (steps 1–3 below). Check: `git -C .claude/worktrees/runner-decision log --oneline main..work/fly-read`, its ledger row, and `hc read t2v`. When it is done: test and standard run once, then an Opus review of the branch. Nothing is waiting on the owner.
 
 **Catch-read fixes merged (2026-11-19, `c313f6a`, Q27).** Runner catch reads, relooks, the holder's look, the hold for the call and the settle guard use only what the runner can see. Sacrifice flies from third 3 → 204 over 600 games; runs 4.38 → 4.48 [4.53 → 4.55]. Reviews resolved ([fixes review](docs/reviews/2026-11-18-codex-catch-read-fixes-review.md), [Opus re-review](docs/reviews/2026-11-18-opus-catch-fixes2-review.md)).
 
-**Next: one Opus `live.rs` job, the 25–50° double-offs** (16.5 → 38.0 per 300 games on this merge). In order: (1) the runner's first look reads 25–50° flies about 2.5 m long even with no read error, and 32 of 342 in-park flies landing past 100 m as home runs (Opus re-review P2-1): find whether the believed pure-backspin axis or the spin-drag nonlinearity causes it and fix the model, recheck the fielders' first look with the same probe (`sim/target/codex-probes/opus-fix2/zz_opus_carry_probe.rs`), and correct the runner-timing note's "does not show a population bias"; (2) an in-flight relook, so a runner who reads a deep fly as gone looks again while it is up and pulls up as the fielder settles (agent-models §6.3); (3) then the catch cut-off calibration below. Ledger row and one Opus review.
+**Running (`fly-read`): one Opus `live.rs` job, the 25–50° double-offs** (16.5 → 38.0 per 300 games on this merge). In order: (1) the runner's first look reads 25–50° flies about 2.5 m long even with no read error, and 32 of 342 in-park flies landing past 100 m as home runs (Opus re-review P2-1): find whether the believed pure-backspin axis or the spin-drag nonlinearity causes it and fix the model, recheck the fielders' first look with the same probe (`sim/target/codex-probes/opus-fix2/zz_opus_carry_probe.rs`), and correct the runner-timing note's "does not show a population bias"; (2) an in-flight relook, so a runner who reads a deep fly as gone looks again while it is up and pulls up as the fielder settles (agent-models §6.3); (3) then the catch cut-off calibration below. Ledger row and one Opus review.
 
 **Saved plays merged (2026-11-18, `38ec67b`, Q30 (b), D9).** A save keeps the recorded timeline, its MD5, the roster, the park and the board; the viewer refuses damaged, swapped or legacy files. Both reviews resolved ([first](docs/reviews/2026-11-18-codex-saved-plays-review.md), [fixes](docs/reviews/2026-11-18-sonnet-saved-plays-fixes-review.md)). Deferred, P3: the fixes review's P3-3 (a park without a full roster is dropped silently), P3-4 (names with `"`/`;`/`=`/`\` are rewritten; park and player values unchecked), P3-5 (unreachable summary checks; `LoadRecorded`'s call to `InfoSane` untested), P3-7 (the check leaves `board_after`, 17 players and most park fields unasserted). All need a hand-edited save or are check coverage. Accepted limit: a saved play uses today's poses, clips and camera.
 
