@@ -236,3 +236,44 @@ The standard sets ran on `c90cc19` with direct seeds 0–299 and 1,000,003,000 o
 | First to third on all singles | 818/2,283 (35.8%) | 590/1,838 (32.1%) | 709/2,127 (33.3%) |
 
 Double-offs at 10–25° are back near the base and below Retrosheet's 25.7 for its line-drive label. Below 10°, most come on catches before the 0.5 s look, which the read cannot affect (Codex review, residual double-offs). On singles with 0–1 out, first to third went from 30.5% to 26.0%, because more runners now hold partway on outfield liners that fall. Second to home went from 38.7% to 44.0% with 0–1 out. The two-out rates hardly moved: 47.1% to 46.9% first to third, 75.3% to 74.7% second to home. The two-out send to center is the contact clock's decision, which these changes do not touch. It stays above the 75–91% band with a median benchmark of 7.26 s, against 6.57 s in left and 6.44 s in right. [Before-and-after standard runs](../metrics-ledger.md#2026-11-18-300-games-each-at---seed-0-and---seed-1000).
+
+### Catch-read review fixes
+
+On seed `1000003000`, play `82`, the contact, catch and first throw match `43bd29e`. On the baseline the runner on third was 9.50 m off at the catch, returned 2.67 s later and stayed. The fly stayed up for 5.683 s on both builds. With the fixes the runner is back 2.33 s before the catch, tags from rest and scores 4.08 s after the catch. The runner heads back on his first look. The revised decision also checks whether the runner on third can set up in time to tag on a plausible catch deep enough for a race home. [Review and resolution](../reviews/2026-11-18-codex-catch-read-review.md#worker-follow-up).
+
+Both builds used the reference fielding grades on direct game seeds 0–299 and 1,000,003,000–1,000,003,299. The appeal counts include caught balls with runners and 0–1 out. The singles and sacrifice flies use the official scorer.
+
+| Measure across the two cohorts | Baseline `43bd29e` | Fixes `ea843d4` |
+|---|---:|---:|
+| Runners doubled off below 10°, per 300 games | 59.5 (67 and 52) | 55.5 (64 and 47) |
+| Runners doubled off at 10–25°, per 300 games | 19.0 (16 and 22) | 19.0 (15 and 23) |
+| Runners doubled off at 25–50°, per 300 games | 16.5 (17 and 16) | 38.0 (49 and 27) |
+| Runners doubled off at 50° and above, per 300 games | 5.5 (7 and 4) | 0.5 (1 and 0) |
+| Scored sacrifice flies from third | 3 (3 and 0) | 204 (98 and 106) |
+| Scored sacrifice flies from third, per team-game | 0.003 | 0.170 |
+| Runner from third scored on an outfield catch, 0–1 out | 5/432 (1.2%) | 205/416 (49.3%) |
+| Second to home on all singles | 558/984 (56.7%) | 546/979 (55.8%) |
+| First to third on all singles | 709/2,127 (33.3%) | 688/2,063 (33.3%) |
+
+Returning early enough to tag restores many sacrifice flies. The 25–50° catches yielded 43 more appeal outs across both cohorts, consistent with the increase in the CLI's fly balls with two or more outs. The appeal count covers catches with runners and 0–1 out. The CLI rate uses all batted-ball plate appearances in that launch band and includes every kind of multi-out play. The specific decisions driving the extra fly-ball appeals and the contribution of each mechanism to runs are still open. [Metrics ledger](../metrics-ledger.md#2026-11-18-300-games-each-at---seed-0-and---seed-1000).
+
+#### Fixes-review follow-up and the 25–50° double-offs
+
+After the second review's fixes (`fd29b1e`; sim last changed in `9fdbf8d`) the same direct seeds give the counts below. The summary run moved only HR/PA on seed 0 against `ea843d4`, because the fixed paths needed private state that differed from what the runner could see.
+
+| Measure across the two cohorts | Fixes `ea843d4` | Follow-up `fd29b1e` |
+|---|---:|---:|
+| Runners doubled off below 10°, per 300 games | 55.5 (64 and 47) | 55.5 (64 and 47) |
+| Runners doubled off at 10–25°, per 300 games | 19.0 (15 and 23) | 18.0 (14 and 22) |
+| Runners doubled off at 25–50°, per 300 games | 38.0 (49 and 27) | 38.0 (49 and 27) |
+| Runners doubled off at 50° and above, per 300 games | 0.5 (1 and 0) | 0.5 (1 and 0) |
+| Second to home on all singles | 546/979 (55.8%) | 548/981 (55.9%) |
+| First to third on all singles | 688/2,063 (33.3%) | 689/2,065 (33.4%) |
+| Two-out sends from second on singles to center | — | 122/123 (99.2%; 67/67 and 55/56) |
+| Two-out sends from second on singles to left / right | — | 69/84 (82%) / 77/96 (80%) |
+
+The two-out send to center stays above the 75–91% band on a fresh cohort; left and right are inside it.
+
+`runner_timing` now lists every runner doubled off a 25–50° catch. A throwaway probe replayed all 76. All were 0–1 out: 50 from first, 25 from second, one from third. Every catch was 80–121 m out after 3.9–6.5 s in the air. Each runner chose to advance at his first look, 0.5 s after contact, on a catch score below the 20% cutoff (median 8%; 15 runners at 15–20%; none at or above). In all 76 his projection cleared the fence, so the scan found no catch on most of his eight paths. At the catch 67 were running 30–50 m off their base, eight stood on the next bag and one was holding. Projecting the true motion with no read error still clears the fence on 16 of them and lands a median 4.2 m (quartiles 1.9 and 6.4 m) beyond the true landing on the others; their true spin is a median 1.5 times the believed typical spin. These balls were selected because the runner was doubled off, so the overshoot does not show a bias in the read across all flies.
+
+These are not movement or bookkeeping errors. A real runner can misjudge the carry of a deep fly. The volume comes from the planner: after the first look nothing makes him look again while the ball is in the air (relooks fire only on a possession or a release), so a runner who reads a home run at 0.5 s runs flat out for five seconds while the outfielder visibly settles under the ball. A real runner with fewer than two out would go partway on a ball he thought might leave and pull up as the fielder settles. Closing it needs an in-flight relook and the cutoff calibration already open, which are design decisions.

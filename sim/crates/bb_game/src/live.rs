@@ -61,6 +61,8 @@ const LOW_CATCH_Z: f64 = 0.4;
 pub(crate) const CATCH_MAX_Z: f64 = 2.4;
 /// Leaping reach at the wall [E].
 const WALL_CATCH_MAX_Z: f64 = 3.0;
+/// Distance inside the wall where a fielder can use the leaping ceiling, m [E].
+const WALL_CATCH_ZONE_M: f64 = 3.0;
 const POCKET: f64 = 0.06;
 const RIM: f64 = 0.12;
 const DEPTH_STRETCH: f64 = 3.0;
@@ -73,6 +75,10 @@ const TYPICAL_ARM: f64 = 37.0;
 const TYPICAL_TRANSFER: f64 = 0.75;
 /// A runner's read of a batted ball, m at 30 m [E].
 const RUNNER_READ_SIGMA0: f64 = 2.0;
+/// Time scale for a runner's ball read to sharpen, s [E].
+const RUNNER_READ_TAU_S: f64 = 0.6;
+/// Typical contact point used by a runner as the plate cue, m [E].
+const RUNNER_PLATE_PRIOR: Vec3 = Vec3::new(0.0, 0.5, 0.9);
 /// Agents' internal flight step, s.
 const AGENT_DT: f64 = 0.1;
 const BASE_L: f64 = 27.432;
@@ -210,6 +216,88 @@ const ARM_READ_SUB: u32 = 1 << 20;
 fn typical_throw_time(d: f64) -> f64 {
     let v = THROW_EFFORT * TYPICAL_ARM;
     throw_time(v, d).min(2.0 * throw_time(v, 0.5 * d) + RELAY_TRANSFER_FRAC * TYPICAL_TRANSFER)
+}
+
+/// A runner's look at a loose ball (his first look and every relook): noisy motion,
+/// viewpoint, how long he has watched it since contact, and the public contact clock
+/// while no ground, wall or glove touch has been seen.
+#[derive(Clone, Copy)]
+struct ContactLook {
+    motion: (Vec3, Vec3),
+    from: Vec3,
+    t: f64,
+    view: f64,
+    contact_since: Option<f64>,
+}
+
+impl ContactLook {
+    fn scales(self, motion: (Vec3, Vec3)) -> (Vec3, f64, f64) {
+        let to = Vec3::new(motion.0.x - self.from.x, motion.0.y - self.from.y, 0.0);
+        let plate = self.contact_since.map(|s| (s, RUNNER_PLATE_PRIOR));
+        let shrink = read_shrink(motion, self.view, RUNNER_READ_TAU_S, plate);
+        let sp = RUNNER_READ_SIGMA0 * (to.norm().max(1.0) / READ_REF_DIST) * shrink;
+        let sv = READ_VEL_FRAC * motion.1.norm() * shrink;
+        (to.normalized(), sp, sv)
+    }
+
+    fn project(self, field: &Field, err: [f64; 4]) -> BallPath {
+        let env = reference_env();
+        let (los, sp, sv) = self.scales(self.motion);
+        let (mut r, v) = noisy_ball_motion(self.motion, los, sp, sv, err);
+        let w = believed_spin(env, v, self.contact_since);
+        if let Some(s) = self.contact_since.filter(|&s| s > 0.0) {
+            let (gain, _, _) = plate_weighing(los, sp, sv, s);
+            r += gain * (position_from_plate(env, RUNNER_PLATE_PRIOR, v, w, s) - r);
+        }
+        batted_path_dt(env, field, BallState { r, v, w }, self.t, AGENT_DT, |_, _| (0.0, 0.0))
+    }
+}
+
+/// One observed path's best catch, with its time and appeal origin paired.
+#[derive(Clone, Copy, Debug, PartialEq)]
+struct CatchRead {
+    score: f64,
+    t: f64,
+    at: Vec3,
+}
+
+/// What the runner saw of the holder receiving or fielding the ball.
+#[derive(Clone, Copy, Debug, PartialEq)]
+struct HolderLook {
+    pos: Vec3,
+    secured: Option<f64>,
+    heading: Option<Vec3>,
+    motion: Vec3,
+    received_throw: bool,
+    stretched: bool,
+    lunge_at: Option<f64>,
+}
+
+impl HolderLook {
+    fn release_time(self, now: f64, base: u8, mean: FielderAttrs, hand: bb_observe::Hand) -> f64 {
+        let Some(secure) = self.secured else { return now };
+        let rise = self.lunge_at.map(|t| t + DIVE_GETUP_S).filter(|&feet| feet > secure);
+        let from_feet = rise.unwrap_or(secure + if self.stretched { STRETCH_COST_S } else { 0.0 });
+        let near = |b| (self.pos - base_pos(b)).norm() <= RECEIVE_REACH;
+        let feed = self.received_throw && (1..=4).any(near);
+        let pivot = feed && near(2) && base == 1;
+        let transfer = if pivot {
+            throwing::pivot_s(mean.transfer)
+        } else if self.received_throw {
+            RELAY_TRANSFER_FRAC * mean.transfer
+        } else {
+            mean.transfer
+        };
+        let to = base_pos(base) - self.pos;
+        let turn = if !self.received_throw || feed {
+            self.heading.map_or(0.0, |f| throwing::turn_extra_s(f, to, hand))
+        } else {
+            // A relay caught away from the bags normally turns through the reception.
+            0.0
+        };
+        let footwork = throwing::footwork_s(self.motion, to, rise.is_some());
+        (from_feet + SetUp::new(transfer, turn, footwork).set_s).max(now)
+    }
 }
 
 /// A runner's read of a throw in the air: his own prediction of its flight from what he sees
@@ -850,6 +938,12 @@ struct Fielder {
     set_base: f64,
     face: Option<Vec3>,
     catch_vel: Vec3,
+    /// Visible heading, motion and reception cue at the catch, published before choosing
+    /// footwork. A later set-up (the pivot on reaching second) changes his footwork, not
+    /// what the runners saw at the reception (catch-read fixes review P1-2).
+    catch_heading: Option<Vec3>,
+    catch_seen_vel: Vec3,
+    catch_received_throw: bool,
     /// He took it on the ground from a dive (set at each securing; `dove` is his recovery
     /// state and is cleared while he still holds the ball: Codex hurried-throws review #1).
     took_diving: bool,
@@ -1130,6 +1224,14 @@ fn fact_time(f: &Input) -> Option<f64> {
     }
 }
 
+fn out_weight_at(goal: u8, outs: u8, force: bool) -> f64 {
+    if outs >= 2 {
+        if force { 1.0 } else { TWO_OUT_TAG_W }
+    } else {
+        [0.9, 1.0, 1.1, 1.3][(goal as usize).saturating_sub(1).min(3)]
+    }
+}
+
 fn phi(x: f64) -> f64 {
     0.5 * (1.0 + m::erf(x / core::f64::consts::SQRT_2))
 }
@@ -1220,24 +1322,43 @@ fn run_time_from(d: f64, v0: f64, v_max: f64, tau: f64) -> f64 {
 const APPROACH_MIN_MPS: f64 = 1.0;
 
 /// One tick of a runner's speed on his way back to a base he will stop on, `rem` m from it:
-/// the speed law, but never faster than he can brake from (`sqrt(2·BRAKE·rem)`, like a
-/// fielder at a wall), and slowing by at most `BRAKE` a tick when he is already too fast
+/// the speed law, limited by braking distance after this tick's movement, and slowing by
+/// at most `BRAKE` a tick when he is already too fast
 /// (agent-models §6.4, Codex recheck P2-2).
 fn approach_speed(v: f64, v_max: f64, tau: f64, rem: f64) -> f64 {
     let free = v + (v_max - v) * (DT / tau);
-    let cap = m::sqrt(2.0 * BRAKE * rem.max(0.0)).max(APPROACH_MIN_MPS);
-    free.min((v - BRAKE * DT).max(cap))
+    let brake_step = BRAKE * DT;
+    // Leave enough room after travelling v_next·DT to brake from v_next.
+    let cap = (m::sqrt(brake_step * brake_step + 2.0 * BRAKE * rem.max(0.0)) - brake_step).max(APPROACH_MIN_MPS);
+    free.min((v - brake_step).max(cap))
 }
 
-/// How long a runner moving at `v0` toward a base `d` m ahead (negative: away from it) needs
-/// to arrive at it and stop there, by the movement step's own laws: braking through zero if
-/// he is moving away, then the speed law limited by his braking distance. Stepped at the
-/// sim's tick so the estimate and the legs agree.
+/// One step toward a stopping point. If a new goal is too close to brake for, the runner
+/// carries his remaining speed past it and comes back.
+fn step_to_stop(s: f64, signed_v: f64, goal: f64, vmax: f64, tau: f64) -> (f64, f64) {
+    let gap = goal - s;
+    if gap.abs() < 1e-9 && signed_v.abs() <= APPROACH_MIN_MPS {
+        return (goal, 0.0);
+    }
+    let dir = gap.signum();
+    let v = if gap.abs() < 1e-9 || signed_v * dir < 0.0 {
+        signed_v.signum() * (signed_v.abs() - BRAKE * DT).max(0.0)
+    } else {
+        dir * approach_speed(signed_v.abs(), vmax, tau, gap.abs())
+    };
+    let next = s + v * DT;
+    if v.abs() <= APPROACH_MIN_MPS && v * dir > 0.0 && (goal - next) * dir <= 0.0 {
+        (goal, 0.0)
+    } else {
+        (next, v)
+    }
+}
+
+/// Time to plant at a stopping point d metres ahead (v0 is signed toward it).
 fn run_time_to_stop(d: f64, v0: f64, v_max: f64, tau: f64) -> f64 {
     let (mut s, mut v, mut t) = (0.0, v0, 0.0);
-    while s < d - 1e-9 && t < 60.0 {
-        v = if v < 0.0 { (v + BRAKE * DT).min(0.0) } else { approach_speed(v, v_max, tau, d - s) };
-        s += v * DT;
+    while (s != d || v != 0.0) && t < 60.0 {
+        (s, v) = step_to_stop(s, v, d, v_max, tau);
         t += DT;
     }
     t
@@ -1839,7 +1960,11 @@ fn wall_delay(field: &Field, fd: &Fielder, goal: Vec3, reach: f64) -> f64 {
 
 /// Highest ball a fielder can take where it is: he can leap at a wall (agent-models §5.4).
 fn catch_ceiling(field: &Field, p: Vec3) -> f64 {
-    if field.body_clearance(p.x, p.y, 0.0).dist < 3.0 { WALL_CATCH_MAX_Z } else { CATCH_MAX_Z }
+    catch_ceiling_at_clearance(field.body_clearance(p.x, p.y, 0.0).dist)
+}
+
+fn catch_ceiling_at_clearance(clearance: f64) -> f64 {
+    if clearance < WALL_CATCH_ZONE_M { WALL_CATCH_MAX_Z } else { CATCH_MAX_Z }
 }
 
 /// Time for a fielder to come within `reach` of `goal` from his current motion: the first
@@ -1996,6 +2121,9 @@ struct Sim<'a> {
     /// a runner who is still reading it carries his movement through his reaction.
     caught_at: Option<f64>,
     no_catch_at: Option<f64>,
+    /// The first glove possession with no ground or wall touch ruled before it: a possible
+    /// catch, visible to every runner, whose call he waits for whatever the ruling is.
+    flight_secured_at: Option<f64>,
     /// The latest catch was low or diving: a close call for the umpire.
     low_catch: bool,
     st: &'a mut RulesState,
@@ -2031,6 +2159,9 @@ impl<'a> Sim<'a> {
             what: Touch::Ground { .. } | Touch::Wall { .. }, ..
         }) {
             self.no_catch_at.get_or_insert(t_fact);
+        }
+        if matches!(fact, Input::GloveSecured { .. }) && self.no_catch_at.is_none() {
+            self.flight_secured_at.get_or_insert(t_fact);
         }
         self.out.facts.push(fact);
         self.absorb(evs, t_fact);
@@ -2285,12 +2416,6 @@ impl<'a> Sim<'a> {
         m::sqrt(var.max(0.0))
     }
 
-    /// An observer's prediction of the ball from where he stands: [`read_prediction`] of its
-    /// state now.
-    fn predict_from(&self, from: Vec3, sigma0: f64, tau_read: f64, view: f64, err: [f64; 4]) -> BallPath {
-        read_prediction(self.inp.env, self.inp.field, self.ball_at(self.t), self.t, from, sigma0, tau_read, view, err, self.off_bat())
-    }
-
     /// For a ball still on its first flight off the bat: the time since contact and the
     /// contact point. A carom off the wall counts as a deflection (Codex momentum review #6).
     fn off_bat(&self) -> Option<(f64, Vec3)> {
@@ -2311,9 +2436,18 @@ impl<'a> Sim<'a> {
         [g.truncated_normal(4.0), g.truncated_normal(4.0), g.truncated_normal(4.0), g.truncated_normal(4.0)]
     }
 
+    /// A runner's relook at a loose ball: the same observation boundary as his first look,
+    /// with this decision's draws (P1-1 of the catch-read fixes review).
     fn runner_predict(&self, k: usize, sub: u32) -> BallPath {
-        let view = (self.t - self.inp.t_contact).max(0.0);
-        self.predict_from(self.runner_pos(&self.r[k]), RUNNER_READ_SIGMA0, 0.6, view, self.runner_ball_errors(k, sub))
+        self.observe_ball(k, sub).project(self.inp.field, [0.0; 4])
+    }
+
+    /// Seconds since contact while the ball is visibly still on its first flight: no
+    /// ground or wall touch has been ruled and no glove has touched it. The world's own
+    /// path and the true contact point play no part.
+    fn public_contact_since(&self) -> Option<f64> {
+        (self.no_catch_at.is_none() && self.caught_at.is_none() && self.out.first_handling.is_none())
+            .then_some((self.t - self.inp.t_contact).max(0.0))
     }
 
     /// Earliest pickup on the runner's own projection using typical fielder speed.
@@ -2335,56 +2469,61 @@ impl<'a> Sim<'a> {
         None
     }
 
-    /// The runner's catch belief at his first look (agent-models §6.3). He knows his look
-    /// is noisy, as a fielder knows his own read ([`landing_depth_sigma`]): he averages the
-    /// catch chance over the reads his error could have given him, at the unscented
-    /// transform's points, `RUNNER_CATCH_READ_POINT` σ either way on each of his four error
-    /// axes, one eighth each (κ = 0: the eight points carry his error's mean and spread).
-    fn runner_catch_belief(&self, k: usize, sub: u32) -> (f64, Option<Vec3>) {
-        let err = self.runner_ball_errors(k, sub);
-        let from = self.runner_pos(&self.r[k]);
-        let view = (self.t - self.inp.t_contact).max(0.0);
-        let mut p = 0.0;
-        for axis in 0..4 {
-            for sign in [-1.0, 1.0] {
-                let mut e = err;
-                e[axis] += sign * RUNNER_CATCH_READ_POINT;
-                p += self.runner_catch_read(&self.predict_from(from, RUNNER_READ_SIGMA0, 0.6, view, e)).0;
-            }
-        }
-        // Where a catch would be, on the read he actually has.
-        let (_, at) = self.runner_catch_read(&self.predict_from(from, RUNNER_READ_SIGMA0, 0.6, view, err));
-        (p / 8.0, at)
+    /// World boundary: sample the four keyed errors once, then hand off the noisy motion.
+    fn observe_contact(&self, k: usize) -> ContactLook {
+        self.observe_ball(k, 1)
     }
 
-    /// The catch chance on one projection of the ball: [`Self::runner_catch_read`].
+    /// One look at the loose ball, with the four draws of sub-index `sub`.
+    fn observe_ball(&self, k: usize, sub: u32) -> ContactLook {
+        let mut look = ContactLook {
+            motion: self.ball_at(self.t),
+            from: self.runner_pos(&self.r[k]),
+            t: self.t,
+            view: (self.t - self.inp.t_contact).max(0.0),
+            contact_since: self.public_contact_since(),
+        };
+        let (los, sp, sv) = look.scales(look.motion);
+        look.motion = noisy_ball_motion(look.motion, los, sp, sv, self.runner_ball_errors(k, sub));
+        look
+    }
+
+    fn runner_catch_paths(&self, look: ContactLook) -> [Option<CatchRead>; 8] {
+        core::array::from_fn(|i| {
+            let mut error = [0.0; 4];
+            error[i / 2] = [-RUNNER_CATCH_READ_POINT, RUNNER_CATCH_READ_POINT][i % 2];
+            self.runner_catch_read(&look.project(self.inp.field, error))
+        })
+    }
+
+    fn catch_score(paths: &[Option<CatchRead>; 8]) -> f64 {
+        paths.iter().flatten().map(|read| read.score).sum::<f64>() / paths.len() as f64
+    }
+
     #[cfg(test)]
     fn runner_catch_probability(&self, pred: &BallPath) -> f64 {
-        self.runner_catch_read(pred).0
+        self.runner_catch_read(pred).map_or(0.0, |read| read.score)
     }
 
     /// The best catch chance over a projection's first flight, and where on the ground it
     /// is. At each point it is the chance a fielder's glove gets there, from visible fielder
     /// motion, in spreads of his doubt about the glove (`RUNNER_CATCH_SIGMA_M`), about the
     /// fielder's speed (`FIELDER_SPEED_SPREAD_MPS` over the run) and about the ball's curve
-    /// from the spin he cannot see (`CURVE_PRIOR`); where his projection has the ball above
-    /// catching height, times the chance the curve brings it down to it.
-    fn runner_catch_read(&self, pred: &BallPath) -> (f64, Option<Vec3>) {
+    /// from the spin he cannot see (`CURVE_PRIOR`). The tighter of the height and horizontal
+    /// margins sets the score, treating residual glove reach in the two as one error.
+    fn runner_catch_read(&self, pred: &BallPath) -> Option<CatchRead> {
         let ground = pred.first_bounce().map_or(f64::INFINITY, |(t, ..)| t);
         let wall = pred.walls.first().map_or(f64::INFINITY, |(t, ..)| *t);
-        let (mut best, mut at) = (0.0, None);
+        let mut best: Option<CatchRead> = None;
         let mut t = self.t;
         while t <= pred.t_end() && t < ground.min(wall) {
             let (b, _) = pred.at(t);
-            if beyond_reach_over_wall(self.inp.field, b) <= 0.0 {
+            let clearance = self.inp.field.body_clearance(b.x, b.y, 0.0).dist;
+            if clearance >= -OVER_WALL_REACH_M {
                 let dt = t - self.t;
-                // The spin he cannot see, as a fielder allows for it before his tracking
-                // learns it: a steady push of `CURVE_PRIOR` per axis from now.
                 let curve_m = 0.5 * CURVE_PRIOR * dt * dt;
-                // A ball he sees above catching height may still be down to it there, by
-                // the curve he cannot see. Lower, the doubt is about where it comes down,
-                // which the margin below carries.
-                let low = if b.z <= CATCH_MAX_Z { 1.0 } else { phi((CATCH_MAX_Z - b.z) / m::hypot(RUNNER_CATCH_SIGMA_M, curve_m)) };
+                let height_margin = (catch_ceiling_at_clearance(clearance) - b.z) / RUNNER_CATCH_SIGMA_M;
+                let mut horizontal_margin = f64::NEG_INFINITY;
                 for fd in &self.f {
                     let to = Vec3::new(b.x - fd.pos.x, b.y - fd.pos.y, 0.0);
                     let d = m::hypot(to.x, to.y);
@@ -2397,63 +2536,93 @@ impl<'a> Sim<'a> {
                     // The run is linear in top speed, so this is its exact spread.
                     let speed_m = travel(TYPICAL_SPEED + FIELDER_SPEED_SPREAD_MPS) - typical;
                     let sigma = m::sqrt(RUNNER_CATCH_SIGMA_M * RUNNER_CATCH_SIGMA_M + speed_m * speed_m + curve_m * curve_m);
-                    let p = phi((REACH + typical - d) / sigma) * low;
-                    if p > best {
-                        (best, at) = (p, Some(Vec3::new(b.x, b.y, 0.0)));
-                    }
+                    horizontal_margin = horizontal_margin.max((REACH + typical - d) / sigma);
+                }
+                let score = phi(horizontal_margin.min(height_margin));
+                if score > 0.0 && best.is_none_or(|read| score > read.score) {
+                    best = Some(CatchRead { score, t, at: Vec3::new(b.x, b.y, 0.0) });
                 }
             }
             t += DT;
         }
-        (best, at)
+        best
     }
 
-    /// How far off his base a runner holds on a close catch (agent-models §6.3): as far as he
-    /// can still get back. From a catch at `at`, by his belief the ball reaches his base after
-    /// a typical transfer and throw; he needs his reaction to the call and a run from a stand
-    /// that stops on the bag (his own legs' law), with his usual caution in spreads of the
-    /// race. On the bag if even that is too far; never past `HALFWAY_M` beyond his lead or
-    /// 0.6 of the way.
-    fn catch_hold_s(&self, k: usize, at: Vec3) -> f64 {
+    fn catch_hold_s(&self, k: usize, paths: &[Option<CatchRead>]) -> Option<f64> {
         let r = &self.r[k];
+        let bag_s = r.start as f64 * BASE_L;
+        let off = r.s - bag_s;
+        let speed = r.v * r.direction;
         let bag = base_pos(r.start);
-        let ball_s = TYPICAL_TRANSFER + typical_throw_time(m::hypot(at.x - bag.x, at.y - bag.y));
         let adv = &self.inp.advance;
-        let budget = ball_s - RUNNER_CATCH_CALL_REACT_S - adv.caution_z * adv.sigma_race_s;
-        let far = (lead_s(r.start) + HALFWAY_M).min((r.start as f64 + 0.6) * BASE_L) - r.start as f64 * BASE_L;
-        let back = |d: f64| run_time_to_stop(d, 0.0, r.vmax, r.tau);
-        let off = if back(far) <= budget {
-            far
-        } else if budget <= 0.0 {
-            0.0
-        } else {
-            let (mut lo, mut hi) = (0.0, far);
-            for _ in 0..20 {
-                let mid = 0.5 * (lo + hi);
-                if back(mid) <= budget { lo = mid } else { hi = mid }
+        let caution = adv.caution_z * adv.sigma_race_s;
+        let far = (lead_s(r.start) + HALFWAY_M).min((r.start as f64 + 0.6) * BASE_L);
+        let plausible = paths.iter().flatten().filter(|read| read.score >= 1.0 - RUNNER_CATCH_CONFIDENCE);
+        if r.start == 3 {
+            let tag = self.inp.tag_up;
+            let to_home = tag_up_time(tag, tag.react_s, BASE_L, r.vmax, r.tau);
+            let to_bag = run_time_to_stop(off, -speed, r.vmax, r.tau);
+            if plausible.clone().any(|read| {
+                read.t - self.t >= to_bag
+                    && TYPICAL_TRANSFER + typical_throw_time(read.at.norm()) + tag.typical_tag_s >= to_home
+            }) {
+                return None;
             }
-            lo
-        };
-        r.start as f64 * BASE_L + off
+        }
+
+        let races: Vec<_> = plausible.map(|read| {
+            let appeal = TYPICAL_TRANSFER + typical_throw_time((read.at - bag).norm());
+            (read.t, appeal - caution - RUNNER_CATCH_CALL_REACT_S)
+        }).collect();
+        if races.is_empty() {
+            return None;
+        }
+        let recoverable = |target: f64| races.iter().all(|&(catch, budget)| {
+            let mut s = r.s;
+            let mut v = speed;
+            // Carry the intended hold through the catch and the reaction. The first
+            // step in the return then uses whatever signed speed remains.
+            let mut t = self.t;
+            let react = catch + RUNNER_CATCH_CALL_REACT_S;
+            while t < react - 1e-9 && (s != target || v != 0.0) {
+                (s, v) = step_to_stop(s, v, target, r.vmax, r.tau);
+                t += DT;
+            }
+            run_time_to_stop(s - bag_s, -v, r.vmax, r.tau) <= budget
+        });
+
+        if recoverable(far) {
+            return Some(far);
+        }
+        if !recoverable(bag_s) {
+            return None;
+        }
+        let (mut lo, mut hi) = (bag_s, far);
+        for _ in 0..20 {
+            let mid = 0.5 * (lo + hi);
+            if recoverable(mid) { lo = mid } else { hi = mid }
+        }
+        (lo > bag_s + 1e-6).then_some(lo)
     }
 
-    fn read_contact(&mut self, k: usize, p_catch: f64, at: Option<Vec3>) {
-        let base = self.r[k].start;
-        if p_catch >= RUNNER_CATCH_CONFIDENCE {
+    fn read_contact(&mut self, k: usize, look: ContactLook) {
+        let paths = self.runner_catch_paths(look);
+        let score = Self::catch_score(&paths);
+        if score >= RUNNER_CATCH_CONFIDENCE {
             self.r[k].tag_up = true;
-        } else if p_catch > 1.0 - RUNNER_CATCH_CONFIDENCE {
-            let hold = match at {
-                Some(at) => self.catch_hold_s(k, at),
-                None => (lead_s(base) + HALFWAY_M).min((base as f64 + 0.6) * BASE_L),
-            };
-            if hold <= base as f64 * BASE_L + 1e-6 {
-                // No room to stand off the bag: he goes back to it, as on a likely catch.
-                self.r[k].tag_up = true;
-            } else {
-                self.r[k].hold_s = Some(hold);
-            }
+        } else if score > 1.0 - RUNNER_CATCH_CONFIDENCE {
+            self.set_catch_hold(k, &paths);
         } else {
-            self.runner_decide(k, base);
+            let pred = look.project(self.inp.field, [0.0; 4]);
+            self.runner_decide_with_contact(k, self.r[k].start, Some(&pred));
+        }
+    }
+
+    fn set_catch_hold(&mut self, k: usize, paths: &[Option<CatchRead>]) {
+        let hold = self.catch_hold_s(k, paths);
+        self.r[k].hold_s = hold;
+        if hold.is_none() {
+            self.r[k].tag_up = true;
         }
     }
 
@@ -3991,7 +4160,10 @@ impl<'a> Sim<'a> {
                 fd.catch_stretched = extending == Some(false);
                 fd.set_base = fd.a.transfer;
                 fd.catch_vel = fd.vel;
-                fd.face = Some(toward(fd.vel).or(toward(-bv)).unwrap_or(Vec3::new(-fd.pos.x, -fd.pos.y, 0.0)));
+                fd.catch_seen_vel = fd.vel;
+                fd.catch_heading = Some(toward(fd.vel).or(toward(-bv)).unwrap_or(Vec3::new(-fd.pos.x, -fd.pos.y, 0.0)));
+                fd.catch_received_throw = receiver.is_some();
+                fd.face = fd.catch_heading;
                 if matches!(self.ball, Ball::Free { .. }) && self.out.ref_set_s.is_none() {
                     // The reference play's set-up for a throw to first: the grade-50 fielder of
                     // this position, from this catch (rules-spec §10.2).
@@ -4292,7 +4464,7 @@ impl<'a> Sim<'a> {
         let from = self.runner_pos(&self.r[k]);
         let to = Vec3::new(truth.0.x - from.x, truth.0.y - from.y, 0.0);
         let view = self.out.released.last().map_or(0.0, |(t, _)| (self.t - t).max(0.0));
-        let shrink = read_shrink(truth, view, 0.6, None);
+        let shrink = read_shrink(truth, view, RUNNER_READ_TAU_S, None);
         let sp = RUNNER_READ_SIGMA0 * (to.norm().max(1.0) / READ_REF_DIST) * shrink;
         let sv = READ_VEL_FRAC * truth.1.norm() * shrink;
         noisy_ball_motion(truth, to.normalized(), sp, sv, self.runner_ball_errors(k, sub))
@@ -4338,6 +4510,20 @@ impl<'a> Sim<'a> {
         ThrownRead { dest, t_arrive, track }
     }
 
+    fn observe_holder(&self, by: usize) -> HolderLook {
+        let fd = &self.f[by];
+        HolderLook {
+            pos: fd.pos,
+            secured: self.out.secured.last().map(|(t, _)| *t)
+                .or_else(|| self.secured_at.is_finite().then_some(self.secured_at)),
+            heading: fd.catch_heading,
+            motion: fd.catch_seen_vel,
+            received_throw: fd.catch_received_throw,
+            stretched: fd.catch_stretched,
+            lunge_at: fd.lunge.map(|(t, _, _)| t),
+        }
+    }
+
     /// Runners' believed time for the ball to reach base `b` (they watch the ball and the
     /// fielders; agent-models §6.3).
     fn ball_time_to(&self, k: usize, b: u8, read_sub: u32, my_at: f64) -> f64 {
@@ -4347,27 +4533,15 @@ impl<'a> Sim<'a> {
                 // read of that fielder is the position's grade-50 transfer and the fielder's
                 // own arm (scouting knows an arm), off by his own read error (agent-models
                 // §6.4; Gemini tag-up review P2-1; one draw per runner, fielder and play).
-                let (p, _) = self.ball_at(self.t);
+                let look = self.observe_holder(*by);
                 let mean = FielderAttrs::average(*by);
                 let err = rng(self.inp.seed, self.inp.play, self.r[k].id, Purpose::RunnerPerception, ARM_READ_SUB + *by as u32).truncated_normal(4.0);
-                // His set-up as the runner sees it: the position's transfer, plus the turn
-                // and footwork a throw to this base needs from the way he took the ball
-                // (both visible), after any get-up (§5.5, §6.4).
                 let fd = &self.f[*by];
-                // A runner can see a dive or a stretch and remember when it happened.
-                // He budgets the usual recovery from that pose and the visible secure.
-                let secure = self.out.secured.last().map(|(t, _)| *t)
-                    .or_else(|| self.secured_at.is_finite().then_some(self.secured_at));
-                let dive_recovery = secure.and_then(|t_catch| fd.lunge.map(|(t, _, _)| t + DIVE_GETUP_S)
-                    .filter(|&feet| feet > t_catch));
-                let from_feet = dive_recovery.or_else(|| secure.map(|t| t + if fd.catch_stretched { STRETCH_COST_S } else { 0.0 }));
+                let arm = fd.a.arm + ARM_READ_SIGMA_MPS * err;
                 let direct = |base: u8| {
-                    let target = base_pos(base);
-                    let to = target - fd.pos;
-                    let turn = fd.face.map(|f| throwing::turn_extra_s(f, to, fd.a.throws)).unwrap_or(0.0);
-                    let su = SetUp::new(if fd.face.is_some() { mean.transfer } else { RELAY_TRANSFER_FRAC * mean.transfer }, turn, throwing::footwork_s(fd.catch_vel, to, dive_recovery.is_some()));
-                    let ready = from_feet.map_or(self.t, |t| (t + su.set_s).max(self.t));
-                    ready + read_throw_time(fd.a.arm + ARM_READ_SIGMA_MPS * err, m::hypot(target.x - p.x, target.y - p.y))
+                    let to = base_pos(base) - look.pos;
+                    look.release_time(self.t, base, mean, fd.a.throws)
+                        + read_throw_time(arm, m::hypot(to.x, to.y))
                 };
                 self.with_expected_play(k, b, my_at, &direct)
             }
@@ -4378,21 +4552,35 @@ impl<'a> Sim<'a> {
             Ball::Free { .. } => {
                 let t0 = prof::enabled().then(std::time::Instant::now);
                 let pred = self.runner_predict(k, read_sub);
-                let end = pred.t_end();
-                let (tf, at) = self.believed_field_intercept(&pred).unwrap_or_else(|| {
-                    let (rest, _) = pred.at(end);
-                    (end + 1.0, Vec3::new(rest.x, rest.y, 0.0))
-                });
+                let time = self.pickup_time_to(k, b, my_at, &pred);
                 if let Some(t0) = t0 {
                     prof::add(&prof::RUNNER, t0.elapsed().as_nanos() as u64);
                 }
-                let direct = |base: u8| {
-                    let target = base_pos(base);
-                    tf + TYPICAL_TRANSFER + typical_throw_time(m::hypot(target.x - at.x, target.y - at.y))
-                };
-                self.with_expected_play(k, b, my_at, &direct)
+                time
             }
         }
+    }
+
+    /// Time both races from the same projection of an airborne throw.
+    fn runner_ball_races(&self, k: usize, sub: u32, ahead: (u8, f64), behind: (u8, f64)) -> (f64, f64) {
+        if matches!(self.ball, Ball::Thrown { .. }) {
+            let read = self.thrown_read(k, sub);
+            (read.time_to(ahead.0), read.time_to(behind.0))
+        } else {
+            (self.ball_time_to(k, ahead.0, sub, ahead.1), self.ball_time_to(k, behind.0, sub, behind.1))
+        }
+    }
+
+    fn pickup_time_to(&self, k: usize, b: u8, my_at: f64, pred: &BallPath) -> f64 {
+        let end = pred.t_end();
+        let (tf, at) = self.believed_field_intercept(pred).unwrap_or_else(|| {
+            let (rest, _) = pred.at(end);
+            (end + 1.0, rest)
+        });
+        self.with_expected_play(k, b, my_at, &|base| {
+            let target = base_pos(base);
+            tf + TYPICAL_TRANSFER + typical_throw_time(m::hypot(target.x - at.x, target.y - at.y))
+        })
     }
 
     /// The ball's time to base `b` for runner `k`, given the play he expects the defense to
@@ -4410,15 +4598,15 @@ impl<'a> Sim<'a> {
         let tag = self.inp.tag_up.typical_tag_s;
         let value = |j: usize, base: u8, runner_at: f64, ball_at: f64| {
             let r = &self.r[j];
-            let force = self.forced(j) && base == r.start + 1 && r.s < base as f64 * BASE_L;
+            let force = self.runner_forced(k, j) && base == r.start + 1 && r.s < base as f64 * BASE_L;
             let p = phi((runner_at - ball_at - if force { 0.0 } else { tag }) / 0.12);
-            if p > 0.3 { p * p * self.out_weight(j, base) } else { 0.0 }
+            if p > 0.3 { p * p * out_weight_at(base, self.runner_outs(k), force) } else { 0.0 }
         };
         let mine = value(k, b, my_at, own);
         let params = throwing::ChoiceParams::default();
         let mut best: Option<(f64, u8)> = None;
         for (j, o) in self.r.iter().enumerate() {
-            if j == k || o.out || o.scored || o.overrun != OverrunPhase::None {
+            if j == k || self.runner_sees_out(k, o) || o.scored || o.overrun != OverrunPhase::None {
                 continue;
             }
             let Some(base) = visible_target(o, params) else { continue };
@@ -4437,11 +4625,41 @@ impl<'a> Sim<'a> {
     }
 
     /// Forced while the batter is still a runner and every base behind this runner is held by
-    /// a runner still in play (the runner sees outs as they are signalled).
+    /// a runner still legally in play.
     fn forced(&self, k: usize) -> bool {
-        let r = &self.r[k];
-        let batter_alive = self.r.iter().any(|x| x.start == 0 && !x.out);
-        r.start == 0 || (batter_alive && (1..r.start).all(|b| self.r.iter().any(|x| x.start == b && !x.out)))
+        self.force_with(k, |r| r.out)
+    }
+
+    /// The rules have recorded a catch runner `k` has not yet seen called: its out and the
+    /// force it removes are hidden from his reads.
+    fn awaiting_catch_call(&self, k: usize) -> bool {
+        self.caught() && !self.r[k].catch_seen
+    }
+
+    /// Runner `k` saw a glove take the ball in flight and has not yet reacted to the call,
+    /// whichever way it went: he holds new decisions until then (catch-read fixes review
+    /// P1-3). With no catch ruled, the call he sees is that possession was no catch.
+    fn awaiting_call(&self, k: usize) -> bool {
+        self.awaiting_catch_call(k)
+            || (!self.caught() && self.flight_secured_at.is_some_and(|ts| self.t + 1e-9 < ts + RUNNER_CATCH_CALL_REACT_S))
+    }
+
+    fn runner_sees_out(&self, k: usize, other: &Runner) -> bool {
+        other.out && !(other.start == 0 && self.awaiting_catch_call(k))
+    }
+
+    fn runner_outs(&self, k: usize) -> u8 {
+        self.st.outs.saturating_sub(u8::from(self.awaiting_catch_call(k)))
+    }
+
+    fn runner_forced(&self, observer: usize, k: usize) -> bool {
+        self.force_with(k, |r| self.runner_sees_out(observer, r))
+    }
+
+    fn force_with(&self, k: usize, is_out: impl Fn(&Runner) -> bool) -> bool {
+        let has_runner = |base| self.r.iter().any(|r| r.start == base && !is_out(r));
+        let start = self.r[k].start;
+        start == 0 || (0..start).all(has_runner)
     }
 
     /// How much the holder values an out on runner `k` at base `goal`. With fewer than two out
@@ -4451,11 +4669,7 @@ impl<'a> Sim<'a> {
     /// coming back to a base he has already reached must be tagged (Codex dive review #1).
     fn out_weight(&self, k: usize, goal: u8) -> f64 {
         let r = &self.r[k];
-        if self.st.outs >= 2 {
-            if self.forced(k) && goal == r.start + 1 && r.s < goal as f64 * BASE_L { 1.0 } else { TWO_OUT_TAG_W }
-        } else {
-            [0.9, 1.0, 1.1, 1.3][(goal as usize).saturating_sub(1).min(3)]
-        }
+        out_weight_at(goal, self.st.outs, self.forced(k) && goal == r.start + 1 && r.s < goal as f64 * BASE_L)
     }
 
     /// Whether a runner is on base `b` or between it and the next, used to choose cutoff
@@ -4477,7 +4691,7 @@ impl<'a> Sim<'a> {
         let r = &self.r[k];
         self.r.iter().any(|o| {
             o.id != r.id
-                && !o.out
+                && !self.runner_sees_out(k, o)
                 && !o.scored
                 && o.start > r.start
                 && ((o.s <= b as f64 * BASE_L + 0.5 && o.still_since.is_some_and(|t0| self.t - t0 >= HOLD_READ_S - 1e-9))
@@ -4496,7 +4710,7 @@ impl<'a> Sim<'a> {
         let mine = run_time_from((b as f64 * BASE_L - r.s).max(0.0), (r.direction * r.v).max(0.0), r.vmax, r.tau);
         self.r.iter().any(|o| {
             let running_home = b == 4 && o.s > 3.0 * BASE_L + 0.5 && o.direction * o.v > SEEN_MOVING_MPS && runner_eta(4.0 * BASE_L - o.s, o.v) + FOLLOW_GAP_S <= mine;
-            o.id != r.id && !o.out && !o.scored && o.start > r.start && o.s <= b as f64 * BASE_L + 0.5 && !running_home
+            o.id != r.id && !self.runner_sees_out(k, o) && !o.scored && o.start > r.start && o.s <= b as f64 * BASE_L + 0.5 && !running_home
         })
     }
 
@@ -4518,7 +4732,7 @@ impl<'a> Sim<'a> {
         // runner ahead whom his advance sends home.
         let state = |mine: u8| -> (u8, f64) {
             let (mut bits, mut runs) = (0u8, 0.0);
-            for o in self.r.iter().filter(|o| o.id != me.id && !o.out && !o.scored) {
+            for o in self.r.iter().filter(|o| o.id != me.id && !self.runner_sees_out(k, o) && !o.scored) {
                 let at = o.s / BASE_L;
                 let fwd = o.direction * o.v;
                 let seen = if fwd > SEEN_MOVING_MPS {
@@ -4541,7 +4755,7 @@ impl<'a> Sim<'a> {
                     bits |= 1 << (b - 1);
                 } else if seen < 4 {
                     runs += 1.0;
-                } else if mine != 0 || self.st.outs < 2 || self.t + runner_eta((4.0 * BASE_L - o.s).max(0.0), o.v) < out_at {
+                } else if mine != 0 || self.runner_outs(k) < 2 || self.t + runner_eta((4.0 * BASE_L - o.s).max(0.0), o.v) < out_at {
                     // Already heading home: his run counts unless the third out comes first.
                     runs += 1.0;
                 }
@@ -4551,7 +4765,7 @@ impl<'a> Sim<'a> {
             }
             (bits, runs)
         };
-        let outs = self.st.outs;
+        let outs = self.runner_outs(k);
         let value = |mine: u8, outs: u8| {
             let (bits, runs) = state(mine);
             run_expectancy(bits, outs) + runs
@@ -4563,7 +4777,14 @@ impl<'a> Sim<'a> {
     }
 
     fn runner_decide(&mut self, k: usize, at_base: u8) {
-        let forced = self.forced(k);
+        self.runner_decide_with_contact(k, at_base, None);
+    }
+
+    fn runner_decide_with_contact(&mut self, k: usize, at_base: u8, contact: Option<&BallPath>) {
+        if self.awaiting_call(k) {
+            return;
+        }
+        let forced = self.runner_forced(k, k);
         let next = at_base + 1;
         if next > 4 {
             return;
@@ -4583,11 +4804,14 @@ impl<'a> Sim<'a> {
         };
         // Unforced, he must beat the tag, not only the ball: his belief of the time it takes.
         let tag_s = if forced { 0.0 } else { self.inp.tag_up.typical_tag_s };
-        let t_ball = self.ball_time_to(k, next, 2 * n + 1, self.t + t_run) + tag_s;
+        let t_ball = match contact {
+            Some(pred) => self.pickup_time_to(k, next, self.t + t_run, pred),
+            None => self.ball_time_to(k, next, 2 * n + 1, self.t + t_run),
+        } + tag_s;
         let mut rr = rng(self.inp.seed, self.inp.play, r.id, Purpose::RunnerPerception, 2 * n);
         let draw = rr.truncated_normal(4.0);
         let noise = RUNNER_TIMING_SIGMA_S * draw;
-        let must = forced && at_base == r.start && !self.caught();
+        let must = forced && at_base == r.start && !r.catch_seen;
         // A runner may only take a base once every runner ahead of him has visibly cleared it;
         // until then he waits at his base.
         let blocked = !must && self.base_uncleared_ahead(k, next);
@@ -4611,13 +4835,15 @@ impl<'a> Sim<'a> {
         self.no_catch_at.is_some_and(|call| self.t + 1e-9 >= call + RUNNER_CATCH_CALL_REACT_S)
     }
 
-    /// Whether runner `j` is at the point of settling on base `b`, as the movement step sees
-    /// it: standing on it with it as his goal (a holder), or heading for it as his goal and
-    /// too near to stop short of it (his speed over `HOLD_READ_S`, then `BRAKE`, reaches it).
+    /// Whether runner `j` is at the point of settling on base `b`, as runner `k` sees it.
+    /// His own (`j == k`): it is his goal and he stands on it or is too near to stop short of
+    /// it. Another runner's goal is private (catch-read fixes review P1-4), so for him it is
+    /// what `k` can see: standing on the bag, or coming at it too fast to stop short of it
+    /// (his speed over `HOLD_READ_S`, then `BRAKE`), whether he means to stop there or not.
     /// Only bases 1–3: any number of runners may score.
-    fn settles_on(&self, j: usize, b: u8) -> bool {
+    fn settles_on(&self, k: usize, j: usize, b: u8) -> bool {
         let o = &self.r[j];
-        if o.out || o.scored || o.goal != b || !(1..=3).contains(&b) {
+        if self.runner_sees_out(k, o) || o.scored || !(1..=3).contains(&b) || (j == k && o.goal != b) {
             return false;
         }
         let bs = b as f64 * BASE_L;
@@ -4629,55 +4855,57 @@ impl<'a> Sim<'a> {
         toward > SEEN_MOVING_MPS && gap.abs() <= toward * HOLD_READ_S + toward * toward / (2.0 * BRAKE) + 0.3
     }
 
+    /// Whether runner `t`, standing on `b`, gives way there, as runner `k` sees it: no force
+    /// on him to it and a free base behind him.
+    fn gives_way(&self, k: usize, t: usize, b: u8) -> bool {
+        let standing = (self.r[t].s - b as f64 * BASE_L).abs() < 1e-6;
+        let forced_to_b = b == self.r[t].start + 1 && self.runner_forced(k, t);
+        standing && !forced_to_b && self.refuge_free(k, t, b)
+    }
+
     /// The invariant at the place bodies stop: two live runners never come to rest on one
     /// base (agent-models §6.4; Codex runner-reads rechecks). Run on the final goals of the
     /// tick, whatever decision path set them (look, held base, turn-back, cap), so none can
-    /// bypass it. Of two runners settling on a base the trailing one gives way if he is
-    /// standing on it with a free base behind him and no force on him; otherwise the lead
-    /// runner goes on to the next base (a force pushes him, and a runner who cannot stop
-    /// short cannot give way).
+    /// bypass it. Each runner changes only his own goal, from what he sees of the others
+    /// (positions, signed speeds, original bases; catch-read fixes review P1-4). Of two
+    /// runners settling on a base the trailing one gives way if he is standing on it with
+    /// a free base behind him and no force on him; otherwise the lead runner goes on to the
+    /// next base (a force pushes him, and a runner who cannot stop short cannot give way).
     fn settle_guard(&mut self, k: usize) {
-        let b = self.r[k].goal;
         for _ in 0..4 {
-            if !self.settles_on(k, b) {
+            let b = self.r[k].goal;
+            if !self.settles_on(k, k, b) {
                 return;
             }
-            let mut claim: Vec<usize> = (0..self.r.len()).filter(|&j| self.settles_on(j, b)).collect();
-            if claim.len() < 2 {
+            let start = self.r[k].start;
+            let others: Vec<usize> = (0..self.r.len()).filter(|&j| j != k && self.settles_on(k, j, b)).collect();
+            let behind_him = others.iter().any(|&j| self.r[j].start > start);
+            let goal = if behind_him && self.gives_way(k, k, b) {
+                b - 1
+            } else if others.iter().any(|&j| self.r[j].start < start && !self.gives_way(k, j, b)) {
+                (b + 1).min(4)
+            } else {
                 return;
-            }
-            // Lead runner first (started furthest along); ties by index.
-            claim.sort_by(|&x, &y| self.r[y].start.cmp(&self.r[x].start).then(x.cmp(&y)));
-            let lead = claim[0];
-            let mut moved = false;
-            for &t in &claim[1..] {
-                let standing = (self.r[t].s - b as f64 * BASE_L).abs() < 1e-6;
-                let forced_to_b = b == self.r[t].start + 1 && self.forced(t);
-                if standing && !forced_to_b && self.refuge_free(t, b) {
-                    let r = &mut self.r[t];
-                    r.goal = b - 1;
-                    r.waiting = false;
-                    r.turned_back = None;
-                    moved = true;
-                } else if self.r[lead].goal == b {
-                    let r = &mut self.r[lead];
-                    r.goal = (b + 1).min(4);
-                    r.waiting = false;
-                    r.turned_back = None;
-                    moved = true;
-                }
-            }
-            if !moved {
-                return;
-            }
+            };
+            let r = &mut self.r[k];
+            r.goal = goal;
+            r.waiting = false;
+            r.turned_back = None;
         }
     }
 
-    /// Whether the base behind a runner standing on `b` is free for him to go back to: not
-    /// home (the batter-runner has none), and no other runner on it or going to it.
-    fn refuge_free(&self, j: usize, b: u8) -> bool {
+    /// Whether the base behind runner `j` standing on `b` is free for him to go back to, as
+    /// runner `k` sees it: not home (the batter-runner has none), no other runner on it, and
+    /// none visibly on his way to it.
+    fn refuge_free(&self, k: usize, j: usize, b: u8) -> bool {
         let back = b - 1;
-        back >= 1 && !self.r.iter().enumerate().any(|(i, x)| i != j && !x.out && !x.scored && ((x.s - back as f64 * BASE_L).abs() < 0.5 || x.goal == back))
+        let bs = back as f64 * BASE_L;
+        back >= 1 && !self.r.iter().enumerate().any(|(i, x)| {
+            i != j && !self.runner_sees_out(k, x) && !x.scored && {
+                let gap = bs - x.s;
+                gap.abs() < 0.5 || (gap.abs() < BASE_L && x.direction * gap.signum() * x.v > SEEN_MOVING_MPS)
+            }
+        })
     }
 
     /// Whether base `b`, behind runner `k`, is no refuge for him, as he can see it: a runner
@@ -4689,7 +4917,7 @@ impl<'a> Sim<'a> {
         let lead = &self.r[k];
         let bs = b as f64 * BASE_L;
         self.r.iter().enumerate().any(|(j, o)| {
-            if j == k || o.out || o.scored || o.start >= lead.start {
+            if j == k || self.runner_sees_out(k, o) || o.scored || o.start >= lead.start {
                 return false;
             }
             if o.s + 1e-6 >= bs {
@@ -4701,7 +4929,7 @@ impl<'a> Sim<'a> {
             }
             // He reads the lead runner's turn after `HOLD_READ_S`, then brakes at `BRAKE`.
             let stop = o.s + v_fwd * HOLD_READ_S + v_fwd * v_fwd / (2.0 * BRAKE);
-            stop + 0.3 >= bs || self.no_way_back(j)
+            stop + 0.3 >= bs || self.no_way_back(k, j)
         })
     }
 
@@ -4718,10 +4946,10 @@ impl<'a> Sim<'a> {
         let Some(g) = (r.goal as f64 * BASE_L > r.s + 1e-6).then_some(r.goal) else { return };
         let (id, start, s) = (r.id, r.start, r.s);
         let coming_back = self.r.iter().any(|o| {
-            o.id != id && !o.out && !o.scored && o.start > start && o.direction * o.v < -SEEN_MOVING_MPS && o.s > s && ((o.s / BASE_L).floor() as u8) == g
+            o.id != id && !self.runner_sees_out(k, o) && !o.scored && o.start > start && o.direction * o.v < -SEEN_MOVING_MPS && o.s > s && ((o.s / BASE_L).floor() as u8) == g
         });
-        let forced_here = g == start + 1 && self.forced(k);
-        if coming_back && !forced_here && between && !self.no_way_back(k) {
+        let forced_here = g == start + 1 && self.runner_forced(k, k);
+        if coming_back && !forced_here && between && !self.no_way_back(k, k) {
             self.r[k].goal = from;
             self.r[k].turned_back = Some(g);
         }
@@ -4729,10 +4957,10 @@ impl<'a> Sim<'a> {
 
     /// Whether runner `j`, between bases, has no base to go back to: the batter-runner (home
     /// is not his), or one with another runner standing on the base he left.
-    fn no_way_back(&self, j: usize) -> bool {
+    fn no_way_back(&self, k: usize, j: usize) -> bool {
         let o = &self.r[j];
         let f = (o.s / BASE_L).floor();
-        o.start == 0 && f < 1.0 || self.r.iter().enumerate().any(|(i, x)| i != j && !x.out && !x.scored && (x.s - f * BASE_L).abs() < 0.5)
+        o.start == 0 && f < 1.0 || self.r.iter().enumerate().any(|(i, x)| i != j && !self.runner_sees_out(k, x) && !x.scored && (x.s - f * BASE_L).abs() < 0.5)
     }
 
     /// A runner between bases looks again when the play has changed under him: the ball
@@ -4748,7 +4976,10 @@ impl<'a> Sim<'a> {
         }
         let nearest = (r.s / BASE_L).round();
         let between = (r.s - nearest * BASE_L).abs() > 1e-6;
-        if !between || r.tag_up || r.retouch || r.waiting || r.hold_s.is_some() || r.turned_back.is_some() || r.overrun != OverrunPhase::None || r.set_start.is_some() {
+        // Behind his own base (carried past it coming back) he has no base behind him to
+        // choose: his own is ahead, and he goes on to it.
+        let behind_own = r.s < r.start as f64 * BASE_L - 1e-6;
+        if !between || behind_own || r.tag_up || r.retouch || r.waiting || r.hold_s.is_some() || r.turned_back.is_some() || r.overrun != OverrunPhase::None || r.set_start.is_some() {
             return false;
         }
         let (start, s_now) = (r.start, r.s);
@@ -4757,7 +4988,7 @@ impl<'a> Sim<'a> {
         let next = from + 1;
         // Forced to the next base, he has no choice (the force is on him as long as it is the
         // base after his own); a runner ahead who has not cleared it also leaves him no go.
-        if next > 4 || (next == start + 1 && self.forced(k)) || self.base_uncleared_ahead(k, next) {
+        if next > 4 || (next == start + 1 && self.runner_forced(k, k)) || self.base_uncleared_ahead(k, next) {
             return false;
         }
         self.r[k].decisions += 1;
@@ -4772,12 +5003,11 @@ impl<'a> Sim<'a> {
         let t_back = run_time_to_stop(d_back, -v_fwd, r.vmax, r.tau);
         // Unforced, he must beat the tag at either base, not only the ball.
         let tag_s = self.inp.tag_up.typical_tag_s;
-        let ball_on = self.ball_time_to(k, next, 2 * n + 1, self.t + t_on) + tag_s;
-        let ball_back = self.ball_time_to(k, from, 2 * n + 1, self.t + t_back) + tag_s;
+        let (ball_on, ball_back) = self.runner_ball_races(k, 2 * n + 1, (next, self.t + t_on), (from, self.t + t_back));
         let mut rr = rng(self.inp.seed, self.inp.play, r.id, Purpose::RunnerPerception, 2 * n);
         let draw = rr.truncated_normal(4.0);
         let noise = RUNNER_TIMING_SIGMA_S * draw;
-        let margin = |t_ball: f64, t_self: f64| t_ball - (self.t + t_self) + noise;
+        let margin = |t_ball: f64, t_self: f64| t_ball + tag_s - (self.t + t_self) + noise;
         let (m_on, m_back) = (margin(ball_on, t_on), margin(ball_back, t_back));
         // Whether he believes he makes each base at all (better than even), and which he
         // chooses by what each is worth (§6.3).
@@ -4878,13 +5108,42 @@ impl<'a> Sim<'a> {
                 let retouched = self.out.facts.iter().any(|f| matches!(f, Input::BaseTouched {
                     t, agent, base, holding_ball: false
                 } if *t >= call && *agent == id && *base == start));
-                if self.r[k].off_base_at_catch && !retouched {
-                    self.r[k].scored = false;
-                    self.r[k].tag_up = false;
+                if self.r[k].off_base_at_catch {
+                    if !retouched {
+                        let r = &mut self.r[k];
+                        r.scored = false;
+                        r.tag_up = false;
+                        r.hold_s = None;
+                        r.retouch = true;
+                        r.waiting = false;
+                        r.goal = start;
+                    } else if at_start && self.r[k].v == 0.0 {
+                        // He returned while the call was pending. The existing touch
+                        // is legal and his next leg is now a decision from rest.
+                        let r = &mut self.r[k];
+                        r.tag_up = false;
+                        r.hold_s = None;
+                        r.retouch = false;
+                        r.turned_back = None;
+                        self.runner_decide(k, start);
+                    } else {
+                        // He touched the bag legally while the call was pending but carried
+                        // on past it (catch-read fixes review P2-1). The touch stands; his
+                        // legs bring him back to plant, and the plant is where he decides.
+                        let r = &mut self.r[k];
+                        r.tag_up = false;
+                        r.hold_s = None;
+                        r.retouch = true;
+                        r.waiting = false;
+                        r.turned_back = None;
+                        r.goal = start;
+                    }
+                } else if !self.r[k].tag_up && at_start && self.r[k].v == 0.0 {
+                    // Planted on his base at the catch without having set up a tag-up: he is
+                    // legally on it, and the out and the lifted force are a new play to judge.
                     self.r[k].hold_s = None;
-                    self.r[k].retouch = true;
                     self.r[k].waiting = false;
-                    self.r[k].goal = start;
+                    self.runner_decide(k, start);
                 }
             }
             if self.r[k].scored {
@@ -4906,7 +5165,14 @@ impl<'a> Sim<'a> {
             // Tag-up: go back to the base and hold it until the catch, then decide.
             if self.r[k].tag_up {
                 let on_base = (self.r[k].s - self.r[k].start as f64 * BASE_L).abs() < 1e-6;
-                if self.r[k].catch_seen {
+                if self.r[k].catch_seen && !on_base {
+                    // Off the bag when he sees the call: back to it first; the plant is
+                    // where he decides (a touch is only reported where his body is).
+                    let r = &mut self.r[k];
+                    r.tag_up = false;
+                    r.retouch = true;
+                    r.goal = r.start;
+                } else if self.r[k].catch_seen {
                     // (A runner who still owes the retouch was sent back above.)
                     self.r[k].tag_up = false;
                     let b = self.r[k].last_base;
@@ -4946,16 +5212,17 @@ impl<'a> Sim<'a> {
                 }
             }
             // Something new to see since his last look: he decides again, from where he is.
-            let awaiting_catch_call = self.caught() && !self.r[k].catch_seen;
-            if !awaiting_catch_call {
+            let awaiting_call = self.awaiting_call(k);
+            if !awaiting_call {
                 self.runner_relook(k);
             }
             self.runner_yields(k);
             // Heading for a base a runner ahead has stopped at (or is retreating to): go back,
             // unless this is a forced advance (then the runner ahead is forced too).
             let g = self.r[k].goal;
-            let forced_here = g == self.r[k].start + 1 && self.forced(k);
-            let back = (self.r[k].s / BASE_L).floor() as u8;
+            let forced_here = g == self.r[k].start + 1 && self.runner_forced(k, k);
+            // (Never behind his own base: carried past it, that is the base he goes back to.)
+            let back = ((self.r[k].s / BASE_L).floor() as u8).max(self.r[k].start);
             if g as f64 * BASE_L > self.r[k].s && self.base_held_ahead(k, g) && !forced_here && !self.return_crowded(k, back) {
                 self.r[k].goal = back;
                 self.r[k].turned_back = Some(g);
@@ -4973,8 +5240,10 @@ impl<'a> Sim<'a> {
             let goal_s = self.r[k].hold_s.unwrap_or(self.r[k].goal as f64 * BASE_L);
             let (now, tag) = (self.t, self.inp.tag_up);
             let r = &mut self.r[k];
-            let dir = (goal_s - r.s).signum();
-            if (goal_s - r.s).abs() < 1e-6 {
+            let gap = goal_s - r.s;
+            let dir = gap.signum();
+            let stopping = r.hold_s.is_some() || r.tag_up || r.retouch || dir < 0.0;
+            if gap.abs() < 1e-6 && (!stopping || r.v == 0.0) {
                 r.v = 0.0;
                 continue;
             }
@@ -4985,26 +5254,28 @@ impl<'a> Sim<'a> {
                 Some(leave) if now < leave => continue,
                 _ => {}
             }
-            // Turning round takes a stop: moving the other way he brakes at `BRAKE` (the
-            // fielders' figure) through zero, then accelerates toward the goal on the usual
-            // curve; he never flips his direction at speed (agent-models §6.4).
-            let against = r.v > 1e-9 && r.direction != dir;
-            let mdir = if against { r.direction } else { dir };
-            r.direction = mdir;
             if r.v == 0.0 {
                 r.moving_since = now;
             }
             let tau = if r.set_start.is_some() { r.tau * tag.tau_gain } else { r.tau };
-            if against {
-                r.v = (r.v - BRAKE * DT).max(0.0);
-            } else if dir < 0.0 || r.hold_s.is_some() {
-                // Brake into a return or a partway hold, both known stopping points.
-                r.v = approach_speed(r.v, r.vmax, tau, (goal_s - r.s).abs());
-            } else {
-                r.v += (r.vmax - r.v) * (DT / tau);
-            }
             let prev = r.s;
-            let nxt = prev + mdir * r.v * DT;
+            let (nxt, stop_speed) = if stopping {
+                step_to_stop(prev, r.direction * r.v, goal_s, r.vmax, tau)
+            } else {
+                // For a running arrival, keep his crossing speed. If turning, brake in the
+                // old direction until he stops, then accelerate toward the new goal.
+                let signed = if r.v > 1e-9 && r.direction != dir {
+                    r.direction * (r.v - BRAKE * DT).max(0.0)
+                } else {
+                    dir * (r.v + (r.vmax - r.v) * (DT / tau))
+                };
+                (prev + signed * DT, signed)
+            };
+            let mdir = (nxt - prev).signum();
+            if mdir != 0.0 {
+                r.direction = mdir;
+            }
+            r.v = stop_speed.abs();
             let crossed = |b: u8| {
                 let bs = b as f64 * BASE_L;
                 (prev < bs && nxt >= bs) || (prev > bs && nxt <= bs)
@@ -5018,8 +5289,8 @@ impl<'a> Sim<'a> {
                 }
             }
             // Leaving a base.
-            let left = (0..=3u8).find(|&b| (prev - b as f64 * BASE_L).abs() < 1e-9 && b >= 1);
-            r.s = if !against && ((dir > 0.0 && nxt >= goal_s) || (dir < 0.0 && nxt <= goal_s)) { goal_s } else { nxt };
+            let left = (1..=3u8).find(|&b| nxt != prev && (prev - b as f64 * BASE_L).abs() < 1e-9);
+            r.s = if !stopping && mdir == dir && crossed(r.goal) { goal_s } else { nxt };
             let id = r.id;
             if let Some(b) = left {
                 self.emit(Input::BaseLeft { t: self.t, agent: id, base: b });
@@ -5034,14 +5305,22 @@ impl<'a> Sim<'a> {
                 if self.done {
                     return;
                 }
+                // Through the bag and on past it in the same tick: he has left it (the rules
+                // hold a runner who touched a bag on it until he leaves).
+                if b < 4 && (self.r[k].s - b as f64 * BASE_L).abs() > 1e-9 {
+                    self.emit(Input::BaseLeft { t: self.t, agent: id, base: b });
+                    if self.done {
+                        return;
+                    }
+                }
                 if b == self.r[k].goal {
                     self.r[k].turns = 0;
                 }
-                let retouched = mdir < 0.0 && self.r[k].retouch && b == self.r[k].start;
+                let retouched = self.r[k].retouch && b == self.r[k].start && self.r[k].v == 0.0;
                 if retouched {
                     self.r[k].retouch = false;
                 }
-                if b < 4 && (mdir > 0.0 || retouched) && b == self.r[k].goal && !awaiting_catch_call {
+                if b < 4 && (!stopping && mdir > 0.0 || retouched) && b == self.r[k].goal && !awaiting_call {
                     // Arrived where it was going (or retouched after a catch): decide whether
                     // to keep going (leaving the base is reported on the next step). Coming
                     // back he braked into the bag, and is planted on it: his next leg starts
@@ -5062,7 +5341,7 @@ impl<'a> Sim<'a> {
             // speed. Protected overruns retain the crossing speed for braking.
             let r = &mut self.r[k];
             let stop_s = r.hold_s.unwrap_or(r.goal as f64 * BASE_L);
-            if r.overrun == OverrunPhase::None && (stop_s - r.s).abs() < 1e-6 {
+            if r.overrun == OverrunPhase::None && (stop_s - r.s).abs() < 1e-6 && (!stopping || r.v == 0.0) {
                 r.v = 0.0;
                 r.set_start = None;
                 r.turned_back = None;
@@ -5628,6 +5907,9 @@ fn new_sim<'a>(inp: &'a LiveInput<'a>, st: &'a mut RulesState) -> Sim<'a> {
                 catch_vel: Vec3::ZERO,
                 took_diving: false,
                 catch_stretched: false,
+                catch_heading: None,
+                catch_seen_vel: Vec3::ZERO,
+                catch_received_throw: false,
                 backs: None,
                 peel: None,
                 carry_to: None,
@@ -5693,6 +5975,7 @@ fn new_sim<'a>(inp: &'a LiveInput<'a>, st: &'a mut RulesState) -> Sim<'a> {
         secured_at: f64::INFINITY,
         caught_at: None,
         no_catch_at: None,
+        flight_secured_at: None,
         low_catch: false,
     }
 }
@@ -5731,6 +6014,7 @@ impl<'a> Sim<'a> {
             secured_at: self.secured_at,
             caught_at: self.caught_at,
             no_catch_at: self.no_catch_at,
+            flight_secured_at: self.flight_secured_at,
             low_catch: self.low_catch,
             st,
             t: self.t,
@@ -5871,8 +6155,12 @@ fn simulate_live_inner(inp: &LiveInput, st: &mut RulesState) -> LiveOutput {
                 if sim.r[k].start == 0 || two_out {
                     continue;
                 }
-                let (p_catch, at) = if check_catch { sim.runner_catch_belief(k, 1) } else { (0.0, None) };
-                sim.read_contact(k, p_catch, at);
+                if check_catch {
+                    let look = sim.observe_contact(k);
+                    sim.read_contact(k, look);
+                } else {
+                    sim.runner_decide(k, sim.r[k].start);
+                }
             }
         }
         if assigned {
@@ -6803,6 +7091,219 @@ mod tests {
         assert_eq!(count(&sim, |f| matches!(f, Input::BaseTouched { agent: R, base: 3, holding_ball: false, .. })), 1, "facts: {:?}", sim.out.facts);
         assert_eq!(count(&sim, |f| matches!(f, Input::BaseLeft { agent: R, base: 2, .. })), 2);
         assert!(!sim.out.events.iter().any(|e| matches!(e, Event::RulesWarning { .. })));
+    }
+
+    #[test]
+    fn an_early_legal_retouch_keeps_its_time_and_gets_a_decision_on_the_call() {
+        const R: AgentId = 7;
+        let fx = fixture(&[(R, 3)]);
+        let inp = input(&fx, vec![
+            RunnerIn { id: fx.st.batter, base: 0, speed: 8.2, tau_s: RUNNER_TAU },
+            RunnerIn { id: R, base: 3, speed: 9.6, tau_s: RUNNER_TAU },
+        ]);
+        for gap in [0.08, 0.45] {
+            let mut st = fx.st.clone();
+            let mut sim = new_sim(&inp, &mut st);
+            sim.start_runners();
+            sim.r[1].reading_contact = false;
+            let call = 5.0;
+            sim.t = call;
+            sim.emit(Input::BaseLeft { t: call, agent: R, base: 3 });
+            let r = &mut sim.r[1];
+            (r.s, r.v, r.direction, r.goal) = (3.0 * BASE_L + gap, 1.0, -1.0, 3);
+            sim.emit(Input::GloveSecured { t: call, fielder: sim.f[CF].id, x: 0.0, y: 120.0 });
+            assert!(sim.caught());
+            sim.ball = Ball::Held { by: CF };
+            sim.f[CF].pos = Vec3::new(0.0, 120.0, 0.0);
+            for tick in 0..36 {
+                sim.t = call + f64::from(tick) / 60.0;
+                sim.move_runners();
+                if tick < 15 {
+                    assert_eq!(sim.r[1].decisions, 0);
+                }
+            }
+            let touches: Vec<_> = sim.out.facts.iter().filter_map(|fact| match *fact {
+                Input::BaseTouched { agent: R, base: 3, t, holding_ball: false } => Some(t),
+                _ => None,
+            }).collect();
+            assert_eq!(touches.len(), 1);
+            if gap < 0.1 {
+                // For an 8 cm gap at the final walking speed, expect about 80 ms.
+                assert!((0.04..0.10).contains(&(touches[0] - call)));
+            } else {
+                assert!(touches[0] >= call + 0.25);
+            }
+            assert_eq!(sim.r[1].decisions, 1);
+            assert_eq!(sim.r[1].goal, 4, "the deep fly is an advance from third");
+        }
+    }
+
+    /// Catch-read fixes review P2-1. A runner coming back to third at 2.5 m/s, 8 cm off at
+    /// the catch, touches it legally within a tick or two and carries on past it, with and
+    /// without an anticipated tag-up. Physics and the rules, independent of the planner: a
+    /// body crossing the bag and ending the tick off it has left it; a touch happens only on
+    /// a tick whose movement reaches the bag. His first touch is the legal retouch, and he
+    /// gets one advance decision, when he has come back and planted. A runner already
+    /// planted on third at the catch, with no tag-up set, also gets that one decision once
+    /// he sees the call.
+    #[test]
+    fn a_retouch_at_speed_keeps_one_touch_reports_the_departure_and_decides_at_the_plant() {
+        const R: AgentId = 7;
+        let fx = fixture(&[(R, 3)]);
+        let inp = input(&fx, vec![
+            RunnerIn { id: fx.st.batter, base: 0, speed: 8.2, tau_s: RUNNER_TAU },
+            RunnerIn { id: R, base: 3, speed: 9.6, tau_s: RUNNER_TAU },
+        ]);
+        let third = 3.0 * BASE_L;
+        let run = |gap: f64, speed: f64, tag_up: bool| {
+            let mut st = fx.st.clone();
+            let mut sim = new_sim(&inp, &mut st);
+            sim.start_runners();
+            sim.r[1].reading_contact = false;
+            let call = 5.0;
+            sim.t = call;
+            if gap > 0.0 {
+                sim.emit(Input::BaseLeft { t: call, agent: R, base: 3 });
+            }
+            let r = &mut sim.r[1];
+            (r.s, r.v, r.direction, r.goal, r.tag_up) = (third + gap, speed, -1.0, 3, tag_up);
+            sim.emit(Input::GloveSecured { t: call, fielder: sim.f[CF].id, x: 0.0, y: 120.0 });
+            assert!(sim.caught());
+            sim.ball = Ball::Held { by: CF };
+            sim.f[CF].pos = Vec3::new(0.0, 120.0, 0.0);
+            let mut decided_at = None;
+            for tick in 0..90 {
+                sim.t = call + f64::from(tick) * DT;
+                let (prev, facts) = (sim.r[1].s, sim.out.facts.len());
+                sim.move_runners();
+                let now = sim.r[1].s;
+                for fact in &sim.out.facts[facts..] {
+                    if let Input::BaseTouched { agent: R, base: 3, .. } = fact {
+                        assert!(prev.min(now) <= third + 1e-9 && prev.max(now) >= third - 1e-9, "touched third from {prev:.3} to {now:.3}, tag-up {tag_up}");
+                    }
+                }
+                if decided_at.is_none() && sim.r[1].decisions > 0 {
+                    decided_at = Some((sim.t, prev, sim.r[1].decisions));
+                }
+            }
+            let warned = sim.out.events.iter().any(|e| matches!(e, Event::RulesWarning { .. }));
+            (sim.out.facts.clone(), warned, sim.r[1].decisions, sim.r[1].goal, decided_at)
+        };
+        for tag_up in [false, true] {
+            let (facts, warned, decisions, _, decided) = run(0.08, 2.5, tag_up);
+            let touches: Vec<f64> = facts.iter().filter_map(|f| match *f {
+                Input::BaseTouched { agent: R, base: 3, t, .. } => Some(t),
+                _ => None,
+            }).collect();
+            let leaves: Vec<f64> = facts.iter().filter_map(|f| match *f {
+                Input::BaseLeft { agent: R, base: 3, t } => Some(t),
+                _ => None,
+            }).collect();
+            assert!(touches[0] > 5.0 && touches[0] < 5.1, "the legal retouch, tag-up {tag_up}: {touches:?}");
+            assert!(leaves.contains(&touches[0]), "the drift past the bag is a departure, tag-up {tag_up}: {leaves:?}");
+            let (t, from, n) = decided.expect("a decision once back on the bag");
+            assert_eq!(n, 1, "one decision, tag-up {tag_up}");
+            assert!(t >= 5.0 + RUNNER_CATCH_CALL_REACT_S - 1e-9, "after the call is seen");
+            assert!(from < third - 1e-6 && t > touches[0] + 0.1, "decided on coming back onto the bag from past it, not while drifting, tag-up {tag_up}: {decided:?}, touches {touches:?}");
+            assert_eq!(decisions, 1, "and no second decision, tag-up {tag_up}");
+            assert!(!warned);
+        }
+        let (_, _, _, goal, decided) = run(0.0, 0.0, false);
+        assert!(decided.is_some_and(|(t, _, n)| n == 1 && (t - 5.0 - RUNNER_CATCH_CALL_REACT_S).abs() < DT), "planted at the catch: {decided:?}");
+        assert_eq!(goal, 4, "the deep fly is an advance from third");
+    }
+
+    /// Catch-read fixes review P1-3: the same visible glove possession near third, with
+    /// and without the catch ruled (the second arm's ground touch reaches only the rules,
+    /// so nothing public differs). A runner 4 m off second going to third sees the ball
+    /// taken in flight either way and reacts only to the call, so his movement through
+    /// the reaction window must match. Once the window ends, the possession without a catch
+    /// is a new thing to see: he looks again.
+    #[test]
+    fn a_possession_in_flight_moves_runners_the_same_until_the_call_is_seen() {
+        const R: AgentId = 7;
+        const B3: usize = 4;
+        let fx = fixture(&[(R, 2)]);
+        let inp = input(&fx, vec![
+            RunnerIn { id: fx.st.batter, base: 0, speed: 8.2, tau_s: RUNNER_TAU },
+            RunnerIn { id: R, base: 2, speed: 8.2, tau_s: RUNNER_TAU },
+        ]);
+        let run = |ruled: bool| {
+            let mut st = fx.st.clone();
+            let mut sim = new_sim(&inp, &mut st);
+            sim.start_runners();
+            sim.r[0].reading_contact = false;
+            sim.r[1].reading_contact = false;
+            let call = 2.0;
+            sim.t = call;
+            sim.emit(Input::BaseLeft { t: call - 0.5, agent: R, base: 2 });
+            let r = &mut sim.r[1];
+            (r.s, r.v, r.direction, r.goal) = (2.0 * BASE_L + 4.0, 3.0, 1.0, 3);
+            if !ruled {
+                step(sim.st, &Input::BallTouched { t: call - 0.1, what: Touch::Ground { x: -20.0, y: 22.0 } });
+            }
+            let at = base_pos(3) + Vec3::new(2.0, 2.0, 0.0);
+            sim.f[B3].pos = at;
+            sim.emit(Input::GloveSecured { t: call, fielder: sim.f[B3].id, x: at.x, y: at.y });
+            sim.ball = Ball::Held { by: B3 };
+            sim.secured_at = call;
+            sim.out.secured.push((call, sim.f[B3].id));
+            assert_eq!(sim.caught(), ruled);
+            assert!(sim.no_catch_at.is_none());
+            let mut seen = Vec::new();
+            let mut tick = 0;
+            while sim.t + 1e-9 < call + RUNNER_CATCH_CALL_REACT_S {
+                sim.move_runners();
+                let r = &sim.r[1];
+                assert!(!r.catch_seen);
+                seen.push((r.s, r.v, r.direction, r.goal, r.decisions));
+                tick += 1;
+                sim.t = call + f64::from(tick) * DT;
+            }
+            sim.move_runners();
+            (seen, sim.r[1].decisions, sim.r[1].catch_seen)
+        };
+        let (with_catch, with_decisions, saw_catch) = run(true);
+        let (without, without_decisions, _) = run(false);
+        assert!(with_catch.len() >= 10);
+        assert!(with_catch.iter().all(|x| x.4 == 0), "no decision before the call is seen");
+        assert_eq!(with_catch, without);
+        assert!(saw_catch && with_decisions == 0, "the catch sends him back to retouch");
+        assert_eq!(without_decisions, 1, "possession without a catch is a new look once the call is seen");
+    }
+
+    #[test]
+    fn a_simultaneous_catch_does_not_remove_the_force_from_runner_traffic() {
+        const TRAIL: AgentId = 7;
+        const LEAD: AgentId = 8;
+        let fx = fixture(&[(TRAIL, 1), (LEAD, 2)]);
+        let inp = input(&fx, vec![
+            RunnerIn { id: fx.st.batter, base: 0, speed: 8.2, tau_s: RUNNER_TAU },
+            RunnerIn { id: TRAIL, base: 1, speed: 8.2, tau_s: RUNNER_TAU },
+            RunnerIn { id: LEAD, base: 2, speed: 8.2, tau_s: RUNNER_TAU },
+        ]);
+        let tick = |caught| {
+            let mut st = fx.st.clone();
+            let mut sim = new_sim(&inp, &mut st);
+            sim.start_runners();
+            sim.r[1].reading_contact = false;
+            sim.r[2].reading_contact = false;
+            sim.t = 5.0;
+            sim.emit(Input::BaseLeft { t: sim.t, agent: TRAIL, base: 1 });
+            (sim.r[1].s, sim.r[1].v, sim.r[1].goal) = (BASE_L + 8.0, 5.0, 2);
+            (sim.r[2].s, sim.r[2].v, sim.r[2].goal) = (2.0 * BASE_L, 0.0, 2);
+            sim.r[2].still_since = Some(4.5);
+            if caught {
+                sim.emit(Input::GloveSecured { t: sim.t, fielder: sim.f[CF].id, x: 0.0, y: 95.0 });
+                sim.ball = Ball::Held { by: CF };
+                assert!(sim.r[0].out && !sim.forced(1), "the legal force is removed at the catch");
+            }
+            sim.move_runners();
+            let trail = &sim.r[1];
+            assert!(!trail.catch_seen && trail.goal == 2 && trail.v > 5.0);
+            (trail.s, trail.v, trail.goal, trail.decisions)
+        };
+        assert_eq!(tick(true), tick(false));
     }
 
     // Day-fixes review #1 (P1): a runner from third who crossed the plate before the catch
@@ -10171,6 +10672,141 @@ mod tests {
     }
 
     #[test]
+    fn catch_height_is_continuous_and_a_fence_leap_is_in_reach() {
+        use bb_physics::ground::Segment;
+
+        let fx = fixture(&[]);
+        let inp = input(&fx, Vec::new());
+        let mut st = fx.st.clone();
+        let mut sim = new_sim(&inp, &mut st);
+        sim.t = 2.0;
+        let score = |sim: &mut Sim, y, z| {
+            sim.f[CF].pos = Vec3::new(0.0, y, 0.0);
+            let ball = BallState { r: Vec3::new(0.0, y, z), v: Vec3::ZERO, w: Vec3::ZERO };
+            let path = BallPath {
+                segments: vec![Segment::Flight { tr: Trajectory::single(sim.t, ball), end: SegmentEnd::Timeout }],
+                bounces: Vec::new(),
+                walls: Vec::new(),
+            };
+            sim.runner_catch_probability(&path)
+        };
+        let below = score(&mut sim, 60.0, 2.399);
+        let above = score(&mut sim, 60.0, 2.401);
+        // The physical ceiling lies between these samples. A millimetre each
+        // side should not halve the chance over a glove's width of uncertainty.
+        assert!(below > above && below - above < 0.01, "{below:.5} vs {above:.5}");
+        let fence_y = (80..1400).map(|i| f64::from(i) * 0.1).find(|&y| {
+            (0.4..1.0).contains(&inp.field.body_clearance(0.0, y, 0.0).dist)
+        }).expect("a point just in front of the center-field fence");
+        assert!(score(&mut sim, 60.0, 2.85) < 0.1);
+        assert!(score(&mut sim, fence_y, 2.85) > 0.65);
+    }
+
+    #[test]
+    fn a_fixed_contact_look_hides_a_change_of_flight() {
+        const R: AgentId = 7;
+        let fx = fixture(&[(R, 2)]);
+        let inp = input(&fx, vec![RunnerIn { id: R, base: 2, speed: 8.2, tau_s: RUNNER_TAU }]);
+        let mut st = fx.st.clone();
+        let mut sim = new_sim(&inp, &mut st);
+        sim.start_runners();
+        sim.r[0].reading_contact = false;
+        sim.t = inp.t_contact + RUNNER_READ_DELAY_S;
+        let look = ContactLook {
+            motion: (Vec3::new(0.0, 17.0, 5.0), Vec3::new(0.0, 30.0, 8.0)),
+            from: sim.runner_pos(&sim.r[0]),
+            t: sim.t,
+            view: RUNNER_READ_DELAY_S,
+            contact_since: Some(RUNNER_READ_DELAY_S),
+        };
+        for fd in &mut sim.f {
+            fd.pos = Vec3::new(-70.0, 30.0, 0.0);
+        }
+        // Sweep one observer-visible catch opportunity from under the fly to out of reach.
+        // Then pin a close read while the world privately replaces the trajectory.
+        let flight = look.project(inp.field, [0.0; 4]);
+        let (_, x, y) = flight.first_bounce().unwrap();
+        let belief = (0..300).find_map(|offset| {
+            sim.f[6].pos = Vec3::new(x + f64::from(offset) * 0.1, y, 0.0);
+            let p = Sim::catch_score(&sim.runner_catch_paths(look));
+            (0.25..0.75).contains(&p).then_some(p)
+        }).expect("a close catch between the fielder and the gap");
+
+        let initial = sim.r[0].clone();
+        sim.read_contact(0, look);
+        let action = (sim.r[0].goal, sim.r[0].tag_up, sim.r[0].hold_s);
+        assert!(action.2.is_some(), "the matched look must set a recoverable hold");
+        let old_motion = sim.ball_at(sim.t);
+        sim.set_free(BallState {
+            r: Vec3::new(3.0, 12.0, 1.0),
+            v: Vec3::new(13.0, 8.0, -3.0),
+            w: Vec3::ZERO,
+        });
+        assert_ne!(sim.ball_at(sim.t), old_motion);
+        assert!(sim.no_catch_at.is_none());
+        sim.r[0] = initial;
+        assert_eq!(Sim::catch_score(&sim.runner_catch_paths(look)), belief);
+        sim.read_contact(0, look);
+        assert_eq!((sim.r[0].goal, sim.r[0].tag_up, sim.r[0].hold_s), action);
+    }
+
+    /// Catch-read fixes review P1-1: a runner's relook at a loose ball sees its motion now,
+    /// not where it was actually hit or whether the world's path began at contact. Three
+    /// worlds with identical ball position and velocity at the look: the batted flight, the
+    /// same flight with the contact point moved 15 cm across and up, and a replacement path
+    /// starting now with the same motion (as an unseen deflection would leave). No ground,
+    /// wall or glove touch is public in any of them, so the runner's prediction and his
+    /// pickup estimate at third must agree.
+    #[test]
+    fn a_loose_ball_relook_ignores_the_private_contact_point_and_path_origin() {
+        const R: AgentId = 7;
+        let fx = fixture(&[(R, 2)]);
+        let runners = vec![RunnerIn { id: R, base: 2, speed: 8.2, tau_s: RUNNER_TAU }];
+        let inp = input(&fx, runners.clone());
+        let mut moved = input(&fx, runners);
+        moved.ball.r += Vec3::new(0.15, 0.0, 0.15);
+        let now = inp.t_contact + 0.5;
+        let look = |sim: &Sim| {
+            let pred = sim.runner_predict(0, 3);
+            let land = pred.first_bounce().map(|(t, x, y)| (t, x, y));
+            (land, pred.at(pred.t_end()).0, sim.ball_time_to(0, 3, 3, now + 2.0))
+        };
+        let prepare = |sim: &mut Sim| {
+            sim.start_runners();
+            sim.r[0].reading_contact = false;
+            sim.t = now;
+        };
+
+        let mut st = fx.st.clone();
+        let mut batted = new_sim(&inp, &mut st);
+        prepare(&mut batted);
+        let motion = batted.ball_at(now);
+        let base = look(&batted);
+
+        let mut st = fx.st.clone();
+        let mut shifted = new_sim(&moved, &mut st);
+        prepare(&mut shifted);
+        shifted.ball = batted.ball.clone();
+        assert_eq!(shifted.ball_at(now), motion);
+        assert_eq!(look(&shifted), base, "the true contact point moved the relook");
+
+        let mut st = fx.st.clone();
+        let mut replaced = new_sim(&inp, &mut st);
+        prepare(&mut replaced);
+        let w = match &replaced.ball {
+            Ball::Free { path, .. } => match path.segments.first() {
+                Some(bb_physics::ground::Segment::Flight { tr, .. }) => tr.first().s.w,
+                _ => unreachable!(),
+            },
+            _ => unreachable!(),
+        };
+        replaced.set_free(BallState { r: motion.0, v: motion.1, w });
+        assert_eq!(replaced.ball_at(now), motion);
+        assert!(replaced.no_catch_at.is_none() && replaced.out.first_handling.is_none());
+        assert_eq!(look(&replaced), base, "a path replaced without a public touch moved the relook");
+    }
+
+    #[test]
     fn a_close_trap_holds_the_runner_partway_until_he_can_react_to_the_call() {
         const R: AgentId = 0x0007;
         let fx = fixture(&[(R, 1)]);
@@ -10208,7 +10844,9 @@ mod tests {
         sim.f[2].pos = Vec3::new(x, y + 1.0, 0.0);
         let p = sim.runner_catch_probability(&seen);
         assert!((0.20..0.80).contains(&p), "close catch belief {p:.2}");
-        sim.read_contact(1, p, None);
+        sim.r[1].s = BASE_L + 0.8;
+        sim.r[1].v = 0.0;
+        sim.set_catch_hold(1, &[sim.runner_catch_read(&seen)]);
         let hold = sim.r[1].hold_s.expect("the close read keeps him partway");
         assert!(hold < 1.5 * BASE_L && !sim.r[1].tag_up);
         let start = sim.r[1].s;
@@ -10332,10 +10970,11 @@ mod tests {
         let mut sim = new_sim(&inp, &mut st);
         sim.start_runners();
         let bag = 2.0 * BASE_L;
-        let deep = sim.catch_hold_s(1, Vec3::new(-50.0, 110.0, 0.0));
+        let read_at = |at| [Some(CatchRead { score: 0.5, t: 5.0, at })];
+        let deep = sim.catch_hold_s(1, &read_at(Vec3::new(-50.0, 110.0, 0.0))).unwrap();
         assert!((deep - (lead_s(2) + HALFWAY_M)).abs() < 1e-9, "deep hold {:.2} m off", deep - bag);
         let at = Vec3::new(-15.0, 45.0, 0.0);
-        let shallow = sim.catch_hold_s(1, at);
+        let shallow = sim.catch_hold_s(1, &read_at(at)).unwrap();
         assert!(shallow > bag + 1.0 && shallow < lead_s(2), "shallow hold {:.2} m off", shallow - bag);
 
         let call = 5.0;
@@ -10356,6 +10995,78 @@ mod tests {
         let spare = ball - back;
         let caution = inp.advance.caution_z * inp.advance.sigma_race_s;
         assert!(spare >= caution - DT && spare <= caution + 0.1, "back in {back:.3} s, ball in {ball:.3} s");
+    }
+
+    #[test]
+    fn a_close_early_catch_sends_the_standard_moving_lead_back_immediately() {
+        const R: AgentId = 7;
+        let fx = fixture(&[(R, 1)]);
+        let inp = input(&fx, vec![
+            RunnerIn { id: fx.st.batter, base: 0, speed: 8.2, tau_s: RUNNER_TAU },
+            RunnerIn { id: R, base: 1, speed: 8.2, tau_s: RUNNER_TAU },
+        ]);
+        let mut st = fx.st.clone();
+        let mut sim = new_sim(&inp, &mut st);
+        sim.start_runners();
+        sim.r[1].s += 0.5 * sim.r[1].v;
+        sim.r[1].reading_contact = false;
+        sim.t = 0.9;
+        let call = 1.05;
+        let at = base_pos(1) - Vec3::X * 30.0;
+        let paths = [Some(CatchRead { score: 0.5, t: call, at })];
+        let lead = sim.r[1].s;
+        assert!((lead - BASE_L - 8.0).abs() < 1e-9);
+        sim.set_catch_hold(1, &paths);
+        assert!(sim.r[1].tag_up && sim.r[1].hold_s.is_none());
+        sim.emit(Input::BaseLeft { t: sim.t, agent: R, base: 1 });
+        sim.move_runners();
+        assert!((sim.r[1].v - (3.0 - 4.75 / 60.0)).abs() < 1e-9);
+        let mut peak = sim.r[1].s;
+        for tick in 1..210 {
+            sim.t = 0.9 + f64::from(tick) / 60.0;
+            if tick == 9 {
+                sim.emit(Input::GloveSecured { t: call, fielder: sim.f[CF].id, x: at.x, y: at.y });
+                assert!(sim.caught());
+                sim.ball = Ball::Held { by: CF };
+                sim.f[CF].pos = at;
+            }
+            sim.move_runners();
+            peak = peak.max(sim.r[1].s);
+        }
+        let retouch = sim.out.facts.iter().find_map(|fact| match *fact {
+            Input::BaseTouched { agent: R, base: 1, t, holding_ball: false } if t > call => Some(t),
+            _ => None,
+        }).expect("legally retouched");
+        // The stopping distance from 3 m/s is about 0.95 m. Even an immediate
+        // turn from an 8 m lead cannot beat the roughly 1.64 s appeal.
+        assert!((0.9..0.95).contains(&(peak - lead)), "braking drift {}", peak - lead);
+        // Acceleration to about 6.4 m/s, braking, and the final slow step
+        // put the earliest return near 2.9 s after the catch.
+        assert!((2.7..3.1).contains(&(retouch - call)), "retouch after {}", retouch - call);
+    }
+
+    #[test]
+    fn a_runner_does_not_plant_at_a_hold_inside_his_braking_distance() {
+        const R: AgentId = 7;
+        let fx = fixture(&[(R, 1)]);
+        let inp = input(&fx, vec![RunnerIn { id: R, base: 1, speed: 8.2, tau_s: RUNNER_TAU }]);
+        let mut st = fx.st.clone();
+        let mut sim = new_sim(&inp, &mut st);
+        sim.t = 0.9;
+        let r = &mut sim.r[0];
+        let start = BASE_L + 8.0;
+        let target = start + 0.13;
+        (r.s, r.v, r.hold_s) = (start, 2.84, Some(target));
+        let mut peak = start;
+        for tick in 0..120 {
+            sim.t = 0.9 + f64::from(tick) / 60.0;
+            sim.move_runners();
+            peak = peak.max(sim.r[0].s);
+        }
+        // From 2.84 m/s the ideal braking distance is 0.85 m. At 60 Hz it
+        // is about 0.82 m, so planting 0.13 m ahead is physically impossible.
+        assert!((0.80..0.85).contains(&(peak - start)), "braking drift {}", peak - start);
+        assert_eq!((sim.r[0].s, sim.r[0].v), (target, 0.0));
     }
 
     // Runners take leads, and on a fly that might drop with fewer than two out they go
@@ -10509,6 +11220,100 @@ mod tests {
         let pos = sim.f[CF].pos;
         sim.f[CF].lunge = Some((4.8, pos, pos));
         assert!((1.3..1.7).contains(&(race(&sim) - upright)));
+    }
+
+    #[test]
+    fn the_holders_visible_reception_hides_the_incoming_throws_private_route() {
+        const R: AgentId = 7;
+        let fx = fixture(&[(R, 1)]);
+        let inp = input(&fx, vec![
+            RunnerIn { id: fx.st.batter, base: 0, speed: 8.2, tau_s: RUNNER_TAU },
+            RunnerIn { id: R, base: 1, speed: 8.2, tau_s: RUNNER_TAU },
+        ]);
+        // `off`: how far from second he takes it. Off the bag, a feed waits for the bag;
+        // then he reaches it moving across, the same visible arrival under every route.
+        let receive = |base, relay, off: f64| {
+            let mut st = fx.st.clone();
+            let mut sim = new_sim(&inp, &mut st);
+            if off != 0.0 {
+                // A ground ball, so the batter is not out on the reception and the force
+                // at second stands.
+                sim.emit(Input::BallTouched { t: 1.0, what: Touch::Ground { x: 0.0, y: 30.0 } });
+            }
+            sim.t = 5.0;
+            let by = 3;
+            let at = base_pos(2) + Vec3::new(off, 0.0, 0.0);
+            sim.f[by].pos = at;
+            sim.f[by].vel = Vec3::ZERO;
+            sim.launch_throw(BallState {
+                r: at + Vec3::Z * THROW_CATCH_Z,
+                v: Vec3::new(0.0, 20.0, 0.0),
+                w: Vec3::ZERO,
+            }, base_pos(base), base, by, relay);
+            sim.try_captures();
+            assert!(matches!(sim.ball, Ball::Held { by: 3 }));
+            let feed = base == 2 && !relay;
+            assert_eq!(sim.f[by].pivot || sim.f[by].pivot_wait_bag, feed, "the fixtures change the private setup");
+            let received = (sim.observe_holder(by), sim.ball_time_to(0, 1, 3, 5.5));
+            if off == 0.0 {
+                return (received, None);
+            }
+            assert_eq!(sim.f[by].pivot_wait_bag, feed);
+            sim.t += DT;
+            sim.f[by].pos = base_pos(2) + Vec3::new(0.35, 0.0, 0.0);
+            sim.f[by].vel = Vec3::new(-4.0, 0.0, 0.0);
+            sim.holder_act();
+            assert!(matches!(sim.ball, Ball::Held { by: 3 }), "still holding it on the bag");
+            assert_eq!(sim.f[by].pivot, feed, "only the feed pivots on the bag");
+            (received, Some((sim.observe_holder(by), sim.ball_time_to(0, 1, 3, 5.5))))
+        };
+        let feed = receive(2, false, 0.0);
+        assert_eq!(feed, receive(3, false, 0.0));
+        assert_eq!(feed, receive(2, true, 0.0));
+        assert!(feed.0.0.received_throw);
+        assert!(feed.0.1 > 6.0 && feed.0.1 < 7.5);
+        // Catch-read fixes review P1-2: the private pivot on reaching the bag must not
+        // rewrite the reception the runner saw.
+        let feed = receive(2, false, 0.61);
+        assert_eq!(feed, receive(3, false, 0.61));
+        assert_eq!(feed, receive(2, true, 0.61));
+        assert_eq!(feed.0.0.motion, feed.1.unwrap().0.motion);
+    }
+
+    #[test]
+    fn a_throw_with_a_recorded_release_times_both_base_races() {
+        let fx = fixture(&[]);
+        let inp = input(&fx, vec![RunnerIn { id: fx.st.batter, base: 0, speed: 8.2, tau_s: RUNNER_TAU }]);
+        let mut st = fx.st.clone();
+        let mut sim = new_sim(&inp, &mut st);
+        let from = Vec3::new(12.0, 85.0, 0.0);
+        throw_to_base(&mut sim, from, 2, 40.0);
+        let fielder = sim.f[CF].id;
+        sim.emit(Input::GloveSecured { t: 5.0, fielder, x: from.x, y: from.y });
+        sim.emit(Input::BallReleasedFromGlove { t: 5.0, fielder, kind: ReleaseKind::Throw, infielder: false });
+        sim.out.released.push((5.0, fielder));
+        sim.t = 5.9;
+
+        let look = sim.runner_throw_observation(0, 3);
+        let release = sim.out.released.pop().unwrap();
+        let unsharpened = sim.runner_throw_observation(0, 3);
+        sim.out.released.push(release);
+        let exact = sim.ball_at(sim.t);
+        assert!((look.0 - exact.0).norm() < (unsharpened.0 - exact.0).norm());
+        assert!((look.1 - exact.1).norm() < (unsharpened.1 - exact.1).norm());
+
+        let projection = sim.project_runner_throw(look.0, look.1);
+        assert_eq!(projection.dest, 2);
+        let (second, first) = sim.runner_ball_races(0, 3, (2, 7.0), (1, 6.5));
+        assert_eq!((second, first), (projection.time_to(2), projection.time_to(1)));
+        // Compare to the crossing on the world flight. The runner has a noisy
+        // estimate, not the exact time. First is another 27 m and a relay later.
+        let Ball::Thrown { path, .. } = &sim.ball else { panic!("still in flight") };
+        let actual_second = path.knots.iter().min_by(|a, b| {
+            (a.s.r - base_pos(2)).norm_sq().total_cmp(&(b.s.r - base_pos(2)).norm_sq())
+        }).unwrap().t;
+        assert!(second >= sim.t && (second - actual_second).abs() < 0.5, "arrival at second {second:.2}, actual {actual_second:.2}");
+        assert!((1.2..1.7).contains(&(first - second)), "relay delay {:.2}", first - second);
     }
 
     // Owner's play (seed 24583, play 81): from center field second base and home lie on one
@@ -11393,6 +12198,38 @@ mod tests {
             }
         }
         Ok(())
+    }
+
+    /// Catch-read fixes review P1-4: the settle guard reads another runner's motion, not his
+    /// goal. The runner from second stands on third; the runner from third is coming back
+    /// at it, 0.30 m off at 2 m/s, too fast to stop short. Whether that lead runner means
+    /// to stay at third or turn for home is his own; the trailing runner gives way either
+    /// way. Only a visible change (the lead runner far off and slow) keeps him on third.
+    #[test]
+    fn the_settle_guard_reads_motion_not_another_runners_goal() {
+        const TRAIL: AgentId = 7;
+        const LEAD: AgentId = 8;
+        let fx = fixture(&[(TRAIL, 2), (LEAD, 3)]);
+        let inp = input(&fx, vec![
+            RunnerIn { id: fx.st.batter, base: 0, speed: 8.2, tau_s: RUNNER_TAU },
+            RunnerIn { id: TRAIL, base: 2, speed: 8.2, tau_s: RUNNER_TAU },
+            RunnerIn { id: LEAD, base: 3, speed: 8.2, tau_s: RUNNER_TAU },
+        ]);
+        let guard = |lead_goal: u8, off: f64, speed: f64| {
+            let mut st = fx.st.clone();
+            let mut sim = new_sim(&inp, &mut st);
+            sim.t = 5.0;
+            let third = 3.0 * BASE_L;
+            let r = &mut sim.r[1];
+            (r.s, r.v, r.direction, r.goal, r.still_since) = (third, 0.0, 1.0, 3, Some(4.0));
+            let r = &mut sim.r[2];
+            (r.s, r.v, r.direction, r.goal) = (third + off, speed, -1.0, lead_goal);
+            sim.settle_guard(1);
+            sim.r[1].goal
+        };
+        assert_eq!(guard(3, 0.30, 2.0), 2, "a lead runner coming onto the bag: give way");
+        assert_eq!(guard(4, 0.30, 2.0), guard(3, 0.30, 2.0), "the lead runner's private goal moved the guard");
+        assert_eq!(guard(3, 8.0, 1.0), 3, "a lead runner far off and slow is no conflict yet");
     }
 
     // Codex runner-reads recheck P1-1, as a property: over seeded random layouts (runners,
