@@ -1,6 +1,6 @@
 # Task List
 
-**Last updated:** 2026-11-18 23:20 (two Claude workers fixing review findings).
+**Last updated:** 2026-11-18 23:40 (saved plays merged; catch-read fixes worker running).
 
 What is next and what is open. Other files hold the rest:
 
@@ -15,13 +15,13 @@ Status: `[ ]` not started · `[~]` partly done · `[?]` needs an owner decision
 
 ---
 
-## Resume here (2026-11-18, 23:20)
+## Resume here (2026-11-18, 23:40)
 
-**State (23:20).** Both branches were reviewed and both reviews are committed on their branches; a Claude worker is fixing each. Tab "Workers" is a 2x2 grid: left column the old Codex (`t2d`) and agy (`t2h`) workers, idle and no longer used (Claude workers only, owner 2026-11-18; close them at the merge); right column the two Claude workers. Read a pane with `hc read <terminal>`.
+**State (23:40).** One worker running. Tab "Workers" holds only the Opus worker `catch-fixes` in `t2q`; the old Codex and agy panes and the saved-plays pane are closed. Read a pane with `hc read <terminal>`; a new Coordinator session starts a background wait on `t2q` (CLAUDE.md, "Watch every worker").
 
 **1. `work/catch-read-fixes`** (worktree `.claude/worktrees/runner-decision`). The [catch-read review](docs/reviews/2026-11-18-codex-catch-read-review.md)'s six findings were fixed (`43bd29e..0b18e54`); the review of those fixes (committed `2ec56a8` on the branch) found 4 P1 (relooks still read the true contact point; a private pivot, an unpublished catch call and another runner's private goal still steer runners), 1 P2 (fast retouch duplicates the decision) and 1 P3 (send-rate cohort). **Opus worker `catch-fixes` in `t2q`** fixes them from untracked WORKER-FIXES2.md, and checks the adverse movement the review recorded (double-offs on 25–50° catches 16.5 → 38.0 per 300 games). The same review found the branch's main gain: sacrifice flies from third 3 → 204 over 600 games. When done: write the review's Resolution, skip a re-review only if the fixes are small and test-covered (else one Opus review in a pane), touch `live.rs`, run the tests and both standard runs yourself, merge.
 
-**2. `work/saved-plays`** (Q30, worktree `.claude/worktrees/saved-plays`, client only). Review committed `c6d522c` on the branch: 3 P1 (save can store a different play than shown; a bad `.timeline` can play wrongly or hang; empty `-BbSavedPlay=` starts a live game), 4 P2 (stale build stamp; check bypasses the viewer's load path; today's roster and park can contradict the recording; board hit totals and outs). **Sonnet worker `saved-plays-fixes` in `t2r`** fixes P1, P2 and P3-1 from untracked WORKER-SAVED-PLAYS-FIXES.md. P3-2 (startup camera aimed at the plate, `36007e7`): **kept, owner Q32 (a), 2026-11-18**; say so in the review's Resolution. When done: write the Resolution, build the client and run `-BbSavedPlayCheck` yourself, merge.
+**Saved plays merged (2026-11-18, `38ec67b`, Q30 (b), D9).** A save keeps the recorded timeline, its MD5, the roster, the park and the board; the viewer refuses damaged, swapped or legacy files. Both reviews resolved ([first](docs/reviews/2026-11-18-codex-saved-plays-review.md), [fixes](docs/reviews/2026-11-18-sonnet-saved-plays-fixes-review.md)). Deferred, P3: the fixes review's P3-3 (a park without a full roster is dropped silently), P3-4 (names with `"`/`;`/`=`/`\` are rewritten; park and player values unchecked), P3-5 (unreachable summary checks; `LoadRecorded`'s call to `InfoSane` untested), P3-7 (the check leaves `board_after`, 17 players and most park fields unasserted). All need a hand-edited save or are check coverage. Accepted limit: a saved play uses today's poses, clips and camera.
 
 **Docs check merged (2026-11-18):** run `python3 bin/check-docs.py` before committing doc changes; it fails on dead links, anchors and paths in the working docs and on this file passing 30 KB (`--all` also checks the dated records, which have 135 old dead references, left as they are).
 
