@@ -133,7 +133,14 @@ A real runner would not take a third baseman who stepped 3 m off the bag to glov
 
 ## Resolution
 
-Open.
+Resolved 2026-11-19 by the Coordinator; merged into main as `4312d29`. No re-review: the follow-up is small and test-covered.
+
+- **P2-1:** fixed in the docs (note §8, ledger row). The remaining direct race at 250–275 ft goes to the owner's Q32 catch model (agent-models §5.5, "The catch sets up the throw"), the next job; `caution_z` is not fitted before it.
+- **P2-2:** recorded (relays 95 → 9 per 600 games, assists at home 10 → 4). The route choice is not a new owner question: the owner's Q32 answer already says deep balls go to the relay man and shallower throws go low through the cutoff. It is part of the Q32 job (TASKS.md, "Open sim work" §3).
+- **P3-1, P3-2, P3-4:** fixed by the worker (above).
+- **P3-3:** deferred with a TASKS.md line (a base receiver's catch-and-throw, against Statcast's catcher exchange).
+- **P3-5:** TASKS.md now gives first to home on a double as 77% (MLB 38%).
+- **Coordinator's check before merging:** sources touched, `cargo test --workspace` passes, standard runs 4.24 [4.47] with no rules warnings, as in the ledger row.
 
 ### Worker follow-up (2026-11-19, `84a42d8` and the commit after it)
 

@@ -15,15 +15,13 @@ Status: `[ ]` not started · `[~]` partly done · `[?]` needs an owner decision
 
 ---
 
-## Resume here (2026-11-19, handoff)
+## Resume here (2026-11-19)
 
-**Nothing waiting on the owner.**
+**State.** Nothing is waiting on the owner. No job running; the Workers tab holds the idle worker `throw-race` (terminal `t2x`, warm worktree `.claude/worktrees/runner-decision`) and an empty pane.
 
-**Running:** the Opus reviewer `relay-review` (herdr-app Workers tab, terminal `t2y`) on `work/relay-exchange` (worktree `.claude/worktrees/runner-decision`, job file REVIEW-RELAY.md), writing a review under docs/reviews. The worker `throw-race` (terminal `t2x`, same worktree) is idle, kept for the review fixes. The branch makes the relay man's catch-to-release 0.75 s at grade 50 (was 0.455 s, hurried to 0.27 s); tests pass and the Coordinator's standard runs match the ledger row (4.27 → 4.24 [4.47 → 4.47]). With every tagging runner sent from third, safe at 250–275 ft 21% → 49% and 275–300 ft 68% → 91% (MLB implies at least 42% / 86%), so the race is now about right and the tag-up shortfall left (scored from third 62%, MLB 75–80%) is the runner's caution (`caution_z`, under Q2). **Next Coordinator:** when the review is committed, hand its findings to `throw-race`, write the Resolution, merge, then order the Q32 job.
+**Merged today.** The throw-race diagnosis (`0f9850e`, [note](docs/calibration/2026-11-19-throw-race.md)) and the relay man's sourced exchange (`4312d29`, 0.75 s at grade 50; [Opus review](docs/reviews/2026-11-19-opus-relay-exchange-review.md), resolved). Runs 4.27 → 4.24 [4.47 → 4.47]. Runners on third score on 62% of outfield catches with fewer than two out (MLB 75–80%); second to third 14% (MLB about 30%). The race from 275–300 ft is now about right; at 250–275 ft the direct throw home still beats more than half of the runners sent. Relays fell 95 → 9 per 600 games because the outfielder picks his route on time alone.
 
-**Throw-race diagnosis merged (`0f9850e`, docs only, not reviewed: no code).** [Note](docs/calibration/2026-11-19-throw-race.md). Runners judge the race correctly; outfield arm spread (ratings) moves nothing. From third, about 15 of the 21-point shortfall is the direct throw home beating the runner by 0.3–0.5 s more than MLB outcomes imply; about 3 points are runners off the bag at the catch. From second, the read is about 5 of 17 points, the race the rest.
-
-**Q32 answered (owner, 2026-11-19): model how the fielder catches the ball.** Momentum away from or across the target costs time to stop, turn and plant (braking at `BRAKE`) or an off-balance throw; momentum toward it helps; good fielders set up behind a fly and come through it; outfield throws go low through the cutoff man, who cuts on the catcher's call. Written into agent-models §5.5 ("The catch sets up the throw"); the owner's write-up is [docs/baseball-throw.md](docs/baseball-throw.md). **Order it after the relay fix merges** (one `live.rs` job at a time): an Opus worker first measures outfielders' speed and direction at catches that lead to a throw, then builds it; ledger row and review.
+**Next: the Q32 job, "The catch sets up the throw"** (owner, 2026-11-19; agent-models §5.5; the owner's write-up [docs/baseball-throw.md](docs/baseball-throw.md)). An Opus worker first measures outfielders' speed and direction at catches that lead to a throw, how often long direct throws bounce or go wide, and sources the crow-hop gain; then builds the catch momentum, the set-up behind a fly and the route choice (relay on deep balls, low through the cutoff otherwise). Ledger row and an Opus review. The cutoff's cut-or-let-it-go call stays in "Open sim work" §3.
 
 ---
 
