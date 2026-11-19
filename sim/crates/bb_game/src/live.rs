@@ -73,6 +73,10 @@ const TYPICAL_ARM: f64 = 37.0;
 const TYPICAL_TRANSFER: f64 = 0.75;
 /// A runner's read of a batted ball, m at 30 m [E].
 const RUNNER_READ_SIGMA0: f64 = 2.0;
+/// Time scale for a runner's ball read to sharpen, s [E].
+const RUNNER_READ_TAU_S: f64 = 0.6;
+/// Typical contact point used by a runner as the plate cue, m [E].
+const RUNNER_PLATE_PRIOR: Vec3 = Vec3::new(0.0, 0.5, 0.9);
 /// Agents' internal flight step, s.
 const AGENT_DT: f64 = 0.1;
 const BASE_L: f64 = 27.432;
@@ -210,6 +214,38 @@ const ARM_READ_SUB: u32 = 1 << 20;
 fn typical_throw_time(d: f64) -> f64 {
     let v = THROW_EFFORT * TYPICAL_ARM;
     throw_time(v, d).min(2.0 * throw_time(v, 0.5 * d) + RELAY_TRANSFER_FRAC * TYPICAL_TRANSFER)
+}
+
+/// The runner's first look: noisy motion, viewpoint and the public contact clock.
+#[derive(Clone, Copy)]
+struct ContactLook {
+    motion: (Vec3, Vec3),
+    from: Vec3,
+    t: f64,
+    contact_since: Option<f64>,
+}
+
+impl ContactLook {
+    fn scales(self, motion: (Vec3, Vec3)) -> (Vec3, f64, f64) {
+        let to = Vec3::new(motion.0.x - self.from.x, motion.0.y - self.from.y, 0.0);
+        let plate = self.contact_since.map(|s| (s, RUNNER_PLATE_PRIOR));
+        let shrink = read_shrink(motion, self.contact_since.unwrap_or(0.0), RUNNER_READ_TAU_S, plate);
+        let sp = RUNNER_READ_SIGMA0 * (to.norm().max(1.0) / READ_REF_DIST) * shrink;
+        let sv = READ_VEL_FRAC * motion.1.norm() * shrink;
+        (to.normalized(), sp, sv)
+    }
+
+    fn project(self, field: &Field, err: [f64; 4]) -> BallPath {
+        let env = reference_env();
+        let (los, sp, sv) = self.scales(self.motion);
+        let (mut r, v) = noisy_ball_motion(self.motion, los, sp, sv, err);
+        let w = believed_spin(env, v, self.contact_since);
+        if let Some(s) = self.contact_since.filter(|&s| s > 0.0) {
+            let (gain, _, _) = plate_weighing(los, sp, sv, s);
+            r += gain * (position_from_plate(env, RUNNER_PLATE_PRIOR, v, w, s) - r);
+        }
+        batted_path_dt(env, field, BallState { r, v, w }, self.t, AGENT_DT, |_, _| (0.0, 0.0))
+    }
 }
 
 /// A runner's read of a throw in the air: his own prediction of its flight from what he sees
@@ -2335,26 +2371,30 @@ impl<'a> Sim<'a> {
         None
     }
 
-    /// The runner's catch belief at his first look (agent-models §6.3). He knows his look
-    /// is noisy, as a fielder knows his own read ([`landing_depth_sigma`]): he averages the
-    /// catch chance over the reads his error could have given him, at the unscented
-    /// transform's points, `RUNNER_CATCH_READ_POINT` σ either way on each of his four error
-    /// axes, one eighth each (κ = 0: the eight points carry his error's mean and spread).
-    fn runner_catch_belief(&self, k: usize, sub: u32) -> (f64, Option<Vec3>) {
-        let err = self.runner_ball_errors(k, sub);
-        let from = self.runner_pos(&self.r[k]);
-        let view = (self.t - self.inp.t_contact).max(0.0);
+    /// World boundary: sample the four keyed errors once, then hand off the noisy motion.
+    fn observe_contact(&self, k: usize) -> ContactLook {
+        let mut look = ContactLook {
+            motion: self.ball_at(self.t),
+            from: self.runner_pos(&self.r[k]),
+            t: self.t,
+            contact_since: self.no_catch_at.is_none().then_some((self.t - self.inp.t_contact).max(0.0)),
+        };
+        let (los, sp, sv) = look.scales(look.motion);
+        look.motion = noisy_ball_motion(look.motion, los, sp, sv, self.runner_ball_errors(k, 1));
+        look
+    }
+
+    /// Average the best catch scores over the eight alternatives to the noisy motion.
+    fn runner_catch_belief(&self, look: ContactLook) -> f64 {
         let mut p = 0.0;
         for axis in 0..4 {
             for sign in [-1.0, 1.0] {
-                let mut e = err;
-                e[axis] += sign * RUNNER_CATCH_READ_POINT;
-                p += self.runner_catch_read(&self.predict_from(from, RUNNER_READ_SIGMA0, 0.6, view, e)).0;
+                let mut e = [0.0; 4];
+                e[axis] = sign * RUNNER_CATCH_READ_POINT;
+                p += self.runner_catch_read(&look.project(self.inp.field, e)).0;
             }
         }
-        // Where a catch would be, on the read he actually has.
-        let (_, at) = self.runner_catch_read(&self.predict_from(from, RUNNER_READ_SIGMA0, 0.6, view, err));
-        (p / 8.0, at)
+        p / 8.0
     }
 
     /// The catch chance on one projection of the ball: [`Self::runner_catch_read`].
@@ -2437,7 +2477,14 @@ impl<'a> Sim<'a> {
         r.start as f64 * BASE_L + off
     }
 
-    fn read_contact(&mut self, k: usize, p_catch: f64, at: Option<Vec3>) {
+    fn read_contact(&mut self, k: usize, look: ContactLook) {
+        let p_catch = self.runner_catch_belief(look);
+        let pred = look.project(self.inp.field, [0.0; 4]);
+        let (_, at) = self.runner_catch_read(&pred);
+        self.act_on_contact(k, p_catch, at, &pred);
+    }
+
+    fn act_on_contact(&mut self, k: usize, p_catch: f64, at: Option<Vec3>, pred: &BallPath) {
         let base = self.r[k].start;
         if p_catch >= RUNNER_CATCH_CONFIDENCE {
             self.r[k].tag_up = true;
@@ -2453,7 +2500,7 @@ impl<'a> Sim<'a> {
                 self.r[k].hold_s = Some(hold);
             }
         } else {
-            self.runner_decide(k, base);
+            self.runner_decide_with_contact(k, base, Some(pred));
         }
     }
 
@@ -4378,21 +4425,25 @@ impl<'a> Sim<'a> {
             Ball::Free { .. } => {
                 let t0 = prof::enabled().then(std::time::Instant::now);
                 let pred = self.runner_predict(k, read_sub);
-                let end = pred.t_end();
-                let (tf, at) = self.believed_field_intercept(&pred).unwrap_or_else(|| {
-                    let (rest, _) = pred.at(end);
-                    (end + 1.0, Vec3::new(rest.x, rest.y, 0.0))
-                });
+                let time = self.pickup_time_to(k, b, my_at, &pred);
                 if let Some(t0) = t0 {
                     prof::add(&prof::RUNNER, t0.elapsed().as_nanos() as u64);
                 }
-                let direct = |base: u8| {
-                    let target = base_pos(base);
-                    tf + TYPICAL_TRANSFER + typical_throw_time(m::hypot(target.x - at.x, target.y - at.y))
-                };
-                self.with_expected_play(k, b, my_at, &direct)
+                time
             }
         }
+    }
+
+    fn pickup_time_to(&self, k: usize, b: u8, my_at: f64, pred: &BallPath) -> f64 {
+        let end = pred.t_end();
+        let (tf, at) = self.believed_field_intercept(pred).unwrap_or_else(|| {
+            let (rest, _) = pred.at(end);
+            (end + 1.0, rest)
+        });
+        self.with_expected_play(k, b, my_at, &|base| {
+            let target = base_pos(base);
+            tf + TYPICAL_TRANSFER + typical_throw_time(m::hypot(target.x - at.x, target.y - at.y))
+        })
     }
 
     /// The ball's time to base `b` for runner `k`, given the play he expects the defense to
@@ -4563,6 +4614,10 @@ impl<'a> Sim<'a> {
     }
 
     fn runner_decide(&mut self, k: usize, at_base: u8) {
+        self.runner_decide_with_contact(k, at_base, None);
+    }
+
+    fn runner_decide_with_contact(&mut self, k: usize, at_base: u8, contact: Option<&BallPath>) {
         let forced = self.forced(k);
         let next = at_base + 1;
         if next > 4 {
@@ -4583,7 +4638,10 @@ impl<'a> Sim<'a> {
         };
         // Unforced, he must beat the tag, not only the ball: his belief of the time it takes.
         let tag_s = if forced { 0.0 } else { self.inp.tag_up.typical_tag_s };
-        let t_ball = self.ball_time_to(k, next, 2 * n + 1, self.t + t_run) + tag_s;
+        let t_ball = match contact {
+            Some(pred) => self.pickup_time_to(k, next, self.t + t_run, pred),
+            None => self.ball_time_to(k, next, 2 * n + 1, self.t + t_run),
+        } + tag_s;
         let mut rr = rng(self.inp.seed, self.inp.play, r.id, Purpose::RunnerPerception, 2 * n);
         let draw = rr.truncated_normal(4.0);
         let noise = RUNNER_TIMING_SIGMA_S * draw;
@@ -5871,8 +5929,12 @@ fn simulate_live_inner(inp: &LiveInput, st: &mut RulesState) -> LiveOutput {
                 if sim.r[k].start == 0 || two_out {
                     continue;
                 }
-                let (p_catch, at) = if check_catch { sim.runner_catch_belief(k, 1) } else { (0.0, None) };
-                sim.read_contact(k, p_catch, at);
+                if check_catch {
+                    let look = sim.observe_contact(k);
+                    sim.read_contact(k, look);
+                } else {
+                    sim.runner_decide(k, sim.r[k].start);
+                }
             }
         }
         if assigned {
@@ -10171,6 +10233,51 @@ mod tests {
     }
 
     #[test]
+    fn a_fixed_contact_look_hides_a_change_of_flight() {
+        const R: AgentId = 7;
+        let fx = fixture(&[(R, 3)]);
+        let inp = input(&fx, vec![RunnerIn { id: R, base: 3, speed: 8.2, tau_s: RUNNER_TAU }]);
+        let mut st = fx.st.clone();
+        let mut sim = new_sim(&inp, &mut st);
+        sim.t = inp.t_contact + RUNNER_READ_DELAY_S;
+        let look = ContactLook {
+            motion: (Vec3::new(0.0, 17.0, 5.0), Vec3::new(0.0, 30.0, 8.0)),
+            from: sim.runner_pos(&sim.r[0]),
+            t: sim.t,
+            contact_since: Some(RUNNER_READ_DELAY_S),
+        };
+        for fd in &mut sim.f {
+            fd.pos = Vec3::new(-70.0, 30.0, 0.0);
+        }
+        // Sweep one observer-visible catch opportunity from under the fly to out of reach.
+        // Then pin a close read while the world privately replaces the trajectory.
+        let flight = look.project(inp.field, [0.0; 4]);
+        let (_, x, y) = flight.first_bounce().unwrap();
+        let belief = (0..300).find_map(|offset| {
+            sim.f[6].pos = Vec3::new(x + f64::from(offset) * 0.1, y, 0.0);
+            let p = sim.runner_catch_belief(look);
+            (0.25..0.75).contains(&p).then_some(p)
+        }).expect("a close catch between the fielder and the gap");
+
+        let initial = sim.r[0].clone();
+        sim.read_contact(0, look);
+        let action = (sim.r[0].goal, sim.r[0].tag_up, sim.r[0].hold_s);
+        assert!(action.1 || action.2.is_some(), "the matched look must exercise the catch decision");
+        let old_motion = sim.ball_at(sim.t);
+        sim.set_free(BallState {
+            r: Vec3::new(3.0, 12.0, 1.0),
+            v: Vec3::new(13.0, 8.0, -3.0),
+            w: Vec3::ZERO,
+        });
+        assert_ne!(sim.ball_at(sim.t), old_motion);
+        assert!(sim.no_catch_at.is_none());
+        sim.r[0] = initial;
+        assert_eq!(sim.runner_catch_belief(look), belief);
+        sim.read_contact(0, look);
+        assert_eq!((sim.r[0].goal, sim.r[0].tag_up, sim.r[0].hold_s), action);
+    }
+
+    #[test]
     fn a_close_trap_holds_the_runner_partway_until_he_can_react_to_the_call() {
         const R: AgentId = 0x0007;
         let fx = fixture(&[(R, 1)]);
@@ -10208,7 +10315,7 @@ mod tests {
         sim.f[2].pos = Vec3::new(x, y + 1.0, 0.0);
         let p = sim.runner_catch_probability(&seen);
         assert!((0.20..0.80).contains(&p), "close catch belief {p:.2}");
-        sim.read_contact(1, p, None);
+        sim.act_on_contact(1, p, None, &seen);
         let hold = sim.r[1].hold_s.expect("the close read keeps him partway");
         assert!(hold < 1.5 * BASE_L && !sim.r[1].tag_up);
         let start = sim.r[1].s;
