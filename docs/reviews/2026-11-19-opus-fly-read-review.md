@@ -150,4 +150,8 @@ By the fly-read worker (Claude Opus 5.5), on `work/fly-read`, one commit per fin
 
 ## Resolution
 
-Open.
+Resolved by the Coordinator, 2026-11-19. Everything is fixed except P3-5, which is deferred.
+
+- **P2-1, fixed** (`e8315a4`, `11db934`). The tag cut-off from second is split by outs: 50% with none out and 60% with one out. The one-out value was swept on 100 games at 60, 65, 70 and 80% (fly-read note §4). At 60% the one-out tag-advance is 10.5% against MLB's 25.9% (1.2% at 80%), and runs scored on balls that drop are unchanged at every value. The rest of the gap is the throw race and the runner's late certainty; both stay open in the note. No re-review: a test-covered constant split.
+- **P3-1, P3-2, P3-3, P3-4, fixed** (`af4948d`, `c430d99`, `6f805c9`, `d63b4ae`).
+- **P3-5, deferred** to TASKS.md item 1 (runners), as a record. Runners are doubled off on deep flies about 1 per 300 games against MLB's 4, because each relook's noise is fresh and closes as the ball comes down. The levers are those the review names.
