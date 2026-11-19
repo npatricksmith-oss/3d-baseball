@@ -132,9 +132,18 @@ const FIELDER_SPEED_SPREAD_MPS: f64 = 0.45;
 /// Confidence needed to commit to either outcome on the initial catch read [E]. Below
 /// 1 − this he goes: roughly the run-value break-even of a full start against a double-off
 /// from first (12% with none out, 18% with one; agent-models §6.3). The return side mirrors
-/// it, provisionally.
+/// it from first and third (checked against MLB tag-ups 2026-11-19); from second it is
+/// `RUNNER_TAG_FROM_SECOND`.
 const RUNNER_CATCH_CONFIDENCE: f64 = 0.80;
-/// A runner who went at his first look keeps looking at a ball still in the air this often, s
+/// The catch score at which a runner on second goes back to tag up [E, fitted 2026-11-19:
+/// docs/calibration/2026-11-19-fly-read.md §3]. Below 80% a runner on second held partway on
+/// nearly every outfield fly and never tagged to third, where major-league runners advance on
+/// 30% of outfield catches (Retrosheet 2024; 37% with none out, 26% with one). Run values
+/// agree: from second with none out a tag gains a base worth about a quarter of a run, and a
+/// ball that drops costs him little from the bag, so tagging pays from about even odds.
+const RUNNER_TAG_FROM_SECOND: f64 = 0.50;
+/// A runner who went at his first look, or holds partway, keeps looking at a ball still in the
+/// air this often, s
 /// (agent-models §6.3, the in-flight relook) [E, unsourced: the first look's own read time,
 /// `RUNNER_READ_DELAY_S`].
 const RUNNER_FLY_LOOK_S: f64 = 0.5;
@@ -1032,8 +1041,8 @@ struct Runner {
     /// How many times the ball had been secured and thrown when he last looked at the play
     /// (his last decision): a change is something new to see (agent-models §6.4).
     looked: (usize, usize),
-    /// He went at his first look on a ball in the air and keeps watching it (agent-models
-    /// §6.3, the in-flight relook): when he looks next, and that look's number.
+    /// He went at his first look on a ball in the air, or holds partway, and keeps watching it
+    /// (agent-models §6.3, the in-flight relook): when he looks next, and that look's number.
     fly_look: Option<(f64, u32)>,
     /// The batter-runner's overrun of first (agent-models §6.2): his phase, and how far past
     /// the bag down the first-base line he is, m (his `s` stays at first meanwhile).
@@ -2648,13 +2657,22 @@ impl<'a> Sim<'a> {
         (lo > bag_s + 1e-6).then_some(lo)
     }
 
+    /// The catch score at which runner `k` goes back to tag up (agent-models §6.3, "What he
+    /// does"): `RUNNER_TAG_FROM_SECOND` from second, `RUNNER_CATCH_CONFIDENCE` otherwise.
+    fn tag_confidence(&self, k: usize) -> f64 {
+        if self.r[k].start == 2 { RUNNER_TAG_FROM_SECOND } else { RUNNER_CATCH_CONFIDENCE }
+    }
+
     fn read_contact(&mut self, k: usize, look: ContactLook) {
         let paths = self.runner_catch_paths(look);
         let score = Self::catch_score(&paths);
-        if score >= RUNNER_CATCH_CONFIDENCE {
+        if score >= self.tag_confidence(k) {
             self.r[k].tag_up = true;
         } else if score > 1.0 - RUNNER_CATCH_CONFIDENCE {
             self.set_catch_hold(k, &paths);
+            if self.r[k].hold_s.is_some() {
+                self.r[k].fly_look = Some((self.t + RUNNER_FLY_LOOK_S, 0));
+            }
         } else {
             let pred = look.project(self.inp.field, [0.0; 4]);
             self.runner_decide_with_contact(k, self.r[k].start, Some(&pred));
@@ -2664,34 +2682,56 @@ impl<'a> Sim<'a> {
         }
     }
 
-    /// A runner who went at his first look on a ball in the air looks at it again (agent-models
-    /// §6.3, the in-flight relook): through the same observation as his first look, with look
-    /// `n`'s own draws. A catch he is sure of sends him back to tag up; a close one pulls him
-    /// up into a hold he can get back from; otherwise he keeps going and looks again. Once the
-    /// ball is seen to come down or be touched, or he has stopped going on, he stops looking.
+    /// A runner who went at his first look on a ball in the air, or holds partway, looks at it
+    /// again (agent-models §6.3, the in-flight relook): through the same observation as his
+    /// first look, with look `n`'s own draws. Going on, a catch he is sure of sends him back to
+    /// tag up, a close one pulls him up into a hold he can get back from, and otherwise he keeps
+    /// going and looks again. Holding partway, a catch he is sure of sends him back to tag up if
+    /// he can be on the bag before it; otherwise he holds and looks again. Once the ball is seen
+    /// to come down or be touched, or he has stopped going on or holding, he stops looking.
     fn fly_relook(&mut self, k: usize, n: u32) {
         let r = &self.r[k];
-        let going = r.goal > r.start && !r.tag_up && !r.retouch && r.hold_s.is_none() && !r.scored && !r.out;
-        if !going || self.public_contact_since().is_none() || !matches!(self.ball, Ball::Free { .. }) {
+        let free = !r.tag_up && !r.retouch && !r.scored && !r.out;
+        let going = free && r.goal > r.start && r.hold_s.is_none();
+        let holding = free && r.hold_s.is_some();
+        if !(going || holding) || self.public_contact_since().is_none() || !matches!(self.ball, Ball::Free { .. }) {
             self.r[k].fly_look = None;
             return;
         }
         let look = self.observe_ball(k, FLY_LOOK_SUB + n);
         let paths = self.runner_catch_paths(look);
         let score = Self::catch_score(&paths);
-        if score >= RUNNER_CATCH_CONFIDENCE {
+        let next = Some((self.t + RUNNER_FLY_LOOK_S, n + 1));
+        if holding {
+            if score >= self.tag_confidence(k) {
+                // Back on the bag before the earliest catch he reads as plausible.
+                let r = &self.r[k];
+                let to_bag = run_time_to_stop(r.s - r.start as f64 * BASE_L, -(r.v * r.direction), r.vmax, r.tau);
+                let catch = paths.iter().flatten().filter(|read| read.score > 1.0 - RUNNER_CATCH_CONFIDENCE).map(|read| read.t).fold(f64::INFINITY, f64::min);
+                if self.t + to_bag <= catch {
+                    let r = &mut self.r[k];
+                    r.fly_look = None;
+                    r.hold_s = None;
+                    r.tag_up = true;
+                    return;
+                }
+            }
+            self.r[k].fly_look = next;
+            return;
+        }
+        if score >= self.tag_confidence(k) {
             let r = &mut self.r[k];
             r.fly_look = None;
             r.tag_up = true;
             r.waiting = false;
             r.turned_back = None;
         } else if score > 1.0 - RUNNER_CATCH_CONFIDENCE {
-            self.r[k].fly_look = None;
             self.r[k].waiting = false;
             self.r[k].turned_back = None;
             self.set_catch_hold(k, &paths);
+            self.r[k].fly_look = if self.r[k].hold_s.is_some() { next } else { None };
         } else {
-            self.r[k].fly_look = Some((self.t + RUNNER_FLY_LOOK_S, n + 1));
+            self.r[k].fly_look = next;
         }
     }
 
@@ -10968,6 +11008,54 @@ mod tests {
         assert!(under_pulled && under_v <= 0.0, "fielder under it: still going at {under_s:.1} m, {under_v:.1} m/s");
         assert!(!away_pulled, "nobody near it: he pulled up at {away_s:.1} m");
         assert!(under_s < away_s - 5.0, "{under_s:.1} m against {away_s:.1} m");
+    }
+
+    // Agent-models §6.3, the in-flight relook while holding: a runner on first with one out
+    // holds partway on a deep fly to center. Two worlds differ only in what he can see: the
+    // center fielder standing under where it comes down, or about 100 m from it. Watching it,
+    // he goes back to tag up when the fielder is under it and is on the bag before it comes
+    // down; with nobody near it he keeps his hold.
+    #[test]
+    fn a_runner_holding_partway_goes_back_to_tag_when_the_catch_is_sure() {
+        const R: AgentId = 7;
+        let mut fx = fixture(&[(R, 1)]);
+        fx.st.outs = 1;
+        let la = 33f64.to_radians();
+        let ball = typical_ball(&fx.env, Vec3::new(0.0, 0.5, 1.0), Vec3::new(0.0, 42.0 * m::cos(la), 42.0 * m::sin(la)));
+        let (t_land, lx, ly) = batted_path(&fx.env, &fx.field, ball, 0.0, |_, _| (0.0, 0.0)).first_bounce().expect("in the park");
+        let land = Vec3::new(lx, ly, 0.0);
+        let mut seen = Vec::new();
+        for cf in [land, Vec3::new(-70.0, 30.0, 0.0)] {
+            let mut inp = input(&fx, vec![RunnerIn { id: R, base: 1, speed: 8.2, tau_s: RUNNER_TAU }]);
+            inp.ball = ball;
+            let mut st = fx.st.clone();
+            let mut sim = new_sim(&inp, &mut st);
+            for fd in &mut sim.f {
+                fd.pos = Vec3::new(-70.0, 30.0, 0.0);
+                fd.vel = Vec3::ZERO;
+            }
+            sim.f[CF].pos = cf;
+            sim.start_runners();
+            sim.r[0].reading_contact = false;
+            sim.t = inp.t_contact + RUNNER_READ_DELAY_S;
+            // Holding partway, as a close read at his first look leaves him.
+            let hold = lead_s(1) + 4.0;
+            sim.r[0].hold_s = Some(hold);
+            sim.r[0].goal = 2;
+            sim.r[0].fly_look = Some((sim.t, 0));
+            let mut on_bag_at = None;
+            while sim.t < inp.t_contact + t_land {
+                sim.move_runners();
+                sim.t += DT;
+                if on_bag_at.is_none() && (sim.r[0].s - BASE_L).abs() < 1e-6 {
+                    on_bag_at = Some(sim.t);
+                }
+            }
+            seen.push((sim.r[0].tag_up, sim.r[0].hold_s, on_bag_at));
+        }
+        let ((under_tag, _, under_bag), (away_tag, away_hold, _)) = (seen[0], seen[1]);
+        assert!(under_tag && under_bag.is_some(), "fielder under it: tag-up {under_tag}, on the bag at {under_bag:?}");
+        assert!(!away_tag && away_hold.is_some(), "nobody near it: tag-up {away_tag}, hold {away_hold:?}");
     }
 
     /// Catch-read fixes review P1-1: a runner's relook at a loose ball sees its motion now,
