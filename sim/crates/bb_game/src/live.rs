@@ -135,13 +135,21 @@ const FIELDER_SPEED_SPREAD_MPS: f64 = 0.45;
 /// it from first and third (checked against MLB tag-ups 2026-11-19); from second it is
 /// `RUNNER_TAG_FROM_SECOND`.
 const RUNNER_CATCH_CONFIDENCE: f64 = 0.80;
-/// The catch score at which a runner on second goes back to tag up [E, fitted 2026-11-19:
-/// docs/calibration/2026-11-19-fly-read.md §3]. Below 80% a runner on second held partway on
-/// nearly every outfield fly and never tagged to third, where major-league runners advance on
-/// 30% of outfield catches (Retrosheet 2024; 37% with none out, 26% with one). Run values
-/// agree: from second with none out a tag gains a base worth about a quarter of a run, and a
-/// ball that drops costs him little from the bag, so tagging pays from about even odds.
-const RUNNER_TAG_FROM_SECOND: f64 = 0.50;
+/// The catch score at which a runner on second goes back to tag up, by the outs before the
+/// catch: none, one (agent-models §6.3, "What he does") [E].
+/// - None out, 50% [fitted 2026-11-19: docs/calibration/2026-11-19-fly-read.md §3]. At 80% a
+///   runner on second held partway on nearly every outfield fly and never tagged to third,
+///   where major-league runners advance on 37% of outfield catches with none out (Retrosheet
+///   2024). Run values agree: a tag that gains third is worth 0.27 runs (`RUN_EXPECTANCY`
+///   0.71 → 0.98, one out), and on a ball that drops he loses little from the bag (scoring
+///   rather than stopping at third is worth 0.08 with the batter on first), so going back pays
+///   from about even odds.
+/// - One out, 80%, as from first and third (Opus review 2026-11-19, P2-1). A tag that gains
+///   third is worth 0.05 runs (0.33 → 0.38, two out), while a ball that drops costs a runner
+///   back on the bag the run he scores from halfway (0.35: 1.54 against 1.19), so the
+///   break-even of going back is above 80%. His holding relook still sends him back on the
+///   deep flies he becomes sure of (major-league runners advance on 26% of these catches).
+const RUNNER_TAG_FROM_SECOND: [f64; 2] = [0.50, RUNNER_CATCH_CONFIDENCE];
 /// A runner who went at his first look, or holds partway, keeps looking at a ball still in the
 /// air this often, s
 /// (agent-models §6.3, the in-flight relook) [E, unsourced: the first look's own read time,
@@ -2661,9 +2669,15 @@ impl<'a> Sim<'a> {
     }
 
     /// The catch score at which runner `k` goes back to tag up (agent-models §6.3, "What he
-    /// does"): `RUNNER_TAG_FROM_SECOND` from second, `RUNNER_CATCH_CONFIDENCE` otherwise.
+    /// does"): `RUNNER_TAG_FROM_SECOND` by the outs from second, `RUNNER_CATCH_CONFIDENCE`
+    /// otherwise. Outs are those before the catch, as he counts them; with two out he never reads
+    /// the catch (he runs on contact), and the none-out value would be moot.
     fn tag_confidence(&self, k: usize) -> f64 {
-        if self.r[k].start == 2 { RUNNER_TAG_FROM_SECOND } else { RUNNER_CATCH_CONFIDENCE }
+        if self.r[k].start == 2 {
+            RUNNER_TAG_FROM_SECOND[usize::from(self.runner_outs(k).min(1))]
+        } else {
+            RUNNER_CATCH_CONFIDENCE
+        }
     }
 
     fn read_contact(&mut self, k: usize, look: ContactLook) {
@@ -10940,10 +10954,11 @@ mod tests {
         // Then pin a close read while the world privately replaces the trajectory.
         let flight = look.project(inp.field, [0.0; 4]);
         let (_, x, y) = flight.first_bounce().unwrap();
+        let tag = sim.tag_confidence(0);
         let belief = (0..300).find_map(|offset| {
             sim.f[6].pos = Vec3::new(x + f64::from(offset) * 0.1, y, 0.0);
             let p = Sim::catch_score(&sim.runner_catch_paths(look));
-            (0.25..RUNNER_TAG_FROM_SECOND).contains(&p).then_some(p)
+            (0.25..tag).contains(&p).then_some(p)
         }).expect("a close catch between the fielder and the gap");
 
         let initial = sim.r[0].clone();
