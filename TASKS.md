@@ -17,11 +17,11 @@ Status: `[ ]` not started · `[~]` partly done · `[?]` needs an owner decision
 
 ## Resume here (2026-11-19)
 
-**State.** Nothing is waiting on the owner. No job running; the Workers tab holds the idle worker `throw-race` (terminal `t2x`, warm worktree `.claude/worktrees/runner-decision`) and an empty pane.
+**State.** Nothing is waiting on the owner. **Running:** worker `catch-throw` (Opus, high), herdr-app Workers tab, terminal `t2x`, worktree `.claude/worktrees/runner-decision`, branch `work/catch-throw` from main `ab5c374`, job file WORKER-CATCHTHROW.md there: the Q32 job below. It measures first (a new catch-throw note under docs/calibration), writes the exact rules into §5.5, builds, measures, and adds a ledger row against 4.24 [4.47]; an owner question it meets goes in its note as proposed. **Next Coordinator:** check `git log main..work/catch-throw`; touch, tests and standard runs; an Opus high review; merge.
 
 **Merged today.** The throw-race diagnosis (`0f9850e`, [note](docs/calibration/2026-11-19-throw-race.md)) and the relay man's sourced exchange (`4312d29`, 0.75 s at grade 50; [Opus review](docs/reviews/2026-11-19-opus-relay-exchange-review.md), resolved). Runs 4.27 → 4.24 [4.47 → 4.47]. Runners on third score on 62% of outfield catches with fewer than two out (MLB 75–80%); second to third 14% (MLB about 30%). The race from 275–300 ft is now about right; at 250–275 ft the direct throw home still beats more than half of the runners sent. Relays fell 95 → 9 per 600 games because the outfielder picks his route on time alone.
 
-**Next: the Q32 job, "The catch sets up the throw"** (owner, 2026-11-19; agent-models §5.5; the owner's write-up [docs/baseball-throw.md](docs/baseball-throw.md)). An Opus worker first measures outfielders' speed and direction at catches that lead to a throw, how often long direct throws bounce or go wide, and sources the crow-hop gain; then builds the catch momentum, the set-up behind a fly and the route choice (relay on deep balls, low through the cutoff otherwise). Ledger row and an Opus review. The cutoff's cut-or-let-it-go call stays in "Open sim work" §3.
+**The Q32 job, "The catch sets up the throw" (running)** (owner, 2026-11-19; agent-models §5.5; the owner's write-up [docs/baseball-throw.md](docs/baseball-throw.md)). An Opus worker first measures outfielders' speed and direction at catches that lead to a throw, how often long direct throws bounce or go wide, and sources the crow-hop gain; then builds the catch momentum, the set-up behind a fly and the route choice (relay on deep balls, low through the cutoff otherwise). Ledger row and an Opus review. The cutoff's cut-or-let-it-go call stays in "Open sim work" §3.
 
 ---
 
