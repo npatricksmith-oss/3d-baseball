@@ -134,6 +134,13 @@ const FIELDER_SPEED_SPREAD_MPS: f64 = 0.45;
 /// from first (12% with none out, 18% with one; agent-models §6.3). The return side mirrors
 /// it, provisionally.
 const RUNNER_CATCH_CONFIDENCE: f64 = 0.80;
+/// A runner who went at his first look keeps looking at a ball still in the air this often, s
+/// (agent-models §6.3, the in-flight relook) [E, unsourced: the first look's own read time,
+/// `RUNNER_READ_DELAY_S`].
+const RUNNER_FLY_LOOK_S: f64 = 0.5;
+/// Sub-indices of the runner-perception stream for those looks: this base plus the look's
+/// number (data-formats §2.3).
+const FLY_LOOK_SUB: u32 = 1 << 21;
 /// From contact to a two-out runner's break from shuffle speed into a full run, s [E].
 const RUNNER_CONTACT_REACT_S: f64 = 0.25;
 /// The error of a runner's read of a race, one draw per look, s [E] (agent-models §6.3).
@@ -1025,6 +1032,9 @@ struct Runner {
     /// How many times the ball had been secured and thrown when he last looked at the play
     /// (his last decision): a change is something new to see (agent-models §6.4).
     looked: (usize, usize),
+    /// He went at his first look on a ball in the air and keeps watching it (agent-models
+    /// §6.3, the in-flight relook): when he looks next, and that look's number.
+    fly_look: Option<(f64, u32)>,
     /// The batter-runner's overrun of first (agent-models §6.2): his phase, and how far past
     /// the bag down the first-base line he is, m (his `s` stays at first meanwhile).
     overrun: OverrunPhase,
@@ -2648,6 +2658,40 @@ impl<'a> Sim<'a> {
         } else {
             let pred = look.project(self.inp.field, [0.0; 4]);
             self.runner_decide_with_contact(k, self.r[k].start, Some(&pred));
+            if self.r[k].goal > self.r[k].start {
+                self.r[k].fly_look = Some((self.t + RUNNER_FLY_LOOK_S, 0));
+            }
+        }
+    }
+
+    /// A runner who went at his first look on a ball in the air looks at it again (agent-models
+    /// §6.3, the in-flight relook): through the same observation as his first look, with look
+    /// `n`'s own draws. A catch he is sure of sends him back to tag up; a close one pulls him
+    /// up into a hold he can get back from; otherwise he keeps going and looks again. Once the
+    /// ball is seen to come down or be touched, or he has stopped going on, he stops looking.
+    fn fly_relook(&mut self, k: usize, n: u32) {
+        let r = &self.r[k];
+        let going = r.goal > r.start && !r.tag_up && !r.retouch && r.hold_s.is_none() && !r.scored && !r.out;
+        if !going || self.public_contact_since().is_none() || !matches!(self.ball, Ball::Free { .. }) {
+            self.r[k].fly_look = None;
+            return;
+        }
+        let look = self.observe_ball(k, FLY_LOOK_SUB + n);
+        let paths = self.runner_catch_paths(look);
+        let score = Self::catch_score(&paths);
+        if score >= RUNNER_CATCH_CONFIDENCE {
+            let r = &mut self.r[k];
+            r.fly_look = None;
+            r.tag_up = true;
+            r.waiting = false;
+            r.turned_back = None;
+        } else if score > 1.0 - RUNNER_CATCH_CONFIDENCE {
+            self.r[k].fly_look = None;
+            self.r[k].waiting = false;
+            self.r[k].turned_back = None;
+            self.set_catch_hold(k, &paths);
+        } else {
+            self.r[k].fly_look = Some((self.t + RUNNER_FLY_LOOK_S, n + 1));
         }
     }
 
@@ -5182,6 +5226,11 @@ impl<'a> Sim<'a> {
             if self.r[k].scored {
                 continue;
             }
+            if let Some((at, n)) = self.r[k].fly_look
+                && self.t + 1e-9 >= at
+            {
+                self.fly_relook(k, n);
+            }
             if self.r[k].reading_contact {
                 self.trace_runner(k);
                 let r = &mut self.r[k];
@@ -5982,6 +6031,7 @@ fn new_sim<'a>(inp: &'a LiveInput<'a>, st: &'a mut RulesState) -> Sim<'a> {
             decisions: 0,
             looked: (0, 0),
             turns: 0,
+            fly_look: None,
             overrun: OverrunPhase::None,
             over_m: 0.0,
         })
@@ -8662,21 +8712,24 @@ mod tests {
     // Agent-models §5.1, the plate cue: flying a ball's true velocity and spin back to contact
     // lands on the contact point (the world's flight, run forward with its own step, is the
     // independent reference), for a liner, a fly and a pop-up, at a time between steps too.
-    // With the typical spin in place of the true one it misses by about the spin floor.
+    // With the typical spin in place of the true one it misses by about the spin floor. The
+    // balls carry as the typical spin says (`typical_ball`), and are looked at only while they
+    // are in the air.
     #[test]
     fn the_plate_cue_flies_the_ball_back_to_contact() {
         let env = FlightEnv::default_env();
         let p0 = Vec3::new(0.0, 0.5, 1.0);
-        for (v, rpm) in [(Vec3::new(-8.0, 40.0, 7.0), 2500.0), (Vec3::new(9.0, 33.0, 22.0), 4800.0), (Vec3::new(4.0, 14.0, 30.0), 6400.0)] {
-            let h = Vec3::new(v.x, v.y, 0.0).normalized();
-            let w0 = Vec3::new(h.y, -h.x, 0.0) * (rpm * core::f64::consts::PI / 30.0);
-            let mut st = BallState { r: p0, v, w: w0 };
+        for v in [Vec3::new(-8.0, 40.0, 7.0), Vec3::new(9.0, 33.0, 22.0), Vec3::new(4.0, 14.0, 30.0)] {
+            let mut st = typical_ball(&env, p0, v);
             let mut t = 0.0f64;
             for s in [0.4f64, 1.0, 1.85, 3.0] {
                 while t < s - 1e-9 {
                     let h = (s - t).min(0.01);
                     st = env.step(&st, h);
                     t += h;
+                }
+                if st.r.z <= env.ball.radius {
+                    break;
                 }
                 let back = position_from_plate(&env, p0, st.v, st.w, s);
                 assert!((back - st.r).norm() < 1e-3, "v {v:?} at {s} s: {back:?} against {:?}", st.r);
@@ -10857,6 +10910,54 @@ mod tests {
         assert_eq!(Sim::catch_score(&sim.runner_catch_paths(look)), belief);
         sim.read_contact(0, look);
         assert_eq!((sim.r[0].goal, sim.r[0].tag_up, sim.r[0].hold_s), action);
+    }
+
+    // Agent-models §6.3, the in-flight relook (fly-read job, 2026-11-19): a runner on first
+    // with one out reads a deep fly to center as a home run at his first look (his read of
+    // its speed 12% high) and goes. Two worlds differ only in what he can see: the center
+    // fielder standing under where it comes down, or 60 m away across the outfield. Watching
+    // the ball while it is up, he pulls up (back to tag, or into a hold he can get back from)
+    // when the fielder is under it, and keeps going when nobody can get there.
+    #[test]
+    fn a_runner_who_reads_a_home_run_pulls_up_when_the_fielder_settles_under_it() {
+        const R: AgentId = 7;
+        let mut fx = fixture(&[(R, 1)]);
+        fx.st.outs = 1;
+        let la = 33f64.to_radians();
+        let ball = typical_ball(&fx.env, Vec3::new(0.0, 0.5, 1.0), Vec3::new(0.0, 44.0 * m::cos(la), 44.0 * m::sin(la)));
+        let (t_land, lx, ly) = batted_path(&fx.env, &fx.field, ball, 0.0, |_, _| (0.0, 0.0)).first_bounce().expect("in the park");
+        let land = Vec3::new(lx, ly, 0.0);
+        assert!((95.0..115.0).contains(&ly), "lands at {land:?}");
+        let mut seen = Vec::new();
+        for cf in [land, land + Vec3::new(60.0, 0.0, 0.0)] {
+            let mut inp = input(&fx, vec![RunnerIn { id: R, base: 1, speed: 8.2, tau_s: RUNNER_TAU }]);
+            inp.ball = ball;
+            let mut st = fx.st.clone();
+            let mut sim = new_sim(&inp, &mut st);
+            for fd in &mut sim.f {
+                fd.pos = Vec3::new(-70.0, 30.0, 0.0);
+                fd.vel = Vec3::ZERO;
+            }
+            sim.f[CF].pos = cf;
+            sim.start_runners();
+            sim.r[0].reading_contact = false;
+            sim.t = inp.t_contact + RUNNER_READ_DELAY_S;
+            let (p, v) = sim.ball_at(sim.t);
+            let look = ContactLook { motion: (p, v * 1.12), from: sim.runner_pos(&sim.r[0]), t: sim.t, view: RUNNER_READ_DELAY_S, contact_since: Some(RUNNER_READ_DELAY_S) };
+            assert!(look.project(inp.field, [0.0; 4]).first_bounce().is_none(), "he reads it over the fence");
+            sim.read_contact(0, look);
+            assert!(sim.r[0].goal == 2 && sim.r[0].fly_look.is_some(), "he goes at his first look");
+            while sim.t < inp.t_contact + t_land - 0.5 {
+                sim.move_runners();
+                sim.t += DT;
+            }
+            let r = &sim.r[0];
+            seen.push((r.tag_up || r.hold_s.is_some(), r.s, r.direction * r.v));
+        }
+        let ((under_pulled, under_s, under_v), (away_pulled, away_s, _)) = (seen[0], seen[1]);
+        assert!(under_pulled && under_v <= 0.0, "fielder under it: still going at {under_s:.1} m, {under_v:.1} m/s");
+        assert!(!away_pulled, "nobody near it: he pulled up at {away_s:.1} m");
+        assert!(under_s < away_s - 5.0, "{under_s:.1} m against {away_s:.1} m");
     }
 
     /// Catch-read fixes review P1-1: a runner's relook at a loose ball sees its motion now,

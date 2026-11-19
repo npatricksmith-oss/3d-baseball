@@ -63,7 +63,7 @@ key = (game_seed: u64, play_index: u32, agent_id: u16, purpose: u16, sub_index: 
 | `FielderPerception` | 5 | Landing/intercept estimate noise |
 | `GlovePlacement` | 6 | Capture error |
 | `ThrowExecution` | 7 | Throw direction and speed noise |
-| `RunnerPerception` | 8 | Jump reads, arrival-versus-throw estimates. Sub-index 1: the first read at contact; 2n and 2n + 1: decision n's timing error and read of a loose or thrown ball (the advance from the first contact look reuses sub-index 1's observation, so it does not draw from 2n + 1); 2^20 + fielder position index (0–8): his read of that fielder's arm (agent-models §6.4) |
+| `RunnerPerception` | 8 | Jump reads, arrival-versus-throw estimates. Sub-index 1: the first read at contact; 2n and 2n + 1: decision n's timing error and read of a loose or thrown ball (the advance from the first contact look reuses sub-index 1's observation, so it does not draw from 2n + 1); 2^20 + fielder position index (0–8): his read of that fielder's arm (agent-models §6.4); 2^21 + k: his k-th look (from 0) at a ball still in the air after going at his first look (agent-models §6.3, the in-flight relook) |
 | `SurfaceBounce` | 9 | Bounce-normal tilt (physics spec §9.3, the only world-side use) |
 | `AgentPolicy` | 10 | Other sampled agent decisions (manager AI, tie-breaks) |
 | `FielderAnticipation` | 11 | A fielder's reads before he reads the ball (agent-models §5.10): sub-index 0, the pitch location before contact; sub-index 1, the bat's angle at contact; sub-index 2, the swing's lead (when the bat started forward against the pitch's arrival) |
