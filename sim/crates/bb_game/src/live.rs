@@ -701,7 +701,7 @@ impl Track {
     }
 
     /// The estimate run on to `t` with the observer's own physics (the spin he believes for
-    /// it, `believed_spin`) plus the extra acceleration he has learned, and its covariance:
+    /// it, `believed_flight`) plus the extra acceleration he has learned, and its covariance:
     /// F = [[I, h, h²/2], [0, I, h], [0, 0, I]] on the ball's part, that acceleration drifting
     /// as white noise of intensity `CURVE_DRIFT`, and his persistent error unchanged
     /// (agent-models §5.1).
@@ -1455,11 +1455,14 @@ fn go_idle(fd: &mut Fielder) {
     fd.target = stop_point(fd);
 }
 
-/// Medians of batted balls' backspin and total spin |ω| (rpm), by launch angle (rows: 10°
-/// bins centred −25° … 55°) and exit speed (columns: 10 mph bins centred 65 … 105 mph; the
-/// outer columns take everything below 70 and from 100 up), from `examples/batted_spin.rs`
-/// (96 games, seeds 0–95). A fielder's or runner's belief about the contact model (agent-
-/// models §5.1); refit when the contact model changes.
+/// The typical spin of a batted ball, an observer's belief about the contact model (agent-
+/// models §5.1, "The unseen spin"), by launch angle (rows: 10° bins centred −25° … 55°) and
+/// exit speed (columns: 10 mph bins centred 65 … 105 mph; the outer columns take everything
+/// below 70 and from 100 up), rpm, from `examples/batted_spin.rs` (96 games, seeds 0–95,
+/// balls launched within the foul lines). `SPIN_BACK_RPM`: the median backspin.
+/// `SPIN_REST_RPM`: the side and gyro spin he cannot see, as a drag-only allowance
+/// (`FlightEnv::unseen_spin`), fitted so each cell's balls carry as far as they truly do in the
+/// median. Refit both when the contact model changes.
 const SPIN_LA_DEG: [f64; 9] = [-25.0, -15.0, -5.0, 5.0, 15.0, 25.0, 35.0, 45.0, 55.0];
 const SPIN_EV_MPH: [f64; 5] = [65.0, 75.0, 85.0, 95.0, 105.0];
 pub const SPIN_BACK_RPM: [[f64; 5]; 9] = [
@@ -1499,17 +1502,17 @@ pub fn spin_table(t: &[[f64; 5]; 9], la: f64, ev: f64) -> f64 {
     row(i) + (row(i + 1) - row(i)) * fi
 }
 
-/// The spin an observer believes a ball has now (agent-models §5.1). Straight off the bat:
-/// the spin the contact model typically gives at the launch angle he estimates, decayed since
-/// contact as his own physics decays it. He estimates the launch angle by flying his read of
-/// the velocity now (`ve`) back the `off_bat_since` seconds to the plate with his own physics
-/// ([`fly_back`]; drag and gravity act on the velocity alone), first with the spin a launch
-/// angle of atan2(v_z + g·s, v_h) would give (the first guess), then looks the table up at the
-/// angle that back-flight leaves the bat at and scales it by the decay the same back-flight
-/// undid (2026-11-15; docs/calibration/2026-11-15-outfield-read.md: the first guess alone is
-/// too steep by mid-flight, since drag has slowed the ball along, and the launch spin is more
-/// than the ball still has: both read every fly too deep). After a bounce or a deflection, a
-/// little topspin.
+/// How an observer believes a ball he reads going `ve` now flies (agent-models §5.1): the
+/// spin he believes it has, and his atmosphere `env` with the unseen spin's drag allowance
+/// (`FlightEnv::unseen_spin`). Straight off the bat: the typical spin (`SPIN_BACK_RPM`,
+/// `SPIN_REST_RPM`) at the launch angle and exit speed he estimates, decayed since contact as
+/// his own physics decays it. He estimates the launch by flying his read of the velocity now
+/// back the `off_bat_since` seconds to the plate with his own physics ([`fly_back`]; drag and
+/// gravity act on the velocity alone), with the typical spin at a first-guess launch of
+/// (v_h, v_z + g·s), then looks the tables up at the launch that back-flight gives and scales
+/// them by the decay it undid (2026-11-15; docs/calibration/2026-11-15-outfield-read.md: the
+/// first guess alone is too steep by mid-flight, and the launch spin is more than the ball
+/// still has). After a bounce or a deflection, a little topspin and no allowance.
 pub fn believed_flight(env: &FlightEnv, ve: Vec3, off_bat_since: Option<f64>) -> (FlightEnv, Vec3) {
     let rpm = core::f64::consts::PI / 30.0;
     let h = Vec3::new(ve.x, ve.y, 0.0).normalized();
@@ -3071,7 +3074,7 @@ impl<'a> Sim<'a> {
     }
 
     /// The loose ball as every fielder can work it out alike: its position and velocity now,
-    /// the typical spin for how it is moving (`believed_spin`), run on with the fielders' own
+    /// the typical spin for how it is moving (`believed_flight`), run on with the fielders' own
     /// physics and no bounce scatter, as a read with no error is (`read_prediction`).
     fn public_path(&self) -> BallPath {
         let (b, v) = self.ball_at(self.t);
