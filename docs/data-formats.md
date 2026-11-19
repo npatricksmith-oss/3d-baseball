@@ -295,7 +295,7 @@ One `PlayTimeline` per play, returned by the sim when the client advances (PLAN 
 
 **Retention:**
 - Live game: the director keeps a bounded pitch history in memory for instant replay (`HistoryMax` in `client/Source/BaseballClient/BbDirector.h`).
-- Saved: the client writes seed/play bookmarks today (`client/Source/BaseballClient/BbSavePlay.cpp`). The planned disk format retains timeline blobs for highlights from watched or managed games. Background games keep event logs only.
+- Saved (D9, 2026-11-18): `client/Source/BaseballClient/BbSavePlay.cpp` writes a `.toml` (`seed`, `play`, `commit`, `timeline`, pre-pitch board, `saved`, `comment`) next to a `.timeline` file holding the recorded `PlayTimeline` (`BBTL`) FlatBuffer bytes in `saved-plays/`. `client/run.sh -BbSavedPlay=<path to .toml>` replays that recorded timeline directly with no re-simulation (and shows a notice naming `commit` without re-simulating when an older file has no `timeline`). Background games keep event logs only.
 - Size budget [E]: about 5 KB per pitch without a ball in play and 50–100 KB per ball in play. About 3–7 MB per fully stored game before zstd.
 
 ### 5.2 Structure

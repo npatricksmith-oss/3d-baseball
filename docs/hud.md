@@ -22,7 +22,7 @@ Carried over from the park plan: the lead builds alone in short sessions, shows 
 
 ## 3. Panels
 
-`BbHud::DrawBug`, `BbHud::DrawCaption`, `BbHud::DrawZone`, `BbHud::DrawInningCard` and `BbHud::DrawBoxScore` draw the shipped panels. The bug includes the pitcher and batter rows under the score, per the owner’s 2026-11-16 update (§5).
+`BbHud::DrawBug`, `BbHud::DrawCaption`, `BbHud::DrawZone`, `BbHud::DrawInningCard`, `BbHud::DrawBoxScore`, `BbHud::DrawComment` and `BbHud::DrawBanner` draw the shipped panels. The bug includes the pitcher and batter rows under the score, per the owner’s 2026-11-16 update (§5).
 
 ## 4. Checking the look
 
@@ -57,3 +57,5 @@ Carried over from the park plan: the lead builds alone in short sessions, shows 
 - **Moved:** the box is drawn by `BbHud::DrawBoxScore` (it was `ABbHUD::DrawBox` in `client/Source/BaseballClient/BbGameMode.cpp`); the game mode's HUD now only places panels. Client only: no sim change, no ledger row.
 - **Checks:** `-BbBoxShots=<n>` photographs the Tab box at pitch n and the final box (`box_midgame.png`, `box_final.png`); `-BbHudHold` shows the card.
 - **For the owner to overrule if he likes:** the dark panel in place of the newspaper page; nicknames in the title and the line score.
+
+**Saved-play viewer (D9, 2026-11-18).** Opening a saved play (`-BbSavedPlay=<path to .toml>`) shows a gold `SAVED PLAY` tag (with `seed`, `play`, and `commit`), the word-wrapped `COMMENT` box under the bug (`BbHud::DrawComment`), the board and pitch info available from the recorded timeline (pitcher row omits the game pitch count since no event log is simulated), and `R` to watch it again. A legacy `.toml` with no `timeline` shows a centred `NO RECORDED TIMELINE` banner (`BbHud::DrawBanner`) naming the saved `commit` instead of re-simulating.
