@@ -17,13 +17,13 @@ Status: `[ ]` not started · `[~]` partly done · `[?]` needs an owner decision
 
 ## Resume here (2026-11-19, handoff)
 
-**Waiting on the owner: Q32** (below).
+**Nothing waiting on the owner.**
 
 **Running:** worker `throw-race` (Opus, high) in the Workers tab of herdr-app (terminal `t2x`), worktree `.claude/worktrees/runner-decision`, now on branch `work/relay-exchange` from main `0f9850e`, job file `WORKER-RELAY.md`. It makes the relay man's catch-to-release about 0.75 s at grade 50 (measured relays 0.62–0.75 s; the sim's took 0.28–0.38 s), as the double-play pivot was fixed, with the players' relay beliefs following. Ledger row against 4.27 [4.47]. **Next Coordinator:** check `git log main..work/relay-exchange`, touch, tests, standard runs, then an Opus high review before merging.
 
 **Throw-race diagnosis merged (`0f9850e`, docs only, not reviewed: no code).** [Note](docs/calibration/2026-11-19-throw-race.md). Runners judge the race correctly; outfield arm spread (ratings) moves nothing. From third, about 15 of the 21-point shortfall is the direct throw home beating the runner by 0.3–0.5 s more than MLB outcomes imply; about 3 points are runners off the bag at the catch. From second, the read is about 5 of 17 points, the race the rest.
 
-**Q32 (owner): what makes the real throw home after a fly slower?** *Now:* on a fly caught 250–300 ft out with a runner on third, the outfielder (0.85 s to let go, full arm, 0.25 s tag) beats or ties an average runner (4.1 s), so runners hold on about two of three such flies. MLB runners go on about half at 250–275 ft and 90% at 275–300 ft, and score 83–95% of the time. *Wrong:* the real ball is 0.3–0.5 s slower somewhere, and no measurement says where. *Options:* (1) wait for measurements: Statcast's catch-to-home tag-up times (defined 2025) and throw-level speeds, and change nothing until then; (2) lengthen the outfielder's catch-to-release on a throw home after a fly by about 0.3 s, unsourced; (3) draw each max-effort throw's speed about 3 mph below the top-10% figure, partly sourced, closes only about 0.1 s; (4) give a tagging runner a rolling start, unsourced. *Recommendation:* (1).
+**Q32 answered (owner, 2026-11-19): model how the fielder catches the ball.** Momentum away from or across the target costs time to stop, turn and plant (braking at `BRAKE`) or an off-balance throw; momentum toward it helps; good fielders set up behind a fly and come through it; outfield throws go low through the cutoff man, who cuts on the catcher's call. Written into agent-models §5.5 ("The catch sets up the throw"); the owner's write-up is [docs/baseball-throw.md](docs/baseball-throw.md). **Order it after the relay fix merges** (one `live.rs` job at a time): an Opus worker first measures outfielders' speed and direction at catches that lead to a throw, then builds it; ledger row and review.
 
 ---
 
@@ -66,7 +66,8 @@ One `sim/crates/bb_game/src/live.rs` job at a time. Each job gets a ledger row a
 
 ### 3. Throws and judgment (owner, 2026-11-15)
 
-- [ ] **Outfield throws to the wrong base or past the cutoff.** Measure by play: throws to a base with no play while a trailing runner advances; cutoff man in line and missed. Then the model change. Includes the owner's "after an out from deep outfield, hit a cutoff".
+- [ ] **The catch sets up the throw (Q32, decided 2026-11-19; agent-models §5.5).** Next after the relay fix: see "Resume here".
+- [ ] **Outfield throws to the wrong base or past the cutoff.** Measure by play: throws to a base with no play while a trailing runner advances; cutoff man in line and missed. Then the model change. Includes the owner's "after an out from deep outfield, hit a cutoff", and the cut-or-let-it-go call (Q32's cutoff part, agent-models §5.5).
 - [ ] **Infield judgment on the double play:** when to go for two, by score, inning, outs, the runners' speed and the fielder's set-up (agent-models §5). Third basemen convert 48% of double-play grounders against a real 38%.
 
 ### 4. Batting and scoring
