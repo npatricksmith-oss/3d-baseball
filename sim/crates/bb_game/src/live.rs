@@ -938,8 +938,11 @@ struct Fielder {
     set_base: f64,
     face: Option<Vec3>,
     catch_vel: Vec3,
-    /// Visible heading and reception cue at the catch, published before choosing footwork.
+    /// Visible heading, motion and reception cue at the catch, published before choosing
+    /// footwork. A later set-up (the pivot on reaching second) changes his footwork, not
+    /// what the runners saw at the reception (catch-read fixes review P1-2).
     catch_heading: Option<Vec3>,
+    catch_seen_vel: Vec3,
     catch_received_throw: bool,
     /// He took it on the ground from a dive (set at each securing; `dove` is his recovery
     /// state and is cleared while he still holds the ball: Codex hurried-throws review #1).
@@ -4151,6 +4154,7 @@ impl<'a> Sim<'a> {
                 fd.catch_stretched = extending == Some(false);
                 fd.set_base = fd.a.transfer;
                 fd.catch_vel = fd.vel;
+                fd.catch_seen_vel = fd.vel;
                 fd.catch_heading = Some(toward(fd.vel).or(toward(-bv)).unwrap_or(Vec3::new(-fd.pos.x, -fd.pos.y, 0.0)));
                 fd.catch_received_throw = receiver.is_some();
                 fd.face = fd.catch_heading;
@@ -4507,7 +4511,7 @@ impl<'a> Sim<'a> {
             secured: self.out.secured.last().map(|(t, _)| *t)
                 .or_else(|| self.secured_at.is_finite().then_some(self.secured_at)),
             heading: fd.catch_heading,
-            motion: fd.catch_vel,
+            motion: fd.catch_seen_vel,
             received_throw: fd.catch_received_throw,
             stretched: fd.catch_stretched,
             lunge_at: fd.lunge.map(|(t, _, _)| t),
@@ -5848,6 +5852,7 @@ fn new_sim<'a>(inp: &'a LiveInput<'a>, st: &'a mut RulesState) -> Sim<'a> {
                 took_diving: false,
                 catch_stretched: false,
                 catch_heading: None,
+                catch_seen_vel: Vec3::ZERO,
                 catch_received_throw: false,
                 backs: None,
                 peel: None,
@@ -11033,12 +11038,19 @@ mod tests {
             RunnerIn { id: fx.st.batter, base: 0, speed: 8.2, tau_s: RUNNER_TAU },
             RunnerIn { id: R, base: 1, speed: 8.2, tau_s: RUNNER_TAU },
         ]);
-        let receive = |base, relay| {
+        // `off`: how far from second he takes it. Off the bag, a feed waits for the bag;
+        // then he reaches it moving across, the same visible arrival under every route.
+        let receive = |base, relay, off: f64| {
             let mut st = fx.st.clone();
             let mut sim = new_sim(&inp, &mut st);
+            if off != 0.0 {
+                // A ground ball, so the batter is not out on the reception and the force
+                // at second stands.
+                sim.emit(Input::BallTouched { t: 1.0, what: Touch::Ground { x: 0.0, y: 30.0 } });
+            }
             sim.t = 5.0;
             let by = 3;
-            let at = base_pos(2);
+            let at = base_pos(2) + Vec3::new(off, 0.0, 0.0);
             sim.f[by].pos = at;
             sim.f[by].vel = Vec3::ZERO;
             sim.launch_throw(BallState {
@@ -11048,14 +11060,32 @@ mod tests {
             }, base_pos(base), base, by, relay);
             sim.try_captures();
             assert!(matches!(sim.ball, Ball::Held { by: 3 }));
-            assert_eq!(sim.f[by].pivot, base == 2 && !relay, "the fixtures change the private setup");
-            (sim.observe_holder(by), sim.ball_time_to(0, 1, 3, 5.5))
+            let feed = base == 2 && !relay;
+            assert_eq!(sim.f[by].pivot || sim.f[by].pivot_wait_bag, feed, "the fixtures change the private setup");
+            let received = (sim.observe_holder(by), sim.ball_time_to(0, 1, 3, 5.5));
+            if off == 0.0 {
+                return (received, None);
+            }
+            assert_eq!(sim.f[by].pivot_wait_bag, feed);
+            sim.t += DT;
+            sim.f[by].pos = base_pos(2) + Vec3::new(0.35, 0.0, 0.0);
+            sim.f[by].vel = Vec3::new(-4.0, 0.0, 0.0);
+            sim.holder_act();
+            assert!(matches!(sim.ball, Ball::Held { by: 3 }), "still holding it on the bag");
+            assert_eq!(sim.f[by].pivot, feed, "only the feed pivots on the bag");
+            (received, Some((sim.observe_holder(by), sim.ball_time_to(0, 1, 3, 5.5))))
         };
-        let feed = receive(2, false);
-        assert_eq!(feed, receive(3, false));
-        assert_eq!(feed, receive(2, true));
-        assert!(feed.0.received_throw);
-        assert!(feed.1 > 6.0 && feed.1 < 7.5);
+        let feed = receive(2, false, 0.0);
+        assert_eq!(feed, receive(3, false, 0.0));
+        assert_eq!(feed, receive(2, true, 0.0));
+        assert!(feed.0.0.received_throw);
+        assert!(feed.0.1 > 6.0 && feed.0.1 < 7.5);
+        // Catch-read fixes review P1-2: the private pivot on reaching the bag must not
+        // rewrite the reception the runner saw.
+        let feed = receive(2, false, 0.61);
+        assert_eq!(feed, receive(3, false, 0.61));
+        assert_eq!(feed, receive(2, true, 0.61));
+        assert_eq!(feed.0.0.motion, feed.1.unwrap().0.motion);
     }
 
     #[test]
