@@ -19,7 +19,7 @@ Status: `[ ]` not started · `[~]` partly done · `[?]` needs an owner decision
 
 **State.** `work/runner-catch-read` is merged and pushed (Q27's contact-read review fixes and the owner's close-catch rule, agent-models §6.3). The lead's own check: 450 tests pass; standard runs 4.38 [4.53], matching the worker. Its [Codex review](docs/reviews/2026-11-18-codex-catch-read-review.md) found three P1s and three P2s in the new code, all open and handed to one job below. Seed 1000's +0.22 runs is 1.46 standard errors from seed 0's paired change, no bug traced.
 
-**Next: the catch-read review fixes** (Codex worker, branch `work/catch-read-fixes` from `main`). Unresolved review findings:
+**Next: the catch-read review fixes, running.** Codex Sol (high) worker in herdr tab "Workers" (terminal `t2d`), worktree `.claude/worktrees/runner-decision`, branch `work/catch-read-fixes` from `43bd29e`, prompt in its untracked `WORKER-FIXES.md`. Check the branch, not the pane: the review's "Worker follow-up", the ledger row and the timing-note section; then touch, test, standard runs, review, merge. Unresolved review findings:
 - P1-1: the catch belief's eight alternative paths are scaled from the true flight; build them from one contact observation and its own uncertainty.
 - P1-2: the holder forecast reads `fd.face`, set from the throw's private target; use a published holder observation.
 - P1-3: base traffic reacts to the catch (`forced`) before the runner sees the ruling.
