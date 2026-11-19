@@ -47,6 +47,10 @@ void ABbHUD::DrawHUD()
 	{
 		Y = BbHud::DrawComment(*this, S, Y + 8.f, SavedCommentTitle, SavedComment, SavedErrorTitle.IsEmpty() ? BbLook::HudGold : BbLook::HudClose);
 	}
+	if (!SavedWarning.IsEmpty())
+	{
+		Y = BbHud::DrawComment(*this, S, Y + 8.f, TEXT("NOT EXACTLY AS SAVED"), SavedWarning, BbLook::HudClose);
+	}
 	if (bZoneShown && CardAlpha <= 0.f)
 	{
 		BbHud::DrawZone(*this, S, Zone);

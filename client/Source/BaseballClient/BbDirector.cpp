@@ -1,4 +1,5 @@
 #include "BbDirector.h"
+#include <limits>
 #include "BbFigure.h"
 #include "BbFrame.h"
 #include "BbPark.h"
@@ -218,6 +219,40 @@ AStaticMeshActor* ABbDirector::Shape(UStaticMesh* Mesh, const FVector& Location,
 	return A;
 }
 
+namespace
+{
+	/** The value of -BbSavedPlay=<path>: true if the argument is there at all, with Out empty
+	 *  when nothing follows the equals sign before the next space (FParse::Value would take the
+	 *  next option for the value). A quoted value may hold spaces. */
+	bool SavedPlayArgument(const TCHAR* Cmd, FString& Out)
+	{
+		Out.Reset();
+		const FString All(Cmd);
+		int32 At = All.Find(TEXT("-BbSavedPlay="), ESearchCase::IgnoreCase);
+		if (At == INDEX_NONE)
+		{
+			return false;
+		}
+		int32 I = At + 13;
+		if (I < All.Len() && All[I] == TEXT('"'))
+		{
+			++I;
+			while (I < All.Len() && All[I] != TEXT('"'))
+			{
+				Out.AppendChar(All[I++]);
+			}
+		}
+		else
+		{
+			while (I < All.Len() && !FChar::IsWhitespace(All[I]))
+			{
+				Out.AppendChar(All[I++]);
+			}
+		}
+		return true;
+	}
+}
+
 void ABbDirector::BeginPlay()
 {
 	Super::BeginPlay();
@@ -333,20 +368,32 @@ void ABbDirector::BeginPlay()
 	FString Lib = FPaths::ConvertRelativePathToFull(FPaths::Combine(FPaths::ProjectDir(), TEXT("../sim/target/release/libbb_ffi.so")));
 	FParse::Value(Cmd, TEXT("BbSimLib="), Lib);
 	SimLibPath = Lib;
-	bSavedPlayCheck = FParse::Param(Cmd, TEXT("BbSavedPlayCheck"));
 	uint64 Seed = 7;
 	FParse::Value(Cmd, TEXT("BbSeed="), Seed);
+	// The headless check of saving and reopening plays: it needs no game of this director's,
+	// only the library, and its exit status says whether it passed.
+	{
+		FString CheckFile;
+		const bool bCheckFile = FParse::Value(Cmd, TEXT("BbSavedPlayCheckFile="), CheckFile);
+		if (bCheckFile || FParse::Param(Cmd, TEXT("BbSavedPlayCheck")))
+		{
+			bGameOver = true;
+			FPlatformMisc::RequestExitWithStatus(false, (uint8)RunSavedPlayCheck(Seed, bCheckFile, CheckFile));
+			return;
+		}
+	}
+	// -BbSavedPlay=<toml>: an empty value is still saved mode (never a quiet live game): the
+	// viewer then says what is missing. Argument present, so the play comes from the file alone.
+	BbSavePlay::FView SavedView;
 	FString SavedArg;
-	FString SavedTomlPath;
-	bool bSavedReadOk = false;
-	if (FParse::Value(Cmd, TEXT("BbSavedPlay="), SavedArg) && !SavedArg.IsEmpty())
+	if (SavedPlayArgument(Cmd, SavedArg))
 	{
 		bSavedPlay = true;
-		SavedTomlPath = BbSavePlay::ResolveTomlPath(SavedArg);
-		bSavedReadOk = BbSavePlay::Read(SavedTomlPath, SavedPlay);
-		if (bSavedReadOk && SavedPlay.bHasSeed)
+		BbSavePlay::BeginView(SavedArg, SavedView);
+		SavedPlay = SavedView.Meta;
+		if (SavedView.bRead && SavedView.Meta.bHasSeed)
 		{
-			Seed = SavedPlay.What.Seed;
+			Seed = SavedView.Meta.What.Seed;
 		}
 	}
 	// The game is started here, before anything is drawn, because the park comes from it.
@@ -354,7 +401,21 @@ void ABbDirector::BeginPlay()
 	if (!Started->Start(Lib, Seed))
 	{
 		bGameOver = true;
+		if (bSavedPlay)
+		{
+			// Nothing can be shown without the library, but say so on screen and in the log.
+			bSavedPlayBroken = true;
+			SavedErrorTitle = TEXT("SIM LIBRARY NOT LOADED");
+			SavedErrorBody = FString::Printf(TEXT("Could not start the sim from %s, so this play cannot be shown.\nBuild it with: cd sim && cargo build --release -p bb_ffi"), *Lib);
+			UE_LOG(LogBb, Error, TEXT("BB_SAVED_PLAY could not start the sim from %s"), *Lib);
+		}
 		return;
+	}
+	if (bSavedPlay && SavedView.ErrTitle.IsEmpty())
+	{
+		// Loads and checks the timeline and puts the recorded roster and park into the sim,
+		// before the park is built from it.
+		BbSavePlay::FinishView(*Started, SavedView);
 	}
 	UE_LOG(LogBb, Display, TEXT("Sim loaded from %s, seed %llu"), *Lib, Seed);
 	Park->Build(Started->Park());
@@ -523,78 +584,20 @@ void ABbDirector::BeginPlay()
 	Sim = MoveTemp(Started);
 	if (bSavedPlay)
 	{
-		if (!bSavedReadOk)
+		SavedBefore = SavedView.Before;
+		SavedWarning = SavedView.CurrentBuildNote;
+		if (!SavedView.bOk)
 		{
 			bSavedPlayBroken = true;
-			SavedErrorTitle = TEXT("COULD NOT OPEN SAVED PLAY");
-			SavedErrorBody = FString::Printf(TEXT("Could not read %s\nNot re-simulated."), *SavedTomlPath);
-			UE_LOG(LogBb, Error, TEXT("BB_SAVED_PLAY failed to read %s"), *SavedTomlPath);
+			SavedErrorTitle = SavedView.ErrTitle;
+			SavedErrorBody = SavedView.ErrBody;
 			return;
 		}
-		FMemory::Memzero(SavedBefore);
-		SavedBefore.inning = SavedPlay.What.Inning > 0 ? SavedPlay.What.Inning : 1;
-		SavedBefore.top = SavedPlay.What.bTop ? 1 : 0;
-		SavedBefore.outs = SavedPlay.What.Outs;
-		SavedBefore.balls = SavedPlay.What.Balls;
-		SavedBefore.strikes = SavedPlay.What.Strikes;
-		SavedBefore.away_runs = SavedPlay.What.AwayRuns;
-		SavedBefore.home_runs = SavedPlay.What.HomeRuns;
-		if (SavedPlay.Timeline.IsEmpty())
-		{
-			bSavedPlayBroken = true;
-			const FString Need = SavedPlay.Commit.IsEmpty()
-				? FString(TEXT("the build that saved it"))
-				: FString::Printf(TEXT("commit %s%s"), *SavedPlay.Commit, SavedPlay.bCommitInferred ? TEXT(" (inferred)") : TEXT(""));
-			SavedErrorTitle = TEXT("NO RECORDED TIMELINE");
-			SavedErrorBody = FString::Printf(TEXT("Needs %s -- not re-simulated."), *Need);
-			UE_LOG(LogBb, Warning, TEXT("BB_SAVED_PLAY no timeline in %s (seed=%llu play=%u; needs %s) -- not re-simulated"),
-				*SavedTomlPath, SavedPlay.What.Seed, SavedPlay.What.Play, *Need);
-			return;
-		}
-		TArray<uint8> Bytes;
-		if (!FFileHelper::LoadFileToArray(Bytes, *SavedPlay.TimelinePath))
-		{
-			bSavedPlayBroken = true;
-			SavedErrorTitle = TEXT("TIMELINE FILE MISSING");
-			SavedErrorBody = FString::Printf(TEXT("Could not read %s\nNot re-simulated."), *SavedPlay.TimelinePath);
-			UE_LOG(LogBb, Error, TEXT("BB_SAVED_PLAY missing timeline file %s for %s -- not re-simulated"), *SavedPlay.TimelinePath, *SavedTomlPath);
-			return;
-		}
-		FBbPlay Loaded = Sim->LoadTimeline(Bytes);
-		if (!Loaded.bValid)
-		{
-			bSavedPlayBroken = true;
-			SavedErrorTitle = TEXT("TIMELINE UNREADABLE");
-			SavedErrorBody = FString::Printf(TEXT("Invalid timeline %s\nNot re-simulated."), *SavedPlay.TimelinePath);
-			UE_LOG(LogBb, Error, TEXT("BB_SAVED_PLAY invalid timeline %s for %s -- not re-simulated"), *SavedPlay.TimelinePath, *SavedTomlPath);
-			return;
-		}
-		BbFrame F0;
-		if (Sim->Sample(Loaded, 0.f, F0))
-		{
-			const double L = 27.432 / UE_SQRT_2;
-			const FVector2D BaseAt[3] = { FVector2D(L, L), FVector2D(0.0, 2.0 * L), FVector2D(-L, L) };
-			for (uint32 I = 0; I < F0.n_actors; ++I)
-			{
-				const BbActor& A = F0.actors[I];
-				if ((A.agent & 0x80) != 0 || A.agent == Loaded.Info.batter)
-				{
-					continue;
-				}
-				const FVector2D P(A.pos[0], A.pos[1]);
-				for (int32 B = 0; B < 3; ++B)
-				{
-					if ((P - BaseAt[B]).Size() < 4.0)
-					{
-						SavedBefore.bases |= static_cast<uint8>(1u << B);
-					}
-				}
-			}
-		}
-		Current = MoveTemp(Loaded);
+		Current = MoveTemp(SavedView.Play);
 		RestartSavedPlay();
-		UE_LOG(LogBb, Display, TEXT("BB_SAVED_PLAY loaded seed=%llu play=%u commit=%s timeline=%s"),
-			SavedPlay.What.Seed, Current.Info.play_index, SavedPlay.Commit.IsEmpty() ? TEXT("unknown") : *SavedPlay.Commit, *SavedPlay.TimelinePath);
+		UE_LOG(LogBb, Display, TEXT("BB_SAVED_PLAY loaded seed=%llu play=%u commit=%s timeline=%s names_and_park=%s"),
+			SavedPlay.What.Seed, Current.Info.play_index, SavedPlay.Commit.IsEmpty() ? TEXT("unknown") : *SavedPlay.Commit, *SavedPlay.TimelinePath,
+			SavedWarning.IsEmpty() ? TEXT("recorded") : TEXT("current build"));
 		return;
 	}
 	// The first pitch, like every other, resolves on a worker; Tick starts it when it is ready.
@@ -796,227 +799,370 @@ void ABbDirector::RestartSavedPlay()
 	UE_LOG(LogBb, Display, TEXT("BB_SAVED_PLAY play=%u seed=%llu"), Current.Info.play_index, SeedShown);
 }
 
-bool ABbDirector::RunSavedPlayCheck()
+namespace
 {
+	/** A BbSavePlay::FBoard from the sim's box score. */
+	BbSavePlay::FBoard BoardOf(const BbBoxScore& Box)
+	{
+		BbSavePlay::FBoard B;
+		B.bValid = true;
+		B.FirstInning = Box.first_inning;
+		for (int32 T = 0; T < 2; ++T)
+		{
+			B.Hits[T] = Box.teams[T].totals.h;
+			const int32 N = FMath::Min<int32>(Box.teams[T].n_batted, BB_BOX_MAX_INNINGS);
+			for (int32 I = 0; I < N; ++I)
+			{
+				B.Runs[T].Add(Box.teams[T].runs[I]);
+			}
+		}
+		return B;
+	}
+
+	/** What a save of this play records: the board before the pitch (Before) and after it,
+	 *  from the sim's box score of the plays through the one before and through this one. */
+	BbSavePlay::FWhat WhatOf(const FBbSim& Sim, uint64 Seed, const BbPlayInfo& Info, const BbPlayInfo& Before)
+	{
+		BbSavePlay::FWhat What;
+		What.Seed = Seed;
+		What.Play = Info.play_index;
+		What.Inning = Before.inning;
+		What.bTop = Before.top != 0;
+		What.Outs = Before.outs;
+		What.Balls = Before.balls;
+		What.Strikes = Before.strikes;
+		What.AwayRuns = Before.away_runs;
+		What.HomeRuns = Before.home_runs;
+		What.bHasBases = true;
+		What.Bases = Before.bases & 7;
+		BbBoxScore Box{};
+		if (Sim.BoxScore(Info.play_index, Box))
+		{
+			What.BoardBefore = BoardOf(Box);
+		}
+		if (Sim.BoxScore(Info.play_index + 1, Box))
+		{
+			What.BoardAfter = BoardOf(Box);
+		}
+		return What;
+	}
+}
+
+void ABbDirector::SavedBoard(bool bKnown, const BbPlayInfo& Src, int32 Inning, BbBoxScore& Out, bool& bHitsKnown) const
+{
+	FMemory::Memzero(Out);
+	Out.innings = static_cast<uint8>(FMath::Clamp(Inning, 1, 255));
+	Out.first_inning = 1;
+	// After the result the board shows the play's line score and hits; before it, the earlier
+	// ones. A save that did not record them has an empty line score and no hit totals (a dash),
+	// never a made-up zero.
+	const BbSavePlay::FBoard& B = bKnown ? SavedPlay.What.BoardAfter : SavedPlay.What.BoardBefore;
+	bHitsKnown = B.bValid;
+	if (B.bValid)
+	{
+		Out.first_inning = static_cast<uint8>(FMath::Clamp(B.FirstInning, 1, 255));
+		for (int32 T = 0; T < 2; ++T)
+		{
+			const int32 N = FMath::Min(B.Runs[T].Num(), BB_BOX_MAX_INNINGS);
+			Out.teams[T].n_batted = static_cast<uint8>(N);
+			for (int32 I = 0; I < N; ++I)
+			{
+				Out.teams[T].runs[I] = B.Runs[T][I];
+			}
+			Out.teams[T].totals.h = static_cast<uint16>(B.Hits[T]);
+		}
+		Out.innings = static_cast<uint8>(FMath::Max<int32>(Out.innings, FMath::Max(B.Runs[0].Num(), B.Runs[1].Num()) + B.FirstInning - 1));
+	}
+	Out.teams[0].totals.r = Src.away_runs;
+	Out.teams[1].totals.r = Src.home_runs;
+}
+
+int32 ABbDirector::RunSavedPlayCheck(uint64 Seed, bool bFileOnly, const FString& File)
+{
+	// A saved play is opened here through BbSavePlay::BeginView and FinishView, the loader the
+	// viewer (-BbSavedPlay) itself calls, on sims of this check's own.
+	auto OpenFile = [this](const FString& Arg, BbSavePlay::FView& V, FBbSim& Viewer)
+	{
+		BbSavePlay::BeginView(Arg, V);
+		if (V.ErrTitle.IsEmpty())
+		{
+			if (!Viewer.Start(SimLibPath, V.Meta.What.Seed))
+			{
+				V.ErrTitle = TEXT("SIM LIBRARY NOT LOADED");
+				V.ErrBody = TEXT("The sim library could not be started.");
+				return;
+			}
+			BbSavePlay::FinishView(Viewer, V);
+		}
+	};
+	if (bFileOnly)
+	{
+		BbSavePlay::FView V;
+		FBbSim Lone;
+		OpenFile(File, V, Lone);
+		if (V.bOk)
+		{
+			UE_LOG(LogBb, Display, TEXT("BB_SAVED_PLAY_CHECK_FILE OPENED %s seed=%llu play=%u names_and_park=%s"), *V.TomlPath, V.Meta.What.Seed, V.Play.Info.play_index, V.CurrentBuildNote.IsEmpty() ? TEXT("recorded") : TEXT("current build"));
+			Lone.Release(V.Play);
+			return 0;
+		}
+		UE_LOG(LogBb, Display, TEXT("BB_SAVED_PLAY_CHECK_FILE REFUSED %s: %s"), *V.ErrTitle, *V.ErrBody.Replace(TEXT("\n"), TEXT(" ")));
+		return 1;
+	}
+
 	const FString TempDir = FPaths::ConvertRelativePathToFull(
 		FPaths::Combine(FPaths::ProjectSavedDir(), TEXT("SavedPlayCheck"), FString::Printf(TEXT("run-%d"), FPlatformProcess::GetCurrentProcessId())));
 	IFileManager::Get().MakeDirectory(*TempDir, true);
-	auto Cleanup = [&TempDir]()
-	{
-		IFileManager::Get().DeleteDirectory(*TempDir, false, true);
-	};
+	int32 Failures = 0;
 	auto Fail = [&](const FString& Why)
 	{
 		UE_LOG(LogBb, Error, TEXT("BB_SAVED_PLAY_CHECK FAIL: %s"), *Why);
-		Cleanup();
-		return false;
+		++Failures;
 	};
-
-	// 1. Save the running game's current play to TempDir, reload it, and verify every SimTickS frame is bit-for-bit equal.
-	BbSavePlay::FWhat What;
-	What.Seed = SeedShown;
-	What.Play = Current.Info.play_index;
-	What.Inning = Before.inning;
-	What.bTop = Before.top != 0;
-	What.Outs = Before.outs;
-	What.Balls = Before.balls;
-	What.Strikes = Before.strikes;
-	What.AwayRuns = Before.away_runs;
-	What.HomeRuns = Before.home_runs;
-	const FString TestComment = TEXT("Saved play check: \"quotes\", a back\\slash\nand a second line.");
-	const FString TomlPath = BbSavePlay::WriteTo(TempDir, What, TestComment, Current.Blob, Current.Len);
-	if (TomlPath.IsEmpty())
+	int32 Cases = 0;
+	auto Expect = [&](bool bOk, const FString& What)
 	{
-		return Fail(TEXT("WriteTo returned empty path"));
-	}
-	if (FPaths::IsUnderDirectory(TomlPath, BbSavePlay::Folder()))
-	{
-		return Fail(TEXT("Test save wrote inside saved-plays/"));
-	}
-	BbSavePlay::FLoaded Meta;
-	if (!BbSavePlay::Read(TomlPath, Meta))
-	{
-		return Fail(FString::Printf(TEXT("Read failed on %s"), *TomlPath));
-	}
-	if (!Meta.bHasSeed || Meta.What.Seed != What.Seed || !Meta.bHasPlay || Meta.What.Play != What.Play)
-	{
-		return Fail(TEXT("Read seed/play mismatch"));
-	}
-	if (Meta.Commit != BbSavePlay::BuildCommit() || Meta.Timeline.IsEmpty() || Meta.Comment != TestComment)
-	{
-		return Fail(FString::Printf(TEXT("Metadata mismatch commit='%s' vs '%s' timeline='%s'"), *Meta.Commit, *BbSavePlay::BuildCommit(), *Meta.Timeline));
-	}
-	if (Meta.What.Inning != What.Inning || Meta.What.bTop != What.bTop || Meta.What.Outs != What.Outs
-		|| Meta.What.Balls != What.Balls || Meta.What.Strikes != What.Strikes
-		|| Meta.What.AwayRuns != What.AwayRuns || Meta.What.HomeRuns != What.HomeRuns)
-	{
-		return Fail(TEXT("Board fields mismatch after Read"));
-	}
-	TArray<uint8> Bytes;
-	if (!FFileHelper::LoadFileToArray(Bytes, *Meta.TimelinePath))
-	{
-		return Fail(FString::Printf(TEXT("Could not read timeline %s"), *Meta.TimelinePath));
-	}
-	FBbPlay Reloaded = Sim->LoadTimeline(Bytes);
-	if (!Reloaded.bValid)
-	{
-		return Fail(TEXT("LoadTimeline returned invalid play"));
-	}
-	BbPlayInfo InfoA = Current.Info, InfoB = Reloaded.Info;
-	if (FMemory::Memcmp(&InfoA, &InfoB, sizeof(BbPlayInfo)) != 0)
-	{
-		Sim->Release(Reloaded);
-		return Fail(TEXT("BbPlayInfo mismatch between live and reloaded timeline"));
-	}
-	auto CheckFramesEqual = [&](const FBbSim& SimA, const FBbPlay& PlayA, const FBbSim& SimB, const FBbPlay& PlayB, int32& OutSteps, const TCHAR* Label) -> bool
-	{
-		OutSteps = 0;
-		const float Dur = PlayA.Info.duration_s;
-		for (int32 K = 0;; ++K)
+		++Cases;
+		if (!bOk)
 		{
-			const float T = FMath::Min(K * SimTickS, Dur);
-			BbFrame FA{}, FB{};
-			if (!SimA.Sample(PlayA, T, FA) || !SimB.Sample(PlayB, T, FB))
-			{
-				Fail(FString::Printf(TEXT("%s: Sample failed at t=%.4f"), Label, T));
-				return false;
-			}
-			if (FMemory::Memcmp(&FA, &FB, sizeof(BbFrame)) != 0)
-			{
-				Fail(FString::Printf(TEXT("%s: BbFrame mismatch at t=%.4f"), Label, T));
-				return false;
-			}
-			++OutSteps;
-			if (T >= Dur)
-			{
-				break;
-			}
+			Fail(What);
 		}
-		return true;
+		return bOk;
 	};
-	int32 Steps1 = 0;
-	if (!CheckFramesEqual(*Sim, Current, *Sim, Reloaded, Steps1, TEXT("same-seed")))
+	auto Finish = [&]() -> int32
 	{
-		Sim->Release(Reloaded);
-		return false;
-	}
-	Sim->Release(Reloaded);
-
-	// 2. Save a play from a different seed's game and verify it reloads to that saved play, not the running one.
-	const uint64 OtherSeed = SeedShown == 3647 ? 11 : 3647;
-	FBbSim OtherSim, RunningCompareSim;
-	if (!OtherSim.Start(SimLibPath, OtherSeed) || !RunningCompareSim.Start(SimLibPath, SeedShown))
-	{
-		return Fail(TEXT("Could not start comparison sims"));
-	}
-	FBbPlay OtherPlay, RunningAtSameIdx;
-	for (int32 I = 0; I <= 3; ++I)
-	{
-		OtherSim.Release(OtherPlay);
-		OtherPlay = OtherSim.Next();
-		RunningCompareSim.Release(RunningAtSameIdx);
-		RunningAtSameIdx = RunningCompareSim.Next();
-	}
-	if (!OtherPlay.bValid || !RunningAtSameIdx.bValid)
-	{
-		OtherSim.Release(OtherPlay);
-		RunningCompareSim.Release(RunningAtSameIdx);
-		return Fail(TEXT("Comparison sims did not produce play 3"));
-	}
-	BbSavePlay::FWhat OtherWhat;
-	OtherWhat.Seed = OtherSeed;
-	OtherWhat.Play = OtherPlay.Info.play_index;
-	OtherWhat.Inning = OtherPlay.Info.inning;
-	OtherWhat.bTop = OtherPlay.Info.top != 0;
-	OtherWhat.Outs = OtherPlay.Info.outs;
-	OtherWhat.Balls = OtherPlay.Info.balls;
-	OtherWhat.Strikes = OtherPlay.Info.strikes;
-	OtherWhat.AwayRuns = OtherPlay.Info.away_runs;
-	OtherWhat.HomeRuns = OtherPlay.Info.home_runs;
-	const FString OtherToml = BbSavePlay::WriteTo(TempDir, OtherWhat, TEXT("Different seed play"), OtherPlay.Blob, OtherPlay.Len);
-	BbSavePlay::FLoaded OtherMeta;
-	TArray<uint8> OtherBytes;
-	if (OtherToml.IsEmpty() || !BbSavePlay::Read(OtherToml, OtherMeta) || !FFileHelper::LoadFileToArray(OtherBytes, *OtherMeta.TimelinePath))
-	{
-		OtherSim.Release(OtherPlay);
-		RunningCompareSim.Release(RunningAtSameIdx);
-		return Fail(TEXT("Failed to write/read different-seed saved play"));
-	}
-	FBbPlay OtherReloaded = Sim->LoadTimeline(OtherBytes);
-	if (!OtherReloaded.bValid || OtherMeta.What.Seed != OtherSeed)
-	{
-		Sim->Release(OtherReloaded);
-		OtherSim.Release(OtherPlay);
-		RunningCompareSim.Release(RunningAtSameIdx);
-		return Fail(TEXT("Different-seed reloaded play invalid or wrong seed"));
-	}
-	int32 Steps2 = 0;
-	if (!CheckFramesEqual(OtherSim, OtherPlay, *Sim, OtherReloaded, Steps2, TEXT("other-seed")))
-	{
-		Sim->Release(OtherReloaded);
-		OtherSim.Release(OtherPlay);
-		RunningCompareSim.Release(RunningAtSameIdx);
-		return false;
-	}
-	bool bDiffersFromRunning = false;
-	{
-		BbFrame FOther{}, FCurr{}, FRunSame{};
-		if (Sim->Sample(OtherReloaded, 0.f, FOther) && Sim->Sample(Current, 0.f, FCurr) && RunningCompareSim.Sample(RunningAtSameIdx, 0.f, FRunSame))
+		IFileManager::Get().DeleteDirectory(*TempDir, false, true);
+		if (Failures == 0)
 		{
-			bDiffersFromRunning = FMemory::Memcmp(&FOther, &FCurr, sizeof(BbFrame)) != 0 && FMemory::Memcmp(&FOther, &FRunSame, sizeof(BbFrame)) != 0;
+			UE_LOG(LogBb, Display, TEXT("BB_SAVED_PLAY_CHECK PASS commit=%s cases=%d"), *BbSavePlay::BuildCommit(), Cases);
+			return 0;
 		}
-	}
-	// Also exercise the director's saved-play playback path on the reloaded different-seed play.
-	if (bDiffersFromRunning)
+		UE_LOG(LogBb, Error, TEXT("BB_SAVED_PLAY_CHECK FAILED %d of %d checks"), Failures, Cases);
+		return 1;
+	};
+	if (FPaths::IsUnderDirectory(TempDir, BbSavePlay::Folder()))
 	{
-		if (bPending)
-		{
-			FBbPlay Drop = Pending.Get();
-			Sim->Release(Drop);
-			bPending = false;
-		}
-		Sim->Release(Current);
-		bSavedPlay = true;
-		bSavedPlayBroken = false;
-		SavedPlay = OtherMeta;
-		SeedShown = OtherMeta.What.Seed;
-		Current = OtherReloaded;
-		RestartSavedPlay();
-		BbFrame Drawn{};
-		if (!SampleDrawn(Current, 0.f, Drawn) || Current.Info.play_index != OtherPlay.Info.play_index)
-		{
-			bDiffersFromRunning = false;
-		}
-	}
-	else
-	{
-		Sim->Release(OtherReloaded);
-	}
-	OtherSim.Release(OtherPlay);
-	RunningCompareSim.Release(RunningAtSameIdx);
-	if (!bDiffersFromRunning)
-	{
-		return Fail(TEXT("Different-seed play was not distinguishable from running game"));
+		Fail(TEXT("the check's folder is inside saved-plays/"));
+		return Finish();
 	}
 
-	// 3. TOML without timeline: Read() parses commit and commit_inferred and leaves Timeline empty.
-	const FString NoTlPath = FPaths::Combine(TempDir, TEXT("old-no-timeline.toml"));
-	const FString NoTlText = TEXT("seed = 3647\nplay = 15\ncommit = \"30634cf\"\ncommit_inferred = true\ninning = 1\nhalf = \"bottom\"\nouts = 0\ncount = \"1-1\"\nscore = \"away 2, home 0\"\nsaved = 2026-11-15T23:41:03\ncomment = \"\"\"\nold note\n\"\"\"\n");
-	BbSavePlay::FLoaded OldMeta;
-	if (!FFileHelper::SaveStringToFile(NoTlText, *NoTlPath, FFileHelper::EEncodingOptions::ForceUTF8WithoutBOM)
-		|| !BbSavePlay::Read(NoTlPath, OldMeta)
-		|| !OldMeta.Timeline.IsEmpty()
-		|| OldMeta.Commit != TEXT("30634cf")
-		|| !OldMeta.bCommitInferred
-		|| OldMeta.Comment != TEXT("old note"))
+	// 1. A play with a ball in play and a runner on, from a game of this check's own, with the
+	//    summary of the play before it (the board before the pitch).
+	FBbSim Game;
+	if (!Game.Start(SimLibPath, Seed))
 	{
-		return Fail(TEXT("No-timeline TOML check failed"));
+		Fail(TEXT("could not start the game sim"));
+		return Finish();
+	}
+	BbPlayInfo BeforeInfo{};
+	BeforeInfo.inning = 1;
+	BeforeInfo.top = 1;
+	FBbPlay Chosen;
+	BbPlayInfo ChosenBefore = BeforeInfo;
+	for (int32 I = 0; I < 60; ++I)
+	{
+		FBbPlay Next = Game.Next();
+		if (!Next.bValid)
+		{
+			break;
+		}
+		const bool bPick = I >= 3 && Next.Info.exit_velocity_mps > 0.f && BeforeInfo.bases != 0;
+		if (bPick || I == 59)
+		{
+			ChosenBefore = BeforeInfo;
+			Chosen = Next;
+			break;
+		}
+		BeforeInfo = Next.Info;
+		Game.Release(Next);
+	}
+	if (!Expect(Chosen.bValid, TEXT("no play to save")))
+	{
+		return Finish();
+	}
+	UE_LOG(LogBb, Display, TEXT("BB_SAVED_PLAY_CHECK saving play=%u (runners before: %u, ball in play: %d)"), Chosen.Info.play_index, ChosenBefore.bases, Chosen.Info.exit_velocity_mps > 0.f ? 1 : 0);
+
+	// 2. Save it with a roster and park that differ from today's (a new name, a hand turned
+	//    round, a taller fence), reopen it through the viewer's loader on a fresh sim, and
+	//    require every frame, the board fields and the recorded (not today's) names and park.
+	BbSavePlay::FContext Context = BbSavePlay::ContextOf(Game);
+	if (!Expect(Context.HasRoster() && Context.bHasPark, TEXT("the sim did not give 18 players and a park")))
+	{
+		Game.Release(Chosen);
+		return Finish();
+	}
+	const uint16 ChangedAgent = Context.Roster[0].bat_agent;
+	const uint16 ChangedField = Context.Roster[0].field_agent;
+	const bool bWasLeft = Context.Roster[0].throws == 1;
+	FCStringAnsi::Strncpy(Context.Roster[0].family, "Recorded", BB_NAME_LEN);
+	Context.Roster[0].throws = bWasLeft ? 2 : 1;
+	const float Fence = Context.Park.fence_height_m + 3.f;
+	Context.Park.fence_height_m = Fence;
+	const BbSavePlay::FWhat What = WhatOf(Game, Seed, Chosen.Info, ChosenBefore);
+	const FString Comment = TEXT("Saved play check: \"quotes\", a back\\slash\nand a second line.");
+	const FString Toml = BbSavePlay::WriteTo(TempDir, What, Context, Comment, Chosen.Blob, Chosen.Len);
+	if (!Expect(!Toml.IsEmpty(), TEXT("WriteTo gave no file")))
+	{
+		Game.Release(Chosen);
+		return Finish();
+	}
+	{
+		BbSavePlay::FView V;
+		FBbSim Viewer;
+		OpenFile(Toml, V, Viewer);
+		if (Expect(V.bOk, FString::Printf(TEXT("the saved play did not open: %s %s"), *V.ErrTitle, *V.ErrBody)))
+		{
+			Expect(V.CurrentBuildNote.IsEmpty(), TEXT("a save with names and park says they come from the current build"));
+			Expect(V.Meta.Commit == BbSavePlay::BuildCommit(), FString::Printf(TEXT("commit '%s' is not the build's '%s'"), *V.Meta.Commit, *BbSavePlay::BuildCommit()));
+			Expect(V.Meta.Comment == Comment, TEXT("the comment did not round-trip"));
+			Expect(V.Meta.What.Seed == Seed && V.Meta.What.Play == Chosen.Info.play_index, TEXT("seed or play changed"));
+			Expect(FMemory::Memcmp(&V.Play.Info, &Chosen.Info, sizeof(BbPlayInfo)) == 0, TEXT("the play's summary changed"));
+			Expect(V.Before.inning == ChosenBefore.inning && V.Before.top == ChosenBefore.top && V.Before.outs == ChosenBefore.outs
+				&& V.Before.balls == ChosenBefore.balls && V.Before.strikes == ChosenBefore.strikes
+				&& V.Before.away_runs == ChosenBefore.away_runs && V.Before.home_runs == ChosenBefore.home_runs, TEXT("the board before the pitch changed"));
+			Expect(V.Before.bases == (ChosenBefore.bases & 7), FString::Printf(TEXT("the runners on changed: saved %u, opened %u"), ChosenBefore.bases & 7, V.Before.bases));
+			Expect(V.Meta.What.BoardBefore.bValid && V.Meta.What.BoardAfter.bValid, TEXT("the board's line score and hits were not recorded"));
+			if (V.Meta.What.BoardBefore.bValid)
+			{
+				Expect(V.Meta.What.BoardBefore.Hits[0] == What.BoardBefore.Hits[0] && V.Meta.What.BoardBefore.Hits[1] == What.BoardBefore.Hits[1]
+					&& V.Meta.What.BoardBefore.Runs[0] == What.BoardBefore.Runs[0] && V.Meta.What.BoardBefore.Runs[1] == What.BoardBefore.Runs[1], TEXT("the line score before changed"));
+			}
+			Expect(Viewer.FamilyName(ChangedAgent) == TEXT("Recorded") && Viewer.FamilyName(ChangedField) == TEXT("Recorded"), TEXT("the viewer does not show the recorded name"));
+			Expect(Viewer.ThrowsLeft(ChangedAgent) == !bWasLeft, TEXT("the viewer does not use the recorded throwing hand"));
+			Expect(FMath::IsNearlyEqual(Viewer.Park().fence_height_m, Fence, 0.f) && Viewer.Park().n_wall == Game.Park().n_wall, TEXT("the viewer does not use the recorded park"));
+			int32 Steps = 0;
+			for (int32 K = 0;; ++K)
+			{
+				const float T = FMath::Min(K * SimTickS, Chosen.Info.duration_s);
+				BbFrame FA{}, FB{};
+				if (!Game.Sample(Chosen, T, FA) || !Viewer.Sample(V.Play, T, FB))
+				{
+					Fail(FString::Printf(TEXT("a frame could not be sampled at t=%.4f"), T));
+					break;
+				}
+				if (FMemory::Memcmp(&FA, &FB, sizeof(BbFrame)) != 0)
+				{
+					Fail(FString::Printf(TEXT("frame mismatch at t=%.4f"), T));
+					break;
+				}
+				++Steps;
+				if (T >= Chosen.Info.duration_s)
+				{
+					break;
+				}
+			}
+			Expect(Steps >= 2, TEXT("fewer than two frames compared"));
+			UE_LOG(LogBb, Display, TEXT("BB_SAVED_PLAY_CHECK opened through the viewer's loader: %d frames equal, recorded name/hand/fence used"), Steps);
+		}
+		Viewer.Release(V.Play);
 	}
 
-	Cleanup();
-	UE_LOG(LogBb, Display, TEXT("BB_SAVED_PLAY_CHECK PASS commit=%s same_seed_steps=%d other_seed=%llu other_seed_steps=%d"),
-		*BbSavePlay::BuildCommit(), Steps1, OtherSeed, Steps2);
-	return true;
+	// 3. Files the viewer must refuse, each through the same loader, each with a message.
+	auto Refused = [&](const FString& Arg, const TCHAR* ExpectTitle, const TCHAR* Label)
+	{
+		BbSavePlay::FView V;
+		FBbSim Viewer;
+		OpenFile(Arg, V, Viewer);
+		const bool bRefused = !V.bOk && !V.ErrTitle.IsEmpty() && !V.ErrBody.IsEmpty();
+		if (V.bOk)
+		{
+			Viewer.Release(V.Play);
+		}
+		Expect(bRefused && (!ExpectTitle || V.ErrTitle == ExpectTitle), FString::Printf(TEXT("%s: %s (%s)"), Label, bRefused ? TEXT("refused with the wrong message") : TEXT("was not refused"), *V.ErrTitle));
+		UE_LOG(LogBb, Display, TEXT("BB_SAVED_PLAY_CHECK %s -> %s"), Label, *V.ErrTitle);
+	};
+	auto Copy = [&](const FString& Name, TFunctionRef<void(FString& Toml, TArray<uint8>& Timeline)> Edit) -> FString
+	{
+		FString Text;
+		TArray<uint8> Bytes;
+		FFileHelper::LoadFileToString(Text, *Toml);
+		FFileHelper::LoadFileToArray(Bytes, *FPaths::ChangeExtension(Toml, TEXT("timeline")));
+		Edit(Text, Bytes);
+		const FString Dir = FPaths::Combine(TempDir, Name);
+		IFileManager::Get().MakeDirectory(*Dir, true);
+		FFileHelper::SaveArrayToFile(Bytes, *FPaths::Combine(Dir, FPaths::GetBaseFilename(Toml) + TEXT(".timeline")));
+		const FString Path = FPaths::Combine(Dir, FPaths::GetBaseFilename(Toml) + TEXT(".toml"));
+		FFileHelper::SaveStringToFile(Text, *Path, FFileHelper::EEncodingOptions::ForceUTF8WithoutBOM);
+		return Path;
+	};
+	auto DropMd5 = [](FString& Text)
+	{
+		TArray<FString> Lines;
+		Text.ParseIntoArray(Lines, TEXT("\n"), false);
+		Lines.RemoveAll([](const FString& L) { return L.StartsWith(TEXT("timeline_md5")); });
+		Text = FString::Join(Lines, TEXT("\n"));
+	};
+	Refused(FString(), TEXT("NO SAVED PLAY GIVEN"), TEXT("empty argument"));
+	Refused(FPaths::Combine(TempDir, TEXT("no-such-file.toml")), TEXT("COULD NOT OPEN SAVED PLAY"), TEXT("missing TOML"));
+	Refused(Copy(TEXT("flipped"), [](FString&, TArray<uint8>& B) { B[B.Num() / 2] ^= 0x5A; }), TEXT("TIMELINE DOES NOT MATCH ITS SAVE"), TEXT("one flipped byte"));
+	Refused(Copy(TEXT("truncated"), [&](FString& T, TArray<uint8>& B) { B.SetNum(B.Num() / 2); DropMd5(T); }), TEXT("TIMELINE UNUSABLE"), TEXT("truncated, no MD5"));
+	Refused(Copy(TEXT("empty"), [&](FString& T, TArray<uint8>& B) { B.Reset(); DropMd5(T); }), nullptr, TEXT("empty timeline file"));
+	Refused(Copy(TEXT("noname"), [&](FString& T, TArray<uint8>&) { T = T.Replace(TEXT("timeline = \""), TEXT("timeline = \"gone-")); }), TEXT("TIMELINE FILE MISSING"), TEXT("missing timeline file"));
+	Refused(Copy(TEXT("play"), [&](FString& T, TArray<uint8>&) { DropMd5(T); T = T.Replace(*FString::Printf(TEXT("\nplay = %u\n"), Chosen.Info.play_index), *FString::Printf(TEXT("\nplay = %u\n"), Chosen.Info.play_index + 1)); }), TEXT("TIMELINE IS ANOTHER PLAY"), TEXT("timeline of another play"));
+	{
+		// Another game's play with the same play number, put in place of this one's: only the MD5 can tell.
+		const uint64 OtherSeed = Seed == 3647 ? 11 : 3647;
+		FBbSim Other;
+		FBbPlay OtherPlay;
+		if (Expect(Other.Start(SimLibPath, OtherSeed), TEXT("could not start the second sim")))
+		{
+			for (uint32 I = 0; I <= Chosen.Info.play_index; ++I)
+			{
+				Other.Release(OtherPlay);
+				OtherPlay = Other.Next();
+			}
+			if (Expect(OtherPlay.bValid && OtherPlay.Info.play_index == Chosen.Info.play_index, TEXT("the second sim has no play with the same number")))
+			{
+				Refused(Copy(TEXT("swapped"), [&](FString&, TArray<uint8>& B) { B.Reset(); B.Append(OtherPlay.Blob, OtherPlay.Len); }), TEXT("TIMELINE DOES NOT MATCH ITS SAVE"), TEXT("same-numbered play of another game"));
+			}
+			Other.Release(OtherPlay);
+		}
+	}
+	// Summaries that would play wrongly or hang, though they are valid FlatBuffers: refused by the sanity checks.
+	{
+		FString Why;
+		BbPlayInfo I = Chosen.Info;
+		Expect(FBbSim::InfoSane(I, Why), FString::Printf(TEXT("the real summary was refused: %s"), *Why));
+		auto Bad = [&](const TCHAR* Label, TFunctionRef<void(BbPlayInfo&)> Mutate)
+		{
+			BbPlayInfo M = Chosen.Info;
+			Mutate(M);
+			FString W;
+			Expect(!FBbSim::InfoSane(M, W) && !W.IsEmpty(), FString::Printf(TEXT("a summary with %s was accepted"), Label));
+		};
+		Bad(TEXT("zero duration"), [](BbPlayInfo& M) { M.duration_s = 0.f; });
+		Bad(TEXT("negative duration"), [](BbPlayInfo& M) { M.duration_s = -3.f; });
+		Bad(TEXT("a huge duration"), [](BbPlayInfo& M) { M.duration_s = 3.0e9f; });
+		Bad(TEXT("a NaN duration"), [](BbPlayInfo& M) { M.duration_s = std::numeric_limits<float>::quiet_NaN(); });
+		Bad(TEXT("an infinite exit speed"), [](BbPlayInfo& M) { M.exit_velocity_mps = std::numeric_limits<float>::infinity(); });
+		Bad(TEXT("contact after the end"), [](BbPlayInfo& M) { M.contact_s = M.duration_s + 5.f; });
+		Bad(TEXT("too many calls"), [](BbPlayInfo& M) { M.n_calls = 9; });
+	}
+	// An older save: a recording but no roster, park or board fields. It opens, and says so.
+	{
+		const BbSavePlay::FWhat Old = [&] { BbSavePlay::FWhat W = What; W.bHasBases = false; W.BoardBefore = BbSavePlay::FBoard(); W.BoardAfter = BbSavePlay::FBoard(); return W; }();
+		const FString OldToml = BbSavePlay::WriteTo(TempDir, Old, BbSavePlay::FContext(), TEXT("old"), Chosen.Blob, Chosen.Len);
+		BbSavePlay::FView V;
+		FBbSim Viewer;
+		OpenFile(OldToml, V, Viewer);
+		if (Expect(V.bOk, TEXT("a save without roster and park did not open")))
+		{
+			Expect(!V.CurrentBuildNote.IsEmpty(), TEXT("a save without roster and park does not say its names and park come from the current build"));
+			Expect(!V.Meta.What.BoardBefore.bValid && !V.Meta.What.BoardAfter.bValid, TEXT("an old save claims board fields"));
+			Viewer.Release(V.Play);
+		}
+	}
+	// A legacy save with no recording at all: parsed, refused with the commit it needs.
+	{
+		const FString NoTl = FPaths::Combine(TempDir, TEXT("old-no-timeline.toml"));
+		FFileHelper::SaveStringToFile(TEXT("seed = 3647\nplay = 15\ncommit = \"30634cf\"\ncommit_inferred = true\ninning = 1\nhalf = \"bottom\"\nouts = 0\ncount = \"1-1\"\nscore = \"away 2, home 0\"\nsaved = 2026-11-15T23:41:03\ncomment = \"\"\"\nold note\n\"\"\"\n"), *NoTl, FFileHelper::EEncodingOptions::ForceUTF8WithoutBOM);
+		BbSavePlay::FView V;
+		FBbSim Viewer;
+		OpenFile(NoTl, V, Viewer);
+		Expect(!V.bOk && V.ErrTitle == TEXT("NO RECORDED TIMELINE") && V.ErrBody.Contains(TEXT("30634cf")) && V.Meta.bCommitInferred && V.Meta.Comment == TEXT("old note"), TEXT("a legacy save without a timeline was not refused with its commit"));
+	}
+	Game.Release(Chosen);
+	return Finish();
 }
 
 void ABbDirector::ReplayBack()
@@ -1134,18 +1280,50 @@ void ABbDirector::SyncCursor()
 	}
 }
 
+bool ABbDirector::HoldsBlob(const uint8* Blob) const
+{
+	if (!Blob)
+	{
+		return false;
+	}
+	if (Current.Blob == Blob || LivePlay.Blob == Blob || NextPlay.Blob == Blob)
+	{
+		return true;
+	}
+	for (const FShown& H : History)
+	{
+		if (H.Play.Blob == Blob)
+		{
+			return true;
+		}
+	}
+	return false;
+}
+
 void ABbDirector::OpenSaveDialog()
 {
-	if (bSaveOpen || !Current.bValid || !Current.Blob || Current.Len == 0 || !GEngine || !GEngine->GameViewport)
+	// The play saved is the one the last drawn tick showed (Presented), taken now and copied:
+	// Current may already be the next play (a handoff runs at the end of a tick), and nothing
+	// that happens while the dialog is open can change what Save writes.
+	if (bSaveOpen || !Presented.bValid || !Sim || !GEngine || !GEngine->GameViewport)
 	{
 		return;
 	}
+	if (!Presented.Blob || Presented.Len == 0 || !HoldsBlob(Presented.Blob))
+	{
+		UE_LOG(LogBb, Warning, TEXT("BB_SAVE not opened: the play on screen is no longer held"));
+		return;
+	}
+	SaveTarget = FSaveTarget();
+	SaveTarget.Blob.Append(Presented.Blob, static_cast<int32>(Presented.Len));
+	SaveTarget.What = WhatOf(*Sim, SeedShown, Presented.Info, Presented.Before);
+	SaveTarget.Context = BbSavePlay::ContextOf(*Sim);
 	bSaveOpen = true;
 	SaveClose = 0;
 	bPausedBeforeSave = bPaused;
 	bPaused = true;
 	TWeakObjectPtr<ABbDirector> Self(this);
-	const FText Title = FText::FromString(FString::Printf(TEXT("[SEED %llu    PLAY %u]"), SeedShown, Current.Info.play_index));
+	const FText Title = FText::FromString(FString::Printf(TEXT("[SEED %llu    PLAY %u]"), SeedShown, SaveTarget.What.Play));
 	// A floating window, not over the middle of the field: it opens at the top right, under
 	// the replay's button, where it was last left, and is dragged by any part that is not a
 	// button or the text box. The field is not dimmed.
@@ -1161,7 +1339,7 @@ void ABbDirector::OpenSaveDialog()
 		];
 	GEngine->GameViewport->AddViewportWidgetContent(SaveDialogLayer.ToSharedRef(), 100);
 	SyncCursor();
-	UE_LOG(LogBb, Display, TEXT("BB_SAVE open seed=%llu play=%u"), SeedShown, Current.Info.play_index);
+	UE_LOG(LogBb, Display, TEXT("BB_SAVE open seed=%llu play=%u (current play now %u%s)"), SeedShown, SaveTarget.What.Play, Current.Info.play_index, bReset ? TEXT(", walking back into place") : TEXT(""));
 }
 
 void ABbDirector::CloseSaveDialog(bool bSave)
@@ -1172,17 +1350,8 @@ void ABbDirector::CloseSaveDialog(bool bSave)
 	}
 	if (bSave)
 	{
-		BbSavePlay::FWhat What;
-		What.Seed = SeedShown;
-		What.Play = Current.Info.play_index;
-		What.Inning = Before.inning;
-		What.bTop = Before.top != 0;
-		What.Outs = Before.outs;
-		What.Balls = Before.balls;
-		What.Strikes = Before.strikes;
-		What.AwayRuns = Before.away_runs;
-		What.HomeRuns = Before.home_runs;
-		const FString Path = BbSavePlay::Write(What, SaveComment, Current.Blob, Current.Len);
+		const BbSavePlay::FWhat& What = SaveTarget.What;
+		const FString Path = BbSavePlay::Write(What, SaveTarget.Context, SaveComment, SaveTarget.Blob.GetData(), SaveTarget.Blob.Num());
 		SavedNote = Path.IsEmpty() ? FString(TEXT("Could not save the play")) : FString::Printf(TEXT("Saved: saved-plays/%s"), *FPaths::GetCleanFilename(Path));
 		SavedUntil = Wall + 4.0;
 		UE_LOG(LogBb, Display, TEXT("BB_SAVE %s seed=%llu play=%u commit=%s path=%s"), Path.IsEmpty() ? TEXT("failed") : TEXT("saved"), SeedShown, What.Play, *BbSavePlay::BuildCommit(), *Path);
@@ -1202,6 +1371,7 @@ void ABbDirector::CloseSaveDialog(bool bSave)
 	SaveDialogLayer.Reset();
 	SaveDialog.Reset();
 	SaveComment.Reset();
+	SaveTarget = FSaveTarget();
 	SaveClose = 0;
 	bSaveOpen = false;
 	bPaused = bPausedBeforeSave;
@@ -3130,7 +3300,7 @@ void ABbDirector::Tick(float DeltaSeconds)
 		CloseSaveDialog(SaveClose == 2);
 	}
 	// -BbSaveAt=<s>: S, then Save a second later, for an unattended check.
-	if (SaveAt >= 0.f && Current.bValid && Wall >= SaveAt + (SaveAuto == 1 ? 1.f : 0.f))
+	if (SaveAt >= 0.f && Presented.bValid && Wall >= SaveAt + (SaveAuto == 1 ? 1.f : 0.f))
 	{
 		if (SaveAuto == 0)
 		{
@@ -3149,7 +3319,7 @@ void ABbDirector::Tick(float DeltaSeconds)
 	if (APlayerController* PC = KeysPC)
 	{
 		// S: save the pitch on screen, with a comment (BbSavePlay).
-		if (PC->WasInputKeyJustPressed(EKeys::S) && Current.bValid && !bSavedPlay)
+		if (PC->WasInputKeyJustPressed(EKeys::S) && Presented.bValid && !bSavedPlay)
 		{
 			OpenSaveDialog();
 		}
@@ -3217,7 +3387,7 @@ void ABbDirector::Tick(float DeltaSeconds)
 			RequestNext();
 		}
 	}
-	else if (!Current.bValid && !bGameOver && Sim)
+	else if (!Current.bValid && ((!bGameOver && Sim) || (bSavedPlay && bSavedPlayBroken)))
 	{
 		if (ABbHUD* Hud = GetWorld()->GetFirstPlayerController() ? Cast<ABbHUD>(GetWorld()->GetFirstPlayerController()->GetHUD()) : nullptr)
 		{
@@ -3235,6 +3405,7 @@ void ABbDirector::Tick(float DeltaSeconds)
 					Bug.Outs = SavedBefore.outs;
 					Bug.Balls = SavedBefore.balls;
 					Bug.Strikes = SavedBefore.strikes;
+					Bug.Bases = SavedBefore.bases;
 					FString CommitTag = SavedPlay.Commit.IsEmpty() ? TEXT("unknown") : SavedPlay.Commit;
 					if (SavedPlay.bCommitInferred)
 					{
@@ -3243,15 +3414,11 @@ void ABbDirector::Tick(float DeltaSeconds)
 					Hud->Replay = FString::Printf(TEXT("SAVED PLAY    seed %llu    play %u    %s"), SeedShown, SavedPlay.What.Play, *CommitTag);
 					Hud->SavedCommentTitle = SavedPlay.Saved.IsEmpty() ? FString(TEXT("COMMENT")) : FString::Printf(TEXT("COMMENT  (%s)"), *SavedPlay.Saved);
 					Hud->SavedComment = SavedPlay.Comment.IsEmpty() ? FString(TEXT("(no comment)")) : SavedPlay.Comment;
-					if (BoardThrough != 0)
 					{
-						BoardThrough = 0;
-						BbBoxScore Minimal{};
-						Minimal.innings = SavedBefore.inning;
-						Minimal.first_inning = 1;
-						Minimal.teams[0].totals.r = SavedBefore.away_runs;
-						Minimal.teams[1].totals.r = SavedBefore.home_runs;
-						Park->ShowBoard(Minimal, SavedBefore.inning, SavedBefore.top != 0, SavedBefore.balls, SavedBefore.strikes, SavedBefore.outs);
+						BbBoxScore ErrBox{};
+						bool bHits = false;
+						SavedBoard(false, SavedBefore, SavedBefore.inning, ErrBox, bHits);
+						Park->ShowBoard(ErrBox, SavedBefore.inning, SavedBefore.top != 0, SavedBefore.balls, SavedBefore.strikes, SavedBefore.outs, bHits);
 					}
 				}
 				else
@@ -3268,6 +3435,7 @@ void ABbDirector::Tick(float DeltaSeconds)
 				Hud->HomeRunAlpha = 0.f;
 				Hud->SavedErrorTitle = SavedErrorTitle;
 				Hud->SavedErrorBody = SavedErrorBody;
+				Hud->SavedWarning.Reset();
 				Hud->Footer = TEXT("C: camera    Q: quit");
 			}
 			else
@@ -3280,19 +3448,6 @@ void ABbDirector::Tick(float DeltaSeconds)
 
 	if (Current.bValid && Sim)
 	{
-		if (bSavedPlayCheck)
-		{
-			bSavedPlayCheck = false;
-			if (RunSavedPlayCheck())
-			{
-				FPlatformMisc::RequestExit(false);
-			}
-			else
-			{
-				FPlatformMisc::RequestExitWithStatus(false, 1);
-			}
-			return;
-		}
 		// -BbReplayAt=<s>: R twice, then F six seconds later, for an unattended check.
 		if (ReplayAt >= 0.f && (RushClock += RushAt >= 0.f ? 0.f : DeltaSeconds) >= ReplayAt + (ReplayAuto == 2 ? 6.f : 0.f))
 		{
@@ -4017,6 +4172,7 @@ void ABbDirector::Tick(float DeltaSeconds)
 				Hud->SavedComment = SavedPlay.Comment.IsEmpty() ? FString(TEXT("(no comment)")) : SavedPlay.Comment;
 				Hud->SavedErrorTitle.Reset();
 				Hud->SavedErrorBody.Reset();
+				Hud->SavedWarning = SavedWarning;
 				Hud->Footer = FString::Printf(TEXT("Space: %s    Speed %.2fx: 1-5 for 1/2/4/6/10x, - / = by 0.25x    R: replay    C: camera (%s)    Z: zone    Q: quit"), bPaused ? TEXT("paused") : TEXT("pause"), Speed, CamNames[CameraMode]);
 			}
 			else
@@ -4026,6 +4182,7 @@ void ABbDirector::Tick(float DeltaSeconds)
 				Hud->SavedComment.Reset();
 				Hud->SavedErrorTitle.Reset();
 				Hud->SavedErrorBody.Reset();
+				Hud->SavedWarning.Reset();
 				Hud->Footer = FString::Printf(TEXT("Space: %s    Speed %.2fx: 1-5 for 1/2/4/6/10x, - / = by 0.25x    Enter: %s    R / F: replay    S: save play    C: camera (%s)    Z: zone    Q: quit"), bPaused ? TEXT("paused") : TEXT("pause"), Speed, bRush ? TEXT("skipping") : TEXT("next pitch"), CamNames[CameraMode]);
 			}
 			Hud->Notice = Wall < SavedUntil ? SavedNote : FString();
@@ -4069,16 +4226,12 @@ void ABbDirector::Tick(float DeltaSeconds)
 						Bug.BatterPosition = B->position <= 9 ? Pos[B->position] : TEXT("");
 						Bug.BatterToday.Reset();
 					}
-					if (BoardThrough != Through)
-					{
-						BoardThrough = Through;
-						BbBoxScore Minimal{};
-						Minimal.innings = Half.inning;
-						Minimal.first_inning = 1;
-						Minimal.teams[0].totals.r = Src.away_runs;
-						Minimal.teams[1].totals.r = Src.home_runs;
-						Park->ShowBoard(Minimal, Half.inning, Half.top != 0, bHalfOver && bKnown ? 0 : Src.balls, bHalfOver && bKnown ? 0 : Src.strikes, Outs);
-					}
+					// The board as the save recorded it, every tick (the park repaints only on a
+					// change): the outs go up with the umpire's call, the runs and hits with the result.
+					BbBoxScore SavedBox{};
+					bool bSavedHits = false;
+					SavedBoard(bKnown, Src, Half.inning, SavedBox, bSavedHits);
+					Park->ShowBoard(SavedBox, Half.inning, Half.top != 0, bHalfOver && bKnown ? 0 : Src.balls, bHalfOver && bKnown ? 0 : Src.strikes, Outs, bSavedHits);
 				}
 				else
 				{
@@ -4204,9 +4357,19 @@ void ABbDirector::Tick(float DeltaSeconds)
 				Hud->bZoneShown = bZoneOn;
 			}
 		}
+		// What this tick drew, for the save dialog (before any handoff below replaces Current).
+		Presented.bValid = true;
+		Presented.Blob = Current.Blob;
+		Presented.Len = Current.Len;
+		Presented.Info = Current.Info;
+		Presented.Before = Before;
 		if (bSavedPlay)
 		{
 			// Single recorded play: hold at the end until R restarts or Q quits.
+		}
+		else if (bSaveOpen)
+		{
+			// The save dialog is open: the screen stays on the play being saved.
 		}
 		else if (bReplay && ReplayIdx >= History.Num() && PlayTime >= Current.Info.duration_s)
 		{

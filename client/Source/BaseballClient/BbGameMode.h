@@ -46,6 +46,8 @@ public:
 	FString SavedComment;
 	FString SavedErrorTitle;
 	FString SavedErrorBody;
+	/** A saved play that does not record its names or park: what is shown is not as it was seen. */
+	FString SavedWarning;
 	/** The call on the current pitch, shown large once it is known. */
 	FString Call;
 	/** The umpire's signal of the latest out ("OUT at first"), shown as he makes it. */

@@ -27,8 +27,24 @@ public:
 	FBbPlay Next();
 	/** Build a playable FBbPlay from recorded FlatBuffer bytes (does not advance the sim). */
 	FBbPlay LoadTimeline(const TArray<uint8>& Bytes) const;
+	/** LoadTimeline plus the checks a recording must pass before it is played: the summary is
+	 *  finite with a duration inside (0, MaxRecordedPlayS], and frames sampled across the whole
+	 *  play (the first and the last included) all read back with a finite ball and between one
+	 *  and BB_MAX_ACTORS finite actors. An empty or half-empty timeline, or one whose duration
+	 *  would stall playback, comes back invalid with Why saying what is wrong. */
+	FBbPlay LoadRecorded(const TArray<uint8>& Bytes, FString& Why) const;
+	/** The summary checks of LoadRecorded alone (testable on a made-up summary). */
+	static bool InfoSane(const BbPlayInfo& Info, FString& Why);
+	/** The longest recorded play accepted, s. A real pitch with a home run's trot is under a minute. */
+	static constexpr float MaxRecordedPlayS = 120.f;
 	bool Sample(const FBbPlay& Play, float T, BbFrame& Out) const;
 	void Release(FBbPlay& Play) const;
+	/** Every player of both sides once, by side and batting order. */
+	TArray<BbPlayer> AllPlayers() const;
+	/** For viewing a saved play (D9): replaces the rosters and, when Park is given, the park
+	 *  with what the save recorded, so the play is shown with the names, numbers, hands and
+	 *  walls it was seen with, not today's. Call before anything reads them. */
+	void UseRecorded(const TArray<BbPlayer>& Roster, const BbPark* RecordedPark);
 	/** The box score of the pitches shown so far (the first ThroughPlays of the game), read by
 	 *  the sim from its event log when asked. False if the library has no box score or the log
 	 *  cannot be read. The worker runs a pitch ahead, which is why the count is passed: the

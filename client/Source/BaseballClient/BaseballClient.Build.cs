@@ -1,40 +1,8 @@
-using System;
-using System.Diagnostics;
 using System.IO;
-using System.Text.RegularExpressions;
 using UnrealBuildTool;
 
 public class BaseballClient : ModuleRules
 {
-	private static string RunGit(string RepoRoot, string Args)
-	{
-		try
-		{
-			var Psi = new ProcessStartInfo("git", Args)
-			{
-				WorkingDirectory = RepoRoot,
-				RedirectStandardOutput = true,
-				RedirectStandardError = true,
-				UseShellExecute = false,
-				CreateNoWindow = true,
-			};
-			using (var Proc = Process.Start(Psi))
-			{
-				if (Proc == null)
-				{
-					return null;
-				}
-				string Output = Proc.StandardOutput.ReadToEnd();
-				Proc.WaitForExit(3000);
-				return Proc.ExitCode == 0 ? Output : null;
-			}
-		}
-		catch
-		{
-			return null;
-		}
-	}
-
 	public BaseballClient(ReadOnlyTargetRules Target) : base(Target)
 	{
 		PCHUsage = PCHUsageMode.UseExplicitOrSharedPCHs;
@@ -44,30 +12,17 @@ public class BaseballClient : ModuleRules
 		string RepoRoot = Path.GetFullPath(Path.Combine(ModuleDirectory, "..", "..", ".."));
 		PublicIncludePaths.Add(Path.Combine(RepoRoot, "sim", "crates", "bb_ffi", "include"));
 
-		string Commit = "unknown";
-		string Sha = RunGit(RepoRoot, "rev-parse --short HEAD");
-		if (!string.IsNullOrWhiteSpace(Sha))
+		// The build's commit stamp (BbBuildStamp.h). Client/Build/stamp-commit.sh, a pre-build
+		// step of both targets, rewrites it before every build; reading git here would be
+		// cached by UBT between builds and go stale. A placeholder is written only if the
+		// step has never run (a build by another route), so the include always resolves.
+		string StampDir = Path.GetFullPath(Path.Combine(ModuleDirectory, "..", "..", "Intermediate", "BbStamp"));
+		string StampHeader = Path.Combine(StampDir, "BbBuildStamp.h");
+		if (!File.Exists(StampHeader))
 		{
-			Sha = Sha.Trim();
-			if (Regex.IsMatch(Sha, "^[0-9a-fA-F]+$"))
-			{
-				string Status = RunGit(RepoRoot, "status --porcelain");
-				Commit = string.IsNullOrEmpty(Status) ? Sha : Sha + "-dirty";
-			}
+			Directory.CreateDirectory(StampDir);
+			File.WriteAllText(StampHeader, "#pragma once\n#define BB_BUILD_COMMIT \"unknown\"\n");
 		}
-		foreach (string GitPathArg in new[] { "rev-parse --git-path HEAD", "rev-parse --git-path index" })
-		{
-			string GitPath = RunGit(RepoRoot, GitPathArg);
-			if (!string.IsNullOrWhiteSpace(GitPath))
-			{
-				GitPath = GitPath.Trim();
-				string Full = Path.IsPathRooted(GitPath) ? GitPath : Path.GetFullPath(Path.Combine(RepoRoot, GitPath));
-				if (File.Exists(Full))
-				{
-					ExternalDependencies.Add(Full);
-				}
-			}
-		}
-		PublicDefinitions.Add("BB_GIT_COMMIT=" + Commit);
+		PrivateIncludePaths.Add(StampDir);
 	}
 }
