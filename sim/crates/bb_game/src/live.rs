@@ -9343,7 +9343,7 @@ mod tests {
                 let Ball::Free { path, .. } = &sim.ball else { unreachable!() };
                 let Some((t, x, y)) = path.first_bounce() else { continue };
                 let near = (6..9).map(|i| m::hypot(home[i].x - x, home[i].y - y)).fold(f64::INFINITY, f64::min);
-                if t - inp.t_contact >= 3.5 && (std::env::var("ZLO").map_or(18.0, |x| x.parse().unwrap())..std::env::var("ZHI").map_or(28.0, |x| x.parse().unwrap())).contains(&near) && path.walls.is_empty() {
+                if t - inp.t_contact >= 3.5 && (18.0..28.0).contains(&near) && path.walls.is_empty() {
                     flies.push(ball);
                 }
             }
