@@ -5063,13 +5063,25 @@ impl<'a> Sim<'a> {
                 let retouched = self.out.facts.iter().any(|f| matches!(f, Input::BaseTouched {
                     t, agent, base, holding_ball: false
                 } if *t >= call && *agent == id && *base == start));
-                if self.r[k].off_base_at_catch && !retouched {
-                    self.r[k].scored = false;
-                    self.r[k].tag_up = false;
-                    self.r[k].hold_s = None;
-                    self.r[k].retouch = true;
-                    self.r[k].waiting = false;
-                    self.r[k].goal = start;
+                if self.r[k].off_base_at_catch {
+                    if !retouched {
+                        let r = &mut self.r[k];
+                        r.scored = false;
+                        r.tag_up = false;
+                        r.hold_s = None;
+                        r.retouch = true;
+                        r.waiting = false;
+                        r.goal = start;
+                    } else if at_start && self.r[k].v == 0.0 {
+                        // He returned while the call was pending. The existing touch
+                        // is legal and his next leg is now a decision from rest.
+                        let r = &mut self.r[k];
+                        r.tag_up = false;
+                        r.hold_s = None;
+                        r.retouch = false;
+                        r.turned_back = None;
+                        self.runner_decide(k, start);
+                    }
                 }
             }
             if self.r[k].scored {
@@ -6998,6 +7010,49 @@ mod tests {
         assert_eq!(count(&sim, |f| matches!(f, Input::BaseTouched { agent: R, base: 3, holding_ball: false, .. })), 1, "facts: {:?}", sim.out.facts);
         assert_eq!(count(&sim, |f| matches!(f, Input::BaseLeft { agent: R, base: 2, .. })), 2);
         assert!(!sim.out.events.iter().any(|e| matches!(e, Event::RulesWarning { .. })));
+    }
+
+    #[test]
+    fn an_early_legal_retouch_keeps_its_time_and_gets_a_decision_on_the_call() {
+        const R: AgentId = 7;
+        let fx = fixture(&[(R, 3)]);
+        let inp = input(&fx, vec![
+            RunnerIn { id: fx.st.batter, base: 0, speed: 8.2, tau_s: RUNNER_TAU },
+            RunnerIn { id: R, base: 3, speed: 9.6, tau_s: RUNNER_TAU },
+        ]);
+        for gap in [0.08, 0.45] {
+            let mut st = fx.st.clone();
+            let mut sim = new_sim(&inp, &mut st);
+            let call = 5.0;
+            sim.t = call;
+            sim.emit(Input::BaseLeft { t: call, agent: R, base: 3 });
+            let r = &mut sim.r[1];
+            (r.s, r.v, r.direction, r.goal) = (3.0 * BASE_L + gap, 1.0, -1.0, 3);
+            sim.emit(Input::GloveSecured { t: call, fielder: sim.f[CF].id, x: 0.0, y: 120.0 });
+            assert!(sim.caught());
+            sim.ball = Ball::Held { by: CF };
+            sim.f[CF].pos = Vec3::new(0.0, 120.0, 0.0);
+            for tick in 0..36 {
+                sim.t = call + f64::from(tick) / 60.0;
+                sim.move_runners();
+                if tick < 15 {
+                    assert_eq!(sim.r[1].decisions, 0);
+                }
+            }
+            let touches: Vec<_> = sim.out.facts.iter().filter_map(|fact| match *fact {
+                Input::BaseTouched { agent: R, base: 3, t, holding_ball: false } => Some(t),
+                _ => None,
+            }).collect();
+            assert_eq!(touches.len(), 1);
+            if gap < 0.1 {
+                // For an 8 cm gap at the final walking speed, expect about 80 ms.
+                assert!((0.04..0.10).contains(&(touches[0] - call)));
+            } else {
+                assert!(touches[0] >= call + 0.25);
+            }
+            assert_eq!(sim.r[1].decisions, 1);
+            assert_eq!(sim.r[1].goal, 4, "the deep fly is an advance from third");
+        }
     }
 
     #[test]
