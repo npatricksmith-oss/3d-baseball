@@ -1,7 +1,9 @@
 #!/bin/bash
 # Pre-build step of both client targets: writes Intermediate/BbStamp/BbBuildStamp.h with the
-# commit this build is made from, "<short sha>" or "<short sha>-dirty" (any uncommitted or
-# untracked change), or "unknown" when git cannot say. UBT runs pre-build steps on every build,
+# commit this build is made from, "<short sha>" or "<short sha>-dirty" (an uncommitted or
+# untracked change under client/ or sim/ that can change the binary: not client/Saved,
+# Intermediate, Binaries, DerivedDataCache, sim/target or anything gitignored, so saved plays,
+# TASKS.md and top-level REVIEW-*.md / WORKER-*.md files leave it clean), or "unknown" when git cannot say. UBT runs pre-build steps on every build,
 # so the stamp is current even when UBT reuses its cached rules (which would keep a stale
 # value read once). The header is rewritten only when its text changes, so BbSavePlay.cpp
 # alone is recompiled when the commit or the dirtiness changed.
@@ -15,7 +17,9 @@ COMMIT="unknown"
 if [ -n "$TOP" ]; then
   SHA="$(git -C "$TOP" rev-parse --short HEAD 2>/dev/null)" || SHA=""
   if [[ "$SHA" =~ ^[0-9a-fA-F]+$ ]]; then
-    if STATUS="$(git -C "$TOP" status --porcelain 2>/dev/null)"; then
+    if STATUS="$(git -C "$TOP" status --porcelain -- client sim \
+        ":(exclude)client/Saved" ":(exclude)client/Intermediate" ":(exclude)client/Binaries" \
+        ":(exclude)client/DerivedDataCache" ":(exclude)sim/target" 2>/dev/null)"; then
       if [ -z "$STATUS" ]; then COMMIT="$SHA"; else COMMIT="$SHA-dirty"; fi
     else
       # status failed: say dirty rather than claim clean

@@ -221,19 +221,20 @@ AStaticMeshActor* ABbDirector::Shape(UStaticMesh* Mesh, const FVector& Location,
 
 namespace
 {
-	/** The value of -BbSavedPlay=<path>: true if the argument is there at all, with Out empty
+	/** The value of -BbSavedPlay=<path> (or another option given as Name, e.g.
+	 *  "-BbSavedPlayCheckFile="): true if the argument is there at all, with Out empty
 	 *  when nothing follows the equals sign before the next space (FParse::Value would take the
 	 *  next option for the value). A quoted value may hold spaces. */
-	bool SavedPlayArgument(const TCHAR* Cmd, FString& Out)
+	bool SavedPlayArgument(const TCHAR* Cmd, FString& Out, const TCHAR* Name = TEXT("-BbSavedPlay="))
 	{
 		Out.Reset();
 		const FString All(Cmd);
-		int32 At = All.Find(TEXT("-BbSavedPlay="), ESearchCase::IgnoreCase);
+		int32 At = All.Find(Name, ESearchCase::IgnoreCase);
 		if (At == INDEX_NONE)
 		{
 			return false;
 		}
-		int32 I = At + 13;
+		int32 I = At + FCString::Strlen(Name);
 		if (I < All.Len() && All[I] == TEXT('"'))
 		{
 			++I;
@@ -374,7 +375,7 @@ void ABbDirector::BeginPlay()
 	// only the library, and its exit status says whether it passed.
 	{
 		FString CheckFile;
-		const bool bCheckFile = FParse::Value(Cmd, TEXT("BbSavedPlayCheckFile="), CheckFile);
+		const bool bCheckFile = SavedPlayArgument(Cmd, CheckFile, TEXT("-BbSavedPlayCheckFile="));
 		if (bCheckFile || FParse::Param(Cmd, TEXT("BbSavedPlayCheck")))
 		{
 			bGameOver = true;
@@ -902,6 +903,11 @@ int32 ABbDirector::RunSavedPlayCheck(uint64 Seed, bool bFileOnly, const FString&
 	};
 	if (bFileOnly)
 	{
+		if (File.IsEmpty())
+		{
+			UE_LOG(LogBb, Display, TEXT("BB_SAVED_PLAY_CHECK_FILE REFUSED no file given: -BbSavedPlayCheckFile= needs a path to a .toml"));
+			return 1;
+		}
 		BbSavePlay::FView V;
 		FBbSim Lone;
 		OpenFile(File, V, Lone);
@@ -4426,7 +4432,7 @@ void ABbDirector::Tick(float DeltaSeconds)
 				NextPlay = FBbPlay();
 			}
 		}
-		else if (PlayTime >= Current.Info.duration_s + HoldAfter && NextPlay.bValid)
+		else if (PlayTime >= Current.Info.duration_s + HoldAfter && NextPlay.bValid && !bSaveOpen)
 		{
 			// The next pitch was already in hand when a replay began: stage the walk to it again.
 			if (!bFoulOut && StartReset(NextPlay))
@@ -4440,7 +4446,7 @@ void ABbDirector::Tick(float DeltaSeconds)
 				NextPlay = FBbPlay();
 			}
 		}
-		else if (PlayTime >= Current.Info.duration_s + HoldAfter && bPending && Pending.IsReady())
+		else if (PlayTime >= Current.Info.duration_s + HoldAfter && bPending && Pending.IsReady() && !bSaveOpen)
 		{
 			FBbPlay Next = Pending.Get();
 			bPending = false;
