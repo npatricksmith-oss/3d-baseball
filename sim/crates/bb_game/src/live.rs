@@ -10940,7 +10940,7 @@ mod tests {
         let belief = (0..300).find_map(|offset| {
             sim.f[6].pos = Vec3::new(x + f64::from(offset) * 0.1, y, 0.0);
             let p = Sim::catch_score(&sim.runner_catch_paths(look));
-            (0.25..0.75).contains(&p).then_some(p)
+            (0.25..RUNNER_TAG_FROM_SECOND).contains(&p).then_some(p)
         }).expect("a close catch between the fielder and the gap");
 
         let initial = sim.r[0].clone();
