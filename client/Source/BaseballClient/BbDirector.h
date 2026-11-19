@@ -54,6 +54,7 @@ class UMaterialInterface;
  *               -BbRushAt=<s> (press Enter once, that many seconds in; logs BB_RUSH)
  *               -BbReplayAt=<s> (press R twice that many seconds in, F six seconds later; logs BB_REPLAY)
  *               -BbSaveAt=<s> (press S that many seconds in and Save a second later; logs BB_SAVE)
+ *               -BbSaveAtHandoff (press S on the first tick after the third pitch begins, Save a second later)
  *               -BbSavedPlay=<path to .toml> (play back a saved timeline with no re-simulation)
  *               -BbSavedPlayCheck (headless check of saving and reopening plays through the viewer's own loader;
  *               exit status 1 if anything fails; -BbSavedPlayCheckFile=<toml> only tries to open that file)
@@ -660,6 +661,10 @@ private:
 	TSharedPtr<SWidget> SaveDialogLayer;
 	TSharedPtr<class SBbSavePlayDialog> SaveDialog;
 	bool bSaveOpen = false;
+	/** -BbSaveAtHandoff: press S on the first tick after the third pitch begins (the moment Current has just
+	 *  moved on), then Save a second later: the case the dialog must get right (unattended check). */
+	bool bSaveAtHandoff = false;
+	bool bSaveHandoffNow = false;
 	/** What the last drawn tick showed: its play (the blob is Current's, a history entry's or
 	 *  the live play's, not owned here) and its board. The save dialog takes this, not Current,
 	 *  which a handoff at the end of that tick may already have replaced (BbSavePlay review P1-1).

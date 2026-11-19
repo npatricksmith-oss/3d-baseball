@@ -446,6 +446,7 @@ void ABbDirector::BeginPlay()
 	FParse::Value(Cmd, TEXT("BbRushAt="), RushAt);
 	FParse::Value(Cmd, TEXT("BbReplayAt="), ReplayAt);
 	FParse::Value(Cmd, TEXT("BbSaveAt="), SaveAt);
+	bSaveAtHandoff = FParse::Param(Cmd, TEXT("BbSaveAtHandoff"));
 	SeedShown = Seed;
 	FParse::Value(Cmd, TEXT("BbShotEvery="), ShotEvery);
 	FParse::Value(Cmd, TEXT("BbShotStart="), NextShot);
@@ -719,6 +720,10 @@ void ABbDirector::BeginPlayback(FBbPlay&& Play)
 		return;
 	}
 	++PlaysShown;
+	if (bSaveAtHandoff && PlaysShown == 3)
+	{
+		bSaveHandoffNow = true;
+	}
 	// Anyone still walking off who is in this pitch after all (only when no reset was staged).
 	BbFrame Start;
 	if (SampleDrawn(Current, 0.f, Start))
@@ -3298,6 +3303,12 @@ void ABbDirector::Tick(float DeltaSeconds)
 	if (SaveClose != 0)
 	{
 		CloseSaveDialog(SaveClose == 2);
+	}
+	if (bSaveHandoffNow)
+	{
+		bSaveHandoffNow = false;
+		SaveAt = 0.f;
+		SaveAuto = 0;
 	}
 	// -BbSaveAt=<s>: S, then Save a second later, for an unattended check.
 	if (SaveAt >= 0.f && Presented.bValid && Wall >= SaveAt + (SaveAuto == 1 ? 1.f : 0.f))
