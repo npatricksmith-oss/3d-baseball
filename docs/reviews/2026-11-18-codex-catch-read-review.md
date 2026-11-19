@@ -92,3 +92,16 @@ Lead, 2026-11-18. My fresh run after touching the changed sources: `cargo test -
 - **P2-3: open, next job.** Remove the step at the 2.4 m catch-height ceiling; use the 3.0 m wall ceiling near a fence.
 - **P3-1: deferred** (TASKS line). Calibrate the 20%/80% cut-offs across base/out states and catch types after the P1 fixes change the belief.
 - **P3-2: folded into the next job's tests**; the moving-lead close-catch fixture and the recorded-release throw fixture go with P2-1 and P1-2.
+
+### Worker follow-up
+
+- **P1-1** One keyed contact observation supplies the position and velocity. The runner derives the plate cue, error axes and uncertainty from the observation and public facts. The matched-look fixture changes the actual flight and checks the same score, action and hold point. `63d6e34`, `149a222`, `71e054a`.
+- **P1-2** The runner uses the observed reception, heading, motion and posture to estimate the transfer. The fixture varies the private destination and relay route while keeping that observation fixed. `b45854c`.
+- **P1-3** The rules remove the force on the catch tick. Runner traffic keeps the perceived force through the call reaction, and new advance decisions wait. The two-runner fixture matches the trailing runner's catch-tick movement with and without the catch. `48aa6fa`, `71e054a`.
+- **P2-1** The hold uses the paired catch time and position from each plausible observed path and steps the runner's signed speed through the reaction and return. He brakes back when he has no recoverable hold. The step reserves braking distance past the current tick and allows physical drift past a late stop. A runner on third sets up a plausible tag-up when he can get back in time. `149a222`, `bd07309`, `ea843d4`. On seed `1000003000`, play `82`, the runner is back on third 2.33 s before the unchanged catch and scores.
+- **P2-2** A planted runner who legally retouched during the reaction window gets the normal advance decision once he sees the ruling. The fixture checks both early and late returns and preserves the original touch. `f13ff90`, `71e054a`.
+- **P2-3** A continuous height margin shares the glove reach uncertainty with the horizontal margin. The catch projection uses the world’s 3.0 m ceiling near a wall. The one-sample tests cover both sides of 2.4 m and the fence. `71e054a`.
+- **P3-1** Cutoff calibration remains in [TASKS item 1](../../TASKS.md#1-runners-agent-models-6364-decision-model-note).
+- **P3-2** The tests above exercise the observation and movement gaps. The recorded-release fixture checks viewing-time shrink and times both base races from one projection, against the world flight and the relay geometry. `b45854c`, `149a222`, `71e054a`.
+
+Release workspace check on `ea843d4`: 458 passed, 0 failed, 4 ignored. Both standard cohorts completed without rules warnings. [Before and after](../calibration/2026-11-17-runner-timing.md#catch-read-review-fixes).
