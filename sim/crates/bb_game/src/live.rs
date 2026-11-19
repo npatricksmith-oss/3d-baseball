@@ -299,6 +299,8 @@ struct HolderLook {
     heading: Option<Vec3>,
     motion: Vec3,
     received_throw: bool,
+    /// He received it as the cutoff man, by the job he visibly showed (agent-models §6.4).
+    shown_relay: bool,
     stretched: bool,
     lunge_at: Option<f64>,
 }
@@ -309,24 +311,27 @@ impl HolderLook {
         let rise = self.lunge_at.map(|t| t + DIVE_GETUP_S).filter(|&feet| feet > secure);
         let from_feet = rise.unwrap_or(secure + if self.stretched { STRETCH_COST_S } else { 0.0 });
         let near = |b| (self.pos - base_pos(b)).norm() <= RECEIVE_REACH;
-        let feed = self.received_throw && (1..=4).any(near);
+        // A relay, as he can see it: the man was visibly out as the cutoff man, or took it
+        // farther from every bag than a base receiver goes (review P3-1, 2026-11-19). Any
+        // other reception is a feed: a receiver at a bag or pulled a few metres off it.
+        let relay_seen = self.received_throw && (self.shown_relay || (1..=4).all(|b| (self.pos - base_pos(b)).norm() > RELAY_SEEN_M));
+        let feed = self.received_throw && !relay_seen;
         let pivot = feed && near(2) && base == 1;
         let transfer = if pivot {
             throwing::pivot_s(mean.transfer)
+        } else if relay_seen {
+            // The relay man's exchange, his turn included (agent-models §5.5, §6.4).
+            throwing::relay_s(mean.transfer)
         } else if feed {
             RELAY_TRANSFER_FRAC * mean.transfer
-        } else if self.received_throw {
-            // A reception away from the bags looks like a relay: the relay man's exchange, his
-            // turn included (agent-models §5.5, §6.4).
-            throwing::relay_s(mean.transfer)
         } else {
             mean.transfer
         };
         let to = base_pos(base) - self.pos;
-        let turn = if !self.received_throw || feed {
+        let turn = if !relay_seen {
             self.heading.map_or(0.0, |f| throwing::turn_extra_s(f, to, hand))
         } else {
-            // A relay caught away from the bags normally turns through the reception.
+            // A relay normally turns through the reception (inside `relay_s`).
             0.0
         };
         let footwork = throwing::footwork_s(self.motion, to, rise.is_some());
@@ -376,6 +381,10 @@ fn reference_env() -> &'static FlightEnv {
 }
 
 const RECEIVE_REACH: f64 = 1.5;
+/// A runner reads a reception at least this far from every bag as a relay, whatever job the
+/// man showed, m [E]: farther than a base receiver goes off his bag for a throw (they took
+/// throws 1.5–6 m off it in 100 traced games; Opus relay review P3-1, 2026-11-19).
+const RELAY_SEEN_M: f64 = 6.0;
 /// How far behind a base its backup stands, on the line of the throw, m [E] (coaching
 /// guides give 15–18 m for an outfielder; foul ground allows less).
 const BACKUP_M: f64 = 13.0;
@@ -980,6 +989,9 @@ struct Fielder {
     catch_heading: Option<Vec3>,
     catch_seen_vel: Vec3,
     catch_received_throw: bool,
+    /// He received that throw visibly as the cutoff man (his shown job was a relay; agent-models
+    /// §6.4): with a reception far from every bag, how a runner tells a relay from a feed.
+    catch_shown_relay: bool,
     /// He took it on the ground from a dive (set at each securing; `dove` is his recovery
     /// state and is cleared while he still holds the ball: Codex hurried-throws review #1).
     took_diving: bool,
@@ -4262,6 +4274,9 @@ impl<'a> Sim<'a> {
             let mut r = rng(self.inp.seed, self.inp.play, fd.id, Purpose::GlovePlacement, fd.attempts);
             let (ex, ez) = (r.truncated_normal(4.0), r.truncated_normal(4.0));
             let d = sg * m::hypot(ex, ez);
+            // The job he was visibly doing as he took it (a cutoff man out on his relay spot):
+            // what a runner can see of a reception, never the throw's private route.
+            let shown_relay = matches!(self.known_job(i).0, Role::Relay(_));
             let fd = &mut self.f[i];
             fd.attempts += 1;
             if diving {
@@ -4313,6 +4328,7 @@ impl<'a> Sim<'a> {
                 fd.catch_seen_vel = fd.vel;
                 fd.catch_heading = Some(toward(fd.vel).or(toward(-bv)).unwrap_or(Vec3::new(-fd.pos.x, -fd.pos.y, 0.0)));
                 fd.catch_received_throw = receiver.is_some();
+                fd.catch_shown_relay = receiver.is_some() && shown_relay;
                 fd.face = fd.catch_heading;
                 if matches!(self.ball, Ball::Free { .. }) && self.out.ref_set_s.is_none() {
                     // The reference play's set-up for a throw to first: the grade-50 fielder of
@@ -4672,6 +4688,7 @@ impl<'a> Sim<'a> {
             heading: fd.catch_heading,
             motion: fd.catch_seen_vel,
             received_throw: fd.catch_received_throw,
+            shown_relay: fd.catch_shown_relay,
             stretched: fd.catch_stretched,
             lunge_at: fd.lunge.map(|(t, _, _)| t),
         }
@@ -6071,6 +6088,7 @@ fn new_sim<'a>(inp: &'a LiveInput<'a>, st: &'a mut RulesState) -> Sim<'a> {
                 catch_heading: None,
                 catch_seen_vel: Vec3::ZERO,
                 catch_received_throw: false,
+                catch_shown_relay: false,
                 backs: None,
                 peel: None,
                 carry_to: None,
@@ -8521,9 +8539,109 @@ mod tests {
         assert_eq!(who, vec![sim.f[CF].id, sim.f[B2].id], "throws by {who:?}; facts {:?}", sim.out.facts);
         let caught = sim.out.secured.iter().find(|x| x.1 == sim.f[B2].id).unwrap().0;
         let hold = sim.out.released[1].0 - caught;
-        assert!((hold - throwing::RELAY_S_50).abs() <= DT + 1e-9, "relay man held it {hold:.3} s");
-        assert!(hold >= 0.62, "quicker than the quickest relay on record: {hold:.3} s");
+        // The wiring: the world holds for the model's own value.
+        assert!((hold - throwing::RELAY_S_50).abs() <= DT + 1e-9, "relay man held it {hold:.3} s, the model's relay_s is {:.3}", throwing::RELAY_S_50);
+        // The sourced check: no quicker than the one measured elite relay exchange (Tatis Jr.,
+        // 0.62 s). The old code let it go at 0.27–0.455 s.
+        assert!(hold >= 0.62, "sourced check: quicker than the quickest relay on record (0.62 s): {hold:.3} s");
         assert_eq!(sim.out.hurry[1].0, 0.0, "a relay is let go set");
+    }
+
+    /// The holder predicts the relay the world makes (the twin of
+    /// `the_holder_predicts_the_pivot_the_world_makes`; Opus relay review P3-4): on the throw
+    /// home from the wall through the cutoff man, the relay man's hold in the holder's route
+    /// estimate (`throw_race`) is the one the world then makes, to a tick, and the ball reaches
+    /// the catcher within 0.15 s of the estimate (the reference atmosphere's flight table
+    /// against the world's flight, two legs). Both sides share `relay_s`, so this guards against
+    /// drift, not the value; the value's sourced check is in
+    /// `the_relay_man_holds_the_ball_for_the_sourced_exchange`.
+    #[test]
+    fn the_holder_predicts_the_relay_the_world_makes() {
+        const R: AgentId = 0x0007;
+        let fx = fixture(&[(R, 3)]);
+        let mut inp = input(&fx, vec![RunnerIn { id: fx.st.batter, base: 0, speed: 8.2, tau_s: bb_agents::running::LEAGUE_TAU_S }, RunnerIn { id: R, base: 3, speed: 8.2, tau_s: bb_agents::running::LEAGUE_TAU_S }]);
+        const B2: usize = 3;
+        inp.fattrs[CF].arm = 30.0;
+        inp.fattrs[CF].arm_sigma = 0.0;
+        inp.fattrs[B2].arm_sigma = 0.0;
+        let deep = Vec3::new(-5.0, 112.0, 0.0);
+        let mut st = fx.st.clone();
+        let mut sim = new_sim(&inp, &mut st);
+        sim.t = 5.0;
+        held_at(&mut sim, CF, deep);
+        sim.f[B2].pos = sim.f[B2].target;
+        sim.f[1].pos = base_pos(4);
+        let k = sim.r.iter().position(|r| r.id == R).unwrap();
+        (sim.r[k].s, sim.r[k].goal, sim.r[k].v) = (3.0 * BASE_L + 6.0, 4, 8.0);
+        let (mut predicted, mut caught) = (None, f64::NAN);
+        for _ in 0..600 {
+            if matches!(sim.ball, Ball::Held { by: CF }) {
+                let race = sim.throw_race(CF, 4);
+                predicted = race.through.then(|| (race.via, throwing::relay_s(sim.f[B2].a.transfer)));
+            }
+            let before = matches!(sim.ball, Ball::Held { by: B2 });
+            sim.update_relay();
+            sim.update_thrown();
+            sim.try_captures();
+            if !before && matches!(sim.ball, Ball::Held { by: B2 }) {
+                caught = sim.t;
+            }
+            sim.holder_act();
+            sim.move_fielders();
+            sim.t += DT;
+            if matches!(sim.ball, Ball::Held { by: 1 }) {
+                let (at_home, hold) = predicted.expect("the holder chose the relay route");
+                let released = sim.out.released[1].0;
+                assert!((released - caught - hold).abs() <= DT + 1e-9, "relay man held it {:.3} s, the holder expected {hold:.3}", released - caught);
+                let arrived = sim.out.secured.last().unwrap().0;
+                assert!((arrived - at_home).abs() <= 0.15, "the catcher has it at {arrived:.3}, the holder expected {at_home:.3}");
+                return;
+            }
+        }
+        panic!("the relay never reached the catcher: {:?}", sim.out.facts);
+    }
+
+    /// A runner reads a relay only from what he can see (Opus relay review P3-1): a third
+    /// baseman who takes a throw 3 m off his bag is a base receiver (0.7 of grade-50 `Transfer`
+    /// and his turn); a man who showed the cutoff job, or takes it far from every bag, is a
+    /// relay man (`relay_s`, turn included). The throw's private route plays no part.
+    #[test]
+    fn a_runner_reads_a_relay_only_from_what_he_can_see() {
+        const R: AgentId = 7;
+        let fx = fixture(&[(R, 2)]);
+        let inp = input(&fx, vec![RunnerIn { id: fx.st.batter, base: 0, speed: 8.2, tau_s: RUNNER_TAU }, RunnerIn { id: R, base: 2, speed: 8.2, tau_s: RUNNER_TAU }]);
+        // The runner's read of the holder's release for a throw home, after the catch.
+        let read = |by: usize, at: Vec3, to_base: u8, relay: bool, shown: Option<Role>| {
+            let mut st = fx.st.clone();
+            let mut sim = new_sim(&inp, &mut st);
+            sim.t = 5.0;
+            if let Some(role) = shown {
+                sim.f[by].shown.push(Shown { at: 4.0, role, backs: None, tier: 0, asks: None });
+            }
+            (sim.f[by].pos, sim.f[by].vel) = (at, Vec3::ZERO);
+            sim.launch_throw(BallState { r: at + Vec3::Z * THROW_CATCH_Z, v: Vec3::new(0.0, -20.0, 0.0), w: Vec3::ZERO }, base_pos(to_base), to_base, by, relay);
+            sim.try_captures();
+            assert!(matches!(sim.ball, Ball::Held { by: b } if b == by), "{:?}", sim.ball);
+            let look = sim.observe_holder(by);
+            look.release_time(sim.t, 4, FielderAttrs::average(by), sim.f[by].a.throws) - look.secured.unwrap()
+        };
+        let relay = throwing::relay_s(FielderAttrs::average(5).transfer);
+        // A third baseman 3 m off third, taking a throw to third: a feed, not a relay.
+        let off_third = read(4, base_pos(3) + Vec3::new(0.0, 3.0, 0.0), 3, false, None);
+        assert!(off_third < relay - 0.1, "receiver 3 m off third read as {off_third:.3} s (a relay is {relay:.3})");
+        assert!(off_third >= RELAY_TRANSFER_FRAC * FielderAttrs::average(4).transfer - 1e-9, "{off_third:.3}");
+        // The shortstop out on the relay spot, shown as the cutoff man: a relay. The same man
+        // there with no job shown: a relay by distance. Either way the throw's private route
+        // is not read.
+        let spot = Vec3::new(-12.0, 55.0, 0.0);
+        assert!((1..=4).all(|b| (spot - base_pos(b)).norm() > RELAY_SEEN_M));
+        let shown = read(5, spot, 4, true, Some(Role::Relay(4)));
+        assert!((shown - relay).abs() < 1e-9, "cutoff man read as {shown:.3} s, relay {relay:.3}");
+        assert_eq!(read(5, spot, 4, false, None), shown);
+        // Shown as the cutoff man but taking it near a bag (5 m off second): still a relay.
+        let near_second = read(5, base_pos(2) + Vec3::new(-3.0, 4.0, 0.0), 4, true, Some(Role::Relay(4)));
+        assert!((near_second - relay).abs() < 1e-9, "{near_second:.3}");
+        assert!(read(5, base_pos(2) + Vec3::new(-3.0, 4.0, 0.0), 2, false, None) < relay - 0.1);
     }
 
     /// Seed 7475 play 26 (2026-11-13): runners on first and third, a chopper to the

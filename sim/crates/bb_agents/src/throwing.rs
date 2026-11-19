@@ -234,9 +234,12 @@ mod tests {
     /// exchange (Tatis Jr., 0.62 s); no early release.
     #[test]
     fn relay_time_by_transfer_grade() {
+        // The value as set (the analyst's 0.75 s at grade 50).
         assert!((relay_s(0.65) - 0.75).abs() < 1e-12);
+        // The sourced check: at grade 70 the grade rule lands within 0.03 s of the one measured
+        // elite relay exchange (Tatis Jr., 0.62 s).
         let g70 = relay_s(0.65 * transfer_scale(70.0));
-        assert!((g70 - 0.62).abs() < 0.03, "{g70}");
+        assert!((g70 - 0.62).abs() < 0.03, "sourced check: grade 70 relay {g70:.3} s against the measured elite 0.62 s");
         let su = SetUp::relay(relay_s(0.65), 0.0);
         assert!(su.earliest_s == su.set_s && su.hurry(su.earliest_s) == 0.0 && su.speed_mult(0.0) == 1.0);
     }
