@@ -34,7 +34,15 @@ Still open after it: two-out sends to center (the two-out contact clock); double
 
 **Numbers on main** (standard run, seeds 0–299 [1000–1299]; ledger §1): runs 4.38 [4.53] against a real 4.39; hits on GB/LD/FB/PU .314/.681/.102/.005 [.313/.687/.097/.004] against about .245/.68/.13/.02; HR/PA 2.73% [2.93%] against 3.0%; K% 22.2 [22.1].
 
-**After that:** item 1 of "Open sim work" below. Last pruning step: a check script that fails on dead paths and on this file growing past its cap. The [prune notes](docs/archive/2026-11-17-docs-prune-notes.md) list decisions (D1, D4, D6, D9, D17, D19/D20) that disagree with the code; put them to the owner as numbered questions (Q29 on).
+**Also running: the docs check script.** Sonnet worker `docs-check` in tab "Workers" (terminal `t2g`), worktree `.claude/worktrees/docs-check`, branch `work/docs-check` from `7febdfb`, prompt in its untracked `WORKER-CHECK.md`. It writes `bin/check-docs.py` (dead links, anchors and paths in the working docs; TASKS.md over 30 KB) with tests, and fixes dead references except in TASKS.md, observations.md, the ledger and agent-models.md, which it lists for the lead. No sim change: no ledger row; run its tests and the script, merge.
+
+**Waiting on the owner (asked 2026-11-18), from the prune notes' decision-log mismatches:**
+- **Q29 (D1, pitch choice).** The pitcher picks his pitch and spot by a weighted draw, mixing like a real pitcher so he can't be sat on; D1's words say randomness enters only as physical noise. No outcome is ever drawn. Recommended: keep it and reword D1 to allow a player to mix his own choices.
+- **Q30 (D9, saved plays).** A saved play stores only seed and play number, not the build, so any sim change since can replay it differently. Recommended: save the build's commit and the recorded play itself, so the client shows it exactly as seen.
+- **Q31 (D6, Unreal).** Unreal is still "contingent on the spike passing"; it passed and he plays in it. Recommended: mark it decided.
+D19/D20 needed no question: PLAN §1 now records the Q7 merge. D4 is covered by Q13/Q14, and D17 (three-batter minimum) waits for pitching changes in M6.
+
+**After that:** item 1 of "Open sim work" below.
 
 ---
 
