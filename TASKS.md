@@ -1,6 +1,6 @@
 # Task List
 
-**Last updated:** 2026-11-18 (context pruning, steps 2 and 3).
+**Last updated:** 2026-11-18 (`work/runner-catch-read` merged).
 
 What is next and what is open. Other files hold the rest:
 
@@ -15,17 +15,26 @@ Status: `[ ]` not started · `[~]` partly done · `[?]` needs an owner decision
 
 ---
 
-## Resume here (2026-11-18)
+## Resume here (2026-11-18, evening)
 
-**State.** Context pruning steps 1–4 are merged and pushed (docs audit, code comments and examples, superseded-figure banners, branch and worktree cleanup with the owner's OK as Q28: local branches left are main, `work/runner-start`, the held `work/pitcher-fielding` and `work/integrate-agy-calib`, and `work/swing-chores`). Codex was reset on 2026-11-17: Codex Sol reviews again.
+**State.** `work/runner-catch-read` is merged and pushed (Q27's contact-read review fixes and the owner's close-catch rule, agent-models §6.3). The lead's own check: 450 tests pass; standard runs 4.38 [4.53], matching the worker. Its [Codex review](docs/reviews/2026-11-18-codex-catch-read-review.md) found three P1s and three P2s in the new code, all open and handed to one job below. Seed 1000's +0.22 runs is 1.46 standard errors from seed 0's paired change, no bug traced.
 
-**Q27 merged (2026-11-18), with its review fix P2-1 (the runner's first check reads his own observation).** Runners move at contact (agent-models §6.1; [timing note](docs/calibration/2026-11-17-runner-timing.md); ledger 2026-11-18): runs 4.33 [4.31]; second to home on singles 53% (MLB 61.7%), first to third 36% (31.7%). **In progress:** the [contact-read review](docs/reviews/2026-11-18-codex-contact-read-review.md)'s P2-1, P2-2, P2-3 and P3-1, by the Codex worker in herdr-app tab "Workers" (terminal `t24`) on `work/runner-catch-read`. P2-3 is an observation-rule breach older than Q27 (a runner reads a thrown ball's exact state). When it reports: run tests and the standard run yourself, review, merge. Still open: two-out sends to center 99% (band 75–91%) and double-offs on catches below 10° (59.5 per 300 games against 25.7).
+**Next: the catch-read review fixes** (Codex worker, branch `work/catch-read-fixes` from `main`). Unresolved review findings:
+- P1-1: the catch belief's eight alternative paths are scaled from the true flight; build them from one contact observation and its own uncertainty.
+- P1-2: the holder forecast reads `fd.face`, set from the throw's private target; use a published holder observation.
+- P1-3: base traffic reacts to the catch (`forced`) before the runner sees the ruling.
+- P2-1: the hold budget assumes a standing runner; a moving one drifts past it (runner from third 9.5 m off on a 5.7 s fly, seed 1000003000 play 82).
+- P2-2: a runner who retouches during the reaction window loses his next decision.
+- P2-3: the catch belief steps at the 2.4 m height ceiling; the wall ceiling is 3.0 m.
+Then one review (Codex Sol, or a Claude model if Codex is near its limit), merge, ledger row.
+
+Still open after it: two-out sends to center (the two-out contact clock); double-offs below 10° (59.5 against about 26); fly balls with 2+ outs above the base rate; a runner never dives back to a bag.
 
 **Lesson:** a worker once reported done on a stale test binary. Before merging a worker's branch, `touch` the changed source and run the tests and the standard run yourself.
 
-**Numbers on main** (standard run, seeds 0–299 [1000–1299]; ledger §1): runs 4.12 [4.14] against a real 4.39; hits on GB/LD/FB/PU .307/.683/.109/.006 [.308/.683/.098/.004] against about .245/.68/.13/.02; HR/PA 2.88% [2.82%] against 3.0%; routine flies caught .980.
+**Numbers on main** (standard run, seeds 0–299 [1000–1299]; ledger §1): runs 4.38 [4.53] against a real 4.39; hits on GB/LD/FB/PU .314/.681/.102/.005 [.313/.687/.097/.004] against about .245/.68/.13/.02; HR/PA 2.73% [2.93%] against 3.0%; K% 22.2 [22.1].
 
-**Next:** the `work/runner-catch-read` branch, then item 1 of "Open sim work" below. Last pruning step: a check script that fails on dead paths and on this file growing past its cap. The [prune notes](docs/archive/2026-11-17-docs-prune-notes.md) list decisions (D1, D4, D6, D9, D17, D19/D20) that disagree with the code; put them to the owner as numbered questions (Q29 on).
+**After that:** item 1 of "Open sim work" below. Last pruning step: a check script that fails on dead paths and on this file growing past its cap. The [prune notes](docs/archive/2026-11-17-docs-prune-notes.md) list decisions (D1, D4, D6, D9, D17, D19/D20) that disagree with the code; put them to the owner as numbered questions (Q29 on).
 
 ---
 
@@ -36,10 +45,11 @@ One `sim/crates/bb_game/src/live.rs` job at a time. Each job gets a ledger row a
 ### 1. Runners (agent-models §6.3–§6.4; [decision-model note](docs/calibration/2026-11-15-runner-decision-model.md))
 
 - [~] **The runner's start (Q27).** Moving secondary leads are merged (2026-11-18): +1.0 m at 3 m/s with 0–1 out, +1.5 m at 5 m/s with two out. All three bases use the contact state, and the live-ball timeline carries the shuffle from release. Early bounces respect the read clock. Runners brake for partway holds and returns, and the rules judge the retouch.
-  - The contact-read review fixes are on `work/runner-catch-read`. Runners use visible fielder motion, react to the public ruling, and judge thrown balls and holder readiness from observation. Their catch belief at the first look allows for their own read error, spin they cannot see and fielder speed. On a close catch they hold only as far off as they can get back from. On all singles, second to home is 56.7% (MLB 61.7%) and first to third is 33.3% (MLB 31.7%).
+  - The contact-read review fixes are merged (2026-11-18); their own review's findings are the job in "Resume here". Runners use visible fielder motion, react to the public ruling, and judge thrown balls and holder readiness from observation. Their catch belief at the first look allows for their own read error, spin they cannot see and fielder speed. On a close catch they hold only as far off as they can get back from. On all singles, second to home is 56.7% (MLB 61.7%) and first to third is 33.3% (MLB 31.7%).
   - The 10–25° double-off jump on that branch (13.5 → 59.0 per 300 games) is fixed: 19.0 now, against Retrosheet's 25.7 by its line-drive label. Below 10° it is 59.5, mostly catches before the 0.5 s look (the fixed lead and coast, not the read). [Read error and return distance](docs/calibration/2026-11-17-runner-timing.md#read-error-and-return-distance).
   - Open: two-out sends to center are 117/118 (99.2%; MLB 75–91%), with a longer throw benchmark than at the corners. Fly balls with two or more outs are .006 [.005], about twice the base. A runner's return is a run that brakes onto the bag, with no dive back, so close holds lose races a real runner might win. The runner's catch-point estimate for the hold distance comes from one look; it can put the throw deeper than it is.
   - Deferred review P3s: the third-base route blend turns the lateral velocity in one tick (P3-1); the first decision sees one tick less coasting than its clock (P3-2). [Q27 timing and checks](docs/calibration/2026-11-17-runner-timing.md#final-measurements).
+- [ ] Calibrate the runner's catch cut-offs (`RUNNER_CATCH_CONFIDENCE` 80%, advance below 20%) across base/out states and catch types, after the catch-read fixes (deferred catch-read review P3-1).
 - [ ] Fit `AdvanceParams::caution_z` to MLB's attempt and success rates (now 1.0, fitted only to outs on the bases).
 - [ ] The coach's read and send for a ball behind the runner (Q10 a). Model early-departure decisions on caught flies, slides around tags, a turn decision before the bag, and an overrun redirected after an overthrow.
 - [ ] The rundown (Q11), on its own branch. A stand-in exists. Two small points from the runner-decision review wait for it.
