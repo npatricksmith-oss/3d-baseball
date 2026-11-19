@@ -85,6 +85,25 @@ FBbPlay FBbSim::Next()
 	return Play;
 }
 
+FBbPlay FBbSim::LoadTimeline(const TArray<uint8>& Bytes) const
+{
+	FBbPlay Play;
+	if (!FnInfo || Bytes.IsEmpty())
+	{
+		return Play;
+	}
+	Play.Storage = MakeShared<TArray<uint8>>(Bytes);
+	Play.Blob = Play.Storage->GetData();
+	Play.Len = static_cast<size_t>(Play.Storage->Num());
+	Play.bSimOwned = false;
+	Play.bValid = FnInfo(Play.Blob, Play.Len, &Play.Info) == 1;
+	if (!Play.bValid)
+	{
+		Play = FBbPlay();
+	}
+	return Play;
+}
+
 bool FBbSim::BoxScore(uint32 ThroughPlays, BbBoxScore& Out) const
 {
 	if (!Game || !FnBoxScore)
@@ -102,7 +121,7 @@ bool FBbSim::Sample(const FBbPlay& Play, float T, BbFrame& Out) const
 
 void FBbSim::Release(FBbPlay& Play) const
 {
-	if (Play.Blob)
+	if (Play.Blob && Play.bSimOwned && FnBlobFree)
 	{
 		FnBlobFree(Play.Blob, Play.Len);
 	}

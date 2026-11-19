@@ -6,13 +6,17 @@
 class SMultiLineEditableTextBox;
 
 /**
- * Saving a play from the instant replay (owner, 2026-11-15). The replay shows a "Save this
- * play" button (or the S key); it opens a dialog with Cancel and Save, the game's seed and
- * the play's number, and a box for a comment. Save writes one file per play to saved-plays/
- * at the top of the repository, so the play can be found again from its seed.
+ * Saving and loading a play from the instant replay (owner, 2026-11-15; D9 2026-11-18).
+ * The replay shows a "Save this play" button (or the S key); it opens a dialog with Cancel
+ * and Save, the game's seed and the play's number, and a box for a comment. Save writes
+ * one .toml and its companion .timeline blob to saved-plays/ at the top of the repository,
+ * stamped with the build's git commit, so the play plays back identically on later builds.
  */
 namespace BbSavePlay
 {
+	/** The git commit this client was built from (short sha, with "-dirty", or "unknown"). */
+	FString BuildCommit();
+
 	/** What a saved file records besides the comment. */
 	struct FWhat
 	{
@@ -27,12 +31,35 @@ namespace BbSavePlay
 		uint8 HomeRuns = 0;
 	};
 
+	/** What Read() loads from a saved-play .toml file. */
+	struct FLoaded
+	{
+		FWhat What;
+		FString Commit;
+		bool bCommitInferred = false;
+		FString Timeline;
+		FString TimelinePath;
+		FString Saved;
+		FString Comment;
+		bool bHasSeed = false;
+		bool bHasPlay = false;
+	};
+
 	/** saved-plays/ at the repository's top (the client project's parent folder). */
 	FString Folder();
 
-	/** Writes saved-plays/seed<seed>-play<n>-<yyyymmdd-hhmmss>.toml; returns its full path, or
-	 *  an empty string if it could not be written. */
-	FString Write(const FWhat& What, const FString& Comment);
+	/** Resolves a -BbSavedPlay=<path> argument against CWD, the repo root, and saved-plays/. */
+	FString ResolveTomlPath(const FString& Arg);
+
+	/** Writes <Dir>/seed<seed>-play<n>-<yyyymmdd-hhmmss>.toml and .timeline; returns the
+	 *  TOML's full path, or an empty string if either could not be written. */
+	FString WriteTo(const FString& Dir, const FWhat& What, const FString& Comment, const uint8* TimelineBlob, size_t TimelineLen);
+
+	/** Writes into saved-plays/ via WriteTo. */
+	FString Write(const FWhat& What, const FString& Comment, const uint8* TimelineBlob, size_t TimelineLen);
+
+	/** Reads a saved-play .toml file. False if the file cannot be read. */
+	bool Read(const FString& TomlPath, FLoaded& Out);
 }
 
 DECLARE_DELEGATE_OneParam(FBbOnSavePlay, const FString& /*Comment*/);

@@ -783,7 +783,7 @@ void ABbDirector::SyncCursor()
 
 void ABbDirector::OpenSaveDialog()
 {
-	if (bSaveOpen || !Current.bValid || !GEngine || !GEngine->GameViewport)
+	if (bSaveOpen || !Current.bValid || !Current.Blob || Current.Len == 0 || !GEngine || !GEngine->GameViewport)
 	{
 		return;
 	}
@@ -829,10 +829,10 @@ void ABbDirector::CloseSaveDialog(bool bSave)
 		What.Strikes = Before.strikes;
 		What.AwayRuns = Before.away_runs;
 		What.HomeRuns = Before.home_runs;
-		const FString Path = BbSavePlay::Write(What, SaveComment);
+		const FString Path = BbSavePlay::Write(What, SaveComment, Current.Blob, Current.Len);
 		SavedNote = Path.IsEmpty() ? FString(TEXT("Could not save the play")) : FString::Printf(TEXT("Saved: saved-plays/%s"), *FPaths::GetCleanFilename(Path));
 		SavedUntil = Wall + 4.0;
-		UE_LOG(LogBb, Display, TEXT("BB_SAVE %s seed=%llu play=%u path=%s"), Path.IsEmpty() ? TEXT("failed") : TEXT("saved"), SeedShown, What.Play, *Path);
+		UE_LOG(LogBb, Display, TEXT("BB_SAVE %s seed=%llu play=%u commit=%s path=%s"), Path.IsEmpty() ? TEXT("failed") : TEXT("saved"), SeedShown, What.Play, *BbSavePlay::BuildCommit(), *Path);
 	}
 	else
 	{

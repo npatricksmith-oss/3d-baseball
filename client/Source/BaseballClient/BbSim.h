@@ -5,13 +5,16 @@
 #include "bb_ffi.h"
 #include "HAL/CriticalSection.h"
 
-/** One pitch's timeline blob, owned by the sim library: release it exactly once (FBbSim::Release). */
+/** One pitch's timeline blob, owned by the sim library (bSimOwned) or by Storage; release it
+ *  with FBbSim::Release. */
 struct FBbPlay
 {
 	uint8* Blob = nullptr;
 	size_t Len = 0;
 	BbPlayInfo Info{};
 	bool bValid = false;
+	bool bSimOwned = true;
+	TSharedPtr<TArray<uint8>> Storage;
 };
 
 class FBbSim
@@ -22,6 +25,8 @@ public:
 	bool Start(const FString& LibraryPath, uint64 Seed);
 	/** Simulate the next pitch. Not valid once the game is over. Safe to call off the game thread. */
 	FBbPlay Next();
+	/** Build a playable FBbPlay from recorded FlatBuffer bytes (does not advance the sim). */
+	FBbPlay LoadTimeline(const TArray<uint8>& Bytes) const;
 	bool Sample(const FBbPlay& Play, float T, BbFrame& Out) const;
 	void Release(FBbPlay& Play) const;
 	/** The box score of the pitches shown so far (the first ThroughPlays of the game), read by
