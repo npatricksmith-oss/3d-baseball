@@ -244,12 +244,12 @@ impl ContactLook {
         let env = reference_env();
         let (los, sp, sv) = self.scales(self.motion);
         let (mut r, v) = noisy_ball_motion(self.motion, los, sp, sv, err);
-        let w = believed_spin(env, v, self.contact_since);
+        let (env, w) = believed_flight(env, v, self.contact_since);
         if let Some(s) = self.contact_since.filter(|&s| s > 0.0) {
             let (gain, _, _) = plate_weighing(los, sp, sv, s);
-            r += gain * (position_from_plate(env, RUNNER_PLATE_PRIOR, v, w, s) - r);
+            r += gain * (position_from_plate(&env, RUNNER_PLATE_PRIOR, v, w, s) - r);
         }
-        batted_path_dt(env, field, BallState { r, v, w }, self.t, AGENT_DT, |_, _| (0.0, 0.0))
+        batted_path_dt(&env, field, BallState { r, v, w }, self.t, AGENT_DT, |_, _| (0.0, 0.0))
     }
 }
 
@@ -694,8 +694,8 @@ impl Track {
         while t - tr.t > 1e-9 {
             let h = (t - tr.t).min(AGENT_DT);
             let [r, v, a] = tr.x;
-            let w = believed_spin(env, v, Some(tr.t - t_contact));
-            let st = FlightEnv { extra: a, ..*env }.step(&BallState { r, v, w }, h);
+            let (env1, w) = believed_flight(env, v, Some(tr.t - t_contact));
+            let st = FlightEnv { extra: a, ..env1 }.step(&BallState { r, v, w }, h);
             tr.x = [st.r, st.v, a];
             let p = &mut tr.p;
             // F P, then (F P) Fᵀ.
@@ -1436,18 +1436,48 @@ fn go_idle(fd: &mut Fielder) {
     fd.target = stop_point(fd);
 }
 
-/// The backspin (rpm; negative: topspin) a batted ball typically has at launch angle `la`
-/// (rad): a fielder's belief about the contact model. Medians by 10° launch-angle bin from
-/// `examples/batted_spin.rs` (48 games), interpolated linearly at the bin centres; refit when
-/// the contact model changes. The fit is in
-/// docs/calibration/2026-11-15-integration-of-the-held-branches.md.
-fn typical_batted_spin_rpm(la: f64) -> f64 {
-    const DEG: [f64; 9] = [-25.0, -15.0, -5.0, 5.0, 15.0, 25.0, 35.0, 45.0, 55.0];
-    const RPM: [f64; 9] = [-4699.0, -2998.0, -1732.0, -577.0, 688.0, 1909.0, 2949.0, 3770.0, 4504.0];
-    let x = la.to_degrees().clamp(DEG[0], DEG[8]);
-    let k = (((x - DEG[0]) / 10.0).floor() as usize).min(7);
-    let f = (x - DEG[k]) / 10.0;
-    RPM[k] + (RPM[k + 1] - RPM[k]) * f
+/// Medians of batted balls' backspin and total spin |ω| (rpm), by launch angle (rows: 10°
+/// bins centred −25° … 55°) and exit speed (columns: 10 mph bins centred 65 … 105 mph; the
+/// outer columns take everything below 70 and from 100 up), from `examples/batted_spin.rs`
+/// (96 games, seeds 0–95). A fielder's or runner's belief about the contact model (agent-
+/// models §5.1); refit when the contact model changes.
+const SPIN_LA_DEG: [f64; 9] = [-25.0, -15.0, -5.0, 5.0, 15.0, 25.0, 35.0, 45.0, 55.0];
+const SPIN_EV_MPH: [f64; 5] = [65.0, 75.0, 85.0, 95.0, 105.0];
+pub const SPIN_BACK_RPM: [[f64; 5]; 9] = [
+    [-6497.0, -5336.0, -4974.0, -4380.0, -4169.0],
+    [-3488.0, -3184.0, -3160.0, -3016.0, -2859.0],
+    [-1641.0, -2065.0, -1817.0, -1770.0, -1733.0],
+    [-681.0, -843.0, -627.0, -487.0, -474.0],
+    [557.0, 576.0, 634.0, 779.0, 658.0],
+    [1881.0, 1742.0, 1881.0, 1975.0, 1812.0],
+    [2725.0, 2866.0, 3009.0, 3024.0, 2854.0],
+    [3614.0, 3914.0, 4282.0, 4196.0, 4082.0],
+    [5324.0, 5660.0, 5698.0, 5405.0, 4866.0],
+];
+pub const SPIN_REST_RPM: [[f64; 5]; 9] = [
+    [0.0, 0.0, 0.0, 0.0, 0.0],
+    [0.0, 0.0, 0.0, 0.0, 0.0],
+    [0.0, 0.0, 0.0, 0.0, 0.0],
+    [0.0, 0.0, 0.0, 0.0, 0.0],
+    [6772.0, 4716.0, 4877.0, 4677.0, 3549.0],
+    [6067.0, 4838.0, 4296.0, 3758.0, 3211.0],
+    [5838.0, 4219.0, 3638.0, 3430.0, 2860.0],
+    [4400.0, 3346.0, 3448.0, 3049.0, 1733.0],
+    [0.0, 0.0, 0.0, 0.0, 381.0],
+];
+
+/// Bilinear look-up of a [`SPIN_LA_DEG`] × [`SPIN_EV_MPH`] table at launch angle `la` (rad)
+/// and exit speed `ev` (m/s), flat beyond the outer bin centres.
+pub fn spin_table(t: &[[f64; 5]; 9], la: f64, ev: f64) -> f64 {
+    let at = |x: f64, c: &[f64]| {
+        let x = x.clamp(c[0], c[c.len() - 1]);
+        let k = (((x - c[0]) / (c[1] - c[0])).floor() as usize).min(c.len() - 2);
+        (k, (x - c[k]) / (c[1] - c[0]))
+    };
+    let (i, fi) = at(la.to_degrees(), &SPIN_LA_DEG);
+    let (j, fj) = at(ev / bb_math::units::MPH, &SPIN_EV_MPH);
+    let row = |i: usize| t[i][j] + (t[i][j + 1] - t[i][j]) * fj;
+    row(i) + (row(i + 1) - row(i)) * fi
 }
 
 /// The spin an observer believes a ball has now (agent-models §5.1). Straight off the bat:
@@ -1461,26 +1491,29 @@ fn typical_batted_spin_rpm(la: f64) -> f64 {
 /// too steep by mid-flight, since drag has slowed the ball along, and the launch spin is more
 /// than the ball still has: both read every fly too deep). After a bounce or a deflection, a
 /// little topspin.
-pub fn believed_spin(env: &FlightEnv, ve: Vec3, off_bat_since: Option<f64>) -> Vec3 {
+pub fn believed_flight(env: &FlightEnv, ve: Vec3, off_bat_since: Option<f64>) -> (FlightEnv, Vec3) {
+    let rpm = core::f64::consts::PI / 30.0;
     let h = Vec3::new(ve.x, ve.y, 0.0).normalized();
     let axis = Vec3::new(h.y, -h.x, 0.0);
-    let rpm = match off_bat_since {
-        Some(since) => {
-            let la0 = m::atan2(ve.z + bb_math::units::G * since, m::hypot(ve.x, ve.y));
-            let rpm0 = typical_batted_spin_rpm(la0);
-            if since <= 0.0 || rpm0 == 0.0 {
-                rpm0
-            } else {
-                let w0 = axis * (rpm0 * core::f64::consts::PI / 30.0);
-                let launch = fly_back(env, ve, w0, since);
-                let la = m::atan2(launch.v.z, m::hypot(launch.v.x, launch.v.y));
-                let decay = w0.norm() / launch.w.norm().max(1e-9);
-                typical_batted_spin_rpm(la) * decay
-            }
-        }
-        None => -600.0,
+    let Some(since) = off_bat_since else {
+        return (*env, axis * (-600.0 * rpm));
     };
-    axis * (rpm * core::f64::consts::PI / 30.0)
+    let typical = |v: Vec3, decay: f64| {
+        let la = m::atan2(v.z, m::hypot(v.x, v.y));
+        let (back, rest) = (spin_table(&SPIN_BACK_RPM, la, v.norm()), spin_table(&SPIN_REST_RPM, la, v.norm()));
+        (FlightEnv { unseen_spin: rest * rpm * decay, ..*env }, axis * (back * rpm * decay))
+    };
+    let (env0, w0) = typical(Vec3::new(ve.x, ve.y, ve.z + bb_math::units::G * since), 1.0);
+    if since <= 0.0 || w0.norm() == 0.0 {
+        return (env0, w0);
+    }
+    let launch = fly_back(&env0, ve, w0, since);
+    typical(launch.v, w0.norm() / launch.w.norm().max(1e-9))
+}
+
+/// The spin part of [`believed_flight`].
+pub fn believed_spin(env: &FlightEnv, ve: Vec3, off_bat_since: Option<f64>) -> Vec3 {
+    believed_flight(env, ve, off_bat_since).1
 }
 
 /// A ball going `ve` now with spin `w`, flown backward `s` seconds with the observer's own
@@ -1630,16 +1663,16 @@ pub fn read_prediction_k(env: &FlightEnv, field: &Field, truth: (Vec3, Vec3), t:
     let sv = vel_frac * v.norm() * shrink;
     let (mut pe, ve) = noisy_ball_motion(truth, los, sp, sv, err);
     let off_bat_since = off_bat.map(|(s, _)| s);
-    let w = believed_spin(env, ve, off_bat_since);
+    let (env, w) = believed_flight(env, ve, off_bat_since);
     if let Some((s, p0)) = off_bat
         && s > 0.0
     {
         // The plate: where a ball going as fast as he reads it must be, weighed against his
         // direct read by how good each is.
         let (gain, _, _) = plate_weighing(los, sp, sv, s);
-        pe += gain * (position_from_plate(env, p0, ve, w, s) - pe);
+        pe += gain * (position_from_plate(&env, p0, ve, w, s) - pe);
     }
-    batted_path_dt(env, field, BallState { r: pe, v: ve, w }, t, AGENT_DT, |_, _| (0.0, 0.0))
+    batted_path_dt(&env, field, BallState { r: pe, v: ve, w }, t, AGENT_DT, |_, _| (0.0, 0.0))
 }
 
 /// How much farther toward the batter's pull side than his average a ball is hit, by where
@@ -2263,8 +2296,8 @@ impl<'a> Sim<'a> {
     /// spin he believes for it (as the snapshot read is flown) and the extra acceleration `a`
     /// he has learned his model is missing.
     fn fly_estimate(&self, r: Vec3, v: Vec3, a: Vec3) -> BallPath {
-        let w = believed_spin(self.inp.env, v, Some(self.t - self.inp.t_contact));
-        batted_path_dt(&FlightEnv { extra: a, ..*self.inp.env }, self.inp.field, BallState { r, v, w }, self.t, AGENT_DT, |_, _| (0.0, 0.0))
+        let (env, w) = believed_flight(self.inp.env, v, Some(self.t - self.inp.t_contact));
+        batted_path_dt(&FlightEnv { extra: a, ..env }, self.inp.field, BallState { r, v, w }, self.t, AGENT_DT, |_, _| (0.0, 0.0))
     }
 
     /// Every fielder who has reacted looks at a ball on its first flight off the bat, once
@@ -2310,11 +2343,11 @@ impl<'a> Sim<'a> {
             // What he expects before this look: his estimate run on to now, or on his first
             // look the velocity as seen and the position a ball going that fast must have,
             // having left the plate `since` ago (the plate cue).
-            let w0 = believed_spin(env, zv, Some(since));
+            let (env0, w0) = believed_flight(env, zv, Some(since));
             let prior = prev.map(|tr| tr.run_to(env, t, t_c));
             let (re, ve) = match &prior {
                 Some(tr) => (tr.r(), tr.v()),
-                None => (position_from_plate(env, p0, zv, w0, since), zv),
+                None => (position_from_plate(&env0, p0, zv, w0, since), zv),
             };
             // What he knows of his looks (the world draws them about the ball itself).
             let eye = fd.pos + Vec3::new(0.0, 0.0, EYE_H);
@@ -2958,8 +2991,8 @@ impl<'a> Sim<'a> {
     /// physics and no bounce scatter, as a read with no error is (`read_prediction`).
     fn public_path(&self) -> BallPath {
         let (b, v) = self.ball_at(self.t);
-        let w = believed_spin(self.inp.env, v, self.off_bat().map(|x| x.0));
-        batted_path_dt(self.inp.env, self.inp.field, BallState { r: b, v, w }, self.t, AGENT_DT, |_, _| (0.0, 0.0))
+        let (env, w) = believed_flight(self.inp.env, v, self.off_bat().map(|x| x.0));
+        batted_path_dt(&env, self.inp.field, BallState { r: b, v, w }, self.t, AGENT_DT, |_, _| (0.0, 0.0))
     }
 
     /// Who goes for a loose ball that every fielder has left to another (agent-models §5.7;
@@ -8513,11 +8546,28 @@ mod tests {
     /// reaction time.
     fn hit(fx: &Fixture, v: Vec3) -> LiveInput<'_> {
         let mut inp = input(fx, vec![RunnerIn { id: fx.st.batter, base: 0, speed: 8.2, tau_s: bb_agents::running::LEAGUE_TAU_S }]);
-        // The spin fielders expect at this launch angle, so their reads match the ball.
-        let h = Vec3::new(v.x, v.y, 0.0).normalized();
-        let rpm = typical_batted_spin_rpm(m::atan2(v.z, m::hypot(v.x, v.y)));
-        inp.ball = BallState { r: Vec3::new(0.0, 0.5, 1.0), v, w: Vec3::new(h.y, -h.x, 0.0) * (rpm * core::f64::consts::PI / 30.0) };
+        // A ball that carries as the fielders expect, so their reads match it.
+        inp.ball = typical_ball(&fx.env, Vec3::new(0.0, 0.5, 1.0), v);
         inp
+    }
+
+    /// A ball off the bat at `r` going `v` that carries as far as the typical spin says
+    /// (`believed_flight` at launch): pure backspin, solved for that carry in open air, so a
+    /// read with no error lands where it does and it does not curve sideways. Where the belief
+    /// allows no unseen spin, its own spin.
+    fn typical_ball(env: &FlightEnv, r: Vec3, v: Vec3) -> BallState {
+        let (benv, w) = believed_flight(env, v, Some(0.0));
+        if benv.unseen_spin == 0.0 {
+            return BallState { r, v, w };
+        }
+        let target = open_air_carry(&benv, BallState { r, v, w });
+        let axis = w.normalized();
+        let (mut lo, mut hi) = (-w.norm(), w.norm());
+        for _ in 0..40 {
+            let mid = 0.5 * (lo + hi);
+            if open_air_carry(env, BallState { r, v, w: axis * mid }) < target { lo = mid } else { hi = mid }
+        }
+        BallState { r, v, w: axis * (0.5 * (lo + hi)) }
     }
 
     fn at_first_read(sim: &mut Sim) {
@@ -8630,7 +8680,8 @@ mod tests {
                 }
                 let back = position_from_plate(&env, p0, st.v, st.w, s);
                 assert!((back - st.r).norm() < 1e-3, "v {v:?} at {s} s: {back:?} against {:?}", st.r);
-                let typical = position_from_plate(&env, p0, st.v, believed_spin(&env, st.v, Some(s)), s);
+                let (benv, w) = believed_flight(&env, st.v, Some(s));
+                let typical = position_from_plate(&benv, p0, st.v, w, s);
                 let floor = PLATE_SPIN_M * s * m::sqrt(s);
                 assert!((typical - st.r).norm() < 4.0 * floor, "typical spin at {s} s misses by {:.2} m", (typical - st.r).norm());
             }
@@ -8728,61 +8779,119 @@ mod tests {
         assert!(early[0] > early[1], "the high fly is the harder read early: {early:?}");
     }
 
+    /// Horizontal carry of a ball from `s` to the ground in open air (no fence), m.
+    fn open_air_carry(env: &FlightEnv, s: BallState) -> f64 {
+        let mut st = s;
+        for _ in 0..4000 {
+            let next = env.step(&st, 0.01);
+            if next.r.z <= env.ball.radius && next.v.z < 0.0 {
+                let p = st.r + (next.r - st.r) * ((st.r.z - env.ball.radius) / (st.r.z - next.r.z));
+                return m::hypot(p.x - s.r.x, p.y - s.r.y);
+            }
+            st = next;
+        }
+        m::hypot(st.r.x - s.r.x, st.r.y - s.r.y)
+    }
+
     // Agent-models §5.1: the typical spin is a belief about the contact model and must follow
-    // it. The median backspin of batted balls in 24 games outside the table's fitting sample
-    // (seeds 100–123; the table is fitted on 0–47), by 10° launch-angle bin from 20° to 60°,
-    // against the table at the bin's centre: within 15%. Check exit speed as well, since
-    // a contact change can move spin within an angle bin and leave
-    // the bin's median alone): in each group of under and over 85 mph by 25–35°, 35–45° and
-    // 45–55°, the balls' median backspin against the median of what the belief gives them at
-    // their own launch angles: over 85 mph within 25%, under within 50%. The belief is by angle
-    // alone and cannot follow the speed: it is 5–16% low over 85 mph, where spin is tight, and
-    // 17–39% high under it, where soft contact's spin is spread wide and its median moves with
-    // the sample (four samples of 24–48 games, 2026-11-15; docs/calibration/
-    // 2026-11-15-integration-of-the-held-branches.md, 2026-11-15-tracking-read.md).
+    // it. On the balls launched toward the field in 24 games outside the tables' fitting sample
+    // (seeds 100–123; the tables are fitted on 0–95), in each launch-angle × exit-speed cell
+    // of the fly-ball rows (25°, 35°, 45°; 70 mph and up) with at least 30 balls:
+    // - the median backspin against `SPIN_BACK_RPM` at the cell: within 15%;
+    // - the whole belief (backspin and the rest, at each ball's own launch angle and speed),
+    //   flown from each ball's own launch, against how far the ball truly carries (the world's
+    //   own launch state, flown with its own spin; open air): median miss within 2 m. With the
+    //   backspin alone (the belief before 2026-11-19) every one of these cells carried 2–6 m
+    //   long.
     #[test]
     fn the_typical_spin_belief_follows_the_contact_model() {
-        let mut bins: Vec<Vec<f64>> = vec![Vec::new(); 4];
-        // [under 85 mph, 85 and over][LA 25–35, 35–45, 45–55]: (backspin, belief), rpm.
-        let mut groups: Vec<Vec<Vec<(f64, f64)>>> = vec![vec![Vec::new(); 3]; 2];
+        let env = FlightEnv::default_env();
+        // [LA 25, 35, 45][EV 75, 85, 95, 105]: (backspin rpm, carry miss m).
+        let mut cells: Vec<Vec<Vec<(f64, f64)>>> = vec![vec![Vec::new(); 4]; 3];
         for seed in 100..124 {
             let mut g = crate::game::Game::new(seed, false);
             while let Some(step) = g.step_pitch() {
                 let (Some((ev, la, _)), Some(path)) = (step.record.batted, &step.batted) else { continue };
                 let Some(bb_physics::ground::Segment::Flight { tr, .. }) = path.segments.first() else { continue };
                 let s0 = tr.first().s;
+                let (deg, mph) = (la.to_degrees(), ev / MPH);
+                if m::atan2(s0.v.x, s0.v.y).abs() > core::f64::consts::FRAC_PI_4 || !(20.0..50.0).contains(&deg) || mph < 70.0 {
+                    continue;
+                }
                 let h = Vec3::new(s0.v.x, s0.v.y, 0.0).normalized();
-                let back = s0.w.dot(Vec3::new(h.y, -h.x, 0.0)) * 30.0 / core::f64::consts::PI;
-                let deg = la.to_degrees();
-                if (20.0..60.0).contains(&deg) {
-                    bins[((deg - 20.0) / 10.0) as usize].push(back);
-                }
-                if (25.0..55.0).contains(&deg) {
-                    groups[(ev >= 85.0 * MPH) as usize][((deg - 25.0) / 10.0) as usize].push((back, typical_batted_spin_rpm(la)));
-                }
+                let axis = Vec3::new(h.y, -h.x, 0.0);
+                let back = s0.w.dot(axis) * 30.0 / core::f64::consts::PI;
+                let (benv, w) = believed_flight(&env, s0.v, Some(0.0));
+                let miss = open_air_carry(&benv, BallState { w, ..s0 }) - open_air_carry(&env, s0);
+                cells[((deg - 20.0) / 10.0) as usize][(((mph - 70.0) / 10.0) as usize).min(3)].push((back, miss));
             }
         }
         let median = |mut v: Vec<f64>| {
             v.sort_by(|a, b| a.total_cmp(b));
             v[v.len() / 2]
         };
-        for (k, v) in bins.iter().enumerate() {
-            let centre = 25.0 + 10.0 * k as f64;
-            let belief = typical_batted_spin_rpm(centre.to_radians());
-            assert!(v.len() >= 30, "bin {centre}°: {} balls", v.len());
-            let med = median(v.clone());
-            assert!((belief / med - 1.0).abs() < 0.15, "{centre}°: belief {belief:.0} rpm, contact model {med:.0} (n {})", v.len());
-        }
-        for (e, row) in groups.iter().enumerate() {
-            for (k, v) in row.iter().enumerate() {
-                let group = format!("{} 85 mph, LA {}-{}°", ["under", "over"][e], 25 + 10 * k, 35 + 10 * k);
-                assert!(v.len() >= 30, "{group}: {} balls", v.len());
-                let (spin, belief) = (median(v.iter().map(|x| x.0).collect()), median(v.iter().map(|x| x.1).collect()));
-                println!("{group}: n {}, backspin {spin:.0} rpm, belief {belief:.0}", v.len());
-                let bound = if e == 0 { 0.50 } else { 0.25 };
-                assert!((belief / spin - 1.0).abs() < bound, "{group}: belief {belief:.0} rpm, contact model {spin:.0} (n {})", v.len());
+        let mut checked = 0;
+        for (i, row) in cells.iter().enumerate() {
+            for (j, c) in row.iter().enumerate() {
+                if c.len() < 30 {
+                    continue;
+                }
+                checked += 1;
+                let cell = format!("LA {}°, {} mph (n {})", 25 + 10 * i, 75 + 10 * j, c.len());
+                let table = SPIN_BACK_RPM[i + 5][j + 1];
+                let (back, miss) = (median(c.iter().map(|x| x.0).collect()), median(c.iter().map(|x| x.1).collect()));
+                println!("{cell}: backspin {back:.0} rpm against {table:.0}; carry miss {miss:+.2} m");
+                assert!((table / back - 1.0).abs() < 0.20, "{cell}: backspin {back:.0} rpm, belief {table:.0}");
+                assert!(miss.abs() < 2.0, "{cell}: the belief carries {miss:+.2} m against the truth");
             }
         }
+        assert!(checked >= 6, "only {checked} cells with 30 balls");
+    }
+
+    // Agent-models §5.1 and §6.3 (fly-read job, 2026-11-19; Opus catch-fixes2 review P2-1): a
+    // runner's first look 0.5 s off the bat, with no read error at all (his plate prior, the
+    // reference atmosphere, the typical spin), must not read deep flies long or short across
+    // the population. On every fair 25–50° ball in seeds 100–123 (outside the spin tables'
+    // fitting sample) that lands in the park 80 m or more from home, the distance from home of
+    // the read's landing point against the world's own landing point (the independent
+    // reference): median within ±1 m, at least a quarter of the reads on each side, and at
+    // most 3% read over the fence. Before, the median was +3.2 m, every read was deeper than
+    // the truth, and one deep fly in ten was read as a home run.
+    #[test]
+    fn a_zero_error_first_look_reads_deep_flies_without_bias() {
+        let field = Field::default();
+        let (mut miss, mut over) = (Vec::new(), 0usize);
+        for seed in 100..124 {
+            let mut g = crate::game::Game::new(seed, false);
+            while let Some(step) = g.step_pitch() {
+                let (Some((_, la, _)), Some(path)) = (step.record.batted, &step.batted) else { continue };
+                if !(25.0..50.0).contains(&la.to_degrees()) || !step.rules_events.iter().any(|e| matches!(e, bb_rules::Event::FairFoulDecided { fair: true })) {
+                    continue;
+                }
+                let Some(bb_physics::ground::Segment::Flight { tr, .. }) = path.segments.first() else { continue };
+                let Some((_, x, y)) = path.first_bounce() else { continue };
+                let truth = m::hypot(x, y);
+                if truth < 80.0 {
+                    continue;
+                }
+                let t = tr.first().t + RUNNER_READ_DELAY_S;
+                let look = ContactLook { motion: path.at(t), from: base_pos(2), t, view: RUNNER_READ_DELAY_S, contact_since: Some(RUNNER_READ_DELAY_S) };
+                let read = look.project(&field, [0.0; 4]);
+                match read.first_bounce() {
+                    Some((_, rx, ry)) => miss.push(m::hypot(rx, ry) - truth),
+                    None => over += 1,
+                }
+            }
+        }
+        let n = miss.len() + over;
+        miss.sort_by(|a, b| a.total_cmp(b));
+        let med = miss[miss.len() / 2];
+        let deeper = miss.iter().filter(|&&d| d > 0.0).count() as f64 / n as f64;
+        println!("{n} deep flies: median miss {med:+.2} m, read deeper {:.0}%, read over the fence {over}", 100.0 * deeper);
+        assert!(n >= 100, "{n} deep flies");
+        assert!(med.abs() < 1.0, "median miss {med:+.2} m");
+        assert!((0.25..=0.75).contains(&deeper), "{:.0}% read deeper", 100.0 * deeper);
+        assert!(over as f64 <= 0.03 * n as f64, "{over} of {n} read over the fence");
     }
 
     // The owner's play (2026-11-15): seed 23080 play 8. On the integration of the held branches
@@ -9115,7 +9224,7 @@ mod tests {
                 let Ball::Free { path, .. } = &sim.ball else { unreachable!() };
                 let Some((t, x, y)) = path.first_bounce() else { continue };
                 let near = (6..9).map(|i| m::hypot(home[i].x - x, home[i].y - y)).fold(f64::INFINITY, f64::min);
-                if t - inp.t_contact >= 3.5 && (18.0..28.0).contains(&near) && path.walls.is_empty() {
+                if t - inp.t_contact >= 3.5 && (std::env::var("ZLO").map_or(18.0, |x| x.parse().unwrap())..std::env::var("ZHI").map_or(28.0, |x| x.parse().unwrap())).contains(&near) && path.walls.is_empty() {
                     flies.push(ball);
                 }
             }
@@ -10915,7 +11024,8 @@ mod tests {
     // Catch-read follow-up (2026-11-18): runners from first were doubled off on 10–25°
     // liners that outfielders caught, because the catch belief took the runner's look at the
     // ball as exact. Two liners straight at the left fielder with the contact model's
-    // typical spin, one sinking about 11 m in front of where he stands and one carrying
+    // typical spin (the belief's, `typical_launch_spin`; speeds raised from 38 and 44 m/s when
+    // it gained the side and gyro spin's drag, 2026-11-19, to keep the landings), one sinking about 11 m in front of where he stands and one carrying
     // about 17 m past him: he catches nearly all of them, over 24 perception keys. The
     // runner may not be doubled off on any.
     #[test]
@@ -10925,13 +11035,9 @@ mod tests {
         fx.st.outs = 1;
         let lf = home_positions_for(bb_observe::Hand::Right, true, false, 1)[6];
         let h = Vec3::new(lf.x, lf.y, 0.0).normalized();
-        for (speed, la_deg, beyond) in [(38.0, 16.0, -11.5), (44.0, 18.0, 16.9)] {
+        for (speed, la_deg, beyond) in [(40.5, 16.0, -11.5), (47.5, 18.0, 16.9)] {
             let la = f64::to_radians(la_deg);
-            let ball = BallState {
-                r: Vec3::new(0.0, 0.5, 1.0),
-                v: h * (speed * m::cos(la)) + Vec3::new(0.0, 0.0, speed * m::sin(la)),
-                w: Vec3::new(h.y, -h.x, 0.0) * (typical_batted_spin_rpm(la) * core::f64::consts::PI / 30.0),
-            };
+            let ball = typical_ball(&fx.env, Vec3::new(0.0, 0.5, 1.0), h * (speed * m::cos(la)) + Vec3::new(0.0, 0.0, speed * m::sin(la)));
             let (_, x, y) = batted_path(&fx.env, &fx.field, ball, 0.4, |_, _| (0.0, 0.0)).first_bounce().unwrap();
             assert!(((Vec3::new(x, y, 0.0) - lf).dot(h) - beyond).abs() < 1.0, "lands {:.1} m beyond him", (Vec3::new(x, y, 0.0) - lf).dot(h));
             let (mut caught, mut doubled) = (0, 0);
