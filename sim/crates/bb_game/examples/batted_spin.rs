@@ -9,8 +9,8 @@
 //!   value with which the cell's balls, each flown from its own launch velocity with the belief
 //!   as it is looked up (both tables interpolated at the ball's own launch angle and speed),
 //!   carry as far as they truly do in the median (signed carry miss to the ground, open air, no
-//!   fence, median zero; bisection per cell, repeated over all cells until it settles, since each
-//!   cell's value reaches the balls of its neighbours). Each ball's own rest varies widely
+//!   fence, median zero; bisection per cell, repeated over all cells, since each
+//!   cell's value reaches the balls of its neighbours, until no cell moves by 50 rpm). Each ball's own rest varies widely
 //!   (quartiles about ±35% of the median) and carry is not linear in it, so the median rest flies
 //!   short. The median of each ball's own rest, √(|ω|² − backspin²), is printed for comparison.
 //! Arguments: first and end seed (default 0 96).
@@ -93,7 +93,11 @@ fn main() {
             carry(&bb_physics::FlightEnv { unseen_spin: rest.max(0.0) / rpm, ..env }, BallState { r: x.0.r, v, w }) - d
         }).collect())
     };
-    for sweep in 0..4 {
+    // Sweep until no cell moves by more than SETTLED_RPM (review 2026-11-19 P3-1: four sweeps
+    // left a cell moving by 700 rpm), at most MAX_SWEEPS.
+    const SETTLED_RPM: f64 = 50.0;
+    const MAX_SWEEPS: usize = 40;
+    for sweep in 0..MAX_SWEEPS {
         let mut worst: f64 = 0.0;
         for k in 0..LA.len() {
             for e in 0..EV.len() {
@@ -121,6 +125,9 @@ fn main() {
             }
         }
         println!("sweep {sweep}: largest change {worst:.0} rpm");
+        if worst < SETTLED_RPM {
+            break;
+        }
     }
     println!("cell: n, backspin median, own-rest median, fitted rest (rpm), median miss as looked up (m)");
     for k in 0..LA.len() {

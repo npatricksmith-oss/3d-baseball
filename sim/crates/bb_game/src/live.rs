@@ -1470,30 +1470,31 @@ fn go_idle(fd: &mut Fielder) {
 /// balls launched within the foul lines). `SPIN_BACK_RPM`: the median backspin.
 /// `SPIN_REST_RPM`: the side and gyro spin he cannot see, as a drag-only allowance
 /// (`FlightEnv::unseen_spin`), fitted so each cell's balls carry as far as they truly do in the
-/// median. Refit both when the contact model changes.
+/// median; the fit sweeps all cells until none moves by 50 rpm (five sweeps on 2026-11-19,
+/// on the games of `925f8ea`). Refit both when the contact model changes.
 const SPIN_LA_DEG: [f64; 9] = [-25.0, -15.0, -5.0, 5.0, 15.0, 25.0, 35.0, 45.0, 55.0];
 const SPIN_EV_MPH: [f64; 5] = [65.0, 75.0, 85.0, 95.0, 105.0];
 pub const SPIN_BACK_RPM: [[f64; 5]; 9] = [
-    [-6430.0, -5436.0, -4953.0, -4362.0, -4143.0],
-    [-3488.0, -3151.0, -3199.0, -3016.0, -2807.0],
-    [-1863.0, -2022.0, -1856.0, -1770.0, -1695.0],
-    [-618.0, -865.0, -695.0, -540.0, -474.0],
-    [585.0, 571.0, 607.0, 793.0, 670.0],
-    [1868.0, 1742.0, 1881.0, 2017.0, 1846.0],
-    [2773.0, 2866.0, 3025.0, 3048.0, 2864.0],
-    [3697.0, 3925.0, 4274.0, 4258.0, 4086.0],
-    [5237.0, 5621.0, 5671.0, 5373.0, 4866.0],
+    [-6681.0, -5454.0, -4905.0, -4417.0, -4169.0],
+    [-3575.0, -3252.0, -3154.0, -2959.0, -2807.0],
+    [-1641.0, -1933.0, -1857.0, -1770.0, -1720.0],
+    [-703.0, -843.0, -613.0, -557.0, -481.0],
+    [585.0, 571.0, 614.0, 764.0, 658.0],
+    [1868.0, 1720.0, 1840.0, 2009.0, 1855.0],
+    [2773.0, 2819.0, 3004.0, 3066.0, 2846.0],
+    [3730.0, 3894.0, 4251.0, 4225.0, 4121.0],
+    [5505.0, 5630.0, 5677.0, 5379.0, 5230.0],
 ];
 pub const SPIN_REST_RPM: [[f64; 5]; 9] = [
     [0.0, 0.0, 0.0, 0.0, 0.0],
     [0.0, 0.0, 0.0, 0.0, 0.0],
     [0.0, 0.0, 0.0, 0.0, 0.0],
     [0.0, 0.0, 0.0, 0.0, 0.0],
-    [5135.0, 5977.0, 3961.0, 4691.0, 3172.0],
-    [5474.0, 5288.0, 4294.0, 3447.0, 2795.0],
-    [5885.0, 3313.0, 3402.0, 3334.0, 2727.0],
-    [4735.0, 3935.0, 3483.0, 3268.0, 1959.0],
-    [0.0, 0.0, 1021.0, 1415.0, 1896.0],
+    [4067.0, 3020.0, 4501.0, 4315.0, 3321.0],
+    [5422.0, 5415.0, 4353.0, 3591.0, 2748.0],
+    [6045.0, 3496.0, 3410.0, 3293.0, 2818.0],
+    [5090.0, 2558.0, 4390.0, 3080.0, 1349.0],
+    [0.0, 0.0, 556.0, 1767.0, 2329.0],
 ];
 
 /// Bilinear look-up of a [`SPIN_LA_DEG`] × [`SPIN_EV_MPH`] table at launch angle `la` (rad)
@@ -8910,19 +8911,27 @@ mod tests {
     // Agent-models §5.1: the typical spin is a belief about the contact model and must follow
     // it. On the balls launched toward the field in 24 games outside the tables' fitting sample
     // (seeds 100–123; the tables are fitted on 0–95), in each launch-angle × exit-speed cell
-    // of the fly-ball rows (25°, 35°, 45°; 70 mph and up) with at least 30 balls:
-    // - the median backspin against `SPIN_BACK_RPM` at the cell: within 15%;
+    // of the liner and fly-ball rows (15°, 25°, 35°, 45°; 70 mph and up) with at least 30 balls:
+    // - the median backspin against `SPIN_BACK_RPM` at the cell: within 15% (in the 15° row,
+    //   whose backspin is about 600 rpm, within LINER_BACK_RPM: 15% of it is under the
+    //   difference between two 30–70-ball medians there, up to 206 rpm out of sample on
+    //   2026-11-19; that row's carry misses were +0.8 to +1.6 m);
     // - the whole belief (backspin and the unseen spin's drag, at each ball's own launch angle
     //   and speed), flown from each ball's own launch, against how far the ball truly carries
     //   (the world's own launch state, flown with its own spin; open air): median miss within
-    //   3 m in each cell (30–80 balls: the median's sampling error is about 1 m) and within 1 m
-    //   over all of them together. With the backspin alone (the belief before 2026-11-19) the
-    //   reads of these flies carried a median 3 m long.
+    //   3 m in each fly-ball cell (30–80 balls: the median's sampling error is about 1 m) and
+    //   within 1 m over all of them together. The 15° row (10–20°), where the fitted unseen
+    //   spin is largest against the backspin, gets LINER_CELL_M per cell and is left out of the
+    //   pooled median, which keeps its meaning for flies (Opus review 2026-11-19, P3-2). With
+    //   the backspin alone (the belief before 2026-11-19) the reads of these flies carried a
+    //   median 3 m long, and of 10–25° liners 2.5–5.7 m long.
     #[test]
     fn the_typical_spin_belief_follows_the_contact_model() {
         let env = FlightEnv::default_env();
-        // [LA 25, 35, 45][EV 75, 85, 95, 105]: (backspin rpm, carry miss m).
-        let mut cells: Vec<Vec<Vec<(f64, f64)>>> = vec![vec![Vec::new(); 4]; 3];
+        const LINER_CELL_M: f64 = 4.0;
+        const LINER_BACK_RPM: f64 = 300.0;
+        // [LA 15, 25, 35, 45][EV 75, 85, 95, 105]: (backspin rpm, carry miss m).
+        let mut cells: Vec<Vec<Vec<(f64, f64)>>> = vec![vec![Vec::new(); 4]; 4];
         for seed in 100..124 {
             let mut g = crate::game::Game::new(seed, false);
             while let Some(step) = g.step_pitch() {
@@ -8930,7 +8939,7 @@ mod tests {
                 let Some(bb_physics::ground::Segment::Flight { tr, .. }) = path.segments.first() else { continue };
                 let s0 = tr.first().s;
                 let (deg, mph) = (la.to_degrees(), ev / MPH);
-                if m::atan2(s0.v.x, s0.v.y).abs() > core::f64::consts::FRAC_PI_4 || !(20.0..50.0).contains(&deg) || mph < 70.0 {
+                if m::atan2(s0.v.x, s0.v.y).abs() > core::f64::consts::FRAC_PI_4 || !(10.0..50.0).contains(&deg) || mph < 70.0 {
                     continue;
                 }
                 let h = Vec3::new(s0.v.x, s0.v.y, 0.0).normalized();
@@ -8938,7 +8947,7 @@ mod tests {
                 let back = s0.w.dot(axis) * 30.0 / core::f64::consts::PI;
                 let (benv, w) = believed_flight(&env, s0.v, Some(0.0));
                 let miss = open_air_carry(&benv, BallState { w, ..s0 }) - open_air_carry(&env, s0);
-                cells[((deg - 20.0) / 10.0) as usize][(((mph - 70.0) / 10.0) as usize).min(3)].push((back, miss));
+                cells[((deg - 10.0) / 10.0) as usize][(((mph - 70.0) / 10.0) as usize).min(3)].push((back, miss));
             }
         }
         let median = |mut v: Vec<f64>| {
@@ -8952,16 +8961,20 @@ mod tests {
                     continue;
                 }
                 checked += 1;
-                let cell = format!("LA {}°, {} mph (n {})", 25 + 10 * i, 75 + 10 * j, c.len());
-                let table = SPIN_BACK_RPM[i + 5][j + 1];
+                let cell = format!("LA {}°, {} mph (n {})", 15 + 10 * i, 75 + 10 * j, c.len());
+                let table = SPIN_BACK_RPM[i + 4][j + 1];
+                let bound = if i == 0 { LINER_CELL_M } else { 3.0 };
                 let (back, miss) = (median(c.iter().map(|x| x.0).collect()), median(c.iter().map(|x| x.1).collect()));
                 println!("{cell}: backspin {back:.0} rpm against {table:.0}; carry miss {miss:+.2} m");
-                assert!((table / back - 1.0).abs() < 0.20, "{cell}: backspin {back:.0} rpm, belief {table:.0}");
-                assert!(miss.abs() < 3.0, "{cell}: the belief carries {miss:+.2} m against the truth");
-                pooled.extend(c.iter().map(|x| x.1));
+                let back_ok = if i == 0 { (table - back).abs() < LINER_BACK_RPM } else { (table / back - 1.0).abs() < 0.15 };
+                assert!(back_ok, "{cell}: backspin {back:.0} rpm, belief {table:.0}");
+                assert!(miss.abs() < bound, "{cell}: the belief carries {miss:+.2} m against the truth");
+                if i > 0 {
+                    pooled.extend(c.iter().map(|x| x.1));
+                }
             }
         }
-        assert!(checked >= 6, "only {checked} cells with 30 balls");
+        assert!(checked >= 8, "only {checked} cells with 30 balls");
         let all = median(pooled);
         println!("all checked cells: carry miss {all:+.2} m");
         assert!(all.abs() < 1.0, "the belief carries {all:+.2} m against the truth over the checked cells");
