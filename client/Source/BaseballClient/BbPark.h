@@ -102,8 +102,9 @@ public:
 	 *  his feet are on (m, sim frame). False before Build or without such a dugout. */
 	bool Bench(double Side, FVector2D& From, FVector2D& Along, FVector2D& Face, double& Length, double& SeatZ, double& FloorZ) const;
 	/** What the outfield board shows: the line score from the sim's box score, the half inning,
-	 *  the count and the outs. Repainted only when one of them has changed. */
-	void ShowBoard(const BbBoxScore& Box, int32 Inning, bool bTop, int32 Balls, int32 Strikes, int32 Outs);
+	 *  the count and the outs. Repainted only when one of them has changed. Without bHitsKnown
+	 *  (a saved play that did not record them) the H column shows a dash, not a false total. */
+	void ShowBoard(const BbBoxScore& Box, int32 Inning, bool bTop, int32 Balls, int32 Strikes, int32 Outs, bool bHitsKnown = true);
 
 	/** The fixed camera spots for this park: behind home, centre field looking in, high on the
 	 *  first-base side, the stands behind third, low at the mound, and straight down. */

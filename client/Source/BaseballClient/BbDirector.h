@@ -6,6 +6,7 @@
 #include "BbSim.h"
 #include "BbPose.h"
 #include "BbCrew.h"
+#include "BbSavePlay.h"
 #include "BbDirector.generated.h"
 
 class AStaticMeshActor;
@@ -53,6 +54,10 @@ class UMaterialInterface;
  *               -BbRushAt=<s> (press Enter once, that many seconds in; logs BB_RUSH)
  *               -BbReplayAt=<s> (press R twice that many seconds in, F six seconds later; logs BB_REPLAY)
  *               -BbSaveAt=<s> (press S that many seconds in and Save a second later; logs BB_SAVE)
+ *               -BbSaveAtHandoff (press S on the first tick after the third pitch begins, Save a second later)
+ *               -BbSavedPlay=<path to .toml> (play back a saved timeline with no re-simulation)
+ *               -BbSavedPlayCheck (headless check of saving and reopening plays through the viewer's own loader;
+ *               exit status 1 if anything fails; -BbSavedPlayCheckFile=<toml> only tries to open that file)
  *               -BbClipSpeeds (log the ground speed each gait clip is animated for as BB_CLIP)
  */
 UCLASS()
@@ -628,6 +633,23 @@ private:
 	void ReplayBack();
 	void ReplayForward();
 	void ShowReplay(int32 Index);
+	/** Viewing one saved play (-BbSavedPlay=<path to .toml>): plays the recorded timeline
+	 *  with no re-simulation, or shows a notice if the TOML has no timeline. */
+	bool bSavedPlay = false;
+	bool bSavedPlayBroken = false;
+	FString SimLibPath;
+	BbSavePlay::FLoaded SavedPlay;
+	BbPlayInfo SavedBefore{};
+	FString SavedErrorTitle, SavedErrorBody;
+	/** Set when the save records no names or park, so the screen says what is not as seen. */
+	FString SavedWarning;
+	void RestartSavedPlay();
+	/** -BbSavedPlayCheck (and -BbSavedPlayCheckFile=<toml>): the headless round-trip check. It
+	 *  runs from BeginPlay on sims of its own, through BbSavePlay::BeginView/FinishView, the
+	 *  loading the viewer itself uses. Returns the exit status. */
+	int32 RunSavedPlayCheck(uint64 Seed, bool bFileOnly, const FString& File);
+	/** The board a saved play's park scoreboard shows, from what the save recorded. */
+	void SavedBoard(bool bKnown, const BbPlayInfo& Src, int32 Inning, BbBoxScore& Box, bool& bHitsKnown) const;
 	/** -BbReplayAt=<s>: seconds of real time after which R is pressed twice and, 6 s later, F
 	 *  once (unattended check; logs BB_REPLAY). */
 	float ReplayAt = -1.f;
@@ -639,6 +661,32 @@ private:
 	TSharedPtr<SWidget> SaveDialogLayer;
 	TSharedPtr<class SBbSavePlayDialog> SaveDialog;
 	bool bSaveOpen = false;
+	/** -BbSaveAtHandoff: press S on the first tick after the third pitch begins (the moment Current has just
+	 *  moved on), then Save a second later: the case the dialog must get right (unattended check). */
+	bool bSaveAtHandoff = false;
+	bool bSaveHandoffNow = false;
+	/** What the last drawn tick showed: its play (the blob is Current's, a history entry's or
+	 *  the live play's, not owned here) and its board. The save dialog takes this, not Current,
+	 *  which a handoff at the end of that tick may already have replaced (BbSavePlay review P1-1).
+	 *  During the walk back into place after a play, the play shown is the one walked back from. */
+	struct FPresented
+	{
+		bool bValid = false;
+		const uint8* Blob = nullptr;
+		size_t Len = 0;
+		BbPlayInfo Info{};
+		BbPlayInfo Before{};
+	} Presented;
+	/** Everything the open dialog will save, taken when it opened (the bytes are copied, so
+	 *  nothing that happens while it is open can change the play being saved). */
+	struct FSaveTarget
+	{
+		TArray<uint8> Blob;
+		BbSavePlay::FWhat What;
+		BbSavePlay::FContext Context;
+	} SaveTarget;
+	/** True if the pointer is a blob this director holds (Current, LivePlay, NextPlay or a history entry). */
+	bool HoldsBlob(const uint8* Blob) const;
 	/** Where the dialog was left: its distance from the screen's right and top edges (Slate units). */
 	FVector2D SaveDialogOffset = FVector2D(28.f, 76.f);
 	bool bPausedBeforeSave = false;

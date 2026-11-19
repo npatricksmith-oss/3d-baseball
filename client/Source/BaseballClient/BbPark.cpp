@@ -1958,7 +1958,7 @@ void ABbPark::BuildBoard()
 	}
 }
 
-void ABbPark::ShowBoard(const BbBoxScore& Box, int32 Inning, bool bTop, int32 Balls, int32 Strikes, int32 Outs)
+void ABbPark::ShowBoard(const BbBoxScore& Box, int32 Inning, bool bTop, int32 Balls, int32 Strikes, int32 Outs, bool bHitsKnown)
 {
 	if (!BoardTex)
 	{
@@ -1968,7 +1968,7 @@ void ABbPark::ShowBoard(const BbBoxScore& Box, int32 Inning, bool bTop, int32 Ba
 	const int32 First = FMath::Max<int32>(1, Box.first_inning), From = FMath::Max(First, (int32)Box.innings - 8);
 	// What is shown, to tell whether anything has changed: 255 = an inning not batted.
 	uint8 Cell[2][9];
-	TArray<uint8> Key = { (uint8)From, (uint8)Inning, (uint8)bTop, (uint8)Balls, (uint8)Strikes, (uint8)Outs };
+	TArray<uint8> Key = { (uint8)From, (uint8)Inning, (uint8)bTop, (uint8)Balls, (uint8)Strikes, (uint8)Outs, (uint8)bHitsKnown };
 	for (int32 T = 0; T < 2; ++T)
 	{
 		for (int32 C = 0; C < 9; ++C)
@@ -2013,7 +2013,7 @@ void ABbPark::ShowBoard(const BbBoxScore& Box, int32 Inning, bool bTop, int32 Ba
 			}
 		}
 		C.Text(FString::FromInt(Box.teams[T].totals.r), ColR, Y, 6, 6, BoardTitle, 1);
-		C.Text(FString::FromInt(Box.teams[T].totals.h), ColH, Y, 6, 6, BoardInk, 1);
+		C.Text(bHitsKnown ? FString::FromInt(Box.teams[T].totals.h) : FString(TEXT("-")), ColH, Y, 6, 6, bHitsKnown ? BoardInk : BoardDim, 1);
 	}
 	C.Box(24, 338, BoardPxW - 24, 341, BoardDim);
 	const int32 LampY = 424;

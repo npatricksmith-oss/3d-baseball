@@ -22,7 +22,7 @@ Carried over from the park plan: the lead builds alone in short sessions, shows 
 
 ## 3. Panels
 
-`BbHud::DrawBug`, `BbHud::DrawCaption`, `BbHud::DrawZone`, `BbHud::DrawInningCard` and `BbHud::DrawBoxScore` draw the shipped panels. The bug includes the pitcher and batter rows under the score, per the owner’s 2026-11-16 update (§5).
+`BbHud::DrawBug`, `BbHud::DrawCaption`, `BbHud::DrawZone`, `BbHud::DrawInningCard`, `BbHud::DrawBoxScore`, `BbHud::DrawComment` and `BbHud::DrawBanner` draw the shipped panels. The bug includes the pitcher and batter rows under the score, per the owner’s 2026-11-16 update (§5).
 
 ## 4. Checking the look
 
@@ -57,3 +57,5 @@ Carried over from the park plan: the lead builds alone in short sessions, shows 
 - **Moved:** the box is drawn by `BbHud::DrawBoxScore` (it was `ABbHUD::DrawBox` in `client/Source/BaseballClient/BbGameMode.cpp`); the game mode's HUD now only places panels. Client only: no sim change, no ledger row.
 - **Checks:** `-BbBoxShots=<n>` photographs the Tab box at pitch n and the final box (`box_midgame.png`, `box_final.png`); `-BbHudHold` shows the card.
 - **For the owner to overrule if he likes:** the dark panel in place of the newspaper page; nicknames in the title and the line score.
+
+**Saved-play viewer (D9, 2026-11-18).** Opening a saved play (`-BbSavedPlay=<path to .toml>`) shows a gold `SAVED PLAY` tag (with `seed`, `play`, and `commit`), the word-wrapped `COMMENT` box under the bug (`BbHud::DrawComment`), the board and pitch info available from the recorded timeline (pitcher row omits the game pitch count since no event log is simulated), and `R` to watch it again. Names, numbers and throwing hands on the bug and the figures, and the park, are the save's own (data-formats.md, saved plays). The runners on, the line score and the hit totals on the park's board are what the save recorded, before the pitch and, once the result is known, after the play; the board's outs follow the umpire's calls every frame; hit totals the save did not record show a dash, never a zero. A save that records no players or park shows a red `NOT EXACTLY AS SAVED` box (`SavedWarning`) saying its names and park come from the current build. A file the viewer refuses (an empty argument, an unreadable, damaged, unusable or mismatched timeline, a legacy `.toml` with no `timeline`) shows a centred banner (`BbHud::DrawBanner`) with the reason, and no pitch is requested. The save dialog (S, or the replay's button) saves the play the last drawn frame showed, not the one that follows it.

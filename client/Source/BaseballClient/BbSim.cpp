@@ -85,6 +85,155 @@ FBbPlay FBbSim::Next()
 	return Play;
 }
 
+FBbPlay FBbSim::LoadTimeline(const TArray<uint8>& Bytes) const
+{
+	FBbPlay Play;
+	if (!FnInfo || Bytes.IsEmpty())
+	{
+		return Play;
+	}
+	Play.Storage = MakeShared<TArray<uint8>>(Bytes);
+	Play.Blob = Play.Storage->GetData();
+	Play.Len = static_cast<size_t>(Play.Storage->Num());
+	Play.bSimOwned = false;
+	Play.bValid = FnInfo(Play.Blob, Play.Len, &Play.Info) == 1;
+	if (!Play.bValid)
+	{
+		Play = FBbPlay();
+	}
+	return Play;
+}
+
+bool FBbSim::InfoSane(const BbPlayInfo& Info, FString& Why)
+{
+	auto Finite = [](float V) { return FMath::IsFinite(V); };
+	if (!Finite(Info.duration_s) || Info.duration_s <= 0.f || Info.duration_s > MaxRecordedPlayS)
+	{
+		Why = FString::Printf(TEXT("its duration is %g s (must be above 0 and at most %g s)"), Info.duration_s, MaxRecordedPlayS);
+		return false;
+	}
+	if (!Finite(Info.release_speed_mps) || !Finite(Info.exit_velocity_mps) || !Finite(Info.launch_angle_rad)
+		|| !Finite(Info.contact_s) || !Finite(Info.call_s) || !Finite(Info.dead_s)
+		|| !Finite(Info.projected_distance_m) || !Finite(Info.plate_x_m) || !Finite(Info.plate_z_m)
+		|| !Finite(Info.zone_bottom_m) || !Finite(Info.zone_top_m) || !Finite(Info.zone_half_width_m))
+	{
+		Why = TEXT("its summary holds a value that is not a number");
+		return false;
+	}
+	if (Info.contact_s > Info.duration_s || Info.call_s > Info.duration_s + 1.f || Info.dead_s > Info.duration_s + 1.f)
+	{
+		Why = TEXT("its contact, call or dead time lies beyond its end");
+		return false;
+	}
+	if (Info.n_calls > BB_MAX_CALLS)
+	{
+		Why = FString::Printf(TEXT("it lists %u umpire calls (at most %d)"), Info.n_calls, BB_MAX_CALLS);
+		return false;
+	}
+	for (uint32 I = 0; I < Info.n_calls; ++I)
+	{
+		if (!Finite(Info.calls[I].t_s) || !Finite(Info.calls[I].margin_s))
+		{
+			Why = TEXT("an umpire call holds a value that is not a number");
+			return false;
+		}
+	}
+	return true;
+}
+
+FBbPlay FBbSim::LoadRecorded(const TArray<uint8>& Bytes, FString& Why) const
+{
+	Why.Reset();
+	if (Bytes.IsEmpty())
+	{
+		Why = TEXT("the file is empty");
+		return FBbPlay();
+	}
+	FBbPlay Play = LoadTimeline(Bytes);
+	if (!Play.bValid)
+	{
+		Why = TEXT("it is not a readable BBTL timeline");
+		return FBbPlay();
+	}
+	if (!InfoSane(Play.Info, Why))
+	{
+		FBbPlay Bad = MoveTemp(Play);
+		Release(Bad);
+		return FBbPlay();
+	}
+	// Frames across the whole play, the ends included (a fixed number, so a long play costs the
+	// same as a short one): each must read back and hold something sane.
+	constexpr int32 Samples = 48;
+	for (int32 K = 0; K <= Samples; ++K)
+	{
+		const float T = Play.Info.duration_s * static_cast<float>(K) / static_cast<float>(Samples);
+		BbFrame F{};
+		bool bOk = Sample(Play, T, F);
+		if (bOk)
+		{
+			bOk = F.n_actors >= 1 && F.n_actors <= BB_MAX_ACTORS && F.n_dives <= BB_MAX_DIVES;
+		}
+		if (bOk)
+		{
+			bOk = FMath::IsFinite(F.ball[0]) && FMath::IsFinite(F.ball[1]) && FMath::IsFinite(F.ball[2])
+				&& FMath::Abs(F.ball[0]) < 2000.f && FMath::Abs(F.ball[1]) < 2000.f && FMath::Abs(F.ball[2]) < 2000.f;
+		}
+		for (uint32 I = 0; bOk && I < F.n_actors; ++I)
+		{
+			const BbActor& A = F.actors[I];
+			bOk = FMath::IsFinite(A.pos[0]) && FMath::IsFinite(A.pos[1]) && FMath::IsFinite(A.pos[2]) && FMath::IsFinite(A.yaw)
+				&& FMath::Abs(A.pos[0]) < 2000.f && FMath::Abs(A.pos[1]) < 2000.f && FMath::Abs(A.pos[2]) < 2000.f;
+		}
+		if (!bOk)
+		{
+			Why = FString::Printf(TEXT("its frame at %.2f s is missing or not sane (no actors, or a position that is not a number)"), T);
+			FBbPlay Bad = MoveTemp(Play);
+			Release(Bad);
+			return FBbPlay();
+		}
+	}
+	return Play;
+}
+
+TArray<BbPlayer> FBbSim::AllPlayers() const
+{
+	TArray<BbPlayer> Out;
+	for (const TPair<uint16, BbPlayer>& Pair : Players)
+	{
+		// Each player is in the map under both of his ids: keep the batting one.
+		if (Pair.Key == Pair.Value.bat_agent)
+		{
+			Out.Add(Pair.Value);
+		}
+	}
+	Out.Sort([](const BbPlayer& A, const BbPlayer& B) { return A.bat_agent < B.bat_agent; });
+	return Out;
+}
+
+void FBbSim::UseRecorded(const TArray<BbPlayer>& Roster, const BbPark* RecordedPark)
+{
+	LeftHanded.Reset();
+	Family.Reset();
+	Players.Reset();
+	for (const BbPlayer& P : Roster)
+	{
+		if (P.throws == 1)
+		{
+			LeftHanded.Add(P.bat_agent);
+			LeftHanded.Add(P.field_agent);
+		}
+		const FString Name = UTF8_TO_TCHAR(P.family);
+		Family.Add(P.bat_agent, Name);
+		Family.Add(P.field_agent, Name);
+		Players.Add(P.bat_agent, P);
+		Players.Add(P.field_agent, P);
+	}
+	if (RecordedPark)
+	{
+		ParkDesc = *RecordedPark;
+	}
+}
+
 bool FBbSim::BoxScore(uint32 ThroughPlays, BbBoxScore& Out) const
 {
 	if (!Game || !FnBoxScore)
@@ -102,7 +251,7 @@ bool FBbSim::Sample(const FBbPlay& Play, float T, BbFrame& Out) const
 
 void FBbSim::Release(FBbPlay& Play) const
 {
-	if (Play.Blob)
+	if (Play.Blob && Play.bSimOwned && FnBlobFree)
 	{
 		FnBlobFree(Play.Blob, Play.Len);
 	}

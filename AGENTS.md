@@ -59,7 +59,7 @@ bb_cli       `sim-cli` lab binary
 - Rerun viewer 0.41.0: `uv tool install rerun-sdk==0.41.0`, then `rerun file.rrd`. The SDK crate is pinned to `=0.41.0` to match.
 - Unreal Engine 5.8.4 (precompiled) belongs at `~/UnrealEngine/5.8.4`, outside the repository. `bin/play.sh` asks before falling back to Rerun when it is missing.
 - Build the client: `Engine/Build/BatchFiles/Linux/Build.sh BaseballClientEditor Linux Development -project=<abs path>/client/BaseballClient.uproject` (6 s incremental).
-- Check visual changes headlessly: `client/run.sh 7 -RenderOffscreen -BbShots=6`, then read the PNGs in `client/Saved/Shots` (made by the run). Fixed picture sets without a game (`-BbParkShots`, `-BbFigureShots`, `-BbMotionShots`, `-BbSlideShots=<n>`, `-BbDiveShots=<n>`, `-BbCrewShots`) are described in park-visuals §4 and player-visuals §6–§12.
+- Check visual changes headlessly: `client/run.sh 7 -RenderOffscreen -BbShots=6`, then read the PNGs in `client/Saved/Shots` (made by the run). Fixed picture sets without a game (`-BbParkShots`, `-BbFigureShots`, `-BbMotionShots`, `-BbSlideShots=<n>`, `-BbDiveShots=<n>`, `-BbCrewShots`) are described in park-visuals §4 and player-visuals §6–§12. Open a saved play with `client/run.sh -BbSavedPlay="<path to .toml>"` (quote the path; it may have spaces). The headless check, which saves and reopens plays through the viewer's own loader and exits 1 on any failure, is `client/run.sh 7 -RenderOffscreen -BbSavedPlayCheck`; `-BbSavedPlayCheckFile="<toml>"` only tries to open one file (exit 1 if the viewer would refuse it or no file is given).
 
 ## Commands
 

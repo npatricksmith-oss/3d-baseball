@@ -1,7 +1,10 @@
 # A play saved from the instant replay (client BbSavePlay).
-# See it again: client/run.sh 3647, then R back to play 40 once it has been shown.
+# No recorded timeline, so this play cannot be replayed exactly: seed 3647 on today's build does not give the same game. Only commit 30634cf (inferred, below) would show it.
 seed = 3647
 play = 40
+commit = "30634cf"
+# Worked out from the save time (git log -1 --before=2026-11-15T23:53:28 main); no recorded timeline.
+commit_inferred = true
 inning = 2
 half = "top"
 # The board before the pitch.
