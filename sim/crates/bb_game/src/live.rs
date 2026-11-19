@@ -4835,13 +4835,15 @@ impl<'a> Sim<'a> {
         self.no_catch_at.is_some_and(|call| self.t + 1e-9 >= call + RUNNER_CATCH_CALL_REACT_S)
     }
 
-    /// Whether runner `j` is at the point of settling on base `b`, as the movement step sees
-    /// it: standing on it with it as his goal (a holder), or heading for it as his goal and
-    /// too near to stop short of it (his speed over `HOLD_READ_S`, then `BRAKE`, reaches it).
+    /// Whether runner `j` is at the point of settling on base `b`, as runner `k` sees it.
+    /// His own (`j == k`): it is his goal and he stands on it or is too near to stop short of
+    /// it. Another runner's goal is private (catch-read fixes review P1-4), so for him it is
+    /// what `k` can see: standing on the bag, or coming at it too fast to stop short of it
+    /// (his speed over `HOLD_READ_S`, then `BRAKE`), whether he means to stop there or not.
     /// Only bases 1–3: any number of runners may score.
     fn settles_on(&self, k: usize, j: usize, b: u8) -> bool {
         let o = &self.r[j];
-        if self.runner_sees_out(k, o) || o.scored || o.goal != b || !(1..=3).contains(&b) {
+        if self.runner_sees_out(k, o) || o.scored || !(1..=3).contains(&b) || (j == k && o.goal != b) {
             return false;
         }
         let bs = b as f64 * BASE_L;
@@ -4853,55 +4855,57 @@ impl<'a> Sim<'a> {
         toward > SEEN_MOVING_MPS && gap.abs() <= toward * HOLD_READ_S + toward * toward / (2.0 * BRAKE) + 0.3
     }
 
+    /// Whether runner `t`, standing on `b`, gives way there, as runner `k` sees it: no force
+    /// on him to it and a free base behind him.
+    fn gives_way(&self, k: usize, t: usize, b: u8) -> bool {
+        let standing = (self.r[t].s - b as f64 * BASE_L).abs() < 1e-6;
+        let forced_to_b = b == self.r[t].start + 1 && self.runner_forced(k, t);
+        standing && !forced_to_b && self.refuge_free(k, t, b)
+    }
+
     /// The invariant at the place bodies stop: two live runners never come to rest on one
     /// base (agent-models §6.4; Codex runner-reads rechecks). Run on the final goals of the
     /// tick, whatever decision path set them (look, held base, turn-back, cap), so none can
-    /// bypass it. Of two runners settling on a base the trailing one gives way if he is
-    /// standing on it with a free base behind him and no force on him; otherwise the lead
-    /// runner goes on to the next base (a force pushes him, and a runner who cannot stop
-    /// short cannot give way).
+    /// bypass it. Each runner changes only his own goal, from what he sees of the others
+    /// (positions, signed speeds, original bases; catch-read fixes review P1-4). Of two
+    /// runners settling on a base the trailing one gives way if he is standing on it with
+    /// a free base behind him and no force on him; otherwise the lead runner goes on to the
+    /// next base (a force pushes him, and a runner who cannot stop short cannot give way).
     fn settle_guard(&mut self, k: usize) {
-        let b = self.r[k].goal;
         for _ in 0..4 {
+            let b = self.r[k].goal;
             if !self.settles_on(k, k, b) {
                 return;
             }
-            let mut claim: Vec<usize> = (0..self.r.len()).filter(|&j| self.settles_on(k, j, b)).collect();
-            if claim.len() < 2 {
+            let start = self.r[k].start;
+            let others: Vec<usize> = (0..self.r.len()).filter(|&j| j != k && self.settles_on(k, j, b)).collect();
+            let behind_him = others.iter().any(|&j| self.r[j].start > start);
+            let goal = if behind_him && self.gives_way(k, k, b) {
+                b - 1
+            } else if others.iter().any(|&j| self.r[j].start < start && !self.gives_way(k, j, b)) {
+                (b + 1).min(4)
+            } else {
                 return;
-            }
-            // Lead runner first (started furthest along); ties by index.
-            claim.sort_by(|&x, &y| self.r[y].start.cmp(&self.r[x].start).then(x.cmp(&y)));
-            let lead = claim[0];
-            let mut moved = false;
-            for &t in &claim[1..] {
-                let standing = (self.r[t].s - b as f64 * BASE_L).abs() < 1e-6;
-                let forced_to_b = b == self.r[t].start + 1 && self.runner_forced(t, t);
-                if standing && !forced_to_b && self.refuge_free(t, b) {
-                    let r = &mut self.r[t];
-                    r.goal = b - 1;
-                    r.waiting = false;
-                    r.turned_back = None;
-                    moved = true;
-                } else if self.r[lead].goal == b {
-                    let r = &mut self.r[lead];
-                    r.goal = (b + 1).min(4);
-                    r.waiting = false;
-                    r.turned_back = None;
-                    moved = true;
-                }
-            }
-            if !moved {
-                return;
-            }
+            };
+            let r = &mut self.r[k];
+            r.goal = goal;
+            r.waiting = false;
+            r.turned_back = None;
         }
     }
 
-    /// Whether the base behind a runner standing on `b` is free for him to go back to: not
-    /// home (the batter-runner has none), and no other runner on it or going to it.
-    fn refuge_free(&self, j: usize, b: u8) -> bool {
+    /// Whether the base behind runner `j` standing on `b` is free for him to go back to, as
+    /// runner `k` sees it: not home (the batter-runner has none), no other runner on it, and
+    /// none visibly on his way to it.
+    fn refuge_free(&self, k: usize, j: usize, b: u8) -> bool {
         let back = b - 1;
-        back >= 1 && !self.r.iter().enumerate().any(|(i, x)| i != j && !self.runner_sees_out(j, x) && !x.scored && ((x.s - back as f64 * BASE_L).abs() < 0.5 || x.goal == back))
+        let bs = back as f64 * BASE_L;
+        back >= 1 && !self.r.iter().enumerate().any(|(i, x)| {
+            i != j && !self.runner_sees_out(k, x) && !x.scored && {
+                let gap = bs - x.s;
+                gap.abs() < 0.5 || (gap.abs() < BASE_L && x.direction * gap.signum() * x.v > SEEN_MOVING_MPS)
+            }
+        })
     }
 
     /// Whether base `b`, behind runner `k`, is no refuge for him, as he can see it: a runner
@@ -12083,6 +12087,38 @@ mod tests {
             }
         }
         Ok(())
+    }
+
+    /// Catch-read fixes review P1-4: the settle guard reads another runner's motion, not his
+    /// goal. The runner from second stands on third; the runner from third is coming back
+    /// at it, 0.30 m off at 2 m/s, too fast to stop short. Whether that lead runner means
+    /// to stay at third or turn for home is his own; the trailing runner gives way either
+    /// way. Only a visible change (the lead runner far off and slow) keeps him on third.
+    #[test]
+    fn the_settle_guard_reads_motion_not_another_runners_goal() {
+        const TRAIL: AgentId = 7;
+        const LEAD: AgentId = 8;
+        let fx = fixture(&[(TRAIL, 2), (LEAD, 3)]);
+        let inp = input(&fx, vec![
+            RunnerIn { id: fx.st.batter, base: 0, speed: 8.2, tau_s: RUNNER_TAU },
+            RunnerIn { id: TRAIL, base: 2, speed: 8.2, tau_s: RUNNER_TAU },
+            RunnerIn { id: LEAD, base: 3, speed: 8.2, tau_s: RUNNER_TAU },
+        ]);
+        let guard = |lead_goal: u8, off: f64, speed: f64| {
+            let mut st = fx.st.clone();
+            let mut sim = new_sim(&inp, &mut st);
+            sim.t = 5.0;
+            let third = 3.0 * BASE_L;
+            let r = &mut sim.r[1];
+            (r.s, r.v, r.direction, r.goal, r.still_since) = (third, 0.0, 1.0, 3, Some(4.0));
+            let r = &mut sim.r[2];
+            (r.s, r.v, r.direction, r.goal) = (third + off, speed, -1.0, lead_goal);
+            sim.settle_guard(1);
+            sim.r[1].goal
+        };
+        assert_eq!(guard(3, 0.30, 2.0), 2, "a lead runner coming onto the bag: give way");
+        assert_eq!(guard(4, 0.30, 2.0), guard(3, 0.30, 2.0), "the lead runner's private goal moved the guard");
+        assert_eq!(guard(3, 8.0, 1.0), 3, "a lead runner far off and slow is no conflict yet");
     }
 
     // Codex runner-reads recheck P1-1, as a property: over seeded random layouts (runners,
