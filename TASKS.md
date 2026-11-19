@@ -1,6 +1,6 @@
 # Task List
 
-**Last updated:** 2026-11-18 (`work/runner-catch-read` merged).
+**Last updated:** 2026-11-18 23:00 (two reviews running in the Workers tab).
 
 What is next and what is open. Other files hold the rest:
 
@@ -15,13 +15,13 @@ Status: `[ ]` not started · `[~]` partly done · `[?]` needs an owner decision
 
 ---
 
-## Resume here (2026-11-18, 22:40)
+## Resume here (2026-11-18, 23:00)
 
-**State (22:40).** Two branches are finished and waiting on review, then the lead's own check and merge. Both workers are idle in tab "Workers"; leave their panes open until the merge, so review fixes can go back to the same session.
+**State (23:00).** Two branches are finished and under review. Tab "Workers" has four panes: the two idle workers on top (leave them open until their merge, so review fixes go back to the same session) and a review pane under each. Read a pane with `hc read <terminal>`.
 
-**1. `work/catch-read-fixes`** (Codex worker, terminal `t2d`, worktree `.claude/worktrees/runner-decision`, `43bd29e..0b18e54`). It fixes all six findings of the [catch-read review](docs/reviews/2026-11-18-codex-catch-read-review.md) (see its "Worker follow-up"). Worker's figures: 458 tests pass; standard runs 4.48 [4.55] (main 4.38 [4.53]); ledger row on the branch. **Its Codex Sol review was started at 22:35** from the lead session (prompt: untracked `WORKER-REVIEW.md` in that worktree), writing docs/reviews/2026-11-18-codex-catch-read-fixes-review.md there (not yet written). If that file is missing, the review died with the session: run it again from the prompt (`codex exec -m gpt-6.2-sol -c model_reasoning_effort="high" -s workspace-write -C <worktree> - < WORKER-REVIEW.md`). Codex was at 59% of its 5-hour window. Then commit the review, hand the findings to the worker, write the Resolution, and before merging touch `live.rs`, run the tests and both standard runs yourself.
+**1. `work/catch-read-fixes`** (Codex worker `t2d`, worktree `.claude/worktrees/runner-decision`, `43bd29e..0b18e54`). It fixes all six findings of the [catch-read review](docs/reviews/2026-11-18-codex-catch-read-review.md) (see its "Worker follow-up"). Worker's figures: 458 tests pass; standard runs 4.48 [4.55] (main 4.38 [4.53]); ledger row on the branch. **Its Codex Sol review (high) started at 22:35** from the previous lead session as a background process; pane `t2k` follows its log and prints "review process ended" when it stops. It writes docs/reviews/2026-11-18-codex-catch-read-fixes-review.md in that worktree. If the process died without writing the file, run it again in `t2k`: `codex exec -m gpt-6.2-sol -c model_reasoning_effort="high" -s workspace-write -C <worktree> - < WORKER-REVIEW.md`. Then commit the review, hand the findings to `t2d`, write the Resolution, and before merging touch `live.rs`, run the tests and both standard runs yourself.
 
-**2. `work/saved-plays`** (Q30; agy Gemini 4 Hydrogen, terminal `t2h`, worktree `.claude/worktrees/saved-plays`, 5 commits from `01011ae`; client only plus the 27 saved-play files). Builds the commit stamp, the `.timeline` file beside each save, `-BbSavedPlay=<toml>` and `-BbSavedPlayCheck`; the old saves get an inferred commit. **Not reviewed.** Gemini writing code was a one-off at the owner's request, so: one review by a Claude model (Codex if it has room), then build and run `-BbSavedPlayCheck` yourself before merging. Points for the review: `36007e7` turns the opening camera toward the plate, outside the job; the worker notes that a saved play still takes park and player names from the current build's roster for its seed (only the timeline is exact).
+**2. `work/saved-plays`** (Q30; agy worker `t2h`, worktree `.claude/worktrees/saved-plays`, `01011ae..36007e7`; client only plus the 27 saved-play files). Builds the commit stamp, the `.timeline` file beside each save, `-BbSavedPlay=<toml>` and `-BbSavedPlayCheck`; old saves get an inferred commit. **Codex Sol review (medium) running in pane `t2j`** from the untracked REVIEW-SAVED-PLAYS.md in that worktree; it writes and commits docs/reviews/2026-11-18-codex-saved-plays-review.md there and builds nothing (the lead builds the client and runs `-BbSavedPlayCheck` before merging). Gemini may not write code, so review fixes go to a Codex or Claude worker, not `t2h`. Points the review covers: `36007e7` turns the opening camera toward the plate, outside the job; a saved play still takes park and player names from the current build's roster for its seed (only the timeline is exact).
 
 **Docs check merged (2026-11-18):** run `python3 bin/check-docs.py` before committing doc changes; it fails on dead links, anchors and paths in the working docs and on this file passing 30 KB (`--all` also checks the dated records, which have 135 old dead references, left as they are).
 
@@ -182,7 +182,6 @@ Check the code again before starting one.
 - [ ] **M7** League and season. Generate more parks and add a run-factor check (0.85–1.15) for each.
 - [ ] **M8** Presentation polish. Revisit the RAM upgrade before this.
 
-- [?] **D6 sign-off:** Verify Unreal’s edit–compile–play loop inside the desktop editor and confirm the hardware gate with the owner. Agree any remaining watchability targets (calibration-targets §6.3).
 
 Exit gates are in [PLAN.md §14](PLAN.md#14-roadmap).
 
