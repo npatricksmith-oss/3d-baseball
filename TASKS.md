@@ -15,34 +15,17 @@ Status: `[ ]` not started · `[~]` partly done · `[?]` needs an owner decision
 
 ---
 
-## Resume here (2026-11-18, evening)
+## Resume here (2026-11-18, 22:40)
 
-**State.** `work/runner-catch-read` is merged and pushed (Q27's contact-read review fixes and the owner's close-catch rule, agent-models §6.3). The lead's own check: 450 tests pass; standard runs 4.38 [4.53], matching the worker. Its [Codex review](docs/reviews/2026-11-18-codex-catch-read-review.md) found three P1s and three P2s in the new code, all open and handed to one job below. Seed 1000's +0.22 runs is 1.46 standard errors from seed 0's paired change, no bug traced.
+**State (22:40).** Two branches are finished and waiting on review, then the lead's own check and merge. Both workers are idle in tab "Workers"; leave their panes open until the merge, so review fixes can go back to the same session.
 
-**Next: the catch-read review fixes, running.** Codex Sol (high) worker in herdr tab "Workers" (terminal `t2d`), worktree `.claude/worktrees/runner-decision`, branch `work/catch-read-fixes` from `43bd29e`, prompt in its untracked `WORKER-FIXES.md`. Check the branch, not the pane: the review's "Worker follow-up", the ledger row and the timing-note section; then touch, test, standard runs, review, merge. Unresolved review findings:
-- P1-1: the catch belief's eight alternative paths are scaled from the true flight; build them from one contact observation and its own uncertainty.
-- P1-2: the holder forecast reads `fd.face`, set from the throw's private target; use a published holder observation.
-- P1-3: base traffic reacts to the catch (`forced`) before the runner sees the ruling.
-- P2-1: the hold budget assumes a standing runner; a moving one drifts past it (runner from third 9.5 m off on a 5.7 s fly, seed 1000003000 play 82).
-- P2-2: a runner who retouches during the reaction window loses his next decision.
-- P2-3: the catch belief steps at the 2.4 m height ceiling; the wall ceiling is 3.0 m.
-Then one review (Codex Sol, or a Claude model if Codex is near its limit), merge, ledger row.
+**1. `work/catch-read-fixes`** (Codex worker, terminal `t2d`, worktree `.claude/worktrees/runner-decision`, `43bd29e..0b18e54`). It fixes all six findings of the [catch-read review](docs/reviews/2026-11-18-codex-catch-read-review.md) (see its "Worker follow-up"). Worker's figures: 458 tests pass; standard runs 4.48 [4.55] (main 4.38 [4.53]); ledger row on the branch. **Its Codex Sol review was started at 22:35** from the lead session (prompt: untracked `WORKER-REVIEW.md` in that worktree), writing docs/reviews/2026-11-18-codex-catch-read-fixes-review.md there (not yet written). If that file is missing, the review died with the session: run it again from the prompt (`codex exec -m gpt-6.2-sol -c model_reasoning_effort="high" -s workspace-write -C <worktree> - < WORKER-REVIEW.md`). Codex was at 59% of its 5-hour window. Then commit the review, hand the findings to the worker, write the Resolution, and before merging touch `live.rs`, run the tests and both standard runs yourself.
 
-Still open after it: two-out sends to center (the two-out contact clock); double-offs below 10° (59.5 against about 26); fly balls with 2+ outs above the base rate; a runner never dives back to a bag.
-
-**Lesson:** a worker once reported done on a stale test binary. Before merging a worker's branch, `touch` the changed source and run the tests and the standard run yourself.
-
-**Numbers on main** (standard run, seeds 0–299 [1000–1299]; ledger §1): runs 4.38 [4.53] against a real 4.39; hits on GB/LD/FB/PU .314/.681/.102/.005 [.313/.687/.097/.004] against about .245/.68/.13/.02; HR/PA 2.73% [2.93%] against 3.0%; K% 22.2 [22.1].
+**2. `work/saved-plays`** (Q30; agy Gemini 4 Hydrogen, terminal `t2h`, worktree `.claude/worktrees/saved-plays`, 5 commits from `01011ae`; client only plus the 27 saved-play files). Builds the commit stamp, the `.timeline` file beside each save, `-BbSavedPlay=<toml>` and `-BbSavedPlayCheck`; the old saves get an inferred commit. **Not reviewed.** Gemini writing code was a one-off at the owner's request, so: one review by a Claude model (Codex if it has room), then build and run `-BbSavedPlayCheck` yourself before merging. Points for the review: `36007e7` turns the opening camera toward the plate, outside the job; the worker notes that a saved play still takes park and player names from the current build's roster for its seed (only the timeline is exact).
 
 **Docs check merged (2026-11-18):** run `python3 bin/check-docs.py` before committing doc changes; it fails on dead links, anchors and paths in the working docs and on this file passing 30 KB (`--all` also checks the dated records, which have 135 old dead references, left as they are).
 
 **Owner's rulings, 2026-11-18** (recorded in PLAN §1): **Q29 (a)** a player may mix his own choices (pitch, spot); D1 reworded. **Q30 (b)** a saved play keeps the build's commit and the recorded play itself (D9). **Q31** Unreal decided outright (D6). D19/D20 now record the Q7 merge; D4 is covered by Q13/Q14; D17 waits for pitching changes in M6.
-
-**Running: Q30, saved plays as recorded plays** (client, plus a build-commit stamp; no sim change, no ledger row). agy Gemini 4 Hydrogen (high) in tab "Workers" (terminal `t2h`), worktree `.claude/worktrees/saved-plays`, branch `work/saved-plays` from `01011ae`, prompt in its untracked `WORKER-SAVED-PLAYS.md`. A one-off exception to "Gemini never writes code", at the owner's request (2026-11-18): review it with a model that wrote none of it, and run the headless check yourself before merging. The job:
-- When a play is saved, write its timeline blob (the FlatBuffer the client already samples through `bb_timeline_sample`) next to the TOML, and add `commit = "<git sha>"` (stamped at build time; mark a dirty tree) to the TOML.
-- A way to open one: `client/run.sh --saved <file>` (or `-BbSavedPlay=`) plays the stored timeline exactly, on any later build, with its board and comment shown.
-- The 27 tracked files in `saved-plays/` have no commit: add the main commit at each file's `saved` time (from `git log --before`), marked as inferred. Their timelines can only be rebuilt by running that commit; record that, do not fake one.
-- A headless check: save, reload, and compare sampled frames bit for bit.
 
 **After that:** item 1 of "Open sim work" below.
 
