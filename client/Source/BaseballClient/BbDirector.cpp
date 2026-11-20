@@ -4026,11 +4026,18 @@ void ABbDirector::Tick(float DeltaSeconds)
 					BatHolder = 0xFFFF;
 				}
 			}
-			// In play: the ball has been hit and is heading out (contact telemetry present
-			// and the ball is in front of the plate after the pitch has arrived).
-			if (Current.Info.exit_velocity_mps > 0.f && T > 0.35f && Frame.ball[1] > 1.5f)
+			// In play: the ball has been hit and is heading out. Not before the bat meets it on
+			// screen (owner, saved play 112): the director holds the whole play, so anything it
+			// does because the ball will be hit (the cut from the long lens to the follow view)
+			// has to wait for the contact the viewer sees. This used to start at T > 0.35 s with
+			// the ball still short of the plate, 0.048 s before contact in play 112.
+			if (!bBallInPlay && Current.Info.exit_velocity_mps > 0.f && Current.Info.contact_s >= 0.f && T >= Current.Info.contact_s && Frame.ball[1] > 1.5f)
 			{
 				bBallInPlay = true;
+				if (bStagingLog)
+				{
+					UE_LOG(LogBb, Display, TEXT("BB_INPLAY play=%u t=%.3f contact=%.3f"), Current.Info.play_index, T, Current.Info.contact_s);
+				}
 			}
 			// A held ball is drawn in the holder's hand, not at the sim's holding point over his
 			// feet (owner, 2026-11-15: the ball hung in the air through the catcher's throw). The
