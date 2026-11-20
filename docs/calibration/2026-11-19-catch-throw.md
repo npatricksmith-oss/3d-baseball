@@ -180,7 +180,7 @@ From second, every tagging runner sent: safe 31% at 250–275 ft and 51% at 275�
 - *What the game does now (this build, as decided in Q32).* A fielder who takes the ball moving away from his target, or across the line to it, must stop that motion under the braking limit before a set throw, or throw off balance. An outfielder who picks up a ball in the gap running across at 7 m/s needs about a second more than before to be set; one running away from the infield the same.
 - *What is wrong.* The sim's fielders reach a ball they are racing at full speed. They never slow into a pickup, or round the ball to take it moving toward their throw, as real fielders do. So they pay the whole stop on plays where real fielders pay little (§5):
   - an outfielder's pickup-to-release rose from 1.01 s to 1.46 s on average, and 61% now take over 1.2 s. Tango's empirical figure for pickup-to-release plus the infielder's tag is about 1.2 s (§3, read): main matched it, this build does not;
-  - runs 4.24 → 4.69 [4.47 → 5.0] in the standard runs, triples +35%, ground-ball hits .313 → .327;
+  - runs 4.24 → 4.69 [4.47 → 4.94] in the standard runs, triples +35%, ground-ball hits .313 → .327;
   - three frozen infield regression plays now fail (`bb_game/tests/throw_choices.rs`: a lead force on seeds 13 and 23, the 6-4-3 on seed 3): the infielder fields moving across and loses the time. With option 3 all five pass; with option 2, four.
 - *Options:*
   1. Keep it as built. The game becomes faster on the bases than MLB in most measures.
