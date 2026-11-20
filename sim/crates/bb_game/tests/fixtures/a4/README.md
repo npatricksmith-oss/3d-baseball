@@ -24,6 +24,10 @@ future changed game's earlier pitches.
   between Savant LHB DP SS −5.7° and 2B +19.0° into CF).
 - `17-203`: third baseman must not head for third for a runner already back
   on second; he takes the first-base force.
+- `65147-10` (frozen 2026-11-20 from `4f18c47`, the owner's saved play): a chopper
+  through the right side that the centre and right fielders each left to the other;
+  the right fielder must cut it off. It was a whole-game replay in `live.rs` until the
+  catch-throw review fixes changed the game's earlier plays.
 
 Expectations are the tactical cases in agent-models §5.6, not saved chosen
 destinations or simulation output hashes. `audit_intended_goal` in the separate

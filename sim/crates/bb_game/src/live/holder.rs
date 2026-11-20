@@ -43,27 +43,42 @@ impl Sim<'_> {
         // The cutoff man as the holder knows him (`seen`: a job taken in the last
         // `CALL_HEARD_S` is not yet known; Codex fielder-communication recheck P1-1).
         let relay = (0..9).find(|&i| i != by && matches!(self.seen(by, i).0, Role::Relay(_)) && (self.f[i].pos - fd.pos).norm() > 10.0);
-        let release = |target, at: f64| {
+        // A cutoff man lined up between him and the base (closer to it than he is): the relay
+        // route through him, as before; and, when he has the job for this base and stands on
+        // its line, the direct throw must pass him low (`cutoff_out`, agent-models §5.5).
+        let between = relay.filter(|&i| (base_pos(base) - self.f[i].pos).norm() < (base_pos(base) - fd.pos).norm());
+        let cut = self.cut_seen(Some(by), fd.pos, base);
+        let release = |target: Vec3, at: f64| {
             let su = self.set_up_for(by, target);
             let t = at.max(fd.up_at + su.earliest_s);
-            (t, THROW_EFFORT * fd.a.arm * su.speed_mult(su.hurry(t - fd.up_at)))
+            (t, self.throw_speed(by, target) * su.speed_mult(su.hurry(t - fd.up_at)))
         };
+        // With a cutoff man in the throw it must pass him low enough to be cut (agent-models
+        // §5.5): the cuttable throw, by the throw and bounce physics.
         let direct = |at| {
             let (t, v) = release(base_pos(base), at);
-            t + throw_time(v, (base_pos(base) - fd.pos).norm())
+            t + direct_time(v, (base_pos(base) - fd.pos).norm(), cut)
         };
         let via = |at| {
-            let Some(i) = relay else { return f64::INFINITY };
+            let Some(i) = between else { return f64::INFINITY };
             let rp = self.f[i].pos;
-            if (base_pos(base) - rp).norm() >= (base_pos(base) - fd.pos).norm() {
-                return f64::INFINITY;
-            }
             let (t, v) = release(rp, at);
             t + throw_time(v, (rp - fd.pos).norm()) + throwing::relay_s(self.f[i].a.transfer) + throw_time(THROW_EFFORT * self.f[i].a.arm, (base_pos(base) - rp).norm())
         };
         let d = direct(self.t);
         let v = via(self.t);
-        let through = v < d;
+        // The route: time, and what each route's throws are likely to cost the man taking them
+        // off line (agent-models §5.5): one long throw misses by more than two short ones.
+        // (A man lined up for another base: by time alone, as before.)
+        let through = between.is_some_and(|i| {
+            if cut == Cut::No {
+                return v < d;
+            }
+            let rp = self.f[i].pos;
+            let miss_direct = miss_cost_s((base_pos(base) - fd.pos).norm(), fd.a.arm_sigma);
+            let miss_via = miss_cost_s((rp - fd.pos).norm(), fd.a.arm_sigma) + miss_cost_s((base_pos(base) - rp).norm(), self.f[i].a.arm_sigma);
+            v + miss_via < d + miss_direct
+        });
         let leg = if through { self.f[relay.unwrap()].pos } else { base_pos(base) };
         let at_set = (fd.up_at + self.set_up_for(by, leg).set_s).max(self.t);
         let receiver = self.receiver_for(by, base);
@@ -75,7 +90,7 @@ impl Sim<'_> {
             receiver,
             receiver_at,
             through,
-            ball_at: d.min(v).max(receiver_at) + 0.05,
+            ball_at: (if through { v } else { d }).max(receiver_at) + 0.05,
             set_ball_at: (if through { via(at_set) } else { direct(at_set) }).max(receiver_at) + 0.05,
         }
     }
@@ -106,7 +121,7 @@ impl Sim<'_> {
             let footwork = throwing::footwork_s(fd.catch_vel, to, fd.took_diving);
             let su = if fd.relayed { SetUp::relay(fd.set_base, footwork) } else { SetUp::new(fd.set_base, turn, footwork) };
             let release_at = option.ball_at.max(fd.up_at + su.earliest_s);
-            (by, release_at, THROW_EFFORT * fd.a.arm * su.speed_mult(su.hurry(release_at - fd.up_at)))
+            (by, release_at, self.throw_speed(by, base_pos(1)) * su.speed_mult(su.hurry(release_at - fd.up_at)))
         } else {
             let next = &self.f[option.receiver];
             (option.receiver, option.ball_at + RELAY_TRANSFER_FRAC * next.a.transfer, THROW_EFFORT * next.a.arm)
