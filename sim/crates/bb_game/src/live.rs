@@ -3360,7 +3360,7 @@ impl<'a> Sim<'a> {
     /// from `ROUND_M` behind it, away from the base, and through it toward the base, the extra
     /// way and the slowing for the turn (`a_lat`, §5.3) paid from his time in hand. His ready
     /// time there is the ball's time, the plant he would owe arriving so (§5.5), and the throw
-    /// at his arm with what coming through toward the base adds. He takes the point and the way
+    /// at his arm. He takes the point and the way
     /// with the earliest ready time; if that is his intercept itself at full speed, no approach
     /// (he goes straight at it, as before). All from his own read (`belief`, `t_int`), his own
     /// body and what everyone sees.
@@ -3398,13 +3398,13 @@ impl<'a> Sim<'a> {
         #[cfg(not(test))]
         let no_round = false;
         // From a take at p arriving at `vel`, the ball at base b: his plant (§5.5, the across
-        // term and the toss rule included) and the throw at his arm, with the crow hop's gain
-        // coming through toward it.
+        // term and the toss rule included) and the throw at his arm. (Not the crow hop's gain:
+        // counted, it bought takes 0.16 s later on outfield pickups with nobody on, most of them
+        // throws made with no play, at less than full effort, where the gain is not had.)
         let at_base = |p: Vec3, vel: Vec3, b: u8| {
             let to = base_pos(b) - p;
-            throwing::footwork_s(vel, to, false) + to.norm() / (arm + throwing::momentum_gain_mps(vel, to))
+            throwing::footwork_s(vel, to, false) + to.norm() / arm
         };
-        let gain_max = throwing::MOMENTUM_GAIN * (throwing::HOP_MAX_MPS - throwing::HOP_MPS);
         // (Past the end of its path the ball lies still: a ball he reaches after it has stopped
         // has no deadline, and his time in hand there grows with the time he takes.)
         let t_last = fd.t_int + APPROACH_LOOK_S;
@@ -3420,9 +3420,9 @@ impl<'a> Sim<'a> {
             let p = Vec3::new(b.x, b.y, 0.0);
             let each = (1..=4u8).filter(|&k| bases & 1 << k != 0);
             let ok = b.z <= catch_ceiling(field, b) && beyond_reach_over_wall(field, b) <= 0.0;
-            // No take here can beat the best so far if even arriving set, with the most a crow
-            // hop adds, it would not (the throw's length alone): skip the reach estimate.
-            let hopeless = !first && best.is_some_and(|bb| t + each.clone().map(|k| (base_pos(k) - p).norm() / (arm + gain_max)).fold(f64::INFINITY, f64::min) >= bb.0 - APPROACH_GAIN_S);
+            // No take here can beat the best so far if even arriving set it would not (the throw's
+            // length alone): skip the reach estimate.
+            let hopeless = !first && best.is_some_and(|bb| t + each.clone().map(|k| (base_pos(k) - p).norm() / arm).fold(f64::INFINITY, f64::min) >= bb.0 - APPROACH_GAIN_S);
             if ok && !hopeless {
                 let g = run_gap(field, &st, p, (t - start - wall_delay(field, &st, p, REACH * 0.7)).max(0.0), REACH * 0.7);
                 if g <= 0.0 {
