@@ -2264,13 +2264,12 @@ void ABbDirector::NoteSignals()
 		// on the ground or after a bound, or settling in front of the bag; a fly beyond the bag
 		// where it comes down; a fly over the fence where it clears it. The plate umpire has a
 		// ball that is fair in front of the bags, the base umpire one that is fair at or past his.
-		// Only a ball within FairNearLineM of the line is signalled.
+		// Only a ball decided within FairNearLineDeg of the line (seen from home) is signalled.
 		const double BagM = 27.432;
 		auto Along = [](const FVector2D& P) { return (FMath::Abs(P.X) + P.Y) / UE_SQRT_2; };
 		auto Inside = [](const FVector2D& P) { return (P.Y - FMath::Abs(P.X)) / UE_SQRT_2; };
 		const float End = Info.dead_s >= 0.f ? FMath::Min(Info.dead_s, Info.duration_s) : Info.duration_s;
 		bool bGround = false, bDecided = false;
-		double Closest = 1e9;
 		FVector2D Was = FVector2D::ZeroVector, At = FVector2D::ZeroVector;
 		float DecidedAt = End, Slow = 0.f;
 		for (float Tt = Info.contact_s + 0.05f; Tt <= End && !bDecided; Tt += 0.02f)
@@ -2289,7 +2288,6 @@ void ABbDirector::NoteSignals()
 			}
 			if (bGround)
 			{
-				Closest = FMath::Min(Closest, Inside(P));
 				Slow = (P - Was).Size() / 0.02 < 0.5 && F.ball[2] < 0.2 && Tt > Info.contact_s + 0.3f ? Slow + 0.02f : 0.f;
 			}
 			Was = P;
@@ -2318,13 +2316,11 @@ void ABbDirector::NoteSignals()
 			// Over the fence in flight: fair where it clears it.
 			At = FVector2D(Info.dead_at[0], Info.dead_at[1]);
 			DecidedAt = Info.dead_s;
-			Closest = 1e9;
 			bDecided = true;
 		}
 		if (bDecided)
 		{
-			Closest = FMath::Min(Closest, Inside(At));
-			if (Inside(At) >= 0.0 && Closest <= FairNearLineM)
+			if (Inside(At) >= 0.0 && FMath::RadiansToDegrees(FMath::Atan2(Inside(At), FMath::Max(Along(At), 1e-3))) <= FairNearLineDeg)
 			{
 				Signals.Add(FBbSignal{ FMath::Min(DecidedAt + UmpireCallLagS, Info.duration_s), Along(At) < BagM - 3.0 ? 0 : At.X > 0.0 ? 1 : 3, ESignal::Fair, At });
 			}

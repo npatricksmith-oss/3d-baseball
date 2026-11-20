@@ -103,10 +103,11 @@ private:
 	BbPlayInfo Before{};
 	/** How long the umpire's out signal stays up, s of play time. */
 	static constexpr float UmpireShowS = 2.0f;
-	/** A fair ball is signalled only if the ball was this near a foul line (m, measured square
-	 *  to the line) where it was judged fair: closer than this and there was a call to make
-	 *  (player-visuals section 12). */
-	static constexpr double FairNearLineM = 4.0;
+	/** A fair ball is signalled only if, where it was judged fair, it was within this angle of
+	 *  a foul line seen from home plate (degrees): at the bags that is 1.9 m inside the line,
+	 *  100 m out 7 m. An angle, not metres, because every point near the plate is a few
+	 *  metres from the lines (player-visuals section 12). */
+	static constexpr double FairNearLineDeg = 4.0;
 	/** How long after the ball is fair (or foul) the umpire's arm goes up, s. */
 	static constexpr float UmpireCallLagS = 0.15f;
 	/** A play this close (runner's time short of the base, s) is called with emphasis. */
