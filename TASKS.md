@@ -1,6 +1,6 @@
 # Task List
 
-**Last updated:** 2026-11-20 (approach continuing: angle from contact; one worker running).
+**Last updated:** 2026-11-20 (approach: set-up timing and the crow hop in the angle's plan; one worker running).
 
 What is next and what is open. Other files hold the rest:
 
@@ -15,13 +15,13 @@ Status: `[ ]` not started · `[~]` partly done · `[?]` needs an owner decision
 
 ---
 
-## Resume here (2026-11-20, evening)
+## Resume here (2026-11-20, night)
 
-**State.** Nothing is waiting on the owner. **One worker running** (a subagent of the Coordinator session, not a pane), the replacement for one stopped at about 16:04 when its background waits were killed: Opus, high effort, in worktree `.claude/worktrees/runner-decision`, branch `work/approach`, job file WORKER-APPROACH-CONTACT.md there (git-excluded), picking up from `8621f54` and an uncommitted gap test. The Coordinator watches it with `sim/target/codex-probes/coord/watch.sh` in that worktree. If the session ended before it reported, check the branch and start a replacement from its last commit (CLAUDE.md, owner 2026-11-20).
+**State.** Nothing is waiting on the owner. **One worker running** (a subagent of the Coordinator session, not a pane): Opus, high effort, worktree `.claude/worktrees/runner-decision`, branch `work/approach` from `7ca37e8`, job file WORKER-APPROACH-SETUP.md there (git-excluded). The Coordinator watches it with `sim/target/codex-probes/coord/watch.sh`. If the session ended before it reported, check the branch and start a replacement from its last commit (CLAUDE.md, owner 2026-11-20).
 
-**What the branch holds.** The approach (fielders slow into a ball they will throw; Q32's across and drift terms; the set-up behind a fly) and rounding (Q33), built and tested (482 pass) but never triggered in 600 games: sim fielders plan the route only once the ball is down, with 0.1–0.2 s in hand. Standard runs 4.38 [4.71] against main 4.27 [4.57]; first to third on singles 36.2% [35.1%] (MLB 31.7%); triples 1.02 → 0.82; set-up catches 9% → 35%. Note §6 of docs/calibration/2026-11-20-approach.md (on the branch).
+**What the branch holds** (note docs/calibration/2026-11-20-approach.md §5–§6, on the branch). The approach (Q32), rounding and the angle from contact (Q33), 485 tests pass. At `8621f54`: runs 4.35 [4.69] against main 4.27 [4.57]; first to third on singles 36.3% [36.0%] (main 32.9% [33.8%], MLB 31.7%): the angle is chosen but dropped before the take on quick singles, because his plan leaves out the crow hop's gain on the throw. Fly-ball hit rise traced: 5 of 7 changed balls are hits on both builds (the out on main came later on the bases), 2 are catches lost to a bug from `fcdc970` (the set-up behind a fly times its come-through without his acceleration).
 
-**The worker's proposed Q35 is not an owner question** (Coordinator, 2026-11-20): real outfielders take their angle to a ball landing in front of them from contact, so that is how Q33's "rounding the ball" is done; charging the across part at the cornering limit would reopen Q32 and is not taken. The running job builds the angle from contact, traces the unexplained fly-ball and pop-up hit rise (ledger §5), and stops after about three rounds if it cannot bring first to third down without losing balls.
+**The running job** (last round before review, at most two build-measure rounds): the set-up's come-through timed with his acceleration (both lost catches made, as a test); the crow hop's gain counted in the angle's plan when the angle's base has a play on; the 100-game changed-ball check; measures as in note §5–§6.
 
 **Then:** the Coordinator's pre-merge check, one Opus review of the whole branch (`dce9769..`), merge. **After that:** the saved-play fixes ("Open sim work" §3, [diagnosis note](docs/calibration/2026-11-20-saved-plays-51001.md)), one `live.rs` job at a time.
 
