@@ -103,6 +103,13 @@ private:
 	BbPlayInfo Before{};
 	/** How long the umpire's out signal stays up, s of play time. */
 	static constexpr float UmpireShowS = 2.0f;
+	/** A fair ball is signalled only if, where it was judged fair, it was within this angle of
+	 *  a foul line seen from home plate (degrees): at the bags that is 1.9 m inside the line,
+	 *  100 m out 7 m. An angle, not metres, because every point near the plate is a few
+	 *  metres from the lines (player-visuals section 12). */
+	static constexpr double FairNearLineDeg = 4.0;
+	/** How long after the ball is fair (or foul) the umpire's arm goes up, s. */
+	static constexpr float UmpireCallLagS = 0.15f;
 	/** A play this close (runner's time short of the base, s) is called with emphasis. */
 	static constexpr float CloseCallS = 0.15f;
 	/** Calls of the current play already logged (BB_CALL). */
@@ -426,20 +433,31 @@ private:
 	// The cut at a change of sides (owner, 2026-11-14; to be a game setting): the jog off and
 	// on takes 23-27 s, so the picture stays for SideCutLeadS while the sides start off, fades
 	// to black over SideCutFadeS, skips the middle of the jog, holds the between-innings card
-	// for SideCutHoldS, and fades back in SideCutTailS before the first pitch, as the fielders
-	// reach their spots. Nothing in the staging changes: both staging clocks jump together
-	// while the picture is black. -BbSideCut=0 plays the whole changeover.
+	// for SideCardHoldS of real time (owner, 2026-11-20, seed 51001 play 128: a second was far
+	// too short) or until Enter is pressed, and fades back in SideCutTailS before the first
+	// pitch, as the fielders reach their spots. Nothing in the staging changes: both staging
+	// clocks jump together while the picture is black and stand still while the card is held.
+	// -BbSideCut=0 plays the whole changeover.
 	bool bSideCut = true;
 	float SideCutLeadS = 4.f;
 	float SideCutFadeS = 0.5f;
-	float SideCutHoldS = 1.5f;
+	/** How long the between-innings card stays up, s of real time (a game setting; neither the
+	 *  speed keys nor Enter-rushing the play shorten it; Space stops the clock;
+	 *  -BbSideCardHold=<s>). */
+	float SideCardHoldS = 10.f;
+	/** The card has been up this long, s of real time. */
+	float SideCardHeldS = 0.f;
+	/** The card is up and held. Enter pressed now ends the hold (bSideCardSkip). */
+	bool bSideCardOn = false, bSideCardSkip = false;
+	/** -BbCardEnterAt=<s>: press Enter this long after the card goes up, for an unattended check. */
+	float SideCardEnterAt = -1.f;
 	float SideCutTailS = 3.5f;
 	/** This reset is a change of sides long enough to cut. */
 	bool bSideCutPlanned = false;
 	/** The jump over the middle of the jog has been made. */
 	bool bSideCutJumped = false;
 	/** How black the picture is (0 clear, 1 black) at ResetTime; makes the jump when it gets there. */
-	float SideCutFade();
+	float SideCutFade(float SimDt, float RealDt);
 	FBbPlay NextPlay;
 	TArray<FResetMover> Movers;
 	/** The planned pose of a staged mover at time T on his own clock. */

@@ -461,6 +461,8 @@ void ABbDirector::BeginPlay()
 	{
 		int32 Cut = 1;
 		FParse::Value(Cmd, TEXT("BbSideCut="), Cut);
+		FParse::Value(Cmd, TEXT("BbSideCardHold="), SideCardHoldS);
+		FParse::Value(Cmd, TEXT("BbCardEnterAt="), SideCardEnterAt);
 		bSideCut = Cut != 0;
 	}
 	bStagingLog = FParse::Param(Cmd, TEXT("BbStagingLog"));
@@ -606,7 +608,7 @@ void ABbDirector::BeginPlay()
 	RequestNext();
 }
 
-float ABbDirector::SideCutFade()
+float ABbDirector::SideCutFade(float SimDt, float RealDt)
 {
 	if (!bSideCutPlanned)
 	{
@@ -622,16 +624,44 @@ float ABbDirector::SideCutFade()
 		}
 		// Black: skip the middle of the jog. The movers (on ResetTime) and the players going
 		// off (on ExitClock) jump together, so everyone is where the full changeover would
-		// have him SideCutHoldS before the picture returns.
-		const float Skip = FMath::Max(0.f, BackAt - SideCutHoldS - ResetTime);
+		// have him as the picture is due back; both then wait while the card is held.
+		const float Skip = FMath::Max(0.f, BackAt - ResetTime);
 		ResetTime += Skip;
 		ExitClock += Skip;
 		bSideCutJumped = true;
+		bSideCardOn = SideCardHoldS > 0.f;
+		bSideCardSkip = false;
+		SideCardHeldS = 0.f;
 		if (bStagingLog)
 		{
 			UE_LOG(LogBb, Display, TEXT("BB_SIDECUT play=%u skipped=%.2f of %.2f s back_at=%.2f"), NextPlay.Info.play_index, Skip, ResetDuration, BackAt);
 		}
 		return 1.f;
+	}
+	if (bSideCardOn)
+	{
+		// The card is held on real time: the speed keys and the rush do not shorten it.
+		SideCardHeldS += bPaused ? 0.f : RealDt;
+		if (SideCardEnterAt >= 0.f && SideCardHeldS >= SideCardEnterAt)
+		{
+			SideCardEnterAt = -1.f;
+			bSideCardSkip = true;
+		}
+		if (bSideCardSkip || SideCardHeldS >= SideCardHoldS)
+		{
+			bSideCardOn = false;
+			if (bStagingLog)
+			{
+				UE_LOG(LogBb, Display, TEXT("BB_CARD play=%u held=%.2f of %.1f s%s"), NextPlay.Info.play_index, SideCardHeldS, SideCardHoldS, bSideCardSkip ? TEXT(" (Enter)") : TEXT(""));
+			}
+		}
+		else
+		{
+			// Everything stands still behind the black.
+			ResetTime -= SimDt;
+			ExitClock -= SimDt;
+			return 1.f;
+		}
 	}
 	return 1.f - FMath::Clamp((ResetTime - BackAt) / SideCutFadeS, 0.f, 1.f);
 }
@@ -1205,6 +1235,7 @@ void ABbDirector::ReplayBack()
 			bSame = true;
 			bReset = false;
 			bSideCutPlanned = false;
+			bSideCardOn = false;
 			if (APlayerController* PC = GetWorld()->GetFirstPlayerController())
 			{
 				if (PC->PlayerCameraManager)
@@ -1504,7 +1535,7 @@ void ABbDirector::NotePitch()
 	}
 	if (bStagingLog)
 	{
-		static const TCHAR* const Kinds[5] = { TEXT("none"), TEXT("strike"), TEXT("out"), TEXT("safe"), TEXT("foul") };
+		static const TCHAR* const Kinds[6] = { TEXT("none"), TEXT("strike"), TEXT("out"), TEXT("safe"), TEXT("foul"), TEXT("fair") };
 		for (const FBbSignal& S : Signals)
 		{
 			UE_LOG(LogBb, Display, TEXT("BB_SIGNAL play=%u t=%.2f of %.2f umpire=%d %s at=(%.1f, %.1f) \"%s\""), Current.Info.play_index, S.T, Current.Info.duration_s, S.Umpire, Kinds[(int32)S.Kind], S.At.X, S.At.Y, UTF8_TO_TCHAR(Current.Info.summary));
@@ -1946,7 +1977,7 @@ bool ABbDirector::StartReset(const FBbPlay& Next)
 		}
 	}
 	// Worth cutting only if there is a middle to skip.
-	bSideCutPlanned = bSideCut && bSideChange && ResetDuration > SideCutLeadS + 2.f * SideCutFadeS + SideCutHoldS + SideCutTailS + 2.f;
+	bSideCutPlanned = bSideCut && bSideChange && ResetDuration > SideCutLeadS + 2.f * SideCutFadeS + SideCutTailS + 3.5f;
 	bSideCutJumped = false;
 	if (bStagingLog)
 	{
@@ -2224,7 +2255,76 @@ void ABbDirector::NoteSignals()
 			}
 		}
 		const FVector B = BallAt(T);
-		Signals.Add(FBbSignal{ FMath::Min(T + 0.15f, Info.duration_s), Near(FVector2D(B.X, B.Y), true), ESignal::Foul, FVector2D(B.X, B.Y) });
+		Signals.Add(FBbSignal{ FMath::Min(T + UmpireCallLagS, Info.duration_s), Near(FVector2D(B.X, B.Y), true), ESignal::Foul, FVector2D(B.X, B.Y) });
+	}
+	else if (bContact && Info.pitch_call == 6)
+	{
+		// A fair ball that had a call to make is pointed to as soon as it is fair under the
+		// rules: first touched by a fielder (not caught in the air), or passing first or third
+		// on the ground or after a bound, or settling in front of the bag; a fly beyond the bag
+		// where it comes down; a fly over the fence where it clears it. The plate umpire has a
+		// ball that is fair in front of the bags, the base umpire one that is fair at or past his.
+		// Only a ball decided within FairNearLineDeg of the line (seen from home) is signalled.
+		const double BagM = 27.432;
+		auto Along = [](const FVector2D& P) { return (FMath::Abs(P.X) + P.Y) / UE_SQRT_2; };
+		auto Inside = [](const FVector2D& P) { return (P.Y - FMath::Abs(P.X)) / UE_SQRT_2; };
+		const float End = Info.dead_s >= 0.f ? FMath::Min(Info.dead_s, Info.duration_s) : Info.duration_s;
+		bool bGround = false, bDecided = false;
+		FVector2D Was = FVector2D::ZeroVector, At = FVector2D::ZeroVector;
+		float DecidedAt = End, Slow = 0.f;
+		for (float Tt = Info.contact_s + 0.05f; Tt <= End && !bDecided; Tt += 0.02f)
+		{
+			BbFrame F;
+			if (!SampleDrawn(Current, Tt, F))
+			{
+				break;
+			}
+			const FVector2D P(F.ball[0], F.ball[1]);
+			const bool bLanding = !bGround && F.ball[2] < 0.12;
+			const bool bPassing = bGround && Along(Was) < BagM && Along(P) >= BagM;
+			if (bLanding)
+			{
+				bGround = true;
+			}
+			if (bGround)
+			{
+				Slow = (P - Was).Size() / 0.02 < 0.5 && F.ball[2] < 0.2 && Tt > Info.contact_s + 0.3f ? Slow + 0.02f : 0.f;
+			}
+			Was = P;
+			At = P;
+			DecidedAt = Tt;
+			if (F.holder >= 0)
+			{
+				// Taken in the air: the out is the call; taken off the ground, fair there.
+				bDecided = bGround;
+				if (!bGround)
+				{
+					break;
+				}
+			}
+			else if (bLanding)
+			{
+				bDecided = Along(P) >= BagM;
+			}
+			else if (bPassing || Slow >= 0.1f)
+			{
+				bDecided = true;
+			}
+		}
+		if (!bDecided && Info.dead_reason == 2 && Info.dead_s >= 0.f)
+		{
+			// Over the fence in flight: fair where it clears it.
+			At = FVector2D(Info.dead_at[0], Info.dead_at[1]);
+			DecidedAt = Info.dead_s;
+			bDecided = true;
+		}
+		if (bDecided)
+		{
+			if (Inside(At) >= 0.0 && FMath::RadiansToDegrees(FMath::Atan2(Inside(At), FMath::Max(Along(At), 1e-3))) <= FairNearLineDeg)
+			{
+				Signals.Add(FBbSignal{ FMath::Min(DecidedAt + UmpireCallLagS, Info.duration_s), Along(At) < BagM - 3.0 ? 0 : At.X > 0.0 ? 1 : 3, ESignal::Fair, At });
+			}
+		}
 	}
 	for (uint32 C = 0; C < Info.n_calls; ++C)
 	{
@@ -2255,7 +2355,7 @@ void ABbDirector::ArrangeCrewShot(int32 Step)
 	T.Batting = 0;
 	T.BatterX = -0.8;
 	T.bSet = Step == 0 || Step == 5 || Step == 6;
-	T.Force = Step == 1 ? ESignal::Strike : Step == 2 ? ESignal::Out : Step == 3 ? ESignal::Safe : Step == 4 ? ESignal::Foul : ESignal::None;
+	T.Force = Step == 1 ? ESignal::Strike : Step == 2 ? ESignal::Out : Step == 3 ? ESignal::Safe : Step == 4 ? ESignal::Foul : Step == 10 ? ESignal::Fair : ESignal::None;
 	CrewShotTick = T;
 	FVector Eye, Look;
 	float Fov = 40.f;
@@ -2265,7 +2365,7 @@ void ABbDirector::ArrangeCrewShot(int32 Step)
 		Eye = ToUE(U.X + 4.6, U.Y + 3.6, 1.5);
 		Look = ToUE(U.X, U.Y, 1.05);
 	}
-	else if (Step <= 5)
+	else if (Step <= 5 || Step == 10)
 	{
 		const FVector2D U = Crew->UmpireAt(1, T);
 		Eye = ToUE(U.X * 0.78, U.Y * 0.78 - 1.5, 1.4);
@@ -3371,7 +3471,16 @@ void ABbDirector::Tick(float DeltaSeconds)
 		// ready to be thrown, then back to the chosen speed (owner, 2026-11-15). Again: stop.
 		if (PC->WasInputKeyJustPressed(EKeys::Enter))
 		{
-			bRush = !bRush;
+			if (bSideCardOn)
+			{
+				// The between-innings card: Enter ends the hold and goes on to the next pitch.
+				bSideCardSkip = true;
+				bRush = true;
+			}
+			else
+			{
+				bRush = !bRush;
+			}
 		}
 		if (PC->WasInputKeyJustPressed(EKeys::R))
 		{
@@ -3623,7 +3732,7 @@ void ABbDirector::Tick(float DeltaSeconds)
 		if (bReset)
 		{
 			ResetTime += SimDt;
-			const float Black = SideCutFade();
+			const float Black = SideCutFade(SimDt, DeltaSeconds);
 			if (APlayerController* PC = GetWorld()->GetFirstPlayerController())
 			{
 				if (PC->PlayerCameraManager)
@@ -3633,6 +3742,7 @@ void ABbDirector::Tick(float DeltaSeconds)
 				if (ABbHUD* CardHud = Cast<ABbHUD>(PC->GetHUD()))
 				{
 					CardHud->CardAlpha = Black;
+					CardHud->bCardHint = bSideCardOn;
 					if (Black > 0.f && CardHud->Card.IsEmpty())
 					{
 						// The half just played is the board before the last play.
@@ -3953,11 +4063,18 @@ void ABbDirector::Tick(float DeltaSeconds)
 					BatHolder = 0xFFFF;
 				}
 			}
-			// In play: the ball has been hit and is heading out (contact telemetry present
-			// and the ball is in front of the plate after the pitch has arrived).
-			if (Current.Info.exit_velocity_mps > 0.f && T > 0.35f && Frame.ball[1] > 1.5f)
+			// In play: the ball has been hit and is heading out. Not before the bat meets it on
+			// screen (owner, saved play 112): the director holds the whole play, so anything it
+			// does because the ball will be hit (the cut from the long lens to the follow view)
+			// has to wait for the contact the viewer sees. This used to start at T > 0.35 s with
+			// the ball still short of the plate, 0.048 s before contact in play 112.
+			if (!bBallInPlay && Current.Info.exit_velocity_mps > 0.f && Current.Info.contact_s >= 0.f && T >= Current.Info.contact_s && Frame.ball[1] > 1.5f)
 			{
 				bBallInPlay = true;
+				if (bStagingLog)
+				{
+					UE_LOG(LogBb, Display, TEXT("BB_INPLAY play=%u t=%.3f contact=%.3f"), Current.Info.play_index, T, Current.Info.contact_s);
+				}
 			}
 			// A held ball is drawn in the holder's hand, not at the sim's holding point over his
 			// feet (owner, 2026-11-15: the ball hung in the air through the catcher's throw). The
@@ -4258,6 +4375,8 @@ void ABbDirector::Tick(float DeltaSeconds)
 					BoardThrough = Through;
 					// The between-innings card shows this line score too (hud.md step 4).
 					Hud->LineBox = BoardBox;
+					// The card shows the half just played (the board before the last play).
+					BbHud::TrimUnplayed(Hud->LineBox, Before.inning, Before.top != 0);
 					Hud->bLineBox = bBoardValid;
 				}
 				// The pitcher and the batter under the score (owner, 2026-11-16): names and
@@ -4416,6 +4535,7 @@ void ABbDirector::Tick(float DeltaSeconds)
 				}
 				bReset = false;
 				bSideCutPlanned = false;
+				bSideCardOn = false;
 				if (APlayerController* PC = GetWorld()->GetFirstPlayerController())
 				{
 					if (PC->PlayerCameraManager)
@@ -4517,8 +4637,8 @@ void ABbDirector::Tick(float DeltaSeconds)
 	// -BbCrewShots: the crew alone, each arrangement held a while and photographed.
 	if (CrewShot >= 0 && Wall >= 8.0)
 	{
-		static const TCHAR* const Names[10] = { TEXT("plate_set"), TEXT("strike"), TEXT("out"), TEXT("safe"), TEXT("foul"), TEXT("base_set"), TEXT("coach"),
-			TEXT("bench_home"), TEXT("bench_away"), TEXT("all") };
+		static const TCHAR* const Names[11] = { TEXT("plate_set"), TEXT("strike"), TEXT("out"), TEXT("safe"), TEXT("foul"), TEXT("base_set"), TEXT("coach"),
+			TEXT("bench_home"), TEXT("bench_away"), TEXT("all"), TEXT("fair") };
 		if (ParkShotSince == 0.0)
 		{
 			ArrangeCrewShot(CrewShot);
@@ -4535,7 +4655,7 @@ void ABbDirector::Tick(float DeltaSeconds)
 		{
 			bParkShotAsked = false;
 			ParkShotSince = 0.0;
-			if (++CrewShot == 10)
+			if (++CrewShot == 11)
 			{
 				CrewShot = -1;
 				Finish();

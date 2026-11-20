@@ -429,7 +429,22 @@ namespace
 	}
 }
 
-void BbHud::DrawInningCard(ABbHUD& Hud, float S, const FString& Title, const int32 Runs[2], const BbBoxScore* Box, float Alpha)
+void BbHud::TrimUnplayed(BbBoxScore& Box, int32 Inning, bool bTop)
+{
+	const int32 First = FMath::Max<int32>(1, Box.first_inning);
+	for (int32 Side = 0; Side < 2; ++Side)
+	{
+		const int32 Through = (Side == 0 || !bTop) ? Inning : Inning - 1;
+		const int32 Slots = FMath::Clamp(Through - First + 1, 0, BB_BOX_MAX_INNINGS);
+		if (Box.teams[Side].n_batted > Slots)
+		{
+			Box.teams[Side].n_batted = static_cast<uint8>(Slots);
+		}
+	}
+	Box.innings = static_cast<uint8>(FMath::Min<int32>(Box.innings, FMath::Clamp(Inning, 0, 255)));
+}
+
+float BbHud::DrawInningCard(ABbHUD& Hud, float S, const FString& Title, const int32 Runs[2], const BbBoxScore* Box, float Alpha)
 {
 	const float TitleH = 50.f;
 	const float CX = Hud.GetCanvas()->ClipX * 0.5f;
@@ -442,7 +457,7 @@ void BbHud::DrawInningCard(ABbHUD& Hud, float S, const FString& Title, const int
 		const float Top = CentredPanel(Hud, S, W, H, 360.f + H * 0.5f, BbLook::HudGold, Alpha);
 		TextCentre(Hud, Title.ToUpper(), CX, (Top + 4.f + (TitleH - 4.f) * 0.5f) * S, Faded(BbLook::HudText, Alpha), 1.5f * S);
 		LineScore(Hud, S, CX / S - W * 0.5f + Pad, Top + TitleH, *Box, Row, Alpha);
-		return;
+		return 360.f + H * 0.5f;
 	}
 	// Two club rows under a title.
 	const float NameWide = 330.f, ScoreWide = 64.f, Row = 48.f;
@@ -458,6 +473,7 @@ void BbHud::DrawInningCard(ABbHUD& Hud, float S, const FString& Title, const int
 		ClubRow(Hud, S, X, (Top + TitleH + Side * Row) * S, NameWide, ScoreWide, Row, Side, *Name, Runs[Side], 1.35f, 1.9f, Alpha);
 	}
 	Hud.DrawRect(Faded(BbLook::HudPanel, Alpha), X, (Top + TitleH + Row - 1.f) * S, W * S, 2.f * S);
+	return Bottom;
 }
 
 void BbHud::DrawBoxScore(ABbHUD& Hud, float S, const BbBoxScore& Box, const FString& Title, const FString& Subtitle, float Alpha, float Dim)

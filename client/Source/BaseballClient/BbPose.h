@@ -221,7 +221,7 @@ namespace BbMotion
 
 	/** The people who are not playing (player-visuals §12): umpires, base coaches, the men
 	 *  on the bench. Everything is in the figure's own frame, +Y the way he faces. */
-	enum class ESignal : uint8 { None, Strike, Out, Safe, Foul };
+	enum class ESignal : uint8 { None, Strike, Out, Safe, Foul, Fair };
 	struct FCrewIn
 	{
 		/** 0 standing easy to 1 down for the pitch, hands on his knees. */
@@ -233,6 +233,9 @@ namespace BbMotion
 		/** An umpire's signal and the seconds since it began. */
 		ESignal Signal = ESignal::None;
 		float SignalT = 0.f;
+		/** For a Fair signal: the way to fair ground in his own frame (x toward his left, y the
+		 *  way he faces; unit). He points the arm on that side. */
+		FVector2D Point = FVector2D(1.0, 0.0);
 		/** What he is watching. */
 		FVector Look = FVector(0, 1000, 150);
 	};

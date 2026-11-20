@@ -38,6 +38,7 @@ Unattended: add `-RenderOffscreen -BbShots=6` (screenshots to the generated Shot
 - A line of play-by-play for every pitch ("Called strike", "Ground out to short", "Double to right, 1 run scores"), built in the sim (`bb_game::describe`) and shown when the viewer would know it.
 - The bat: the executed swing is in the timeline and the client draws it; the batter stands in his box until contact.
 - Two cameras cut like a broadcast: the pitch from beyond center field through a long lens, the play from high behind home following the ball.
+  **Nothing may show the outcome before the viewer sees it (owner, 2026-11-20, seed 51001 play 112).** The director holds the whole timeline, so every outcome-driven cut, HUD figure, signal or card is gated on the play clock reaching the sim's own moment for it: the follow-view cut on `contact_s` (it was `T > 0.35 s` with the ball short of the plate, 0.048 s early in play 112; `BB_INPLAY` logs the cut against the contact under `-BbStagingLog`), the exit speed and zone mark on `contact_s`, the call text on `call_s`, outs and the home-run card on their times, umpires' signals after the event. Checked 2026-11-20; the park has no crowd reaction.
 
 - Stands as plain blocks, a runners-on diamond, and keys: Space pauses, `-` and `=` change speed, C cycles cameras (broadcast, behind home, overhead).
 - Run in a window on the desktop (`client/run.sh 7 -BbBenchSeconds=25`): 328 fps at 1600×900, worst frame 7.5 ms.

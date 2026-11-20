@@ -83,7 +83,14 @@ void ABbHUD::DrawHUD()
 	if (CardAlpha > 0.f && !Card.IsEmpty())
 	{
 		// Centred on the black between innings; it comes and goes with the fade.
-		BbHud::DrawInningCard(*this, S, Card, CardRuns, bLineBox ? &LineBox : nullptr, CardAlpha);
+		const float CardBottom = BbHud::DrawInningCard(*this, S, Card, CardRuns, bLineBox ? &LineBox : nullptr, CardAlpha);
+		if (bCardHint)
+		{
+			const FString Hint(TEXT("Enter: continue"));
+			float W = 0.f, Hh = 0.f;
+			GetTextSize(Hint, W, Hh, Font, 1.0f * S);
+			DrawText(Hint, FLinearColor(1.f, 1.f, 1.f, 0.55f * CardAlpha), (Canvas->ClipX - W) * 0.5f, (CardBottom + 18.f) * S, Font, 1.0f * S);
+		}
 	}
 	else if (bHold)
 	{
