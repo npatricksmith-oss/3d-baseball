@@ -3476,6 +3476,9 @@ impl<'a> Sim<'a> {
         let d_pt = m::hypot(pt.x - fd.pos.x, pt.y - fd.pos.y);
         // The come-through is timed at the set-up pace over his actual distance; the pace that
         // keeps him on time then rises as his acceleration lags, so he takes it a little faster.
+        // (It also leaves him late on some balls: two catches main makes are lost so, seed 155
+        // play 23 and seed 264 play 109; timed with the lag, `run_time`, both are made but he
+        // comes through under the crow hop's speed. Approach note §5, open.)
         let come = d_pt / SETUP_THROUGH_MPS;
         let at_back = m::hypot(back.x - fd.pos.x, back.y - fd.pos.y) <= SETUP_AT_M;
         if fd.setup == 1 || at_back {
@@ -16422,5 +16425,56 @@ mod tests {
         assert!(past <= REACH, "he was {past:.2} m past the catch point before the ball came down");
         let (none, _) = come_through(&[]);
         assert!(none < 1.5, "with nobody on he takes it at {none:.2} m/s toward home");
+    }
+
+    /// agent-models §5.5, the set-up behind a fly must not cost a catch (old-versus-new bound):
+    /// flies to all three outfielders that the outfielder catches with nobody on (no throw to
+    /// set up for, so no set-up) are caught as well with a runner on second and none out, when
+    /// he sets up behind the catch and comes through it toward third. A guard, not a
+    /// reproduction: the two catches the set-up's come-through timing loses in games (approach
+    /// note §5; seed 155 play 23, seed 264 play 109) are made here, over this grid and eight
+    /// read-noise draws; they need game conditions this fixture does not have.
+    #[test]
+    fn the_set_up_behind_a_fly_does_not_cost_a_catch() {
+        const R: AgentId = 0x0007;
+        let play = |v: Vec3, on: &[(AgentId, u8)]| {
+            let fx = fixture(on);
+            let mut runners = vec![RunnerIn { id: fx.st.batter, base: 0, speed: 8.2, tau_s: bb_agents::running::LEAGUE_TAU_S }];
+            runners.extend(on.iter().map(|&(id, base)| RunnerIn { id, base, speed: 8.2, tau_s: bb_agents::running::LEAGUE_TAU_S }));
+            let mut inp = input(&fx, runners);
+            inp.ball = BallState { r: Vec3::new(0.0, 0.5, 1.0), v, w: Vec3::new(bb_math::units::rpm_to_radps(2000.0), 0.0, 0.0) };
+            let mut st = fx.st.clone();
+            let out = simulate_live(&LiveInput { record: true, ..inp }, &mut st);
+            let (t, who) = out.secured.first().copied().unwrap_or((f64::INFINITY, 0));
+            let down = out.facts.iter().any(|f| matches!(f, Input::BallTouched { t: tt, what: Touch::Ground { .. } | Touch::Wall { .. } } if *tt < t));
+            // His speed toward third at the catch.
+            let mut toward = 0.0;
+            if t.is_finite() {
+                let track = &out.actors[(who & 0x7f) as usize - 1].1;
+                let i = track.iter().rposition(|(tt, _)| *tt <= t + 1e-9).unwrap();
+                let (a, b) = (track[i - 1], track[i]);
+                let u = base_pos(3) - b.1;
+                toward = ((b.1 - a.1) * (1.0 / (b.0 - a.0))).dot(Vec3::new(u.x, u.y, 0.0).normalized());
+            }
+            (!down && (who & 0x7f) >= 7, t, who & 0x7f, toward)
+        };
+        let (mut caught, mut changed) = (0, 0);
+        for spray in [-28.0f64, -14.0, 0.0, 14.0, 28.0] {
+            for (speed, launch) in [(30.0, 32.0f64), (33.0, 30.0), (33.0, 38.0), (36.0, 34.0), (38.0, 30.0)] {
+                let (s, l) = (spray.to_radians(), launch.to_radians());
+                let v = Vec3::new(m::sin(s) * m::cos(l), m::cos(s) * m::cos(l), m::sin(l)) * speed;
+                let plain = play(v, &[]);
+                if !plain.0 {
+                    continue;
+                }
+                caught += 1;
+                let set = play(v, &[(R, 2)]);
+                eprintln!("spray {spray}° {speed} m/s at {launch}°: nobody on, caught by {} at {:.2} s; runner on second: caught {} by {} at {:.2} s, {:.1} m/s toward third", plain.2, plain.1, set.0, set.2, set.1, set.3);
+                assert!(set.0, "with a runner on second the fly is not caught (fielder {} at {:.2} s; nobody on, {} at {:.2} s)", set.2, set.1, plain.2, plain.1);
+                changed += (set.3 > throwing::HOP_MPS) as u32;
+            }
+        }
+        assert!(caught >= 12, "only {caught} of the flies were caught with nobody on");
+        assert!(changed >= 3, "he came through toward third on only {changed} of the catches");
     }
 }
