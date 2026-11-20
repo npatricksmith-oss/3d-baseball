@@ -1048,8 +1048,10 @@ struct Fielder {
     /// moving (agent-models §5.5).
     up_at: f64,
     set_base: f64,
-    /// Coming through a set-up catch toward his throw (agent-models §5.5, `chase_target`).
+    /// Coming through a set-up catch toward his throw (agent-models §5.5, `chase_target`), and
+    /// the way he comes (toward the base he expects to throw to).
     through: bool,
+    through_dir: Vec3,
     face: Option<Vec3>,
     catch_vel: Vec3,
     /// Visible heading, motion and reception cue at the catch, published before choosing
@@ -3025,7 +3027,7 @@ impl<'a> Sim<'a> {
     /// follows the read (`refresh_call`).
     fn replan(&mut self, i: usize) {
         self.read(i);
-        (self.f[i].target, self.f[i].through) = self.chase_target(i);
+        self.set_chase(i);
         self.refresh_call(i);
     }
 
@@ -3038,6 +3040,11 @@ impl<'a> Sim<'a> {
     fn chase_target(&self, i: usize) -> (Vec3, bool) {
         let fd = &self.f[i];
         let pt = fd.int_pt;
+        // Once coming through he keeps coming, at his latest read of the catch point, while
+        // the ball is up (a close re-read that leaves him unsure for a moment does not stop him).
+        if fd.through && self.ball_still_up() {
+            return (pt + fd.through_dir * SETUP_PAST_M, true);
+        }
         let Some(dir) = self.setup_dir(i) else { return (pt, false) };
         let back = pt - dir * SETUP_BACK_M;
         // No room behind it (at the wall): he takes it where it comes down.
@@ -3052,6 +3059,16 @@ impl<'a> Sim<'a> {
             return if to_back <= SETUP_AT_M || fd.through { (pt + dir * SETUP_PAST_M, true) } else { (pt, false) };
         }
         if to_back <= SETUP_AT_M || left >= self.eta(i, back) + come + SETUP_SPARE_S { (back, false) } else { (pt, false) }
+    }
+
+    /// Chaser `i` runs where `chase_target` says, remembering the way he comes through.
+    fn set_chase(&mut self, i: usize) {
+        let (target, through) = self.chase_target(i);
+        let fd = &mut self.f[i];
+        if through && !fd.through {
+            fd.through_dir = Vec3::new(target.x - fd.int_pt.x, target.y - fd.int_pt.y, 0.0).normalized();
+        }
+        (fd.target, fd.through) = (target, through);
     }
 
     /// The way an outfielder expects to throw after catching the fly he is under, as a unit
@@ -3086,6 +3103,10 @@ impl<'a> Sim<'a> {
         for i in 0..9 {
             if self.f[i].role == Role::Chase && self.t >= self.f[i].next_plan {
                 self.replan(i);
+            } else if self.f[i].role == Role::Chase && !self.f[i].through && self.setup_dir(i).is_some() {
+                // Waiting on his set-up spot, he goes the moment his run from there would just
+                // bring him to the ball (agent-models §5.5), not at his next read.
+                self.set_chase(i);
             }
         }
         let (b, bv) = self.ball_at(self.t);
@@ -3281,10 +3302,9 @@ impl<'a> Sim<'a> {
     fn apply(&mut self, i: usize, d: Decision) {
         match d {
             Decision::Go => {
-                let (target, through) = self.chase_target(i);
+                self.set_chase(i);
                 let fd = &mut self.f[i];
                 fd.role = Role::Chase;
-                (fd.target, fd.through) = (target, through);
                 fd.peel = None;
             }
             Decision::CoverSecond => {
@@ -4214,7 +4234,7 @@ impl<'a> Sim<'a> {
                         let fd = &mut self.f[i];
                         (fd.t_int, fd.int_pt, fd.target, fd.belief, fd.read_at, fd.read_ball) = (ti, pt, pt, Some(p), t, ball);
                         self.refresh_call(i);
-                        (self.f[i].target, self.f[i].through) = self.chase_target(i);
+                        self.set_chase(i);
                     }
                 }
             }
@@ -6252,6 +6272,7 @@ fn new_sim<'a>(inp: &'a LiveInput<'a>, st: &'a mut RulesState) -> Sim<'a> {
                 face: None,
                 catch_vel: Vec3::ZERO,
                 through: false,
+                through_dir: Vec3::ZERO,
                 took_diving: false,
                 catch_stretched: false,
                 catch_heading: None,
