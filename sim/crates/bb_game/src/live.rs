@@ -670,6 +670,24 @@ const ROUND_CLEAR_M: f64 = 1.5;
 /// speed (`PLANT_FREE_MPS`) costs nothing, so a part of the turn often does the work of all of
 /// it at a fraction of the cost.
 const ROUND_SLANT_DEG: [f64; 4] = [0.0, 20.0, 40.0, 60.0];
+/// Rounding keeps a margin, s [E, unsourced: a ground ball's read error and the plan's ±0.1 s
+/// against the movement]: he rounds only with this much time in hand beyond the rounding's
+/// cost, and is paced to be at the take point this much before the ball. Rounded to the last
+/// tenth, he was a step late as often as not, and the ball, which goes on past the take point,
+/// went by him (23 of the 26 first balls in play that rounding changed in 100 games were outs
+/// made hits).
+const ROUND_MARGIN_S: f64 = 0.3;
+/// A ball rolling slower than this at the take point by his read is all but still, m/s [E]:
+/// rounding it he is not paced to it (he goes round it as fast as the turn allows and picks it
+/// up coming through). Paced to a ball with no time it must be taken by, a man rounding a
+/// stopped ball waited behind it while a teammate came in and the runner took third (seed 39,
+/// play 144: each re-read put the take a little later).
+const ROUND_MIN_BALL_MPS: f64 = 3.0;
+/// A rounded take must beat the best straight one by this, s [E: the bound on the plan's error
+/// against the movement, `the_plan_costs_a_rounded_take_as_the_movement_runs_it`]: a smaller
+/// gain is within what the plan cannot tell (a rounded pickup of a dead ball in the corner,
+/// planned 0.01 s ahead, came 0.05 s late and the batter made third; seed 6, play 17).
+const ROUND_GAIN_S: f64 = 0.15;
 /// The holder's race rule (agent-models §5.6): the σ of a race, s, and the least chance of an
 /// out he throws for. A fielder rounds a ball for the lead runner's extra base only where by
 /// this rule he would have a play there.
@@ -1071,8 +1089,8 @@ fn sight_cov(u: Vec3, a: Vec3, b: Vec3, sigma: f64, along: f64) -> Mat3 {
 /// A fielder's approach to a ball he takes on the ground (agent-models §5.2): the point he
 /// takes it at, the ball's time there by his read, the speed he lets himself arrive at
 /// (infinite: no limit), and, when he rounds it, the unit vector from the take point toward
-/// the base he rounds it for and whether he has reached the point behind the ball and is
-/// coming through it.
+/// the base he rounds it for, whether he has reached the point behind the ball and is coming
+/// through it, and whether he is paced to the ball.
 #[derive(Clone, Copy, Debug)]
 struct Approach {
     at: Vec3,
@@ -1080,6 +1098,8 @@ struct Approach {
     arrive: f64,
     round: Option<Vec3>,
     through: bool,
+    /// Rounding a ball that is all but still: not paced to it (`ROUND_MIN_BALL_MPS`).
+    unpaced: bool,
 }
 
 #[derive(Clone, Debug)]
@@ -2345,13 +2365,18 @@ fn fielder_step(fd: &Fielder, t: f64, t_contact: f64) -> (Vec3, Vec3) {
         let p = fd.target;
         let w = p - u * ROUND_M;
         let dw = m::hypot(w.x - fd.pos.x, w.y - fd.pos.y);
-        let left = t_goal - t;
+        // He means to be at the take point `ROUND_MARGIN_S` before the ball; a ball all but
+        // still he goes round as fast as the turn allows.
+        let unpaced = fd.approach.is_some_and(|ap| ap.unpaced);
+        let t_goal = if unpaced { t } else { t_goal };
+        let left = t_goal - ROUND_MARGIN_S - t;
         let (q, pace, cap) = if fd.approach.is_some_and(|ap| ap.through) {
             let behind = (p - fd.pos).dot(u);
             let v = fd.vel.norm();
             let q = p - u * (behind - (v * v / fd.a.a_lat).max(ROUND_NEAR_M)).max(0.0);
             let dp = m::hypot(p.x - fd.pos.x, p.y - fd.pos.y);
-            let pace = if left > DT { dp / left } else { fd.a.speed };
+            // (Inside the margin, paced to the ball itself: he does not run on past the point.)
+            let pace = if left > DT { dp / left } else if t_goal - t > DT { dp / (t_goal - t) } else { fd.a.speed };
             // No faster than lets him finish the turn onto the way by the take point (§5.3's turn
             // law for the turn still to make over the way left), whatever re-reading has moved.
             (q, pace, arrive.min(turn_speed(fd.a.a_lat, fd.vel, u, (dp - REACH).max(ROUND_NEAR_M))))
@@ -3338,18 +3363,24 @@ impl<'a> Sim<'a> {
     }
 
     /// The base an outfielder plans his approach for (agent-models §5.2, rounding the ball),
-    /// from his own read of the take (`t_take`, at `p`) and what everyone sees of the runners:
-    /// the lead runner's extra base (third for a runner on first, home for one on second or
-    /// third) where, by the holder's own race rule (§5.6), a throw from that take would give
-    /// him a play on that runner (a league-typical runner from where he is and how he is moving,
-    /// `runner_eta`; the ball: the take, his `Transfer`, the throw at his arm); otherwise second
-    /// (coaching: "ball at you, lead runner; ball away from you, second").
+    /// from his own read of the take (`t_take`, at `p`) and what everyone sees of the runners.
+    /// The lead runner is the one farthest along, the batter included; past the base he is
+    /// heading for, the next one, if by the holder's own race rule (§5.6) a throw there from that
+    /// take would give him a play on that runner (a league-typical runner from where he is and
+    /// how he is moving, `runner_eta`; the ball: the take, his `Transfer`, the throw at his arm);
+    /// else the base he is heading for, if that would; else second. Coaching: "Ball at you, lead
+    /// runner. Ball away from you, 2nd base". (Planning for second with nobody on, he rounded a
+    /// ball in the gap toward second while the batter went on for third, and owed the plant on
+    /// the throw there: triples 0.82 → 0.90 a team-game.)
     fn outfield_round_base(&self, t_take: f64, p: Vec3, arm: f64, transfer: f64) -> u8 {
-        let Some(r) = self.r.iter().filter(|r| r.start > 0 && !r.out && !r.scored).max_by_key(|r| r.start) else { return 2 };
-        let b = (r.start + 2).min(4);
-        let runner_at = self.t + runner_eta((b as f64 * BASE_L - r.s).max(0.0), r.v);
-        let ball_at = t_take + transfer + throw_time(arm, (base_pos(b) - p).norm());
-        if phi((runner_at - ball_at) / RACE_SIGMA_S) > RACE_MIN_P { b } else { 2 }
+        let Some(r) = self.r.iter().filter(|r| !r.out && !r.scored).max_by(|a, b| a.s.total_cmp(&b.s)) else { return 2 };
+        let heading = ((r.s / BASE_L).floor() as u8 + 1).min(4);
+        let play = |b: u8| {
+            let runner_at = self.t + runner_eta((b as f64 * BASE_L - r.s).max(0.0), r.v);
+            let ball_at = t_take + transfer + throw_time(arm, (base_pos(b) - p).norm());
+            phi((runner_at - ball_at) / RACE_SIGMA_S) > RACE_MIN_P
+        };
+        [(heading + 1).min(4), heading].into_iter().find(|&b| b >= 2 && play(b)).unwrap_or(2)
     }
 
     /// The approach (agent-models §5.2): chaser `i`, going for a ball he will take on the
@@ -3411,14 +3442,14 @@ impl<'a> Sim<'a> {
         // (ready, take point, ball time, arrival cap, rounding)
         let mut best: Option<(f64, Vec3, f64, f64, Option<Vec3>)> = None;
         // The rounded takes (ready, take point, ball time, arrival speed, way).
-        let mut rounded: Vec<(f64, Vec3, f64, f64, Vec3)> = Vec::new();
+        let mut rounded: Vec<(f64, Vec3, f64, f64, Vec3, bool)> = Vec::new();
         let mut first = true;
         let mut t = fd.t_int;
         while t <= t_last + 1e-9 {
             if best.is_some_and(|b| t >= b.0) {
                 break;
             }
-            let (b, _) = pred.at(t);
+            let (b, bv) = pred.at(t);
             let p = Vec3::new(b.x, b.y, 0.0);
             let each = (1..=4u8).filter(|&k| bases & 1 << k != 0);
             let ok = b.z <= catch_ceiling(field, b) && beyond_reach_over_wall(field, b) <= 0.0;
@@ -3456,6 +3487,7 @@ impl<'a> Sim<'a> {
                     // ROUND_M left to p (§5.3's turn law). A toss is not rounded: only motion
                     // away from it counts (`TOSS_MAX_M`).
                     let rb = of_base.or_else(|| each.clone().min_by(|&x, &y| (base_pos(x) - p).norm().total_cmp(&(base_pos(y) - p).norm())));
+                    let still = m::hypot(bv.x, bv.y) < ROUND_MIN_BALL_MPS;
                     if let Some(rb) = rb.filter(|&rb| !no_round && m::hypot(base_pos(rb).x - p.x, base_pos(rb).y - p.y) > throwing::TOSS_MAX_M) {
                         let tb = base_pos(rb) - p;
                         let u = Vec3::new(tb.x, tb.y, 0.0).normalized();
@@ -3483,11 +3515,11 @@ impl<'a> Sim<'a> {
                             let off = m::sqrt((1.0 - a.dot(u) * a.dot(u)).max(0.0));
                             let v_free = if off > 1e-6 { throwing::PLANT_FREE_MPS / off } else { f64::INFINITY };
                             let (cost, v_r, way) = if on { (0.0, v.min(was), d) } else { round_cost(&st.a, st.pos, st.vel.norm(), v, v_free, p, a) };
-                            if slack >= cost {
+                            if slack >= cost + if still { 0.0 } else { ROUND_MARGIN_S } {
                                 // Paced to the ball (`fielder_step`), he comes through at about the
                                 // way over the time he has, no faster than the turn allows.
                                 let r = t + at_base(p, a * v_r.min(way / (t - start).max(DT)), rb);
-                                rounded.push((r, p, t, v_r.min(v_free), a));
+                                rounded.push((r, p, t, v_r.min(v_free), a, still));
                             }
                         }
                     }
@@ -3502,18 +3534,17 @@ impl<'a> Sim<'a> {
             first = false;
             t += APPROACH_STEP_S;
         }
-        // Rounding changes how he comes through the ball, not when he takes it: a rounded take
-        // only at a point he would take it no later than his best straight take (one later,
-        // traded for the plant it saves at the base he plans for, gave every other runner the
-        // delay: outfield pickups 0.11 s later, triples 0.82 → 0.89 a team-game). It beats the
-        // straight take by `APPROACH_GAIN_S`, or ties it when he is already rounding.
+        // A rounded take beats the best straight one by `ROUND_GAIN_S`; already rounding, he
+        // keeps on unless the straight one is better by `APPROACH_GAIN_S`.
+        let mut unpaced = false;
         if let Some(bs) = best {
-            let edge = if rounding.is_some() { -APPROACH_GAIN_S } else { APPROACH_GAIN_S };
-            if let Some(r) = rounded.iter().filter(|r| r.2 <= bs.2 + 1e-9 && r.0 < bs.0 - edge).min_by(|x, y| x.0.total_cmp(&y.0)) {
+            let edge = if rounding.is_some() { -APPROACH_GAIN_S } else { ROUND_GAIN_S };
+            if let Some(r) = rounded.iter().filter(|r| r.0 < bs.0 - edge).min_by(|x, y| x.0.total_cmp(&y.0)) {
                 best = Some((r.0, r.1, r.2, r.3, Some(r.4)));
+                unpaced = r.5;
             }
         }
-        best.filter(|b| b.3.is_finite() || b.4.is_some()).map(|b| Approach { at: b.1, t_ball: b.2, arrive: b.3, round: b.4, through: false })
+        best.filter(|b| b.3.is_finite() || b.4.is_some()).map(|b| Approach { at: b.1, t_ball: b.2, arrive: b.3, round: b.4, through: false, unpaced })
     }
 
     /// A chaser's call follows his own latest read (agent-models §5.7; Codex
@@ -15858,7 +15889,7 @@ mod tests {
                         fd.role = Role::Chase;
                         fd.target = p;
                         fd.t_int = 0.0;
-                        fd.approach = Some(Approach { at: p, t_ball: 0.0, arrive: f64::INFINITY, round: Some(u), through: false });
+                        fd.approach = Some(Approach { at: p, t_ball: 0.0, arrive: f64::INFINITY, round: Some(u), through: false, unpaced: false });
                         let (t0, mut t_r, mut prev) = (100.0, 0.0, fd.pos);
                         while !(fd.approach.is_some_and(|ap| ap.through) && m::hypot(p.x - fd.pos.x, p.y - fd.pos.y) <= reach) && t_r < 10.0 {
                             prev = fd.pos;
