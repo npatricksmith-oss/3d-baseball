@@ -285,7 +285,8 @@ void UBbCrew::Tick(const FBbCrewTick& In)
 			{
 				M.Signal = In.Force;
 				M.SignalT = 0.6f;
-				M.SignalAt = FVector2D(0.0, 0.0);
+				// (-BbCrewShots: a fair ball down the first-base line.)
+				M.SignalAt = In.Force == BbMotion::ESignal::Fair ? FVector2D(BaseL, BaseL - 3.0) : FVector2D(0.0, 0.0);
 			}
 			else if (In.bPlay)
 			{
@@ -315,7 +316,7 @@ void UBbCrew::Tick(const FBbCrewTick& In)
 		const bool bPlate = bUmpire && M.Which == 0;
 		FVector2D Toward = bPlate ? FVector2D(At.X, At.Y + 10.0) : FVector2D(0.0, 0.0);
 		// (A strike is called facing the mound, with the arm out to the side.)
-		if (bSignal && !(bPlate && M.Signal == BbMotion::ESignal::Strike) && In.Force == BbMotion::ESignal::None)
+		if (bSignal && !(bPlate && M.Signal == BbMotion::ESignal::Strike) && (In.Force == BbMotion::ESignal::None || In.Force == BbMotion::ESignal::Fair))
 		{
 			Toward = M.SignalAt;
 		}
@@ -337,6 +338,13 @@ void UBbCrew::Tick(const FBbCrewTick& In)
 		Ci.Hips = bUmpire ? 0.f : 1.f;
 		Ci.Signal = M.Signal;
 		Ci.SignalT = M.SignalT;
+		if (M.Signal == BbMotion::ESignal::Fair)
+		{
+			// Fair ground is toward the infield from the line the ball is on: in his own frame,
+			// x toward his left.
+			const FVector2D ToFair = (M.SignalAt.X > 0.0 ? FVector2D(-1.0, 1.0) : FVector2D(1.0, 1.0)).GetSafeNormal();
+			Ci.Point = FVector2D(FVector2D::DotProduct(ToFair, FVector2D(-Face.Y, Face.X)), FVector2D::DotProduct(ToFair, Face));
+		}
 		Ci.Look = F->GetActorTransform().InverseTransformPosition(M.Look);
 		Apply(I, BbMotion::Crew(Ci, *Skel, Ground));
 	}

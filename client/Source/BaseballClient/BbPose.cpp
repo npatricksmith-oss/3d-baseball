@@ -1349,6 +1349,19 @@ FBbStick BbMotion::Crew(const FCrewIn& In, const FBbSkeleton& Skel, const FBbMot
 			B.Elbow[L] = { 0, -0.5, -1 };
 			B.Elbow[R] = { 0, -0.5, -1 };
 			break;
+		case ESignal::Fair:
+		{
+			// The arm on the infield side comes up and points straight out toward fair
+			// ground; the other hangs.
+			const int32 Arm = In.Point.X > 0.0 ? L : R;
+			const double Side = Arm == L ? 1.0 : -1.0;
+			A.Wrist[Arm] = { Side * 16.0, 14.0, 10.0 };
+			A.Elbow[Arm] = { Side * 1.0, -0.4, -0.3 };
+			B = A;
+			B.Wrist[Arm] = { In.Point.X * 52.0, In.Point.Y * 52.0 + 8.0, 2.0 };
+			B.Elbow[Arm] = { Side * 0.2, -0.3, -1.0 };
+			break;
+		}
 		default:
 			// Foul: both arms up and out.
 			A.Wrist[L] = { 20, 14, 20 };

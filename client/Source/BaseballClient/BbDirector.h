@@ -103,6 +103,12 @@ private:
 	BbPlayInfo Before{};
 	/** How long the umpire's out signal stays up, s of play time. */
 	static constexpr float UmpireShowS = 2.0f;
+	/** A fair ball is signalled only if the ball was this near a foul line (m, measured square
+	 *  to the line) where it was judged fair: closer than this and there was a call to make
+	 *  (player-visuals section 12). */
+	static constexpr double FairNearLineM = 4.0;
+	/** How long after the ball is fair (or foul) the umpire's arm goes up, s. */
+	static constexpr float UmpireCallLagS = 0.15f;
 	/** A play this close (runner's time short of the base, s) is called with emphasis. */
 	static constexpr float CloseCallS = 0.15f;
 	/** Calls of the current play already logged (BB_CALL). */
