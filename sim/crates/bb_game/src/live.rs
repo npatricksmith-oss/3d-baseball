@@ -633,15 +633,17 @@ const TRACK_CONTACT_M: f64 = 0.3;
 /// to the owner's band for a routine fly (90–99% by ability; grade 50 .967 on seeds 0–99 when
 /// fitted, .979 with the look's full Jacobian; docs/calibration/2026-11-17-track-bias.md) [E].
 pub(crate) const TRACK_BIAS_FRAC: f64 = 0.6;
-/// The set-up behind a fly (agent-models §5.5, the catch sets up the throw): how far behind
-/// his catch point an outfielder with time to spare waits, m [E; "one or two steps behind"
-/// in coaching texts, unsourced as a measurement]; the time he must have in hand beyond
-/// getting there and coming through, s [E, unsourced]; within this of the spot he counts as
-/// there, m [E].
+/// The set-up behind a fly (agent-models §5.5, the catch sets up the throw): the least depth
+/// behind his catch point an outfielder with time to spare waits at, m [E; "one or two steps
+/// behind" in coaching texts, unsourced as a measurement], deeper if his acceleration needs it
+/// to come through at `SETUP_THROUGH_MPS` (`setup_depth`); the time he must have in hand
+/// beyond getting there and coming through, s [E, unsourced]; within this of the spot he
+/// counts as there, m [E].
 const SETUP_BACK_M: f64 = 2.5;
 const SETUP_SPARE_S: f64 = 0.5;
 const SETUP_AT_M: f64 = 1.0;
-/// The pace he comes through at, m/s [E]: a little over the crow hop's 3 m/s (`HOP_MPS`).
+/// The speed he means to come through at from his spot, m/s [E]: a little over the crow hop's
+/// 3 m/s (`HOP_MPS`).
 const SETUP_THROUGH_MPS: f64 = 4.0;
 /// The approach to a ball on the ground (agent-models §5.2): how far past his intercept a
 /// chaser looks for a better take, s; the step he looks at, s; how much earlier a later take
@@ -1589,6 +1591,76 @@ fn run_time_from(d: f64, v0: f64, v_max: f64, tau: f64) -> f64 {
     0.5 * (lo + hi)
 }
 
+/// Distance covered in `t` from speed `v0` toward a point with the movement step's top speed
+/// held at `vc` (agent-models §5.3): up to it by the speed law ([`run_dist_from`]); down to it
+/// braking at `BRAKE`, then at it.
+fn paced_dist(t: f64, v0: f64, vc: f64, tau: f64) -> f64 {
+    if v0 <= vc {
+        return run_dist_from(t, v0, vc, tau);
+    }
+    let t_b = (v0 - vc) / BRAKE;
+    if t <= t_b {
+        return v0 * t - 0.5 * BRAKE * t * t;
+    }
+    (v0 * v0 - vc * vc) / (2.0 * BRAKE) + vc * (t - t_b)
+}
+
+/// The top speed (`step_toward`'s) with which a run of `d` from `v0` toward a point takes
+/// exactly `t` ([`paced_dist`]; agent-models §5.5, the set-up's come-through, timed to the
+/// ball): `v_max` if even that is not enough; by bisection.
+fn paced_speed(d: f64, v0: f64, t: f64, v_max: f64, tau: f64) -> f64 {
+    if t <= DT || paced_dist(t, v0, v_max, tau) <= d {
+        return v_max;
+    }
+    let (mut lo, mut hi) = (0.0, v_max);
+    for _ in 0..40 {
+        let mid = 0.5 * (lo + hi);
+        if paced_dist(t, v0, mid, tau) < d { lo = mid } else { hi = mid }
+    }
+    hi
+}
+
+/// The set-up behind a fly (agent-models §5.5): how deep behind the catch point an outfielder
+/// with abilities `a` sets up, m. From his spot he leaves when his full-effort run to the
+/// catch point (`run_time`) and the slack a sure call keeps (`CALL_SLACK_S`) are left, paced
+/// to be there as the ball comes down (`paced_speed`); the least depth, at least
+/// `SETUP_BACK_M`, from which he comes through so at `SETUP_THROUGH_MPS`. (At most twice
+/// `SETUP_BACK_M`: a man too slow for it comes through as fast as he can from there.)
+fn setup_depth(a: &FielderAttrs) -> f64 {
+    let through = |d: f64| {
+        let t = run_time(d, a.speed, a.tau_a) + CALL_SLACK_S;
+        paced_speed(d, 0.0, t, a.speed, a.tau_a) * (1.0 - m::exp(-t / a.tau_a))
+    };
+    let (mut lo, mut hi) = (SETUP_BACK_M, 2.0 * SETUP_BACK_M);
+    if through(lo) >= SETUP_THROUGH_MPS {
+        return lo;
+    }
+    if through(hi) < SETUP_THROUGH_MPS {
+        return hi;
+    }
+    for _ in 0..30 {
+        let mid = 0.5 * (lo + hi);
+        if through(mid) < SETUP_THROUGH_MPS { lo = mid } else { hi = mid }
+    }
+    hi
+}
+
+/// Time for a fielder to get to `spot` and be settled on it, s (the set-up behind a fly,
+/// agent-models §5.5): his motion across the line to it braked off (`BRAKE`), and along it the
+/// run to a stop there (`run_time_to_stop`, carrying past it and coming back if it is nearer
+/// than his braking distance).
+fn settle_time(fd: &Fielder, spot: Vec3) -> f64 {
+    let to = Vec3::new(spot.x - fd.pos.x, spot.y - fd.pos.y, 0.0);
+    let d = to.norm();
+    if d < 1e-9 {
+        return fd.vel.norm() / BRAKE;
+    }
+    let u = to * (1.0 / d);
+    let along = fd.vel.x * u.x + fd.vel.y * u.y;
+    let across = m::hypot(fd.vel.x - u.x * along, fd.vel.y - u.y * along);
+    (across / BRAKE).max(run_time_to_stop(d, along, fd.a.speed, fd.a.tau_a))
+}
+
 /// The slowest a runner holds on his way to a base he will stop at, m/s [E]: he does not
 /// crawl the last metre. The speed at which he arrives, then planted.
 const APPROACH_MIN_MPS: f64 = 1.0;
@@ -2367,13 +2439,14 @@ fn fielder_step(fd: &Fielder, t: f64, t_contact: f64) -> (Vec3, Vec3) {
     // On an approach (agent-models §5.2) he is timed against the ball at his take point, and
     // arrives there no faster than he planned, even late by a tick or two.
     if fd.setup == 2 && fd.role == Role::Chase && fd.t_int.is_finite() {
-        // Coming through a set-up catch (agent-models §5.5), timed against the ball: the pace
-        // that brings him to the catch point as it comes down by his read (he set off when the
-        // set-up pace would just do it), at most his top speed: recomputed every tick, so he speeds up if his
-        // acceleration has left him behind, and never runs past the point before the ball.
+        // Coming through a set-up catch (agent-models §5.5), timed against the ball: the top
+        // speed of his speed law with which his run from his motion brings him to the catch
+        // point as it comes down by his read (`paced_speed`; he set off with the slack a sure
+        // call keeps), at most his top speed: recomputed every tick, so he speeds up if a re-read
+        // has left him behind, and never runs past the point before the ball.
         let left = fd.t_int - t;
-        let pace = if left > DT { d / left } else { fd.a.speed };
-        let a = FielderAttrs { speed: fd.a.speed.min(pace), ..fd.a };
+        let pace = paced_speed(d, along, left, fd.a.speed, fd.a.tau_a);
+        let a = FielderAttrs { speed: pace, ..fd.a };
         return step_toward(fd.pos, fd.vel, fd.target, &a, false, 0.0, f64::INFINITY);
     }
     let (t_goal, arrive) = match fd.approach {
@@ -3439,12 +3512,17 @@ impl<'a> Sim<'a> {
 
     /// The set-up behind a fly (agent-models §5.5): an outfielder under a fly he has called
     /// sure, with fewer than two out and a runner on, expects to throw to the base ahead of the
-    /// lead runner. With time to spare by his own read he goes to a spot `SETUP_BACK_M` behind
-    /// his catch point, away from that base, and waits; he comes through when a run from where
-    /// he stands to the catch point at the set-up pace would just bring him there as the ball
-    /// comes down (from his actual distance, not the nominal one; the first build timed it
-    /// from 2.5 m at rest while he was still moving, reached the point half a second early and
-    /// ran on past it, and the ball fell behind him: 2026-11-20). Coming through he is timed
+    /// lead runner. With time to spare by his own read he goes to a spot `setup_depth` behind
+    /// his catch point, away from that base, and waits; he comes through when his run from
+    /// where he is to the catch point, by the movement model from his actual motion
+    /// (`run_time_to`: his acceleration, and any stop and turn), and the slack a sure call
+    /// keeps (`CALL_SLACK_S`) are what is left before the ball comes down. (The first build
+    /// timed it from 2.5 m at rest while he was still moving, reached the point half a second
+    /// early and ran on past it, and the ball fell behind him; the second timed it at 4 m/s
+    /// without his acceleration, left late, and lost two catches main makes, seed 155 play 23
+    /// and seed 264 play 109: approach note §2, §6.) He goes to the spot, and stays on his way
+    /// there, only while he can be settled on it (`settle_time`) and still come through so;
+    /// otherwise he plays the ball plainly: the catch comes first. Coming through he is timed
     /// against the ball (`fielder_step`) at his latest read of the catch point. The spot and
     /// the stage: (target, 1 or 2).
     fn fly_setup(&self, i: usize) -> Option<(Vec3, u8)> {
@@ -3467,31 +3545,41 @@ impl<'a> Sim<'a> {
             return None;
         }
         let dir = to.normalized();
-        let back = pt - dir * SETUP_BACK_M;
+        let depth = setup_depth(&fd.a);
+        let back = pt - dir * depth;
         // No room behind it (at the wall): he takes it where it comes down.
         if self.inp.field.body_clearance(back.x, back.y, BODY_R).dist < 0.0 {
             return None;
         }
         let left = fd.t_int - self.t;
-        let d_pt = m::hypot(pt.x - fd.pos.x, pt.y - fd.pos.y);
-        // The come-through is timed at the set-up pace over his actual distance; the pace that
-        // keeps him on time then rises as his acceleration lags, so he takes it a little faster.
-        // (It also leaves him late on some balls: two catches main makes are lost so, seed 155
-        // play 23 and seed 264 play 109; timed with the lag, `run_time`, both are made but he
-        // comes through under the crow hop's speed. Approach note §5, open.)
-        let come = d_pt / SETUP_THROUGH_MPS;
+        let field = self.inp.field;
+        // His come-through from where he is, and from the spot at rest.
+        let come = run_time_to(field, fd, pt, 0.0) + CALL_SLACK_S;
+        let come_back = run_time(depth, fd.a.speed, fd.a.tau_a) + CALL_SLACK_S;
+        // Settled on the spot: what is left of his reaction, then his run there to a stop.
+        let settle = (self.inp.t_contact + fd.a.reaction - self.t).max(0.0) + settle_time(fd, back) + wall_delay(field, fd, back, 0.0);
         let at_back = m::hypot(back.x - fd.pos.x, back.y - fd.pos.y) <= SETUP_AT_M;
+        // Already behind the ball: the catch point ahead of him, within `ANGLE_KEEP_DEG` of the
+        // line through it to the base (as coming through on the angle from contact, §5.2).
+        let rel = Vec3::new(pt.x - fd.pos.x, pt.y - fd.pos.y, 0.0);
+        let behind = rel.norm() > SETUP_AT_M && rel.dot(dir) >= rel.norm() * m::cos(ANGLE_KEEP_DEG.to_radians());
         if fd.setup == 1 || at_back {
-            // On his way to the spot or waiting there: he goes when the run would just bring him
-            // to the ball; caught short of the spot with the ball coming, he plays it plainly.
+            // On his way to the spot or waiting there: he goes when his run would just bring him
+            // to the ball with the slack in hand; caught short of the spot with the ball coming,
+            // he plays it plainly, unless he is already behind the ball.
             if left <= come {
-                return at_back.then_some((pt, 2));
+                return (at_back || behind).then_some((pt, 2));
             }
-            let come_back = SETUP_BACK_M / SETUP_THROUGH_MPS;
-            return (at_back || left >= self.eta(i, back) + come_back).then_some((back, 1));
+            if at_back || left >= settle + come_back {
+                return Some((back, 1));
+            }
+        } else if left >= settle + come_back + SETUP_SPARE_S {
+            return Some((back, 1));
         }
-        let come_back = SETUP_BACK_M / SETUP_THROUGH_MPS;
-        (left >= self.eta(i, back) + come_back + SETUP_SPARE_S).then_some((back, 1))
+        // No time to settle on the spot: already behind the ball with time to spare, he comes
+        // through from where he is, timed to it, slower than from the spot; otherwise he plays
+        // it plainly.
+        (behind && left >= come + if fd.setup == 1 { 0.0 } else { SETUP_SPARE_S }).then_some((pt, 2))
     }
 
     /// The bases an infielder expects to throw to after taking the ball, from what everyone sees
@@ -16421,6 +16509,7 @@ mod tests {
             (v.dot(home), past)
         };
         let (set_up, past) = come_through(&[(R, 3)]);
+        eprintln!("runner on third: he comes through at {set_up:.2} m/s toward home, at most {past:.2} m past the catch point before the ball");
         assert!(set_up > throwing::HOP_MPS, "he comes through at {set_up:.2} m/s toward home");
         assert!(past <= REACH, "he was {past:.2} m past the catch point before the ball came down");
         let (none, _) = come_through(&[]);

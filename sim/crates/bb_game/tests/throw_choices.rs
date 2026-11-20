@@ -175,3 +175,37 @@ fn seed_65147_play_10_an_outfielder_takes_a_grounder_through_the_hole_both_left_
     assert_eq!(who & 0x7F, 9, "fielder {who} secured it first at ({x:.1}, {y:.1})");
     assert!(x.hypot(y) < 100.0 && t - contact < 6.0, "fielded at ({x:.1}, {y:.1}), {t:.2} s");
 }
+
+/// The first glove possession and whether the ball had touched the ground or a wall before it.
+fn first_secured(out: &LiveOutput) -> (f64, u16, bool) {
+    let (t, who) = out.facts.iter().find_map(|f| match f {
+        Input::GloveSecured { t, fielder, .. } => Some((*t, *fielder)),
+        _ => None,
+    }).expect("someone fields it");
+    let down = out.facts.iter().any(|f| matches!(f, Input::BallTouched { t: tt, what: bb_rules::Touch::Ground { .. } | bb_rules::Touch::Wall { .. } } if *tt < t));
+    (t, who, down)
+}
+
+#[test]
+fn seed_155_play_23_the_centre_fielder_setting_up_still_catches_the_deep_fly() {
+    // Agent-models §5.5, the set-up behind a fly: a deep fly to left-centre, a runner on
+    // second, none out. The centre fielder catches it on main; on `8621f54` he went for a spot
+    // behind the catch point at full speed, a late re-read put the catch point under him, he
+    // ran on past it toward the new spot, could no longer get back, and the left fielder took
+    // it on the bounce (approach note §5–§6). The catch comes first: he is set up only while he
+    // can be settled on the spot and still come through in time.
+    let (out, _, _) = replay(include_str!("fixtures/a4/155-23.json"));
+    let (t, who, down) = first_secured(&out);
+    assert!(!down && who & 0x7F == 8, "fielder {} secured it at {t:.2} s, after it came down: {down}", who & 0x7F);
+}
+
+#[test]
+fn seed_264_play_109_the_left_fielder_still_catches_the_sinking_liner() {
+    // Agent-models §5.5, the set-up behind a fly: a sinking liner to left, a runner on second,
+    // none out. Main's left fielder catches it at his shoetops; on `8621f54` his first read had
+    // it high and deep, he started for a spot behind it, and when the read came in he was a
+    // step behind and took it on the short hop, 0.06 s late (approach note §5–§6).
+    let (out, _, _) = replay(include_str!("fixtures/a4/264-109.json"));
+    let (t, who, down) = first_secured(&out);
+    assert!(!down && who & 0x7F == 7, "fielder {} secured it at {t:.2} s, after it came down: {down}", who & 0x7F);
+}
