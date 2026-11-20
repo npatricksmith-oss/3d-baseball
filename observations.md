@@ -4,7 +4,7 @@ The owner's list of what he has seen and wants, with where each stands. The lett
 
 `[x]` done · `[~]` partly done (the note says what is left) · `[ ]` not started
 
-**Last updated:** 2026-11-19
+**Last updated:** 2026-11-20
 
 # Added 2026-11-16
 
@@ -64,6 +64,7 @@ Fielding and throwing:
 - [x] A. Throwing motion doesn't look realistic. *Fielders now throw with a coded motion, hand on the ball's real release point. You have not seen it moving yet.*
 - [x] A. A hurried throw loses accuracy and speed. If a player has time to get balanced, then the throw can gain accuracy and speed. *See below: fielders still choose to hurry too often.*
 - [ ] A. The outfield throw home (2026-11-19, your answer to Q32; your write-up is [docs/baseball-throw.md](docs/baseball-throw.md)). In order of what decides how quickly and accurately it gets there: 1. How the fielder catches the ball. If he catches it on the run with momentum away from the target base, he either throws off balance (less accuracy and power) or takes a beat to stop, turn, plant his back foot and throw hard and accurately, which takes time. Good fielders set up under the fly so that they catch it with a little forward momentum toward the target, for a more accurate and harder throw. 2. The cutoff: on singles and sacrifice flies the outfielder throws low *through* the cutoff man; the catcher calls "cut" or lets it go, and a cut ball goes to second or third; deep balls (about 280 ft or more) go to a relay man. *Written into the fielding spec (agent-models §5.5) as decided. Being built (2026-11-19): the stop for momentum away from the target, the crow-hop gain toward it, the low throw through the cutoff and the relay from about 280 ft. Momentum across the line waits (your Q33) for fielders who slow into the ball and round it, the next job, with setting up behind a fly.*
+- [~] A. Infielder throws should behave the same (physics-wise) as outfielders regarding the mechanics of throwing as well (2026-11-20). *Partly there already: the stop before a set throw (motion away from the target) and the extra speed from coming through the ball toward the target apply to every fielder, infielders included, once the outfield throw work merges. Left: infielders do not yet slow into the ball or round it to come through it toward first (that is the next job, and it will cover infielders), and motion across the line (a backhand in the hole, a throw across the body) is not charged yet.*
 - [~] A. Each player has throwing ratings (accuracy, speed, throwing set-up time). *The ratings exist in the model; every player is average until players get their own ratings.*
 - [~] A. Smarter player decisions based on runners on base and number of outs. E.g. with a runner on 3rd and 2 outs, fielders play to get the force out at first or second instead of throwing home. *Throw choices weigh outs and runners; more cases are in your saved plays below.*
 - [~] A. Players dive for balls, increasing range. Takes effort to rise back up to throw if the catch or grounder has been gotten. *Dives and the get-up work in the sim at a realistic rate. Since 2026-11-16 the dive is its own motion: laid out with the glove on the ball, down, up through hands and knees. Left: every dive is head-first straight at the ball. You have not seen it moving yet.*
