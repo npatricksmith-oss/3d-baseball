@@ -461,6 +461,8 @@ void ABbDirector::BeginPlay()
 	{
 		int32 Cut = 1;
 		FParse::Value(Cmd, TEXT("BbSideCut="), Cut);
+		FParse::Value(Cmd, TEXT("BbSideCardHold="), SideCardHoldS);
+		FParse::Value(Cmd, TEXT("BbCardEnterAt="), SideCardEnterAt);
 		bSideCut = Cut != 0;
 	}
 	bStagingLog = FParse::Param(Cmd, TEXT("BbStagingLog"));
@@ -606,7 +608,7 @@ void ABbDirector::BeginPlay()
 	RequestNext();
 }
 
-float ABbDirector::SideCutFade()
+float ABbDirector::SideCutFade(float SimDt, float RealDt)
 {
 	if (!bSideCutPlanned)
 	{
@@ -622,16 +624,44 @@ float ABbDirector::SideCutFade()
 		}
 		// Black: skip the middle of the jog. The movers (on ResetTime) and the players going
 		// off (on ExitClock) jump together, so everyone is where the full changeover would
-		// have him SideCutHoldS before the picture returns.
-		const float Skip = FMath::Max(0.f, BackAt - SideCutHoldS - ResetTime);
+		// have him as the picture is due back; both then wait while the card is held.
+		const float Skip = FMath::Max(0.f, BackAt - ResetTime);
 		ResetTime += Skip;
 		ExitClock += Skip;
 		bSideCutJumped = true;
+		bSideCardOn = SideCardHoldS > 0.f;
+		bSideCardSkip = false;
+		SideCardHeldS = 0.f;
 		if (bStagingLog)
 		{
 			UE_LOG(LogBb, Display, TEXT("BB_SIDECUT play=%u skipped=%.2f of %.2f s back_at=%.2f"), NextPlay.Info.play_index, Skip, ResetDuration, BackAt);
 		}
 		return 1.f;
+	}
+	if (bSideCardOn)
+	{
+		// The card is held on real time: the speed keys and the rush do not shorten it.
+		SideCardHeldS += bPaused ? 0.f : RealDt;
+		if (SideCardEnterAt >= 0.f && SideCardHeldS >= SideCardEnterAt)
+		{
+			SideCardEnterAt = -1.f;
+			bSideCardSkip = true;
+		}
+		if (bSideCardSkip || SideCardHeldS >= SideCardHoldS)
+		{
+			bSideCardOn = false;
+			if (bStagingLog)
+			{
+				UE_LOG(LogBb, Display, TEXT("BB_CARD play=%u held=%.2f of %.1f s%s"), NextPlay.Info.play_index, SideCardHeldS, SideCardHoldS, bSideCardSkip ? TEXT(" (Enter)") : TEXT(""));
+			}
+		}
+		else
+		{
+			// Everything stands still behind the black.
+			ResetTime -= SimDt;
+			ExitClock -= SimDt;
+			return 1.f;
+		}
 	}
 	return 1.f - FMath::Clamp((ResetTime - BackAt) / SideCutFadeS, 0.f, 1.f);
 }
@@ -1205,6 +1235,7 @@ void ABbDirector::ReplayBack()
 			bSame = true;
 			bReset = false;
 			bSideCutPlanned = false;
+			bSideCardOn = false;
 			if (APlayerController* PC = GetWorld()->GetFirstPlayerController())
 			{
 				if (PC->PlayerCameraManager)
@@ -1946,7 +1977,7 @@ bool ABbDirector::StartReset(const FBbPlay& Next)
 		}
 	}
 	// Worth cutting only if there is a middle to skip.
-	bSideCutPlanned = bSideCut && bSideChange && ResetDuration > SideCutLeadS + 2.f * SideCutFadeS + SideCutHoldS + SideCutTailS + 2.f;
+	bSideCutPlanned = bSideCut && bSideChange && ResetDuration > SideCutLeadS + 2.f * SideCutFadeS + SideCutTailS + 3.5f;
 	bSideCutJumped = false;
 	if (bStagingLog)
 	{
@@ -3444,7 +3475,16 @@ void ABbDirector::Tick(float DeltaSeconds)
 		// ready to be thrown, then back to the chosen speed (owner, 2026-11-15). Again: stop.
 		if (PC->WasInputKeyJustPressed(EKeys::Enter))
 		{
-			bRush = !bRush;
+			if (bSideCardOn)
+			{
+				// The between-innings card: Enter ends the hold and goes on to the next pitch.
+				bSideCardSkip = true;
+				bRush = true;
+			}
+			else
+			{
+				bRush = !bRush;
+			}
 		}
 		if (PC->WasInputKeyJustPressed(EKeys::R))
 		{
@@ -3696,7 +3736,7 @@ void ABbDirector::Tick(float DeltaSeconds)
 		if (bReset)
 		{
 			ResetTime += SimDt;
-			const float Black = SideCutFade();
+			const float Black = SideCutFade(SimDt, DeltaSeconds);
 			if (APlayerController* PC = GetWorld()->GetFirstPlayerController())
 			{
 				if (PC->PlayerCameraManager)
@@ -3706,6 +3746,7 @@ void ABbDirector::Tick(float DeltaSeconds)
 				if (ABbHUD* CardHud = Cast<ABbHUD>(PC->GetHUD()))
 				{
 					CardHud->CardAlpha = Black;
+					CardHud->bCardHint = bSideCardOn;
 					if (Black > 0.f && CardHud->Card.IsEmpty())
 					{
 						// The half just played is the board before the last play.
@@ -4496,6 +4537,7 @@ void ABbDirector::Tick(float DeltaSeconds)
 				}
 				bReset = false;
 				bSideCutPlanned = false;
+				bSideCardOn = false;
 				if (APlayerController* PC = GetWorld()->GetFirstPlayerController())
 				{
 					if (PC->PlayerCameraManager)

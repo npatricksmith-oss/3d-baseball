@@ -62,6 +62,8 @@ public:
 	int32 CardRuns[2] = { 0, 0 };
 	/** 0 hidden, 1 fully shown. */
 	float CardAlpha = 0.f;
+	/** The card is held until Enter or its time is up: say so under it. */
+	bool bCardHint = false;
 	/** The line score on that card: the sim's box score through the pitches shown (the same
 	 *  one the scoreboard in the park reads). Without it the card shows the runs alone. */
 	BbBoxScore LineBox{};
