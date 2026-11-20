@@ -19,9 +19,8 @@ Status: `[ ]` not started · `[~]` partly done · `[?]` needs an owner decision
 
 **State.** Nothing is waiting on the owner. **Running** (herdr-app Workers tab):
 - `approach` (Opus, high; terminal `t34`; worktree `.claude/worktrees/runner-decision`, branch `work/approach` from `dce9769`; job file WORKER-APPROACH.md): fielders slow into the ball and round it, so they take it moving toward their target; infielders included (owner, 2026-11-20); the set-up behind a fly; then the across term and Q32's drift accuracy restored. Checks: Tango's ≈1.2 s pickup-to-release, triples (1.02 a team-game against MLB about 0.14), outfield assists (0.287 against 0.133), the frozen infield plays. Ledger row, then an Opus review.
-- `client-51001` (Sonnet, high; terminal `t36`; worktree `.claude/worktrees/saved-plays`, branch `work/client-51001`; job file WORKER-CLIENT51001.md): the umpire's fair-ball signal (89, 146), the camera not moving before contact (112), the inning-change score card held 10 s or until Enter (128). Client only.
 
-**Next Coordinator:** when `t36` stops, check its shots, a Sonnet review (client only, cannot alter a game), merge. When `t34` stops: pre-merge check, Opus review, merge; then the saved-play fixes ("Open sim work" §3, from the [diagnosis note](docs/calibration/2026-11-20-saved-plays-51001.md), merged).
+**Next Coordinator:** when `t34` stops: pre-merge check, Opus review, merge; then the saved-play fixes ("Open sim work" §3, from the [diagnosis note](docs/calibration/2026-11-20-saved-plays-51001.md)). Merged 2026-11-20: the client fixes from the same saved plays (fair-ball signal, camera after contact, inning card held 10 s; [Sonnet review](docs/reviews/2026-11-20-sonnet-client-51001-review.md), resolved).
 
 **Merged 2026-11-20: the catch sets up the throw** (`dce9769`; owner's Q32 under Q33; [note](docs/calibration/2026-11-19-catch-throw.md); [Opus review](docs/reviews/2026-11-19-opus-catch-throw-review.md) and [re-review](docs/reviews/2026-11-20-opus-catch-throw-fix-review.md), both resolved). Runs 4.24 → 4.27 [4.47 → 4.57]. The plant on motion away, the crow-hop gain, the throw through a cutoff man 45 ft out reaching the plate on one hop, the relay from 80 m out, runners' beliefs follow what they can see. Triples rose 0.87 → 1.02 a team-game (the away plant; the approach should bring them down). Tags from third 64% (MLB 75–80%), from second 15% (MLB 30%).
 
@@ -137,7 +136,6 @@ Check the code again before starting one.
 
 ### Priority A, not done
 
-- [ ] **Client, from the owner's seed 51001 saved plays (2026-11-20):** the plate umpire signals a fair ball (pointing toward the infield) as soon as a ball down the line is fair (89, 146); the camera must not move in on the swing before the bat meets the ball (112: the owner read it as the outcome being decided before contact); the inning-change score card stays 10 s or until Enter (128). A Sonnet client job, after `diag-51001`.
 - [~] **A4. Throw choices from the outs and the runners.** Built with review fixes; more cases are items 2 and 3 above.
 - [~] **A5. Dives.** Rate and motion are in. Left: every dive is head-first straight at the ball.
 - [~] **A6. Slides.** Client only: a runner slides feet-first when a play is being made on him. The sim has no slide (agent-models §6.2); see item 1 above for the dead stop.

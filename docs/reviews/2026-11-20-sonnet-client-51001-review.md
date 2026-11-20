@@ -39,4 +39,10 @@ Seen in the worker's own shot `client/Saved/Shots/shot_21.png` and re-read by me
 
 ## Resolution
 
-Open.
+Resolved 2026-11-20 by the Coordinator; merged with `work/client-51001`. Fixes by the Sonnet worker `client-51001`; no re-review (small, client-only, each covered by a headless check). The Coordinator's check: client build, `client/check-fair-signals.sh` and `-BbSavedPlayCheck`.
+
+- **P1 fixed** (`5092d6d`). Nearness is the angle from the foul line seen from home (`FairNearLineDeg` 4°), at the place the ball is decided. `client/check-fair-signals.sh` checks the owner's plays: 89 and 146 give one fair signal each, 66 and 102 none.
+- **P2 fixed** (`a6f3e99`). `BbHud::TrimUnplayed` drops the next half's empty slot, for the between-innings card and the park scoreboard.
+- **P3 (hint) fixed** (`6d490e1`). "Enter: continue" is drawn under the card's own box.
+- **P3 (stale count) fixed** (`bb4ba64`). Re-measured on seed 7, 94 pitches: 60 signals (33 strikes, 17 outs, 7 fouls, 2 fairs, 1 safe).
+- **P3 (camera margin)** no change: the cut follows contact by 1–2 frames, never before it.
