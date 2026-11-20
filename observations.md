@@ -116,13 +116,13 @@ Catcher:
 Watch any of them again with `client/run.sh -BbSavedPlay="saved-plays/<file>.toml"` (files `seed51001-play<N>-…`). Played on main `b8898d3`, before the outfield throw work merged.
 
 Fielding:
-- [ ] 66. 2nd baseman should have tried for double play. There was more than enough time. Decided not to throw to second base. Why?
-- [ ] 168. That should have been a double play attempt. The fielder understands the baseball situation (1 out, 1 runner on first, potential force out at 2nd, potential double play if a ground ball). So he should toss quickly to the shortstop covering the base so the shortstop can make an attempt at first.
-- [ ] 102. 2nd baseman hardly moved when the ball was hit. Realistic or no?
-- [ ] 71. Right fielder makes error tracking the rolling ball into the outfield. It goes by him and runner gets a triple. Why? I think the fielder's tracking is off.
+- [ ] 66. 2nd baseman should have tried for double play. There was more than enough time. Decided not to throw to second base. Why? *Found (diagnosis note, [docs/calibration/2026-11-20-saved-plays-51001.md](docs/calibration/2026-11-20-saved-plays-51001.md)): the shortstop fielded it and misjudged when the covering second baseman would reach the bag, treating him as standing still though he was already running. So the force at second looked doubtful and he took the sure out at first. Fix queued after the job running now; with it he forces the runner at second by 0.43 s.*
+- [ ] 168. That should have been a double play attempt. The fielder understands the baseball situation (1 out, 1 runner on first, potential force out at 2nd, potential double play if a ground ball). So he should toss quickly to the shortstop covering the base so the shortstop can make an attempt at first. *Found: the shortstop covering second stops dead on the bag instead of crossing it, so he gets there about 0.4 s late and there is no time left for the throw to first. Fix queued: a cover man who is late takes the bag on the move; with it this play is a 4-6-3 double play. Double plays per chance are already a little above MLB's, so they get re-measured.*
+- [ ] 102. 2nd baseman hardly moved when the ball was hit. Realistic or no? *Found: not chasing was right (the ball was out of his reach even with a dive, and he read it correctly). But the infield's job assignments left him with no job for 0.75 s, then swapped jobs with the shortstop. Fix queued: on a ball through the infield the middle infielder on the ball's side goes out as the cutoff man and the other covers second, from the first moment.*
+- [ ] 71. Right fielder makes error tracking the rolling ball into the outfield. It goes by him and runner gets a triple. Why? I think the fielder's tracking is off. *Found: you are right. His read of the liner in the air was off by 4–5 m (a possible misjudgment), but at the first bounce his tracking of the ball stops and a fresh, worse guess replaces it, which put the ball 15 m closer than it was. Fix queued: he keeps tracking the ball through its bounces; with a true read he holds the batter to a single.*
 
 Running:
-- [ ] 90. Runner gives up during a rundown. Need to work on fielders performing rundowns as well. *(The rundown is planned: TASKS "Open sim work" §1, Q11.)*
+- [ ] 90. Runner gives up during a rundown. Need to work on fielders performing rundowns as well. *Found: the stand-in lets a trapped runner turn round only once; he used it, so he could not go back when the ball went to third. The real rundown is planned (TASKS "Open sim work" §1, Q11).*
 
 Umpire, camera and screen:
 - [ ] 89, 146. A fair ball down the line: the umpire should signal it by pointing toward the infield as soon as it is officially fair.
