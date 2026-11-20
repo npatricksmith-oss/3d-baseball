@@ -3161,7 +3161,9 @@ impl<'a> Sim<'a> {
         }
         let left = fd.t_int - self.t;
         let d_pt = m::hypot(pt.x - fd.pos.x, pt.y - fd.pos.y);
-        let come = run_time(d_pt, SETUP_THROUGH_MPS, fd.a.tau_a);
+        // The come-through is timed at the set-up pace over his actual distance; the pace that
+        // keeps him on time then rises as his acceleration lags, so he takes it a little faster.
+        let come = d_pt / SETUP_THROUGH_MPS;
         let at_back = m::hypot(back.x - fd.pos.x, back.y - fd.pos.y) <= SETUP_AT_M;
         if fd.setup == 1 || at_back {
             // On his way to the spot or waiting there: he goes when the run would just bring him
@@ -3169,10 +3171,10 @@ impl<'a> Sim<'a> {
             if left <= come {
                 return at_back.then_some((pt, 2));
             }
-            let come_back = run_time(SETUP_BACK_M, SETUP_THROUGH_MPS, fd.a.tau_a);
+            let come_back = SETUP_BACK_M / SETUP_THROUGH_MPS;
             return (at_back || left >= self.eta(i, back) + come_back).then_some((back, 1));
         }
-        let come_back = run_time(SETUP_BACK_M, SETUP_THROUGH_MPS, fd.a.tau_a);
+        let come_back = SETUP_BACK_M / SETUP_THROUGH_MPS;
         (left >= self.eta(i, back) + come_back + SETUP_SPARE_S).then_some((back, 1))
     }
 
@@ -3210,6 +3212,10 @@ impl<'a> Sim<'a> {
     /// at full speed, no approach (he goes straight at it, as before). All from his own read
     /// (`belief`, `t_int`), his own body and what everyone sees.
     fn plan_approach(&self, i: usize) -> Option<(Vec3, f64, f64)> {
+        #[cfg(test)]
+        if tests::NO_APPROACH.with(|c| c.get()) {
+            return None;
+        }
         let fd = &self.f[i];
         let dbg = std::env::var("BB_AP_DBG").is_ok(); // ZZ-DBG
         let pred = fd.belief.as_ref()?;
@@ -3223,7 +3229,9 @@ impl<'a> Sim<'a> {
         let bases = self.throw_bases(i);
         let (st, start) = self.planning_state(i);
         let field = self.inp.field;
-        let t_last = (fd.t_int + APPROACH_LOOK_S).min(pred.t_end());
+        // (Past the end of its path the ball lies still: a ball he reaches after it has stopped
+        // has no deadline, and his time in hand there grows with the time he takes.)
+        let t_last = fd.t_int + APPROACH_LOOK_S;
         let mut best: Option<(f64, Vec3, f64, f64)> = None;
         let mut first = true;
         let mut t = fd.t_int;
@@ -6959,6 +6967,12 @@ fn simulate_live_inner(inp: &LiveInput, st: &mut RulesState) -> LiveOutput {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    thread_local! {
+        /// Test switch: chasers go straight at their intercept (the approach of agent-models
+        /// §5.2 off), for old-versus-new comparisons.
+        pub(super) static NO_APPROACH: std::cell::Cell<bool> = const { std::cell::Cell::new(false) };
+    }
     use crate::play::home_positions;
     use bb_math::units::MPH;
 
@@ -15541,4 +15555,97 @@ mod tests {
         }
     }
 
+
+    /// One ground ball at the shortstop, played out with nobody on: when he secured it, his
+    /// velocity then, and when he let the throw to first go. `approach`: the approach of
+    /// agent-models §5.2 on or off.
+    fn shortstop_grounder(v: Vec3, approach: bool) -> (f64, Vec3, Vec3, f64) {
+        NO_APPROACH.with(|c| c.set(!approach));
+        let fx = fixture(&[]);
+        let mut inp = input(&fx, vec![RunnerIn { id: fx.st.batter, base: 0, speed: 8.2, tau_s: bb_agents::running::LEAGUE_TAU_S }]);
+        inp.ball = BallState { r: Vec3::new(0.0, 0.6, 0.6), v, w: Vec3::ZERO };
+        let mut st = fx.st.clone();
+        let out = simulate_live(&LiveInput { record: true, ..inp }, &mut st);
+        NO_APPROACH.with(|c| c.set(false));
+        let (t, who) = out.secured[0];
+        let track = &out.actors[(who & 0x7f) as usize - 1].1;
+        let k = track.iter().rposition(|(tt, _)| *tt <= t + 1e-9).unwrap();
+        let (a, b) = (track[k - 1], track[k]);
+        let vel = (b.1 - a.1) * (1.0 / (b.0 - a.0));
+        (t, b.1, vel, out.released.first().map_or(f64::NAN, |r| r.0))
+    }
+
+    /// agent-models §5.2, the approach: a routine ground ball at the shortstop. Going straight
+    /// at his intercept (the old rule) he takes it at a run, mostly across the line to first, and
+    /// owes the plant of §5.5 for it. With the approach he slows into a later hop, takes it moving
+    /// no faster off that line than the plant leaves free (2 m/s, with a tick's slack), and lets
+    /// the throw go no later than going straight would (old-versus-new bound). His braking never
+    /// beats the sourced limit (4.75 m/s², Harper et al. 2020).
+    #[test]
+    fn a_shortstop_with_time_in_hand_slows_into_a_routine_grounder() {
+        let v = Vec3::new(-0.27, 0.96, -0.08).normalized() * 30.0;
+        let (t0, p0, v0, r0) = shortstop_grounder(v, false);
+        let (t1, p1, v1, r1) = shortstop_grounder(v, true);
+        let to = |p: Vec3| base_pos(1) - p;
+        let (off0, off1) = (throwing::off_line_mps(v0, to(p0)), throwing::off_line_mps(v1, to(p1)));
+        eprintln!("straight: took it at {t0:.2} s moving {:.2} m/s ({off0:.2} off the line), let go {r0:.2}; approach: {t1:.2} s, {:.2} m/s ({off1:.2}), let go {r1:.2}", v0.norm(), v1.norm());
+        assert!(throwing::footwork_s(v0, to(p0), false) > 0.05, "going straight he owes a plant: {off0:.2} m/s off the line");
+        assert!(off1 <= throwing::PLANT_FREE_MPS + BRAKE * 0.1, "with the approach he takes it at {off1:.2} m/s off the line");
+        assert!(t1 >= t0 && r1 <= r0 + 1e-9, "taken {t0:.2} → {t1:.2} s, let go {r0:.2} → {r1:.2} s");
+    }
+
+    /// agent-models §5.5, the crow hop's gain is a set throw's: coming through toward first at
+    /// 5 m/s the shortstop's set throw has his arm plus 1.07 × (5 − 3) = 2.13 m/s (Wagner et al.
+    /// 2011, read); let go at full hurry (arm only, no step) it has none, and halfway half.
+    #[test]
+    fn the_crow_hop_gain_goes_with_the_set_throw() {
+        let fx = fixture(&[]);
+        let inp = input(&fx, vec![RunnerIn { id: fx.st.batter, base: 0, speed: 8.2, tau_s: bb_agents::running::LEAGUE_TAU_S }]);
+        let mut st = fx.st.clone();
+        let mut sim = new_sim(&inp, &mut st);
+        held_at(&mut sim, 5, Vec3::new(-8.0, 38.0, 0.0));
+        let to = base_pos(1) - sim.f[5].pos;
+        sim.f[5].catch_vel = to.normalized() * 5.0;
+        let arm = THROW_EFFORT * sim.f[5].a.arm;
+        let gain = throwing::MOMENTUM_GAIN * 2.0;
+        assert!((sim.throw_speed(5, base_pos(1), 0.0) - (arm + gain)).abs() < 1e-9);
+        assert!((sim.throw_speed(5, base_pos(1), 1.0) - arm).abs() < 1e-9);
+        assert!((sim.throw_speed(5, base_pos(1), 0.5) - (arm + 0.5 * gain)).abs() < 1e-9);
+    }
+
+    /// agent-models §5.5, the set-up behind a fly: with a runner on third and none out, a centre
+    /// fielder under a high fly he has time to spare on takes it moving toward home, faster than
+    /// a crow hop's 3 m/s (Wagner et al. 2011), as coaching describes ("get behind the catch",
+    /// note §3); without a runner on base he has no throw to set up for and takes it nearly
+    /// standing. Coming through he never gets past the catch point before the ball (the first
+    /// build's come-through ran on past it and the ball fell behind him; approach note §2): at
+    /// every recorded instant before the catch he is no farther past it, toward home, than his
+    /// reach.
+    #[test]
+    fn an_outfielder_with_time_sets_up_and_comes_through_the_catch() {
+        const R: AgentId = 0x0007;
+        let come_through = |on: &[(AgentId, u8)]| {
+            let fx = fixture(on);
+            let mut runners = vec![RunnerIn { id: fx.st.batter, base: 0, speed: 8.2, tau_s: bb_agents::running::LEAGUE_TAU_S }];
+            runners.extend(on.iter().map(|&(id, base)| RunnerIn { id, base, speed: 8.2, tau_s: bb_agents::running::LEAGUE_TAU_S }));
+            let mut inp = input(&fx, runners);
+            inp.ball = BallState { r: Vec3::new(0.0, 0.5, 1.0), v: Vec3::new(0.0, 24.0, 28.0), w: Vec3::new(bb_math::units::rpm_to_radps(2500.0), 0.0, 0.0) };
+            let mut st = fx.st.clone();
+            let out = simulate_live(&LiveInput { record: true, ..inp }, &mut st);
+            let (t_catch, who) = out.secured[0];
+            assert_eq!(who & 0x7f, 8, "the centre fielder catches it: {:?}", out.secured);
+            let track = &out.actors[CF].1;
+            let i = track.iter().rposition(|(t, _)| *t <= t_catch + 1e-9).unwrap();
+            let (a, b) = (track[i - 1], track[i]);
+            let v = (b.1 - a.1) * (1.0 / (b.0 - a.0));
+            let home = Vec3::new(-b.1.x, -b.1.y, 0.0).normalized();
+            let past = track[..i].iter().map(|(_, p)| (*p - b.1).dot(home)).fold(f64::NEG_INFINITY, f64::max);
+            (v.dot(home), past)
+        };
+        let (set_up, past) = come_through(&[(R, 3)]);
+        assert!(set_up > throwing::HOP_MPS, "he comes through at {set_up:.2} m/s toward home");
+        assert!(past <= REACH, "he was {past:.2} m past the catch point before the ball came down");
+        let (none, _) = come_through(&[]);
+        assert!(none < 1.5, "with nobody on he takes it at {none:.2} m/s toward home");
+    }
 }

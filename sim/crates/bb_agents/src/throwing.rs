@@ -437,7 +437,7 @@ mod tests {
     // at a constant limit scales with speed, so from 7 m/s he owes 1.47 × (7 − 2)/7 = 1.05 s.
     #[test]
     fn the_plant_is_the_stop_under_the_braking_limit() {
-        let to = Vec3::new(10.0, 0.0, 0.0);
+        let to = Vec3::new(30.0, 0.0, 0.0);
         let plant_7 = footwork_s(Vec3::new(-7.0, 0.0, 0.0), to, false);
         assert!((plant_7 - 1.47 * 5.0 / 7.0).abs() < 0.005, "{plant_7}");
         assert_eq!(footwork_s(Vec3::new(-2.0, 0.0, 0.0), to, false), 0.0);
@@ -454,6 +454,11 @@ mod tests {
         assert!(close(away_mps(Vec3::new(-3.0, 4.0, 0.0), to), 3.0) && close(away_mps(Vec3::new(4.0, 3.0, 0.0), to), 0.0));
         // Under the free 2 m/s in any direction, nothing.
         assert_eq!(footwork_s(Vec3::new(-1.2, 1.6, 0.0), to, false), 0.0);
+        // A toss (a target within 15 m) counts only motion away, like the pivot's exchange.
+        let toss = Vec3::new(12.0, 0.0, 0.0);
+        assert_eq!(footwork_s(Vec3::new(0.0, 7.0, 0.0), toss, false), 0.0);
+        assert!(close(footwork_s(Vec3::new(-7.0, 0.0, 0.0), toss, false), plant_7));
+        assert_eq!(exchange_footwork_s(Vec3::new(0.0, 7.0, 0.0), to, false), 0.0);
         // A dive: his get-up from a standstill replaces it.
         assert_eq!(footwork_s(Vec3::ZERO, to, true), 0.3);
         assert_eq!(footwork_s(Vec3::new(-5.0, 0.0, 0.0), to, true), 0.3);
@@ -497,7 +502,7 @@ mod tests {
     // none. Unknown drift (a dive) counts in full.
     #[test]
     fn the_drift_term_follows_the_unbraked_speed() {
-        let to = Vec3::new(10.0, 0.0, 0.0);
+        let to = Vec3::new(30.0, 0.0, 0.0);
         let fast = SetUp::new(0.65, 0.0, footwork_s(Vec3::new(0.0, 6.0, 0.0), to, false)).with_drift(6.0);
         assert!(close(fast.off_weight(1.0), 1.0) && close(fast.sigma_mult(1.0), 3.0));
         let slow = SetUp::new(0.65, 0.0, footwork_s(Vec3::new(0.0, 2.5, 0.0), to, false)).with_drift(2.5);
@@ -507,6 +512,23 @@ mod tests {
         assert_eq!((slow.off_weight(0.0), fast.off_weight(0.0)), (0.0, 0.0));
         let dive = SetUp::new(0.65, 0.0, footwork_s(Vec3::ZERO, to, true));
         assert_eq!(dive.off_weight(1.0), 1.0);
+    }
+
+    // A sourced check of the hurry rule with the drift term (approach note §3): Báez's backhand
+    // deep in the hole (Statcast, MLB.com 2020, read) was let go 0.60 s after he had it at 81.0
+    // mph, against his 88.3 mph max-effort arm (92%). An elite `Transfer` (grade 70: 0.65 s ×
+    // 1.08⁻² = 0.557 s), moving away from first at 4–5 m/s, let go at 0.60 s, keeps 88–91% of
+    // his arm under the rule: within a few points of the play.
+    #[test]
+    fn the_hurry_rule_matches_a_measured_backhand_exchange() {
+        let to = Vec3::new(30.0, -10.0, 0.0);
+        let base = 0.65 * transfer_scale(70.0);
+        for away in [4.0, 4.5, 5.0] {
+            let vel = to.normalized() * -away;
+            let su = SetUp::new(base, 0.0, footwork_s(vel, to, false)).with_drift(off_line_mps(vel, to));
+            let kept = su.speed_mult(su.hurry(0.60));
+            assert!((kept - 81.0 / 88.3).abs() < 0.05, "moving away at {away} m/s he keeps {kept:.3} of his arm");
+        }
     }
 
     // agent-models §5.5, all three terms together: set = Transfer + turn + footwork, and he can
