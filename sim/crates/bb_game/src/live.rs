@@ -216,9 +216,13 @@ const THROW_SCOOP_Z: f64 = 0.15;
 /// short, and its receiver steps in for it (a 3 m threshold read those as arriving later,
 /// on the hop at the bag, and runners took bases against them: catch-throw note §5).
 const LOW_THROW_READ_M: f64 = 8.0;
-/// ... unless a fielder visibly stands within this of where it comes down: then it is a throw
-/// to him (a relay), m [E].
+/// ... unless a fielder visibly stands within this of where it comes down, and not short of it:
+/// then it is a throw to him (a relay), m [E].
 const LOW_THROW_MAN_M: f64 = 4.0;
+/// ... and he stands no more than this short of that point along the throw, m [E]: the cutoff
+/// man the throw passes over stands 2.4–3.6 m short of where it comes down, and does not stop
+/// the runner following it on (Opus catch-throw re-review P3-1).
+const LOW_THROW_SHORT_M: f64 = 1.0;
 /// Step of a receiver's read of a throw on from where it comes down, s.
 const THROW_HOP_DT: f64 = 0.01;
 /// A receiver at a base steps in up to this far to take a throw in the air; one coming down
@@ -4785,16 +4789,59 @@ impl<'a> Sim<'a> {
                 .unwrap()
         };
         let (t_down, q_down) = track[arrive];
-        // A throw coming down far from every bag (`LOW_THROW_READ_M`) is a low throw meant to carry on along
-        // the ground (agent-models §5.5, through the cutoff man): he follows it on through the
-        // bounce, with the same physics, and takes the first base it comes within reach of after
-        // it comes down as the one it is going to (Opus catch-throw review P3-1; the last one
-        // would read a short throw to second that skips on toward home as a throw home).
-        // Otherwise the base nearest where it comes down.
-        // A fielder standing where it comes down is the man it is thrown to (a relay): the
-        // relay read below covers that.
-        let to_a_man = self.f.iter().any(|f| m::hypot(f.pos.x - q_down.x, f.pos.y - q_down.y) <= LOW_THROW_MAN_M);
-        if down.is_some() && near(q_down).1 > LOW_THROW_READ_M && !to_a_man {
+        // A throw coming down far from every bag (`LOW_THROW_READ_M`) is a low throw meant to
+        // carry on along the ground (agent-models §5.5, through the cutoff man). He follows it on
+        // through the bounce with the same physics, and the base it is going to is the one it is
+        // heading for: of the bags it is closing on as it comes down, the first one it passes
+        // nearest (the first minimum of its distance to a bag), however wide, timed when it comes
+        // within a receiver's reach of that bag or else at that closest pass (Opus catch-throw
+        // re-review P2-1: a catch radius named the next bag along the line when a noisy read
+        // passed the target a couple of metres wide). Otherwise the base nearest where it comes
+        // down. A fielder the ball comes down at is the man it is thrown to (a relay: the relay
+        // read covers that); a man short of that point on its line, the cutoff man it passes
+        // over, is not (re-review P3-1).
+        let u = {
+            let v = tr.knots.get(arrive).map_or(Vec3::ZERO, |k| k.s.v);
+            Vec3::new(v.x, v.y, 0.0).normalized()
+        };
+        let to_a_man = self.f.iter().any(|f| {
+            let off = Vec3::new(f.pos.x - q_down.x, f.pos.y - q_down.y, 0.0);
+            off.norm() <= LOW_THROW_MAN_M && off.dot(u) >= -LOW_THROW_SHORT_M
+        });
+        // The bags on its line: ahead of where he first sees it, within `LOW_THROW_READ_M` of the
+        // line of its flight; of those, the one nearest where it comes down.
+        let p0 = track[0].1;
+        let u0 = Vec3::new(s0.v.x, s0.v.y, 0.0).normalized();
+        let on_line = (1..=4u8)
+            .filter(|&b| {
+                let off = Vec3::new(base_pos(b).x - p0.x, base_pos(b).y - p0.y, 0.0);
+                off.dot(u0) > 0.0 && (off.x * u0.y - off.y * u0.x).abs() <= LOW_THROW_READ_M
+            })
+            .min_by(|&a, &c| {
+                let da = m::hypot(base_pos(a).x - q_down.x, base_pos(a).y - q_down.y);
+                let dc = m::hypot(base_pos(c).x - q_down.x, base_pos(c).y - q_down.y);
+                da.total_cmp(&dc)
+            });
+        // He follows it on only when he can see it is meant to: a man with the cutoff job for
+        // that base visibly stands on its line (`known_job`), short of where it comes down. Any
+        // other throw he reads as before, so a noisy read of an ordinary throw that comes down
+        // short does not make him bolder (Opus catch-throw re-review P2-1).
+        let cutoff_in_it = |b: u8| {
+            let bp = base_pos(b);
+            let line = Vec3::new(bp.x - p0.x, bp.y - p0.y, 0.0);
+            let len = line.norm();
+            len > 1e-9
+                && (0..9).any(|j| {
+                    let q = self.f[j].pos;
+                    let along = ((q.x - p0.x) * line.x + (q.y - p0.y) * line.y) / len;
+                    self.known_job(j).0 == Role::Relay(b) && along > 0.0 && along < len && ((q.x - p0.x) * line.y - (q.y - p0.y) * line.x).abs() / len < CUT_LINE_M
+                })
+        };
+        if let (Some(_), Some(b)) = (down, on_line)
+            && m::hypot(base_pos(b).x - q_down.x, base_pos(b).y - q_down.y) > LOW_THROW_READ_M
+            && !to_a_man
+            && cutoff_in_it(b)
+        {
             let land = (arrive..tr.knots.len()).map(|i| tr.knots[i]).find(|k| k.s.r.z <= env.ball.radius + 1e-6).or_else(|| (tr.stop == Some(0)).then(|| *tr.last()));
             if let Some(land) = land {
                 let on = batted_path_dt(env, self.inp.field, land.s, land.t, THROW_HOP_DT, |_, _| (0.0, 0.0));
@@ -4805,18 +4852,15 @@ impl<'a> Sim<'a> {
                     full.push((t, on.at(t).0));
                     t += THROW_HOP_DT;
                 }
-                let reached = full.iter().filter(|(t, q)| *t >= t_down && q.z <= PASS_MAX_Z).find_map(|&(t, q)| {
-                    let (b, d) = near(q);
-                    (d <= PASS_REACH_M).then_some((t, b))
-                });
-                if let Some((t_b, b)) = reached {
-                    // When it is nearest that bag.
-                    let bp = base_pos(b);
-                    let (t_arrive, _) = full.iter().filter(|(t, _)| *t <= t_b + 1e-9).map(|&(t, q)| (t, m::hypot(q.x - bp.x, q.y - bp.y))).filter(|x| x.1 <= PASS_REACH_M).min_by(|x, y| x.1.total_cmp(&y.1)).unwrap_or((t_b, 0.0));
-                    let cut = full.iter().position(|(t, _)| *t > t_arrive).unwrap_or(full.len());
-                    full.truncate(cut);
-                    return ThrownRead { dest: b, t_arrive, track: full };
-                }
+                // The base it is going to: of the bags on its line ahead of where he first sees
+                // it, the one nearest where it comes down.
+                let dist = |b: u8, q: Vec3| m::hypot(base_pos(b).x - q.x, base_pos(b).y - q.y);
+                let after = &full[arrive..];
+                let i_min = (0..after.len()).min_by(|&i, &j| dist(b, after[i].1).total_cmp(&dist(b, after[j].1)).then(i.cmp(&j))).unwrap_or(0);
+                let i_arr = (0..=i_min).find(|&i| dist(b, after[i].1) <= RECEIVE_REACH && after[i].1.z <= PASS_MAX_Z).unwrap_or(i_min);
+                let t_arrive = after[i_arr].0;
+                full.truncate(arrive + i_arr + 1);
+                return ThrownRead { dest: b, t_arrive, track: full };
             }
         }
         track.truncate(arrive + 1);
@@ -8865,6 +8909,14 @@ mod tests {
         let from = Vec3::new(0.0, 88.0, THROW_RELEASE_Z);
         let v = 37.0;
         let short = through_spot(88.0);
+        // The cutoff man the throw is kept low for: the first baseman at his spot, on the line,
+        // his job known to everyone (re-review P3-1: the first test left him off the field).
+        const B1: usize = 2;
+        sim.f[B1].role = Role::Relay(4);
+        sim.f[B1].pos = Vec3::new(0.0, short, 0.0);
+        sim.f[B1].target = sim.f[B1].pos;
+        jobs_become_known(&mut sim);
+        assert_eq!(sim.known_job(B1).0, Role::Relay(4));
         let el = cut_elev(&fx.env, THROW_RELEASE_Z, THROW_CATCH_Z, CUT_HEIGHT_M, 88.0, 88.0 - short, v).unwrap();
         let s0 = throw_state(from, Vec3::new(0.0, -1.0, 0.0), v, el);
         let read = sim.project_runner_throw(s0.r, s0.v);
@@ -8872,17 +8924,27 @@ mod tests {
         assert_eq!(read.dest, 4, "read as going to {}", read.dest);
         // He times it at the plate (within his catching reach of it), not 10 m short.
         assert!(read.t_arrive - sim.t > world - 0.2 && read.t_arrive - sim.t <= world + 0.02, "read {:.2} s, the world {world:.2} s", read.t_arrive - sim.t);
+        // A plain throw to second, which passes over the cutoff man toward home's line no
+        // further than second: going to second.
         let to2 = base_pos(2) - Vec3::new(0.0, 88.0, 0.0);
         let el = solve_throw(&fx.env, THROW_RELEASE_Z, THROW_CATCH_Z, to2.norm(), v).unwrap().elev;
         let s0 = throw_state(from, to2, v, el);
         assert_eq!(sim.project_runner_throw(s0.r, s0.v).dest, 2);
-        // The same throw 15% slow comes down well short of second and skips on, through second
-        // and toward home: it is still a throw to second, the first base it reaches.
+        // The same throw 15% slow comes down well short of second and skips on: it is still a
+        // throw to second (nobody has the cutoff job for second, so he reads it as before).
         let s0 = throw_state(from, to2, 0.85 * v, el);
         let tr = bb_physics::throw::fly_throw(&fx.env, s0, 0.0, 6.0);
         let down = tr.knots.windows(2).find(|w| w[0].s.r.z > THROW_CATCH_Z && w[1].s.r.z <= THROW_CATCH_Z).map(|w| w[1].s.r).unwrap();
         assert!((down - base_pos(2)).norm() > 2.0 * RECEIVE_REACH, "the slow throw must come down short of every bag: {down:?}");
         assert_eq!(sim.project_runner_throw(s0.r, s0.v).dest, 2);
+        // And with nobody in the throw home, he reads the low throw as before: home, at the
+        // point it comes down through catching height (he has no reason to expect a hop).
+        sim.f[B1].role = Role::Idle;
+        sim.f[B1].pos = base_pos(1);
+        jobs_become_known(&mut sim);
+        let s0 = throw_state(from, Vec3::new(0.0, -1.0, 0.0), v, cut_elev(&fx.env, THROW_RELEASE_Z, THROW_CATCH_Z, CUT_HEIGHT_M, 88.0, 88.0 - short, v).unwrap());
+        let plain = sim.project_runner_throw(s0.r, s0.v);
+        assert!(plain.dest == 4 && plain.t_arrive < read.t_arrive - 0.2, "no cutoff man: {} at {:.2} s", plain.dest, plain.t_arrive - sim.t);
     }
 
     /// agent-models §5.5, the relay man's exchange: on the throw home from the wall above, with
@@ -15169,4 +15231,5 @@ mod tests {
             assert_eq!(sim.f[0].role, Role::Chase, "the holder keeps his ball");
         }
     }
+
 }
