@@ -142,28 +142,28 @@ pub fn turn_extra_s(facing: Vec3, to_target: Vec3, throws: Hand) -> f64 {
 
 /// The plant owed before a set throw along `to_target` by a fielder who took the ball moving
 /// at `catch_vel` (`dove`: he took it on the ground from a dive), s (agent-models §5.5, the
-/// catch sets up the throw). Whatever of his motion is not toward the target (moving away, or
-/// across the line) must be stopped under his braking limit before he can plant his back foot
-/// and step to it; the part of that stop inside the glove-to-hand of his transfer
-/// ([`PLANT_OVERLAP_S`]) costs nothing. A dive replaces it: he gets up from a standstill.
+/// catch sets up the throw). His motion away from the target must be stopped under his
+/// braking limit before he can plant his back foot and step to it; the part of that stop
+/// inside the glove-to-hand of his transfer ([`PLANT_OVERLAP_S`]) costs nothing. A dive
+/// replaces it: he gets up from a standstill. Motion across the line is not charged: decided
+/// in Q32, deferred by the owner's Q33 (2026-11-19) until fielders slow into the ball and round
+/// it as real fielders do (the approach); without that, charging it took an outfielder's
+/// pickup-to-release to 1.46 s against an empirical 1.2 s with the tag.
 pub fn footwork_s(catch_vel: Vec3, to_target: Vec3, dove: bool) -> f64 {
     if dove {
         return DIVE_FOOTWORK_S;
     }
-    (off_line_mps(catch_vel, to_target) / BRAKE_MPS2 - PLANT_OVERLAP_S).max(0.0)
+    (away_mps(catch_vel, to_target) / BRAKE_MPS2 - PLANT_OVERLAP_S).max(0.0)
 }
 
-/// His speed off the line to his target: the part of `vel` (horizontal) that is not toward
-/// `to_target`, m/s (moving away counts whole; moving across counts its across part).
-pub fn off_line_mps(vel: Vec3, to_target: Vec3) -> f64 {
+/// His speed away from his target: the part of `vel` (horizontal) along the line to
+/// `to_target` taking him away from it, m/s (0 moving toward it or straight across).
+pub fn away_mps(vel: Vec3, to_target: Vec3) -> f64 {
     let tl = m::hypot(to_target.x, to_target.y);
     if tl < 1e-9 {
-        return m::hypot(vel.x, vel.y);
+        return 0.0;
     }
-    let (ux, uy) = (to_target.x / tl, to_target.y / tl);
-    let along = vel.x * ux + vel.y * uy;
-    let across = vel.x * uy - vel.y * ux;
-    m::hypot(along.min(0.0), across)
+    (-(vel.x * to_target.x + vel.y * to_target.y) / tl).max(0.0)
 }
 
 /// Ball speed a thrower adds by coming through the catch toward his target at `vel`, m/s
@@ -381,10 +381,12 @@ mod tests {
         assert!(footwork_s(Vec3::new(-2.1, 0.0, 0.0), to, false) > 0.0);
         // Toward the target: nothing to stop, at any speed.
         assert_eq!(footwork_s(Vec3::new(7.0, 0.0, 0.0), to, false), 0.0);
-        // Across the line counts as much as away; a diagonal counts its across part only.
-        assert!(close(footwork_s(Vec3::new(0.0, 5.0, 0.0), to, false), footwork_s(Vec3::new(-5.0, 0.0, 0.0), to, false)));
-        assert!(close(footwork_s(Vec3::new(4.0, 2.0, 0.0), to, false), 0.0));
-        assert!(close(off_line_mps(Vec3::new(4.0, 3.0, 0.0), to), 3.0) && close(off_line_mps(Vec3::new(-4.0, 3.0, 0.0), to), 5.0));
+        // Straight across the line: not charged (Q33, deferred until the approach is built).
+        assert_eq!(footwork_s(Vec3::new(0.0, 7.0, 0.0), to, false), 0.0);
+        // A diagonal away counts its away part only: 5 m/s at 53° off straight back is 3 m/s
+        // away, the same plant as 3 m/s straight away.
+        assert!(close(footwork_s(Vec3::new(-3.0, 4.0, 0.0), to, false), footwork_s(Vec3::new(-3.0, 0.0, 0.0), to, false)));
+        assert!(close(away_mps(Vec3::new(-3.0, 4.0, 0.0), to), 3.0) && close(away_mps(Vec3::new(4.0, 3.0, 0.0), to), 0.0));
         // A dive: his get-up from a standstill replaces it.
         assert_eq!(footwork_s(Vec3::ZERO, to, true), 0.3);
         assert_eq!(footwork_s(Vec3::new(-5.0, 0.0, 0.0), to, true), 0.3);

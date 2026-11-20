@@ -14453,10 +14453,8 @@ mod tests {
         let face = sim.f[B2].face.expect("facing");
         assert!(face.dot(approach) > 0.99, "faces {face:?}, not his approach {approach:?}");
         let world = sim.set_up_for(B2, base_pos(1)).set_s;
-        // (The world turns and plants toward first from where he stands, 0.59 m off the bag;
-        // the estimate from the bag. The plant counts his motion across the line to first, so
-        // the 1° between the two lines is worth about 0.006 s at 2.4 m/s; agent-models §5.5.)
-        assert!((world - predicted).abs() < 0.01, "the world's pivot {world:.4} s, the estimate {predicted:.4} s");
+        // (The world turns toward first from where he stands, 0.59 m off the bag.)
+        assert!((world - predicted).abs() < 0.005, "the world's pivot {world:.4} s, the estimate {predicted:.4} s");
     }
 
     /// agent-models §5.5: the holder's estimate of a double play uses the pivot model the
