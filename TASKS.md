@@ -17,7 +17,7 @@ Status: `[ ]` not started · `[~]` partly done · `[?]` needs an owner decision
 
 ## Resume here (2026-11-20, evening)
 
-**State.** Nothing is waiting on the owner. **One worker running** (a subagent of the Coordinator session, not a pane): Opus, high effort, in worktree `.claude/worktrees/runner-decision`, branch `work/approach`, job file WORKER-APPROACH-CONTACT.md there (git-excluded). If the session ended before it reported, check the branch past `55bf7b4` and restart the job from its last commit.
+**State.** Nothing is waiting on the owner. **One worker running** (a subagent of the Coordinator session, not a pane), the replacement for one stopped at about 16:04 when its background waits were killed: Opus, high effort, in worktree `.claude/worktrees/runner-decision`, branch `work/approach`, job file WORKER-APPROACH-CONTACT.md there (git-excluded), picking up from `8621f54` and an uncommitted gap test. The Coordinator watches it with `sim/target/codex-probes/coord/watch.sh` in that worktree. If the session ended before it reported, check the branch and start a replacement from its last commit (CLAUDE.md, owner 2026-11-20).
 
 **What the branch holds.** The approach (fielders slow into a ball they will throw; Q32's across and drift terms; the set-up behind a fly) and rounding (Q33), built and tested (482 pass) but never triggered in 600 games: sim fielders plan the route only once the ball is down, with 0.1–0.2 s in hand. Standard runs 4.38 [4.71] against main 4.27 [4.57]; first to third on singles 36.2% [35.1%] (MLB 31.7%); triples 1.02 → 0.82; set-up catches 9% → 35%. Note §6 of docs/calibration/2026-11-20-approach.md (on the branch).
 
