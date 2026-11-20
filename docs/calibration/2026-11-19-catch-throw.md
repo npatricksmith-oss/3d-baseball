@@ -11,7 +11,7 @@ Source tags as in the [throw-race note](2026-11-19-throw-race.md): `read` (page 
 - **Long throws are rainbows.** Outfield throws of 60–90 m leave at 14–18° and peak 5–9 m up, over any cutoff man's head. 17–28% come down short of the target (median 1.5–2.1 m short: speed noise near the aim), and the lateral miss is small (median 0.8–1.2 m, more than 3 m on 3–7%). Almost none go home: 12 of 7,038 such throws in 600 games; nearly all are returns to second with no play.
 - **Relays have almost vanished** (9 in 600 games), as the relay review found.
 - **Sources found:** a run-up toward the target adds about 7% of ball speed (1.6 m/s for 1.5 m/s more body speed, elite handball; read), with no loss of accuracy; a crow hop adds about 10% over a pitch (read). No measurement of an outfielder's plant or catch-to-release on a fly was found, nor an MLB share of throws through the cutoff by depth. One play (Reddick 2017, 276 ft, read) took 3.82 s from catch to the catcher.
-- **After the build (§5, §6):** as decided in Q32 (the plant also charging motion across the line), the build added about half a run a team-game and raised the outfielders' mean pickup-to-release from 1.01 s to 1.46 s, against an empirical ≈1.2 s with the tag. The owner's Q33 defers the across term until fielders slow into the ball and round it (the next job). The final build (with the Opus review's fixes) charges only motion away: runs 4.24 → 4.28 [4.47 → 4.50], pickup-to-release 1.08 s, tags from second and from third at main's levels, triples 0.87 → 1.09 a team-game (MLB about 0.14), mostly the plant on balls run down going away. The set-up behind a fly was built, dropped catches, and was taken out.
+- **After the build (§5, §6):** as decided in Q32 (the plant also charging motion across the line), the build added about half a run a team-game and raised the outfielders' mean pickup-to-release from 1.01 s to 1.46 s, against an empirical ≈1.2 s with the tag. The owner's Q33 defers the across term until fielders slow into the ball and round it (the next job). The final build, with the Opus review's and re-review's fixes, charges only motion away. Runs are 4.24 → 4.27 [4.47 → 4.57] and pickup-to-release 1.08 s. Tags from second and from third are at main's levels. Triples are 0.87 → 1.02 a team-game (MLB about 0.14), the plant on balls run down going away. 7 of 8 throws through a cutoff man reach the plate on the fly or one hop. The set-up behind a fly was built, dropped catches, and was taken out.
 - **The physics puts the relay where the owner said.** A throw through a cutoff man about 45 ft from the plate, passing him at head height, carries home on one hop and costs 0.02–0.06 s over the plain aim. With each route's expected miss cost, the relay (with the sourced 0.75 s exchange) beats it from about 246 ft at 34 m/s, 276 ft at 37 m/s and 302 ft at 40 m/s (§4). The owner's figure is about 280 ft. (Revised 2026-11-20: the first build passed the throw past the cutoff man at the relay spot, and it rolled in.)
 
 ## 1. How outfielders take the ball (as built, main `ab5c374`)
@@ -123,27 +123,39 @@ Times are from release to the ball reaching the plate, at any height. The miss c
 
 ## 5. After the change (`work/catch-throw`, against main `ab5c374`)
 
-**The final build** (`55402ee`: the owner's Q33 with the Opus review's fixes). The plant charges only motion away from the target. A throw through a cutoff man 45 ft out passes him at his head and carries to the base on one hop; a deep ball's relay man stands at the relay spot. The holder chooses the route by time and miss cost; runners believe a cuttable throw only where a man is visibly in it. The momentum gain and the receivers' and runners' reads of a hop are in. The set-up behind a fly is not.
+**The final build** (`797fa6f`: the owner's Q33, with the Opus review's and re-review's fixes):
+- The plant charges only motion away from the target.
+- A throw through a cutoff man 45 ft out passes his spot at his head and carries to the base on one hop. It is kept low where he is going, not where he stands at the release. A deep ball's relay man stands at the relay spot.
+- The holder chooses the route by time and miss cost. Runners believe a cuttable throw only where a man is visibly in it.
+- A runner names the base a throw in the air is going to from its direction. He follows it on through the bounce only when a cutoff man is visibly in it.
+- The momentum gain and the receivers' read of a hop are in. The set-up behind a fly is not.
 
-The probe is the same one with the trace, on direct seeds 0–299 and 1000–1299, both seed sets pooled unless split as [seed 0 / seed 1000]. Two earlier columns are kept as the record behind §6 and the review:
-- "Q33, before the review" (`4f18c47`);
-- "as decided" (Q32 with the across term, `4ebf724`, which still had the set-up).
+The same probe, with the trace, on direct seeds 0–299 and 1000–1299. Both seed sets are pooled unless split as [seed 0 / seed 1000]. Two earlier builds are kept as the record behind the reviews and §6:
+- "after the first review" (`55402ee`);
+- "Q33, before the review" (`4f18c47`).
 
-**What earlier builds did wrong** (fixed):
+**What earlier builds did wrong** (all fixed):
 
 - **Returns to second thrown low.** A cutoff man lined up toward home was taken as standing in returns to second, so 98–100% of 60–90 m returns were thrown low and came down 12–18 m short. Fixed: only a man with the job for that base, within 5 m of its line (`CUT_LINE_M`).
 - **The set-up behind a fly dropped catches** (below), and was taken out.
-- **The low throw rolled in** (review P2-1). It passed the cutoff man at the relay spot, landed 13–35 m short of the plate and rolled in. Now he stands 45 ft out (§4).
+- **The low throw rolled in** (review P2-1). It passed the cutoff man at the relay spot, landed 13–35 m short of the plate and rolled in. Then (re-review P3-3) it was kept low where he stood at the release, often 18–25 m out on his way in, and still rolled in. Now he goes to 45 ft out and the throw is kept low at that spot (§4). In the final build 7 of the 8 throws through a cutoff man in 600 games reached the plate on the fly or one hop (1 on the fly, 6 on one hop); 1 took two bounces.
 - **Runners believed a throw that was not coming** (review P1-1). Every runner believed a cuttable throw on every outfield throw to third or home from 50 m out, where the world threw it 7 times in 190. That, not the plant, raised tags from second 14% → 21% on the Q33 build. Now only where a man is visibly in the throw.
-- **The runners' new read of a hop made them too bold** (review P3-1). The first version followed any throw coming down more than 3 m from every bag and took the last base it reached. A short throw to second that skipped on was read as going home, and throws that die a little from speed noise were timed at the bag on the hop when the receiver steps in. Seed 1000, 300 games: triples 1.02 → 1.12 and outfield assists 0.33 → 0.42 a team-game, back to 1.015 and 0.320 with the read off. Now the first base it reaches, only for a throw coming down 8 m or more from every bag with nobody there: 1.09 and 0.37 on that seed set.
+- **The runners' read of a low throw made them too bold** (review P3-1, re-review P2-1, P3-1).
+  - The first versions followed a throw on when it came down 3 m, then 8 m, from every bag, and named the first bag it passed within 2.5 m. A noisy read of a throw to second that passed the bag a couple of metres wide or high was named home, first or third.
+  - That made runners bolder on ordinary throws: +0.07 triples and +0.05 outfield assists a team-game on both seed sets.
+  - The throw it was written for was never followed: the cutoff man stood within 4 m of where it came down. So runners read it at the plate 0.5–0.75 s early.
+  - Now the base is the one on the throw's line nearest where it comes down. He follows it on only when a man with the cutoff job for that base visibly stands on its line.
+  - In a throwaway probe, 1,000 noisy reads 0.3 s after release:
+    - plain throws to second from centre, left-centre and right-centre, and to third and home, read exactly as the old read did (wrong base 18–100 per 1,000);
+    - the throw home through a cutoff man is read 0.07–0.10 s before it reaches the plate, against 0.48–0.69 s before.
+  - Triples and assists came down to the read-off ablation's level (below).
 
 **Release after the catch:**
 
 | | Main | Final build | Q33, before the review | As decided (Q32) |
 |---|---:|---:|---:|---:|
-| Outfield pickups: mean pickup-to-release (first throw) | 1.007 / 1.005 s | 1.080 / 1.082 s | 1.081 / 1.078 s | 1.459 / 1.456 s |
-| the same, over 1.2 s | 6.0% / 6.1% | 23.1% / 23.0% | 23.0% / 22.7% | 60.9% / 60.8% |
-| Outfield fly catches that lead to a throw: mean catch-to-release | 0.935 s (seed 0) | 0.974 / 0.957 s | 0.973 / 0.955 s | 1.115 s (seed 0) |
+| Outfield pickups: mean pickup-to-release (first throw) | 1.007 / 1.005 s | 1.081 / 1.079 s | 1.081 / 1.078 s | 1.459 / 1.456 s |
+| the same, over 1.2 s | 6.0% / 6.1% | 23.0% / 22.7% | 23.0% / 22.7% | 60.9% / 60.8% |
 
 Tango's empirical pickup-to-release plus the infielder's tag is about 1.2 s (§3), so about 0.95 s of release. This build is about 0.13 s slower than that, main about 0.05 s.
 
@@ -152,10 +164,10 @@ Tango's empirical pickup-to-release plus the infielder's tag is about 1.2 s (§3
 | Away at the pickup | n (final) | Plant | Pickup-to-release: main → final |
 |---|---:|---:|---|
 | 3–5 m/s | 1,695 | 0.35 s | 1.11 → 1.26 s |
-| 5–7 m/s | 514 | 0.80 s | 1.09 → 1.69 s |
-| 7+ m/s | 31 | 1.12 s | 1.11 → 1.99 s |
+| 5–7 m/s | 494 | 0.80 s | 1.09 → 1.69 s |
+| 7+ m/s | 34 | 1.12 s | 1.11 → 1.99 s |
 
-A real outfielder slows into a ball he runs down and throws off the deceleration. The sim's reaches it at full speed and then owes the whole stop: the movement gap Q33 deferred the across term for applies to away motion too. It is the next job's (the approach); Q33 stands until then. `PLANT_OVERLAP_S` is the plant's calibration knob (agent-models §5.5), to be re-checked there against Tango's 1.2 s and the triple rate.
+A real outfielder slows into a ball he runs down and throws off the deceleration. The sim's reaches it at full speed and then owes the whole stop. That is the movement gap Q33 deferred the across term for, and it applies to away motion too. It is the next job's (the approach); Q33 stands until then. `PLANT_OVERLAP_S` is the plant's calibration knob (agent-models §5.5), to be re-checked there against Tango's 1.2 s and the triple rate.
 
 **The set-up behind a fly was taken out of the build.**
 - It seldom triggered. The fielder needs, by his own read, time to reach a spot 2.5 m behind the catch and half a second more, and the sim's outfielders rarely have that (§1): about one come-through in two games.
@@ -163,49 +175,50 @@ A real outfielder slows into a ball he runs down and throws off the deceleration
 - It dropped catches. Coming through at full speed: fly-ball hits .097 → .145 and pop-ups .006 → .028 (100 games). At 4 m/s over 300 games (seed 0): fly-ball hits .097 without it and .104 with it, pop-up hits .004 against .016. In a traced case (seed 6, play 40, right fielder) he drifted back off his catch point coming through and the ball fell in front of him.
 - It belongs with the approach work of §6. agent-models §5.5 keeps the rule as specified, marked not built.
 
-**Routes** (outfield throws to third or home, the first throw of the play, 600 games, final build; relay / low through the cutoff man / plain):
+**Routes** (outfield throws to third or home, the first throw of the play, 600 games, final build):
 
-| Throw length | To third | To home |
-|---|---|---|
-| under 60 m | 0 / 0 / 40 | — |
-| 60–75 m (197–246 ft) | 1 / 0 / 119 | 0 / 5 / 3 |
-| 75–85 m (246–279 ft) | 1 / 0 / 2 | 2 / 1 / 1 |
-| 85–95 m (279–312 ft) | 0 / 0 / 1 | 2 / 0 / 0 |
+| Throw length | To third: relay / low through the cutoff man / plain | To home: relay / low through / plain | Through the cutoff man, at the base on the fly or one hop |
+|---|---|---|---|
+| under 60 m | 0 / 0 / 42 | — | — |
+| 60–75 m (197–246 ft) | 1 / 0 / 108 | 0 / 6 / 3 | 7 of 8 throws through a cutoff man, all home (any throw of the play, both ranges): 1 on the fly, 6 on one hop, 1 on two |
+| 75–85 m (246–279 ft) | 1 / 0 / 2 | 2 / 2 / 1 | |
+| 85–95 m (279–312 ft) | 0 / 0 / 1 | 2 / 0 / 0 | |
 
 - **Throws to third are almost all plain.** With a runner on second the relay job goes toward home (`relay_job`), and nobody goes out for a ball under 50 m from home.
-- **Where a man is in a throw home, the route follows §4.** Through a cutoff man 45 ft out at 60–85 m, to the relay man from deep. "Plain" throws home are ones where he was not yet on the line, or not yet known to the holder.
-- **Relays:** the probe's count (an infielder taking an outfielder's throw away from the bags and throwing on) went from 9 to 20 per 600 games.
+- **Where a man is in a throw home, the route follows §4.** Through a cutoff man 45 ft out at 60–85 m, to the relay man from deep. "Plain" throws home are ones where he was not yet near the line, or not yet known to the holder.
+- **Relays:** the probe's count (an infielder taking an outfielder's throw away from the bags and throwing on) went from 9 to 19 per 600 games.
+- **The relay man goes out at a fixed 80 m** (`RELAY_DEEP_M`), whatever the thrower's arm. For a strong arm at 269–295 ft that relays where a throw through the cutoff man would be 0.1–0.2 s quicker (re-review P3-2). It is §5.7 positioning, deferred.
 
 **The game measures** (MLB where known):
 
-| Measure | Main | Final build | Q33, before the review | MLB |
-|---|---:|---:|---:|---:|
-| Runs per team-game (probe; seeds 0 / 1000) | 4.24 / 4.36 | 4.28 / 4.42 | 4.28 / 4.47 | 4.4–4.5 |
-| Runner on third, outfield catch, 0–1 out: scored | 62.1% (256 of 412) | 61.3% (265 of 432) | 63.4% | 75–80% |
-| the same, put out going | 1 | 4 | 3 | 2–3.5% |
-| Runner on second, third empty, outfield catch: advanced to third | 14.2% (92 of 647) | 15.2% (92 of 604) | 21.2% | 30.2% |
-| Singles: first to third | 31.9% (689 of 2,162) | 34.0% (746 of 2,191) | 33.9% | 31.7% |
-| Singles: second to home | 54.7% (568 of 1,038) | 54.7% (526 of 961) | 55.4% | 61.7% |
-| Doubles: first to home | 77.7% (424 of 546) | 78.6% (367 of 467) | 78.9% | 38% |
-| Outfield assists per team-game (the probe's generous count) | 0.252 | 0.336 | 0.292 | 0.133 |
-| the same, at home (600 games) | 4 | 9 | 7 | — |
-| Triples per team-game | 0.89 / 0.84 | 1.10 / 1.09 | 1.04 / 1.02 | about 0.14 |
-| Doubles per team-game | 1.84 / 2.06 | 1.68 / 1.80 | 1.70 / 1.87 | — |
+| Measure | Main | Final build | After the first review | Q33, before the review | MLB |
+|---|---:|---:|---:|---:|---:|
+| Runs per team-game (probe; seeds 0 / 1000) | 4.24 / 4.36 | 4.27 / 4.43 | 4.28 / 4.42 | 4.28 / 4.47 | 4.4–4.5 |
+| Runner on third, outfield catch, 0–1 out: scored | 62.1% (256 of 412) | 63.9% (274 of 429) | 61.3% | 63.4% | 75–80% |
+| the same, put out going | 1 | 3 | 4 | 3 | 2–3.5% |
+| Runner on second, third empty, outfield catch: advanced to third | 14.2% (92 of 647) | 15.2% (96 of 631) | 15.2% | 21.2% | 30.2% |
+| Singles: first to third | 31.9% (689 of 2,162) | 33.4% (731 of 2,189) | 34.0% | 33.9% | 31.7% |
+| Singles: second to home | 54.7% (568 of 1,038) | 53.6% | 54.7% | 55.4% | 61.7% |
+| Doubles: first to home | 77.7% (424 of 546) | 79.6% (397 of 499) | 78.6% | 78.9% | 38% |
+| Outfield assists per team-game (the probe's generous count) | 0.252 | 0.287 | 0.336 | 0.292 | 0.133 |
+| the same, at home (600 games) | 4 | 10 | 9 | 7 | — |
+| Triples per team-game | 0.89 / 0.84 | 1.02 / 1.02 | 1.10 / 1.09 | 1.04 / 1.02 | about 0.14 |
+| Doubles per team-game | 1.84 / 2.06 | 1.73 / 1.86 | 1.68 / 1.80 | 1.70 / 1.87 | — |
 
 **Tag-ups by depth** (whether or not the runner was on the bag at the catch; runs scored or bases taken / chances, both sets):
 
 | Catch depth | From third: main | From third: final | From second: main | From second: final |
 |---|---:|---:|---:|---:|
-| under 225 ft | 1 / 27 | 1 / 29 | 0 / 41 | 0 / 40 |
-| 225–250 | 0 / 25 | 0 / 34 | 0 / 59 | 0 / 47 |
-| 250–275 | 1 / 59 | 3 / 63 | 1 / 84 | 0 / 84 |
-| 275–300 | 22 / 56 | 38 / 71 | 1 / 110 | 1 / 95 |
-| 300–350 | 157 / 168 | 148 / 159 | 45 / 236 | 43 / 223 |
-| 350+ | 75 / 77 | 75 / 76 | 45 / 117 | 48 / 115 |
+| under 225 ft | 1 / 27 | 1 / 31 | 0 / 41 | 0 / 38 |
+| 225–250 | 0 / 25 | 0 / 30 | 0 / 59 | 0 / 56 |
+| 250–275 | 1 / 59 | 4 / 59 | 1 / 84 | 0 / 88 |
+| 275–300 | 22 / 56 | 39 / 68 | 1 / 110 | 1 / 100 |
+| 300–350 | 157 / 168 | 155 / 165 | 45 / 236 | 45 / 228 |
+| 350+ | 75 / 77 | 75 / 76 | 45 / 117 | 50 / 121 |
 
-**Every tagging runner sent** (the throw-race note's counterfactual, `BB_TAG_GO`; runners on the bag at the catch). Main's figures are the throw-race note's §8, from its own probe on the same seeds. Bins of 15–60 runners are good to about ±10 points.
+**Every tagging runner sent** (the throw-race note's counterfactual, `BB_TAG_GO`; runners on the bag at the catch). This was measured after the first review (`55402ee`) and not re-run for the re-review fixes: those change only throws through a cutoff man and runners' reads of them, and these are tag-up throws home. Main's figures are the throw-race note's §8, from its own probe on the same seeds. Bins of 15–60 runners are good to about ±10 points.
 
-| From third, catch depth | Main: safe | Final: safe (out) | Q33, before the review | MLB, at least |
+| From third, catch depth | Main: safe | After the first review: safe (out) | Q33, before the review | MLB, at least |
 |---|---:|---:|---:|---:|
 | 225–250 ft | 6 of 13 (46%) | 7 of 15 (47%; 8 out) | 63% | — |
 | 250–275 | 17 of 35 (49%) | 23 of 41 (56%; 14 out) | 58% | 42% (5 in 6 of those sent) |
@@ -215,13 +228,15 @@ From second, every tagging runner sent: safe 33% at 250–275 ft and 42% at 275�
 
 **What moved and why** (final build):
 
-- **Runs barely move:** 4.24 → 4.28 [4.47 → 4.50] in the standard runs, inside one set's noise.
-- **Tags from second are back at main's level** (14.2% → 15.2%, MLB 30%). The Q33 build's 21% came from the runners' false cut belief (review P1-1); the plant does not move them.
-- **Scoring from third is unchanged overall** (62% → 61%, MLB 75–80%). By depth it is up at 275–300 ft (22 of 56 → 38 of 71) and down a little deeper, within each bin's noise.
-- **Triples rise** about 0.2 a team-game (0.87 → 1.09, MLB about 0.14), and **first to third on singles** 31.9% → 34.0% (MLB 31.7%). Most of it is the plant on balls run down going away (P2-2 above; with the old flat footwork the Q33 build's triples were main's, review P1-1's table).
-  - About 0.06 more than the Q33 build is not explained. The runners' read of a hop is the suspect: at its first threshold it added 0.1. At 8 m, seed 1000 is within 1.5σ of the read off.
-- **Outfield assists rise** 0.25 → 0.34 a team-game (MLB 0.133 by Retrosheet's stricter count): more runners try for an extra base, and more are thrown out. The same split, and the same unexplained part (+0.04 over Q33).
-- **First to home on doubles did not move** (77.7% → 78.6%, MLB 38%). It is not the throw; it stays its own problem (TASKS).
+- **Runs barely move:** 4.24 → 4.27 [4.47 → 4.57] in the standard runs. Seed 1000's +0.10 is inside one set's noise (about 0.12). In the probe's count it is 4.36 → 4.43.
+- **Tags from second are at main's level** (14.2% → 15.2%, MLB 30%). The Q33 build's 21% came from the runners' false cut belief (review P1-1). The plant does not move them.
+- **Scoring from third is about unchanged** (62% → 64%, MLB 75–80%). By depth it is up at 275–300 ft (22 of 56 → 39 of 68), within each bin's noise elsewhere.
+- **Triples rise** 0.87 → 1.02 a team-game (MLB about 0.14), and **first to third on singles** 31.9% → 33.4% (MLB 31.7%). That is the plant on balls run down going away: with the old flat footwork, the Q33 build's triples were main's (review P1-1's table).
+  - The +0.07 that the runners' first read of a low throw added (re-review P2-1) is gone: 1.02 / 1.02 against the read-off ablation's 1.03 / 1.02.
+- **Outfield assists rise** 0.25 → 0.29 a team-game (MLB 0.133 by Retrosheet's stricter count). They are at the read-off ablation's level (0.255 / 0.320 against 0.250 / 0.320).
+  - On seed 1000 the rise over main is split among the plant, the throw through the cutoff man and the runners' cut belief, within about 2σ of one another. The first review's ablations there: Q33 0.328, old footwork 0.312, no cut belief 0.303; main 0.263.
+  - It is not the plant alone, as the ledger first said.
+- **First to home on doubles did not move** (77.7% → 79.6%, MLB 38%). It is not the throw; it stays its own problem (TASKS).
 
 ## 6. The owner question (Q33) and the answer
 
