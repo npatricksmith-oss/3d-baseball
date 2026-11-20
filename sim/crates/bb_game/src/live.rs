@@ -209,6 +209,16 @@ pub fn throw_release_point(pos: Vec3, tgt: Vec3, throws: bb_observe::Hand) -> Ve
 const RECEIVE_REPLAN_S: f64 = 0.25;
 /// Lowest a receiver takes a throw in the air (a scoop), m [E].
 const THROW_SCOOP_Z: f64 = 0.15;
+/// A runner reads a throw that comes down through catching height at least this far from
+/// every bag as a low throw meant to carry on along the ground, and follows it on (agent-
+/// models §5.5, §6.4), m [E]: the throw through a cutoff man 45 ft out comes down 10–12 m
+/// short of the base; a throw that dies a little from the 3% speed noise comes down 2–6 m
+/// short, and its receiver steps in for it (a 3 m threshold read those as arriving later,
+/// on the hop at the bag, and runners took bases against them: catch-throw note §5).
+const LOW_THROW_READ_M: f64 = 8.0;
+/// ... unless a fielder visibly stands within this of where it comes down: then it is a throw
+/// to him (a relay), m [E].
+const LOW_THROW_MAN_M: f64 = 4.0;
 /// Step of a receiver's read of a throw on from where it comes down, s.
 const THROW_HOP_DT: f64 = 0.01;
 /// A receiver at a base steps in up to this far to take a throw in the air; one coming down
@@ -4775,13 +4785,16 @@ impl<'a> Sim<'a> {
                 .unwrap()
         };
         let (t_down, q_down) = track[arrive];
-        // A throw coming down well short of every bag is a low throw meant to carry on along
+        // A throw coming down far from every bag (`LOW_THROW_READ_M`) is a low throw meant to carry on along
         // the ground (agent-models §5.5, through the cutoff man): he follows it on through the
         // bounce, with the same physics, and takes the first base it comes within reach of after
         // it comes down as the one it is going to (Opus catch-throw review P3-1; the last one
         // would read a short throw to second that skips on toward home as a throw home).
         // Otherwise the base nearest where it comes down.
-        if down.is_some() && near(q_down).1 > 2.0 * RECEIVE_REACH {
+        // A fielder standing where it comes down is the man it is thrown to (a relay): the
+        // relay read below covers that.
+        let to_a_man = self.f.iter().any(|f| m::hypot(f.pos.x - q_down.x, f.pos.y - q_down.y) <= LOW_THROW_MAN_M);
+        if down.is_some() && near(q_down).1 > LOW_THROW_READ_M && !to_a_man {
             let land = (arrive..tr.knots.len()).map(|i| tr.knots[i]).find(|k| k.s.r.z <= env.ball.radius + 1e-6).or_else(|| (tr.stop == Some(0)).then(|| *tr.last()));
             if let Some(land) = land {
                 let on = batted_path_dt(env, self.inp.field, land.s, land.t, THROW_HOP_DT, |_, _| (0.0, 0.0));
