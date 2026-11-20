@@ -63,11 +63,34 @@ pub const OFF_SPEED_LOSS: f64 = 0.08;
 /// Turning the body to throw: time per 90° of turn beyond (or short of) the turn a throw
 /// straight ahead needs, s [E].
 pub const TURN_S: f64 = 0.12;
-/// Footwork to get balanced before a throw, s [E]: after fielding the ball while moving away
-/// from the target faster than [`AWAY_MPS`], and after a dive (on top of getting up).
-pub const AWAY_FOOTWORK_S: f64 = 0.2;
+/// A fielder's braking limit, m/s² (agent-models §5.3, `BRAKE`): the mean of measured maximal
+/// decelerations of team-sport athletes, 4.2–5.0 m/s² (Harper, Cohen, Carling & Kiely 2020,
+/// *Sports* 8(6), 76). The movement law and the plant before a throw share it.
+pub const BRAKE_MPS2: f64 = 4.75;
+/// The catch sets up the throw (agent-models §5.5, owner's Q32): the part of his catch-to-
+/// release during which a fielder can already be braking (the ball going from glove to hand
+/// while his feet stop), s [E, unsourced]. 2 m/s ÷ `BRAKE_MPS2`: a man under 2 m/s off the
+/// line to his target owes nothing, as under the old flat rule.
+pub const PLANT_OVERLAP_S: f64 = 2.0 / BRAKE_MPS2;
+/// Footwork to get up and balanced after taking the ball on the ground from a dive, s [E].
 pub const DIVE_FOOTWORK_S: f64 = 0.3;
-pub const AWAY_MPS: f64 = 2.0;
+/// Momentum toward the target (agent-models §5.5): the speed of a thrower's body toward his
+/// target at release in a throw with a run-up (a crow hop), m/s: 3.0 m/s in elite team-handball
+/// standing throws with run-up, against 1.5 m/s without (Wagner, Pfusterschmied, von Duvillard
+/// & Müller 2011, *J Sports Sci Med* 10, 73, Table 1; read). `ArmStrength` (Statcast's top
+/// throws, crow hops) is a throw at this speed; a crow hop from a stand reaches it inside his
+/// `Transfer`.
+pub const HOP_MPS: f64 = 3.0;
+/// Ball speed gained per m/s of body speed toward the target beyond [`HOP_MPS`]: in the same
+/// study the run-up's +1.5 m/s of body speed gave +1.6 m/s of ball (22.3 → 23.9 m/s; read).
+/// Javelin release speed is likewise the run-up's speed plus the thrower's (Bartlett & Best
+/// 1988, cited there).
+pub const MOMENTUM_GAIN: f64 = 1.6 / 1.5;
+/// The most body speed toward the target a thrower can carry into the block, m/s [E,
+/// unsourced]: the gain is then at most 2.1 m/s (4.8 mph), inside the 6.1 mph median spread
+/// between an outfielder's hardest throw and his top-10% mean (Savant 2025 arm-strength CSV;
+/// docs/calibration/2026-11-19-throw-race.md §4).
+pub const HOP_MAX_MPS: f64 = 5.0;
 
 /// A4 decision parameters [E], agent-models §5.5–5.7. These configure beliefs and
 /// option admission, never physical outcomes or execution noise.
@@ -117,19 +140,44 @@ pub fn turn_extra_s(facing: Vec3, to_target: Vec3, throws: Hand) -> f64 {
     TURN_S * (m::acos(cos) - quarter) / quarter
 }
 
-/// Footwork owed before a balanced throw along `to_target` by a fielder who took the ball
-/// moving at `catch_vel` (`dove`: he took it on the ground from a dive), s. A dive replaces
-/// the moving-away term: he gets up from a standstill.
+/// The plant owed before a set throw along `to_target` by a fielder who took the ball moving
+/// at `catch_vel` (`dove`: he took it on the ground from a dive), s (agent-models §5.5, the
+/// catch sets up the throw). Whatever of his motion is not toward the target (moving away, or
+/// across the line) must be stopped under his braking limit before he can plant his back foot
+/// and step to it; the part of that stop inside the glove-to-hand of his transfer
+/// ([`PLANT_OVERLAP_S`]) costs nothing. A dive replaces it: he gets up from a standstill.
 pub fn footwork_s(catch_vel: Vec3, to_target: Vec3, dove: bool) -> f64 {
     if dove {
         return DIVE_FOOTWORK_S;
     }
+    (off_line_mps(catch_vel, to_target) / BRAKE_MPS2 - PLANT_OVERLAP_S).max(0.0)
+}
+
+/// His speed off the line to his target: the part of `vel` (horizontal) that is not toward
+/// `to_target`, m/s (moving away counts whole; moving across counts its across part).
+pub fn off_line_mps(vel: Vec3, to_target: Vec3) -> f64 {
+    let tl = m::hypot(to_target.x, to_target.y);
+    if tl < 1e-9 {
+        return m::hypot(vel.x, vel.y);
+    }
+    let (ux, uy) = (to_target.x / tl, to_target.y / tl);
+    let along = vel.x * ux + vel.y * uy;
+    let across = vel.x * uy - vel.y * ux;
+    m::hypot(along.min(0.0), across)
+}
+
+/// Ball speed a thrower adds by coming through the catch toward his target at `vel`, m/s
+/// (agent-models §5.5): [`MOMENTUM_GAIN`] per m/s of his speed toward it beyond the crow hop's
+/// [`HOP_MPS`], up to [`HOP_MAX_MPS`]. Nothing below that: a set throw from a slower approach
+/// (or from a plant) has his crow hop and his `ArmStrength`. No accuracy cost (Wagner et al.
+/// 2011: mean radial error 0.30 m with and without the run-up).
+pub fn momentum_gain_mps(vel: Vec3, to_target: Vec3) -> f64 {
     let tl = m::hypot(to_target.x, to_target.y);
     if tl < 1e-9 {
         return 0.0;
     }
-    let away = -(catch_vel.x * to_target.x + catch_vel.y * to_target.y) / tl;
-    if away > AWAY_MPS { AWAY_FOOTWORK_S } else { 0.0 }
+    let along = (vel.x * to_target.x + vel.y * to_target.y) / tl;
+    MOMENTUM_GAIN * (along.min(HOP_MAX_MPS) - HOP_MPS).max(0.0)
 }
 
 /// The double-play pivot's catch-to-release at a `Transfer` grade of 50, s (agent-models
@@ -321,15 +369,39 @@ mod tests {
         assert!(r > 0.09 && l < -0.09 && close(r, -l), "right {r:.3}, left {l:.3}");
     }
 
+    // agent-models §5.5, the catch sets up the throw: the plant is the stop under the braking
+    // limit less what fits inside the transfer. Independent figures: §5.3's stop from 7 m/s
+    // (1.47 s at 4.75 m/s²), and the old rule's 2 m/s threshold, below which nothing is owed.
     #[test]
-    fn footwork_is_owed_moving_away_or_after_a_dive() {
+    fn the_plant_is_the_stop_under_the_braking_limit() {
         let to = Vec3::new(10.0, 0.0, 0.0);
-        assert_eq!(footwork_s(Vec3::new(-5.0, 0.0, 0.0), to, false), 0.2);
-        assert_eq!(footwork_s(Vec3::new(5.0, 0.0, 0.0), to, false), 0.0);
-        assert_eq!(footwork_s(Vec3::new(-1.5, 6.0, 0.0), to, false), 0.0); // across, not away
+        let stop_7 = footwork_s(Vec3::new(-7.0, 0.0, 0.0), to, false) + PLANT_OVERLAP_S;
+        assert!((stop_7 - 1.47).abs() < 0.005, "{stop_7}");
+        assert_eq!(footwork_s(Vec3::new(-2.0, 0.0, 0.0), to, false), 0.0);
+        assert!(footwork_s(Vec3::new(-2.1, 0.0, 0.0), to, false) > 0.0);
+        // Toward the target: nothing to stop, at any speed.
+        assert_eq!(footwork_s(Vec3::new(7.0, 0.0, 0.0), to, false), 0.0);
+        // Across the line counts as much as away; a diagonal counts its across part only.
+        assert!(close(footwork_s(Vec3::new(0.0, 5.0, 0.0), to, false), footwork_s(Vec3::new(-5.0, 0.0, 0.0), to, false)));
+        assert!(close(footwork_s(Vec3::new(4.0, 2.0, 0.0), to, false), 0.0));
+        assert!(close(off_line_mps(Vec3::new(4.0, 3.0, 0.0), to), 3.0) && close(off_line_mps(Vec3::new(-4.0, 3.0, 0.0), to), 5.0));
+        // A dive: his get-up from a standstill replaces it.
         assert_eq!(footwork_s(Vec3::ZERO, to, true), 0.3);
-        // A dive while moving away: 0.3, not 0.5 (he gets up from a standstill).
         assert_eq!(footwork_s(Vec3::new(-5.0, 0.0, 0.0), to, true), 0.3);
+    }
+
+    // Wagner et al. 2011 (Table 1): body speed toward the goal 1.5 → 3.0 m/s with the run-up gave
+    // ball speed 22.3 → 23.9 m/s. A throw with the crow hop's 3.0 m/s is `ArmStrength` (gain 0);
+    // 1.5 m/s more toward the target gives the study's 1.6 m/s; the gain stops at HOP_MAX_MPS.
+    #[test]
+    fn coming_through_the_catch_adds_the_measured_run_up_gain() {
+        let to = Vec3::new(0.0, -60.0, 0.0);
+        assert_eq!(momentum_gain_mps(Vec3::new(0.0, -3.0, 0.0), to), 0.0);
+        assert_eq!(momentum_gain_mps(Vec3::ZERO, to), 0.0);
+        assert_eq!(momentum_gain_mps(Vec3::new(0.0, 6.0, 0.0), to), 0.0);
+        assert!((momentum_gain_mps(Vec3::new(0.0, -4.5, 0.0), to) - (23.9 - 22.3)).abs() < 1e-9);
+        let cap = momentum_gain_mps(Vec3::new(0.0, -9.0, 0.0), to);
+        assert!(close(cap, momentum_gain_mps(Vec3::new(0.0, -HOP_MAX_MPS, 0.0), to)) && cap * 2.2369 < 6.1, "{cap}");
     }
 
     // The worked example of agent-models §5.5: an infielder (0.65 s) moving away.
@@ -351,8 +423,9 @@ mod tests {
     // agent-models §5.5, all three terms together: set = Transfer + turn + footwork, and he can
     // let go from RUSH_MIN_FRAC (0.6) of Transfer + turn (the footwork is not part of it).
     // Transfer 0.65 s:
-    //   off his throwing shoulder (+0.12) and moving away (+0.2): set = 0.65+0.12+0.2 = 0.97,
-    //     earliest = 0.6·(0.65+0.12) = 0.462; at 0.6 s hurry = (0.97−0.6)/(0.97−0.462) = 0.7283;
+    //   off his throwing shoulder (+0.12) and moving away at 5 m/s (plant 5/4.75 − 2/4.75 =
+    //     0.6316): set = 0.65+0.12+0.6316 = 1.4016, earliest = 0.6·(0.65+0.12) = 0.462;
+    //     at 0.6 s hurry = (1.4016−0.6)/(1.4016−0.462);
     //   off his glove shoulder (−0.12) after a dive (+0.3): set = 0.65−0.12+0.3 = 0.83,
     //     earliest = 0.6·0.53 = 0.318; half way (0.574 s) hurry 0.5: speed 1−0.5·0.18 = 0.91,
     //     direction σ ×(1+0.5·2) = 2.
@@ -360,8 +433,9 @@ mod tests {
     fn set_up_adds_transfer_turn_and_footwork() {
         let to = Vec3::new(10.0, 0.0, 0.0);
         let a = SetUp::new(0.65, 0.12, footwork_s(Vec3::new(-5.0, 0.0, 0.0), to, false));
-        assert!(close(a.set_s, 0.97) && close(a.earliest_s, 0.462) && a.off_balance);
-        assert!(close(a.hurry(0.6), 0.37 / 0.508));
+        let plant = 3.0 / 4.75;
+        assert!(close(a.set_s, 0.77 + plant) && close(a.earliest_s, 0.462) && a.off_balance);
+        assert!(close(a.hurry(0.6), (0.17 + plant) / (0.308 + plant)));
         let b = SetUp::new(0.65, -0.12, footwork_s(Vec3::ZERO, to, true));
         assert!(close(b.set_s, 0.83) && close(b.earliest_s, 0.318) && b.off_balance);
         let mid = 0.5 * (0.318 + 0.83);
@@ -370,13 +444,5 @@ mod tests {
         // no turn (§5.5): 0.7 · 0.65 = 0.455 s, earliest 0.273, on balance.
         let c = SetUp::new(0.7 * 0.65, 0.0, 0.0);
         assert!(close(c.set_s, 0.455) && close(c.earliest_s, 0.273) && !c.off_balance);
-    }
-
-    // The incoming-ball and moving-away thresholds: owed only above 2 m/s away (§5.5).
-    #[test]
-    fn moving_away_is_owed_only_above_two_metres_a_second() {
-        let to = Vec3::new(0.0, 10.0, 0.0);
-        assert_eq!(footwork_s(Vec3::new(0.0, -2.0, 0.0), to, false), 0.0);
-        assert_eq!(footwork_s(Vec3::new(0.0, -2.01, 0.0), to, false), 0.2);
     }
 }

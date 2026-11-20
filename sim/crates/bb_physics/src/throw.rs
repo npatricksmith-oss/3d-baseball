@@ -154,6 +154,41 @@ pub fn solve_throw(env: &FlightEnv, z0: f64, zt: f64, d: f64, speed: f64) -> Opt
     Some(ThrowSolution { elev: x, t_flight: t })
 }
 
+/// The launch elevation of a throw of length `d` at `speed` that must pass the cutoff man
+/// `d_cut` out from the release no higher than `cut_z` (agent-models §5.5): the plain aim
+/// (chest height at the target) when that passes him low enough, else the flatter angle that
+/// passes him at `cut_z`. `None` when neither carries that far on the fly.
+pub fn cut_elev(env: &FlightEnv, z0: f64, zt: f64, cut_z: f64, d: f64, d_cut: f64, speed: f64) -> Option<f64> {
+    let plain = solve_throw(env, z0, zt, d, speed).map(|s| s.elev);
+    if d_cut <= 0.0 || d_cut >= d {
+        return plain;
+    }
+    let low = solve_throw(env, z0, cut_z, d_cut, speed).map(|s| s.elev);
+    match (plain, low) {
+        (Some(p), Some(l)) => Some(p.min(l)),
+        (None, l) => l,
+        (p, None) => p,
+    }
+}
+
+/// How long the cuttable throw of [`cut_elev`] takes to go `d` metres along its line, at any
+/// height (on the fly, on a hop or rolling), over `field`'s ground thrown toward home from
+/// straight-away centre; infinite if it stops short.
+pub fn cut_throw_time(env: &FlightEnv, field: &crate::ground::Field, z0: f64, zt: f64, cut_z: f64, d: f64, d_cut: f64, speed: f64) -> f64 {
+    let Some(elev) = cut_elev(env, z0, zt, cut_z, d, d_cut, speed) else { return f64::INFINITY };
+    let s0 = throw_state(Vec3::new(0.0, d, z0), Vec3::new(0.0, -1.0, 0.0), speed, elev);
+    let path = crate::ground::batted_path_dt(env, field, s0, 0.0, THROW_DT, |_, _| (0.0, 0.0));
+    let (end, step) = (path.t_end(), 0.002);
+    let mut t = 0.0;
+    while t <= end {
+        if path.at(t).0.y <= 0.0 {
+            return t;
+        }
+        t += step;
+    }
+    f64::INFINITY
+}
+
 /// Flight time of a throw over horizontal distance, tabulated by release speed: a fielder's
 /// working knowledge of how long his throws take (a belief, built once for a reference
 /// atmosphere; agent-models §5.6). Throws leave the hand at `z0` and arrive at `zt`.
@@ -210,6 +245,21 @@ impl ThrowTable {
         lerp(row(i), row(i + 1), a)
     }
 
+    /// The cuttable throw (agent-models §5.5, the catch sets up the throw): with a cutoff man
+    /// lined up `cut_spot(d)` metres short of the base on a throw of length `d`, a throw from
+    /// the outfield must pass him no higher than `cut_z` (his head) so that he can take it. It
+    /// is the plain throw when that already passes low enough; otherwise it is launched to pass
+    /// him at `cut_z` and comes down short, then skips and rolls on to the base on `field`'s
+    /// ground. Tabulated as the time until the ball has gone `d` metres along its line, at any
+    /// height; infinite if it never gets there. Thrown toward home from straight-away centre,
+    /// a reference line (a belief, like [`ThrowTable::build`]).
+    pub fn build_cut(env: &FlightEnv, field: &crate::ground::Field, z0: f64, zt: f64, cut_z: f64, cut_spot: impl Fn(f64) -> f64) -> Self {
+        let speeds: Vec<f64> = (0..=14).map(|i| 20.0 + 2.0 * i as f64).collect();
+        let dists: Vec<f64> = (0..=26).map(|j| 5.0 * j as f64).collect();
+        let t = speeds.iter().map(|&v| dists.iter().map(|&d| if d == 0.0 { 0.0 } else { cut_throw_time(env, field, z0, zt, cut_z, d, d - cut_spot(d), v) }).collect()).collect();
+        Self { speeds, dists, t }
+    }
+
     /// Longest distance (m) a throw at speed `v` carries on the fly, to the table's 5 m grid.
     pub fn reach(&self, v: f64) -> f64 {
         let i = ((v.clamp(self.speeds[0], *self.speeds.last().unwrap()) - self.speeds[0]) / (self.speeds[1] - self.speeds[0])).floor() as usize;
@@ -225,6 +275,30 @@ mod tests {
 
     fn vacuum() -> FlightEnv {
         FlightEnv::new(0.0)
+    }
+
+    /// The cuttable throw (agent-models §5.5): it passes the cutoff man no higher than `cut_z`
+    /// (checked by flying it), it is never quicker to the base than the plain throw (a lower
+    /// launch with the same speed only loses time to the ground), and where the plain throw
+    /// already passes low it is the plain throw.
+    #[test]
+    fn a_cuttable_throw_passes_the_cutoff_man_low_and_is_no_quicker() {
+        let env = FlightEnv::default_env();
+        let field = crate::ground::Field::default();
+        for (d, v) in [(70.0, 38.0), (85.0, 40.0), (90.0, 37.0)] {
+            let dc = d - 30.0;
+            let el = cut_elev(&env, 1.8, 1.3, 2.0, d, dc, v).unwrap();
+            let tr = fly_throw(&env, throw_state(Vec3::new(0.0, 0.0, 1.8), Vec3::Y, v, el), 0.0, 6.0);
+            let h = tr.knots.iter().find(|k| k.s.r.y >= dc).map(|k| k.s.r.z).unwrap();
+            assert!(h <= 2.0 + 0.02, "{d} m at {v} m/s passes the cutoff man {h:.2} m up");
+            let plain = solve_throw(&env, 1.8, 1.3, d, v).unwrap().t_flight;
+            let cut = cut_throw_time(&env, &field, 1.8, 1.3, 2.0, d, dc, v);
+            assert!(cut.is_finite() && cut >= plain - 0.01, "{d} m: cuttable {cut:.2} s, plain {plain:.2} s");
+        }
+        // 35 m at 40 m/s with the cutoff man 4 m short of the base: the plain throw, coming down
+        // to chest height there, already passes him low.
+        let (d, dc, v) = (35.0, 31.0, 40.0);
+        assert_eq!(cut_elev(&env, 1.8, 1.3, 2.0, d, dc, v), solve_throw(&env, 1.8, 1.3, d, v).map(|s| s.elev));
     }
 
     #[test]
