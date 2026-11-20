@@ -3731,6 +3731,8 @@ impl<'a> Sim<'a> {
         if let (Some(bs), Some(ba)) = (best, angled) {
             let edge = if fd.approach.is_some_and(|ap| ap.angle) { -APPROACH_GAIN_S } else { ANGLE_GAIN_S };
             if ba.0 < bs.0 - edge {
+                #[cfg(test)]
+                tests::ANGLED.with(|c| c.set(c.get() + 1));
                 // Level with the join or past it, he is coming through along the way.
                 let through = (ba.1 - st.pos).dot(ba.3) <= ba.4;
                 return Some(Approach { at: ba.1, t_ball: ba.2, arrive: f64::INFINITY, round: Some(ba.3), through, unpaced: false, behind: ba.4, angle: true, lead: ba.5 });
@@ -3831,6 +3833,8 @@ impl<'a> Sim<'a> {
         if ba.0 >= bs.0 - edge {
             return None;
         }
+        #[cfg(test)]
+        tests::ANGLED.with(|c| c.set(c.get() + 1));
         // Already level with the join, or past it, he is coming through along the way.
         let through = (ba.1 - st.pos).dot(ba.3) <= ba.4;
         Some(Approach { at: ba.1, t_ball: ba.2, arrive: f64::INFINITY, round: Some(ba.3), through, unpaced: false, behind: ba.4, angle: true, lead: f64::INFINITY })
@@ -7532,6 +7536,8 @@ mod tests {
         pub(super) static NO_ROUND: std::cell::Cell<bool> = const { std::cell::Cell::new(false) };
         /// Test switch: no angle from contact (agent-models §5.2).
         pub(super) static NO_ANGLE: std::cell::Cell<bool> = const { std::cell::Cell::new(false) };
+        /// Test count: plans that chose an angle from contact (agent-models §5.2).
+        pub(super) static ANGLED: std::cell::Cell<u32> = const { std::cell::Cell::new(0) };
     }
     use crate::play::home_positions;
     use bb_math::units::MPH;
@@ -16288,6 +16294,60 @@ mod tests {
         assert!(worst_early >= -0.1, "the plan's cost was {:.2} s too high", -worst_early);
         assert!(worst_angle <= 5.0, "he came through {worst_angle:.0}° off the way");
         assert!(worst_drop <= 1.0, "he slowed {worst_drop:.2} m/s from his top speed on the way");
+    }
+
+    /// agent-models §5.2, the angle from contact must not lose a ball in the gap: line drives to
+    /// left-centre and left field that land in front of the outfielders and roll on toward the
+    /// gap and the wall, a runner on first (the angle is planned on all of them, toward third).
+    /// With the angle on, the same outfielder takes the ball as with it switched off, no deeper
+    /// than 3 m more and no later than the rounding margin `ROUND_MARGIN_S` more (old-versus-new
+    /// bound), and the batter gets no farther. (The same line drives to right-centre and right,
+    /// and the low liners a shortstop runs down, had no angle planned on this build, so they test
+    /// nothing here and are left out.)
+    #[test]
+    fn the_angle_from_contact_does_not_lose_a_ball_in_the_gap() {
+        const R: AgentId = 0x0007;
+        let play = |v: Vec3, angle: bool| {
+            NO_ANGLE.with(|c| c.set(!angle));
+            NO_ROUND.with(|c| c.set(false));
+            ANGLED.with(|c| c.set(0));
+            let fx = fixture(&[(R, 1)]);
+            let runners = vec![
+                RunnerIn { id: fx.st.batter, base: 0, speed: 8.2, tau_s: bb_agents::running::LEAGUE_TAU_S },
+                RunnerIn { id: R, base: 1, speed: 8.2, tau_s: bb_agents::running::LEAGUE_TAU_S },
+            ];
+            let mut inp = input(&fx, runners);
+            inp.ball = BallState { r: Vec3::new(0.0, 0.6, 0.9), v, w: Vec3::ZERO };
+            let mut st = fx.st.clone();
+            let out = simulate_live(&LiveInput { record: true, ..inp }, &mut st);
+            NO_ANGLE.with(|c| c.set(false));
+            let angled = ANGLED.with(|c| c.get());
+            let (t, who) = out.secured[0];
+            let track = &out.actors[(who & 0x7f) as usize - 1].1;
+            let k = track.iter().rposition(|(tt, _)| *tt <= t + 1e-9).unwrap();
+            let p = track[k].1;
+            let batter = st.bases.iter().rposition(|b| *b == Some(fx.st.batter)).map_or(0, |b| b + 1);
+            (t, who & 0x7f, m::hypot(p.x, p.y), batter, angled)
+        };
+        let mut tried = 0;
+        for spray in [-24.0f64, -12.0] {
+            for (speed, launch) in [(36.0, 15.0f64), (40.0, 14.0), (33.0, 18.0)] {
+                if spray == -12.0 && speed == 40.0 {
+                    continue;
+                }
+                let (s, l) = (spray.to_radians(), launch.to_radians());
+                let v = Vec3::new(m::sin(s) * m::cos(l), m::cos(s) * m::cos(l), m::sin(l)) * speed;
+                let off = play(v, false);
+                let on = play(v, true);
+                eprintln!("spray {spray}° {speed} m/s at {launch}°: off taken {:.2} s by {} at {:.1} m, batter {}; on {:.2} s by {} at {:.1} m, batter {} ({} angle plans)", off.0, off.1, off.2, off.3, on.0, on.1, on.2, on.3, on.4);
+                assert!(off.1 >= 7 && on.1 == off.1, "fielder {} takes it against {}", on.1, off.1);
+                assert!(on.2 <= off.2 + 3.0, "taken {:.1} m from home against {:.1} m", on.2, off.2);
+                assert!(on.0 <= off.0 + ROUND_MARGIN_S, "taken at {:.2} s against {:.2} s", on.0, off.0);
+                assert!(on.3 <= off.3, "the batter reached base {} against {}", on.3, off.3);
+                tried += (on.4 > 0) as u32;
+            }
+        }
+        assert!(tried >= 4, "the angle was planned on only {tried} of the balls");
     }
 
     /// agent-models §5.2, the approach: a ground ball to the shortstop's left. Going straight at
