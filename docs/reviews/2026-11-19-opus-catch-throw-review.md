@@ -203,4 +203,12 @@ All built in a copy of the branch's `sim/` at `82a0436` under `sim/target/review
 
 ## Resolution
 
-Open.
+Resolved 2026-11-20 by the Coordinator; merged with `work/catch-throw`. Fixes by the Opus worker `catch-throw` (`a65ad33`..`826120a`), re-reviewed by Opus ([re-review](2026-11-20-opus-catch-throw-fix-review.md)), whose findings were fixed in turn (`e0501a5`..`ee58933`).
+
+- **P1-1 fixed** (`a65ad33`, spec `ade3604`). A runner believes a cuttable throw only where anyone on the field could see a man in it: the base the relay job lines up for and a man visibly within `CUT_LINE_M` of the line, as his job was shown `CALL_HEARD_S` ago (`man_in_throw`/`cut_seen`, `observer: None`); the holder and the world use the same predicate through his own knowledge. The appeal-throw read in `catch_hold_s` follows it. Tags from second are back at main's level (15.2%, main 14.2% on both sets); the ledger row and note §5 now credit the earlier rise to this belief.
+- **P2-1 fixed** (`a65ad33`, `797fa6f`). On a ball under 80 m out the cutoff man of a throw to third or home stands 45 ft from the base and the throw passes him at his head; the relay man keeps the relay spot on deep balls. In games 7 of 8 throws through a cutoff man reached the plate on the fly or one hop (note §5). Taking the first-baseman/third-baseman assignment of the owner's write-up was not part of this change; who goes out stays §5.7 (TASKS).
+- **P2-2 deferred to the approach job** (Q33 stands). Recorded in the ledger row, note §5 and ledger §5 with MLB's triple rate; the approach job's checks include the pickup-to-release table and triples.
+- **P3-1 fixed** (`a65ad33`, `409d16e`, `55402ee`, redone in `e0501a5` after the re-review's P2-1).
+- **P3-2 fixed** (`a65ad33`): the expected run time of the miss by a fixed 48-node quadrature (the re-review matched it to its Monte Carlo within 0.001 s); crossover restated in note §4 and §5.5; the route test's shallow cases moved off the knife edge.
+- **P3-3 fixed** (`a65ad33`, tightened in `797fa6f`): the cut table against the world's throw off centre and to third, the runners' cut belief against `cutoff_out`, the low-throw read; plant tests anchored on the movement law's own stop.
+- **P3-4, P3-5 fixed in the spec** (`ade3604`): `PLANT_OVERLAP_S` is the plant's calibration knob, anchored on Tango's ≈1.2 s, re-checked by the approach job; Q32's drift-accuracy term is deferred with the across term.

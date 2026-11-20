@@ -208,4 +208,11 @@ All in a copy of the branch's `sim/` at `826120a` under `sim/target/review-probe
 
 ## Resolution
 
-Open.
+Resolved 2026-11-20 by the Coordinator; merged with `work/catch-throw`. Fixes by the Opus worker `catch-throw` (`e0501a5`..`ee58933`). No third review: the fixes follow this review's suggested fixes, are covered by tests, and bring the measures this review ablated back to the read-off level (triples 1.02/1.02, outfield assists 0.287 a team-game).
+
+- **P2-1 fixed** (`e0501a5`). The runner names the destination from the throw's direction (the first bag the projected track passes nearest after it comes down); a read that comes down short of that bag is a throw to it on the hop.
+- **P3-1 fixed** (`e0501a5`). A man standing short of where the throw comes down, on its line, no longer stops the follow-on; the test puts the cutoff man at `through_spot`.
+- **P3-2 deferred** to §5.7 positioning (TASKS "Open sim work", "Who goes out as relay man depends on the outfielder's arm").
+- **P3-3 fixed** (`797fa6f`). The throw is kept low where the cutoff man is going (his shown spot). Sending him earlier is §5.7 (same TASKS line). Note §5 gives the share of throws through him that reach the plate on the fly or one hop: 7 of 8.
+- **P3-4 fixed** (`797fa6f`). Tighter cut-table tolerances, a separate through table for third, and a case through `throw_to` with the man off his spot.
+- **P3-5 fixed** (`ee58933`). Triples and assists re-measured on both sets; the ledger row's cause for the assists corrected and the "not explained" line dropped.

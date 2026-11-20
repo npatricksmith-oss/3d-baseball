@@ -110,3 +110,21 @@ Covering and calling:
 
 Catcher:
 - [ ] 40. On a pop foul the catcher takes his mask off and tosses it aside (for the look only).
+
+# Saved plays, 2026-11-20 night (seed 51001)
+
+Watch any of them again with `client/run.sh -BbSavedPlay="saved-plays/<file>.toml"` (files `seed51001-play<N>-…`). Played on main `b8898d3`, before the outfield throw work merged.
+
+Fielding:
+- [ ] 66. 2nd baseman should have tried for double play. There was more than enough time. Decided not to throw to second base. Why?
+- [ ] 168. That should have been a double play attempt. The fielder understands the baseball situation (1 out, 1 runner on first, potential force out at 2nd, potential double play if a ground ball). So he should toss quickly to the shortstop covering the base so the shortstop can make an attempt at first.
+- [ ] 102. 2nd baseman hardly moved when the ball was hit. Realistic or no?
+- [ ] 71. Right fielder makes error tracking the rolling ball into the outfield. It goes by him and runner gets a triple. Why? I think the fielder's tracking is off.
+
+Running:
+- [ ] 90. Runner gives up during a rundown. Need to work on fielders performing rundowns as well. *(The rundown is planned: TASKS "Open sim work" §1, Q11.)*
+
+Umpire, camera and screen:
+- [ ] 89, 146. A fair ball down the line: the umpire should signal it by pointing toward the infield as soon as it is officially fair.
+- [ ] 112. When the batter swings the camera zooms in too early (before the bat makes contact). This tells me that the hit ball is predetermined instead of realistic 3D physics.
+- [ ] 128. After the play, during the inning switch over, the score card flashes for 1 second or so, which is far too short. Let it stay on the screen for 10 seconds, or the player can press Enter to continue sooner.
