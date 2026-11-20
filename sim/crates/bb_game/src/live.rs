@@ -692,15 +692,20 @@ const ROUND_GAIN_S: f64 = 0.15;
 /// (`PLANT_FREE_MPS`) the way he takes leaves his motion off the line to the base at full
 /// speed, so that he owes no plant with a little to spare [E].
 const ANGLE_FREE_FRAC: f64 = 0.9;
-/// The angle from contact must have him ready at the base this much sooner than going straight
-/// at the ball, s [E].
-const ANGLE_GAIN_S: f64 = ROUND_GAIN_S;
+/// The angle from contact must have him ready at the base this much sooner than any other take,
+/// s [E: the bound on the plan's error against the movement for the angle,
+/// `the_plan_costs_an_angle_from_contact_as_the_movement_runs_it`, as `ROUND_GAIN_S` is for
+/// rounding].
+const ANGLE_GAIN_S: f64 = 0.05;
 /// The angle from contact: the sharpest turn onto his way at the join he plans at full speed,
 /// degrees [E]: sharper, he reaches the line past the take point.
 const ANGLE_MAX_TURN_DEG: f64 = 60.0;
 /// The angle from contact: level with his join, he is on his way while the take point is within
 /// this of it, seen from where he is, degrees [E].
 const ANGLE_ON_LINE_DEG: f64 = 15.0;
+/// The angle from contact: coming through on his way, he keeps to it while the take point is
+/// ahead of him within this of it, degrees [E].
+const ANGLE_KEEP_DEG: f64 = 30.0;
 /// The holder's race rule (agent-models §5.6): the σ of a race, s, and the least chance of an
 /// out he throws for. A fielder rounds a ball for the lead runner's extra base only where by
 /// this rule he would have a play there.
@@ -1116,9 +1121,12 @@ struct Approach {
     /// Rounding: how far behind the take point, along the way through it, the point he comes
     /// through it from, m (`ROUND_M` on the ground; longer on an angle from contact).
     behind: f64,
-    /// The angle from contact (agent-models §5.2): planned while the ball is still in the air,
-    /// run at full speed, not paced to the ball.
+    /// The angle from contact (agent-models §5.2): run at full speed; on a ball that is down,
+    /// coming through he is paced to be at the take point `lead` seconds before the ball.
     angle: bool,
+    /// On an angle, how long before the ball he means to be at the take point, s (infinite: not
+    /// paced, the ball still in the air).
+    lead: f64,
 }
 
 #[derive(Clone, Debug)]
@@ -2387,7 +2395,17 @@ fn fielder_step(fd: &Fielder, t: f64, t_contact: f64) -> (Vec3, Vec3) {
         } else {
             p - u * ap.behind
         };
-        return step_toward(fd.pos, fd.vel, q, &fd.a, false, 0.0, f64::INFINITY);
+        // On a ball that is down, coming through he is timed against it, as rounding is: the way
+        // left over the time left until `lead` before the ball (inside that, until the ball),
+        // at most his top speed, recomputed every tick.
+        let mut a = fd.a;
+        if ap.through && ap.lead.is_finite() {
+            let dp = m::hypot(p.x - fd.pos.x, p.y - fd.pos.y);
+            let left = ap.t_ball - ap.lead - t;
+            let pace = if left > DT { dp / left } else if ap.t_ball - t > DT { dp / (ap.t_ball - t) } else { fd.a.speed };
+            a.speed = a.speed.min(pace);
+        }
+        return step_toward(fd.pos, fd.vel, q, &a, false, 0.0, f64::INFINITY);
     }
     if let Some(u) = fd.approach.filter(|_| fd.role == Role::Chase).and_then(|ap| ap.round) {
         // Rounding the ball (agent-models §5.2): he runs at the point `ROUND_M` behind the take
@@ -2518,6 +2536,51 @@ fn angle_join(a_lat: f64, pos: Vec3, p: Vec3, a: Vec3, v: f64) -> f64 {
         jn = angle_tangent(a_lat, p - a * jn - pos, a, v) + ROUND_M;
     }
     jn
+}
+
+/// The angle from contact (agent-models §5.2): the best way for an outfielder in state `st` to
+/// come through take point `p` (the ball there at `tp` by his read) toward base `rb` at full
+/// speed, arriving at `v` along `along` if he went straight: the line to the base turned toward
+/// his straight run by the most that leaves his motion off it under `ANGLE_FREE_FRAC` of the
+/// plant's free speed, or by `ROUND_SLANT_DEG`; joined `angle_join` behind the take point, by a
+/// turn of at most `ANGLE_MAX_TURN_DEG` there (`angle_way_ok`), inside the field; its extra way
+/// (`round_cost`) and a margin covered by his time in hand `slack`: `ROUND_MARGIN_S` times the
+/// share of the ball's motion there (`bv`, his read) that is across his way. (ready at the base,
+/// way, join, margin.) A toss is not angled for.
+#[allow(clippy::too_many_arguments)]
+fn angle_way(field: &Field, st: &Fielder, p: Vec3, tp: f64, v: f64, along: Vec3, slack: f64, bv: Vec3, rb: u8, arm: f64) -> Option<(f64, Vec3, f64, f64)> {
+    let tb = base_pos(rb) - p;
+    if m::hypot(tb.x, tb.y) <= throwing::TOSS_MAX_M || v < 1.0 {
+        return None;
+    }
+    let u = Vec3::new(tb.x, tb.y, 0.0).normalized();
+    let ang = m::atan2(u.x * along.y - u.y * along.x, u.x * along.x + u.y * along.y);
+    let free = m::asin((ANGLE_FREE_FRAC * throwing::PLANT_FREE_MPS / v).min(1.0));
+    let mut best: Option<(f64, Vec3, f64, f64)> = None;
+    let bl = m::hypot(bv.x, bv.y);
+    for s in ROUND_SLANT_DEG.iter().map(|d| d.to_radians()).chain(std::iter::once(free)).filter(|&s| s < ang.abs()) {
+        let a = u.rotate(Vec3::Z, s * ang.signum());
+        let jn = angle_join(st.a.a_lat, st.pos, p, a, v);
+        let w = p - a * jn;
+        if !angle_way_ok(st.pos, p, a, jn) || field.body_clearance(w.x, w.y, BODY_R).dist < 0.0 {
+            continue;
+        }
+        // The margin is for the ball going past him across his way: the ball's motion across it
+        // at the take point, as a share of its speed (a ball met head-on that he is late for
+        // only comes to him sooner).
+        let across = if bl > 1e-6 { ((bv.x * a.y - bv.y * a.x) / bl).abs() } else { 0.0 };
+        let lead = ROUND_MARGIN_S * across;
+        let (cost, v_r, _) = round_cost(&st.a, st.pos, st.vel.norm(), v, f64::INFINITY, p, a, jn);
+        if slack < cost + lead {
+            continue;
+        }
+        let to = base_pos(rb) - p;
+        let r = tp + throwing::footwork_s(a * v_r, to, false) + to.norm() / arm;
+        if best.is_none_or(|b| r < b.0) {
+            best = Some((r, a, jn, lead));
+        }
+    }
+    best
 }
 
 /// The angle from contact: whether a body at `pos` can take way `a` through take point `p` by a
@@ -3535,6 +3598,9 @@ impl<'a> Sim<'a> {
         let mut best: Option<(f64, Vec3, f64, f64, Option<Vec3>)> = None;
         // The rounded takes (ready, take point, ball time, arrival speed, way).
         let mut rounded: Vec<(f64, Vec3, f64, f64, Vec3, bool)> = Vec::new();
+        // An outfielder's best angle (agent-models §5.2, the angle from contact), at full speed:
+        // (ready, take point, ball time, way, join, margin).
+        let mut angled: Option<(f64, Vec3, f64, Vec3, f64, f64)> = None;
         let mut first = true;
         let mut t = fd.t_int;
         while t <= t_last + 1e-9 {
@@ -3615,6 +3681,29 @@ impl<'a> Sim<'a> {
                             }
                         }
                     }
+                    if let Some(ob) = of_base.filter(|_| !no_round) {
+                        if let Some((r, a, jn, lead)) = angle_way(field, &st, p, t, v, along, slack, bv, ob, arm) {
+                            if angled.is_none_or(|b| r < b.0) {
+                                angled = Some((r, p, t, a, jn, lead));
+                            }
+                        }
+                        // Coming through on an angle, the way he is on costs nothing more while the
+                        // take point is ahead of him within `ANGLE_KEEP_DEG` of it (a re-read moves
+                        // the take point a little off his line; the pursuit of the line takes it).
+                        if let Some(ap) = fd.approach.filter(|ap| ap.angle && ap.through) {
+                            let a = ap.round.expect("an angle has a way");
+                            let to = Vec3::new(p.x - st.pos.x, p.y - st.pos.y, 0.0);
+                            let bl = m::hypot(bv.x, bv.y);
+                            let lead = if bl > 1e-6 { ROUND_MARGIN_S * ((bv.x * a.y - bv.y * a.x) / bl).abs() } else { 0.0 };
+                            let tb = base_pos(ob) - p;
+                            if to.dot(a) > to.norm() * m::cos(ANGLE_KEEP_DEG.to_radians()) && slack >= lead && m::hypot(tb.x, tb.y) > throwing::TOSS_MAX_M {
+                                let r = t + throwing::footwork_s(a * v, tb, false) + tb.norm() / arm;
+                                if angled.is_none_or(|b| r < b.0) {
+                                    angled = Some((r, p, t, a, ap.behind, lead));
+                                }
+                            }
+                        }
+                    }
                     let edge = if first { 0.0 } else { APPROACH_GAIN_S };
                     if best.is_none_or(|bb| take.0 < bb.0 - edge) {
                         best = Some((take.0, p, t, take.1, None));
@@ -3636,7 +3725,18 @@ impl<'a> Sim<'a> {
                 unpaced = r.5;
             }
         }
-        best.filter(|b| b.3.is_finite() || b.4.is_some()).map(|b| Approach { at: b.1, t_ball: b.2, arrive: b.3, round: b.4, through: false, unpaced, behind: ROUND_M, angle: false })
+        // An outfielder keeps to his angle on a ball that is down as long as it has him ready
+        // `ANGLE_GAIN_S` sooner than any other take (already on one, unless another is better by
+        // `APPROACH_GAIN_S`): at full speed, not paced.
+        if let (Some(bs), Some(ba)) = (best, angled) {
+            let edge = if fd.approach.is_some_and(|ap| ap.angle) { -APPROACH_GAIN_S } else { ANGLE_GAIN_S };
+            if ba.0 < bs.0 - edge {
+                // Level with the join or past it, he is coming through along the way.
+                let through = (ba.1 - st.pos).dot(ba.3) <= ba.4;
+                return Some(Approach { at: ba.1, t_ball: ba.2, arrive: f64::INFINITY, round: Some(ba.3), through, unpaced: false, behind: ba.4, angle: true, lead: ba.5 });
+            }
+        }
+        best.filter(|b| b.3.is_finite() || b.4.is_some()).map(|b| Approach { at: b.1, t_ball: b.2, arrive: b.3, round: b.4, through: false, unpaced, behind: ROUND_M, angle: false, lead: f64::INFINITY })
     }
 
     /// The angle from contact (agent-models §5.2; owner's Q33): an outfielder whose own read has
@@ -3695,7 +3795,7 @@ impl<'a> Sim<'a> {
             if straight.is_some_and(|b| t >= b.0) {
                 break;
             }
-            let (b, _) = pred.at(t);
+            let (b, bv) = pred.at(t);
             let p = Vec3::new(b.x, b.y, 0.0);
             t += APPROACH_STEP_S;
             if b.z > catch_ceiling(field, b) || beyond_reach_over_wall(field, b) > 0.0 {
@@ -3720,26 +3820,7 @@ impl<'a> Sim<'a> {
             if straight.is_none_or(|b| r_straight < b.0) {
                 straight = Some((r_straight, p, tp));
             }
-            let tb_ = base_pos(rb) - p;
-            if m::hypot(tb_.x, tb_.y) <= throwing::TOSS_MAX_M || v < 1.0 {
-                continue;
-            }
-            let u = Vec3::new(tb_.x, tb_.y, 0.0).normalized();
-            let ang = m::atan2(u.x * along.y - u.y * along.x, u.x * along.x + u.y * along.y);
-            let free = m::asin((ANGLE_FREE_FRAC * throwing::PLANT_FREE_MPS / v).min(1.0));
-            let slants = ROUND_SLANT_DEG.iter().map(|d| d.to_radians()).chain(std::iter::once(free));
-            for s in slants.filter(|&s| s < ang.abs()) {
-                let a = u.rotate(Vec3::Z, s * ang.signum());
-                let jn = angle_join(st.a.a_lat, st.pos, p, a, v);
-                let w = p - a * jn;
-                if !angle_way_ok(st.pos, p, a, jn) || field.body_clearance(w.x, w.y, BODY_R).dist < 0.0 {
-                    continue;
-                }
-                let (cost, v_r, _) = round_cost(&st.a, st.pos, st.vel.norm(), v, f64::INFINITY, p, a, jn);
-                if slack < cost + ROUND_MARGIN_S {
-                    continue;
-                }
-                let r = tp + at_base(p, a * v_r);
+            if let Some((r, a, jn, _)) = angle_way(field, &st, p, tp, v, along, slack, bv, rb, arm) {
                 if angled.is_none_or(|b| r < b.0) {
                     angled = Some((r, p, tp, a, jn));
                 }
@@ -3752,7 +3833,7 @@ impl<'a> Sim<'a> {
         }
         // Already level with the join, or past it, he is coming through along the way.
         let through = (ba.1 - st.pos).dot(ba.3) <= ba.4;
-        Some(Approach { at: ba.1, t_ball: ba.2, arrive: f64::INFINITY, round: Some(ba.3), through, unpaced: false, behind: ba.4, angle: true })
+        Some(Approach { at: ba.1, t_ball: ba.2, arrive: f64::INFINITY, round: Some(ba.3), through, unpaced: false, behind: ba.4, angle: true, lead: f64::INFINITY })
     }
 
     /// A chaser's call follows his own latest read (agent-models §5.7; Codex
@@ -16099,7 +16180,7 @@ mod tests {
                         fd.role = Role::Chase;
                         fd.target = p;
                         fd.t_int = 0.0;
-                        fd.approach = Some(Approach { at: p, t_ball: 0.0, arrive: f64::INFINITY, round: Some(u), through: false, unpaced: false, behind: ROUND_M, angle: false });
+                        fd.approach = Some(Approach { at: p, t_ball: 0.0, arrive: f64::INFINITY, round: Some(u), through: false, unpaced: false, behind: ROUND_M, angle: false, lead: f64::INFINITY });
                         let (t0, mut t_r, mut prev) = (100.0, 0.0, fd.pos);
                         while !(fd.approach.is_some_and(|ap| ap.through) && m::hypot(p.x - fd.pos.x, p.y - fd.pos.y) <= reach) && t_r < 10.0 {
                             prev = fd.pos;
@@ -16175,7 +16256,7 @@ mod tests {
                         fd.target = p;
                         fd.t_int = 0.0;
                         let through = (p - fd.pos).dot(a) <= jn;
-                        fd.approach = Some(Approach { at: p, t_ball: 0.0, arrive: f64::INFINITY, round: Some(a), through, unpaced: false, behind: jn, angle: true });
+                        fd.approach = Some(Approach { at: p, t_ball: 0.0, arrive: f64::INFINITY, round: Some(a), through, unpaced: false, behind: jn, angle: true, lead: f64::INFINITY });
                         let (t0, mut t_r, mut prev, mut top, mut drop) = (100.0, 0.0, fd.pos, 0.0f64, 0.0f64);
                         while m::hypot(p.x - fd.pos.x, p.y - fd.pos.y) > reach && t_r < 10.0 {
                             prev = fd.pos;
