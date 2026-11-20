@@ -4777,9 +4777,10 @@ impl<'a> Sim<'a> {
         let (t_down, q_down) = track[arrive];
         // A throw coming down well short of every bag is a low throw meant to carry on along
         // the ground (agent-models §5.5, through the cutoff man): he follows it on through the
-        // bounce, with the same physics, and takes the last base it comes within reach of at
-        // catching height as the one it is going to (Opus catch-throw review P3-1). Otherwise
-        // the base nearest where it comes down.
+        // bounce, with the same physics, and takes the first base it comes within reach of after
+        // it comes down as the one it is going to (Opus catch-throw review P3-1; the last one
+        // would read a short throw to second that skips on toward home as a throw home).
+        // Otherwise the base nearest where it comes down.
         if down.is_some() && near(q_down).1 > 2.0 * RECEIVE_REACH {
             let land = (arrive..tr.knots.len()).map(|i| tr.knots[i]).find(|k| k.s.r.z <= env.ball.radius + 1e-6).or_else(|| (tr.stop == Some(0)).then(|| *tr.last()));
             if let Some(land) = land {
@@ -4791,10 +4792,10 @@ impl<'a> Sim<'a> {
                     full.push((t, on.at(t).0));
                     t += THROW_HOP_DT;
                 }
-                let reached = full.iter().filter(|(_, q)| q.z <= PASS_MAX_Z).filter_map(|&(t, q)| {
+                let reached = full.iter().filter(|(t, q)| *t >= t_down && q.z <= PASS_MAX_Z).find_map(|&(t, q)| {
                     let (b, d) = near(q);
                     (d <= PASS_REACH_M).then_some((t, b))
-                }).last();
+                });
                 if let Some((t_b, b)) = reached {
                     // When it is nearest that bag.
                     let bp = base_pos(b);
@@ -8861,6 +8862,13 @@ mod tests {
         let to2 = base_pos(2) - Vec3::new(0.0, 88.0, 0.0);
         let el = solve_throw(&fx.env, THROW_RELEASE_Z, THROW_CATCH_Z, to2.norm(), v).unwrap().elev;
         let s0 = throw_state(from, to2, v, el);
+        assert_eq!(sim.project_runner_throw(s0.r, s0.v).dest, 2);
+        // The same throw 15% slow comes down well short of second and skips on, through second
+        // and toward home: it is still a throw to second, the first base it reaches.
+        let s0 = throw_state(from, to2, 0.85 * v, el);
+        let tr = bb_physics::throw::fly_throw(&fx.env, s0, 0.0, 6.0);
+        let down = tr.knots.windows(2).find(|w| w[0].s.r.z > THROW_CATCH_Z && w[1].s.r.z <= THROW_CATCH_Z).map(|w| w[1].s.r).unwrap();
+        assert!((down - base_pos(2)).norm() > 2.0 * RECEIVE_REACH, "the slow throw must come down short of every bag: {down:?}");
         assert_eq!(sim.project_runner_throw(s0.r, s0.v).dest, 2);
     }
 
