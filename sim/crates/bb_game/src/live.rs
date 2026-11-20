@@ -695,6 +695,12 @@ const ANGLE_FREE_FRAC: f64 = 0.9;
 /// The angle from contact must have him ready at the base this much sooner than going straight
 /// at the ball, s [E].
 const ANGLE_GAIN_S: f64 = ROUND_GAIN_S;
+/// The angle from contact: the sharpest turn onto his way at the join he plans at full speed,
+/// degrees [E]: sharper, he reaches the line past the take point.
+const ANGLE_MAX_TURN_DEG: f64 = 60.0;
+/// The angle from contact: level with his join, he is on his way while the take point is within
+/// this of it, seen from where he is, degrees [E].
+const ANGLE_ON_LINE_DEG: f64 = 15.0;
 /// The holder's race rule (agent-models §5.6): the σ of a race, s, and the least chance of an
 /// out he throws for. A fielder rounds a ball for the lead runner's extra base only where by
 /// this rule he would have a play there.
@@ -2366,6 +2372,23 @@ fn fielder_step(fd: &Fielder, t: f64, t_contact: f64) -> (Vec3, Vec3) {
         Some(ap) if fd.role == Role::Chase => (ap.t_ball, ap.arrive),
         _ => (fd.t_int, f64::INFINITY),
     };
+    if let Some(ap) = fd.approach.filter(|ap| fd.role == Role::Chase && ap.angle) {
+        // The angle from contact (agent-models §5.2): at full speed, the ball still in the air.
+        // Going out he runs at the join `behind` the take point on his way; from where his turn
+        // onto the way begins (`round_reached`) he follows the line of the way, steering at the
+        // point on it a turning radius at his speed ahead of where he is (past the take point if
+        // need be), so he curves onto it and comes through the take point along it. Nothing
+        // holds him back but the turn itself (§5.3).
+        let u = ap.round.expect("an angle has a way");
+        let p = fd.target;
+        let q = if ap.through {
+            let v = fd.vel.norm().max(1.0);
+            p - u * ((p - fd.pos).dot(u) - (v * v / fd.a.a_lat).max(ROUND_NEAR_M))
+        } else {
+            p - u * ap.behind
+        };
+        return step_toward(fd.pos, fd.vel, q, &fd.a, false, 0.0, f64::INFINITY);
+    }
     if let Some(u) = fd.approach.filter(|_| fd.role == Role::Chase).and_then(|ap| ap.round) {
         // Rounding the ball (agent-models §5.2): he runs at the point `ROUND_M` behind the take
         // point, away from the base, slowing to what his lateral acceleration allows for the
@@ -2380,9 +2403,8 @@ fn fielder_step(fd: &Fielder, t: f64, t_contact: f64) -> (Vec3, Vec3) {
         let w = p - u * behind;
         let dw = m::hypot(w.x - fd.pos.x, w.y - fd.pos.y);
         // He means to be at the take point `ROUND_MARGIN_S` before the ball; a ball all but
-        // still he goes round as fast as the turn allows, and on an angle from contact, the ball
-        // still in the air, he runs as hard as he can (agent-models §5.2).
-        let unpaced = fd.approach.is_some_and(|ap| ap.unpaced || ap.angle);
+        // still he goes round as fast as the turn allows.
+        let unpaced = fd.approach.is_some_and(|ap| ap.unpaced);
         let t_goal = if unpaced { t } else { t_goal };
         let left = t_goal - ROUND_MARGIN_S - t;
         let (q, pace, cap) = if fd.approach.is_some_and(|ap| ap.through) {
@@ -2430,6 +2452,14 @@ fn round_turn(fd: &Fielder, u: Vec3, v_cap: f64) -> (f64, f64) {
 fn round_reached(fd: &mut Fielder) {
     let Some(u) = fd.approach.filter(|ap| !ap.through).and_then(|ap| ap.round) else { return };
     let w = fd.target - u * fd.approach.map_or(ROUND_M, |ap| ap.behind);
+    if fd.approach.is_some_and(|ap| ap.angle) {
+        // On an angle from contact his turn onto the way begins its tangent length before the
+        // join (`angle_tangent`).
+        if m::hypot(w.x - fd.pos.x, w.y - fd.pos.y) <= angle_tangent(fd.a.a_lat, fd.vel, u, fd.vel.norm()) {
+            fd.approach.as_mut().expect("an angle").through = true;
+        }
+        return;
+    }
     let cap = fd.approach.map_or(f64::INFINITY, |ap| ap.arrive);
     if m::hypot(w.x - fd.pos.x, w.y - fd.pos.y) <= round_turn(fd, u, cap).1 {
         fd.approach.as_mut().expect("rounding").through = true;
@@ -2475,6 +2505,47 @@ fn round_cost(a: &FielderAttrs, pos: Vec3, v_now: f64, v: f64, v_cap: f64, p: Ve
     let v_r = v.min(v_turn);
     let cost = (dw + behind - d) / v.max(1.0) + (v - v_r) * (v - v_r) / (2.0 * BRAKE * v.max(1e-9)) + if v_r < v { behind * (1.0 / v_r - 1.0 / v) } else { 0.0 };
     (cost, v_r, dw + behind)
+}
+
+/// The angle from contact (agent-models §5.2): how far behind take point `p`, along the way `a`
+/// he comes through it, a body at `pos` running at `v` joins that way, m: the turn onto it at
+/// that speed (§5.3: radius r = v²/a_lat) begins and ends r·tan(θ/2) either side of the join,
+/// θ the angle between his run there and the way, and he then runs `ROUND_M` along the way
+/// before the take point. (θ shrinks as the join moves back: three passes settle it.)
+fn angle_join(a_lat: f64, pos: Vec3, p: Vec3, a: Vec3, v: f64) -> f64 {
+    let mut jn = ROUND_M;
+    for _ in 0..3 {
+        jn = angle_tangent(a_lat, p - a * jn - pos, a, v) + ROUND_M;
+    }
+    jn
+}
+
+/// The angle from contact: whether a body at `pos` can take way `a` through take point `p` by a
+/// join `jn` behind it: level with the join or past it (he is coming through), only if he is
+/// near the line, within `ANGLE_ON_LINE_DEG` of it seen from the take point; behind the join,
+/// turning onto the way there by no more than `ANGLE_MAX_TURN_DEG`. (A sharper turn at full
+/// speed has him reach the line past the take point.)
+fn angle_way_ok(pos: Vec3, p: Vec3, a: Vec3, jn: f64) -> bool {
+    let to = p - pos;
+    let to = Vec3::new(to.x, to.y, 0.0);
+    let s = to.dot(a);
+    if s <= jn {
+        return s > 0.0 && s >= to.norm() * m::cos(ANGLE_ON_LINE_DEG.to_radians());
+    }
+    let tw = to - a * jn;
+    tw.dot(a) >= tw.norm() * m::cos(ANGLE_MAX_TURN_DEG.to_radians())
+}
+
+/// The angle from contact: how far before the join a body heading along `heading` at `v` begins
+/// his turn onto the way `a` (and how far past it he ends it), r·tan(θ/2) with r = v²/a_lat,
+/// at least `ROUND_NEAR_M`, m.
+fn angle_tangent(a_lat: f64, heading: Vec3, a: Vec3, v: f64) -> f64 {
+    let h = Vec3::new(heading.x, heading.y, 0.0);
+    let n = h.norm();
+    let c = if n > 1e-9 { (h.dot(a) / n).clamp(-1.0, 1.0) } else { 1.0 };
+    // tan(θ/2) = sin θ / (1 + cos θ), held finite short of a reversal.
+    let tan_half = m::sqrt((1.0 - c * c).max(0.0)) / (1.0 + c).max(0.05);
+    (v * v / a_lat * tan_half).max(ROUND_NEAR_M)
 }
 
 /// The movement step toward `target` for a body at `pos` moving `vel` with abilities `a`
@@ -3659,18 +3730,9 @@ impl<'a> Sim<'a> {
             let slants = ROUND_SLANT_DEG.iter().map(|d| d.to_radians()).chain(std::iter::once(free));
             for s in slants.filter(|&s| s < ang.abs()) {
                 let a = u.rotate(Vec3::Z, s * ang.signum());
-                // The join: far enough behind the take point that the turn onto the way there is
-                // made at his speed (§5.3: a turn through θ over a chord J at speed v needs
-                // J ≥ 2·sin(θ/2)·v²/a_lat), at least `ROUND_M`.
-                let mut jn = ROUND_M;
-                for _ in 0..3 {
-                    let w = p - a * jn;
-                    let tw = Vec3::new(w.x - st.pos.x, w.y - st.pos.y, 0.0);
-                    let c = if tw.norm() > 1e-9 { (tw.dot(a) / tw.norm()).clamp(-1.0, 1.0) } else { 1.0 };
-                    jn = (2.0 * m::sqrt(((1.0 - c) / 2.0).max(0.0)) * v * v / st.a.a_lat).max(ROUND_M);
-                }
+                let jn = angle_join(st.a.a_lat, st.pos, p, a, v);
                 let w = p - a * jn;
-                if field.body_clearance(w.x, w.y, BODY_R).dist < 0.0 {
+                if !angle_way_ok(st.pos, p, a, jn) || field.body_clearance(w.x, w.y, BODY_R).dist < 0.0 {
                     continue;
                 }
                 let (cost, v_r, _) = round_cost(&st.a, st.pos, st.vel.norm(), v, f64::INFINITY, p, a, jn);
@@ -16029,7 +16091,7 @@ mod tests {
                         // His arrival speed running straight through, as the plan has it.
                         let k = m::exp(-t_s / fd.a.tau_a);
                         let v = (fd.vel * k + Vec3::new(0.0, 1.0, 0.0) * (fd.a.speed * (1.0 - k))).norm().min(fd.a.speed);
-                        let (cost, _, _) = round_cost(&fd.a, fd.pos, speed, v, f64::INFINITY, p, u);
+                        let (cost, _, _) = round_cost(&fd.a, fd.pos, speed, v, f64::INFINITY, p, u, ROUND_M);
                         if !cost.is_finite() {
                             continue;
                         }
@@ -16060,6 +16122,91 @@ mod tests {
         assert!(worst_late <= 0.15, "the rounded run took {worst_late:.2} s longer than the plan's cost");
         assert!(worst_early >= -0.25, "the plan's cost was {:.2} s too high", -worst_early);
         assert!(worst_angle <= 25.0, "he came through {worst_angle:.0}° off the line to the base");
+    }
+
+    /// agent-models §5.2, the angle from contact: the plan's cost of a way through the take point
+    /// (`angle_join`, then `round_cost`: the extra way via the join at his speed) against the
+    /// movement step itself, run at full speed as on a ball still in the air. From a run at
+    /// 0–8 m/s toward a take point 12–40 m away, the way turned 10–50° off his line either side:
+    /// he comes within his reach of the take point no later than the straight run's stepped time
+    /// plus the plan's cost and 0.1 s, and no sooner than that less 0.1 s (measured −0.05 to
+    /// +0.04 s over 78 cases); he comes through it within 5° of the way (measured 2°); and he
+    /// is not held back: once at his top speed he loses no more than the curve onto the way
+    /// itself costs under §5.3's turn law, 1 m/s (measured 0.75 m/s, on a 40° turn at 8 m/s).
+    /// (A first build that finished the turn only at the take point came through it 15–42° off
+    /// the way, and one that let him join the way level with the take point overran it.)
+    #[test]
+    fn the_plan_costs_an_angle_from_contact_as_the_movement_runs_it() {
+        let fx = fixture(&[]);
+        let inp = input(&fx, vec![RunnerIn { id: fx.st.batter, base: 0, speed: 8.2, tau_s: bb_agents::running::LEAGUE_TAU_S }]);
+        let mut st = fx.st.clone();
+        let sim = new_sim(&inp, &mut st);
+        let field = inp.field;
+        let base = sim.f[CF].clone();
+        let reach = REACH * 0.7;
+        let (mut worst_late, mut worst_early, mut worst_angle, mut worst_drop, mut n) = (f64::NEG_INFINITY, f64::INFINITY, 0.0f64, 0.0f64, 0);
+        for speed in [0.0, 4.0, 8.0] {
+            for dist in [12.0, 20.0, 30.0, 40.0] {
+                for deg in [10.0f64, 20.0, 30.0, 40.0, 50.0] {
+                    for side in [-1.0, 1.0] {
+                        let mut fd = base.clone();
+                        fd.pos = Vec3::new(0.0, 90.0, 0.0);
+                        fd.vel = Vec3::new(0.0, -speed, 0.0);
+                        let p = fd.pos + Vec3::new(0.0, -dist, 0.0);
+                        let h = (side * deg).to_radians();
+                        let a = Vec3::new(m::sin(h), -m::cos(h), 0.0);
+                        // The straight run, stepped (top speed through it).
+                        let (mut q, mut vq, mut t_s) = (fd.pos, fd.vel, 0.0);
+                        while m::hypot(p.x - q.x, p.y - q.y) > reach && t_s < 10.0 {
+                            (q, vq) = step_toward(q, vq, p, &fd.a, false, 0.0, f64::INFINITY);
+                            t_s += DT;
+                        }
+                        // His arrival speed running straight through, as the plan has it.
+                        let k = m::exp(-t_s / fd.a.tau_a);
+                        let v = (fd.vel * k + Vec3::new(0.0, -1.0, 0.0) * (fd.a.speed * (1.0 - k))).norm().min(fd.a.speed);
+                        let jn = angle_join(fd.a.a_lat, fd.pos, p, a, v);
+                        let (cost, _, _) = round_cost(&fd.a, fd.pos, speed, v, f64::INFINITY, p, a, jn);
+                        if !cost.is_finite() || !angle_way_ok(fd.pos, p, a, jn) {
+                            continue;
+                        }
+                        n += 1;
+                        // The angle route, stepped by `fielder_step` at full speed.
+                        fd.role = Role::Chase;
+                        fd.target = p;
+                        fd.t_int = 0.0;
+                        let through = (p - fd.pos).dot(a) <= jn;
+                        fd.approach = Some(Approach { at: p, t_ball: 0.0, arrive: f64::INFINITY, round: Some(a), through, unpaced: false, behind: jn, angle: true });
+                        let (t0, mut t_r, mut prev, mut top, mut drop) = (100.0, 0.0, fd.pos, 0.0f64, 0.0f64);
+                        while m::hypot(p.x - fd.pos.x, p.y - fd.pos.y) > reach && t_r < 10.0 {
+                            prev = fd.pos;
+                            let (np, nv) = fielder_step(&fd, t0 + t_r, 0.0);
+                            (fd.pos, fd.vel) = wall_rule(field, np, nv);
+                            round_reached(&mut fd);
+                            let sp = fd.vel.norm();
+                            if top >= fd.a.speed - 0.05 {
+                                drop = drop.max(top - sp);
+                            }
+                            top = top.max(sp);
+                            t_r += DT;
+                        }
+                        let heading = Vec3::new(fd.pos.x - prev.x, fd.pos.y - prev.y, 0.0).normalized();
+                        let angle = m::acos(heading.dot(a).clamp(-1.0, 1.0)).to_degrees();
+                        let late = t_r - (t_s + cost);
+                        eprintln!("v0 {speed} d {dist} way {deg}° side {side}: J {jn:.1} straight {t_s:.2} s + cost {cost:.2} = {:.2}; stepped {t_r:.2} s ({late:+.2}), heading {angle:.0}° off the way, slowed {drop:.2} m/s", t_s + cost);
+                        worst_late = worst_late.max(late);
+                        worst_early = worst_early.min(late);
+                        worst_angle = worst_angle.max(angle);
+                        worst_drop = worst_drop.max(drop);
+                    }
+                }
+            }
+        }
+        eprintln!("{n} cases: late {worst_late:+.2} early {worst_early:+.2} angle {worst_angle:.0}° slowed {worst_drop:.2}");
+        assert!(n >= 60, "only {n} cases planned");
+        assert!(worst_late <= 0.1, "the angle took {worst_late:.2} s longer than the plan's cost");
+        assert!(worst_early >= -0.1, "the plan's cost was {:.2} s too high", -worst_early);
+        assert!(worst_angle <= 5.0, "he came through {worst_angle:.0}° off the way");
+        assert!(worst_drop <= 1.0, "he slowed {worst_drop:.2} m/s from his top speed on the way");
     }
 
     /// agent-models §5.2, the approach: a ground ball to the shortstop's left. Going straight at
