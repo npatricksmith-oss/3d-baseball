@@ -11,7 +11,7 @@ Source tags as in the [throw-race note](2026-11-19-throw-race.md): `read` (page 
 - **Long throws are rainbows.** Outfield throws of 60–90 m leave at 14–18° and peak 5–9 m up, over any cutoff man's head. 17–28% come down short of the target (median 1.5–2.1 m short: speed noise near the aim), and the lateral miss is small (median 0.8–1.2 m, more than 3 m on 3–7%). Almost none go home: 12 of 7,038 such throws in 600 games; nearly all are returns to second with no play.
 - **Relays have almost vanished** (9 in 600 games), as the relay review found.
 - **Sources found:** a run-up toward the target adds about 7% of ball speed (1.6 m/s for 1.5 m/s more body speed, elite handball; read), with no loss of accuracy; a crow hop adds about 10% over a pitch (read). No measurement of an outfielder's plant or catch-to-release on a fly was found, nor an MLB share of throws through the cutoff by depth. One play (Reddick 2017, 276 ft, read) took 3.82 s from catch to the catcher.
-- **After the build (§5):** the plant, as decided, adds about half a run a team-game and raises the outfielders' mean pickup-to-release from 1.01 s to 1.46 s, against an empirical 1.2 s with the tag. That is a proposed owner question (§6). Everything else in the build is close to neutral on runs. Tags from second rise from 14% to 25% (MLB 30%), and at 250–275 ft a runner sent from third is safe 63% of the time (main 49%).
+- **After the build (§5):** the plant, as decided, adds about half a run a team-game and raises the outfielders' mean pickup-to-release from 1.01 s to 1.46 s, against an empirical 1.2 s with the tag. That is a proposed owner question (§6). Everything else in the build is close to neutral on runs. The set-up behind a fly was built, dropped catches, and was taken out (§5). Tags from second rise from 14% to 25% (MLB 30%), and at 250–275 ft a runner sent from third is safe 63% of the time (main 49%).
 - **The physics puts the relay where the owner said.** If a throw with a cutoff man in it must pass him at head height, it comes down short and skips on; by the sim's own flight and bounce physics it is quicker than the relay (with the sourced 0.75 s exchange) up to about 80 m at a grade-50 arm and 90 m at 40 m/s, so the relay wins from about 262–295 ft. The owner's figure is about 280 ft (§4).
 
 ## 1. How outfielders take the ball (as built, main `ab5c374`)
@@ -103,7 +103,7 @@ A throwaway probe (`zz_lowthrow.rs`) flies three throws home from straight-away 
 
 ## 5. After the change (`work/catch-throw`, against main `ab5c374`)
 
-The same probe with the trace, direct seeds 0–299 and 1000–1299, on the build after the two follow-up fixes (`4ebf724`). Both seed sets are pooled unless split as [seed 0 / seed 1000].
+The same probe with the trace, direct seeds 0–299 and 1000–1299, on the build after the two follow-up fixes (`4ebf724`). Both seed sets are pooled unless split as [seed 0 / seed 1000]. These figures include the set-up behind a fly, which the final build leaves out (below); it seldom triggered, so it moves them little. The standard runs in the ledger are on the final build.
 
 **What the first build did wrong, fixed before measuring** (100 games, seed 0):
 
@@ -120,7 +120,11 @@ The same probe with the trace, direct seeds 0–299 and 1000–1299, on the buil
 | Fly catches with a runner on third, 0–1 out, 225–300 ft: toward home / across / away / standing | 24% / 53% / 7% / 16% (141) | 21% / 57% / 6% / 16% (190) |
 | the same, all depths: standing and settled ≥ 0.5 s before the catch | 19 of 412 | 15 of 462 |
 
-The set-up behind a fly seldom triggers. The fielder needs, by his own read, time to reach a spot 2.5 m behind the catch and half a second more, and the sim's outfielders rarely have that (§1). Where it does trigger it works: in the test `an_outfielder_with_time_sets_up_and_comes_through_the_catch` the centre fielder takes the fly at 4 m/s toward home, and at 0 m/s with nobody on.
+**The set-up behind a fly was taken out of the build.**
+- It seldom triggered. The fielder needs, by his own read, time to reach a spot 2.5 m behind the catch and half a second more, and the sim's outfielders rarely have that (§1): about one come-through in two games.
+- At the 4 m/s pace that keeps the catch in reach it adds at most about 1 m/s of throw (the gain starts at 3 m/s).
+- It dropped catches. Over 300 games (seed 0, standard run): fly-ball hits .097 without it, .104 with it; pop-up hits .004 against .016. A traced case (seed 6, play 40, right fielder): coming through, he drifted back off his catch point and the ball fell in front of him. A persistence fix and a pace that gave way when late did not cure it.
+- It belongs with the approach work of §6: fielders who slow into the ball and round it. agent-models §5.5 keeps the rule as specified, marked not built.
 
 **Routes** (outfield throws to third or home, the first throw of the play, 600 games):
 
@@ -163,7 +167,7 @@ From second, every tagging runner sent: safe 31% at 250–275 ft and 51% at 275�
 **What moved and why:**
 
 - **The plant drives nearly all of it.** Outfielders who take a fly or a pickup moving across or away now need up to a second more before a set throw, so runners take more bases. Tags from second nearly double (toward MLB's 30%), first to third on singles overshoots MLB, triples rise by a third, and runs rise by about half a run.
-  - With the old flat footwork and everything else in this build, seed 0 gives 4.26 runs (main 4.24). The momentum gain, the set-up, the cuttable throw and the receiver's read of a hop are close to neutral on runs.
+  - With the old flat footwork and everything else in this build, seed 0 gives 4.26 runs (main 4.24). The momentum gain, the cuttable throw and the receiver's read of a hop are close to neutral on runs.
   - Across the line at the cornering limit instead of the braking limit (§6, option 2): seed 0 gives 4.45.
 - **At 250–275 ft the direct race home is now nearer MLB.** Sent, 63% are safe (main 49%), against MLB's roughly 5 in 6 of those sent and at least 42% of all. Runners from third still decide on their belief. It now includes the plant, from the motion they see at the catch, and the tag-up rate rose 5 points (62% → 67%).
 - **First to home on doubles did not move** (77.7% → 80.1%, MLB 38%). It is not the throw; it stays its own problem (TASKS).
@@ -176,17 +180,18 @@ From second, every tagging runner sent: safe 31% at 250–275 ft and 51% at 275�
 - *What the game does now (this build, as decided in Q32).* A fielder who takes the ball moving away from his target, or across the line to it, must stop that motion under the braking limit before a set throw, or throw off balance. An outfielder who picks up a ball in the gap running across at 7 m/s needs about a second more than before to be set; one running away from the infield the same.
 - *What is wrong.* The sim's fielders reach a ball they are racing at full speed. They never slow into a pickup, or round the ball to take it moving toward their throw, as real fielders do. So they pay the whole stop on plays where real fielders pay little (§5):
   - an outfielder's pickup-to-release rose from 1.01 s to 1.46 s on average, and 61% now take over 1.2 s. Tango's empirical figure for pickup-to-release plus the infielder's tag is about 1.2 s (§3, read): main matched it, this build does not;
-  - runs 4.24 → 4.72 on the standard seed 0 run, triples +35%, ground-ball hits .313 → .327.
+  - runs 4.24 → 4.69 [4.47 → 5.0] in the standard runs, triples +35%, ground-ball hits .313 → .327;
+  - three frozen infield regression plays now fail (`bb_game/tests/throw_choices.rs`: a lead force on seeds 13 and 23, the 6-4-3 on seed 3): the infielder fields moving across and loses the time. With option 3 all five pass; with option 2, four.
 - *Options:*
   1. Keep it as built. The game becomes faster on the bases than MLB in most measures.
   2. Count the motion across the line at the fielder's cornering limit (`Agility`, 7 m/s² at grade 50), and only the motion away at the braking limit: seed 0 gives 4.45 runs, ground-ball hits .318. A physical reading (he curves toward his target rather than stopping), but wrong for a man running straight across.
   3. Count only the motion away, at the braking limit: 4.12 at 100 games on seed 0, against 4.09 for the old flat rule.
-  4. **(Recommended)** Keep the physics and build the approach: a fielder who will throw after fielding the ball slows into it and, with room, rounds it, so that he takes it moving toward his target (agent-models §5.2's arriving under control, extended to ground balls and caroms). That is how real fielders avoid the cost, and Tango's 1.2 s is the check.
+  4. **(Recommended)** Keep the physics and build the approach: a fielder who will throw after fielding the ball slows into it and, with room, rounds it, so that he takes it moving toward his target (agent-models §5.2's arriving under control, extended to ground balls and caroms), with the set-up behind a fly in the same job. That is how real fielders avoid the cost, and Tango's 1.2 s is the check.
 - *Recommendation:* option 4 as the next job. Until it is built, option 2 or 3 on this branch, so that main does not carry half a run from a movement gap. The switch is one function (`throwing::footwork_s`) and its tests; nothing else in the build depends on it.
 
 Two findings are reported, not decided here:
 
-- **Outfielders creep in to routine flies** (§1, unchanged in §5). Whether they should camp under every routine fly is the movement model's (agent-models §5.2). It also decides how often the set-up can happen.
+- **Outfielders creep in to routine flies** (§1). Whether they should camp under every routine fly is the movement model's (agent-models §5.2). It also decides how often the set-up behind a fly could happen, which is why that waits for the approach work.
 - **The cut call** (the catcher's "Cut!") stays out of this job, as the job says. The sim's cutoff man never intercepts a throw aimed past him, so a low throw he could have cut goes on to the base: the "let it go" half of the call. The route change does not need the call to be sensible, since throws through the cutoff are few (§5).
 
 ## Sources

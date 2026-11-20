@@ -579,18 +579,6 @@ const TRACK_CONTACT_M: f64 = 0.3;
 /// to the owner's band for a routine fly (90–99% by ability; grade 50 .967 on seeds 0–99 when
 /// fitted, .979 with the look's full Jacobian; docs/calibration/2026-11-17-track-bias.md) [E].
 pub(crate) const TRACK_BIAS_FRAC: f64 = 0.6;
-/// The set-up behind a fly (agent-models §5.5, the catch sets up the throw): how far behind
-/// his catch point an outfielder with time to spare waits, m [E; "one or two steps behind"
-/// in coaching texts, unsourced as a measurement]; the time he must have in hand beyond
-/// getting there and coming through, s [E, unsourced]; within this of the spot he counts as
-/// there, m; and how far past the catch point, toward his target, he runs on through it, m [E].
-const SETUP_BACK_M: f64 = 2.5;
-const SETUP_SPARE_S: f64 = 0.5;
-const SETUP_AT_M: f64 = 1.0;
-const SETUP_PAST_M: f64 = 3.0;
-/// The pace he comes through at, m/s [E]: a little over the crow hop's 3 m/s (`HOP_MPS`), so
-/// that a read a tenth of a second out leaves the ball within his reach.
-const SETUP_THROUGH_MPS: f64 = 4.0;
 /// Arriving under control (agent-models §5.2): a chaser with time in hand keeps this many of
 /// his doubts (the σ of where he believes it comes down) between where he can stop and his
 /// spot [E].
@@ -1048,10 +1036,6 @@ struct Fielder {
     /// moving (agent-models §5.5).
     up_at: f64,
     set_base: f64,
-    /// Coming through a set-up catch toward his throw (agent-models §5.5, `chase_target`), and
-    /// the way he comes (toward the base he expects to throw to).
-    through: bool,
-    through_dir: Vec3,
     face: Option<Vec3>,
     catch_vel: Vec3,
     /// Visible heading, motion and reception cue at the catch, published before choosing
@@ -1557,7 +1541,6 @@ fn stop_point(fd: &Fielder) -> Vec3 {
 /// braking to the spot he chose when his job ended (Codex idle-fielder review #1).
 fn go_idle(fd: &mut Fielder) {
     fd.role = Role::Idle;
-    fd.through = false;
     fd.backs = None;
     fd.target = stop_point(fd);
 }
@@ -2220,11 +2203,6 @@ fn fielder_step(fd: &Fielder, t: f64, t_contact: f64) -> (Vec3, Vec3) {
     // Early for a ball in the air, he keeps a margin of his doubt short of where he can stop
     // (agent-models §5.2, arriving under control).
     let margin = if early && fd.role == Role::Chase { ARRIVE_SIGMAS * fd.doubt } else { 0.0 };
-    if fd.through && fd.role == Role::Chase && fd.t_int.is_finite() {
-        // Coming through a set-up catch at the set-up pace (agent-models §5.5).
-        let a = FielderAttrs { speed: fd.a.speed.min(SETUP_THROUGH_MPS), ..fd.a };
-        return step_toward(fd.pos, fd.vel, fd.target, &a, false, 0.0);
-    }
     step_toward(fd.pos, fd.vel, fd.target, &fd.a, early, margin)
 }
 
@@ -3027,63 +3005,8 @@ impl<'a> Sim<'a> {
     /// follows the read (`refresh_call`).
     fn replan(&mut self, i: usize) {
         self.read(i);
-        self.set_chase(i);
+        self.f[i].target = self.f[i].int_pt;
         self.refresh_call(i);
-    }
-
-    /// Where chaser `i` runs (agent-models §5.5, the catch sets up the throw): his intercept;
-    /// or, an outfielder under a fly he has called sure, with time to spare and a throw likely
-    /// to follow, first a spot `SETUP_BACK_M` behind it (away from where he expects to throw)
-    /// and then, when his run from there would just bring him to it as the ball comes down,
-    /// on through it toward his target, so that he takes the ball moving that way. All from
-    /// his own read (`t_int`, `int_pt`, `call`) and what everyone sees (runners, outs).
-    fn chase_target(&self, i: usize) -> (Vec3, bool) {
-        let fd = &self.f[i];
-        let pt = fd.int_pt;
-        // Once coming through he keeps coming, at his latest read of the catch point, while
-        // the ball is up (a close re-read that leaves him unsure for a moment does not stop him).
-        if fd.through && self.ball_still_up() {
-            return (pt + fd.through_dir * SETUP_PAST_M, true);
-        }
-        let Some(dir) = self.setup_dir(i) else { return (pt, false) };
-        let back = pt - dir * SETUP_BACK_M;
-        // No room behind it (at the wall): he takes it where it comes down.
-        if self.inp.field.body_clearance(back.x, back.y, BODY_R).dist < 0.0 {
-            return (pt, false);
-        }
-        let left = fd.t_int - self.t;
-        let come = run_time(SETUP_BACK_M, SETUP_THROUGH_MPS, fd.a.tau_a);
-        let to_back = Vec3::new(back.x - fd.pos.x, back.y - fd.pos.y, 0.0).norm();
-        if left <= come {
-            // Coming through only from the set-up spot; caught short of it, he plays it plainly.
-            return if to_back <= SETUP_AT_M || fd.through { (pt + dir * SETUP_PAST_M, true) } else { (pt, false) };
-        }
-        if to_back <= SETUP_AT_M || left >= self.eta(i, back) + come + SETUP_SPARE_S { (back, false) } else { (pt, false) }
-    }
-
-    /// Chaser `i` runs where `chase_target` says, remembering the way he comes through.
-    fn set_chase(&mut self, i: usize) {
-        let (target, through) = self.chase_target(i);
-        let fd = &mut self.f[i];
-        if through && !fd.through {
-            fd.through_dir = Vec3::new(target.x - fd.int_pt.x, target.y - fd.int_pt.y, 0.0).normalized();
-        }
-        (fd.target, fd.through) = (target, through);
-    }
-
-    /// The way an outfielder expects to throw after catching the fly he is under, as a unit
-    /// vector from his catch point, if he expects to throw at all: with fewer than two out, to
-    /// the base ahead of the lead runner (agent-models §5.5). Only for a ball still in the air
-    /// that he has called sure.
-    fn setup_dir(&self, i: usize) -> Option<Vec3> {
-        let fd = &self.f[i];
-        if i < 6 || fd.call != 3 || !fd.t_int.is_finite() || self.st.outs >= 2 || !self.ball_still_up() {
-            return None;
-        }
-        let lead = self.r.iter().filter(|r| r.start > 0 && !r.out && !r.scored).map(|r| r.start).max()?;
-        let to = base_pos(lead + 1) - fd.int_pt;
-        let to = Vec3::new(to.x, to.y, 0.0);
-        (to.norm() > 1.0).then(|| to.normalized())
     }
 
     /// A chaser's call follows his own latest read (agent-models §5.7; Codex
@@ -3103,10 +3026,6 @@ impl<'a> Sim<'a> {
         for i in 0..9 {
             if self.f[i].role == Role::Chase && self.t >= self.f[i].next_plan {
                 self.replan(i);
-            } else if self.f[i].role == Role::Chase && !self.f[i].through && self.setup_dir(i).is_some() {
-                // Waiting on his set-up spot, he goes the moment his run from there would just
-                // bring him to the ball (agent-models §5.5), not at his next read.
-                self.set_chase(i);
             }
         }
         let (b, bv) = self.ball_at(self.t);
@@ -3302,9 +3221,9 @@ impl<'a> Sim<'a> {
     fn apply(&mut self, i: usize, d: Decision) {
         match d {
             Decision::Go => {
-                self.set_chase(i);
                 let fd = &mut self.f[i];
                 fd.role = Role::Chase;
+                fd.target = fd.int_pt;
                 fd.peel = None;
             }
             Decision::CoverSecond => {
@@ -4234,7 +4153,6 @@ impl<'a> Sim<'a> {
                         let fd = &mut self.f[i];
                         (fd.t_int, fd.int_pt, fd.target, fd.belief, fd.read_at, fd.read_ball) = (ti, pt, pt, Some(p), t, ball);
                         self.refresh_call(i);
-                        self.set_chase(i);
                     }
                 }
             }
@@ -4481,7 +4399,6 @@ impl<'a> Sim<'a> {
                 (fd.pivot, fd.pivot_wait_bag, fd.relayed) = (false, false, false);
                 // No longer racing the ball: he brakes onto that spot.
                 fd.t_int = f64::INFINITY;
-                fd.through = false;
                 if let Ball::Thrown { to_base, relay, .. } = self.ball {
                     // A receiver steps straight to the bag; a relay man stays put. Either goes
                     // on quickly, already facing his next target.
@@ -6271,8 +6188,6 @@ fn new_sim<'a>(inp: &'a LiveInput<'a>, st: &'a mut RulesState) -> Sim<'a> {
                 set_base: 0.0,
                 face: None,
                 catch_vel: Vec3::ZERO,
-                through: false,
-                through_dir: Vec3::ZERO,
                 took_diving: false,
                 catch_stretched: false,
                 catch_heading: None,
@@ -8753,38 +8668,6 @@ mod tests {
         let tr = bb_physics::throw::fly_throw(&fx.env, throw_state(Vec3::new(0.0, 0.0, THROW_RELEASE_Z), Vec3::Y, path.first().s.v.norm(), plain), 0.0, 6.0);
         let h_plain = tr.knots.iter().find(|k| k.s.r.y >= out).map(|k| k.s.r.z).unwrap();
         assert!(h_plain > 4.0, "the plain aim would pass him at {h_plain:.2} m");
-    }
-
-    /// agent-models §5.5, the set-up behind a fly: with a runner on third and none out, a centre
-    /// fielder under a high fly he has time to spare on takes it moving toward home, faster than
-    /// a crow hop's 3 m/s (Wagner et al. 2011), as coaching describes ("one or two steps behind
-    /// where the ball will land", catch moving toward the target); without a runner on base he
-    /// has no throw to set up for and takes it nearly standing, as the sim's catches mostly were
-    /// (catch-throw note §1).
-    #[test]
-    fn an_outfielder_with_time_sets_up_and_comes_through_the_catch() {
-        const R: AgentId = 0x0007;
-        let speed_toward_home = |on: &[(AgentId, u8)]| {
-            let fx = fixture(on);
-            let mut runners = vec![RunnerIn { id: fx.st.batter, base: 0, speed: 8.2, tau_s: bb_agents::running::LEAGUE_TAU_S }];
-            runners.extend(on.iter().map(|&(id, base)| RunnerIn { id, base, speed: 8.2, tau_s: bb_agents::running::LEAGUE_TAU_S }));
-            let mut inp = input(&fx, runners);
-            inp.ball = BallState { r: Vec3::new(0.0, 0.5, 1.0), v: Vec3::new(0.0, 24.0, 28.0), w: Vec3::new(bb_math::units::rpm_to_radps(2500.0), 0.0, 0.0) };
-            let mut st = fx.st.clone();
-            let out = simulate_live(&LiveInput { record: true, ..inp }, &mut st);
-            let (t_catch, who) = out.secured[0];
-            assert_eq!(who & 0x7f, 8, "the centre fielder catches it: {:?}", out.secured);
-            let track = &out.actors[CF].1;
-            let i = track.iter().rposition(|(t, _)| *t <= t_catch + 1e-9).unwrap();
-            let (a, b) = (track[i - 1], track[i]);
-            let v = (b.1 - a.1) * (1.0 / (b.0 - a.0));
-            let home = Vec3::new(-b.1.x, -b.1.y, 0.0).normalized();
-            v.dot(home)
-        };
-        let set_up = speed_toward_home(&[(R, 3)]);
-        assert!(set_up > throwing::HOP_MPS, "he comes through at {set_up:.2} m/s toward home");
-        let none = speed_toward_home(&[]);
-        assert!(none < 1.5, "with nobody on he takes it at {none:.2} m/s toward home");
     }
 
     /// agent-models §5.5, the relay man's exchange: on the throw home from the wall above, with
