@@ -265,11 +265,14 @@ fn through_spot(d: f64) -> f64 {
 }
 
 /// A man lined up in a throw, as someone on the field sees him (agent-models §5.5): none; the
-/// cutoff man of a throw through (`through_spot`); or the relay man of a deep ball (`cut_spot`).
+/// cutoff man of a throw through (`through_spot`) home, or to third (its own table: throws to
+/// third cross the dirt differently, Opus catch-throw re-review P3-4); or the relay man of a
+/// deep ball (`cut_spot`).
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 enum Cut {
     No,
     Through,
+    ThroughThird,
     Relay,
 }
 
@@ -286,10 +289,20 @@ impl Cut {
 /// the man in it can stand at (a learned belief, like [`throw_table`]; `ThrowTable::build_cut`).
 fn cut_table(cut: Cut) -> &'static ThrowTable {
     static THROUGH: std::sync::OnceLock<ThrowTable> = std::sync::OnceLock::new();
+    static THROUGH_THIRD: std::sync::OnceLock<ThrowTable> = std::sync::OnceLock::new();
     static RELAY: std::sync::OnceLock<ThrowTable> = std::sync::OnceLock::new();
-    let build = |spot: fn(f64) -> f64| ThrowTable::build_cut(&FlightEnv::default_env(), &Field::default(), THROW_RELEASE_Z, THROW_CATCH_Z, CUT_HEIGHT_M, spot);
-    if cut == Cut::Relay { RELAY.get_or_init(|| build(cut_spot)) } else { THROUGH.get_or_init(|| build(through_spot)) }
+    let build = |spot: fn(f64) -> f64, to: Vec3, dir: Vec3| ThrowTable::build_cut_to(&FlightEnv::default_env(), &Field::default(), THROW_RELEASE_Z, THROW_CATCH_Z, CUT_HEIGHT_M, spot, to, dir);
+    match cut {
+        Cut::Relay => RELAY.get_or_init(|| build(cut_spot, Vec3::ZERO, Vec3::Y)),
+        // To third along a line from left-centre (the middle of the throws third takes).
+        Cut::ThroughThird => THROUGH_THIRD.get_or_init(|| build(through_spot, base_pos(3), THIRD_TABLE_FROM - base_pos(3))),
+        _ => THROUGH.get_or_init(|| build(through_spot, Vec3::ZERO, Vec3::Y)),
+    }
 }
+
+/// The outfield point the throw-to-third belief table is thrown from (left-centre, 260 ft at
+/// −20°), m.
+const THIRD_TABLE_FROM: Vec3 = Vec3 { x: -27.1, y: 74.5, z: 0.0 };
 
 /// Believed time for a throw at release speed `v` to go `d` metres to a base: the cuttable
 /// throw when a man stands in it (`cut`), else the plain one.
@@ -6041,7 +6054,9 @@ impl<'a> Sim<'a> {
     /// The man with the cutoff or relay job for base `b` standing in a throw from `from` to it
     /// (between, more than 10 m out, within `CUT_LINE_M` of the line), as `observer` knows the
     /// jobs (`seen`; `None`: what everyone can see, `known_job`): how far out along the throw
-    /// he stands, m.
+    /// his spot is, m. The throw is kept low where he is going, his spot by the known convention
+    /// (`relay_spot`), not where he stands at the release: he is often still on his way in, and a
+    /// throw kept low 25 m out rolls in (Opus catch-throw re-review P3-3).
     fn man_in_throw(&self, observer: Option<usize>, from: Vec3, b: u8) -> Option<f64> {
         let base = base_pos(b);
         let line = Vec3::new(base.x - from.x, base.y - from.y, 0.0);
@@ -6058,9 +6073,11 @@ impl<'a> Sim<'a> {
                 observer != Some(i) && job == Role::Relay(b)
             })
             .map(|i| self.f[i].pos)
-            .filter(|p| (*p - from).norm() > 10.0 && (base - *p).norm() < len && ((p.x - from.x) * line.y - (p.y - from.y) * line.x).abs() / len < CUT_LINE_M)
-            .map(|p| ((p.x - from.x) * line.x + (p.y - from.y) * line.y) / len)
-            .next()
+            .find(|p| (*p - from).norm() > 10.0 && (base - *p).norm() < len && ((p.x - from.x) * line.y - (p.y - from.y) * line.x).abs() / len < CUT_LINE_M)
+            .map(|_| {
+                let spot = Self::relay_spot(from, b);
+                ((spot.x - from.x) * line.x + (spot.y - from.y) * line.y) / len
+            })
     }
 
     /// Whether a throw from `from` to base `b` would go through a man lined up in it, and which
@@ -6068,7 +6085,10 @@ impl<'a> Sim<'a> {
     /// they stand; agent-models §5.5, §6.4).
     fn cut_seen(&self, observer: Option<usize>, from: Vec3, b: u8) -> Cut {
         let len = m::hypot(base_pos(b).x - from.x, base_pos(b).y - from.y);
-        self.man_in_throw(observer, from, b).map_or(Cut::No, |out| Cut::of(len - out, len))
+        self.man_in_throw(observer, from, b).map_or(Cut::No, |out| match Cut::of(len - out, len) {
+            Cut::Through if b == 3 => Cut::ThroughThird,
+            c => c,
+        })
     }
 
     /// Fielder `by` throws to ground point `tgt` for `receiver` (the ball is headed for base
@@ -8827,10 +8847,12 @@ mod tests {
         t
     }
 
-    /// Opus catch-throw review P3-3(a): the cuttable-throw belief tables against the world's
-    /// throw, the same physics flown along the real line in the reference park: home from
-    /// across the outfield (spray −40° to +40°) and third from left and centre, through a
-    /// cutoff man about 45 ft out; and home from deep through the relay man's spot.
+    /// Opus catch-throw review P3-3(a), re-review P3-4: the cuttable-throw belief tables against
+    /// the world's throw, the same physics flown along the real line in the reference park: home
+    /// from across the outfield (spray −40° to +40°) and third from left to centre, through a
+    /// cutoff man about 45 ft out; and home from deep past the relay man's spot. The bounds are
+    /// tight enough to reject the plain table: home within 0.02 s; to third within 0.03 s and
+    /// nearer the world on average than the plain table is.
     #[test]
     fn the_cut_tables_match_the_worlds_cuttable_throw() {
         let (env, field) = (FlightEnv::default_env(), Field::default());
@@ -8838,6 +8860,8 @@ mod tests {
             let d = m::hypot(to.x - from.x, to.y - from.y);
             bb_physics::throw::cut_throw_time_along(&env, &field, from, to, THROW_RELEASE_Z, THROW_CATCH_Z, CUT_HEIGHT_M, d - short, v)
         };
+        let (mut third_err, mut third_plain) = (0.0, 0.0);
+        let mut n3 = 0;
         for deg in [-40.0f64, -20.0, 0.0, 20.0, 40.0] {
             for ft in [230.0, 260.0, 290.0] {
                 for v in [34.0, 37.0, 40.0] {
@@ -8845,22 +8869,81 @@ mod tests {
                     let from = Vec3::new(r * deg.to_radians().sin(), r * deg.to_radians().cos(), 0.0);
                     let d_home = from.norm();
                     let (w, b) = (world(from, Vec3::ZERO, through_spot(d_home), v), direct_time(v, d_home, Cut::Through));
-                    assert!(w.is_finite() == b.is_finite() && (!w.is_finite() || (w - b).abs() < 0.06), "home from {deg}° {ft} ft at {v}: world {w:.3} s, belief {b:.3} s");
+                    assert!(w.is_finite() == b.is_finite() && (!w.is_finite() || (w - b).abs() < 0.02), "home from {deg}° {ft} ft at {v}: world {w:.3} s, belief {b:.3} s");
                     if deg <= 0.0 {
                         let third = base_pos(3);
                         let d3 = (third - from).norm();
-                        let (w, b) = (world(from, third, through_spot(d3), v), direct_time(v, d3, Cut::Through));
-                        assert!(!w.is_finite() || !b.is_finite() || (w - b).abs() < 0.12, "third from {deg}° {ft} ft at {v}: world {w:.3} s, belief {b:.3} s");
+                        let (w, b, p) = (world(from, third, through_spot(d3), v), direct_time(v, d3, Cut::ThroughThird), direct_time(v, d3, Cut::No));
+                        if w.is_finite() && b.is_finite() && p.is_finite() {
+                            assert!((w - b).abs() < 0.03, "third from {deg}° {ft} ft at {v}: world {w:.3} s, belief {b:.3} s");
+                            (third_err, third_plain, n3) = (third_err + (w - b).abs(), third_plain + (w - p).abs(), n3 + 1);
+                        }
                     }
                 }
             }
         }
+        assert!(n3 > 20 && third_err < third_plain, "to third: mean error {:.4} s, plain table {:.4} s", third_err / n3 as f64, third_plain / n3 as f64);
         for (ft, v) in [(300.0, 37.0), (320.0, 40.0)] {
             let from = Vec3::new(0.0, ft * 0.3048, 0.0);
             let d = from.norm();
             let (w, b) = (world(from, Vec3::ZERO, cut_spot(d), v), direct_time(v, d, Cut::Relay));
-            assert!((w - b).abs() < 0.06, "home from {ft} ft past the relay man at {v}: world {w:.3} s, belief {b:.3} s");
+            assert!((w - b).abs() < 0.02, "home from {ft} ft past the relay man at {v}: world {w:.3} s, belief {b:.3} s");
         }
+    }
+
+    /// Opus catch-throw re-review P3-3, P3-4: the world's own throw home (`throw_to`: the hand's
+    /// release point, the cutoff man found on the line) with the cutoff man still on his way in,
+    /// 25 m out, short of his spot (45 ft). The throw is kept low where he is going: it passes
+    /// his spot at head height, reaches the plate on the fly or one hop (flown on from where it
+    /// comes down with the bounce physics, no tilt), and as soon as the belief table says.
+    #[test]
+    fn the_throw_through_is_kept_low_where_the_cutoff_man_is_going() {
+        const R: AgentId = 0x0007;
+        let fx = fixture(&[(R, 3)]);
+        let mut inp = input(&fx, vec![RunnerIn { id: fx.st.batter, base: 0, speed: 8.2, tau_s: bb_agents::running::LEAGUE_TAU_S }, RunnerIn { id: R, base: 3, speed: 8.2, tau_s: bb_agents::running::LEAGUE_TAU_S }]);
+        inp.fattrs[CF].arm_sigma = 0.0;
+        let mut st = fx.st.clone();
+        let mut sim = new_sim(&inp, &mut st);
+        sim.t = 5.0;
+        let at = Vec3::new(0.0, 240.0 * 0.3048, 0.0);
+        let k = sim.r.iter().position(|r| r.id == R).unwrap();
+        (sim.r[k].s, sim.r[k].goal, sim.r[k].v) = (3.0 * BASE_L + 3.0, 4, 7.0);
+        held_at(&mut sim, CF, at);
+        let cut = (0..9).find(|&i| matches!(sim.f[i].role, Role::Relay(4))).expect("a cutoff man");
+        let spot = sim.f[cut].target;
+        assert!((spot.norm() - through_spot(at.norm())).abs() < 0.5, "his spot {spot:?}");
+        sim.f[cut].pos = at * (25.0 / at.norm());
+        jobs_become_known(&mut sim);
+        for _ in 0..120 {
+            sim.holder_act();
+            if !sim.out.released.is_empty() {
+                break;
+            }
+            sim.t += DT;
+        }
+        let Ball::Thrown { path, relay: false, to_base: 4, .. } = &sim.ball else { panic!("no direct throw home: {:?}", sim.out.released) };
+        // Re-fly the aim: the launch the world chose, at the speed it aimed (the executed speed
+        // carries the 3% speed noise, which moves where it comes down).
+        let s0 = path.first().s;
+        let r0 = Vec3::new(s0.r.x, s0.r.y, 0.0);
+        let u = Vec3::new(s0.v.x, s0.v.y, 0.0).normalized();
+        let elev = m::atan2(s0.v.z, m::hypot(s0.v.x, s0.v.y));
+        let v_aim = sim.out.effort[0] * sim.throw_speed(CF, base_pos(4));
+        assert!((s0.v.norm() / v_aim - 1.0).abs() < 0.12, "executed {:.1} m/s against aimed {v_aim:.1}", s0.v.norm());
+        let d = r0.norm();
+        let out_spot = (spot - r0).dot(u);
+        let air = bb_physics::throw::fly_throw(&fx.env, throw_state(s0.r, u, v_aim, elev), 0.0, 6.0);
+        let h = air.knots.iter().find(|kn| (kn.s.r - r0).dot(u) >= out_spot).map(|kn| kn.s.r.z).expect("it reaches his spot");
+        assert!((h - CUT_HEIGHT_M).abs() < 0.1, "passes his spot (45 ft out, where he is going) {h:.2} m up");
+        let flown = batted_path_dt(&fx.env, &fx.field, throw_state(s0.r, u, v_aim, elev), 0.0, THROW_HOP_DT, |_, _| (0.0, 0.0));
+        let mut t = 0.0;
+        while t <= flown.t_end() && (flown.at(t).0 - r0).dot(u) < d {
+            t += THROW_HOP_DT;
+        }
+        let bounces = flown.bounces.iter().filter(|b| (Vec3::new(b.1, b.2, 0.0) - r0).dot(u) < d).count();
+        assert!(bounces <= 1, "{bounces} bounces before the plate: {:?}", flown.bounces);
+        let belief = direct_time(v_aim, d, Cut::Through);
+        assert!((t - belief).abs() < 0.05, "at the plate {t:.2} s after release, belief {belief:.2} s");
     }
 
     /// Opus catch-throw review P3-3(b), P1-1: a runner believes a cuttable throw only where the

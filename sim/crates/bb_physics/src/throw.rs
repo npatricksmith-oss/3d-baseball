@@ -267,9 +267,20 @@ impl ThrowTable {
     /// height; infinite if it never gets there. Thrown toward home from straight-away centre,
     /// a reference line (a belief, like [`ThrowTable::build`]).
     pub fn build_cut(env: &FlightEnv, field: &crate::ground::Field, z0: f64, zt: f64, cut_z: f64, cut_spot: impl Fn(f64) -> f64) -> Self {
+        Self::build_cut_to(env, field, z0, zt, cut_z, cut_spot, Vec3::ZERO, Vec3::Y)
+    }
+
+    /// [`ThrowTable::build_cut`] for throws to the ground point `to` along the line from
+    /// `to + dir·d` (any base, any representative direction; `dir` horizontal, from the base
+    /// out toward the thrower).
+    pub fn build_cut_to(env: &FlightEnv, field: &crate::ground::Field, z0: f64, zt: f64, cut_z: f64, cut_spot: impl Fn(f64) -> f64, to: Vec3, dir: Vec3) -> Self {
         let speeds: Vec<f64> = (0..=14).map(|i| 20.0 + 2.0 * i as f64).collect();
         let dists: Vec<f64> = (0..=26).map(|j| 5.0 * j as f64).collect();
-        let t = speeds.iter().map(|&v| dists.iter().map(|&d| if d == 0.0 { 0.0 } else { cut_throw_time(env, field, z0, zt, cut_z, d, d - cut_spot(d), v) }).collect()).collect();
+        let u = Vec3::new(dir.x, dir.y, 0.0).normalized();
+        let t = speeds
+            .iter()
+            .map(|&v| dists.iter().map(|&d| if d == 0.0 { 0.0 } else { cut_throw_time_along(env, field, to + u * d, to, z0, zt, cut_z, d - cut_spot(d), v) }).collect())
+            .collect();
         Self { speeds, dists, t }
     }
 
