@@ -233,6 +233,10 @@ fn throw_time(v: f64, d: f64) -> f64 {
 /// at his head or chest") [E], m.
 const CUT_HEIGHT_M: f64 = 2.0;
 
+/// A cutoff man is in a throw when he has the job for that base and stands within this of
+/// its line, m [E]: he keeps to the line as it moves (`update_relay`).
+const CUT_LINE_M: f64 = 5.0;
+
 /// Where the cutoff or relay man stands on a throw of length `d` to a base: this far short of
 /// the base, m (`Sim::relay_spot`).
 fn cut_spot(d: f64) -> f64 {
@@ -584,6 +588,9 @@ const SETUP_BACK_M: f64 = 2.5;
 const SETUP_SPARE_S: f64 = 0.5;
 const SETUP_AT_M: f64 = 1.0;
 const SETUP_PAST_M: f64 = 3.0;
+/// The pace he comes through at, m/s [E]: a little over the crow hop's 3 m/s (`HOP_MPS`), so
+/// that a read a tenth of a second out leaves the ball within his reach.
+const SETUP_THROUGH_MPS: f64 = 4.0;
 /// Arriving under control (agent-models §5.2): a chaser with time in hand keeps this many of
 /// his doubts (the σ of where he believes it comes down) between where he can stop and his
 /// spot [E].
@@ -1041,6 +1048,8 @@ struct Fielder {
     /// moving (agent-models §5.5).
     up_at: f64,
     set_base: f64,
+    /// Coming through a set-up catch toward his throw (agent-models §5.5, `chase_target`).
+    through: bool,
     face: Option<Vec3>,
     catch_vel: Vec3,
     /// Visible heading, motion and reception cue at the catch, published before choosing
@@ -1546,6 +1555,7 @@ fn stop_point(fd: &Fielder) -> Vec3 {
 /// braking to the spot he chose when his job ended (Codex idle-fielder review #1).
 fn go_idle(fd: &mut Fielder) {
     fd.role = Role::Idle;
+    fd.through = false;
     fd.backs = None;
     fd.target = stop_point(fd);
 }
@@ -2208,6 +2218,11 @@ fn fielder_step(fd: &Fielder, t: f64, t_contact: f64) -> (Vec3, Vec3) {
     // Early for a ball in the air, he keeps a margin of his doubt short of where he can stop
     // (agent-models §5.2, arriving under control).
     let margin = if early && fd.role == Role::Chase { ARRIVE_SIGMAS * fd.doubt } else { 0.0 };
+    if fd.through && fd.role == Role::Chase && fd.t_int.is_finite() {
+        // Coming through a set-up catch at the set-up pace (agent-models §5.5).
+        let a = FielderAttrs { speed: fd.a.speed.min(SETUP_THROUGH_MPS), ..fd.a };
+        return step_toward(fd.pos, fd.vel, fd.target, &a, false, 0.0);
+    }
     step_toward(fd.pos, fd.vel, fd.target, &fd.a, early, margin)
 }
 
@@ -3010,7 +3025,7 @@ impl<'a> Sim<'a> {
     /// follows the read (`refresh_call`).
     fn replan(&mut self, i: usize) {
         self.read(i);
-        self.f[i].target = self.chase_target(i);
+        (self.f[i].target, self.f[i].through) = self.chase_target(i);
         self.refresh_call(i);
     }
 
@@ -3020,22 +3035,23 @@ impl<'a> Sim<'a> {
     /// and then, when his run from there would just bring him to it as the ball comes down,
     /// on through it toward his target, so that he takes the ball moving that way. All from
     /// his own read (`t_int`, `int_pt`, `call`) and what everyone sees (runners, outs).
-    fn chase_target(&self, i: usize) -> Vec3 {
+    fn chase_target(&self, i: usize) -> (Vec3, bool) {
         let fd = &self.f[i];
         let pt = fd.int_pt;
-        let Some(dir) = self.setup_dir(i) else { return pt };
+        let Some(dir) = self.setup_dir(i) else { return (pt, false) };
         let back = pt - dir * SETUP_BACK_M;
         // No room behind it (at the wall): he takes it where it comes down.
         if self.inp.field.body_clearance(back.x, back.y, BODY_R).dist < 0.0 {
-            return pt;
+            return (pt, false);
         }
         let left = fd.t_int - self.t;
-        let come = run_time(SETUP_BACK_M, fd.a.speed, fd.a.tau_a);
-        if left <= come {
-            return pt + dir * SETUP_PAST_M;
-        }
+        let come = run_time(SETUP_BACK_M, SETUP_THROUGH_MPS, fd.a.tau_a);
         let to_back = Vec3::new(back.x - fd.pos.x, back.y - fd.pos.y, 0.0).norm();
-        if to_back <= SETUP_AT_M || left >= self.eta(i, back) + come + SETUP_SPARE_S { back } else { pt }
+        if left <= come {
+            // Coming through only from the set-up spot; caught short of it, he plays it plainly.
+            return if to_back <= SETUP_AT_M || fd.through { (pt + dir * SETUP_PAST_M, true) } else { (pt, false) };
+        }
+        if to_back <= SETUP_AT_M || left >= self.eta(i, back) + come + SETUP_SPARE_S { (back, false) } else { (pt, false) }
     }
 
     /// The way an outfielder expects to throw after catching the fly he is under, as a unit
@@ -3265,10 +3281,10 @@ impl<'a> Sim<'a> {
     fn apply(&mut self, i: usize, d: Decision) {
         match d {
             Decision::Go => {
-                let target = self.chase_target(i);
+                let (target, through) = self.chase_target(i);
                 let fd = &mut self.f[i];
                 fd.role = Role::Chase;
-                fd.target = target;
+                (fd.target, fd.through) = (target, through);
                 fd.peel = None;
             }
             Decision::CoverSecond => {
@@ -4198,7 +4214,7 @@ impl<'a> Sim<'a> {
                         let fd = &mut self.f[i];
                         (fd.t_int, fd.int_pt, fd.target, fd.belief, fd.read_at, fd.read_ball) = (ti, pt, pt, Some(p), t, ball);
                         self.refresh_call(i);
-                        self.f[i].target = self.chase_target(i);
+                        (self.f[i].target, self.f[i].through) = self.chase_target(i);
                     }
                 }
             }
@@ -4445,6 +4461,7 @@ impl<'a> Sim<'a> {
                 (fd.pivot, fd.pivot_wait_bag, fd.relayed) = (false, false, false);
                 // No longer racing the ball: he brakes onto that spot.
                 fd.t_int = f64::INFINITY;
+                fd.through = false;
                 if let Ball::Thrown { to_base, relay, .. } = self.ball {
                     // A receiver steps straight to the bag; a relay man stays put. Either goes
                     // on quickly, already facing his next target.
@@ -5967,9 +5984,9 @@ impl<'a> Sim<'a> {
         let line = Vec3::new(base.x - from.x, base.y - from.y, 0.0);
         let len = line.norm();
         (0..9)
-            .filter(|&i| i != by && matches!(self.seen(by, i).0, Role::Relay(_)))
+            .filter(|&i| i != by && self.seen(by, i).0 == Role::Relay(b))
             .map(|i| self.f[i].pos)
-            .filter(|p| (*p - from).norm() > 10.0 && (base - *p).norm() < len)
+            .filter(|p| (*p - from).norm() > 10.0 && (base - *p).norm() < len && ((p.x - from.x) * line.y - (p.y - from.y) * line.x).abs() / len < CUT_LINE_M)
             .map(|p| ((p.x - from.x) * line.x + (p.y - from.y) * line.y) / len)
             .next()
     }
@@ -6234,6 +6251,7 @@ fn new_sim<'a>(inp: &'a LiveInput<'a>, st: &'a mut RulesState) -> Sim<'a> {
                 set_base: 0.0,
                 face: None,
                 catch_vel: Vec3::ZERO,
+                through: false,
                 took_diving: false,
                 catch_stretched: false,
                 catch_heading: None,

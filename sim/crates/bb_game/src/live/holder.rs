@@ -43,8 +43,11 @@ impl Sim<'_> {
         // The cutoff man as the holder knows him (`seen`: a job taken in the last
         // `CALL_HEARD_S` is not yet known; Codex fielder-communication recheck P1-1).
         let relay = (0..9).find(|&i| i != by && matches!(self.seen(by, i).0, Role::Relay(_)) && (self.f[i].pos - fd.pos).norm() > 10.0);
-        // A cutoff man lined up between him and the base (closer to it than he is).
+        // A cutoff man lined up between him and the base (closer to it than he is): the relay
+        // route through him, as before; and, when he has the job for this base and stands on
+        // its line, the direct throw must pass him low (`cutoff_out`, agent-models §5.5).
         let between = relay.filter(|&i| (base_pos(base) - self.f[i].pos).norm() < (base_pos(base) - fd.pos).norm());
+        let cut = self.cutoff_out(by, base).is_some();
         let release = |target: Vec3, at: f64| {
             let su = self.set_up_for(by, target);
             let t = at.max(fd.up_at + su.earliest_s);
@@ -54,7 +57,7 @@ impl Sim<'_> {
         // §5.5): the cuttable throw, by the throw and bounce physics.
         let direct = |at| {
             let (t, v) = release(base_pos(base), at);
-            t + direct_time(v, (base_pos(base) - fd.pos).norm(), between.is_some())
+            t + direct_time(v, (base_pos(base) - fd.pos).norm(), cut)
         };
         let via = |at| {
             let Some(i) = between else { return f64::INFINITY };
@@ -66,7 +69,11 @@ impl Sim<'_> {
         let v = via(self.t);
         // The route: time, and what each route's throws are likely to cost the man taking them
         // off line (agent-models §5.5): one long throw misses by more than two short ones.
+        // (A man lined up for another base: by time alone, as before.)
         let through = between.is_some_and(|i| {
+            if !cut {
+                return v < d;
+            }
             let rp = self.f[i].pos;
             let miss_direct = miss_cost_s((base_pos(base) - fd.pos).norm(), fd.a.arm_sigma);
             let miss_via = miss_cost_s((rp - fd.pos).norm(), fd.a.arm_sigma) + miss_cost_s((base_pos(base) - rp).norm(), self.f[i].a.arm_sigma);
