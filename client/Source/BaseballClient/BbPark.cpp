@@ -1,5 +1,6 @@
 #include "BbPark.h"
 #include "BbFrame.h"
+#include "BbHud.h"
 #include "Algo/Reverse.h"
 #include "Async/ParallelFor.h"
 #include "BbLook.h"
@@ -1958,12 +1959,15 @@ void ABbPark::BuildBoard()
 	}
 }
 
-void ABbPark::ShowBoard(const BbBoxScore& Box, int32 Inning, bool bTop, int32 Balls, int32 Strikes, int32 Outs, bool bHitsKnown)
+void ABbPark::ShowBoard(const BbBoxScore& Shown, int32 Inning, bool bTop, int32 Balls, int32 Strikes, int32 Outs, bool bHitsKnown)
 {
 	if (!BoardTex)
 	{
 		return;
 	}
+	// Not the next half's empty slot, which the box holds from the third out (BbHud::TrimUnplayed).
+	BbBoxScore Box = Shown;
+	BbHud::TrimUnplayed(Box, Inning, bTop);
 	// Nine innings fit: in extra innings, the last nine.
 	const int32 First = FMath::Max<int32>(1, Box.first_inning), From = FMath::Max(First, (int32)Box.innings - 8);
 	// What is shown, to tell whether anything has changed: 255 = an inning not batted.

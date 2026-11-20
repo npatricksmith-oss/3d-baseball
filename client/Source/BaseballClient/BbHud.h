@@ -77,6 +77,11 @@ namespace BbHud
 	/** Between innings, on the black: "Middle of the 3rd" over the line score (an inning to a
 	 *  column, then runs and hits), read from the sim's box score. Without a box score (Box
 	 *  null) it shows the two clubs' runs alone. */
+	/** The sim opens a line-score slot for the next half inning in the play that makes the third
+	 *  out, so a box read through that play holds an inning that has not been played. Drop what
+	 *  the half shown (Inning, bTop) has not reached: the visitors have batted through Inning,
+	 *  the home side through Inning - 1 in the top half and Inning in the bottom. */
+	void TrimUnplayed(BbBoxScore& Box, int32 Inning, bool bTop);
 	void DrawInningCard(ABbHUD& Hud, float S, const FString& Title, const int32 Runs[2], const BbBoxScore* Box, float Alpha);
 	/** The box score, full screen (step 4): the score in words, the line score, each club's
 	 *  batting lines and the notes under them. Dim is how dark the field behind it goes. */

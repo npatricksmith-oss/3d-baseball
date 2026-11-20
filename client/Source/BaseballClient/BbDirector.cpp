@@ -4375,6 +4375,8 @@ void ABbDirector::Tick(float DeltaSeconds)
 					BoardThrough = Through;
 					// The between-innings card shows this line score too (hud.md step 4).
 					Hud->LineBox = BoardBox;
+					// The card shows the half just played (the board before the last play).
+					BbHud::TrimUnplayed(Hud->LineBox, Before.inning, Before.top != 0);
 					Hud->bLineBox = bBoardValid;
 				}
 				// The pitcher and the batter under the score (owner, 2026-11-16): names and

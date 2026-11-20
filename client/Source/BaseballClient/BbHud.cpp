@@ -429,6 +429,21 @@ namespace
 	}
 }
 
+void BbHud::TrimUnplayed(BbBoxScore& Box, int32 Inning, bool bTop)
+{
+	const int32 First = FMath::Max<int32>(1, Box.first_inning);
+	for (int32 Side = 0; Side < 2; ++Side)
+	{
+		const int32 Through = (Side == 0 || !bTop) ? Inning : Inning - 1;
+		const int32 Slots = FMath::Clamp(Through - First + 1, 0, BB_BOX_MAX_INNINGS);
+		if (Box.teams[Side].n_batted > Slots)
+		{
+			Box.teams[Side].n_batted = static_cast<uint8>(Slots);
+		}
+	}
+	Box.innings = static_cast<uint8>(FMath::Min<int32>(Box.innings, FMath::Clamp(Inning, 0, 255)));
+}
+
 void BbHud::DrawInningCard(ABbHUD& Hud, float S, const FString& Title, const int32 Runs[2], const BbBoxScore* Box, float Alpha)
 {
 	const float TitleH = 50.f;
