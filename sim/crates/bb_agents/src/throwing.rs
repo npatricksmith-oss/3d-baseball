@@ -142,18 +142,57 @@ pub fn turn_extra_s(facing: Vec3, to_target: Vec3, throws: Hand) -> f64 {
 
 /// The plant owed before a set throw along `to_target` by a fielder who took the ball moving
 /// at `catch_vel` (`dove`: he took it on the ground from a dive), s (agent-models §5.5, the
-/// catch sets up the throw). His motion away from the target must be stopped under his
-/// braking limit before he can plant his back foot and step to it; the part of that stop
-/// inside the glove-to-hand of his transfer ([`PLANT_OVERLAP_S`]) costs nothing. A dive
-/// replaces it: he gets up from a standstill. Motion across the line is not charged: decided
-/// in Q32, deferred by the owner's Q33 (2026-11-19) until fielders slow into the ball and round
-/// it as real fielders do (the approach); without that, charging it took an outfielder's
-/// pickup-to-release to 1.46 s against an empirical 1.2 s with the tag.
+/// catch sets up the throw). His motion off the line to the target (away from it, and across
+/// it: [`off_line_mps`]) must be stopped under his braking limit before he can plant his back
+/// foot and step to it; the part of that stop inside the glove-to-hand of his transfer
+/// ([`PLANT_OVERLAP_S`]) costs nothing. A dive replaces it: he gets up from a standstill. A
+/// throw of [`TOSS_MAX_M`] or less (a feed, a flip) counts only motion away, as the pivot's
+/// and relay man's exchanges do ([`exchange_footwork_s`]). (Q32 as decided; the owner's Q33 charged only the away part until fielders slowed into the
+/// ball as real fielders do, which the approach of agent-models §5.2 now does.)
 pub fn footwork_s(catch_vel: Vec3, to_target: Vec3, dove: bool) -> f64 {
     if dove {
         return DIVE_FOOTWORK_S;
     }
+    // A toss or a flip is thrown with the arm alone: only motion away from it must be stopped.
+    if m::hypot(to_target.x, to_target.y) <= TOSS_MAX_M {
+        return exchange_footwork_s(catch_vel, to_target, false);
+    }
+    if std::env::var("ZZ_FW").is_ok() { let f = (off_line_mps(catch_vel, to_target) / BRAKE_MPS2 - PLANT_OVERLAP_S).max(0.0); if f > 0.0 { eprintln!("FW vel ({:.2},{:.2}) to ({:.1},{:.1}) off {:.2} away {:.2} plant {:.3}", catch_vel.x, catch_vel.y, to_target.x, to_target.y, off_line_mps(catch_vel, to_target), away_mps(catch_vel, to_target), f); } } // ZZ-DBG
+    if std::env::var("ZZ_AWAY").is_ok() { return (away_mps(catch_vel, to_target) / BRAKE_MPS2 - PLANT_OVERLAP_S).max(0.0); } // ZZ-DBG
+    (off_line_mps(catch_vel, to_target) / BRAKE_MPS2 - PLANT_OVERLAP_S).max(0.0)
+}
+
+/// The longest throw that is a toss or a flip, thrown with the arm alone, m [E, unsourced;
+/// coaching has feeds near the bag flipped or tossed underhand on the run]: its plant counts
+/// only motion away from it.
+pub const TOSS_MAX_M: f64 = 15.0;
+
+/// The plant owed by a double-play pivot man or a relay man before his throw on, s (agent-models
+/// §5.5): only his motion away from the target (Q33's rule). Their sourced times
+/// ([`PIVOT_S_50`], [`RELAY_S_50`]) are measured whole exchanges, the pivot man's footwork
+/// across the bag and the relay man's turn included, so motion across the line is inside them.
+pub fn exchange_footwork_s(catch_vel: Vec3, to_target: Vec3, dove: bool) -> f64 {
+    if dove {
+        return DIVE_FOOTWORK_S;
+    }
     (away_mps(catch_vel, to_target) / BRAKE_MPS2 - PLANT_OVERLAP_S).max(0.0)
+}
+
+/// The speed a fielder can carry off the line to his target and still owe no plant, m/s
+/// (`BRAKE_MPS2` × `PLANT_OVERLAP_S` = 2 m/s): what he stops inside his transfer.
+pub const PLANT_FREE_MPS: f64 = BRAKE_MPS2 * PLANT_OVERLAP_S;
+
+/// His motion off the line to `to_target` (horizontal): the part away from it and the part
+/// across it, |(min(a, 0), across)| with a his speed toward it, m/s (Q32's v_off).
+pub fn off_line_mps(vel: Vec3, to_target: Vec3) -> f64 {
+    let tl = m::hypot(to_target.x, to_target.y);
+    if tl < 1e-9 {
+        return 0.0;
+    }
+    let (ux, uy) = (to_target.x / tl, to_target.y / tl);
+    let along = vel.x * ux + vel.y * uy;
+    let across = vel.x * uy - vel.y * ux;
+    m::hypot(along.min(0.0), across)
 }
 
 /// His speed away from his target: the part of `vel` (horizontal) along the line to
@@ -218,8 +257,13 @@ pub struct SetUp {
     pub earliest_s: f64,
     /// When he is set: balanced, with his stride behind the throw.
     pub set_s: f64,
-    /// He owes footwork to get balanced (moving away, or after a dive).
+    /// He owes footwork to get balanced (moving off the line to his target, or after a dive).
     pub off_balance: bool,
+    /// His motion off the line to his target as he took the ball, m/s ([`off_line_mps`]): what
+    /// he is still carrying at an early release makes it wilder and slower (the drift term,
+    /// [`Self::off_weight`]). Infinite (the default) counts any footwork owed in full, as for a
+    /// dive or where the motion is not known.
+    pub drift_mps: f64,
 }
 
 impl SetUp {
@@ -227,7 +271,25 @@ impl SetUp {
     /// [`turn_extra_s`]; `footwork_s` from [`footwork_s`].
     pub fn new(base_s: f64, turn_s: f64, footwork_s: f64) -> Self {
         let normal = (base_s + turn_s).max(0.0);
-        Self { earliest_s: RUSH_MIN_FRAC * normal, set_s: normal + footwork_s, off_balance: footwork_s > 0.0 }
+        Self { earliest_s: RUSH_MIN_FRAC * normal, set_s: normal + footwork_s, off_balance: footwork_s > 0.0, drift_mps: f64::INFINITY }
+    }
+
+    /// The same set-up for a man who took the ball moving `off_line` m/s off the line to his
+    /// target ([`off_line_mps`]; not after a dive): the drift term of agent-models §5.5.
+    pub fn with_drift(self, off_line: f64) -> Self {
+        Self { drift_mps: off_line, ..self }
+    }
+
+    /// How off balance a release at `hurry` is, 0 to 1 (agent-models §5.5, Q32's drift term):
+    /// the off-line speed he still carries then, having braked at [`BRAKE_MPS2`] since he had
+    /// the ball, as a share of [`PLANT_FREE_MPS`] (the drift his transfer absorbs), at most 1.
+    /// None if he owes no footwork; set, none (the plant has stopped it).
+    pub fn off_weight(&self, hurry: f64) -> f64 {
+        if !self.off_balance {
+            return 0.0;
+        }
+        let elapsed = self.set_s - hurry * (self.set_s - self.earliest_s);
+        ((self.drift_mps - BRAKE_MPS2 * elapsed) / PLANT_FREE_MPS).clamp(0.0, 1.0)
     }
 
     /// A double-play pivot (agent-models §5.5): the measured pivot times are already the quick
@@ -235,7 +297,7 @@ impl SetUp {
     /// `base_s + turn + footwork` (and the slide's delay, nothing yet), at full arm.
     pub fn pivot(base_s: f64, turn_s: f64, footwork_s: f64) -> Self {
         let t = (base_s + turn_s).max(0.0) + footwork_s + PIVOT_SLIDE_DELAY_S;
-        Self { earliest_s: t, set_s: t, off_balance: footwork_s > 0.0 }
+        Self { earliest_s: t, set_s: t, off_balance: footwork_s > 0.0, drift_mps: f64::INFINITY }
     }
 
     /// A relay man's throw on (agent-models §5.5, the relay man's exchange): like the pivot,
@@ -243,7 +305,7 @@ impl SetUp {
     /// and set are both `base_s + footwork` (the turn is inside `relay_s`), at full arm.
     pub fn relay(base_s: f64, footwork_s: f64) -> Self {
         let t = base_s.max(0.0) + footwork_s;
-        Self { earliest_s: t, set_s: t, off_balance: footwork_s > 0.0 }
+        Self { earliest_s: t, set_s: t, off_balance: footwork_s > 0.0, drift_mps: f64::INFINITY }
     }
 
     /// How hurried a release `elapsed_s` into the set-up is: 1 at the earliest, falling
@@ -256,12 +318,12 @@ impl SetUp {
     /// Direction σ multiplier of a release at `hurry` (the `F_situation` of agent-models
     /// §1.3 for a throw).
     pub fn sigma_mult(&self, hurry: f64) -> f64 {
-        1.0 + hurry * (K_RUSH + if self.off_balance { K_OFF } else { 0.0 })
+        1.0 + hurry * (K_RUSH + K_OFF * self.off_weight(hurry))
     }
 
     /// Fraction of his arm's speed a release at `hurry` leaves with.
     pub fn speed_mult(&self, hurry: f64) -> f64 {
-        1.0 - hurry * (RUSH_SPEED_LOSS + if self.off_balance { OFF_SPEED_LOSS } else { 0.0 })
+        1.0 - hurry * (RUSH_SPEED_LOSS + OFF_SPEED_LOSS * self.off_weight(hurry))
     }
 }
 
@@ -382,12 +444,16 @@ mod tests {
         assert!(footwork_s(Vec3::new(-2.1, 0.0, 0.0), to, false) > 0.0);
         // Toward the target: nothing to stop, at any speed.
         assert_eq!(footwork_s(Vec3::new(7.0, 0.0, 0.0), to, false), 0.0);
-        // Straight across the line: not charged (Q33, deferred until the approach is built).
-        assert_eq!(footwork_s(Vec3::new(0.0, 7.0, 0.0), to, false), 0.0);
-        // A diagonal away counts its away part only: 5 m/s at 53° off straight back is 3 m/s
-        // away, the same plant as 3 m/s straight away.
-        assert!(close(footwork_s(Vec3::new(-3.0, 4.0, 0.0), to, false), footwork_s(Vec3::new(-3.0, 0.0, 0.0), to, false)));
+        // Straight across the line (Q32, restored with the approach): the same stop as away.
+        assert!(close(footwork_s(Vec3::new(0.0, 7.0, 0.0), to, false), plant_7));
+        // A diagonal away counts all of its motion off the line: 5 m/s at 53° off straight
+        // back is 3 m/s away and 4 m/s across, the plant of 5 m/s straight away. Coming toward
+        // the target at 4 m/s with 3 m/s across counts the 3 m/s across only.
+        assert!(close(footwork_s(Vec3::new(-3.0, 4.0, 0.0), to, false), footwork_s(Vec3::new(-5.0, 0.0, 0.0), to, false)));
+        assert!(close(off_line_mps(Vec3::new(-3.0, 4.0, 0.0), to), 5.0) && close(off_line_mps(Vec3::new(4.0, 3.0, 0.0), to), 3.0));
         assert!(close(away_mps(Vec3::new(-3.0, 4.0, 0.0), to), 3.0) && close(away_mps(Vec3::new(4.0, 3.0, 0.0), to), 0.0));
+        // Under the free 2 m/s in any direction, nothing.
+        assert_eq!(footwork_s(Vec3::new(-1.2, 1.6, 0.0), to, false), 0.0);
         // A dive: his get-up from a standstill replaces it.
         assert_eq!(footwork_s(Vec3::ZERO, to, true), 0.3);
         assert_eq!(footwork_s(Vec3::new(-5.0, 0.0, 0.0), to, true), 0.3);
@@ -421,6 +487,26 @@ mod tests {
         assert!(close(b.set_s, 0.65) && !b.off_balance);
         assert!(close(b.sigma_mult(1.0), 2.0) && close(b.speed_mult(1.0), 0.90));
         assert!(close(b.sigma_mult(0.0), 1.0) && close(b.speed_mult(0.0), 1.0));
+    }
+
+    // agent-models §5.5, the drift term (Q32): how off balance a hurried release is follows the
+    // off-line speed still unbraked then, at the braking limit since he had the ball, as a
+    // share of the 2 m/s his transfer absorbs. Transfer 0.65 s, earliest 0.39 s: from 6 m/s
+    // off the line he still carries 6 − 4.75·0.39 = 4.15 m/s at the earliest release (fully
+    // off balance, as the old rule had every footwork); from 2.5 m/s, 0.65 m/s (a third); set,
+    // none. Unknown drift (a dive) counts in full.
+    #[test]
+    fn the_drift_term_follows_the_unbraked_speed() {
+        let to = Vec3::new(10.0, 0.0, 0.0);
+        let fast = SetUp::new(0.65, 0.0, footwork_s(Vec3::new(0.0, 6.0, 0.0), to, false)).with_drift(6.0);
+        assert!(close(fast.off_weight(1.0), 1.0) && close(fast.sigma_mult(1.0), 3.0));
+        let slow = SetUp::new(0.65, 0.0, footwork_s(Vec3::new(0.0, 2.5, 0.0), to, false)).with_drift(2.5);
+        let w = (2.5 - BRAKE_MPS2 * 0.39) / 2.0;
+        assert!(slow.off_balance && (slow.off_weight(1.0) - w).abs() < 1e-9 && (w - 0.324).abs() < 0.01, "{w}");
+        assert!(close(slow.sigma_mult(1.0), 2.0 + w) && close(slow.speed_mult(1.0), 1.0 - 0.10 - 0.08 * w));
+        assert_eq!((slow.off_weight(0.0), fast.off_weight(0.0)), (0.0, 0.0));
+        let dive = SetUp::new(0.65, 0.0, footwork_s(Vec3::ZERO, to, true));
+        assert_eq!(dive.off_weight(1.0), 1.0);
     }
 
     // agent-models §5.5, all three terms together: set = Transfer + turn + footwork, and he can

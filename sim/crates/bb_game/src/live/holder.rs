@@ -51,7 +51,7 @@ impl Sim<'_> {
         let release = |target: Vec3, at: f64| {
             let su = self.set_up_for(by, target);
             let t = at.max(fd.up_at + su.earliest_s);
-            (t, self.throw_speed(by, target) * su.speed_mult(su.hurry(t - fd.up_at)))
+            (t, self.throw_speed(by, target, su.hurry(t - fd.up_at)) * su.speed_mult(su.hurry(t - fd.up_at)))
         };
         // With a cutoff man in the throw it must pass him low enough to be cut (agent-models
         // §5.5): the cuttable throw, by the throw and bounce physics.
@@ -119,9 +119,10 @@ impl Sim<'_> {
             let to = base_pos(1) - base_pos(option.base);
             let turn = fd.face.map(|face| throwing::turn_extra_s(face, to, fd.a.throws)).unwrap_or(0.0);
             let footwork = throwing::footwork_s(fd.catch_vel, to, fd.took_diving);
-            let su = if fd.relayed { SetUp::relay(fd.set_base, footwork) } else { SetUp::new(fd.set_base, turn, footwork) };
+            let drift = if fd.took_diving { f64::INFINITY } else { throwing::off_line_mps(fd.catch_vel, to) };
+            let su = if fd.relayed { SetUp::relay(fd.set_base, throwing::exchange_footwork_s(fd.catch_vel, to, fd.took_diving)) } else { SetUp::new(fd.set_base, turn, footwork).with_drift(drift) };
             let release_at = option.ball_at.max(fd.up_at + su.earliest_s);
-            (by, release_at, self.throw_speed(by, base_pos(1)) * su.speed_mult(su.hurry(release_at - fd.up_at)))
+            (by, release_at, self.throw_speed(by, base_pos(1), su.hurry(release_at - fd.up_at)) * su.speed_mult(su.hurry(release_at - fd.up_at)))
         } else {
             let next = &self.f[option.receiver];
             (option.receiver, option.ball_at + RELAY_TRANSFER_FRAC * next.a.transfer, THROW_EFFORT * next.a.arm)
@@ -146,7 +147,7 @@ impl Sim<'_> {
         } else {
             (Vec3::new(feed_from.x - bag.x, feed_from.y - bag.y, 0.0).normalized(), Vec3::ZERO)
         };
-        let su = SetUp::pivot(throwing::pivot_s(pf.a.transfer), throwing::turn_extra_s(face, to_first, pf.a.throws), throwing::footwork_s(vel, to_first, false));
+        let su = SetUp::pivot(throwing::pivot_s(pf.a.transfer), throwing::turn_extra_s(face, to_first, pf.a.throws), throwing::exchange_footwork_s(vel, to_first, false));
         t_bag + su.set_s
     }
 
