@@ -1,6 +1,6 @@
 # Task List
 
-**Last updated:** 2026-11-19 (fly-read merged; no workers running).
+**Last updated:** 2026-11-20 (approach continuing: angle from contact; one worker running).
 
 What is next and what is open. Other files hold the rest:
 
@@ -15,15 +15,15 @@ Status: `[ ]` not started · `[~]` partly done · `[?]` needs an owner decision
 
 ---
 
-## Resume here (2026-11-20, later)
+## Resume here (2026-11-20, evening)
 
-**State.** Nothing is waiting on the owner. **Nothing is running** (the owner asked to stop and continue in a new session; the Workers tab is closed).
+**State.** Nothing is waiting on the owner. **One worker running** (a subagent of the Coordinator session, not a pane): Opus, high effort, in worktree `.claude/worktrees/runner-decision`, branch `work/approach`, job file WORKER-APPROACH-CONTACT.md there (git-excluded). If the session ended before it reported, check the branch past `55bf7b4` and restart the job from its last commit.
 
-**Next Coordinator: rounding the ball, on `work/approach`.** Worktree `.claude/worktrees/runner-decision` (warm `sim/target`), branch `work/approach` at `0418e7e`: the approach (fielders slow into a ball they will throw, infielders included; the set-up behind a fly rebuilt; the across and drift terms of Q32 restored), ledger row and note (docs/calibration, 2026-11-20 approach) on the branch. Not yet checked by the Coordinator, not reviewed, not merged. Its figures: triples 1.02 → 0.82 a team-game (MLB about 0.14); outfield pickup-to-release 1.08 → 1.05 s; set-up catches 9% → 33%; but first to third on singles 33.4% → 36.4% (MLB 31.7%) and runs 4.27 → 4.39 [4.57 → 4.71], because fielders still run straight at the ball, so a throw to third from a single to centre is across their motion and they give it up. The cure is rounding the ball, which the owner's **Q33 answer already decided** ("slowing into and rounding the ball"): the worker's proposed Q34 is not an owner question. Start an Opus worker in that worktree with the job file WORKER-APPROACH-ROUNDING.md (written, git-excluded), watch it (its pane can stay "working" while its own background shell runs: also watch for the "done" line), then the pre-merge check, one Opus review of the whole branch (`dce9769..`), merge.
+**What the branch holds.** The approach (fielders slow into a ball they will throw; Q32's across and drift terms; the set-up behind a fly) and rounding (Q33), built and tested (482 pass) but never triggered in 600 games: sim fielders plan the route only once the ball is down, with 0.1–0.2 s in hand. Standard runs 4.38 [4.71] against main 4.27 [4.57]; first to third on singles 36.2% [35.1%] (MLB 31.7%); triples 1.02 → 0.82; set-up catches 9% → 35%. Note §6 of docs/calibration/2026-11-20-approach.md (on the branch).
 
-**After that: the saved-play fixes** ("Open sim work" §3, from the [diagnosis note](docs/calibration/2026-11-20-saved-plays-51001.md)): the double-play cover and the receiver estimate (66, 168), tracking through the bounce (71), the middle infielders' jobs (102). One `live.rs` job at a time.
+**The worker's proposed Q35 is not an owner question** (Coordinator, 2026-11-20): real outfielders take their angle to a ball landing in front of them from contact, so that is how Q33's "rounding the ball" is done; charging the across part at the cornering limit would reopen Q32 and is not taken. The running job builds the angle from contact, traces the unexplained fly-ball and pop-up hit rise (ledger §5), and stops after about three rounds if it cannot bring first to third down without losing balls.
 
-**Merged 2026-11-20.** The catch sets up the throw (`dce9769`, owner's Q32 under Q33; [note](docs/calibration/2026-11-19-catch-throw.md); [Opus review](docs/reviews/2026-11-19-opus-catch-throw-review.md) and [re-review](docs/reviews/2026-11-20-opus-catch-throw-fix-review.md), resolved): runs 4.24 → 4.27 [4.47 → 4.57]. The diagnosis of the owner's seed 51001 saved plays (`0d3fddd`). The client fixes from the same plays (`df9825b`: the umpire's fair-ball signal, the camera after contact, the inning card held 10 s or until Enter; [Sonnet review](docs/reviews/2026-11-20-sonnet-client-51001-review.md), resolved).
+**Then:** the Coordinator's pre-merge check, one Opus review of the whole branch (`dce9769..`), merge. **After that:** the saved-play fixes ("Open sim work" §3, [diagnosis note](docs/calibration/2026-11-20-saved-plays-51001.md)), one `live.rs` job at a time.
 
 ---
 
