@@ -3217,10 +3217,10 @@ impl<'a> Sim<'a> {
         }
         let fd = &self.f[i];
         let pred = fd.belief.as_ref()?;
-        // A ball he takes on the ground: by his read it comes down first, or it already has (a
-        // ball taken on a hop is not a catch).
-        let fb = pred.first_bounce().map_or(f64::INFINITY, |b| b.0);
-        if !fd.t_int.is_finite() || (fd.t_int < fb && self.ball_still_up()) {
+        // A ball on the ground: it has come down since contact (a ball taken on a hop is not a
+        // catch). While it is still in the air he goes for it as hard as he can, whatever his
+        // read says of where it comes down: slowing for a ball he might yet catch drops it.
+        if !fd.t_int.is_finite() || self.ball_still_up() {
             return None;
         }
         let bases = self.throw_bases(i);
@@ -3246,7 +3246,10 @@ impl<'a> Sim<'a> {
                 (1..=4u8).filter(|&b| bases & 1 << b != 0).map(|b| throwing::footwork_s(vel, base_pos(b) - p, false) + (base_pos(b) - p).norm() / arm).fold(f64::INFINITY, f64::min)
             };
             let ok = b.z <= catch_ceiling(field, b) && beyond_reach_over_wall(field, b) <= 0.0;
-            if ok {
+            // No take here can beat the best so far if even arriving set it would not (the
+            // throw's length alone): skip the reach estimate.
+            let hopeless = !first && best.is_some_and(|bb| t + plant(Vec3::ZERO) >= bb.0 - APPROACH_GAIN_S);
+            if ok && !hopeless {
                 let g = run_gap(field, &st, p, (t - start - wall_delay(field, &st, p, REACH * 0.7)).max(0.0), REACH * 0.7);
                 if g <= 0.0 {
                     let to = p - st.pos;
@@ -3260,10 +3263,14 @@ impl<'a> Sim<'a> {
                     arr.z = 0.0;
                     let v = arr.norm().min(st.a.speed);
                     let along = if v > 1e-9 { arr * (1.0 / arr.norm()) } else { dir };
-                    // His time in hand there: the ball's time less his reach time (the shortfall
-                    // `g` only says whether he makes it; within a few metres it stops at his reach).
-                    let reach_t = run_time_to(field, &st, p, REACH * 0.7) + wall_delay(field, &st, p, REACH * 0.7);
-                    let slack = (t - start - reach_t).max(0.0);
+                    // His time in hand there: how far past the point he would be by the ball's time,
+                    // at his arrival speed; within a few metres (where the shortfall is stepped
+                    // and stops at his reach) the ball's time less his reach time.
+                    let slack = if stepped_reach(&st, p) {
+                        (t - start - run_time_to(field, &st, p, REACH * 0.7)).max(0.0)
+                    } else {
+                        -g / v.max(1.0)
+                    };
                     let vc = if first { v } else { (v - m::sqrt(2.0 * BRAKE * v * slack)).max(0.0) };
                     let ready = t + plant(along * vc);
                     if best.is_none_or(|bb| ready < bb.0 - APPROACH_GAIN_S) {
