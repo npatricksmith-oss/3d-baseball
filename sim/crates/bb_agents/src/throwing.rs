@@ -69,9 +69,13 @@ pub const TURN_S: f64 = 0.12;
 pub const BRAKE_MPS2: f64 = 4.75;
 /// The catch sets up the throw (agent-models §5.5, owner's Q32): the part of his catch-to-
 /// release during which a fielder can already be braking (the ball going from glove to hand
-/// while his feet stop), s [E, unsourced]. 2 m/s ÷ `BRAKE_MPS2`: a man under 2 m/s off the
-/// line to his target owes nothing, as under the old flat rule.
-pub const PLANT_OVERLAP_S: f64 = 2.0 / BRAKE_MPS2;
+/// while his feet stop), s [E, unsourced; the plant's calibration knob]. 3.2 m/s ÷
+/// `BRAKE_MPS2` = 0.67 s, about an infielder's whole `Transfer` and most of an outfielder's:
+/// set 2026-11-20 (approach note §5) so that with the approach and the across term an
+/// outfielder's pickup-to-release (1.02 s) comes nearest Tango's empirical ≈0.95 s (1.2 s with
+/// the tag) of the values tried (2.0, 2.6, 3.2 m/s); it was 2 m/s (0.42 s), the old flat
+/// rule's no-charge point.
+pub const PLANT_OVERLAP_S: f64 = 3.2 / BRAKE_MPS2;
 /// Footwork to get up and balanced after taking the ball on the ground from a dive, s [E].
 pub const DIVE_FOOTWORK_S: f64 = 0.3;
 /// Momentum toward the target (agent-models §5.5): the speed of a thrower's body toward his
@@ -157,8 +161,6 @@ pub fn footwork_s(catch_vel: Vec3, to_target: Vec3, dove: bool) -> f64 {
     if m::hypot(to_target.x, to_target.y) <= TOSS_MAX_M {
         return exchange_footwork_s(catch_vel, to_target, false);
     }
-    if std::env::var("ZZ_FW").is_ok() { let f = (off_line_mps(catch_vel, to_target) / BRAKE_MPS2 - PLANT_OVERLAP_S).max(0.0); if f > 0.0 { eprintln!("FW vel ({:.2},{:.2}) to ({:.1},{:.1}) off {:.2} away {:.2} plant {:.3}", catch_vel.x, catch_vel.y, to_target.x, to_target.y, off_line_mps(catch_vel, to_target), away_mps(catch_vel, to_target), f); } } // ZZ-DBG
-    if std::env::var("ZZ_AWAY").is_ok() { return (away_mps(catch_vel, to_target) / BRAKE_MPS2 - PLANT_OVERLAP_S).max(0.0); } // ZZ-DBG
     (off_line_mps(catch_vel, to_target) / BRAKE_MPS2 - PLANT_OVERLAP_S).max(0.0)
 }
 
@@ -179,7 +181,7 @@ pub fn exchange_footwork_s(catch_vel: Vec3, to_target: Vec3, dove: bool) -> f64 
 }
 
 /// The speed a fielder can carry off the line to his target and still owe no plant, m/s
-/// (`BRAKE_MPS2` × `PLANT_OVERLAP_S` = 2 m/s): what he stops inside his transfer.
+/// (`BRAKE_MPS2` × `PLANT_OVERLAP_S` = 3.2 m/s): what he stops inside his transfer.
 pub const PLANT_FREE_MPS: f64 = BRAKE_MPS2 * PLANT_OVERLAP_S;
 
 /// His motion off the line to `to_target` (horizontal): the part away from it and the part
@@ -285,7 +287,7 @@ impl SetUp {
     /// the ball, as a share of [`PLANT_FREE_MPS`] (the drift his transfer absorbs), at most 1.
     /// None if he owes no footwork; set, none (the plant has stopped it).
     pub fn off_weight(&self, hurry: f64) -> f64 {
-        if !self.off_balance {
+        if !self.off_balance || hurry <= 0.0 {
             return 0.0;
         }
         let elapsed = self.set_s - hurry * (self.set_s - self.earliest_s);
@@ -432,16 +434,16 @@ mod tests {
     }
 
     // agent-models §5.5, the catch sets up the throw: the plant is the stop under the braking
-    // limit beyond what a man moving away at 2 m/s needs (the old rule's no-charge point). Two
-    // independent figures: §5.3's full stop from 7 m/s, 1.47 s, and that 2 m/s point. A stop
-    // at a constant limit scales with speed, so from 7 m/s he owes 1.47 × (7 − 2)/7 = 1.05 s.
+    // limit beyond what he stops inside his transfer (`PLANT_FREE_MPS`). Two independent
+    // figures: §5.3's full stop from 7 m/s, 1.47 s, and the free speed v_f. A stop at a constant
+    // limit scales with speed, so from 7 m/s he owes 1.47 × (7 − v_f)/7.
     #[test]
     fn the_plant_is_the_stop_under_the_braking_limit() {
         let to = Vec3::new(30.0, 0.0, 0.0);
         let plant_7 = footwork_s(Vec3::new(-7.0, 0.0, 0.0), to, false);
-        assert!((plant_7 - 1.47 * 5.0 / 7.0).abs() < 0.005, "{plant_7}");
-        assert_eq!(footwork_s(Vec3::new(-2.0, 0.0, 0.0), to, false), 0.0);
-        assert!(footwork_s(Vec3::new(-2.1, 0.0, 0.0), to, false) > 0.0);
+        assert!((plant_7 - 1.47 * (7.0 - PLANT_FREE_MPS) / 7.0).abs() < 0.005, "{plant_7}");
+        assert_eq!(footwork_s(Vec3::new(-PLANT_FREE_MPS, 0.0, 0.0), to, false), 0.0);
+        assert!(footwork_s(Vec3::new(-PLANT_FREE_MPS - 0.1, 0.0, 0.0), to, false) > 0.0);
         // Toward the target: nothing to stop, at any speed.
         assert_eq!(footwork_s(Vec3::new(7.0, 0.0, 0.0), to, false), 0.0);
         // Straight across the line (Q32, restored with the approach): the same stop as away.
@@ -452,8 +454,8 @@ mod tests {
         assert!(close(footwork_s(Vec3::new(-3.0, 4.0, 0.0), to, false), footwork_s(Vec3::new(-5.0, 0.0, 0.0), to, false)));
         assert!(close(off_line_mps(Vec3::new(-3.0, 4.0, 0.0), to), 5.0) && close(off_line_mps(Vec3::new(4.0, 3.0, 0.0), to), 3.0));
         assert!(close(away_mps(Vec3::new(-3.0, 4.0, 0.0), to), 3.0) && close(away_mps(Vec3::new(4.0, 3.0, 0.0), to), 0.0));
-        // Under the free 2 m/s in any direction, nothing.
-        assert_eq!(footwork_s(Vec3::new(-1.2, 1.6, 0.0), to, false), 0.0);
+        // Under the free speed in any direction, nothing.
+        assert_eq!(footwork_s(Vec3::new(-1.8, 2.4, 0.0), to, false), 0.0);
         // A toss (a target within 15 m) counts only motion away, like the pivot's exchange.
         let toss = Vec3::new(12.0, 0.0, 0.0);
         assert_eq!(footwork_s(Vec3::new(0.0, 7.0, 0.0), toss, false), 0.0);
@@ -496,18 +498,18 @@ mod tests {
 
     // agent-models §5.5, the drift term (Q32): how off balance a hurried release is follows the
     // off-line speed still unbraked then, at the braking limit since he had the ball, as a
-    // share of the 2 m/s his transfer absorbs. Transfer 0.65 s, earliest 0.39 s: from 6 m/s
-    // off the line he still carries 6 − 4.75·0.39 = 4.15 m/s at the earliest release (fully
-    // off balance, as the old rule had every footwork); from 2.5 m/s, 0.65 m/s (a third); set,
-    // none. Unknown drift (a dive) counts in full.
+    // share of the free speed his transfer absorbs (`PLANT_FREE_MPS`, 3.2 m/s). Transfer 0.65 s,
+    // earliest 0.39 s: from 7 m/s off the line he still carries 7 − 4.75·0.39 = 5.15 m/s at the
+    // earliest release (fully off balance, as the old rule had every footwork); from 3.6 m/s,
+    // 1.75 m/s (a little over half); set, none. Unknown drift (a dive) counts in full.
     #[test]
     fn the_drift_term_follows_the_unbraked_speed() {
         let to = Vec3::new(30.0, 0.0, 0.0);
-        let fast = SetUp::new(0.65, 0.0, footwork_s(Vec3::new(0.0, 6.0, 0.0), to, false)).with_drift(6.0);
+        let fast = SetUp::new(0.65, 0.0, footwork_s(Vec3::new(0.0, 7.0, 0.0), to, false)).with_drift(7.0);
         assert!(close(fast.off_weight(1.0), 1.0) && close(fast.sigma_mult(1.0), 3.0));
-        let slow = SetUp::new(0.65, 0.0, footwork_s(Vec3::new(0.0, 2.5, 0.0), to, false)).with_drift(2.5);
-        let w = (2.5 - BRAKE_MPS2 * 0.39) / 2.0;
-        assert!(slow.off_balance && (slow.off_weight(1.0) - w).abs() < 1e-9 && (w - 0.324).abs() < 0.01, "{w}");
+        let slow = SetUp::new(0.65, 0.0, footwork_s(Vec3::new(0.0, 3.6, 0.0), to, false)).with_drift(3.6);
+        let w = (3.6 - BRAKE_MPS2 * 0.39) / PLANT_FREE_MPS;
+        assert!(slow.off_balance && (slow.off_weight(1.0) - w).abs() < 1e-9 && (w - 0.546).abs() < 0.01, "{w}");
         assert!(close(slow.sigma_mult(1.0), 2.0 + w) && close(slow.speed_mult(1.0), 1.0 - 0.10 - 0.08 * w));
         assert_eq!((slow.off_weight(0.0), fast.off_weight(0.0)), (0.0, 0.0));
         let dive = SetUp::new(0.65, 0.0, footwork_s(Vec3::ZERO, to, true));
@@ -534,18 +536,18 @@ mod tests {
     // agent-models §5.5, all three terms together: set = Transfer + turn + footwork, and he can
     // let go from RUSH_MIN_FRAC (0.6) of Transfer + turn (the footwork is not part of it).
     // Transfer 0.65 s:
-    //   off his throwing shoulder (+0.12) and moving away at 5 m/s (plant ≈ 1.47·3/7 = 0.63 by
-    //     §5.3's stop): set ≈ 0.65+0.12+0.63 = 1.40, earliest = 0.6·(0.65+0.12) = 0.462;
+    //   off his throwing shoulder (+0.12) and moving away at 5 m/s (plant ≈ 1.47·(5 − v_f)/7 by
+    //     §5.3's stop, v_f the free speed): set ≈ 0.65+0.12+plant, earliest = 0.6·(0.65+0.12) = 0.462;
     //     at 0.6 s hurry = (set−0.6)/(set−0.462);
     //   off his glove shoulder (−0.12) after a dive (+0.3): set = 0.65−0.12+0.3 = 0.83,
     //     earliest = 0.6·0.53 = 0.318; half way (0.574 s) hurry 0.5: speed 1−0.5·0.18 = 0.91,
     //     direction σ ×(1+0.5·2) = 2.
     #[test]
     fn set_up_adds_transfer_turn_and_footwork() {
-        let to = Vec3::new(10.0, 0.0, 0.0);
+        let to = Vec3::new(30.0, 0.0, 0.0);
         let a = SetUp::new(0.65, 0.12, footwork_s(Vec3::new(-5.0, 0.0, 0.0), to, false));
-        // The plant from 5 m/s away, by §5.3's stop (1.47 s from 7 m/s) beyond the 2 m/s point.
-        let plant = 1.47 * 3.0 / 7.0;
+        // The plant from 5 m/s away, by §5.3's stop (1.47 s from 7 m/s) beyond the free speed.
+        let plant = 1.47 * (5.0 - PLANT_FREE_MPS) / 7.0;
         assert!((a.set_s - (0.77 + plant)).abs() < 0.005 && close(a.earliest_s, 0.462) && a.off_balance);
         assert!((a.hurry(0.6) - (0.17 + plant) / (0.308 + plant)).abs() < 0.005);
         let b = SetUp::new(0.65, -0.12, footwork_s(Vec3::ZERO, to, true));

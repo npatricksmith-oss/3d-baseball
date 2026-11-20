@@ -90,7 +90,6 @@ fn seed_23_play_109_takes_a_sure_lead_force_instead_of_automatic_first() {
     // lead forces and throw home first for the 3-2-3 / lead-force double play.
     let (out, choices, _) = replay(include_str!("fixtures/a4/23-109.json"));
     let first = &choices[0];
-    if std::env::var("ZZ_SHOW").is_ok() { eprintln!("ZZ secured {:?} released {:?} facts {:?}", out.secured, out.released, out.facts.iter().filter(|f| matches!(f, bb_rules::Input::GloveSecured { .. })).collect::<Vec<_>>()); } // ZZ-DBG
     assert!(!(first.action == "carry" && first.base == 1), "{first:#?}");
     assert!(first.options.iter().any(|o| o.base == 1 && o.kind == "carry" && o.force), "carry first was compared: {first:#?}");
     let chosen = &first.options[first.selected_option.unwrap()];
@@ -139,7 +138,6 @@ fn seed_3_play_140_keeps_the_force_double_play_against_a_single_home_tag() {
     assert_eq!((choices[0].action, choices[0].base), ("throw", 2), "{:#?}", choices[0]);
     assert_eq!(out.calls.iter().map(|c| c.base).collect::<Vec<_>>(), vec![2, 1]);
     let chosen = &choices[0].options[choices[0].selected_option.unwrap()];
-    if std::env::var("ZZ_SHOW").is_ok() { eprintln!("ZZ p2 {:?} ball_at {:.3} second_ball_at {:?} runner_at {:.3} secured {:?} released {:?}", chosen.second_out_p, chosen.ball_at, chosen.second_ball_at, chosen.runner_at, out.secured, out.released); } // ZZ-DBG
     assert!(chosen.second_out_p.is_some_and(|p| p > 0.5), "{chosen:#?}");
 }
 

@@ -645,12 +645,10 @@ const SETUP_AT_M: f64 = 1.0;
 const SETUP_THROUGH_MPS: f64 = 4.0;
 /// The approach to a ball on the ground (agent-models §5.2): how far past his intercept a
 /// chaser looks for a better take, s; the step he looks at, s; how much earlier a later take
-/// must have him ready to be worth it, s (a tie goes to the intercept); the least arrival speed his time in
-/// hand is measured at, m/s [E, unsourced].
+/// must have him ready to be worth it, s (a tie goes to the intercept) [E, unsourced].
 const APPROACH_LOOK_S: f64 = 1.5;
 const APPROACH_STEP_S: f64 = 0.04;
 const APPROACH_GAIN_S: f64 = 0.01;
-const APPROACH_V_MIN: f64 = 0.5;
 /// Arriving under control (agent-models §5.2): a chaser with time in hand keeps this many of
 /// his doubts (the σ of where he believes it comes down) between where he can stop and his
 /// spot [E].
@@ -2306,7 +2304,7 @@ fn fielder_step(fd: &Fielder, t: f64, t_contact: f64) -> (Vec3, Vec3) {
 /// The movement step toward `target` for a body at `pos` moving `vel` with abilities `a`
 /// (agent-models §5.3): `early`, the speed that stops him `margin` short of it at `BRAKE`;
 /// otherwise his top speed; either held to the turn he can make, and to the speed that brings
-/// him onto it at `arrive` m/s at `BRAKE` (an approach, §5.2; infinite: none).
+/// him within his reach of it at `arrive` m/s at `BRAKE` (an approach, §5.2; infinite: none).
 fn step_toward(pos: Vec3, vel: Vec3, target: Vec3, a: &FielderAttrs, early: bool, margin: f64, arrive: f64) -> (Vec3, Vec3) {
     let to = Vec3::new(target.x - pos.x, target.y - pos.y, 0.0);
     let d = to.norm();
@@ -2321,7 +2319,8 @@ fn step_toward(pos: Vec3, vel: Vec3, target: Vec3, a: &FielderAttrs, early: bool
     let dir = to * (1.0 / d);
     let mut want = if early { a.speed.min(m::sqrt(2.0 * BRAKE * (d - margin).max(0.0))) } else { a.speed };
     if arrive.is_finite() {
-        want = want.min(m::sqrt(arrive * arrive + 2.0 * BRAKE * d));
+        // He takes the ball as it comes within his reach, so he is down to `arrive` there.
+        want = want.min(m::sqrt(arrive * arrive + 2.0 * BRAKE * (d - REACH).max(0.0)));
     }
     // He slows into a turn he cannot make at speed: reaching a spot d away at an angle θ off
     // his heading takes a curve of radius d/(2 sin θ), which his lateral acceleration allows
@@ -3217,13 +3216,11 @@ impl<'a> Sim<'a> {
             return None;
         }
         let fd = &self.f[i];
-        let dbg = std::env::var("BB_AP_DBG").is_ok(); // ZZ-DBG
         let pred = fd.belief.as_ref()?;
         // A ball he takes on the ground: by his read it comes down first, or it already has (a
         // ball taken on a hop is not a catch).
         let fb = pred.first_bounce().map_or(f64::INFINITY, |b| b.0);
         if !fd.t_int.is_finite() || (fd.t_int < fb && self.ball_still_up()) {
-            if dbg { eprintln!("APD t {:.2} f{} none: in the air (t_int {:.2}, bounce {:.2})", self.t, i + 1, fd.t_int, fb); } // ZZ-DBG
             return None;
         }
         let bases = self.throw_bases(i);
@@ -3263,7 +3260,10 @@ impl<'a> Sim<'a> {
                     arr.z = 0.0;
                     let v = arr.norm().min(st.a.speed);
                     let along = if v > 1e-9 { arr * (1.0 / arr.norm()) } else { dir };
-                    let slack = -g / v.max(APPROACH_V_MIN);
+                    // His time in hand there: the ball's time less his reach time (the shortfall
+                    // `g` only says whether he makes it; within a few metres it stops at his reach).
+                    let reach_t = run_time_to(field, &st, p, REACH * 0.7) + wall_delay(field, &st, p, REACH * 0.7);
+                    let slack = (t - start - reach_t).max(0.0);
                     let vc = if first { v } else { (v - m::sqrt(2.0 * BRAKE * v * slack)).max(0.0) };
                     let ready = t + plant(along * vc);
                     if best.is_none_or(|bb| ready < bb.0 - APPROACH_GAIN_S) {
@@ -3271,13 +3271,11 @@ impl<'a> Sim<'a> {
                     }
                 }
             } else if first {
-                if dbg { eprintln!("APD t {:.2} f{} none: first sample not takeable z {:.2}", self.t, i + 1, b.z); } // ZZ-DBG
                 return None;
             }
             first = false;
             t += APPROACH_STEP_S;
         }
-        if dbg { eprintln!("APD t {:.2} f{} pos ({:.1},{:.1}) v ({:.1},{:.1}) t_int {:.2} int ({:.1},{:.1}) best {:?}", self.t, i + 1, fd.pos.x, fd.pos.y, fd.vel.x, fd.vel.y, fd.t_int, fd.int_pt.x, fd.int_pt.y, best.map(|b| ((b.0 * 100.0).round() / 100.0, (b.2 * 100.0).round() / 100.0, (b.1.x * 10.0).round() / 10.0, (b.1.y * 10.0).round() / 10.0, (b.3 * 100.0).round() / 100.0))); } // ZZ-DBG
         best.filter(|b| b.3.is_finite()).map(|b| (b.1, b.2, b.3))
     }
 
@@ -15050,11 +15048,8 @@ mod tests {
         let face = sim.f[B2].face.expect("facing");
         assert!(face.dot(approach) > 0.99, "faces {face:?}, not his approach {approach:?}");
         let world = sim.set_up_for(B2, base_pos(1)).set_s;
-        // (The world turns toward first from where he stands, 0.59 m off the bag. Coming across
-        // the line to first at 2.39 m/s he owes a plant for the 2.1 m/s of it across the line,
-        // a hair over the free 2 m/s (agent-models §5.5, the across term), and that 0.02 s
-        // plant moves by a few milliseconds with the 0.59 m.)
-        assert!((world - predicted).abs() < 0.015, "the world's pivot {world:.4} s, the estimate {predicted:.4} s");
+        // (The world turns toward first from where he stands, 0.59 m off the bag.)
+        assert!((world - predicted).abs() < 0.005, "the world's pivot {world:.4} s, the estimate {predicted:.4} s");
     }
 
     /// agent-models §5.5: the holder's estimate of a double play uses the pivot model the
@@ -15575,15 +15570,15 @@ mod tests {
         (t, b.1, vel, out.released.first().map_or(f64::NAN, |r| r.0))
     }
 
-    /// agent-models §5.2, the approach: a routine ground ball at the shortstop. Going straight
-    /// at his intercept (the old rule) he takes it at a run, mostly across the line to first, and
+    /// agent-models §5.2, the approach: a ground ball to the shortstop's left. Going straight at
+    /// his intercept (the old rule) he takes it at a run, mostly across the line to first, and
     /// owes the plant of §5.5 for it. With the approach he slows into a later hop, takes it moving
-    /// no faster off that line than the plant leaves free (2 m/s, with a tick's slack), and lets
-    /// the throw go no later than going straight would (old-versus-new bound). His braking never
-    /// beats the sourced limit (4.75 m/s², Harper et al. 2020).
+    /// no faster off that line than the plant leaves free (`PLANT_FREE_MPS`, with a tick's
+    /// braking of slack), and lets the throw go no later than going straight would
+    /// (old-versus-new bound; measured 3.22 → 2.65 s).
     #[test]
-    fn a_shortstop_with_time_in_hand_slows_into_a_routine_grounder() {
-        let v = Vec3::new(-0.27, 0.96, -0.08).normalized() * 30.0;
+    fn a_shortstop_with_time_in_hand_slows_into_a_ground_ball() {
+        let v = Vec3::new(-0.40, 0.96, -0.08).normalized() * 30.0;
         let (t0, p0, v0, r0) = shortstop_grounder(v, false);
         let (t1, p1, v1, r1) = shortstop_grounder(v, true);
         let to = |p: Vec3| base_pos(1) - p;
