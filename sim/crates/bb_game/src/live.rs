@@ -3410,6 +3410,8 @@ impl<'a> Sim<'a> {
         let t_last = fd.t_int + APPROACH_LOOK_S;
         // (ready, take point, ball time, arrival cap, rounding)
         let mut best: Option<(f64, Vec3, f64, f64, Option<Vec3>)> = None;
+        // The rounded takes (ready, take point, ball time, arrival speed, way).
+        let mut rounded: Vec<(f64, Vec3, f64, f64, Vec3)> = Vec::new();
         let mut first = true;
         let mut t = fd.t_int;
         while t <= t_last + 1e-9 {
@@ -3447,7 +3449,7 @@ impl<'a> Sim<'a> {
                     };
                     let vc = if first { v } else { (v - m::sqrt(2.0 * BRAKE * v * slack)).max(0.0) };
                     let straight = t + each.clone().map(|k| at_base(p, along * vc, k)).fold(f64::INFINITY, f64::min);
-                    let mut take = (straight, if first { f64::INFINITY } else { vc }, None);
+                    let take = (straight, if first { f64::INFINITY } else { vc });
                     // Rounding it for the base: from w = p − ROUND_M·u, then through p toward the
                     // base. Its cost against running straight in: the extra way at his speed, and
                     // slowing for the turn at w to what his lateral acceleration allows over the
@@ -3485,16 +3487,13 @@ impl<'a> Sim<'a> {
                                 // Paced to the ball (`fielder_step`), he comes through at about the
                                 // way over the time he has, no faster than the turn allows.
                                 let r = t + at_base(p, a * v_r.min(way / (t - start).max(DT)), rb);
-                                let edge = if rounding.is_some() { -APPROACH_GAIN_S } else { APPROACH_GAIN_S };
-                                if r < take.0 - edge {
-                                    take = (r, v_r.min(v_free), Some(a));
-                                }
+                                rounded.push((r, p, t, v_r.min(v_free), a));
                             }
                         }
                     }
                     let edge = if first { 0.0 } else { APPROACH_GAIN_S };
                     if best.is_none_or(|bb| take.0 < bb.0 - edge) {
-                        best = Some((take.0, p, t, take.1, take.2));
+                        best = Some((take.0, p, t, take.1, None));
                     }
                 }
             } else if first {
@@ -3502,6 +3501,17 @@ impl<'a> Sim<'a> {
             }
             first = false;
             t += APPROACH_STEP_S;
+        }
+        // Rounding changes how he comes through the ball, not when he takes it: a rounded take
+        // only at a point he would take it no later than his best straight take (one later,
+        // traded for the plant it saves at the base he plans for, gave every other runner the
+        // delay: outfield pickups 0.11 s later, triples 0.82 → 0.89 a team-game). It beats the
+        // straight take by `APPROACH_GAIN_S`, or ties it when he is already rounding.
+        if let Some(bs) = best {
+            let edge = if rounding.is_some() { -APPROACH_GAIN_S } else { APPROACH_GAIN_S };
+            if let Some(r) = rounded.iter().filter(|r| r.2 <= bs.2 + 1e-9 && r.0 < bs.0 - edge).min_by(|x, y| x.0.total_cmp(&y.0)) {
+                best = Some((r.0, r.1, r.2, r.3, Some(r.4)));
+            }
         }
         best.filter(|b| b.3.is_finite() || b.4.is_some()).map(|b| Approach { at: b.1, t_ball: b.2, arrive: b.3, round: b.4, through: false })
     }
