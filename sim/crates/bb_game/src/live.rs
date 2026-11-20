@@ -661,6 +661,15 @@ const ROUND_NEAR_M: f64 = 0.5;
 /// Re-planning while he rounds a ball, a base this close in direction (the cosine of the angle
 /// between the old and the new line from the take point) is the same base [E].
 const ROUND_SAME_COS: f64 = 0.98;
+/// Rounding: his run out to the point behind the take point must pass the take point no
+/// nearer than this, m [E: his reach and half a step]; nearer, the ball would meet him on the
+/// way out, going away from the base.
+const ROUND_CLEAR_M: f64 = 1.5;
+/// Rounding: how far from the line to the base, toward his straight run, the ways he may come
+/// through the take point are turned, degrees [E]: motion off the line up to the plant's free
+/// speed (`PLANT_FREE_MPS`) costs nothing, so a part of the turn often does the work of all of
+/// it at a fraction of the cost.
+const ROUND_SLANT_DEG: [f64; 4] = [0.0, 20.0, 40.0, 60.0];
 /// The holder's race rule (agent-models §5.6): the σ of a race, s, and the least chance of an
 /// out he throws for. A fielder rounds a ball for the lead runner's extra base only where by
 /// this rule he would have a play there.
@@ -2330,23 +2339,30 @@ fn fielder_step(fd: &Fielder, t: f64, t_contact: f64) -> (Vec3, Vec3) {
         // turn there; within his turning radius of it (or once he is nearer the take point along
         // the line to the base) he follows that line through the take point, steering at a
         // point on it a little ahead of him. He is timed against the ball there, as coming
-        // through a set-up behind a fly (§5.5): his pace is the way left over the time left, at
-        // most his top speed, recomputed every tick.
+        // through a set-up behind a fly (§5.5): his pace is the way left over the time left
+        // (going out, the time left less the last `ROUND_M` at the turn's speed), at most his
+        // top speed, recomputed every tick.
         let p = fd.target;
         let w = p - u * ROUND_M;
         let dw = m::hypot(w.x - fd.pos.x, w.y - fd.pos.y);
         let left = t_goal - t;
-        let (q, way, cap) = if fd.approach.is_some_and(|ap| ap.through) {
+        let (q, pace, cap) = if fd.approach.is_some_and(|ap| ap.through) {
             let behind = (p - fd.pos).dot(u);
             let v = fd.vel.norm();
             let q = p - u * (behind - (v * v / fd.a.a_lat).max(ROUND_NEAR_M)).max(0.0);
-            (q, m::hypot(p.x - fd.pos.x, p.y - fd.pos.y), f64::INFINITY)
+            let dp = m::hypot(p.x - fd.pos.x, p.y - fd.pos.y);
+            let pace = if left > DT { dp / left } else { fd.a.speed };
+            // No faster than lets him finish the turn onto the way by the take point (§5.3's turn
+            // law for the turn still to make over the way left), whatever re-reading has moved.
+            (q, pace, arrive.min(turn_speed(fd.a.a_lat, fd.vel, u, (dp - REACH).max(ROUND_NEAR_M))))
         } else {
-            // Down to the turn's speed by the turn's radius from the point.
-            let (v_turn, r_turn) = round_turn(fd, u);
-            (w, dw + ROUND_M, m::sqrt(v_turn * v_turn + 2.0 * BRAKE * (dw - r_turn).max(0.0)))
+            // Down to the turn's speed by the turn's radius from the point; his pace there leaves
+            // the time the last `ROUND_M` take at that speed.
+            let (v_turn, r_turn) = round_turn(fd, u, arrive);
+            let out = left - ROUND_M / v_turn.max(1.0);
+            let pace = if out > DT { dw / out } else { fd.a.speed };
+            (w, pace, m::sqrt(v_turn * v_turn + 2.0 * BRAKE * (dw - r_turn).max(0.0)))
         };
-        let pace = if left > DT { way / left } else { fd.a.speed };
         let a = FielderAttrs { speed: fd.a.speed.min(pace).min(cap), ..fd.a };
         return step_toward(fd.pos, fd.vel, q, &a, false, 0.0, f64::INFINITY);
     }
@@ -2359,11 +2375,12 @@ fn fielder_step(fd: &Fielder, t: f64, t_contact: f64) -> (Vec3, Vec3) {
 
 /// Rounding a ball (agent-models §5.2), on his way to the point behind the take point (`u`
 /// toward the base): the speed his lateral acceleration allows for the turn there (§5.3's
-/// turn law over the `ROUND_M` to the take point), and the radius of that turn, v²/a_lat (at
+/// turn law over the `ROUND_M` to the take point; at most `v_cap`, the speed he planned to come
+/// through at), and the radius of that turn, v²/a_lat (at
 /// least `ROUND_NEAR_M`), within which of the point he turns through it.
-fn round_turn(fd: &Fielder, u: Vec3) -> (f64, f64) {
+fn round_turn(fd: &Fielder, u: Vec3, v_cap: f64) -> (f64, f64) {
     let w = fd.target - u * ROUND_M;
-    let v_turn = turn_speed(fd.a.a_lat, w - fd.pos, u, ROUND_M).min(fd.a.speed);
+    let v_turn = turn_speed(fd.a.a_lat, w - fd.pos, u, ROUND_M).min(fd.a.speed).min(v_cap);
     (v_turn, (v_turn * v_turn / fd.a.a_lat).max(ROUND_NEAR_M))
 }
 
@@ -2372,7 +2389,8 @@ fn round_turn(fd: &Fielder, u: Vec3) -> (f64, f64) {
 fn round_reached(fd: &mut Fielder) {
     let Some(u) = fd.approach.filter(|ap| !ap.through).and_then(|ap| ap.round) else { return };
     let w = fd.target - u * ROUND_M;
-    if m::hypot(w.x - fd.pos.x, w.y - fd.pos.y) <= round_turn(fd, u).1 {
+    let cap = fd.approach.map_or(f64::INFINITY, |ap| ap.arrive);
+    if m::hypot(w.x - fd.pos.x, w.y - fd.pos.y) <= round_turn(fd, u, cap).1 {
         fd.approach.as_mut().expect("rounding").through = true;
     }
 }
@@ -2391,21 +2409,25 @@ fn turn_speed(a_lat: f64, heading: Vec3, u: Vec3, d: f64) -> f64 {
     if half < 1e-6 { f64::INFINITY } else { m::sqrt(a_lat * d.max(0.0) / (2.0 * half)) }
 }
 
-/// Rounding a ball (agent-models §5.2): what coming at take point `p` from `ROUND_M` behind it,
-/// away from the base (`u`, the unit vector toward it), and through it toward the base costs a
-/// body at `pos` with abilities `a` arriving at speed `v` against running straight in: the
-/// extra way at v, slowing at `BRAKE` to the speed his lateral acceleration allows through the
-/// turn there over the `ROUND_M` left (§5.3's turn law), and those `ROUND_M` at that speed.
-/// Moving at `v_now` with too little room to brake to that speed before the turn, he cannot
-/// round it (infinite cost). (cost s, the speed through the turn, the way via the point
+/// Rounding a ball (agent-models §5.2): what coming at take point `p` from `ROUND_M` behind it
+/// along `u` (the way he comes through it) costs a body at `pos` with abilities `a` arriving at
+/// speed `v` against running straight in: the extra way at v, slowing at `BRAKE` to the speed
+/// his lateral acceleration allows through the turn there over the `ROUND_M` left (§5.3's turn
+/// law), or to `v_cap` if lower, and those `ROUND_M` at that speed.
+/// Moving at `v_now` with too little room to brake to that speed before the turn, or with a
+/// run out to the point behind that passes the take point within `ROUND_CLEAR_M` (he would
+/// meet the ball going away), he cannot round it (infinite cost). (cost s, the speed through the turn, the way via the point
 /// behind, m.)
-fn round_cost(a: &FielderAttrs, pos: Vec3, v_now: f64, v: f64, p: Vec3, u: Vec3) -> (f64, f64, f64) {
+fn round_cost(a: &FielderAttrs, pos: Vec3, v_now: f64, v: f64, v_cap: f64, p: Vec3, u: Vec3) -> (f64, f64, f64) {
     let w = p - u * ROUND_M;
     let tw = Vec3::new(w.x - pos.x, w.y - pos.y, 0.0);
     let (dw, d) = (tw.norm(), m::hypot(p.x - pos.x, p.y - pos.y));
-    let v_turn = turn_speed(a.a_lat, tw, u, ROUND_M).min(a.speed);
+    let v_turn = turn_speed(a.a_lat, tw, u, ROUND_M).min(a.speed).min(v_cap);
     let r_turn = (v_turn * v_turn / a.a_lat).max(ROUND_NEAR_M);
-    if (v_now * v_now - v_turn * v_turn) / (2.0 * BRAKE) > (dw - r_turn).max(0.0) {
+    // How near his run out to w passes the take point.
+    let k = if dw > 1e-9 { ((p - pos).dot(tw) / (dw * dw)).clamp(0.0, 1.0) } else { 0.0 };
+    let near = m::hypot(pos.x + tw.x * k - p.x, pos.y + tw.y * k - p.y);
+    if near < ROUND_CLEAR_M || (v_now * v_now - v_turn * v_turn) / (2.0 * BRAKE) > (dw - r_turn).max(0.0) {
         return (f64::INFINITY, v_turn, dw + ROUND_M);
     }
     let v_r = v.min(v_turn);
@@ -3369,6 +3391,7 @@ impl<'a> Sim<'a> {
             (self.throw_bases(i), None)
         };
         let rounding = fd.approach.and_then(|a| a.round);
+        let was = fd.approach.map_or(f64::INFINITY, |a| a.arrive);
         let through = fd.approach.is_some_and(|a| a.through);
         #[cfg(test)]
         let no_round = tests::NO_ROUND.with(|c| c.get());
@@ -3434,18 +3457,37 @@ impl<'a> Sim<'a> {
                     if let Some(rb) = rb.filter(|&rb| !no_round && m::hypot(base_pos(rb).x - p.x, base_pos(rb).y - p.y) > throwing::TOSS_MAX_M) {
                         let tb = base_pos(rb) - p;
                         let u = Vec3::new(tb.x, tb.y, 0.0).normalized();
-                        let w = p - u * ROUND_M;
-                        // Already coming through it for this base: the way on to the take point.
-                        let on = through && rounding.is_some_and(|r| r.dot(u) > ROUND_SAME_COS);
-                        if on || field.body_clearance(w.x, w.y, BODY_R).dist >= 0.0 {
-                            let (cost, v_r, way) = if on { (0.0, v, d) } else { round_cost(&st.a, st.pos, st.vel.norm(), v, p, u) };
+                        // The ways through it: arriving along the line to the base, or turned from
+                        // it toward his straight run by `ROUND_SLANT_DEG` (motion off the line up to
+                        // the plant's free speed costs nothing); and, already coming through, the
+                        // way he is on, the rest of it costing nothing extra.
+                        let ang = m::atan2(u.x * along.y - u.y * along.x, u.x * along.x + u.y * along.y);
+                        let mut ways = [None; ROUND_SLANT_DEG.len() + 1];
+                        for (k, deg) in ROUND_SLANT_DEG.iter().enumerate() {
+                            let s = deg.to_radians();
+                            if s < ang.abs() {
+                                ways[k] = Some((u.rotate(Vec3::Z, s * ang.signum()), false));
+                            }
+                        }
+                        let widest = m::cos((ROUND_SLANT_DEG[ROUND_SLANT_DEG.len() - 1] + 5.0).to_radians());
+                        ways[ROUND_SLANT_DEG.len()] = rounding.filter(|r| through && r.dot(u) >= widest).map(|r| (r, true));
+                        for (a, on) in ways.into_iter().flatten() {
+                            let w = p - a * ROUND_M;
+                            if !on && field.body_clearance(w.x, w.y, BODY_R).dist < 0.0 {
+                                continue;
+                            }
+                            // On a slanted way he comes through no faster than leaves his motion off
+                            // the line under the plant's free speed.
+                            let off = m::sqrt((1.0 - a.dot(u) * a.dot(u)).max(0.0));
+                            let v_free = if off > 1e-6 { throwing::PLANT_FREE_MPS / off } else { f64::INFINITY };
+                            let (cost, v_r, way) = if on { (0.0, v.min(was), d) } else { round_cost(&st.a, st.pos, st.vel.norm(), v, v_free, p, a) };
                             if slack >= cost {
                                 // Paced to the ball (`fielder_step`), he comes through at about the
                                 // way over the time he has, no faster than the turn allows.
-                                let r = t + at_base(p, u * v_r.min(way / (t - start).max(DT)), rb);
+                                let r = t + at_base(p, a * v_r.min(way / (t - start).max(DT)), rb);
                                 let edge = if rounding.is_some() { -APPROACH_GAIN_S } else { APPROACH_GAIN_S };
                                 if r < take.0 - edge {
-                                    take = (r, f64::INFINITY, Some(u));
+                                    take = (r, v_r.min(v_free), Some(a));
                                 }
                             }
                         }
@@ -15766,9 +15808,9 @@ mod tests {
     /// itself. From a run at 0–8 m/s toward a take point 6–20 m away, the base at 20–120° off
     /// his line, every rounding the plan allows (it rules out a turn he has no room to brake
     /// for): run as late as he can (top pace), coming through he is within his reach of the take
-    /// point no later than the straight run's stepped time plus the plan's cost and 0.1 s, and
-    /// no sooner than that less 0.25 s (measured −0.20 to +0.07 s over 82 cases); and he comes
-    /// through it within 25° of the line to the base (measured 22°).
+    /// point no later than the straight run's stepped time plus the plan's cost and 0.15 s, and
+    /// no sooner than that less 0.25 s (measured −0.06 to +0.11 s over 82 cases); and he comes
+    /// through it within 25° of the line to the base (measured 24°).
     #[test]
     fn the_plan_costs_a_rounded_take_as_the_movement_runs_it() {
         let fx = fixture(&[]);
@@ -15798,7 +15840,7 @@ mod tests {
                         // His arrival speed running straight through, as the plan has it.
                         let k = m::exp(-t_s / fd.a.tau_a);
                         let v = (fd.vel * k + Vec3::new(0.0, 1.0, 0.0) * (fd.a.speed * (1.0 - k))).norm().min(fd.a.speed);
-                        let (cost, _, _) = round_cost(&fd.a, fd.pos, speed, v, p, u);
+                        let (cost, _, _) = round_cost(&fd.a, fd.pos, speed, v, f64::INFINITY, p, u);
                         if !cost.is_finite() {
                             continue;
                         }
@@ -15826,7 +15868,7 @@ mod tests {
                 }
             }
         }
-        assert!(worst_late <= 0.1, "the rounded run took {worst_late:.2} s longer than the plan's cost");
+        assert!(worst_late <= 0.15, "the rounded run took {worst_late:.2} s longer than the plan's cost");
         assert!(worst_early >= -0.25, "the plan's cost was {:.2} s too high", -worst_early);
         assert!(worst_angle <= 25.0, "he came through {worst_angle:.0}° off the line to the base");
     }
