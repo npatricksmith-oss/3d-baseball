@@ -237,52 +237,79 @@ const CUT_HEIGHT_M: f64 = 2.0;
 /// its line, m [E]: he keeps to the line as it moves (`update_relay`).
 const CUT_LINE_M: f64 = 5.0;
 
-/// Where the cutoff or relay man stands on a throw of length `d` to a base: this far short of
-/// the base, m (`Sim::relay_spot`).
+/// Where the relay man stands on a deep ball's throw of length `d` to a base: this far short
+/// of the base, m (`Sim::relay_spot`): the outfielder's throw to him is `RELAY_OF_THROW_M`.
 fn cut_spot(d: f64) -> f64 {
     (d - RELAY_OF_THROW_M).max(CUTOFF_M).min(0.5 * d)
 }
 
+/// Where the cutoff man stands for a throw through him (agent-models §5.5; owner's
+/// docs/baseball-throw.md): `CUTOFF_M` (about 45 ft) short of the base, or halfway on a short
+/// throw, so that a throw passing him at his head carries to the base on the fly or one hop.
+fn through_spot(d: f64) -> f64 {
+    CUTOFF_M.min(0.5 * d)
+}
+
+/// A man lined up in a throw, as someone on the field sees him (agent-models §5.5): none; the
+/// cutoff man of a throw through (`through_spot`); or the relay man of a deep ball (`cut_spot`).
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+enum Cut {
+    No,
+    Through,
+    Relay,
+}
+
+impl Cut {
+    /// Which spot a man `short` metres short of the base on a throw of length `d` is at: the
+    /// nearer of the two.
+    fn of(short: f64, d: f64) -> Self {
+        if short <= 0.5 * (through_spot(d) + cut_spot(d)) { Cut::Through } else { Cut::Relay }
+    }
+}
+
 /// How long a cuttable throw takes, as fielders and runners believe it: tabulated once from
-/// the throw and bounce physics in a reference atmosphere and park (a learned belief, like
-/// [`throw_table`]; `ThrowTable::build_cut`).
-fn cut_table() -> &'static ThrowTable {
-    static T: std::sync::OnceLock<ThrowTable> = std::sync::OnceLock::new();
-    T.get_or_init(|| ThrowTable::build_cut(&FlightEnv::default_env(), &Field::default(), THROW_RELEASE_Z, THROW_CATCH_Z, CUT_HEIGHT_M, cut_spot))
+/// the throw and bounce physics in a reference atmosphere and park, for each of the two spots
+/// the man in it can stand at (a learned belief, like [`throw_table`]; `ThrowTable::build_cut`).
+fn cut_table(cut: Cut) -> &'static ThrowTable {
+    static THROUGH: std::sync::OnceLock<ThrowTable> = std::sync::OnceLock::new();
+    static RELAY: std::sync::OnceLock<ThrowTable> = std::sync::OnceLock::new();
+    let build = |spot: fn(f64) -> f64| ThrowTable::build_cut(&FlightEnv::default_env(), &Field::default(), THROW_RELEASE_Z, THROW_CATCH_Z, CUT_HEIGHT_M, spot);
+    if cut == Cut::Relay { RELAY.get_or_init(|| build(cut_spot)) } else { THROUGH.get_or_init(|| build(through_spot)) }
 }
 
 /// Believed time for a throw at release speed `v` to go `d` metres to a base: the cuttable
-/// throw when a cutoff man stands in it (`cut`), else the plain one.
-fn direct_time(v: f64, d: f64, cut: bool) -> f64 {
-    if cut { cut_table().time(v, d) } else { throw_time(v, d) }
-}
-
-/// Whether a throw from `from` to base `b` has a cutoff man lined up in it, as anyone on the
-/// field expects: a ball in the outfield (`RELAY_FROM_M` out or more) thrown to third or home
-/// (`Sim::relay_job`: nobody lines up for a throw to second).
-fn cut_on(from: Vec3, b: u8) -> bool {
-    b >= 3 && m::hypot(from.x, from.y) >= RELAY_FROM_M
+/// throw when a man stands in it (`cut`), else the plain one.
+fn direct_time(v: f64, d: f64, cut: Cut) -> f64 {
+    if cut == Cut::No { throw_time(v, d) } else { cut_table(cut).time(v, d) }
 }
 
 /// The expected time a receiver loses to a throw `len` metres long off its line by direction
-/// σ `sigma` (rad): the expected miss beyond his receiving reach, run from a stand at a
-/// league-typical speed (agent-models §5.5, the route: accuracy) [belief].
+/// σ `sigma` (rad): the miss X ~ N(0, len·σ), and he runs from a stand at a league-typical
+/// speed whatever of it is beyond his receiving reach. E[run_time((|X| − reach)⁺)] by the
+/// midpoint rule over [reach, reach + 6 len·σ] (agent-models §5.5, the route: accuracy)
+/// [belief]. (Costing the run of the mean excess, as first built, overstated it about twice:
+/// a run from a stand is concave in distance; Opus catch-throw review P3-2.)
 fn miss_cost_s(len: f64, sigma: f64) -> f64 {
     let s = len * sigma;
     if s < 1e-9 {
         return 0.0;
     }
-    let z = RECEIVE_REACH / s;
-    let pdf = m::exp(-0.5 * z * z) / m::sqrt(2.0 * core::f64::consts::PI);
-    let excess = (2.0 * s * pdf - 2.0 * RECEIVE_REACH * (1.0 - phi(z))).max(0.0);
-    run_time(excess, TYPICAL_SPEED, 0.9)
+    const N: usize = 48;
+    let h = 6.0 * s / N as f64;
+    let norm = 1.0 / (s * m::sqrt(2.0 * core::f64::consts::PI));
+    (0..N)
+        .map(|k| {
+            let x = RECEIVE_REACH + (k as f64 + 0.5) * h;
+            2.0 * norm * m::exp(-0.5 * (x / s) * (x / s)) * run_time(x - RECEIVE_REACH, TYPICAL_SPEED, 0.9) * h
+        })
+        .sum()
 }
 
 /// A runner's read of how long the man holding the ball needs to get it `d` m by throwing:
 /// his read of that fielder's arm, relayed through a man halfway (a league-typical arm and
 /// relay exchange, `throwing::RELAY_S_50`) when that is quicker or the throw cannot carry
 /// (agent-models §5.5, §6.4).
-fn read_throw_time(arm: f64, d: f64, cut: bool) -> f64 {
+fn read_throw_time(arm: f64, d: f64, cut: Cut) -> f64 {
     let v = THROW_EFFORT * arm;
     direct_time(v, d, cut).min(throw_time(v, 0.5 * d) + throwing::RELAY_S_50 + throw_time(THROW_EFFORT * TYPICAL_ARM, 0.5 * d))
 }
@@ -298,7 +325,7 @@ const ARM_READ_SUB: u32 = 1 << 20;
 /// A runner's estimate of how long the defense needs to get the ball over horizontal
 /// distance `d` by throwing: a league-typical arm, relayed through a man halfway (the league's
 /// relay exchange, `throwing::RELAY_S_50`) when that is quicker or the throw cannot carry.
-fn typical_throw_time(d: f64, cut: bool) -> f64 {
+fn typical_throw_time(d: f64, cut: Cut) -> f64 {
     let v = THROW_EFFORT * TYPICAL_ARM;
     direct_time(v, d, cut).min(2.0 * throw_time(v, 0.5 * d) + throwing::RELAY_S_50)
 }
@@ -413,7 +440,7 @@ impl ThrownRead {
         let est = if self.dest == base {
             self.t_arrive
         } else {
-            self.t_arrive + RELAY_READ_S + typical_throw_time((base_pos(base) - base_pos(self.dest)).norm(), false)
+            self.t_arrive + RELAY_READ_S + typical_throw_time((base_pos(base) - base_pos(self.dest)).norm(), Cut::No)
         };
         self.pass_time(base).map_or(est, |pass| est.min(pass))
     }
@@ -2710,14 +2737,14 @@ impl<'a> Sim<'a> {
             let to_bag = run_time_to_stop(off, -speed, r.vmax, r.tau);
             if plausible.clone().any(|read| {
                 read.t - self.t >= to_bag
-                    && TYPICAL_TRANSFER + typical_throw_time(read.at.norm(), cut_on(read.at, 4)) + tag.typical_tag_s >= to_home
+                    && TYPICAL_TRANSFER + typical_throw_time(read.at.norm(), self.cut_seen(None, read.at, 4)) + tag.typical_tag_s >= to_home
             }) {
                 return None;
             }
         }
 
         let races: Vec<_> = plausible.map(|read| {
-            let appeal = TYPICAL_TRANSFER + typical_throw_time((read.at - bag).norm(), cut_on(read.at, r.start));
+            let appeal = TYPICAL_TRANSFER + typical_throw_time((read.at - bag).norm(), self.cut_seen(None, read.at, r.start));
             (read.t, appeal - caution - RUNNER_CATCH_CALL_REACT_S)
         }).collect();
         if races.is_empty() {
@@ -3748,7 +3775,10 @@ impl<'a> Sim<'a> {
     fn relay_spot(from: Vec3, b: u8) -> Vec3 {
         let base = base_pos(b);
         let line = Vec3::new(from.x - base.x, from.y - base.y, 0.0);
-        base + line.normalized() * cut_spot(line.norm())
+        // A deep ball's relay man goes out; on a shallower one the cutoff man stands where a
+        // throw through him carries to the base (agent-models §5.5, §5.7).
+        let short = if m::hypot(from.x, from.y) > RELAY_DEEP_M { cut_spot(line.norm()) } else { through_spot(line.norm()) };
+        base + line.normalized() * short
     }
 
     /// Give the cutoff or relay job to its man (taking him off any base he was covering;
@@ -4738,16 +4768,46 @@ impl<'a> Sim<'a> {
                 track.len() - 1
             }
         };
+        let near = |q: Vec3| {
+            (1..=4u8)
+                .map(|b| (b, m::hypot(base_pos(b).x - q.x, base_pos(b).y - q.y)))
+                .min_by(|x, y| x.1.total_cmp(&y.1))
+                .unwrap()
+        };
+        let (t_down, q_down) = track[arrive];
+        // A throw coming down well short of every bag is a low throw meant to carry on along
+        // the ground (agent-models §5.5, through the cutoff man): he follows it on through the
+        // bounce, with the same physics, and takes the last base it comes within reach of at
+        // catching height as the one it is going to (Opus catch-throw review P3-1). Otherwise
+        // the base nearest where it comes down.
+        if down.is_some() && near(q_down).1 > 2.0 * RECEIVE_REACH {
+            let land = (arrive..tr.knots.len()).map(|i| tr.knots[i]).find(|k| k.s.r.z <= env.ball.radius + 1e-6).or_else(|| (tr.stop == Some(0)).then(|| *tr.last()));
+            if let Some(land) = land {
+                let on = batted_path_dt(env, self.inp.field, land.s, land.t, THROW_HOP_DT, |_, _| (0.0, 0.0));
+                let mut full: Vec<(f64, Vec3)> = track[..=arrive].to_vec();
+                full.extend(tr.knots.iter().filter(|k| k.t > t_down && k.t < land.t).map(|k| (k.t, k.s.r)));
+                let mut t = land.t;
+                while t <= on.t_end().min(self.t + THROW_READ_S) {
+                    full.push((t, on.at(t).0));
+                    t += THROW_HOP_DT;
+                }
+                let reached = full.iter().filter(|(_, q)| q.z <= PASS_MAX_Z).filter_map(|&(t, q)| {
+                    let (b, d) = near(q);
+                    (d <= PASS_REACH_M).then_some((t, b))
+                }).last();
+                if let Some((t_b, b)) = reached {
+                    // When it is nearest that bag.
+                    let bp = base_pos(b);
+                    let (t_arrive, _) = full.iter().filter(|(t, _)| *t <= t_b + 1e-9).map(|&(t, q)| (t, m::hypot(q.x - bp.x, q.y - bp.y))).filter(|x| x.1 <= PASS_REACH_M).min_by(|x, y| x.1.total_cmp(&y.1)).unwrap_or((t_b, 0.0));
+                    let cut = full.iter().position(|(t, _)| *t > t_arrive).unwrap_or(full.len());
+                    full.truncate(cut);
+                    return ThrownRead { dest: b, t_arrive, track: full };
+                }
+            }
+        }
         track.truncate(arrive + 1);
-        let (t_arrive, q) = track[arrive];
-        let dest = (1..=4u8)
-            .min_by(|&a, &c| {
-                let da = m::hypot(base_pos(a).x - q.x, base_pos(a).y - q.y);
-                let dc = m::hypot(base_pos(c).x - q.x, base_pos(c).y - q.y);
-                da.total_cmp(&dc)
-            })
-            .unwrap();
-        ThrownRead { dest, t_arrive, track }
+        let dest = near(q_down).0;
+        ThrownRead { dest, t_arrive: t_down, track }
     }
 
     fn observe_holder(&self, by: usize) -> HolderLook {
@@ -4785,7 +4845,7 @@ impl<'a> Sim<'a> {
                     // §5.5): his arm and that momentum; and whether a cutoff man stands in the throw.
                     let gain = if look.lunge_at.is_some() { 0.0 } else { throwing::momentum_gain_mps(look.motion, to) };
                     look.release_time(self.t, base, mean, fd.a.throws)
-                        + read_throw_time(arm + gain / THROW_EFFORT, m::hypot(to.x, to.y), cut_on(look.pos, base))
+                        + read_throw_time(arm + gain / THROW_EFFORT, m::hypot(to.x, to.y), self.cut_seen(None, look.pos, base))
                 };
                 self.with_expected_play(k, b, my_at, &direct)
             }
@@ -4823,7 +4883,7 @@ impl<'a> Sim<'a> {
         });
         self.with_expected_play(k, b, my_at, &|base| {
             let target = base_pos(base);
-            tf + TYPICAL_TRANSFER + typical_throw_time(m::hypot(target.x - at.x, target.y - at.y), cut_on(at, base))
+            tf + TYPICAL_TRANSFER + typical_throw_time(m::hypot(target.x - at.x, target.y - at.y), self.cut_seen(None, at, base))
         })
     }
 
@@ -4864,7 +4924,7 @@ impl<'a> Sim<'a> {
         }
         match best {
             None => own,
-            Some((_, dest)) => (direct(dest) + RELAY_READ_S + typical_throw_time((base_pos(b) - base_pos(dest)).norm(), false)).min(own + CUT_EXTRA_S),
+            Some((_, dest)) => (direct(dest) + RELAY_READ_S + typical_throw_time((base_pos(b) - base_pos(dest)).norm(), Cut::No)).min(own + CUT_EXTRA_S),
         }
     }
 
@@ -5839,7 +5899,7 @@ impl<'a> Sim<'a> {
                 let v = self.throw_speed(by, tgt) * su.speed_mult(su.hurry(since));
                 let d = (tgt - fd.pos).norm();
                 let tag = if o.force { 0.0 } else { self.f[receiver].a.tag_apply_s };
-                let cut = self.cutoff_out(by, b).is_some();
+                let cut = self.cut_seen(Some(by), fd.pos, b);
                 let ball_at = |e: f64| (self.t + direct_time(e * v, d, cut)).max(race.receiver_at) + 0.05 + tag;
                 (0..=20).map(|i| throwing::EFFORT_MIN + (1.0 - throwing::EFFORT_MIN) * i as f64 / 20.0).find(|&e| o.runner_at - ball_at(e) >= SAFE_MARGIN_S).unwrap_or(1.0)
             }
@@ -5917,15 +5977,40 @@ impl<'a> Sim<'a> {
     /// The cutoff man lined up between fielder `by` and base `b`, as `by` knows him: how far
     /// out along the throw he stands, m (agent-models §5.5: the throw must pass him low).
     fn cutoff_out(&self, by: usize, b: u8) -> Option<f64> {
-        let (from, base) = (self.f[by].pos, base_pos(b));
+        self.man_in_throw(Some(by), self.f[by].pos, b)
+    }
+
+    /// The man with the cutoff or relay job for base `b` standing in a throw from `from` to it
+    /// (between, more than 10 m out, within `CUT_LINE_M` of the line), as `observer` knows the
+    /// jobs (`seen`; `None`: what everyone can see, `known_job`): how far out along the throw
+    /// he stands, m.
+    fn man_in_throw(&self, observer: Option<usize>, from: Vec3, b: u8) -> Option<f64> {
+        let base = base_pos(b);
         let line = Vec3::new(base.x - from.x, base.y - from.y, 0.0);
         let len = line.norm();
+        if len < 1e-9 {
+            return None;
+        }
         (0..9)
-            .filter(|&i| i != by && self.seen(by, i).0 == Role::Relay(b))
+            .filter(|&i| {
+                let job = match observer {
+                    Some(o) => self.seen(o, i).0,
+                    None => self.known_job(i).0,
+                };
+                observer != Some(i) && job == Role::Relay(b)
+            })
             .map(|i| self.f[i].pos)
             .filter(|p| (*p - from).norm() > 10.0 && (base - *p).norm() < len && ((p.x - from.x) * line.y - (p.y - from.y) * line.x).abs() / len < CUT_LINE_M)
             .map(|p| ((p.x - from.x) * line.x + (p.y - from.y) * line.y) / len)
             .next()
+    }
+
+    /// Whether a throw from `from` to base `b` would go through a man lined up in it, and which
+    /// kind, as `observer` sees it (`None`: a runner, from the jobs the fielders show and where
+    /// they stand; agent-models §5.5, §6.4).
+    fn cut_seen(&self, observer: Option<usize>, from: Vec3, b: u8) -> Cut {
+        let len = m::hypot(base_pos(b).x - from.x, base_pos(b).y - from.y);
+        self.man_in_throw(observer, from, b).map_or(Cut::No, |out| Cut::of(len - out, len))
     }
 
     /// Fielder `by` throws to ground point `tgt` for `receiver` (the ball is headed for base
@@ -7292,7 +7377,7 @@ mod tests {
         for ft in [200.0, 225.0, 250.0, 275.0, 280.0, 300.0, 325.0, 350.0] {
             let d = ft * 0.3048;
             let flight = throw_time(THROW_EFFORT * cf, d);
-            let belief = TYPICAL_TRANSFER + typical_throw_time(d, d >= RELAY_FROM_M);
+            let belief = TYPICAL_TRANSFER + typical_throw_time(d, Cut::No);
             let run = run_time(BASE_L, 8.2, RUNNER_TAU);
             println!("{ft:4} ft {d:6.1} m  CF arm {cf:.2}: flight {flight:.2} s, +0.85 transfer {:.2} s | runner believes ball {belief:.2} s (37 m/s, relay if quicker); runner {run:.2} s", 0.85 + flight);
         }
@@ -8610,12 +8695,12 @@ mod tests {
 
     /// agent-models §5.5, the route (owner's Q32): with a runner racing home and a cutoff man
     /// lined up, a grade-50 centre fielder throws to the relay man from deep (300 ft and more)
-    /// and low through the cutoff man from shallower (230 ft and less). The owner put the line at
+    /// and low through the cutoff man from shallower (240 ft and less). The owner put the line at
     /// "about 280 ft"; this checks the route against that, either side of it.
     #[test]
     fn the_route_is_the_relay_from_deep_and_low_through_the_cutoff_from_shallow() {
         const R: AgentId = 0x0007;
-        for (ft, relay) in [(230.0, false), (250.0, false), (300.0, true), (320.0, true)] {
+        for (ft, relay) in [(230.0, false), (240.0, false), (300.0, true), (320.0, true)] {
             let fx = fixture(&[(R, 3)]);
             let inp = input(&fx, vec![RunnerIn { id: fx.st.batter, base: 0, speed: 8.2, tau_s: bb_agents::running::LEAGUE_TAU_S }, RunnerIn { id: R, base: 3, speed: 8.2, tau_s: bb_agents::running::LEAGUE_TAU_S }]);
             let mut st = fx.st.clone();
@@ -8668,6 +8753,115 @@ mod tests {
         let tr = bb_physics::throw::fly_throw(&fx.env, throw_state(Vec3::new(0.0, 0.0, THROW_RELEASE_Z), Vec3::Y, path.first().s.v.norm(), plain), 0.0, 6.0);
         let h_plain = tr.knots.iter().find(|k| k.s.r.y >= out).map(|k| k.s.r.z).unwrap();
         assert!(h_plain > 4.0, "the plain aim would pass him at {h_plain:.2} m");
+    }
+
+    /// How long the movement law takes to stop a body moving at `v` when it brakes as hard as
+    /// it can (`step_toward` toward the point where braking stops it), s.
+    fn law_stop_s(v: f64) -> f64 {
+        let a = FielderAttrs::average(5);
+        let (mut pos, mut vel) = (Vec3::ZERO, Vec3::new(v, 0.0, 0.0));
+        let target = Vec3::new(v * v / (2.0 * BRAKE), 0.0, 0.0);
+        let mut t = 0.0;
+        while vel.norm() > 1e-9 && t < 5.0 {
+            (pos, vel) = step_toward(pos, vel, target, &a, true, 0.0);
+            t += DT;
+        }
+        t
+    }
+
+    /// Opus catch-throw review P3-3(a): the cuttable-throw belief tables against the world's
+    /// throw, the same physics flown along the real line in the reference park: home from
+    /// across the outfield (spray −40° to +40°) and third from left and centre, through a
+    /// cutoff man about 45 ft out; and home from deep through the relay man's spot.
+    #[test]
+    fn the_cut_tables_match_the_worlds_cuttable_throw() {
+        let (env, field) = (FlightEnv::default_env(), Field::default());
+        let world = |from: Vec3, to: Vec3, short: f64, v: f64| {
+            let d = m::hypot(to.x - from.x, to.y - from.y);
+            bb_physics::throw::cut_throw_time_along(&env, &field, from, to, THROW_RELEASE_Z, THROW_CATCH_Z, CUT_HEIGHT_M, d - short, v)
+        };
+        for deg in [-40.0f64, -20.0, 0.0, 20.0, 40.0] {
+            for ft in [230.0, 260.0, 290.0] {
+                for v in [34.0, 37.0, 40.0] {
+                    let r = ft * 0.3048;
+                    let from = Vec3::new(r * deg.to_radians().sin(), r * deg.to_radians().cos(), 0.0);
+                    let d_home = from.norm();
+                    let (w, b) = (world(from, Vec3::ZERO, through_spot(d_home), v), direct_time(v, d_home, Cut::Through));
+                    assert!(w.is_finite() == b.is_finite() && (!w.is_finite() || (w - b).abs() < 0.06), "home from {deg}° {ft} ft at {v}: world {w:.3} s, belief {b:.3} s");
+                    if deg <= 0.0 {
+                        let third = base_pos(3);
+                        let d3 = (third - from).norm();
+                        let (w, b) = (world(from, third, through_spot(d3), v), direct_time(v, d3, Cut::Through));
+                        assert!(!w.is_finite() || !b.is_finite() || (w - b).abs() < 0.12, "third from {deg}° {ft} ft at {v}: world {w:.3} s, belief {b:.3} s");
+                    }
+                }
+            }
+        }
+        for (ft, v) in [(300.0, 37.0), (320.0, 40.0)] {
+            let from = Vec3::new(0.0, ft * 0.3048, 0.0);
+            let d = from.norm();
+            let (w, b) = (world(from, Vec3::ZERO, cut_spot(d), v), direct_time(v, d, Cut::Relay));
+            assert!((w - b).abs() < 0.06, "home from {ft} ft past the relay man at {v}: world {w:.3} s, belief {b:.3} s");
+        }
+    }
+
+    /// Opus catch-throw review P3-3(b), P1-1: a runner believes a cuttable throw only where the
+    /// world would make one. With a runner on second the relay job lines a man up toward home,
+    /// not third: from the centre fielder's spot a runner reads a throw home through him and a
+    /// plain throw to third, exactly as the centre fielder will throw them; and before the man
+    /// is on the line (still at his base), neither.
+    #[test]
+    fn a_runners_cut_belief_follows_the_throw_the_world_would_make() {
+        const R: AgentId = 0x0007;
+        let fx = fixture(&[(R, 2)]);
+        let inp = input(&fx, vec![RunnerIn { id: fx.st.batter, base: 0, speed: 8.2, tau_s: bb_agents::running::LEAGUE_TAU_S }, RunnerIn { id: R, base: 2, speed: 8.2, tau_s: bb_agents::running::LEAGUE_TAU_S }]);
+        let mut st = fx.st.clone();
+        let mut sim = new_sim(&inp, &mut st);
+        sim.t = 5.0;
+        let at = Vec3::new(10.0, 72.0, 0.0);
+        held_at(&mut sim, CF, at);
+        let cut = (0..9).find(|&i| matches!(sim.f[i].role, Role::Relay(4))).expect("a cutoff man toward home");
+        // Not yet out on the line.
+        let mut early = sim.f[cut].pos;
+        early.x += 6.0;
+        sim.f[cut].pos = early;
+        for b in [3u8, 4] {
+            assert_eq!((sim.cut_seen(None, at, b), sim.cutoff_out(CF, b).is_some()), (Cut::No, false), "base {b}, man not on the line");
+        }
+        sim.f[cut].pos = sim.f[cut].target;
+        jobs_become_known(&mut sim);
+        assert!(((sim.f[cut].pos - base_pos(4)).norm() - through_spot(at.norm())).abs() < 0.5, "the cutoff man stands about 45 ft out: {:?}", sim.f[cut].pos);
+        assert_eq!((sim.cut_seen(None, at, 4), sim.cutoff_out(CF, 4).is_some()), (Cut::Through, true));
+        assert_eq!((sim.cut_seen(None, at, 3), sim.cutoff_out(CF, 3).is_some()), (Cut::No, false));
+    }
+
+    /// Opus catch-throw review P3-3(c), P3-1: a runner's read of the low throw through the
+    /// cutoff man names the base it is going to, home, and times it there, on the hop, as the
+    /// same physics flies it (not where it comes down through catching height, 10 m short); a
+    /// plain throw to second he reads as going to second. (The rolling throw past a deep relay
+    /// man 45 m out comes down through catching height over second base, the same in the air
+    /// as a throw to second; the holder takes the relay there instead, note §4.)
+    #[test]
+    fn a_runner_reads_a_low_throw_to_the_base_it_is_going_to() {
+        let fx = fixture(&[]);
+        let inp = input(&fx, vec![RunnerIn { id: fx.st.batter, base: 0, speed: 8.2, tau_s: bb_agents::running::LEAGUE_TAU_S }]);
+        let mut st = fx.st.clone();
+        let mut sim = new_sim(&inp, &mut st);
+        sim.t = 5.0;
+        let from = Vec3::new(0.0, 88.0, THROW_RELEASE_Z);
+        let v = 37.0;
+        let short = through_spot(88.0);
+        let el = cut_elev(&fx.env, THROW_RELEASE_Z, THROW_CATCH_Z, CUT_HEIGHT_M, 88.0, 88.0 - short, v).unwrap();
+        let s0 = throw_state(from, Vec3::new(0.0, -1.0, 0.0), v, el);
+        let read = sim.project_runner_throw(s0.r, s0.v);
+        let world = bb_physics::throw::cut_throw_time_along(&fx.env, &fx.field, Vec3::new(0.0, 88.0, 0.0), Vec3::ZERO, THROW_RELEASE_Z, THROW_CATCH_Z, CUT_HEIGHT_M, 88.0 - short, v);
+        assert_eq!(read.dest, 4, "read as going to {}", read.dest);
+        // He times it at the plate (within his catching reach of it), not 10 m short.
+        assert!(read.t_arrive - sim.t > world - 0.2 && read.t_arrive - sim.t <= world + 0.02, "read {:.2} s, the world {world:.2} s", read.t_arrive - sim.t);
+        let to2 = base_pos(2) - Vec3::new(0.0, 88.0, 0.0);
+        let el = solve_throw(&fx.env, THROW_RELEASE_Z, THROW_CATCH_Z, to2.norm(), v).unwrap().elev;
+        let s0 = throw_state(from, to2, v, el);
+        assert_eq!(sim.project_runner_throw(s0.r, s0.v).dest, 2);
     }
 
     /// agent-models §5.5, the relay man's exchange: on the throw home from the wall above, with
@@ -11684,7 +11878,7 @@ mod tests {
             sim.t += DT;
         }
         let back = sim.t - call;
-        let ball = TYPICAL_TRANSFER + typical_throw_time((at - base_pos(2)).norm(), cut_on(at, 2));
+        let ball = TYPICAL_TRANSFER + typical_throw_time((at - base_pos(2)).norm(), Cut::No);
         let spare = ball - back;
         let caution = inp.advance.caution_z * inp.advance.sigma_race_s;
         assert!(spare >= caution - DT && spare <= caution + 0.1, "back in {back:.3} s, ball in {ball:.3} s");
@@ -13419,15 +13613,15 @@ mod tests {
     }
 
     // Taking the ball moving away from first at 5 m/s he must stop before he plants (agent-
-    // models §5.5): under the sourced braking limit that is 5/4.75 = 1.05 s, of which the
-    // 0.42 s inside his transfer costs nothing. Set at 0.65 + 1.05 − 0.42 = 1.28 s when he has
-    // the time (the flat rule had 0.85 s).
+    // models §5.5). By the movement law's own stop (`step_toward` braking a body from 5 m/s
+    // and from the 2 m/s no-charge point to rest), he owes the difference: set at 0.65 s plus
+    // that when he has the time (the flat rule had 0.85 s).
     #[test]
     fn a_fielder_moving_away_needs_longer_to_get_set() {
         let away = (Vec3::new(-8.0, 38.0, 0.0) - base_pos(1)).normalized() * 5.0;
         let (sim, after) = shortstop_to_first(3.0, away);
-        let set = 0.65 + 5.0 / BRAKE - throwing::PLANT_OVERLAP_S;
-        assert!(after >= set - 1e-9 && after < set + DT + 1e-9, "let go after {after:.3} s, set at {set:.3}");
+        let set = 0.65 + law_stop_s(5.0) - law_stop_s(2.0);
+        assert!(after >= set - DT - 1e-9 && after < set + 2.0 * DT + 1e-9, "let go after {after:.3} s, set at {set:.3}");
         assert_eq!(sim.out.hurry, vec![(0.0, true)]);
     }
 

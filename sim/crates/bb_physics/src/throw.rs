@@ -175,13 +175,26 @@ pub fn cut_elev(env: &FlightEnv, z0: f64, zt: f64, cut_z: f64, d: f64, d_cut: f6
 /// height (on the fly, on a hop or rolling), over `field`'s ground thrown toward home from
 /// straight-away centre; infinite if it stops short.
 pub fn cut_throw_time(env: &FlightEnv, field: &crate::ground::Field, z0: f64, zt: f64, cut_z: f64, d: f64, d_cut: f64, speed: f64) -> f64 {
+    cut_throw_time_along(env, field, Vec3::new(0.0, d, 0.0), Vec3::ZERO, z0, zt, cut_z, d_cut, speed)
+}
+
+/// [`cut_throw_time`] for a throw from ground point `from` to ground point `to` (any line):
+/// the time until the ball has gone the whole way along it, at any height.
+pub fn cut_throw_time_along(env: &FlightEnv, field: &crate::ground::Field, from: Vec3, to: Vec3, z0: f64, zt: f64, cut_z: f64, d_cut: f64, speed: f64) -> f64 {
+    let dir = Vec3::new(to.x - from.x, to.y - from.y, 0.0);
+    let d = dir.norm();
+    if d < 1e-9 {
+        return 0.0;
+    }
+    let u = dir * (1.0 / d);
     let Some(elev) = cut_elev(env, z0, zt, cut_z, d, d_cut, speed) else { return f64::INFINITY };
-    let s0 = throw_state(Vec3::new(0.0, d, z0), Vec3::new(0.0, -1.0, 0.0), speed, elev);
+    let s0 = throw_state(Vec3::new(from.x, from.y, z0), u, speed, elev);
     let path = crate::ground::batted_path_dt(env, field, s0, 0.0, THROW_DT, |_, _| (0.0, 0.0));
     let (end, step) = (path.t_end(), 0.002);
     let mut t = 0.0;
     while t <= end {
-        if path.at(t).0.y <= 0.0 {
+        let p = path.at(t).0;
+        if (p.x - from.x) * u.x + (p.y - from.y) * u.y >= d {
             return t;
         }
         t += step;

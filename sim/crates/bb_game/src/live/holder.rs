@@ -47,7 +47,7 @@ impl Sim<'_> {
         // route through him, as before; and, when he has the job for this base and stands on
         // its line, the direct throw must pass him low (`cutoff_out`, agent-models §5.5).
         let between = relay.filter(|&i| (base_pos(base) - self.f[i].pos).norm() < (base_pos(base) - fd.pos).norm());
-        let cut = self.cutoff_out(by, base).is_some();
+        let cut = self.cut_seen(Some(by), fd.pos, base);
         let release = |target: Vec3, at: f64| {
             let su = self.set_up_for(by, target);
             let t = at.max(fd.up_at + su.earliest_s);
@@ -71,7 +71,7 @@ impl Sim<'_> {
         // off line (agent-models §5.5): one long throw misses by more than two short ones.
         // (A man lined up for another base: by time alone, as before.)
         let through = between.is_some_and(|i| {
-            if !cut {
+            if cut == Cut::No {
                 return v < d;
             }
             let rp = self.f[i].pos;

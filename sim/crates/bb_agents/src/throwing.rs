@@ -370,13 +370,14 @@ mod tests {
     }
 
     // agent-models §5.5, the catch sets up the throw: the plant is the stop under the braking
-    // limit less what fits inside the transfer. Independent figures: §5.3's stop from 7 m/s
-    // (1.47 s at 4.75 m/s²), and the old rule's 2 m/s threshold, below which nothing is owed.
+    // limit beyond what a man moving away at 2 m/s needs (the old rule's no-charge point). Two
+    // independent figures: §5.3's full stop from 7 m/s, 1.47 s, and that 2 m/s point. A stop
+    // at a constant limit scales with speed, so from 7 m/s he owes 1.47 × (7 − 2)/7 = 1.05 s.
     #[test]
     fn the_plant_is_the_stop_under_the_braking_limit() {
         let to = Vec3::new(10.0, 0.0, 0.0);
-        let stop_7 = footwork_s(Vec3::new(-7.0, 0.0, 0.0), to, false) + PLANT_OVERLAP_S;
-        assert!((stop_7 - 1.47).abs() < 0.005, "{stop_7}");
+        let plant_7 = footwork_s(Vec3::new(-7.0, 0.0, 0.0), to, false);
+        assert!((plant_7 - 1.47 * 5.0 / 7.0).abs() < 0.005, "{plant_7}");
         assert_eq!(footwork_s(Vec3::new(-2.0, 0.0, 0.0), to, false), 0.0);
         assert!(footwork_s(Vec3::new(-2.1, 0.0, 0.0), to, false) > 0.0);
         // Toward the target: nothing to stop, at any speed.
@@ -425,9 +426,9 @@ mod tests {
     // agent-models §5.5, all three terms together: set = Transfer + turn + footwork, and he can
     // let go from RUSH_MIN_FRAC (0.6) of Transfer + turn (the footwork is not part of it).
     // Transfer 0.65 s:
-    //   off his throwing shoulder (+0.12) and moving away at 5 m/s (plant 5/4.75 − 2/4.75 =
-    //     0.6316): set = 0.65+0.12+0.6316 = 1.4016, earliest = 0.6·(0.65+0.12) = 0.462;
-    //     at 0.6 s hurry = (1.4016−0.6)/(1.4016−0.462);
+    //   off his throwing shoulder (+0.12) and moving away at 5 m/s (plant ≈ 1.47·3/7 = 0.63 by
+    //     §5.3's stop): set ≈ 0.65+0.12+0.63 = 1.40, earliest = 0.6·(0.65+0.12) = 0.462;
+    //     at 0.6 s hurry = (set−0.6)/(set−0.462);
     //   off his glove shoulder (−0.12) after a dive (+0.3): set = 0.65−0.12+0.3 = 0.83,
     //     earliest = 0.6·0.53 = 0.318; half way (0.574 s) hurry 0.5: speed 1−0.5·0.18 = 0.91,
     //     direction σ ×(1+0.5·2) = 2.
@@ -435,9 +436,10 @@ mod tests {
     fn set_up_adds_transfer_turn_and_footwork() {
         let to = Vec3::new(10.0, 0.0, 0.0);
         let a = SetUp::new(0.65, 0.12, footwork_s(Vec3::new(-5.0, 0.0, 0.0), to, false));
-        let plant = 3.0 / 4.75;
-        assert!(close(a.set_s, 0.77 + plant) && close(a.earliest_s, 0.462) && a.off_balance);
-        assert!(close(a.hurry(0.6), (0.17 + plant) / (0.308 + plant)));
+        // The plant from 5 m/s away, by §5.3's stop (1.47 s from 7 m/s) beyond the 2 m/s point.
+        let plant = 1.47 * 3.0 / 7.0;
+        assert!((a.set_s - (0.77 + plant)).abs() < 0.005 && close(a.earliest_s, 0.462) && a.off_balance);
+        assert!((a.hurry(0.6) - (0.17 + plant) / (0.308 + plant)).abs() < 0.005);
         let b = SetUp::new(0.65, -0.12, footwork_s(Vec3::ZERO, to, true));
         assert!(close(b.set_s, 0.83) && close(b.earliest_s, 0.318) && b.off_balance);
         let mid = 0.5 * (0.318 + 0.83);
