@@ -157,3 +157,21 @@ fn seed_17_play_203_does_not_run_at_third_for_a_runner_who_is_not_moving_toward_
         assert!(r.speed > 0.5, "an option at third for a runner moving at {:.2} m/s: {c:#?}", r.speed);
     }
 }
+
+#[test]
+fn seed_65147_play_10_an_outfielder_takes_a_grounder_through_the_hole_both_left_to_the_other() {
+    // Agent-models §5.7, the owner's saved play (seed 65147 play 10): a chopper off the plate
+    // goes through the right side. The centre and right fielders each read it as the other's
+    // and both stayed; the right fielder now cuts it off in front of the warning track.
+    // (Frozen 2026-11-20 from `4f18c47`, where the game still reached this ball: it was a
+    // whole-game replay in live.rs, and the catch-throw review fixes changed earlier plays.)
+    let text = include_str!("fixtures/a4/65147-10.json");
+    let (out, _, _) = replay(text);
+    let contact = serde_json::from_str::<Value>(text).unwrap()["t_contact"].as_f64().unwrap();
+    let (t, who, x, y) = out.facts.iter().find_map(|f| match f {
+        Input::GloveSecured { t, fielder, x, y } => Some((*t, *fielder, *x, *y)),
+        _ => None,
+    }).expect("someone fields it");
+    assert_eq!(who & 0x7F, 9, "fielder {who} secured it first at ({x:.1}, {y:.1})");
+    assert!(x.hypot(y) < 100.0 && t - contact < 6.0, "fielded at ({x:.1}, {y:.1}), {t:.2} s");
+}

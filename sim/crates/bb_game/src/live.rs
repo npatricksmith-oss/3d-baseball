@@ -15106,32 +15106,6 @@ mod tests {
         assert_eq!(sim.f[2].role, Role::Cover(1), "1B must stay with first: {roles:?}");
     }
 
-    // Agent-models §5.7, the owner's saved play (seed 65147 play 10): a chopper off the plate
-    // goes through the right side. The centre and right fielders each read it as the other's
-    // and both stayed. The right fielder now cuts it off in front of the warning track.
-    #[test]
-    fn an_outfielder_takes_a_grounder_through_the_hole_both_left_to_the_other() {
-        let mut g = crate::game::Game::new(65147, false);
-        while let Some(step) = g.step_pitch() {
-            if step.play != 10 {
-                continue;
-            }
-            let first = step.facts.iter().find_map(|f| match f {
-                Input::GloveSecured { t, fielder, x, y } => Some((*t, *fielder, *x, *y)),
-                _ => None,
-            });
-            let (t, who, x, y) = first.expect("someone fields it");
-            let contact = step.facts.iter().find_map(|f| match f {
-                Input::BatContact { t } => Some(*t),
-                _ => None,
-            }).expect("contact on play 10");
-            assert_eq!(who & 0x7F, 9, "fielder {who} secured it first at ({x:.1}, {y:.1})");
-            assert!(m::hypot(x, y) < 100.0 && t - contact < 6.0, "fielded at ({x:.1}, {y:.1}), {t:.2} s");
-            return;
-        }
-        panic!("no play 10");
-    }
-
     // P1-1: a first baseman who broke for a ball sees the pitcher secure it and, after his
     // reaction time, goes back to his bag; with first already taken he pulls up instead.
     #[test]
