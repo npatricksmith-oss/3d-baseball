@@ -14015,13 +14015,13 @@ mod tests {
 
     // Taking the ball moving away from first at 5 m/s he must stop before he plants (agent-
     // models §5.5). By the movement law's own stop (`step_toward` braking a body from 5 m/s
-    // and from the 2 m/s no-charge point to rest), he owes the difference: set at 0.65 s plus
-    // that when he has the time (the flat rule had 0.85 s).
+    // and from the no-charge point, `PLANT_FREE_MPS`, to rest), he owes the difference: set at
+    // 0.65 s plus that when he has the time (the flat rule had 0.85 s).
     #[test]
     fn a_fielder_moving_away_needs_longer_to_get_set() {
         let away = (Vec3::new(-8.0, 38.0, 0.0) - base_pos(1)).normalized() * 5.0;
         let (sim, after) = shortstop_to_first(3.0, away);
-        let set = 0.65 + law_stop_s(5.0) - law_stop_s(2.0);
+        let set = 0.65 + law_stop_s(5.0) - law_stop_s(throwing::PLANT_FREE_MPS);
         assert!(after >= set - DT - 1e-9 && after < set + 2.0 * DT + 1e-9, "let go after {after:.3} s, set at {set:.3}");
         assert_eq!(sim.out.hurry, vec![(0.0, true)]);
     }
@@ -14032,7 +14032,9 @@ mod tests {
     #[test]
     fn an_off_balance_hurried_throw_is_slower_and_wilder() {
         let from = Vec3::new(-8.0, 38.0, 0.0);
-        let away = (from - base_pos(1)).normalized() * 5.0;
+        // Moving away at 6 m/s he still carries more than the free speed at his earliest
+        // release, so he is fully off balance (the drift term's weight is 1).
+        let away = (from - base_pos(1)).normalized() * 6.0;
         let thrown = |off: bool| {
             let (sim, after) = shortstop_to_first(eta_for_margin(0.05, off), if off { away } else { Vec3::ZERO });
             let (hurry, was_off) = sim.out.hurry[0];
