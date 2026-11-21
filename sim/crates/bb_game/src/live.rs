@@ -5738,12 +5738,20 @@ impl<'a> Sim<'a> {
         // takes second from a second baseman already on it (he is first in its order), who
         // then covers first once he knows the shortstop is on his way (`cover_table`).
         let ss_claims_second = o == 5 && relay(2) && !ss_busy && matches!(self.f[5].role, Role::Idle | Role::Backup | Role::Cover(2));
+        // Likewise the second baseman takes first from a pitcher who covered it while the first
+        // baseman was going for the ball; the pitcher then backs up home.
+        let two_claims_first = o == 3 && relay(2) && !ss_busy && matches!(self.f[3].role, Role::Idle | Role::Backup | Role::Cover(1));
+        // And back: a first baseman no longer on the cutoff (a deep ball's relay man has taken
+        // over from him, or the throw went by) takes first back from the second baseman, who is
+        // then free for second (before, the second baseman stayed at first with second open
+        // after the shortstop on it went out as the relay man).
+        let one_back = !relay(2) && !self.chasing_as_known_by(o, 2) && matches!(job(2), Role::Idle | Role::Backup) && job(3) == Role::Cover(1);
         // Reserve kept non-chasing covers first so base 1's fallback never steals Cover(2).
         let mut filled = [false; 5];
         for base in 1..=4u8 {
             let cands: Vec<usize> = order.iter().filter(|e| e.0 == base).flat_map(|e| e.1.iter().copied()).collect();
             let rank = |i: usize| cands.iter().position(|&c| c == i).unwrap_or(cands.len());
-            if let Some(c) = (0..9).filter(|&i| (job(i) == Role::Cover(base) || (ss_claims_second && base == 2 && i == 5)) && !taken.contains(&i)).min_by_key(|&i| (rank(i), i)) {
+            if let Some(c) = (0..9).filter(|&i| (job(i) == Role::Cover(base) || (ss_claims_second && base == 2 && i == 5) || (two_claims_first && base == 1 && i == 3) || (one_back && base == 1 && i == 2)) && !taken.contains(&i)).min_by_key(|&i| (rank(i), i)) {
                 if c == o {
                     return Some(base);
                 }

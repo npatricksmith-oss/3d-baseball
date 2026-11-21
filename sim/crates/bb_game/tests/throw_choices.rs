@@ -559,11 +559,31 @@ fn check_risp_single_jobs(text: &str, label: &str) -> u16 {
         assert_eq!(at.job[i], job, "{label}: fielded by {by}, at {:.2} s fielder {} has job {} (expected {job}): {:?}", at.t, i + 1, at.job[i], at.job);
     }
     assert!(at.target[0].y < 0.0, "{label}: the pitcher's backup spot {:?} is not behind home", at.target[0]);
-    // Second is covered at every tick from the first call to the catch.
+    // Second is never open for longer than the 0.3 s it takes a teammate to learn of a change
+    // (`CALL_HEARD_S`) at a stretch, from the first call to the catch.
+    let mut since: Option<f64> = None;
     for k in &ticks {
-        assert!(k.job.contains(&12), "{label}: second open at {:.2} s: {:?}", k.t, k.job);
+        if k.job.contains(&12) {
+            since = None;
+        } else {
+            let t0 = *since.get_or_insert(k.t);
+            assert!(k.t - t0 <= 0.31, "{label}: second open from {t0:.2} to {:.2} s: {:?}", k.t, k.job);
+        }
     }
     by
+}
+
+/// Whether the ball was fielded in front of the outfielder who first secured it: no deeper
+/// than where he stood at the pitch (from his recorded track). A ball that got past him is a
+/// deep ball, with a middle infielder as the relay man (agent-models §5.7), not this case.
+fn fielded_in_front(out: &LiveOutput) -> bool {
+    let &(_, by) = out.secured.first().expect("the ball is fielded");
+    let start = out.actors.iter().find(|a| a.0 == by).and_then(|a| a.1.first()).map(|s| s.1).expect("his track");
+    let at = out.facts.iter().find_map(|f| match *f {
+        Input::GloveSecured { x, y, .. } => Some(x.hypot(y)),
+        _ => None,
+    }).unwrap();
+    at <= start.x.hypot(start.y)
 }
 
 /// Seed 9 play 9 (frozen from main `312789e`; TASKS case (a)): bottom of the first, none out,
@@ -580,42 +600,60 @@ fn seed_9_play_9_a_single_to_left_centre_with_a_runner_on_second_gets_the_standa
     assert_eq!(by, 8, "the premise: the centre fielder fields it");
 }
 
-/// Play 102's grounder (frozen bases empty) with a runner on second, turned from 30° toward
-/// third to 30° toward first, and mirrored: on every variant an outfielder fields, the standard
-/// jobs of `check_risp_single_jobs`; and no infielder stands with no job for more than the
-/// 0.3 s it takes a teammate's job to become known (`CALL_HEARD_S`) at a stretch while the ball
-/// is loose after the first call. (On `312789e` the middle infielder away from the ball had no
-/// job from the first call until 0.3 s after the cutoff man was known: 0.6–0.9 s.)
+/// Ground singles to an outfielder with a runner in scoring position: play 102's grounder (frozen
+/// bases empty) with a runner on second, turned every degree from 30° toward third to 30° toward
+/// first and mirrored, and two game plays frozen from main `312789e`, turned every degree up to
+/// 6° either way (seed 65 play 43: none out, a runner on second, a grounder through the right
+/// side fielded by the right fielder at (39, 67) m; seed 30 play 35: none out, a runner on third,
+/// a grounder through the left side fielded by the left fielder at (−40, 66) m). On every variant
+/// an outfielder fields in front of him (one that gets past him is a deep ball, with its own
+/// relay man): the standard jobs of `check_risp_single_jobs`; and once everyone can know that no
+/// infielder is going for the ball any more (`CALL_HEARD_S` after the last one stopped), neither
+/// a middle infielder nor a corner man stands with no job for more than that 0.3 s at a stretch
+/// while the ball is loose. (While an infielder is still going for it the others wait on him:
+/// TASKS case (b).) (On
+/// `312789e` the middle infielder away from the ball had no job from the first call until 0.3 s
+/// after the cutoff man was known, 0.6–0.9 s, and the pitcher covered first on balls to the left
+/// of centre.)
 #[test]
-fn a_ground_single_with_a_runner_on_second_gives_every_infielder_his_job() {
-    let base = with_bases(include_str!("fixtures/a4/51001-102.json"), [None, Some(ON_FIRST), None]);
-    let mut checked = 0;
-    for mirror in [false, true] {
-        for turn in [-30.0, -24.0, -18.0, -12.0, -6.0, 0.0, 6.0, 12.0, 18.0, 24.0, 30.0] {
-            let text = if mirror { mirrored(&base, turn) } else { turned(&base, turn, None) };
-            let label = format!("turn {turn}, mirrored {mirror}");
-            let (ticks, _, by, out) = loose_jobs(&text);
-            let down = out.facts.iter().find_map(|f| match *f {
-                Input::BallTouched { what: bb_rules::Touch::Ground { x, y }, .. } => Some(x.hypot(y)),
-                _ => None,
-            });
-            if by < 7 || !down.is_some_and(|d| d < 47.4) {
-                continue;
-            }
-            checked += 1;
-            check_risp_single_jobs(&text, &label);
-            for i in [0, 2, 3, 4, 5] {
-                let mut since: Option<f64> = None;
-                for k in &ticks {
-                    if k.job[i] == 0 {
-                        let t0 = *since.get_or_insert(k.t);
-                        assert!(k.t - t0 <= 0.31, "{label}: fielder {} with no job from {t0:.2} to {:.2} s: {:?}", i + 1, k.t, ticks.iter().map(|k| (k.t, k.job[i])).collect::<Vec<_>>());
-                    } else {
-                        since = None;
-                    }
+fn a_ground_single_with_a_runner_in_scoring_position_gives_every_infielder_his_job() {
+    let p102 = with_bases(include_str!("fixtures/a4/51001-102.json"), [None, Some(ON_FIRST), None]);
+    let mut variants: Vec<(String, String)> = Vec::new();
+    for turn in -30..=30 {
+        variants.push((format!("play 102, turn {turn}"), turned(&p102, f64::from(turn), None)));
+        variants.push((format!("play 102 mirrored, turn {turn}"), mirrored(&p102, f64::from(turn))));
+    }
+    for (name, text) in [("seed 65 play 43", include_str!("fixtures/a4/65-43.json")), ("seed 30 play 35", include_str!("fixtures/a4/30-35.json"))] {
+        for turn in -6..=6 {
+            variants.push((format!("{name}, turn {turn}"), turned(text, f64::from(turn), None)));
+        }
+    }
+    let mut checked = std::collections::BTreeMap::new();
+    for (label, text) in &variants {
+        let (ticks, _, by, out) = loose_jobs(text);
+        let down = out.facts.iter().find_map(|f| match *f {
+            Input::BallTouched { what: bb_rules::Touch::Ground { x, y }, .. } => Some(x.hypot(y)),
+            _ => None,
+        });
+        if by < 7 || !down.is_some_and(|d| d < 47.4) || !fielded_in_front(&out) {
+            continue;
+        }
+        *checked.entry(by).or_insert(0) += 1;
+        check_risp_single_jobs(text, label);
+        // From the moment everyone can know that no infielder is going for the ball any more:
+        // the last tick one was, plus `CALL_HEARD_S`.
+        let free = ticks.iter().filter(|k| k.job[..6].contains(&1)).map(|k| k.t + 0.3).fold(0.0, f64::max);
+        for i in [2, 3, 4, 5] {
+            let mut since: Option<f64> = None;
+            for k in ticks.iter().filter(|k| k.t > free) {
+                if k.job[i] == 0 {
+                    let t0 = *since.get_or_insert(k.t);
+                    assert!(k.t - t0 <= 0.31, "{label}: fielder {} with no job from {t0:.2} to {:.2} s: {:?}", i + 1, k.t, ticks.iter().map(|k| (k.t, k.job[i])).collect::<Vec<_>>());
+                } else {
+                    since = None;
                 }
             }
         }
     }
-    assert!(checked >= 8, "only {checked} variants are singles to an outfielder");
+    assert!(checked.len() == 3 && checked.values().sum::<i32>() >= 15, "singles checked by the outfielder who fielded them: {checked:?}");
 }
