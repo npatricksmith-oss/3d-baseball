@@ -92,7 +92,7 @@ Looked at: `basemap_00_2.png`, `basemap_01_3.png`, `basemap_02_4.png` in full, a
 
 ## Resolution
 
-Open.
+Resolved (Coordinator, 2026-11-21). Fixed on `work/base-map` `67e63f9` (details in the worker follow-up below): P2-1 (a base is lit from the runner's progress along the path, so an overrun, a long lead and a return keep it lit; a continuity assertion in the check), P2-2 (a foul is the sim's ruling in the summary, one helper), P3-1, P3-4, P3-6, and P3-2 in part (assertions for an out runner's dot and a scorer's dot). Deferred: the rest of P3-2 (the check does not exercise the director's `Before` state, replay or a reopened saved play), P3-3 (the dot's size on an unlit base, a matter of taste) and P3-5 (a small per-frame array); a structured foul flag from `bb_ffi` is an open item in TASKS.md. No re-review: the fixes are small and covered by `-BbBaseMapCheck`; the Coordinator rebuilt and ran `-BbBaseMapCheck`, `-BbSavedPlayCheck`, `-BbBaseMapShots=3` and `bin/check-docs.py` on `67e63f9` (all exit 0) and read the play-24 picture (first stays lit through the overrun).
 
 ### Worker follow-up
 
