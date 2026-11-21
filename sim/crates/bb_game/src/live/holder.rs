@@ -84,7 +84,11 @@ impl Sim<'_> {
         let receiver = self.receiver_for(by, base);
         // He is ready for the throw the holder would make, timed to it (a man covering a force
         // base crosses it unless he is early for the throw: agent-models §5.5).
-        let receiver_at = self.receiver_ready(receiver, base, if through { v } else { d });
+        let arrives = if through { v } else { d };
+        let receiver_at = self.receiver_ready(receiver, base, arrives);
+        // A force is made at the touch: a man who takes the throw short of the bag has the out
+        // when he gets to it (as a carry is timed to the touch radius).
+        let touch_at = if self.force_pending_at(base) { self.cover_reach(receiver, base, arrives, BAG_TOUCH_M).0 } else { f64::NEG_INFINITY };
         ThrowRace {
             direct: d,
             via: v,
@@ -92,8 +96,8 @@ impl Sim<'_> {
             receiver,
             receiver_at,
             through,
-            ball_at: (if through { v } else { d }).max(receiver_at) + 0.05,
-            set_ball_at: (if through { via(at_set) } else { direct(at_set) }).max(receiver_at) + 0.05,
+            ball_at: arrives.max(receiver_at).max(touch_at) + 0.05,
+            set_ball_at: (if through { via(at_set) } else { direct(at_set) }).max(receiver_at).max(touch_at) + 0.05,
         }
     }
 
@@ -143,7 +147,8 @@ impl Sim<'_> {
         };
         let receiver = self.receiver_for(next_holder, 1);
         let arrives = release_at + throw_time(speed, (base_pos(1) - base_pos(option.base)).norm());
-        let ball_at = arrives.max(self.receiver_ready(receiver, 1, arrives)) + 0.05;
+        // The force at first is his touch of the bag with the ball (`throw_race`'s rule).
+        let ball_at = arrives.max(self.cover_reach(receiver, 1, arrives, BAG_TOUCH_M).0) + 0.05;
         Some((phi((runner_at - ball_at) / RACE_SIGMA_S), ball_at))
     }
 

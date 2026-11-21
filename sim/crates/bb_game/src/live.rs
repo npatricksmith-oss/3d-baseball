@@ -6900,14 +6900,26 @@ impl<'a> Sim<'a> {
         (t, vel)
     }
 
-    /// When fielder `i`, covering base `b`, believes the throw gets there with the ball held by
-    /// teammate `by` (agent-models §5.5): what he can see of the holder, his catch (when he
-    /// secured it, and whether it was a throw he took) and where he stands, and his known
-    /// `Transfer` and arm. The holder's set-up clock and his choice are his own.
+    /// When a man covering base `b` believes the throw gets there with the ball held by teammate
+    /// `by` (agent-models §5.5): from what he can see of the holder, as the holder would throw
+    /// with time in hand (set, `SAFE_MARGIN_S`): up from his catch (after a dive's get-up or a
+    /// stretch), then set for the throw, with his known `Transfer` (0.7 of it for a throw he
+    /// took; `pivot_s` for a feed at second with the force on there), the turn from the way he
+    /// faced taking it and the plant from how he was moving (both seen), then the throw's flight
+    /// at his known arm. The holder's own set-up clock and his choice are his.
     fn feed_seen(&self, by: usize, b: u8) -> f64 {
         let h = &self.f[by];
-        let set = if h.catch_received_throw { RELAY_TRANSFER_FRAC * h.a.transfer } else { h.a.transfer };
-        self.t.max(self.secured_at + set) + throw_time(THROW_EFFORT * h.a.arm, (base_pos(b) - h.pos).norm())
+        let to = base_pos(b) - h.pos;
+        let turn = h.catch_heading.filter(|_| !h.catch_received_throw).map(|f| throwing::turn_extra_s(f, to, h.a.throws)).unwrap_or(0.0);
+        let su = if h.pivot || h.pivot_wait_bag {
+            SetUp::pivot(throwing::pivot_s(h.a.transfer), turn, throwing::exchange_footwork_s(h.catch_seen_vel, to, false))
+        } else {
+            let base = if h.catch_received_throw { RELAY_TRANSFER_FRAC * h.a.transfer } else { h.a.transfer };
+            SetUp::new(base, turn, throwing::footwork_s(h.catch_seen_vel, to, h.took_diving))
+        };
+        // Taken on the ground from a dive, or at full stretch, he is up first (both are seen).
+        let up = self.secured_at + if h.took_diving { DIVE_GETUP_S } else if h.catch_stretched { STRETCH_COST_S } else { 0.0 };
+        self.t.max(up + su.set_s) + throw_time(THROW_EFFORT * h.a.arm, to.norm())
     }
 
     /// Each man covering a base with a force pending there, on his way to the bag, believes
