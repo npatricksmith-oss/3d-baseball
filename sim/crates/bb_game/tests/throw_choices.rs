@@ -258,13 +258,3 @@ fn seed_1042_play_28_the_right_fielder_catches_the_fly() {
     let (t, who, down) = first_taken(include_str!("fixtures/a4/1042-28.json"));
     assert!(!down && who == 9, "fielder {who} secured it {t:.2} s after contact, after it came down: {down}");
 }
-
-#[test]
-fn zz_replay_files() {
-    let Ok(list) = std::env::var("ZZ_FX") else { return };
-    for f in list.split(',') {
-        let text = std::fs::read_to_string(f).unwrap();
-        let (t, who, down) = first_taken(&text);
-        eprintln!("ZZ {f}: first secured by {who} at {t:.2} s after contact, down {down}");
-    }
-}

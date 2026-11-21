@@ -2549,24 +2549,6 @@ fn round_cost(a: &FielderAttrs, pos: Vec3, v_now: f64, v: f64, v_cap: f64, p: Ve
     (cost, v_r, dw + behind)
 }
 
-/// The margin a take keeps against the ball (agent-models §5.2, the approach): `ROUND_MARGIN_S`
-/// times the share of the ball's motion at the take point (`bv`, his read) that is across his
-/// way `a` through it, s. He plans to be there that much before the ball. A ball met head-on
-/// that he is late for only comes to him sooner; one going across his way goes past him (paced
-/// to meet it exactly, a step late, it did). A ball all but still (`ROUND_MIN_BALL_MPS`) needs
-/// none.
-fn take_margin(bv: Vec3, a: Vec3) -> f64 {
-    let bl = m::hypot(bv.x, bv.y);
-    if bl < ROUND_MIN_BALL_MPS {
-        return 0.0;
-    }
-    let al = m::hypot(a.x, a.y);
-    if al < 1e-9 {
-        return ROUND_MARGIN_S;
-    }
-    ROUND_MARGIN_S * ((bv.x * a.y - bv.y * a.x) / (bl * al)).abs()
-}
-
 /// The least speed a man in state `st` can be down to at his planning reach of take point `p`,
 /// braking at `BRAKE` from his speed toward it now over the way left, m/s (agent-models §5.2:
 /// a plan that brakes him harder than that has him there sooner and faster than it says).
@@ -2581,22 +2563,18 @@ fn brake_floor(st: &Fielder, p: Vec3) -> f64 {
 }
 
 /// The braked take (agent-models §5.2, the approach): a man in state `st` who would reach take
-/// point `p` at `v` running through, with `slack` s in hand there and a margin `lead`
-/// (`take_margin`) to keep, brakes to v_c = v − √(2·`BRAKE`·v·(slack − lead)), the braking's time
-/// cost being what he has in hand less the margin; no lower than `v_min`, nor than he can brake
-/// to from his motion now over the way left (`brake_floor`), nor than 0. Braked less than he
-/// wanted, he is there early by the rest of his time in hand, and must still be within his
-/// planning reach of the take point when the ball gets there: moving on at v_c he would
+/// point `p` at `v` running through, with `slack` s in hand there, brakes to
+/// v_c = v − √(2·`BRAKE`·v·slack), the braking's time cost being his time in hand; no lower than
+/// he can brake to from his motion now over the way left (`brake_floor`), nor than 0. Braked less
+/// than he wanted, he is there early by the rest of his time in hand, and must still be within
+/// his planning reach of the take point when the ball gets there: moving on at v_c he would
 /// otherwise be past it (`the_plan_times_a_braked_take_as_the_movement_runs_it`). The speed he
-/// takes it at, or none (no margin in hand, or no waiting for it there).
-fn braked_take(st: &Fielder, p: Vec3, v: f64, slack: f64, lead: f64, v_min: f64) -> Option<f64> {
-    if slack < lead {
-        return None;
-    }
-    let want = v - m::sqrt(2.0 * BRAKE * v * (slack - lead));
-    let vc = want.max(v_min).max(if std::env::var_os("ZZ_NOFLOOR").is_some() { 0.0 } else { brake_floor(st, p) }).max(0.0).min(v); // ZZTMP
-    let early = (slack - lead) - (v - vc) * (v - vc) / (2.0 * BRAKE * v.max(1e-9));
-    (std::env::var_os("ZZ_NOWAIT").is_some() || early * vc <= REACH * 0.7).then_some(vc) // ZZTMP
+/// takes it at, or none (no waiting for it there).
+fn braked_take(st: &Fielder, p: Vec3, v: f64, slack: f64) -> Option<f64> {
+    let want = v - m::sqrt(2.0 * BRAKE * v * slack.max(0.0));
+    let vc = want.max(brake_floor(st, p)).max(0.0).min(v);
+    let early = slack - (v - vc) * (v - vc) / (2.0 * BRAKE * v.max(1e-9));
+    (early * vc <= REACH * 0.7).then_some(vc)
 }
 
 /// Whether the ball reaches take point `p` (moving `bv` there, his read) after passing a man at
@@ -2631,7 +2609,7 @@ fn step_toward(pos: Vec3, vel: Vec3, target: Vec3, a: &FielderAttrs, early: bool
         // reach, a man slowed nearly to a stop stood a metre off the ball's path and took it at
         // full stretch, or came there 0.1–0.3 s after the plan had him:
         // `the_plan_times_a_braked_take_as_the_movement_runs_it`.)
-        want = want.min(m::sqrt(arrive * arrive + 2.0 * BRAKE * (d - if std::env::var_os("ZZ_CAPR").is_some() { REACH } else { REACH * 0.7 }).max(0.0))); // ZZTMP
+        want = want.min(m::sqrt(arrive * arrive + 2.0 * BRAKE * (d - REACH * 0.7).max(0.0)));
     }
     // He slows into a turn he cannot make at speed: reaching a spot d away at an angle θ off
     // his heading takes a curve of radius d/(2 sin θ), which his lateral acceleration allows
@@ -3433,7 +3411,6 @@ impl<'a> Sim<'a> {
         }
         fd.approach = ap;
         fd.target = ap.map_or(fd.int_pt, |a| a.at);
-        if std::env::var_os("ZZ_DBG").is_some() && i >= 6 && (fd.setup != 0 || setup.is_some()) { eprintln!("ZD t {:.2} f {} setup {} -> {:?} doubt {:.2} t_int {:.2} int ({:.1},{:.1}) pos ({:.1},{:.1}) vel ({:.1},{:.1})", self.t, i + 1, fd.setup, setup.map(|s| (s.1, (s.0.x * 10.0).round() / 10.0, (s.0.y * 10.0).round() / 10.0)), fd.doubt, fd.t_int, fd.int_pt.x, fd.int_pt.y, fd.pos.x, fd.pos.y, fd.vel.x, fd.vel.y); } // ZZTMP
         fd.setup = setup.map_or(0, |s| s.1);
         if let Some((spot, _)) = setup {
             fd.target = spot;
@@ -3456,7 +3433,6 @@ impl<'a> Sim<'a> {
     /// against the ball (`fielder_step`) at his latest read of the catch point. The spot and
     /// the stage: (target, 1 or 2).
     fn fly_setup(&self, i: usize) -> Option<(Vec3, u8)> {
-        if std::env::var_os("ZZ_NOSETUP").is_some() { return None; } // ZZTMP
         let fd = &self.f[i];
         if i < 6 || fd.call != 3 || !fd.t_int.is_finite() || self.st.outs >= 2 || !self.ball_still_up() {
             return None;
@@ -3494,13 +3470,14 @@ impl<'a> Sim<'a> {
         // line through it to the base.
         let rel = Vec3::new(pt.x - fd.pos.x, pt.y - fd.pos.y, 0.0);
         let behind = rel.norm() > SETUP_AT_M && rel.dot(dir) >= rel.norm() * m::cos(SETUP_BEHIND_DEG.to_radians());
-        // He sets up only once his read has settled: where he believes it comes down known to
-        // within the spot's own tolerance (`ARRIVE_SIGMAS` of his doubt within `SETUP_AT_M`).
-        // Until then he plays the ball plainly, at the catch point, and drifts back to the spot
-        // from under it. (Chosen on a first read, the set-up sent a man a metre or more off his
+        // He sets up only once his read has settled: `ARRIVE_SIGMAS` of his tracked doubt within
+        // the spot's least depth (`SETUP_BACK_M`), so that the spot is behind where the ball
+        // comes down unless his read is more than that off. Until then he plays the ball plainly,
+        // at the catch point, and drifts back to the spot from under it. (Within `SETUP_AT_M`
+        // the read settles too late on a high fly to come through faster than a crow hop.) (Chosen on a first read, the set-up sent a man a metre or more off his
         // plain path in the first two seconds, and when the read moved he could not get back:
         // seed 207 play 66, seed 1042 play 28; Opus approach review P2-2.)
-        let settled = fd.doubt_tracked && ARRIVE_SIGMAS * fd.doubt <= std::env::var("ZZ_SETTLE").ok().map_or(SETUP_BACK_M, |x| x.parse::<f64>().unwrap()); // ZZTMP
+        let settled = fd.doubt_tracked && ARRIVE_SIGMAS * fd.doubt <= SETUP_BACK_M;
         if fd.setup == 1 || (at_back && settled) {
             // On his way to the spot or waiting there: he goes when his run would just bring him
             // to the ball with the slack in hand; caught short of the spot with the ball coming,
@@ -3588,7 +3565,6 @@ impl<'a> Sim<'a> {
         if !fd.t_int.is_finite() || self.ball_still_up() {
             return None;
         }
-        if std::env::var_os("ZZ_APPOFF").is_some() { return None; } // ZZTMP
         let (st, start) = self.planning_state(i);
         let field = self.inp.field;
         let arm = THROW_EFFORT * st.a.arm;
@@ -3640,7 +3616,7 @@ impl<'a> Sim<'a> {
             let (b, bv) = pred.at(t);
             let p = Vec3::new(b.x, b.y, 0.0);
             let each = (1..=4u8).filter(|&k| bases & 1 << k != 0);
-            let passed = !first && coming && ball_passed_him(st.pos, p, bv) && std::env::var_os("ZZ_NOPASS").is_none(); // ZZTMP
+            let passed = !first && coming && ball_passed_him(st.pos, p, bv);
             let ok = !passed && b.z <= catch_ceiling(field, b) && beyond_reach_over_wall(field, b) <= 0.0;
             // No take here can beat the best so far if even arriving set it would not (the throw's
             // length alone): skip the reach estimate.
@@ -3667,10 +3643,8 @@ impl<'a> Sim<'a> {
                     } else {
                         -g / v.max(1.0)
                     };
-                    // A later take keeps a margin (`take_margin`): he brakes with his time in hand
-                    // less it, so that he is there that much before the ball, and needs it in hand.
-                    let lead = if first || std::env::var_os("ZZ_NOLEAD").is_some() { 0.0 } else { take_margin(bv, along) * std::env::var("ZZ_LEADK").ok().map_or(1.0, |x| x.parse::<f64>().unwrap()) }; // ZZTMP
-                    let vc = if first { Some(v) } else { braked_take(&st, p, v, slack, lead, 0.0) };
+                    // Past his intercept he brakes with his time in hand (`braked_take`).
+                    let vc = if first { Some(v) } else { braked_take(&st, p, v, slack) };
                     let straight = vc.map_or(f64::INFINITY, |vc| t + each.clone().map(|k| at_base(p, along * vc, k)).fold(f64::INFINITY, f64::min));
                     let take = (straight, if first { f64::INFINITY } else { vc.unwrap_or(v) });
                     // Rounding it for the base: from w = p − ROUND_M·u, then through p toward the
@@ -16149,7 +16123,7 @@ mod tests {
                         // plan has them.
                         let k = m::exp(-t_s / fd.a.tau_a);
                         let v = (fd.vel * k + dir * (fd.a.speed * (1.0 - k))).norm().min(fd.a.speed);
-                        let Some(vc) = braked_take(&fd, p, v, slack, 0.0, 0.0) else { continue };
+                        let Some(vc) = braked_take(&fd, p, v, slack) else { continue };
                         let t0 = 100.0;
                         let t_ball = t0 + t_s + slack;
                         fd.role = Role::Chase;
