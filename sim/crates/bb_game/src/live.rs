@@ -4630,7 +4630,13 @@ impl<'a> Sim<'a> {
     /// on the infield dirt, the likeliest throw third, no infielder known to him to be going
     /// for it still in front of the ball, the shortstop not known to be going for it; and his
     /// own fresh read: on the ground, carrying beyond `INFIELD_BREAK_R`, with no play for him
-    /// in the infield. If he is wrong, second has two men on it for a moment.
+    /// in the infield; and, as the shortstop's own departure asks, by his estimate no other
+    /// infielder the ball has not yet gone by (the pitcher included) can field it in the infield
+    /// (Opus re-review P3-1: without it he took second at the first call on balls the first
+    /// baseman then fielded, and dropped to no job 0.3 s later). Once he is on second, only a
+    /// chase known to him in front of the ball or the shortstop's chase ends the judgment; his
+    /// read and estimate are not asked again (they flipped it tick by tick). If he is wrong,
+    /// second has two men on it for a moment.
     fn second_takes_over(&self) -> bool {
         if !matches!(self.ball, Ball::Free { .. }) || self.ball_still_up() || !self.first_down_m().is_some_and(|d| d < INFIELD_R) || self.relay_base(false, 3) != 3 {
             return false;
@@ -4640,12 +4646,19 @@ impl<'a> Sim<'a> {
         if fd.read_ball != self.ball_gen || fd.role == Role::Chase || self.partner_going(3) {
             return false;
         }
+        let on = fd.role == Role::Cover(2);
+        if (0..6).any(|j| j != 3 && matches!(self.known(j), (true, _, true)) && !self.ball_gone_by(j, if on { 0.0 } else { REACH })) {
+            return false;
+        }
+        if on {
+            return true;
+        }
         let past = |p: Vec3| m::hypot(p.x, p.y) > INFIELD_BREAK_R;
         let (end, _) = pred.at(pred.t_end());
         if !(past(end) && (!fd.t_int.is_finite() || past(fd.int_pt))) {
             return false;
         }
-        !(0..6).any(|j| j != 3 && matches!(self.known(j), (true, _, true)) && !self.ball_gone_by(j, REACH))
+        !(0..6).any(|j| j != 3 && !self.ball_gone_by(j, REACH) && !past(self.seen_intercept(j, pred).1))
     }
 
     /// Whether the loose ball, as everyone sees it now, has gone by fielder `j` along its path
