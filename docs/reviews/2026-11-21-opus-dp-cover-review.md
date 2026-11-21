@@ -163,3 +163,17 @@ All builds in this worktree's `sim/target` or, for copies, `sim/target/review-pr
 ## Resolution
 
 Open.
+
+### Worker follow-up
+
+On `work/dp-cover`, final sim commit `acc17a9` (fixture `2d1c8dc`; spec and TASKS `7f2f985`; docs after).
+
+- **P1-1, fixed.** A man not yet within receiving reach counts as ready `RECEIVE_MARGIN_S` = 0.1 s [E, unsourced; agent-models §5.5] after he gets there, and the holder waits while his throw would reach the bag before that (a man already within reach is ready now): the review's variant C in named form. Tests: `seed_12_play_105_the_pitchers_feed_is_taken_by_the_covering_second_baseman` (frozen from `37bec49`, where the feed passed him; now he takes it at second, the force by 0.62 s) and `a_feed_held_for_a_cover_coming_across_is_taken_by_him` (below). Throws not taken by their receiver (`zz_uncaught`, throwaway; main matches the review's counts exactly): the pitcher's feeds to second, seeds 0–255, 0 of 66 (main) → 39 of 115 (review, `37bec49`) → **4 of 114**; every throw, seeds 0–99, 22 of 1,764 → 54 of 1,843 → **24 of 1,794**.
+- **P2-1, corrected.** Note §4 and §5, the ledger row and the ledger §5 entry now give the review's cause (his own carries 9 → 5 and 18 → 10; feeds turning two less often, mostly through P1-1); the 6U-3 lead is deleted. With the hold fixed, shortstop-started double plays 51.9% (main 54.3%).
+- **P2-2, not fixed (pre-existing; the Coordinator's call).** A TASKS "Open sim work" §3 item with the review's figures.
+- **P3-1, fixed.** The world's three literal 0.6s are `BAG_TOUCH_M`, named in agent-models §5.5.
+- **P3-2, fixed.** The holder now times the cover's crossing to *the cover's* belief of the throw (`feed_seen`, worked out from what the cover sees of him), not to his own hurried release: in the new held-ball test (starts 4–10 m out at 0–7 m/s, the cover moving on his own belief) the holder's belief of the man's reach is within 0.03 s of the world's (0.12 s with the holder's release), and every feed is taken by him at the bag. Test 1 now checks `cover_reach` and says it is a consistency check of the shared stepping; test 2 (kinematics) is kept.
+- **P3-3.** Third gap fixed: a holder visibly running the ball to the cover's bag (faster than 3 m/s, within about 25° of the line, not on it) gives the cover no throw to time; he brakes onto the bag. The first two gaps (a pivot man's clock from the catch; throws assumed at full arm) are deferred to the same TASKS item.
+- **P3-4, fixed.** The `PIVOT_FACE_MIN_MPS` comment names both arrivals.
+- **Question 2.** Recorded in the note §5, ledger §5 and the TASKS item (no slide or break-up on the pivot man; catching while crossing costs nothing).
+- **Re-measured on `acc17a9`** (sources touched): `cargo test --workspace` 497 passed, 0 failed; fixtures 51001-66 (force at second, 0.65 s) and 51001-168 (4-6-3, 0.20 s at first) unchanged. Standard run, main → final: runs 4.37 → 4.16 [4.77 → 4.59], GB .309 → .309 [.324 → .322], GB 2+ outs .065 → .072 [.063 → .072], out of play after a throw 0.103 → 0.103 [0.140 → 0.137]. `dp_probe 256 0`: 11.2% → 12.3% per opportunity; P 51.9 → 63.6%, 1B 19.3 → 35.4%, 2B 34.7 → 41.4%, 3B 44.0 → 46.6%, SS 54.3 → 51.9%. **Unexplained:** runs −0.21 [−0.18], of which the extra double plays and forces explain about 0.04 (ledger §5).
