@@ -1534,6 +1534,11 @@ struct Fielder {
     /// plus one on which he made it, 0 for none. Once made, his read and his estimate of the
     /// others are not asked again on that ball; a chase known to him in front of it ends it.
     through: std::cell::Cell<u64>,
+    /// His own judgment, while a batted ball is still up, that it will come down in front of an
+    /// outfielder as a single (agent-models §5.7, `Sim::air_read`): the ball (`Sim::ball_gen`)
+    /// plus one on which he made it (0 for none), and where by his estimate it will be fielded.
+    /// Once made, his read and his estimates are not asked again on that ball.
+    air: std::cell::Cell<(u64, Vec3)>,
     /// Throws made this play (keys the throw-execution noise).
     throws: u32,
     /// Since he last secured the ball: when his set-up for a throw began (on his feet with
@@ -4974,10 +4979,11 @@ impl<'a> Sim<'a> {
             match b {
                 4 => self.home_cutoff_man(fielder),
                 3 => 5,
-                // With no runner to play beyond second: on a ball through the infield on the
-                // ground, the middle infielder on its side (agent-models §5.7); otherwise
-                // nobody.
-                _ if self.first_down_m().is_some_and(|d| d < INFIELD_R) => self.second_cutoff_man(),
+                // With no runner to play beyond second: on a single (a ball that came down before
+                // anyone caught it: on the ground through the infield, or a line drive or fly
+                // that fell in), the middle infielder on its side (agent-models §5.7); after a
+                // catch nobody.
+                _ if self.first_down_m().is_some() => self.second_cutoff_man(),
                 _ => return None,
             }
         };
@@ -4997,7 +5003,10 @@ impl<'a> Sim<'a> {
             let fd = &self.f[who];
             fd.belief.as_ref().and_then(|p| p.first_bounce()).map(|b| fd.t_int > b.0).unwrap_or(true)
         };
-        if !down && !(deep && no_air_play()) {
+        // Nor on a ball he judges will come down in front of an outfielder (`air_read`: a single,
+        // not a deep ball), nor once he knows of another man out on a cutoff for it (the single's
+        // cutoff man, `air_cutoff`).
+        if !down && !(deep && no_air_play() && self.air_read(who).is_none() && !(0..6).any(|j| j != who && matches!(self.seen(who, j).0, Role::Relay(_)))) {
             return None;
         }
         // While the ball is loose he plays it himself if his own read says he gets there
@@ -5055,20 +5064,26 @@ impl<'a> Sim<'a> {
         if depth(from) <= RELAY_DEEP_M {
             return false;
         }
-        if !self.first_down_m().is_some_and(|d| d < INFIELD_R) {
+        // In the air, or caught: by where it is being fielded alone.
+        let Some(down) = self.first_down_m() else { return true };
+        let of = match self.ball {
+            Ball::Held { by } if by >= 6 => by,
+            Ball::Free { .. } if self.lead().is_some_and(|l| l >= 6) => self.lead().expect("checked"),
+            _ => (6..9).min_by(|&a, &c| (self.home[a] - from).norm().total_cmp(&(self.home[c] - from).norm())).expect("three outfielders"),
+        };
+        // First down beyond the infield dirt and no shallower than the outfielder's spot: over or
+        // past him. First down in front of him (on the dirt, or shorter than his spot): deep only
+        // once it has got past him.
+        if down >= INFIELD_R && down >= depth(self.home[of]) {
             return true;
         }
         match self.ball {
             Ball::Held { by } if by >= 6 => depth(from) > depth(self.home[by]),
             Ball::Free { .. } if self.lead().is_some_and(|l| l >= 6) => {
-                let l = self.lead().expect("checked");
                 let now = depth(self.ball_at(self.t).0);
-                now > depth(self.home[l]) && now > depth(self.f[l].pos)
+                now > depth(self.home[of]) && now > depth(self.f[of].pos)
             }
-            _ => {
-                let of = (6..9).min_by(|&a, &c| (self.home[a] - from).norm().total_cmp(&(self.home[c] - from).norm())).expect("three outfielders");
-                depth(from) > depth(self.home[of])
-            }
+            _ => depth(from) > depth(self.home[of]),
         }
     }
 
@@ -5127,20 +5142,26 @@ impl<'a> Sim<'a> {
     /// read and estimate are not asked again; a chase known to him in front of the ball ends it
     /// (as `second_takes_over`). The catcher and the outfielders do not use it.
     fn home_cutoff_by_convention(&self, o: usize) -> Option<usize> {
-        if o == 1 || o >= 6 || !matches!(self.ball, Ball::Free { .. }) || self.ball_still_up() || !self.first_down_m().is_some_and(|d| d < INFIELD_R) || self.relay_base(false, o) != 4 {
+        if o == 1 || o >= 6 || !matches!(self.ball, Ball::Free { .. }) || self.relay_base(false, o) != 4 {
+            return None;
+        }
+        // On the ground through the infield; or in the air, a single by his own judgment
+        // (`air_read`), which stands once the ball has come down beyond the dirt.
+        let gen1 = self.ball_gen + 1;
+        let air = self.ball_still_up() || self.f[o].air.get().0 == gen1;
+        if !air && !self.first_down_m().is_some_and(|d| d < INFIELD_R) {
             return None;
         }
         // Once a man is known to be out on a cutoff or relay, the tables use what is known.
         if (0..9).any(|j| j != o && matches!(self.seen(o, j).0, Role::Relay(_))) {
             return None;
         }
-        let c = self.home_cutoff_man(self.through_point().0);
+        let c = self.home_cutoff_man(if air { self.single_of() } else { self.through_point().0 });
         let fd = &self.f[o];
         if c == o || fd.role == Role::Chase || fd.read_ball != self.ball_gen || self.chasing_as_known_by(o, c) {
             return None;
         }
         let pred = fd.belief.as_ref()?;
-        let gen1 = self.ball_gen + 1;
         let on = fd.through.get() == gen1;
         // Any infielder known to be going for the ball, wherever it is: the cutoff man home does
         // not go out while one is (`infield_lets_go`, Opus cutoff-home review P2-1).
@@ -5149,6 +5170,11 @@ impl<'a> Sim<'a> {
             return None;
         }
         if on {
+            return Some(c);
+        }
+        if air {
+            self.air_read(o)?;
+            fd.through.set(gen1);
             return Some(c);
         }
         let past = |p: Vec3| m::hypot(p.x, p.y) > INFIELD_BREAK_R;
@@ -5181,7 +5207,7 @@ impl<'a> Sim<'a> {
     /// pitcher the backup of home. His own schedule: he watches the ball go through; his
     /// teammates learn his job `CALL_HEARD_S` later.
     fn through_jobs(&mut self) {
-        if !matches!(self.ball, Ball::Free { .. }) || self.ball_still_up() {
+        if !matches!(self.ball, Ball::Free { .. }) {
             return;
         }
         for i in 0..6 {
@@ -5189,6 +5215,94 @@ impl<'a> Sim<'a> {
                 self.take_own_job(i);
             }
         }
+    }
+
+    /// The outfielder who will field a ball the infielders take for a single (agent-models §5.7):
+    /// the one known to be going for it, else the `through_point`'s.
+    fn single_of(&self) -> usize {
+        self.lead().filter(|&l| l >= 6).unwrap_or_else(|| self.through_point().0)
+    }
+
+    /// Fielder `o`'s own judgment, while a batted ball is still up, that it will come down in
+    /// front of an outfielder as a single (agent-models §5.7, "A ball in the air that will come
+    /// down in front of an outfielder"); where by his estimate it will be fielded. From what he
+    /// sees and is told: the ball still up; no outfielder known to him to have made a sure call
+    /// on it (a catch is expected); and his own read: no play for him (no catch, and no ball he
+    /// fields inside `INFIELD_BREAK_R`); by his estimate (`seen_intercept` on his read) no other
+    /// infielder the ball has not yet gone by catches it or fields it inside that range, and the
+    /// first outfielder to reach it does so only after it has come down, beyond `RELAY_FROM_M`,
+    /// and not over or past him (no deeper than `RELAY_DEEP_M`, or no deeper than his pre-pitch
+    /// spot: not a deep ball). Once made on this ball (`Fielder::air`), his read and estimates are
+    /// not asked again. The catcher and the outfielders do not use it.
+    fn air_read(&self, o: usize) -> Option<Vec3> {
+        let fd = &self.f[o];
+        let gen1 = self.ball_gen + 1;
+        let (made, fp) = fd.air.get();
+        if made == gen1 {
+            return Some(fp);
+        }
+        if o == 1 || o >= 6 || !matches!(self.ball, Ball::Free { .. }) || !self.ball_still_up() || fd.role == Role::Chase || fd.read_ball != self.ball_gen {
+            return None;
+        }
+        if (6..9).any(|j| matches!(self.known(j), (true, tier, true) if tier >= 2)) {
+            return None;
+        }
+        let pred = fd.belief.as_ref()?;
+        let land = pred.first_bounce()?.0;
+        let depth = |p: Vec3| m::hypot(p.x, p.y);
+        let infield = |p: Vec3| depth(p) <= INFIELD_BREAK_R;
+        if fd.t_int.is_finite() && (fd.t_int < land || infield(fd.int_pt)) {
+            return None;
+        }
+        // The outfielders first: on most balls in the air one of them catches it.
+        let (t, fp, of) = (6..9)
+            .map(|j| {
+                let (t, p) = self.seen_intercept(j, pred);
+                (t, p, j)
+            })
+            .min_by(|a, c| a.0.total_cmp(&c.0))
+            .expect("three outfielders");
+        if t < land || depth(fp) < RELAY_FROM_M || (depth(fp) > RELAY_DEEP_M && depth(fp) > depth(self.home[of])) {
+            return None;
+        }
+        if (0..6).any(|j| {
+            j != o && !self.ball_gone_by(j, REACH) && {
+                let (t, p) = self.seen_intercept(j, pred);
+                t < land || infield(p)
+            }
+        }) {
+            return None;
+        }
+        fd.air.set((gen1, fp));
+        Some(fp)
+    }
+
+    /// The single's cutoff job for fielder `c` while the ball is still up (agent-models §5.7,
+    /// "A ball in the air that will come down in front of an outfielder"): if he is its man (the
+    /// middle infielder on the ball's side toward second, the shortstop toward third, the corner
+    /// man toward home for the outfielder who will field it, `single_of`; the base as he reads
+    /// the runners), his own judgment is that it will drop in as a single (`air_read`), and the
+    /// infield lets him go (`infield_lets_go`, as on a ground single). The base, and his spot on
+    /// the line from where he estimates it will be fielded.
+    fn air_cutoff(&self, c: usize) -> Option<(u8, Vec3)> {
+        if !(2..6).contains(&c) || !matches!(self.ball, Ball::Free { .. }) || !self.ball_still_up() || self.f[c].role == Role::Chase {
+            return None;
+        }
+        let b = self.relay_base(false, c);
+        let man = match b {
+            2 => self.second_cutoff_man(),
+            3 => 5,
+            4 => self.home_cutoff_man(self.single_of()),
+            _ => return None,
+        };
+        if man != c {
+            return None;
+        }
+        let fp = self.air_read(c)?;
+        if !self.infield_lets_go(c, b) {
+            return None;
+        }
+        Some((b, Self::relay_spot(fp, b, false)))
     }
 
     /// Whether middle infielder `who` knows his partner to be going for this ball (shown
@@ -5213,7 +5327,13 @@ impl<'a> Sim<'a> {
     /// read and estimate are not asked again (they flipped it tick by tick). If he is wrong,
     /// second has two men on it for a moment.
     fn second_takes_over(&self) -> bool {
-        if !matches!(self.ball, Ball::Free { .. }) || self.ball_still_up() || !self.first_down_m().is_some_and(|d| d < INFIELD_R) || self.relay_base(false, 3) != 3 {
+        if !matches!(self.ball, Ball::Free { .. }) || self.relay_base(false, 3) != 3 {
+            return false;
+        }
+        // On the ground through the infield; or in the air, a single by his own judgment
+        // (`air_read`), which stands once the ball has come down beyond the dirt.
+        let air = self.ball_still_up() || self.f[3].air.get().0 == self.ball_gen + 1;
+        if !air && !self.first_down_m().is_some_and(|d| d < INFIELD_R) {
             return false;
         }
         let fd = &self.f[3];
@@ -5227,6 +5347,9 @@ impl<'a> Sim<'a> {
         }
         if on {
             return true;
+        }
+        if air {
+            return self.air_read(3).is_some();
         }
         let past = |p: Vec3| m::hypot(p.x, p.y) > INFIELD_BREAK_R;
         let (end, _) = pred.at(pred.t_end());
@@ -5425,6 +5548,11 @@ impl<'a> Sim<'a> {
                 }
                 _ => {}
             }
+            // The single's cutoff man on a ball still up keeps his job by his own judgment
+            // (`air_cutoff`); nobody else's choice takes it from him.
+            if matches!(self.air_cutoff(i), Some((b, _)) if self.f[i].role == Role::Relay(b)) {
+                continue;
+            }
             // Nobody known to be going for the ball just now (and no ball through the infield
             // to line up on): he holds his line.
             if decided && !matches!(job, Some((who, _, _)) if who == i) {
@@ -5436,6 +5564,18 @@ impl<'a> Sim<'a> {
                 if ISO_REVERT_GATE.with(|c| c.get()) {
                     self.cover_roles_after_chasers();
                 }
+            }
+        }
+        // While the ball is up, the single's cutoff man takes his job himself (`air_cutoff`), or
+        // keeps to its line.
+        for c in 2..6 {
+            if matches!(job, Some((who, _, _)) if who == c) {
+                continue;
+            }
+            if let Some((b, spot)) = self.air_cutoff(c) {
+                self.f[c].role = Role::Relay(b);
+                self.f[c].backs = None;
+                self.f[c].target = spot;
             }
         }
         let Some((who, b, spot)) = job else { return };
@@ -8097,6 +8237,7 @@ fn new_sim<'a>(inp: &'a LiveInput<'a>, st: &'a mut RulesState) -> Sim<'a> {
                 last_dive_read: f64::NEG_INFINITY,
                 will_dive: std::cell::Cell::new(false),
                 through: std::cell::Cell::new(0),
+                air: std::cell::Cell::new((0, Vec3::ZERO)),
                 throws: 0,
                 up_at: 0.0,
                 set_base: 0.0,
@@ -12890,7 +13031,7 @@ mod tests {
             (f.pos, f.vel, f.jump, f.role, f.target, f.next_plan, f.err, f.attempts, f.blocked_until, f.ready_at, f.dove, f.lunge),
             (f.t_int, f.int_pt, f.read_at, f.read_ball, f.call, f.shown.clone(), f.last_close_read, f.must_dive_since, f.last_dive_read, f.will_dive.get(), f.throws, f.up_at),
             (f.set_base, f.face, f.catch_vel, f.took_diving, f.catch_stretched, f.backs, f.peel, f.carry_to, f.asks, f.pivot, f.pivot_wait_bag, f.relayed),
-            f.through.get(),
+            (f.through.get(), f.air.get()),
             f.belief.as_ref().map(|p| (p.at(sim.t), p.at(p.t_end()), p.t_end())),
         )
     }
@@ -13017,6 +13158,7 @@ mod tests {
         v.push(("will dive".into(), Box::new(|f: &mut Fielder| f.will_dive.set(!f.will_dive.get()))));
         let gen1 = sim.ball_gen + 1;
         v.push(("through".into(), Box::new(move |f: &mut Fielder| f.through.set(if f.through.get() == gen1 { 0 } else { gen1 }))));
+        v.push(("air".into(), Box::new(move |f: &mut Fielder| f.air.set(if f.air.get().0 == gen1 { (0, Vec3::ZERO) } else { (gen1, f.pos) }))));
         v.push(("jump".into(), Box::new(|f: &mut Fielder| f.jump = f.jump + Vec3::new(3.0, -3.0, 0.0))));
         v.push(("carry_to".into(), Box::new(|f: &mut Fielder| f.carry_to = if f.carry_to.is_some() { None } else { Some(4) })));
         v.push(("set_base".into(), Box::new(|f: &mut Fielder| f.set_base += 1.0)));
