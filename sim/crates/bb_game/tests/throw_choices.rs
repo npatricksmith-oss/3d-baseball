@@ -311,3 +311,213 @@ fn seed_12_play_105_the_pitchers_feed_is_taken_by_the_covering_second_baseman() 
     assert_eq!(who, receiver, "the feed was taken by {who} at ({x:.1}, {y:.1}), not by the receiver {receiver}");
     assert!((x * x + (y - 38.795).powi(2)).sqrt() < 3.0, "taken at ({x:.1}, {y:.1}), not at second");
 }
+
+/// The fixture mirrored across the line from home through second (x → −x): the ball, its spin
+/// (an axial vector: ω → (ω_x, −ω_y, −ω_z)), the batter's side and the bat; then the ball's
+/// position, velocity and spin turned `turn_deg` about the vertical toward +x. The other side's
+/// Savant alignment is close to the mirror image (agent-models §5.9: a left-handed batter's
+/// second baseman at 148.2 ft / +19.1°, a right-handed batter's shortstop at 148.3 ft / −18.3°),
+/// but the bounces' scatter is not mirrored.
+fn mirrored(text: &str, turn_deg: f64) -> String {
+    let mut v: Value = serde_json::from_str(text).unwrap();
+    let neg = |v: &mut Value, k: usize| v[k] = (-v[k].as_f64().unwrap()).into();
+    for k in ["ball_r", "ball_v", "batter_box"] {
+        neg(&mut v[k], 0);
+    }
+    neg(&mut v["ball_w"], 1);
+    neg(&mut v["ball_w"], 2);
+    for k in ["pitch_x", "bat_yaw"] {
+        v[k] = (-v[k].as_f64().unwrap()).into();
+    }
+    v["bats"] = if v["bats"] == "L" { "R" } else { "L" }.into();
+    turned(&v.to_string(), turn_deg, None)
+}
+
+/// The fixture's ball (position, velocity, spin) turned `turn_deg` about the vertical toward
+/// +x (the first-base side), and, with `on_first`, that batting id on first base.
+fn turned(text: &str, turn_deg: f64, on_first: Option<u16>) -> String {
+    let mut v: Value = serde_json::from_str(text).unwrap();
+    let (s, c) = turn_deg.to_radians().sin_cos();
+    for k in ["ball_r", "ball_v", "ball_w"] {
+        let a = vec3(&v[k]);
+        v[k] = serde_json::json!([a.x * c + a.y * s, -a.x * s + a.y * c, a.z]);
+    }
+    if let Some(id) = on_first {
+        v["bases"][0] = id.into();
+    }
+    v.to_string()
+}
+
+/// Replays a fixture with the jobs traced: the play and every tick's jobs from the first read.
+fn replay_jobs(text: &str) -> (LiveOutput, Vec<bb_game::live::job_trace::Tick>) {
+    bb_game::live::job_trace::take();
+    bb_game::live::job_trace::ON.with(|x| x.set(true));
+    let (out, _, _) = replay(text);
+    bb_game::live::job_trace::ON.with(|x| x.set(false));
+    (out, bb_game::live::job_trace::take())
+}
+
+/// A ground single through the infield, as on the owner's saved play 102 (below): the middle
+/// infielder on the ball's side (`out_man`) goes out as the cutoff man for second from the
+/// first call and never stands with no job while the ball is loose; his partner covers second
+/// from the first call; the outfielder fields it in front of him, so it is not a deep ball and
+/// nobody goes out toward third. Checked against the geometry: when the ball is fielded the
+/// cutoff man is out from where he started and on the line from the ball to second, between
+/// them (within `CUT_LINE_M` = 5 m, agent-models §5.5).
+fn check_ground_single_jobs(text: &str, out_man: usize, cover_man: usize, fielder: u16) {
+    const SECOND: (f64, f64) = (0.0, 38.795);
+    let (out, ticks) = replay_jobs(text);
+    let &(t_fielded, by) = out.secured.first().expect("the ball is fielded");
+    assert_eq!(by & 0x7f, fielder, "fielded by {by:#x}");
+    let first = &ticks[0];
+    assert_eq!((first.job[out_man], first.job[cover_man]), (22, 12), "the first call: {:?}", first.job);
+    for k in ticks.iter().filter(|k| k.t < t_fielded) {
+        assert_eq!((k.job[out_man], k.job[cover_man]), (22, 12), "at {:.2} s, before the ball is fielded: {:?}", k.t, k.job);
+        assert!(!k.job.contains(&23), "a relay toward third at {:.2} s: {:?}", k.t, k.job);
+    }
+    let at = ticks.iter().rev().find(|k| k.t <= t_fielded).unwrap();
+    let ball = out.facts.iter().find_map(|f| match *f {
+        Input::GloveSecured { x, y, .. } => Some((x, y)),
+        _ => None,
+    }).unwrap();
+    let p = at.pos[out_man];
+    let (lx, ly) = (ball.0 - SECOND.0, ball.1 - SECOND.1);
+    let len = (lx * lx + ly * ly).sqrt();
+    let along = ((p.x - SECOND.0) * lx + (p.y - SECOND.1) * ly) / len;
+    let off = ((p.x - SECOND.0) * ly - (p.y - SECOND.1) * lx).abs() / len;
+    assert!(off < 5.0 && along > 0.0 && along < len, "the cutoff man at ({:.1}, {:.1}) is off the line from second to the ball at ({:.1}, {:.1}): {off:.1} m off, {along:.1} m along", p.x, p.y, ball.0, ball.1);
+    assert!(p.y.hypot(p.x) > ticks[0].pos[out_man].y.hypot(ticks[0].pos[out_man].x), "he went out: from {:?} to {p:?}", ticks[0].pos[out_man]);
+}
+
+/// Seed 51001 play 102, the owner's saved play (calibration note 2026-11-20-saved-plays-51001
+/// §3; frozen from main `904c1ea`, a left-handed batter): none out, bases empty, a 98 mph
+/// grounder up the middle on the second baseman's side, out of his reach, fielded by the centre
+/// fielder at 88 m. On main the first call gave second to the shortstop and the second baseman
+/// nothing, so he stood for 0.75 s; then the deep-ball rule sent the shortstop out toward third
+/// and second fell back to the second baseman. Now (agent-models §5.7, a ground ball through
+/// the infield) the second baseman goes out as the cutoff for second at the first call and the
+/// shortstop covers second.
+#[test]
+fn seed_51001_play_102_the_second_baseman_goes_out_as_the_cutoff_and_the_shortstop_covers() {
+    check_ground_single_jobs(include_str!("fixtures/a4/51001-102.json"), 3, 5, 8);
+}
+
+/// The mirror image of play 102, on the shortstop's side (a right-handed batter): the shortstop
+/// goes out and the second baseman covers second. Turned 3° toward the middle (spray −11° to
+/// −8°): the exact mirror bounces differently and the shortstop fields it in the infield.
+#[test]
+fn mirrored_play_102_the_shortstop_goes_out_and_the_second_baseman_covers() {
+    check_ground_single_jobs(&mirrored(include_str!("fixtures/a4/51001-102.json"), 3.0), 5, 3, 8);
+}
+
+
+/// Batting id put on first in the variants below (any of the batting side's ids).
+const ON_FIRST: u16 = 5;
+
+/// Jobs from the first call until the ball is first secured: (ticks, who secured it).
+fn loose_jobs(text: &str) -> (Vec<bb_game::live::job_trace::Tick>, f64, u16, LiveOutput) {
+    let (out, ticks) = replay_jobs(text);
+    let &(t, by) = out.secured.first().expect("the ball is fielded");
+    (ticks.into_iter().filter(|k| k.t < t).collect(), t, by & 0x7f, out)
+}
+
+/// Opus mid-infield review P1-1: play 102 turned 3° toward first with a runner on first (none
+/// out, double-play depth). The second baseman goes for it and fields it 51 m out. With a
+/// runner on first the shortstop holds second for the force until the ball is plainly through
+/// (agent-models §5.7): he covers second at every tick from the first call to the catch and is
+/// never out on a cutoff. (Before the fix he went out toward third at 1.74 s, came back,
+/// went out again at 2.32 s: second empty for 1.45 s with the runner going.)
+#[test]
+fn runner_on_first_the_shortstop_holds_second_while_the_second_baseman_fields_it() {
+    let (ticks, _, by, _) = loose_jobs(&turned(include_str!("fixtures/a4/51001-102.json"), 3.0, Some(ON_FIRST)));
+    assert_eq!(by, 4, "the premise: the second baseman fields it");
+    assert!(ticks.iter().any(|k| k.job[3] == 1), "the second baseman goes for it");
+    for k in &ticks {
+        assert_eq!(k.job[5], 12, "at {:.2} s the shortstop is not on second: {:?}", k.t, k.job);
+    }
+}
+
+/// A comebacker the pitcher fields (play 102 turned 8° toward third, at the mound), with nobody
+/// on and with a runner on first: no middle infielder goes out on a cutoff, and second is
+/// covered at every tick from the first call to the catch. What it guards: a regression guard
+/// only. It passes on the first build too (at this angle the shortstop goes for the ball, so
+/// the second baseman stays on second by the tables), and it does not pin the first build's
+/// comebacker cutoffs with nobody on, which leaving the pitcher out of the estimate toward
+/// second keeps on purpose (agent-models §5.7; Opus re-review P3-3).
+#[test]
+fn a_comebacker_sends_nobody_out_and_leaves_second_covered() {
+    for on_first in [None, Some(ON_FIRST)] {
+        let (ticks, _, by, _) = loose_jobs(&turned(include_str!("fixtures/a4/51001-102.json"), -8.0, on_first));
+        assert_eq!(by, 1, "the premise: the pitcher fields it ({on_first:?})");
+        for k in &ticks {
+            assert!(!(20..30).contains(&k.job[3]) && !(20..30).contains(&k.job[5]), "a cutoff at {:.2} s ({on_first:?}): {:?}", k.t, k.job);
+            assert!(k.job.contains(&12), "second open at {:.2} s ({on_first:?}): {:?}", k.t, k.job);
+        }
+    }
+}
+
+/// No middle infielder goes out on a cutoff, comes off it and goes out again while the ball is
+/// loose (Opus mid-infield review P1-1; re-review P2-1, the out-back-out): a cutoff job, then a
+/// stretch with no job, a base or a backup, then a cutoff job again. A stretch in which he or his
+/// partner went for the ball is a different thing and is not counted: he chased, pulled up and
+/// went back on the line; or, his partner going for it, he held second for him (the pair rule,
+/// agent-models §5.7), as real players do. With a runner on first, second is never empty
+/// for longer than the 0.3 s knowledge lag while one of them is out on a cutoff.
+fn check_no_out_back_out(text: &str, label: &str, runner_on_first: bool) {
+    let (ticks, ..) = loose_jobs(text);
+    for i in [3, 5] {
+        let jobs: Vec<u8> = ticks.iter().map(|k| k.job[i]).collect();
+        let partner: Vec<u8> = ticks.iter().map(|k| k.job[8 - i]).collect();
+        let cut = |j: u8| (20..30).contains(&j);
+        let mut was_out = false;
+        let mut chased_since = false;
+        for (n, &j) in jobs.iter().enumerate() {
+            if cut(j) {
+                assert!(!(was_out && n > 0 && !cut(jobs[n - 1]) && !chased_since), "{label}: fielder {i} out, back, out again at {:.2} s: {:?}", ticks[n].t, ticks.iter().map(|k| (k.t, k.job[i])).collect::<Vec<_>>());
+                was_out = true;
+                chased_since = false;
+            } else if j == 1 || partner[n] == 1 {
+                chased_since = true;
+            }
+        }
+    }
+    if runner_on_first {
+        // At most a teammate's knowledge lag (`CALL_HEARD_S`, 0.3 s) at a stretch: a partner who
+        // starts for the ball as the shortstop leaves is seen 0.3 s later, and the shortstop
+        // comes back.
+        let mut since: Option<f64> = None;
+        for k in &ticks {
+            let out = (20..30).contains(&k.job[3]) || (20..30).contains(&k.job[5]);
+            if out && !k.job.contains(&12) {
+                let t0 = *since.get_or_insert(k.t);
+                assert!(k.t - t0 <= 0.31, "{label}: second open with a man on a cutoff from {t0:.2} to {:.2} s: {:?}", k.t, k.job);
+            } else {
+                since = None;
+            }
+        }
+    }
+}
+
+/// Over play 102 turned from 14° toward third to 14° toward first (every degree near the middle,
+/// where the first review saw the flicker at +3°), bases empty and a runner on first; and three
+/// nobody-on plays frozen from `792c3d1` (Opus re-review P2-1; game seeds 33, 10, 18), on each
+/// of which the cutoff man for second went out at the first call, was taken off 0.3 s later when
+/// an infielder's chase in front of the ball became known (the third baseman, the pitcher, the
+/// first baseman) and went out again: seed 33 play 150 the shortstop out 0.65 s, covering third
+/// 0.95 s, out 1.38 s; seed 10 play 52 out 0.68, no job 0.95, out 1.02; seed 18 play 91 the
+/// second baseman out 0.65, no job 0.95, out 1.60. With nobody on, once out, only his partner's
+/// chase or a catch takes him off (agent-models §5.7). Fails on `792c3d1` (seed 33 play 150).
+#[test]
+fn the_through_cutoff_does_not_flicker() {
+    let base = include_str!("fixtures/a4/51001-102.json");
+    let turns = [-14.0, -12.0, -10.0, -8.0, -6.0, -4.0, -3.0, -2.0, -1.0, 0.0, 1.0, 2.0, 3.0, 4.0, 6.0, 8.0, 10.0, 12.0, 14.0];
+    for turn in turns {
+        for on_first in [None, Some(ON_FIRST)] {
+            check_no_out_back_out(&turned(base, turn, on_first), &format!("turn {turn}, {on_first:?}"), on_first.is_some());
+        }
+    }
+    for (label, text) in [("seed 33 play 150", include_str!("fixtures/a4/33-150.json")), ("seed 10 play 52", include_str!("fixtures/a4/10-52.json")), ("seed 18 play 91", include_str!("fixtures/a4/18-91.json"))] {
+        check_no_out_back_out(text, label, false);
+    }
+}
+
