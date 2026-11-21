@@ -129,7 +129,7 @@ impl Sim<'_> {
         };
         let receiver = self.receiver_for(next_holder, 1);
         let ball_at = (release_at + throw_time(speed, (base_pos(1) - base_pos(option.base)).norm())).max(self.receiver_ready(receiver, 1)) + 0.05;
-        Some((phi((runner_at - ball_at) / 0.12), ball_at))
+        Some((phi((runner_at - ball_at) / RACE_SIGMA_S), ball_at))
     }
 
     /// When the pivot man at second lets the ball go for first, as a teammate judges it
@@ -167,7 +167,7 @@ impl Sim<'_> {
             let distance = (target - fd.pos).norm();
             let race = self.throw_race(by, base);
             let mut add = |carry: bool, ball_at, set_ball_at| {
-                let p_out = phi((runner_at - ball_at) / 0.12);
+                let p_out = phi((runner_at - ball_at) / RACE_SIGMA_S);
                 let weight = self.out_weight(k, base);
                 let mut option = HolderOption {
                     runner: k,
@@ -189,9 +189,9 @@ impl Sim<'_> {
                     continuation: None,
                 };
                 option.continuation = self.force_continuation(by, &option);
-                // Only a second out whose throw would be attempted (p > 0.3, the holder's own
+                // Only a second out whose throw would be attempted (p > `RACE_MIN_P`, the holder's own
                 // rule) adds to the value (Gemini A4 review P1-2).
-                if let Some((p_second, _)) = option.continuation.filter(|c| c.0 > 0.3) {
+                if let Some((p_second, _)) = option.continuation.filter(|c| c.0 > RACE_MIN_P) {
                     let w_second = if self.st.outs + 1 >= 2 { 1.0 } else { 0.9 };
                     option.value += params.continuation_weight * p_out * p_out * p_second * p_second * w_second;
                 }

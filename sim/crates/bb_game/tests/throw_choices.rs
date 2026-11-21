@@ -210,19 +210,51 @@ fn seed_264_play_109_the_left_fielder_still_catches_the_sinking_liner() {
     assert!(!down && who & 0x7F == 7, "fielder {} secured it at {t:.2} s, after it came down: {down}", who & 0x7F);
 }
 
+/// The first glove possession, in seconds after contact, and by whom.
+fn first_taken(text: &str) -> (f64, u16, bool) {
+    let v: Value = serde_json::from_str(text).unwrap();
+    let (out, _, _) = replay(text);
+    let (t, who, down) = first_secured(&out);
+    (t - v["t_contact"].as_f64().unwrap(), who & 0x7F, down)
+}
+
 #[test]
-fn zz_probe_new_fixtures() {
-    for (name, text) in [("13-140", include_str!("fixtures/a4/13-140.json")), ("1048-193", include_str!("fixtures/a4/1048-193.json")), ("136-13", include_str!("fixtures/a4/136-13.json")), ("207-66", include_str!("fixtures/a4/207-66.json")), ("1042-28", include_str!("fixtures/a4/1042-28.json"))] {
-        let v: Value = serde_json::from_str(text).unwrap();
-        let tc = v["t_contact"].as_f64().unwrap();
-        let (out, _, st) = replay(text);
-        let (t, who, down) = first_secured(&out);
-        eprintln!("ZZ {name}: first secured by {} at {:.2} s after contact, down {down}; bases {:?} outs {}", who & 0x7F, t - tc, st.bases, st.outs);
-        let w = (who & 0x7f) as usize - 1;
-        let tr = &out.actors[w].1;
-        let k = tr.iter().rposition(|(tt, _)| *tt <= t + 1e-9).unwrap();
-        let (a, b) = (tr[k - 1], tr[k]);
-        let vel = (b.1 - a.1) * (1.0 / (b.0 - a.0));
-        eprintln!("ZZ    at ({:.2},{:.2}) vel ({:.2},{:.2}) released {:?}", b.1.x, b.1.y, vel.x, vel.y, out.released.first().map(|r| r.0 - tc));
-    }
+fn seed_1048_play_193_the_pitcher_takes_the_comebacker_in_front_of_him() {
+    // Agent-models §5.2, the approach (Opus approach review P2-3): a comebacker, a runner on
+    // first, none out. On main the pitcher steps to his left and takes it 0.65 s after contact in front
+    // of him. On `af5825d` he backed away toward a deeper point on the ball's path to take it
+    // with a better throw, the ball passed him and he picked it up 3.9 s after contact. A ball
+    // coming at him is taken in front of him.
+    let (t, who, _) = first_taken(include_str!("fixtures/a4/1048-193.json"));
+    assert!(who == 1 && t < 1.0, "fielder {who} first took it {t:.2} s after contact");
+}
+
+#[test]
+fn seed_136_play_13_the_second_baseman_does_not_let_the_grounder_by() {
+    // Agent-models §5.2, the approach (Opus approach review P2-3): a grounder to the second
+    // baseman, nobody on, one out. On `af5825d`, paced to meet it exactly at a later hop, he let
+    // it pass 1.1 m from him and picked it up 4.1 s after contact. Planned with a margin and
+    // timed as the movement runs it, he fields it 1.65 s after contact.
+    let (t, who, _) = first_taken(include_str!("fixtures/a4/136-13.json"));
+    assert!(who == 4 && t < 2.0, "fielder {who} first took it {t:.2} s after contact");
+}
+
+#[test]
+fn seed_207_play_66_the_left_fielder_catches_the_pop_up() {
+    // Agent-models §5.5, the set-up behind a fly (Opus approach review P2-2): a pop-up to
+    // shallow left, a runner on third, one out. On `af5825d` the left fielder chose
+    // the set-up on his first read, headed for a spot behind a catch point his read had wrong,
+    // and came up short; main catches it. He sets up only once his read has settled.
+    let (t, who, down) = first_taken(include_str!("fixtures/a4/207-66.json"));
+    assert!(!down && who == 7, "fielder {who} secured it {t:.2} s after contact, after it came down: {down}");
+}
+
+#[test]
+fn seed_1042_play_28_the_right_fielder_catches_the_fly() {
+    // Agent-models §5.5, the set-up behind a fly (Opus approach review P2-2): a fly to
+    // right-centre, a runner on second, none out. On `af5825d` the right fielder
+    // drifted deep for the set-up from 1.7 s on an unsettled read and the ball landed 1.3 m from
+    // him; main catches it.
+    let (t, who, down) = first_taken(include_str!("fixtures/a4/1042-28.json"));
+    assert!(!down && who == 9, "fielder {who} secured it {t:.2} s after contact, after it came down: {down}");
 }

@@ -720,8 +720,9 @@ const ANGLE_ON_LINE_DEG: f64 = 15.0;
 /// ahead of him within this of it, degrees [E].
 const ANGLE_KEEP_DEG: f64 = 30.0;
 /// The holder's race rule (agent-models §5.6): the σ of a race, s, and the least chance of an
-/// out he throws for. A fielder rounds a ball for the lead runner's extra base only where by
-/// this rule he would have a play there.
+/// out he throws for (p = Φ((runner − ball)/σ) above it). The one source for every use: the
+/// holder's options (`live/holder.rs`), a runner's read of the play he expects
+/// (`with_expected_play`), and an outfielder's base for his approach (`outfield_round_base`).
 const RACE_SIGMA_S: f64 = 0.12;
 const RACE_MIN_P: f64 = 0.3;
 /// Arriving under control (agent-models §5.2): a chaser with time in hand keeps this many of
@@ -2449,8 +2450,6 @@ fn fielder_step(fd: &Fielder, t: f64, t_contact: f64) -> (Vec3, Vec3) {
     // it: at the speed he has toward it, or, slower than that, from rest by the speed law
     // (he does not take a man standing 2 m short to be 4 s away).
     let eta = (d / along.max(0.5)).min(m::sqrt(2.0 * d * fd.a.tau_a / fd.a.speed) + d / fd.a.speed);
-    // On an approach (agent-models §5.2) he is timed against the ball at his take point, and
-    // arrives there no faster than he planned, even late by a tick or two.
     if fd.setup == 2 && fd.role == Role::Chase && fd.t_int.is_finite() {
         // Coming through a set-up catch (agent-models §5.5), timed against the ball: the top
         // speed of his speed law with which his run from his motion brings him to the catch
@@ -2462,6 +2461,8 @@ fn fielder_step(fd: &Fielder, t: f64, t_contact: f64) -> (Vec3, Vec3) {
         let a = FielderAttrs { speed: pace, ..fd.a };
         return step_toward(fd.pos, fd.vel, fd.target, &a, false, 0.0, f64::INFINITY);
     }
+    // On an approach (agent-models §5.2) he is timed against the ball at his take point, and
+    // arrives there no faster than he planned, even late by a tick or two.
     let (t_goal, arrive) = match fd.approach {
         Some(ap) if fd.role == Role::Chase => (ap.t_ball, ap.arrive),
         _ => (fd.t_int, f64::INFINITY),
@@ -5964,8 +5965,8 @@ impl<'a> Sim<'a> {
         let value = |j: usize, base: u8, runner_at: f64, ball_at: f64| {
             let r = &self.r[j];
             let force = self.runner_forced(k, j) && base == r.start + 1 && r.s < base as f64 * BASE_L;
-            let p = phi((runner_at - ball_at - if force { 0.0 } else { tag }) / 0.12);
-            if p > 0.3 { p * p * out_weight_at(base, self.runner_outs(k), force) } else { 0.0 }
+            let p = phi((runner_at - ball_at - if force { 0.0 } else { tag }) / RACE_SIGMA_S);
+            if p > RACE_MIN_P { p * p * out_weight_at(base, self.runner_outs(k), force) } else { 0.0 }
         };
         let mine = value(k, b, my_at, own);
         let params = throwing::ChoiceParams::default();
@@ -6864,7 +6865,7 @@ impl<'a> Sim<'a> {
                 o.runner_at - o.ball_at > cur.runner_at - cur.ball_at
             }
         };
-        let best = options.iter().enumerate().filter(|(_, o)| o.p_out > 0.3)
+        let best = options.iter().enumerate().filter(|(_, o)| o.p_out > RACE_MIN_P)
             .fold(None, |best: Option<usize>, (i, o)| if best.is_none_or(|j| better(o, &options[j])) { Some(i) } else { best });
         let (b, through, margins, target_runner) = if let Some(i) = best {
             let o = options[i];
@@ -15537,7 +15538,7 @@ mod tests {
             (fd.up_at, fd.set_base, fd.face, fd.catch_vel) = (1.0, fd.a.transfer, None, Vec3::ZERO);
             (sim.r[0].s, sim.r[0].v, sim.r[0].goal) = (BASE_L - 8.2 * eta_for_margin(margin, false), 8.2, 1);
             let p = sim.holder_options(SS).iter().find(|o| !o.carry && o.base == 1).unwrap().p_out;
-            assert!((p > 0.3) == attempt, "fixture: p {p} at margin {margin}");
+            assert!((p > RACE_MIN_P) == attempt, "fixture: p {p} at margin {margin}");
             let mut thrown = false;
             for _ in 0..60 {
                 sim.holder_act();
@@ -16711,9 +16712,9 @@ mod tests {
     /// flies to all three outfielders that the outfielder catches with nobody on (no throw to
     /// set up for, so no set-up) are caught as well with a runner on second and none out, when
     /// he sets up behind the catch and comes through it toward third. A guard, not a
-    /// reproduction: the two catches the set-up's come-through timing loses in games (approach
-    /// note §5; seed 155 play 23, seed 264 play 109) are made here, over this grid and eight
-    /// read-noise draws; they need game conditions this fixture does not have.
+    /// reproduction (one play per ball, the fixture's own read noise): the catches the set-up
+    /// lost in games are frozen plays in `tests/throw_choices.rs` (seed 155 play 23, seed 264
+    /// play 109, seed 207 play 66, seed 1042 play 28).
     #[test]
     fn the_set_up_behind_a_fly_does_not_cost_a_catch() {
         const R: AgentId = 0x0007;
