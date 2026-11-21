@@ -126,6 +126,13 @@ float BbHud::DrawBug(ABbHUD& Hud, float S, const FBbBugInfo& Bug)
 		const bool bOn = Bug.bValid && ((Bug.Bases >> I) & 1);
 		Diamond(Hud, Bases[I], R, bOn ? BbLook::HudGold : BbLook::HudOff);
 	}
+	// The runners, each a dot at his place on the diamond (home is Step * 2 below second base).
+	for (const FVector2D& Dot : Bug.Dots)
+	{
+		const FVector2D At(DX + Dot.X * Step, DY + (2.f - Dot.Y) * Step);
+		Hud.DrawRect(BbLook::HudPanel, At.X - 4.f * S, At.Y - 4.f * S, 8.f * S, 8.f * S);
+		Hud.DrawRect(BbLook::HudText, At.X - 3.f * S, At.Y - 3.f * S, 6.f * S, 6.f * S);
+	}
 	// The outs, as three dots under the bases.
 	for (int32 I = 0; I < 3; ++I)
 	{

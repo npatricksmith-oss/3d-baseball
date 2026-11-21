@@ -1,4 +1,5 @@
 #include "BbDirector.h"
+#include "BbBaseMap.h"
 #include <limits>
 #include "BbFigure.h"
 #include "BbFrame.h"
@@ -383,6 +384,12 @@ void ABbDirector::BeginPlay()
 			return;
 		}
 	}
+	if (FParse::Param(Cmd, TEXT("BbBaseMapCheck")))
+	{
+		bGameOver = true;
+		FPlatformMisc::RequestExitWithStatus(false, (uint8)RunBaseMapCheck(Seed));
+		return;
+	}
 	// -BbSavedPlay=<toml>: an empty value is still saved mode (never a quiet live game): the
 	// viewer then says what is missing. Argument present, so the play comes from the file alone.
 	BbSavePlay::FView SavedView;
@@ -454,6 +461,7 @@ void ABbDirector::BeginPlay()
 	FParse::Value(Cmd, TEXT("BbBenchSeconds="), BenchSeconds);
 	FParse::Value(Cmd, TEXT("BbDiveShots="), DiveShotsLeft);
 	FParse::Value(Cmd, TEXT("BbSlideShots="), SlideShotsLeft);
+	FParse::Value(Cmd, TEXT("BbBaseMapShots="), BaseMapShotsLeft);
 	FParse::Value(Cmd, TEXT("BbBoxShots="), BoxShotAtPlay);
 	FParse::Value(Cmd, TEXT("BbBoxHold="), BoxHoldS);
 	FParse::Value(Cmd, TEXT("BbParkShotsAt="), ParkShotsAt);
@@ -911,6 +919,225 @@ void ABbDirector::SavedBoard(bool bKnown, const BbPlayInfo& Src, int32 Inning, B
 	}
 	Out.teams[0].totals.r = Src.away_runs;
 	Out.teams[1].totals.r = Src.home_runs;
+}
+
+int32 ABbDirector::RunBaseMapCheck(uint64 Seed)
+{
+	FBbSim Game;
+	if (!Game.Start(SimLibPath, Seed))
+	{
+		UE_LOG(LogBb, Error, TEXT("BB_BASE_MAP_CHECK FAIL: could not start the game sim"));
+		return 1;
+	}
+	int32 Failures = 0, Cases = 0, Plays = 0, WithRunners = 0, MovedLit = 0, DotSamples = 0;
+	auto Expect = [&](bool bOk, const FString& Why)
+	{
+		++Cases;
+		if (!bOk && ++Failures <= 20)
+		{
+			UE_LOG(LogBb, Error, TEXT("BB_BASE_MAP_CHECK FAIL: %s"), *Why);
+		}
+		return bOk;
+	};
+	const BbPark& Ground = Game.Park();
+	auto Pop = [](uint8 Bits) { return (int32)((Bits & 1) + ((Bits >> 1) & 1) + ((Bits >> 2) & 1)); };
+
+	// 1. Fixed points of the projection: the bases' own sim coordinates land on the corners of
+	//    the picture, and halfway along a path lands halfway (x toward first base, y toward second).
+	{
+		auto Near = [](const FVector2D& A, double X, double Y) { return FMath::Abs(A.X - X) < 1e-4 && FMath::Abs(A.Y - Y) < 1e-4; };
+		const float* F1 = Ground.bases[0];
+		const float* F2 = Ground.bases[1];
+		const float* F3 = Ground.bases[2];
+		Expect(Near(BbBaseMap::ToDiamond(0.f, 0.f, Ground), 0, 0), TEXT("home does not map to the picture's home"));
+		Expect(Near(BbBaseMap::ToDiamond(F1[0], F1[1], Ground), 1, 1), TEXT("first base does not map to the picture's first-base corner"));
+		Expect(Near(BbBaseMap::ToDiamond(F2[0], F2[1], Ground), 0, 2), TEXT("second base does not map to the picture's second-base corner"));
+		Expect(Near(BbBaseMap::ToDiamond(F3[0], F3[1], Ground), -1, 1), TEXT("third base does not map to the picture's third-base corner"));
+		Expect(Near(BbBaseMap::ToDiamond(F1[0] * 0.5f, F1[1] * 0.5f, Ground), 0.5, 0.5), TEXT("halfway to first does not map halfway"));
+		Expect(Near(BbBaseMap::ToDiamond((F1[0] + F2[0]) * 0.5f, (F1[1] + F2[1]) * 0.5f, Ground), 0.5, 1.5), TEXT("halfway from first to second does not map halfway"));
+		Expect(Near(BbBaseMap::ToDiamond((F2[0] + F3[0]) * 0.5f, (F2[1] + F3[1]) * 0.5f, Ground), -0.5, 1.5), TEXT("halfway from second to third does not map halfway"));
+		Expect(Near(BbBaseMap::ToDiamond(F3[0] * 0.5f, F3[1] * 0.5f, Ground), -0.5, 0.5), TEXT("halfway from home to third does not map halfway"));
+	}
+	const double HomeToFirstM = FMath::Sqrt((double)Ground.bases[0][0] * Ground.bases[0][0] + (double)Ground.bases[0][1] * Ground.bases[0][1]);
+	const double ScalePerM = FMath::Sqrt(2.0) / HomeToFirstM; // |(1, 1)| picture units per metre
+
+	int32 PrevOuts = 0;
+	uint8 PrevInning = 1, PrevTop = 1, PrevBases = 0;
+	bool bPrevEndedHalf = false;
+	for (int32 I = 0; I < 400; ++I)
+	{
+		FBbPlay Play = Game.Next();
+		if (!Play.bValid)
+		{
+			break;
+		}
+		const BbPlayInfo& Info = Play.Info;
+		// The board before the pitch: what the last play left, nothing in a new half inning.
+		const bool bFresh = I == 0 || bPrevEndedHalf;
+		const uint8 OnBefore = bFresh ? 0 : PrevBases;
+		const int32 OutsBefore = bFresh ? 0 : PrevOuts;
+		++Plays;
+		uint8 Last = 0xFF;
+		int32 LitChanges = 0;
+		TMap<uint16, FVector2D> PrevDot;
+		float PrevT = 0.f;
+		// Every sample of the play, to judge the lit bases against each runner's own track.
+		struct FTrack { float T; uint8 Lit; TMap<uint16, FVector2D> Pos; };
+		TArray<FTrack> Track;
+		for (int32 K = 0;; ++K)
+		{
+			const float T = FMath::Min(K * 0.0333333f, Info.duration_s);
+			BbFrame F{};
+			if (!Game.Sample(Play, T, F))
+			{
+				Expect(false, FString::Printf(TEXT("play %u: no frame at t=%.3f"), Info.play_index, T));
+				break;
+			}
+			BbBaseMap::FMap M;
+			BbBaseMap::Read(F, Ground, Info, OnBefore, OutsBefore, T, M);
+			// Independent of the function: a dot is where the runner is, to scale. The picture's
+			// distance from home is the runner's distance from home in the timeline times one
+			// constant, and a runner moves no faster on the picture than he runs.
+			int32 NRunners = 0;
+			for (uint32 A = 0; A < F.n_actors; ++A)
+			{
+				NRunners += (F.actors[A].agent & 0x80) ? 0 : 1;
+			}
+			Expect(M.Dots.Num() <= NRunners && Pop(M.Lit) <= M.Dots.Num(), FString::Printf(TEXT("play %u t=%.2f: %d dots, %d lit, %d runners"), Info.play_index, T, M.Dots.Num(), Pop(M.Lit), NRunners));
+			for (const BbBaseMap::FDot& D : M.Dots)
+			{
+				if (D.Agent == 0)
+				{
+					continue;
+				}
+				const BbActor* Who = nullptr;
+				for (uint32 A = 0; A < F.n_actors; ++A)
+				{
+					Who = F.actors[A].agent == D.Agent ? &F.actors[A] : Who;
+				}
+				if (!Expect(Who != nullptr, FString::Printf(TEXT("play %u: a dot for agent %x who is not in the frame"), Info.play_index, D.Agent)))
+				{
+					continue;
+				}
+				++DotSamples;
+				const double SimR = FMath::Sqrt((double)Who->pos[0] * Who->pos[0] + (double)Who->pos[1] * Who->pos[1]);
+				Expect(FMath::Abs(D.At.Size() - SimR * ScalePerM) < 2e-3 * (1.0 + SimR * ScalePerM), FString::Printf(TEXT("play %u t=%.2f: dot %.3f from home, runner %.2f m out should be %.3f"), Info.play_index, T, D.At.Size(), SimR, SimR * ScalePerM));
+				if (const FVector2D* Was = PrevDot.Find(D.Agent))
+				{
+					Expect(FVector2D::Distance(*Was, D.At) <= 12.0 * (T - PrevT) * ScalePerM + 1e-3, FString::Printf(TEXT("play %u t=%.2f: agent %x's dot jumped"), Info.play_index, T, D.Agent));
+				}
+			}
+			{
+				FTrack& Row = Track.AddDefaulted_GetRef();
+				Row.T = T;
+				Row.Lit = M.Lit;
+				for (uint32 A = 0; A < F.n_actors; ++A)
+				{
+					if (!(F.actors[A].agent & 0x80))
+					{
+						Row.Pos.Add(F.actors[A].agent, FVector2D(F.actors[A].pos[0], F.actors[A].pos[1]));
+					}
+				}
+			}
+			// The umpire's out calls and a runner who has scored take their dots away.
+			for (const BbBaseMap::FDot& D : M.Dots)
+			{
+				if (D.Agent == 0)
+				{
+					continue;
+				}
+				for (uint32 C = 0; C < Info.n_calls; ++C)
+				{
+					Expect(!(Info.calls[C].runner == D.Agent && T >= Info.calls[C].t_s), FString::Printf(TEXT("play %u t=%.2f: agent %x has a dot after he was called out at %.2f"), Info.play_index, T, D.Agent, Info.calls[C].t_s));
+				}
+				for (uint32 A = 0; A < F.n_actors; ++A)
+				{
+					if (F.actors[A].agent == D.Agent)
+					{
+						Expect(F.actors[A].pos[0] * F.actors[A].pos[0] + F.actors[A].pos[1] * F.actors[A].pos[1] > 1.f, FString::Printf(TEXT("play %u t=%.2f: agent %x has a dot at the plate"), Info.play_index, T, D.Agent));
+					}
+				}
+			}
+			PrevDot.Reset();
+			for (const BbBaseMap::FDot& D : M.Dots)
+			{
+				PrevDot.Add(D.Agent, D.At);
+			}
+			PrevT = T;
+			if (K == 0)
+			{
+				Expect(M.Lit == OnBefore && M.Dots.Num() == Pop(OnBefore), FString::Printf(TEXT("play %u: at the pitch the map shows %u with %d dots, the runners on were %u"), Info.play_index, M.Lit, M.Dots.Num(), OnBefore));
+			}
+			if (M.Lit != Last)
+			{
+				++LitChanges;
+				Last = M.Lit;
+			}
+			if (T >= Info.duration_s)
+			{
+				Expect(M.Lit == (Info.bases & 7) && M.Dots.Num() == Pop(Info.bases & 7), FString::Printf(TEXT("play %u (%hs): at the end the map shows %u with %d dots (pitch_call %d, before %u), the result is %u"), Info.play_index, Info.summary, M.Lit, M.Dots.Num(), Info.pitch_call, OnBefore, Info.bases & 7));
+				break;
+			}
+		}
+		// A base stays lit while its runner is there: for each runner still on the field at the end
+		// (not out, not scored, not a foul, not the half's end), by his own track and the base
+		// distances in metres, never by the path rule under test. If he began the play at a base
+		// and ended at that same base, it was lit at every sample; if he arrived at a base
+		// (within a metre of it), it was lit at every sample from then on.
+		if (!BbBaseMap::IsFoul(Info) && OutsBefore + (int32)Info.n_calls < 3 && Track.Num() > 1)
+		{
+			auto Near = [&](const FVector2D& P, int32 B, double R) { return FVector2D::Distance(P, FVector2D(Ground.bases[B][0], Ground.bases[B][1])) <= R; };
+			for (const TPair<uint16, FVector2D>& R : Track.Last().Pos)
+			{
+				bool bGone = R.Value.Size() <= BbBaseMap::HomeHideM;
+				for (uint32 C = 0; C < Info.n_calls; ++C)
+				{
+					bGone |= Info.calls[C].runner == R.Key;
+				}
+				for (int32 B = 0; B < 3 && !bGone; ++B)
+				{
+					if (!Near(R.Value, B, 7.0))
+					{
+						continue;
+					}
+					const FVector2D* Start = Track[0].Pos.Find(R.Key);
+					int32 From = -1;
+					if (Start && Near(*Start, B, 7.0))
+					{
+						From = 0;
+					}
+					else
+					{
+						for (int32 K = 0; K < Track.Num() && From < 0; ++K)
+						{
+							const FVector2D* At = Track[K].Pos.Find(R.Key);
+							From = At && Near(*At, B, 1.0) ? K : From;
+						}
+					}
+					for (int32 K = FMath::Max(From, 0); From >= 0 && K < Track.Num(); ++K)
+					{
+						if (!Expect(((Track[K].Lit >> B) & 1) != 0, FString::Printf(TEXT("play %u (%hs): base %d went dark at t=%.2f while its runner %x was there (reached it at sample %d)"), Info.play_index, Info.summary, B + 1, Track[K].T, R.Key, From)))
+						{
+							break;
+						}
+					}
+				}
+			}
+		}
+		if (OnBefore != 0 || (Info.bases & 7) != 0)
+		{
+			++WithRunners;
+			MovedLit += LitChanges > 1 ? 1 : 0;
+		}
+		bPrevEndedHalf = Info.inning != PrevInning || Info.top != PrevTop;
+		PrevInning = Info.inning;
+		PrevTop = Info.top;
+		PrevBases = Info.bases & 7;
+		PrevOuts = Info.outs;
+		Game.Release(Play);
+	}
+	UE_LOG(LogBb, Display, TEXT("BB_BASE_MAP_CHECK %s plays=%d with_runners=%d lit_set_changed_in=%d dot_samples=%d cases=%d failures=%d"), Failures == 0 ? TEXT("PASS") : TEXT("FAILED"), Plays, WithRunners, MovedLit, DotSamples, Cases, Failures);
+	return Failures == 0 ? 0 : 1;
 }
 
 int32 ABbDirector::RunSavedPlayCheck(uint64 Seed, bool bFileOnly, const FString& File)
@@ -2242,7 +2469,7 @@ void ABbDirector::NoteSignals()
 	{
 		Signals.Add(FBbSignal{ bContact ? Info.contact_s + 0.5f : Info.call_s, 0, ESignal::Strike, FVector2D(0.0, 18.0) });
 	}
-	else if (bContact && Words.EndsWith(TEXT("Foul")))
+	else if (bContact && BbBaseMap::IsFoul(Info))
 	{
 		// Called when it comes down (or leaves the field).
 		float T = Info.dead_s >= 0.f ? Info.dead_s : Info.duration_s;
@@ -2564,6 +2791,17 @@ void ABbDirector::NoteSlides()
 			++DiveShotIndex;
 			--DiveShotsLeft;
 		}
+	}
+	// -BbBaseMapShots: a play with a runner on or one left on, photographed along its length.
+	if (BaseMapShotsLeft > 0 && ((Before.bases & 7) != 0 || (Current.Info.bases & 7) != 0))
+	{
+		const float Marks[4] = { 0.2f, 0.4f, 0.6f, 0.85f };
+		for (int32 M = 0; M < 4; ++M)
+		{
+			ExtraShots.Emplace(Current.Info.duration_s * Marks[M], FString::Printf(TEXT("basemap_%02d_%d.png"), BaseMapShotIndex, M + 1));
+		}
+		++BaseMapShotIndex;
+		--BaseMapShotsLeft;
 	}
 	ExtraShots.Sort([](const TPair<float, FString>& A, const TPair<float, FString>& B) { return A.Key < B.Key; });
 }
@@ -3718,7 +3956,7 @@ void ABbDirector::Tick(float DeltaSeconds)
 				const FString Name = FPaths::Combine(FPaths::ProjectSavedDir(), TEXT("Shots"), ExtraShots[ExtraShotNext].Value);
 				FScreenshotRequest::RequestScreenshot(Name, false, false);
 				UE_LOG(LogBb, Display, TEXT("BB_EXTRA_SHOT %s play %u t %.2f"), *Name, Current.Info.play_index, At);
-				if (++ExtraShotNext == ExtraShots.Num() && SlideShotsLeft <= 0 && DiveShotsLeft <= 0)
+				if (++ExtraShotNext == ExtraShots.Num() && SlideShotsLeft <= 0 && DiveShotsLeft <= 0 && BaseMapShotsLeft <= 0)
 				{
 					BenchSeconds = FMath::Max(BenchSeconds, (float)Wall + 2.f);
 				}
@@ -4338,6 +4576,20 @@ void ABbDirector::Tick(float DeltaSeconds)
 				Bug.Balls = bHalfOver && bKnown ? 0 : Src.balls;
 				Bug.Strikes = bHalfOver && bKnown ? 0 : Src.strikes;
 				Bug.Bases = Src.bases;
+				// The base map follows the runners in the timeline at the playback clock (owner,
+				// 2026-11-21): a dot for each, a base lit while one is at it. Its end is the
+				// sim's result, so there is no jump when the play is known.
+				Bug.Dots.Reset();
+				if (bHave && Sim)
+				{
+					BbBaseMap::FMap Map;
+					BbBaseMap::Read(Frame, Sim->Park(), In, Before.bases & 7, Before.outs, T, Map);
+					Bug.Bases = Map.Lit;
+					for (const BbBaseMap::FDot& D : Map.Dots)
+					{
+						Bug.Dots.Add(D.At);
+					}
+				}
 				// The board in the outfield shows the same, with the line score read from the
 				// sim's log once a pitch.
 				const uint32 Through = In.play_index + (bKnown ? 1u : 0u);
