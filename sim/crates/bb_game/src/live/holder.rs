@@ -82,13 +82,17 @@ impl Sim<'_> {
         let leg = if through { self.f[relay.unwrap()].pos } else { base_pos(base) };
         let at_set = (fd.up_at + self.set_up_for(by, leg).set_s).max(self.t);
         let receiver = self.receiver_for(by, base);
-        // He is ready for the throw the holder would make, timed to it (a man covering a force
-        // base crosses it unless he is early for the throw: agent-models §5.5).
+        // When the man covering a force base gets there: he crosses it unless he is early for
+        // the throw by *his* belief of it (agent-models §5.3, §5.5), which the holder works out
+        // as the man does, from what the man sees of him (`feed_seen`; Opus dp-cover review
+        // P3-2: timed to the holder's own hurried release, the man was believed 0.1 s sooner
+        // than he came).
         let arrives = if through { v } else { d };
-        let receiver_at = self.receiver_ready(receiver, base, arrives);
+        let feed = if self.carrying_seen(by, base) { f64::INFINITY } else { self.feed_seen(by, base) };
+        let receiver_at = self.receiver_ready(receiver, base, feed);
         // A force is made at the touch: a man who takes the throw short of the bag has the out
         // when he gets to it (as a carry is timed to the touch radius).
-        let touch_at = if self.force_pending_at(base) { self.cover_reach(receiver, base, arrives, BAG_TOUCH_M).0 } else { f64::NEG_INFINITY };
+        let touch_at = if self.force_pending_at(base) { self.cover_reach(receiver, base, feed, BAG_TOUCH_M).0 } else { f64::NEG_INFINITY };
         ThrowRace {
             direct: d,
             via: v,

@@ -290,3 +290,24 @@ fn seed_51001_play_168_the_covering_shortstop_turns_the_double_play() {
     assert_eq!(calls.iter().map(|c| c.0).collect::<Vec<_>>(), vec![2, 1], "4-6-3: {calls:?}");
     assert!(calls[1].1 > 0.05, "the batter out at first with a margin: {calls:?}");
 }
+
+/// Seed 12 play 105 (Opus dp-cover review P1-1; frozen from the branch at `37bec49`): one out,
+/// a runner on first, a comebacker to the pitcher, who waits for the second baseman coming
+/// across to second from the first-base side. Released to arrive as the man came within 1.5 m
+/// of the bag, the feed passed him 1.75 m away and rolled into centre field (the runner took
+/// third). Held until it reaches the bag `RECEIVE_MARGIN_S` after he can take it there
+/// (agent-models §5.5), the throw is taken by the man it was thrown to, at second.
+#[test]
+fn seed_12_play_105_the_pitchers_feed_is_taken_by_the_covering_second_baseman() {
+    let (out, choices, _) = replay(include_str!("fixtures/a4/12-105.json"));
+    let feed = choices.iter().find(|c| c.holder & 0x7f == 1 && c.action == "throw").expect("the pitcher throws");
+    assert_eq!(feed.base, 2, "{feed:#?}");
+    let receiver = feed.options[feed.selected_option.unwrap()].receiver.expect("a receiver");
+    let next = out.facts.iter().find_map(|f| match f {
+        Input::GloveSecured { t, fielder, x, y } if *t > feed.t => Some((*fielder, *x, *y)),
+        _ => None,
+    });
+    let (who, x, y) = next.expect("someone takes the throw");
+    assert_eq!(who, receiver, "the feed was taken by {who} at ({x:.1}, {y:.1}), not by the receiver {receiver}");
+    assert!((x * x + (y - 38.795).powi(2)).sqrt() < 3.0, "taken at ({x:.1}, {y:.1}), not at second");
+}
