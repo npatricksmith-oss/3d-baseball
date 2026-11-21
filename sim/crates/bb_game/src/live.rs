@@ -2611,6 +2611,16 @@ fn angle_join(a_lat: f64, pos: Vec3, p: Vec3, a: Vec3, v: f64) -> f64 {
     jn
 }
 
+/// An outfielder's ready time at a base from a take arriving at `vel`, `to` the way to it
+/// (agent-models §5.2, the approach): the plant he owes (§5.5) and the throw at his arm, and,
+/// with a play there (`hop`), what coming through toward it adds to the throw, the crow hop's
+/// gain (`throwing::momentum_gain_mps`, as `throw_speed` gives it to a set throw). With no play
+/// the throw is not made at full effort and the gain is not counted.
+fn ready_at_base(vel: Vec3, to: Vec3, arm: f64, hop: bool) -> f64 {
+    let gain = if hop { throwing::momentum_gain_mps(vel, to) } else { 0.0 };
+    throwing::footwork_s(vel, to, false) + to.norm() / (arm + gain)
+}
+
 /// The angle from contact (agent-models §5.2): the best way for an outfielder in state `st` to
 /// come through take point `p` (the ball there at `tp` by his read) toward base `rb` at full
 /// speed, arriving at `v` along `along` if he went straight: the line to the base turned toward
@@ -2621,7 +2631,7 @@ fn angle_join(a_lat: f64, pos: Vec3, p: Vec3, a: Vec3, v: f64) -> f64 {
 /// share of the ball's motion there (`bv`, his read) that is across his way. (ready at the base,
 /// way, join, margin.) A toss is not angled for.
 #[allow(clippy::too_many_arguments)]
-fn angle_way(field: &Field, st: &Fielder, p: Vec3, tp: f64, v: f64, along: Vec3, slack: f64, bv: Vec3, rb: u8, arm: f64) -> Option<(f64, Vec3, f64, f64)> {
+fn angle_way(field: &Field, st: &Fielder, p: Vec3, tp: f64, v: f64, along: Vec3, slack: f64, bv: Vec3, rb: u8, arm: f64, hop: bool) -> Option<(f64, Vec3, f64, f64)> {
     let tb = base_pos(rb) - p;
     if m::hypot(tb.x, tb.y) <= throwing::TOSS_MAX_M || v < 1.0 {
         return None;
@@ -2647,8 +2657,7 @@ fn angle_way(field: &Field, st: &Fielder, p: Vec3, tp: f64, v: f64, along: Vec3,
         if slack < cost + lead {
             continue;
         }
-        let to = base_pos(rb) - p;
-        let r = tp + throwing::footwork_s(a * v_r, to, false) + to.norm() / arm;
+        let r = tp + ready_at_base(a * v_r, base_pos(rb) - p, arm, hop);
         if best.is_none_or(|b| r < b.0) {
             best = Some((r, a, jn, lead));
         }
@@ -3614,15 +3623,15 @@ impl<'a> Sim<'a> {
     /// runner. Ball away from you, 2nd base". (Planning for second with nobody on, he rounded a
     /// ball in the gap toward second while the batter went on for third, and owed the plant on
     /// the throw there: triples 0.82 → 0.90 a team-game.)
-    fn outfield_round_base(&self, t_take: f64, p: Vec3, arm: f64, transfer: f64) -> u8 {
-        let Some(r) = self.r.iter().filter(|r| !r.out && !r.scored).max_by(|a, b| a.s.total_cmp(&b.s)) else { return 2 };
+    fn outfield_round_base(&self, t_take: f64, p: Vec3, arm: f64, transfer: f64) -> (u8, bool) {
+        let Some(r) = self.r.iter().filter(|r| !r.out && !r.scored).max_by(|a, b| a.s.total_cmp(&b.s)) else { return (2, false) };
         let heading = ((r.s / BASE_L).floor() as u8 + 1).min(4);
         let play = |b: u8| {
             let runner_at = self.t + runner_eta((b as f64 * BASE_L - r.s).max(0.0), r.v);
             let ball_at = t_take + transfer + throw_time(arm, (base_pos(b) - p).norm());
             phi((runner_at - ball_at) / RACE_SIGMA_S) > RACE_MIN_P
         };
-        [(heading + 1).min(4), heading].into_iter().find(|&b| b >= 2 && play(b)).unwrap_or(2)
+        [(heading + 1).min(4), heading].into_iter().find(|&b| b >= 2 && play(b)).map_or((2, false), |b| (b, true))
     }
 
     /// The approach (agent-models §5.2): chaser `i`, going for a ball he will take on the
@@ -3660,12 +3669,12 @@ impl<'a> Sim<'a> {
         // The bases he plans for: an outfielder one (`outfield_round_base`, judged from his
         // intercept); an infielder the throws he expects (`throw_bases`), rounding a ball for
         // the nearest of them.
-        let (bases, of_base) = if i >= 6 {
+        let (bases, of_base, hop) = if i >= 6 {
             let (b, _) = pred.at(fd.t_int);
-            let ob = self.outfield_round_base(fd.t_int, Vec3::new(b.x, b.y, 0.0), arm, st.a.transfer);
-            (1u8 << ob, Some(ob))
+            let (ob, play) = self.outfield_round_base(fd.t_int, Vec3::new(b.x, b.y, 0.0), arm, st.a.transfer);
+            (1u8 << ob, Some(ob), play)
         } else {
-            (self.throw_bases(i), None)
+            (self.throw_bases(i), None, false)
         };
         let rounding = fd.approach.and_then(|a| a.round);
         let was = fd.approach.map_or(f64::INFINITY, |a| a.arrive);
@@ -3675,13 +3684,12 @@ impl<'a> Sim<'a> {
         #[cfg(not(test))]
         let no_round = false;
         // From a take at p arriving at `vel`, the ball at base b: his plant (§5.5, the across
-        // term and the toss rule included) and the throw at his arm. (Not the crow hop's gain:
-        // counted, it bought takes 0.16 s later on outfield pickups with nobody on, most of them
-        // throws made with no play, at less than full effort, where the gain is not had.)
-        let at_base = |p: Vec3, vel: Vec3, b: u8| {
-            let to = base_pos(b) - p;
-            throwing::footwork_s(vel, to, false) + to.norm() / arm
-        };
+        // term and the toss rule included) and the throw at his arm; an outfielder with a play at
+        // his base counts the crow hop's gain too (`ready_at_base`). (Not with no play, nor for
+        // an infielder: counted for every throw, it bought takes 0.16 s later on outfield pickups
+        // with nobody on, most of them throws made with no play, at less than full effort, where
+        // the gain is not had.)
+        let at_base = |p: Vec3, vel: Vec3, b: u8| ready_at_base(vel, base_pos(b) - p, arm, hop);
         // (Past the end of its path the ball lies still: a ball he reaches after it has stopped
         // has no deadline, and his time in hand there grows with the time he takes.)
         let t_last = fd.t_int + APPROACH_LOOK_S;
@@ -3773,7 +3781,7 @@ impl<'a> Sim<'a> {
                         }
                     }
                     if let Some(ob) = of_base.filter(|_| !no_round) {
-                        if let Some((r, a, jn, lead)) = angle_way(field, &st, p, t, v, along, slack, bv, ob, arm) {
+                        if let Some((r, a, jn, lead)) = angle_way(field, &st, p, t, v, along, slack, bv, ob, arm, hop) {
                             if angled.is_none_or(|b| r < b.0) {
                                 angled = Some((r, p, t, a, jn, lead));
                             }
@@ -3788,7 +3796,7 @@ impl<'a> Sim<'a> {
                             let lead = if bl > 1e-6 { ROUND_MARGIN_S * ((bv.x * a.y - bv.y * a.x) / bl).abs() } else { 0.0 };
                             let tb = base_pos(ob) - p;
                             if to.dot(a) > to.norm() * m::cos(ANGLE_KEEP_DEG.to_radians()) && slack >= lead && m::hypot(tb.x, tb.y) > throwing::TOSS_MAX_M {
-                                let r = t + throwing::footwork_s(a * v, tb, false) + tb.norm() / arm;
+                                let r = t + ready_at_base(a * v, tb, arm, hop);
                                 if angled.is_none_or(|b| r < b.0) {
                                     angled = Some((r, p, t, a, ap.behind, lead));
                                 }
@@ -3873,11 +3881,10 @@ impl<'a> Sim<'a> {
         }
         let arm = THROW_EFFORT * st.a.arm;
         let (b0, _) = pred.at(fd.t_int);
-        let rb = self.outfield_round_base(fd.t_int, Vec3::new(b0.x, b0.y, 0.0), arm, st.a.transfer);
-        let at_base = |p: Vec3, vel: Vec3| {
-            let to = base_pos(rb) - p;
-            throwing::footwork_s(vel, to, false) + to.norm() / arm
-        };
+        let (rb, hop) = self.outfield_round_base(fd.t_int, Vec3::new(b0.x, b0.y, 0.0), arm, st.a.transfer);
+        // Going straight and on a way alike, with a play at the base he counts the crow hop's
+        // gain on the throw (`ready_at_base`).
+        let at_base = |p: Vec3, vel: Vec3| ready_at_base(vel, base_pos(rb) - p, arm, hop);
         let was = fd.approach.filter(|ap| ap.angle).and_then(|ap| ap.round);
         // (ready, take point, ball time) going straight; (ready, take point, ball time, way, J).
         let mut straight: Option<(f64, Vec3, f64)> = None;
@@ -3913,7 +3920,7 @@ impl<'a> Sim<'a> {
             if straight.is_none_or(|b| r_straight < b.0) {
                 straight = Some((r_straight, p, tp));
             }
-            if let Some((r, a, jn, _)) = angle_way(field, &st, p, tp, v, along, slack, bv, rb, arm) {
+            if let Some((r, a, jn, _)) = angle_way(field, &st, p, tp, v, along, slack, bv, rb, arm, hop) {
                 if angled.is_none_or(|b| r < b.0) {
                     angled = Some((r, p, tp, a, jn));
                 }
