@@ -113,4 +113,13 @@ The counts are the same on main (`cornerif.py`: 4 plays in seeds 120–239). Not
 
 ## Resolution
 
-Open.
+Resolved (worker, 2026-11-21; commits on `work/cutoff-home-jobs`). No re-review planned: the fixes are small and test-covered.
+
+- **P2-1, fixed** (`1c06fdb`). Toward home an infielder known to be going for the ball blocks the early cutoff wherever the ball is (`infield_lets_go`, `b == 4`), and the others' convention likewise (`home_cutoff_by_convention`): the reviewer's first option. No better rule showed in the trace: whether the chaser will still field the ball in the infield is his own read, which teammates cannot know. Over every loose ball, game seeds 0–119: early cutoffs home on infielder-fielded balls with a runner in scoring position 12 → 1 (the one left follows a throw, with every base covered), with a runner on first 8 → 0. Cost: middle infielders' no-job time on outfielder-fielded singles 0.109 → 0.116 s (2B), 0.102 → 0.120 s (SS) a play; stretches over 0.1 s 77 → 85. New test `seed_8_play_208_the_first_baseman_holds_first_while_the_second_baseman_runs_the_ball_down` (fixture `8-208.json` from `e56ddc5`): fails on `e56ddc5` ("first open at 2.28 s"), passes now. The spec sentence (agent-models §5.7) and the note's row are corrected.
+- **P3-1, fixed** (`1c06fdb`). `one_back` now needs a first baseman who was on the cutoff this play (his shown jobs), the ball loose beyond the infield dirt or in an outfielder's hands, not thrown. Seed 32 play 33 and seed 77 play 10 trace identically to main; the nobody-on take-back signature is back to main's count; `a_retired_cutoff_man_with_no_job_stops` passes. The flicker of the deep-ball relay stays with the deep-relay item.
+- **P3-2, deferred** to TASKS §3 ("For the relay review"): second open up to 0.3 s when a single past the centre fielder makes the shortstop the relay man.
+- **P3-3, deferred** to TASKS §3 (`relay_job`'s cutoff home has no infield gate; on main too; seed 191 play 125).
+- **P3-4, fixed** (`0bc20d7`). The note is `docs/calibration/2026-11-21-cutoff-home-jobs.md`; links, the ledger (its row joins the 2026-11-21 section), the spec and the code comments follow.
+- **P3-5, fixed** (`17bdadf`). The note's §3 gives first-ball and every-loose-ball rows side by side and says which is which (`an_all.py`).
+
+Final build `1c06fdb` (later commits are docs and comments), sources touched: `cargo test --workspace --release` 512 passed, 0 failed, 4 ignored. Standard run, main → `e56ddc5` → final, seeds 0 [1000]: runs 4.08 → 4.07 → 4.08 [4.44 → 4.46 → 4.46], GB hits .310 → .309 → .310 [.316 → .315 → .315], reached on BIP 33.8% → 33.7% → 33.7% [34.0%]; within noise (ledger row of 2026-11-21, note §3).
