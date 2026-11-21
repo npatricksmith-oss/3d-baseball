@@ -162,7 +162,15 @@ All builds in this worktree's `sim/target` or, for copies, `sim/target/review-pr
 
 ## Resolution
 
-Open.
+Resolved for merge (Coordinator, 2026-11-21). The fixes are on `work/dp-cover`, final sim commit `acc17a9`; details in the Worker follow-up below.
+
+- **P1-1 fixed:** a held throw reaches the bag `RECEIVE_MARGIN_S` (0.1 s) after the receiver can take it. The pitcher's feeds to second not taken: 39 of 115 → 4 of 114 (main 0 of 66); every throw, seeds 0–99: 54 → 24 (main 22).
+- **P2-1 fixed:** the note and the ledger no longer blame the shortstop's carries.
+- **P2-2 deferred** (predates the branch; TASKS "Open sim work" §3): the carry's double-play estimate against the world, and the throw with no plant after a carry.
+- **P3-1, P3-2, P3-4 fixed. P3-3:** the visible carry fixed; the pivot clock from the catch and the full effort assumed are deferred in the same TASKS item.
+- **Question 2 deferred** (same TASKS item): no slide or break-up on the pivot man, behind the first-baseman-started and pitcher-started excess.
+- **No re-review:** the P1 fix is the change the reviewer tried in a test build, and it is covered by a fixture (seed 12 play 105) and a held-feed test. The Coordinator touched the sources and ran `cargo test --workspace` (497 passed) and the standard run (4.16 [4.59], rules warnings empty), matching the worker's figures.
+- **Open after merge:** runs −0.21 [−0.18] against main, about 0.04 explained (ledger §5).
 
 ### Worker follow-up
 
