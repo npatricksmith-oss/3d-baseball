@@ -244,7 +244,7 @@ All throwaway copies (the worktree example, `fin-src`, `fb-src`) were deleted. T
 
 ## Resolution
 
-Open.
+Resolved (Coordinator, 2026-11-21). Fixed on `work/mid-infield-jobs` (`1e3d045`, `2a72c11`; the worker follow-up below): P2-1 (toward second, a man out on the cutoff is taken off only by his partner's chase or a catch; out-back-out with nobody on 8 → 22 → 8 in 120 games), P3-1 (the second baseman's take of second uses the same estimate and holds), P3-3 (the flicker test fails on `792c3d1`; the comebacker test's comment says it is a regression guard) and P3-4 (the comebacker figure is a median 0.18 s, at most 0.30 s; position labels). Deferred to TASKS.md "Open sim work" §3: P3-2 (a second baseman covering second by his own choice taken off it for the cutoff on comebackers). No third review: the round is small and test-covered. The Coordinator merged main into the branch, touched the sources and ran `cargo test --workspace --release` (505 passed, 0 failed, 4 ignored) and the standard run (4.19 [4.59], ground-ball hits .308, matching the ledger row).
 
 ### Worker follow-up
 

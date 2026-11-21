@@ -159,7 +159,7 @@ All probe files were removed from the tree; outputs are kept in `sim/target/revi
 
 ## Resolution
 
-Open.
+Resolved (Coordinator, 2026-11-21). P1-1, P2-1, P2-2, P2-3, P3-1 and P3-2 were fixed on `work/mid-infield-jobs` (`a767730`, `ded08b0`, `792c3d1`; the worker follow-up below); P3-3 needed nothing. Because the P1 fix changed about 140 lines of `live.rs`, it had a focused [re-review](2026-11-21-opus-mid-infield-jobs-rereview.md), which confirmed P1-1 fixed on the same 120 games (second empty on infielder-fielded balls with a runner on first 4 → 40 → 5). Left open in TASKS.md "Open sim work" §3: false cutoffs with nobody on that an infielder then fields (mostly the pitcher's comebackers, kept by choice and explained in agent-models §5.7).
 
 ### Worker follow-up
 

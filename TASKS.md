@@ -1,6 +1,6 @@
 # Task List
 
-**Last updated:** 2026-11-21 (dp-cover merged; saved plays 71 and 102 next).
+**Last updated:** 2026-11-21 (mid-infield jobs and the base map merged; saved play 71 next).
 
 What is next and what is open. Other files hold the rest:
 
@@ -15,13 +15,13 @@ Status: `[ ]` not started · `[~]` partly done · `[?]` needs an owner decision
 
 ---
 
-## Resume here (2026-11-21)
+## Resume here (2026-11-21, evening)
 
-**State.** Nothing is waiting on the owner. Nothing is running. `work/dp-cover` is merged (`509e304`, pushed): a teammate's estimate of when a covering man can take a throw uses his visible motion; a man covering a force base crosses it at `COVER_CROSS_MPS` unless early for the throw; a held throw waits `RECEIVE_MARGIN_S` for the receiver. The owner's saved plays 66 (force at second) and 168 (4-6-3) of seed 51001 are fixed. Record: [dp-cover note](docs/calibration/2026-11-21-dp-cover.md), [review](docs/reviews/2026-11-21-opus-dp-cover-review.md) with its Resolution (no finding unresolved; deferred ones are in "Open sim work" §3). Standard runs 4.16 [4.59] (before 4.37 [4.77]).
+**State.** Nothing is waiting on the owner. Nothing is running. Merged and pushed today: `work/dp-cover`, `work/base-map` (client: runners as moving dots on the base map; [review](docs/reviews/2026-11-21-sonnet-base-map-review.md)) and `work/mid-infield-jobs` (owner's saved play 102: on a ground ball through the infield the ball-side middle infielder is the cutoff for second and the other covers; [note](docs/calibration/2026-11-21-mid-infield-jobs.md), [review](docs/reviews/2026-11-21-opus-mid-infield-jobs-review.md) and [re-review](docs/reviews/2026-11-21-opus-mid-infield-jobs-rereview.md), no finding unresolved). Standard runs 4.19 [4.59].
 
-**Open from it (ledger §5):** runs fell 0.21 [0.18], about 0.04 explained, not bisected: check the run-to-run noise on more seeds before tracing. Double plays 12.3% per opportunity (MLB 9.8%); pitcher-started 63.6% and first-baseman-started 35.4% of chances (MLB 19.6%, 21.5%): no slide or break-up on the pivot man.
+**Open (ledger §5):** runs fell 0.21 [0.18] with dp-cover, about 0.04 explained: check the run-to-run noise on more seeds before tracing. Double plays 12.3% per opportunity (MLB 9.8%): no slide or break-up on the pivot man.
 
-**Next:** the remaining saved-play fixes ("Open sim work" §3, [diagnosis note](docs/calibration/2026-11-20-saved-plays-51001.md)), one `live.rs` job each: (4) the middle infielders' jobs on a ball through the infield (play 102), then (3) tracking across the bounce (play 71, Opus). The warm worktree is `.claude/worktrees/runner-decision` (on the merged `work/dp-cover`). Then the approach follow-ups in §2.
+**Next:** tracking across the bounce (saved play 71, "Open sim work" §3, [diagnosis note](docs/calibration/2026-11-20-saved-plays-51001.md); Opus, one `live.rs` job). The warm worktree is `.claude/worktrees/runner-decision` (on the merged `work/mid-infield-jobs`). Then the middle infielders' remaining no-job cases (§3).
 
 ---
 
