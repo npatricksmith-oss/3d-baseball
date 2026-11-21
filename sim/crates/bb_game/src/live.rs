@@ -1539,6 +1539,10 @@ struct Fielder {
     /// plus one on which he made it (0 for none), and where by his estimate it will be fielded.
     /// Once made, his read and his estimates are not asked again on that ball.
     air: std::cell::Cell<(u64, Vec3)>,
+    /// When he last found this ball not a single that way (the ball plus one, his look count
+    /// `looks`, and the read it was on): he works it out again at his next look at the ball
+    /// (every `LOOK_S`) or on a new read, not every tick.
+    air_no: std::cell::Cell<(u64, u32, f64)>,
     /// Throws made this play (keys the throw-execution noise).
     throws: u32,
     /// Since he last secured the ball: when his set-up for a throw began (on his feet with
@@ -5247,6 +5251,11 @@ impl<'a> Sim<'a> {
         if (6..9).any(|j| matches!(self.known(j), (true, tier, true) if tier >= 2)) {
             return None;
         }
+        let no = (gen1, fd.looks, fd.read_at);
+        if fd.air_no.get() == no {
+            return None;
+        }
+        fd.air_no.set(no);
         let pred = fd.belief.as_ref()?;
         let land = pred.first_bounce()?.0;
         let depth = |p: Vec3| m::hypot(p.x, p.y);
@@ -5255,14 +5264,18 @@ impl<'a> Sim<'a> {
             return None;
         }
         // The outfielders first: on most balls in the air one of them catches it.
-        let (t, fp, of) = (6..9)
-            .map(|j| {
-                let (t, p) = self.seen_intercept(j, pred);
-                (t, p, j)
-            })
-            .min_by(|a, c| a.0.total_cmp(&c.0))
-            .expect("three outfielders");
-        if t < land || depth(fp) < RELAY_FROM_M || (depth(fp) > RELAY_DEEP_M && depth(fp) > depth(self.home[of])) {
+        let mut first: Option<(f64, Vec3, usize)> = None;
+        for j in 6..9 {
+            let (t, p) = self.seen_intercept(j, pred);
+            if t < land {
+                return None;
+            }
+            if first.is_none_or(|f| t < f.0) {
+                first = Some((t, p, j));
+            }
+        }
+        let (_, fp, of) = first.expect("three outfielders");
+        if depth(fp) < RELAY_FROM_M || (depth(fp) > RELAY_DEEP_M && depth(fp) > depth(self.home[of])) {
             return None;
         }
         if (0..6).any(|j| {
@@ -8238,6 +8251,7 @@ fn new_sim<'a>(inp: &'a LiveInput<'a>, st: &'a mut RulesState) -> Sim<'a> {
                 will_dive: std::cell::Cell::new(false),
                 through: std::cell::Cell::new(0),
                 air: std::cell::Cell::new((0, Vec3::ZERO)),
+                air_no: std::cell::Cell::new((0, 0, 0.0)),
                 throws: 0,
                 up_at: 0.0,
                 set_base: 0.0,
