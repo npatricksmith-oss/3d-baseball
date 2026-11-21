@@ -36,8 +36,8 @@ future changed game's earlier pitches.
 - `1048-193` and `136-13` (frozen 2026-11-20 from `af5825d`, `work/approach`, where the ball
   got by the fielder; Opus approach review P2-3): a comebacker the pitcher backed off to take
   deeper, and a grounder the second baseman was paced to meet exactly at a later hop. Each must
-  be fielded cleanly by that fielder (agent-models §5.2, the approach's margin and its rule for
-  a ball coming at him).
+  be fielded cleanly by that fielder (agent-models §5.2, the braked take timed as the movement
+  runs it, and the rule for a ball coming at him).
 - `207-66` and `1042-28` (frozen 2026-11-20 from `af5825d`; review P2-2): a pop-up to shallow
   left and a fly to right-centre that main catches and the set-up, chosen on a first read, lost.
   The outfielder must catch them in the air (agent-models §5.5, the set-up only on a settled

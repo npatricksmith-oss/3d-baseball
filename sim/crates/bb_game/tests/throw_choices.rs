@@ -233,8 +233,8 @@ fn seed_1048_play_193_the_pitcher_takes_the_comebacker_in_front_of_him() {
 fn seed_136_play_13_the_second_baseman_does_not_let_the_grounder_by() {
     // Agent-models §5.2, the approach (Opus approach review P2-3): a grounder to the second
     // baseman, nobody on, one out. On `af5825d`, paced to meet it exactly at a later hop, he let
-    // it pass 1.1 m from him and picked it up 4.1 s after contact. Planned with a margin and
-    // timed as the movement runs it, he fields it 1.65 s after contact.
+    // it pass 1.1 m from him and picked it up 4.1 s after contact. With the plan timed as the
+    // movement runs it, he fields it 1.65 s after contact.
     let (t, who, _) = first_taken(include_str!("fixtures/a4/136-13.json"));
     assert!(who == 4 && t < 2.0, "fielder {who} first took it {t:.2} s after contact");
 }
