@@ -28,6 +28,11 @@ future changed game's earlier pitches.
   through the right side that the centre and right fielders each left to the other;
   the right fielder must cut it off. It was a whole-game replay in `live.rs` until the
   catch-throw review fixes changed the game's earlier plays.
+- `155-23` and `264-109` (frozen 2026-11-20 from `8621f54`, `work/approach`, where both
+  were lost): flies with a runner on second and none out that main catches and the set-up
+  behind a fly dropped (a deep fly to left-centre, the centre fielder; a sinking liner, the
+  left fielder). The outfielder must catch them in the air (agent-models §5.5, the set-up's
+  timing; approach note §6).
 
 Expectations are the tactical cases in agent-models §5.6, not saved chosen
 destinations or simulation output hashes. `audit_intended_goal` in the separate
