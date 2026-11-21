@@ -82,7 +82,9 @@ impl Sim<'_> {
         let leg = if through { self.f[relay.unwrap()].pos } else { base_pos(base) };
         let at_set = (fd.up_at + self.set_up_for(by, leg).set_s).max(self.t);
         let receiver = self.receiver_for(by, base);
-        let receiver_at = self.receiver_ready(receiver, base);
+        // He is ready for the throw the holder would make, timed to it (a man covering a force
+        // base crosses it unless he is early for the throw: agent-models §5.5).
+        let receiver_at = self.receiver_ready(receiver, base, if through { v } else { d });
         ThrowRace {
             direct: d,
             via: v,
@@ -112,8 +114,20 @@ impl Sim<'_> {
             // §5.5), from what the holder sees.
             let pivot = if option.carry { by } else { option.receiver };
             let pf = &self.f[pivot];
-            let arriving = (base_pos(2) - pf.pos).norm() >= 0.6 && (option.carry || self.receiver_ready(pivot, 2) + 0.3 >= option.ball_at);
-            (pivot, self.pivot_release(pivot, fd.pos, option.ball_at, arriving), THROW_EFFORT * pf.a.arm)
+            let bag = base_pos(2);
+            let approach = Vec3::new(bag.x - pf.pos.x, bag.y - pf.pos.y, 0.0).normalized();
+            // He gets the bag at the later of the feed's arrival and his own arrival there, by
+            // the movement he will make (`cover_reach`, timed to this feed); a carrier brakes
+            // onto it at √(2·BRAKE·0.6 m) at the touch radius.
+            let (t_bag, arriving) = if (bag - pf.pos).norm() < BAG_TOUCH_M {
+                (option.ball_at, None)
+            } else if option.carry {
+                (option.ball_at, Some(approach * m::sqrt(2.0 * BRAKE * BAG_TOUCH_M)))
+            } else {
+                let (t_touch, v_touch) = self.cover_reach(pivot, 2, option.ball_at - 0.05, BAG_TOUCH_M);
+                (option.ball_at.max(t_touch), (t_touch + 0.3 >= option.ball_at).then_some(v_touch))
+            };
+            (pivot, self.pivot_release(pivot, fd.pos, t_bag, arriving), THROW_EFFORT * pf.a.arm)
         } else if option.carry {
             // The carrier still has the same setup clock after touching the bag.
             let to = base_pos(1) - base_pos(option.base);
@@ -128,24 +142,28 @@ impl Sim<'_> {
             (option.receiver, option.ball_at + RELAY_TRANSFER_FRAC * next.a.transfer, THROW_EFFORT * next.a.arm)
         };
         let receiver = self.receiver_for(next_holder, 1);
-        let ball_at = (release_at + throw_time(speed, (base_pos(1) - base_pos(option.base)).norm())).max(self.receiver_ready(receiver, 1)) + 0.05;
+        let arrives = release_at + throw_time(speed, (base_pos(1) - base_pos(option.base)).norm());
+        let ball_at = arrives.max(self.receiver_ready(receiver, 1, arrives)) + 0.05;
         Some((phi((runner_at - ball_at) / RACE_SIGMA_S), ball_at))
     }
 
     /// When the pivot man at second lets the ball go for first, as a teammate judges it
-    /// (agent-models §5.5): he has the bag at `t_bag`; still `arriving`, he is braking into it
-    /// along his approach (√(2·BRAKE·0.6 m) at the touch radius, the movement law) and faces
-    /// that way; already there, he stands facing the feed from `feed_from`. His `Transfer`
-    /// is known to his teammates.
-    pub(super) fn pivot_release(&self, pivot: usize, feed_from: Vec3, t_bag: f64, arriving: bool) -> f64 {
+    /// (agent-models §5.5): he has the bag at `t_bag`; still `arriving` at it, he takes it moving
+    /// with that velocity (braking onto it, or crossing it, by the movement law: `cover_reach`)
+    /// and faces the way he moves (faster than `PIVOT_FACE_MIN_MPS`), else the feed; already
+    /// there, he stands facing the feed from `feed_from`. His `Transfer` is known to his
+    /// teammates.
+    pub(super) fn pivot_release(&self, pivot: usize, feed_from: Vec3, t_bag: f64, arriving: Option<Vec3>) -> f64 {
         let pf = &self.f[pivot];
         let bag = base_pos(2);
         let to_first = base_pos(1) - bag;
-        let approach = Vec3::new(bag.x - pf.pos.x, bag.y - pf.pos.y, 0.0).normalized();
-        let (face, vel) = if arriving {
-            (approach, approach * m::sqrt(2.0 * BRAKE * 0.6))
-        } else {
-            (Vec3::new(feed_from.x - bag.x, feed_from.y - bag.y, 0.0).normalized(), Vec3::ZERO)
+        let feed_face = Vec3::new(feed_from.x - bag.x, feed_from.y - bag.y, 0.0).normalized();
+        let (face, vel) = match arriving {
+            Some(v) => {
+                let v = Vec3::new(v.x, v.y, 0.0);
+                (if v.norm() > PIVOT_FACE_MIN_MPS { v.normalized() } else { feed_face }, v)
+            }
+            None => (feed_face, Vec3::ZERO),
         };
         let su = SetUp::pivot(throwing::pivot_s(pf.a.transfer), throwing::turn_extra_s(face, to_first, pf.a.throws), throwing::exchange_footwork_s(vel, to_first, false));
         t_bag + su.set_s
