@@ -642,14 +642,17 @@ const BOUNCE_SPIN_RPM: f64 = 1000.0;
 /// A rolling ball (agent-models §5.1): how far its slowing may be off the rolling law he
 /// believes, as an extra level acceleration he learns from his looks: its prior σ per level
 /// axis, m/s² [E, unsourced: grass's μ_r less dirt's times g, 0.6 m/s², the difference a
-/// roll's surface makes; a ball stopped by the wall slows by about as much more], and its
-/// drift (white noise intensity, m²/s⁵), (σ/2)² over a 2 s roll [E].
+/// roll's surface makes; a ball stopped by the wall slows by about as much more].
 const ROLL_SLOW_PRIOR: f64 = 0.6;
 /// After a bounce (agent-models §5.1, across the bounces), a look reads a ball's velocity no
 /// better than that of a ball going this fast, m/s [E, unsourced: a speed read is a fraction
 /// of the speed only while the ball is moving well; without the floor a ball coming to rest
 /// was read exactly, and the filter's gain on it ran away].
 const LOOK_VEL_FLOOR_MPS: f64 = 3.0;
+/// A rolling ball (agent-models §5.1): the drift of the learned extra acceleration, white noise
+/// intensity per level axis, m²/s⁵: (`ROLL_SLOW_PRIOR`/2)² over a 2 s roll [E]. Put on both
+/// level axes, though only its part along the roll moves the ball (an allowance across, about
+/// 0.3 m of position σ over 2 s).
 const ROLL_DRIFT: f64 = ROLL_SLOW_PRIOR * ROLL_SLOW_PRIOR / 8.0;
 /// The persistent part of a look's error (agent-models §5.1): this fraction of the play's
 /// fixed draws at the snapshot read's σ, on every look (a misjudged angle and fraction of the
@@ -934,7 +937,7 @@ struct Track {
 enum Phase {
     /// Off the bat, until its first bounce or a wall.
     First,
-    /// In the air after a bounce, a wall or a glove.
+    /// In the air after a bounce (a wall or a glove ends the track).
     Hop,
     /// Rolling on the ground: its height and vertical velocity known.
     Roll,
@@ -1240,7 +1243,7 @@ impl Track {
     /// persistent error (the persistent error's size and directions depend on where the ball
     /// is and how fast it goes; an extended Kalman update, the Jacobian by central
     /// differences).
-    fn see(&mut self, look: &Look, z: Vec3) -> bool {
+    fn see(&mut self, look: &Look, z: Vec3) -> Result<(), f64> {
         let (r, v, b) = (self.x[0], self.x[1], self.b);
         let (zhat, rm) = look.expect(r, v, b);
         // H, 3 × TN (the learned acceleration does not enter a look).
@@ -1268,12 +1271,12 @@ impl Track {
         // P Hᵀ, TN × 3.
         let pht: [[f64; 3]; TN] = core::array::from_fn(|i| core::array::from_fn(|ax| (0..TN).map(|j| p[i][j] * h[ax][j]).sum()));
         let s = Mat3::from_rows(core::array::from_fn(|ax| core::array::from_fn(|bx| (0..TN).map(|j| h[ax][j] * pht[j][bx]).sum()))) + rm;
-        let Some(si) = s.inverse() else { return true };
+        let Some(si) = s.inverse() else { return Ok(()) };
         let e = comps(z - zhat);
         // A look that his estimate cannot explain at all (agent-models §5.1, `TRACK_GATE`).
         let nis: f64 = (0..3).map(|a| (0..3).map(|c| e[a] * si.r[a][c] * e[c]).sum::<f64>()).sum();
         if self.phase != Phase::First && nis > TRACK_GATE {
-            return false;
+            return Err(e.iter().map(|x| x * x).sum());
         }
         let k: [[f64; 3]; TN] = core::array::from_fn(|i| core::array::from_fn(|c| (0..3).map(|ax| pht[i][ax] * si.r[ax][c]).sum()));
         let dx: [f64; TN] = core::array::from_fn(|i| k[i][0] * e[0] + k[i][1] * e[1] + k[i][2] * e[2]);
@@ -1291,15 +1294,62 @@ impl Track {
         }
         sym_n(&mut np);
         self.p = np;
-        true
+        Ok(())
+    }
+
+    /// A look his estimate cannot explain (agent-models §5.1, the gate): he keeps the track,
+    /// but what he believed of the ball's position (`vel` false) or velocity (`vel` true) is
+    /// let go. That block is taken again from the look `z` itself, uncorrelated with the rest,
+    /// its variance per axis the look's squared error `e2` (so the look explains it again; the
+    /// look's own σ, which scales with the speed, is then worked out at the speed it shows), and
+    /// the learned acceleration goes back to its prior; a velocity let go also widens the
+    /// position by what it may have carried it wrong since his last look (`e2`·`LOOK_S`²). Then
+    /// the look is taken again. On the ground only the level components move.
+    fn let_go(&mut self, vel: bool, e2: f64, z: Vec3) {
+        let level = if self.phase == Phase::Roll { 2 } else { 3 };
+        let base = if vel { 3 } else { 0 };
+        let a_prior = if self.phase == Phase::Roll { ROLL_SLOW_PRIOR } else { CURVE_PRIOR };
+        for k in (0..level).flat_map(|ax| [base + ax, 6 + ax]) {
+            for j in 0..TN {
+                self.p[k][j] = 0.0;
+                self.p[j][k] = 0.0;
+            }
+        }
+        for ax in 0..level {
+            self.p[base + ax][base + ax] = e2;
+            self.p[6 + ax][6 + ax] = a_prior * a_prior;
+        }
+        // A velocity that was wrong has carried his position wrong since his last look, by as
+        // much as that error over the look's interval.
+        if vel {
+            for ax in 0..level {
+                self.p[ax][ax] += e2 * LOOK_S * LOOK_S;
+            }
+        }
+        let blk = &mut self.x[if vel { 1 } else { 0 }];
+        *blk = if level == 2 { Vec3::new(z.x, z.y, blk.z) } else { z };
+        self.x[2] = Vec3::ZERO;
+    }
+
+    /// A ball he sees still rolling (agent-models §5.1): however sure his estimate is that it
+    /// has slowed or stopped, its level velocity keeps at least `floor` of σ, so a look that
+    /// shows it moving can move it (a rolling estimate that has stopped has no velocity
+    /// variance left, and no look could start it again).
+    fn seen_moving(&mut self, floor: f64) {
+        for k in 3..5 {
+            if self.p[k][k] < floor * floor {
+                self.p[k][k] = floor * floor;
+            }
+        }
     }
 }
 
 /// After a bounce, a look whose error against his estimate, in units of his own expected
-/// spread (its normalised innovation squared, three degrees of freedom), is beyond this ends
-/// his track (agent-models §5.1): his estimate has gone wrong (the bounce and the roll are
-/// far from linear), and he reads the ball by the snapshot read [E: χ² with 3 degrees of
-/// freedom passes 50 once in 10¹⁰ looks of an honest track].
+/// spread (its normalised innovation squared, three degrees of freedom), is beyond this
+/// (agent-models §5.1, the gate): his estimate has gone wrong (the bounce and the roll are far
+/// from linear), and he lets go of what he believed of that block ([`Track::let_go`]) and
+/// takes the look again [E: χ² with 3 degrees of freedom passes 50 once in 10¹⁰ looks of an
+/// honest track].
 const TRACK_GATE: f64 = 50.0;
 
 /// The step for a look's Jacobian in the ball's position (m) and velocity (m/s) [E: numerical,
@@ -3323,10 +3373,25 @@ impl<'a> Sim<'a> {
                 (Some(tr), _) => {
                     let mut tr = tr.run_to(env, t, t_c);
                     // A ball seen at rest.
-                    if tr.phase == Phase::Roll && bv == Vec3::ZERO {
-                        tr.at_rest();
+                    if tr.phase == Phase::Roll {
+                        if bv == Vec3::ZERO {
+                            tr.at_rest();
+                        } else {
+                            tr.seen_moving(fd.a.read_vel_frac * LOOK_VEL_FLOOR_MPS);
+                        }
                     }
-                    if !(tr.see(&lp, zp) && tr.see(&lv, zv)) {
+                    // A look he cannot explain lets go of what he believed of that block
+                    // (the gate), and is taken again; only if even then it cannot be
+                    // explained (never seen in games 0–199) does he fall back on the snapshot
+                    // read.
+                    let mut ok = true;
+                    for (look, z) in [(&lp, zp), (&lv, zv)] {
+                        if let Err(e2) = tr.see(look, z) {
+                            tr.let_go(look.vel, e2, z);
+                            ok &= tr.see(look, z).is_ok();
+                        }
+                    }
+                    if !ok {
                         self.f[i].track = None;
                         self.f[i].looks = kp + 1;
                         continue;
@@ -8060,8 +8125,9 @@ fn simulate_live_inner(inp: &LiveInput, st: &mut RulesState) -> LiveOutput {
             sim.emit(Input::PlayTimeout { t });
             break;
         }
-        // Every fielder who has reacted keeps looking at a ball on its first flight
-        // (agent-models §5.1, the tracking read).
+        // Every fielder who has reacted and tracks the ball keeps looking at it: from its first
+        // flight, across its bounces, until a wall, a touch or a catch (agent-models §5.1, the
+        // tracking read).
         if matches!(sim.ball, Ball::Free { .. }) {
             sim.take_looks();
         }
@@ -11449,7 +11515,9 @@ mod tests {
     // his read jumped to 15 m off and under the ground, he turned for the wall at 2.3 s and the
     // ball passed 5.7 m from him (a triple). Across the bounces (agent-models §5.1): his read a
     // moment after the bounce is no worse than just before it and within a metre by 3.3 s, and
-    // he runs at the ball's line: it passes within 2.5 m of him.
+    // he runs at the ball's line: it passes within 4 m of him (1.9–2.1 m measured; the margin
+    // is for changes elsewhere in his movement, and still catches the old turn for the wall,
+    // which left him 5.7 m from it).
     #[test]
     fn the_owners_rolling_ball_seed_51001_play_71_is_played_at_its_line() {
         let mut st = RulesState::default_fixture();
@@ -11501,7 +11569,7 @@ mod tests {
         assert!(late.0.abs() < 1.0, "at 3.3 s: {late:?}");
         let (t_near, near) = recs.iter().filter(|r| r.t < 4.0).map(|r| (r.t, (Vec3::new(r.pos.x, r.pos.y, 0.0) - Vec3::new(path.at(r.t).0.x, path.at(r.t).0.y, 0.0)).norm())).min_by(|a, b| a.1.total_cmp(&b.1)).unwrap();
         println!("the ball passes {near:.2} m from him at {t_near:.2} s");
-        assert!(near < 2.5, "the ball passes {near:.2} m from him at {t_near:.2} s");
+        assert!(near < 4.0, "the ball passes {near:.2} m from him at {t_near:.2} s");
     }
 
     /// Fielder `CF`, standing 12 m short of where a ball hit at `la` degrees and `speed` m/s
@@ -11669,8 +11737,8 @@ mod tests {
                     for k in 0..4 {
                         tr.p[TB + k][TB + k] = 0.0;
                     }
-                    tr.see(&lp, zp);
-                    tr.see(&lv, zv);
+                    let _ = tr.see(&lp, zp);
+                    let _ = tr.see(&lv, zv);
                     for (m_, truth) in [(0, r), (1, v)] {
                         let e = tr.x[m_] - truth;
                         let pm = tr.blk(m_, m_);
@@ -12040,6 +12108,81 @@ mod tests {
                 }
             }
         }
+    }
+
+    // Agent-models §5.1, the gate (Opus bounce-track review P2-1, P3-2). A fielder whose
+    // rolling estimate has gone wrong keeps the ball: grounders and low liners to the outfield
+    // over a grid of directions, 10 plays of draws each, every outfielder tracking it. Half a
+    // second after the ball begins to roll, each estimate is told the ball has stopped (its
+    // velocity zero and sure, as a rolling estimate that stopped itself early is), while the
+    // ball rolls on. Against where the ball truly is, along his line of sight: (1) he keeps his
+    // track (no fall to the snapshot read, which before put a ball at rest at the wall 19 m
+    // beyond it); (2) his error never grows past what the ball covers before his next look plus
+    // his error before (|e₀| + 0.2 s × its speed + 0.5 m: up to two look intervals, the first
+    // look after the stop seeing a ball ahead of a believed stop); (3) half a second on it is within
+    // three of his own σ there, or within 0.5 m of his error before (a look shows it moving,
+    // his read follows, and he knows how much he has lost).
+    #[test]
+    fn a_wrong_rolling_estimate_is_let_go_of_and_the_ball_kept() {
+        let fx = fixture(&[]);
+        let mut cases = 0;
+        let mut worst_late = 0.0f64;
+        for (la, spray) in [(-2.0f64, -20.0f64), (-2.0, 15.0), (4.0, -10.0), (4.0, 25.0), (8.0, 0.0)] {
+            for play in 0..10 {
+                let (lr, sr) = (la.to_radians(), spray.to_radians());
+                let mut inp = hit(&fx, Vec3::new(m::sin(sr), m::cos(sr), 0.0) * (42.0 * m::cos(lr)) + Vec3::new(0.0, 0.0, 42.0 * m::sin(lr)));
+                inp.play = play;
+                let mut st = fx.st.clone();
+                let mut sim = new_sim(&inp, &mut st);
+                let Ball::Free { path, .. } = &sim.ball else { unreachable!() };
+                let path = path.clone();
+                let Some(t_roll) = path.segments.iter().find_map(|sg| match sg {
+                    bb_physics::ground::Segment::Roll { t0, .. } => Some(*t0),
+                    _ => None,
+                }) else {
+                    continue;
+                };
+                let (t_cut, t_end) = (t_roll + 0.5, t_roll + 1.5);
+                if path.t_end() < t_end {
+                    continue;
+                }
+                let mut e0 = [None; 9];
+                sim.t = inp.t_contact;
+                while sim.t < t_end {
+                    sim.take_looks();
+                    let (b, bv) = path.at(sim.t);
+                    for i in 6..9 {
+                        let Some(tr) = sim.track_now(i) else {
+                            assert!(e0[i].is_none(), "LA {la} spray {spray} play {play}, fielder {i}: the track was dropped at {:.2} s", sim.t);
+                            continue;
+                        };
+                        let l = Vec3::new(b.x - sim.f[i].pos.x, b.y - sim.f[i].pos.y, 0.0).normalized();
+                        let e = (tr.r() - b).dot(l);
+                        if sim.t >= t_cut && e0[i].is_none() && tr.phase == Phase::Roll {
+                            // His estimate believes the ball has stopped.
+                            let mut stopped = sim.f[i].track.unwrap();
+                            stopped.at_rest();
+                            sim.f[i].track = Some(stopped);
+                            e0[i] = Some(e);
+                            cases += 1;
+                            continue;
+                        }
+                        if let Some(e_0) = e0[i] {
+                            let bound = f64::abs(e_0) + 0.2 * bv.norm() + 0.5;
+                            assert!(e.abs() <= bound, "LA {la} spray {spray} play {play}, fielder {i} at {:.2} s: error {e:.2} m, bound {bound:.2} m", sim.t);
+                            if sim.t >= t_cut + 0.5 {
+                                let sd = m::sqrt(l.dot(tr.blk(0, 0) * l));
+                                worst_late = worst_late.max(e.abs());
+                                assert!(e.abs() <= (3.0 * sd).max(e_0.abs() + 0.5), "LA {la} spray {spray} play {play}, fielder {i} at {:.2} s: error {e:.2} m half a second on (σ {sd:.2} m), {e_0:.2} m before", sim.t);
+                            }
+                        }
+                    }
+                    sim.t += DT;
+                }
+            }
+        }
+        println!("{cases} estimates stopped by hand; half a second on and after, the error at most {worst_late:.2} m");
+        assert!(cases >= 60, "{cases} cases");
     }
 
     // Agent-models §5.1, across the bounces (owner's saved play 71 of seed 51001): a seen
