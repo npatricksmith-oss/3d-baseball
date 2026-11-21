@@ -39,7 +39,7 @@ The batter stops at first in both. Nobody goes out toward third.
 - **A ball the outfielder misplays, or one rolling to the wall.** Once the loose ball is deeper than the chaser and his spot, it is a deep ball: the relay man (the middle infielder nearer the relay spot) goes out toward third at the relay spot (test `a_ground_single_fielded_deep_is_not_a_deep_ball`, a grounder fielded at 110 m).
 - **A fly over an outfielder** is still deep (same test: a ball first down at 80 m, and one caught and held).
 - **A line-drive or fly single with nobody on** still has no cutoff man for second (not changed; TASKS, open).
-- **A comebacker.** Toward second the pitcher is left out of the estimate (not of the known chase), so on a ball up the middle he may reach the ball-side man starts out on its line at the first call, as on play 102; if the pitcher fields it the job ends with the catch. Measured: 44 such balls in 120 games, out a median 0.02 s, at most 0.18 s, before the catch; on 5 the shortstop was going for it too, not yet known, and second stood empty for the last 0.1–0.2 s (nobody on, the play at first). Counting the pitcher would remove these and hold the second baseman on play 102 still until the ball passed the mound (about 0.3 s); I kept the first-call departure. Toward third the pitcher counts, so the shortstop stays on second (test `a_comebacker_sends_nobody_out_and_leaves_second_covered`).
+- **A comebacker.** Toward second the pitcher is left out of the estimate (not of the known chase), so on a ball up the middle he may reach the ball-side man starts out on its line at the first call, as on play 102; if the pitcher fields it the job ends with the catch. Measured: 44 such balls in 120 games, on the cutoff a median 0.18 s, at most 0.30 s, before the catch (under half a metre of running from a set start; first given here as a median 0.02 s, which was the minimum, Opus re-review P3-4); on 5 the shortstop was going for it too, not yet known, and second stood empty for the last 0.1–0.2 s (nobody on, the play at first). Counting the pitcher would remove these and hold the second baseman on play 102 still until the ball passed the mound (about 0.3 s); I kept the first-call departure. Toward third the pitcher counts, so the shortstop stays on second (test `a_comebacker_sends_nobody_out_and_leaves_second_covered`).
 - **One middle infielder going for the ball.** His partner stays at, or goes to, second, from a cutoff or from no job; only in the 0.3 s before the chase is known can both be away.
 
 ## 4. Measurements
@@ -82,7 +82,7 @@ The first build sent the through-job man out on his estimate alone. That estimat
 | force at second / double plays (267, 265, 265 chances) | 199 / 114 | 199 / 110 | 200 / 114 |
 | Nobody on: ground balls | 1,939 | 1,941 | 1,946 |
 | early cutoffs | 0 | 412 | 308 |
-| of them fielded by an infielder | 0 | 145 | 64 (pitcher 44, 3B 5, 2B 5, SS 6, 1B 4; none with an infielder known to be going) |
+| of them fielded by an infielder | 0 | 145 | 64 (pitcher 44, 1B 5, 2B 5, 3B 6, SS 4; none with an infielder known to be going; labels corrected, Opus re-review P3-4) |
 | second uncovered while loose | 83 | 42 | 43 |
 | the same, ball fielded by an infielder | 9 | 14 | 14 (5 of them the comebackers of §3) |
 | Runner in scoring position: second uncovered while loose | 12 | 9 | 8 |
@@ -90,6 +90,31 @@ The first build sent the through-job man out on his estimate alone. That estimat
 Ground balls an outfielder fields (game seeds 0–59, `an3.py`): second uncovered while loose 46 → 22 → 14.
 
 Not separated: how much of the main-to-final drop in second uncovered with nobody on (83 → 43) is the cutoff man and how much the re-call fix (§1 item 5).
+
+## 6. The Opus re-review's fixes (2026-11-21, [re-review](../reviews/2026-11-21-opus-mid-infield-jobs-rereview.md))
+
+- **P2-1, the out-back-out with nobody on.** At the first call no chase is known yet, so toward second the man went out on his estimate alone; when a chase in front of the ball became known 0.3 s later (the pitcher, the first or third baseman) he was pulled back, and went out again once the ball had passed that man. Now, toward second, once out only his partner's chase or a catch takes him off. Toward third (a runner on first) nothing changed: a known chase in front of the ball still sends the shortstop back to second.
+- **P3-1, the second baseman's takeover of second.** It now asks the same estimate of the other infielders as the shortstop's departure (the pitcher counted) and, once he is on second, only a known chase in front of the ball or the shortstop's chase ends it.
+- **P3-3, tests.** `the_through_cutoff_does_not_flicker` checks the out-back-out directly (a cutoff, a stretch with no job, a base or a backup in which neither he nor his partner went for the ball, then a cutoff again), over turns of play 102 every degree near the middle (the first review's +3° among them), and three nobody-on plays frozen from `792c3d1` (seeds 33/150, 10/52, 18/91; fixtures `tests/fixtures/a4/33-150.json`, `10-52.json`, `18-91.json`); it fails on `792c3d1` (seed 33 play 150) and passes now. Its second-base check allows a stretch of at most the 0.3 s knowledge lag (a partner who starts for the ball just as the shortstop leaves). The comebacker test's comment says it is a regression guard only.
+- **P3-2** (a second baseman covering second by his own choice taken off it for the cutoff on two comebackers) and the 5 comebackers with both middle infielders away: TASKS.md.
+
+Game seeds 0–119, every ground ball (the reviewer's probe and scripts: `an.py`, `rr_flick2.py`, and counts of the second baseman going from second to no job, of time on the cutoff before the pitcher's catch): main → `792c3d1` → final.
+
+| | Main | `792c3d1` | Final |
+|---|---|---|---|
+| Out-back-out within 1 s while loose, nobody on | 8 | 22 | **8** |
+| the same, runner on first; runner in scoring position | 1; 10 | 3; 3 | 3; 3 |
+| Runner on first: second baseman from second to no job while loose (of them fielded by an infielder) | 17 (0) | 56 (32) | **16 (1)** |
+| Runner on first: second uncovered while loose, all ground balls; ball fielded by an infielder | 52; 4 | 42; 5 | 41; **5** |
+| Runner on first: early cutoffs; fielded by an infielder | 0; 0 | 25; 0 | 25; **0** |
+| Runner on first: forces at second / double plays (chances) | 199 / 114 (267) | 200 / 114 (265) | 198 / 113 (263) |
+| Nobody on: early cutoffs; fielded by an infielder | 0; 0 | 308; 64 | 306; 66 (P 44, 1B 5, 2B 6, 3B 6, SS 5) |
+| Nobody on: second uncovered while loose; ball fielded by an infielder | 83; 9 | 43; 14 | 43; 14 |
+| Nobody on, the pitcher's comebackers: time on the cutoff before his catch, median / max | | 0.18 / 0.30 s | 0.18 / 0.30 s |
+
+Ground balls an outfielder fields (seeds 0–59): second uncovered while loose 46 → 14 → 14.
+
+Standard run on the final build (seeds 0 [1000]): runs 4.19 [4.59] (main 4.16 [4.59], `792c3d1` 4.20 [4.61]); GB hits .308 [.321], LD .672 [.673], FB .102 [.098]; reached on BIP 33.7% [34.5%]; out of play after a throw 0.103 [0.133] a game; time 4,674 [4,745] ms per game per core. Within the seed sets' noise. `cargo test --workspace --release`: 505 passed, 0 failed; play 102 and its mirror still fixed.
 
 ## Reproduce
 
