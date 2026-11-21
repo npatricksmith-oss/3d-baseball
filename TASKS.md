@@ -1,6 +1,6 @@
 # Task List
 
-**Last updated:** 2026-11-20 (approach merged; saved-play fixes next).
+**Last updated:** 2026-11-21 (dp-cover merged; saved plays 71 and 102 next).
 
 What is next and what is open. Other files hold the rest:
 
@@ -15,11 +15,13 @@ Status: `[ ]` not started · `[~]` partly done · `[?]` needs an owner decision
 
 ---
 
-## Resume here (2026-11-20, night)
+## Resume here (2026-11-21)
 
-**State.** Nothing is waiting on the owner. Nothing is running. `work/approach` is merged (`8fd90ad`, pushed): fielders slow into a ball they will throw and come through it (Q32's across and drift terms), the set-up behind a fly on a settled read, rounding the ball (Q33, built, almost never pays in games); the angle from contact was built, tried and removed. The Opus review's Resolution is in [the review](docs/reviews/2026-11-20-opus-approach-review.md); the [approach note](docs/calibration/2026-11-20-approach.md) §5–§7 has the record. Standard runs 4.37 [4.77] (before 4.27 [4.57]); triples 1.02 → 0.85; first to third on singles 36.4% [36.3%] against MLB 31.7%, a consequence of Q32's across charge (review Q4); outfield pickup-to-release 1.05 → 1.12 s.
+**State.** Nothing is waiting on the owner. Nothing is running. `work/dp-cover` is merged (`509e304`, pushed): a teammate's estimate of when a covering man can take a throw uses his visible motion; a man covering a force base crosses it at `COVER_CROSS_MPS` unless early for the throw; a held throw waits `RECEIVE_MARGIN_S` for the receiver. The owner's saved plays 66 (force at second) and 168 (4-6-3) of seed 51001 are fixed. Record: [dp-cover note](docs/calibration/2026-11-21-dp-cover.md), [review](docs/reviews/2026-11-21-opus-dp-cover-review.md) with its Resolution (no finding unresolved; deferred ones are in "Open sim work" §3). Standard runs 4.16 [4.59] (before 4.37 [4.77]).
 
-**Next:** the saved-play fixes ("Open sim work" §3, [diagnosis note](docs/calibration/2026-11-20-saved-plays-51001.md)), one `live.rs` job at a time; then the approach follow-ups in §2.
+**Open from it (ledger §5):** runs fell 0.21 [0.18], about 0.04 explained, not bisected: check the run-to-run noise on more seeds before tracing. Double plays 12.3% per opportunity (MLB 9.8%); pitcher-started 63.6% and first-baseman-started 35.4% of chances (MLB 19.6%, 21.5%): no slide or break-up on the pivot man.
+
+**Next:** the remaining saved-play fixes ("Open sim work" §3, [diagnosis note](docs/calibration/2026-11-20-saved-plays-51001.md)), one `live.rs` job each: (4) the middle infielders' jobs on a ball through the infield (play 102), then (3) tracking across the bounce (play 71, Opus). The warm worktree is `.claude/worktrees/runner-decision` (on the merged `work/dp-cover`). Then the approach follow-ups in §2.
 
 ---
 
