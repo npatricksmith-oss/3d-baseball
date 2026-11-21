@@ -46,6 +46,8 @@ class UMaterialInterface;
  *               and knees, getting up; then quit)
  *               -BbSlideShots=<n> (photograph n slides: going down, sliding, at the bag, sitting
  *               up, getting up; then quit; with -BbStagingLog each slide is logged as BB_SLIDE)
+ *               -BbBaseMapShots=<n> (photograph n plays with runners four times along the play, basemap_<n>_<k>.png,
+ *               then quit)
  *               -BbAnimTest (stock clips looping) or -BbAnimTest=dive (dive pose candidates;
  *               -BbAnimFrac=<0..1> -BbAnimTilt=<degrees>)
  *               -BbBenchSeconds=<s> (log frame rate and memory, then quit)
@@ -757,6 +759,9 @@ private:
 	int32 DiveShotIndex = 0;
 	/** -BbSlideShots=<n>: the same for the next n slides. */
 	int32 SlideShotsLeft = 0;
+	/** -BbBaseMapShots: plays with runners still to photograph (four pictures each, the score bug's
+	 *  base map along the play), and the next one's number. */
+	int32 BaseMapShotsLeft = 0, BaseMapShotIndex = 0;
 	int32 SlideShotIndex = 0;
 	/** The moments of the pitch on screen that those two photograph (play time, file name),
 	 *  in time order, and the next to take; which slide and which diver the camera is on. */

@@ -461,6 +461,7 @@ void ABbDirector::BeginPlay()
 	FParse::Value(Cmd, TEXT("BbBenchSeconds="), BenchSeconds);
 	FParse::Value(Cmd, TEXT("BbDiveShots="), DiveShotsLeft);
 	FParse::Value(Cmd, TEXT("BbSlideShots="), SlideShotsLeft);
+	FParse::Value(Cmd, TEXT("BbBaseMapShots="), BaseMapShotsLeft);
 	FParse::Value(Cmd, TEXT("BbBoxShots="), BoxShotAtPlay);
 	FParse::Value(Cmd, TEXT("BbBoxHold="), BoxHoldS);
 	FParse::Value(Cmd, TEXT("BbParkShotsAt="), ParkShotsAt);
@@ -2712,6 +2713,17 @@ void ABbDirector::NoteSlides()
 			--DiveShotsLeft;
 		}
 	}
+	// -BbBaseMapShots: a play with a runner on or one left on, photographed along its length.
+	if (BaseMapShotsLeft > 0 && ((Before.bases & 7) != 0 || (Current.Info.bases & 7) != 0))
+	{
+		const float Marks[4] = { 0.2f, 0.4f, 0.6f, 0.85f };
+		for (int32 M = 0; M < 4; ++M)
+		{
+			ExtraShots.Emplace(Current.Info.duration_s * Marks[M], FString::Printf(TEXT("basemap_%02d_%d.png"), BaseMapShotIndex, M + 1));
+		}
+		++BaseMapShotIndex;
+		--BaseMapShotsLeft;
+	}
 	ExtraShots.Sort([](const TPair<float, FString>& A, const TPair<float, FString>& B) { return A.Key < B.Key; });
 }
 
@@ -3865,7 +3877,7 @@ void ABbDirector::Tick(float DeltaSeconds)
 				const FString Name = FPaths::Combine(FPaths::ProjectSavedDir(), TEXT("Shots"), ExtraShots[ExtraShotNext].Value);
 				FScreenshotRequest::RequestScreenshot(Name, false, false);
 				UE_LOG(LogBb, Display, TEXT("BB_EXTRA_SHOT %s play %u t %.2f"), *Name, Current.Info.play_index, At);
-				if (++ExtraShotNext == ExtraShots.Num() && SlideShotsLeft <= 0 && DiveShotsLeft <= 0)
+				if (++ExtraShotNext == ExtraShots.Num() && SlideShotsLeft <= 0 && DiveShotsLeft <= 0 && BaseMapShotsLeft <= 0)
 				{
 					BenchSeconds = FMath::Max(BenchSeconds, (float)Wall + 2.f);
 				}

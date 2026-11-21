@@ -147,7 +147,6 @@ Check the code again before starting one.
 - [ ] **A9. Stolen bases** [W13]. Needs A7, A8, A6 and the catcher's throw (agent-models §4).
 - [ ] **A11. Wind and weather.** The flight model takes a wind vector (always zero) and an air density. Rain must act through physical causes (D1): a wet ball, wet ground; never a mistake rate.
 - [ ] **A17. Fielding errors** [W10], from physical causes only (a bobble, a bad throw; D1). Ties to the scorer's hit-or-error ruling (rules-spec §10). Do not use the read's noise as a stand-in for errors (owner, 2026-11-15).
-- [ ] The base map in the score bug follows the real runners during a play.
 - [ ] Owner's throwing notes A–D in observations.md: plant before a throw on the run, a penalty across the body, how far outfield throws scatter (unchecked against real throws).
 
 **Agreed order for what is left** (owner, 2026-11-13): A17 errors; then A8 → A7 → A6 → A9 (leads and pickoffs, the stretch, slides, steals); then A11, wind first.
