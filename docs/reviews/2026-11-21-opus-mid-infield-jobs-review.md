@@ -173,4 +173,4 @@ Commits after `dc96641` on `work/mid-infield-jobs`; measurements in the [mid-inf
 - **P3-2, fixed.** The done parenthesis is gone from TASKS.md.
 - **P3-3.** Nothing to do.
 
-Tests and standard run on the final build: TESTS; STDRUN.
+Tests and standard run on the final build (sources touched): `cargo test --workspace --release`, 505 passed, 0 failed, 4 ignored, including play 102 and its mirror (still fixed: the second baseman is the cutoff for second from the first call, the shortstop on second throughout). Standard run, main → first build → final: runs 4.16 → 4.19 → 4.20 [4.59 → 4.59 → 4.61], GB hits .309 → .309 → .309 [.322 → .321 → .323], reached on BIP 33.6% → 33.8% → 33.8% [34.5% → 34.5% → 34.6%]; all within the seed sets' noise (ledger row of 2026-11-21).
