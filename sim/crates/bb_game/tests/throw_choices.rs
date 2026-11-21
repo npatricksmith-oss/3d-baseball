@@ -330,10 +330,20 @@ fn mirrored(text: &str, turn_deg: f64) -> String {
         v[k] = (-v[k].as_f64().unwrap()).into();
     }
     v["bats"] = if v["bats"] == "L" { "R" } else { "L" }.into();
+    turned(&v.to_string(), turn_deg, None)
+}
+
+/// The fixture's ball (position, velocity, spin) turned `turn_deg` about the vertical toward
+/// +x (the first-base side), and, with `on_first`, that batting id on first base.
+fn turned(text: &str, turn_deg: f64, on_first: Option<u16>) -> String {
+    let mut v: Value = serde_json::from_str(text).unwrap();
     let (s, c) = turn_deg.to_radians().sin_cos();
     for k in ["ball_r", "ball_v", "ball_w"] {
         let a = vec3(&v[k]);
         v[k] = serde_json::json!([a.x * c + a.y * s, -a.x * s + a.y * c, a.z]);
+    }
+    if let Some(id) = on_first {
+        v["bases"][0] = id.into();
     }
     v.to_string()
 }
@@ -398,4 +408,71 @@ fn seed_51001_play_102_the_second_baseman_goes_out_as_the_cutoff_and_the_shortst
 #[test]
 fn mirrored_play_102_the_shortstop_goes_out_and_the_second_baseman_covers() {
     check_ground_single_jobs(&mirrored(include_str!("fixtures/a4/51001-102.json"), 3.0), 5, 3, 8);
+}
+
+
+/// Batting id put on first in the variants below (any of the batting side's ids).
+const ON_FIRST: u16 = 5;
+
+/// Jobs from the first call until the ball is first secured: (ticks, who secured it).
+fn loose_jobs(text: &str) -> (Vec<bb_game::live::job_trace::Tick>, f64, u16, LiveOutput) {
+    let (out, ticks) = replay_jobs(text);
+    let &(t, by) = out.secured.first().expect("the ball is fielded");
+    (ticks.into_iter().filter(|k| k.t < t).collect(), t, by & 0x7f, out)
+}
+
+/// Opus mid-infield review P1-1: play 102 turned 3° toward first with a runner on first (none
+/// out, double-play depth). The second baseman goes for it and fields it 51 m out. With a
+/// runner on first the shortstop holds second for the force until the ball is plainly through
+/// (agent-models §5.7): he covers second at every tick from the first call to the catch and is
+/// never out on a cutoff. (Before the fix he went out toward third at 1.74 s, came back,
+/// went out again at 2.32 s: second empty for 1.45 s with the runner going.)
+#[test]
+fn runner_on_first_the_shortstop_holds_second_while_the_second_baseman_fields_it() {
+    let (ticks, _, by, _) = loose_jobs(&turned(include_str!("fixtures/a4/51001-102.json"), 3.0, Some(ON_FIRST)));
+    assert_eq!(by, 4, "the premise: the second baseman fields it");
+    assert!(ticks.iter().any(|k| k.job[3] == 1), "the second baseman goes for it");
+    for k in &ticks {
+        assert_eq!(k.job[5], 12, "at {:.2} s the shortstop is not on second: {:?}", k.t, k.job);
+    }
+}
+
+/// Opus mid-infield review P1-1 and P2-2: a comebacker the pitcher fields (play 102 turned 8°
+/// toward third, at the mound), with nobody on and with a runner on first. No middle infielder
+/// goes out on a cutoff, and second is covered at every tick from the first call to the catch.
+#[test]
+fn a_comebacker_sends_nobody_out_and_leaves_second_covered() {
+    for on_first in [None, Some(ON_FIRST)] {
+        let (ticks, _, by, _) = loose_jobs(&turned(include_str!("fixtures/a4/51001-102.json"), -8.0, on_first));
+        assert_eq!(by, 1, "the premise: the pitcher fields it ({on_first:?})");
+        for k in &ticks {
+            assert!(!(20..30).contains(&k.job[3]) && !(20..30).contains(&k.job[5]), "a cutoff at {:.2} s ({on_first:?}): {:?}", k.t, k.job);
+            assert!(k.job.contains(&12), "second open at {:.2} s ({on_first:?}): {:?}", k.t, k.job);
+        }
+    }
+}
+
+/// Opus mid-infield review P1-1 (the flicker): over play 102 turned from 14° toward third to
+/// 14° toward first, bases empty and a runner on first, no middle infielder goes out on a
+/// cutoff, comes off it and goes out again while the ball is loose; and with a runner on first
+/// second is never empty while one of them is out on a cutoff.
+#[test]
+fn the_through_cutoff_does_not_flicker() {
+    let base = include_str!("fixtures/a4/51001-102.json");
+    for turn in (-7..=7).map(|k| 2.0 * k as f64) {
+        for on_first in [None, Some(ON_FIRST)] {
+            let (ticks, ..) = loose_jobs(&turned(base, turn, on_first));
+            for i in [3, 5] {
+                let cut: Vec<bool> = ticks.iter().map(|k| (20..30).contains(&k.job[i])).collect();
+                let starts = cut.windows(2).filter(|w| !w[0] && w[1]).count() + usize::from(cut.first() == Some(&true));
+                assert!(starts <= 1, "turn {turn}, {on_first:?}: fielder {i} went out {starts} times: {:?}", ticks.iter().map(|k| (k.t, k.job[i])).collect::<Vec<_>>());
+            }
+            if on_first.is_some() {
+                for k in &ticks {
+                    let out = (20..30).contains(&k.job[3]) || (20..30).contains(&k.job[5]);
+                    assert!(!out || k.job.contains(&12), "turn {turn}: second open with a man on a cutoff at {:.2} s: {:?}", k.t, k.job);
+                }
+            }
+        }
+    }
 }

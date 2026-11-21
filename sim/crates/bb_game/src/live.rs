@@ -4517,6 +4517,11 @@ impl<'a> Sim<'a> {
         if matches!(self.f[who].role, Role::Chase) || matches!(self.ball, Ball::Held { by } if by == who) {
             return None;
         }
+        // A middle infielder whose partner he knows to be going for the ball stays at second
+        // instead of going out on a cutoff (Opus mid-infield review P2-2).
+        if !deep && (who == 3 || who == 5) && self.partner_going(who) {
+            return None;
+        }
         // "No play on it": by his own read he cannot be there before it lands (his
         // intercept time is when he could field it, possibly long after the bounce).
         let no_air_play = || {
@@ -4609,31 +4614,84 @@ impl<'a> Sim<'a> {
         if self.seen(side, partner).0 == Role::Relay(2) { partner } else { side }
     }
 
+    /// Whether middle infielder `who` knows his partner to be going for this ball (shown
+    /// `CALL_HEARD_S` ago, on this ball).
+    fn partner_going(&self, who: usize) -> bool {
+        matches!(self.known(8 - who), (true, _, true))
+    }
+
+    /// The second baseman's own judgment that a ground ball is through the infield with a runner
+    /// on first (agent-models §5.7): the standard assignment then has the shortstop out as the
+    /// cutoff to third and himself at second, so he takes second at once instead of waiting
+    /// `CALL_HEARD_S` to see the shortstop go (the shortstop leaves only once he knows what
+    /// every infielder is doing, `through_job`). From what he sees and is told: the ball down
+    /// on the infield dirt, the likeliest throw third, no infielder known to him to be going
+    /// for it still in front of the ball, the shortstop not known to be going for it; and his
+    /// own fresh read: on the ground, carrying beyond `INFIELD_BREAK_R`, with no play for him
+    /// in the infield. If he is wrong, second has two men on it for a moment.
+    fn second_takes_over(&self) -> bool {
+        if !matches!(self.ball, Ball::Free { .. }) || self.ball_still_up() || !self.first_down_m().is_some_and(|d| d < INFIELD_R) || self.relay_base(false, 3) != 3 {
+            return false;
+        }
+        let fd = &self.f[3];
+        let Some(pred) = fd.belief.as_ref() else { return false };
+        if fd.read_ball != self.ball_gen || fd.role == Role::Chase || self.partner_going(3) {
+            return false;
+        }
+        let past = |p: Vec3| m::hypot(p.x, p.y) > INFIELD_BREAK_R;
+        let (end, _) = pred.at(pred.t_end());
+        if !(past(end) && (!fd.t_int.is_finite() || past(fd.int_pt))) {
+            return false;
+        }
+        !(0..6).any(|j| j != 3 && matches!(self.known(j), (true, _, true)) && !self.ball_gone_by(j, REACH))
+    }
+
+    /// Whether the loose ball, as everyone sees it now, has gone by fielder `j` along its path
+    /// by more than `margin` (a stopped ball has gone by nobody).
+    fn ball_gone_by(&self, j: usize, margin: f64) -> bool {
+        let (now, v) = self.ball_at(self.t);
+        let h = Vec3::new(v.x, v.y, 0.0);
+        let p = self.f[j].pos;
+        h.norm() >= 0.5 && Vec3::new(now.x - p.x, now.y - p.y, 0.0).dot(h.normalized()) > margin
+    }
+
     /// The cutoff job on a ground ball through the infield while no outfielder is known to be
-    /// going for it (agent-models §5.7): nobody is known to be going yet, or only an infielder.
-    /// Its man goes out as soon as the ball is down in the infield and **his own read** has it
-    /// past him, on the ground, carrying beyond the infielders' range (`INFIELD_BREAK_R`) with
-    /// no play for him in it, and by his own estimate of his teammates (`seen_intercept`, on
-    /// his read) no other infielder can field it within that range, whatever his job now. Toward second the pitcher does
-    /// not count: a ball he may knock down comes on toward the man going out on its line, and
-    /// there is no force at second to cover. Toward third (a runner on first) he does: the
-    /// shortstop must not leave second on a ball the pitcher may turn into a double play. Only
-    /// the middle infielders' cutoffs: to second (the man on the ball's side) and to third (the
-    /// shortstop). He lines up toward where his read has the ball going, at the cutoff spot of
-    /// a throw through him (it is not yet a deep ball: nobody knows it will get past an
-    /// outfielder). Returns the man, the base and his spot.
+    /// going for it (agent-models §5.7, "At the first call"): nobody is known to be going yet,
+    /// or only an infielder. Only the middle infielders' cutoffs: to second (the man on the
+    /// ball's side, `second_cutoff_man`) and to third (the shortstop, a runner on first). Its
+    /// man goes out when the ball is down in the infield and
+    /// - his own read has it on the ground, carrying beyond the infielders' range
+    ///   (`INFIELD_BREAK_R`), with no play for him in it;
+    /// - no infielder he knows to be going for it is still in front of the ball (the ball, as
+    ///   everyone sees it now, has not yet gone by him along its path by more than his reach,
+    ///   `REACH`), and his partner is not known to be going for it at all (then he stays at
+    ///   second, whoever's ball it is: Opus mid-infield review P1-1, P2-2);
+    /// - by his own estimate of each other infielder the ball has not yet gone by (`seen_intercept`
+    ///   on his read, whatever that man's job now: play 168 of seed 51001) none can field it in
+    ///   that range. Toward second the pitcher is left out of this estimate (not of the known
+    ///   chase): with nobody on there is no force at second, his partner holds the bag, and on a
+    ///   ball up the middle the pitcher may reach the man's first steps are toward the ball's line
+    ///   behind second either way;
+    /// - toward third, with the force at second at stake, the shortstop also waits until he
+    ///   knows what every infielder is doing on this ball (each has shown himself on it).
+    /// Once out, he keeps the job unless a teammate becomes known to be going for the ball in
+    /// front of it (the ball not yet by him) or his partner goes for it; his estimate is not
+    /// asked again, so the job does not flicker as it crosses the range. He lines up toward
+    /// where his read has the ball going, at the cutoff spot of a throw through him (it is not
+    /// yet a deep ball). Returns the man, the base and his spot.
     fn through_job(&self) -> Option<(usize, u8, Vec3)> {
         if !matches!(self.ball, Ball::Free { .. }) || self.ball_still_up() || !self.first_down_m().is_some_and(|d| d < INFIELD_R) {
             return None;
         }
-        let b = self.relay_base(false, 5);
-        let who = match b {
-            2 => self.second_cutoff_man(),
-            3 => 5,
+        // The base as the candidate himself reads the runners (review P3-1).
+        let side = self.second_cutoff_man();
+        let (who, b) = match self.relay_base(false, side) {
+            2 => (side, 2),
+            3 if self.relay_base(false, 5) == 3 => (5, 3),
             _ => return None,
         };
         let fd = &self.f[who];
-        if fd.role == Role::Chase || fd.read_ball != self.ball_gen {
+        if fd.role == Role::Chase || fd.read_ball != self.ball_gen || self.partner_going(who) {
             return None;
         }
         let pred = fd.belief.as_ref()?;
@@ -4642,12 +4700,24 @@ impl<'a> Sim<'a> {
         if !(past(end) && (!fd.t_int.is_finite() || past(fd.int_pt))) {
             return None;
         }
-        // By his own estimate another infielder can field it in the infield, whatever job he
-        // is on now (a man not going for it yet may still: seen on the owner's play 168 of
-        // seed 51001, a chopper the second baseman went for only at the re-call).
-        let short = (0..6).filter(|&j| j != who && !(b == 2 && j == 0)).any(|j| !past(self.seen_intercept(j, pred).1));
-        if short {
+        let out = fd.role == Role::Relay(b);
+        let gone_by = |j: usize, margin: f64| self.ball_gone_by(j, margin);
+        let margin = if out { 0.0 } else { REACH };
+        let others = || (0..6).filter(move |&j| j != who);
+        if others().any(|j| matches!(self.known(j), (true, _, true)) && !gone_by(j, margin)) {
             return None;
+        }
+        if !out {
+            // By his own estimate another infielder the ball has not yet gone by can field it in
+            // the infield, whatever job he is on now (a man not going for it yet may still: seen
+            // on the owner's play 168 of seed 51001, a chopper the second baseman went for only
+            // at the re-call).
+            if others().any(|j| !(b == 2 && j == 0) && !gone_by(j, REACH) && !past(self.seen_intercept(j, pred).1)) {
+                return None;
+            }
+            if b == 3 && others().any(|j| !self.known(j).2) {
+                return None;
+            }
         }
         Some((who, b, Self::relay_spot(Vec3::new(end.x, end.y, 0.0), b, false)))
     }
@@ -4923,7 +4993,10 @@ impl<'a> Sim<'a> {
         // base's last man, the second baseman, is dealt after the other bases: he takes first
         // only when second is someone else's (recheck P1-2: while the first baseman and
         // pitcher were still counted as going, he went to first and left second open).
-        let relay = |c: usize| matches!(self.seen(o, c).0, Role::Relay(_));
+        // The second baseman who judges the ball through toward third counts the shortstop as
+        // the cutoff man by the convention (`second_takes_over`).
+        let through3 = o == 3 && self.second_takes_over();
+        let relay = |c: usize| matches!(self.seen(o, c).0, Role::Relay(_)) || (through3 && c == 5);
         let (first, first_last): (&[usize], &[usize]) = match (relay(2), left) {
             (true, false) => (&[3, 0], &[]),
             (true, true) => (&[0, 3], &[]),
@@ -4984,7 +5057,8 @@ impl<'a> Sim<'a> {
     fn cover_after_chasers(&self, o: usize) -> Option<u8> {
         let job = |j: usize| self.seen(o, j).0;
         let left = self.ball_side_x() < 0.0;
-        let mut taken: Vec<usize> = (0..9).filter(|&i| self.chasing_as_known_by(o, i) || matches!(job(i), Role::Relay(_))).collect();
+        let through3 = o == 3 && self.second_takes_over();
+        let mut taken: Vec<usize> = (0..9).filter(|&i| self.chasing_as_known_by(o, i) || matches!(job(i), Role::Relay(_)) || (through3 && i == 5)).collect();
         // The first baseman out as the cutoff to home: on a ball to the right side the second
         // baseman takes first and the pitcher stays free to back up home; to the left side
         // the second baseman is needed at second, so the pitcher takes first.
