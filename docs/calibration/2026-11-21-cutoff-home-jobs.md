@@ -97,6 +97,7 @@ The one left (seed 5 play 89) comes after the third baseman had the ball and thr
 
 - `seed_9_play_9_a_single_to_left_centre_with_a_runner_on_second_gets_the_standard_jobs` (fixture `9-9.json`, frozen from `312789e`): at the catch the corner man on the cutoff home and the standard arrangement for him (the left fielder went first, the centre fielder took it over, so the third baseman is the cutoff); the pitcher behind home; second never open longer than the 0.3 s knowledge lag. Fails on `312789e` (the second baseman on second, not first).
 - `a_ground_single_with_a_runner_in_scoring_position_gives_every_infielder_his_job`: play 102's grounder with a runner on second, turned every degree from −30° to +30° and mirrored, and two game plays frozen from `312789e` (seed 65 play 43, a runner on second, through the right side to the right fielder; seed 30 play 35, a runner on third, through the left side to the left fielder), each turned up to 6° either way. On each variant fielded in front of an outfielder: the standard jobs at the catch, and once everyone can know no infielder is going for the ball, no middle infielder or corner man without a job for more than 0.3 s at a stretch. Fails on `312789e` (play 102 mirrored, turned −17°: the shortstop with no job 0.66–0.97 s).
+- `seed_8_play_208_the_first_baseman_holds_first_while_the_second_baseman_runs_the_ball_down` (fixture `8-208.json`, frozen from `e56ddc5`; added after the review, §6): one out, a runner on second, the second baseman runs down a ball off his glove and fields it 49 m out; first covered at every tick to the catch, and the first baseman never on the cutoff home while the second baseman is going for it. Fails on `e56ddc5` (first open at 2.28 s, the first baseman on the cutoff).
 - Play 102, its mirror, the runner-on-first, comebacker and flicker tests pass unchanged. The isolation harness checks the new step (`through_jobs`) and the new private state (`Fielder::through`).
 
 `cargo test --workspace --release` on the final build, sources touched: 511 passed, 0 failed, 4 ignored. One existing test, `a_retired_cutoff_man_with_no_job_stops`, failed on the first version of the first baseman's taking first back (with an infielder holding the ball he took first from the second baseman); that hand-over now applies only while the ball is out of the infield.
@@ -105,7 +106,8 @@ The one left (seed 5 play 89) comes after the third baseman had the ball and thr
 
 - **A liner or blooper that comes down in the dirt** (57 of the 77 remaining stretches): while it is up nobody acts on a single, and the deep-ball rule can send a middle infielder out as the relay man and back. Shares its ground with case (d) (line-drive and fly singles).
 - **While an infielder is still going for the ball** the others wait on him (case (b)): the test counts from the moment everyone can know no infielder is going.
-- **Second for 0.3 s when a single gets past the centre fielder** (§3).
+- **Second for 0.3 s when a single gets past the centre fielder** (§3): for the relay review (TASKS).
+- **`relay_job`'s cutoff home has no infield gate** once an outfielder is the known lead (as on main; review P3-3, TASKS): seed 191 play 125, third empty 0.6 s while the shortstop fields a chopper.
 - The pitcher still has no job until he judges the ball through (0.245 s a play), and first base waits for the shortstop when he is the one going for the ball.
 - Cases (b)–(f) of the TASKS item do not share this cause; (b) and (d) border it as above.
 
@@ -113,3 +115,12 @@ The one left (seed 5 play 89) comes after the third baseman had the ball and thr
 
 - The fixtures: `tests/throw_choices.rs` (the job trace from `replay_jobs`).
 - The trace probe (kept outside the tree, `sim/target/codex-probes/cuthome/`): copy `zz_cut_home.rs` into `crates/bb_game/examples/`, build it on each commit, `BB_COVER_TRACE=1 zz_cut_home 120 0 2> tr.log`, then `an.py before.log after.log` (counts by base state), `stretch.py tr.log` (stretches by the job before and after), `unc.py before.log after.log` (uncovered bases), `outcomes.py`, and the mid-infield `../mid/jobs.py` on the seeds 0–59 lines.
+
+## 6. The Opus review's fixes (2026-11-21, [review](../reviews/2026-11-21-opus-cutoff-home-jobs-review.md))
+
+- **P2-1, early cutoff home on a ball an infielder runs down after it came off him.** The gate toward home let the first baseman go once the ball had passed the infielder known to be going for it; after a deflection that infielder chases it from behind and fields it 50–57 m out, and first stood empty 0.5–2.75 s (20 plays in game seeds 0–119, 9 in 120–239). Fixed by the reviewer's first option: toward home any infielder known to be going for the ball holds the cutoff man (and the others' convention) wherever the ball is. I kept it because the trace offers nothing better that a teammate can know: whether the chaser will still reach the ball in the infield is his own private read. Over every loose ball, early cutoffs home on infielder-fielded balls 12 → 1 (runner in scoring position) and 8 → 0 (runner on first); the one left is after a throw, with every base covered. Cost on clean singles: the middle infielders' no-job time rises 0.109 → 0.116 s (2B) and 0.102 → 0.120 s (SS) a play, stretches 77 → 85, as the corner man and his cover wait for a man who went for the ball and stops. New test from seed 8 play 208 (§4).
+- **P3-1, the first baseman's take-back of first.** Narrowed to what the spec said: only a first baseman who was on the cutoff this play (his shown jobs) and has been replaced, with the ball loose beyond the infield dirt or in an outfielder's hands, not thrown. Seed 32 play 33 and seed 77 play 10 (nobody on) now trace identically to main; with nobody on the take-back's signature is back to main's count. `a_retired_cutoff_man_with_no_job_stops` still passes.
+- **P3-5.** §3 now gives the first-ball rows and the every-loose-ball rows side by side.
+- **P3-4.** The note's date is 2026-11-21 (renamed from `2026-11-22-…`); links, the ledger, the spec and two code comments follow.
+- **P3-2, P3-3.** Deferred to TASKS (§5).
+
