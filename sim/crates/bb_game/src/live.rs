@@ -15801,7 +15801,9 @@ mod tests {
         let away = -approach.dot((base_pos(1) - base_pos(2)).normalized()) * speed;
         assert!(away > 3.2 && (plant - (away - 3.2) / BRAKE).abs() < 0.01, "moving away at {away:.2} m/s: plant {plant:.3} s");
         let world = sim.set_up_for(B2, base_pos(1)).set_s;
-        assert!((world - predicted).abs() < 0.005, "the world's pivot {world:.4} s, the estimate {predicted:.4} s");
+        // (The world turns and plants toward first from where he stands, 0.59 m off the bag;
+        // the estimate from the bag. At 4.66 m/s the 1° between them is about 0.01 s of plant.)
+        assert!((world - predicted).abs() < 0.02, "the world's pivot {world:.4} s, the estimate {predicted:.4} s");
     }
 
     /// agent-models §5.5: the holder's estimate of a double play uses the pivot model the
