@@ -997,9 +997,10 @@ impl Track {
     /// believes it goes (his bounce law on the surface under his estimate, the spin he believes
     /// it has, no tilt), its covariance through the law's Jacobian in the incoming velocity
     /// plus what he cannot foresee of a bounce (the surface's tilt σ, `BOUNCE_SPIN_RPM`); the
-    /// learned acceleration back at its prior; his persistent error carried. `first`: the
-    /// ball's first bounce (it comes off its first flight with the typical spin); `rolls`: he
-    /// sees it roll from here.
+    /// learned acceleration back at its prior; his persistent error carried; the spin his law
+    /// leaves it with kept for the next bounce (`w`). `first`: the ball's first bounce (it
+    /// comes off its first flight with the typical spin); `rolls`: he sees it roll from here,
+    /// and the rolling law is set (`roll_decel`).
     fn bounce(&mut self, env: &FlightEnv, field: &Field, t_contact: f64, first: bool, rolls: bool) {
         let radius = env.ball.radius;
         // (1) On the ground at the touch: a measurement of the height.
