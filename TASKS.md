@@ -87,6 +87,7 @@ One `sim/crates/bb_game/src/live.rs` job at a time. Each job gets a ledger row a
 
 ### 5. Review findings still open
 
+- [ ] A structured `foul` flag in `BbPlayInfo` (`bb_ffi`, sim side) to replace the client's match on the summary text "Foul" (`BbBaseMap::IsFoul`, used by the base map and the umpire's foul signal). Sonnet base-map review P2-2.
 - [ ] [Codex live-play review](docs/reviews/2026-11-14-codex-live-play-review.md), P2s: a bounced or caromed throw can stay live after crossing into dead territory; a dive clipped at the wall still catches beyond it; the carry-to-second continuation still charges the pivot that carriers no longer pay; two wall contacts can reuse `SurfaceBounce` RNG streams; "first play" is reduced to "first throw with no recorded out"; the runner's tag allowance uses the force at the start, not at his destination; a pivot can choose 80% effort against the full-arm pivot contract; stopping walk-off awards drops the batter's required minimum advance. P3s: pivot and set-up gates gain a tick from the floating-point clock origin; the continuation regression test no longer shows the continuation changing a choice.
 - Deferred in their Resolutions: tag geometry (the world tags 1 m short of the bag; a carry adds 0.25 s twice); the restored counterfactual in the 3/140 fixture; a runner oversliding a base (scorer P1-5 part 1); captions from the log; the client's dugout roof at 2.4 m against the sim's 4 ft; six older test gaps ([test-gaps review](docs/reviews/2026-11-14-codex-test-gaps-review.md)); the infield review's P3-4; three P3s of the [foul-at-the-bag review](docs/reviews/2026-11-16-agy-hydrogen-foul-at-bag-review.md).
 
@@ -148,7 +149,6 @@ Check the code again before starting one.
 - [ ] **A9. Stolen bases** [W13]. Needs A7, A8, A6 and the catcher's throw (agent-models §4).
 - [ ] **A11. Wind and weather.** The flight model takes a wind vector (always zero) and an air density. Rain must act through physical causes (D1): a wet ball, wet ground; never a mistake rate.
 - [ ] **A17. Fielding errors** [W10], from physical causes only (a bobble, a bad throw; D1). Ties to the scorer's hit-or-error ruling (rules-spec §10). Do not use the read's noise as a stand-in for errors (owner, 2026-11-15).
-- [ ] The base map in the score bug follows the real runners during a play.
 - [ ] Owner's throwing notes A–D in observations.md: plant before a throw on the run, a penalty across the body, how far outfield throws scatter (unchecked against real throws).
 
 **Agreed order for what is left** (owner, 2026-11-13): A17 errors; then A8 → A7 → A6 → A9 (leads and pickoffs, the stretch, slides, steals); then A11, wind first.
