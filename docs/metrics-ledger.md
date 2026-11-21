@@ -29,6 +29,8 @@ Numbers are only comparable within one seed set and game count. The standard set
 
 ## 1. Where the numbers stand
 
+*Update 2026-11-22 (the infielders' jobs on a ground single with a runner in scoring position, `work/cutoff-home-jobs`): runs 4.08 → 4.07 [4.44 → 4.46]; GB/LD/FB/PU hits .309/.670/.103/.005 [.315/.663/.099/.007]; HR/PA 2.72% [2.98%], K% 22.6 [22.1], reached on BIP 33.7% [34.0%]. All within noise. See the newest row in §3.*
+
 *Update 2026-11-21 (tracking across the bounce, `work/bounce-track`, with the Opus review's fixes): runs 4.19 → 4.08 [4.59 → 4.44]. GB/LD/FB/PU hits .310/.671/.103/.005 [.316/.665/.100/.007]. HR/PA 2.73% [2.95%], K% 22.6 [22.2], reached on BIP 33.8% [34.0%]. Triples 1.74 → 1.43 a game (seeds 0–299). See the newest row in §3.*
 
 *Update 2026-11-21 (the covering man, `work/dp-cover`, then the middle infielders' jobs with the Opus review's and re-review's fixes, `work/mid-infield-jobs`): runs 4.16 → 4.19 [4.59 → 4.59]. GB/LD/FB/PU hits .308/.672/.102/.005 [.321/.673/.098/.007]. HR/PA 2.73% [2.82%], K% 22.5 [22.3], reached on BIP 33.7% [34.5%]. See the two newest rows in §3.*
@@ -187,6 +189,12 @@ The "5.48" at the top of the last block is a coincidence of two samples: the div
 ## 3. The rows
 
 Hit rates are per ball in play of that type. "Seed 5" and "seed 2" mean `sim-cli games --seed` with 1,024 games unless a row says otherwise.
+
+### 2026-11-22 (300 games each at `--seed 0` and `--seed 1000`)
+
+| Task | Commit | What changed | Numbers (before → after) | Cause | Open |
+|---|---|---|---|---|---|
+| **The infielders' jobs on a ground single with a runner in scoring position** (TASKS §3, the middle infielders' no-job item, case (a); [cutoff-home note](calibration/2026-11-22-cutoff-home-jobs.md); agent-models §5.7, "With a runner in scoring position") | main `312789e` (sim code = the bounce-track final `5ab0301`, its figures reused) → `work/cutoff-home-jobs` final sim commit `e56ddc5` (first builds `77b0431`, `08d8cf6`) | The cutoff man home goes out at the first call on the shortstop-toward-third gate; every infielder who judges the ball through counts him as out at once and takes the standard job (2B first, SS second, P behind home with the first baseman cutting; 1B first, 2B second, SS third with the third baseman cutting); the cutoff man home is the third baseman on a ball the left fielder fields, else the first baseman (was x < −15 m); the pitcher no longer covers first with the first baseman cutting; hand-overs of first and second between the second baseman, shortstop, pitcher and first baseman. Every digest changed | Seeds 0 [1000]: runs 4.08 → 4.07 [4.44 → 4.46]; GB/LD/FB/PU .310/.671/.103/.005 → .309/.670/.103/.005 [.316/.665/.100/.007 → .315/.663/.099/.007]; HR/PA 2.73% → 2.72% [2.95% → 2.98%]; K% 22.6 → 22.6 [22.2 → 22.1]; BB% 8.0 → 8.0 [8.4 → 8.5]; reached on BIP 33.8% → 33.7% [34.0% → 34.0%]; PA/team-game 37.7 → 37.7 [38.1 → 38.1]; out of play after a throw 0.133 → 0.153 [0.113 → 0.120] a game; rules warnings {}; 4,540 → 4,618 [4,485 → 4,567] ms per game per core. Game seeds 0–119, ground singles with a runner in scoring position an outfielder fields (129 → 125): 2B no job 0.360 → 0.109 s a play, SS 0.557 → 0.102 s; stretches over 0.1 s 166 → 77 (begun with the ball on the ground 98 → 20); first uncovered while loose 86 → 27 plays, third 47 → 14, second 10 → 22 (each at most 0.43 s; the new ones the 0.3 s hand-over when a single gets past the centre fielder); early cutoffs fielded by an infielder 0 → 0; runner from second scoring on a ground single 40/62 → 39/59; outs at home 1 → 1 | Where the infielders stand changes, not the throws: no outcome moved beyond the seed sets' noise | Nothing unexplained. Open (note §5): a liner or blooper first down in the dirt (most of the stretches left; case (d)); second open 0.3 s when a single gets past the centre fielder; the pitcher waits until he judges the ball through |
 
 ### 2026-11-21 (300 games each at `--seed 0` and `--seed 1000`)
 
