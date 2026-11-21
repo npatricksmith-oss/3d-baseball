@@ -437,9 +437,13 @@ fn runner_on_first_the_shortstop_holds_second_while_the_second_baseman_fields_it
     }
 }
 
-/// Opus mid-infield review P1-1 and P2-2: a comebacker the pitcher fields (play 102 turned 8°
-/// toward third, at the mound), with nobody on and with a runner on first. No middle infielder
-/// goes out on a cutoff, and second is covered at every tick from the first call to the catch.
+/// A comebacker the pitcher fields (play 102 turned 8° toward third, at the mound), with nobody
+/// on and with a runner on first: no middle infielder goes out on a cutoff, and second is
+/// covered at every tick from the first call to the catch. What it guards: a regression guard
+/// only. It passes on the first build too (at this angle the shortstop goes for the ball, so
+/// the second baseman stays on second by the tables), and it does not pin the first build's
+/// comebacker cutoffs with nobody on, which leaving the pitcher out of the estimate toward
+/// second keeps on purpose (agent-models §5.7; Opus re-review P3-3).
 #[test]
 fn a_comebacker_sends_nobody_out_and_leaves_second_covered() {
     for on_first in [None, Some(ON_FIRST)] {
@@ -452,27 +456,68 @@ fn a_comebacker_sends_nobody_out_and_leaves_second_covered() {
     }
 }
 
-/// Opus mid-infield review P1-1 (the flicker): over play 102 turned from 14° toward third to
-/// 14° toward first, bases empty and a runner on first, no middle infielder goes out on a
-/// cutoff, comes off it and goes out again while the ball is loose; and with a runner on first
-/// second is never empty while one of them is out on a cutoff.
-#[test]
-fn the_through_cutoff_does_not_flicker() {
-    let base = include_str!("fixtures/a4/51001-102.json");
-    for turn in (-7..=7).map(|k| 2.0 * k as f64) {
-        for on_first in [None, Some(ON_FIRST)] {
-            let (ticks, ..) = loose_jobs(&turned(base, turn, on_first));
-            for i in [3, 5] {
-                let cut: Vec<bool> = ticks.iter().map(|k| (20..30).contains(&k.job[i])).collect();
-                let starts = cut.windows(2).filter(|w| !w[0] && w[1]).count() + usize::from(cut.first() == Some(&true));
-                assert!(starts <= 1, "turn {turn}, {on_first:?}: fielder {i} went out {starts} times: {:?}", ticks.iter().map(|k| (k.t, k.job[i])).collect::<Vec<_>>());
+/// No middle infielder goes out on a cutoff, comes off it and goes out again while the ball is
+/// loose (Opus mid-infield review P1-1; re-review P2-1, the out-back-out): a cutoff job, then a
+/// stretch with no job, a base or a backup, then a cutoff job again. A stretch in which he or his
+/// partner went for the ball is a different thing and is not counted: he chased, pulled up and
+/// went back on the line; or, his partner going for it, he held second for him (the pair rule,
+/// agent-models §5.7), as real players do. With a runner on first, second is never empty
+/// for longer than the 0.3 s knowledge lag while one of them is out on a cutoff.
+fn check_no_out_back_out(text: &str, label: &str, runner_on_first: bool) {
+    let (ticks, ..) = loose_jobs(text);
+    for i in [3, 5] {
+        let jobs: Vec<u8> = ticks.iter().map(|k| k.job[i]).collect();
+        let partner: Vec<u8> = ticks.iter().map(|k| k.job[8 - i]).collect();
+        let cut = |j: u8| (20..30).contains(&j);
+        let mut was_out = false;
+        let mut chased_since = false;
+        for (n, &j) in jobs.iter().enumerate() {
+            if cut(j) {
+                assert!(!(was_out && n > 0 && !cut(jobs[n - 1]) && !chased_since), "{label}: fielder {i} out, back, out again at {:.2} s: {:?}", ticks[n].t, ticks.iter().map(|k| (k.t, k.job[i])).collect::<Vec<_>>());
+                was_out = true;
+                chased_since = false;
+            } else if j == 1 || partner[n] == 1 {
+                chased_since = true;
             }
-            if on_first.is_some() {
-                for k in &ticks {
-                    let out = (20..30).contains(&k.job[3]) || (20..30).contains(&k.job[5]);
-                    assert!(!out || k.job.contains(&12), "turn {turn}: second open with a man on a cutoff at {:.2} s: {:?}", k.t, k.job);
-                }
+        }
+    }
+    if runner_on_first {
+        // At most a teammate's knowledge lag (`CALL_HEARD_S`, 0.3 s) at a stretch: a partner who
+        // starts for the ball as the shortstop leaves is seen 0.3 s later, and the shortstop
+        // comes back.
+        let mut since: Option<f64> = None;
+        for k in &ticks {
+            let out = (20..30).contains(&k.job[3]) || (20..30).contains(&k.job[5]);
+            if out && !k.job.contains(&12) {
+                let t0 = *since.get_or_insert(k.t);
+                assert!(k.t - t0 <= 0.31, "{label}: second open with a man on a cutoff from {t0:.2} to {:.2} s: {:?}", k.t, k.job);
+            } else {
+                since = None;
             }
         }
     }
 }
+
+/// Over play 102 turned from 14° toward third to 14° toward first (every degree near the middle,
+/// where the first review saw the flicker at +3°), bases empty and a runner on first; and three
+/// nobody-on plays frozen from `792c3d1` (Opus re-review P2-1; game seeds 33, 10, 18), on each
+/// of which the cutoff man for second went out at the first call, was taken off 0.3 s later when
+/// an infielder's chase in front of the ball became known (the third baseman, the pitcher, the
+/// first baseman) and went out again: seed 33 play 150 the shortstop out 0.65 s, covering third
+/// 0.95 s, out 1.38 s; seed 10 play 52 out 0.68, no job 0.95, out 1.02; seed 18 play 91 the
+/// second baseman out 0.65, no job 0.95, out 1.60. With nobody on, once out, only his partner's
+/// chase or a catch takes him off (agent-models §5.7). Fails on `792c3d1` (seed 33 play 150).
+#[test]
+fn the_through_cutoff_does_not_flicker() {
+    let base = include_str!("fixtures/a4/51001-102.json");
+    let turns = [-14.0, -12.0, -10.0, -8.0, -6.0, -4.0, -3.0, -2.0, -1.0, 0.0, 1.0, 2.0, 3.0, 4.0, 6.0, 8.0, 10.0, 12.0, 14.0];
+    for turn in turns {
+        for on_first in [None, Some(ON_FIRST)] {
+            check_no_out_back_out(&turned(base, turn, on_first), &format!("turn {turn}, {on_first:?}"), on_first.is_some());
+        }
+    }
+    for (label, text) in [("seed 33 play 150", include_str!("fixtures/a4/33-150.json")), ("seed 10 play 52", include_str!("fixtures/a4/10-52.json")), ("seed 18 play 91", include_str!("fixtures/a4/18-91.json"))] {
+        check_no_out_back_out(text, label, false);
+    }
+}
+

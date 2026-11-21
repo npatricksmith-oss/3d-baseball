@@ -4711,8 +4711,9 @@ impl<'a> Sim<'a> {
     /// Whether middle infielder `who` may leave for the cutoff toward base `b` (2 or 3) while a
     /// ground ball is loose, by what he knows of the infielders (agent-models §5.7, "At the
     /// first call"; Opus mid-infield review P1-1): no infielder known to be going for it still
-    /// in front of the ball (by more than `REACH` to go out, by any margin to stay out), his
-    /// partner not known to be going for it, and, to go out, by his own estimate no other
+    /// in front of the ball (by more than `REACH` to go out, by any margin to stay out toward
+    /// third; toward second, once out, only the partner's chase counts), his partner not known
+    /// to be going for it, and, to go out, by his own estimate no other
     /// infielder the ball has not yet gone by can field it inside `INFIELD_BREAK_R` (the
     /// pitcher left out toward second), and toward third every infielder known on this ball.
     fn infield_lets_go(&self, who: usize, b: u8) -> bool {
@@ -4720,6 +4721,13 @@ impl<'a> Sim<'a> {
             return false;
         }
         let out = self.f[who].role == Role::Relay(b);
+        // Toward second with nobody on, once out only his partner's chase (above) or a catch
+        // takes him off: a known chase in front of the ball does not pull him back, as the
+        // estimate already leaves out the pitcher (Opus re-review P2-1: out at the first call,
+        // back 0.3 s later when the chase became known, out again).
+        if out && b == 2 {
+            return true;
+        }
         let margin = if out { 0.0 } else { REACH };
         let others = || (0..6).filter(move |&j| j != who);
         if others().any(|j| matches!(self.known(j), (true, _, true)) && !self.ball_gone_by(j, margin)) {
