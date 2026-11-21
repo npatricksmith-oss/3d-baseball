@@ -5741,11 +5741,13 @@ impl<'a> Sim<'a> {
         // Likewise the second baseman takes first from a pitcher who covered it while the first
         // baseman was going for the ball; the pitcher then backs up home.
         let two_claims_first = o == 3 && relay(2) && !ss_busy && matches!(self.f[3].role, Role::Idle | Role::Backup | Role::Cover(1));
-        // And back: a first baseman no longer on the cutoff (a deep ball's relay man has taken
-        // over from him, or the throw went by) takes first back from the second baseman, who is
-        // then free for second (before, the second baseman stayed at first with second open
-        // after the shortstop on it went out as the relay man).
-        let one_back = !relay(2) && !self.chasing_as_known_by(o, 2) && matches!(job(2), Role::Idle | Role::Backup) && job(3) == Role::Cover(1);
+        // And back: a first baseman no longer on the cutoff while the ball is still out of the
+        // infield (a deep ball's relay man has taken over from him) takes first back from the
+        // second baseman, who is then free for second (before, the second baseman stayed at
+        // first with second open after the shortstop on it went out as the relay man). Once an
+        // infielder has the ball the bases stand as they are.
+        let infield_has_it = matches!(self.ball, Ball::Held { by } if by < 6);
+        let one_back = !infield_has_it && !relay(2) && !self.chasing_as_known_by(o, 2) && matches!(job(2), Role::Idle | Role::Backup) && job(3) == Role::Cover(1);
         // Reserve kept non-chasing covers first so base 1's fallback never steals Cover(2).
         let mut filled = [false; 5];
         for base in 1..=4u8 {
@@ -12867,8 +12869,9 @@ mod tests {
         let f = &sim.f[k];
         (
             (f.pos, f.vel, f.jump, f.role, f.target, f.next_plan, f.err, f.attempts, f.blocked_until, f.ready_at, f.dove, f.lunge),
-            (f.t_int, f.int_pt, f.read_at, f.read_ball, f.call, f.shown.clone(), f.last_close_read, f.must_dive_since, f.last_dive_read, f.will_dive.get(), f.through.get(), f.throws, f.up_at),
+            (f.t_int, f.int_pt, f.read_at, f.read_ball, f.call, f.shown.clone(), f.last_close_read, f.must_dive_since, f.last_dive_read, f.will_dive.get(), f.throws, f.up_at),
             (f.set_base, f.face, f.catch_vel, f.took_diving, f.catch_stretched, f.backs, f.peel, f.carry_to, f.asks, f.pivot, f.pivot_wait_bag, f.relayed),
+            f.through.get(),
             f.belief.as_ref().map(|p| (p.at(sim.t), p.at(p.t_end()), p.t_end())),
         )
     }
