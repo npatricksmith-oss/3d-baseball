@@ -93,3 +93,13 @@ Looked at: `basemap_00_2.png`, `basemap_01_3.png`, `basemap_02_4.png` in full, a
 ## Resolution
 
 Open.
+
+### Worker follow-up
+
+All client-only; no sim file changed.
+
+- **P2-1 fixed.** The lit base is now decided from the runner's progress along the base path (`BbBaseMap::PathProgress`: his position projected onto the nearest side of the diamond, clamped to the side's ends), not a radius. A base is lit from when he reaches it (1.5 m short of it) until he has committed to the next (half way along the side). This is stateless, so it is right when paused, scrubbed or reopened, which ruled out hysteresis (it needs history). It holds through a long lead, an overrun (it clamps to the bag), a return to the base, and a runner rounding a base without stopping (lit as he passes, then dark half way to the next). New check assertion: for every runner still on the field at the end of a non-foul, non-half-ending play, a base he started at and ended at was lit at every sample, and a base he arrived at (within 1 m) was lit at every sample from then on, judged by his own track in metres, not the path rule. With the hold shortened to 0.1 the assertion fails at once (tested), and with the final rule seeds 7 and 51001 pass. New pictures `client/Saved/Shots/basemap_01_1..4.png` and `basemap_01_strip.png` (seed 7 play 24): first stays lit through the overrun, no flicker.
+- **P2-2 fixed.** `BbBaseMap::IsFoul` is exactly the summary "Foul"; the `pitch_call` and suffix terms are gone; the director's umpire foul signal uses the same helper. `docs/hud.md` notes that a structured `foul` flag from `bb_ffi` would replace the match; open item added to TASKS.md section 5 (sim not changed).
+- **P3-1, P3-4, P3-6 fixed.** The `RunBaseMapCheck` doc names `Read`; the orphan sentence is back on the bug bullet and the lit-base wording in hud.md is updated; the `Read` comment is one list plus the foul exception.
+- **P3-2, in part.** Added: an out runner has no dot from his call time on, and no dot shows for a runner at the plate. The rest is left.
+- **P3-3 and P3-5**: left alone, as ordered.

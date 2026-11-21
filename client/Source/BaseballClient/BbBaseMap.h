@@ -9,10 +9,14 @@
 
 namespace BbBaseMap
 {
-	/** A base is lit while a runner is within this distance of it (sim plane, m): he stands on
-	 *  the bag, or takes his lead (about 5 m), or overruns it. Between bases nothing is lit and
-	 *  only his dot shows. Leaving the zone for the next base puts the light out. */
-	constexpr float LitZoneM = 7.0f;
+	/** A base is lit for a runner from when he reaches it, ArriveS before it along the path
+	 *  (about 1.5 m: he is on the bag or the next stride puts him there), until he has committed
+	 *  to the next one, HoldS past it (half way along the side, about 13.7 m). That keeps it lit
+	 *  through his lead (a long one too), an overrun, and his return to the bag; it goes out
+	 *  half way to the next base, and the next base lights as he reaches it. A runner who rounds
+	 *  a base and runs on lights it as he passes (he has reached it), and not again. */
+	constexpr float ArriveS = 0.055f;
+	constexpr float HoldS = 0.5f;
 	/** A runner within this distance of the plate (m) is not drawn: the batter in his box,
 	 *  and a runner who has scored. The dot appears when the batter leaves the box. */
 	constexpr float HomeHideM = 1.8f;
@@ -31,6 +35,31 @@ namespace BbBaseMap
 		return FVector2D(A - B, A + B);
 	}
 
+	/** A runner's progress along the base path, in bases: 0 at the plate, 1 at first, 2 at
+	 *  second, 3 at third, 4 back at the plate. It is his place projected onto the nearest side of
+	 *  the diamond (clamped to the side's ends, so an overrun past a bag, which lies on the line
+	 *  of the side he came by, is still that bag). A function of where he is now, so it needs no
+	 *  history and is right when paused, scrubbed or reopened. */
+	inline float PathProgress(float X, float Y, const BbPark& Park)
+	{
+		const FVector2D U = ToDiamond(X, Y, Park);
+		const FVector2D Corner[5] = { FVector2D(0, 0), FVector2D(1, 1), FVector2D(0, 2), FVector2D(-1, 1), FVector2D(0, 0) };
+		float Best = 0.f;
+		double BestD = TNumericLimits<double>::Max();
+		for (int32 Side = 0; Side < 4; ++Side)
+		{
+			const FVector2D A = Corner[Side], D = Corner[Side + 1] - A;
+			const double T = FMath::Clamp(FVector2D::DotProduct(U - A, D) / FVector2D::DotProduct(D, D), 0.0, 1.0);
+			const double Dist = FVector2D::Distance(U, A + D * T);
+			if (Dist < BestD - 1e-9)
+			{
+				BestD = Dist;
+				Best = (float)(Side + T);
+			}
+		}
+		return Best;
+	}
+
 	/** One runner as the map draws him. */
 	struct FDot
 	{
@@ -38,34 +67,36 @@ namespace BbBaseMap
 		FVector2D At = FVector2D::ZeroVector;
 	};
 
-	/** A foul ball: pitch_call 4 or 5, or a batted ball the sim's own summary calls "Foul" (a
-	 *  ball in play on the pitch call, ruled foul by where it came down; the director reads
-	 *  the summary the same way). */
+	/** A foul ball, as the sim rules it: its summary is exactly "Foul" when the plate appearance
+	 *  goes on after a batted ball ruled foul (the pitch call is only a guess from where the
+	 *  ball first lands). A structured flag from bb_ffi would replace this text match
+	 *  (docs/hud.md); the director's foul-ball signal reads the summary the same way. */
 	inline bool IsFoul(const BbPlayInfo& Info)
 	{
-		return Info.pitch_call == 4 || Info.pitch_call == 5 || FCStringAnsi::Strcmp(Info.summary, "Foul") == 0
-			|| (FCStringAnsi::Strlen(Info.summary) >= 4 && FCStringAnsi::Strcmp(Info.summary + FCStringAnsi::Strlen(Info.summary) - 4, "Foul") == 0);
+		return FCStringAnsi::Strcmp(Info.summary, "Foul") == 0;
 	}
 
 	/** What the map shows at one moment of a play. */
 	struct FMap
 	{
-		/** Bit 0 first, bit 1 second, bit 2 third: the bases with a runner in their zone. */
+		/** Bit 0 first, bit 1 second, bit 2 third: the bases a runner has reached and not left. */
 		uint8 Lit = 0;
 		TArray<FDot> Dots;
 	};
 
 	/** The map at play time T from the sampled frame F, for a play whose summary is Info and
-	 *  which began with the runners BasesBefore (bit 0 first ... bit 2 third) and OutsBefore outs. Every actor without the fielder bit (0x80) is a runner,
-	 *  but not drawn (nor does he light a base):
-	 *  - the batter still in his box and a runner who has scored (within HomeHideM of the plate);
-	 *  - a runner the umpire has called out (BbCall.runner, from its t_s: the timeline leaves him
-	 *    standing where he was put out);
-	 *  A foul ball (IsFoul) is the exception: the timeline has the batter and the
+	 *  which began with the runners BasesBefore (bit 0 first ... bit 2 third) and OutsBefore outs.
+	 *  Every actor without the fielder bit (0x80) is a runner, but not drawn (nor does he light a
+	 *  base) when:
+	 *  - he is the batter still in his box, or a runner who has scored (within HomeHideM of the
+	 *    plate);
+	 *  - the umpire has called him out (BbCall.runner, from its t_s): the timeline leaves him
+	 *    standing where he was put out;
+	 *  - the third out has been called: the half inning is over, and the sim's result clears the
+	 *    bases.
+	 *  A foul ball (IsFoul) is the exception to all of it: the timeline has the batter and the
 	 *  runners break and stops with them off their bases, but by the rules they go back, so the
-	 *  map keeps the runners where they were before the pitch: the bases lit, a dot on each.
-	 *  - everyone once the third out has been called: the half inning is over, and the sim's
-	 *    result clears the bases. */
+	 *  map keeps the runners where they were before the pitch: the bases lit, a dot on each. */
 	inline void Read(const BbFrame& F, const BbPark& Park, const BbPlayInfo& Info, uint8 BasesBefore, int32 OutsBefore, float T, FMap& Out)
 	{
 		Out.Lit = 0;
@@ -114,13 +145,12 @@ namespace BbBaseMap
 			D.Agent = Agent;
 			D.At = ToDiamond(P[0], P[1], Park);
 			Out.Dots.Add(D);
-			for (int32 B = 0; B < 3; ++B)
+			const float Along = PathProgress(P[0], P[1], Park);
+			for (int32 B = 1; B <= 3; ++B)
 			{
-				const float DX = P[0] - Park.bases[B][0];
-				const float DY = P[1] - Park.bases[B][1];
-				if (DX * DX + DY * DY <= LitZoneM * LitZoneM)
+				if (Along >= B - ArriveS && Along <= B + HoldS)
 				{
-					Out.Lit |= (uint8)(1 << B);
+					Out.Lit |= (uint8)(1 << (B - 1));
 				}
 			}
 		}

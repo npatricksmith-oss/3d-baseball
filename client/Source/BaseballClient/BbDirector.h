@@ -671,7 +671,7 @@ private:
 	 *  loading the viewer itself uses. Returns the exit status. */
 	int32 RunSavedPlayCheck(uint64 Seed, bool bFileOnly, const FString& File);
 	/** -BbBaseMapCheck: plays a game headlessly and, for every play, reads the score bug's base
-	 *  map (BbBaseMap::Occupied) from the sampled timeline across the whole play. Returns the
+	 *  map (BbBaseMap::Read) from the sampled timeline across the whole play. Returns the
 	 *  exit status; see the .cpp for what is compared with what. */
 	int32 RunBaseMapCheck(uint64 Seed);
 	/** The board a saved play's park scoreboard shows, from what the save recorded. */

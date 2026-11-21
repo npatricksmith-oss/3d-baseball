@@ -981,6 +981,9 @@ int32 ABbDirector::RunBaseMapCheck(uint64 Seed)
 		int32 LitChanges = 0;
 		TMap<uint16, FVector2D> PrevDot;
 		float PrevT = 0.f;
+		// Every sample of the play, to judge the lit bases against each runner's own track.
+		struct FTrack { float T; uint8 Lit; TMap<uint16, FVector2D> Pos; };
+		TArray<FTrack> Track;
 		for (int32 K = 0;; ++K)
 		{
 			const float T = FMath::Min(K * 0.0333333f, Info.duration_s);
@@ -1024,6 +1027,37 @@ int32 ABbDirector::RunBaseMapCheck(uint64 Seed)
 					Expect(FVector2D::Distance(*Was, D.At) <= 12.0 * (T - PrevT) * ScalePerM + 1e-3, FString::Printf(TEXT("play %u t=%.2f: agent %x's dot jumped"), Info.play_index, T, D.Agent));
 				}
 			}
+			{
+				FTrack& Row = Track.AddDefaulted_GetRef();
+				Row.T = T;
+				Row.Lit = M.Lit;
+				for (uint32 A = 0; A < F.n_actors; ++A)
+				{
+					if (!(F.actors[A].agent & 0x80))
+					{
+						Row.Pos.Add(F.actors[A].agent, FVector2D(F.actors[A].pos[0], F.actors[A].pos[1]));
+					}
+				}
+			}
+			// The umpire's out calls and a runner who has scored take their dots away.
+			for (const BbBaseMap::FDot& D : M.Dots)
+			{
+				if (D.Agent == 0)
+				{
+					continue;
+				}
+				for (uint32 C = 0; C < Info.n_calls; ++C)
+				{
+					Expect(!(Info.calls[C].runner == D.Agent && T >= Info.calls[C].t_s), FString::Printf(TEXT("play %u t=%.2f: agent %x has a dot after he was called out at %.2f"), Info.play_index, T, D.Agent, Info.calls[C].t_s));
+				}
+				for (uint32 A = 0; A < F.n_actors; ++A)
+				{
+					if (F.actors[A].agent == D.Agent)
+					{
+						Expect(F.actors[A].pos[0] * F.actors[A].pos[0] + F.actors[A].pos[1] * F.actors[A].pos[1] > 1.f, FString::Printf(TEXT("play %u t=%.2f: agent %x has a dot at the plate"), Info.play_index, T, D.Agent));
+					}
+				}
+			}
 			PrevDot.Reset();
 			for (const BbBaseMap::FDot& D : M.Dots)
 			{
@@ -1043,6 +1077,51 @@ int32 ABbDirector::RunBaseMapCheck(uint64 Seed)
 			{
 				Expect(M.Lit == (Info.bases & 7) && M.Dots.Num() == Pop(Info.bases & 7), FString::Printf(TEXT("play %u (%hs): at the end the map shows %u with %d dots (pitch_call %d, before %u), the result is %u"), Info.play_index, Info.summary, M.Lit, M.Dots.Num(), Info.pitch_call, OnBefore, Info.bases & 7));
 				break;
+			}
+		}
+		// A base stays lit while its runner is there: for each runner still on the field at the end
+		// (not out, not scored, not a foul, not the half's end), by his own track and the base
+		// distances in metres, never by the path rule under test. If he began the play at a base
+		// and ended at that same base, it was lit at every sample; if he arrived at a base
+		// (within a metre of it), it was lit at every sample from then on.
+		if (!BbBaseMap::IsFoul(Info) && OutsBefore + (int32)Info.n_calls < 3 && Track.Num() > 1)
+		{
+			auto Near = [&](const FVector2D& P, int32 B, double R) { return FVector2D::Distance(P, FVector2D(Ground.bases[B][0], Ground.bases[B][1])) <= R; };
+			for (const TPair<uint16, FVector2D>& R : Track.Last().Pos)
+			{
+				bool bGone = R.Value.Size() <= BbBaseMap::HomeHideM;
+				for (uint32 C = 0; C < Info.n_calls; ++C)
+				{
+					bGone |= Info.calls[C].runner == R.Key;
+				}
+				for (int32 B = 0; B < 3 && !bGone; ++B)
+				{
+					if (!Near(R.Value, B, 7.0))
+					{
+						continue;
+					}
+					const FVector2D* Start = Track[0].Pos.Find(R.Key);
+					int32 From = -1;
+					if (Start && Near(*Start, B, 7.0))
+					{
+						From = 0;
+					}
+					else
+					{
+						for (int32 K = 0; K < Track.Num() && From < 0; ++K)
+						{
+							const FVector2D* At = Track[K].Pos.Find(R.Key);
+							From = At && Near(*At, B, 1.0) ? K : From;
+						}
+					}
+					for (int32 K = FMath::Max(From, 0); From >= 0 && K < Track.Num(); ++K)
+					{
+						if (!Expect(((Track[K].Lit >> B) & 1) != 0, FString::Printf(TEXT("play %u (%hs): base %d went dark at t=%.2f while its runner %x was there (reached it at sample %d)"), Info.play_index, Info.summary, B + 1, Track[K].T, R.Key, From)))
+						{
+							break;
+						}
+					}
+				}
 			}
 		}
 		if (OnBefore != 0 || (Info.bases & 7) != 0)
@@ -2390,7 +2469,7 @@ void ABbDirector::NoteSignals()
 	{
 		Signals.Add(FBbSignal{ bContact ? Info.contact_s + 0.5f : Info.call_s, 0, ESignal::Strike, FVector2D(0.0, 18.0) });
 	}
-	else if (bContact && Words.EndsWith(TEXT("Foul")))
+	else if (bContact && BbBaseMap::IsFoul(Info))
 	{
 		// Called when it comes down (or leaves the field).
 		float T = Info.dead_s >= 0.f ? Info.dead_s : Info.duration_s;
