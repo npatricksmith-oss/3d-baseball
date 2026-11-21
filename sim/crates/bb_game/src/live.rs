@@ -4570,18 +4570,32 @@ impl<'a> Sim<'a> {
     /// A deep ball (agent-models §5.7), one the relay man goes out for: fielded at `from`,
     /// beyond `RELAY_DEEP_M` from home, after being hit over or past an outfielder. A ball hit
     /// on the ground (first down within the infield dirt, `INFIELD_R`) is deep only once it
-    /// is past the outfielder whose part of the field it is in (deeper than the pre-pitch spot
-    /// of the outfielder nearest it): a ground single fielded in front of him is not.
+    /// has got past the outfielder fielding it, as everyone sees it: in his hands deeper than
+    /// his pre-pitch spot (he went back for it); loose, the ball now deeper than both that
+    /// spot and the man known to be going for it. A ground single fielded in front of him is
+    /// not deep, however deep he plays. (Judged by where it is fielded alone, a grounder
+    /// rolling straight at the centre fielder flickered between deep and not as he started in;
+    /// with nobody known to have it, by the outfielder whose spot is nearest `from`.)
     fn deep_ball(&self, from: Vec3) -> bool {
-        let depth = m::hypot(from.x, from.y);
-        if depth <= RELAY_DEEP_M {
+        let depth = |p: Vec3| m::hypot(p.x, p.y);
+        if depth(from) <= RELAY_DEEP_M {
             return false;
         }
         if !self.first_down_m().is_some_and(|d| d < INFIELD_R) {
             return true;
         }
-        let of = (6..9).min_by(|&a, &c| (self.home[a] - from).norm().total_cmp(&(self.home[c] - from).norm())).expect("three outfielders");
-        depth > m::hypot(self.home[of].x, self.home[of].y)
+        match self.ball {
+            Ball::Held { by } if by >= 6 => depth(from) > depth(self.home[by]),
+            Ball::Free { .. } if self.lead().is_some_and(|l| l >= 6) => {
+                let l = self.lead().expect("checked");
+                let now = depth(self.ball_at(self.t).0);
+                now > depth(self.home[l]) && now > depth(self.f[l].pos)
+            }
+            _ => {
+                let of = (6..9).min_by(|&a, &c| (self.home[a] - from).norm().total_cmp(&(self.home[c] - from).norm())).expect("three outfielders");
+                depth(from) > depth(self.home[of])
+            }
+        }
     }
 
     /// The cutoff man for second on a ball through the infield (agent-models §5.7): the middle
