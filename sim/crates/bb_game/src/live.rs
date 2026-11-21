@@ -4528,8 +4528,12 @@ impl<'a> Sim<'a> {
         }
         // While the ball is loose he plays it himself if his own read says he gets there
         // before the man chasing it could get to the same spot (a grounder he can cut off
-        // before it reaches the outfield): the relay job is for a ball that is past him.
-        if matches!(self.ball, Ball::Free { .. }) && self.f[who].t_int <= self.t + self.eta(fielder, self.f[who].int_pt) {
+        // before it reaches the outfield): the relay job is for a ball that is past him. A ball
+        // his read has him reaching only beyond the infielders' range (`INFIELD_BREAK_R`) is
+        // past him (2026-11-21: on a ground single his intercept in the outfield, sooner than
+        // the outfielder's run to that same spot, left him with no job at all).
+        let fd = &self.f[who];
+        if matches!(self.ball, Ball::Free { .. }) && m::hypot(fd.int_pt.x, fd.int_pt.y) < INFIELD_BREAK_R && fd.t_int <= self.t + self.eta(fielder, fd.int_pt) {
             return None;
         }
         Some((who, b))
@@ -4591,20 +4595,25 @@ impl<'a> Sim<'a> {
         if self.seen(side, partner).0 == Role::Relay(2) { partner } else { side }
     }
 
-    /// The cutoff job on a ground ball through the infield before anyone is known to be going
-    /// for it (agent-models §5.7): its man goes out as soon as the ball is down in the infield
-    /// and his own read has it past him, on the ground, carrying beyond the infielders' range
-    /// (`INFIELD_BREAK_R`), with no play for him in it. Only the middle infielders' cutoffs: to
-    /// second (the man on the ball's side) and to third (the shortstop). He lines up toward
-    /// where his read has the ball going, at the cutoff spot of a throw through him (it is not
-    /// yet a deep ball: nobody knows it will get past an outfielder). Returns the man, the base
-    /// and his spot. Once a man is known to be going for it, `relay_job` decides from where he
-    /// fields it.
+    /// The cutoff job on a ground ball through the infield while no outfielder is known to be
+    /// going for it (agent-models §5.7): nobody is known to be going yet, or only an infielder.
+    /// Its man goes out as soon as the ball is down in the infield and **his own read** has it
+    /// past him, on the ground, carrying beyond the infielders' range (`INFIELD_BREAK_R`) with
+    /// no play for him in it, and by his own estimate of his teammates (`seen_intercept`, on
+    /// his read) no other infielder can field it within that range, whatever his job now. Toward second the pitcher does
+    /// not count: a ball he may knock down comes on toward the man going out on its line, and
+    /// there is no force at second to cover. Toward third (a runner on first) he does: the
+    /// shortstop must not leave second on a ball the pitcher may turn into a double play. Only
+    /// the middle infielders' cutoffs: to second (the man on the ball's side) and to third (the
+    /// shortstop). He lines up toward where his read has the ball going, at the cutoff spot of
+    /// a throw through him (it is not yet a deep ball: nobody knows it will get past an
+    /// outfielder). Returns the man, the base and his spot.
     fn through_job(&self) -> Option<(usize, u8, Vec3)> {
         if !matches!(self.ball, Ball::Free { .. }) || self.ball_still_up() || !self.first_down_m().is_some_and(|d| d < INFIELD_R) {
             return None;
         }
-        let who = match self.relay_base(false, 5) {
+        let b = self.relay_base(false, 5);
+        let who = match b {
             2 => self.second_cutoff_man(),
             3 => 5,
             _ => return None,
@@ -4619,16 +4628,24 @@ impl<'a> Sim<'a> {
         if !(past(end) && (!fd.t_int.is_finite() || past(fd.int_pt))) {
             return None;
         }
-        let b = self.relay_base(false, who);
+        // By his own estimate another infielder can field it in the infield, whatever job he
+        // is on now (a man not going for it yet may still: seen on the owner's play 168 of
+        // seed 51001, a chopper the second baseman went for only at the re-call).
+        let short = (0..6).filter(|&j| j != who && !(b == 2 && j == 0)).any(|j| !past(self.seen_intercept(j, pred).1));
+        if short {
+            return None;
+        }
         Some((who, b, Self::relay_spot(Vec3::new(end.x, end.y, 0.0), b, false)))
     }
 
     /// The cutoff or relay job now and its man's spot: `relay_job` from where the ball is
-    /// being fielded, or `through_job` while nobody is known to be going for it.
+    /// being fielded once an outfielder is known to be going for it or has it, else
+    /// `through_job` while it is loose.
     fn cutoff_job(&self) -> Option<(usize, u8, Vec3)> {
+        let infielder_on_it = matches!(self.ball, Ball::Free { .. }) && self.lead().is_none_or(|l| l < 6);
         match self.fielding_point() {
-            Some(from) => self.relay_job(from).map(|(i, b)| (i, b, Self::relay_spot(from, b, self.deep_ball(from)))),
-            None => self.through_job(),
+            Some(from) if !infielder_on_it => self.relay_job(from).map(|(i, b)| (i, b, Self::relay_spot(from, b, self.deep_ball(from)))),
+            _ => self.through_job(),
         }
     }
 
@@ -9613,6 +9630,120 @@ mod tests {
         sim.assign();
         let_calls_be_heard(&mut sim);
         assert!(!(0..9).any(|i| matches!(sim.f[i].role, Role::Relay(_))));
+    }
+
+    // Agent-models §5.7, a deep ball (2026-11-21; the owner's saved play 102 of seed 51001): a
+    // ball fielded beyond RELAY_DEEP_M is deep only when it was hit over or past an outfielder.
+    // Bases empty throughout.
+    #[test]
+    fn a_ground_single_fielded_deep_is_not_a_deep_ball() {
+        let fx = fixture(&[]);
+        let inp = input(&fx, vec![RunnerIn { id: fx.st.batter, base: 0, speed: 8.2, tau_s: bb_agents::running::LEAGUE_TAU_S }]);
+        let relays = |sim: &Sim| -> Vec<(usize, Role)> { (0..9).filter(|&i| matches!(sim.f[i].role, Role::Relay(_))).map(|i| (i, sim.f[i].role)).collect() };
+        // A grounder that first came down on the infield dirt, fielded by the centre fielder at
+        // 88 m (beyond RELAY_DEEP_M, in front of his 97.5 m spot), right of centre: a single.
+        // Nobody goes out toward third; the second baseman, on the ball's side, is the cutoff
+        // for second, between the ball and the bag 14 m out (CUTOFF_M), and the shortstop
+        // covers second.
+        let at = Vec3::new(8.0, 88.0, 0.0);
+        let mut st = fx.st.clone();
+        let mut sim = new_sim(&inp, &mut st);
+        assert!(m::hypot(at.x, at.y) > RELAY_DEEP_M && m::hypot(at.x, at.y) < m::hypot(sim.home[7].x, sim.home[7].y));
+        sim.out.facts.push(Input::BallTouched { t: 0.5, what: Touch::Ground { x: 1.0, y: 9.0 } });
+        held_at(&mut sim, 7, at);
+        assert_eq!(relays(&sim), vec![(3, Role::Relay(2))]);
+        let spot = sim.f[3].target;
+        assert!(on_segment(spot, base_pos(2), at) && ((spot - base_pos(2)).norm() - CUTOFF_M).abs() < 1e-9, "cutoff spot {spot:?}");
+        assert_eq!(sim.f[5].role, Role::Cover(2));
+        // The same on the left of centre: the shortstop goes out, the second baseman covers.
+        let mut st = fx.st.clone();
+        let mut sim = new_sim(&inp, &mut st);
+        sim.out.facts.push(Input::BallTouched { t: 0.5, what: Touch::Ground { x: -1.0, y: 9.0 } });
+        held_at(&mut sim, 7, Vec3::new(-8.0, 88.0, 0.0));
+        assert_eq!(relays(&sim), vec![(5, Role::Relay(2))]);
+        assert_eq!(sim.f[3].role, Role::Cover(2));
+        // The same ball in the same spot after a fly that came down in the outfield: deep, the
+        // relay man goes out for third, at the relay spot (RELAY_OF_THROW_M from the ball, or
+        // halfway when that is longer).
+        let mut st = fx.st.clone();
+        let mut sim = new_sim(&inp, &mut st);
+        sim.out.facts.push(Input::BallTouched { t: 3.0, what: Touch::Ground { x: 6.0, y: 80.0 } });
+        held_at(&mut sim, 7, at);
+        let r = relays(&sim);
+        assert!(r == [(3, Role::Relay(3))] || r == [(5, Role::Relay(3))], "{r:?}");
+        let (i, d) = (r[0].0, (base_pos(3) - at).norm());
+        assert!(on_segment(sim.f[i].target, base_pos(3), at) && ((sim.f[i].target - at).norm() - RELAY_OF_THROW_M.max(0.5 * d)).abs() < 1e-6);
+        // A fly caught on the run, then held: never down, so not a ground ball: deep.
+        let mut st = fx.st.clone();
+        let mut sim = new_sim(&inp, &mut st);
+        sim.out.facts.push(Input::GloveSecured { t: 3.0, fielder: sim.f[7].id, x: at.x, y: at.y });
+        held_at(&mut sim, 7, at);
+        assert!(matches!(relays(&sim)[..], [(_, Role::Relay(3))]), "{:?}", relays(&sim));
+        // A grounder that got past the centre fielder, fielded at 110 m: deep again.
+        let mut st = fx.st.clone();
+        let mut sim = new_sim(&inp, &mut st);
+        sim.out.facts.push(Input::BallTouched { t: 0.5, what: Touch::Ground { x: 1.0, y: 9.0 } });
+        held_at(&mut sim, 7, Vec3::new(8.0, 110.0, 0.0));
+        assert!(matches!(relays(&sim)[..], [(_, Role::Relay(3))]), "{:?}", relays(&sim));
+        // A line drive that came down in front of him and was fielded short of 80 m: as before,
+        // no cutoff man with nobody on.
+        let mut st = fx.st.clone();
+        let mut sim = new_sim(&inp, &mut st);
+        sim.out.facts.push(Input::BallTouched { t: 1.5, what: Touch::Ground { x: 5.0, y: 65.0 } });
+        held_at(&mut sim, 7, Vec3::new(6.0, 70.0, 0.0));
+        assert!(relays(&sim).is_empty(), "{:?}", relays(&sim));
+    }
+
+    // Agent-models §5.7 (2026-11-21): the batter who has reached first on a single is not a
+    // runner on first for the cutoff: the throw goes to second, and the cutoff man stays on
+    // that line. A runner who was on first at the pitch still sends it to third (the
+    // shortstop).
+    #[test]
+    fn the_batter_on_first_does_not_turn_the_cutoff_toward_third() {
+        const R: AgentId = 0x0007;
+        let at = Vec3::new(8.0, 70.0, 0.0);
+        for on_first in [false, true] {
+            let fx = fixture(if on_first { &[(R, 1)] } else { &[] });
+            let mut runners = vec![RunnerIn { id: fx.st.batter, base: 0, speed: 8.2, tau_s: bb_agents::running::LEAGUE_TAU_S }];
+            if on_first {
+                runners.push(RunnerIn { id: R, base: 1, speed: 8.2, tau_s: bb_agents::running::LEAGUE_TAU_S });
+            }
+            let inp = input(&fx, runners);
+            let mut st = fx.st.clone();
+            let mut sim = new_sim(&inp, &mut st);
+            sim.out.facts.push(Input::BallTouched { t: 0.5, what: Touch::Ground { x: 1.0, y: 9.0 } });
+            // The batter stands on first; the runner from first, if any, has stopped short of
+            // second.
+            for r in sim.r.iter_mut() {
+                r.s = if r.start == 0 { BASE_L } else { 1.4 * BASE_L };
+                r.v = 0.0;
+            }
+            held_at(&mut sim, 7, at);
+            let relays: Vec<(usize, Role)> = (0..9).filter(|&i| matches!(sim.f[i].role, Role::Relay(_))).map(|i| (i, sim.f[i].role)).collect();
+            assert_eq!(relays, if on_first { vec![(5, Role::Relay(3))] } else { vec![(3, Role::Relay(2))] }, "runner on first at the pitch: {on_first}");
+        }
+    }
+
+    // Agent-models §5.7 (2026-11-21): a man known to be out on a cutoff keeps it when the
+    // tables are worked out again at a re-call, and his partner keeps second.
+    #[test]
+    fn a_recall_leaves_the_cutoff_man_and_the_cover_at_second_in_their_jobs() {
+        const R: AgentId = 0x0007;
+        let fx = fixture(&[(R, 1)]);
+        let inp = input(&fx, vec![RunnerIn { id: fx.st.batter, base: 0, speed: 8.2, tau_s: bb_agents::running::LEAGUE_TAU_S }, RunnerIn { id: R, base: 1, speed: 8.2, tau_s: bb_agents::running::LEAGUE_TAU_S }]);
+        let mut st = fx.st.clone();
+        let mut sim = new_sim(&inp, &mut st);
+        sim.out.facts.push(Input::BallTouched { t: 0.5, what: Touch::Ground { x: 1.0, y: 9.0 } });
+        // A single to right-centre with a runner on first: the shortstop is the cutoff to third
+        // and the second baseman covers second.
+        held_at(&mut sim, 8, Vec3::new(20.0, 70.0, 0.0));
+        assert_eq!((sim.f[5].role, sim.f[3].role), (Role::Relay(3), Role::Cover(2)));
+        // A re-call's tables (`cover_roles`, then the cutoff) change neither. (Before, the
+        // tables dealt second to the shortstop, the cutoff took him back, and the second
+        // baseman was left with no base.)
+        sim.cover_roles(&[]);
+        sim.assign_relay();
+        assert_eq!((sim.f[5].role, sim.f[3].role), (Role::Relay(3), Role::Cover(2)));
     }
 
     // Codex review 2026-11-12 #1: the receiver plans from his own read of the throw, never

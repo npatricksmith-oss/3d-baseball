@@ -311,3 +311,91 @@ fn seed_12_play_105_the_pitchers_feed_is_taken_by_the_covering_second_baseman() 
     assert_eq!(who, receiver, "the feed was taken by {who} at ({x:.1}, {y:.1}), not by the receiver {receiver}");
     assert!((x * x + (y - 38.795).powi(2)).sqrt() < 3.0, "taken at ({x:.1}, {y:.1}), not at second");
 }
+
+/// The fixture mirrored across the line from home through second (x → −x): the ball, its spin
+/// (an axial vector: ω → (ω_x, −ω_y, −ω_z)), the batter's side and the bat; then the ball's
+/// position, velocity and spin turned `turn_deg` about the vertical toward +x. The other side's
+/// Savant alignment is close to the mirror image (agent-models §5.9: a left-handed batter's
+/// second baseman at 148.2 ft / +19.1°, a right-handed batter's shortstop at 148.3 ft / −18.3°),
+/// but the bounces' scatter is not mirrored.
+fn mirrored(text: &str, turn_deg: f64) -> String {
+    let mut v: Value = serde_json::from_str(text).unwrap();
+    let neg = |v: &mut Value, k: usize| v[k] = (-v[k].as_f64().unwrap()).into();
+    for k in ["ball_r", "ball_v", "batter_box"] {
+        neg(&mut v[k], 0);
+    }
+    neg(&mut v["ball_w"], 1);
+    neg(&mut v["ball_w"], 2);
+    for k in ["pitch_x", "bat_yaw"] {
+        v[k] = (-v[k].as_f64().unwrap()).into();
+    }
+    v["bats"] = if v["bats"] == "L" { "R" } else { "L" }.into();
+    let (s, c) = turn_deg.to_radians().sin_cos();
+    for k in ["ball_r", "ball_v", "ball_w"] {
+        let a = vec3(&v[k]);
+        v[k] = serde_json::json!([a.x * c + a.y * s, -a.x * s + a.y * c, a.z]);
+    }
+    v.to_string()
+}
+
+/// Replays a fixture with the jobs traced: the play and every tick's jobs from the first read.
+fn replay_jobs(text: &str) -> (LiveOutput, Vec<bb_game::live::job_trace::Tick>) {
+    bb_game::live::job_trace::take();
+    bb_game::live::job_trace::ON.with(|x| x.set(true));
+    let (out, _, _) = replay(text);
+    bb_game::live::job_trace::ON.with(|x| x.set(false));
+    (out, bb_game::live::job_trace::take())
+}
+
+/// A ground single through the infield, as on the owner's saved play 102 (below): the middle
+/// infielder on the ball's side (`out_man`) goes out as the cutoff man for second from the
+/// first call and never stands with no job while the ball is loose; his partner covers second
+/// from the first call; the outfielder fields it in front of him, so it is not a deep ball and
+/// nobody goes out toward third. Checked against the geometry: when the ball is fielded the
+/// cutoff man is out from where he started and on the line from the ball to second, between
+/// them (within `CUT_LINE_M` = 5 m, agent-models §5.5).
+fn check_ground_single_jobs(text: &str, out_man: usize, cover_man: usize, fielder: u16) {
+    const SECOND: (f64, f64) = (0.0, 38.795);
+    let (out, ticks) = replay_jobs(text);
+    let &(t_fielded, by) = out.secured.first().expect("the ball is fielded");
+    assert_eq!(by & 0x7f, fielder, "fielded by {by:#x}");
+    let first = &ticks[0];
+    assert_eq!((first.job[out_man], first.job[cover_man]), (22, 12), "the first call: {:?}", first.job);
+    for k in ticks.iter().filter(|k| k.t < t_fielded) {
+        assert_eq!((k.job[out_man], k.job[cover_man]), (22, 12), "at {:.2} s, before the ball is fielded: {:?}", k.t, k.job);
+        assert!(!k.job.contains(&23), "a relay toward third at {:.2} s: {:?}", k.t, k.job);
+    }
+    let at = ticks.iter().rev().find(|k| k.t <= t_fielded).unwrap();
+    let ball = out.facts.iter().find_map(|f| match *f {
+        Input::GloveSecured { x, y, .. } => Some((x, y)),
+        _ => None,
+    }).unwrap();
+    let p = at.pos[out_man];
+    let (lx, ly) = (ball.0 - SECOND.0, ball.1 - SECOND.1);
+    let len = (lx * lx + ly * ly).sqrt();
+    let along = ((p.x - SECOND.0) * lx + (p.y - SECOND.1) * ly) / len;
+    let off = ((p.x - SECOND.0) * ly - (p.y - SECOND.1) * lx).abs() / len;
+    assert!(off < 5.0 && along > 0.0 && along < len, "the cutoff man at ({:.1}, {:.1}) is off the line from second to the ball at ({:.1}, {:.1}): {off:.1} m off, {along:.1} m along", p.x, p.y, ball.0, ball.1);
+    assert!(p.y.hypot(p.x) > ticks[0].pos[out_man].y.hypot(ticks[0].pos[out_man].x), "he went out: from {:?} to {p:?}", ticks[0].pos[out_man]);
+}
+
+/// Seed 51001 play 102, the owner's saved play (calibration note 2026-11-20-saved-plays-51001
+/// §3; frozen from main `904c1ea`, a left-handed batter): none out, bases empty, a 98 mph
+/// grounder up the middle on the second baseman's side, out of his reach, fielded by the centre
+/// fielder at 88 m. On main the first call gave second to the shortstop and the second baseman
+/// nothing, so he stood for 0.75 s; then the deep-ball rule sent the shortstop out toward third
+/// and second fell back to the second baseman. Now (agent-models §5.7, a ground ball through
+/// the infield) the second baseman goes out as the cutoff for second at the first call and the
+/// shortstop covers second.
+#[test]
+fn seed_51001_play_102_the_second_baseman_goes_out_as_the_cutoff_and_the_shortstop_covers() {
+    check_ground_single_jobs(include_str!("fixtures/a4/51001-102.json"), 3, 5, 8);
+}
+
+/// The mirror image of play 102, on the shortstop's side (a right-handed batter): the shortstop
+/// goes out and the second baseman covers second. Turned 3° toward the middle (spray −11° to
+/// −8°): the exact mirror bounces differently and the shortstop fields it in the infield.
+#[test]
+fn mirrored_play_102_the_shortstop_goes_out_and_the_second_baseman_covers() {
+    check_ground_single_jobs(&mirrored(include_str!("fixtures/a4/51001-102.json"), 3.0), 5, 3, 8);
+}
