@@ -521,3 +521,156 @@ fn the_through_cutoff_does_not_flicker() {
     }
 }
 
+
+/// The fixture with `bases` (batting ids on first, second, third) in place of its own.
+fn with_bases(text: &str, bases: [Option<u16>; 3]) -> String {
+    let mut v: Value = serde_json::from_str(text).unwrap();
+    for (k, b) in bases.iter().enumerate() {
+        v["bases"][k] = b.map_or(Value::Null, |id| id.into());
+    }
+    v.to_string()
+}
+
+/// A ground single through the infield to an outfielder with a runner in scoring position:
+/// the standard assignment by the time the outfielder has the ball (agent-models §5.7, "With
+/// a runner in scoring position"; the coaching guides' single-to-the-outfield diagrams). The
+/// cutoff man for the throw home is the third baseman on a ball to the left fielder and the
+/// first baseman on one to the centre or right fielder; with the first baseman cutting, the second baseman covers first,
+/// the shortstop second and the third baseman third; with the third baseman cutting, the first
+/// baseman covers first, the second baseman second and the shortstop third; the catcher is at
+/// home and the pitcher backs up home (he runs to a spot behind the plate). Job codes as the
+/// job trace gives them: 1 going for the ball, 10 + b covering base b, 20 + b the cutoff
+/// toward base b, 30 a backup. Returns who fielded it (position number).
+fn check_risp_single_jobs(text: &str, label: &str) -> u16 {
+    let (ticks, _, by, out) = loose_jobs(text);
+    assert!(by >= 7, "{label}: the premise, an outfielder fields it (by {by})");
+    let down = out.facts.iter().find_map(|f| match *f {
+        Input::BallTouched { what: bb_rules::Touch::Ground { x, y }, .. } => Some(x.hypot(y)),
+        _ => None,
+    });
+    assert!(down.is_some_and(|d| d < 47.4), "{label}: the premise, a ground ball (first down {down:?} m)");
+    let at = ticks.last().expect("ticks before the catch");
+    // The cutoff man is the one of the two who went out: the left fielder's ball is the third
+    // baseman's and a centre or right fielder's the first baseman's, by who was first going
+    // for it (the job does not change hands when another outfielder takes the ball over).
+    assert!(at.job[2] == 24 || at.job[4] == 24, "{label}: no first or third baseman on the cutoff home at {:.2} s: {:?}", at.t, at.job);
+    let expected: [(usize, u8); 6] = if at.job[4] == 24 { [(4, 24), (2, 11), (3, 12), (5, 13), (1, 14), (0, 30)] } else { [(2, 24), (3, 11), (5, 12), (4, 13), (1, 14), (0, 30)] };
+    for (i, job) in expected {
+        assert_eq!(at.job[i], job, "{label}: fielded by {by}, at {:.2} s fielder {} has job {} (expected {job}): {:?}", at.t, i + 1, at.job[i], at.job);
+    }
+    assert!(at.target[0].y < 0.0, "{label}: the pitcher's backup spot {:?} is not behind home", at.target[0]);
+    // Second is never open for longer than the 0.3 s it takes a teammate to learn of a change
+    // (`CALL_HEARD_S`) at a stretch, from the first call to the catch.
+    let mut since: Option<f64> = None;
+    for k in &ticks {
+        if k.job.contains(&12) {
+            since = None;
+        } else {
+            let t0 = *since.get_or_insert(k.t);
+            assert!(k.t - t0 <= 0.31, "{label}: second open from {t0:.2} to {:.2} s: {:?}", k.t, k.job);
+        }
+    }
+    by
+}
+
+/// Whether the ball was fielded in front of the outfielder who first secured it: no deeper
+/// than where he stood at the pitch (from his recorded track). A ball that got past him is a
+/// deep ball, with a middle infielder as the relay man (agent-models §5.7), not this case.
+fn fielded_in_front(out: &LiveOutput) -> bool {
+    let &(_, by) = out.secured.first().expect("the ball is fielded");
+    let start = out.actors.iter().find(|a| a.0 == by).and_then(|a| a.1.first()).map(|s| s.1).expect("his track");
+    let at = out.facts.iter().find_map(|f| match *f {
+        Input::GloveSecured { x, y, .. } => Some(x.hypot(y)),
+        _ => None,
+    }).unwrap();
+    at <= start.x.hypot(start.y)
+}
+
+/// Seed 9 play 9 (frozen from main `312789e`; TASKS case (a)): bottom of the first, none out,
+/// a runner on second, a high chopper off the plate that bounces over the middle and is fielded
+/// by the centre fielder at (−12.5, 81) m. On `312789e` the first baseman went out as the
+/// cutoff home, the second baseman stayed on second, the pitcher covered first and the
+/// shortstop had no job for 3.7 s until the ball was fielded; the runner from second scored.
+/// The left fielder goes for it first and the centre fielder takes it over, so either corner
+/// man may be the cutoff; the rest follows the standard for him (`check_risp_single_jobs`),
+/// with the pitcher behind home.
+#[test]
+fn seed_9_play_9_a_single_to_left_centre_with_a_runner_on_second_gets_the_standard_jobs() {
+    let by = check_risp_single_jobs(include_str!("fixtures/a4/9-9.json"), "seed 9 play 9");
+    assert_eq!(by, 8, "the premise: the centre fielder fields it");
+}
+
+/// Ground singles to an outfielder with a runner in scoring position: play 102's grounder (frozen
+/// bases empty) with a runner on second, turned every degree from 30° toward third to 30° toward
+/// first and mirrored, and two game plays frozen from main `312789e`, turned every degree up to
+/// 6° either way (seed 65 play 43: none out, a runner on second, a grounder through the right
+/// side fielded by the right fielder at (39, 67) m; seed 30 play 35: none out, a runner on third,
+/// a grounder through the left side fielded by the left fielder at (−40, 66) m). On every variant
+/// an outfielder fields in front of him (one that gets past him is a deep ball, with its own
+/// relay man): the standard jobs of `check_risp_single_jobs`; and once everyone can know that no
+/// infielder is going for the ball any more (`CALL_HEARD_S` after the last one stopped), neither
+/// a middle infielder nor a corner man stands with no job for more than that 0.3 s at a stretch
+/// while the ball is loose. (While an infielder is still going for it the others wait on him:
+/// TASKS case (b).) (On
+/// `312789e` the middle infielder away from the ball had no job from the first call until 0.3 s
+/// after the cutoff man was known, 0.6–0.9 s, and the pitcher covered first on balls to the left
+/// of centre.)
+#[test]
+fn a_ground_single_with_a_runner_in_scoring_position_gives_every_infielder_his_job() {
+    let p102 = with_bases(include_str!("fixtures/a4/51001-102.json"), [None, Some(ON_FIRST), None]);
+    let mut variants: Vec<(String, String)> = Vec::new();
+    for turn in -30..=30 {
+        variants.push((format!("play 102, turn {turn}"), turned(&p102, f64::from(turn), None)));
+        variants.push((format!("play 102 mirrored, turn {turn}"), mirrored(&p102, f64::from(turn))));
+    }
+    for (name, text) in [("seed 65 play 43", include_str!("fixtures/a4/65-43.json")), ("seed 30 play 35", include_str!("fixtures/a4/30-35.json"))] {
+        for turn in -6..=6 {
+            variants.push((format!("{name}, turn {turn}"), turned(text, f64::from(turn), None)));
+        }
+    }
+    let mut checked = std::collections::BTreeMap::new();
+    for (label, text) in &variants {
+        let (ticks, _, by, out) = loose_jobs(text);
+        let down = out.facts.iter().find_map(|f| match *f {
+            Input::BallTouched { what: bb_rules::Touch::Ground { x, y }, .. } => Some(x.hypot(y)),
+            _ => None,
+        });
+        if by < 7 || !down.is_some_and(|d| d < 47.4) || !fielded_in_front(&out) {
+            continue;
+        }
+        *checked.entry(by).or_insert(0) += 1;
+        check_risp_single_jobs(text, label);
+        // From the moment everyone can know that no infielder is going for the ball any more:
+        // the last tick one was, plus `CALL_HEARD_S`.
+        let free = ticks.iter().filter(|k| k.job[..6].contains(&1)).map(|k| k.t + 0.3).fold(0.0, f64::max);
+        for i in [2, 3, 4, 5] {
+            let mut since: Option<f64> = None;
+            for k in ticks.iter().filter(|k| k.t > free) {
+                if k.job[i] == 0 {
+                    let t0 = *since.get_or_insert(k.t);
+                    assert!(k.t - t0 <= 0.31, "{label}: fielder {} with no job from {t0:.2} to {:.2} s: {:?}", i + 1, k.t, ticks.iter().map(|k| (k.t, k.job[i])).collect::<Vec<_>>());
+                } else {
+                    since = None;
+                }
+            }
+        }
+    }
+    assert!(checked.len() == 3 && checked.values().sum::<i32>() >= 15, "singles checked by the outfielder who fielded them: {checked:?}");
+}
+
+/// Seed 8 play 208 (Opus cutoff-home review P2-1; frozen from `e56ddc5`): one out, a runner on
+/// second, a grounder the second baseman goes for that comes off him; he runs it down and fields
+/// it 49 m out at 5.25 s. While he is still going for it a real first baseman holds his bag (the
+/// play at first is not settled); on `e56ddc5` he went out as the cutoff home at 2.28 s and first
+/// stood empty until 4.08 s. First is covered at every tick from the first call to the catch,
+/// and the first baseman is never on the cutoff while the second baseman is going for the ball.
+#[test]
+fn seed_8_play_208_the_first_baseman_holds_first_while_the_second_baseman_runs_the_ball_down() {
+    let (ticks, _, by, _) = loose_jobs(include_str!("fixtures/a4/8-208.json"));
+    assert_eq!(by, 4, "the premise: the second baseman fields it");
+    assert!(ticks.iter().any(|k| k.job[3] == 1), "the premise: the second baseman goes for it");
+    for k in &ticks {
+        assert!(k.job.contains(&11), "first open at {:.2} s: {:?}", k.t, k.job);
+        assert!(!(k.job[3] == 1 && k.job[2] == 24), "the first baseman on the cutoff home at {:.2} s while the second baseman goes for the ball: {:?}", k.t, k.job);
+    }
+}
