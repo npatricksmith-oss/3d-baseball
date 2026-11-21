@@ -1,6 +1,6 @@
 # Task List
 
-**Last updated:** 2026-11-20 (approach: Opus review in, no P1; review fixes running).
+**Last updated:** 2026-11-20 (approach: review fixes in; spin-test robustness running, then merge).
 
 What is next and what is open. Other files hold the rest:
 
@@ -17,13 +17,11 @@ Status: `[ ]` not started · `[~]` partly done · `[?]` needs an owner decision
 
 ## Resume here (2026-11-20, night)
 
-**State.** Nothing is waiting on the owner. **One worker running** (a subagent of the Coordinator session): Opus, high effort, fixing the Opus review of `work/approach` (committed on the branch as `43ca11f`; no P1). Worktree `.claude/worktrees/runner-decision`, job WORKER-APPROACH-REVIEWFIX.md there (git-excluded). Watched with `sim/target/codex-probes/coord/watch.sh`. If the session ended before it reported, check the branch and start a replacement from its last commit (CLAUDE.md, owner 2026-11-20).
+**State.** Nothing is waiting on the owner. **One worker running** (a subagent of the Coordinator session): Sonnet, medium, making `the_typical_spin_belief_follows_the_contact_model` robust to which balls the games produce (it fails on the branch by 4 rpm over a fixed 300 rpm bound in a 30-ball liner cell; no game code involved). Worktree `.claude/worktrees/runner-decision`, branch `work/approach`, job WORKER-SPINTEST.md there (git-excluded). Watched with `sim/target/codex-probes/coord/watch.sh`. If the session ended before it reported, check the branch and restart it from its last commit.
 
-**The review's findings and where they went.** P2-3 (the ground approach has no margin: infielders back off balls they would take in front of them, e.g. the pitcher on a comebacker, seed 1048 play 193), P2-2 (the set-up behind a fly chosen on an early read costs catches, seeds 207/66 and 1042/28), P2-1 (the angle from contact is weighed in the air against the wrong alternative, so it is given up before the take: one try at the fix, else removed), P3-1/2/3/4/6: to the running worker. **Deferred:** P3-5 (two tests partly restate their formula; the angle's no-ball-lost test covers an angle always given up), P3-7 (outside this branch: a fielder who misses a catch stands beside the dead ball about a second), and P3-2's second half (`outfield_round_base` ignores the runner's direction and the tag time). The Resolution is written when the fixes are in.
+**Review fixes done** (`work/approach` `6ed53e4`, docs `657811f`; note §7 on the branch). P2-3: the plan and the movement disagreed on the braked take (planned at 0.7 m, braked at full reach); fixed, with a plan-against-movement test of 93 cases and frozen plays 1048/193, 136/13; the margin was tried and not kept (it broke frozen play 13-140, raised triples; without it the excess of balls getting by is gone, 64 lost against 75 gained). P2-2: the set-up only once his tracked doubt is within the spot's depth; frozen plays 207/66, 1042/28. P2-1: the angle from contact removed (one try; still his way at the take in 2–4 plays a set). P3-1/2/3/4/6 fixed. Standard runs 4.37 [4.77] (main 4.27 [4.57]). First to third 36.4% [36.3%] (MLB 31.7%; the review: a real consequence of Q32's across charge, not a runner bug). **Open after merge:** outfield pickup-to-release 1.05 → 1.12 s (the honest braked take; can braking at full reach when the planned speed is well above a stop win some back?); first to third; the pop-up rise untraced; P3-5, P3-7, P3-2's runner direction (deferred). No re-review: the angle's removal is deletion and the other fixes are covered by the new plan-against-movement test and six frozen plays.
 
-**What the branch holds** (note docs/calibration/2026-11-20-approach.md, on the branch; final sim commit `af5825d`, 487 tests pass). The approach (Q32), rounding and the angle from contact (Q33), and the set-up behind a fly timed from the movement model (both lost catches made, frozen as fixtures `a4/155-23`, `264-109`). The crow hop's gain in the angle's plan was tried, changed nothing, and was reverted. Runs 4.39 [4.70] against main 4.27 [4.57]; first to third on singles 36.6% [36.7%] (main 32.9% [33.8%], MLB 31.7%); set-up catches 20% [16%]; triples 1.02 → 0.83. Open after it: a set-up chosen on a first read can send a man a few metres off his path (real outfielders go to the ball first, then set up); first to third; the pop-up hit rise is untraced.
-
-**Then:** the Resolution, the Coordinator's pre-merge check, merge (the review fix is small enough and test-covered: no re-review unless the angle is removed in a way that touches more than its own code). **After that:** the saved-play fixes ("Open sim work" §3, [diagnosis note](docs/calibration/2026-11-20-saved-plays-51001.md)), one `live.rs` job at a time.
+**Then:** the review's Resolution, the Coordinator's pre-merge check, merge. **After that:** the saved-play fixes ("Open sim work" §3, [diagnosis note](docs/calibration/2026-11-20-saved-plays-51001.md)), one `live.rs` job at a time.
 
 ---
 
