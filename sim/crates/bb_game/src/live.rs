@@ -5087,7 +5087,7 @@ impl<'a> Sim<'a> {
     /// assignment): the third baseman on a ball the left fielder fields, the first baseman on
     /// one the centre or right fielder fields; but a man already known to that man to be out
     /// on the cutoff keeps it, so the job does not change hands when another outfielder takes
-    /// the ball over (as `second_cutoff_man`). (Before 2026-11-22 the side was where the ball
+    /// the ball over (as `second_cutoff_man`). (Before 2026-11-21 the side was where the ball
     /// was being fielded, x < −15 m; on a ball the centre fielder fielded near that line the
     /// job changed hands every 0.3 s.)
     fn home_cutoff_man(&self, of: usize) -> usize {
@@ -5624,7 +5624,7 @@ impl<'a> Sim<'a> {
     /// base (the standard assignment on a single with a runner in scoring position); with the
     /// shortstop free, the second baseman covers first and the shortstop second; with the
     /// shortstop busy, the second baseman covers second and first waits until the shortstop
-    /// is free to take second from him (before 2026-11-22 the pitcher took first on a ball to
+    /// is free to take second from him (before 2026-11-21 the pitcher took first on a ball to
     /// the left side, and the shortstop was left with no job: seed 9 play 9).
     fn home_order(one_out: bool, ss_busy: bool, left: bool) -> (&'static [usize], &'static [usize], &'static [usize]) {
         match (one_out, ss_busy) {

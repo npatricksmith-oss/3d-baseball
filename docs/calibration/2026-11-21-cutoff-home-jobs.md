@@ -1,4 +1,4 @@
-# The infielders' jobs on a ground single with a runner in scoring position (2026-11-22)
+# The infielders' jobs on a ground single with a runner in scoring position (2026-11-21)
 
 **Job.** TASKS.md §3, "Middle infielders with no job while a ground single is loose", case (a): with a runner on second or third and a ground ball through the infield, a middle infielder often had no job for 0.6–0.9 s while the ball was loose, and the tables could leave the shortstop with nothing, the second baseman at second and the pitcher at first (seed 9 play 9). Branch `work/cutoff-home-jobs`, from main `312789e`. Continues the [mid-infield note](2026-11-21-mid-infield-jobs.md) (§3, "Runner on second or third"). Spec: agent-models §5.7, "With a runner in scoring position" and "Cutoffs and relays"; §5.5, "Where the man in the throw stands".
 
