@@ -15,13 +15,13 @@ Status: `[ ]` not started · `[~]` partly done · `[?]` needs an owner decision
 
 ---
 
-## Resume here (2026-11-21, evening)
+## Resume here (2026-11-21, night)
 
-**State.** Nothing is waiting on the owner. Nothing is running. Merged and pushed today: `work/dp-cover`, `work/base-map`, `work/mid-infield-jobs` (saved play 102) and `work/bounce-track` (saved play 71: a fielder keeps tracking the ball across its bounces; [note](docs/calibration/2026-11-21-bounce-track.md), [review](docs/reviews/2026-11-21-opus-bounce-track-review.md) resolved, no re-review). Standard runs 4.08 [4.44].
+**State.** Nothing is waiting on the owner. Nothing is running. Merged and pushed today: `work/dp-cover`, `work/base-map`, `work/mid-infield-jobs`, `work/bounce-track` and `work/cutoff-home-jobs` (§3 case (a): the infielders' jobs on a ground single with a runner in scoring position; [note](docs/calibration/2026-11-21-cutoff-home-jobs.md), [review](docs/reviews/2026-11-21-opus-cutoff-home-jobs-review.md) resolved, no re-review). Standard runs 4.08 [4.46].
 
 **Open (ledger §5):** runs fell 0.21 [0.18] with dp-cover, about 0.04 explained: check the run-to-run noise on more seeds before tracing. Double plays 12.3% per opportunity (MLB 9.8%): no slide or break-up on the pivot man.
 
-**Next:** merge `work/cutoff-home-jobs` (§3 case (a), review fixed; [note](docs/calibration/2026-11-21-cutoff-home-jobs.md)); then the item's other cases. Play 71 is still a triple (§2: no dive at a ground ball 1.9 m away). The warm worktree is `.claude/worktrees/runner-decision` (on the merged `work/bounce-track`).
+**Next:** the middle infielders' other no-job cases (§3; a liner or blooper landing in the dirt is most of what is left). Play 71 is still a triple (§2: no dive at a ground ball 1.9 m away). The warm worktree is `.claude/worktrees/runner-decision` (on the merged `work/cutoff-home-jobs`).
 
 ---
 
