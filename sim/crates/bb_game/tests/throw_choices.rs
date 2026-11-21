@@ -657,3 +657,20 @@ fn a_ground_single_with_a_runner_in_scoring_position_gives_every_infielder_his_j
     }
     assert!(checked.len() == 3 && checked.values().sum::<i32>() >= 15, "singles checked by the outfielder who fielded them: {checked:?}");
 }
+
+/// Seed 8 play 208 (Opus cutoff-home review P2-1; frozen from `e56ddc5`): one out, a runner on
+/// second, a grounder the second baseman goes for that comes off him; he runs it down and fields
+/// it 49 m out at 5.25 s. While he is still going for it a real first baseman holds his bag (the
+/// play at first is not settled); on `e56ddc5` he went out as the cutoff home at 2.28 s and first
+/// stood empty until 4.08 s. First is covered at every tick from the first call to the catch,
+/// and the first baseman is never on the cutoff while the second baseman is going for the ball.
+#[test]
+fn seed_8_play_208_the_first_baseman_holds_first_while_the_second_baseman_runs_the_ball_down() {
+    let (ticks, _, by, _) = loose_jobs(include_str!("fixtures/a4/8-208.json"));
+    assert_eq!(by, 4, "the premise: the second baseman fields it");
+    assert!(ticks.iter().any(|k| k.job[3] == 1), "the premise: the second baseman goes for it");
+    for k in &ticks {
+        assert!(k.job.contains(&11), "first open at {:.2} s: {:?}", k.t, k.job);
+        assert!(!(k.job[3] == 1 && k.job[2] == 24), "the first baseman on the cutoff home at {:.2} s while the second baseman goes for the ball: {:?}", k.t, k.job);
+    }
+}

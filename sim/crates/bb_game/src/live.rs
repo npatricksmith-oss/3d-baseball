@@ -5142,7 +5142,9 @@ impl<'a> Sim<'a> {
         let pred = fd.belief.as_ref()?;
         let gen1 = self.ball_gen + 1;
         let on = fd.through.get() == gen1;
-        if (0..6).any(|j| j != o && matches!(self.known(j), (true, _, true)) && !self.ball_gone_by(j, if on { 0.0 } else { REACH })) {
+        // Any infielder known to be going for the ball, wherever it is: the cutoff man home does
+        // not go out while one is (`infield_lets_go`, Opus cutoff-home review P2-1).
+        if (0..6).any(|j| j != o && matches!(self.known(j), (true, _, true))) {
             fd.through.set(0);
             return None;
         }
@@ -5323,7 +5325,13 @@ impl<'a> Sim<'a> {
         }
         let margin = if out { 0.0 } else { REACH };
         let others = || (0..6).filter(move |&j| j != who);
-        if others().any(|j| matches!(self.known(j), (true, _, true)) && !self.ball_gone_by(j, margin)) {
+        // Toward home an infielder known to be going for the ball blocks it wherever the ball is
+        // (Opus cutoff-home review P2-1): one who has knocked it down and is running it down from
+        // behind may still make a play at first, and the first baseman holds his bag until that
+        // is settled (seed 8 play 208: first stood empty 1.8 s while the second baseman ran down
+        // a ball off his glove at 49 m). Toward second and third, as before, only one in front of
+        // the ball.
+        if others().any(|j| matches!(self.known(j), (true, _, true)) && (b == 4 || !self.ball_gone_by(j, margin))) {
             return false;
         }
         if out {
@@ -5741,13 +5749,24 @@ impl<'a> Sim<'a> {
         // Likewise the second baseman takes first from a pitcher who covered it while the first
         // baseman was going for the ball; the pitcher then backs up home.
         let two_claims_first = o == 3 && relay(2) && !ss_busy && matches!(self.f[3].role, Role::Idle | Role::Backup | Role::Cover(1));
-        // And back: a first baseman no longer on the cutoff while the ball is still out of the
-        // infield (a deep ball's relay man has taken over from him) takes first back from the
-        // second baseman, who is then free for second (before, the second baseman stayed at
-        // first with second open after the shortstop on it went out as the relay man). Once an
-        // infielder has the ball the bases stand as they are.
-        let infield_has_it = matches!(self.ball, Ball::Held { by } if by < 6);
-        let one_back = !infield_has_it && !relay(2) && !self.chasing_as_known_by(o, 2) && matches!(job(2), Role::Idle | Role::Backup) && job(3) == Role::Cover(1);
+        // And back: a first baseman who was out on the cutoff this play and has been replaced
+        // (a deep ball's relay man has taken over from him) while the ball is out of the infield
+        // (loose beyond the infield dirt, or in an outfielder's hands; not thrown) takes first
+        // back from the second baseman, who is then free for second (before, the second baseman
+        // stayed at first with second open after the shortstop on it went out as the relay man).
+        // Otherwise the bases stand as they are (Opus cutoff-home review P3-1: a first version
+        // applied to any first baseman with no job, on nobody-on plays too).
+        let horizon = self.t - CALL_HEARD_S + 1e-9;
+        let one_was_out = self.f[2].shown.iter().any(|e| matches!(e.role, Role::Relay(_)) && (o == 2 || e.at <= horizon));
+        let out_of_infield = match self.ball {
+            Ball::Free { .. } => {
+                let (b, _) = self.ball_at(self.t);
+                m::hypot(b.x, b.y) > INFIELD_R
+            }
+            Ball::Held { by } => by >= 6,
+            Ball::Thrown { .. } => false,
+        };
+        let one_back = out_of_infield && one_was_out && !relay(2) && !self.chasing_as_known_by(o, 2) && matches!(job(2), Role::Idle | Role::Backup) && job(3) == Role::Cover(1);
         // Reserve kept non-chasing covers first so base 1's fallback never steals Cover(2).
         let mut filled = [false; 5];
         for base in 1..=4u8 {
