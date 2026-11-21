@@ -521,3 +521,101 @@ fn the_through_cutoff_does_not_flicker() {
     }
 }
 
+
+/// The fixture with `bases` (batting ids on first, second, third) in place of its own.
+fn with_bases(text: &str, bases: [Option<u16>; 3]) -> String {
+    let mut v: Value = serde_json::from_str(text).unwrap();
+    for (k, b) in bases.iter().enumerate() {
+        v["bases"][k] = b.map_or(Value::Null, |id| id.into());
+    }
+    v.to_string()
+}
+
+/// A ground single through the infield to an outfielder with a runner in scoring position:
+/// the standard assignment by the time the outfielder has the ball (agent-models §5.7, "With
+/// a runner in scoring position"; the coaching guides' single-to-the-outfield diagrams). The
+/// cutoff man for the throw home is the third baseman on a ball to the left fielder and the
+/// first baseman on one to the centre or right fielder; with the first baseman cutting, the second baseman covers first,
+/// the shortstop second and the third baseman third; with the third baseman cutting, the first
+/// baseman covers first, the second baseman second and the shortstop third; the catcher is at
+/// home and the pitcher backs up home (he runs to a spot behind the plate). Job codes as the
+/// job trace gives them: 1 going for the ball, 10 + b covering base b, 20 + b the cutoff
+/// toward base b, 30 a backup. Returns who fielded it (position number).
+fn check_risp_single_jobs(text: &str, label: &str) -> u16 {
+    let (ticks, _, by, out) = loose_jobs(text);
+    assert!(by >= 7, "{label}: the premise, an outfielder fields it (by {by})");
+    let down = out.facts.iter().find_map(|f| match *f {
+        Input::BallTouched { what: bb_rules::Touch::Ground { x, y }, .. } => Some(x.hypot(y)),
+        _ => None,
+    });
+    assert!(down.is_some_and(|d| d < 47.4), "{label}: the premise, a ground ball (first down {down:?} m)");
+    let at = ticks.last().expect("ticks before the catch");
+    // The cutoff man is the one of the two who went out: the left fielder's ball is the third
+    // baseman's and a centre or right fielder's the first baseman's, by who was first going
+    // for it (the job does not change hands when another outfielder takes the ball over).
+    assert!(at.job[2] == 24 || at.job[4] == 24, "{label}: no first or third baseman on the cutoff home at {:.2} s: {:?}", at.t, at.job);
+    let expected: [(usize, u8); 6] = if at.job[4] == 24 { [(4, 24), (2, 11), (3, 12), (5, 13), (1, 14), (0, 30)] } else { [(2, 24), (3, 11), (5, 12), (4, 13), (1, 14), (0, 30)] };
+    for (i, job) in expected {
+        assert_eq!(at.job[i], job, "{label}: fielded by {by}, at {:.2} s fielder {} has job {} (expected {job}): {:?}", at.t, i + 1, at.job[i], at.job);
+    }
+    assert!(at.target[0].y < 0.0, "{label}: the pitcher's backup spot {:?} is not behind home", at.target[0]);
+    // Second is covered at every tick from the first call to the catch.
+    for k in &ticks {
+        assert!(k.job.contains(&12), "{label}: second open at {:.2} s: {:?}", k.t, k.job);
+    }
+    by
+}
+
+/// Seed 9 play 9 (frozen from main `312789e`; TASKS case (a)): bottom of the first, none out,
+/// a runner on second, a high chopper off the plate that bounces over the middle and is fielded
+/// by the centre fielder at (−12.5, 81) m. On `312789e` the first baseman went out as the
+/// cutoff home, the second baseman stayed on second, the pitcher covered first and the
+/// shortstop had no job for 3.7 s until the ball was fielded; the runner from second scored.
+/// The left fielder goes for it first and the centre fielder takes it over, so either corner
+/// man may be the cutoff; the rest follows the standard for him (`check_risp_single_jobs`),
+/// with the pitcher behind home.
+#[test]
+fn seed_9_play_9_a_single_to_left_centre_with_a_runner_on_second_gets_the_standard_jobs() {
+    let by = check_risp_single_jobs(include_str!("fixtures/a4/9-9.json"), "seed 9 play 9");
+    assert_eq!(by, 8, "the premise: the centre fielder fields it");
+}
+
+/// Play 102's grounder (frozen bases empty) with a runner on second, turned from 30° toward
+/// third to 30° toward first, and mirrored: on every variant an outfielder fields, the standard
+/// jobs of `check_risp_single_jobs`; and no infielder stands with no job for more than the
+/// 0.3 s it takes a teammate's job to become known (`CALL_HEARD_S`) at a stretch while the ball
+/// is loose after the first call. (On `312789e` the middle infielder away from the ball had no
+/// job from the first call until 0.3 s after the cutoff man was known: 0.6–0.9 s.)
+#[test]
+fn a_ground_single_with_a_runner_on_second_gives_every_infielder_his_job() {
+    let base = with_bases(include_str!("fixtures/a4/51001-102.json"), [None, Some(ON_FIRST), None]);
+    let mut checked = 0;
+    for mirror in [false, true] {
+        for turn in [-30.0, -24.0, -18.0, -12.0, -6.0, 0.0, 6.0, 12.0, 18.0, 24.0, 30.0] {
+            let text = if mirror { mirrored(&base, turn) } else { turned(&base, turn, None) };
+            let label = format!("turn {turn}, mirrored {mirror}");
+            let (ticks, _, by, out) = loose_jobs(&text);
+            let down = out.facts.iter().find_map(|f| match *f {
+                Input::BallTouched { what: bb_rules::Touch::Ground { x, y }, .. } => Some(x.hypot(y)),
+                _ => None,
+            });
+            if by < 7 || !down.is_some_and(|d| d < 47.4) {
+                continue;
+            }
+            checked += 1;
+            check_risp_single_jobs(&text, &label);
+            for i in [0, 2, 3, 4, 5] {
+                let mut since: Option<f64> = None;
+                for k in &ticks {
+                    if k.job[i] == 0 {
+                        let t0 = *since.get_or_insert(k.t);
+                        assert!(k.t - t0 <= 0.31, "{label}: fielder {} with no job from {t0:.2} to {:.2} s: {:?}", i + 1, k.t, ticks.iter().map(|k| (k.t, k.job[i])).collect::<Vec<_>>());
+                    } else {
+                        since = None;
+                    }
+                }
+            }
+        }
+    }
+    assert!(checked >= 8, "only {checked} variants are singles to an outfielder");
+}
