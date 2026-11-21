@@ -642,6 +642,13 @@ pub(crate) const TRACK_BIAS_FRAC: f64 = 0.6;
 const SETUP_BACK_M: f64 = 2.5;
 const SETUP_SPARE_S: f64 = 0.5;
 const SETUP_AT_M: f64 = 1.0;
+/// The set-up's spot is at most this deep behind the catch point, m [E]: twice the least depth.
+const SETUP_MAX_M: f64 = 5.0;
+/// A catch point this near the base he would throw to needs no set-up (he is at the bag), m [E].
+const SETUP_BASE_NEAR_M: f64 = 1.0;
+/// Already behind the ball: the catch point ahead of him within this of the line through it to
+/// the base, degrees [E]. He comes through from where he is.
+const SETUP_BEHIND_DEG: f64 = 30.0;
 /// The speed he means to come through at from his spot, m/s [E]: a little over the crow hop's
 /// 3 m/s (`HOP_MPS`).
 const SETUP_THROUGH_MPS: f64 = 4.0;
@@ -672,6 +679,10 @@ const ROUND_CLEAR_M: f64 = 1.5;
 /// speed (`PLANT_FREE_MPS`) costs nothing, so a part of the turn often does the work of all of
 /// it at a fraction of the cost.
 const ROUND_SLANT_DEG: [f64; 4] = [0.0, 20.0, 40.0, 60.0];
+/// Rounding: coming through, he keeps the way he is on while the line to the base is within this
+/// beyond the widest of `ROUND_SLANT_DEG` from it, degrees [E] (a re-read moves the base's line
+/// a little).
+const ROUND_KEEP_SLACK_DEG: f64 = 5.0;
 /// Rounding keeps a margin, s [E, unsourced: a ground ball's read error and the plan's ±0.1 s
 /// against the movement]: he rounds only with this much time in hand beyond the rounding's
 /// cost, and is paced to be at the take point this much before the ball. Rounded to the last
@@ -1154,9 +1165,11 @@ struct Fielder {
     /// His running estimate of a ball on its first flight (agent-models §5.1).
     track: Option<Track>,
     /// The σ of where his latest read has the ball coming down, along his line of sight to it
-    /// (his doubt; 0 without a track), and when it was worked out.
+    /// (his doubt; 0 without a track), and when it was worked out; and whether it came from a
+    /// track (a read before his first look has none).
     doubt: f64,
     doubt_at: f64,
+    doubt_tracked: bool,
     attempts: u32,
     blocked_until: f64,
     ready_at: f64,
@@ -1631,7 +1644,7 @@ fn setup_depth(a: &FielderAttrs) -> f64 {
         let t = run_time(d, a.speed, a.tau_a) + CALL_SLACK_S;
         paced_speed(d, 0.0, t, a.speed, a.tau_a) * (1.0 - m::exp(-t / a.tau_a))
     };
-    let (mut lo, mut hi) = (SETUP_BACK_M, 2.0 * SETUP_BACK_M);
+    let (mut lo, mut hi) = (SETUP_BACK_M, SETUP_MAX_M);
     if through(lo) >= SETUP_THROUGH_MPS {
         return lo;
     }
@@ -2598,6 +2611,64 @@ fn round_cost(a: &FielderAttrs, pos: Vec3, v_now: f64, v: f64, v_cap: f64, p: Ve
     (cost, v_r, dw + behind)
 }
 
+/// The margin a take keeps against the ball (agent-models §5.2, the approach): `ROUND_MARGIN_S`
+/// times the share of the ball's motion at the take point (`bv`, his read) that is across his
+/// way `a` through it, s. He plans to be there that much before the ball. A ball met head-on
+/// that he is late for only comes to him sooner; one going across his way goes past him (paced
+/// to meet it exactly, a step late, it did). A ball all but still (`ROUND_MIN_BALL_MPS`) needs
+/// none.
+fn take_margin(bv: Vec3, a: Vec3) -> f64 {
+    let bl = m::hypot(bv.x, bv.y);
+    if bl < ROUND_MIN_BALL_MPS {
+        return 0.0;
+    }
+    let al = m::hypot(a.x, a.y);
+    if al < 1e-9 {
+        return ROUND_MARGIN_S;
+    }
+    ROUND_MARGIN_S * ((bv.x * a.y - bv.y * a.x) / (bl * al)).abs()
+}
+
+/// The least speed a man in state `st` can be down to at his planning reach of take point `p`,
+/// braking at `BRAKE` from his speed toward it now over the way left, m/s (agent-models §5.2:
+/// a plan that brakes him harder than that has him there sooner and faster than it says).
+fn brake_floor(st: &Fielder, p: Vec3) -> f64 {
+    let to = Vec3::new(p.x - st.pos.x, p.y - st.pos.y, 0.0);
+    let d = to.norm();
+    if d < 1e-9 {
+        return 0.0;
+    }
+    let toward = (st.vel.dot(to) / d).max(0.0);
+    m::sqrt((toward * toward - 2.0 * BRAKE * (d - REACH * 0.7).max(0.0)).max(0.0))
+}
+
+/// The braked take (agent-models §5.2, the approach): a man in state `st` who would reach take
+/// point `p` at `v` running through, with `slack` s in hand there and a margin `lead`
+/// (`take_margin`) to keep, brakes to v_c = v − √(2·`BRAKE`·v·(slack − lead)), the braking's time
+/// cost being what he has in hand less the margin; no lower than `v_min`, nor than he can brake
+/// to from his motion now over the way left (`brake_floor`), nor than 0. Braked less than he
+/// wanted, he is there early by the rest of his time in hand, and must still be within his
+/// planning reach of the take point when the ball gets there: moving on at v_c he would
+/// otherwise be past it (`the_plan_times_a_braked_take_as_the_movement_runs_it`). The speed he
+/// takes it at, or none (no margin in hand, or no waiting for it there).
+fn braked_take(st: &Fielder, p: Vec3, v: f64, slack: f64, lead: f64, v_min: f64) -> Option<f64> {
+    if slack < lead {
+        return None;
+    }
+    let want = v - m::sqrt(2.0 * BRAKE * v * (slack - lead));
+    let vc = want.max(v_min).max(brake_floor(st, p)).max(0.0).min(v);
+    let early = (slack - lead) - (v - vc) * (v - vc) / (2.0 * BRAKE * v.max(1e-9));
+    (early * vc <= REACH * 0.7).then_some(vc)
+}
+
+/// Whether the ball reaches take point `p` (moving `bv` there, his read) after passing a man at
+/// `pos`: at `p` it is moving away from him (agent-models §5.2: on a ball coming at him he
+/// takes no such point; a pitcher who backed off a comebacker to take it deeper let it by him,
+/// seed 1048 play 193).
+fn ball_passed_him(pos: Vec3, p: Vec3, bv: Vec3) -> bool {
+    (p.x - pos.x) * bv.x + (p.y - pos.y) * bv.y > 0.0
+}
+
 /// The angle from contact (agent-models §5.2): how far behind take point `p`, along the way `a`
 /// he comes through it, a body at `pos` running at `v` joins that way, m: the turn onto it at
 /// that speed (§5.3: radius r = v²/a_lat) begins and ends r·tan(θ/2) either side of the join,
@@ -2630,7 +2701,6 @@ fn angle_way(field: &Field, st: &Fielder, p: Vec3, tp: f64, v: f64, along: Vec3,
     let ang = m::atan2(u.x * along.y - u.y * along.x, u.x * along.x + u.y * along.y);
     let free = m::asin((ANGLE_FREE_FRAC * throwing::PLANT_FREE_MPS / v).min(1.0));
     let mut best: Option<(f64, Vec3, f64, f64)> = None;
-    let bl = m::hypot(bv.x, bv.y);
     for s in ROUND_SLANT_DEG.iter().map(|d| d.to_radians()).chain(std::iter::once(free)).filter(|&s| s < ang.abs()) {
         let a = u.rotate(Vec3::Z, s * ang.signum());
         let jn = angle_join(st.a.a_lat, st.pos, p, a, v);
@@ -2638,11 +2708,7 @@ fn angle_way(field: &Field, st: &Fielder, p: Vec3, tp: f64, v: f64, along: Vec3,
         if !angle_way_ok(st.pos, p, a, jn) || field.body_clearance(w.x, w.y, BODY_R).dist < 0.0 {
             continue;
         }
-        // The margin is for the ball going past him across his way: the ball's motion across it
-        // at the take point, as a share of its speed (a ball met head-on that he is late for
-        // only comes to him sooner).
-        let across = if bl > 1e-6 { ((bv.x * a.y - bv.y * a.x) / bl).abs() } else { 0.0 };
-        let lead = ROUND_MARGIN_S * across;
+        let lead = take_margin(bv, a);
         let (cost, v_r, _) = round_cost(&st.a, st.pos, st.vel.norm(), v, f64::INFINITY, p, a, jn);
         if slack < cost + lead {
             continue;
@@ -2687,7 +2753,8 @@ fn angle_tangent(a_lat: f64, heading: Vec3, a: Vec3, v: f64) -> f64 {
 /// The movement step toward `target` for a body at `pos` moving `vel` with abilities `a`
 /// (agent-models §5.3): `early`, the speed that stops him `margin` short of it at `BRAKE`;
 /// otherwise his top speed; either held to the turn he can make, and to the speed that brings
-/// him within his reach of it at `arrive` m/s at `BRAKE` (an approach, §5.2; infinite: none).
+/// him within his planning reach of it at `arrive` m/s at `BRAKE` (an approach, §5.2; infinite:
+/// none).
 fn step_toward(pos: Vec3, vel: Vec3, target: Vec3, a: &FielderAttrs, early: bool, margin: f64, arrive: f64) -> (Vec3, Vec3) {
     let to = Vec3::new(target.x - pos.x, target.y - pos.y, 0.0);
     let d = to.norm();
@@ -2702,8 +2769,12 @@ fn step_toward(pos: Vec3, vel: Vec3, target: Vec3, a: &FielderAttrs, early: bool
     let dir = to * (1.0 / d);
     let mut want = if early { a.speed.min(m::sqrt(2.0 * BRAKE * (d - margin).max(0.0))) } else { a.speed };
     if arrive.is_finite() {
-        // He takes the ball as it comes within his reach, so he is down to `arrive` there.
-        want = want.min(m::sqrt(arrive * arrive + 2.0 * BRAKE * (d - REACH).max(0.0)));
+        // He takes the ball as it comes within the reach he plans with (`REACH` × 0.7, as the
+        // plan times the take), so he is down to `arrive` there. (Braked to it at his full
+        // reach, a man slowed nearly to a stop stood a metre off the ball's path and took it at
+        // full stretch, or came there 0.1–0.3 s after the plan had him:
+        // `the_plan_times_a_braked_take_as_the_movement_runs_it`.)
+        want = want.min(m::sqrt(arrive * arrive + 2.0 * BRAKE * (d - REACH * 0.7).max(0.0)));
     }
     // He slows into a turn he cannot make at speed: reaching a spot d away at an angle θ off
     // his heading takes a curve of radius d/(2 sin θ), which his lateral acceleration allows
@@ -3475,13 +3546,14 @@ impl<'a> Sim<'a> {
         }
         let p = self.predict(i);
         let (ti, pt) = self.intercept(i, &p);
-        let doubt = self.track_now(i).map_or(0.0, |tr| self.track_doubt(&tr, self.f[i].pos));
+        let tracked = self.track_now(i);
+        let doubt = tracked.map_or(0.0, |tr| self.track_doubt(&tr, self.f[i].pos));
         // His reads come faster as his own read has the ball coming down sooner.
         let down = p.first_bounce().map_or(p.t_end(), |b| b.0) - t;
         let every = (REPLAN_FRAC * down).clamp(REPLAN_MIN_S, REPLAN_S);
         let fd = &mut self.f[i];
         (fd.t_int, fd.int_pt, fd.belief, fd.read_at, fd.read_ball, fd.next_plan) = (ti, pt, Some(p), t, ball, t + every);
-        (fd.doubt, fd.doubt_at) = (doubt, t);
+        (fd.doubt, fd.doubt_at, fd.doubt_tracked) = (doubt, t, tracked.is_some());
     }
 
     /// A chaser's replan from a fresh read: he runs at his own new intercept, and his call
@@ -3504,6 +3576,7 @@ impl<'a> Sim<'a> {
         }
         fd.approach = ap;
         fd.target = ap.map_or(fd.int_pt, |a| a.at);
+        if std::env::var_os("ZZ_DBG").is_some() && i >= 6 && (fd.setup != 0 || setup.is_some()) { eprintln!("ZD t {:.2} f {} setup {} -> {:?} doubt {:.2} t_int {:.2} int ({:.1},{:.1}) pos ({:.1},{:.1}) vel ({:.1},{:.1})", self.t, i + 1, fd.setup, setup.map(|s| (s.1, (s.0.x * 10.0).round() / 10.0, (s.0.y * 10.0).round() / 10.0)), fd.doubt, fd.t_int, fd.int_pt.x, fd.int_pt.y, fd.pos.x, fd.pos.y, fd.vel.x, fd.vel.y); } // ZZTMP
         fd.setup = setup.map_or(0, |s| s.1);
         if let Some((spot, _)) = setup {
             fd.target = spot;
@@ -3526,6 +3599,7 @@ impl<'a> Sim<'a> {
     /// against the ball (`fielder_step`) at his latest read of the catch point. The spot and
     /// the stage: (target, 1 or 2).
     fn fly_setup(&self, i: usize) -> Option<(Vec3, u8)> {
+        if std::env::var_os("ZZ_NOSETUP").is_some() { return None; } // ZZTMP
         let fd = &self.f[i];
         if i < 6 || fd.call != 3 || !fd.t_int.is_finite() || self.st.outs >= 2 || !self.ball_still_up() {
             return None;
@@ -3541,7 +3615,7 @@ impl<'a> Sim<'a> {
         }
         let to = base_pos(lead + 1) - pt;
         let to = Vec3::new(to.x, to.y, 0.0);
-        if to.norm() < 1.0 {
+        if to.norm() < SETUP_BASE_NEAR_M {
             return None;
         }
         let dir = to.normalized();
@@ -3559,11 +3633,18 @@ impl<'a> Sim<'a> {
         // Settled on the spot: what is left of his reaction, then his run there to a stop.
         let settle = (self.inp.t_contact + fd.a.reaction - self.t).max(0.0) + settle_time(fd, back) + wall_delay(field, fd, back, 0.0);
         let at_back = m::hypot(back.x - fd.pos.x, back.y - fd.pos.y) <= SETUP_AT_M;
-        // Already behind the ball: the catch point ahead of him, within `ANGLE_KEEP_DEG` of the
-        // line through it to the base (as coming through on the angle from contact, §5.2).
+        // Already behind the ball: the catch point ahead of him, within `SETUP_BEHIND_DEG` of the
+        // line through it to the base.
         let rel = Vec3::new(pt.x - fd.pos.x, pt.y - fd.pos.y, 0.0);
-        let behind = rel.norm() > SETUP_AT_M && rel.dot(dir) >= rel.norm() * m::cos(ANGLE_KEEP_DEG.to_radians());
-        if fd.setup == 1 || at_back {
+        let behind = rel.norm() > SETUP_AT_M && rel.dot(dir) >= rel.norm() * m::cos(SETUP_BEHIND_DEG.to_radians());
+        // He sets up only once his read has settled: where he believes it comes down known to
+        // within the spot's own tolerance (`ARRIVE_SIGMAS` of his doubt within `SETUP_AT_M`).
+        // Until then he plays the ball plainly, at the catch point, and drifts back to the spot
+        // from under it. (Chosen on a first read, the set-up sent a man a metre or more off his
+        // plain path in the first two seconds, and when the read moved he could not get back:
+        // seed 207 play 66, seed 1042 play 28; Opus approach review P2-2.)
+        let settled = fd.doubt_tracked && ARRIVE_SIGMAS * fd.doubt <= std::env::var("ZZ_SETTLE").ok().map_or(SETUP_BACK_M, |x| x.parse::<f64>().unwrap()); // ZZTMP
+        if fd.setup == 1 || (at_back && settled) {
             // On his way to the spot or waiting there: he goes when his run would just bring him
             // to the ball with the slack in hand; caught short of the spot with the ball coming,
             // he plays it plainly, unless he is already behind the ball.
@@ -3573,13 +3654,13 @@ impl<'a> Sim<'a> {
             if at_back || left >= settle + come_back {
                 return Some((back, 1));
             }
-        } else if left >= settle + come_back + SETUP_SPARE_S {
+        } else if settled && left >= settle + come_back + SETUP_SPARE_S {
             return Some((back, 1));
         }
         // No time to settle on the spot: already behind the ball with time to spare, he comes
         // through from where he is, timed to it, slower than from the spot; otherwise he plays
         // it plainly.
-        (behind && left >= come + if fd.setup == 1 { 0.0 } else { SETUP_SPARE_S }).then_some((pt, 2))
+        (behind && (fd.setup == 1 || settled) && left >= come + if fd.setup == 1 { 0.0 } else { SETUP_SPARE_S }).then_some((pt, 2))
     }
 
     /// The bases an infielder expects to throw to after taking the ball, from what everyone sees
@@ -3654,6 +3735,7 @@ impl<'a> Sim<'a> {
         if self.ball_still_up() {
             return self.plan_angle(i);
         }
+        if std::env::var_os("ZZ_APPOFF").is_some() { return None; } // ZZTMP
         let (st, start) = self.planning_state(i);
         let field = self.inp.field;
         let arm = THROW_EFFORT * st.a.arm;
@@ -3685,6 +3767,13 @@ impl<'a> Sim<'a> {
         // (Past the end of its path the ball lies still: a ball he reaches after it has stopped
         // has no deadline, and his time in hand there grows with the time he takes.)
         let t_last = fd.t_int + APPROACH_LOOK_S;
+        // A ball coming at him (at his intercept it is moving toward where he is) he takes in
+        // front of him, never at a point it reaches after passing him: a real fielder does not
+        // back off a ball he can take in front of him (`ball_passed_him`).
+        let coming = {
+            let (b, bv) = pred.at(fd.t_int);
+            (st.pos - b).dot(Vec3::new(bv.x, bv.y, 0.0)) > 0.0
+        };
         // (ready, take point, ball time, arrival cap, rounding)
         let mut best: Option<(f64, Vec3, f64, f64, Option<Vec3>)> = None;
         // The rounded takes (ready, take point, ball time, arrival speed, way).
@@ -3701,7 +3790,8 @@ impl<'a> Sim<'a> {
             let (b, bv) = pred.at(t);
             let p = Vec3::new(b.x, b.y, 0.0);
             let each = (1..=4u8).filter(|&k| bases & 1 << k != 0);
-            let ok = b.z <= catch_ceiling(field, b) && beyond_reach_over_wall(field, b) <= 0.0;
+            let passed = !first && coming && ball_passed_him(st.pos, p, bv) && std::env::var_os("ZZ_NOPASS").is_none(); // ZZTMP
+            let ok = !passed && b.z <= catch_ceiling(field, b) && beyond_reach_over_wall(field, b) <= 0.0;
             // No take here can beat the best so far if even arriving set it would not (the throw's
             // length alone): skip the reach estimate.
             let hopeless = !first && best.is_some_and(|bb| t + each.clone().map(|k| (base_pos(k) - p).norm() / arm).fold(f64::INFINITY, f64::min) >= bb.0 - APPROACH_GAIN_S);
@@ -3727,9 +3817,12 @@ impl<'a> Sim<'a> {
                     } else {
                         -g / v.max(1.0)
                     };
-                    let vc = if first { v } else { (v - m::sqrt(2.0 * BRAKE * v * slack)).max(0.0) };
-                    let straight = t + each.clone().map(|k| at_base(p, along * vc, k)).fold(f64::INFINITY, f64::min);
-                    let take = (straight, if first { f64::INFINITY } else { vc });
+                    // A later take keeps a margin (`take_margin`): he brakes with his time in hand
+                    // less it, so that he is there that much before the ball, and needs it in hand.
+                    let lead = if first || std::env::var_os("ZZ_NOLEAD").is_some() { 0.0 } else { take_margin(bv, along) * std::env::var("ZZ_LEADK").ok().map_or(1.0, |x| x.parse::<f64>().unwrap()) }; // ZZTMP
+                    let vc = if first { Some(v) } else { braked_take(&st, p, v, slack, lead, 0.0) };
+                    let straight = vc.map_or(f64::INFINITY, |vc| t + each.clone().map(|k| at_base(p, along * vc, k)).fold(f64::INFINITY, f64::min));
+                    let take = (straight, if first { f64::INFINITY } else { vc.unwrap_or(v) });
                     // Rounding it for the base: from w = p − ROUND_M·u, then through p toward the
                     // base. Its cost against running straight in: the extra way at his speed, and
                     // slowing for the turn at w to what his lateral acceleration allows over the
@@ -3752,7 +3845,7 @@ impl<'a> Sim<'a> {
                                 ways[k] = Some((u.rotate(Vec3::Z, s * ang.signum()), false));
                             }
                         }
-                        let widest = m::cos((ROUND_SLANT_DEG[ROUND_SLANT_DEG.len() - 1] + 5.0).to_radians());
+                        let widest = m::cos((ROUND_SLANT_DEG[ROUND_SLANT_DEG.len() - 1] + ROUND_KEEP_SLACK_DEG).to_radians());
                         ways[ROUND_SLANT_DEG.len()] = rounding.filter(|r| through && r.dot(u) >= widest).map(|r| (r, true));
                         for (a, on) in ways.into_iter().flatten() {
                             let w = p - a * ROUND_M;
@@ -3784,8 +3877,7 @@ impl<'a> Sim<'a> {
                         if let Some(ap) = fd.approach.filter(|ap| ap.angle && ap.through) {
                             let a = ap.round.expect("an angle has a way");
                             let to = Vec3::new(p.x - st.pos.x, p.y - st.pos.y, 0.0);
-                            let bl = m::hypot(bv.x, bv.y);
-                            let lead = if bl > 1e-6 { ROUND_MARGIN_S * ((bv.x * a.y - bv.y * a.x) / bl).abs() } else { 0.0 };
+                            let lead = take_margin(bv, a);
                             let tb = base_pos(ob) - p;
                             if to.dot(a) > to.norm() * m::cos(ANGLE_KEEP_DEG.to_radians()) && slack >= lead && m::hypot(tb.x, tb.y) > throwing::TOSS_MAX_M {
                                 let r = t + throwing::footwork_s(a * v, tb, false) + tb.norm() / arm;
@@ -3850,6 +3942,7 @@ impl<'a> Sim<'a> {
     /// (already on one, unless going straight is better by `APPROACH_GAIN_S`). He re-plans at
     /// every read; once the ball is down the approach (`plan_approach`) takes over.
     fn plan_angle(&self, i: usize) -> Option<Approach> {
+        if std::env::var_os("ZZ_NOANGLE").is_some() { return None; } // ZZTMP
         #[cfg(test)]
         if tests::NO_ANGLE.with(|c| c.get()) {
             return None;
@@ -3879,6 +3972,11 @@ impl<'a> Sim<'a> {
             throwing::footwork_s(vel, to, false) + to.norm() / arm
         };
         let was = fd.approach.filter(|ap| ap.angle).and_then(|ap| ap.round);
+        // As on the ground (`plan_approach`), a ball coming at him is taken in front of him.
+        let coming = {
+            let (b, bv) = pred.at(fd.t_int);
+            (st.pos - b).dot(Vec3::new(bv.x, bv.y, 0.0)) > 0.0
+        };
         // (ready, take point, ball time) going straight; (ready, take point, ball time, way, J).
         let mut straight: Option<(f64, Vec3, f64)> = None;
         let mut angled: Option<(f64, Vec3, f64, Vec3, f64)> = None;
@@ -3890,8 +3988,9 @@ impl<'a> Sim<'a> {
             }
             let (b, bv) = pred.at(t);
             let p = Vec3::new(b.x, b.y, 0.0);
+            let first = t <= fd.t_int + 1e-9;
             t += APPROACH_STEP_S;
-            if b.z > catch_ceiling(field, b) || beyond_reach_over_wall(field, b) > 0.0 {
+            if b.z > catch_ceiling(field, b) || beyond_reach_over_wall(field, b) > 0.0 || (!first && coming && ball_passed_him(st.pos, p, bv)) {
                 continue;
             }
             let g = run_gap(field, &st, p, (t - APPROACH_STEP_S - start - wall_delay(field, &st, p, REACH * 0.7)).max(0.0), REACH * 0.7);
@@ -3909,9 +4008,19 @@ impl<'a> Sim<'a> {
             let v = arr.norm().min(st.a.speed);
             let along = if v > 1e-9 { arr * (1.0 / arr.norm()) } else { dir };
             let slack = if stepped_reach(&st, p) { (tp - start - run_time_to(field, &st, p, REACH * 0.7)).max(0.0) } else { -g / v.max(1.0) };
-            let r_straight = tp + at_base(p, along * v);
-            if straight.is_none_or(|b| r_straight < b.0) {
-                straight = Some((r_straight, p, tp));
+            // Going straight he is weighed as the approach will weigh him once the ball is down
+            // (Opus approach review P2-1: weighed here at full speed, the angle was credited with
+            // a saving the braked take on the ground takes back, and given up before the take):
+            // past his intercept he brakes with his time in hand less the margin (`take_margin`),
+            // but only once the ball is down, so the braking must fit between the first bounce and
+            // his arrival.
+            let lead = if first { 0.0 } else { take_margin(bv, along) };
+            let vc = if first { Some(v) } else { braked_take(&st, p, v, slack, lead, v - BRAKE * (tp - lead - tb).max(0.0)) };
+            if let Some(vc) = vc {
+                let r_straight = tp + at_base(p, along * vc);
+                if straight.is_none_or(|b| r_straight < b.0) {
+                    straight = Some((r_straight, p, tp));
+                }
             }
             if let Some((r, a, jn, _)) = angle_way(field, &st, p, tp, v, along, slack, bv, rb, arm) {
                 if angled.is_none_or(|b| r < b.0) {
@@ -5062,6 +5171,11 @@ impl<'a> Sim<'a> {
             }
             (fd.pos, fd.vel) = fielder_step(fd, t, t_contact);
             (fd.pos, fd.vel) = wall_rule(field, fd.pos, fd.vel);
+            // An approach is a chaser's: one who stops chasing drops it, so that a later chase
+            // on the same line does not start "coming through" (Opus approach review P3-6).
+            if fd.role != Role::Chase {
+                fd.approach = None;
+            }
             round_reached(fd);
         }
     }
@@ -7210,6 +7324,7 @@ fn new_sim<'a>(inp: &'a LiveInput<'a>, st: &'a mut RulesState) -> Sim<'a> {
                 track: None,
                 doubt: 0.0,
                 doubt_at: f64::NEG_INFINITY,
+                doubt_tracked: false,
                 attempts: 0,
                 blocked_until: 0.0,
                 ready_at: 0.0,
@@ -16300,6 +16415,82 @@ mod tests {
         assert!(worst_late <= 0.15, "the rounded run took {worst_late:.2} s longer than the plan's cost");
         assert!(worst_early >= -0.25, "the plan's cost was {:.2} s too high", -worst_early);
         assert!(worst_angle <= 25.0, "he came through {worst_angle:.0}° off the line to the base");
+    }
+
+    /// agent-models §5.2, the approach: the plan's braked take against the movement step itself
+    /// (Opus approach review P2-3). From a run at 0–8 m/s, a take point 4–22 m away straight on or
+    /// 45° off his run, and s = 0.1–0.8 s in hand at full speed: the plan brakes him to
+    /// v_c = v − √(2·`BRAKE`·v·s) and has him reach the point (within his planning reach) as the
+    /// ball does, at v_c. Stepped by `fielder_step` with that approach, he is there no later than
+    /// the ball's time plus 0.05 s and no sooner than less 0.25 s, at no more than v_c plus a
+    /// tick's braking.
+    #[test]
+    fn the_plan_times_a_braked_take_as_the_movement_runs_it() {
+        let fx = fixture(&[]);
+        let inp = input(&fx, vec![RunnerIn { id: fx.st.batter, base: 0, speed: 8.2, tau_s: bb_agents::running::LEAGUE_TAU_S }]);
+        let mut st = fx.st.clone();
+        let sim = new_sim(&inp, &mut st);
+        let field = inp.field;
+        let base = sim.f[5].clone();
+        let reach = REACH * 0.7;
+        let (mut worst_late, mut worst_early, mut worst_fast, mut worst_off, mut n) = (f64::NEG_INFINITY, f64::INFINITY, f64::NEG_INFINITY, 0.0f64, 0);
+        for speed in [0.0, 4.0, 8.0] {
+            for dist in [4.0, 8.0, 14.0, 22.0] {
+                for deg in [0.0f64, 45.0] {
+                    for slack in [0.1, 0.2, 0.4, 0.8] {
+                        let mut fd = base.clone();
+                        fd.pos = Vec3::new(-10.0, 30.0, 0.0);
+                        fd.vel = Vec3::new(0.0, speed, 0.0);
+                        let h = deg.to_radians();
+                        let dir = Vec3::new(m::sin(h), m::cos(h), 0.0);
+                        let p = fd.pos + dir * dist;
+                        // The straight run, stepped (late: top speed through it).
+                        let (mut q, mut vq, mut t_s) = (fd.pos, fd.vel, 0.0);
+                        while m::hypot(p.x - q.x, p.y - q.y) > reach && t_s < 10.0 {
+                            (q, vq) = step_toward(q, vq, p, &fd.a, false, 0.0, f64::INFINITY);
+                            t_s += DT;
+                        }
+                        // His arrival speed running straight through, and the braked one, as the
+                        // plan has them.
+                        let k = m::exp(-t_s / fd.a.tau_a);
+                        let v = (fd.vel * k + dir * (fd.a.speed * (1.0 - k))).norm().min(fd.a.speed);
+                        let Some(vc) = braked_take(&fd, p, v, slack, 0.0, 0.0) else { continue };
+                        let t0 = 100.0;
+                        let t_ball = t0 + t_s + slack;
+                        fd.role = Role::Chase;
+                        fd.target = p;
+                        fd.t_int = t_ball;
+                        fd.approach = Some(Approach { at: p, t_ball, arrive: vc, round: None, through: false, unpaced: false, behind: ROUND_M, angle: false, lead: f64::INFINITY });
+                        let mut t_r = 0.0;
+                        while m::hypot(p.x - fd.pos.x, p.y - fd.pos.y) > reach + 0.02 && t_r < 10.0 {
+                            let (np, nv) = fielder_step(&fd, t0 + t_r, 0.0);
+                            (fd.pos, fd.vel) = wall_rule(field, np, nv);
+                            t_r += DT;
+                        }
+                        n += 1;
+                        let late = t0 + t_r - t_ball;
+                        // Where he is and how fast he moves when the ball gets there (the take).
+                        while t0 + t_r < t_ball - 1e-9 {
+                            let (np, nv) = fielder_step(&fd, t0 + t_r, 0.0);
+                            (fd.pos, fd.vel) = wall_rule(field, np, nv);
+                            t_r += DT;
+                        }
+                        let off = m::hypot(p.x - fd.pos.x, p.y - fd.pos.y);
+                        let fast = fd.vel.norm() - vc;
+                        eprintln!("v0 {speed} d {dist} at {deg}° in hand {slack}: straight {t_s:.2} s at {v:.2} m/s, braked to {vc:.2}; stepped there {late:+.2} s from the ball, at the ball's time {off:.2} m off at {:.2} m/s ({fast:+.2})", fd.vel.norm());
+                        worst_off = worst_off.max(off);
+                        worst_late = worst_late.max(late);
+                        worst_early = worst_early.min(late);
+                        worst_fast = worst_fast.max(fast);
+                    }
+                }
+            }
+        }
+        eprintln!("{n} cases: late {worst_late:+.2} early {worst_early:+.2}; at the ball's time at most {worst_off:.2} m off, faster than planned by {worst_fast:.2} m/s");
+        assert!(worst_late <= 0.1, "the braked run reached the take point {worst_late:.2} s after the ball");
+        assert!(worst_early >= -0.8, "the braked run reached it {:.2} s before the ball", -worst_early);
+        assert!(worst_off <= REACH * 0.7 + 0.15, "at the ball's time he was {worst_off:.2} m from the take point");
+        assert!(worst_fast <= 0.25, "he took it {worst_fast:.2} m/s faster than planned");
     }
 
     /// agent-models §5.2, the angle from contact: the plan's cost of a way through the take point

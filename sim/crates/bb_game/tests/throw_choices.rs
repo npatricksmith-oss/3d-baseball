@@ -209,3 +209,20 @@ fn seed_264_play_109_the_left_fielder_still_catches_the_sinking_liner() {
     let (t, who, down) = first_secured(&out);
     assert!(!down && who & 0x7F == 7, "fielder {} secured it at {t:.2} s, after it came down: {down}", who & 0x7F);
 }
+
+#[test]
+fn zz_probe_new_fixtures() {
+    for (name, text) in [("13-140", include_str!("fixtures/a4/13-140.json")), ("1048-193", include_str!("fixtures/a4/1048-193.json")), ("136-13", include_str!("fixtures/a4/136-13.json")), ("207-66", include_str!("fixtures/a4/207-66.json")), ("1042-28", include_str!("fixtures/a4/1042-28.json"))] {
+        let v: Value = serde_json::from_str(text).unwrap();
+        let tc = v["t_contact"].as_f64().unwrap();
+        let (out, _, st) = replay(text);
+        let (t, who, down) = first_secured(&out);
+        eprintln!("ZZ {name}: first secured by {} at {:.2} s after contact, down {down}; bases {:?} outs {}", who & 0x7F, t - tc, st.bases, st.outs);
+        let w = (who & 0x7f) as usize - 1;
+        let tr = &out.actors[w].1;
+        let k = tr.iter().rposition(|(tt, _)| *tt <= t + 1e-9).unwrap();
+        let (a, b) = (tr[k - 1], tr[k]);
+        let vel = (b.1 - a.1) * (1.0 / (b.0 - a.0));
+        eprintln!("ZZ    at ({:.2},{:.2}) vel ({:.2},{:.2}) released {:?}", b.1.x, b.1.y, vel.x, vel.y, out.released.first().map(|r| r.0 - tc));
+    }
+}
