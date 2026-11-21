@@ -4517,9 +4517,11 @@ impl<'a> Sim<'a> {
         if matches!(self.f[who].role, Role::Chase) || matches!(self.ball, Ball::Held { by } if by == who) {
             return None;
         }
-        // A middle infielder whose partner he knows to be going for the ball stays at second
-        // instead of going out on a cutoff (Opus mid-infield review P2-2).
-        if !deep && (who == 3 || who == 5) && self.partner_going(who) {
+        // A middle infielder goes out on a cutoff to second or third from a loose ground ball
+        // only as the infield lets him go (`infield_lets_go`): never while his partner is known
+        // to be going for it, nor while an infielder known to be going for it is still in front
+        // of it (Opus mid-infield review P1-1, P2-2).
+        if !deep && (who == 3 || who == 5) && (self.partner_going(who) || (matches!(self.ball, Ball::Free { .. }) && self.first_down_m().is_some_and(|d| d < INFIELD_R) && !self.infield_lets_go(who, b))) {
             return None;
         }
         // "No play on it": by his own read he cannot be there before it lands (his
@@ -4691,7 +4693,7 @@ impl<'a> Sim<'a> {
             _ => return None,
         };
         let fd = &self.f[who];
-        if fd.role == Role::Chase || fd.read_ball != self.ball_gen || self.partner_going(who) {
+        if fd.role == Role::Chase || fd.read_ball != self.ball_gen {
             return None;
         }
         let pred = fd.belief.as_ref()?;
@@ -4700,26 +4702,43 @@ impl<'a> Sim<'a> {
         if !(past(end) && (!fd.t_int.is_finite() || past(fd.int_pt))) {
             return None;
         }
-        let out = fd.role == Role::Relay(b);
-        let gone_by = |j: usize, margin: f64| self.ball_gone_by(j, margin);
-        let margin = if out { 0.0 } else { REACH };
-        let others = || (0..6).filter(move |&j| j != who);
-        if others().any(|j| matches!(self.known(j), (true, _, true)) && !gone_by(j, margin)) {
+        if !self.infield_lets_go(who, b) {
             return None;
         }
-        if !out {
-            // By his own estimate another infielder the ball has not yet gone by can field it in
-            // the infield, whatever job he is on now (a man not going for it yet may still: seen
-            // on the owner's play 168 of seed 51001, a chopper the second baseman went for only
-            // at the re-call).
-            if others().any(|j| !(b == 2 && j == 0) && !gone_by(j, REACH) && !past(self.seen_intercept(j, pred).1)) {
-                return None;
-            }
-            if b == 3 && others().any(|j| !self.known(j).2) {
-                return None;
+        Some((who, b, Self::relay_spot(Vec3::new(end.x, end.y, 0.0), b, false)))
+    }
+
+    /// Whether middle infielder `who` may leave for the cutoff toward base `b` (2 or 3) while a
+    /// ground ball is loose, by what he knows of the infielders (agent-models §5.7, "At the
+    /// first call"; Opus mid-infield review P1-1): no infielder known to be going for it still
+    /// in front of the ball (by more than `REACH` to go out, by any margin to stay out), his
+    /// partner not known to be going for it, and, to go out, by his own estimate no other
+    /// infielder the ball has not yet gone by can field it inside `INFIELD_BREAK_R` (the
+    /// pitcher left out toward second), and toward third every infielder known on this ball.
+    fn infield_lets_go(&self, who: usize, b: u8) -> bool {
+        if self.partner_going(who) {
+            return false;
+        }
+        let out = self.f[who].role == Role::Relay(b);
+        let margin = if out { 0.0 } else { REACH };
+        let others = || (0..6).filter(move |&j| j != who);
+        if others().any(|j| matches!(self.known(j), (true, _, true)) && !self.ball_gone_by(j, margin)) {
+            return false;
+        }
+        if out {
+            return true;
+        }
+        // By his own estimate another infielder the ball has not yet gone by can field it in
+        // the infield, whatever job he is on now (a man not going for it yet may still: seen
+        // on the owner's play 168 of seed 51001, a chopper the second baseman went for only at
+        // the re-call).
+        let fd = &self.f[who];
+        if let Some(pred) = fd.belief.as_ref().filter(|_| fd.read_ball == self.ball_gen) {
+            if others().any(|j| !(b == 2 && j == 0) && !self.ball_gone_by(j, REACH) && m::hypot(self.seen_intercept(j, pred).1.x, self.seen_intercept(j, pred).1.y) <= INFIELD_BREAK_R) {
+                return false;
             }
         }
-        Some((who, b, Self::relay_spot(Vec3::new(end.x, end.y, 0.0), b, false)))
+        !(b == 3 && others().any(|j| !self.known(j).2))
     }
 
     /// The cutoff or relay job now and its man's spot: `relay_job` from where the ball is
