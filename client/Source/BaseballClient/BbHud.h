@@ -22,6 +22,9 @@ struct FBbBugInfo
 	int32 Strikes = 0;
 	/** Runners on base: bit 0 first, bit 1 second, bit 2 third. */
 	uint8 Bases = 0;
+	/** Each runner as a dot on the diamond, in BbBaseMap::ToDiamond's units (home (0, 0), first
+	 *  (1, 1), second (0, 2), third (-1, 1)). */
+	TArray<FVector2D> Dots;
 	/** The two rows under the score (owner, 2026-11-16): the pitcher with the pitches he has
 	 *  thrown, and the batter with his game so far ("1-2, 2B, RBI"). Empty names: no rows. */
 	FString Pitcher;

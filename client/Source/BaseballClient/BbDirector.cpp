@@ -928,7 +928,7 @@ int32 ABbDirector::RunBaseMapCheck(uint64 Seed)
 		UE_LOG(LogBb, Error, TEXT("BB_BASE_MAP_CHECK FAIL: could not start the game sim"));
 		return 1;
 	}
-	int32 Failures = 0, Cases = 0, Plays = 0, WithRunners = 0, Moved = 0, Outs = 0, Scored = 0;
+	int32 Failures = 0, Cases = 0, Plays = 0, WithRunners = 0, MovedLit = 0, DotSamples = 0;
 	auto Expect = [&](bool bOk, const FString& Why)
 	{
 		++Cases;
@@ -936,10 +936,32 @@ int32 ABbDirector::RunBaseMapCheck(uint64 Seed)
 		{
 			UE_LOG(LogBb, Error, TEXT("BB_BASE_MAP_CHECK FAIL: %s"), *Why);
 		}
+		return bOk;
 	};
 	const BbPark& Ground = Game.Park();
-	uint8 Prev = 0;
-	uint8 PrevInning = 1, PrevTop = 1;
+	auto Pop = [](uint8 Bits) { return (int32)((Bits & 1) + ((Bits >> 1) & 1) + ((Bits >> 2) & 1)); };
+
+	// 1. Fixed points of the projection: the bases' own sim coordinates land on the corners of
+	//    the picture, and halfway along a path lands halfway (x toward first base, y toward second).
+	{
+		auto Near = [](const FVector2D& A, double X, double Y) { return FMath::Abs(A.X - X) < 1e-4 && FMath::Abs(A.Y - Y) < 1e-4; };
+		const float* F1 = Ground.bases[0];
+		const float* F2 = Ground.bases[1];
+		const float* F3 = Ground.bases[2];
+		Expect(Near(BbBaseMap::ToDiamond(0.f, 0.f, Ground), 0, 0), TEXT("home does not map to the picture's home"));
+		Expect(Near(BbBaseMap::ToDiamond(F1[0], F1[1], Ground), 1, 1), TEXT("first base does not map to the picture's first-base corner"));
+		Expect(Near(BbBaseMap::ToDiamond(F2[0], F2[1], Ground), 0, 2), TEXT("second base does not map to the picture's second-base corner"));
+		Expect(Near(BbBaseMap::ToDiamond(F3[0], F3[1], Ground), -1, 1), TEXT("third base does not map to the picture's third-base corner"));
+		Expect(Near(BbBaseMap::ToDiamond(F1[0] * 0.5f, F1[1] * 0.5f, Ground), 0.5, 0.5), TEXT("halfway to first does not map halfway"));
+		Expect(Near(BbBaseMap::ToDiamond((F1[0] + F2[0]) * 0.5f, (F1[1] + F2[1]) * 0.5f, Ground), 0.5, 1.5), TEXT("halfway from first to second does not map halfway"));
+		Expect(Near(BbBaseMap::ToDiamond((F2[0] + F3[0]) * 0.5f, (F2[1] + F3[1]) * 0.5f, Ground), -0.5, 1.5), TEXT("halfway from second to third does not map halfway"));
+		Expect(Near(BbBaseMap::ToDiamond(F3[0] * 0.5f, F3[1] * 0.5f, Ground), -0.5, 0.5), TEXT("halfway from home to third does not map halfway"));
+	}
+	const double HomeToFirstM = FMath::Sqrt((double)Ground.bases[0][0] * Ground.bases[0][0] + (double)Ground.bases[0][1] * Ground.bases[0][1]);
+	const double ScalePerM = FMath::Sqrt(2.0) / HomeToFirstM; // |(1, 1)| picture units per metre
+
+	int32 PrevOuts = 0;
+	uint8 PrevInning = 1, PrevTop = 1, PrevBases = 0;
 	bool bPrevEndedHalf = false;
 	for (int32 I = 0; I < 400; ++I)
 	{
@@ -949,14 +971,15 @@ int32 ABbDirector::RunBaseMapCheck(uint64 Seed)
 			break;
 		}
 		const BbPlayInfo& Info = Play.Info;
-		// The runners on before the pitch: what the last play left, none in a new half inning.
-		const uint8 OnBefore = (I == 0 || bPrevEndedHalf) ? 0 : Prev;
-		const bool bEndsHalf = Info.inning != PrevInning || Info.top != PrevTop;
+		// The board before the pitch: what the last play left, nothing in a new half inning.
+		const bool bFresh = I == 0 || bPrevEndedHalf;
+		const uint8 OnBefore = bFresh ? 0 : PrevBases;
+		const int32 OutsBefore = bFresh ? 0 : PrevOuts;
 		++Plays;
-		// The sim's tick for the samples: every 1/30 s, and the very end.
 		uint8 Last = 0xFF;
-		int32 Changes = 0, MaxLit = 0;
-		uint8 Ever = 0;
+		int32 LitChanges = 0;
+		TMap<uint16, FVector2D> PrevDot;
+		float PrevT = 0.f;
 		for (int32 K = 0;; ++K)
 		{
 			const float T = FMath::Min(K * 0.0333333f, Info.duration_s);
@@ -966,55 +989,74 @@ int32 ABbDirector::RunBaseMapCheck(uint64 Seed)
 				Expect(false, FString::Printf(TEXT("play %u: no frame at t=%.3f"), Info.play_index, T));
 				break;
 			}
-			const uint8 Lit = BbBaseMap::Occupied(F, Ground);
-			// Independent of the function: no more bases lit than runners in the frame.
+			BbBaseMap::FMap M;
+			BbBaseMap::Read(F, Ground, Info, OnBefore, OutsBefore, T, M);
+			// Independent of the function: a dot is where the runner is, to scale. The picture's
+			// distance from home is the runner's distance from home in the timeline times one
+			// constant, and a runner moves no faster on the picture than he runs.
 			int32 NRunners = 0;
 			for (uint32 A = 0; A < F.n_actors; ++A)
 			{
 				NRunners += (F.actors[A].agent & 0x80) ? 0 : 1;
 			}
-			const int32 NLit = (Lit & 1) + ((Lit >> 1) & 1) + ((Lit >> 2) & 1);
-			MaxLit = FMath::Max(MaxLit, NLit);
-			Expect(NLit <= NRunners, FString::Printf(TEXT("play %u t=%.2f: %d bases lit with %d runners"), Info.play_index, T, NLit, NRunners));
-			if (K == 0 && I >= 22 && I <= 24)
+			Expect(M.Dots.Num() <= NRunners && Pop(M.Lit) <= M.Dots.Num(), FString::Printf(TEXT("play %u t=%.2f: %d dots, %d lit, %d runners"), Info.play_index, T, M.Dots.Num(), Pop(M.Lit), NRunners));
+			for (const BbBaseMap::FDot& D : M.Dots)
 			{
-				UE_LOG(LogBb, Display, TEXT("PROBE play %d before=%u bases %.2f,%.2f %.2f,%.2f %.2f,%.2f n=%u"), I, OnBefore, Ground.bases[0][0], Ground.bases[0][1], Ground.bases[1][0], Ground.bases[1][1], Ground.bases[2][0], Ground.bases[2][1], F.n_actors);
+				if (D.Agent == 0)
+				{
+					continue;
+				}
+				const BbActor* Who = nullptr;
 				for (uint32 A = 0; A < F.n_actors; ++A)
 				{
-					UE_LOG(LogBb, Display, TEXT("PROBE  agent %x at %.2f %.2f"), F.actors[A].agent, F.actors[A].pos[0], F.actors[A].pos[1]);
+					Who = F.actors[A].agent == D.Agent ? &F.actors[A] : Who;
+				}
+				if (!Expect(Who != nullptr, FString::Printf(TEXT("play %u: a dot for agent %x who is not in the frame"), Info.play_index, D.Agent)))
+				{
+					continue;
+				}
+				++DotSamples;
+				const double SimR = FMath::Sqrt((double)Who->pos[0] * Who->pos[0] + (double)Who->pos[1] * Who->pos[1]);
+				Expect(FMath::Abs(D.At.Size() - SimR * ScalePerM) < 2e-3 * (1.0 + SimR * ScalePerM), FString::Printf(TEXT("play %u t=%.2f: dot %.3f from home, runner %.2f m out should be %.3f"), Info.play_index, T, D.At.Size(), SimR, SimR * ScalePerM));
+				if (const FVector2D* Was = PrevDot.Find(D.Agent))
+				{
+					Expect(FVector2D::Distance(*Was, D.At) <= 12.0 * (T - PrevT) * ScalePerM + 1e-3, FString::Printf(TEXT("play %u t=%.2f: agent %x's dot jumped"), Info.play_index, T, D.Agent));
 				}
 			}
+			PrevDot.Reset();
+			for (const BbBaseMap::FDot& D : M.Dots)
+			{
+				PrevDot.Add(D.Agent, D.At);
+			}
+			PrevT = T;
 			if (K == 0)
 			{
-				Expect(Lit == OnBefore, FString::Printf(TEXT("play %u: at the pitch the map shows %u, the runners on were %u"), Info.play_index, Lit, OnBefore));
+				Expect(M.Lit == OnBefore && M.Dots.Num() == Pop(OnBefore), FString::Printf(TEXT("play %u: at the pitch the map shows %u with %d dots, the runners on were %u"), Info.play_index, M.Lit, M.Dots.Num(), OnBefore));
 			}
-			if (Lit != Last)
+			if (M.Lit != Last)
 			{
-				++Changes;
-				Last = Lit;
+				++LitChanges;
+				Last = M.Lit;
 			}
-			Ever |= Lit;
 			if (T >= Info.duration_s)
 			{
-				Expect(Lit == (Info.bases & 7), FString::Printf(TEXT("play %u (%hs): at the end the map shows %u, the result is %u"), Info.play_index, Info.summary, Lit, Info.bases & 7));
+				Expect(M.Lit == (Info.bases & 7) && M.Dots.Num() == Pop(Info.bases & 7), FString::Printf(TEXT("play %u (%hs): at the end the map shows %u with %d dots (pitch_call %d, before %u), the result is %u"), Info.play_index, Info.summary, M.Lit, M.Dots.Num(), Info.pitch_call, OnBefore, Info.bases & 7));
 				break;
 			}
 		}
 		if (OnBefore != 0 || (Info.bases & 7) != 0)
 		{
 			++WithRunners;
-			Moved += Changes > 1 ? 1 : 0;
+			MovedLit += LitChanges > 1 ? 1 : 0;
 		}
-		Outs += Info.n_calls > 0 && Info.exit_velocity_mps > 0.f ? 1 : 0;
-		Scored += Info.home_runs + Info.away_runs > 0 ? 1 : 0;
-		UE_LOG(LogBb, Verbose, TEXT("BB_BASE_MAP play=%u before=%u after=%u changes=%d maxlit=%d %hs"), Info.play_index, OnBefore, Info.bases & 7, Changes, MaxLit, Info.summary);
-		bPrevEndedHalf = bEndsHalf;
+		bPrevEndedHalf = Info.inning != PrevInning || Info.top != PrevTop;
 		PrevInning = Info.inning;
 		PrevTop = Info.top;
-		Prev = Info.bases & 7;
+		PrevBases = Info.bases & 7;
+		PrevOuts = Info.outs;
 		Game.Release(Play);
 	}
-	UE_LOG(LogBb, Display, TEXT("BB_BASE_MAP_CHECK %s plays=%d with_runners=%d map_moved_in=%d cases=%d failures=%d"), Failures == 0 ? TEXT("PASS") : TEXT("FAILED"), Plays, WithRunners, Moved, Cases, Failures);
+	UE_LOG(LogBb, Display, TEXT("BB_BASE_MAP_CHECK %s plays=%d with_runners=%d lit_set_changed_in=%d dot_samples=%d cases=%d failures=%d"), Failures == 0 ? TEXT("PASS") : TEXT("FAILED"), Plays, WithRunners, MovedLit, DotSamples, Cases, Failures);
 	return Failures == 0 ? 0 : 1;
 }
 
@@ -4443,6 +4485,20 @@ void ABbDirector::Tick(float DeltaSeconds)
 				Bug.Balls = bHalfOver && bKnown ? 0 : Src.balls;
 				Bug.Strikes = bHalfOver && bKnown ? 0 : Src.strikes;
 				Bug.Bases = Src.bases;
+				// The base map follows the runners in the timeline at the playback clock (owner,
+				// 2026-11-21): a dot for each, a base lit while one is at it. Its end is the
+				// sim's result, so there is no jump when the play is known.
+				Bug.Dots.Reset();
+				if (bHave && Sim)
+				{
+					BbBaseMap::FMap Map;
+					BbBaseMap::Read(Frame, Sim->Park(), In, Before.bases & 7, Before.outs, T, Map);
+					Bug.Bases = Map.Lit;
+					for (const BbBaseMap::FDot& D : Map.Dots)
+					{
+						Bug.Dots.Add(D.At);
+					}
+				}
 				// The board in the outfield shows the same, with the line score read from the
 				// sim's log once a pitch.
 				const uint32 Through = In.play_index + (bKnown ? 1u : 0u);
