@@ -1,6 +1,6 @@
 # Task List
 
-**Last updated:** 2026-11-21 (`work/bounce-track` ready for review).
+**Last updated:** 2026-11-21 (bounce track merged; middle infielders' no-job cases next).
 
 What is next and what is open. Other files hold the rest:
 
@@ -17,11 +17,11 @@ Status: `[ ]` not started · `[~]` partly done · `[?]` needs an owner decision
 
 ## Resume here (2026-11-21, evening)
 
-**State.** Nothing is waiting on the owner. Merged and pushed today: `work/dp-cover`, `work/base-map`, `work/mid-infield-jobs` (saved play 102; reviews resolved). Main's standard runs 4.19 [4.59].
+**State.** Nothing is waiting on the owner. Nothing is running. Merged and pushed today: `work/dp-cover`, `work/base-map`, `work/mid-infield-jobs` (saved play 102) and `work/bounce-track` (saved play 71: a fielder keeps tracking the ball across its bounces; [note](docs/calibration/2026-11-21-bounce-track.md), [review](docs/reviews/2026-11-21-opus-bounce-track-review.md) resolved, no re-review). Standard runs 4.08 [4.44].
 
 **Open (ledger §5):** runs fell 0.21 [0.18] with dp-cover, about 0.04 explained: check the run-to-run noise on more seeds before tracing. Double plays 12.3% per opportunity (MLB 9.8%): no slide or break-up on the pivot man.
 
-**Review fixes done:** `work/bounce-track` (saved play 71; [review](docs/reviews/2026-11-21-opus-bounce-track-review.md), fixes in the [note](docs/calibration/2026-11-21-bounce-track.md) §10: the gate keeps the track, a rolling estimate can restart; runs 4.08 [4.44] against main 4.19 [4.59]). Small, test-covered fixes: merge without a re-review, or one quick look at `Track::let_go`. **Then:** the middle infielders' remaining no-job cases (§3).
+**Next:** the middle infielders' remaining no-job cases (§3). Play 71 is still a triple (§2: no dive at a ground ball 1.9 m away). The warm worktree is `.claude/worktrees/runner-decision` (on the merged `work/bounce-track`).
 
 ---
 

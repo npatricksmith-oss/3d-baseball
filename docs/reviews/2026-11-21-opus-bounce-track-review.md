@@ -77,4 +77,15 @@ All from the worktree `runner-decision` unless noted; probe copies built with `C
 
 ## Resolution
 
-Open.
+Resolved 2026-11-21 (Coordinator). Fixes on `work/bounce-track`, commits `5ab0301`, `f6f535d`, `7bb8873`; the worker's account is in the [note](../calibration/2026-11-21-bounce-track.md) §10. No re-review: the fix is small and covered by its own test, and the game totals stayed within a point of the reviewed build.
+
+- **P2-1, fixed.** A look the estimate cannot explain no longer ends the track: the fielder lets go of the failed part (velocity or position), re-takes it from that look and applies the look again (`Track::let_go`). Games 0–199: 272 tracks ended before, none after; the worst read of fielders who hit the gate went from median 5.45 m (max 93.4 m) to median 1.63 m (max 14.2 m). Test `a_wrong_rolling_estimate_is_let_go_of_and_the_ball_kept`. Spec and note figures corrected.
+- **P3-2, fixed.** A rolling ball seen moving keeps a velocity uncertainty floor, so an estimate that stopped itself early can start again.
+- **P3-5, fixed.** The note and the ledger row name the below-ground clamp's own effect.
+- **P3-6, fixed.** The stale comments in `live.rs` and the stale lines in agent-models §5.1.
+- **Play-71 test threshold** (answers to the questions): now 4 m against 2.02 m measured; it still fails on the old turn for the wall (5.7 m).
+- **P3-3, partly fixed.** The honesty figures are restated as measured on two seed sets. Deferred: outfielders' error²/σ² of about 1.4–1.6 after the bounce and the share of their errors that grow just after it.
+- **P3-1, deferred** (TASKS §2): `BOUNCE_SPIN_RPM` is unsourced; source it from the contact model's spin spread.
+- **P3-4, deferred** (TASKS §2): the roll's process noise acts across the roll as well as along it; small and on the cautious side.
+
+Coordinator's check before the merge, on `7bb8873` with the changed sources touched: `cargo test --workspace` 509 passed, 0 failed; standard run 4.08 [4.44], ground-ball hits .310 [.316], no rules warnings, matching the ledger row.
