@@ -175,3 +175,86 @@ fn seed_65147_play_10_an_outfielder_takes_a_grounder_through_the_hole_both_left_
     assert_eq!(who & 0x7F, 9, "fielder {who} secured it first at ({x:.1}, {y:.1})");
     assert!(x.hypot(y) < 100.0 && t - contact < 6.0, "fielded at ({x:.1}, {y:.1}), {t:.2} s");
 }
+
+/// The first glove possession and whether the ball had touched the ground or a wall before it.
+fn first_secured(out: &LiveOutput) -> (f64, u16, bool) {
+    let (t, who) = out.facts.iter().find_map(|f| match f {
+        Input::GloveSecured { t, fielder, .. } => Some((*t, *fielder)),
+        _ => None,
+    }).expect("someone fields it");
+    let down = out.facts.iter().any(|f| matches!(f, Input::BallTouched { t: tt, what: bb_rules::Touch::Ground { .. } | bb_rules::Touch::Wall { .. } } if *tt < t));
+    (t, who, down)
+}
+
+#[test]
+fn seed_155_play_23_the_centre_fielder_setting_up_still_catches_the_deep_fly() {
+    // Agent-models §5.5, the set-up behind a fly: a deep fly to left-centre, a runner on
+    // second, none out. The centre fielder catches it on main; on `8621f54` he went for a spot
+    // behind the catch point at full speed, a late re-read put the catch point under him, he
+    // ran on past it toward the new spot, could no longer get back, and the left fielder took
+    // it on the bounce (approach note §5–§6). The catch comes first: he is set up only while he
+    // can be settled on the spot and still come through in time.
+    let (out, _, _) = replay(include_str!("fixtures/a4/155-23.json"));
+    let (t, who, down) = first_secured(&out);
+    assert!(!down && who & 0x7F == 8, "fielder {} secured it at {t:.2} s, after it came down: {down}", who & 0x7F);
+}
+
+#[test]
+fn seed_264_play_109_the_left_fielder_still_catches_the_sinking_liner() {
+    // Agent-models §5.5, the set-up behind a fly: a sinking liner to left, a runner on second,
+    // none out. Main's left fielder catches it at his shoetops; on `8621f54` his first read had
+    // it high and deep, he started for a spot behind it, and when the read came in he was a
+    // step behind and took it on the short hop, 0.06 s late (approach note §5–§6).
+    let (out, _, _) = replay(include_str!("fixtures/a4/264-109.json"));
+    let (t, who, down) = first_secured(&out);
+    assert!(!down && who & 0x7F == 7, "fielder {} secured it at {t:.2} s, after it came down: {down}", who & 0x7F);
+}
+
+/// The first glove possession, in seconds after contact, and by whom.
+fn first_taken(text: &str) -> (f64, u16, bool) {
+    let v: Value = serde_json::from_str(text).unwrap();
+    let (out, _, _) = replay(text);
+    let (t, who, down) = first_secured(&out);
+    (t - v["t_contact"].as_f64().unwrap(), who & 0x7F, down)
+}
+
+#[test]
+fn seed_1048_play_193_the_pitcher_takes_the_comebacker_in_front_of_him() {
+    // Agent-models §5.2, the approach (Opus approach review P2-3): a comebacker, a runner on
+    // first, none out. On main the pitcher steps to his left and takes it 0.65 s after contact in front
+    // of him. On `af5825d` he backed away toward a deeper point on the ball's path to take it
+    // with a better throw, the ball passed him and he picked it up 3.9 s after contact. A ball
+    // coming at him is taken in front of him.
+    let (t, who, _) = first_taken(include_str!("fixtures/a4/1048-193.json"));
+    assert!(who == 1 && t < 1.0, "fielder {who} first took it {t:.2} s after contact");
+}
+
+#[test]
+fn seed_136_play_13_the_second_baseman_does_not_let_the_grounder_by() {
+    // Agent-models §5.2, the approach (Opus approach review P2-3): a grounder to the second
+    // baseman, nobody on, one out. On `af5825d`, paced to meet it exactly at a later hop, he let
+    // it pass 1.1 m from him and picked it up 4.1 s after contact. With the plan timed as the
+    // movement runs it, he fields it 1.65 s after contact.
+    let (t, who, _) = first_taken(include_str!("fixtures/a4/136-13.json"));
+    assert!(who == 4 && t < 2.0, "fielder {who} first took it {t:.2} s after contact");
+}
+
+#[test]
+fn seed_207_play_66_the_left_fielder_catches_the_pop_up() {
+    // Agent-models §5.5, the set-up behind a fly (Opus approach review P2-2): a pop-up to
+    // shallow left, a runner on third, one out. On `af5825d` the left fielder chose
+    // the set-up on his first read, headed for a spot behind a catch point his read had wrong,
+    // and came up short; main catches it. He sets up only once his read has settled.
+    let (t, who, down) = first_taken(include_str!("fixtures/a4/207-66.json"));
+    assert!(!down && who == 7, "fielder {who} secured it {t:.2} s after contact, after it came down: {down}");
+}
+
+#[test]
+fn seed_1042_play_28_the_right_fielder_catches_the_fly() {
+    // Agent-models §5.5, the set-up behind a fly (Opus approach review P2-2): a fly to
+    // right-centre, a runner on second, none out. On `af5825d` the right fielder
+    // drifted deep for the set-up from 1.7 s on an unsettled read and the ball landed 1.3 m from
+    // him; main catches it.
+    let (t, who, down) = first_taken(include_str!("fixtures/a4/1042-28.json"));
+    assert!(!down && who == 9, "fielder {who} secured it {t:.2} s after contact, after it came down: {down}");
+}

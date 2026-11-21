@@ -51,7 +51,7 @@ impl Sim<'_> {
         let release = |target: Vec3, at: f64| {
             let su = self.set_up_for(by, target);
             let t = at.max(fd.up_at + su.earliest_s);
-            (t, self.throw_speed(by, target) * su.speed_mult(su.hurry(t - fd.up_at)))
+            (t, self.throw_speed(by, target, su.hurry(t - fd.up_at)) * su.speed_mult(su.hurry(t - fd.up_at)))
         };
         // With a cutoff man in the throw it must pass him low enough to be cut (agent-models
         // §5.5): the cuttable throw, by the throw and bounce physics.
@@ -119,16 +119,17 @@ impl Sim<'_> {
             let to = base_pos(1) - base_pos(option.base);
             let turn = fd.face.map(|face| throwing::turn_extra_s(face, to, fd.a.throws)).unwrap_or(0.0);
             let footwork = throwing::footwork_s(fd.catch_vel, to, fd.took_diving);
-            let su = if fd.relayed { SetUp::relay(fd.set_base, footwork) } else { SetUp::new(fd.set_base, turn, footwork) };
+            let drift = if fd.took_diving { f64::INFINITY } else { throwing::off_line_mps(fd.catch_vel, to) };
+            let su = if fd.relayed { SetUp::relay(fd.set_base, throwing::exchange_footwork_s(fd.catch_vel, to, fd.took_diving)) } else { SetUp::new(fd.set_base, turn, footwork).with_drift(drift) };
             let release_at = option.ball_at.max(fd.up_at + su.earliest_s);
-            (by, release_at, self.throw_speed(by, base_pos(1)) * su.speed_mult(su.hurry(release_at - fd.up_at)))
+            (by, release_at, self.throw_speed(by, base_pos(1), su.hurry(release_at - fd.up_at)) * su.speed_mult(su.hurry(release_at - fd.up_at)))
         } else {
             let next = &self.f[option.receiver];
             (option.receiver, option.ball_at + RELAY_TRANSFER_FRAC * next.a.transfer, THROW_EFFORT * next.a.arm)
         };
         let receiver = self.receiver_for(next_holder, 1);
         let ball_at = (release_at + throw_time(speed, (base_pos(1) - base_pos(option.base)).norm())).max(self.receiver_ready(receiver, 1)) + 0.05;
-        Some((phi((runner_at - ball_at) / 0.12), ball_at))
+        Some((phi((runner_at - ball_at) / RACE_SIGMA_S), ball_at))
     }
 
     /// When the pivot man at second lets the ball go for first, as a teammate judges it
@@ -146,7 +147,7 @@ impl Sim<'_> {
         } else {
             (Vec3::new(feed_from.x - bag.x, feed_from.y - bag.y, 0.0).normalized(), Vec3::ZERO)
         };
-        let su = SetUp::pivot(throwing::pivot_s(pf.a.transfer), throwing::turn_extra_s(face, to_first, pf.a.throws), throwing::footwork_s(vel, to_first, false));
+        let su = SetUp::pivot(throwing::pivot_s(pf.a.transfer), throwing::turn_extra_s(face, to_first, pf.a.throws), throwing::exchange_footwork_s(vel, to_first, false));
         t_bag + su.set_s
     }
 
@@ -166,7 +167,7 @@ impl Sim<'_> {
             let distance = (target - fd.pos).norm();
             let race = self.throw_race(by, base);
             let mut add = |carry: bool, ball_at, set_ball_at| {
-                let p_out = phi((runner_at - ball_at) / 0.12);
+                let p_out = phi((runner_at - ball_at) / RACE_SIGMA_S);
                 let weight = self.out_weight(k, base);
                 let mut option = HolderOption {
                     runner: k,
@@ -188,9 +189,9 @@ impl Sim<'_> {
                     continuation: None,
                 };
                 option.continuation = self.force_continuation(by, &option);
-                // Only a second out whose throw would be attempted (p > 0.3, the holder's own
+                // Only a second out whose throw would be attempted (p > `RACE_MIN_P`, the holder's own
                 // rule) adds to the value (Gemini A4 review P1-2).
-                if let Some((p_second, _)) = option.continuation.filter(|c| c.0 > 0.3) {
+                if let Some((p_second, _)) = option.continuation.filter(|c| c.0 > RACE_MIN_P) {
                     let w_second = if self.st.outs + 1 >= 2 { 1.0 } else { 0.9 };
                     option.value += params.continuation_weight * p_out * p_out * p_second * p_second * w_second;
                 }
