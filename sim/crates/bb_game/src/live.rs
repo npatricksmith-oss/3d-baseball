@@ -183,9 +183,10 @@ const HURRY_GAIN_MIN_S: f64 = 0.01;
 /// A fielder running, or a ball coming, faster than this sets which way he faces as he
 /// takes it, m/s [E].
 const FACE_MIN_MPS: f64 = 3.0;
-/// The same for a pivot man coming onto the bag: he brakes onto it (√(2·BRAKE·0.6 m) = 2.39 m/s
-/// at the touch radius), under the running threshold above, and still faces the way he is
-/// moving (agent-models §5.5, Gemini pivot review P2-3): a walk's pace, m/s [E].
+/// The same for a pivot man coming onto the bag: one early for the feed brakes onto it
+/// (√(2·BRAKE·0.6 m) = 2.39 m/s at the touch radius, under the running threshold above), one
+/// late for it crosses it at about 4.7 m/s (`COVER_CROSS_MPS`, agent-models §5.3); either still
+/// faces the way he is moving (agent-models §5.5, Gemini pivot review P2-3): a walk's pace, m/s [E].
 const PIVOT_FACE_MIN_MPS: f64 = 1.0;
 /// Release and catch heights of a throw, m.
 const THROW_RELEASE_Z: f64 = 1.8;
@@ -755,6 +756,30 @@ const BRAKE: f64 = throwing::BRAKE_MPS2;
 /// 2026-11-15]. His speed toward the nearest wall is capped at
 /// `sqrt(v_c² + 2·BRAKE·distance)` ([`wall_speed_cap`]). Planned: a per-fielder value.
 pub const WALL_CONTACT_SPEED_MPS: f64 = 2.0;
+/// How fast a man covering a base with a force pending there crosses the bag when he is not
+/// early for the throw, m/s [E, unsourced: about a jog; the owner's saved plays 66 and 168 of
+/// seed 51001, docs/calibration/2026-11-20-saved-plays-51001.md §1, Q-A (b)]. His speed toward
+/// the bag is held to `sqrt(v_c² + 2·BRAKE·d)` ([`cover_step`]), the form of the wall's cap. A
+/// real middle infielder on a double-play ball takes the bag moving (drag foot, cross or
+/// straddle); he times his arrival to the feed and does not stop at it (agent-models §5.3, §5.5).
+const COVER_CROSS_MPS: f64 = 4.0;
+/// A man is early for the ball at his spot when his time to it leaves this much before the
+/// ball, s [E]: a chaser then slows for his spot, a man covering a force base brakes onto the
+/// bag (agent-models §5.3).
+const EARLY_MARGIN_S: f64 = 0.1;
+/// A throw held for a man on his way to the bag is let go to reach it this long after he is
+/// within receiving reach of it by the holder's belief, s [E, unsourced; Opus dp-cover review
+/// P1-1]. Released to arrive as he came within reach (it was 0.05 s before), a throw to a man
+/// coming at the bag from the side passed out of his reach into the outfield (seed 12 play 105:
+/// the pitcher's feed to second; 39 of the pitcher's 115 feeds to second on seeds 0–255).
+const RECEIVE_MARGIN_S: f64 = 0.1;
+/// The force-touch radius: a man with the ball has the bag within this of its centre, m [E]
+/// (agent-models §5.5, the pivot).
+const BAG_TOUCH_M: f64 = 0.6;
+/// The most a teammate's estimate of a covering man's run to his bag steps the movement, s
+/// [E: a cover more than this from his bag is no throw's receiver; the rest is run at top
+/// speed].
+const COVER_STEP_CAP_S: f64 = 4.0;
 /// Time to spare a fielder needs to believe he has before he calls a ball in the air, s [E].
 const CALL_SLACK_S: f64 = 0.3;
 /// A teammate's chase, and his call, reach the others this long after he begins it
@@ -804,8 +829,9 @@ enum Ball {
     /// The receiver's plan is his own: `aim` is the spot he was thrown to, `catch_at` where
     /// he believes he can take it (the aim until his first read), `read_err` his read's
     /// error draws for this throw, and `next_read` when he looks again.
-    /// `relay`: thrown to the cutoff or relay man, who throws on to `to_base`.
-    Thrown { path: Trajectory, aim: Vec3, catch_at: Vec3, read_at: Vec3, read_err: [f64; 4], next_read: f64, to_base: u8, receiver: usize, relay: bool },
+    /// `relay`: thrown to the cutoff or relay man, who throws on to `to_base`. `read_t`: when
+    /// his latest read has it at `read_at` (infinite before his first read).
+    Thrown { path: Trajectory, aim: Vec3, catch_at: Vec3, read_at: Vec3, read_t: f64, read_err: [f64; 4], next_read: f64, to_base: u8, receiver: usize, relay: bool },
 }
 
 /// A fielder's own decision on a loose ball (`Sim::decide`).
@@ -1225,6 +1251,10 @@ struct Fielder {
     /// He took a relay as the cutoff man (agent-models §5.5, the relay man's exchange): his
     /// set-up is `throwing::relay_s` from his catch, turn included, no early release.
     relayed: bool,
+    /// Covering a base with a force pending there: when he believes the throw gets to the bag
+    /// (`Sim::cover_feeds`; infinite when none is coming that he can see). It decides whether
+    /// he brakes onto the bag or crosses it ([`cover_step`]).
+    feed_at: f64,
 }
 
 #[derive(Clone, Debug)]
@@ -2479,7 +2509,14 @@ fn fielder_step(fd: &Fielder, t: f64, t_contact: f64) -> (Vec3, Vec3) {
         let a = FielderAttrs { speed: fd.a.speed.min(pace).min(cap), ..fd.a };
         return step_toward(fd.pos, fd.vel, q, &a, false, 0.0, f64::INFINITY);
     }
-    let early = fd.role != Role::Chase || !fd.t_int.is_finite() || t + eta + 0.1 < t_goal;
+    if let (Role::Cover(b), true) = (fd.role, fd.feed_at.is_finite()) {
+        // Covering a base with a force pending there (agent-models §5.3, §5.5): he brakes onto
+        // the bag only when he is early for the throw, otherwise crosses it.
+        if fd.target == base_pos(b) {
+            return cover_step(fd.pos, fd.vel, fd.target, &fd.a, t, fd.feed_at);
+        }
+    }
+    let early = fd.role != Role::Chase || !fd.t_int.is_finite() || t + eta + EARLY_MARGIN_S < t_goal;
     // Early for a ball in the air, he keeps a margin of his doubt short of where he can stop
     // (agent-models §5.2, arriving under control).
     let margin = if early && fd.role == Role::Chase { ARRIVE_SIGMAS * fd.doubt } else { 0.0 };
@@ -2644,6 +2681,26 @@ fn step_toward(pos: Vec3, vel: Vec3, target: Vec3, a: &FielderAttrs, early: bool
         return (Vec3::new(target.x, target.y, pos.z), Vec3::ZERO);
     }
     (pos + vel2 * DT, vel2)
+}
+
+/// The movement step of a man covering `bag` with a force pending there (agent-models §5.3,
+/// §5.5), the throw coming there at `feed_at` by his belief: as a chaser does, he brakes onto
+/// the bag (`step_toward`'s early stop) only when he is early for it, his time to the bag (at
+/// the speed he has toward it, or from rest by the speed law) leaving `EARLY_MARGIN_S` before
+/// the throw; otherwise he comes at it to cross it at `COVER_CROSS_MPS`, his speed toward it
+/// held to √(`COVER_CROSS_MPS`² + 2·`BRAKE`·d). Within the touch radius, or once past the bag,
+/// he brakes onto it. One rule for the world and for a teammate's estimate of him
+/// (`Sim::cover_reach`).
+fn cover_step(pos: Vec3, vel: Vec3, bag: Vec3, a: &FielderAttrs, t: f64, feed_at: f64) -> (Vec3, Vec3) {
+    let to = Vec3::new(bag.x - pos.x, bag.y - pos.y, 0.0);
+    let d = to.norm();
+    let along = if d < 1e-9 { 0.0 } else { vel.dot(to) / d };
+    let eta = (d / along.max(0.5)).min(m::sqrt(2.0 * d * a.tau_a / a.speed) + d / a.speed);
+    if d > BAG_TOUCH_M && along >= 0.0 && t + eta + EARLY_MARGIN_S >= feed_at {
+        let a = FielderAttrs { speed: a.speed.min(m::sqrt(COVER_CROSS_MPS * COVER_CROSS_MPS + 2.0 * BRAKE * d)), ..*a };
+        return step_toward(pos, vel, bag, &a, false, 0.0, f64::INFINITY);
+    }
+    step_toward(pos, vel, bag, a, true, 0.0, f64::INFINITY)
 }
 
 struct Sim<'a> {
@@ -4836,6 +4893,7 @@ impl<'a> Sim<'a> {
     }
 
     fn move_fielders(&mut self) {
+        self.cover_feeds();
         let (t, t_contact) = (self.t, self.inp.t_contact);
         let field = self.inp.field;
         for fd in self.f.iter_mut() {
@@ -5142,7 +5200,7 @@ impl<'a> Sim<'a> {
                         fd.set_base = throwing::pivot_s(fd.a.transfer);
                         let moving = (m::hypot(fd.vel.x, fd.vel.y) > PIVOT_FACE_MIN_MPS).then(|| Vec3::new(fd.vel.x, fd.vel.y, 0.0));
                         fd.face = Some(moving.unwrap_or(Vec3::new(-bv.x, -bv.y, 0.0)));
-                        fd.pivot_wait_bag = (base_pos(2) - fd.pos).norm() >= 0.6;
+                        fd.pivot_wait_bag = (base_pos(2) - fd.pos).norm() >= BAG_TOUCH_M;
                     }
                 }
                 let id = fd.id;
@@ -5279,7 +5337,7 @@ impl<'a> Sim<'a> {
         let mut r = rng(self.inp.seed, self.inp.play, self.f[receiver].id, Purpose::FielderPerception, 1 + self.out.released.len() as u32);
         let read_err = [r.truncated_normal(4.0), r.truncated_normal(4.0), r.truncated_normal(4.0), r.truncated_normal(4.0)];
         let next_read = self.t + self.f[receiver].a.reaction;
-        self.ball = Ball::Thrown { path, aim, catch_at: aim, read_at: aim, read_err, next_read, to_base, receiver, relay };
+        self.ball = Ball::Thrown { path, aim, catch_at: aim, read_at: aim, read_t: f64::INFINITY, read_err, next_read, to_base, receiver, relay };
     }
 
     /// The receiver's read of a throw in the air (agent-models §5.5 receiving): a noisy
@@ -5287,8 +5345,9 @@ impl<'a> Sim<'a> {
     /// error grows with distance and shrinks with viewing time), flown on with his own throw
     /// physics. He takes it where it is catchable (from a scoop to a reach overhead) nearest
     /// the spot he was thrown to: on the bag when he believes it comes through there.
-    /// Returns (where he believes he takes it, weighed against the aim; his read alone).
-    fn receiver_read(&self, i: usize, aim: Vec3, err: [f64; 4], t_release: f64, relay: bool) -> (Vec3, Vec3) {
+    /// Returns (where he believes he takes it, weighed against the aim; his read alone; when his
+    /// read alone has it there).
+    fn receiver_read(&self, i: usize, aim: Vec3, err: [f64; 4], t_release: f64, relay: bool) -> (Vec3, Vec3, f64) {
         let fd = &self.f[i];
         let (p, v) = self.ball_at(self.t);
         let view = (self.t - t_release - fd.a.reaction).max(0.0);
@@ -5308,8 +5367,8 @@ impl<'a> Sim<'a> {
         let horizon = m::hypot(aim.x - r.x, aim.y - r.y) / vh + 1.0;
         let pred = fly_throw(self.inp.env, BallState { r, v: ve, w }, self.t, horizon);
         let near = |q: &Vec3| m::hypot(q.x - aim.x, q.y - aim.y);
-        let mut spots: Vec<Vec3> = pred.knots.iter().filter(|k| k.s.r.z >= THROW_SCOOP_Z && k.s.r.z <= CATCH_MAX_Z).map(|k| k.s.r).collect();
-        let in_air = spots.iter().map(near).fold(f64::INFINITY, f64::min);
+        let mut spots: Vec<(Vec3, f64)> = pred.knots.iter().filter(|k| k.s.r.z >= THROW_SCOOP_Z && k.s.r.z <= CATCH_MAX_Z).map(|k| (k.s.r, k.t)).collect();
+        let in_air = spots.iter().map(|q| near(&q.0)).fold(f64::INFINITY, f64::min);
         // A throw to a base he reads coming down well short of him skips on: he takes it on
         // the hop or rolling where that is nearest his spot (agent-models §5.5: the low throw
         // through a cutoff man is meant to arrive on a hop), not where it last was at scoop
@@ -5322,15 +5381,15 @@ impl<'a> Sim<'a> {
             while t <= on.t_end().min(self.t + horizon) {
                 let (q, _) = on.at(t);
                 if q.z <= CATCH_MAX_Z {
-                    spots.push(q);
+                    spots.push((q, t));
                 }
                 t += THROW_HOP_DT;
             }
         }
-        let raw = spots
+        let (raw, raw_t) = spots
             .into_iter()
-            .min_by(|a, b| near(a).total_cmp(&near(b)))
-            .unwrap_or(aim);
+            .min_by(|a, b| near(&a.0).total_cmp(&near(&b.0)))
+            .unwrap_or((aim, self.t + horizon - 1.0));
         // He knows throws mostly come where they are aimed, so he weighs his read against
         // that: a throw typically misses its spot by `THROW_MISS_FRAC` of its length; his
         // read's own error is its depth error now plus the velocity error flown to the spot.
@@ -5341,7 +5400,7 @@ impl<'a> Sim<'a> {
         let s_read = m::hypot(sp * DEPTH_STRETCH, sv * DEPTH_STRETCH * 0.5 * t_left);
         let k = s_prior * s_prior / (s_prior * s_prior + s_read * s_read);
         let at = aim + Vec3::new(raw.x - aim.x, raw.y - aim.y, 0.0) * k;
-        (if m::hypot(at.x - aim.x, at.y - aim.y) < 0.5 { aim } else { at }, raw)
+        (if m::hypot(at.x - aim.x, at.y - aim.y) < 0.5 { aim } else { at }, raw, raw_t)
     }
 
     /// The receiver of a throw watches it and goes to where he believes he can take it,
@@ -5352,10 +5411,11 @@ impl<'a> Sim<'a> {
         if let Ball::Thrown { path, aim, read_err, next_read, receiver, relay, .. } = &self.ball {
             if self.t >= *next_read {
                 let (aim, err, i, t0, relay) = (*aim, *read_err, *receiver, path.first().t, *relay);
-                let (at, raw) = self.receiver_read(i, aim, err, t0, relay);
-                if let Ball::Thrown { catch_at, read_at, next_read, .. } = &mut self.ball {
+                let (at, raw, raw_t) = self.receiver_read(i, aim, err, t0, relay);
+                if let Ball::Thrown { catch_at, read_at, read_t, next_read, .. } = &mut self.ball {
                     *catch_at = at;
                     *read_at = raw;
+                    *read_t = raw_t;
                     *next_read = self.t + RECEIVE_REPLAN_S;
                 }
             }
@@ -5719,7 +5779,12 @@ impl<'a> Sim<'a> {
     /// A runner forced to second who has not yet reached it (a force there is still to be
     /// made, §5.4): what makes a feed to second a double-play pivot.
     fn force_pending_at_second(&self) -> bool {
-        (0..self.r.len()).any(|k| !self.r[k].out && self.r[k].start == 1 && self.forced(k) && self.r[k].s < 2.0 * BASE_L - 0.1)
+        self.force_pending_at(2)
+    }
+
+    /// A runner forced to base `b` who has not yet reached it: a force there is still to be made.
+    fn force_pending_at(&self, b: u8) -> bool {
+        (0..self.r.len()).any(|k| !self.r[k].out && !self.r[k].scored && self.r[k].start + 1 == b && self.forced(k) && self.r[k].s < b as f64 * BASE_L - 0.1)
     }
 
     /// Whether a runner ahead of runner `k` holds base `b`, as `k` can see it: he is at or
@@ -6470,7 +6535,7 @@ impl<'a> Sim<'a> {
             if f.pivot_wait_bag && !force_at_second {
                 end_pivot_wait(f);
             }
-            let on_bag = (base_pos(2) - f.pos).norm() < 0.6;
+            let on_bag = (base_pos(2) - f.pos).norm() < BAG_TOUCH_M;
             // (A carrier to second caught nothing there: he keeps the set-up he spent holding
             // the ball, agent-models §5.6, and is an ordinary holder on the bag. Gemini pivot
             // review P2-2.)
@@ -6510,7 +6575,7 @@ impl<'a> Sim<'a> {
         }
         // Standing on a base with the ball: a force or appeal is made by touching it.
         for b in 1..=4u8 {
-            if (base_pos(b) - fd.pos).norm() < 0.6 {
+            if (base_pos(b) - fd.pos).norm() < BAG_TOUCH_M {
                 let base = if b == 4 { 4 } else { b };
                 let pending = self.r.iter().enumerate().any(|(k, r)| !r.out && !r.scored && self.forced(k) && r.start + 1 == base && r.s < base as f64 * BASE_L - 0.1)
                     || self.r.iter().any(|r| !r.out && r.start == base && r.s > base as f64 * BASE_L + 0.1);
@@ -6613,7 +6678,7 @@ impl<'a> Sim<'a> {
         // pointing). The call is his to make, but it reaches the man only when heard
         // (`heed_requests`, `CALL_HEARD_S`); his private choice moves nobody (Codex
         // fielder-communication fourth review P1-1).
-        if race.direct < race.receiver_at - 0.05 {
+        if race.receiver_at > self.t && race.direct < race.receiver_at {
             self.f[by].asks = Some((b, receiver));
             return;
         }
@@ -6813,11 +6878,96 @@ impl<'a> Sim<'a> {
         })
     }
 
-    /// When fielder `i` can take a throw at base `b`, as a teammate judges it: his visible
-    /// distance from the bag at league-typical speed from a standing start.
-    fn receiver_ready(&self, i: usize, b: u8) -> f64 {
-        let d = (base_pos(b) - self.f[i].pos).norm() - 0.5;
-        if d <= 0.0 { self.t } else { self.t + run_time(d, TYPICAL_SPEED, 0.9) }
+    /// When fielder `i` can take a throw at base `b` that gets there at `ball_at`, as a
+    /// teammate judges it: now if he is within receiving reach of the bag (`cover_reach`),
+    /// else `RECEIVE_MARGIN_S` after he gets there (agent-models §5.5: the holder holds his
+    /// throw until it reaches the bag after the man can take it there).
+    fn receiver_ready(&self, i: usize, b: u8, ball_at: f64) -> f64 {
+        let at = self.cover_reach(i, b, ball_at, RECEIVE_REACH).0;
+        if at <= self.t { self.t } else { at + RECEIVE_MARGIN_S }
+    }
+
+    /// When fielder `i`, going to base `b` for a throw that gets there at `ball_at`, comes
+    /// within `reach` of the bag, and how he is moving then, as a teammate judges it
+    /// (agent-models §5.5, the receiver's estimate): from his visible position and velocity and
+    /// his known speed, by the movement step itself ([`cover_step`] where a force is pending
+    /// there, timed to that throw; otherwise braking onto the bag, [`step_toward`]), for at
+    /// most `COVER_STEP_CAP_S`, the rest at top speed. (It was a run from rest at league-typical
+    /// speed: a man already running at the bag was believed late, seed 51001 play 66.)
+    fn cover_reach(&self, i: usize, b: u8, ball_at: f64, reach: f64) -> (f64, Vec3) {
+        let fd = &self.f[i];
+        let bag = base_pos(b);
+        let feed = if self.force_pending_at(b) { ball_at } else { f64::INFINITY };
+        let gap = |p: Vec3| m::hypot(bag.x - p.x, bag.y - p.y);
+        let (mut pos, mut vel, mut t) = (fd.pos, fd.vel, self.t);
+        while gap(pos) > reach {
+            if t >= self.t + COVER_STEP_CAP_S {
+                return (t + (gap(pos) - reach) / fd.a.speed, vel);
+            }
+            (pos, vel) = if feed.is_finite() { cover_step(pos, vel, bag, &fd.a, t, feed) } else { step_toward(pos, vel, bag, &fd.a, true, 0.0, f64::INFINITY) };
+            t += DT;
+        }
+        (t, vel)
+    }
+
+    /// When a man covering base `b` believes the throw gets there with the ball held by teammate
+    /// `by` (agent-models §5.5): from what he can see of the holder, as the holder would throw
+    /// with time in hand (set, `SAFE_MARGIN_S`): up from his catch (after a dive's get-up or a
+    /// stretch), then set for the throw, with his known `Transfer` (0.7 of it for a throw he
+    /// took; `pivot_s` for a feed at second with the force on there), the turn from the way he
+    /// faced taking it and the plant from how he was moving (both seen), then the throw's flight
+    /// at his known arm. The holder's own set-up clock and his choice are his.
+    fn feed_seen(&self, by: usize, b: u8) -> f64 {
+        let h = &self.f[by];
+        let to = base_pos(b) - h.pos;
+        let turn = h.catch_heading.filter(|_| !h.catch_received_throw).map(|f| throwing::turn_extra_s(f, to, h.a.throws)).unwrap_or(0.0);
+        let su = if h.pivot || h.pivot_wait_bag {
+            SetUp::pivot(throwing::pivot_s(h.a.transfer), turn, throwing::exchange_footwork_s(h.catch_seen_vel, to, false))
+        } else {
+            let base = if h.catch_received_throw { RELAY_TRANSFER_FRAC * h.a.transfer } else { h.a.transfer };
+            SetUp::new(base, turn, throwing::footwork_s(h.catch_seen_vel, to, h.took_diving))
+        };
+        // Taken on the ground from a dive, or at full stretch, he is up first (both are seen).
+        let up = self.secured_at + if h.took_diving { DIVE_GETUP_S } else if h.catch_stretched { STRETCH_COST_S } else { 0.0 };
+        self.t.max(up + su.set_s) + throw_time(THROW_EFFORT * h.a.arm, to.norm())
+    }
+
+    /// Whether holder `by` is visibly carrying the ball to base `b` himself, as his teammates
+    /// see it: running at it (faster than `FACE_MIN_MPS`, within about 25° of the line to it)
+    /// and not yet on it.
+    fn carrying_seen(&self, by: usize, b: u8) -> bool {
+        let h = &self.f[by];
+        let to = Vec3::new(base_pos(b).x - h.pos.x, base_pos(b).y - h.pos.y, 0.0);
+        let (d, v) = (to.norm(), m::hypot(h.vel.x, h.vel.y));
+        if d <= BAG_TOUCH_M || v <= FACE_MIN_MPS {
+            return false;
+        }
+        let along = (h.vel.x * to.x + h.vel.y * to.y) / d;
+        along > FACE_MIN_MPS && along > 0.9 * v
+    }
+
+    /// Each man covering a base with a force pending there, on his way to the bag, believes
+    /// the throw gets there (`Fielder::feed_at`): from the holder he sees (`feed_seen`), or
+    /// from his own read of the throw coming to him (until his first read, what he believed
+    /// as it was let go). With the ball loose, the holder visibly carrying it to that bag, or
+    /// no force there, none is coming that he can time, and he brakes onto the bag as before.
+    fn cover_feeds(&mut self) {
+        for i in 0..9 {
+            let feed = match self.f[i].role {
+                Role::Cover(b) if self.f[i].target == base_pos(b) && self.force_pending_at(b) => match self.ball {
+                    // A holder visibly running at that bag with the ball is carrying it there
+                    // himself: no throw to time (Opus dp-cover review P3-3).
+                    Ball::Held { by } if by != i && self.carrying_seen(by, b) => f64::INFINITY,
+                    Ball::Held { by } if by != i => self.feed_seen(by, b),
+                    Ball::Thrown { to_base, receiver, read_t, relay: false, .. } if receiver == i && to_base == b => {
+                        if read_t.is_finite() { read_t } else { self.f[i].feed_at }
+                    }
+                    _ => f64::INFINITY,
+                },
+                _ => f64::INFINITY,
+            };
+            self.f[i].feed_at = feed;
+        }
     }
 
     fn settled(&self) -> bool {
@@ -7034,6 +7184,7 @@ fn new_sim<'a>(inp: &'a LiveInput<'a>, st: &'a mut RulesState) -> Sim<'a> {
                 pivot: false,
                 pivot_wait_bag: false,
                 relayed: false,
+                feed_at: f64::INFINITY,
             }
         })
         .collect();
@@ -11382,8 +11533,8 @@ mod tests {
         match &sim.ball {
             Ball::Free { path, next_touch, next_wall, settled_sent } => format!("free {:?} {:?}", (path.at(sim.t), path.at(path.t_end()), path.t_end()), (next_touch, next_wall, settled_sent)),
             Ball::Held { by } => format!("held {by}"),
-            Ball::Thrown { path, aim, catch_at, read_at, read_err, next_read, to_base, receiver, relay } => {
-                format!("thrown {:?} {:?}", (path.first(), path.last()), (aim, catch_at, read_at, read_err, next_read, to_base, receiver, relay))
+            Ball::Thrown { path, aim, catch_at, read_at, read_err, next_read, to_base, receiver, relay, read_t } => {
+                format!("thrown {:?} {:?}", (path.first(), path.last()), (aim, catch_at, read_at, read_t, read_err, next_read, to_base, receiver, relay))
             }
         }
     }
@@ -15496,7 +15647,7 @@ mod tests {
         let speed = m::sqrt(2.0 * BRAKE * 0.6);
         held_at(&mut sim, B2, base_pos(2) - approach * 0.59);
         let feed_from = Vec3::new(-7.0, 35.0, 0.0);
-        let predicted = sim.pivot_release(B2, feed_from, 0.0, true);
+        let predicted = sim.pivot_release(B2, feed_from, 0.0, Some(approach * speed));
         let fd = &mut sim.f[B2];
         fd.vel = approach * speed;
         fd.pivot = true;
@@ -15509,6 +15660,272 @@ mod tests {
         let world = sim.set_up_for(B2, base_pos(1)).set_s;
         // (The world turns toward first from where he stands, 0.59 m off the bag.)
         assert!((world - predicted).abs() < 0.005, "the world's pivot {world:.4} s, the estimate {predicted:.4} s");
+    }
+
+    /// The input for a man covering second `d` m from the bag along `dir` (from the bag out to
+    /// him), moving `v0` toward it and `w` across, with a runner forced from first when
+    /// `force`: the input, a rules state, and his position and velocity.
+    fn cover_on_the_way(fx: &Fixture, force: bool, d: f64, dir: Vec3, v0: f64, w: f64) -> (LiveInput<'_>, RulesState, [Vec3; 2]) {
+        let mut runners = vec![RunnerIn { id: fx.st.batter, base: 0, speed: 8.2, tau_s: bb_agents::running::LEAGUE_TAU_S }];
+        if force {
+            runners.push(RunnerIn { id: 5, base: 1, speed: 8.2, tau_s: bb_agents::running::LEAGUE_TAU_S });
+        }
+        let inp = input(fx, runners);
+        let side = Vec3::new(-dir.y, dir.x, 0.0);
+        (inp, fx.st.clone(), [base_pos(2) + dir * d, dir * (-v0) + side * w])
+    }
+
+    /// The sim for `cover_on_the_way`: the other fielders standing, the runner from first on
+    /// his way, and a throw from the shortstop's side in the air to the covering man, whose read
+    /// has it at the bag at `feed` (fixed: no re-read).
+    fn cover_sim<'a>(inp: &'a LiveInput<'a>, st: &'a mut RulesState, start: [Vec3; 2], feed: f64) -> Sim<'a> {
+        const B2: usize = 3;
+        const SS: usize = 5;
+        let mut sim = new_sim(inp, st);
+        sim.t = 2.0;
+        if let Some(k) = sim.r.iter().position(|r| r.start == 1) {
+            (sim.r[k].s, sim.r[k].v, sim.r[k].goal, sim.r[k].direction) = (BASE_L + 5.0, 8.2, 2, 1.0);
+        }
+        for fd in sim.f.iter_mut() {
+            (fd.vel, fd.role) = (Vec3::ZERO, Role::Idle);
+            fd.target = fd.pos;
+        }
+        let from = Vec3::new(-9.0, 36.0, 0.0);
+        sim.f[SS].pos = from;
+        let to = base_pos(2);
+        let s = solve_throw(sim.inp.env, THROW_RELEASE_Z, THROW_CATCH_Z, (to - from).norm(), 30.0).expect("in reach");
+        sim.launch_throw(throw_state(from + Vec3::new(0.0, 0.0, THROW_RELEASE_Z), to - from, 30.0, s.elev), to, 2, B2, false);
+        if let Ball::Thrown { read_t, next_read, .. } = &mut sim.ball {
+            (*read_t, *next_read) = (feed, f64::INFINITY);
+        }
+        let fd = &mut sim.f[B2];
+        (fd.pos, fd.vel, fd.role, fd.target) = (start[0], start[1], Role::Cover(2), base_pos(2));
+        sim
+    }
+
+    /// Fix 1 of the owner's saved plays of seed 51001 (play 66; calibration note
+    /// 2026-11-20-saved-plays-51001 §1, agent-models §5.5): a teammate's estimate of when a
+    /// covering man is within receiving reach of the bag (`receiver_ready`) follows the
+    /// movement the world then steps him through, for a man already running at it: braking
+    /// onto the bag with no force there; with a force pending, crossing it when he is late for
+    /// the throw and braking onto it when he is early. Over distances, speeds toward the bag
+    /// and across it, the estimate (`cover_reach`) is the world's time to a tick. Both step the
+    /// same movement with the feed pinned, so this checks that the estimate and the world route
+    /// a cover through one rule (the role and bag gates, the reach counted on the same tick);
+    /// the independent checks are the kinematics of the next test and the held ball of
+    /// `a_feed_held_for_a_cover_coming_across_is_taken_by_him` (Opus dp-cover review P3-2). The
+    /// one bound here against something else: the old estimate, a run from rest at 8 m/s, was
+    /// 0.7 s late for a man 3.9 m out at 6–7 m/s, and the shortstop took the out at first
+    /// instead of the lead runner.
+    #[test]
+    fn the_receiver_estimate_follows_the_covering_mans_movement() {
+        const B2: usize = 3;
+        let fx = fixture(&[(5, 1)]);
+        let dir = Vec3::new(1.0, 0.25, 0.0).normalized();
+        let (mut worst, mut worst_old, mut n) = (0.0f64, 0.0f64, 0);
+        for (force, feed_in) in [(false, 1.0), (true, 0.2), (true, 4.0)] {
+            for &d in &[2.0, 4.0, 7.0, 12.0] {
+                for &v0 in &[0.0, 3.0, 6.0, 7.5] {
+                    for &w in &[0.0, 2.0] {
+                        let feed = 2.0 + feed_in;
+                        let (inp, mut st, start) = cover_on_the_way(&fx, force, d, dir, v0, w);
+                        let mut sim = cover_sim(&inp, &mut st, start, feed);
+                        assert_eq!(sim.force_pending_at(2), force);
+                        let est = sim.cover_reach(B2, 2, feed, RECEIVE_REACH).0 - sim.t;
+                        let old = run_time((d - 0.5).max(0.0), TYPICAL_SPEED, 0.9);
+                        let mut truth = f64::NAN;
+                        for k in 0..600 {
+                            if (base_pos(2) - sim.f[B2].pos).norm() <= RECEIVE_REACH {
+                                truth = k as f64 * DT;
+                                break;
+                            }
+                            sim.move_fielders();
+                            sim.t += DT;
+                        }
+                        assert!(truth.is_finite(), "never there: force {force} d {d} v0 {v0} w {w}");
+                        worst = worst.max((est - truth).abs());
+                        if v0 >= 6.0 && d >= 4.0 {
+                            worst_old = worst_old.max((old - truth).abs());
+                        }
+                        n += 1;
+                    }
+                }
+            }
+        }
+        eprintln!("{n} runs: estimate − world worst {worst:.3} s; the run from rest, for a man running at 6+ m/s from 4+ m: {worst_old:.3} s");
+        assert!(worst <= DT + 1e-9, "estimate − world: worst {worst:.3} s");
+        assert!(worst_old > 0.3, "the old estimate was this far off: {worst_old:.3} s");
+    }
+
+    /// Fix 2 (the note's Q-A, option (b); agent-models §5.3, §5.5): straight at the bag at his
+    /// top speed from 12 m, with a force pending at second. Late for the throw, he crosses the
+    /// bag at about `COVER_CROSS_MPS` and comes within reach when the kinematics of a run at
+    /// top speed braked at `BRAKE` to √(v_c² + 2·BRAKE·reach) say; early for it, he brakes onto
+    /// the bag, stopped on it before the throw, by the same kinematics with v_c = 0. With no
+    /// force on, a late throw changes nothing: he brakes onto the bag (a tag play needs him
+    /// set there). Closed forms by hand: time to reach = (d − reach − (v² − v_r²)/(2·BRAKE))/v
+    /// + (v − v_r)/BRAKE.
+    #[test]
+    fn a_late_cover_crosses_a_force_base_and_an_early_one_sets_his_feet() {
+        const B2: usize = 3;
+        let fx = fixture(&[(5, 1)]);
+        let dir = Vec3::new(1.0, 0.25, 0.0).normalized();
+        let d = 12.0;
+        let run = |force: bool, feed: f64| {
+            let (inp, mut st, start) = cover_on_the_way(&fx, force, d, dir, 0.0, 0.0);
+            let mut sim = cover_sim(&inp, &mut st, start, feed);
+            let v = sim.f[B2].a.speed;
+            sim.f[B2].vel = dir * (-v);
+            let (mut at_reach, mut at_bag, mut speed_at_bag, mut stopped_at) = (f64::NAN, f64::NAN, f64::NAN, f64::NAN);
+            for _ in 0..400 {
+                let gap = (base_pos(2) - sim.f[B2].pos).norm();
+                if at_reach.is_nan() && gap <= RECEIVE_REACH {
+                    at_reach = sim.t - 2.0;
+                }
+                // Passing the bag: the tick he is nearest it.
+                let next = (base_pos(2) - (sim.f[B2].pos + sim.f[B2].vel * DT)).norm();
+                if at_bag.is_nan() && (next > gap || gap < 0.05) {
+                    (at_bag, speed_at_bag) = (sim.t - 2.0, sim.f[B2].vel.norm());
+                }
+                if stopped_at.is_nan() && gap < 0.05 && sim.f[B2].vel.norm() < SETTLE_V {
+                    stopped_at = sim.t - 2.0;
+                }
+                sim.move_fielders();
+                sim.t += DT;
+            }
+            (v, at_reach, at_bag, speed_at_bag, stopped_at)
+        };
+        let closed = |v: f64, v_r: f64| (d - RECEIVE_REACH - (v * v - v_r * v_r) / (2.0 * BRAKE)) / v + (v - v_r) / BRAKE;
+        // Late: the throw is at the bag 0.5 s from now.
+        let (v, reach, bag, speed, _) = run(true, 2.5);
+        let v_r = m::sqrt(COVER_CROSS_MPS * COVER_CROSS_MPS + 2.0 * BRAKE * RECEIVE_REACH);
+        assert!((reach - closed(v, v_r)).abs() < 2.0 * DT, "late: within reach at {reach:.3} s, kinematics {:.3}", closed(v, v_r));
+        assert!((speed - COVER_CROSS_MPS).abs() < 0.3, "late: crosses the bag at {speed:.2} m/s");
+        // Early: the throw is 5 s away.
+        let (v, reach_e, _, _, stopped) = run(true, 7.0);
+        let v_r = m::sqrt(2.0 * BRAKE * RECEIVE_REACH);
+        assert!((reach_e - closed(v, v_r)).abs() < 2.0 * DT, "early: within reach at {reach_e:.3} s, kinematics {:.3}", closed(v, v_r));
+        assert!(stopped < 5.0, "early: stopped on the bag at {stopped:.2} s, before the throw at 5 s");
+        assert!(bag < stopped, "late: on the bag at {bag:.2} s, before the early man is set at {stopped:.2}");
+        // No force: as early.
+        let (_, reach_n, _, _, stopped_n) = run(false, 2.5);
+        assert!((reach_n - reach_e).abs() < 1e-9 && (stopped_n - stopped).abs() < 1e-9, "no force: within reach at {reach_n:.3} s, stopped at {stopped_n:.3}");
+    }
+
+    /// agent-models §5.5: a pivot man who takes second crossing it, moving away from first
+    /// faster than the plant's free speed (3.2 m/s), still owes the plant, and his teammates'
+    /// estimate (`pivot_release` with the velocity he takes the bag at) says the same as the
+    /// world. A second baseman coming across the bag from the first-base side at 4.66 m/s (the
+    /// crossing speed at the touch radius): the plant is (4.66·cos − 3.2)/BRAKE.
+    #[test]
+    fn a_pivot_man_crossing_the_bag_away_from_first_owes_the_plant() {
+        const B2: usize = 3;
+        let fx = fixture(&[(5, 1)]);
+        let inp = input(&fx, vec![RunnerIn { id: fx.st.batter, base: 0, speed: 8.2, tau_s: bb_agents::running::LEAGUE_TAU_S }, RunnerIn { id: 5, base: 1, speed: 8.2, tau_s: bb_agents::running::LEAGUE_TAU_S }]);
+        let mut st = fx.st.clone();
+        let mut sim = new_sim(&inp, &mut st);
+        sim.t = 2.0;
+        let (b, r1) = (sim.r.iter().position(|r| r.start == 0).unwrap(), sim.r.iter().position(|r| r.start == 1).unwrap());
+        (sim.r[b].s, sim.r[b].v, sim.r[b].goal, sim.r[b].direction) = (BASE_L - 8.2 * 3.0, 8.2, 1, 1.0);
+        (sim.r[r1].s, sim.r[r1].v, sim.r[r1].goal, sim.r[r1].direction) = (1.5 * BASE_L, 8.2, 2, 1.0);
+        let approach = Vec3::new(-1.0, 0.15, 0.0).normalized();
+        let speed = m::sqrt(COVER_CROSS_MPS * COVER_CROSS_MPS + 2.0 * BRAKE * BAG_TOUCH_M);
+        held_at(&mut sim, B2, base_pos(2) - approach * (BAG_TOUCH_M - 0.01));
+        let feed_from = Vec3::new(8.0, 42.0, 0.0);
+        let predicted = sim.pivot_release(B2, feed_from, 0.0, Some(approach * speed));
+        let fd = &mut sim.f[B2];
+        fd.vel = approach * speed;
+        fd.pivot = true;
+        fd.pivot_wait_bag = true;
+        fd.face = Some((feed_from - base_pos(2)).normalized());
+        fd.up_at = 2.0;
+        sim.holder_act();
+        let to_first = base_pos(1) - sim.f[B2].pos;
+        let plant = throwing::exchange_footwork_s(sim.f[B2].catch_vel, to_first, false);
+        let away = -approach.dot((base_pos(1) - base_pos(2)).normalized()) * speed;
+        assert!(away > 3.2 && (plant - (away - 3.2) / BRAKE).abs() < 0.01, "moving away at {away:.2} m/s: plant {plant:.3} s");
+        let world = sim.set_up_for(B2, base_pos(1)).set_s;
+        // (The world turns and plants toward first from where he stands, 0.59 m off the bag;
+        // the estimate from the bag. At 4.66 m/s the 1° between them is about 0.01 s of plant.)
+        assert!((world - predicted).abs() < 0.02, "the world's pivot {world:.4} s, the estimate {predicted:.4} s");
+    }
+
+    /// Opus dp-cover review P1-1 and P3-2 (agent-models §5.5): the ball held, a cover coming at
+    /// second from the first-base side, the holder waiting on him. The holder times his throw
+    /// by his own belief of the man (`receiver_ready`, timed to the throw he would make); the
+    /// man moves by his own belief of the throw (`feed_seen`, the holder's visible set-up at
+    /// full arm), which the holder works out as the man does. For starts 4–10 m out at 0–7 m/s:
+    /// the holder's belief of when the man is within receiving reach is within 0.05 s of when
+    /// the world brings him there, and the throw
+    /// the release rule lets go reaches the bag `RECEIVE_MARGIN_S` after that and is taken by
+    /// him, at the bag. (Released to arrive as the man came within reach, the feed passed a
+    /// man crossing from the side out of his reach: seed 12 play 105.)
+    #[test]
+    fn a_feed_held_for_a_cover_coming_across_is_taken_by_him() {
+        const P: usize = 0;
+        const B2: usize = 3;
+        let fx = fixture(&[(5, 1)]);
+        let inp = input(&fx, vec![RunnerIn { id: fx.st.batter, base: 0, speed: 8.2, tau_s: bb_agents::running::LEAGUE_TAU_S }, RunnerIn { id: 5, base: 1, speed: 8.2, tau_s: bb_agents::running::LEAGUE_TAU_S }]);
+        let dir = Vec3::new(1.0, 0.2, 0.0).normalized();
+        let mut worst = 0.0f64;
+        for &d in &[4.0, 7.0, 10.0] {
+            for &v0 in &[0.0, 4.0, 7.0] {
+                let mut st = fx.st.clone();
+                let mut sim = new_sim(&inp, &mut st);
+                sim.t = 1.0;
+                let p_id = sim.f[P].id;
+                sim.emit(Input::BallTouched { t: 0.7, what: Touch::Ground { x: 0.5, y: 12.0 } });
+                sim.emit(Input::GloveSecured { t: 1.0, fielder: p_id, x: 0.7, y: 18.0 });
+                held_at(&mut sim, P, Vec3::new(0.7, 18.0, 0.0));
+                for fd in sim.f.iter_mut() {
+                    (fd.vel, fd.role) = (Vec3::ZERO, Role::Idle);
+                    fd.target = fd.pos;
+                }
+                let fd = &mut sim.f[P];
+                (fd.up_at, fd.set_base, fd.face, fd.catch_vel) = (1.0, fd.a.transfer, None, Vec3::ZERO);
+                (sim.f[B2].pos, sim.f[B2].vel) = (base_pos(2) + dir * d, dir * (-v0));
+                known_doing(&mut sim, B2, Role::Cover(2));
+                let (b, r1) = (sim.r.iter().position(|r| r.start == 0).unwrap(), sim.r.iter().position(|r| r.start == 1).unwrap());
+                // The batter is all but at first: the play is at second.
+                (sim.r[b].s, sim.r[b].v, sim.r[b].goal, sim.r[b].direction) = (BASE_L - 1.0, 8.2, 1, 1.0);
+                (sim.r[r1].s, sim.r[r1].v, sim.r[r1].goal, sim.r[r1].direction) = (BASE_L + 4.0, 8.2, 2, 1.0);
+                let believed = sim.throw_race(P, 2).receiver_at;
+                let believed = if believed > sim.t { believed - RECEIVE_MARGIN_S } else { believed };
+                let (mut reach, mut released) = (f64::NAN, f64::NAN);
+                let mut taken = None;
+                for _ in 0..400 {
+                    if reach.is_nan() && (base_pos(2) - sim.f[B2].pos).norm() <= RECEIVE_REACH {
+                        reach = sim.t;
+                    }
+                    sim.update_thrown();
+                    sim.holder_act();
+                    if released.is_nan() && matches!(sim.ball, Ball::Thrown { .. }) {
+                        released = sim.t;
+                        let Ball::Thrown { to_base, receiver, .. } = sim.ball else { unreachable!() };
+                        assert_eq!((to_base, receiver), (2, B2), "d {d} v0 {v0}: the feed goes to second, to him");
+                    }
+                    for k in [b, r1] {
+                        let goal = sim.r[k].goal as f64 * BASE_L;
+                        sim.r[k].s = (sim.r[k].s + 8.2 * DT).min(goal);
+                    }
+                    world_tick(&mut sim);
+                    if released.is_finite() {
+                        if let Ball::Held { by } = sim.ball {
+                            taken = Some((by, sim.f[by].pos));
+                            break;
+                        }
+                    }
+                }
+                assert!(released.is_finite() && reach.is_finite(), "d {d} v0 {v0}: released {released}, reach {reach}");
+                worst = worst.max((believed - reach).abs());
+                let (by, at) = taken.expect("the feed is taken");
+                assert_eq!(by, B2, "d {d} v0 {v0}: the feed was taken by fielder {by} at {at:?}");
+                assert!((at - base_pos(2)).norm() < RECEIVE_REACH + 0.5, "d {d} v0 {v0}: taken at {at:?}, off the bag");
+            }
+        }
+        // (Timed to the holder's own release, it was 0.12 s early for a man braking onto the
+        // bag; timed to the man's own belief, 0.03 s.)
+        assert!(worst <= 0.05, "the holder's belief of the man's reach against the world: worst {worst:.3} s");
     }
 
     /// agent-models §5.5: the holder's estimate of a double play uses the pivot model the
@@ -15548,7 +15965,7 @@ mod tests {
             if matches!(sim.ball, Ball::Held { by: SS }) {
                 let opts = sim.holder_options(SS);
                 predicted = opts.iter().find(|o| !o.carry && o.base == 2).and_then(|o| {
-                    let pivot = sim.pivot_release(B2, sim.f[SS].pos, o.ball_at, false) - o.ball_at;
+                    let pivot = sim.pivot_release(B2, sim.f[SS].pos, o.ball_at, None) - o.ball_at;
                     o.continuation.map(|c| (pivot, c.1))
                 });
             }
