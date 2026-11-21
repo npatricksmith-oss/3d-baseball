@@ -10,7 +10,7 @@ Each fielder's tracking read (agent-models §5.1) ended at the ball's first boun
 
 - **A seen bounce continues the track.** At the moment he sees the ball touch the ground, (1) its height there is the ground's, a measurement that also corrects the range he misjudged together with the height; (2) it bounces as he believes a bounce goes: his own bounce law, on the surface under his estimate, with the spin he believes it meets the ground with (the first flight's typical spin; after that, what his law left it with at the bounce before), no tilt. The covariance goes through the law's Jacobian, plus what he cannot foresee (the surface's roughness tilt, and 1,000 rpm of spin he cannot see); (3) the learned extra acceleration returns to its prior; (4) his persistent error carries over. Nothing is drawn.
 - **A hop** flies on with the spin his law left it with. **A rolling ball** has its height and vertical speed known, and rolls on by the world's rolling law as set where it began to roll (μ_r·g of that surface, or the even slowing that stops it at the wall); what that law has wrong he learns as an extra level acceleration. **A ball at rest** has its velocity known.
-- **Off the first flight** a velocity look is no better than for a ball going 3 m/s, and a look his estimate cannot explain at all (normalised innovation squared above 50) ends the track. After that, and after a wall carom, a touch, or a new loose ball, he reads the ball by the snapshot read, as before.
+- **Off the first flight** a velocity look is no better than for a ball going 3 m/s. A look his estimate cannot explain at all (normalised innovation squared above 50) makes him let go of that block, position or velocity, re-take it from the look and widen it, and keep the track (§10; it first ended the track). A rolling ball seen moving keeps a small velocity σ. After a wall carom, a touch, or a new loose ball, he reads the ball by the snapshot read, as before.
 - **A fielder with no track at the first bounce** (his reaction ended after it) reads by the snapshot read, as before.
 - **No read below the ground**: a snapshot read of a ball seen rolling takes its height and vertical speed as known; every other read is held at the ball's radius at least. This applies to the runners' reads too.
 
@@ -23,7 +23,7 @@ Each fielder's tracking read (agent-models §5.1) ended at the ball's first boun
 | `ROLL_SLOW_PRIOR` | 0.6 m/s² | Unsourced: grass's μ_r less dirt's, times g |
 | `ROLL_DRIFT` | (0.6/2)² / 2 m²/s⁵ | Half the prior's change over a 2 s roll |
 | `LOOK_VEL_FLOOR_MPS` | 3 m/s | Unsourced: a speed read is a fraction of the speed only while the ball moves well |
-| `TRACK_GATE` | 50 | χ² with 3 degrees of freedom passes 50 once in 10¹⁰ looks of an honest track |
+| `TRACK_GATE` | 50 | χ² with 3 degrees of freedom passes 50 once in 10¹⁰ looks of an honest track (it now lets go of a block, §10) |
 
 The world's roll code moved, unchanged, into `bb_physics::ground::roll_from`, so the fielder's belief and the world use one rolling law.
 
@@ -33,7 +33,7 @@ The world's roll code moved, unchanged, into `bb_physics::ground::roll_from`, so
 
 1. **A fresh track for a ball first seen after it bounced** (and for a new ball off a wall or a glove), started from the look against a wide prior with the persistent error carried. On far balls the persistent error is a fraction of the range, and an estimate started tens of metres short believes that fraction of a *short* range, so it grew sure of a wrong range (a centre fielder 40 m off with σ 1.6 m). The infielders' fresh tracks of hard grounders were honest but rougher than the snapshot read for their first half-second, and ground-ball hits rose from .308 to .334 (runs 4.19 → 4.28 on seeds 0–299). Dropping the fresh tracks put ground-ball hits back (.312 on games 0–95, as main).
 2. **The roll slowing at the surface under his estimate, with a velocity random walk** (`ROLL_DRIFT` as velocity noise). The world keeps a roll's first surface and stops a roll that would reach the wall by an even slowing from its start; a ball that rolled from the dirt onto the grass, or into the wall, slowed other than he believed, and his error²/σ² 2 s after the bounce was 13 for outfielders. Now the rolling law is set as the world sets it, at the roll start, and the rest is learned.
-3. **600 rpm of topspin after every bounce** (the flight model's belief after a bounce). A hopping grounder carries thousands of rpm of topspin from its bounces, so his predicted hops were badly wrong: in games 0–9 the gate ended 122 tracks, 115 of them on hops. With the spin his own bounce law gives carried through, it ended 9, all on rolling balls.
+3. **600 rpm of topspin after every bounce** (the flight model's belief after a bounce). A hopping grounder carries thousands of rpm of topspin from its bounces, so his predicted hops were badly wrong: in games 0–9 the gate ended 122 tracks, 115 of them on hops. With the spin his own bounce law gives carried through, it ended 9 in those games, all on rolling balls; over games 0–199 it was 272, 33 on hops (the Opus review's count; the 10-game sample was too small), which led to the let-go of §10.
 4. **The velocity look's σ in proportion to the ball's speed down to zero.** As a ball came to rest its velocity looks became exact and the filter's gain ran away (one estimate moved 30 m in one look). Hence the floor, and a ball seen at rest has its velocity known.
 
 ## 4. Play 71, before and after
@@ -73,6 +73,7 @@ First play that differs in each of games 0–5 (`zz_facts` on main and on the br
 - **Seed 1 play 44** (81 mph at 8°, a low liner that bounces in front of the shortstop): before, it got through to the centre fielder at 4.9 s and the batter took second; now the shortstop, still tracking it after its hop, takes it at 1.93 s: a single.
 - **Seed 4 play 1** (104 mph grounder through the right side to the wall): the right fielder picks it up at the same moment (6.64 s), throws 0.03 s sooner, and the batter, who before ran to second and on to third, now stops at first.
 - **Seeds 0, 2, 3, 5** (a chopper to second, grounders to the infield and the outfield): the same plays, the throw released 0.0–0.03 s sooner or the catch a few centimetres away. Nothing a real fielder would not do.
+- **Infield ground balls with no track** (they bounced before anyone reacted, so every read is the snapshot read): only the below-ground clamp changes them. On game seeds 200, 201 and 205 the first play to differ is such a ball, and the infielder's throw leaves 0.05–0.07 s *later*; on 203 the catch moves 0.4 m (Opus review P3-5). The clamp moves snapshot-read plays by a few hundredths of a second either way; ground-ball hits do not move.
 - **Seed 65147 play 10** (the TASKS depth-read item): a chopper that bounces at 0.45 s, before any outfielder has reacted, so none has a track and they read it by the snapshot read as before (the right fielder's first read 37 m off). Not covered (§7).
 
 ## 7. Measurements (standard run)
@@ -95,7 +96,7 @@ First play that differs in each of games 0–5 (`zz_facts` on main and on the br
 | rules warnings | none | none | |
 | ms per game per core | 4,574 [4,726] | 4,474 [4,594] | |
 
-**Causes.** Outfielders who keep their read across the bounce cut balls off sooner: a fifth of the triples (and a third of the ground-ball triples) become singles, which is why singles rise by 125 and doubles stay put. Runs fall 0.10 [0.17]. Ground-ball hits do not move (the infield read across a bounce was already good from the snapshot read at those distances). Second to home on a single falls 1.7 points, within the noise of 500 chances. The direction is the diagnosis's expected one.
+**Causes.** Outfielders who keep their read across the bounce cut balls off sooner: a fifth of the triples (and a third of the ground-ball triples) become singles, which is why singles rise by 125 and doubles stay put. Runs fall 0.10 [0.17]. Ground-ball hits do not move (the infield read across a bounce was already good from the snapshot read at those distances). The below-ground clamp alone moves plays read by the snapshot read (infield balls that bounced before anyone reacted) by a few hundredths of a second either way (§6). Second to home on a single falls 1.7 points, within the noise of 500 chances. The direction is the diagnosis's expected one. These are the figures of the first reviewed build; the final build's are in §10.
 
 **Unexplained:** nothing beyond the noise. Triples remain far above MLB's (1.4 a game): the read is no longer the cause in play 71; the in-flight misjudgment and the ground-ball dive are next.
 
@@ -109,5 +110,58 @@ First play that differs in each of games 0–5 (`zz_facts` on main and on the br
 
 - **The depth read of a ball first seen on the ground** (TASKS §2, seed 65147 play 10) is not covered: a fielder with no track at the first bounce keeps the snapshot read. A track started there needs the persistent error's range-proportional size handled other than by linearising at the estimate (it diverges on far balls), and its infield first half-second must not be worse than the snapshot read's.
 - **Play 71 is still a triple**: the right fielder is a step short of a ball rolling 1.9 m from him and does not dive at it. Whether an outfielder should dive at a ground ball going by is its own question.
-- **A wall carom or a touch** still ends the track (the snapshot read after it); a track that the gate ended likewise.
+- **A wall carom or a touch** still ends the track (the snapshot read after it). (The gate no longer ends a track, §10.)
 - **The world's roll keeps its first surface** (physics-spec §9.2 says to switch at the dirt–grass edge; not built, ledger §5). The fielder's belief follows the world.
+
+## 10. Worker follow-up to the Opus review (2026-11-21)
+
+[Review](../reviews/2026-11-21-opus-bounce-track-review.md): no P1, one P2, six P3s. Fixed on this branch, final sim `5ab0301`:
+
+**P2-1, the gate ended good tracks.** On the reviewed build the gate ended 272 tracks in games 0–199 (33 on hops), mostly with the position still good and only the speed wrong, and the snapshot read that took over was sometimes far worse (a ball at rest against the wall read 19 m beyond it, seed 4 play 19; 93 m at worst). A fielder watching the ball does not lose it like that. Now a look his estimate cannot explain makes him **let go of that block and keep the track** (`Track::let_go`, agent-models §5.1 *The gate*): the block (velocity, or position) is taken again from the look itself, uncorrelated with the rest, its variance the look's squared error; the learned acceleration goes back to its prior; a velocity let go also widens his position by what that wrong velocity may have carried it since his last look (the error × `LOOK_S`). Then the look is taken again. Why the look's own value and not only a widened P (the reviewer's other suggestion): a velocity look's σ is a fraction of the speed, so linearised at a stopped estimate it was 0.024 m/s against a world draw of 0.2 m/s on a ball rolling at 25 m/s; widened about the stopped estimate, the look still failed on its vertical part (normalised error 52–123), and the track was dropped. Re-taken from the look, its σ is worked out at the speed the look shows. And why the position widening: a velocity that was wrong for a look's interval has carried the position wrong by as much, which the position block did not yet know.
+
+The same probe on games 0–199 (`zz_gate`, kept in `sim/target/codex-probes/bounce/`; every fielder who was tracking the ball at its first bounce; his worst read error along his line of sight in the 3 s after it):
+
+| | Reviewed build `fe9d5a0` | Final build `5ab0301` |
+|---|---|---|
+| Gate events | 272 track ends (239 rolling, 33 hops), 111 plays | 801 let-gos (766 velocities rolling, 34 hops, 1 position), 107 plays, 248 fielders' plays; **0 tracks ended** |
+| Worst read, fielders' plays with a gate: median / p90 / max | 5.45 / 13.8 / **93.4 m** | **1.63 / 5.0 / 14.2 m** |
+| … of them over 5 m | 144 of 272 | 25 of 248, all 80–100 m from the ball |
+| Worst read, every tracked fielder's play: p99 / max | 12.6 / 93.4 m | 11.9 / 46.0 m |
+| Seed 4 play 19, left fielder, the ball at rest against the wall | snapshot read 19 m beyond it | track 1.0–1.4 m off, σ 0.3–0.6 m |
+
+**P3-2, a stopped estimate could not restart.** A rolling ball he sees moving now keeps a level velocity σ of at least a look's at the floor speed (`read_vel_frac`·`LOOK_VEL_FLOOR_MPS`, 0.12 m/s at grade 50); only a ball seen at rest has its velocity known. Test: `a_wrong_rolling_estimate_is_let_go_of_and_the_ball_kept`.
+
+**The play-71 test** asked that the ball pass within 2.5 m of the right fielder (1.9–2.1 m measured), too close to the measurement. It now asks 4 m: room for changes elsewhere in his movement, and it still catches the old turn for the wall, which left him 5.7 m from the ball; the read checks (no worse after the bounce than before, within 1 m by 3.3 s) are unchanged.
+
+**P3-5** (§6, §7, ledger), **P3-6** (`live.rs` comments: the loop's looks, `Phase::Hop`, `ROLL_DRIFT`'s own doc; agent-models §5.1's 600 rpm and "until someone holds the ball" lines, the gate's counts) and **P3-3's figures** are corrected. Honesty on two seed sets on the final build (every fielder tracking at the first bounce; RMS error, RMS σ, mean error²/σ² along his line of sight):
+
+| From the first bounce | Outfielders, games 0–59 | Outfielders, games 300–359 | Infielders, 0–59 | Infielders, 300–359 |
+|---|---|---|---|---|
+| −0.05 s (in flight) | 1.44, 1.09, 1.42 | 1.42, 1.09, 1.39 | 0.22, 0.22, 0.96 | 0.22, 0.22, 0.94 |
+| +0.05 s | 1.24, 0.97, 1.38 | 1.32, 1.00, 1.43 | 0.21, 0.21, 0.96 | 0.22, 0.21, 0.96 |
+| +0.5 s | 1.27, 0.99, 1.37 | 1.37, 1.02, 1.43 | 0.22, 0.21, 1.02 | 0.22, 0.22, 1.00 |
+| +1 s | 1.35, 1.01, 1.42 | 1.47, 1.03, 1.55 | 0.24, 0.23, 1.03 | 0.24, 0.23, 1.01 |
+| +2 s | 1.30, 0.87, 1.47 | 1.38, 0.86, 1.61 | 0.27, 0.25, 1.17 | 0.27, 0.25, 1.10 |
+
+So the infield read after a bounce is honest (0.94–1.17); the outfield read is 1.4–1.6, about 20–25% over-confident in σ, the in-flight filter's own over-confidence (1.39–1.42 just before the bounce) carried on, and its error does not fall over 2 s for these fielders as a whole. §5's figures (games 0–59, reviewed build) stand for that build only. Of outfielders, 1,244 of 2,172 (games 0–59) and 1,290 of 2,235 (300–359) have an error just after the bounce no larger than just before (+5 cm): over 40% grow, though the RMS falls. Deferred (TASKS): that over-confidence, P3-1 (`BOUNCE_SPIN_RPM` unsourced; the contact model's spin spread would source it), P3-4 (the roll's â drift on both level axes, an allowance across the roll).
+
+**Final build, standard run** (300 games, `--seed 0` [`--seed 1000`]; doubles, triples and extra bases on game seeds 0–299 by `zz_bounce_stats`), main `519842c` → reviewed build `fe9d5a0` → final `5ab0301`:
+
+| | main | reviewed | **final** | MLB |
+|---|---|---|---|---|
+| runs / team-game | 4.19 [4.59] | 4.09 [4.42] | **4.08 [4.44]** | 4.39 |
+| GB hits | .308 [.321] | .309 [.316] | .310 [.316] | about .245 |
+| LD / FB / PU hits | .672 / .102 / .005 [.673 / .098 / .007] | .671 / .103 / .005 [.664 / .101 / .007] | .671 / .103 / .005 [.665 / .100 / .007] | |
+| HR/PA, K%, BB% | 2.73%, 22.5, 8.1 [2.82%, 22.3, 8.5] | 2.74%, 22.6, 8.0 [2.93%, 22.2, 8.4] | 2.73%, 22.6, 8.0 [2.95%, 22.2, 8.4] | |
+| reached on BIP | 33.7% [34.5%] | 33.8% [34.0%] | 33.8% [34.0%] | |
+| singles / doubles / triples | 2,965 / 1,144 / 521 | 3,090 / 1,140 / 424 | 3,089 / 1,131 / **429** | |
+| triples a game | 1.74 | 1.41 | **1.43** | about 0.3 |
+| ground-ball triples | 214 | 141 | 141 | |
+| first to third on a single | .343 | .343 | .340 | .317 |
+| second to home on a single | .552 | .535 | .534 | .617 |
+| first to home on a double | .795 | .786 | .782 | .38 |
+| rules warnings | none | none | none | |
+| ms per game per core | 4,574 [4,726] | 4,474 [4,594] | 4,540 [4,485] | |
+
+The let-go changes nothing the game totals can see: every figure moves within a point of the reviewed build. Nothing is unexplained.
+
