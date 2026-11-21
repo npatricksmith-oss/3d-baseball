@@ -1,4 +1,5 @@
 #include "BbDirector.h"
+#include "BbBaseMap.h"
 #include <limits>
 #include "BbFigure.h"
 #include "BbFrame.h"
@@ -382,6 +383,12 @@ void ABbDirector::BeginPlay()
 			FPlatformMisc::RequestExitWithStatus(false, (uint8)RunSavedPlayCheck(Seed, bCheckFile, CheckFile));
 			return;
 		}
+	}
+	if (FParse::Param(Cmd, TEXT("BbBaseMapCheck")))
+	{
+		bGameOver = true;
+		FPlatformMisc::RequestExitWithStatus(false, (uint8)RunBaseMapCheck(Seed));
+		return;
 	}
 	// -BbSavedPlay=<toml>: an empty value is still saved mode (never a quiet live game): the
 	// viewer then says what is missing. Argument present, so the play comes from the file alone.
@@ -911,6 +918,104 @@ void ABbDirector::SavedBoard(bool bKnown, const BbPlayInfo& Src, int32 Inning, B
 	}
 	Out.teams[0].totals.r = Src.away_runs;
 	Out.teams[1].totals.r = Src.home_runs;
+}
+
+int32 ABbDirector::RunBaseMapCheck(uint64 Seed)
+{
+	FBbSim Game;
+	if (!Game.Start(SimLibPath, Seed))
+	{
+		UE_LOG(LogBb, Error, TEXT("BB_BASE_MAP_CHECK FAIL: could not start the game sim"));
+		return 1;
+	}
+	int32 Failures = 0, Cases = 0, Plays = 0, WithRunners = 0, Moved = 0, Outs = 0, Scored = 0;
+	auto Expect = [&](bool bOk, const FString& Why)
+	{
+		++Cases;
+		if (!bOk && ++Failures <= 20)
+		{
+			UE_LOG(LogBb, Error, TEXT("BB_BASE_MAP_CHECK FAIL: %s"), *Why);
+		}
+	};
+	const BbPark& Ground = Game.Park();
+	uint8 Prev = 0;
+	uint8 PrevInning = 1, PrevTop = 1;
+	bool bPrevEndedHalf = false;
+	for (int32 I = 0; I < 400; ++I)
+	{
+		FBbPlay Play = Game.Next();
+		if (!Play.bValid)
+		{
+			break;
+		}
+		const BbPlayInfo& Info = Play.Info;
+		// The runners on before the pitch: what the last play left, none in a new half inning.
+		const uint8 OnBefore = (I == 0 || bPrevEndedHalf) ? 0 : Prev;
+		const bool bEndsHalf = Info.inning != PrevInning || Info.top != PrevTop;
+		++Plays;
+		// The sim's tick for the samples: every 1/30 s, and the very end.
+		uint8 Last = 0xFF;
+		int32 Changes = 0, MaxLit = 0;
+		uint8 Ever = 0;
+		for (int32 K = 0;; ++K)
+		{
+			const float T = FMath::Min(K * 0.0333333f, Info.duration_s);
+			BbFrame F{};
+			if (!Game.Sample(Play, T, F))
+			{
+				Expect(false, FString::Printf(TEXT("play %u: no frame at t=%.3f"), Info.play_index, T));
+				break;
+			}
+			const uint8 Lit = BbBaseMap::Occupied(F, Ground);
+			// Independent of the function: no more bases lit than runners in the frame.
+			int32 NRunners = 0;
+			for (uint32 A = 0; A < F.n_actors; ++A)
+			{
+				NRunners += (F.actors[A].agent & 0x80) ? 0 : 1;
+			}
+			const int32 NLit = (Lit & 1) + ((Lit >> 1) & 1) + ((Lit >> 2) & 1);
+			MaxLit = FMath::Max(MaxLit, NLit);
+			Expect(NLit <= NRunners, FString::Printf(TEXT("play %u t=%.2f: %d bases lit with %d runners"), Info.play_index, T, NLit, NRunners));
+			if (K == 0 && I >= 22 && I <= 24)
+			{
+				UE_LOG(LogBb, Display, TEXT("PROBE play %d before=%u bases %.2f,%.2f %.2f,%.2f %.2f,%.2f n=%u"), I, OnBefore, Ground.bases[0][0], Ground.bases[0][1], Ground.bases[1][0], Ground.bases[1][1], Ground.bases[2][0], Ground.bases[2][1], F.n_actors);
+				for (uint32 A = 0; A < F.n_actors; ++A)
+				{
+					UE_LOG(LogBb, Display, TEXT("PROBE  agent %x at %.2f %.2f"), F.actors[A].agent, F.actors[A].pos[0], F.actors[A].pos[1]);
+				}
+			}
+			if (K == 0)
+			{
+				Expect(Lit == OnBefore, FString::Printf(TEXT("play %u: at the pitch the map shows %u, the runners on were %u"), Info.play_index, Lit, OnBefore));
+			}
+			if (Lit != Last)
+			{
+				++Changes;
+				Last = Lit;
+			}
+			Ever |= Lit;
+			if (T >= Info.duration_s)
+			{
+				Expect(Lit == (Info.bases & 7), FString::Printf(TEXT("play %u (%hs): at the end the map shows %u, the result is %u"), Info.play_index, Info.summary, Lit, Info.bases & 7));
+				break;
+			}
+		}
+		if (OnBefore != 0 || (Info.bases & 7) != 0)
+		{
+			++WithRunners;
+			Moved += Changes > 1 ? 1 : 0;
+		}
+		Outs += Info.n_calls > 0 && Info.exit_velocity_mps > 0.f ? 1 : 0;
+		Scored += Info.home_runs + Info.away_runs > 0 ? 1 : 0;
+		UE_LOG(LogBb, Verbose, TEXT("BB_BASE_MAP play=%u before=%u after=%u changes=%d maxlit=%d %hs"), Info.play_index, OnBefore, Info.bases & 7, Changes, MaxLit, Info.summary);
+		bPrevEndedHalf = bEndsHalf;
+		PrevInning = Info.inning;
+		PrevTop = Info.top;
+		Prev = Info.bases & 7;
+		Game.Release(Play);
+	}
+	UE_LOG(LogBb, Display, TEXT("BB_BASE_MAP_CHECK %s plays=%d with_runners=%d map_moved_in=%d cases=%d failures=%d"), Failures == 0 ? TEXT("PASS") : TEXT("FAILED"), Plays, WithRunners, Moved, Cases, Failures);
+	return Failures == 0 ? 0 : 1;
 }
 
 int32 ABbDirector::RunSavedPlayCheck(uint64 Seed, bool bFileOnly, const FString& File)

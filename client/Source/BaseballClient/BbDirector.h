@@ -58,6 +58,8 @@ class UMaterialInterface;
  *               -BbSavedPlay=<path to .toml> (play back a saved timeline with no re-simulation)
  *               -BbSavedPlayCheck (headless check of saving and reopening plays through the viewer's own loader;
  *               exit status 1 if anything fails; -BbSavedPlayCheckFile=<toml> only tries to open that file)
+ *               -BbBaseMapCheck (headless check that the score bug's base map follows the timeline's runners
+ *               and ends on the play's recorded result; exit status 1 if anything fails)
  *               -BbClipSpeeds (log the ground speed each gait clip is animated for as BB_CLIP)
  */
 UCLASS()
@@ -666,6 +668,10 @@ private:
 	 *  runs from BeginPlay on sims of its own, through BbSavePlay::BeginView/FinishView, the
 	 *  loading the viewer itself uses. Returns the exit status. */
 	int32 RunSavedPlayCheck(uint64 Seed, bool bFileOnly, const FString& File);
+	/** -BbBaseMapCheck: plays a game headlessly and, for every play, reads the score bug's base
+	 *  map (BbBaseMap::Occupied) from the sampled timeline across the whole play. Returns the
+	 *  exit status; see the .cpp for what is compared with what. */
+	int32 RunBaseMapCheck(uint64 Seed);
 	/** The board a saved play's park scoreboard shows, from what the save recorded. */
 	void SavedBoard(bool bKnown, const BbPlayInfo& Src, int32 Inning, BbBoxScore& Box, bool& bHitsKnown) const;
 	/** -BbReplayAt=<s>: seconds of real time after which R is pressed twice and, 6 s later, F
