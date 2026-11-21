@@ -368,6 +368,8 @@ struct ContactLook {
     t: f64,
     view: f64,
     contact_since: Option<f64>,
+    /// He sees it rolling on the ground (agent-models §5.1: no read below the ground).
+    rolling: bool,
 }
 
 impl ContactLook {
@@ -389,6 +391,7 @@ impl ContactLook {
             let (gain, _, _) = plate_weighing(los, sp, sv, s);
             r += gain * (position_from_plate(&env, RUNNER_PLATE_PRIOR, v, w, s) - r);
         }
+        let (r, v) = on_or_above_ground((r, v), self.rolling, env.ball.radius);
         batted_path_dt(&env, field, BallState { r, v, w }, self.t, AGENT_DT, |_, _| (0.0, 0.0))
     }
 }
@@ -628,6 +631,29 @@ const CURVE_PRIOR: f64 = 2.0 * PLATE_SPIN_M;
 const CURVE_DRIFT: f64 = CURVE_PRIOR * CURVE_PRIOR / 24.0;
 /// How well he knows where the ball was hit (he saw it), σ per axis, m [E].
 const TRACK_CONTACT_M: f64 = 0.3;
+/// A seen bounce (agent-models §5.1, across the bounces): the σ of the ball's height at the
+/// moment he sees it touch the ground, m [E, numerical: the height is the ground's; the σ only
+/// keeps the update well conditioned].
+const BOUNCE_Z_M: f64 = 0.01;
+/// A seen bounce: the σ of the spin he cannot see about each level axis as the ball meets the
+/// ground, rpm [E, unsourced: about half a liner's typical backspin; checked by the honesty
+/// measurement of docs/calibration/2026-11-21-bounce-track.md].
+const BOUNCE_SPIN_RPM: f64 = 1000.0;
+/// A rolling ball (agent-models §5.1): how far its slowing may be off the rolling law he
+/// believes, as an extra level acceleration he learns from his looks: its prior σ per level
+/// axis, m/s² [E, unsourced: grass's μ_r less dirt's times g, 0.6 m/s², the difference a
+/// roll's surface makes; a ball stopped by the wall slows by about as much more].
+const ROLL_SLOW_PRIOR: f64 = 0.6;
+/// After a bounce (agent-models §5.1, across the bounces), a look reads a ball's velocity no
+/// better than that of a ball going this fast, m/s [E, unsourced: a speed read is a fraction
+/// of the speed only while the ball is moving well; without the floor a ball coming to rest
+/// was read exactly, and the filter's gain on it ran away].
+const LOOK_VEL_FLOOR_MPS: f64 = 3.0;
+/// A rolling ball (agent-models §5.1): the drift of the learned extra acceleration, white noise
+/// intensity per level axis, m²/s⁵: (`ROLL_SLOW_PRIOR`/2)² over a 2 s roll [E]. Put on both
+/// level axes, though only its part along the roll moves the ball (an allowance across, about
+/// 0.3 m of position σ over 2 s).
+const ROLL_DRIFT: f64 = ROLL_SLOW_PRIOR * ROLL_SLOW_PRIOR / 8.0;
 /// The persistent part of a look's error (agent-models §5.1): this fraction of the play's
 /// fixed draws at the snapshot read's σ, on every look (a misjudged angle and fraction of the
 /// range); the rest is fresh each look. The filter carries it as a state. Refitted with that
@@ -894,9 +920,27 @@ struct Track {
     x: [Vec3; 3],
     b: [f64; 4],
     p: [[f64; TN]; TN],
-    /// Looks taken so far.
+    /// Looks taken so far in this track.
     looks: u32,
     next_look: f64,
+    /// What he sees the ball doing (agent-models §5.1, across the bounces).
+    phase: Phase,
+    /// Rolling: how fast he believes it slows, m/s² (μ_r·g of the surface it began to roll on).
+    roll_decel: f64,
+    /// After a bounce: the spin he believes the bounce left it with (his own bounce law).
+    w: Vec3,
+}
+
+/// The phase of a free ball a fielder's track follows (agent-models §5.1, across the bounces):
+/// seen, as the ball meets the ground and rolls.
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+enum Phase {
+    /// Off the bat, until its first bounce or a wall.
+    First,
+    /// In the air after a bounce (a wall or a glove ends the track).
+    Hop,
+    /// Rolling on the ground: its height and vertical velocity known.
+    Roll,
 }
 
 fn comps(v: Vec3) -> [f64; 3] {
@@ -921,7 +965,130 @@ impl Track {
         for k in 0..4 {
             p[TB + k][TB + k] = 1.0;
         }
-        Track { ball, t, x, b: [0.0; 4], p, looks: 0, next_look: t }
+        Track { ball, t, x, b: [0.0; 4], p, looks: 0, next_look: t, phase: Phase::First, roll_decel: 0.0, w: Vec3::ZERO }
+    }
+
+    /// A rolling ball (agent-models §5.1): its height is the ball's radius and its vertical
+    /// velocity zero, both known; so is the vertical part of the learned acceleration.
+    fn pin_ground(&mut self, radius: f64) {
+        self.x[0].z = radius;
+        self.x[1].z = 0.0;
+        self.x[2].z = 0.0;
+        for k in [2, 5, 8] {
+            for j in 0..TN {
+                self.p[k][j] = 0.0;
+                self.p[j][k] = 0.0;
+            }
+        }
+    }
+
+    /// A ball he sees at rest (agent-models §5.1, rolling): its velocity is zero, known, and
+    /// so is the learned acceleration.
+    fn at_rest(&mut self) {
+        self.x[1] = Vec3::ZERO;
+        self.x[2] = Vec3::ZERO;
+        for k in 3..9 {
+            for j in 0..TN {
+                self.p[k][j] = 0.0;
+                self.p[j][k] = 0.0;
+            }
+        }
+    }
+
+    /// The track at a bounce he sees at its time `self.t` (agent-models §5.1, across the
+    /// bounces): the height at the touch is the ground's (a measurement), then the bounce as he
+    /// believes it goes (his bounce law on the surface under his estimate, the spin he believes
+    /// it has, no tilt), its covariance through the law's Jacobian in the incoming velocity
+    /// plus what he cannot foresee of a bounce (the surface's tilt σ, `BOUNCE_SPIN_RPM`); the
+    /// learned acceleration back at its prior; his persistent error carried; the spin his law
+    /// leaves it with kept for the next bounce (`w`). `first`: the ball's first bounce (it
+    /// comes off its first flight with the typical spin); `rolls`: he sees it roll from here,
+    /// and the rolling law is set (`roll_decel`).
+    fn bounce(&mut self, env: &FlightEnv, field: &Field, t_contact: f64, first: bool, rolls: bool) {
+        let radius = env.ball.radius;
+        // (1) On the ground at the touch: a measurement of the height.
+        let s = self.p[2][2] + BOUNCE_Z_M * BOUNCE_Z_M;
+        let innov = radius - self.x[0].z;
+        let k: [f64; TN] = core::array::from_fn(|i| self.p[i][2] / s);
+        for (bi, xv) in self.x.iter_mut().enumerate() {
+            *xv = *xv + Vec3::new(k[3 * bi], k[3 * bi + 1], k[3 * bi + 2]) * innov;
+        }
+        for (j, bv) in self.b.iter_mut().enumerate() {
+            *bv += k[TB + j] * innov;
+        }
+        let col: [f64; TN] = core::array::from_fn(|i| self.p[i][2]);
+        for i in 0..TN {
+            for j in 0..TN {
+                self.p[i][j] -= k[i] * col[j];
+            }
+        }
+        sym_n(&mut self.p);
+        // (2) The bounce as he believes it goes.
+        let (r, v) = (self.x[0], self.x[1]);
+        // The spin he believes it meets the ground with: the first flight's typical spin, or
+        // what his own bounce law left it with at the bounce before.
+        let w = if first { believed_flight(env, v, Some(self.t - t_contact)).1 } else { self.w };
+        let surf = field.surface_at(r.x, r.y);
+        let on = Vec3::new(r.x, r.y, radius);
+        let out = |v: Vec3, w: Vec3, tilt: (f64, f64)| bb_physics::ground::bounce(env, BallState { r: on, v, w }, &surf, tilt).v;
+        let v_out = out(v, w, (0.0, 0.0));
+        let dv = 1e-3;
+        let unit = [Vec3::new(1.0, 0.0, 0.0), Vec3::new(0.0, 1.0, 0.0), Vec3::new(0.0, 0.0, 1.0)];
+        let jv: [Vec3; 3] = core::array::from_fn(|c| (out(v + unit[c] * dv, w, (0.0, 0.0)) - out(v - unit[c] * dv, w, (0.0, 0.0))) * (0.5 / dv));
+        let dt = 1e-4;
+        let jt = [
+            (out(v, w, (dt, 0.0)) - out(v, w, (-dt, 0.0))) * (0.5 / dt),
+            (out(v, w, (0.0, dt)) - out(v, w, (0.0, -dt))) * (0.5 / dt),
+        ];
+        let dw = 1.0;
+        let jw = [
+            (out(v, w + unit[0] * dw, (0.0, 0.0)) - out(v, w - unit[0] * dw, (0.0, 0.0))) * (0.5 / dw),
+            (out(v, w + unit[1] * dw, (0.0, 0.0)) - out(v, w - unit[1] * dw, (0.0, 0.0))) * (0.5 / dw),
+        ];
+        // The transform: level position kept, height set, velocity through the law, the
+        // learned acceleration dropped (its prior is put back below), his error kept.
+        let mut f = [[0.0; TN]; TN];
+        f[0][0] = 1.0;
+        f[1][1] = 1.0;
+        for ax in 0..3 {
+            for c in 0..3 {
+                f[3 + ax][3 + c] = comps(jv[c])[ax];
+            }
+        }
+        for k in TB..TN {
+            f[k][k] = 1.0;
+        }
+        let fp: [[f64; TN]; TN] = core::array::from_fn(|i| core::array::from_fn(|j| (0..TN).map(|m_| f[i][m_] * self.p[m_][j]).sum()));
+        let mut np: [[f64; TN]; TN] = core::array::from_fn(|i| core::array::from_fn(|j| (0..TN).map(|m_| fp[i][m_] * f[j][m_]).sum()));
+        let sw = BOUNCE_SPIN_RPM * core::f64::consts::PI / 30.0;
+        for ax in 0..3 {
+            for bx in 0..3 {
+                let q = surf.roughness * surf.roughness * (comps(jt[0])[ax] * comps(jt[0])[bx] + comps(jt[1])[ax] * comps(jt[1])[bx])
+                    + sw * sw * (comps(jw[0])[ax] * comps(jw[0])[bx] + comps(jw[1])[ax] * comps(jw[1])[bx]);
+                np[3 + ax][3 + bx] += q;
+            }
+        }
+        for k in 6..9 {
+            np[k][k] = CURVE_PRIOR * CURVE_PRIOR;
+        }
+        sym_n(&mut np);
+        self.p = np;
+        self.x = [on, v_out, Vec3::ZERO];
+        self.w = bb_physics::ground::bounce(env, BallState { r: on, v, w }, &surf, (0.0, 0.0)).w;
+        self.phase = if rolls { Phase::Roll } else { Phase::Hop };
+        if rolls {
+            // The world's rolling law, set where it begins to roll: mu_r*g of the surface there,
+            // or, if it would roll into the wall, the even slowing that stops it there.
+            let vh = Vec3::new(v_out.x, v_out.y, 0.0);
+            self.roll_decel = match bb_physics::ground::roll_from(field, on, vh, surf.mu_r * bb_math::units::G, self.t, radius).first() {
+                Some(bb_physics::ground::Segment::Roll { decel, .. }) => *decel,
+                _ => surf.mu_r * bb_math::units::G,
+            };
+            for k in 6..8 {
+                self.p[k][k] = ROLL_SLOW_PRIOR * ROLL_SLOW_PRIOR;
+            }
+            self.pin_ground(radius);
+        }
     }
 
     fn r(&self) -> Vec3 {
@@ -942,13 +1109,18 @@ impl Track {
     /// it, `believed_flight`) plus the extra acceleration he has learned, and its covariance:
     /// F = [[I, h, h²/2], [0, I, h], [0, 0, I]] on the ball's part, that acceleration drifting
     /// as white noise of intensity `CURVE_DRIFT`, and his persistent error unchanged
-    /// (agent-models §5.1).
+    /// (agent-models §5.1). A rolling ball rolls on as he believes a ball rolls
+    /// ([`Track::roll_to`]).
     fn run_to(&self, env: &FlightEnv, t: f64, t_contact: f64) -> Track {
+        if self.phase == Phase::Roll {
+            return self.roll_to(t);
+        }
         let mut tr = *self;
         while t - tr.t > 1e-9 {
             let h = (t - tr.t).min(AGENT_DT);
             let [r, v, a] = tr.x;
-            let (env1, w) = believed_flight(env, v, Some(tr.t - t_contact));
+            let (env1, w) = believed_flight(env, v, (tr.phase == Phase::First).then_some(tr.t - t_contact));
+            let w = if tr.phase == Phase::Hop { tr.w } else { w };
             let st = FlightEnv { extra: a, ..env1 }.step(&BallState { r, v, w }, h);
             tr.x = [st.r, st.v, a];
             let p = &mut tr.p;
@@ -986,6 +1158,84 @@ impl Track {
         tr
     }
 
+    /// A rolling ball's estimate run on to `t` (agent-models §5.1, rolling): slowing along its
+    /// way by the world's rolling law as he believes it was set where it began to roll
+    /// (`roll_decel`: μ_r·g of the surface there, or the even slowing that stops it at the wall),
+    /// less the learned extra acceleration along it ([`roll_slowing`]), until it stops; no
+    /// gravity. P by the step's Jacobian in the level position, velocity and learned
+    /// acceleration (central differences: a ball that stops within a step no longer moves with
+    /// them), the learned acceleration drifting as white noise of intensity `ROLL_DRIFT`.
+    fn roll_to(&self, t: f64) -> Track {
+        // The level state: x, y, vx, vy, ax, ay.
+        const IX: [usize; 6] = [0, 1, 3, 4, 6, 7];
+        let mut tr = *self;
+        // One step of the roll.
+        let open = |s: [f64; 6], h: f64| -> [f64; 6] {
+            let (v, a) = (Vec3::new(s[2], s[3], 0.0), Vec3::new(s[4], s[5], 0.0));
+            let sp = v.norm();
+            if sp <= 0.0 {
+                return s;
+            }
+            let decel = roll_slowing(tr.roll_decel, v, a);
+            let go = h.min(sp / decel);
+            let (dir, d) = (v * (1.0 / sp), sp * go - 0.5 * decel * go * go);
+            let vn = dir * (sp - decel * go).max(0.0);
+            [s[0] + dir.x * d, s[1] + dir.y * d, vn.x, vn.y, s[4], s[5]]
+        };
+        while t - tr.t > 1e-9 {
+            let h = (t - tr.t).min(AGENT_DT);
+            let s0: [f64; 6] = core::array::from_fn(|k| comps(tr.x[IX[k] / 3])[IX[k] % 3]);
+            let s1 = open(s0, h);
+            let mut f = [[0.0; 6]; 6];
+            for c in 0..6 {
+                let d = 1e-4;
+                let (mut sp, mut sm) = (s0, s0);
+                sp[c] += d;
+                sm[c] -= d;
+                let (gp, gm) = (open(sp, h), open(sm, h));
+                for (row, fr) in f.iter_mut().enumerate() {
+                    fr[c] = (gp[row] - gm[row]) / (2.0 * d);
+                }
+            }
+            for (k, &ix) in IX.iter().enumerate() {
+                let mut v = comps(tr.x[ix / 3]);
+                v[ix % 3] = s1[k];
+                tr.x[ix / 3] = Vec3::new(v[0], v[1], v[2]);
+            }
+            let p = tr.p;
+            // F P over the level rows, then (F P) Fᵀ over the level columns.
+            let mut fp = p;
+            for (k, &i) in IX.iter().enumerate() {
+                for c in 0..TN {
+                    fp[i][c] = (0..6).map(|m_| f[k][m_] * p[IX[m_]][c]).sum();
+                }
+            }
+            let mut np = fp;
+            for row in 0..TN {
+                for (k, &j) in IX.iter().enumerate() {
+                    np[row][j] = (0..6).map(|m_| fp[row][IX[m_]] * f[k][m_]).sum();
+                }
+            }
+            let q = ROLL_DRIFT;
+            let qb = [
+                [q * h * h * h * h * h / 20.0, q * h * h * h * h / 8.0, q * h * h * h / 6.0],
+                [q * h * h * h * h / 8.0, q * h * h * h / 3.0, q * h * h / 2.0],
+                [q * h * h * h / 6.0, q * h * h / 2.0, q * h],
+            ];
+            for (bi, qrow) in qb.iter().enumerate() {
+                for (bj, &qv) in qrow.iter().enumerate() {
+                    for ax in 0..2 {
+                        np[3 * bi + ax][3 * bj + ax] += qv;
+                    }
+                }
+            }
+            sym_n(&mut np);
+            tr.p = np;
+            tr.t += h;
+        }
+        tr
+    }
+
     /// A look `z` (agent-models §5.1): a Kalman update with what `look` says he should see
     /// from the estimate as it stands now (so a velocity look taken after a position look is
     /// worked out from the corrected position) and the fresh part's covariance there, with H
@@ -993,7 +1243,7 @@ impl Track {
     /// persistent error (the persistent error's size and directions depend on where the ball
     /// is and how fast it goes; an extended Kalman update, the Jacobian by central
     /// differences).
-    fn see(&mut self, look: &Look, z: Vec3) {
+    fn see(&mut self, look: &Look, z: Vec3) -> Result<(), f64> {
         let (r, v, b) = (self.x[0], self.x[1], self.b);
         let (zhat, rm) = look.expect(r, v, b);
         // H, 3 × TN (the learned acceleration does not enter a look).
@@ -1021,8 +1271,13 @@ impl Track {
         // P Hᵀ, TN × 3.
         let pht: [[f64; 3]; TN] = core::array::from_fn(|i| core::array::from_fn(|ax| (0..TN).map(|j| p[i][j] * h[ax][j]).sum()));
         let s = Mat3::from_rows(core::array::from_fn(|ax| core::array::from_fn(|bx| (0..TN).map(|j| h[ax][j] * pht[j][bx]).sum()))) + rm;
-        let Some(si) = s.inverse() else { return };
+        let Some(si) = s.inverse() else { return Ok(()) };
         let e = comps(z - zhat);
+        // A look that his estimate cannot explain at all (agent-models §5.1, `TRACK_GATE`).
+        let nis: f64 = (0..3).map(|a| (0..3).map(|c| e[a] * si.r[a][c] * e[c]).sum::<f64>()).sum();
+        if self.phase != Phase::First && nis > TRACK_GATE {
+            return Err(e.iter().map(|x| x * x).sum());
+        }
         let k: [[f64; 3]; TN] = core::array::from_fn(|i| core::array::from_fn(|c| (0..3).map(|ax| pht[i][ax] * si.r[ax][c]).sum()));
         let dx: [f64; TN] = core::array::from_fn(|i| k[i][0] * e[0] + k[i][1] * e[1] + k[i][2] * e[2]);
         for (bi, xv) in self.x.iter_mut().enumerate() {
@@ -1039,8 +1294,63 @@ impl Track {
         }
         sym_n(&mut np);
         self.p = np;
+        Ok(())
+    }
+
+    /// A look his estimate cannot explain (agent-models §5.1, the gate): he keeps the track,
+    /// but what he believed of the ball's position (`vel` false) or velocity (`vel` true) is
+    /// let go. That block is taken again from the look `z` itself, uncorrelated with the rest,
+    /// its variance per axis the look's squared error `e2` (so the look explains it again; the
+    /// look's own σ, which scales with the speed, is then worked out at the speed it shows), and
+    /// the learned acceleration goes back to its prior; a velocity let go also widens the
+    /// position by what it may have carried it wrong since his last look (`e2`·`LOOK_S`²). Then
+    /// the look is taken again. On the ground only the level components move.
+    fn let_go(&mut self, vel: bool, e2: f64, z: Vec3) {
+        let level = if self.phase == Phase::Roll { 2 } else { 3 };
+        let base = if vel { 3 } else { 0 };
+        let a_prior = if self.phase == Phase::Roll { ROLL_SLOW_PRIOR } else { CURVE_PRIOR };
+        for k in (0..level).flat_map(|ax| [base + ax, 6 + ax]) {
+            for j in 0..TN {
+                self.p[k][j] = 0.0;
+                self.p[j][k] = 0.0;
+            }
+        }
+        for ax in 0..level {
+            self.p[base + ax][base + ax] = e2;
+            self.p[6 + ax][6 + ax] = a_prior * a_prior;
+        }
+        // A velocity that was wrong has carried his position wrong since his last look, by as
+        // much as that error over the look's interval.
+        if vel {
+            for ax in 0..level {
+                self.p[ax][ax] += e2 * LOOK_S * LOOK_S;
+            }
+        }
+        let blk = &mut self.x[if vel { 1 } else { 0 }];
+        *blk = if level == 2 { Vec3::new(z.x, z.y, blk.z) } else { z };
+        self.x[2] = Vec3::ZERO;
+    }
+
+    /// A ball he sees still rolling (agent-models §5.1): however sure his estimate is that it
+    /// has slowed or stopped, its level velocity keeps at least `floor` of σ, so a look that
+    /// shows it moving can move it (a rolling estimate that has stopped has no velocity
+    /// variance left, and no look could start it again).
+    fn seen_moving(&mut self, floor: f64) {
+        for k in 3..5 {
+            if self.p[k][k] < floor * floor {
+                self.p[k][k] = floor * floor;
+            }
+        }
     }
 }
+
+/// After a bounce, a look whose error against his estimate, in units of his own expected
+/// spread (its normalised innovation squared, three degrees of freedom), is beyond this
+/// (agent-models §5.1, the gate): his estimate has gone wrong (the bounce and the roll are far
+/// from linear), and he lets go of what he believed of that block ([`Track::let_go`]) and
+/// takes the look again [E: χ² with 3 degrees of freedom passes 50 once in 10¹⁰ looks of an
+/// honest track].
+const TRACK_GATE: f64 = 50.0;
 
 /// The step for a look's Jacobian in the ball's position (m) and velocity (m/s) [E: numerical,
 /// small against every distance and speed a look sees].
@@ -1059,6 +1369,9 @@ struct Look {
     vel_frac: f64,
     scale: f64,
     kb: f64,
+    /// The speed below which a velocity look is no better (`LOOK_VEL_FLOOR_MPS` off the
+    /// first flight, 0 on it).
+    vel_floor: f64,
 }
 
 impl Look {
@@ -1070,7 +1383,7 @@ impl Look {
     fn expect(&self, r: Vec3, v: Vec3, b: [f64; 4]) -> (Vec3, Mat3) {
         let (d, u, a, w) = sight_frame(self.eye, r);
         if self.vel {
-            let base = self.vel_frac * v.norm();
+            let base = self.vel_frac * v.norm().max(self.vel_floor);
             let mean = v + u * (0.5 * DEPTH_STRETCH * self.kb * base * b[2]) + a * (self.kb * base * b[3]);
             (mean, sight_cov(u, a, w, base * self.scale, 0.5 * DEPTH_STRETCH))
         } else {
@@ -1079,6 +1392,14 @@ impl Look {
             (mean, sight_cov(u, a, w, base * self.scale, DEPTH_STRETCH))
         }
     }
+}
+
+/// How fast a ball rolling at `v` slows by a fielder's belief (agent-models §5.1, rolling): the
+/// rolling law's `decel` less the learned extra acceleration `a` along its way, m/s² (at least
+/// a tenth of the law's: a rolling ball does not speed up).
+fn roll_slowing(decel: f64, v: Vec3, a: Vec3) -> f64 {
+    let dir = Vec3::new(v.x, v.y, 0.0).normalized();
+    (decel - a.dot(dir)).max(0.1 * decel)
 }
 
 /// A square matrix made exactly symmetric (the mean of it and its transpose).
@@ -1162,8 +1483,10 @@ struct Fielder {
     next_plan: f64,
     /// Fixed per-play draws for the read error (depth, lateral, velocity depth, velocity lateral).
     err: [f64; 4],
-    /// His running estimate of a ball on its first flight (agent-models §5.1).
+    /// His running estimate of the free ball (agent-models §5.1).
     track: Option<Track>,
+    /// Looks he has taken in this play, over all his tracks (the `FielderLook` sub-index).
+    looks: u32,
     /// The σ of where his latest read has the ball coming down, along his line of sight to it
     /// (his doubt; 0 without a track), and when it was worked out; and whether it came from a
     /// track (a read before his first look has none).
@@ -1471,6 +1794,17 @@ pub mod read_trace {
         pub peel: bool,
         pub must_dive_since: f64,
         pub dove: bool,
+        /// His track's phase: 0 none (the snapshot read), 1 first flight, 2 a hop, 3 rolling.
+        pub phase: u8,
+        /// Where he believes the ball is now: his track's estimate, else his latest read's.
+        pub est: Option<Vec3>,
+        /// His track's σ of that position along his level line of sight to it, m (NaN untracked).
+        pub sd_los: f64,
+        /// Where the ball truly is (world truth, for the trace's reader only).
+        pub ball: Vec3,
+        /// His track's velocity and learned extra acceleration (zero untracked).
+        pub est_v: Vec3,
+        pub est_a: Vec3,
     }
     thread_local! {
         pub static ON: Cell<bool> = const { Cell::new(false) };
@@ -2037,6 +2371,23 @@ pub fn read_prediction(env: &FlightEnv, field: &Field, truth: (Vec3, Vec3), t: f
     read_prediction_k(env, field, truth, t, from, sigma0, READ_VEL_FRAC, tau_read, view, err, off_bat)
 }
 
+/// No read puts the ball below the ground (agent-models §5.1, 2026-11-21): a ball seen rolling
+/// (`rolling`) is on the ground, its vertical velocity zero; any other read's height is held
+/// at the ball's radius at least. So every believed path meets the ground.
+fn on_or_above_ground((p, v): (Vec3, Vec3), rolling: bool, radius: f64) -> (Vec3, Vec3) {
+    if rolling {
+        (Vec3::new(p.x, p.y, radius), Vec3::new(v.x, v.y, 0.0))
+    } else {
+        (Vec3::new(p.x, p.y, p.z.max(radius)), v)
+    }
+}
+
+/// Whether a ball's true state is a ball rolling on the ground (the observation boundary: it
+/// is seen rolling).
+fn seen_rolling((p, v): (Vec3, Vec3), radius: f64) -> bool {
+    p.z <= radius + 1e-6 && v.z == 0.0
+}
+
 /// Perturb position and velocity along and across the observer's line of sight.
 fn noisy_ball_motion((p, v): (Vec3, Vec3), los: Vec3, sp: f64, sv: f64, err: [f64; 4]) -> (Vec3, Vec3) {
     let lat = Vec3::new(-los.y, los.x, 0.0);
@@ -2067,6 +2418,7 @@ pub fn read_prediction_k(env: &FlightEnv, field: &Field, truth: (Vec3, Vec3), t:
         let (gain, _, _) = plate_weighing(los, sp, sv, s);
         pe += gain * (position_from_plate(&env, p0, ve, w, s) - pe);
     }
+    let (pe, ve) = on_or_above_ground((pe, ve), seen_rolling(truth, env.ball.radius), env.ball.radius);
     batted_path_dt(&env, field, BallState { r: pe, v: ve, w }, t, AGENT_DT, |_, _| (0.0, 0.0))
 }
 
@@ -2858,7 +3210,7 @@ impl<'a> Sim<'a> {
         let fd = &self.f[i];
         let r = if let Some(tr) = self.track_now(i) {
             // His running estimate, flown on with his own physics (agent-models §5.1).
-            self.fly_estimate(tr.r(), tr.v(), tr.x[2])
+            self.fly_estimate(tr.r(), tr.v(), tr.x[2], tr.phase, roll_slowing(tr.roll_decel, tr.v(), tr.x[2]), tr.w)
         } else {
             let view = (self.t - self.inp.t_contact - fd.a.reaction).max(0.0);
             read_prediction_k(self.inp.env, self.inp.field, self.ball_at(self.t), self.t, fd.pos, fd.a.read_sigma0, fd.a.read_vel_frac, fd.a.tau_read, view, fd.err, self.off_bat())
@@ -2869,52 +3221,135 @@ impl<'a> Sim<'a> {
         r
     }
 
-    /// Fielder `i`'s running estimate of the ball, run on to now: while it is on its first
-    /// flight off the bat and he has looked at it (agent-models §5.1).
+    /// Fielder `i`'s running estimate of the ball, run on to now: from his first look at a
+    /// free ball until it is held, across its bounces (agent-models §5.1). `take_looks` has
+    /// brought it through every bounce up to now.
     fn track_now(&self, i: usize) -> Option<Track> {
         let tr = self.f[i].track?;
-        if tr.ball != self.ball_gen || tr.looks == 0 || self.off_bat().is_none() {
+        if tr.ball != self.ball_gen || tr.looks == 0 || !matches!(self.ball, Ball::Free { .. }) {
             return None;
         }
         Some(tr.run_to(self.inp.env, self.t, self.inp.t_contact))
     }
 
     /// A ball believed at `r` going `v` now, flown on with the observer's own physics, the
-    /// spin he believes for it (as the snapshot read is flown) and the extra acceleration `a`
-    /// he has learned his model is missing.
-    fn fly_estimate(&self, r: Vec3, v: Vec3, a: Vec3) -> BallPath {
-        let (env, w) = believed_flight(self.inp.env, v, Some(self.t - self.inp.t_contact));
+    /// spin he believes for it in its phase (as the snapshot read is flown) and the extra
+    /// acceleration `a` he has learned his model is missing. Never from below the ground
+    /// (agent-models §5.1). A rolling ball rolls on from where he believes it is, slowing at
+    /// `roll_decel` (the world's rolling law, `bb_physics::ground::roll_from`).
+    fn fly_estimate(&self, r: Vec3, v: Vec3, a: Vec3, phase: Phase, roll_decel: f64, spin: Vec3) -> BallPath {
+        let radius = self.inp.env.ball.radius;
+        if phase == Phase::Roll {
+            let vh = Vec3::new(v.x, v.y, 0.0);
+            let segments = if vh.norm() > 0.0 && roll_decel > 0.0 {
+                bb_physics::ground::roll_from(self.inp.field, Vec3::new(r.x, r.y, radius), vh, roll_decel, self.t, radius)
+            } else {
+                vec![bb_physics::ground::Segment::Roll { t0: self.t, r0: Vec3::new(r.x, r.y, radius), v0: Vec3::ZERO, decel: 1.0, t_stop: self.t }]
+            };
+            return BallPath { segments, bounces: vec![(self.t, r.x, r.y)], walls: Vec::new() };
+        }
+        let (env, w) = believed_flight(self.inp.env, v, (phase == Phase::First).then_some(self.t - self.inp.t_contact));
+        // On a hop, the spin his bounce law left it with.
+        let w = if phase == Phase::Hop { spin } else { w };
+        let (r, v) = on_or_above_ground((r, v), false, radius);
         batted_path_dt(&FlightEnv { extra: a, ..env }, self.inp.field, BallState { r, v, w }, self.t, AGENT_DT, |_, _| (0.0, 0.0))
     }
 
-    /// Every fielder who has reacted looks at a ball on its first flight off the bat, once
-    /// each `LOOK_S` (agent-models §5.1, the tracking read): what he sees of its position and
-    /// velocity, good across his line of sight and poor along it, with fresh noise each look
-    /// (`FielderLook`) and a persistent part (`TRACK_BIAS_FRAC` of the play's fixed draws). His
-    /// first look counts as τ_read of watching: velocity as seen, position where a ball going
-    /// that fast must be having left the plate (the plate cue), weighed with what he sees.
+    /// The bounces (`false`) and wall caroms (`true`) of the free ball after `after` up to now,
+    /// in time order: what a fielder has seen it do since (agent-models §5.1, across the
+    /// bounces).
+    fn ball_events(&self, after: f64) -> Vec<(f64, bool)> {
+        let Ball::Free { path, .. } = &self.ball else { return Vec::new() };
+        let within = |te: f64| te > after + 1e-12 && te <= self.t + 1e-12;
+        let mut ev: Vec<(f64, bool)> = path.bounces.iter().filter(|b| within(b.0)).map(|b| (b.0, false)).chain(path.walls.iter().filter(|w| within(w.0)).map(|w| (w.0, true))).collect();
+        ev.sort_by(|a, b| a.0.total_cmp(&b.0).then(a.1.cmp(&b.1)));
+        ev
+    }
+
+    /// Whether the free ball is seen rolling just after time `t` (agent-models §5.1: whether it
+    /// is in the air or on the ground is seen).
+    fn rolling_after(&self, t: f64) -> bool {
+        let Ball::Free { path, .. } = &self.ball else { return false };
+        let t = t + 1e-6;
+        for seg in &path.segments {
+            match seg {
+                bb_physics::ground::Segment::Flight { tr, .. } => {
+                    if t <= tr.last().t {
+                        return false;
+                    }
+                }
+                bb_physics::ground::Segment::Roll { t_stop, .. } => {
+                    if t <= *t_stop {
+                        return true;
+                    }
+                }
+            }
+        }
+        matches!(path.segments.last(), Some(bb_physics::ground::Segment::Roll { .. }))
+    }
+
+    /// Every fielder who has reacted looks at a batted ball once each `LOOK_S` from its first
+    /// flight until someone holds it (agent-models §5.1, the tracking read): what he sees of its
+    /// position and velocity, good across his line of sight and poor along it, with fresh noise
+    /// each look (`FielderLook`, keyed by his look's number in the play) and a persistent part
+    /// (`TRACK_BIAS_FRAC` of the play's fixed draws). His first look counts as τ_read of
+    /// watching: velocity as seen, position where a ball going that fast must be having left
+    /// the plate (the plate cue), weighed with what he sees. Each bounce he has seen since his
+    /// last look goes on into his track (across the bounces); a wall carom or a new ball ends
+    /// it. A man with no track then (his first look came after the first bounce) reads the ball
+    /// by the snapshot read.
     fn take_looks(&mut self) {
-        let Some((since, p0)) = self.off_bat() else { return };
+        if !matches!(self.ball, Ball::Free { .. }) {
+            return;
+        }
+        let off = self.off_bat();
         let (t, t_c, ball) = (self.t, self.inp.t_contact, self.ball_gen);
-        let env = self.inp.env;
+        let (env, field) = (self.inp.env, self.inp.field);
+        let radius = env.ball.radius;
         let (bp, bv) = self.ball_at(t);
         for i in 0..9 {
             let fd = &self.f[i];
             if t < t_c + fd.a.reaction {
                 continue;
             }
-            let prev = fd.track.filter(|tr| tr.ball == ball);
-            if prev.is_some_and(|tr| t < tr.next_look - 1e-9) {
+            // What he has seen since his track was last brought up to date: each bounce goes on
+            // into it; a wall carom ends it, as a new ball does.
+            let mut cur = fd.track.filter(|tr| tr.ball == ball && tr.looks > 0);
+            if let Some(mut tr) = cur {
+                let mut ended = false;
+                for (te, wall) in self.ball_events(tr.t) {
+                    if wall {
+                        ended = true;
+                        break;
+                    }
+                    let first = tr.phase == Phase::First;
+                    tr = tr.run_to(env, te, t_c);
+                    tr.bounce(env, field, t_c, first, self.rolling_after(te));
+                }
+                cur = (!ended).then_some(tr);
+            }
+            if let Some(tr) = cur
+                && t < tr.next_look - 1e-9
+            {
+                self.f[i].track = Some(tr);
                 continue;
             }
-            let k = prev.map_or(0, |tr| tr.looks);
+            // No track to go on with off the first flight (he first looked after it bounced, or
+            // a wall or a new ball ended it): the snapshot read (agent-models §5.1).
+            if cur.is_none() && off.is_none() {
+                self.f[i].track = None;
+                continue;
+            }
+            let fd = &self.f[i];
+            let (kp, k) = (fd.looks, cur.map_or(0, |tr| tr.looks));
             let (d, u, a, b) = sight_frame(fd.pos + Vec3::new(0.0, 0.0, EYE_H), bp);
-            // His first look is the snapshot read's first read, its shrink included (for a ball
-            // about to come down, the closing of `READ_CLOSE_S`: a grounder before its first
-            // bounce is read as sharply as before); later looks, `LOOK_SCALE` of the plain σ.
+            // A track's first look is the snapshot read's first read, its shrink included (for
+            // a ball about to come down off the bat, the closing of `READ_CLOSE_S`: a grounder
+            // before its first bounce is read as sharply as before); later looks, `LOOK_SCALE` of
+            // the plain σ.
             let view = (t - t_c - fd.a.reaction).max(0.0);
-            let scale = if k == 0 { read_shrink((bp, bv), view, fd.a.tau_read, Some((since, p0))) } else { LOOK_SCALE };
-            let mut g = rng(self.inp.seed, self.inp.play, fd.id, Purpose::FielderLook, k);
+            let scale = if k == 0 { read_shrink((bp, bv), view, fd.a.tau_read, off) } else { LOOK_SCALE };
+            let mut g = rng(self.inp.seed, self.inp.play, fd.id, Purpose::FielderLook, kp);
             let (fresh, bias) = look_noise();
             let e: [f64; 6] = core::array::from_fn(|_| fresh * g.truncated_normal(4.0));
             let (bias, err) = (bias * TRACK_BIAS_FRAC, fd.err);
@@ -2924,30 +3359,50 @@ impl<'a> Sim<'a> {
             // shrink so grounders get the same initial precision as the snapshot read.
             let bias = bias * if k == 0 { scale } else { 1.0 };
             let zp = bp + u * (DEPTH_STRETCH * (sp * e[0] + bias * base_p * err[0])) + a * (sp * e[1] + bias * base_p * err[1]) + b * (sp * e[2]);
-            let base_v = fd.a.read_vel_frac * bv.norm();
+            let vel_floor = if cur.is_some_and(|tr| tr.phase != Phase::First) { LOOK_VEL_FLOOR_MPS } else { 0.0 };
+            let base_v = fd.a.read_vel_frac * bv.norm().max(vel_floor);
             let sv = base_v * scale;
             let zv = bv + u * (0.5 * DEPTH_STRETCH * (sv * e[3] + bias * base_v * err[2])) + a * (sv * e[4] + bias * base_v * err[3]) + b * (sv * e[5]);
-            // What he expects before this look: his estimate run on to now, or on his first
-            // look the velocity as seen and the position a ball going that fast must have,
-            // having left the plate `since` ago (the plate cue).
-            let (env0, w0) = believed_flight(env, zv, Some(since));
-            let prior = prev.map(|tr| tr.run_to(env, t, t_c));
-            let (re, ve) = match &prior {
-                Some(tr) => (tr.r(), tr.v()),
-                None => (position_from_plate(&env0, p0, zv, w0, since), zv),
-            };
             // What he knows of his looks (the world draws them about the ball itself).
             let eye = fd.pos + Vec3::new(0.0, 0.0, EYE_H);
             let kb = TRACK_BIAS_FRAC * if k == 0 { scale } else { 1.0 };
-            let lp = Look { eye, vel: false, sigma_per_m: fd.a.read_sigma0 / READ_REF_DIST, vel_frac: fd.a.read_vel_frac, scale, kb };
+            let lp = Look { eye, vel: false, sigma_per_m: fd.a.read_sigma0 / READ_REF_DIST, vel_frac: fd.a.read_vel_frac, scale, kb, vel_floor };
             let lv = Look { vel: true, ..lp };
-            let mut tr = match prior {
-                Some(mut tr) => {
-                    tr.see(&lp, zp);
-                    tr.see(&lv, zv);
+            let mut tr = match (cur, off) {
+                // His estimate run on to now, then the look.
+                (Some(tr), _) => {
+                    let mut tr = tr.run_to(env, t, t_c);
+                    // A ball seen at rest.
+                    if tr.phase == Phase::Roll {
+                        if bv == Vec3::ZERO {
+                            tr.at_rest();
+                        } else {
+                            tr.seen_moving(fd.a.read_vel_frac * LOOK_VEL_FLOOR_MPS);
+                        }
+                    }
+                    // A look he cannot explain lets go of what he believed of that block
+                    // (the gate), and is taken again; only if even then it cannot be
+                    // explained (never seen in games 0–199) does he fall back on the snapshot
+                    // read.
+                    let mut ok = true;
+                    for (look, z) in [(&lp, zp), (&lv, zv)] {
+                        if let Err(e2) = tr.see(look, z) {
+                            tr.let_go(look.vel, e2, z);
+                            ok &= tr.see(look, z).is_ok();
+                        }
+                    }
+                    if !ok {
+                        self.f[i].track = None;
+                        self.f[i].looks = kp + 1;
+                        continue;
+                    }
                     tr
                 }
-                None => {
+                // A first flight's first look: velocity as seen, position where a ball going
+                // that fast must be, having left the plate `since` ago (the plate cue).
+                (None, Some((since, p0))) => {
+                    let (env0, w0) = believed_flight(env, zv, Some(since));
+                    let (re, ve) = (position_from_plate(&env0, p0, zv, w0, since), zv);
                     let c = TRACK_CONTACT_M * TRACK_CONTACT_M;
                     let pa = Mat3::scale(CURVE_PRIOR * CURVE_PRIOR);
                     let s2 = since * since;
@@ -2988,13 +3443,18 @@ impl<'a> Sim<'a> {
                             tr.p[TB + 2 + c][ax] = hr[ax];
                         }
                     }
-                    tr.see(&lp, zp);
+                    let _ = tr.see(&lp, zp);
                     tr
                 }
+                (None, None) => unreachable!("no first look off the first flight"),
             };
+            if tr.phase == Phase::Roll {
+                tr.pin_ground(radius);
+            }
             tr.looks = k + 1;
             tr.next_look = t + LOOK_S;
             self.f[i].track = Some(tr);
+            self.f[i].looks = kp + 1;
         }
     }
 
@@ -3006,7 +3466,7 @@ impl<'a> Sim<'a> {
     /// already: the filter carries it as a state, so it needs no term of its own.
     fn track_doubt(&self, tr: &Track, from: Vec3) -> f64 {
         let land_a = |r: Vec3, v: Vec3, acc: Vec3| {
-            let p = self.fly_estimate(r, v, acc);
+            let p = self.fly_estimate(r, v, acc, tr.phase, roll_slowing(tr.roll_decel, v, acc), tr.w);
             match p.first_bounce() {
                 Some((_, x, y)) => Vec3::new(x, y, 0.0),
                 None => {
@@ -3102,6 +3562,7 @@ impl<'a> Sim<'a> {
             t: self.t,
             view: (self.t - self.inp.t_contact).max(0.0),
             contact_since: self.public_contact_since(),
+            rolling: seen_rolling(self.ball_at(self.t), self.inp.env.ball.radius),
         };
         let (los, sp, sv) = look.scales(look.motion);
         look.motion = noisy_ball_motion(look.motion, los, sp, sv, self.runner_ball_errors(k, sub));
@@ -3466,7 +3927,8 @@ impl<'a> Sim<'a> {
         }
         let p = self.predict(i);
         let (ti, pt) = self.intercept(i, &p);
-        let tracked = self.track_now(i);
+        // His doubt is of where a ball on its first flight comes down (agent-models §5.1).
+        let tracked = self.track_now(i).filter(|tr| tr.phase == Phase::First);
         let doubt = tracked.map_or(0.0, |tr| self.track_doubt(&tr, self.f[i].pos));
         // His reads come faster as his own read has the ball coming down sooner.
         let down = p.first_bounce().map_or(p.t_end(), |b| b.0) - t;
@@ -4380,7 +4842,7 @@ impl<'a> Sim<'a> {
                     // His running estimate's own doubt (agent-models §5.1), as worked out at
                     // this tick's read when there was one.
                     Some(tr) => {
-                        if self.f[i].doubt_at == self.t && self.f[i].read_ball == self.ball_gen { self.f[i].doubt } else { self.track_doubt(&tr, fd.pos) }
+                        if tr.phase == Phase::First && self.f[i].doubt_at == self.t && self.f[i].read_ball == self.ball_gen { self.f[i].doubt } else { self.track_doubt(&tr, fd.pos) }
                     }
                     None => landing_depth_sigma(self.inp.env, self.inp.field, pred.at(self.t), self.t, fd.pos, fd.a.read_sigma0, fd.a.read_vel_frac, fd.a.tau_read, view, self.off_bat()),
                 };
@@ -7425,6 +7887,7 @@ fn new_sim<'a>(inp: &'a LiveInput<'a>, st: &'a mut RulesState) -> Sim<'a> {
                 next_plan: 0.0,
                 err: [r.truncated_normal(4.0), r.truncated_normal(4.0), r.truncated_normal(4.0), r.truncated_normal(4.0)],
                 track: None,
+                looks: 0,
                 doubt: 0.0,
                 doubt_at: f64::NEG_INFINITY,
                 doubt_tracked: false,
@@ -7662,8 +8125,9 @@ fn simulate_live_inner(inp: &LiveInput, st: &mut RulesState) -> LiveOutput {
             sim.emit(Input::PlayTimeout { t });
             break;
         }
-        // Every fielder who has reacted keeps looking at a ball on its first flight
-        // (agent-models §5.1, the tracking read).
+        // Every fielder who has reacted and tracks the ball keeps looking at it: from its first
+        // flight, across its bounces, until a wall, a touch or a catch (agent-models §5.1, the
+        // tracking read).
         if matches!(sim.ball, Ball::Free { .. }) {
             sim.take_looks();
         }
@@ -7779,8 +8243,17 @@ fn simulate_live_inner(inp: &LiveInput, st: &mut RulesState) -> LiveOutput {
         if assigned {
             sim.publish();
         }
-        if read_trace::on() && sim.off_bat().is_some() {
-            let recs: Vec<read_trace::Rec> = sim.f.iter().enumerate().map(|(i, fd)| read_trace::Rec {
+        if read_trace::on() && matches!(sim.ball, Ball::Free { .. }) {
+            let recs: Vec<read_trace::Rec> = sim.f.iter().enumerate().map(|(i, fd)| {
+                let tr = sim.track_now(i);
+                let est = tr.map(|tr| tr.r()).or_else(|| fd.belief.as_ref().map(|p| p.at(sim.t).0));
+                let sd_los = tr.map_or(f64::NAN, |tr| {
+                    let l = Vec3::new(tr.r().x - fd.pos.x, tr.r().y - fd.pos.y, 0.0).normalized();
+                    let l = [l.x, l.y, 0.0];
+                    m::sqrt((0..3).map(|a| (0..3).map(|c| l[a] * tr.p[a][c] * l[c]).sum::<f64>()).sum::<f64>().max(0.0))
+                });
+                let phase = tr.map_or(0, |tr| match tr.phase { Phase::First => 1, Phase::Hop => 2, Phase::Roll => 3 });
+                read_trace::Rec {
                 t: sim.t,
                 i,
                 role: match fd.role { Role::Idle => 0, Role::Chase => 1, Role::Cover(_) => 2, Role::Relay(_) => 3, Role::Backup => 4 },
@@ -7793,7 +8266,13 @@ fn simulate_live_inner(inp: &LiveInput, st: &mut RulesState) -> LiveOutput {
                 peel: fd.peel.is_some(),
                 must_dive_since: fd.must_dive_since,
                 dove: fd.dove,
-            }).collect();
+                phase,
+                est,
+                sd_los,
+                ball: sim.ball_at(sim.t).0,
+                est_v: tr.map_or(Vec3::ZERO, |tr| tr.v()),
+                est_a: tr.map_or(Vec3::ZERO, |tr| tr.x[2]),
+            }}).collect();
             read_trace::RECS.with(|r| r.borrow_mut().extend(recs));
         }
         if job_trace::on() && assigned {
@@ -10974,7 +11453,7 @@ mod tests {
                     continue;
                 }
                 let t = tr.first().t + RUNNER_READ_DELAY_S;
-                let look = ContactLook { motion: path.at(t), from: base_pos(2), t, view: RUNNER_READ_DELAY_S, contact_since: Some(RUNNER_READ_DELAY_S) };
+                let look = ContactLook { motion: path.at(t), from: base_pos(2), t, view: RUNNER_READ_DELAY_S, contact_since: Some(RUNNER_READ_DELAY_S), rolling: false };
                 let read = look.project(&field, [0.0; 4]);
                 match read.first_bounce() {
                     Some((_, rx, ry)) => miss.push(m::hypot(rx, ry) - truth),
@@ -11025,6 +11504,72 @@ mod tests {
         let mut st = fx.st.clone();
         let out = simulate_live(&inp, &mut st);
         assert!(out.events.iter().any(|e| matches!(e, Event::Catch { .. })), "not caught: {:?}", out.facts);
+    }
+
+    // The owner's saved play 71 of seed 51001 (2026-11-20; docs/calibration/2026-11-20-saved-
+    // plays-51001.md §2): a liner at 89 mph and 13° into right-centre, first bounce 2.19 s at
+    // (20.4, 53.9), that rolls past the right fielder to the wall. Kept as its contact (one out,
+    // bases empty, a left-handed batter, the play's own streams, seed 51001 play 71), not its
+    // seed's game. His fixed draws are 3.1σ in range and 3.4σ in speed, so his read in flight
+    // is 4–5 m short along his line of sight (a believable misjudgment). Before, at the bounce
+    // his read jumped to 15 m off and under the ground, he turned for the wall at 2.3 s and the
+    // ball passed 5.7 m from him (a triple). Across the bounces (agent-models §5.1): his read a
+    // moment after the bounce is no worse than just before it and within a metre by 3.3 s, and
+    // he runs at the ball's line: it passes within 4 m of him (1.9–2.1 m measured; the margin
+    // is for changes elsewhere in his movement, and still catches the old turn for the wall,
+    // which left him 5.7 m from it).
+    #[test]
+    fn the_owners_rolling_ball_seed_51001_play_71_is_played_at_its_line() {
+        let mut st = RulesState::default_fixture();
+        step(&mut st, &Input::StartGame);
+        st.outs = 1;
+        let t_c = 0.40175847989450797;
+        step(&mut st, &Input::PitchDelivered { t: 0.0 });
+        step(&mut st, &Input::BatContact { t: t_c });
+        let fx = Fixture { env: FlightEnv::default_env(), field: Field::default(), st };
+        let mut inp = input(&fx, vec![RunnerIn { id: fx.st.batter, base: 0, speed: 8.2, tau_s: bb_agents::running::LEAGUE_TAU_S }]);
+        inp.fattrs = core::array::from_fn(FielderAttrs::average);
+        inp.ball = BallState {
+            r: Vec3::new(0.0157440219412026, 0.538999248592413, 0.5755484555111461),
+            v: Vec3::new(9.82461593263031, 37.52603116910538, 8.6360178101137),
+            w: Vec3::new(-15.058824190440447, -101.19389608174313, -201.40755537192393),
+        };
+        inp.t_contact = t_c;
+        inp.pitch_x = Some(0.02581383632126375);
+        inp.bat_yaw = Some(-1.3144351065336362);
+        inp.swing_lead = Some(0.16172116961654806);
+        inp.bats = bb_observe::Hand::Left;
+        inp.batter_box = Vec3::new(0.95, 0.3, 0.0);
+        (inp.seed, inp.play) = (51001, 71);
+        const RF: usize = 8;
+        let path = {
+            let mut st = fx.st.clone();
+            let sim = new_sim(&inp, &mut st);
+            let Ball::Free { path, .. } = &sim.ball else { unreachable!() };
+            path.clone()
+        };
+        let (tb, bx, by) = path.first_bounce().unwrap();
+        assert!((tb - 2.19).abs() < 0.01 && (bx - 20.4).abs() < 0.1 && (by - 53.9).abs() < 0.1, "the owner's ball: first bounce {tb:.2} s at ({bx:.1}, {by:.1})");
+        read_trace::ON.with(|x| x.set(true));
+        read_trace::take();
+        let mut st = fx.st.clone();
+        simulate_live(&inp, &mut st);
+        read_trace::ON.with(|x| x.set(false));
+        let recs: Vec<_> = read_trace::take().into_iter().filter(|r| r.i == RF).collect();
+        let err_at = |t: f64| {
+            let r = recs.iter().min_by(|a, b| (a.t - t).abs().total_cmp(&(b.t - t).abs())).unwrap();
+            let b = path.at(r.t).0;
+            let l = Vec3::new(b.x - r.pos.x, b.y - r.pos.y, 0.0).normalized();
+            ((r.est.unwrap() - b).dot(l), r.phase)
+        };
+        let (before, after, late) = (err_at(tb - 0.05), err_at(tb + 0.2), err_at(3.3));
+        println!("his read along his line of sight: {before:.2?} before the bounce, {after:.2?} after it, {late:.2?} at 3.3 s");
+        assert!(before.1 == 1 && after.1 > 1, "tracked before and after the bounce: {before:?}, {after:?}");
+        assert!(after.0.abs() <= before.0.abs(), "{after:?} after the bounce, {before:?} before it");
+        assert!(late.0.abs() < 1.0, "at 3.3 s: {late:?}");
+        let (t_near, near) = recs.iter().filter(|r| r.t < 4.0).map(|r| (r.t, (Vec3::new(r.pos.x, r.pos.y, 0.0) - Vec3::new(path.at(r.t).0.x, path.at(r.t).0.y, 0.0)).norm())).min_by(|a, b| a.1.total_cmp(&b.1)).unwrap();
+        println!("the ball passes {near:.2} m from him at {t_near:.2} s");
+        assert!(near < 4.0, "the ball passes {near:.2} m from him at {t_near:.2} s");
     }
 
     /// Fielder `CF`, standing 12 m short of where a ball hit at `la` degrees and `speed` m/s
@@ -11168,7 +11713,7 @@ mod tests {
         let n = 2000;
         for (ci, &(r0, v0)) in cases.iter().enumerate() {
             for (bi, &bias) in biases.iter().enumerate() {
-                let lp = Look { eye, vel: false, sigma_per_m: a.read_sigma0 / READ_REF_DIST, vel_frac: a.read_vel_frac, scale: LOOK_SCALE, kb: TRACK_BIAS_FRAC };
+                let lp = Look { eye, vel: false, sigma_per_m: a.read_sigma0 / READ_REF_DIST, vel_frac: a.read_vel_frac, scale: LOOK_SCALE, kb: TRACK_BIAS_FRAC, vel_floor: 0.0 };
                 let lv = Look { vel: true, ..lp };
                 let (_, u, al, w) = sight_frame(eye, r0);
                 let dirs = [u, al, w];
@@ -11192,8 +11737,8 @@ mod tests {
                     for k in 0..4 {
                         tr.p[TB + k][TB + k] = 0.0;
                     }
-                    tr.see(&lp, zp);
-                    tr.see(&lv, zv);
+                    let _ = tr.see(&lp, zp);
+                    let _ = tr.see(&lv, zv);
                     for (m_, truth) in [(0, r), (1, v)] {
                         let e = tr.x[m_] - truth;
                         let pm = tr.blk(m_, m_);
@@ -11394,7 +11939,7 @@ mod tests {
         let d0 = sim.track_doubt(&bare, from);
         let los = Vec3::new(b.x - from.x, b.y - from.y, 0.0).normalized();
         let land = |acc: Vec3| {
-            let p = sim.fly_estimate(b, bv, acc);
+            let p = sim.fly_estimate(b, bv, acc, Phase::First, 0.0, Vec3::ZERO);
             let (_, x, y) = p.first_bounce().unwrap();
             Vec3::new(x, y, 0.0).dot(los)
         };
@@ -11511,6 +12056,230 @@ mod tests {
             assert!(new_err <= 1.1 * old_err + 1e-3, "vz {vz}: snapshot {old_err:.4} m, tracked {new_err:.4} m");
         }
         LOOK_NOISE.with(|c| c.set((1.0, 1.0)));
+    }
+
+    /// No believed point of `path` is below the ball's radius (by more than a millimetre: the
+    /// flight's crossing of the ground is found to that), and the path meets the ground, or
+    /// leaves the field (a read far enough off is outside the park; agent-models §5.1, no read
+    /// below the ground).
+    fn assert_meets_the_ground(path: &BallPath, radius: f64, what: &str) {
+        for seg in &path.segments {
+            match seg {
+                bb_physics::ground::Segment::Flight { tr, .. } => {
+                    for k in &tr.knots {
+                        assert!(k.s.r.z >= radius - 1e-3, "{what}: a believed point at z {:.4} m (t {:.2})", k.s.r.z, k.t);
+                    }
+                }
+                bb_physics::ground::Segment::Roll { r0, .. } => assert!(r0.z >= radius - 1e-3, "{what}: rolling at z {:.4} m", r0.z),
+            }
+        }
+        let left = matches!(path.end(), SegmentEnd::OverFence { .. });
+        assert!(path.first_bounce().is_some() || left || matches!(path.segments.first(), Some(bb_physics::ground::Segment::Roll { .. })), "{what}: the believed path never meets the ground (nor leaves the field)");
+    }
+
+    // Agent-models §5.1, no read below the ground (owner's saved play 71 of seed 51001: a ball
+    // rolling 0.15 m up was read 0.24 m below the ground going up, and the believed path never
+    // came down). A ball rolling and a ball on a low hop, seen from 10, 30 and 80 m, read by the
+    // snapshot read and by a runner's look with every sign of their four draws at 4σ (their
+    // truncation): no believed point is below the ball's radius, and every believed path meets
+    // the ground. (Before, a rolling ball read with its lateral draw at −4σ and its velocity's
+    // at +4σ started under the ground going up and never came down.)
+    #[test]
+    fn no_read_puts_the_ball_below_the_ground() {
+        let (env, field) = (FlightEnv::default_env(), Field::default());
+        let radius = env.ball.radius;
+        let a = FielderAttrs::average(8);
+        let states = [
+            (Vec3::new(20.0, 60.0, radius), Vec3::new(6.0, 14.0, 0.0), true),
+            (Vec3::new(-5.0, 30.0, radius), Vec3::new(-2.0, 25.0, 0.0), true),
+            (Vec3::new(20.0, 60.0, 0.15), Vec3::new(6.0, 14.0, 0.4), false),
+        ];
+        for (p, v, rolling) in states {
+            assert_eq!(seen_rolling((p, v), radius), rolling);
+            for (d, dir) in [(10.0, 0.3f64), (30.0, 1.2), (80.0, -0.7)] {
+                let from = Vec3::new(p.x + d * m::sin(dir), p.y + d * m::cos(dir), 0.0);
+                for bits in 0..16u32 {
+                    let err: [f64; 4] = core::array::from_fn(|k| if bits >> k & 1 == 1 { 4.0 } else { -4.0 });
+                    let what = format!("{p:?} from {d} m, draws {err:?}");
+                    let snap = read_prediction_k(&env, &field, (p, v), 2.0, from, a.read_sigma0, a.read_vel_frac, a.tau_read, 0.5, err, None);
+                    assert_meets_the_ground(&snap, radius, &format!("snapshot read, {what}"));
+                    let look = ContactLook { motion: (p, v), from, t: 2.0, view: 1.5, contact_since: None, rolling };
+                    assert_meets_the_ground(&look.project(&field, err), radius, &format!("runner's look, {what}"));
+                }
+            }
+        }
+    }
+
+    // Agent-models §5.1, the gate (Opus bounce-track review P2-1, P3-2). A fielder whose
+    // rolling estimate has gone wrong keeps the ball: grounders and low liners to the outfield
+    // over a grid of directions, 10 plays of draws each, every outfielder tracking it. Half a
+    // second after the ball begins to roll, each estimate is told the ball has stopped (its
+    // velocity zero and sure, as a rolling estimate that stopped itself early is), while the
+    // ball rolls on. Against where the ball truly is, along his line of sight: (1) he keeps his
+    // track (no fall to the snapshot read, which before put a ball at rest at the wall 19 m
+    // beyond it); (2) his error never grows past what the ball covers before his next look plus
+    // his error before (|e₀| + 0.2 s × its speed + 0.5 m: up to two look intervals, the first
+    // look after the stop seeing a ball ahead of a believed stop); (3) half a second on it is within
+    // three of his own σ there, or within 0.5 m of his error before (a look shows it moving,
+    // his read follows, and he knows how much he has lost).
+    #[test]
+    fn a_wrong_rolling_estimate_is_let_go_of_and_the_ball_kept() {
+        let fx = fixture(&[]);
+        let mut cases = 0;
+        let mut worst_late = 0.0f64;
+        for (la, spray) in [(-2.0f64, -20.0f64), (-2.0, 15.0), (4.0, -10.0), (4.0, 25.0), (8.0, 0.0)] {
+            for play in 0..10 {
+                let (lr, sr) = (la.to_radians(), spray.to_radians());
+                let mut inp = hit(&fx, Vec3::new(m::sin(sr), m::cos(sr), 0.0) * (42.0 * m::cos(lr)) + Vec3::new(0.0, 0.0, 42.0 * m::sin(lr)));
+                inp.play = play;
+                let mut st = fx.st.clone();
+                let mut sim = new_sim(&inp, &mut st);
+                let Ball::Free { path, .. } = &sim.ball else { unreachable!() };
+                let path = path.clone();
+                let Some(t_roll) = path.segments.iter().find_map(|sg| match sg {
+                    bb_physics::ground::Segment::Roll { t0, .. } => Some(*t0),
+                    _ => None,
+                }) else {
+                    continue;
+                };
+                let (t_cut, t_end) = (t_roll + 0.5, t_roll + 1.5);
+                if path.t_end() < t_end {
+                    continue;
+                }
+                let mut e0 = [None; 9];
+                sim.t = inp.t_contact;
+                while sim.t < t_end {
+                    sim.take_looks();
+                    let (b, bv) = path.at(sim.t);
+                    for i in 6..9 {
+                        let Some(tr) = sim.track_now(i) else {
+                            assert!(e0[i].is_none(), "LA {la} spray {spray} play {play}, fielder {i}: the track was dropped at {:.2} s", sim.t);
+                            continue;
+                        };
+                        let l = Vec3::new(b.x - sim.f[i].pos.x, b.y - sim.f[i].pos.y, 0.0).normalized();
+                        let e = (tr.r() - b).dot(l);
+                        if sim.t >= t_cut && e0[i].is_none() && tr.phase == Phase::Roll {
+                            // His estimate believes the ball has stopped.
+                            let mut stopped = sim.f[i].track.unwrap();
+                            stopped.at_rest();
+                            sim.f[i].track = Some(stopped);
+                            e0[i] = Some(e);
+                            cases += 1;
+                            continue;
+                        }
+                        if let Some(e_0) = e0[i] {
+                            let bound = f64::abs(e_0) + 0.2 * bv.norm() + 0.5;
+                            assert!(e.abs() <= bound, "LA {la} spray {spray} play {play}, fielder {i} at {:.2} s: error {e:.2} m, bound {bound:.2} m", sim.t);
+                            if sim.t >= t_cut + 0.5 {
+                                let sd = m::sqrt(l.dot(tr.blk(0, 0) * l));
+                                worst_late = worst_late.max(e.abs());
+                                assert!(e.abs() <= (3.0 * sd).max(e_0.abs() + 0.5), "LA {la} spray {spray} play {play}, fielder {i} at {:.2} s: error {e:.2} m half a second on (σ {sd:.2} m), {e_0:.2} m before", sim.t);
+                            }
+                        }
+                    }
+                    sim.t += DT;
+                }
+            }
+        }
+        println!("{cases} estimates stopped by hand; half a second on and after, the error at most {worst_late:.2} m");
+        assert!(cases >= 60, "{cases} cases");
+    }
+
+    // Agent-models §5.1, across the bounces (owner's saved play 71 of seed 51001): a seen
+    // bounce continues his track. Liners and low line drives hit to the outfield over a grid
+    // of directions, tracked by the three outfielders standing at their places, on 30 plays of
+    // draws each (each his own fixed and fresh draws, as in games). Along his level line of
+    // sight, against where the ball truly is, over every outfielder who was tracking it before
+    // it bounced: (1) his RMS error a moment after the bounce is no larger than a moment before
+    // it (he saw where the ground is); (2) it does not grow as the ball goes on, measured
+    // against what one look tells him at that range (σ0·d/30 m: the balls run on away from
+    // some of them): standing still, what is left is his persistent error, which looks from one
+    // place cannot tell from the ball (running in, the changing geometry teaches it him: the
+    // owner's play 71 below); (3) the read is honest: after the bounce the mean of error²/σ²
+    // (his own σ) is that of a unit normal within a factor of two either way; (4) it is better
+    // than the snapshot read it replaces (his whole fixed draw, times `DEPTH_STRETCH` along
+    // his line of sight) at the same moment. Every read he makes then (`predict`) meets the
+    // ground from above it.
+    #[test]
+    fn a_seen_bounce_continues_the_track() {
+        let fx = fixture(&[]);
+        let radius = fx.env.ball.radius;
+        let offs = [-0.05, 0.05, 0.5, 1.0];
+        // Per offset: n, Σe², Σσ², Σe²/σ², and Σe² over the square of a look's σ there
+        // (σ0·d/30 m, his eye's precision at that range); and the snapshot read's Σe² a moment
+        // after.
+        let mut sums = [[0.0f64; 5]; 4];
+        let mut snap = 0.0;
+        for (la, spray) in [(4.0f64, -25.0f64), (4.0, 15.0), (8.0, -15.0), (8.0, 25.0), (12.0, -5.0), (12.0, 20.0), (16.0, -20.0), (16.0, 10.0)] {
+            for play in 0..30 {
+                let (lr, sr) = (la.to_radians(), spray.to_radians());
+                let mut inp = hit(&fx, Vec3::new(m::sin(sr), m::cos(sr), 0.0) * (40.0 * m::cos(lr)) + Vec3::new(0.0, 0.0, 40.0 * m::sin(lr)));
+                inp.play = play;
+                let mut st = fx.st.clone();
+                let mut sim = new_sim(&inp, &mut st);
+                let Ball::Free { path, .. } = &sim.ball else { unreachable!() };
+                let path = path.clone();
+                let Some((tb, ..)) = path.first_bounce() else { continue };
+                // Only balls the outfielders were watching before they bounced.
+                if tb < inp.t_contact + sim.f[7].a.reaction + 0.3 {
+                    continue;
+                }
+                let when = offs.map(|o| tb + o);
+                let mut before = [None; 9];
+                let mut next = 0;
+                sim.t = inp.t_contact;
+                while next < 4 {
+                    sim.take_looks();
+                    while next < 4 && sim.t + DT > when[next] {
+                        let (b, bv) = path.at(sim.t);
+                        for i in 6..9 {
+                            let Some(tr) = sim.track_now(i) else { continue };
+                            let fd = &sim.f[i];
+                            let l = Vec3::new(b.x - fd.pos.x, b.y - fd.pos.y, 0.0).normalized();
+                            let e = (tr.r() - b).dot(l);
+                            let var = l.dot(tr.blk(0, 0) * l).max(1e-9);
+                            if next == 0 {
+                                before[i] = Some(e);
+                            } else if before[i].is_none() {
+                                continue;
+                            }
+                            let c = &mut sums[next];
+                            c[0] += 1.0;
+                            c[1] += e * e;
+                            c[2] += var;
+                            c[3] += e * e / var;
+                            let base = fd.a.read_sigma0 * (b - (fd.pos + Vec3::new(0.0, 0.0, EYE_H))).norm() / READ_REF_DIST;
+                            c[4] += e * e / (base * base);
+                            if next == 1 {
+                                let view = (sim.t - inp.t_contact - fd.a.reaction).max(0.0);
+                                let old = read_prediction_k(inp.env, inp.field, (b, bv), sim.t, fd.pos, fd.a.read_sigma0, fd.a.read_vel_frac, fd.a.tau_read, view, fd.err, None);
+                                snap += ((old.at(sim.t).0 - b).dot(l)).powi(2);
+                            }
+                            if next >= 1 {
+                                assert_meets_the_ground(&sim.predict(i), radius, &format!("LA {la} spray {spray} play {play}, fielder {i}"));
+                            }
+                        }
+                        next += 1;
+                    }
+                    sim.t += DT;
+                }
+            }
+        }
+        let rms = |k: usize| m::sqrt(sums[k][1] / sums[k][0]);
+        for (k, off) in offs.iter().enumerate() {
+            println!("{off:+.2} s from the bounce: {} reads, RMS error {:.2} m, RMS σ {:.2} m, mean e²/σ² {:.2}, RMS error in a look's σ at that range {:.3}", sums[k][0], rms(k), m::sqrt(sums[k][2] / sums[k][0]), sums[k][3] / sums[k][0], m::sqrt(sums[k][4] / sums[k][0]));
+        }
+        let snap = m::sqrt(snap / sums[1][0]);
+        println!("the snapshot read a moment after the bounce: RMS error {snap:.2} m");
+        assert!(sums[0][0] >= 200.0 && sums[1][0] == sums[0][0], "{:?}", sums.map(|c| c[0]));
+        assert!(rms(1) <= rms(0), "a moment after the bounce {:.2} m, before it {:.2} m", rms(1), rms(0));
+        let rel = |k: usize| m::sqrt(sums[k][4] / sums[k][0]);
+        assert!(rel(3) <= 1.1 * rel(1) && rel(2) <= 1.1 * rel(1), "in a look's σ at that range: {:.3} a moment after, {:.3} at 0.5 s, {:.3} a second on", rel(1), rel(2), rel(3));
+        assert!(snap > rms(1), "the snapshot read {snap:.2} m, the track {:.2} m", rms(1));
+        for k in 1..4 {
+            let q = sums[k][3] / sums[k][0];
+            assert!(q > 0.5 && q < 2.0, "{:+.2} s: mean e²/σ² {q:.2}", offs[k]);
+        }
     }
 
     // Codex tracking-read review P2-3: below 2 m the reach estimate (`run_time_to`, with
@@ -12926,6 +13695,7 @@ mod tests {
             t: sim.t,
             view: RUNNER_READ_DELAY_S,
             contact_since: Some(RUNNER_READ_DELAY_S),
+            rolling: false,
         };
         for fd in &mut sim.f {
             fd.pos = Vec3::new(-70.0, 30.0, 0.0);
@@ -12991,7 +13761,7 @@ mod tests {
             sim.r[0].reading_contact = false;
             sim.t = inp.t_contact + RUNNER_READ_DELAY_S;
             let (p, v) = sim.ball_at(sim.t);
-            let look = ContactLook { motion: (p, v * 1.12), from: sim.runner_pos(&sim.r[0]), t: sim.t, view: RUNNER_READ_DELAY_S, contact_since: Some(RUNNER_READ_DELAY_S) };
+            let look = ContactLook { motion: (p, v * 1.12), from: sim.runner_pos(&sim.r[0]), t: sim.t, view: RUNNER_READ_DELAY_S, contact_since: Some(RUNNER_READ_DELAY_S), rolling: false };
             assert!(look.project(inp.field, [0.0; 4]).first_bounce().is_none(), "he reads it over the fence");
             sim.read_contact(0, look);
             assert!(sim.r[0].goal == 2 && sim.r[0].fly_look.is_some(), "he goes at his first look");

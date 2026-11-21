@@ -393,6 +393,40 @@ pub const ROLL_VZ: f64 = 0.6;
 /// Below this speed a rolling ball is at rest, m/s.
 pub const REST_SPEED: f64 = 0.05;
 
+/// A ball rolling from `r0` (on the ground, radius `r`) at level velocity `vh` at time `t`,
+/// slowing at `decel` (μ_r·g of the surface it began to roll on, physics-spec §9.2) until it
+/// rests: its segments. A rolling ball stops at the wall; one rolling into a dugout leaves the
+/// field (§9.5).
+pub fn roll_from(field: &Field, r0: Vec3, vh: Vec3, decel: f64, t: f64, r: f64) -> Vec<Segment> {
+    let t_stop = t + vh.norm() / decel;
+    let dir = vh.normalized();
+    let sp = vh.norm();
+    let (mut lo, mut hi) = (0.0, t_stop - t);
+    let pos = |dt: f64| r0 + dir * (sp * dt - 0.5 * decel * dt * dt);
+    let beyond = |p: Vec3| field.ball_clearance(p.x, p.y, r).dist < 0.0;
+    if beyond(pos(hi)) {
+        for _ in 0..40 {
+            let mid = 0.5 * (lo + hi);
+            if beyond(pos(mid)) { hi = mid } else { lo = mid }
+        }
+        let p = pos(lo);
+        // Rolling into a dugout, it leaves the field (physics-spec §9.5).
+        let w = field.ball_clearance(pos(hi).x, pos(hi).y, r);
+        if field.wall_top(&w) <= 0.0 {
+            let v_in = dir * (sp - decel * hi).max(0.0);
+            return vec![
+                Segment::Roll { t0: t, r0, v0: vh, decel, t_stop: t + hi },
+                Segment::Flight { tr: Trajectory::single(t + hi, BallState { r: pos(hi), v: v_in, w: Vec3::ZERO }), end: SegmentEnd::OverFence { fair: Field::fair(p.x, p.y) } },
+            ];
+        }
+        // Treat the stop as abrupt: model the roll as decelerating to rest there.
+        let d = (p - r0).norm();
+        let decel2 = if d > 0.0 { sp * sp / (2.0 * d) } else { decel };
+        return vec![Segment::Roll { t0: t, r0, v0: vh, decel: decel2, t_stop: t + sp / decel2 }];
+    }
+    vec![Segment::Roll { t0: t, r0, v0: vh, decel, t_stop }]
+}
+
 /// Fly a fair/foul batted ball over the field: flights, bounces, wall caroms, and the final
 /// roll. `tilts` supplies one roughness tilt per bounce (index = bounce number).
 pub fn batted_path(env: &FlightEnv, field: &Field, s0: BallState, t0: f64, tilts: impl FnMut(u32, &Surface) -> (f64, f64)) -> BallPath {
@@ -435,38 +469,7 @@ pub fn batted_path_dt(env: &FlightEnv, field: &Field, s0: BallState, t0: f64, dt
                 if nb.v.z < ROLL_VZ {
                     // Roll (physics-spec §9.2): constrained to the surface, decelerating at μ_r·g.
                     let vh = Vec3::new(nb.v.x, nb.v.y, 0.0);
-                    let decel = surf.mu_r * G;
-                    let t_stop = t + vh.norm() / decel;
-                    // A rolling ball stops at the wall.
-                    let r0 = Vec3::new(nb.r.x, nb.r.y, r);
-                    let dir = vh.normalized();
-                    let sp = vh.norm();
-                    let (mut lo, mut hi) = (0.0, t_stop - t);
-                    let pos = |dt: f64| r0 + dir * (sp * dt - 0.5 * decel * dt * dt);
-                    let beyond = |p: Vec3| field.ball_clearance(p.x, p.y, r).dist < 0.0;
-                    if beyond(pos(hi)) {
-                        for _ in 0..40 {
-                            let mid = 0.5 * (lo + hi);
-                            if beyond(pos(mid)) { hi = mid } else { lo = mid }
-                        }
-                        let p = pos(lo);
-                        // Rolling into a dugout, it leaves the field (physics-spec §9.5).
-                        let w = field.ball_clearance(pos(hi).x, pos(hi).y, r);
-                        if field.wall_top(&w) <= 0.0 {
-                            segs.push(Segment::Roll { t0: t, r0, v0: vh, decel, t_stop: t + hi });
-                            let v_in = dir * (sp - decel * hi).max(0.0);
-                            segs.push(Segment::Flight { tr: Trajectory::single(t + hi, BallState { r: pos(hi), v: v_in, w: Vec3::ZERO }), end: SegmentEnd::OverFence { fair: Field::fair(p.x, p.y) } });
-                            return BallPath { segments: segs, bounces, walls };
-                        }
-                        let v_wall = (sp - decel * lo).max(0.0);
-                        // Treat the stop as abrupt: model the roll as decelerating to rest there.
-                        let d = (p - r0).norm();
-                        let decel2 = if d > 0.0 { sp * sp / (2.0 * d) } else { decel };
-                        let _ = v_wall;
-                        segs.push(Segment::Roll { t0: t, r0, v0: vh, decel: decel2, t_stop: t + sp / decel2 });
-                        return BallPath { segments: segs, bounces, walls };
-                    }
-                    segs.push(Segment::Roll { t0: t, r0, v0: vh, decel, t_stop });
+                    segs.extend(roll_from(field, Vec3::new(nb.r.x, nb.r.y, r), vh, surf.mu_r * G, t, r));
                     return BallPath { segments: segs, bounces, walls };
                 }
                 s = nb;
