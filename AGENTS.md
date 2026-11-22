@@ -67,6 +67,7 @@ bb_cli       `sim-cli` lab binary
 cd sim && cargo test --workspace          # all tests (unit, golden, oracle cross-checks)
 python3 bin/check-docs.py                # docs drift: dead links/anchors/paths, TASKS.md size cap (--all adds dated records)
 python3 -m unittest bin/test_check_docs.py  # tests for the docs check
+bin/worker-wait.sh worker-1 --timeout 600  # block until a worker (started with BB_WORKER_NAME=worker-1) stops: docs/worker-status-hooks.md
 cargo run --release -p bb_cli -- arsenal  # pitch-type table for an average pitcher
 cargo run --release -p bb_cli -- pitch --type SL --n 20 --rrd out/sl.rrd
 cargo run --release -p bb_cli -- tunnel --with CU --json out/t.json

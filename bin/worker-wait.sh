@@ -5,8 +5,8 @@
 # Prints "<name>: <reason>: <status line>" and exits 0 on the first hit.
 # Exit 3 on timeout, 2 on usage error. Terminal lines older than this script's start
 # are ignored unless --any-age (the stale check always applies). A "working" or "started" line whose file has not been
-# touched for --stale seconds (default 900; PostToolUse refreshes it) returns "stale".
-names=(); timeout=0; stale=900; anyage=0; dir=""
+# touched for --stale seconds (default 1800; PostToolUse refreshes it) returns "stale".
+names=(); timeout=0; stale=1800; anyage=0; dir=""
 while [ $# -gt 0 ]; do
   case $1 in
     --timeout) timeout=$2; shift 2;;
