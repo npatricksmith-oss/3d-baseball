@@ -5047,47 +5047,78 @@ impl<'a> Sim<'a> {
     /// (a wall counts, at its distance). `None` while it has not come down, or if a fielder
     /// secured it first.
     fn first_down_m(&self) -> Option<f64> {
+        self.first_down_pt().map(|p| m::hypot(p.x, p.y))
+    }
+
+    /// Where the batted ball first came down, as everyone saw it (a wall counts); `None` while it
+    /// has not come down, or if a fielder secured it first.
+    fn first_down_pt(&self) -> Option<Vec3> {
         self.out.facts.iter().find_map(|f| match *f {
-            Input::BallTouched { what: Touch::Ground { x, y } | Touch::Wall { x, y }, .. } => Some(Some(m::hypot(x, y))),
+            Input::BallTouched { what: Touch::Ground { x, y } | Touch::Wall { x, y }, .. } => Some(Some(Vec3::new(x, y, 0.0))),
             Input::GloveSecured { .. } => Some(None),
             _ => None,
         })?
     }
 
     /// A deep ball (agent-models §5.7), one the relay man goes out for: fielded at `from`,
-    /// beyond `RELAY_DEEP_M` from home, after being hit over or past an outfielder. A ball hit
-    /// on the ground (first down within the infield dirt, `INFIELD_R`) is deep only once it
-    /// has got past the outfielder fielding it, as everyone sees it: in his hands deeper than
-    /// his pre-pitch spot (he went back for it); loose, the ball now deeper than both that
-    /// spot and the man known to be going for it. A ground single fielded in front of him is
-    /// not deep, however deep he plays. (Judged by where it is fielded alone, a grounder
-    /// rolling straight at the centre fielder flickered between deep and not as he started in;
-    /// with nobody known to have it, by the outfielder whose spot is nearest `from`.)
+    /// beyond `RELAY_DEEP_M` from home, after being hit over or past an outfielder. In the air
+    /// or caught, by `from` alone; first down beyond `RELAY_DEEP_M`, deep. A ball first down in
+    /// the outfield short of that (a line drive or blooper that fell in) is deep once it is
+    /// deeper than the pre-pitch spot of the outfielder whose spot is nearest where it came
+    /// down, or, while loose, while a middle infielder is known to be out as its relay man
+    /// (he went out while it was up): a fixed mark and the infield's known call, so it changes
+    /// at most once (2026-11-22; before, it was deep whenever fielded beyond `RELAY_DEEP_M`, and
+    /// a liner falling in front of a deep outfielder was deep until he came in). A ball hit on
+    /// the ground (first down within the infield dirt, `INFIELD_R`) is deep only once it has
+    /// got past the outfielder fielding it, as everyone sees it: in his hands deeper than his
+    /// pre-pitch spot (he went back for it); loose, the ball now deeper than both that spot and
+    /// the man known to be going for it. A ground single fielded in front of him is not deep,
+    /// however deep he plays. (Judged by where it is fielded alone, a grounder rolling straight
+    /// at the centre fielder flickered between deep and not as he started in; with nobody known
+    /// to have it, by the outfielder whose spot is nearest `from`.)
     fn deep_ball(&self, from: Vec3) -> bool {
         let depth = |p: Vec3| m::hypot(p.x, p.y);
         if depth(from) <= RELAY_DEEP_M {
             return false;
         }
         // In the air, or caught: by where it is being fielded alone.
-        let Some(down) = self.first_down_m() else { return true };
-        let of = match self.ball {
-            Ball::Held { by } if by >= 6 => by,
-            Ball::Free { .. } if self.lead().is_some_and(|l| l >= 6) => self.lead().expect("checked"),
-            _ => (6..9).min_by(|&a, &c| (self.home[a] - from).norm().total_cmp(&(self.home[c] - from).norm())).expect("three outfielders"),
-        };
-        // First down beyond the infield dirt and no shallower than the outfielder's spot: over or
-        // past him. First down in front of him (on the dirt, or shorter than his spot): deep only
-        // once it has got past him.
-        if down >= INFIELD_R && down >= depth(self.home[of]) {
+        let Some(down) = self.first_down_pt() else { return true };
+        if depth(down) >= RELAY_DEEP_M {
             return true;
+        }
+        if depth(down) >= INFIELD_R {
+            // First down in the outfield short of `RELAY_DEEP_M`, in front of the outfielders: deep
+            // once it is deeper than the pre-pitch spot of the outfielder whose spot is nearest
+            // where it came down (loose, or in a fielder's hands). A fixed mark for the ball, so
+            // the judgment changes at most once.
+            let spot = (6..9).map(|j| self.home[j]).min_by(|a, c| (*a - down).norm().total_cmp(&(*c - down).norm())).expect("three outfielders");
+            let now = match self.ball {
+                Ball::Free { .. } => depth(self.ball_at(self.t).0),
+                _ => depth(from),
+            };
+            // While it is loose, a middle infielder known to be out as its relay man (he went out
+            // while it was up, by his own read: the infield has called it over or past the
+            // outfielders) keeps it a deep ball: the relay toward home, or toward third but for
+            // the shortstop's cutoff to third with a runner on first.
+            let relay_out = matches!(self.ball, Ball::Free { .. })
+                && [3, 5].iter().any(|&j| match self.known_job(j).0 {
+                    Role::Relay(4) => true,
+                    Role::Relay(3) => j == 3 || self.relay_base(false, 5) == 2,
+                    _ => false,
+                });
+            return now > depth(spot) || relay_out;
         }
         match self.ball {
             Ball::Held { by } if by >= 6 => depth(from) > depth(self.home[by]),
             Ball::Free { .. } if self.lead().is_some_and(|l| l >= 6) => {
+                let l = self.lead().expect("checked");
                 let now = depth(self.ball_at(self.t).0);
-                now > depth(self.home[of]) && now > depth(self.f[of].pos)
+                now > depth(self.home[l]) && now > depth(self.f[l].pos)
             }
-            _ => depth(from) > depth(self.home[of]),
+            _ => {
+                let of = (6..9).min_by(|&a, &c| (self.home[a] - from).norm().total_cmp(&(self.home[c] - from).norm())).expect("three outfielders");
+                depth(from) > depth(self.home[of])
+            }
         }
     }
 
@@ -5235,9 +5266,12 @@ impl<'a> Sim<'a> {
     /// fields inside `INFIELD_BREAK_R`); by his estimate (`seen_intercept` on his read) no other
     /// infielder the ball has not yet gone by catches it or fields it inside that range, and the
     /// first outfielder to reach it does so only after it has come down, beyond `RELAY_FROM_M`,
-    /// and not over or past him (no deeper than `RELAY_DEEP_M`, or no deeper than his pre-pitch
-    /// spot: not a deep ball). Once made on this ball (`Fielder::air`), his read and estimates are
-    /// not asked again. The catcher and the outfielders do not use it.
+    /// and not as a deep ball as `deep_ball` will judge it once it is down (fielded no deeper
+    /// than `RELAY_DEEP_M`, or coming down short of `RELAY_DEEP_M` and fielded no deeper than the
+    /// spot of the outfielder nearest where it comes down). Only on a read of his that is recent
+    /// (`HEAR_READ_AGE_S`) and still has the ball up; he works it out at each look he takes
+    /// (`LOOK_S`, `Fielder::air_no`). Once made on this ball (`Fielder::air`), his read and
+    /// estimates are not asked again. The catcher and the outfielders do not use it.
     fn air_read(&self, o: usize) -> Option<Vec3> {
         let fd = &self.f[o];
         let gen1 = self.ball_gen + 1;
@@ -5256,8 +5290,13 @@ impl<'a> Sim<'a> {
             return None;
         }
         fd.air_no.set(no);
-        let pred = fd.belief.as_ref()?;
+        // A read of his that is not his view of the ball now is no ground for it: an old one
+        // (`HEAR_READ_AGE_S`), or one that had it down by now.
+        let pred = fd.belief.as_ref().filter(|_| self.t - fd.read_at <= HEAR_READ_AGE_S)?;
         let land = pred.first_bounce()?.0;
+        if land <= self.t {
+            return None;
+        }
         let depth = |p: Vec3| m::hypot(p.x, p.y);
         let infield = |p: Vec3| depth(p) <= INFIELD_BREAK_R;
         if fd.t_int.is_finite() && (fd.t_int < land || infield(fd.int_pt)) {
@@ -5274,8 +5313,14 @@ impl<'a> Sim<'a> {
                 first = Some((t, p, j));
             }
         }
-        let (_, fp, of) = first.expect("three outfielders");
-        if depth(fp) < RELAY_FROM_M || (depth(fp) > RELAY_DEEP_M && depth(fp) > depth(self.home[of])) {
+        let (_, fp, _) = first.expect("three outfielders");
+        // A deep ball by his read (as `deep_ball` will judge it once it is down): fielded beyond
+        // `RELAY_DEEP_M` after coming down no shallower than the spot of the outfielder nearest
+        // where it comes down, or fielded deeper than that spot.
+        let (lx, ly) = (pred.first_bounce()?.1, pred.first_bounce()?.2);
+        let l = Vec3::new(lx, ly, 0.0);
+        let spot = depth((6..9).map(|j| self.home[j]).min_by(|a, c| (*a - l).norm().total_cmp(&(*c - l).norm())).expect("three outfielders"));
+        if depth(fp) < RELAY_FROM_M || (depth(fp) > RELAY_DEEP_M && (depth(l) >= RELAY_DEEP_M || depth(fp) > spot)) {
             return None;
         }
         if (0..6).any(|j| {
