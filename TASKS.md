@@ -21,7 +21,7 @@ Status: `[ ]` not started · `[~]` partly done · `[?]` needs an owner decision
 
 **State.** Nothing is running. Run workers in herdr panes, not as subagents (an interrupted turn kills them).
 
-**Waiting on the owner:** (1) merge `work/worker-hooks`? (2) Q33: new wording for CLAUDE.md's two watch rules; (3) restart the relay worker in a herdr pane. All three recommended yes.
+**Waiting on the owner:** (1) merge `work/worker-hooks`? (2) Q33: new wording for CLAUDE.md's two watch rules; (3) restart the relay worker in a herdr pane. All recommended.
 
 **`work/worker-hooks`** (`ae461ab`, unmerged): worker status hooks and the job queue for long runs (Q34).
 
