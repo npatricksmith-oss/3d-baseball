@@ -6034,7 +6034,12 @@ impl<'a> Sim<'a> {
         let relay = |c: usize| matches!(self.seen(o, c).0, Role::Relay(_)) || (through3 && c == 5) || home_cut == Some(c);
         let ss_busy = self.chasing_as_known_by(o, 5) || relay(5);
         let (first, first_last, second_order) = Self::home_order(relay(2), ss_busy, left);
-        let order: [(usize, &[usize]); 5] = [(0, first), (1, second_order), (2, &[4, 5]), (3, &[1, 0]), (0, first_last)];
+        // Third's order is the one `cover_after_chasers` uses between calls: the third baseman,
+        // the shortstop, then the pitcher. (Before 2026-11-22 the pitcher was left out here, so
+        // with the third baseman and shortstop both out he covered third between calls and went
+        // back to backing up home at each once-a-second re-call: seed 107 play 40, seed 109 play
+        // 209.)
+        let order: [(usize, &[usize]); 5] = [(0, first), (1, second_order), (2, &[4, 5, 0]), (3, &[1, 0]), (0, first_last)];
         let mut second: Vec<usize> = Vec::new();
         if own_second {
             second.push(o);

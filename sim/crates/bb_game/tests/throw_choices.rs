@@ -915,19 +915,56 @@ fn the_relay_man_keeps_the_job_through_the_outfielders_pickup() {
 #[test]
 fn a_deep_ball_with_the_first_baseman_and_shortstop_out_has_second_covered() {
     for (label, text) in [("seed 13 play 224", include_str!("fixtures/a4/13-224.json")), ("seed 93 play 113", include_str!("fixtures/a4/93-113.json"))] {
+        check_base_covered_while_out(text, label, [2, 5], 2);
+    }
+}
+
+/// Before the first throw, at every tick at which the two infielders `men` have both been out on
+/// a cutoff or relay without a break for longer than it takes a teammate to know it and start for
+/// the bag (`CALL_HEARD_S`, 0.3 s, and one tick), someone covers `base`.
+fn check_base_covered_while_out(text: &str, label: &str, men: [usize; 2], base: u8) {
+    let (out, ticks) = replay_jobs(text);
+    let &(t_throw, _) = out.released.first().expect("the premise: the outfielder throws");
+    let both = |k: &bb_game::live::job_trace::Tick| men.iter().all(|&i| (20..30).contains(&k.job[i]));
+    let mut since = None;
+    let mut checked = 0;
+    for k in ticks.iter().filter(|k| k.t < t_throw) {
+        since = if both(k) { since.or(Some(k.t)) } else { None };
+        if let Some(t0) = since.filter(|t0| k.t > t0 + 0.3 + 0.02) {
+            checked += 1;
+            assert!(k.job.contains(&(10 + base)), "{label}: base {base} open at {:.2} s, both out since {t0:.2} s: {:?}", k.t, k.job);
+        }
+    }
+    assert!(checked > 10, "{label}: the premise, both out for a while before the throw ({checked} ticks)");
+}
+
+/// Item 5 of the relay hand-overs job (agent-models §5.7, "The coverage table and the cutoff
+/// men"): with the third baseman out on the cutoff home and the shortstop out as the relay man,
+/// the pitcher is third's man in the tables worked between calls, and must be in the tables worked
+/// at each once-a-second re-call too, or he leaves third at every re-call and comes back 0.3 s
+/// later. Two plays frozen from main `7622093`, a runner on third and a ball to left that the left
+/// fielder runs down: seed 107 play 40 (two out; the pitcher on third and back behind home three
+/// times, third open at 0.95, 1.40 and 2.42 s) and seed 109 play 209 (none out; the shortstop comes
+/// back to third at the re-call at 1.42 s, and the pitcher, on third from 1.27 s, went back behind
+/// home there, on third again at 1.57 s and back at 1.72 s). On 107/40 third is covered while both
+/// are out; on both, before the throw, the pitcher does not go back to a job and leave it again
+/// (A, B, A, B). Fails without the change (seed 107 play 40, third open at 1.40 s).
+#[test]
+fn the_pitcher_keeps_third_while_the_third_baseman_and_shortstop_are_out() {
+    check_base_covered_while_out(include_str!("fixtures/a4/107-40.json"), "seed 107 play 40", [4, 5], 3);
+    for (label, text) in [("seed 107 play 40", include_str!("fixtures/a4/107-40.json")), ("seed 109 play 209", include_str!("fixtures/a4/109-209.json"))] {
         let (out, ticks) = replay_jobs(text);
         let &(t_throw, _) = out.released.first().expect("the premise: the outfielder throws");
-        let both = |k: &bb_game::live::job_trace::Tick| k.job[2] == 24 && (20..30).contains(&k.job[5]);
-        let mut since = None;
-        let mut checked = 0;
+        let mut seq: Vec<(f64, u8)> = Vec::new();
         for k in ticks.iter().filter(|k| k.t < t_throw) {
-            since = if both(k) { since.or(Some(k.t)) } else { None };
-            if let Some(t0) = since.filter(|t0| k.t > t0 + 0.3 + 0.02) {
-                checked += 1;
-                assert!(k.job.contains(&12), "{label}: second open at {:.2} s, both out since {t0:.2} s: {:?}", k.t, k.job);
+            if seq.last().is_none_or(|l| l.1 != k.job[0]) {
+                seq.push((k.t, k.job[0]));
             }
         }
-        assert!(checked > 10, "{label}: the premise, both out for a while before the throw ({checked} ticks)");
+        assert!(seq.iter().any(|s| s.1 == 13), "{label}: the premise, the pitcher covers third: {seq:?}");
+        for w in seq.windows(4) {
+            assert!(!(w[0].1 == w[2].1 && w[1].1 == w[3].1), "{label}: the pitcher flips between jobs {} and {} from {:.2} s: {seq:?}", w[0].1, w[1].1, w[0].0);
+        }
     }
 }
 
