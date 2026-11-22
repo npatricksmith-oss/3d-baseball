@@ -1,5 +1,7 @@
 # Worker status hooks
 
+Long builds and runs are not the worker's own background shells any more: they live in the job queue ([job-queue.md](job-queue.md)), so a `stopped` worker with a job running or queued is waiting, not done.
+
 Each worker session reports its own state through Claude Code hooks, so the Coordinator waits on one file per worker instead of guessing from pane labels, file times or process names. Written against Claude Code 2.1.330.
 
 ## The files
