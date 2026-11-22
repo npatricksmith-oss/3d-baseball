@@ -828,6 +828,41 @@ fn a_single_judged_in_the_air_gives_way_to_a_cutoff_man_who_stays() {
     }
 }
 
+/// Liner-single review P2-2 (agent-models §5.7, "Cutoffs and relays"): a single to the outfield
+/// with a runner on first only. The standard alignment: the throw on the runner goes to third
+/// with the shortstop as the cutoff man, and the first baseman stays at first behind the
+/// batter-runner; nobody lines up for a throw home while the runner from first has not rounded
+/// third. Two plays frozen from main `7622093`, on each of which the runner from first rounds
+/// second before the outfielder throws:
+/// - seed 6 play 6, none out: a fly to right that falls in at (36, 52) m; the right fielder fields
+///   it at (44, 61) m. On `7622093` the first baseman went out on the cutoff home as the runner
+///   passed second and first stood open 0.3 s, until the second baseman saw it;
+/// - seed 3 play 63, two out: a grounder up the middle fielded by the centre fielder at
+///   (−10, 85) m; the same.
+///
+/// From the first call to the outfielder's throw: nobody on the cutoff home, the first baseman
+/// on first at every tick, and at the pickup the shortstop on the cutoff to third. Both fail on
+/// `7622093`.
+#[test]
+fn a_runner_from_first_passing_second_keeps_the_first_baseman_at_first() {
+    for (label, text, by_of) in [("seed 6 play 6", include_str!("fixtures/a4/6-6.json"), 9), ("seed 3 play 63", include_str!("fixtures/a4/3-63.json"), 8)] {
+        let (out, ticks) = replay_jobs(text);
+        let &(t_fielded, by) = out.secured.first().expect("the ball is fielded");
+        assert_eq!(by & 0x7f, by_of, "{label}: the premise, fielded by {by_of}");
+        let &(t_throw, _) = out.released.first().expect("the premise: the outfielder throws");
+        // The runner from first (the second runner's track: the batter's comes first) is past
+        // second, on his way to third, before the throw.
+        let runner = &out.actors[10].1;
+        assert!(runner.iter().any(|(t, p)| *t < t_throw && p.x < -1.0), "{label}: the premise, the runner from first rounds second before the throw at {t_throw:.2} s");
+        for k in ticks.iter().filter(|k| k.t < t_throw) {
+            assert!(!k.job[..6].contains(&24), "{label}: a cutoff home at {:.2} s: {:?}", k.t, k.job);
+            assert_eq!(k.job[2], 11, "{label}: the first baseman not on first at {:.2} s: {:?}", k.t, k.job);
+        }
+        let at = ticks.iter().rev().find(|k| k.t <= t_fielded).expect("a tick at the pickup");
+        assert_eq!(at.job[5], 23, "{label}: the shortstop not on the cutoff to third at the pickup, {:.2} s: {:?}", at.t, at.job);
+    }
+}
+
 /// What must not change (agent-models §5.7: the judgment needs no play for any infielder, and no
 /// sure call or catch in time by an outfielder). Regression guards: each passes on `445ef2c` too.
 /// - Seed 2 play 117 (frozen from `445ef2c`): none out, a runner on second, a pop-up the third

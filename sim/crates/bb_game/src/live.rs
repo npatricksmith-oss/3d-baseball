@@ -5053,11 +5053,17 @@ impl<'a> Sim<'a> {
     /// The base the cutoff or relay man lines up toward (agent-models §5.7): home with a
     /// runner in scoring position, third with a runner on first or on a deep ball, otherwise
     /// second; raised to any base a runner is visibly heading past that, as `viewer` reads
-    /// the runners. The runners on base are those who were on base at the pitch, wherever
-    /// they are now: the batter who has reached first on a single is not a runner on first
-    /// for this (the throw goes to second to hold him, unless he is seen going on).
+    /// the runners. The runners on base are those who were on base at the pitch: the batter who
+    /// has reached first on a single is not a runner on first for this (the throw goes to second
+    /// to hold him, unless he is seen going on). On a single (not `deep`) each counts at the base
+    /// he was on at the pitch: a runner from first who has passed second is still the runner from
+    /// first, the throw on him goes to third with the shortstop cutting and the first baseman
+    /// stays at first behind the batter-runner (liner-single review P2-2; counted at the base he
+    /// had reached, he made the throw home and sent the first baseman out on the cutoff with
+    /// first open). On a deep ball, at the base he has reached: a runner from first going round
+    /// second on an extra-base hit is the run the relay goes home for.
     fn relay_base(&self, deep: bool, viewer: usize) -> u8 {
-        let on = |b: u8| self.r.iter().any(|r| r.start > 0 && !r.out && !r.scored && (r.s / BASE_L + 1e-6).floor() as u8 == b);
+        let on = |b: u8| self.r.iter().any(|r| r.start > 0 && !r.out && !r.scored && if deep { (r.s / BASE_L + 1e-6).floor() as u8 == b } else { r.start == b });
         let mut b = if on(2) || on(3) { 4 } else if on(1) || deep { 3 } else { 2 };
         for r in self.r.iter().filter(|r| !r.out && !r.scored) {
             if let Some(target) = visible_target(r, self.f[viewer].a.throw_choice) {
