@@ -29,6 +29,8 @@ Numbers are only comparable within one seed set and game count. The standard set
 
 ## 1. Where the numbers stand
 
+*Update 2026-11-22 (cutoff and relay hand-overs, `work/relay-handovers`, before its review): runs 4.05 → 4.05 [4.39 → 4.33]; GB/LD/FB/PU hits .309/.666/.104/.006 [.312/.659/.096/.007]; HR/PA 2.70% [2.94%], K% 22.7 [22.1], reached on BIP 33.6% [33.6%]. Within noise; time per game unchanged. See the newest row in §3.*
+
 *Update 2026-11-21 (the infielders' jobs while a line drive or blooper falls in, `work/liner-single-jobs`, with the review fixes): runs 4.08 → 4.05 [4.46 → 4.39]; GB/LD/FB/PU hits .308/.666/.104/.005 [.313/.657/.097/.007]; HR/PA 2.74% [2.95%], K% 22.6 [22.0], reached on BIP 33.5% [33.7%]. Within noise; time per game +4%. See the newest row in §3.*
 
 *Update 2026-11-21 (the infielders' jobs on a ground single with a runner in scoring position, `work/cutoff-home-jobs`): runs 4.08 → 4.08 [4.44 → 4.46]; GB/LD/FB/PU hits .310/.671/.102/.005 [.315/.663/.099/.007]; HR/PA 2.73% [2.98%], K% 22.6 [22.1], reached on BIP 33.7% [34.0%]. All within noise. See the newest row in §3.*
@@ -191,6 +193,12 @@ The "5.48" at the top of the last block is a coincidence of two samples: the div
 ## 3. The rows
 
 Hit rates are per ball in play of that type. "Seed 5" and "seed 2" mean `sim-cli games --seed` with 1,024 games unless a row says otherwise.
+
+### 2026-11-22 (300 games each at `--seed 0` and `--seed 1000`)
+
+| Task | Commit | What changed | Numbers (before → after) | Cause | Open |
+|---|---|---|---|---|---|
+| **Cutoff and relay hand-overs** (TASKS §3 "For the relay review", items 1, 2, 3, 5, 6; [relay hand-overs note](calibration/2026-11-22-relay-handovers.md); agent-models §5.7) | main `7622093` → `work/relay-handovers` sim commit `ea66e2b` (before its review) | On a single each runner counts at the base he was on at the pitch unless he stands on third, so a runner from first rounding second keeps the throw at third with the shortstop cutting and the first baseman at first (liner review P2-2); a corner man known out on the cutoff home keeps the throw home while a runner from base still runs; the known relay man keeps the job through the outfielder's pickup, a held ball judged where it was secured (re-review P2-1); the second baseman leaves first for second when the first baseman is on the cutoff home and the shortstop out (re-review P3-1); the re-call's cover table gives third to the pitcher after the third baseman and shortstop, as between calls; `relay_job`'s cutoff home from a loose ground ball takes the infield gate (cutoff-home P3-3). Every digest changed | Seeds 0 [1000], main → final, back to back, both binaries built fresh (main's repeats the liner-single final's figures line for line): runs 4.05 → 4.05 [4.39 → 4.33]; GB/LD/FB/PU .308/.666/.104/.005 → .309/.666/.104/.006 [.313/.657/.097/.007 → .312/.659/.096/.007]; HR/PA 2.74% → 2.70% [2.95% → 2.94%]; K% 22.6 → 22.7 [22.0 → 22.1]; BB% 8.0 → 8.0 [8.5 → 8.5]; reached on BIP 33.5% → 33.6% [33.7% → 33.6%]; PA/team-game 37.8 → 37.9 [37.9 → 37.8]; pitches/game 239 → 239 [237 → 237]; out of play after a throw 0.123 → 0.110 [0.127 → 0.113] a game; rules warnings {}; 4,792 → 4,895 [4,950 → 4,946] ms per game per core. Game seeds 0–119 (trace probe), runner on first: first open while an outfield hit is loose 29/24/24 → 0/0/0 plays (air in the dirt / air shallow / ground); cutoff or relay man changing hands 45/50/29 → 13/13/8, at the pickup 25/31/13 → 2/1/1; second open 13/22/6 → 14/19/12 plays (item 4's swap); runner in scoring position: within a play or two of main but pickups on shallow air balls 7 → 1, second open on deep balls 3.7 → 2.1 s; the review's `pickup.py` 6 → 0 (note §2) | Where the infielders stand changes, not the throws: the movements are within the seed sets' noise and were not traced. The out-of-play-after-a-throw fall (−0.013 [−0.014] a game, 4 throws in 300 games) not traced | Item 4 (the double cut on a ball past the outfielders) waits on the owner (note §4); a single with a runner on third lines up for home until he scores; item 6's doubled bag on 3 plays (note §5) |
 
 ### 2026-11-21 (300 games each at `--seed 0` and `--seed 1000`)
 

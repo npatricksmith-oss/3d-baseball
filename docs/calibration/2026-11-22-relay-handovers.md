@@ -110,21 +110,21 @@ The rest of item 4 that is not a design choice: no bug found. The out-back-out p
 
 ## 6. Standard run
 
-`sim-cli games --n 300`, seeds 0 [1000], main `7622093` against the final build, run back to back (main's binary is the one built from `7622093`, whose seed 0 output repeats the liner-single final's line for line).
+`sim-cli games --n 300`, seeds 0 [1000], main `7622093` against the final build `ea66e2b`, run back to back on 2026-11-22. Both binaries were built fresh for it: main's from `git archive 7622093` in its own target directory (its output repeats the liner-single final's ledger figures line for line on both seed sets), the final's in this worktree after touching the changed sources (byte-identical to the killed worker's `sim-cli-final2`). Outputs: `sim/target/codex-probes/handover/std3-{main,head}-{0,1000}.txt`.
 
 | | Main `7622093` | Final `ea66e2b` |
 |---|---|---|
-| Runs/team-game | 4.05 [4.39] | FINAL_RUNS |
-| GB / LD / FB / PU hit | .308/.666/.104/.005 [.313/.657/.097/.007] | FINAL_HITS |
-| HR/PA | 2.74% [2.95%] | FINAL_HR |
-| K%, BB% | 22.6, 8.0 [22.0, 8.5] | FINAL_KBB |
-| Reached on BIP | 33.5% [33.7%] | FINAL_BIP |
-| PA/team-game, pitches/game | 37.8, 239 [37.9, 237] | FINAL_PA |
-| Out of play after a throw, a game | 0.123 [0.127] | FINAL_OOP |
+| Runs/team-game | 4.05 [4.39] | 4.05 [4.33] |
+| GB / LD / FB / PU hit | .308/.666/.104/.005 [.313/.657/.097/.007] | .309/.666/.104/.006 [.312/.659/.096/.007] |
+| HR/PA | 2.74% [2.95%] | 2.70% [2.94%] |
+| K%, BB% | 22.6, 8.0 [22.0, 8.5] | 22.7, 8.0 [22.1, 8.5] |
+| Reached on BIP | 33.5% [33.7%] | 33.6% [33.6%] |
+| PA/team-game, pitches/game | 37.8, 239 [37.9, 237] | 37.9, 239 [37.8, 237] |
+| Out of play after a throw, a game | 0.123 [0.127] | 0.110 [0.113] |
 | Rules warnings | {} | {} |
-| Time, ms per game per core (back to back) | MAIN_TIME | FINAL_TIME |
+| Time, ms per game per core (back to back) | 4,792 [4,950] | 4,895 [4,946] |
 
-FINAL_DISCUSSION
+The jobs change where the infielders stand, not how the ball is thrown, and nothing moved beyond the seed sets' noise (runs [−0.06] on seed set 1000; the two sets differ by 0.1–0.2 runs between themselves, and the same build's 300-game figures move by a few hundredths whenever any play in a game changes). Not traced: the out-of-play-after-a-throw fall, 0.123 → 0.110 [0.127 → 0.113] a game, about 4 throws in 300 games. The time per game is the same within the ±2% two back-to-back runs of one binary give (the killed worker's pair on seed 0 had 4,748 → 4,718).
 
 ## Reproduce
 
