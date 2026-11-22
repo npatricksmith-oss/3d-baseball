@@ -780,6 +780,54 @@ fn seed_0_play_17_a_fly_single_with_nobody_on_gets_a_cutoff_man_for_second() {
     assert!(p.y.hypot(p.x) > ticks[0].pos[3].y.hypot(ticks[0].pos[3].x), "he went out: from {:?} to {p:?}", ticks[0].pos[3]);
 }
 
+/// Opus liner-single review P1-1 (agent-models §5.7, "A cutoff man who stays"): a ball in the
+/// air with a runner in scoring position that one infielder judges a single while the man he
+/// counts out on the cutoff home, reading it otherwise, stays on his bag. Three plays frozen from
+/// main `445ef2c`:
+/// - seed 61 play 187, two out, a runner on third: a liner to left that first comes down at 82 m;
+///   the left fielder fields it at 88 m. On `e16a457` the shortstop judged it a single, counted
+///   the third baseman out on the cutoff and covered third with him from 0.70 s to 3.43 s, and
+///   nobody was out on the relay until it came down;
+/// - seed 21 play 86, one out, a runner on third: a fly to right first down at 77 m, fielded at
+///   85.6 m. On `e16a457` the second baseman, out as the relay man, came back at 1.40 s to cover
+///   first with the first baseman until it came down;
+/// - seed 77 play 114, two out, a runner on third: a fly to right-centre first down at 90 m,
+///   fielded at 118 m. On `e16a457` the first and second basemen were both on first from 0.65 s
+///   to 3.42 s.
+///
+/// No bag is held by two men for longer than it takes to know the cutoff man is not going: his
+/// infield gate (every infielder known on this ball, `CALL_HEARD_S` after the first call) and
+/// `CALL_HEARD_S` to see him stay, 0.6 s from the first call. And from `CALL_HEARD_S` after the
+/// outfielder's chase is known (its first tick plus `CALL_HEARD_S`) to the pickup, an infielder
+/// is out on a cutoff or relay at every tick. Each fails on `e16a457`.
+#[test]
+fn a_single_judged_in_the_air_gives_way_to_a_cutoff_man_who_stays() {
+    for (label, text, by_of) in [
+        ("seed 61 play 187", include_str!("fixtures/a4/61-187.json"), 7),
+        ("seed 21 play 86", include_str!("fixtures/a4/21-86.json"), 9),
+        ("seed 77 play 114", include_str!("fixtures/a4/77-114.json"), 8),
+    ] {
+        let (ticks, _, by, out) = loose_jobs(text);
+        assert_eq!(by, by_of, "{label}: the premise, fielded by {by_of} (by {by})");
+        assert!(first_down(&out).is_some_and(|(_, d)| d > 47.4), "{label}: the premise, it falls in the outfield");
+        for b in 1..=4u8 {
+            let mut since: Option<f64> = None;
+            for k in &ticks {
+                if k.job[..6].iter().filter(|&&j| j == 10 + b).count() >= 2 {
+                    let t0 = *since.get_or_insert(k.t);
+                    assert!(k.t - t0 <= 0.61, "{label}: base {b} held by two men from {t0:.2} to {:.2} s: {:?}", k.t, k.job);
+                } else {
+                    since = None;
+                }
+            }
+        }
+        let chase = ticks.iter().find(|k| k.job[6..].contains(&1)).expect("an outfielder goes for it").t;
+        for k in ticks.iter().filter(|k| k.t >= chase + 0.6 - 1e-6) {
+            assert!(k.job[..6].iter().any(|j| (20..30).contains(j)), "{label}: nobody on a cutoff or relay at {:.2} s (the chase known at {:.2} s): {:?}", k.t, chase + 0.3, k.job);
+        }
+    }
+}
+
 /// What must not change (agent-models §5.7: the judgment needs no play for any infielder, and no
 /// sure call or catch in time by an outfielder). Regression guards: each passes on `445ef2c` too.
 /// - Seed 2 play 117 (frozen from `445ef2c`): none out, a runner on second, a pop-up the third

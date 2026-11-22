@@ -1,4 +1,4 @@
-# The infielders' jobs while a line drive or blooper falls in (2026-11-22)
+# The infielders' jobs while a line drive or blooper falls in (2026-11-21)
 
 **Job.** TASKS.md §3, "Middle infielders with no job while a ground single is loose", cases (a) and (d): a liner or blooper that first comes down in the dirt got no single's jobs while it was up, and a line-drive or fly single with nobody on had no cutoff man for second. Branch `work/liner-single-jobs`, from main `445ef2c`. Continues the [cutoff-home note](2026-11-21-cutoff-home-jobs.md) §5 and the [mid-infield note](2026-11-21-mid-infield-jobs.md) §3. Spec: agent-models §5.7, "A ball in the air that will come down in front of an outfielder", "Cutoffs and relays" (the deep ball) and "The cutoff to second".
 
