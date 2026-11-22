@@ -5136,7 +5136,29 @@ impl<'a> Sim<'a> {
     fn second_cutoff_man(&self) -> usize {
         let side = if self.ball_side_x() < 0.0 { 5 } else { 3 };
         let partner = 8 - side;
-        if self.seen(side, partner).0 == Role::Relay(2) { partner } else { side }
+        // When both are known to be out on it (each saw the other's job 0.3 s late, on a ball up
+        // the middle whose side changes), the one known out first keeps it (2026-11-22: seed 6
+        // play 233, the two traded it every 0.3 s for 1.9 s).
+        match (self.known_out_since(partner, 2), self.known_out_since(side, 2)) {
+            (Some(p), Some(o)) if p < o => partner,
+            (Some(_), None) => partner,
+            _ => side,
+        }
+    }
+
+    /// Since when fielder `j` has been known, without a break, to be out on the cutoff toward
+    /// base `b` on this ball (his shown jobs `CALL_HEARD_S` ago and before); `None` if he is not
+    /// known to be on it now.
+    fn known_out_since(&self, j: usize, b: u8) -> Option<f64> {
+        let horizon = self.t - CALL_HEARD_S + 1e-9;
+        let mut since = None;
+        for e in self.f[j].shown.iter().rev().filter(|e| e.at <= horizon) {
+            if e.role != Role::Relay(b) || e.at + 1e-9 < self.ball_since {
+                break;
+            }
+            since = Some(e.at);
+        }
+        since
     }
 
     /// The cutoff man for the throw home from outfielder `of` (agent-models §5.7, the standard
@@ -10694,13 +10716,28 @@ mod tests {
         sim.out.facts.push(Input::BallTouched { t: 0.5, what: Touch::Ground { x: 1.0, y: 9.0 } });
         held_at(&mut sim, 7, Vec3::new(8.0, 110.0, 0.0));
         assert!(matches!(relays(&sim)[..], [(_, Role::Relay(3))]), "{:?}", relays(&sim));
-        // A line drive that came down in front of him and was fielded short of 80 m: as before,
-        // no cutoff man with nobody on.
+        // A line drive that came down in front of him and was fielded short of 80 m: a single;
+        // with nobody on, the second baseman on its side is the cutoff man for second (2026-11-22,
+        // TASKS case (d); before, nobody).
         let mut st = fx.st.clone();
         let mut sim = new_sim(&inp, &mut st);
         sim.out.facts.push(Input::BallTouched { t: 1.5, what: Touch::Ground { x: 5.0, y: 65.0 } });
         held_at(&mut sim, 7, Vec3::new(6.0, 70.0, 0.0));
-        assert!(relays(&sim).is_empty(), "{:?}", relays(&sim));
+        assert_eq!(relays(&sim), vec![(3, Role::Relay(2))]);
+        // The same line drive fielded at 88 m, in front of his 97.5 m spot: still a single, not a
+        // deep ball (before 2026-11-22 a ball first down beyond the dirt was deep whenever it was
+        // fielded beyond `RELAY_DEEP_M`); fielded at 110 m, past his spot by more than
+        // `PAST_OF_M`: deep, the relay man out for third.
+        let mut st = fx.st.clone();
+        let mut sim = new_sim(&inp, &mut st);
+        sim.out.facts.push(Input::BallTouched { t: 1.5, what: Touch::Ground { x: 5.0, y: 65.0 } });
+        held_at(&mut sim, 7, at);
+        assert_eq!(relays(&sim), vec![(3, Role::Relay(2))]);
+        let mut st = fx.st.clone();
+        let mut sim = new_sim(&inp, &mut st);
+        sim.out.facts.push(Input::BallTouched { t: 1.5, what: Touch::Ground { x: 5.0, y: 65.0 } });
+        held_at(&mut sim, 7, Vec3::new(8.0, 110.0, 0.0));
+        assert!(matches!(relays(&sim)[..], [(_, Role::Relay(3))]), "{:?}", relays(&sim));
     }
 
     // Agent-models §5.7 (2026-11-21): the batter who has reached first on a single is not a
