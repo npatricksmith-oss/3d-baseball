@@ -23,3 +23,10 @@ The detail behind TASKS.md "Resume here". Delete this file when the three questi
 **Open (ledger §5):** runs fell 0.21 [0.18] with dp-cover, about 0.04 explained: check noise on more seeds before tracing. Double plays 12.3% per opportunity (MLB 9.8%). Standard runs on main 4.05 [4.39].
 
 **After that:** play 71 (§2: no dive at a ground ball 1.9 m away).
+
+## Update, 2026-11-22 midday (owner's answers)
+
+- **Merge `work/worker-hooks`: yes**, after a Sonnet review (`hooks-review`, review file `docs/reviews/2026-11-22-sonnet-worker-hooks-review.md` on that branch).
+- **Q33: yes**, wording approved as shown to him: one bullet "Workers are their own sessions, and the Coordinator knows each one's real state" replacing CLAUDE.md's "Watch every worker you start" and "Know each worker's real state" (own herdr sessions with `BB_WORKER_NAME`, never subagents; `bin/worker-wait.sh`; long runs in the job queue, `bin/job.sh status` is the truth; a look every 30 minutes and on every notice; restart without asking; warn before `/reload-plugins`, `/clear` or an interrupt while a subagent runs). Put it in CLAUDE.md with the hooks merge.
+- **Q35 (item 4 of the relay job): (c), the textbook double cut.** On a deep ball with a play at home a middle infielder goes out as the relay man and the first baseman lines up behind him as the cutoff man home, whichever field the ball is in; the third baseman stays at third, the other middle infielder covers second. Its own job after `work/relay-handovers` merges: spec agent-models §5.7 first, then code, ledger row, Opus review (relay note §4, `docs/calibration/2026-11-22-relay-handovers.md` on the branch).
+- Relay worker finished: `work/relay-handovers` at `c5eb654`, 523 tests, standard run 4.05 → 4.05 [4.39 → 4.33]. Opus review running (`relay-review`), file `docs/reviews/2026-11-22-opus-relay-handovers-review.md`.
