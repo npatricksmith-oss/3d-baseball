@@ -682,6 +682,24 @@ fn seed_8_play_208_the_first_baseman_holds_first_while_the_second_baseman_runs_t
 }
 
 
+/// Opus cutoff-home review P3-3 (relay hand-overs item 6; agent-models §5.7, "Not changed" no
+/// longer): seed 12 play 9 (frozen from main `7622093`), two out, runners on first and second, a
+/// chopper the shortstop goes for and fields 40 m out, the right fielder coming in as the known
+/// lead. On `7622093` the first baseman went out on the cutoff home at 0.95 s by `relay_job`, with
+/// no infield gate, and first stood empty until 1.35 s. First is covered at every tick from the
+/// first call to the shortstop's pickup, and the first baseman is never on the cutoff while the
+/// shortstop is going for the ball. Fails without the change.
+#[test]
+fn seed_12_play_9_the_first_baseman_holds_first_while_the_shortstop_goes_for_the_chopper() {
+    let (ticks, _, by, _) = loose_jobs(include_str!("fixtures/a4/12-9.json"));
+    assert_eq!(by, 6, "the premise: the shortstop fields it");
+    assert!(ticks.iter().any(|k| k.job[5] == 1 && k.job[8] == 1), "the premise: the shortstop and the right fielder go for it");
+    for k in &ticks {
+        assert!(k.job.contains(&11), "first open at {:.2} s: {:?}", k.t, k.job);
+        assert!(!(k.job[5] == 1 && k.job[2] == 24), "the first baseman on the cutoff home at {:.2} s while the shortstop goes for the ball: {:?}", k.t, k.job);
+    }
+}
+
 /// When the batted ball first came down (time, distance from home), if before anyone secured it.
 fn first_down(out: &LiveOutput) -> Option<(f64, f64)> {
     out.facts.iter().find_map(|f| match *f {

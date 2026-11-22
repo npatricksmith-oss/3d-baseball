@@ -5015,6 +5015,16 @@ impl<'a> Sim<'a> {
         if !deep && (who == 3 || who == 5) && (self.partner_going(who) || (matches!(self.ball, Ball::Free { .. }) && self.first_down_m().is_some_and(|d| d < INFIELD_R) && !self.infield_lets_go(who, b))) {
             return None;
         }
+        // The corner man goes out on the cutoff home from a loose ground ball by the same gate
+        // (toward home: no infielder known to be going for it at all, by his estimate none can
+        // field it in the infield, every infielder known on this ball), as he does at the first
+        // call (`through_job`): first, or third, is not left while an infielder may still field
+        // the ball and make a play there (Opus cutoff-home review P3-3: once an outfielder was
+        // the known lead he went out without it, seed 12 play 9, first open 0.4 s while the
+        // shortstop fielded a chopper 40 m out and threw the batter out at first).
+        if !deep && b == 4 && (who == 2 || who == 4) && matches!(self.ball, Ball::Free { .. }) && self.first_down_m().is_some_and(|d| d < INFIELD_R) && !self.infield_lets_go(who, 4) {
+            return None;
+        }
         // "No play on it": by his own read he cannot be there before it lands (his
         // intercept time is when he could field it, possibly long after the bounce).
         let no_air_play = || {
