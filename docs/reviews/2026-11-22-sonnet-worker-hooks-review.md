@@ -52,4 +52,6 @@ Checked: a `light` job showed affinity `ffff` and niceness 0; two run in paralle
 
 ## Resolution
 
-Open.
+Resolved 2026-11-22 (Coordinator). All eight findings fixed by a Sonnet worker in `edd4cd9`: P2-1 (an option without a value, or a non-numeric one, now exits 2 with a message), P2-2 (a file older than the wait's start is ignored in every state until rewritten; `--any-age` still counts it), P2-3 (PostToolUse rewrites the file only when it reads `working` or `started`), P3-1 to P3-5. The Coordinator reran the review's reproductions for P2-1, P2-2 and P3-3 on `edd4cd9` before merging (`8ab3308`); no re-review (small fixes covered by those reproductions).
+
+Left as known limits, in docs/worker-status-hooks.md: a worker already hung before the wait starts is not reported stale without `--any-age`; the hook's check of the current state and its write are not one step.

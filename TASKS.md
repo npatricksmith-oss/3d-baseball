@@ -1,6 +1,6 @@
 # Task List
 
-**Last updated:** 2026-11-22 (worker status hooks and job queue built, unmerged; relay hand-overs stopped near the end).
+**Last updated:** 2026-11-22 (worker hooks and job queue merged; relay hand-overs in review; Q35 decided).
 
 What is next and what is open. Other files hold the rest:
 
@@ -15,17 +15,17 @@ Status: `[ ]` not started · `[~]` partly done · `[?]` needs an owner decision
 
 ---
 
-## Resume here (2026-11-22, morning)
+## Resume here (2026-11-22, evening)
 
-**Detail: [HANDOFF.md](HANDOFF.md)** (read first; delete when done).
+**Detail: [HANDOFF.md](HANDOFF.md)** (read first; delete when the relay branch is merged).
 
-**State.** Nothing is running. Run workers in herdr panes, not as subagents (an interrupted turn kills them).
+**Merged:** worker status hooks and the job queue (Q34), with CLAUDE.md's new worker rule (Q33). Workers run as their own herdr sessions with `BB_WORKER_NAME`; wait with `bin/worker-wait.sh`; long runs through `bin/job.sh`.
 
-**Waiting on the owner:** (1) merge `work/worker-hooks`? (2) Q33: new wording for CLAUDE.md's two watch rules; (3) restart the relay worker in a herdr pane. All recommended.
+**`work/relay-handovers`** (worktree `.claude/worktrees/runner-decision`, `c5eb654`, unmerged): worker done (523 tests; standard run 4.05 → 4.05 [4.39 → 4.33]). Opus review running or due: `docs/reviews/2026-11-22-opus-relay-handovers-review.md` on the branch. Then findings to a worker, the Coordinator's own test pass and standard run, merge (its TASKS.md edit conflicts here: keep this section, take its §3).
 
-**`work/worker-hooks`** (`ae461ab`, unmerged): worker status hooks and the job queue for long runs (Q34).
+**Next job, decided (Q35, owner: (c)):** the textbook double cut on a deep ball with a play at home (relay man plus the first baseman as cutoff man home on either side; third baseman stays). Spec agent-models §5.7 first; relay note §4.
 
-**`work/relay-handovers`** (worktree `.claude/worktrees/runner-decision`, `ea66e2b`, unmerged): items 1, 2, 3, 5, 6 committed, tests pass (523). Uncommitted there: the note, a TASKS.md edit. Missing: standard run, ledger row, item 4's question, review.
+**Waiting on the owner:** nothing.
 
 **Open (ledger §5):** runs fell 0.21 [0.18] with dp-cover, 0.04 explained: check noise first. Double plays 12.3% (MLB 9.8%). Standard runs 4.05 [4.39].
 
