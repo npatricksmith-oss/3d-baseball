@@ -19,9 +19,7 @@ Status: `[ ]` not started · `[~]` partly done · `[?]` needs an owner decision
 
 **Detail: [HANDOFF.md](HANDOFF.md)** (read first; delete when the relay branch is merged).
 
-**Merged:** worker status hooks and the job queue (Q34), with CLAUDE.md's new worker rule (Q33). Workers run as their own herdr sessions with `BB_WORKER_NAME`; wait with `bin/worker-wait.sh`; long runs through `bin/job.sh`.
-
-**`work/relay-handovers`** (worktree `.claude/worktrees/runner-decision`, `c5eb654`, unmerged): worker done (523 tests; standard run 4.05 → 4.05 [4.39 → 4.33]). Opus review running or due: `docs/reviews/2026-11-22-opus-relay-handovers-review.md` on the branch. Then findings to a worker, the Coordinator's own test pass and standard run, merge (its TASKS.md edit conflicts here: keep this section, take its §3).
+**`work/relay-handovers`** (worktree `.claude/worktrees/runner-decision`, `c5eb654`, unmerged): worker done (523 tests; standard run 4.05 → 4.05 [4.39 → 4.33]). Opus review (`relay-review`) running or due, written under docs/reviews on the branch. Then fixes, the Coordinator's test pass and standard run, merge (TASKS.md conflict: keep this section, take its §3).
 
 **Next job, decided (Q35, owner: (c)):** the textbook double cut on a deep ball with a play at home (relay man plus the first baseman as cutoff man home on either side; third baseman stays). Spec agent-models §5.7 first; relay note §4.
 
