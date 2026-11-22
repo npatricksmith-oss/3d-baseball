@@ -3,8 +3,8 @@
 # (see docs/worker-status-hooks.md). Usage:
 #   bin/worker-wait.sh <name>... [--timeout S] [--stale S] [--any-age] [--dir D]
 # Prints "<name>: <reason>: <status line>" and exits 0 on the first hit.
-# Exit 3 on timeout, 2 on usage error. Status lines older than this script's start
-# are ignored unless --any-age. A "working" or "started" line whose file has not been
+# Exit 3 on timeout, 2 on usage error. Terminal lines older than this script's start
+# are ignored unless --any-age (the stale check always applies). A "working" or "started" line whose file has not been
 # touched for --stale seconds (default 900; PostToolUse refreshes it) returns "stale".
 names=(); timeout=0; stale=900; anyage=0; dir=""
 while [ $# -gt 0 ]; do
@@ -29,10 +29,9 @@ while :; do
   for n in "${names[@]}"; do
     f="$dir/$n"; [ -f "$f" ] || continue
     m=$(stat -c %Y "$f" 2>/dev/null) || continue
-    if [ "$anyage" = 0 ] && [ "$m" -lt "$start" ]; then continue; fi
     line=$(head -n1 "$f" 2>/dev/null); state=${line%% *}
     case $state in
-      stopped|blocked|failed|ended) echo "$n: $state: $line"; exit 0;;
+      stopped|blocked|failed|ended) if [ "$anyage" = 0 ] && [ "$m" -lt "$start" ]; then continue; fi; echo "$n: $state: $line"; exit 0;;
       working|started) if [ $(( now - m )) -ge "$stale" ]; then echo "$n: stale (no update for $(( now - m )) s): $line"; exit 0; fi;;
     esac
   done
