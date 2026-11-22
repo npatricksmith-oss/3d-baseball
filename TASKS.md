@@ -17,11 +17,16 @@ Status: `[ ]` not started · `[~]` partly done · `[?]` needs an owner decision
 
 ## Resume here (2026-11-21, late)
 
-**State.** Nothing is waiting on the owner. Nothing is running. Merged today, last: `work/liner-single-jobs` (§3 cases (a), (d): the single's jobs while a liner or blooper is up; [note](docs/calibration/2026-11-21-liner-single-jobs.md), reviews resolved). Standard runs 4.05 [4.39]; the game runs 4% slower.
+**State.** Nothing is waiting on the owner. Nothing is running: the relay hand-overs job was stopped at the owner's request (23:10) and is unmerged on `work/relay-handovers` (below). Merged today, last: `work/liner-single-jobs` (§3 cases (a), (d): the single's jobs while a liner or blooper is up; [note](docs/calibration/2026-11-21-liner-single-jobs.md), reviews resolved). Standard runs 4.05 [4.39]; the game runs 4% slower.
 
 **Open (ledger §5):** runs fell 0.21 [0.18] with dp-cover, about 0.04 explained: check noise on more seeds before tracing. Double plays 12.3% per opportunity (MLB 9.8%).
 
-**Next:** the relay review's items (§3 "For the relay review": cutoff and relay hand-overs, first left open), or play 71 (§2: no dive at a ground ball 1.9 m away). Warm worktree: `.claude/worktrees/runner-decision`.
+**Stopped mid-job: `work/relay-handovers`** (worktree `.claude/worktrees/runner-decision`, job file `WORKER-RELAY-HANDOVERS.md` there, items 1–6 = §3 "For the relay review" plus the `relay_job` gate). Nothing of it is on `main`; no note, ledger row, standard run or review yet.
+- `7413eb8`, item 1 (a runner from first passing second sent the first baseman out as the cutoff man home): runners count at their base at the pitch. Tested (fixtures 6-6, 3-63 fail on `7622093`). Runner on first, 120 games: first uncovered 29/24/24 → 0/0/0 (air to the dirt / air shallow / ground); second uncovered on ground balls 6 → 13 plays (≤0.3 s, item 4's pattern).
+- `40102f7`, WIP, compiles, **tests not run on it**: item 1 refined (a runner standing on third still counts at third; `7413eb8` alone breaks `the_cutoff_lines_up_for_home_with_a_runner_standing_on_third`) and item 2 (the known relay man keeps the job through the pickup; a held ball is judged where it was secured; fixtures 23-94, 115-32, 63-211; spec §5.7). Before the refinement: `pickup.py` 6 → 0, 30 `throw_choices` tests passed. The spec links a note that does not exist yet, so `bin/check-docs.py` fails on the branch.
+- To continue (Opus worker, same worktree and branch): run `cargo test --workspace` and the 120-game trace with `hc.py` on `40102f7` (`tr-i2d.log` is partial); item 3: apply only the `two_to_second` block of `sim/target/codex-probes/handover/live-i3.rs` (a whole old `live.rs`; in `cover_after_chasers`); item 5: the once-a-second re-call's cover table lacks the pitcher for third, which the between-calls table has (107/40, 109/209); item 4 may need an owner question (on a ball past the outfielders, does the corner man stay out as the cutoff man home behind the relay man, and which corner man on a ball to left?); then the note `docs/calibration/2026-11-21-relay-handovers.md`, fixture README entries, ledger row, standard run, Opus review. Probes and traces: `sim/target/codex-probes/handover/` (`tr-base.log` = the liner job's `tr-b8.log`).
+
+**After that:** play 71 (§2: no dive at a ground ball 1.9 m away).
 ---
 
 ## Open sim work, in order
