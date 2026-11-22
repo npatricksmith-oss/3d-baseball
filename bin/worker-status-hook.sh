@@ -11,13 +11,16 @@
   dir="$(dirname "$common")/.claude/worker-status"
   mkdir -p "$dir" 2>/dev/null || exit 0
   input=$(cat 2>/dev/null)
-  BB_DIR="$dir" BB_NAME="$name" BB_PPID="$PPID" BB_IN="$input" timeout 5 python3 -I - <<'PY'
+  BB_DIR="$dir" BB_NAME="$name" BB_PPID="$PPID" BB_IN="$input" BB_WORKER_TRACE="${BB_WORKER_TRACE:-}" timeout 5 python3 -I - <<'PY'
 import json, os, time, subprocess
 try:
     d = json.loads(os.environ.get("BB_IN") or "")
     if not isinstance(d, dict): d = {}
 except Exception:
     d = {}
+tr = os.environ.get("BB_WORKER_TRACE")   # debugging: append every raw event to this file
+if tr:
+    with open(tr, "a") as f: f.write(time.strftime("%H:%M:%S ") + (os.environ.get("BB_IN") or "")[:600].replace("\n", " ") + "\n")
 ev = str(d.get("hook_event_name", ""))
 nt = str(d.get("notification_type", ""))
 why = ""
@@ -42,28 +45,9 @@ if state is None or d.get("agent_id"):
     if not (ev == "PermissionRequest" and state):
         raise SystemExit(0)
 def clean(s): return "".join(c if c.isalnum() or c in "._-:" else "_" for c in s)[:60] or "-"
-# background jobs: descendants of the claude process, excluding this hook's own chain
-bg = 0
-try:
-    rows = {}
-    for l in subprocess.run(["ps", "-eo", "pid=,ppid=,comm="], capture_output=True, text=True, timeout=2).stdout.splitlines():
-        p = l.split(None, 2)
-        if len(p) == 3: rows[int(p[0])] = (int(p[1]), p[2])
-    me = os.getpid(); chain = {me}; x = me
-    while x in rows and rows[x][0] > 1:
-        x = rows[x][0]; chain.add(x)
-        if rows[x][1].startswith(("claude", "node")): break
-    root = x
-    kids = {}
-    for pid, (pp, c) in rows.items(): kids.setdefault(pp, []).append(pid)
-    stack, seen = [root], set()
-    while stack:
-        for k in kids.get(stack.pop(), []):
-            if k in chain or k in seen: continue
-            seen.add(k); stack.append(k)
-            if rows[k][1] not in ("ps", "sleep") or True: bg += 1
-except Exception:
-    pass
+# background shell jobs / tasks still running: the Stop input lists them
+bt = d.get("background_tasks")
+bg = len(bt) if isinstance(bt, list) else 0
 line = "%s %s %s bg=%d why=%s %s\n" % (state, time.strftime("%Y-%m-%dT%H:%M:%SZ", time.gmtime()),
         clean(str(d.get("session_id", "-"))), bg, clean(why), str(d.get("cwd", os.getcwd())).replace("\n", " "))
 path = os.path.join(os.environ["BB_DIR"], os.environ["BB_NAME"])
