@@ -15,7 +15,7 @@ Each worker session reports its own state through Claude Code hooks, so the Coor
 | State | Written on | Meaning |
 | :- | :- | :- |
 | `started` | SessionStart | session is up, no prompt yet (`why` = startup/resume/clear/...) |
-| `working` | UserPromptSubmit, PostToolUse | a prompt was submitted or a tool just finished; PostToolUse also refreshes the file time as a heartbeat |
+| `working` | UserPromptSubmit, PostToolUse | a prompt was submitted or a tool just finished; PostToolUse also refreshes the file time as a heartbeat, but it only rewrites a file already `working` or `started`, so a late async PostToolUse cannot undo `stopped`, `blocked` or `ended` |
 | `blocked` | PermissionRequest, Notification (`permission_prompt`, `elicitation_dialog`, `elicitation_url_dialog`, `agent_needs_input`) | a person has to answer (`why` = tool name or notification type) |
 | `stopped` | Stop | the turn finished; `bg=<n>` is the number of the session's own background tasks still running (from the Stop input's `background_tasks`). `bg>0` means its own shell or task is still going: look before treating it as done |
 | `failed` | StopFailure | the turn ended on an API error (`why` = error type) |
@@ -36,10 +36,10 @@ A worker branch made before this change was merged has no `.claude/settings.json
 ## Waiting
 
 ```bash
-bin/worker-wait.sh worker-1 worker-2 [--timeout S] [--stale S] [--any-age]
+bin/worker-wait.sh worker-1 worker-2 [--timeout S] [--stale S] [--any-age | --since-start]
 ```
 
-Blocks until one named worker is `stopped`, `blocked`, `failed` or `ended`, then prints `<name>: <why returned>: <status line>` and exits 0. Exit 3 on timeout, 2 on bad usage. Polls every 5 s (`inotifywait` is not installed here). Terminal lines whose file is older than the script's own start are ignored (`--any-age` turns that off), so yesterday's files cannot fire it. A `working` or `started` file untouched for `--stale` seconds (default 1800) returns `stale`: a worker that died, or one inside a single tool call longer than that (a long build). Either way the Coordinator looks at the branch log, `git status` and the process list itself. Run it with `run_in_background` to be woken.
+Blocks until one named worker is `stopped`, `blocked`, `failed` or `ended`, then prints `<name>: <why returned>: <status line>` and exits 0. Exit 3 on timeout, 2 on bad usage. Polls every 5 s (`inotifywait` is not installed here). A status file last written before the script started (any state, `working` and `started` included) belongs to an earlier worker of that name and is ignored until the worker rewrites it, so a leftover file cannot fire it; `--since-start` is that default, `--any-age` counts old files too (use it for a worker already running, or hung, before the wait started). A `working` or `started` file untouched for `--stale` seconds (default 1800) returns `stale`: a worker that died, or one inside a single tool call longer than that (a long build). Either way the Coordinator looks at the branch log, `git status` and the process list itself. Run it with `run_in_background` to be woken.
 
 `BB_WORKER_TRACE=<file>` makes the hook append every raw event to a file, for debugging.
 

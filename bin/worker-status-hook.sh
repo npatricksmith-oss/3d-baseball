@@ -10,7 +10,7 @@
   common=$(git rev-parse --path-format=absolute --git-common-dir 2>/dev/null) || exit 0
   dir="$(dirname "$common")/.claude/worker-status"
   mkdir -p "$dir" 2>/dev/null || exit 0
-  input=$(cat 2>/dev/null)
+  input=$(timeout 2 cat 2>/dev/null)
   BB_DIR="$dir" BB_NAME="$name" BB_PPID="$PPID" BB_IN="$input" BB_WORKER_TRACE="${BB_WORKER_TRACE:-}" timeout 5 python3 -I - <<'PY'
 import json, os, time, subprocess
 try:
@@ -51,6 +51,14 @@ bg = len(bt) if isinstance(bt, list) else 0
 line = "%s %s %s bg=%d why=%s %s\n" % (state, time.strftime("%Y-%m-%dT%H:%M:%SZ", time.gmtime()),
         clean(str(d.get("session_id", "-"))), bg, clean(why), str(d.get("cwd", os.getcwd())).replace("\n", " "))
 path = os.path.join(os.environ["BB_DIR"], os.environ["BB_NAME"])
+if ev == "PostToolUse":
+    # async: a late one must not overwrite stopped/blocked/ended; refresh only a live state
+    try:
+        with open(path) as f: cur = f.readline().split(" ", 1)[0]
+    except Exception:
+        cur = ""
+    if cur not in ("working", "started"):
+        raise SystemExit(0)
 tmp = "%s.tmp.%d" % (path, os.getpid())
 with open(tmp, "w") as f: f.write(line)
 os.replace(tmp, path)

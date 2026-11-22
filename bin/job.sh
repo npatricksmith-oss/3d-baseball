@@ -15,6 +15,8 @@ set -u
 PATH="$HOME/.local/bin:$PATH"
 
 die() { echo "job.sh: $*" >&2; exit 2; }
+need() { [ $# -ge 2 ] || die "$1 needs a value"; }                 # need OPT VALUE...
+num() { case $2 in ''|*[!0-9]*) die "$1 needs a number, got '$2'" ;; esac; }   # num WHAT VALUE
 
 ensure_daemon() {
   command -v pueue >/dev/null || die "pueue is not installed (docs/job-queue.md)"
@@ -101,8 +103,8 @@ case "$cmd" in
     group=sim; label=""
     while [ $# -gt 0 ]; do
       case "$1" in
-        --group) group=${2:-}; shift 2 ;;
-        --label) label=${2:-}; shift 2 ;;
+        --group) need "$@"; group=$2; shift 2 ;;
+        --label) need "$@"; label=$2; shift 2 ;;
         --) shift; break ;;
         *) die "run: unknown option '$1' (the command goes after --)" ;;
       esac
@@ -123,9 +125,9 @@ case "$cmd" in
     pueue add --print-task-id -w "$PWD" -g "$group" -l "$label" -- "$line" || die "pueue add failed"
     ;;
   wait)
-    id=${1:-}; [ -n "$id" ] || die "wait: no job id"; shift
+    id=${1:-}; [ -n "$id" ] || die "wait: no job id"; num "job id" "$id"; shift
     max=540
-    while [ $# -gt 0 ]; do case "$1" in --max) max=${2:-540}; shift 2 ;; *) die "wait: unknown option '$1'" ;; esac; done
+    while [ $# -gt 0 ]; do case "$1" in --max) need "$@"; num --max "$2"; max=$2; shift 2 ;; *) die "wait: unknown option '$1'" ;; esac; done
     ensure_daemon
     end=$(( $(date +%s) + max ))
     while :; do
@@ -143,17 +145,19 @@ case "$cmd" in
     ;;
   status)
     ensure_daemon
-    if [ -n "${1:-}" ]; then report status "$1"; [ $? -eq 2 ] && exit 2; exit 0
+    if [ -n "${1:-}" ]; then num "job id" "$1"; report status "$1"; [ $? -eq 2 ] && exit 2; exit 0
     else report status; fi
     ;;
   log)
-    id=${1:-}; [ -n "$id" ] || die "log: no job id"; shift
+    id=${1:-}; [ -n "$id" ] || die "log: no job id"; num "job id" "$id"; shift
     n=200
-    while [ $# -gt 0 ]; do case "$1" in --tail) n=${2:-200}; shift 2 ;; *) die "log: unknown option '$1'" ;; esac; done
-    ensure_daemon; show_log "$id" "$n"
+    while [ $# -gt 0 ]; do case "$1" in --tail) need "$@"; num --tail "$2"; n=$2; shift 2 ;; *) die "log: unknown option '$1'" ;; esac; done
+    ensure_daemon
+    report status "$id" >/dev/null || exit 2     # unknown id: report says "no job" and exits 2
+    show_log "$id" "$n"
     ;;
   kill)
-    id=${1:-}; [ -n "$id" ] || die "kill: no job id"
+    id=${1:-}; [ -n "$id" ] || die "kill: no job id"; num "job id" "$id"
     ensure_daemon; pueue kill "$id"
     ;;
   *) sed -n '2,13p' "$0" | sed 's/^# \{0,1\}//'; exit 2 ;;

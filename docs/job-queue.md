@@ -16,8 +16,8 @@ bin/job.sh log "$id" --tail 50
 bin/job.sh kill "$id"
 ```
 
-- Run `bin/job.sh run` from the directory the command should start in (your worktree). One argument after `--` is a shell line (`'a && b'`); several are a command and its arguments.
-- `--group sim` (the default): one job at a time, wrapped in `taskset -c 0-7 nice` with `CARGO_BUILD_JOBS=2` and `~/.cargo/bin` on the path. Do not add those yourself. `--group light`: two at a time, no wrapping; for docs checks and the Python oracle.
+- Run `bin/job.sh run` from the directory the command should start in (your worktree). One argument after `--` is a shell line (`'a && b'`); several are a command and its arguments, run without a shell: for `VAR=x cmd` use the one-argument form (`'VAR=x cmd'`) or `env VAR=x cmd`.
+- `--group sim` (the default): one job at a time, wrapped in `taskset -c 0-7 nice` with `CARGO_BUILD_JOBS=2` and `~/.cargo/bin` on the path. Do not add those yourself. `--group light`: two at a time, no wrapping; for docs checks and the Python oracle. It is not for sim builds, test runs or measurement runs: it has no `taskset`/`nice` and no one-at-a-time limit, and the laptop crashes when hot.
 - `--label` says whose run it is and what; the default is `$BB_WORKER_NAME` and the branch.
 - `wait` returns 3 at its limit because a foreground command in Claude Code is capped at 10 minutes: call it again. Never end your turn to wait; never start the run in a background shell of your own.
 - A status line reads `3 queued rc=- group=sim start=- run=- label=…  queued behind 2 <label>`: you are waiting on someone else's run.
