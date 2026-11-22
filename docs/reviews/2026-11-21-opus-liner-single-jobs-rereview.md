@@ -220,4 +220,9 @@ Commit: the head of `work/liner-single-jobs` after `7665064` (message "Re-review
 
 ## Resolution
 
-Open.
+Resolved (Coordinator, 2026-11-21). Small findings fixed by a Sonnet worker in `ee6c14b` (see Worker follow-up); no third review (text, a removed unread field and a horizon filter; the standard run on `ee6c14b` is identical line for line to `84e10f8`'s, 4.05 [4.39], and 517 tests pass).
+
+- **P2-1: deferred** to the relay review (TASKS §3, "For the relay review"): the cutoff man home changes at the outfielder's pickup on 6 plays in 120 games (1 on main). It belongs with the other cutoff and relay hand-over items there and changes no outcome in the traces.
+- **P3-1: note corrected**; the second baseman staying on first with second open (13/224, 93/113) and the pitcher's flip (107/40) deferred to the same TASKS entry.
+- **P3-2: fixed** (doc comment, `Fielder::air`'s unread time removed, spec and note wording).
+- **P3-3: fixed** (the date in observations.md; the `CALL_HEARD_S` horizon on the first-showing read). The `stays` latch not keyed by the man: no change, as the re-review says.

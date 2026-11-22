@@ -174,4 +174,11 @@ By the fix worker (not the reviewer), finding by finding. Code, spec, fixtures a
 
 ## Resolution
 
-Open.
+Resolved (Coordinator, 2026-11-21). Fixes by a second Opus worker in `84e10f8` and `0deb7f1` (see Worker follow-up), re-reviewed by Opus ([re-review](2026-11-21-opus-liner-single-jobs-rereview.md): mergeable as is).
+
+- **P1-1: fixed.** A man who judged the ball a single stops counting the cutoff man as out once that man is known to be staying; two men on one bag for over 0.65 s 30 → 0 in seeds 0–119 (23 stretches of exactly 0.6 s remain, two `CALL_HEARD_S`, the rule's floor); over 1 s with no cutoff or relay man 15 → 0. New test `a_single_judged_in_the_air_gives_way_to_a_cutoff_man_who_stays` (fixtures 61-187, 21-86, 77-114).
+- **P2-1: fixed.** The relay man stands down for a corner man's cutoff home only on a ball he reads landing short of `RELAY_DEEP_M`; out-back-out on deep balls 7 → 2.
+- **P2-2: deferred** to the relay review (TASKS §3), reworded as a cutoff-convention bug, not an owner question. It predates this change.
+- **P3-1 to P3-5: fixed** (spec sentence, one measured run-time figure (+4%), suspends/ends, dates to 2026-11-21 with the note renamed, stale comments and README).
+
+Coordinator's check on the final head `ee6c14b`, sources touched: 517 tests pass, 0 fail, 4 ignored; standard run 4.05 [4.39] (main 4.08 [4.46]), output identical line for line to the worker's run on `84e10f8`.
