@@ -834,6 +834,12 @@ const PEEL_BACKUP_M: f64 = 5.0;
 /// coaching guides' cutoff spot) and at most halfway.
 const RELAY_FROM_M: f64 = 50.0;
 const RELAY_DEEP_M: f64 = 80.0;
+/// A line drive or blooper that falls in front of the outfielders (agent-models §5.7, the deep
+/// ball) counts as past an outfielder once it is, or is to be fielded, this much deeper than his
+/// pre-pitch spot, m [E, unsourced]: a ball he takes within it of his spot came to him (he had no
+/// need to go back for it). Without it, a hard liner that skips to the centre fielder at his spot
+/// was a deep ball by a metre either way.
+const PAST_OF_M: f64 = 5.0;
 const RELAY_OF_THROW_M: f64 = 45.0;
 const CUTOFF_M: f64 = 14.0;
 
@@ -5106,7 +5112,7 @@ impl<'a> Sim<'a> {
                     Role::Relay(3) => j == 3 || self.relay_base(false, 5) == 2,
                     _ => false,
                 });
-            return now > depth(spot) || relay_out;
+            return now > depth(spot) + PAST_OF_M || relay_out;
         }
         match self.ball {
             Ball::Held { by } if by >= 6 => depth(from) > depth(self.home[by]),
@@ -5320,7 +5326,7 @@ impl<'a> Sim<'a> {
         let (lx, ly) = (pred.first_bounce()?.1, pred.first_bounce()?.2);
         let l = Vec3::new(lx, ly, 0.0);
         let spot = depth((6..9).map(|j| self.home[j]).min_by(|a, c| (*a - l).norm().total_cmp(&(*c - l).norm())).expect("three outfielders"));
-        if depth(fp) < RELAY_FROM_M || (depth(fp) > RELAY_DEEP_M && (depth(l) >= RELAY_DEEP_M || depth(fp) > spot)) {
+        if depth(fp) < RELAY_FROM_M || (depth(fp) > RELAY_DEEP_M && (depth(l) >= RELAY_DEEP_M || depth(fp) > spot + PAST_OF_M)) {
             return None;
         }
         if (0..6).any(|j| {
