@@ -27,7 +27,7 @@ Status: `[ ]` not started · `[~]` partly done · `[?]` needs an owner decision
 
 **`work/relay-handovers`** (worktree `.claude/worktrees/runner-decision`, `ea66e2b`, unmerged): items 1, 2, 3, 5, 6 committed, tests pass (523). Uncommitted there: the note, a TASKS.md edit. Missing: standard run, ledger row, item 4's question, review.
 
-**Open (ledger §5):** runs fell 0.21 [0.18] with dp-cover, about 0.04 explained: check noise on more seeds first. Double plays 12.3% per opportunity (MLB 9.8%). Standard runs 4.05 [4.39].
+**Open (ledger §5):** runs fell 0.21 [0.18] with dp-cover, 0.04 explained: check noise first. Double plays 12.3% (MLB 9.8%). Standard runs 4.05 [4.39].
 
 **After that:** play 71 (§2: no dive at a ground ball 1.9 m away).
 ---
