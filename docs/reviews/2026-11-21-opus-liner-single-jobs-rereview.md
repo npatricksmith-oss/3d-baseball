@@ -209,6 +209,15 @@ All runs under `taskset -c 0-7 nice`, `CARGO_BUILD_JOBS=2`, one at a time. The w
 
 I did not run the standard run or the whole workspace suite (the worker's `test-final.txt` reports 517 passed). No background job of mine is left running.
 
+## Worker follow-up
+
+Commit: the head of `work/liner-single-jobs` after `7665064` (message "Re-review small findings").
+
+- **P3-2:** `single_cutoff_stays`'s doc comment now describes `could` and the known-at-`t` test as coded. `Fielder::air`'s third element removed (never read; written, initialised and flipped in the isolation harness only). Spec §5.7 and the note §2 item 7 reworded (job may be shown at any time; the gate applies toward second too).
+- **P3-3:** the `CALL_HEARD_S` horizon added to the first-`shown` read in `single_cutoff_stays` (`e.at <= t - CALL_HEARD_S`). Identical result as argued: an entry past the horizon gave `could > t - CALL_HEARD_S`, so `false`, and `find` now returns none, so `false`. `observations.md` "2026-11-22" corrected to "2026-11-21". The unkeyed `stays` latch: no change, as advised.
+- **P3-1:** note §3 reworded (3 of 7 deep plays are the standard alignment; 13/224, 93/113, 107/40 and the second-uncovered figures given) and added to note §5; deferred to TASKS §3 "For the relay review".
+- **P2-1:** not fixed; deferred. In TASKS §3 "For the relay review" and note §5.
+
 ## Resolution
 
 Open.

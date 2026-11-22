@@ -1542,9 +1542,9 @@ struct Fielder {
     through: std::cell::Cell<u64>,
     /// His own judgment, while a batted ball is still up, that it will come down in front of an
     /// outfielder as a single (agent-models §5.7, `Sim::air_read`): the ball (`Sim::ball_gen`)
-    /// plus one on which he made it (0 for none), where by his estimate it will be fielded, and
-    /// when he made it. Once made, his read and his estimates are not asked again on that ball.
-    air: std::cell::Cell<(u64, Vec3, f64)>,
+    /// plus one on which he made it (0 for none), and where by his estimate it will be fielded.
+    /// Once made, his read and his estimates are not asked again on that ball.
+    air: std::cell::Cell<(u64, Vec3)>,
     /// The single's conventions (agent-models §5.7, `Sim::single_cutoff_stays`) have ended for him
     /// on this ball (the ball plus one, 0 for none): the cutoff man they count out is known to him
     /// to be staying on another job.
@@ -5337,7 +5337,7 @@ impl<'a> Sim<'a> {
     fn air_read(&self, o: usize) -> Option<Vec3> {
         let fd = &self.f[o];
         let gen1 = self.ball_gen + 1;
-        let (made, fp, _) = fd.air.get();
+        let (made, fp) = fd.air.get();
         if made == gen1 {
             return Some(fp);
         }
@@ -5398,7 +5398,7 @@ impl<'a> Sim<'a> {
         }) {
             return None;
         }
-        fd.air.set((gen1, fp, self.t));
+        fd.air.set((gen1, fp));
         Some(fp)
     }
 
@@ -5445,10 +5445,13 @@ impl<'a> Sim<'a> {
 
     /// Whether, for fielder `o`, who judged the ball a single while it was up (`air_read`), the
     /// single's conventions have ended on this ball because its cutoff man `c` is staying put
-    /// (agent-models §5.7, Opus liner-single review P1-1): `c` is known to him, on this ball, to
-    /// be on another job than going out on a cutoff or going for the ball, as shown at or after
-    /// the moment `o` made his judgment (so `c`, seeing the same ball, had as long to judge it).
-    /// Two reads of one ball can differ (one man sees it dropping in, the other over the
+    /// (agent-models §5.7, Opus liner-single review P1-1): `c`'s job, as known to him at `t`
+    /// (shown `CALL_HEARD_S` ago, on this ball), is another than going out on a cutoff or going
+    /// for the ball, and `t - CALL_HEARD_S` is at or after `could`: the later of when `o` began
+    /// counting `c` the cutoff man (`Fielder::cut`) and the moment every infielder was known on
+    /// this ball (the first showing of each plus `CALL_HEARD_S`). The job may have been shown at
+    /// any time on this ball (a cover is not shown again). Applies toward second as well as
+    /// toward third and home. Two reads of one ball can differ (one man sees it dropping in, the other over the
     /// outfielder or caught); `o` then plays from what he sees `c` doing, not from what the
     /// convention says he should be doing. Once ended it stays ended on this ball
     /// (`Fielder::stays`); a man known to be out on the cutoff afterwards is in the tables as
@@ -5468,7 +5471,7 @@ impl<'a> Sim<'a> {
         // (`infield_lets_go`), the first showing of each on this ball plus `CALL_HEARD_S`.
         let mut could = self.track_single_cutoff(o, c);
         for j in 0..6 {
-            match self.f[j].shown.iter().find(|e| e.at + 1e-9 >= self.ball_since) {
+            match self.f[j].shown.iter().find(|e| e.at + 1e-9 >= self.ball_since && e.at <= self.t - CALL_HEARD_S + 1e-9) {
                 Some(e) => could = could.max(e.at + CALL_HEARD_S),
                 None => return false,
             }
@@ -8438,7 +8441,7 @@ fn new_sim<'a>(inp: &'a LiveInput<'a>, st: &'a mut RulesState) -> Sim<'a> {
                 last_dive_read: f64::NEG_INFINITY,
                 will_dive: std::cell::Cell::new(false),
                 through: std::cell::Cell::new(0),
-                air: std::cell::Cell::new((0, Vec3::ZERO, 0.0)),
+                air: std::cell::Cell::new((0, Vec3::ZERO)),
                 stays: std::cell::Cell::new(0),
                 cut: std::cell::Cell::new((0, 0, 0.0)),
                 air_no: std::cell::Cell::new((0, 0, 0.0)),
@@ -13377,7 +13380,7 @@ mod tests {
         v.push(("will dive".into(), Box::new(|f: &mut Fielder| f.will_dive.set(!f.will_dive.get()))));
         let gen1 = sim.ball_gen + 1;
         v.push(("through".into(), Box::new(move |f: &mut Fielder| f.through.set(if f.through.get() == gen1 { 0 } else { gen1 }))));
-        v.push(("air".into(), Box::new(move |f: &mut Fielder| f.air.set(if f.air.get().0 == gen1 { (0, Vec3::ZERO, 0.0) } else { (gen1, f.pos, 0.0) }))));
+        v.push(("air".into(), Box::new(move |f: &mut Fielder| f.air.set(if f.air.get().0 == gen1 { (0, Vec3::ZERO) } else { (gen1, f.pos) }))));
         v.push(("stays".into(), Box::new(move |f: &mut Fielder| f.stays.set(if f.stays.get() == gen1 { 0 } else { gen1 }))));
         v.push(("cut".into(), Box::new(move |f: &mut Fielder| f.cut.set(if f.cut.get().0 == gen1 { (0, 0, 0.0) } else { (gen1, 2, f64::NEG_INFINITY) }))));
         v.push(("jump".into(), Box::new(|f: &mut Fielder| f.jump = f.jump + Vec3::new(3.0, -3.0, 0.0))));
