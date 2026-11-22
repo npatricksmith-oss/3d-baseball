@@ -55,6 +55,7 @@ bb_cli       `sim-cli` lab binary
 - **No system gcc/glibc-devel and no sudo on the host.** Rust links through `~/.local/bin/zigcc` (zig from `uv tool install ziglang`), configured in `~/.cargo/config.toml`; if a link or `cc`-crate build fails oddly, suspect that shim first. For anything needing real system packages (e.g. `flatc`), use the toolbx container: `toolbox run -c fedora-toolbox-45 <cmd>` (passwordless `sudo dnf` works inside it).
 - **`/tmp` is a 7.5 GB RAM-backed tmpfs.** Build in the checkout's gitignored `sim/target` (probes and baseline exports under `sim/target/codex-probes/`), never in a new target dir under `/tmp` or a scratchpad.
 - **The laptop crashes when hot.** `sim-cli games` starts 16 threads. Prefix sim runs and full test runs with `taskset -c 0-7 nice`, keep `CARGO_BUILD_JOBS=2`, and never run two measurement runs at once.
+- **Long runs go through the job queue (owner Q34, 2026-11-22; on trial).** A build of more than a few minutes, a full test run or a measurement run is submitted with `bin/job.sh run -- '<command>'` and awaited with `bin/job.sh wait <id>` (call it again while it exits 3), never started as a background shell of your own and never waited for by ending your turn. The queue's `sim` group runs one job at a time and applies `taskset -c 0-7 nice` and `CARGO_BUILD_JOBS=2` itself, and the run outlives your session. [docs/job-queue.md](docs/job-queue.md).
 - Python: `uv` in `~/.local/bin`. The oracle uses only the stdlib (`python3 -m unittest analysis/oracle/test_oracle.py`). Plot scripts: `uv run analysis/plots/<script>.py`.
 - Rerun viewer 0.41.0: `uv tool install rerun-sdk==0.41.0`, then `rerun file.rrd`. The SDK crate is pinned to `=0.41.0` to match.
 - Unreal Engine 5.8.4 (precompiled) belongs at `~/UnrealEngine/5.8.4`, outside the repository. `bin/play.sh` asks before falling back to Rerun when it is missing.
@@ -67,6 +68,8 @@ bb_cli       `sim-cli` lab binary
 cd sim && cargo test --workspace          # all tests (unit, golden, oracle cross-checks)
 python3 bin/check-docs.py                # docs drift: dead links/anchors/paths, TASKS.md size cap (--all adds dated records)
 python3 -m unittest bin/test_check_docs.py  # tests for the docs check
+bin/worker-wait.sh worker-1 --timeout 600  # block until a worker (started with BB_WORKER_NAME=worker-1) stops: docs/worker-status-hooks.md
+bin/job.sh run -- 'cd sim && cargo test --workspace 2>&1'   # long runs go through the queue; then bin/job.sh wait <id>, status, log: docs/job-queue.md
 cargo run --release -p bb_cli -- arsenal  # pitch-type table for an average pitcher
 cargo run --release -p bb_cli -- pitch --type SL --n 20 --rrd out/sl.rrd
 cargo run --release -p bb_cli -- tunnel --with CU --json out/t.json
