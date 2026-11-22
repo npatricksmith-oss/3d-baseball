@@ -64,3 +64,19 @@ diagnostic trace is never part of a fielder's inputs.
   82 m, a fly to right first down at 77 m, a fly to right-centre first down at 90 m). The bag is
   not held by two men for longer than it takes to see the cutoff man not go, and someone is out
   on a cutoff or relay once the outfielder's chase is known.
+- Relay hand-overs (frozen 2026-11-21 and 2026-11-22 from main `7622093`;
+  [relay hand-overs note](../../../../../../docs/calibration/2026-11-22-relay-handovers.md);
+  agent-models §5.7). Each test fails on `7622093` or without its change:
+  - `6-6`, `3-63` (Opus liner-single review P2-2): a fly single to right and a ground single
+    up the middle with a runner on first who rounds second. The first baseman stays on first
+    and the shortstop is the cutoff to third. `13-227`: runners on first and third, a fly
+    single to centre; the first baseman out on the cutoff home keeps it when the run scores.
+  - `23-94`, `115-32`, `63-211` (Opus liner-single re-review P2-1): balls in the air with a
+    runner in scoring position that a middle infielder goes out on as the relay man while up,
+    first down short of 80 m. He keeps the job through the outfielder's pickup to the throw.
+  - `13-224`, `93-113` (re-review P3-1): deep balls with the first baseman on the cutoff home
+    and the shortstop out. Second is covered once both are known out.
+  - `107-40`, `109-209` (item 5): a runner on third, a ball to left with the third baseman and
+    shortstop both out. The pitcher keeps third and does not flip with each re-call.
+  - `12-9` (Opus cutoff-home review P3-3): a chopper the shortstop fields 40 m out with the
+    right fielder the known lead. The first baseman stays on first.

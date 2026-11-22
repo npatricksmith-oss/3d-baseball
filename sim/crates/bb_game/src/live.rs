@@ -5074,6 +5074,12 @@ impl<'a> Sim<'a> {
     /// stopping at second as the outfielder picked the ball up he sent the corner man out late).
     /// On a deep ball each counts at the base he has reached: a runner from first going round
     /// second on an extra-base hit is the run the relay goes home for.
+    /// On a single, a corner man known to `viewer` to be out on the cutoff home keeps the throw
+    /// home while a runner who was on base at the pitch is still running: the lead runner scoring
+    /// does not send him back and the shortstop out for third in his place (2026-11-22: counted
+    /// at the pitch's base, the runner from first behind a runner from third made it third the
+    /// moment the run scored, a hand-over 3.4-3.9 s after contact on 11 plays with runners on
+    /// first and third in 120 games).
     fn relay_base(&self, deep: bool, viewer: usize) -> u8 {
         let moving = self.f[viewer].a.throw_choice.moving_mps;
         let at = |r: &Runner| {
@@ -5081,7 +5087,8 @@ impl<'a> Sim<'a> {
             if deep || (reached == 3 && r.direction * r.v <= moving) { reached } else { r.start }
         };
         let on = |b: u8| self.r.iter().any(|r| r.start > 0 && !r.out && !r.scored && at(r) == b);
-        let mut b = if on(2) || on(3) { 4 } else if on(1) || deep { 3 } else { 2 };
+        let held_home = || !deep && [2, 4].iter().any(|&j| self.seen(viewer, j).0 == Role::Relay(4)) && self.r.iter().any(|r| r.start > 0 && !r.out && !r.scored);
+        let mut b = if on(2) || on(3) || held_home() { 4 } else if on(1) || deep { 3 } else { 2 };
         for r in self.r.iter().filter(|r| !r.out && !r.scored) {
             if let Some(target) = visible_target(r, self.f[viewer].a.throw_choice) {
                 b = b.max(target);

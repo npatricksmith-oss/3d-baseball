@@ -881,6 +881,30 @@ fn a_runner_from_first_passing_second_keeps_the_first_baseman_at_first() {
     }
 }
 
+/// The same rule with runners on first and third (agent-models §5.7, "Cutoffs and relays"): seed 13
+/// play 227 (frozen from main `7622093`), two out, a fly to centre that falls in at 77 m and is
+/// fielded at 86 m, the first baseman out on the cutoff home from 0.95 s. The runner from third
+/// scores before the throw; the runner from first, counted at first, then no longer makes the throw
+/// home, but the corner man already out keeps it while a runner is still going. Counting runners at
+/// the pitch's base alone (`7413eb8`'s rule), the job went to the shortstop on the cutoff to third
+/// as the run scored (3.42 s), 1.7 s before the throw. From the first baseman's going out to the
+/// throw: he stays on the cutoff home and nobody else goes out. Fails without the rule.
+#[test]
+fn a_corner_man_out_on_the_cutoff_home_keeps_it_when_the_lead_runner_scores() {
+    let text = include_str!("fixtures/a4/13-227.json");
+    let (out, ticks) = replay_jobs(text);
+    let &(t_throw, _) = out.released.first().expect("the premise: the outfielder throws");
+    let t_out = ticks.iter().find(|k| k.job[2] == 24).expect("the premise: the first baseman goes out on the cutoff home").t;
+    // The runner from third (the batter's track comes first, then the runners in base order: first,
+    // then third) crosses the plate before the throw.
+    let scored = out.actors[11].1.iter().any(|(t, p)| *t < t_throw && p.x.hypot(p.y) < 1.0);
+    assert!(scored, "the premise: the runner from third scores before the throw at {t_throw:.2} s");
+    for k in ticks.iter().filter(|k| k.t >= t_out && k.t < t_throw) {
+        assert_eq!(k.job[2], 24, "the first baseman off the cutoff home at {:.2} s: {:?}", k.t, k.job);
+        assert!((0..6).all(|i| i == 2 || !(20..30).contains(&k.job[i])), "another man out on a cutoff at {:.2} s: {:?}", k.t, k.job);
+    }
+}
+
 /// Opus liner-single re-review P2-1 (agent-models §5.7, "A deep ball"): a ball in the air with a
 /// runner in scoring position that a middle infielder goes out on as the relay man while it is up,
 /// and that comes down short of `RELAY_DEEP_M` and is fielded beyond it. A real infield does not
