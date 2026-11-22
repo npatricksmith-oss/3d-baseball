@@ -549,6 +549,15 @@ fn check_risp_single_jobs(text: &str, label: &str) -> u16 {
         _ => None,
     });
     assert!(down.is_some_and(|d| d < 47.4), "{label}: the premise, a ground ball (first down {down:?} m)");
+    check_risp_arrangement(&ticks, label, by);
+    by
+}
+
+/// The standard arrangement on a single to an outfielder with a runner in scoring position
+/// (`check_risp_single_jobs`), at the last tick before the catch; and second never open for
+/// longer than the 0.3 s it takes a teammate to learn of a change (`CALL_HEARD_S`) at a stretch,
+/// from the first call to the catch.
+fn check_risp_arrangement(ticks: &[bb_game::live::job_trace::Tick], label: &str, by: u16) {
     let at = ticks.last().expect("ticks before the catch");
     // The cutoff man is the one of the two who went out: the left fielder's ball is the third
     // baseman's and a centre or right fielder's the first baseman's, by who was first going
@@ -559,10 +568,8 @@ fn check_risp_single_jobs(text: &str, label: &str) -> u16 {
         assert_eq!(at.job[i], job, "{label}: fielded by {by}, at {:.2} s fielder {} has job {} (expected {job}): {:?}", at.t, i + 1, at.job[i], at.job);
     }
     assert!(at.target[0].y < 0.0, "{label}: the pitcher's backup spot {:?} is not behind home", at.target[0]);
-    // Second is never open for longer than the 0.3 s it takes a teammate to learn of a change
-    // (`CALL_HEARD_S`) at a stretch, from the first call to the catch.
     let mut since: Option<f64> = None;
-    for k in &ticks {
+    for k in ticks {
         if k.job.contains(&12) {
             since = None;
         } else {
@@ -570,7 +577,6 @@ fn check_risp_single_jobs(text: &str, label: &str) -> u16 {
             assert!(k.t - t0 <= 0.31, "{label}: second open from {t0:.2} to {:.2} s: {:?}", k.t, k.job);
         }
     }
-    by
 }
 
 /// Whether the ball was fielded in front of the outfielder who first secured it: no deeper
@@ -672,5 +678,186 @@ fn seed_8_play_208_the_first_baseman_holds_first_while_the_second_baseman_runs_t
     for k in &ticks {
         assert!(k.job.contains(&11), "first open at {:.2} s: {:?}", k.t, k.job);
         assert!(!(k.job[3] == 1 && k.job[2] == 24), "the first baseman on the cutoff home at {:.2} s while the second baseman goes for the ball: {:?}", k.t, k.job);
+    }
+}
+
+
+/// When the batted ball first came down (time, distance from home), if before anyone secured it.
+fn first_down(out: &LiveOutput) -> Option<(f64, f64)> {
+    out.facts.iter().find_map(|f| match *f {
+        Input::BallTouched { t, what: bb_rules::Touch::Ground { x, y } } => Some(Some((t, x.hypot(y)))),
+        Input::GloveSecured { .. } => Some(None),
+        _ => None,
+    })?
+}
+
+/// A line drive or blooper that falls in front of an outfielder with a runner in scoring
+/// position (agent-models §5.7, "A ball in the air that will come down in front of an
+/// outfielder"): the infielders take the single's jobs while it is up. While it is up no middle
+/// infielder is out on a relay (it is not a deep ball), and the corner man is out on the cutoff
+/// home before it comes down; at the catch, the standard arrangement (`check_risp_arrangement`);
+/// and once everyone can know that no infielder is going for the ball (`CALL_HEARD_S` after the
+/// last one stopped, and after the first call), no middle infielder or corner man stands with no
+/// job for more than that 0.3 s at a stretch.
+fn check_risp_air_single(text: &str, label: &str, down_from: f64, down_to: f64) {
+    let (ticks, _, by, out) = loose_jobs(text);
+    assert!(by >= 7, "{label}: the premise, an outfielder fields it (by {by})");
+    let (t_down, d) = first_down(&out).expect("the premise: it falls in");
+    assert!((down_from..down_to).contains(&d), "{label}: the premise, first down at {d:.1} m");
+    for k in ticks.iter().filter(|k| k.t < t_down) {
+        assert!(!(20..30).contains(&k.job[3]) && !(20..30).contains(&k.job[5]), "{label}: a middle infielder on a relay at {:.2} s, while it is up: {:?}", k.t, k.job);
+    }
+    assert!(ticks.iter().any(|k| k.t < t_down && (k.job[2] == 24 || k.job[4] == 24)), "{label}: no corner man on the cutoff home before it came down at {t_down:.2} s");
+    check_risp_arrangement(&ticks, label, by);
+    let free = ticks.iter().filter(|k| k.job[..6].contains(&1)).map(|k| k.t + 0.3).fold(ticks[0].t + 0.3, f64::max);
+    for i in [2, 3, 4, 5] {
+        let mut since: Option<f64> = None;
+        for k in ticks.iter().filter(|k| k.t > free) {
+            if k.job[i] == 0 {
+                let t0 = *since.get_or_insert(k.t);
+                assert!(k.t - t0 <= 0.31, "{label}: fielder {} with no job from {t0:.2} to {:.2} s", i + 1, k.t);
+            } else {
+                since = None;
+            }
+        }
+    }
+}
+
+/// Seed 5 play 60 (frozen from main `445ef2c`; TASKS §3 case (a)): second inning, none out, a
+/// runner on third, a 105 mph line drive over second that first comes down at 45 m, on the
+/// infield dirt behind the bag, at 1.56 s and skips to the centre fielder, who fields it at
+/// (14, 92) m. On `445ef2c` nobody acted on a single while it was up: the second baseman had no
+/// job at the first call, then went out as a deep ball's relay man toward home (the fielding
+/// point was the centre fielder's feet, 92 m out) until it came down, and only then went to
+/// first while the first baseman went out on the cutoff home. Fails on `445ef2c` (the second
+/// baseman on a relay while it is up).
+#[test]
+fn seed_5_play_60_a_liner_into_the_dirt_with_a_runner_on_third_gets_the_singles_jobs_while_it_is_up() {
+    check_risp_air_single(include_str!("fixtures/a4/5-60.json"), "seed 5 play 60", 0.0, 47.4);
+}
+
+/// Seed 5 play 149 (frozen from `445ef2c`; case (a), the shallow outfield): fifth inning, two
+/// out, runners on first and second, a fly that falls in front of the right fielder at (25, 65)
+/// m at 3.59 s; he fields it at (28, 70) m. On `445ef2c` the second baseman had no job for
+/// 0.6 s, went out as a deep ball's relay man home for 2 s, then had no job again until 0.3 s
+/// after the ball came down, and first stood open while he did. Fails on `445ef2c` (the same).
+#[test]
+fn seed_5_play_149_a_fly_falling_in_front_of_the_right_fielder_gets_the_singles_jobs_while_it_is_up() {
+    check_risp_air_single(include_str!("fixtures/a4/5-149.json"), "seed 5 play 149", 47.4, 80.0);
+}
+
+/// Seed 0 play 17 (frozen from `445ef2c`; TASKS §3 case (d)): second inning, none out, nobody
+/// on, a fly to right that falls in at (34, 52) m at 2.78 s; the right fielder fields it at
+/// (45, 62) m. On `445ef2c` the second baseman went out toward third as a deep ball's relay man
+/// while it was up and had no job from the moment it came down to the catch: nobody lined up
+/// for the throw to second. A single to the outfield with nobody on has the middle infielder on
+/// its side out as the cutoff man for second and his partner on second (agent-models §5.7): from
+/// the moment it comes down to the catch the second baseman is on the cutoff to second and the
+/// shortstop on second, and at the catch the cutoff man is out from where he started and on the
+/// line from the ball to second, between them (within `CUT_LINE_M` = 5 m). Fails on `445ef2c`
+/// (the second baseman with no job once it is down).
+#[test]
+fn seed_0_play_17_a_fly_single_with_nobody_on_gets_a_cutoff_man_for_second() {
+    const SECOND: (f64, f64) = (0.0, 38.795);
+    let (ticks, t_fielded, by, out) = loose_jobs(include_str!("fixtures/a4/0-17.json"));
+    assert_eq!(by, 9, "the premise: the right fielder fields it");
+    let (t_down, d) = first_down(&out).expect("the premise: it falls in");
+    assert!(d > 47.4, "the premise: first down in the outfield, {d:.1} m");
+    for k in ticks.iter().filter(|k| k.t >= t_down) {
+        assert_eq!((k.job[3], k.job[5]), (22, 12), "at {:.2} s, after it came down at {t_down:.2} s: {:?}", k.t, k.job);
+    }
+    let at = ticks.last().expect("ticks before the catch");
+    let ball = out.facts.iter().find_map(|f| match *f {
+        Input::GloveSecured { x, y, .. } => Some((x, y)),
+        _ => None,
+    }).unwrap();
+    let p = at.pos[3];
+    let (lx, ly) = (ball.0 - SECOND.0, ball.1 - SECOND.1);
+    let len = (lx * lx + ly * ly).sqrt();
+    let along = ((p.x - SECOND.0) * lx + (p.y - SECOND.1) * ly) / len;
+    let off = ((p.x - SECOND.0) * ly - (p.y - SECOND.1) * lx).abs() / len;
+    assert!(off < 5.0 && along > 0.0 && along < len, "at {t_fielded:.2} s the cutoff man at ({:.1}, {:.1}) is off the line from second to the ball at ({:.1}, {:.1}): {off:.1} m off, {along:.1} m along", p.x, p.y, ball.0, ball.1);
+    assert!(p.y.hypot(p.x) > ticks[0].pos[3].y.hypot(ticks[0].pos[3].x), "he went out: from {:?} to {p:?}", ticks[0].pos[3]);
+}
+
+/// Opus liner-single review P1-1 (agent-models §5.7, "A cutoff man who stays"): a ball in the
+/// air with a runner in scoring position that one infielder judges a single while the man he
+/// counts out on the cutoff home, reading it otherwise, stays on his bag. Three plays frozen from
+/// main `445ef2c`:
+/// - seed 61 play 187, two out, a runner on third: a liner to left that first comes down at 82 m;
+///   the left fielder fields it at 88 m. On `e16a457` the shortstop judged it a single, counted
+///   the third baseman out on the cutoff and covered third with him from 0.70 s to 3.43 s, and
+///   nobody was out on the relay until it came down;
+/// - seed 21 play 86, one out, a runner on third: a fly to right first down at 77 m, fielded at
+///   85.6 m. On `e16a457` the second baseman, out as the relay man, came back at 1.40 s to cover
+///   first with the first baseman until it came down;
+/// - seed 77 play 114, two out, a runner on third: a fly to right-centre first down at 90 m,
+///   fielded at 118 m. On `e16a457` the first and second basemen were both on first from 0.65 s
+///   to 3.42 s.
+///
+/// No bag is held by two men for longer than it takes to know the cutoff man is not going: his
+/// infield gate (every infielder known on this ball, `CALL_HEARD_S` after the first call) and
+/// `CALL_HEARD_S` to see him stay, 0.6 s from the first call. And from `CALL_HEARD_S` after the
+/// outfielder's chase is known (its first tick plus `CALL_HEARD_S`) to the pickup, an infielder
+/// is out on a cutoff or relay at every tick. Each fails on `e16a457`.
+#[test]
+fn a_single_judged_in_the_air_gives_way_to_a_cutoff_man_who_stays() {
+    for (label, text, by_of) in [
+        ("seed 61 play 187", include_str!("fixtures/a4/61-187.json"), 7),
+        ("seed 21 play 86", include_str!("fixtures/a4/21-86.json"), 9),
+        ("seed 77 play 114", include_str!("fixtures/a4/77-114.json"), 8),
+    ] {
+        let (ticks, _, by, out) = loose_jobs(text);
+        assert_eq!(by, by_of, "{label}: the premise, fielded by {by_of} (by {by})");
+        assert!(first_down(&out).is_some_and(|(_, d)| d > 47.4), "{label}: the premise, it falls in the outfield");
+        for b in 1..=4u8 {
+            let mut since: Option<f64> = None;
+            for k in &ticks {
+                if k.job[..6].iter().filter(|&&j| j == 10 + b).count() >= 2 {
+                    let t0 = *since.get_or_insert(k.t);
+                    assert!(k.t - t0 <= 0.61, "{label}: base {b} held by two men from {t0:.2} to {:.2} s: {:?}", k.t, k.job);
+                } else {
+                    since = None;
+                }
+            }
+        }
+        let chase = ticks.iter().find(|k| k.job[6..].contains(&1)).expect("an outfielder goes for it").t;
+        for k in ticks.iter().filter(|k| k.t >= chase + 0.6 - 1e-6) {
+            assert!(k.job[..6].iter().any(|j| (20..30).contains(j)), "{label}: nobody on a cutoff or relay at {:.2} s (the chase known at {:.2} s): {:?}", k.t, chase + 0.3, k.job);
+        }
+    }
+}
+
+/// What must not change (agent-models §5.7: the judgment needs no play for any infielder, and no
+/// sure call or catch in time by an outfielder). Regression guards: each passes on `445ef2c` too.
+/// - Seed 2 play 117 (frozen from `445ef2c`): none out, a runner on second, a pop-up the third
+///   baseman catches 51 m out: nobody goes out on a cutoff while it is up.
+/// - Seed 11 play 203 (frozen from `445ef2c`): none out, a runner on third, a ball over the
+///   centre fielder that first comes down at 113 m: a deep ball, and a middle infielder is out as
+///   its relay man home while it is up, as before; no corner man on the cutoff home.
+/// - Seeds 155 play 23 and 264 play 109 (the deep fly to left-centre and the sinking liner to
+///   left, a runner on second and none out, both caught): second, the runner's base to tag up at,
+///   and third, the base he would go to, are covered at every tick from the first call to the
+///   catch.
+#[test]
+fn a_ball_an_infielder_catches_a_deep_ball_and_a_caught_fly_keep_their_jobs() {
+    let (ticks, _, by, out) = loose_jobs(include_str!("fixtures/a4/2-117.json"));
+    assert!(by == 5 && first_down(&out).is_none(), "the premise: the third baseman catches it (by {by})");
+    for k in &ticks {
+        assert!(!k.job[..6].iter().any(|j| (20..30).contains(j)), "seed 2 play 117: a cutoff at {:.2} s: {:?}", k.t, k.job);
+    }
+    let (ticks, _, by, out) = loose_jobs(include_str!("fixtures/a4/11-203.json"));
+    let (t_down, d) = first_down(&out).expect("the premise: it falls in");
+    assert!(by >= 7 && d > 100.0, "the premise: over the outfielder ({d:.1} m, by {by})");
+    assert!(ticks.iter().any(|k| k.t < t_down && (k.job[3] == 24 || k.job[5] == 24)), "seed 11 play 203: no relay man out while it is up");
+    for k in ticks.iter().filter(|k| k.t < t_down) {
+        assert!(k.job[2] != 24 && k.job[4] != 24, "seed 11 play 203: a corner man on the cutoff home at {:.2} s: {:?}", k.t, k.job);
+    }
+    for (label, text) in [("seed 155 play 23", include_str!("fixtures/a4/155-23.json")), ("seed 264 play 109", include_str!("fixtures/a4/264-109.json"))] {
+        let (ticks, _, by, out) = loose_jobs(text);
+        assert!(by >= 7 && first_down(&out).is_none(), "{label}: the premise, an outfielder catches it");
+        for k in &ticks {
+            assert!(k.job.contains(&12) && k.job.contains(&13), "{label}: second or third open at {:.2} s: {:?}", k.t, k.job);
+        }
     }
 }
