@@ -5136,29 +5136,22 @@ impl<'a> Sim<'a> {
     fn second_cutoff_man(&self) -> usize {
         let side = if self.ball_side_x() < 0.0 { 5 } else { 3 };
         let partner = 8 - side;
-        // When both are known to be out on it (each saw the other's job 0.3 s late, on a ball up
-        // the middle whose side changes), the one known out first keeps it (2026-11-22: seed 6
-        // play 233, the two traded it every 0.3 s for 1.9 s).
-        match (self.known_out_since(partner, 2), self.known_out_since(side, 2)) {
+        // The man known to have gone out on it first on this ball keeps it, whatever he and his
+        // partner are known to be doing since (2026-11-22: on a blooper up the middle whose side
+        // changed, seed 6 play 233, each in turn saw the other out 0.3 s late and handed it back,
+        // every 0.3 s for 1.9 s).
+        match (self.known_first_out(partner, 2), self.known_first_out(side, 2)) {
             (Some(p), Some(o)) if p < o => partner,
             (Some(_), None) => partner,
             _ => side,
         }
     }
 
-    /// Since when fielder `j` has been known, without a break, to be out on the cutoff toward
-    /// base `b` on this ball (his shown jobs `CALL_HEARD_S` ago and before); `None` if he is not
-    /// known to be on it now.
-    fn known_out_since(&self, j: usize, b: u8) -> Option<f64> {
+    /// When fielder `j` was first known to be out on the cutoff toward base `b` on this ball (his
+    /// shown jobs, `CALL_HEARD_S` ago and before); `None` if he has not been.
+    fn known_first_out(&self, j: usize, b: u8) -> Option<f64> {
         let horizon = self.t - CALL_HEARD_S + 1e-9;
-        let mut since = None;
-        for e in self.f[j].shown.iter().rev().filter(|e| e.at <= horizon) {
-            if e.role != Role::Relay(b) || e.at + 1e-9 < self.ball_since {
-                break;
-            }
-            since = Some(e.at);
-        }
-        since
+        self.f[j].shown.iter().find(|e| e.at + 1e-9 >= self.ball_since && e.at <= horizon && e.role == Role::Relay(b)).map(|e| e.at)
     }
 
     /// The cutoff man for the throw home from outfielder `of` (agent-models §5.7, the standard
