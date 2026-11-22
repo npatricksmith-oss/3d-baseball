@@ -28,3 +28,6 @@ __pycache__/
 
 # Engine downloads never go in the repository
 *.zip
+
+# Worker status files written by bin/worker-status-hook.sh
+/.claude/worker-status/
