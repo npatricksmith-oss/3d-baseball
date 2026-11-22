@@ -17,7 +17,7 @@ Status: `[ ]` not started · `[~]` partly done · `[?]` needs an owner decision
 
 ## Resume here (2026-11-22, morning)
 
-**Detail: [HANDOFF.md](HANDOFF.md)** (read it first; delete it when this is done).
+**Detail: [HANDOFF.md](HANDOFF.md)** (read first; delete when done).
 
 **State.** Nothing is running. Run workers in herdr panes, not as subagents (an interrupted turn kills them).
 
