@@ -898,6 +898,39 @@ fn the_relay_man_keeps_the_job_through_the_outfielders_pickup() {
     }
 }
 
+/// Opus liner-single re-review P3-1 (agent-models §5.7, the coverage table with the first baseman
+/// cutting): a deep ball with the first baseman out on the cutoff home and the shortstop out as the
+/// relay man. Second is the base the batter-runner goes for next, and the second baseman, the one
+/// infielder left free, belongs on it, not on first behind nobody. Two plays frozen from main
+/// `7622093`:
+/// - seed 13 play 224, one out, runners on first and third: a fly to left-centre first down at
+///   86 m, fielded by the left fielder at 92 m; on `7622093` second stood open from 1.25 s to
+///   2.42 s with the second baseman on first;
+/// - seed 93 play 113, one out, a runner on second: a fly over the right fielder's left first down
+///   at 82 m, fielded at 118 m (a triple); second open from 2.47 s to 3.39 s.
+///
+/// Before the first throw, at every tick at which both men have been out without a break for longer
+/// than it takes the second baseman to know it and start for the bag (`CALL_HEARD_S`, 0.3 s, and
+/// one tick), someone covers second. Fails without the change (seed 13 play 224 at 1.59 s).
+#[test]
+fn a_deep_ball_with_the_first_baseman_and_shortstop_out_has_second_covered() {
+    for (label, text) in [("seed 13 play 224", include_str!("fixtures/a4/13-224.json")), ("seed 93 play 113", include_str!("fixtures/a4/93-113.json"))] {
+        let (out, ticks) = replay_jobs(text);
+        let &(t_throw, _) = out.released.first().expect("the premise: the outfielder throws");
+        let both = |k: &bb_game::live::job_trace::Tick| k.job[2] == 24 && (20..30).contains(&k.job[5]);
+        let mut since = None;
+        let mut checked = 0;
+        for k in ticks.iter().filter(|k| k.t < t_throw) {
+            since = if both(k) { since.or(Some(k.t)) } else { None };
+            if let Some(t0) = since.filter(|t0| k.t > t0 + 0.3 + 0.02) {
+                checked += 1;
+                assert!(k.job.contains(&12), "{label}: second open at {:.2} s, both out since {t0:.2} s: {:?}", k.t, k.job);
+            }
+        }
+        assert!(checked > 10, "{label}: the premise, both out for a while before the throw ({checked} ticks)");
+    }
+}
+
 /// What must not change (agent-models §5.7: the judgment needs no play for any infielder, and no
 /// sure call or catch in time by an outfielder). Regression guards: each passes on `445ef2c` too.
 /// - Seed 2 play 117 (frozen from `445ef2c`): none out, a runner on second, a pop-up the third

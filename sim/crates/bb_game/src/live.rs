@@ -6141,12 +6141,23 @@ impl<'a> Sim<'a> {
             Ball::Thrown { .. } => false,
         };
         let one_back = out_of_infield && one_was_out && !relay(2) && !self.chasing_as_known_by(o, 2) && matches!(job(2), Role::Idle | Role::Backup) && job(3) == Role::Cover(1);
+        // With the first baseman out on the cutoff home and the shortstop out on a cutoff or relay
+        // (or going for a ball out of the infield), second is the second baseman's and first is
+        // nobody's (`home_order`): a second baseman on first, put there while the shortstop was
+        // free, leaves it for second. With both of them out on a ball no infielder will field,
+        // second is the base the batter-runner goes for next, and the play at first is over
+        // (Opus liner-single re-review P3-1: he stayed on first with second open about 1.2 s,
+        // seeds 13/224 and 93/113, until a re-call worked the table afresh and sent him there).
+        // A shortstop going for a ball still in the infield may yet throw to first: then the
+        // second baseman stays.
+        let two_to_second = o == 3 && relay(2) && (relay(5) || (ss_busy && out_of_infield)) && matches!(self.f[3].role, Role::Idle | Role::Backup | Role::Cover(1));
         // Reserve kept non-chasing covers first so base 1's fallback never steals Cover(2).
         let mut filled = [false; 5];
         for base in 1..=4u8 {
             let cands: Vec<usize> = order.iter().filter(|e| e.0 == base).flat_map(|e| e.1.iter().copied()).collect();
             let rank = |i: usize| cands.iter().position(|&c| c == i).unwrap_or(cands.len());
-            if let Some(c) = (0..9).filter(|&i| (job(i) == Role::Cover(base) || (ss_claims_second && base == 2 && i == 5) || (two_claims_first && base == 1 && i == 3) || (one_back && base == 1 && i == 2)) && !taken.contains(&i)).min_by_key(|&i| (rank(i), i)) {
+            let holds = |i: usize| (job(i) == Role::Cover(base) && !(two_to_second && i == 3)) || (two_to_second && base == 2 && i == 3);
+            if let Some(c) = (0..9).filter(|&i| (holds(i) || (ss_claims_second && base == 2 && i == 5) || (two_claims_first && base == 1 && i == 3) || (one_back && base == 1 && i == 2)) && !taken.contains(&i)).min_by_key(|&i| (rank(i), i)) {
                 if c == o {
                     return Some(base);
                 }
