@@ -5287,9 +5287,9 @@ impl<'a> Sim<'a> {
     /// fields inside `INFIELD_BREAK_R`); by his estimate (`seen_intercept` on his read) no other
     /// infielder the ball has not yet gone by catches it or fields it inside that range, and the
     /// first outfielder to reach it does so only after it has come down, beyond `RELAY_FROM_M`,
-    /// and not as a deep ball as `deep_ball` will judge it once it is down (fielded no deeper
-    /// than `RELAY_DEEP_M`, or coming down short of `RELAY_DEEP_M` and fielded no deeper than the
-    /// spot of the outfielder nearest where it comes down). Only on a read of his that is recent
+    /// and not as a deep ball as `deep_ball` will judge it once it is down: by his read it comes
+    /// down short of `RELAY_DEEP_M`, and is fielded no deeper than `RELAY_DEEP_M` or no more than
+    /// `PAST_OF_M` deeper than the spot of the outfielder nearest where it comes down. Only on a read of his that is recent
     /// (`HEAR_READ_AGE_S`) and still has the ball up; he works it out at each look he takes
     /// (`LOOK_S`, `Fielder::air_no`). Once made on this ball (`Fielder::air`), his read and
     /// estimates are not asked again. The catcher and the outfielders do not use it.
@@ -5320,6 +5320,13 @@ impl<'a> Sim<'a> {
         }
         let depth = |p: Vec3| m::hypot(p.x, p.y);
         let infield = |p: Vec3| depth(p) <= INFIELD_BREAK_R;
+        // Coming down, by his read, at or beyond `RELAY_DEEP_M`: a catch or a deep ball, never a
+        // single in front of the outfielders (and the commonest ball in the air: asked first).
+        let (_, lx, ly) = pred.first_bounce()?;
+        let l = Vec3::new(lx, ly, 0.0);
+        if depth(l) >= RELAY_DEEP_M {
+            return None;
+        }
         if fd.t_int.is_finite() && (fd.t_int < land || infield(fd.int_pt)) {
             return None;
         }
@@ -5335,13 +5342,11 @@ impl<'a> Sim<'a> {
             }
         }
         let (_, fp, _) = first.expect("three outfielders");
-        // A deep ball by his read (as `deep_ball` will judge it once it is down): fielded beyond
-        // `RELAY_DEEP_M` after coming down no shallower than the spot of the outfielder nearest
-        // where it comes down, or fielded deeper than that spot.
-        let (lx, ly) = (pred.first_bounce()?.1, pred.first_bounce()?.2);
-        let l = Vec3::new(lx, ly, 0.0);
+        // A deep ball by his read (as `deep_ball` will judge it once it is down; it comes down
+        // short of `RELAY_DEEP_M`, above): fielded beyond `RELAY_DEEP_M` and more than `PAST_OF_M`
+        // deeper than the spot of the outfielder nearest where it comes down.
         let spot = depth((6..9).map(|j| self.home[j]).min_by(|a, c| (*a - l).norm().total_cmp(&(*c - l).norm())).expect("three outfielders"));
-        if depth(fp) < RELAY_FROM_M || (depth(fp) > RELAY_DEEP_M && (depth(l) >= RELAY_DEEP_M || depth(fp) > spot + PAST_OF_M)) {
+        if depth(fp) < RELAY_FROM_M || (depth(fp) > RELAY_DEEP_M && depth(fp) > spot + PAST_OF_M) {
             return None;
         }
         if (0..6).any(|j| {
