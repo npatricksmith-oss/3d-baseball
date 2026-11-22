@@ -863,6 +863,41 @@ fn a_runner_from_first_passing_second_keeps_the_first_baseman_at_first() {
     }
 }
 
+/// Opus liner-single re-review P2-1 (agent-models §5.7, "A deep ball"): a ball in the air with a
+/// runner in scoring position that a middle infielder goes out on as the relay man while it is up,
+/// and that comes down short of `RELAY_DEEP_M` and is fielded beyond it. A real infield does not
+/// change its cutoff man as the outfielder picks the ball up: the man already in line stays there
+/// and nobody leaves a base for the line in the last second before the throw. Three plays frozen
+/// from main `7622093`:
+/// - seed 23 play 94, none out, a runner on second: a fly to right first down at 70 m, fielded at
+///   (31, 86) m; on `7622093` the second baseman was the relay man from 0.95 s, and at the pickup
+///   (3.78 s) the first baseman left first for the cutoff home, 2.5 s before the throw;
+/// - seed 115 play 32, one out, runners on first and second: the same at (30, 77) m, the throw
+///   0.8 s after the pickup;
+/// - seed 63 play 211, two out, a runner on second: a liner to left first down at 52 m, fielded
+///   80.2 m out; the left fielder stepped in to throw, and inside 80 m the shortstop gave way to
+///   the third baseman 0.85 s before the throw.
+///
+/// From the pickup to the outfielder's throw, the middle infielder on the relay home at the pickup
+/// keeps it, and nobody else goes out on a cutoff or relay. Each fails on `7622093`.
+#[test]
+fn the_relay_man_keeps_the_job_through_the_outfielders_pickup() {
+    for (label, text) in [("seed 23 play 94", include_str!("fixtures/a4/23-94.json")), ("seed 115 play 32", include_str!("fixtures/a4/115-32.json")), ("seed 63 play 211", include_str!("fixtures/a4/63-211.json"))] {
+        let (out, ticks) = replay_jobs(text);
+        let &(t_fielded, by) = out.secured.first().expect("the ball is fielded");
+        assert!(by & 0x7f >= 7, "{label}: the premise, an outfielder fields it");
+        let (_, d) = first_down(&out).expect("the premise: it falls in");
+        assert!((47.4..80.0).contains(&d), "{label}: the premise, first down in the shallow outfield ({d:.1} m)");
+        let &(t_throw, _) = out.released.first().expect("the premise: the outfielder throws");
+        let at = ticks.iter().rev().find(|k| k.t < t_fielded - 1e-9).expect("a tick before the pickup");
+        let relay = [3, 5].into_iter().find(|&i| at.job[i] == 24).unwrap_or_else(|| panic!("{label}: the premise, a middle infielder on the relay home as the outfielder picks it up: {:?}", at.job));
+        for k in ticks.iter().filter(|k| k.t >= t_fielded - 1e-9 && k.t < t_throw) {
+            assert_eq!(k.job[relay], 24, "{label}: fielder {} off the relay at {:.2} s, after the pickup at {t_fielded:.2} s: {:?}", relay + 1, k.t, k.job);
+            assert!((0..6).all(|i| i == relay || !(20..30).contains(&k.job[i])), "{label}: another man out on a cutoff at {:.2} s, after the pickup at {t_fielded:.2} s: {:?}", k.t, k.job);
+        }
+    }
+}
+
 /// What must not change (agent-models §5.7: the judgment needs no play for any infielder, and no
 /// sure call or catch in time by an outfielder). Regression guards: each passes on `445ef2c` too.
 /// - Seed 2 play 117 (frozen from `445ef2c`): none out, a runner on second, a pop-up the third
