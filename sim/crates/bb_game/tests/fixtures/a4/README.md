@@ -46,3 +46,14 @@ future changed game's earlier pitches.
 Expectations are the tactical cases in agent-models §5.6, not saved chosen
 destinations or simulation output hashes. `audit_intended_goal` in the separate
 diagnostic trace is never part of a fielder's inputs.
+- `5-60`, `5-149`, `0-17` (frozen 2026-11-22 from `445ef2c`, TASKS §3 cases (a) and (d);
+  [liner-single note](../../../../../../docs/calibration/2026-11-22-liner-single-jobs.md)): a
+  liner into the dirt behind second with a runner on third, a fly falling in front of the right
+  fielder with runners on first and second, and a fly single to right with nobody on. While the
+  ball is up the infielders take the single's jobs (agent-models §5.7, "A ball in the air that
+  will come down in front of an outfielder"); with nobody on the second baseman is the cutoff
+  man for second.
+- `2-117` and `11-203` (frozen 2026-11-22 from `445ef2c`): a pop-up the third baseman catches
+  51 m out with a runner on second, and a ball over the centre fielder with a runner on third.
+  What must not change: no cutoff on the first, a middle infielder out as the relay man on the
+  second while it is up.
