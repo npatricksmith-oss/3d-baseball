@@ -149,4 +149,4 @@ No real runner turns from a near base he might make to a far one he cannot. With
 
 ## Resolution
 
-Open.
+Coordinator, 2026-11-23. Every finding fixed by worker-1 (`02ad6f9`, `52902d7`, `9cbb70b`; see Worker follow-up): P2-1 (the base look waits the read time and watches a throw at the base in front of him; a pass by the man covering counts), P2-2 (the forced runner races with the tag past his forced base, OBR 5.09(b)(6)), P2-3 (the trapped runner goes for the base he has the better `p_safe` at, above `TRAPPED_MIN_P`), P2-4 (ledger, TASKS and spec give the traced causes), P3-1 and P3-2. Failed base-relook sends fell from 9 to 1 in 600 games. No re-review: the fixes are test-covered (four new fixtures, each failing on the old rule) and measured; the Coordinator reran the tests and the standard run before merging. Left open in TASKS §1: the remaining out (a look 0.5 s into a throw put it 15 m short), `RELAY_READ_S` 0.6 s against the 0.28–0.47 s rushed return, and held runners starting from rest.

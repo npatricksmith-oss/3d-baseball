@@ -1,6 +1,6 @@
 # Task List
 
-**Last updated:** 2026-11-23 (double cut merged; Q37 open).
+**Last updated:** 2026-11-23 (runner-start note merged; Q37–Q39 open).
 
 What is next and what is open. Other files hold the rest:
 
@@ -17,9 +17,9 @@ Status: `[ ]` not started · `[~]` partly done · `[?]` needs an owner decision
 
 ## Resume here (2026-11-23)
 
-**State.** Nothing is running. **Waiting on the owner: Q37** (stances: looks only (a, recommended) or tied to attributes (b)); it blocks nothing; he watches the swing first. The double cut is merged (Q35 (c), Q36 (a)).
+**State.** Running: worker-1 (Opus) on `work/runner-relook` in `.claude/worktrees/runner-decision` (§1: held runner's relook); then an Opus review. **Waiting on the owner:** Q37 (stances; parked), Q38 (two-out caution at the corners; (a) by outs), Q39 (dive back; (a) build): [runner-start note §6](docs/calibration/2026-11-23-runner-start-open.md#6-plan-ranked).
 
-**Next:** the owner's seed-5593 plays (§2) and play 71 (§2: no dive).
+**Next:** after worker-1, the late-flight catch read, then the tagging runner's relook (note §6). Then §2: seed-5593, play 71.
 
 **Open (ledger §5):** runs down 0.21 [0.18] since dp-cover (0.04 explained; check noise); double plays 12.3% (MLB 9.8%).
 
@@ -34,9 +34,8 @@ One `sim/crates/bb_game/src/live.rs` job at a time. Each job gets a ledger row a
 - [~] **The runner's start (Q27).** Moving secondary leads are merged (2026-11-18): +1.0 m at 3 m/s with 0–1 out, +1.5 m at 5 m/s with two out. All three bases use the contact state, and the live-ball timeline carries the shuffle from release. Early bounces respect the read clock. Runners brake for partway holds and returns, and the rules judge the retouch.
   - The catch-read review follow-up is on `work/catch-read-fixes` for review. The catch and holder forecasts use observations, and the runners use the perceived force through the catch-call reaction. Holds account for signed speed and braking drift, an early legal retouch keeps its decision, and catch height varies continuously with the park's ceiling. The runner on third in seed 1000003000 play 82 is back before the catch and scores. [Review follow-up](docs/reviews/2026-11-18-codex-catch-read-review.md#worker-follow-up).
   - After fly-read (2026-11-19): double-offs per 300 games 0 at 25–50° (MLB about 4: each in-flight relook's noise is fresh and closes as the ball comes down, so a runner always sees the catch coming; deferred review P3-5, levers in the [review](docs/reviews/2026-11-19-opus-fly-read-review.md)), 12.5 at 10–25°, 60.5 below 10°. On singles second to home is 55.1% (MLB 61.7%), first to third 31.2% (31.7%). Long liners still up after 3–4 s read 20–40 m off flown back from the plate cue (70 balls in 48 games; tracking corrects it). [Fly-read note](docs/calibration/2026-11-19-fly-read.md#open).
-  - Open: the last two-out send measurement to center was 117/118 (99.2%, MLB 75–91%), with a longer throw benchmark than at the corners. The runner still uses a single noisy contact look for the catch forecast. Returns brake onto the bag. A dive back remains open.
-  - Deferred P3s from the Opus re-review of the catch-read fixes: a comment at `awaiting_call`'s no-catch clause (the rules cannot produce it today, and it would strand a planted tag-up runner); a test tagging a runner between bases after a non-goal crossing; a pending-catch variant of the 3,000-layout property test.
-  - Deferred review P3s: the third-base route blend turns the lateral velocity in one tick (P3-1); the first decision sees one tick less coasting than its clock (P3-2). [Q27 timing and checks](docs/calibration/2026-11-17-runner-timing.md#final-measurements).
+  - Open, diagnosed 2026-11-23 ([note](docs/calibration/2026-11-23-runner-start-open.md)): two-out sends to center now match MLB (96.5%, Retrosheet 96.2%); the corners are short (81–82% against 91–93%) from caution, not the race. Plan (§6): fix the runner's late-flight catch read (collapses on high flies), then let a tagging runner keep looking (+4 points second to home, 0–1 out). Proposed owner questions: two-out caution by outs; a dive back (90 tag outs going back on grounders per 600 games, MLB 3).
+  - Deferred P3s (catch-read re-review; runner-timing review P3-1, P3-2): note §5 says which go with which fix.
 - [ ] Base relook (§6.4; ledger row 2026-11-23): his look at a throw 0.5 s in misplaces it along his line of sight (σ capped only by the distance flown; the one out in 600 games). `RELAY_READ_S` 0.6 s vs the 0.28–0.47 s rushed return. Held runners start from rest.
 - [ ] Batter-runner stops at first on 97/279 double cuts, some fielded 120 m out (64/196; main too; Opus review Q5).
 - [ ] Fit `AdvanceParams::caution_z` to MLB's attempt and success rates (now 1.0, fitted only to outs on the bases).
