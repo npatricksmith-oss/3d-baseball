@@ -1,6 +1,6 @@
 # Task List
 
-**Last updated:** 2026-11-23 (runner-start note merged; Q37–Q39 open).
+**Last updated:** 2026-11-23 (base relook merged; Q37–Q39 open).
 
 What is next and what is open. Other files hold the rest:
 
@@ -17,9 +17,9 @@ Status: `[ ]` not started · `[~]` partly done · `[?]` needs an owner decision
 
 ## Resume here (2026-11-23)
 
-**State.** Running: worker-1 (Opus) on `work/runner-relook` in `.claude/worktrees/runner-decision` (§1: held runner's relook); then an Opus review. **Waiting on the owner:** Q37 (stances; parked), Q38 (two-out caution at the corners; (a) by outs), Q39 (dive back; (a) build): [runner-start note §6](docs/calibration/2026-11-23-runner-start-open.md#6-plan-ranked).
+**State.** Running: worker-2 (Opus) on `work/late-catch-read` in `.claude/worktrees/saved-plays`: late-flight catch read, then the tagging relook (note §6); then an Opus review. The base relook is merged (`3de8698`). **Waiting on the owner:** Q37 (stances; parked), Q38 (two-out caution at the corners; (a) by outs), Q39 (dive back; (a) build): [runner-start note §6](docs/calibration/2026-11-23-runner-start-open.md#6-plan-ranked).
 
-**Next:** after worker-1, the late-flight catch read, then the tagging runner's relook (note §6). Then §2: seed-5593, play 71.
+**Next:** §2: seed-5593, play 71.
 
 **Open (ledger §5):** runs down 0.21 [0.18] since dp-cover (0.04 explained; check noise); double plays 12.3% (MLB 9.8%).
 
