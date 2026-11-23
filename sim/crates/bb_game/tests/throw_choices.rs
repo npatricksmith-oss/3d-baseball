@@ -682,6 +682,24 @@ fn seed_8_play_208_the_first_baseman_holds_first_while_the_second_baseman_runs_t
 }
 
 
+/// Opus cutoff-home review P3-3 (relay hand-overs item 6; agent-models §5.7, "Not changed" no
+/// longer): seed 12 play 9 (frozen from main `7622093`), two out, runners on first and second, a
+/// chopper the shortstop goes for and fields 40 m out, the right fielder coming in as the known
+/// lead. On `7622093` the first baseman went out on the cutoff home at 0.95 s by `relay_job`, with
+/// no infield gate, and first stood empty until 1.35 s. First is covered at every tick from the
+/// first call to the shortstop's pickup, and the first baseman is never on the cutoff while the
+/// shortstop is going for the ball. Fails without the change.
+#[test]
+fn seed_12_play_9_the_first_baseman_holds_first_while_the_shortstop_goes_for_the_chopper() {
+    let (ticks, _, by, _) = loose_jobs(include_str!("fixtures/a4/12-9.json"));
+    assert_eq!(by, 6, "the premise: the shortstop fields it");
+    assert!(ticks.iter().any(|k| k.job[5] == 1 && k.job[8] == 1), "the premise: the shortstop and the right fielder go for it");
+    for k in &ticks {
+        assert!(k.job.contains(&11), "first open at {:.2} s: {:?}", k.t, k.job);
+        assert!(!(k.job[5] == 1 && k.job[2] == 24), "the first baseman on the cutoff home at {:.2} s while the shortstop goes for the ball: {:?}", k.t, k.job);
+    }
+}
+
 /// When the batted ball first came down (time, distance from home), if before anyone secured it.
 fn first_down(out: &LiveOutput) -> Option<(f64, f64)> {
     out.facts.iter().find_map(|f| match *f {
@@ -824,6 +842,170 @@ fn a_single_judged_in_the_air_gives_way_to_a_cutoff_man_who_stays() {
         let chase = ticks.iter().find(|k| k.job[6..].contains(&1)).expect("an outfielder goes for it").t;
         for k in ticks.iter().filter(|k| k.t >= chase + 0.6 - 1e-6) {
             assert!(k.job[..6].iter().any(|j| (20..30).contains(j)), "{label}: nobody on a cutoff or relay at {:.2} s (the chase known at {:.2} s): {:?}", k.t, chase + 0.3, k.job);
+        }
+    }
+}
+
+/// Liner-single review P2-2 (agent-models §5.7, "Cutoffs and relays"): a single to the outfield
+/// with a runner on first only. The standard alignment: the throw on the runner goes to third
+/// with the shortstop as the cutoff man, and the first baseman stays at first behind the
+/// batter-runner; nobody lines up for a throw home while the runner from first has not rounded
+/// third. Two plays frozen from main `7622093`, on each of which the runner from first rounds
+/// second before the outfielder throws:
+/// - seed 6 play 6, none out: a fly to right that falls in at (36, 52) m; the right fielder fields
+///   it at (44, 61) m. On `7622093` the first baseman went out on the cutoff home as the runner
+///   passed second and first stood open 0.3 s, until the second baseman saw it;
+/// - seed 3 play 63, two out: a grounder up the middle fielded by the centre fielder at
+///   (−10, 85) m; the same.
+///
+/// From the first call to the outfielder's throw: nobody on the cutoff home, the first baseman
+/// on first at every tick, and at the pickup the shortstop on the cutoff to third. Both fail on
+/// `7622093`.
+#[test]
+fn a_runner_from_first_passing_second_keeps_the_first_baseman_at_first() {
+    for (label, text, by_of) in [("seed 6 play 6", include_str!("fixtures/a4/6-6.json"), 9), ("seed 3 play 63", include_str!("fixtures/a4/3-63.json"), 8)] {
+        let (out, ticks) = replay_jobs(text);
+        let &(t_fielded, by) = out.secured.first().expect("the ball is fielded");
+        assert_eq!(by & 0x7f, by_of, "{label}: the premise, fielded by {by_of}");
+        let &(t_throw, _) = out.released.first().expect("the premise: the outfielder throws");
+        // The runner from first (the second runner's track: the batter's comes first) is past
+        // second, on his way to third, before the throw.
+        let runner = &out.actors[10].1;
+        assert!(runner.iter().any(|(t, p)| *t < t_throw && p.x < -1.0), "{label}: the premise, the runner from first rounds second before the throw at {t_throw:.2} s");
+        for k in ticks.iter().filter(|k| k.t < t_throw) {
+            assert!(!k.job[..6].contains(&24), "{label}: a cutoff home at {:.2} s: {:?}", k.t, k.job);
+            assert_eq!(k.job[2], 11, "{label}: the first baseman not on first at {:.2} s: {:?}", k.t, k.job);
+        }
+        let at = ticks.iter().rev().find(|k| k.t <= t_fielded).expect("a tick at the pickup");
+        assert_eq!(at.job[5], 23, "{label}: the shortstop not on the cutoff to third at the pickup, {:.2} s: {:?}", at.t, at.job);
+    }
+}
+
+/// The same rule with runners on first and third (agent-models §5.7, "Cutoffs and relays"): seed 13
+/// play 227 (frozen from main `7622093`), two out, a fly to centre that falls in at 77 m and is
+/// fielded at 86 m, the first baseman out on the cutoff home from 0.95 s. The runner from third
+/// scores before the throw; the runner from first, counted at first, then no longer makes the throw
+/// home, but the corner man already out keeps it while a runner is still going. Counting runners at
+/// the pitch's base alone (`7413eb8`'s rule), the job went to the shortstop on the cutoff to third
+/// as the run scored (3.42 s), 1.7 s before the throw. From the first baseman's going out to the
+/// throw: he stays on the cutoff home and nobody else goes out. Fails without the rule.
+#[test]
+fn a_corner_man_out_on_the_cutoff_home_keeps_it_when_the_lead_runner_scores() {
+    let text = include_str!("fixtures/a4/13-227.json");
+    let (out, ticks) = replay_jobs(text);
+    let &(t_throw, _) = out.released.first().expect("the premise: the outfielder throws");
+    let t_out = ticks.iter().find(|k| k.job[2] == 24).expect("the premise: the first baseman goes out on the cutoff home").t;
+    // The runner from third (the batter's track comes first, then the runners in base order: first,
+    // then third) crosses the plate before the throw.
+    let scored = out.actors[11].1.iter().any(|(t, p)| *t < t_throw && p.x.hypot(p.y) < 1.0);
+    assert!(scored, "the premise: the runner from third scores before the throw at {t_throw:.2} s");
+    for k in ticks.iter().filter(|k| k.t >= t_out && k.t < t_throw) {
+        assert_eq!(k.job[2], 24, "the first baseman off the cutoff home at {:.2} s: {:?}", k.t, k.job);
+        assert!((0..6).all(|i| i == 2 || !(20..30).contains(&k.job[i])), "another man out on a cutoff at {:.2} s: {:?}", k.t, k.job);
+    }
+}
+
+/// Opus liner-single re-review P2-1 (agent-models §5.7, "A deep ball"): a ball in the air with a
+/// runner in scoring position that a middle infielder goes out on as the relay man while it is up,
+/// and that comes down short of `RELAY_DEEP_M` and is fielded beyond it. A real infield does not
+/// change its cutoff man as the outfielder picks the ball up: the man already in line stays there
+/// and nobody leaves a base for the line in the last second before the throw. Three plays frozen
+/// from main `7622093`:
+/// - seed 23 play 94, none out, a runner on second: a fly to right first down at 70 m, fielded at
+///   (31, 86) m; on `7622093` the second baseman was the relay man from 0.95 s, and at the pickup
+///   (3.78 s) the first baseman left first for the cutoff home, 2.5 s before the throw;
+/// - seed 115 play 32, one out, runners on first and second: the same at (30, 77) m, the throw
+///   0.8 s after the pickup;
+/// - seed 63 play 211, two out, a runner on second: a liner to left first down at 52 m, fielded
+///   80.2 m out; the left fielder stepped in to throw, and inside 80 m the shortstop gave way to
+///   the third baseman 0.85 s before the throw.
+///
+/// From the pickup to the outfielder's throw, the middle infielder on the relay home at the pickup
+/// keeps it, and nobody else goes out on a cutoff or relay. Each fails on `7622093`.
+#[test]
+fn the_relay_man_keeps_the_job_through_the_outfielders_pickup() {
+    for (label, text) in [("seed 23 play 94", include_str!("fixtures/a4/23-94.json")), ("seed 115 play 32", include_str!("fixtures/a4/115-32.json")), ("seed 63 play 211", include_str!("fixtures/a4/63-211.json"))] {
+        let (out, ticks) = replay_jobs(text);
+        let &(t_fielded, by) = out.secured.first().expect("the ball is fielded");
+        assert!(by & 0x7f >= 7, "{label}: the premise, an outfielder fields it");
+        let (_, d) = first_down(&out).expect("the premise: it falls in");
+        assert!((47.4..80.0).contains(&d), "{label}: the premise, first down in the shallow outfield ({d:.1} m)");
+        let &(t_throw, _) = out.released.first().expect("the premise: the outfielder throws");
+        let at = ticks.iter().rev().find(|k| k.t < t_fielded - 1e-9).expect("a tick before the pickup");
+        let relay = [3, 5].into_iter().find(|&i| at.job[i] == 24).unwrap_or_else(|| panic!("{label}: the premise, a middle infielder on the relay home as the outfielder picks it up: {:?}", at.job));
+        for k in ticks.iter().filter(|k| k.t >= t_fielded - 1e-9 && k.t < t_throw) {
+            assert_eq!(k.job[relay], 24, "{label}: fielder {} off the relay at {:.2} s, after the pickup at {t_fielded:.2} s: {:?}", relay + 1, k.t, k.job);
+            assert!((0..6).all(|i| i == relay || !(20..30).contains(&k.job[i])), "{label}: another man out on a cutoff at {:.2} s, after the pickup at {t_fielded:.2} s: {:?}", k.t, k.job);
+        }
+    }
+}
+
+/// Opus liner-single re-review P3-1 (agent-models §5.7, the coverage table with the first baseman
+/// cutting): a deep ball with the first baseman out on the cutoff home and the shortstop out as the
+/// relay man. Second is the base the batter-runner goes for next, and the second baseman, the one
+/// infielder left free, belongs on it, not on first behind nobody. Two plays frozen from main
+/// `7622093`:
+/// - seed 13 play 224, one out, runners on first and third: a fly to left-centre first down at
+///   86 m, fielded by the left fielder at 92 m; on `7622093` second stood open from 1.25 s to
+///   2.42 s with the second baseman on first;
+/// - seed 93 play 113, one out, a runner on second: a fly over the right fielder's left first down
+///   at 82 m, fielded at 118 m (a triple); second open from 2.47 s to 3.39 s.
+///
+/// Before the first throw, at every tick at which both men have been out without a break for longer
+/// than it takes the second baseman to know it and start for the bag (`CALL_HEARD_S`, 0.3 s, and
+/// one tick), someone covers second. Fails without the change (seed 13 play 224 at 1.59 s).
+#[test]
+fn a_deep_ball_with_the_first_baseman_and_shortstop_out_has_second_covered() {
+    for (label, text) in [("seed 13 play 224", include_str!("fixtures/a4/13-224.json")), ("seed 93 play 113", include_str!("fixtures/a4/93-113.json"))] {
+        check_base_covered_while_out(text, label, [2, 5], 2);
+    }
+}
+
+/// Before the first throw, at every tick at which the two infielders `men` have both been out on
+/// a cutoff or relay without a break for longer than it takes a teammate to know it and start for
+/// the bag (`CALL_HEARD_S`, 0.3 s, and one tick), someone covers `base`.
+fn check_base_covered_while_out(text: &str, label: &str, men: [usize; 2], base: u8) {
+    let (out, ticks) = replay_jobs(text);
+    let &(t_throw, _) = out.released.first().expect("the premise: the outfielder throws");
+    let both = |k: &bb_game::live::job_trace::Tick| men.iter().all(|&i| (20..30).contains(&k.job[i]));
+    let mut since = None;
+    let mut checked = 0;
+    for k in ticks.iter().filter(|k| k.t < t_throw) {
+        since = if both(k) { since.or(Some(k.t)) } else { None };
+        if let Some(t0) = since.filter(|t0| k.t > t0 + 0.3 + 0.02) {
+            checked += 1;
+            assert!(k.job.contains(&(10 + base)), "{label}: base {base} open at {:.2} s, both out since {t0:.2} s: {:?}", k.t, k.job);
+        }
+    }
+    assert!(checked > 10, "{label}: the premise, both out for a while before the throw ({checked} ticks)");
+}
+
+/// Item 5 of the relay hand-overs job (agent-models §5.7, "The coverage table and the cutoff
+/// men"): with the third baseman out on the cutoff home and the shortstop out as the relay man,
+/// the pitcher is third's man in the tables worked between calls, and must be in the tables worked
+/// at each once-a-second re-call too, or he leaves third at every re-call and comes back 0.3 s
+/// later. Two plays frozen from main `7622093`, a runner on third and a ball to left that the left
+/// fielder runs down: seed 107 play 40 (two out; the pitcher on third and back behind home three
+/// times, third open at 0.95, 1.40 and 2.42 s) and seed 109 play 209 (none out; the shortstop comes
+/// back to third at the re-call at 1.42 s, and the pitcher, on third from 1.27 s, went back behind
+/// home there, on third again at 1.57 s and back at 1.72 s). On 107/40 third is covered while both
+/// are out; on both, before the throw, the pitcher does not go back to a job and leave it again
+/// (A, B, A, B). Fails without the change (seed 107 play 40, third open at 1.40 s).
+#[test]
+fn the_pitcher_keeps_third_while_the_third_baseman_and_shortstop_are_out() {
+    check_base_covered_while_out(include_str!("fixtures/a4/107-40.json"), "seed 107 play 40", [4, 5], 3);
+    for (label, text) in [("seed 107 play 40", include_str!("fixtures/a4/107-40.json")), ("seed 109 play 209", include_str!("fixtures/a4/109-209.json"))] {
+        let (out, ticks) = replay_jobs(text);
+        let &(t_throw, _) = out.released.first().expect("the premise: the outfielder throws");
+        let mut seq: Vec<(f64, u8)> = Vec::new();
+        for k in ticks.iter().filter(|k| k.t < t_throw) {
+            if seq.last().is_none_or(|l| l.1 != k.job[0]) {
+                seq.push((k.t, k.job[0]));
+            }
+        }
+        assert!(seq.iter().any(|s| s.1 == 13), "{label}: the premise, the pitcher covers third: {seq:?}");
+        for w in seq.windows(4) {
+            assert!(!(w[0].1 == w[2].1 && w[1].1 == w[3].1), "{label}: the pitcher flips between jobs {} and {} from {:.2} s: {seq:?}", w[0].1, w[1].1, w[0].0);
         }
     }
 }

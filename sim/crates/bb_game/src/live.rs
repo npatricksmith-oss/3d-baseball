@@ -5015,6 +5015,16 @@ impl<'a> Sim<'a> {
         if !deep && (who == 3 || who == 5) && (self.partner_going(who) || (matches!(self.ball, Ball::Free { .. }) && self.first_down_m().is_some_and(|d| d < INFIELD_R) && !self.infield_lets_go(who, b))) {
             return None;
         }
+        // The corner man goes out on the cutoff home from a loose ground ball by the same gate
+        // (toward home: no infielder known to be going for it at all, by his estimate none can
+        // field it in the infield, every infielder known on this ball), as he does at the first
+        // call (`through_job`): first, or third, is not left while an infielder may still field
+        // the ball and make a play there (Opus cutoff-home review P3-3: once an outfielder was
+        // the known lead he went out without it, seed 12 play 9, first open 0.4 s while the
+        // shortstop fielded a chopper 40 m out and threw the batter out at first).
+        if !deep && b == 4 && (who == 2 || who == 4) && matches!(self.ball, Ball::Free { .. }) && self.first_down_m().is_some_and(|d| d < INFIELD_R) && !self.infield_lets_go(who, 4) {
+            return None;
+        }
         // "No play on it": by his own read he cannot be there before it lands (his
         // intercept time is when he could field it, possibly long after the bounce).
         let no_air_play = || {
@@ -5053,12 +5063,35 @@ impl<'a> Sim<'a> {
     /// The base the cutoff or relay man lines up toward (agent-models §5.7): home with a
     /// runner in scoring position, third with a runner on first or on a deep ball, otherwise
     /// second; raised to any base a runner is visibly heading past that, as `viewer` reads
-    /// the runners. The runners on base are those who were on base at the pitch, wherever
-    /// they are now: the batter who has reached first on a single is not a runner on first
-    /// for this (the throw goes to second to hold him, unless he is seen going on).
+    /// the runners. The runners on base are those who were on base at the pitch: the batter who
+    /// has reached first on a single is not a runner on first for this (the throw goes to second
+    /// to hold him, unless he is seen going on). On a single (not `deep`) each counts at the base
+    /// he was on at the pitch, unless he stands on third, which threatens home (Gemini A4 review
+    /// P2-3): a runner from first who has passed second, or has stopped there, is still the runner
+    /// from first, the throw on him goes to third with the shortstop cutting and the first baseman
+    /// stays at first behind the batter-runner (Opus liner-single review P2-2; counted on second,
+    /// he made the throw home and sent the first baseman out on the cutoff with first open, and on
+    /// stopping at second as the outfielder picked the ball up he sent the corner man out late).
+    /// On a deep ball each counts at the base he has reached: a runner from first going round
+    /// second on an extra-base hit is the run the relay goes home for.
+    /// On a single, a corner man known to `viewer` to be out on the cutoff home keeps the throw
+    /// home while a runner who was on base at the pitch is still on the bases (not out, not
+    /// scored), moving or not: the lead runner scoring does not send him back and the shortstop
+    /// out for third in his place (2026-11-22: counted at the pitch's base, the runner from first
+    /// behind a runner from third made it third the moment the run scored, a hand-over 3.4-3.9 s
+    /// after contact on 11 plays with runners on first and third in 120 games). With the run in
+    /// and the runner from first held at second, a real infield does not realign either: holding
+    /// only while a runner moves gave more hand-overs at the pickup and more of third open (Opus
+    /// relay hand-overs review P3-1).
     fn relay_base(&self, deep: bool, viewer: usize) -> u8 {
-        let on = |b: u8| self.r.iter().any(|r| r.start > 0 && !r.out && !r.scored && (r.s / BASE_L + 1e-6).floor() as u8 == b);
-        let mut b = if on(2) || on(3) { 4 } else if on(1) || deep { 3 } else { 2 };
+        let moving = self.f[viewer].a.throw_choice.moving_mps;
+        let at = |r: &Runner| {
+            let reached = (r.s / BASE_L + 1e-6).floor() as u8;
+            if deep || (reached == 3 && r.direction * r.v <= moving) { reached } else { r.start }
+        };
+        let on = |b: u8| self.r.iter().any(|r| r.start > 0 && !r.out && !r.scored && at(r) == b);
+        let held_home = || !deep && [2, 4].iter().any(|&j| self.seen(viewer, j).0 == Role::Relay(4)) && self.r.iter().any(|r| r.start > 0 && !r.out && !r.scored);
+        let mut b = if on(2) || on(3) || held_home() { 4 } else if on(1) || deep { 3 } else { 2 };
         for r in self.r.iter().filter(|r| !r.out && !r.scored) {
             if let Some(target) = visible_target(r, self.f[viewer].a.throw_choice) {
                 b = b.max(target);
@@ -5095,11 +5128,13 @@ impl<'a> Sim<'a> {
     }
 
     /// A deep ball (agent-models §5.7), one the relay man goes out for: fielded at `from`,
-    /// beyond `RELAY_DEEP_M` from home, after being hit over or past an outfielder. In the air
+    /// beyond `RELAY_DEEP_M` from home, after being hit over or past an outfielder (in an
+    /// outfielder's hands, where he secured it). In the air
     /// or caught, by `from` alone; first down beyond `RELAY_DEEP_M`, deep. A ball first down in
     /// the outfield short of that (a line drive or blooper that fell in) is deep once it is
     /// deeper than the pre-pitch spot of the outfielder whose spot is nearest where it came
-    /// down by more than `PAST_OF_M`, or, while loose, if a middle infielder was known to be out
+    /// down by more than `PAST_OF_M`, or, while loose and through the outfielder's pickup to his
+    /// throw, if a middle infielder was known to be out
     /// as its relay man when it came down (he went out while it was up) and no corner man was
     /// known out on the cutoff home then: a fixed mark and the infield's call as known at the
     /// touch, so it changes at most once (2026-11-21; before, it was deep whenever fielded beyond `RELAY_DEEP_M`, and
@@ -5113,6 +5148,18 @@ impl<'a> Sim<'a> {
     /// to have it, by the outfielder whose spot is nearest `from`.)
     fn deep_ball(&self, from: Vec3) -> bool {
         let depth = |p: Vec3| m::hypot(p.x, p.y);
+        // A ball in an outfielder's hands is judged where he secured it, a fixed fact everyone
+        // saw, not where he is now: he steps in to throw, and a ball he took 80.2 m out stopped
+        // being a deep ball under him as he did, the relay man giving way to the corner man in
+        // the last half-second before the throw (seed 63 play 211; Opus liner-single re-review
+        // P2-1).
+        let from = match self.ball {
+            Ball::Held { by } if by >= 6 => self.out.facts.iter().rev().find_map(|f| match *f {
+                Input::GloveSecured { x, y, .. } => Some(Vec3::new(x, y, 0.0)),
+                _ => None,
+            }).unwrap_or(from),
+            _ => from,
+        };
         if depth(from) <= RELAY_DEEP_M {
             return false;
         }
@@ -5138,10 +5185,13 @@ impl<'a> Sim<'a> {
             // shown at the touch, a fixed fact once known: judged on his job now, the ball was deep
             // while he was known out, so he stayed out, and not while he was known back, so he
             // came back, and with the corner man on the cutoff home too the two traded the job
-            // every 0.3 s (Opus liner-single review P2-1's fix).
+            // every 0.3 s (Opus liner-single review P2-1's fix). It holds through the outfielder's
+            // pickup until his throw: the man already in line stays the relay man (Opus liner-single
+            // re-review P2-1: held only while loose, the fixed mark gave the job at the pickup to the
+            // corner man, who left his bag 0.8-2.5 s before the throw).
             let known_at_touch = self.first_down_t().unwrap_or(f64::INFINITY) - CALL_HEARD_S + 1e-9;
             let at_touch = |j: usize| self.f[j].shown.iter().rev().find(|e| e.at <= known_at_touch).filter(|e| e.at + 1e-9 >= self.ball_since).map(|e| e.role);
-            let relay_out = matches!(self.ball, Ball::Free { .. })
+            let relay_out = matches!(self.ball, Ball::Free { .. } | Ball::Held { by: 6..=8 })
                 && [3, 5].iter().any(|&j| match at_touch(j) {
                     Some(Role::Relay(4)) => true,
                     Some(Role::Relay(3)) => j == 3 || self.relay_base(false, 5) == 2,
@@ -6004,7 +6054,12 @@ impl<'a> Sim<'a> {
         let relay = |c: usize| matches!(self.seen(o, c).0, Role::Relay(_)) || (through3 && c == 5) || home_cut == Some(c);
         let ss_busy = self.chasing_as_known_by(o, 5) || relay(5);
         let (first, first_last, second_order) = Self::home_order(relay(2), ss_busy, left);
-        let order: [(usize, &[usize]); 5] = [(0, first), (1, second_order), (2, &[4, 5]), (3, &[1, 0]), (0, first_last)];
+        // Third's order is the one `cover_after_chasers` uses between calls: the third baseman,
+        // the shortstop, then the pitcher. (Before 2026-11-22 the pitcher was left out here, so
+        // with the third baseman and shortstop both out he covered third between calls and went
+        // back to backing up home at each once-a-second re-call: seed 107 play 40, seed 109 play
+        // 209.)
+        let order: [(usize, &[usize]); 5] = [(0, first), (1, second_order), (2, &[4, 5, 0]), (3, &[1, 0]), (0, first_last)];
         let mut second: Vec<usize> = Vec::new();
         if own_second {
             second.push(o);
@@ -6111,12 +6166,23 @@ impl<'a> Sim<'a> {
             Ball::Thrown { .. } => false,
         };
         let one_back = out_of_infield && one_was_out && !relay(2) && !self.chasing_as_known_by(o, 2) && matches!(job(2), Role::Idle | Role::Backup) && job(3) == Role::Cover(1);
+        // With the first baseman out on the cutoff home and the shortstop out on a cutoff or relay
+        // (or going for a ball out of the infield), second is the second baseman's and first is
+        // nobody's (`home_order`): a second baseman on first, put there while the shortstop was
+        // free, leaves it for second. With both of them out on a ball no infielder will field,
+        // second is the base the batter-runner goes for next, and the play at first is over
+        // (Opus liner-single re-review P3-1: he stayed on first with second open about 1.2 s,
+        // seeds 13/224 and 93/113, until a re-call worked the table afresh and sent him there).
+        // A shortstop going for a ball still in the infield may yet throw to first: then the
+        // second baseman stays.
+        let two_to_second = o == 3 && relay(2) && (relay(5) || (ss_busy && out_of_infield)) && matches!(self.f[3].role, Role::Idle | Role::Backup | Role::Cover(1));
         // Reserve kept non-chasing covers first so base 1's fallback never steals Cover(2).
         let mut filled = [false; 5];
         for base in 1..=4u8 {
             let cands: Vec<usize> = order.iter().filter(|e| e.0 == base).flat_map(|e| e.1.iter().copied()).collect();
             let rank = |i: usize| cands.iter().position(|&c| c == i).unwrap_or(cands.len());
-            if let Some(c) = (0..9).filter(|&i| (job(i) == Role::Cover(base) || (ss_claims_second && base == 2 && i == 5) || (two_claims_first && base == 1 && i == 3) || (one_back && base == 1 && i == 2)) && !taken.contains(&i)).min_by_key(|&i| (rank(i), i)) {
+            let holds = |i: usize| (job(i) == Role::Cover(base) && !(two_to_second && i == 3)) || (two_to_second && base == 2 && i == 3);
+            if let Some(c) = (0..9).filter(|&i| (holds(i) || (ss_claims_second && base == 2 && i == 5) || (two_claims_first && base == 1 && i == 3) || (one_back && base == 1 && i == 2)) && !taken.contains(&i)).min_by_key(|&i| (rank(i), i)) {
                 if c == o {
                     return Some(base);
                 }

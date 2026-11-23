@@ -1,6 +1,6 @@
 # Task List
 
-**Last updated:** 2026-11-22 (worker hooks and job queue merged; relay hand-overs in review; Q35 decided).
+**Last updated:** 2026-11-22 (relay hand-overs, worker hooks and job queue merged; next: the double cut, Q35).
 
 What is next and what is open. Other files hold the rest:
 
@@ -15,17 +15,13 @@ Status: `[ ]` not started · `[~]` partly done · `[?]` needs an owner decision
 
 ---
 
-## Resume here (2026-11-22, evening)
+## Resume here (2026-11-22, night)
 
-**Detail: [HANDOFF.md](HANDOFF.md)** (read first; delete when the relay branch is merged).
+**State.** Nothing is running; nothing is waiting on the owner. Relay hand-overs and the worker hooks and job queue are merged. Workers: own herdr sessions with `BB_WORKER_NAME`, `bin/worker-wait.sh`, long runs through `bin/job.sh` (CLAUDE.md).
 
-**`work/relay-handovers`** (worktree `.claude/worktrees/runner-decision`, `c5eb654`, unmerged): worker done (523 tests; standard run 4.05 → 4.05 [4.39 → 4.33]). Opus review (`relay-review`) running or due, written under docs/reviews on the branch. Then fixes, the Coordinator's test pass and standard run, merge (TASKS.md conflict: keep this section, take its §3).
+**Next job (Q35, owner 2026-11-22: (c)):** the double cut, §3 below. Opus worker; spec first, ledger row, Opus review.
 
-**Next job, decided (Q35, owner: (c)):** the textbook double cut on a deep ball with a play at home (relay man plus the first baseman as cutoff man home on either side; third baseman stays). Spec agent-models §5.7 first; relay note §4.
-
-**Waiting on the owner:** nothing.
-
-**Open (ledger §5):** runs fell 0.21 [0.18] with dp-cover, 0.04 explained: check noise first. Double plays 12.3% (MLB 9.8%). Standard runs 4.05 [4.39].
+**Open (ledger §5):** runs fell 0.21 [0.18] with dp-cover, 0.04 explained: check noise first. Double plays 12.3% (MLB 9.8%). Standard runs 4.05 [4.33].
 
 **After that:** play 71 (§2: no dive at a ground ball 1.9 m away).
 ---
@@ -78,8 +74,9 @@ One `sim/crates/bb_game/src/live.rs` job at a time. Each job gets a ledger row a
 - [ ] **Outfield throws to the wrong base or past the cutoff.** Measure by play: throws to a base with no play while a trailing runner advances; cutoff man in line and missed. Includes the owner's "after an out from deep outfield, hit a cutoff" and the cut-or-let-it-go call (Q32, agent-models §5.5).
 - [ ] **Double plays after `work/dp-cover`: what the review left** ([review](docs/reviews/2026-11-21-opus-dp-cover-review.md); [dp-cover note](docs/calibration/2026-11-21-dp-cover.md) §4). (a) P2-2, pre-existing: a carrier to second (6U-3, 4U-3) is estimated as a pivot man (touch, then `pivot_s` 0.80 s, a turn and plant), but the world lets him throw on the tick after the touch with the set-up he spent carrying. The ball at first comes 0.09–0.51 s sooner than estimated; the force at second 0.20–0.23 s later than `carry_ball_at`. Fix both to one model (a turn and plant from his motion at the touch, `exchange_footwork_s(fd.vel, to_first)`), with a frozen 4U-3. (b) P3-3: the cover's pivot clock starts at the catch (world: the touch, 0.1–0.2 s later) and assumes full arm. (c) First-baseman-started double plays 35.9% (MLB 21.5%): the 3-6-3 pivot costs nothing; no slide (`PIVOT_SLIDE_DELAY_S` = 0, A6).
 - [ ] **Middle infielders with no job while a ground single is loose** ([note](docs/calibration/2026-11-21-mid-infield-jobs.md) §3). (a) A ball in the air not taken for a single (deep, or catchable by their estimate): no job the first call's 0.3 s ([liner note](docs/calibration/2026-11-21-liner-single-jobs.md) §5). (b) A ball another infielder could field: the ball-side man waits. (c) No job at the call on a chopper (51001/168). (e) A cutoff man a throw passed stands idle. (f) Comebackers, nobody on: both middle infielders away 0.1–0.2 s (5 in 120 games; on 2 the 2B leaves second for the cutoff, 24/54, 32/107).
-- [ ] **For the relay review** (cutoff-home P3-2, liner note §5, [re-review](docs/reviews/2026-11-21-opus-liner-single-jobs-rereview.md)): a single past the CF: second open ≤0.3 s; a gap hit landing short: cutoff to relay man. Bug (liner P2-2): a runner from first passing second sends the first baseman to the cutoff home (first open 0.3 s); standard: throw to third, SS cutting. Re-review P2-1: shallow single, runner in scoring position: the cutoff man home changes at the pickup (`relay_out`'s relay man gives way to the corner man, who leaves his bag 0.8-2.5 s before the throw; 23/94, 115/32; 6 plays in 120 games, main 1); fix: the relay man keeps the job through the pickup. Deep ball, corner man and SS out: the 2B stays on first, second open ~1.2 s (13/224, 93/113). The pitcher flips between third and backing up home (107/40).
-- [ ] **`relay_job`'s cutoff home has no infield gate** (cutoff-home review P3-3): the corner man leaves his base while an infielder can field it (191/125).
+- [ ] **The double cut on a deep ball with a play at home (Q35, owner 2026-11-22: option (c))** ([relay hand-overs note §4](docs/calibration/2026-11-22-relay-handovers.md)): a middle infielder goes out as the relay man and the first baseman lines up behind him as the cutoff man home, whichever field the ball is in; the third baseman stays at third, the other middle infielder covers second; the relay man chooses between throwing home and throwing through the cutoff. Today one man goes and the two swap when a single rolls past an outfielder (second or third open ≤0.3 s; 23/83, 97/119). Spec agent-models §5.7 first. With it: the deep call on a ground ball flips when the lead outfielder changes (118/162; [Opus review](docs/reviews/2026-11-22-opus-relay-handovers-review.md) P3-3: a fixed mark for a ground ball, or keep the first deep call).
+- [ ] **A single with a runner on third** (relay hand-overs note §5): the runner from third scores, so the standard throw goes to third (runner on first, shortstop cutting) or second; the game lines up for home until he scores.
+- [ ] **Relay leftovers** (relay hand-overs note §5): two men on one bag >0.5 s on 3 plays from item 6's gate (39/145, 95/176, 111/74); a corner man out before any infielder goes for the ball (117/38); the pitcher follows the third baseman between the cutoff home and third (93/183).
 - [ ] **Do fielders or runners start moving before contact on screen?** The camera cuts after contact (saved play 112); nobody checked the timeline's fielders and runners against `contact_s` (sim side).
 - [ ] **Infield judgment on the double play:** when to go for two, by score, inning, outs, runner speed and set-up (agent-models §5). Third basemen convert 48% of DP grounders (real 38%).
 
