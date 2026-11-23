@@ -17653,6 +17653,10 @@ mod tests {
         sim.r[1].v = 7.0;
         assert!(sim.runner_relook(1));
         assert_eq!(sim.r[1].goal, 2);
+        // The race back is close, so he chooses to dive into the bag (agent-models §6.4,
+        // "Diving back"); this test is of the braked return's law, so he brakes in.
+        assert_eq!(sim.r[1].dive_to, Some(2));
+        sim.r[1].dive_to = None;
         let expected = run_time_to_stop(8.0, -7.0, sim.r[1].vmax, RUNNER_TAU);
         let t0 = sim.t;
         sim.move_runners();
