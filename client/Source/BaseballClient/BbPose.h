@@ -219,6 +219,19 @@ namespace BbMotion
 	constexpr float SlideStartS = -0.42f;
 	constexpr float SlideEndS = 1.2f;
 
+	/** A runner's dive back to a bag (player-visuals §11; the sim's dive back, agent-models
+	 *  §6.4): from the moment he leaves his feet he is laid out headfirst, his right hand
+	 *  reaching for the bag; it is on the bag when the sim has it touch, he lies there, and
+	 *  gets up onto the bag through his hands and knees as the sim has him up. Since: seconds
+	 *  since he left his feet; TouchIn: seconds until his hand touches (negative after);
+	 *  UpIn: seconds until the sim has him up. The figure faces the way he dove; its origin is
+	 *  where the sim has his touching hand, the bag once it is on it. OutReach puts the right
+	 *  wrist on the origin while the hand is on the bag. */
+	FBbStick DiveBack(float Since, float TouchIn, float UpIn, const FBbSkeleton& Skel, const FBbMotionGround& Ground, FBbReach& OutReach);
+	/** How long the getting up onto the bag takes, s (the sim has him down DIVE_BACK_UP_S,
+	 *  1.0 s, from the touch). */
+	constexpr float DiveBackRiseS = 0.7f;
+
 	/** The people who are not playing (player-visuals §12): umpires, base coaches, the men
 	 *  on the bench. Everything is in the figure's own frame, +Y the way he faces. */
 	enum class ESignal : uint8 { None, Strike, Out, Safe, Foul, Fair };

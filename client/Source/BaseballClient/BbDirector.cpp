@@ -460,6 +460,7 @@ void ABbDirector::BeginPlay()
 	FParse::Value(Cmd, TEXT("BbShotStart="), NextShot);
 	FParse::Value(Cmd, TEXT("BbBenchSeconds="), BenchSeconds);
 	FParse::Value(Cmd, TEXT("BbDiveShots="), DiveShotsLeft);
+	FParse::Value(Cmd, TEXT("BbDiveBackShots="), DiveBackShotsLeft);
 	FParse::Value(Cmd, TEXT("BbSlideShots="), SlideShotsLeft);
 	FParse::Value(Cmd, TEXT("BbBaseMapShots="), BaseMapShotsLeft);
 	FParse::Value(Cmd, TEXT("BbBoxShots="), BoxShotAtPlay);
@@ -2699,7 +2700,16 @@ void ABbDirector::NoteSlides()
 				}
 				FVector2D Holder;
 				bPlay |= F.holder >= 0 && Find(K, (uint16)F.holder, Holder) && (Holder - Bags[B]).Size() < SlidePlayM;
-				const bool bSlide = bPlay && Mps >= SlideMinMps;
+				// A runner diving back into the bag is the sim's dive, drawn as such, not a slide.
+				bool bDivingBack = false;
+				for (int32 J = FMath::Max(K - 30, 0); J <= FMath::Min(K + 5, Seen.Num() - 1); ++J)
+				{
+					for (uint32 D = 0; D < Seen[J].n_dives; ++D)
+					{
+						bDivingBack |= Seen[J].dives[D].agent == Agent && Seen[J].dives[D].base == B + 2;
+					}
+				}
+				const bool bSlide = bPlay && Mps >= SlideMinMps && !bDivingBack;
 				// A play on him and no out: the umpire there has him safe.
 				bool bOutThere = false;
 				for (uint32 C = 0; C < Current.Info.n_calls; ++C)
@@ -2774,9 +2784,37 @@ void ABbDirector::NoteSlides()
 	{
 		ShotSlide = -1;
 	}
+	// -BbDiveBackShots: its first runner's dive back leaving his feet, in the air, the hand on
+	// the bag, down, and getting up.
+	for (int32 K = 0; DiveBackShotsLeft > 0 && K < Seen.Num() && ShotDiver < 0; ++K)
+	{
+		for (uint32 D = 0; D < Seen[K].n_dives && ShotDiver < 0; ++D)
+		{
+			const BbDive& Dv = Seen[K].dives[D];
+			if (Dv.base == 0)
+			{
+				continue;
+			}
+			const float T0 = K * Step - Dv.since_s, Touch = T0 + Dv.since_s + Dv.touch_in_s, Up = T0 + Dv.since_s + Dv.up_in_s;
+			const float Marks[5] = { T0, 0.5f * (T0 + Touch), Touch, Up - 0.45f, Up - 0.15f };
+			for (int32 M = 0; M < 5; ++M)
+			{
+				ExtraShots.Emplace(Marks[M], FString::Printf(TEXT("diveback_%02d_%d.png"), DiveBackShotIndex, M + 1));
+			}
+			ShotDiver = Dv.agent;
+			ShotDiveFrom = T0;
+			ShotDiveYaw = ToUE(Dv.dir[0], Dv.dir[1], 0.0).Rotation().Yaw;
+			if (bStagingLog)
+			{
+				UE_LOG(LogBb, Display, TEXT("BB_DIVEBACK play=%u agent=0x%03x base=%d leave=%.2f touch=%.2f up=%.2f"), Current.Info.play_index, Dv.agent, Dv.base, T0, Touch, Up);
+			}
+			++DiveBackShotIndex;
+			--DiveBackShotsLeft;
+		}
+	}
 	for (int32 K = 0; bWantDives && K < Seen.Num() && ShotDiver < 0; ++K)
 	{
-		if (Seen[K].n_dives > 0)
+		if (Seen[K].n_dives > 0 && Seen[K].dives[0].base == 0)
 		{
 			const BbDive& Dv = Seen[K].dives[0];
 			const float T0 = K * Step - Dv.since_s, Up = T0 + Dv.since_s + Dv.up_in_s;
@@ -3011,6 +3049,11 @@ void ABbDirector::PoseFigure(int32 Slot, const BbActor& A, const BbFrame& Frame,
 		Motion = 6;
 		MotionT = In.SlideT;
 	}
+	// A runner diving back to a bag, as the sim has it (player-visuals §11).
+	if (Coded && bMotions && !bFielder && In.bDiveBack && !bReset)
+	{
+		Motion = 7;
+	}
 	// (A pitcher who dives on an early comebacker is diving, not finishing his delivery.)
 	if (!Coded && bMotions && bFielder && Position == 1 && !In.bStaged && PlayTime < 0.8f && AnimPitch && In.DiveSince < 0.f)
 	{
@@ -3113,6 +3156,10 @@ void ABbDirector::PoseFigure(int32 Slot, const BbActor& A, const BbFrame& Frame,
 		{
 			WantYaw = In.bSlide ? In.SlideYaw : St.Yaw;
 		}
+		else if (St.Motion == 7)
+		{
+			WantYaw = In.bDiveBack ? In.DiveBackYaw : St.Yaw;
+		}
 		else if (St.Motion != 4)
 		{
 			WantYaw = St.Motion == 3 ? ToUE(0.0, 1.0, 0.0).Rotation().Yaw : YawToPlate(Foot);
@@ -3130,7 +3177,7 @@ void ABbDirector::PoseFigure(int32 Slot, const BbActor& A, const BbFrame& Frame,
 		{
 			WantYaw = St.Yaw;
 		}
-		bMirror = St.Motion == 3 ? Bn.bLeftBox : St.Motion == 6 ? false : bLefty;
+		bMirror = St.Motion == 3 ? Bn.bLeftBox : St.Motion >= 6 ? false : bLefty;
 	}
 	// Turns ease on play time, so a pause holds them and fast playback keeps up.
 	St.Yaw = FMath::RInterpTo(FRotator(0, St.Yaw, 0), FRotator(0, WantYaw, 0), SimDt, Manual || (St.Motion == 4 && In.bThrow) || (St.MotionW > 0.f && St.Motion >= 5) ? 18.f : TurnRate).Yaw;
@@ -3305,6 +3352,11 @@ void ABbDirector::PoseFigure(int32 Slot, const BbActor& A, const BbFrame& Frame,
 			else if (St.Motion == 6)
 			{
 				S = BbMotion::Slide(St.MotionT, Skel, GroundOwn);
+			}
+			else if (St.Motion == 7)
+			{
+				// (Blending out after he is up: standing on the bag, the pose's last key.)
+				S = In.bDiveBack ? BbMotion::DiveBack(In.DiveBackSince, In.DiveBackTouchIn, In.DiveBackUpIn, Skel, GroundOwn, Reach) : BbMotion::DiveBack(9.f, -9.f, 0.f, Skel, GroundOwn, Reach);
 			}
 			else if (St.Motion == 3)
 			{
@@ -3956,7 +4008,7 @@ void ABbDirector::Tick(float DeltaSeconds)
 				const FString Name = FPaths::Combine(FPaths::ProjectSavedDir(), TEXT("Shots"), ExtraShots[ExtraShotNext].Value);
 				FScreenshotRequest::RequestScreenshot(Name, false, false);
 				UE_LOG(LogBb, Display, TEXT("BB_EXTRA_SHOT %s play %u t %.2f"), *Name, Current.Info.play_index, At);
-				if (++ExtraShotNext == ExtraShots.Num() && SlideShotsLeft <= 0 && DiveShotsLeft <= 0 && BaseMapShotsLeft <= 0)
+				if (++ExtraShotNext == ExtraShots.Num() && SlideShotsLeft <= 0 && DiveShotsLeft <= 0 && DiveBackShotsLeft <= 0 && BaseMapShotsLeft <= 0)
 				{
 					BenchSeconds = FMath::Max(BenchSeconds, (float)Wall + 2.f);
 				}
@@ -4131,7 +4183,24 @@ void ABbDirector::Tick(float DeltaSeconds)
 						for (uint32 D = 0; D < Frame.n_dives; ++D)
 						{
 							const BbDive& Dv = Frame.dives[D];
-							if (Dv.agent == A.agent)
+							if (Dv.agent == A.agent && Dv.base != 0)
+							{
+								// A runner's dive back (agent-models §6.4): on the sim's clock,
+								// no lead. He is drawn from his touching hand, which the sim's
+								// glide carries at a constant speed from DIVE_BACK_M - DIVE_REACH_M
+								// (1.8 m) out to the bag, where it is from the touch on.
+								In.bDiveBack = true;
+								In.DiveBackSince = Dv.since_s;
+								In.DiveBackTouchIn = Dv.touch_in_s;
+								In.DiveBackUpIn = Dv.up_in_s;
+								In.DiveBackYaw = ToUE(Dv.dir[0], Dv.dir[1], 0.0).Rotation().Yaw;
+								const double L = 27.432 / UE_SQRT_2;
+								const FVector2D Bag = Dv.base == 1 ? FVector2D(L, L) : Dv.base == 2 ? FVector2D(0.0, 2.0 * L) : FVector2D(-L, L);
+								const double Left = Dv.touch_in_s > 0.f ? 1.8 * Dv.touch_in_s / FMath::Max(Dv.since_s + Dv.touch_in_s, 0.05f) : 0.0;
+								A.pos[0] = (float)(Bag.X - Dv.dir[0] * Left);
+								A.pos[1] = (float)(Bag.Y - Dv.dir[1] * Left);
+							}
+							else if (Dv.agent == A.agent)
 							{
 								In.DiveSince = Dv.since_s + DiveLeadS;
 								In.DiveUpIn = Dv.up_in_s;
@@ -4145,7 +4214,7 @@ void ABbDirector::Tick(float DeltaSeconds)
 							for (uint32 D = 0; D < Ahead.n_dives; ++D)
 							{
 								const BbDive& Dv = Ahead.dives[D];
-								if (Dv.agent == A.agent)
+								if (Dv.agent == A.agent && Dv.base == 0)
 								{
 									In.DiveSince = Dv.since_s;
 									In.DiveUpIn = Dv.up_in_s + DiveLeadS;

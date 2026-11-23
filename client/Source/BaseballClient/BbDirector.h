@@ -274,6 +274,14 @@ private:
 		float DiveUpIn = 0.f;
 		bool bDiveDir = false;
 		float DiveYaw = 0.f;
+		/** A runner's dive back to a bag (the sim's BbDive with a base): seconds since he left
+		 *  his feet, until his hand touches (negative after), until he is up; which way he
+		 *  dove (Unreal yaw). */
+		bool bDiveBack = false;
+		float DiveBackSince = 0.f;
+		float DiveBackTouchIn = 0.f;
+		float DiveBackUpIn = 0.f;
+		float DiveBackYaw = 0.f;
 		/** A runner's slide: seconds from his arrival at the bag, and which way he came. */
 		bool bSlide = false;
 		float SlideT = 0.f;
@@ -757,6 +765,9 @@ private:
 	/** -BbDiveShots=<n>: photograph the next n dives at five moments each, then quit. */
 	int32 DiveShotsLeft = 0;
 	int32 DiveShotIndex = 0;
+	/** -BbDiveBackShots=<n>: the same for the next n runners' dives back to a bag. */
+	int32 DiveBackShotsLeft = 0;
+	int32 DiveBackShotIndex = 0;
 	/** -BbSlideShots=<n>: the same for the next n slides. */
 	int32 SlideShotsLeft = 0;
 	/** -BbBaseMapShots: plays with runners still to photograph (four pictures each, the score bug's

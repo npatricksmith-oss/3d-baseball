@@ -8139,16 +8139,16 @@ impl<'a> Sim<'a> {
         let heading_on = r.goal as f64 * BASE_L > r.s;
         let turning = (goal > from) != heading_on;
         let trapped = !go_on && !go_back && !crowded;
-        if turning && trapped && r.turns >= MAX_TURNS {
-            return true;
+        if !(turning && trapped && r.turns >= MAX_TURNS) {
+            if turning {
+                r.turns += 1;
+            }
+            r.goal = goal;
         }
-        if turning {
-            r.turns += 1;
-        }
-        r.goal = goal;
         // Going back on a close race, he dives into the bag rather than brake onto it
-        // (agent-models §6.4, "Diving back": his margin there by this look, braking included).
-        r.dive_to = (goal == from && from >= 1 && m_back < DIVE_CLOSE_S).then_some(from);
+        // (agent-models §6.4, "Diving back": his margin there by this look, braking included),
+        // whether this look turned him back or he stays committed to the way back.
+        r.dive_to = (r.goal == from && from >= 1 && m_back < DIVE_CLOSE_S).then_some(from);
         true
     }
 

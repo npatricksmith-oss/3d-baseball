@@ -1196,6 +1196,159 @@ namespace
 	}
 }
 
+namespace
+{
+	/** Down on his front after a dive back, his right hand on the bag at the origin, the left
+	 *  beside it, his body laid out behind. */
+	void DiveBackDown(FBbStick& S)
+	{
+		const int32 L = 0, R = 1;
+		S.Pelvis = { 0, -100, 15 };
+		S.PelvisUp = { 0, 1, 0.05 };
+		S.PelvisFwd = { 0, 0.05, -1 };
+		S.ChestUp = { 0, 1, 0.15 };
+		S.ChestFwd = { 0, 0.15, -1 };
+		S.HeadFwd = { 0, 1, 0.1 };
+		S.HeadUp = { 0, 0.2, 1 };
+		S.Ankle[L] = { 13, -184, 0 };
+		S.Ankle[R] = { -13, -184, 0 };
+		S.Knee[L] = { 0.1, 0, -1 };
+		S.Knee[R] = { -0.1, 0, -1 };
+		S.Toe[L] = { 0.4, -1, -0.1 };
+		S.Toe[R] = { -0.4, -1, -0.1 };
+		S.Wrist[L] = { 14, 6, 46 };
+		S.Elbow[L] = { 1, -0.4, 0 };
+		S.Fingers[L] = { 0.2, 1, 0 };
+		S.Wrist[R] = { -4, 6, 54 };
+		S.Elbow[R] = { -1, -0.4, 0 };
+		S.Fingers[R] = { 0, 1, 0 };
+	}
+
+	/** The dive back in the air, by how far through the glide he is (0 leaving his feet, 1 the
+	 *  hand on the bag). */
+	const TArray<FKey>& DiveBackKeys()
+	{
+		static TArray<FKey> Keys;
+		if (Keys.Num() > 0)
+		{
+			return Keys;
+		}
+		const int32 L = 0, R = 1;
+		// Off the left foot, low, the trunk going over, both hands reaching for the bag.
+		Keys.Add(Key(0.f, [&](FBbStick& S)
+		{
+			S.Pelvis = { 0, -110, 66 };
+			S.PelvisUp = { 0, 0.6, 1 };
+			S.PelvisFwd = { 0, 1, -0.6 };
+			S.ChestUp = { 0, 1, 0.7 };
+			S.ChestFwd = { 0, 0.7, -1 };
+			S.HeadFwd = { 0, 1, -0.2 };
+			S.Ankle[L] = { 12, -128, 0 };
+			S.Ankle[R] = { -12, -170, 14 };
+			S.Knee[L] = { 0.2, 1, 0 };
+			S.Knee[R] = { -0.2, 1, -0.3 };
+			S.Toe[R] = { 0, 0.6, -0.8 };
+			S.Wrist[L] = { 10, 12, 42 };
+			S.Elbow[L] = { 1, -0.3, 0 };
+			S.Wrist[R] = { -6, 12, 46 };
+			S.Elbow[R] = { -1, -0.3, 0 };
+		}));
+		// Laid out, coming down chest first.
+		Keys.Add(Key(0.55f, [&](FBbStick& S)
+		{
+			DiveBackDown(S);
+			S.Pelvis = { 0, -104, 34 };
+			S.PelvisUp = { 0, 1, 0.12 };
+			S.PelvisFwd = { 0, 0.12, -1 };
+			S.Ankle[L] = { 12, -186, 26 };
+			S.Ankle[R] = { -12, -186, 30 };
+		}));
+		Keys.Add(Key(1.f, DiveBackDown));
+		return Keys;
+	}
+
+	/** Up from a dive back, by seconds since he began to: onto his hands and knees with the
+	 *  hands on the bag, a foot under him, standing on the bag. */
+	const TArray<FKey>& DiveBackRiseKeys()
+	{
+		static TArray<FKey> Keys;
+		if (Keys.Num() > 0)
+		{
+			return Keys;
+		}
+		const int32 L = 0, R = 1;
+		Keys.Add(Key(0.f, DiveBackDown));
+		Keys.Add(Key(0.3f, [&](FBbStick& S)
+		{
+			S.Pelvis = { 0, -66, 46 };
+			S.PelvisUp = { 0, 1, 0.25 };
+			S.PelvisFwd = { 0, 0.25, -1 };
+			S.ChestUp = { 0, 1, 0.4 };
+			S.ChestFwd = { 0, 0.4, -1 };
+			S.HeadFwd = { 0, 1, -0.2 };
+			S.HeadUp = { 0, 0.4, 1 };
+			S.Ankle[L] = { 13, -118, 0 };
+			S.Ankle[R] = { -13, -118, 0 };
+			S.Knee[L] = { 0.1, 1, -0.7 };
+			S.Knee[R] = { -0.1, 1, -0.7 };
+			S.Toe[L] = { 0.3, -1, -0.2 };
+			S.Toe[R] = { -0.3, -1, -0.2 };
+			S.Wrist[L] = { 6, 34, 8 };
+			S.Elbow[L] = { 1, -0.4, 0 };
+			S.Wrist[R] = { -6, 34, 8 };
+			S.Elbow[R] = { -1, -0.4, 0 };
+		}));
+		// The right foot up to the bag, the left knee still down.
+		Keys.Add(Key(0.5f, [&](FBbStick& S)
+		{
+			S.Pelvis = { 0, -26, 58 };
+			S.PelvisUp = { 0, 0.3, 1 };
+			S.PelvisFwd = { 0, 1, -0.3 };
+			S.ChestUp = { 0, 0.4, 1 };
+			S.ChestFwd = { 0, 1, -0.4 };
+			S.Ankle[R] = { -15, -4, 0 };
+			S.Knee[R] = { -0.2, 1, 0.4 };
+			S.Ankle[L] = { 14, -76, 2 };
+			S.Knee[L] = { 0.1, 1, -0.6 };
+			S.Toe[L] = { 0.3, -1, -0.2 };
+			S.Wrist[L] = { 10, 20, -30 };
+			S.Wrist[R] = { -10, 20, -30 };
+		}));
+		// Standing on the bag.
+		Keys.Add(Key(BbMotion::DiveBackRiseS, [&](FBbStick& S) {}));
+		return Keys;
+	}
+}
+
+FBbStick BbMotion::DiveBack(float Since, float TouchIn, float UpIn, const FBbSkeleton& Skel, const FBbMotionGround& Ground, FBbReach& OutReach)
+{
+	const int32 R = 1;
+	FBbStick S;
+	double Hand = 0.0;
+	if (TouchIn > 0.f)
+	{
+		const float F = Since / FMath::Max(Since + TouchIn, 0.05f);
+		S = Through(DiveBackKeys(), F);
+		Hand = Smooth(0.5, 1.0, F);
+	}
+	else if (UpIn > DiveBackRiseS)
+	{
+		S = Through(DiveBackKeys(), 1.f);
+		Hand = 1.0;
+	}
+	else
+	{
+		const float T = DiveBackRiseS - UpIn;
+		S = Through(DiveBackRiseKeys(), T);
+		Hand = 1.0 - Smooth(0.3, 0.5, T);
+	}
+	// The hand on the bag where and when the sim has it (invariant 4).
+	OutReach.At[R] = FVector(0.0, 0.0, 6.0);
+	OutReach.Weight[R] = (float)Hand;
+	Stand(S, Skel, Ground);
+	return S;
+}
+
 FBbStick BbMotion::Dive(float Since, float UpIn, const FVector& GloveAt, float Glove, const FVector& Look, const FBbSkeleton& Skel, const FBbMotionGround& Ground, FBbReach& OutReach, FVector& OutPocket)
 {
 	const int32 L = 0;

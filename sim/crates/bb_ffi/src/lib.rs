@@ -1228,11 +1228,27 @@ mod tests {
                 let mut f = BbFrame::default();
                 unsafe { bb_timeline_sample(p, len, t, &mut f) };
                 for d in &f.dives[..f.n_dives as usize] {
+                    let a = f.actors[..f.n_actors as usize].iter().find(|a| a.agent == d.agent).expect("the diver is on the field");
+                    if d.base != 0 {
+                        // A runner's dive back (agent-models §6.4): down the sim's 1.0 s from his
+                        // touch, and lying on the bag from it (to within one track sample).
+                        assert!(d.agent & 0x80 == 0, "a dive back by fielder {:#x}", d.agent);
+                        assert!((1..=3).contains(&d.base));
+                        assert!((d.up_in_s - d.touch_in_s - 1.0).abs() < 1e-3, "down from the touch {} - {} s", d.up_in_s, d.touch_in_s);
+                        assert!(d.since_s + d.touch_in_s > 0.0 && d.since_s + d.touch_in_s < 0.8, "in the air {} s", d.since_s + d.touch_in_s);
+                        let l = 27.432 / std::f32::consts::SQRT_2;
+                        let bag = [[l, l], [0.0, 2.0 * l], [-l, l]][d.base as usize - 1];
+                        if d.touch_in_s < -0.1 {
+                            assert!((a.pos[0] - bag[0]).hypot(a.pos[1] - bag[1]) < 0.05, "play {} at {t:.2} s: {:#x} off the bag while down", info.play_index, d.agent);
+                        }
+                        dives += 1;
+                        continue;
+                    }
                     assert!(d.agent & 0x80 != 0, "diver {:#x} is not a fielder", d.agent);
                     assert!((d.since_s + d.up_in_s - 1.5).abs() < 1e-3, "down {} + {} s", d.since_s, d.up_in_s);
+                    assert_eq!(d.touch_in_s, 0.0);
                     let n = d.dir[0].hypot(d.dir[1]);
                     assert!(n == 0.0 || (n - 1.0).abs() < 1e-4, "dive direction {:?}", d.dir);
-                    let a = f.actors[..f.n_actors as usize].iter().find(|a| a.agent == d.agent).expect("the diver is on the field");
                     if d.since_s > 0.45 && d.up_in_s > 0.1 {
                         match lying.iter().find(|l| l.0 == d.agent) {
                             Some(l) => assert!((a.pos[0] - l.1[0]).hypot(a.pos[1] - l.1[1]) < 1e-3, "play {} at {t:.2} s: {:#x} moved while down", info.play_index, d.agent),
@@ -1248,7 +1264,7 @@ mod tests {
             // the diver is up (Codex dive animation review #3).
             let mut f = BbFrame::default();
             unsafe { bb_timeline_sample(p, len, info.duration_s, &mut f) };
-            assert!(f.dives[..f.n_dives as usize].iter().all(|d| d.up_in_s < 1e-3), "play {}: the clip ends with a fielder still down", info.play_index);
+            assert!(f.dives[..f.n_dives as usize].iter().all(|d| d.up_in_s < 1e-3), "play {}: the clip ends with a player still down", info.play_index);
             // The ball never goes under the turf, at any instant of any play.
             let mut t = 0.0;
             while t <= info.duration_s {
