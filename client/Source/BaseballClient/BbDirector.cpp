@@ -2795,7 +2795,7 @@ void ABbDirector::NoteSlides()
 			{
 				continue;
 			}
-			const float T0 = K * Step - Dv.since_s, Touch = T0 + Dv.since_s + Dv.touch_in_s, Up = T0 + Dv.since_s + Dv.up_in_s;
+			const float T0 = K * Step - Dv.since_s, Touch = T0 + Dv.since_s + Dv.end_in_s, Up = T0 + Dv.since_s + Dv.up_in_s;
 			const float Marks[5] = { T0, 0.5f * (T0 + Touch), Touch, Up - 0.45f, Up - 0.15f };
 			for (int32 M = 0; M < 5; ++M)
 			{
@@ -2806,7 +2806,7 @@ void ABbDirector::NoteSlides()
 			ShotDiveYaw = ToUE(Dv.dir[0], Dv.dir[1], 0.0).Rotation().Yaw;
 			if (bStagingLog)
 			{
-				UE_LOG(LogBb, Display, TEXT("BB_DIVEBACK play=%u agent=0x%03x base=%d leave=%.2f touch=%.2f up=%.2f"), Current.Info.play_index, Dv.agent, Dv.base, T0, Touch, Up);
+				UE_LOG(LogBb, Display, TEXT("BB_DIVEBACK play=%u agent=0x%03x base=%d leave=%.2f end=%.2f touched=%u up=%.2f"), Current.Info.play_index, Dv.agent, Dv.base, T0, Touch, Dv.touched, Up);
 			}
 			++DiveBackShotIndex;
 			--DiveBackShotsLeft;
@@ -3356,7 +3356,7 @@ void ABbDirector::PoseFigure(int32 Slot, const BbActor& A, const BbFrame& Frame,
 			else if (St.Motion == 7)
 			{
 				// (Blending out after he is up: standing on the bag, the pose's last key.)
-				S = In.bDiveBack ? BbMotion::DiveBack(In.DiveBackSince, In.DiveBackTouchIn, In.DiveBackUpIn, Skel, GroundOwn, Reach) : BbMotion::DiveBack(9.f, -9.f, 0.f, Skel, GroundOwn, Reach);
+				S = In.bDiveBack ? BbMotion::DiveBack(In.DiveBackSince, In.DiveBackEndIn, In.DiveBackUpIn, In.bDiveBackTouched, Skel, GroundOwn, Reach) : BbMotion::DiveBack(9.f, -9.f, 0.f, true, Skel, GroundOwn, Reach);
 			}
 			else if (St.Motion == 3)
 			{
@@ -4185,20 +4185,22 @@ void ABbDirector::Tick(float DeltaSeconds)
 							const BbDive& Dv = Frame.dives[D];
 							if (Dv.agent == A.agent && Dv.base != 0)
 							{
-								// A runner's dive back (agent-models §6.4): on the sim's clock,
-								// no lead. He is drawn from his touching hand, which the sim's
-								// glide carries at a constant speed from DIVE_BACK_M - DIVE_REACH_M
-								// (1.8 m) out to the bag, where it is from the touch on.
+								// A runner's dive back (agent-models §6.4), on the sim's clock. He is
+								// drawn from his touching hand, which the sim's glide carries at a
+								// constant speed from hand_from to hand_to (the bag, if he touched),
+								// where it lies from the glide's end on. At take-off the origin is
+								// still his path point, DIVE_REACH_M (0.4 m) behind the hand; it
+								// moves onto the hand over the first half of the glide.
 								In.bDiveBack = true;
 								In.DiveBackSince = Dv.since_s;
-								In.DiveBackTouchIn = Dv.touch_in_s;
+								In.DiveBackEndIn = Dv.end_in_s;
 								In.DiveBackUpIn = Dv.up_in_s;
+								In.bDiveBackTouched = Dv.touched != 0;
 								In.DiveBackYaw = ToUE(Dv.dir[0], Dv.dir[1], 0.0).Rotation().Yaw;
-								const double L = 27.432 / UE_SQRT_2;
-								const FVector2D Bag = Dv.base == 1 ? FVector2D(L, L) : Dv.base == 2 ? FVector2D(0.0, 2.0 * L) : FVector2D(-L, L);
-								const double Left = Dv.touch_in_s > 0.f ? 1.8 * Dv.touch_in_s / FMath::Max(Dv.since_s + Dv.touch_in_s, 0.05f) : 0.0;
-								A.pos[0] = (float)(Bag.X - Dv.dir[0] * Left);
-								A.pos[1] = (float)(Bag.Y - Dv.dir[1] * Left);
+								const float F = Dv.end_in_s > 0.f ? FMath::Clamp(Dv.since_s / FMath::Max(Dv.since_s + Dv.end_in_s, 0.05f), 0.f, 1.f) : 1.f;
+								const float Behind = 0.4f * (1.f - FMath::SmoothStep(0.f, 0.5f, F));
+								A.pos[0] = FMath::Lerp(Dv.hand_from[0], Dv.hand_to[0], F) - Dv.dir[0] * Behind;
+								A.pos[1] = FMath::Lerp(Dv.hand_from[1], Dv.hand_to[1], F) - Dv.dir[1] * Behind;
 							}
 							else if (Dv.agent == A.agent)
 							{
@@ -4208,7 +4210,26 @@ void ABbDirector::Tick(float DeltaSeconds)
 								In.DiveYaw = ToUE(Dv.dir[0], Dv.dir[1], 0.0).Rotation().Yaw;
 							}
 						}
+						// A runner about to dive back: the pose blends in over the DiveBackLeadS
+						// before the sim's take-off, so he is leaving his feet when the sim has him
+						// leave them (review P3-6); his place is the sim's until then.
 						BbFrame Ahead;
+						if (!In.bDiveBack && bFigure && PlayTime + DiveBackLeadS <= Current.Info.duration_s && SampleDrawn(Current, PlayTime + DiveBackLeadS, Ahead))
+						{
+							for (uint32 D = 0; D < Ahead.n_dives; ++D)
+							{
+								const BbDive& Dv = Ahead.dives[D];
+								if (Dv.agent == A.agent && Dv.base != 0 && Dv.since_s < DiveBackLeadS)
+								{
+									In.bDiveBack = true;
+									In.DiveBackSince = Dv.since_s - DiveBackLeadS;
+									In.DiveBackEndIn = Dv.end_in_s + DiveBackLeadS;
+									In.DiveBackUpIn = Dv.up_in_s + DiveBackLeadS;
+									In.bDiveBackTouched = Dv.touched != 0;
+									In.DiveBackYaw = ToUE(Dv.dir[0], Dv.dir[1], 0.0).Rotation().Yaw;
+								}
+							}
+						}
 						if (In.DiveSince < 0.f && bFigure && PlayTime + DiveLeadS <= Current.Info.duration_s && SampleDrawn(Current, PlayTime + DiveLeadS, Ahead))
 						{
 							for (uint32 D = 0; D < Ahead.n_dives; ++D)

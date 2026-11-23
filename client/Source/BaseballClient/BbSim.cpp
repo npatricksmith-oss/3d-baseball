@@ -39,6 +39,16 @@ bool FBbSim::Start(const FString& LibraryPath, uint64 Seed)
 		UE_LOG(LogBbSim, Error, TEXT("The sim library at %s is missing part of the C ABI"), *LibraryPath);
 		return false;
 	}
+	// The structs the client reads must have the layout it was compiled with (Q39 review P3-5):
+	// a library of another ABI version would write past them.
+	using FAbiVersion = uint32 (*)();
+	const FAbiVersion FnAbi = reinterpret_cast<FAbiVersion>(Sym(TEXT("bb_abi_version")));
+	const uint32 LibAbi = FnAbi ? FnAbi() : 1;
+	if (LibAbi != BB_ABI_VERSION)
+	{
+		UE_LOG(LogBbSim, Error, TEXT("The sim library at %s speaks C ABI version %u; this client was built for version %u. Rebuild both from one checkout (client/run.sh does: cargo build --release -p bb_ffi, then the client)."), *LibraryPath, LibAbi, (uint32)BB_ABI_VERSION);
+		return false;
+	}
 	Game = FnCreate(Seed);
 	if (!Game)
 	{

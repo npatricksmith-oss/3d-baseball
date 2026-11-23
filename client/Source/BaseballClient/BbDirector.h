@@ -278,12 +278,14 @@ private:
 		bool bDiveDir = false;
 		float DiveYaw = 0.f;
 		/** A runner's dive back to a bag (the sim's BbDive with a base): seconds since he left
-		 *  his feet, until his hand touches (negative after), until he is up; which way he
-		 *  dove (Unreal yaw). */
+		 *  his feet (negative just before, as the pose blends in), until his glide ends
+		 *  (negative after), until he is up; whether it ended with his hand on the bag; which
+		 *  way he dove (Unreal yaw). */
 		bool bDiveBack = false;
 		float DiveBackSince = 0.f;
-		float DiveBackTouchIn = 0.f;
+		float DiveBackEndIn = 0.f;
 		float DiveBackUpIn = 0.f;
+		bool bDiveBackTouched = true;
 		float DiveBackYaw = 0.f;
 		/** A runner's slide: seconds from his arrival at the bag, and which way he came. */
 		bool bSlide = false;
@@ -298,6 +300,8 @@ private:
 	 *  flat, his middle is DiveBodyBackCm from his feet. Check with -BbDiveShots. */
 	/** The drawn dive begins this long before the sim's (PoseFigure's caller says why), s. */
 	static constexpr float DiveLeadS = 0.17f;
+	/** A runner's dive back starts its blend this long before the sim's take-off. */
+	static constexpr float DiveBackLeadS = 0.12f;
 	float DiveFallS = 0.3f;
 	float DiveRiseS = 0.6f;
 	float DiveTiltDeg = 45.f;

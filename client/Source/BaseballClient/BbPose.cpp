@@ -1234,17 +1234,18 @@ namespace
 			return Keys;
 		}
 		const int32 L = 0, R = 1;
-		// Off the left foot, low, the trunk going over, both hands reaching for the bag.
+		// Off the left foot, low, the trunk going over, both hands reaching for the bag. (The
+		// origin is still his path point here, 0.4 m behind where the hand will be.)
 		Keys.Add(Key(0.f, [&](FBbStick& S)
 		{
-			S.Pelvis = { 0, -110, 66 };
+			S.Pelvis = { 0, -20, 66 };
 			S.PelvisUp = { 0, 0.6, 1 };
 			S.PelvisFwd = { 0, 1, -0.6 };
 			S.ChestUp = { 0, 1, 0.7 };
 			S.ChestFwd = { 0, 0.7, -1 };
 			S.HeadFwd = { 0, 1, -0.2 };
-			S.Ankle[L] = { 12, -128, 0 };
-			S.Ankle[R] = { -12, -170, 14 };
+			S.Ankle[L] = { 12, -38, 0 };
+			S.Ankle[R] = { -12, -80, 14 };
 			S.Knee[L] = { 0.2, 1, 0 };
 			S.Knee[R] = { -0.2, 1, -0.3 };
 			S.Toe[R] = { 0, 0.6, -0.8 };
@@ -1320,14 +1321,14 @@ namespace
 	}
 }
 
-FBbStick BbMotion::DiveBack(float Since, float TouchIn, float UpIn, const FBbSkeleton& Skel, const FBbMotionGround& Ground, FBbReach& OutReach)
+FBbStick BbMotion::DiveBack(float Since, float EndIn, float UpIn, bool bTouched, const FBbSkeleton& Skel, const FBbMotionGround& Ground, FBbReach& OutReach)
 {
 	const int32 R = 1;
 	FBbStick S;
 	double Hand = 0.0;
-	if (TouchIn > 0.f)
+	if (EndIn > 0.f)
 	{
-		const float F = Since / FMath::Max(Since + TouchIn, 0.05f);
+		const float F = Since / FMath::Max(Since + EndIn, 0.05f);
 		S = Through(DiveBackKeys(), F);
 		Hand = Smooth(0.5, 1.0, F);
 	}
@@ -1342,8 +1343,9 @@ FBbStick BbMotion::DiveBack(float Since, float TouchIn, float UpIn, const FBbSke
 		S = Through(DiveBackRiseKeys(), T);
 		Hand = 1.0 - Smooth(0.3, 0.5, T);
 	}
-	// The hand on the bag where and when the sim has it (invariant 4).
-	OutReach.At[R] = FVector(0.0, 0.0, 6.0);
+	// The hand on the bag where and when the sim has it (invariant 4); short of it, on the
+	// dirt where the sim's glide left it.
+	OutReach.At[R] = FVector(0.0, 0.0, bTouched ? 6.0 : 2.0);
 	OutReach.Weight[R] = (float)Hand;
 	Stand(S, Skel, Ground);
 	return S;
