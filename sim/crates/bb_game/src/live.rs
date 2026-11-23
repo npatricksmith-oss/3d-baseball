@@ -7527,7 +7527,9 @@ impl<'a> Sim<'a> {
             None => run_time_from(d_run, r.direction * r.v, r.vmax, r.tau),
         };
         // Unforced, he must beat the tag, not only the ball: his belief of the time it takes.
-        let tag_s = if forced { 0.0 } else { self.inp.tag_up.typical_tag_s };
+        // The force is only to the base after his own: once there, every base on is a tag play
+        // (OBR 5.09(b)(6)), for the batter-runner too (review 2026-11-23, P2-2).
+        let tag_s = if forced && at_base == self.r[k].start { 0.0 } else { self.inp.tag_up.typical_tag_s };
         let t_ball = match contact {
             Some(pred) => self.pickup_time_to(k, next, self.t + t_run, pred),
             None => self.ball_time_to(k, next, 2 * n + 1, self.t + t_run),
@@ -7741,8 +7743,10 @@ impl<'a> Sim<'a> {
         let adv = &self.inp.advance;
         let (go_on, go_back) = (adv.p_safe(m_on) > 0.5, adv.p_safe(m_back) > 0.5);
         let prefers_on = adv.chooses_on(m_on, m_back, &self.advance_values(k, from, self.t + t_on.min(t_back)));
-        // Safe at neither: he turns toward the base the ball is farther from (a rundown is
-        // not modelled; either way he is probably out).
+        // Safe at neither: he heads for the base where his race is least bad, the larger margin
+        // (ball and tag less his own time; a rundown is not modelled, and either way he is
+        // probably out). It was the base the ball takes longer to reach, whatever his own
+        // distance: a runner 6 m from second turned for first (review 2026-11-23, P2-3).
         // The base behind him is no refuge once a runner who started behind him stands on it
         // or has passed it (two on a base; the force is off, but he is not alone on the path).
         let crowded = self.return_crowded(k, from);
@@ -7750,7 +7754,7 @@ impl<'a> Sim<'a> {
             next
         } else if go_on || go_back {
             if prefers_on { next } else { from }
-        } else if ball_back >= ball_on {
+        } else if m_back > m_on {
             from
         } else {
             next
