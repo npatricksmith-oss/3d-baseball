@@ -139,6 +139,24 @@ All builds were in `sim/target/review-probes/q39/`: `tree/` is `git archive 0ec2
   - All three are retouches after a caught liner ("OUT, caught"), the commonest source (537 of 829).
 - **Code checks:** `margin_s` in `absorb` (`live.rs` ~3440). Tick order: `holder_act` before `move_runners`. `BbDive` layout in the header and Rust. Retrosheet scripts `retro_third_gb.py` and `retro_second_gb.py` against the probe `zz_dive_back.rs`, and the probe's `tagback_gb` rows (50 from second, all 0–1 out, infielder first). `python3 bin/check-docs.py`: clean apart from this file not yet existing.
 
+## Worker follow-up (worker-2, 2026-11-23)
+
+- **P2-1 (fixed, `383e0d0`, spec `489e8fd`).**
+  - He dives only on a margin between −`DIVE_SAVE_S` (0.4 s [E]) and `DIVE_CLOSE_S`. This applies in `runner_relook`, the capped path included, and in `retouch_dive` (`dive_can_change`).
+  - Test: `a_capped_runner_beaten_by_a_second_brakes_in`.
+  - Your count, redone with your prints and `analyse.py` on the fixed code over the standard 600 games: 829 → 552 dives, put out in the air 207 → 14, play ended in the air 8 → 2, capped runners under −1 s 175 → 7. The 7 are dives kept from an earlier close look (P3-1).
+  - The outs are not unchanged. In the probe cohort, appeal outs went back from 133 to main's 141. The 8 saved before were retouches believed lost by more than 0.4 s whose hands got there. Dropping the lower bound on retouches alone would keep them (note §6; a choice for the Coordinator).
+- **P2-2 (fixed, `383e0d0`, `95cf42b`).**
+  - The dive is recorded at take-off. The record closes at the touch, at an out (tag or appeal) or at the play's end. Without a touch, the timeline has `Dive` and `DiveUp` and no `BaseTouch`, and the track holds until he is up.
+  - Test: `a_dive_tagged_in_the_air_is_recorded`. The FFI timeline test checks touched and untouched dives.
+  - The client draws the glide and the runner lying short of the bag. Headless check: seed 44, play 166 (the only dive back in that game, tagged in the air).
+- **P3-1 (fixed).** A chosen dive stands while he keeps going back. Test: `a_chosen_dive_stands_while_he_keeps_going_back`. Run-ins cancelled inside braking distance: 6 → 0.
+- **P3-2 (fixed).** `BbDive` carries `hand_from` and `hand_to` (the `Dive` and `DiveUp` points), and the client interpolates between them. The 0.4 m step at take-off is smoothed: the origin moves from his path point onto the hand over the first half of the glide. data-formats §5.4 is corrected.
+- **P3-3 (fixed).** The test text in §6.4 now names a constructed close return. The tag-test comment is corrected. `retouch_dive`'s doc comment and §6.4 now say the throw is from where the catcher stands when the runner sees the call. Note §summary and §6 quantify the in-air outs.
+- **P3-4 (fixed).** Note §3 and §6.4 list the per-fielder divergence (pitcher, first, short) and the infield-in confound as open, and say the `3XH` reading is unchecked.
+- **P3-5 (fixed).** `bb_abi_version()` and `BB_ABI_VERSION` 2. A test ties the header's version to the library's. `FBbSim::Start` refuses a library of another version, or one without the function, and says why.
+- **P3-6.** The 3,000-layout property tests now include runners diving back and down on a bag. The pose's blend starts 0.12 s before the sim's take-off, read from the frame ahead (`DiveBackLeadS`). The covering fielder's overlap is deferred with a line in TASKS §1.
+
 ## Resolution
 
 Open.
