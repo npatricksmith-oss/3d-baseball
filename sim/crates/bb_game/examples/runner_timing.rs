@@ -465,6 +465,10 @@ fn row(
 struct Counts {
     // Starting base (first or second), then outs. Count opportunities and advances.
     singles: [[(u64, u64); 3]; 2],
+    // The same runners put out on the play.
+    singles_out: [[u64; 3]; 2],
+    // Runner on first on a scorer's double, by outs: opportunities, scored, put out.
+    doubles: [(u64, u64, u64); 3],
     // Launch below 10°, 10–25°, 25–50° and 50° or more. Catches with runners, plays
     // with appeals, and runners retired on those appeals.
     catches: [(u64, u64, u64); 4],
@@ -488,6 +492,16 @@ impl Counts {
                     _ => false,
                 });
                 entry.1 += u64::from(safe);
+                let out = step.rules_events.iter().any(|e| matches!(*e, Event::RunnerOut { runner, .. } if runner == id));
+                self.singles_out[i][outs as usize] += u64::from(out);
+            }
+        }
+        if step.scorer_ruling.is_some_and(|r| r.outcome == Outcome::Hit(2)) {
+            if let Some(id) = runners[0] {
+                let entry = &mut self.doubles[outs as usize];
+                entry.0 += 1;
+                entry.1 += u64::from(step.rules_events.iter().any(|e| matches!(*e, Event::RunScored { runner } if runner == id)));
+                entry.2 += u64::from(step.rules_events.iter().any(|e| matches!(*e, Event::RunnerOut { runner, .. } if runner == id)));
             }
         }
 
@@ -527,6 +541,14 @@ impl Counts {
         {
             mine.0 += theirs.0;
             mine.1 += theirs.1;
+        }
+        for (mine, theirs) in self.singles_out.iter_mut().flatten().zip(other.singles_out.into_iter().flatten()) {
+            *mine += theirs;
+        }
+        for (mine, theirs) in self.doubles.iter_mut().zip(other.doubles) {
+            mine.0 += theirs.0;
+            mine.1 += theirs.1;
+            mine.2 += theirs.2;
         }
         for (mine, theirs) in self.catches.iter_mut().zip(other.catches) {
             mine.0 += theirs.0;
@@ -671,6 +693,8 @@ fn main() {
     eprintln!("{games} games. All singles (opportunities, advances) by outs 0/1/2:");
     eprintln!("  first to third: {:?}", counts.singles[0]);
     eprintln!("  second to home: {:?}", counts.singles[1]);
+    eprintln!("  put out, first / second: {:?} / {:?}", counts.singles_out[0], counts.singles_out[1]);
+    eprintln!("Doubles, runner on first by outs 0/1/2 (opportunities, scored, put out): {:?}", counts.doubles);
     eprintln!("Caught balls with runners and 0–1 out (catches, plays with appeals, doubled off):");
     eprintln!("  launch below 10°: {:?}", counts.catches[0]);
     eprintln!("  launch 10–25°: {:?}", counts.catches[1]);
