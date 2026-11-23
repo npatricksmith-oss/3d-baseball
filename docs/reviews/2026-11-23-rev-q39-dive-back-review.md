@@ -145,7 +145,8 @@ All builds were in `sim/target/review-probes/q39/`: `tree/` is `git archive 0ec2
   - He dives only on a margin between −`DIVE_SAVE_S` (0.4 s [E]) and `DIVE_CLOSE_S`. This applies in `runner_relook`, the capped path included, and in `retouch_dive` (`dive_can_change`).
   - Test: `a_capped_runner_beaten_by_a_second_brakes_in`.
   - Your count, redone with your prints and `analyse.py` on the fixed code over the standard 600 games: 829 → 552 dives, put out in the air 207 → 14, play ended in the air 8 → 2, capped runners under −1 s 175 → 7. The 7 are dives kept from an earlier close look (P3-1).
-  - The outs are not unchanged. In the probe cohort, appeal outs went back from 133 to main's 141. The 8 saved before were retouches believed lost by more than 0.4 s whose hands got there. Dropping the lower bound on retouches alone would keep them (note §6; a choice for the Coordinator).
+  - The outs are not unchanged. In the probe cohort, appeal outs went back from 133 to main's 141. The 8 saved before were retouches believed lost by more than 0.4 s whose hands got there.
+  - The Coordinator then decided to drop the lower bound on the retouch only (`b4abc03`): on an appeal the runner has no rundown. Test: `a_retouch_believed_lost_still_dives`. Standard run: 690 dives, 39 put out in the air (25 of them appeals), 8 ended in the air. Probe: appeal outs 134. Note §6.
 - **P2-2 (fixed, `383e0d0`, `95cf42b`).**
   - The dive is recorded at take-off. The record closes at the touch, at an out (tag or appeal) or at the play's end. Without a touch, the timeline has `Dive` and `DiveUp` and no `BaseTouch`, and the track holds until he is up.
   - Test: `a_dive_tagged_in_the_air_is_recorded`. The FFI timeline test checks touched and untouched dives.
