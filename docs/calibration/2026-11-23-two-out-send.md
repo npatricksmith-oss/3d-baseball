@@ -48,7 +48,17 @@ Seeds 0–299 and 1000–1299 direct, average fielders, `runner_timing` (`sim/ta
 
 ## 4. The standard run
 
-STANDARD-RUN
+On `18226df` after a touch, with `sim-cli` rebuilt, `cargo test --workspace` gave 549 passed and 0 failed. The before figures are the late-catch review-fix row of the [ledger](../metrics-ledger.md); no sim source has changed since `a9508e3`. Seeds 0 [1000]:
+
+| | Before | After |
+|---|---|---|
+| Runs/team-game | 4.12 [4.43] | 4.13 [4.45] |
+| GB/LD/FB/PU hit | .307/.671/.099/.006 [.312/.664/.100/.008] | .307/.671/.099/.006 [.312/.665/.100/.008] |
+| HR/PA, K%, BB% | 2.73%, 22.6, 8.1 [2.86%, 22.0, 8.5] | 2.73%, 22.6, 8.1 [2.88%, 22.0, 8.5] |
+| Reached on BIP | 33.7% [33.8%] | 33.7% [33.8%] |
+| PA/team-game, pitches/game | 37.7, 237 [38.2, 240] | 37.6, 237 [38.3, 240] |
+
+All of these are within noise. Every digest changed, because a different send changes the rest of the game. About 12 more runners from second score with two out in 600 games, and about 5 more are put out. That is about +0.01 runs a team-game, the size of the change measured.
 
 ## 5. Open
 

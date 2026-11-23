@@ -1,6 +1,6 @@
 # Task List
 
-**Last updated:** 2026-11-23 (late-catch read merged; Q38, Q39 decided; Q37 parked).
+**Last updated:** 2026-11-23 (Q38 (a) built on `work/two-out-caution`, awaiting review; Q39 decided; Q37 parked).
 
 What is next and what is open. Other files hold the rest:
 
@@ -17,9 +17,9 @@ Status: `[ ]` not started · `[~]` partly done · `[?]` needs an owner decision
 
 ## Resume here (2026-11-23)
 
-**State.** Nothing running; the late-catch read is merged. **Waiting on the owner:** Q37 (stances; parked). Q38 (a), Q39 (a) decided (§1).
+**State.** Q38 (a) built, tested and measured on `work/two-out-caution` (`18226df`, docs after it; worker-1); nothing running. It needs its review (Opus, sim change) and merge. **Waiting on the owner:** Q37 (stances; parked). Q39 (a) decided (§1).
 
-**Next:** Q38 then Q39 (§1, one live.rs job at a time). Then §2: seed-5593, play 71.
+**Next:** review and merge Q38, then Q39 (§1, one live.rs job at a time). Then §2: seed-5593, play 71.
 
 **Open (ledger §5):** runs down 0.21 [0.18] since dp-cover (0.04 explained; check noise); double plays 12.3% (MLB 9.8%).
 
@@ -33,16 +33,16 @@ One `sim/crates/bb_game/src/live.rs` job at a time. Each job gets a ledger row a
 
 - [~] **The runner's start (Q27).** Moving secondary leads are merged (2026-11-18): +1.0 m at 3 m/s with 0–1 out, +1.5 m at 5 m/s with two out. All three bases use the contact state, and the live-ball timeline carries the shuffle from release. Early bounces respect the read clock. Runners brake for partway holds and returns, and the rules judge the retouch.
   - After fly-read (2026-11-19): double-offs per 300 games 0 at 25–50° (MLB about 4: each in-flight relook's noise is fresh and closes as the ball comes down, so a runner always sees the catch coming; deferred review P3-5, levers in the [review](docs/reviews/2026-11-19-opus-fly-read-review.md)), 12.5 at 10–25°, 60.5 below 10°. On singles second to home is 55.1% (MLB 61.7%), first to third 31.2% (31.7%). Long liners still up after 3–4 s read 20–40 m off flown back from the plate cue (70 balls in 48 games; tracking corrects it). [Fly-read note](docs/calibration/2026-11-19-fly-read.md#open).
-  - Open, diagnosed 2026-11-23 ([note](docs/calibration/2026-11-23-runner-start-open.md)): two-out sends: center matches MLB, the corners are short (81–82% against 91–93%) from caution (Q38). Dive back: Q39. Late-flight read and tag-up relook merged ([note](docs/calibration/2026-11-23-late-catch-read.md); open: its §6): second to home, 0–1 out, 43.1% → 46.0% (MLB 49.1%).
+  - Open, diagnosed 2026-11-23 ([note](docs/calibration/2026-11-23-runner-start-open.md)): two-out sends: the corners were short from caution; Q38 (a) built (below). Dive back: Q39. Late-flight read and tag-up relook merged ([note](docs/calibration/2026-11-23-late-catch-read.md); open: its §6): second to home, 0–1 out, 43.1% → 46.0% (MLB 49.1%).
   - Deferred P3s left (runner-start note §5): a tag between bases after a non-goal crossing (with the dive back); runner-timing P3-1, P3-2.
 - [ ] Base relook (§6.4; ledger row 2026-11-23): his look at a throw 0.5 s in misplaces it along his line of sight (σ capped only by the distance flown; the one out in 600 games). `RELAY_READ_S` 0.6 s vs the 0.28–0.47 s rushed return. Held runners start from rest.
 - [ ] Batter-runner stops at first on 97/279 double cuts, some fielded 120 m out (64/196; main too; Opus review Q5).
-- [ ] **Q38 (a)** (2026-11-23): `caution_z` by outs (two-out pre-decision), fitted to Retrosheet two-out sends from second (~92% at the corners, 2–6% out); first to third and 0–1 out unmoved ([note](docs/calibration/2026-11-23-runner-start-open.md) §1).
+- [~] **Q38 (a)** (2026-11-23), built on `work/two-out-caution`, awaiting review: `send_two_out_z` = −0.2 for the runner from second deciding on home with two out (agent-models §6.3). Corners 83.0% → 93.1% sent, 4.3% of sends out (Retrosheet 92.1%, 3.9%); center 99%; 0–1 out, first to third and doubles unmoved ([note](docs/calibration/2026-11-23-two-out-send.md)).
 - [ ] **Q39 (a)** (2026-11-23): a dive or slide back on close returns (note §3; spec §6.4 first; client shows it). Same job: the runner from third breaking 15 m on a grounder in front of him.
 - [ ] The coach's read and send for a ball behind the runner (Q10 a). Model early-departure decisions on caught flies, slides around tags, a turn decision before the bag, and an overrun redirected after an overthrow.
 - [ ] The rundown (Q11), on its own branch. A stand-in exists. Two small points from the runner-decision review wait for it.
 - [ ] A runner stops dead standing at a base he holds, at 8 m/s (the sim brakes him only going back). A runner put out short of the bag leaves the picture, so there is no slide into a tag.
-- [ ] Unexplained: doubles with a runner on first and two out nearly doubled after the decision model (88 → 167 in 300 games). Suspect: the scorer's single-or-double ruling when the batter takes second on the throw home. First to home on a double is 77% against MLB 38% (65 of 84, seeds 0–99, `extra_base_rates`, 2026-11-19; the 53% quoted before dated from 2026-11-15).
+- [ ] Unexplained: doubles with a runner on first and two out nearly doubled after the decision model (88 → 167 in 300 games). Suspect: the scorer's single-or-double ruling when the batter takes second on the throw home. First to home on a double is 77% against MLB 38% (65 of 84, seeds 0–99, `extra_base_rates`, 2026-11-19; the 53% quoted before dated from 2026-11-15). 2026-11-23, 600 games: 61/67/92% at 0/1/2 out against Retrosheet 2024 outfield doubles 31/35/59%, with 350 of 549 chances at two out (MLB 885 of 2,270) ([two-out send note §5](docs/calibration/2026-11-23-two-out-send.md#5-open)).
 - [ ] Owner's saved plays 65, 67, 68, 156 and "round first on a throw to the cutoff" (observations.md): going halfway on a fly, running through first, rounding first.
 - Waiting for ratings: per-runner caution and speed; τ refit to Statcast 90-ft splits (league top speed is 8.2 m/s; 27.0 ft/s is 8.23); the left/right home-to-first gap (0.17 s against 0.09 s).
 
