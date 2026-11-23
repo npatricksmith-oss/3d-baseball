@@ -1,6 +1,6 @@
 # Task List
 
-**Last updated:** 2026-11-23 (Q38 merged; Q39 running; Q37 parked).
+**Last updated:** 2026-11-23 (Q38 merged; Q39 to merge; Q37 parked).
 
 What is next and what is open. Other files hold the rest:
 
@@ -17,7 +17,7 @@ Status: `[ ]` not started · `[~]` partly done · `[?]` needs an owner decision
 
 ## Resume here (2026-11-23)
 
-**State.** Done, to review: worker-2 (Opus), `work/dive-back` in `.claude/worktrees/saved-plays`: Q39 (a), the dive back; next an Opus review (sim and client). Q38 is merged. **Waiting on the owner:** Q37 (stances; parked).
+**State.** Review fixed, to merge: worker-2 (Opus), `work/dive-back` in `.claude/worktrees/saved-plays`: Q39 (a), the dive back. Q38 is merged. **Waiting on the owner:** Q37 (stances; parked).
 
 **Next:** after Q39, §2: seed-5593, play 71.
 
@@ -33,12 +33,12 @@ One `sim/crates/bb_game/src/live.rs` job at a time. Each job gets a ledger row a
 
 - [~] **The runner's start (Q27).** Moving secondary leads are merged (2026-11-18): +1.0 m at 3 m/s with 0–1 out, +1.5 m at 5 m/s with two out. All three bases use the contact state, and the live-ball timeline carries the shuffle from release. Early bounces respect the read clock. Runners brake for partway holds and returns, and the rules judge the retouch.
   - After fly-read (2026-11-19): double-offs per 300 games 0 at 25–50° (MLB about 4: each in-flight relook's noise is fresh and closes as the ball comes down, so a runner always sees the catch coming; deferred review P3-5, levers in the [review](docs/reviews/2026-11-19-opus-fly-read-review.md)), 12.5 at 10–25°, 60.5 below 10°. On singles second to home is 55.1% (MLB 61.7%), first to third 31.2% (31.7%). Long liners still up after 3–4 s read 20–40 m off flown back from the plate cue (70 balls in 48 games; tracking corrects it). [Fly-read note](docs/calibration/2026-11-19-fly-read.md#open).
-  - Open, diagnosed 2026-11-23 ([note](docs/calibration/2026-11-23-runner-start-open.md)): two-out sends: Q38 (below). Dive back: Q39 (built, below). Late-flight read and tag-up relook merged ([note](docs/calibration/2026-11-23-late-catch-read.md); open: its §6): second to home, 0–1 out, 43.1% → 46.0% (MLB 49.1%).
+  - Open, diagnosed 2026-11-23 ([note](docs/calibration/2026-11-23-runner-start-open.md)): two-out sends: Q38 (merged). Dive back: Q39 (built, below). Late-flight read and tag-up relook merged ([note](docs/calibration/2026-11-23-late-catch-read.md); open: its §6): second to home, 0–1 out, 43.1% → 46.0% (MLB 49.1%).
   - Deferred P3s left (runner-start note §5): runner-timing P3-1, P3-2.
 - [ ] Base relook (§6.4; ledger row 2026-11-23): his look at a throw 0.5 s in misplaces it along his line of sight (σ capped only by the distance flown; the one out in 600 games). `RELAY_READ_S` 0.6 s vs the 0.28–0.47 s rushed return. Held runners start from rest.
 - [ ] Batter-runner stops at first on 97/279 double cuts, some fielded 120 m out (64/196; main too; Opus review Q5).
 - [ ] **The runner's read at third of a charging outfielder's throw home is ~0.2 s slow** ([note §2a](docs/calibration/2026-11-23-two-out-send.md#2a-the-runners-read-of-the-throw-home-review-p2-1)): he times it from the fielder's spot at his look (he lets go 2–3 m nearer) to the plate. If fixed, refit `send_two_out_z`. `runner_timing`'s benchmark is 0.28 s slow. All 7 corner outs at right.
-- [~] **Q39 (a)** on `work/dive-back`, to review ([note](docs/calibration/2026-11-23-dive-back.md)): about one dive back a game; outs going back barely move (73 → 72 on grounders, appeals 141 → 133 per 600 games): those runners are a second late. The runner from third's break matches MLB: not changed.
+- [~] **Q39 (a)** on `work/dive-back`, review fixed, to merge ([note §6](docs/calibration/2026-11-23-dive-back.md)): dives only when it can change the race; 552 a standard run, 14 put out in the air (was 207). Outs going back as on main (73, appeals 141). Choice: no lower bound on retouches saves 8 appeals in 600 games (note §6). Deferred: the covering fielder stands in the lying runner (client).
 - [ ] **Outs going back on grounders: 72 per 600 games, MLB about 3** (note §3–§4): 51 from second, where MLB's are out at third. Likely the missing rundown (Q11); count the sim's outs at third first.
 - [ ] The coach's read and send for a ball behind the runner (Q10 a). Model early-departure decisions on caught flies, slides around tags, a turn decision before the bag, and an overrun redirected after an overthrow.
 - [ ] The rundown (Q11), on its own branch. A stand-in exists. Two small points from the runner-decision review wait for it.
