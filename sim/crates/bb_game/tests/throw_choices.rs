@@ -1112,3 +1112,37 @@ fn a_ball_past_the_outfielders_adds_the_relay_man_and_keeps_the_first_baseman() 
         }
     }
 }
+
+/// The double cut in real games (agent-models §5.7; owner Q35 (c): "the third baseman stays at
+/// third, the other middle infielder covers second"). Seeds 0–7, every play: at every tick at
+/// which the first baseman and a middle infielder are both out on the cutoff home with the ball
+/// down (the double cut), the third baseman covers third, the other middle infielder second, the
+/// catcher home, and no other infielder is on a cutoff. Third is never left open by it.
+#[test]
+fn in_real_games_the_double_cut_keeps_third_second_and_home_covered() {
+    let mut plays = 0;
+    for seed in 0..8 {
+        let mut g = Game::new(seed, false);
+        bb_game::live::job_trace::take();
+        bb_game::live::job_trace::ON.with(|x| x.set(true));
+        while let Some(step) = g.step_pitch() {
+            let ticks = bb_game::live::job_trace::take();
+            let down = step.facts.iter().find_map(|f| match *f {
+                Input::BallTouched { t, what: bb_rules::Touch::Ground { .. } | bb_rules::Touch::Wall { .. } } => Some(Some(t)),
+                Input::GloveSecured { .. } => Some(None),
+                _ => None,
+            });
+            let Some(Some(t_down)) = down else { continue };
+            let mut on = false;
+            for k in ticks.iter().filter(|k| k.t > t_down && k.job[2] == 24) {
+                let Some(relay) = [3, 5].into_iter().find(|&i| k.job[i] == 24) else { continue };
+                on = true;
+                assert!(k.job[4] == 13 && k.job[8 - relay] == 12 && k.job[1] == 14, "seed {seed} play {}: the double cut at {:.2} s without third, second or home covered: {:?}", step.play, k.t, k.job);
+                assert!([0, 4, 8 - relay].iter().all(|&i| !(20..30).contains(&k.job[i])), "seed {seed} play {}: a third man on a cutoff at {:.2} s: {:?}", step.play, k.t, k.job);
+            }
+            plays += on as u32;
+        }
+        bb_game::live::job_trace::ON.with(|x| x.set(false));
+    }
+    assert!(plays >= 8, "the premise: double cuts in eight games ({plays})");
+}
