@@ -107,6 +107,12 @@ const HALFWAY_M: f64 = 5.0;
 /// A runner's belief of how long a fielder who takes a throw at one base needs before his
 /// own throw to another leaves, s [E].
 const RELAY_READ_S: f64 = 0.6;
+/// A runner's belief of how soon the man taking a throw at the base he stands on can have
+/// it on its way to his next base, s: that man's quickest, a hurried release
+/// (`throwing::RUSH_MIN_FRAC`) of a grade-50 infielder's set exchange on a bag (0.7 of
+/// `INFIELD_TRANSFER_50_S`, as `RELAY_TRANSFER_FRAC`): 0.27 s. League knowledge of the
+/// fielders' own model; no new parameter (agent-models §6.4, a quick return throw).
+const QUICK_RETURN_S: f64 = throwing::RUSH_MIN_FRAC * RELAY_TRANSFER_FRAC * throwing::INFIELD_TRANSFER_50_S;
 /// A runner's belief of what a cut costs: how much later than a straight throw the ball
 /// reaches his base when the throw was sent to another base and the cutoff man takes it on
 /// the way and turns, s [E]: the relay man's exchange (`throwing::RELAY_S_50`, 0.75 s) and the
@@ -7245,7 +7251,22 @@ impl<'a> Sim<'a> {
             }
             Ball::Thrown { .. } => {
                 // One keyed look feeds every base race in this decision.
-                self.thrown_read(k, read_sub).time_to(b)
+                let read = self.thrown_read(k, read_sub);
+                let mut t = read.time_to(b);
+                // A quick return throw (agent-models §6.4): standing on the base before `b`, he
+                // knows the man taking a throw there has his next base a short throw away and
+                // nobody else to play, and can rush it (`QUICK_RETURN_S`), whether the throw is
+                // to that base or passes it where it can be taken.
+                let r = &self.r[k];
+                let own = (r.s / BASE_L).round();
+                if (r.s - own * BASE_L).abs() < 1e-6 && own as u8 + 1 == b && (1..=3).contains(&(own as u8)) && read.relay.is_none() {
+                    let o = own as u8;
+                    let at_own = if read.dest == o { Some(read.t_arrive) } else { read.pass_time(o) };
+                    if let Some(t0) = at_own {
+                        t = t.min(t0 + QUICK_RETURN_S + typical_throw_time(BASE_L, Cut::No));
+                    }
+                }
+                t
             }
             Ball::Free { .. } => {
                 let t0 = prof::enabled().then(std::time::Instant::now);
@@ -7776,21 +7797,7 @@ impl<'a> Sim<'a> {
             return false;
         }
         let (id, t) = (r.id, self.t);
-        // A throw coming to his own base (his read brings it down there, or past his bag where
-        // it can be taken) comes to the man beside him, a short throw from the next base, who
-        // can rush it: he stays and watches it in, and looks again when it is caught. The look
-        // is spent (its draws are this decision's).
-        let to_his_base = matches!(self.ball, Ball::Thrown { .. }) && {
-            let read = self.thrown_read(k, 2 * (self.r[k].decisions + 1) + 1);
-            read.relay.is_none() && (read.dest == b || read.pass_time(b).is_some())
-        };
-        if to_his_base {
-            let r = &mut self.r[k];
-            r.decisions += 1;
-            r.looked = (self.out.secured.len(), self.out.released.len());
-        } else {
-            self.runner_decide(k, b);
-        }
+        self.runner_decide(k, b);
         if runner_trace::enabled() {
             let r = &self.r[k];
             runner_trace::push_look(runner_trace::BaseLook { runner: id, t, base: b, went: r.goal > b, waiting: r.waiting, ball_thrown: matches!(self.ball, Ball::Thrown { .. }) });
@@ -16010,18 +16017,17 @@ mod tests {
         }
     }
 
-    // The throw comes to his own base. One out after a fly-out to the right-field corner, the
-    // runner on second standing on his bag; the right fielder (a weak 37 m/s arm) throws to
-    // second. In the first
-    // measurement of the base relook, 8 of the 9 runners from second put out at third had
-    // left on such a throw: the man at second caught it and rushed his throw to third in
-    // 0.28 s, where the runner's race gives him 0.6 s (`RELAY_READ_S`). He stays now, and
-    // the world agrees he would be out: the throw's flight, the receiver's hurried exchange
-    // (`RUSH_MIN_FRAC` of his set exchange on a bag), his throw at his own arm and the third
-    // baseman's tag beat him from rest. A throw home from there (98 m: at his position's
-    // average 40.5 m/s) goes to another base, and he takes third on it.
+    // A quick return throw (agent-models §6.4). One out after a fly-out to the right-field
+    // corner, the runner on second standing on his bag; the right fielder throws to second.
+    // In the first measurement of the base relook, 8 of the 9 runners from second put out at
+    // third had left on such a throw: the man at second caught it and rushed his throw to
+    // third in 0.28 s, where the runner gave him 0.6 s (`RELAY_READ_S`). At a 37 m/s arm he
+    // stays now, and the world agrees he would be out: the throw's flight, the receiver's
+    // hurried exchange (`RUSH_MIN_FRAC` of his set exchange on a bag), his throw at his own
+    // arm and the third baseman's tag beat him from rest. A slower throw (32 m/s) the world
+    // cannot beat him on, and he takes third on it, as on a throw home from there.
     #[test]
-    fn a_runner_held_on_second_stays_on_a_throw_to_his_own_base() {
+    fn a_runner_held_on_second_races_the_quick_return_throw() {
         const RF: usize = 8;
         let goes = |to: u8, arm: f64| {
             let mut fx = fixture(&[(0x0006, 2)]);
@@ -16040,14 +16046,6 @@ mod tests {
             sim.out.released.push((5.0, sim.f[RF].id));
             let d = m::hypot(base_pos(to).x - from.x, base_pos(to).y - from.y);
             let flight = solve_throw(sim.inp.env, THROW_RELEASE_Z, THROW_CATCH_Z, d, arm).unwrap().t_flight;
-            if to == 2 {
-                // His race alone (the decision at a base, with the 0.6 s he gives the man at
-                // second) would send him: the rule is what keeps him.
-                let before = sim.r[1].clone();
-                sim.runner_decide(1, 2);
-                assert_eq!(sim.r[1].goal, 3, "the race alone sends him");
-                sim.r[1] = before;
-            }
             assert!(sim.runner_relook(1), "he looks at the throw");
             // The world's quickest at third through the man taking it at second.
             let fd = &sim.f[3];
@@ -16057,8 +16055,11 @@ mod tests {
             (sim.r[1].goal == 3, ball, mine)
         };
         let (went, ball, mine) = goes(2, 37.0);
-        assert!(!went, "a throw to second: he stays on second");
+        assert!(!went, "a throw to second at 37 m/s: he stays on second");
         assert!(ball < mine, "the world: the ball at third and the tag on {ball:.2} s after the release, his run {mine:.2} s");
+        let (went, ball, mine) = goes(2, 32.0);
+        assert!(ball > mine + 0.2, "the world: the ball at third and the tag on {ball:.2} s after the release at the quickest, his run {mine:.2} s");
+        assert!(went, "a throw to second at 32 m/s: he takes third");
         let (went_home, _, _) = goes(4, 40.5);
         assert!(went_home, "a throw home from the corner: he takes third");
     }
