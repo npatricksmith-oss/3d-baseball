@@ -1602,6 +1602,10 @@ struct Fielder {
     /// He took a relay as the cutoff man (agent-models §5.5, the relay man's exchange): his
     /// set-up is `throwing::relay_s` from his catch, turn included, no early release.
     relayed: bool,
+    /// The deep ball's cutoff men as he last worked them out by the convention
+    /// (`Sim::deep_cut_by_convention`, agent-models §5.7, the double cut): bit 15 when it applies,
+    /// bit j for each man it counts out. He re-works his own job when it changes (`Sim::deep_jobs`).
+    deep_conv: u16,
     /// Covering a base with a force pending there: when he believes the throw gets to the bag
     /// (`Sim::cover_feeds`; infinite when none is coming that he can see). It decides whether
     /// he brakes onto the bag or crosses it ([`cover_step`]).
@@ -3137,6 +3141,9 @@ struct Sim<'a> {
     ball_since: f64,
     /// Counts the loose balls of this play (`set_free`): which ball a read was of.
     ball_gen: u64,
+    /// `ball_gen + 1` once a ball hit on the ground has been judged deep (`deep_ball`): it stays
+    /// deep through the outfielder's pickup to his throw (agent-models §5.7; `latch_deep`).
+    deep_gen: u64,
     /// `public_rank` for all nine at (time, ball, positions).
     rank_cache: std::cell::RefCell<Option<(f64, u64, [Vec3; 9], [Vec3; 9], [f64; 9])>>,
     /// What each fielder's teammates knew of him at the last tick (`hear` acts on changes):
@@ -4991,8 +4998,7 @@ impl<'a> Sim<'a> {
         };
         let b = self.relay_base(deep, fielder);
         let who = if deep {
-            let spot = Self::relay_spot(from, b, true);
-            if (self.home[5] - spot).norm() <= (self.home[3] - spot).norm() { 5 } else { 3 }
+            self.deep_relay_man(from, b)
         } else {
             match b {
                 4 => self.home_cutoff_man(fielder),
@@ -5082,7 +5088,9 @@ impl<'a> Sim<'a> {
     /// after contact on 11 plays with runners on first and third in 120 games). With the run in
     /// and the runner from first held at second, a real infield does not realign either: holding
     /// only while a runner moves gave more hand-overs at the pickup and more of third open (Opus
-    /// relay hand-overs review P3-1).
+    /// relay hand-overs review P3-1). The same on a deep ball with the first baseman known out on
+    /// the double cut (2026-11-22, agent-models §5.7): the run from third scoring does not send him
+    /// back while the runner from first is still coming.
     fn relay_base(&self, deep: bool, viewer: usize) -> u8 {
         let moving = self.f[viewer].a.throw_choice.moving_mps;
         let at = |r: &Runner| {
@@ -5090,7 +5098,7 @@ impl<'a> Sim<'a> {
             if deep || (reached == 3 && r.direction * r.v <= moving) { reached } else { r.start }
         };
         let on = |b: u8| self.r.iter().any(|r| r.start > 0 && !r.out && !r.scored && at(r) == b);
-        let held_home = || !deep && [2, 4].iter().any(|&j| self.seen(viewer, j).0 == Role::Relay(4)) && self.r.iter().any(|r| r.start > 0 && !r.out && !r.scored);
+        let held_home = || [2, 4].iter().any(|&j| self.seen(viewer, j).0 == Role::Relay(4)) && self.r.iter().any(|r| r.start > 0 && !r.out && !r.scored);
         let mut b = if on(2) || on(3) || held_home() { 4 } else if on(1) || deep { 3 } else { 2 };
         for r in self.r.iter().filter(|r| !r.out && !r.scored) {
             if let Some(target) = visible_target(r, self.f[viewer].a.throw_choice) {
@@ -5098,6 +5106,141 @@ impl<'a> Sim<'a> {
             }
         }
         b
+    }
+
+    /// The deep ball's relay man (agent-models §5.7): the middle infielder whose pre-pitch spot is
+    /// nearer the relay spot for a ball fielded at `from` thrown toward base `b`.
+    fn deep_relay_man(&self, from: Vec3, b: u8) -> usize {
+        let spot = Self::relay_spot(from, b, true);
+        if (self.home[5] - spot).norm() <= (self.home[3] - spot).norm() { 5 } else { 3 }
+    }
+
+    /// A deep ball's relay as everyone works it out (agent-models §5.7, the double cut): the
+    /// outfielder fielding it (the known lead while it is loose, else the man holding it), where
+    /// (`fielding_point`), and the relay's base (`relay_base`), on a ball that came down before
+    /// anyone caught it, fielded beyond `RELAY_FROM_M` and judged deep (`deep_ball`). Only what
+    /// everyone has seen goes into it. `None` otherwise (a throw in the air, a catch, an infielder
+    /// with the ball, a ball not deep).
+    fn deep_cut_point(&self) -> Option<(usize, Vec3, u8)> {
+        let fielder = match self.ball {
+            Ball::Held { by } => by,
+            Ball::Free { .. } => self.lead()?,
+            Ball::Thrown { .. } => return None,
+        };
+        if fielder < 6 || self.first_down_pt().is_none() {
+            return None;
+        }
+        let from = self.fielding_point()?;
+        if m::hypot(from.x, from.y) < RELAY_FROM_M || !self.deep_ball(from) {
+            return None;
+        }
+        Some((fielder, from, self.relay_base(true, fielder)))
+    }
+
+    /// The deep ball's cutoff men by the standard assignments, as fielder `o` works them out
+    /// (agent-models §5.7, the double cut, "What each man knows"): its relay man, and with the
+    /// throw going home the first baseman behind him; a man `o` knows to be going for the ball is
+    /// not counted. `None` when there is no such ball (`deep_cut_point`): the tables then use the
+    /// jobs as known. While it applies, every other man's known cutoff job is not counted: a
+    /// corner man out on a single's cutoff home who is not its man is back at his base, a middle
+    /// infielder out on a single's cutoff who is not its relay man is free.
+    fn deep_cut_by_convention(&self, o: usize) -> Option<[Option<usize>; 2]> {
+        let (_, from, b) = self.deep_cut_point()?;
+        let relay = self.deep_relay_man(from, b);
+        Some([(!self.chasing_as_known_by(o, relay)).then_some(relay), (b == 4 && !self.chasing_as_known_by(o, 2)).then_some(2)])
+    }
+
+    /// The first baseman's job on the double cut (agent-models §5.7): his spot, on the line from
+    /// the relay man to home, `through_spot` short of the plate. While the ball is with the
+    /// outfielder, by the convention (`deep_cut_point`, the throw going home), from the relay man's
+    /// spot; once the outfielder has thrown to the relay man (a throw everyone sees), from where the
+    /// relay man is; while he holds the ball he took as the relay man (known on the relay home at
+    /// the catch), from where he holds it: the first baseman already out stays lined up behind him.
+    /// `None` when he is going for the ball, and otherwise.
+    fn double_cut_job(&self) -> Option<Vec3> {
+        let fd = &self.f[2];
+        if fd.role == Role::Chase {
+            return None;
+        }
+        let out = fd.role == Role::Relay(4);
+        let from = match self.ball {
+            Ball::Thrown { receiver, relay: true, to_base: 4, .. } if out && (receiver == 3 || receiver == 5) => self.f[receiver].pos,
+            Ball::Thrown { .. } => return None,
+            Ball::Held { by } if by == 3 || by == 5 => {
+                let horizon = self.secured_at.min(self.t - CALL_HEARD_S) + 1e-9;
+                let shown = self.f[by].shown.iter().rev().find(|e| e.at <= horizon);
+                if !(out && shown.is_some_and(|e| e.role == Role::Relay(4) && e.at + 1e-9 >= self.ball_since)) {
+                    return None;
+                }
+                self.f[by].pos
+            }
+            _ => {
+                let (_, from, b) = self.deep_cut_point()?;
+                if b != 4 {
+                    return None;
+                }
+                Self::relay_spot(from, 4, true)
+            }
+        };
+        let home = base_pos(4);
+        let line = Vec3::new(from.x - home.x, from.y - home.y, 0.0);
+        Some(home + line.normalized() * through_spot(line.norm()))
+    }
+
+    /// Once a ball hit on the ground is judged deep where it is being fielded (`deep_ball`), it
+    /// stays deep for this loose ball, through the outfielder's pickup to his throw (agent-models
+    /// §5.7, "A deep ball"; Opus relay hand-overs review P3-3). From what everyone sees.
+    fn latch_deep(&mut self) {
+        if self.deep_gen == self.ball_gen + 1 || !matches!(self.ball, Ball::Free { .. } | Ball::Held { by: 6..=8 }) {
+            return;
+        }
+        if !self.first_down_m().is_some_and(|d| d < INFIELD_R) {
+            return;
+        }
+        let of_fields = match self.ball {
+            Ball::Free { .. } => self.lead().is_some_and(|l| l >= 6),
+            _ => true,
+        };
+        if of_fields && self.fielding_point().is_some_and(|from| self.deep_ball(from)) {
+            self.deep_gen = self.ball_gen + 1;
+        }
+    }
+
+    /// Each fielder not going for the ball, not on a cutoff and not holding it re-works his own
+    /// cover or backup job when the deep ball's cutoff men by the convention, as he works them out
+    /// (`deep_cut_by_convention`), change: the moment the ball is seen past the outfielders, not
+    /// when the relay man's job is shown (agent-models §5.7, the double cut). Not while a throw is
+    /// in the air.
+    fn deep_jobs(&mut self) {
+        if matches!(self.ball, Ball::Thrown { .. }) {
+            return;
+        }
+        let holder = match self.ball {
+            Ball::Held { by } => Some(by),
+            _ => None,
+        };
+        for o in 0..9 {
+            let mask = self.deep_cut_by_convention(o).map_or(0, |c| c.iter().flatten().fold(1u16 << 15, |m, &j| m | 1 << j));
+            if mask == self.f[o].deep_conv {
+                continue;
+            }
+            self.f[o].deep_conv = mask;
+            if Some(o) == holder || matches!(self.f[o].role, Role::Chase | Role::Relay(_)) {
+                continue;
+            }
+            match self.cover_after_chasers(o) {
+                Some(b) if self.f[o].role != Role::Cover(b) => {
+                    self.f[o].role = Role::Cover(b);
+                    self.f[o].backs = None;
+                    self.f[o].target = base_pos(b);
+                }
+                None if matches!(self.f[o].role, Role::Cover(_)) => {
+                    go_idle(&mut self.f[o]);
+                    self.take_own_job(o);
+                }
+                _ => {}
+            }
+        }
     }
 
     /// Where the batted ball first came down, as everyone saw it: its distance from home, m
@@ -5160,6 +5303,13 @@ impl<'a> Sim<'a> {
             }).unwrap_or(from),
             _ => from,
         };
+        // A ball hit on the ground once judged deep stays deep through the outfielder's pickup to
+        // his throw (`latch_deep`; Opus relay hand-overs review P3-3: judged against the spot and
+        // position of the outfielder known to be going for it, it went back to not deep when
+        // another outfielder took it over from the one it had got past, seed 118 play 162).
+        if self.deep_gen == self.ball_gen + 1 && matches!(self.ball, Ball::Free { .. } | Ball::Held { by: 6..=8 }) {
+            return true;
+        }
         if depth(from) <= RELAY_DEEP_M {
             return false;
         }
@@ -5775,6 +5925,7 @@ impl<'a> Sim<'a> {
     /// him ends it; a throw coming to him keeps it. The man leaving takes his own next job.
     /// Teammates update their jobs when they learn of the change (`hear`).
     fn update_relay(&mut self) {
+        self.latch_deep();
         if matches!(self.ball, Ball::Free { .. }) {
             for o in 0..6 {
                 if let Some(c) = self.single_cutoff_man(o) {
@@ -5786,11 +5937,17 @@ impl<'a> Sim<'a> {
             Ball::Thrown { .. } => None,
             _ => self.cutoff_job(),
         };
+        // The first baseman's job on the double cut (agent-models §5.7): he stays lined up behind
+        // the relay man while the outfielder's throw goes to him and while he holds it.
+        let dc = self.double_cut_job();
         // A job worked out (from where the ball is being fielded, or from the early read of a
         // ball through the infield).
         let decided = job.is_some() || self.fielding_point().is_some();
         for i in 0..9 {
             if !matches!(self.f[i].role, Role::Relay(_)) {
+                continue;
+            }
+            if i == 2 && dc.is_some() {
                 continue;
             }
             match self.ball {
@@ -5830,6 +5987,13 @@ impl<'a> Sim<'a> {
                 self.f[c].role = Role::Relay(b);
                 self.f[c].backs = None;
                 self.f[c].target = spot;
+            }
+        }
+        if let Some(spot) = dc {
+            if !matches!(self.ball, Ball::Held { by: 2 }) {
+                self.f[2].role = Role::Relay(4);
+                self.f[2].backs = None;
+                self.f[2].target = spot;
             }
         }
         let Some((who, b, spot)) = job else { return };
@@ -6049,9 +6213,14 @@ impl<'a> Sim<'a> {
         // judges the ball through toward third counts the shortstop as the cutoff man
         // (`second_takes_over`), and a man who judges it through toward home counts the cutoff
         // man home (`home_cutoff_by_convention`).
-        let through3 = o == 3 && self.second_takes_over();
+        // On a deep ball the convention names its cutoff men, at once (`deep_cut_by_convention`).
+        let deep = self.deep_cut_by_convention(o);
+        let through3 = deep.is_none() && o == 3 && self.second_takes_over();
         let home_cut = self.home_cutoff_by_convention(o);
-        let relay = |c: usize| matches!(self.seen(o, c).0, Role::Relay(_)) || (through3 && c == 5) || home_cut == Some(c);
+        let relay = |c: usize| match deep {
+            Some(men) => men.contains(&Some(c)),
+            None => matches!(self.seen(o, c).0, Role::Relay(_)) || (through3 && c == 5) || home_cut == Some(c),
+        };
         let ss_busy = self.chasing_as_known_by(o, 5) || relay(5);
         let (first, first_last, second_order) = Self::home_order(relay(2), ss_busy, left);
         // Third's order is the one `cover_after_chasers` uses between calls: the third baseman,
@@ -6122,9 +6291,14 @@ impl<'a> Sim<'a> {
     fn cover_after_chasers(&self, o: usize) -> Option<u8> {
         let job = |j: usize| self.seen(o, j).0;
         let left = self.ball_side_x() < 0.0;
-        let through3 = o == 3 && self.second_takes_over();
+        // On a deep ball the convention names its cutoff men, at once (`deep_cut_by_convention`).
+        let deep = self.deep_cut_by_convention(o);
+        let through3 = deep.is_none() && o == 3 && self.second_takes_over();
         let home_cut = self.home_cutoff_by_convention(o);
-        let relay = |c: usize| matches!(job(c), Role::Relay(_)) || home_cut == Some(c);
+        let relay = |c: usize| match deep {
+            Some(men) => men.contains(&Some(c)),
+            None => matches!(job(c), Role::Relay(_)) || home_cut == Some(c),
+        };
         let mut taken: Vec<usize> = (0..9).filter(|&i| self.chasing_as_known_by(o, i) || relay(i) || (through3 && i == 5)).collect();
         // The first baseman out as the cutoff to home (`home_order`): the second baseman
         // covers first and the shortstop second, the pitcher free to back up home; with the
@@ -8531,6 +8705,7 @@ fn new_sim<'a>(inp: &'a LiveInput<'a>, st: &'a mut RulesState) -> Sim<'a> {
                 pivot: false,
                 pivot_wait_bag: false,
                 relayed: false,
+                deep_conv: 0,
                 feed_at: f64::INFINITY,
             }
         })
@@ -8582,6 +8757,7 @@ fn new_sim<'a>(inp: &'a LiveInput<'a>, st: &'a mut RulesState) -> Sim<'a> {
         r,
         ball_since: t_c,
         ball_gen: 0,
+        deep_gen: 0,
         rank_cache: Default::default(),
         last_known: vec![(false, 0, false); 9],
         last_jobs: vec![(Role::Idle, None); 9],
@@ -8641,6 +8817,7 @@ impl<'a> Sim<'a> {
             r: self.r.clone(),
             ball_since: self.ball_since,
             ball_gen: self.ball_gen,
+            deep_gen: self.deep_gen,
             rank_cache: Default::default(),
             last_known: self.last_known.clone(),
             last_jobs: self.last_jobs.clone(),
@@ -8696,6 +8873,7 @@ impl<'a> Sim<'a> {
             "hear" => self.hear(),
             "update_relay" => self.update_relay(),
             "through_jobs" => self.through_jobs(),
+            "deep_jobs" => self.deep_jobs(),
             _ => unreachable!("{step}"),
         }
     }
@@ -8820,6 +8998,11 @@ fn simulate_live_inner(inp: &LiveInput, st: &mut RulesState) -> LiveOutput {
         #[cfg(test)]
         iso_check(&sim, "update_relay");
         sim.update_relay();
+        if assigned {
+            #[cfg(test)]
+            iso_check(&sim, "deep_jobs");
+            sim.deep_jobs();
+        }
         sim.move_fielders();
         if tick == 0 {
             // The contact position is a real track sample. The first elapsed tick
@@ -13319,7 +13502,7 @@ mod tests {
             (f.pos, f.vel, f.jump, f.role, f.target, f.next_plan, f.err, f.attempts, f.blocked_until, f.ready_at, f.dove, f.lunge),
             (f.t_int, f.int_pt, f.read_at, f.read_ball, f.call, f.shown.clone(), f.last_close_read, f.must_dive_since, f.last_dive_read, f.will_dive.get(), f.throws, f.up_at),
             (f.set_base, f.face, f.catch_vel, f.took_diving, f.catch_stretched, f.backs, f.peel, f.carry_to, f.asks, f.pivot, f.pivot_wait_bag, f.relayed),
-            (f.through.get(), f.air.get(), f.stays.get(), f.cut.get()),
+            (f.through.get(), f.air.get(), f.stays.get(), f.cut.get(), f.deep_conv),
             f.belief.as_ref().map(|p| (p.at(sim.t), p.at(p.t_end()), p.t_end())),
         )
     }

@@ -42,11 +42,16 @@ impl Sim<'_> {
         let fd = &self.f[by];
         // The cutoff man as the holder knows him (`seen`: a job taken in the last
         // `CALL_HEARD_S` is not yet known; Codex fielder-communication recheck P1-1).
-        let relay = (0..9).find(|&i| i != by && matches!(self.seen(by, i).0, Role::Relay(_)) && (self.f[i].pos - fd.pos).norm() > 10.0);
+        let lined: Vec<usize> = (0..9).filter(|&i| i != by && matches!(self.seen(by, i).0, Role::Relay(_)) && (self.f[i].pos - fd.pos).norm() > 10.0).collect();
         // A cutoff man lined up between him and the base (closer to it than he is): the relay
         // route through him, as before; and, when he has the job for this base and stands on
-        // its line, the direct throw must pass him low (`cutoff_out`, agent-models §5.5).
-        let between = relay.filter(|&i| (base_pos(base) - self.f[i].pos).norm() < (base_pos(base) - fd.pos).norm());
+        // its line, the direct throw must pass him low (`cutoff_out`, agent-models §5.5). With
+        // two (the double cut, §5.7: the relay man and the first baseman behind him), the
+        // nearer of them: his throw goes to the relay man, and the relay man's to the first
+        // baseman.
+        let closer = |i: usize| (base_pos(base) - self.f[i].pos).norm() < (base_pos(base) - fd.pos).norm();
+        let between = lined.iter().copied().filter(|&i| closer(i)).min_by(|&a, &c| (self.f[a].pos - fd.pos).norm().total_cmp(&(self.f[c].pos - fd.pos).norm()).then(a.cmp(&c)));
+        let relay = between.or(lined.first().copied());
         let cut = self.cut_seen(Some(by), fd.pos, base);
         let release = |target: Vec3, at: f64| {
             let su = self.set_up_for(by, target);
