@@ -146,6 +146,7 @@ Check the code again before starting one.
 
 ### Priority A, not done
 
+- [ ] **Batting stances (owner, 2026-11-22; moved up from Looks L3 [W3]).** Fix the stances: every player gets his own stance, swing style and follow-through. Players can share a core stance as variations of it, but no two are quite alike. His examples: Pete Rose, Darryl Strawberry, Gary Carter. Client work (player-visuals); the sim's per-batter timing, extension and plane wait for batter ratings (§4).
 - [~] **A4. Throw choices from the outs and the runners.** Built with review fixes; more cases are items 2 and 3 above.
 - [~] **A5. Dives.** Rate and motion are in. Left: every dive is head-first straight at the ball.
 - [~] **A6. Slides.** Client only: a runner slides feet-first when a play is being made on him. The sim has no slide (agent-models §6.2); see item 1 above for the dead stop.
@@ -169,7 +170,6 @@ Check the code again before starting one.
 
 ### Looks, later
 
-- [ ] L3. Batter stances and swings per player [W3]. The owner's examples: Pete Rose, Darryl Strawberry, Gary Carter.
 - [ ] Names that follow nationality; the catcher tossing his mask on a pop foul (saved play 40); a tag shown being made; the first baseman's "I got it" (159); a runner's athletic stance (65).
 - [ ] Park polish: night lighting, per-team colours, moving flags, aisle/front railings, pole-end gaps, lattice towers, turf grain and sharper distant shadows, more detailed trees/sign lettering, and crowd standing, concourse motion and reactions.
 - [ ] Figure and kit polish: shirt hem, finger and glove shapes, catcher’s cage mask, first-base mitt, batting gloves and shin guard.

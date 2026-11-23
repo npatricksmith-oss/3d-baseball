@@ -75,6 +75,8 @@ Fielding and throwing:
 - [x] A. Hitting home runs brings up display with player name, how far ball was hit and mph.
 - [x] A. Hitting animation needs work. Batting stance. Initial load. Swing. Follow through. *Coded stance, stride and swing, hands on the sim's bat. Different stances per player come later. You have not seen it moving yet.*
 
+- [ ] A. We need to fix batting stances. Each player gets a unique batting stance, swing style, and follow through. Players can have variations of core stances, but each should be slightly different. *(2026-11-22) Queued in TASKS "Priority A, not done".*
+
 # Stats
 - [ ] B. Clarify what "fielder's choice" means; I think the game uses it too liberally.
 - [~] B. Implement statistics. *The sim works out batting lines and the box score from each game's record; no statistics screens yet.*
