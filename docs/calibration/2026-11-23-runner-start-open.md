@@ -124,6 +124,8 @@ Effect on the rates (600 games; second to home and first to third on singles):
 
 ## 3. Returns brake onto the bag; no dive back
 
+*Correction (2026-11-23, [dive-back note](2026-11-23-dive-back.md)):* the margins below are the umpire's `margin_s`, the runner's distance from the bag at the out divided by his top speed, not the time he lost. "Out by 0.13 s" is a runner about 1.1 m short. When the tagger got the ball these runners were a median 9–10 m out, so the dive back, now built, changes 73 tag outs on grounders to 72 and 141 appeal outs to 133, not the numbers predicted here.
+
 **What the sim does.** A runner going back to a base he will stop on limits his speed so that he can stop at the bag (`approach_speed`, `BRAKE` = 4.75 m/s²), and arrives at 1 m/s. He cannot dive or slide back.
 
 **What a real runner does.** On a contested return he does not stop short. He dives headfirst at the bag, or slides into it, and keeps his speed to the touch. This is the ordinary pickoff and line-drive return. Using the sim's own laws of motion (`dive.py`), returning 4–15 m to the bag, braking costs:
