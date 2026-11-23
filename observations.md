@@ -130,3 +130,12 @@ Umpire, camera and screen:
 - [x] 89, 146. A fair ball down the line: the umpire should signal it by pointing toward the infield as soon as it is officially fair. *Done 2026-11-20: on a fair ball near a foul line, the nearer base umpire (or the plate umpire in front of the bags) points to fair ground as soon as the ball is fair under the rules; in 89 and 146 the third-base umpire points 0.15 s after the ball comes down at the bag. Routine balls up the middle get no signal. You have not seen it moving yet.*
 - [x] 112. When the batter swings the camera zooms in too early (before the bat makes contact). This tells me that the hit ball is predetermined instead of realistic 3D physics. *Done 2026-11-20: the camera now cuts to the batted ball only after the bat meets it on screen (it was cutting 0.05 s early). Why it could: the hit is real physics (the bat and ball collide in the sim, nothing is rolled), but the sim works out the whole play before the screen plays it back, so the camera knew the outcome early. The other on-screen cues tied to the hit (text, pitch line, umpires) were checked and wait for contact; whether any fielder starts moving before contact has not been checked yet.*
 - [x] 128. After the play, during the inning switch over, the score card flashes for 1 second or so, which is far too short. Let it stay on the screen for 10 seconds, or the player can press Enter to continue sooner. *Done 2026-11-20: it stays 10 s of real time whatever the game speed, Enter continues sooner, and the card says so. It also no longer shows an empty inning for the side about to bat.*
+
+# Saved plays, 2026-11-22 night (seed 5593)
+
+Watch any of them again with `client/run.sh -BbSavedPlay="saved-plays/<file>.toml"` (files `seed5593-play<N>-…`). Played on main `76d4eaa`, before the double cut merged.
+
+- [ ] 18. No ball shadow during pitch or throw back.
+- [ ] 3. Fix first baseman's catching ball. A first baseman plants one foot on the base and then steps (stretches) to catch the ball sooner to help the ball beat the runner to the base. *Same as 86 above; not built.*
+- [ ] 52. Fielders appear to stop too quickly as they converge on a fly ball.
+- [ ] 56. Third baseman should have either tried to tag the runner out or immediately thrown to 2nd base. Instead he ran part way to the base looking for a force out. But then threw to first base instead.

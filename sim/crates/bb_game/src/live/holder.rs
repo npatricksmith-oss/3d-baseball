@@ -40,13 +40,20 @@ impl Sim<'_> {
     /// Also used for the unchanged no-play return to second.
     pub(super) fn throw_race(&self, by: usize, base: u8) -> ThrowRace {
         let fd = &self.f[by];
-        // The cutoff man as the holder knows him (`seen`: a job taken in the last
-        // `CALL_HEARD_S` is not yet known; Codex fielder-communication recheck P1-1).
-        let relay = (0..9).find(|&i| i != by && matches!(self.seen(by, i).0, Role::Relay(_)) && (self.f[i].pos - fd.pos).norm() > 10.0);
-        // A cutoff man lined up between him and the base (closer to it than he is): the relay
-        // route through him, as before; and, when he has the job for this base and stands on
-        // its line, the direct throw must pass him low (`cutoff_out`, agent-models §5.5).
-        let between = relay.filter(|&i| (base_pos(base) - self.f[i].pos).norm() < (base_pos(base) - fd.pos).norm());
+        // The cutoff man lined up in the throw as the holder knows him (`men_in_throw`: the job
+        // for this base, between him and the base, on its line; `seen`: a job taken in the last
+        // `CALL_HEARD_S` is not yet known, Codex fielder-communication recheck P1-1): the relay
+        // route through him; and the direct throw must pass him low (`cutoff_out`, agent-models
+        // §5.5). With two (the double cut, §5.7: the relay man and the first baseman behind
+        // him), the nearer of them: his throw goes to the relay man, and the relay man's to the
+        // first baseman. A man off the line is never the route (Opus double-cut review P3-1).
+        // With nobody lined up for this base, a man on its line with a cutoff job for another
+        // base may be, by time alone: the ball back to second with no play, through the relay
+        // man lined up toward home, who stands on that line for a ball to centre (§5.7, "the
+        // quicker way"); the throw is not kept low for him.
+        let nearest = |men: Vec<usize>| men.into_iter().min_by(|&a, &c| (self.f[a].pos - fd.pos).norm().total_cmp(&(self.f[c].pos - fd.pos).norm()).then(a.cmp(&c)));
+        let between = nearest(self.men_in_throw(Some(by), fd.pos, base)).or_else(|| nearest(self.lined_in_throw(Some(by), fd.pos, base, true)));
+        let relay = between;
         let cut = self.cut_seen(Some(by), fd.pos, base);
         let release = |target: Vec3, at: f64| {
             let su = self.set_up_for(by, target);

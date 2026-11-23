@@ -1,6 +1,6 @@
 # Task List
 
-**Last updated:** 2026-11-22 (relay hand-overs, worker hooks and job queue merged; next: the double cut, Q35).
+**Last updated:** 2026-11-23 (double cut merged; Q37 open).
 
 What is next and what is open. Other files hold the rest:
 
@@ -15,15 +15,14 @@ Status: `[ ]` not started · `[~]` partly done · `[?]` needs an owner decision
 
 ---
 
-## Resume here (2026-11-22, night)
+## Resume here (2026-11-23)
 
-**State.** Nothing is running; nothing is waiting on the owner. Relay hand-overs and the worker hooks and job queue are merged.
+**State.** Nothing is running. **Waiting on the owner: Q37** (stances: looks only (a, recommended) or tied to attributes (b)); it blocks nothing; he watches the swing first. The double cut is merged (Q35 (c), Q36 (a)).
 
-**Next job (Q35, owner 2026-11-22: (c)):** the double cut, §3 below. Opus worker; spec first, ledger row, Opus review.
+**Next:** the owner's seed-5593 plays (§2) and play 71 (§2: no dive).
 
-**Open (ledger §5):** runs fell 0.21 [0.18] with dp-cover, 0.04 explained: check noise first. Double plays 12.3% (MLB 9.8%). Standard runs 4.05 [4.33].
+**Open (ledger §5):** runs down 0.21 [0.18] since dp-cover (0.04 explained; check noise); double plays 12.3% (MLB 9.8%).
 
-**After that:** play 71 (§2: no dive at a ground ball 1.9 m away).
 ---
 
 ## Open sim work, in order
@@ -39,6 +38,7 @@ One `sim/crates/bb_game/src/live.rs` job at a time. Each job gets a ledger row a
   - Deferred P3s from the Opus re-review of the catch-read fixes: a comment at `awaiting_call`'s no-catch clause (the rules cannot produce it today, and it would strand a planted tag-up runner); a test tagging a runner between bases after a non-goal crossing; a pending-catch variant of the 3,000-layout property test.
   - Deferred review P3s: the third-base route blend turns the lateral velocity in one tick (P3-1); the first decision sees one tick less coasting than its clock (P3-2). [Q27 timing and checks](docs/calibration/2026-11-17-runner-timing.md#final-measurements).
 - [ ] A runner who holds on a base never decides again while the ball is held (`runner_relook` returns early for a runner on a base), so he does not go when the outfielder throws to another base ([throw-race note §7](docs/calibration/2026-11-19-throw-race.md#7-open)).
+- [ ] Batter-runner stops at first on 97/279 double cuts, some fielded 120 m out (64/196; main too; Opus review Q5).
 - [ ] Fit `AdvanceParams::caution_z` to MLB's attempt and success rates (now 1.0, fitted only to outs on the bases).
 - [ ] The coach's read and send for a ball behind the runner (Q10 a). Model early-departure decisions on caught flies, slides around tags, a turn decision before the bag, and an overrun redirected after an overthrow.
 - [ ] The rundown (Q11), on its own branch. A stand-in exists. Two small points from the runner-decision review wait for it.
@@ -63,7 +63,8 @@ One `sim/crates/bb_game/src/live.rs` job at a time. Each job gets a ledger row a
 - [ ] Dives not taken on routine fly misses (`OF_DIVE_MIN_P`): 27 of 61 before the track-bias fix; count again first.
 - [ ] From the track-bias review: the shortstop's liner velocity is still overconfident (error²/var 3.9); very short grounders are read conservatively ([tracking note §6](docs/calibration/2026-11-17-track-bias.md#6-what-is-still-off)).
 - [ ] No lost-ball state. The fly-hit deficit against matched catch-probability bins. An on-time caller displaced by a later teammate.
-- [ ] A receiver on a bag has no stretch for a wide throw (owner's saved play 86).
+- [ ] A receiver on a bag has no stretch for a wide throw (owner's saved plays 86, 5593/3).
+- [ ] Owner's seed-5593 plays (observations.md): 52, fielders stop too quickly converging on a fly; 56, the third baseman neither tags nor throws to second, then throws to first. Client: 18, no ball shadow on a pitch.
 - [ ] Owner's saved plays on throws and covering (observations.md): 56, 107, 142, 32 (set before throwing when there is time; trace how hurried each throw was before changing anything), 19, 52, 63, 159, 26, 68, 147.
 - [ ] Not traced: infield hits with no throw rose 257 → 338 over 300 games after the infield alignment fixes; probably holders at 45–47.4 m who no longer make a return throw.
 
@@ -73,8 +74,8 @@ One `sim/crates/bb_game/src/live.rs` job at a time. Each job gets a ledger row a
 - [ ] **A base receiver's catch-and-throw is unsourced** (relay review P3-3): 0.7 × `Transfer` with the hurry, as quick as 0.28 s (27 of 71 receivers hurried per 100 games). Statcast's catcher exchange (mean 0.73 s, elite 0.64 s) is the nearest analogue; use it to replace `RELAY_TRANSFER_FRAC` and its hurry.
 - [ ] **Outfield throws to the wrong base or past the cutoff.** Measure by play: throws to a base with no play while a trailing runner advances; cutoff man in line and missed. Includes the owner's "after an out from deep outfield, hit a cutoff" and the cut-or-let-it-go call (Q32, agent-models §5.5).
 - [ ] **Double plays after `work/dp-cover`: what the review left** ([review](docs/reviews/2026-11-21-opus-dp-cover-review.md); [dp-cover note](docs/calibration/2026-11-21-dp-cover.md) §4). (a) P2-2, pre-existing: a carrier to second (6U-3, 4U-3) is estimated as a pivot man (touch, then `pivot_s` 0.80 s, a turn and plant), but the world lets him throw on the tick after the touch with the set-up he spent carrying. The ball at first comes 0.09–0.51 s sooner than estimated; the force at second 0.20–0.23 s later than `carry_ball_at`. Fix both to one model (a turn and plant from his motion at the touch, `exchange_footwork_s(fd.vel, to_first)`), with a frozen 4U-3. (b) P3-3: the cover's pivot clock starts at the catch (world: the touch, 0.1–0.2 s later) and assumes full arm. (c) First-baseman-started double plays 35.9% (MLB 21.5%): the 3-6-3 pivot costs nothing; no slide (`PIVOT_SLIDE_DELAY_S` = 0, A6).
-- [ ] **Middle infielders with no job while a ground single is loose** ([note](docs/calibration/2026-11-21-mid-infield-jobs.md) §3). (a) A ball in the air not taken for a single (deep, or catchable by their estimate): no job the first call's 0.3 s ([liner note](docs/calibration/2026-11-21-liner-single-jobs.md) §5). (b) A ball another infielder could field: the ball-side man waits. (c) No job at the call on a chopper (51001/168). (e) A cutoff man a throw passed stands idle. (f) Comebackers, nobody on: both middle infielders away 0.1–0.2 s (5 in 120 games; on 2 the 2B leaves second for the cutoff, 24/54, 32/107).
-- [ ] **The double cut on a deep ball with a play at home (Q35, owner 2026-11-22: option (c))** ([relay hand-overs note §4](docs/calibration/2026-11-22-relay-handovers.md)): a middle infielder goes out as the relay man and the first baseman lines up behind him as the cutoff man home, whichever field the ball is in; the third baseman stays at third, the other middle infielder covers second; the relay man chooses between throwing home and throwing through the cutoff. Today one man goes and the two swap when a single rolls past an outfielder (second or third open ≤0.3 s; 23/83, 97/119). Spec agent-models §5.7 first. With it: the deep call on a ground ball flips when the lead outfielder changes (118/162; [Opus review](docs/reviews/2026-11-22-opus-relay-handovers-review.md) P3-3: a fixed mark for a ground ball, or keep the first deep call).
+- [ ] **Middle infielders with no job while a ground single is loose** ([note](docs/calibration/2026-11-21-mid-infield-jobs.md) §3). (a) A ball in the air not taken for a single (deep, or catchable by their estimate): no job the first call's 0.3 s ([liner note](docs/calibration/2026-11-21-liner-single-jobs.md) §5). (b) A ball another infielder could field: the ball-side man waits. (c) No job at the call on a chopper (51001/168). (f) Comebackers, nobody on: both middle infielders away 0.1–0.2 s (5 in 120 games; on 2 the 2B leaves second for the cutoff, 24/54, 32/107).
+- [ ] **Double-cut leftovers** ([note §6–§7](docs/calibration/2026-11-22-double-cut.md#7-review-fixes-2026-11-22)): the relay man flips between middle infielders up the middle (10/38, 71/185); a man a throw passes heads for a base taken <0.3 s before the release, two on it till the catch (9 in 120 games). Deferred ([Opus](docs/reviews/2026-11-22-opus-double-cut-review.md), [Codex](docs/reviews/2026-11-22-codex-double-cut-review.md)): a relay throw landing short ends the first baseman's job (O P3-3); the convention counts a relay man his stale intercept vetoes (C P3-1, constructed); `relay_base` takes the outfielder's thresholds for all (matters once per-player).
 - [ ] **A single with a runner on third** (relay hand-overs note §5): the runner from third scores, so the standard throw goes to third (runner on first, shortstop cutting) or second; the game lines up for home until he scores.
 - [ ] **Relay leftovers** (relay hand-overs note §5): two men on one bag >0.5 s on 3 plays from item 6's gate (39/145, 95/176, 111/74); a corner man out before any infielder goes for the ball (117/38); the pitcher follows the third baseman between the cutoff home and third (93/183).
 - [ ] **Do fielders or runners start moving before contact on screen?** The camera cuts after contact (saved play 112); nobody checked the timeline's fielders and runners against `contact_s` (sim side).
@@ -113,7 +114,7 @@ Check the code again before starting one.
 - [ ] `Executed*` visibility isolation with a compile-fail test (none exists).
 - [ ] `criterion` benchmarks for the per-pitch budget (not in any `Cargo.toml`; the timing harness is `sim/crates/bb_game/examples/perf.rs`).
 - [ ] Rules corpus: 136 scenarios, toward 150 (rules-spec §12.3). Implement interference (rules-spec §5.7) and a separate first-fielder-touch fact for retouch timing on a deflected fly. Missed-base appeals and passing during awards are open (rules-spec §5.5–§5.6).
-- [ ] Live play: double cuts and deliberate one-hop throws.
+- [ ] Live play: deliberate one-hop throws (the double cut is built, 2026-11-22).
 - [ ] **R8:** Check Savant `spin_axis` and `pfx_x` signs on real right- and left-handed four-seamers (data-formats §9.2–§9.3).
 - [ ] **R9:** Source angular perception error, velocity Weber fraction and the near-plate blanking distance from interception and time-to-contact studies (agent-models §3.2–§3.3).
 - [ ] **R10:** Refresh the calibration spec’s league reference values against the latest complete season and record the sources.

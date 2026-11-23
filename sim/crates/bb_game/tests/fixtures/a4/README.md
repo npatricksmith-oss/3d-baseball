@@ -80,3 +80,18 @@ diagnostic trace is never part of a fielder's inputs.
     shortstop both out. The pitcher keeps third and does not flip with each re-call.
   - `12-9` (Opus cutoff-home review P3-3): a chopper the shortstop fields 40 m out with the
     right fielder the known lead. The first baseman stays on first.
+- Frozen 2026-11-22 from main `ba40063` for the double cut (owner Q35 (c);
+  [double-cut note](../../../../../../docs/calibration/2026-11-22-double-cut.md); agent-models
+  §5.7). Balls that get past the outfielders with a runner who may score; each fails on
+  `ba40063` (`a_ball_past_the_outfielders_adds_the_relay_man_and_keeps_the_first_baseman`):
+  - `23-83`: runners on first and third, a ball into left-centre that falls in and rolls past
+    the left fielder. The first baseman, out on the single's cutoff home, stays out behind the
+    shortstop; second is covered at once.
+  - `97-119`: runners on first and second, the same to left. The third baseman comes back from
+    the single's cutoff to third at once, the first baseman goes out.
+  - `118-162` (Opus relay hand-overs review P3-3): a runner on first, a grounder past the right
+    fielder that the centre fielder takes over. The deep call does not flip back.
+  - `17-103` (frozen the same way after the double-cut reviews, P2-1; fails without that fix,
+    and on `ba40063` at its premise, there being no double cut): a runner on first, none out, a ball past the
+    centre fielder; he throws to second, past the first baseman out on the double cut, who goes
+    back to first at once (`a_throw_that_goes_by_the_double_cut_sends_the_first_baseman_back_to_first`).
