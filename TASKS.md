@@ -1,6 +1,6 @@
 # Task List
 
-**Last updated:** 2026-11-23 (Q38 (a) built on `work/two-out-caution`, awaiting review; Q39 decided; Q37 parked).
+**Last updated:** 2026-11-23 (Q38 merged; Q39 running; Q37 parked).
 
 What is next and what is open. Other files hold the rest:
 
@@ -17,9 +17,9 @@ Status: `[ ]` not started · `[~]` partly done · `[?]` needs an owner decision
 
 ## Resume here (2026-11-23)
 
-**State.** Q38 (a) on `work/two-out-caution`: review fixes done (worker-1). Needs its Resolution and merge. **Waiting on the owner:** Q37 (stances; parked). Q39 (a) decided (§1).
+**State.** Running: worker-2 (Opus) on `work/dive-back` in `.claude/worktrees/saved-plays`: Q39 (a), the dive back (job WORKER-Q39.md); then an Opus review. Q38 is merged. **Waiting on the owner:** Q37 (stances; parked).
 
-**Next:** merge Q38, then Q39 (§1, one live.rs job at a time). Then §2: seed-5593, play 71.
+**Next:** after Q39, §2: seed-5593, play 71.
 
 **Open (ledger §5):** runs down 0.21 [0.18] since dp-cover (0.04 explained; check noise); double plays 12.3% (MLB 9.8%).
 
