@@ -40,18 +40,16 @@ impl Sim<'_> {
     /// Also used for the unchanged no-play return to second.
     pub(super) fn throw_race(&self, by: usize, base: u8) -> ThrowRace {
         let fd = &self.f[by];
-        // The cutoff man as the holder knows him (`seen`: a job taken in the last
-        // `CALL_HEARD_S` is not yet known; Codex fielder-communication recheck P1-1).
-        let lined: Vec<usize> = (0..9).filter(|&i| i != by && matches!(self.seen(by, i).0, Role::Relay(_)) && (self.f[i].pos - fd.pos).norm() > 10.0).collect();
-        // A cutoff man lined up between him and the base (closer to it than he is): the relay
-        // route through him, as before; and, when he has the job for this base and stands on
-        // its line, the direct throw must pass him low (`cutoff_out`, agent-models §5.5). With
-        // two (the double cut, §5.7: the relay man and the first baseman behind him), the
-        // nearer of them: his throw goes to the relay man, and the relay man's to the first
-        // baseman.
-        let closer = |i: usize| (base_pos(base) - self.f[i].pos).norm() < (base_pos(base) - fd.pos).norm();
-        let between = lined.iter().copied().filter(|&i| closer(i)).min_by(|&a, &c| (self.f[a].pos - fd.pos).norm().total_cmp(&(self.f[c].pos - fd.pos).norm()).then(a.cmp(&c)));
-        let relay = between.or(lined.first().copied());
+        // The cutoff man lined up in the throw as the holder knows him (`men_in_throw`: the job
+        // for this base, between him and the base, on its line; `seen`: a job taken in the last
+        // `CALL_HEARD_S` is not yet known, Codex fielder-communication recheck P1-1): the relay
+        // route through him; and the direct throw must pass him low (`cutoff_out`, agent-models
+        // §5.5). With two (the double cut, §5.7: the relay man and the first baseman behind
+        // him), the nearer of them: his throw goes to the relay man, and the relay man's to the
+        // first baseman. A man off the line, or lined up for another base, is in neither (Opus
+        // double-cut review P3-1).
+        let between = self.men_in_throw(Some(by), fd.pos, base).into_iter().min_by(|&a, &c| (self.f[a].pos - fd.pos).norm().total_cmp(&(self.f[c].pos - fd.pos).norm()).then(a.cmp(&c)));
+        let relay = between;
         let cut = self.cut_seen(Some(by), fd.pos, base);
         let release = |target: Vec3, at: f64| {
             let su = self.set_up_for(by, target);
@@ -74,11 +72,7 @@ impl Sim<'_> {
         let v = via(self.t);
         // The route: time, and what each route's throws are likely to cost the man taking them
         // off line (agent-models §5.5): one long throw misses by more than two short ones.
-        // (A man lined up for another base: by time alone, as before.)
         let through = between.is_some_and(|i| {
-            if cut == Cut::No {
-                return v < d;
-            }
             let rp = self.f[i].pos;
             let miss_direct = miss_cost_s((base_pos(base) - fd.pos).norm(), fd.a.arm_sigma);
             let miss_via = miss_cost_s((rp - fd.pos).norm(), fd.a.arm_sigma) + miss_cost_s((base_pos(base) - rp).norm(), self.f[i].a.arm_sigma);

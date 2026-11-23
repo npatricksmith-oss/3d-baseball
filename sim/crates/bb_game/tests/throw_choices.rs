@@ -1117,6 +1117,39 @@ fn a_ball_past_the_outfielders_adds_the_relay_man_and_keeps_the_first_baseman() 
     }
 }
 
+/// Opus and Codex double-cut reviews P2-1, seed 17 play 103 (frozen from `ba40063`): a ball past
+/// the centre fielder with a runner on first and none out; the first baseman is out on the double
+/// cut behind the relay man, and the centre fielder throws to second, a throw that goes by them
+/// both. A first baseman whose cutoff is passed goes back to his bag at once, first being empty:
+/// from the release until the ball is taken at second he covers first, and he is nearer first
+/// when it is taken than at the release. (Before the fix he stood with no job until the catch,
+/// 2.1 s, and the throw back to first waited for him.)
+#[test]
+fn a_throw_that_goes_by_the_double_cut_sends_the_first_baseman_back_to_first() {
+    let (out, ticks) = replay_jobs(include_str!("fixtures/a4/17-103.json"));
+    let &(t_throw, by) = out.released.first().expect("the premise: a throw");
+    assert!(by & 0x7f >= 7, "the premise: an outfielder throws first ({by:#x})");
+    let before = ticks.iter().rev().find(|k| k.t < t_throw).expect("a tick before the release");
+    assert_eq!(before.job[2], 24, "the premise: the first baseman out on the double cut at the release: {:?}", before.job);
+    let (t_caught, x, y) = out
+        .facts
+        .iter()
+        .find_map(|f| match *f {
+            Input::GloveSecured { t, x, y, .. } if t > t_throw => Some((t, x, y)),
+            _ => None,
+        })
+        .expect("the throw is taken");
+    assert!((Vec3::new(x, y, 0.0) - bb_game::play::base_pos(2)).norm() < 5.0, "the premise: the throw is taken at second, at ({x:.1}, {y:.1})");
+    let first = bb_game::play::base_pos(1);
+    let flight: Vec<_> = ticks.iter().filter(|k| k.t >= t_throw && k.t < t_caught).collect();
+    assert!(flight.len() > 10, "the premise: a throw in the air ({} ticks)", flight.len());
+    for k in &flight {
+        assert_eq!(k.job[2], 11, "at {:.2} s, the throw to second in the air since {t_throw:.2} s, the first baseman is not on his way back to first: {:?}", k.t, k.job);
+    }
+    let (d0, d1) = ((flight[0].pos[2] - first).norm(), (flight[flight.len() - 1].pos[2] - first).norm());
+    assert!(d1 < d0, "the first baseman {d0:.1} m from first at the release and {d1:.1} m when the ball is taken at second");
+}
+
 /// The double cut in real games (agent-models §5.7; owner Q35 (c): "the third baseman stays at
 /// third, the other middle infielder covers second"). Seeds 0–7, every play: at every tick at
 /// which the first baseman and a middle infielder are both out on the cutoff home with the ball
