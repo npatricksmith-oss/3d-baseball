@@ -8381,6 +8381,12 @@ impl<'a> Sim<'a> {
     /// (`man_in_throw`) and its route (`throw_race`), so the two agree on who is in the throw
     /// (Opus double-cut review P3-1).
     fn men_in_throw(&self, observer: Option<usize>, from: Vec3, b: u8) -> Vec<usize> {
+        self.lined_in_throw(observer, from, b, false)
+    }
+
+    /// `men_in_throw`, or with `any_base` the men standing in the throw the same way with a cutoff
+    /// or relay job for any base (the route's fallback when nobody is lined up for this one).
+    fn lined_in_throw(&self, observer: Option<usize>, from: Vec3, b: u8, any_base: bool) -> Vec<usize> {
         let base = base_pos(b);
         let line = Vec3::new(base.x - from.x, base.y - from.y, 0.0);
         let len = line.norm();
@@ -8394,7 +8400,7 @@ impl<'a> Sim<'a> {
                     None => self.known_job(i).0,
                 };
                 let p = self.f[i].pos;
-                observer != Some(i) && job == Role::Relay(b) && (p - from).norm() > 10.0 && (base - p).norm() < len && ((p.x - from.x) * line.y - (p.y - from.y) * line.x).abs() / len < CUT_LINE_M
+                observer != Some(i) && (job == Role::Relay(b) || (any_base && matches!(job, Role::Relay(_)))) && (p - from).norm() > 10.0 && (base - p).norm() < len && ((p.x - from.x) * line.y - (p.y - from.y) * line.x).abs() / len < CUT_LINE_M
             })
             .collect()
     }
@@ -11648,6 +11654,9 @@ mod tests {
     /// home goes through is one lined up for home, between him and the plate and on the line. Two
     /// men nearer him are not: one known on the cutoff home but 40 m off the line, one on the
     /// line but lined up for third. The route and the throw's cut height agree on who is in it.
+    /// With nobody lined up for home, the man on the line lined up for third may be the route (by
+    /// time alone, the throw not kept low for him: the ball back to second through the relay man
+    /// lined up toward home, §5.7); the man off the line never is.
     #[test]
     fn the_route_goes_only_through_a_man_lined_up_for_that_base() {
         let fx = fixture(&[(0x0007, 2)]);
@@ -11670,6 +11679,14 @@ mod tests {
         assert_eq!(race.relay, Some(5), "the relay route goes through the man lined up for home");
         assert!(race.via.is_finite(), "through him the relay is a route home");
         assert_eq!(sim.men_in_throw(Some(CF), sim.f[CF].pos, 4), vec![5], "the man in the throw for its cut height");
+        sim.f[5].role = Role::Idle;
+        jobs_become_known(&mut sim);
+        sim.f[4].role = Role::Relay(3);
+        sim.f[3].role = Role::Relay(4);
+        jobs_become_known(&mut sim);
+        let race = sim.throw_race(CF, 4);
+        assert_eq!((race.relay, sim.men_in_throw(Some(CF), sim.f[CF].pos, 4)), (Some(4), vec![]), "nobody lined up for home: the man on the line for third, not the man off it");
+        assert_eq!(sim.cut_seen(Some(CF), sim.f[CF].pos, 4), Cut::No, "the throw is not kept low for a man lined up for another base");
     }
 
     /// agent-models §5.5: a throw straight home with a cutoff man lined up passes him no higher

@@ -46,9 +46,13 @@ impl Sim<'_> {
         // route through him; and the direct throw must pass him low (`cutoff_out`, agent-models
         // §5.5). With two (the double cut, §5.7: the relay man and the first baseman behind
         // him), the nearer of them: his throw goes to the relay man, and the relay man's to the
-        // first baseman. A man off the line, or lined up for another base, is in neither (Opus
-        // double-cut review P3-1).
-        let between = self.men_in_throw(Some(by), fd.pos, base).into_iter().min_by(|&a, &c| (self.f[a].pos - fd.pos).norm().total_cmp(&(self.f[c].pos - fd.pos).norm()).then(a.cmp(&c)));
+        // first baseman. A man off the line is never the route (Opus double-cut review P3-1).
+        // With nobody lined up for this base, a man on its line with a cutoff job for another
+        // base may be, by time alone: the ball back to second with no play, through the relay
+        // man lined up toward home, who stands on that line for a ball to centre (§5.7, "the
+        // quicker way"); the throw is not kept low for him.
+        let nearest = |men: Vec<usize>| men.into_iter().min_by(|&a, &c| (self.f[a].pos - fd.pos).norm().total_cmp(&(self.f[c].pos - fd.pos).norm()).then(a.cmp(&c)));
+        let between = nearest(self.men_in_throw(Some(by), fd.pos, base)).or_else(|| nearest(self.lined_in_throw(Some(by), fd.pos, base, true)));
         let relay = between;
         let cut = self.cut_seen(Some(by), fd.pos, base);
         let release = |target: Vec3, at: f64| {
@@ -72,7 +76,11 @@ impl Sim<'_> {
         let v = via(self.t);
         // The route: time, and what each route's throws are likely to cost the man taking them
         // off line (agent-models §5.5): one long throw misses by more than two short ones.
+        // (A man lined up for another base: by time alone, as before.)
         let through = between.is_some_and(|i| {
+            if cut == Cut::No {
+                return v < d;
+            }
             let rp = self.f[i].pos;
             let miss_direct = miss_cost_s((base_pos(base) - fd.pos).norm(), fd.a.arm_sigma);
             let miss_via = miss_cost_s((rp - fd.pos).norm(), fd.a.arm_sigma) + miss_cost_s((base_pos(base) - rp).norm(), self.f[i].a.arm_sigma);
