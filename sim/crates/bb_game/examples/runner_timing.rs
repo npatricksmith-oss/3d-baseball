@@ -3,9 +3,10 @@
 //! `-- <games> <first seed>` for one range, or `-- <seed> <play> <runner>` for
 //! one runner's raw 60 Hz trace. To try different leads, append metres and m/s for
 //! 0–1 outs and then two outs to the two-argument form. Times are seconds from contact.
+//! `BB_SEND_TWO_OUT_Z=<z>` runs with another caution for the two-out send home.
 //! Actual tracks and an independent, noise-free throw benchmark are both reported.
 
-use bb_agents::running::LEAGUE_TAU_S;
+use bb_agents::running::{AdvanceParams, LEAGUE_TAU_S};
 use bb_game::game::{Game, PitchStep, simulate_game_fielders};
 use bb_game::live::{
     RunnerStartParams, SecondaryLead, choice_trace,
@@ -536,6 +537,12 @@ impl Counts {
     }
 }
 
+/// `BB_SEND_TWO_OUT_Z=<z>` tries another caution for the two-out send home (Q38 fit).
+fn advance_override() -> Option<AdvanceParams> {
+    let z: f64 = std::env::var("BB_SEND_TWO_OUT_Z").ok()?.parse().ok()?;
+    Some(AdvanceParams { send_two_out_z: z, ..AdvanceParams::default() })
+}
+
 fn run(seeds: Range<u64>, params: Option<RunnerStartParams>) -> (Vec<String>, Counts) {
     let env = FlightEnv::default_env();
     let mut rows = Vec::new();
@@ -545,6 +552,9 @@ fn run(seeds: Range<u64>, params: Option<RunnerStartParams>) -> (Vec<String>, Co
             Game::new(seed, true).with_fielders(core::array::from_fn(FielderAttrs::average));
         if let Some(params) = params {
             game = game.with_runner_start(params);
+        }
+        if let Some(advance) = advance_override() {
+            game = game.with_advance(advance);
         }
         let mut singles = Vec::new();
         loop {
@@ -585,7 +595,7 @@ fn run(seeds: Range<u64>, params: Option<RunnerStartParams>) -> (Vec<String>, Co
                 &env,
             ));
         }
-        if seed == 0 && params.is_none() {
+        if seed == 0 && params.is_none() && advance_override().is_none() {
             let standard =
                 simulate_game_fielders(seed, core::array::from_fn(FielderAttrs::average));
             assert_eq!(standard.digest, result.digest, "tracing changed seed 0");

@@ -142,15 +142,29 @@ pub struct AdvanceParams {
     /// for the race itself to be right (note §9). A team's and a runner's aggressiveness
     /// lower it, timidity raises it.
     pub caution_z: f64,
+    /// Caution for the send home with two out [E] (agent-models §6.3, the third-base coach's
+    /// two-out send; owner's Q38 (a)): with two out the coach decides before the pitch to
+    /// send the runner home and holds him only when he is clearly beaten (Guilliams,
+    /// decision-model note §1.6). It replaces `caution_z` in every decision whose next base
+    /// is home with two out on the board as the runner sees them. Fitted to Retrosheet 2024's
+    /// two-out sends from second on outfield singles by fielder: 91.3% (left), 96.2%
+    /// (center), 92.9% (right), 5.6%, 0.6% and 2.2% of those sent put out (Q38 note).
+    pub send_two_out_z: f64,
 }
 
 impl Default for AdvanceParams {
     fn default() -> Self {
-        Self { sigma_race_s: 0.20, caution_z: 1.0 }
+        Self { sigma_race_s: 0.20, caution_z: 1.0, send_two_out_z: 1.0 }
     }
 }
 
 impl AdvanceParams {
+    /// The parameters for a decision to go on to base `next` (4: home) with `outs` on the
+    /// board as he sees them: the two-out send's caution in place of `caution_z` for home.
+    pub fn for_base(&self, next: u8, outs: u8) -> Self {
+        if next == 4 && outs >= 2 { Self { caution_z: self.send_two_out_z, ..*self } } else { *self }
+    }
+
     /// His belief that he is safe with `margin_s` in hand (the ball's believed arrival, tag
     /// included, less his own).
     pub fn p_safe(&self, margin_s: f64) -> f64 {

@@ -1,7 +1,8 @@
 //! Diagnostic for the runner decision model (docs/calibration/2026-11-15-runner-decision-model.md
 //! §4, T1, T2, T4, T6): how often a runner takes the extra base on a hit and how often he is
 //! put out going, by the outs before the play; tag-ups from third on caught outfield flies;
-//! and outs on the bases by cause, per team-game. `-- [games] [first seed]`
+//! and outs on the bases by cause, per team-game. `-- [games] [first seed]`;
+//! `BB_SEND_TWO_OUT_Z=<z>` runs with another caution for the two-out send home.
 use bb_game::{game::{classify_bip, Game}, play::FielderAttrs};
 use bb_rules::{Event, Input, OutKind};
 use bb_stats::scorer::{score_play, Outcome, DEFAULT_CHOICE_MARGIN_S};
@@ -24,6 +25,9 @@ fn run(seeds: std::ops::Range<u64>) -> Counts {
     let (mut oob_hit_batter, mut oob_hit_other, mut oob_catch, mut oob_other, mut team_games) = (0usize, 0usize, 0usize, 0usize, 0usize);
     for seed in seeds {
         let mut g = Game::new(seed, false).with_fielders(core::array::from_fn(FielderAttrs::average));
+        if let Some(z) = std::env::var("BB_SEND_TWO_OUT_Z").ok().and_then(|z| z.parse().ok()) {
+            g = g.with_advance(bb_agents::running::AdvanceParams { send_two_out_z: z, ..Default::default() });
+        }
         let mut data = Vec::new();
         loop {
             let (bases, outs_before) = (g.st.bases, g.st.outs);

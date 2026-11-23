@@ -201,6 +201,7 @@ pub struct Game {
     /// Each side's fielders, `[side][position − 1]`.
     fattrs: [[FielderAttrs; 9]; 2],
     runner_start: crate::live::RunnerStartParams,
+    advance: bb_agents::running::AdvanceParams,
     play: u32,
     prev: Option<PitchType>,
     last_v: Option<f64>,
@@ -256,6 +257,7 @@ impl Game {
             bs,
             fattrs,
             runner_start: Default::default(),
+            advance: Default::default(),
             play: 0,
             prev: None,
             last_v: None,
@@ -290,6 +292,12 @@ impl Game {
     /// Run the same matchup with alternate secondary leads (calibration).
     pub fn with_runner_start(mut self, params: crate::live::RunnerStartParams) -> Game {
         self.runner_start = params;
+        self
+    }
+
+    /// Run the same matchup with alternate advance cautions (calibration).
+    pub fn with_advance(mut self, params: bb_agents::running::AdvanceParams) -> Game {
+        self.advance = params;
         self
     }
 
@@ -404,7 +412,7 @@ impl Game {
             // forward (world truth, read with each fielder's error, agent-models §5.10).
             let swing_lead = rec.swing.map(|s| t_plate - s.t_start());
             let out = crate::live::simulate_live(
-                &crate::live::LiveInput { env: &mu.env, field: &self.field, ball, t_contact: t_c, runners, fielders, fattrs: self.fattrs[fside as usize], batter_box: { let p = mu.template.pivot(&mu.batter); bb_math::Vec3::new(p.x, p.y, 0.0) }, bats: mu.batter.bats, pitch_x: rec.plate.map(|p| p.x).or(Some(ball.r.x)), bat_yaw, swing_lead, seed, play, record, runner_start: self.runner_start, tag_up: Default::default(), advance: Default::default() },
+                &crate::live::LiveInput { env: &mu.env, field: &self.field, ball, t_contact: t_c, runners, fielders, fattrs: self.fattrs[fside as usize], batter_box: { let p = mu.template.pivot(&mu.batter); bb_math::Vec3::new(p.x, p.y, 0.0) }, bats: mu.batter.bats, pitch_x: rec.plate.map(|p| p.x).or(Some(ball.r.x)), bat_yaw, swing_lead, seed, play, record, runner_start: self.runner_start, tag_up: Default::default(), advance: self.advance },
                 st,
             );
             let first_touch = out.facts.iter().find_map(|f| match f {

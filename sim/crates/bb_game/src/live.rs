@@ -7821,7 +7821,9 @@ impl<'a> Sim<'a> {
         // until then he waits at his base.
         let blocked = !must && self.base_uncleared_ahead(k, next);
         // His margin by his read, weighed against what the base is worth (§6.3).
-        let go = !blocked && (must || self.inp.advance.goes(t_ball - (self.t + t_run) + noise, &self.advance_values(k, at_base, self.t + t_run)));
+        // With two out the coach's send home has its own caution (`send_two_out_z`, Q38 (a)).
+        let adv = self.inp.advance.for_base(next, self.runner_outs(k));
+        let go = !blocked && (must || adv.goes(t_ball - (self.t + t_run) + noise, &self.advance_values(k, at_base, self.t + t_run)));
         let r = &mut self.r[k];
         r.last_timing_draw = draw;
         r.waiting = blocked;
@@ -8027,7 +8029,7 @@ impl<'a> Sim<'a> {
         let (m_on, m_back) = (margin(ball_on, t_on), margin(ball_back, t_back));
         // Whether he believes he makes each base at all (better than even), and which he
         // chooses by what each is worth (§6.3).
-        let adv = &self.inp.advance;
+        let adv = &self.inp.advance.for_base(next, self.runner_outs(k));
         let (go_on, go_back) = (adv.p_safe(m_on) > 0.5, adv.p_safe(m_back) > 0.5);
         let prefers_on = adv.chooses_on(m_on, m_back, &self.advance_values(k, from, self.t + t_on.min(t_back)));
         // Safe at neither: he goes for the base he has the better chance at, as he sees it,
