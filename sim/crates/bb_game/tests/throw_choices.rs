@@ -921,7 +921,10 @@ fn a_corner_man_out_on_the_cutoff_home_keeps_it_when_the_lead_runner_scores() {
 ///   the third baseman 0.85 s before the throw.
 ///
 /// From the pickup to the outfielder's throw, the middle infielder on the relay home at the pickup
-/// keeps it, and nobody else goes out on a cutoff or relay. Each fails on `7622093`.
+/// keeps it, and nobody else goes out on a cutoff or relay. (Since the double cut, 2026-11-22, the
+/// first baseman lines up behind the relay man on these balls when they come down: he may stay out,
+/// having gone before the pickup, but nobody leaves a base for a cutoff at it.) Each fails on
+/// `7622093`.
 #[test]
 fn the_relay_man_keeps_the_job_through_the_outfielders_pickup() {
     for (label, text) in [("seed 23 play 94", include_str!("fixtures/a4/23-94.json")), ("seed 115 play 32", include_str!("fixtures/a4/115-32.json")), ("seed 63 play 211", include_str!("fixtures/a4/63-211.json"))] {
@@ -933,9 +936,10 @@ fn the_relay_man_keeps_the_job_through_the_outfielders_pickup() {
         let &(t_throw, _) = out.released.first().expect("the premise: the outfielder throws");
         let at = ticks.iter().rev().find(|k| k.t < t_fielded - 1e-9).expect("a tick before the pickup");
         let relay = [3, 5].into_iter().find(|&i| at.job[i] == 24).unwrap_or_else(|| panic!("{label}: the premise, a middle infielder on the relay home as the outfielder picks it up: {:?}", at.job));
+        let double_cut = at.job[2] == 24;
         for k in ticks.iter().filter(|k| k.t >= t_fielded - 1e-9 && k.t < t_throw) {
             assert_eq!(k.job[relay], 24, "{label}: fielder {} off the relay at {:.2} s, after the pickup at {t_fielded:.2} s: {:?}", relay + 1, k.t, k.job);
-            assert!((0..6).all(|i| i == relay || !(20..30).contains(&k.job[i])), "{label}: another man out on a cutoff at {:.2} s, after the pickup at {t_fielded:.2} s: {:?}", k.t, k.job);
+            assert!((0..6).all(|i| i == relay || (i == 2 && double_cut) || !(20..30).contains(&k.job[i])), "{label}: another man out on a cutoff at {:.2} s, after the pickup at {t_fielded:.2} s: {:?}", k.t, k.job);
         }
     }
 }
