@@ -71,3 +71,31 @@ Runner outcomes (`zz_lc_rates`, seeds 0–299 and 1000–1299 direct, average fi
 
 The read matters today only to runners already going or holding partway, who relook. A runner who tags up never looks again, so the change to his read cannot show yet. Every figure is within run-to-run noise.
 
+## 5. Step 2: the tagging runner keeps looking
+
+A runner tagging up on a ball still in the air now looks again every `RUNNER_FLY_LOOK_S`, on his bag or on his way back to it (agent-models §6.3). At a catch score of 0.2 or less, he gives up the tag-up and decides as at contact. Before, he never looked again. The fixture `a_tagging_runner_leaves_his_bag_when_he_sees_nobody_can_get_there` fails without the change.
+
+| | Second to home on a single, 0 / 1 / 2 out | First to third on a single, 0 / 1 / 2 out | Doubled off on catches: <10°, 10–25°, 25–50°, 50°+ | Runs, seeds 0 [1000] |
+|---|---|---|---|---|
+| Main `3de8698` | 84/205, 165/373, 307/407 | 186/548, 268/871, 397/807 | 118, 31, 1, 0 | 4.12 [4.45] |
+| Step 1 | 85/207, 168/370, 311/410 | 190/541, 263/869, 400/809 | 114, 26, 0, 0 | 4.14 [4.41] |
+| Step 2 | 88/206, 176/368, 309/414 | 204/553, 274/879, 399/811 | 115, 28, 0, 0 | 4.18 [4.43] |
+
+- **Second to home with 0–1 out:** 43.8% → 46.0% (main 43.1%; Retrosheet 2024 49.1%). That is +2.2 points, against the runner-start note's +3.8 from its probe on the old read.
+- **First to third with 0–1 out:** 32.1% → 33.4% (note: +0.5).
+- **Noise:** about 2 points per arm on about 575 chances, so both moves agree with the note's estimate.
+- **Pop-up double-offs stay at 0.** The probe on the old read freed tagging runners on caught pop-ups and doubled off 8 at 50° and above. MLB has about 2 per 600 games, so 0 is near it.
+- **25–50° double-offs:** also still 0, against MLB's about 8 (runner-start note §4).
+- **Cost:** time per game +3.5% [+4.3%], from the tagging runners' relooks.
+
+The two deferred P3s from the catch-fixes re-review went in with this step:
+- the comment at `awaiting_call`'s no-catch clause, which adds that a tagging runner's relooks stop at the glove's touch, so they would not free a stranded runner either;
+- `random_runner_layouts_with_a_catch_call_pending_never_leave_two_on_a_base`: 3,000 layouts after a fly caught 0.1 s before, with the planted tag-up runners seeing the call at once and the others not yet. It passes.
+
+## 6. Open
+
+- **25–50° double-offs**, at 0 against MLB's 8 per 600 games: runner-start note §4.
+- **Second to home with 0–1 out**, still 3 points under Retrosheet. The note's remaining levers are caution by outs (Q38) and the coach reading a ball behind the runner (Q10 (a)).
+- **The spin's size.** He flies the typical size about the axis he has seen. A ball with much more spin than typical (1040/214: 8,900 rpm against 5,400) still lands a metre or two off. At the railing, that decides whether a catch reads likely.
+- **Time.** The seen axis is worked out again in each of a look's nine projections. Working it out once per look would win back most of step 1's +2–3% without changing a game.
+
