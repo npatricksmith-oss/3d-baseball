@@ -3847,12 +3847,13 @@ impl<'a> Sim<'a> {
         let paths = self.runner_catch_paths(look);
         let score = Self::catch_score(&paths);
         if score >= self.tag_confidence(k) {
+            // Tagging up, he keeps watching it (agent-models §6.3).
             self.r[k].tag_up = true;
+            self.r[k].fly_look = Some((self.t + RUNNER_FLY_LOOK_S, 0));
         } else if score > 1.0 - RUNNER_CATCH_CONFIDENCE {
+            // Holding partway, or tagging up when no hold is recoverable: he keeps watching.
             self.set_catch_hold(k, &paths);
-            if self.r[k].hold_s.is_some() {
-                self.r[k].fly_look = Some((self.t + RUNNER_FLY_LOOK_S, 0));
-            }
+            self.r[k].fly_look = Some((self.t + RUNNER_FLY_LOOK_S, 0));
         } else {
             let pred = look.project(self.inp.field, [0.0; 4]);
             self.runner_decide_with_contact(k, self.r[k].start, Some(&pred));
@@ -3862,19 +3863,22 @@ impl<'a> Sim<'a> {
         }
     }
 
-    /// A runner who went at his first look on a ball in the air, or holds partway, looks at it
-    /// again (agent-models §6.3, the in-flight relook): through the same observation as his
-    /// first look, with look `n`'s own draws. Going on, a catch he is sure of sends him back to
-    /// tag up, a close one pulls him up into a hold he can get back from, and otherwise he keeps
-    /// going and looks again. Holding partway, a catch he is sure of sends him back to tag up if
-    /// he can be on the bag before it; otherwise he holds and looks again. Once the ball is seen
-    /// to come down or be touched, or he has stopped going on or holding, he stops looking.
+    /// A runner who went at his first look on a ball in the air, holds partway or tags up looks
+    /// at it again (agent-models §6.3, the in-flight relook): through the same observation as
+    /// his first look, with look `n`'s own draws. Going on, a catch he is sure of sends him back
+    /// to tag up, a close one pulls him up into a hold he can get back from, and otherwise he
+    /// keeps going and looks again. Holding partway, a catch he is sure of sends him back to
+    /// tag up if he can be on the bag before it; otherwise he holds and looks again. Tagging up,
+    /// a ball he reads as dropping (a score at or below his advance cut-off) frees him to decide
+    /// as at contact; otherwise he stays and looks again. Once the ball is seen to come down or
+    /// be touched, or he has stopped going on, holding or tagging up, he stops looking.
     fn fly_relook(&mut self, k: usize, n: u32) {
         let r = &self.r[k];
-        let free = !r.tag_up && !r.retouch && !r.scored && !r.out;
-        let going = free && r.goal > r.start && r.hold_s.is_none();
-        let holding = free && r.hold_s.is_some();
-        if !(going || holding) || self.public_contact_since().is_none() || !matches!(self.ball, Ball::Free { .. }) {
+        let live = !r.retouch && !r.scored && !r.out;
+        let going = live && !r.tag_up && r.goal > r.start && r.hold_s.is_none();
+        let holding = live && !r.tag_up && r.hold_s.is_some();
+        let tagging = live && r.tag_up;
+        if !(going || holding || tagging) || self.public_contact_since().is_none() || !matches!(self.ball, Ball::Free { .. }) {
             self.r[k].fly_look = None;
             return;
         }
@@ -3882,6 +3886,19 @@ impl<'a> Sim<'a> {
         let paths = self.runner_catch_paths(look);
         let score = Self::catch_score(&paths);
         let next = Some((self.t + RUNNER_FLY_LOOK_S, n + 1));
+        if tagging {
+            if score <= 1.0 - RUNNER_CATCH_CONFIDENCE {
+                // He reads it dropping: the tag-up is off, and he decides as at contact.
+                self.r[k].tag_up = false;
+                let pred = look.project(self.inp.field, [0.0; 4]);
+                self.runner_decide_with_contact(k, self.r[k].start, Some(&pred));
+                let r = &mut self.r[k];
+                r.fly_look = if r.goal > r.start && r.hold_s.is_none() && !r.tag_up { next } else { None };
+            } else {
+                self.r[k].fly_look = next;
+            }
+            return;
+        }
         if holding {
             if score >= self.tag_confidence(k) {
                 // Back on the bag before the earliest catch he reads as plausible.
@@ -3890,7 +3907,7 @@ impl<'a> Sim<'a> {
                 let catch = paths.iter().flatten().filter(|read| read.score > 1.0 - RUNNER_CATCH_CONFIDENCE).map(|read| read.t).fold(f64::INFINITY, f64::min);
                 if self.t + to_bag <= catch {
                     let r = &mut self.r[k];
-                    r.fly_look = None;
+                    r.fly_look = next;
                     r.hold_s = None;
                     r.tag_up = true;
                     return;
@@ -3901,15 +3918,16 @@ impl<'a> Sim<'a> {
         }
         if score >= self.tag_confidence(k) {
             let r = &mut self.r[k];
-            r.fly_look = None;
+            r.fly_look = next;
             r.tag_up = true;
             r.waiting = false;
             r.turned_back = None;
         } else if score > 1.0 - RUNNER_CATCH_CONFIDENCE {
             self.r[k].waiting = false;
             self.r[k].turned_back = None;
+            // Into a hold, or back to tag up if none is recoverable: either way he keeps watching.
             self.set_catch_hold(k, &paths);
-            self.r[k].fly_look = if self.r[k].hold_s.is_some() { next } else { None };
+            self.r[k].fly_look = next;
         } else {
             self.r[k].fly_look = next;
         }
@@ -7470,6 +7488,14 @@ impl<'a> Sim<'a> {
     /// whichever way it went: he holds new decisions until then (catch-read fixes review
     /// P1-3). With no catch ruled, the call he sees is that possession was no catch.
     fn awaiting_call(&self, k: usize) -> bool {
+        // The second clause (a possession in flight the rules did not rule a catch) cannot
+        // happen today: the rules rule a catch for any `GloveSecured` before a ground touch,
+        // and `emit` sets `no_catch_at` on any ground or wall fact first, after which
+        // `flight_secured_at` stays empty (Opus catch-fixes re-review P3-1). If the rules ever
+        // gain an umpire's no-catch call on a possession, a runner planted on his bag to tag up
+        // would be stranded: his tag-up waits for `catch_seen` or `no_catch_read()`, neither
+        // would come, and his in-flight relooks (agent-models §6.3) stop at the glove's touch,
+        // when the ball is no longer free, so they would not free him either.
         self.awaiting_catch_call(k)
             || (!self.caught() && self.flight_secured_at.is_some_and(|ts| self.t + 1e-9 < ts + RUNNER_CATCH_CALL_REACT_S))
     }
@@ -15341,6 +15367,49 @@ mod tests {
         assert!(checked >= 20, "{checked} balls come down in play");
     }
 
+    // Agent-models §6.3, the tagging runner keeps watching (2026-11-23): a runner on second with
+    // one out is on his bag tagging up on a deep fly to center. Two worlds differ only in what he
+    // can see: the center fielder standing where it comes down, or every fielder about 100 m from
+    // it. Watching it, he stays on the bag to tag when the fielder is under it, and leaves it for
+    // third when nobody can get there.
+    #[test]
+    fn a_tagging_runner_leaves_his_bag_when_he_sees_nobody_can_get_there() {
+        const R: AgentId = 7;
+        let mut fx = fixture(&[(R, 2)]);
+        fx.st.outs = 1;
+        let la = 33f64.to_radians();
+        let ball = typical_ball(&fx.env, Vec3::new(0.0, 0.5, 1.0), Vec3::new(0.0, 42.0 * m::cos(la), 42.0 * m::sin(la)));
+        let (t_land, lx, ly) = batted_path(&fx.env, &fx.field, ball, 0.0, |_, _| (0.0, 0.0)).first_bounce().expect("in the park");
+        let land = Vec3::new(lx, ly, 0.0);
+        let mut seen = Vec::new();
+        for cf in [land, Vec3::new(-70.0, 30.0, 0.0)] {
+            let mut inp = input(&fx, vec![RunnerIn { id: R, base: 2, speed: 8.2, tau_s: RUNNER_TAU }]);
+            inp.ball = ball;
+            let mut st = fx.st.clone();
+            let mut sim = new_sim(&inp, &mut st);
+            for fd in &mut sim.f {
+                fd.pos = Vec3::new(-70.0, 30.0, 0.0);
+                fd.vel = Vec3::ZERO;
+            }
+            sim.f[CF].pos = cf;
+            sim.start_runners();
+            sim.t = inp.t_contact + RUNNER_READ_DELAY_S;
+            // On his bag tagging up, as a sure read at his first look leaves him.
+            let r = &mut sim.r[0];
+            (r.reading_contact, r.s, r.v, r.goal, r.tag_up, r.hold_s) = (false, 2.0 * BASE_L, 0.0, 2, true, None);
+            r.fly_look = Some((sim.t, 0));
+            while sim.t < inp.t_contact + t_land - 0.5 {
+                sim.move_runners();
+                sim.t += DT;
+            }
+            let r = &sim.r[0];
+            seen.push((r.tag_up, r.goal, r.s - 2.0 * BASE_L));
+        }
+        let ((under_tag, under_goal, under_off), (away_tag, away_goal, away_off)) = (seen[0], seen[1]);
+        assert!(under_tag && under_goal == 2 && under_off.abs() < 1e-6, "fielder under it: tag-up {under_tag}, goal {under_goal}, {under_off:.1} m off");
+        assert!(!away_tag && away_goal >= 3 && away_off > 10.0, "nobody near it: tag-up {away_tag}, goal {away_goal}, {away_off:.1} m off");
+    }
+
     // Agent-models §6.3, the in-flight relook while holding: a runner on first with one out
     // holds partway on a deep fly to center. Two worlds differ only in what he can see: the
     // center fielder standing under where it comes down, or about 100 m from it. Watching it,
@@ -17196,6 +17265,15 @@ mod tests {
     /// a random place along the paths in order of start, with a random speed, direction and
     /// goal; the ball held by a random fielder at a random place. Returns a description.
     fn random_traffic_case(case: u64) -> Result<(), String> {
+        random_traffic_case_with(case, false)
+    }
+
+    /// [`random_traffic_case`], or with `catch` the same kind of layout after a fly caught at
+    /// 5.9 s by the fielder holding the ball, its call still pending at 6.0 s for every runner
+    /// but those planted on their own base to tag up, who see it at once (agent-models §6.4):
+    /// the views of the outs and the force differ between runners (Opus catch-fixes re-review
+    /// P3-3). The batter is out on the catch.
+    fn random_traffic_case_with(case: u64, catch: bool) -> Result<(), String> {
         let mut x = case.wrapping_mul(0x9E37_79B9_7F4A_7C15) ^ 0xD1B5_4A32_D192_ED03;
         let mut rnd = move || {
             x ^= x << 13;
@@ -17217,11 +17295,13 @@ mod tests {
         let inp = input(&fx, runners);
         let mut st = fx.st.clone();
         let mut sim = new_sim(&inp, &mut st);
-        let batter_runs = rnd() < 0.4;
-        sim.emit(Input::BallTouched { t: 0.5, what: Touch::Ground { x: 0.0, y: 1.0 } });
-        sim.emit(Input::BallPassedBase { t: 0.55, fair: true });
-        if !batter_runs {
-            sim.emit(Input::TagContact { t: 1.0, fielder: sim.f[4].id, runner: fx.st.batter, holding_ball: true });
+        let batter_runs = !catch && rnd() < 0.4;
+        if !catch {
+            sim.emit(Input::BallTouched { t: 0.5, what: Touch::Ground { x: 0.0, y: 1.0 } });
+            sim.emit(Input::BallPassedBase { t: 0.55, fair: true });
+            if !batter_runs {
+                sim.emit(Input::TagContact { t: 1.0, fielder: sim.f[4].id, runner: fx.st.batter, holding_ball: true });
+            }
         }
         sim.t = 6.0;
         // Places, lead runner furthest along, at least 1.5 m apart.
@@ -17265,13 +17345,14 @@ mod tests {
             let v = if rnd() < 0.3 { 0.0 } else { 1.0 + 8.0 * rnd() };
             let dir = if rnd() < 0.5 { 1.0 } else { -1.0 };
             let goal = if standing { floor_b + (rnd() < 0.4) as u8 } else { floor_b + (rnd() < 0.5) as u8 };
+            let planted = catch && standing && floor_b == b && rnd() < 0.5;
             let r = &mut sim.r[j];
             r.s = pos;
             r.v = if standing { 0.0 } else { v };
             r.direction = dir;
-            r.goal = goal.clamp(b, 4);
+            r.goal = if planted { b } else { goal.clamp(b, 4) };
             r.hold_s = None;
-            r.tag_up = false;
+            r.tag_up = planted;
             r.waiting = false;
         }
         if batter_runs {
@@ -17292,8 +17373,16 @@ mod tests {
         };
         sim.f[by].pos = spot;
         sim.f[by].target = spot;
+        if catch {
+            // The catch, ruled now with the runners where they are.
+            sim.set_free(BallState { r: spot + Vec3::new(0.0, 0.0, 1.5), v: Vec3::new(0.0, 0.0, -5.0), w: Vec3::ZERO });
+            sim.emit(Input::GloveSecured { t: 5.9, fielder: sim.f[by].id, x: spot.x, y: spot.y });
+            if !sim.caught() || !sim.r[0].out {
+                return Err(format!("case {case}: the catch was not ruled"));
+            }
+        }
         sim.ball = Ball::Held { by };
-        sim.out.secured.push((6.0, sim.f[by].id));
+        sim.out.secured.push((if catch { 5.9 } else { 6.0 }, sim.f[by].id));
         for tick in 0..1200u32 {
             sim.move_runners();
             if tick % 2 == 0 {
@@ -17370,6 +17459,22 @@ mod tests {
         let mut bad = Vec::new();
         for case in 0..3000u64 {
             if let Err(e) = random_traffic_case(case) {
+                bad.push(e);
+            }
+        }
+        assert!(bad.is_empty(), "{} of 3000 failed; first: {}", bad.len(), bad[..bad.len().min(6)].join("\n"));
+    }
+
+    // The same with a catch call pending (Opus catch-fixes re-review P3-3, deferred until the
+    // tag-up relook, agent-models §6.3): a fly caught 0.1 s ago, the runners planted on their
+    // bags to tag up seeing it at once and the rest not yet, so the outs and the force they
+    // read differ. Still no two on a base, every live runner ends on one, and the rules never
+    // warn.
+    #[test]
+    fn random_runner_layouts_with_a_catch_call_pending_never_leave_two_on_a_base() {
+        let mut bad = Vec::new();
+        for case in 0..3000u64 {
+            if let Err(e) = random_traffic_case_with(case, true) {
                 bad.push(e);
             }
         }
