@@ -382,77 +382,122 @@ struct ContactLook {
     contact_since: Option<f64>,
     /// He sees it rolling on the ground (agent-models §5.1: no read below the ground).
     rolling: bool,
-    /// His first catch look at this first flight, if he has had one (agent-models §6.3, "The
-    /// curve he has seen").
+    /// What he keeps of his catch looks at this first flight, if he has had one (agent-models
+    /// §6.3, "The curve he has seen").
     seen: Option<SeenLook>,
     /// The spin axis he has seen (`seen_axis`), worked out once for the look and used by each
     /// of its projections; set with [`ContactLook::with_seen`].
     axis: Option<Vec3>,
 }
 
-/// What a runner keeps of his first catch look at a ball on its first flight (agent-models
-/// §6.3, "The curve he has seen"): when it was (seconds since contact), the velocity he read,
-/// and that read's error covariance.
+/// What a runner keeps of his catch looks at a ball on its first flight (agent-models §6.3,
+/// "The curve he has seen"): his first catch look (when, seconds since contact; the velocity
+/// he read; that read's error covariance) and the sums of the least-squares fit of the spin
+/// axis over the intervals from it to each later catch look (`normal`·ω = `rhs`).
 #[derive(Clone, Copy, Debug)]
 struct SeenLook {
     since: f64,
     v: Vec3,
     cov: Mat3,
+    normal: Mat3,
+    rhs: Vec3,
+}
+
+/// The spread of a batted ball's spin size about the typical spin he flies (`SPIN_BACK_RPM`),
+/// as a fraction: the error of his push model that no axis explains [E].
+const SEEN_SPIN_SIZE_SPREAD: f64 = 0.3;
+
+/// One interval's share of the seen-axis fit (agent-models §6.3, "The curve he has seen"):
+/// from his first catch look `first` to a look at `now` (seconds since contact) reading
+/// velocity `v` with error covariance `cov`. He flies `first`'s velocity on with his own model
+/// and no spin push; `v` less that flight's is the push he has seen. A spin about the axis ω
+/// (in units of the typical spin's size) adds up to a push of ω × J, J the push-free path's
+/// direction weighted by how hard a spin of the typical size pushes there. With M = the
+/// matrix of ω ↦ ω × J and W the inverse of the two looks' velocity error covariance, the
+/// interval adds Mᵀ·W·M to the normal matrix and Mᵀ·W·push to the right-hand side.
+fn seen_interval(first: &SeenLook, now: f64, v: Vec3, cov: Mat3) -> Option<(Mat3, Vec3)> {
+    let dt = now - first.since;
+    if dt <= 1e-6 {
+        return None;
+    }
+    let (env, w) = believed_flight(reference_env(), first.v, Some(first.since));
+    let still = FlightEnv { aero: bb_physics::AeroParams { magnus: false, ..env.aero }, ..env };
+    let mut free = BallState { r: Vec3::ZERO, v: first.v, w };
+    let mut j = Vec3::ZERO;
+    let mut left = dt;
+    while left > 1e-9 {
+        let h = left.min(AGENT_DT);
+        // How hard a spin of this size across the flight pushes it here, along its way.
+        let u = free.v;
+        let across = Vec3::new(-u.y, u.x, 0.0).normalized() * free.w.norm();
+        j += u.normalized() * ((env.accel(u, across) - still.accel(u, across)).norm() * h);
+        free = still.step(&free, h);
+        left -= h;
+    }
+    let size = SEEN_SPIN_SIZE_SPREAD * j.norm();
+    let weight = (first.cov + cov + Mat3::scale(size * size)).inverse()?;
+    // ω × J = −J × ω: M = −[J]×, Mᵀ = [J]×.
+    let mt = Mat3::skew(j);
+    Some((mt * weight * (mt * -1.0), mt * (weight * (v - free.v))))
 }
 
 impl ContactLook {
-    /// This look with `seen` as his earlier catch look, and the axis he has seen worked out.
+    /// This look with `seen` as what he keeps of his catch looks, and the axis he has seen
+    /// worked out.
     fn with_seen(mut self, seen: Option<SeenLook>) -> Self {
         self.seen = seen;
         self.axis = self.seen_axis();
         self
     }
 
-    /// This look as the one he keeps for the next: none once the ball is off its first flight.
-    fn kept(self) -> Option<SeenLook> {
-        let since = self.contact_since?;
+    /// This look's velocity read and its error covariance.
+    fn velocity_read(self) -> (Vec3, Mat3) {
         let (los, _, sv) = self.scales(self.motion);
-        Some(SeenLook { since, v: self.motion.1, cov: read_cov(los, sv, DEPTH_STRETCH * 0.5) })
+        (self.motion.1, read_cov(los, sv, DEPTH_STRETCH * 0.5))
     }
 
-    /// The spin axis he has seen (agent-models §6.3, "The curve he has seen"). He flies the
-    /// velocity of his first catch look on to now with his own model, with the typical spin's
-    /// push and without any; the velocity he reads now less the push-free flight's is the push
-    /// he has seen, the typical flight's the push he expected. He weighs the two as the
-    /// tracking read weighs a look (§5.1): the push's prior σ `CURVE_PRIOR` per axis over the
-    /// interval, against the two looks' velocity errors. A push about axis ω̂ adds up to
-    /// ω̂ × J over the flight, J the push-free path's directions weighted by how hard a spin
-    /// of the typical size pushes at each (the lift law's k·C_L·u²); so the axis is J × the
-    /// push (its part across J). `None` on his first look, or off the first flight.
+    /// The fit's sums with this look's interval added: none off the first flight.
+    fn fit_sums(self) -> Option<(Mat3, Vec3)> {
+        let now = self.contact_since?;
+        let (v, cov) = self.velocity_read();
+        Some(match self.seen {
+            Some(first) => match seen_interval(&first, now, v, cov) {
+                Some((n, b)) => (first.normal + n, first.rhs + b),
+                None => (first.normal, first.rhs),
+            },
+            None => (Mat3::scale(0.0), Vec3::ZERO),
+        })
+    }
+
+    /// What he keeps of his catch looks after this one: his first catch look and the fit's
+    /// sums; none once the ball is off its first flight.
+    fn kept(self) -> Option<SeenLook> {
+        let since = self.contact_since?;
+        let (normal, rhs) = self.fit_sums()?;
+        Some(match self.seen {
+            Some(first) => SeenLook { normal, rhs, ..first },
+            None => {
+                let (v, cov) = self.velocity_read();
+                SeenLook { since, v, cov, normal, rhs }
+            }
+        })
+    }
+
+    /// The spin axis he has seen (agent-models §6.3, "The curve he has seen"): the
+    /// generalised least-squares fit over the intervals from his first catch look to each
+    /// later one ([`seen_interval`]), with the typical spin's axis as a prior of spread one
+    /// per component, which also supplies any part no interval shows (spin about the flight's
+    /// own direction). The earlier intervals keep the rising leg's direction once the ball has
+    /// passed its apex, so a pop-up's late looks, where the push over the whole flight nearly
+    /// cancels, are read as well as any (review P2-2). `None` on his first look, or off the
+    /// first flight.
     fn seen_axis(self) -> Option<Vec3> {
-        let (now, first) = (self.contact_since?, self.seen?);
-        let dt = now - first.since;
-        if dt <= 1e-6 {
-            return None;
-        }
-        let (env, w) = believed_flight(reference_env(), first.v, Some(first.since));
-        let still = FlightEnv { aero: bb_physics::AeroParams { magnus: false, ..env.aero }, ..env };
-        let (mut free, mut typical) = (BallState { r: Vec3::ZERO, v: first.v, w }, BallState { r: Vec3::ZERO, v: first.v, w });
-        let mut j = Vec3::ZERO;
-        let mut left = dt;
-        while left > 1e-9 {
-            let h = left.min(AGENT_DT);
-            // How hard a spin of this size across the flight pushes it here, along its way.
-            let u = free.v;
-            let across = Vec3::new(-u.y, u.x, 0.0).normalized() * free.w.norm();
-            j += u.normalized() * ((env.accel(u, across) - still.accel(u, across)).norm() * h);
-            free = still.step(&free, h);
-            typical = env.step(&typical, h);
-            left -= h;
-        }
-        let (los, _, sv) = self.scales(self.motion);
-        let err = first.cov + read_cov(los, sv, DEPTH_STRETCH * 0.5);
-        let prior = Mat3::scale(CURVE_PRIOR * CURVE_PRIOR * dt * dt);
-        let gain = prior * (prior + err).inverse()?;
-        let expected = typical.v - free.v;
-        let push = expected + gain * (self.motion.1 - free.v - expected);
-        let axis = j.cross(push);
-        (axis.norm() > 1e-9).then(|| axis.normalized())
+        let now = self.contact_since?;
+        self.seen?;
+        let (normal, rhs) = self.fit_sums()?;
+        let typical = believed_flight(reference_env(), self.motion.1, Some(now)).1.normalized();
+        let w = (normal + Mat3::scale(1.0)).inverse()? * (rhs + typical);
+        (w.norm() > 1e-6).then(|| w.normalized())
     }
 
     fn scales(self, motion: (Vec3, Vec3)) -> (Vec3, f64, f64) {
@@ -1778,8 +1823,8 @@ struct Runner {
     /// He went at his first look on a ball in the air, or holds partway, and keeps watching it
     /// (agent-models §6.3, the in-flight relook): when he looks next, and that look's number.
     fly_look: Option<(f64, u32)>,
-    /// His first catch look at the ball on its first flight, for the curve he has seen since
-    /// (agent-models §6.3).
+    /// What he keeps of his catch looks at the ball on its first flight: the first, and the
+    /// seen-axis fit so far (agent-models §6.3).
     catch_look: Option<SeenLook>,
     /// Standing on a base, he is watching a throw his look carried over or near the base in
     /// front of him, to see whether it gets there (agent-models §6.4): until when, and the
@@ -3717,7 +3762,7 @@ impl<'a> Sim<'a> {
         };
         let (los, sp, sv) = look.scales(look.motion);
         look.motion = noisy_ball_motion(look.motion, los, sp, sv, self.runner_ball_errors(k, sub));
-        // His first catch look counts only on the same first flight, and before this one.
+        // His catch looks count only on the same first flight, and before this one.
         let seen = self.r[k].catch_look.filter(|prev| look.contact_since.is_some_and(|now| now > prev.since));
         look.with_seen(seen)
     }
@@ -3894,6 +3939,7 @@ impl<'a> Sim<'a> {
             return;
         }
         let look = self.observe_ball(k, FLY_LOOK_SUB + n);
+        self.r[k].catch_look = look.kept();
         let paths = self.runner_catch_paths(look);
         let score = Self::catch_score(&paths);
         let next = Some((self.t + RUNNER_FLY_LOOK_S, n + 1));
@@ -15257,7 +15303,7 @@ mod tests {
     /// The late-flight catch read (agent-models §6.3; docs/calibration/2026-11-23-late-catch-
     /// read.md): a runner on `base` with one out watches `ball` from his base with a noise-free
     /// look every `RUNNER_FLY_LOOK_S` from his first look until 0.3 s before it comes down,
-    /// keeping his first look for the later ones as he does in a game. Fielder `who` is placed by
+    /// keeping each look for the next as he does in a game. Fielder `who` is placed by
     /// `place(t)` (position, velocity) at each look; the others stand far from the ball. The
     /// scores, by time since contact, and the least score the catch should keep: 0.5 where it
     /// comes down in the open, and above his advance cut-off (`1 − RUNNER_CATCH_CONFIDENCE`:
@@ -15292,7 +15338,7 @@ mod tests {
             let since = t - inp.t_contact;
             let look = ContactLook { motion: sim.ball_at(t), from: sim.runner_pos(&sim.r[0]), t, view: since, contact_since: Some(since), rolling: false, seen: None, axis: None }.with_seen(seen);
             out.push((since, Sim::catch_score(&sim.runner_catch_paths(look))));
-            seen = seen.or(look.kept());
+            seen = look.kept();
             t += RUNNER_FLY_LOOK_S;
         }
         Some((out, floor))
@@ -15377,6 +15423,124 @@ mod tests {
             }
         }
         assert!(checked >= 20, "{checked} balls come down in play");
+    }
+
+    /// A xorshift stream for the seen-axis property test's synthetic launches and read draws.
+    struct AxisRng(u64);
+    impl AxisRng {
+        fn u(&mut self) -> f64 {
+            self.0 ^= self.0 << 13;
+            self.0 ^= self.0 >> 7;
+            self.0 ^= self.0 << 17;
+            ((self.0 >> 11) as f64 + 0.5) / (1u64 << 53) as f64
+        }
+        fn n(&mut self) -> f64 {
+            let (a, b) = (self.u(), self.u());
+            (m::sqrt(-2.0 * m::ln(a)) * m::cos(core::f64::consts::TAU * b)).clamp(-4.0, 4.0)
+        }
+    }
+
+    /// The seen-axis property test's tallies by flight phase for launches of `lo`–`hi` degrees:
+    /// [looks, flipped beyond 90°, off by more than 45°] for looks before the apex, up to 0.6 of
+    /// the rise past it, straddling it (0.6–1.4) and beyond. The angle is between the part of
+    /// his axis across the ball's true velocity now and the same part of the true axis: what
+    /// pushes the ball from here on (review P2-2, P3-5).
+    fn seen_axis_by_phase(lo: f64, hi: f64, balls: usize, seed: u64) -> ([[usize; 3]; 4], f64, f64) {
+        let fx = fixture(&[]);
+        let (env, field) = (fx.env, &fx.field);
+        let from = base_pos(1);
+        let mut g = AxisRng(seed);
+        let mut tab = [[0usize; 3]; 4];
+        let (mut seen_miss, mut typical_miss) = (Vec::new(), Vec::new());
+        let mut done = 0;
+        while done < balls {
+            let la = (lo + (hi - lo) * g.u()).to_radians();
+            let spray = (-45.0 + 90.0 * g.u()).to_radians();
+            let ev = 25.0 + 25.0 * g.u();
+            let v = Vec3::new(m::sin(spray), m::cos(spray), 0.0) * (ev * m::cos(la)) + Vec3::new(0.0, 0.0, ev * m::sin(la));
+            let base = typical_ball(&env, Vec3::new(0.0, 0.5, 0.9), v);
+            // The typical spin's axis rolled by up to ±60° about the velocity and pitched up to
+            // ±30° toward it (gyro), its size ×0.6–1.6.
+            let (vh, a0) = (v.normalized(), base.w.normalized());
+            let b0 = vh.cross(a0).normalized();
+            let (roll, gyro) = ((-60.0 + 120.0 * g.u()).to_radians(), (-30.0 + 60.0 * g.u()).to_radians());
+            let axis = ((a0 * m::cos(roll) + b0 * m::sin(roll)) * m::cos(gyro) + vh * m::sin(gyro)).normalized();
+            let ball = BallState { r: base.r, v, w: axis * (base.w.norm() * (0.6 + g.u())) };
+            let path = batted_path(&env, field, ball, 0.0, |_, _| (0.0, 0.0));
+            let Some((t_land, lx, ly)) = path.first_bounce() else { continue };
+            if t_land < 1.3 {
+                continue;
+            }
+            done += 1;
+            let mut t_apex = 0.0;
+            let mut tt = 0.0;
+            while tt < t_land {
+                if path.at(tt).0.z > path.at(t_apex).0.z {
+                    t_apex = tt;
+                }
+                tt += 0.02;
+            }
+            let t1 = RUNNER_READ_DELAY_S;
+            let mut seen = None;
+            let mut t = t1;
+            while t < t_land - 0.3 {
+                let mut look = ContactLook { motion: path.at(t), from, t, view: t, contact_since: Some(t), rolling: false, seen: None, axis: None };
+                let (los, sp, sv) = look.scales(look.motion);
+                look.motion = noisy_ball_motion(look.motion, los, sp, sv, [g.n(), g.n(), g.n(), g.n()]);
+                let look = look.with_seen(seen);
+                if let Some(a) = look.axis {
+                    assert!(a.x.is_finite() && a.y.is_finite() && a.z.is_finite(), "{a:?}");
+                    let vnow = path.at(t).1.normalized();
+                    let (mine, truth) = (a.reject(vnow).normalized(), axis.reject(vnow).normalized());
+                    let d = m::acos(mine.dot(truth).clamp(-1.0, 1.0)).to_degrees();
+                    let ph = (t - t_apex) / (t_apex - t1).max(0.1);
+                    let row = &mut tab[if ph < 0.0 { 0 } else if ph < 0.6 { 1 } else if ph < 1.4 { 2 } else { 3 }];
+                    row[0] += 1;
+                    row[1] += usize::from(d > 90.0);
+                    row[2] += usize::from(d > 45.0);
+                }
+                let miss = |l: ContactLook| l.project(field, [0.0; 4]).first_bounce().map(|(_, x, y)| m::hypot(x - lx, y - ly));
+                if let (Some(a), Some(b)) = (miss(look), miss(ContactLook { axis: None, ..look })) {
+                    seen_miss.push(a);
+                    typical_miss.push(b);
+                }
+                seen = look.kept();
+                t += RUNNER_FLY_LOOK_S;
+            }
+        }
+        let median = |mut v: Vec<f64>| {
+            v.sort_by(f64::total_cmp);
+            v[v.len() / 2]
+        };
+        (tab, median(seen_miss), median(typical_miss))
+    }
+
+    // Review P2-2 and P3-5: the spin axis he has seen, under his own read noise on every look,
+    // by flight phase, on synthetic launches whose spin is the typical spin's rolled ±60°,
+    // pitched ±30° and sized ×0.6–1.6. The whole-flight estimate the review measured flipped on
+    // 16% of the pop-up looks that straddle the apex; the fit over intervals holds there (as
+    // built, 2026-11-23: 4 of 930 flipped, 23 off by 45°). Bounds are those figures with room, per band:
+    // (flipped, off by 45°) in any phase, and for pop-ups the straddling phase on its own. And
+    // flown on, the seen axis comes down no farther from the true landing than the typical
+    // axis does, in the median.
+    #[test]
+    fn the_seen_axis_holds_across_the_apex_under_read_noise() {
+        for (lo, hi, flip_max, off_max) in [(60.0, 88.0, 0.06, 0.15), (40.0, 60.0, 0.05, 0.16), (20.0, 40.0, 0.02, 0.12), (5.0, 20.0, 0.10, 0.25)] {
+            let (tab, seen, typical) = seen_axis_by_phase(lo, hi, 300, 0x1234_5678_9abc_def1);
+            for (phase, [n, flip, off]) in tab.iter().enumerate() {
+                if *n < 50 {
+                    continue;
+                }
+                let (f, o) = (*flip as f64 / *n as f64, *off as f64 / *n as f64);
+                assert!(f <= flip_max && o <= off_max, "{lo}-{hi}°, phase {phase}: {flip} of {n} flipped, {off} off by 45° ({tab:?})");
+            }
+            if lo >= 60.0 {
+                let [n, flip, off] = tab[2];
+                assert!(n >= 500 && flip * 50 <= n && off * 20 <= n, "straddling the apex: {flip} of {n} flipped, {off} off by 45°");
+            }
+            assert!(seen <= typical + 0.1, "{lo}-{hi}°: median landing miss {seen:.2} m with the seen axis, {typical:.2} m with the typical");
+            eprintln!("{lo}-{hi}°: {tab:?}; median landing miss {seen:.2} m seen, {typical:.2} m typical");
+        }
     }
 
     // Agent-models §6.3, the tagging runner keeps watching (2026-11-23): a runner on second with
