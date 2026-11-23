@@ -7064,7 +7064,16 @@ impl<'a> Sim<'a> {
         let to = Vec3::new(truth.0.x - from.x, truth.0.y - from.y, 0.0);
         let view = self.out.released.last().map_or(0.0, |(t, _)| (self.t - t).max(0.0));
         let shrink = read_shrink(truth, view, RUNNER_READ_TAU_S, None);
-        let sp = RUNNER_READ_SIGMA0 * (to.norm().max(1.0) / READ_REF_DIST) * shrink;
+        // He watched it leave the hand of the man he was watching hold it (his read of the
+        // holder has the man where he stands): he cannot misplace it by more than it has gone
+        // since. His depth error (the largest, `DEPTH_STRETCH` σ) is capped at that distance,
+        // so at the release he has the ball where it is and errs only in how it is moving
+        // (agent-models §6.4, his read of a throw in the air).
+        let travelled = match &self.ball {
+            Ball::Thrown { path, .. } => (truth.0 - path.knots[0].s.r).norm(),
+            _ => f64::INFINITY,
+        };
+        let sp = (RUNNER_READ_SIGMA0 * (to.norm().max(1.0) / READ_REF_DIST) * shrink).min(travelled / DEPTH_STRETCH);
         let sv = READ_VEL_FRAC * truth.1.norm() * shrink;
         noisy_ball_motion(truth, to.normalized(), sp, sv, self.runner_ball_errors(k, sub))
     }
@@ -15496,9 +15505,22 @@ mod tests {
         let look = sim.runner_throw_observation(0, 3);
         let other = sim.runner_throw_observation(0, 5);
         assert_eq!(look, sim.runner_throw_observation(0, 3));
-        assert!((look.0 - exact.0).norm() > 0.01, "the look perturbs position");
+        // At the release he has it where it is, in the hand he watched (agent-models §6.4):
+        // only its motion is misread. Once it has flown he misplaces it too, and never by
+        // more than a few times the way it has come (the depth σ is capped at that distance).
+        assert_eq!(look.0, exact.0, "at the release he has it in the hand");
         assert!((look.1 - exact.1).norm() > 0.01, "the look perturbs velocity");
         assert_ne!(look, other, "a different decision gets its own look");
+        {
+            let t0 = sim.t;
+            sim.t = t0 + 0.3;
+            let (p, _) = sim.runner_throw_observation(0, 3);
+            let now = sim.ball_at(sim.t).0;
+            let gone = (now - Vec3::new(0.0, 80.0, THROW_RELEASE_Z)).norm();
+            let off = (p - now).norm();
+            assert!(off > 0.01 && off <= 4.0 * m::hypot(1.0, 1.25 / DEPTH_STRETCH) * gone + 1e-9, "0.3 s on, {gone:.1} m flown: {off:.2} m off");
+            sim.t = t0;
+        }
         let read = sim.thrown_read(0, 3);
         let start = read.track[0].1;
         assert_eq!((start.x, start.y), (look.0.x, look.0.y));

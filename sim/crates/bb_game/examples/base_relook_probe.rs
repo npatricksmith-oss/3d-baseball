@@ -36,7 +36,7 @@ fn main() {
                     let fattrs: [FielderAttrs; 9] = core::array::from_fn(FielderAttrs::average);
                     let mut g = bb_game::game::Game::new(seed, false).with_fielders(fattrs);
                     loop {
-                        let (step, _) = runner_trace::capture(|| g.step_pitch());
+                        let (step, ticks) = runner_trace::capture(|| g.step_pitch());
                         let looks = runner_trace::take_looks();
                         let Some(step) = step else { break };
                         // His first look that sent him, per runner.
@@ -53,10 +53,11 @@ fn main() {
                             let b = base as usize;
                             c[b].sent += 1;
                             c[b].sent_thrown += u64::from(thrown);
-                            let out = step.rules_events.iter().find_map(|e| match e {
-                                Event::RunnerOut { runner: r, base, .. } if *r == runner => Some(*base),
+                            let out_ev = step.rules_events.iter().find_map(|e| match e {
+                                Event::RunnerOut { runner: r, base, kind } if *r == runner => Some((*base, *kind)),
                                 _ => None,
                             });
+                            let out = out_ev.map(|o| o.0);
                             let reached = step.rules_events.iter().filter_map(|e| match e {
                                 Event::RunnerAdvanced { runner: r, to, .. } if *r == runner => Some(*to),
                                 Event::RunScored { runner: r } if *r == runner => Some(4),
@@ -80,7 +81,22 @@ fn main() {
                                     "stayed"
                                 }
                             };
-                            lines.push(format!("seed {seed} play {} runner {runner:#06x} from {base} ({}) {how}", step.play, if thrown { "throw" } else { "held" }));
+                            let t_look = looks.iter().find(|l| l.runner == runner && l.went).map_or(f64::NAN, |l| l.t);
+                            lines.push(format!("seed {seed} play {} runner {runner:#06x} from {base} ({}) at {t_look:.2} s: {how} {out_ev:?}", step.play, if thrown { "throw" } else { "held" }));
+                            if std::env::var("RELOOK_DUMP").is_ok() {
+                                for e in &step.rules_events {
+                                    lines.push(format!("    {e:?}"));
+                                }
+                                for tk in ticks.iter().filter(|tk| tk.runner == runner && ((tk.t * 60.0).round() as i64) % 15 == 0) {
+                                    lines.push(format!("    tick t {:.2} s {:.1} v {:.1} goal {} {:?}", tk.t, tk.s, tk.signed_mps, tk.goal, tk.cause));
+                                }
+                                for f in &step.facts {
+                                    let s = format!("{f:?}");
+                                    if !s.starts_with("RunnerPosition") {
+                                        lines.push(format!("    fact {s}"));
+                                    }
+                                }
+                            }
                         }
                     }
                 }
