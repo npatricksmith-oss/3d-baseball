@@ -202,7 +202,7 @@ pub const BB_MAX_ACTORS: usize = 16;
 /// he is back on them: a fielder's dive for a ball, or a runner's dive back to a bag
 /// (agent-models §6.4, "Diving back").
 #[repr(C)]
-#[derive(Clone, Copy, Default)]
+#[derive(Clone, Copy, Default, Debug)]
 pub struct BbDive {
     pub agent: u16,
     /// The bag a runner dives back to (1–3); 0 for a fielder's dive.
@@ -213,9 +213,28 @@ pub struct BbDive {
     pub up_in_s: f32,
     /// Direction of the dive on the ground (sim frame, unit; zero if he went nowhere).
     pub dir: [f32; 2],
-    /// A runner's dive back: seconds until his hand touches the bag (negative once it has).
-    /// 0 for a fielder's dive.
-    pub touch_in_s: f32,
+    /// A runner's dive back: seconds until his glide ends (negative once it has), with his hand
+    /// on the bag (`touched` 1) or short of it (put out in the air, or the play over). 0 for a
+    /// fielder's dive.
+    pub end_in_s: f32,
+    pub touched: u32,
+    /// A runner's dive back: where his hand was when he left his feet and where it was when the
+    /// glide ended (sim frame, m). The sim's glide is at a constant speed, so between the two it
+    /// is on the straight line, at the fraction `since_s / (since_s + end_in_s)`. Zero for a
+    /// fielder's dive.
+    pub hand_from: [f32; 2],
+    pub hand_to: [f32; 2],
+}
+
+/// The C ABI's version, `BB_ABI_VERSION` in `bb_ffi.h`: raised whenever a struct the client
+/// reads changes its layout, so a client built against another version can refuse the library
+/// (Q39 review P3-5). 2: `BbDive` gained a runner's dive back (2026-11-23).
+pub const BB_ABI_VERSION: u32 = 2;
+
+/// The C ABI's version (`BB_ABI_VERSION`).
+#[unsafe(no_mangle)]
+pub extern "C" fn bb_abi_version() -> u32 {
+    BB_ABI_VERSION
 }
 
 /// Most dives shown at one instant.
@@ -230,9 +249,10 @@ struct DiveMark {
     p: [f32; 3],
 }
 
-/// The dives under way at `t`: each `Dive` pairs with that fielder's first `DiveUp` strictly
+/// The dives under way at `t`: each `Dive` pairs with that player's first `DiveUp` strictly
 /// after it (a second dive can start the instant he is up from the first, and must not pair
-/// with that first get-up: Codex dive animation review #2).
+/// with that first get-up: Codex dive animation review #2). A runner's dive back (`base` set)
+/// ended `DIVE_BACK_UP_S` before his `DiveUp`, on the bag if a `BaseTouch` comes between.
 fn active_dives(marks: &[DiveMark], t: f32) -> Vec<BbDive> {
     let mut out = Vec::new();
     let next = |kind: MarkerKind, mk: &DiveMark| marks.iter().filter(|u| u.kind == kind && u.agent == mk.agent && u.t > mk.t).min_by(|a, b| a.t.total_cmp(&b.t));
@@ -241,8 +261,15 @@ fn active_dives(marks: &[DiveMark], t: f32) -> Vec<BbDive> {
         let (dx, dy) = (up.p[0] - mk.p[0], up.p[1] - mk.p[1]);
         let n = (dx * dx + dy * dy).sqrt();
         let dir = if n > 1e-4 { [dx / n, dy / n] } else { [0.0, 0.0] };
-        let touch_in_s = if mk.base > 0 { next(MarkerKind::BaseTouch, mk).filter(|b| b.t <= up.t).map_or(0.0, |b| b.t - t) } else { 0.0 };
-        out.push(BbDive { agent: mk.agent, base: mk.base as u16, since_s: t - mk.t, up_in_s: up.t - t, dir, touch_in_s });
+        let mut d = BbDive { agent: mk.agent, base: mk.base as u16, since_s: t - mk.t, up_in_s: up.t - t, dir, ..Default::default() };
+        if mk.base > 0 {
+            let end = up.t - bb_game::live::DIVE_BACK_UP_S as f32;
+            d.end_in_s = end - t;
+            d.touched = u32::from(next(MarkerKind::BaseTouch, mk).is_some_and(|b| b.t <= up.t));
+            d.hand_from = [mk.p[0], mk.p[1]];
+            d.hand_to = [up.p[0], up.p[1]];
+        }
+        out.push(d);
     }
     out
 }
@@ -1230,23 +1257,33 @@ mod tests {
                 for d in &f.dives[..f.n_dives as usize] {
                     let a = f.actors[..f.n_actors as usize].iter().find(|a| a.agent == d.agent).expect("the diver is on the field");
                     if d.base != 0 {
-                        // A runner's dive back (agent-models §6.4): down the sim's 1.0 s from his
-                        // touch, and lying on the bag from it (to within one track sample).
+                        // A runner's dive back (agent-models §6.4): down the sim's 1.0 s from the
+                        // glide's end, in the air under 0.8 s; touched, his hand ends on the bag and
+                        // he lies there (to within one track sample); his hand never starts farther
+                        // than `DIVE_BACK_M - DIVE_REACH_M` out of it (along the route: a few cm
+                        // more in a straight line where the route bends toward foul at third).
                         assert!(d.agent & 0x80 == 0, "a dive back by fielder {:#x}", d.agent);
                         assert!((1..=3).contains(&d.base));
-                        assert!((d.up_in_s - d.touch_in_s - 1.0).abs() < 1e-3, "down from the touch {} - {} s", d.up_in_s, d.touch_in_s);
-                        assert!(d.since_s + d.touch_in_s > 0.0 && d.since_s + d.touch_in_s < 0.8, "in the air {} s", d.since_s + d.touch_in_s);
+                        assert!((d.up_in_s - d.end_in_s - 1.0).abs() < 1e-3, "down from the end {} - {} s", d.up_in_s, d.end_in_s);
+                        assert!(d.since_s + d.end_in_s > 0.0 && d.since_s + d.end_in_s < 0.8, "in the air {} s", d.since_s + d.end_in_s);
                         let l = 27.432 / std::f32::consts::SQRT_2;
                         let bag = [[l, l], [0.0, 2.0 * l], [-l, l]][d.base as usize - 1];
-                        if d.touch_in_s < -0.1 {
-                            assert!((a.pos[0] - bag[0]).hypot(a.pos[1] - bag[1]) < 0.05, "play {} at {t:.2} s: {:#x} off the bag while down", info.play_index, d.agent);
+                        let off = |p: [f32; 2]| (p[0] - bag[0]).hypot(p[1] - bag[1]);
+                        assert!(off(d.hand_from) < 1.85, "play {}: his hand {} m out at take-off", info.play_index, off(d.hand_from));
+                        if d.touched == 1 {
+                            assert!(off(d.hand_to) < 1e-3, "play {}: a touch off the bag", info.play_index);
+                            if d.end_in_s < -0.1 {
+                                assert!((a.pos[0] - bag[0]).hypot(a.pos[1] - bag[1]) < 0.05, "play {} at {t:.2} s: {:#x} off the bag while down", info.play_index, d.agent);
+                            }
+                        } else {
+                            assert!(off(d.hand_to) > 0.2, "play {}: no touch, yet his hand on the bag", info.play_index);
                         }
                         dives += 1;
                         continue;
                     }
                     assert!(d.agent & 0x80 != 0, "diver {:#x} is not a fielder", d.agent);
                     assert!((d.since_s + d.up_in_s - 1.5).abs() < 1e-3, "down {} + {} s", d.since_s, d.up_in_s);
-                    assert_eq!(d.touch_in_s, 0.0);
+                    assert_eq!((d.end_in_s, d.touched, d.hand_from, d.hand_to), (0.0, 0, [0.0; 2], [0.0; 2]));
                     let n = d.dir[0].hypot(d.dir[1]);
                     assert!(n == 0.0 || (n - 1.0).abs() < 1e-4, "dive direction {:?}", d.dir);
                     if d.since_s > 0.45 && d.up_in_s > 0.1 {
@@ -1315,6 +1352,15 @@ mod tests {
         let mut info = BbPlayInfo::default();
         assert_eq!(unsafe { bb_timeline_info(junk.as_ptr(), 7, &mut info) }, -1);
         unsafe { bb_game_free(g) };
+    }
+
+    // Q39 review P3-5: the header's `BB_ABI_VERSION` is the library's, so a client compiled
+    // against the header refuses a library of another layout.
+    #[test]
+    fn the_header_states_the_library_abi_version() {
+        let h = include_str!("../include/bb_ffi.h");
+        let v: u32 = h.lines().find_map(|l| l.strip_prefix("#define BB_ABI_VERSION ")).and_then(|v| v.trim().parse().ok()).expect("BB_ABI_VERSION in bb_ffi.h");
+        assert_eq!(v, bb_abi_version());
     }
 
     // Codex dive animation review #2: a second dive that starts the instant the fielder is up

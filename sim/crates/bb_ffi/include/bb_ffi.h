@@ -10,6 +10,12 @@ extern "C" {
 
 typedef struct BbGame BbGame;
 
+/* The ABI's version: raised whenever a struct below changes its layout. A client compares
+ * bb_abi_version() with the BB_ABI_VERSION it was compiled with and refuses a mismatch (an
+ * older library lacks the function). 2 (2026-11-23): BbDive gained a runner's dive back. */
+#define BB_ABI_VERSION 2
+uint32_t bb_abi_version(void);
+
 /* New AI-vs-AI game with average players. */
 BbGame *bb_game_create(uint64_t seed);
 /* Advance one pitch: 1 = *out_blob holds a PlayTimeline ("BBTL"); 0 = game over; -1 = bad args. */
@@ -23,9 +29,12 @@ typedef struct { uint16_t agent; uint16_t _pad; float pos[3]; float yaw; } BbAct
 /* A player off his feet from a dive, from leaving them until he is back on them: a fielder's
  * dive for a ball (base 0), or a runner's dive back to bag `base` (1-3). since_s after he left
  * them, up_in_s before he is up; dir = the dive's direction on the ground (sim frame, unit;
- * zero if he went nowhere); touch_in_s = for a dive back, seconds until his hand touches the
- * bag (negative once it has), else 0. */
-typedef struct { uint16_t agent; uint16_t base; float since_s; float up_in_s; float dir[2]; float touch_in_s; } BbDive;
+ * zero if he went nowhere). A dive back also has: end_in_s, seconds until his glide ends
+ * (negative after), touched = 1 if it ended with his hand on the bag (0: put out in the air or
+ * the play over); hand_from and hand_to, where his hand was at take-off and at the glide's end
+ * (the glide is at a constant speed: in between, on the line at since_s/(since_s+end_in_s)).
+ * All 0 for a fielder. */
+typedef struct { uint16_t agent; uint16_t base; float since_s; float up_in_s; float dir[2]; float end_in_s; uint32_t touched; float hand_from[2]; float hand_to[2]; } BbDive;
 #define BB_MAX_DIVES 4
 typedef struct {
   float ball[3]; uint32_t n_actors; BbActor actors[BB_MAX_ACTORS];
