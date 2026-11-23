@@ -222,8 +222,10 @@ pub fn encode(step: &PitchStep, st: &RulesState, rosters: &crate::roster::Roster
     // clip lasts until then (agent-models §6.4, "Diving back"). Presentation only.
     for d in &step.viz.runner_dives {
         let Some((_, track)) = tracks.iter_mut().find(|(a, _)| *a == d.agent) else { continue };
-        if track.last().unwrap().0 < d.t_up {
-            track.push((d.t_up, d.hand));
+        let (last_t, last_p) = *track.last().unwrap();
+        if d.t_up.is_finite() && last_t < d.t_up {
+            // On the bag if his hand got there; otherwise where he was put out (review P2-2).
+            track.push((d.t_up, if d.touched { d.hand_end } else { last_p }));
             t_end = t_end.max(d.t_up);
         }
     }
@@ -330,10 +332,12 @@ pub fn encode(step: &PitchStep, st: &RulesState, rosters: &crate::roster::Roster
         })
         .collect();
     // Runners' dives back (agent-models §6.4, "Diving back"; data-formats §5.4): he leaves his
-    // feet (p = where), his hand touches the bag (p = the bag's point on his path), he is up
-    // (p = the same point); `base` is the bag.
-    for d in &step.viz.runner_dives {
-        for (t, kind, p) in [(d.t_leave, MarkerKind::Dive, d.from), (d.t_touch, MarkerKind::BaseTouch, d.hand), (d.t_up, MarkerKind::DiveUp, d.hand)] {
+    // feet (p = where his hand is then), his hand touches the bag (p = the bag's point on his
+    // path; only if it got there), he is up (p = where his hand was at the glide's end, which is
+    // `DIVE_BACK_UP_S` before); `base` is the bag.
+    for d in step.viz.runner_dives.iter().filter(|d| d.t_up.is_finite()) {
+        let touch = d.touched.then_some((d.t_end, MarkerKind::BaseTouch, d.hand_end));
+        for (t, kind, p) in [Some((d.t_leave, MarkerKind::Dive, d.hand_leave)), touch, Some((d.t_up, MarkerKind::DiveUp, d.hand_end))].into_iter().flatten() {
             let pv = v3f(p);
             marks.push(tl::Marker::create(&mut fbb, &tl::MarkerArgs { t: t as f32, kind, agent: d.agent, base: d.base, p: Some(&pv), margin_s: 0.0 }));
         }

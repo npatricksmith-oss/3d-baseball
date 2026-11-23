@@ -2244,8 +2244,12 @@ const APPROACH_MIN_MPS: f64 = 1.0;
 
 /// Diving back (owner's Q39 (a), agent-models §6.4, "Diving back"). He dives on a return
 /// whose margin by his own read, braking included, is under this, s [E]: about what braking
-/// costs him, so whenever braking could lose him the race.
+/// costs him, so whenever braking could lose him the race...
 const DIVE_CLOSE_S: f64 = 0.5;
+/// ...and over minus this, s [E]: the least the dive saves over braking (0.43 s from 4 m at
+/// rest). Beaten by more, not even the dive wins: he brakes and is caught short, the stand-in
+/// for a rundown (review P2-1).
+const DIVE_SAVE_S: f64 = 0.4;
 /// How far from the bag (his path coordinate to the base's) he leaves his feet, m [E]: a
 /// step and a glide.
 pub const DIVE_BACK_M: f64 = 2.2;
@@ -2272,27 +2276,35 @@ const ON_BAG_TAG_M: f64 = 0.3;
 #[derive(Clone, Copy, Debug)]
 struct DiveBack {
     base: u8,
-    /// When and where (his path coordinate) he left his feet.
-    t_leave: f64,
-    s_leave: f64,
     /// The glide's speed toward the bag, m/s.
     v: f64,
     /// When his hand touched the bag, once it has.
     t_touch: Option<f64>,
+    /// His record in `LiveOutput::runner_dives`, made at take-off.
+    rec: usize,
 }
 
-/// One runner's dive back, for the timeline (agent-models §6.4; data-formats §5.4).
+/// Whether runner `k`'s margin back by his own read is a race the dive can change: braking
+/// could lose it and the dive could win it (agent-models §6.4, "Diving back", "When").
+fn dive_can_change(margin_s: f64) -> bool {
+    margin_s > -DIVE_SAVE_S && margin_s < DIVE_CLOSE_S
+}
+
+/// One runner's dive back, for the timeline (agent-models §6.4, "Diving back"; data-formats
+/// §5.4), recorded at take-off (review P2-2).
 #[derive(Clone, Copy, Debug, PartialEq)]
 pub struct RunnerDive {
     pub agent: AgentId,
     pub base: u8,
-    /// He left his feet: when, and where (his position then).
+    /// He left his feet: when, and where his touching hand was then.
     pub t_leave: f64,
-    pub from: Vec3,
-    /// His hand on the bag: when, and where (the base coordinate's point on his path).
-    pub t_touch: f64,
-    pub hand: Vec3,
-    /// He is up, standing on the bag.
+    pub hand_leave: Vec3,
+    /// His glide ended: when, and where his hand was. On the bag (`touched`) or short of it:
+    /// put out in the air, or the play over before the hand arrived. Infinite while he glides.
+    pub t_end: f64,
+    pub hand_end: Vec3,
+    pub touched: bool,
+    /// He is up: `DIVE_BACK_UP_S` after the end.
     pub t_up: f64,
 }
 
@@ -3443,6 +3455,7 @@ impl<'a> Sim<'a> {
                     };
                     let at = self.runner_pos(r);
                     self.out.calls.push(crate::umpire::OutCall { t_out: t_fact, runner: *runner, base: *base, margin_s, at });
+                    self.end_dive_in_air(k, t_fact);
                     self.r[k].out = true;
                 }
             }
@@ -8148,7 +8161,12 @@ impl<'a> Sim<'a> {
         // Going back on a close race, he dives into the bag rather than brake onto it
         // (agent-models §6.4, "Diving back": his margin there by this look, braking included),
         // whether this look turned him back or he stays committed to the way back.
-        r.dive_to = (r.goal == from && from >= 1 && m_back < DIVE_CLOSE_S).then_some(from);
+        // Once chosen, a dive stands while he keeps going back (review P3-1: diving is never
+        // slower, and a runner inside his braking distance would otherwise overshoot his bag);
+        // a new one only on a race the dive can change (P2-1: beaten by more than the dive
+        // saves, he brakes and is caught short, the rundown's stand-in).
+        let keep = r.dive_to == Some(from);
+        r.dive_to = (r.goal == from && from >= 1 && (keep || dive_can_change(m_back))).then_some(from);
         true
     }
 
@@ -8601,8 +8619,14 @@ impl<'a> Sim<'a> {
         if r.dive.is_none()
             && let Some(g) = glide
         {
-            r.dive = Some(DiveBack { base, t_leave: now, s_leave: prev, v: g, t_touch: None });
+            // Recorded at take-off, so a dive that ends in the air has its record too (review P2-2).
+            let rec = self.out.runner_dives.len();
+            let hand = runner_path_pos(r.start, (prev - DIVE_REACH_M).max(bs));
+            r.dive = Some(DiveBack { base, v: g, t_touch: None, rec });
+            let id = r.id;
+            self.out.runner_dives.push(RunnerDive { agent: id, base, t_leave: now, hand_leave: hand, t_end: f64::INFINITY, hand_end: hand, touched: false, t_up: f64::INFINITY });
         }
+        let r = &mut self.r[k];
         r.v = v.abs();
         if v != 0.0 {
             r.direction = -v.signum();
@@ -8618,17 +8642,24 @@ impl<'a> Sim<'a> {
         r.turns = 0;
         let d = r.dive.as_mut().expect("a touch comes from the glide");
         d.t_touch = Some(now);
-        let (id, start, s_leave, t_leave) = (r.id, r.start, d.s_leave, d.t_leave);
-        self.out.runner_dives.push(RunnerDive {
-            agent: id,
-            base,
-            t_leave,
-            from: runner_path_pos(start, s_leave),
-            t_touch: now,
-            hand: runner_path_pos(start, bs),
-            t_up: now + DIVE_BACK_UP_S,
-        });
+        let (id, start, rec) = (r.id, r.start, d.rec);
+        let dv = &mut self.out.runner_dives[rec];
+        (dv.t_end, dv.hand_end, dv.touched, dv.t_up) = (now, runner_path_pos(start, bs), true, now + DIVE_BACK_UP_S);
         self.emit(Input::BaseTouched { t: now, agent: id, base, holding_ball: false });
+    }
+
+    /// A dive back that ends before his hand is on the bag (put out in the air, or the play
+    /// over): his record ends at `t` with his hand where it is, and he is up `DIVE_BACK_UP_S`
+    /// later (agent-models §6.4, "Tagged in the air"; review P2-2).
+    fn end_dive_in_air(&mut self, k: usize, t: f64) {
+        let r = &self.r[k];
+        let Some(d) = r.dive.filter(|d| d.t_touch.is_none()) else { return };
+        let hand = runner_path_pos(r.start, Self::touch_s(r));
+        let dv = &mut self.out.runner_dives[d.rec];
+        if dv.t_end.is_finite() {
+            return;
+        }
+        (dv.t_end, dv.hand_end, dv.touched, dv.t_up) = (t, hand, false, t + DIVE_BACK_UP_S);
     }
 
     /// Where runner `r` touches a base, along his path: his path coordinate, or his hand's
@@ -8656,10 +8687,11 @@ impl<'a> Sim<'a> {
         }
     }
 
-    /// Runner `k`, coming back to retouch after a catch, dives if his braked return is close
-    /// against the throw he believes in: a grade-50 transfer and a typical throw from where the
-    /// ball was caught to his bag, from the catch (no tag: the appeal is a touch of the base;
-    /// the partway hold's belief, `catch_hold_s`). Agent-models §6.4, "Diving back".
+    /// Runner `k`, coming back to retouch after a catch, dives if the dive can change his race
+    /// (`dive_can_change`) against the throw he believes in: a grade-50 transfer from the catch
+    /// and a typical throw to his bag from where the fielder who caught it stands as the runner
+    /// sees the call (no tag: the appeal is a touch of the base; the partway hold's belief,
+    /// `catch_hold_s`). Agent-models §6.4, "Diving back".
     fn retouch_dive(&mut self, k: usize) {
         let r = &self.r[k];
         let b = r.start;
@@ -8672,7 +8704,7 @@ impl<'a> Sim<'a> {
         let at = fd.pos;
         let ball = t_catch + TYPICAL_TRANSFER + typical_throw_time(m::hypot(base_pos(b).x - at.x, base_pos(b).y - at.y), self.cut_seen(None, at, b));
         let mine = self.t + run_time_to_stop(r.s - bs, -(r.direction * r.v), r.vmax, r.tau);
-        if ball - mine < DIVE_CLOSE_S {
+        if dive_can_change(ball - mine) {
             self.r[k].dive_to = Some(b);
         }
     }
@@ -9839,6 +9871,11 @@ fn simulate_live_inner(inp: &LiveInput, st: &mut RulesState) -> LiveOutput {
     if inp.record {
         // The tick that ended the play (the catch, the force, the ball leaving the park).
         sim.record(true);
+    }
+    // A dive back still in the air when the play ended ends there (agent-models §6.4).
+    for k in 0..sim.r.len() {
+        let t = sim.t;
+        sim.end_dive_in_air(k, t);
     }
     // The batter-runner, if the play ended before he touched first: when he would have.
     if let Some(r) = sim.r.iter().find(|r| r.start == 0) {
@@ -17652,11 +17689,9 @@ mod tests {
         sim.out.secured.push((6.0, sim.f[4].id));
         sim.r[1].v = 7.0;
         assert!(sim.runner_relook(1));
-        assert_eq!(sim.r[1].goal, 2);
-        // The race back is close, so he chooses to dive into the bag (agent-models §6.4,
-        // "Diving back"); this test is of the braked return's law, so he brakes in.
-        assert_eq!(sim.r[1].dive_to, Some(2));
-        sim.r[1].dive_to = None;
+        assert_eq!((sim.r[1].goal, sim.r[1].dive_to), (2, None));
+        // The third baseman's throw to second beats him by more than a dive saves, so he brakes
+        // in (agent-models §6.4, "Diving back", "When"): the braked return's law.
         let expected = run_time_to_stop(8.0, -7.0, sim.r[1].vmax, RUNNER_TAU);
         let t0 = sim.t;
         sim.move_runners();
@@ -20759,6 +20794,8 @@ mod tests {
         r.dive_to = dive.then_some(3);
         let (vmax, tau) = (r.vmax, r.tau);
         sim.r[1].looked = (sim.out.secured.len(), sim.out.released.len());
+        // The rules see him off his bag, as in a game (his lead and break toward home).
+        sim.emit(Input::BaseLeft { t: t0, agent: R, base: 3 });
         sim.secured_at = t0 + dive_touch_by_hand(4.4, 7.4, vmax, tau) + after_s - sim.f[4].a.tag_apply_s;
         for _ in 0..240 {
             if sim.done {
@@ -20782,9 +20819,11 @@ mod tests {
         let tagged = |sim: &Sim| sim.out.facts.iter().any(|f| matches!(f, Input::TagContact { runner: R, .. }));
         let (braked, _) = back_to_third(false, 0.13);
         assert!(tagged(&braked), "braking onto the bag he is tagged short of it");
+        assert!(braked.out.events.iter().any(|e| matches!(e, Event::RunnerOut { runner: R, kind: bb_rules::OutKind::Tag, .. })));
         assert!(braked.out.runner_dives.is_empty());
         let (dove, t0) = back_to_third(true, 0.13);
         assert!(!tagged(&dove), "diving back he beats the tag: {:?}", dove.out.facts);
+        assert!(!dove.out.events.iter().any(|e| matches!(e, Event::RunnerOut { .. })));
         let touch = dove.out.facts.iter().find_map(|f| match f {
             Input::BaseTouched { t, agent: R, base: 3, holding_ball: false } => Some(*t - t0),
             _ => None,
@@ -20794,13 +20833,17 @@ mod tests {
         assert!((touch - by_hand).abs() <= 2.0 * DT, "touch {touch:.3} s after he started back, by hand {by_hand:.3} s");
         let d = dove.out.runner_dives[0];
         assert_eq!((d.agent, d.base), (R, 3));
-        assert!((d.t_up - d.t_touch - DIVE_BACK_UP_S).abs() < 1e-9);
-        assert!(((d.from - base_pos(3)).norm() - DIVE_BACK_M).abs() < 0.2, "he left his feet {:.2} m out", (d.from - base_pos(3)).norm());
+        assert!(d.touched && (d.t_end - t0 - touch).abs() < 1e-9 && (d.t_up - d.t_end - DIVE_BACK_UP_S).abs() < 1e-9);
+        assert!((d.hand_end - base_pos(3)).norm() < 1e-9);
+        // He left his feet within a tick's run of `DIVE_BACK_M` out, his hand `DIVE_REACH_M` ahead
+        // (straight-line distance; his route blends 0.6 m foul toward third, a few cm more).
+        let hand = (d.hand_leave - base_pos(3)).norm();
+        assert!(hand <= DIVE_BACK_M - DIVE_REACH_M + 0.05 && hand > DIVE_BACK_M - DIVE_REACH_M - 8.2 * DT, "his hand {hand:.2} m out at take-off");
     }
 
     // A tag on the diving runner reaches his body laid out behind his hand (the segment, not
-    // his path point): a fielder 1.0 m to the side of his body's middle reaches it, and a
-    // runner on his feet at that path point is 1.0 m from him as well.
+    // his path point): a fielder 1.0 m to the side of his body's middle is 1.0 m from him, and
+    // so is one 1.0 m beyond his feet.
     #[test]
     fn a_tag_reaches_a_diving_runner_anywhere_along_his_body() {
         let fx = fixture(&[(0x0007, 1)]);
@@ -20809,7 +20852,7 @@ mod tests {
         let mut sim = new_sim(&inp, &mut st);
         let r = &mut sim.r[1];
         (r.s, r.direction, r.v) = (BASE_L + 1.5, -1.0, 6.0);
-        r.dive = Some(DiveBack { base: 1, t_leave: 0.0, s_leave: BASE_L + 2.2, v: 6.0, t_touch: None });
+        r.dive = Some(DiveBack { base: 1, v: 6.0, t_touch: None, rec: 0 });
         // His hand is 0.4 m ahead of his path point, his feet 2.0 m behind the hand: the body
         // runs from 1.1 m to 3.1 m up the line from first toward second.
         let line = (base_pos(2) - base_pos(1)).normalized();
@@ -20883,8 +20926,8 @@ mod tests {
         for _ in 0..120 {
             sim.move_runners();
             sim.t += DT;
-            if let Some(d) = sim.out.runner_dives.first() {
-                touch = Some(d.t_touch);
+            if let Some(d) = sim.out.runner_dives.first().filter(|d| d.touched) {
+                touch = Some(d.t_end);
                 break;
             }
         }
@@ -20955,5 +20998,81 @@ mod tests {
             sim.out.events
         );
         assert!(sim.out.runner_dives.is_empty());
+    }
+
+    /// A runner from second `out_m` past it coming back at 3 m/s, his goal second, a look at
+    /// the shortstop holding the ball at `at` (review P2-1, P3-1). `turns` and `dive_to` as set.
+    fn coming_back_to_second(out_m: f64, at: Vec3, turns: u8, dive_to: Option<u8>) -> Sim<'static> {
+        let fx: &'static Fixture = Box::leak(Box::new(fixture(&[(0x0007, 2)])));
+        let inp = input(fx, vec![RunnerIn { id: fx.st.batter, base: 0, speed: 8.2, tau_s: bb_agents::running::LEAGUE_TAU_S }, RunnerIn { id: 0x0007, base: 2, speed: 8.2, tau_s: bb_agents::running::LEAGUE_TAU_S }]);
+        let inp: &'static LiveInput<'static> = Box::leak(Box::new(inp));
+        let st: &'static mut RulesState = Box::leak(Box::new(fx.st.clone()));
+        let mut sim = new_sim(inp, st);
+        sim.t = 4.0;
+        sim.r[0].out = true;
+        let r = &mut sim.r[1];
+        (r.s, r.v, r.direction, r.goal, r.hold_s, r.turns, r.dive_to) = (2.0 * BASE_L + out_m, 3.0, -1.0, 2, None, turns, dive_to);
+        held_at(&mut sim, 5, at);
+        sim.out.secured.push((4.0, sim.f[5].id));
+        assert!(sim.runner_relook(1));
+        sim
+    }
+
+    // Review P2-1: a runner the turn cap holds to the way back, beaten there by more than a
+    // dive saves by his own read (the shortstop with the ball beside second, the runner 9 m
+    // out: about a second), does not dive. He brakes in and is caught short, the rundown's
+    // stand-in. Before, every capped runner going back dove (175 of 829 dives).
+    #[test]
+    fn a_capped_runner_beaten_by_a_second_brakes_in() {
+        let mut sim = coming_back_to_second(9.0, base_pos(2) + Vec3::new(-1.5, -1.5, 0.0), MAX_TURNS, None);
+        assert_eq!(sim.r[1].goal, 2, "the turn cap keeps him on the way back");
+        assert_eq!(sim.r[1].dive_to, None);
+        let mut arrival = f64::NAN;
+        for _ in 0..300 {
+            let before = sim.r[1].v;
+            sim.move_runners();
+            sim.t += DT;
+            if (sim.r[1].s - 2.0 * BASE_L).abs() < 1e-9 {
+                arrival = before;
+                break;
+            }
+        }
+        assert!(arrival <= APPROACH_MIN_MPS + 1e-9, "he brakes in: {arrival} m/s");
+        assert!(sim.out.runner_dives.is_empty());
+    }
+
+    // Review P3-1: a dive chosen on a close look stands when a later look keeps him going back
+    // with time to spare (the left fielder deep: about 1.4 s), since diving is never slower and
+    // a runner inside his braking distance would otherwise carry past his bag.
+    #[test]
+    fn a_chosen_dive_stands_while_he_keeps_going_back() {
+        let far = Vec3::new(-70.0, 60.0, 0.0);
+        let kept = coming_back_to_second(3.5, far, 0, Some(2));
+        assert_eq!((kept.r[1].goal, kept.r[1].dive_to), (2, Some(2)));
+        // The same look with no dive chosen before does not choose one.
+        let fresh = coming_back_to_second(3.5, far, 0, None);
+        assert_eq!((fresh.r[1].goal, fresh.r[1].dive_to), (2, None));
+    }
+
+    // Review P2-2: a dive that ends in the air has its record. The third baseman on the bag can
+    // tag 0.15 s before the hand would arrive: the runner is tagged laid out, short of the bag,
+    // and his record says so: no touch, ended at the tag with his hand where it was, up
+    // `DIVE_BACK_UP_S` later; the timeline has `Dive` and `DiveUp` and no `BaseTouch`.
+    #[test]
+    fn a_dive_tagged_in_the_air_is_recorded() {
+        const R: AgentId = 0x0007;
+        let (sim, _) = back_to_third(true, -0.15);
+        let tag = sim.out.facts.iter().find_map(|f| match f {
+            Input::TagContact { t, runner: R, .. } => Some(*t),
+            _ => None,
+        });
+        let tag = tag.expect("tagged in the air");
+        assert!(sim.out.events.iter().any(|e| matches!(e, Event::RunnerOut { runner: R, kind: bb_rules::OutKind::Tag, .. })));
+        assert_eq!(sim.out.runner_dives.len(), 1);
+        let d = sim.out.runner_dives[0];
+        assert!(d.t_leave < tag && !d.touched && (d.t_end - tag).abs() < 1e-9 && (d.t_up - tag - DIVE_BACK_UP_S).abs() < 1e-9, "{d:?}");
+        let short = (d.hand_end - base_pos(3)).norm();
+        assert!(short > ON_BAG_TAG_M && short < 1.3, "his hand {short:.2} m short of the bag");
+        assert!(!sim.out.facts.iter().any(|f| matches!(f, Input::BaseTouched { agent: R, .. })));
     }
 }
