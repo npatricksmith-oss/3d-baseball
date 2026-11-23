@@ -464,12 +464,20 @@ struct ThrownRead {
     t_arrive: f64,
     /// His predicted track up to then: time and position.
     track: Vec<(f64, Vec3)>,
+    /// Where the relay man stands when it comes down at one, as he can see it (the man
+    /// visibly out as the cutoff man, or one farther than `RELAY_SEEN_M` from every bag): the
+    /// ball goes on to every base from there, not from the base nearest him.
+    relay: Option<Vec3>,
 }
 
 impl ThrownRead {
     /// The runner times a direct delivery, a relay, or a catch along the way.
     fn time_to(&self, base: u8) -> f64 {
-        let est = if self.dest == base {
+        let est = if let Some(at) = self.relay {
+            // The relay man's exchange (the league's, `RELAY_S_50`) and a typical throw on.
+            let bp = base_pos(base);
+            self.t_arrive + throwing::RELAY_S_50 + typical_throw_time(m::hypot(bp.x - at.x, bp.y - at.y), Cut::No)
+        } else if self.dest == base {
             self.t_arrive
         } else {
             self.t_arrive + RELAY_READ_S + typical_throw_time((base_pos(base) - base_pos(self.dest)).norm(), Cut::No)
@@ -7167,12 +7175,25 @@ impl<'a> Sim<'a> {
                 let i_arr = (0..=i_min).find(|&i| dist(b, after[i].1) <= RECEIVE_REACH && after[i].1.z <= PASS_MAX_Z).unwrap_or(i_min);
                 let t_arrive = after[i_arr].0;
                 full.truncate(arrive + i_arr + 1);
-                return ThrownRead { dest: b, t_arrive, track: full };
+                return ThrownRead { dest: b, t_arrive, track: full, relay: None };
             }
         }
         track.truncate(arrive + 1);
         let dest = near(q_down).0;
-        ThrownRead { dest, t_arrive: t_down, track }
+        // A throw coming down at a relay man (agent-models §6.4, the read of a throw: the same
+        // test as his read of a reception, `HolderLook::release_time`) goes on from him.
+        let relay = (0..9)
+            .filter(|&j| {
+                let off = Vec3::new(self.f[j].pos.x - q_down.x, self.f[j].pos.y - q_down.y, 0.0);
+                off.norm() <= LOW_THROW_MAN_M && off.dot(u) >= -LOW_THROW_SHORT_M
+            })
+            .min_by(|&a, &c| m::hypot(self.f[a].pos.x - q_down.x, self.f[a].pos.y - q_down.y).total_cmp(&m::hypot(self.f[c].pos.x - q_down.x, self.f[c].pos.y - q_down.y)))
+            .filter(|&j| {
+                let p = self.f[j].pos;
+                matches!(self.known_job(j).0, Role::Relay(_)) || (1..=4).all(|b| m::hypot(p.x - base_pos(b).x, p.y - base_pos(b).y) > RELAY_SEEN_M)
+            })
+            .map(|j| Vec3::new(self.f[j].pos.x, self.f[j].pos.y, 0.0));
+        ThrownRead { dest, t_arrive: t_down, track, relay }
     }
 
     fn observe_holder(&self, by: usize) -> HolderLook {
@@ -7639,9 +7660,9 @@ impl<'a> Sim<'a> {
 
     /// A runner between bases looks again when the play has changed under him: the ball
     /// secured by a fielder, or a throw released, since he last looked (agent-models §6.4).
-    /// He is between bases, on his way (a runner at a base, tagging up, waiting on one
-    /// ahead of him, holding on a ball in the air, or coming back to retouch has his own
-    /// rules). Returns whether he decided.
+    /// Between bases he races both ways; standing on a base he was holding, `base_relook`
+    /// (a runner tagging up, waiting on one ahead of him, holding on a ball in the air, or
+    /// coming back to retouch has his own rules). Returns whether he decided.
     fn runner_relook(&mut self, k: usize) -> bool {
         let seen = (self.out.secured.len(), self.out.released.len());
         let r = &self.r[k];
@@ -7653,7 +7674,10 @@ impl<'a> Sim<'a> {
         // Behind his own base (carried past it coming back) he has no base behind him to
         // choose: his own is ahead, and he goes on to it.
         let behind_own = r.s < r.start as f64 * BASE_L - 1e-6;
-        if !between || behind_own || r.tag_up || r.retouch || r.waiting || r.hold_s.is_some() || r.turned_back.is_some() || r.overrun != OverrunPhase::None || r.set_start.is_some() {
+        if !between {
+            return self.base_relook(k, nearest);
+        }
+        if behind_own || r.tag_up || r.retouch || r.waiting || r.hold_s.is_some() || r.turned_back.is_some() || r.overrun != OverrunPhase::None || r.set_start.is_some() {
             return false;
         }
         let (start, s_now) = (r.start, r.s);
@@ -7717,6 +7741,38 @@ impl<'a> Sim<'a> {
             r.turns += 1;
         }
         r.goal = goal;
+        true
+    }
+
+    /// A runner standing on a base he chose to hold looks again when the play changes: a ball
+    /// secured or a throw released since his last look (agent-models §6.4, "Looking again from
+    /// a base"). The look is his ordinary decision at a base from rest (`runner_decide`): his
+    /// legs against his own read of the ball at the next base, a throw to another base
+    /// reaching his only by a second throw or on the way. Tag-ups, partway holds, retouches,
+    /// waits on a runner ahead, turn-backs, set starts and the overrun keep their own rules.
+    /// Returns whether he decided.
+    fn base_relook(&mut self, k: usize, nearest: f64) -> bool {
+        let r = &self.r[k];
+        let b = nearest as u8;
+        if !(1..=3).contains(&b)
+            || r.goal != b
+            || r.v != 0.0
+            || r.tag_up
+            || r.retouch
+            || r.waiting
+            || r.hold_s.is_some()
+            || r.turned_back.is_some()
+            || r.overrun != OverrunPhase::None
+            || r.set_start.is_some()
+        {
+            return false;
+        }
+        let (id, t) = (r.id, self.t);
+        self.runner_decide(k, b);
+        if runner_trace::enabled() {
+            let r = &self.r[k];
+            runner_trace::push_look(runner_trace::BaseLook { runner: id, t, base: b, went: r.goal > b, waiting: r.waiting, ball_thrown: matches!(self.ball, Ball::Thrown { .. }) });
+        }
         true
     }
 
@@ -15808,6 +15864,179 @@ mod tests {
         assert!(sim.runner_relook(1), "the ball is secured ahead of him");
         assert_eq!(sim.r[1].goal, 2, "he cannot beat the ball to third, and goes back");
         assert!(!sim.runner_relook(1), "one look per event");
+    }
+
+    /// The base relook's fixture (agent-models §6.4, "Looking again from a base"): one out, the
+    /// runner who started on third standing on the bag where he held, the runner from first
+    /// on his way to second, the batter standing on first, and the right fielder with the
+    /// ball at `from`. He throws at his own arm to second, or to the cutoff man lined up with
+    /// home at his spot. Returns the sim with the throw released and the runners' last looks
+    /// before it.
+    fn held_on_third_throw(fx: &Fixture) -> LiveInput<'_> {
+        input(fx, vec![
+            RunnerIn { id: fx.st.batter, base: 0, speed: 8.2, tau_s: bb_agents::running::LEAGUE_TAU_S },
+            RunnerIn { id: 0x0006, base: 1, speed: 8.2, tau_s: bb_agents::running::LEAGUE_TAU_S },
+            RunnerIn { id: 0x0007, base: 3, speed: 8.2, tau_s: bb_agents::running::LEAGUE_TAU_S },
+        ])
+    }
+
+    /// Place the runners and the right fielder, release his throw (to second, or to the
+    /// cutoff man for home at his spot) and return (the receiver, the world's flight time to
+    /// him).
+    fn throw_with_runner_held_on_third(sim: &mut Sim, from: Vec3, to_cutoff: bool) -> (usize, f64) {
+        const RF: usize = 8;
+        sim.t = 5.0;
+        (sim.r[0].s, sim.r[0].v, sim.r[0].goal, sim.r[0].hold_s) = (BASE_L, 0.0, 1, None);
+        (sim.r[1].s, sim.r[1].v, sim.r[1].direction, sim.r[1].goal, sim.r[1].hold_s) = (2.0 * BASE_L - 8.0, 8.0, 1.0, 2, None);
+        (sim.r[2].s, sim.r[2].v, sim.r[2].goal, sim.r[2].hold_s) = (3.0 * BASE_L, 0.0, 3, None);
+        held_at(sim, RF, from);
+        let seen = (sim.out.secured.len(), sim.out.released.len());
+        for r in sim.r.iter_mut() {
+            r.looked = seen;
+        }
+        assert!(!sim.runner_relook(2), "nothing new to see: he stays");
+        let (receiver, to, base) = if to_cutoff {
+            let j = (0..9).find(|&j| sim.f[j].role == Role::Relay(4)).expect("a cutoff man for home");
+            sim.f[j].pos = sim.f[j].target;
+            (j, sim.f[j].pos, 4)
+        } else {
+            // The man covering second takes it on the bag.
+            let j = (0..9).find(|&j| sim.f[j].role == Role::Cover(2)).unwrap_or(5);
+            sim.f[j].pos = base_pos(2);
+            (j, base_pos(2), 2)
+        };
+        let arm = sim.f[RF].a.arm;
+        let d = m::hypot(to.x - from.x, to.y - from.y);
+        let sol = solve_throw(sim.inp.env, THROW_RELEASE_Z, THROW_CATCH_Z, d, arm).expect("in reach");
+        let s0 = throw_state(from + Vec3::new(0.0, 0.0, THROW_RELEASE_Z), to - from, arm, sol.elev);
+        sim.launch_throw(s0, to, base, receiver, to_cutoff);
+        sim.out.released.push((5.0, sim.f[RF].id));
+        (receiver, sol.t_flight)
+    }
+
+    /// The world's quickest the ball can be at home with the tag on after the man at `at`
+    /// (fielder `j`) has it at `t_at`: his exchange (a feed's quick transfer on the bag, a relay
+    /// man's whole exchange off it), his throw at his own arm by the throw physics, and the
+    /// catcher's tag. No turn and no footwork: a lower bound.
+    fn quickest_home_with_tag(sim: &Sim, j: usize, at: Vec3, t_at: f64, relay: bool) -> f64 {
+        let fd = &sim.f[j];
+        let exchange = if relay { throwing::relay_s(fd.a.transfer) } else { RELAY_TRANSFER_FRAC * fd.a.transfer };
+        let d = m::hypot(at.x, at.y);
+        t_at + exchange + solve_throw(sim.inp.env, THROW_RELEASE_Z, THROW_CATCH_Z, d, fd.a.arm).expect("in reach").t_flight + sim.f[1].a.tag_apply_s
+    }
+
+    // TASKS §1 (throw-race note §7): a runner standing on third where he held never looked
+    // again while the ball was held or thrown, so he stayed when the right fielder threw from
+    // deep right-center to second. He goes now, and the world agrees he scores: by the throw
+    // physics the ball cannot be home with the tag on before him even at the quickest
+    // exchange. The right fielder's arm is weak, 35 m/s (2.5 σ under his position's 40.5):
+    // from rest on the bag the runner needs 4.10 s, and with an average arm the world has
+    // the ball home and tagged 4.23 s after the release at the quickest, too close to send him.
+    #[test]
+    fn a_runner_held_on_third_scores_when_a_deep_throw_goes_to_second() {
+        let mut fx = fixture(&[(0x0006, 1), (0x0007, 3)]);
+        fx.st.outs = 1;
+        let inp = held_on_third_throw(&fx);
+        let mut st = fx.st.clone();
+        let mut sim = new_sim(&inp, &mut st);
+        sim.f[8].a.arm = 35.0;
+        let from = Vec3::new(52.0, 92.0, 0.0);
+        let theta = m::atan2(from.x, from.y);
+        assert!(m::hypot(from.x, from.y) < sim.inp.field.fence_at(theta) - 2.0, "in front of the wall");
+        let (j, flight) = throw_with_runner_held_on_third(&mut sim, from, false);
+        let mine = run_time_from(BASE_L, 0.0, sim.r[2].vmax, sim.r[2].tau);
+        let ball = quickest_home_with_tag(&sim, j, base_pos(2), flight, false);
+        assert!(ball > mine + 0.2, "the world: ball home and tagged {ball:.2} s after release at the quickest, his run {mine:.2} s");
+        assert!(sim.runner_relook(2), "the throw is something new to see");
+        assert_eq!(sim.r[2].goal, 4, "he goes on the throw to second");
+        assert!(!sim.runner_relook(2), "one look per event");
+    }
+
+    // The counter cases: the same runner stays when the right fielder (his average arm)
+    // throws from right field to the cutoff man lined up with home, and when the throw to
+    // second comes from shallow right: either way the world has the ball home and tagged
+    // before him even with half a second more than the quickest exchange.
+    #[test]
+    fn a_runner_held_on_third_stays_when_the_throw_can_beat_him_home() {
+        for (from, to_cutoff) in [(Vec3::new(35.0, 68.0, 0.0), true), (Vec3::new(30.0, 60.0, 0.0), false)] {
+            let mut fx = fixture(&[(0x0006, 1), (0x0007, 3)]);
+            fx.st.outs = 1;
+            let inp = held_on_third_throw(&fx);
+            let mut st = fx.st.clone();
+            let mut sim = new_sim(&inp, &mut st);
+            let (j, flight) = throw_with_runner_held_on_third(&mut sim, from, to_cutoff);
+            let at = if to_cutoff { sim.f[j].pos } else { base_pos(2) };
+            let mine = run_time_from(BASE_L, 0.0, sim.r[2].vmax, sim.r[2].tau);
+            // The quickest exchange plus half a second for the turn, footwork and an off-line throw.
+            let ball = quickest_home_with_tag(&sim, j, at, flight, to_cutoff) + 0.5;
+            assert!(ball < mine, "from {from:?}, to the cutoff {to_cutoff}: ball home and tagged by {ball:.2} s, his run {mine:.2} s");
+            assert!(sim.runner_relook(2));
+            assert_eq!(sim.r[2].goal, 3, "from {from:?}, to the cutoff {to_cutoff}: he stays");
+        }
+    }
+
+    // A throw to the relay man goes on from him (agent-models §6.4, his read of a throw in
+    // the air). From deep right-center to the cutoff man for home at his relay spot (26, 46),
+    // read exactly (no look error) at release and later in its flight: the base nearest
+    // where it comes down is second, 27 m from him, and timing home as a second throw from
+    // second put the ball there 0.75 s early (3.34 s after release against the world's 4.09).
+    // From the relay man he is within 0.1 s of the world (the true flight to him, his own
+    // relay exchange and his throw at his own arm by the throw physics).
+    #[test]
+    fn a_runner_reads_a_throw_to_the_relay_man_as_going_on_from_him() {
+        let mut fx = fixture(&[(0x0006, 1), (0x0007, 3)]);
+        fx.st.outs = 1;
+        let inp = held_on_third_throw(&fx);
+        let mut st = fx.st.clone();
+        let mut sim = new_sim(&inp, &mut st);
+        let (j, flight) = throw_with_runner_held_on_third(&mut sim, Vec3::new(52.0, 92.0, 0.0), true);
+        let at = sim.f[j].pos;
+        assert!((1..=4).all(|b| (at - base_pos(b)).norm() > RELAY_SEEN_M), "a relay spot off the bags: {at:?}");
+        let world = 5.0 + quickest_home_with_tag(&sim, j, at, flight, true) - sim.f[1].a.tag_apply_s;
+        for dt in [0.0, 0.5, 1.0] {
+            sim.t = 5.0 + dt;
+            let read = project_fixture_throw(&sim);
+            assert_eq!(read.relay.map(|p| (p.x, p.y)), Some((at.x, at.y)), "{dt} s after release");
+            let home = read.time_to(4);
+            assert!((home - world).abs() < 0.4, "{dt} s after release: read home at {:.2} s, the world {:.2} s", home - 5.0, world - 5.0);
+            let from_nearest = ThrownRead { relay: None, ..read };
+            assert!(from_nearest.dest != 4 && world - from_nearest.time_to(4) > 0.5, "the old read: {:.2} s", from_nearest.time_to(4) - 5.0);
+        }
+    }
+
+    // A blocked runner: the runner on second standing on his bag with the lead runner
+    // standing on third. The deep throw goes home; he may not take third while it is held, so
+    // he waits on the man ahead (the held-base rule: he decides when third is cleared) and
+    // does not leave. A runner forced to the next base is already on his way and has no
+    // base relook: the batter-runner's overrun keeps its own rule too.
+    #[test]
+    fn a_runner_held_behind_a_held_base_waits_on_the_throw() {
+        const RF: usize = 8;
+        let mut fx = fixture(&[(0x0006, 2), (0x0007, 3)]);
+        fx.st.outs = 1;
+        let inp = input(&fx, vec![
+            RunnerIn { id: fx.st.batter, base: 0, speed: 8.2, tau_s: bb_agents::running::LEAGUE_TAU_S },
+            RunnerIn { id: 0x0006, base: 2, speed: 8.2, tau_s: bb_agents::running::LEAGUE_TAU_S },
+            RunnerIn { id: 0x0007, base: 3, speed: 8.2, tau_s: bb_agents::running::LEAGUE_TAU_S },
+        ]);
+        let mut st = fx.st.clone();
+        let mut sim = new_sim(&inp, &mut st);
+        sim.t = 5.0;
+        let from = Vec3::new(52.0, 92.0, 0.0);
+        (sim.r[0].s, sim.r[0].v, sim.r[0].goal, sim.r[0].hold_s, sim.r[0].overrun) = (BASE_L, 0.0, 1, None, OverrunPhase::Back);
+        (sim.r[1].s, sim.r[1].v, sim.r[1].goal, sim.r[1].hold_s) = (2.0 * BASE_L, 0.0, 2, None);
+        (sim.r[2].s, sim.r[2].v, sim.r[2].goal, sim.r[2].hold_s) = (3.0 * BASE_L, 0.0, 3, None);
+        held_at(&mut sim, RF, from);
+        for r in sim.r.iter_mut() {
+            r.looked = (sim.out.secured.len(), sim.out.released.len());
+        }
+        let arm = sim.f[RF].a.arm;
+        throw_to_base(&mut sim, from, 4, arm);
+        sim.out.released.push((5.0, sim.f[RF].id));
+        assert!(sim.runner_relook(1), "he looks");
+        assert!(sim.r[1].waiting && sim.r[1].goal == 2, "third is held ahead of him: he waits on second (goal {}, waiting {})", sim.r[1].goal, sim.r[1].waiting);
+        assert!(!sim.runner_relook(0), "the batter-runner walking back from his overrun keeps its rule");
+        assert_eq!(sim.r[0].goal, 1);
     }
 
     // agent-models §6.3: the same race is run with two out and not with none. A runner from
