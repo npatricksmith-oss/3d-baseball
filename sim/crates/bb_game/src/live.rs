@@ -8687,8 +8687,10 @@ impl<'a> Sim<'a> {
         }
     }
 
-    /// Runner `k`, coming back to retouch after a catch, dives if the dive can change his race
-    /// (`dive_can_change`) against the throw he believes in: a grade-50 transfer from the catch
+    /// Runner `k`, coming back to retouch after a catch, dives if braking could lose him the race
+    /// (margin under `DIVE_CLOSE_S`), however far he believes himself beaten: on an appeal he
+    /// has no rundown, so his quickest arrival is his only chance (agent-models §6.4, "When";
+    /// Coordinator, 2026-11-23). The race is against the throw he believes in: a grade-50 transfer from the catch
     /// and a typical throw to his bag from where the fielder who caught it stands as the runner
     /// sees the call (no tag: the appeal is a touch of the base; the partway hold's belief,
     /// `catch_hold_s`). Agent-models §6.4, "Diving back".
@@ -8704,7 +8706,7 @@ impl<'a> Sim<'a> {
         let at = fd.pos;
         let ball = t_catch + TYPICAL_TRANSFER + typical_throw_time(m::hypot(base_pos(b).x - at.x, base_pos(b).y - at.y), self.cut_seen(None, at, b));
         let mine = self.t + run_time_to_stop(r.s - bs, -(r.direction * r.v), r.vmax, r.tau);
-        if dive_can_change(ball - mine) {
+        if ball - mine < DIVE_CLOSE_S {
             self.r[k].dive_to = Some(b);
         }
     }
@@ -21085,5 +21087,28 @@ mod tests {
         let short = (d.hand_end - base_pos(3)).norm();
         assert!(short > ON_BAG_TAG_M && short < 1.3, "his hand {short:.2} m short of the bag");
         assert!(!sim.out.facts.iter().any(|f| matches!(f, Input::BaseTouched { agent: R, .. })));
+    }
+
+    // agent-models §6.4, "When" (Coordinator, 2026-11-23): a runner coming back to retouch
+    // dives however far he believes himself beaten, since on an appeal he has no rundown. Here
+    // he is 4 m off second at rest (about 1.5 s back from rest) and the shortstop caught it 3 m
+    // from the bag (a transfer and a flip, under 1 s): beaten by about a second, he still dives.
+    // (A tag-play return beaten by a second brakes: `a_capped_runner_beaten_by_a_second_brakes_in`.)
+    #[test]
+    fn a_retouch_believed_lost_still_dives() {
+        let fx = fixture(&[(0x0007, 2)]);
+        let inp = input(&fx, vec![RunnerIn { id: fx.st.batter, base: 0, speed: 8.2, tau_s: bb_agents::running::LEAGUE_TAU_S }, RunnerIn { id: 0x0007, base: 2, speed: 8.2, tau_s: bb_agents::running::LEAGUE_TAU_S }]);
+        let mut st = fx.st.clone();
+        let mut sim = new_sim(&inp, &mut st);
+        sim.t = 2.3;
+        let at = base_pos(2) + Vec3::new(-3.0, 0.0, 0.0);
+        held_at(&mut sim, 5, at);
+        sim.out.secured.push((2.0, sim.f[5].id));
+        let r = &mut sim.r[1];
+        (r.s, r.v, r.direction, r.goal, r.hold_s, r.retouch) = (2.0 * BASE_L + 4.0, 0.0, 1.0, 2, None, true);
+        let mine = run_time_to_stop(4.0, 0.0, sim.r[1].vmax, sim.r[1].tau);
+        assert!(mine > 1.4, "his way back from rest: {mine:.2} s");
+        sim.retouch_dive(1);
+        assert_eq!(sim.r[1].dive_to, Some(2));
     }
 }
