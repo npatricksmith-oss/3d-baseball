@@ -3912,11 +3912,88 @@ impl<'a> Sim<'a> {
             self.r[k].fly_look = Some((self.t + RUNNER_FLY_LOOK_S, 0));
         } else {
             let pred = look.project(self.inp.field, [0.0; 4]);
+            if !self.tag_up_worth_leaving(k, score, &paths, &pred) {
+                // He reads it dropping, but the tag-up he would give up is worth more than going
+                // now (agent-models §6.3, review P2-1): back to the bag, and he keeps watching.
+                self.r[k].tag_up = true;
+                self.r[k].fly_look = Some((self.t + RUNNER_FLY_LOOK_S, 0));
+                return;
+            }
             self.runner_decide_with_contact(k, self.r[k].start, Some(&pred));
             if self.r[k].goal > self.r[k].start {
                 self.r[k].fly_look = Some((self.t + RUNNER_FLY_LOOK_S, 0));
             }
         }
+    }
+
+    /// Whether runner `k`, tagging up or at his first look, should leave his bag now on a ball he reads as dropping
+    /// (catch score `score` over `paths`, central projection `pred`; agent-models §6.3, "The
+    /// tagging runner keeps watching", review P2-1): going now is worth P̂·V_back +
+    /// (1 − P̂)·V_now, staying with the tag-up P̂·V_tag + (1 − P̂)·V_drop, each the better of
+    /// staying and going on at his cautious chance of the race, valued as his advance decision
+    /// values it.
+    fn tag_up_worth_leaving(&self, k: usize, score: f64, paths: &[Option<CatchRead>; 8], pred: &BallPath) -> bool {
+        let r = &self.r[k];
+        let (start, next) = (r.start, r.start + 1);
+        if next > 4 {
+            return false;
+        }
+        let adv = &self.inp.advance;
+        let chance = |margin: f64| bb_agents::running::phi(margin / adv.sigma_race_s - adv.caution_z);
+        let worth = |p: f64, v: &bb_agents::running::AdvanceValues| p * v.safe + (1.0 - p) * v.out;
+        let best = |p: f64, v: &bb_agents::running::AdvanceValues| worth(p, v).max(v.hold);
+        let tag = self.inp.tag_up;
+        let bag_s = start as f64 * BASE_L;
+        let speed = r.direction * r.v;
+        let react = RUNNER_CATCH_CALL_REACT_S;
+        let tag_s = self.race_tag_s(k, start);
+        let d_now = (next as f64 * BASE_L - r.s).max(0.0);
+        // The ball not caught, running from `s` at signed speed `v0` from time `t0`: the best of
+        // staying, the next base and the one after (a runner with time in hand goes on).
+        let on = |s: f64, v0: f64, t0: f64| {
+            let mut value = f64::NEG_INFINITY;
+            for (b, tag_b) in [(next, tag_s), (next + 1, tag.typical_tag_s)] {
+                if b > 4 {
+                    break;
+                }
+                let at = t0 + run_time_from((b as f64 * BASE_L - s).max(0.0), v0, r.vmax, r.tau);
+                let v = self.advance_values(k, b - 1, at);
+                let v = if b == next { v } else { bb_agents::running::AdvanceValues { hold: self.advance_values(k, start, at).hold, ..v } };
+                value = value.max(best(chance(self.pickup_time_to(k, b, at, pred) + tag_b - at), &v));
+            }
+            value
+        };
+        // Going now, from where he is; staying, from the bag his call reaction after the ball
+        // touches ground or wall, from rest.
+        let v_now = on(r.s, speed, self.t);
+        let down = pred.first_bounce().map(|(t, ..)| t).into_iter().chain(pred.walls.first().map(|w| w.0)).fold(f64::INFINITY, f64::min);
+        // Out of play as he reads it (over the fence or into the seats): what happens to him
+        // happens whether he goes now or stays, so only the catch decides.
+        let v_drop = if down.is_finite() { on(bag_s, 0.0, down + react) } else { v_now };
+        // The ball caught where he reads it likeliest.
+        let likeliest = paths.iter().flatten().copied().fold(None, |b: Option<CatchRead>, c| if b.is_none_or(|b| c.score > b.score) { Some(c) } else { b });
+        let (v_tag, v_back) = match likeliest {
+            Some(c) => {
+                let after = self.advance_values_after(k, start, c.t, true);
+                // Tagging up from the bag on the catch with his anticipated start.
+                let run = tag_up_time(tag, tag.react_s, BASE_L, r.vmax, r.tau);
+                let throw = TYPICAL_TRANSFER + typical_throw_time(m::hypot(base_pos(next).x - c.at.x, base_pos(next).y - c.at.y), self.cut_seen(None, c.at, next)) + tag.typical_tag_s;
+                let v_tag = best(chance(throw - run), &after);
+                // Gone now: back to the bag from where he is when he sees the call.
+                let gone = (c.t + react - self.t).max(0.0);
+                let off = (r.s - bag_s + run_dist_from(gone, speed, r.vmax, r.tau)).min(d_now + (r.s - bag_s));
+                let v_then = r.vmax - (r.vmax - speed) * m::exp(-gone / r.tau);
+                let back = run_time_to_stop(off, -v_then, r.vmax, r.tau);
+                let appeal = TYPICAL_TRANSFER + typical_throw_time(m::hypot(base_pos(start).x - c.at.x, base_pos(start).y - c.at.y), self.cut_seen(None, c.at, start));
+                let p_back = chance(appeal - react - back);
+                (v_tag, p_back * after.hold + (1.0 - p_back) * after.out)
+            }
+            None => {
+                let after = self.advance_values_after(k, start, self.t, true);
+                (after.hold, after.hold)
+            }
+        };
+        score * v_back + (1.0 - score) * v_now > score * v_tag + (1.0 - score) * v_drop
     }
 
     /// A runner who went at his first look on a ball in the air, holds partway or tags up looks
@@ -3944,15 +4021,19 @@ impl<'a> Sim<'a> {
         let score = Self::catch_score(&paths);
         let next = Some((self.t + RUNNER_FLY_LOOK_S, n + 1));
         if tagging {
+            self.r[k].fly_look = next;
             if score <= 1.0 - RUNNER_CATCH_CONFIDENCE {
-                // He reads it dropping: the tag-up is off, and he decides as at contact.
-                self.r[k].tag_up = false;
                 let pred = look.project(self.inp.field, [0.0; 4]);
-                self.runner_decide_with_contact(k, self.r[k].start, Some(&pred));
-                let r = &mut self.r[k];
-                r.fly_look = if r.goal > r.start && r.hold_s.is_none() && !r.tag_up { next } else { None };
-            } else {
-                self.r[k].fly_look = next;
+                if self.tag_up_worth_leaving(k, score, &paths, &pred) {
+                    // He reads it dropping and the tag-up is worth less than going now: he
+                    // decides as at contact. Staying put, he keeps the tag-up and watches on.
+                    self.r[k].tag_up = false;
+                    self.runner_decide_with_contact(k, self.r[k].start, Some(&pred));
+                    let r = &mut self.r[k];
+                    if r.goal <= r.start {
+                        r.tag_up = true;
+                    }
+                }
             }
             return;
         }
@@ -7643,6 +7724,13 @@ impl<'a> Sim<'a> {
     /// `out_at` is when that out would come (his own arrival at the base), against a typical
     /// runner's time home (Codex runner-decision review P2).
     fn advance_values(&self, k: usize, from: u8, out_at: f64) -> bb_agents::running::AdvanceValues {
+        self.advance_values_after(k, from, out_at, false)
+    }
+
+    /// [`Sim::advance_values`], or with `caught` as they would stand after the catch of the
+    /// ball in the air: the batter out, one more out on the board (agent-models §6.3, the
+    /// tagging runner's weighing).
+    fn advance_values_after(&self, k: usize, from: u8, out_at: f64, caught: bool) -> bb_agents::running::AdvanceValues {
         use bb_agents::running::{run_expectancy, run_weight, AdvanceValues};
         let me = &self.r[k];
         let next = from + 1;
@@ -7650,7 +7738,7 @@ impl<'a> Sim<'a> {
         // runner ahead whom his advance sends home.
         let state = |mine: u8| -> (u8, f64) {
             let (mut bits, mut runs) = (0u8, 0.0);
-            for o in self.r.iter().filter(|o| o.id != me.id && !self.runner_sees_out(k, o) && !o.scored) {
+            for o in self.r.iter().filter(|o| o.id != me.id && !self.runner_sees_out(k, o) && !o.scored && !(caught && o.start == 0)) {
                 let at = o.s / BASE_L;
                 let fwd = o.direction * o.v;
                 let seen = if fwd > SEEN_MOVING_MPS {
@@ -7683,7 +7771,7 @@ impl<'a> Sim<'a> {
             }
             (bits, runs)
         };
-        let outs = self.runner_outs(k);
+        let outs = self.runner_outs(k) + u8::from(caught);
         let value = |mine: u8, outs: u8| {
             let (bits, runs) = state(mine);
             run_expectancy(bits, outs) + runs
@@ -15306,21 +15394,35 @@ mod tests {
     /// keeping each look for the next as he does in a game. Fielder `who` is placed by
     /// `place(t)` (position, velocity) at each look; the others stand far from the ball. The
     /// scores, by time since contact, and the least score the catch should keep: 0.5 where it
-    /// comes down in the open, and above his advance cut-off (`1 − RUNNER_CATCH_CONFIDENCE`:
-    /// he never reads it as dropping) within `WALL_CATCH_ZONE_M` of a wall, where a metre or
-    /// two of curve he cannot see decides whether it is in the seats. `None` for a ball that
-    /// does not come down in play.
+    /// comes down in the open, and `LATE_READ_RAIL_FLOOR` within `WALL_CATCH_ZONE_M` of a
+    /// wall, where a metre or two of curve he cannot see decides whether it is in the seats.
+    /// `None` for a ball that does not come down in play.
     fn late_read_scores(base: u8, ball: BallState, who: usize, place: impl Fn(f64, f64, Vec3) -> (Vec3, Vec3)) -> Option<(Vec<(f64, f64)>, f64)> {
+        late_read_scores_to(base, ball, who, false, place).map(|(s, f, _)| (s, f))
+    }
+
+    /// [`late_read_scores`], or with `seats` for a ball that comes down in the seats: there
+    /// `land` is where its flight ends and the floor is not set (NaN). Also returns the
+    /// landing's clearance from the walls (negative past one).
+    fn late_read_scores_to(base: u8, ball: BallState, who: usize, seats: bool, place: impl Fn(f64, f64, Vec3) -> (Vec3, Vec3)) -> Option<(Vec<(f64, f64)>, f64, f64)> {
         const R: AgentId = 7;
         let mut fx = fixture(&[(R, base)]);
         fx.st.outs = 1;
         let mut inp = input(&fx, vec![RunnerIn { id: R, base, speed: 8.2, tau_s: RUNNER_TAU }]);
         inp.ball = ball;
         let path = batted_path(&fx.env, &fx.field, ball, inp.t_contact, |_, _| (0.0, 0.0));
-        let (t_land, lx, ly) = path.first_bounce()?;
+        let (t_land, lx, ly) = if seats {
+            if path.first_bounce().is_some() || !matches!(path.end(), SegmentEnd::OverFence { fair: false }) {
+                return None;
+            }
+            let end = path.at(path.t_end()).0;
+            (path.t_end(), end.x, end.y)
+        } else {
+            path.first_bounce()?
+        };
         let land = Vec3::new(lx, ly, 0.0);
         let clearance = fx.field.body_clearance(lx, ly, 0.0).dist;
-        let floor = if clearance >= WALL_CATCH_ZONE_M { 0.5 } else { 1.0 - RUNNER_CATCH_CONFIDENCE + 1e-9 };
+        let floor = if seats { f64::NAN } else if clearance >= WALL_CATCH_ZONE_M { 0.5 } else { LATE_READ_RAIL_FLOOR };
         let mut st = fx.st.clone();
         let mut sim = new_sim(&inp, &mut st);
         sim.start_runners();
@@ -15341,7 +15443,7 @@ mod tests {
             seen = look.kept();
             t += RUNNER_FLY_LOOK_S;
         }
-        Some((out, floor))
+        Some((out, floor, clearance))
     }
 
     /// The named plays' balls, and each turned about the vertical through the plate by −30°
@@ -15358,6 +15460,11 @@ mod tests {
         }
         out
     }
+
+    /// The least noise-free read of a catch at the railing in the late-read tests: the build
+    /// gives 0.43 at the least (2026-11-23); before review P3-5 the floor was the advance
+    /// cut-off, 0.2, which would have let a regression to a hold pass.
+    const LATE_READ_RAIL_FLOOR: f64 = 0.4;
 
     /// The named plays of the late-catch note, as launched in the games (contact point,
     /// velocity m/s, spin rad/s), with the base of the runner traced and the fielder who caught
@@ -15541,6 +15648,86 @@ mod tests {
             assert!(seen <= typical + 0.1, "{lo}-{hi}°: median landing miss {seen:.2} m with the seen axis, {typical:.2} m with the typical");
             eprintln!("{lo}-{hi}°: {tab:?}; median landing miss {seen:.2} m seen, {typical:.2} m typical");
         }
+    }
+
+    // Review P3-5, the other side of the late-flight read: the same balls with every fielder
+    // about 100 m from where they come down, behind the plate on its line. Nobody can get
+    // there, and from 2 s on a runner watching with no read error reads the catch at his
+    // advance cut-off or below (the build gives 0.03 at the most).
+    #[test]
+    fn a_runner_watching_a_ball_nobody_can_reach_reads_it_dropping() {
+        let mut checked = 0;
+        for (what, base, ball, who) in late_read_balls() {
+            let Some((scores, _)) = late_read_scores(base, ball, who, |_, _, land| (land - land.normalized() * (land.norm() + 50.0), Vec3::ZERO)) else { continue };
+            checked += 1;
+            for &(since, score) in scores.iter().filter(|(since, _)| *since >= 2.0) {
+                assert!(score <= 1.0 - RUNNER_CATCH_CONFIDENCE, "{what}: {score:.3} at {since:.1} s ({scores:.2?})");
+            }
+        }
+        assert!(checked >= 20, "{checked} balls come down in play");
+    }
+
+    // Review P3-5, the wall's side: the named balls that come down 5 m or more into the foul
+    // seats, the fielder who caught the original standing at the railing in front of where it
+    // comes down. Early on the curve he cannot see could still bring it back (½·`CURVE_PRIOR`·t²
+    // is 19 m with 3.6 s to go), but over its last 1.5 s (looks at most 0.3 s before it comes
+    // down) he reads it at his advance cut-off or below.
+    #[test]
+    fn a_runner_watching_a_ball_into_the_seats_reads_no_catch() {
+        let mut checked = 0;
+        for (what, base, ball, who) in late_read_balls() {
+            let Some((scores, _, clearance)) = late_read_scores_to(base, ball, who, true, |_, _, land| (Field::default().keep_inside(land, 1.0), Vec3::ZERO)) else { continue };
+            if clearance > -5.0 {
+                continue;
+            }
+            checked += 1;
+            let last = scores.last().map_or(0.0, |s| s.0);
+            for &(since, score) in scores.iter().filter(|(since, _)| *since >= last - 1.5) {
+                assert!(score <= 1.0 - RUNNER_CATCH_CONFIDENCE, "{what}, {:.1} m into the seats: {score:.3} at {since:.1} s ({scores:.2?})", -clearance);
+            }
+        }
+        assert!(checked >= 3, "{checked} balls come down 5 m or more into the seats");
+    }
+
+    // Review P2-1 (agent-models §6.3, the tagging runner's weighing): seed 139 play 147's ball,
+    // a 39.7° fly to left with runners on first and third and none out. With fewer than two out
+    // a runner on third on a fly to the outfield stays on the bag until it is caught or drops:
+    // the race home after a deep drop is easy from the bag, so leaving early gains nothing and
+    // gives up the sacrifice fly. Over 40 seeds of read noise, on every catch he is still on
+    // third when it is made, and he scores after it on most.
+    #[test]
+    fn a_runner_on_third_keeps_his_tag_up_on_a_deep_fly() {
+        const R1: AgentId = 7;
+        const R3: AgentId = 8;
+        let fx = fixture(&[(R1, 1), (R3, 3)]);
+        let mut inp = input(&fx, vec![
+            RunnerIn { id: fx.st.batter, base: 0, speed: 8.2, tau_s: RUNNER_TAU },
+            RunnerIn { id: R1, base: 1, speed: 8.2, tau_s: RUNNER_TAU },
+            RunnerIn { id: R3, base: 3, speed: 8.2, tau_s: RUNNER_TAU },
+        ]);
+        inp.ball = BallState { r: Vec3::new(-0.0359, 0.3957, 0.6093), v: Vec3::new(-16.0722, 29.3924, 27.8471), w: Vec3::new(541.262, -294.806, 194.151) };
+        let (mut caught, mut scored) = (0, 0);
+        for seed in 0..40u64 {
+            inp.seed = seed;
+            let mut st = fx.st.clone();
+            let out = simulate_live(&inp, &mut st);
+            let Some(t_catch) = out.facts.iter().find_map(|f| if let Input::GloveSecured { t, .. } = *f { Some(t) } else { None }) else { continue };
+            if !out.events.iter().any(|e| matches!(e, Event::Catch { .. })) {
+                continue;
+            }
+            caught += 1;
+            // On the bag at the catch: his last touch of third or departure from it before
+            // the catch is a touch (he left on his lead at contact and came back to tag).
+            let last = out.facts.iter().filter_map(|f| match *f {
+                Input::BaseTouched { t, agent, base: 3, .. } if agent == R3 && t < t_catch - 1e-6 => Some((t, true)),
+                Input::BaseLeft { t, agent, base: 3 } if agent == R3 && t < t_catch - 1e-6 => Some((t, false)),
+                _ => None,
+            }).last();
+            assert!(matches!(last, Some((_, true))), "seed {seed}: the runner on third was off the bag at the catch ({t_catch:.2} s; last: {last:?})");
+            scored += usize::from(out.events.iter().any(|e| matches!(e, Event::RunScored { runner } if *runner == R3)));
+        }
+        assert!(caught >= 30, "{caught} of 40 caught");
+        assert!(scored * 10 >= caught * 8, "{scored} of {caught} scored after the catch");
     }
 
     // Agent-models §6.3, the tagging runner keeps watching (2026-11-23): a runner on second with
