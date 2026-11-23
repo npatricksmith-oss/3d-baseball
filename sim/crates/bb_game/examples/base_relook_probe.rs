@@ -2,7 +2,8 @@
 //! the ball is secured (agent-models §6.4, "Looking again from a base"). Counts the looks, the
 //! ones that sent him (by base, ball thrown or held) and how each sent runner ended the play:
 //! scored or safe at the next base or beyond, back on his base, or put out. `-- [games]
-//! [first seed]`; the standard sets are `300 0` and `300 1000003000`.
+//! [first seed]`; the standard sets are `300 0` and `300 1000003000`. With `RELOOK_DUMP=1` each
+//! sent runner's play is printed in full: rules events, facts and his track every 0.25 s.
 use bb_game::live::runner_trace;
 use bb_game::play::FielderAttrs;
 use bb_rules::Event;

@@ -16019,9 +16019,9 @@ mod tests {
 
     // A quick return throw (agent-models §6.4). One out after a fly-out to the right-field
     // corner, the runner on second standing on his bag; the right fielder throws to second.
-    // In the first measurement of the base relook, 8 of the 9 runners from second put out at
-    // third had left on such a throw: the man at second caught it and rushed his throw to
-    // third in 0.28 s, where the runner gave him 0.6 s (`RELAY_READ_S`). At a 37 m/s arm he
+    // Measured before this (600 games), all 8 runners from second put out at third had left
+    // on such a throw: the man at second caught it and rushed his throw to third in
+    // 0.28–0.47 s, where the runner gave him 0.6 s (`RELAY_READ_S`). At a 37 m/s arm he
     // stays now, and the world agrees he would be out: the throw's flight, the receiver's
     // hurried exchange (`RUSH_MIN_FRAC` of his set exchange on a bag), his throw at his own
     // arm and the third baseman's tag beat him from rest. A slower throw (32 m/s) the world
