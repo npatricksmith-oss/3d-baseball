@@ -109,6 +109,13 @@ Below 0.3, every runner added at right ends as an out or a turn-back, and none s
 - Read: the full diff `main..work/two-out-caution`, `runner_decide`, `runner_relook`, `base_relook`, `ball_time_to`, `read_throw_time`, `advance_values_after`, `runner_outs`, `AdvanceParams::{p_safe, goes, chooses_on}`, and `runner_timing`'s `throw_benchmark` and `actual_delivery`.
 - Not run: the full workspace test run and the standard run. The worker's logged run (549 passed) and the ledger row were taken as given. Their figures are consistent with the note's sweep.
 
-## Resolution
+## Worker follow-up (worker-1, 2026-11-23)
+
+- **P2-1.** Note §1 and the spec's "*Why below zero*" now call it an outcome fit, with the benchmark gap stated. The §2 field-split bullet now carries the right-field table and p ≈ 0.02. The probe (temporary hooks in `runner_decide` and `runner_relook`, which only print, on the same 600 games; note §2a) found that his read at third of the throw home is about 0.21 s hopeful (median; 10 direct throws), all of it in the flight; his read of the release is right. At the release he reads it right (−0.05 s). About 0.1 s is distance: he times the throw from where the fielder stands at his look, the fielder lets go 1.9–3.3 m nearer, and the catcher takes it 0.4–1.8 m out. The benchmark is 0.28 s slow. Both gaps are open in TASKS §1, and there is a correction line in the runner-start note under "each leg". The race model is not changed.
+- **P3-1.** Fixed: `AdvanceParams::chooses_between`, with the two-out caution on the way home only, and the test `the_two_out_send_does_not_make_the_way_back_look_safer` (hand-worked from the run table). No measured rate moved: the CSV and both standard-run reports are identical.
+- **P3-2.** §6.3 marks the scope as interim, tied to first to home on a double, and names the runner who goes home on a later look from the bag.
+- **P3-3.** The range 0.1 to −0.3 is in the note, the spec line and the parameter's doc comment.
+- **P3-4.** The case is now 0.15 s behind the ball alone (a 31% general-caution chance against the 41.5% break-even). The suggested 0.05 s behind would be 0.20 s in hand, a 50% chance, which goes even at the general caution. The scope loop is labelled as documentation.
+
 
 Open.

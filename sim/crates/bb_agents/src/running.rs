@@ -151,7 +151,9 @@ pub struct AdvanceParams {
     /// sent, 3.9% of those sent put out (left 91.3% and 5.6%, right 92.9% and 2.2%; center
     /// 96.2%, which the sim already matched; `docs/calibration/2026-11-23-two-out-send.md`).
     /// Below zero: he goes on a race he believes slightly lost, as the coach's "send unless
-    /// clearly beaten" does.
+    /// clearly beaten" does. An outcome fit: values from about 0.1 to −0.3 fit within noise,
+    /// and his read at third of a charging outfielder's throw is about 0.2 s hopeful (note
+    /// §2a), so a corrected read needs a new fit (Q38 review P2-1, P3-3).
     pub send_two_out_z: f64,
 }
 

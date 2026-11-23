@@ -52,6 +52,8 @@ The 117/118 figure was measured on the merged-base build of 2026-11-17. Since th
 | Clean ball home (benchmark) | 6.51 s | 7.27 s | 6.50 s | — |
 | Runner minus benchmark | −0.39 s | −1.15 s | −0.38 s | — |
 
+*Correction (2026-11-23, Q38 review P2-1; [two-out send note §2a](2026-11-23-two-out-send.md#2a-the-runners-read-of-the-throw-home-review-p2-1)):* the "clean throw home" rows are `runner_timing`'s benchmark, a clean throw at the fielder's arm from the pickup point. On the direct throws home at the corners the sim's real throw arrives about 0.28 s sooner, all of it in the flight: the fielder carries his charge 2–3 m nearer before he lets go, the momentum gain is left out, and the catcher takes it in front of the plate. The real flights, about 74 m in 2.1–2.3 s, agree with Lang. So "no leg is out of line" holds for the sim's legs, but the benchmark row is about 0.28 s slow, and the margins measured against it below are that much too kind to the runner.
+
 The center fielder fields later, runs farther and has a longer throw. Center's race is about 0.75 s easier than the corners', and MLB's center rate is also the highest of the three. No leg is out of line with its source. The parts with no source (pickup, exchange) are those the [throw-race note](2026-11-19-throw-race.md#6-conclusion-stop-and-report-job-step-2) already left open.
 
 ### Cause at the corners: the runner holds on races he would win
