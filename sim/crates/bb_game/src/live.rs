@@ -20719,4 +20719,237 @@ mod tests {
         assert!(caught >= 12, "only {caught} of the flies were caught with nobody on");
         assert!(changed >= 3, "he came through toward third on only {changed} of the catches");
     }
+
+    /// The dive back's touch time by hand (agent-models §6.4, "Diving back"): `d` m from the bag
+    /// at `v0` m/s toward it, his speed law in closed form, v(t) = v_max − (v_max − v0)e^(−t/τ),
+    /// up to `DIVE_BACK_M` out, then the glide at max(0.8 v, 4 m/s) until his hand, 0.4 m ahead,
+    /// is at the bag. (The sim steps it at 60 Hz.)
+    fn dive_touch_by_hand(d: f64, v0: f64, v_max: f64, tau: f64) -> f64 {
+        let dist = |t: f64| v_max * t - (v_max - v0) * tau * (1.0 - (-t / tau).exp());
+        let (mut lo, mut hi) = (0.0, 10.0);
+        for _ in 0..60 {
+            let mid = 0.5 * (lo + hi);
+            if dist(mid) < d - 2.2 { lo = mid } else { hi = mid }
+        }
+        let v1 = v_max - (v_max - v0) * (-hi / tau).exp();
+        hi + (2.2 - 0.4) / (0.8 * v1).max(4.0)
+    }
+
+    /// The runner-start note's typical case (§3): a runner on third coming back 4.4 m out at
+    /// 7.4 m/s, the third baseman on the bag with the ball, able to tag `after_s` after a dive
+    /// back would have had the hand on the bag. Returns the sim and when the return began.
+    fn back_to_third(dive: bool, after_s: f64) -> (Sim<'static>, f64) {
+        const R: AgentId = 0x0007;
+        let fx: &'static Fixture = Box::leak(Box::new(fixture(&[(R, 3)])));
+        let inp = input(fx, vec![RunnerIn { id: fx.st.batter, base: 0, speed: 8.2, tau_s: bb_agents::running::LEAGUE_TAU_S }, RunnerIn { id: R, base: 3, speed: 8.2, tau_s: bb_agents::running::LEAGUE_TAU_S }]);
+        let inp: &'static LiveInput<'static> = Box::leak(Box::new(inp));
+        let st: &'static mut RulesState = Box::leak(Box::new(fx.st.clone()));
+        let mut sim = new_sim(inp, st);
+        sim.t = 3.0;
+        let t0 = sim.t;
+        sim.r[0].out = true;
+        held_at(&mut sim, 4, base_pos(3));
+        sim.out.secured.push((t0, sim.f[4].id));
+        let r = &mut sim.r[1];
+        (r.s, r.v, r.direction, r.goal, r.hold_s) = (3.0 * BASE_L + 4.4, 7.4, -1.0, 3, None);
+        r.dive_to = dive.then_some(3);
+        let (vmax, tau) = (r.vmax, r.tau);
+        sim.r[1].looked = (sim.out.secured.len(), sim.out.released.len());
+        sim.secured_at = t0 + dive_touch_by_hand(4.4, 7.4, vmax, tau) + after_s - sim.f[4].a.tag_apply_s;
+        for _ in 0..240 {
+            if sim.done {
+                break;
+            }
+            // He holds the bag and waits for the runner there.
+            (sim.f[4].pos, sim.f[4].target, sim.f[4].vel) = (base_pos(3), base_pos(3), Vec3::ZERO);
+            sim.holder_act();
+            sim.move_runners();
+            sim.t += DT;
+        }
+        (sim, t0)
+    }
+
+    // Q39 (a), agent-models §6.4 "Diving back": the runner-start note's typical case. Braking
+    // onto the bag he is tagged a step short; diving back, his hand is on the bag at the
+    // hand-worked time, before the tag can come 0.13 s later, and he is safe.
+    #[test]
+    fn a_close_return_dives_back_and_beats_the_tag() {
+        const R: AgentId = 0x0007;
+        let tagged = |sim: &Sim| sim.out.facts.iter().any(|f| matches!(f, Input::TagContact { runner: R, .. }));
+        let (braked, _) = back_to_third(false, 0.13);
+        assert!(tagged(&braked), "braking onto the bag he is tagged short of it");
+        assert!(braked.out.runner_dives.is_empty());
+        let (dove, t0) = back_to_third(true, 0.13);
+        assert!(!tagged(&dove), "diving back he beats the tag: {:?}", dove.out.facts);
+        let touch = dove.out.facts.iter().find_map(|f| match f {
+            Input::BaseTouched { t, agent: R, base: 3, holding_ball: false } => Some(*t - t0),
+            _ => None,
+        });
+        let by_hand = dive_touch_by_hand(4.4, 7.4, 8.2, bb_agents::running::LEAGUE_TAU_S);
+        let touch = touch.expect("his hand touches third");
+        assert!((touch - by_hand).abs() <= 2.0 * DT, "touch {touch:.3} s after he started back, by hand {by_hand:.3} s");
+        let d = dove.out.runner_dives[0];
+        assert_eq!((d.agent, d.base), (R, 3));
+        assert!((d.t_up - d.t_touch - DIVE_BACK_UP_S).abs() < 1e-9);
+        assert!(((d.from - base_pos(3)).norm() - DIVE_BACK_M).abs() < 0.2, "he left his feet {:.2} m out", (d.from - base_pos(3)).norm());
+    }
+
+    // A tag on the diving runner reaches his body laid out behind his hand (the segment, not
+    // his path point): a fielder 1.0 m to the side of his body's middle reaches it, and a
+    // runner on his feet at that path point is 1.0 m from him as well.
+    #[test]
+    fn a_tag_reaches_a_diving_runner_anywhere_along_his_body() {
+        let fx = fixture(&[(0x0007, 1)]);
+        let inp = input(&fx, vec![RunnerIn { id: fx.st.batter, base: 0, speed: 8.2, tau_s: bb_agents::running::LEAGUE_TAU_S }, RunnerIn { id: 0x0007, base: 1, speed: 8.2, tau_s: bb_agents::running::LEAGUE_TAU_S }]);
+        let mut st = fx.st.clone();
+        let mut sim = new_sim(&inp, &mut st);
+        let r = &mut sim.r[1];
+        (r.s, r.direction, r.v) = (BASE_L + 1.5, -1.0, 6.0);
+        r.dive = Some(DiveBack { base: 1, t_leave: 0.0, s_leave: BASE_L + 2.2, v: 6.0, t_touch: None });
+        // His hand is 0.4 m ahead of his path point, his feet 2.0 m behind the hand: the body
+        // runs from 1.1 m to 3.1 m up the line from first toward second.
+        let line = (base_pos(2) - base_pos(1)).normalized();
+        let side = Vec3::new(-line.y, line.x, 0.0);
+        let r = sim.r[1].clone();
+        let at_middle = base_pos(1) + line * 2.1 + side * 1.0;
+        assert!((sim.tag_distance(&r, at_middle) - 1.0).abs() < 1e-6);
+        let past_feet = base_pos(1) + line * 4.1;
+        assert!((sim.tag_distance(&r, past_feet) - 1.0).abs() < 1e-6, "1.0 m beyond his feet");
+        assert!((Sim::touch_s(&r) - (BASE_L + 1.1)).abs() < 1e-9);
+    }
+
+    // A return with time to spare is not a dive: the look sends him back with a wide margin,
+    // (about 1.4 s), and he brakes onto the bag and plants at no more than `APPROACH_MIN_MPS`.
+    // With the ball nearer the bag (the margin under `DIVE_CLOSE_S`) the same look chooses the dive.
+    #[test]
+    fn only_a_close_return_is_a_dive() {
+        let look = |holder: usize, at: Vec3| {
+            let fx: &'static Fixture = Box::leak(Box::new(fixture(&[(0x0007, 2)])));
+            let inp = input(fx, vec![RunnerIn { id: fx.st.batter, base: 0, speed: 8.2, tau_s: bb_agents::running::LEAGUE_TAU_S }, RunnerIn { id: 0x0007, base: 2, speed: 8.2, tau_s: bb_agents::running::LEAGUE_TAU_S }]);
+            let inp: &'static LiveInput<'static> = Box::leak(Box::new(inp));
+            let st: &'static mut RulesState = Box::leak(Box::new(fx.st.clone()));
+            let mut sim = new_sim(inp, st);
+            sim.t = 4.0;
+            sim.r[0].out = true;
+            let r = &mut sim.r[1];
+            (r.s, r.v, r.direction, r.goal, r.hold_s) = (2.0 * BASE_L + 5.0, 1.0, 1.0, 3, None);
+            held_at(&mut sim, holder, at);
+            sim.out.secured.push((4.0, sim.f[holder].id));
+            assert!(sim.runner_relook(1));
+            sim
+        };
+        // The left fielder deep: a 73 m throw to second.
+        let mut far = look(6, Vec3::new(-70.0, 60.0, 0.0));
+        assert_eq!((far.r[1].goal, far.r[1].dive_to), (2, None));
+        let mut arrival = f64::NAN;
+        for _ in 0..300 {
+            let before = far.r[1].v;
+            far.move_runners();
+            far.t += DT;
+            if (far.r[1].s - 2.0 * BASE_L).abs() < 1e-9 {
+                arrival = before;
+                break;
+            }
+        }
+        assert!(arrival <= APPROACH_MIN_MPS + 1e-9, "he came in at {arrival} m/s");
+        assert_eq!(far.r[1].v, 0.0);
+        assert!(far.out.runner_dives.is_empty());
+        // The shortstop with the ball deep behind second (his margin back about +0.3 s, his
+        // read: safe, but closer than `DIVE_CLOSE_S`).
+        let near = look(5, Vec3::new(-42.0, 68.0, 0.0));
+        assert_eq!((near.r[1].goal, near.r[1].dive_to), (2, Some(2)));
+    }
+
+    // A diving runner is down on the bag until he is up (`DIVE_BACK_UP_S`): a misplay while he
+    // is down (the ball in the right-field corner with a weak arm) does not send him on until
+    // he is up; then his look does.
+    #[test]
+    fn a_diving_runner_cannot_go_until_he_is_up() {
+        const RF: usize = 8;
+        let fx = fixture(&[(0x0007, 1)]);
+        let inp = input(&fx, vec![RunnerIn { id: fx.st.batter, base: 0, speed: 8.2, tau_s: bb_agents::running::LEAGUE_TAU_S }, RunnerIn { id: 0x0007, base: 1, speed: 8.2, tau_s: bb_agents::running::LEAGUE_TAU_S }]);
+        let mut st = fx.st.clone();
+        let mut sim = new_sim(&inp, &mut st);
+        sim.t = 3.0;
+        sim.r[0].out = true;
+        let r = &mut sim.r[1];
+        (r.s, r.v, r.direction, r.goal, r.hold_s, r.dive_to) = (BASE_L + 3.0, 5.0, -1.0, 1, None, Some(1));
+        sim.r[1].looked = (sim.out.secured.len(), sim.out.released.len());
+        let mut touch = None;
+        for _ in 0..120 {
+            sim.move_runners();
+            sim.t += DT;
+            if let Some(d) = sim.out.runner_dives.first() {
+                touch = Some(d.t_touch);
+                break;
+            }
+        }
+        let touch = touch.expect("he dives back into first");
+        // The misplay: the ball loose to the right-field corner, picked up by a weak arm.
+        held_at(&mut sim, RF, Vec3::new(90.0, 10.0, 0.0));
+        sim.f[RF].a.arm = 20.0;
+        sim.out.secured.push((sim.t, sim.f[RF].id));
+        while sim.t < touch + DIVE_BACK_UP_S - 1e-9 {
+            sim.move_runners();
+            sim.t += DT;
+            assert_eq!((sim.r[1].goal, sim.r[1].s), (1, BASE_L), "down on the bag at {:.3} s", sim.t - touch);
+        }
+        for _ in 0..3 {
+            sim.move_runners();
+            sim.t += DT;
+        }
+        assert_eq!(sim.r[1].goal, 2, "up, he takes second on the misplay");
+        assert!(sim.r[1].dive.is_none());
+    }
+
+    // Runner-start note §5, the deferred P3 (catch-read re-review P3-2): a runner going back
+    // past a bag that is not his goal touches and leaves it on the same tick, so the rules do
+    // not keep him on it, and a tag between that bag and his own puts him out.
+    #[test]
+    fn a_runner_tagged_between_bases_after_crossing_a_bag_that_is_not_his_goal() {
+        const R: AgentId = 0x0007;
+        let fx = fixture(&[(R, 1)]);
+        let inp = input(&fx, vec![RunnerIn { id: fx.st.batter, base: 0, speed: 8.2, tau_s: bb_agents::running::LEAGUE_TAU_S }, RunnerIn { id: R, base: 1, speed: 8.2, tau_s: bb_agents::running::LEAGUE_TAU_S }]);
+        let mut st = fx.st.clone();
+        let mut sim = new_sim(&inp, &mut st);
+        sim.t = 3.0;
+        sim.r[0].out = true;
+        let spot = runner_path_pos(1, 1.5 * BASE_L);
+        held_at(&mut sim, 3, spot);
+        sim.out.secured.push((2.0, sim.f[3].id));
+        sim.secured_at = 2.0;
+        let r = &mut sim.r[1];
+        (r.s, r.v, r.direction, r.goal, r.hold_s, r.last_base) = (2.0 * BASE_L + 1.0, 3.0, -1.0, 1, None, 2);
+        sim.r[1].looked = (sim.out.secured.len(), sim.out.released.len());
+        for _ in 0..360 {
+            if sim.done {
+                break;
+            }
+            (sim.f[3].pos, sim.f[3].target, sim.f[3].vel) = (spot, spot, Vec3::ZERO);
+            sim.holder_act();
+            sim.move_runners();
+            sim.t += DT;
+        }
+        let touched = sim.out.facts.iter().find_map(|f| match f {
+            Input::BaseTouched { t, agent: R, base: 2, .. } => Some(*t),
+            _ => None,
+        });
+        let left = sim.out.facts.iter().find_map(|f| match f {
+            Input::BaseLeft { t, agent: R, base: 2 } => Some(*t),
+            _ => None,
+        });
+        let tag = sim.out.facts.iter().find_map(|f| match f {
+            Input::TagContact { t, runner: R, .. } => Some(*t),
+            _ => None,
+        });
+        let (touched, left, tag) = (touched.expect("he crosses second"), left.expect("and leaves it"), tag.expect("and is tagged"));
+        assert_eq!(touched, left, "touch and departure on one tick");
+        assert!(tag > left);
+        assert!(
+            sim.out.events.iter().any(|e| matches!(e, Event::RunnerOut { runner: R, kind: bb_rules::OutKind::Tag, .. })),
+            "the rules put him out: {:?}",
+            sim.out.events
+        );
+        assert!(sim.out.runner_dives.is_empty());
+    }
 }
