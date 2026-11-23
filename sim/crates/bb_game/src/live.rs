@@ -382,9 +382,69 @@ struct ContactLook {
     contact_since: Option<f64>,
     /// He sees it rolling on the ground (agent-models §5.1: no read below the ground).
     rolling: bool,
+    /// His first catch look at this first flight, if he has had one (agent-models §6.3, "The
+    /// curve he has seen").
+    seen: Option<SeenLook>,
+}
+
+/// What a runner keeps of his first catch look at a ball on its first flight (agent-models
+/// §6.3, "The curve he has seen"): when it was (seconds since contact), the velocity he read,
+/// and that read's error covariance.
+#[derive(Clone, Copy, Debug)]
+struct SeenLook {
+    since: f64,
+    v: Vec3,
+    cov: Mat3,
 }
 
 impl ContactLook {
+    /// This look as the one he keeps for the next: none once the ball is off its first flight.
+    fn kept(self) -> Option<SeenLook> {
+        let since = self.contact_since?;
+        let (los, _, sv) = self.scales(self.motion);
+        Some(SeenLook { since, v: self.motion.1, cov: read_cov(los, sv, DEPTH_STRETCH * 0.5) })
+    }
+
+    /// The spin axis he has seen (agent-models §6.3, "The curve he has seen"). He flies the
+    /// velocity of his first catch look on to now with his own model, with the typical spin's
+    /// push and without any; the velocity he reads now less the push-free flight's is the push
+    /// he has seen, the typical flight's the push he expected. He weighs the two as the
+    /// tracking read weighs a look (§5.1): the push's prior σ `CURVE_PRIOR` per axis over the
+    /// interval, against the two looks' velocity errors. A push about axis ω̂ adds up to
+    /// ω̂ × J over the flight, J the push-free path's directions weighted by how hard a spin
+    /// of the typical size pushes at each (the lift law's k·C_L·u²); so the axis is J × the
+    /// push (its part across J). `None` on his first look, or off the first flight.
+    fn seen_axis(self) -> Option<Vec3> {
+        let (now, first) = (self.contact_since?, self.seen?);
+        let dt = now - first.since;
+        if dt <= 1e-6 {
+            return None;
+        }
+        let (env, w) = believed_flight(reference_env(), first.v, Some(first.since));
+        let still = FlightEnv { aero: bb_physics::AeroParams { magnus: false, ..env.aero }, ..env };
+        let (mut free, mut typical) = (BallState { r: Vec3::ZERO, v: first.v, w }, BallState { r: Vec3::ZERO, v: first.v, w });
+        let mut j = Vec3::ZERO;
+        let mut left = dt;
+        while left > 1e-9 {
+            let h = left.min(AGENT_DT);
+            // How hard a spin of this size across the flight pushes it here, along its way.
+            let u = free.v;
+            let across = Vec3::new(-u.y, u.x, 0.0).normalized() * free.w.norm();
+            j += u.normalized() * ((env.accel(u, across) - still.accel(u, across)).norm() * h);
+            free = still.step(&free, h);
+            typical = env.step(&typical, h);
+            left -= h;
+        }
+        let (los, _, sv) = self.scales(self.motion);
+        let err = first.cov + read_cov(los, sv, DEPTH_STRETCH * 0.5);
+        let prior = Mat3::scale(CURVE_PRIOR * CURVE_PRIOR * dt * dt);
+        let gain = prior * (prior + err).inverse()?;
+        let expected = typical.v - free.v;
+        let push = expected + gain * (self.motion.1 - free.v - expected);
+        let axis = j.cross(push);
+        (axis.norm() > 1e-9).then(|| axis.normalized())
+    }
+
     fn scales(self, motion: (Vec3, Vec3)) -> (Vec3, f64, f64) {
         let to = Vec3::new(motion.0.x - self.from.x, motion.0.y - self.from.y, 0.0);
         let plate = self.contact_since.map(|s| (s, RUNNER_PLATE_PRIOR));
@@ -403,6 +463,9 @@ impl ContactLook {
             let (gain, _, _) = plate_weighing(los, sp, sv, s);
             r += gain * (position_from_plate(&env, RUNNER_PLATE_PRIOR, v, w, s) - r);
         }
+        // Forward, the typical spin's size about the axis he has seen (from his central read:
+        // the eight error points are this look's own errors, not a different curve).
+        let w = self.seen_axis().map_or(w, |axis| axis * w.norm());
         let (r, v) = on_or_above_ground((r, v), self.rolling, env.ball.radius);
         batted_path_dt(&env, field, BallState { r, v, w }, self.t, AGENT_DT, |_, _| (0.0, 0.0))
     }
@@ -1705,6 +1768,9 @@ struct Runner {
     /// He went at his first look on a ball in the air, or holds partway, and keeps watching it
     /// (agent-models §6.3, the in-flight relook): when he looks next, and that look's number.
     fly_look: Option<(f64, u32)>,
+    /// His first catch look at the ball on its first flight, for the curve he has seen since
+    /// (agent-models §6.3).
+    catch_look: Option<SeenLook>,
     /// Standing on a base, he is watching a throw his look carried over or near the base in
     /// front of him, to see whether it gets there (agent-models §6.4): until when, and the
     /// play's (secured, released) counts it belongs to.
@@ -3636,9 +3702,12 @@ impl<'a> Sim<'a> {
             view: (self.t - self.inp.t_contact).max(0.0),
             contact_since: self.public_contact_since(),
             rolling: seen_rolling(self.ball_at(self.t), self.inp.env.ball.radius),
+            seen: None,
         };
         let (los, sp, sv) = look.scales(look.motion);
         look.motion = noisy_ball_motion(look.motion, los, sp, sv, self.runner_ball_errors(k, sub));
+        // His first catch look counts only on the same first flight, and before this one.
+        look.seen = self.r[k].catch_look.filter(|prev| look.contact_since.is_some_and(|now| now > prev.since));
         look
     }
 
@@ -3661,10 +3730,13 @@ impl<'a> Sim<'a> {
 
     /// The best catch chance over a projection's first flight, and where on the ground it
     /// is. At each point it is the chance a fielder's glove gets there, from visible fielder
-    /// motion, in spreads of his doubt about the glove (`RUNNER_CATCH_SIGMA_M`), about the
-    /// fielder's speed (`FIELDER_SPEED_SPREAD_MPS` over the run) and about the ball's curve
-    /// from the spin he cannot see (`CURVE_PRIOR`). The tighter of the height and horizontal
-    /// margins sets the score, treating residual glove reach in the two as one error.
+    /// motion (his speed toward the point, at any distance), in spreads of his doubt about the
+    /// glove (`RUNNER_CATCH_SIGMA_M`), about the fielder's speed (`FIELDER_SPEED_SPREAD_MPS`
+    /// over the run) and about the ball's curve from the spin he cannot see (`CURVE_PRIOR`).
+    /// The tightest of the height, horizontal and wall margins sets the score, treating
+    /// residual glove reach in them as one error; the wall margin (how far inside the glove's
+    /// reach over the wall the point is) is in the glove and curve spread, so a point he
+    /// projects a little into the seats is not out of the question (agent-models §6.3).
     fn runner_catch_read(&self, pred: &BallPath) -> Option<CatchRead> {
         let ground = pred.first_bounce().map_or(f64::INFINITY, |(t, ..)| t);
         let wall = pred.walls.first().map_or(f64::INFINITY, |(t, ..)| *t);
@@ -3673,29 +3745,28 @@ impl<'a> Sim<'a> {
         while t <= pred.t_end() && t < ground.min(wall) {
             let (b, _) = pred.at(t);
             let clearance = self.inp.field.body_clearance(b.x, b.y, 0.0).dist;
-            if clearance >= -OVER_WALL_REACH_M {
-                let dt = t - self.t;
-                let curve_m = 0.5 * CURVE_PRIOR * dt * dt;
-                let height_margin = (catch_ceiling_at_clearance(clearance) - b.z) / RUNNER_CATCH_SIGMA_M;
-                let mut horizontal_margin = f64::NEG_INFINITY;
-                for fd in &self.f {
-                    let to = Vec3::new(b.x - fd.pos.x, b.y - fd.pos.y, 0.0);
-                    let d = m::hypot(to.x, to.y);
-                    let v0 = if d > 1e-9 && d <= STEP_REACH_M { Some(fd.vel.dot(to) / d) } else { None };
-                    let travel = |v_max: f64| match v0 {
-                        Some(v0) => run_dist_from(dt, v0, v_max, 0.9),
-                        None => run_dist(dt, v_max, 0.9),
-                    };
-                    let typical = travel(TYPICAL_SPEED);
-                    // The run is linear in top speed, so this is its exact spread.
-                    let speed_m = travel(TYPICAL_SPEED + FIELDER_SPEED_SPREAD_MPS) - typical;
-                    let sigma = m::sqrt(RUNNER_CATCH_SIGMA_M * RUNNER_CATCH_SIGMA_M + speed_m * speed_m + curve_m * curve_m);
-                    horizontal_margin = horizontal_margin.max((REACH + typical - d) / sigma);
-                }
-                let score = phi(horizontal_margin.min(height_margin));
-                if score > 0.0 && best.is_none_or(|read| score > read.score) {
-                    best = Some(CatchRead { score, t, at: Vec3::new(b.x, b.y, 0.0) });
-                }
+            let dt = t - self.t;
+            let curve_m = 0.5 * CURVE_PRIOR * dt * dt;
+            let wall_margin = (clearance + OVER_WALL_REACH_M) / m::sqrt(RUNNER_CATCH_SIGMA_M * RUNNER_CATCH_SIGMA_M + curve_m * curve_m);
+            let height_margin = (catch_ceiling_at_clearance(clearance) - b.z) / RUNNER_CATCH_SIGMA_M;
+            let mut horizontal_margin = f64::NEG_INFINITY;
+            for fd in &self.f {
+                let to = Vec3::new(b.x - fd.pos.x, b.y - fd.pos.y, 0.0);
+                let d = m::hypot(to.x, to.y);
+                let v0 = (d > 1e-9).then(|| fd.vel.dot(to) / d);
+                let travel = |v_max: f64| match v0 {
+                    Some(v0) => run_dist_from(dt, v0, v_max, 0.9),
+                    None => run_dist(dt, v_max, 0.9),
+                };
+                let typical = travel(TYPICAL_SPEED);
+                // The run is linear in top speed, so this is its exact spread.
+                let speed_m = travel(TYPICAL_SPEED + FIELDER_SPEED_SPREAD_MPS) - typical;
+                let sigma = m::sqrt(RUNNER_CATCH_SIGMA_M * RUNNER_CATCH_SIGMA_M + speed_m * speed_m + curve_m * curve_m);
+                horizontal_margin = horizontal_margin.max((REACH + typical - d) / sigma);
+            }
+            let score = phi(horizontal_margin.min(height_margin).min(wall_margin));
+            if score > 0.0 && best.is_none_or(|read| score > read.score) {
+                best = Some(CatchRead { score, t, at: Vec3::new(b.x, b.y, 0.0) });
             }
             t += DT;
         }
@@ -3772,6 +3843,7 @@ impl<'a> Sim<'a> {
     }
 
     fn read_contact(&mut self, k: usize, look: ContactLook) {
+        self.r[k].catch_look = look.kept();
         let paths = self.runner_catch_paths(look);
         let score = Self::catch_score(&paths);
         if score >= self.tag_confidence(k) {
@@ -8995,6 +9067,7 @@ fn new_sim<'a>(inp: &'a LiveInput<'a>, st: &'a mut RulesState) -> Sim<'a> {
             looked: (0, 0),
             turns: 0,
             fly_look: None,
+            catch_look: None,
             throw_watch: None,
             overrun: OverrunPhase::None,
             over_m: 0.0,
@@ -12811,7 +12884,7 @@ mod tests {
                     continue;
                 }
                 let t = tr.first().t + RUNNER_READ_DELAY_S;
-                let look = ContactLook { motion: path.at(t), from: base_pos(2), t, view: RUNNER_READ_DELAY_S, contact_since: Some(RUNNER_READ_DELAY_S), rolling: false };
+                let look = ContactLook { motion: path.at(t), from: base_pos(2), t, view: RUNNER_READ_DELAY_S, contact_since: Some(RUNNER_READ_DELAY_S), rolling: false, seen: None };
                 let read = look.project(&field, [0.0; 4]);
                 match read.first_bounce() {
                     Some((_, rx, ry)) => miss.push(m::hypot(rx, ry) - truth),
@@ -13461,7 +13534,7 @@ mod tests {
                     let what = format!("{p:?} from {d} m, draws {err:?}");
                     let snap = read_prediction_k(&env, &field, (p, v), 2.0, from, a.read_sigma0, a.read_vel_frac, a.tau_read, 0.5, err, None);
                     assert_meets_the_ground(&snap, radius, &format!("snapshot read, {what}"));
-                    let look = ContactLook { motion: (p, v), from, t: 2.0, view: 1.5, contact_since: None, rolling };
+                    let look = ContactLook { motion: (p, v), from, t: 2.0, view: 1.5, contact_since: None, rolling, seen: None };
                     assert_meets_the_ground(&look.project(&field, err), radius, &format!("runner's look, {what}"));
                 }
             }
@@ -15060,6 +15133,7 @@ mod tests {
             view: RUNNER_READ_DELAY_S,
             contact_since: Some(RUNNER_READ_DELAY_S),
             rolling: false,
+            seen: None,
         };
         for fd in &mut sim.f {
             fd.pos = Vec3::new(-70.0, 30.0, 0.0);
@@ -15125,7 +15199,7 @@ mod tests {
             sim.r[0].reading_contact = false;
             sim.t = inp.t_contact + RUNNER_READ_DELAY_S;
             let (p, v) = sim.ball_at(sim.t);
-            let look = ContactLook { motion: (p, v * 1.12), from: sim.runner_pos(&sim.r[0]), t: sim.t, view: RUNNER_READ_DELAY_S, contact_since: Some(RUNNER_READ_DELAY_S), rolling: false };
+            let look = ContactLook { motion: (p, v * 1.12), from: sim.runner_pos(&sim.r[0]), t: sim.t, view: RUNNER_READ_DELAY_S, contact_since: Some(RUNNER_READ_DELAY_S), rolling: false, seen: None };
             assert!(look.project(inp.field, [0.0; 4]).first_bounce().is_none(), "he reads it over the fence");
             sim.read_contact(0, look);
             assert!(sim.r[0].goal == 2 && sim.r[0].fly_look.is_some(), "he goes at his first look");
@@ -15140,6 +15214,131 @@ mod tests {
         assert!(under_pulled && under_v <= 0.0, "fielder under it: still going at {under_s:.1} m, {under_v:.1} m/s");
         assert!(!away_pulled, "nobody near it: he pulled up at {away_s:.1} m");
         assert!(under_s < away_s - 5.0, "{under_s:.1} m against {away_s:.1} m");
+    }
+
+    /// The late-flight catch read (agent-models §6.3; docs/calibration/2026-11-23-late-catch-
+    /// read.md): a runner on `base` with one out watches `ball` from his base with a noise-free
+    /// look every `RUNNER_FLY_LOOK_S` from his first look until 0.3 s before it comes down,
+    /// keeping his first look for the later ones as he does in a game. Fielder `who` is placed by
+    /// `place(t)` (position, velocity) at each look; the others stand far from the ball. The
+    /// scores, by time since contact, and the least score the catch should keep: 0.5 where it
+    /// comes down in the open, and above his advance cut-off (`1 − RUNNER_CATCH_CONFIDENCE`:
+    /// he never reads it as dropping) within `WALL_CATCH_ZONE_M` of a wall, where a metre or
+    /// two of curve he cannot see decides whether it is in the seats. `None` for a ball that
+    /// does not come down in play.
+    fn late_read_scores(base: u8, ball: BallState, who: usize, place: impl Fn(f64, f64, Vec3) -> (Vec3, Vec3)) -> Option<(Vec<(f64, f64)>, f64)> {
+        const R: AgentId = 7;
+        let mut fx = fixture(&[(R, base)]);
+        fx.st.outs = 1;
+        let mut inp = input(&fx, vec![RunnerIn { id: R, base, speed: 8.2, tau_s: RUNNER_TAU }]);
+        inp.ball = ball;
+        let path = batted_path(&fx.env, &fx.field, ball, inp.t_contact, |_, _| (0.0, 0.0));
+        let (t_land, lx, ly) = path.first_bounce()?;
+        let land = Vec3::new(lx, ly, 0.0);
+        let clearance = fx.field.body_clearance(lx, ly, 0.0).dist;
+        let floor = if clearance >= WALL_CATCH_ZONE_M { 0.5 } else { 1.0 - RUNNER_CATCH_CONFIDENCE + 1e-9 };
+        let mut st = fx.st.clone();
+        let mut sim = new_sim(&inp, &mut st);
+        sim.start_runners();
+        sim.r[0].reading_contact = false;
+        let mut seen = None;
+        let mut out = Vec::new();
+        let mut t = inp.t_contact + RUNNER_READ_DELAY_S;
+        while t < t_land - 0.3 {
+            sim.t = t;
+            for fd in &mut sim.f {
+                fd.pos = Vec3::new(0.0, 110.0, 0.0);
+                fd.vel = Vec3::ZERO;
+            }
+            (sim.f[who].pos, sim.f[who].vel) = place(t - inp.t_contact, t_land - inp.t_contact, land);
+            let since = t - inp.t_contact;
+            let look = ContactLook { motion: sim.ball_at(t), from: sim.runner_pos(&sim.r[0]), t, view: since, contact_since: Some(since), rolling: false, seen };
+            out.push((since, Sim::catch_score(&sim.runner_catch_paths(look))));
+            seen = seen.or(look.kept());
+            t += RUNNER_FLY_LOOK_S;
+        }
+        Some((out, floor))
+    }
+
+    /// The named plays' balls, and each turned about the vertical through the plate by −30°
+    /// to 30° in 10° steps (the whole launch, spin included, so the flight is the same ball's
+    /// in another direction): spin axes at many angles to the field and to the heading.
+    fn late_read_balls() -> Vec<(String, u8, BallState, usize)> {
+        let mut out = Vec::new();
+        for (what, base, ball, who) in late_read_plays() {
+            for deg in [-30.0f64, -20.0, -10.0, 0.0, 10.0, 20.0, 30.0] {
+                let (c, sn) = (m::cos(deg.to_radians()), m::sin(deg.to_radians()));
+                let turn = |p: Vec3| Vec3::new(c * p.x - sn * p.y, sn * p.x + c * p.y, p.z);
+                out.push((format!("{what}, turned {deg}°"), base, BallState { r: turn(ball.r), v: turn(ball.v), w: turn(ball.w) }, who));
+            }
+        }
+        out
+    }
+
+    /// The named plays of the late-catch note, as launched in the games (contact point,
+    /// velocity m/s, spin rad/s), with the base of the runner traced and the fielder who caught
+    /// it: (what, base, ball, fielder).
+    fn late_read_plays() -> [(&'static str, u8, BallState, usize); 5] {
+        let b = |r: [f64; 3], v: [f64; 3], w: [f64; 3]| BallState { r: Vec3::new(r[0], r[1], r[2]), v: Vec3::new(v[0], v[1], v[2]), w: Vec3::new(w[0], w[1], w[2]) };
+        [
+            ("seed 1040 play 214, 77° pop-up behind third, the catcher", 2, b([-0.0709, 0.6915, 0.6567], [-4.5206, 6.6036, 35.3096], [969.418, -191.935, 163.238]), 1),
+            ("seed 1256 play 243, 66° pop-up behind third", 2, b([0.1569, 0.4842, 0.7333], [-9.3124, 10.2558, 30.7532], [787.311, 42.937, 577.113]), 4),
+            ("seed 108 play 142, 55° foul fly at the right-field seats", 1, b([0.1250, 0.4762, 0.7473], [12.3160, 19.6728, 32.8264], [713.418, 116.706, -247.803]), 8),
+            ("seed 8 play 75, 56° foul fly past first", 3, b([-0.1759, 0.4206, 0.6597], [11.4466, 13.7418, 26.6306], [670.731, 126.436, -291.215]), 2),
+            ("seed 280 play 10, 61° fly to shallow left", 2, b([0.1199, 0.5124, 0.6904], [-5.9259, 17.2460, 32.9536], [658.764, -138.347, 134.473]), 6),
+        ]
+    }
+
+    // The late-flight catch read (agent-models §6.3, late-catch note §1): a fielder standing
+    // where the ball comes down catches it, so a runner watching it with no read error never
+    // reads that catch as less likely than not, all the way down (at the railing, never as
+    // dropping). The named plays' balls in seven directions each. On main `3de8698` the plays
+    // themselves read 0.000–0.18 in mid-flight: the pop-ups flown about the wrong spin axis
+    // landed in the seats, and anything past the wall scored nothing.
+    #[test]
+    fn a_runner_watching_a_ball_the_fielder_stands_under_reads_the_catch_all_the_way_down() {
+        let mut open = 0;
+        for (what, base, ball, who) in late_read_balls() {
+            let Some((scores, floor)) = late_read_scores(base, ball, who, |_, _, land| (land, Vec3::ZERO)) else { continue };
+            assert!(scores.len() >= 8, "{what}: {} looks", scores.len());
+            open += usize::from(floor == 0.5);
+            for &(since, score) in &scores {
+                assert!(score >= floor, "{what}: {score:.3} at {since:.1} s, floor {floor:.2} ({scores:.2?})");
+            }
+        }
+        assert!(open >= 15, "{open} balls come down in the open");
+    }
+
+    // The same with the fielder running in (late-catch note §1, seed 280 play 10): he stands
+    // 33 m out until 1 s, then runs straight in at 7 m/s (below the typical 8 m/s) and is
+    // there 0.3 s before the ball. A runner who sees him coming does not read the catch as
+    // unlikely once the fielder is on his way; on main the read fell to 0.004 at 5 s because a
+    // fielder more than 5 m off was taken to start from rest.
+    #[test]
+    fn a_runner_watching_a_fielder_run_in_under_a_fly_reads_the_catch() {
+        const SPEED: f64 = 7.0;
+        let mut checked = 0;
+        for (what, base, ball, who) in late_read_balls() {
+            let Some((scores, floor)) = late_read_scores(base, ball, who, |t, t_land, land| {
+                let arrive = t_land - 0.3;
+                let dir = Vec3::new(-0.6, 0.8, 0.0);
+                let start = land + dir * (SPEED * (arrive - 1.0));
+                if t < 1.0 {
+                    (start, Vec3::ZERO)
+                } else if t < arrive {
+                    (start - dir * (SPEED * (t - 1.0)), dir * -SPEED)
+                } else {
+                    (land, Vec3::ZERO)
+                }
+            }) else {
+                continue;
+            };
+            checked += 1;
+            for &(since, score) in scores.iter().filter(|(since, _)| *since >= 1.0) {
+                assert!(score >= floor, "{what}: {score:.3} at {since:.1} s, floor {floor:.2} ({scores:.2?})");
+            }
+        }
+        assert!(checked >= 20, "{checked} balls come down in play");
     }
 
     // Agent-models §6.3, the in-flight relook while holding: a runner on first with one out
