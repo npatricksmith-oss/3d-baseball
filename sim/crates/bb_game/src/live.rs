@@ -464,9 +464,9 @@ struct ThrownRead {
     t_arrive: f64,
     /// His predicted track up to then: time and position.
     track: Vec<(f64, Vec3)>,
-    /// Where the relay man stands when it comes down at one, as he can see it (the man
-    /// visibly out as the cutoff man, or one farther than `RELAY_SEEN_M` from every bag): the
-    /// ball goes on to every base from there, not from the base nearest him.
+    /// Where the relay man stands when it comes down at one, as he can see it (a man visibly
+    /// out as the cutoff man): the ball goes on to every base from there, not from the base
+    /// nearest him.
     relay: Option<Vec3>,
 }
 
@@ -7180,18 +7180,17 @@ impl<'a> Sim<'a> {
         }
         track.truncate(arrive + 1);
         let dest = near(q_down).0;
-        // A throw coming down at a relay man (agent-models §6.4, the read of a throw: the same
-        // test as his read of a reception, `HolderLook::release_time`) goes on from him.
+        // A throw coming down at a man who visibly has the cutoff job goes on from him
+        // (agent-models §6.4, his read of a throw). Only the shown job: a man merely standing
+        // off the bags where a noisy read brings it down (a second baseman at his position
+        // short of the bag he is covering) is no relay.
         let relay = (0..9)
             .filter(|&j| {
                 let off = Vec3::new(self.f[j].pos.x - q_down.x, self.f[j].pos.y - q_down.y, 0.0);
                 off.norm() <= LOW_THROW_MAN_M && off.dot(u) >= -LOW_THROW_SHORT_M
             })
             .min_by(|&a, &c| m::hypot(self.f[a].pos.x - q_down.x, self.f[a].pos.y - q_down.y).total_cmp(&m::hypot(self.f[c].pos.x - q_down.x, self.f[c].pos.y - q_down.y)))
-            .filter(|&j| {
-                let p = self.f[j].pos;
-                matches!(self.known_job(j).0, Role::Relay(_)) || (1..=4).all(|b| m::hypot(p.x - base_pos(b).x, p.y - base_pos(b).y) > RELAY_SEEN_M)
-            })
+            .filter(|&j| matches!(self.known_job(j).0, Role::Relay(_)))
             .map(|j| Vec3::new(self.f[j].pos.x, self.f[j].pos.y, 0.0));
         ThrownRead { dest, t_arrive: t_down, track, relay }
     }
@@ -15991,7 +15990,7 @@ mod tests {
         let mut sim = new_sim(&inp, &mut st);
         let (j, flight) = throw_with_runner_held_on_third(&mut sim, Vec3::new(52.0, 92.0, 0.0), true);
         let at = sim.f[j].pos;
-        assert!((1..=4).all(|b| (at - base_pos(b)).norm() > RELAY_SEEN_M), "a relay spot off the bags: {at:?}");
+        assert_eq!(sim.known_job(j).0, Role::Relay(4), "he shows the cutoff job");
         let world = 5.0 + quickest_home_with_tag(&sim, j, at, flight, true) - sim.f[1].a.tag_apply_s;
         for dt in [0.0, 0.5, 1.0] {
             sim.t = 5.0 + dt;
