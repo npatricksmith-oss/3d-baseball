@@ -56,21 +56,25 @@ pub(super) fn push_look(look: BaseLook) {
     LOOKS.with_borrow_mut(|looks| looks.push(look));
 }
 
-/// The base looks recorded during the last `capture`, taken (cleared) by this call.
-pub fn take_looks() -> Vec<BaseLook> {
-    LOOKS.with_borrow_mut(core::mem::take)
+/// The ticks and the base looks of `f`.
+pub fn capture<T>(f: impl FnOnce() -> T) -> (T, Vec<Tick>) {
+    let (result, ticks, _) = capture_with_looks(f);
+    (result, ticks)
 }
 
-pub fn capture<T>(f: impl FnOnce() -> T) -> (T, Vec<Tick>) {
+/// The ticks and the base looks of `f`. Both buffers are cleared when the capture ends,
+/// however it ends (a panic included), so nothing from one capture reaches the next.
+pub fn capture_with_looks<T>(f: impl FnOnce() -> T) -> (T, Vec<Tick>, Vec<BaseLook>) {
     ON.with(|on| assert!(!on.replace(true), "nested runner capture"));
     struct Guard;
     impl Drop for Guard {
         fn drop(&mut self) {
             ON.with(|on| on.set(false));
             TICKS.with_borrow_mut(Vec::clear);
+            LOOKS.with_borrow_mut(Vec::clear);
         }
     }
     let _guard = Guard;
     let result = f();
-    (result, TICKS.with_borrow_mut(core::mem::take))
+    (result, TICKS.with_borrow_mut(core::mem::take), LOOKS.with_borrow_mut(core::mem::take))
 }

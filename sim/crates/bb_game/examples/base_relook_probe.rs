@@ -37,8 +37,7 @@ fn main() {
                     let fattrs: [FielderAttrs; 9] = core::array::from_fn(FielderAttrs::average);
                     let mut g = bb_game::game::Game::new(seed, false).with_fielders(fattrs);
                     loop {
-                        let (step, ticks) = runner_trace::capture(|| g.step_pitch());
-                        let looks = runner_trace::take_looks();
+                        let (step, ticks, looks) = runner_trace::capture_with_looks(|| g.step_pitch());
                         let Some(step) = step else { break };
                         // His first look that sent him, per runner.
                         let mut sent: BTreeMap<u16, (u8, bool)> = BTreeMap::new();
