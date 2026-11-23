@@ -18048,6 +18048,10 @@ mod tests {
             let dir = if rnd() < 0.5 { 1.0 } else { -1.0 };
             let goal = if standing { floor_b + (rnd() < 0.4) as u8 } else { floor_b + (rnd() < 0.5) as u8 };
             let planted = catch && standing && floor_b == b && rnd() < 0.5;
+            // Some diving back to the bag behind them, some down on a bag from a dive (review
+            // P3-6: the diver skips the settle guard while he is down).
+            let (dive_roll, down_s) = (rnd(), rnd() * DIVE_BACK_UP_S);
+            let now = sim.t;
             let r = &mut sim.r[j];
             r.s = pos;
             r.v = if standing { 0.0 } else { v };
@@ -18056,6 +18060,12 @@ mod tests {
             r.hold_s = None;
             r.tag_up = planted;
             r.waiting = false;
+            if !standing && floor_b >= 1 && dive_roll < 0.15 {
+                (r.goal, r.direction, r.dive_to) = (floor_b, -1.0, Some(floor_b));
+            } else if standing && !planted && (1..=3).contains(&floor_b) && dive_roll < 0.25 {
+                r.goal = floor_b;
+                r.dive = Some(DiveBack { base: floor_b, v: 0.0, t_touch: Some(now - down_s), rec: 0 });
+            }
         }
         if batter_runs {
             let r = &mut sim.r[0];
@@ -18153,8 +18163,9 @@ mod tests {
     }
 
     // Codex runner-reads recheck P1-1, as a property: over seeded random layouts (runners,
-    // places, speeds, directions, goals, a batter out or running so that a force may stand, the
-    // ball held anywhere, fresh looks as it is secured and thrown) no two live runners rest on
+    // places, speeds, directions, goals, a batter out or running so that a force may stand,
+    // runners diving back or down on a bag from a dive, the ball held anywhere, fresh looks as it
+    // is secured and thrown) no two live runners rest on
     // one base, every live runner ends on a base, and the rules engine never warns.
     #[test]
     fn random_runner_layouts_never_leave_two_on_a_base() {
