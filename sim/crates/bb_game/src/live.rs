@@ -2,8 +2,9 @@
 //! their observations, and the rules engine judges each fact as it happens.
 //!
 //! Fielders project observed ball states using their own physics (agent-models §5.1).
-//! The defense uses at most one cutoff or relay man, and coverage follows the assignments
-//! in agent-models §5.7.
+//! The defense lines up one cutoff or relay man, or on a deep ball with a play at home two (the
+//! double cut: a middle infielder as the relay man and the first baseman behind him), and coverage
+//! follows the assignments in agent-models §5.7.
 
 use bb_math::{KeyedRng, Mat3, Purpose, RngKey, Vec3, m};
 use bb_physics::ground::{BallPath, Field, SegmentEnd, WallContact, batted_path, batted_path_dt, over_the_wall, wall_contact};
@@ -5088,9 +5089,11 @@ impl<'a> Sim<'a> {
     /// after contact on 11 plays with runners on first and third in 120 games). With the run in
     /// and the runner from first held at second, a real infield does not realign either: holding
     /// only while a runner moves gave more hand-overs at the pickup and more of third open (Opus
-    /// relay hand-overs review P3-1). The same on a deep ball with the first baseman known out on
-    /// the double cut (2026-11-22, agent-models §5.7): the run from third scoring does not send him
-    /// back while the runner from first is still coming.
+    /// relay hand-overs review P3-1). The same on a deep ball with a corner man known out on the
+    /// cutoff home (2026-11-22, agent-models §5.7): the double cut's first baseman, whom the run
+    /// from third scoring does not send back while the runner from first is still coming; or a
+    /// third baseman still known out on a single's cutoff home as the ball turns deep, until he is
+    /// known back (the double cut then follows).
     fn relay_base(&self, deep: bool, viewer: usize) -> u8 {
         let moving = self.f[viewer].a.throw_choice.moving_mps;
         let at = |r: &Runner| {
@@ -5247,7 +5250,8 @@ impl<'a> Sim<'a> {
     }
 
     /// Each fielder not going for the ball, not on a cutoff and not holding it re-works his own
-    /// cover or backup job when the deep ball's cutoff men by the convention, as he works them out
+    /// cover job (one who loses a cover takes his own next job, `take_own_job`) when the deep
+    /// ball's cutoff men by the convention, as he works them out
     /// (`deep_cut_by_convention`), change: the moment the ball is seen past the outfielders, not
     /// when the relay man's job is shown (agent-models §5.7, the double cut). Not while a throw is
     /// in the air.
@@ -5963,7 +5967,8 @@ impl<'a> Sim<'a> {
     /// everyone sees, and for its man his own chase and read): its man takes it, or keeps to
     /// its line as the fielding point and the runners' intentions change; a man who had it
     /// and is no longer its man goes back to covering. A throw to someone else that goes by
-    /// him ends it; a throw coming to him keeps it. The man leaving takes his own next job.
+    /// him ends it, and he takes his own next job at once; a throw coming to him keeps it. The
+    /// man leaving takes his own next job.
     /// Teammates update their jobs when they learn of the change (`hear`).
     fn update_relay(&mut self) {
         self.latch_deep();

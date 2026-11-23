@@ -91,3 +91,7 @@ diagnostic trace is never part of a fielder's inputs.
     the single's cutoff to third at once, the first baseman goes out.
   - `118-162` (Opus relay hand-overs review P3-3): a runner on first, a grounder past the right
     fielder that the centre fielder takes over. The deep call does not flip back.
+  - `17-103` (frozen the same way after the double-cut reviews, P2-1; fails without that fix,
+    and on `ba40063` at its premise, there being no double cut): a runner on first, none out, a ball past the
+    centre fielder; he throws to second, past the first baseman out on the double cut, who goes
+    back to first at once (`a_throw_that_goes_by_the_double_cut_sends_the_first_baseman_back_to_first`).
