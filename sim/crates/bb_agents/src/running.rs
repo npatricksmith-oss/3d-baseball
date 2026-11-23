@@ -187,8 +187,15 @@ impl AdvanceParams {
     /// cushion is in spreads of the race, not in probability, so a sure thing is always
     /// taken when it gains anything and a break-even near 1 does not become "never".
     pub fn chooses_on(&self, on_margin_s: f64, back_margin_s: f64, values: &AdvanceValues) -> bool {
-        let p_on = phi(on_margin_s / self.sigma_race_s - self.caution_z);
-        let p_back = if back_margin_s == f64::INFINITY { 1.0 } else { phi(back_margin_s / self.sigma_race_s - self.caution_z) };
+        self.chooses_between(on_margin_s, back_margin_s, values, self.caution_z, self.caution_z)
+    }
+
+    /// [`AdvanceParams::chooses_on`] with its own caution for each way: the two-out send's
+    /// for the way home, the general one for the way back to third (review 2026-11-23, P3-1:
+    /// the coach's send makes going home look better, not the return).
+    pub fn chooses_between(&self, on_margin_s: f64, back_margin_s: f64, values: &AdvanceValues, caution_on: f64, caution_back: f64) -> bool {
+        let p_on = phi(on_margin_s / self.sigma_race_s - caution_on);
+        let p_back = if back_margin_s == f64::INFINITY { 1.0 } else { phi(back_margin_s / self.sigma_race_s - caution_back) };
         p_on * values.safe + (1.0 - p_on) * values.out > p_back * values.hold + (1.0 - p_back) * values.out
     }
 }
@@ -259,17 +266,18 @@ mod advance_tests {
     }
 
     // Q38 (a): with two out the runner from second is sent home unless clearly beaten. His
-    // read of a race 0.1 s behind the ball alone is 0.15 s in hand once the catcher's tag
-    // (0.25 s) is counted: the general caution held him there (it wants about 0.16 s at the
-    // two-out break-even of 41%, runner-start note §1), the two-out send takes him, and with one
-    // out (break-even 73%) the same race still holds him. 0.7 s behind the ball alone (−0.45 s
-    // with the tag) he is beaten and holds. Only the runner from second going home is sent so:
-    // first to third and first to home keep the general caution.
+    // read of a race 0.15 s behind the ball alone is 0.10 s in hand once the catcher's tag
+    // (0.25 s) is counted. The general caution makes that a 31% chance, clearly under the
+    // two-out break-even of 41.5% (note §1.5; it wants about 0.16 s in hand, runner-start note
+    // §1), so it held him; the two-out send makes it 76% and takes him; with one out
+    // (break-even 73%) the same race still holds him. 0.7 s behind the ball alone (−0.45 s with
+    // the tag) he is beaten and holds. The loop at the end only documents the scope: first to
+    // third, first to home, the batter-runner and second to third keep the general caution.
     #[test]
     fn the_two_out_send_from_second_takes_the_close_race() {
         let p = AdvanceParams::default();
         let v = |o: u8| AdvanceValues { hold: run_expectancy(0b101, o), safe: run_expectancy(0b001, o) + 1.0, out: run_expectancy(0b001, o + 1) };
-        let close = 0.25 - 0.1;
+        let close = 0.25 - 0.15;
         assert!(!p.goes(close, &v(2)), "the general caution holds him");
         assert!(p.for_decision(2, 4, 2).goes(close, &v(2)), "the two-out send takes him");
         assert!(!p.for_decision(2, 4, 1).goes(close, &v(1)), "one out: he holds");
@@ -277,6 +285,23 @@ mod advance_tests {
         for (start, next) in [(1u8, 3u8), (1, 4), (0, 2), (2, 3)] {
             assert_eq!(p.for_decision(start, next, 2), p, "{start} to {next} keeps the general caution");
         }
+    }
+
+    // Review P3-1: between third and home with two out, the send's caution is on the way home
+    // only. Worked by hand from the run table (two out: hold 1-3 0.51, safe a run and a man on
+    // first 1.23, out 0): home believed 0.2 s short (margin −0.2 s), third 0.1 s in hand.
+    // Home: Φ(−1 + 0.2) = 0.212, worth 0.26. Third at the general caution: Φ(0.5 − 1) = 0.309,
+    // worth 0.16: he goes on. Had the way back taken the send's −0.2 too, Φ(0.7) = 0.758,
+    // worth 0.39: he would have turned back, the send making the return look safer.
+    #[test]
+    fn the_two_out_send_does_not_make_the_way_back_look_safer() {
+        let p = AdvanceParams::default();
+        let v = AdvanceValues { hold: run_expectancy(0b101, 2), safe: run_expectancy(0b001, 2) + 1.0, out: 0.0 };
+        assert!((v.hold - 0.51).abs() < 1e-9 && (v.safe - 1.23).abs() < 1e-9);
+        let z = p.send_two_out_z;
+        assert!(p.chooses_between(-0.2, 0.1, &v, z, p.caution_z), "the send on the way home only: he goes on");
+        assert!(!p.chooses_between(-0.2, 0.1, &v, z, z), "the send on both ways: he turns back");
+        assert!(!p.chooses_on(-0.2, 0.1, &v), "the general caution both ways: he turns back");
     }
 
     #[test]

@@ -8029,9 +8029,12 @@ impl<'a> Sim<'a> {
         let (m_on, m_back) = (margin(ball_on, t_on), margin(ball_back, t_back));
         // Whether he believes he makes each base at all (better than even), and which he
         // chooses by what each is worth (§6.3).
-        let adv = &self.inp.advance.for_decision(start, next, self.runner_outs(k));
+        // With two out the coach's send home has its own caution on the way home only; the way
+        // back keeps the general caution (`send_two_out_z`, Q38 (a); review P3-1).
+        let adv = &self.inp.advance;
+        let caution_on = adv.for_decision(start, next, self.runner_outs(k)).caution_z;
         let (go_on, go_back) = (adv.p_safe(m_on) > 0.5, adv.p_safe(m_back) > 0.5);
-        let prefers_on = adv.chooses_on(m_on, m_back, &self.advance_values(k, from, self.t + t_on.min(t_back)));
+        let prefers_on = adv.chooses_between(m_on, m_back, &self.advance_values(k, from, self.t + t_on.min(t_back)), caution_on, adv.caution_z);
         // Safe at neither: he goes for the base he has the better chance at, as he sees it,
         // while that chance is worth running for (`TRAPPED_MIN_P`); with none, he keeps away
         // from the ball, toward the base it takes longer to reach (a rundown is not modelled;
