@@ -59,7 +59,7 @@ No throw went through a cutoff or relay man to any base in 120 games on either b
 
 ## 5. Standard run
 
-`sim-cli games --n 300`, seeds 0 [1000], main `ba40063` against `f7baee3`, back to back on 2026-11-22, both built fresh (main from `git archive`; its output repeats the relay hand-overs ledger row's final figures line for line). `816a15e` (the convention worked out once per tick) gives the same figures on seed 0.
+`sim-cli games --n 300`, seeds 0 [1000], main `ba40063` against `f7baee3`, back to back on 2026-11-22, both built fresh (main from `git archive`; its output repeats the relay hand-overs ledger row's final figures line for line). The final build (`563bfa9`, sim as `816a15e`: the convention worked out once per tick), touched and rebuilt, gives the same figures on both seed sets, at 4,930 [5,058] ms per game per core; `cargo test --workspace` on it: 526 passed, 0 failed.
 
 | | Main `ba40063` | `f7baee3` |
 |---|---|---|
