@@ -17,9 +17,9 @@ Status: `[ ]` not started · `[~]` partly done · `[?]` needs an owner decision
 
 ## Resume here (2026-11-23)
 
-**State.** Nothing running; the late-catch read is merged. **Waiting on the owner:** Q37 (stances; parked). Q38 (a), Q39 (a) decided (§1).
+**State.** Running: worker-1 (Opus) on `work/two-out-caution` in `.claude/worktrees/runner-decision`: Q38 (job WORKER-Q38.md); then an Opus review. **Waiting on the owner:** Q37 (stances; parked). Q38 (a), Q39 (a) decided (§1).
 
-**Next:** Q38 then Q39 (§1, one live.rs job at a time). Then §2: seed-5593, play 71.
+**Next:** Q39 after Q38 (§1, one live.rs job at a time). Then §2: seed-5593, play 71.
 
 **Open (ledger §5):** runs down 0.21 [0.18] since dp-cover (0.04 explained; check noise); double plays 12.3% (MLB 9.8%).
 
