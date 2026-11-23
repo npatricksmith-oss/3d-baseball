@@ -6241,7 +6241,9 @@ impl<'a> Sim<'a> {
             second.push(5);
         }
         let mi: [usize; 2] = if ss_takes_second { [5, 3] } else { [3, 5] };
-        second.extend(mi.into_iter().filter(|&c| c != o && self.seen(o, c).0 == Role::Cover(2)));
+        // (A man the deep ball's convention counts out as its relay man is not on second, whatever
+        // he was last known doing: `deep_cut_by_convention`.)
+        second.extend(mi.into_iter().filter(|&c| c != o && self.seen(o, c).0 == Role::Cover(2) && !relay(c)));
         let mut taken: Vec<usize> = second.clone();
         taken.extend((0..9).filter(|&c| relay(c)));
         let mut out = [None; 4];
@@ -6355,7 +6357,11 @@ impl<'a> Sim<'a> {
         for base in 1..=4u8 {
             let cands: Vec<usize> = order.iter().filter(|e| e.0 == base).flat_map(|e| e.1.iter().copied()).collect();
             let rank = |i: usize| cands.iter().position(|&c| c == i).unwrap_or(cands.len());
-            let holds = |i: usize| (job(i) == Role::Cover(base) && !(two_to_second && i == 3)) || (two_to_second && base == 2 && i == 3);
+            // On a deep ball by the convention, a corner man not counted out on a cutoff is back at
+            // his base, whatever he was last known doing (out on a single's cutoff home): the
+            // standard assignment gives it to him (`deep_cut_by_convention`).
+            let corner_back = |i: usize| deep.is_some() && ((i == 4 && base == 3) || (i == 2 && base == 1));
+            let holds = |i: usize| (job(i) == Role::Cover(base) && !(two_to_second && i == 3)) || (two_to_second && base == 2 && i == 3) || corner_back(i);
             if let Some(c) = (0..9).filter(|&i| (holds(i) || (ss_claims_second && base == 2 && i == 5) || (two_claims_first && base == 1 && i == 3) || (one_back && base == 1 && i == 2)) && !taken.contains(&i)).min_by_key(|&i| (rank(i), i)) {
                 if c == o {
                     return Some(base);
