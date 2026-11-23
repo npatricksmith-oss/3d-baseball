@@ -17,7 +17,7 @@ Status: `[ ]` not started · `[~]` partly done · `[?]` needs an owner decision
 
 ## Resume here (2026-11-22, night)
 
-**State.** Nothing is running; nothing is waiting on the owner. Relay hand-overs and the worker hooks and job queue are merged. Workers: own herdr sessions with `BB_WORKER_NAME`, `bin/worker-wait.sh`, long runs through `bin/job.sh` (CLAUDE.md).
+**State.** Nothing is running; nothing is waiting on the owner. Relay hand-overs and the worker hooks and job queue are merged.
 
 **Next job (Q35, owner 2026-11-22: (c)):** the double cut, §3 below. Opus worker; spec first, ledger row, Opus review.
 
