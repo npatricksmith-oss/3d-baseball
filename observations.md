@@ -41,7 +41,7 @@ Fielding and throwing:
 - [x] A. Implement rosters (player names, player numbers, player positions). *Numbers are on the backs of the uniforms.*
 - [ ] B. Team lineups (vs left vs right batting orders).
 - [ ] B. Implement a game settings screen.
-- [~] A. Implement baserunners sliding at appropriate times. *Since 2026-11-16 a runner slides feet-first into second, third or home when a play is being made on him there. Left: with no play on him he still stops dead standing (the sim stops him dead; slowing into the base is sim work), and a runner put out before the bag is not seen sliding into the tag. You have not seen it moving yet.*
+- [~] A. Implement baserunners sliding at appropriate times. *Since 2026-11-16 a runner slides feet-first into second, third or home when a play is being made on him there. Left: with no play on him he still stops dead standing (the sim stops him dead; slowing into the base is sim work), and a runner put out before the bag is not seen sliding into the tag. You have not seen it moving yet.* *2026-11-23 (Q39): a runner going back to his base on a close play now dives back headfirst, about once a game. This is the sim's own move: he gets there sooner than by braking, and he is down a second before he can run again. It is drawn with his hand on the bag when the sim has it touch.*
 - [ ] A. Implement stolen bases.
 - [~] A. Variety of body shapes, nationalities, ethnicities, skin color. *Height, build and skin tone vary by player; names do not yet follow nationality.*
 - [x] A. Team uniforms.
