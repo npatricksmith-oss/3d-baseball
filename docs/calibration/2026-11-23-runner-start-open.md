@@ -180,7 +180,7 @@ The levers remain those in the [fly-read note](2026-11-19-fly-read.md#open) and 
 1. **The late-flight catch read (§2, step 1).** A defect with a clear test, it needs no owner decision, and it blocks the tag-up relook. It should also make the going runners' relooks right. Opus: it touches the projection. It needs its own ledger row.
 2. **The tag-up relook (§2, step 2)**, with the two P3s above: about +4 points on second to home with 0–1 out. It brings the sim's behaviour in line with agent-models §6.3's own description of a runner who keeps watching. The spec needs one line saying that it applies to tagging runners too.
 
-**Needs the owner (proposed questions; the Coordinator numbers them):**
+**Decided by the owner (2026-11-23): Q38 (a), Q39 (a).** Q38 is the first question below (two-out sends at the corners: the coach's two-out pre-decision, `caution_z` set by outs and fitted to these rates); Q39 the second (build a dive or slide back for close returns, and look at the runner from third breaking 15 m on a grounder in front of him in the same job). As the questions were put:
 - **Two-out sends at the corners.**
   - *Now:* with two out, a runner on second holds at third on about one single in five to left or right, on plays where he would have scored. Big-league runners go on about 92% and are thrown out on 2–6% of those sends. To center both the sim and MLB send 96%.
   - *Options:*
