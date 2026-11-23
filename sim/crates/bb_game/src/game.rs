@@ -157,6 +157,8 @@ pub struct PlayViz {
     /// Dives (t, fielder, where he left his feet, where his body lands); he is up
     /// [`crate::live::DIVE_GETUP_S`] later.
     pub dives: Vec<(f64, u16, bb_math::Vec3, bb_math::Vec3)>,
+    /// Runners' dives back to a bag (agent-models §6.4, "Diving back").
+    pub runner_dives: Vec<crate::live::RunnerDive>,
 }
 
 /// Everything one pitch produced, for timelines and visualization.
@@ -462,6 +464,7 @@ impl Game {
                 viz.released = out.released.clone();
                 viz.hurry = out.hurry.clone();
                 viz.dives = out.dives.clone();
+                viz.runner_dives = out.runner_dives.clone();
             }
             // Balls out of play, by what they were (lab diagnostic).
             for f in &out.facts {

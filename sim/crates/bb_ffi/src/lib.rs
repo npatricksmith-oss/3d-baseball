@@ -198,29 +198,35 @@ pub struct BbActor {
 /// Maximum actors in a frame: nine fielders, the batter, three runners, and room to spare.
 pub const BB_MAX_ACTORS: usize = 16;
 
-/// A fielder off his feet from a dive at this instant: from the moment he leaves them until
-/// he is back on them.
+/// A player off his feet from a dive at this instant, from the moment he leaves them until
+/// he is back on them: a fielder's dive for a ball, or a runner's dive back to a bag
+/// (agent-models §6.4, "Diving back").
 #[repr(C)]
 #[derive(Clone, Copy, Default)]
 pub struct BbDive {
     pub agent: u16,
-    pub _pad: u16,
+    /// The bag a runner dives back to (1–3); 0 for a fielder's dive.
+    pub base: u16,
     /// Seconds since he left his feet.
     pub since_s: f32,
     /// Seconds until he is back on them.
     pub up_in_s: f32,
     /// Direction of the dive on the ground (sim frame, unit; zero if he went nowhere).
     pub dir: [f32; 2],
+    /// A runner's dive back: seconds until his hand touches the bag (negative once it has).
+    /// 0 for a fielder's dive.
+    pub touch_in_s: f32,
 }
 
 /// Most dives shown at one instant.
 pub const BB_MAX_DIVES: usize = 4;
 
-/// A `Dive` or `DiveUp` marker, decoded.
+/// A `Dive`, `DiveUp` or (a runner's dive back) `BaseTouch` marker, decoded.
 struct DiveMark {
-    up: bool,
+    kind: MarkerKind,
     t: f32,
     agent: u16,
+    base: u8,
     p: [f32; 3],
 }
 
@@ -229,13 +235,14 @@ struct DiveMark {
 /// with that first get-up: Codex dive animation review #2).
 fn active_dives(marks: &[DiveMark], t: f32) -> Vec<BbDive> {
     let mut out = Vec::new();
-    for mk in marks.iter().filter(|m| !m.up && m.t <= t) {
-        let up = marks.iter().filter(|u| u.up && u.agent == mk.agent && u.t > mk.t).min_by(|a, b| a.t.total_cmp(&b.t));
-        let Some(up) = up.filter(|u| u.t > t) else { continue };
+    let next = |kind: MarkerKind, mk: &DiveMark| marks.iter().filter(|u| u.kind == kind && u.agent == mk.agent && u.t > mk.t).min_by(|a, b| a.t.total_cmp(&b.t));
+    for mk in marks.iter().filter(|m| m.kind == MarkerKind::Dive && m.t <= t) {
+        let Some(up) = next(MarkerKind::DiveUp, mk).filter(|u| u.t > t) else { continue };
         let (dx, dy) = (up.p[0] - mk.p[0], up.p[1] - mk.p[1]);
         let n = (dx * dx + dy * dy).sqrt();
         let dir = if n > 1e-4 { [dx / n, dy / n] } else { [0.0, 0.0] };
-        out.push(BbDive { agent: mk.agent, _pad: 0, since_s: t - mk.t, up_in_s: up.t - t, dir });
+        let touch_in_s = if mk.base > 0 { next(MarkerKind::BaseTouch, mk).filter(|b| b.t <= up.t).map_or(0.0, |b| b.t - t) } else { 0.0 };
+        out.push(BbDive { agent: mk.agent, base: mk.base as u16, since_s: t - mk.t, up_in_s: up.t - t, dir, touch_in_s });
     }
     out
 }
@@ -255,7 +262,7 @@ pub struct BbFrame {
     pub holder: i32,
     /// Seconds until that holder releases a throw, or -1 if he does not throw it.
     pub release_in_s: f32,
-    /// Fielders off their feet from a dive.
+    /// Players off their feet from a dive (a fielder's, or a runner's dive back).
     pub n_dives: u32,
     pub dives: [BbDive; BB_MAX_DIVES],
 }
@@ -472,8 +479,8 @@ pub unsafe extern "C" fn bb_timeline_sample(blob: *const u8, len: usize, t: f32,
         // Dives under way.
         let dm: Vec<DiveMark> = marks
             .iter()
-            .filter(|m| matches!(m.kind(), MarkerKind::Dive | MarkerKind::DiveUp))
-            .filter_map(|m| m.p().map(|p| DiveMark { up: m.kind() == MarkerKind::DiveUp, t: m.t(), agent: m.agent(), p: v3(p) }))
+            .filter(|m| matches!(m.kind(), MarkerKind::Dive | MarkerKind::DiveUp | MarkerKind::BaseTouch))
+            .filter_map(|m| m.p().map(|p| DiveMark { kind: m.kind(), t: m.t(), agent: m.agent(), base: m.base(), p: v3(p) }))
             .collect();
         for d in active_dives(&dm, t).into_iter().take(BB_MAX_DIVES) {
             frame.dives[frame.n_dives as usize] = d;
@@ -1298,7 +1305,7 @@ mod tests {
     // from the first is reported, with its own direction, not paired with the first get-up.
     #[test]
     fn a_dive_starting_as_the_last_one_ends_is_reported() {
-        let mk = |up: bool, t: f32, p: [f32; 3]| DiveMark { up, t, agent: 0x186, p };
+        let mk = |up: bool, t: f32, p: [f32; 3]| DiveMark { kind: if up { MarkerKind::DiveUp } else { MarkerKind::Dive }, t, agent: 0x186, base: 0, p };
         let marks = [mk(false, 1.0, [0.0, 30.0, 0.0]), mk(true, 2.5, [1.0, 30.0, 0.0]), mk(false, 2.5, [1.0, 30.0, 0.0]), mk(true, 4.0, [1.0, 31.5, 0.0])];
         for t in [2.5f32, 3.0, 3.9] {
             let d = active_dives(&marks, t);

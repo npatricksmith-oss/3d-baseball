@@ -218,6 +218,15 @@ pub fn encode(step: &PitchStep, st: &RulesState, rosters: &crate::roster::Roster
             t_end = t_end.max(up);
         }
     }
+    // A runner's dive back the play ended during: he lies on the bag until he is up, and the
+    // clip lasts until then (agent-models §6.4, "Diving back"). Presentation only.
+    for d in &step.viz.runner_dives {
+        let Some((_, track)) = tracks.iter_mut().find(|(a, _)| *a == d.agent) else { continue };
+        if track.last().unwrap().0 < d.t_up {
+            track.push((d.t_up, d.hand));
+            t_end = t_end.max(d.t_up);
+        }
+    }
     // The play is not over for a viewer until the umpire has signalled its last out.
     t_end = step.calls.iter().map(|c| c.t_call()).fold(t_end, f64::max);
     let mut actor_offs = Vec::new();
@@ -320,6 +329,15 @@ pub fn encode(step: &PitchStep, st: &RulesState, rosters: &crate::roster::Roster
             tl::Marker::create(&mut fbb, &tl::MarkerArgs { t: t as f32, kind, agent, base: 0, p: Some(&pv), margin_s: 0.0 })
         })
         .collect();
+    // Runners' dives back (agent-models §6.4, "Diving back"; data-formats §5.4): he leaves his
+    // feet (p = where), his hand touches the bag (p = the bag's point on his path), he is up
+    // (p = the same point); `base` is the bag.
+    for d in &step.viz.runner_dives {
+        for (t, kind, p) in [(d.t_leave, MarkerKind::Dive, d.from), (d.t_touch, MarkerKind::BaseTouch, d.hand), (d.t_up, MarkerKind::DiveUp, d.hand)] {
+            let pv = v3f(p);
+            marks.push(tl::Marker::create(&mut fbb, &tl::MarkerArgs { t: t as f32, kind, agent: d.agent, base: d.base, p: Some(&pv), margin_s: 0.0 }));
+        }
+    }
     // The umpire's out calls (rules-spec §1.3), at the moment he signals each.
     for c in &step.calls {
         let pv = v3f(c.at);
