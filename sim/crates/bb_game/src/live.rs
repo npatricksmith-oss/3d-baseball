@@ -385,6 +385,9 @@ struct ContactLook {
     /// His first catch look at this first flight, if he has had one (agent-models §6.3, "The
     /// curve he has seen").
     seen: Option<SeenLook>,
+    /// The spin axis he has seen (`seen_axis`), worked out once for the look and used by each
+    /// of its projections; set with [`ContactLook::with_seen`].
+    axis: Option<Vec3>,
 }
 
 /// What a runner keeps of his first catch look at a ball on its first flight (agent-models
@@ -398,6 +401,13 @@ struct SeenLook {
 }
 
 impl ContactLook {
+    /// This look with `seen` as his earlier catch look, and the axis he has seen worked out.
+    fn with_seen(mut self, seen: Option<SeenLook>) -> Self {
+        self.seen = seen;
+        self.axis = self.seen_axis();
+        self
+    }
+
     /// This look as the one he keeps for the next: none once the ball is off its first flight.
     fn kept(self) -> Option<SeenLook> {
         let since = self.contact_since?;
@@ -465,7 +475,7 @@ impl ContactLook {
         }
         // Forward, the typical spin's size about the axis he has seen (from his central read:
         // the eight error points are this look's own errors, not a different curve).
-        let w = self.seen_axis().map_or(w, |axis| axis * w.norm());
+        let w = self.axis.map_or(w, |axis| axis * w.norm());
         let (r, v) = on_or_above_ground((r, v), self.rolling, env.ball.radius);
         batted_path_dt(&env, field, BallState { r, v, w }, self.t, AGENT_DT, |_, _| (0.0, 0.0))
     }
@@ -3703,12 +3713,13 @@ impl<'a> Sim<'a> {
             contact_since: self.public_contact_since(),
             rolling: seen_rolling(self.ball_at(self.t), self.inp.env.ball.radius),
             seen: None,
+            axis: None,
         };
         let (los, sp, sv) = look.scales(look.motion);
         look.motion = noisy_ball_motion(look.motion, los, sp, sv, self.runner_ball_errors(k, sub));
         // His first catch look counts only on the same first flight, and before this one.
-        look.seen = self.r[k].catch_look.filter(|prev| look.contact_since.is_some_and(|now| now > prev.since));
-        look
+        let seen = self.r[k].catch_look.filter(|prev| look.contact_since.is_some_and(|now| now > prev.since));
+        look.with_seen(seen)
     }
 
     fn runner_catch_paths(&self, look: ContactLook) -> [Option<CatchRead>; 8] {
@@ -12910,7 +12921,7 @@ mod tests {
                     continue;
                 }
                 let t = tr.first().t + RUNNER_READ_DELAY_S;
-                let look = ContactLook { motion: path.at(t), from: base_pos(2), t, view: RUNNER_READ_DELAY_S, contact_since: Some(RUNNER_READ_DELAY_S), rolling: false, seen: None };
+                let look = ContactLook { motion: path.at(t), from: base_pos(2), t, view: RUNNER_READ_DELAY_S, contact_since: Some(RUNNER_READ_DELAY_S), rolling: false, seen: None, axis: None };
                 let read = look.project(&field, [0.0; 4]);
                 match read.first_bounce() {
                     Some((_, rx, ry)) => miss.push(m::hypot(rx, ry) - truth),
@@ -13560,7 +13571,7 @@ mod tests {
                     let what = format!("{p:?} from {d} m, draws {err:?}");
                     let snap = read_prediction_k(&env, &field, (p, v), 2.0, from, a.read_sigma0, a.read_vel_frac, a.tau_read, 0.5, err, None);
                     assert_meets_the_ground(&snap, radius, &format!("snapshot read, {what}"));
-                    let look = ContactLook { motion: (p, v), from, t: 2.0, view: 1.5, contact_since: None, rolling, seen: None };
+                    let look = ContactLook { motion: (p, v), from, t: 2.0, view: 1.5, contact_since: None, rolling, seen: None, axis: None };
                     assert_meets_the_ground(&look.project(&field, err), radius, &format!("runner's look, {what}"));
                 }
             }
@@ -15160,6 +15171,7 @@ mod tests {
             contact_since: Some(RUNNER_READ_DELAY_S),
             rolling: false,
             seen: None,
+            axis: None,
         };
         for fd in &mut sim.f {
             fd.pos = Vec3::new(-70.0, 30.0, 0.0);
@@ -15225,7 +15237,7 @@ mod tests {
             sim.r[0].reading_contact = false;
             sim.t = inp.t_contact + RUNNER_READ_DELAY_S;
             let (p, v) = sim.ball_at(sim.t);
-            let look = ContactLook { motion: (p, v * 1.12), from: sim.runner_pos(&sim.r[0]), t: sim.t, view: RUNNER_READ_DELAY_S, contact_since: Some(RUNNER_READ_DELAY_S), rolling: false, seen: None };
+            let look = ContactLook { motion: (p, v * 1.12), from: sim.runner_pos(&sim.r[0]), t: sim.t, view: RUNNER_READ_DELAY_S, contact_since: Some(RUNNER_READ_DELAY_S), rolling: false, seen: None, axis: None };
             assert!(look.project(inp.field, [0.0; 4]).first_bounce().is_none(), "he reads it over the fence");
             sim.read_contact(0, look);
             assert!(sim.r[0].goal == 2 && sim.r[0].fly_look.is_some(), "he goes at his first look");
@@ -15278,7 +15290,7 @@ mod tests {
             }
             (sim.f[who].pos, sim.f[who].vel) = place(t - inp.t_contact, t_land - inp.t_contact, land);
             let since = t - inp.t_contact;
-            let look = ContactLook { motion: sim.ball_at(t), from: sim.runner_pos(&sim.r[0]), t, view: since, contact_since: Some(since), rolling: false, seen };
+            let look = ContactLook { motion: sim.ball_at(t), from: sim.runner_pos(&sim.r[0]), t, view: since, contact_since: Some(since), rolling: false, seen: None, axis: None }.with_seen(seen);
             out.push((since, Sim::catch_score(&sim.runner_catch_paths(look))));
             seen = seen.or(look.kept());
             t += RUNNER_FLY_LOOK_S;
