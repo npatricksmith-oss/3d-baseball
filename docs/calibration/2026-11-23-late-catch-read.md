@@ -40,3 +40,34 @@ For each runner on base with the ball on its first flight, the probe scored a no
 - The seen axis, keeping the typical spin's size, is the one that tracks the ball.
 - None of the three makes a hit look like a sure catch: the 0.8+ reads on balls that dropped stay at 166 against 167.
 - The remaining 676 dips below 0.5 are mostly fielders running or diving for the ball (liners at 10–40°, outfielders on the run), where the doubt is real.
+
+The seen-axis variant in this table took the push between the last two looks, 0.5 s apart. That version swung near the apex, where the push is weak and turns quickly: in seed 1256 play 243 at 3.0 s its axis came out 60° wrong, and the descent was flown about it. The built version measures the push from his first look on, with the fielders' tracking-read weighing (agent-models §6.3, "The curve he has seen").
+
+## 3. The built read
+
+The same scan on the built read (branch `b58dd0b`; the games differ a little from main's, so the counts are not paired):
+
+| | Caught, min < 0.5 | Caught, min ≤ 0.2 | 50°+ caught, min < 0.5 | 50°+ caught, min ≤ 0.2 | Not caught (10°+), max ≥ 0.8 | Landing error, median / 90th pct (50°+) |
+|---|---:|---:|---:|---:|---:|---|
+| Main `3de8698` | 1,742 of 6,075 | 731 | 370 of 1,504 | 197 | 167 of 9,139 | 1.6 / 5.3 m (1.3 / 4.0 m) |
+| Built | 650 of 5,981 | 49 | 105 of 1,507 | 3 | 173 of 8,656 | 1.3 / 3.9 m (0.8 / 2.7 m) |
+
+The tests (`live.rs`, `late_read_scores`) fly the five named plays' launches, each turned through −30° to 30° of spray in 10° steps. Thirty-five balls are flown, and 23 come down in play.
+- **Fielder standing where the ball comes down.** The noise-free read stays at 0.5 or more on every look from 0.5 s to 0.3 s before the landing, for every ball that comes down 3 m or more from a wall. Within 3 m of a wall (a catch at the railing: 1256/243, 108/142 and 8/75 come down 0.4–0.6 m from the stands), it stays above the advance cut-off of 0.2; it was 0.39–0.50 there. A metre of curve that he cannot see decides whether such a ball is in the seats.
+- **Fielder running in at 7 m/s from 33 m.** The read stays above the same floors from 1 s on.
+
+On main these plays read 0.000–0.18 in mid-flight.
+
+## 4. Step 1 in games
+
+Standard run (`sim-cli games --n 300`), main `3de8698` → `b58dd0b`, seeds 0 [1000]: runs 4.12 → 4.14 [4.45 → 4.41]. The other figures are in the [ledger](../metrics-ledger.md).
+
+Runner outcomes (`zz_lc_rates`, seeds 0–299 and 1000–1299 direct, average fielders):
+
+| | Second to home on a single, 0 / 1 / 2 out | First to third on a single, 0 / 1 / 2 out | Doubled off on catches: <10°, 10–25°, 25–50°, 50°+ | Advanced on a caught fly, 0–1 out, from first / second / third |
+|---|---|---|---|---|
+| Main `3de8698` | 84/205, 165/373, 307/407 | 186/548, 268/871, 397/807 | 118, 31, 1, 0 | 8, 123, 248 |
+| Step 1 | 85/207, 168/370, 311/410 | 190/541, 263/869, 400/809 | 114, 26, 0, 0 | 7, 132, 251 |
+
+The read matters today only to runners already going or holding partway, who relook. A runner who tags up never looks again, so the change to his read cannot show yet. Every figure is within run-to-run noise.
+
