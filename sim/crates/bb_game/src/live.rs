@@ -11322,6 +11322,83 @@ mod tests {
         }
     }
 
+    /// agent-models §5.7, the double cut (owner Q35 (c)): a ball that came down and got past the
+    /// outfielders, in an outfielder's hands 100 m out, with a runner on second. Checked against the
+    /// standard alignment and the throw's geometry, not the code's numbers:
+    /// - a middle infielder out as the relay man on the line from the ball to home, the first
+    ///   baseman behind him on that line toward the plate, about 45 ft (`CUTOFF_M`, the owner's
+    ///   docs/baseball-throw.md) from it, whichever field the ball is in; the third baseman on
+    ///   third, the other middle infielder on second, the catcher home, nobody on first;
+    /// - the outfielder's relay route goes to the first man in his throw's path, the relay man;
+    ///   the relay man, with the ball, has the first baseman between him and the plate;
+    /// - not on a caught ball (the runners must tag up: their bases stay covered), and not with
+    ///   no play at home (nobody on but the batter-runner).
+    #[test]
+    fn the_double_cut_lines_up_the_first_baseman_behind_the_relay_man() {
+        const R: AgentId = 0x0007;
+        let runner = |fx: &Fixture, on: Option<u8>| {
+            let mut v = vec![RunnerIn { id: fx.st.batter, base: 0, speed: 8.2, tau_s: bb_agents::running::LEAGUE_TAU_S }];
+            v.extend(on.map(|b| RunnerIn { id: R, base: b, speed: 8.2, tau_s: bb_agents::running::LEAGUE_TAU_S }));
+            v
+        };
+        // (where the outfielder holds it, who: centre, left-centre to the left fielder, the right
+        // fielder down the line)
+        for (at, of) in [(Vec3::new(0.0, 112.0, 0.0), CF), (Vec3::new(-62.0, 92.0, 0.0), 6), (Vec3::new(70.0, 80.0, 0.0), 8)] {
+            let fx = fixture(&[(R, 2)]);
+            let inp = input(&fx, runner(&fx, Some(2)));
+            let mut st = fx.st.clone();
+            let mut sim = new_sim(&inp, &mut st);
+            sim.t = 5.0;
+            // It came down beyond the outfielders (a hit, everyone saw it), and he has it.
+            let dir = at.normalized();
+            sim.out.facts.push(Input::BallTouched { t: 3.0, what: Touch::Ground { x: dir.x * 95.0, y: dir.y * 95.0 } });
+            held_at(&mut sim, of, at);
+            sim.update_relay();
+            jobs_become_known(&mut sim);
+            let relay: Vec<usize> = [3, 5].into_iter().filter(|&i| sim.f[i].role == Role::Relay(4)).collect();
+            assert_eq!(relay.len(), 1, "{at:?}: one relay man: {:?}", sim.f.iter().map(|f| f.role).collect::<Vec<_>>());
+            let relay = relay[0];
+            let roles: Vec<Role> = sim.f.iter().map(|f| f.role).collect();
+            assert_eq!((roles[2], roles[4], roles[8 - relay], roles[1]), (Role::Relay(4), Role::Cover(3), Role::Cover(2), Role::Cover(4)), "{at:?}: {roles:?}");
+            assert!(!roles.contains(&Role::Cover(1)), "{at:?}: first is left: {roles:?}");
+            let (rs, fs) = (sim.f[relay].target, sim.f[2].target);
+            assert!(on_segment(rs, base_pos(4), at), "{at:?}: the relay man at {rs:?} off the line from the ball to home");
+            assert!(on_segment(fs, base_pos(4), rs), "{at:?}: the first baseman at {fs:?} not between the relay man at {rs:?} and home");
+            assert!(((fs - base_pos(4)).norm() - 45.0 * 0.3048).abs() < 0.5, "{at:?}: the first baseman {:.1} m from home", (fs - base_pos(4)).norm());
+            // In place, jobs known: the outfielder's throw goes to the relay man, the first man in
+            // its path (with the first baseman taken first, the relay would be a 90 m throw).
+            sim.f[relay].pos = rs;
+            sim.f[2].pos = fs;
+            jobs_become_known(&mut sim);
+            assert_eq!(sim.throw_race(of, 4).relay, Some(relay), "{at:?}: the outfielder's relay route");
+            // The relay man has it (thrown to him, a visible fact): the first baseman stays lined
+            // up behind him, and is the man between him and the plate.
+            sim.ball = Ball::Held { by: relay };
+            sim.secured_at = sim.t;
+            sim.f[relay].role = Role::Idle;
+            sim.f[relay].relayed = true;
+            sim.update_relay();
+            assert_eq!(sim.f[2].role, Role::Relay(4), "{at:?}: the first baseman left the line as the relay man took the throw");
+            assert!(on_segment(sim.f[2].target, base_pos(4), rs), "{at:?}: the first baseman's spot {:?}", sim.f[2].target);
+            assert_eq!(sim.throw_race(relay, 4).relay, Some(2), "{at:?}: the relay man's cutoff man");
+        }
+        // No double cut: the same ball caught (no ground touch), and nobody on but the batter.
+        for (on, caught) in [(Some(2), true), (None, false)] {
+            let fx = fixture(&on.map(|b| vec![(R, b)]).unwrap_or_default());
+            let inp = input(&fx, runner(&fx, on));
+            let mut st = fx.st.clone();
+            let mut sim = new_sim(&inp, &mut st);
+            sim.t = 5.0;
+            if !caught {
+                sim.out.facts.push(Input::BallTouched { t: 3.0, what: Touch::Ground { x: 0.0, y: 105.0 } });
+            }
+            held_at(&mut sim, CF, Vec3::new(0.0, 112.0, 0.0));
+            sim.update_relay();
+            jobs_become_known(&mut sim);
+            assert_ne!(sim.f[2].role, Role::Relay(4), "on {on:?}, caught {caught}: the first baseman out: {:?}", sim.f.iter().map(|f| f.role).collect::<Vec<_>>());
+        }
+    }
+
     /// agent-models §5.5: a throw straight home with a cutoff man lined up passes him no higher
     /// than his head (`CUT_HEIGHT_M`), so that he could cut it, where the plain aim from 240 ft
     /// would pass him over 5 m up (catch-throw note §4).
