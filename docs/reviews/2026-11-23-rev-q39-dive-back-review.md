@@ -160,4 +160,9 @@ All builds were in `sim/target/review-probes/q39/`: `tree/` is `git archive 0ec2
 
 ## Resolution
 
-Open.
+Coordinator, 2026-11-23. All findings handed to worker-2 on `work/dive-back`; no re-review (the fixes are test-covered and measured with the reviewer's own count). Coordinator's pre-merge tests and standard run before merging.
+
+- **P2-1 fixed** (`383e0d0`, spec `489e8fd`): the dive is taken only when it can change the race (`DIVE_SAVE_S` 0.4 s), including the capped path; in-air outs 207 → 14. The Coordinator then dropped the lower bound on the **retouch only** (`b4abc03`, spec `0264c34`): on an appeal the fielder need only touch the bag, so a runner has no rundown to stay alive in and real runners dive back on double-off attempts regardless. Final standard run: 690 dives, 39 out in the air (25 appeals), appeal outs 134 against main's 141. His retouch belief being pessimistic is a TASKS §1 lead.
+- **P2-2 fixed** (`383e0d0`, `27b169c`, `95cf42b`): the dive is recorded from take-off and closed at the touch, the out or the play's end; the client draws the lying runner short of the bag (seed 44 play 166).
+- **P3-1, P3-2, P3-3, P3-4, P3-5 fixed** as in the Worker follow-up (`bb_abi_version`, `BB_ABI_VERSION` 2, the client refuses a mismatch).
+- **P3-6**: the property tests cover diving and lying runners; the take-off pose leads by 0.12 s. **Deferred:** the covering fielder overlapping the lying runner (TASKS §1).
