@@ -146,7 +146,7 @@ Check the code again before starting one.
 
 ### Priority A, not done
 
-- [ ] **Batting stances (owner, 2026-11-22; moved up from Looks L3 [W3]).** Fix the stances: every player gets his own stance, swing style and follow-through. Players can share a core stance as variations of it, but no two are quite alike. His examples: Pete Rose, Darryl Strawberry, Gary Carter. Client work (player-visuals); the sim's per-batter timing, extension and plane wait for batter ratings (§4).
+- [ ] **Batting stances (owner, 2026-11-22; was L3 [W3]).** Each player his own stance, swing style and follow-through: variations of core stances, none quite alike (Rose, Strawberry, Carter). Client work.
 - [~] **A4. Throw choices from the outs and the runners.** Built with review fixes; more cases are items 2 and 3 above.
 - [~] **A5. Dives.** Rate and motion are in. Left: every dive is head-first straight at the ball.
 - [~] **A6. Slides.** Client only: a runner slides feet-first when a play is being made on him. The sim has no slide (agent-models §6.2); see item 1 above for the dead stop.
