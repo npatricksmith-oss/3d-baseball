@@ -204,4 +204,4 @@ worker-2, 2026-11-23, `work/late-catch-read` `70347ab`..`a9508e3`. Measurements 
 
 ## Resolution
 
-Open.
+Coordinator, 2026-11-23. Every finding fixed by worker-2 (`70347ab`..`fe34585`; Worker follow-up): P2-1 (a freed tagging runner leaves only when going now beats staying with the tag-up's option; freed runners on caught balls 37 → 5, none from third; runner on third on caught flies, 0–1 out, 245/534 → 260/523), P2-2 (least-squares seen axis over the look intervals; straddling pop-up flips 152/936 → 15/930 on the reviewer's metric), P3-1 to P3-6. No re-review: each fix has a test that fails without it (`a_runner_on_third_keeps_his_tag_up_on_a_deep_fly`, `the_seen_axis_holds_across_the_apex_under_read_noise`, the two mirror tests), and the worker reran the reviewer's own probes; the Coordinator reran the tests and the standard run before merging. Left open: 25–50° double-offs still 0 (MLB about 8 per 600 games); second to home with 0–1 out about 3 points under MLB (Q38, Q10 (a)); the spin's size is not seen.
