@@ -44,6 +44,9 @@ class UMaterialInterface;
  *               -BbNoCrew (no umpires, coaches or benches);
  *               -BbDiveShots=<n> (photograph n dives: driving off, in the air, down, on hands
  *               and knees, getting up; then quit)
+ *               -BbDiveBackShots=<n> (photograph n runners' dives back to a bag: leaving his
+ *               feet, in the air, the hand on the bag, down, getting up; then quit; with
+ *               -BbStagingLog each is logged as BB_DIVEBACK)
  *               -BbSlideShots=<n> (photograph n slides: going down, sliding, at the bag, sitting
  *               up, getting up; then quit; with -BbStagingLog each slide is logged as BB_SLIDE)
  *               -BbBaseMapShots=<n> (photograph n plays with runners four times along the play, basemap_<n>_<k>.png,
