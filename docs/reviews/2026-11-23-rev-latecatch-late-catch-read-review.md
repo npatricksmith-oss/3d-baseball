@@ -175,6 +175,33 @@ Pooled with the worker's 600 games, second to home with 0–1 out goes from 44.9
   - `examples/zz_rev_rates.rs`: the worker's `zz_lc_rates` taking a seed range. Seeds 2000–2299 on the branch and on a main copy (`tree-main`, `live.rs` from `main`). Outputs: `rates-branch-2000.txt`, `rates-main-2000.txt`.
 - Read: the full diff, `believed_flight`, `read_cov`, `noisy_ball_motion`, `FlightEnv::accel`, the tag-up and catch-call paths in `move_runners`, `runner_decide_with_contact`, and `batted_path`'s fence and stands handling.
 
+## Worker follow-up
+
+worker-2, 2026-11-23, `work/late-catch-read` `70347ab`..`a9508e3`. Measurements in [late-catch note §7](../calibration/2026-11-23-late-catch-read.md#7-the-review-fixes) and the ledger's "Late-catch review fixes" row.
+
+- **P2-1.** Fixed (`d02bac4` spec, `a9508e3`). A runner who reads the ball as dropping leaves the bag only when going now is worth more than staying with the tag-up's option: P̂·V_back + (1 − P̂)·V_now against P̂·V_tag + (1 − P̂)·V_drop, each valued as his advance decision values a race, one base or two on (`tag_up_worth_leaving`).
+  - The weighing also governs his first look at 0.2 or less. On 139/147's ball over 40 draws, a first look of 0.07 had the runner on third off the bag at the catch.
+  - A projection out of play counts the same staying or going.
+  - Fixture: `a_runner_on_third_keeps_his_tag_up_on_a_deep_fly`. It fails with the weighing off.
+  - Your counts on seeds 0–299 and 1000–1299:
+    - Caught flies, 0–1 out, runner on third advanced: 245/534 → 260/523 (main 248/532); on seeds 2000–2299, 124/264 → 128/265 (main 133/273).
+    - Freed tagging runners: 522 → 225. On balls then caught: 37 (18 from third) → 5 (none from third); the 2 appeal outs are your two liners, freed at 1.0 s.
+- **P2-2.** Fixed (`00ae9b3`). The axis is now a least-squares fit over the intervals from his first catch look to each later one.
+  - Each interval is weighed by the looks' read error plus the push's error from the unseen spin size, `SEEN_SPIN_SIZE_SPREAD` = 0.3, which is the contact model's spread (0.29 at 25–50°, 0.20 at 50°+).
+  - The typical axis is a unit-spread prior.
+  - Property test by flight phase with noisy looks: `the_seen_axis_holds_across_the_apex_under_read_noise`. Straddling pop-up looks flip on 4 of 930 on my metric (the axis's part across the velocity now) and on 15 of 930 on yours, against your 152 of 936.
+  - Median landing miss on pop-ups: 1.65 m seen against 3.40 m typical. No band is worse than the typical axis.
+- **P3-1.** Fixed (`70347ab`). Computed once per look (`ContactLook::axis`). The digests of 40 games are unchanged by that commit. Time per game 5,129 → 4,954 [5,257 → 5,236] ms over all the fixes.
+- **P3-2.** Fixed: on a stay he keeps `tag_up` and `fly_look`.
+- **P3-3.** No separate hysteresis needed: free → re-tag fell from 12 to 1, and free → re-tag twice from 2 to 0.
+- **P3-4.** Fixed (`d02bac4`).
+  - The old *Why* is back after the holding sentences.
+  - The hold → tag → free path is stated.
+  - The tagging runner is a sub-item of its own.
+- **P3-5.** Fixed. Mirror tests `a_runner_watching_a_ball_nobody_can_reach_reads_it_dropping` (≤ 0.2 from 2 s on) and `a_runner_watching_a_ball_into_the_seats_reads_no_catch`. A ball 5 m or more into the seats reads ≤ 0.2 only over its last 1.5 s: at 2 s, 3.6 s from coming down, the 19 m curve allowance still reads 0.35. The railing floor is 0.4 (`LATE_READ_RAIL_FLOOR`; the build gives 0.43 at the least).
+- **P3-6.** Fixed: the step-2 ledger row and note §5 now carry your wording and fresh-set figures.
+- **Tests and runs.** After a touch: `cargo test --workspace` 547 passed, 0 failed. `sim-cli` rebuilt. Standard run 4.18 → 4.12 [4.43 → 4.43], rules warnings none.
+
 ## Resolution
 
 Open.

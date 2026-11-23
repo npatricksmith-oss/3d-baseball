@@ -1,6 +1,6 @@
 # Task List
 
-**Last updated:** 2026-11-23 (`work/late-catch-read` done, for review; Q37–Q39 open).
+**Last updated:** 2026-11-23 (`work/late-catch-read` review fixed, to merge; Q37–Q39 open).
 
 What is next and what is open. Other files hold the rest:
 
@@ -19,7 +19,7 @@ Status: `[ ]` not started · `[~]` partly done · `[?]` needs an owner decision
 
 **State.** Running: worker-1 (Opus) on `work/runner-relook` in `.claude/worktrees/runner-decision` (§1: held runner's relook); then an Opus review. **Waiting on the owner:** Q37 (stances; parked), Q38 (two-out caution at the corners; (a) by outs), Q39 (dive back; (a) build): [runner-start note §6](docs/calibration/2026-11-23-runner-start-open.md#6-plan-ranked).
 
-**Next:** review `work/late-catch-read` (worker-2 done: the late-flight catch read and the tagging runner's relook, runner-start note §6; sim change, so Opus). Then §2: seed-5593, play 71.
+**Next:** merge `work/late-catch-read` (review fixed; [review](docs/reviews/2026-11-23-rev-latecatch-late-catch-read-review.md) Resolution to write). Then §2: seed-5593, play 71.
 
 **Open (ledger §5):** runs down 0.21 [0.18] since dp-cover (0.04 explained; check noise); double plays 12.3% (MLB 9.8%).
 
@@ -34,7 +34,7 @@ One `sim/crates/bb_game/src/live.rs` job at a time. Each job gets a ledger row a
 - [~] **The runner's start (Q27).** Moving secondary leads are merged (2026-11-18): +1.0 m at 3 m/s with 0–1 out, +1.5 m at 5 m/s with two out. All three bases use the contact state, and the live-ball timeline carries the shuffle from release. Early bounces respect the read clock. Runners brake for partway holds and returns, and the rules judge the retouch.
   - The catch-read review follow-up is on `work/catch-read-fixes` for review. The catch and holder forecasts use observations, and the runners use the perceived force through the catch-call reaction. Holds account for signed speed and braking drift, an early legal retouch keeps its decision, and catch height varies continuously with the park's ceiling. The runner on third in seed 1000003000 play 82 is back before the catch and scores. [Review follow-up](docs/reviews/2026-11-18-codex-catch-read-review.md#worker-follow-up).
   - After fly-read (2026-11-19): double-offs per 300 games 0 at 25–50° (MLB about 4: each in-flight relook's noise is fresh and closes as the ball comes down, so a runner always sees the catch coming; deferred review P3-5, levers in the [review](docs/reviews/2026-11-19-opus-fly-read-review.md)), 12.5 at 10–25°, 60.5 below 10°. On singles second to home is 55.1% (MLB 61.7%), first to third 31.2% (31.7%). Long liners still up after 3–4 s read 20–40 m off flown back from the plate cue (70 balls in 48 games; tracking corrects it). [Fly-read note](docs/calibration/2026-11-19-fly-read.md#open).
-  - Open, diagnosed 2026-11-23 ([note](docs/calibration/2026-11-23-runner-start-open.md)): two-out sends: center matches MLB, the corners are short (81–82% against 91–93%) from caution (Q38). Dive back: Q39. Late-flight read and tag-up relook on `work/late-catch-read` for review ([note](docs/calibration/2026-11-23-late-catch-read.md); open: its §6): second to home, 0–1 out, 43.1% → 46.0% (MLB 49.1%).
+  - Open, diagnosed 2026-11-23 ([note](docs/calibration/2026-11-23-runner-start-open.md)): two-out sends: center matches MLB, the corners are short (81–82% against 91–93%) from caution (Q38). Dive back: Q39. Late-flight read and tag-up relook on `work/late-catch-read`, review fixed ([note](docs/calibration/2026-11-23-late-catch-read.md); open: its §6): second to home, 0–1 out, 43.1% → 46.0% (MLB 49.1%).
   - Deferred P3s left (runner-start note §5): a tag between bases after a non-goal crossing (with the dive back); runner-timing P3-1, P3-2.
 - [ ] Base relook (§6.4; ledger row 2026-11-23): his look at a throw 0.5 s in misplaces it along his line of sight (σ capped only by the distance flown; the one out in 600 games). `RELAY_READ_S` 0.6 s vs the 0.28–0.47 s rushed return. Held runners start from rest.
 - [ ] Batter-runner stops at first on 97/279 double cuts, some fielded 120 m out (64/196; main too; Opus review Q5).

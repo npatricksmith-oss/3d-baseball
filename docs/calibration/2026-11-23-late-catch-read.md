@@ -83,7 +83,7 @@ A runner tagging up on a ball still in the air now looks again every `RUNNER_FLY
 
 - **Second to home with 0–1 out:** 43.8% → 46.0% (main 43.1%; Retrosheet 2024 49.1%). That is +2.2 points, against the runner-start note's +3.8 from its probe on the old read.
 - **First to third with 0–1 out:** 32.1% → 33.4% (note: +0.5).
-- **Noise:** about 2 points per arm on about 575 chances, so both moves agree with the note's estimate.
+- **Noise:** the difference between two arms carries about 2.9 points of noise for second to home and 1.8 for first to third, so on 600 games neither move is distinguishable from zero (review P3-6). The reviewer's fresh set (seeds 2000–2299) moved the same way: second to home 48.0% → 53.6%. Pooled, 44.9% → 48.7% (+3.8, about 1.6σ).
 - **Pop-up double-offs stay at 0.** The probe on the old read freed tagging runners on caught pop-ups and doubled off 8 at 50° and above. MLB has about 2 per 600 games, so 0 is near it.
 - **25–50° double-offs:** also still 0, against MLB's about 8 (runner-start note §4).
 - **Cost:** time per game +3.5% [+4.3%], from the tagging runners' relooks.
@@ -95,7 +95,51 @@ The two deferred P3s from the catch-fixes re-review went in with this step:
 ## 6. Open
 
 - **25–50° double-offs**, at 0 against MLB's 8 per 600 games: runner-start note §4.
-- **Second to home with 0–1 out**, still 3 points under Retrosheet. The note's remaining levers are caution by outs (Q38) and the coach reading a ball behind the runner (Q10 (a)).
+- **Second to home with 0–1 out**, still about 3 points under Retrosheet on these seeds. The note's remaining levers are caution by outs (Q38) and the coach reading a ball behind the runner (Q10 (a)).
 - **The spin's size.** He flies the typical size about the axis he has seen. A ball with much more spin than typical (1040/214: 8,900 rpm against 5,400) still lands a metre or two off. At the railing, that decides whether a catch reads likely.
-- **Time.** The seen axis is worked out again in each of a look's nine projections. Working it out once per look would win back most of step 1's +2–3% without changing a game.
 
+## 7. The review fixes
+
+[Review](../reviews/2026-11-23-rev-latecatch-late-catch-read-review.md): two P2s and six P3s, all fixed.
+
+**P2-1, the sacrifice fly.** A runner who reads the ball as dropping, at a tag-up relook or at his first look, now leaves the bag only when going now is worth more than staying with the tag-up's option (agent-models §6.3). Staying is worth P̂·V_tag + (1 − P̂)·V_drop and going now P̂·V_back + (1 − P̂)·V_now, each valued as his advance decision values a race, one base or two on.
+- The first look needed the same weighing. On seed 139 play 147's ball, run over 40 draws, a first look of 0.07 sent the runner on third off on a fly caught 5.6 s later.
+- A ball he projects out of play counts the same staying or going: a home run scores him either way. Before that change, a first look that read a home run took him off third.
+- The fixture `a_runner_on_third_keeps_his_tag_up_on_a_deep_fly`: on every catch over the 40 draws he is on third when it is made, and he scores after most. With the weighing switched off it fails (seed 11: off the bag 0.23 s before the catch).
+- A stay keeps the tag-up and the looks (P3-2). Free → re-tag fell from 12 runners to 1, and none went and came back twice (P3-3), so no separate hysteresis was needed.
+
+**P2-2, the apex.** The axis is now a least-squares fit over the intervals from his first catch look to each later one. The rising leg's intervals keep their direction after the apex. Each interval is weighed by the two looks' read error plus the push's own error from the spin size he cannot see (`SEEN_SPIN_SIZE_SPREAD` = 0.3 of |J|).
+- **Where 0.3 comes from:** the contact model's spread of |ω⊥v| about the typical backspin. Interquartile range over 1.349 of the median, games 0–95: 0.29 at 25–50°, 0.20 at 50°+. Liners spread far more, because their sidespin is not in the typical push.
+- **Why the size term:** weighed by read error alone, the fit put large spurious parts along the flight's own direction, where the intervals barely differ. 1040/214's noise-free axis (the launch turned −30°) came out about 77° off from 1.5 s on.
+- **The test:** `the_seen_axis_holds_across_the_apex_under_read_noise` (P3-5), 300 synthetic launches per band, read noise on every look. The angle is that of the axis's part across the ball's velocity now, the part that pushes it from here on.
+
+| Seen axis, by flight phase, as built | Before the apex | Past it, < 0.6 of the rise | Straddling (0.6–1.4) | Median landing miss, seen / typical axis |
+|---|---|---|---|---|
+| Pop-ups 60–88° (flipped, off by > 45°) | 33, 145 of 1,227 | 38, 91 of 818 | **4, 23 of 930** | 1.65 / 3.40 m |
+| 40–60° | 6, 63 of 1,114 | 25, 99 of 751 | 5, 35 of 861 | 2.39 / 2.57 m |
+| 20–40° | 3, 58 of 715 | 0, 14 of 516 | 0, 19 of 595 | 2.02 / 2.07 m |
+| Liners 5–20° | 3, 20 of 148 | 2, 20 of 165 | 8, 24 of 231 | 0.98 / 1.14 m |
+
+On the reviewer's own metric (the part across his first and current velocities together), the straddling pop-up looks flip on 15 of 930. The whole-flight estimate flipped on 152 of 936.
+
+**P3-1.** The axis is worked out once per look. The digests of 40 games were unchanged by that step alone. Time per game is 5,129 → 4,954 [5,257 → 5,236] ms over all the fixes.
+
+**P3-4.** The spec's relook paragraphs were reordered, and the hold → tag → free path is now stated.
+
+**P3-5.** Two mirror tests:
+- `a_runner_watching_a_ball_nobody_can_reach_reads_it_dropping`: the same balls with every fielder out of reach read 0.2 or less from 2 s on.
+- `a_runner_watching_a_ball_into_the_seats_reads_no_catch`: balls 5 m or more into the foul seats read 0.2 or less over their last 1.5 s. Earlier, the 19 m curve allowance keeps them possible.
+- The railing floor in the standing tests is 0.4; the build gives 0.43 at the least.
+
+**P3-6.** The noise wording is in §5 and the ledger.
+
+**In games** (seeds 0–299 and 1000–1299; then the reviewer's fresh set, seeds 2000–2299):
+
+| | Main | Step 2 | Review fixes |
+|---|---|---|---|
+| Advanced on a caught fly, 0–1 out, from third | 248/532 | 245/534 | **260/523** |
+| The same, seeds 2000–2299 | 133/273 | 124/264 | 128/265 |
+| Second to home on a single, 0–1 out | 249/578 | 264/574 | 277/604 |
+| The same, seeds 2000–2299 | 158/329 | 173/323 | 180/344 |
+| Freed tagging runners; on balls then caught (from third) | – | 522; 37 (18) | 225; 5 (0) |
+| Runs, seeds 0 [1000] | 4.12 [4.45] | 4.18 [4.43] | 4.12 [4.43] |
