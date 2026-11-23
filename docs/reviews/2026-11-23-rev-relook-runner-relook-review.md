@@ -113,6 +113,40 @@ No real runner turns from a near base he might make to a far one he cannot. With
   - A print-only test (jobs 89–90) reproduced the fixtures' numbers in P3-2.
 - No background shells left running.
 
+## Worker follow-up (worker-1, `02ad6f9`, `52902d7`)
+
+- **P2-1.** Fixed, with (a) and (c), plus a watch:
+  - The base look at a throw waits `RUNNER_READ_DELAY_S` (0.5 s) after the release; a catch before then is new and decides it.
+  - A throw his look carries within `CUT_LINE_M` of the base in front of him, or of the man visibly covering it (at any height), he watches until it gets there (`throw_watch`), then decides on a fresh look, or on the catch if it is taken first.
+  - The read counts a pass within `PASS_REACH_M` of the man visibly covering a base as catchable there.
+  - (c) alone did not cover the seed-24 flip, which reads the throw 17% fast and so 4 m over the man.
+  - Fixture `a_runner_on_first_never_goes_on_a_throw_to_the_man_covering_second`: 4 throws, 4,096 draws each, he never goes. Decided at the release, the deep-center throw sends him 44 times.
+  - Spec in agent-models §6.4.
+- **P2-2.** Fixed as proposed (`race_tag_s`: no tag only for a forced runner going on from his own base). It serves the base look and the arrival decision. Test `a_runner_past_his_forced_base_races_the_tag`.
+- **P2-3.** Fixed, but not by the margin alone:
+  - That would send a runner 8 m past second into the third baseman standing on third with the ball (−1.7 s there against −3.0 s back), which two existing tests caught.
+  - He goes for the base he has the better chance at (`p_safe`) while it is at least `TRAPPED_MIN_P` = 5% [E]; below that at both, he keeps away from the ball as before.
+  - Fixtures in `a_trapped_runner_goes_for_the_base_he_has_a_chance_at`, both failing on the old rule:
+    - the seed-41 geometry with the runner 9.5 m short of second, so that he believes the race lost;
+    - the runner 14 m from home.
+  - Spec sentences in §6.3 and §6.4 updated.
+- **P2-4.** The ledger row, the TASKS lead and the spec give the causes found here, not `sigma_race_s`.
+- **P3-1.** The quick-return fixture now checks two things:
+  - his belief against the world's set-up with the receiver's turn: within 0.3 s of the rushed quickest, and the old 0.6 s belief more than 0.3 s late;
+  - the stay case against an upper bound, the set (unhurried) release.
+  - The slow-throw "goes" case was dropped. With the read-time look, no throw from that corner both reaches second catchably and lets him beat the rushed return; a lob that would takes 4.9 s.
+- **P3-2.**
+  - `quickest_home_with_tag` now uses the rushed exchange; the third-base fixture uses a 32 m/s throw, since the look now comes 0.5 s later.
+  - The relay read is asserted within 0.1 s.
+  - The release-cap comment is corrected.
+  - `runner_trace::capture_with_looks` clears both buffers in its guard; the probe uses it.
+  - New tests: the forced runner, the catch call and the retouch path (`a_base_look_waits_for_the_catch_call_and_follows_the_retouch`, stepping `move_runners`), and the P2-1 fixture.
+- **Measured** (job 91, `52902d7`):
+  - 539 tests passed, 0 failed.
+  - Standard run 4.12 [4.45] against main's 4.04 [4.34].
+  - The probe sent 10 [22]: 9 [20] advanced, 0 [2] went back, 1 [0] put out.
+  - The out (seed 247 play 111): his look 0.5 s into the throw put the ball 15 m short, so he took it as coming down near first. That is the position error at the read time, now the TASKS lead.
+
 ## Resolution
 
 Open.
