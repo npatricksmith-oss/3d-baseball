@@ -5145,9 +5145,20 @@ impl<'a> Sim<'a> {
     /// corner man out on a single's cutoff home who is not its man is back at his base, a middle
     /// infielder out on a single's cutoff who is not its relay man is free.
     fn deep_cut_by_convention(&self, o: usize) -> Option<[Option<usize>; 2]> {
+        self.deep_cut_men().map(|men| self.deep_cut_as_known_by(o, men))
+    }
+
+    /// The deep ball's relay man and, with the throw going home, the first baseman, before any
+    /// man's knowledge of who is going for the ball (`deep_cut_by_convention`): the same for
+    /// everyone at a tick.
+    fn deep_cut_men(&self) -> Option<(usize, bool)> {
         let (_, from, b) = self.deep_cut_point()?;
-        let relay = self.deep_relay_man(from, b);
-        Some([(!self.chasing_as_known_by(o, relay)).then_some(relay), (b == 4 && !self.chasing_as_known_by(o, 2)).then_some(2)])
+        Some((self.deep_relay_man(from, b), b == 4))
+    }
+
+    /// `deep_cut_men` as fielder `o` counts them: a man he knows to be going for the ball is not.
+    fn deep_cut_as_known_by(&self, o: usize, (relay, home): (usize, bool)) -> [Option<usize>; 2] {
+        [(!self.chasing_as_known_by(o, relay)).then_some(relay), (home && !self.chasing_as_known_by(o, 2)).then_some(2)]
     }
 
     /// The first baseman's job on the double cut (agent-models §5.7): his spot, on the line from
@@ -5219,8 +5230,9 @@ impl<'a> Sim<'a> {
             Ball::Held { by } => Some(by),
             _ => None,
         };
+        let men = self.deep_cut_men();
         for o in 0..9 {
-            let mask = self.deep_cut_by_convention(o).map_or(0, |c| c.iter().flatten().fold(1u16 << 15, |m, &j| m | 1 << j));
+            let mask = men.map(|men| self.deep_cut_as_known_by(o, men)).map_or(0, |c| c.iter().flatten().fold(1u16 << 15, |m, &j| m | 1 << j));
             if mask == self.f[o].deep_conv {
                 continue;
             }
