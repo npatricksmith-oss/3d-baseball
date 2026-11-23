@@ -118,4 +118,6 @@ Below 0.3, every runner added at right ends as an out or a turn-back, and none s
 - **P3-4.** The case is now 0.15 s behind the ball alone (a 31% general-caution chance against the 41.5% break-even). The suggested 0.05 s behind would be 0.20 s in hand, a 50% chance, which goes even at the general caution. The scope loop is labelled as documentation.
 
 
-Open.
+## Resolution
+
+Coordinator, 2026-11-23. All findings handled by worker-1 (`4514ac7`, `b621fe4`; Worker follow-up). P2-1: the note and spec now call −0.2 an outcome fit of the share sent and share out; the field split (all 7 outs at right, p ≈ 0.02) is stated; the probe found the runner's read at third of the throw home about 0.21 s hopeful, all in the flight, and that gap and the benchmark's 0.28 s are open in TASKS §1 (the race model is not changed here). P3-1 fixed (`chooses_between`; no rate moved, the reports are identical). P3-2, P3-3 documented; P3-4 test case moved clearly under break-even. No re-review: small, test-covered and with identical game output for the code fix; the Coordinator reran the tests and the standard run before merging.
