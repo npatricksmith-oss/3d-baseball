@@ -17148,6 +17148,70 @@ mod tests {
         assert!(only_two >= 3 && only_none == 0, "depths where only two out sends him: {only_two} m; only none out: {only_none} m");
     }
 
+    // Q38 (a), agent-models §6.3 "The two-out send": with two out the third-base coach sends the
+    // runner from second home unless he is clearly beaten. A runner from second reaches third at
+    // speed on a single to left, the left fielder just having secured the ball on the line from
+    // left field home. The race is set by a benchmark independent of the runner's read (the
+    // runner-start note's): his legs from third at his speed against the fielder's grade-50
+    // exchange and a clean throw home at his arm (`solve_throw`). Each look has its own timing
+    // draw, so each case is run over 200 draws (plays). 0.1 s behind the ball alone, the
+    // catcher's tag (0.25 s) makes him safe: with two out he goes on most reads, and more often
+    // than at the general caution (the old rule); with one out the same race holds him on most
+    // (break-even 73% there, 41% with two out: note §1.5). 0.7 s behind, clearly beaten, he holds
+    // with two out as well.
+    #[test]
+    fn with_two_out_the_runner_from_second_is_sent_unless_clearly_beaten() {
+        const LF: usize = 6;
+        let fx0 = fixture(&[(0x0007, 2)]);
+        let lf = FielderAttrs::average(LF);
+        let dir = Vec3::new(-0.55, 1.0, 0.0) * (1.0 / m::hypot(0.55, 1.0));
+        let runner_s = run_time_from(BASE_L, 8.1, 8.2, bb_agents::running::LEAGUE_TAU_S);
+        let ball_s = |d: f64| {
+            let (at, home) = (dir * d, base_pos(4));
+            let origin = throw_release_point(at, home, lf.throws);
+            let flight = solve_throw(&fx0.env, origin.z, THROW_CATCH_Z, m::hypot(home.x - origin.x, home.y - origin.y), lf.arm).expect("in reach").t_flight;
+            lf.transfer + flight
+        };
+        // The depth at which the runner is `behind_s` behind the ball alone.
+        let depth = |behind_s: f64| {
+            let (mut lo, mut hi) = (30.0, 110.0);
+            for _ in 0..60 {
+                let mid = 0.5 * (lo + hi);
+                if runner_s - ball_s(mid) > behind_s { lo = mid } else { hi = mid }
+            }
+            0.5 * (lo + hi)
+        };
+        let sent = |outs: u8, behind_s: f64, advance: bb_agents::running::AdvanceParams| {
+            let d = depth(behind_s);
+            (0..200u32).filter(|&play| {
+                let mut fx = fixture(&[(0x0007, 2)]);
+                fx.st.outs = outs;
+                let mut inp = input(&fx, vec![RunnerIn { id: fx.st.batter, base: 0, speed: 8.2, tau_s: bb_agents::running::LEAGUE_TAU_S }, RunnerIn { id: 0x0007, base: 2, speed: 8.2, tau_s: bb_agents::running::LEAGUE_TAU_S }]);
+                (inp.play, inp.advance) = (play, advance);
+                let mut st = fx.st.clone();
+                let mut sim = new_sim(&inp, &mut st);
+                sim.t = 3.0;
+                (sim.r[0].s, sim.r[0].v, sim.r[0].goal) = (BASE_L, 0.0, 1);
+                (sim.r[1].s, sim.r[1].v, sim.r[1].direction, sim.r[1].goal, sim.r[1].hold_s) = (3.0 * BASE_L, 8.1, 1.0, 3, None);
+                sim.f[LF].pos = dir * d;
+                sim.f[LF].target = sim.f[LF].pos;
+                sim.ball = Ball::Held { by: LF };
+                sim.out.secured.push((sim.t, sim.f[LF].id));
+                sim.runner_decide(1, 3);
+                sim.r[1].goal == 4
+            }).count()
+        };
+        let now = bb_agents::running::AdvanceParams::default();
+        let old = bb_agents::running::AdvanceParams { send_two_out_z: now.caution_z, ..now };
+        // Measured at the fit (`send_two_out_z` −0.2): 187, the old rule 111, one out 41;
+        // beaten, 2 (14 at 0.6 s, where his read's 0.15 s noise still sends a few).
+        let (two, two_old, one) = (sent(2, 0.1, now), sent(2, 0.1, old), sent(1, 0.1, now));
+        assert!(two >= 170 && two >= two_old + 50, "0.1 s behind, two out: sent on {two} of 200 reads (the old rule {two_old})");
+        assert!(one <= 60, "0.1 s behind, one out: sent on {one} of 200 reads");
+        let beaten = sent(2, 0.7, now);
+        assert!(beaten <= 6, "0.7 s behind, two out: sent on {beaten} of 200 reads");
+    }
+
     // Nobody stops at home: a runner arriving at third is not held up by a runner ahead who
     // is past third and running in, but is by one standing on third.
     #[test]

@@ -107,6 +107,9 @@ fn delay_by_cause(ticks: &[Tick], runner: u16, start: u8, split: f64) -> [f64; 7
 
 fn raw_trace(seed: u64, play: u32, runner: u16) {
     let mut game = Game::new(seed, true).with_fielders(core::array::from_fn(FielderAttrs::average));
+    if let Some(advance) = advance_override() {
+        game = game.with_advance(advance);
+    }
     while let (Some(step), ticks) = runner_trace::capture(|| game.step_pitch()) {
         if step.play != play {
             continue;

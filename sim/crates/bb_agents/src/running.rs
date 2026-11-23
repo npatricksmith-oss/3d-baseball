@@ -146,15 +146,18 @@ pub struct AdvanceParams {
     /// two-out send; owner's Q38 (a)): with two out the coach decides before the pitch to
     /// send the runner home and holds him only when he is clearly beaten (Guilliams,
     /// decision-model note §1.6). It replaces `caution_z` when the runner who started the play
-    /// on second decides on home with two out on the board as he sees them. Fitted to Retrosheet 2024's
-    /// two-out sends from second on outfield singles by fielder: 91.3% (left), 96.2%
-    /// (center), 92.9% (right), 5.6%, 0.6% and 2.2% of those sent put out (Q38 note).
+    /// on second decides on home with two out on the board as he sees them. −0.2, fitted to
+    /// Retrosheet 2024's two-out sends from second on outfield singles at the corners: 92.1%
+    /// sent, 3.9% of those sent put out (left 91.3% and 5.6%, right 92.9% and 2.2%; center
+    /// 96.2%, which the sim already matched; `docs/calibration/2026-11-23-two-out-send.md`).
+    /// Below zero: he goes on a race he believes slightly lost, as the coach's "send unless
+    /// clearly beaten" does.
     pub send_two_out_z: f64,
 }
 
 impl Default for AdvanceParams {
     fn default() -> Self {
-        Self { sigma_race_s: 0.20, caution_z: 1.0, send_two_out_z: 1.0 }
+        Self { sigma_race_s: 0.20, caution_z: 1.0, send_two_out_z: -0.2 }
     }
 }
 
@@ -253,6 +256,27 @@ mod advance_tests {
         assert!(v(1).weighted(run_weight(8, -4)).break_even() > v(1).break_even());
         assert_eq!(run_weight(2, 0), 1.0);
         assert!(run_weight(5, 0) > 1.0 && run_weight(5, 0) < run_weight(8, 0));
+    }
+
+    // Q38 (a): with two out the runner from second is sent home unless clearly beaten. His
+    // read of a race 0.1 s behind the ball alone is 0.15 s in hand once the catcher's tag
+    // (0.25 s) is counted: the general caution held him there (it wants about 0.16 s at the
+    // two-out break-even of 41%, runner-start note §1), the two-out send takes him, and with one
+    // out (break-even 73%) the same race still holds him. 0.7 s behind the ball alone (−0.45 s
+    // with the tag) he is beaten and holds. Only the runner from second going home is sent so:
+    // first to third and first to home keep the general caution.
+    #[test]
+    fn the_two_out_send_from_second_takes_the_close_race() {
+        let p = AdvanceParams::default();
+        let v = |o: u8| AdvanceValues { hold: run_expectancy(0b101, o), safe: run_expectancy(0b001, o) + 1.0, out: run_expectancy(0b001, o + 1) };
+        let close = 0.25 - 0.1;
+        assert!(!p.goes(close, &v(2)), "the general caution holds him");
+        assert!(p.for_decision(2, 4, 2).goes(close, &v(2)), "the two-out send takes him");
+        assert!(!p.for_decision(2, 4, 1).goes(close, &v(1)), "one out: he holds");
+        assert!(!p.for_decision(2, 4, 2).goes(0.25 - 0.7, &v(2)), "clearly beaten: he holds");
+        for (start, next) in [(1u8, 3u8), (1, 4), (0, 2), (2, 3)] {
+            assert_eq!(p.for_decision(start, next, 2), p, "{start} to {next} keeps the general caution");
+        }
     }
 
     #[test]
