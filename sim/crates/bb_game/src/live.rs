@@ -5075,11 +5075,14 @@ impl<'a> Sim<'a> {
     /// On a deep ball each counts at the base he has reached: a runner from first going round
     /// second on an extra-base hit is the run the relay goes home for.
     /// On a single, a corner man known to `viewer` to be out on the cutoff home keeps the throw
-    /// home while a runner who was on base at the pitch is still running: the lead runner scoring
-    /// does not send him back and the shortstop out for third in his place (2026-11-22: counted
-    /// at the pitch's base, the runner from first behind a runner from third made it third the
-    /// moment the run scored, a hand-over 3.4-3.9 s after contact on 11 plays with runners on
-    /// first and third in 120 games).
+    /// home while a runner who was on base at the pitch is still on the bases (not out, not
+    /// scored), moving or not: the lead runner scoring does not send him back and the shortstop
+    /// out for third in his place (2026-11-22: counted at the pitch's base, the runner from first
+    /// behind a runner from third made it third the moment the run scored, a hand-over 3.4-3.9 s
+    /// after contact on 11 plays with runners on first and third in 120 games). With the run in
+    /// and the runner from first held at second, a real infield does not realign either: holding
+    /// only while a runner moves gave more hand-overs at the pickup and more of third open (Opus
+    /// relay hand-overs review P3-1).
     fn relay_base(&self, deep: bool, viewer: usize) -> u8 {
         let moving = self.f[viewer].a.throw_choice.moving_mps;
         let at = |r: &Runner| {
