@@ -374,5 +374,14 @@ class OracleTests(unittest.TestCase):
                 self.assertEqual(len(cases), len({c['name'] for c in cases}))
 
 
+# The swing v3 oracle's checks (docs/swing-model-v3.md §11) run with this file.
+try:
+    from .test_swing_v3 import (HandWorkedCase, ReadingAndBody, Jet, PathInvariants, AppendixE, Braking,
+                                AimRange, SourceBounds, GoldenFile)
+except ImportError:
+    from test_swing_v3 import (HandWorkedCase, ReadingAndBody, Jet, PathInvariants, AppendixE, Braking,
+                               AimRange, SourceBounds, GoldenFile)
+
+
 if __name__ == '__main__':
     unittest.main()
