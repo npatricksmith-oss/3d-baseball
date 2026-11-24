@@ -181,9 +181,9 @@ fn seed_65147_play_10_the_right_fielder_reads_the_chopper_on_the_grass_within_a_
     // Agent-models §5.1, the depth of a ball seen on the ground (2026-11-24). The same play: the
     // chopper bounces before the right fielder's first look, so he has no track and reads it by
     // the snapshot read. From its first bounce until it is fielded, his read of where the ball
-    // is now, along his level line of sight to it: before, his first read was 37 m off (the
-    // snapshot read's depth σ, 3 × 3.5 m × d/30 m, at 77 m, with his fixed draw); with the ground
-    // cue, under 8 m (±4σ of a 3′ angle below his eyes at 77 m is 13 m; his draw here is smaller).
+    // is now, along his level line of sight to it: before, up to 32 m off (the snapshot read's
+    // depth σ, 3 × 3.5 m × d/30 m at 77 m, with his fixed draw; 37 m in the saved game); with the
+    // ground cue 4.2 m, bound 8 m (±4σ of a 3′ angle below his eyes at 77 m is 13 m).
     let text = include_str!("fixtures/a4/65147-10.json");
     bb_game::live::read_trace::ON.with(|x| x.set(true));
     bb_game::live::read_trace::take();
