@@ -1195,3 +1195,45 @@ fn in_real_games_the_double_cut_keeps_third_second_and_home_covered() {
     assert!(plays >= 8, "the premise: double cuts in eight games ({plays})");
 }
 
+
+/// Second ground-dive review (2026-11-24), plays frozen from `0da2212` (`work/of-ground-dive`
+/// before its second fix round), the play's own contact and streams (the replay matches the game's
+/// play there). Each asserts the dive (or its
+/// absence), not the catch, which is the glove draw's.
+/// When fielder `pos` (1 the pitcher … 9 right field) dove, if he did, and when the ball first
+/// touched the ground.
+fn dive_and_first_ground(text: &str, pos: u16) -> (Option<f64>, f64, LiveOutput) {
+    let (out, _, _) = replay(text);
+    let dive = out.dives.iter().find(|d| d.1 & 0x7f == pos).map(|d| d.0);
+    let ground = out.facts.iter().find_map(|f| match *f {
+        Input::BallTouched { t, what: bb_rules::Touch::Ground { .. } } => Some(t),
+        _ => None,
+    });
+    (dive, ground.unwrap_or(f64::INFINITY), out)
+}
+
+/// P2-1: a foul pop-up at 51° that comes down 1.5 m from the third baseman. He lays out for it
+/// while it is still in the air (the in-air rule: his read has it pass within the capture's
+/// envelope before it comes down). On `0da2212` the short-hop rule took it for a ground ball, the
+/// must-dive hold broke and it dropped. (The review's second play, seed 1043 play 201, is not
+/// restored by this rule: the second baseman's own read at 1.17 s has the liner bouncing before it
+/// reaches him; second review Resolution.)
+#[test]
+fn an_infielder_lays_out_for_a_catchable_pop_up() {
+    for (label, text, pos) in [("seed 106 play 191, the third baseman", include_str!("fixtures/a4/106-191.json"), 5)] {
+        let (dive, ground, out) = dive_and_first_ground(text, pos);
+        println!("{label}: dive {dive:?}, first down {ground:.2} s, secured {:?}", out.secured);
+        let t = dive.unwrap_or_else(|| panic!("{label}: no dive; dives {:?}", out.dives));
+        assert!(t < ground, "{label}: dove at {t:.2} s, after it came down at {ground:.2} s");
+    }
+}
+
+/// P2-2: a chopper off the plate up the middle. As it reaches the pitcher, the dive he is about to
+/// make is the one weighed, and he lays out (main's play: he catches it and gets the out at first).
+/// On `0da2212` the plan's dive point jumped to one seconds later and he stayed up.
+#[test]
+fn the_pitcher_lays_out_at_a_chopper_up_the_middle() {
+    let (dive, _, out) = dive_and_first_ground(include_str!("fixtures/a4/290-242.json"), 1);
+    println!("seed 290 play 242: pitcher's dive {dive:?}, secured {:?}", out.secured);
+    assert!(dive.is_some(), "the pitcher stayed up; dives {:?}", out.dives);
+}

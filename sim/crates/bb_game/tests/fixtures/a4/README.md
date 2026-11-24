@@ -96,6 +96,10 @@ diagnostic trace is never part of a fielder's inputs.
   - `36-158` (frozen 2026-11-24 from `ef1e83b`, `work/of-ground-dive`, in place of `118-162`;
     review P3-4): two out, a runner on first, a liner through the right side that the centre
     fielder takes over from the right fielder. The deep call does not flip back.
+  - `106-191` and `290-242` (frozen 2026-11-24 from `0da2212`, `work/of-ground-dive`; second
+    ground-dive review P2-1, P2-2): a foul pop-up the third baseman must lay out for while it is
+    in the air, and a chopper up the middle the pitcher must lay out at. The replay matches the
+    game's play. Only the dive is asserted.
   - `17-103` (frozen the same way after the double-cut reviews, P2-1; fails without that fix,
     and on `ba40063` at its premise, there being no double cut): a runner on first, none out, a ball past the
     centre fielder; he throws to second, past the first baseman out on the double cut, who goes

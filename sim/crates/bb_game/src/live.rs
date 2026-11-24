@@ -3090,6 +3090,26 @@ fn beyond_reach_over_wall(field: &Field, b: Vec3) -> f64 {
     -field.body_clearance(b.x, b.y, 0.0).dist - OVER_WALL_REACH_M
 }
 
+/// Where a dive from `from` at a ball at `b` lands the body: until the glove is at the ball
+/// (arm's reach short of it), and never through the wall: the body stops short of the first
+/// point of its path that would put him within his body's width of it (the fair and foul
+/// fences meet at an inward corner a straight lunge can cut; Codex dive animation review #1).
+fn lunge_land(field: &Field, from: Vec3, b: Vec3) -> Vec3 {
+    let horiz = m::hypot(b.x - from.x, b.y - from.y);
+    let to_ball = Vec3::new(b.x - from.x, b.y - from.y, 0.0);
+    let land = from + to_ball * ((horiz - REACH).max(0.0) / horiz.max(1e-9));
+    let inside = |p: Vec3| field.body_clearance(p.x, p.y, BODY_R).dist >= 0.0;
+    let mut ok = from;
+    for j in 1..=LUNGE_CHECKS {
+        let q = from + (land - from) * (j as f64 / LUNGE_CHECKS as f64);
+        if !inside(q) {
+            break;
+        }
+        ok = q;
+    }
+    ok
+}
+
 fn fielder_step(fd: &Fielder, t: f64, t_contact: f64) -> (Vec3, Vec3) {
     if fd.dove && t < fd.ready_at {
         // Down from a dive: the lunge carries him toward the ball, then he lies still.
@@ -7048,24 +7068,7 @@ impl<'a> Sim<'a> {
                 // body goes until the glove is at the ball (arm's reach short of it).
                 fd.dove = true;
                 fd.ready_at = self.t + DIVE_GETUP_S;
-                let to_ball = Vec3::new(b.x - fd.pos.x, b.y - fd.pos.y, 0.0);
-                let mut land = fd.pos + to_ball * ((horiz - REACH).max(0.0) / horiz.max(1e-9));
-                // Never through the wall: the body stops short of the first point of its
-                // path that would put him within his body's width of it (the fair and foul
-                // fences meet at an inward corner a straight lunge can cut; Codex dive
-                // animation review #1).
-                let field = self.inp.field;
-                let inside = |p: Vec3| field.body_clearance(p.x, p.y, BODY_R).dist >= 0.0;
-                let from = fd.pos;
-                let mut ok = from;
-                for j in 1..=LUNGE_CHECKS {
-                    let q = from + (land - from) * (j as f64 / LUNGE_CHECKS as f64);
-                    if !inside(q) {
-                        break;
-                    }
-                    ok = q;
-                }
-                land = ok;
+                let land = lunge_land(self.inp.field, fd.pos, b);
                 fd.lunge = Some((self.t, fd.pos, land));
                 let (id, from) = (fd.id, fd.pos);
                 self.out.dives.push((self.t, id, from, land));
@@ -7194,36 +7197,61 @@ impl<'a> Sim<'a> {
     fn dive_pays(&self, i: usize) -> bool {
         let fd = &self.f[i];
         let Some(p) = &fd.belief else { return false };
+        let field = self.inp.field;
         let (stand, dive) = self.intercept_scan(i, p);
-        // Still up, with his plan's dive before it comes down by his read: a dive for a catch
-        // in the air. A dive he would make only after it has come down (a short hop in front
-        // of him) is a dive at a ball on the ground and is weighed as one.
-        if self.ball_still_up() && dive.map_or(true, |(td, _)| p.first_bounce().map_or(true, |b| td < b.0)) {
-            return self.dive_gains(i, DIVE_GETUP_S);
-        }
-        // Where he would lay out: the plan's first dive point (at its 0.6 of the layout); if the
-        // plan has none (it plans dives only to `REACH` + 0.6·`DIVE`), where his read has the
-        // ball pass closest to him while it is still fast enough to lunge at
-        // ([`LUNGE_MIN_MPS`]), at that distance.
-        let (td, at, h) = match dive {
-            Some((td, at)) => (td, at, REACH + 0.6 * DIVE),
-            None => {
-                let near = |t: f64| { let b = p.at(t).0; m::hypot(b.x - fd.pos.x, b.y - fd.pos.y) };
-                let mut tc = self.t;
-                let mut k = self.t;
-                while k <= p.t_end() && p.at(k).1.norm() > LUNGE_MIN_MPS {
-                    if near(k) < near(tc) {
-                        tc = k;
-                    }
-                    k += DT;
+        // His own path ahead as his movement runs it, against the ball by his read: (t, where
+        // he is, the ball, its velocity), while the ball is within [`DIVE_READ_M`] of him or
+        // still coming closer.
+        let mut ahead: Vec<(f64, Vec3, Vec3, Vec3)> = Vec::new();
+        {
+            let mut body = fd.clone();
+            let (mut t, mut prev) = (self.t, f64::INFINITY);
+            while t <= p.t_end() {
+                let (b, v) = p.at(t);
+                let h = m::hypot(b.x - body.pos.x, b.y - body.pos.y);
+                if h > DIVE_READ_M && h > prev {
+                    break;
                 }
-                if near(tc) > REACH + DIVE {
-                    return stand.is_none();
-                }
-                let b = p.at(tc).0;
-                (tc, Vec3::new(b.x, b.y, 0.0), near(tc).max(REACH))
+                ahead.push((t, body.pos, b, v));
+                prev = h;
+                (body.pos, body.vel) = fielder_step(&body, t, self.inp.t_contact);
+                t += DT;
             }
-        };
+        }
+        let h_of = |e: &(f64, Vec3, Vec3, Vec3)| m::hypot(e.2.x - e.1.x, e.2.y - e.1.y);
+        // Still up, and his read has it pass within the capture's envelope before it comes
+        // down: a dive for a catch in the air (second review P2-1). Only a dive he can make
+        // nowhere but after the bounce (a short hop) is a dive at a ball on the ground.
+        // A wall touch is a bounce: a ball off the wall is no catch for an out (a public fact
+        // once it has happened; his read for one to come).
+        let off_wall = matches!(&self.ball, Ball::Free { path, .. } if path.walls.first().is_some_and(|w| w.0 <= self.t));
+        if self.ball_still_up() && !off_wall {
+            let fb = p.first_bounce().map_or(f64::INFINITY, |x| x.0).min(p.walls.first().map_or(f64::INFINITY, |w| w.0));
+            if ahead.iter().any(|e| e.0 < fb && e.2.z <= DIVE_MAX_Z && h_of(e) <= REACH + DIVE) {
+                return self.dive_gains(i, DIVE_GETUP_S);
+            }
+        }
+        // The dive he is about to make (second review P2-2, P3-5): the earlier of his plan's
+        // first dive point (at the plan's 0.6 of the layout) and the nearest pass within his
+        // dive reach (his arm plus the layout his lunge time allows by then, as the capture
+        // counts it) while the ball is fast enough to lunge at ([`LUNGE_MIN_MPS`]), low enough
+        // and not past a wall; each from where he will be then.
+        let since = fd.must_dive_since.min(self.t).max(self.inp.t_contact + if i == 0 { PITCHER_RECOVER_S } else { fd.a.reaction });
+        let reach_at = |t: f64| REACH + DIVE * ((t - since) / DIVE_LUNGE_S).clamp(0.0, 1.0);
+        // The first approach within reach, at its closest (where the capture lays out).
+        let can = |e: &(f64, Vec3, Vec3, Vec3)| e.3.norm() > LUNGE_MIN_MPS && e.2.z <= DIVE_MAX_Z && beyond_reach_over_wall(field, e.2) <= 0.0 && h_of(e) <= reach_at(e.0);
+        let pass = ahead.iter().position(can).map(|k0| {
+            let mut k = k0;
+            while k + 1 < ahead.len() && can(&ahead[k + 1]) && h_of(&ahead[k + 1]) < h_of(&ahead[k]) {
+                k += 1;
+            }
+            let e = &ahead[k];
+            (e.0, e.1, Vec3::new(e.2.x, e.2.y, 0.0), h_of(e).max(REACH))
+        });
+        let plan = dive.map(|(td, at)| {
+            let from = ahead.iter().min_by(|a, b| (a.0 - td).abs().total_cmp(&(b.0 - td).abs())).map_or(fd.pos, |e| e.1);
+            (td, from, at, REACH + 0.6 * DIVE)
+        });
         // His standing take; if the ball comes to rest before he can reach it on his feet,
         // where it rests, at his top speed.
         let ts = match stand {
@@ -7233,6 +7261,15 @@ impl<'a> Sim<'a> {
                 p.t_end().max(self.t + m::hypot(rest.x - fd.pos.x, rest.y - fd.pos.y) / fd.a.speed)
             }
         };
+        // No dive within his reach by his read: none to price. With no standing take either, the
+        // resting-point take stands for it (rule (1)); he may go only if that is later than a
+        // catch's get-up, so not at a ball nearly at rest (second review P3-1).
+        let Some((td, from, at, h)) = (match (plan, pass) {
+            (Some(a), Some(b)) => Some(if b.0 < a.0 { b } else { a }),
+            (a, b) => a.or(b),
+        }) else {
+            return stand.is_none() && ts - self.t > DIVE_GETUP_S;
+        };
         let (bd, vd) = p.at(td);
         let vh = Vec3::new(vd.x, vd.y, 0.0);
         let sg = fd.a.hands * glove_sigma_mult(vd.norm(), h, true);
@@ -7241,8 +7278,7 @@ impl<'a> Sim<'a> {
         // He lands with his glove at the ball, his body an arm's reach short of it, and is
         // up, at rest, after the get-up.
         let up = td + DIVE_GETUP_S;
-        let to = Vec3::new(at.x - fd.pos.x, at.y - fd.pos.y, 0.0);
-        let land = Vec3::new(at.x, at.y, 0.0) - to * (REACH / to.norm().max(REACH));
+        let land = lunge_land(field, from, at);
         let mut body = fd.clone();
         (body.pos, body.vel) = (land, Vec3::ZERO);
         // When he has a ball moving along `path`: his intercept from where he lies, or, if
@@ -10489,7 +10525,10 @@ mod tests {
     // not end in his glove (a knock-down: up, then run to the ball; a miss: up, then chase it).
     // A 10 m/s grounder he would have on his feet 1.8 s from now: the get-up alone (1.5 s)
     // let him go, but a knock-down or a miss would leave him later than that, so he stays up.
-    // At 14 m/s his standing take is 4 s away and the dive pays.
+    // At 10.5 m/s his standing take (2.07 s) is later than a catch would have him (up 2.03 s
+    // from now) but earlier than the expected time (2.31 s): the mixture keeps him up (second
+    // review P3-2; a charge of the get-up from the dive point alone would send him). At 14 m/s
+    // his standing take is 4 s away and the dive pays.
     #[test]
     fn a_dive_at_a_ground_ball_pays_only_when_its_expected_cost_beats_his_standing_take() {
         let near = grounder_beside_cf(10.0);
@@ -10499,10 +10538,40 @@ mod tests {
         assert!(dive.is_some() && ts > DIVE_GETUP_S && ts < 2.7, "fixture: standing take {ts:.2} s away, beyond the get-up");
         assert!(near.dive_gains(CF, DIVE_GETUP_S), "fixture: the get-up alone lets him go");
         assert!(!near.dive_pays(CF), "he dove at a ball he would have on his feet {ts:.2} s from now");
+        let mid = grounder_beside_cf(10.5);
+        let p = mid.f[CF].belief.clone().unwrap();
+        let (stand, dive) = mid.intercept_scan(CF, &p);
+        let (ts, td) = (stand.expect("fixture: a standing take").0 - mid.t, dive.expect("fixture: a dive point").0 - mid.t);
+        assert!(ts > td + DIVE_GETUP_S && ts < td + DIVE_GETUP_S + 0.3, "fixture: standing take {ts:.2} s, a catch up at {:.2} s", td + DIVE_GETUP_S);
+        assert!(!mid.dive_pays(CF), "he dove though a knock-down or a miss would leave him later than his standing take {ts:.2} s");
         let far = grounder_beside_cf(14.0);
         let p = far.f[CF].belief.clone().unwrap();
         let ts = far.intercept_scan(CF, &p).0.expect("fixture: a standing take").0 - far.t;
         assert!(ts > 3.5 && far.dive_pays(CF), "standing take {ts:.2} s away: the dive should pay");
+    }
+
+    // Second review P3-1: a ball rolling away from him at 3.2 m/s from 2.6 m off (out of his
+    // reach, and it will not come back within it) that comes to rest 1.1 s from now, before he
+    // can reach it on his feet. With no standing take and no dive to price, the resting-point
+    // take stands for it: less than a catch's get-up away, so he stays up (before, no standing
+    // take let him go at once, and the capture would lay him out at it if it came near).
+    #[test]
+    fn nobody_lays_out_at_a_ball_coming_to_rest_out_of_his_reach() {
+        let fx: &'static Fixture = Box::leak(Box::new(fixture(&[])));
+        let mut inp = input(fx, vec![RunnerIn { id: fx.st.batter, base: 0, speed: 8.2, tau_s: bb_agents::running::LEAGUE_TAU_S }]);
+        inp.fattrs = core::array::from_fn(FielderAttrs::average);
+        let inp: &'static LiveInput<'static> = Box::leak(Box::new(inp));
+        let st: &'static mut RulesState = Box::leak(Box::new(fx.st.clone()));
+        let mut sim = new_sim(inp, st);
+        sim.f[CF].pos = Vec3::new(0.0, 80.0, 0.0);
+        loose_ball(&mut sim, 1.5, Vec3::new(1.5, 82.6, 0.04), Vec3::new(0.0, 3.2, 0.0));
+        sim.f[CF].role = Role::Chase;
+        sim.f[CF].belief = Some(sim.predict(CF));
+        sim.t += 0.05;
+        let p = sim.f[CF].belief.clone().unwrap();
+        let (stand, dive) = sim.intercept_scan(CF, &p);
+        assert!(stand.is_none() && dive.is_none() && p.t_end() - sim.t < DIVE_GETUP_S, "fixture: no standing take, no dive point, at rest {:.2} s on", p.t_end() - sim.t);
+        assert!(!sim.dive_pays(CF), "he may lay out at a ball coming to rest");
     }
 
     // The ground side of `OF_DIVE_MIN_P` (review P3-1): at a 20 m/s grounder passing 2.4 m
