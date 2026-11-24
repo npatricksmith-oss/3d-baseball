@@ -477,8 +477,11 @@ void ABbDirector::BeginPlay()
 	bStagingLog = FParse::Param(Cmd, TEXT("BbStagingLog"));
 	bMotionShots = FParse::Param(Cmd, TEXT("BbMotionShots"));
 	bBatCheck = FParse::Param(Cmd, TEXT("BbBatCheck"));
-	bBatLegacy = FParse::Param(Cmd, TEXT("BbBatLegacy"));
 	FParse::Value(Cmd, TEXT("BbBatShots="), BatShotsLeft);
+	// The step 1 bat (player-visuals §13.4) is off by default until the owner's Q44 settles the
+	// sim's swing-start pose; the checks and pictures of it turn it on.
+	bClientBat = FParse::Param(Cmd, TEXT("BbBatSim")) || bBatCheck || BatShotsLeft > 0;
+	UE_LOG(LogBb, Display, TEXT("BB_BATMODE client_bat=%d (1: the step 1 bat, -BbBatSim; 0: the timeline's bat as it is)"), bClientBat ? 1 : 0);
 	if (FParse::Param(Cmd, TEXT("BbClipSpeeds")))
 	{
 		// The pace each gait clip is animated for, to check the staging speeds against.
@@ -1889,10 +1892,10 @@ void ABbDirector::NoteBat(const FBbPlay& Play, FBatNote& Out) const
 
 void ABbDirector::DrawnBat(float T, const FBatNote& N, const FVector& SimKnob, const FVector& SimTip, FVector& OutKnob, FVector& OutTip) const
 {
-	if (bBatLegacy)
+	if (!bClientBat)
 	{
-		// -BbBatLegacy: the bat as before step 1 (the timeline's, stance and load samples
-		// included), for comparing pictures and checks with it.
+		// The default: the timeline's bat as it is, stance and load samples included (as before
+		// step 1; -BbBatSim draws the client's own before the swing).
 		OutKnob = SimKnob;
 		OutTip = SimTip;
 		return;

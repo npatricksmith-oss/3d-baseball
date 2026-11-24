@@ -1,14 +1,14 @@
 #!/bin/bash
 # Headless check of the batter's bat before the swing (player-visuals section 13, build step 1):
 # seeds 7 and 6 (a right- and a left-hander among the batters) are played fast with
-# -BbBatCheck, which logs one BB_BATCHECK line per pitch (the drawn bat at 1 ms: hand speed
+# -BbBatSim -BbBatCheck (the step 1 bat, off by default until the owner's Q44), which logs one BB_BATCHECK line per pitch (the drawn bat at 1 ms: hand speed
 # before the sim's bat moves <= 1.5 m/s, the bat within 2 cm and 2 degrees of the motion carried
 # on at both ends of the handover, the same bat to 0.1 cm with the swing withheld, D22), and
 # -BbStagingLog, which adds BB_BATHANDS (the worst a hand has been from the handle from the
 # moment the sim's bat first moves to the end of the swing, per swing).
 # Exits 1 if any BB_BATCHECK line says FAIL, if fewer than 10 swings were checked, or if a hand
 # was ever more than 1 cm further from the handle than in the same swing with the bat as it was
-# before step 1 (-BbBatLegacy, run too and compared by play): some swings reach beyond today's
+# before step 1 (the default bat, run too and compared by play): some swings reach beyond today's
 # body (the arms are too short for a far or low aim, up to 10 cm; the base swing's step 3 is for
 # that), and they do so with either bat. Builds nothing (build the client first).
 # The handover's hand speed (the drawn knob's, while the client's bat closes on the sim's start
@@ -29,11 +29,11 @@ fail=0
 allspeeds=$(mktemp)
 run() { # seed, extra args, log
   taskset -c 0-7 nice timeout $((SECS + 120)) "$UE/Engine/Binaries/Linux/UnrealEditor" "$HERE/BaseballClient.uproject" -game -windowed -ResX=888 -ResY=500 -nosplash \
-    -RenderOffscreen -BbSeed=$1 -BbSpeed=$PACE -BbBatCheck -BbStagingLog -BbBenchSeconds=$SECS $2 > "$3" 2>&1
+    -RenderOffscreen -BbSeed=$1 -BbSpeed=$PACE -BbStagingLog -BbBenchSeconds=$SECS $2 > "$3" 2>&1
 }
 for seed in $SEEDS; do
   new="$OUT/bat-step1-seed$seed.log"; old="$OUT/bat-step1-seed$seed-legacy.log"
-  run $seed "" "$new"; [ "$HANDS" = 1 ] && run $seed "-BbBatLegacy" "$old"
+  run $seed "-BbBatSim -BbBatCheck" "$new"; [ "$HANDS" = 1 ] && run $seed "" "$old"
   swings=$(grep "BB_BATCHECK" "$new" | grep -c "swing=1")
   takes=$(grep "BB_BATCHECK" "$new" | grep -c "swing=0")
   fails=$(grep "BB_BATCHECK" "$new" | grep -c " FAIL")
