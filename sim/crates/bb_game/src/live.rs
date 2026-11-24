@@ -7182,7 +7182,7 @@ impl<'a> Sim<'a> {
         }
     }
 
-        /// Whether a dive gains the fielder anything (agent-models §5.3, "What a dive at a ball on
+    /// Whether a dive gains the fielder anything (agent-models §5.3, "What a dive at a ball on
     /// the ground costs him"). A ball still in the air: as [`Self::dive_gains`] with the
     /// get-up. A ball on the ground: by his own read and his own hands, the expected time to
     /// have the ball after a dive (a catch: up after [`DIVE_GETUP_S`]; a knock-down: up, then
