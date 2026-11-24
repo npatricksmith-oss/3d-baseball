@@ -5,8 +5,10 @@ is v2's (swing_oracle.Plan); here its first two derivatives are taken analytical
 rate bumps and checked in the tests against finite differences of v2's own positions.
 
 `Swing` is the swing family of §6.7 (PLAN D27): the template (the grade-50 batter's swing at the aim,
-§6.3, in its own phase) scaled for the batter's travel and time. `SwingStep1` is the path as merged
-in build step 1 (one launch, one swing time), kept for the comparisons of §6.7.
+§6.3, in its own phase) scaled for the batter's travel and time, fitted at the stance of PLAN D28
+(`P_STANCE`, §5.3.1) with the contact depth a parameter (`CONTACT_Y0`, Q51; `contact_depth(y0)`).
+`SwingStep1` is the path as merged in build step 1 (one launch, one swing time, today's stance spot),
+kept for the comparisons of §6.7.
 
 Run from the repository root:
     python3 analysis/oracle/swing_v3.py           # writes golden/swing_v3.json
@@ -748,7 +750,8 @@ class Template(SwingStep1):
 
 class Swing(SwingStep1):
     """One swing of the family (§6.7, PLAN D27): the template at the aim, every displacement from the
-    contact pose (A, E, W) multiplied by the travel factor λ, in the swing's phase u = τ/T with
+    contact pose multiplied by the travel factor (λ for A and E, λ_W ≤ 1.10·λ/λ_nom for the hands W),
+    in the swing's phase u = τ/T with
     T = T_t·(T_b/T_MEAN)/(1 + effort); a second-order correction on [u_93, 0] so the contact jet is the
     batter's own; and the fade h(u) that puts the launch at his own L, the same on every pitch.
 
