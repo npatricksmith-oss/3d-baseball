@@ -50,4 +50,4 @@ agent-models §1.1 says the scan "fails on ... `#[path]` or `include!`"; that is
 
 ## Resolution
 
-Open.
+All five fixed in `695bb43` by the original worker (cm-trial-2): `cfg_attr` paths and a renamed `include` are flagged (P2-1, P3-2); only `struct`/`enum`/`union` names count as local in `motor.rs`, so an alias impl is flagged (P2-2); `impl` counts as an item only in item position, lifetimes are skipped and tuple self types are checked (P3-1); agent-models §1.1 names the `motor.rs` rule and the forms it covers (P3-3). Each hole has a self-test case and was planted against the real source through the new `EXEC_ISOLATION_SRC` override. No re-review: a small, test-covered fix to a test file (CLAUDE.md, Pace). Coordinator re-ran `cargo test -p bb_agents`, `crate_graph` and check-docs (queue job 150, passed).
