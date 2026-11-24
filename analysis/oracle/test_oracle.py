@@ -377,10 +377,10 @@ class OracleTests(unittest.TestCase):
 # The swing v3 oracle's checks (docs/swing-model-v3.md §11) run with this file.
 try:
     from .test_swing_v3 import (HandWorkedCase, ReadingAndBody, Jet, PathInvariants, AppendixE, Braking,
-                                AimRange, SourceBounds, Family, RatingRange, GoldenFile)
+                                AimRange, SourceBounds, Family, RatingRange, HandsSpeed, GoldenFile)
 except ImportError:
     from test_swing_v3 import (HandWorkedCase, ReadingAndBody, Jet, PathInvariants, AppendixE, Braking,
-                               AimRange, SourceBounds, Family, RatingRange, GoldenFile)
+                               AimRange, SourceBounds, Family, RatingRange, HandsSpeed, GoldenFile)
 
 
 if __name__ == '__main__':

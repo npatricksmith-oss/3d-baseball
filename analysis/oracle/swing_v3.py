@@ -707,7 +707,7 @@ class Swing(SwingStep1):
     def __init__(self, aim, t_c=0.40, side=1, H=1.85, bat_speed=V_TEMPLATE, t_swing=T_MEAN, P=None, alpha=None,
                  effort=0.0, path='v3', plan=None, jet_yaw_deg=0.0, T_force=None):
         self.side, self.H, self.t_c, self.effort, self.path = side, H, t_c, effort, 'v3'
-        self.T_b, self.bat_speed = t_swing, bat_speed
+        self.T_b, self.bat_speed, self.plan_aim, self.plan_alpha = t_swing, bat_speed, aim, alpha
         tm = self.tmpl = Template(aim, t_c=t_c, side=side, H=H, P=P, alpha=alpha, jet_yaw_deg=jet_yaw_deg)
         self.P = tm.P
         self.lam_nom = self.travel(bat_speed, t_swing)
@@ -738,7 +738,13 @@ class Swing(SwingStep1):
         ref = ref_jet(H, bat_speed, side, effort, t_c)
         self.X_ref = [unwrap_about(ref.A[0], tm.A_ref), ref.E[0]] + list(ref.W[0])
         L_t = [f(-1.0, 0) for f in self._f]
-        self.X_L = [r + self.lam_nom * (l - r) for r, l in zip(self.X_ref, L_t)]   # the batter's launch
+        # The batter's launch: the bat's (A, E) the template's scaled about his middle-middle contact
+        # pose by λ; the hands by min(λ, 1): a short swing starts with the hands nearer the ball, a long
+        # one at [4]'s launch hands (built from [4]'s arm angles on his own segments, §6.1; scaled
+        # past them they leave the lead arm's reach, review P2-1).
+        lam_W = min(self.lam_nom, 1.0)
+        self.X_L = [r + self.lam_nom * (l - r) for r, l in zip(self.X_ref[:2], L_t[:2])] + \
+                   [r + lam_W * (l - r) for r, l in zip(self.X_ref[2:], L_t[2:])]
         self._fade = [xl - (x0 + lam * (l - f(0.0, 0))) for xl, x0, l, f in zip(self.X_L, self._x0, L_t, self._f)]
         self.A_L, self.E_L = self.X_L[0], self.X_L[1]
         self.W_L = tuple(self.X_L[2:])
@@ -860,15 +866,33 @@ def diagnostics(sw, dt=0.0005):
     # One surge (§6.3): from −93 ms to contact the azimuth rate never falls below its −93 ms value.
     i93 = min(range(n + 1), key=lambda i: abs(taus[i] - sw.tau93))
     rate_dip = min(Ad[i93:]) / Ad[i93]
-    # One surge (§6.7.4, strict): before its peak a rate never falls below its running maximum by more
-    # than a share of the peak (the azimuth rate and the sweet spot's speed, launch to contact).
-    def worst_dip(x):
-        i = max(range(len(x)), key=lambda k: x[k])
-        m, w = x[0], 0.0
-        for k in range(i + 1):
-            m = max(m, x[k]); w = max(w, (m - x[k]) / x[i])
-        return w
+    # One surge (§6.7.4): the deepest valley of a speed, the drop below the lower of the maxima on
+    # either side, as a share of that lower maximum (an early stall reads at its own size, review
+    # P3-1); counted once both maxima pass `SURGE_FLOOR` of the speed at contact (below it the bat
+    # cocks against the hands' first move, at a few per cent of its contact speed).
+    def worst_dip(x, floor=None):
+        n = len(x)
+        fl = SURGE_FLOOR * x[-1] if floor is None else floor
+        Lm, Rm, m = [0.0] * n, [0.0] * n, 0.0
+        for k in range(n): m = max(m, x[k]); Lm[k] = m
+        m = 0.0
+        for k in range(n - 1, -1, -1): m = max(m, x[k]); Rm[k] = m
+        return max([(min(Lm[k], Rm[k]) - x[k]) / min(Lm[k], Rm[k]) for k in range(n) if min(Lm[k], Rm[k]) > fl] or [0.0])
     ss_all = ss + [v0]
+    hand_v = [nrm(x[5]) for x in st]
+    knob_v = []
+    for x in st:
+        a = bat_dir(x[0], x[2])
+        a1 = (-math.cos(x[2]) * math.sin(x[0]) * x[1] - math.sin(x[2]) * math.cos(x[0]) * x[3],
+              math.cos(x[2]) * math.cos(x[0]) * x[1] - math.sin(x[2]) * math.sin(x[0]) * x[3], math.cos(x[2]) * x[3])
+        knob_v.append(nrm(sub(x[5], sc(a1, U_G))))
+    # The arms' reach (review P2-1): each shoulder to the hands at the body's knots, over a straight arm.
+    arms = {}
+    for knot, tk in (('L', -T), ('93', sw.tau93)):
+        b = sw.bodies[knot]
+        W = sw.state_rh(tk)[4]
+        straight = (SEG['upper_arm'] + SEG['forearm']) * sw.H
+        arms[knot] = (nrm(sub(W, b.lead)) - straight, nrm(sub(W, b.rear)) - straight)
     tipv = [sw.point_velocity(sw.t_c + t, BAT_L) for t in taus[:-1]]
     if sw.side == -1:
         tipv = [mirror(v) for v in tipv]
@@ -905,7 +929,10 @@ def diagnostics(sw, dt=0.0005):
         lag_L=lag[0], lag_93=sw.lag(sw.tau93), lag_c=lag[-1], lag_max=lag[ilm], lag_max_tau=taus[ilm],
         uncock_peak=-lagr[iun], uncock_tau=taus[iun + 1],
         arm_rate_peak=arm[iar], arm_rate_tau=taus[iar + 1], rate_dip_after_93=rate_dip, rate_93_over_c=Ad[i93] / (sw.A_c[1] / DEG),
-        rate_worst_dip=worst_dip(Ad), ss_worst_dip=worst_dip(ss_all), T=sw.T, A_L=sw.A_L / DEG, E_L=sw.E_L / DEG,
+        rate_worst_dip=worst_dip(Ad, floor=0.0), ss_worst_dip=worst_dip(ss_all), T=sw.T, A_L=sw.A_L / DEG, E_L=sw.E_L / DEG,
+        hands_worst_dip=worst_dip(hand_v), knob_worst_dip=worst_dip(knob_v),
+        lead_arm_over_L=arms['L'][0], rear_arm_over_L=arms['L'][1], lead_arm_over_93=arms['93'][0], rear_arm_over_93=arms['93'][1],
+        start_slack=start_slack(sw),
         tip_toward_plate_peak=tipv[ix][0], tip_toward_plate_tau=taus[ix],
         tip_down_peak=-tipv[iz][2], tip_down_tau=taus[iz],
         hands_ahead_c=dot(sub(Wc, sw.S_rh(0.0)), bc.xT),
@@ -922,8 +949,20 @@ TIP_RATIO_MAX = 1.15   # [3]'s shape bound (§11): the tip's speed peak before c
 E_RANGE = (-45.0, 65.0)   # [E] a plausibility guard: the longest swings (travel +3 sd) launch with the bat up to 62° (§6.7.4)
 
 
-RATE_DIP_TOL = 1e-3    # [E] one surge: the azimuth rate never more than 0.1% of its peak below its running maximum
-SPEED_DIP_TOL = 0.02   # [E] the sweet spot's speed: 2% (a flat top before contact ripples by up to 1.5%)
+RATE_DIP_TOL = 1e-3    # [E] one surge: no valley in the azimuth rate deeper than 0.1%
+SPEED_DIP_TOL = 0.02   # [E] the sweet spot's, the hands' and the knob's speed: 2% (a flat top before contact ripples by up to 1.9%)
+SURGE_FLOOR = 0.25     # [E] valleys counted once the speed passes a quarter of its contact value
+ARM_SLACK = 0.02       # m [E] each arm at most 2 cm past straight at the knots (the template's own residual at L is 1.1 cm, §6.1)
+T_LATENCY = 0.050      # s, agent-models §3.4: the decision to the swing's start (the bat at 10% of its peak speed)
+T_BAT10 = 0.150 / 0.170   # the share of the from-rest time at which the bat passes 10% of its peak angular speed (§4.3)
+
+
+def start_slack(sw):
+    """How much earlier than his planned start (t_c − T_b) this swing may leave rest without leaving
+    before the decision (§6.7.5): the decision comes T_latency before the bat's 10% instant of his
+    usual swing, which is (1 − T_BAT10)·T_b after his first motion; negative = the swing starts late."""
+    T_b = getattr(sw, 'T_b', sw.T)
+    return (T_LATENCY - (1.0 - T_BAT10) * T_b) - (sw.T - T_b)
 
 
 def range_failures(d, H=1.85):
@@ -932,6 +971,8 @@ def range_failures(d, H=1.85):
     if not all(math.isfinite(v) for v in d.values()): bad.append('finite')
     if d['min_Adot'] < -1e-6: bad.append('A non-decreasing')
     if d['rate_worst_dip'] > RATE_DIP_TOL or d['ss_worst_dip'] > SPEED_DIP_TOL: bad.append('one surge')
+    if d['hands_worst_dip'] > SPEED_DIP_TOL or d['knob_worst_dip'] > SPEED_DIP_TOL: bad.append('hands one surge')
+    if max(d['lead_arm_over_L'], d['rear_arm_over_L'], d['lead_arm_over_93'], d['rear_arm_over_93']) > ARM_SLACK: bad.append('arms reach')
     if not (E_RANGE[0] <= d['E_min'] and d['E_max'] <= E_RANGE[1]): bad.append('E range')
     if d['ss_ratio_max'] > SS_RATIO_MAX: bad.append('sweet-spot speed')
     if d['tip_ratio_max'] > TIP_RATIO_MAX: bad.append('tip speed')
@@ -1132,6 +1173,45 @@ def basis_matrix(nodes):
     return [[cols[i][j] for i in range(n)] for j in range(n)]
 
 
+def today_plan(sw):
+    """Today's v2 for the same batter, aim and effort: its swing time `t_swing` = his T_b × 0.150/0.170
+    (the bat's 10% start, §6.7.7), the effort in k (v2's effort multiplies both bumps, as k does)."""
+    return v2.Plan(sw.plan_aim, sw.t_c, sw.side, sw.H, U_SS, sw.bat_speed * (1.0 + sw.effort), t_swing=sw.T_b * T_BAT10,
+                   alpha=sw.plan_alpha)
+
+
+def late_vs_today(sw):
+    """§6.7.6 over the family (review P2-2): v3 against today's v2 before contact."""
+    p = today_plan(sw)
+    out = {}
+    for ms in (-25.0, -15.0, -10.0):
+        t = sw.t_c + ms * 1e-3
+        v3v, v2v = sw.point_velocity(t, U_SS), p.velocity(t, U_SS)
+        (aa3, _), (aa2, _) = attack(v3v, sw.side), attack(v2v, sw.side)
+        out['%d' % ms] = dict(attack_angle_diff=aa3 - aa2, ss_v3_mph=nrm(v3v) / MPH, ss_v2_mph=nrm(v2v) / MPH)
+    xs3, ys3, xs2, ys2 = [], [], [], []
+    for i in range(81):
+        t = sw.t_c + (-10.0 + i * 0.25) * 1e-3
+        a3, d3 = attack(sw.point_velocity(t, U_SS), sw.side); a2, d2 = attack(p.velocity(t, U_SS), sw.side)
+        xs3.append(d3); ys3.append(a3); xs2.append(d2); ys2.append(a2)
+    def slope(xs, ys):
+        mx, my = sum(xs) / len(xs), sum(ys) / len(ys)
+        return sum((x - mx) * (y - my) for x, y in zip(xs, ys)) / sum((x - mx) ** 2 for x in xs)
+    out['attack_slope_diff'] = slope(xs3, ys3) - slope(xs2, ys2)
+    pts = [sw.point(sw.t_c - 0.040 + i * 0.001, U_SS) for i in range(41)]
+    out['tilt_minus_beta'] = plane_tilt_deg(pts) - sw.plan.beta / DEG
+    return out
+
+
+FAMILY_LATE_CASES = [('grade 50', {}), ('easy -2 sd', dict(effort=-0.09)), ('hard +2 sd', dict(effort=0.09)),
+                     ('slow bat -2 sd', dict(bat_speed=32.0 * (1 - 2 * 1.25 / 32))), ('fast bat +2 sd', dict(bat_speed=32.0 * (1 + 2 * 1.25 / 32))),
+                     ('quick hands +2 sd', dict(t_swing=T_MEAN / 1.05 ** 2)), ('slow hands -2 sd', dict(t_swing=T_MEAN * 1.05 ** 2))]
+
+
+def family_late():
+    return {name: {n: late_vs_today(Swing(a, **kw)) for n, a in GOLDEN_AIMS.items()} for name, kw in FAMILY_LATE_CASES}
+
+
 def family_report():
     """§6.7.4: across batters (BatSpeed at fixed T_b) and within a batter (effort), middle aim; the
     template's time by aim. Head travel from the start (rest) and over the last 65 ms."""
@@ -1155,7 +1235,7 @@ def family_report():
     grid = {}
     for z in (0.35, 0.55, 0.75, 0.95, 1.14):
         grid['%.2f' % z] = [Template((x, 0.35 - 0.125 * x, z)).T for x in (-0.45, -0.30, -0.15, 0.0, 0.15, 0.30, 0.45)]
-    return dict(across=across, within=within, template_T_by_aim=grid)
+    return dict(across=across, within=within, template_T_by_aim=grid, late_vs_today=family_late())
 
 
 def golden(skip=()):

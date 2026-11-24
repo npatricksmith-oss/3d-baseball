@@ -125,9 +125,21 @@ def m_S_linear():
     patch(s.Swing, 'S_rh', g)
 
 # The swing family's (§6.7, PLAN D27).
-def m_effort_in_travel():
+def m_effort_left_out_of_time():
     patch(s.Swing, 'swing_time', staticmethod(lambda T_t, t_swing, effort: T_t * (t_swing / s.T_MEAN)))
-    patch(s.Swing, 'travel', staticmethod(lambda v, t_swing: (v / s.V_TEMPLATE) * (t_swing / s.T_MEAN)))
+def m_effort_in_travel():
+    # effort multiplies the travel at a fixed time (the launch moves with effort; review P2-5)
+    patch(s.Swing, 'swing_time', staticmethod(lambda T_t, t_swing, effort: T_t * (t_swing / s.T_MEAN)))
+    init = s.Swing.__init__
+    trav = s.Swing.__dict__['travel']
+    def new(self, aim, *a, **k):
+        e = k.get('effort', 0.0)
+        s.Swing.travel = staticmethod(lambda v, t: trav.__func__(v, t) * (1.0 + e))
+        try:
+            init(self, aim, *a, **k)
+        finally:
+            s.Swing.travel = trav
+    patch(s.Swing, '__init__', new)
 def m_travel_without_own_time():
     patch(s.Swing, 'travel', staticmethod(lambda v, t_swing: v / s.V_TEMPLATE))
 def m_no_fade():
@@ -139,7 +151,8 @@ def m_replan_travel_held():
 def m_step1_anchor():
     _dA_variant(True)
 
-MUT_FAMILY = [('family: effort changes the travel, not the time', m_effort_in_travel),
+MUT_FAMILY = [('family: effort left out of the time (the contact correction absorbs the rate)', m_effort_left_out_of_time),
+              ('family: effort multiplies the travel at a fixed time (the launch moves)', m_effort_in_travel),
               ('family: travel follows BatSpeed only (not his own time)', m_travel_without_own_time),
               ('family: no fade (the launch moves with the pitch)', m_no_fade),
               ('family: the template at T_mean for every aim', m_template_one_time),
