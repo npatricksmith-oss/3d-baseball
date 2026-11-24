@@ -17,7 +17,7 @@ Status: `[ ]` not started · `[~]` partly done · `[?]` needs an owner decision
 
 ## Resume here (2026-11-24)
 
-**State.** Swing v3 ([spec](docs/swing-model-v3.md)): Q45–Q48 decided (D26); steps 0–1 done, step 1 on `work/swing-oracle` (oracle, goldens, the elevation fix: spec §6.3, §11.1), not yet reviewed (Opus) or merged. Depth read merged. Nothing waits on the owner.
+**State.** Swing v3 ([spec](docs/swing-model-v3.md)): Q45–Q48 decided (D26); step 1 on `work/swing-oracle` (oracle, goldens), Opus review fixed, not merged; spec §14.1 is a new owner choice, not yet numbered. Depth read merged. Nothing waits on the owner.
 
 **Next:** §2: the ground-dive leftovers ([note](docs/calibration/2026-11-23-of-ground-dive.md) §9); swing steps 2–3 after step 1.
 
