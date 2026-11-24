@@ -176,6 +176,40 @@ fn seed_65147_play_10_an_outfielder_takes_a_grounder_through_the_hole_both_left_
     assert!(x.hypot(y) < 100.0 && t - contact < 6.0, "fielded at ({x:.1}, {y:.1}), {t:.2} s");
 }
 
+#[test]
+fn seed_65147_play_10_the_right_fielder_reads_the_chopper_on_the_grass_within_a_few_metres() {
+    // Agent-models §5.1, the depth of a ball seen on the ground (2026-11-24). The same play: the
+    // chopper bounces before the right fielder's first look, so he has no track and reads it by
+    // the snapshot read. From its first bounce until it is fielded, his read of where the ball
+    // is now, along his level line of sight to it: before, his first read was 37 m off (the
+    // snapshot read's depth σ, 3 × 3.5 m × d/30 m, at 77 m, with his fixed draw); with the ground
+    // cue, under 8 m (±4σ of a 3′ angle below his eyes at 77 m is 13 m; his draw here is smaller).
+    let text = include_str!("fixtures/a4/65147-10.json");
+    bb_game::live::read_trace::ON.with(|x| x.set(true));
+    bb_game::live::read_trace::take();
+    let (out, _, _) = replay(text);
+    bb_game::live::read_trace::ON.with(|x| x.set(false));
+    let recs = bb_game::live::read_trace::take();
+    let tb = out.facts.iter().find_map(|f| match f {
+        Input::BallTouched { t, what: bb_rules::Touch::Ground { .. } } => Some(*t),
+        _ => None,
+    }).expect("it bounces");
+    let secured = out.facts.iter().find_map(|f| match f {
+        Input::GloveSecured { t, .. } => Some(*t),
+        _ => None,
+    }).expect("someone fields it");
+    const RF: usize = 8;
+    let mine: Vec<_> = recs.iter().filter(|r| r.i == RF && r.t >= tb && r.t < secured && r.est.is_some()).collect();
+    assert!(mine.len() >= 20 && mine.iter().all(|r| r.phase == 0), "{} reads after the bounce, all by the snapshot read", mine.len());
+    let worst = mine.iter().map(|r| {
+        let u = Vec3::new(r.ball.x - r.pos.x, r.ball.y - r.pos.y, 0.0).normalized();
+        let e = r.est.unwrap() - r.ball;
+        (Vec3::new(e.x, e.y, 0.0).dot(u).abs(), r.t)
+    }).fold((0.0, 0.0), |a, b| if b.0 > a.0 { b } else { a });
+    println!("right fielder: {} reads from the bounce at {tb:.2} s, worst {:.1} m off along his line of sight at {:.2} s", mine.len(), worst.0, worst.1);
+    assert!(worst.0 < 8.0, "his read {:.1} m off along his line of sight at {:.2} s", worst.0, worst.1);
+}
+
 /// The first glove possession and whether the ball had touched the ground or a wall before it.
 fn first_secured(out: &LiveOutput) -> (f64, u16, bool) {
     let (t, who) = out.facts.iter().find_map(|f| match f {
