@@ -17,7 +17,7 @@ Status: `[ ]` not started · `[~]` partly done · `[?]` needs an owner decision
 
 ## Resume here (2026-11-24)
 
-**State.** Swing v3 ([spec](docs/swing-model-v3.md)): steps 0–1 and the swing family (D27, §6.7) merged; its [review](docs/reviews/2026-11-24-opus-swing-family-review.md) leaves the hands' stall open. PLAN D28: the batter stands 0.58 m deeper ([note 11](docs/research/swing/11-stance-depth.md)). Worker `swing-stance` (Opus, `work/swing-stance`, worktree `swing-research`): refits the family and oracle at that stance; needs an Opus review. **Q51 waits on the owner** (meet the ball 0.15 m further out front, as MLB does, or not). Then step 2 (Rust). Step 4 brings Q45 back with game measurements.
+**State.** Swing v3 ([spec](docs/swing-model-v3.md)): steps 0–1 and the swing family (D27, §6.7) merged; its [review](docs/reviews/2026-11-24-opus-swing-family-review.md) leaves the hands' stall open. PLAN D28: the batter stands 0.58 m deeper ([note 11](docs/research/swing/11-stance-depth.md)). Worker `swing-stance` (Opus, `work/swing-stance`, worktree `swing-research`): refits the family and oracle at that stance; needs an Opus review. Q51 = a (PLAN D29): the ball is met 0.15 m further out front. Nothing waits on the owner.15 m further out front, as MLB does, or not). Then step 2 (Rust). Step 4 brings Q45 back with game measurements.
 
 **Next:** §2: the ground-dive leftovers ([note](docs/calibration/2026-11-23-of-ground-dive.md) §9); swing step 2 after the stance refit.
 
