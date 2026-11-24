@@ -657,8 +657,9 @@ class RatingRange(unittest.TestCase):
     @unittest.expectedFailure
     def test_both_ratings_at_three_sd_at_once(self):
         """Fails at the long corner (BatSpeed +3 sd and QuickHands −3 sd together, travel 1.30, +4.2 sd,
-        beyond MLB's longest swings, note 10): on the outer pitch at mid-height the hands' speed dips
-        4.3% before its peak; the other eight corner swings pass every check (spec §6.7.4)."""
+        beyond MLB's longest swings, note 10): on the inside third the sweet spot peaks at 1.103× at the
+        bottom of the zone and its speed dips 2.4% and 9.4% at mid-height and the top, where the bat
+        also touches the body; the other six corner swings pass every check (spec §6.7.4)."""
         for kw, d in self.rows:
             if kw['corner']:
                 self.assertEqual(s.range_failures(d), [], kw)
@@ -670,7 +671,7 @@ class HandsSpeed(unittest.TestCase):
 
     def test_the_hands_rise_once_at_the_measured_stance(self):
         # Every pitch of the zone at ±2 sd of effort: the hands' and the knob's speed with one surge
-        # (2%, 3%), from rest to a peak of 10–12 m/s 30–50 ms before contact and easing into the ball
+        # (2%), from rest to a peak of 10–13.5 m/s 37–50 ms before contact and easing into the ball
         # as the bat whips (§6.7.4).
         for x in (-0.15, 0.0, 0.15):
             for z in (0.55, 0.75, 0.95):
@@ -681,7 +682,7 @@ class HandsSpeed(unittest.TestCase):
 
     def test_todays_stance_was_the_stall(self):
         # The cause, kept as a check (§5.3, §6.7.4): the same construction at today's stance spot stalls
-        # the hands (valleys 36–86% on the golden aims): from [4]'s arms at −93 ms only 0.31 m is left
+        # the hands (valleys 35–73% on the golden aims): from [4]'s arms at −93 ms only 0.31 m is left
         # to contact hands 0.08 m behind the chest. A change that hid the stall some other way would
         # show here.
         for aim in (MIDDLE, INSIDE_LOW, OUTSIDE_HIGH):
