@@ -1,6 +1,6 @@
 # Task List
 
-**Last updated:** 2026-11-24 (swing v3 spec).
+**Last updated:** 2026-11-24 (depth read).
 
 What is next and what is open. Other files hold the rest:
 
@@ -17,9 +17,9 @@ Status: `[ ]` not started · `[~]` partly done · `[?]` needs an owner decision
 
 ## Resume here (2026-11-24)
 
-**State.** Swing v3 spec merged ([spec](docs/swing-model-v3.md)): **Q45–Q48 wait on the owner** (§14); step 0 done ([note](docs/research/swing/9-step0-data.md)); steps 1–3 need no answer. Worker `depth-read` (Opus, `work/depth-read`, worktree `saved-plays`): TASKS §2 depth read, built, measuring; needs an Opus review.
+**State.** Swing v3 spec merged ([spec](docs/swing-model-v3.md)): **Q45–Q48 wait on the owner** (§14); step 0 done ([note](docs/research/swing/9-step0-data.md)); step 1 (oracle, Opus) waits for Q45 and Q48. Depth read merged ([note](docs/calibration/2026-11-24-depth-read.md)). No worker running.
 
-**Next:** review and merge `work/depth-read` (the ground cue in the snapshot read of a ball on the ground; sim change, Opus review; [note](docs/calibration/2026-11-24-depth-read.md)); then the ground-dive leftovers ([note](docs/calibration/2026-11-23-of-ground-dive.md) §9).
+**Next:** §2: the ground-dive leftovers ([note](docs/calibration/2026-11-23-of-ground-dive.md) §9); swing step 1 once Q45 and Q48 are answered.
 
 **Open (ledger §5):** runs down 0.21 [0.18] since dp-cover (0.04 explained; check noise); double plays 12.3% (MLB 9.8%).
 

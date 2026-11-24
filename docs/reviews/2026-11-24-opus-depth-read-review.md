@@ -87,4 +87,11 @@ Reviewer: Opus (independent; wrote none of the change), 2026-11-24. Job: `REVIEW
 
 ## Resolution
 
-Open.
+Resolved 2026-11-24 by the change's author (Opus, `68db91e`..`1efeade`; per finding in the [depth-read note](../calibration/2026-11-24-depth-read.md) §8). No second review: the fixes are small and each has a test; the Coordinator's pre-merge run (job 265) passed the workspace tests and repeated the worker's standard-run figures.
+
+- **P2-1** fixed: a new free ball starting within `GROUND_START_Z_M` (0.3 m [E]) of the ground is read as on the ground where it started, with its height as a doubt; test `a_grounder_off_a_gloves_rim_is_read_on_the_ground_where_it_left_the_glove`. Two ground-dive fixtures were moved back into their stated windows (their assertions unchanged).
+- **P3-1** fixed: the hop's declination σ at the bounce point's range. The run-on term stays independent of `err[2]` (decided, note §8).
+- **P3-2** fixed: the rolling-ball test is two-sided and fails with the cue ten times sharper.
+- **P3-3, P3-4, P3-6** fixed in the note, spec, ledger and observations.
+- **P3-5** fixed: 3′ anchored to `Vision` σ_ang, kept [E]. **Deferred:** the eye-height term (note §7).
+- **Not covered by a test:** dropping the height doubt (z/d) itself.
