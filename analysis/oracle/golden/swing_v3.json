@@ -26252,6 +26252,2101 @@
    "E_L": 23.96664411890969
   }
  ],
+ "rating_range_q51": {
+  "contact_y0": 0.5,
+  "rows": [
+   {
+    "case": {
+     "aim": [
+      -0.15,
+      0.51875,
+      0.55
+     ],
+     "bat_speed": 28.25,
+     "t_swing": 0.17,
+     "corner": false
+    },
+    "failures": [],
+    "ss_ratio_max": 1.0999996367136258,
+    "hands_worst_dip": 0.0,
+    "knob_worst_dip": 0.0,
+    "lead_arm_over_93": -0.13543816800647834,
+    "lead_arm_over_c": 0.15709660538951564,
+    "rear_arm_over_c": 0.09510523997710518
+   },
+   {
+    "case": {
+     "aim": [
+      -0.15,
+      0.51875,
+      0.55
+     ],
+     "bat_speed": 35.75,
+     "t_swing": 0.17,
+     "corner": false
+    },
+    "failures": [
+     "sweet-spot speed"
+    ],
+    "ss_ratio_max": 1.1149411621990448,
+    "hands_worst_dip": 0.0,
+    "knob_worst_dip": 0.0,
+    "lead_arm_over_93": -0.00873980549143949,
+    "lead_arm_over_c": 0.15709660538951564,
+    "rear_arm_over_c": 0.09510523997710518
+   },
+   {
+    "case": {
+     "aim": [
+      -0.15,
+      0.51875,
+      0.55
+     ],
+     "bat_speed": 32.0,
+     "t_swing": 0.14685239175035095,
+     "corner": false
+    },
+    "failures": [],
+    "ss_ratio_max": 1.0983321515859963,
+    "hands_worst_dip": 0.0,
+    "knob_worst_dip": 0.0,
+    "lead_arm_over_93": -0.14324353021590425,
+    "lead_arm_over_c": 0.15709660538951564,
+    "rear_arm_over_c": 0.09510523997710518
+   },
+   {
+    "case": {
+     "aim": [
+      -0.15,
+      0.51875,
+      0.55
+     ],
+     "bat_speed": 32.0,
+     "t_swing": 0.19679625000000003,
+     "corner": false
+    },
+    "failures": [
+     "sweet-spot speed"
+    ],
+    "ss_ratio_max": 1.112908747943378,
+    "hands_worst_dip": 0.0,
+    "knob_worst_dip": 0.0,
+    "lead_arm_over_93": -0.008739805491439268,
+    "lead_arm_over_c": 0.15709660538951564,
+    "rear_arm_over_c": 0.09510523997710518
+   },
+   {
+    "case": {
+     "aim": [
+      -0.15,
+      0.51875,
+      0.55
+     ],
+     "bat_speed": 28.25,
+     "t_swing": 0.19679625000000003,
+     "corner": false
+    },
+    "failures": [
+     "sweet-spot speed"
+    ],
+    "ss_ratio_max": 1.1110825211159987,
+    "hands_worst_dip": 0.0,
+    "knob_worst_dip": 0.0,
+    "lead_arm_over_93": -0.06093048754524144,
+    "lead_arm_over_c": 0.15709660538951564,
+    "rear_arm_over_c": 0.09510523997710518
+   },
+   {
+    "case": {
+     "aim": [
+      -0.15,
+      0.51875,
+      0.55
+     ],
+     "bat_speed": 35.75,
+     "t_swing": 0.14685239175035095,
+     "corner": false
+    },
+    "failures": [
+     "sweet-spot speed"
+    ],
+    "ss_ratio_max": 1.1069749988092714,
+    "hands_worst_dip": 0.0,
+    "knob_worst_dip": 0.0,
+    "lead_arm_over_93": -0.09470584464949194,
+    "lead_arm_over_c": 0.15709660538951564,
+    "rear_arm_over_c": 0.09510523997710518
+   },
+   {
+    "case": {
+     "aim": [
+      -0.15,
+      0.51875,
+      0.55
+     ],
+     "bat_speed": 28.25,
+     "t_swing": 0.14685239175035095,
+     "corner": false
+    },
+    "failures": [],
+    "ss_ratio_max": 1.089360409121116,
+    "hands_worst_dip": 0.0,
+    "knob_worst_dip": 0.0,
+    "lead_arm_over_93": -0.17293765459803112,
+    "lead_arm_over_c": 0.15709660538951564,
+    "rear_arm_over_c": 0.09510523997710518
+   },
+   {
+    "case": {
+     "aim": [
+      -0.15,
+      0.51875,
+      0.55
+     ],
+     "bat_speed": 35.75,
+     "t_swing": 0.19679625000000003,
+     "corner": true
+    },
+    "failures": [
+     "sweet-spot speed"
+    ],
+    "ss_ratio_max": 1.10816501303181,
+    "hands_worst_dip": 0.0,
+    "knob_worst_dip": 0.0,
+    "lead_arm_over_93": -0.008739805491439268,
+    "lead_arm_over_c": 0.15709660538951564,
+    "rear_arm_over_c": 0.09510523997710518
+   },
+   {
+    "case": {
+     "aim": [
+      -0.15,
+      0.51875,
+      0.55
+     ],
+     "effort": -0.135,
+     "corner": false
+    },
+    "failures": [
+     "sweet-spot speed"
+    ],
+    "ss_ratio_max": 1.1096375492350177,
+    "hands_worst_dip": 0.0,
+    "knob_worst_dip": 0.0,
+    "lead_arm_over_93": -0.07444698201808497,
+    "lead_arm_over_c": 0.15709660538951564,
+    "rear_arm_over_c": 0.09510523997710518
+   },
+   {
+    "case": {
+     "aim": [
+      -0.15,
+      0.51875,
+      0.55
+     ],
+     "effort": -0.135,
+     "bat_speed": 28.25,
+     "t_swing": 0.14685239175035095,
+     "corner": false
+    },
+    "failures": [],
+    "ss_ratio_max": 1.0894043303238055,
+    "hands_worst_dip": 0.0,
+    "knob_worst_dip": 0.0,
+    "lead_arm_over_93": -0.17293765459803123,
+    "lead_arm_over_c": 0.15709660538951564,
+    "rear_arm_over_c": 0.09510523997710518
+   },
+   {
+    "case": {
+     "aim": [
+      -0.15,
+      0.51875,
+      0.55
+     ],
+     "effort": 0.135,
+     "corner": false
+    },
+    "failures": [
+     "sweet-spot speed"
+    ],
+    "ss_ratio_max": 1.109348498772415,
+    "hands_worst_dip": 0.0,
+    "knob_worst_dip": 0.0,
+    "lead_arm_over_93": -0.07444698201808497,
+    "lead_arm_over_c": 0.15709660538951564,
+    "rear_arm_over_c": 0.09510523997710518
+   },
+   {
+    "case": {
+     "aim": [
+      -0.15,
+      0.51875,
+      0.55
+     ],
+     "effort": 0.135,
+     "bat_speed": 28.25,
+     "t_swing": 0.14685239175035095,
+     "corner": false
+    },
+    "failures": [],
+    "ss_ratio_max": 1.0892297418216434,
+    "hands_worst_dip": 0.0,
+    "knob_worst_dip": 0.0,
+    "lead_arm_over_93": -0.17293765459803112,
+    "lead_arm_over_c": 0.15709660538951564,
+    "rear_arm_over_c": 0.09510523997710518
+   },
+   {
+    "case": {
+     "aim": [
+      -0.15,
+      0.51875,
+      0.75
+     ],
+     "bat_speed": 28.25,
+     "t_swing": 0.17,
+     "corner": false
+    },
+    "failures": [],
+    "ss_ratio_max": 1.0980629195146454,
+    "hands_worst_dip": 0.0,
+    "knob_worst_dip": 0.0,
+    "lead_arm_over_93": -0.1488404205584979,
+    "lead_arm_over_c": 0.04960321980963034,
+    "rear_arm_over_c": 0.03946921806962078
+   },
+   {
+    "case": {
+     "aim": [
+      -0.15,
+      0.51875,
+      0.75
+     ],
+     "bat_speed": 35.75,
+     "t_swing": 0.17,
+     "corner": false
+    },
+    "failures": [
+     "sweet-spot speed"
+    ],
+    "ss_ratio_max": 1.1036232674361475,
+    "hands_worst_dip": 0.0,
+    "knob_worst_dip": 0.0,
+    "lead_arm_over_93": -0.00043077608103070375,
+    "lead_arm_over_c": 0.04960321980963034,
+    "rear_arm_over_c": 0.03946921806962078
+   },
+   {
+    "case": {
+     "aim": [
+      -0.15,
+      0.51875,
+      0.75
+     ],
+     "bat_speed": 32.0,
+     "t_swing": 0.14685239175035095,
+     "corner": false
+    },
+    "failures": [],
+    "ss_ratio_max": 1.0972567760918055,
+    "hands_worst_dip": 0.0,
+    "knob_worst_dip": 0.0,
+    "lead_arm_over_93": -0.15920715825184528,
+    "lead_arm_over_c": 0.04960321980963034,
+    "rear_arm_over_c": 0.03946921806962078
+   },
+   {
+    "case": {
+     "aim": [
+      -0.15,
+      0.51875,
+      0.75
+     ],
+     "bat_speed": 32.0,
+     "t_swing": 0.19679625000000003,
+     "corner": false
+    },
+    "failures": [],
+    "ss_ratio_max": 1.0997269029774843,
+    "hands_worst_dip": 0.0,
+    "knob_worst_dip": 0.0,
+    "lead_arm_over_93": -0.0004307760810309258,
+    "lead_arm_over_c": 0.04960321980963034,
+    "rear_arm_over_c": 0.03946921806962078
+   },
+   {
+    "case": {
+     "aim": [
+      -0.15,
+      0.51875,
+      0.75
+     ],
+     "bat_speed": 28.25,
+     "t_swing": 0.19679625000000003,
+     "corner": false
+    },
+    "failures": [
+     "sweet-spot speed"
+    ],
+    "ss_ratio_max": 1.103186896649842,
+    "hands_worst_dip": 0.0,
+    "knob_worst_dip": 0.0,
+    "lead_arm_over_93": -0.05887571645333911,
+    "lead_arm_over_c": 0.04960321980963034,
+    "rear_arm_over_c": 0.03946921806962078
+   },
+   {
+    "case": {
+     "aim": [
+      -0.15,
+      0.51875,
+      0.75
+     ],
+     "bat_speed": 35.75,
+     "t_swing": 0.14685239175035095,
+     "corner": false
+    },
+    "failures": [
+     "sweet-spot speed"
+    ],
+    "ss_ratio_max": 1.1010146298680317,
+    "hands_worst_dip": 0.0,
+    "knob_worst_dip": 0.0,
+    "lead_arm_over_93": -0.09826330150647822,
+    "lead_arm_over_c": 0.04960321980963034,
+    "rear_arm_over_c": 0.03946921806962078
+   },
+   {
+    "case": {
+     "aim": [
+      -0.15,
+      0.51875,
+      0.75
+     ],
+     "bat_speed": 28.25,
+     "t_swing": 0.14685239175035095,
+     "corner": false
+    },
+    "failures": [
+     "sweet-spot speed"
+    ],
+    "ss_ratio_max": 1.100361272012862,
+    "hands_worst_dip": 0.0,
+    "knob_worst_dip": 0.0,
+    "lead_arm_over_93": -0.20407369421225674,
+    "lead_arm_over_c": 0.04960321980963034,
+    "rear_arm_over_c": 0.03946921806962078
+   },
+   {
+    "case": {
+     "aim": [
+      -0.15,
+      0.51875,
+      0.75
+     ],
+     "bat_speed": 35.75,
+     "t_swing": 0.19679625000000003,
+     "corner": true
+    },
+    "failures": [],
+    "ss_ratio_max": 1.090647606144626,
+    "hands_worst_dip": 0.0,
+    "knob_worst_dip": 0.0,
+    "lead_arm_over_93": -0.0004307760810314809,
+    "lead_arm_over_c": 0.04960321980963034,
+    "rear_arm_over_c": 0.03946921806962078
+   },
+   {
+    "case": {
+     "aim": [
+      -0.15,
+      0.51875,
+      0.75
+     ],
+     "effort": -0.135,
+     "corner": false
+    },
+    "failures": [
+     "sweet-spot speed"
+    ],
+    "ss_ratio_max": 1.102270723987283,
+    "hands_worst_dip": 0.0,
+    "knob_worst_dip": 0.0,
+    "lead_arm_over_93": -0.07444698201809063,
+    "lead_arm_over_c": 0.04960321980963034,
+    "rear_arm_over_c": 0.03946921806962078
+   },
+   {
+    "case": {
+     "aim": [
+      -0.15,
+      0.51875,
+      0.75
+     ],
+     "effort": -0.135,
+     "bat_speed": 28.25,
+     "t_swing": 0.14685239175035095,
+     "corner": false
+    },
+    "failures": [
+     "sweet-spot speed"
+    ],
+    "ss_ratio_max": 1.1003306771149997,
+    "hands_worst_dip": 0.0,
+    "knob_worst_dip": 0.0,
+    "lead_arm_over_93": -0.20407369421225674,
+    "lead_arm_over_c": 0.04960321980963034,
+    "rear_arm_over_c": 0.03946921806962078
+   },
+   {
+    "case": {
+     "aim": [
+      -0.15,
+      0.51875,
+      0.75
+     ],
+     "effort": 0.135,
+     "corner": false
+    },
+    "failures": [
+     "sweet-spot speed"
+    ],
+    "ss_ratio_max": 1.102476103903979,
+    "hands_worst_dip": 0.0,
+    "knob_worst_dip": 0.0,
+    "lead_arm_over_93": -0.07444698201809063,
+    "lead_arm_over_c": 0.04960321980963034,
+    "rear_arm_over_c": 0.03946921806962078
+   },
+   {
+    "case": {
+     "aim": [
+      -0.15,
+      0.51875,
+      0.75
+     ],
+     "effort": 0.135,
+     "bat_speed": 28.25,
+     "t_swing": 0.14685239175035095,
+     "corner": false
+    },
+    "failures": [],
+    "ss_ratio_max": 1.0998272686270667,
+    "hands_worst_dip": 0.0,
+    "knob_worst_dip": 0.0,
+    "lead_arm_over_93": -0.20407369421225663,
+    "lead_arm_over_c": 0.04960321980963034,
+    "rear_arm_over_c": 0.03946921806962078
+   },
+   {
+    "case": {
+     "aim": [
+      -0.15,
+      0.51875,
+      0.95
+     ],
+     "bat_speed": 28.25,
+     "t_swing": 0.17,
+     "corner": false
+    },
+    "failures": [],
+    "ss_ratio_max": 1.0950819826191083,
+    "hands_worst_dip": 0.0,
+    "knob_worst_dip": 0.0,
+    "lead_arm_over_93": -0.1613511034760564,
+    "lead_arm_over_c": -0.03238685528665697,
+    "rear_arm_over_c": 0.019542018950024165
+   },
+   {
+    "case": {
+     "aim": [
+      -0.15,
+      0.51875,
+      0.95
+     ],
+     "bat_speed": 35.75,
+     "t_swing": 0.17,
+     "corner": false
+    },
+    "failures": [],
+    "ss_ratio_max": 1.088487684742274,
+    "hands_worst_dip": 0.0,
+    "knob_worst_dip": 0.0,
+    "lead_arm_over_93": 0.007777459655665675,
+    "lead_arm_over_c": -0.03238685528665697,
+    "rear_arm_over_c": 0.019542018950024165
+   },
+   {
+    "case": {
+     "aim": [
+      -0.15,
+      0.51875,
+      0.95
+     ],
+     "bat_speed": 32.0,
+     "t_swing": 0.14685239175035095,
+     "corner": false
+    },
+    "failures": [],
+    "ss_ratio_max": 1.0967563370892774,
+    "hands_worst_dip": 0.0,
+    "knob_worst_dip": 0.0,
+    "lead_arm_over_93": -0.17407323551836512,
+    "lead_arm_over_c": -0.03238685528665697,
+    "rear_arm_over_c": 0.019542018950024165
+   },
+   {
+    "case": {
+     "aim": [
+      -0.15,
+      0.51875,
+      0.95
+     ],
+     "bat_speed": 32.0,
+     "t_swing": 0.19679625000000003,
+     "corner": false
+    },
+    "failures": [],
+    "ss_ratio_max": 1.0835015885554782,
+    "hands_worst_dip": 0.0,
+    "knob_worst_dip": 0.0,
+    "lead_arm_over_93": 0.007777459655665453,
+    "lead_arm_over_c": -0.03238685528665697,
+    "rear_arm_over_c": 0.019542018950024165
+   },
+   {
+    "case": {
+     "aim": [
+      -0.15,
+      0.51875,
+      0.95
+     ],
+     "bat_speed": 28.25,
+     "t_swing": 0.19679625000000003,
+     "corner": false
+    },
+    "failures": [],
+    "ss_ratio_max": 1.091276918945034,
+    "hands_worst_dip": 0.0,
+    "knob_worst_dip": 0.0,
+    "lead_arm_over_93": -0.0568973624529463,
+    "lead_arm_over_c": -0.03238685528665697,
+    "rear_arm_over_c": 0.019542018950024165
+   },
+   {
+    "case": {
+     "aim": [
+      -0.15,
+      0.51875,
+      0.95
+     ],
+     "bat_speed": 35.75,
+     "t_swing": 0.14685239175035095,
+     "corner": false
+    },
+    "failures": [],
+    "ss_ratio_max": 1.0912343392817019,
+    "hands_worst_dip": 0.0,
+    "knob_worst_dip": 0.0,
+    "lead_arm_over_93": -0.10163642743795653,
+    "lead_arm_over_c": -0.03238685528665697,
+    "rear_arm_over_c": 0.019542018950024165
+   },
+   {
+    "case": {
+     "aim": [
+      -0.15,
+      0.51875,
+      0.95
+     ],
+     "bat_speed": 28.25,
+     "t_swing": 0.14685239175035095,
+     "corner": false
+    },
+    "failures": [
+     "sweet-spot speed"
+    ],
+    "ss_ratio_max": 1.1046755890275808,
+    "hands_worst_dip": 0.0,
+    "knob_worst_dip": 0.0,
+    "lead_arm_over_93": -0.23291201379331905,
+    "lead_arm_over_c": -0.03238685528665697,
+    "rear_arm_over_c": 0.019542018950024165
+   },
+   {
+    "case": {
+     "aim": [
+      -0.15,
+      0.51875,
+      0.95
+     ],
+     "bat_speed": 35.75,
+     "t_swing": 0.19679625000000003,
+     "corner": true
+    },
+    "failures": [
+     "one surge"
+    ],
+    "ss_ratio_max": 1.0710767047200138,
+    "hands_worst_dip": 0.0,
+    "knob_worst_dip": 0.0,
+    "lead_arm_over_93": 0.007777459655665453,
+    "lead_arm_over_c": -0.03238685528665697,
+    "rear_arm_over_c": 0.019542018950024165
+   },
+   {
+    "case": {
+     "aim": [
+      -0.15,
+      0.51875,
+      0.95
+     ],
+     "effort": -0.135,
+     "corner": false
+    },
+    "failures": [],
+    "ss_ratio_max": 1.0912975749635039,
+    "hands_worst_dip": 0.0,
+    "knob_worst_dip": 0.0,
+    "lead_arm_over_93": -0.07444698201809608,
+    "lead_arm_over_c": -0.03238685528665697,
+    "rear_arm_over_c": 0.019542018950024165
+   },
+   {
+    "case": {
+     "aim": [
+      -0.15,
+      0.51875,
+      0.95
+     ],
+     "effort": -0.135,
+     "bat_speed": 28.25,
+     "t_swing": 0.14685239175035095,
+     "corner": false
+    },
+    "failures": [
+     "sweet-spot speed"
+    ],
+    "ss_ratio_max": 1.1046510028455252,
+    "hands_worst_dip": 0.0,
+    "knob_worst_dip": 0.0,
+    "lead_arm_over_93": -0.23291201379331905,
+    "lead_arm_over_c": -0.03238685528665697,
+    "rear_arm_over_c": 0.019542018950024165
+   },
+   {
+    "case": {
+     "aim": [
+      -0.15,
+      0.51875,
+      0.95
+     ],
+     "effort": 0.135,
+     "corner": false
+    },
+    "failures": [],
+    "ss_ratio_max": 1.0914337338773195,
+    "hands_worst_dip": 0.0,
+    "knob_worst_dip": 0.0,
+    "lead_arm_over_93": -0.07444698201809608,
+    "lead_arm_over_c": -0.03238685528665697,
+    "rear_arm_over_c": 0.019542018950024165
+   },
+   {
+    "case": {
+     "aim": [
+      -0.15,
+      0.51875,
+      0.95
+     ],
+     "effort": 0.135,
+     "bat_speed": 28.25,
+     "t_swing": 0.14685239175035095,
+     "corner": false
+    },
+    "failures": [
+     "sweet-spot speed"
+    ],
+    "ss_ratio_max": 1.1047317365875198,
+    "hands_worst_dip": 0.0,
+    "knob_worst_dip": 0.0,
+    "lead_arm_over_93": -0.2329120137933191,
+    "lead_arm_over_c": -0.03238685528665697,
+    "rear_arm_over_c": 0.019542018950024165
+   },
+   {
+    "case": {
+     "aim": [
+      0.0,
+      0.5,
+      0.55
+     ],
+     "bat_speed": 28.25,
+     "t_swing": 0.17,
+     "corner": false
+    },
+    "failures": [],
+    "ss_ratio_max": 1.089735394433842,
+    "hands_worst_dip": 0.0,
+    "knob_worst_dip": 0.0,
+    "lead_arm_over_93": -0.13130037815847478,
+    "lead_arm_over_c": 0.16943994904835724,
+    "rear_arm_over_c": 0.07280866233919414
+   },
+   {
+    "case": {
+     "aim": [
+      0.0,
+      0.5,
+      0.55
+     ],
+     "bat_speed": 35.75,
+     "t_swing": 0.17,
+     "corner": false
+    },
+    "failures": [
+     "sweet-spot speed"
+    ],
+    "ss_ratio_max": 1.1023397269269586,
+    "hands_worst_dip": 0.0,
+    "knob_worst_dip": 0.0,
+    "lead_arm_over_93": -0.011841373501957353,
+    "lead_arm_over_c": 0.16943994904835724,
+    "rear_arm_over_c": 0.07280866233919414
+   },
+   {
+    "case": {
+     "aim": [
+      0.0,
+      0.5,
+      0.55
+     ],
+     "bat_speed": 32.0,
+     "t_swing": 0.14685239175035095,
+     "corner": false
+    },
+    "failures": [],
+    "ss_ratio_max": 1.0883566447671247,
+    "hands_worst_dip": 0.0,
+    "knob_worst_dip": 0.0,
+    "lead_arm_over_93": -0.13840409368889267,
+    "lead_arm_over_c": 0.16943994904835724,
+    "rear_arm_over_c": 0.07280866233919414
+   },
+   {
+    "case": {
+     "aim": [
+      0.0,
+      0.5,
+      0.55
+     ],
+     "bat_speed": 32.0,
+     "t_swing": 0.19679625000000003,
+     "corner": false
+    },
+    "failures": [],
+    "ss_ratio_max": 1.0993158202017828,
+    "hands_worst_dip": 0.0,
+    "knob_worst_dip": 0.0,
+    "lead_arm_over_93": -0.011841373501957353,
+    "lead_arm_over_c": 0.16943994904835724,
+    "rear_arm_over_c": 0.07280866233919414
+   },
+   {
+    "case": {
+     "aim": [
+      0.0,
+      0.5,
+      0.55
+     ],
+     "bat_speed": 28.25,
+     "t_swing": 0.19679625000000003,
+     "corner": false
+    },
+    "failures": [],
+    "ss_ratio_max": 1.0991020319457965,
+    "hands_worst_dip": 0.0,
+    "knob_worst_dip": 0.0,
+    "lead_arm_over_93": -0.061649591590997144,
+    "lead_arm_over_c": 0.16943994904835724,
+    "rear_arm_over_c": 0.07280866233919414
+   },
+   {
+    "case": {
+     "aim": [
+      0.0,
+      0.5,
+      0.55
+     ],
+     "bat_speed": 35.75,
+     "t_swing": 0.14685239175035095,
+     "corner": false
+    },
+    "failures": [],
+    "ss_ratio_max": 1.0955887943460654,
+    "hands_worst_dip": 0.0,
+    "knob_worst_dip": 0.0,
+    "lead_arm_over_93": -0.09352095172545216,
+    "lead_arm_over_c": 0.16943994904835724,
+    "rear_arm_over_c": 0.07280866233919414
+   },
+   {
+    "case": {
+     "aim": [
+      0.0,
+      0.5,
+      0.55
+     ],
+     "bat_speed": 28.25,
+     "t_swing": 0.14685239175035095,
+     "corner": false
+    },
+    "failures": [],
+    "ss_ratio_max": 1.0798576153539226,
+    "hands_worst_dip": 0.0,
+    "knob_worst_dip": 0.0,
+    "lead_arm_over_93": -0.16440824973744472,
+    "lead_arm_over_c": 0.16943994904835724,
+    "rear_arm_over_c": 0.07280866233919414
+   },
+   {
+    "case": {
+     "aim": [
+      0.0,
+      0.5,
+      0.55
+     ],
+     "bat_speed": 35.75,
+     "t_swing": 0.19679625000000003,
+     "corner": true
+    },
+    "failures": [],
+    "ss_ratio_max": 1.092489784726513,
+    "hands_worst_dip": 0.0,
+    "knob_worst_dip": 0.0,
+    "lead_arm_over_93": -0.011841373501958019,
+    "lead_arm_over_c": 0.16943994904835724,
+    "rear_arm_over_c": 0.07280866233919414
+   },
+   {
+    "case": {
+     "aim": [
+      0.0,
+      0.5,
+      0.55
+     ],
+     "effort": -0.135,
+     "corner": false
+    },
+    "failures": [],
+    "ss_ratio_max": 1.097944074253767,
+    "hands_worst_dip": 0.0,
+    "knob_worst_dip": 0.0,
+    "lead_arm_over_93": -0.07444698201808131,
+    "lead_arm_over_c": 0.16943994904835724,
+    "rear_arm_over_c": 0.07280866233919414
+   },
+   {
+    "case": {
+     "aim": [
+      0.0,
+      0.5,
+      0.55
+     ],
+     "effort": -0.135,
+     "bat_speed": 28.25,
+     "t_swing": 0.14685239175035095,
+     "corner": false
+    },
+    "failures": [],
+    "ss_ratio_max": 1.0798901731248087,
+    "hands_worst_dip": 0.0,
+    "knob_worst_dip": 0.0,
+    "lead_arm_over_93": -0.16440824973744472,
+    "lead_arm_over_c": 0.16943994904835724,
+    "rear_arm_over_c": 0.07280866233919414
+   },
+   {
+    "case": {
+     "aim": [
+      0.0,
+      0.5,
+      0.55
+     ],
+     "effort": 0.135,
+     "corner": false
+    },
+    "failures": [],
+    "ss_ratio_max": 1.0979498713520917,
+    "hands_worst_dip": 0.0,
+    "knob_worst_dip": 0.0,
+    "lead_arm_over_93": -0.07444698201808131,
+    "lead_arm_over_c": 0.16943994904835724,
+    "rear_arm_over_c": 0.07280866233919414
+   },
+   {
+    "case": {
+     "aim": [
+      0.0,
+      0.5,
+      0.55
+     ],
+     "effort": 0.135,
+     "bat_speed": 28.25,
+     "t_swing": 0.14685239175035095,
+     "corner": false
+    },
+    "failures": [],
+    "ss_ratio_max": 1.0798238635083797,
+    "hands_worst_dip": 0.0,
+    "knob_worst_dip": 0.0,
+    "lead_arm_over_93": -0.1644082497374449,
+    "lead_arm_over_c": 0.16943994904835724,
+    "rear_arm_over_c": 0.07280866233919414
+   },
+   {
+    "case": {
+     "aim": [
+      0.0,
+      0.5,
+      0.75
+     ],
+     "bat_speed": 28.25,
+     "t_swing": 0.17,
+     "corner": false
+    },
+    "failures": [],
+    "ss_ratio_max": 1.0886482618203641,
+    "hands_worst_dip": 0.0,
+    "knob_worst_dip": 0.0,
+    "lead_arm_over_93": -0.14445898238116728,
+    "lead_arm_over_c": 0.07033528511247167,
+    "rear_arm_over_c": 0.02156193344381019
+   },
+   {
+    "case": {
+     "aim": [
+      0.0,
+      0.5,
+      0.75
+     ],
+     "bat_speed": 35.75,
+     "t_swing": 0.17,
+     "corner": false
+    },
+    "failures": [],
+    "ss_ratio_max": 1.0925900621794498,
+    "hands_worst_dip": 0.0,
+    "knob_worst_dip": 0.0,
+    "lead_arm_over_93": -0.0034118360907234857,
+    "lead_arm_over_c": 0.07033528511247167,
+    "rear_arm_over_c": 0.02156193344381019
+   },
+   {
+    "case": {
+     "aim": [
+      0.0,
+      0.5,
+      0.75
+     ],
+     "bat_speed": 32.0,
+     "t_swing": 0.14685239175035095,
+     "corner": false
+    },
+    "failures": [],
+    "ss_ratio_max": 1.0877917197795175,
+    "hands_worst_dip": 0.0,
+    "knob_worst_dip": 0.0,
+    "lead_arm_over_93": -0.15402545417554986,
+    "lead_arm_over_c": 0.07033528511247167,
+    "rear_arm_over_c": 0.02156193344381019
+   },
+   {
+    "case": {
+     "aim": [
+      0.0,
+      0.5,
+      0.75
+     ],
+     "bat_speed": 32.0,
+     "t_swing": 0.19679625000000003,
+     "corner": false
+    },
+    "failures": [],
+    "ss_ratio_max": 1.0882622824875607,
+    "hands_worst_dip": 0.0,
+    "knob_worst_dip": 0.0,
+    "lead_arm_over_93": -0.0034118360907234857,
+    "lead_arm_over_c": 0.07033528511247167,
+    "rear_arm_over_c": 0.02156193344381019
+   },
+   {
+    "case": {
+     "aim": [
+      0.0,
+      0.5,
+      0.75
+     ],
+     "bat_speed": 28.25,
+     "t_swing": 0.19679625000000003,
+     "corner": false
+    },
+    "failures": [],
+    "ss_ratio_max": 1.092788854764296,
+    "hands_worst_dip": 0.0,
+    "knob_worst_dip": 0.0,
+    "lead_arm_over_93": -0.05958718024944798,
+    "lead_arm_over_c": 0.07033528511247167,
+    "rear_arm_over_c": 0.02156193344381019
+   },
+   {
+    "case": {
+     "aim": [
+      0.0,
+      0.5,
+      0.75
+     ],
+     "bat_speed": 35.75,
+     "t_swing": 0.14685239175035095,
+     "corner": false
+    },
+    "failures": [],
+    "ss_ratio_max": 1.0912910556941462,
+    "hands_worst_dip": 0.0,
+    "knob_worst_dip": 0.0,
+    "lead_arm_over_93": -0.09706137659856806,
+    "lead_arm_over_c": 0.07033528511247167,
+    "rear_arm_over_c": 0.02156193344381019
+   },
+   {
+    "case": {
+     "aim": [
+      0.0,
+      0.5,
+      0.75
+     ],
+     "bat_speed": 28.25,
+     "t_swing": 0.14685239175035095,
+     "corner": false
+    },
+    "failures": [],
+    "ss_ratio_max": 1.0883286500281049,
+    "hands_worst_dip": 0.0,
+    "knob_worst_dip": 0.0,
+    "lead_arm_over_93": -0.19431840655060922,
+    "lead_arm_over_c": 0.07033528511247167,
+    "rear_arm_over_c": 0.02156193344381019
+   },
+   {
+    "case": {
+     "aim": [
+      0.0,
+      0.5,
+      0.75
+     ],
+     "bat_speed": 35.75,
+     "t_swing": 0.19679625000000003,
+     "corner": true
+    },
+    "failures": [],
+    "ss_ratio_max": 1.0775402934143234,
+    "hands_worst_dip": 0.0,
+    "knob_worst_dip": 0.0,
+    "lead_arm_over_93": -0.003411836090724041,
+    "lead_arm_over_c": 0.07033528511247167,
+    "rear_arm_over_c": 0.02156193344381019
+   },
+   {
+    "case": {
+     "aim": [
+      0.0,
+      0.5,
+      0.75
+     ],
+     "effort": -0.135,
+     "corner": false
+    },
+    "failures": [],
+    "ss_ratio_max": 1.0923106749188563,
+    "hands_worst_dip": 0.0,
+    "knob_worst_dip": 0.0,
+    "lead_arm_over_93": -0.07444698201808775,
+    "lead_arm_over_c": 0.07033528511247167,
+    "rear_arm_over_c": 0.02156193344381019
+   },
+   {
+    "case": {
+     "aim": [
+      0.0,
+      0.5,
+      0.75
+     ],
+     "effort": -0.135,
+     "bat_speed": 28.25,
+     "t_swing": 0.14685239175035095,
+     "corner": false
+    },
+    "failures": [],
+    "ss_ratio_max": 1.0883517976277572,
+    "hands_worst_dip": 0.0,
+    "knob_worst_dip": 0.0,
+    "lead_arm_over_93": -0.19431840655060933,
+    "lead_arm_over_c": 0.07033528511247167,
+    "rear_arm_over_c": 0.02156193344381019
+   },
+   {
+    "case": {
+     "aim": [
+      0.0,
+      0.5,
+      0.75
+     ],
+     "effort": 0.135,
+     "corner": false
+    },
+    "failures": [],
+    "ss_ratio_max": 1.0919368419405637,
+    "hands_worst_dip": 0.0,
+    "knob_worst_dip": 0.0,
+    "lead_arm_over_93": -0.07444698201808775,
+    "lead_arm_over_c": 0.07033528511247167,
+    "rear_arm_over_c": 0.02156193344381019
+   },
+   {
+    "case": {
+     "aim": [
+      0.0,
+      0.5,
+      0.75
+     ],
+     "effort": 0.135,
+     "bat_speed": 28.25,
+     "t_swing": 0.14685239175035095,
+     "corner": false
+    },
+    "failures": [],
+    "ss_ratio_max": 1.0884581397531432,
+    "hands_worst_dip": 0.0,
+    "knob_worst_dip": 0.0,
+    "lead_arm_over_93": -0.19431840655060922,
+    "lead_arm_over_c": 0.07033528511247167,
+    "rear_arm_over_c": 0.02156193344381019
+   },
+   {
+    "case": {
+     "aim": [
+      0.0,
+      0.5,
+      0.95
+     ],
+     "bat_speed": 28.25,
+     "t_swing": 0.17,
+     "corner": false
+    },
+    "failures": [],
+    "ss_ratio_max": 1.0838172830507806,
+    "hands_worst_dip": 0.0,
+    "knob_worst_dip": 0.0,
+    "lead_arm_over_93": -0.1566871286322296,
+    "lead_arm_over_c": -0.0026349541687047395,
+    "rear_arm_over_c": 0.006350115535019962
+   },
+   {
+    "case": {
+     "aim": [
+      0.0,
+      0.5,
+      0.95
+     ],
+     "bat_speed": 35.75,
+     "t_swing": 0.17,
+     "corner": false
+    },
+    "failures": [],
+    "ss_ratio_max": 1.0793276244367178,
+    "hands_worst_dip": 0.0,
+    "knob_worst_dip": 0.0,
+    "lead_arm_over_93": 0.004860534045493026,
+    "lead_arm_over_c": -0.0026349541687047395,
+    "rear_arm_over_c": 0.006350115535019962
+   },
+   {
+    "case": {
+     "aim": [
+      0.0,
+      0.5,
+      0.95
+     ],
+     "bat_speed": 32.0,
+     "t_swing": 0.14685239175035095,
+     "corner": false
+    },
+    "failures": [],
+    "ss_ratio_max": 1.0851634628636035,
+    "hands_worst_dip": 0.0,
+    "knob_worst_dip": 0.0,
+    "lead_arm_over_93": -0.16850353161409304,
+    "lead_arm_over_c": -0.0026349541687047395,
+    "rear_arm_over_c": 0.006350115535019962
+   },
+   {
+    "case": {
+     "aim": [
+      0.0,
+      0.5,
+      0.95
+     ],
+     "bat_speed": 32.0,
+     "t_swing": 0.19679625000000003,
+     "corner": false
+    },
+    "failures": [],
+    "ss_ratio_max": 1.0739667170550844,
+    "hands_worst_dip": 0.0,
+    "knob_worst_dip": 0.0,
+    "lead_arm_over_93": 0.004860534045492915,
+    "lead_arm_over_c": -0.0026349541687047395,
+    "rear_arm_over_c": 0.006350115535019962
+   },
+   {
+    "case": {
+     "aim": [
+      0.0,
+      0.5,
+      0.95
+     ],
+     "bat_speed": 28.25,
+     "t_swing": 0.19679625000000003,
+     "corner": false
+    },
+    "failures": [],
+    "ss_ratio_max": 1.082511197084441,
+    "hands_worst_dip": 0.0,
+    "knob_worst_dip": 0.0,
+    "lead_arm_over_93": -0.05761144943559526,
+    "lead_arm_over_c": -0.0026349541687047395,
+    "rear_arm_over_c": 0.006350115535019962
+   },
+   {
+    "case": {
+     "aim": [
+      0.0,
+      0.5,
+      0.95
+     ],
+     "bat_speed": 35.75,
+     "t_swing": 0.14685239175035095,
+     "corner": false
+    },
+    "failures": [],
+    "ss_ratio_max": 1.082909703139919,
+    "hands_worst_dip": 0.0,
+    "knob_worst_dip": 0.0,
+    "lead_arm_over_93": -0.10040371336199039,
+    "lead_arm_over_c": -0.0026349541687047395,
+    "rear_arm_over_c": 0.006350115535019962
+   },
+   {
+    "case": {
+     "aim": [
+      0.0,
+      0.5,
+      0.95
+     ],
+     "bat_speed": 28.25,
+     "t_swing": 0.14685239175035095,
+     "corner": false
+    },
+    "failures": [],
+    "ss_ratio_max": 1.0923673365827187,
+    "hands_worst_dip": 0.0,
+    "knob_worst_dip": 0.0,
+    "lead_arm_over_93": -0.22178969830904488,
+    "lead_arm_over_c": -0.0026349541687047395,
+    "rear_arm_over_c": 0.006350115535019962
+   },
+   {
+    "case": {
+     "aim": [
+      0.0,
+      0.5,
+      0.95
+     ],
+     "bat_speed": 35.75,
+     "t_swing": 0.19679625000000003,
+     "corner": true
+    },
+    "failures": [],
+    "ss_ratio_max": 1.0603169067419154,
+    "hands_worst_dip": 0.0,
+    "knob_worst_dip": 0.0,
+    "lead_arm_over_93": 0.0048605340454922485,
+    "lead_arm_over_c": -0.0026349541687047395,
+    "rear_arm_over_c": 0.006350115535019962
+   },
+   {
+    "case": {
+     "aim": [
+      0.0,
+      0.5,
+      0.95
+     ],
+     "effort": -0.135,
+     "corner": false
+    },
+    "failures": [],
+    "ss_ratio_max": 1.0827190876243196,
+    "hands_worst_dip": 0.0,
+    "knob_worst_dip": 0.0,
+    "lead_arm_over_93": -0.07444698201809397,
+    "lead_arm_over_c": -0.0026349541687047395,
+    "rear_arm_over_c": 0.006350115535019962
+   },
+   {
+    "case": {
+     "aim": [
+      0.0,
+      0.5,
+      0.95
+     ],
+     "effort": -0.135,
+     "bat_speed": 28.25,
+     "t_swing": 0.14685239175035095,
+     "corner": false
+    },
+    "failures": [],
+    "ss_ratio_max": 1.092324268013027,
+    "hands_worst_dip": 0.0,
+    "knob_worst_dip": 0.0,
+    "lead_arm_over_93": -0.2217896983090447,
+    "lead_arm_over_c": -0.0026349541687047395,
+    "rear_arm_over_c": 0.006350115535019962
+   },
+   {
+    "case": {
+     "aim": [
+      0.0,
+      0.5,
+      0.95
+     ],
+     "effort": 0.135,
+     "corner": false
+    },
+    "failures": [],
+    "ss_ratio_max": 1.0826021810412267,
+    "hands_worst_dip": 0.0,
+    "knob_worst_dip": 0.0,
+    "lead_arm_over_93": -0.07444698201809397,
+    "lead_arm_over_c": -0.0026349541687047395,
+    "rear_arm_over_c": 0.006350115535019962
+   },
+   {
+    "case": {
+     "aim": [
+      0.0,
+      0.5,
+      0.95
+     ],
+     "effort": 0.135,
+     "bat_speed": 28.25,
+     "t_swing": 0.14685239175035095,
+     "corner": false
+    },
+    "failures": [],
+    "ss_ratio_max": 1.0917191906791777,
+    "hands_worst_dip": 0.0,
+    "knob_worst_dip": 0.0,
+    "lead_arm_over_93": -0.22178969830904477,
+    "lead_arm_over_c": -0.0026349541687047395,
+    "rear_arm_over_c": 0.006350115535019962
+   },
+   {
+    "case": {
+     "aim": [
+      0.15,
+      0.48125,
+      0.55
+     ],
+     "bat_speed": 28.25,
+     "t_swing": 0.17,
+     "corner": false
+    },
+    "failures": [],
+    "ss_ratio_max": 1.0818791105867092,
+    "hands_worst_dip": 0.0,
+    "knob_worst_dip": 0.0,
+    "lead_arm_over_93": -0.12712314259562735,
+    "lead_arm_over_c": 0.19777753228226758,
+    "rear_arm_over_c": 0.0689954351133315
+   },
+   {
+    "case": {
+     "aim": [
+      0.15,
+      0.48125,
+      0.55
+     ],
+     "bat_speed": 35.75,
+     "t_swing": 0.17,
+     "corner": false
+    },
+    "failures": [],
+    "ss_ratio_max": 1.091857428953528,
+    "hands_worst_dip": 0.0,
+    "knob_worst_dip": 0.0,
+    "lead_arm_over_93": -0.014465260498267019,
+    "lead_arm_over_c": 0.19777753228226758,
+    "rear_arm_over_c": 0.0689954351133315
+   },
+   {
+    "case": {
+     "aim": [
+      0.15,
+      0.48125,
+      0.55
+     ],
+     "bat_speed": 32.0,
+     "t_swing": 0.14685239175035095,
+     "corner": false
+    },
+    "failures": [],
+    "ss_ratio_max": 1.0807661898999936,
+    "hands_worst_dip": 0.0,
+    "knob_worst_dip": 0.0,
+    "lead_arm_over_93": -0.13344463173498755,
+    "lead_arm_over_c": 0.19777753228226758,
+    "rear_arm_over_c": 0.0689954351133315
+   },
+   {
+    "case": {
+     "aim": [
+      0.15,
+      0.48125,
+      0.55
+     ],
+     "bat_speed": 32.0,
+     "t_swing": 0.19679625000000003,
+     "corner": false
+    },
+    "failures": [],
+    "ss_ratio_max": 1.0886560231398297,
+    "hands_worst_dip": 0.0,
+    "knob_worst_dip": 0.0,
+    "lead_arm_over_93": -0.01446526049826724,
+    "lead_arm_over_c": 0.19777753228226758,
+    "rear_arm_over_c": 0.0689954351133315
+   },
+   {
+    "case": {
+     "aim": [
+      0.15,
+      0.48125,
+      0.55
+     ],
+     "bat_speed": 28.25,
+     "t_swing": 0.19679625000000003,
+     "corner": false
+    },
+    "failures": [],
+    "ss_ratio_max": 1.0901884262062242,
+    "hands_worst_dip": 0.0,
+    "knob_worst_dip": 0.0,
+    "lead_arm_over_93": -0.0622985842148831,
+    "lead_arm_over_c": 0.19777753228226758,
+    "rear_arm_over_c": 0.0689954351133315
+   },
+   {
+    "case": {
+     "aim": [
+      0.15,
+      0.48125,
+      0.55
+     ],
+     "bat_speed": 35.75,
+     "t_swing": 0.14685239175035095,
+     "corner": false
+    },
+    "failures": [],
+    "ss_ratio_max": 1.086953081835038,
+    "hands_worst_dip": 0.0,
+    "knob_worst_dip": 0.0,
+    "lead_arm_over_93": -0.09240089511241079,
+    "lead_arm_over_c": 0.19777753228226758,
+    "rear_arm_over_c": 0.0689954351133315
+   },
+   {
+    "case": {
+     "aim": [
+      0.15,
+      0.48125,
+      0.55
+     ],
+     "bat_speed": 28.25,
+     "t_swing": 0.14685239175035095,
+     "corner": false
+    },
+    "failures": [],
+    "ss_ratio_max": 1.073183696193231,
+    "hands_worst_dip": 0.0,
+    "knob_worst_dip": 0.0,
+    "lead_arm_over_93": -0.15494054133713203,
+    "lead_arm_over_c": 0.19777753228226758,
+    "rear_arm_over_c": 0.0689954351133315
+   },
+   {
+    "case": {
+     "aim": [
+      0.15,
+      0.48125,
+      0.55
+     ],
+     "bat_speed": 35.75,
+     "t_swing": 0.19679625000000003,
+     "corner": true
+    },
+    "failures": [],
+    "ss_ratio_max": 1.0797159405994219,
+    "hands_worst_dip": 0.0,
+    "knob_worst_dip": 0.0,
+    "lead_arm_over_93": -0.014465260498267796,
+    "lead_arm_over_c": 0.19777753228226758,
+    "rear_arm_over_c": 0.0689954351133315
+   },
+   {
+    "case": {
+     "aim": [
+      0.15,
+      0.48125,
+      0.55
+     ],
+     "effort": -0.135,
+     "corner": false
+    },
+    "failures": [],
+    "ss_ratio_max": 1.089061425992535,
+    "hands_worst_dip": 0.0,
+    "knob_worst_dip": 0.0,
+    "lead_arm_over_93": -0.07444698201807909,
+    "lead_arm_over_c": 0.19777753228226758,
+    "rear_arm_over_c": 0.0689954351133315
+   },
+   {
+    "case": {
+     "aim": [
+      0.15,
+      0.48125,
+      0.55
+     ],
+     "effort": -0.135,
+     "bat_speed": 28.25,
+     "t_swing": 0.14685239175035095,
+     "corner": false
+    },
+    "failures": [],
+    "ss_ratio_max": 1.0732975911017493,
+    "hands_worst_dip": 0.0,
+    "knob_worst_dip": 0.0,
+    "lead_arm_over_93": -0.1549405413371317,
+    "lead_arm_over_c": 0.19777753228226758,
+    "rear_arm_over_c": 0.0689954351133315
+   },
+   {
+    "case": {
+     "aim": [
+      0.15,
+      0.48125,
+      0.55
+     ],
+     "effort": 0.135,
+     "corner": false
+    },
+    "failures": [],
+    "ss_ratio_max": 1.089047254632137,
+    "hands_worst_dip": 0.0,
+    "knob_worst_dip": 0.0,
+    "lead_arm_over_93": -0.07444698201807931,
+    "lead_arm_over_c": 0.19777753228226758,
+    "rear_arm_over_c": 0.0689954351133315
+   },
+   {
+    "case": {
+     "aim": [
+      0.15,
+      0.48125,
+      0.55
+     ],
+     "effort": 0.135,
+     "bat_speed": 28.25,
+     "t_swing": 0.14685239175035095,
+     "corner": false
+    },
+    "failures": [],
+    "ss_ratio_max": 1.073253522460075,
+    "hands_worst_dip": 0.0,
+    "knob_worst_dip": 0.0,
+    "lead_arm_over_93": -0.15494054133713175,
+    "lead_arm_over_c": 0.19777753228226758,
+    "rear_arm_over_c": 0.0689954351133315
+   },
+   {
+    "case": {
+     "aim": [
+      0.15,
+      0.48125,
+      0.75
+     ],
+     "bat_speed": 28.25,
+     "t_swing": 0.17,
+     "corner": false
+    },
+    "failures": [],
+    "ss_ratio_max": 1.081641237751319,
+    "hands_worst_dip": 0.0,
+    "knob_worst_dip": 0.0,
+    "lead_arm_over_93": -0.1400520855723723,
+    "lead_arm_over_c": 0.10769021546384427,
+    "rear_arm_over_c": 0.022670419280710785
+   },
+   {
+    "case": {
+     "aim": [
+      0.15,
+      0.48125,
+      0.75
+     ],
+     "bat_speed": 35.75,
+     "t_swing": 0.17,
+     "corner": false
+    },
+    "failures": [],
+    "ss_ratio_max": 1.0839585400319411,
+    "hands_worst_dip": 0.0,
+    "knob_worst_dip": 0.0,
+    "lead_arm_over_93": -0.0059419629346408875,
+    "lead_arm_over_c": 0.10769021546384427,
+    "rear_arm_over_c": 0.022670419280710785
+   },
+   {
+    "case": {
+     "aim": [
+      0.15,
+      0.48125,
+      0.75
+     ],
+     "bat_speed": 32.0,
+     "t_swing": 0.14685239175035095,
+     "corner": false
+    },
+    "failures": [],
+    "ss_ratio_max": 1.081130968968819,
+    "hands_worst_dip": 0.0,
+    "knob_worst_dip": 0.0,
+    "lead_arm_over_93": -0.14874420549959683,
+    "lead_arm_over_c": 0.10769021546384427,
+    "rear_arm_over_c": 0.022670419280710785
+   },
+   {
+    "case": {
+     "aim": [
+      0.15,
+      0.48125,
+      0.75
+     ],
+     "bat_speed": 32.0,
+     "t_swing": 0.19679625000000003,
+     "corner": false
+    },
+    "failures": [],
+    "ss_ratio_max": 1.0792617007171892,
+    "hands_worst_dip": 0.0,
+    "knob_worst_dip": 0.0,
+    "lead_arm_over_93": -0.005941962934641221,
+    "lead_arm_over_c": 0.10769021546384427,
+    "rear_arm_over_c": 0.022670419280710785
+   },
+   {
+    "case": {
+     "aim": [
+      0.15,
+      0.48125,
+      0.75
+     ],
+     "bat_speed": 28.25,
+     "t_swing": 0.19679625000000003,
+     "corner": false
+    },
+    "failures": [],
+    "ss_ratio_max": 1.084959792596064,
+    "hands_worst_dip": 0.0,
+    "knob_worst_dip": 0.0,
+    "lead_arm_over_93": -0.060231441047132406,
+    "lead_arm_over_c": 0.10769021546384427,
+    "rear_arm_over_c": 0.022670419280710785
+   },
+   {
+    "case": {
+     "aim": [
+      0.15,
+      0.48125,
+      0.75
+     ],
+     "bat_speed": 35.75,
+     "t_swing": 0.14685239175035095,
+     "corner": false
+    },
+    "failures": [],
+    "ss_ratio_max": 1.083898124551972,
+    "hands_worst_dip": 0.0,
+    "knob_worst_dip": 0.0,
+    "lead_arm_over_93": -0.09592331961615308,
+    "lead_arm_over_c": 0.10769021546384427,
+    "rear_arm_over_c": 0.022670419280710785
+   },
+   {
+    "case": {
+     "aim": [
+      0.15,
+      0.48125,
+      0.75
+     ],
+     "bat_speed": 28.25,
+     "t_swing": 0.14685239175035095,
+     "corner": false
+    },
+    "failures": [],
+    "ss_ratio_max": 1.080091254292077,
+    "hands_worst_dip": 0.0,
+    "knob_worst_dip": 0.0,
+    "lead_arm_over_93": -0.1836908157011236,
+    "lead_arm_over_c": 0.10769021546384427,
+    "rear_arm_over_c": 0.022670419280710785
+   },
+   {
+    "case": {
+     "aim": [
+      0.15,
+      0.48125,
+      0.75
+     ],
+     "bat_speed": 35.75,
+     "t_swing": 0.19679625000000003,
+     "corner": true
+    },
+    "failures": [],
+    "ss_ratio_max": 1.066862799726292,
+    "hands_worst_dip": 0.0,
+    "knob_worst_dip": 0.0,
+    "lead_arm_over_93": -0.005941962934641665,
+    "lead_arm_over_c": 0.10769021546384427,
+    "rear_arm_over_c": 0.022670419280710785
+   },
+   {
+    "case": {
+     "aim": [
+      0.15,
+      0.48125,
+      0.75
+     ],
+     "effort": -0.135,
+     "corner": false
+    },
+    "failures": [],
+    "ss_ratio_max": 1.0847065098063855,
+    "hands_worst_dip": 0.0,
+    "knob_worst_dip": 0.0,
+    "lead_arm_over_93": -0.07444698201808564,
+    "lead_arm_over_c": 0.10769021546384427,
+    "rear_arm_over_c": 0.022670419280710785
+   },
+   {
+    "case": {
+     "aim": [
+      0.15,
+      0.48125,
+      0.75
+     ],
+     "effort": -0.135,
+     "bat_speed": 28.25,
+     "t_swing": 0.14685239175035095,
+     "corner": false
+    },
+    "failures": [],
+    "ss_ratio_max": 1.080205701407793,
+    "hands_worst_dip": 0.0,
+    "knob_worst_dip": 0.0,
+    "lead_arm_over_93": -0.18369081570112367,
+    "lead_arm_over_c": 0.10769021546384427,
+    "rear_arm_over_c": 0.022670419280710785
+   },
+   {
+    "case": {
+     "aim": [
+      0.15,
+      0.48125,
+      0.75
+     ],
+     "effort": 0.135,
+     "corner": false
+    },
+    "failures": [],
+    "ss_ratio_max": 1.0846995074748866,
+    "hands_worst_dip": 0.0,
+    "knob_worst_dip": 0.0,
+    "lead_arm_over_93": -0.07444698201808564,
+    "lead_arm_over_c": 0.10769021546384427,
+    "rear_arm_over_c": 0.022670419280710785
+   },
+   {
+    "case": {
+     "aim": [
+      0.15,
+      0.48125,
+      0.75
+     ],
+     "effort": 0.135,
+     "bat_speed": 28.25,
+     "t_swing": 0.14685239175035095,
+     "corner": false
+    },
+    "failures": [],
+    "ss_ratio_max": 1.0801911045471435,
+    "hands_worst_dip": 0.0,
+    "knob_worst_dip": 0.0,
+    "lead_arm_over_93": -0.18369081570112356,
+    "lead_arm_over_c": 0.10769021546384427,
+    "rear_arm_over_c": 0.022670419280710785
+   },
+   {
+    "case": {
+     "aim": [
+      0.15,
+      0.48125,
+      0.95
+     ],
+     "bat_speed": 28.25,
+     "t_swing": 0.17,
+     "corner": false
+    },
+    "failures": [],
+    "ss_ratio_max": 1.0770005133204263,
+    "hands_worst_dip": 0.0,
+    "knob_worst_dip": 0.0,
+    "lead_arm_over_93": -0.15201266944295155,
+    "lead_arm_over_c": 0.04367326775797398,
+    "rear_arm_over_c": 0.011709122921984116
+   },
+   {
+    "case": {
+     "aim": [
+      0.15,
+      0.48125,
+      0.95
+     ],
+     "bat_speed": 35.75,
+     "t_swing": 0.17,
+     "corner": false
+    },
+    "failures": [],
+    "ss_ratio_max": 1.0723166358971348,
+    "hands_worst_dip": 0.0,
+    "knob_worst_dip": 0.0,
+    "lead_arm_over_93": 0.0023702639906183487,
+    "lead_arm_over_c": 0.04367326775797398,
+    "rear_arm_over_c": 0.011709122921984116
+   },
+   {
+    "case": {
+     "aim": [
+      0.15,
+      0.48125,
+      0.95
+     ],
+     "bat_speed": 32.0,
+     "t_swing": 0.14685239175035095,
+     "corner": false
+    },
+    "failures": [],
+    "ss_ratio_max": 1.0772737398450971,
+    "hands_worst_dip": 0.0,
+    "knob_worst_dip": 0.0,
+    "lead_arm_over_93": -0.16285654294534052,
+    "lead_arm_over_c": 0.04367326775797398,
+    "rear_arm_over_c": 0.011709122921984116
+   },
+   {
+    "case": {
+     "aim": [
+      0.15,
+      0.48125,
+      0.95
+     ],
+     "bat_speed": 32.0,
+     "t_swing": 0.19679625000000003,
+     "corner": false
+    },
+    "failures": [],
+    "ss_ratio_max": 1.0666742102510913,
+    "hands_worst_dip": 0.0,
+    "knob_worst_dip": 0.0,
+    "lead_arm_over_93": 0.0023702639906181266,
+    "lead_arm_over_c": 0.04367326775797398,
+    "rear_arm_over_c": 0.011709122921984116
+   },
+   {
+    "case": {
+     "aim": [
+      0.15,
+      0.48125,
+      0.95
+     ],
+     "bat_speed": 28.25,
+     "t_swing": 0.19679625000000003,
+     "corner": false
+    },
+    "failures": [],
+    "ss_ratio_max": 1.0759551692672973,
+    "hands_worst_dip": 0.0,
+    "knob_worst_dip": 0.0,
+    "lead_arm_over_93": -0.058260946549869574,
+    "lead_arm_over_c": 0.04367326775797398,
+    "rear_arm_over_c": 0.011709122921984116
+   },
+   {
+    "case": {
+     "aim": [
+      0.15,
+      0.48125,
+      0.95
+     ],
+     "bat_speed": 35.75,
+     "t_swing": 0.14685239175035095,
+     "corner": false
+    },
+    "failures": [],
+    "ss_ratio_max": 1.0763169355517481,
+    "hands_worst_dip": 0.0,
+    "knob_worst_dip": 0.0,
+    "lead_arm_over_93": -0.09923412563721934,
+    "lead_arm_over_c": 0.04367326775797398,
+    "rear_arm_over_c": 0.011709122921984116
+   },
+   {
+    "case": {
+     "aim": [
+      0.15,
+      0.48125,
+      0.95
+     ],
+     "bat_speed": 28.25,
+     "t_swing": 0.14685239175035095,
+     "corner": false
+    },
+    "failures": [],
+    "ss_ratio_max": 1.08301985885173,
+    "hands_worst_dip": 0.0,
+    "knob_worst_dip": 0.0,
+    "lead_arm_over_93": -0.20988334169069378,
+    "lead_arm_over_c": 0.04367326775797398,
+    "rear_arm_over_c": 0.011709122921984116
+   },
+   {
+    "case": {
+     "aim": [
+      0.15,
+      0.48125,
+      0.95
+     ],
+     "bat_speed": 35.75,
+     "t_swing": 0.19679625000000003,
+     "corner": true
+    },
+    "failures": [],
+    "ss_ratio_max": 1.0519001296440784,
+    "hands_worst_dip": 0.0,
+    "knob_worst_dip": 0.0,
+    "lead_arm_over_93": 0.0023702639906176826,
+    "lead_arm_over_c": 0.04367326775797398,
+    "rear_arm_over_c": 0.011709122921984116
+   },
+   {
+    "case": {
+     "aim": [
+      0.15,
+      0.48125,
+      0.95
+     ],
+     "effort": -0.135,
+     "corner": false
+    },
+    "failures": [],
+    "ss_ratio_max": 1.076281625568238,
+    "hands_worst_dip": 0.0,
+    "knob_worst_dip": 0.0,
+    "lead_arm_over_93": -0.07444698201809108,
+    "lead_arm_over_c": 0.04367326775797398,
+    "rear_arm_over_c": 0.011709122921984116
+   },
+   {
+    "case": {
+     "aim": [
+      0.15,
+      0.48125,
+      0.95
+     ],
+     "effort": -0.135,
+     "bat_speed": 28.25,
+     "t_swing": 0.14685239175035095,
+     "corner": false
+    },
+    "failures": [],
+    "ss_ratio_max": 1.0835130894097158,
+    "hands_worst_dip": 0.0,
+    "knob_worst_dip": 0.0,
+    "lead_arm_over_93": -0.20988334169069373,
+    "lead_arm_over_c": 0.04367326775797398,
+    "rear_arm_over_c": 0.011709122921984116
+   },
+   {
+    "case": {
+     "aim": [
+      0.15,
+      0.48125,
+      0.95
+     ],
+     "effort": 0.135,
+     "corner": false
+    },
+    "failures": [],
+    "ss_ratio_max": 1.0762215528708412,
+    "hands_worst_dip": 0.0,
+    "knob_worst_dip": 0.0,
+    "lead_arm_over_93": -0.07444698201809108,
+    "lead_arm_over_c": 0.04367326775797398,
+    "rear_arm_over_c": 0.011709122921984116
+   },
+   {
+    "case": {
+     "aim": [
+      0.15,
+      0.48125,
+      0.95
+     ],
+     "effort": 0.135,
+     "bat_speed": 28.25,
+     "t_swing": 0.14685239175035095,
+     "corner": false
+    },
+    "failures": [],
+    "ss_ratio_max": 1.0834954714820797,
+    "hands_worst_dip": 0.0,
+    "knob_worst_dip": 0.0,
+    "lead_arm_over_93": -0.2098833416906939,
+    "lead_arm_over_c": 0.04367326775797398,
+    "rear_arm_over_c": 0.011709122921984116
+   }
+  ]
+ },
  "bounds": {
   "rhb_middle": [
    {
@@ -31211,2098 +33306,6 @@
      }
     }
    }
-  },
-  "rating_range_at_contact_y0_0.50": [
-   {
-    "case": {
-     "aim": [
-      -0.15,
-      0.51875,
-      0.55
-     ],
-     "bat_speed": 28.25,
-     "t_swing": 0.17,
-     "corner": false
-    },
-    "failures": [],
-    "ss_ratio_max": 1.0999996367136258,
-    "hands_worst_dip": 0.0,
-    "knob_worst_dip": 0.0,
-    "lead_arm_over_93": -0.13543816800647834,
-    "lead_arm_over_c": 0.15709660538951564,
-    "rear_arm_over_c": 0.09510523997710518
-   },
-   {
-    "case": {
-     "aim": [
-      -0.15,
-      0.51875,
-      0.55
-     ],
-     "bat_speed": 35.75,
-     "t_swing": 0.17,
-     "corner": false
-    },
-    "failures": [
-     "sweet-spot speed"
-    ],
-    "ss_ratio_max": 1.1149411621990448,
-    "hands_worst_dip": 0.0,
-    "knob_worst_dip": 0.0,
-    "lead_arm_over_93": -0.00873980549143949,
-    "lead_arm_over_c": 0.15709660538951564,
-    "rear_arm_over_c": 0.09510523997710518
-   },
-   {
-    "case": {
-     "aim": [
-      -0.15,
-      0.51875,
-      0.55
-     ],
-     "bat_speed": 32.0,
-     "t_swing": 0.14685239175035095,
-     "corner": false
-    },
-    "failures": [],
-    "ss_ratio_max": 1.0983321515859963,
-    "hands_worst_dip": 0.0,
-    "knob_worst_dip": 0.0,
-    "lead_arm_over_93": -0.14324353021590425,
-    "lead_arm_over_c": 0.15709660538951564,
-    "rear_arm_over_c": 0.09510523997710518
-   },
-   {
-    "case": {
-     "aim": [
-      -0.15,
-      0.51875,
-      0.55
-     ],
-     "bat_speed": 32.0,
-     "t_swing": 0.19679625000000003,
-     "corner": false
-    },
-    "failures": [
-     "sweet-spot speed"
-    ],
-    "ss_ratio_max": 1.112908747943378,
-    "hands_worst_dip": 0.0,
-    "knob_worst_dip": 0.0,
-    "lead_arm_over_93": -0.008739805491439268,
-    "lead_arm_over_c": 0.15709660538951564,
-    "rear_arm_over_c": 0.09510523997710518
-   },
-   {
-    "case": {
-     "aim": [
-      -0.15,
-      0.51875,
-      0.55
-     ],
-     "bat_speed": 28.25,
-     "t_swing": 0.19679625000000003,
-     "corner": false
-    },
-    "failures": [
-     "sweet-spot speed"
-    ],
-    "ss_ratio_max": 1.1110825211159987,
-    "hands_worst_dip": 0.0,
-    "knob_worst_dip": 0.0,
-    "lead_arm_over_93": -0.06093048754524144,
-    "lead_arm_over_c": 0.15709660538951564,
-    "rear_arm_over_c": 0.09510523997710518
-   },
-   {
-    "case": {
-     "aim": [
-      -0.15,
-      0.51875,
-      0.55
-     ],
-     "bat_speed": 35.75,
-     "t_swing": 0.14685239175035095,
-     "corner": false
-    },
-    "failures": [
-     "sweet-spot speed"
-    ],
-    "ss_ratio_max": 1.1069749988092714,
-    "hands_worst_dip": 0.0,
-    "knob_worst_dip": 0.0,
-    "lead_arm_over_93": -0.09470584464949194,
-    "lead_arm_over_c": 0.15709660538951564,
-    "rear_arm_over_c": 0.09510523997710518
-   },
-   {
-    "case": {
-     "aim": [
-      -0.15,
-      0.51875,
-      0.55
-     ],
-     "bat_speed": 28.25,
-     "t_swing": 0.14685239175035095,
-     "corner": false
-    },
-    "failures": [],
-    "ss_ratio_max": 1.089360409121116,
-    "hands_worst_dip": 0.0,
-    "knob_worst_dip": 0.0,
-    "lead_arm_over_93": -0.17293765459803112,
-    "lead_arm_over_c": 0.15709660538951564,
-    "rear_arm_over_c": 0.09510523997710518
-   },
-   {
-    "case": {
-     "aim": [
-      -0.15,
-      0.51875,
-      0.55
-     ],
-     "bat_speed": 35.75,
-     "t_swing": 0.19679625000000003,
-     "corner": true
-    },
-    "failures": [
-     "sweet-spot speed"
-    ],
-    "ss_ratio_max": 1.10816501303181,
-    "hands_worst_dip": 0.0,
-    "knob_worst_dip": 0.0,
-    "lead_arm_over_93": -0.008739805491439268,
-    "lead_arm_over_c": 0.15709660538951564,
-    "rear_arm_over_c": 0.09510523997710518
-   },
-   {
-    "case": {
-     "aim": [
-      -0.15,
-      0.51875,
-      0.55
-     ],
-     "effort": -0.135,
-     "corner": false
-    },
-    "failures": [
-     "sweet-spot speed"
-    ],
-    "ss_ratio_max": 1.1096375492350177,
-    "hands_worst_dip": 0.0,
-    "knob_worst_dip": 0.0,
-    "lead_arm_over_93": -0.07444698201808497,
-    "lead_arm_over_c": 0.15709660538951564,
-    "rear_arm_over_c": 0.09510523997710518
-   },
-   {
-    "case": {
-     "aim": [
-      -0.15,
-      0.51875,
-      0.55
-     ],
-     "effort": -0.135,
-     "bat_speed": 28.25,
-     "t_swing": 0.14685239175035095,
-     "corner": false
-    },
-    "failures": [],
-    "ss_ratio_max": 1.0894043303238055,
-    "hands_worst_dip": 0.0,
-    "knob_worst_dip": 0.0,
-    "lead_arm_over_93": -0.17293765459803123,
-    "lead_arm_over_c": 0.15709660538951564,
-    "rear_arm_over_c": 0.09510523997710518
-   },
-   {
-    "case": {
-     "aim": [
-      -0.15,
-      0.51875,
-      0.55
-     ],
-     "effort": 0.135,
-     "corner": false
-    },
-    "failures": [
-     "sweet-spot speed"
-    ],
-    "ss_ratio_max": 1.109348498772415,
-    "hands_worst_dip": 0.0,
-    "knob_worst_dip": 0.0,
-    "lead_arm_over_93": -0.07444698201808497,
-    "lead_arm_over_c": 0.15709660538951564,
-    "rear_arm_over_c": 0.09510523997710518
-   },
-   {
-    "case": {
-     "aim": [
-      -0.15,
-      0.51875,
-      0.55
-     ],
-     "effort": 0.135,
-     "bat_speed": 28.25,
-     "t_swing": 0.14685239175035095,
-     "corner": false
-    },
-    "failures": [],
-    "ss_ratio_max": 1.0892297418216434,
-    "hands_worst_dip": 0.0,
-    "knob_worst_dip": 0.0,
-    "lead_arm_over_93": -0.17293765459803112,
-    "lead_arm_over_c": 0.15709660538951564,
-    "rear_arm_over_c": 0.09510523997710518
-   },
-   {
-    "case": {
-     "aim": [
-      -0.15,
-      0.51875,
-      0.75
-     ],
-     "bat_speed": 28.25,
-     "t_swing": 0.17,
-     "corner": false
-    },
-    "failures": [],
-    "ss_ratio_max": 1.0980629195146454,
-    "hands_worst_dip": 0.0,
-    "knob_worst_dip": 0.0,
-    "lead_arm_over_93": -0.1488404205584979,
-    "lead_arm_over_c": 0.04960321980963034,
-    "rear_arm_over_c": 0.03946921806962078
-   },
-   {
-    "case": {
-     "aim": [
-      -0.15,
-      0.51875,
-      0.75
-     ],
-     "bat_speed": 35.75,
-     "t_swing": 0.17,
-     "corner": false
-    },
-    "failures": [
-     "sweet-spot speed"
-    ],
-    "ss_ratio_max": 1.1036232674361475,
-    "hands_worst_dip": 0.0,
-    "knob_worst_dip": 0.0,
-    "lead_arm_over_93": -0.00043077608103070375,
-    "lead_arm_over_c": 0.04960321980963034,
-    "rear_arm_over_c": 0.03946921806962078
-   },
-   {
-    "case": {
-     "aim": [
-      -0.15,
-      0.51875,
-      0.75
-     ],
-     "bat_speed": 32.0,
-     "t_swing": 0.14685239175035095,
-     "corner": false
-    },
-    "failures": [],
-    "ss_ratio_max": 1.0972567760918055,
-    "hands_worst_dip": 0.0,
-    "knob_worst_dip": 0.0,
-    "lead_arm_over_93": -0.15920715825184528,
-    "lead_arm_over_c": 0.04960321980963034,
-    "rear_arm_over_c": 0.03946921806962078
-   },
-   {
-    "case": {
-     "aim": [
-      -0.15,
-      0.51875,
-      0.75
-     ],
-     "bat_speed": 32.0,
-     "t_swing": 0.19679625000000003,
-     "corner": false
-    },
-    "failures": [],
-    "ss_ratio_max": 1.0997269029774843,
-    "hands_worst_dip": 0.0,
-    "knob_worst_dip": 0.0,
-    "lead_arm_over_93": -0.0004307760810309258,
-    "lead_arm_over_c": 0.04960321980963034,
-    "rear_arm_over_c": 0.03946921806962078
-   },
-   {
-    "case": {
-     "aim": [
-      -0.15,
-      0.51875,
-      0.75
-     ],
-     "bat_speed": 28.25,
-     "t_swing": 0.19679625000000003,
-     "corner": false
-    },
-    "failures": [
-     "sweet-spot speed"
-    ],
-    "ss_ratio_max": 1.103186896649842,
-    "hands_worst_dip": 0.0,
-    "knob_worst_dip": 0.0,
-    "lead_arm_over_93": -0.05887571645333911,
-    "lead_arm_over_c": 0.04960321980963034,
-    "rear_arm_over_c": 0.03946921806962078
-   },
-   {
-    "case": {
-     "aim": [
-      -0.15,
-      0.51875,
-      0.75
-     ],
-     "bat_speed": 35.75,
-     "t_swing": 0.14685239175035095,
-     "corner": false
-    },
-    "failures": [
-     "sweet-spot speed"
-    ],
-    "ss_ratio_max": 1.1010146298680317,
-    "hands_worst_dip": 0.0,
-    "knob_worst_dip": 0.0,
-    "lead_arm_over_93": -0.09826330150647822,
-    "lead_arm_over_c": 0.04960321980963034,
-    "rear_arm_over_c": 0.03946921806962078
-   },
-   {
-    "case": {
-     "aim": [
-      -0.15,
-      0.51875,
-      0.75
-     ],
-     "bat_speed": 28.25,
-     "t_swing": 0.14685239175035095,
-     "corner": false
-    },
-    "failures": [
-     "sweet-spot speed"
-    ],
-    "ss_ratio_max": 1.100361272012862,
-    "hands_worst_dip": 0.0,
-    "knob_worst_dip": 0.0,
-    "lead_arm_over_93": -0.20407369421225674,
-    "lead_arm_over_c": 0.04960321980963034,
-    "rear_arm_over_c": 0.03946921806962078
-   },
-   {
-    "case": {
-     "aim": [
-      -0.15,
-      0.51875,
-      0.75
-     ],
-     "bat_speed": 35.75,
-     "t_swing": 0.19679625000000003,
-     "corner": true
-    },
-    "failures": [],
-    "ss_ratio_max": 1.090647606144626,
-    "hands_worst_dip": 0.0,
-    "knob_worst_dip": 0.0,
-    "lead_arm_over_93": -0.0004307760810314809,
-    "lead_arm_over_c": 0.04960321980963034,
-    "rear_arm_over_c": 0.03946921806962078
-   },
-   {
-    "case": {
-     "aim": [
-      -0.15,
-      0.51875,
-      0.75
-     ],
-     "effort": -0.135,
-     "corner": false
-    },
-    "failures": [
-     "sweet-spot speed"
-    ],
-    "ss_ratio_max": 1.102270723987283,
-    "hands_worst_dip": 0.0,
-    "knob_worst_dip": 0.0,
-    "lead_arm_over_93": -0.07444698201809063,
-    "lead_arm_over_c": 0.04960321980963034,
-    "rear_arm_over_c": 0.03946921806962078
-   },
-   {
-    "case": {
-     "aim": [
-      -0.15,
-      0.51875,
-      0.75
-     ],
-     "effort": -0.135,
-     "bat_speed": 28.25,
-     "t_swing": 0.14685239175035095,
-     "corner": false
-    },
-    "failures": [
-     "sweet-spot speed"
-    ],
-    "ss_ratio_max": 1.1003306771149997,
-    "hands_worst_dip": 0.0,
-    "knob_worst_dip": 0.0,
-    "lead_arm_over_93": -0.20407369421225674,
-    "lead_arm_over_c": 0.04960321980963034,
-    "rear_arm_over_c": 0.03946921806962078
-   },
-   {
-    "case": {
-     "aim": [
-      -0.15,
-      0.51875,
-      0.75
-     ],
-     "effort": 0.135,
-     "corner": false
-    },
-    "failures": [
-     "sweet-spot speed"
-    ],
-    "ss_ratio_max": 1.102476103903979,
-    "hands_worst_dip": 0.0,
-    "knob_worst_dip": 0.0,
-    "lead_arm_over_93": -0.07444698201809063,
-    "lead_arm_over_c": 0.04960321980963034,
-    "rear_arm_over_c": 0.03946921806962078
-   },
-   {
-    "case": {
-     "aim": [
-      -0.15,
-      0.51875,
-      0.75
-     ],
-     "effort": 0.135,
-     "bat_speed": 28.25,
-     "t_swing": 0.14685239175035095,
-     "corner": false
-    },
-    "failures": [],
-    "ss_ratio_max": 1.0998272686270667,
-    "hands_worst_dip": 0.0,
-    "knob_worst_dip": 0.0,
-    "lead_arm_over_93": -0.20407369421225663,
-    "lead_arm_over_c": 0.04960321980963034,
-    "rear_arm_over_c": 0.03946921806962078
-   },
-   {
-    "case": {
-     "aim": [
-      -0.15,
-      0.51875,
-      0.95
-     ],
-     "bat_speed": 28.25,
-     "t_swing": 0.17,
-     "corner": false
-    },
-    "failures": [],
-    "ss_ratio_max": 1.0950819826191083,
-    "hands_worst_dip": 0.0,
-    "knob_worst_dip": 0.0,
-    "lead_arm_over_93": -0.1613511034760564,
-    "lead_arm_over_c": -0.03238685528665697,
-    "rear_arm_over_c": 0.019542018950024165
-   },
-   {
-    "case": {
-     "aim": [
-      -0.15,
-      0.51875,
-      0.95
-     ],
-     "bat_speed": 35.75,
-     "t_swing": 0.17,
-     "corner": false
-    },
-    "failures": [],
-    "ss_ratio_max": 1.088487684742274,
-    "hands_worst_dip": 0.0,
-    "knob_worst_dip": 0.0,
-    "lead_arm_over_93": 0.007777459655665675,
-    "lead_arm_over_c": -0.03238685528665697,
-    "rear_arm_over_c": 0.019542018950024165
-   },
-   {
-    "case": {
-     "aim": [
-      -0.15,
-      0.51875,
-      0.95
-     ],
-     "bat_speed": 32.0,
-     "t_swing": 0.14685239175035095,
-     "corner": false
-    },
-    "failures": [],
-    "ss_ratio_max": 1.0967563370892774,
-    "hands_worst_dip": 0.0,
-    "knob_worst_dip": 0.0,
-    "lead_arm_over_93": -0.17407323551836512,
-    "lead_arm_over_c": -0.03238685528665697,
-    "rear_arm_over_c": 0.019542018950024165
-   },
-   {
-    "case": {
-     "aim": [
-      -0.15,
-      0.51875,
-      0.95
-     ],
-     "bat_speed": 32.0,
-     "t_swing": 0.19679625000000003,
-     "corner": false
-    },
-    "failures": [],
-    "ss_ratio_max": 1.0835015885554782,
-    "hands_worst_dip": 0.0,
-    "knob_worst_dip": 0.0,
-    "lead_arm_over_93": 0.007777459655665453,
-    "lead_arm_over_c": -0.03238685528665697,
-    "rear_arm_over_c": 0.019542018950024165
-   },
-   {
-    "case": {
-     "aim": [
-      -0.15,
-      0.51875,
-      0.95
-     ],
-     "bat_speed": 28.25,
-     "t_swing": 0.19679625000000003,
-     "corner": false
-    },
-    "failures": [],
-    "ss_ratio_max": 1.091276918945034,
-    "hands_worst_dip": 0.0,
-    "knob_worst_dip": 0.0,
-    "lead_arm_over_93": -0.0568973624529463,
-    "lead_arm_over_c": -0.03238685528665697,
-    "rear_arm_over_c": 0.019542018950024165
-   },
-   {
-    "case": {
-     "aim": [
-      -0.15,
-      0.51875,
-      0.95
-     ],
-     "bat_speed": 35.75,
-     "t_swing": 0.14685239175035095,
-     "corner": false
-    },
-    "failures": [],
-    "ss_ratio_max": 1.0912343392817019,
-    "hands_worst_dip": 0.0,
-    "knob_worst_dip": 0.0,
-    "lead_arm_over_93": -0.10163642743795653,
-    "lead_arm_over_c": -0.03238685528665697,
-    "rear_arm_over_c": 0.019542018950024165
-   },
-   {
-    "case": {
-     "aim": [
-      -0.15,
-      0.51875,
-      0.95
-     ],
-     "bat_speed": 28.25,
-     "t_swing": 0.14685239175035095,
-     "corner": false
-    },
-    "failures": [
-     "sweet-spot speed"
-    ],
-    "ss_ratio_max": 1.1046755890275808,
-    "hands_worst_dip": 0.0,
-    "knob_worst_dip": 0.0,
-    "lead_arm_over_93": -0.23291201379331905,
-    "lead_arm_over_c": -0.03238685528665697,
-    "rear_arm_over_c": 0.019542018950024165
-   },
-   {
-    "case": {
-     "aim": [
-      -0.15,
-      0.51875,
-      0.95
-     ],
-     "bat_speed": 35.75,
-     "t_swing": 0.19679625000000003,
-     "corner": true
-    },
-    "failures": [
-     "one surge"
-    ],
-    "ss_ratio_max": 1.0710767047200138,
-    "hands_worst_dip": 0.0,
-    "knob_worst_dip": 0.0,
-    "lead_arm_over_93": 0.007777459655665453,
-    "lead_arm_over_c": -0.03238685528665697,
-    "rear_arm_over_c": 0.019542018950024165
-   },
-   {
-    "case": {
-     "aim": [
-      -0.15,
-      0.51875,
-      0.95
-     ],
-     "effort": -0.135,
-     "corner": false
-    },
-    "failures": [],
-    "ss_ratio_max": 1.0912975749635039,
-    "hands_worst_dip": 0.0,
-    "knob_worst_dip": 0.0,
-    "lead_arm_over_93": -0.07444698201809608,
-    "lead_arm_over_c": -0.03238685528665697,
-    "rear_arm_over_c": 0.019542018950024165
-   },
-   {
-    "case": {
-     "aim": [
-      -0.15,
-      0.51875,
-      0.95
-     ],
-     "effort": -0.135,
-     "bat_speed": 28.25,
-     "t_swing": 0.14685239175035095,
-     "corner": false
-    },
-    "failures": [
-     "sweet-spot speed"
-    ],
-    "ss_ratio_max": 1.1046510028455252,
-    "hands_worst_dip": 0.0,
-    "knob_worst_dip": 0.0,
-    "lead_arm_over_93": -0.23291201379331905,
-    "lead_arm_over_c": -0.03238685528665697,
-    "rear_arm_over_c": 0.019542018950024165
-   },
-   {
-    "case": {
-     "aim": [
-      -0.15,
-      0.51875,
-      0.95
-     ],
-     "effort": 0.135,
-     "corner": false
-    },
-    "failures": [],
-    "ss_ratio_max": 1.0914337338773195,
-    "hands_worst_dip": 0.0,
-    "knob_worst_dip": 0.0,
-    "lead_arm_over_93": -0.07444698201809608,
-    "lead_arm_over_c": -0.03238685528665697,
-    "rear_arm_over_c": 0.019542018950024165
-   },
-   {
-    "case": {
-     "aim": [
-      -0.15,
-      0.51875,
-      0.95
-     ],
-     "effort": 0.135,
-     "bat_speed": 28.25,
-     "t_swing": 0.14685239175035095,
-     "corner": false
-    },
-    "failures": [
-     "sweet-spot speed"
-    ],
-    "ss_ratio_max": 1.1047317365875198,
-    "hands_worst_dip": 0.0,
-    "knob_worst_dip": 0.0,
-    "lead_arm_over_93": -0.2329120137933191,
-    "lead_arm_over_c": -0.03238685528665697,
-    "rear_arm_over_c": 0.019542018950024165
-   },
-   {
-    "case": {
-     "aim": [
-      0.0,
-      0.5,
-      0.55
-     ],
-     "bat_speed": 28.25,
-     "t_swing": 0.17,
-     "corner": false
-    },
-    "failures": [],
-    "ss_ratio_max": 1.089735394433842,
-    "hands_worst_dip": 0.0,
-    "knob_worst_dip": 0.0,
-    "lead_arm_over_93": -0.13130037815847478,
-    "lead_arm_over_c": 0.16943994904835724,
-    "rear_arm_over_c": 0.07280866233919414
-   },
-   {
-    "case": {
-     "aim": [
-      0.0,
-      0.5,
-      0.55
-     ],
-     "bat_speed": 35.75,
-     "t_swing": 0.17,
-     "corner": false
-    },
-    "failures": [
-     "sweet-spot speed"
-    ],
-    "ss_ratio_max": 1.1023397269269586,
-    "hands_worst_dip": 0.0,
-    "knob_worst_dip": 0.0,
-    "lead_arm_over_93": -0.011841373501957353,
-    "lead_arm_over_c": 0.16943994904835724,
-    "rear_arm_over_c": 0.07280866233919414
-   },
-   {
-    "case": {
-     "aim": [
-      0.0,
-      0.5,
-      0.55
-     ],
-     "bat_speed": 32.0,
-     "t_swing": 0.14685239175035095,
-     "corner": false
-    },
-    "failures": [],
-    "ss_ratio_max": 1.0883566447671247,
-    "hands_worst_dip": 0.0,
-    "knob_worst_dip": 0.0,
-    "lead_arm_over_93": -0.13840409368889267,
-    "lead_arm_over_c": 0.16943994904835724,
-    "rear_arm_over_c": 0.07280866233919414
-   },
-   {
-    "case": {
-     "aim": [
-      0.0,
-      0.5,
-      0.55
-     ],
-     "bat_speed": 32.0,
-     "t_swing": 0.19679625000000003,
-     "corner": false
-    },
-    "failures": [],
-    "ss_ratio_max": 1.0993158202017828,
-    "hands_worst_dip": 0.0,
-    "knob_worst_dip": 0.0,
-    "lead_arm_over_93": -0.011841373501957353,
-    "lead_arm_over_c": 0.16943994904835724,
-    "rear_arm_over_c": 0.07280866233919414
-   },
-   {
-    "case": {
-     "aim": [
-      0.0,
-      0.5,
-      0.55
-     ],
-     "bat_speed": 28.25,
-     "t_swing": 0.19679625000000003,
-     "corner": false
-    },
-    "failures": [],
-    "ss_ratio_max": 1.0991020319457965,
-    "hands_worst_dip": 0.0,
-    "knob_worst_dip": 0.0,
-    "lead_arm_over_93": -0.061649591590997144,
-    "lead_arm_over_c": 0.16943994904835724,
-    "rear_arm_over_c": 0.07280866233919414
-   },
-   {
-    "case": {
-     "aim": [
-      0.0,
-      0.5,
-      0.55
-     ],
-     "bat_speed": 35.75,
-     "t_swing": 0.14685239175035095,
-     "corner": false
-    },
-    "failures": [],
-    "ss_ratio_max": 1.0955887943460654,
-    "hands_worst_dip": 0.0,
-    "knob_worst_dip": 0.0,
-    "lead_arm_over_93": -0.09352095172545216,
-    "lead_arm_over_c": 0.16943994904835724,
-    "rear_arm_over_c": 0.07280866233919414
-   },
-   {
-    "case": {
-     "aim": [
-      0.0,
-      0.5,
-      0.55
-     ],
-     "bat_speed": 28.25,
-     "t_swing": 0.14685239175035095,
-     "corner": false
-    },
-    "failures": [],
-    "ss_ratio_max": 1.0798576153539226,
-    "hands_worst_dip": 0.0,
-    "knob_worst_dip": 0.0,
-    "lead_arm_over_93": -0.16440824973744472,
-    "lead_arm_over_c": 0.16943994904835724,
-    "rear_arm_over_c": 0.07280866233919414
-   },
-   {
-    "case": {
-     "aim": [
-      0.0,
-      0.5,
-      0.55
-     ],
-     "bat_speed": 35.75,
-     "t_swing": 0.19679625000000003,
-     "corner": true
-    },
-    "failures": [],
-    "ss_ratio_max": 1.092489784726513,
-    "hands_worst_dip": 0.0,
-    "knob_worst_dip": 0.0,
-    "lead_arm_over_93": -0.011841373501958019,
-    "lead_arm_over_c": 0.16943994904835724,
-    "rear_arm_over_c": 0.07280866233919414
-   },
-   {
-    "case": {
-     "aim": [
-      0.0,
-      0.5,
-      0.55
-     ],
-     "effort": -0.135,
-     "corner": false
-    },
-    "failures": [],
-    "ss_ratio_max": 1.097944074253767,
-    "hands_worst_dip": 0.0,
-    "knob_worst_dip": 0.0,
-    "lead_arm_over_93": -0.07444698201808131,
-    "lead_arm_over_c": 0.16943994904835724,
-    "rear_arm_over_c": 0.07280866233919414
-   },
-   {
-    "case": {
-     "aim": [
-      0.0,
-      0.5,
-      0.55
-     ],
-     "effort": -0.135,
-     "bat_speed": 28.25,
-     "t_swing": 0.14685239175035095,
-     "corner": false
-    },
-    "failures": [],
-    "ss_ratio_max": 1.0798901731248087,
-    "hands_worst_dip": 0.0,
-    "knob_worst_dip": 0.0,
-    "lead_arm_over_93": -0.16440824973744472,
-    "lead_arm_over_c": 0.16943994904835724,
-    "rear_arm_over_c": 0.07280866233919414
-   },
-   {
-    "case": {
-     "aim": [
-      0.0,
-      0.5,
-      0.55
-     ],
-     "effort": 0.135,
-     "corner": false
-    },
-    "failures": [],
-    "ss_ratio_max": 1.0979498713520917,
-    "hands_worst_dip": 0.0,
-    "knob_worst_dip": 0.0,
-    "lead_arm_over_93": -0.07444698201808131,
-    "lead_arm_over_c": 0.16943994904835724,
-    "rear_arm_over_c": 0.07280866233919414
-   },
-   {
-    "case": {
-     "aim": [
-      0.0,
-      0.5,
-      0.55
-     ],
-     "effort": 0.135,
-     "bat_speed": 28.25,
-     "t_swing": 0.14685239175035095,
-     "corner": false
-    },
-    "failures": [],
-    "ss_ratio_max": 1.0798238635083797,
-    "hands_worst_dip": 0.0,
-    "knob_worst_dip": 0.0,
-    "lead_arm_over_93": -0.1644082497374449,
-    "lead_arm_over_c": 0.16943994904835724,
-    "rear_arm_over_c": 0.07280866233919414
-   },
-   {
-    "case": {
-     "aim": [
-      0.0,
-      0.5,
-      0.75
-     ],
-     "bat_speed": 28.25,
-     "t_swing": 0.17,
-     "corner": false
-    },
-    "failures": [],
-    "ss_ratio_max": 1.0886482618203641,
-    "hands_worst_dip": 0.0,
-    "knob_worst_dip": 0.0,
-    "lead_arm_over_93": -0.14445898238116728,
-    "lead_arm_over_c": 0.07033528511247167,
-    "rear_arm_over_c": 0.02156193344381019
-   },
-   {
-    "case": {
-     "aim": [
-      0.0,
-      0.5,
-      0.75
-     ],
-     "bat_speed": 35.75,
-     "t_swing": 0.17,
-     "corner": false
-    },
-    "failures": [],
-    "ss_ratio_max": 1.0925900621794498,
-    "hands_worst_dip": 0.0,
-    "knob_worst_dip": 0.0,
-    "lead_arm_over_93": -0.0034118360907234857,
-    "lead_arm_over_c": 0.07033528511247167,
-    "rear_arm_over_c": 0.02156193344381019
-   },
-   {
-    "case": {
-     "aim": [
-      0.0,
-      0.5,
-      0.75
-     ],
-     "bat_speed": 32.0,
-     "t_swing": 0.14685239175035095,
-     "corner": false
-    },
-    "failures": [],
-    "ss_ratio_max": 1.0877917197795175,
-    "hands_worst_dip": 0.0,
-    "knob_worst_dip": 0.0,
-    "lead_arm_over_93": -0.15402545417554986,
-    "lead_arm_over_c": 0.07033528511247167,
-    "rear_arm_over_c": 0.02156193344381019
-   },
-   {
-    "case": {
-     "aim": [
-      0.0,
-      0.5,
-      0.75
-     ],
-     "bat_speed": 32.0,
-     "t_swing": 0.19679625000000003,
-     "corner": false
-    },
-    "failures": [],
-    "ss_ratio_max": 1.0882622824875607,
-    "hands_worst_dip": 0.0,
-    "knob_worst_dip": 0.0,
-    "lead_arm_over_93": -0.0034118360907234857,
-    "lead_arm_over_c": 0.07033528511247167,
-    "rear_arm_over_c": 0.02156193344381019
-   },
-   {
-    "case": {
-     "aim": [
-      0.0,
-      0.5,
-      0.75
-     ],
-     "bat_speed": 28.25,
-     "t_swing": 0.19679625000000003,
-     "corner": false
-    },
-    "failures": [],
-    "ss_ratio_max": 1.092788854764296,
-    "hands_worst_dip": 0.0,
-    "knob_worst_dip": 0.0,
-    "lead_arm_over_93": -0.05958718024944798,
-    "lead_arm_over_c": 0.07033528511247167,
-    "rear_arm_over_c": 0.02156193344381019
-   },
-   {
-    "case": {
-     "aim": [
-      0.0,
-      0.5,
-      0.75
-     ],
-     "bat_speed": 35.75,
-     "t_swing": 0.14685239175035095,
-     "corner": false
-    },
-    "failures": [],
-    "ss_ratio_max": 1.0912910556941462,
-    "hands_worst_dip": 0.0,
-    "knob_worst_dip": 0.0,
-    "lead_arm_over_93": -0.09706137659856806,
-    "lead_arm_over_c": 0.07033528511247167,
-    "rear_arm_over_c": 0.02156193344381019
-   },
-   {
-    "case": {
-     "aim": [
-      0.0,
-      0.5,
-      0.75
-     ],
-     "bat_speed": 28.25,
-     "t_swing": 0.14685239175035095,
-     "corner": false
-    },
-    "failures": [],
-    "ss_ratio_max": 1.0883286500281049,
-    "hands_worst_dip": 0.0,
-    "knob_worst_dip": 0.0,
-    "lead_arm_over_93": -0.19431840655060922,
-    "lead_arm_over_c": 0.07033528511247167,
-    "rear_arm_over_c": 0.02156193344381019
-   },
-   {
-    "case": {
-     "aim": [
-      0.0,
-      0.5,
-      0.75
-     ],
-     "bat_speed": 35.75,
-     "t_swing": 0.19679625000000003,
-     "corner": true
-    },
-    "failures": [],
-    "ss_ratio_max": 1.0775402934143234,
-    "hands_worst_dip": 0.0,
-    "knob_worst_dip": 0.0,
-    "lead_arm_over_93": -0.003411836090724041,
-    "lead_arm_over_c": 0.07033528511247167,
-    "rear_arm_over_c": 0.02156193344381019
-   },
-   {
-    "case": {
-     "aim": [
-      0.0,
-      0.5,
-      0.75
-     ],
-     "effort": -0.135,
-     "corner": false
-    },
-    "failures": [],
-    "ss_ratio_max": 1.0923106749188563,
-    "hands_worst_dip": 0.0,
-    "knob_worst_dip": 0.0,
-    "lead_arm_over_93": -0.07444698201808775,
-    "lead_arm_over_c": 0.07033528511247167,
-    "rear_arm_over_c": 0.02156193344381019
-   },
-   {
-    "case": {
-     "aim": [
-      0.0,
-      0.5,
-      0.75
-     ],
-     "effort": -0.135,
-     "bat_speed": 28.25,
-     "t_swing": 0.14685239175035095,
-     "corner": false
-    },
-    "failures": [],
-    "ss_ratio_max": 1.0883517976277572,
-    "hands_worst_dip": 0.0,
-    "knob_worst_dip": 0.0,
-    "lead_arm_over_93": -0.19431840655060933,
-    "lead_arm_over_c": 0.07033528511247167,
-    "rear_arm_over_c": 0.02156193344381019
-   },
-   {
-    "case": {
-     "aim": [
-      0.0,
-      0.5,
-      0.75
-     ],
-     "effort": 0.135,
-     "corner": false
-    },
-    "failures": [],
-    "ss_ratio_max": 1.0919368419405637,
-    "hands_worst_dip": 0.0,
-    "knob_worst_dip": 0.0,
-    "lead_arm_over_93": -0.07444698201808775,
-    "lead_arm_over_c": 0.07033528511247167,
-    "rear_arm_over_c": 0.02156193344381019
-   },
-   {
-    "case": {
-     "aim": [
-      0.0,
-      0.5,
-      0.75
-     ],
-     "effort": 0.135,
-     "bat_speed": 28.25,
-     "t_swing": 0.14685239175035095,
-     "corner": false
-    },
-    "failures": [],
-    "ss_ratio_max": 1.0884581397531432,
-    "hands_worst_dip": 0.0,
-    "knob_worst_dip": 0.0,
-    "lead_arm_over_93": -0.19431840655060922,
-    "lead_arm_over_c": 0.07033528511247167,
-    "rear_arm_over_c": 0.02156193344381019
-   },
-   {
-    "case": {
-     "aim": [
-      0.0,
-      0.5,
-      0.95
-     ],
-     "bat_speed": 28.25,
-     "t_swing": 0.17,
-     "corner": false
-    },
-    "failures": [],
-    "ss_ratio_max": 1.0838172830507806,
-    "hands_worst_dip": 0.0,
-    "knob_worst_dip": 0.0,
-    "lead_arm_over_93": -0.1566871286322296,
-    "lead_arm_over_c": -0.0026349541687047395,
-    "rear_arm_over_c": 0.006350115535019962
-   },
-   {
-    "case": {
-     "aim": [
-      0.0,
-      0.5,
-      0.95
-     ],
-     "bat_speed": 35.75,
-     "t_swing": 0.17,
-     "corner": false
-    },
-    "failures": [],
-    "ss_ratio_max": 1.0793276244367178,
-    "hands_worst_dip": 0.0,
-    "knob_worst_dip": 0.0,
-    "lead_arm_over_93": 0.004860534045493026,
-    "lead_arm_over_c": -0.0026349541687047395,
-    "rear_arm_over_c": 0.006350115535019962
-   },
-   {
-    "case": {
-     "aim": [
-      0.0,
-      0.5,
-      0.95
-     ],
-     "bat_speed": 32.0,
-     "t_swing": 0.14685239175035095,
-     "corner": false
-    },
-    "failures": [],
-    "ss_ratio_max": 1.0851634628636035,
-    "hands_worst_dip": 0.0,
-    "knob_worst_dip": 0.0,
-    "lead_arm_over_93": -0.16850353161409304,
-    "lead_arm_over_c": -0.0026349541687047395,
-    "rear_arm_over_c": 0.006350115535019962
-   },
-   {
-    "case": {
-     "aim": [
-      0.0,
-      0.5,
-      0.95
-     ],
-     "bat_speed": 32.0,
-     "t_swing": 0.19679625000000003,
-     "corner": false
-    },
-    "failures": [],
-    "ss_ratio_max": 1.0739667170550844,
-    "hands_worst_dip": 0.0,
-    "knob_worst_dip": 0.0,
-    "lead_arm_over_93": 0.004860534045492915,
-    "lead_arm_over_c": -0.0026349541687047395,
-    "rear_arm_over_c": 0.006350115535019962
-   },
-   {
-    "case": {
-     "aim": [
-      0.0,
-      0.5,
-      0.95
-     ],
-     "bat_speed": 28.25,
-     "t_swing": 0.19679625000000003,
-     "corner": false
-    },
-    "failures": [],
-    "ss_ratio_max": 1.082511197084441,
-    "hands_worst_dip": 0.0,
-    "knob_worst_dip": 0.0,
-    "lead_arm_over_93": -0.05761144943559526,
-    "lead_arm_over_c": -0.0026349541687047395,
-    "rear_arm_over_c": 0.006350115535019962
-   },
-   {
-    "case": {
-     "aim": [
-      0.0,
-      0.5,
-      0.95
-     ],
-     "bat_speed": 35.75,
-     "t_swing": 0.14685239175035095,
-     "corner": false
-    },
-    "failures": [],
-    "ss_ratio_max": 1.082909703139919,
-    "hands_worst_dip": 0.0,
-    "knob_worst_dip": 0.0,
-    "lead_arm_over_93": -0.10040371336199039,
-    "lead_arm_over_c": -0.0026349541687047395,
-    "rear_arm_over_c": 0.006350115535019962
-   },
-   {
-    "case": {
-     "aim": [
-      0.0,
-      0.5,
-      0.95
-     ],
-     "bat_speed": 28.25,
-     "t_swing": 0.14685239175035095,
-     "corner": false
-    },
-    "failures": [],
-    "ss_ratio_max": 1.0923673365827187,
-    "hands_worst_dip": 0.0,
-    "knob_worst_dip": 0.0,
-    "lead_arm_over_93": -0.22178969830904488,
-    "lead_arm_over_c": -0.0026349541687047395,
-    "rear_arm_over_c": 0.006350115535019962
-   },
-   {
-    "case": {
-     "aim": [
-      0.0,
-      0.5,
-      0.95
-     ],
-     "bat_speed": 35.75,
-     "t_swing": 0.19679625000000003,
-     "corner": true
-    },
-    "failures": [],
-    "ss_ratio_max": 1.0603169067419154,
-    "hands_worst_dip": 0.0,
-    "knob_worst_dip": 0.0,
-    "lead_arm_over_93": 0.0048605340454922485,
-    "lead_arm_over_c": -0.0026349541687047395,
-    "rear_arm_over_c": 0.006350115535019962
-   },
-   {
-    "case": {
-     "aim": [
-      0.0,
-      0.5,
-      0.95
-     ],
-     "effort": -0.135,
-     "corner": false
-    },
-    "failures": [],
-    "ss_ratio_max": 1.0827190876243196,
-    "hands_worst_dip": 0.0,
-    "knob_worst_dip": 0.0,
-    "lead_arm_over_93": -0.07444698201809397,
-    "lead_arm_over_c": -0.0026349541687047395,
-    "rear_arm_over_c": 0.006350115535019962
-   },
-   {
-    "case": {
-     "aim": [
-      0.0,
-      0.5,
-      0.95
-     ],
-     "effort": -0.135,
-     "bat_speed": 28.25,
-     "t_swing": 0.14685239175035095,
-     "corner": false
-    },
-    "failures": [],
-    "ss_ratio_max": 1.092324268013027,
-    "hands_worst_dip": 0.0,
-    "knob_worst_dip": 0.0,
-    "lead_arm_over_93": -0.2217896983090447,
-    "lead_arm_over_c": -0.0026349541687047395,
-    "rear_arm_over_c": 0.006350115535019962
-   },
-   {
-    "case": {
-     "aim": [
-      0.0,
-      0.5,
-      0.95
-     ],
-     "effort": 0.135,
-     "corner": false
-    },
-    "failures": [],
-    "ss_ratio_max": 1.0826021810412267,
-    "hands_worst_dip": 0.0,
-    "knob_worst_dip": 0.0,
-    "lead_arm_over_93": -0.07444698201809397,
-    "lead_arm_over_c": -0.0026349541687047395,
-    "rear_arm_over_c": 0.006350115535019962
-   },
-   {
-    "case": {
-     "aim": [
-      0.0,
-      0.5,
-      0.95
-     ],
-     "effort": 0.135,
-     "bat_speed": 28.25,
-     "t_swing": 0.14685239175035095,
-     "corner": false
-    },
-    "failures": [],
-    "ss_ratio_max": 1.0917191906791777,
-    "hands_worst_dip": 0.0,
-    "knob_worst_dip": 0.0,
-    "lead_arm_over_93": -0.22178969830904477,
-    "lead_arm_over_c": -0.0026349541687047395,
-    "rear_arm_over_c": 0.006350115535019962
-   },
-   {
-    "case": {
-     "aim": [
-      0.15,
-      0.48125,
-      0.55
-     ],
-     "bat_speed": 28.25,
-     "t_swing": 0.17,
-     "corner": false
-    },
-    "failures": [],
-    "ss_ratio_max": 1.0818791105867092,
-    "hands_worst_dip": 0.0,
-    "knob_worst_dip": 0.0,
-    "lead_arm_over_93": -0.12712314259562735,
-    "lead_arm_over_c": 0.19777753228226758,
-    "rear_arm_over_c": 0.0689954351133315
-   },
-   {
-    "case": {
-     "aim": [
-      0.15,
-      0.48125,
-      0.55
-     ],
-     "bat_speed": 35.75,
-     "t_swing": 0.17,
-     "corner": false
-    },
-    "failures": [],
-    "ss_ratio_max": 1.091857428953528,
-    "hands_worst_dip": 0.0,
-    "knob_worst_dip": 0.0,
-    "lead_arm_over_93": -0.014465260498267019,
-    "lead_arm_over_c": 0.19777753228226758,
-    "rear_arm_over_c": 0.0689954351133315
-   },
-   {
-    "case": {
-     "aim": [
-      0.15,
-      0.48125,
-      0.55
-     ],
-     "bat_speed": 32.0,
-     "t_swing": 0.14685239175035095,
-     "corner": false
-    },
-    "failures": [],
-    "ss_ratio_max": 1.0807661898999936,
-    "hands_worst_dip": 0.0,
-    "knob_worst_dip": 0.0,
-    "lead_arm_over_93": -0.13344463173498755,
-    "lead_arm_over_c": 0.19777753228226758,
-    "rear_arm_over_c": 0.0689954351133315
-   },
-   {
-    "case": {
-     "aim": [
-      0.15,
-      0.48125,
-      0.55
-     ],
-     "bat_speed": 32.0,
-     "t_swing": 0.19679625000000003,
-     "corner": false
-    },
-    "failures": [],
-    "ss_ratio_max": 1.0886560231398297,
-    "hands_worst_dip": 0.0,
-    "knob_worst_dip": 0.0,
-    "lead_arm_over_93": -0.01446526049826724,
-    "lead_arm_over_c": 0.19777753228226758,
-    "rear_arm_over_c": 0.0689954351133315
-   },
-   {
-    "case": {
-     "aim": [
-      0.15,
-      0.48125,
-      0.55
-     ],
-     "bat_speed": 28.25,
-     "t_swing": 0.19679625000000003,
-     "corner": false
-    },
-    "failures": [],
-    "ss_ratio_max": 1.0901884262062242,
-    "hands_worst_dip": 0.0,
-    "knob_worst_dip": 0.0,
-    "lead_arm_over_93": -0.0622985842148831,
-    "lead_arm_over_c": 0.19777753228226758,
-    "rear_arm_over_c": 0.0689954351133315
-   },
-   {
-    "case": {
-     "aim": [
-      0.15,
-      0.48125,
-      0.55
-     ],
-     "bat_speed": 35.75,
-     "t_swing": 0.14685239175035095,
-     "corner": false
-    },
-    "failures": [],
-    "ss_ratio_max": 1.086953081835038,
-    "hands_worst_dip": 0.0,
-    "knob_worst_dip": 0.0,
-    "lead_arm_over_93": -0.09240089511241079,
-    "lead_arm_over_c": 0.19777753228226758,
-    "rear_arm_over_c": 0.0689954351133315
-   },
-   {
-    "case": {
-     "aim": [
-      0.15,
-      0.48125,
-      0.55
-     ],
-     "bat_speed": 28.25,
-     "t_swing": 0.14685239175035095,
-     "corner": false
-    },
-    "failures": [],
-    "ss_ratio_max": 1.073183696193231,
-    "hands_worst_dip": 0.0,
-    "knob_worst_dip": 0.0,
-    "lead_arm_over_93": -0.15494054133713203,
-    "lead_arm_over_c": 0.19777753228226758,
-    "rear_arm_over_c": 0.0689954351133315
-   },
-   {
-    "case": {
-     "aim": [
-      0.15,
-      0.48125,
-      0.55
-     ],
-     "bat_speed": 35.75,
-     "t_swing": 0.19679625000000003,
-     "corner": true
-    },
-    "failures": [],
-    "ss_ratio_max": 1.0797159405994219,
-    "hands_worst_dip": 0.0,
-    "knob_worst_dip": 0.0,
-    "lead_arm_over_93": -0.014465260498267796,
-    "lead_arm_over_c": 0.19777753228226758,
-    "rear_arm_over_c": 0.0689954351133315
-   },
-   {
-    "case": {
-     "aim": [
-      0.15,
-      0.48125,
-      0.55
-     ],
-     "effort": -0.135,
-     "corner": false
-    },
-    "failures": [],
-    "ss_ratio_max": 1.089061425992535,
-    "hands_worst_dip": 0.0,
-    "knob_worst_dip": 0.0,
-    "lead_arm_over_93": -0.07444698201807909,
-    "lead_arm_over_c": 0.19777753228226758,
-    "rear_arm_over_c": 0.0689954351133315
-   },
-   {
-    "case": {
-     "aim": [
-      0.15,
-      0.48125,
-      0.55
-     ],
-     "effort": -0.135,
-     "bat_speed": 28.25,
-     "t_swing": 0.14685239175035095,
-     "corner": false
-    },
-    "failures": [],
-    "ss_ratio_max": 1.0732975911017493,
-    "hands_worst_dip": 0.0,
-    "knob_worst_dip": 0.0,
-    "lead_arm_over_93": -0.1549405413371317,
-    "lead_arm_over_c": 0.19777753228226758,
-    "rear_arm_over_c": 0.0689954351133315
-   },
-   {
-    "case": {
-     "aim": [
-      0.15,
-      0.48125,
-      0.55
-     ],
-     "effort": 0.135,
-     "corner": false
-    },
-    "failures": [],
-    "ss_ratio_max": 1.089047254632137,
-    "hands_worst_dip": 0.0,
-    "knob_worst_dip": 0.0,
-    "lead_arm_over_93": -0.07444698201807931,
-    "lead_arm_over_c": 0.19777753228226758,
-    "rear_arm_over_c": 0.0689954351133315
-   },
-   {
-    "case": {
-     "aim": [
-      0.15,
-      0.48125,
-      0.55
-     ],
-     "effort": 0.135,
-     "bat_speed": 28.25,
-     "t_swing": 0.14685239175035095,
-     "corner": false
-    },
-    "failures": [],
-    "ss_ratio_max": 1.073253522460075,
-    "hands_worst_dip": 0.0,
-    "knob_worst_dip": 0.0,
-    "lead_arm_over_93": -0.15494054133713175,
-    "lead_arm_over_c": 0.19777753228226758,
-    "rear_arm_over_c": 0.0689954351133315
-   },
-   {
-    "case": {
-     "aim": [
-      0.15,
-      0.48125,
-      0.75
-     ],
-     "bat_speed": 28.25,
-     "t_swing": 0.17,
-     "corner": false
-    },
-    "failures": [],
-    "ss_ratio_max": 1.081641237751319,
-    "hands_worst_dip": 0.0,
-    "knob_worst_dip": 0.0,
-    "lead_arm_over_93": -0.1400520855723723,
-    "lead_arm_over_c": 0.10769021546384427,
-    "rear_arm_over_c": 0.022670419280710785
-   },
-   {
-    "case": {
-     "aim": [
-      0.15,
-      0.48125,
-      0.75
-     ],
-     "bat_speed": 35.75,
-     "t_swing": 0.17,
-     "corner": false
-    },
-    "failures": [],
-    "ss_ratio_max": 1.0839585400319411,
-    "hands_worst_dip": 0.0,
-    "knob_worst_dip": 0.0,
-    "lead_arm_over_93": -0.0059419629346408875,
-    "lead_arm_over_c": 0.10769021546384427,
-    "rear_arm_over_c": 0.022670419280710785
-   },
-   {
-    "case": {
-     "aim": [
-      0.15,
-      0.48125,
-      0.75
-     ],
-     "bat_speed": 32.0,
-     "t_swing": 0.14685239175035095,
-     "corner": false
-    },
-    "failures": [],
-    "ss_ratio_max": 1.081130968968819,
-    "hands_worst_dip": 0.0,
-    "knob_worst_dip": 0.0,
-    "lead_arm_over_93": -0.14874420549959683,
-    "lead_arm_over_c": 0.10769021546384427,
-    "rear_arm_over_c": 0.022670419280710785
-   },
-   {
-    "case": {
-     "aim": [
-      0.15,
-      0.48125,
-      0.75
-     ],
-     "bat_speed": 32.0,
-     "t_swing": 0.19679625000000003,
-     "corner": false
-    },
-    "failures": [],
-    "ss_ratio_max": 1.0792617007171892,
-    "hands_worst_dip": 0.0,
-    "knob_worst_dip": 0.0,
-    "lead_arm_over_93": -0.005941962934641221,
-    "lead_arm_over_c": 0.10769021546384427,
-    "rear_arm_over_c": 0.022670419280710785
-   },
-   {
-    "case": {
-     "aim": [
-      0.15,
-      0.48125,
-      0.75
-     ],
-     "bat_speed": 28.25,
-     "t_swing": 0.19679625000000003,
-     "corner": false
-    },
-    "failures": [],
-    "ss_ratio_max": 1.084959792596064,
-    "hands_worst_dip": 0.0,
-    "knob_worst_dip": 0.0,
-    "lead_arm_over_93": -0.060231441047132406,
-    "lead_arm_over_c": 0.10769021546384427,
-    "rear_arm_over_c": 0.022670419280710785
-   },
-   {
-    "case": {
-     "aim": [
-      0.15,
-      0.48125,
-      0.75
-     ],
-     "bat_speed": 35.75,
-     "t_swing": 0.14685239175035095,
-     "corner": false
-    },
-    "failures": [],
-    "ss_ratio_max": 1.083898124551972,
-    "hands_worst_dip": 0.0,
-    "knob_worst_dip": 0.0,
-    "lead_arm_over_93": -0.09592331961615308,
-    "lead_arm_over_c": 0.10769021546384427,
-    "rear_arm_over_c": 0.022670419280710785
-   },
-   {
-    "case": {
-     "aim": [
-      0.15,
-      0.48125,
-      0.75
-     ],
-     "bat_speed": 28.25,
-     "t_swing": 0.14685239175035095,
-     "corner": false
-    },
-    "failures": [],
-    "ss_ratio_max": 1.080091254292077,
-    "hands_worst_dip": 0.0,
-    "knob_worst_dip": 0.0,
-    "lead_arm_over_93": -0.1836908157011236,
-    "lead_arm_over_c": 0.10769021546384427,
-    "rear_arm_over_c": 0.022670419280710785
-   },
-   {
-    "case": {
-     "aim": [
-      0.15,
-      0.48125,
-      0.75
-     ],
-     "bat_speed": 35.75,
-     "t_swing": 0.19679625000000003,
-     "corner": true
-    },
-    "failures": [],
-    "ss_ratio_max": 1.066862799726292,
-    "hands_worst_dip": 0.0,
-    "knob_worst_dip": 0.0,
-    "lead_arm_over_93": -0.005941962934641665,
-    "lead_arm_over_c": 0.10769021546384427,
-    "rear_arm_over_c": 0.022670419280710785
-   },
-   {
-    "case": {
-     "aim": [
-      0.15,
-      0.48125,
-      0.75
-     ],
-     "effort": -0.135,
-     "corner": false
-    },
-    "failures": [],
-    "ss_ratio_max": 1.0847065098063855,
-    "hands_worst_dip": 0.0,
-    "knob_worst_dip": 0.0,
-    "lead_arm_over_93": -0.07444698201808564,
-    "lead_arm_over_c": 0.10769021546384427,
-    "rear_arm_over_c": 0.022670419280710785
-   },
-   {
-    "case": {
-     "aim": [
-      0.15,
-      0.48125,
-      0.75
-     ],
-     "effort": -0.135,
-     "bat_speed": 28.25,
-     "t_swing": 0.14685239175035095,
-     "corner": false
-    },
-    "failures": [],
-    "ss_ratio_max": 1.080205701407793,
-    "hands_worst_dip": 0.0,
-    "knob_worst_dip": 0.0,
-    "lead_arm_over_93": -0.18369081570112367,
-    "lead_arm_over_c": 0.10769021546384427,
-    "rear_arm_over_c": 0.022670419280710785
-   },
-   {
-    "case": {
-     "aim": [
-      0.15,
-      0.48125,
-      0.75
-     ],
-     "effort": 0.135,
-     "corner": false
-    },
-    "failures": [],
-    "ss_ratio_max": 1.0846995074748866,
-    "hands_worst_dip": 0.0,
-    "knob_worst_dip": 0.0,
-    "lead_arm_over_93": -0.07444698201808564,
-    "lead_arm_over_c": 0.10769021546384427,
-    "rear_arm_over_c": 0.022670419280710785
-   },
-   {
-    "case": {
-     "aim": [
-      0.15,
-      0.48125,
-      0.75
-     ],
-     "effort": 0.135,
-     "bat_speed": 28.25,
-     "t_swing": 0.14685239175035095,
-     "corner": false
-    },
-    "failures": [],
-    "ss_ratio_max": 1.0801911045471435,
-    "hands_worst_dip": 0.0,
-    "knob_worst_dip": 0.0,
-    "lead_arm_over_93": -0.18369081570112356,
-    "lead_arm_over_c": 0.10769021546384427,
-    "rear_arm_over_c": 0.022670419280710785
-   },
-   {
-    "case": {
-     "aim": [
-      0.15,
-      0.48125,
-      0.95
-     ],
-     "bat_speed": 28.25,
-     "t_swing": 0.17,
-     "corner": false
-    },
-    "failures": [],
-    "ss_ratio_max": 1.0770005133204263,
-    "hands_worst_dip": 0.0,
-    "knob_worst_dip": 0.0,
-    "lead_arm_over_93": -0.15201266944295155,
-    "lead_arm_over_c": 0.04367326775797398,
-    "rear_arm_over_c": 0.011709122921984116
-   },
-   {
-    "case": {
-     "aim": [
-      0.15,
-      0.48125,
-      0.95
-     ],
-     "bat_speed": 35.75,
-     "t_swing": 0.17,
-     "corner": false
-    },
-    "failures": [],
-    "ss_ratio_max": 1.0723166358971348,
-    "hands_worst_dip": 0.0,
-    "knob_worst_dip": 0.0,
-    "lead_arm_over_93": 0.0023702639906183487,
-    "lead_arm_over_c": 0.04367326775797398,
-    "rear_arm_over_c": 0.011709122921984116
-   },
-   {
-    "case": {
-     "aim": [
-      0.15,
-      0.48125,
-      0.95
-     ],
-     "bat_speed": 32.0,
-     "t_swing": 0.14685239175035095,
-     "corner": false
-    },
-    "failures": [],
-    "ss_ratio_max": 1.0772737398450971,
-    "hands_worst_dip": 0.0,
-    "knob_worst_dip": 0.0,
-    "lead_arm_over_93": -0.16285654294534052,
-    "lead_arm_over_c": 0.04367326775797398,
-    "rear_arm_over_c": 0.011709122921984116
-   },
-   {
-    "case": {
-     "aim": [
-      0.15,
-      0.48125,
-      0.95
-     ],
-     "bat_speed": 32.0,
-     "t_swing": 0.19679625000000003,
-     "corner": false
-    },
-    "failures": [],
-    "ss_ratio_max": 1.0666742102510913,
-    "hands_worst_dip": 0.0,
-    "knob_worst_dip": 0.0,
-    "lead_arm_over_93": 0.0023702639906181266,
-    "lead_arm_over_c": 0.04367326775797398,
-    "rear_arm_over_c": 0.011709122921984116
-   },
-   {
-    "case": {
-     "aim": [
-      0.15,
-      0.48125,
-      0.95
-     ],
-     "bat_speed": 28.25,
-     "t_swing": 0.19679625000000003,
-     "corner": false
-    },
-    "failures": [],
-    "ss_ratio_max": 1.0759551692672973,
-    "hands_worst_dip": 0.0,
-    "knob_worst_dip": 0.0,
-    "lead_arm_over_93": -0.058260946549869574,
-    "lead_arm_over_c": 0.04367326775797398,
-    "rear_arm_over_c": 0.011709122921984116
-   },
-   {
-    "case": {
-     "aim": [
-      0.15,
-      0.48125,
-      0.95
-     ],
-     "bat_speed": 35.75,
-     "t_swing": 0.14685239175035095,
-     "corner": false
-    },
-    "failures": [],
-    "ss_ratio_max": 1.0763169355517481,
-    "hands_worst_dip": 0.0,
-    "knob_worst_dip": 0.0,
-    "lead_arm_over_93": -0.09923412563721934,
-    "lead_arm_over_c": 0.04367326775797398,
-    "rear_arm_over_c": 0.011709122921984116
-   },
-   {
-    "case": {
-     "aim": [
-      0.15,
-      0.48125,
-      0.95
-     ],
-     "bat_speed": 28.25,
-     "t_swing": 0.14685239175035095,
-     "corner": false
-    },
-    "failures": [],
-    "ss_ratio_max": 1.08301985885173,
-    "hands_worst_dip": 0.0,
-    "knob_worst_dip": 0.0,
-    "lead_arm_over_93": -0.20988334169069378,
-    "lead_arm_over_c": 0.04367326775797398,
-    "rear_arm_over_c": 0.011709122921984116
-   },
-   {
-    "case": {
-     "aim": [
-      0.15,
-      0.48125,
-      0.95
-     ],
-     "bat_speed": 35.75,
-     "t_swing": 0.19679625000000003,
-     "corner": true
-    },
-    "failures": [],
-    "ss_ratio_max": 1.0519001296440784,
-    "hands_worst_dip": 0.0,
-    "knob_worst_dip": 0.0,
-    "lead_arm_over_93": 0.0023702639906176826,
-    "lead_arm_over_c": 0.04367326775797398,
-    "rear_arm_over_c": 0.011709122921984116
-   },
-   {
-    "case": {
-     "aim": [
-      0.15,
-      0.48125,
-      0.95
-     ],
-     "effort": -0.135,
-     "corner": false
-    },
-    "failures": [],
-    "ss_ratio_max": 1.076281625568238,
-    "hands_worst_dip": 0.0,
-    "knob_worst_dip": 0.0,
-    "lead_arm_over_93": -0.07444698201809108,
-    "lead_arm_over_c": 0.04367326775797398,
-    "rear_arm_over_c": 0.011709122921984116
-   },
-   {
-    "case": {
-     "aim": [
-      0.15,
-      0.48125,
-      0.95
-     ],
-     "effort": -0.135,
-     "bat_speed": 28.25,
-     "t_swing": 0.14685239175035095,
-     "corner": false
-    },
-    "failures": [],
-    "ss_ratio_max": 1.0835130894097158,
-    "hands_worst_dip": 0.0,
-    "knob_worst_dip": 0.0,
-    "lead_arm_over_93": -0.20988334169069373,
-    "lead_arm_over_c": 0.04367326775797398,
-    "rear_arm_over_c": 0.011709122921984116
-   },
-   {
-    "case": {
-     "aim": [
-      0.15,
-      0.48125,
-      0.95
-     ],
-     "effort": 0.135,
-     "corner": false
-    },
-    "failures": [],
-    "ss_ratio_max": 1.0762215528708412,
-    "hands_worst_dip": 0.0,
-    "knob_worst_dip": 0.0,
-    "lead_arm_over_93": -0.07444698201809108,
-    "lead_arm_over_c": 0.04367326775797398,
-    "rear_arm_over_c": 0.011709122921984116
-   },
-   {
-    "case": {
-     "aim": [
-      0.15,
-      0.48125,
-      0.95
-     ],
-     "effort": 0.135,
-     "bat_speed": 28.25,
-     "t_swing": 0.14685239175035095,
-     "corner": false
-    },
-    "failures": [],
-    "ss_ratio_max": 1.0834954714820797,
-    "hands_worst_dip": 0.0,
-    "knob_worst_dip": 0.0,
-    "lead_arm_over_93": -0.2098833416906939,
-    "lead_arm_over_c": 0.04367326775797398,
-    "rear_arm_over_c": 0.011709122921984116
-   }
-  ]
+  }
  }
 }
