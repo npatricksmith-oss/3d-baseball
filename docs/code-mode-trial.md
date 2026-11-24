@@ -22,3 +22,14 @@ Job: audit TASKS.md §7 (26 bullets) against the code.
 - Research items R8–R11, the flight/bat/restitution sourcing and the Savant fixtures: the specs still list them as open.
 
 I changed the heading date and added the `RunnerPassed` detail to one bullet.
+
+## Coordinator's findings (Q40, 2026-11-23)
+
+Owner decision Q40 (2026-11-23): trial Claude Code's experimental Code Mode on workers, one at a time, started per worker with `CLAUDE_CODE_EXPERIMENTAL_CODE_MODE=1` on the start line (never in a settings file). Claude Code 2.1.331.
+
+- **Status hooks still work.** With `BB_WORKER_TRACE` on, `PostToolUse` fired for every call a program made (each `Bash`, `Read`) and once more for the program itself (`REPL`; also `Poll`). The heartbeat and the `working` → `stopped` change behaved as in [worker-status-hooks](worker-status-hooks.md). Some trace lines were not valid JSON (trace only; the status file was fine).
+- **Parallel commands.** One program ran 12 shell commands at once. Harmless for probes; a program must never start `cargo` builds or tests in parallel (the laptop overheats). Builds and test runs stay in the job queue.
+- **Start-up.** The first Code Mode session on the machine shows a one-time confirmation and restarts; the worker's prompt survived it. A Code Mode session resumes only with the variable set.
+- **Guardrail.** Auto mode checks a program once, not each call, so the worker was started with `--settings '{"permissions":{"ask":["Bash(git push *)"]}}'`.
+- **Unchecked:** the worker's "30 s default timeout" per program; the docs give 10 minutes. Check before relying on either.
+- **Cost:** the audit took about a minute of work over 8 programs for 26 items. There was no control run, so no token comparison yet; the next trial job should be one with a comparable past run.

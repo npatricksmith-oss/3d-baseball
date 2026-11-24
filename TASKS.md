@@ -17,7 +17,7 @@ Status: `[ ]` not started · `[~]` partly done · `[?]` needs an owner decision
 
 ## Resume here (2026-11-23)
 
-**State.** No workers running. Q38 and Q39 (the dive back) are merged (`3a71284`; 560 tests, runs 4.14 [4.45]). **Waiting on the owner:** Q37 (stances; parked).
+**State.** No workers running. Q38, Q39, Q40 ([Code Mode trial](docs/code-mode-trial.md)) merged (`3a71284`; 560 tests, runs 4.14 [4.45]). **Waiting on the owner:** Q37 (stances; parked).
 
 **Next:** §2: seed-5593, play 71 (the right fielder not diving at the rolling ball).
 
@@ -129,7 +129,7 @@ Check the code again before starting one.
 - [ ] Refit provisional agent estimates and elasticity gates as mechanisms and player ratings land (agent-models §10 and calibration-targets §7.2, §11).
 - [ ] When fielding errors land (A17), audit ordinary-effort thresholds and the reference-fielder model against watched plays (rules-spec §10.1).
 - [ ] Check first-base attempt and passed-infielder geometric thresholds against replay cases when their rulings are available (rules-spec §5.5, §5.7).
-- [ ] Log runner passing with its own event/out kind so the scorer can show the actual ruling (rules-spec §5.5). The rules engine emits `Event::RunnerPassed` (`bb_rules/src/engine.rs:224`), but `bb_game/src/eventlog.rs` writes only `RunnerOut`, so the log has no passing record. Complete the schema-backed log producers for timeout detail, liveness and umpire signals, and deciding evidence for batted-ball rulings (rules-spec §15).
+- [ ] Log runner passing with its own event/out kind so the scorer can show the actual ruling (rules-spec §5.5). Complete the schema-backed log producers for timeout detail, liveness and umpire signals, and deciding evidence for batted-ball rulings (rules-spec §15).
 - [ ] Add infield fly and check the declaration time against runners’ hold behavior (rules-spec §13).
 - [ ] Finish catcher receiving/blocking, uncaught third strikes, and caught foul tips (agent-models §4, rules-spec §4.4), plus bunts and balks (rules-spec §8, §13).
 - [ ] Validate the dead-ball cut on a throw into the seats and a ground-rule double (physics-spec §9.5).
