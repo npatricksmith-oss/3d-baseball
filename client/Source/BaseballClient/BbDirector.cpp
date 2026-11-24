@@ -1664,7 +1664,7 @@ FVector ABbDirector::FromBatterFrame(const FVector& Cm, const FBatNote& N)
 	return ToUE(N.Spot.X + Side * Cm.X / 100.0, N.Spot.Y + Cm.Y / 100.0, Cm.Z / 100.0);
 }
 
-float ABbDirector::PitchPlaneT(const FBbPlay& Play) const
+float ABbDirector::PitchPlaneT(const FBbPlay& Play, float CutAt) const
 {
 	// The ball's track to the plane the sim's swing aims at (physics: contact_y0, 0.35 m). On a
 	// pitch hit the track ends at contact: if that is short of the plane, the crossing is found
@@ -1674,7 +1674,8 @@ float ABbDirector::PitchPlaneT(const FBbPlay& Play) const
 	{
 		return -1.f;
 	}
-	const float Contact = Play.Info.contact_s;
+	// (CutAt >= 0: the track as known up to that time, as if it ended there, for checking.)
+	const float Contact = CutAt >= 0.f ? CutAt : Play.Info.contact_s;
 	const float End = Contact >= 0.f ? Contact : FMath::Min(Play.Info.duration_s, 1.5f);
 	auto Y = [&](float T)
 	{
@@ -1768,13 +1769,12 @@ float ABbDirector::InferContactT(const FBbPlay& Play, const FBatNote& N) const
 	{
 		return T0 + 0.150f;
 	}
-	const double X0 = -1.0, X1 = 0.0, X2 = 1.0, R0 = Rate[Best - 1], R1 = Rate[Best], R2 = Rate[Best + 1];
+	const double R0 = Rate[Best - 1], R1 = Rate[Best], R2 = Rate[Best + 1];
 	const double A = 0.5 * (R0 + R2) - R1, Bq = 0.5 * (R2 - R0);
 	if (A >= 0.0)
 	{
 		return -1.f;
 	}
-	(void)X0; (void)X1; (void)X2;
 	// The span i covers (T0 + 0.005 i, T0 + 0.005 (i + 1)): its rate is at the span's middle.
 	const double Peak = T0 + 0.005 * (Best + 0.5) + 0.005 * (-Bq / (2.0 * A));
 	const double Tsw0 = (Peak - 0.010) - T0;
@@ -1936,9 +1936,28 @@ void ABbDirector::CheckBat(const FBbPlay& Play, const FBatNote& N) const
 		return;
 	}
 	const FVector StanceK = ToUE(F0.bat_knob), StanceT = ToUE(F0.bat_tip);
+	// The same pitch as a take. What the client's bat before the sim's bat moves depends on
+	// is the pitch's own clock (TA, the catch), so those are worked out here again, not copied
+	// from the swing's note, or the comparison could not fail on them: TA from the ball's track
+	// as a take would have it (the whole track), which on a swing that hit is not known past
+	// contact, so from the track 30 ms shorter than the swing's (its extrapolation is then
+	// from other samples), and on a swing that missed from the track cut at the swing's nominal
+	// contact (what the client has when the swing is only just on).
 	FBatNote Withheld = N;
 	Withheld.bSwing = false;
 	Withheld.TL = Withheld.TS = Withheld.TC = -1.f;
+	double TaErrMs = 0.0;
+	if (N.bSwing)
+	{
+		const float Contact = Play.Info.contact_s;
+		const float Indep = Contact >= 0.f ? PitchPlaneT(Play, Contact - 0.03f) : PitchPlaneT(Play, N.TC);
+		if (Indep >= 0.f)
+		{
+			Withheld.TA = Indep;
+			TaErrMs = 1000.0 * FMath::Abs((double)N.TA - Indep);
+		}
+		Withheld.CatchT = Contact < 0.f ? Play.Info.call_s - 0.2f : Withheld.TA + 0.06f;
+	}
 	const float T0 = -0.6f, Dt = 0.001f;
 	const float Tend = N.bSwing ? N.EndT : FMath::Min(Play.Info.duration_s, (N.CatchT >= 0.f ? N.CatchT : 0.6f) + 1.5f);
 	TArray<FVector> Knob, Axis;
@@ -2001,9 +2020,9 @@ void ABbDirector::CheckBat(const FBbPlay& Play, const FBatNote& N) const
 		GapCm = (Ck - N.StartKnob).Size();
 		GapDeg = FMath::RadiansToDegrees(FMath::Acos(FMath::Clamp((float)(Ca | (N.StartTip - N.StartKnob).GetSafeNormal()), -1.f, 1.f)));
 	}
-	const bool bFail = SpeedBefore > 1.5 || StepLCm > 2.0 || StepLDeg > 2.0 || StepECm > 2.0 || StepEDeg > 2.0 || D22 > 0.1;
-	UE_LOG(LogBb, Display, TEXT("BB_BATCHECK play=%u swing=%d t_l=%.4f t_s=%.4f end=%.4f speed_before=%.2f m/s speed_handover=%.2f m/s step_l=%.2f cm %.2f deg step_end=%.2f cm %.2f deg gap=%.1f cm %.1f deg d22=%.4f cm%s"),
-		Current.Info.play_index, N.bSwing ? 1 : 0, N.TL, N.TS, End, SpeedBefore, SpeedHandover, StepLCm, StepLDeg, StepECm, StepEDeg, GapCm, GapDeg, D22, bFail ? TEXT(" FAIL") : TEXT(""));
+	const bool bFail = SpeedBefore > 1.5 || StepLCm > 2.0 || StepLDeg > 2.0 || StepECm > 2.0 || StepEDeg > 2.0 || D22 > 0.1 || TaErrMs > 0.5;
+	UE_LOG(LogBb, Display, TEXT("BB_BATCHECK play=%u swing=%d t_l=%.4f t_s=%.4f end=%.4f speed_before=%.2f m/s speed_handover=%.2f m/s step_l=%.2f cm %.2f deg step_end=%.2f cm %.2f deg gap=%.1f cm %.1f deg d22=%.4f cm ta_err=%.3f ms%s"),
+		Current.Info.play_index, N.bSwing ? 1 : 0, N.TL, N.TS, End, SpeedBefore, SpeedHandover, StepLCm, StepLDeg, StepECm, StepEDeg, GapCm, GapDeg, D22, TaErrMs, bFail ? TEXT(" FAIL") : TEXT(""));
 }
 
 void ABbDirector::NotePitch()

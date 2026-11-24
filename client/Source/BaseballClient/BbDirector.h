@@ -595,7 +595,7 @@ private:
 	/** The inverse of BatterFrame, to Unreal coordinates (a point, cm in his frame). */
 	static FVector FromBatterFrame(const FVector& Cm, const FBatNote& N);
 	/** When the pitch reaches the sim's contact plane (y = 0.35 m), play time, or -1. */
-	float PitchPlaneT(const FBbPlay& Play) const;
+	float PitchPlaneT(const FBbPlay& Play, float CutAt = -1.f) const;
 	/** The sim's own times of the swing from the bat's samples, for a timeline recorded
 	 *  without export E1's swing_contact_s: nominal contact from the bat's fastest turning. */
 	float InferContactT(const FBbPlay& Play, const FBatNote& N) const;

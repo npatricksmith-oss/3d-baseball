@@ -1203,6 +1203,77 @@ mod tests {
         assert!(err_interp < 0.3 * err_held, "interpolated error {err_interp:.1} against held {err_held:.1} (summed cm)");
     }
 
+    // The bat's whole track against the sim's own bat, including the three places where the
+    // interpolation rule could go wrong (review of step 1, P3-1): the stance sample to the
+    // first load sample (a hold), the load's last sample to the swing's first, and, when the
+    // decision came with the swing's start and there is no load, the stance to the swing's first
+    // pose in one step, which is a hold until it and not a blend over the whole pitch. The
+    // sim's own bat before the swing: the stance until the load starts (the later of 0.05 s
+    // before the swing and the decision), then a straight line to the swing's start pose; from
+    // there the swing's own. The decision time is moved to make the cut and absent loads (they
+    // occur in the sim: `t_s − t_decide` is 0 on 0.2% of swings).
+    #[test]
+    fn the_bat_before_and_through_the_swing_is_the_sims_own() {
+        use bb_physics::contact::BatPose;
+        let mut game = Game::new(11, true);
+        let (mut checked, mut no_load, mut cut) = (0, 0, 0);
+        let (mut worst_cm, mut worst_deg) = (0f64, 0f64);
+        while let Some(mut step) = game.step_pitch() {
+            let (Some(sw), Some((_, at))) = (step.record.swing, step.viz.standing.last().copied()) else { continue };
+            if checked >= 40 {
+                break;
+            }
+            let t0 = sw.t_start();
+            if t0 <= 0.0 {
+                continue;
+            }
+            let (stance_k, stance_a) = bb_game::timeline::stance_pose(at);
+            let start = sw.at(t0);
+            let natural = step.record.t_decide;
+            for decide in [natural, t0, t0 - 0.02] {
+                step.record.t_decide = decide;
+                let t_load = (t0 - bb_game::timeline::LOAD_S).max(decide);
+                no_load += (t_load >= t0) as u32;
+                cut += (t_load > t0 - bb_game::timeline::LOAD_S + 1e-9) as u32;
+                let bytes = bb_game::timeline::encode(&step, &game.st, &game.rosters);
+                let (p, len) = (bytes.as_ptr(), bytes.len());
+                // Every 1.7 ms through the track, and either side of the two boundaries.
+                let mut times: Vec<f64> = (0..).map(|i| i as f64 * 0.0017).take_while(|t| *t < sw.t_c + 0.11).collect();
+                times.extend([t_load - 0.0005, t_load + 0.0005, t_load + 0.0031, t0 - 0.0031, t0 - 0.0005, t0 + 0.0005, t0 + 0.0031]);
+                for t in times.into_iter().filter(|t| *t >= 0.0) {
+                    let mut f = BbFrame::default();
+                    unsafe { bb_timeline_sample(p, len, t as f32, &mut f) };
+                    // The sim's own bat at t.
+                    let (knob, axis): ([f64; 3], [f64; 3]) = if t >= t0 {
+                        let k = sw.at(t);
+                        ([k.knob.x, k.knob.y, k.knob.z], [k.axis.x, k.axis.y, k.axis.z])
+                    } else if t <= t_load {
+                        ([stance_k.x, stance_k.y, stance_k.z], [stance_a.x, stance_a.y, stance_a.z])
+                    } else {
+                        let u = (t - t_load) / (t0 - t_load);
+                        let k = [stance_k.x + (start.knob.x - stance_k.x) * u, stance_k.y + (start.knob.y - stance_k.y) * u, stance_k.z + (start.knob.z - stance_k.z) * u];
+                        let a = [stance_a.x * (1.0 - u) + start.axis.x * u, stance_a.y * (1.0 - u) + start.axis.y * u, stance_a.z * (1.0 - u) + start.axis.z * u];
+                        let n = (a[0] * a[0] + a[1] * a[1] + a[2] * a[2]).sqrt();
+                        (k, [a[0] / n, a[1] / n, a[2] / n])
+                    };
+                    let cm = (0..3).map(|j| (f.bat_knob[j] as f64 - knob[j]).powi(2)).sum::<f64>().sqrt() * 100.0;
+                    let ax: [f64; 3] = core::array::from_fn(|j| (f.bat_tip[j] - f.bat_knob[j]) as f64 / BAT_LENGTH_M as f64);
+                    let deg = (ax[0] * axis[0] + ax[1] * axis[1] + ax[2] * axis[2]).clamp(-1.0, 1.0).acos().to_degrees();
+                    (worst_cm, worst_deg) = (worst_cm.max(cm), worst_deg.max(deg));
+                    // (A load cut to a few samples turns the bat some 70 degrees in them, and a
+                    // normalized blend of two samples 5 ms apart of that is up to about a degree
+                    // off the load's own path between them; a full load is within 0.2.)
+                    let deg_bound = if t0 - t_load >= 0.04 { 0.2 } else { 2.0 };
+                    assert!(cm < 0.15 && deg < deg_bound, "play {} decision {decide:.4} swing start {t0:.4} at {t:.4}: {cm:.3} cm and {deg:.3} deg off the sim's bat", step.play);
+                }
+            }
+            step.record.t_decide = natural;
+            checked += 1;
+        }
+        assert!(checked >= 40 && no_load >= 40 && cut >= 40, "{checked} swings, {no_load} with no load, {cut} with a cut or absent load");
+        assert!(worst_cm < 0.15 && worst_deg < 2.0);
+    }
+
     // A timeline recorded before export E1 has no swing-contact time: it reads −1, and the swing's
     // start is still the marker's. (An owner's saved play of 2026-11-20, a ball hit.)
     #[test]
