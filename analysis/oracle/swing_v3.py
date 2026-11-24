@@ -1498,9 +1498,9 @@ def golden(skip=()):
                   family=family_report(),
                   stance_and_depth=stance_report(),
                   late_contact_by_depth={'%.2f' % y0: late_by_depth(y0) for y0 in (CONTACT_Y0, CONTACT_Y0_Q51)})
-    rating = None
+    rating, rating_q51 = None, None
     if 'rating_range' not in skip:
-        report['rating_range_at_contact_y0_%.2f' % CONTACT_Y0_Q51] = rating_summary(CONTACT_Y0_Q51)
+        rating_q51 = dict(contact_y0=CONTACT_Y0_Q51, rows=rating_summary(CONTACT_Y0_Q51))
         rr = []
         for kw in rating_cases():
             d = diagnostics(Swing(**{k: v for k, v in kw.items() if k != 'corner'}), dt=0.001)
@@ -1509,7 +1509,7 @@ def golden(skip=()):
                            ss_worst_dip=d['ss_worst_dip'], T=d['T'], A_L=d['A_L'], E_L=d['E_L']))
         rating = rr
     return dict(meta=meta, hand_case=hand_case, body=body, reading_check=reading, hands=hands, jets=jets, paths=paths,
-                brakes=brakes, aim_range=rng, rating_range=rating, bounds=bnd, lag_at_contact_by_location=lag_loc, report=report)
+                brakes=brakes, aim_range=rng, rating_range=rating, rating_range_q51=rating_q51, bounds=bnd, lag_at_contact_by_location=lag_loc, report=report)
 
 
 if __name__ == '__main__':

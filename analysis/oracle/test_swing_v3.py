@@ -696,7 +696,7 @@ class GoldenFile(unittest.TestCase):
     @classmethod
     def setUpClass(cls):
         cls.file = json.loads((HERE / 'golden' / 'swing_v3.json').read_text())
-        cls.now = json.loads(json.dumps(s.golden(skip=('aim_range', 'rating_range'))))
+        cls.now = json.loads(json.dumps(s.golden(skip=('aim_range', 'rating_range'))))   # (rating_range_q51 goes with rating_range)
 
     def close(self, a, b, path):
         if isinstance(a, dict):
@@ -712,7 +712,7 @@ class GoldenFile(unittest.TestCase):
 
     def test_every_section_matches_the_oracle(self):
         for k, v in self.now.items():
-            if k not in ('aim_range', 'rating_range'):
+            if k not in ('aim_range', 'rating_range', 'rating_range_q51'):
                 self.close(self.file[k], v, k)
 
     def test_aim_range_matches_the_oracle(self):
