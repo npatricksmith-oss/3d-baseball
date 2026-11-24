@@ -17,7 +17,7 @@ Status: `[ ]` not started · `[~]` partly done · `[?]` needs an owner decision
 
 ## Resume here (2026-11-24)
 
-**State.** Worker `swing-spec` (Opus, `work/swing-rebuild`): spec for D25 (Q44 = b), no code yet. Swing step 1 merged, off by default. Nothing waits on the owner.
+**State.** D25 swing v3 specified, `work/swing-rebuild` ([spec](docs/swing-model-v3.md)): 4 owner choices in its §14; step 0 next.
 
 **Next:** §2: the depth read of a ball first seen on the ground, or the ground-dive leftovers ([note](docs/calibration/2026-11-23-of-ground-dive.md) §9).
 

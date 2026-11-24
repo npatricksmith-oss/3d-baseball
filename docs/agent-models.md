@@ -283,6 +283,8 @@ logit(P̃) = c_D · logit(P) + b_D
 
 ### 3.6 Swing model
 
+*v3 is specified in [docs/swing-model-v3.md](swing-model-v3.md) (PLAN D25, 2026-11-24, not built): the measured launch, path and arms, with this section's contact plan kept as its contact jet. It replaces this section when its build step 4 lands; until then this is what the code does.*
+
 A **template in a contact-relative frame** (PLAN §8.3): the batter plans where the sweet spot meets the ball, which way it is moving then, and how fast; the hand path and the bat's lag are laid out backward and forward in time from that instant. *v2, specified 2026-11-14 (docs/calibration/2026-11-14-swing-model.md); it replaces v1, a rigid bat turning about a fixed pivot at a fixed angular speed, whose sweet-spot speed grew with reach (64 mph on inside pitches against 84 on outside ones, where Statcast has 71–72 at both).*
 
 **Kinematics: hands on an arc, a bat that lags and releases.** A kinematic double pendulum: the motion a double pendulum's proximal-to-distal sequencing produces is prescribed, not integrated from torques (a justified simplification; a torque-driven model can replace it behind the same interface).
