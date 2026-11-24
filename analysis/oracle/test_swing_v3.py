@@ -125,8 +125,10 @@ class ReadingAndBody(unittest.TestCase):
         chi = s.template_chi()
         for H2 in (1.70, 2.00):
             P2 = (s.P_TODAY[0] * H2 / H, s.P_TODAY[1] * H2 / H, 0.0)
+            A_ref = s.template_A_ref(H2)  # the middle-middle contact azimuth of a batter of height H2
+            self.assertAlmostEqual(A_ref, chi['A_ref'], places=9)
             for k in ('L', '93'):
-                c = s.solve_chi(k, H2, P2, chi['A_ref'])[0]
+                c = s.solve_chi(k, H2, P2, A_ref)[0]
                 self.assertAlmostEqual(c, chi[k], places=6)
 
 
