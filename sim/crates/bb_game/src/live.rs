@@ -41,6 +41,8 @@ const STRETCH_COST_S: f64 = 0.3;
 const K_EXTEND: f64 = 1.5;
 /// An outfielder has nobody behind him: he leaves his feet only when he gives himself at
 /// least this chance of the ball [E]; otherwise he plays it on his feet (agent-models §5.3).
+/// In the air the chance is of a clean catch (the glove within [`POCKET`]); on the ground,
+/// of a glove on it (within [`RIM`]: a catch or a knock-down that stays near him).
 const OF_DIVE_MIN_P: f64 = 0.5;
 /// The pitcher is finishing his delivery when the ball is hit: he cannot lay out until this
 /// long after contact, s [E].
@@ -6989,14 +6991,17 @@ impl<'a> Sim<'a> {
                 // An outfielder weighs a dive first: a ball that gets by him rolls to the
                 // wall. He knows his own hands, and judges the ball by his own read of it
                 // (where it is and how fast, from his belief, not the world's): the chance
-                // that a glove placed with his error σ per axis is within the pocket. Below
-                // `OF_DIVE_MIN_P` he stays on his feet. Once he has decided to go he goes
-                // (Codex dive-rate review #1, #2).
+                // that a glove placed with his error σ per axis is close enough. In the air
+                // only a clean catch counts (the pocket); on the ground a knock-down stops it
+                // too (the rim: agent-models §5.3, 2026-11-23). Below `OF_DIVE_MIN_P` he
+                // stays on his feet. Once he has decided to go he goes (Codex dive-rate
+                // review #1, #2).
                 if dive && i >= 6 && !fd.will_dive.get() {
                     let Some((q, qv)) = fd.belief.as_ref().map(|p| p.at(self.t)) else { continue };
                     let h = m::hypot(q.x - fd.pos.x, q.y - fd.pos.y);
                     let sg = fd.a.hands * glove_sigma_mult(qv.norm(), h, true);
-                    if 1.0 - m::exp(-0.5 * (POCKET / sg) * (POCKET / sg)) < OF_DIVE_MIN_P {
+                    let r = if self.ball_still_up() { POCKET } else { RIM };
+                    if 1.0 - m::exp(-0.5 * (r / sg) * (r / sg)) < OF_DIVE_MIN_P {
                         continue;
                     }
                     fd.will_dive.set(true);
@@ -10250,6 +10255,12 @@ mod tests {
     /// that crosses in front of him at 20 m/s, `pass_m` away at its closest, `lead_s` after
     /// it appears at time `t0`. Runs 0.8 s of world ticks.
     fn crossing_ball(i: usize, pass_m: f64, lead_s: f64, t0: f64, sure: bool) -> (Sim<'static>, f64) {
+        crossing(i, pass_m, lead_s, t0, sure, 0.04, 0.0)
+    }
+
+    /// [`crossing_ball`] for a ball that appears at height `z0` moving up at `vz` (a low
+    /// liner, still in the air as it passes him, when `z0` and `vz` keep it up that long).
+    fn crossing(i: usize, pass_m: f64, lead_s: f64, t0: f64, sure: bool, z0: f64, vz: f64) -> (Sim<'static>, f64) {
         let fx: &'static Fixture = Box::leak(Box::new(fixture(&[])));
         let mut inp = input(fx, vec![RunnerIn { id: fx.st.batter, base: 0, speed: 8.2, tau_s: bb_agents::running::LEAGUE_TAU_S }]);
         if !sure {
@@ -10259,7 +10270,7 @@ mod tests {
         let st: &'static mut RulesState = Box::leak(Box::new(fx.st.clone()));
         let mut sim = new_sim(inp, st);
         sim.f[i].pos = Vec3::new(0.0, 80.0, 0.0);
-        loose_ball(&mut sim, t0, Vec3::new(-20.0 * lead_s, 80.0 - pass_m, 0.04), Vec3::new(20.0, 0.0, 0.0));
+        loose_ball(&mut sim, t0, Vec3::new(-20.0 * lead_s, 80.0 - pass_m, z0), Vec3::new(20.0, 0.0, vz));
         sim.f[i].role = Role::Chase;
         sim.f[i].belief = Some(sim.predict(i));
         for _ in 0..48 {
@@ -10296,16 +10307,83 @@ mod tests {
         assert!(secured_at(&early).is_some());
     }
 
-    // An outfielder has nobody behind him: at nearly full stretch (2.3 m, where an average
-    // glove gets about one ball in three) he stays on his feet. A shortstop, with the
+    // An outfielder has nobody behind him: for a low liner still in the air at nearly full
+    // stretch (2.3 m, where an average glove catches about one in three) he stays on his
+    // feet, since a ball off his glove in the air is still a hit. A shortstop, with the
     // outfield behind him, goes for the same ball.
     #[test]
     fn an_outfielder_does_not_dive_for_a_ball_he_will_probably_miss() {
         const SS: usize = 5;
-        let (cf, _) = crossing_ball(CF, 2.3, 0.5, 1.5, false);
+        let (z0, vz) = (0.9, 1.5);
+        {
+            let fx = fixture(&[]);
+            let inp = input(&fx, vec![]);
+            let mut st = fx.st.clone();
+            let mut sim = new_sim(&inp, &mut st);
+            loose_ball(&mut sim, 1.5, Vec3::new(-10.0, 77.7, z0), Vec3::new(20.0, 0.0, vz));
+            let Ball::Free { path, .. } = &sim.ball else { unreachable!() };
+            let up = path.at(2.0).0;
+            assert!(path.bounces.first().is_some_and(|x| x.0 > 2.05) && up.z > 0.2 && up.z < DIVE_MAX_Z, "fixture: a low liner still up as it passes ({:.2} m)", up.z);
+        }
+        let liner = |i: usize| crossing(i, 2.3, 0.5, 1.5, false, z0, vz).0;
+        let cf = liner(CF);
         assert!(cf.out.dives.is_empty(), "the center fielder dove: {:?}", cf.out.dives);
-        let (ss, _) = crossing_ball(SS, 2.3, 0.5, 1.5, false);
+        let ss = liner(SS);
         assert_eq!(ss.out.dives.len(), 1, "the shortstop should dive");
+    }
+
+    // The owner's saved play 71 (seed 51001), constructed: a hard grounder rolling past an
+    // average outfielder 2.3 m away, out of reach on his feet (1.4 m with a stretch) and with
+    // the lunge time to lay out. A clean catch there is about one in three, but a glove on
+    // it (a catch or a knock-down that stays near him) about four in five, and on the
+    // ground a knock-down stops it: he lays out (agent-models §5.3, 2026-11-23; before, he
+    // never did). Unplayed, the ball rolls on at nearly 20 m/s toward the wall. Across ten
+    // plays (each its own reads and glove draws) he lays out on most (on one, seed-fixed, his
+    // read tells him late that he cannot take it standing, too late for the lunge) and keeps
+    // it by him (caught, or knocked down below 8 m/s) on most.
+    #[test]
+    fn an_outfielder_lays_out_for_a_grounder_passing_within_his_dive() {
+        let (cf, _) = crossing_ball(CF, 2.3, 0.5, 1.5, false);
+        assert_eq!(cf.out.dives.len(), 1, "the center fielder stayed up: {:?}", cf.out.facts);
+        let (mut dove, mut kept) = (0, 0);
+        for play in 0..10u32 {
+            {
+                let fx = fixture(&[]);
+                let mut inp = input(&fx, vec![RunnerIn { id: fx.st.batter, base: 0, speed: 8.2, tau_s: bb_agents::running::LEAGUE_TAU_S }]);
+                inp.fattrs = core::array::from_fn(FielderAttrs::average);
+                inp.play = play;
+                let mut st = fx.st.clone();
+                let mut sim = new_sim(&inp, &mut st);
+                sim.f[CF].pos = Vec3::new(0.0, 80.0, 0.0);
+                loose_ball(&mut sim, 1.5, Vec3::new(-10.0, 77.7, 0.04), Vec3::new(20.0, 0.0, 0.0));
+                sim.f[CF].role = Role::Chase;
+                sim.f[CF].belief = Some(sim.predict(CF));
+                for _ in 0..48 {
+                    world_tick(&mut sim);
+                }
+                dove += sim.out.dives.len();
+                kept += match &sim.ball {
+                    Ball::Held { .. } => 1,
+                    Ball::Free { .. } => usize::from(sim.ball_at(sim.t).1.norm() < 8.0),
+                    Ball::Thrown { .. } => 0,
+                };
+            }
+        }
+        assert!(dove >= 8 && kept >= 6, "dove {dove} and kept it by him {kept} of 10");
+    }
+
+    // The other side of the same rule: an average outfielder stays on his feet for a grounder
+    // he can take with a stretch (1.3 m), one beyond any dive (2.8 m: reach 1.0 m and a
+    // 1.5 m layout), and one passing 2.2 m away seen too late to lay out 1.2 m (0.15 s
+    // ahead, against the 0.24 s it takes).
+    #[test]
+    fn an_outfielder_stays_up_for_a_grounder_he_can_take_on_his_feet_or_cannot_reach() {
+        let (stretch, _) = crossing_ball(CF, 1.3, 0.5, 1.5, false);
+        assert!(stretch.out.dives.is_empty() && secured_at(&stretch).is_some(), "1.3 m: {:?}", stretch.out.dives);
+        let (far, _) = crossing_ball(CF, 2.8, 0.5, 1.5, false);
+        assert!(far.out.dives.is_empty() && far.out.first_handling.is_none(), "2.8 m: {:?}", far.out.dives);
+        let (late, _) = crossing_ball(CF, 2.2, 0.15, 1.5, false);
+        assert!(late.out.dives.is_empty() && late.out.first_handling.is_none(), "seen 0.15 s ahead: {:?}", late.out.dives);
     }
 
     /// The center fielder (hands `hands`) at (0, 80) with a dive long earned and his reads
@@ -10332,13 +10410,13 @@ mod tests {
     }
 
     // Codex dive-rate review #1: the outfielder weighed his dive with the world's ball speed.
-    // It is his read that counts: believing the ball slow he likes his chances 1.5 m out
-    // (53% with average hands) and goes; believing it fast (48%) he does not, whatever the
-    // ball is really doing.
+    // It is his read that counts: believing a low liner slow he likes his chances of a catch
+    // 1.5 m out (53% with average hands) and goes; believing it fast (48%) he does not,
+    // whatever the ball is really doing. (In the air, so the clean catch is what he weighs.)
     #[test]
     fn an_outfielder_weighs_a_dive_by_his_own_read_of_the_ball() {
         let hands = FielderAttrs::average(CF).hands;
-        let r = Vec3::new(0.0, 78.5, 0.04);
+        let r = Vec3::new(0.0, 78.5, 0.5);
         let v = |s: f64| Vec3::new(s, 0.0, 0.0);
         for world in [5.0, 20.0, 40.0] {
             assert_eq!(weighed_dive(hands, r, v(world), v(5.0), 1), 1, "believed slow, really {world} m/s");
@@ -13394,7 +13472,13 @@ mod tests {
     // moment after the bounce is no worse than just before it and within a metre by 3.3 s, and
     // he runs at the ball's line: it passes within 4 m of him (1.9–2.1 m measured; the margin
     // is for changes elsewhere in his movement, and still catches the old turn for the wall,
-    // which left him 5.7 m from it).
+    // which left him 5.7 m from it). Since 2026-11-23 (agent-models §5.3, a ball on the
+    // ground): with the ball rolling past 2.1 m from him at 16 m/s, a dive earned 0.3 s ahead
+    // and a glove on it about five in six (a clean catch about one in three), he lays out as
+    // it passes, from within the 2.5 m a dive reaches. (Before, he weighed the clean catch
+    // alone and stayed up.) This play's own glove draw is 2.2σ, 0.137 m from the ball against
+    // the 0.12 m rim: the dive misses and the ball still reaches the wall; that is the glove,
+    // not his choice, so it is printed, not asserted.
     #[test]
     fn the_owners_rolling_ball_seed_51001_play_71_is_played_at_its_line() {
         let mut st = RulesState::default_fixture();
@@ -13419,20 +13503,27 @@ mod tests {
         inp.batter_box = Vec3::new(0.95, 0.3, 0.0);
         (inp.seed, inp.play) = (51001, 71);
         const RF: usize = 8;
-        let path = {
+        let (path, rf_id) = {
             let mut st = fx.st.clone();
             let sim = new_sim(&inp, &mut st);
             let Ball::Free { path, .. } = &sim.ball else { unreachable!() };
-            path.clone()
+            (path.clone(), sim.f[RF].id)
         };
         let (tb, bx, by) = path.first_bounce().unwrap();
         assert!((tb - 2.19).abs() < 0.01 && (bx - 20.4).abs() < 0.1 && (by - 53.9).abs() < 0.1, "the owner's ball: first bounce {tb:.2} s at ({bx:.1}, {by:.1})");
         read_trace::ON.with(|x| x.set(true));
         read_trace::take();
         let mut st = fx.st.clone();
-        simulate_live(&inp, &mut st);
+        let out = simulate_live(&inp, &mut st);
         read_trace::ON.with(|x| x.set(false));
         let recs: Vec<_> = read_trace::take().into_iter().filter(|r| r.i == RF).collect();
+        let dives: Vec<_> = out.dives.iter().filter(|d| d.1 == rf_id).collect();
+        assert_eq!(dives.len(), 1, "the right fielder's dives: {:?}", out.dives);
+        let (t_dive, _, from, _) = *dives[0];
+        let at = path.at(t_dive).0;
+        let gap = m::hypot(at.x - from.x, at.y - from.y);
+        println!("he dives at {t_dive:.2} s, the ball {gap:.2} m from him; first handled {:?}, bases after {:?}", out.first_handling, st.bases);
+        assert!(t_dive < 3.5 && gap > REACH + STRETCH && gap <= REACH + DIVE, "dive at {t_dive:.2} s with the ball {gap:.2} m off");
         let err_at = |t: f64| {
             let r = recs.iter().min_by(|a, b| (a.t - t).abs().total_cmp(&(b.t - t).abs())).unwrap();
             let b = path.at(r.t).0;
