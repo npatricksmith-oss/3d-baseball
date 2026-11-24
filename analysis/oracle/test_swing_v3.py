@@ -76,7 +76,7 @@ class ReadingAndBody(unittest.TestCase):
     """§11 case 2 and the body of §5.3 against [4]'s prose and geometry."""
 
     def forward(self, knot, rear_or_lead, elev, az):
-        b = s.Body(knot, H, s.P_TODAY)
+        b = s.Body(knot, H, s.P_STANCE)
         sh = b.rear if rear_or_lead == 'rear' else b.lead
         el = s.add(sh, s.sc(b.upper_arm_dir(elev, az), 0.186 * H))
         return s.dot(s.sub(el, sh), b.xT)
@@ -96,7 +96,7 @@ class ReadingAndBody(unittest.TestCase):
 
     def test_trunk_frame(self):
         for k, turn in (('L', -22), ('93', 2), ('c', 75)):
-            b = s.Body(k, H, s.P_TODAY)
+            b = s.Body(k, H, s.P_STANCE)
             self.assertAlmostEqual(s.nrm(s.sub(b.S, b.O)), 0.28 * H, places=12)
             for u in (b.t, b.xT, b.yT): self.assertAlmostEqual(s.nrm(u), 1.0, places=12)
             self.assertAlmostEqual(s.dot(b.xT, b.yT), 0.0, places=12)
@@ -109,8 +109,8 @@ class ReadingAndBody(unittest.TestCase):
 
     def test_launch_hands_where_4_describes(self):
         # [4] at weight commitment: the hands just in front of the back shoulder, at its height.
-        b = s.Body('L', H, s.P_TODAY)
-        W = s.hands_anchor('L', H, s.P_TODAY)
+        b = s.Body('L', H, s.P_STANCE)
+        W = s.hands_anchor('L', H, s.P_STANCE)
         ahead = s.dot(s.sub(W, b.rear), b.xT)
         self.assertGreaterEqual(ahead, 0.0)
         self.assertLess(ahead, 0.30)
@@ -124,7 +124,7 @@ class ReadingAndBody(unittest.TestCase):
     def test_chi_is_the_least_misfit_and_does_not_depend_on_height(self):
         chi = s.template_chi()
         for H2 in (1.70, 2.00):
-            P2 = (s.P_TODAY[0] * H2 / H, s.P_TODAY[1] * H2 / H, 0.0)
+            P2 = (s.P_STANCE[0] * H2 / H, s.P_STANCE[1] * H2 / H, 0.0)
             A_ref = s.template_A_ref(H2)  # the middle-middle contact azimuth of a batter of height H2
             self.assertAlmostEqual(A_ref, chi['A_ref'], places=9)
             for k in ('L', '93'):
@@ -263,13 +263,18 @@ class AppendixE(unittest.TestCase):
 
     def test_elevation_follows_4_to_minus_30_ms(self):
         # The elevation fix (§6.3): within the digitising error (±1°) from launch to −30 ms of [4]'s
-        # time, at every swing time (the anchor instants scale with s_T).
-        # The template batter's swing (§6.7.3); its time follows effort (the same swing, slower).
+        # time, at every swing time (the anchor instants scale with s_T), once the share of the aim's
+        # contact-elevation offset the construction has added by then is taken off (the middle pitch is
+        # met 1.0° lower than [4]'s, §6.3: the offset, not the shape). The template batter's swing
+        # (§6.7.3); its time follows effort (the same swing, slower).
         for e in (-0.09, 0.0, 0.09):
             sw = swing(MIDDLE, effort=e)
             for row in s.appendix_e_compare(sw):
                 if row['t4'] <= -30:
-                    self.assertAlmostEqual(row['el'], row['el4'], delta=1.0, msg=(e, row['t4']))
+                    u = row['t4'] / 170.0
+                    off = sw.E_off * s.smoothstep((u - sw.u93) / (sw.uw - sw.u93)) / D if u > sw.u93 else 0.0
+                    self.assertAlmostEqual(row['el'] - off, row['el4'], delta=1.0, msg=(e, row['t4']))
+                    self.assertLess(abs(off), 1.1, msg=(e, row['t4']))   # the middle pitch's offset is ~1°
 
     def test_elevation_before_step1_was_low(self):
         # What step 0 found, so the test above can tell the two paths apart: 8–13° low at −60..−25 ms.
@@ -377,18 +382,18 @@ class AimRange(unittest.TestCase):
                 self.assertNotIn('A non-decreasing', r['failures'], r['case'])
 
     def test_speed_and_reach_in_the_zone(self):
-        # (the hands' own surge is HandsSpeed's, an expected failure in today's stance)
-        for x in (-0.30, 0.0, 0.30):
+        # The zone's aims and its edges (the plate's half-width and the ball, 0.25 m); the hands too.
+        for x in (-0.25, 0.0, 0.25):
             for z in (0.55, 0.75, 0.95):
-                d = diag((x, 0.35 - 0.125 * x, z))
-                self.assertEqual([f for f in s.range_failures(d) if f != 'hands one surge'], [], (x, z))
+                d = diag(s.aim_at(x, z))
+                self.assertEqual(s.range_failures(d), [], (x, z))
 
     def test_one_surge_in_the_zone(self):
         # §6.7.4 (strict): before its peak the azimuth rate never falls below its running maximum (by
         # 0.1% of the peak), nor the sweet spot's speed (by 2%).
-        for x in (-0.30, 0.0, 0.30):
+        for x in (-0.25, 0.0, 0.25):
             for z in (0.55, 0.75, 0.95):
-                d = diag((x, 0.35 - 0.125 * x, z))
+                d = diag(s.aim_at(x, z))
                 self.assertLessEqual(d['rate_worst_dip'], s.RATE_DIP_TOL, (x, z))
                 self.assertLessEqual(d['ss_worst_dip'], s.SPEED_DIP_TOL, (x, z))
 
@@ -410,13 +415,11 @@ class AimRange(unittest.TestCase):
 
 
 class SourceBounds(unittest.TestCase):
-    """§11's bounds table on the three golden aims (today's stance)."""
+    """§11's bounds table on the three golden aims (the measured stance, D28; contact depth 0.35)."""
 
-    @unittest.expectedFailure
     def test_lag_maximum(self):
-        """Fails in time: the lag peaks at 139° / 137° / 141° (middle, inside-low, outside-high; size
-        passes, 133 ± 8°) at −104 / −98 / −111 ms against [4]'s −80 ± 20 ms (spec §6.7.6). Step 1's path
-        (T 0.150 s) passed narrowly at −89 ms."""
+        # [4] §4.1.5: 133° at −80 ms. At the measured stance 135° / 134° / 137° at −94 / −94 / −95 ms
+        # (today's stance peaked at −104 to −111 ms, an expected failure).
         for aim in (MIDDLE, INSIDE_LOW, OUTSIDE_HIGH):
             self.assertTrue(bound('lag maximum (deg)', aim)['passed'])
             self.assertTrue(bound('lag maximum time (ms)', aim)['passed'])
@@ -445,39 +448,40 @@ class SourceBounds(unittest.TestCase):
 
     @unittest.expectedFailure
     def test_uncocking_rate(self):
-        """Fails with today's stance: peak 2,206°/s at −53 ms (middle), 2,157°/s at −53 ms
-        (outside-high), against [3]'s 1,588 scaled (1,670 ± 25%) at −20 ± 15 ms (spec §5.3)."""
+        """Fails at inside-low in size only: 1,315°/s at −18 ms against [3]'s 1,588 scaled by the contact
+        rate (1,797 ± 25%, at least 1,348); middle 1,415 and outside-high 1,419°/s at −17 to −18 ms
+        pass. Today's stance gave 2,055–2,251°/s at −48 to −56 ms (spec §5.3)."""
         for aim in (MIDDLE, INSIDE_LOW, OUTSIDE_HIGH):
             self.assertTrue(bound('uncocking peak (deg/s)', aim)['passed'])
             self.assertTrue(bound('uncocking peak time (ms)', aim)['passed'])
 
     @unittest.expectedFailure
     def test_arm_vector_turning_rate(self):
-        """Fails in time with today's stance: about the trunk axis, as [3] measures it, the arm vector
-        peaks at 915–1,000°/s (inside [3]'s size bound) at −116 to −126 ms against −65 ± 20 ms.
-        Appendix E has no arm-vector curve (spec §15)."""
+        """Fails at the measured stance: about the trunk axis, as [3] measures it, the arm vector peaks
+        at 828 / 805°/s at −114 / −118 ms (middle, inside-low) against [3]'s 1,160 scaled (±25%) at
+        −65 ± 20 ms, and at 1,154°/s at −43 ms (outside-high, 2 ms late). Met the ball 0.15 m further
+        out (Q51) the middle pitch passes (1,044°/s at −57 ms). Appendix E has no arm-vector curve
+        (spec §15)."""
         for aim in (MIDDLE, INSIDE_LOW, OUTSIDE_HIGH):
             self.assertTrue(bound('arm-vector turning peak (deg/s)', aim)['passed'])
             self.assertTrue(bound('arm-vector turning peak time (ms)', aim)['passed'])
 
-    @unittest.expectedFailure
     def test_hands_ahead_of_the_clavicle(self):
-        """Fails with today's stance: the hands 0.06–0.08 m behind the clavicle at contact, against
-        ≥ 0.25 m in front ([4]'s arms; spec §5.3, Q46)."""
+        # [4]'s arms at contact: the hands about 0.4 m in front of the chest. At the measured stance
+        # 0.46 / 0.46 / 0.48 m (today's stance 0.06–0.08 m behind it).
         for aim in (MIDDLE, INSIDE_LOW, OUTSIDE_HIGH):
             self.assertTrue(bound('hands ahead of the clavicle at contact (m)', aim)['passed'])
 
-    @unittest.expectedFailure
     def test_lag_at_contact_by_location(self):
-        """Fails at HIGH OUT only: 30° against [4]'s 63 ± 15° (middle 51 against 65, HIGH IN 72 / 79,
-        LOW IN 62 / 58, LOW OUT 40 / 51 pass); with today's stance (spec §5.3)."""
+        # [4] Table 1: middle 54 against 65, HIGH IN 72 / 79, HIGH OUT 55 / 63, LOW IN 54 / 58, LOW OUT
+        # 42 / 51 (today's stance failed at HIGH OUT, 30°).
         for loc, aim in s.LOCATION_AIMS.items():
             self.assertAlmostEqual(swing(aim).lag(0.0), s.LAG_AT_CONTACT_4[loc], delta=15.0, msg=loc)
 
     @unittest.expectedFailure
     def test_plane_tilt_over_the_last_40_ms(self):
-        """Fails: the sweet spot's path over the last 40 ms is 8.5° (middle), 8.1° (inside-low) and
-        7.9° (outside-high) steeper than the jet's tilt β. The hands' path is off the jet's plane there
+        """Fails: the sweet spot's path over the last 40 ms is 9.6° (middle), 7.2° (inside-low) and
+        10.9° (outside-high) steeper than the jet's tilt β. The hands' path is off the jet's plane there
         (as before step 1), and the bat follows [4]'s elevation to −30 ms (spec §6.3, §6.7.6)."""
         for aim in (MIDDLE, INSIDE_LOW, OUTSIDE_HIGH):
             self.assertTrue(bound('plane tilt over the last 40 ms - beta (deg)', aim)['passed'])
@@ -522,20 +526,22 @@ class Family(unittest.TestCase):
         return sum(s.nrm(s.sub(pts[i + 1], pts[i])) for i in range(n)) / 0.3048
 
     def test_travel_across_batters_as_MLBs(self):
-        # Restates the construction (λ ∝ BatSpeed at a common time; review P3-3) and catches slips in
-        # it. The one number not imposed: the travel from rest; Savant's length is closer to the last
-        # 65 ms (§15), whose slope is 0.090 ft per mph, at the band's top.
-        # Note 10 §1: per-batter swing length ÷ bat speed is flat (68–70 ms across speed bins, ±1.5%),
-        # and length rises 0.05–0.09 ft per mph. Over a fixed window (the last 65 ms) the ratio holds
-        # within ±3%; from the start, the slope lies in MLB's range.
+        # Note 10 §1: per-batter swing length rises 0.05–0.09 ft per mph of bat speed (0.087 over all
+        # batters with 20 swings or more), and length ÷ speed lies at 68–70 ms in every speed bin
+        # (65–77 mph, about ±1.7 sd). Savant's length is closest to the head's travel over the last
+        # 65 ms (§15). At today's stance this restated λ ∝ BatSpeed (the head's speed then nearly all
+        # rotation); at the measured stance the hands carry a third of it and the sum depends on the
+        # geometry, so it is a comparison: over ±3 sd the slope (0.067) lies in MLB's band and
+        # length ÷ speed at 65–70 ms (64.8 at +3 sd). (From rest the head travels 9.75–10.13 ft, 0.023
+        # ft per mph: the hands' long path is the same for every batter; Savant's start is undefined.)
         rows = []
         for f in (1 - 3 * s.BATSPEED_SD, 1.0, 1 + 3 * s.BATSPEED_SD):
             sw = swing(bat_speed=32.0 * f)
             v = s.nrm(sw.point_velocity(sw.t_c, s.U_SS)) / s.MPH
-            rows.append((v, self.head_travel(sw, -0.065), self.head_travel(sw, -sw.T)))
-        r = [w / v for v, w, _ in rows]
-        self.assertLess(max(r) / min(r) - 1, 0.03, r)
-        slope = (rows[-1][2] - rows[0][2]) / (rows[-1][0] - rows[0][0])
+            rows.append((v, self.head_travel(sw, -0.065)))
+        for v, w in rows:
+            self.assertTrue(0.064 <= w / (v * 1.46667) <= 0.071, (v, w))   # length ÷ speed, s
+        slope = (rows[-1][1] - rows[0][1]) / (rows[-1][0] - rows[0][0])
         self.assertTrue(0.05 <= slope <= 0.09, slope)
 
     def test_within_a_batter_the_travel_holds_and_the_time_follows(self):
@@ -560,7 +566,7 @@ class Family(unittest.TestCase):
         # §6.7.5: the aim moves 5 cm after the start; T and the launch stay, the contact is the new plan's.
         for aim in (MIDDLE, INSIDE_LOW):
             a0 = swing(aim)
-            a1 = (aim[0] + 0.05, 0.35 - 0.125 * (aim[0] + 0.05), aim[2] - 0.05)
+            a1 = s.aim_at(aim[0] + 0.05, aim[2] - 0.05)
             sw, free = s.Swing(a1, T_force=a0.T), swing(a1)
             p, q = sw.pose(sw.t_c - sw.T), a0.pose(a0.t_c - a0.T)
             for k in ('knob', 'axis', 'hands'):
@@ -570,9 +576,9 @@ class Family(unittest.TestCase):
             for x, y in zip(sw.point(sw.t_c + 0.01, s.U_SS), free.point(sw.t_c + 0.01, s.U_SS)): self.assertAlmostEqual(x, y, delta=1e-4)
             for x, y in zip(sw.point_velocity(sw.t_c, s.U_SS), free.point_velocity(free.t_c, s.U_SS)): self.assertAlmostEqual(x, y, delta=1e-6)
             # the re-planned swing keeps [4]'s rate shape: its azimuth rate at u_93 is Appendix E's share
-            # of the contact rate (0.565), as a planned swing's is (a travel held at its old value and
-            # the mismatch left to the contact correction gives 0.572–0.574)
-            self.assertAlmostEqual(sw.curves(sw.u93, 1)[0] / (sw.A_c[1] * sw.T), s.RATE4_RATIO(1e3 * s.T4_93), delta=0.003)
+            # (0.565) of the horizontal contact rate (§6.7.3), as a planned swing's is (a travel held at
+            # its old value and the mismatch left to the contact correction gives 0.572–0.574)
+            self.assertAlmostEqual(sw.curves(sw.u93, 1)[0] / (sw.A_c[1] * s.h_scale(sw.E_c[0]) * sw.T), s.RATE4_RATIO(1e3 * s.T4_93), delta=0.003)
             d, d1 = s.diagnostics(sw, dt=0.001), diag(a1)
             self.assertLess(d['ss_worst_dip'] - d1['ss_worst_dip'], 0.01)
             self.assertLessEqual(d['rate_worst_dip'], s.RATE_DIP_TOL)
@@ -587,7 +593,7 @@ class Family(unittest.TestCase):
                 for bat, es in ((dict(), 0.09), (dict(t_swing=s.T_MEAN * 1.05 ** 3), 0.0675), (dict(t_swing=s.T_MEAN / 1.05 ** 3), 0.09),
                                 (dict(bat_speed=32.0 * 0.883), 0.09)):
                     for e in (-es, es):
-                        sw = swing((x, 0.35 - 0.125 * x, z), effort=e, **bat)
+                        sw = swing(s.aim_at(x, z), effort=e, **bat)
                         self.assertGreaterEqual(s.start_slack(sw), 0.0, (x, z, bat, e))
 
     def test_the_clavicle_moves_smoothly(self):
@@ -603,7 +609,8 @@ class RatingRange(unittest.TestCase):
     """§6.7.4: in the zone, for every BatSpeed and QuickHands at ±3 sd (alone and together, short of
     the long corner: fast bat and slow hands at once) and effort at ±3 sd, the sweet spot's speed rises into the
     ball (peak at most 1.10× its contact value, no earlier than 25 ms before contact scaled) with one
-    surge, the bat clear of the body and the hands within reach. Must pass."""
+    surge, the hands and the knob with one surge, the bat clear of the body and both arms within reach
+    at the launch and at −93 ms. Must pass (at the measured stance, D28; contact depth 0.35)."""
 
     @classmethod
     def setUpClass(cls):
@@ -613,18 +620,21 @@ class RatingRange(unittest.TestCase):
             cls.rows.append((kw, d))
 
     def test_every_rating_and_effort_in_the_zone(self):
-        # (the hands' own surge is HandsSpeed's, an expected failure in today's stance)
         for kw, d in self.rows:
             if kw['corner']:
                 continue
-            self.assertEqual([f for f in s.range_failures(d) if f != 'hands one surge'], [], kw)
-            self.assertGreaterEqual(d['ss_ratio_tau'], -0.025 * d['T'] / s.T_MEAN, kw)
+            self.assertEqual(s.range_failures(d), [], kw)
+            # the peak no earlier than −25 ms × T/T̄, within one sample of the diagnostics (1 ms): on a flat
+            # top the sample that is highest moves by up to a step (the shortest swing at high-inside peaks
+            # at 1.067× 0.6 ms before the scaled bound at effort −3 sd, 7 µs at effort 0)
+            self.assertGreaterEqual(d['ss_ratio_tau'], -0.025 * d['T'] / s.T_MEAN - 0.001, kw)
 
     @unittest.expectedFailure
     def test_both_ratings_at_three_sd_at_once(self):
         """Fails at the long corner (BatSpeed +3 sd and QuickHands −3 sd together, travel 1.30, +4.2 sd,
-        beyond MLB's longest swings, note 10): on high pitches the sweet spot's speed dips 4% before
-        its peak (spec §6.7.4)."""
+        beyond MLB's longest swings, note 10): the hands' speed dips up to 14% before its peak and the
+        sweet spot's 1–3% on middle and high pitches, and the low-inside one peaks at 1.11× (spec
+        §6.7.4)."""
         for kw, d in self.rows:
             if kw['corner']:
                 self.assertEqual(s.range_failures(d), [], kw)
@@ -632,28 +642,51 @@ class RatingRange(unittest.TestCase):
 
 class HandsSpeed(unittest.TestCase):
     """§6.7.4, review P1-2: the hands (the mid-wrists W, where the client draws them) and the knob
-    speed up once, as the bat does."""
+    speed up once, as the bat does (must pass over the rating range: RatingRange)."""
 
-    @unittest.expectedFailure
-    def test_hands_rise_once_in_todays_stance(self):
-        """Fails on every swing in today's stance: the hands run 7.4 m/s 110 ms before contact, slow to
-        2.3 m/s at −50 ms and reach 9.4 m/s at contact (middle pitch; valleys 60–97% over the rating
-        range). From [4]'s arms at −93 ms only 0.31 m is left to the contact hands, 0.08 m behind the
-        clavicle (§5.3, Q46): no curve that rises once can cover it. Where [4]'s arms put the batter
-        (0.55 m deeper) the template's hands rise once (next test)."""
-        for kw in (dict(), dict(aim=INSIDE_LOW), dict(aim=OUTSIDE_HIGH), dict(effort=-0.09)):
-            d = diag(**kw)
-            self.assertLessEqual(max(d['hands_worst_dip'], d['knob_worst_dip']), s.SPEED_DIP_TOL, kw)
-
-    def test_the_hands_rise_once_where_4s_arms_put_the_batter(self):
-        # The stall is the stance (§5.3): with the batter 0.55 m deeper the average batter's hands and
-        # knob speed up once on every pitch of the zone within 5% (0–0.4% on low and middle pitches,
-        # 3.4–4.3% on high ones), against 60–97% in today's stance.
+    def test_the_hands_rise_once_at_the_measured_stance(self):
+        # Every pitch of the zone at ±2 sd of effort: the hands' and the knob's speed with one surge
+        # (2%, 3%), from rest to a peak of 10–12 m/s 30–50 ms before contact and easing into the ball
+        # as the bat whips (§6.7.4).
         for x in (-0.15, 0.0, 0.15):
             for z in (0.55, 0.75, 0.95):
                 for e in (-0.09, 0.0, 0.09):
-                    d = s.diagnostics(s.Swing((x, 0.35 - 0.125 * x, z), P=(-0.95, -0.25, 0.0), effort=e), dt=0.001)
-                    self.assertLessEqual(max(d['hands_worst_dip'], d['knob_worst_dip']), 0.05, (x, z, e))
+                    d = diag(s.aim_at(x, z), effort=e)
+                    self.assertLessEqual(d['hands_worst_dip'], s.SPEED_DIP_TOL, (x, z, e))
+                    self.assertLessEqual(d['knob_worst_dip'], s.KNOB_DIP_TOL, (x, z, e))
+
+    def test_todays_stance_was_the_stall(self):
+        # The cause, kept as a check (§5.3, §6.7.4): the same construction at today's stance spot stalls
+        # the hands (valleys 36–86% on the golden aims): from [4]'s arms at −93 ms only 0.31 m is left
+        # to contact hands 0.08 m behind the chest. A change that hid the stall some other way would
+        # show here.
+        for aim in (MIDDLE, INSIDE_LOW, OUTSIDE_HIGH):
+            d = s.diagnostics(s.Swing(aim, P=s.P_TODAY), dt=0.001)
+            self.assertGreater(d['hands_worst_dip'], 0.30, aim)
+
+
+class ArmsAtContact(unittest.TestCase):
+    """The two-arm reach at contact (D28 refit, §6.7.4): each shoulder to the hands, against a straight
+    arm (2 cm allowed, as at the launch and −93 ms)."""
+
+    @unittest.expectedFailure
+    def test_both_arms_reach_the_contact_hands(self):
+        """Fails on low pitches at any stance: at the zone's bottom (0.55 m) the contact hands (v2's
+        jet) are 0.6 m below the lead shoulder, and the lead arm is 9–13 cm past straight (8 cm at
+        the inside edge, 13 at the outside; 18 cm 0.3 m outside); at 0.75 m and above it reaches. The
+        body at contact is the same for every pitch ([4] Table 1: the lead knee 15–18° at every
+        location), so only the jet or the body by pitch height can change it (spec §6.7.4, §15).
+        Met 0.15 m further out (Q51): 15–20 cm, and the rear arm 7–10 cm past straight."""
+        for x in (-0.15, 0.0, 0.15):
+            for z in (0.55, 0.75, 0.95):
+                d = diag(s.aim_at(x, z))
+                self.assertLessEqual(max(d['lead_arm_over_c'], d['rear_arm_over_c']), s.ARM_SLACK, (x, z))
+
+    def test_the_arms_reach_from_the_middle_of_the_zone_up(self):
+        for x in (-0.15, 0.0, 0.15):
+            for z in (0.75, 0.95):
+                d = diag(s.aim_at(x, z))
+                self.assertLessEqual(max(d['lead_arm_over_c'], d['rear_arm_over_c']), 0.03, (x, z))
 
 
 class GoldenFile(unittest.TestCase):

@@ -1300,20 +1300,84 @@ def family_report():
     return dict(across=across, within=within, template_T_by_aim=grid, late_vs_today=family_late())
 
 
+class contact_depth:
+    """Run the oracle with the middle pitch met at y0 (Q51): `with contact_depth(0.50): ...`. The
+    batter's reference (middle-middle) jet follows it; aims are given with aim_at(x, z, y0)."""
+    def __init__(self, y0): self.y0 = y0
+    def __enter__(self):
+        global CONTACT_Y0
+        self.old, CONTACT_Y0 = CONTACT_Y0, self.y0
+    def __exit__(self, *a):
+        global CONTACT_Y0
+        CONTACT_Y0 = self.old
+
+
+GOLDEN_XZ = {'rhb_middle': (0.0, 0.745), 'rhb_inside_low': (-0.20, 0.56), 'rhb_outside_high': (0.22, 0.93)}
+LOCATION_XZ = {'MIDDLE': (0.0, 0.745), 'HIGH IN': (-0.20, 0.93), 'HIGH OUT': (0.22, 0.93), 'LOW IN': (-0.20, 0.56), 'LOW OUT': (0.22, 0.56)}
+# §5.3: the stance spot read at the stance (D28's), at contact (the hips 0.17 m further back), and today's.
+STANCES = {'today (P_y +0.30)': P_TODAY, 'measured, stance reading (P_y -0.276)': P_STANCE,
+           'measured, contact reading (P_y -0.446)': (P_STANCE[0], P_STANCE[1] - BODY['c'][0], 0.0)}
+STANCE_KEYS = ('ss_ratio_max', 'ss_ratio_tau', 'tip_ratio_max', 'tip_ratio_tau', 'hands_worst_dip', 'knob_worst_dip', 'lag_max', 'lag_max_tau',
+               'lag_c', 'uncock_peak', 'uncock_tau', 'arm_rate_peak', 'arm_rate_tau', 'hands_ahead_c', 'plane_tilt_40ms', 'beta',
+               'lead_arm_over_93', 'lead_arm_over_c', 'rear_arm_over_c', 'T', 'head_travel_65ms_ft')
+
+
+def stance_report():
+    """§5.3's table: the golden aims' diagnostics, bounds and lag at contact by location at each stance
+    reading and contact depth."""
+    out = {}
+    for sname, P in STANCES.items():
+        for y0 in (CONTACT_Y0, CONTACT_Y0_Q51):
+            with contact_depth(y0):
+                rows = {}
+                for n, (x, z) in GOLDEN_XZ.items():
+                    sw = Swing(aim_at(x, z), P=P)
+                    d = diagnostics(sw, dt=0.001)
+                    rows[n] = dict({k: d[k] for k in STANCE_KEYS}, bounds=[dict(check=b['check'], value=b['value'], passed=b['passed']) for b in bounds(sw, d)])
+                rows['lag_at_contact_by_location'] = {loc: Swing(aim_at(x, z), P=P).lag(0.0) for loc, (x, z) in LOCATION_XZ.items()}
+            out['%s, contact y0 %.2f' % (sname, y0)] = rows
+    return out
+
+
+def late_by_depth(y0):
+    """§6.7.6 at contact depth y0: the late-contact figures against today's v2 and v2's own path."""
+    with contact_depth(y0):
+        aims = {n: aim_at(x, z) for n, (x, z) in GOLDEN_XZ.items()}
+        return dict(v2_difference={n: v2_difference(Swing(a)) for n, a in aims.items()},
+                    family={name: {n: late_vs_today(Swing(a, **kw)) for n, a in aims.items()} for name, kw in FAMILY_LATE_CASES})
+
+
+def rating_summary(y0):
+    """The rating range (§6.7.4) at contact depth y0: failures and the worst values."""
+    with contact_depth(y0):
+        rows = []
+        for kw in rating_cases():
+            d = diagnostics(Swing(**{k: v for k, v in kw.items() if k != 'corner'}), dt=0.001)
+            rows.append(dict(case={k: (list(v) if isinstance(v, tuple) else v) for k, v in kw.items()}, failures=range_failures(d),
+                             ss_ratio_max=d['ss_ratio_max'], hands_worst_dip=d['hands_worst_dip'], knob_worst_dip=d['knob_worst_dip'],
+                             lead_arm_over_93=d['lead_arm_over_93'], lead_arm_over_c=d['lead_arm_over_c'], rear_arm_over_c=d['rear_arm_over_c']))
+    return rows
+
+
 def golden(skip=()):
     """Every section of golden/swing_v3.json; `skip` leaves out the slow ones (the tests)."""
-    H, P = 1.85, P_TODAY
+    H, P = 1.85, P_STANCE
     chi = template_chi()
     u93, uw = T4_93 / T4, T4_W / (1e3 * T4)
     meta = dict(
-        spec='docs/swing-model-v3.md (the swing family, §6.7, PLAN D27)', H=H, stance_P=list(P), u_g=U_G, u_ss=U_SS, u_cm=U_CM, bat_length=BAT_L,
+        spec='docs/swing-model-v3.md (the swing family, §6.7, PLAN D27; fitted at the measured stance, PLAN D28)', H=H, stance_P=list(P),
+        contact_y0=CONTACT_Y0, contact_k=CONTACT_K, hands_travel_max=LAM_W_MAX, E4_contact_deg=E4_C / DEG,
+        rate_shape_scale='A1s = A1 cos(E_c) / cos(E4_contact): the rate shape on the horizontal contact rate',
+        elevation='B(u) = 39 deg + (e(t4) - e(-93 ms)) + dE smoothstep((u - u93)/(uw - u93)), dE = E_c - (39 deg + e(0) - e(-93 ms))',
+        u_g=U_G, u_ss=U_SS, u_cm=U_CM, bat_length=BAT_L,
         T4=T4, t4_93=T4_93, t4_w_ms=T4_W, segments=SEG,
         body_knots={k: list(v) for k, v in BODY.items()}, arms=ARMS,
         chi_L_deg=chi['L'] / DEG, chi_93_deg=chi['93'] / DEG, A_ref_deg=chi['A_ref'],
         family=dict(T_mean=T_MEAN, v_template=V_TEMPLATE, I_hat=I_HAT, I_93=I_93,
                     template_launch_azimuth_deg=chi['A_L'], template_93_azimuth_deg=chi['A_93'],
-                    template_time='T_t = (A_c - A_L,t) / (Adot_c I_hat), the template batter at the aim',
+                    template_time='T_t = (A_c - A_L,t) / (Adot_c h_scale(E_c) I_hat), the template batter at the aim',
                     swing_time='T = T_t (T_b / T_mean) / (1 + effort)', travel='lambda = (BatSpeed / v_template)(T_b / T_mean) (x T / T_nominal after a re-plan)',
+                    hands_travel='lambda_W = lambda min(1, 1.10 / lambda_nominal); the launch hands min(lambda_nominal, 1)',
                     fade='h(u) = 1 - (10x^3 - 15x^4 + 6x^5), x = (u + 1)/(u93 + 1) on [-1, u93], 0 after',
                     correction_nodes=[[u93, 0], [u93, 1], [u93, 2], [0.0, 0], [0.0, 1], [0.0, 2]]),
         step1=dict(launch_azimuth_deg=A_LAUNCH, sweep_93_deg=SWEEP_93, chi_L_deg=step1_chi()['L'] / DEG, chi_93_deg=step1_chi()['93'] / DEG),
@@ -1393,7 +1457,7 @@ def golden(skip=()):
             samples.append(dict(t=t, knob=_v(p['knob']), axis=_v(p['axis']), omega=_v(p['omega']), v_cm=_v(p['v_cm']),
                                 hands=_v(p['hands']), S=_v(p['S'])))
         paths.append(dict(name=name, aim=list(aim), bats='R' if side == 1 else 'L', height=H, t_swing=Tb, T=T, t_c=sw.t_c,
-                          bat_speed=v, effort=e, travel=sw.lam, template_T=sw.tmpl.T, tau_93=sw.tau93, tau_w=sw.uw * T, kappa=sw.kappa,
+                          bat_speed=v, effort=e, travel=sw.lam, template_T=sw.tmpl.T, tau_93=sw.tau93, tau_w=sw.uw * T, elevation_offset_rad=sw.E_off, hands_travel=sw.lam_W,
                           launch_azimuth_unwrapped_rad=sw.A_L, launch_elevation_rad=sw.E_L, launch_hands=_v(sw.W_L), samples=samples))
     # 6. braking
     brakes = []
@@ -1431,9 +1495,12 @@ def golden(skip=()):
                   v2_difference={n: v2_difference(Swing(a)) for n, a in GOLDEN_AIMS.items()},
                   v2_difference_step1={n: v2_difference(SwingStep1(a)) for n, a in GOLDEN_AIMS.items()},
                   diagnostics={n: diagnostics(Swing(a)) for n, a in GOLDEN_AIMS.items()},
-                  family=family_report())
+                  family=family_report(),
+                  stance_and_depth=stance_report(),
+                  late_contact_by_depth={'%.2f' % y0: late_by_depth(y0) for y0 in (CONTACT_Y0, CONTACT_Y0_Q51)})
     rating = None
     if 'rating_range' not in skip:
+        report['rating_range_at_contact_y0_%.2f' % CONTACT_Y0_Q51] = rating_summary(CONTACT_Y0_Q51)
         rr = []
         for kw in rating_cases():
             d = diagnostics(Swing(**{k: v for k, v in kw.items() if k != 'corner'}), dt=0.001)
