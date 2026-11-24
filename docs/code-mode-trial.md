@@ -43,3 +43,13 @@ Job: make AGENTS invariant 3 ("decision code never receives an `Executed*`") rea
 3. **In the way:** nothing blocked. Writing Rust source inside a JS template literal needed a placeholder for backticks (`@@` replaced after the fact), and the display shows `&`, `<`, `>` as entities, which makes Rust code in output hard to read. A mutation check (plant, run, revert) was easy to do in one program.
 
 **Coordinator, after trial 2:** a full cycle (implementation, Code Mode reviewer, fixes in the resumed worker session) ran without a tool error. Resuming needs the variable on the start line (`CLAUDE_CODE_EXPERIMENTAL_CODE_MODE=1 claude --resume <id>`). After each turn Claude Code may leave a suggested next prompt in a worker's input box (e.g. "Merge the trial branch into main"); it is not sent, and it is not the owner's. Clear it (`ctrl+u`) before quitting the pane.
+
+## Trial 4 (researcher, swing research)
+
+Job: distil eight sources (papers, a dissertation, a dataset, four videos) into notes under `docs/research/swing/` and a synthesis.
+
+1. **Programs run:** about 14 REPL programs. One read the job and docs. One read the current swing code and specs in a single fan-out. Eight launched the source subagents, one or two per program, with a shared prompt held in a REPL variable. The rest read the notes, wrote the synthesis, ran the docs check and committed.
+2. **Subagents from Code Mode: they worked.** `tools.Agent` returns at once with `async_launched` and an id; the completion arrives later as a task notification, not as the program's return value. So a program cannot `await` an agent's result, and a `Promise.all` over agents returns in under a second. I kept at most 3 running by launching the next as each notification came. Each subagent wrote its own note and returned about 10 lines, so the raw sources never entered my context (source 6 took a subagent about 4 minutes; the others 25–100 s).
+3. **Helped:** a prompt template in a variable, launched with a one-line call per source; reading all notes in one program; running the docs check and the commit in the same program.
+4. **Got in the way:** the task notifications are the only way to learn that an agent finished, so the wait is a `Poll`, not a script. Output shows `&amp;`, `&lt;` and `&gt;` as entities, which makes the notes' quoted figures harder to read. Writing the synthesis as a JS template literal needed care with backticks.
+5. **Outcome:** two of the eight sources gave almost nothing (a vendor promo with no speech, and a paper blocked by the publisher so only the abstract was read); that is stated in their notes, not filled from memory.
