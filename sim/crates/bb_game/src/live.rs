@@ -14412,8 +14412,8 @@ mod tests {
                     for e in [-2.0, -1.0, 1.0, 2.0] {
                         sim.f[i].err = [e, 0.0, 0.0, 0.0];
                         let q = sim.predict(i).at(t).0;
-                        // Both at the ball's height: the range is what is read here (a read of a
-                        // rolling ball sits at the ball's radius, the world's ball 1 mm lower).
+                        // Both at the ball's height: the range is what is read here (the path his
+                        // read is flown by starts a ball on the ground 1 mm above it).
                         let angle = |p: Vec3| m::atan2(EYE_H - b.z, m::hypot(p.x - from.x, p.y - from.y));
                         let off = (angle(q) - angle(b)).abs();
                         let bound = f64::abs(e) * sim.f[i].a.ground_decl_sigma * 1.15;
