@@ -1,5 +1,5 @@
-//! Baseline of today's swing at contact (PLAN D25; agent-models §3.6 rebuild spec, docs/research/
-//! swing/swing-rebuild-baseline.md): over the standard run's games (`sim-cli games --n 300` at
+//! Baseline of today's swing at contact (PLAN D25; docs/swing-model-v3.md, results in
+//! docs/calibration/2026-11-24-swing-contact-baseline.md): over the standard run's games (`sim-cli games --n 300` at
 //! `--seed 0` and `--seed 1000`, average fielders), what the collision reads from the executed
 //! swing at the contact instant and what it gives. Read-only: it plays the games exactly as the
 //! standard run does and re-reads each executed swing (`PitchRecord::swing`) at the recorded
