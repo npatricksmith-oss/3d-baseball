@@ -1,6 +1,6 @@
 # Player visuals: figures, motions, kit
 
-**Status:** plan agreed with the owner 2026-11-15 (seven questions, Q15–Q21, all as recommended; §1). All seven steps are built (§6–§12): the figure, the kit, the delivery and the catcher, the swing, throws and catches in the field, the slide and the dive, and the other people. The plan is complete. A redesign of the batter's stance and swing (§13, 2026-11-23) is specified and not yet built. This is the second part of the graphics stage, after [the park](park-visuals.md) and before [the HUD](hud.md).
+**Status:** plan agreed with the owner 2026-11-15 (seven questions, Q15–Q21, all as recommended; §1). All seven steps are built (§6–§12): the figure, the kit, the delivery and the catcher, the swing, throws and catches in the field, the slide and the dive, and the other people. The plan is complete. A redesign of the batter's stance and swing (§13, 2026-11-23) is specified; its build step 1 (the bat before the swing, export E1) is built, steps 2–5 are not. This is the second part of the graphics stage, after [the park](park-visuals.md) and before [the HUD](hud.md).
 
 ## 1. Decisions (owner, 2026-11-15)
 
@@ -75,7 +75,7 @@ The first motions written as poses in code. `BbPose.{h,cpp}` holds all of it.
 
 ## 9. Step 4 as built (2026-11-16): the swing
 
-*To be replaced in parts by [§13](#13-the-base-stance-and-swing-design-2026-11-23-not-yet-built) as its build steps land; until then this is what the game does.* **Step 1 of §13 is built (2026-11-24): the bat before the swing is no longer the sim's stance and load.** Until the sim's bat first moves the client draws its own: still in the stance, then from 0.325 s before release the hands drift back to the load pose L (the sim's mean swing-start pose) and wait there, the same on every pitch whether he swings or not; from the moment the sim's bat first moves it blends into the sim's over 0.05 s, and the sim's bat is drawn from there to the end of its track. (`BbMotion::LoadBat`, `HandoverWeight`; `ABbDirector::DrawnBat`; a pitch taken eases back to the stance 0.2 s after the catch.) The text below still describes the body, which step 1 does not touch. `-BbBatLegacy` draws the old bat for comparison.
+*To be replaced in parts by [§13](#13-the-base-stance-and-swing-design-2026-11-23-step-1-of-5-built) as its build steps land; until then this is what the game does.* **Step 1 of §13 is built (2026-11-24): the bat before the swing is no longer the sim's stance and load.** Until the sim's bat first moves the client draws its own: still in the stance, then from 0.325 s before release the hands drift back to the load pose L (the sim's mean swing-start pose) and wait there, the same on every pitch whether he swings or not; from the moment the sim's bat first moves it blends into the sim's over 0.05 s, and the sim's bat is drawn from there to the end of its track. (`BbMotion::LoadBat`, `HandoverWeight`; `ABbDirector::DrawnBat`; a pitch taken eases back to the stance 0.2 s after the catch.) The text below still describes the body, which step 1 does not touch. `-BbBatLegacy` draws the old bat for comparison.
 
 The batter holds his bat and swings it. `BbMotion::Swing` in `BbPose.{h,cpp}`; the bat's handling is in `BbDirector`.
 
@@ -141,7 +141,7 @@ Four umpires, the batting side's two base coaches and the men in both dugouts (o
 - **Cost: about a sixth of the frame rate.** 141 fps with the crew against 170 without, the same build minutes apart (seed 7, `-BbShots=6 -BbUncapped`). It is 34 more figures of 32 pieces. Two savings are in: a man on the bench has his bones worked out only when his head turns (about once a second), and nobody under a dugout roof throws a shadow. Still above the 120 the game is watched at.
 - **For the owner to overrule if he likes:** the umpires' pale blue; the plate umpire signals swinging strikes too; the nine sit in batting order with the reserves beyond them.
 
-## 13. The base stance and swing (design, 2026-11-23; not yet built)
+## 13. The base stance and swing (design, 2026-11-23; step 1 of 5 built)
 
 **Status (2026-11-24): design; build step 1 is built** (export E1, the bat before the swing and the measurements, §13.8, results §13.10); steps 2–5 are not. It replaces the body part of §9 (the stance, the stride, the turn of hips and shoulders after the bat, the bat between the end of the sim's track and his shoulder) step by step as §13.8 is built; until then §9 describes the game. Written from [the swing research](research/swing/swing-synthesis.md) under PLAN D21 (numbers from Fortenbaugh [4] and Welch [3]; OpenBiomechanics [6] only as a check), D22 (coil and hip turn on every pitch, held up on a take) and D23 (per-player styles are looks only). Source numbers in brackets are the synthesis's: [4] Fortenbaugh 2011, [3] Welch 1995, [2] OnBase manual, [5] Driveline clip, [7] Ochart webinar, [8] HDR video, [6] OBP (check only). Revised after [the review](reviews/2026-11-23-sonnet-base-swing-spec-review.md) (2026-11-23): fooled and late swings follow [4] §4.3, the warp is bounded, the contact checks depend on location, Q43 and export E1 are stated in full.
 
