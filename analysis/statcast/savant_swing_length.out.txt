@@ -1,0 +1,56 @@
+tracked rows 12163 competitive 11185
+batters 578 swings per batter: median 17 p10 4 p90 39 max 66
+
+== 1. ACROSS batters, per-batter means, batters with >= 20 competitive swings
+batters 255; bat speed mean 71.75 sd 3.01 mph; swing length mean 7.305 sd 0.448 ft
+swing length = 1.037 + 0.0874 x bat speed  (ft per mph; 2.7 cm per mph); r = 0.587; r with depth 0.202
+  controlling mean contact depth: slope 0.0848 ft/mph, depth 0.0095 ft/in
+  by bat-speed band (per-batter mean):
+   [ 0,67) batters  19 bat 65.32 mph  len 6.571 ft  depth  28.4 in
+   [67,69) batters  23 bat 68.22 mph  len 7.007 ft  depth  28.2 in
+   [69,71) batters  49 bat 70.14 mph  len 7.256 ft  depth  30.8 in
+   [71,73) batters  74 bat 71.94 mph  len 7.377 ft  depth  30.6 in
+   [73,75) batters  59 bat 73.79 mph  len 7.432 ft  depth  31.5 in
+   [75,99) batters  31 bat 76.50 mph  len 7.640 ft  depth  31.2 in
+
+== 1. ACROSS batters, per-batter means, batters with >= 40 competitive swings
+batters 51; bat speed mean 72.60 sd 2.54 mph; swing length mean 7.376 sd 0.359 ft
+swing length = 3.623 + 0.0517 x bat speed  (ft per mph; 1.6 cm per mph); r = 0.366; r with depth 0.182
+  controlling mean contact depth: slope 0.0490 ft/mph, depth 0.0122 ft/in
+  by bat-speed band (per-batter mean):
+   [ 0,67) batters   1 bat 63.88 mph  len 7.054 ft  depth  30.5 in
+   [67,69) batters   5 bat 68.20 mph  len 6.990 ft  depth  28.6 in
+   [69,71) batters   5 bat 70.08 mph  len 7.267 ft  depth  28.7 in
+   [71,73) batters  14 bat 72.17 mph  len 7.448 ft  depth  30.3 in
+   [73,75) batters  19 bat 74.05 mph  len 7.455 ft  depth  30.5 in
+   [75,99) batters   7 bat 75.68 mph  len 7.420 ft  depth  31.2 in
+
+== 2. WITHIN a batter (deviations from his own means; batters >= 20 swings)
+n 8269; within-batter sd: bat speed 4.30 mph, swing length 0.753 ft, depth 10.47 in
+swing length dev = 0.0602 ft/mph x bat speed dev; r = 0.344   (no depth control)
+  with contact depth dev: 0.0198 ft/mph and 0.0579 ft/in of depth; r(depth, length) 0.837; r(depth, speed) 0.287
+  at a fixed depth (within +-2 in of his own mean depth):
+   n 1207 slope 0.0152 ft/mph r 0.158
+  swing length dev by bat-speed dev band, all depths | fixed depth (mph, ft):
+   [-99, -6) n   599 speed -8.66 len -0.541 depth  -5.8 in | fixed n    28 len -0.038
+   [ -6, -3) n  1268 speed -4.31 len -0.270 depth  -3.2 in | fixed n   128 len -0.056
+   [ -3, -1) n  1290 speed -1.96 len -0.129 depth  -1.8 in | fixed n   158 len -0.109
+   [ -1,  1) n  1639 speed +0.02 len +0.006 depth  -0.1 in | fixed n   252 len -0.028
+   [  1,  3) n  1560 speed +1.97 len +0.125 depth  +1.4 in | fixed n   268 len -0.006
+   [  3, 99) n  1913 speed +5.28 len +0.329 depth  +4.1 in | fixed n   373 len +0.091
+  same, as % of his mean swing length / speed (log-log slope: elasticity)
+   %length = 0.206 x %speed + 0.790%/in depth  (depth-controlled)
+   %length = 0.598 x %speed (uncontrolled)
+
+== 3. implied "time" = swing length / bat speed at contact (an upper bound on time if speed rises into contact; not a swing time)
+   [ 0,67) bat 65.32 mph len 6.571 ft  len/speed   68.6 ms
+   [67,69) bat 68.22 mph len 7.007 ft  len/speed   70.0 ms
+   [69,71) bat 70.14 mph len 7.256 ft  len/speed   70.5 ms
+   [71,73) bat 71.94 mph len 7.377 ft  len/speed   69.9 ms
+   [73,75) bat 73.79 mph len 7.432 ft  len/speed   68.7 ms
+   [75,99) bat 76.50 mph len 7.640 ft  len/speed   68.1 ms
+   all: bat 71.75 sd 3.01 mph, len 7.305 ft, len/speed 69.4 ms
+
+== model arithmetic: batter k sd slow in bat speed (sd of per-batter mean = 3.01 mph, in swing speed 4.2%)
+  1 sd slow (68.7 mph, -4.2%): length across-batters -0.263 ft (-3.6%), time scale 1.006 (swing time 0.151 s from 0.150 s); length if length followed speed 1:1 -0.307 ft; within-batter slope -0.181 ft
+  2 sd slow (65.7 mph, -8.4%): length across-batters -0.526 ft (-7.2%), time scale 1.013 (swing time 0.152 s from 0.150 s); length if length followed speed 1:1 -0.614 ft; within-batter slope -0.363 ft
