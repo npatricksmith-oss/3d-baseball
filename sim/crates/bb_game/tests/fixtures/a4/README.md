@@ -93,6 +93,9 @@ diagnostic trace is never part of a fielder's inputs.
     fielder that the centre fielder takes over. The deep call does not flip back. *Unused since
     2026-11-23:* the right fielder now lays out for that grounder and knocks it down
     (agent-models §5.3, the outfielder's dive at a ground ball), so it no longer gets past him.
+  - `36-158` (frozen 2026-11-24 from `ef1e83b`, `work/of-ground-dive`, in place of `118-162`;
+    review P3-4): two out, a runner on first, a liner through the right side that the centre
+    fielder takes over from the right fielder. The deep call does not flip back.
   - `17-103` (frozen the same way after the double-cut reviews, P2-1; fails without that fix,
     and on `ba40063` at its premise, there being no double cut): a runner on first, none out, a ball past the
     centre fielder; he throws to second, past the first baseman out on the double cut, who goes

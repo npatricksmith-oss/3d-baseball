@@ -1064,6 +1064,10 @@ fn a_ball_an_infielder_catches_a_deep_ball_and_a_caught_fly_keep_their_jobs() {
 ///   (agent-models §5.3), the right fielder lays out for it at 3.56 s and knocks it down: it no
 ///   longer gets past the outfielders, so it is no longer a case of this test. (On `ba40063` the
 ///   second baseman went out as the relay man at 4.11 s, back at 4.26 s, and out again at 5.29 s.)
+/// - seed 36 play 158 (frozen 2026-11-24 from `ef1e83b`, `work/of-ground-dive`, in its place;
+///   review P3-4): two out, a runner on first, a liner through the right side first down 21 m out
+///   that the centre fielder takes over from the right fielder and fields at 6.41 s. The relay man
+///   goes out at 5.86 s and the deep call does not flip back before the throw.
 ///
 /// From the moment the relay man goes out with the ball down (the deep call) to the outfielder's
 /// throw: he stays out; the first baseman is out on the cutoff home behind him; nobody else is on a cutoff; at every tick
@@ -1073,47 +1077,54 @@ fn a_ball_an_infielder_catches_a_deep_ball_and_a_caught_fly_keep_their_jobs() {
 /// man's spot and between them, and at the release he is nearer that line than at the call; on
 /// 23/83, out since 0.95 s, he stands on it. (On 97/119 he leaves first at 4.20 s for the left
 /// side of the mound and is still 16 m off the line at the release at 6.50 s: the owner's choice of
-/// the first baseman on every ball, a long run on a ball to left.) Each fails on `ba40063`.
+/// the first baseman on every ball, a long run on a ball to left.) The first two fail on `ba40063`; 36/158 was
+/// not checked there.
 #[test]
 fn a_ball_past_the_outfielders_adds_the_relay_man_and_keeps_the_first_baseman() {
-    for (label, text) in [("seed 23 play 83", include_str!("fixtures/a4/23-83.json")), ("seed 97 play 119", include_str!("fixtures/a4/97-119.json"))] {
-        let (out, ticks) = replay_jobs(text);
-        let &(t_fielded, by) = out.secured.first().expect("the ball is fielded");
-        assert!(by & 0x7f >= 7, "{label}: the premise, an outfielder fields it");
-        let (t_down, _) = first_down(&out).expect("the premise: it comes down before anyone has it");
-        let &(t_throw, _) = out.released.first().expect("the premise: the outfielder throws");
-        assert!(t_throw > t_fielded, "{label}: the premise, the outfielder's throw is the first");
-        let call = ticks.iter().position(|k| k.t > t_down && (k.job[3] == 24 || k.job[5] == 24)).unwrap_or_else(|| panic!("{label}: no relay man out with the ball down"));
-        let relay = if ticks[call].job[3] == 24 { 3 } else { 5 };
-        let t_call = ticks[call].t;
-        let first_out = ticks.iter().find(|k| k.job[2] == 24).map(|k| k.t);
-        for k in ticks.iter().filter(|k| k.t < t_throw) {
-            if first_out.is_some_and(|t0| k.t >= t0) && first_out < Some(t_call) {
-                assert_eq!(k.job[2], 24, "{label}: the first baseman, out on the cutoff home since {:.2} s, off it at {:.2} s: {:?}", first_out.unwrap(), k.t, k.job);
-            }
-            if k.t < t_call {
-                continue;
-            }
-            assert_eq!((k.job[relay], k.job[2]), (24, 24), "{label}: at {:.2} s, the relay man (fielder {}) and the first baseman out since {t_call:.2} s: {:?}", k.t, relay + 1, k.job);
-            assert!((0..6).all(|i| i == relay || i == 2 || !(20..30).contains(&k.job[i])), "{label}: another man on a cutoff at {:.2} s: {:?}", k.t, k.job);
-            assert!(k.job[4] == 13 && k.job.contains(&12), "{label}: third or second without its man at {:.2} s (the call at {t_call:.2} s): {:?}", k.t, k.job);
+    for (label, text) in [("seed 23 play 83", include_str!("fixtures/a4/23-83.json")), ("seed 97 play 119", include_str!("fixtures/a4/97-119.json")), ("seed 36 play 158", include_str!("fixtures/a4/36-158.json"))] {
+        check_deep_call(label, text);
+    }
+}
+
+/// The checks of [`a_ball_past_the_outfielders_adds_the_relay_man_and_keeps_the_first_baseman`]
+/// on one frozen play.
+fn check_deep_call(label: &str, text: &str) {
+    let (out, ticks) = replay_jobs(text);
+    let &(t_fielded, by) = out.secured.first().expect("the ball is fielded");
+    assert!(by & 0x7f >= 7, "{label}: the premise, an outfielder fields it");
+    let (t_down, _) = first_down(&out).expect("the premise: it comes down before anyone has it");
+    let &(t_throw, _) = out.released.first().expect("the premise: the outfielder throws");
+    assert!(t_throw > t_fielded, "{label}: the premise, the outfielder's throw is the first");
+    let call = ticks.iter().position(|k| k.t > t_down && (k.job[3] == 24 || k.job[5] == 24)).unwrap_or_else(|| panic!("{label}: no relay man out with the ball down"));
+    let relay = if ticks[call].job[3] == 24 { 3 } else { 5 };
+    let t_call = ticks[call].t;
+    let first_out = ticks.iter().find(|k| k.job[2] == 24).map(|k| k.t);
+    for k in ticks.iter().filter(|k| k.t < t_throw) {
+        if first_out.is_some_and(|t0| k.t >= t0) && first_out < Some(t_call) {
+            assert_eq!(k.job[2], 24, "{label}: the first baseman, out on the cutoff home since {:.2} s, off it at {:.2} s: {:?}", first_out.unwrap(), k.t, k.job);
         }
-        // Distance off the line from home to `r`, and how far along it, of point `p`.
-        let line = |r: bb_math::Vec3, p: bb_math::Vec3| {
-            let len = r.x.hypot(r.y);
-            ((p.x * r.y - p.y * r.x).abs() / len, (p.x * r.x + p.y * r.y) / len, len)
-        };
-        for k in ticks.iter().filter(|k| k.t >= t_call && k.t < t_throw) {
-            let (off, along, len) = line(k.target[relay], k.target[2]);
-            assert!(off < 5.0 && along > 0.0 && along < len, "{label}: at {:.2} s the first baseman's spot ({:.1}, {:.1}) is not between home and the relay man's spot ({:.1}, {:.1})", k.t, k.target[2].x, k.target[2].y, k.target[relay].x, k.target[relay].y);
+        if k.t < t_call {
+            continue;
         }
-        let at = ticks.iter().rev().find(|k| k.t < t_throw).expect("a tick before the throw");
-        let (off_then, _, _) = line(ticks[call].target[relay], ticks[call].pos[2]);
-        let (off, along, len) = line(at.target[relay], at.pos[2]);
-        assert!(off < off_then, "{label}: the first baseman no nearer the line at the release ({off:.1} m) than at the call ({off_then:.1} m)");
-        if label == "seed 23 play 83" {
-            assert!(off < 5.0 && along > 0.0 && along < len, "{label}: at the release the first baseman at ({:.1}, {:.1}) is not between home and the relay man's spot: {off:.1} m off the line, {along:.1} m along", at.pos[2].x, at.pos[2].y);
-        }
+        assert_eq!((k.job[relay], k.job[2]), (24, 24), "{label}: at {:.2} s, the relay man (fielder {}) and the first baseman out since {t_call:.2} s: {:?}", k.t, relay + 1, k.job);
+        assert!((0..6).all(|i| i == relay || i == 2 || !(20..30).contains(&k.job[i])), "{label}: another man on a cutoff at {:.2} s: {:?}", k.t, k.job);
+        assert!(k.job[4] == 13 && k.job.contains(&12), "{label}: third or second without its man at {:.2} s (the call at {t_call:.2} s): {:?}", k.t, k.job);
+    }
+    // Distance off the line from home to `r`, and how far along it, of point `p`.
+    let line = |r: bb_math::Vec3, p: bb_math::Vec3| {
+        let len = r.x.hypot(r.y);
+        ((p.x * r.y - p.y * r.x).abs() / len, (p.x * r.x + p.y * r.y) / len, len)
+    };
+    for k in ticks.iter().filter(|k| k.t >= t_call && k.t < t_throw) {
+        let (off, along, len) = line(k.target[relay], k.target[2]);
+        assert!(off < 5.0 && along > 0.0 && along < len, "{label}: at {:.2} s the first baseman's spot ({:.1}, {:.1}) is not between home and the relay man's spot ({:.1}, {:.1})", k.t, k.target[2].x, k.target[2].y, k.target[relay].x, k.target[relay].y);
+    }
+    let at = ticks.iter().rev().find(|k| k.t < t_throw).expect("a tick before the throw");
+    let (off_then, _, _) = line(ticks[call].target[relay], ticks[call].pos[2]);
+    let (off, along, len) = line(at.target[relay], at.pos[2]);
+    assert!(off < off_then, "{label}: the first baseman no nearer the line at the release ({off:.1} m) than at the call ({off_then:.1} m)");
+    if label == "seed 23 play 83" {
+        assert!(off < 5.0 && along > 0.0 && along < len, "{label}: at the release the first baseman at ({:.1}, {:.1}) is not between home and the relay man's spot: {off:.1} m off the line, {along:.1} m along", at.pos[2].x, at.pos[2].y);
     }
 }
 
@@ -1183,3 +1194,4 @@ fn in_real_games_the_double_cut_keeps_third_second_and_home_covered() {
     }
     assert!(plays >= 8, "the premise: double cuts in eight games ({plays})");
 }
+

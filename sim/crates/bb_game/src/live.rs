@@ -50,6 +50,8 @@ const PITCHER_RECOVER_S: f64 = 0.7;
 /// How often a chaser near the ball asks himself whether he must dive, s, and how near, m.
 const DIVE_READ_S: f64 = 0.1;
 const DIVE_READ_M: f64 = 15.0;
+/// Nobody lunges at a ball slower than this: he walks up and fields it, m/s [E].
+const LUNGE_MIN_MPS: f64 = 3.0;
 /// Points checked along a dive's lunge against the wall, and the body's half-width kept off
 /// it, m [E].
 const LUNGE_CHECKS: usize = 15;
@@ -6989,7 +6991,7 @@ impl<'a> Sim<'a> {
                     None
                 }
             };
-            let extending = if !standing && !down && receiver.is_none() && fd.role == Role::Chase && bv.norm() > 3.0 { how(self.t, horiz, b, zmax) } else { None };
+            let extending = if !standing && !down && receiver.is_none() && fd.role == Role::Chase && bv.norm() > LUNGE_MIN_MPS { how(self.t, horiz, b, zmax) } else { None };
             if let Some(dive) = extending {
                 // An outfielder weighs a dive first: a ball that gets by him rolls to the
                 // wall. He knows his own hands, and judges the ball by his own read of it
@@ -7180,27 +7182,60 @@ impl<'a> Sim<'a> {
         }
     }
 
-    /// Whether a dive gains the fielder anything (agent-models §5.3, "What a dive at a ball on
+        /// Whether a dive gains the fielder anything (agent-models §5.3, "What a dive at a ball on
     /// the ground costs him"). A ball still in the air: as [`Self::dive_gains`] with the
     /// get-up. A ball on the ground: by his own read and his own hands, the expected time to
     /// have the ball after a dive (a catch: up after [`DIVE_GETUP_S`]; a knock-down: up, then
     /// running to a ball that left his glove along its path at [`RIM_KEEP`] of its speed; a
     /// miss: up, then chasing the ball as it goes on), weighted by the chances that his glove
     /// is within the pocket, within the rim, or beyond, has to be earlier than his standing
-    /// take. No standing take at all: he dives.
+    /// take (a take that misses the ball before it comes to rest: where it rests, at his top
+    /// speed). A short hop he would dive at only after it has come down is on the ground.
     fn dive_pays(&self, i: usize) -> bool {
-        if self.ball_still_up() {
-            return self.dive_gains(i, DIVE_GETUP_S);
-        }
         let fd = &self.f[i];
         let Some(p) = &fd.belief else { return false };
         let (stand, dive) = self.intercept_scan(i, p);
-        let Some((ts, _)) = stand else { return true };
-        // Where he would lay out: the plan's first dive point (none: no dive to weigh).
-        let Some((td, at)) = dive else { return false };
+        // Still up, with his plan's dive before it comes down by his read: a dive for a catch
+        // in the air. A dive he would make only after it has come down (a short hop in front
+        // of him) is a dive at a ball on the ground and is weighed as one.
+        if self.ball_still_up() && dive.map_or(true, |(td, _)| p.first_bounce().map_or(true, |b| td < b.0)) {
+            return self.dive_gains(i, DIVE_GETUP_S);
+        }
+        // Where he would lay out: the plan's first dive point (at its 0.6 of the layout); if the
+        // plan has none (it plans dives only to `REACH` + 0.6·`DIVE`), where his read has the
+        // ball pass closest to him while it is still fast enough to lunge at
+        // ([`LUNGE_MIN_MPS`]), at that distance.
+        let (td, at, h) = match dive {
+            Some((td, at)) => (td, at, REACH + 0.6 * DIVE),
+            None => {
+                let near = |t: f64| { let b = p.at(t).0; m::hypot(b.x - fd.pos.x, b.y - fd.pos.y) };
+                let mut tc = self.t;
+                let mut k = self.t;
+                while k <= p.t_end() && p.at(k).1.norm() > LUNGE_MIN_MPS {
+                    if near(k) < near(tc) {
+                        tc = k;
+                    }
+                    k += DT;
+                }
+                if near(tc) > REACH + DIVE {
+                    return stand.is_none();
+                }
+                let b = p.at(tc).0;
+                (tc, Vec3::new(b.x, b.y, 0.0), near(tc).max(REACH))
+            }
+        };
+        // His standing take; if the ball comes to rest before he can reach it on his feet,
+        // where it rests, at his top speed.
+        let ts = match stand {
+            Some((ts, _)) => ts,
+            None => {
+                let rest = p.at(p.t_end()).0;
+                p.t_end().max(self.t + m::hypot(rest.x - fd.pos.x, rest.y - fd.pos.y) / fd.a.speed)
+            }
+        };
         let (bd, vd) = p.at(td);
         let vh = Vec3::new(vd.x, vd.y, 0.0);
-        let sg = fd.a.hands * glove_sigma_mult(vd.norm(), REACH + 0.6 * DIVE, true);
+        let sg = fd.a.hands * glove_sigma_mult(vd.norm(), h, true);
         let within = |r: f64| 1.0 - m::exp(-0.5 * (r / sg) * (r / sg));
         let (p_catch, p_rim) = (within(POCKET), within(RIM));
         // He lands with his glove at the ball, his body an arm's reach short of it, and is
@@ -7216,7 +7251,7 @@ impl<'a> Sim<'a> {
             Some((t, _)) => t,
             None => {
                 let rest = path.at(path.t_end()).0;
-                up.max(path.t_end()) + m::hypot(rest.x - land.x, rest.y - land.y) / fd.a.speed
+                path.t_end().max(up + m::hypot(rest.x - land.x, rest.y - land.y) / fd.a.speed)
             }
         };
         let r0 = Vec3::new(bd.x, bd.y, self.inp.env.ball.radius + 0.01);
