@@ -59,8 +59,26 @@ BRAKE_S = 0.040            # §8.2
 THETA_SWING = 0.0          # deg, the ruling's threshold (§8.4)
 TRACK_AFTER_S = 0.030      # the track ends at t_c + 0.03 s (D24)
 
-# Stance spot of today's game (right-handed batter's frame).
+# Stance spot of today's game (right-handed batter's frame; swing.rs pivot_x, pivot_y), kept for the
+# comparisons of §5.3.
 P_TODAY = (-0.95, 0.30, 0.0)
+# PLAN D28 (§5.3): the batter stands where MLB's do. Savant's batting-stance leaderboard (2025, note 11):
+# the hip midpoint 0.708 m behind the plate's front edge (y = 0.432 − 0.708), 0.918 m off the middle line
+# (the game's 0.95 kept). Read as the position at the stance, carried forward by [4]'s stride to contact
+# (§5.3's knots) [E: the reading; §5.3 says why and what would settle it].
+P_STANCE = (-0.95, 0.432 - 0.708, 0.0)
+# Where the middle pitch is met, y (swing.rs contact_y0) and its slope across the plate (contact_k).
+# Q51 (the owner's, open): Savant's average intercept is 0.505 m; the oracle gives every result at
+# 0.35 (today's) and 0.50 (§5.3, §6.7.8).
+CONTACT_Y0 = 0.35
+CONTACT_Y0_Q51 = 0.50
+CONTACT_K = 0.125
+
+
+def aim_at(x, z, y0=None, side=1):
+    """An aim at plate x, height z, on the contact depth rule: y0 + 0.125 m per metre inside of the
+    plate's centre (inside is −x for a right-hander)."""
+    return (x, (CONTACT_Y0 if y0 is None else y0) - side * CONTACT_K * x, z)
 
 # ---------------------------------------------------------------- linear algebra
 def solve(M, y):
@@ -260,7 +278,7 @@ def solve_chi(knot, H=1.85, P=P_TODAY, A_ref_deg=None, n=3600, A_knot_deg=None):
     return ok[0][1], sorted(mins)
 
 
-MIDDLE_MIDDLE = lambda H, y=0.35: (0.0, y, (v2.TEMPLATE['zone_bottom_frac'] + 0.5 * (v2.TEMPLATE['zone_top_frac'] - v2.TEMPLATE['zone_bottom_frac'])) * H)
+MIDDLE_MIDDLE = lambda H, y=None: (0.0, CONTACT_Y0 if y is None else y, (v2.TEMPLATE['zone_bottom_frac'] + 0.5 * (v2.TEMPLATE['zone_top_frac'] - v2.TEMPLATE['zone_bottom_frac'])) * H)
 
 
 def template_A_ref(H=1.85):
@@ -272,6 +290,7 @@ def template_A_ref(H=1.85):
 # ---------------------------------------------------------------- the template's own phase (§6.7)
 T_MEAN = 0.170             # s, the grade-50 batter's swing time, launch to contact (§4.3, §6.7.3) [owner's choice pending]
 V_TEMPLATE = 32.0          # m/s, the grade-50 BatSpeed (agent-models §10)
+LAM_W_MAX = 1.10           # [E] the hands' travel factor at most (§6.7.3, D28 refit): the lead arm straight at −93 ms
 I_HAT = -RATE4_RATIO.integral(0.0, -170.0) / 170.0     # [4]'s azimuth sweep from −170 ms over (contact rate × 170 ms)
 I_93 = -RATE4_RATIO.integral(0.0, 1e3 * T4_93) / 170.0   # the same from −93 ms
 
@@ -288,17 +307,29 @@ def unwrap_about(A0, A_ref):
     return A0
 
 
+E4_C = EL4(0.0) * DEG      # [4]'s bat elevation at contact (rad), −29.7°
+
+
+def h_scale(E_c):
+    """The rate shape's scale over the contact azimuth rate (§6.7.3, D28 refit): [4]'s shape is scaled to
+    the bat's horizontal turning rate Ȧ·cos E at contact, at [4]'s own contact elevation, so a bat met
+    steeper than [4]'s (a low pitch) turns faster in azimuth only where it is steep, near contact."""
+    return math.cos(E_c) / math.cos(E4_C)
+
+
 def template_knot_azimuths(H=1.85):
     """The template batter's bat azimuth at launch and at u_93 (rad): [4]'s rate shape from rest,
-    scaled to his middle-middle contact rate over T_MEAN (§6.7.3)."""
+    scaled to his middle-middle contact rate (horizontal, h_scale) over T_MEAN (§6.7.3)."""
     j = ref_jet(H)
-    return j.A[0] - j.A[1] * T_MEAN * I_HAT, j.A[0] - j.A[1] * T_MEAN * I_93
+    a1 = j.A[1] * h_scale(j.E[0])
+    return j.A[0] - a1 * T_MEAN * I_HAT, j.A[0] - a1 * T_MEAN * I_93
 
 
 _CHI = {}
 def template_chi():
-    """χ_L, χ_93 (rad): template constants (§6.1 step 4), computed at H = 1.85 m, today's P, with the
-    template's own knot azimuths (§6.7)."""
+    """χ_L, χ_93 (rad): template constants (§6.1 step 4), computed at H = 1.85 m with the template's own
+    knot azimuths (§6.7). Every length is relative to the body, so χ depends on neither the stance spot
+    nor the contact depth."""
     if not _CHI:
         A_ref = template_A_ref()
         AL, A93 = template_knot_azimuths()
@@ -644,13 +675,14 @@ def h_fade(u, u93, k=0):
 
 class Template(SwingStep1):
     """The grade-50 batter's swing at an aim (§6.3 in its own phase, §6.7.3): BatSpeed V_TEMPLATE,
-    effort 0, the launch azimuth of template_knot_azimuths, and the time T_t = (A_c − A_L)/(Ȧ_c·Î) so
-    that the azimuth is [4]'s rate shape, from rest, scaled to the contact rate; δ_A carries only the
-    jet's second derivative."""
+    effort 0, the launch azimuth of template_knot_azimuths, and the time T_t = (A_c − A_L)/(Ȧ_s·Î) so
+    that the azimuth is [4]'s rate shape, from rest, scaled to the horizontal contact rate
+    Ȧ_s = Ȧ_c·h_scale(E_c); δ_A carries the rest of the jet's rate (Ȧ_c − Ȧ_s, from a bat steeper than
+    [4]'s at contact) and its second derivative."""
 
     def __init__(self, aim, t_c=0.40, side=1, H=1.85, P=None, alpha=None, jet_yaw_deg=0.0):
         self.side, self.H, self.t_c, self.effort = side, H, t_c, 0.0
-        P = P if P is not None else ((P_TODAY[0] * side, P_TODAY[1], P_TODAY[2]))
+        P = P if P is not None else ((P_STANCE[0] * side, P_STANCE[1], P_STANCE[2]))
         self.P = (P[0] * side, P[1], P[2])
         self.A_ref = ref_jet(H, side=side).A[0]
         AL, _ = template_knot_azimuths(H)
@@ -658,7 +690,7 @@ class Template(SwingStep1):
         j0 = Jet(v2.Plan(aim, t_c, side, H, U_SS, V_TEMPLATE, alpha=alpha), side)
         if jet_yaw_deg:
             j0.yaw(jet_yaw_deg * DEG)
-        self.T = self.template_time(unwrap_about(j0.A[0], self.A_ref), j0.A[1], AL)
+        self.T = self.template_time(unwrap_about(j0.A[0], self.A_ref), j0.A[1] * h_scale(j0.E[0]), AL)
         self.plan = v2.Plan(aim, t_c, side, H, U_SS, V_TEMPLATE, t_swing=self.T, alpha=alpha)
         self.jet = Jet(self.plan, side)
         if jet_yaw_deg:
@@ -671,19 +703,39 @@ class Template(SwingStep1):
         (A0, A1, A2), (E0, E1, E2) = self.jet.A, self.jet.E
         self.A_c = (unwrap_about(A0, self.A_ref), A1, A2)
         self.E_c = (E0, E1, E2)
+        self.A1s = A1 * h_scale(E0)
         self.path = 'v3'
         self._build()
 
     @staticmethod
-    def template_time(A0, A1, A_L):
-        """T_t: the time in which [4]'s rate shape, scaled to the contact rate A1, covers A0 − A_L."""
-        return (A0 - A_L) / (A1 * I_HAT)
+    def template_time(A0, A1s, A_L):
+        """T_t: the time in which [4]'s rate shape, scaled to the horizontal contact rate A1s, covers
+        A0 − A_L."""
+        return (A0 - A_L) / (A1s * I_HAT)
+
+    def _baseA(self, u, k=0):
+        """[4]'s rate shape scaled to the horizontal contact rate Ȧ_s (§6.7.3)."""
+        A0, A1 = self.A_c[0], self.A1s
+        t = 1e3 * T4 * u
+        if k == 0: return A0 + A1 * self.T / (1e3 * T4) * RATE4_RATIO.integral(0.0, t)
+        if k == 1: return A1 * self.T * RATE4_RATIO(t)
+        return A1 * self.T * 1e3 * T4 * RATE4_RATIO(t, 1)
+
+    def _baseE(self, u, k=0):
+        """[4]'s elevation from −93 ms (39° there), and the aim's own contact elevation reached by an
+        offset ΔE = E_c − [4]'s contact elevation (from 39°), the C2 smoothstep from u_93 to u_w: the bat
+        on a low pitch is lower through the swing, not only at contact ([4] §4.2.1). Replaces step 1's
+        κ-scaled fall (§6.3)."""
+        t = 1e3 * T4 * u
+        x, L = (u - self.u93) / (self.uw - self.u93), self.uw - self.u93
+        if k == 0: return ARMS['93']['bat_elev'] * DEG + (EL4(t) - EL4(1e3 * T4_93)) * DEG + self.E_off * smoothstep(x)
+        return (1e3 * T4) ** k * EL4(t, k) * DEG + self.E_off * smoothstep(x, k) / L ** k
 
     def _build_v3(self):
         T, u93, uw = self.T, self.tau93 / self.T, T4_W / (1e3 * T4)
         self.u93, self.uw = u93, uw
         A0, A1, A2 = self.A_c
-        self.kappa = (self.E_c[0] - ARMS['93']['bat_elev'] * DEG) / ((EL4(0.0) - EL4(1e3 * T4_93)) * DEG)
+        self.E_off = self.E_c[0] - (ARMS['93']['bat_elev'] * DEG + (EL4(0.0) - EL4(1e3 * T4_93)) * DEG)
         bA = self._baseA
         self.dA = poly_fit([(u93, 0, 0.0), (u93, 1, 0.0), (u93, 2, 0.0),
                             (0.0, 0, A0 - bA(0.0)), (0.0, 1, A1 * T - bA(0.0, 1)), (0.0, 2, A2 * T * T - bA(0.0, 2))])
@@ -720,7 +772,7 @@ class Swing(SwingStep1):
             self.jet.yaw(jet_yaw_deg * DEG)
         self.sT = self.T / T4
         self.tau93 = T4_93 * self.sT
-        self.u93, self.uw, self.kappa = tm.u93, tm.uw, tm.kappa
+        self.u93, self.uw, self.E_off = tm.u93, tm.uw, tm.E_off
         self.bodies = tm.bodies
         self.S_knots = [(-self.T, self.bodies['L'].S), (self.tau93, self.bodies['93'].S), (0.0, self.bodies['c'].S)]
         (A0, A1, A2), (E0, E1, E2) = self.jet.A, self.jet.E
@@ -730,11 +782,17 @@ class Swing(SwingStep1):
         own = [self.A_c, self.E_c] + [(W0[i], W1[i], W2[i]) for i in range(3)]
         self._f = [lambda u, k: tm.curves(u, k)[0], lambda u, k: tm.curves(u, k)[1]] + \
                   [(lambda i: lambda u, k: tm.hands(u, k)[i])(i) for i in range(3)]
-        T, lam, u93 = self.T, self.lam, self.u93
+        T, u93 = self.T, self.u93
+        # The hands' travel factor (D28 refit, §6.7.3): λ, but at most LAM_W_MAX: a long swing's hands
+        # go back with it until the lead arm is straight at −93 ms (the template's lead arm has 7.4 cm
+        # of slack there, about a tenth of the hands' way to contact); the rest of the travel is the
+        # bat's (A, E). Scaled with λ by a re-plan.
+        self.lam_W = self.lam * min(1.0, LAM_W_MAX / self.lam_nom)
+        self._lams = [self.lam, self.lam] + [self.lam_W] * 3
         self._x0 = [o[0] for o in own]
         self._corr = [poly_fit([(u93, 0, 0.0), (u93, 1, 0.0), (u93, 2, 0.0), (0.0, 0, 0.0),
                                 (0.0, 1, o[1] * T - lam * f(0.0, 1)), (0.0, 2, o[2] * T * T - lam * f(0.0, 2))])
-                      for o, f in zip(own, self._f)]
+                      for o, f, lam in zip(own, self._f, self._lams)]
         ref = ref_jet(H, bat_speed, side, effort, t_c)
         self.X_ref = [unwrap_about(ref.A[0], tm.A_ref), ref.E[0]] + list(ref.W[0])
         L_t = [f(-1.0, 0) for f in self._f]
@@ -742,10 +800,10 @@ class Swing(SwingStep1):
         # pose by λ; the hands by min(λ, 1): a short swing starts with the hands nearer the ball, a long
         # one at [4]'s launch hands (built from [4]'s arm angles on his own segments, §6.1; scaled
         # past them they leave the lead arm's reach, review P2-1).
-        lam_W = min(self.lam_nom, 1.0)
+        lam_WL = min(self.lam_nom, 1.0)
         self.X_L = [r + self.lam_nom * (l - r) for r, l in zip(self.X_ref[:2], L_t[:2])] + \
-                   [r + lam_W * (l - r) for r, l in zip(self.X_ref[2:], L_t[2:])]
-        self._fade = [xl - (x0 + lam * (l - f(0.0, 0))) for xl, x0, l, f in zip(self.X_L, self._x0, L_t, self._f)]
+                   [r + lam_WL * (l - r) for r, l in zip(self.X_ref[2:], L_t[2:])]
+        self._fade = [xl - (x0 + lam * (l - f(0.0, 0))) for xl, x0, l, f, lam in zip(self.X_L, self._x0, L_t, self._f, self._lams)]
         self.A_L, self.E_L = self.X_L[0], self.X_L[1]
         self.W_L = tuple(self.X_L[2:])
 
@@ -766,8 +824,8 @@ class Swing(SwingStep1):
 
     def coord(self, i, u, k=0):
         """Coordinate i (A, E, W_x, W_y, W_z) and its k-th derivative in u, on [−1, 0]."""
-        f = self._f[i]
-        v = (self._x0[i] + self.lam * (f(u, 0) - f(0.0, 0))) if k == 0 else self.lam * f(u, k)
+        f, lam = self._f[i], self._lams[i]
+        v = (self._x0[i] + lam * (f(u, 0) - f(0.0, 0))) if k == 0 else lam * f(u, k)
         if u >= self.u93:
             v += poly_eval(self._corr[i], u, k)
         return v + self._fade[i] * h_fade(u, self.u93, k)
@@ -888,7 +946,7 @@ def diagnostics(sw, dt=0.0005):
         knob_v.append(nrm(sub(x[5], sc(a1, U_G))))
     # The arms' reach (review P2-1): each shoulder to the hands at the body's knots, over a straight arm.
     arms = {}
-    for knot, tk in (('L', -T), ('93', sw.tau93)):
+    for knot, tk in (('L', -T), ('93', sw.tau93), ('c', 0.0)):
         b = sw.bodies[knot]
         W = sw.state_rh(tk)[4]
         straight = (SEG['upper_arm'] + SEG['forearm']) * sw.H
@@ -932,6 +990,7 @@ def diagnostics(sw, dt=0.0005):
         rate_worst_dip=worst_dip(Ad, floor=0.0), ss_worst_dip=worst_dip(ss_all), T=sw.T, A_L=sw.A_L / DEG, E_L=sw.E_L / DEG,
         hands_worst_dip=worst_dip(hand_v), knob_worst_dip=worst_dip(knob_v),
         lead_arm_over_L=arms['L'][0], rear_arm_over_L=arms['L'][1], lead_arm_over_93=arms['93'][0], rear_arm_over_93=arms['93'][1],
+        lead_arm_over_c=arms['c'][0], rear_arm_over_c=arms['c'][1],
         start_slack=start_slack(sw),
         tip_toward_plate_peak=tipv[ix][0], tip_toward_plate_tau=taus[ix],
         tip_down_peak=-tipv[iz][2], tip_down_tau=taus[iz],
@@ -950,7 +1009,10 @@ E_RANGE = (-45.0, 65.0)   # [E] a plausibility guard: the longest swings (travel
 
 
 RATE_DIP_TOL = 5e-3    # [E] one surge: no valley in the azimuth rate deeper than 0.5% (its flat top near contact ripples by up to 0.33% when the attack angle is changed by 4°)
-SPEED_DIP_TOL = 0.02   # [E] the sweet spot's, the hands' and the knob's speed: 2% (a flat top before contact ripples by up to 1.9%)
+SPEED_DIP_TOL = 0.02   # [E] the sweet spot's and the hands' speed: 2% (a flat top before contact ripples by up to 1.9%)
+KNOB_DIP_TOL = 0.03    # [E] the knob's: 3%. The knob is 8 cm behind the hands on the bat: as the bat whips at [4]'s rate
+                       # peak (−10 ms) while the hands slow into contact, it is pushed back (largest 2.8%, the shortest
+                       # swing at low-outside; the hands themselves 0.5%)
 SURGE_FLOOR = 0.25     # [E] valleys counted once the speed passes a quarter of its contact value
 ARM_SLACK = 0.02       # m [E] each arm at most 2 cm past straight at the knots (the template's own residual at L is 1.1 cm, §6.1)
 T_LATENCY = 0.050      # s, agent-models §3.4: the decision to the swing's start (the bat at 10% of its peak speed)
@@ -971,7 +1033,7 @@ def range_failures(d, H=1.85):
     if not all(math.isfinite(v) for v in d.values()): bad.append('finite')
     if d['min_Adot'] < -1e-6: bad.append('A non-decreasing')
     if d['rate_worst_dip'] > RATE_DIP_TOL or d['ss_worst_dip'] > SPEED_DIP_TOL: bad.append('one surge')
-    if d['hands_worst_dip'] > SPEED_DIP_TOL or d['knob_worst_dip'] > SPEED_DIP_TOL: bad.append('hands one surge')
+    if d['hands_worst_dip'] > SPEED_DIP_TOL or d['knob_worst_dip'] > KNOB_DIP_TOL: bad.append('hands one surge')
     if max(d['lead_arm_over_L'], d['rear_arm_over_L'], d['lead_arm_over_93'], d['rear_arm_over_93']) > ARM_SLACK: bad.append('arms reach')
     if not (E_RANGE[0] <= d['E_min'] and d['E_max'] <= E_RANGE[1]): bad.append('E range')
     if d['ss_ratio_max'] > SS_RATIO_MAX: bad.append('sweet-spot speed')
@@ -1001,7 +1063,7 @@ def rating_cases(coarse=False):
     qlo, qhi = QUICKHANDS_RHO ** -3, QUICKHANDS_RHO ** 3
     for x in xs:
         for z in zs:
-            aim = (x, 0.35 - 0.125 * x, z)
+            aim = aim_at(x, z)
             for f, q in ((lo, 1.0), (hi, 1.0), (1.0, qlo), (1.0, qhi), (lo, qhi), (hi, qlo), (lo, qlo), (hi, qhi)):
                 corner = f > 1.0 and q > 1.0       # the long corner: the longest swing the ratings give
                 out.append(dict(aim=aim, bat_speed=V_TEMPLATE * f, t_swing=T_MEAN * q, corner=corner))
@@ -1021,7 +1083,7 @@ def range_cases(coarse=False):
     out = []
     for x in xs:
         for z in zs:
-            aim = (x, 0.35 - 0.125 * x, z)
+            aim = aim_at(x, z)
             for T in ((T_MEAN,) if coarse else (T_MEAN * QUICKHANDS_RHO ** -3, T_MEAN, T_MEAN * QUICKHANDS_RHO ** 3)):
                 base = v2.Plan(aim, 0.40, 1, H, U_SS, 32.0)
                 for dal in ((0.0,) if coarse else (-4.0, 0.0, 4.0)):
@@ -1029,25 +1091,25 @@ def range_cases(coarse=False):
                     out.append(kw)
     if not coarse:
         for e in (-0.10, 0.10):
-            for aim in ((0.0, 0.35, 0.745), (-0.45, 0.406, 0.35), (0.45, 0.294, 1.14)):
+            for aim in (aim_at(0.0, 0.745), aim_at(-0.45, 0.35), aim_at(0.45, 1.14)):
                 out.append(dict(aim=aim, effort=e))
-        for aim in ((0.0, 0.35, 0.745), (0.45, 0.406, 0.35), (-0.45, 0.294, 1.14)):
+        for aim in (aim_at(0.0, 0.745), aim_at(0.45, 0.35, side=-1), aim_at(-0.45, 1.14, side=-1)):
             out.append(dict(aim=aim, side=-1))
     # Swing time crossed with BatSpeed and effort (±3 sd each), on the zone's corners, the middle and
     # the low and high edges (P2-2 of the step-1 review; §6.7.4).
     if not coarse:
-        cross_aims = ((0.0, 0.35, 0.745), (-0.25, 0.38125, 0.50), (0.25, 0.31875, 0.50), (-0.25, 0.38125, 0.99),
-                      (0.25, 0.31875, 0.99), (0.45, 0.29375, 0.35), (-0.45, 0.40625, 0.35), (-0.45, 0.40625, 1.14))
+        cross_aims = (aim_at(0.0, 0.745), aim_at(-0.25, 0.50), aim_at(0.25, 0.50), aim_at(-0.25, 0.99),
+                      aim_at(0.25, 0.99), aim_at(0.45, 0.35), aim_at(-0.45, 0.35), aim_at(-0.45, 1.14))
         for aim in cross_aims:
             for q in (QUICKHANDS_RHO ** -3, 1.0, QUICKHANDS_RHO ** 3):
                 for f in SPEED_FACTORS:
                     out.append(dict(aim=aim, t_swing=T_MEAN * q, bat_speed=32.0 * f))
         for f in SPEED_FACTORS:
-            out.append(dict(aim=(0.0, 0.35, 0.745), side=-1, bat_speed=32.0 * f))
+            out.append(dict(aim=aim_at(0.0, 0.745), side=-1, bat_speed=32.0 * f))
         for e in (-0.135, 0.135):
-            out.append(dict(aim=(0.0, 0.35, 0.745), side=-1, effort=e))
+            out.append(dict(aim=aim_at(0.0, 0.745), side=-1, effort=e))
     for target in range(-25, 51, 15 if coarse else 5):
-        for aim in (((0.0, 0.35, 0.745),) if coarse else ((0.0, 0.35, 0.745), (-0.20, 0.375, 0.56), (0.22, 0.3225, 0.93))):
+        for aim in ((aim_at(0.0, 0.745),) if coarse else (aim_at(0.0, 0.745), aim_at(-0.20, 0.56), aim_at(0.22, 0.93))):
             a0 = Jet(v2.Plan(aim, 0.40, 1, H, U_SS, 32.0)).A[0] / DEG
             out.append(dict(aim=aim, jet_yaw_deg=target - a0))
     return out
@@ -1063,10 +1125,10 @@ def aim_range(coarse=False):
 
 
 # ---------------------------------------------------------------- bounds from the sources (§11)
-GOLDEN_AIMS = {'rhb_middle': (0.0, 0.35, 0.745), 'rhb_inside_low': (-0.20, 0.375, 0.56), 'rhb_outside_high': (0.22, 0.3225, 0.93)}
+GOLDEN_AIMS = {'rhb_middle': aim_at(0.0, 0.745), 'rhb_inside_low': aim_at(-0.20, 0.56), 'rhb_outside_high': aim_at(0.22, 0.93)}
 # [4] Table 1's five locations, on the golden aims' columns and rows.
-LOCATION_AIMS = {'MIDDLE': (0.0, 0.35, 0.745), 'HIGH IN': (-0.20, 0.375, 0.93), 'HIGH OUT': (0.22, 0.3225, 0.93),
-                 'LOW IN': (-0.20, 0.375, 0.56), 'LOW OUT': (0.22, 0.3225, 0.56)}
+LOCATION_AIMS = {'MIDDLE': aim_at(0.0, 0.745), 'HIGH IN': aim_at(-0.20, 0.93), 'HIGH OUT': aim_at(0.22, 0.93),
+                 'LOW IN': aim_at(-0.20, 0.56), 'LOW OUT': aim_at(0.22, 0.56)}
 LAG_AT_CONTACT_4 = {'MIDDLE': 65.0, 'HIGH IN': 79.0, 'HIGH OUT': 63.0, 'LOW IN': 58.0, 'LOW OUT': 51.0}
 
 
@@ -1219,7 +1281,7 @@ def family_report():
         n = 400
         pts = [sw.point(sw.t_c + t0 + (-t0) * i / n, BAT_L) for i in range(n + 1)]
         return sum(nrm(sub(pts[i + 1], pts[i])) for i in range(n)) / 0.3048
-    M = (0.0, 0.35, 0.745)
+    M = aim_at(0.0, 0.745)
     across, within = [], []
     for f in (1 - 3 * BATSPEED_SD, 1 - 1.5 * BATSPEED_SD, 1.0, 1 + 1.5 * BATSPEED_SD, 1 + 3 * BATSPEED_SD):
         sw = Swing(M, bat_speed=V_TEMPLATE * f)
@@ -1234,7 +1296,7 @@ def family_report():
                            ss_ratio_tau=d['ss_ratio_tau']))
     grid = {}
     for z in (0.35, 0.55, 0.75, 0.95, 1.14):
-        grid['%.2f' % z] = [Template((x, 0.35 - 0.125 * x, z)).T for x in (-0.45, -0.30, -0.15, 0.0, 0.15, 0.30, 0.45)]
+        grid['%.2f' % z] = [Template(aim_at(x, z)).T for x in (-0.45, -0.30, -0.15, 0.0, 0.15, 0.30, 0.45)]
     return dict(across=across, within=within, template_T_by_aim=grid, late_vs_today=family_late())
 
 
@@ -1304,13 +1366,13 @@ def golden(skip=()):
     # 3. the jets; 4. path samples; 7. T_swing
     jets, paths = [], []
     q3, f3 = QUICKHANDS_RHO ** 3, 3 * BATSPEED_SD
-    M = (0.0, 0.35, 0.745)
-    cases = [('rhb_middle', M, 1, T_MEAN, 32.0, 0.0), ('rhb_inside_low', (-0.20, 0.375, 0.56), 1, T_MEAN, 32.0, 0.0),
-             ('rhb_outside_high', (0.22, 0.3225, 0.93), 1, T_MEAN, 32.0, 0.0), ('lhb_middle_quick', (0.05, 0.344, 0.70), -1, T_MEAN / q3, 32.0, 0.0),
+    M = aim_at(0.0, 0.745)
+    cases = [('rhb_middle', M, 1, T_MEAN, 32.0, 0.0), ('rhb_inside_low', aim_at(-0.20, 0.56), 1, T_MEAN, 32.0, 0.0),
+             ('rhb_outside_high', aim_at(0.22, 0.93), 1, T_MEAN, 32.0, 0.0), ('lhb_middle_quick', aim_at(0.05, 0.70, side=-1), -1, T_MEAN / q3, 32.0, 0.0),
              ('rhb_middle_quick_hands', M, 1, T_MEAN / q3, 32.0, 0.0), ('rhb_middle_slow_hands', M, 1, T_MEAN * q3, 32.0, 0.0),
              ('rhb_middle_slow_bat', M, 1, T_MEAN, 32.0 * (1 - f3), 0.0), ('rhb_middle_fast_bat', M, 1, T_MEAN, 32.0 * (1 + f3), 0.0),
              ('rhb_middle_easy', M, 1, T_MEAN, 32.0, -0.09), ('rhb_middle_hard', M, 1, T_MEAN, 32.0, 0.09),
-             ('rhb_inside_low_long', (-0.20, 0.375, 0.56), 1, T_MEAN * q3, 32.0 * (1 + f3), 0.0)]
+             ('rhb_inside_low_long', aim_at(-0.20, 0.56), 1, T_MEAN * q3, 32.0 * (1 + f3), 0.0)]
     for name, aim, side, Tb, v, e in cases:
         sw = Swing(aim, side=side, t_swing=Tb, bat_speed=v, effort=e)
         T = sw.T
