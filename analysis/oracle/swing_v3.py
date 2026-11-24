@@ -196,6 +196,16 @@ def lead_reach(H, flex_deg):
     return math.sqrt(lu * lu + lf * lf + 2 * lu * lf * math.cos(flex_deg * DEG))
 
 
+def smoothstep(x, k=0):
+    """The quintic smoothstep 10x³ − 15x⁴ + 6x⁵ on [0, 1] (zero rate and acceleration at both ends)
+    and its derivatives."""
+    if x <= 0.0: return 0.0
+    if x >= 1.0: return 1.0 if k == 0 else 0.0
+    if k == 0: return x ** 3 * (10 - 15 * x + 6 * x * x)
+    if k == 1: return 30 * x * x * (1 - x) ** 2
+    return 60 * x * (1 - x) * (1 - 2 * x)
+
+
 def bat_dir(A, E):
     """§4.2 (radians in)."""
     return (math.cos(E) * math.cos(A), math.cos(E) * math.sin(A), math.sin(E))
@@ -411,21 +421,47 @@ class Swing:
         T, u93, uw = self.T, self.tau93 / self.T, T4_W / (1e3 * T4)
         self.u93, self.uw = u93, uw
         A0, A1, A2 = self.A_c
-        E0, E1, E2 = self.E_c
+        E0 = self.E_c[0]
         self.kappa = (E0 - ARMS['93']['bat_elev'] * DEG) / ((EL4(0.0) - EL4(1e3 * T4_93)) * DEG)
-        bA, bE = self._baseA, self._baseE
+        bA = self._baseA
         self.dA = poly_fit([(u93, 0, A0 - SWEEP_93 * DEG - bA(u93)), (u93, 1, 0.0), (u93, 2, 0.0),
                             (0.0, 0, A0 - bA(0.0)), (0.0, 1, A1 * T - bA(0.0, 1)), (0.0, 2, A2 * T * T - bA(0.0, 2))])
-        self.dE = poly_fit([(uw, 0, 0.0), (uw, 1, 0.0), (uw, 2, 0.0),
-                            (0.0, 0, E0 - bE(0.0)), (0.0, 1, E1 * T - bE(0.0, 1)), (0.0, 2, E2 * T * T - bE(0.0, 2))])
         self.c1A = poly_fit([(-1.0, 0, self.A_L), (-1.0, 1, 0.0), (-1.0, 2, 0.0)] + [(u93, k, self._seg2A(u93, k)) for k in range(3)])
         self.c1E = poly_fit([(-1.0, 0, self.E_L), (-1.0, 1, 0.0), (-1.0, 2, 0.0)] + [(u93, k, self._seg2E(u93, k)) for k in range(3)])
 
     def _seg2A(self, u, k=0):
         return self._baseA(u, k) + poly_eval(self.dA, u, k)
 
+    def _v2_elevation(self, u):
+        """v2's own elevation at u and its first two derivatives in u (§6.3's blend). v2's bat turns
+        about n̂ by θ(τ), the integral of its Gaussian rate bump (closed form in erf here; v2's own
+        oracle integrates it numerically), times (1 + effort)."""
+        p, e, tau = self.plan, 1.0 + self.effort, u * self.T
+        c = math.sqrt(2.0) * p.w_b
+        norm = math.exp(-0.5 * (p.tau_b / p.w_b) ** 2)
+        th = e * p.k * p.w_b * math.sqrt(math.pi / 2) / norm * (math.erf((tau - p.tau_b) / c) - math.erf(-p.tau_b / c))
+        th1 = e * p.k * math.exp(-0.5 * ((tau - p.tau_b) / p.w_b) ** 2) / norm
+        th2 = -th1 * (tau - p.tau_b) / p.w_b ** 2
+        a = v2.rotate(p.a_c, p.n, th)
+        na = cross(p.n, a)
+        a1 = sc(na, th1)
+        a2 = add(sc(na, th2), sc(cross(p.n, na), th1 * th1))
+        _, (E0, E1, E2) = angles_and_derivs(a, a1, a2)   # the elevation does not change under the mirror
+        return E0, E1 * self.T, E2 * self.T ** 2
+
     def _seg2E(self, u, k=0):
-        return self._baseE(u, k) + (poly_eval(self.dE, u, k) if u > self.uw else 0.0)
+        """[4]'s elevation (scaled by κ) to u_w, then blended into v2's own elevation curve by a C2
+        smoothstep w over [u_w, 0] (§6.3): E = (1 − w)·B + w·V."""
+        if u <= self.uw:
+            return self._baseE(u, k)
+        L = -self.uw
+        x = (u - self.uw) / L
+        w, w1, w2 = smoothstep(x), smoothstep(x, 1) / L, smoothstep(x, 2) / L ** 2
+        B = [self._baseE(u, j) for j in range(k + 1)]
+        V = self._v2_elevation(u)
+        if k == 0: return (1 - w) * B[0] + w * V[0]
+        if k == 1: return (1 - w) * B[1] + w * V[1] + w1 * (V[0] - B[0])
+        return (1 - w) * B[2] + w * V[2] + 2 * w1 * (V[1] - B[1]) + w2 * (V[0] - B[0])
 
     def curves(self, u, k=0):
         """A, E (rad) and their k-th derivatives in u, on [−1, 0]."""
@@ -605,14 +641,18 @@ def diagnostics(sw, dt=0.0005):
     ilm = max(range(len(lag)), key=lambda i: lag[i])
     lagr = [(lag[i + 1] - lag[i - 1]) / (2 * dt) for i in range(1, n)]
     iun = min(range(len(lagr)), key=lambda i: lagr[i])
-    def armaz(i):
-        a = sub(st[i][4], sw.S_rh(taus[i])); return math.atan2(a[1], a[0])
+    # The arm vector a = W − S turning about the trunk axis, as [3] measures segment rotation
+    # ("about the trunk axis, mid-hips to mid-shoulders"): ω_arm·t̂ with ω_arm = a × ȧ / |a|² and t̂
+    # the unit vector from the mid-hips to the clavicle.
     arm = []
-    for i in range(1, n):
-        d = armaz(i + 1) - armaz(i - 1)
-        d = (d + math.pi) % (2 * math.pi) - math.pi
-        arm.append(d / (2 * dt) / DEG)
+    for x, t in zip(st[1:-1], taus[1:-1]):
+        a, ad = sub(x[4], sw.S_rh(t)), sub(x[5], sw.S_rh(t, 1))
+        tt = unit(sub(sw.S_rh(t), sw.O_rh(t)))
+        arm.append(dot(cross(a, ad), tt) / dot(a, a) / DEG)
     iar = max(range(len(arm)), key=lambda i: arm[i])
+    # One surge (§6.3): from −93 ms to contact the azimuth rate never falls below its −93 ms value.
+    i93 = min(range(n + 1), key=lambda i: abs(taus[i] - sw.tau93))
+    rate_dip = min(Ad[i93:]) / Ad[i93]
     tipv = [sw.point_velocity(sw.t_c + t, BAT_L) for t in taus[:-1]]
     if sw.side == -1:
         tipv = [mirror(v) for v in tipv]
@@ -648,7 +688,7 @@ def diagnostics(sw, dt=0.0005):
         clear_torso=clear_torso, clear_head=clear_head,
         lag_L=lag[0], lag_93=sw.lag(sw.tau93), lag_c=lag[-1], lag_max=lag[ilm], lag_max_tau=taus[ilm],
         uncock_peak=-lagr[iun], uncock_tau=taus[iun + 1],
-        arm_rate_peak=arm[iar], arm_rate_tau=taus[iar + 1],
+        arm_rate_peak=arm[iar], arm_rate_tau=taus[iar + 1], rate_dip_after_93=rate_dip, rate_93_over_c=Ad[i93] / (sw.A_c[1] / DEG),
         tip_toward_plate_peak=tipv[ix][0], tip_toward_plate_tau=taus[ix],
         tip_down_peak=-tipv[iz][2], tip_down_tau=taus[iz],
         hands_ahead_c=dot(sub(Wc, sw.S_rh(0.0)), bc.xT),
@@ -670,12 +710,16 @@ def range_failures(d, H=1.85):
     bad = []
     if not all(math.isfinite(v) for v in d.values()): bad.append('finite')
     if d['min_Adot'] < -1e-6: bad.append('A non-decreasing')
+    if d['rate_dip_after_93'] < 1.0 - 1e-6: bad.append('one surge')
     if not (E_RANGE[0] <= d['E_min'] and d['E_max'] <= E_RANGE[1]): bad.append('E range')
     if d['ss_ratio_max'] > SS_RATIO_MAX: bad.append('sweet-spot speed')
     if d['tip_ratio_max'] > TIP_RATIO_MAX: bad.append('tip speed')
     if not (0.15 <= d['reach_min'] and d['reach_max'] <= FULL_REACH * H): bad.append('hands within reach')
     if d['clear_torso'] < 0.0 or d['clear_head'] < 0.0: bad.append('bat through the body')
     return bad
+
+
+SPEED_FACTORS = (0.82, 0.88, 0.94, 1.06, 1.12, 1.18)
 
 
 def range_cases(coarse=False):
@@ -700,6 +744,18 @@ def range_cases(coarse=False):
                 out.append(dict(aim=aim, effort=e))
         for aim in ((0.0, 0.35, 0.745), (0.45, 0.406, 0.35), (-0.45, 0.294, 1.14)):
             out.append(dict(aim=aim, side=-1))
+    # Swing time crossed with the swing's speed (BatSpeed × (1 + effort) over 32 m/s: the game's
+    # σ are 3.9% and 4.5%, about 6% together, so 0.82-1.18 is ±3 sd), on the zone's corners, the
+    # middle and the low and high edges (P2-2 of the step-1 review).
+    if not coarse:
+        cross_aims = ((0.0, 0.35, 0.745), (-0.25, 0.38125, 0.50), (0.25, 0.31875, 0.50), (-0.25, 0.38125, 0.99),
+                      (0.25, 0.31875, 0.99), (0.45, 0.29375, 0.35), (-0.45, 0.40625, 0.35), (-0.45, 0.40625, 1.14))
+        for aim in cross_aims:
+            for T in (0.130, 0.150, 0.174):
+                for f in SPEED_FACTORS:
+                    out.append(dict(aim=aim, t_swing=T, bat_speed=32.0 * f))
+        for f in SPEED_FACTORS:
+            out.append(dict(aim=(0.0, 0.35, 0.745), side=-1, bat_speed=32.0 * f))
     for target in range(-25, 51, 15 if coarse else 5):
         for aim in (((0.0, 0.35, 0.745),) if coarse else ((0.0, 0.35, 0.745), (-0.20, 0.375, 0.56), (0.22, 0.3225, 0.93))):
             a0 = Jet(v2.Plan(aim, 0.40, 1, H, U_SS, 32.0)).A[0] / DEG
@@ -722,6 +778,9 @@ GOLDEN_AIMS = {'rhb_middle': (0.0, 0.35, 0.745), 'rhb_inside_low': (-0.20, 0.375
 LOCATION_AIMS = {'MIDDLE': (0.0, 0.35, 0.745), 'HIGH IN': (-0.20, 0.375, 0.93), 'HIGH OUT': (0.22, 0.3225, 0.93),
                  'LOW IN': (-0.20, 0.375, 0.56), 'LOW OUT': (0.22, 0.3225, 0.56)}
 LAG_AT_CONTACT_4 = {'MIDDLE': 65.0, 'HIGH IN': 79.0, 'HIGH OUT': 63.0, 'LOW IN': 58.0, 'LOW OUT': 51.0}
+
+
+ATTACK_SLOPE_TOL = 0.15   # [E]: about a third of MLB's +0.41 per degree (agent-models §3.6); v2's games give +0.44
 
 
 def bounds(sw, d=None):
@@ -747,6 +806,8 @@ def bounds(sw, d=None):
     chk('plane tilt over the last 40 ms - beta (deg)', d['plane_tilt_40ms'] - d['beta'], -1.5, 1.5)
     chk('head travel in the last 65 ms (ft)', d['head_travel_65ms_ft'], 7.3 - 0.7, 7.3 + 0.7)
     chk('knob (hands) speed at contact (m/s)', d['knob_speed_c'], 6.0, 9.0)
+    sl3, sl2 = attack_slope(sw), attack_slope(sw, v2_path=True)
+    chk('attack-angle slope on attack direction within the swing (±10 ms), v3 - v2', sl3 - sl2, -ATTACK_SLOPE_TOL, ATTACK_SLOPE_TOL)
     return out
 
 
@@ -762,21 +823,49 @@ def appendix_e_compare(sw):
     return rows
 
 
+def attack(v, side):
+    """Attack angle (the velocity's elevation) and attack direction (its horizontal direction,
+    pull +: pull is −x for a right-hander), deg, from a sim-frame velocity (agent-models §3.6)."""
+    return (math.degrees(math.atan2(v[2], math.hypot(v[0], v[1]))),
+            math.degrees(math.atan2(-side * v[0], v[1])))
+
+
+V2_DIFF_TAUS_MS = (-25.0, -15.0, -10.0, -8.0, -5.0, -3.0)
+
+
 def v2_difference(sw):
-    """§6.5: v3 − v2 azimuth and elevation, sweet-spot speeds, before contact."""
+    """§6.5: v3 − v2 bat azimuth and elevation, the sweet spot's attack angle and direction, and
+    the sweet-spot speeds, before contact."""
     p = sw.plan
     out = []
-    for tau in (-0.025, -0.015, -0.010, -0.005):
+    for ms in V2_DIFF_TAUS_MS:
+        tau = ms * 1e-3
         k, a = p.knob_axis(sw.t_c + tau)
         if sw.side == -1: a = mirror(a)
         A2, E2 = math.atan2(a[1], a[0]), math.asin(a[2])
         A, _, E, _, _, _ = sw.state_rh(tau)
         while A2 < A - math.pi: A2 += 2 * math.pi
         while A2 > A + math.pi: A2 -= 2 * math.pi
-        out.append(dict(tau_ms=tau * 1e3, dA=(A - A2) / DEG, dE=(E - E2) / DEG,
-                        ss_v3_mph=nrm(sw.point_velocity(sw.t_c + tau, U_SS)) / MPH,
-                        ss_v2_mph=nrm(p.velocity(sw.t_c + tau, U_SS)) / MPH))
+        v3v, v2v = sw.point_velocity(sw.t_c + tau, U_SS), p.velocity(sw.t_c + tau, U_SS)
+        (aa3, ad3), (aa2, ad2) = attack(v3v, sw.side), attack(v2v, sw.side)
+        out.append(dict(tau_ms=ms, dA=(A - A2) / DEG, dE=(E - E2) / DEG,
+                        attack_angle_v3=aa3, attack_angle_v2=aa2, attack_direction_v3=ad3, attack_direction_v2=ad2,
+                        ss_v3_mph=nrm(v3v) / MPH, ss_v2_mph=nrm(v2v) / MPH))
     return out
+
+
+def attack_slope(sw, lo_ms=-10.0, hi_ms=10.0, step_ms=0.25, v2_path=False):
+    """Within one swing, the least-squares slope of attack angle on attack direction over contact
+    timings from lo to hi ms (MLB's slope across swings: +0.41 per degree; v2's games +0.44)."""
+    xs, ys = [], []
+    n = int(round((hi_ms - lo_ms) / step_ms))
+    for i in range(n + 1):
+        t = sw.t_c + (lo_ms + i * step_ms) * 1e-3
+        v = sw.plan.velocity(t, U_SS) if v2_path else sw.point_velocity(t, U_SS)
+        aa, ad = attack(v, sw.side)
+        xs.append(ad); ys.append(aa)
+    mx, my = sum(xs) / len(xs), sum(ys) / len(ys)
+    return sum((x - mx) * (y - my) for x, y in zip(xs, ys)) / sum((x - mx) ** 2 for x in xs)
 
 
 # ---------------------------------------------------------------- the golden file (§11)
@@ -794,7 +883,8 @@ def basis_matrix(nodes):
     return [[cols[i][j] for i in range(n)] for j in range(n)]
 
 
-def golden():
+def golden(skip=()):
+    """Every section of golden/swing_v3.json; `skip` leaves out the slow ones (the tests)."""
     H, P = 1.85, P_TODAY
     chi = template_chi()
     u93, uw = T4_93 / T4, T4_W / (1e3 * T4)
@@ -812,8 +902,7 @@ def golden():
                                 coeffs=basis_matrix([(-1.0, 0), (-1.0, 1), (-1.0, 2), (u93, 0), (u93, 1), (u93, 2)])),
             azimuth_correction=dict(nodes=[[u93, 0], [u93, 1], [u93, 2], [0.0, 0], [0.0, 1], [0.0, 2]],
                                     coeffs=basis_matrix([(u93, 0), (u93, 1), (u93, 2), (0.0, 0), (0.0, 1), (0.0, 2)])),
-            elevation_correction=dict(nodes=[[uw, 0], [uw, 1], [uw, 2], [0.0, 0], [0.0, 1], [0.0, 2]],
-                                      coeffs=basis_matrix([(uw, 0), (uw, 1), (uw, 2), (0.0, 0), (0.0, 1), (0.0, 2)])),
+            elevation_blend='E = (1 - w) B + w V on [uw, 0], w = 10x^3 - 15x^4 + 6x^5, x = (u - uw)/(-uw); V = v2 elevation',
             hands_sextic=dict(nodes=[[-1.0, 0], [-1.0, 1], [-1.0, 2], [u93, 0], [0.0, 0], [0.0, 1], [0.0, 2]],
                               coeffs=basis_matrix([(-1.0, 0), (-1.0, 1), (-1.0, 2), (u93, 0), (0.0, 0), (0.0, 1), (0.0, 2)]))),
         note='Angles in degrees where named _deg, else radians; positions m; times s unless _ms; sim frame.')
@@ -881,18 +970,24 @@ def golden():
         sw = Swing(GOLDEN_AIMS[name])
         for tb in (-0.120, -0.082, -0.040, -0.025, -0.012):
             p = sw.pose(sw.t_c + tb + BRAKE_S + 0.005, tau_b=tb)
-            brakes.append(dict(name=name, tau_brake=tb, stop_azimuth_deg=sw.A_max(tb), judged_swing=sw.judged_swing(tb),
-                               stop_knob=_v(p['knob']), stop_axis=_v(p['axis'])))
-    # 8. the aim range, and the bounds
-    rows = aim_range()
-    keys = ('A_c', 'E_c', 'min_Adot', 'E_min', 'E_max', 'ss_ratio_max', 'tip_ratio_max', 'reach_min', 'reach_max',
-            'clear_torso', 'clear_head', 'lag_93', 'lag_c', 'plane_tilt_40ms', 'head_travel_65ms_ft')
-    planned = [r for r in rows if 'jet_yaw_deg' not in r['case']]
-    rng = dict(n=len(rows), n_planned=len(planned),
-               ranges={k: [min(r[k] for r in rows), max(r[k] for r in rows)] for k in keys},
-               failures=[dict(case=r['case'], failures=r['failures'], ss_ratio_max=r['ss_ratio_max'],
-                              tip_ratio_max=r['tip_ratio_max'], reach_max=r['reach_max'], min_Adot=r['min_Adot'])
-                         for r in rows if r['failures']])
+            samples = []
+            for i in range(10):   # every 5 ms from t_b to t_b + B + 5 ms (P2-1 of the step-1 review)
+                t = sw.t_c + tb + 0.005 * i
+                q = sw.pose(t, tau_b=tb)
+                samples.append(dict(t=t, knob=_v(q['knob']), axis=_v(q['axis']), omega=_v(q['omega']), v_cm=_v(q['v_cm']), hands=_v(q['hands'])))
+            brakes.append(dict(name=name, t_c=sw.t_c, tau_brake=tb, stop_azimuth_deg=sw.A_max(tb), judged_swing=sw.judged_swing(tb),
+                               stop_knob=_v(p['knob']), stop_axis=_v(p['axis']), samples=samples))
+    rng = None
+    if 'aim_range' not in skip:
+        rows = aim_range()
+        keys = ('A_c', 'E_c', 'min_Adot', 'E_min', 'E_max', 'ss_ratio_max', 'tip_ratio_max', 'reach_min', 'reach_max',
+                'clear_torso', 'clear_head', 'lag_93', 'lag_c', 'plane_tilt_40ms', 'head_travel_65ms_ft', 'rate_dip_after_93')
+        planned = [r for r in rows if 'jet_yaw_deg' not in r['case']]
+        rng = dict(n=len(rows), n_planned=len(planned),
+                   ranges={k: [min(r[k] for r in rows), max(r[k] for r in rows)] for k in keys},
+                   failures=[dict(case=r['case'], failures=r['failures'], ss_ratio_max=r['ss_ratio_max'], tip_ratio_max=r['tip_ratio_max'],
+                                  reach_max=r['reach_max'], min_Adot=r['min_Adot'], rate_dip_after_93=r['rate_dip_after_93'])
+                             for r in rows if r['failures']])
     bnd = {}
     for name, aim in GOLDEN_AIMS.items():
         sw = Swing(aim)

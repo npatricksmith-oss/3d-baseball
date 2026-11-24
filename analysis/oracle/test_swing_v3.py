@@ -175,14 +175,30 @@ class PathInvariants(unittest.TestCase):
     """§11 case 5 and the property tests: continuity, rest, velocity = d(position)/dt, mirror."""
 
     def test_c2_at_every_joint(self):
+        # From the curves' values alone (finite differences, not the conditions the construction
+        # imposes): the rate and acceleration just left and just right of u_93 and u_w agree, and the
+        # analytic derivatives the path reports are the derivatives of its values.
+        h = 2e-4
+        def fd(f, u0, side):
+            v = [f(u0 + side * i * h) for i in range(4)]
+            d1 = side * (-3 * v[0] + 4 * v[1] - v[2]) / (2 * h)
+            d2 = (2 * v[0] - 5 * v[1] + 4 * v[2] - v[3]) / (h * h)
+            return d1, d2
         for aim in (MIDDLE, INSIDE_LOW, OUTSIDE_HIGH):
             for T in (0.130, 0.150, 0.174):
                 sw = swing(aim, t_swing=T)
-                for k in range(3):
-                    a1, e1 = s.poly_eval(sw.c1A, sw.u93, k), s.poly_eval(sw.c1E, sw.u93, k)
-                    self.assertAlmostEqual(a1, sw._seg2A(sw.u93, k), delta=1e-9 * max(1, abs(a1)))
-                    self.assertAlmostEqual(e1, sw._baseE(sw.u93, k), delta=1e-9 * max(1, abs(e1)))
-                    self.assertAlmostEqual(s.poly_eval(sw.dE, sw.uw, k), 0.0, delta=1e-9)
+                for i, name in ((0, 'A'), (1, 'E')):
+                    f = lambda u: sw.curves(u)[i]
+                    for uj in (sw.u93, sw.uw):
+                        (l1, l2), (r1, r2) = fd(f, uj - 1e-12, -1), fd(f, uj + 1e-12, 1)
+                        scale1 = max(1.0, abs(l1))
+                        self.assertAlmostEqual(l1, r1, delta=2e-4 * scale1, msg=(aim, T, name, uj))
+                        self.assertAlmostEqual(l2, r2, delta=0.02 * max(1.0, abs(l2), abs(r2)), msg=(aim, T, name, uj))
+                    for u in (-0.9, -0.7, sw.u93 + 0.03, -0.3, sw.uw + 0.02, -0.05):
+                        c1 = (f(u + 1e-6) - f(u - 1e-6)) / 2e-6
+                        c2 = (f(u + 1e-4) - 2 * f(u) + f(u - 1e-4)) / 1e-8
+                        self.assertAlmostEqual(sw.curves(u, 1)[i], c1, delta=1e-6 * max(1.0, abs(c1)), msg=(aim, T, name, u))
+                        self.assertAlmostEqual(sw.curves(u, 2)[i], c2, delta=1e-3 * max(1.0, abs(c2)), msg=(aim, T, name, u))
                 # At contact the path meets v2's analytic swing (§6.4): position, velocity from
                 # both sides, and acceleration by one-sided differences.
                 L, R = sw.state_rh(-1e-15), sw._v2_state(1e-15)
@@ -302,6 +318,22 @@ class Braking(unittest.TestCase):
             mid, path = sw.pose(sw.t_c + tb + s.BRAKE_S / 2, tau_b=tb), sw.pose(sw.t_c + tb + 3 * s.BRAKE_S / 8)
             for x, y in zip(mid['axis'], path['axis']): self.assertAlmostEqual(x, y, delta=1e-12)
 
+    def test_braked_velocity_is_the_derivative_of_position(self):
+        # While braking every velocity is the path's times σ̇ (§8.2): the reported Ω and V are the
+        # derivatives of the braked poses.
+        h = 1e-6
+        for aim in (MIDDLE, OUTSIDE_HIGH):
+            sw = swing(aim)
+            for tb in (-0.082, -0.025, -0.012):
+                for frac in (0.1, 0.35, 0.6, 0.9):
+                    t = sw.t_c + tb + frac * s.BRAKE_S
+                    for u in (s.U_CM, s.U_SS):
+                        fd = s.sc(s.sub(sw.point(t + h, u, tb), sw.point(t - h, u, tb)), 0.5 / h)
+                        for a, e in zip(sw.point_velocity(t, u, tb), fd): self.assertAlmostEqual(a, e, delta=1e-5 * max(1.0, abs(e)))
+                    p = sw.pose(t, tau_b=tb)
+                    fd = s.sc(s.sub(sw.pose(t + h, tau_b=tb)['axis'], sw.pose(t - h, tau_b=tb)['axis']), 0.5 / h)
+                    for a, e in zip(s.cross(p['omega'], p['axis']), fd): self.assertAlmostEqual(a, e, delta=1e-5 * max(1.0, abs(e)))
+
     def test_ruling_matches_the_bat_direction(self):
         # §8.4: a swing when the bat has turned to across the plate (A_max ≥ 0). Independently of
         # the unwrapped azimuth: at the stop the axis then points toward the plate and the pitcher
@@ -339,16 +371,31 @@ class AimRange(unittest.TestCase):
                 d = diag((x, 0.35 - 0.125 * x, z))
                 self.assertEqual(s.range_failures(d), [], (x, z))
 
+    def test_one_surge_in_the_zone(self):
+        # §6.3: from −93 ms to contact the azimuth rate never falls below its −93 ms value.
+        for x in (-0.30, 0.0, 0.30):
+            for z in (0.55, 0.75, 0.95):
+                self.assertGreaterEqual(diag((x, 0.35 - 0.125 * x, z))['rate_dip_after_93'], 1.0 - 1e-6, (x, z))
+
     @unittest.expectedFailure
     def test_speed_bound_over_the_whole_range(self):
-        """Fails (golden aim_range): the sweet spot reaches 1.12× its contact speed below and
-        outside the zone at T 0.150, 1.18× for a 10% slow swing (effort −0.1), and 1.36× at
-        T 0.130: the 168° still to turn at −93 ms is fixed while the contact rate scales with
-        BatSpeed and effort and the time with s_T (spec §6.3)."""
+        """Fails (golden aim_range; spec §6.3, §14's open choice): at T_swing 0.150 s and grade-50
+        speed the sweet spot reaches 1.15× its contact speed (low inside, below the zone), the middle
+        aim 1.09× on a one-sd slow swing (speed factor 0.94) and 1.24× at 0.82; at T 0.130 s up to
+        1.70×. The 168° still to turn at −93 ms is fixed while the contact rate follows BatSpeed and
+        effort and the time follows s_T."""
         for r in self.rows:
             self.assertNotIn('sweet-spot speed', r['failures'], r['case'])
-        for kw in (dict(effort=-0.10), dict(t_swing=0.130)):
+        for kw in (dict(effort=-0.10), dict(t_swing=0.130), dict(bat_speed=32.0 * 0.94)):
             self.assertLessEqual(diag(MIDDLE, **kw)['ss_ratio_max'], s.SS_RATIO_MAX, kw)
+
+    @unittest.expectedFailure
+    def test_one_surge_over_the_whole_range(self):
+        """Fails for fast swings and long swing times (spec §6.3, §14's open choice): the azimuth rate
+        dips to 0.64 of its −93 ms value at the low-inside edge on a 1.18 speed factor at T 0.150 s,
+        and to 0.33 at T 0.174 s (31 of 105 grade-50 swings at T 0.174 s fail)."""
+        for kw in (dict(aim=(-0.45, 0.40625, 0.35), bat_speed=32.0 * 1.18), dict(aim=MIDDLE, t_swing=0.174)):
+            self.assertGreaterEqual(diag(**kw)['rate_dip_after_93'], 1.0 - 1e-6, kw)
 
 
 class SourceBounds(unittest.TestCase):
@@ -391,8 +438,9 @@ class SourceBounds(unittest.TestCase):
 
     @unittest.expectedFailure
     def test_arm_vector_turning_rate(self):
-        """Fails in time with either stance: peak 1,257°/s at −104 ms (middle) against [3]'s
-        −57 ± 20 ms (size inside the bound). Appendix E has no arm-vector curve (spec §15)."""
+        """Fails in time with today's stance: about the trunk axis, as [3] measures it, the arm vector
+        peaks at 1,158–1,163°/s (inside [3]'s size bound) at −104 to −106 ms against −57 ± 20 ms.
+        Appendix E has no arm-vector curve (spec §15)."""
         for aim in (MIDDLE, INSIDE_LOW, OUTSIDE_HIGH):
             self.assertTrue(bound('arm-vector turning peak (deg/s)', aim)['passed'])
             self.assertTrue(bound('arm-vector turning peak time (ms)', aim)['passed'])
@@ -413,28 +461,60 @@ class SourceBounds(unittest.TestCase):
 
     @unittest.expectedFailure
     def test_plane_tilt_over_the_last_40_ms(self):
-        """Fails: the sweet spot's path over the last 40 ms is 5.0° (middle) and 8.8° (inside-low)
-        steeper than the jet's tilt β (outside-high +1.1°, passes). The hands' path is up to 11 cm off
-        the jet's plane there (as it was before step 1), and the bat, following [4]'s elevation to
-        −30 ms, is up to 13° off it (spec §6.3)."""
+        """Fails: the sweet spot's path over the last 40 ms is 7.2° (middle), 11.0° (inside-low) and
+        3.1° (outside-high) steeper than the jet's tilt β. The hands' path is 3–11 cm off the jet's
+        plane there (as before step 1), and the bat follows [4]'s elevation to −30 ms (spec §6.3)."""
         for aim in (MIDDLE, INSIDE_LOW, OUTSIDE_HIGH):
             self.assertTrue(bound('plane tilt over the last 40 ms - beta (deg)', aim)['passed'])
 
+    def test_attack_slope_is_v2s_on_the_outside_pitch(self):
+        self.assertTrue(bound('attack-angle slope on attack direction within the swing (±10 ms), v3 - v2', OUTSIDE_HIGH)['passed'])
+
+    @unittest.expectedFailure
+    def test_attack_slope_within_the_swing(self):
+        """Fails: within one swing, over contact timings of ±10 ms, attack angle rises 0.80 / 1.03 /
+        0.59° per degree of attack direction (middle, inside-low, outside-high) where v2's path gives
+        0.59 / 0.71 / 0.47: +0.21 / +0.32 / +0.12 against a bound of ±0.15 (MLB's slope across swings
+        +0.41, v2's games +0.44; spec §6.5, §12)."""
+        for aim in (MIDDLE, INSIDE_LOW, OUTSIDE_HIGH):
+            self.assertTrue(bound('attack-angle slope on attack direction within the swing (±10 ms), v3 - v2', aim)['passed'])
+
 
 class GoldenFile(unittest.TestCase):
-    """golden/swing_v3.json is the oracle's current output (regenerate with
+    """golden/swing_v3.json is the oracle's current output, every section (regenerate with
     python3 analysis/oracle/swing_v3.py after any change)."""
 
-    def test_paths_match_the_oracle(self):
-        g = json.loads((HERE / 'golden' / 'swing_v3.json').read_text())
-        for case in g['paths'][:3]:
-            sw = swing(tuple(case['aim']), side=1 if case['bats'] == 'R' else -1, t_swing=case['t_swing'])
-            for smp in case['samples'][::6]:
-                p = sw.pose(smp['t'])
-                for k in ('knob', 'axis', 'omega', 'v_cm', 'hands', 'S'):
-                    for a, e in zip(p[k], smp[k]): self.assertAlmostEqual(a, e, delta=1e-12)
-        self.assertAlmostEqual(g['meta']['chi_L_deg'], s.template_chi()['L'] / D, places=9)
-        self.assertAlmostEqual(g['meta']['chi_93_deg'], s.template_chi()['93'] / D, places=9)
+    @classmethod
+    def setUpClass(cls):
+        cls.file = json.loads((HERE / 'golden' / 'swing_v3.json').read_text())
+        cls.now = json.loads(json.dumps(s.golden(skip=('aim_range',))))
+
+    def close(self, a, b, path):
+        if isinstance(a, dict):
+            self.assertEqual(sorted(a), sorted(b), path)
+            for k in a: self.close(a[k], b[k], path + '.' + k)
+        elif isinstance(a, list):
+            self.assertEqual(len(a), len(b), path)
+            for i, (x, y) in enumerate(zip(a, b)): self.close(x, y, '%s[%d]' % (path, i))
+        elif isinstance(a, float) or isinstance(b, float):
+            self.assertAlmostEqual(a, b, delta=1e-10 * max(1.0, abs(b)), msg=path)
+        else:
+            self.assertEqual(a, b, path)
+
+    def test_every_section_matches_the_oracle(self):
+        for k, v in self.now.items():
+            if k != 'aim_range':
+                self.close(self.file[k], v, k)
+
+    def test_aim_range_matches_the_oracle(self):
+        g = self.file['aim_range']
+        self.assertEqual(g['n'], len(s.range_cases()))
+        picks = g['failures'][::max(1, len(g['failures']) // 4)][:4]
+        for row in picks:
+            kw = {k: (tuple(v) if isinstance(v, list) else v) for k, v in row['case'].items()}
+            d = s.diagnostics(s.Swing(**kw), dt=0.001)
+            self.assertEqual(s.range_failures(d), row['failures'], row['case'])
+            self.assertAlmostEqual(d['ss_ratio_max'], row['ss_ratio_max'], places=9)
 
 
 if __name__ == '__main__':
