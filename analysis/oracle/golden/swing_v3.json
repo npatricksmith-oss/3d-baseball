@@ -22976,6 +22976,26 @@
      "aim": [
       0.15,
       0.47125,
+      0.35
+     ],
+     "t_swing": 0.19679625000000003,
+     "alpha": 0.33166551406989336
+    },
+    "failures": [
+     "hands one surge"
+    ],
+    "ss_ratio_max": 1.0860540018197342,
+    "tip_ratio_max": 1.100317763863511,
+    "reach_max": 0.7558168216412257,
+    "min_Adot": 5.876123494743798e-11,
+    "rate_worst_dip": 0.0,
+    "ss_worst_dip": 0.019751669056139565
+   },
+   {
+    "case": {
+     "aim": [
+      0.15,
+      0.47125,
       1.14
      ],
      "t_swing": 0.14685239175035095,
@@ -23030,6 +23050,26 @@
     "min_Adot": 1.1412488312421639e-10,
     "rate_worst_dip": 0.0063745346055009665,
     "ss_worst_dip": 0.0
+   },
+   {
+    "case": {
+     "aim": [
+      0.3,
+      0.4525,
+      0.35
+     ],
+     "t_swing": 0.14685239175035095,
+     "alpha": null
+    },
+    "failures": [
+     "hands one surge"
+    ],
+    "ss_ratio_max": 1.0628829861817022,
+    "tip_ratio_max": 1.0710458605092925,
+    "reach_max": 0.7700055109320908,
+    "min_Adot": 5.974729043103692e-11,
+    "rate_worst_dip": 0.0,
+    "ss_worst_dip": 0.00763882755647332
    },
    {
     "case": {
@@ -23196,6 +23236,26 @@
     "min_Adot": 8.672210468470928e-11,
     "rate_worst_dip": 0.0,
     "ss_worst_dip": 0.021466331307926204
+   },
+   {
+    "case": {
+     "aim": [
+      0.45,
+      0.43374999999999997,
+      0.35
+     ],
+     "t_swing": 0.19679625000000003,
+     "alpha": null
+    },
+    "failures": [
+     "hands one surge"
+    ],
+    "ss_ratio_max": 1.0734104358281622,
+    "tip_ratio_max": 1.0871591095770274,
+    "reach_max": 0.7876384048246328,
+    "min_Adot": 8.102887635642663e-11,
+    "rate_worst_dip": 0.0,
+    "ss_worst_dip": 0.0033672390740961135
    },
    {
     "case": {
@@ -23718,6 +23778,66 @@
     "min_Adot": 7.616714377504101e-11,
     "rate_worst_dip": 0.0,
     "ss_worst_dip": 0.007846539811985144
+   },
+   {
+    "case": {
+     "aim": [
+      0.45,
+      0.43374999999999997,
+      0.35
+     ],
+     "t_swing": 0.14685239175035095,
+     "bat_speed": 33.92
+    },
+    "failures": [
+     "hands one surge"
+    ],
+    "ss_ratio_max": 1.0662133765668467,
+    "tip_ratio_max": 1.0757466259704624,
+    "reach_max": 0.7878519653058331,
+    "min_Adot": 8.589060893781223e-11,
+    "rate_worst_dip": 0.0,
+    "ss_worst_dip": 0.005851183249056695
+   },
+   {
+    "case": {
+     "aim": [
+      0.45,
+      0.43374999999999997,
+      0.35
+     ],
+     "t_swing": 0.17,
+     "bat_speed": 28.256
+    },
+    "failures": [
+     "hands one surge"
+    ],
+    "ss_ratio_max": 1.0635608519570683,
+    "tip_ratio_max": 1.0727259489182857,
+    "reach_max": 0.7878226040870776,
+    "min_Adot": 7.15484978227247e-11,
+    "rate_worst_dip": 0.0,
+    "ss_worst_dip": 0.006380923870267389
+   },
+   {
+    "case": {
+     "aim": [
+      0.45,
+      0.43374999999999997,
+      0.35
+     ],
+     "t_swing": 0.17,
+     "bat_speed": 30.08
+    },
+    "failures": [
+     "hands one surge"
+    ],
+    "ss_ratio_max": 1.0681063140696945,
+    "tip_ratio_max": 1.0779362433859343,
+    "reach_max": 0.7878462250687744,
+    "min_Adot": 7.616714377504102e-11,
+    "rate_worst_dip": 0.0,
+    "ss_worst_dip": 0.0054583640608466735
    },
    {
     "case": {
@@ -28213,7 +28333,9 @@
      "t_swing": 0.14685239175035095,
      "corner": false
     },
-    "failures": [],
+    "failures": [
+     "hands one surge"
+    ],
     "ss_ratio_max": 1.0446786610243994,
     "hands_worst_dip": 0.019482118391036668,
     "knob_worst_dip": 0.024453976723472468,
@@ -28272,7 +28394,9 @@
      "t_swing": 0.14685239175035095,
      "corner": false
     },
-    "failures": [],
+    "failures": [
+     "hands one surge"
+    ],
     "ss_ratio_max": 1.0449948049198374,
     "hands_worst_dip": 0.01952492210270763,
     "knob_worst_dip": 0.02437368366733605,
@@ -28310,7 +28434,9 @@
      "t_swing": 0.14685239175035095,
      "corner": false
     },
-    "failures": [],
+    "failures": [
+     "hands one surge"
+    ],
     "ss_ratio_max": 1.0449958880999815,
     "hands_worst_dip": 0.01946690054124996,
     "knob_worst_dip": 0.02435900394293473,
