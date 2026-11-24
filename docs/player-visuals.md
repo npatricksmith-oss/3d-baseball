@@ -412,6 +412,8 @@ New: **strip 9, a checked swing** (the first the run finds): hips open, bat stop
 
 **Sim side**, with export E1: an FFI test that `swing_start_s` equals the `SwingStart` marker and `swing_contact_s` the swing's `t_c`, and that the bat is interpolated; with Q43: a `bb_game` test that the bat track ends 0.03 s after the later contact. For either, `cargo run --release -p bb_game --example digest` identical before and after, and one ledger line.
 
+**Step 1's checks, built:** `-BbBatCheck` (with `-BbStagingLog`) logs `BB_BATCHECK` per pitch (the drawn bat's speed before the sim's bat moves, the continuity at both ends of the handover, the swing-withheld comparison), `BB_BATNOTE` (the clocks, with t_c inferred when E1 is absent) and `BB_BATHANDS`; `client/check-bat-step1.sh` runs seeds 7 and 6 with it and against `-BbBatLegacy` (the bat as before) and fails on any of them; `-BbBatShots=2` takes the pictures (`bat1_swing_*`, `bat1_take_*`). The D22 comparison is of the drawn bat alone, which is all the pose reads before the sim's bat moves (stride and eyes are on the pitcher's clock and the pitch's ball, the swing weight 0 until then); it is not yet of every joint.
+
 **Cost:** frame rate from `-BbShots=6 -BbUncapped` against the build before, as every step reports.
 
 ### 13.8 Build steps
