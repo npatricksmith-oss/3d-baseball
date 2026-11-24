@@ -15,11 +15,11 @@ Status: `[ ]` not started · `[~]` partly done · `[?]` needs an owner decision
 
 ---
 
-## Resume here (2026-11-23)
+## Resume here (2026-11-24)
 
-**State.** Workers: `swing-1` (§13), `of-dive`. Q38, Q39, Q40 trials 1–2 ([Code Mode](docs/code-mode-trial.md)) merged (`3a71284`; 560 tests, runs 4.14 [4.45]). **Waiting on the owner:** Q43 (player-visuals §13.5).
+**State.** Workers: `swing-1` (§13). Ground-ball dive merged (Code Mode trial 3; 572 tests, runs 4.09 [4.37]). **Waiting on the owner:** Q43 (player-visuals §13.5).
 
-**Next:** merge `work/of-ground-dive` (§2, play 71; both reviews fixed, note §7–§9).
+**Next:** §2: the depth read of a ball first seen on the ground, or the ground-dive leftovers ([note](docs/calibration/2026-11-23-of-ground-dive.md) §9).
 
 **Open (ledger §5):** runs down 0.21 [0.18] since dp-cover (0.04 explained; check noise); double plays 12.3% (MLB 9.8%).
 
@@ -55,7 +55,7 @@ One `sim/crates/bb_game/src/live.rs` job at a time. Each job gets a ledger row a
 - [ ] A fielder who misses a catch stands still beside the dead ball for about a second before picking it up (approach review P3-7; seed 207 play 66; on main before the approach too; maybe the once-a-second recall).
 - [ ] Revisit the geometric routine-play gate using catch-probability bins (calibration-targets §4.6).
 - [ ] **Depth read of a ball first seen on the ground.** An outfielder with no track at the first bounce (a chopper or a grounder through the infield bouncing inside his reaction) reads it by the snapshot read: depth σ along his line of sight `3.5 m × d/30 m × DEPTH_STRETCH`, about 27 m at 77 m (seed 65147 play 10: right fielder 37 m off). Not covered by the bounce track: a track started there diverged on far balls (range-proportional persistent error linearised at a short estimate) and roughened the infielders' first half-second (GB hits .334) ([bounce-track note](docs/calibration/2026-11-21-bounce-track.md) §3, §9). Spec the change in agent-models §5.1 first.
-- [~] **Play 71 (seed 51001), outfield dive at a grounder** (`work/of-ground-dive`, [note](docs/calibration/2026-11-23-of-ground-dive.md)): he now dives; on the play's draw he misses by 1.7 cm (still a triple). Left: note §8–§9.
+- [~] **Play 71 (seed 51001)** ([note](docs/calibration/2026-11-23-of-ground-dive.md)): he dives now and misses by 1.7 cm (a triple). Left: note §9.
 - [ ] The rim's push is in fixed world axes (always toward home), not §5.4's collision; it slows outfield knock-downs ([review](docs/reviews/2026-11-23-rev-of-dive-of-ground-dive-review.md) P3-3).
 - [ ] **Bounce-track review, deferred** ([review](docs/reviews/2026-11-21-opus-bounce-track-review.md)). P3-1: `BOUNCE_SPIN_RPM` 1,000 rpm is unsourced and small for mis-hits (topspin read as backspin); source it from the contact model's spin spread about the typical-spin table (`examples/batted_spin.rs`), then recount the hop let-gos. P3-3: outfielders' error²/σ² about 1.4–1.6 after the bounce (the in-flight read's own over-confidence), and over 40% of their errors grow just after the bounce though the RMS falls. P3-4: the roll's â drift sits on both level axes though only its part along the roll moves the ball (about 0.3 m of σ across over 2 s). Pre-existing: a snapshot read of a ball at rest against the wall can put it beyond the wall.
 - [ ] **The misplay on a ball still in the air** ([Fable review](docs/reviews/2026-11-17-fable-of-grounder-backup-review.md) P2-1). The outfield grounder rule (`outfielder_to_reconsider`) is shut while the ball is up and is looked at only when a call changes. In seed 43 play 74, all three outfielders leave a low fly that lands at (18, 57) and the second baseman goes; right field goes only at the 2.47 s recall and fields it at the wall. Suggested: open the gate for a ball in the air whose public first bounce is beyond `INFIELD_BREAK_R`, and look at it again when the ball comes down. Own branch, own ledger row.
