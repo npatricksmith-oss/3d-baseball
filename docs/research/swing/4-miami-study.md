@@ -1,6 +1,6 @@
 # Source 4: Fortenbaugh 2011, "The Biomechanics of the Baseball Swing" (Univ. of Miami PhD dissertation)
 
-Fetched: https://hittingperformancelab.com/wp-content/uploads/2015/01/hitting-baseball-miami-study.pdf (249-page PDF, text extracted with pdftotext; stored in sim/target/research-dl/4/). Cited by section number (section numbers are the dissertation's own). Figures/Appendix E graphs were not inspected; all values below come from the text and tables.
+Fetched: https://hittingperformancelab.com/wp-content/uploads/2015/01/hitting-baseball-miami-study.pdf (249-page PDF, text extracted with pdftotext; stored in sim/target/research-dl/4/). Cited by section number (section numbers are the dissertation's own). Appendix B diagrams and Appendix E graphs were read later (2026-11-24, [9-step0-data.md](9-step0-data.md)); all values below come from the text and tables.
 
 ## What it is and how far to trust it
 - Dissertation, David M. Fortenbaugh, University of Miami, May 2011; lab at the American Sports Medicine Institute (Birmingham, AL). (Abstract, 3.1)
