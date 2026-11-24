@@ -17,7 +17,7 @@ Status: `[ ]` not started · `[~]` partly done · `[?]` needs an owner decision
 
 ## Resume here (2026-11-24)
 
-**State.** Swing v3 ([spec](docs/swing-model-v3.md)): steps 0–1 merged. **PLAN D27** answered on `work/swing-family` (worktree `swing-research`): spec §6.7 and the oracle make the swing a family, the average batter's measured swing scaled by each batter's travel and time; needs an Opus review, then step 2 (Rust). One owner choice, not yet numbered (spec §6.7.7: the average swing's time, 0.170 s recommended). Step 4 brings Q45 back with game measurements.
+**State.** Swing v3 ([spec](docs/swing-model-v3.md)): steps 0–1 merged. **PLAN D27** on `work/swing-family` (worktree `swing-research`): the swing is a family (spec §6.7); Opus review fixed (review file's Resolution open). Owner choices, not numbered, spec §6.7.7: the hands stall in today's stance (Q46's finding again), the decision point (no change needed), easy swings timed by the body. Then step 2 (Rust).
 
 **Next:** §2: the ground-dive leftovers ([note](docs/calibration/2026-11-23-of-ground-dive.md) §9); swing steps 2–3 after step 1.
 
