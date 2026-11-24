@@ -17,7 +17,7 @@ Status: `[ ]` not started · `[~]` partly done · `[?]` needs an owner decision
 
 ## Resume here (2026-11-23)
 
-**State.** No workers running. Q38, Q39, Q40 ([Code Mode trial](docs/code-mode-trial.md)) merged (`3a71284`; 560 tests, runs 4.14 [4.45]). **Waiting on the owner:** Q37 (stances; parked).
+**State.** No workers running. Q38, Q39, Q40 trials 1–2 ([Code Mode](docs/code-mode-trial.md)) merged (`3a71284`; 560 tests, runs 4.14 [4.45]). **Waiting on the owner:** Q37 (stances; owner testing in game).
 
 **Next:** §2: seed-5593, play 71 (the right fielder not diving at the rolling ball).
 
