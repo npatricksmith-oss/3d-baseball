@@ -1,6 +1,6 @@
 # Task List
 
-**Last updated:** 2026-11-24 (swing step 1).
+**Last updated:** 2026-11-24 (swing v3 spec).
 
 What is next and what is open. Other files hold the rest:
 
@@ -17,7 +17,7 @@ Status: `[ ]` not started · `[~]` partly done · `[?]` needs an owner decision
 
 ## Resume here (2026-11-24)
 
-**State.** D25 swing v3 specified, `work/swing-rebuild` ([spec](docs/swing-model-v3.md)): 4 owner choices in its §14; step 0 next.
+**State.** Swing v3 spec merged ([spec](docs/swing-model-v3.md), no code): **Q45–Q48 wait on the owner** (its §14, in order); steps 0–3 need no answer, step 0 (data) next. Worker `depth-read` (Opus, `work/depth-read`, worktree `saved-plays`): TASKS §2 depth read, built, measuring; needs an Opus review.
 
 **Next:** §2: the depth read of a ball first seen on the ground, or the ground-dive leftovers ([note](docs/calibration/2026-11-23-of-ground-dive.md) §9).
 

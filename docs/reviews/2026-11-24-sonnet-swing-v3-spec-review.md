@@ -75,4 +75,12 @@ Case 1's λ_L = 121°, A_L, E_L "to 1e-9" and case 3's A, Ȧ, E, λ at τ_93 "to
 
 ## Resolution
 
-Open.
+Resolved 2026-11-24 by the spec's author (Opus, `0ac6436`, `4037e65`), who checked each finding with its own probe; no second review, because build step 1 (the Python oracle and goldens) recomputes the same quantities independently.
+
+- **P1-1** fixed: the hands at launch and at −93 ms are set per batter by a least-misfit forearm roll (constants χ_L, χ_93), with no run-time root find; a golden covers the aim range.
+- **P2-1** confirmed and stated, not removed: §6.5 gives the measured v3 − v2 differences and why v3 cannot be joined smoothly to v2's last 30 ms. It is the owner's choice Q45 (spec §14, first).
+- **P2-2** fixed: explicit body, trunk frame, S curve and s_T scaling in §5.3.
+- **P2-3** fixed: one direction convention for the shoulder angles and a check from [4]'s prose that separates the two readings. Appendix B (step 0) still settles the reading.
+- **P2-4** fixed: a hand-worked golden and bounds from [3] and [4].
+- **P3-1 to P3-9** fixed as suggested; P3-8 is option (c) of Q47.
+- **Open, stated in spec §11:** with today's stance the bat-to-arm angle at contact and the hands-ahead-of-chest check fail (Q46); the arm-vector turning rate misses [3]'s bound with either stance (look in Fortenbaugh's graphs, step 0).
