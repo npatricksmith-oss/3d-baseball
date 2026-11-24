@@ -10602,7 +10602,8 @@ mod tests {
 
     /// The centre fielder (average) at rest at (0, 80), and a grounder at `speed` toward the
     /// wall passing 2.2 m to his side, 0.5 s before it is level with him; his read made and
-    /// planned 0.05 s later.
+    /// planned 0.05 s later, with no read error (since 2026-11-24 he reads a ball this low by
+    /// the ground cue, and the fixture should not hang on his draws).
     fn grounder_beside_cf(speed: f64) -> Sim<'static> {
         let fx: &'static Fixture = Box::leak(Box::new(fixture(&[])));
         let mut inp = input(fx, vec![RunnerIn { id: fx.st.batter, base: 0, speed: 8.2, tau_s: bb_agents::running::LEAGUE_TAU_S }]);
@@ -10612,6 +10613,7 @@ mod tests {
         let mut sim = new_sim(inp, st);
         sim.f[CF].pos = Vec3::new(0.0, 80.0, 0.0);
         loose_ball(&mut sim, 1.5, Vec3::new(2.2, 80.0 - speed * 0.5, 0.04), Vec3::new(0.0, speed, 0.0));
+        sim.f[CF].err = [0.0; 4];
         sim.f[CF].role = Role::Chase;
         sim.f[CF].belief = Some(sim.predict(CF));
         sim.t += 0.05;
@@ -10620,12 +10622,14 @@ mod tests {
 
     // Review P2-1: a dive at a ball on the ground costs him more than the get-up when it does
     // not end in his glove (a knock-down: up, then run to the ball; a miss: up, then chase it).
-    // A 10 m/s grounder he would have on his feet 1.8 s from now: the get-up alone (1.5 s)
+    // A 10 m/s grounder he would have on his feet 1.9 s from now: the get-up alone (1.5 s)
     // let him go, but a knock-down or a miss would leave him later than that, so he stays up.
-    // At 10.5 m/s his standing take (2.07 s) is later than a catch would have him (up 2.03 s
-    // from now) but earlier than the expected time (2.31 s): the mixture keeps him up (second
-    // review P3-2; a charge of the get-up from the dive point alone would send him). At 14 m/s
-    // his standing take is 4 s away and the dive pays.
+    // At 10.3 m/s his standing take (2.09 s) is later than a catch would have him (up 1.89 s
+    // from now) but earlier than the expected time: the mixture keeps him up (second review
+    // P3-2; a charge of the get-up from the dive point alone would send him). At 14 m/s his
+    // standing take is 4 s away and the dive pays. (Speeds 10.5 → 10.3 m/s on 2026-11-24, when
+    // his read of this ball became exact: at 10.5 the standing take is 2.19 s, out of the
+    // window.)
     #[test]
     fn a_dive_at_a_ground_ball_pays_only_when_its_expected_cost_beats_his_standing_take() {
         let near = grounder_beside_cf(10.0);
@@ -10635,7 +10639,7 @@ mod tests {
         assert!(dive.is_some() && ts > DIVE_GETUP_S && ts < 2.7, "fixture: standing take {ts:.2} s away, beyond the get-up");
         assert!(near.dive_gains(CF, DIVE_GETUP_S), "fixture: the get-up alone lets him go");
         assert!(!near.dive_pays(CF), "he dove at a ball he would have on his feet {ts:.2} s from now");
-        let mid = grounder_beside_cf(10.5);
+        let mid = grounder_beside_cf(10.3);
         let p = mid.f[CF].belief.clone().unwrap();
         let (stand, dive) = mid.intercept_scan(CF, &p);
         let (ts, td) = (stand.expect("fixture: a standing take").0 - mid.t, dive.expect("fixture: a dive point").0 - mid.t);
@@ -10647,8 +10651,9 @@ mod tests {
         assert!(ts > 3.5 && far.dive_pays(CF), "standing take {ts:.2} s away: the dive should pay");
     }
 
-    // Second review P3-1: a ball rolling away from him at 3.2 m/s from 2.6 m off (out of his
-    // reach, and it will not come back within it) that comes to rest 1.1 s from now, before he
+    // Second review P3-1: a ball rolling away from him at 3.2 m/s from 3.5 m off (out of his
+    // reach, and it will not come back within it; 2.6 m until 2026-11-24, when his read of it
+    // became exact and a dive point at 2.6 m appeared) that comes to rest 1.1 s from now, before he
     // can reach it on his feet. With no standing take and no dive to price, the resting-point
     // take stands for it: less than a catch's get-up away, so he stays up (before, no standing
     // take let him go at once, and the capture would lay him out at it if it came near).
@@ -10661,7 +10666,8 @@ mod tests {
         let st: &'static mut RulesState = Box::leak(Box::new(fx.st.clone()));
         let mut sim = new_sim(inp, st);
         sim.f[CF].pos = Vec3::new(0.0, 80.0, 0.0);
-        loose_ball(&mut sim, 1.5, Vec3::new(1.5, 82.6, 0.04), Vec3::new(0.0, 3.2, 0.0));
+        loose_ball(&mut sim, 1.5, Vec3::new(1.5, 83.2, 0.04), Vec3::new(0.0, 3.2, 0.0));
+        sim.f[CF].err = [0.0; 4];
         sim.f[CF].role = Role::Chase;
         sim.f[CF].belief = Some(sim.predict(CF));
         sim.t += 0.05;
