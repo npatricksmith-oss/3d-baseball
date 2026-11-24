@@ -563,6 +563,10 @@ class Family(unittest.TestCase):
             # after contact v2's bat at the swing's own (held) time: 1.6% of time moves it by microns
             for x, y in zip(sw.point(sw.t_c + 0.01, s.U_SS), free.point(sw.t_c + 0.01, s.U_SS)): self.assertAlmostEqual(x, y, delta=1e-4)
             for x, y in zip(sw.point_velocity(sw.t_c, s.U_SS), free.point_velocity(free.t_c, s.U_SS)): self.assertAlmostEqual(x, y, delta=1e-6)
+            # the re-planned swing keeps [4]'s rate shape: its azimuth rate at u_93 is Appendix E's share
+            # of the contact rate (0.565), as a planned swing's is (a travel held at its old value and
+            # the mismatch left to the contact correction gives 0.572–0.574)
+            self.assertAlmostEqual(sw.curves(sw.u93, 1)[0] / (sw.A_c[1] * sw.T), s.RATE4_RATIO(1e3 * s.T4_93), delta=0.003)
             d, d1 = s.diagnostics(sw, dt=0.001), diag(a1)
             self.assertLess(d['ss_worst_dip'] - d1['ss_worst_dip'], 0.01)
             self.assertLessEqual(d['rate_worst_dip'], s.RATE_DIP_TOL)

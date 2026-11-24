@@ -9,10 +9,16 @@ import swing_v3 as s
 import test_swing_v3 as t
 
 orig = {}
+_MISSING = object()
 def patch(obj, name, val):
-    orig.setdefault((obj, name), getattr(obj, name)); setattr(obj, name, val)
+    # the raw attribute (a class's staticmethod stays a staticmethod when restored; an inherited
+    # method is removed again rather than copied down)
+    raw = obj.__dict__.get(name, _MISSING) if isinstance(obj, type) else getattr(obj, name)
+    orig.setdefault((obj, name), raw); setattr(obj, name, val)
 def restore():
-    for (obj, name), v in orig.items(): setattr(obj, name, v)
+    for (obj, name), v in orig.items():
+        if v is _MISSING: delattr(obj, name)
+        else: setattr(obj, name, v)
     orig.clear()
 
 def m_reading2():
