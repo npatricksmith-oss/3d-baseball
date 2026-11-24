@@ -17,7 +17,7 @@ Status: `[ ]` not started · `[~]` partly done · `[?]` needs an owner decision
 
 ## Resume here (2026-11-24)
 
-**State.** Swing v3 ([spec](docs/swing-model-v3.md)): steps 0–1 merged (oracle, goldens; [review](docs/reviews/2026-11-24-opus-swing-oracle-review.md)). **Q49 waits on the owner** (spec §14.1: slow swings peak before contact; restated 2026-11-24 with a fourth option, a shorter path for slower bats, from [the swing-length note](docs/research/swing/10-swing-length-by-bat-speed.md); §14.1 must be rewritten to match his answer). Step 2 (Rust behind a switch, Opus) not started: needs no answer; ask the owner to check `/usage` first. Step 4 must bring Q45 back with game measurements of late contact. Depth read merged. No worker running.
+**State.** Swing v3 ([spec](docs/swing-model-v3.md)): steps 0–1 merged. **PLAN D27** (owner on Q49): the swing must be realistic for every batter and effort, so travel and time follow from attributes. Worker `swing-family` (Opus, `work/swing-family`, worktree `swing-research`): redoes spec §6 and §14.1 and the oracle for it; needs an Opus review. Then step 2 (Rust). Step 4 brings Q45 back with game measurements of late contact. Nothing waits on the owner.
 
 **Next:** §2: the ground-dive leftovers ([note](docs/calibration/2026-11-23-of-ground-dive.md) §9); swing steps 2–3 after step 1.
 
