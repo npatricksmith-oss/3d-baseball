@@ -354,7 +354,7 @@ His path, for each coordinate X of (A, E, W_x, W_y, W_z), in u = τ/T on [−1, 
 
 where X_t is the template's at the aim (§6.3), X_c the contact jet's value (the template's and his are the same pose); δ the correction on [u_93, 0] with zero value, rate and acceleration at u_93 and zero value, the jet's rate × T less λ·X_t′(0) and the jet's acceleration × T² less λ·X_t″(0) at contact (a quintic: the first two are zero to rounding on a planned swing, the third small, from the centripetal parts of the jet's acceleration, which scale with speed squared); and **h(u)·F the launch's fade**: h = 1 − (10x³ − 15x⁴ + 6x⁵), x = (u + 1)/(u_93 + 1), on [−1, u_93] and 0 after it, and F = [X_ref + λ_nom·(X_L,t − X_ref)] − [X_c + λ·(X_L,t − X_c)], with X_ref the batter's middle-middle contact pose and X_L,t the template's launch. So his launch is **X_ref + λ·(X_L,t − X_ref)**: the template's launch scaled about his own middle-middle contact pose, at rest, the same on every pitch (D22), whatever the aim and effort (tested to 1e-9, §11). Without the fade the scaling about each pitch's own contact pose would move a batter's launch with the pitch, by (1 − λ) times the spread of contact azimuths (2.6° across the zone at λ 0.76, more outside it), which the client's load could not end on.
 
-After contact the bat is v2's plan at the swing's own time T (§6.4; its widths scale with T, which moves the bat 25 ms after contact by microns). The body S(τ) is §5.3's at the knots −T, −0.093·T/T₄ and 0, as before.
+After contact the bat is v2's plan at the swing's own time T (§6.4; its widths scale with T). At the average batter's 0.170 s against today's 0.150 s that bat is within 0.02° and 0.2 mph of today's up to 10 ms after contact (where nearly all early contact is; the baseline's contact − t_c has sd 5.6 ms) and 0.15° round and 1.2 mph faster at +25 ms, so contact on time and early stays the baseline's (§2) within that. The body S(τ) is §5.3's at the knots −T, −0.093·T/T₄ and 0, as before.
 
 **What each batter looks like** (H 1.85 m, middle pitch; probe and `golden/swing_v3.json` `report.family`):
 
@@ -556,7 +556,7 @@ Spec changes step 1 and its review made to be implementable (each in this file):
 | Contact%, whiff% | small changes at the window's early edge | the sweet spot is up to about 15 cm elsewhere at −25 ms (mostly higher) |
 | Bat speed by contact depth (Tier M) | deep contact loses about 0.3 mph at −15 ms where MLB's loses 3.4 (step 1 gained 2.5): still expected to miss the band, by less | §6.7.6; the fix, if wanted, is the interior shape, not a knob (D26, Q45) |
 | Attack angle against attack direction (Tier M) | the game's slope rises a little from v2's +0.44 per degree (MLB +0.41): within one swing v3's is v2's +0.06 to +0.25 | §6.7.6; an expected failure at inside-low in §11 |
-| EV of all contact, by batter | unchanged on time (the jet is v2's at `BatSpeed` × (1 + e)); the long swingers' and short swingers' late contact differs a little (the same shape scaled) | §6.7.3 |
+| EV of all contact, by batter | unchanged on time (the jet is v2's at `BatSpeed` × (1 + e)); early contact up to 0.2 mph faster to +10 ms and 1.2 mph at +25 ms (v2's bat at 0.170 s); the long and short swingers' late contact differs a little (the same shape scaled) | §6.7.3 |
 | HR/PA, runs | follow K% and BB% | |
 | HBP% and everything perceptual | unchanged (the batter is not moved in this rebuild, D26, Q46) | the eye point and body capsules follow the stance spot |
 
