@@ -40,7 +40,31 @@ So on a swing that is not checked, **nothing that decides a game reads the bat e
 
 ## 3. The sim's bat against the measured bat
 
-PROBE-PLACEHOLDER
+Probe: `sim/crates/bb_game/examples/launch_probe.rs` (throwaway, not committed; built with `CARGO_TARGET_DIR=sim/target/codex-probes`, job 212), 40 games (seeds 0–39): 5,019 swings, of which **4,376 not checked** (the table) and **643 checked**. Every batter mirrored to a right-hander. Cross-checked on a middle-middle, an inside-low and an outside-high aim with the independent Python oracle `analysis/oracle/swing_oracle.py` (same values to the rounding). Every batter's T_swing is 0.150 s today, so t_s = −150 ms on every swing; plane tilt 31.9° ± 3.3°.
+
+**Definitions** are Fortenbaugh's own, read from his analysis code ([4] Appendix C, `BatLag()`), not from the prose: **elevation** = the bat's angle above horizontal (knob → tip); **azimuth** = atan2(lab Y, lab X) − 270°, lab X toward the pitcher, lab Y away from the plate (so −180° = tip pointing away from the plate behind him, −90° = at the catcher, 0° = across the plate; −232° = wrapped behind the head toward the pitcher's side); **lag** = angle between the bat and the arm vector from the clavicle to the mid-wrists (0° = bat in line with the arms; Welch [3] uses the supplement, 180° = in line). The sim has no chest, so the lag uses a clavicle 1.40 m up over his spot, 0.10 m toward the pitcher; the bracket is the range over 0.15 m forward or back and 0.10 m lower. Knob: from his spot, x toward the plate, y toward the pitcher, z up. Times are from the nominal contact t_c (actual contact is t_c ± 0.01 s, mean 0.00).
+
+| t (ms) | Elevation sim | Elevation [4] | Azimuth sim | Azimuth [4] | Lag sim | Lag [4] | Knob sim (x, y, z) m | Hand speed sim m/s | Azimuth rate sim °/s | Azimuth rate [4] °/s |
+| --: | --: | :-- | --: | :-- | :-- | :-- | :-- | --: | --: | :-- |
+| −150 (t_s) | 9 ± 5 | 39–44 (44 at the end of the stride, 39 at −93) | −118 ± 7 | −225 at −170; −219* | 34 (30–35) | 121 at −170, 131 at −93 | −0.03, −0.57, 1.25 | 0.8 | 27 | 236 at −170 |
+| −100 | 6 ± 5 | about 39 | −113 ± 6 | −182* | 35 (31–39) | about 131 | 0.05, −0.53, 1.21 | 3.6 | 245 | 1247 at −93 |
+| −80 | 2 ± 5 | falling from 39 (not stated) | −106 ± 6 | −158* | 35 (31–41) | **133 (max)** | 0.12, −0.48, 1.18 | 5.3 | 469 | (1367*) |
+| −50 | −11 ± 5 | not stated | −84 ± 4 | −111* | 28 (20–39) | falling, not stated | 0.24, −0.35, 1.12 | 7.3 | 1020 | (1776*) |
+| −25 | −26 ± 4 | not stated | −50 ± 3 | −63* | 14 (8–29) | not stated | 0.31, −0.18, 1.10 | 7.6 | 1810 | (2117*) |
+| −10 | −32 ± 4 | not stated | −19 ± 3 | −29* | 12 (12–23) | not stated | 0.33, −0.07, 1.11 | 7.1 | 2299 | **2435 (peak)** |
+| 0 | **−30 ± 3** | **−30 ± 5** | **+5 ± 3** | **−8 ± 12** | 21 (14–36) | **65 ± 10** | 0.34, 0.00, 1.11 | 6.5 | 2356 | 2233 |
+
+\* My interpolation, not [4]'s: [4] states the azimuth only at −170 (−225°), −93 (−175°) and contact (−7°, −8 ± 12° for middle pitches) and the rates at −170, −93, −10 and contact; between them I assumed the rate linear in time and scaled it to the stated sweeps (50° and 168°). [4]'s Appendix E graphs, which have the curves, were not read. ± is one standard deviation over swings (sim) or players ([4]).
+
+**Welch [3]** (tee) gives no angles that are legible at these times, only speeds: bat (barrel-end marker) 31 m/s at its peak at −15 ms and 29 m/s at contact (sim: tip 36.5 at −10 and 37.5 at contact, still rising, peak about +10 ms; sweet spot 31.3 and 32.1, set to Statcast's 71.5 mph); the bat's speed across toward the plate and downward peak at 19 and 16 m/s near −40 ms (sim tip: 20.1 and 10.1 m/s, both peaking at −40 ms); the bat uncocks fastest, 1588°/s, at −20 ms (sim, in its plane: about 1090°/s over −25 to −10 ms and 1320°/s over −10 to 0, peaking at contact).
+
+**Where they agree.** At contact the bat's direction is the measured one: elevation −30° against −30 ± 5°, azimuth +5° against −8 ± 12°; the azimuth rate agrees from −10 ms on (2300–2360°/s against 2233–2435); the bat's speed across the plate peaks at −40 ms in both. **Where they part.** In azimuth the gap is 10° at −10 ms, 13° at −25, 27° at −50, 52° at −80 and about 100° at t_s; in elevation 35° by −93 ms; in lag about 100° from t_s to −80 ms. So the sim's last 25 ms are the measured swing's; before about −40 ms it is another swing.
+
+**What the sim's early swing is, in a hitter's terms.** At t_s the bat is where a measured bat is at about −50 ms in azimuth (pointing back past the catcher), but flat instead of up, and **in line with the arms** (lag 34°) where a measured hitter has it cocked 121–133° behind them. The hands are 0.57 m behind his spot at 1.25 m, so the arms reach back toward the catcher. Over the next 100 ms the sim's bat turns only 45° in azimuth (measured: about 100°) at a quarter of the measured rate at −93 ms (about 330°/s against 1247°/s); then it makes up the difference in the last 50 ms. In a hitter that pose is "casting": the barrel out and the arms long before the turn.
+
+**A difference inside the contact window.** The lag at contact, 14–36° against 65 ± 10°, depends on where the chest is assumed and the sim has none; it says that at contact the sim's hands lie further out along the bat's line from the chest than a measured hitter's, whose bat is cocked about 66° to the arms (both elbows still bent, 81° and 56° [4]). It comes from the contact pose itself (`lag_c` = 0, the knob and the sweet spot on one line from C, `swing.rs:389-398`), so no option that keeps contact bit for bit can change it.
+
+**Checked swings** (643, 12.8% of swings): the brake starts at t_c − 80 ms ± 30 ms (p5 −130, p95 −30); 629 of 643 (97.8%) brake before −25 ms and 563 (87.6%) before −40 ms. Today 3 of the 643 are ruled swings and 15 touch the ball (foul tips on a check); the other 625 are ruled no swing.
 
 ## 4. Options
 
