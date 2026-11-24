@@ -2916,33 +2916,33 @@ void ABbDirector::NoteSlides()
 	bBatShotPitch = false;
 	if (BatShotsLeft > 0 && Current.bValid && BatNote.bBat && Current.Info.play_index > 3 && !bBatShotDone[BatNote.bSwing ? 0 : 1])
 	{
-		const FBatNote& B = BatNote;
-		const float Arrive = FMath::Max(FMath::Min(BbMotion::BatLoadAtS, B.TA - BbMotion::BatCommitLeadS - BbMotion::BatLoadBeforeCommitS), BbMotion::BatSettleS + 0.1f);
+		const FBatNote& Bn1 = BatNote;
+		const float Arrive = FMath::Max(FMath::Min(BbMotion::BatLoadAtS, Bn1.TA - BbMotion::BatCommitLeadS - BbMotion::BatLoadBeforeCommitS), BbMotion::BatSettleS + 0.1f);
 		TArray<TPair<float, const TCHAR*>> Marks;
 		Marks.Emplace(-0.5f, TEXT("stance"));
 		Marks.Emplace(BbMotion::BatSettleS + 0.5f * (Arrive - BbMotion::BatSettleS), TEXT("drift"));
 		Marks.Emplace(Arrive, TEXT("loaded"));
-		if (B.bSwing)
+		if (Bn1.bSwing)
 		{
-			const float End = FMath::Max(B.TS, B.TL + BbMotion::BatHandoverS);
-			Marks.Emplace(B.TL - 0.01f, TEXT("before_sim"));
-			Marks.Emplace(0.5f * (B.TL + End), TEXT("handover"));
+			const float End = FMath::Max(Bn1.TS, Bn1.TL + BbMotion::BatHandoverS);
+			Marks.Emplace(Bn1.TL - 0.01f, TEXT("before_sim"));
+			Marks.Emplace(0.5f * (Bn1.TL + End), TEXT("handover"));
 			Marks.Emplace(End, TEXT("sim_has_it"));
 			Marks.Emplace(End + 0.03f, TEXT("swing"));
 		}
 		else
 		{
-			Marks.Emplace(B.TA, TEXT("at_the_plate"));
-			Marks.Emplace(FMath::Max(B.CatchT, B.TA) + 0.1f, TEXT("caught"));
-			Marks.Emplace(FMath::Max(B.CatchT, B.TA) + BbMotion::BatRelaxAfterCatchS + 0.5f * BbMotion::BatRelaxOverS, TEXT("easing"));
-			Marks.Emplace(FMath::Max(B.CatchT, B.TA) + BbMotion::BatRelaxAfterCatchS + BbMotion::BatRelaxOverS + 0.1f, TEXT("stance_again"));
+			Marks.Emplace(Bn1.TA, TEXT("at_the_plate"));
+			Marks.Emplace(FMath::Max(Bn1.CatchT, Bn1.TA) + 0.1f, TEXT("caught"));
+			Marks.Emplace(FMath::Max(Bn1.CatchT, Bn1.TA) + BbMotion::BatRelaxAfterCatchS + 0.5f * BbMotion::BatRelaxOverS, TEXT("easing"));
+			Marks.Emplace(FMath::Max(Bn1.CatchT, Bn1.TA) + BbMotion::BatRelaxAfterCatchS + BbMotion::BatRelaxOverS + 0.1f, TEXT("stance_again"));
 		}
 		for (int32 M = 0; M < Marks.Num(); ++M)
 		{
-			ExtraShots.Emplace(Marks[M].Key, FString::Printf(TEXT("bat1_%s_%d_%s.png"), B.bSwing ? TEXT("swing") : TEXT("take"), M + 1, Marks[M].Value));
+			ExtraShots.Emplace(Marks[M].Key, FString::Printf(TEXT("bat1_%s_%d_%s.png"), Bn1.bSwing ? TEXT("swing") : TEXT("take"), M + 1, Marks[M].Value));
 		}
-		ExtraShots.Sort([](const TPair<float, FString>& A, const TPair<float, FString>& B) { return A.Key < B.Key; });
-		bBatShotDone[B.bSwing ? 0 : 1] = true;
+		ExtraShots.Sort([](const TPair<float, FString>& P, const TPair<float, FString>& Q) { return P.Key < Q.Key; });
+		bBatShotDone[Bn1.bSwing ? 0 : 1] = true;
 		bBatShotPitch = true;
 		--BatShotsLeft;
 	}
