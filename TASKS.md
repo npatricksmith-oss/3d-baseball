@@ -17,7 +17,7 @@ Status: `[ ]` not started · `[~]` partly done · `[?]` needs an owner decision
 
 ## Resume here (2026-11-24)
 
-**State.** Swing v3 ([spec](docs/swing-model-v3.md)): steps 0–1 merged. **PLAN D27** (owner on Q49): the swing must be realistic for every batter and effort, so travel and time follow from attributes. Worker `swing-family` (Opus, `work/swing-family`, worktree `swing-research`): redoes spec §6 and §14.1 and the oracle for it; needs an Opus review. Then step 2 (Rust). Step 4 brings Q45 back with game measurements of late contact. Nothing waits on the owner.
+**State.** Swing v3 ([spec](docs/swing-model-v3.md)): steps 0–1 merged. **PLAN D27** answered on `work/swing-family` (worktree `swing-research`): spec §6.7 and the oracle make the swing a family, the average batter's measured swing scaled by each batter's travel and time; needs an Opus review, then step 2 (Rust). One owner choice, not yet numbered (spec §6.7.7: the average swing's time, 0.170 s recommended). Step 4 brings Q45 back with game measurements.
 
 **Next:** §2: the ground-dive leftovers ([note](docs/calibration/2026-11-23-of-ground-dive.md) §9); swing steps 2–3 after step 1.
 
