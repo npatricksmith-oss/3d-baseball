@@ -161,6 +161,37 @@ namespace BbMotion
 	const FVector RestKnob(-14.0, -8.0, 100.0);
 	const FVector RestAxis(0.35, -0.45, 0.82);
 
+	/** The bat before the sim's own moves (player-visuals §13.2-§13.4, the base swing's build
+	 *  step 1). Times are play time, s from the pitcher's release; the batter's frame as above,
+	 *  cm. All named and configurable [E]; "by eye" and "from [4]" are marked in §13.3. */
+	/** The hands start to drift back from the stance (the pitcher in his stride): R -0.325 s. */
+	constexpr float BatSettleS = -0.325f;
+	/** The hands reach the load pose L: R +0.188 s, or sooner on a fast pitch (below). */
+	constexpr float BatLoadAtS = 0.188f;
+	/** The weight commitment comes this long before the pitch reaches the plane (T_swing 0.150
+	 *  s: 0.170 s; T_swing is not known before the swing, so this is what a take has too, D22),
+	 *  and the hands are at L this long before it at the latest. */
+	constexpr float BatCommitLeadS = 0.170f;
+	constexpr float BatLoadBeforeCommitS = 0.049f;
+	/** The handover from the client's bat to the sim's takes at least this long from the moment
+	 *  the sim's bat first moves. */
+	constexpr float BatHandoverS = 0.05f;
+	/** A pitch taken: the bat eases back from L toward the stance this long after the catch,
+	 *  over this long. */
+	constexpr float BatRelaxAfterCatchS = 0.2f;
+	constexpr float BatRelaxOverS = 0.6f;
+	/** The load pose L: the mean of the sim's swing-start pose (swing_pose_probe, step 1). */
+	extern const FVector LoadKnob;
+	extern const FVector LoadAxis;
+	/** The client's bat at play time T: the stance, then from BatSettleS drifting to L by a
+	 *  smooth curve, reaching it at min(BatLoadAtS, Ta - BatCommitLeadS - BatLoadBeforeCommitS),
+	 *  then still; on a pitch taken (bTake) easing back to the stance after the catch (CatchT).
+	 *  The same on every pitch, a swing or a take, until the sim's bat moves (D22). */
+	void LoadBat(float T, float Ta, bool bTake, float CatchT, const FVector& StanceKnob, const FVector& StanceAxis, FVector& OutKnob, FVector& OutAxis);
+	/** How much of the drawn bat is the sim's, 0 to 1 and smooth: from TL, the moment the sim's
+	 *  bat first moves, to TS (the swing's start) or TL + BatHandoverS if later. */
+	float HandoverWeight(float T, float TL, float TS);
+
 	/** What a fielder's pose is made from (player-visuals §10). Everything is in the frame of
 	 *  the figure as it is drawn: +Y the way he faces. A right-handed thrower, the glove on
 	 *  his left hand; a left-hander is the same shown in a mirror. */

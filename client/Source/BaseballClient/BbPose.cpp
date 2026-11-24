@@ -572,6 +572,29 @@ double BbMotion::HandsDeg(const FVector& Knob, const FVector& Tip)
 	return FMath::RadiansToDegrees(FMath::Atan2(H.Y, -H.X));
 }
 
+// The mean of the sim's swing-start pose over 5,019 swings of 40 games (swing_pose_probe, 2026-11-23),
+// in his frame (the probe's x is toward the plate, here -X): the knob 57 cm back, level with
+// 125 cm up, the bat nearly level and laid back toward the catcher.
+const FVector BbMotion::LoadKnob(2.9, -56.9, 125.0);
+const FVector BbMotion::LoadAxis(0.465, -0.871, 0.160);
+
+void BbMotion::LoadBat(float T, float Ta, bool bTake, float CatchT, const FVector& StanceKnob, const FVector& StanceAxis, FVector& OutKnob, FVector& OutAxis)
+{
+	const float Arrive = FMath::Max(FMath::Min(BatLoadAtS, Ta - BatCommitLeadS - BatLoadBeforeCommitS), BatSettleS + 0.1f);
+	double U = FMath::SmoothStep(BatSettleS, Arrive, T);
+	if (bTake && CatchT >= 0.f)
+	{
+		U *= 1.0 - FMath::SmoothStep(CatchT + BatRelaxAfterCatchS, CatchT + BatRelaxAfterCatchS + BatRelaxOverS, T);
+	}
+	OutKnob = FMath::Lerp(StanceKnob, LoadKnob, U);
+	OutAxis = FMath::Lerp(StanceAxis, LoadAxis.GetSafeNormal(), U).GetSafeNormal(1e-6, StanceAxis);
+}
+
+float BbMotion::HandoverWeight(float T, float TL, float TS)
+{
+	return FMath::SmoothStep(TL, FMath::Max(TS, TL + BatHandoverS), T);
+}
+
 FBbStick BbMotion::Swing(const FSwingIn& In, const FBbSkeleton& Skel, const FBbMotionGround& Ground, FBbReach& OutReach)
 {
 	const int32 L = 0, R = 1;

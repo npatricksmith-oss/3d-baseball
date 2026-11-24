@@ -144,6 +144,11 @@ table Telemetry {
   // The call on the pitch: 1 ball, 2 called strike, 3 swinging strike, 4 foul, 5 foul tip,
   // 6 in play, 7 hit by pitch; 0 unknown.
   pitch_call: ubyte (id: 22);
+  // The batter's swing, for presentation (player-visuals §13.6; export E1): the executed swing's
+  // nominal contact (the moment its hands and bat line up), s from release, or -1 if he did
+  // not swing. Appended 2026-11-23: a timeline recorded before reads -1 here (the swing's start
+  // is the `SwingStart` marker, which every swing has had since M4).
+  swing_contact_s: float = -1.0 (id: 23);
 }
 
 table PlayTimeline {

@@ -12,8 +12,10 @@ typedef struct BbGame BbGame;
 
 /* The ABI's version: raised whenever a struct below changes its layout. A client compares
  * bb_abi_version() with the BB_ABI_VERSION it was compiled with and refuses a mismatch (an
- * older library lacks the function). 2 (2026-11-23): BbDive gained a runner's dive back. */
-#define BB_ABI_VERSION 2
+ * older library lacks the function). 2 (2026-11-23): BbDive gained a runner's dive back.
+ * 3 (2026-11-23): BbPlayInfo gained swing_start_s and swing_contact_s; bb_timeline_sample
+ * interpolates the bat between the timeline's 5 ms samples. */
+#define BB_ABI_VERSION 3
 uint32_t bb_abi_version(void);
 
 /* New AI-vs-AI game with average players. */
@@ -84,6 +86,11 @@ typedef struct {
   float plate_x_m, plate_z_m;
   float zone_bottom_m, zone_top_m, zone_half_width_m;
   uint8_t plate_crossed, pitch_call, _pad3[2];
+  /* The batter's swing, for presentation (player-visuals 13.6): swing_start_s = play time its
+   * start (the timeline's SwingStart marker), swing_contact_s = play time of its nominal contact
+   * (the moment its hands and bat line up, within 0.025 s of the actual contact); each -1 if he
+   * did not swing, and swing_contact_s -1 too for a timeline recorded before this field. */
+  float swing_start_s, swing_contact_s;
 } BbPlayInfo;
 /* Agent ids: high byte = team (0 away, 1 home); bit 0x80 = fielder, low 7 bits = position 1-9;
  * without bit 0x80, a batter or runner, low 7 bits = place in the batting order 1-9. A player

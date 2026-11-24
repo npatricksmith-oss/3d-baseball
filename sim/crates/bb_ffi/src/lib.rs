@@ -228,8 +228,10 @@ pub struct BbDive {
 
 /// The C ABI's version, `BB_ABI_VERSION` in `bb_ffi.h`: raised whenever a struct the client
 /// reads changes its layout, so a client built against another version can refuse the library
-/// (Q39 review P3-5). 2: `BbDive` gained a runner's dive back (2026-11-23).
-pub const BB_ABI_VERSION: u32 = 2;
+/// (Q39 review P3-5). 2: `BbDive` gained a runner's dive back (2026-11-23). 3: `BbPlayInfo`
+/// gained `swing_start_s` and `swing_contact_s`, and `bb_timeline_sample` interpolates the bat
+/// between the timeline's samples (export E1, player-visuals §13.6, 2026-11-23).
+pub const BB_ABI_VERSION: u32 = 3;
 
 /// The C ABI's version (`BB_ABI_VERSION`).
 #[unsafe(no_mangle)]
@@ -359,6 +361,12 @@ pub struct BbPlayInfo {
     /// 7 hit by pitch; 0 unknown.
     pub pitch_call: u8,
     pub _pad3: [u8; 2],
+    /// The batter's swing, for presentation (export E1): the play time of its start (the
+    /// timeline's `SwingStart` marker) and of its nominal contact (the moment its hands and
+    /// bat line up, within 0.025 s of the actual contact), each −1 if he did not swing. A
+    /// timeline recorded before E1 has no contact time: −1 there too.
+    pub swing_start_s: f32,
+    pub swing_contact_s: f32,
 }
 
 /// One out as the umpire signals it (rules-spec §1.3).
@@ -411,7 +419,7 @@ fn timeline<'a>(blob: *const u8, len: usize) -> Option<bb_schema::tl::PlayTimeli
 #[unsafe(no_mangle)]
 pub unsafe extern "C" fn bb_timeline_info(blob: *const u8, len: usize, out: *mut BbPlayInfo) -> i32 {
     let (Some(tl), false) = (timeline(blob, len), out.is_null()) else { return -1 };
-    let mut info = BbPlayInfo { play_index: tl.play_index(), duration_s: tl.duration_s(), batter: tl.batter(), ..Default::default() };
+    let mut info = BbPlayInfo { play_index: tl.play_index(), duration_s: tl.duration_s(), batter: tl.batter(), swing_contact_s: -1.0, ..Default::default() };
     if let Some(v) = tl.view_after() {
         info.inning = v.inning();
         info.top = v.top() as u8;
@@ -436,9 +444,11 @@ pub unsafe extern "C" fn bb_timeline_info(blob: *const u8, len: usize, out: *mut
         info.zone_half_width_m = t.zone_half_width_m();
         info.plate_crossed = t.plate_crossed() as u8;
         info.pitch_call = t.pitch_call();
+        info.swing_contact_s = t.swing_contact_s();
     }
     let contact = tl.markers().and_then(|m| m.iter().find(|m| m.kind() == MarkerKind::Contact)).map(|m| m.t());
     info.contact_s = contact.unwrap_or(-1.0);
+    info.swing_start_s = tl.markers().and_then(|m| m.iter().find(|m| m.kind() == MarkerKind::SwingStart)).map_or(-1.0, |m| m.t());
     // The pitch ends in the catcher's glove, on the ground, or at contact.
     let pitch_end = tl.ball().and_then(|b| b.segments()).and_then(|s| s.iter().next()).and_then(|s| s.knots()).and_then(|k| k.iter().last()).map(|k| k.t()).unwrap_or(0.0);
     info.call_s = if contact.is_some() { info.duration_s } else { pitch_end + bb_game::timeline::UMPIRE_SIGNAL_S as f32 };
@@ -562,10 +572,28 @@ pub unsafe extern "C" fn bb_timeline_sample(blob: *const u8, len: usize, t: f32,
         let i = (0..n).take_while(|&i| k.get(i).t() <= t).count().clamp(1, n) - 1;
         // A swing's track ends with the follow-through; after that the bat is on the ground.
         if n == 1 || t <= k.get(n - 1).t() + 0.25 {
-            let s = k.get(i);
-            let (q, knob) = (s.rot(), v3(s.knob()));
-            // Bat axis = rot · +X (first column of the rotation matrix).
-            let axis = [1.0 - 2.0 * (q.y() * q.y() + q.z() * q.z()), 2.0 * (q.x() * q.y() + q.w() * q.z()), 2.0 * (q.x() * q.z() - q.w() * q.y())];
+            let bat_at = |s: &bb_schema::tl::BatSample| {
+                let q = s.rot();
+                // Bat axis = rot · +X (first column of the rotation matrix).
+                (v3(s.knob()), [1.0 - 2.0 * (q.y() * q.y() + q.z() * q.z()), 2.0 * (q.x() * q.y() + q.w() * q.z()), 2.0 * (q.x() * q.z() - q.w() * q.y())])
+            };
+            let (mut knob, mut axis) = bat_at(&k.get(i));
+            // Between two samples a few milliseconds apart the bat is interpolated (export E1:
+            // the knob in a straight line, the direction by normalized blend), as the players
+            // are; the 5 ms samples are up to 10 degrees apart in a fast swing. A longer gap
+            // (the stance, then the swing's first sample) is a hold, not a motion.
+            if i + 1 < n && t > k.get(i).t() {
+                let (s0, s1) = (k.get(i), k.get(i + 1));
+                let h = s1.t() - s0.t();
+                if h > 0.0 && h <= BAT_INTERP_MAX_GAP_S {
+                    let u = ((t - s0.t()) / h).clamp(0.0, 1.0);
+                    let ((k0, a0), (k1, a1)) = (bat_at(&s0), bat_at(&s1));
+                    knob = core::array::from_fn(|j| k0[j] + (k1[j] - k0[j]) * u);
+                    let b: [f32; 3] = core::array::from_fn(|j| a0[j] + (a1[j] - a0[j]) * u);
+                    let len = (b[0] * b[0] + b[1] * b[1] + b[2] * b[2]).sqrt();
+                    axis = if len > 1e-6 { [b[0] / len, b[1] / len, b[2] / len] } else { a0 };
+                }
+            }
             frame.has_bat = 1;
             frame.bat_knob = knob;
             frame.bat_tip = core::array::from_fn(|j| knob[j] + BAT_LENGTH_M * axis[j]);
@@ -574,6 +602,10 @@ pub unsafe extern "C" fn bb_timeline_sample(blob: *const u8, len: usize, t: f32,
     unsafe { *out = frame };
     1
 }
+
+/// The bat track's samples are 5 ms apart through a swing; two further apart than this are not
+/// joined (the stance to the swing's first sample when there is no load, or the load's start).
+const BAT_INTERP_MAX_GAP_S: f32 = 0.0075;
 
 /// Length of the stock bat (34 in), m: the only bat model so far (timeline `model_id` 0).
 const BAT_LENGTH_M: f32 = 0.8636;
@@ -1117,6 +1149,150 @@ mod tests {
         }
         // Enough of each, including swings that start inside the latency after the decision.
         assert!(swings > 50 && takes > 50 && walks >= 2 && loads > 5, "{swings} swings ({loads} short loads), {takes} takes, {walks} walks");
+    }
+
+    // Export E1 (player-visuals §13.6). The swing's times a client reads are the swing's own:
+    // the start is the `SwingStart` marker's time, the contact the executed swing's nominal
+    // contact; neither is given for a pitch not swung at. The bat between its 5 ms samples is
+    // where the swing's own curve has it, not held on the sample before.
+    #[test]
+    fn the_swings_clocks_and_the_bat_between_its_samples() {
+        let mut game = Game::new(11, true);
+        let (mut swings, mut takes) = (0, 0);
+        let (mut err_held, mut err_interp, mut worst_cm, mut worst_deg) = (0f64, 0f64, 0f64, 0f64);
+        while let Some(step) = game.step_pitch() {
+            let bytes = bb_game::timeline::encode(&step, &game.st, &game.rosters);
+            let (p, len) = (bytes.as_ptr(), bytes.len());
+            let mut info = BbPlayInfo::default();
+            assert_eq!(unsafe { bb_timeline_info(p, len, &mut info) }, 1);
+            let marker = flatbuffers::root::<bb_schema::tl::PlayTimeline>(&bytes).ok().and_then(|t| t.markers()).and_then(|m| m.iter().find(|m| m.kind() == MarkerKind::SwingStart).map(|m| m.t()));
+            let Some(sw) = &step.record.swing else {
+                takes += 1;
+                assert_eq!((info.swing_start_s, info.swing_contact_s, marker), (-1.0, -1.0, None));
+                continue;
+            };
+            swings += 1;
+            // Both from the sim's own record of the swing.
+            assert_eq!(info.swing_start_s, sw.t_start() as f32, "play {}", info.play_index);
+            assert_eq!(Some(info.swing_start_s), marker);
+            assert_eq!(info.swing_contact_s, sw.t_c as f32, "play {}", info.play_index);
+            // The bat at times between samples, against the swing's own bat there (1 mm and a
+            // fifth of a degree allowed for the straight line and the blend), and against the
+            // sample before it, held (what a client saw before E1).
+            use bb_physics::contact::BatPose;
+            let (t0, t1) = (sw.t_start() + 0.0123, sw.t_c + 0.11);
+            let mut t = t0;
+            while t < t1 {
+                let mut f = BbFrame::default();
+                unsafe { bb_timeline_sample(p, len, t as f32, &mut f) };
+                let truth = sw.at(t);
+                let d3 = |a: [f32; 3], b: [f64; 3]| (0..3).map(|j| (a[j] as f64 - b[j]).powi(2)).sum::<f64>().sqrt();
+                let cm = d3(f.bat_knob, [truth.knob.x, truth.knob.y, truth.knob.z]) * 100.0;
+                let ax: [f64; 3] = core::array::from_fn(|j| (f.bat_tip[j] - f.bat_knob[j]) as f64 / BAT_LENGTH_M as f64);
+                let deg = (ax[0] * truth.axis.x + ax[1] * truth.axis.y + ax[2] * truth.axis.z).clamp(-1.0, 1.0).acos().to_degrees();
+                (worst_cm, worst_deg) = (worst_cm.max(cm), worst_deg.max(deg));
+                err_interp += cm;
+                // The held sample: the last one on the 5 ms grid from the swing's start.
+                let held = sw.at(sw.t_start() + ((t - sw.t_start()) / 0.005).floor() * 0.005);
+                err_held += ((held.knob.x - truth.knob.x).powi(2) + (held.knob.y - truth.knob.y).powi(2) + (held.knob.z - truth.knob.z).powi(2)).sqrt() * 100.0;
+                t += 0.0071;
+            }
+        }
+        assert!(swings > 50 && takes > 50, "{swings} swings, {takes} takes");
+        assert!(worst_cm < 0.15 && worst_deg < 0.2, "the interpolated bat is {worst_cm:.3} cm and {worst_deg:.3} deg off the swing's own at worst");
+        assert!(err_interp < 0.3 * err_held, "interpolated error {err_interp:.1} against held {err_held:.1} (summed cm)");
+    }
+
+    // The bat's whole track against the sim's own bat, including the three places where the
+    // interpolation rule could go wrong (review of step 1, P3-1): the stance sample to the
+    // first load sample (a hold), the load's last sample to the swing's first, and, when the
+    // decision came with the swing's start and there is no load, the stance to the swing's first
+    // pose in one step, which is a hold until it and not a blend over the whole pitch. The
+    // sim's own bat before the swing: the stance until the load starts (the later of 0.05 s
+    // before the swing and the decision), then a straight line to the swing's start pose; from
+    // there the swing's own. The decision time is moved to make the cut and absent loads (they
+    // occur in the sim: `t_s − t_decide` is 0 on 0.2% of swings).
+    #[test]
+    fn the_bat_before_and_through_the_swing_is_the_sims_own() {
+        use bb_physics::contact::BatPose;
+        let mut game = Game::new(11, true);
+        let (mut checked, mut no_load, mut cut) = (0, 0, 0);
+        let (mut worst_cm, mut worst_deg) = (0f64, 0f64);
+        while let Some(mut step) = game.step_pitch() {
+            let (Some(sw), Some((_, at))) = (step.record.swing, step.viz.standing.last().copied()) else { continue };
+            if checked >= 40 {
+                break;
+            }
+            let t0 = sw.t_start();
+            if t0 <= 0.0 {
+                continue;
+            }
+            let (stance_k, stance_a) = bb_game::timeline::stance_pose(at);
+            let start = sw.at(t0);
+            let natural = step.record.t_decide;
+            for decide in [natural, t0, t0 - 0.02] {
+                step.record.t_decide = decide;
+                let t_load = (t0 - bb_game::timeline::LOAD_S).max(decide);
+                no_load += (t_load >= t0) as u32;
+                cut += (t_load > t0 - bb_game::timeline::LOAD_S + 1e-9) as u32;
+                let bytes = bb_game::timeline::encode(&step, &game.st, &game.rosters);
+                let (p, len) = (bytes.as_ptr(), bytes.len());
+                // Every 1.7 ms through the track, and either side of the two boundaries.
+                let mut times: Vec<f64> = (0..).map(|i| i as f64 * 0.0017).take_while(|t| *t < sw.t_c + 0.11).collect();
+                times.extend([t_load - 0.0005, t_load + 0.0005, t_load + 0.0031, t0 - 0.0031, t0 - 0.0005, t0 + 0.0005, t0 + 0.0031]);
+                for t in times.into_iter().filter(|t| *t >= 0.0) {
+                    let mut f = BbFrame::default();
+                    unsafe { bb_timeline_sample(p, len, t as f32, &mut f) };
+                    // The sim's own bat at t.
+                    let (knob, axis): ([f64; 3], [f64; 3]) = if t >= t0 {
+                        let k = sw.at(t);
+                        ([k.knob.x, k.knob.y, k.knob.z], [k.axis.x, k.axis.y, k.axis.z])
+                    } else if t <= t_load {
+                        ([stance_k.x, stance_k.y, stance_k.z], [stance_a.x, stance_a.y, stance_a.z])
+                    } else {
+                        let u = (t - t_load) / (t0 - t_load);
+                        let k = [stance_k.x + (start.knob.x - stance_k.x) * u, stance_k.y + (start.knob.y - stance_k.y) * u, stance_k.z + (start.knob.z - stance_k.z) * u];
+                        let a = [stance_a.x * (1.0 - u) + start.axis.x * u, stance_a.y * (1.0 - u) + start.axis.y * u, stance_a.z * (1.0 - u) + start.axis.z * u];
+                        let n = (a[0] * a[0] + a[1] * a[1] + a[2] * a[2]).sqrt();
+                        (k, [a[0] / n, a[1] / n, a[2] / n])
+                    };
+                    let cm = (0..3).map(|j| (f.bat_knob[j] as f64 - knob[j]).powi(2)).sum::<f64>().sqrt() * 100.0;
+                    let ax: [f64; 3] = core::array::from_fn(|j| (f.bat_tip[j] - f.bat_knob[j]) as f64 / BAT_LENGTH_M as f64);
+                    let deg = (ax[0] * axis[0] + ax[1] * axis[1] + ax[2] * axis[2]).clamp(-1.0, 1.0).acos().to_degrees();
+                    (worst_cm, worst_deg) = (worst_cm.max(cm), worst_deg.max(deg));
+                    // (A load cut to a few samples turns the bat some 70 degrees in them, and a
+                    // normalized blend of two samples 5 ms apart of that is up to about a degree
+                    // off the load's own path between them; a full load is within 0.2.)
+                    let deg_bound = if t0 - t_load >= 0.04 { 0.2 } else { 2.0 };
+                    assert!(cm < 0.15 && deg < deg_bound, "play {} decision {decide:.4} swing start {t0:.4} at {t:.4}: {cm:.3} cm and {deg:.3} deg off the sim's bat", step.play);
+                }
+            }
+            step.record.t_decide = natural;
+            checked += 1;
+        }
+        assert!(checked >= 40 && no_load >= 40 && cut >= 40, "{checked} swings, {no_load} with no load, {cut} with a cut or absent load");
+        assert!(worst_cm < 0.15 && worst_deg < 2.0);
+    }
+
+    // A timeline recorded before export E1 has no swing-contact time: it reads −1, and the swing's
+    // start is still the marker's. (An owner's saved play of 2026-11-20, a ball hit.)
+    #[test]
+    fn an_old_saved_play_has_no_swing_contact_time() {
+        let path = concat!(env!("CARGO_MANIFEST_DIR"), "/../../../saved-plays/seed51001-play102-20261120-002144.timeline");
+        let bytes = std::fs::read(path).expect("the owner's saved timeline");
+        let mut info = BbPlayInfo::default();
+        assert_eq!(unsafe { bb_timeline_info(bytes.as_ptr(), bytes.len(), &mut info) }, 1);
+        let marker = flatbuffers::root::<bb_schema::tl::PlayTimeline>(&bytes).unwrap().markers().unwrap().iter().find(|m| m.kind() == MarkerKind::SwingStart).map(|m| m.t());
+        assert!(marker.is_some() && info.contact_s > 0.0, "a ball hit has a swing and a contact");
+        assert_eq!(info.swing_contact_s, -1.0);
+        assert_eq!(Some(info.swing_start_s), marker);
+        // And its bat is sampled as before: a stance, then the swing.
+        let (mut a, mut b) = (BbFrame::default(), BbFrame::default());
+        unsafe {
+            bb_timeline_sample(bytes.as_ptr(), bytes.len(), 0.0, &mut a);
+            bb_timeline_sample(bytes.as_ptr(), bytes.len(), info.contact_s, &mut b);
+        }
+        assert!(a.has_bat == 1 && b.has_bat == 1 && a.bat_knob != b.bat_knob);
     }
 
     // A client samples timelines without parsing them. Everything checked here is a fact

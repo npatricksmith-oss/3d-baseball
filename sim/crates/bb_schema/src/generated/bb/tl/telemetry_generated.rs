@@ -41,6 +41,7 @@ impl<'a> Telemetry<'a> {
   pub const VT_ZONE_HALF_WIDTH_M: ::flatbuffers::VOffsetT = 44;
   pub const VT_PLATE_CROSSED: ::flatbuffers::VOffsetT = 46;
   pub const VT_PITCH_CALL: ::flatbuffers::VOffsetT = 48;
+  pub const VT_SWING_CONTACT_S: ::flatbuffers::VOffsetT = 50;
 
   #[inline]
   pub unsafe fn init_from_table(table: ::flatbuffers::Table<'a>) -> Self {
@@ -52,6 +53,7 @@ impl<'a> Telemetry<'a> {
     args: &'args TelemetryArgs<'args>
   ) -> ::flatbuffers::WIPOffset<Telemetry<'bldr>> {
     let mut builder = TelemetryBuilder::new(_fbb);
+    builder.add_swing_contact_s(args.swing_contact_s);
     builder.add_zone_half_width_m(args.zone_half_width_m);
     builder.add_zone_top_m(args.zone_top_m);
     builder.add_zone_bottom_m(args.zone_bottom_m);
@@ -240,6 +242,13 @@ impl<'a> Telemetry<'a> {
     // which contains a valid value in this slot
     unsafe { self._tab.get::<u8>(Telemetry::VT_PITCH_CALL, Some(0)).unwrap()}
   }
+  #[inline]
+  pub fn swing_contact_s(&self) -> f32 {
+    // Safety:
+    // Created from valid Table for this object
+    // which contains a valid value in this slot
+    unsafe { self._tab.get::<f32>(Telemetry::VT_SWING_CONTACT_S, Some(-1.0)).unwrap()}
+  }
 }
 
 impl ::flatbuffers::Verifiable for Telemetry<'_> {
@@ -271,6 +280,7 @@ impl ::flatbuffers::Verifiable for Telemetry<'_> {
      .visit_field::<f32>("zone_half_width_m", Self::VT_ZONE_HALF_WIDTH_M, false)?
      .visit_field::<bool>("plate_crossed", Self::VT_PLATE_CROSSED, false)?
      .visit_field::<u8>("pitch_call", Self::VT_PITCH_CALL, false)?
+     .visit_field::<f32>("swing_contact_s", Self::VT_SWING_CONTACT_S, false)?
      .finish();
     Ok(())
   }
@@ -299,6 +309,7 @@ pub struct TelemetryArgs<'a> {
     pub zone_half_width_m: f32,
     pub plate_crossed: bool,
     pub pitch_call: u8,
+    pub swing_contact_s: f32,
 }
 impl<'a> Default for TelemetryArgs<'a> {
   #[inline]
@@ -327,6 +338,7 @@ impl<'a> Default for TelemetryArgs<'a> {
       zone_half_width_m: 0.0,
       plate_crossed: false,
       pitch_call: 0,
+      swing_contact_s: -1.0,
     }
   }
 }
@@ -429,6 +441,10 @@ impl<'a: 'b, 'b, A: ::flatbuffers::Allocator + 'a> TelemetryBuilder<'a, 'b, A> {
     self.fbb_.push_slot::<u8>(Telemetry::VT_PITCH_CALL, pitch_call, 0);
   }
   #[inline]
+  pub fn add_swing_contact_s(&mut self, swing_contact_s: f32) {
+    self.fbb_.push_slot::<f32>(Telemetry::VT_SWING_CONTACT_S, swing_contact_s, -1.0);
+  }
+  #[inline]
   pub fn new(_fbb: &'b mut ::flatbuffers::FlatBufferBuilder<'a, A>) -> TelemetryBuilder<'a, 'b, A> {
     let start = _fbb.start_table();
     TelemetryBuilder {
@@ -469,6 +485,7 @@ impl ::core::fmt::Debug for Telemetry<'_> {
       ds.field("zone_half_width_m", &self.zone_half_width_m());
       ds.field("plate_crossed", &self.plate_crossed());
       ds.field("pitch_call", &self.pitch_call());
+      ds.field("swing_contact_s", &self.swing_contact_s());
       ds.finish()
   }
 }

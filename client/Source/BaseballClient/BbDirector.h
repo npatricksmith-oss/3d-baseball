@@ -36,6 +36,13 @@ class UMaterialInterface;
  *               -BbMotionShots (the delivery, the catcher's receive, a ball hit, a swing and a
  *               miss, a pitch taken, a ball fielded and thrown and a throw taken photographed
  *               at their named moments as motion_<strip>_<n>_<what>.png, then quit);
+ *               -BbBatShots=<n> (the first swing and the first pitch taken, held on the moments
+ *               of the bat before the swing, as bat1_<swing|take>_<n>_<what>.png, then quit);
+ *               -BbBatCheck (the drawn bat's speed, handover and swing-withheld checks of
+ *               player-visuals §13.7, logged per pitch as BB_BATCHECK; with -BbStagingLog also
+ *               BB_BATNOTE and BB_BATHANDS), see check-bat-step1.sh;
+ *               -BbBatSim (the bat before the swing as the client draws it, player-visuals §13.4:
+ *               off by default until the owner's Q44; -BbBatCheck and -BbBatShots turn it on);
  *               -BbParkShots (photograph the park from its fixed spots as park_<spot>.png, then quit;
  *               -BbParkShotsAt=<seconds> when to start)
  *               -BbBoxShots=<n> (photograph the Tab box at pitch n and the final box, then quit)
@@ -570,11 +577,53 @@ private:
 		float StartT = -1.f, LaunchT = -1.f, EndT = -1.f;
 		float LaunchDeg = 0.f;
 		FVector EndKnob = FVector::ZeroVector, EndTip = FVector::ZeroVector;
+		/** The base swing's clocks (player-visuals §13.2), play time: TA, the pitch reaching the
+		 *  sim's contact plane (y = 0.35 m), read from the ball's track (extrapolated from its
+		 *  last 30 ms when the ball was hit first); CatchT, the mitt's catch on a pitch not
+		 *  hit, else -1. On a swing: TL, the moment the sim's bat first moves (StartT: the end
+		 *  of the client's bat); TS, the swing's start; TC, its nominal contact (the sim's own
+		 *  with export E1, else inferred from the bat's fastest turning: bTcInferred). */
+		float TA = 0.42f, CatchT = -1.f, TL = -1.f, TS = -1.f, TC = -1.f;
+		bool bTcInferred = false;
+		/** TA was found on the ball's track (false: the pitch never reached the plane on it, a ball
+		 *  in the dirt, and TA is the 0.42 s default). */
+		bool bTaFound = false;
+		/** The stance in his frame, and the sim's bat at TS (world, cm). */
+		FVector StanceKnobB = FVector::ZeroVector, StanceAxisB = FVector(0, 0, 1);
+		FVector StartKnob = FVector::ZeroVector, StartTip = FVector::ZeroVector;
 	};
 	FBatNote BatNote, NextBatNote;
 	void NoteBat(const FBbPlay& Play, FBatNote& Out) const;
 	/** A sim point in the batter's own frame (BbMotion::FSwingIn), cm, without the figure. */
 	static FVector BatterFrame(const float P[3], const FBatNote& N);
+	/** The inverse of BatterFrame, to Unreal coordinates (a point, cm in his frame). */
+	static FVector FromBatterFrame(const FVector& Cm, const FBatNote& N);
+	/** When the pitch reaches the sim's contact plane (y = 0.35 m), play time, or -1. */
+	float PitchPlaneT(const FBbPlay& Play, float CutAt = -1.f) const;
+	/** The sim's own times of the swing from the bat's samples, for a timeline recorded
+	 *  without export E1's swing_contact_s: nominal contact from the bat's fastest turning. */
+	float InferContactT(const FBbPlay& Play, const FBatNote& N) const;
+	/** The bat as drawn at play time T while it is the timeline's (player-visuals §13.4): the
+	 *  client's own before the sim's bat moves, blended into the sim's from the handover on,
+	 *  the sim's (SimKnob, SimTip: the timeline's bat at T) from then. Unreal coordinates. */
+	void DrawnBat(float T, const FBatNote& N, const FVector& SimKnob, const FVector& SimTip, FVector& OutKnob, FVector& OutTip) const;
+	/** -BbBatCheck: the drawn bat over the whole of this pitch at 1 ms, against what §13.7
+	 *  asks of it (speed before the sim's bat moves, continuity at both ends of the handover,
+	 *  the same with the swing withheld before then), logged as BB_BATCHECK. */
+	void CheckBat(const FBbPlay& Play, const FBatNote& N) const;
+	bool bBatCheck = false;
+	/** -BbBatSim (or -BbBatCheck, -BbBatShots): the client's own bat before the sim's moves and the
+	 *  handover (the base swing's step 1). Off: the timeline's bat as it is. */
+	bool bClientBat = false;
+	/** -BbBatShots: this pitch's first swing and first take photographed before the swing. */
+	int32 BatShotsLeft = 0;
+	bool bBatShotDone[2] = { false, false };
+	/** This pitch is one of them: the camera is across the plate from the batter. */
+	bool bBatShotPitch = false;
+	/** The worst a hand has been from the handle in this pitch's handover and swing, cm
+	 *  (BB_BATHANDS), and the frames it was measured in. */
+	float BatHandMax = 0.f;
+	int32 BatHandFrames = 0;
 	/** The bat as drawn this frame. The sim's while the sim has it in his hands (bBatSim);
 	 *  the batter's own to carry otherwise, as long as he stands at the plate (bBatHeld): back
 	 *  from the end of his swing to his shoulder, at ease between pitches, up into the stance. */

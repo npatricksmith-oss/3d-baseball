@@ -148,7 +148,7 @@ Check the code again before starting one.
 
 ### Priority A, not done
 
-- [~] **Batting stances.** Base swing: [player-visuals §13](docs/player-visuals.md#13-the-base-stance-and-swing-design-2026-11-23-not-yet-built); per-player looks after (D23). Steps [ ] 1 bat, E1 · [ ] 2 legs · [ ] 3 hips, take · [ ] 4 finish, Q43 · [ ] 5 late swings
+- [~] **Batting stances.** Base swing: [player-visuals §13](docs/player-visuals.md#13-the-base-stance-and-swing-design-2026-11-23-step-1-of-5-built); per-player looks after (D23). [x] 1 bat/E1 (Q44: -BbBatSim) · [ ] 2 legs · [ ] 3 hips, take · [ ] 4 finish, Q43 · [ ] 5 late
 - [~] **A4. Throw choices from the outs and the runners.** Built with review fixes; more cases are items 2 and 3 above.
 - [~] **A5. Dives.** Rate and motion are in. Left: every dive is head-first straight at the ball.
 - [~] **A6. Slides.** Client only: a runner slides feet-first when a play is being made on him. The sim has no slide (agent-models §6.2); see item 1 above for the dead stop.
