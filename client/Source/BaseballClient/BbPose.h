@@ -164,15 +164,15 @@ namespace BbMotion
 	/** The bat before the sim's own moves (player-visuals §13.2-§13.4, the base swing's build
 	 *  step 1). Times are play time, s from the pitcher's release; the batter's frame as above,
 	 *  cm. All named and configurable [E]; "by eye" and "from [4]" are marked in §13.3. */
-	/** The hands start to drift back from the stance (the pitcher in his stride): R -0.34 s. */
-	constexpr float BatSettleS = -0.34f;
-	/** The hands reach the load pose L: R +0.198 s, or sooner on a fast pitch (below). */
-	constexpr float BatLoadAtS = 0.198f;
+	/** The hands start to drift back from the stance (the pitcher in his stride): R -0.325 s. */
+	constexpr float BatSettleS = -0.325f;
+	/** The hands reach the load pose L: R +0.188 s, or sooner on a fast pitch (below). */
+	constexpr float BatLoadAtS = 0.188f;
 	/** The weight commitment comes this long before the pitch reaches the plane (T_swing 0.150
 	 *  s: 0.170 s; T_swing is not known before the swing, so this is what a take has too, D22),
 	 *  and the hands are at L this long before it at the latest. */
 	constexpr float BatCommitLeadS = 0.170f;
-	constexpr float BatLoadBeforeCommitS = 0.052f;
+	constexpr float BatLoadBeforeCommitS = 0.049f;
 	/** The handover from the client's bat to the sim's takes at least this long from the moment
 	 *  the sim's bat first moves. */
 	constexpr float BatHandoverS = 0.03f;

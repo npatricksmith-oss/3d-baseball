@@ -572,10 +572,11 @@ double BbMotion::HandsDeg(const FVector& Knob, const FVector& Tip)
 	return FMath::RadiansToDegrees(FMath::Atan2(H.Y, -H.X));
 }
 
-// The mean of the sim's swing-start pose over the swing_pose_probe's swings, in his frame (the
-// probe's x is toward the plate, here -X).
-const FVector BbMotion::LoadKnob(-5.0, -57.0, 130.0);
-const FVector BbMotion::LoadAxis(0.0, -0.4, 0.9);
+// The mean of the sim's swing-start pose over 5,019 swings of 40 games (swing_pose_probe, 2026-11-23),
+// in his frame (the probe's x is toward the plate, here -X): the knob 57 cm back, level with
+// 125 cm up, the bat nearly level and laid back toward the catcher.
+const FVector BbMotion::LoadKnob(2.9, -56.9, 125.0);
+const FVector BbMotion::LoadAxis(0.465, -0.871, 0.160);
 
 void BbMotion::LoadBat(float T, float Ta, bool bTake, float CatchT, const FVector& StanceKnob, const FVector& StanceAxis, FVector& OutKnob, FVector& OutAxis)
 {

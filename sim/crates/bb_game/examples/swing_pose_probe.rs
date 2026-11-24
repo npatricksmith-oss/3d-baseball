@@ -30,6 +30,18 @@ fn row(name: &str, v: &mut Vec<f64>) {
     println!("{name:<34} n {:5}  min {:8.4}  p5 {:8.4}  p50 {:8.4}  p95 {:8.4}  max {:8.4}", v.len(), q(0.0), q(0.05), q(0.5), q(0.95), q(1.0));
 }
 
+/// Like `row`, in milliseconds.
+fn row_ms(name: &str, v: &[f64]) {
+    let mut ms: Vec<f64> = v.iter().map(|x| x * 1000.0).collect();
+    if ms.is_empty() {
+        println!("{name:<34} (none)");
+        return;
+    }
+    ms.sort_by(|a, b| a.partial_cmp(b).unwrap());
+    let q = |p: f64| ms[((ms.len() - 1) as f64 * p).round() as usize];
+    println!("{name:<34} n {:5}  min {:8.3}  p5 {:8.3}  p50 {:8.3}  p95 {:8.3}  max {:8.3}  (ms)", ms.len(), q(0.0), q(0.05), q(0.5), q(0.95), q(1.0));
+}
+
 fn mean_sd(v: &[f64]) -> (f64, f64) {
     let m = v.iter().sum::<f64>() / v.len() as f64;
     (m, (v.iter().map(|x| (x - m) * (x - m)).sum::<f64>() / v.len() as f64).sqrt())
@@ -136,6 +148,8 @@ fn main() {
     let (mut starts_rel, mut starts_axis): (Vec<(Vec3, Vec3)>, Vec<Vec3>) = (Vec::new(), Vec::new());
     let (mut load_cut, mut no_load, mut sample_count) = (0u32, 0u32, 0u32);
     let mut peak_after: Vec<f64> = Vec::new();
+    let (mut bat_stopped_checked, mut bat_stopped_total) = (0u32, 0u32);
+    let mut delta_by_type: Vec<(PitchType, Vec<f64>)> = PitchType::ALL.iter().map(|t| (*t, Vec::new())).collect();
     for seed in 0..games {
         let mut g = bb_game::game::Game::new(seed, true);
         while let Some(step) = g.step_pitch() {
@@ -197,6 +211,7 @@ fn main() {
             let seen_cut = rec.contact_state.map(|c| c.0);
             if let Some(ta) = t_cross(&step.pitch_flight, seen_cut) {
                 delta.push(sw.t_c - ta);
+                delta_by_type.iter_mut().find(|(t, _)| *t == rec.ty).unwrap().1.push(sw.t_c - ta);
                 if rec.contact_state.is_some() { delta_hit.push(sw.t_c - ta) } else { delta_miss.push(sw.t_c - ta) }
             }
             // T_a from a track cut at nominal contact against the full track, on a swing that
@@ -232,10 +247,22 @@ fn main() {
             let ts_used = t_s_inf.unwrap_or_else(|| sw.t_start());
             if let Some(pk) = infer_peak(&samples, ts_used) {
                 peak_after.push(pk - sw.t_c);
-                let tsw0 = (pk - 0.010) - ts_used;
-                let tsw = (pk - 0.010 * tsw0 / 0.150) - ts_used;
-                let est = pk - 0.010 * tsw / 0.150;
+                // A checked swing's bat has stopped by the end of its track (an unchecked
+                // one is still turning at 14% of its contact rate, 0.12 s after): then t_c is
+                // t_s + T_SWING_REF (0.150 s), the batter's own T_swing not being known.
+                let last = samples.len() - 1;
+                let end_rate = (samples[last - 1].2.dot(samples[last].2).clamp(-1.0, 1.0)).acos() / (samples[last].0 - samples[last - 1].0);
+                let stopped = end_rate < 1.0;
+                let est = if stopped {
+                    ts_used + 0.150
+                } else {
+                    let tsw0 = (pk - 0.010) - ts_used;
+                    let tsw = (pk - 0.010 * tsw0 / 0.150) - ts_used;
+                    pk - 0.010 * tsw / 0.150
+                };
                 if sw.t_brake.is_some() { tc_err_checked.push(est - sw.t_c) } else { tc_err.push(est - sw.t_c) }
+                bat_stopped_checked += (stopped == sw.t_brake.is_some()) as u32;
+                bat_stopped_total += 1;
             }
         }
     }
@@ -295,9 +322,16 @@ fn main() {
     println!("T_a extrapolated from contact on a ball hit, minus the same from 30 ms earlier, s:");
     row("  hit: cut - cut earlier", &mut ta_cut_err_hit);
 
-    println!("\nInferred times without E1 (inferred - the swing's own), s:");
-    row("  t_s (end of the load's line)", &mut ts_err);
-    row("  t_c from the fastest turning (not checked)", &mut tc_err);
-    row("  t_c from the fastest turning (checked)", &mut tc_err_checked);
+    println!("\nDelta by pitch type (swings):");
+    for (t, v) in delta_by_type.iter_mut() {
+        if !v.is_empty() {
+            row(&format!("  {t:?}"), v);
+        }
+    }
+    println!("\nInferred times without E1 (inferred - the swing's own):");
+    row_ms("  t_s (end of the load's line)", &ts_err);
+    row_ms("  t_c, swings not checked", &tc_err);
+    row_ms("  t_c, checked swings (t_s + 0.150)", &tc_err_checked);
+    println!("  the bat stopped at the end of its track agrees with the swing being checked in {bat_stopped_checked} of {bat_stopped_total}");
     row("  fastest turning minus t_c, s", &mut peak_after);
 }

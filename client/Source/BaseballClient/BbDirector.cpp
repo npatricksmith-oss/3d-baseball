@@ -1760,6 +1760,13 @@ float ABbDirector::InferContactT(const FBbPlay& Play, const FBatNote& N) const
 	{
 		return -1.f;
 	}
+	// A checked swing's bat has stopped by the end of its track (an unchecked one is still
+	// turning at about 14% of its contact rate there): its nominal contact is T_swing, 0.150 s
+	// at the reference batter, after its start (the batter's own T_swing is not known here).
+	if (Rate.Last() < 1.f)
+	{
+		return T0 + 0.150f;
+	}
 	const double X0 = -1.0, X1 = 0.0, X2 = 1.0, R0 = Rate[Best - 1], R1 = Rate[Best], R2 = Rate[Best + 1];
 	const double A = 0.5 * (R0 + R2) - R1, Bq = 0.5 * (R2 - R0);
 	if (A >= 0.0)
