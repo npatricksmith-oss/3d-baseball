@@ -17,7 +17,7 @@ Status: `[ ]` not started · `[~]` partly done · `[?]` needs an owner decision
 
 ## Resume here (2026-11-24)
 
-**State.** Swing v3 ([spec](docs/swing-model-v3.md)): Q45–Q48 decided (D26); step 1 on `work/swing-oracle` (oracle, goldens), Opus review fixed, not merged; spec §14.1 is a new owner choice, not yet numbered. Depth read merged. Nothing waits on the owner.
+**State.** Swing v3 ([spec](docs/swing-model-v3.md)): steps 0–1 merged (oracle, goldens; [review](docs/reviews/2026-11-24-opus-swing-oracle-review.md)). **Q49 waits on the owner** (spec §14.1: slow swings peak before contact). Step 2 (Rust behind a switch, Opus) not started: needs no answer; ask the owner to check `/usage` first. Step 4 must bring Q45 back with game measurements of late contact. Depth read merged. No worker running.
 
 **Next:** §2: the ground-dive leftovers ([note](docs/calibration/2026-11-23-of-ground-dive.md) §9); swing steps 2–3 after step 1.
 

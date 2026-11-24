@@ -116,4 +116,10 @@ All probes are in `sim/target/review-probes/`, stdlib Python, run from the workt
 
 ## Resolution
 
-Open.
+Resolved 2026-11-24 by the oracle's author (Opus, `09b7b13`, `3e96af3`, `39d085a`), who reproduced each finding first. No second review: the Coordinator reran `test_oracle.py` (65 tests, 9 expected failures) and the docs check; step 2's Rust is reviewed against the same goldens.
+
+- **P1-1** fixed by the reviewer's construction (the Coordinator's decision; the worker compared four joins and it was best or tied): [4]'s elevation is blended into v2's own elevation curve by a C2 smoothstep from −30 ms of [4]'s time. Attack angle v3 − v2 (middle / inside-low / outside-high): −0.3 / −0.5 / −0.1° at −3 ms, −1.2 / −1.8 / −0.6° at −5 ms, −3.9 / −5.5 / −2.4° at −8 ms, −6.2 / −8.3 / −4.0° at −10 ms. **Still open, stated in spec §6.5, §12 and §14 (Q45):** the change at 8 ms and later is large, the within-swing attack slope is an expected failure (0.80 / 1.03 / 0.59 against v2's 0.59 / 0.71 / 0.47), the path tilt is +7.2 / +11.0 / +3.1° off β, and below the zone the sweet spot reaches 1.10–1.15 × its contact speed on 21 of 105 locations. Step 4 measures these in games before the owner is asked to keep Q45 = a.
+- **P2-1** fixed: braked samples in the golden and §11.1, a finite-difference test of the braked velocity; the σ̇ mutation fails.
+- **P2-2** fixed: the grid crosses swing time with speed factor on eight aims (522 swings) and checks for a second surge. The finding itself is the owner's **Q49** (spec §14.1): open.
+- **P2-3** fixed: §5.3, §1 and §11 regenerated; the deeper stance fixes three checks and breaks three (for step 5, Q46).
+- **P3-1** fixed (about the trunk axis: 1,158–1,163°/s at −104 to −106 ms, still an expected failure in time; the worker's figures differ from the reviewer's and it says why in its report: the reviewer's included the frame's own rotation). **P3-2 to P3-6** fixed. **P3-7** relabelled as a v2 finding only.
