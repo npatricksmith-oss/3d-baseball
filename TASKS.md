@@ -1,6 +1,6 @@
 # Task List
 
-**Last updated:** 2026-11-23 (Q38, Q39 merged; Q37 parked).
+**Last updated:** 2026-11-23 (Q37 = D23).
 
 What is next and what is open. Other files hold the rest:
 
@@ -17,7 +17,7 @@ Status: `[ ]` not started · `[~]` partly done · `[?]` needs an owner decision
 
 ## Resume here (2026-11-23)
 
-**State.** No workers running. Q38, Q39, Q40 trials 1–2 ([Code Mode](docs/code-mode-trial.md)) merged (`3a71284`; 560 tests, runs 4.14 [4.45]). **Waiting on the owner:** Q37 (stances; owner testing in game).
+**State.** Workers: `swing-1` (§13), `of-dive`. Q38, Q39, Q40 trials 1–2 ([Code Mode](docs/code-mode-trial.md)) merged (`3a71284`; 560 tests, runs 4.14 [4.45]). **Waiting on the owner:** Q43 (player-visuals §13.5).
 
 **Next:** merge `work/of-ground-dive` (§2, play 71; both reviews fixed, note §7–§9).
 
@@ -148,7 +148,7 @@ Check the code again before starting one.
 
 ### Priority A, not done
 
-- [ ] **Batting stances (owner, 2026-11-22; was L3 [W3]).** Each player his own stance, swing style and follow-through: variations of core stances, none quite alike (Rose, Strawberry, Carter). Client work.
+- [~] **Batting stances.** Base swing: [player-visuals §13](docs/player-visuals.md#13-the-base-stance-and-swing-design-2026-11-23-not-yet-built); per-player looks after (D23). Steps [ ] 1 bat, E1 · [ ] 2 legs · [ ] 3 hips, take · [ ] 4 finish, Q43 · [ ] 5 late swings
 - [~] **A4. Throw choices from the outs and the runners.** Built with review fixes; more cases are items 2 and 3 above.
 - [~] **A5. Dives.** Rate and motion are in. Left: every dive is head-first straight at the ball.
 - [~] **A6. Slides.** Client only: a runner slides feet-first when a play is being made on him. The sim has no slide (agent-models §6.2); see item 1 above for the dead stop.
