@@ -477,6 +477,7 @@ void ABbDirector::BeginPlay()
 	bStagingLog = FParse::Param(Cmd, TEXT("BbStagingLog"));
 	bMotionShots = FParse::Param(Cmd, TEXT("BbMotionShots"));
 	bBatCheck = FParse::Param(Cmd, TEXT("BbBatCheck"));
+	bBatLegacy = FParse::Param(Cmd, TEXT("BbBatLegacy"));
 	FParse::Value(Cmd, TEXT("BbBatShots="), BatShotsLeft);
 	if (FParse::Param(Cmd, TEXT("BbClipSpeeds")))
 	{
@@ -1875,16 +1876,24 @@ void ABbDirector::NoteBat(const FBbPlay& Play, FBatNote& Out) const
 	}
 	Out.StanceKnobB = BatterFrame(F0.bat_knob, Out);
 	Out.StanceAxisB = (BatterFrame(F0.bat_tip, Out) - Out.StanceKnobB).GetSafeNormal();
-	const float Plane = PitchPlaneT(Play);
-	if (Plane > 0.f)
+	const float PlaneAt = PitchPlaneT(Play);
+	if (PlaneAt > 0.f)
 	{
-		Out.TA = Plane;
+		Out.TA = PlaneAt;
 	}
 	Out.CatchT = Play.Info.contact_s < 0.f ? Play.Info.call_s - 0.2f : -1.f;
 }
 
 void ABbDirector::DrawnBat(float T, const FBatNote& N, const FVector& SimKnob, const FVector& SimTip, FVector& OutKnob, FVector& OutTip) const
 {
+	if (bBatLegacy)
+	{
+		// -BbBatLegacy: the bat as before step 1 (the timeline's, stance and load samples
+		// included), for comparing pictures and checks with it.
+		OutKnob = SimKnob;
+		OutTip = SimTip;
+		return;
+	}
 	FVector CKnob, CAxis;
 	BbMotion::LoadBat(T, N.TA, !N.bSwing, N.CatchT, N.StanceKnobB, N.StanceAxisB, CKnob, CAxis);
 	// (His frame is in cm and so is Unreal's; the bat is 86.36 cm long in both.)
@@ -1951,14 +1960,14 @@ void ABbDirector::CheckBat(const FBbPlay& Play, const FBatNote& N) const
 		}
 		if (Knob.Num() > 0)
 		{
-			const double Speed = (K - Knob.Last()).Size() * 0.01 / Dt;
+			const double Mps = (K - Knob.Last()).Size() * 0.01 / Dt;
 			if (bBefore)
 			{
-				SpeedBefore = FMath::Max(SpeedBefore, Speed);
+				SpeedBefore = FMath::Max(SpeedBefore, Mps);
 			}
 			else if (T < FMath::Max(N.TS, N.TL + BbMotion::BatHandoverS))
 			{
-				SpeedHandover = FMath::Max(SpeedHandover, Speed);
+				SpeedHandover = FMath::Max(SpeedHandover, Mps);
 			}
 		}
 		Knob.Add(K);
@@ -3824,6 +3833,11 @@ void ABbDirector::PoseFigure(int32 Slot, const BbActor& A, const BbFrame& Frame,
 					const float Off = FMath::Max((Wrist[0] - Reach.At[0]).Size() - Reach.Past[0], (Wrist[1] - Reach.At[1]).Size() - Reach.Past[1]) * FMath::Abs(Scale.Z);
 					BatHandMax = FMath::Max(BatHandMax, Off);
 					++BatHandFrames;
+					if (Off > 0.1f)
+					{
+						UE_LOG(LogBb, Display, TEXT("BB_BATHAND_OFF play=%u t=%.4f from_t_l=%.4f from_t_s=%.4f to_end=%.4f low_off=%.2f high_off=%.2f cm swingw=%.2f"), Current.Info.play_index, PlayTime, PlayTime - Bn.TL, PlayTime - Bn.TS, Bn.EndT - PlayTime,
+							((Wrist[0] - Reach.At[0]).Size() - Reach.Past[0]) * FMath::Abs(Scale.Z), ((Wrist[1] - Reach.At[1]).Size() - Reach.Past[1]) * FMath::Abs(Scale.Z), BatSwingW);
+					}
 				}
 				else if (PlayTime > Bn.EndT && BatHandFrames > 0)
 				{

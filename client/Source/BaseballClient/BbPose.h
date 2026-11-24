@@ -175,7 +175,7 @@ namespace BbMotion
 	constexpr float BatLoadBeforeCommitS = 0.049f;
 	/** The handover from the client's bat to the sim's takes at least this long from the moment
 	 *  the sim's bat first moves. */
-	constexpr float BatHandoverS = 0.03f;
+	constexpr float BatHandoverS = 0.05f;
 	/** A pitch taken: the bat eases back from L toward the stance this long after the catch,
 	 *  over this long. */
 	constexpr float BatRelaxAfterCatchS = 0.2f;

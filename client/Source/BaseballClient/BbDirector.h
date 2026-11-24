@@ -41,6 +41,7 @@ class UMaterialInterface;
  *               -BbBatCheck (the drawn bat's speed, handover and swing-withheld checks of
  *               player-visuals §13.7, logged per pitch as BB_BATCHECK; with -BbStagingLog also
  *               BB_BATNOTE and BB_BATHANDS), see check-bat-step1.sh;
+ *               -BbBatLegacy (the bat as it was before step 1, to compare);
  *               -BbParkShots (photograph the park from its fixed spots as park_<spot>.png, then quit;
  *               -BbParkShotsAt=<seconds> when to start)
  *               -BbBoxShots=<n> (photograph the Tab box at pitch n and the final box, then quit)
@@ -607,6 +608,8 @@ private:
 	 *  the same with the swing withheld before then), logged as BB_BATCHECK. */
 	void CheckBat(const FBbPlay& Play, const FBatNote& N) const;
 	bool bBatCheck = false;
+	/** -BbBatLegacy: draw the timeline's bat as it is (before the base swing's step 1). */
+	bool bBatLegacy = false;
 	/** -BbBatShots: this pitch's first swing and first take photographed before the swing. */
 	int32 BatShotsLeft = 0;
 	bool bBatShotDone[2] = { false, false };
