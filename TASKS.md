@@ -17,7 +17,11 @@ Status: `[ ]` not started · `[~]` partly done · `[?]` needs an owner decision
 
 ## Resume here (2026-11-24)
 
-**State.** Swing v3 ([spec](docs/swing-model-v3.md)): steps 0–1 merged. PLAN D27 (owner on Q49): realistic for every batter. `work/swing-family` (worktree `swing-research`): the swing family (spec §6.7) and oracle, **not merged**; its Opus review is on the branch (2 P1, 5 P2, 9 P3, Resolution open) and worker `swing-family` (Opus, Workers tab) is fixing all of it. When it stops: read its per-finding report, write the Resolution, rerun `test_oracle.py`, merge. **Q50 is withdrawn** (review P1-1: it compared two different start instants); the worker restates it, then renumber it Q51 for the owner. Then step 2 (Rust). Step 4 brings Q45 back with game measurements.
+<<<<<<< HEAD
+**State.** Swing v3 ([spec](docs/swing-model-v3.md)): steps 0–1 and the swing family (D27, §6.7) merged; its [review](docs/reviews/2026-11-24-opus-swing-family-review.md) leaves the hands' stall open. PLAN D28: the batter stands 0.58 m deeper ([note 11](docs/research/swing/11-stance-depth.md)). Worker `swing-stance` (Opus, `work/swing-stance`, worktree `swing-research`): refits the family and oracle at that stance; needs an Opus review. **Q51 waits on the owner** (meet the ball 0.15 m further out front, as MLB does, or not). Then step 2 (Rust). Step 4 brings Q45 back with game measurements.
+=======
+**State.** Swing v3 ([spec](docs/swing-model-v3.md)): steps 0–1 merged. **PLAN D27** on `work/swing-family` (worktree `swing-research`): the swing is a family (spec §6.7); Opus review fixed (review file's Resolution open). Owner choices, not numbered, spec §6.7.7: the hands stall in today's stance (Q46's finding again), the decision point (no change needed), easy swings timed by the body. Then step 2 (Rust).
+>>>>>>> work/swing-family
 
 **Next:** §2: the ground-dive leftovers ([note](docs/calibration/2026-11-23-of-ground-dive.md) §9); swing steps 2–3 after step 1.
 
