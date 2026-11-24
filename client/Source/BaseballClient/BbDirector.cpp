@@ -2010,13 +2010,18 @@ void ABbDirector::NotePitch()
 {
 	PitchEndT = -1.f;
 	CrouchUntil = 0.6f;
+	const double NoteStart = FPlatformTime::Seconds();
 	NoteBat(Current, BatNote);
+	const double NoteMs = 1000.0 * (FPlatformTime::Seconds() - NoteStart);
 	BatHandMax = 0.f;
 	BatHandFrames = 0;
 	if (bStagingLog && BatNote.bBat)
 	{
-		UE_LOG(LogBb, Display, TEXT("BB_BATNOTE play=%u swing=%d t_a=%.4f catch=%.4f t_l=%.4f t_s=%.4f t_c=%.4f%s handover_end=%.4f"), Current.Info.play_index, BatNote.bSwing ? 1 : 0, BatNote.TA, BatNote.CatchT, BatNote.TL, BatNote.TS, BatNote.TC,
-			BatNote.bTcInferred ? TEXT(" (inferred)") : TEXT(""), BatNote.bSwing ? FMath::Max(BatNote.TS, BatNote.TL + BbMotion::BatHandoverS) : -1.f);
+		// (With the sim's own t_c, the inference a saved play without it would have been given
+		// is logged beside it.)
+		const float Inferred = BatNote.bSwing && !BatNote.bTcInferred ? InferContactT(Current, BatNote) : -1.f;
+		UE_LOG(LogBb, Display, TEXT("BB_BATNOTE play=%u swing=%d t_a=%.4f catch=%.4f t_l=%.4f t_s=%.4f t_c=%.4f%s handover_end=%.4f infer_err=%.3f ms note=%.1f ms"), Current.Info.play_index, BatNote.bSwing ? 1 : 0, BatNote.TA, BatNote.CatchT, BatNote.TL, BatNote.TS, BatNote.TC,
+			BatNote.bTcInferred ? TEXT(" (inferred)") : TEXT(""), BatNote.bSwing ? FMath::Max(BatNote.TS, BatNote.TL + BbMotion::BatHandoverS) : -1.f, Inferred >= 0.f ? 1000.f * (Inferred - BatNote.TC) : 0.f, NoteMs);
 	}
 	if (bBatCheck && BatNote.bBat)
 	{
