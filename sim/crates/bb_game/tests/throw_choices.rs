@@ -183,7 +183,10 @@ fn seed_65147_play_10_the_right_fielder_reads_the_chopper_on_the_grass_within_a_
     // the snapshot read. From its first bounce until it is fielded, his read of where the ball
     // is now, along his level line of sight to it: before, up to 32 m off (the snapshot read's
     // depth σ, 3 × 3.5 m × d/30 m at 77 m, with his fixed draw; 37 m in the saved game); with the
-    // ground cue 4.2 m, bound 8 m (±4σ of a 3′ angle below his eyes at 77 m is 13 m).
+    // ground cue 4.2 m, bound 8 m (±4σ of a 3′ angle below his eyes at 77 m is 13 m). It bounds
+    // this play only while its course holds (Opus depth-read review P3-2: with a cue ten times
+    // sharper the second baseman knocks the ball down, a new ball, and the play goes another
+    // way); the read's own bounds are the unit tests in live.rs.
     let text = include_str!("fixtures/a4/65147-10.json");
     bb_game::live::read_trace::ON.with(|x| x.set(true));
     bb_game::live::read_trace::take();
