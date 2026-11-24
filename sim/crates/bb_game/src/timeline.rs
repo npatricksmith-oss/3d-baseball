@@ -254,7 +254,10 @@ pub fn encode(step: &PitchStep, st: &RulesState, rosters: &crate::roster::Roster
     // shoulder, so nothing before the swing tells a viewer whether he will swing. A swing
     // leaves the stance at most `LOAD_S` before it starts and never before his decision
     // (agent-models §3.6), blending into the swing's own start pose, then follows the
-    // executed swing every 5 ms through the follow-through.
+    // executed swing every 5 ms through the follow-through. (The client draws the bat only
+    // from the first of these samples that moves, player-visuals §13.4: its own stance and
+    // load come before, the same on a swing and a take; the stance and load samples here are
+    // what the viewer of an older client sees, and mark the moment the sim's bat first moves.)
     let quat_from_x = |a: Vec3| {
         // Shortest rotation taking +X to the unit vector `a` (bat axis = rot · +X).
         let (c, w) = (Vec3::new(0.0, -a.z, a.y), 1.0 + a.x);
@@ -395,6 +398,9 @@ pub fn encode(step: &PitchStep, st: &RulesState, rosters: &crate::roster::Roster
             zone_top_m: rec.zone.top as f32,
             zone_half_width_m: rec.zone.half_width as f32,
             plate_crossed: rec.plate.is_some(),
+            // Export E1 (player-visuals §13.6): the swing's nominal contact, which the bat track does
+            // not carry. Read only by presentation; not in the event log.
+            swing_contact_s: rec.swing.map_or(-1.0, |sw| sw.t_c as f32),
             pitch_call: match rec.call {
                 crate::pa::Call::Ball => 1,
                 crate::pa::Call::CalledStrike => 2,
