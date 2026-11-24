@@ -17,7 +17,7 @@ Status: `[ ]` not started · `[~]` partly done · `[?]` needs an owner decision
 
 ## Resume here (2026-11-24)
 
-**State.** No workers. Swing step 1 merged, off by default. **Waiting on the owner:** Q43 (player-visuals §13.5), Q44 (docs/research/swing/launch-position.md).
+**State.** No workers. Swing step 1 merged, off by default. **Waiting on the owner:** Q44 (docs/research/swing/launch-position.md). Q43 = D24.
 
 **Next:** §2: the depth read of a ball first seen on the ground, or the ground-dive leftovers ([note](docs/calibration/2026-11-23-of-ground-dive.md) §9).
 
