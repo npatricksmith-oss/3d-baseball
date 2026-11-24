@@ -33,3 +33,11 @@ Owner decision Q40 (2026-11-23): trial Claude Code's experimental Code Mode on w
 - **Guardrail.** Auto mode checks a program once, not each call, so the worker was started with `--settings '{"permissions":{"ask":["Bash(git push *)"]}}'`.
 - **Unchecked:** the worker's "30 s default timeout" per program; the docs give 10 minutes. Check before relying on either.
 - **Cost:** the audit took about a minute of work over 8 programs for 26 items. There was no control run, so no token comparison yet; the next trial job should be one with a comparable past run.
+
+## Trial 2 (cm-trial-2, exec isolation)
+
+Job: make AGENTS invariant 3 ("decision code never receives an `Executed*`") real and tested.
+
+1. **Programs run:** 10 REPL programs. Two read the job file and the code (specs, `motor.rs`, TASKS) in one fan-out each. One wrote the test file and submitted its first queue job. One checked the result. One planted a violation in `pitcher.rs`, ran the real scan, and reverted it with `git checkout`. One made the four doc edits. One ran the final checks; the rest were small follow-ups.
+2. **Job queue from a program:** it worked as for a human. `bin/job.sh run` returned an id, and `bin/job.sh wait <id>` blocked inside the program and returned the exit code (0 here). Two jobs were submitted together and the second queued behind the first. The longest program ran 35.5 s (two queued test runs plus the docs check) and came back normally, so the 30 s figure is when a program is detached and keeps running, not a kill. The hard stop is the 10 minutes the docs give. I never reached it, and `wait` itself caps at 540 s, so a program that calls it once stays inside it. No timeout message was seen.
+3. **In the way:** nothing blocked. Writing Rust source inside a JS template literal needed a placeholder for backticks (`@@` replaced after the fact), and the display shows `&`, `<`, `>` as entities, which makes Rust code in output hard to read. A mutation check (plant, run, revert) was easy to do in one program.

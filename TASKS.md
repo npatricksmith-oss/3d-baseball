@@ -112,7 +112,6 @@ Check the code again before starting one.
 - [ ] Composure (leverage-scaled noise, agent-models §1.5): `sim/crates/bb_agents/src/motor.rs` takes the factor; nothing feeds it game state.
 - [ ] Hit-by-pitch evasion (agent-models §3.7): let the batter move the body capsule away from the pitch.
 - [ ] SpinCapacity has no effect; SpinRecognition is weak; QuickHands is flat between 30 and 50 ([M3 report, adaptation and sensitivity addendum](docs/calibration/2026-10-31-m3-interim.md#addendum-in-game-adaptation-and-sensitivity-later-the-same-night)).
-- [ ] `Executed*` visibility isolation with a compile-fail test (none exists).
 - [ ] `criterion` benchmarks for the per-pitch budget (not in any `Cargo.toml`; the timing harness is `sim/crates/bb_game/examples/perf.rs`).
 - [ ] Rules corpus: 136 scenarios, toward 150 (rules-spec §12.3). Implement interference (rules-spec §5.7) and a separate first-fielder-touch fact for retouch timing on a deflected fly. Missed-base appeals and passing during awards are open (rules-spec §5.5–§5.6).
 - [ ] Live play: deliberate one-hop throws (the double cut is built, 2026-11-22).
