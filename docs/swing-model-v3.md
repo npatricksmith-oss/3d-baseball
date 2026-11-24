@@ -1,6 +1,6 @@
 # The swing model, v3: the measured swing (proposed rewrite of agent-models §3.6)
 
-**Status (2026-11-24): specified, not built.** PLAN D25 (owner Q44 = b): the sim's swing is rebuilt whole from the measurements. This file is the rewrite of [agent-models §3.6](agent-models.md#36-swing-model) and of the lines of [physics-spec §6.3](physics-spec.md#63-bat-pose) and [rules-spec §4.5](rules-spec.md#45-check-swing) it touches (§6.6 and §8.4 below hold their proposed text). Until build step 4 (§13) switches the game to it, agent-models §3.6 (v2) describes what the code does; at that step this text replaces §3.6 there and this file is reduced to a pointer. Written by worker swing-spec on branch `work/swing-rebuild` from main `aa4a31d`.
+**Status (2026-11-24): specified, not built.** PLAN D25 (owner Q44 = b): the sim's swing is rebuilt whole from the measurements. This file is the rewrite of [agent-models §3.6](agent-models.md#36-swing-model) and of the lines of [physics-spec §6.3](physics-spec.md#63-bat-pose) and [rules-spec §4.5](rules-spec.md#45-check-swing) it touches (§6.6 and §8.4 below hold their proposed text). Until build step 4 (§13) switches the game to it, agent-models §3.6 (v2) describes what the code does; at that step this text replaces §3.6 there and this file is reduced to a pointer. Written by worker swing-spec on branch `work/swing-rebuild` from main `aa4a31d`; revised the same day for [the Sonnet review](reviews/2026-11-24-sonnet-swing-v3-spec-review.md), every changed number measured with `sim/target/codex-probes/v3_review_probe.py`, `v3_variants.py` and `v3_checks.py` (stdlib Python on the v2 oracle; outputs beside them).
 
 **Sources.** [4] Fortenbaugh 2011 (33 AA hitters, live batting practice at 25 m/s, 300 Hz; the base) and [3] Welch et al. 1995 (7 professionals off a tee, 200 Hz) give every number of the swing's shape (D21). Statcast (MLB 2025 bat tracking, as fitted in [docs/calibration/2026-11-14-swing-model.md](calibration/2026-11-14-swing-model.md)) gives the contact instant, as v2 does. OpenBiomechanics is not used (D21). Every value read from [4] was checked against its text (`sim/target/research-dl/4/s.txt`, §4.1 and Appendix C's analysis code); the research notes are [docs/research/swing/](research/swing/swing-synthesis.md), and the diagnosis that led here is [launch-position.md](research/swing/launch-position.md). Today's swing at contact is measured in [docs/calibration/2026-11-24-swing-contact-baseline.md](calibration/2026-11-24-swing-contact-baseline.md) (the baseline, §2).
 
@@ -13,13 +13,13 @@ Today's swing (v2) is one rigid plane laid backward from the contact pose. It me
 v3 keeps what v2 gets right and rebuilds the rest:
 
 - **What moves.** The bat (the only physical body), held at the **hands** (mid-wrists, a point on the handle), whose path is built round a **shoulder point S** (the clavicle, the root of [4]'s arm vector) that follows the body. Three elements; the pelvis, trunk turn, legs and head stay presentation keyed to the sim's clocks (§3).
-- **Where it starts.** A fixed **launch pose L** per batter, the same on every pitch, at rest: the bat 41° up and wrapped (azimuth −225°), cocked 121° behind the arms, the hands just in front of the back shoulder ([4] at weight commitment, −170 ms) (§6.1).
-- **How it meets the ball.** The **contact jet**, the pose, velocity and acceleration at t_c, is v2's plan exactly: the sweet spot at the aim point at `BatSpeed`, with Statcast's attack angle, attack direction, path tilt and vertical bat angle, and v2's reach rule (§6.2). Statcast is the better source for the instant that decides the game, and [3] and [4] agree with it within their spread at contact, except on when the bat is fastest (an owner choice, §14).
-- **Between.** Smooth curves in the bat's azimuth and elevation and in the hands' position, from L at rest through [4]'s mid-swing anchor (−93 ms: azimuth 168° short of contact and turning at 56% of its contact rate, elevation still 39°, lag 131°) into the contact jet (§6.3). The lag through the swing is an outcome checked against [4] (121° → 133° max at −80 ms → 65° at contact).
+- **Where it starts.** A fixed **launch pose L** per batter, the same on every pitch, at rest: the bat 41° up and wrapped (azimuth −225°), cocked well behind the arms ([4]: 121°; 129° as built), the hands just in front of the back shoulder at its height ([4] at weight commitment, −170 ms) (§6.1).
+- **How it meets the ball.** The **contact jet**, the pose, velocity and acceleration at t_c, is v2's plan exactly: the sweet spot at the aim point at `BatSpeed`, with Statcast's attack angle, attack direction, path tilt and vertical bat angle, and v2's reach rule (§6.2). After t_c the bat is v2's (§6.4). Before t_c the measured shape brings the bat into the contact window differently from today (§6.5).
+- **Between.** Smooth curves in the bat's azimuth and elevation and in the hands' position, from L at rest through [4]'s mid-swing anchor (−93 ms: azimuth 168° short of contact and turning at 56% of its contact rate, elevation 39°; the hands at a per-batter point built from [4]'s arm angles) into the contact jet (§6.3). The lag through the swing is an outcome checked against [4] (121° → 133° max at −80 ms → 65° at contact).
 - **Checked swings** brake by slowing the swing's own clock, so the bat stays on its path; the ruling measures the bat's turn from L (rules-spec §4.5's wording), so a wrapped bat is no longer "a swing" before it moves (§8).
 - **Determinism and noise** are as v2: the same five execution draws in the same order on the same two streams; no new RNG purpose (§9).
-- **What changes in games**: contact more than about 10 ms off the planned instant a little (third-order terms of the path), checked swings a lot (the braked bat is far back: about 0.6 fewer strikes a game). The recalibration should be small (§12).
-- **A finding that needs data before the build** (§5.3, §14): the measured arms at contact ([4]'s shoulder angles and its 65° bat-to-arm angle) put the hands about 0.4 m in front of the batter's chest, toward the pitcher. With today's contact depth and stance spot the sim's batter would have to stand about half a metre further back in the box than he does (at about the same distance from the plate), or meet the ball that much further out in front. Either the sim's batter stands in the wrong place or its contact point is too deep (its depth level, 0.35 m, is unsourced); Statcast's batter-relative intercept settles it.
+- **What changes in games**: balls met before the planned instant (late swings; 23% of contact is 3 ms or more before it): 25 ms before t_c the bat is 6–9° further back, 2–3° higher and its sweet spot 2–7 mph faster than today's; 10 ms before, under 1° and within about 2 mph; at and after t_c it is today's bat. Checked swings change a lot (the braked bat is far back: about 0.6 fewer strikes a game). The recalibration should be small to moderate (§12).
+- **A finding that needs data before the build** (§5.3, §14): the measured arms at contact ([4]'s shoulder angles and its 65° bat-to-arm angle) put the hands about 0.4 m in front of the batter's chest, toward the pitcher. With today's contact depth and stance spot the sim's batter would have to stand about half a metre further back in the box than he does (at about the same distance from the plate), or meet the ball that much further out in front. Either the sim's batter stands in the wrong place or its contact point is too deep (its depth level, 0.35 m, is unsourced); Statcast's batter-relative intercept settles it. The probe backs the finding: [4]'s lag curve (falling steadily from 133° to about 60° at contact) appears only with the body 0.55–0.70 m deeper; with today's stance the lag bottoms out at 20–26° before contact and rises again. Where the body stands also moves the hands' anchors and so the late path, so it is a game question, not only a look.
 
 ## 2. What v3 must keep: today's contact (the baseline)
 
@@ -39,7 +39,7 @@ Today, over the standard run's 600 games (77,434 swings; [baseline](calibration/
 
 Slopes: spray +3.2° and bat-against-path +0.27° per ms of contact − t_c; launch angle +10.1° per cm of undercut; EV 1.01 mph per mph of sweet-spot speed. Checked swings: 13.2% of swings, the brake at −82 ± 32 ms, 3.4% ruled swings (310 touches, 36 on the yaw).
 
-**By construction v3 reproduces** every quantity at the planned contact instant (the jet is v2's) and, to first and second order in the timing error, the timing table and the slopes. **It moves** contact far from t_c a little and checked swings a lot (§12).
+**By construction v3 reproduces** every quantity at the planned contact instant (the jet is v2's) and every contact after it (§6.4: the bat is v2's there; 57% of contacts). **It moves** contacts before t_c, which meet a bat further back and faster than today's, by an amount that grows quickly with the timing error (§6.5: under 1° at −10 ms, 6–9° at −25 ms), and checked swings a lot (§12). It is not "v2 to second order" over the window: the first version of this spec said so, and the review measured otherwise.
 
 ## 3. The state: what moves, and why these three
 
@@ -67,7 +67,11 @@ The batter's frame, for a right-handed batter (a left-hander is mirrored in x, a
 
 - **Bat azimuth A and elevation E** (`BatLag()`: `BatPhi − 270`, `90 − BatTheta`): â = (cos E cos A, cos E sin A, sin E). A = 0° the bat across the plate (tip toward the plate), −90° at the catcher, −180° pointing away from the plate behind him, −225° wrapped behind his head toward the pitcher's side. A increases through the swing (counter-clockwise seen from above for a right-hander) and is **unwrapped**: continuous from L, never reduced modulo 360°.
 - **Lag λ** (`BatLag()`): the angle between â (knob → cap) and the vector from the clavicle to the mid-wrists, as above.
-- **Shoulder elevation and azimuth** (`PolarShoulder()`): the polar angles of the vector from the elbow to the shoulder joint centre, in the upper trunk's frame, the same formula for both arms. Elevation 0° = arm hanging, 90° = horizontal. Azimuth = atan2(y, x) − 90° in the trunk frame, whose axes Appendix B's diagram defines (not yet read). **Provisional reading** [E]: azimuth 0° = the upper arm pointing forward from the chest, negative = turned toward the batter's rear side (for the rear arm, out to the side and back; for the lead arm, across the chest). It is the only reading in which [4]'s values describe a loaded hitter (rear arm −84°: the back elbow out and back; lead arm −30°: across the chest) and a hitter at contact with both arms in front of him (lead −1°, rear −9°) that fits [4]'s 65° lag; the other readings put the hands beside or behind the chest at contact. **Step 0 confirms it (§13).**
+- **Shoulder elevation θ and azimuth φ** (`PolarShoulder()`): [4]'s code takes the polar angles of the vector **from the elbow to the shoulder** joint centre in the upper trunk's frame, the same formula for both arms: θ = its angle from the trunk's long axis (so 0° = arm hanging, 90° = horizontal), φ = atan2(y, x) − 90° in axes that Appendix B's diagram defines (not yet read). This spec never uses that vector or [4]'s axes directly. It places the **shoulder-to-elbow** unit vector d in its own trunk frame (x_T forward from the chest, y_T toward the lead side, t̂ up the trunk; §5.3):
+
+  **d = −cos θ·t̂ + sin θ·(cos φ·x_T + sin φ·y_T)** (reading 1, provisional [E]),
+
+  so φ = 0° is the upper arm pointing forward from the chest and negative φ turns it toward the batter's rear side (the rear arm out to the side and back; the lead arm across the chest). Reading 2, the only other one the code allows, reverses the horizontal part (φ + 180°). **The check that tells them apart is [4]'s own prose**: during swing initiation "the trail upper arm dropped and moved forward" while its azimuth rose −78° → −42°, and during acceleration the lead arm went "down and forward" as its azimuth rose −24° → −1°. Under reading 1 the rear elbow's forward coordinate (along x_T, from the rear shoulder) rises +0.07 → +0.19 m from launch to −93 ms and the lead elbow's +0.30 → +0.32 → +0.32 m; under reading 2 both are reversed (the elbows move back). The oracle asserts the sign (§11). Reading 2 would also put the launch hands only 0.15–0.28 m from the clavicle, against the swing-start hands near the back shoulder the sources describe. Appendix B (step 0) settles it for good.
 - **Elbow and knee**: flexion, 0° straight.
 
 ### 4.3 The swing's clock and [4]'s times
@@ -88,26 +92,29 @@ Every measured value the path must pass through (**constraint**) or is tested ag
 | :-- | :-- | :-- | :-- |
 | Bat azimuth at launch (−170 ms) | −225° | [4] §4.1.4 ("uncoiling from an azimuth of −225º to −175º") | constraint, L |
 | Bat elevation at launch | 41° [E] | [4] §4.1.2: 44° max at the end of the stride (−340 ms); §4.1.5: 39° at −93 ms. Not stated at −170 | constraint, L |
-| Lag at launch | 121° | [4] §4.1.4 ("from 121º to 131º") | constraint, L |
+| Lag at launch | 121° | [4] §4.1.4 ("from 121º to 131º") | target of the hands' fit (§6.1); 129° as built, a check ±10° |
 | Rear elbow, rear shoulder elevation / azimuth, lead elbow at launch | 128°, 71° / −78°, 72° | [4] §4.1.4 (start-of-phase values) | constraint, builds W_L (§6.1) |
-| Trunk (upper trunk, global) turn at launch | −21° [E] | [4] §4.1.3: −22° at −186 ms; §4.1.4: −22° → 2° over −170 to −93 | constraint, builds W_L |
+| Lead shoulder elevation / azimuth at launch, −93 ms, contact | 88° / −30°, 80° / −23°, 70° / −1° | [4] §4.1.3 (end of coiling), §4.1.4 (end of initiation), §4.1.5 | the reading check (§4.2) and the arms-at-contact check; not used to place the hands |
+| Trunk (upper trunk, global) turn at launch | −22° | [4] §4.1.4: "from −22º to 2º" over −170 to −93 ms (also its maximum counter-rotation, −186 ms) | constraint, S and W_L (§5.3) |
+| Trunk forward flexion, lean toward the rear side | see §5.3's table | [4] §4.1.4–4.1.5 | constraint, S |
 | Bat azimuth at −93 ms | A_c − 168° | [4] §4.1.4–4.1.5: −175° at −93 ms, −7° at contact (sweep 168°) | constraint |
 | Bat azimuth rate at −93 ms | 0.558·Ȧ_c | [4]: 1,247°/s at −93 ms against 2,233°/s at contact | constraint |
 | Bat elevation at −93 ms | 39° | [4] §4.1.5 | constraint |
-| Lag at −93 ms | 131° | [4] §4.1.4 | constraint, builds W_93 |
+| Lag at −93 ms | 131° | [4] §4.1.4 | target of the hands' fit for the middle-middle aim (§6.1); 133° as built; an outcome for other aims (153° to 103° for contact azimuths −20° to +45°) |
 | Rear elbow, rear shoulder elevation / azimuth, lead elbow at −93 ms | 126°, 49° / −42°, 68° | [4] §4.1.4 (end-of-phase values) | constraint, builds W_93 |
-| Trunk turn at −93 ms | +2° | [4] §4.1.4 | constraint, builds W_93 |
-| Pelvis forward of the stance at −170, −93 ms, contact | +12, +17, +17 cm (and 5 cm rise over the last 93 ms) | [4] §4.1.1–4.1.5: back 6, then forward 7 (stride), 11 (coiling), 5 (initiation) cm | constraint, S (§5.3) |
-| Lag maximum | 133° at −80 ms | [4] §4.1.5 | check ±5°, ±10 ms |
+| Trunk turn at −93 ms, at contact | +2°, +75° | [4] §4.1.4, §4.1.5 | constraint, S |
+| Pelvis forward of the stance at −170, −93 ms | +12, +17 cm | [4] §4.1.1–4.1.4: back 6, then forward 7 (stride), 11 (coiling), 5 (initiation) cm | constraint, S (§5.3) |
+| Pelvis at contact | +17 cm forward [E], 5 cm higher | [4] §4.1.5 states the 5 cm rise and no forward travel in the last phase; "no travel" is this spec's assumption | constraint, S |
+| Lag maximum | 133° at −80 ms (−71 ms at T_swing 0.150) | [4] §4.1.5 | check ±8°, ±20 ms (§11) |
 | Lag at contact, by location | middle 65 ± 10°; HI 79, HO 63, LI 58, LO 51 | [4] §4.1.5; Table 1 (means by location) | check (§5.3), with the next row |
-| Arms at contact | lead shoulder elevation 70°, azimuth −1°; rear 35° (min, at −23 ms), −9°; lead elbow 56°, rear 81° | [4] §4.1.5, Table 1 | check: the hands in front of the clavicle toward the pitcher (§5.3) |
-| Peak lag (uncocking) rate | 1,588°/s at −20 ms | [3] Table 2 | check: the peak magnitude within ±25% when scaled to the contact rate; at −20 ± 10 ms |
-| Peak arm-vector turning rate | 1,160°/s at −65 ms | [3] Table 2 (arms about the trunk axis) | check ±25%, ±15 ms |
-| Peak bat azimuth rate | 2,435°/s at −10 ms; 2,233°/s at contact | [4] §4.1.5–4.1.6 | check of the shape **only if the owner takes the lab's speed peak** (§14); otherwise reported |
-| Bat speed peak (barrel end) | 31 m/s at −15 ms; 29 m/s at contact | [3] "Ball Contact" | as the row above |
-| Bat's speed toward the plate and downward | peaks of 19 and 16 m/s near −40 ms | [3] | check ±25% (today's sim: 20.1 and 10.1) |
+| Arms at contact | lead shoulder elevation 70°, azimuth −1°; rear 35° (min, at −23 ms), −9°; lead elbow 56°, rear 81° | [4] §4.1.5, Table 1 | check: the hands at least 0.25 m in front of the clavicle along x_T [E] (§5.3) |
+| Peak lag (uncocking) rate | 1,588°/s at −20 ms | [3] Table 2 | check: \|λ̇\| peak within ±25% of 1,588 × Ȧ_c / 2,233°/s (scaled by the ratio of v3's contact azimuth rate to [4]'s, since [3] gives no contact rate), at −20 ± 15 ms scaled |
+| Peak arm-vector turning rate | 1,160°/s at −65 ms | [3] Table 2 (arms about the trunk axis) | check ±25% of 1,160 × Ȧ_c / 2,233, at −65 ± 20 ms scaled |
+| Peak bat azimuth rate | 2,435°/s at −10 ms; 2,233°/s at contact | [4] §4.1.5–4.1.6 | reported (v3's peaks 12–26 ms before contact, §6.5) |
+| Bat speed (barrel end) | peak 31 m/s at −15 ms, 29 m/s at contact | [3] "Ball Contact" | shape only: v3's tip speed peaks before contact at 1.0–1.15 × its contact value, within −30 to 0 ms. Absolute values are not comparable: the sim's sweet spot is set to MLB's 71.5 mph and [3]'s tip marker is filtered at 13 Hz |
+| Bat tip's speed toward the plate and downward | peaks of 19 and 16 m/s near −40 ms | [3] | check of the times (−40 ± 15 ms scaled); magnitudes reported |
 | Elbows at contact | rear 81 ± 8°, lead 56° | [4] Table 1 | client check (player-visuals §13.7) |
-| Bat elevation, azimuth at contact | −30 ± 5°; −8 ± 12° | [4] Table 1 | check (the jet gives −29.5°, +7.7° today: inside both) |
+| Bat elevation, azimuth at contact | −30 ± 5°; −8 ± 12° | [4] Table 1 | check (the jet gives −29.5°, inside one sd, and +7.7°, 1.3 sd above [4]'s mean: within two sd) |
 | Contact-instant values | sweet-spot speed, attack angle α, direction ψ, path tilt β over the last 40 ms, vertical bat angle, depth y_c, reach gain g | Statcast via agent-models §3.6 v2 | constraint, the jet (§6.2) |
 | Swing length | 7.2–7.3 ft | Statcast | check, with Statcast's own start-of-swing definition (§15) |
 
@@ -115,10 +122,11 @@ Every measured value the path must pass through (**constraint**) or is tested ag
 
 Plainly, so no one mistakes an assumption for a measurement:
 
-- **The curves between the stated instants.** [4] states azimuth, elevation and lag at −170, −93, −80 (lag only) and contact; its Appendix E graphs have the full curves and were not read (they are figures). v3 joins the stated values with the lowest-order smooth curves (§6.3) [E]. Reading Appendix E (step 0) would replace the interior shape with the measured one or confirm it.
-- **The hands' position at any instant.** Neither [3] nor [4] gives it. v3 builds it at −170 and −93 ms from [4]'s arm angles on the figure's segment lengths (§6.1) and takes it from the contact jet at t_c. Between, it is a smooth curve [E].
-- **The elevation at launch** (41° [E], between [4]'s 44° and 39°).
-- **The trunk frame of [4]'s shoulder azimuth** (§4.2): assumed, to be confirmed.
+- **The curves between the stated instants.** [4] states azimuth, elevation and lag at −170, −93, −80 (lag only) and contact; its Appendix E graphs have the full curves and were not read (they are figures). v3 joins the stated values with the lowest-order smooth curves (§6.3) [E]. Their shape is not neutral: it is what brings the bat into the contact window faster and further back than today's (§6.5), and it lifts the elevation to 45–46° between launch and −93 ms, 1–2° above [4]'s stated 44° maximum. Reading Appendix E (step 0) would replace the interior shape with the measured one or confirm it.
+- **The hands' position at any instant.** Neither [3] nor [4] gives it. v3 builds it at −170 and −93 ms from [4]'s arm angles on the figure's segment lengths, choosing the forearm's roll by a least-misfit rule (§6.1), and takes it from the contact jet at t_c. Between, it is a smooth curve [E]. The arm angles, the lag and the lead arm's length do not fit exactly together on these proportions (§6.1's residuals).
+- **The elevation at launch** (41° [E], between [4]'s 44° and 39°; the probe found 39° and 44° change nothing that matters).
+- **The trunk frame of [4]'s shoulder azimuth** (§4.2): reading 1 assumed, backed by [4]'s prose, to be confirmed.
+- **The trunk's lean at launch and its flexion at contact**, and the pelvis's travel in the last phase (§5.3's table, [E] marks).
 - **Where the body is relative to the contact point** (§5.3).
 - **The hand speed at contact.** [3] and [4] do not give it; v3 keeps v2's (q = 0.32, hands at about 6.4 m/s; [3]'s arm and uncocking rates suggest 6–9 m/s, a check, §11).
 - **Anything after contact.** v3's track ends at t_c + 0.03 s (D24); the client draws the follow-through.
@@ -127,29 +135,65 @@ Plainly, so no one mistakes an assumption for a measurement:
 
 Upper arm 0.186·H, forearm with hand to the mid-wrists 0.146·H, half the shoulder width (clavicle to shoulder joint centre) 0.112·H, clavicle above the mid-hips 0.28·H [E: standard anthropometric fractions of height; the client's figure must use the same fractions, so the drawn arms reach the sim's hands exactly]. At H = 1.85 m: 0.344, 0.270, 0.207 and 0.518 m.
 
-### 5.3 The shoulder point S, and the body at contact
+### 5.3 The shoulder point S, the trunk frame, and the body at contact
 
-S(τ) = P + Δ(τ), P the batter's stance reference (today `SwingTemplate::pivot`: x = −0.95 m, y = 0.30 m for a right-hander). Δ is built from [4]'s pelvis travel (table above), the clavicle 0.28·H above the mid-hips, and the trunk's lean: forward flexion over the plate 8° at launch and 13° at −93 ms ([4] §4.1.4); toward the rear side at contact by the pelvis's obliquity plus the trunk's lateral flexion, 27° + 4° ([4] §4.1.5; [3]'s 20° is global). The three positions (launch, −93 ms, contact) are joined by the same kind of curve as the hands (§6.3), with zero velocity at none of them [E: velocity from the neighbouring anchors]. S is the same on every pitch: it does not depend on the aim or on whether he swings (D22). It is exported so the client puts the figure's clavicle there (§10).
+The body is built at three knots, **L** (τ = −T_swing), **93** (τ_93 = −0.093·s_T) and **c** (τ = 0), for a right-hander in the batter's frame (a left-hander is built the same and mirrored in x). Every quantity is a function of the stance reference P and the height H only: it does not depend on the aim or on whether he swings (D22).
 
-**The finding.** The lag at contact is fixed by three things: the bat's line at contact (the jet), the hands' point on it, and S. With the jet's bat (elevation −30°, azimuth +5°, the sweet spot at the aim) and [4]'s arms at contact (both arms in front of the chest, §4.2), a 65° lag needs the clavicle about **0.4 m behind the hands toward the catcher and 0.3 m above them**, nearly level with them across: the hands in front of the belly, the arms pointing down and toward the pitcher, the bat across the plate. That is how a hitter at contact looks. The jet puts a middle pitch's hands (mid-wrists) at about x = −0.55 m, y = +0.30 m, z = 1.06 m, so the clavicle would be near x = −0.6 m, y = −0.1 m. S built from today's stance spot, with [4]'s pelvis travel (+17 cm) and the trunk's lean at contact (about 31° toward the rear side, which at contact is toward the plate, and 13° forward), sits near x = −0.66 m, y = +0.5 m, z = 1.38 m: about right across, but **about 0.5–0.6 m too far forward**. With that S the lag even comes out near 50°, but with the hands behind the chest, which no hitter does; so the check is the arms' direction (the next anchor row), not the lag alone.
+| Knot | pelvis forward of P (fwd) | pelvis rise | trunk turn ψ | forward flexion φ_f | lean toward the rear side φ_l |
+| :-- | --: | --: | --: | --: | --: |
+| L | 0.12 m | 0 | −22° | 8° | 10° [E: pelvis obliquity 1° + trunk lateral flexion 9°, the −93 ms value; [4] gives none at −170] |
+| 93 | 0.17 m | 0 | +2° | 13° | 23° (obliquity 14° + lateral flexion 9°) |
+| c | 0.17 m [E] | 0.05 m | +75° | 15° [E: 13° at −93, 16° at +30 ms] | 31° (obliquity 27° + lateral flexion 4°) |
 
-So either the sim's batter stands in the wrong place (the stance spot, 0.30 m from the plate's back tip toward the pitcher, is set by eye) or the sim's contact is too deep (contact depth y₀ = 0.35 m is [E]; only its slope across the plate came from Statcast). Statcast's bat tracking records the intercept relative to the batter (`intercept_ball_minus_batter_pos_x_inches`, `_y_inches`, used for the slopes in agent-models §3.6 and `analysis/statcast/savant_bat.py`); the sample's CSVs are not on this machine. **Step 0 (§13) re-pulls them, reads Savant's definition of the batter's position, and computes the mean intercept relative to the batter**; then the owner chooses how to place the batter (§14). Until then the anchor stays a check that is expected to fail at contact; everything else in this spec does not depend on it.
+Sources: [4] §4.1.1–4.1.5 (pelvis travel, rise and obliquity, upper trunk global turn, flexion and lateral flexion). Lateral flexion is [4]'s relative to the pelvis and obliquity the pelvis's own tilt; adding them for the trunk's lean is an approximation [E].
+
+At each knot:
+
+- mid-hips **O** = (P_x, P_y + fwd, 0.50·H + rise) [E: 0.50·H is the hip-joint height with the knees at [4]'s 40–50° of flexion];
+- facing **f** = (cos ψ, sin ψ, 0) (ψ = 0°: the chest faces the plate, +90°: the pitcher); rear side **r** = (sin ψ, −cos ψ, 0) (the batter's right);
+- trunk axis **t̂** = cos φ_l·(cos φ_f·ẑ + sin φ_f·f) + sin φ_l·r (flexion first, then the lean; t̂ is a unit vector because f, r and ẑ are orthonormal);
+- **S** = O + 0.28·H·t̂ (the clavicle);
+- **r̂′** = normalize(r − (r·t̂)·t̂); trunk frame **x_T** = t̂ × r̂′ (forward from the chest), **y_T** = t̂ × x_T (toward the lead side);
+- rear shoulder = S + 0.112·H·r̂′, lead shoulder = S − 0.112·H·r̂′.
+
+At H = 1.85 m and today's P = (−0.95, 0.30, 0): S_L = (−0.918, 0.310, 1.430), S_93 = (−0.836, 0.271, 1.390), S_c = (−0.663, 0.512, 1.404) m. (At contact the rear side faces the plate, so the 31° lean moves the clavicle 0.27 m toward it.)
+
+**S(τ)** is the quadratic in τ through the three knots (Lagrange form, each coordinate), on [−T_swing, +0.03 s]; the knots scale with s_T like every other anchor. It is exported so the client puts the figure's clavicle there (§10). Only S(τ) is needed at run time; the shoulders and the trunk frame are needed at L and 93 to build the hands (§6.1) and at c for the checks.
+
+**The finding.** With the jet's bat for a middle pitch (elevation −31°, azimuth +5°, the sweet spot at the aim) the hands (mid-wrists) are at about (−0.55, 0.30, 1.06) m. [4]'s arms at contact (both arms in front of the chest, reading 1) and its 65° lag need the clavicle about **0.4 m behind the hands toward the catcher and 0.3 m above them**, about level with them across: the hands in front of the belly, the arms pointing down and toward the pitcher, the bat across the plate. S_c above is about right across but **0.5–0.6 m too far forward**: the hands sit 0.06–0.08 m *behind* the clavicle along x_T, which no hitter does. The probe shows what that does to the whole curve (`v3_checks.py`, `v3_stance_sweep.txt`):
+
+| Stance P_y (today 0.30 m) | lag at −82 / −40 / −20 / 0 ms (middle) | uncocking peak, against [3] scaled | hands ahead of the clavicle at contact |
+| :-- | :-- | :-- | --: |
+| +0.30 | 133° / 50° / 22° / 51° (minimum 20–26° about 25 ms before contact, then rising) | 2,550–2,900°/s at −39 to −50 ms: 1.7 times too fast | −0.06 to −0.08 m |
+| −0.10 | 133° / 85° / 58° / 45° | 1,760–1,780°/s | +0.30 m |
+| −0.25 | 133° / 99° / 75° / 53° | 1,350–1,480°/s, inside the bound | +0.44 m |
+| −0.40 | 133° / 112° / 87° / 59° | 1,180–1,670°/s | +0.58 m |
+
+So [4]'s lag curve appears when the batter stands 0.55–0.70 m deeper than today. Moving him also moves the hands' anchors W_L and W_93 with his body, which changes the late path itself: at P_y = −0.25 m the bat tip's speed peaks about 24 ms before contact at about 1.08 times its contact value, which is [3]'s shape (1.07 at −15 ms), where today's stance gives a peak at contact. **Where the batter stands is therefore a question about contact, not only about looks.**
+
+So either the sim's batter stands in the wrong place (the stance spot, 0.30 m from the plate's back tip toward the pitcher, is set by eye) or the sim's contact is too deep (contact depth y₀ = 0.35 m is [E]; only its slope across the plate came from Statcast). Statcast's bat tracking records the intercept relative to the batter (`intercept_ball_minus_batter_pos_x_inches`, `_y_inches`, used for the slopes in agent-models §3.6 and `analysis/statcast/savant_bat.py`); the sample's CSVs are not on this machine. **Step 0 (§13) re-pulls them, reads Savant's definition of the batter's position, and computes the mean intercept relative to the batter**; then the owner chooses how to place the batter (§14). Until then the lag and arms-at-contact checks are expected to fail with today's stance, and the rest of this spec does not depend on the choice.
 
 ## 6. The path
 
-### 6.1 The launch pose L
+### 6.1 The launch pose L and the hands' anchors
 
-One pose per batter (his height and handedness), the same on every pitch, at rest. Built once:
+The hands are built at L and at 93 from [4]'s arm angles on the segment lengths of §5.2, in the body of §5.3. Both are **per batter**: neither depends on the aim, so every swing has them and they are continuous across aims. The construction has no root to find at run time.
 
-1. S_L from §5.3; the trunk turned −21° (coiled toward the catcher); the rear and lead shoulder joint centres 0.112·H either side of S_L along the trunk's shoulder line.
-2. The rear elbow: 0.186·H from the rear shoulder at elevation 71°, azimuth −78° (§4.2, provisional reading): about 19° below shoulder height, out to the side of the coiled trunk, which at launch is toward the catcher and a little away from the plate.
-3. The hands W_L: on the cone of points 0.146·H from the rear elbow at 128° of flexion, **at the point where the clavicle-to-hands vector makes λ = 121° with the bat** (A = −225°, E = 41°). The cone and the lag condition give at most two points; take the one in front of the rear shoulder (toward the plate). That is a one-dimensional root find on the cone's angle, done once per batter.
-4. Check the lead arm: the lead shoulder to W_L must lie within the lead arm's reach at [4]'s 72° of lead elbow flexion (distance 0.10·H either side of that arm's length at 72°) [E]. If it fails, the trunk frame of step 2 is wrong (§4.2) or the figure's proportions are; fix those, not the lag.
+1. **Rear elbow** = rear shoulder + 0.186·H·d, with d from §4.2 (reading 1) at the knot's rear-shoulder elevation and azimuth (L: 71°, −78°; 93: 49°, −42°).
+2. **Forearm**: with p̂ = normalize(t̂ − (t̂·d)·d) and q̂ = d × p̂, the hands are **W(χ)** = elbow + 0.146·H·[cos κ·d + sin κ·(cos χ·p̂ + sin χ·q̂)], κ the rear elbow's flexion (L: 128°, 93: 126°) and χ the forearm's roll about the upper arm, which [4] does not give.
+3. **χ by least misfit** [E]: χ minimises
+
+   M(χ) = ((λ(χ) − λ*)/10°)² + ((|W(χ) − lead shoulder| − R)/(0.03·H))²,
+
+   λ(χ) = ∠(W(χ) − S, â) with the knot's bat (L: A = −225°, E = 41°; 93: A = A_ref − 168°, E = 39°, where A_ref is the contact azimuth of the batter's own **middle-middle** aim, +4.8° for the template), λ* = [4]'s lag (121°, 131°), and R = the lead arm's shoulder-to-wrist distance at [4]'s lead elbow flexion (72°, 68°): R = √(l_u² + l_f² + 2·l_u·l_f·cos κ_lead), l_u = 0.186·H, l_f = 0.146·H. Among the local minima keep those with the hands in front of the rear shoulder ((W − rear shoulder)·x_T ≥ 0: "hands just in front of the back shoulder"), and take the lowest. The 10° is [4]'s spread of the lag at contact; the 0.03·H is about 5 cm.
+4. **Constants.** Every length is a multiple of H, so χ does not depend on H: χ_L and χ_93 are template constants, computed once by the oracle and stored with their derivation in a test. The probe gives **χ_L = 308.2°, χ_93 = 309.4°** (the forearm keeps nearly the same roll, so the hands' path is smooth), and at H = 1.85 m, P as today: W_L = (−0.872, −0.124, 1.401), W_93 = (−0.576, 0.069, 1.221) m.
 5. The knob K_L = W_L − u_g·â_L.
 
-W_93 is built the same way at −93 ms (trunk +2°, rear shoulder 49° / −42°, rear elbow 126°, lead elbow 68°, λ = 131°), with the bat's direction at that instant, which depends on the aim through A(τ_93) = A_c − 168°. So W_93 is solved per swing (the same one-dimensional root; a few µs), not per batter.
+**Residuals, reported by the oracle and not hidden:** at L the lag comes out 129° (target 121°) and the lead shoulder is 0.625 m from the hands, longer than the lead arm at 72° (0.499 m) and 1 cm beyond even a straight lead arm (0.614 m): on these proportions the lead arm cannot quite reach the hands the rear arm and the lag put by the back shoulder. At 93 the lag is 133° (131°) and the lead arm 1.6 cm long. The cause is in the inputs that are not measured (the proportions, the clavicle taken on the shoulder line rather than at the front of the chest, the trunk frame); step 0 and the client's figure settle them. The client's reach solver (`FBbReach`, up to 24 cm) covers it in the picture meanwhile.
 
-*Expected* (rough, from the figure in step 1 of the oracle): the hands about 0.1–0.2 m in front of and slightly above the rear shoulder, the bat pointing up and back over the head toward the pitcher's side. Today's swing starts with the hands 0.57 m behind his spot at chest height and the bat flat at the catcher (player-visuals §13.10).
+**Why not the lag alone, or both arms alone** (the first version solved the cone for the lag per swing): solving the lag at 93 with the swing's own bat makes the hands depend on the aim, and the solution can vanish (the review found none for contact azimuths of 27° and more without the trunk's lean; with the lean included the probe finds roots up to +45°, but the margin is thin and the baseline's azimuths reach past it); there can be up to four roots, and none. Solving the two arms alone (the rear arm's cone meeting the lead arm's sphere) has no solution at L on these proportions (6.5 cm short) and gives a lag of 147°. The misfit is always defined, chooses continuously, and leaves the lag where it belongs, as an outcome checked against [4].
+
+*Picture:* at L the hands are at shoulder height, 0.21 m in front of the rear shoulder and 0.43 m from the clavicle, the rear elbow out and back, the bat 41° up and wrapped toward the pitcher's side. Today's swing starts with the hands 0.57 m behind his spot at chest height and the bat flat at the catcher (player-visuals §13.10).
 
 ### 6.2 The contact jet
 
@@ -161,7 +205,7 @@ At the executed nominal contact t_c the bat's state and its first two time deriv
 
 From these, at τ = 0: W, Ẇ, Ẅ (the point u_g along the bat); A_c, E_c and their first two derivatives (from â, â̇ = ω × â, â̈ = ω̇ × â + ω × (ω × â)).
 
-This is how v3 keeps "match by construction" (§2): at t_c the sweet spot is at the aim, at `BatSpeed`·(1 + effort), with α, ψ, the plane tilt β and the vertical bat angle; the hands at q's share; the bat square to its path (v2's λ_c = 0, which is a statement about v2's hand-arc centre, not [4]'s lag); and the bat still speeding up at contact (v2's τ_b = +10 ms: Statcast's bat speed rises with contact depth out to 6–12 in out front). v2's template keeps its role as the **contact planner**: its widths and peak times now set only the jet's accelerations. The owner may instead take [3]'s and [4]'s speed history, which peaks 10–15 ms before contact (§14).
+This is how v3 keeps "match by construction" (§2) **at the planned instant**: there the sweet spot is at the aim, at `BatSpeed`·(1 + effort), with α, ψ, the plane tilt β and the vertical bat angle; the hands at q's share; the bat square to its path (v2's λ_c = 0, which is a statement about v2's hand-arc centre, not [4]'s lag); and the sweet spot's speed still rising (v2's τ_b = +10 ms: Statcast's bat speed rises with contact depth out to 6–12 in out front). v2's template keeps its role as the **contact planner**: its widths and peak times now set only the jet and the path after t_c (§6.4). Before t_c the curves of §6.3 decide, and they do not reproduce v2's rates there (§6.5).
 
 ### 6.3 Between: launch to contact
 
@@ -171,20 +215,31 @@ On τ ∈ [−T_swing, 0], three groups of curves, each a polynomial in τ:
 | :-- | :-- | :-- |
 | A(τ) | at −T_swing: A_L, Ȧ = 0, Ä = 0; at τ_93 = −0.093·s_T: A_c − 168°, Ȧ = 0.558·Ȧ_c; at 0: A_c, Ȧ_c, Ä_c | 7 |
 | E(τ) | at −T_swing: E_L, 0, 0; at τ_93: 39°; at 0: E_c, Ė_c, Ë_c | 6 |
-| W(τ), each of x, y, z | at −T_swing: W_L, 0, 0; at τ_93: W_93; at 0: W_c, Ẇ_c, Ẅ_c | 6 |
+| W(τ), each of x, y, z | at −T_swing: W_L, 0, 0; at τ_93: W_93 (per batter, §6.1); at 0: W_c, Ẇ_c, Ẅ_c | 6 |
 
 - **Closed form.** With u = τ/T_swing the interior knot sits at the fixed fraction u_93 = −0.093/0.170, the same for every batter, so each curve is a fixed linear combination of the conditions: the basis polynomials are computed once (in the oracle, and as constants in Rust with their derivation in a test), and each swing's coefficients are a dot product. No per-swing linear solve.
 - **Pose at τ:** â = (cos E cos A, cos E sin A, sin E) (mirrored for a left-hander), W from its curve, knob K = W − u_g·â. **Velocity:** â̇ from Ȧ, Ė; ω = â × â̇ (the bat has no roll about its own axis, as in v2); the centre of mass moves at Ẇ + ω × ((u_cm − u_g)·â). All transcendental functions through `bb_math::m`.
-- **Why these conditions.** At rest at the start, so the client's load ends on L without a jump; [4]'s mid-swing values where [4] states them; the jet at contact, so every contact quantity is v2's to second order. Ȧ at −93 ms is a ratio to the contact rate (not 1,247°/s) so that a faster swing is faster all through, and the elevation is held at 39° until −93 ms as [4] has it. The lag between the anchors is left to fall out and is checked (§11).
-- **What must be verified** (the oracle does it before any Rust, §11): A increases monotonically on [−T_swing, 0]; E stays within [−40°, 50°]; the hands stay between 0.15 m and the arms' full reach from S; the hands' and the bat's speeds rise without a dip after −93 ms; the lag peaks near −80 ms. If a polynomial overshoots, the fix is one more interior condition from [4]'s stated values (for instance Ė = 0 at τ_93), not a different shape family.
+- **Why these conditions.** At rest at the start, so the client's load ends on L without a jump; [4]'s mid-swing values where [4] states them; the jet at contact, so the planned contact is v2's. Ȧ at −93 ms is a ratio to the contact rate (not 1,247°/s) so that a faster swing is faster all through. The elevation passes through 39° at −93 ms; between launch and there it rises to 45–46° (1–2° above [4]'s 44° maximum). Ė = 0 at −93 ms would cap it at 41°, but it pushes the elevation's fall later and makes the sweet spot reach 74 mph 25 ms before contact, faster than at contact, so it is not used (probe `v3_variants.py`). The lag between the anchors is left to fall out and is checked (§11).
+- **Why not join today's path before the window** (the review's other remedy): the measured mid-swing (168° of azimuth still to go 82 ms before contact, turning at 56% of the contact rate) cannot be joined to v2's state 30 ms before contact (only 63° to go, turning at 1,616°/s) without the bat speeding up, slowing to 1,450–1,600°/s, and speeding up again: two surges in one swing (probe: rate peaks at −72 ms and again at contact). Dropping the −93 ms anchor does not cure it (the wrapped launch is 110° behind v2's own start, so the deficit must be made up before the window). A condition on the third derivative at contact does not help either (the difference at −25 ms stays 7–9.5°). So v3 keeps the measured shape up to the planned instant, and §6.5 states the difference; the owner can choose otherwise (§14).
+- **What must be verified** (the oracle does it before any Rust, over the whole aim range of §11): A non-decreasing on [−T_swing, 0] (true for the three golden aims; the rate has a shallow plateau near −90 ms); E within [−45°, 50°] (probe: −38° to 46°); the hands between 0.15 m and the arms' full reach from S; the sweet spot's speed never above 1.1 times its contact value before contact; the lag checks of §11. If a curve misbehaves somewhere in the range, the fix is an interior condition from [4]'s stated values, not a different shape family.
 
 ### 6.4 After contact
 
-For τ ∈ [0, +0.03 s] (D24) the bat follows v2's analytic swing (the bumps continued past t_c), which joins the curves of §6.3 with matching position, velocity and acceleration at τ = 0. Contacts found after t_c (57% of contacts today, all within +25 ms) therefore meet a bat that agrees with v2's to second order at t_c and exactly after it; the after-contact motion is otherwise cosmetic (physics-spec §6.3) and the follow-through is the client's.
+For τ ∈ [0, +0.03 s] (D24) the bat follows v2's analytic swing (the bumps continued past t_c), which joins the curves of §6.3 with matching position, velocity and acceleration at τ = 0. Contacts found after t_c (57% of contacts today, all within +25 ms) therefore meet exactly v2's bat; the after-contact motion is otherwise cosmetic (physics-spec §6.3) and the follow-through is the client's.
 
 ### 6.5 Where v3 differs from v2 inside the contact window
 
-On [−25 ms, 0] the curves and v2 share position, velocity and acceleration at 0 and differ by their third derivative. v2's bat angle has a jerk of about −320·k rad/s³ at contact (k ≈ 36 rad/s); a difference of that size moves the bat by about 0.1° at −10 ms and 2° at −25 ms. That bounds what v3 does to contact before t_c: about 1,000 contacts in 600 games fall more than 10 ms before it (baseline, timing table). The oracle reports the actual difference (§11).
+At τ = 0 the curves and v2 share position, velocity and acceleration; after it the bat is v2's (§6.4). Before it they differ, and not by a small third-order term, as the first version of this section estimated (0.1° at −10 ms, 2° at −25 ms). Measured on the oracle's v2 jet (`v3_review_probe.py p21`, the three golden aims, today's stance):
+
+| aim | v3 − v2 azimuth at −10 / −25 ms | v3 − v2 elevation at −25 ms | sweet-spot speed v3 / v2 at −25, −15, −10 ms (mph; 71.6 at contact) | v3's azimuth rate peak |
+| :-- | :-- | :-- | :-- | :-- |
+| middle | −0.7° / −7.6° | +2.7° | 66.9 / 62.8, 69.9 / 68.0, 70.8 / 69.9 | 2,546°/s at −20 ms (contact 2,349) |
+| inside-low | −0.4° / −5.8° | +1.9° | 64.3 / 62.2, 67.4 / 67.6, 69.1 / 69.6 | 2,679°/s at −12 ms (contact 2,527) |
+| outside-high | −0.9° / −9.2° | +3.3° | 70.5 / 63.5, 72.5 / 68.5, 72.4 / 70.1 | 2,535°/s at −26 ms (contact 2,172) |
+
+The reviewer's numbers are reproduced exactly. The reason is the measured shape itself: [4]'s bat still has 168° to turn 82 ms before contact, and v2's has 111°, so v3's bat must turn faster than today's in the last 80 ms, and its azimuth rate peaks 12–26 ms before contact, as [4]'s does (−10 ms). **In v3 the lab's peak is built in**, whatever the owner chooses about speed at contact.
+
+**What it does to contact.** Contacts after t_c (57%, the early swings) are unchanged. Contacts before it (late swings) meet a bat further back, higher and faster: from the baseline's timing table, 1,003 contacts in 600 games (2.3%) come 10–26 ms before t_c, where the bat is 3–9° further back and 2–7 mph faster; 8,885 (20%) come 3–10 ms before, where it is under 1° back and up to 2 mph faster. Expected: late balls hit a little harder and pushed more to the opposite field, some swings at the window's early edge turning misses into fouls or the reverse; foul share and exit speed of late contact move, the totals probably within a point (to be measured, §12). Against Statcast's speed by contact depth (bat speed about 3.4 mph under the batter's mean for balls met 12 in or more deep, about −15 ms), v2 gives −3.6 mph at −15 ms and v3 −1.7 (middle aim): **v3 keeps about half of MLB's loss of speed on late contact**. That is a Tier M check (calibration-targets §4.3) for build step 4; if it fails, the fix is the interior shape from [4]'s Appendix E, not a speed knob.
 
 ### 6.6 physics-spec §6.3, as proposed
 
@@ -222,7 +277,7 @@ so σ advances by B/2 = 20 ms of path while slowing to a stop, the bat and hands
 
 ### 8.3 What a checked swing does now
 
-The brake comes at −82 ± 32 ms (baseline). At −82 ms v3's bat is about 168° short of its contact azimuth (pointing away from the plate and up), and 20 ms more of path brings it to about −140°: well back. Only a brake started after about −25 ms (p95 is −29 ms) gets the bat to the plate. A braked v3 bat almost never touches the ball and almost never passes 0°. Today 3.4% of checked swings are strikes (310 touches, 36 on the yaw), about 0.6 a game; v3 should make nearly all of them balls. No source here measures how often a real check swing is ruled a swing; this is reported, and the owner may want it looked at (§14).
+The brake comes at −82 ± 32 ms (baseline), and never after t_c − 10 ms (the abort point, 60 ms before contact, plus the 50 ms latency). At −82 ms v3's bat is about 168° short of its contact azimuth (pointing away from the plate and up), and 20 ms more of path brings it to −128° to −142° (probe, three aims): well back. A brake at −25 ms still stops it at −12° to −1°; only brakes in the last 10–20 ms before the cut-off (the baseline's p95 is −29 ms) can carry it past 0°, and then only on inside pitches. A braked v3 bat almost never touches the ball and almost never passes 0°. Today 3.4% of checked swings are strikes (310 touches, 36 on the yaw), about 0.6 a game; v3 should make nearly all of them balls. No source here measures how often a real check swing is ruled a swing; this is reported, and the owner may want it looked at (§14).
 
 ### 8.4 rules-spec §4.5, as proposed
 
@@ -232,7 +287,7 @@ In code: `Swing::judged_swing` becomes A(σ(t_b + B)) ≥ 0 on the unwrapped azi
 
 ## 9. Determinism
 
-- Every function is closed form in τ: polynomials, `m::sin`/`m::cos` for â, one `m::atan2`/`m::acos` family for A and E of the jet, and the one-dimensional root for W_L and W_93 (a fixed number of bisection steps on a fixed bracket, so the same operations in the same order every time). No `mul_add`, no iteration that depends on a tolerance reached.
+- Every function is closed form in τ: polynomials, `m::sin`/`m::cos` for â, one `m::atan2`/`m::asin` for A and E of the jet. W_L and W_93 are built from the constants χ_L, χ_93 (§6.1) by closed-form vector arithmetic; nothing is solved at run time. No `mul_add`, no iteration that depends on a tolerance reached.
 - No new RNG purpose. The draw order of `SwingExecution` (δ_v, α, δ_r, t₀) and `SwingEffort` is unchanged; nothing new is drawn.
 - The basis polynomials of §6.3 are constants with a test that rederives them from their conditions.
 - Same build + seed ⇒ same game, as always; v3 changes games once (build step 4), with a ledger row.
@@ -246,27 +301,43 @@ In code: `Swing::judged_swing` becomes A(σ(t_b + B)) ≥ 0 on the unwrapped azi
   - the shoulder point S at each bat sample (a parallel vector in `BatTrack`, appended), so the figure's clavicle is put there;
   - the grip station u_g (one constant per bat).
   One schema change (`./schemas/gen.sh`), `BB_ABI_VERSION` up by one, an FFI test; no digest changes (the timeline is not in the event log): a "No effect on games" ledger line.
+  **While v2 is the game's swing** (if step 3 lands before step 4): the new fields are written empty (`BbPlayInfo` flags L as absent, `BatTrack` has no S samples), since v2 has no launch pose or shoulder point; the client keeps its step 1 behaviour. They are filled from step 4 on.
 - The `CheckSwingBrake` marker (in the schema, never written) is written at t_b, so the client stops the body with the bat.
 
 ## 11. Goldens and the oracle
 
 The Python oracle (`analysis/oracle/swing_oracle.py`, stdlib only) gains a v3 module that computes everything below **from this spec**, independently of the Rust; its fixtures go in a new `swing_v3.json` beside `analysis/oracle/golden/swing.json` and `sim/crates/bb_agents/tests/` reads them. v2's oracle and golden stay as the contact planner's (the jet is v2's), so the jet is tested against v2's existing fixtures.
 
-**Golden cases** (a right-hander, H = 1.85 m, grade 50: T_swing 0.150 s, `BatSpeed` 32.0 m/s, effort 0; the 34-in bat; and a left-hander mirrored):
+**Golden cases** (a right-hander, H = 1.85 m, grade 50: T_swing 0.150 s, `BatSpeed` 32.0 m/s, effort 0; the 34-in bat; and a left-hander mirrored). Each is computed by the oracle from this spec and compared with the Rust; the conditions the construction imposes are not themselves tests (AGENTS.md: no tautological tests), so each case below names what it can catch.
 
-1. **L**: S_L, both shoulders, the rear elbow, W_L, K_L, â_L; with λ_L = 121° and A_L, E_L to 1e-9 (they are conditions), and the lead-arm distance check.
-2. **The jet** at t_c for v2's golden cases `rhb_middle`, `rhb_inside_low`, `rhb_outside_high` and `lhb_middle_quick` (`golden/swing.json`): equal to v2's pose and velocity there, and to the acceleration of v2's bumps, to 1e-9.
-3. **Interior anchors**: at τ_93, A = A_c − 168°, Ȧ = 0.558·Ȧ_c, E = 39°, λ = 131° (to 1e-9).
-4. **Path samples** every 5 ms from t_s to t_c + 0.03 for the three aims: knob, axis, Ω, the centre of mass's velocity (Rust within 1e-9 m and rad).
-5. **Continuity**: position, velocity and acceleration equal from both sides at τ = 0 (curves against v2's continuation) to 1e-9; at rest at t_s.
-6. **Braking**: brakes starting at −120, −82, −40 and −25 ms: the stopped pose, A_max, and the ruling (expected: no swing for the first three; the −25 ms case states its own expected answer from the oracle).
-7. **T_swing** 0.130 and 0.174: the anchors land at s_T·(−93 ms).
+1. **A hand-worked case** (catches frames, signs, the reading of §4.2 and the χ convention; worked on paper, not by the oracle): S = (0, 0, 0); an upright trunk facing +x (ψ = φ_f = φ_l = 0, so t̂ = ẑ, x_T = +x, y_T = +y, r̂′ = −y); H = 1.85 m (l_u = 0.3441, l_f = 0.2701, half-shoulder 0.2072 m). Rear shoulder (0, −0.2072, 0). Rear arm θ = 90°, φ = −90°: d = −y, elbow (0, −0.5513, 0). Forearm κ = 90°: p̂ = ẑ, q̂ = d × p̂ = −x, and χ = 270° gives the forearm +x, so **W = (0.2701, −0.5513, 0)**, |W − S| = 0.6139 m, **hands at shoulder height**. With the bat at A = −90°, E = 45° (â = (0, −0.7071, 0.7071)): **λ = acos(0.5513 × 0.7071 / 0.6139) = 50.58°**. Under reading 2 the same inputs give the elbow at (0, +0.1369, 0), W = (−0.2701, 0.1369, 0) and λ = 108.6°, so the case tells the readings apart.
+2. **The reading check** (§4.2): from L to 93 the rear elbow's forward coordinate (along x_T, from the rear shoulder) rises (probe: +0.07 → +0.19 m), and the lead elbow's rises from 93 to c. Fails under reading 2.
+3. **The jet** at t_c for v2's golden cases `rhb_middle`, `rhb_inside_low`, `rhb_outside_high` and `lhb_middle_quick` (`golden/swing.json`): equal to v2's pose and velocity there to 1e-9 (an independent fixture: v2's oracle), and the acceleration to v2's bumps' to 1e-6 (finite differences).
+4. **Path samples** every 5 ms from t_s to t_c + 0.03 for the three aims: knob, axis, Ω, the centre of mass's velocity, Rust against the oracle within 1e-9 m and rad (two implementations of the same spec: catches implementation errors, not spec errors).
+5. **Continuity and rest**: position, velocity and acceleration equal from both sides at τ = 0 to 1e-9; all rates zero at t_s.
+6. **Braking**: brakes starting at −120, −82, −40, −25 and −12 ms: the stopped azimuth and the ruling. From the probe: −82 ms stops at −135° (middle), −25 ms at −7° (middle), −1.4° (inside-low), −12° (outside-high); all no swing. The −12 ms case's answer comes from the oracle.
+7. **T_swing** 0.130 and 0.174: the anchors land at s_T·(−93 ms) and the curves stay within the §6.3 bounds.
+8. **Over the whole aim range** (the P1 lesson): a grid of aims across and up the zone and 0.15 m outside it, contact azimuths from −25° to +50°: every path defined, A non-decreasing, E within [−45°, 50°], the hands within reach, no sweet-spot speed above 1.1 times its contact value before contact, and the lag at 93 reported (probe: 153° at −20° to 103° at +45°).
 
-**Checks the oracle reports and the tests bound** (outcomes, not conditions; tolerances [E], wide enough for a model that is not fitted to them): lag maximum 133 ± 5° at −80 ± 10 ms (scaled); peak uncocking rate within ±25% of [3]'s 1,588°/s scaled to the contact rate, at −20 ± 10 ms; peak arm-vector turning rate (about S, horizontal) within ±25% of 1,160°/s scaled, at −65 ± 15 ms; the bat's speed toward the plate and downward peaking near −40 ms; swing length against Statcast (with its definition, §15); the plane tilt over the last 40 ms within 1.5° of β; the difference from v2 at −10 and −25 ms (§6.5); and the lag at contact by location against [4]'s Table 1 (reported, failing only after §5.3 is settled). Monotone A, bounded E, hands within reach (§6.3).
+**Bounds from the sources** (outcomes the construction does not impose; each test fails outside its bound; tolerances [E], wide enough for a model not fitted to them, and stated with what the probe gives today):
+
+| Check | Bound | Source | Probe today (today's stance / stance 0.55 m deeper) |
+| :-- | :-- | :-- | :-- |
+| Lag maximum | 133 ± 8° at −71 ± 20 ms (−80 ms scaled) | [4] §4.1.5 | 130–139° at −88 to −90 ms (passes narrowly on time) / same |
+| Peak uncocking rate \|λ̇\| | within ±25% of 1,588 × Ȧ_c / 2,233°/s, at −18 ± 15 ms scaled | [3] Table 2, scaled by [4]'s contact rate (§5) | 2,550–2,900°/s at −39 to −50 ms (fails) / 1,350–1,480°/s (passes in size; time −23 to −50 ms) |
+| Peak arm-vector turning rate (horizontal, about S) | within ±25% of 1,160 × Ȧ_c / 2,233°/s, at −57 ± 20 ms scaled | [3] Table 2 | 1,250°/s at −104 ms (time fails) / 1,430–2,700°/s at −38 to −46 ms (size fails) |
+| Bat tip speed shape | peak before contact, 1.0–1.15 × the contact value | [3] | at contact (fails) / 1.08 at −24 ms (passes) |
+| Tip toward the plate and downward | peaks at −35 ± 15 ms scaled | [3] (−40 ms) | toward the plate −36 to −39 ms (passes); downward −49 to −51 ms (at the edge) |
+| Lag at contact, by location | middle 65 ± 15°; HI 79, HO 63, LI 58, LO 51, each ± 15° | [4] Table 1 | 30–62° / 53–54° |
+| Hands ahead of the clavicle at contact | ≥ 0.25 m along x_T | [4] arms at contact (§5) | −0.06 to −0.08 m (fails) / +0.43 to +0.46 m |
+| Plane tilt over the last 40 ms | within 1.5° of β | Statcast (the jet) | to be measured |
+| Swing length | reported against Statcast with its own start definition (§15) | Statcast | 8.1–9.1 ft from t_s |
+
+The failures with today's stance are §5.3's finding, not defects of the construction; they are expected to pass once the body is placed (§14). The arm-vector rate fails either way: the oracle reports it and step 0 (Appendix E's curves) is the first place to look.
 
 **Property tests** (Rust): |â| = 1; the velocity the pose reports equals the finite difference of positions (as v2's test); A non-decreasing on every unbraked swing; a braked swing never moves after t_b + B; mirror symmetry for a left-hander; determinism (the same plan twice gives identical bits).
 
-**Game-level tests**: a test that every swing's contact quantities at the planned instant (sweet-spot speed, α, ψ, bat elevation) equal v2's for the same plan; the `bb_game` crate-graph test unchanged.
+**Game-level tests**: a test that every swing's contact quantities at the planned instant (sweet-spot speed, α, ψ, bat elevation) equal v2's for the same plan, and that the bat after t_c is v2's; the `bb_game` crate-graph test unchanged.
 
 ## 12. The recalibration plan
 
@@ -277,22 +348,24 @@ The Python oracle (`analysis/oracle/swing_oracle.py`, stdlib only) gains a v3 mo
 | Checked swings ruled swings | 3.4% → near 0 | the braked bat is far back (§8.3) |
 | K% | −0.1 to −0.3 points | about 0.6 strikes a game become balls |
 | BB%, pitches per PA | +0.1 to +0.2 points; up slightly | the same pitches |
-| EV, LA, spray, foul share of contact | within noise; the far timing rows may move a little | the jet is v2's; only third-order terms differ (§6.5) |
-| Contact%, whiff% | within noise | as above, and misses are decided in the window |
+| EV, LA, spray, foul share of late contact (3 or more ms before t_c, 23% of contact) | late balls a little harder (up to +2 mph at −10 ms, +2–7 at −25) and pushed; foul share there moves | the measured shape brings the bat in faster and further back (§6.5) |
+| EV, LA, spray of all contact; foul share | probably within a point; measure | early contact (57%) is unchanged; late contact is the minority |
+| Contact%, whiff% | small changes at the window's early edge | the bat is up to 9 cm elsewhere at −25 ms |
+| Bat speed by contact depth (Tier M) | deep contact loses about half of MLB's 3.4 mph | §6.5 |
 | HR/PA, runs | within noise, follow K% and BB% | |
 | HBP% and everything perceptual | unchanged **unless** the owner moves the batter (§14) | the eye point and body capsules follow the stance spot |
 
-**Match by construction** (§2): every contact-instant quantity and the slopes.
+**Match by construction** (§2): every quantity at the planned instant, and every contact after it.
 
 **Bands** (calibration-targets): §4.3 (bat speed 71.5–72 mph, swing length about 7.3 ft, attack angle, commit-to-contact 0.15 s), §4.4 (EV 88.5, LA 12°, hard-hit, GB/LD/FB/PU), §5 (K% 22.5, BB% 8.3, Swing%, Contact%, foul share), and §6.2 (runs 4.39).
 
 **Order of work**, bottom-up (calibration-targets §2.1):
 
-1. **Tier A/M first**: the oracle and goldens pass; then the cage (`swing_cage_probe`, and `swing_contact_baseline` against [the baseline](calibration/2026-11-24-swing-contact-baseline.md)): every contact-instant row identical, the timing table's middle rows identical within noise, the far rows reported.
+1. **Tier A/M first**: the oracle and goldens pass; then the cage (`swing_cage_probe`, and `swing_contact_baseline` against [the baseline](calibration/2026-11-24-swing-contact-baseline.md)): the timing table's rows from −3 ms on identical within noise, the earlier rows reported with §6.5's expectation beside them, and bat speed by contact depth against Statcast.
 2. **The standard run**, before and after (ledger row). If K%, BB% and runs are within noise or move as the table says, stop: no retuning.
 3. **If something moves more than expected**, look for a bug first (a planner or path error, AGENTS.md), then the checked-swing mechanism (§8): the brake and the ruling are the only new physics on the game path.
-4. **Only then retune**, and only what calibration-targets §2.3 allows: `K_swing` (the miss scale) and the `BatSpeed` population mean, in that order. **Never** the anchors, the jet's Statcast fits, or a checked-swing threshold toward a stat. Swing length, if it leaves 6–8.5 ft, is a Tier M finding about the path's shape (§15), fixed in the curves' conditions from [4], never through speed.
-5. If the owner moves the batter or the contact depth (§14), that is its own calibration step after this one: perception and HBP change with it, and K%, BB%, HBP% and the timing of contact are re-measured; a calibration report under docs/calibration/ names each change and its band.
+4. **Only then retune**, and only what calibration-targets §2.3 allows: `K_swing` (the miss scale) and the `BatSpeed` population mean, in that order. **Never** the anchors, the jet's Statcast fits, or a checked-swing threshold toward a stat. If late contact is off a Tier M band (speed by depth, spray by timing), the fix is the interior shape from [4]'s curves (step 0), not a knob. Swing length, if it leaves 6–8.5 ft, is a Tier M finding about the path's shape (§15), fixed in the curves' conditions from [4], never through speed.
+5. If the owner moves the batter or the contact depth (§14), that is its own calibration step after this one: perception, HBP and the late path (the hands' anchors move with the body, §5.3) change with it, and K%, BB%, HBP%, late contact and the timing of contact are re-measured; a calibration report under docs/calibration/ names each change and its band.
 
 ## 13. Build order
 
@@ -300,10 +373,10 @@ Each step testable and reviewable on its own. Sizes are rough Opus working time.
 
 | Step | What | Game change | Size | Review |
 | :-- | :-- | :-- | :-- | :-- |
-| **0. Data** | Read [4] Appendix B (the shoulder angles' trunk frame) and, if legible, Appendix E's curves (azimuth, elevation, lag between the anchors). Re-pull the Statcast sample (calibration note 2026-11-14 §8 has the query) and compute the intercept relative to the batter (x, y), with Savant's definition of the batter's position. Write the numbers into §4.2, §5 and §5.3 of this spec. | none | half a day | none (data; the Coordinator reads it) |
-| **1. Oracle** | `swing_oracle.py` v3: L, W_93, the jet (v2's), the curves, braking; goldens §11 cases 1–7; the checks report. Settle overshoots here (§6.3). | none | 1 day | Opus, with the spec |
+| **0. Data** | Read [4] Appendix B (the shoulder angles' trunk frame) and, if legible, Appendix E's curves (azimuth, elevation, lag between the anchors). Re-pull the Statcast sample (calibration note 2026-11-14 §8 has the query) and compute the intercept relative to the batter (x, y), with Savant's definition of the batter's position. Write the numbers into §4.2, §5 and §5.3 of this spec, and the owner's choices of §14 are taken with them. | none | half a day | none (data; the Coordinator reads it) |
+| **1. Oracle** | `swing_oracle.py` v3: the body (§5.3), χ_L and χ_93 by the misfit (§6.1), the jet (v2's), the curves, braking; goldens §11 cases 1–8 and the bounds table; settle any misbehaviour over the aim range here (§6.3). Start from `sim/target/codex-probes/v3_review_probe.py`, which already builds most of it. | none | 1 day | Opus, with the spec |
 | **2. Rust, behind a switch** | `bb_agents::swing`: v3 path as a `BatPose` beside v2 (`SwingTemplate::model`, default v2); the clock-based brake, A_max and the new ruling apply to v3 only; tests from the goldens. Digests unchanged (v2 default). | none | 1 day | Opus (sim) |
-| **3. Export E2 and D24** | L in `BbPlayInfo`, S samples in `BatTrack`, u_g, the `CheckSwingBrake` marker, the track's end at t_c + 0.03 s; schema, FFI, tests. Ledger: "No effect on games". | none | half a day | Sonnet |
+| **3. Export E2 and D24** | L in `BbPlayInfo`, S samples in `BatTrack`, u_g, the `CheckSwingBrake` marker, the track's end at t_c + 0.03 s; schema, FFI, tests. Empty while v2 is the game's swing (§10). Ledger: "No effect on games". | none | half a day | Sonnet |
 | **4. Switch the game to v3** | default v3; the ledger row (standard run before/after); the baseline example against the baseline; the checked-swing counts; the recalibration of §12 if needed; agent-models §3.6 replaced by this text, physics-spec §6.3 and rules-spec §4.5 updated. | yes | 1 day + runs | Opus (sim) |
 | **5. Where the batter stands** (if the owner chooses to move him, §14) | stance spot and/or contact depth, eye point, body capsules; its own ledger row and calibration report. | yes | 1 day + runs | Opus |
 | **6. Remove v2's path** | v2 kept only as the contact planner; the switch deleted. | none (digests identical) | an hour | Sonnet |
@@ -319,21 +392,23 @@ Each step testable and reviewable on its own. Sizes are rough Opus working time.
 
 Plain baseball terms; numbering is the Coordinator's.
 
-**When is the bat fastest: before the ball or just after it?** *Now:* the game's bat is still speeding up when it meets the ball and is fastest about a hundredth of a second later, as MLB's bat tracking implies (bat speed keeps rising for balls met 6–12 inches further out front). *The lab studies* ([3] off a tee, [4] in batting practice) have the bat fastest 10–15 thousandths of a second before contact and slightly slower at the ball. *Options:* (a) keep MLB's timing at contact and the lab's shape everywhere else: batted balls barely change; (b) take the lab's: balls met late are hit harder than now and balls met out front softer, pull and fly-ball rates by timing shift, and the hitting calibration is redone in earnest. *Recommended:* (a). MLB game data decides the moment that decides the game, the lab measures a different quantity (the bat's turning rate in [4], a barrel marker smoothed at 13 Hz in [3]) on slower pitches, and the two agree everywhere else.
+**How the bat comes into the ball on a late swing.** *Now:* when a batter is late (the ball reaches the bat a little before he planned), the game's bat is still well short of full speed: 25 thousandths of a second before the planned moment its sweet spot is at about 63 mph against 72 at the planned moment, the way MLB's bat tracking shows late contact losing speed. *With the measured swing* the bat turns fastest 12–26 thousandths before contact, as in the lab studies, so on a late swing it is further back (6–9° at 25 thousandths), a little higher, and faster (64–71 mph): late balls are hit somewhat harder and pushed more to the opposite field, and about half of MLB's loss of speed on late contact is kept. Balls met on time or out front are exactly as now. *Options:* (a) the measured swing all the way to the ball, as specified: late contact changes as described, measured in the recalibration step against MLB's speed by contact depth; (b) keep today's bat for the last 30 thousandths: not possible as one smooth swing from the measured start (the bat would speed up, slow down and speed up again), so it means giving up the measured mid-swing position as well (the bat about 15° behind it 0.08 s before contact) and still a visible surge, or refitting today's last part of the swing to the measurements, which is several days' more work. *Recommended:* (a), with the check against MLB's late-contact speed; if it fails, the fix is the measured curve between −93 ms and contact from Fortenbaugh's graphs (step 0), not a speed setting.
 
-**Where does the batter stand?** *Now:* the game's batter stands about 0.95 m off the middle of the plate, roughly even with it, and meets a middle pitch about 5 cm in front of where he stands. *The measurements:* at contact a hitter's hands are about 0.4 m in front of his chest, with the bat cocked about 65° to his arms. For the game's bat to have that relation to his arms, he would have to stand about half a metre further back in the box than the game's batter does (about as far from the plate), or meet the ball that much further out in front. MLB's bat tracking records where the ball is met relative to the batter and can settle which (step 0). *Options:* (a) once the data are in, move the batter (deeper in the box) and with him the point he watches from and the body the pitch can hit: hit-by-pitch and pitch recognition change a little and are re-measured; (b) meet the ball further out in front instead (if the data say so): the ball is met earlier and higher, which changes timing and contact and needs a fuller recalibration; (c) leave him where he is: the swing is measured everywhere except that at contact his arms and bat are nearly in line (the look today). *Recommended:* decide after step 0's numbers; (a) if they confirm the gap, done as its own step after the swing.
+**Where does the batter stand?** *Now:* the game's batter stands about 0.95 m off the middle of the plate, roughly even with it, and meets a middle pitch about 5 cm in front of where he stands. *The measurements:* at contact a hitter's hands are about 0.4 m in front of his chest, with the bat cocked about 65° to his arms. For the game's bat to have that relation to his arms, he would have to stand about half a metre further back in the box than the game's batter does (about as far from the plate), or meet the ball that much further out in front. MLB's bat tracking records where the ball is met relative to the batter and can settle which (step 0). It is not only a look: where his body is moves where his hands are in mid-swing, and so how the bat comes into the ball on a late swing (§5.3). *Options:* (a) once the data are in, move the batter (deeper in the box) and with him the point he watches from and the body the pitch can hit: hit-by-pitch, pitch recognition and late contact change a little and are re-measured; (b) meet the ball further out in front instead (if the data say so): the ball is met earlier and higher, which changes timing and contact and needs a fuller recalibration; (c) leave him where he is: the swing is measured everywhere except that at contact his arms and bat are nearly in line (the look today). *Recommended:* decide after step 0's numbers; (a) if they confirm the gap, done as its own step after the swing.
 
-**How far a checked swing goes.** *Now:* about one held-up swing in thirty is a strike (touching the ball or the bat passing the front of the plate). *With the measured swing* the bat is still far back when the batter brakes, so nearly none will be. No source here says how often a real one is called a swing. *Options:* (a) accept and measure it; (b) let the batter brake later or more slowly (a later decision point than 60% of the swing, or a longer brake than 0.04 s) so some checked swings do go. *Recommended:* (a) now; (b) only with a source (video of check swings) to set it.
+**How far a checked swing goes.** *Now:* about one held-up swing in thirty is a strike (touching the ball or the bat passing the front of the plate). *With the measured swing* the bat is still far back when the batter brakes, so nearly none will be. No source here says how often a real one is called a swing. *Options:* (a) accept and measure it; (b) let the batter brake later or more slowly (a later decision point than 60% of the swing, or a longer brake than 0.04 s) so some checked swings do go; (c) change what the umpire calls a swing: today it is the bat turned until it points straight across the plate; it could be the bat short of that by some angle, or the barrel's head crossing the front edge of the plate (closer to how umpires judge it in practice, though the rule book gives no definition). With the measured swing the hands start further back, so the same angle is a longer turn of the barrel than before. *Recommended:* (a) now; (b) or (c) only with a source (video of check swings and the calls on them) to set it.
 
 **The measured swing is slower than the game's.** *Now:* the game's swing takes 0.150 s from start to contact for an average batter (MLB's bat sensors), and the hitter's decision clock is built on it. [4]'s hitters took 0.170 s from their weight shift to contact against 56 mph batting practice. *Options:* (a) squeeze the measured shape into each batter's own swing time (the average one 12% quicker): the decision clock and the plate-appearance rates stay; (b) keep the measured times and start the game's bat 0.02 s into [4]'s swing, already turning: the start no longer comes from rest and the client's load has to hand over to a moving bat. *Recommended:* (a).
 
 ## 15. Not established, and what would settle it
 
 - **[4]'s curves between its stated instants** (§5.1): Appendix E's graphs (figures in the PDF). Settles the interior shape; until then the curves are the lowest-order ones through the stated values.
-- **The trunk frame of [4]'s shoulder azimuth** (§4.2): Appendix B's diagrams. The provisional reading is the only one that fits [4]'s own coil and contact descriptions; if Appendix B says otherwise, W_L and W_93 move and §5.3's numbers are redone. The lead-arm check (§6.1 step 4) also catches a wrong choice.
+- **The trunk frame of [4]'s shoulder azimuth** (§4.2): Appendix B's diagrams. Reading 1 is the one [4]'s prose supports (the elbows move forward as the azimuths rise, §4.2); if Appendix B says otherwise, W_L and W_93 move and §5.3's and §6.1's numbers are redone. (The first version said the lead-arm check would catch a wrong reading; the review showed its tolerance could not, and it is gone.)
 - **The body's position relative to the contact point** (§5.3): Statcast's batter-relative intercept and Savant's definition of the batter's position (step 0).
-- **Swing length.** v3's sweet spot starts wrapped behind the head, so over its whole 0.150 s it travels further than v2's (an estimate: 8–10 ft against Statcast's 7.2–7.3 ft). Statcast's swing length runs from its own "start of swing", which must be read before comparing (v2 compared the last 150 ms). If v3 is long by Statcast's definition, it is a Tier M finding about the path's early part.
+- **Swing length.** v3's sweet spot starts wrapped behind the head, so over its whole 0.150 s it travels further than v2's (probe: 8.1–9.1 ft from t_s against Statcast's 7.2–7.3 ft). Statcast's swing length runs from its own "start of swing", which must be read before comparing (v2 compared the last 150 ms). If v3 is long by Statcast's definition, it is a Tier M finding about the path's early part.
 - **The hand speed at contact** (v2's q, unsourced): [3]'s uncocking (1,588°/s) and arm (1,160°/s) rates and [4]'s rear elbow extending at 752°/s at contact suggest 6–9 m/s against v2's 6.4; a check, not a constraint.
 - **Live MLB timing**: [4]'s pitches were 56 mph. The swing's own 0.150–0.170 s agrees across sources; the scale s_T is an assumption (§4.3).
 - **Real check swings**: no source here (§8.3).
-- **What v3 does to games** has not been measured: nothing is built. §12's table is an expectation from the baseline and the construction.
+- **The lead arm's reach at launch** (§6.1 residual: 12 cm long at 72° of lead elbow flexion): the proportions, the clavicle's position and the trunk frame; step 0 and the figure.
+- **The arm-vector turning rate** fails its [3] bound in time or size whichever stance is used (§11): first look at [4]'s Appendix E curves.
+- **What v3 does to games** has not been measured: nothing is built. §12's table is an expectation from the baseline, the construction and the probe's three aims.
