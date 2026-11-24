@@ -76,7 +76,7 @@ Fielding and throwing:
 - [x] A. Hitting animation needs work. Batting stance. Initial load. Swing. Follow through. *Coded stance, stride and swing, hands on the sim's bat. Different stances per player come later. You have not seen it moving yet.*
 
 - [ ] A. We need to fix batting stances. Each player gets a unique batting stance, swing style, and follow through. Players can have variations of core stances, but each should be slightly different. *(2026-11-22) Queued in TASKS "Priority A, not done". (2026-11-23) You chose looks only (Q37, PLAN D23): each player's style changes nothing in the game. The base swing comes first.*
-- [ ] A. The current stance and swing are a decent start but incomplete and too unnatural. *(2026-11-23) The research is done and the base-swing design is written (player-visuals §13); five build steps are queued. One question for you on the follow-through (the bat after contact).*
+- [ ] A. The current stance and swing are a decent start but incomplete and too unnatural. *(2026-11-23) The research is done and the base-swing design is written (player-visuals §13); five build steps are queued. One question for you on the follow-through (the bat after contact). (2026-11-24) You chose the full rebuild (Q44 b): the new swing is specified (docs/swing-model-v3.md), from a fixed launch with the bat up and wrapped; four questions for you (Q45–Q48) are in its §14. Nothing built yet.*
 
 # Stats
 - [ ] B. Clarify what "fielder's choice" means; I think the game uses it too liberally.

@@ -149,7 +149,7 @@ Facts for one pitch are judged in this order. The first rule that applies decide
 
 ### 4.5 Check swing
 
-A batter has **swung** if the bat's horizontal yaw, measured from its pose at the start of the swing, reaches the point where the bat is **perpendicular to the pitcher–home line** (barrel head level with the front of the batter) [C]: `max_yaw ≥ θ_swing`, with θ_swing a configurable angle defaulting to that geometry. The swing model reports `max_yaw` (agent-models §3.6). Any bat contact is a swing regardless of yaw, unless it is a bunt attempt pulled back (M5).
+A batter has **swung** if the bat's horizontal yaw, measured from its pose at the start of the swing, reaches the point where the bat is **perpendicular to the pitcher–home line** (barrel head level with the front of the batter) [C]: `max_yaw ≥ θ_swing`, with θ_swing a configurable angle defaulting to that geometry. The swing model reports `max_yaw` (agent-models §3.6). Any bat contact is a swing regardless of yaw, unless it is a bunt attempt pulled back (M5). *Proposed with swing v3 ([swing-model-v3 §8.4](swing-model-v3.md#84-rules-spec-45-as-proposed)): "perpendicular" is the one with the barrel toward the plate, measured on the bat's azimuth unwrapped from its start pose; a bat that starts wrapped behind the head passes the other perpendicular early in every swing.*
 
 ---
 

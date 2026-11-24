@@ -1,6 +1,6 @@
 # Task List
 
-**Last updated:** 2026-11-24 (swing step 1).
+**Last updated:** 2026-11-24 (swing v3 spec).
 
 What is next and what is open. Other files hold the rest:
 
@@ -17,7 +17,7 @@ Status: `[ ]` not started · `[~]` partly done · `[?]` needs an owner decision
 
 ## Resume here (2026-11-24)
 
-**State.** Worker `swing-spec` (Opus, `work/swing-rebuild`): spec for D25 (Q44 = b), no code yet. Swing step 1 merged, off by default. Nothing waits on the owner.
+**State.** Swing v3 spec merged ([spec](docs/swing-model-v3.md)): **Q45–Q48 wait on the owner** (§14); step 0 done ([note](docs/research/swing/9-step0-data.md)); steps 1–3 need no answer. Worker `depth-read` (Opus, `work/depth-read`, worktree `saved-plays`): TASKS §2 depth read, built, measuring; needs an Opus review.
 
 **Next:** review and merge `work/depth-read` (the ground cue in the snapshot read of a ball on the ground; sim change, Opus review; [note](docs/calibration/2026-11-24-depth-read.md)); then the ground-dive leftovers ([note](docs/calibration/2026-11-23-of-ground-dive.md) §9).
 
@@ -38,7 +38,7 @@ One `sim/crates/bb_game/src/live.rs` job at a time. Each job gets a ledger row a
 - [ ] Base relook (§6.4; ledger row 2026-11-23): his look at a throw 0.5 s in misplaces it along his line of sight (σ capped only by the distance flown; the one out in 600 games). `RELAY_READ_S` 0.6 s vs the 0.28–0.47 s rushed return. Held runners start from rest.
 - [ ] Batter-runner stops at first on 97/279 double cuts, some fielded 120 m out (64/196; main too; Opus review Q5).
 - [ ] **The runner's read at third of a charging outfielder's throw home is ~0.2 s slow** ([note §2a](docs/calibration/2026-11-23-two-out-send.md#2a-the-runners-read-of-the-throw-home-review-p2-1)): he times it from the fielder's spot at his look (he lets go 2–3 m nearer) to the plate. If fixed, refit `send_two_out_z`. `runner_timing`'s benchmark is 0.28 s slow. All 7 corner outs at right.
-- [x] **Q39 (a)** merged 2026-11-23 ([note §6](docs/calibration/2026-11-23-dive-back.md)): a tag-play return dives only if it can change the race, a retouch whenever close. 690 a standard run, 39 out in the air; appeals 141 → 134. Deferred: fielder stands in the lying runner.
+- [ ] Deferred from Q39 ([note §6](docs/calibration/2026-11-23-dive-back.md)): a fielder stands in the lying runner.
 - [ ] Retouch belief pessimistic: 8 retouches in 600 games he thinks lost are won diving (note §6).
 - [ ] **Outs going back on grounders: 72 per 600 games, MLB about 3** (note §3–§4): 51 from second, where MLB's are out at third. Likely the missing rundown (Q11); count the sim's outs at third first.
 - [ ] The coach's read and send for a ball behind the runner (Q10 a). Model early-departure decisions on caught flies, slides around tags, a turn decision before the bag, and an overrun redirected after an overthrow.
