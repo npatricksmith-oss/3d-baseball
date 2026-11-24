@@ -7,7 +7,35 @@
 //! `-- play <seed> <play> <fielder 7-9>` prints one fielder's read every 0.1 s.
 use bb_game::live::read_trace;
 use bb_math::Vec3;
-use bb_rules::{Input, Touch};
+use bb_rules::{Event, Input, Touch};
+
+/// A fair ground ball (launch under 10°): the batter's bases on a hit (0 out or on a fielder's
+/// choice), and when an outfielder first secured it, s after contact.
+#[derive(Clone, Copy)]
+struct Gb {
+    bases: u8,
+    of_secure: Option<f64>,
+}
+
+fn ground_ball(step: &bb_game::game::PitchStep) -> Option<Gb> {
+    let (_, la, _) = step.record.batted?;
+    if la.to_degrees() >= 10.0 || !step.rules_events.iter().any(|e| matches!(e, Event::FairFoulDecided { fair: true })) {
+        return None;
+    }
+    let batter = step.rules_events.iter().find_map(|e| if let Event::PlateAppearanceEnded { batter, .. } = e { Some(*batter) } else { None })?;
+    let (_, hit) = bb_game::game::classify_bip(batter, &step.rules_events, &step.facts);
+    let bases = if hit {
+        step.rules_events.iter().filter_map(|e| if let Event::RunnerAdvanced { runner, to, .. } = e { (*runner == batter).then_some(*to) } else { None }).max().unwrap_or(1).clamp(1, 4) as u8
+    } else {
+        0
+    };
+    let tc = step.facts.iter().find_map(|f| if let Input::BatContact { t } = f { Some(*t) } else { None })?;
+    let of_secure = step.facts.iter().find_map(|f| match f {
+        Input::GloveSecured { t, fielder, .. } => Some((*t, *fielder)),
+        _ => None,
+    }).filter(|(_, who)| (who & 0x7F) >= 7).map(|(t, _)| t - tc);
+    Some(Gb { bases, of_secure })
+}
 
 struct Case {
     seed: u64,
@@ -25,14 +53,16 @@ fn stop_time(step: &bb_game::game::PitchStep) -> f64 {
     }).fold(f64::INFINITY, f64::min)
 }
 
-fn cases_of_game(seed: u64) -> Vec<Case> {
+fn cases_of_game(seed: u64) -> (Vec<Case>, Vec<Gb>) {
     read_trace::ON.with(|x| x.set(true));
     let mut g = bb_game::game::Game::new(seed, false);
     let mut out = Vec::new();
+    let mut gbs = Vec::new();
     loop {
         read_trace::take();
         let Some(step) = g.step_pitch() else { break };
         let recs = read_trace::take();
+        gbs.extend(ground_ball(&step));
         let Some(path) = step.batted.as_ref() else { continue };
         let Some((tb, _, _)) = path.first_bounce() else { continue };
         let stop = stop_time(&step);
@@ -57,7 +87,7 @@ fn cases_of_game(seed: u64) -> Vec<Case> {
             }
         }
     }
-    out
+    (out, gbs)
 }
 
 fn pct(v: &mut [f64], p: f64) -> f64 {
@@ -104,10 +134,18 @@ fn main() {
     let threads: usize = a.get(2).map_or(8, |s| s.parse().unwrap());
     let seeds: Vec<u64> = (0..n).map(|i| base * 1_000_003 + i).collect();
     let chunk = seeds.len().div_ceil(threads);
-    let cases: Vec<Case> = std::thread::scope(|s| {
-        let hs: Vec<_> = seeds.chunks(chunk).map(|c| s.spawn(move || c.iter().flat_map(|&sd| cases_of_game(sd)).collect::<Vec<_>>())).collect();
+    let per: Vec<(Vec<Case>, Vec<Gb>)> = std::thread::scope(|s| {
+        let hs: Vec<_> = seeds.chunks(chunk).map(|c| s.spawn(move || c.iter().map(|&sd| cases_of_game(sd)).collect::<Vec<_>>())).collect();
         hs.into_iter().flat_map(|h| h.join().unwrap()).collect()
     });
+    let gbs: Vec<Gb> = per.iter().flat_map(|p| p.1.iter().copied()).collect();
+    let cases: Vec<Case> = per.into_iter().flat_map(|p| p.0).collect();
+    let by = |b: u8| gbs.iter().filter(|g| g.bases == b).count();
+    let hits = gbs.len() - by(0);
+    println!("{n} games: {} fair ground balls, hits {} ({:.3}): 1B {} 2B {} 3B {} HR {}", gbs.len(), hits, hits as f64 / gbs.len() as f64, by(1), by(2), by(3), by(4));
+    let mut sec: Vec<f64> = gbs.iter().filter(|g| g.bases > 0).filter_map(|g| g.of_secure).collect();
+    let mean = sec.iter().sum::<f64>() / sec.len().max(1) as f64;
+    println!("  ground-ball hits an outfielder secured first: {}, s after contact: mean {mean:.2}, median {:.2}, 90th pct {:.2}", sec.len(), pct(&mut sec, 0.5), pct(&mut sec, 0.9));
     let plays: std::collections::BTreeSet<(u64, u32)> = cases.iter().map(|c| (c.seed, c.play)).collect();
     println!("{n} games: {} outfielders' plays with no track at the first bounce, in {} plays ({:.2} a game)", cases.len(), plays.len(), plays.len() as f64 / n as f64);
     let chasers = cases.iter().filter(|c| c.rows.iter().any(|r| r.4 == 1)).count();
