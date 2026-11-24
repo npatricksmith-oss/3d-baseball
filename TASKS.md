@@ -17,7 +17,7 @@ Status: `[ ]` not started · `[~]` partly done · `[?]` needs an owner decision
 
 ## Resume here (2026-11-23)
 
-**State.** No workers running. Q38, Q39, Q40 trials 1–2 ([Code Mode](docs/code-mode-trial.md)) merged (`3a71284`; 560 tests, runs 4.14 [4.45]). **Waiting on the owner:** player-visuals §13.5 Proposal 1.
+**State.** No workers running. Q38, Q39, Q40 trials 1–2 ([Code Mode](docs/code-mode-trial.md)) merged (`3a71284`; 560 tests, runs 4.14 [4.45]). **Waiting on the owner:** Q43 (player-visuals §13.5).
 
 **Next:** §2: seed-5593, play 71 (the right fielder not diving at the rolling ball).
 
@@ -147,7 +147,7 @@ Check the code again before starting one.
 
 ### Priority A, not done
 
-- [~] **Batting stances.** Base swing: [player-visuals §13](docs/player-visuals.md#13-the-base-stance-and-swing-design-2026-11-23-not-yet-built); per-player looks after (D23). Steps [ ] 1 legs · [ ] 2 hips, take · [ ] 3 finish (Proposal 1) · [ ] 4 hands' load · [ ] 5 checked swings
+- [~] **Batting stances.** Base swing: [player-visuals §13](docs/player-visuals.md#13-the-base-stance-and-swing-design-2026-11-23-not-yet-built); per-player looks after (D23). Steps [ ] 1 bat, E1 · [ ] 2 legs · [ ] 3 hips, take · [ ] 4 finish, Q43 · [ ] 5 late swings
 - [~] **A4. Throw choices from the outs and the runners.** Built with review fixes; more cases are items 2 and 3 above.
 - [~] **A5. Dives.** Rate and motion are in. Left: every dive is head-first straight at the ball.
 - [~] **A6. Slides.** Client only: a runner slides feet-first when a play is being made on him. The sim has no slide (agent-models §6.2); see item 1 above for the dead stop.
