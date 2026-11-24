@@ -1881,6 +1881,7 @@ void ABbDirector::NoteBat(const FBbPlay& Play, FBatNote& Out) const
 	const float PlaneAt = PitchPlaneT(Play);
 	if (PlaneAt > 0.f)
 	{
+		Out.bTaFound = true;
 		Out.TA = PlaneAt;
 	}
 	Out.CatchT = Play.Info.contact_s < 0.f ? Play.Info.call_s - 0.2f : -1.f;
@@ -1951,8 +1952,11 @@ void ABbDirector::CheckBat(const FBbPlay& Play, const FBatNote& N) const
 	double TaErrMs = 0.0;
 	if (N.bSwing)
 	{
+		// (A pitch the ball never carried to the plane, one in the dirt that bounced first,
+		// has no T_a on its track, take or swing: both use the fallback and there is nothing to
+		// compare it with.)
 		const float Contact = Play.Info.contact_s;
-		const float Indep = Contact >= 0.f ? PitchPlaneT(Play, Contact - 0.03f) : PitchPlaneT(Play, N.TC);
+		const float Indep = !N.bTaFound ? -1.f : Contact >= 0.f ? PitchPlaneT(Play, Contact - 0.03f) : PitchPlaneT(Play, N.TC);
 		if (Indep >= 0.f)
 		{
 			Withheld.TA = Indep;
@@ -2041,7 +2045,7 @@ void ABbDirector::NotePitch()
 		// (With the sim's own t_c, the inference a saved play without it would have been given
 		// is logged beside it.)
 		const float Inferred = BatNote.bSwing && !BatNote.bTcInferred ? InferContactT(Current, BatNote) : -1.f;
-		UE_LOG(LogBb, Display, TEXT("BB_BATNOTE play=%u swing=%d t_a=%.4f catch=%.4f t_l=%.4f t_s=%.4f t_c=%.4f%s handover_end=%.4f infer_err=%.3f ms note=%.1f ms"), Current.Info.play_index, BatNote.bSwing ? 1 : 0, BatNote.TA, BatNote.CatchT, BatNote.TL, BatNote.TS, BatNote.TC,
+		UE_LOG(LogBb, Display, TEXT("BB_BATNOTE play=%u swing=%d t_a=%.4f%s catch=%.4f t_l=%.4f t_s=%.4f t_c=%.4f%s handover_end=%.4f infer_err=%.3f ms note=%.1f ms"), Current.Info.play_index, BatNote.bSwing ? 1 : 0, BatNote.TA, BatNote.bTaFound ? TEXT() : TEXT(" (fallback)"), BatNote.CatchT, BatNote.TL, BatNote.TS, BatNote.TC,
 			BatNote.bTcInferred ? TEXT(" (inferred)") : TEXT(""), BatNote.bSwing ? FMath::Max(BatNote.TS, BatNote.TL + BbMotion::BatHandoverS) : -1.f, Inferred >= 0.f ? 1000.f * (Inferred - BatNote.TC) : 0.f, NoteMs);
 	}
 	if (bBatCheck && BatNote.bBat)

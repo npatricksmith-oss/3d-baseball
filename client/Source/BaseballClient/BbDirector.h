@@ -584,6 +584,9 @@ private:
 		 *  with export E1, else inferred from the bat's fastest turning: bTcInferred). */
 		float TA = 0.42f, CatchT = -1.f, TL = -1.f, TS = -1.f, TC = -1.f;
 		bool bTcInferred = false;
+		/** TA was found on the ball's track (false: the pitch never reached the plane on it, a ball
+		 *  in the dirt, and TA is the 0.42 s default). */
+		bool bTaFound = false;
 		/** The stance in his frame, and the sim's bat at TS (world, cm). */
 		FVector StanceKnobB = FVector::ZeroVector, StanceAxisB = FVector(0, 0, 1);
 		FVector StartKnob = FVector::ZeroVector, StartTip = FVector::ZeroVector;
