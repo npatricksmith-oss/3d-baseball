@@ -38,6 +38,9 @@ pub struct FielderAttrs {
     /// His first read of a batted ball's velocity is off by this fraction of its speed per
     /// axis (agent-models §5.1, §10 `ReadSkill`).
     pub read_vel_frac: f64,
+    /// σ of his angle below eye level to a ball on the ground, rad: the range of a ball seen
+    /// on the ground (agent-models §5.1, §10 `ReadSkill`).
+    pub ground_decl_sigma: f64,
     /// `Anticipation` (agent-models §5.10): σ of his read of where the pitch crosses the
     /// plate (horizontal), m.
     pub antic_sigma: f64,
@@ -98,6 +101,7 @@ impl FielderAttrs {
             tau_read: 0.6,
             read_sigma0: if outfield { 3.5 } else { 0.3 },
             read_vel_frac: crate::live::READ_VEL_FRAC,
+            ground_decl_sigma: crate::live::GROUND_DECL_SIGMA_RAD,
             antic_sigma: ANTIC_SIGMA_50,
             swing_sigma: bat_read_sigma(BAT_READ_TIME_SIGMA_50_S),
             lead_sigma: LEAD_READ_TIME_SIGMA_50_S,
@@ -122,13 +126,14 @@ impl FielderAttrs {
     }
 
     /// The same average fielder with `ReadSkill` at `grade` (20–80 scale, agent-models §10):
-    /// his read's position and velocity error σs by [`READ_RHO`] and his τ_read by
+    /// his read's position, velocity and ground-declination error σs by [`READ_RHO`] and his τ_read by
     /// [`TAU_READ_RHO`] (all less is better), from his position's grade-50 values.
     pub fn with_read(self, grade: f64) -> Self {
         use bb_agents::attributes::ratio_from_grade;
         Self {
             read_sigma0: ratio_from_grade(grade, self.read_sigma0, READ_RHO),
             read_vel_frac: ratio_from_grade(grade, self.read_vel_frac, READ_RHO),
+            ground_decl_sigma: ratio_from_grade(grade, self.ground_decl_sigma, READ_RHO),
             tau_read: ratio_from_grade(grade, self.tau_read, TAU_READ_RHO),
             ..self
         }

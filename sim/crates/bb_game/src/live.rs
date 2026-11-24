@@ -774,6 +774,16 @@ const PLATE_SPIN_M: f64 = 1.5;
 const LOOK_S: f64 = 0.1;
 /// His eyes above his feet, m [E].
 const EYE_H: f64 = 1.7;
+/// The σ of his angle below eye level to a ball on the ground, at grade 50, rad (agent-models
+/// §5.1, the depth of a ball seen on the ground) [E]: 3′, within 15% of the same eye's
+/// `Vision` σ_ang at grade 50 (1.0 mrad = 3.4′, agent-models §10), placing the ball against the
+/// field around it; about the ball's own angular size at 80 m. Distance on the ground is
+/// perceived through this angle (Ooi, Wu & He 2001).
+pub(crate) const GROUND_DECL_SIGMA_RAD: f64 = 3.0 / 60.0 * core::f64::consts::PI / 180.0;
+/// A new ball (off a glove's rim, or off a wall) that starts no higher than this above where a
+/// ball on the ground sits is seen on the ground where it starts (agent-models §5.1, the depth
+/// of a ball seen on the ground), m [E]: a grounder knocked down leaves the glove at the grass.
+const GROUND_START_Z_M: f64 = 0.3;
 /// How good one look after the first is, against the snapshot read's σ at the same distance
 /// (agent-models §5.1): an outfielder's look is good to 0.2 × 3.5 m at 30 m across his line of
 /// sight (1.3°), three times that along it. Fitted with `TRACK_BIAS_FRAC` to the owner's band
@@ -2675,10 +2685,15 @@ fn seen_rolling((p, v): (Vec3, Vec3), radius: f64) -> bool {
 }
 
 /// Perturb position and velocity along and across the observer's line of sight.
-fn noisy_ball_motion((p, v): (Vec3, Vec3), los: Vec3, sp: f64, sv: f64, err: [f64; 4]) -> (Vec3, Vec3) {
+fn noisy_ball_motion(motion: (Vec3, Vec3), los: Vec3, sp: f64, sv: f64, err: [f64; 4]) -> (Vec3, Vec3) {
+    noisy_ball_motion_depth(motion, los, sp, sp * DEPTH_STRETCH, sv, err)
+}
+
+/// [`noisy_ball_motion`] with the position's σ along the line of sight given (`sd`, m).
+fn noisy_ball_motion_depth((p, v): (Vec3, Vec3), los: Vec3, sp: f64, sd: f64, sv: f64, err: [f64; 4]) -> (Vec3, Vec3) {
     let lat = Vec3::new(-los.y, los.x, 0.0);
     // Height is read with the lateral precision of the angular measurement.
-    let pe = p + los * (err[0] * sp * DEPTH_STRETCH) + lat * (err[1] * sp) + Vec3::new(0.0, 0.0, err[1] * sp * 0.5);
+    let pe = p + los * (err[0] * sd) + lat * (err[1] * sp) + Vec3::new(0.0, 0.0, err[1] * sp * 0.5);
     let ve = v + los * (err[2] * sv * DEPTH_STRETCH * 0.5) + lat * (err[3] * sv) + Vec3::new(0.0, 0.0, err[3] * sv * 0.5);
     (pe, ve)
 }
@@ -2687,13 +2702,55 @@ fn noisy_ball_motion((p, v): (Vec3, Vec3), los: Vec3, sp: f64, sv: f64, err: [f6
 /// `vel_frac` of its speed per axis (a fielder's own read rating, agent-models §10).
 #[allow(clippy::too_many_arguments)]
 pub fn read_prediction_k(env: &FlightEnv, field: &Field, truth: (Vec3, Vec3), t: f64, from: Vec3, sigma0: f64, vel_frac: f64, tau_read: f64, view: f64, err: [f64; 4], off_bat: Option<(f64, Vec3)>) -> BallPath {
+    read_prediction_g(env, field, truth, t, from, sigma0, vel_frac, tau_read, view, err, off_bat, None)
+}
+
+/// The σ of the range to a ball on the ground that its angle below his eye level gives
+/// (agent-models §5.1, the depth of a ball seen on the ground), m: a ball at level range `d`
+/// is seen `h` below his eyes (his eye height less the ball's radius), so an error `decl_sigma`
+/// (rad) in that angle moves it (d² + h²)/h · `decl_sigma`. A ball on a hop is placed from
+/// where it last touched the ground, `since` seconds ago, run on by his velocity read along his
+/// line of sight (σ `sv_depth`): that adds `sv_depth` × `since` in quadrature.
+pub fn ground_range_sigma(d: f64, h: f64, decl_sigma: f64, sv_depth: f64, since: f64) -> f64 {
+    m::hypot((d * d + h * h) / h * decl_sigma, sv_depth * since)
+}
+
+/// Where and when a fielder last saw the ball on the ground (agent-models §5.1, the depth of a
+/// ball seen on the ground), with his σ of the angle below his eye level, rad.
+#[derive(Clone, Copy, Debug)]
+pub struct GroundCue {
+    /// Seconds since it was last on the ground (0 while it rolls or lies still).
+    pub since: f64,
+    /// Where it was then (level position; its range from him is taken there).
+    pub at: Vec3,
+    /// How high above a ball on the ground it may have been then, m: a new ball off a glove or
+    /// a wall starts up to `GROUND_START_Z_M` up; 0 at a bounce or rolling.
+    pub z: f64,
+    pub decl_sigma: f64,
+}
+
+/// [`read_prediction_k`], with the cue of a ball seen on the ground (agent-models §5.1). His
+/// depth σ along his line of sight is then the snapshot's (`DEPTH_STRETCH` × the lateral σ)
+/// and the ground's weighed by precision: [`ground_range_sigma`] at the range of where he last
+/// saw it on the ground, with the height it may have had there (a ball `z` up at level range d
+/// is placed d·z/h too far) in quadrature. His fixed depth draw is applied at it. `None`: the
+/// snapshot read as before.
+#[allow(clippy::too_many_arguments)]
+pub fn read_prediction_g(env: &FlightEnv, field: &Field, truth: (Vec3, Vec3), t: f64, from: Vec3, sigma0: f64, vel_frac: f64, tau_read: f64, view: f64, err: [f64; 4], off_bat: Option<(f64, Vec3)>, ground: Option<GroundCue>) -> BallPath {
     let (p, v) = truth;
     let dist = m::hypot(p.x - from.x, p.y - from.y).max(1.0);
     let shrink = read_shrink(truth, view, tau_read, off_bat);
     let sp = sigma0 * (dist / READ_REF_DIST) * shrink;
     let los = Vec3::new(p.x - from.x, p.y - from.y, 0.0).normalized();
     let sv = vel_frac * v.norm() * shrink;
-    let (mut pe, ve) = noisy_ball_motion(truth, los, sp, sv, err);
+    let mut sd = sp * DEPTH_STRETCH;
+    if let Some(g) = ground {
+        let h = EYE_H - env.ball.radius;
+        let dg = m::hypot(g.at.x - from.x, g.at.y - from.y).max(1.0);
+        let sg = m::hypot(ground_range_sigma(dg, h, g.decl_sigma, 0.5 * DEPTH_STRETCH * sv, g.since), dg * g.z / h);
+        sd = 1.0 / m::sqrt(1.0 / (sd * sd) + 1.0 / (sg * sg));
+    }
+    let (mut pe, ve) = noisy_ball_motion_depth(truth, los, sp, sd, sv, err);
     let off_bat_since = off_bat.map(|(s, _)| s);
     let (env, w) = believed_flight(env, ve, off_bat_since);
     if let Some((s, p0)) = off_bat
@@ -3523,12 +3580,52 @@ impl<'a> Sim<'a> {
             self.fly_estimate(tr.r(), tr.v(), tr.x[2], tr.phase, roll_slowing(tr.roll_decel, tr.v(), tr.x[2]), tr.w)
         } else {
             let view = (self.t - self.inp.t_contact - fd.a.reaction).max(0.0);
-            read_prediction_k(self.inp.env, self.inp.field, self.ball_at(self.t), self.t, fd.pos, fd.a.read_sigma0, fd.a.read_vel_frac, fd.a.tau_read, view, fd.err, self.off_bat())
+            let ground = self.ground_seen().map(|(since, at, z)| GroundCue { since, at, z, decl_sigma: fd.a.ground_decl_sigma });
+            read_prediction_g(self.inp.env, self.inp.field, self.ball_at(self.t), self.t, fd.pos, fd.a.read_sigma0, fd.a.read_vel_frac, fd.a.tau_read, view, fd.err, self.off_bat(), ground)
         };
         if let Some(t0) = t0 {
             prof::add(&prof::PRED, t0.elapsed().as_nanos() as u64);
         }
         r
+    }
+
+    /// When and where the free ball was last seen on the ground, and how high it may have
+    /// been there (agent-models §5.1, the depth of a ball seen on the ground): (seconds since,
+    /// where, height above a ball on the ground, m). Rolling or still: now, here, 0. On a hop:
+    /// its last bounce, 0. A new ball (off a glove or a wall, or a throw come down) that starts
+    /// within `GROUND_START_Z_M` of the ground and has not bounced yet: its start, at the height
+    /// it starts at. `None` for a ball in the air otherwise (the batted ball before its first
+    /// bounce, after a wall carom until it next bounces, a ball off a glove high up) and for a
+    /// ball not free.
+    fn ground_seen(&self) -> Option<(f64, Vec3, f64)> {
+        let Ball::Free { path, .. } = &self.ball else { return None };
+        let radius = self.inp.env.ball.radius;
+        let (now, v) = path.at(self.t);
+        if seen_rolling((now, v), radius) {
+            return Some((0.0, now, 0.0));
+        }
+        let within = |te: f64| te <= self.t + 1e-12;
+        let bounce = path.bounces.iter().filter(|b| within(b.0)).fold(None, |a: Option<(f64, f64, f64)>, b| if a.is_none_or(|a| b.0 >= a.0) { Some(*b) } else { a });
+        let wall = path.walls.iter().map(|w| w.0).filter(|&te| within(te)).fold(f64::NEG_INFINITY, f64::max);
+        if let Some((tb, x, y)) = bounce
+            && tb >= wall
+        {
+            return Some(((self.t - tb).max(0.0), Vec3::new(x, y, radius), 0.0));
+        }
+        // A new ball that starts low and has not touched the ground or a wall since.
+        if bounce.is_none() && !wall.is_finite() {
+            let first = match path.segments.first() {
+                Some(bb_physics::ground::Segment::Flight { tr, .. }) => Some((tr.first().t, tr.first().s.r)),
+                _ => None,
+            };
+            if let Some((t0, r0)) = first
+                && (t0 - self.inp.t_contact).abs() > 1e-9
+                && r0.z - radius <= GROUND_START_Z_M
+            {
+                return Some(((self.t - t0).max(0.0), r0, (r0.z - radius).max(0.0)));
+            }
+        }
+        None
     }
 
     /// Fielder `i`'s running estimate of the ball, run on to now: from his first look at a
@@ -10505,7 +10602,8 @@ mod tests {
 
     /// The centre fielder (average) at rest at (0, 80), and a grounder at `speed` toward the
     /// wall passing 2.2 m to his side, 0.5 s before it is level with him; his read made and
-    /// planned 0.05 s later.
+    /// planned 0.05 s later, with no read error (since 2026-11-24 he reads a ball this low by
+    /// the ground cue, and the fixture should not hang on his draws).
     fn grounder_beside_cf(speed: f64) -> Sim<'static> {
         let fx: &'static Fixture = Box::leak(Box::new(fixture(&[])));
         let mut inp = input(fx, vec![RunnerIn { id: fx.st.batter, base: 0, speed: 8.2, tau_s: bb_agents::running::LEAGUE_TAU_S }]);
@@ -10515,6 +10613,7 @@ mod tests {
         let mut sim = new_sim(inp, st);
         sim.f[CF].pos = Vec3::new(0.0, 80.0, 0.0);
         loose_ball(&mut sim, 1.5, Vec3::new(2.2, 80.0 - speed * 0.5, 0.04), Vec3::new(0.0, speed, 0.0));
+        sim.f[CF].err = [0.0; 4];
         sim.f[CF].role = Role::Chase;
         sim.f[CF].belief = Some(sim.predict(CF));
         sim.t += 0.05;
@@ -10523,12 +10622,14 @@ mod tests {
 
     // Review P2-1: a dive at a ball on the ground costs him more than the get-up when it does
     // not end in his glove (a knock-down: up, then run to the ball; a miss: up, then chase it).
-    // A 10 m/s grounder he would have on his feet 1.8 s from now: the get-up alone (1.5 s)
+    // A 10 m/s grounder he would have on his feet 1.9 s from now: the get-up alone (1.5 s)
     // let him go, but a knock-down or a miss would leave him later than that, so he stays up.
-    // At 10.5 m/s his standing take (2.07 s) is later than a catch would have him (up 2.03 s
-    // from now) but earlier than the expected time (2.31 s): the mixture keeps him up (second
-    // review P3-2; a charge of the get-up from the dive point alone would send him). At 14 m/s
-    // his standing take is 4 s away and the dive pays.
+    // At 10.3 m/s his standing take (2.09 s) is later than a catch would have him (up 1.89 s
+    // from now) but earlier than the expected time: the mixture keeps him up (second review
+    // P3-2; a charge of the get-up from the dive point alone would send him). At 14 m/s his
+    // standing take is 4 s away and the dive pays. (Speeds 10.5 → 10.3 m/s on 2026-11-24, when
+    // his read of this ball became exact: at 10.5 the standing take is 2.19 s, out of the
+    // window.)
     #[test]
     fn a_dive_at_a_ground_ball_pays_only_when_its_expected_cost_beats_his_standing_take() {
         let near = grounder_beside_cf(10.0);
@@ -10538,7 +10639,7 @@ mod tests {
         assert!(dive.is_some() && ts > DIVE_GETUP_S && ts < 2.7, "fixture: standing take {ts:.2} s away, beyond the get-up");
         assert!(near.dive_gains(CF, DIVE_GETUP_S), "fixture: the get-up alone lets him go");
         assert!(!near.dive_pays(CF), "he dove at a ball he would have on his feet {ts:.2} s from now");
-        let mid = grounder_beside_cf(10.5);
+        let mid = grounder_beside_cf(10.3);
         let p = mid.f[CF].belief.clone().unwrap();
         let (stand, dive) = mid.intercept_scan(CF, &p);
         let (ts, td) = (stand.expect("fixture: a standing take").0 - mid.t, dive.expect("fixture: a dive point").0 - mid.t);
@@ -10550,8 +10651,9 @@ mod tests {
         assert!(ts > 3.5 && far.dive_pays(CF), "standing take {ts:.2} s away: the dive should pay");
     }
 
-    // Second review P3-1: a ball rolling away from him at 3.2 m/s from 2.6 m off (out of his
-    // reach, and it will not come back within it) that comes to rest 1.1 s from now, before he
+    // Second review P3-1: a ball rolling away from him at 3.2 m/s from 3.5 m off (out of his
+    // reach, and it will not come back within it; 2.6 m until 2026-11-24, when his read of it
+    // became exact and a dive point at 2.6 m appeared) that comes to rest 1.1 s from now, before he
     // can reach it on his feet. With no standing take and no dive to price, the resting-point
     // take stands for it: less than a catch's get-up away, so he stays up (before, no standing
     // take let him go at once, and the capture would lay him out at it if it came near).
@@ -10564,7 +10666,8 @@ mod tests {
         let st: &'static mut RulesState = Box::leak(Box::new(fx.st.clone()));
         let mut sim = new_sim(inp, st);
         sim.f[CF].pos = Vec3::new(0.0, 80.0, 0.0);
-        loose_ball(&mut sim, 1.5, Vec3::new(1.5, 82.6, 0.04), Vec3::new(0.0, 3.2, 0.0));
+        loose_ball(&mut sim, 1.5, Vec3::new(1.5, 83.2, 0.04), Vec3::new(0.0, 3.2, 0.0));
+        sim.f[CF].err = [0.0; 4];
         sim.f[CF].role = Role::Chase;
         sim.f[CF].belief = Some(sim.predict(CF));
         sim.t += 0.05;
@@ -14297,6 +14400,172 @@ mod tests {
                 }
             }
         }
+    }
+
+    // Agent-models §5.1, the depth of a ball seen on the ground: the σ of the range that his
+    // angle below eye level gives is that angle's σ carried through the geometry itself. For a
+    // ball at level range d seen h below his eyes, the ranges at the angle ± a small σ
+    // (h / tan(atan(h/d) ∓ σ)) are as far apart as ±`ground_range_sigma`, from 2 m to 110 m.
+    #[test]
+    fn the_range_of_a_ball_on_the_ground_follows_its_angle_below_his_eyes() {
+        let h = EYE_H - FlightEnv::default_env().ball.radius;
+        let s = 1e-6;
+        for d in [2.0, 10.0, 30.0, 80.0, 110.0] {
+            let at = |da: f64| h / m::tan(m::atan2(h, d) + da);
+            let geometric = (at(-s) - at(s)) / 2.0;
+            let model = ground_range_sigma(d, h, s, 0.0, 0.0);
+            println!("{d} m: geometry {geometric:.4e} m, model {model:.4e} m");
+            assert!((model / geometric - 1.0).abs() < 1e-3, "{d} m: geometry {geometric:.4e} m, model {model:.4e} m");
+        }
+    }
+
+    // Agent-models §5.1, the depth of a ball seen on the ground (2026-11-24). A grounder up the
+    // middle, read by the snapshot read (no track) by the centre fielder and the shortstop, their
+    // depth draw at ±1σ and ±2σ and every other draw zero. (1) What he sees of its phase: in the
+    // air before its first bounce no ground cue, on a hop the time since its last bounce and
+    // where it was (the bounce point), rolling 0 and here (against the world's path). (2) While it
+    // rolls, his read puts it where his eye does: the angle below his eye level of where he reads
+    // it is within his draw times his angular σ of where it is (15% for the curvature of the
+    // geometry at 2σ). Before (the snapshot read's `DEPTH_STRETCH` × σ0·d/30 m along his line of
+    // sight) the centre fielder's angle was off by many times that. (3) Not sharper than his eye
+    // either (Opus depth-read review P3-2): where the centre fielder's snapshot depth σ is at
+    // least five times the cue's, the two weighed give at least 0.98 of the cue's whatever the
+    // weighing, so his angle is off by at least 0.85 of his draw times his angular σ (the
+    // curvature again).
+    #[test]
+    fn a_ball_on_the_ground_is_read_where_his_eye_puts_it() {
+        const SS: usize = 5;
+        const CF: usize = 7;
+        let fx = fixture(&[]);
+        let inp = hit(&fx, Vec3::new(1.0, 30.0, -4.0));
+        let mut st = fx.st.clone();
+        let mut sim = new_sim(&inp, &mut st);
+        let Ball::Free { path, .. } = &sim.ball else { panic!("a free ball") };
+        let path = path.clone();
+        let (tb, _, _) = path.first_bounce().expect("a grounder bounces");
+        let h = EYE_H - inp.env.ball.radius;
+        let (mut rolled, mut hopped, mut sharp) = (0, 0, 0);
+        let mut t = inp.t_contact + 0.05;
+        while t < path.t_end() - 0.05 {
+            sim.t = t;
+            let (b, v) = path.at(t);
+            let last = path.bounces.iter().map(|x| x.0).filter(|&x| x <= t).fold(f64::NEG_INFINITY, f64::max);
+            let rolling = seen_rolling((b, v), inp.env.ball.radius);
+            match sim.ground_seen() {
+                None => assert!(t < tb, "t {t:.2}: no ground cue after the first bounce at {tb:.2}"),
+                Some((s, at, z)) if rolling => assert!(s == 0.0 && at == b && z == 0.0, "t {t:.2}: rolling, {s} s ago at {at:?} ({b:?}), {z} m up"),
+                Some((s, at, z)) => {
+                    let (_, x, y) = *path.bounces.iter().rfind(|x| x.0 <= t).unwrap();
+                    assert!((s - (t - last)).abs() < 1e-9 && at.x == x && at.y == y && z == 0.0, "t {t:.2}: on a hop {s:.3} s since the ground at {at:?}, {z} m up; the path says {:.3} s at ({x}, {y})", t - last);
+                    hopped += 1;
+                }
+            }
+            if rolling {
+                for i in [SS, CF] {
+                    let from = sim.f[i].pos;
+                    let d = m::hypot(b.x - from.x, b.y - from.y);
+                    if d < 5.0 {
+                        continue;
+                    }
+                    for e in [-2.0, -1.0, 1.0, 2.0] {
+                        sim.f[i].err = [e, 0.0, 0.0, 0.0];
+                        let q = sim.predict(i).at(t).0;
+                        // Both at the ball's height: the range is what is read here (the path his
+                        // read is flown by starts a ball on the ground 1 mm above it).
+                        let angle = |p: Vec3| m::atan2(EYE_H - b.z, m::hypot(p.x - from.x, p.y - from.y));
+                        let off = (angle(q) - angle(b)).abs();
+                        let a = &sim.f[i].a;
+                        let bound = f64::abs(e) * a.ground_decl_sigma * 1.15;
+                        assert!(off <= bound, "t {t:.2}, fielder {}, {d:.1} m, draw {e}: his read's angle is {:.2}′ off, bound {:.2}′ (h {h:.2})", i + 1, off.to_degrees() * 60.0, bound.to_degrees() * 60.0);
+                        let view = (t - inp.t_contact - a.reaction).max(0.0);
+                        let snap = DEPTH_STRETCH * a.read_sigma0 * d / READ_REF_DIST / m::sqrt(1.0 + view / a.tau_read);
+                        let cue = (d * d + h * h) / h * a.ground_decl_sigma;
+                        if snap >= 5.0 * cue {
+                            let floor = f64::abs(e) * a.ground_decl_sigma * 0.85;
+                            assert!(off >= floor, "t {t:.2}, fielder {}, {d:.1} m, draw {e}: his read's angle is {:.2}′ off, sharper than his eye ({:.2}′)", i + 1, off.to_degrees() * 60.0, floor.to_degrees() * 60.0);
+                            sharp += 1;
+                        }
+                    }
+                    rolled += 1;
+                }
+            }
+            t += 0.1;
+        }
+        println!("{rolled} reads of the rolling ball ({sharp} draws held to the cue's floor), {hopped} times on a hop");
+        assert!(rolled >= 20 && hopped >= 3 && sharp >= 40, "{rolled} reads of the rolling ball ({sharp} draws held to the cue's floor), {hopped} times on a hop");
+    }
+
+    // Agent-models §5.1, the depth of a ball seen on the ground, on a hop (Opus depth-read review
+    // P3-1): what he saw on the ground is the bounce, so its angle below his eyes there, at the
+    // bounce point's range, is what his depth read carries. A hop coming at a shortstop from a
+    // bounce 43 m away, now 30 m away, the instant after the bounce (no run-on), his velocity read
+    // perfect and his snapshot depth σ far wider than the cue: the read's depth offset, put back at
+    // the bounce point, moves the angle he saw it at by his draw times his angular σ (within 15%).
+    // At the range now the read would be about half as wide in angle as what his eye measured.
+    #[test]
+    fn a_hop_is_read_from_the_angle_of_its_bounce() {
+        let (env, field) = (FlightEnv::default_env(), Field::default());
+        let from = Vec3::ZERO;
+        let bounce = Vec3::new(0.0, 43.0, env.ball.radius);
+        let (p, v) = (Vec3::new(0.0, 30.0, 0.4), Vec3::new(0.0, -20.0, 1.0));
+        let decl = GROUND_DECL_SIGMA_RAD;
+        let h = EYE_H - env.ball.radius;
+        let angle = |y: f64| m::atan2(h, y);
+        for e in [-2.0, -1.0, 1.0, 2.0] {
+            let g = GroundCue { since: 0.0, at: bounce, z: 0.0, decl_sigma: decl };
+            let read = read_prediction_g(&env, &field, (p, v), 2.0, from, 30.0, 0.0, 0.6, 0.0, [e, 0.0, 0.0, 0.0], None, Some(g));
+            let dy = read.at(2.0).0.y - p.y;
+            let off = (angle(bounce.y + dy) - angle(bounce.y)).abs();
+            println!("draw {e}: depth {dy:+.3} m, {:.2}′ at the bounce", off.to_degrees() * 60.0);
+            assert!(off >= 0.85 * f64::abs(e) * decl && off <= 1.15 * f64::abs(e) * decl, "draw {e}: depth {dy:+.3} m, {:.2}′ at the bounce against {:.2}′", off.to_degrees() * 60.0, (f64::abs(e) * decl).to_degrees() * 60.0);
+        }
+    }
+
+    // Agent-models §5.1, the depth of a ball seen on the ground: a grounder knocked down off a
+    // glove's rim (Opus depth-read review P2-1). The new ball leaves the glove a few centimetres
+    // above the grass, rising, and has not bounced yet; it starts a call round, so every fielder
+    // reads it at once, all by the snapshot read (a touch ends every track). An outfielder sees
+    // where it left the glove against the ground: right after it comes off, his read of it is off
+    // in the angle below his eyes by no more than his draw times his angular σ and the height he
+    // cannot tell (z/d in angle; 15% for the geometry). Before, he read it as a ball in the air,
+    // `DEPTH_STRETCH` × σ0·d/30 m deep, many times that.
+    #[test]
+    fn a_grounder_off_a_gloves_rim_is_read_on_the_ground_where_it_left_the_glove() {
+        let fx = fixture(&[]);
+        let mut cases = 0;
+        for (vx, of) in [(-6.0, 6usize), (1.0, 7), (7.0, 8)] {
+            let inp = hit(&fx, Vec3::new(vx, 30.0, -4.0));
+            let mut st = fx.st.clone();
+            let mut sim = new_sim(&inp, &mut st);
+            let Ball::Free { path, .. } = &sim.ball else { panic!("a free ball") };
+            let path = path.clone();
+            // At about 25 m from home, on the ground or on a low hop: the infielder's glove.
+            let mut t = path.first_bounce().unwrap().0 + 0.05;
+            while m::hypot(path.at(t).0.x, path.at(t).0.y) < 25.0 {
+                t += 0.01;
+            }
+            let (b, bv) = path.at(t);
+            sim.t = t;
+            // As the rim does (`collide`): most of its speed kept, popped up at 1 m/s.
+            let r0 = Vec3::new(b.x, b.y, b.z.max(inp.env.ball.radius + 0.01));
+            sim.set_free(BallState { r: r0, v: (bv * RIM_KEEP).reject(Vec3::Z) + Vec3::new(0.0, 0.0, 1.0), w: Vec3::ZERO });
+            let (seen_t, _, z) = sim.ground_seen().expect("a ball off the glove at the grass is seen on the ground");
+            assert!(seen_t == 0.0 && (z - (r0.z - inp.env.ball.radius)).abs() < 1e-12, "{seen_t} s ago, {z} m up");
+            let from = sim.f[of].pos;
+            let (q0, _) = sim.ball_at(t);
+            let d = m::hypot(q0.x - from.x, q0.y - from.y);
+            for e in [-2.0, -1.0, 1.0, 2.0] {
+                sim.f[of].err = [e, 0.0, 0.0, 0.0];
+                let q = sim.predict(of).at(t).0;
+                let angle = |p: Vec3| m::atan2(EYE_H - q0.z, m::hypot(p.x - from.x, p.y - from.y));
+                let off = (angle(q) - angle(q0)).abs();
+                let bound = f64::abs(e) * m::hypot(sim.f[of].a.ground_decl_sigma, z / d) * 1.15;
+                println!("fielder {}, {d:.1} m, draw {e}: {:.2}′ off, bound {:.2}′", of + 1, off.to_degrees() * 60.0, bound.to_degrees() * 60.0);
+                assert!(off <= bound, "fielder {}, {d:.1} m, draw {e}: his read's angle is {:.2}′ off, bound {:.2}′", of + 1, off.to_degrees() * 60.0, bound.to_degrees() * 60.0);
+                cases += 1;
+            }
+        }
+        assert_eq!(cases, 12);
     }
 
     // Agent-models §5.1, the gate (Opus bounce-track review P2-1, P3-2). A fielder whose
