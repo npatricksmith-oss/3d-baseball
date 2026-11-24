@@ -17,7 +17,7 @@ Status: `[ ]` not started · `[~]` partly done · `[?]` needs an owner decision
 
 ## Resume here (2026-11-24)
 
-**State.** Swing v3 ([spec](docs/swing-model-v3.md)): steps 0–1 and the family (D27) merged; its refit at MLB's stance (D28, §5.3.1) done in the oracle by `swing-stance` (`work/swing-stance`, worktree `swing-research`; needs an Opus review): the hands rise once. Open: the arms at contact on low pitches, late contact faster than MLB's (§6.7.4, §6.7.6). **Q51 waits on the owner** (§6.7.8; keep 0.35 m recommended). Then step 2 (Rust) and 3b (move the batter). Step 4 brings Q45 back with game measurements.
+**State.** Swing v3 ([spec](docs/swing-model-v3.md)): steps 0–1 and the family (D27) merged; its refit at MLB's stance and contact point (D28, D29; §5.3.1, §6.7.8) done in the oracle by `swing-stance` (`work/swing-stance`, worktree `swing-research`; needs an Opus review): the hands rise once. Open: the zone's low-inside corner (1.11×), the arms at contact on low pitches, late contact faster than MLB's (§6.7.4, §6.7.6). Nothing waits on the owner. Then step 2 (Rust) and 3b (move the batter and the contact point). Step 4 brings Q45 back with game measurements.
 
 **Next:** §2: the ground-dive leftovers ([note](docs/calibration/2026-11-23-of-ground-dive.md) §9); swing step 2 after the stance refit.
 
