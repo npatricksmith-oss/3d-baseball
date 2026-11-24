@@ -476,6 +476,8 @@ void ABbDirector::BeginPlay()
 	}
 	bStagingLog = FParse::Param(Cmd, TEXT("BbStagingLog"));
 	bMotionShots = FParse::Param(Cmd, TEXT("BbMotionShots"));
+	bBatCheck = FParse::Param(Cmd, TEXT("BbBatCheck"));
+	FParse::Value(Cmd, TEXT("BbBatShots="), BatShotsLeft);
 	if (FParse::Param(Cmd, TEXT("BbClipSpeeds")))
 	{
 		// The pace each gait clip is animated for, to check the staging speeds against.
@@ -1655,6 +1657,123 @@ FVector ABbDirector::BatterFrame(const float P[3], const FBatNote& N)
 	return FVector((N.bLeftBox ? 1.0 : -1.0) * (P[0] - N.Spot.X) * 100.0, (P[1] - N.Spot.Y) * 100.0, P[2] * 100.0);
 }
 
+FVector ABbDirector::FromBatterFrame(const FVector& Cm, const FBatNote& N)
+{
+	const double Side = N.bLeftBox ? 1.0 : -1.0;
+	return ToUE(N.Spot.X + Side * Cm.X / 100.0, N.Spot.Y + Cm.Y / 100.0, Cm.Z / 100.0);
+}
+
+float ABbDirector::PitchPlaneT(const FBbPlay& Play) const
+{
+	// The ball's track to the plane the sim's swing aims at (physics: contact_y0, 0.35 m). On a
+	// pitch hit the track ends at contact: if that is short of the plane, the crossing is found
+	// from the last 30 ms by a parabola (checked against the full track in the probe, step 1).
+	constexpr float PlaneY = 0.35f;
+	if (!Sim || !Play.bValid)
+	{
+		return -1.f;
+	}
+	const float Contact = Play.Info.contact_s;
+	const float End = Contact >= 0.f ? Contact : FMath::Min(Play.Info.duration_s, 1.5f);
+	auto Y = [&](float T)
+	{
+		BbFrame F;
+		return Sim->Sample(Play, T, F) ? F.ball[1] : -1e9f;
+	};
+	for (float T = 0.005f; T <= End + 1e-4f; T += 0.005f)
+	{
+		if (Y(FMath::Min(T, End)) <= PlaneY)
+		{
+			float Lo = T - 0.005f, Hi = FMath::Min(T, End);
+			for (int32 I = 0; I < 20; ++I)
+			{
+				const float Mid = 0.5f * (Lo + Hi);
+				(Y(Mid) > PlaneY ? Lo : Hi) = Mid;
+			}
+			return 0.5f * (Lo + Hi);
+		}
+	}
+	if (Contact < 0.f)
+	{
+		return -1.f;
+	}
+	const double Y0 = Y(End), A = Y(End - 0.015f) - Y0, B = Y(End - 0.03f) - Y0;
+	const double Acc = (B - 2.0 * A) / 0.000225, Vel = (0.0001125 * Acc - A) / 0.015;
+	// Y0 + Vel dt + Acc dt^2 / 2 = PlaneY, the smallest dt >= 0.
+	const double C = Y0 - PlaneY, Disc = Vel * Vel - 2.0 * Acc * C;
+	if (Disc < 0.0)
+	{
+		return -1.f;
+	}
+	const double Root = FMath::Sqrt(Disc);
+	double Dt = 1e9;
+	if (FMath::Abs(Acc) < 1e-9)
+	{
+		Dt = Vel < 0.0 ? -C / Vel : Dt;
+	}
+	else
+	{
+		for (const double R : { (-Vel + Root) / Acc, (-Vel - Root) / Acc })
+		{
+			if (R >= 0.0 && R < Dt)
+			{
+				Dt = R;
+			}
+		}
+	}
+	return Dt < 1.0 ? End + (float)Dt : -1.f;
+}
+
+float ABbDirector::InferContactT(const FBbPlay& Play, const FBatNote& N) const
+{
+	// The sim's bat turns fastest 0.010 s (at T_swing 0.150, scaled with it) after nominal
+	// contact: the parabola through the turning rates of the three 5 ms spans round the fastest,
+	// less that offset, T_swing being (contact - start) found by iterating once.
+	if (!Sim || !N.bSwing || N.TS < 0.f)
+	{
+		return -1.f;
+	}
+	TArray<float> Rate;
+	const float T0 = N.TS, T1 = N.EndT;
+	BbFrame Prev;
+	if (!Sim->Sample(Play, T0, Prev))
+	{
+		return -1.f;
+	}
+	int32 Best = -1;
+	for (float T = T0 + 0.005f; T <= T1 + 1e-4f; T += 0.005f)
+	{
+		BbFrame F;
+		if (!Sim->Sample(Play, T, F))
+		{
+			return -1.f;
+		}
+		const FVector A0 = (ToUE(Prev.bat_tip) - ToUE(Prev.bat_knob)).GetSafeNormal(), A1 = (ToUE(F.bat_tip) - ToUE(F.bat_knob)).GetSafeNormal();
+		Rate.Add(FMath::Acos(FMath::Clamp((float)(A0 | A1), -1.f, 1.f)) / 0.005f);
+		if (Best < 0 || Rate.Last() > Rate[Best])
+		{
+			Best = Rate.Num() - 1;
+		}
+		Prev = F;
+	}
+	if (Best < 1 || Best + 1 >= Rate.Num())
+	{
+		return -1.f;
+	}
+	const double X0 = -1.0, X1 = 0.0, X2 = 1.0, R0 = Rate[Best - 1], R1 = Rate[Best], R2 = Rate[Best + 1];
+	const double A = 0.5 * (R0 + R2) - R1, Bq = 0.5 * (R2 - R0);
+	if (A >= 0.0)
+	{
+		return -1.f;
+	}
+	(void)X0; (void)X1; (void)X2;
+	// The span i covers (T0 + 0.005 i, T0 + 0.005 (i + 1)): its rate is at the span's middle.
+	const double Peak = T0 + 0.005 * (Best + 0.5) + 0.005 * (-Bq / (2.0 * A));
+	const double Tsw0 = (Peak - 0.010) - T0;
+	const double Tsw = (Peak - 0.010 * Tsw0 / 0.150) - T0;
+	return (float)(Peak - 0.010 * Tsw / 0.150);
+}
+
 void ABbDirector::NoteBat(const FBbPlay& Play, FBatNote& Out) const
 {
 	Out = FBatNote();
@@ -1722,7 +1841,153 @@ void ABbDirector::NoteBat(const FBbPlay& Play, FBatNote& Out) const
 	{
 		Out.LaunchDeg = LeastDeg;
 		Out.EndT = LastMove;
+		// The moment the sim's bat first moves, to 0.1 ms (the scan's 5 ms step brackets it; the
+		// bat is the stance until then).
+		float Lo = Out.StartT, Hi = Out.StartT + 0.005f;
+		for (int32 I = 0; I < 6; ++I)
+		{
+			BbFrame F;
+			const float Mid = 0.5f * (Lo + Hi);
+			const bool bMoved = Sim->Sample(Play, Mid, F) && (FMemory::Memcmp(F.bat_knob, F0.bat_knob, sizeof(F.bat_knob)) != 0 || FMemory::Memcmp(F.bat_tip, F0.bat_tip, sizeof(F.bat_tip)) != 0);
+			(bMoved ? Hi : Lo) = Mid;
+		}
+		Out.TL = Out.StartT = Hi;
+		Out.TS = Play.Info.swing_start_s >= 0.f ? Play.Info.swing_start_s : Out.TL;
+		Out.TC = Play.Info.swing_contact_s;
+		BbFrame S;
+		if (Sim->Sample(Play, Out.TS, S))
+		{
+			Out.StartKnob = ToUE(S.bat_knob);
+			Out.StartTip = ToUE(S.bat_tip);
+		}
+		if (Out.TC < 0.f)
+		{
+			Out.bTcInferred = true;
+			Out.TC = InferContactT(Play, Out);
+		}
 	}
+	Out.StanceKnobB = BatterFrame(F0.bat_knob, Out);
+	Out.StanceAxisB = (BatterFrame(F0.bat_tip, Out) - Out.StanceKnobB).GetSafeNormal();
+	const float Plane = PitchPlaneT(Play);
+	if (Plane > 0.f)
+	{
+		Out.TA = Plane;
+	}
+	Out.CatchT = Play.Info.contact_s < 0.f ? Play.Info.call_s - 0.2f : -1.f;
+}
+
+void ABbDirector::DrawnBat(float T, const FBatNote& N, const FVector& SimKnob, const FVector& SimTip, FVector& OutKnob, FVector& OutTip) const
+{
+	FVector CKnob, CAxis;
+	BbMotion::LoadBat(T, N.TA, !N.bSwing, N.CatchT, N.StanceKnobB, N.StanceAxisB, CKnob, CAxis);
+	// (His frame is in cm and so is Unreal's; the bat is 86.36 cm long in both.)
+	const FVector ClientKnob = FromBatterFrame(CKnob, N);
+	const FVector ClientTip = FromBatterFrame(CKnob + CAxis * BatLenCm, N);
+	if (!N.bSwing || T < N.TL)
+	{
+		OutKnob = ClientKnob;
+		OutTip = ClientTip;
+		return;
+	}
+	// The handover: the client's bat blended into where the sim's will be, the swing's start
+	// pose until TS and the sim's bat from then. The weight rises smoothly 0 to 1.
+	const float W = BbMotion::HandoverWeight(T, N.TL, N.TS);
+	if (W >= 1.f)
+	{
+		OutKnob = SimKnob;
+		OutTip = SimTip;
+		return;
+	}
+	const FVector TargetKnob = T < N.TS ? N.StartKnob : SimKnob;
+	const FVector TargetAxis = ((T < N.TS ? N.StartTip : SimTip) - TargetKnob).GetSafeNormal();
+	OutKnob = FMath::Lerp(ClientKnob, TargetKnob, (double)W);
+	const FVector Axis = FMath::Lerp((ClientTip - ClientKnob).GetSafeNormal(), TargetAxis, (double)W).GetSafeNormal(1e-6, TargetAxis);
+	OutTip = OutKnob + Axis * BatLenCm;
+}
+
+void ABbDirector::CheckBat(const FBbPlay& Play, const FBatNote& N) const
+{
+	// The drawn bat over the whole pitch at 1 ms against what player-visuals §13.7 asks of it
+	// before and at the handover. The expectations are physical, not the code's own numbers:
+	// the hands never faster than 1.5 m/s before the sim's bat moves; no jump (the bat within
+	// 2 cm and 2 degrees of the motion carried on from the last 10 ms) where the client's bat
+	// gives way and where the handover ends; and, with the swing withheld (the same pitch as a
+	// take, the timeline's bat the stance alone), the same bat to 0.1 cm at every time before
+	// the sim's bat moves (D22).
+	BbFrame F0;
+	if (!Sim || !Sim->Sample(Play, 0.f, F0))
+	{
+		return;
+	}
+	const FVector StanceK = ToUE(F0.bat_knob), StanceT = ToUE(F0.bat_tip);
+	FBatNote Withheld = N;
+	Withheld.bSwing = false;
+	Withheld.TL = Withheld.TS = Withheld.TC = -1.f;
+	const float T0 = -0.6f, Dt = 0.001f;
+	const float Tend = N.bSwing ? N.EndT : FMath::Min(Play.Info.duration_s, (N.CatchT >= 0.f ? N.CatchT : 0.6f) + 1.5f);
+	TArray<FVector> Knob, Axis;
+	double SpeedBefore = 0.0, SpeedHandover = 0.0, D22 = 0.0;
+	for (float T = T0; T <= Tend; T += Dt)
+	{
+		BbFrame F;
+		if (!Sim->Sample(Play, T, F))
+		{
+			return;
+		}
+		FVector K, Tip, K2, Tip2;
+		DrawnBat(T, N, ToUE(F.bat_knob), ToUE(F.bat_tip), K, Tip);
+		DrawnBat(T, Withheld, StanceK, StanceT, K2, Tip2);
+		const bool bBefore = !N.bSwing || T < N.TL;
+		if (bBefore)
+		{
+			D22 = FMath::Max(D22, (double)FMath::Max((K - K2).Size(), (Tip - Tip2).Size()));
+		}
+		if (Knob.Num() > 0)
+		{
+			const double Speed = (K - Knob.Last()).Size() * 0.01 / Dt;
+			if (bBefore)
+			{
+				SpeedBefore = FMath::Max(SpeedBefore, Speed);
+			}
+			else if (T < FMath::Max(N.TS, N.TL + BbMotion::BatHandoverS))
+			{
+				SpeedHandover = FMath::Max(SpeedHandover, Speed);
+			}
+		}
+		Knob.Add(K);
+		Axis.Add((Tip - K).GetSafeNormal());
+	}
+	// How far the drawn bat is from the motion carried on from the 10 ms before At, 5 ms on.
+	auto Step = [&](float At, double& Cm, double& Deg)
+	{
+		Cm = Deg = 0.0;
+		const int32 I = FMath::RoundToInt((At - T0) / Dt);
+		if (I < 10 || I + 5 >= Knob.Num())
+		{
+			return;
+		}
+		const FVector PredK = Knob[I] + (Knob[I] - Knob[I - 10]) * 0.5;
+		const FVector PredA = (Axis[I] + (Axis[I] - Axis[I - 10]) * 0.5).GetSafeNormal();
+		Cm = (Knob[I + 5] - PredK).Size();
+		Deg = FMath::RadiansToDegrees(FMath::Acos(FMath::Clamp((float)(PredA | Axis[I + 5]), -1.f, 1.f)));
+	};
+	double StepLCm = 0.0, StepLDeg = 0.0, StepECm = 0.0, StepEDeg = 0.0, GapCm = 0.0, GapDeg = 0.0;
+	float End = -1.f;
+	if (N.bSwing)
+	{
+		End = FMath::Max(N.TS, N.TL + BbMotion::BatHandoverS);
+		Step(N.TL, StepLCm, StepLDeg);
+		Step(End, StepECm, StepEDeg);
+		// The distance the handover closes: the client's bat at TL against the sim's start pose.
+		FVector CK, CA;
+		BbMotion::LoadBat(N.TL, N.TA, false, -1.f, N.StanceKnobB, N.StanceAxisB, CK, CA);
+		const FVector Ck = FromBatterFrame(CK, N), Ca = (FromBatterFrame(CK + CA * BatLenCm, N) - Ck).GetSafeNormal();
+		GapCm = (Ck - N.StartKnob).Size();
+		GapDeg = FMath::RadiansToDegrees(FMath::Acos(FMath::Clamp((float)(Ca | (N.StartTip - N.StartKnob).GetSafeNormal()), -1.f, 1.f)));
+	}
+	const bool bFail = SpeedBefore > 1.5 || StepLCm > 2.0 || StepLDeg > 2.0 || StepECm > 2.0 || StepEDeg > 2.0 || D22 > 0.1;
+	UE_LOG(LogBb, Display, TEXT("BB_BATCHECK play=%u swing=%d t_l=%.4f t_s=%.4f end=%.4f speed_before=%.2f m/s speed_handover=%.2f m/s step_l=%.2f cm %.2f deg step_end=%.2f cm %.2f deg gap=%.1f cm %.1f deg d22=%.4f cm%s"),
+		Current.Info.play_index, N.bSwing ? 1 : 0, N.TL, N.TS, End, SpeedBefore, SpeedHandover, StepLCm, StepLDeg, StepECm, StepEDeg, GapCm, GapDeg, D22, bFail ? TEXT(" FAIL") : TEXT(""));
 }
 
 void ABbDirector::NotePitch()
@@ -1730,6 +1995,17 @@ void ABbDirector::NotePitch()
 	PitchEndT = -1.f;
 	CrouchUntil = 0.6f;
 	NoteBat(Current, BatNote);
+	BatHandMax = 0.f;
+	BatHandFrames = 0;
+	if (bStagingLog && BatNote.bBat)
+	{
+		UE_LOG(LogBb, Display, TEXT("BB_BATNOTE play=%u swing=%d t_a=%.4f catch=%.4f t_l=%.4f t_s=%.4f t_c=%.4f%s handover_end=%.4f"), Current.Info.play_index, BatNote.bSwing ? 1 : 0, BatNote.TA, BatNote.CatchT, BatNote.TL, BatNote.TS, BatNote.TC,
+			BatNote.bTcInferred ? TEXT(" (inferred)") : TEXT(""), BatNote.bSwing ? FMath::Max(BatNote.TS, BatNote.TL + BbMotion::BatHandoverS) : -1.f);
+	}
+	if (bBatCheck && BatNote.bBat)
+	{
+		CheckBat(Current, BatNote);
+	}
 	MotionStrip = -1;
 	if (bMotionShots && Current.bValid)
 	{
@@ -2635,6 +2911,41 @@ void ABbDirector::NoteSlides()
 	ExtraShots.Reset();
 	ExtraShotNext = 0;
 	ShotDiver = -1;
+	// -BbBatShots=2: the first swing and the first pitch taken (after the third pitch) held on
+	// the moments of the bat before the swing (player-visuals §13.4), from across the plate.
+	bBatShotPitch = false;
+	if (BatShotsLeft > 0 && Current.bValid && BatNote.bBat && Current.Info.play_index > 3 && !bBatShotDone[BatNote.bSwing ? 0 : 1])
+	{
+		const FBatNote& B = BatNote;
+		const float Arrive = FMath::Max(FMath::Min(BbMotion::BatLoadAtS, B.TA - BbMotion::BatCommitLeadS - BbMotion::BatLoadBeforeCommitS), BbMotion::BatSettleS + 0.1f);
+		TArray<TPair<float, const TCHAR*>> Marks;
+		Marks.Emplace(-0.5f, TEXT("stance"));
+		Marks.Emplace(BbMotion::BatSettleS + 0.5f * (Arrive - BbMotion::BatSettleS), TEXT("drift"));
+		Marks.Emplace(Arrive, TEXT("loaded"));
+		if (B.bSwing)
+		{
+			const float End = FMath::Max(B.TS, B.TL + BbMotion::BatHandoverS);
+			Marks.Emplace(B.TL - 0.01f, TEXT("before_sim"));
+			Marks.Emplace(0.5f * (B.TL + End), TEXT("handover"));
+			Marks.Emplace(End, TEXT("sim_has_it"));
+			Marks.Emplace(End + 0.03f, TEXT("swing"));
+		}
+		else
+		{
+			Marks.Emplace(B.TA, TEXT("at_the_plate"));
+			Marks.Emplace(FMath::Max(B.CatchT, B.TA) + 0.1f, TEXT("caught"));
+			Marks.Emplace(FMath::Max(B.CatchT, B.TA) + BbMotion::BatRelaxAfterCatchS + 0.5f * BbMotion::BatRelaxOverS, TEXT("easing"));
+			Marks.Emplace(FMath::Max(B.CatchT, B.TA) + BbMotion::BatRelaxAfterCatchS + BbMotion::BatRelaxOverS + 0.1f, TEXT("stance_again"));
+		}
+		for (int32 M = 0; M < Marks.Num(); ++M)
+		{
+			ExtraShots.Emplace(Marks[M].Key, FString::Printf(TEXT("bat1_%s_%d_%s.png"), B.bSwing ? TEXT("swing") : TEXT("take"), M + 1, Marks[M].Value));
+		}
+		ExtraShots.Sort([](const TPair<float, FString>& A, const TPair<float, FString>& B) { return A.Key < B.Key; });
+		bBatShotDone[B.bSwing ? 0 : 1] = true;
+		bBatShotPitch = true;
+		--BatShotsLeft;
+	}
 	if (!Sim || !Current.bValid || Current.Info.contact_s < 0.f)
 	{
 		return;
@@ -3497,6 +3808,22 @@ void ABbDirector::PoseFigure(int32 Slot, const BbActor& A, const BbFrame& Frame,
 					FMath::Abs(Scale.Z), ((Wrist[0] - Reach.At[0]).Size() - Reach.Past[0]) * FMath::Abs(Scale.Z), ((Wrist[1] - Reach.At[1]).Size() - Reach.Past[1]) * FMath::Abs(Scale.Z),
 					Bn.LaunchT, BbMotion::HandsDeg(Own.InverseTransformPosition(BatKnob), Own.InverseTransformPosition(BatTip)) - Bn.LaunchDeg, MotionShown);
 			}
+			// And through the handover and the swing (the sim's bat first moving to its end): the
+			// worst either hand has been from the handle, logged when the swing is over.
+			if (bStagingLog && St.Motion == 3 && !bReset && Bn.bSwing)
+			{
+				if (PlayTime >= Bn.TL && PlayTime <= Bn.EndT)
+				{
+					const float Off = FMath::Max((Wrist[0] - Reach.At[0]).Size() - Reach.Past[0], (Wrist[1] - Reach.At[1]).Size() - Reach.Past[1]) * FMath::Abs(Scale.Z);
+					BatHandMax = FMath::Max(BatHandMax, Off);
+					++BatHandFrames;
+				}
+				else if (PlayTime > Bn.EndT && BatHandFrames > 0)
+				{
+					UE_LOG(LogBb, Display, TEXT("BB_BATHANDS play=%u worst_hand_off=%.2f cm over %d frames from t_l=%.3f to %.3f"), Current.Info.play_index, BatHandMax, BatHandFrames, Bn.TL, Bn.EndT);
+					BatHandFrames = 0;
+				}
+			}
 			Coded->PoseWeight = MotionShown;
 			if (St.Motion == 1 && !bReset && PlayTime < 0.f && MotionShown >= 0.99f)
 			{
@@ -4008,7 +4335,7 @@ void ABbDirector::Tick(float DeltaSeconds)
 				const FString Name = FPaths::Combine(FPaths::ProjectSavedDir(), TEXT("Shots"), ExtraShots[ExtraShotNext].Value);
 				FScreenshotRequest::RequestScreenshot(Name, false, false);
 				UE_LOG(LogBb, Display, TEXT("BB_EXTRA_SHOT %s play %u t %.2f"), *Name, Current.Info.play_index, At);
-				if (++ExtraShotNext == ExtraShots.Num() && SlideShotsLeft <= 0 && DiveShotsLeft <= 0 && DiveBackShotsLeft <= 0 && BaseMapShotsLeft <= 0)
+				if (++ExtraShotNext == ExtraShots.Num() && SlideShotsLeft <= 0 && DiveShotsLeft <= 0 && DiveBackShotsLeft <= 0 && BaseMapShotsLeft <= 0 && BatShotsLeft <= 0)
 				{
 					BenchSeconds = FMath::Max(BenchSeconds, (float)Wall + 2.f);
 				}
@@ -4103,15 +4430,16 @@ void ABbDirector::Tick(float DeltaSeconds)
 					PlaceBat(ToUE(Frame.bat_knob), ToUE(Frame.bat_tip));
 				}
 			}
-			// The bat (player-visuals §9). It is the sim's for as long as the sim's bat is in
-			// his hands and moving or waiting to: through the stance and the swing. After the
-			// swing, and between pitches, it is the batter's own to carry (PoseFigure).
+			// The bat (player-visuals §9, §13.4). It is the timeline's for as long as the sim's bat
+			// is in his hands: the client's own through the stance and the load, until the sim's
+			// bat first moves, the same on a swing and a pitch taken (D22); then blended into the
+			// sim's, and the sim's through the swing. After the swing, and between pitches, it is
+			// the batter's own to carry (PoseFigure).
 			bBatHeld = false;
 			bBatSim = !bReset && Frame.has_bat != 0 && (!BatNote.bSwing || PlayTime <= BatNote.EndT);
 			if (bBatSim)
 			{
-				BatKnob = ToUE(Frame.bat_knob);
-				BatTip = ToUE(Frame.bat_tip);
+				DrawnBat(PlayTime, BatNote, ToUE(Frame.bat_knob), ToUE(Frame.bat_tip), BatKnob, BatTip);
 			}
 			{
 				// What the batter's body goes by besides the bat. In a pitch these follow from
@@ -4474,7 +4802,7 @@ void ABbDirector::Tick(float DeltaSeconds)
 				}
 			}
 			UpdateCamera(Frame, DeltaSeconds);
-			if (bMotionShots && !bReset && MotionStrip >= 3 && MotionStrip <= 5)
+			if ((bMotionShots && !bReset && MotionStrip >= 3 && MotionStrip <= 5) || (bBatShotPitch && !bReset))
 			{
 				// The batter: from across the plate, in front of him (a ball hit, a pitch taken);
 				// from the mound's side of him (a swing and a miss).
