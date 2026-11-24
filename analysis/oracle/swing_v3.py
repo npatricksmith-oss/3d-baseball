@@ -43,7 +43,7 @@ U_G = 0.08                 # grip station, m from the knob (§3)
 BAT_L = 34 * 0.0254        # the 34-in bat
 U_SS = BAT_L - 0.15        # sweet spot (as v2's goldens)
 U_CM = 0.5977425305663189  # golden/bat_default.json
-SEG = dict(upper_arm=0.186, forearm=0.146, half_shoulder=0.112, clavicle=0.28, hip=0.50)  # × H (§5.2, §5.3)
+SEG = dict(upper_arm=0.186, forearm=0.146, half_shoulder=0.112, clavicle=0.28, hip=0.45)  # × H (§5.2, §5.3; hip 0.50 before the D29 refit)
 # Body knots (§5.3 table): pelvis forward of P (m), pelvis rise (m), trunk turn, flexion, lean (deg)
 BODY = {'L': (0.12, 0.00, -22.0, 8.0, 10.0),
         '93': (0.17, 0.00, 2.0, 13.0, 23.0),
@@ -69,11 +69,12 @@ P_TODAY = (-0.95, 0.30, 0.0)
 # (the game's 0.95 kept). Read as the position at the stance, carried forward by [4]'s stride to contact
 # (§5.3's knots) [E: the reading; §5.3 says why and what would settle it].
 P_STANCE = (-0.95, 0.432 - 0.708, 0.0)
-# Where the middle pitch is met, y (swing.rs contact_y0) and its slope across the plate (contact_k).
-# Q51 (the owner's, open): Savant's average intercept is 0.505 m; the oracle gives every result at
-# 0.35 (today's) and 0.50 (§5.3, §6.7.8).
-CONTACT_Y0 = 0.35
-CONTACT_Y0_Q51 = 0.50
+# Where the middle pitch is met, y, and its slope across the plate (contact_k). PLAN D29 (owner Q51 = a):
+# where MLB's batters meet it, Savant's average nearest approach 0.505 m less the middle pitch's own
+# shortfall from the average (about 0.01 m in step 0's per-pitch sample; up to 0.04 m by note 11 §3)
+# [E] (§6.7.8). Today's game value (swing.rs contact_y0 0.35) is kept for a reported comparison only.
+CONTACT_Y0 = 0.49
+CONTACT_Y0_TODAY = 0.35
 CONTACT_K = 0.125
 
 
@@ -1330,7 +1331,7 @@ def stance_report():
     reading and contact depth."""
     out = {}
     for sname, P in STANCES.items():
-        for y0 in (CONTACT_Y0, CONTACT_Y0_Q51):
+        for y0 in (CONTACT_Y0, CONTACT_Y0_TODAY):
             with contact_depth(y0):
                 rows = {}
                 for n, (x, z) in GOLDEN_XZ.items():
@@ -1500,10 +1501,10 @@ def golden(skip=()):
                   diagnostics={n: diagnostics(Swing(a)) for n, a in GOLDEN_AIMS.items()},
                   family=family_report(),
                   stance_and_depth=stance_report(),
-                  late_contact_by_depth={'%.2f' % y0: late_by_depth(y0) for y0 in (CONTACT_Y0, CONTACT_Y0_Q51)})
-    rating, rating_q51 = None, None
+                  late_contact_by_depth={'%.2f' % y0: late_by_depth(y0) for y0 in (CONTACT_Y0, CONTACT_Y0_TODAY)})
+    rating, rating_today_depth = None, None
     if 'rating_range' not in skip:
-        rating_q51 = dict(contact_y0=CONTACT_Y0_Q51, rows=rating_summary(CONTACT_Y0_Q51))
+        rating_today_depth = dict(contact_y0=CONTACT_Y0_TODAY, rows=rating_summary(CONTACT_Y0_TODAY))   # reported only
         rr = []
         for kw in rating_cases():
             d = diagnostics(Swing(**{k: v for k, v in kw.items() if k != 'corner'}), dt=0.001)
@@ -1512,7 +1513,7 @@ def golden(skip=()):
                            ss_worst_dip=d['ss_worst_dip'], T=d['T'], A_L=d['A_L'], E_L=d['E_L']))
         rating = rr
     return dict(meta=meta, hand_case=hand_case, body=body, reading_check=reading, hands=hands, jets=jets, paths=paths,
-                brakes=brakes, aim_range=rng, rating_range=rating, rating_range_q51=rating_q51, bounds=bnd, lag_at_contact_by_location=lag_loc, report=report)
+                brakes=brakes, aim_range=rng, rating_range=rating, rating_range_contact_y0_today=rating_today_depth, bounds=bnd, lag_at_contact_by_location=lag_loc, report=report)
 
 
 if __name__ == '__main__':
