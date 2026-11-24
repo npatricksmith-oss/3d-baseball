@@ -19,6 +19,8 @@ Status: `[ ]` not started · `[~]` partly done · `[?]` needs an owner decision
 
 **State.** No workers running. Q38, Q39, Q40 trials 1–2 ([Code Mode](docs/code-mode-trial.md)) merged (`3a71284`; 560 tests, runs 4.14 [4.45]). **Waiting on the owner:** Q43 (player-visuals §13.5).
 
+**Base swing (second Coordinator session, 2026-11-23).** Worker `swing-1` (Sonnet, high) in Workers pane `t3m`, worktree `.claude/worktrees/swing-research`, branch `work/base-swing-step1`: player-visuals §13 build step 1 (export E1, the bat before the swing, measurements). To check: its branch log, `bin/job.sh status` (labels `swing-1 step1`), `.claude/worker-status/swing-1`. Then a Sonnet review, the Coordinator's own tests, merge. The `of-dive` worker belongs to the first Coordinator session.
+
 **Next:** §2: seed-5593, play 71 (the right fielder not diving at the rolling ball).
 
 **Open (ledger §5):** runs down 0.21 [0.18] since dp-cover (0.04 explained; check noise); double plays 12.3% (MLB 9.8%).
