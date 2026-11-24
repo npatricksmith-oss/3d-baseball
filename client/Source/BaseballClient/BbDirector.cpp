@@ -1682,7 +1682,9 @@ float ABbDirector::PitchPlaneT(const FBbPlay& Play, float CutAt) const
 		BbFrame F;
 		return Sim->Sample(Play, T, F) ? F.ball[1] : -1e9f;
 	};
-	for (float T = 0.005f; T <= End + 1e-4f; T += 0.005f)
+	// (The last step stops at End itself: a ball hit just past the plane crossed it between the
+	// last whole step and contact.)
+	for (float T = 0.005f; T - 0.005f < End; T += 0.005f)
 	{
 		if (Y(FMath::Min(T, End)) <= PlaneY)
 		{
