@@ -1048,7 +1048,7 @@ fn a_ball_an_infielder_catches_a_deep_ball_and_a_caught_fly_keep_their_jobs() {
     }
 }
 
-/// The double cut (owner Q35 (c), agent-models §5.7): add a man, not trade one. Three plays frozen
+/// The double cut (owner Q35 (c), agent-models §5.7): add a man, not trade one. Plays frozen
 /// from main `ba40063` (the relay hand-overs note §4 and the Opus relay review P3-3), each a ball
 /// that gets past the outfielders with a runner who may score:
 /// - seed 23 play 83, two out, runners on first and third: a ball into left-centre first down 61 m
@@ -1059,14 +1059,14 @@ fn a_ball_an_infielder_catches_a_deep_ball_and_a_caught_fly_keep_their_jobs() {
 ///   fielded 102 m out. The third baseman is out on the single's cutoff home and the shortstop on
 ///   third; on `ba40063`, as the ball got past the left fielder (4.20 s) the shortstop went out as
 ///   the relay man and nobody had third for 0.3 s;
-/// - seed 118 play 162, two out, a runner on first: a grounder through the right side past the
-///   right fielder, taken over by the centre fielder and fielded 114 m out. On `ba40063` the second
-///   baseman went out as the relay man at 4.11 s, back at 4.26 s when the centre fielder took it
-///   over (the ball no longer deep against his spot), and out again at 5.29 s.
+/// - seed 118 play 162 (dropped 2026-11-23): a grounder through the right side past the right
+///   fielder, fielded 114 m out. Since the outfielder's dive at a ground ball weighs a glove on it
+///   (agent-models §5.3), the right fielder lays out for it at 3.56 s and knocks it down: it no
+///   longer gets past the outfielders, so it is no longer a case of this test. (On `ba40063` the
+///   second baseman went out as the relay man at 4.11 s, back at 4.26 s, and out again at 5.29 s.)
 ///
 /// From the moment the relay man goes out with the ball down (the deep call) to the outfielder's
-/// throw: he stays out; the first baseman is out on the cutoff home behind him (none was out before
-/// on 118/162: there he goes out with the relay man); nobody else is on a cutoff; at every tick
+/// throw: he stays out; the first baseman is out on the cutoff home behind him; nobody else is on a cutoff; at every tick
 /// second and third each have a man assigned (no 0.3 s while a teammate learns the job), the third
 /// baseman on third. A first baseman out before the call stays out throughout (no trade). From the
 /// call on, the spot he runs to is within `CUT_LINE_M` (5 m) of the line from home to the relay
@@ -1076,7 +1076,7 @@ fn a_ball_an_infielder_catches_a_deep_ball_and_a_caught_fly_keep_their_jobs() {
 /// the first baseman on every ball, a long run on a ball to left.) Each fails on `ba40063`.
 #[test]
 fn a_ball_past_the_outfielders_adds_the_relay_man_and_keeps_the_first_baseman() {
-    for (label, text) in [("seed 23 play 83", include_str!("fixtures/a4/23-83.json")), ("seed 97 play 119", include_str!("fixtures/a4/97-119.json")), ("seed 118 play 162", include_str!("fixtures/a4/118-162.json"))] {
+    for (label, text) in [("seed 23 play 83", include_str!("fixtures/a4/23-83.json")), ("seed 97 play 119", include_str!("fixtures/a4/97-119.json"))] {
         let (out, ticks) = replay_jobs(text);
         let &(t_fielded, by) = out.secured.first().expect("the ball is fielded");
         assert!(by & 0x7f >= 7, "{label}: the premise, an outfielder fields it");
