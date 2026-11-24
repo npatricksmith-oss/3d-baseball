@@ -109,7 +109,7 @@ Covering and calling:
 - [ ] 159. The first baseman who is taking the bag himself puts his hand up to tell the pitcher "I got it".
 - [ ] 86. The first baseman stretches: lead foot and glove out toward the throw, to shorten it.
 - [ ] 147. The right fielder should call off the center fielder, who peels off to back up. *(The caption "Fly out to center" names the fielder who caught it, as a scorer does.)*
-- [x] Seed 65147, play 10 (saved 2026-11-17 20:29). "Right fielder completely misjudged a roller to the outfield." *The centre and right fielders each left it to the other. Right field now takes the chase at the first hearing and cuts it off at 5.08 s. Since 2026-11-24 (branch `work/depth-read`) he also reads the roller's distance within 4 m (it was 32 m off): a ball on the grass is judged by its angle below his eyes.*
+- [x] Seed 65147, play 10 (saved 2026-11-17 20:29). "Right fielder completely misjudged a roller to the outfield." *The centre and right fielders each left it to the other. Right field now takes the chase at the first hearing and cuts it off at 5.08 s. Since 2026-11-24 he also reads the roller's distance within 4 m (it was 32 m off): a ball on the grass is judged by its angle below his eyes.*
 
 Catcher:
 - [ ] 40. On a pop foul the catcher takes his mask off and tosses it aside (for the look only).

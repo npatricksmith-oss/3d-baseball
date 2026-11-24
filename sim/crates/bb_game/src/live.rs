@@ -775,9 +775,10 @@ const LOOK_S: f64 = 0.1;
 /// His eyes above his feet, m [E].
 const EYE_H: f64 = 1.7;
 /// The σ of his angle below eye level to a ball on the ground, at grade 50, rad (agent-models
-/// §5.1, the depth of a ball seen on the ground) [E, unsourced as a number]: 3′, about the
-/// ball's own angular size at 80 m, placed against the field around it; three times the eye's
-/// 1′ acuity. Distance on the ground is perceived through this angle (Ooi, Wu & He 2001).
+/// §5.1, the depth of a ball seen on the ground) [E]: 3′, within 15% of the same eye's
+/// `Vision` σ_ang at grade 50 (1.0 mrad = 3.4′, agent-models §10), placing the ball against the
+/// field around it; about the ball's own angular size at 80 m. Distance on the ground is
+/// perceived through this angle (Ooi, Wu & He 2001).
 pub(crate) const GROUND_DECL_SIGMA_RAD: f64 = 3.0 / 60.0 * core::f64::consts::PI / 180.0;
 /// A new ball (off a glove's rim, or off a wall) that starts no higher than this above where a
 /// ball on the ground sits is seen on the ground where it starts (agent-models §5.1, the depth
