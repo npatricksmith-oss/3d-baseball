@@ -949,7 +949,7 @@ TIP_RATIO_MAX = 1.15   # [3]'s shape bound (§11): the tip's speed peak before c
 E_RANGE = (-45.0, 65.0)   # [E] a plausibility guard: the longest swings (travel +3 sd) launch with the bat up to 62° (§6.7.4)
 
 
-RATE_DIP_TOL = 1e-3    # [E] one surge: no valley in the azimuth rate deeper than 0.1%
+RATE_DIP_TOL = 5e-3    # [E] one surge: no valley in the azimuth rate deeper than 0.5% (its flat top near contact ripples by up to 0.33% when the attack angle is changed by 4°)
 SPEED_DIP_TOL = 0.02   # [E] the sweet spot's, the hands' and the knob's speed: 2% (a flat top before contact ripples by up to 1.9%)
 SURGE_FLOOR = 0.25     # [E] valleys counted once the speed passes a quarter of its contact value
 ARM_SLACK = 0.02       # m [E] each arm at most 2 cm past straight at the knots (the template's own residual at L is 1.1 cm, §6.1)
