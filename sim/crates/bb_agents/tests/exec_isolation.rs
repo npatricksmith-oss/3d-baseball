@@ -14,13 +14,20 @@
 //!   2. contain no identifier `motor` (this covers `crate::motor`, `super::motor`,
 //!      `bb_agents::motor`, `use ... as m`, re-exports, `motor::*` and
 //!      `use crate::{.., motor}`), except the one declaration `mod motor;` in `lib.rs`;
-//!   3. not use `#[path]`, `include!`, `include_str!`, `include_bytes!`, `concat_idents` or
-//!      `paste`, which could pull in or build a name the scan cannot see.
+//!   3. not use a `path` attribute argument anywhere inside an attribute (`#[path = ".."]`,
+//!      `#![path = ".."]`, and the same nested in `#[cfg_attr(.., path = "..")]`); not contain the
+//!      identifier `include`, `include_str` or `include_bytes` at all (so a renamed
+//!      `use core::include as inc; inc!(..)` is caught at the `use`); and not contain
+//!      `concat_idents` or `paste`. Each could pull in or build a name the scan cannot see.
 //!
 //! And `motor.rs` itself must not leak its output through a name-free route: no `trait`
-//! (a blanket impl would put a method on every type), no `macro_rules`, and every `impl`
-//! must be for a type defined in `motor.rs` (an `impl IntendedRelease { fn run(..) -> Executed.. }`
-//! would let `pitcher.rs` call it without naming `motor`). Importing decision types into
+//! (a blanket impl would put a method on every type), no `macro_rules`, and every `impl` item
+//! must be for a `struct`, `enum` or `union` defined in `motor.rs` (an
+//! `impl IntendedRelease { fn run(..) -> Executed.. }` would let `pitcher.rs` call it without
+//! naming `motor`). A `type` alias does not count as defined there: `type A = IntendedRelease;
+//! impl A { .. }` is the same leak (so an `impl` on an alias of a local type is refused too; write
+//! it on the type). A tuple, array or qualified-path self type is refused. `impl Trait` in
+//! argument or return position is not an `impl` item and is ignored. Importing decision types into
 //! `motor.rs` is fine: that is the intended direction.
 //!
 //! Known limits (the scan is textual, not a type checker):
@@ -32,6 +39,8 @@
 //!   - A type that merely contains an `Executed*` value (a field) must name it, so rule 1
 //!     catches it; a `pub` function in `motor.rs` that returns one is reached only via `motor`.
 //!   - Files outside `src/` pulled in by `#[path]` or `include!` are refused by rule 3.
+//!   - Set `EXEC_ISOLATION_SRC=<dir>` to scan a copy of `src/` instead (used to plant a violation
+//!     and see the real scan fail without editing the sources).
 //!   - The scan trusts `lib.rs`'s one `mod motor;` line; another `mod` line there that
 //!     re-declares the file is a rule-3 or rule-2 hit.
 
@@ -216,10 +225,46 @@ fn is_punct(t: Option<&(Tok, usize)>, p: char) -> bool {
     t.is_some_and(|t| t.0 == Tok::Punct(p))
 }
 
+/// For each token, whether it lies inside an attribute (`#[..]` or `#![..]`), brackets balanced.
+fn attribute_mask(toks: &[(Tok, usize)]) -> Vec<bool> {
+    let mut mask = vec![false; toks.len()];
+    let mut k = 0;
+    while k < toks.len() {
+        if is_punct(toks.get(k), '#') {
+            let mut j = k + 1;
+            if is_punct(toks.get(j), '!') {
+                j += 1;
+            }
+            if is_punct(toks.get(j), '[') {
+                let mut depth = 0;
+                while j < toks.len() {
+                    match toks[j].0 {
+                        Tok::Punct('[') => depth += 1,
+                        Tok::Punct(']') => {
+                            depth -= 1;
+                            if depth == 0 {
+                                break;
+                            }
+                        }
+                        _ => {}
+                    }
+                    mask[j] = true;
+                    j += 1;
+                }
+                k = j;
+                continue;
+            }
+        }
+        k += 1;
+    }
+    mask
+}
+
 /// Rules for every `bb_agents/src` file except `motor.rs`. `is_lib`: the file is `lib.rs`, which may
 /// declare `mod motor;` once.
 fn scan_decision(src: &str, is_lib: bool) -> Vec<Violation> {
     let toks = tokens(&strip(src));
+    let in_attr = attribute_mask(&toks);
     let mut v = Vec::new();
     let mut push = |line: usize, rule: &str| v.push(Violation { line, rule: rule.to_string() });
     for (k, t) in toks.iter().enumerate() {
@@ -236,15 +281,12 @@ fn scan_decision(src: &str, is_lib: bool) -> Vec<Violation> {
             if !declaration {
                 push(line, "refers to the motor module (use, path, alias, re-export or glob); only lib.rs may declare it (invariant 3)");
             }
-        } else if matches!(id, "include" | "include_str" | "include_bytes") && is_punct(next, '!') {
-            push(line, &format!("{id}! can pull motor code or names past the scan (rule 3)"));
+        } else if matches!(id, "include" | "include_str" | "include_bytes") {
+            push(line, &format!("{id} (also when renamed with use .. as ..) can pull motor code or names past the scan (rule 3)"));
         } else if matches!(id, "concat_idents" | "paste") {
             push(line, &format!("{id} can build an Executed*/motor name the scan cannot see (rule 3)"));
-        } else if id == "path" && is_punct(prev, '[') {
-            let before = k.checked_sub(2).map(|p| &toks[p]);
-            if is_punct(before, '#') || is_punct(before, '!') {
-                push(line, "#[path] can re-declare motor.rs under another name (rule 3)");
-            }
+        } else if id == "path" && in_attr[k] && is_punct(next, '=') {
+            push(line, "a path attribute (also inside cfg_attr) can re-declare motor.rs under another name (rule 3)");
         }
     }
     v
@@ -256,9 +298,11 @@ fn scan_motor(src: &str) -> Vec<Violation> {
     let toks = tokens(&strip(src));
     let mut v = Vec::new();
     let mut push = |line: usize, rule: &str| v.push(Violation { line, rule: rule.to_string() });
+    // Local types are structs, enums and unions only. A `type` alias can name a decision type, so
+    // it does not make an `impl` on it acceptable.
     let mut locals: Vec<&str> = Vec::new();
     for (k, t) in toks.iter().enumerate() {
-        if matches!(ident(t), Some("struct" | "enum" | "type" | "union")) {
+        if matches!(ident(t), Some("struct" | "enum" | "union")) {
             if let Some(name) = toks.get(k + 1).and_then(ident) {
                 locals.push(name);
             }
@@ -270,6 +314,13 @@ fn scan_motor(src: &str) -> Vec<Violation> {
             "trait" => push(t.1, "motor.rs defines a trait: a blanket impl would put a method on decision types without naming motor (motor.rs rule)"),
             "macro_rules" => push(t.1, "motor.rs defines a macro, which can be used without naming motor (motor.rs rule)"),
             "impl" => {
+                // Only an impl item is checked. `impl Trait` in argument or return position follows
+                // `:`, `->`, `&mut`, `<` and so on, never a statement boundary or an attribute.
+                let p = if k > 0 && ident(&toks[k - 1]) == Some("unsafe") { k - 1 } else { k };
+                let item = p == 0 || matches!(toks[p - 1].0, Tok::Punct(';' | '}' | '{' | ']'));
+                if !item {
+                    continue;
+                }
                 let mut j = k + 1;
                 if is_punct(toks.get(j), '<') {
                     let mut depth = 0;
@@ -288,7 +339,7 @@ fn scan_motor(src: &str) -> Vec<Violation> {
                         j += 1;
                     }
                 }
-                // Self type: after "for" if this is a trait impl, else the first type name.
+                // Self type: after the last `for` if this is a trait impl, else right after the generics.
                 let mut start = j;
                 let mut m = j;
                 while m < toks.len() && !is_punct(toks.get(m), '{') && ident(&toks[m]) != Some("where") {
@@ -297,12 +348,24 @@ fn scan_motor(src: &str) -> Vec<Violation> {
                     }
                     m += 1;
                 }
-                let self_ty = toks[start..m.min(toks.len())]
-                    .iter()
-                    .filter_map(ident)
-                    .find(|s| !matches!(*s, "mut" | "dyn" | "const"));
+                // Skip references, raw pointers, lifetimes and `mut`/`dyn`/`const`; the next identifier is
+                // the self type's name. A tuple, array or qualified path has no single name: refuse.
+                let mut self_ty: Option<&str> = None;
+                let mut q = start;
+                while q < m {
+                    match &toks[q].0 {
+                        Tok::Punct('&' | '*') => q += 1,
+                        Tok::Punct('\'') => q += 2,
+                        Tok::Ident(s) if matches!(s.as_str(), "mut" | "dyn" | "const") => q += 1,
+                        Tok::Ident(s) => {
+                            self_ty = Some(s);
+                            break;
+                        }
+                        Tok::Punct(_) => break,
+                    }
+                }
                 if !self_ty.is_some_and(|s| locals.contains(&s)) {
-                    push(t.1, &format!("motor.rs impl for {}, which motor.rs does not define: it would hang a method (or an Executed* result) on a decision type (motor.rs rule)", self_ty.unwrap_or("?")));
+                    push(t.1, &format!("motor.rs impl for {}, which is not a struct, enum or union motor.rs defines: it would hang a method (or an Executed* result) on a decision type (motor.rs rule)", self_ty.unwrap_or("a tuple, array or qualified-path type")));
                 }
             }
             _ => {}
@@ -331,7 +394,9 @@ fn report(rel: &str, vs: &[Violation], failures: &mut Vec<String>) {
 
 #[test]
 fn decision_code_never_names_executed_values() {
-    let src_dir = Path::new(env!("CARGO_MANIFEST_DIR")).join("src");
+    let src_dir = std::env::var_os("EXEC_ISOLATION_SRC")
+        .map(PathBuf::from)
+        .unwrap_or_else(|| Path::new(env!("CARGO_MANIFEST_DIR")).join("src"));
     let mut files = Vec::new();
     rs_files(&src_dir, &mut files);
     let rels: Vec<String> = files
@@ -384,6 +449,12 @@ fn scanner_flags_each_planted_violation() {
         ("path attribute", "#[path = \"motor.rs\"]\nmod sneaky;"),
         ("inner path attribute", "#![path = \"motor.rs\"]"),
         ("include!", "include!(\"motor.rs\");"),
+        ("cfg_attr path", "#[cfg_attr(all(), path = \"motor.rs\")]\nmod sneaky;"),
+        ("cfg_attr path, nested", "#[cfg_attr(not(any(test, doc)), cfg_attr(unix, path = \"motor.rs\"))]\nmod sneaky;"),
+        ("inner cfg_attr path", "#![cfg_attr(all(), path = \"motor.rs\")]"),
+        ("renamed include", "use core::include as inc;\ninc!(\"motor.rs\");"),
+        ("renamed include_str", "use core::include_str as inc;"),
+        ("path-qualified include", "core::include!(\"motor.rs\");"),
         ("include_str!", "const S: &str = include_str!(\"motor.rs\");"),
         ("paste", "paste! { type T = [<Executed Swing>]; }"),
         ("raw identifier", "fn f(x: r#ExecutedSwing) {}"),
@@ -431,6 +502,8 @@ fn scanner_ignores_clean_mentions() {
         ("doc attribute", "#[doc = \"see motor::ExecutedSwing\"]\nfn f() {}"),
         ("similar identifiers", "let motor_latency_s = 0.1; let executed = 1; let execution_noise = 2; fn execute() {}"),
         ("field and variable names that merely contain the words", "struct S { motor_lag: f64, executed_count: u32 }"),
+        ("variable called path", "let path = 3; if path == 3 {}"),
+        ("ordinary attributes", "#[derive(Debug, Clone)]\n#[cfg(test)]\nstruct S;\n#[cfg_attr(test, derive(Debug))]\nstruct T;"),
         ("lifetime then comment", "fn f<'a>(x: &'a str) -> &'a str { x } // ExecutedSwing"),
     ];
     for (what, src) in clean {
@@ -445,7 +518,11 @@ fn motor_scan_flags_name_free_leaks_and_accepts_the_real_shape() {
               impl ReleaseNoise { pub fn new() -> Self { Self { angle: 0.0 } } }\n\
               impl Default for ReleaseNoise { fn default() -> Self { Self::new() } }\n\
               pub struct ExecutedRelease { pub yaw: f64 }\n\
-              pub fn execute_release(i: &IntendedRelease) -> ExecutedRelease { todo!() }\n";
+              pub fn execute_release(i: &IntendedRelease) -> ExecutedRelease { todo!() }\n\
+              impl<'a> Show for &'a ReleaseNoise { fn show(&self) {} }\n\
+              unsafe impl Send for ReleaseNoise {}\n\
+              pub fn execute_throw(rng: &mut impl Rng, k: impl Into<f64>) -> impl Iterator<Item = f64> { todo!() }\n\
+              pub fn pick(x: Option<impl Clone>) -> Box<impl Fn()> { todo!() }\n";
     assert!(scan_motor(ok).is_empty(), "{:?}", scan_motor(ok));
     let bad: &[(&str, &str)] = &[
         ("impl on a decision type", "use crate::pitcher::IntendedRelease;\nimpl IntendedRelease { pub fn run(&self) -> ExecutedRelease { todo!() } }"),
@@ -454,6 +531,16 @@ fn motor_scan_flags_name_free_leaks_and_accepts_the_real_shape() {
         ("blanket impl", "pub struct L;\nimpl<T> Run for T { fn run(&self) {} }"),
         ("trait definition", "pub trait Execute { fn go(&self) -> ExecutedSwing; }"),
         ("macro definition", "macro_rules! go { () => {}; }"),
+        ("type alias of a decision type, then impl", "use crate::pitcher::IntendedRelease;\ntype Alias = IntendedRelease;\nimpl Alias { pub fn run(&self) -> ExecutedRelease { todo!() } }"),
+        ("alias of a local type, then impl (refused: write it on the type)", "pub struct L;\ntype A = L;\nimpl A {}"),
+        ("tuple self type", "pub struct L;\nimpl Tr for (L, IntendedRelease) { }"),
+        ("array self type", "impl Tr for [IntendedRelease; 2] { }"),
+        ("qualified path self type", "impl Tr for <IntendedRelease as X>::Y { }"),
+        ("path self type", "impl crate::pitcher::IntendedRelease { }"),
+        ("lifetime generics, foreign reference", "impl<'a> Tr for &'a IntendedRelease { }"),
+        ("unsafe impl on a decision type", "unsafe impl Send for IntendedRelease {}"),
+        ("impl after an attribute", "#[allow(dead_code)]\nimpl IntendedRelease {}"),
+        ("impl inside a function body", "fn f() { impl IntendedRelease { } }"),
     ];
     for (what, src) in bad {
         assert!(!scan_motor(src).is_empty(), "motor scan missed: {what}");
