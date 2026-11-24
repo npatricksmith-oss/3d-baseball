@@ -57,8 +57,20 @@ In practice the worker measured the extrapolation error at 0.0–0.1 ms (§13.10
 
 ### Mutation results
 
-Job 210 was still queued behind other workers' jobs when this review was written; the results are not in. The Coordinator can read them with `bin/job.sh log 210`.
+Run by the author of the fixes (the reviewer's job 210 failed on the unquoted space in the repository path): copies of `sim/` in the scratchpad, `cargo test --release -p bb_ffi` on the two E1 tests, the new one included (queue job 245, log `sim/target/swing1-mutations.txt`).
+
+| Mutation | Result |
+| :-- | :-- |
+| A: `swing_contact_s` written 10 ms late | fails: `the_swings_clocks_and_the_bat_between_its_samples` (the `swing_contact_s` equality) |
+| B: the interpolated knob 5 cm off in x | fails both: 5.037 cm off the swing's own, and 5.000 cm off the sim's bat at 0.2601 s in the new test |
+| C: `BAT_INTERP_MAX_GAP_S` 0.5 s | passes the old test (as the review expected), **fails the new one**: with no load the bat blends from the stance toward the swing's start over the whole pitch (0.254 cm and 0.64° off at 3.4 ms) |
 
 ## Resolution
 
-Open.
+Resolved 2026-11-24 on `work/base-swing-step1` (merged with main `2b3c1eb`).
+
+- **P2-1: fixed.** `CheckBat` no longer copies `TA` and `CatchT` into the withheld take: it works them out again (`PitchPlaneT` gained a `CutAt` argument: a ball hit, from the track cut 30 ms before contact; a miss, from the track cut at the swing's nominal contact; the catch from the call time) and fails when the swing's `TA` is more than 0.5 ms away (`ta_err` in `BB_BATCHECK`). A pitch that never reaches the plane on its track (in the dirt) has no `TA` to compare. **Planted fault** (`TA` taken from the swing's contact on swings, applied to the working tree and restored, built twice): the check fails all 18 swings of seed 7, `ta_err` 1.4–71 ms and `d22` up to 6.7 cm; restored, seeds 6 and 7 pass (0 FAIL, 35 swings). The new check also found a real bug the old one could not: `PitchPlaneT`'s scan stopped a step before contact, so a ball hit just past the plane fell back on 0.42 s (26 of 398 swings). Fixed in the same commit series (`PitchPlaneT`'s loop now ends at contact).
+- **P3-1: fixed.** New test `the_bat_before_and_through_the_swing_is_the_sims_own` compares the drawn bat with the sim's own over the whole track (stance, the load's straight line, the swing) at 1.7 ms steps and at both sides of the stance-to-load and load-to-swing boundaries, for 40 swings each with the decision as it was, with no load (`t_decide` = the swing's start) and with the load cut to 20 ms. Mutations A, B and C now each fail something (table above); C failed nothing before.
+- **P3-2: fixed.** `docs/player-visuals.md` line 3 and the §13 heading ("step 1 of 5 built"); the three anchors (PLAN, TASKS, §9) renamed.
+- **P3-3: judged and printed, not redesigned.** `client/check-bat-step1.sh` prints the handover's hand speed over all the swings it checked (median, p95, worst, how many above 10 m/s, the largest gap) and takes `BB_SEEDS`, `BB_SPEED`, `BB_HANDS`, `BB_MIN_SWINGS` for a long run without the hands comparison. 406 swings: worst 13.5 m/s, 17 (4.2%) above 10 m/s, three of them (gaps 38–45 cm) 2.06–2.34 cm from the carried-on motion at the handover's end (limit 2 cm), reported by the script as failures. §13.10 has the figures and the judgment; the handover stays as it is until Q44.
+- **P3-4: fixed.** The dead `X0, X1, X2` are gone.
