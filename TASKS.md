@@ -1,6 +1,6 @@
 # Task List
 
-**Last updated:** 2026-11-24 (depth read).
+**Last updated:** 2026-11-24 (swing stance refit).
 
 What is next and what is open. Other files hold the rest:
 
@@ -17,7 +17,7 @@ Status: `[ ]` not started · `[~]` partly done · `[?]` needs an owner decision
 
 ## Resume here (2026-11-24)
 
-**State.** Swing v3 ([spec](docs/swing-model-v3.md)): steps 0–1 and the swing family (D27, §6.7) merged; its [review](docs/reviews/2026-11-24-opus-swing-family-review.md) leaves the hands' stall open. PLAN D28: the batter stands 0.58 m deeper ([note 11](docs/research/swing/11-stance-depth.md)). Worker `swing-stance` (Opus, `work/swing-stance`, worktree `swing-research`): refits the family and oracle at that stance; needs an Opus review. **Q51 waits on the owner** (meet the ball 0.15 m further out front, as MLB does, or not). Then step 2 (Rust). Step 4 brings Q45 back with game measurements.
+**State.** Swing v3 ([spec](docs/swing-model-v3.md)): steps 0–1 and the family (D27) merged; its refit at MLB's stance (D28, §5.3.1) done in the oracle by `swing-stance` (`work/swing-stance`, worktree `swing-research`; needs an Opus review): the hands rise once. Open: the arms at contact on low pitches, late contact faster than MLB's (§6.7.4, §6.7.6). **Q51 waits on the owner** (§6.7.8; keep 0.35 m recommended). Then step 2 (Rust) and 3b (move the batter). Step 4 brings Q45 back with game measurements.
 
 **Next:** §2: the ground-dive leftovers ([note](docs/calibration/2026-11-23-of-ground-dive.md) §9); swing step 2 after the stance refit.
 

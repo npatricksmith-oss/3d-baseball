@@ -632,9 +632,8 @@ class RatingRange(unittest.TestCase):
     @unittest.expectedFailure
     def test_both_ratings_at_three_sd_at_once(self):
         """Fails at the long corner (BatSpeed +3 sd and QuickHands −3 sd together, travel 1.30, +4.2 sd,
-        beyond MLB's longest swings, note 10): the hands' speed dips up to 14% before its peak and the
-        sweet spot's 1–3% on middle and high pitches, and the low-inside one peaks at 1.11× (spec
-        §6.7.4)."""
+        beyond MLB's longest swings, note 10): on the outer pitch at mid-height the hands' speed dips
+        4.3% before its peak; the other eight corner swings pass every check (spec §6.7.4)."""
         for kw, d in self.rows:
             if kw['corner']:
                 self.assertEqual(s.range_failures(d), [], kw)
