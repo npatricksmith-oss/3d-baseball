@@ -1,6 +1,6 @@
 # Task List
 
-**Last updated:** 2026-11-23 (Q37 = D23).
+**Last updated:** 2026-11-24 (swing step 1).
 
 What is next and what is open. Other files hold the rest:
 
@@ -17,7 +17,7 @@ Status: `[ ]` not started · `[~]` partly done · `[?]` needs an owner decision
 
 ## Resume here (2026-11-24)
 
-**State.** Workers: `swing-1` (§13). Ground-ball dive merged (Code Mode trial 3; 572 tests, runs 4.09 [4.37]). **Waiting on the owner:** Q43 (player-visuals §13.5).
+**State.** No workers. Swing step 1 merged, off by default. **Waiting on the owner:** Q43 (player-visuals §13.5), Q44 (docs/research/swing/launch-position.md).
 
 **Next:** §2: the depth read of a ball first seen on the ground, or the ground-dive leftovers ([note](docs/calibration/2026-11-23-of-ground-dive.md) §9).
 
