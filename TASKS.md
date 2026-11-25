@@ -23,7 +23,7 @@ Status: `[ ]` not started · `[~]` partly done · `[?]` needs an owner decision
 
 **Owner:** Q55 = a, outliers allowed (D32); Q56 = b (D33); Q57 = go.
 
-**Phase 1 running:** worker `body-3d` (Fable), Workers tab t4c, worktree `swing-research`, branch `work/body-3d`. Session 1 merged (`385f206`: 3D engine, 19 checks, spec §4.4). Session 2 (job WORKER-BODY-3D-2.md there): the fit under the design's rules. On stop: report, `git status`, tests, merge. Opus review at the gate.
+**Phase 1 running:** worker `body-3d` (Fable), Workers tab t4c, worktree `swing-research`, `work/body-3d`. Session 1 merged (`385f206`). Session 2 (job WORKER-BODY-3D-2.md there): the fit under the rules. Then: tests, merge. Opus review at gate.
 
 **Next:** §2: the ground-dive leftovers ([note](docs/calibration/2026-11-23-of-ground-dive.md) §9).
 
@@ -194,6 +194,7 @@ Check the code again before starting one.
 - [ ] **M5** Deepen the field (much of it is under way above)
 - [ ] **M6** Live management (the primary experience)
 - [ ] M6 policy and calibration: manager personalities, full tactic set, fatigue and bullpen use bands; define elapsed-time gaps for warm-up and fatigue (data-formats §2.2).
+- [ ] M6 learned tables: add a best-answer test ([note](docs/research/cogentic/README.md) §2).
 - [ ] M6 explanations and replay: implement belief snapshots and explanation facts, then settle highlight retention and fact importance (data-formats §5.1, §5.5–§5.6).
 - [ ] **M7** League and season. Generate more parks and add a run-factor check (0.85–1.15) for each.
 - [ ] **M8** Presentation polish. Revisit the RAM upgrade before this.
