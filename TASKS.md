@@ -19,11 +19,11 @@ Status: `[ ]` not started · `[~]` partly done · `[?]` needs an owner decision
 
 **State.** PLAN D31–D34: a force-driven body; PLAN §14.1, spec [docs/body-motion.md](docs/body-motion.md).
 
-**Phase 1 (spec §4.7; sessions 1–6 merged):** on measured limits the body reaches the ball (+4 ms). Outside: the bat's speed, 20.1 m/s (gate 29–34; [4]'s own 22.9), and the trunk's curve.
+**Phase 1 (spec §4.4, §4.8, §4.9; sessions 1–7 merged):** every designed freedom driven: contact +0.8 ms, every gated curve inside a band; the bat 21.3 m/s (48 mph), outside. [4]'s "51 mph" is its smoothing through impact (62–67 mph undone).
 
-**[?] Q59: the gate's bat speed** (§4.4): (a) [4]'s 22.9 m/s, review now; (b) 29–34, the missing drives first; (c) the drives, then review at (a)'s speed. Recommended: (c), with 29–34 required before games.
+**[?] Q59, restated (§4.4):** (a) gate 29–34 m/s, the last 40 ms fitted to unsmoothed curves; (b) gate 27–34, same; (c) no change. Recommended: (b).
 
-**Running, not waiting on Q59:** `body-3d` (Fable, pane t4c, worktree `swing-research`), job WORKER-BODY-3D-7.md: the placed motion's speed; the missing drives, limits first; the refit. Then: checks, merge, Opus review.
+**Running:** `rev-body-3d-7` (Opus, pane t4c, worktree `swing-research`, REVIEW-BODY-3D-7.md): commit, resolve, merge. Session 8 after it and Q59: the trunk's second channel out, more cold starts, the hands' speed.
 
 **Next:** §2: the ground-dive leftovers ([note](docs/calibration/2026-11-23-of-ground-dive.md) §9).
 
