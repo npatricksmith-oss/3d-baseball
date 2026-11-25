@@ -778,7 +778,7 @@ A floor from [4] itself, independent of all of the above: a ball leaving at [4]'
 
 ### 4.9 The refit with every designed freedom driven (session 7)
 
-`fit3d.py` on §4.5's limits with its last block, written and committed before the engine had the channels: 41 channels, 205 numbers; three cold starts staged as before (25, 25 and 40 iterations) and one more from session 6's fitted plan with the new channels switched off; one run of the whole body for the reported numbers (the same at a 0.5 ms step to 0.1 ms and 0.1 m/s). 46,400 swings, 38 minutes. The compiled probe agrees with the Python engine with all 41 channels on (4 × 10⁻¹²), and with the new channels off the new code reproduces session 6's fit exactly (+4.0 ms, 20.1 m/s). This is a laboratory fit of the model's drive numbers to a recorded average swing, as before.
+`fit3d.py` on §4.5's limits with its last block, written and committed before the engine had the channels: 41 channels, 205 numbers; three cold starts staged as before (25, 25 and 40 iterations) and one more from session 6's fitted plan with the new channels switched off; one run of the whole body for the reported numbers (the same at a 0.5 ms step to 0.1 ms and 0.1 m/s). 46,400 swings, 38 minutes. The compiled probe agrees with the Python engine with all 41 channels on and on the fitted swing itself (9 × 10⁻¹² at worst), and with the new channels off the new code reproduces session 6's fit exactly (+4.0 ms, 20.1 m/s). This is a laboratory fit of the model's drive numbers to a recorded average swing, as before.
 
 | | Start 0 | Start 1 (best) | Start 2 | From session 6's fit | The gate |
 | :-- | --: | --: | --: | --: | :-- |
