@@ -53,6 +53,8 @@ FLEX_MAX = 150.0          # deg [E] knee's and elbow's full bend; 0 = straight, 
 STOP_K, STOP_C = 2000.0, 20.0   # [E] N m/rad, N m s/rad: a joint's end-of-range stop (one-sided, never pulls)
 # posture [4] does not give, [E]
 TRUNK_FLEX = 15.0         # deg, the trunk bent forward over the pelvis
+TRUNK_TILT_IN_WORLD = False   # False: the forward bend turns with the trunk [E]. True: the lean stays toward the plate (trunk3d.py's case)
+TRUNK_SIDE = 0.0          # deg [E], the trunk bent sideways (+: toward the rear side); [4] reports it but no curve is digitised
 REAR_FOOT_YAW = 0.0       # deg from +X: the rear foot square to the plate
 STRIDE = 0.42             # x H between the ankles ([4]: 42 % of height, toe to toe; measured)
 STRIDE_CLOSED = 0.11      # m, lead foot toward the plate ([4], measured)
@@ -344,7 +346,9 @@ def pose(mdl, t0, heel="solve", report=None, hands_guess=None, hands_solve=True)
             q = E.axes_to_q(ex, ey, ez)
             s.set_body(st, b[body + sd], E.sub(top, E.mv(E.qR(q), c)), q)
     # trunk: measured rotation, bent forward [E]
-    qt = E.qmul(E.qaxis(up, curve("trunk_rot", t0) * D2R), E.qaxis((0, 1, 0), TRUNK_FLEX * D2R))
+    qt = E.qmul(E.qmul(E.qaxis(up, curve("trunk_rot", t0) * D2R), E.qaxis((0, 1, 0), TRUNK_FLEX * D2R)), E.qaxis((1, 0, 0), TRUNK_SIDE * D2R))
+    if TRUNK_TILT_IN_WORLD:      # the lean kept toward the plate while the trunk turns under it (a sensitivity case)
+        qt = E.qmul(E.qaxis((0, 1, 0), TRUNK_FLEX * D2R), E.qaxis(up, curve("trunk_rot", t0) * D2R))
     Rt = E.qR(qt)
     lum = E.add(xp, E.mv(Rp, mdl.jp["lumbar"][1]))
     xt = E.sub(lum, E.mv(Rt, mdl.jp["lumbar"][3]))
