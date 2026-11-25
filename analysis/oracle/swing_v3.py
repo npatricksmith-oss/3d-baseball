@@ -44,10 +44,31 @@ BAT_L = 34 * 0.0254        # the 34-in bat
 U_SS = BAT_L - 0.15        # sweet spot (as v2's goldens)
 U_CM = 0.5977425305663189  # golden/bat_default.json
 SEG = dict(upper_arm=0.186, forearm=0.146, half_shoulder=0.112, clavicle=0.28, hip=0.45)  # × H (§5.2, §5.3; hip 0.50 before the D29 refit)
-# Body knots (§5.3 table): pelvis forward of P (m), pelvis rise (m), trunk turn, flexion, lean (deg)
-BODY = {'L': (0.12, 0.00, -22.0, 8.0, 10.0),
-        '93': (0.17, 0.00, 2.0, 13.0, 23.0),
-        'c': (0.17, 0.05, 75.0, 15.0, 31.0)}
+# Body knots (§5.3 table): pelvis forward of P (m), pelvis rise (m), trunk turn, flexion, lean (deg).
+# P is the pelvis at the end of [4]'s stance phase (after its 6 cm drift back; the review's P1-1): then
+# [4]'s 7 + 11 cm to the launch, 5 cm more to −93 ms and Appendix E's 1 cm to contact.
+BODY = {'L': (0.18, 0.00, -22.0, 8.0, 10.0),
+        '93': (0.23, 0.00, 2.0, 13.0, 23.0),
+        'c': (0.24, 0.05, 75.0, 15.0, 31.0)}
+# The contact body follows the pitch [E] (§5.3; the review's P1-1): per 0.1·H (0.185 m at 1.85 m), forward
+# flexion +15° for an aim below the zone's middle height (0.4025·H) and +10° for an aim more than 0.10 m
+# outside of the plate's centre (reaching out over the plate), and the lean toward the rear side −3° for an
+# aim above the middle. No source gives the trunk by location ([4] Table 1 gives the lead knee, 15–18° at
+# every location, and the trunk's turn); [3]'s tee swing ends at 20° of lateral flexion, 9° of extension.
+FLEX_LOW_DEG = 15.0
+FLEX_OUT_DEG = 10.0
+OUT_FROM = 0.10
+LEAN_HIGH_DEG = 3.0
+BEND_PER_H = 0.10
+ZONE_MID_FRAC = 0.4025
+
+
+def contact_body_params(aim, side, H):
+    fwd, rise, turn, flex, lean = BODY['c']
+    below = max(0.0, ZONE_MID_FRAC * H - aim[2]) / (BEND_PER_H * H)
+    above = max(0.0, aim[2] - ZONE_MID_FRAC * H) / (BEND_PER_H * H)
+    outside = max(0.0, side * aim[0] - OUT_FROM) / (BEND_PER_H * H)
+    return (fwd, rise, turn, flex + FLEX_LOW_DEG * below + FLEX_OUT_DEG * outside, lean - LEAN_HIGH_DEG * above)
 # Arms at the knots ([4] §4.1.4-4.1.5): rear shoulder elevation, azimuth, rear elbow flexion,
 # lead elbow flexion, target lag; bat elevation (deg).
 ARMS = {'L': dict(rear_elev=71.0, rear_az=-78.0, rear_elbow=128.0, lead_elbow=72.0, lag=121.0, bat_elev=41.0),
@@ -65,10 +86,10 @@ TRACK_AFTER_S = 0.030      # the track ends at t_c + 0.03 s (D24)
 # comparisons of §5.3.
 P_TODAY = (-0.95, 0.30, 0.0)
 # PLAN D28 (§5.3): the batter stands where MLB's do. Savant's batting-stance leaderboard (2025, note 11):
-# the hip midpoint 0.708 m behind the plate's front edge (y = 0.432 − 0.708), 0.918 m off the middle line
-# (the game's 0.95 kept). Read as the position at the stance, carried forward by [4]'s stride to contact
-# (§5.3's knots) [E: the reading; §5.3 says why and what would settle it].
-P_STANCE = (-0.95, 0.432 - 0.708, 0.0)
+# the hip midpoint 0.708 m behind the plate's front edge (y = 0.432 − 0.708) and 0.918 m off the middle
+# line. Read as the position at the end of the stance, from which [4]'s stride carries him forward
+# (§5.3's knots) [E: the reading; §5.3.1 says why and what would settle it].
+P_STANCE = (-0.918, 0.432 - 0.708, 0.0)
 # Where the middle pitch is met, y, and its slope across the plate (contact_k). PLAN D29 (owner Q51 = a):
 # where MLB's batters meet it, Savant's average nearest approach 0.505 m less the middle pitch's own
 # shortfall from the average (about 0.01 m in step 0's per-pitch sample; up to 0.04 m by note 11 §3)
@@ -701,6 +722,7 @@ class Template(SwingStep1):
         self.sT = self.T / T4
         self.tau93 = T4_93 * self.sT
         self.bodies = {k: Body(k, H, self.P) for k in BODY}
+        self.bodies['c'] = Body('c', H, self.P, params=contact_body_params(aim, side, H))   # follows the pitch (§5.3)
         self.W_L = hands_anchor('L', H, self.P)
         self.W_93 = hands_anchor('93', H, self.P)
         (A0, A1, A2), (E0, E1, E2) = self.jet.A, self.jet.E
@@ -1038,6 +1060,7 @@ def range_failures(d, H=1.85):
     if d['rate_worst_dip'] > RATE_DIP_TOL or d['ss_worst_dip'] > SPEED_DIP_TOL: bad.append('one surge')
     if d['hands_worst_dip'] > SPEED_DIP_TOL or d['knob_worst_dip'] > KNOB_DIP_TOL: bad.append('hands one surge')
     if max(d['lead_arm_over_L'], d['rear_arm_over_L'], d['lead_arm_over_93'], d['rear_arm_over_93']) > ARM_SLACK: bad.append('arms reach')
+    if max(d['lead_arm_over_c'], d['rear_arm_over_c']) > ARM_SLACK: bad.append('arms reach at contact')
     if not (E_RANGE[0] <= d['E_min'] and d['E_max'] <= E_RANGE[1]): bad.append('E range')
     if d['ss_ratio_max'] > SS_RATIO_MAX: bad.append('sweet-spot speed')
     if d['tip_ratio_max'] > TIP_RATIO_MAX: bad.append('tip speed')
