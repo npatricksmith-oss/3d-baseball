@@ -47,26 +47,26 @@ def start_state(body):
 # fixed [E] maximum shortening speeds per channel (rad/s, m/s): docs 4.2 lists them as unsourced
 WMAX = {"legs": 20.0, "core": 25.0, "shoulder": 30.0, "wrist": 40.0, "rear": 3.0, "lead": 3.0}
 NAMES = ["T_legs", "on_legs", "T_core", "on_core", "T_sh", "on_sh", "T_wr", "on_wr", "T_rear", "T_lead", "on_lead",
-         "rise_legs", "rise_core", "rise_sh", "rise_wr"]
-X0 = [769, -0.25, 219, -0.185, 275, -0.196, 336, -0.05, 9, 253, -0.10, 0.08, 0.03, 0.03, 0.02]
-SCALE = [100, 0.02, 80, 0.02, 80, 0.02, 60, 0.02, 40, 80, 0.02, 0.03, 0.02, 0.02, 0.02]
+         "rise_legs", "rise_core", "rise_sh", "rise_wr", "off_legs", "off_core"]
+X0 = [769, -0.25, 219, -0.185, 275, -0.196, 336, -0.05, 9, 253, -0.10, 0.08, 0.03, 0.03, 0.02, -0.05, -0.04]
+SCALE = [100, 0.02, 80, 0.02, 80, 0.02, 60, 0.02, 40, 80, 0.02, 0.03, 0.02, 0.02, 0.02, 0.02, 0.02]
 
 
 def make_plan(p, body):
-    T_legs, on_legs, T_core, on_core, T_sh, on_sh, T_wr, on_wr, T_rear, T_lead, on_lead, r1, r2, r3, r4 = p
-    ch = {"legs": [T_legs, on_legs, 1.0, WMAX["legs"], r1], "core": [T_core, on_core, 1.0, WMAX["core"], r2],
+    T_legs, on_legs, T_core, on_core, T_sh, on_sh, T_wr, on_wr, T_rear, T_lead, on_lead, r1, r2, r3, r4, off1, off2 = p
+    ch = {"legs": [T_legs, on_legs, off1, WMAX["legs"], r1], "core": [T_core, on_core, off2, WMAX["core"], r2],
           "shoulder": [T_sh, on_sh, 1.0, WMAX["shoulder"], r3], "wrist": [T_wr, on_wr, 1.0, WMAX["wrist"], r4],
           "rear": [T_rear, -1.0, -0.10, WMAX["rear"]], "lead": [T_lead, on_lead, 1.0, WMAX["lead"]]}
     return Plan(ch, t_fd=-0.34, start=start_state(body))
 
 
 def cost(p, body, verbose=False):
-    if any(v < 0 for v in (p[0], p[2], p[4], p[6], p[8], p[9])) or any(v < 0.0 or v > 0.25 for v in p[11:15]):
+    if any(v < 0 for v in (p[0], p[2], p[4], p[6], p[8], p[9])) or any(v < 0.0 or v > 0.25 for v in p[11:15]) or p[15] < p[1] + 0.03 or p[16] < p[3] + 0.03:
         return 1e9
     sim = Sim(body, make_plan(p, body), dt=0.001, record=True)
     out = sim.run(t_end=0.03)
     if out["contact"] is None:
-        return 1e6
+        return 1e3 + ((-8 * D2R - out["x_end"][4]) / D2R) ** 2    # graded, so the search can climb out
     tc = out["contact"][0]
     c = (tc / 0.003) ** 2 * 4            # contact time, 3 ms scale, weight of 4 points
     npts = 0
@@ -122,6 +122,11 @@ def main():
     if os.path.exists(path):
         old = json.load(open(path))["params"]
         x0 = [old.get(k, X0[i]) for i, k in enumerate(NAMES)]
+        if "off_legs" not in old:
+            x0[NAMES.index("off_legs")] = 0.02; x0[NAMES.index("off_core")] = 0.02
+        if "rise_legs" not in old:          # rises new: start each onset half its rise earlier
+            for k, r in (("on_legs", "rise_legs"), ("on_core", "rise_core"), ("on_sh", "rise_sh"), ("on_wr", "rise_wr")):
+                x0[NAMES.index(k)] -= 0.5 * X0[NAMES.index(r)]
     t = time.time(); c0 = cost(x0, body); print("start cost %.3f (%.2f s per eval)" % (c0, time.time() - t))
     best, val = x0, c0
     for rnd in range(3):

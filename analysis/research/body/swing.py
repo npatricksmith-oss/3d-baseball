@@ -13,7 +13,8 @@ HERE = os.path.dirname(os.path.abspath(__file__))
 
 
 def fitted():
-    return [json.load(open(os.path.join(HERE, "fit_params.json")))["params"][k] for k in fit.NAMES]
+    d = json.load(open(os.path.join(HERE, "fit_params.json")))["params"]
+    return [d.get(k, fit.X0[i]) for i, k in enumerate(fit.NAMES)]
 
 
 def summary(sim, out):
@@ -75,7 +76,7 @@ def main():
         max(d["legs"] for d in out["tau"]), max(d["core"] for d in out["tau"]), max(d["shoulder"] for d in out["tau"]),
         max(d["wrist"] for d in out["tau"]), max(d["lead"] for d in out["tau"]), max(d["rear"] for d in out["tau"])))
     # energy check: KE change = work of all forces (drives, the wrist stop, ground)
-    ke0, ke1 = out["ke"][0], out["ke"][-1]
+    ke0, ke1 = out["ke"][0], sim.ke(out["x_end"])
     print("energy: KE %.2f -> %.2f J, change %.3f J; drives' work %.3f J; mismatch %.2e J (%.1e of the change)" % (
         ke0, ke1, ke1 - ke0, out["work"], (ke1 - ke0) - out["work"], abs((ke1 - ke0) - out["work"]) / abs(ke1 - ke0)))
     print("time per swing in this probe: %.2f s for %.0f ms at dt 0.5 ms (%d steps)" % (el, (out["t_end"] - out["t"][0]) * 1000, len(out["t"])))

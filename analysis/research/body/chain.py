@@ -67,6 +67,8 @@ class Plan:
         self.mu, self.r_free = mu, r_free
 
 
+TAU_LOAD = 0.17                       # lead foot's loading time after touch-down [E from [4]'s 10 -> 50 % BW]
+SEP_STOP = 45 * D2R                   # trunk-on-pelvis axial rotation limit [E: a range of motion, unsourced]
 TA_UP, TA_DN = 0.015, 0.050           # activation time constants (s), OpenSim Thelen2003Muscle defaults [E]
 K_FV = 0.25                           # Hill curvature a/F0 [E: Hill 1938's order]
 ECC = 1.5                             # eccentric plateau [E]
@@ -150,6 +152,9 @@ class Sim:
         if t < self.p.t_fd:
             return 0.0, W
         fl = min(1.0, max(0.0, s / b.stride))
+        # the lead foot takes weight over TAU_LOAD after it touches ([4]: 10 % BW at foot down, -340 ms,
+        # to 50 % at the weight commitment, -170 ms): the vertical dynamics the planar model leaves out [E]
+        fl *= min(1.0, (t - self.p.t_fd) / TAU_LOAD)
         return W * fl, W * (1 - fl)
 
     def forces(self, t, q, qd, act):
@@ -159,7 +164,7 @@ class Sim:
         rel = {"legs": qd[1], "core": qd[2] - qd[1], "shoulder": qd[3] - qd[2], "wrist": qd[4] - qd[3],
                "rear": qd[0], "lead": -qd[0]}
         for n in CHANNELS:
-            T, ton, toff, Wmax = ch[n]
+            T, ton, toff, Wmax = ch[n][:4]
             tau[n] = T * act[n] * fv(rel[n] / Wmax)
         # lead leg brakes only once the foot is down, and only while the body moves forward
         if t < p.t_fd or qd[0] <= 0.0:
@@ -173,6 +178,11 @@ class Sim:
         cap = mu * min(Fl, Fr) * b.stride + mu * p.r_free * (Fl + Fr)
         self.cap = cap
         tau["legs"] = max(-cap, min(cap, tau["legs"]))
+        # passive trunk-on-pelvis range of motion (both ways) [E]
+        sep = q[2] - q[1]
+        if abs(sep) > SEP_STOP:
+            sg = 1.0 if sep > 0 else -1.0
+            tau["core"] += -sg * 2.0e3 * (abs(sep) - SEP_STOP) - 20.0 * (qd[2] - qd[1]) * (1.0 if sg * (qd[2] - qd[1]) > 0 else 0.0)
         # passive wrist stop at the cock limit (stiff one-sided spring-damper) [E]
         lag = q[3] - q[4]
         if lag > b.lag_stop:
