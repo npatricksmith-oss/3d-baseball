@@ -209,7 +209,11 @@ class Model:
                 o[k] = (bz[0] * d[1] - bz[1] * d[0]) / h2 / D2R
             else:
                 o[k] = w[2] / D2R
-        o["sweet_speed"] = E.norm(self.bat_point(st, C.BAT_SS)[1])
+        vss = self.bat_point(st, C.BAT_SS)[1]
+        o["sweet_speed"] = E.norm(vss)
+        # the attack angle: the sweet spot's velocity above (+) or below level (deg). A check, never fitted
+        # (body-motion 4.5's held-out checks; OpenBiomechanics +4.1 +- 5.9 at contact, research note swing/6)
+        o["attack"] = math.asin(max(-1.0, min(1.0, vss[2] / o["sweet_speed"]))) / D2R if o["sweet_speed"] > 1e-9 else 0.0
         # held out of every fit (body-motion 4.5, session 7): each upper arm's angle from hanging at the side, in the
         # trunk's frame ([4]'s shoulder elevation as its polar angle is read here), and the azimuth of the line from
         # the lead shoulder to the lead wrist ([3]'s "arms", [E])

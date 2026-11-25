@@ -121,7 +121,16 @@ WITHOUT = {
     "without_forearm_rotation": {"only": tuple(n for n in CH if not n.startswith(("pron", "sup")))},
     "without_wrist_flexion_and_extension": {"only": tuple(n for n in CH if not n.startswith(("wrist_flex", "wrist_ext")))},
 }
-STRONGEST = {"strongest": {"goal": "speed"}, "strongest_on_time": {"goal": "speed", "tight": 10.0}}
+STRONGEST = {"strongest": {"goal": "speed"}, "strongest_on_time": {"goal": "speed", "tight": 10.0},
+             "strongest_held": {"goal": "speed", "tight": 10.0, "held": True}}
+# the strongest batter held to a hitter's swing (body-motion 4.9, session 7 fix; stated there before the run): asked for
+# speed as strongest_on_time, and in addition, each a one-sided penalty that is zero inside its limit:
+HELD_CURVES = ("pelvis_rot_vel", "pelvis_y", "lead_knee_flex", "lead_grf_z", "trail_grf_z", "lead_grf_x", "trail_grf_x",
+               "lead_grf_y", "trail_grf_y")     # the gate's ground-force and lower-body curves: RMS at most 1 band unit
+HELD_W = 30.0                # the penalty's weight per band unit (or unit below) past its limit [E]; stated before the run
+STOP_SLACK, STOP_UNIT = 5.0, 10.0   # N m: no stop may carry more than the average fit's swing makes it carry (+5), per 10 N m
+ATTACK_RANGE, ATTACK_UNIT = (-3.3, 10.7), 2.0   # deg: OpenBiomechanics' p10-p90 at contact (note 6); per 2 deg past it
+STOP_REF = {}                # the average fit's largest stop torques, set before a held run
 RULES = {"design": {}, "wrist_delp": {"wrist": "delp"}, **RELAX, **RANGES, **WITHOUT, **STRONGEST}
 
 
@@ -290,6 +299,17 @@ class Ctx:
                     pl = self.plan(u)
                     on = [pl[nm][1] for nm in ARMS if pl[nm][0] > 0.01 * self.bd[nm]]
                     r.append(max(0.0, (tfm - min(on)) - self.emd) / 0.001 if on else 0.0)
+            if self.rules.get("held"):
+                n = len(self.times)
+                for k in HELD_CURVES:
+                    rms = math.sqrt(sum(((a - b) / BAND[k]) ** 2 for a, b in zip(val[k], self.target[k])) / n)
+                    r.append(HELD_W * max(0.0, rms - 1.0))
+                upto = [o for t, o, g in rows if t <= tc + 1e-9]
+                for nm, ref in STOP_REF.items():
+                    pk = max(abs(o["stops"][nm][0]) for o in upto)
+                    r.append(HELD_W * max(0.0, pk - ref - STOP_SLACK) / STOP_UNIT)
+                lo, hi = ATTACK_RANGE
+                r.append(HELD_W * max(0.0, lo - oc["attack"], oc["attack"] - hi) / ATTACK_UNIT)
             return None if any(x != x for x in r) else r
         for k in (which or BAND):
             w = 1.0 / (BAND[k] * math.sqrt(n))
@@ -361,7 +381,8 @@ def lm(ctx, u, free, which=None, iters=25, log=None, fd=0.02):
                 break
             lam *= 4.0
         if log:
-            log("      iteration %2d: cost %.4f, lambda %.1e, %d runs" % (it + 1, cost, lam, ctx.evals))
+            log("      iteration %2d: cost %.4f, lambda %.1e, %d runs%s" % (it + 1, cost, lam, ctx.evals,
+                ", sweet spot at contact %.2f m/s" % (SPEED_ASK - SPEED_BAND * r[0]) if ctx.goal == "speed" else ""))
         if not improved or gain < 1e-5 * cost:
             break
     return u, cost
@@ -443,6 +464,8 @@ def show(out, log=print):
 
 
 HELD_BAND = 10.0             # deg [E]: the held-out shoulder elevations' unit (body-motion 4.5, session 7)
+ATTACK_MEASURED = (4.1, 5.9)  # deg: OpenBiomechanics' attack angle at contact, mean and SD (research note swing/6; a check, never fitted)
+ATTACK_PLACED = 5.6          # deg: [4]'s motion as placed on this body, at contact (batspeed.py section 4)
 
 
 def held_out(ctx, u, log=print):
@@ -507,6 +530,11 @@ def held_out(ctx, u, log=print):
     out["bat_peak_before_contact"] = (pk[0], pk[1] * 1e3, oc["sweet_speed"] / pk[0])
     log("   held out 4, the bat before contact: its fastest %.1f m/s at %.0f ms; at contact %.0f %% of that (measured hitters: 98 %%, the peak 2 +- 5 ms before)"
         % (pk[0], pk[1] * 1e3, 100 * oc["sweet_speed"] / pk[0]))
+    at = lambda tt: next(o["attack"] for t, o, g in rows if abs(t - tt) < 1e-9)
+    out["attack"] = (oc["attack"], at(-0.020), at(-0.010), at(0.0))
+    log("   held out 5, the attack angle (the sweet spot's path above level) at contact: %+.1f deg; at -20, -10, 0 ms: %+.1f, %+.1f, %+.1f"
+        "   [OpenBiomechanics %+.1f +- %.1f at contact, 677 swings of mostly college hitters (note 6); [4]'s motion placed on this body %+.1f]"
+        % (out["attack"] + ATTACK_MEASURED + (ATTACK_PLACED,)))
     return out
 
 
@@ -596,7 +624,15 @@ def main():
     if "--strongest" in a:
         base = json.load(open(base_file))
         print("the strongest batter the limits allow: from the design fit, every number free inside the rules, asked only for the sweet spot's speed at contact, the ball met on time and the bat's first motion at -170 ms")
-        name = "strongest_on_time" if "--on-time" in a else "strongest"
+        name = "strongest_on_time" if "--on-time" in a else "strongest_held" if "--held-swing" in a else "strongest"
+        if name == "strongest_held":
+            ref = Ctx(rules="design")
+            rows_ref = ref.run(ref.u_of(base["plan"]))
+            tc_ref = ref.measures(rows_ref)[1]
+            STOP_REF.update({nm: max(abs(o["stops"][nm][0]) for t, o, g in rows_ref if t <= tc_ref + 1e-9) for nm in rows_ref[0][1]["stops"]})
+            print("held to a hitter's swing: the gate's ground-force and lower-body curves within 1 band unit (%s), no stop past the average fit's"
+                  " largest (%s N m, +%.0f), the attack angle at contact in %.1f to %.1f deg, the timing held hard; each a one-sided penalty of weight %.0f"
+                  % (", ".join(HELD_CURVES), ", ".join("%s %.0f" % kv for kv in STOP_REF.items()), STOP_SLACK, ATTACK_RANGE[0], ATTACK_RANGE[1], HELD_W))
         if "--from" in a:
             base = json.load(open(arg("--from", "")))
         ctx, best = fit(name, 1, u_from=base["plan"], iters=(0, 0, it))
