@@ -21,7 +21,7 @@ Status: `[ ]` not started · `[~]` partly done · `[?]` needs an owner decision
 
 **Phase 1 (spec §4.4–§4.6; sessions 1–5 merged, `d47e1e0`):** on measured limits (owner Q58 = a, PLAN D34) the lower body is inside the gate; the bat is still 21–28 ms late at 18.6 m/s; the arms' limits are still estimates.
 
-**Running:** `arm-research` (Sonnet, Workers tab, own worktree, job file there): note 9, measured arm limits and when arm muscles switch on. Then: merge it; `body-3d` (Fable, pane t4c, worktree `swing-research`, idle) writes the arms' limits into §4.5 first, then refits. If it swings: an Opus review. A remaining gap: the owner.
+**Running:** `body-3d` (Fable, pane t4c, worktree `swing-research`), session 6, job WORKER-BODY-3D-6.md: the arms' measured limits ([note 9](docs/research/body/9-arm-limits.md)) written into §4.5 first, then the refit. Then: tests, merge. If it swings: review. A remaining gap: the owner (arms starting before the decision is his question).
 
 **Next:** §2: the ground-dive leftovers ([note](docs/calibration/2026-11-23-of-ground-dive.md) §9).
 
