@@ -17,13 +17,11 @@ Status: `[ ]` not started · `[~]` partly done · `[?]` needs an owner decision
 
 ## Resume here (2026-11-25)
 
-**State.** **PLAN D31 (Q54 = b): a force-driven body for the swing and the delivery; plan PLAN §14.1.** Swing v3's Rust step, D30 and Q53 are dropped.
+**State.** PLAN D31–D33 (owner: Q54 b, Q55 a with outliers, Q56 b, Q57 go): a force-driven body; plan PLAN §14.1, spec [docs/body-motion.md](docs/body-motion.md).
 
-**Phase 0 is merged (`262d0f3`):** [docs/body-motion.md](docs/body-motion.md), probes in `analysis/research/body/`, three reviews resolved. Stop rule: spec §13.
+**Phase 1 stopped at its gate (spec §4.4; sessions 1–3 merged, `d738a6f`):** the legs turn the pelvis in time, but the measured swing needs 330–440 N·m of trunk torque (bound 288) and 70–95% of hip and knee strength at speeds where the law leaves 25–60%. Worker `body-3d` (Fable) idle, pane t4c, worktree `swing-research`.
 
-**Owner:** Q55 = a, outliers allowed (D32); Q56 = b (D33); Q57 = go.
-
-**Phase 1 running:** worker `body-3d` (Fable), Workers tab t4c, worktree `swing-research`, `work/body-3d`. Sessions 1–2 merged (`57f3cf7`): under the rules the 3D body is 41–52 ms late at 17–18 m/s; the pelvis turns late (spec §4.4). Session 3 (job WORKER-BODY-3D-3.md there): can the legs turn it in time. Then: tests, merge; a shortfall: the owner.
+**Running:** `strength-research` (Sonnet, t4f, own worktree, job file there): sources, note 8 in `docs/research/body/`. Then merge; `[?]` Q58 to the owner: higher bound or flatter law, or elastic stretch (his "rubber band").
 
 **Next:** §2: the ground-dive leftovers ([note](docs/calibration/2026-11-23-of-ground-dive.md) §9).
 
