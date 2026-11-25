@@ -1,6 +1,6 @@
 # Task List
 
-**Last updated:** 2026-11-24 (swing stance refit).
+**Last updated:** 2026-11-24 (depth read).
 
 What is next and what is open. Other files hold the rest:
 
@@ -17,7 +17,7 @@ Status: `[ ]` not started · `[~]` partly done · `[?]` needs an owner decision
 
 ## Resume here (2026-11-24)
 
-**State.** Swing v3 ([spec](docs/swing-model-v3.md)): steps 0–1 and the family (D27) merged; its refit at MLB's stance and contact point (D28, D29; §5.3.1, §6.7.8) and its [review](docs/reviews/2026-11-25-opus-swing-stance-review.md)'s fixes done in the oracle by `swing-stance` (`work/swing-stance`, worktree `swing-research`): every check in the zone passes, the arms reach on every game swing. Open: late contact faster than MLB's, an owner's choice to put (§6.7.6). Then step 2 (Rust) and 3b (move the batter and the contact point).
+**State.** Swing v3 ([spec](docs/swing-model-v3.md)): steps 0–1 and the swing family (D27) merged. PLAN D28, D29: the batter stands 0.58 m deeper and meets the ball 0.15 m further out front. `work/swing-stance` (worktree `swing-research`): refitted there, the hands no longer stall; **not merged**; its Opus review is on the branch (1 P1, 3 P2, 6 P3, Resolution open) and worker `swing-stance` (Opus, Workers tab) is fixing it (the arms reach at contact; a probe of a late-swing elevation laid toward Statcast's plane). When it stops: read its report, write the Resolution, rerun `test_oracle.py`, merge. Q52 = a (PLAN D30): the last 40 ms follow MLB's tracking; the worker adopts it in the oracle, so the fixes need an Opus look at that join before merge. Nothing waits on the owner. Then step 2 (Rust).
 
 **Next:** §2: the ground-dive leftovers ([note](docs/calibration/2026-11-23-of-ground-dive.md) §9); swing step 2 after the stance refit.
 
