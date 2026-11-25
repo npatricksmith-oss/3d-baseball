@@ -1,6 +1,6 @@
 # Body motion: a force-driven batter and pitcher (PLAN D31, §14.1 phase 0)
 
-**Status: design, not built.** Written 2026-11-25 by worker body-design on branch `work/body-motion`, revised the same day after three independent reviews. This file is phase 0 of [PLAN §14.1](../PLAN.md#141-the-body-motion-rebuild-d31): it settles the seven items of the plan and the owner's question on consolidating muscle groups and ratings, as far as a flat probe can. Nothing here is in Rust; today's swing and release stay in games until phase 4.
+**Status: design; phase 1 started.** Written 2026-11-25 by worker body-design on branch `work/body-motion`, revised the same day after three independent reviews. Phase 1's first session (worker body-3d, 2026-11-25) built the three-dimensional checking engine and placed the body; the fit under the design's rules has not been run, so the main open finding below is still open (§4.4). This file is phase 0 of [PLAN §14.1](../PLAN.md#141-the-body-motion-rebuild-d31): it settles the seven items of the plan and the owner's question on consolidating muscle groups and ratings, as far as a flat probe can. Nothing here is in Rust; today's swing and release stay in games until phase 4.
 
 ## Status and what is left
 
@@ -8,7 +8,8 @@
 - **Reviewed and revised.** Three independent reviews (2026-11-25: [Codex Sol](reviews/2026-11-25-codex-sol-body-motion-review.md), [Gemini Carbon](reviews/2026-11-25-gemini-carbon-body-motion-review.md), [Gemini Neon](reviews/2026-11-25-gemini-neon-body-motion-review.md)) found errors in the probes and the spec. This version is rewritten from the corrected runs; "What the first version got wrong" below lists what changed.
 - **Built in the probes:** a driven pelvis–trunk–arms–bat chain over planted feet, in the horizontal plane (§4.2). Not built: any three-dimensional body (§4.1 designs it; phase 1 builds it), the pitcher's body (§11, design depth only).
 - **The main open finding.** Under the design's own rules (the arms start no earlier than the decision allows, drives rise no faster than 50 ms, strengths inside sourced bounds), the flat chain does not reach the ball in time (§4.3). The fit that does reproduce [4] breaks those rules. Phase 1's first job is to show that the three-dimensional body can swing under them; if it cannot, the work stops there (§13).
-- **Left for whoever continues:** the owner's decisions of §14; then phase 1 (§13).
+- **Phase 1, session 1 (2026-11-25):** the 3D engine in Python with its checks (§8.1), the body from de Leva's table placed on [4]'s measured state, a measured cost (§8.2) and first undriven and hand-set runs (§4.4). **Not done: the fit under the rules, so whether the 3D body can swing is not answered yet.**
+- **Left for whoever continues:** phase 1 from §4.4's "next" list.
 
 **What the first version got wrong** (and what the reviews found):
 
@@ -92,6 +93,9 @@ Every number below is tagged **measured** (a source gives it), **derived** (comp
 | balance | `python3 analysis/research/body/balance.py` | what keeps a standing body up (§5.3) |
 | breakdowns | `python3 analysis/research/body/breakdowns.py` | the owner's named failures and the decision clock (§5.4, §6.2) |
 | ratings | `python3 analysis/research/body/ratings.py` (25 s); `BB_BODY_SCALING=MH` for torque by weight × height | the consolidation comparison (§7) |
+| the 3D engine's checks | `python3 -m unittest analysis/oracle/test_body3d.py` (13 s; also run by `test_oracle.py`) | closed forms, independent derivations, conservation, mutations (§8.1) |
+| the 3D placed body | `python3 analysis/research/body/placed3d.py` (40 s), output `sim/target/codex-probes/body3d/placed3d.out` | the placement against [4], the starting muscle level, undriven and hand-set runs, the Python step's time (§4.4) |
+| Rust cost, 3D kernel | `rustc -C opt-level=3 -C linker=$HOME/.local/bin/zigcc -o sim/target/codex-probes/body3d/bench_body3d analysis/research/body/bench_body3d.rs`, then run it | the 49-row solve that dominates a 3D step (§8.2) |
 | Rust cost | `rustc -C opt-level=3 -C linker=$HOME/.local/bin/zigcc -o sim/target/codex-probes/body/bench_chain analysis/research/body/bench_chain.rs`, then run it | time per step of the flat chain in Rust (§8.2) |
 
 ## 4. The body (§14.1 item 1)
@@ -111,6 +115,8 @@ Every number below is tagged **measured** (a source gives it), **derived** (comp
 | bat | physics-spec §6.2 (integrated from the profile) | welded to both hands: a closed loop | 0 (6 loop constraints) |
 
 That is 35 degrees of freedom before constraints.
+
+**As built** (`analysis/oracle/body3d/body.py`): the two hands and the bat are one rigid body. A hand welded to the handle moves as the handle does, so the weld is built into the body's mass and inertia instead of being twelve more constraint rows; the loop of the two arms closes through the two wrists (each two axes). That leaves 13 bodies and 49 joint rows, 29 freedoms, which is the table's 35 less the loop's 6. The force along the bat at each hand is then read from the wrist's joint force. What de Leva's table does not give is a named [E] list at the top of that file: the hip joints' spacing, the shoulders' position on the trunk, the ankle's height and place on the foot, the sole's contact points, the wrist's distance from the handle, the hands' roll about the handle (taken as the same for both), and the contact's stiffness.
 
 - **Segment numbers.** [dL] gives each segment's mass as a share of body mass, its centre of mass as a share of its length, and three radii of gyration as shares of its length; `analysis/research/body/common.py` uses its male rows, with the alternative head (vertex–cervicale) and upper-trunk (cervicale–xiphion) rows (checked digit for digit against Table 4 by the reviews). This is **measured** for de Leva's subjects (Zatsiorsky's, mostly physical-education students; mean 73.0 kg, 1.741 m). Scaling the lengths by stature is **[E]**: de Leva gives no scaling rule and suggests measuring the individual's segment lengths. Applying the table to a 92 kg professional is **[E]**: no table measured on baseball players exists ([N4] §5), and [N4] expects errors of 10% or more on some segment. Composite segments in 3D need their inertia tensors rotated and moved by the parallel-axis rule. The probe's sensitivity (`checks.py` item 6, the drive unchanged, against the baseline's contact): ±10% on the trunk's inertia moves contact ±1.3 ms, on the pelvis's 0.1–0.2 ms, on the arms' mass ±3.1–3.3 ms; bat speed stays within 30.18–30.30 m/s against 30.25.
 - **The feet.** A loaded foot is held to the ground by a contact constraint:
@@ -224,6 +230,33 @@ The decision clock binds: in the flat chain, a rigid arm turned by the shoulder 
 | nothing | +13.1 | 28.47 | 143 / 84 | 0 | +8.4, a miss: the bat passes the ball 0.92 m out, beyond its 0.784 m end |
 
 So what holds the cock does decide where the ball meets the bat. The stiff stop is a device that carries far more than hands can. In 3D the cock is held by the two hands' couple, each wrist bounded by its sourced strength, and a passive limit (if any) must have an anatomical value, never pull, and have its work and reaction recorded. Phase 1 runs with and without it.
+
+### 4.4 The three-dimensional body: where phase 1 stands after its first session
+
+**Built and checked:** the engine (§8.1), the body of §4.1, the drive law of §5.1 with the design's bounds per joint (`analysis/oracle/body3d/drive.py`), and 19 checks. **Not run: the fit under the design's rules.** So the question of §4.3 (can a three-dimensional body swing under the rules?) is not answered, in either direction. Everything below is from `placed3d.py`; its driven runs are hand-set and are labelled so.
+
+**The bounds per joint** (the design's rules of §4.3 carried to 3D, set before any 3D run; for [4]'s mean batter): rear hip extension 347 N·m and lead hip flexion 244 (Anderson 2007's C1 × weight × height × 1.3 [E]), each hip's rotators 78 [E], each knee's extension 352 (Anderson), trunk rotation 288, each shoulder 100 [E], each elbow's extension 70 [E: no N·m value found, range 50–100], each wrist 9.5 (ulnar deviation, Delp 1996). The flat chain's single "legs" bound (498 N·m of yaw) has no counterpart: in 3D the pelvis is turned by the hips' torques and the feet's forces, whatever they come to.
+
+**The placed body sits on [4]'s curves.** At −340 ms (foot down) and at −250 ms the pelvis's and trunk's rotation, the bat's azimuth and elevation, the lag, both elbows' bend and the lead knee's bend are matched to 0.01°, with the feet flat a stride apart and every joint closed. The hands' position, which [4] does not report, is solved from the two elbows and the lag. Not placed: the shoulders' polar angles ([4]'s text does not define them well enough to reproduce), the pelvis's tilt and obliquity, and the trunk's forward bend [E: 15°].
+
+**[4]'s leg numbers do not fit one level pelvis.** With the lead knee at its measured 49° the rear knee comes out at 73° at −340 ms and 62° at −250 ms, against [4]'s about 50° and 44–47°. Feet flat 0.77 m apart, de Leva's leg lengths, a level pelvis and [4]'s pelvis travel read from the lead ankle (the flat probe's reading, §4.2) put the two hips about 12 cm apart in the height each knee asks for. What could close it: the pelvis's obliquity ([4]: 14–27°), a lead heel still up at foot down, the reading of [4]'s pelvis zero, or the stride measured toe to toe. It matters for the fit because it sets how the weight sits on the feet. Open; the next session's first item.
+
+**The muscles' level at the start.** The joint torques that hold the placed posture at the first instant, worked back by least squares (`drive.solve_tone`): rear knee 148 N·m, rear hip 108, lumbar 93, lead hip 43, rear ankle 24, the arms 1–11. All inside the bounds. They are then held constant, a stand-in [E] for the postural program of §5.3 (a later session's); joint damping of 1 N·m·s/rad [E] is the only other passive term, and there is no stiffness toward any posture.
+
+**Undriven from foot down, the body stands for about 200 ms** on that level alone (no drive, no feedback): by −140 ms the knees have moved 10–12°, the elbows under 5° and the lag 6°, while the pelvis has drifted back from −18° to −32°. Then the rear knee straightens under its constant torque (to the stop by −20 ms) and the rear foot leaves the ground. More telling: **the lead foot never takes the weight.** Its load stays at 100–140 N (11–15% of body weight) where [4]'s rises to 50% by −170 ms and 130% at −93 ms. The weight shift is a motion of its own that something must drive.
+
+**Three hand-set runs from −250 ms** (not fits: onsets at the earliest the rules allow, rises 50 ms, strengths on the bounds, which is the corner the flat chain's fit ended on):
+
+| Hand-set drive | Pelvis rate, largest up to 0 ms | Trunk rate, largest up to 0 ms | Bat azimuth at 0 ms (largest rate) | Lag at 0 ms | Sweet spot at 0 ms | The feet |
+| :-- | --: | --: | --: | --: | --: | :-- |
+| every drive at its bound | 292°/s at −5 ms | 687°/s at 0 ms, still rising | −119° (1,089°/s) | 116° | 10.5 m/s | the rear foot reaches 1,413 N (1.55 × body weight) and leaves the ground at −115 ms, the lead foot at −90 ms: a jump |
+| knees' extension off | 356°/s at −65 ms | 686°/s at 0 ms | −111° (1,179°/s) | 115° | 11.0 m/s | lead foot off from −130 ms, rear from −55 ms |
+| knees' and hips' extension and flexion off | 116°/s at −205 ms, then backward (−174°/s at 0 ms) | 535°/s at 0 ms | −119° (1,296°/s) | 117° | 8.2 m/s | both down until 0 ms; the trunk's drive turns the pelvis the wrong way, the rotators alone cannot hold it |
+| [4] | 581°/s at −70 ms | 766°/s at −57 ms | −8° (2,435°/s at −10 ms) | 65° | 27.0 m/s read in 3D from [4]'s curves (§4.2); [3]: 29–31 | lead foot 130% of body weight at −93 ms |
+
+In all three the bat is about 100° short at 0 ms and still cocked, the lead elbow has been driven nearly straight (5–9° against [4]'s 56°), and the lead foot never carries more than 188 N (20% of body weight). **These runs do not show that the body cannot swing**: they show that in 3D the bounds are not a usable corner. In the flat chain the legs could only turn the pelvis, so "everything at its bound" was the best case; here a leg at its bound is a jump, and the pelvis has nothing to turn against until the weight is on the front foot (the mechanism of the flat chain's late foot, §6.2). The lower body's program (the weight shift, then the block) has to be found by the fit, not set by hand.
+
+**Next, in order:** (1) the compiled probe of the engine, checked state for state against the Python one (§8.2: the fit is too slow in Python); (2) the two knees' inconsistency above; (3) the fit under the rules with several cold starts, every residual and bound reported, against §13's gate, and then one rule relaxed at a time as `limits.py` does; (4) the small-frame run of PLAN D32 (about 1.75 m, 77 kg [E], strengths at the top of the bounds).
 
 ## 5. The drive and its control (§14.1 items 2 and 3)
 
@@ -524,7 +557,30 @@ Why two strength groups and not one: one rating cannot make a lower-body hitter 
 
 Activation is advanced once per step by its exact exponential (`m::exp`) and held through the step's stages (phase 1 can integrate it as a state instead, which removes the tenth-of-a-millisecond wobble below). The non-smooth parts (contacts switching, range stops, friction) are evaluated at each stage's state in a fixed order. Every transcendental goes through `bb_math::m`, the linear solves use partial pivoting in a fixed order, no FMA, no fast-math, no hash iteration, so the same build, seed and commands give the same motion bit for bit (invariant 5).
 
-**What the 3D body adds, to specify in phase 1:** how the hands' loop and the feet's contacts are solved (a deterministic constrained solve, its iteration count and tie order fixed), how constraint drift is held (projection or stabilisation, and whether it is applied per step), how a contact's making or breaking and an impact are handled, and what happens when a solve fails. Events (toe touch, heel contact, the bat passing a point, release) are located within the step by cubic Hermite interpolation of the state, or by sub-stepping at 0.1 ms around release and contact [E], with a convergence test against finer location (§11 says why release needs it).
+**The 3D engine as built** (`analysis/oracle/body3d/engine.py`, phase 1 session 1):
+
+- **Formulation: maximal coordinates.** Every segment is a free rigid body (centre of mass, unit quaternion, linear and angular velocity). Every joint is a set of constraint rows made from two primitives: a point of one body on a point of the other (3 rows), and an axis of one body square to an axis of the other (1 row). A ball joint is a point; a two-axis joint a point and one axis pair; a hinge a point and two; a weld a point and three. Each derivative evaluation solves (J M⁻¹ Jᵀ) λ = γ − J M⁻¹ F by Cholesky in a fixed order, 49 rows for the batter. Chosen over minimal (joint-angle) coordinates because the hands' closed loop is then two ordinary joints, every joint type is the same few lines, and the equations can be checked against joint-angle derivations that share no code with them. Its cost is the larger solve (§8.2).
+- **Constraint drift:** Baumgarte's stabilisation, C̈ + 2aĊ + b²C = 0 with a = b = 50 s⁻¹ [E], evaluated at every stage. Measured on the driven body over 80 ms: 0.33 µm at a 1 ms step, 0.01 µm at 0.5 ms; 19 µm without stabilisation. No projection per step. In the violent hand-set runs of §4.4 (stops and landings) the drift reaches 10 µm at 1 ms, so the fit should run at 0.5 ms or with stronger gains until the event tests settle it.
+- **Contact:** points on each sole (heel and ball, inside and outside) against the ground plane. The normal force is a one-sided spring and damper that is never negative; friction is a stick spring to an anchor, capped by the cone μN, the anchor dragged when the cap is reached. Anchors move once per step and are held through the stages, like the activation's corner. Four points per foot give §4.1's requirements without more machinery: no sinking beyond the spring's fraction of a millimetre, the centre of pressure inside the sole (each point's force is ≥ 0), and the foot's horizontal force and twisting moment from one set of contact forces.
+- **Joint limits:** one-sided spring-damper stops on an angle (the knees' and elbows' straight end so far). A stop's torque is clamped so it can push out of the limit and never pull.
+- **A failed solve** (a pivot that is not safely positive: a singular posture or redundant joints) raises an error. It is never regularised away.
+- **Activation** is integrated as a state (15 ms up, 50 ms down), not held through the step.
+- **Work** of the drives, stops, damping and contacts is integrated beside the motion as four more states.
+
+**Its checks** (`analysis/oracle/test_body3d.py`, 19 tests, each against something the engine did not produce):
+
+- a free symmetric body against Euler's closed form (the body-frame precession, the cone about the angular momentum, the straight-line centre): 2 × 10⁻⁹;
+- a hinged rod released at 2.0 rad against the pendulum's exact (elliptic) period: 5 × 10⁻⁹ rad;
+- a double pendulum against Lagrange's equations in its two angles, integrated in the test: 2 × 10⁻⁸ rad after 1.5 s;
+- the Euler–Lagrange identity for a 3D chain (ball, two-axis joint, hinge) at three moving states: the engine's accelerations against those from the chain's own joint-angle kinematics, differentiated by the complex step: 2 × 10⁻⁶ (the differences' level);
+- a closed loop with an exact answer (a parallelogram linkage is a pendulum): back at its start after one exact period to 2 × 10⁻⁸ rad, the loop shut to 10⁻¹⁰ m;
+- the whole body off the ground with every drive on: linear momentum constant to rounding on three axes, angular momentum to 1 × 10⁻⁸ kg·m²/s (the size the joints' drift explains);
+- the whole body on the ground, driven: energy gained equals work booked to 2 mJ in 16 J at 1 ms, 0.07 mJ at 0.5 ms and 0.004 mJ at 0.25 ms (fourth order);
+- a block on four contact points: it stays under μmg, accelerates at F/m − μg above it, and no contact force is ever negative, also when dropped;
+- a pendulum swung into a stop: the stop never pulls;
+- **mutations:** the gyroscopic term removed fails the free body; the centripetal term's sign flipped fails the double pendulum and the identity; a drive's reaction on its parent removed fails angular momentum.
+
+**Still blind:** the segment table itself beyond its mass sum; the ground model's realism; a drive axis wrong alike in the model and in what the fit compares; event-time location (not built). **What the 3D body still needs specified:** how the hands' loop and the feet's contacts are solved (a deterministic constrained solve, its iteration count and tie order fixed), how constraint drift is held (projection or stabilisation, and whether it is applied per step), how a contact's making or breaking and an impact are handled, and what happens when a solve fails. Events (toe touch, heel contact, the bat passing a point, release) are located within the step by cubic Hermite interpolation of the state, or by sub-stepping at 0.1 ms around release and contact [E], with a convergence test against finer location (§11 says why release needs it).
 
 **Checks** (`checks.py`, output `checks.out`, on the free fit):
 
@@ -542,7 +598,12 @@ Activation is advanced once per step by its exact exponential (`m::exp`) and hel
 
 **Measured:** the flat chain in Python, 0.15 s per 270 ms swing at a 0.5 ms step; in Rust (`bench_chain.rs`, opt-level 3, one core), **1.7 µs per RK4 step**, 0.46 ms per swing at 1 ms. The Rust loop uses native math, a constant yaw cap and no load split, trunk stop, recording or contact solve: a rough cost for a 5-degree-of-freedom loop of arithmetic, nothing more.
 
-**Everything for the 3D body is [E]** until phase 1 benchmarks a representative constrained step:
+**Measured for the 3D body (phase 1 session 1):**
+
+- **Python:** 7.9 ms per RK4 step for the full batter (13 bodies, 49 joint rows, 8 contact points), so 2.5 s for a swing from −250 ms to +60 ms at 1 ms. A fit of the 13 channels' forty-odd numbers needs some 4,000 swings per cold start: about 3 hours a start, 12 for four. That is too slow to iterate on, so the fit goes to a compiled probe of the same engine (one Rust file under `analysis/research/body/`, like `bench_chain.rs`), checked state for state against the Python engine, which stays the reference.
+- **Rust, the dominant kernel** (`bench_body3d.rs`, opt-level 3, one core, scalar arithmetic in a fixed order): the 49 × 49 Cholesky factor and solve takes **15.0 µs**, four per step: 60 µs. By count that solve is about 22,000 of an evaluation's roughly 30,000 multiply-adds, so the whole step is **about 90 µs [E from the measured kernel]**: a swing in about 28 ms, a 4,000-swing start in about 2 minutes, and a game of 290 pitches at 800–1,600 steps each in **about 21–42 s**. That is inside the table's range below, toward its upper end. The matrix is block-sparse along the body's tree, so a factorisation that follows the tree should cut it; not measured. The engine's own Rust step is measured when the probe is ported.
+
+**The estimates made before that measurement** (kept for the reduced core and the per-pitch step counts):
 
 | | Per RK4 step [E] | Per pitch [E] | Per game, 290 pitches [E] |
 | :-- | :-- | :-- | :-- |
@@ -639,6 +700,8 @@ PLAN D9 is decided: a saved play stores the build's commit and the recorded play
 
 - **Pass:** under the design's rules (the arms after the decision, rises of at least 50 ms, strengths inside sourced bounds, the wrists bounded by their measured strength), the average batter's fitted swing reaches contact within ±5 ms of plan; the pelvis, trunk, arm and bat rate curves within 1 band unit RMS each from −250 ms to contact; at contact pelvis 77 ± 6°, lag 65 ± 10°, bat elevation −30 ± 5° ([4] Table 1); the bat's speed within [3]'s and Statcast's range (29–34 m/s at the sweet spot); [4]'s vertical and lateral ground forces within their bands; momentum, angular momentum, energy and the Euler–Lagrange identity to their tolerances; every named breakdown run as one change (or a stated two), its consequence reported as the body gives it.
 - **Stop:** if no fit within the rules reaches contact, or the rate curves stay beyond 2 band units, or contact needs a rule broken. The owner is told which rule binds and what the body lacks, as §4.3 does for the flat chain.
+
+**Phase 1 after its first session (2026-11-25):** the engine, its checks, the placed body and the cost are done (§4.4, §8.1, §8.2). The gate has not been tested: no fit under the rules has run. Next: the compiled probe, the knees' inconsistency, the fit, the rule that binds, the small-frame run.
 
 **Phase 1's order** (Codex's): (1) one placed body, feet down at the foot-down posture, with a two-grip fit of the hands and bounded forces, and its contact outcomes left free; (2) a representative constrained 3D step benchmarked early, with its matching oracle case (cost, §8.2); (3) the stride, the stance and the postural feedback; (4) the moving-ball breakdowns with the collision.
 
