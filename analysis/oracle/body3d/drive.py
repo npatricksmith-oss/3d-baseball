@@ -11,77 +11,90 @@ from . import body as B
 
 D2R = B.D2R
 
-# ---- the design's rules (body-motion 4.3), set before any 3D fit was run ---------------------------
+# ---- the design's rules (body-motion 4.3) and, since PLAN D34, the limits of body-motion 4.5 -------
+# Every number below is body-motion 4.5's, written there with its source before any refit. Nothing here is
+# chosen by what a swing does.
 ARMS_EARLIEST = -0.170     # s: shoulders, elbows and wrists may not start before [4]'s first move
 RISE_MIN = 0.050           # s [E]: every rise at least this long
-ATHLETE = 1.3              # [E] professional over recreationally active adults (4.3; no source)
-# strength bounds, N m. WH = weight x height (N m). Anderson 2007's C1 (note 5 section 1, full text) for the legs.
-C1_HIP_EXT, C1_HIP_FLEX, C1_KNEE_EXT, C1_ANKLE_PF = 0.161, 0.113, 0.163, 0.095
-HIP_ROT = 60.0             # [E] one hip's rotators, 40-60 N m, no source (4.3)
-# hip abduction and adduction (session 3; set before any run with them):
-# abduction: college pitchers' isometric trail-hip abduction 109 +- 16.4 N m at 96.1 kg, 1.89 m (note 5 section 2,
-#   second hand: a search excerpt of PMC4527197's table, hand-held dynamometer). Bound = mean + 2 SD, scaled by
-#   weight x height. No athlete factor: they are athletes. The same paper's hip extension by that method is 75 N m
-#   where Anderson's dynamometer model gives 282, so the method may read low by a large factor: see body-motion 4.4.
-# adduction: [E] equal to abduction, range 0.7-1.4 x. The one comparison found (PMC6522434, healthy non-athletes at
-#   60 deg/s on a Biodex, read from a search summary only) has adductors about 70 N m against abductors 87.
+# full strength: the source's mean + 2 SD, x weight x height (Anderson 2007 C1 and its SD; note 5 section 1, table)
+C1 = {"hip_ext": (0.161, 0.049), "hip_flex": (0.113, 0.025), "knee_ext": (0.163, 0.040), "knee_flex": (0.087, 0.015),
+      "ankle_pf": (0.095, 0.022)}
+SD_COUNT = 2.0
+HIP_ROT = 78.0             # [E] one hip's rotators, no source (4.3, 4.5)
+# hip abduction: college pitchers' isometric trail-hip abduction 109 +- 16.4 N m at 96.1 kg, 1.89 m (note 5 section 2,
+# second hand, hand-held dynamometer); adduction [E] equal to it (4.5)
 HIP_ABD_REF, HIP_ABD_REF_WH = 109.0 + 2 * 16.4, 96.1 * E.G * 1.89
 HIP_ADD_OVER_ABD = 1.0
-CORE_REF = 288.0           # golfers' mean + 2 SD scaled to 92 kg, 1.84 m, over the f-v factor at the tested speed (4.3)
-SHOULDER = 100.0           # [E] one shoulder (4.3: pitchers' internal rotation 66-80 measured)
-ELBOW_EXT = 70.0           # [E] one elbow's extension, range 50-100; note 5 found no N m value
-WRIST_ULNAR, WRIST_RADIAL = 9.5, 11.0   # one wrist, Delp 1996 (abstract only): uncocking, holding the cock
+TRUNK_REF = (140.6 + 2 * 30.9) * (92.0 * 1.84) / (74.7 * 1.765)   # Bae 2012 golfers at 0.52 rad/s, mean + 2 SD, scaled: 260 N m
+SHOULDER = 100.0           # [E] one shoulder (4.3)
+ELBOW_EXT = 70.0           # [E] one elbow's extension (4.4)
+WRIST_ULNAR, WRIST_RADIAL = 9.5, 11.0   # one wrist, Delp 1996 (abstract only)
 REF_WH = 92.0 * E.G * 1.84
-# top speeds W, rad/s [E] (5.1): legs 20, core 25, shoulder 30, wrist 40; elbow and knee assumed
+# strength at speed: (rad/s, fraction of full strength), straight lines between (4.5's table, with its sources)
+CURVES = {
+    "hip_ext": ((0.0, 1.0), (1.05, 0.83), (3.14, 0.83 * 0.84), (4.19, 0.83 * 0.795), (14.2, 0.0)),
+    "hip_ext_anderson": ((0.0, 1.0), (1.578, 0.75), (3.19, 0.50), (6.4, 0.0)),
+    "hip_flex": ((0.0, 1.0), (2.095, 0.75), (4.267, 0.50), (8.6, 0.0)),
+    "knee_ext": ((0.0, 1.0), (1.517, 0.75), (3.952, 0.50), (5.24, 0.82 * 0.525), (13.4, 0.0)),
+    "knee_flex": ((0.0, 1.0), (2.008, 0.75), (5.233, 0.50), (11.7, 0.0)),
+    "ankle_pf": ((0.0, 1.0), (0.987, 0.75), (3.558, 0.50), (8.7, 0.0)),
+    "trunk": ((0.0, 1.0), (0.52, 1.0), (1.05, 127.4 / 140.6), (2.09, 117.0 / 140.6), (4.19, 117.0 / 140.6 * 53.5 / 66.3), (12.9, 0.0)),
+}
+HIP_SIDE_CURVE = "hip_ext"    # [E] hip abduction, adduction and rotators fall with speed as the hip's extensors do; None = the first law
+# tendon stretch at full strength, rad: Wilson 2006's tabulated full strength over series stiffness (note 8 section 3.3)
+SEC_STRETCH = {"hip_ext": 480.0 / 5092.0, "knee_ext": 328.0 / 857.0, "hip_flex": 289.0 / 496.0, "ankle_pf": 283.0 / 767.0}
+TENDONS = True             # False: no series springs (a sensitivity case)
+# the first law's top speeds W, rad/s [E] (5.1), still used by the arms and wherever a curve is None
 W_TOP = {"hip": 20.0, "knee": 20.0, "ankle": 20.0, "core": 25.0, "shoulder": 30.0, "elbow": 35.0, "wrist": 40.0}
-# intrinsic joint damping [E]: N m s/rad on every joint, capped; stiffness none (a posture reference is next session's)
+# intrinsic joint damping [E]: N m s/rad on every joint, capped; stiffness none
 JOINT_DAMP = 1.0
 JOINT_DAMP_CAP = 30.0
 TONE_RIDGE = 1e-8          # relative to the largest diagonal of the normal equations
 
 
 def bounds(H, M):
-    """upper bound on each channel's isometric strength T (N m) for a batter of stature H and mass M.
+    """upper bound on each channel's full strength T (N m) for a batter of stature H and mass M (4.5).
     Scaling by weight x height is [E] (7.1)."""
     wh = M * E.G * H
     k = wh / REF_WH
-    b = {"hip_ext_R": C1_HIP_EXT * wh * ATHLETE, "hip_flex_L": C1_HIP_FLEX * wh * ATHLETE,
-         "hip_ext_L": C1_HIP_EXT * wh * ATHLETE,
-         "hip_abd_R": HIP_ABD_REF * wh / HIP_ABD_REF_WH, "hip_abd_L": HIP_ABD_REF * wh / HIP_ABD_REF_WH,
-         "hip_add_R": HIP_ADD_OVER_ABD * HIP_ABD_REF * wh / HIP_ABD_REF_WH,
-         "hip_add_L": HIP_ADD_OVER_ABD * HIP_ABD_REF * wh / HIP_ABD_REF_WH,
-         "ankle_pf_R": C1_ANKLE_PF * wh * ATHLETE, "ankle_pf_L": C1_ANKLE_PF * wh * ATHLETE,
-         "hip_rot_R": HIP_ROT * ATHLETE * k, "hip_rot_L": HIP_ROT * ATHLETE * k,
-         "knee_ext_L": C1_KNEE_EXT * wh * ATHLETE, "knee_ext_R": C1_KNEE_EXT * wh * ATHLETE,
-         "core": CORE_REF * k, "shoulder_L": SHOULDER * k, "shoulder_R": SHOULDER * k,
+    c = lambda n: (C1[n][0] + SD_COUNT * C1[n][1]) * wh
+    abd = HIP_ABD_REF * wh / HIP_ABD_REF_WH
+    b = {"hip_ext_R": c("hip_ext"), "hip_ext_L": c("hip_ext"), "hip_flex_L": c("hip_flex"),
+         "hip_rot_R": HIP_ROT * k, "hip_rot_L": HIP_ROT * k,
+         "hip_abd_R": abd, "hip_abd_L": abd, "hip_add_R": HIP_ADD_OVER_ABD * abd, "hip_add_L": HIP_ADD_OVER_ABD * abd,
+         "knee_ext_L": c("knee_ext"), "knee_ext_R": c("knee_ext"), "knee_flex_L": c("knee_flex"), "knee_flex_R": c("knee_flex"),
+         "ankle_pf_R": c("ankle_pf"), "ankle_pf_L": c("ankle_pf"),
+         "core": TRUNK_REF * k, "shoulder_L": SHOULDER * k, "shoulder_R": SHOULDER * k,
          "elbow_ext_L": ELBOW_EXT * k, "elbow_ext_R": ELBOW_EXT * k,
          "wrist_L": WRIST_ULNAR * k, "wrist_R": WRIST_ULNAR * k}
     return b
 
 
-# channel -> (parent body, child body, axis in the parent's frame, top-speed group). The torque acts on the
-# child about +axis, its reaction on the parent. Axes follow body.py's frames: the pelvis's and trunk's
-# own x forward, y left, z up; a knee's or elbow's own +y is its flexion axis as place() builds them.
+# channel -> (parent body, child body, axis in the parent's frame, first-law speed group, curve, tendon).
+# The torque acts on the child about +axis, its reaction on the parent. The hip channels act about the THIGH's
+# own axes (its y side-to-side, x front-to-back, z long; as place() builds them), the way hip strength is
+# tested: the thigh is the parent there and the pelvis the child, so each axis below is the torque on the pelvis.
 CHANNELS = {
-    "hip_ext_R": ("pelvis", "thigh_R", (0, 1, 0), "hip"),      # the rear thigh driven back under the pelvis
-    "hip_flex_L": ("pelvis", "thigh_L", (0, -1, 0), "hip"),    # the lead thigh driven forward
-    "hip_ext_L": ("pelvis", "thigh_L", (0, 1, 0), "hip"),      # the lead hip's extensors: the block (4.1)
-    # abduction carries the thigh's far end out to its own side, about the pelvis's forward axis
-    "hip_abd_L": ("pelvis", "thigh_L", (1, 0, 0), "hip"), "hip_add_L": ("pelvis", "thigh_L", (-1, 0, 0), "hip"),
-    "hip_abd_R": ("pelvis", "thigh_R", (-1, 0, 0), "hip"), "hip_add_R": ("pelvis", "thigh_R", (1, 0, 0), "hip"),
-    "ankle_pf_R": ("shank_R", "foot_R", (0, 1, 0), "ankle"),   # plantar flexion: the push off the rear foot
-    "ankle_pf_L": ("shank_L", "foot_L", (0, 1, 0), "ankle"),
-    "hip_rot_R": ("pelvis", "thigh_R", (0, 0, -1), "hip"),     # rotators: the pelvis turned toward the pitcher over each thigh
-    "hip_rot_L": ("pelvis", "thigh_L", (0, 0, -1), "hip"),
-    "knee_ext_L": ("thigh_L", "shank_L", (0, -1, 0), "knee"),  # the block
-    "knee_ext_R": ("thigh_R", "shank_R", (0, -1, 0), "knee"),  # the push
-    "core": ("pelvis", "trunk", (0, 0, 1), "core"),
-    "shoulder_L": ("trunk", "uarm_L", (0, 0, 1), "shoulder"),  # the lead arm swept toward the pitcher about the trunk's axis
-    "shoulder_R": ("trunk", "uarm_R", (0, 0, 1), "shoulder"),  # the rear arm brought forward and round
-    "elbow_ext_L": ("uarm_L", "farm_L", (0, -1, 0), "elbow"),
-    "elbow_ext_R": ("uarm_R", "farm_R", (0, -1, 0), "elbow"),
-    "wrist_L": ("bat", "farm_L", None, "wrist"),               # axis: the bat's own y, signed in add_drives so it uncocks
-    "wrist_R": ("bat", "farm_R", None, "wrist"),
+    "hip_ext_R": ("thigh_R", "pelvis", (0, -1, 0), "hip", "hip_ext", "hip_ext"),     # the thigh driven back under the pelvis
+    "hip_ext_L": ("thigh_L", "pelvis", (0, -1, 0), "hip", "hip_ext", "hip_ext"),     # the lead hip's extensors: the block
+    "hip_flex_L": ("thigh_L", "pelvis", (0, 1, 0), "hip", "hip_flex", "hip_flex"),   # the lead thigh driven forward
+    "hip_rot_R": ("thigh_R", "pelvis", (0, 0, 1), "hip", "side", None),              # rotators: the pelvis turned toward the pitcher
+    "hip_rot_L": ("thigh_L", "pelvis", (0, 0, 1), "hip", "side", None),
+    "hip_abd_L": ("thigh_L", "pelvis", (-1, 0, 0), "hip", "side", None), "hip_add_L": ("thigh_L", "pelvis", (1, 0, 0), "hip", "side", None),
+    "hip_abd_R": ("thigh_R", "pelvis", (1, 0, 0), "hip", "side", None), "hip_add_R": ("thigh_R", "pelvis", (-1, 0, 0), "hip", "side", None),
+    "knee_ext_L": ("thigh_L", "shank_L", (0, -1, 0), "knee", "knee_ext", "knee_ext"),  # the block
+    "knee_ext_R": ("thigh_R", "shank_R", (0, -1, 0), "knee", "knee_ext", "knee_ext"),  # the push
+    "knee_flex_L": ("thigh_L", "shank_L", (0, 1, 0), "knee", "knee_flex", None),
+    "knee_flex_R": ("thigh_R", "shank_R", (0, 1, 0), "knee", "knee_flex", None),
+    "ankle_pf_R": ("shank_R", "foot_R", (0, 1, 0), "ankle", "ankle_pf", "ankle_pf"),   # plantar flexion: the push off the rear foot
+    "ankle_pf_L": ("shank_L", "foot_L", (0, 1, 0), "ankle", "ankle_pf", "ankle_pf"),
+    "core": ("pelvis", "trunk", (0, 0, 1), "core", "trunk", None),
+    "shoulder_L": ("trunk", "uarm_L", (0, 0, 1), "shoulder", None, None),  # the lead arm swept toward the pitcher about the trunk's axis
+    "shoulder_R": ("trunk", "uarm_R", (0, 0, 1), "shoulder", None, None),  # the rear arm brought forward and round
+    "elbow_ext_L": ("uarm_L", "farm_L", (0, -1, 0), "elbow", None, None),
+    "elbow_ext_R": ("uarm_R", "farm_R", (0, -1, 0), "elbow", None, None),
+    "wrist_L": ("bat", "farm_L", None, "wrist", None, None),               # axis: the bat's own y, signed in add_drives so it uncocks
+    "wrist_R": ("bat", "farm_R", None, "wrist", None, None),
 }
 ARM_CHANNELS = ("shoulder_L", "shoulder_R", "elbow_ext_L", "elbow_ext_R", "wrist_L", "wrist_R")
 JOINTS = ("lumbar", "hip_L", "hip_R", "knee_L", "knee_R", "ankle_L", "ankle_R",
@@ -92,24 +105,34 @@ def check_rules(mdl, plan):
     """the design's rules broken by a plan {channel: (T, t_on, t_rise, t_off)}; empty when it obeys them."""
     bad = []
     bd = bounds(mdl.H, mdl.M)
-    for n, (T, t_on, rise, t_off) in plan.items():
+    for n, v in plan.items():
+        T, t_on, rise, t_off = v[:4]
         if T > bd[n] * (1 + 1e-9):
             bad.append("%s: strength %.0f over its bound %.0f N m" % (n, T, bd[n]))
         if rise < RISE_MIN - 1e-12:
             bad.append("%s: rise %.0f ms under %.0f" % (n, rise * 1e3, RISE_MIN * 1e3))
+        if n in ARM_CHANNELS and len(plan[n]) > 4 and plan[n][4] > 1e-12:
+            bad.append("%s: tensed before the decision allows" % n)
         if n in ARM_CHANNELS and t_on < ARMS_EARLIEST - 1e-12:
             bad.append("%s: starts at %.0f ms, before the decision allows (%.0f)" % (n, t_on * 1e3, ARMS_EARLIEST * 1e3))
     return bad
 
 
 def add_drives(mdl, st, plan):
-    """add the plan's channels to the model and return the state with their activations (all 0) in it.
-    The placed state is only read to sign the wrists' axis: the drive must reduce the lag (uncock)."""
+    """add the plan's channels {name: (T, onset, rise, off[, starting level])} to the model, each with its
+    strength-at-speed curve and, at the leg joints that have one, its tendon spring (4.5). Returns the state
+    with the channels' activations at their starting levels. The placed state is only read to sign the
+    wrists' axis: the drive must reduce the lag (uncock). Call sec_start afterwards for the springs."""
     s, b = mdl.sys, mdl.b
     nold = len(s.acts)
     s.acts = []
-    for n, (T, t_on, rise, t_off) in plan.items():
-        pa, ch, ax, grp = CHANNELS[n]
+    s.fvtabs = []
+    tab_of = {}
+    bd = bounds(mdl.H, mdl.M)
+    for n, v in plan.items():
+        T, t_on, rise, t_off = v[:4]
+        a0 = v[4] if len(v) > 4 else 0.0
+        pa, ch, ax, grp, curve, tendon = CHANNELS[n]
         if ax is None:
             sd = n[-1]
             bz = mdl.axis(st, "bat", (0, 0, 1)); by = mdl.axis(st, "bat", (0, 1, 0))
@@ -117,9 +140,18 @@ def add_drives(mdl, st, plan):
             # turning the bat by +d about its y moves its axis by d (by x bz); the lag falls if that is toward the arm
             toward = E.dot(E.cross(by, bz), arm)
             ax = (0, -1, 0) if toward > 0 else (0, 1, 0)      # the torque on the forearm is the reaction of the bat's
-        s.actuator(n, b[pa], b[ch], ax, T, W_TOP[grp], t_on, rise, t_off)
+        if curve == "side":
+            curve = HIP_SIDE_CURVE
+        tab = -1
+        if curve is not None:
+            if curve not in tab_of:
+                tab_of[curve] = len(s.fvtabs)
+                s.fvtabs.append(tuple(CURVES[curve]))
+            tab = tab_of[curve]
+        ksec = bd[n] / SEC_STRETCH[tendon] if (tendon and TENDONS and tab >= 0) else 0.0
+        s.actuator(n, b[pa], b[ch], ax, T, W_TOP[grp], t_on, rise, t_off, a0, tab, ksec)
     nb13 = 13 * s.nb
-    return st[:nb13] + [0.0] * len(s.acts) + st[nb13 + nold:]
+    return st[:nb13] + [a[9] for a in s.acts] + st[nb13 + nold:]
 
 
 def add_damping(mdl, st, damp=JOINT_DAMP, cap=JOINT_DAMP_CAP):

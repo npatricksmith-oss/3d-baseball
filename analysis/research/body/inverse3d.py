@@ -47,8 +47,8 @@ AXES = [
     ("lead hip abduction", "hip_L", (1, 0, 0), "hip_abd_L", "hip"), ("lead hip adduction", "hip_L", (-1, 0, 0), "hip_add_L", "hip"),
     ("lead hip rotators, pelvis toward the pitcher", "hip_L", (0, 0, -1), "hip_rot_L", "hip"),
     ("lead hip rotators, the other way", "hip_L", (0, 0, 1), "hip_rot_L", "hip"),
-    ("rear knee extension", "knee_R", (0, -1, 0), "knee_ext_R", "knee"), ("rear knee flexion", "knee_R", (0, 1, 0), None, "knee"),
-    ("lead knee extension", "knee_L", (0, -1, 0), "knee_ext_L", "knee"), ("lead knee flexion", "knee_L", (0, 1, 0), None, "knee"),
+    ("rear knee extension", "knee_R", (0, -1, 0), "knee_ext_R", "knee"), ("rear knee flexion", "knee_R", (0, 1, 0), "knee_flex_R", "knee"),
+    ("lead knee extension", "knee_L", (0, -1, 0), "knee_ext_L", "knee"), ("lead knee flexion", "knee_L", (0, 1, 0), "knee_flex_L", "knee"),
     ("rear ankle plantar flexion", "ankle_R", (0, 1, 0), "ankle_pf_R", "ankle"), ("lead ankle plantar flexion", "ankle_L", (0, 1, 0), "ankle_pf_L", "ankle"),
     ("trunk rotation toward the pitcher", "lumbar", (0, 0, 1), "core", "core"), ("trunk rotation, the other way", "lumbar", (0, 0, -1), "core", "core"),
     ("lead shoulder about the trunk's axis", "shoulder_L", (0, 0, 1), "shoulder_L", "shoulder"),
@@ -56,6 +56,17 @@ AXES = [
     ("lead elbow extension", "elbow_L", (0, -1, 0), "elbow_ext_L", "elbow"), ("rear elbow extension", "elbow_R", (0, -1, 0), "elbow_ext_R", "elbow"),
 ]
 WHOLE = ("lumbar", "shoulder_L", "shoulder_R", "wrist_L", "wrist_R")     # joints whose whole torque vector's size is printed too
+
+
+def allowed_at(bd, ch, speed, grp):
+    """what channel ch's bound allows at the joint's shortening speed (rad/s): its measured strength-at-speed
+    curve of body-motion 4.5, or the first law where it has none."""
+    curve = Dr.CHANNELS[ch][4]
+    if curve == "side":
+        curve = Dr.HIP_SIDE_CURVE
+    if curve is None:
+        return bd[ch] * E.fv(speed / Dr.W_TOP[grp])
+    return bd[ch] * E.fv_tab(Dr.CURVES[curve], speed)
 
 
 def smooth(v, half):
@@ -284,7 +295,7 @@ def run(dt, free_at="feet"):
             wrel = E.mtv(Ra, E.sub(s.pose(st, bb)[3], s.pose(st, a)[3]))
             need_t = E.dot(tau[j], axis)
             speed = E.dot(wrel, axis)
-            allowed = None if ch is None else bd[ch] * E.fv(speed / Dr.W_TOP[grp])
+            allowed = None if ch is None else allowed_at(bd, ch, speed, grp)
             ax[label] = (need_t, speed, allowed)
         for sd, nm in (("R", "rear"), ("L", "lead")):
             (c1, c2, c3), axes, sp = hip_generators(m, st, sd, tau["hip_" + sd])
@@ -293,7 +304,7 @@ def run(dt, free_at="feet"):
                                              (nm + " hip: adduction", sgn * c2, sgn * sp[1], "hip_add_" + sd), (nm + " hip: abduction", -sgn * c2, -sgn * sp[1], "hip_abd_" + sd),
                                              (nm + " hip: rotators turning the pelvis toward the pitcher", -c3, -sp[2], "hip_rot_" + sd),
                                              (nm + " hip: rotators the other way", c3, sp[2], "hip_rot_" + sd)):
-                ax["GEN " + label] = (need_t, speed, bd[ch] * E.fv(speed / Dr.W_TOP["hip"]))
+                ax["GEN " + label] = (need_t, speed, allowed_at(bd, ch, speed, "hip"), bd[ch])
             ax["_yaw_" + sd] = (-tau["hip_" + sd][2], axes[2], axes[1])     # torque on the pelvis about its own vertical; how much of the rotators' and of the floating axis points along it
         o = m.observe(st)
         rows.append({"dv": dv, "da": da,"t": times[i], "tau": tau, "ax": ax, "fres": fres, "mres": mres, "free": free, "miss": miss, "hz": hz,
@@ -353,10 +364,9 @@ def report(dt, rows, bd, full=True):
     print("   THE HIPS along the thigh's own axes (extension-flexion about its side-to-side axis, abduction-adduction about its front-to-back axis, the rotators about its long axis):")
     for label in [k for k in rows[0]["ax"] if k.startswith("GEN ")]:
         pk = max(rows, key=lambda r: r["ax"][label][0])
-        need, speed, allowed = pk["ax"][label]
+        need, speed, allowed, bound = pk["ax"][label]
         over = sum(1 for r in rows if r["ax"][label][0] > r["ax"][label][2] + 1e-9) * dt * 1e3
         early = max(r["ax"][label][0] for r in rows if r["t"] <= -0.093 + 1e-9)
-        bound = allowed / E.fv(speed / Dr.W_TOP["hip"]) if E.fv(speed / Dr.W_TOP["hip"]) > 0 else float("nan")
         table[label] = (need, pk["t"], bound, allowed, over, early)
         if need >= 5.0:
             print("     %-58s | %5.0f (%4.0f) | %5.0f | %5.0f (%+5.1f) | %5s | %4.0f | %5.0f"

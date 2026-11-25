@@ -369,7 +369,82 @@ def block(push, mu=0.6, t_end=0.5, h=1e-3):
     return s[0], s[7], low[0]
 
 
+# ---- 6b. the tendon spring in series with a drive (body-motion 4.5) -----------------------------------
+SEC_TAB = ((0.0, 1.0), (1.517, 0.75), (3.952, 0.50), (5.24, 0.43), (13.4, 0.0))
+
+
+def tendon_ledger(h):
+    """a hinged rod under gravity, driven through a series spring. The muscle's own work, from its
+    strength-at-speed law at its own speed (the joint's plus the spring's rate of stretch), must equal the work
+    the rod receives plus the energy the spring holds. Returns (the gap, the muscle's work, the spring's largest
+    energy, the largest stretch); the gap is first order in the step."""
+    T, K = 150.0, 800.0
+    sys = E.System()
+    b = sys.body("rod", 4.0, (0.3, 0.5, 0.05))
+    sys.hinge(-1, b, (0, 0, 0), (0, 0, 0.3), (0, 1, 0), (0, 1, 0))
+    sys.fvtabs = [SEC_TAB]
+    sys.actuator("m", -1, b, (0, 1, 0), T, 20.0, 0.02, 0.05, 0.25, 0.2, 0, K)
+    s = sys.new_state()
+    q = E.qaxis((0, 1, 0), 0.4)
+    sys.set_body(s, b, E.scale(E.mv(E.qR(q), (0, 0, 0.3)), -1.0), q)
+    s[13] = 0.2                                      # the drive already on at its starting level
+    aux = sys.new_aux()
+    sys.sec_start(s, aux)
+    th = [aux[0]]
+    log = []
+
+    def each(t, st):
+        th.append(aux[0])
+        log.append((st[13], st[11], (th[-1] - th[-2]) / h))      # activation, the joint's speed about y, the stretch's rate
+    s = sys.run(s, 0.0, 0.4, h, aux=aux, each=each)
+    w_ce = sum(T * a * E.fv_tab(SEC_TAB, wj + dth) * (wj + dth) * h for a, wj, dth in log)
+    stored = 0.5 * K * (th[-1] ** 2 - th[0] ** 2)
+    return w_ce - (s[-E.NW] + stored), w_ce, 0.5 * K * max(th) ** 2, max(th)
+
+
 class EngineChecks(unittest.TestCase):
+    def test_speed_curve_and_its_inverse(self):
+        """a measured strength-at-speed curve passes through its points, falls with speed, rises for a stretched
+        muscle toward ECC, and its inverse undoes it on both sides."""
+        for w, f in SEC_TAB:
+            self.assertAlmostEqual(E.fv_tab(SEC_TAB, w), f, places=12)
+        ws = [-6.0 + 0.37 * k for k in range(52)]
+        fs = [E.fv_tab(SEC_TAB, w) for w in ws]
+        self.assertTrue(all(a >= b for a, b in zip(fs, fs[1:])))
+        self.assertLess(max(fs), E.ECC)
+        for w in ws:
+            if w < 13.4:
+                self.assertAlmostEqual(E.fv_tab_inv(SEC_TAB, E.fv_tab(SEC_TAB, w)), w, places=9)
+
+    def test_tendon_spring_holds_the_muscles_full_strength_when_nothing_moves(self):
+        """against a rod too heavy to move, the spring stretches until it carries exactly the muscle's
+        isometric torque T a: stretch T a / K."""
+        sys = E.System(g=(0.0, 0.0, 0.0))
+        b = sys.body("anvil", 1e6, (1e6, 1e6, 1e6))
+        sys.hinge(-1, b, (0, 0, 0), (0, 0, 0), (0, 1, 0), (0, 1, 0))
+        sys.fvtabs = [SEC_TAB]
+        sys.actuator("m", -1, b, (0, 1, 0), 120.0, 20.0, -1.0, 0.0, 9.0, 0.6, 0, 1000.0)
+        s = sys.new_state()
+        s[13] = 0.6
+        aux = sys.new_aux()
+        sys.diag = {}
+        s = sys.run(s, 0.0, 0.5, 1e-3, aux=aux)
+        self.assertAlmostEqual(aux[0], 120.0 * s[13] / 1000.0, delta=5e-6)     # the anvil creeps at 6e-5 rad/s
+        sys.deriv(0.5, s, aux)
+        self.assertAlmostEqual(sys.diag["act"]["m"][0], 120.0 * s[13], delta=5e-3)
+        self.assertGreater(s[13], 0.99)                   # the excitation rose from its starting level to full
+
+    def test_tendon_energy_is_accounted_for(self):
+        """the muscle's work by its own law equals the work delivered to the joint plus the energy in the
+        spring; the gap shrinks with the step (the spring is advanced by a first-order implicit step)."""
+        g1, w1, e1, th1 = tendon_ledger(5e-4)
+        g2, w2, e2, th2 = tendon_ledger(2.5e-4)
+        self.assertGreater(e2, 2.0)                       # the spring really stored energy (J)
+        self.assertGreater(abs(w2), 10.0)                 # and the muscle really worked
+        self.assertLess(abs(g2), 0.02 * abs(w2))
+        self.assertLess(abs(g2), 0.7 * abs(g1))
+
+
     def test_free_body_closed_form(self):
         """Euler's torque-free motion of a symmetric body: body-frame precession, the cone about L, straight-line centre."""
         self.assertLess(free_body_error(), 2e-9)
@@ -476,6 +551,7 @@ class EngineChecks(unittest.TestCase):
 # ---- 7. the whole body ---------------------------------------------------------------------------
 T0 = -0.250
 MODEST = {"hip_rot_R": 0.6, "hip_rot_L": 0.6, "hip_ext_R": 0.3, "hip_flex_L": 0.3, "knee_ext_L": 0.1, "knee_ext_R": 0.1,
+          "hip_abd_R": 0.3, "hip_add_L": 0.3, "knee_flex_R": 0.2, "ankle_pf_R": 0.2,
           "core": 0.8, "shoulder_L": 0.8, "shoulder_R": 0.8, "elbow_ext_L": 0.3, "elbow_ext_R": 0.5, "wrist_L": 1.0, "wrist_R": 1.0}
 
 
@@ -601,6 +677,15 @@ class Mutations(unittest.TestCase):
         self.assertGreater(abs(t1 - r1) + abs(t2 - r2), 1e-2)
 
     @NEED
+    def test_spring_fed_the_wrong_joint_speed_fails_the_energy_account(self):
+        """the spring advanced with the joint's speed reversed no longer carries the muscle's torque: the
+        muscle's work and the delivered work plus stored energy part ways."""
+        g0, w0, _, _ = tendon_ledger(2.5e-4)
+        E.MUT.add("sec_sign")
+        g1, w1, _, _ = tendon_ledger(2.5e-4)
+        self.assertGreater(abs(g1), 10.0 * abs(g0))
+        self.assertGreater(abs(g1), 0.1 * abs(w0))
+
     def test_missing_reaction_fails_momentum(self):
         """a drive that turns the child without its reaction on the parent breaks angular momentum."""
         E.MUT.add("no_reaction")

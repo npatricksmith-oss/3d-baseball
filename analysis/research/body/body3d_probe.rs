@@ -46,7 +46,7 @@ const E3: [V3; 3] = [[1.0, 0.0, 0.0], [0.0, 1.0, 0.0], [0.0, 0.0, 1.0]];
 
 struct Pt { a: i32, b: i32, ra: V3, rb: V3 }
 struct Dt { a: i32, b: i32, ua: V3, wb: V3 }
-struct Act { a: i32, b: usize, ax: V3, t: f64, w: f64, ton: f64, rise: f64, toff: f64 }
+struct Act { a: i32, b: usize, ax: V3, t: f64, w: f64, ton: f64, rise: f64, toff: f64, a0: f64, tab: i32, ksec: f64 }
 struct Stop { a: i32, b: usize, ax: V3, ea: V3, fb: V3, lo: f64, hi: f64, k: f64, c: f64 }
 struct Hold { a: i32, b: usize, qref: [f64; 4], k: V3, c: V3, cap: f64 }
 struct Tone { a: i32, b: usize, tl: V3 }
@@ -60,7 +60,11 @@ struct Sys {
     m: Vec<f64>, inr: Vec<V3>,
     pts: Vec<Pt>, dots: Vec<Dt>, order: Vec<usize>, first: Vec<usize>,
     acts: Vec<Act>, stops: Vec<Stop>, holds: Vec<Hold>, tones: Vec<Tone>, cons: Vec<Con>,
+    fvtabs: Vec<Vec<[f64; 2]>>,
 }
+
+const SEC_ITERS: usize = 40;
+const A_MIN: f64 = 1e-3;
 
 #[derive(Default)]
 struct Diag { con: Vec<V3>, act: Vec<V3>, stop: Vec<[f64; 2]> }
@@ -74,9 +78,68 @@ impl Sys {
     }
     fn excitation(&self, j: usize, t: f64) -> f64 {
         let a = &self.acts[j];
-        if t < a.ton || t >= a.toff { return 0.0; }
-        if a.rise > 0.0 && t < a.ton + a.rise { return (t - a.ton) / a.rise; }
+        if t >= a.toff { return 0.0; }
+        if t < a.ton { return a.a0; }
+        if a.rise > 0.0 && t < a.ton + a.rise { return a.a0 + (1.0 - a.a0) * (t - a.ton) / a.rise; }
         1.0
+    }
+    /// engine.py's fv_tab: a measured strength-at-speed curve, straight lines between its points.
+    fn fv_tab(&self, tab: &[[f64; 2]], w: f64) -> f64 {
+        let top = tab[tab.len() - 1][0];
+        if w >= top { return 0.0; }
+        if w >= 0.0 {
+            for k in 0..tab.len() - 1 {
+                let (wa, fa, wb, fb) = (tab[k][0], tab[k][1], tab[k + 1][0], tab[k + 1][1]);
+                if w <= wb { return fa + (fb - fa) * (w - wa) / (wb - wa); }
+            }
+            return 0.0;
+        }
+        self.ecc - (self.ecc - 1.0) / (1.0 - self.ecc_slope * (w / top))
+    }
+    fn fv_tab_inv(&self, tab: &[[f64; 2]], f: f64) -> f64 {
+        let top = tab[tab.len() - 1][0];
+        if f <= 0.0 { return top; }
+        if f <= 1.0 {
+            for k in 0..tab.len() - 1 {
+                let (wa, fa, wb, fb) = (tab[k][0], tab[k][1], tab[k + 1][0], tab[k + 1][1]);
+                if f >= fb { return if fa == fb { wa } else { wa + (wb - wa) * (fa - f) / (fa - fb) }; }
+            }
+            return top;
+        }
+        top * (1.0 - (self.ecc - 1.0) / (self.ecc - f)) / self.ecc_slope
+    }
+    fn act_speed(&self, j: usize, s: &[f64]) -> f64 {
+        let a = &self.acts[j];
+        let (n, wa) = if a.a >= 0 {
+            let o = 13 * a.a as usize;
+            (mv(&qr(&[s[o + 3], s[o + 4], s[o + 5], s[o + 6]]), &a.ax), [s[o + 10], s[o + 11], s[o + 12]])
+        } else { (a.ax, ZERO) };
+        let o = 13 * a.b;
+        dot(&sub(&[s[o + 10], s[o + 11], s[o + 12]], &wa), &n)
+    }
+    /// engine.py's sec_update: one implicit step of each series spring, by bisection.
+    fn sec_update(&self, s: &[f64], sec: &mut [f64], h: f64) {
+        let oa = 13 * self.nb();
+        for (j, a) in self.acts.iter().enumerate() {
+            let k = a.ksec;
+            if k <= 0.0 { continue; }
+            let tab = &self.fvtabs[a.tab as usize];
+            let cap = a.t * f64::max(s[oa + j], A_MIN);
+            let wj = self.act_speed(j, s);
+            let old = sec[j];
+            let g = |th: f64| th - old - h * (self.fv_tab_inv(tab, k * th / cap) - wj);
+            let mut hi = (self.ecc - 1e-6) * cap / k;
+            if cap <= 0.0 || g(0.0) >= 0.0 { sec[j] = 0.0; }
+            else if g(hi) <= 0.0 { sec[j] = hi; }
+            else {
+                let mut lo = 0.0;
+                for _ in 0..SEC_ITERS {
+                    let mid = 0.5 * (lo + hi);
+                    if g(mid) > 0.0 { hi = mid; } else { lo = mid; }
+                }
+                sec[j] = 0.5 * (lo + hi);
+            }
+        }
     }
 
     fn rows(&self, x: &[V3], r: &[M9], v: &[V3], w: &[V3]) -> Vec<Row> {
@@ -122,7 +185,7 @@ impl Sys {
         [j[0] * lin, j[1] * lin, j[2] * lin, y[0], y[1], y[2]]
     }
 
-    fn deriv(&self, t: f64, s: &[f64], aux: &[Option<[f64; 2]>], mut diag: Option<&mut Diag>) -> Vec<f64> {
+    fn deriv(&self, t: f64, s: &[f64], aux: &[Option<[f64; 2]>], sec: &[f64], mut diag: Option<&mut Diag>) -> Vec<f64> {
         let nb = self.nb();
         let mut x = Vec::with_capacity(nb); let mut r = Vec::with_capacity(nb);
         let mut v = Vec::with_capacity(nb); let mut w = Vec::with_capacity(nb);
@@ -149,7 +212,7 @@ impl Sys {
             let n = if a.a >= 0 { mv(&r[a.a as usize], &a.ax) } else { a.ax };
             let wa = if a.a >= 0 { w[a.a as usize] } else { ZERO };
             let wrel = dot(&sub(&w[a.b], &wa), &n);
-            let tau = a.t * act * self.fv(wrel / a.w);
+            let tau = if a.ksec > 0.0 { a.ksec * sec[j] } else if a.tab >= 0 { a.t * act * self.fv_tab(&self.fvtabs[a.tab as usize], wrel) } else { a.t * act * self.fv(wrel / a.w) };
             let tv = scale(&n, tau);
             tq[a.b] = add(&tq[a.b], &tv);
             if a.a >= 0 { tq[a.a as usize] = sub(&tq[a.a as usize], &tv); }
@@ -342,16 +405,16 @@ impl Sys {
         }
     }
 
-    fn step(&self, t: f64, s: &[f64], aux: &mut [Option<[f64; 2]>], h: f64) -> Vec<f64> {
+    fn step(&self, t: f64, s: &[f64], aux: &mut [Option<[f64; 2]>], sec: &mut [f64], h: f64) -> Vec<f64> {
         let n = s.len();
-        let k1 = self.deriv(t, s, aux, None);
+        let k1 = self.deriv(t, s, aux, sec, None);
         let mut tmp = vec![0.0; n];
         for i in 0..n { tmp[i] = s[i] + 0.5 * h * k1[i]; }
-        let k2 = self.deriv(t + 0.5 * h, &tmp, aux, None);
+        let k2 = self.deriv(t + 0.5 * h, &tmp, aux, sec, None);
         for i in 0..n { tmp[i] = s[i] + 0.5 * h * k2[i]; }
-        let k3 = self.deriv(t + 0.5 * h, &tmp, aux, None);
+        let k3 = self.deriv(t + 0.5 * h, &tmp, aux, sec, None);
         for i in 0..n { tmp[i] = s[i] + h * k3[i]; }
-        let k4 = self.deriv(t + h, &tmp, aux, None);
+        let k4 = self.deriv(t + h, &tmp, aux, sec, None);
         let h6 = h / 6.0;
         let mut out = vec![0.0; n];
         for i in 0..n { out[i] = s[i] + h6 * (k1[i] + 2.0 * k2[i] + 2.0 * k3[i] + k4[i]); }
@@ -361,6 +424,7 @@ impl Sys {
             out[o] /= qn; out[o + 1] /= qn; out[o + 2] /= qn; out[o + 3] /= qn;
         }
         self.anchors(&out, aux);
+        self.sec_update(&out, sec, h);
         out
     }
 }
@@ -391,8 +455,12 @@ fn main() {
     let dots: Vec<Dt> = (0..n).map(|_| Dt { a: tk.i(), b: tk.i(), ua: tk.v3(), wb: tk.v3() }).collect();
     tk.key("order"); let n = tk.u();
     let order: Vec<usize> = (0..n).map(|_| tk.u()).collect();
+    tk.key("fvtabs"); let n = tk.u();
+    let mut fvtabs: Vec<Vec<[f64; 2]>> = Vec::new();
+    for _ in 0..n { let np = tk.u(); fvtabs.push((0..np).map(|_| [tk.f(), tk.f()]).collect()); }
     tk.key("acts"); let n = tk.u();
-    let acts: Vec<Act> = (0..n).map(|_| Act { a: tk.i(), b: tk.u(), ax: tk.v3(), t: tk.f(), w: tk.f(), ton: tk.f(), rise: tk.f(), toff: tk.f() }).collect();
+    let acts: Vec<Act> = (0..n).map(|_| Act { a: tk.i(), b: tk.u(), ax: tk.v3(), t: tk.f(), w: tk.f(), ton: tk.f(), rise: tk.f(), toff: tk.f(),
+                                               a0: tk.f(), tab: tk.i(), ksec: tk.f() }).collect();
     tk.key("stops"); let n = tk.u();
     let stops: Vec<Stop> = (0..n).map(|_| Stop { a: tk.i(), b: tk.u(), ax: tk.v3(), ea: tk.v3(), fb: tk.v3(), lo: tk.f(), hi: tk.f(), k: tk.f(), c: tk.f() }).collect();
     tk.key("holds"); let n = tk.u();
@@ -404,12 +472,14 @@ fn main() {
     tk.key("anchors");
     let mut aux0: Vec<Option<[f64; 2]>> = Vec::new();
     for _ in 0..cons.len() { let flag = tk.u(); let (ax, ay) = (tk.f(), tk.f()); aux0.push(if flag == 1 { Some([ax, ay]) } else { None }); }
+    tk.key("sec"); let n = tk.u();
+    let sec0: Vec<f64> = (0..n).map(|_| tk.f()).collect();
     tk.key("run"); let (t0, nsteps, h, every) = (tk.f(), tk.u(), tk.f(), tk.u());
     tk.key("state"); let n = tk.u();
     let s0: Vec<f64> = (0..n).map(|_| tk.f()).collect();
     let nrows = 3 * pts.len() + dots.len();
     let mut sys = Sys { g, baum_a, baum_b, ta_up, ta_dn, k_fv, ecc, ecc_slope, d0, m, inr, pts, dots, order, first: vec![0; nrows],
-                        acts, stops, holds, tones, cons };
+                        acts, stops, holds, tones, cons, fvtabs };
     if !sys.order.is_empty() {
         // each row's first structural non-zero: the earliest row sharing a body with it; then the
         // envelope is closed under fill (a row's envelope reaches at least as far left as ... its own first)
@@ -434,8 +504,9 @@ fn main() {
         for _ in 0..reps {
             let mut s = s0.clone();
             let mut aux = aux0.clone();
+            let mut sec = sec0.clone();
             sys.anchors(&s, &mut aux);
-            for i in 0..nsteps { s = sys.step(t0 + (i as f64) * h, &s, &mut aux, h); }
+            for i in 0..nsteps { s = sys.step(t0 + (i as f64) * h, &s, &mut aux, &mut sec, h); }
             chk += s[0];
         }
         let us = t.elapsed().as_secs_f64() * 1e6 / (reps * nsteps) as f64;
@@ -446,20 +517,22 @@ fn main() {
     let mut out = std::io::BufWriter::new(out.lock());
     let mut s = s0.clone();
     let mut aux = aux0.clone();
+    let mut sec = sec0.clone();
     sys.anchors(&s, &mut aux);
     let mut diag = Diag::default();
-    let mut record = |t: f64, s: &[f64], aux: &[Option<[f64; 2]>], out: &mut dyn Write| {
-        sys.deriv(t, s, aux, Some(&mut diag));
+    let mut record = |t: f64, s: &[f64], aux: &[Option<[f64; 2]>], sec: &[f64], out: &mut dyn Write| {
+        sys.deriv(t, s, aux, sec, Some(&mut diag));
         write!(out, "{:e}", t).unwrap();
         for x in s { write!(out, " {:e}", x).unwrap(); }
         for c in &diag.con { write!(out, " {:e} {:e} {:e}", c[0], c[1], c[2]).unwrap(); }
         for a in &diag.act { write!(out, " {:e} {:e} {:e}", a[0], a[1], a[2]).unwrap(); }
         for st in &diag.stop { write!(out, " {:e} {:e}", st[0], st[1]).unwrap(); }
+        for x in sec { write!(out, " {:e}", x).unwrap(); }
         writeln!(out).unwrap();
     };
-    record(t0, &s, &aux, &mut out);
+    record(t0, &s, &aux, &sec, &mut out);
     for i in 0..nsteps {
-        s = sys.step(t0 + (i as f64) * h, &s, &mut aux, h);
-        if (i + 1) % every == 0 { record(t0 + ((i + 1) as f64) * h, &s, &aux, &mut out); }
+        s = sys.step(t0 + (i as f64) * h, &s, &mut aux, &mut sec, h);
+        if (i + 1) % every == 0 { record(t0 + ((i + 1) as f64) * h, &s, &aux, &sec, &mut out); }
     }
 }

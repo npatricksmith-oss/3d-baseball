@@ -61,9 +61,12 @@ def write_model(path, s, st, aux, t0, nsteps, h, every, order=()):
     for a, b, ua, wb in s.dots:
         w.append("%d %d %s %s" % (a, b, f(*ua), f(*wb)))
     w.append("order %d %s" % (len(order), " ".join(str(i) for i in order)))
+    w.append("fvtabs %d" % len(s.fvtabs))
+    for tab in s.fvtabs:
+        w.append("%d %s" % (len(tab), " ".join(f(*pt) for pt in tab)))
     w.append("acts %d" % len(s.acts))
-    for name, a, b, ax, T, W, t_on, rise, t_off in s.acts:
-        w.append("%d %d %s %s" % (a, b, f(*ax), f(T, W, t_on, rise, t_off)))
+    for name, a, b, ax, T, W, t_on, rise, t_off, a0, tab, ksec in s.acts:
+        w.append("%d %d %s %s %d %s" % (a, b, f(*ax), f(T, W, t_on, rise, t_off, a0), tab, f(ksec)))
     w.append("stops %d" % len(s.stops))
     for name, a, b, ax, ea, fb, lo, hi, k, c in s.stops:
         w.append("%d %d %s %s %s %s" % (a, b, f(*ax), f(*ea), f(*fb), f(lo, hi, k, c)))
@@ -76,7 +79,10 @@ def write_model(path, s, st, aux, t0, nsteps, h, every, order=()):
     w.append("cons %d" % len(s.contacts))
     for name, b, p, kn, cn, kt, ct, mu in s.contacts:
         w.append("%d %s %s" % (b, f(*p), f(kn, cn, kt, ct, mu)))
-    w.append("anchors " + " ".join("0 0.0 0.0" if a is None else "1 " + f(*a) for a in aux))
+    nc = len(s.contacts)
+    sec = list(aux[nc:]) + [0.0] * (len(s.acts) - max(0, len(aux) - nc))
+    w.append("anchors " + " ".join("0 0.0 0.0" if a is None else "1 " + f(*a) for a in aux[:nc]))
+    w.append("sec %d %s" % (len(sec), f(*sec)))
     w.append("run %s %d %s %d" % (f(t0), nsteps, f(h), every))
     w.append("state %d %s" % (len(st), f(*st)))
     with open(path, "w") as fh:
@@ -103,7 +109,8 @@ def run_raw(s, st, t0, nsteps, h, every, aux=None, order=(), tag="run", reps=0):
         o = 1 + n
         recs.append((v[0], v[1:o], [tuple(v[o + 3 * i:o + 3 * i + 3]) for i in range(nc)],
                      [tuple(v[o + 3 * nc + 3 * i:o + 3 * nc + 3 * i + 3]) for i in range(na)],
-                     [tuple(v[o + 3 * nc + 3 * na + 2 * i:o + 3 * nc + 3 * na + 2 * i + 2]) for i in range(ns)]))
+                     [tuple(v[o + 3 * nc + 3 * na + 2 * i:o + 3 * nc + 3 * na + 2 * i + 2]) for i in range(ns)],
+                     v[o + 3 * nc + 3 * na + 2 * ns:]))
     return recs
 
 
@@ -113,8 +120,9 @@ def simulate(mdl, st, t0, t1, h=1e-3, every=5, aux=None, tree=True):
     n = int(round((t1 - t0) / h))
     recs = run_raw(s, st, t0, n, h, every, aux, tree_order(mdl) if tree else ())
     rows, prev = [], None
-    for t, state, con, act, stop in recs:
+    for t, state, con, act, stop, sec in recs:
         o = mdl.observe(state)
+        o["sec"] = sec
         if prev is None:
             if o["bat_az"] > 0.0:
                 o["bat_az"] -= 360.0
@@ -153,26 +161,29 @@ def _cases():
     m = B.Model()
     st = B.place(m, -0.250)
     bd = Dr.bounds(m.H, m.M)
-    st = Dr.add_drives(m, st, {n: (bd[n], -0.245 if n in ("core",) or n.startswith(("hip", "knee")) else -0.170, 0.05, 0.1) for n in bd})
+    arm = lambda n: n.startswith(("shoulder", "elbow", "wrist"))
+    st = Dr.add_drives(m, st, {n: (bd[n], -0.170 if arm(n) else -0.245, 0.05, 0.1, 0.0 if arm(n) else 0.3) for n in bd})
     Dr.solve_tone(m, st, -0.250)
     Dr.add_damping(m, st)
-    out.append(("every drive at its bound", m, st, -0.250, 310))
+    aux = m.sys.new_aux()
+    m.sys.anchors(st, aux)
+    m.sys.sec_start(st, aux)                         # the leg drives tensed at 0.3, their tendon springs loaded to match
+    m.check_aux = aux
+    out.append(("every drive at its bound, legs tensed, tendons", m, st, -0.250, 310))
     m = B.Model(contacts=False)
     m.sys.g = (0.0, 0.0, 0.0)
     st = B.place(m, -0.250)
     st = Dr.add_drives(m, st, {n: (0.5 * bd[n], -0.250, 0.05, 1.0) for n in bd})
     Dr.add_damping(m, st)
     out.append(("off the ground, half drive", m, st, -0.250, 150))
-    fitted = os.path.join(HERE, "fit3d_design.json")
-    if os.path.isfile(fitted):                       # the fitted swing itself, from its own starting ground forces
+    fitted = os.path.join(HERE, "fit3d_d34.json")
+    if os.path.isfile(fitted):                       # the fitted swing itself (4.5's limits), from its own start
         import json
         import fit3d
         ctx = fit3d.Ctx()
-        plan = json.load(open(fitted))["plan"]
-        for a in ctx.m.sys.acts:                     # channels added since that fit stay off
-            a[4], a[6], a[7], a[8] = plan.get(a[0], (0.0, 0.0, 0.05, 0.1))
-        ctx.m.check_aux = list(ctx.aux0)
-        out.append(("the fitted swing (design rules)", ctx.m, ctx.st, fit3d.T0, 310))
+        st, aux = ctx.prepare(ctx.u_of(json.load(open(fitted))["plan"]))
+        ctx.m.check_aux = aux
+        out.append(("the fitted swing (4.5's limits)", ctx.m, st, fit3d.T0, 310))
     return out
 
 
@@ -193,7 +204,7 @@ def check():
             recs = run_raw(m.sys, st, t0, n, 1e-3, 10, aux=None if aux0 is None else list(aux0), order=order)[1:]
             d = max(abs(a - b) for (t, state, *_), r in zip(recs, ref) for a, b in zip(state, r))
             dend = max(abs(a - b) for a, b in zip(recs[-1][1], ref[-1]))
-            print("%-28s %-13s largest state difference over %d records: %.2e (at the end %.2e)" % (label, nm, len(ref), d, dend))
+            print("%-46s %-13s largest state difference over %d records: %.2e (at the end %.2e)" % (label, nm, len(ref), d, dend))
             worst = max(worst, d)
     print("worst %.2e, tolerance %.0e: %s" % (worst, CHECK_TOL, "PASS" if worst <= CHECK_TOL else "FAIL"))
     return worst <= CHECK_TOL
