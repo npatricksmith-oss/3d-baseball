@@ -22,6 +22,12 @@ fn add(a: &V3, b: &V3) -> V3 { [a[0] + b[0], a[1] + b[1], a[2] + b[2]] }
 fn sub(a: &V3, b: &V3) -> V3 { [a[0] - b[0], a[1] - b[1], a[2] - b[2]] }
 fn scale(a: &V3, k: f64) -> V3 { [a[0] * k, a[1] * k, a[2] * k] }
 fn norm(a: &V3) -> f64 { dot(a, a).sqrt() }
+/// engine.py's float_axis: the unit vector along na x nb, or zero where they are parallel.
+fn float_axis(na: &V3, nb: &V3) -> V3 {
+    let c = cross(na, nb);
+    let l = dot(&c, &c).sqrt();
+    if l > 1e-9 { scale(&c, 1.0 / l) } else { [0.0; 3] }
+}
 fn qmul(p: &[f64; 4], q: &[f64; 4]) -> [f64; 4] {
     [p[0] * q[0] - p[1] * q[1] - p[2] * q[2] - p[3] * q[3],
      p[0] * q[1] + p[1] * q[0] + p[2] * q[3] - p[3] * q[2],
@@ -46,7 +52,7 @@ const E3: [V3; 3] = [[1.0, 0.0, 0.0], [0.0, 1.0, 0.0], [0.0, 0.0, 1.0]];
 
 struct Pt { a: i32, b: i32, ra: V3, rb: V3 }
 struct Dt { a: i32, b: i32, ua: V3, wb: V3 }
-struct Act { a: i32, b: usize, ax: V3, t: f64, w: f64, ton: f64, rise: f64, toff: f64, a0: f64, tab: i32, ksec: f64 }
+struct Act { a: i32, b: usize, ax: V3, t: f64, w: f64, ton: f64, rise: f64, toff: f64, a0: f64, tab: i32, ksec: f64, axb: V3 }
 struct Stop { a: i32, b: usize, ax: V3, ea: V3, fb: V3, lo: f64, hi: f64, k: f64, c: f64 }
 struct Hold { a: i32, b: usize, qref: [f64; 4], k: V3, c: V3, cap: f64 }
 struct Tone { a: i32, b: usize, tl: V3 }
@@ -110,11 +116,12 @@ impl Sys {
     }
     fn act_speed(&self, j: usize, s: &[f64]) -> f64 {
         let a = &self.acts[j];
-        let (n, wa) = if a.a >= 0 {
+        let (mut n, wa) = if a.a >= 0 {
             let o = 13 * a.a as usize;
             (mv(&qr(&[s[o + 3], s[o + 4], s[o + 5], s[o + 6]]), &a.ax), [s[o + 10], s[o + 11], s[o + 12]])
         } else { (a.ax, ZERO) };
         let o = 13 * a.b;
+        if a.axb != ZERO { n = float_axis(&n, &mv(&qr(&[s[o + 3], s[o + 4], s[o + 5], s[o + 6]]), &a.axb)); }
         dot(&sub(&[s[o + 10], s[o + 11], s[o + 12]], &wa), &n)
     }
     /// engine.py's sec_update: one implicit step of each series spring, by bisection.
@@ -210,7 +217,8 @@ impl Sys {
             let act = s[oa + j];
             let u = self.excitation(j, t);
             ds[oa + j] = (u - act) / (if u > act { self.ta_up } else { self.ta_dn });
-            let n = if a.a >= 0 { mv(&r[a.a as usize], &a.ax) } else { a.ax };
+            let mut n = if a.a >= 0 { mv(&r[a.a as usize], &a.ax) } else { a.ax };
+            if a.axb != ZERO { n = float_axis(&n, &mv(&r[a.b], &a.axb)); }
             let wa = if a.a >= 0 { w[a.a as usize] } else { ZERO };
             let wrel = dot(&sub(&w[a.b], &wa), &n);
             let tau = if a.ksec > 0.0 { a.ksec * sec[j] } else if a.tab >= 0 { a.t * act * self.fv_tab(&self.fvtabs[a.tab as usize], self.fvecc[a.tab as usize], wrel) } else { a.t * act * self.fv(wrel / a.w) };
@@ -462,7 +470,7 @@ fn main() {
     for _ in 0..n { let np = tk.u(); fvecc.push(tk.f()); fvtabs.push((0..np).map(|_| [tk.f(), tk.f()]).collect()); }
     tk.key("acts"); let n = tk.u();
     let acts: Vec<Act> = (0..n).map(|_| Act { a: tk.i(), b: tk.u(), ax: tk.v3(), t: tk.f(), w: tk.f(), ton: tk.f(), rise: tk.f(), toff: tk.f(),
-                                               a0: tk.f(), tab: tk.i(), ksec: tk.f() }).collect();
+                                               a0: tk.f(), tab: tk.i(), ksec: tk.f(), axb: tk.v3() }).collect();
     tk.key("stops"); let n = tk.u();
     let stops: Vec<Stop> = (0..n).map(|_| Stop { a: tk.i(), b: tk.u(), ax: tk.v3(), ea: tk.v3(), fb: tk.v3(), lo: tk.f(), hi: tk.f(), k: tk.f(), c: tk.f() }).collect();
     tk.key("holds"); let n = tk.u();

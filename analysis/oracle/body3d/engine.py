@@ -41,6 +41,7 @@ ECC = 1.5                 # [E] eccentric plateau
 ECC_SLOPE = 4.0           # [E]
 CONTACT_D0 = 1.0e-3       # [E] m, depth over which the contact's damping fades in (keeps the force continuous)
 NW = 4                    # work integrals carried in the state: drives, stops, holds, contacts
+FLOAT_EPS = 1e-9          # a floating drive axis (actuator's axis_b) is taken as absent where its two directions are this near parallel
 MUT = set()               # mutations, for the tests that show a check can fail (never set in real runs)
 
 
@@ -272,16 +273,26 @@ class System:
         for i in range(3):
             self.dotc(a, b, E3[i], mtv(Rb, mv(Ra, E3[(i + 1) % 3])))
 
-    def actuator(self, name, a, b, axis_a, T, W, t_on, t_rise, t_off, a0=0.0, tab=-1, ksec=0.0):
+    def actuator(self, name, a, b, axis_a, T, W, t_on, t_rise, t_off, a0=0.0, tab=-1, ksec=0.0, axis_b=None):
         """a drive between a and b about an axis fixed in a (5.1): on b the torque T act f_v about +axis,
         on a its reaction. Its shortening speed is b's angular velocity relative to a about the axis.
         a0: the excitation it holds before its onset (a muscle tensed before it fires; 4.5).
         tab: index of its measured strength-at-speed curve in fvtabs (-1: the first law with top speed W).
         ksec > 0: the muscle acts through a spring of that stiffness in series (tendon stretch, 4.5): the joint
-        gets ksec x the spring's stretch, and the stretch follows the muscle (sec_update)."""
+        gets ksec x the spring's stretch, and the stretch follows the muscle (sec_update).
+        axis_b (a direction fixed in b): the drive acts about the FLOATING axis square to both, the unit vector
+        along axis_a x axis_b, which turns axis_b away from axis_a (4.5, session 7: raising and lowering the arm, the axis square to the trunk's long axis and the
+        upper arm). Where the two are parallel there is no such axis and the drive gives nothing."""
         self.acts.append([name, a, b, unit(axis_a), float(T), float(W), float(t_on), float(t_rise), float(t_off),
-                          float(a0), int(tab), float(ksec)])
+                          float(a0), int(tab), float(ksec), ZERO if axis_b is None else unit(axis_b)])
         return len(self.acts) - 1
+
+    @staticmethod
+    def float_axis(na, nb):
+        """the floating axis of two directions (world): the unit vector along na x nb, or zero where they are parallel."""
+        c = cross(nb, na) if "float_swap" in MUT else cross(na, nb)
+        l = math.sqrt(dot(c, c))
+        return scale(c, 1.0 / l) if l > FLOAT_EPS else ZERO
 
     def stop(self, name, a, b, axis_a, e_a, f_b, lo, hi, k, c):
         """a one-sided limit on the angle about axis_a (fixed in a) from e_a (in a) to f_b (in b)."""
@@ -350,6 +361,9 @@ class System:
         """drive j's shortening speed in state s: its child's angular velocity relative to its parent about the axis."""
         name, a, b, ax = self.acts[j][:4]
         n = mv(qR(tuple(s[13 * a + 3:13 * a + 7])), ax) if a >= 0 else ax
+        axb = self.acts[j][12]
+        if axb != ZERO:
+            n = self.float_axis(n, mv(qR(tuple(s[13 * b + 3:13 * b + 7])), axb))
         wa = tuple(s[13 * a + 10:13 * a + 13]) if a >= 0 else ZERO
         return dot(sub(tuple(s[13 * b + 10:13 * b + 13]), wa), n)
 
@@ -477,11 +491,13 @@ class System:
         diag = self.diag
         p_act = p_stop = p_hold = p_con = 0.0
         nc = len(self.contacts)
-        for j, (name, a, b, ax, T, W, t_on, rise, t_off, a0, tab, ksec) in enumerate(self.acts):
+        for j, (name, a, b, ax, T, W, t_on, rise, t_off, a0, tab, ksec, axb) in enumerate(self.acts):
             act = s[oa + j]
             u = self.excitation(j, t)
             ds[oa + j] = (u - act) / (TA_UP if u > act else TA_DN)
             n = mv(R[a], ax) if a >= 0 else ax
+            if axb != ZERO:
+                n = self.float_axis(n, mv(R[b], axb))
             wrel = dot(sub(Wv[b], Wv[a] if a >= 0 else ZERO), n)
             if ksec > 0.0:
                 tau = ksec * (aux[nc + j] if len(aux) > nc + j else 0.0)

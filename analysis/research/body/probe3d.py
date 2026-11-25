@@ -65,8 +65,8 @@ def write_model(path, s, st, aux, t0, nsteps, h, every, order=()):
     for k, tab in enumerate(s.fvtabs):
         w.append("%d %s %s" % (len(tab), f(s.tab_ecc(k)), " ".join(f(*pt) for pt in tab)))
     w.append("acts %d" % len(s.acts))
-    for name, a, b, ax, T, W, t_on, rise, t_off, a0, tab, ksec in s.acts:
-        w.append("%d %d %s %s %d %s" % (a, b, f(*ax), f(T, W, t_on, rise, t_off, a0), tab, f(ksec)))
+    for name, a, b, ax, T, W, t_on, rise, t_off, a0, tab, ksec, axb in s.acts:
+        w.append("%d %d %s %s %d %s %s" % (a, b, f(*ax), f(T, W, t_on, rise, t_off, a0), tab, f(ksec), f(*axb)))
     w.append("stops %d" % len(s.stops))
     for name, a, b, ax, ea, fb, lo, hi, k, c in s.stops:
         w.append("%d %d %s %s %s %s" % (a, b, f(*ax), f(*ea), f(*fb), f(lo, hi, k, c)))
@@ -176,7 +176,9 @@ def _cases():
     st = Dr.add_drives(m, st, {n: (0.5 * bd[n], -0.250, 0.05, 1.0) for n in bd})
     Dr.add_damping(m, st)
     out.append(("off the ground, half drive", m, st, -0.250, 150))
-    fitted = os.path.join(HERE, "fit3d_d34_arms.json")
+    fitted = os.path.join(HERE, "fit3d_d34_all.json")
+    if not os.path.isfile(fitted):                   # session 6's fit (its 22 channels; session 7's then switched off)
+        fitted = os.path.join(HERE, "fit3d_d34_arms.json")
     if os.path.isfile(fitted):                       # the fitted swing itself (4.5's limits), from its own start
         import json
         import fit3d
