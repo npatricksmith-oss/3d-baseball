@@ -121,7 +121,7 @@ WITHOUT = {
     "without_forearm_rotation": {"only": tuple(n for n in CH if not n.startswith(("pron", "sup")))},
     "without_wrist_flexion_and_extension": {"only": tuple(n for n in CH if not n.startswith(("wrist_flex", "wrist_ext")))},
 }
-STRONGEST = {"strongest": {"goal": "speed"}}
+STRONGEST = {"strongest": {"goal": "speed"}, "strongest_on_time": {"goal": "speed", "tight": 10.0}}
 RULES = {"design": {}, "wrist_delp": {"wrist": "delp"}, **RELAX, **RANGES, **WITHOUT, **STRONGEST}
 
 
@@ -281,9 +281,15 @@ class Ctx:
         if self.goal == "speed":
             # the strongest batter the limits allow: nothing asked but the sweet spot's speed at contact, the ball met
             # on time and the bat first moving when [4]'s does. SPEED_ASK is out of reach on purpose.
-            r = [(SPEED_ASK - oc["sweet_speed"]) / SPEED_BAND, tc / CONTACT_BAND]
+            tight = self.rules.get("tight", 1.0)        # > 1: the timing held that much harder (the second strongest-batter run)
+            r = [(SPEED_ASK - oc["sweet_speed"]) / SPEED_BAND, tc / CONTACT_BAND * tight]
             if self.first_motion:
-                r.append((self.first_motion_time(rows) - Dr.FIRST_MOTION_T) / FIRST_MOTION_BAND)
+                tfm = self.first_motion_time(rows)
+                r.append((tfm - Dr.FIRST_MOTION_T) / FIRST_MOTION_BAND * tight)
+                if tight > 1.0:                         # and no arm drive rising more than the measured delay before the bat moves
+                    pl = self.plan(u)
+                    on = [pl[nm][1] for nm in ARMS if pl[nm][0] > 0.01 * self.bd[nm]]
+                    r.append(max(0.0, (tfm - min(on)) - self.emd) / 0.001 if on else 0.0)
             return None if any(x != x for x in r) else r
         for k in (which or BAND):
             w = 1.0 / (BAND[k] * math.sqrt(n))
@@ -590,9 +596,12 @@ def main():
     if "--strongest" in a:
         base = json.load(open(base_file))
         print("the strongest batter the limits allow: from the design fit, every number free inside the rules, asked only for the sweet spot's speed at contact, the ball met on time and the bat's first motion at -170 ms")
-        ctx, best = fit("strongest", 1, u_from=base["plan"], iters=(0, 0, it))
+        name = "strongest_on_time" if "--on-time" in a else "strongest"
+        if "--from" in a:
+            base = json.load(open(arg("--from", "")))
+        ctx, best = fit(name, 1, u_from=base["plan"], iters=(0, 0, it))
         held_out(ctx, ctx.u_of(best["plan"]))
-        json.dump(best, open(os.path.join(P.OUT, "fit3d_all_strongest.json"), "w"), indent=1)
+        json.dump(best, open(os.path.join(P.OUT, "fit3d_all_%s.json" % name), "w"), indent=1)
         return
     if "--relax" in a or "--ranges" in a or "--without" in a:
         base = json.load(open(base_file))
