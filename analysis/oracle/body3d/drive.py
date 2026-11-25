@@ -39,6 +39,18 @@ ELBOW_EXT = (60.5 + 2 * 6.2) * (92.0 * 1.84) / (81.6 * 1.778)   # Holzbaur 2007,
 WRIST = {"peleg": (26.5 + 2 * 6.6) * (92.0 * 1.84) / (74.3 * 1.763), "delp": 9.5 + 2 * 2.2}    # 51 and 13.9 N m
 WRIST_READING = "peleg"
 REF_WH = 92.0 * E.G * 1.84
+# the undriven freedoms' limits (4.5, session 7; notes 8 and 9), each for 92 kg, 1.84 m
+_HOLZ = (92.0 * 1.84) / (81.6 * 1.778)                 # Holzbaur 2007: 5 men, isometric
+_DODDS = (92.0 * 1.84) / (89.6 * 1.834)                # Dodds 2020: 9 position players at 3.14 rad/s
+SHOULDER_RAISE = (74.4 + 2 * 10.8) * _HOLZ             # abduction: 112 N m
+SHOULDER_LOWER = (93.7 + 2 * 11.3) * _HOLZ             # adduction: 136
+SHOULDER_IROT = (37.2 + 2 * 15.4) * _DODDS             # internal rotation: 70
+SHOULDER_EROT = (23.2 + 2 * 7.4) * _DODDS              # external rotation: 39
+ELBOW_FLEX = (79.5 + 2 * 8.1) * _HOLZ                  # 112
+FOREARM_PRON, FOREARM_SUP = 17.35, 18.30               # Kentel 2011's one player, as measured (no sample exists)
+WRIST_FLEX = (25.6 + 2 * 7.0) * _HOLZ                  # 46 (the SD printed "7", the rest cut)
+WRIST_EXT = (14.0 + 2 * 3.4) * _HOLZ                   # 24
+TRUNK_BACK_REF = (131.83 + 2 * 27.87) * (92.0 * 1.84) / (74.7 * 1.765)   # Bae 2012, the golfers' other direction: 241 N m
 # strength at speed: (rad/s, fraction of full strength), straight lines between (4.5's table, with its sources)
 CURVES = {
     "hip_ext": ((0.0, 1.0), (1.05, 0.83), (3.14, 0.83 * 0.84), (4.19, 0.83 * 0.795), (14.2, 0.0)),
@@ -72,15 +84,37 @@ CURVES.update({
     "wrist_peleg": _arm_curve(18.02, 5.83, ((0.0, 1.0), (1.57, 1.0)), 1.57, (2.0, 3.0, 4.0, 5.0, 6.1, 9.0, 13.0)),
     "wrist_delp": _arm_curve(18.02, 5.83, ((0.0, 1.0),), 0.0, _SPEEDS0),
 })
+_IR53, _IR85 = 31.0 / 37.2, 31.0 / 37.2 * 37.14 / 50.66      # Dodds 3.14 -> 5.24 rad/s; Wilkin 5.24 -> 7.85
+_ER53, _ER85 = 19.9 / 23.2, 19.9 / 23.2 * 17.68 / 30.16
+_TB = (117.67 / 131.83, 111.04 / 131.83, 111.04 / 131.83 * 50.0 / 65.0)   # Bae's other direction; Gifford's other row
+CURVES.update({
+    "sh_raise": _arm_curve(20.74, 6.70, ((0.0, 1.0),), 0.0, _SPEEDS0),          # Kentel's shoulder flexion
+    "sh_lower": _arm_curve(31.93, 15.02, ((0.0, 1.0),), 0.0, _SPEEDS0 + (18.0, 24.0)),   # his shoulder extension
+    "sh_irot": _arm_curve(19.47, 9.71, ((0.0, 1.0), (3.14, 1.0), (5.24, _IR53), (7.85, _IR85)), 7.85, (9.0, 13.0)),
+    "sh_erot": _arm_curve(18.00, 7.20, ((0.0, 1.0), (3.14, 1.0), (5.24, _ER53), (7.85, _ER85)), 7.85, (9.0, 13.0)),
+    "elbow_flex": _arm_curve(18.10, 5.43, ((0.0, 1.0),), 0.0, _SPEEDS0),
+    "pron": _arm_curve(27.88, 9.71, ((0.0, 1.0),), 0.0, _SPEEDS0 + (18.0, 22.0)),
+    "sup": _arm_curve(35.45, 16.90, ((0.0, 1.0),), 0.0, _SPEEDS0 + (18.0, 24.0, 30.0)),
+    "wrist_flex": _arm_curve(21.40, 10.70, ((0.0, 1.0),), 0.0, _SPEEDS0 + (17.0,)),
+    "wrist_ext": _arm_curve(18.08, 7.78, ((0.0, 1.0),), 0.0, _SPEEDS0),
+    "sh_irot_kentel": _arm_curve(19.47, 9.71, ((0.0, 1.0),), 0.0, _SPEEDS0),
+    "sh_erot_kentel": _arm_curve(18.00, 7.20, ((0.0, 1.0),), 0.0, _SPEEDS0),
+    "trunk_back": ((0.0, 1.0), (0.52, 1.0), (1.05, _TB[0]), (2.09, _TB[1]), (4.19, _TB[2]),
+                   (4.19 + _TB[2] * 2.10 / (_TB[1] - _TB[2]), 0.0)),
+})
 ARM_ECC = 1.4                 # Kentel: an arm muscle being stretched rises to 1.4 x (the legs and trunk: Wilson's 1.5)
+NEW_SHOULDER_CURVES = "samples"   # "kentel": the shoulder's rotation on the one player's curve alone (a range end)
 SHOULDER_CURVES = "silva"     # "kentel": the one player's curve alone from zero speed (a range end)
 HIP_SIDE_CURVE = "hip_ext"    # [E] hip abduction, adduction and rotators fall with speed as the hip's extensors do; None = the first law
 # tendon stretch at full strength, rad: Wilson 2006's tabulated full strength over series stiffness (note 8 section 3.3)
 SEC_STRETCH = {"hip_ext": 480.0 / 5092.0, "knee_ext": 328.0 / 857.0, "hip_flex": 289.0 / 496.0, "ankle_pf": 283.0 / 767.0,
                # the arms: Kentel 2011's printed full strength over series stiffness (note 9 section 1)
-               "sh_hadd": 97.48 / 1968.5, "sh_habd": 71.90 / 785.9, "elbow_ext": 51.95 / 280.3, "wrist": 41.44 / 23.3}
+               "sh_hadd": 97.48 / 1968.5, "sh_habd": 71.90 / 785.9, "elbow_ext": 51.95 / 280.3, "wrist": 41.44 / 23.3,
+               # session 7's channels: Kentel's shoulder flexion, extension, internal rotation and elbow flexion rows
+               "sh_raise": 56.29 / 1386.9, "sh_lower": 119.13 / 2366.9, "sh_irot": 42.67 / 603.1, "elbow_flex": 75.82 / 651.5}
 TENDONS = True             # False: no series springs at the legs (a sensitivity case)
-ARM_TENDONS = {"sh_hadd": True, "sh_habd": True, "elbow_ext": True, "wrist": False}   # 4.5: the wrists' printed value is doubted
+ARM_TENDONS = {"sh_hadd": True, "sh_habd": True, "elbow_ext": True, "wrist": False,   # 4.5: the wrists' printed value is doubted
+               "sh_raise": True, "sh_lower": True, "sh_irot": True, "elbow_flex": True}
 # the first law's top speeds W, rad/s [E] (5.1), still used by the arms and wherever a curve is None
 W_TOP = {"hip": 20.0, "knee": 20.0, "ankle": 20.0, "core": 25.0, "shoulder": 30.0, "elbow": 35.0, "wrist": 40.0}
 # intrinsic joint damping [E]: N m s/rad on every joint, capped; stiffness none
@@ -103,7 +137,13 @@ def bounds(H, M):
          "ankle_pf_R": c("ankle_pf"), "ankle_pf_L": c("ankle_pf"),
          "core": TRUNK_REF * k, "shoulder_L": SHOULDER_HABD * k, "shoulder_R": SHOULDER_HADD * k,
          "elbow_ext_L": ELBOW_EXT * k, "elbow_ext_R": ELBOW_EXT * k,
-         "wrist_L": WRIST[WRIST_READING] * k, "wrist_R": WRIST[WRIST_READING] * k}
+         "wrist_L": WRIST[WRIST_READING] * k, "wrist_R": WRIST[WRIST_READING] * k, "core_back": TRUNK_BACK_REF * k}
+    for sd in "LR":
+        b.update({"sh_raise_" + sd: SHOULDER_RAISE * k, "sh_lower_" + sd: SHOULDER_LOWER * k, "sh_irot_" + sd: SHOULDER_IROT * k,
+                  "sh_erot_" + sd: SHOULDER_EROT * k, "elbow_flex_" + sd: ELBOW_FLEX * k, "pron_" + sd: FOREARM_PRON, "sup_" + sd: FOREARM_SUP,
+                  "wrist_flex_" + sd: WRIST_FLEX * k, "wrist_ext_" + sd: WRIST_EXT * k})
+    for n, f in BOUND_SCALE.items():
+        b[n] *= f
     return b
 
 
@@ -135,6 +175,38 @@ CHANNELS = {
 }
 
 
+# ---- session 7's channels (4.5) ---------------------------------------------------------------
+# A seventh field, where present, is a direction fixed in the CHILD: the drive then acts about the floating axis
+# along (axis in the parent) x (that direction) (engine.actuator's axis_b). The upper arm's own z runs from the
+# elbow up to the shoulder and the forearm's from the wrist up to the elbow (body.pose), so:
+# - raising the arm turns the upper arm's z away from the trunk's +z (the arm, which points along -z of itself,
+#   toward the trunk's upper end): the floating axis of (trunk +z, upper arm +z). Lowering: of (trunk -z, arm +z).
+# - internal rotation turns the RIGHT upper arm about its own +z (a bent forearm pointing forward swings across
+#   the front of the body) and the LEFT about its own -z. These and the forearm's rotation act about an axis of
+#   the child, so, as the hips do, the segment is the "parent" and the axis below is the torque on the OTHER body
+#   (the reaction of the one meant: the right arm's internal rotation is the trunk driven about the arm's -z).
+# - pronation turns the RIGHT forearm about its own +z (the thumb from outside, through the front, to inside)
+#   and the LEFT about its own -z.
+# - wrist flexion and extension act about the forearm's x, the wrist joint's first axis; which way is flexion is
+#   signed from the placed posture in add_drives (both hands hold the bat thumb toward the barrel).
+for _sd, _sg in (("L", 1.0), ("R", -1.0)):
+    CHANNELS.update({
+        "sh_raise_" + _sd: ("trunk", "uarm_" + _sd, (0, 0, 1), "shoulder", "sh_raise", "sh_raise", (0, 0, 1)),
+        "sh_lower_" + _sd: ("trunk", "uarm_" + _sd, (0, 0, -1), "shoulder", "sh_lower", "sh_lower", (0, 0, 1)),
+        "sh_irot_" + _sd: ("uarm_" + _sd, "trunk", (0, 0, _sg), "shoulder", "sh_irot", "sh_irot"),
+        "sh_erot_" + _sd: ("uarm_" + _sd, "trunk", (0, 0, -_sg), "shoulder", "sh_erot", None),
+        "elbow_flex_" + _sd: ("uarm_" + _sd, "farm_" + _sd, (0, 1, 0), "elbow", "elbow_flex", "elbow_flex"),
+        "pron_" + _sd: ("farm_" + _sd, "uarm_" + _sd, (0, 0, _sg), "elbow", "pron", None),
+        "sup_" + _sd: ("farm_" + _sd, "uarm_" + _sd, (0, 0, -_sg), "elbow", "sup", None),
+        "wrist_flex_" + _sd: ("farm_" + _sd, "bat", "flex", "wrist", "wrist_flex", None),
+        "wrist_ext_" + _sd: ("farm_" + _sd, "bat", "ext", "wrist", "wrist_ext", None),
+    })
+CHANNELS["core_back"] = ("pelvis", "trunk", (0, 0, -1), "core", "trunk_back", None)   # the trunk's rotators away from the pitcher: its brake
+NEW_ARM_CHANNELS = tuple(n + sd for sd in "LR" for n in ("sh_raise_", "sh_lower_", "sh_irot_", "sh_erot_", "elbow_flex_", "pron_", "sup_",
+                                                          "wrist_flex_", "wrist_ext_"))
+BOUND_SCALE = {}           # {channel: factor} on a bound, for a rerun at a range end; empty in the design
+
+
 def curve_of(ch):
     """the name in CURVES of channel ch's strength-at-speed curve as the switches stand, or None (the first law)."""
     curve = CHANNELS[ch][4]
@@ -143,6 +215,8 @@ def curve_of(ch):
     if curve == "wrist":
         return "wrist_" + WRIST_READING
     if curve in ("sh_hadd", "sh_habd") and SHOULDER_CURVES == "kentel":
+        return curve + "_kentel"
+    if curve in ("sh_irot", "sh_erot") and NEW_SHOULDER_CURVES == "kentel":
         return curve + "_kentel"
     return curve
 
@@ -158,8 +232,8 @@ def tendon_of(ch):
 
 
 def curve_ecc(curve):
-    return ARM_ECC if curve and curve.startswith(("sh_", "elbow", "wrist")) else E.ECC
-ARM_CHANNELS = ("shoulder_L", "shoulder_R", "elbow_ext_L", "elbow_ext_R", "wrist_L", "wrist_R")
+    return ARM_ECC if curve and curve.startswith(("sh_", "elbow", "wrist", "pron", "sup")) else E.ECC
+ARM_CHANNELS = ("shoulder_L", "shoulder_R", "elbow_ext_L", "elbow_ext_R", "wrist_L", "wrist_R")   # session 6's; with NEW_ARM_CHANNELS, the arms'
 JOINTS = ("lumbar", "hip_L", "hip_R", "knee_L", "knee_R", "ankle_L", "ankle_R",
           "shoulder_L", "shoulder_R", "elbow_L", "elbow_R", "wrist_L", "wrist_R")
 
@@ -174,7 +248,7 @@ def check_rules(mdl, plan):
             bad.append("%s: strength %.0f over its bound %.0f N m" % (n, T, bd[n]))
         if rise < RISE_MIN - 1e-12:
             bad.append("%s: rise %.0f ms under %.0f" % (n, rise * 1e3, RISE_MIN * 1e3))
-        if n in ARM_CHANNELS and t_on < ARMS_EARLIEST - 1e-12:
+        if n in ARM_CHANNELS + NEW_ARM_CHANNELS and t_on < ARMS_EARLIEST - 1e-12:
             bad.append("%s: rises from %.0f ms, more than the electromechanical delay before the bat's first motion (%.0f)" % (n, t_on * 1e3, ARMS_EARLIEST * 1e3))
     return bad
 
@@ -194,7 +268,15 @@ def add_drives(mdl, st, plan):
     for n, v in plan.items():
         T, t_on, rise, t_off = v[:4]
         a0 = v[4] if len(v) > 4 else 0.0
-        pa, ch, ax, grp, curve, tendon = CHANNELS[n]
+        pa, ch, ax, grp, curve, tendon = CHANNELS[n][:6]
+        axb = CHANNELS[n][6] if len(CHANNELS[n]) > 6 else None
+        if ax in ("flex", "ext"):
+            # the wrist's first axis is the forearm's x; in a hand closed round the handle it lies along the handle.
+            # Thumb toward the barrel, flexion turns the bat (relative to the forearm) about the handle's knob-to-barrel
+            # direction for the right (rear) hand and against it for the left (4.5)
+            along = E.dot(mdl.axis(st, pa, (1, 0, 0)), mdl.axis(st, "bat", (0, 0, 1)))
+            sgn = (1.0 if along > 0 else -1.0) * (1.0 if n[-1] == "R" else -1.0) * (1.0 if ax == "flex" else -1.0)
+            ax = (sgn, 0, 0)
         if ax is None:
             sd = n[-1]
             bz = mdl.axis(st, "bat", (0, 0, 1)); by = mdl.axis(st, "bat", (0, 1, 0))
@@ -211,7 +293,7 @@ def add_drives(mdl, st, plan):
                 s.fvecc.append(curve_ecc(curve))
             tab = tab_of[curve]
         ksec = bd[n] / SEC_STRETCH[tendon] if (tendon and tab >= 0) else 0.0
-        s.actuator(n, b[pa], b[ch], ax, T, W_TOP[grp], t_on, rise, t_off, a0, tab, ksec)
+        s.actuator(n, b[pa], b[ch], ax, T, W_TOP[grp], t_on, rise, t_off, a0, tab, ksec, axb)
     nb13 = 13 * s.nb
     return st[:nb13] + [a[9] for a in s.acts] + st[nb13 + nold:]
 

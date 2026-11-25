@@ -370,6 +370,43 @@ def block(push, mu=0.6, t_end=0.5, h=1e-3):
 
 
 # ---- 6b. the tendon spring in series with a drive (body-motion 4.5) -----------------------------------
+def floating_axis_error(t_end=0.3, h=5e-4):
+    """a rod on a ball joint at the origin, no gravity, turning about the vertical, with a constant torque about the
+    FLOATING axis square to the vertical and to the rod (a drive with an axis_b; body-motion 4.5, session 7). In
+    spherical coordinates (th from straight down, ph about the vertical) that torque is the generalised force on
+    th alone, so, for a rod with no inertia about its own axis,
+        th'' = sin th cos th ph'^2 + T / Ip,      sin^2 th ph' = constant,
+    integrated here by RK4. Returns the engine's (th, ph) and these."""
+    m, a, It, T = 2.0, 0.3, 0.05, 1.5
+    th0, phd0 = 0.9, 3.0
+    Ip = It + m * a * a
+    sys = E.System(g=(0.0, 0.0, 0.0))
+    b = sys.body("rod", m, (It, It, 1e-9))
+    sys.ball(-1, b, (0, 0, 0), (0, 0, a))
+    sys.actuator("raise", -1, b, (0, 0, 1), T, 1e12, -1.0, 0.0, 1e9, 1.0, -1, 0.0, (0, 0, 1))
+    q = E.qaxis((0, 1, 0), th0)                      # own +z from the far end to the pivot: the rod hangs at th0 toward -x (ph = pi)
+    s = sys.new_state()
+    xc = E.scale(E.mv(E.qR(q), (0, 0, a)), -1.0)
+    sys.set_body(s, b, xc, q)
+    w = (0.0, 0.0, phd0)
+    s[7:10] = list(E.cross(w, xc))
+    s[10:13] = list(w)
+    s[13] = 1.0                                      # the drive fully on from the start
+    s = sys.run(s, 0.0, t_end, h)
+    R = rot(s[3:7])
+    d = (-R[0][2], -R[1][2], -R[2][2])               # from the pivot to the far end
+    th = math.acos(-d[2])
+    ph = math.atan2(d[1], d[0])
+    hc = math.sin(th0) ** 2 * phd0
+
+    def f(y):
+        t_, td, p_ = y
+        pd = hc / math.sin(t_) ** 2
+        return [td, math.sin(t_) * math.cos(t_) * pd * pd + T / Ip, pd]
+    ref = rk4(f, [th0, 0.0, math.pi], 1e-4, int(round(t_end / 1e-4)))
+    return (th, ph), (ref[0], ref[2])
+
+
 SEC_TAB = ((0.0, 1.0), (1.517, 0.75), (3.952, 0.50), (5.24, 0.43), (13.4, 0.0))
 
 
@@ -437,6 +474,41 @@ class EngineChecks(unittest.TestCase):
             self.assertAlmostEqual(E.fv_tab(Dr.CURVES[name], w), f, delta=0.006, msg=name)
         for name, deg in (("sh_hadd", 2.8), ("sh_habd", 5.2), ("elbow_ext", 10.6)):
             self.assertAlmostEqual(math.degrees(Dr.SEC_STRETCH[name]), deg, delta=0.06)
+
+    def test_session_7s_curves_and_bounds_are_the_committed_ones(self):
+        """body-motion 4.5's last block, typed here from its tables (not read from drive.py)."""
+        bd = Dr.bounds(1.84, 92.0)
+        for n, v in (("sh_raise_L", 112.0), ("sh_lower_R", 136.0), ("sh_irot_R", 70.0), ("sh_erot_L", 39.0), ("elbow_flex_L", 112.0),
+                     ("pron_R", 17.4), ("sup_L", 18.3), ("wrist_flex_R", 46.0), ("wrist_ext_L", 24.0), ("core_back", 241.0)):
+            self.assertAlmostEqual(bd[n], v, delta=0.6, msg=n)
+        small = Dr.bounds(1.75, 77.0)
+        self.assertAlmostEqual(small["pron_L"], 17.4, delta=0.06)       # one player's value, not scaled by size
+        self.assertAlmostEqual(small["sh_raise_L"] / bd["sh_raise_L"], 1.75 * 77.0 / (1.84 * 92.0), places=9)
+        for name, w, f in (("sh_raise", 3.0, 0.59), ("sh_raise", 9.0, 0.24), ("sh_lower", 5.0, 0.63), ("sh_irot", 3.14, 1.0),
+                           ("sh_irot", 5.24, 0.833), ("sh_irot", 7.85, 0.611), ("sh_irot", 13.0, 0.263), ("sh_erot", 7.85, 0.503),
+                           ("sh_erot", 9.0, 0.414), ("trunk_back", 1.05, 0.893), ("trunk_back", 4.19, 0.648), ("trunk_back", 11.2, 0.0)):
+            self.assertAlmostEqual(E.fv_tab(Dr.CURVES[name], w), f, delta=0.006, msg=name)
+        hyp = lambda wm, wc, w: (wc / wm) * (wm - w) / (wc + w)        # Kentel's printed (top speed, omega_c), note 9
+        for name, wm, wc in (("elbow_flex", 18.10, 5.43), ("pron", 27.88, 9.71), ("sup", 35.45, 16.90), ("wrist_flex", 21.40, 10.70),
+                             ("wrist_ext", 18.08, 7.78), ("sh_lower", 31.93, 15.02)):
+            for w in (2.0, 6.1, 13.0):
+                self.assertAlmostEqual(E.fv_tab(Dr.CURVES[name], w), hyp(wm, wc, w), delta=1e-9, msg=name)
+            pts = Dr.CURVES[name]
+            self.assertTrue(all(a[1] > b_[1] for a, b_ in zip(pts, pts[1:])), name)     # falls all the way to zero at its top speed
+            self.assertEqual(pts[-1], (wm, 0.0))
+        for name, deg in (("sh_raise", 2.3), ("sh_lower", 2.9), ("sh_irot", 4.1), ("elbow_flex", 6.7)):
+            self.assertAlmostEqual(math.degrees(Dr.SEC_STRETCH[name]), deg, delta=0.06)
+        for name in ("sh_erot", "pron", "sup", "wrist_flex", "wrist_ext", "trunk_back"):
+            self.assertNotIn(name, Dr.SEC_STRETCH)                    # no tendon spring: 4.5
+
+    def test_floating_axis_against_spherical_coordinates(self):
+        """a drive about the axis square to two directions (raising the arm) against the same motion written in
+        spherical coordinates and integrated here."""
+        (th, ph), (rth, rph) = floating_axis_error()
+        self.assertGreater(rth - 0.9, 0.3)               # the torque raised the rod by a third of a radian or more
+        self.assertGreater(rph - math.pi, 0.5)           # and it went round the vertical meanwhile, so the axis moved
+        self.assertAlmostEqual(th, rth, delta=1e-6)      # 2e-7 at this step, 1e-8 at half of it (fourth order)
+        self.assertLess(abs(math.atan2(math.sin(ph - rph), math.cos(ph - rph))), 1e-6)
 
     def test_tendon_spring_holds_the_muscles_full_strength_when_nothing_moves(self):
         """against a rod too heavy to move, the spring stretches until it carries exactly the muscle's
@@ -577,6 +649,38 @@ T0 = -0.250
 MODEST = {"hip_rot_R": 0.6, "hip_rot_L": 0.6, "hip_ext_R": 0.3, "hip_flex_L": 0.3, "knee_ext_L": 0.1, "knee_ext_R": 0.1,
           "hip_abd_R": 0.3, "hip_add_L": 0.3, "knee_flex_R": 0.2, "ankle_pf_R": 0.2,
           "core": 0.8, "shoulder_L": 0.8, "shoulder_R": 0.8, "elbow_ext_L": 0.3, "elbow_ext_R": 0.5, "wrist_L": 1.0, "wrist_R": 1.0}
+# session 7's channels (body-motion 4.5): every one on, so the momentum and energy checks see each of them
+MODEST.update({"core_back": 0.3, "sh_raise_L": 0.5, "sh_lower_R": 0.5, "sh_raise_R": 0.2, "sh_lower_L": 0.2, "sh_irot_R": 0.8, "sh_erot_R": 0.3,
+               "sh_irot_L": 0.3, "sh_erot_L": 0.8, "elbow_flex_L": 0.4, "elbow_flex_R": 0.2, "pron_R": 1.0, "sup_R": 0.5, "pron_L": 0.5,
+               "sup_L": 1.0, "wrist_flex_R": 0.6, "wrist_ext_R": 0.3, "wrist_flex_L": 0.3, "wrist_ext_L": 0.6})
+
+
+def drive_turns(name):
+    """channel `name` alone at its bound on the placed body, off the ground: the change it makes to the angular
+    acceleration of its joint, as (child's minus parent's, world axes), with the model."""
+    m = B.Model(contacts=False)
+    st = B.place(m, T0)
+    bd = Dr.bounds(m.H, m.M)
+    acc = []
+    s1 = list(st)
+    for T in (0.0, bd[name]):
+        s1 = Dr.add_drives(m, s1, {name: (T, T0 - 1.0, 0.05, 1.0, 1.0)})
+        aux = m.sys.new_aux()
+        m.sys.sec_start(s1, aux)
+        ds = m.sys.deriv(T0, s1, aux)
+        acc.append([ds[13 * i + 10:13 * i + 13] for i in range(m.sys.nb)])
+    return m, st, [E.sub(tuple(a1), tuple(a0)) for a0, a1 in zip(*acc)]
+
+
+def anatomy(m, st, sd):
+    """directions read from the joint centres alone (not from any body's own axes): the upper arm from shoulder to
+    elbow, the forearm from elbow to wrist, the trunk's long axis from the lumbar joint to between the shoulders'
+    level (its own z is used only for the head end's sense), the bat from knob to barrel."""
+    S, El, W = m.joint_pos(st, "shoulder_" + sd), m.joint_pos(st, "elbow_" + sd), m.joint_pos(st, "wrist_" + sd)
+    mid = E.scale(E.add(m.joint_pos(st, "shoulder_L"), m.joint_pos(st, "shoulder_R")), 0.5)
+    zt = E.unit(E.sub(mid, m.joint_pos(st, "lumbar")))
+    bz = E.unit(E.sub(m.bat_point(st, 0.8)[0], m.bat_point(st, 0.0)[0]))
+    return E.unit(E.sub(El, S)), E.unit(E.sub(W, El)), zt, bz
 
 
 def driven_body(contacts=True, gravity=True, t_on=T0):
@@ -656,6 +760,38 @@ class BodyChecks(unittest.TestCase):
         self.assertLess(m.sys.residual(st)[1], 1e-10)
 
     @NEED
+    def test_each_of_session_7s_drives_turns_its_joint_the_named_way(self):
+        """each new channel, alone, against the anatomical meaning of its name, written here from the joint centres:
+        raising takes the upper arm away from hanging along the trunk; internal rotation turns the right upper arm
+        about its own axis the way that swings a forward-pointing forearm across the front of the body (a positive
+        turn about the line from elbow to shoulder), the left the other way; flexion closes the elbow; pronation
+        turns the right forearm positively about the line from wrist to elbow, the left the other way; with the thumb
+        toward the barrel, wrist flexion turns the bat against the forearm about the knob-to-barrel line for the
+        right hand and the other way for the left; the trunk's second channel turns it back against the pelvis."""
+        for sd, right in (("L", -1.0), ("R", 1.0)):
+            for name, parent, child, want in (
+                    ("sh_raise_", "trunk", "uarm_", lambda u, f, zt, bz: E.unit(E.cross(u, zt))),
+                    ("sh_lower_", "trunk", "uarm_", lambda u, f, zt, bz: E.unit(E.cross(zt, u))),
+                    ("sh_irot_", "trunk", "uarm_", lambda u, f, zt, bz: E.scale(u, -right)),
+                    ("sh_erot_", "trunk", "uarm_", lambda u, f, zt, bz: E.scale(u, right)),
+                    ("elbow_flex_", "uarm_", "farm_", lambda u, f, zt, bz: E.unit(E.cross(f, E.scale(u, -1.0)))),
+                    ("elbow_ext_", "uarm_", "farm_", lambda u, f, zt, bz: E.unit(E.cross(E.scale(u, -1.0), f))),
+                    ("pron_", "uarm_", "farm_", lambda u, f, zt, bz: E.scale(f, -right)),
+                    ("sup_", "uarm_", "farm_", lambda u, f, zt, bz: E.scale(f, right)),
+                    ("wrist_flex_", "farm_", "bat", lambda u, f, zt, bz: E.scale(bz, right)),
+                    ("wrist_ext_", "farm_", "bat", lambda u, f, zt, bz: E.scale(bz, -right))):
+                m, st, dacc = drive_turns(name + sd)
+                u, f, zt, bz = anatomy(m, st, sd)
+                pa = m.b[parent if parent == "trunk" else parent + sd]
+                ch = m.b[child if child == "bat" else child + sd]
+                turn = E.dot(E.sub(dacc[ch], dacc[pa]), want(u, f, zt, bz))
+                self.assertGreater(turn, 1.0, name + sd)           # rad/s^2 about the named direction
+        for name, sign in (("core", 1.0), ("core_back", -1.0)):
+            m, st, dacc = drive_turns(name)
+            up = E.unit(E.sub(m.joint_pos(st, "lumbar"), E.scale(E.add(m.joint_pos(st, "hip_L"), m.joint_pos(st, "hip_R")), 0.5)))
+            self.assertGreater(sign * E.dot(E.sub(dacc[m.b["trunk"]], dacc[m.b["pelvis"]]), up), 1.0, name)
+
+    @NEED
     def test_momentum_three_axes(self):
         """internal drives cannot change the body's linear or angular momentum on any axis. Linear momentum
         holds to rounding. Angular momentum holds to the joints' drift (a joint force acting across a gap
@@ -709,6 +845,12 @@ class Mutations(unittest.TestCase):
         g1, w1, _, _ = tendon_ledger(2.5e-4)
         self.assertGreater(abs(g1), 10.0 * abs(g0))
         self.assertGreater(abs(g1), 0.1 * abs(w0))
+
+    def test_floating_axis_the_wrong_way_round_fails_the_spherical_check(self):
+        """the floating axis taken as (child's direction) x (parent's) lowers what it should raise."""
+        E.MUT.add("float_swap")
+        (th, ph), (rth, rph) = floating_axis_error()
+        self.assertGreater(abs(th - rth), 0.3)
 
     def test_missing_reaction_fails_momentum(self):
         """a drive that turns the child without its reaction on the parent breaks angular momentum."""

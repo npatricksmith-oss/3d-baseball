@@ -210,6 +210,14 @@ class Model:
             else:
                 o[k] = w[2] / D2R
         o["sweet_speed"] = E.norm(self.bat_point(st, C.BAT_SS)[1])
+        # held out of every fit (body-motion 4.5, session 7): each upper arm's angle from hanging at the side, in the
+        # trunk's frame ([4]'s shoulder elevation as its polar angle is read here), and the azimuth of the line from
+        # the lead shoulder to the lead wrist ([3]'s "arms", [E])
+        zt = self.axis(st, "trunk", (0, 0, 1))
+        for sd, k in (("L", "lead_sh_elev"), ("R", "trail_sh_elev")):
+            d = E.unit(E.sub(self.joint_pos(st, "elbow_" + sd), self.joint_pos(st, "shoulder_" + sd)))
+            o[k] = math.acos(max(-1.0, min(1.0, -E.dot(d, zt)))) / D2R
+        o["lead_arm_az"] = math.atan2(arm[1], arm[0]) / D2R
         o["pelvis_y"] = self.sys.pose(st, self.b["pelvis"])[0][1]
         return o
 
