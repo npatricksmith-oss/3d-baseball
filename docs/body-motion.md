@@ -510,6 +510,67 @@ The owner ruled on 2026-11-25 (Q58 = a): the body's strength limits come only fr
 
 **What rests on an assumption in the arms, for the owner:** the rear and lead shoulders' bounds rest on one sample of boys scaled by mass; the elbows' on five men; every arm speed curve beyond 3 rad/s, and the elbows' and wrists' at any speed, on one tennis player; all tendon stretch in the arms on an assumed 5%; which wrist reading applies; the ± 15 ms; and the shoulders act about one axis only (the trunk's), with no channel for raising or lowering the arm, bending the elbow or turning the forearm.
 
+**The undriven freedoms' limits (session 7), written before any run with them.** §4.7 lists what the arms and trunk lack. Each gets a drive under the same rule, and the direction decides which measurement applies. This block was written and committed before the engine had the channels and before any refit. Sources are [N9]'s and [N8]'s with their reading statuses; one value was read this session and is marked. 19 channels are added to the 22, each with a strength, an onset, a rise, a switch-off and a starting level: 205 fitted numbers in place of 110.
+
+*The axes.* A shoulder is driven the way its motion is described clinically: the existing channel turns the arm about the trunk's long axis; **raising and lowering** act about the axis square to the trunk's long axis and the upper arm (it moves with the arm; the angle it changes is the arm's angle from hanging at the side, which is what [4] reports as the shoulder's elevation); **rotation** acts about the upper arm's own long axis. The elbow's flexors act about the hinge the extensors use; forearm rotation about the forearm's long axis; wrist flexion and extension about the wrist's second axis, which in a hand closed round a handle lies along the handle (the motion of a throttle grip). Both hands hold the bat thumb toward the barrel, which fixes which way is flexion.
+
+| Channel (each side unless said) | Bound, N·m | From | Read | Range a rerun tests |
+| :-- | --: | :-- | :-- | :-- |
+| shoulder, raising the arm | 112 | Holzbaur 2007: 5 men, isometric abduction 74.4 ± 10.8 N·m at 81.6 kg, 1.778 m, mean + 2 SD scaled | TAB (text layer garbled) | 56 (Kentel's one player, flexion; with the next three as one rerun) |
+| shoulder, lowering the arm | 136 | Holzbaur: adduction 93.7 ± 11.3, the same way | TAB | 119 (Kentel, extension) |
+| shoulder, internal rotation | 70 at 3.14 rad/s and slower | Dodds 2020: 9 college position players, 37.2 ± 15.4 N·m at 180°/s, 89.6 kg, 1.834 m, mean + 2 SD scaled. Wilkin's pitchers give 64 at 5.24 rad/s (AB, SD from an SEM) | TAB | 43 (Kentel) |
+| shoulder, external rotation | 39 at 3.14 rad/s and slower | Dodds: 23.2 ± 7.4, the same way | TAB | 34 (Kentel) |
+| elbow flexion | 112 | Holzbaur: 79.5 ± 8.1, mean + 2 SD scaled | TAB | 76 (Kentel) |
+| forearm, pronation | 17.4 | **Kentel's one player, as measured: no adult-male sample exists in N·m** ([N9]); his size is not given, so unscaled | FT | none measured; × 2 run as a diagnosis only |
+| forearm, supination | 18.3 | the same | FT | the same |
+| wrist flexion | 46 | Holzbaur: 25.6 N·m, its SD printed "7" with the rest cut (Danneskiold-Samsøe's is 7.4), mean + 2 SD scaled | TAB | not varied |
+| wrist extension | 24 | Holzbaur: 14.0 ± 3.4, mean + 2 SD scaled | TAB | 16 (Peleg 2025, on a handle at 1.57 rad/s: 8.8 ± 1.7, scaled) |
+| trunk rotation away from the pitcher (one channel) | 241 at 0.52 rad/s and slower | Bae 2012, the same 51 golfers turning the other way: 131.83 ± 27.87 N·m at 30°/s, mean + 2 SD scaled | **FT, the paper's Results text, read this session** ([N8] has the means only) | 260 (the first direction's bound) |
+
+**Their strength at speed,** in §4.5's form: 1 at and below the speed the bound was measured at, the sample's points where there are any, then Kentel's one player's hyperbola (top speed, ω_c) as a ratio to its own value at the join. A stretched arm muscle rises to 1.4 ×, the trunk to 1.5 ×, as before.
+
+| Group | Points (rad/s: fraction) | From |
+| :-- | :-- | :-- |
+| raising the arm | Kentel's shoulder flexion from zero speed (20.74, 6.70): 3: 0.59; 5: 0.43; 9: 0.24; 20.74: 0 | one player; Holzbaur's bound is isometric; his frontal-plane rows do not exist, so the forward-plane rows stand in |
+| lowering the arm | Kentel's shoulder extension from zero speed (31.93, 15.02): 3: 0.76; 5: 0.63; 9: 0.45; 31.93: 0 | the same |
+| internal rotation | 0–3.14: 1; 5.24: 0.833; 7.85: 0.611; then Kentel (19.47, 9.71): 9: 0.516; 13: 0.263; 19.47: 0 | Dodds's position players keep 83.3% from 3.14 to 5.24 rad/s (TAB); Wilkin's pitchers 73.3% from 5.24 to 7.85 (AB). **The one arm curve with samples to 7.85 rad/s** |
+| external rotation | 0–3.14: 1; 5.24: 0.858; 7.85: 0.503; then Kentel (18.00, 7.20): 9: 0.414; 13: 0.185; 18.00: 0 | Dodds 85.8%; Wilkin 58.6% |
+| elbow flexion | Kentel from zero speed (18.10, 5.43) | one player |
+| pronation; supination | Kentel from zero speed (27.88, 9.71); (35.45, 16.90) | one player; junior players keep 86% from 1.57 to 3.67 rad/s where his curves give 78% and 84% (a check, not used) |
+| wrist flexion; extension | Kentel from zero speed (21.40, 10.70); (18.08, 7.78) | one player |
+| trunk rotation away from the pitcher | 0–0.52: 1; 1.05: 0.893; 2.09: 0.842; 4.19: 0.648; the last line continued to zero at 11.2 | Bae: 131.83, 117.67, 111.04 N·m at 0.52, 1.05, 2.09 rad/s (FT); Gifford's golfers' other row keeps 76.9% from 2.09 to 4.19 (EXC). **Above 4.19 rad/s: [E]** |
+
+**Tendon stretch** at full strength, from Kentel's printed stiffness as §4.5 does for the neighbouring channels: raising 56.29 over 1,386.9 N·m/rad, 2.3°; lowering 119.13 over 2,366.9, 2.9°; internal rotation 42.67 over 603.1, 4.1°; elbow flexion 75.82 over 651.5, 6.7°. **None** for external rotation, the forearm or the wrists (the printed rows give 17–84°, which [N9] doubts as read), and none at the trunk (no value exists). A rerun tests the new channels with no tendon springs.
+
+**Starting levels and the clock.** Each new channel has a starting level between 0 and 1 that the fit finds. The 18 arm channels are under the arms' clock as it stands: no onset before −240 ms, the bat's first motion at −170 ± 15 ms. The trunk's second channel is under the legs' and trunk's rules. Every rise is at least 50 ms.
+
+**What stays undriven, because nothing in the notes measures it:**
+
+- **the trunk's bending, sideways and forward-and-back.** [N5] and [N8] hold rotation only. It keeps the constant starting torques and the joint damping of §4.4.
+- **the hands' roll about the handle.** In a real grip the skin's friction under the fingers' squeeze holds the bat from turning in the hand, and the hand can only turn the handle through the wrist. The one measurement is a torque the grip carried, not a limit: Koike 2003's bottom hand put about 20 N·m about the bat's long axis at impact (FIG, off the panel's edge, five hitters, tee; [N2] §2.1). No source bounds a slip, so the bat stays fixed in both hands, and where each wrist sits round the handle stays [E] and the same for both. What the model lacked here was the wrists' flexion and extension, which is how a fixed hand turns a handle; that is in the table.
+- **the shoulder girdle** (the shoulder joint moving on the trunk): no body part and no measurement.
+- **Still one-way, and not in this job's list:** each shoulder's turn about the trunk's axis the other way (measured: 123 and 92 N·m, Silva) and the wrists' cocking the other way (28, Peleg).
+
+**What each new drive is expected to do, written before the run:**
+
+- *lowering the rear arm:* the rear elbow drops to the side as [4]'s does (its arm 78° from hanging at −250 ms, 37° at contact); the barrel's drop and the rear elbow's bend fit better; little speed.
+- *raising and lowering the lead arm:* holds the lead arm up against the bat's pull; the lead elbow's fit; no speed.
+- *internal rotation of the rear shoulder, external of the lead:* with the rear elbow bent, turning the upper arm about its own axis swings the forearm and the hands forward. Expected to be the one new drive that adds hand speed: 1–2 m/s at the sweet spot.
+- *elbow flexors:* the lead elbow is no longer driven straight (36° at contact against 56°); no speed.
+- *forearm rotation:* the top hand rolls over the bottom one through contact. At 17–18 N·m, under 0.5 m/s; it moves the bat's elevation.
+- *wrist flexion and extension:* turn the bat about its own handle; nothing at the sweet spot.
+- *the trunk's brake:* the trunk's rate falls after −57 ms as [4]'s does; its curve comes inside one band unit and its angle at contact from 99° toward [4]'s 62–75°. A trunk that stops lets the arms run on: up to 1 m/s.
+- *The bat's speed overall:* the curves the fit is matched to hold 22.9 m/s at contact (§4.8). A body matched to them is expected to come up from 20.1 toward 22–23 m/s, and not to 29.
+
+**Held out: measured things the fit is not given, checked afterwards.** More drives match any curve more easily, so these say whether the body swings as batters do. Each is also computed for session 6's fit, for comparison.
+
+1. **[4]'s shoulder elevation curves, both arms** (digitised, never in the misfit): the upper arm's angle from hanging at the side, in the trunk's frame. Rear: 78° at −250 ms, 71 at −170, 48 at −93, 37 at contact. Lead: 83, 88, 80, 70. Reported as RMS from −250 ms to contact in units of 10° [E: [4]'s between-batter SD at contact is 4–11°], beside what the placed motion gives, since [4]'s trunk frame is not the model's.
+2. **[3]'s arm rate:** 1,160 ± 96°/s at −65 ms. Read here as the turning rate about the vertical of the line from the lead shoulder to the lead wrist [E: [3] does not define it beyond "arms"].
+3. **The batting electromyography of [N9] §4.1:** (a) the order of first rises is legs, then trunk, then arms; (b) the lead shoulder's muscle that sweeps the arm out (posterior deltoid: 76–101% of a maximum test from pre-swing through the swing) is on before the swing and stays on; (c) the lead elbow's extensor is highest early (triceps: 92% in early swing, 73% in the middle); (d) the muscle that raises the lead arm stays low (supraspinatus: under 40% throughout). **A new drive the fit runs in a way none of these recordings shows is said so.**
+4. **The bat does not slow before contact** (OpenBiomechanics: at 98% of its peak at contact, §4.8). The fit is matched to [4]'s smoothed curve, which does slow, so this is expected to fail; it is reported.
+
+**What rests on an assumption in this block, for the owner:** the forearm's strength is one tennis player's; every speed curve here except the shoulder's rotation is that player's; the raising and lowering bounds are five men's and measured in the frontal plane; the wrist's flexion SD is half-read; tendon stretch as before; Gifford's row for the trunk's fall above 2 rad/s; the two [E] readings in the held-out checks.
+
 ### 4.6 The refit on the measured limits (session 5)
 
 `fit3d.py` on §4.5's limits, written before it: 22 channels (16 of the legs and trunk with a starting level each, 6 of the arms), 104 numbers, three cold starts, staged as before, the reported numbers from one run of the whole body (the same at a 0.5 ms step). 19,450 swings, 13 minutes. The compiled probe agrees with the Python engine on this fitted swing (`probe3d.py --check`).
