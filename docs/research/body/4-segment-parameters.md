@@ -22,7 +22,17 @@ Male values. Mass is a fraction of body mass `M`. The centre-of-mass position is
 | Shank (knee → lateral malleolus) | 0.0433 | 434.0 | 0.4459 | 0.255 | 0.249 | 0.103 |
 | Foot (heel → toe tip) | 0.0137 | 258.1 | 0.4415 | 0.257 | 0.245 | 0.124 |
 
-(Check: the three trunk parts sum to the trunk, 0.1596 + 0.1633 + 0.1117 = 0.4346, and head + trunk + two of each limb segment = 1.0000.) Several alternative endpoints are tabulated in the paper (for the head, trunk, hand and shank); for a game with the neck and trunk as separate bodies, use the "Head 2 / CERV" and "Trunk 2 / CERV → mid-hip" rows (head 0.5002 of 242.9 mm from the vertex, r 0.303/0.315/0.261; trunk 0.5138 of 603.3 mm from the cervicale, r 0.328/0.306/0.169), which I read from the notebook transcription only.
+(Check: the three trunk parts sum to the trunk, 0.1596 + 0.1633 + 0.1117 = 0.4346, and head + trunk + two of each limb segment = 1.0000.) Several alternative endpoints are tabulated in the paper (for the head, trunk, hand and shank); for a game with the neck and trunk as separate bodies, use the "Head 2 / CERV" and "Trunk 2 / CERV → mid-hip" rows (head 0.5002 of 242.9 mm from the vertex, r 0.303/0.315/0.261; trunk 0.5138 of 603.3 mm from the cervicale, r 0.328/0.306/0.169), first read from the notebook transcription only, since checked against the paper's Table 4 page (below).
+
+**Alternative rows, checked against the paper** (2026-11-25, body-design, after the reviews: Table 4's lower block, "Using alternative endpoints", read from an image of the printed page of the same robotics.unibs.it copy, rendered by the gemini-neon reviewer; **FT**). Male values; Table 4 marks the head and upper-trunk rows "*Not adjusted values*":
+
+| Segment (origin → other end) | Mass | Length L (mm) | CM from origin | r sagittal | r transverse | r longitudinal |
+| :-- | --: | --: | --: | --: | --: | --: |
+| Head (vertex → cervicale) | 0.0694 | 242.9 | 0.5002 | 0.303 | 0.315 | 0.261 |
+| Trunk (cervicale → mid hip) | 0.4346 | 603.3 | 0.5138 | 0.328 | 0.306 | 0.169 |
+| Upper trunk (cervicale → xiphion) | 0.1596 | 242.1 | 0.5066 | 0.505 | 0.320 | 0.465 |
+
+The probes (`analysis/research/body/common.py`) use the vertex → cervicale head and the cervicale → xiphion upper trunk, so head, upper, middle and lower trunk join without a gap at the neck. The two upper-trunk rows are the same mass with different endpoints; with their own lengths, the radii give the same inertias to three figures (for example sagittal 0.716 × 170.7 = 122 mm against 0.505 × 242.1 = 122 mm).
 
 **How to use it.** `m = fraction × M`; `L = L_table × (Height / 1.741 m)` (the paper gives no scaling rule: scaling length by stature is the assumption, and the paper's own caveat is that mean values "generalised to an individual" carry errors); `I_axis = m (r·L)²` about the centre of mass (de Leva's own formula, `I = (M·m)(l·r)²`). Example, 1.88 m and 95 kg: thigh `m` = 13.45 kg, `L` = 0.456 m, `I` about the left-right axis = 0.303 kg·m², about its long axis 0.062 kg·m²; upper arm 2.57 kg, 0.304 m, 0.0193 and 0.0059 kg·m².
 

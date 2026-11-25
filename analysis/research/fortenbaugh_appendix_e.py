@@ -23,7 +23,19 @@ GREEN, ORANGE = (0, 176, 80), (247, 150, 70)
 TOP, BOT_SYM, BOT_ZERO = 92.5, 719.5, 672.5   # frame rows: value max; symmetric min; 0-based min
 # image index (page order from page 234) -> (name, line colour, value at top, value at bottom, bottom row)
 GRAPHS = {
+    0:  ("trail_grf_x",      GREEN, 100, -20, BOT_SYM),     # %BW; body-motion design (2026-11-25)
+    1:  ("lead_grf_x",       ORANGE, 20, -100, BOT_SYM),
+    2:  ("trail_grf_y",      GREEN, 50, -50, BOT_SYM),
+    3:  ("lead_grf_y",       ORANGE, 50, -50, BOT_SYM),
+    4:  ("trail_grf_z",      GREEN, 200, 0, BOT_ZERO),
+    5:  ("lead_grf_z",       ORANGE, 200, 0, BOT_ZERO),
+    7:  ("lead_knee_flex",   ORANGE, 180, 0, BOT_ZERO),
     9:  ("pelvis_x_cm",      ORANGE, 0, -100, BOT_SYM),
+    12: ("pelvis_rot",       GREEN, 180, -90, BOT_SYM),
+    13: ("trunk_rot",        ORANGE, 180, -90, BOT_SYM),
+    14: ("pelvis_rot_vel",   GREEN, 1000, -200, BOT_SYM),
+    15: ("trunk_rot_vel",    ORANGE, 1000, -200, BOT_SYM),
+    18: ("trunk_rel_pelvis", GREEN, 90, -90, BOT_SYM),
     19: ("bat_lag",          ORANGE, 180, 0, BOT_ZERO),
     20: ("trail_sh_elev",    GREEN, 180, 0, BOT_ZERO),
     21: ("lead_sh_elev",     ORANGE, 180, 0, BOT_ZERO),
