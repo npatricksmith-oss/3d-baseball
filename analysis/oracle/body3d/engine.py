@@ -53,6 +53,39 @@ def fv(w):
     return ECC - (ECC - 1.0) / (1.0 - ECC_SLOPE * w)
 
 
+def fv_tab(tab, w):
+    """a measured strength-at-speed curve: tab = ((speed rad/s, fraction), ...) from (0, 1) down to (top speed, 0),
+    straight lines between; w = shortening speed in rad/s. A muscle being stretched (w < 0) rises toward ECC
+    as in fv, on the curve's own top speed."""
+    top = tab[-1][0]
+    if w >= top:
+        return 0.0
+    if w >= 0.0:
+        for (wa, fa), (wb, fb) in zip(tab, tab[1:]):
+            if w <= wb:
+                return fa + (fb - fa) * (w - wa) / (wb - wa)
+        return 0.0
+    return ECC - (ECC - 1.0) / (1.0 - ECC_SLOPE * (w / top))
+
+
+def fv_tab_inv(tab, f):
+    """the speed (rad/s) at which the curve gives the fraction f, 0 <= f < ECC."""
+    top = tab[-1][0]
+    if f <= 0.0:
+        return top
+    if f <= 1.0:
+        for (wa, fa), (wb, fb) in zip(tab, tab[1:]):
+            if f >= fb:
+                return wa if fa == fb else wa + (wb - wa) * (fa - f) / (fa - fb)
+        return top
+    return top * (1.0 - (ECC - 1.0) / (ECC - f)) / ECC_SLOPE
+
+
+SEC_ITERS = 40            # bisections in the series spring's implicit step (fixed, for replay)
+SEC_FMAX = ECC - 1e-6     # the spring is never asked for more than the stretched muscle's plateau
+MUT_A_MIN = 1e-3          # activation floor inside the spring's step (a switched-off muscle lets the spring go)
+
+
 # ---- small vector and quaternion algebra (tuples) ----------------------------------------------
 def cross(a, b):
     return (a[1] * b[2] - a[2] * b[1], a[2] * b[0] - a[0] * b[2], a[0] * b[1] - a[1] * b[0])
@@ -191,6 +224,7 @@ class System:
         self.pts, self.dots = [], []        # constraint primitives
         self.acts, self.stops, self.holds, self.contacts = [], [], [], []
         self.tones = []
+        self.fvtabs = []                    # measured strength-at-speed curves (fv_tab), by index
         self.ext = []                       # external loads (body, point in the body, force, moment; world axes): inverse dynamics only
         self.baum_a, self.baum_b = BAUM_A, BAUM_B
         self.diag = None                    # set to {} to have deriv() record forces of its last call
@@ -235,10 +269,15 @@ class System:
         for i in range(3):
             self.dotc(a, b, E3[i], mtv(Rb, mv(Ra, E3[(i + 1) % 3])))
 
-    def actuator(self, name, a, b, axis_a, T, W, t_on, t_rise, t_off):
+    def actuator(self, name, a, b, axis_a, T, W, t_on, t_rise, t_off, a0=0.0, tab=-1, ksec=0.0):
         """a drive between a and b about an axis fixed in a (5.1): on b the torque T act f_v about +axis,
-        on a its reaction. Its shortening speed is b's angular velocity relative to a about the axis."""
-        self.acts.append([name, a, b, unit(axis_a), float(T), float(W), float(t_on), float(t_rise), float(t_off)])
+        on a its reaction. Its shortening speed is b's angular velocity relative to a about the axis.
+        a0: the excitation it holds before its onset (a muscle tensed before it fires; 4.5).
+        tab: index of its measured strength-at-speed curve in fvtabs (-1: the first law with top speed W).
+        ksec > 0: the muscle acts through a spring of that stiffness in series (tendon stretch, 4.5): the joint
+        gets ksec x the spring's stretch, and the stretch follows the muscle (sec_update)."""
+        self.acts.append([name, a, b, unit(axis_a), float(T), float(W), float(t_on), float(t_rise), float(t_off),
+                          float(a0), int(tab), float(ksec)])
         return len(self.acts) - 1
 
     def stop(self, name, a, b, axis_a, e_a, f_b, lo, hi, k, c):
@@ -271,7 +310,9 @@ class System:
         return s
 
     def new_aux(self):
-        return [None] * len(self.contacts)
+        """what is advanced once per step and held through its stages: the contacts' friction anchors, then
+        each drive's series-spring stretch (rad)."""
+        return [None] * len(self.contacts) + [0.0] * len(self.acts)
 
     @staticmethod
     def set_body(s, i, x, q, v=ZERO, w=ZERO):
@@ -285,12 +326,69 @@ class System:
 
     def excitation(self, j, t):
         a = self.acts[j]
-        t_on, rise, t_off = a[6], a[7], a[8]
-        if t < t_on or t >= t_off:
+        t_on, rise, t_off, a0 = a[6], a[7], a[8], a[9]
+        if t >= t_off:
             return 0.0
+        if t < t_on:
+            return a0
         if rise > 0.0 and t < t_on + rise:
-            return (t - t_on) / rise
+            return a0 + (1.0 - a0) * (t - t_on) / rise
         return 1.0
+
+    def act_fv(self, j, w):
+        """drive j's strength fraction at shortening speed w (rad/s)."""
+        a = self.acts[j]
+        return fv(w / a[5]) if a[10] < 0 else fv_tab(self.fvtabs[a[10]], w)
+
+    def act_speed(self, j, s):
+        """drive j's shortening speed in state s: its child's angular velocity relative to its parent about the axis."""
+        name, a, b, ax = self.acts[j][:4]
+        n = mv(qR(tuple(s[13 * a + 3:13 * a + 7])), ax) if a >= 0 else ax
+        wa = tuple(s[13 * a + 10:13 * a + 13]) if a >= 0 else ZERO
+        return dot(sub(tuple(s[13 * b + 10:13 * b + 13]), wa), n)
+
+    def sec_start(self, s, aux):
+        """each series spring's stretch for a muscle in steady pull at the state's speed and activation."""
+        nc, oa = len(self.contacts), 13 * self.nb
+        while len(aux) < nc + len(self.acts):
+            aux.append(0.0)
+        for j, a in enumerate(self.acts):
+            if a[11] > 0.0:
+                aux[nc + j] = a[4] * s[oa + j] * self.act_fv(j, self.act_speed(j, s)) / a[11]
+
+    def sec_update(self, s, aux, h):
+        """advance each series spring by one implicit (backward Euler) step of
+            stretch' = (muscle's shortening speed) - (joint's shortening speed),
+        where the muscle's speed is the one at which its strength-at-speed curve gives the spring's torque:
+        K stretch = T act f(speed). Solved by SEC_ITERS bisections, so any stiffness is stable."""
+        nc, oa = len(self.contacts), 13 * self.nb
+        while len(aux) < nc + len(self.acts):
+            aux.append(0.0)
+        for j, a in enumerate(self.acts):
+            K = a[11]
+            if K <= 0.0:
+                continue
+            tab = self.fvtabs[a[10]]
+            cap = a[4] * max(s[oa + j], MUT_A_MIN)
+            wj = self.act_speed(j, s)
+            if "sec_sign" in MUT:
+                wj = -wj
+            old = aux[nc + j]
+            g = lambda th: th - old - h * (fv_tab_inv(tab, K * th / cap) - wj)
+            hi = SEC_FMAX * cap / K
+            if cap <= 0.0 or g(0.0) >= 0.0:
+                aux[nc + j] = 0.0
+            elif g(hi) <= 0.0:
+                aux[nc + j] = hi
+            else:
+                lo = 0.0
+                for _ in range(SEC_ITERS):
+                    mid = 0.5 * (lo + hi)
+                    if g(mid) > 0.0:
+                        hi = mid
+                    else:
+                        lo = mid
+                aux[nc + j] = 0.5 * (lo + hi)
 
     # ---- constraint rows ----
     def _kin(self, s):
@@ -371,13 +469,19 @@ class System:
         ow = oa + len(self.acts)
         diag = self.diag
         p_act = p_stop = p_hold = p_con = 0.0
-        for j, (name, a, b, ax, T, W, t_on, rise, t_off) in enumerate(self.acts):
+        nc = len(self.contacts)
+        for j, (name, a, b, ax, T, W, t_on, rise, t_off, a0, tab, ksec) in enumerate(self.acts):
             act = s[oa + j]
             u = self.excitation(j, t)
             ds[oa + j] = (u - act) / (TA_UP if u > act else TA_DN)
             n = mv(R[a], ax) if a >= 0 else ax
             wrel = dot(sub(Wv[b], Wv[a] if a >= 0 else ZERO), n)
-            tau = T * act * fv(wrel / W)
+            if ksec > 0.0:
+                tau = ksec * (aux[nc + j] if len(aux) > nc + j else 0.0)
+            elif tab >= 0:
+                tau = T * act * fv_tab(self.fvtabs[tab], wrel)
+            else:
+                tau = T * act * fv(wrel / W)
             tv = scale(n, tau)
             Tq[b] = add(Tq[b], tv)
             if a >= 0 and "no_reaction" not in MUT:
@@ -534,6 +638,7 @@ class System:
             qn = math.sqrt(n[o] * n[o] + n[o + 1] * n[o + 1] + n[o + 2] * n[o + 2] + n[o + 3] * n[o + 3])
             n[o] /= qn; n[o + 1] /= qn; n[o + 2] /= qn; n[o + 3] /= qn
         self.anchors(n, aux)
+        self.sec_update(n, aux, h)
         return n
 
     def anchors(self, s, aux):
