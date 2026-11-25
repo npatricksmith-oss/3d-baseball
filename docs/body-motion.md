@@ -8,6 +8,7 @@
 - **Reviewed and revised.** Three independent reviews (2026-11-25: [Codex Sol](reviews/2026-11-25-codex-sol-body-motion-review.md), [Gemini Carbon](reviews/2026-11-25-gemini-carbon-body-motion-review.md), [Gemini Neon](reviews/2026-11-25-gemini-neon-body-motion-review.md)) found errors in the probes and the spec. This version is rewritten from the corrected runs; "What the first version got wrong" below lists what changed.
 - **Built in the probes:** a driven pelvis–trunk–arms–bat chain over planted feet, in the horizontal plane (§4.2). Not built: any three-dimensional body (§4.1 designs it; phase 1 builds it), the pitcher's body (§11, design depth only).
 - **The main open finding.** Under the design's own rules (the arms start no earlier than the decision allows, drives rise no faster than 50 ms, strengths inside sourced bounds), the flat chain does not reach the ball in time (§4.3). The fit that does reproduce [4] breaks those rules. Phase 1's first job is to show that the three-dimensional body can swing under them; if it cannot, the work stops there (§13).
+- **Phase 1, session 7, step 0 (2026-11-25, diagnosis only):** the 22.9 m/s of [4]'s own motion is a measuring effect, not slow hitters. [3]'s 29–31 m/s is the bat's end (23.9–25.5 at the sweet spot), and [3] and [4] smoothed their marker paths through the impact, which pulls the bat's speed down before contact; undone, [4]'s motion has **27.6–29.9 m/s** at the sweet spot on this body. The same smoothing is in every curve of [4]'s last 40 ms, which the fits are matched to. It changes Q59's options (§4.8).
 - **Phase 1, session 6 (2026-11-25):** the arms' limits were written down with their sources before any refit (§4.5: strength by direction, speed curves, tendon stretch at shoulders and elbows, a starting level, the clock restated as the bat's measured first motion at −170 ms with the arm muscles rising at most 70 ms earlier). **Refitted, contact is +4 ms, the bat first moves at −172 ms, and every gated curve but the trunk's is inside one band unit. The bat is at 20.1 m/s: the gate asks 29–34, [4]'s own motion on this body has 22.9.** Nothing was added; the gate is not passed (§4.7).
 - **Phase 1, session 5 (2026-11-25), after the owner's ruling that limits come only from measurements (PLAN D34):** the limits were written down with their sources before any refit (§4.5); the engine got measured strength-at-speed curves, tendon springs at the leg joints and muscles tensed beforehand, with their checks (§8.1). **Refitted, the lower body is inside the gate (pelvis 573°/s at −93 ms, the feet's forces within a band) and the bat is still 21–28 ms late at 18.6 m/s. What is short is the arms, whose limits are estimates and were not touched. Nothing was added to close the gap** (§4.6).
 - **Phase 1, session 4 (2026-11-25, diagnosis only):** session 3's 330–440 N·m for the trunk was the lumbar torque about the pelvis's long axis, which takes in part of a large bending moment. About the trunk's own long axis, the way strength is tested, the need is 321 N·m as placed and 216–355 over the things it rests on; worked up from [4]'s ground forces it is 131–172 before the feet's unreported free moments. **So the trunk's excess over 288 is not robust.** The hips' and lead knee's shortfall at speed stands (§4.4).
@@ -104,6 +105,7 @@ Every number below is tagged **measured** (a source gives it), **derived** (comp
 | which rule binds; what the answer rests on | `python3 analysis/research/body/fit3d.py --relax`; `--ranges` (9 and 13 min; job queue) | that fit continued with one rule relaxed, or one of §4.5's range ends, at a time (§4.6) |
 | the legs alone, 3D | `python3 analysis/research/body/fit3d.py --lower forces` (also `pelvis`, `rate`; 3–4 min each; job queue) | whether the legs turn the pelvis in time inside the bounds, under three stated weightings (§4.4's numbers are from `876b3aa`, before §4.5's limits) |
 | the trunk's torque, three ways | `python3 analysis/research/body/trunk3d.py` (2 min), output `sim/target/codex-probes/body3d/trunk3d.out` | the lumbar torque from above, from below and from the angular momentum, by axis, with its sensitivities (§4.4) |
+| where the placed motion's bat speed goes | `python3 analysis/research/body/batspeed.py` (10 s), output `sim/target/codex-probes/body3d/batspeed.out` | the sweet spot's speed in [4]'s motion split into hands and turning; the 12 Hz filter through the impact undone; where each source measures (§4.8) |
 | inverse dynamics, 3D | `python3 analysis/research/body/inverse3d.py` (20 s; job queue), output `sim/target/codex-probes/body3d/inverse3d.out` | the joint torques [4]'s motion needs against the bounds, and the turn about the vertical against [4]'s ground forces (§4.4) |
 | the small frame; the wrists | `python3 analysis/research/body/fit3d.py --small`, `--wrists` (2–3 min each; job queue) | PLAN D32's small frame; with and without a stop on the wrists' cock (§4.4) |
 | Rust cost, 3D kernel | `rustc -C opt-level=3 -C linker=$HOME/.local/bin/zigcc -o sim/target/codex-probes/body3d/bench_body3d analysis/research/body/bench_body3d.rs`, then run it | the 49-row dense solve alone (§8.2; superseded by the probe's measured step) |
@@ -646,6 +648,69 @@ No rule binds contact any more. Only the shoulders' and elbows' strength moves t
 - the hands' roll about the handle is fixed and the same for both hands.
 
 **Next:** the owner's decision in §4.4. Before any review: the breakdowns of §6.2 are not run, and the gate's two inconsistencies (angle against rate curves; 29–34 m/s against [4]'s own 23–25) need one reading each.
+
+### 4.8 Where the placed motion's bat speed goes (session 7, step 0: a diagnosis)
+
+`batspeed.py` (§3); no fit, no drive, nothing in the model changed. §4.7 read the 6–11 m/s between the placed motion's 22.9 m/s and the gate's 29–34 as two different sets of hitters. **It is mostly two things about how the sources measured: [3]'s speed is a marker on the bat's end, not the sweet spot; and both [3] and [4] smoothed their marker paths straight through the bat's impact with the ball, which pulls the bat's measured speed down before contact.** [4]'s batters were not slow.
+
+**The split.** The sweet spot is 0.634 m from the lead hand's grip. Its speed in the placed motion, as the hands' translation plus the bat's turning about the hands (each part taken along the sweet spot's own direction, so they add up):
+
+| | Sweet spot | = hands | + turn in azimuth | + turn in elevation | Hands' own speed | Bat's azimuth rate (its whole turning rate) |
+| :-- | --: | --: | --: | --: | --: | --: |
+| at its fastest, −10 ms | 25.0 m/s | 2.6 | 21.4 | 0.9 | 7.4 m/s | 2,339°/s (2,118) |
+| at contact | 22.9 | 3.2 | 19.7 | 0.0 | 6.5 | 2,129 (1,850) |
+| [4]'s curves alone, no body, at contact | 21.3 from turning | | | | | 2,217 on its rate curve (1,926) |
+
+- **The hands are not what is short.** They reach 11.0 m/s at −50 ms and are at 6.5 m/s at contact (7.0 measured from the mid-point between the hands, §4.7's figure). Blast's database has major-league peak hand speed at 23–29 mph, 10.3–13.0 m/s (a knob sensor's own measure; EXC, blastmotion.com and Prep Baseball Report boards). At contact they move 60° off the sweet spot's direction, so 6.5 m/s of hand gives it 3.2.
+- **The speed is the bat's turning**, and the turning is [4]'s own curve: no freedom the placement leaves out can change it. The placement is a posture at every instant, so every joint takes whatever angle closes the arms on the bat (the shoulders' three axes, the forearms, both wrist axes); the only thing [4] does not give is the hands' path, worth 3 m/s here. A shoulder joint moving 5 cm on the trunk in the last 100 ms [E: the shoulder girdle, which the body does not have] would add 0.5 m/s to the hands and about half of that to the sweet spot.
+- **2,435 against 2,212°/s are two different quantities.** 2,435 is [4]'s rate of the bat's azimuth (the direction of its shadow on the ground). §4.7's 2,212 (2,204 here) and 1,850 are the placed bat's whole turning rate: with the barrel 21–30° below level, the azimuth rate counts for its cosine. Like for like the placed motion's azimuth rate peaks at 2,339°/s at −10 ms against [4]'s 2,435 (2,419 as digitised): 4% low, because the placement differentiates [4]'s angle curve over ±10 ms across a peak 20 ms wide. At contact that is 1.0 m/s of the sweet spot's speed.
+- **What does not matter:** making the velocities consistent with the joints (13°/s); smoothing the hands' path (22.9 either way); the pelvis's and trunk's rate-curve reading (22.9); shoulders at Winter's 0.129 of height from the trunk's axis in place of 0.112 (22.7). Differencing over ±5 ms is noise (29.2 m/s at −10 ms, 18.8 at contact: the digitised points are 5–9 ms apart).
+
+**Where each source measures.**
+
+- **[3]: a marker on the barrel end** ("bat handle just above the hands, bat barrel end", [note 3](research/swing/3-welch-1995.md), FT), on a tee, paths smoothed at 13.3 Hz. Its 31 m/s (fastest, −15 ms) and 29 (contact) are the bat's end. In the placed motion the sweet spot moves at 0.82–0.83 of the end's speed, so [3]'s figures are **25.5 and 23.9 m/s at the sweet spot** (derived). Like for like at the bat's end the placed motion has 30.3 m/s at its fastest and 27.6 at contact, against [3]'s 31 and 29: 2–5% apart. **The gate's "29" was never a sweet-spot speed.**
+- **Statcast: 6 inches from the head, at contact,** the model's own point: 71.5 mph, 32.0 m/s, the mean of major leaguers' competitive swings in games ([note 9](research/swing/9-step0-data.md)). OpenBiomechanics, the same point, mostly college hitters: 29.6 m/s at contact, 31.1 for its minor leaguers; **its bat peaks 2 ± 5 ms before contact and is at 98% of its peak at contact** ([note 6](research/swing/6-openbiomechanics.md)).
+- **[4]: no speed, only the azimuth rate,** which peaks at −10 ms and has lost 9% by contact; [3]'s peaks at −15 ms and has lost 6%. A real bat does not slow before it meets the ball (OpenBiomechanics, above).
+
+**The filter through the impact.** [4] passed "the raw XYZ positions of the markers … through a 12 Hz Butterworth filter" over the whole cropped swing ([4] §3.4, FT), so through contact. The ball takes speed off the bat within a millisecond; a 12 Hz low-pass spreads that loss over about 40 ms either side, so the curve starts to fall before contact and reads, at contact, about half-way down. [4]'s rate curve has that shape: 2,419°/s at −10 ms, 2,217 at contact, 1,748 at +15, 1,449 at +35.
+
+- **How large the loss at impact is, without any fit** (the oracle's collision, physics-spec §8): [4]'s own regression (its Eq. 14, middle location, mean pitch 25.0 m/s, mean peak bat rate) gives a mean exit velocity of 36.7 m/s, 82 mph. A ball leaving at that speed takes 12.2 m/s off the sweet spot of a bat nothing holds, and 1,519°/s off its turning rate (derived). A held bat loses less.
+- **The smoothing undone.** The true curve is taken as smooth before contact, broken at contact, smooth after; the filter is applied; the pieces are fitted to [4]'s curve over ±70 ms. [4] does not give the filter's order or whether its cut-off was corrected for two passes: [E], four variants run.
+
+| What is fitted | The bat just before contact, four filter variants | As [4]'s filtered curve reads | Misfit with the break (with none) |
+| :-- | --: | --: | --: |
+| azimuth rate curve, straight pieces, a step | 2,649–2,841°/s; the step 794–1,073°/s, 0.52–0.71 of a free bat's | 2,217 | 63–83°/s (135–143) |
+| azimuth rate curve, curved pieces | 3,471–5,897°/s | | 9–36 (102–109): **not determined**, the fit cannot tell a steeper rise from a bigger step |
+| azimuth angle curve, its slope breaks | 2,775–3,164°/s; the bat at −4.9 to −1.1° at contact | 2,107 over ±10 ms; −9.7° (as digitised; [4]'s text −7°) | 0.9–1.1° |
+| elevation | still falling at 616–755°/s; −33.4 to −35.6° at contact | 36°/s; −29.7° | 0.5° |
+| lag (the cock) | closing at 1,782–2,030°/s; 57.9–61.2° at contact | 1,232°/s; 64.5° | 0.4–0.5° |
+
+- **The placed motion on the unsmoothed curves** (the bat's azimuth, elevation and lag; the elbows left as they are): **27.6–29.9 m/s at the sweet spot at contact**, its fastest point, of which the hands give 1.6–2.1, the turn in azimuth 21.9–24.3 and in elevation 3.4–4.5; the bat's end at 33.6–36.6 m/s. Collegiate hitters' bat-head speeds off a tee are 35.6–37.9 m/s ([N2]).
+- **How far to trust it.** That the curve is pulled down before contact is not in doubt: the filter is [4]'s own statement, the shape is the filter's, the step agrees with the collision's size, and a break halves the misfit. How much is an estimate: a low-pass filter cannot be undone uniquely, and the 4.7–7.0 m/s rests on the bat's rate rising in a straight line over its last 70 ms [E]. Steeper forms give more.
+
+**The account.** Of the 6.1 m/s to the gate's lower end and the 11.1 to its upper:
+
+| Candidate | Accounts for | Evidence |
+| :-- | :-- | :-- |
+| the gate's lower end, 29 m/s, is [3]'s bat end, not its sweet spot | all of the gap to [3]: at the sweet spot [3] has 23.9 at contact and 25.5 at its fastest, the placed motion 22.9 and 25.0 | measured (the marker's place, FT); the ratio derived |
+| the 12 Hz filter run through the impact | 4.7–7.0 m/s at contact (22.9 becomes 27.6–29.9); 1.0 of it is the ±10 ms differencing | the filter measured ([4] §3.4, FT); the size derived, its form [E] |
+| the mean curve blunter than single swings | 0.5 m/s: the mean of the swings' own peaks is 2,486°/s, the mean curve's peak 2,435, 2.1% ([4] Table 3 against its §4.1.5) | measured (TAB) |
+| freedoms the placement does not use | none through the bat's turning; at most about 0.3 m/s through the hands | derived; the 5 cm [E] |
+| the body's dimensions | −0.2 m/s (shoulder width); height and weight are [4]'s own means | derived |
+| the instant | none: the model, Statcast and OpenBiomechanics all read at contact; [3]'s and [4]'s curves peak 10–15 ms early only because of the filter | derived |
+| **left over** | **to 29 m/s: nothing (−1.4 to +0.9). To Statcast's mean of 32.0: 1.6–3.9 m/s. To 34: 3.6–5.9.** | different hitters and pitches: AA players against 56 mph batting practice, major leaguers' fastest 90% of swings in games |
+
+A floor from [4] itself, independent of all of the above: a ball leaving at [4]'s mean 36.7 m/s needs the sweet spot at 23.1–24.7 m/s if every ball is met squarely there (normal restitution 0.55–0.50), and more for every ball that is not.
+
+**What would settle the size:** [4]'s marker paths unfiltered or filtered separately before and after contact; or the bat's turning rate of professional hitters from any set processed that way. OpenBiomechanics has it for college hitters (cross-check only, [N7]): its bat at 98% of its peak at contact is already the answer to the shape.
+
+**What this changes, for the owner (with Q59).**
+
+- *What was found:* the "51 mph" swing was a measuring effect. The pros in the study the body is fitted to swung at about **62–67 mph at the sweet spot (27.6–29.9 m/s)**, as near as the study's smoothing can be undone; the older tee study's 65–69 mph was measured at the very end of the bat and is 53–57 mph at the sweet spot before the same correction. Major leaguers in games average 71.5 mph.
+- *So the two sets of hitters are not far apart,* and Q59's option (a), taking 22.9 m/s as the gate, would write the smoothing into the gate.
+- *It reaches further than the bat's speed.* Everything the study reports inside the last 40 ms is smoothed the same way: the bat's rate curve, the cock at contact (65° reads 58–61° undone), the barrel's drop (−30° reads −33 to −36°), and the bat's angle at contact (−8° reads −5 to −1°, 1–3 ms of timing). The fits so far, this session's included, are matched to the smoothed curves: the body is being asked to slow its bat before contact, which no hitter does.
+- *Options:* (a) the gate reads 29–34 m/s at the sweet spot at contact as written, and the fit's targets inside the last 40 ms become the unsmoothed ones, their form stated [E]; (b) the gate's band becomes 27–34 m/s (the study's own hitters, unsmoothed, at the bottom; Statcast's at the top), with the same change to the targets; (c) nothing changes and the speed is listed as an open item, knowing the targets near contact are smoothed.
+- *Recommendation:* (b). It keeps the body fitted to one set of hitters, asks of it what those hitters did as nearly as it can be recovered, and leaves room up to the major-league figure. The smoothing's size is the one new assumption, and it is stated.
 
 ## 5. The drive and its control (§14.1 items 2 and 3)
 
