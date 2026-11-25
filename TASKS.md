@@ -17,11 +17,13 @@ Status: `[ ]` not started · `[~]` partly done · `[?]` needs an owner decision
 
 ## Resume here (2026-11-25)
 
-**State.** PLAN D31–D33 (owner: Q54 b, Q55 a with outliers, Q56 b, Q57 go): a force-driven body; plan PLAN §14.1, spec [docs/body-motion.md](docs/body-motion.md).
+**State.** PLAN D31–D34: a force-driven body; PLAN §14.1, spec [docs/body-motion.md](docs/body-motion.md).
 
-**Phase 1 (spec §4.4–§4.6; sessions 1–5 merged, `d47e1e0`):** on measured limits (owner Q58 = a, PLAN D34) the lower body is inside the gate; the bat is still 21–28 ms late at 18.6 m/s; the arms' limits are still estimates.
+**Phase 1 (spec §4.7; sessions 1–6 merged):** on measured limits the body reaches the ball (+4 ms). Outside: the bat's speed, 20.1 m/s (gate 29–34; [4]'s own 22.9), and the trunk's curve.
 
-**Running:** `body-3d` (Fable, pane t4c, worktree `swing-research`), session 6, job WORKER-BODY-3D-6.md: the arms' measured limits ([note 9](docs/research/body/9-arm-limits.md)) written into §4.5 first, then the refit. Then: tests, merge. If it swings: review. A remaining gap: the owner (arms starting before the decision is his question).
+**[?] Q59: the gate's bat speed** (§4.4): (a) [4]'s 22.9 m/s, review now; (b) 29–34, the missing drives first; (c) the drives, then review at (a)'s speed. Recommended: (c), with 29–34 required before games.
+
+**Running, not waiting on Q59:** `body-3d` (Fable, pane t4c, worktree `swing-research`), job WORKER-BODY-3D-7.md: the placed motion's speed; the missing drives, limits first; the refit. Then: checks, merge, Opus review of 5–7.
 
 **Next:** §2: the ground-dive leftovers ([note](docs/calibration/2026-11-23-of-ground-dive.md) §9).
 
