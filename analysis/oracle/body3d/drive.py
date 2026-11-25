@@ -14,7 +14,11 @@ D2R = B.D2R
 # ---- the design's rules (body-motion 4.3) and, since PLAN D34, the limits of body-motion 4.5 -------
 # Every number below is body-motion 4.5's, written there with its source before any refit. Nothing here is
 # chosen by what a swing does.
-ARMS_EARLIEST = -0.170     # s: shoulders, elbows and wrists may not start before [4]'s first move
+# the clock as measured (4.5, session 6): [4]'s bat rises through 236 deg/s at -170 ms; the model's must, within the
+# tolerance; and no arm drive may rise above its holding level more than the electromechanical delay's range before it
+FIRST_MOTION_T, FIRST_MOTION_RATE, FIRST_MOTION_TOL = -0.170, 236.0, 0.015
+EMD_MIN, EMD_MAX = 0.010, 0.070
+ARMS_EARLIEST = FIRST_MOTION_T - EMD_MAX
 RISE_MIN = 0.050           # s [E]: every rise at least this long
 # full strength: the source's mean + 2 SD, x weight x height (Anderson 2007 C1 and its SD; note 5 section 1, table)
 C1 = {"hip_ext": (0.161, 0.049), "hip_flex": (0.113, 0.025), "knee_ext": (0.163, 0.040), "knee_flex": (0.087, 0.015),
@@ -26,9 +30,14 @@ HIP_ROT = 78.0             # [E] one hip's rotators, no source (4.3, 4.5)
 HIP_ABD_REF, HIP_ABD_REF_WH = 109.0 + 2 * 16.4, 96.1 * E.G * 1.89
 HIP_ADD_OVER_ABD = 1.0
 TRUNK_REF = (140.6 + 2 * 30.9) * (92.0 * 1.84) / (74.7 * 1.765)   # Bae 2012 golfers at 0.52 rad/s, mean + 2 SD, scaled: 260 N m
-SHOULDER = 100.0           # [E] one shoulder (4.3)
-ELBOW_EXT = 70.0           # [E] one elbow's extension (4.4)
-WRIST_ULNAR, WRIST_RADIAL = 9.5, 11.0   # one wrist, Delp 1996 (abstract only)
+# the arms (4.5, session 6; note 9). Shoulders by direction: Silva 2006's junior tennis players, per 100 kg, mean + 2 SD,
+# x 92 kg: the rear shoulder acts in horizontal adduction, the lead in horizontal abduction
+SHOULDER_HADD = (90.9 + 2 * 21.3) / 100.0 * 92.0      # 123 N m
+SHOULDER_HABD = (69.8 + 2 * 15.0) / 100.0 * 92.0      # 92 N m
+ELBOW_EXT = (60.5 + 2 * 6.2) * (92.0 * 1.84) / (81.6 * 1.778)   # Holzbaur 2007, 5 men, isometric: 85 N m
+# one wrist's ulnar deviation, two readings (4.5): Peleg 2025 (a Biodex handle at 1.57 rad/s) and Delp 1996 (isometric)
+WRIST = {"peleg": (26.5 + 2 * 6.6) * (92.0 * 1.84) / (74.3 * 1.763), "delp": 9.5 + 2 * 2.2}    # 51 and 13.9 N m
+WRIST_READING = "peleg"
 REF_WH = 92.0 * E.G * 1.84
 # strength at speed: (rad/s, fraction of full strength), straight lines between (4.5's table, with its sources)
 CURVES = {
@@ -40,10 +49,38 @@ CURVES = {
     "ankle_pf": ((0.0, 1.0), (0.987, 0.75), (3.558, 0.50), (8.7, 0.0)),
     "trunk": ((0.0, 1.0), (0.52, 1.0), (1.05, 127.4 / 140.6), (2.09, 117.0 / 140.6), (4.19, 117.0 / 140.6 * 53.5 / 66.3), (12.9, 0.0)),
 }
+def _hyp(wmax, wc):
+    """Kentel 2011's fitted curve for one elite tennis player: fraction of isometric torque at speed w."""
+    return lambda w: (wc / wmax) * (wmax - w) / (wc + w)
+
+
+def _arm_curve(wmax, wc, lead, join, speeds=(4.0, 5.24, 6.1, 9.0, 13.0)):
+    """`lead` (measured points up to the speed `join`), then the player's curve as a ratio to its own value at
+    the join, to zero at his top speed."""
+    f = _hyp(wmax, wc)
+    base = lead[-1][1]
+    return tuple(lead) + tuple((w, base * f(w) / f(join)) for w in speeds if w > join) + ((wmax, 0.0),)
+
+
+_SPEEDS0 = (1.0, 2.0, 3.0, 4.0, 5.0, 6.1, 9.0, 13.0)
+CURVES.update({
+    "sh_hadd": _arm_curve(18.05, 6.43, ((0.0, 1.0), (3.14, 1.0)), 3.14),                     # Silva: 100 % kept to 3.14 rad/s
+    "sh_habd": _arm_curve(18.0, 6.93, ((0.0, 1.0), (1.05, 1.0), (3.14, 0.93)), 3.14),          # Silva: 93 %
+    "sh_hadd_kentel": _arm_curve(18.05, 6.43, ((0.0, 1.0),), 0.0, _SPEEDS0),
+    "sh_habd_kentel": _arm_curve(18.0, 6.93, ((0.0, 1.0),), 0.0, _SPEEDS0),
+    "elbow_ext": _arm_curve(18.45, 5.55, ((0.0, 1.0),), 0.0, _SPEEDS0),
+    "wrist_peleg": _arm_curve(18.02, 5.83, ((0.0, 1.0), (1.57, 1.0)), 1.57, (2.0, 3.0, 4.0, 5.0, 6.1, 9.0, 13.0)),
+    "wrist_delp": _arm_curve(18.02, 5.83, ((0.0, 1.0),), 0.0, _SPEEDS0),
+})
+ARM_ECC = 1.4                 # Kentel: an arm muscle being stretched rises to 1.4 x (the legs and trunk: Wilson's 1.5)
+SHOULDER_CURVES = "silva"     # "kentel": the one player's curve alone from zero speed (a range end)
 HIP_SIDE_CURVE = "hip_ext"    # [E] hip abduction, adduction and rotators fall with speed as the hip's extensors do; None = the first law
 # tendon stretch at full strength, rad: Wilson 2006's tabulated full strength over series stiffness (note 8 section 3.3)
-SEC_STRETCH = {"hip_ext": 480.0 / 5092.0, "knee_ext": 328.0 / 857.0, "hip_flex": 289.0 / 496.0, "ankle_pf": 283.0 / 767.0}
-TENDONS = True             # False: no series springs (a sensitivity case)
+SEC_STRETCH = {"hip_ext": 480.0 / 5092.0, "knee_ext": 328.0 / 857.0, "hip_flex": 289.0 / 496.0, "ankle_pf": 283.0 / 767.0,
+               # the arms: Kentel 2011's printed full strength over series stiffness (note 9 section 1)
+               "sh_hadd": 97.48 / 1968.5, "sh_habd": 71.90 / 785.9, "elbow_ext": 51.95 / 280.3, "wrist": 41.44 / 23.3}
+TENDONS = True             # False: no series springs at the legs (a sensitivity case)
+ARM_TENDONS = {"sh_hadd": True, "sh_habd": True, "elbow_ext": True, "wrist": False}   # 4.5: the wrists' printed value is doubted
 # the first law's top speeds W, rad/s [E] (5.1), still used by the arms and wherever a curve is None
 W_TOP = {"hip": 20.0, "knee": 20.0, "ankle": 20.0, "core": 25.0, "shoulder": 30.0, "elbow": 35.0, "wrist": 40.0}
 # intrinsic joint damping [E]: N m s/rad on every joint, capped; stiffness none
@@ -64,9 +101,9 @@ def bounds(H, M):
          "hip_abd_R": abd, "hip_abd_L": abd, "hip_add_R": HIP_ADD_OVER_ABD * abd, "hip_add_L": HIP_ADD_OVER_ABD * abd,
          "knee_ext_L": c("knee_ext"), "knee_ext_R": c("knee_ext"), "knee_flex_L": c("knee_flex"), "knee_flex_R": c("knee_flex"),
          "ankle_pf_R": c("ankle_pf"), "ankle_pf_L": c("ankle_pf"),
-         "core": TRUNK_REF * k, "shoulder_L": SHOULDER * k, "shoulder_R": SHOULDER * k,
+         "core": TRUNK_REF * k, "shoulder_L": SHOULDER_HABD * k, "shoulder_R": SHOULDER_HADD * k,
          "elbow_ext_L": ELBOW_EXT * k, "elbow_ext_R": ELBOW_EXT * k,
-         "wrist_L": WRIST_ULNAR * k, "wrist_R": WRIST_ULNAR * k}
+         "wrist_L": WRIST[WRIST_READING] * k, "wrist_R": WRIST[WRIST_READING] * k}
     return b
 
 
@@ -89,13 +126,39 @@ CHANNELS = {
     "ankle_pf_R": ("shank_R", "foot_R", (0, 1, 0), "ankle", "ankle_pf", "ankle_pf"),   # plantar flexion: the push off the rear foot
     "ankle_pf_L": ("shank_L", "foot_L", (0, 1, 0), "ankle", "ankle_pf", "ankle_pf"),
     "core": ("pelvis", "trunk", (0, 0, 1), "core", "trunk", None),
-    "shoulder_L": ("trunk", "uarm_L", (0, 0, 1), "shoulder", None, None),  # the lead arm swept toward the pitcher about the trunk's axis
-    "shoulder_R": ("trunk", "uarm_R", (0, 0, 1), "shoulder", None, None),  # the rear arm brought forward and round
-    "elbow_ext_L": ("uarm_L", "farm_L", (0, -1, 0), "elbow", None, None),
-    "elbow_ext_R": ("uarm_R", "farm_R", (0, -1, 0), "elbow", None, None),
-    "wrist_L": ("bat", "farm_L", None, "wrist", None, None),               # axis: the bat's own y, signed in add_drives so it uncocks
-    "wrist_R": ("bat", "farm_R", None, "wrist", None, None),
+    "shoulder_L": ("trunk", "uarm_L", (0, 0, 1), "shoulder", "sh_habd", "sh_habd"),  # the lead arm swept out toward the pitcher: horizontal abduction
+    "shoulder_R": ("trunk", "uarm_R", (0, 0, 1), "shoulder", "sh_hadd", "sh_hadd"),  # the rear arm brought forward and round: horizontal adduction
+    "elbow_ext_L": ("uarm_L", "farm_L", (0, -1, 0), "elbow", "elbow_ext", "elbow_ext"),
+    "elbow_ext_R": ("uarm_R", "farm_R", (0, -1, 0), "elbow", "elbow_ext", "elbow_ext"),
+    "wrist_L": ("bat", "farm_L", None, "wrist", "wrist", "wrist"),         # axis: the bat's own y, signed in add_drives so it uncocks (ulnar deviation)
+    "wrist_R": ("bat", "farm_R", None, "wrist", "wrist", "wrist"),
 }
+
+
+def curve_of(ch):
+    """the name in CURVES of channel ch's strength-at-speed curve as the switches stand, or None (the first law)."""
+    curve = CHANNELS[ch][4]
+    if curve == "side":
+        return HIP_SIDE_CURVE
+    if curve == "wrist":
+        return "wrist_" + WRIST_READING
+    if curve in ("sh_hadd", "sh_habd") and SHOULDER_CURVES == "kentel":
+        return curve + "_kentel"
+    return curve
+
+
+def tendon_of(ch):
+    """the name in SEC_STRETCH of channel ch's tendon spring as the switches stand, or None."""
+    t = CHANNELS[ch][5]
+    if t is None:
+        return None
+    if t in ARM_TENDONS:
+        return t if ARM_TENDONS[t] else None
+    return t if TENDONS else None
+
+
+def curve_ecc(curve):
+    return ARM_ECC if curve and curve.startswith(("sh_", "elbow", "wrist")) else E.ECC
 ARM_CHANNELS = ("shoulder_L", "shoulder_R", "elbow_ext_L", "elbow_ext_R", "wrist_L", "wrist_R")
 JOINTS = ("lumbar", "hip_L", "hip_R", "knee_L", "knee_R", "ankle_L", "ankle_R",
           "shoulder_L", "shoulder_R", "elbow_L", "elbow_R", "wrist_L", "wrist_R")
@@ -111,10 +174,8 @@ def check_rules(mdl, plan):
             bad.append("%s: strength %.0f over its bound %.0f N m" % (n, T, bd[n]))
         if rise < RISE_MIN - 1e-12:
             bad.append("%s: rise %.0f ms under %.0f" % (n, rise * 1e3, RISE_MIN * 1e3))
-        if n in ARM_CHANNELS and len(plan[n]) > 4 and plan[n][4] > 1e-12:
-            bad.append("%s: tensed before the decision allows" % n)
         if n in ARM_CHANNELS and t_on < ARMS_EARLIEST - 1e-12:
-            bad.append("%s: starts at %.0f ms, before the decision allows (%.0f)" % (n, t_on * 1e3, ARMS_EARLIEST * 1e3))
+            bad.append("%s: rises from %.0f ms, more than the electromechanical delay before the bat's first motion (%.0f)" % (n, t_on * 1e3, ARMS_EARLIEST * 1e3))
     return bad
 
 
@@ -127,6 +188,7 @@ def add_drives(mdl, st, plan):
     nold = len(s.acts)
     s.acts = []
     s.fvtabs = []
+    s.fvecc = []
     tab_of = {}
     bd = bounds(mdl.H, mdl.M)
     for n, v in plan.items():
@@ -140,15 +202,15 @@ def add_drives(mdl, st, plan):
             # turning the bat by +d about its y moves its axis by d (by x bz); the lag falls if that is toward the arm
             toward = E.dot(E.cross(by, bz), arm)
             ax = (0, -1, 0) if toward > 0 else (0, 1, 0)      # the torque on the forearm is the reaction of the bat's
-        if curve == "side":
-            curve = HIP_SIDE_CURVE
+        curve, tendon = curve_of(n), tendon_of(n)
         tab = -1
         if curve is not None:
             if curve not in tab_of:
                 tab_of[curve] = len(s.fvtabs)
                 s.fvtabs.append(tuple(CURVES[curve]))
+                s.fvecc.append(curve_ecc(curve))
             tab = tab_of[curve]
-        ksec = bd[n] / SEC_STRETCH[tendon] if (tendon and TENDONS and tab >= 0) else 0.0
+        ksec = bd[n] / SEC_STRETCH[tendon] if (tendon and tab >= 0) else 0.0
         s.actuator(n, b[pa], b[ch], ax, T, W_TOP[grp], t_on, rise, t_off, a0, tab, ksec)
     nb13 = 13 * s.nb
     return st[:nb13] + [a[9] for a in s.acts] + st[nb13 + nold:]

@@ -53,10 +53,11 @@ def fv(w):
     return ECC - (ECC - 1.0) / (1.0 - ECC_SLOPE * w)
 
 
-def fv_tab(tab, w):
+def fv_tab(tab, w, ecc=None):
     """a measured strength-at-speed curve: tab = ((speed rad/s, fraction), ...) from (0, 1) down to (top speed, 0),
     straight lines between; w = shortening speed in rad/s. A muscle being stretched (w < 0) rises toward ECC
     as in fv, on the curve's own top speed."""
+    ecc = ECC if ecc is None else ecc           # the stretched muscle's plateau: ECC, or the curve's own (4.5: the arms' 1.4)
     top = tab[-1][0]
     if w >= top:
         return 0.0
@@ -65,11 +66,12 @@ def fv_tab(tab, w):
             if w <= wb:
                 return fa + (fb - fa) * (w - wa) / (wb - wa)
         return 0.0
-    return ECC - (ECC - 1.0) / (1.0 - ECC_SLOPE * (w / top))
+    return ecc - (ecc - 1.0) / (1.0 - ECC_SLOPE * (w / top))
 
 
-def fv_tab_inv(tab, f):
-    """the speed (rad/s) at which the curve gives the fraction f, 0 <= f < ECC."""
+def fv_tab_inv(tab, f, ecc=None):
+    """the speed (rad/s) at which the curve gives the fraction f, 0 <= f < its plateau."""
+    ecc = ECC if ecc is None else ecc
     top = tab[-1][0]
     if f <= 0.0:
         return top
@@ -78,11 +80,11 @@ def fv_tab_inv(tab, f):
             if f >= fb:
                 return wa if fa == fb else wa + (wb - wa) * (fa - f) / (fa - fb)
         return top
-    return top * (1.0 - (ECC - 1.0) / (ECC - f)) / ECC_SLOPE
+    return top * (1.0 - (ecc - 1.0) / (ecc - f)) / ECC_SLOPE
 
 
 SEC_ITERS = 40            # bisections in the series spring's implicit step (fixed, for replay)
-SEC_FMAX = ECC - 1e-6     # the spring is never asked for more than the stretched muscle's plateau
+SEC_MARGIN = 1e-6         # the spring is never asked for more than the stretched muscle's plateau less this
 MUT_A_MIN = 1e-3          # activation floor inside the spring's step (a switched-off muscle lets the spring go)
 
 
@@ -225,6 +227,7 @@ class System:
         self.acts, self.stops, self.holds, self.contacts = [], [], [], []
         self.tones = []
         self.fvtabs = []                    # measured strength-at-speed curves (fv_tab), by index
+        self.fvecc = []                     # each curve's plateau for a stretched muscle (ECC where not given)
         self.ext = []                       # external loads (body, point in the body, force, moment; world axes): inverse dynamics only
         self.baum_a, self.baum_b = BAUM_A, BAUM_B
         self.diag = None                    # set to {} to have deriv() record forces of its last call
@@ -335,10 +338,13 @@ class System:
             return a0 + (1.0 - a0) * (t - t_on) / rise
         return 1.0
 
+    def tab_ecc(self, tab):
+        return self.fvecc[tab] if tab < len(self.fvecc) else ECC
+
     def act_fv(self, j, w):
         """drive j's strength fraction at shortening speed w (rad/s)."""
         a = self.acts[j]
-        return fv(w / a[5]) if a[10] < 0 else fv_tab(self.fvtabs[a[10]], w)
+        return fv(w / a[5]) if a[10] < 0 else fv_tab(self.fvtabs[a[10]], w, self.tab_ecc(a[10]))
 
     def act_speed(self, j, s):
         """drive j's shortening speed in state s: its child's angular velocity relative to its parent about the axis."""
@@ -369,13 +375,14 @@ class System:
             if K <= 0.0:
                 continue
             tab = self.fvtabs[a[10]]
+            ecc = self.tab_ecc(a[10])
             cap = a[4] * max(s[oa + j], MUT_A_MIN)
             wj = self.act_speed(j, s)
             if "sec_sign" in MUT:
                 wj = -wj
             old = aux[nc + j]
-            g = lambda th: th - old - h * (fv_tab_inv(tab, K * th / cap) - wj)
-            hi = SEC_FMAX * cap / K
+            g = lambda th: th - old - h * (fv_tab_inv(tab, K * th / cap, ecc) - wj)
+            hi = (ecc - SEC_MARGIN) * cap / K
             if cap <= 0.0 or g(0.0) >= 0.0:
                 aux[nc + j] = 0.0
             elif g(hi) <= 0.0:
@@ -479,7 +486,7 @@ class System:
             if ksec > 0.0:
                 tau = ksec * (aux[nc + j] if len(aux) > nc + j else 0.0)
             elif tab >= 0:
-                tau = T * act * fv_tab(self.fvtabs[tab], wrel)
+                tau = T * act * fv_tab(self.fvtabs[tab], wrel, self.tab_ecc(tab))
             else:
                 tau = T * act * fv(wrel / W)
             tv = scale(n, tau)

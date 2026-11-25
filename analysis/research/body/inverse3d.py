@@ -61,12 +61,10 @@ WHOLE = ("lumbar", "shoulder_L", "shoulder_R", "wrist_L", "wrist_R")     # joint
 def allowed_at(bd, ch, speed, grp):
     """what channel ch's bound allows at the joint's shortening speed (rad/s): its measured strength-at-speed
     curve of body-motion 4.5, or the first law where it has none."""
-    curve = Dr.CHANNELS[ch][4]
-    if curve == "side":
-        curve = Dr.HIP_SIDE_CURVE
+    curve = Dr.curve_of(ch)
     if curve is None:
         return bd[ch] * E.fv(speed / Dr.W_TOP[grp])
-    return bd[ch] * E.fv_tab(Dr.CURVES[curve], speed)
+    return bd[ch] * E.fv_tab(Dr.CURVES[curve], speed, Dr.curve_ecc(curve))
 
 
 def smooth(v, half):
