@@ -381,7 +381,7 @@ def show(out, log=print):
     if "first_motion_ms" in out:
         ao = out["arm_onset_first"]
         log("   the bat's first motion (its rate through 236 deg/s) at %.0f ms (-170 +- 15); the first arm drive rises at %s; the delay between them %s ms (measured range 10-70)"
-            % (out["first_motion_ms"], "-" if not ao else "%.0f ms (%s)" % ao, "-" if out["delay_ms"] is None else "%.0f" % out["delay_ms"]))
+            % (out["first_motion_ms"], "-" if not ao else "%.0f ms (%s)" % tuple(ao), "-" if out["delay_ms"] is None else "%.0f" % out["delay_ms"]))
     log("   residual RMS in band units, -250 ms to 0: " + ", ".join("%s %.2f" % (k, v) for k, v in out["rms_band_units"].items()))
     log("   plan: channel  strength of bound [applied peak, at rad/s]  onset rise off ms  starting level")
     for nm, v in out["plan"].items():
