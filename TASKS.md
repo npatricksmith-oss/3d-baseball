@@ -1,6 +1,6 @@
 # Task List
 
-**Last updated:** 2026-11-24 (depth read).
+**Last updated:** 2026-11-25 (body-motion phase 0 started).
 
 What is next and what is open. Other files hold the rest:
 
@@ -15,11 +15,15 @@ Status: `[ ]` not started · `[~]` partly done · `[?]` needs an owner decision
 
 ---
 
-## Resume here (2026-11-24)
+## Resume here (2026-11-25)
 
-**State.** Swing v3 ([spec](docs/swing-model-v3.md)): the oracle is merged through the stance refit (D27–D29): every must-pass check in the zone passes and both arms reach on every game swing ([review](docs/reviews/2026-11-25-opus-swing-stance-review.md)). PLAN D30 (the last 40 ms follow MLB's tracking) could not be built: the join makes the bat ease and surge (spec §6.7.6; probe `analysis/research/late_swing_d30.py`). **Owner, 2026-11-24: "the motion of the players determines the outcome. Not the other way around"** (observations.md, swing): the sim's swing is a curve worked back from the planned contact; the pitcher has no delivery. **Q54 = b: a force-driven body (PLAN D31, §14.1).** Q53 withdrawn; swing step 2 not built. Next: §14.1 phase 0 (Opus), on his go. No worker running.
+**State.** **PLAN D31 (Q54 = b): a force-driven body for the swing and the delivery; plan PLAN §14.1.** Swing v3's Rust step, D30 and Q53 are dropped.
 
-**Next:** §2: the ground-dive leftovers ([note](docs/calibration/2026-11-23-of-ground-dive.md) §9); swing step 2 after the stance refit.
+**Running (phase 0), Workers tab:** `body-design` (Opus; worktree `swing-research`, branch `work/body-motion`, job WORKER-BODY-DESIGN.md there): the spec and probes (his ask: compare consolidated muscle groups and one "strength" rating). `body-research` (Sonnet; worktree and branch `body-research`): source notes the design merges. Wait: `bin/worker-wait.sh body-design body-research`.
+
+**When the design stops:** read its report; merge both branches (no ledger row). **Reviews, owner's order for this job (overrides "no agy"): Codex Sol 6.2, agy Gemini Carbon and Neon** (agy tested; check Codex's usage), each in a pane, writing only its review file. Then his questions, from Q55.
+
+**Next:** §2: the ground-dive leftovers ([note](docs/calibration/2026-11-23-of-ground-dive.md) §9).
 
 **Open (ledger §5):** runs down 0.21 [0.18] since dp-cover (0.04 explained; check noise); double plays 12.3% (MLB 9.8%).
 
