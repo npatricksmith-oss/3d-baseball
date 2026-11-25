@@ -19,9 +19,9 @@ Status: `[ ]` not started · `[~]` partly done · `[?]` needs an owner decision
 
 **State.** **PLAN D31 (Q54 = b): a force-driven body for the swing and the delivery; plan PLAN §14.1.** Swing v3's Rust step, D30 and Q53 are dropped.
 
-**Phase 0 design written, not merged:** `work/body-motion` at `d0def11` (worktree `swing-research`; `body-design`, Opus, idle in the Workers tab for fixes): the body-motion spec and its probes (a planar 5-joint chain; the 3D body is designed, not built).
+**Phase 0 design reviewed, fixes running, not merged:** `work/body-motion` (worktree `swing-research`; `body-design`, Opus, pane t46, job FIX-BODY-MOTION.md there). Three reviews (Codex Sol 6.2, Gemini Carbon, Neon) committed on the branch at `4fb522d`, Resolutions open: keep the driven body; the lunging, late-foot-wait and wrist results were probe faults, the fit breaks its own clock, replay must follow D9.
 
-**Reviews running (owner's order for this job; overrides "no agy"), Workers tab, worktrees `rev-body-codex`, `-carbon`, `-neon`, brief REVIEW-BODY-MOTION.md in each:** Codex Sol 6.2 (pane t48), agy Gemini Carbon (t49), Neon xhigh (t4b; agy prints only at the end). Then: `git status` in each, the reviews onto `work/body-motion`, findings to `body-design`, Resolutions, merge. Then the owner's five questions (spec §14), from Q55.
+**Then:** check its per-finding report, write the three Resolutions, check-docs and the oracle test, merge, remove worktrees `rev-body-*`. Then the owner's questions (spec §14) from Q55 and his go-ahead for phase 1.
 
 **Next:** §2: the ground-dive leftovers ([note](docs/calibration/2026-11-23-of-ground-dive.md) §9).
 
