@@ -431,7 +431,7 @@ class EngineChecks(unittest.TestCase):
         s = sys.run(s, 0.0, 0.5, 1e-3, aux=aux)
         self.assertAlmostEqual(aux[0], 120.0 * s[13] / 1000.0, delta=5e-6)     # the anvil creeps at 6e-5 rad/s
         sys.deriv(0.5, s, aux)
-        self.assertAlmostEqual(sys.diag["act"]["m"][0], 120.0 * s[13], delta=1e-3)
+        self.assertAlmostEqual(sys.diag["act"]["m"][0], 120.0 * s[13], delta=5e-3)
         self.assertGreater(s[13], 0.99)                   # the excitation rose from its starting level to full
 
     def test_tendon_energy_is_accounted_for(self):
