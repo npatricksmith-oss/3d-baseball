@@ -16,7 +16,7 @@ ARMS_EARLIEST = -0.170     # s: shoulders, elbows and wrists may not start befor
 RISE_MIN = 0.050           # s [E]: every rise at least this long
 ATHLETE = 1.3              # [E] professional over recreationally active adults (4.3; no source)
 # strength bounds, N m. WH = weight x height (N m). Anderson 2007's C1 (note 5 section 1, full text) for the legs.
-C1_HIP_EXT, C1_HIP_FLEX, C1_KNEE_EXT = 0.161, 0.113, 0.163
+C1_HIP_EXT, C1_HIP_FLEX, C1_KNEE_EXT, C1_ANKLE_PF = 0.161, 0.113, 0.163, 0.095
 HIP_ROT = 60.0             # [E] one hip's rotators, 40-60 N m, no source (4.3)
 CORE_REF = 288.0           # golfers' mean + 2 SD scaled to 92 kg, 1.84 m, over the f-v factor at the tested speed (4.3)
 SHOULDER = 100.0           # [E] one shoulder (4.3: pitchers' internal rotation 66-80 measured)
@@ -24,7 +24,7 @@ ELBOW_EXT = 70.0           # [E] one elbow's extension, range 50-100; note 5 fou
 WRIST_ULNAR, WRIST_RADIAL = 9.5, 11.0   # one wrist, Delp 1996 (abstract only): uncocking, holding the cock
 REF_WH = 92.0 * E.G * 1.84
 # top speeds W, rad/s [E] (5.1): legs 20, core 25, shoulder 30, wrist 40; elbow and knee assumed
-W_TOP = {"hip": 20.0, "knee": 20.0, "core": 25.0, "shoulder": 30.0, "elbow": 35.0, "wrist": 40.0}
+W_TOP = {"hip": 20.0, "knee": 20.0, "ankle": 20.0, "core": 25.0, "shoulder": 30.0, "elbow": 35.0, "wrist": 40.0}
 # intrinsic joint damping [E]: N m s/rad on every joint, capped; stiffness none (a posture reference is next session's)
 JOINT_DAMP = 1.0
 JOINT_DAMP_CAP = 30.0
@@ -37,6 +37,8 @@ def bounds(H, M):
     wh = M * E.G * H
     k = wh / REF_WH
     b = {"hip_ext_R": C1_HIP_EXT * wh * ATHLETE, "hip_flex_L": C1_HIP_FLEX * wh * ATHLETE,
+         "hip_ext_L": C1_HIP_EXT * wh * ATHLETE,
+         "ankle_pf_R": C1_ANKLE_PF * wh * ATHLETE, "ankle_pf_L": C1_ANKLE_PF * wh * ATHLETE,
          "hip_rot_R": HIP_ROT * ATHLETE * k, "hip_rot_L": HIP_ROT * ATHLETE * k,
          "knee_ext_L": C1_KNEE_EXT * wh * ATHLETE, "knee_ext_R": C1_KNEE_EXT * wh * ATHLETE,
          "core": CORE_REF * k, "shoulder_L": SHOULDER * k, "shoulder_R": SHOULDER * k,
@@ -51,6 +53,9 @@ def bounds(H, M):
 CHANNELS = {
     "hip_ext_R": ("pelvis", "thigh_R", (0, 1, 0), "hip"),      # the rear thigh driven back under the pelvis
     "hip_flex_L": ("pelvis", "thigh_L", (0, -1, 0), "hip"),    # the lead thigh driven forward
+    "hip_ext_L": ("pelvis", "thigh_L", (0, 1, 0), "hip"),      # the lead hip's extensors: the block (4.1)
+    "ankle_pf_R": ("shank_R", "foot_R", (0, 1, 0), "ankle"),   # plantar flexion: the push off the rear foot
+    "ankle_pf_L": ("shank_L", "foot_L", (0, 1, 0), "ankle"),
     "hip_rot_R": ("pelvis", "thigh_R", (0, 0, -1), "hip"),     # rotators: the pelvis turned toward the pitcher over each thigh
     "hip_rot_L": ("pelvis", "thigh_L", (0, 0, -1), "hip"),
     "knee_ext_L": ("thigh_L", "shank_L", (0, -1, 0), "knee"),  # the block

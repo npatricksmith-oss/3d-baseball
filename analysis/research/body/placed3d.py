@@ -1,90 +1,115 @@
-"""The placed three-dimensional body, first runs (docs/body-motion.md 4.4; PLAN D31 phase 1, session 1).
+"""The placed three-dimensional body: the two knees, the moving start, and what it does undriven
+(docs/body-motion.md 4.4; PLAN D31 phase 1, sessions 1 and 2).
 
-    python3 analysis/research/body/placed3d.py > sim/target/codex-probes/body3d/placed3d.out     (about 30 s)
+    python3 analysis/research/body/placed3d.py > sim/target/codex-probes/body3d/placed3d.out     (about 20 s)
 
-It places the body of analysis/oracle/body3d on [4]'s measured state, reports what could and could not
-be matched, works back the muscles' level at the start, runs the body undriven, times a step, and runs
-three HAND-SET drives. None of this is a fit: the hand-set runs only show what the body does when every
-drive sits on its bound, which is where the flat chain's fit under the design's rules ended (4.3).
-The fit under the rules needs the compiled probe (8.2) and is the next session's.
+1. The knees: what pelvis height each knee's measured bend asks for with both feet flat and the pelvis
+   level, and how the heels and [4]'s pelvis obliquity close the gap; against [4]'s ground forces.
+2. The start at -250 ms: every velocity the placed body has, and where it comes from in [4].
+3. Undriven runs from that start (the starting muscle level and joint damping only), with the [E] parts of
+   the start varied: does the weight come onto the front foot?
+Session 1's hand-set runs (every drive on its bound) are gone: fit3d.py replaces them.
 """
+import math
 import os
 import sys
-import time
 
-sys.path.insert(0, os.path.join(os.path.dirname(os.path.abspath(__file__)), "..", "..", "oracle"))
-from body3d import engine as E, body as B, drive as Dr   # noqa: E402
+HERE = os.path.dirname(os.path.abspath(__file__))
+sys.path.insert(0, HERE)
+import probe3d as P                                    # noqa: E402
+from probe3d import E, B, Dr                           # noqa: E402
 
 H, M = 1.84, 92.0           # [4]'s mean batter
-ONSETS = {"hip_ext_R": -0.245, "hip_flex_L": -0.245, "hip_rot_R": -0.245, "hip_rot_L": -0.245,   # [4]: pelvis rate rises from -245 ms
-          "knee_ext_R": -0.245, "knee_ext_L": -0.170, "core": -0.220,
-          "shoulder_L": -0.170, "shoulder_R": -0.170, "elbow_ext_L": -0.170, "elbow_ext_R": -0.170,  # the decision's earliest
-          "wrist_L": -0.060, "wrist_R": -0.060}
+TIMES = (-0.340, -0.300, -0.250, -0.200, -0.170, -0.120, -0.093, -0.050, 0.0)
 
 
-def show(rows, step=1):
-    print("    t ms | pelvis deg (deg/s) | trunk | bat azimuth | bat elev | lag | knee L, R | elbow L, R | sweet spot m/s | ground Fz L, R (N) | pelvis y m")
-    for t, o, g in rows[::step]:
-        print("  %5.0f | %6.1f (%5.0f) | %6.1f (%5.0f) | %7.1f (%5.0f) | %5.1f | %5.1f | %4.0f %4.0f | %4.0f %4.0f | %5.2f | %5.0f %5.0f | %+.3f"
-              % (t * 1e3, o["pelvis_rot"], o["pelvis_rot_vel"], o["trunk_rot"], o["trunk_rot_vel"], o["bat_az"], o["bat_az_vel"],
-                 o["bat_elev"], o["bat_lag"], o["lead_knee_flex"], o["trail_knee_flex"], o["lead_elbow_flex"], o["trail_elbow_flex"],
-                 o["sweet_speed"], g["L"][2], g["R"][2], o["pelvis_y"]))
+def knees():
+    print("1. THE KNEES. Both feet flat, [4]'s pelvis travel read from the lead ankle:")
+    print("   t ms | pelvis height asked by the lead knee, by the rear knee, pelvis level (m) | gap cm: level, with [4]'s obliquity | centre of mass along the stride: placed, from [4]'s forces (m from mid-stance)")
+    m = B.Model(H, M)
+    stride = B.STRIDE * H
+    for t in TIMES:
+        rep = {}
+        st, _ = B.pose(m, t, "solve", rep)
+        zo = rep["pelvis_z_from_each_knee_flat"]
+        rep0 = {}
+        B.pose(m, t, "flat", rep0)
+        zl, zr = rep0["pelvis_z_from_each_knee_flat"]
+        fz = (B.curve("lead_grf_z", t), B.curve("trail_grf_z", t))
+        fy = B.curve("lead_grf_x", t) + B.curve("trail_grf_x", t)
+        x, _ = B.com(m, st)
+        # moment balance about the centre of mass, no change of angular momentum [E]: where it must be along the stride
+        yc = (0.5 * stride * (fz[0] - fz[1]) + x[2] * fy) / (fz[0] + fz[1])
+        print("  %5.0f | %.3f  %.3f | %+5.1f  %+5.1f | %+.3f  %+.3f" % (t * 1e3, zl, zr, (zr - zl) * 100, (zo[1] - zo[0]) * 100, x[1], yc))
+    print("   placed with the heels and [4]'s obliquity (body3d.body.pose):")
+    print("   t ms | lead heel up, rear heel up (deg) | pelvis obliquity ([4]) | lead knee placed ([4]) | rear knee placed ([4] text) | pelvis height m")
+    for t in TIMES:
+        rep = {}
+        st, _ = B.pose(m, t, "solve", rep)
+        o = rep["placed"]
+        print("  %5.0f | %4.1f  %4.1f | %4.1f | %5.1f (%5.1f) | %5.1f (%5.1f) | %.3f"
+              % (t * 1e3, rep["lead_heel_deg"], rep["rear_heel_deg"], B.curve_obliquity(t), o["lead_knee_flex"], B.curve("lead_knee_flex", t),
+                 o["trail_knee_flex"], B.curve_trail_knee(t), m.sys.pose(st, m.b["pelvis"])[0][2]))
 
 
-def placed(t0):
+def start():
+    t0 = -0.250
+    print("\n2. THE START at %.0f ms: the placed body's velocities (slopes of [4]'s curves over +-%.0f ms)" % (t0 * 1e3, B.VEL_DT * 1e3))
     m = B.Model(H, M)
     rep = {}
     st = B.place(m, t0, rep)
-    print("\nplaced at %.0f ms: joints closed to %.1e m" % (t0 * 1e3, m.sys.residual(st)[0]))
-    for k in sorted(rep["measured"]):
-        d = rep["placed"][k] - rep["measured"][k]
-        if k == "bat_az":
-            d = (d + 180.0) % 360.0 - 180.0
-        print("   %-18s placed - [4] = %+7.2f   (moved by closing the joints %+.2f)" % (k, d, rep["moved_by_closing"][k]))
-    print("   trail knee bend %.1f deg: NOT placed, it follows from the rest ([4]: about 50 at foot down, 44 at -220 ms)" % rep["placed"]["trail_knee_flex"])
-    print("   pelvis centre %.3f m above the ground" % m.sys.pose(st, m.b["pelvis"])[0][2])
-    return m, st
+    o = rep["placed"]
+    x, v = B.com(m, st)
+    print("   centre of mass: %+.2f m/s toward the pitcher, %+.2f toward the plate, %+.2f up; momentum toward the pitcher %.0f kg m/s"
+          % (v[1], v[0], v[2], sum(m.sys.m) * v[1]))
+    print("   pelvis forward %.2f m/s ([4]'s pelvis travel curve: slope over +-10 ms %.2f, over +-20 ms %.2f)"
+          % (st[13 * m.b["pelvis"] + 8], B.curve_rate("pelvis_x_cm", t0, 0.01) / 100, B.curve_rate("pelvis_x_cm", t0, 0.02) / 100))
+    for k, src in (("pelvis_rot_vel", "pelvis_rot"), ("trunk_rot_vel", "trunk_rot"), ("bat_az_vel", "bat_az")):
+        print("   %-15s %+5.0f deg/s (slope of [4]'s angle curve %+.0f; [4]'s own rate curve, not used, %+.0f)"
+              % (k, o[k], B.curve_rate(src, t0, B.VEL_DT), B.curve(k, t0)))
+    sm, _ = B.pose(m, t0 - B.VEL_DT)
+    sp, _ = B.pose(m, t0 + B.VEL_DT)
+    om, op = m.observe(sm), m.observe(sp)
+    print("   " + "; ".join("%s %+.0f deg/s" % (k, (op[k] - om[k]) / (2 * B.VEL_DT)) for k in
+                            ("bat_elev", "bat_lag", "lead_elbow_flex", "trail_elbow_flex", "lead_knee_flex", "trail_knee_flex")))
+    fw = m.sys.pose(st, m.b["foot_L"])[3]
+    print("   lead heel coming down at %.0f deg/s (from the heel angles placed 10 ms either side); sweet spot %.2f m/s" % (E.norm(fw) / B.D2R, o["sweet_speed"]))
+    print("   each foot's ground force at the start is [4]'s: lead %.0f %% BW up, %.0f toward the pitcher; rear %.0f up, %.0f toward the pitcher"
+          % tuple(B.curve(k, t0) for k in ("lead_grf_z", "lead_grf_x", "trail_grf_z", "trail_grf_x")))
+
+
+def undriven(label, t0=-0.250, **kw):
+    m = B.Model(H, M)
+    st = B.place(m, t0, **kw)
+    _, v = B.com(m, st)
+    tone, rest = Dr.solve_tone(m, st, t0, aux=list(m.start_aux))
+    Dr.add_damping(m, st)
+    rows, _ = P.simulate(m, st, t0, 0.0, every=5, aux=list(m.start_aux))
+    BW = M * E.G
+    y_lead = 0.5 * B.STRIDE * H
+    print("\n   %s: centre of mass %+.2f m/s toward the pitcher at the start; largest starting joint torque %.0f N m"
+          % (label, v[1], max(E.norm(t) for t in tone.values())))
+    print("      t ms | pelvis travel m (model, [4]) | lead foot % BW (model, [4]) | rear foot (model, [4]) | lead knee, rear knee")
+    for t, o, g in rows[::10]:
+        print("     %5.0f | %+.3f %+.3f | %4.0f %4.0f | %4.0f %4.0f | %3.0f %3.0f"
+              % (t * 1e3, o["pelvis_y"], y_lead + B.curve("pelvis_x_cm", t) / 100, 100 * g["L"][2] / BW, B.curve("lead_grf_z", t),
+                 100 * g["R"][2] / BW, B.curve("trail_grf_z", t), o["lead_knee_flex"], o["trail_knee_flex"]))
+    held = [100 * g["L"][2] / BW for t, o, g in rows]
+    print("      lead foot: mean load %.0f %% BW over -250 to 0 ms ([4]: %.0f), over 50 %% BW for %d ms ([4]: from -170 ms on)"
+          % (sum(held) / len(held), sum(B.curve("lead_grf_z", t) for t, o, g in rows) / len(rows), 5 * sum(1 for x in held if x > 50.0)))
 
 
 def main():
+    P.build()
     print("the three-dimensional placed body: H %.2f m, M %.1f kg" % (H, M))
-    m, st = placed(-0.340)
-    tone, rest = Dr.solve_tone(m, st, -0.340)
-    print("muscles' level at the start (N m, each joint's vector in its parent's frame; size):")
-    for j, v in tone.items():
-        print("   %-11s %7.1f %7.1f %7.1f   %5.0f" % (j, v[0], v[1], v[2], E.norm(v)))
-    print("   accelerations left: %.2f m/s^2, %.2f rad/s^2 (the ground carries [4]'s 93 %% of body weight at foot down)" % rest)
-    Dr.add_damping(m, st)
-    t = time.time()
-    rows, s1 = Dr.simulate(m, st, -0.340, 0.0, every=20)
-    dt = (time.time() - t) / 340
-    print("\nundriven from foot down: only the starting muscle level and joint damping (no drive, no feedback)")
-    show(rows)
-    print("   joints' drift at the end %.1e m" % m.sys.residual(s1)[0])
-    print("\nbenchmark: %.1f ms per RK4 step in Python (13 bodies, 49 joint rows, 8 contact points; includes recording)" % (dt * 1e3))
-    bd = Dr.bounds(H, M)
-    print("\nstrength bounds (N m):", ", ".join("%s %.0f" % (k, v) for k, v in bd.items()))
-    for label, knee, hipx in (("every drive at its bound", 1.0, 1.0), ("knees' extension off, the rest at their bounds", 0.0, 1.0),
-                              ("knees' and hips' extension and flexion off (rotators, trunk and arms at their bounds)", 0.0, 0.0)):
-        m, st = placed(-0.250) if label.startswith("every") else (B.Model(H, M), None)
-        if st is None:
-            st = B.place(m, -0.250)
-        plan = {n: (bd[n] * (knee if n.startswith("knee") else hipx if n[:7] in ("hip_ext", "hip_fle") else 1.0), ONSETS[n], Dr.RISE_MIN, 0.100) for n in bd}
-        st = Dr.add_drives(m, st, plan)
-        Dr.solve_tone(m, st, -0.250)
-        Dr.add_damping(m, st)
-        rows, s1 = Dr.simulate(m, st, -0.250, 0.060, every=5)
-        print("\nHAND-SET, not a fit: %s; rises 50 ms; rules broken: %s" % (label, Dr.check_rules(m, plan) or "none"))
-        show(rows, 5)
-        for k, nm in (("pelvis_rot_vel", "pelvis"), ("trunk_rot_vel", "trunk"), ("bat_az_vel", "bat azimuth")):
-            v, tp = max((o[k], t) for t, o, g in rows if t <= 0.0)
-            print("   %s rate, largest up to 0 ms (5 ms samples): %.0f deg/s at %.0f ms" % (nm, v, tp * 1e3))
-        for sd, nm in (("L", "lead"), ("R", "rear")):
-            off = [t for t, o, g in rows if g[sd][2] <= 0.0]
-            print("   %s foot: largest load %.0f N; %s" % (nm, max(g[sd][2] for t, o, g in rows),
-                                                          "first unloaded at %.0f ms" % (off[0] * 1e3) if off else "never unloaded"))
-        print("   work J: drives %.0f, stops %.0f, damping and starting level %.0f, ground %.0f; joints' drift %.1e m"
-              % (s1[-4], s1[-3], s1[-2], s1[-1], m.sys.residual(s1)[0]))
+    knees()
+    start()
+    print("\n3. UNDRIVEN from -250 ms: the starting muscle level and joint damping only (no drive, no feedback)")
+    undriven("the start as placed")
+    undriven("at rest (no starting velocities)", moving=False)
+    undriven("velocities as slopes over +-5 ms", dt=0.005)
+    undriven("velocities as slopes over +-3 ms", dt=0.003)
+    undriven("session 1's placement (lead foot flat, pelvis low), moving", heel="flat")
 
 
 if __name__ == "__main__":

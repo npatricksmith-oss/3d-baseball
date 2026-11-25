@@ -533,21 +533,38 @@ class BodyChecks(unittest.TestCase):
         for k in ("pelvis_rot", "trunk_rot", "bat_elev", "bat_lag", "lead_elbow_flex", "trail_elbow_flex", "lead_knee_flex"):
             self.assertAlmostEqual(o[k], B.curve(k, T0), delta=0.5, msg=k)
         self.assertAlmostEqual((o["bat_az"] - B.curve("bat_az", T0)) % 360.0, 0.0, delta=0.5)
-        for sd in "LR":                                   # both feet flat: every sole point within a millimetre of the ground
-            for n, b_, p, *_ in m.sys.contacts:
-                x, q, v, w = m.sys.pose(st, b_)
-                self.assertLess(abs(E.add(x, E.mv(E.qR(q), p))[2]), 1.5e-3)
+        self.assertAlmostEqual(o["trail_knee_flex"], B.curve_trail_knee(T0), delta=0.5)
+        for n, b_, p, *_ in m.sys.contacts:               # the rear foot flat, the lead foot on its ball, heel up
+            x, q, v, w = m.sys.pose(st, b_)
+            z = E.add(x, E.mv(E.qR(q), p))[2]
+            if n.startswith("R_") or "_ball_" in n:
+                self.assertLess(abs(z), 1.5e-3, n)
+            else:
+                self.assertGreater(z, 0.02, n)
+
+    @NEED
+    def test_starts_moving_as_measured(self):
+        """the placed body's velocities are [4]'s slopes: the rotation rates of pelvis, trunk and bat (read
+        here from [4]'s digitised rate curves, which the placement does not use) and the pelvis's travel."""
+        m = B.Model()
+        st = B.place(m, T0)
+        o = m.observe(st)
+        for k, tol in (("pelvis_rot_vel", 25.0), ("trunk_rot_vel", 25.0), ("bat_az_vel", 40.0)):
+            self.assertAlmostEqual(o[k], B.curve(k, T0), delta=tol, msg=k)
+        vy = st[13 * m.b["pelvis"] + 8]
+        self.assertAlmostEqual(vy, B.curve_rate("pelvis_x_cm", T0, 0.02) / 100.0, delta=0.12)
+        self.assertLess(m.sys.residual(st)[1], 1e-10)
 
     @NEED
     def test_momentum_three_axes(self):
         """internal drives cannot change the body's linear or angular momentum on any axis. Linear momentum
         holds to rounding. Angular momentum holds to the joints' drift (a joint force acting across a gap
-        of 2e-9 m is a small couple): 1e-8 kg m^2/s here, against segment momenta of order 1."""
+        of under a micrometre is a small couple): under 1e-6 kg m^2/s here, against segment momenta of order 1."""
         dP, dL, spin, (c, cd) = body_free_momentum()
         self.assertGreater(spin, 5.0)                     # the drives did move the segments
         self.assertLess(dP, 1e-12)
-        self.assertLess(dL, 1e-7)
-        self.assertLess(c, 1e-8)
+        self.assertLess(dL, 1e-6)
+        self.assertLess(c, 1e-6)                          # the joints' drift at a 1 ms step, from the moving start
 
     @NEED
     def test_work_against_energy(self):

@@ -1,0 +1,215 @@
+{
+ "contact_ms": 42.89098819297075,
+ "at_contact": {
+  "pelvis_rot": 81.79548746117374,
+  "trunk_rot": 130.2359524315999,
+  "bat_lag": 89.44348240894796,
+  "bat_elev": -12.678802011837538,
+  "sweet_speed": 17.22509019000342,
+  "lead_knee_flex": 9.17990904288839,
+  "lead_elbow_flex": 8.757582424814448,
+  "trail_elbow_flex": 63.81736524577611,
+  "bat_az_vel": 1947.8466272474232
+ },
+ "rms_band_units": {
+  "pelvis_rot_vel": 2.7483965533754806,
+  "trunk_rot_vel": 1.6429048747005794,
+  "bat_az_vel": 1.619772363787923,
+  "pelvis_y": 1.7929992476907706,
+  "lead_grf_z": 3.2409920952868716,
+  "trail_grf_z": 2.1369077916867454,
+  "lead_grf_x": 2.6650564857613,
+  "trail_grf_x": 1.8217769745563657,
+  "lead_grf_y": 1.1903286708128864,
+  "trail_grf_y": 1.7104351197020327,
+  "lead_knee_flex": 0.9127340934798547,
+  "lead_elbow_flex": 1.1780135412493244,
+  "trail_elbow_flex": 0.4068712924499458,
+  "bat_elev": 2.1620138658053163,
+  "bat_lag": 1.159423045665701
+ },
+ "peaks": {
+  "pelvis_rot_vel": [
+   562.8923788423864,
+   60.0
+  ],
+  "trunk_rot_vel": [
+   770.341541939315,
+   5.000000000000004
+  ],
+  "bat_az_vel": [
+   2024.3077284006797,
+   60.0
+  ]
+ },
+ "grf_peak_lead_z": [
+  103.17617420946158,
+  -105.00000000000001
+ ],
+ "came_round": true,
+ "bat_az_at_0": -80.9418685857506,
+ "sweet_speed_at_0": 12.933656660186129,
+ "applied_peak": {
+  "hip_ext_R": 178.56720583943238,
+  "hip_flex_L": 187.89488989189624,
+  "hip_ext_L": 0.0,
+  "hip_rot_R": 87.09203991381496,
+  "hip_rot_L": 102.93781679184839,
+  "knee_ext_R": 71.78048039228219,
+  "knee_ext_L": 327.5252967399148,
+  "ankle_pf_R": 0.0,
+  "ankle_pf_L": 47.54522964509367,
+  "core": 137.43953462754283,
+  "shoulder_L": 75.34926672245909,
+  "shoulder_R": 60.39727822427118,
+  "elbow_ext_L": 40.57089063938891,
+  "elbow_ext_R": 51.08786006072613,
+  "wrist_L": 10.285663822581379,
+  "wrist_R": 10.891135826930245
+ },
+ "stop_peak": {
+  "knee_L": 426.03103122162815,
+  "elbow_L": 0.0,
+  "shoulder_L": 62.68915816506609,
+  "knee_R": 369.26563885643554,
+  "elbow_R": 0.0,
+  "shoulder_R": 0.0
+ },
+ "plan": {
+  "hip_ext_R": [
+   347.57128224,
+   -0.20109735730840939,
+   0.09396671681745802,
+   -0.07335033711519168
+  ],
+  "hip_flex_L": [
+   243.94754592000007,
+   -0.20616260814179868,
+   0.05,
+   0.09331364575891443
+  ],
+  "hip_ext_L": [
+   0.0,
+   -0.023009580452020506,
+   0.25,
+   -0.11576756596626964
+  ],
+  "hip_rot_R": [
+   78.0,
+   -0.25,
+   0.05,
+   0.09948195629497428
+  ],
+  "hip_rot_L": [
+   78.0,
+   -0.23984558110223905,
+   0.05,
+   0.0766702798968133
+  ],
+  "knee_ext_R": [
+   166.64099360732408,
+   -0.04749302644123804,
+   0.2,
+   0.09434651278536776
+  ],
+  "knee_ext_L": [
+   349.070690986165,
+   -0.173549090614122,
+   0.05010394119331859,
+   0.1
+  ],
+  "ankle_pf_R": [
+   0.0,
+   -0.15096001575248094,
+   0.18491429186924607,
+   0.013669739298646677
+  ],
+  "ankle_pf_L": [
+   202.31869819682672,
+   -0.15265254584883248,
+   0.08415419445726399,
+   -0.015982203034320214
+  ],
+  "core": [
+   288.0,
+   -0.25,
+   0.08806157196019346,
+   0.0906593649897561
+  ],
+  "shoulder_L": [
+   100.0,
+   -0.17,
+   0.05,
+   0.09809765730721268
+  ],
+  "shoulder_R": [
+   100.0,
+   -0.17,
+   0.05,
+   0.07151508982374535
+  ],
+  "elbow_ext_L": [
+   70.0,
+   -0.17,
+   0.05,
+   0.09248320720945705
+  ],
+  "elbow_ext_R": [
+   70.0,
+   -0.17,
+   0.05,
+   0.08828509185812533
+  ],
+  "wrist_L": [
+   9.5,
+   -0.17,
+   0.05,
+   0.0920330439191929
+  ],
+  "wrist_R": [
+   9.5,
+   -0.17,
+   0.05,
+   0.09496672437688983
+  ]
+ },
+ "on_bounds": [
+  "hip_ext_R T at its upper bound (348)",
+  "hip_flex_L T at its upper bound (244)",
+  "hip_flex_L rise at its lower bound (0.05)",
+  "hip_ext_L T at its lower bound (0)",
+  "hip_ext_L rise at its upper bound (0.25)",
+  "hip_rot_R T at its upper bound (78)",
+  "hip_rot_R on at its lower bound (-0.25)",
+  "hip_rot_R rise at its lower bound (0.05)",
+  "hip_rot_L T at its upper bound (78)",
+  "hip_rot_L rise at its lower bound (0.05)",
+  "knee_ext_L off at its upper bound (0.1)",
+  "ankle_pf_R T at its lower bound (0)",
+  "core T at its upper bound (288)",
+  "core on at its lower bound (-0.25)",
+  "shoulder_L T at its upper bound (100)",
+  "shoulder_L on at its lower bound (-0.17)",
+  "shoulder_L rise at its lower bound (0.05)",
+  "shoulder_R T at its upper bound (100)",
+  "shoulder_R on at its lower bound (-0.17)",
+  "shoulder_R rise at its lower bound (0.05)",
+  "elbow_ext_L T at its upper bound (70)",
+  "elbow_ext_L on at its lower bound (-0.17)",
+  "elbow_ext_L rise at its lower bound (0.05)",
+  "elbow_ext_R T at its upper bound (70)",
+  "elbow_ext_R on at its lower bound (-0.17)",
+  "elbow_ext_R rise at its lower bound (0.05)",
+  "wrist_L T at its upper bound (9.5)",
+  "wrist_L on at its lower bound (-0.17)",
+  "wrist_L rise at its lower bound (0.05)",
+  "wrist_R T at its upper bound (9.5)",
+  "wrist_R on at its lower bound (-0.17)",
+  "wrist_R rise at its lower bound (0.05)"
+ ],
+ "rules_broken": [],
+ "cost": 146.5305772805539,
+ "start": 2,
+ "runs": 11402,
+ "seconds": 125.51181745529175
+}

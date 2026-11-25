@@ -218,15 +218,18 @@ checked copy of the table, not two).
 - `body.py`: the batter's 13 bodies from `Height` and `Mass`, the bat held
   by both hands as a closed loop, the feet's contact points, and `place`,
   which puts the body on Fortenbaugh's measured state at a given time.
-- `drive.py`: the 13 drive channels, the design's rules and strength
+- `drive.py`: the 16 drive channels, the design's rules and strength
   bounds, the muscles' level at the start, and a run that records what
   Fortenbaugh measured.
-- `test_body3d.py` (19 tests, also run by `test_oracle.py`): each check
+- `test_body3d.py` (20 tests, also run by `test_oracle.py`): each check
   compares the engine with something it did not produce; three mutations
   show the checks can fail. The whole-body tests need the digitised curves
   under `sim/target/research-dl/4/csv` (or `BB_FORT_CSV`) and are skipped
   without them.
 
-The fit of the drives is not in this package. A compiled probe of the same
-engine is planned for it (docs/body-motion.md §8.2); this Python engine
-stays the reference it is checked against.
+The fit of the drives is not in this package. It runs through a compiled
+copy of this engine, `analysis/research/body/body3d_probe.rs`, which
+`python3 analysis/research/body/probe3d.py --check` compares state for
+state with this engine (largest difference 2e-12 over four runs, tolerance
+1e-9). This Python engine stays the reference; the probe is not part of
+the oracle and is not run by `test_oracle.py`.
