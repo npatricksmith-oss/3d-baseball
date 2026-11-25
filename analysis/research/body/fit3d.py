@@ -1,5 +1,5 @@
 """The three-dimensional body's fit to Fortenbaugh's mean swing under the design's rules
-(docs/body-motion.md 4.3's rules, 4.5's limits, 13's gate; PLAN D31 phase 1, sessions 2 and 5; PLAN D34).
+(docs/body-motion.md 4.3's rules, 4.5's limits, 13's gate; PLAN D31 phase 1, sessions 2, 5 and 6; PLAN D34).
 
     python3 analysis/research/body/fit3d.py --starts 3        the whole body under body-motion 4.5's limits (job queue)
     python3 analysis/research/body/fit3d.py --relax           one rule relaxed at a time, from that fit
@@ -13,17 +13,17 @@
 This FITS THE MODEL'S DRIVE NUMBERS TO A RECORDED AVERAGE SWING in the laboratory. Nothing in a game is
 fitted; nothing here tells the body where the bat should end, except as a recorded curve to compare with.
 
-The body starts at -250 ms on [4]'s measured state, moving (body3d.body.place). 22 drive channels: 16 of the
-legs and trunk, each (strength, onset, rise, switch-off, starting level), and 6 of the arms, each (strength,
-onset, rise, switch-off): 104 numbers. The rules are the search's box: strengths inside body-motion 4.5's
-bounds, rises of at least 50 ms, the arms' channels off until -170 ms at the earliest, every onset inside
-the window, the legs' and trunk's starting levels between 0 and 1. The search is Levenberg-Marquardt on the
-residuals in band units with a finite-difference Jacobian, projected onto the box, run through the compiled
-probe (probe3d.py). It is staged: (A) the lower body and trunk against [4]'s ground forces, pelvis, trunk
-and lead knee, the arms undriven; (B) the arms against the bat and elbows, A's numbers held; (C) all the
-numbers against everything. The reported numbers are from one run of the whole body with C's result.
-Starts: start 0 is a hand estimate from [4]'s event times at half strength; the others perturb it with a
-fixed seed. The gate's curves are [4]'s RATE curves (4.5).
+The body starts at -250 ms on [4]'s measured state, moving (body3d.body.place). 22 drive channels, each
+(strength, onset, rise, switch-off, starting level): 110 numbers. The rules are the search's box: strengths
+inside body-motion 4.5's bounds, rises of at least 50 ms, every onset inside the window, no arm drive rising
+above its holding level more than 70 ms (the measured electromechanical delay's top) before -170 ms, and the
+bat's first motion (its azimuth rate through [4]'s 236 deg/s) asked for at -170 ms. The search is
+Levenberg-Marquardt on the residuals in band units with a finite-difference Jacobian, projected onto the
+box, run through the compiled probe (probe3d.py). It is staged: (A) the lower body and trunk against [4]'s
+ground forces, pelvis, trunk and lead knee, the arms undriven; (B) the arms against the bat and elbows, A's
+numbers held; (C) all the numbers against everything. The reported numbers are from one run of the whole
+body with C's result. Starts: start 0 is a hand estimate from [4]'s event times at half strength; the
+others perturb it with a fixed seed. The gate's curves are [4]'s RATE curves (4.5).
 """
 import json
 import math

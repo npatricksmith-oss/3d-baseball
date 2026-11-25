@@ -60,3 +60,9 @@ Phase 1's dead ends (worker body-3d, 2026-11-25), one line each, so nobody retri
 | On that fit: the arms' onset free; shoulders and elbows × 2; no rise floor; wrists × 3; a stop on the wrists' cock | +8.3, +14.4, +15.5, +15.3, +13.5 ms; none inside ±5 ms and the bat never over 22 m/s | `9f31453` |
 | The legs and trunk not tensed before they fire | contact goes from +21 to +40 ms | `9f31453` |
 | Hip extension on Anderson's recreational speed curve; the legs' bounds at their sources' means | +26.1 and +23.2 ms, pelvis 521 and 526°/s at −93 ms: a few ms, not the answer | `9f31453` |
+| The arms on estimates (100 N·m a shoulder, 70 an elbow, 9.5 a wrist, the first speed law, no tendon stretch, off until −170 ms) | the bat 21–28 ms late with every arm number on its bound; replaced by measured limits by direction and the clock as the bat's measured first motion | `f741891`, `ec25578` |
+| "−170 ms is [4]'s first move of the hands" | [4] has no such event: −170 ms is the lead foot passing half of body weight; what it measured there is the bat's rate, 236°/s on its way up | `f741891` |
+| Choosing between the wrists' two readings (Delp 13.9 N·m, Peleg 51) | not needed: whole fits on each give contact +5.9 and +4.0 ms and the same bat speed | `ec25578` |
+| On the arms' refit: doubled shoulder and elbow bounds; wrists × 3; no rise floor; legs and trunk × 1.5; no first-motion rule | contact +1.5 to +3.8 ms against +3.9; only the doubled shoulders and elbows move the bat's speed (22.3 m/s) | `ec25578` |
+| The arms' tendon springs, a wrist stop, the arms tensed beforehand, as what brings the bat on time | each is worth under 2 ms; the legs and trunk tensed beforehand (26 ms) and the arms' rise 65 ms before the bat moves (7 ms) are what does | `ec25578` |
+| The gate's 29–34 m/s as a target for a body fitted to [4] | [4]'s own motion on this body has 22.9 m/s at contact and 25.0 at its fastest; the two cannot both be met | `ec25578` |
