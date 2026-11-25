@@ -305,7 +305,7 @@ def fit(rules="design", starts=3, H=1.84, M=92.0, log=print, iters=(20, 20, 30),
     for sidx in range(starts):
         t = time.time()
         if u_from is not None:
-            u = [min(1.0, max(0.0, (u_from[n][k] - lo) / (hi - lo))) for n in CH
+            u = [min(1.0, max(0.0, (u_from.get(n, (0.0, lo if k else 0.0, 0.05, 0.1))[k] - lo) / (hi - lo))) for n in CH
                  for k, (_, _, lo, hi) in enumerate(ctx.box[4 * CH.index(n):4 * CH.index(n) + 4])]
             log("  start %d: from a given plan, all numbers free" % sidx)
             u, c = lm(ctx, u, iA + iB, None, iters[2], log)

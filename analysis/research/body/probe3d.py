@@ -168,9 +168,9 @@ def _cases():
         import json
         import fit3d
         ctx = fit3d.Ctx()
-        for a, (n, v) in zip(ctx.m.sys.acts, json.load(open(fitted))["plan"].items()):
-            assert a[0] == n
-            a[4], a[6], a[7], a[8] = v
+        plan = json.load(open(fitted))["plan"]
+        for a in ctx.m.sys.acts:                     # channels added since that fit stay off
+            a[4], a[6], a[7], a[8] = plan.get(a[0], (0.0, 0.0, 0.05, 0.1))
         ctx.m.check_aux = list(ctx.aux0)
         out.append(("the fitted swing (design rules)", ctx.m, ctx.st, fit3d.T0, 310))
     return out

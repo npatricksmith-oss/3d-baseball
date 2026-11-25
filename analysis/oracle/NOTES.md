@@ -218,7 +218,7 @@ checked copy of the table, not two).
 - `body.py`: the batter's 13 bodies from `Height` and `Mass`, the bat held
   by both hands as a closed loop, the feet's contact points, and `place`,
   which puts the body on Fortenbaugh's measured state at a given time.
-- `drive.py`: the 16 drive channels, the design's rules and strength
+- `drive.py`: the 20 drive channels, the design's rules and strength
   bounds, the muscles' level at the start, and a run that records what
   Fortenbaugh measured.
 - `test_body3d.py` (20 tests, also run by `test_oracle.py`): each check
