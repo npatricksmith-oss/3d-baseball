@@ -152,7 +152,7 @@ All under `sim/target/codex-probes/review-body-3d-7/`, output beside each script
 
 ## Resolution
 
-Handed to worker `body-3d-7fix` (Opus, job `WORKER-BODY-3D-7FIX.md`, branch `work/body-3d`), 2026-11-25, except where said. The Coordinator updates this section when that work is merged.
+Handed to worker `body-3d-7fix` (Opus, job `WORKER-BODY-3D-7FIX.md`, branch `work/body-3d`), 2026-11-25, except where said. **Merged 2026-11-25** (branch commits `f7bb1a2`..`350bba3`): every handed finding below is done as described; checks rerun by the Coordinator (docs check, oracle 106, body 30, the probe at 8.6e-12).
 
 - **P1-1, P1-2, P3-1 (the smoothing's size, its basis, the unsmoothed elevation as a target):** handed. `unsmooth()` joined to [4]'s curve at the window's edges, Winter's correction fixed, the variants rerun with straight, accelerating and plateau rises, the attack angle given for each, §4.8 rewritten with the size as a range. "Matched to unsmoothed curves" is withdrawn from Q59's options; the owner has been told (2026-11-25) that 62–67 mph is an estimate inside a wide range.
 - **P2-1 (the fitted swing comes down on the ball at 7.8°):** handed: the attack angle at contact becomes a held-out check, reported for sessions 6 and 7's fits and said to the owner.
@@ -163,4 +163,4 @@ Handed to worker `body-3d-7fix` (Opus, job `WORKER-BODY-3D-7FIX.md`, branch `wor
 - **P3-3 (stale status lines, §13's pelvis reading):** handed.
 - **P3-5 (the floating axis singular with the arm hanging):** handed as a line for phase 2; no code now.
 
-No re-review of the fixes is planned if the reworked smoothing figures agree with this review's own (`filt.py`, `filt2.py`); if they disagree, the disagreement goes back to a reviewer.
+No re-review of the fixes: the reworked smoothing figures agree with this review's own probes to a few °/s where the problem is the same (body-motion §4.8); the one difference is explained there (the review capped the step in the bat's whole turning rate, 1,519°/s, where [4]'s curve is the azimuth rate, 1,749°/s). New from the fixes: the strongest batter held to a hitter's swing reached 50 mph in one search from one start (P2-4), so whether this body reaches the gate's speed with a hitter's swing is open and goes to the next fitting session with P2-2.

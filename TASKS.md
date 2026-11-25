@@ -19,11 +19,11 @@ Status: `[ ]` not started · `[~]` partly done · `[?]` needs an owner decision
 
 **State.** PLAN D31–D34: a force-driven body; PLAN §14.1, spec [docs/body-motion.md](docs/body-motion.md).
 
-**Phase 1 (spec §4.4, §4.8, §4.9; sessions 1–7 merged):** every designed freedom driven: contact +0.8 ms, every gated curve inside a band; the bat 21.3 m/s (48 mph), outside. [4]'s "51 mph" is its smoothing through impact (62–67 mph undone).
+**Phase 1 (spec §4.4, §4.8, §4.9; session 7, its review and fixes merged):** contact +0.8 ms, gated curves inside their bands; the bat 48 mph and coming down 7° on the ball. PLAN D35: the curves' last 40 ms are not a target. The strongest batter held to a hitter's swing: 50 mph (one search).
 
-**[?] Q59** (gate 65–76 or 60–76 mph; D35 settles the rest) and **Q60** (a cost on effort in the practice search).
+**[?] Q59** (gate 65–76 or 60–76 mph) and **Q60** (a cost on effort in the practice search).
 
-**Running (Workers tab):** `body-3d-7fix` (Opus, t4c, worktree `swing-research`): the s7 review's fixes; merge, Resolution. `smooth-audit` (Opus, t4h, worktree `body-research`): D35's audit, note 10. Session 8 waits on both and Q59/Q60.
+**Running:** `smooth-audit` (Opus, pane t4h, worktree `body-research`, `work/smoothing-audit`): D35's audit, note 10; check, merge. Then session 8 (review P2-2, the held search from more starts), after Q59/Q60.
 
 **Next:** §2: the ground-dive leftovers ([note](docs/calibration/2026-11-23-of-ground-dive.md) §9).
 
