@@ -17,7 +17,7 @@ Status: `[ ]` not started · `[~]` partly done · `[?]` needs an owner decision
 
 ## Resume here (2026-11-24)
 
-**State.** Swing v3 ([spec](docs/swing-model-v3.md)): steps 0–1 and the swing family (D27, §6.7) merged; its [review](docs/reviews/2026-11-24-opus-swing-family-review.md) leaves the hands' stall open. PLAN D28: the batter stands 0.58 m deeper ([note 11](docs/research/swing/11-stance-depth.md)). Worker `swing-stance` (Opus, `work/swing-stance`, worktree `swing-research`): refits the family and oracle at that stance; needs an Opus review. Q51 = a (PLAN D29): the ball is met 0.15 m further out front. Nothing waits on the owner.15 m further out front, as MLB does, or not). Then step 2 (Rust). Step 4 brings Q45 back with game measurements.
+**State.** Swing v3 ([spec](docs/swing-model-v3.md)): steps 0–1 and the swing family (D27) merged. PLAN D28, D29: the batter stands 0.58 m deeper and meets the ball 0.15 m further out front. `work/swing-stance` (worktree `swing-research`, `e9e9cce`): the family and oracle refitted there, the hands no longer stall; **not merged**. Reviewer `rev-swing-stance` (Opus, Workers tab) writes its review under docs/reviews on that branch: commit the Resolution, hand findings to a worker (the arms over-reach at contact on low and outside pitches: fix before the Rust, D27), rerun `test_oracle.py`, merge. Then step 2 (Rust). Step 4 brings Q45 back with game measurements. Nothing waits on the owner.
 
 **Next:** §2: the ground-dive leftovers ([note](docs/calibration/2026-11-23-of-ground-dive.md) §9); swing step 2 after the stance refit.
 
