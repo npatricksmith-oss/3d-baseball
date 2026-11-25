@@ -6,6 +6,7 @@
     python3 analysis/research/body/fit3d.py --ranges          4.5's range ends, one at a time (--only a,b for some)
     python3 analysis/research/body/fit3d.py --small           PLAN D32's small frame
     python3 analysis/research/body/fit3d.py --wrists          with a stop on the wrists' cock
+    python3 analysis/research/body/fit3d.py --lower forces    the legs and trunk alone (also: pelvis, rate)
     python3 analysis/research/body/fit3d.py --show fit3d_d34.json
 
 This FITS THE MODEL'S DRIVE NUMBERS TO A RECORDED AVERAGE SWING in the laboratory. Nothing in a game is
@@ -383,6 +384,29 @@ def fit(rules="design", starts=3, H=1.84, M=92.0, log=print, iters=(20, 20, 30),
     return ctx, best
 
 
+def fit_lower(weighting, starts=3, iters=40, log=print):
+    """the lower body alone (the leg and trunk channels; the arms undriven) against one of LOWER_SETS: forces
+    (pelvis and trunk rates, travel, both feet's forces, the lead knee), pelvis (rate, travel, lead knee), rate.
+    Session 3's numbers in body-motion 4.4 came from this mode at commit 876b3aa, before 4.5's limits."""
+    ctx = Ctx()
+    which = LOWER_SETS[weighting] or STAGE_A
+    iA = [i for i in ctx.free if ctx.box[i][0] in LOWER]
+    best = None
+    for sidx in range(starts):
+        u = ctx.start(sidx)
+        for i, n in enumerate(CH):
+            if n in ARMS:
+                u[NP * i] = 0.0
+        log("  start %d (lower body alone, weighting '%s')" % (sidx, weighting))
+        u, c = lm(ctx, u, iA, which, iters, log)
+        out, rows = summary(ctx, u)
+        out["cost"], out["start"] = c, sidx
+        show(out, log)
+        if best is None or c < best["cost"]:
+            best = out
+    return ctx, best
+
+
 def main():
     P.build()
     a = sys.argv[1:]
@@ -391,6 +415,11 @@ def main():
     it = int(arg("--iters", 25))
     if "--show" in a:
         show(json.load(open(os.path.join(HERE, arg("--show", "fit3d_d34.json")))))
+        return
+    if "--lower" in a:
+        w = arg("--lower", "forces")
+        ctx, best = fit_lower(w, int(arg("--starts", 3)), int(arg("--iters", 40)))
+        json.dump(best, open(os.path.join(P.OUT, "fit3d_d34_lower_%s.json" % w), "w"), indent=1)
         return
     if "--relax" in a or "--ranges" in a:
         base = json.load(open(base_file))
