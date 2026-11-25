@@ -45,6 +45,7 @@ def tree_order(mdl):
 
 
 def write_model(path, s, st, aux, t0, nsteps, h, every, order=()):
+    assert not s.ext, "the probe has no external loads (inverse dynamics runs in the Python engine)"
     w = []
     f = lambda *xs: " ".join(repr(float(x)) for x in xs)
     w.append("g " + f(*s.g))

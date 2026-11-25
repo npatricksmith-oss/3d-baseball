@@ -191,6 +191,7 @@ class System:
         self.pts, self.dots = [], []        # constraint primitives
         self.acts, self.stops, self.holds, self.contacts = [], [], [], []
         self.tones = []
+        self.ext = []                       # external loads (body, point in the body, force, moment; world axes): inverse dynamics only
         self.baum_a, self.baum_b = BAUM_A, BAUM_B
         self.diag = None                    # set to {} to have deriv() record forces of its last call
 
@@ -439,6 +440,9 @@ class System:
             if a >= 0:
                 Tq[a] = sub(Tq[a], tv)
             p_hold += dot(tv, sub(Wv[b], Wv[a] if a >= 0 else ZERO))
+        for b, p, f, mo in self.ext:
+            F[b] = add(F[b], f)
+            Tq[b] = add(add(Tq[b], cross(mv(R[b], p), f)), mo)
         for j, (name, b, p, kn, cn, kt, ct, mu) in enumerate(self.contacts):
             sp = mv(R[b], p)
             P = add(X[b], sp)
