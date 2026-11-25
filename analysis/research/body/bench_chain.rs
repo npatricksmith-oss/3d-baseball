@@ -2,7 +2,7 @@
 // (5 DOF: base, pelvis, trunk, arms, bat; 6 drive channels with activation and force-velocity; the
 // friction caps, the wrist stop; RK4), integrated 0.27 s at 0.5, 1 and 2 ms, repeated to time it.
 // Not sim code: a stand-alone timing probe. f64 libm-free (std sin/cos: timing only, not replay).
-// Build and run:  rustc -C opt-level=3 -o sim/target/codex-probes/body/bench_chain \
+// Build and run:  rustc -C opt-level=3 -C linker=$HOME/.local/bin/zigcc -o sim/target/codex-probes/body/bench_chain \
 //                   analysis/research/body/bench_chain.rs && sim/target/codex-probes/body/bench_chain
 use std::time::Instant;
 
@@ -37,7 +37,7 @@ fn eom(x: &[f64; 10], pts: &[Pt], rot: &[f64; 5], act: &[f64; 6], tq: &[f64; 6],
     }
     let cap = 280.0; tau[0] = tau[0].max(-cap).min(cap);
     let lag = q[3] - q[4];
-    if lag > 2.32 { tau[3] += 2.0e4 * (lag - 2.32) + 40.0 * (qd[3] - qd[4]); }
+    if lag > 2.32 { tau[3] += (2.0e4 * (lag - 2.32) + 40.0 * (qd[3] - qd[4])).max(0.0); }   // one-sided: never pulls
     let qf = [tau[4] - tau[5], tau[0] - tau[1], tau[1] - tau[2], tau[2] - tau[3], tau[3]];
     // Gaussian elimination
     let mut a = [[0.0f64; N + 1]; N];

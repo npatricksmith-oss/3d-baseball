@@ -28,7 +28,8 @@ DE_LEVA = {
 
 def segment(name, H, M):
     """(length m, mass kg, cm fraction, I_sag, I_trans, I_long kg m^2) scaled by stature and mass.
-    de Leva: I = (M m_rel) (l r_rel)^2 with l proportional to stature (the paper's own assumption)."""
+    de Leva: I = (M m_rel) (l r_rel)^2. Scaling l with stature is [E]: de Leva gives no scaling rule and suggests
+    measuring the individual's segment lengths (docs/body-motion.md 4.1)."""
     l, m, c, rs, rt, rl = DE_LEVA[name]
     L = l * H / DE_LEVA_H
     mk = m * M
