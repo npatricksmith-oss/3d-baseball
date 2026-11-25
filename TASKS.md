@@ -23,7 +23,7 @@ Status: `[ ]` not started · `[~]` partly done · `[?]` needs an owner decision
 
 **[?] Q59: the gate's bat speed** (§4.4): (a) [4]'s 22.9 m/s, review now; (b) 29–34, the missing drives first; (c) the drives, then review at (a)'s speed. Recommended: (c), with 29–34 required before games.
 
-**Running, not waiting on Q59:** `body-3d` (Fable, pane t4c, worktree `swing-research`), job WORKER-BODY-3D-7.md: the placed motion's speed; the missing drives, limits first; the refit. Then: checks, merge, Opus review of 5–7.
+**Running, not waiting on Q59:** `body-3d` (Fable, pane t4c, worktree `swing-research`), job WORKER-BODY-3D-7.md: the placed motion's speed; the missing drives, limits first; the refit. Then: checks, merge, Opus review.
 
 **Next:** §2: the ground-dive leftovers ([note](docs/calibration/2026-11-23-of-ground-dive.md) §9).
 
