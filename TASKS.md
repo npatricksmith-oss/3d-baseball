@@ -23,7 +23,7 @@ Status: `[ ]` not started · `[~]` partly done · `[?]` needs an owner decision
 
 **[?] Q59** (gate 65–76 or 60–76 mph) and **Q60** (a cost on effort in the practice search).
 
-**Running:** `smooth-audit` (Opus, pane t4h, worktree `body-research`, `work/smoothing-audit`): D35's audit, note 10; check, merge. Then session 8 (review P2-2, the held search from more starts), after Q59/Q60.
+**Nothing running.** Session 8 after Q59/Q60: free the last 40 ms, review P2-2, the held search again; [note 10](docs/research/body/10-smoothed-sources.md) §6 and §1a (averaged peaks, "about 2%", the handle kick, swing v3).
 
 **Next:** §2: the ground-dive leftovers ([note](docs/calibration/2026-11-23-of-ground-dive.md) §9).
 
