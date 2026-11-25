@@ -72,6 +72,13 @@ def main():
             print("  %4d  %5.0f / %4.0f  %5.0f / %4.0f  %5.0f / %4.0f" % (ms, x[6] / D2R, fit.mval("pelvis_rot_vel", tt), x[7] / D2R, fit.mval("trunk_rot_vel", tt), x[9] / D2R, fit.mval("bat_az_vel", tt)))
     # applied torques and the friction cap
     tl = max(out["tau"], key=lambda d: d["legs"])
+    print("strengths T (isometric, N m or N): legs %.0f, core %.0f, shoulder %.0f, wrist %.1f, push %.0f, brake %.0f; the model's core at 0.52 rad/s: %.0f N m (golfers scaled by weight x height: 180 +- 40)" % (
+        plan.ch["legs"][0], plan.ch["core"][0], plan.ch["shoulder"][0], plan.ch["wrist"][0], plan.ch["rear"][0], plan.ch["lead"][0],
+        plan.ch["core"][0] * fv(0.52 / plan.ch["core"][3])))
+    capped = sum(1 for raw, c in zip(out["legs_raw"], out["cap"]) if abs(raw) > c)
+    i_pk = max(range(len(out["legs_raw"])), key=lambda i: out["legs_raw"][i])
+    print("the legs' drive peaks at %.0f N m at %.0f ms, the friction cap then %.0f N m; drive above the cap on %d of %d steps" % (
+        out["legs_raw"][i_pk], out["t"][i_pk] * 1000, out["cap"][i_pk], capped, len(out["cap"])))
     print("largest applied yaw torques (N m): legs %.0f, core %.0f, shoulder %.0f, wrist %.0f; brake %.0f N, push %.0f N" % (
         max(d["legs"] for d in out["tau"]), max(d["core"] for d in out["tau"]), max(d["shoulder"] for d in out["tau"]),
         max(d["wrist"] for d in out["tau"]), max(d["lead"] for d in out["tau"]), max(d["rear"] for d in out["tau"])))

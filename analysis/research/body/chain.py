@@ -233,6 +233,7 @@ class Sim:
         act = {n: 0.0 for n in CHANNELS}
         out = {"t": [], "x": [], "tau": [], "ke": [], "cap": [], "legs_raw": [], "stop": [], "work": 0.0, "contact": None}
         work = 0.0
+        ang = 0.0
         while t < t_end:
             u = self.excite(t)
             # activation: exact first-order step over dt with the rate set by rising or falling
@@ -251,6 +252,8 @@ class Sim:
             xn = [x[i] + dt / 6 * (k1[i] + 2 * k2[i] + 2 * k3[i] + k4[i]) for i in range(10)]
             # the forces' work, integrated with the same RK4 stages (the energy check of docs 6)
             work += dt / 6 * (self.power(x, tau) + 2 * self.power(x2, tau2) + 2 * self.power(x3, tau3) + self.power(x4, tau4))
+            # the angular momentum's source about the base point, same stages (checks.py 7)
+            ang += dt / 6 * (self.ang_rate(x, tau) + 2 * self.ang_rate(x2, tau2) + 2 * self.ang_rate(x3, tau3) + self.ang_rate(x4, tau4))
             if out["contact"] is None and x[4] < A_c <= xn[4]:
                 f = (A_c - x[4]) / (xn[4] - x[4])
                 xc = [x[i] + f * (xn[i] - x[i]) for i in range(10)]
@@ -263,6 +266,7 @@ class Sim:
                 out["cap"].append(cap_k1); out["legs_raw"].append(raw_k1); out["stop"].append(stop_k1)
             t += dt; x = xn
         out["work"] = work
+        out["ang"] = ang
         out["x_end"] = x; out["t_end"] = t
         return out
 
@@ -270,6 +274,34 @@ class Sim:
         qd = x[5:]
         return (tau["rear"] - tau["lead"]) * qd[0] + tau["legs"] * qd[1] + tau["core"] * (qd[2] - qd[1]) + \
             tau["shoulder"] * (qd[3] - qd[2]) + tau["wrist"] * (qd[4] - qd[3])
+
+    def vel_pts(self, x):
+        """each point mass's position relative to the base point (0, s) and its velocity."""
+        q, qd = x[:5], x[5:]
+        res = []
+        for m, terms in self.pts:
+            px = py = 0.0; vx, vy = 0.0, qd[0]
+            for k, r, off in terms:
+                a = q[k] + off
+                px += r * math.cos(a); py += r * math.sin(a)
+                vx += -r * math.sin(a) * qd[k]; vy += r * math.cos(a) * qd[k]
+            res.append((m, px, py, vx, vy))
+        return res
+
+    def ang_mom(self, x):
+        """vertical angular momentum about the moving base point A = (0, s)."""
+        b, qd = self.b, x[5:]
+        L = b.I1 * qd[1] + b.I2 * qd[2] + b.I3 * qd[3] + b.Ib * qd[4]
+        for m, px, py, vx, vy in self.vel_pts(x):
+            L += m * (px * vy - py * vx)
+        return L
+
+    def ang_rate(self, x, tau):
+        """dL_A/dt from the external loads alone: the ground's yaw couple on the pelvis, plus -v_A x P
+        (the base point moves at (0, s')); the ground's horizontal forces act at A. Internal drives and
+        stops cancel in pairs, so a wrong internal term shows up here."""
+        Px = sum(m * vx for m, px, py, vx, vy in self.vel_pts(x))
+        return tau["legs"] + x[5] * Px
 
     def ke(self, x):
         q, qd = x[:5], x[5:]

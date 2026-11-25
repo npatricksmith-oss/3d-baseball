@@ -9,8 +9,16 @@ a pelvis -> trunk -> arms -> bat chain needs to move that way:
   tau_sh    trunk -> arms   (both arms as one link from the trunk's axis to the hands)
   tau_wr    arms -> bat     (about the vertical through the hands)
 Then it compares tau_legs (= the whole chain's rate of vertical angular momentum about the pelvis) with
-the yaw moment of [4]'s measured ground forces, under both possible signs of [4]'s GRFy, as an
-independent check: the free moment of the feet is not in [4], so agreement can only be partial.
+the yaw moment of [4]'s measured ground forces, as an independent check: the free moment of the feet is
+not in [4], so agreement can only be partial. The sign of [4]'s plotted GRFy is settled by [4]'s
+Appendix C (ForcePlateInfo.sky, printed pp. 202-204): the export negates both plates' Y for right-handed
+hitters and keeps it for left-handed ones, so plotted +GRFy points toward home plate for both.
+
+Corrections after the 2026-11-25 reviews: the pelvis's forward acceleration was added to the bat twice
+(now once, through the hands); the hands' velocity now includes the pelvis's forward speed; the arms'
+own rotational inertia is in the shoulder's torque; the rear foot is 0.77 m behind the pelvis's zero,
+as in fit.py. Still not the forward model's geometry: the arm link is hinged on the trunk's axis here
+(no shoulder offset r_sh), so the shoulder and core split differs from chain.py's.
 
 Segment masses and inertias: de Leva 1996 at [4]'s mean batter (1.84 m, 92 kg). Geometry [E]:
 the arm link's horizontal reach from the axis to the hands L_A = 0.30 H; the arms' masses lumped at
@@ -48,7 +56,8 @@ def main():
     w3 = [a + b for a, b in zip(w4, deriv(lag, DT))]
     a1 = deriv(w1, DT); a2 = deriv(w2, DT); a3 = deriv(w3, DT); a4 = deriv(w4, DT)
     Ed = deriv(E, DT); Edd = deriv(Ed, DT)
-    ypa = deriv(deriv(yp, DT), DT)
+    ypd = deriv(yp, DT)
+    ypa = deriv(ypd, DT)
 
     # inertias
     _, m_lpt, _, _, _, I_lpt = segment("lpt", H, M)
@@ -58,6 +67,7 @@ def main():
     m_ua = 2 * segment("upperarm", H, M)[1]; m_fa = 2 * segment("forearm", H, M)[1]; m_ha = 2 * segment("hand", H, M)[1]
     LA = 0.30 * H
     arm_pts = [(m_ua, 0.22), (m_fa, 0.42), (m_ha, LA)]
+    I3 = 2 * (segment("upperarm", H, M)[4] + segment("forearm", H, M)[4])      # the arms' own transverse inertia, as chain.py
     cb = BAT_UCM - GRIP_FROM_KNOB
     ss = BAT_SS - GRIP_FROM_KNOB
 
@@ -79,7 +89,7 @@ def main():
             acc = (ha[i][0] + rhodd * c - 2 * rhod * w4[i] * s_ - rho * (a4[i] * s_ + w4[i] ** 2 * c),
                    ha[i][1] + rhodd * s_ + 2 * rhod * w4[i] * c + rho * (a4[i] * c - w4[i] ** 2 * s_))
             vh = (-LA * w3[i] * math.sin(p3[i]) + rhod * c - rho * w4[i] * s_,
-                  LA * w3[i] * math.cos(p3[i]) + rhod * s_ + rho * w4[i] * c,
+                  ypd[i] + LA * w3[i] * math.cos(p3[i]) + rhod * s_ + rho * w4[i] * c,
                   u * math.cos(E[i]) * Ed[i])
             return pos, acc, vh
         p, a, _ = bat_pt(cb); bcm.append(p); ab.append(a)
@@ -93,7 +103,6 @@ def main():
         arm_acc.append((m, pos, ([a[0] for a in acc_], [a[1] + ypa[i] for i, a in enumerate(acc_)])))
     Hb = [(BAT_ICM * math.cos(E[i]) ** 2 + BAT_IAX * math.sin(E[i]) ** 2) * w4[i] for i in range(n)]
     dHb = deriv(Hb, DT)
-    ab = (ab[0], [ab[1][i] + ypa[i] for i in range(n)])
     yp0 = yp
     yp = [0.0] * n            # positions above are relative to B
 
@@ -107,17 +116,18 @@ def main():
         ts_ = cross((bcm[i][0] - B[0], bcm[i][1] - B[1]), fb) + dHb[i]
         for m, pos, a in arm_acc:
             ts_ += cross((pos[i][0] - B[0], pos[i][1] - B[1]), (m * a[0][i], m * a[1][i]))
+        ts_ += I3 * a3[i]
         tc = ts_ + I2 * a2[i]
         tl = tc + I1 * a1[i]
         rows.append((ts[i], tw, ts_, tc, tl))
 
-    # ground yaw moment from [4]'s forces about B, feet [E]: rear (0, -0.80), lead (+0.11, -0.80 + 0.42 H)
+    # ground yaw moment from [4]'s forces about B, feet [E]: rear (0, -0.77), lead (+0.11, -0.77 + 0.42 H)
     gx_t = resample(load("trail_grf_x"), T0, T1, DT); gx_l = resample(load("lead_grf_x"), T0, T1, DT)
     gy_t = resample(load("trail_grf_y"), T0, T1, DT); gy_l = resample(load("lead_grf_y"), T0, T1, DT)
-    fr, fl = (0.0, -0.80), (0.11, -0.80 + 0.42 * H)
+    fr, fl = (0.0, -0.77), (0.11, -0.77 + 0.42 * H)
 
     def ground(i, sgn):
-        # [4] GRFx is along +y here (toward the pitcher); GRFy is along x with sign sgn (unknown: +1 = toward the plate)
+        # [4] GRFx is along +y here (toward the pitcher); plotted GRFy is along +x, toward the plate ([4] App. C); sgn -1 only for comparison
         B = (0.0, yp0[i]); tot = 0.0
         for f, gx, gy in ((fr, gx_t, gy_t), (fl, gx_l, gy_l)):
             F = (sgn * gy[i] / 100 * BW, gx[i] / 100 * BW)
@@ -147,7 +157,7 @@ def main():
     for sgn in (+1, -1):
         Ig = sum(ground(i, sgn) for i in range(i0, ic)) * DT
         Il = sum(rows[i][4] for i in range(i0, ic)) * DT
-        print("angular impulse -170..0: chain needs %.1f N m s; [4]'s forces give %.1f (GRFy sign %+d)" % (Il, Ig, sgn))
+        print("angular impulse -170..0: chain needs %.1f N m s; [4]'s forces give %.1f (GRFy sign %+d%s)" % (Il, Ig, sgn, ", [4]'s, App. C" if sgn > 0 else ", the wrong sign, for comparison"))
     ke_b = 0.5 * BAT_M * ssv[ic] ** 2
     print("sweet-spot speed at contact %.1f m/s (planar reading of [4]'s bat angles at L_A, [4] gives none; [3] 29 m/s)" % ssv[ic])
 
