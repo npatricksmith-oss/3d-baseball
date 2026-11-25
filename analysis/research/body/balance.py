@@ -109,9 +109,9 @@ def main():
                 row.append("%-6s %6.2f cm%s" % (err, w * 100, (" fell at %.2f s" % fell) if fell else ""))
             print("T %.2f s  %-9s  %s" % (T, mode, " | ".join(row)))
     print()
-    print("rating range, reflex control, 1.5 s, mass error (cm):")
+    print("rating range, 1.5 s, lean error 0.5 deg (cm), open loop -> reflex:")
     for H in (1.70, 1.84, 2.00):
-        print("  H %.2f: " % H + "  ".join("M %3.0f kg %.2f" % (Mb, run(1.5, H=H, Mb=Mb, mode="reflex", err="mass")[0] * 100) for Mb in (75, 92, 120)))
+        print("  H %.2f: " % H + "  ".join("M %3.0f kg %.1f -> %.2f" % (Mb, run(1.5, H=H, Mb=Mb, mode="open", err="lean")[0] * 100, run(1.5, H=H, Mb=Mb, mode="reflex", err="lean")[0] * 100) for Mb in (75, 92, 120)))
     print()
     print("reflex delay sweep (1.5 s, lean error): " + "  ".join("%3.0f ms %.2f cm" % (d * 1000, run(1.5, mode="reflex", err="lean", delay=d)[0] * 100) for d in (0.05, 0.10, 0.15, 0.20)))
     print("reflex gain sweep  (1.5 s, lean error): " + "  ".join("Kn %.1f %.2f cm" % (k, run(1.5, mode="reflex", err="lean", Kn=k)[0] * 100) for k in (0.3, 0.8, 1.6, 2.5)))
