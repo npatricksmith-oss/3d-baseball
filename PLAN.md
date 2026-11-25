@@ -52,6 +52,7 @@ The human is the **manager**. They pick lineups, tactics, pitching changes, and 
 | D28 | **The batter stands where MLB's batters stand: his hips 0.71 m behind the front edge of the plate** (0.58 m deeper than the game's stance spot, set by eye), across as now. The swing is fitted at that stance before any Rust is written, because at today's stance the hands stall in mid-swing (D27). | **Decided** (owner Q46 = a, 2026-11-24, on the condition that a plate-relative figure confirmed he stands deeper; confirmed the same day by Savant's batting-stance leaderboard, [note 11](docs/research/swing/11-stance-depth.md)) | Not established: whether Savant's hip position is at the stance or at contact (the stride, about 0.17 m). Where the ball is met: D29. The eye point and the body the pitch can hit move with him: hit-by-pitch and pitch recognition are re-measured in step 4. |
 | D29 | **The ball is met where MLB's batters meet it: about 0.15 m further out in front** (a middle pitch about 0.07 m in front of the plate's front edge; the game's `contact_y0` 0.35 m was set by eye). | **Decided** (owner Q51 = a, 2026-11-24) | Savant's figure is the bat's nearest approach over all swings and locations, so the middle-pitch value may be up to about 0.04 m less: the stance refit fixes the number [E] ([note 11](docs/research/swing/11-stance-depth.md)). Every ball is met earlier in its flight: timing and batted balls are re-measured in step 4. |
 | D30 | **The last 40 ms of the swing follow MLB's game tracking, not the lab study:** the lab's measured swing ([4], level swings at 56 mph batting practice) up to about 40 ms before contact, then the bat laid onto Statcast's swing plane through the ball, so that late contact meets a slower barrel, as Savant's bat speed by contact depth shows. Fixed in the oracle before any Rust. | **Decided** (owner Q52 = a, 2026-11-24); **not built: back to the owner as Q53** (2026-11-25: no join of the two swings passes D27's checks, spec §6.7.6) | Changes Q45 = a (D26: the lab's swing all the way to the ball), whose check the oracle review predicted to fail (+4.8 mph at 15 ms late where MLB has −2 to −4.5; [review](docs/reviews/2026-11-25-opus-swing-stance-review.md) P2-1). The join between the two sources is the model's own, [E]. Step 4 still measures bat speed and path tilt by contact depth in games. |
+| D31 | **The motion of the players determines the outcome, not the other way around: the batter's swing and the pitcher's delivery are computed in the sim as a force-driven body** (muscle drive at the joints moves the body's segments forward in time; the bat's path and the ball's release are results). An error happens in a named link of the motion and carries forward; nothing later in a motion changes anything earlier, and no motion is fitted to its planned end. | **Decided** (owner Q54 = b, 2026-11-24: "In this game, the motion of the players determines the outcome. Not the other way around."); the plan is §14.1; not designed yet | Supersedes D23 (stances and swing styles as looks only) and the drawn swing path of D25–D27 and D30 (Q53 withdrawn; swing-model-v3's Rust step is not built). Kept as facts the body must reproduce: the measurements (D21), where he stands (D28), where the ball is met (D29); D22 stands. Today's swing and release stay in games until the new ones pass §14.1's gates. |
 
 ---
 
@@ -405,6 +406,33 @@ A procedural world generator (league, divisions, schedule, **parametric ballpark
 | **M6: Live management** (primary experience) | Command API; human manager HUD; AI manager; pacing modes; fatigue; bullpen warm-ups; substitutions; causal explanations; first learned-belief tables | Human-vs-AI game is fun to manage; A/B sims show each tactic changes outcomes in the expected direction |
 | **M7: League** | Generator, schedules, parametric parks, recovery, saves, standings, leaderboards, parallel seasons, per-league belief tables | Full season playable; managed live games interleave with instant background days |
 | **M8: Presentation** | Characters, Motion Matching, IK, broadcast camera director, replays, audio | Owner's quality bar |
+
+### 14.1 The body-motion rebuild (D31)
+
+Written 2026-11-24 by the Coordinator on the owner's Q54 = b. It cuts across M3 (batter against pitcher) and M8 (what the client draws). Each phase ends at a gate; nothing reaches games before phase 4. Today's swing and release stay in games, unchanged, until then.
+
+| Phase | What is built | Gate |
+| :--- | :--- | :--- |
+| **0. Design study and spec** (a new spec under docs/, body-motion; Opus, then an independent Opus review) | See "What the study must settle" below. | The owner's numbered questions answered; the review resolved. It also sizes phases 1–5. |
+| **1. The body in the checking model** (Python oracle, the average batter) | The segments, the joints, the feet on the ground, the drive, a fixed-step integrator. | Driven by the drive derived from the measurements, it reproduces the measured swing within the measurements' own error; momentum and energy checks pass; each named breakdown gives its consequence. **If it cannot, the work stops here and the owner is told what blocks it.** No Rust before this. |
+| **2. The engine in Rust** (`bb_physics`, pure, through `bb_math::m`) | The same body, bit for bit replayable; a cage command in `sim-cli`; the client draws the sim's own body for a single swing. | Rust against the oracle within tolerance; the owner sees one swing. |
+| **3. The batter in plate appearances** (behind a switch, off) | The load, stride, foot down and heel plant as events in the sim; his plan from his own learned swings; drive errors; changes in mid-swing only to drive not yet spent; a check swing as the drive stopped. | Cage rates and direction checks over the whole rating range (D27 still binds: a slow swing as real as a fast one). |
+| **4. The batter in games** | The switch on; body ratings and the roster generator; hitting recalibrated through ability distributions only (§13); the client draws the sim's body. | Ledger rows; an Opus review; the owner watches games. |
+| **5. The pitcher** | The delivery on the same engine: release point, speed, spin and direction are results; fatigue is less drive. | The same gates as phases 1–4, for the delivery. |
+| **6. After** | Fielders' and the catcher's throws on the same engine. | — |
+
+**What the study must settle** (each with its source, or marked [E]):
+
+1. **The body:** which segments and joints, in three dimensions; segment masses and inertias from published tables by `Height` and `Mass`; how the feet hold the ground and how the front leg blocks.
+2. **The drive:** what a muscle drive is at each joint (when it starts, how long, how strong, capped by the player's strength), and its numbers: worked back from the measured swing ([4]'s motion and ground forces) and from published pitching forces. What no source gives is listed.
+3. **Control:** how a player produces a motion for what he intends without reading the world (§4.1): a set of swings he has learned for his own body, not a solve per pitch; what holds a driven body on its path for 0.5 s of swing and 1.5 s of delivery (played-back forces alone drift).
+4. **Errors:** which link each error enters, which rating sets its size, and how it carries. The owner's named breakdowns are the tests: a late foot, hips open early, casting, pulling off, lunging; flying open, a collapsed front leg, an early or late release, a finger slip.
+5. **Ratings:** bat speed, swing time, fastball speed and command become results of the body; which body ratings replace them as inputs (§7), and how rosters are drawn so that MLB's spreads come out.
+6. **Replay and speed:** a fixed-step integrator, its step and order; the cost per game against §13.4's 200 ms, and what to do if it does not fit.
+7. **What the client draws,** and what the timeline carries for it.
+
+**Not blocked by this, on its own track (decisions, not motion):** pitch sequencing and tunnelling, pitching to a batter's weakness, hunting a pitch, the two-strike approach.
+
 
 **Deferred past M8:** seam-shifted wake, human-umpire mode and framing, swing styles, evolving mechanics, scouting inferred from behavior, injuries, online human-vs-human play (authoritative host streaming timelines). Wind and weather are priority A11 in [TASKS.md](TASKS.md).
 
