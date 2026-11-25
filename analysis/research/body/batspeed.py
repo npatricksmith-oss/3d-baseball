@@ -379,6 +379,25 @@ def held_bat(col):
               " (rigid wrists) is nearer that case than a real grip is" % (100 - 100 * GRIP_K[1] * dgrip * CONTACT_TIME[1] ** 2 / 6.0 / J, 100 * w_pin / w_free))
 
 
+def hands_through_filter(col):
+    """how much the 12 Hz filter could change the hands' speed near contact (owner's question, session 7 fix): the
+    impact kicks a free bat's handle back by dgrip; held, that loss reaches the hands and is shared with the forearms
+    over the next milliseconds. A loss of the hands' speed at contact shows through the zero-lag filter as a fraction
+    of it before contact; the fractions are the filter's step response, run here."""
+    J, dgrip = col["impulse"][0]
+    m = B.Model(H, M, contacts=False)
+    share = m.sys.m[m.b["bat"]] + m.sys.m[m.b["farm_L"]] + m.sys.m[m.b["farm_R"]]
+    print("     the hands' speed through the filter: a step loss of the hands' speed at contact, between nothing and the free handle's %.1f m/s kick [E];"
+          " the ball's %.1f N s shared by the bat, both hands and both forearms (%.1f kg) is %.1f m/s" % (dgrip, J, share, J / share))
+    ts = [-0.4 + i / FS for i in range(800)]
+    step = [0.0 if t < 0 else -1.0 for t in ts]
+    for label, order, corr in FILTERS:
+        y = lowpass(step, order, FC, corr)
+        at = lambda tt: -y[min(range(len(ts)), key=lambda i: abs(ts[i] - tt))]
+        print("       %-40s shows %.2f of the step at contact, %.2f at -10 ms, %.2f at -20, %.2f at -50: so %.1f-%.1f m/s at contact, %.1f-%.1f at -10 ms"
+              % (label, at(0.0), at(-0.010), at(-0.020), max(0.0, at(-0.050)), at(0.0) * J / share, at(0.0) * dgrip, at(-0.010) * J / share, at(-0.010) * dgrip))
+
+
 LAG_RATE_3 = (1588.0, 162.0)        # deg/s, [3] Table 2: the bat lag's largest closing rate, at -20 ms
 ATTACK_OBM = (4.1, 5.9)            # deg, note 6: OpenBiomechanics' attack angle at contact, mean and SD over 677 swings
 
@@ -584,6 +603,7 @@ def main():
     print("     as the azimuth rate [4] reports, with the bat %.1f deg below level at contact ([4]), a turning-rate loss L is L / cos(elevation): %s deg/s"
           % (-ELEV_AT_CONTACT, ", ".join("%.0f" % (r[3] / math.cos(ELEV_AT_CONTACT * D2R)) for r in col["rows"])))
     held_bat(col)
+    hands_through_filter(col)
     print("     every ball not met squarely needs more bat speed for the same exit velocity, so this is a floor for [4]'s batters' mean bat speed")
 
     print("\n== 7. where on the bat: the bat's end against the sweet spot, in the placed motion")
