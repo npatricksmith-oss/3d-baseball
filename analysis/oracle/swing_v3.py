@@ -312,7 +312,7 @@ def template_A_ref(H=1.85):
 
 
 # ---------------------------------------------------------------- the template's own phase (§6.7)
-T_MEAN = 0.170             # s, the grade-50 batter's swing time, launch to contact (§4.3, §6.7.3) [owner's choice pending]
+T_MEAN = 0.170             # s, the grade-50 batter's swing time from rest to contact (§4.3, §6.7.3) [E: [4]'s]
 V_TEMPLATE = 32.0          # m/s, the grade-50 BatSpeed (agent-models §10)
 LAM_W_MAX = 1.10           # [E] the hands' travel factor at most (§6.7.3, D28 refit): the lead arm straight at −93 ms
 I_HAT = -RATE4_RATIO.integral(0.0, -170.0) / 170.0     # [4]'s azimuth sweep from −170 ms over (contact rate × 170 ms)
@@ -1015,8 +1015,10 @@ def diagnostics(sw, dt=0.0005):
         arm_rate_peak=arm[iar], arm_rate_tau=taus[iar + 1], rate_dip_after_93=rate_dip, rate_93_over_c=Ad[i93] / (sw.A_c[1] / DEG),
         rate_worst_dip=worst_dip(Ad, floor=0.0), ss_worst_dip=worst_dip(ss_all), T=sw.T, A_L=sw.A_L / DEG, E_L=sw.E_L / DEG,
         hands_worst_dip=worst_dip(hand_v), knob_worst_dip=worst_dip(knob_v),
+        hands_peak=max(hand_v), hands_peak_tau=taus[max(range(len(hand_v)), key=lambda i: hand_v[i])],
         lead_arm_over_L=arms['L'][0], rear_arm_over_L=arms['L'][1], lead_arm_over_93=arms['93'][0], rear_arm_over_93=arms['93'][1],
         lead_arm_over_c=arms['c'][0], rear_arm_over_c=arms['c'][1],
+        lead_arm_vs_4_c=arms['c'][0] + (SEG['upper_arm'] + SEG['forearm']) * sw.H - lead_reach(sw.H, LEAD_ELBOW_4_C),
         start_slack=start_slack(sw),
         tip_toward_plate_peak=tipv[ix][0], tip_toward_plate_tau=taus[ix],
         tip_down_peak=-tipv[iz][2], tip_down_tau=taus[iz],
@@ -1039,7 +1041,8 @@ SPEED_DIP_TOL = 0.02   # [E] the sweet spot's and the hands' speed: 2% (a flat t
 KNOB_DIP_TOL = SPEED_DIP_TOL   # the knob's, the same 2% (at the build values no valley; at today's contact depth, reported,
                                # the hands and knob dip 2–3% on eight swings of the rating range)
 SURGE_FLOOR = 0.25     # [E] valleys counted once the speed passes a quarter of its contact value
-ARM_SLACK = 0.02       # m [E] each arm at most 2 cm past straight at the knots (the template's own residual at L is 1.1 cm, §6.1)
+LEAD_ELBOW_4_C = 56.0  # deg, [4]'s lead elbow at contact (Table 1, middle pitch): the reported check of the lead arm (§11)
+ARM_SLACK = 0.02       # m [E] each arm at most 2 cm past straight at the knots (the template's own residual at L is 0.9 cm, §6.1)
 T_LATENCY = 0.050      # s, agent-models §3.4: the decision to the swing's start (the bat at 10% of its peak speed)
 T_BAT10 = 0.150 / 0.170   # the share of the from-rest time at which the bat passes 10% of its peak angular speed (§4.3)
 
@@ -1184,6 +1187,7 @@ def bounds(sw, d=None):
     chk('plane tilt over the last 40 ms - beta (deg)', d['plane_tilt_40ms'] - d['beta'], -1.5, 1.5)
     chk('head travel in the last 65 ms (ft)', d['head_travel_65ms_ft'], 7.3 - 0.7, 7.3 + 0.7)
     chk('knob (hands) speed at contact (m/s)', d['knob_speed_c'], 6.0, 9.0)
+    chk("lead shoulder to hands at contact, over [4]'s arm at its 56 deg elbow (m)", d['lead_arm_vs_4_c'], -9.0, ARM_SLACK)
     sl3, sl2 = attack_slope(sw), attack_slope(sw, v2_path=True)
     chk('attack-angle slope on attack direction within the swing (±10 ms), v3 - v2', sl3 - sl2, -ATTACK_SLOPE_TOL, ATTACK_SLOPE_TOL)
     return out
@@ -1365,6 +1369,28 @@ def stance_report():
     return out
 
 
+# [4] Table 2, mean times of the peaks by location (ms before contact): the lead shoulder's azimuth rate
+# (the lead arm's turning) and the bat's azimuth rate.
+LEAD_ARM_PEAK_4 = {'HIGH IN': -41, 'HIGH OUT': -43, 'LOW IN': -48, 'LOW OUT': -49, 'MIDDLE': -44}
+BAT_RATE_PEAK_4 = {'HIGH IN': -11, 'HIGH OUT': -14, 'LOW IN': -8, 'LOW OUT': -10, 'MIDDLE': -10}
+
+
+def location_report():
+    """§6.7.4 (the review's P3-1): at [4]'s five locations, the hands' speed peak and its time against
+    [4]'s lead-arm turning peak, the lag maximum (133 ± 8° at −80 ± 20 ms, [4]'s middle) and the arm
+    vector's peak, and the bat's azimuth-rate peak time against [4] Table 2. Reported, not tested."""
+    out = {}
+    for loc, aim in LOCATION_AIMS.items():
+        sw = Swing(aim)
+        d = diagnostics(sw, dt=0.001)
+        best = max((sw.state_rh(-i * 1e-4)[1], -i * 1e-4) for i in range(0, 600))
+        out[loc] = dict(hands_peak_mps=d['hands_peak'], hands_peak_ms=d['hands_peak_tau'] * 1e3, hands_contact_mps=d['hands_speed_c'],
+                        lead_arm_peak_4_ms=LEAD_ARM_PEAK_4[loc], lag_max_deg=d['lag_max'], lag_max_ms=d['lag_max_tau'] * 1e3,
+                        arm_rate_peak_dps=d['arm_rate_peak'], arm_rate_peak_ms=d['arm_rate_tau'] * 1e3,
+                        bat_rate_peak_ms=best[1] * 1e3, bat_rate_peak_4_ms=BAT_RATE_PEAK_4[loc], T=sw.T)
+    return out
+
+
 def late_by_depth(y0):
     """§6.7.6 at contact depth y0: the late-contact figures against today's v2 and v2's own path."""
     with contact_depth(y0):
@@ -1523,6 +1549,7 @@ def golden(skip=()):
                   diagnostics={n: diagnostics(Swing(a)) for n, a in GOLDEN_AIMS.items()},
                   family=family_report(),
                   stance_and_depth=stance_report(),
+                  locations=location_report(),
                   late_contact_by_depth={'%.2f' % y0: late_by_depth(y0) for y0 in (CONTACT_Y0, CONTACT_Y0_TODAY)})
     rating, rating_today_depth = None, None
     if 'rating_range' not in skip:
