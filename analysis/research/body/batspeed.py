@@ -12,13 +12,18 @@ bat's turning, and puts a number on each candidate for the difference:
    velocities are made consistent with the joints; over 5 and 10 ms; with the hands' path not smoothed.
 3. [4]'s marker positions were passed through a 12 Hz Butterworth filter over the whole swing ([4] 3.4), so
    through the bat's impact with the ball. A low-pass filter run through a sudden loss of speed pulls the
-   curve down BEFORE the loss. The true curve is modelled as smooth before contact, a step at contact, smooth
-   after; the filter is applied; the pieces are fitted to [4]'s curve (linear least squares, the filter is
-   linear). The filter's order and whether its cut-off was corrected for two passes are not stated in [4]: [E],
-   four variants are run.
-4. The placed motion on the curves with that smoothing undone (the bat's azimuth, elevation and lag).
+   curve down BEFORE the loss. 3a: session 7's reading (free polynomial pieces inside +-70 ms, which jump at
+   the window's edges; the jump is printed). 3b (session 7 fix, review P1-2): the true rate as a rise of a
+   stated SHAPE [E] (straight, accelerating u^k, joined in slope too, levelling off) joined to [4]'s curve at
+   -70 and +70 ms, a step at contact free or capped at a free bat's loss, fitted through the filter (linear
+   least squares for each shape). 3c: the elevation and lag undone as session 7 did. The filter's order and
+   whether its cut-off was corrected for two passes are not stated in [4]: [E], four variants are run.
+4. The placed motion on each shape that fits, with the azimuth undone alone, with the lag, and with the
+   elevation and lag as session 7 undid them: the sweet spot's speed and the attack angle at contact.
 5. The mean curve's peak against the mean of single swings' peaks ([4] Table 3).
 6. What [4]'s own ball exit velocities need of the bat (its Eq. 14 and the oracle's collision).
+   Also: whether a held bat loses less at the impact (the grip as a spring [E], a rigidly held handle) and how
+   much the filter could change the hands' speed near contact.
 7. Where on the bat each source measures: the bat's end against the sweet spot.
 8. The body's dimensions: the shoulders' width.
 """
