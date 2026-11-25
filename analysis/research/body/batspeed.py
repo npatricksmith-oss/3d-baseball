@@ -74,8 +74,10 @@ def _run(x, sos):
 
 def lowpass(x, order=2, fc=FC, corrected=True, fs=FS):
     """`order` forward and the same backward. corrected: the cut-off raised so the two passes together are 3 dB
-    down at fc (Winter's correction); not corrected, the two passes together are 6 dB down at fc."""
-    f = fc / (2.0 ** (1.0 / order) - 1.0) ** (1.0 / (2 * order)) if corrected else fc
+    down at fc (Winter's correction for two passes, (2^(1/2) - 1)^(1/(2 order)); session 7 had 2^(1/order) in
+    place of 2^(1/2), the same for order 2 and 14.8 Hz in place of 13.4 for order 4: review P3-1); not corrected,
+    the two passes together are 6 dB down at fc."""
+    f = fc / (2.0 ** 0.5 - 1.0) ** (1.0 / (2 * order)) if corrected else fc
     sos = _biquads(order, f, fs)
     pad = int(fs * 0.5)
     y = [x[0]] * pad + list(x) + [x[-1]] * pad
@@ -162,7 +164,231 @@ def unsmooth(name, order, corrected, kind, deg=2, win=WIN):
             return coef[0] + sum(c * (t / win) ** (d + 1) for d, c in enumerate(post))
         return sum(c * (t / win) ** d for d, c in enumerate(post))
     slope0 = sum(d * c / win for d, c in enumerate(pre) if d == 1)
-    return true, before, rms, before(0.0), slope0
+    # the pieces are free inside the window and [4]'s curve outside, so the "true" curve may jump at +-win (review
+    # P1-2): reported beside every figure from this function
+    jump = (before(-win) - raw(name, -win), true(win) - raw(name, win))
+    return true, before, rms, before(0.0), slope0, jump
+
+
+# ---- the smoothing undone with pieces joined to [4]'s curve at the window's edges (session 7 fix, review P1-2) ----
+# The true azimuth rate is [4]'s curve outside +-WIN. Inside: before contact a rise of a stated SHAPE [E] from [4]'s
+# value at -WIN to r0 just before contact; a step s at contact; after contact a piece from r0 - s back to [4]'s value
+# at +WIN (straight, plus one bump term). Every shape joins [4]'s curve in value at both edges; "accelerating, joined
+# in slope" also in slope at -WIN. Given the shape, the model is linear in (r0, s, bump), so each is a linear least
+# squares through the (linear) filter. Shapes: (label, kind, parameter); a parameter of None is scanned and the best
+# misfit kept.
+SHAPES = (("straight rise", "line", 0.0),
+          ("accelerating, u^2", "pow", 2.0),
+          ("accelerating, u^3", "pow", 3.0),
+          ("accelerating, u^k, k fitted", "pow", None),
+          ("accelerating, u^k, joined in slope too, k fitted", "powc1", None),
+          ("rise, then flat for the last 10 ms", "plateau", 0.010),
+          ("rise, then flat for the last 20 ms", "plateau", 0.020),
+          ("rise, then flat for the last 30 ms", "plateau", 0.030))
+K_SCAN = [1.0 + 0.1 * i for i in range(51)]     # k from 1 to 6
+FIT_RMS_OK = 50.0            # deg/s [E]: a shape "fits" [4]'s curve if its misfit RMS over +-100 ms is under this,
+                             # a fifth of the fit's band on this curve (250, fit3d.BAND); stated before the run
+
+
+def _grid():
+    t0, t1 = -0.40, 0.19
+    n = int(round((t1 - t0) * FS)) + 1
+    ts = [t0 + i / FS for i in range(n)]
+    return ts, [raw("bat_az_vel", t) for t in ts]
+
+
+def shape_rate(kind, par, a, a_slope, r0, t, win=WIN):
+    """the rise before contact (t < 0; continued past contact for t >= 0, the way the bat would have gone on
+    without the ball) from [4]'s value a at -win to r0 at contact."""
+    u = (t + win) / win
+    if kind == "line":
+        return a + (r0 - a) * u
+    if kind == "pow":
+        return a + (r0 - a) * u ** par
+    if kind == "powc1":
+        return a + a_slope * win * (u - u ** par) + (r0 - a) * u ** par
+    if kind == "plateau":
+        return a + (r0 - a) * min(1.0, u * win / (win - par))
+    raise ValueError(kind)
+
+
+def _fit_shape(ts, meas, kind, par, order, corrected, cap, win=WIN, cache=None):
+    """one shape, one filter: returns a dict of the fitted numbers and the filtered result."""
+    a, b = raw("bat_az_vel", -win), raw("bat_az_vel", win)
+    a_slope = (raw("bat_az_vel", -win + 0.005) - raw("bat_az_vel", -win - 0.005)) / 0.010
+    n = len(ts)
+    base, c_r0, c_s, c_p = list(meas), [0.0] * n, [0.0] * n, [0.0] * n
+    for i, t in enumerate(ts):
+        if -win <= t < 0.0:
+            g = shape_rate(kind, par, 0.0, 0.0, 1.0, t, win)        # the coefficient of r0
+            base[i] = shape_rate(kind, par, a, a_slope, 0.0, t, win)
+            c_r0[i] = g
+        elif 0.0 <= t <= win:
+            u2 = t / win
+            base[i] = b * u2
+            c_r0[i], c_s[i], c_p[i] = 1.0 - u2, -(1.0 - u2), u2 * (1.0 - u2)
+    key = (kind, par, order, corrected)
+    if cache is not None and key in cache:
+        fb, fr, fs, fp = cache[key]
+    else:
+        fb, fr, fs, fp = (lowpass(x, order, FC, corrected) for x in (base, c_r0, c_s, c_p))
+        if cache is not None:
+            cache[key] = (fb, fr, fs, fp)
+    sel = [i for i, t in enumerate(ts) if abs(t) <= win + 0.03]
+    y = [meas[i] - fb[i] for i in sel]
+    coef = _lstsq([[fr[i] for i in sel], [fs[i] for i in sel], [fp[i] for i in sel]], y)
+    capped = False
+    if cap is not None and coef[1] > cap:
+        capped = True
+        y2 = [yy - cap * fs[i] for yy, i in zip(y, sel)]
+        c2 = _lstsq([[fr[i] for i in sel], [fp[i] for i in sel]], y2)
+        coef = [c2[0], cap, c2[1]]
+    r0, s, p = coef
+    filt = [fb[i] + r0 * fr[i] + s * fs[i] + p * fp[i] for i in range(n)]
+    rms = math.sqrt(sum((filt[i] - meas[i]) ** 2 for i in sel) / len(sel))
+    slope_in = {"line": (r0 - a) / win, "pow": (r0 - a) / win if par == 1.0 else 0.0, "powc1": a_slope,
+                "plateau": (r0 - a) / (win - par) if kind == "plateau" else 0.0}[kind]
+    return {"kind": kind, "par": par, "r0": r0, "step": s, "bump": p, "rms": rms, "capped": capped, "filtered": filt,
+            "a": a, "a_slope": a_slope, "slope_jump": slope_in - a_slope,
+            "rate": lambda t, r0=r0, kind=kind, par=par: shape_rate(kind, par, a, a_slope, r0, t, win)}
+
+
+def shape_of(ts, x):
+    """a curve's shape as [4]'s is read: the peak and its time within +-50 ms, the fraction lost by contact, the
+    values at +15 and +35 ms."""
+    w = [(v, t) for t, v in zip(ts, x) if -0.05 < t < 0.05]
+    pk, tp = max(w)
+    at = lambda tt: x[min(range(len(ts)), key=lambda i: abs(ts[i] - tt))]
+    return {"peak": pk, "peak_ms": tp * 1e3, "lost": 1.0 - at(0.0) / pk, "p15": at(0.015), "p35": at(0.035)}
+
+
+def fit_shapes(cap_value, log=print):
+    """every shape, every filter variant, the step free and capped at cap_value: list of result dicts."""
+    ts, meas = _grid()
+    out = []
+    cache = {}
+    for label, order, corr in FILTERS:
+        for name, kind, par in SHAPES:
+            for cap in (None, cap_value):
+                if par is None:
+                    best = min((_fit_shape(ts, meas, kind, k, order, corr, cap, cache=cache) for k in K_SCAN), key=lambda d: d["rms"])
+                else:
+                    best = _fit_shape(ts, meas, kind, par, order, corr, cap, cache=cache)
+                best.update(filter=label, shape=name, cap=cap, shp=shape_of(ts, best["filtered"]))
+                out.append(best)
+    return ts, meas, out
+
+
+def az_override(res, win=WIN, h=0.001):
+    """[4]'s azimuth ANGLE curve with the rate correction of a fitted shape added: theta4(t) + the integral from -win
+    of (the shape's rate - [4]'s rate curve), the shape continued past contact. Outside the window, theta4 (with the
+    whole window's correction held after it)."""
+    n = int(round(2 * win / h))
+    acc, cum = 0.0, [0.0]
+    for i in range(n):
+        tm = -win + (i + 0.5) * h
+        acc += (res["rate"](tm) - raw("bat_az_vel", tm)) * h
+        cum.append(acc)
+
+    def f(t):
+        if t <= -win:
+            return raw("bat_az", t)
+        x = min(n * 1.0, (t + win) / h)
+        i = min(n - 1, int(x))
+        return raw("bat_az", t) + cum[i] + (x - i) * (cum[i + 1] - cum[i])
+    return f
+
+
+ELEV_AT_CONTACT = -29.7     # deg, [4]'s bat elevation at contact as digitised
+
+
+def collision():
+    """[4]'s mean exit velocity (its Eq. 14) and what a free bat (the oracle's rigid bat, physics-spec 8) must do to
+    give it: per normal restitution, (e_n, the sweet spot's speed needed, the speed and turning rate the impact takes
+    off it). Also the ball's impulse and the free bat's handle velocity change, for held_bat()."""
+    bev = EQ14[0] + EQ14[1] * PEAK_MEAN_OF_SWINGS + EQ14[2] * PITCH_RELEASE
+    rho_air = P.air_density()
+    ball = P.integrate(P.State((0.0, PITCH_DIST, 1.5), (0.0, -PITCH_RELEASE, 1.0), (0.0, 0.0, 0.0)), rho_air, stop={"kind": "plane_y", "y": 0.0})
+    v_plate = P.norm(ball["v"])
+    bat = P.bat_mass_properties()
+    rows, extra = [], []
+    for e_n in (0.50, 0.55):
+        def exit_speed(vb):
+            # a level bat along +X swung toward +Y at the sweet spot, turning about a point 0.10 m beyond the knob; the ball met squarely
+            a = (1.0, 0.0, 0.0)
+            w = vb / (bat["L"] - 0.15 + 0.10)
+            om = (0.0, 0.0, w)
+            knob = (0.0, 0.0, 0.0)
+            v_cm = (0.0, w * (bat["u_cm"] + 0.10), 0.0)
+            br = (bat["L"] - 0.15, P.bat_radius(bat["L"] - 0.15) + P.RADIUS, 0.0)
+            res = P.bat_ball_contact(br, (0.0, -v_plate, 0.0), (0.0, 0.0, 0.0), knob, a, v_cm, om, (0.0, 1.0, 0.0), e_n, 0.5)
+            at = lambda V, W, u: P.add(V, P.cross(W, P.scale(a, u - bat["u_cm"])))
+            dv = P.norm(P.sub(at(res["V"], res["W"], bat["L"] - 0.15), at(v_cm, om, bat["L"] - 0.15)))
+            dgrip = P.norm(P.sub(at(res["V"], res["W"], GRIP_MID), at(v_cm, om, GRIP_MID)))
+            return P.norm(res["v"]), dv, (res["W"][2] - w) / D2R, P.MASS * (res["v"][1] + v_plate), dgrip
+        lo, hi = 10.0, 45.0
+        for _ in range(50):
+            mid = 0.5 * (lo + hi)
+            lo, hi = (mid, hi) if exit_speed(mid)[0] < bev else (lo, mid)
+        need = 0.5 * (lo + hi)
+        r = exit_speed(need)
+        rows.append((e_n, need, r[1], -r[2]))
+        extra.append((r[3], r[4]))
+    return {"bev": bev, "v_plate": v_plate, "rows": rows, "impulse": extra, "bat": bat}
+
+
+GRIP_MID = 0.5 * (B.GRIP_L + B.GRIP_R)     # m from the knob: between the hands
+CONTACT_TIME = (0.0006, 0.0010)     # s: the bat-ball contact's duration [E: about 0.7 ms in the literature physics-spec 6.3 rests on]
+GRIP_K = (1.0e4, 1.0e6)     # N/m: the hands' grip on the handle as a spring in the impact's direction [E: a range spanning a soft
+                             # palm to nearly rigid; no measurement was read for this job]
+
+
+def held_bat(col):
+    """does a held bat lose less at the impact than a free one? (body-motion 4.8; review P1-2.) Three readings:
+    the physics-spec's own (the free-bat approximation, physics-spec 6.3 [S]); a grip spring [E] loaded by the
+    handle's motion during the contact; and the body as it is built, where the hands are lumped rigidly into the
+    bat (body.Model: the bat body carries both hands' mass), which is the case in which a held bat would lose less."""
+    bat = col["bat"]
+    J, dgrip = col["impulse"][0]
+    print("     does a held bat lose less? The ball's impulse is %.1f N s; on a free bat the handle between the hands changes speed by %.1f m/s in the impact"
+          % (J, dgrip))
+    for tau in CONTACT_TIME:
+        for k in GRIP_K:
+            # the handle's displacement grows about as dv t^2 / (2 tau) over the contact; a spring's impulse over it is k dv tau^2 / 6
+            extra = k * dgrip * tau * tau / 6.0
+            print("       contact %.1f ms, grip %.0e N/m: the grip's extra impulse in the contact %.3f N s, %.1f %% of the ball's" % (tau * 1e3, k, extra, 100 * extra / J))
+    # the body as built: the hands' mass rigidly on the bat, the impact's effective mass at the sweet spot with and without it
+    m = B.Model(H, M, contacts=False)
+    mb, ib = m.sys.m[m.b["bat"]], m.sys.I[m.b["bat"]][0]
+    if True:
+        d0, d1 = C.BAT_SS - C.BAT_UCM, C.BAT_SS - m.bat_ucm
+        me_free = 1.0 / (1.0 / C.BAT_M + d0 * d0 / C.BAT_ICM)
+        me_body = 1.0 / (1.0 / mb + d1 * d1 / ib)
+        print("       the body as built lumps both hands (%.2f kg) rigidly into the bat: the impact's effective mass at the sweet spot is %.3f kg against the bare bat's %.3f,"
+              " so a rigid grip would take %.0f %% less speed off the bat; the arms behind rigid wrists would add more"
+              % (mb - C.BAT_M, me_body, me_free, 100 * (1 - me_free / me_body)))
+        ip = C.BAT_ICM + C.BAT_M * (C.BAT_UCM - GRIP_MID) ** 2
+        me_pin = ip / (C.BAT_SS - GRIP_MID) ** 2
+        # the same impulse J (the ball's change of momentum hardly depends on this) on a bat turning about the held handle
+        w_free = J * (C.BAT_SS - C.BAT_UCM) / C.BAT_ICM / D2R
+        w_pin = J * (C.BAT_SS - GRIP_MID) / ip / D2R
+        print("       the stiffest grip there could be, the handle held still between the hands: effective mass %.3f kg, %.0f %% less speed off the sweet spot than free;"
+              " the turning rate's step %.0f deg/s against the free bat's %.0f (%.0f %%): a free bat's sweet-spot loss is part turning, part the whole bat recoiling"
+              % (me_pin, 100 * (1 - me_free / me_pin), w_pin, w_free, 100 * w_pin / w_free))
+        print("       so in the contact itself a held bat's step is %.0f-100 %% of a free bat's over the grip's range [E]; a rigidly held handle would give %.0f %%, and the body as built"
+              " (rigid wrists) is nearer that case than a real grip is" % (100 - 100 * GRIP_K[1] * dgrip * CONTACT_TIME[1] ** 2 / 6.0 / J, 100 * w_pin / w_free))
+
+
+LAG_RATE_3 = (1588.0, 162.0)        # deg/s, [3] Table 2: the bat lag's largest closing rate, at -20 ms
+ATTACK_OBM = (4.1, 5.9)            # deg, note 6: OpenBiomechanics' attack angle at contact, mean and SD over 677 swings
+
+
+def show_attack(title, res):
+    print("   " + title)
+    for t in (-20, -10, 0):
+        c = res[t][1]
+        print("     %4d ms: sweet spot %4.1f m/s = hands %4.1f + azimuth %4.1f + elevation %4.1f; its velocity %+5.1f m/s vertical, attack angle %+5.1f deg; bat elevation %5.1f deg"
+              % (t, c["speed"], c["hands"], c["az"], c["el"], c["vz"], c["attack"], c["elev"]))
 
 
 # ---- the bat's speed split ----
@@ -185,7 +411,7 @@ def split(m, st, u=U_SS, hand=U_LEAD):
     vs = E.add(vh, E.scale(dbz, rho))
     sp = E.norm(vs)
     uh = E.scale(vs, 1.0 / sp)
-    return {"speed": sp, "hands": E.dot(vh, uh), "az": rho * az_rate * ce * E.dot(e_az, uh), "el": rho * el_rate * E.dot(e_el, uh),
+    return {"speed": sp, "attack": math.asin(max(-1.0, min(1.0, uh[2]))) / D2R, "vz": vs[2], "hands": E.dot(vh, uh), "az": rho * az_rate * ce * E.dot(e_az, uh), "el": rho * el_rate * E.dot(e_el, uh),
             "hand_speed": E.norm(vh), "az_rate": az_rate / D2R, "el_rate": el_rate / D2R, "roll": E.dot(w, bz) / D2R,
             "turn": math.sqrt((az_rate * ce) ** 2 + el_rate ** 2) / D2R, "elev": math.asin(bz[2]) / D2R}
 
@@ -261,74 +487,103 @@ def main():
     print("     measured from the mid-point between the hands instead of the lead grip: hands %.1f m/s (%.1f along), turning %.1f"
           % (base[0][3]["hand_speed"], base[0][3]["hands"], base[0][3]["az"] + base[0][3]["el"]))
 
-    print("\n== 3. the 12 Hz filter run through the impact ([4] 3.4). The true curve: smooth, a break at contact, smooth; filtered; fitted to [4]'s curve over +-%.0f ms" % (WIN * 1e3))
-    print("     the bat's azimuth RATE curve ([4]: %.0f deg/s at contact, peak %.0f):" % (B.curve("bat_az_vel", 0.0), max(B.curve("bat_az_vel", -0.03 + 0.001 * k) for k in range(40))))
-    print("     %-40s | misfit RMS deg/s: no break, a step | true rate just before contact | the step | true rate at -10, -20, -40 ms" % "the filter [E]")
-    rate_pre = []
+    col = collision()
+    cap_turn = max(r[3] for r in col["rows"])
+    cap_az = cap_turn / math.cos(ELEV_AT_CONTACT * D2R)
+    print("\n== 3. the 12 Hz filter run through the impact ([4] 3.4): the true curve rises before contact, steps at contact, recovers after; filtered; fitted to [4]'s curve over +-%.0f ms" % ((WIN + 0.03) * 1e3))
+    print("   3a. session 7's reading: polynomial pieces free inside +-%.0f ms, [4]'s curve outside (so the true curve may JUMP at the window's edges: review P1-2), Winter's correction fixed (P3-1)" % (WIN * 1e3))
+    print("     %-40s | misfit RMS deg/s: no break, a step | true rate just before contact | the step | jump at -70 ms, +70 ms" % "the filter [E]")
     for label, order, corr in FILTERS:
         for deg in (1, 2):
-            _, _, rms0, _, _ = unsmooth("bat_az_vel", order, corr, "none", deg)
-            true, before, rms, v0, _ = unsmooth("bat_az_vel", order, corr, "rate", deg)
-            print("     %-40s | %5.0f %5.0f | %5.0f | %6.0f | %5.0f %5.0f %5.0f   (pieces of degree %d)"
-                  % (label, rms0, rms, v0, true(1e-6) - v0, before(-0.010), before(-0.020), before(-0.040), deg))
-            rate_pre.append(v0)
-    print("     so the bat's true azimuth rate just before contact is %.0f-%.0f deg/s where the filtered curve reads %.0f"
-          % (min(rate_pre), max(rate_pre), B.curve("bat_az_vel", 0.0)))
-    print("     the same from the bat's azimuth ANGLE curve (continuous, its slope breaks), and the elevation and the lag:")
-    print("     %-40s | azimuth: slope just before contact (filtered curve's slope), angle at contact (filtered) | elevation: slope, angle | lag: slope, angle | misfit RMS deg" % "the filter [E]")
+            rms0 = unsmooth("bat_az_vel", order, corr, "none", deg)[2]
+            true, before, rms, v0, _, jump = unsmooth("bat_az_vel", order, corr, "rate", deg)
+            print("     %-40s | %5.0f %5.0f | %5.0f | %6.0f | %+6.0f %+6.0f   (pieces of degree %d)" % (label, rms0, rms, v0, true(1e-6) - v0, jump[0], jump[1], deg))
+    print("   3b. shapes joined to [4]'s curve at -70 and +70 ms in value (and in slope at -70 where said). [4]'s curve: peak %.0f deg/s at %.0f ms, %.1f %% lost by contact, %.0f at +15 ms, %.0f at +35"
+          % (lambda d: (d["peak"], d["peak_ms"], 100 * d["lost"], d["p15"], d["p35"]))(shape_of(*_grid())))
+    print("     the step's ceiling, a free bat's loss (6 below): %.0f deg/s of turning rate, %.0f deg/s of [4]'s azimuth rate with the bat %.0f deg below level; a held bat loses about the same (6)"
+          % (cap_turn, cap_az, -ELEV_AT_CONTACT))
+    print("     a shape FITS if its misfit is under %.0f deg/s [E] and its step is at most a free bat's (%.0f): larger steps are ruled out by the collision" % (FIT_RMS_OK, cap_az))
+    ts, meas, res = fit_shapes(cap_az)
+    print("     %-38s %-48s | step   | just before contact | step (of a free bat's) | misfit | slope jump at -70 | filtered: peak, when, lost by contact, +15, +35 | fits"
+          % ("the filter [E]", "the shape [E]"))
+    survivors = []
+    for r in res:
+        if r["cap"] is not None and not r["capped"]:
+            continue                                  # the cap did not bind: the same as the free row
+        sh = r["shp"]
+        ok = r["rms"] <= FIT_RMS_OK and r["step"] <= cap_az + 1e-6
+        r["fits"] = ok
+        par = "" if r["par"] in (None, 0.0) or r["kind"] == "plateau" else " (k %.1f)" % r["par"]
+        print("     %-38s %-48s | %-6s | %5.0f deg/s | %5.0f (%.2f) | %4.0f | %+6.0f deg/s^2 | %5.0f %4.0f ms %4.1f %% %5.0f %5.0f | %s"
+              % (r["filter"], r["shape"] + par, "capped" if r["capped"] else "free", r["r0"], r["step"], r["step"] / cap_az, r["rms"], r["slope_jump"],
+                 sh["peak"], sh["peak_ms"], 100 * sh["lost"], sh["p15"], sh["p35"], "FITS" if ok else "no" + (" (step over a free bat's)" if r["step"] > cap_az else "")))
+        if ok:
+            survivors.append(r)
+    r0s = [r["r0"] for r in survivors]
+    print("     the shapes that fit: the bat's true azimuth rate just before contact %.0f-%.0f deg/s, where the filtered curve reads %.0f (session 7's straight pieces: 2,649-2,841)"
+          % (min(r0s), max(r0s), B.curve("bat_az_vel", 0.0)))
+    print("   3c. the elevation and the lag undone as session 7 did (pieces of degree 2, angle continuous at contact, slope free to break), with the jump at the window's edges")
+    print("     %-40s | elevation: slope before contact, angle at contact, jump at -70/+70 | lag: slope, angle, jump | misfit RMS deg" % "the filter [E]")
     for label, order, corr in FILTERS:
-        r = [unsmooth(nm, order, corr, "angle", 2) for nm in ("bat_az", "bat_elev", "bat_lag")]
-        sl = lambda nm: (B.curve(nm, 0.005) - B.curve(nm, -0.005)) / 0.010
-        print("     %-40s | %5.0f (%5.0f) %6.1f (%5.1f) | %5.0f (%5.0f) %6.1f (%5.1f) | %6.0f (%6.0f) %5.1f (%5.1f) | %.2f %.2f %.2f"
-              % (label, r[0][4], sl("bat_az"), r[0][3], B.curve("bat_az", 0.0), r[1][4], sl("bat_elev"), r[1][3], B.curve("bat_elev", 0.0),
-                 r[2][4], sl("bat_lag"), r[2][3], B.curve("bat_lag", 0.0), r[0][2], r[1][2], r[2][2]))
+        e = unsmooth("bat_elev", order, corr, "angle", 2)
+        g = unsmooth("bat_lag", order, corr, "angle", 2)
+        print("     %-40s | %5.0f deg/s %6.1f deg %+5.1f/%+5.1f | %6.0f deg/s %5.1f deg %+5.1f/%+5.1f | %.2f %.2f"
+              % (label, e[4], e[3], e[5][0], e[5][1], g[4], g[3], g[5][0], g[5][1], e[2], g[2]))
+    sl = lambda nm: (B.curve(nm, 0.005) - B.curve(nm, -0.005)) / 0.010
+    print("     [4]'s curves as filtered: elevation %.0f deg/s, %.1f deg at contact; lag %.0f deg/s, %.1f deg. [3]'s lag closes at most at %.0f +- %.0f deg/s, at -20 ms (its arm line from mid-shoulders"
+          " to mid-wrists, not the lead arm; also filtered through the impact)" % (sl("bat_elev"), B.curve("bat_elev", 0.0), sl("bat_lag"), B.curve("bat_lag", 0.0), LAG_RATE_3[0], LAG_RATE_3[1]))
 
-    print("\n== 4. the placed motion on the curves with the smoothing undone (the bat's azimuth, elevation and lag; the piece before contact continued past it, so nothing is differenced across the impact)")
-    undone = []
+    print("\n== 4. the placed motion with the smoothing undone: the sweet spot's speed and the attack angle at contact (its velocity above level; OpenBiomechanics %+.1f +- %.1f deg, mostly college hitters)" % ATTACK_OBM)
+    show_attack("as placed", base)
+    session7 = {}
     for label, order, corr in FILTERS:
+        session7[label] = {}
+        for nm in ("bat_elev", "bat_lag"):
+            true, before, *_ = unsmooth(nm, order, corr, "angle", 2)
+            session7[label][nm] = (lambda t, true=true, before=before: before(t) if 0.0 <= t <= WIN else true(t))
+    undone = {}
+    for r in survivors + [x for x in res if x["kind"] == "line" and x["cap"] is None]:
+        tag = "%s; %s%s%s" % (r["filter"][:24], r["shape"][:30], " k %.1f" % r["par"] if r["kind"] in ("pow", "powc1") else "", ", step capped" if r["capped"] else "")
+        if not r.get("fits"):
+            tag += " (does NOT fit; session 7's family)"
+        azo = az_override(r)
+        off = azo(0.0) - raw("bat_az", 0.0)
+        print("   " + tag + ": the bat %.1f deg further round at contact than [4]'s angle curve (%.1f), so at [4]'s -8 deg %.1f ms earlier"
+              % (off, raw("bat_az", 0.0), off / r["r0"] * 1e3))
+        for what, extra in (("azimuth only", ()), ("azimuth and lag", ("bat_lag",)), ("azimuth, elevation, lag (session 7's)", ("bat_elev", "bat_lag"))):
+            B.CURVE_OVERRIDE.clear()
+            B.CURVE_OVERRIDE["bat_az"] = az_override(r)
+            for nm in extra:
+                B.CURVE_OVERRIDE[nm] = session7[r["filter"]][nm]
+            try:
+                c = placed(0.010)[0][1]
+                print("     %-38s sweet spot %4.1f m/s (%2.0f mph) = hands %4.1f + azimuth %4.1f + elevation %4.1f; attack angle %+5.1f deg; azimuth rate %5.0f deg/s"
+                      % (what, c["speed"], c["speed"] / 0.44704, c["hands"], c["az"], c["el"], c["attack"], c["az_rate"]))
+                undone.setdefault(what, []).append((c["speed"], c["attack"], r.get("fits", False)))
+            except E.SolveError as ex:
+                print("     %-38s the posture did not assemble (%s)" % (what, ex))
         B.CURVE_OVERRIDE.clear()
-        for nm in ("bat_az", "bat_elev", "bat_lag"):
-            true, before, rms, v0, s0 = unsmooth(nm, order, corr, "angle", 2)
-            B.CURVE_OVERRIDE[nm] = (lambda t, true=true, before=before: before(t) if 0.0 <= t <= WIN else true(t))
-        res = placed(0.010)
-        show(label, res, times=(-20, -10, 0))
-        undone.append(res[0][1]["speed"])
-        B.CURVE_OVERRIDE.clear()
-    print("     so with the impact's smoothing undone the placed motion has %.1f-%.1f m/s at contact, against %.1f as placed" % (min(undone), max(undone), c0["speed"]))
+    for what, v in undone.items():
+        f = [x for x in v if x[2]]
+        if f:
+            print("   over the shapes that fit, %s: the sweet spot %.1f-%.1f m/s (%.0f-%.0f mph), the attack angle %+.1f to %+.1f deg"
+                  % (what, min(x[0] for x in f), max(x[0] for x in f), min(x[0] for x in f) / 0.44704, max(x[0] for x in f) / 0.44704, min(x[1] for x in f), max(x[1] for x in f)))
 
     print("\n== 5. the mean curve against single swings ([4] Table 3, MIDDLE): the mean of the swings' own peaks %.0f deg/s, the mean curve's peak %.0f: %.1f %% blunter"
           % (PEAK_MEAN_OF_SWINGS, PEAK_OF_MEAN_CURVE, 100 * (1 - PEAK_OF_MEAN_CURVE / PEAK_MEAN_OF_SWINGS)))
     print("     as bat speed at the sweet spot: %.1f m/s of the turning part" % ((PEAK_MEAN_OF_SWINGS - PEAK_OF_MEAN_CURVE) * D2R * rho_ss * math.cos(30 * D2R)))
 
     print("\n== 6. what [4]'s own batted balls need of the bat")
-    bev = EQ14[0] + EQ14[1] * PEAK_MEAN_OF_SWINGS + EQ14[2] * PITCH_RELEASE
+    col = collision()
     print("     [4] Eq. 14 at the MIDDLE location, the mean pitch (%.1f m/s) and the mean peak bat rate: mean ball exit velocity %.1f m/s (%.0f mph), over every swing with a measurable batted ball"
-          % (PITCH_RELEASE, bev, bev / 0.44704))
-    rho_air = P.air_density()
-    ball = P.integrate(P.State((0.0, PITCH_DIST, 1.5), (0.0, -PITCH_RELEASE, 1.0), (0.0, 0.0, 0.0)), rho_air, stop={"kind": "plane_y", "y": 0.0})
-    v_plate = P.norm(ball["v"])
-    print("     the pitch at the plate, by the oracle's flight from %.0f m: %.1f m/s" % (PITCH_DIST, v_plate))
-    bat = P.bat_mass_properties()
-    for e_n in (0.50, 0.55):
-        def exit_speed(vb):
-            # a level bat along +X swung toward +Y at the sweet spot, turning about a point 0.10 m beyond the knob; the ball met squarely
-            a = (1.0, 0.0, 0.0)
-            w = vb / (bat["L"] - 0.15 + 0.10)
-            om = (0.0, 0.0, w)
-            knob = (0.0, 0.0, 0.0)
-            v_cm = (0.0, w * (bat["u_cm"] + 0.10), 0.0)
-            br = (bat["L"] - 0.15, P.bat_radius(bat["L"] - 0.15) + P.RADIUS, 0.0)
-            res = P.bat_ball_contact(br, (0.0, -v_plate, 0.0), (0.0, 0.0, 0.0), knob, a, v_cm, om, (0.0, 1.0, 0.0), e_n, 0.5)
-            dv = P.norm(P.sub(P.add(res["V"], P.cross(res["W"], P.scale(a, bat["L"] - 0.15 - bat["u_cm"]))),
-                              P.add(v_cm, P.cross(om, P.scale(a, bat["L"] - 0.15 - bat["u_cm"])))))
-            return P.norm(res["v"]), dv, (res["W"][2] - w) / D2R
-        lo, hi = 10.0, 45.0
-        for _ in range(50):
-            mid = 0.5 * (lo + hi)
-            lo, hi = (mid, hi) if exit_speed(mid)[0] < bev else (lo, mid)
-        need = 0.5 * (lo + hi)
+          % (PITCH_RELEASE, col["bev"], col["bev"] / 0.44704))
+    print("     the pitch at the plate, by the oracle's flight from %.0f m: %.1f m/s" % (PITCH_DIST, col["v_plate"]))
+    for e_n, need, dv, dw in col["rows"]:
         print("     normal restitution %.2f: a ball met squarely at the sweet spot leaves at %.1f m/s only if the sweet spot moves at %.1f m/s; that impact takes %.1f m/s off the sweet spot and %.0f deg/s off the turning rate of a bat nothing holds"
-              % (e_n, bev, need, exit_speed(need)[1], -exit_speed(need)[2]))
+              % (e_n, col["bev"], need, dv, dw))
+    print("     as the azimuth rate [4] reports, with the bat %.1f deg below level at contact ([4]), a turning-rate loss L is L / cos(elevation): %s deg/s"
+          % (-ELEV_AT_CONTACT, ", ".join("%.0f" % (r[3] / math.cos(ELEV_AT_CONTACT * D2R)) for r in col["rows"])))
+    held_bat(col)
     print("     every ball not met squarely needs more bat speed for the same exit velocity, so this is a floor for [4]'s batters' mean bat speed")
 
     print("\n== 7. where on the bat: the bat's end against the sweet spot, in the placed motion")

@@ -894,6 +894,14 @@ No rule binds anything. **Twice the measured shoulder and elbow strength adds 0.
 - **It gets there with a swing no hitter makes:** the front leg does not block (the knee 61° bent at contact, the foot never over 70% of body weight), the hips turn at 813°/s, and the lead arm is pressed 16° past the end of its range across the chest, where the model's stop is a soft spring [E: 2,000 N·m/rad] carrying 574 N·m, more than any shoulder muscle's bound. A stiffer stop would take some of that speed away; how much was not run.
 - **So the average batter's 21.3 m/s is not a strength limit:** the same limits allow 30.6. It is what the fitted curves hold (§4.8).
 
+**The strongest batter held to a hitter's swing** (session 7 fix, review P2-4; this paragraph was written and committed before the run). `fit3d.py --strongest --held-swing`: the same search as the run above (every bound available, every timing free, asked only for the sweet spot's speed at contact, the timing held hard: contact at 0, the bat's first motion at −170 ms, no arm drive rising more than 70 ms before it), started from the average batter's fitted plan, 80 iterations, all 205 numbers free. Added, each as a one-sided penalty that is zero inside its limit and weighs 30 per unit past it [E] (`HELD_W`):
+
+- the gate's ground-force curves (both feet, three directions) and its lower-body curves (the pelvis's rate and travel, the lead knee) each within 1 band unit RMS of [4]'s, from −250 ms to contact;
+- no joint pressed past its range more than in the average batter's fitted swing: each end-of-range stop's largest torque up to contact at most the average fit's plus 5 N·m (the lead shoulder's 99, the rear's 228; the knees' and elbows' 0), per 10 N·m past it;
+- the attack angle at contact inside OpenBiomechanics' 10th–90th percentiles, −3.3° to +10.7° ([note 6](research/swing/6-openbiomechanics.md)), per 2° past it. The average fit itself is outside this (−7.8°), so the run starts with that penalty on.
+
+The trunk's and arms' curves, the bat's own curves and the held-out checks are not asked for. What is reported: the bat's speed at contact, every penalty's state at the end (a limit the search did not keep is said as broken, not hidden), what the speed sits on (strengths on their bounds, the pelvis's and trunk's peaks, the lead foot's load and knee), and how fast the speed was still rising over the last 10 iterations.
+
 **What is left:**
 
 - the owner's reading of the gate's bat speed (Q59, with §4.8's finding that [4]'s curves near contact are smoothed through the impact). If the fit's targets inside the last 40 ms change, this fit is redone against them;
