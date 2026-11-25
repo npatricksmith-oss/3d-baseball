@@ -19,11 +19,11 @@ Status: `[ ]` not started · `[~]` partly done · `[?]` needs an owner decision
 
 **State.** **PLAN D31 (Q54 = b): a force-driven body for the swing and the delivery; plan PLAN §14.1.** Swing v3's Rust step, D30 and Q53 are dropped.
 
-**Phase 0 is merged (`262d0f3`):** [docs/body-motion.md](docs/body-motion.md), probes in `analysis/research/body/`, three reviews resolved. Open finding (spec §4.3): held to the design's rules the flat body does not reach the ball; the 3D body must, or phase 1 stops (§13).
+**Phase 0 is merged (`262d0f3`):** [docs/body-motion.md](docs/body-motion.md), probes in `analysis/research/body/`, three reviews resolved. Stop rule: spec §13.
 
 **Owner:** Q55 = a, outliers allowed (D32); Q56 = b (D33); Q57 = go.
 
-**Phase 1 running:** worker `body-3d` (Fable), Workers tab t4c, worktree `swing-research`, `work/body-3d`. Session 1 merged (`385f206`). Session 2 (job WORKER-BODY-3D-2.md there): the fit under the rules. Then: tests, merge. Opus review at gate.
+**Phase 1 running:** worker `body-3d` (Fable), Workers tab t4c, worktree `swing-research`, `work/body-3d`. Sessions 1–2 merged (`57f3cf7`): under the rules the 3D body is 41–52 ms late at 17–18 m/s; the pelvis turns late (spec §4.4). Session 3 (job WORKER-BODY-3D-3.md there): can the legs turn it in time. Then: tests, merge; a shortfall: the owner.
 
 **Next:** §2: the ground-dive leftovers ([note](docs/calibration/2026-11-23-of-ground-dive.md) §9).
 
