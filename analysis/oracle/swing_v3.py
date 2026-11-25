@@ -1346,7 +1346,7 @@ GOLDEN_XZ = {'rhb_middle': (0.0, 0.745), 'rhb_inside_low': (-0.20, 0.56), 'rhb_o
 LOCATION_XZ = {'MIDDLE': (0.0, 0.745), 'HIGH IN': (-0.20, 0.93), 'HIGH OUT': (0.22, 0.93), 'LOW IN': (-0.20, 0.56), 'LOW OUT': (0.22, 0.56)}
 # §5.3: the stance spot read at the stance (D28's), at contact (the hips 0.17 m further back), and today's.
 STANCES = {'today (P_y +0.30)': P_TODAY, 'measured, stance reading (P_y -0.276)': P_STANCE,
-           'measured, contact reading (P_y -0.446)': (P_STANCE[0], P_STANCE[1] - BODY['c'][0], 0.0)}
+           'measured, contact reading (P_y -0.516)': (P_STANCE[0], P_STANCE[1] - BODY['c'][0], 0.0)}
 STANCE_KEYS = ('ss_ratio_max', 'ss_ratio_tau', 'tip_ratio_max', 'tip_ratio_tau', 'hands_worst_dip', 'knob_worst_dip', 'lag_max', 'lag_max_tau',
                'lag_c', 'uncock_peak', 'uncock_tau', 'arm_rate_peak', 'arm_rate_tau', 'hands_ahead_c', 'plane_tilt_40ms', 'beta',
                'lead_arm_over_93', 'lead_arm_over_c', 'rear_arm_over_c', 'T', 'head_travel_65ms_ft')
@@ -1419,6 +1419,8 @@ def golden(skip=()):
     meta = dict(
         spec='docs/swing-model-v3.md (the swing family, §6.7, PLAN D27; fitted at the measured stance, PLAN D28)', H=H, stance_P=list(P),
         contact_y0=CONTACT_Y0, contact_k=CONTACT_K, hands_travel_max=LAM_W_MAX, E4_contact_deg=E4_C / DEG,
+        contact_body=dict(flex_low_deg=FLEX_LOW_DEG, flex_out_deg=FLEX_OUT_DEG, out_from=OUT_FROM, lean_high_deg=LEAN_HIGH_DEG, per_H=BEND_PER_H,
+                          zone_mid_frac=ZONE_MID_FRAC, rule='flexion + flex_low*below + flex_out*outside, lean - lean_high*above; below/above/outside in units of per_H*H'),
         rate_shape_scale='A1s = A1 cos(E_c) / cos(E4_contact): the rate shape on the horizontal contact rate',
         elevation='B(u) = 39 deg + (e(t4) - e(-93 ms)) + dE smoothstep((u - u93)/(uw - u93)), dE = E_c - (39 deg + e(0) - e(-93 ms))',
         u_g=U_G, u_ss=U_SS, u_cm=U_CM, bat_length=BAT_L,

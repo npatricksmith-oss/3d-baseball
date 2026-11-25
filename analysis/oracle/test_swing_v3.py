@@ -424,11 +424,11 @@ class AimRange(unittest.TestCase):
 
 
 class SourceBounds(unittest.TestCase):
-    """§11's bounds table on the three golden aims (the measured stance, D28; contact depth 0.35)."""
+    """§11's bounds table on the three golden aims (the measured stance, D28; the ball met at D29's 0.49 m)."""
 
     def test_lag_maximum(self):
-        # [4] §4.1.5: 133° at −80 ms. At the measured stance 135° / 134° / 137° at −94 / −94 / −95 ms
-        # (today's stance peaked at −104 to −111 ms, an expected failure).
+        # [4] §4.1.5: 133° at −80 ms. At the build 135° / 134° / 137° at −94 / −97 / −97 ms (today's
+        # stance peaked at −105 to −107 ms, an expected failure).
         for aim in (MIDDLE, INSIDE_LOW, OUTSIDE_HIGH):
             self.assertTrue(bound('lag maximum (deg)', aim)['passed'])
             self.assertTrue(bound('lag maximum time (ms)', aim)['passed'])
@@ -468,30 +468,30 @@ class SourceBounds(unittest.TestCase):
 
     @unittest.expectedFailure
     def test_arm_vector_turning_rate(self):
-        """Fails in size at inside-low and outside-high: about the trunk axis, as [3] measures it, the arm
-        vector peaks at 1,252 / 809 / 1,571°/s at −52 / −60 / −54 ms against [3]'s 1,160 scaled (1,220 /
-        1,313 / 1,128 ± 25%) at −65 ± 20 ms; the middle pitch passes, and every peak's time. At today's
+        """Fails at inside-low (size and time) and outside-high (size): about the trunk axis, as [3]
+        measures it, the arm vector peaks at 1,170 / 777 / 1,482°/s at −47 / −120 / −47 ms against [3]'s
+        1,160 scaled (1,220 / 1,313 / 1,128 ± 25%) at −65 ± 20 ms; the middle pitch passes. At today's
         contact depth (0.35 m) all three fail. Appendix E has no arm-vector curve (spec §15)."""
         for aim in (MIDDLE, INSIDE_LOW, OUTSIDE_HIGH):
             self.assertTrue(bound('arm-vector turning peak (deg/s)', aim)['passed'])
             self.assertTrue(bound('arm-vector turning peak time (ms)', aim)['passed'])
 
     def test_hands_ahead_of_the_clavicle(self):
-        # [4]'s arms at contact: the hands about 0.4 m in front of the chest. At the measured stance
-        # 0.46 / 0.46 / 0.48 m (today's stance 0.06–0.08 m behind it).
+        # [4]'s arms at contact: the hands about 0.4 m in front of the chest. At the build 0.49 / 0.44 /
+        # 0.45 m (today's stance 0.04–0.06 m behind it).
         for aim in (MIDDLE, INSIDE_LOW, OUTSIDE_HIGH):
             self.assertTrue(bound('hands ahead of the clavicle at contact (m)', aim)['passed'])
 
     def test_lag_at_contact_by_location(self):
-        # [4] Table 1: middle 54 against 65, HIGH IN 72 / 79, HIGH OUT 55 / 63, LOW IN 54 / 58, LOW OUT
-        # 42 / 51 (today's stance failed at HIGH OUT, 30°).
+        # [4] Table 1: middle 63 against 65, HIGH IN 78 / 79, HIGH OUT 62 / 63, LOW IN 62 / 58, LOW OUT
+        # 44 / 51 (today's stance fails at the middle and HIGH OUT, 44° and 31°).
         for loc, aim in s.LOCATION_AIMS.items():
             self.assertAlmostEqual(swing(aim).lag(0.0), s.LAG_AT_CONTACT_4[loc], delta=15.0, msg=loc)
 
     @unittest.expectedFailure
     def test_plane_tilt_over_the_last_40_ms(self):
-        """Fails: the sweet spot's path over the last 40 ms is 9.6° (middle), 7.2° (inside-low) and
-        10.9° (outside-high) steeper than the jet's tilt β. The hands' path is off the jet's plane there
+        """Fails: the sweet spot's path over the last 40 ms is 8.3° (middle), 6.1° (inside-low) and
+        9.3° (outside-high) steeper than the jet's tilt β. The hands' path is off the jet's plane there
         (as before step 1), and the bat follows [4]'s elevation to −30 ms (spec §6.3, §6.7.6)."""
         for aim in (MIDDLE, INSIDE_LOW, OUTSIDE_HIGH):
             self.assertTrue(bound('plane tilt over the last 40 ms - beta (deg)', aim)['passed'])
@@ -620,7 +620,7 @@ class RatingRange(unittest.TestCase):
     the long corner: fast bat and slow hands at once) and effort at ±3 sd, the sweet spot's speed rises into the
     ball (peak at most 1.10× its contact value, no earlier than 25 ms before contact scaled) with one
     surge, the hands and the knob with one surge, the bat clear of the body and both arms within reach
-    at the launch and at −93 ms. Must pass (at the measured stance, D28; contact depth 0.35)."""
+    at the launch, at −93 ms and at contact. Must pass (the measured stance, D28; the ball at D29's 0.49 m)."""
 
     @classmethod
     def setUpClass(cls):
@@ -656,8 +656,8 @@ class HandsSpeed(unittest.TestCase):
 
     def test_the_hands_rise_once_at_the_measured_stance(self):
         # Every pitch of the zone at ±2 sd of effort: the hands' and the knob's speed with one surge
-        # (2%), from rest to a peak of 10–13.5 m/s 37–50 ms before contact and easing into the ball
-        # as the bat whips (§6.7.4).
+        # (2%), from rest to a peak of 10–13 m/s 35–48 ms before contact on most pitches (low-outside's
+        # at −15 ms) and easing into the ball as the bat whips (§6.7.4).
         for x in (-0.15, 0.0, 0.15):
             for z in (0.55, 0.75, 0.95):
                 for e in (-0.09, 0.0, 0.09):
@@ -667,7 +667,7 @@ class HandsSpeed(unittest.TestCase):
 
     def test_todays_stance_was_the_stall(self):
         # The cause, kept as a check (§5.3, §6.7.4): the same construction at today's stance spot stalls
-        # the hands (valleys 35–73% on the golden aims): from [4]'s arms at −93 ms only 0.31 m is left
+        # the hands (valleys 39–82% on the golden aims): from [4]'s arms at −93 ms only 0.31 m is left
         # to contact hands 0.08 m behind the chest. A change that hid the stall some other way would
         # show here.
         for aim in (MIDDLE, INSIDE_LOW, OUTSIDE_HIGH):

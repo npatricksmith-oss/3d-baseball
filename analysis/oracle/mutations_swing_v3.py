@@ -141,6 +141,20 @@ def m_offset_to_contact():
         finally: self.uw = uw
     patch(s.Template, '_baseE', g)
 
+# The stance review's P1-1.
+def m_knots_old():
+    patch(s, 'BODY', {'L': (0.12, 0.00, -22.0, 8.0, 10.0), '93': (0.17, 0.00, 2.0, 13.0, 23.0), 'c': (0.17, 0.05, 75.0, 15.0, 31.0)})
+def m_px_game():
+    patch(s, 'P_STANCE', (-0.95, s.P_STANCE[1], 0.0))
+def m_no_bend():
+    patch(s, 'contact_body_params', lambda aim, side, H: s.BODY['c'])
+def m_bend_inside():
+    f = s.contact_body_params
+    patch(s, 'contact_body_params', lambda aim, side, H: f((-aim[0], aim[1], aim[2]), side, H))
+
+MUT_REVIEW2 = [('review 2: pelvis knots from the set-up (0.12 / 0.17 / 0.17 m)', m_knots_old), ('review 2: the game\'s 0.95 m off the plate', m_px_game),
+               ('review 2: no contact-body bend', m_no_bend), ('review 2: the bend for inside pitches instead of outside', m_bend_inside)]
+
 MUT_STANCE = [('stance: today\'s spot (P_y +0.30)', m_stance_today), ('stance: rate shape on the contact azimuth rate (no h_scale)', m_rate_on_azimuth),
               ('stance: the hands\' travel not capped', m_hands_uncapped), ('stance: κ-scaled elevation fall instead of the offset', m_kappa_back),
               ('stance: the elevation offset finished at contact', m_offset_to_contact)]
@@ -204,7 +218,7 @@ MUT = [('frame: shoulder azimuth reading 2', m_reading2), ('frame: trunk x_T and
        ('anchor instant: -93 ms unscaled by s_T', m_anchor_unscaled), ('s_T = T/0.150 (T4 0.150)', m_sT_150),
        ('s_T = 1 (no scaling)', m_sT_none), ('mirror: omega as a polar vector', m_omega_mirror)]
 only = sys.argv[1:]
-for name, m in [('none', lambda: None)] + MUT + MUT_REVIEW + MUT_FAMILY + MUT_STANCE:
+for name, m in [('none', lambda: None)] + MUT + MUT_REVIEW + MUT_FAMILY + MUT_STANCE + MUT_REVIEW2:
     if only and not any(o in name for o in only):
         continue
     m()
