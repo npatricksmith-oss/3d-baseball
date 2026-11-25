@@ -19,9 +19,9 @@ Status: `[ ]` not started · `[~]` partly done · `[?]` needs an owner decision
 
 **State.** PLAN D31–D33 (owner: Q54 b, Q55 a with outliers, Q56 b, Q57 go): a force-driven body; plan PLAN §14.1, spec [docs/body-motion.md](docs/body-motion.md).
 
-**Phase 1 stopped at its gate (spec §4.4; sessions 1–3 merged):** the legs turn the pelvis in time, but the measured swing needs 330–440 N·m of trunk torque (bound 288) and 70–95% of hip and knee strength at speeds where the law leaves 25–60%. Sources: [note 8](docs/research/body/8-strength-at-speed.md); the trunk figure is the shakiest.
+**Phase 1 stopped at its gate (spec §4.4; sessions 1–4 merged, `00f0178`):** the legs turn the pelvis in time; the hips and lead knee need 70–95% of full strength at speeds where the law leaves 25–60%; the trunk's excess is not robust (axial 216–355 N·m against a bound of 288). Sources: [note 8](docs/research/body/8-strength-at-speed.md).
 
-**Running:** `body-3d` (Fable, pane t4c, worktree `swing-research`), session 4, job WORKER-BODY-3D-4.md: is the trunk shortfall real; diagnosis only. **`[?]` Q58** is with the owner: what may close the gap.
+**`[?]` Q58** is with the owner: what may close the gap (recommended: sourced changes only, the athletes' leg data). Worker `body-3d` (Fable) idle, pane t4c, worktree `swing-research`; nothing running.
 
 **Next:** §2: the ground-dive leftovers ([note](docs/calibration/2026-11-23-of-ground-dive.md) §9).
 
