@@ -18,7 +18,8 @@ lead leg (brake along s, from foot-down).
 Ground (docs 4.1): feet fixed; the vertical load split by the lever rule; the legs' yaw torque is capped
 by friction (a lateral couple across the two feet plus each foot's free moment); the push and the brake
 along s are capped by friction on the foot that makes them. The wrist has a passive stop at the
-largest cock. Integrator: classical RK4 at a fixed step.
+largest cock, one-sided (it never pulls; docs 4.3 gives the swing with it, capped and without).
+Integrator: classical RK4 at a fixed step.
 """
 import math, sys, os
 sys.path.insert(0, os.path.dirname(__file__))
@@ -55,6 +56,11 @@ class Body:
         self.m_tr = M * (1 - 2 * (0.0433 + 0.0137))
         self.stride = 0.42 * H                   # [4] toe-to-toe at foot down, 42 % of stature
         self.lag_stop = 133 * D2R                # [4] largest bat lag (-80 ms): the wrist's cock limit [E as a stop]
+        # what holds the cock at lag_stop: None = a stiff one-sided stop (a device: it may push the bat
+        # forward without limit but never pull it back); a number = that stop's torque capped there, N m
+        # (two wrists' measured holding strength is about 20, note 5, abstract only); lag_stop = 10 rad
+        # removes the stop altogether
+        self.wrist_cap = None
 
 
 class Plan:
@@ -116,9 +122,10 @@ class Sim:
     def setup(self):
         self.pts = self.points()
 
-    def eom(self, t, x, act):
-        """x = [s, p1, p2, p3, p4, sd, w1, w2, w3, w4] -> derivatives, and the drive torques used."""
-        b, p = self.b, self.p
+    def mass_h(self, x):
+        """the mass matrix M(q) and the velocity terms h(q, qd) of M qdd + h = Q (checks.py tests them
+        against the Lagrangian by finite differences)."""
+        b = self.b
         q, qd = x[:5], x[5:]
         Mm = [[0.0] * 5 for _ in range(5)]
         h = [0.0] * 5
@@ -137,6 +144,12 @@ class Sim:
                 for j in range(5):
                     Mm[i][j] += m * (J[0][i] * J[0][j] + J[1][i] * J[1][j])
         Mm[1][1] += b.I1; Mm[2][2] += b.I2; Mm[3][3] += b.I3; Mm[4][4] += b.Ib
+        return Mm, h
+
+    def eom(self, t, x, act):
+        """x = [s, p1, p2, p3, p4, sd, w1, w2, w3, w4] -> derivatives, and the drive torques used."""
+        q, qd = x[:5], x[5:]
+        Mm, h = self.mass_h(x)
         tau = self.forces(t, q, qd, act)
         Q = [tau["rear"] - tau["lead"],
              tau["legs"] - tau["core"],
@@ -177,16 +190,24 @@ class Sim:
         # the legs' yaw torque: a lateral couple across the feet plus each foot's free moment
         cap = mu * min(Fl, Fr) * b.stride + mu * p.r_free * (Fl + Fr)
         self.cap = cap
+        self.legs_raw = tau["legs"]           # the legs' drive before the friction cap (for the reports)
         tau["legs"] = max(-cap, min(cap, tau["legs"]))
         # passive trunk-on-pelvis range of motion (both ways) [E]
         sep = q[2] - q[1]
         if abs(sep) > SEP_STOP:
             sg = 1.0 if sep > 0 else -1.0
             tau["core"] += -sg * 2.0e3 * (abs(sep) - SEP_STOP) - 20.0 * (qd[2] - qd[1]) * (1.0 if sg * (qd[2] - qd[1]) > 0 else 0.0)
-        # passive wrist stop at the cock limit (stiff one-sided spring-damper) [E]
+        # passive wrist stop at the cock limit: a stiff spring-damper [E: 2e4 N m/rad, 40 N m s/rad], one-sided
+        # in both senses: it acts only past the limit, and its torque is never negative (it may push the
+        # bat forward, never hold it back while it uncocks); optionally capped at b.wrist_cap
         lag = q[3] - q[4]
+        self.stop_tau = 0.0
         if lag > b.lag_stop:
-            tau["wrist"] += 2.0e4 * (lag - b.lag_stop) + 40.0 * (qd[3] - qd[4])
+            st = max(0.0, 2.0e4 * (lag - b.lag_stop) + 40.0 * (qd[3] - qd[4]))
+            if b.wrist_cap is not None:
+                st = min(b.wrist_cap, st)
+            self.stop_tau = st
+            tau["wrist"] += st
         return tau
 
     def excite(self, t):
@@ -210,7 +231,7 @@ class Sim:
         st = list(self.p.start)
         t = st[0]; x = st[1:]
         act = {n: 0.0 for n in CHANNELS}
-        out = {"t": [], "x": [], "tau": [], "ke": [], "work": 0.0, "contact": None}
+        out = {"t": [], "x": [], "tau": [], "ke": [], "cap": [], "legs_raw": [], "stop": [], "work": 0.0, "contact": None}
         work = 0.0
         while t < t_end:
             u = self.excite(t)
@@ -220,6 +241,7 @@ class Sim:
                 act[n] = u[n] + (act[n] - u[n]) * math.exp(-dt / tc)
             # RK4 with the activation held over the step
             k1, tau = self.eom(t, x, act)
+            cap_k1, raw_k1, stop_k1 = self.cap, self.legs_raw, self.stop_tau
             x2 = [x[i] + dt / 2 * k1[i] for i in range(10)]
             k2, tau2 = self.eom(t + dt / 2, x2, act)
             x3 = [x[i] + dt / 2 * k2[i] for i in range(10)]
@@ -238,6 +260,7 @@ class Sim:
                     break
             if self.record:
                 out["t"].append(t); out["x"].append(x); out["tau"].append(tau); out["ke"].append(self.ke(x))
+                out["cap"].append(cap_k1); out["legs_raw"].append(raw_k1); out["stop"].append(stop_k1)
             t += dt; x = xn
         out["work"] = work
         out["x_end"] = x; out["t_end"] = t
