@@ -134,4 +134,20 @@ Finger opening can initiate a change in grip. Detachment should follow when the 
 
 ## Resolution
 
-Open.
+Resolved 2026-11-25 by worker body-design (Opus) on `work/body-motion`, commits `8e25dda`, `3b3a598`, `17a3955`, `fc6e82c`, `f92b4c6`; checked by the Coordinator.
+
+- **P1-1 (one causal clock): fixed in the spec, open in substance.** §5.4 now gives one clock (what starts on every pitch, the sensed heel trigger with latency and fallback, the arms' commitment, mid-motion changes touching future excitation only) and the prefix property as a required phase 3 test. The fit was rerun under those rules: the flat chain does not reach the ball (§4.3), which is now the design's main open finding and phase 1's first question.
+- **P1-2 (wrist stop): fixed.** The stop is one-sided; §4.3 reports the swing with the stop, capped at 100 and 20 N·m, and without (a miss past the bat's end). "The wrists switched themselves off" is withdrawn in its strong form: refitted with the channel visible, the fit puts 0.3–13 N·m on it.
+- **P1-3 (inverse dynamics): fixed.** Duplicate acceleration, arm inertia, rear-foot offset; the lateral-force sign taken from Fortenbaugh's Appendix C (the ground moment is 156 N·m, not 222). The 23 N·m·s gap stays open (§12).
+- **P1-4 (replay against D9): fixed.** §9 stores sampled joint coordinates; the drive program is a same-build diagnostic only; the collision's reaction on the body is specified.
+- **P2-1 (breakdowns): fixed.** Each timing case is run with the burst moved whole and with the onset alone, with the real bat and a moving ball, the friction cap read at the legs' peak. Lunging's power loss does not come out of the flat body and §6.2 says so.
+- **P2-2 (fit identifies little): fixed as far as the flat chain allows.** Cold start, three starts, every parameter inside the scored window, residuals and unidentified parameters reported, strengths compared like for like.
+- **P2-3 (open loop in 3D), P2-4 (integrator coverage): fixed in the claims, deferred in substance to phase 1.** §5.3 no longer claims a 3D swing needs no feedback; `checks.py` gains angular momentum, the Euler–Lagrange identity and mutation tests, and §8.1 lists the blind spots and what phase 1 adds.
+- **P2-5 (ratings exercise): fixed.** The recommended two-group split is what is run; effort is not re-timed; the coil result is labelled a construction; the strength-to-coil correlation is withdrawn.
+- **P2-6 (error scales): fixed.** §6.1 separates planned approach from noise, enters the stride error at the stride's drive, and says what each back-solve target really measures; sizes are [E] with ranges.
+- **P2-7 (cost): fixed.** All 3D costs are [E] ranges (2–75 s a game); the reduced core's losses are listed; the budget question waits for phase 1's benchmark.
+- **P2-8 (held ball, release): fixed at design depth, deferred to phase 5.** §11 specifies the ball as a body in the hand, release by loss of contact, and the command requirement as a gate.
+- **P3 (sources, labels): fixed** (`f92b4c6` and the spec's [E] tags).
+- **Remaining answers:** the phase 1 order and the stop rule are copied into §13; the practice search is marked pending the owner (§14).
+
+Not re-reviewed: this is a design document and probes, nothing here runs in games, and PLAN §14.1's phase 1 gate (now numeric in the spec's §13) is the next check. The Coordinator reran `breakdowns.py`, `checks.py`, `ratings.py` and `swing.py` on the fixed branch (identical to the worker's outputs), the docs check and the oracle tests (76 pass, 8 expected failures).

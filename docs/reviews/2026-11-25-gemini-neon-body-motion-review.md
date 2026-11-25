@@ -225,4 +225,17 @@ All commands ran from `/home/natex/Projects/3D Baseball/.claude/worktrees/rev-bo
 
 ## Resolution
 
-Open.
+Resolved 2026-11-25 by worker body-design (Opus) on `work/body-motion`, commits `8e25dda`, `3b3a598`, `17a3955`, `fc6e82c`, `f92b4c6`; checked by the Coordinator.
+
+- **P1-1 (`shifted()`; cap read after the run): fixed.** As in the Carbon review's P1-1; the cap is now read at the legs' peak, and §6.2 says the flat body does not produce lunging's power loss and what it needs in 3D.
+- **P1-2 (the fit breaks the clock and the strength bounds): confirmed and adopted as the main open finding.** `fit.py --rules design` (four starts) and `limits.py` reproduce the reviewer's result: under the arms' clock, a 50 ms rise floor and sourced bounds the flat chain does not reach the ball; the clock is the rule that binds. §4.3 reports isometric and applied strengths, the corrected comparisons (1.5 × the golfers' mean under weight × height scaling, 24% Hill drop) and the argument for the leg channel's bound. The fit cold-starts. Phase 1 must show a 3D body swings under the rules or stop (§13).
+- **P1-3 (D9; invariants for sensing noise, eyes, mid-swing): fixed in the spec, one item deferred.** §9 records poses; §5.4 and §10 give the tick loop and where each draw is made. The moving eye point's effect on perception is a named phase 3 item.
+- **P2-1 (lateral ground force, decoupled caps, sticky stop): stop fixed; the rest deferred to phase 1.** The stop is one-sided. A single friction cone per foot and the lateral load belong to the 3D contact (§4.1, §5.3, §12); the spec no longer claims the swing stays inside friction or needs no feedback in 3D.
+- **P2-2 (release against command; one-foot balance): fixed at design depth.** §11 states the command requirement and that the two shoulder numbers are not simultaneous; `balance.py` now uses a one-foot base for the leg lift (a 2° error grows to 14 cm, 3° falls), reported in §1 and §5.3.
+- **P2-3 (back-solve targets double-count): fixed** (§6.1's table of what each target includes and how to use it).
+- **P2-4 (ratings probe): fixed.** The two-group split as recommended; the "re-learned" label corrected and the limit stated (timings not re-learned per build); the coil labelled a construction; the force-scaling slip noted with both scalings run.
+- **P2-5 (cost, the core, library cost, blending): fixed** (§8.2; §5.5 requires continuation between grid programs and a smoothness test).
+- **P2-6 (owner questions): fixed.** §14 now has two questions (the practice search; one timing rating or two), the late-foot item answered from the owner's walkthrough with corrected numbers, the budget deferred until measured, the coil question withdrawn. D9 is complied with; the phase 1 gate is numeric in §13.
+- **P3-1, P3-2: fixed** (`inverse.py`; `f92b4c6`; attribution of length scaling to [E]; reading-status caveats; [E] tags).
+
+Not re-reviewed: this is a design document and probes, nothing here runs in games, and PLAN §14.1's phase 1 gate (now numeric in the spec's §13) is the next check. The Coordinator reran `breakdowns.py`, `checks.py`, `ratings.py` and `swing.py` on the fixed branch (identical to the worker's outputs), the docs check and the oracle tests (76 pass, 8 expected failures).

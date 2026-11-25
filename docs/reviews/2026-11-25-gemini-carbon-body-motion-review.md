@@ -171,4 +171,19 @@ Commands run from `/home/natex/Projects/3D Baseball/.claude/worktrees/rev-body-c
 
 ## Resolution
 
-Open.
+Resolved 2026-11-25 by worker body-design (Opus) on `work/body-motion`, commits `8e25dda`, `3b3a598`, `17a3955`, `fc6e82c`, `f92b4c6`; checked by the Coordinator.
+
+- **P1-1 (`shifted()` moved the onset only): fixed.** Confirmed by the Coordinator in the code. Timing cases now move the whole burst, with the onset-only rows kept for comparison. Lunging and the heel-plant wait are late but intact; early hips cost a little speed; the cap binds only for a late foot on a fixed clock. §1, §6.2 and §14 are rewritten from the corrected runs.
+- **P1-2 (effort re-timed backward; variance budget): fixed.** The effort table is not re-timed (a swing at 0.8 of its drive arrives 17–19 ms late); §6.1 separates a planned approach from execution noise and puts motor drive noise at a 3–5% baseline [E].
+- **P1-3 (replay against D9; sensing noise): fixed.** §9 stores sampled joint coordinates; sensing noise is drawn per tick in `bb_agents::motor` under a new `Purpose` and passed to the world as data.
+- **P1-4 (eyes, decision clock, adjustability): fixed in the spec, partly deferred.** §5.4 gives the clock, the tick-by-tick stepping in `bb_game` and lets a mid-motion change touch future excitation on active channels. The fit under the clock fails in the flat chain (§4.3), reported as the main open finding. How a body that pulls off moves the eye point is a named phase 3 item.
+- **P2-1 (fit unidentifiable; strengths unreported): fixed.** Cold start, several starts, isometric and applied values both reported, sourced bounds argued in §4.3.
+- **P2-2 (checks blind to work-free terms; sticky stop): fixed.** Angular momentum and the Euler–Lagrange identity added, with mutation tests; the stop is one-sided.
+- **P2-3 (reduced core, cost, roster time): fixed.** §8.2 lists what the old core dropped, gives [E] ranges, stops tabulating the delivery and sizes the library build.
+- **P2-4 (planar artefacts): fixed in the claims, deferred in substance to phase 1** (bat speed at true elevation, the coil, feedback in 3D are in §12; the coil question to the owner is withdrawn).
+- **P2-5 (release precision, finger spin): fixed at design depth, deferred to phase 5** (§11: command requirement, held ball, sub-step release, blend bias test).
+- **P3-1 (Coordination's unit; scaling; labels): fixed.** A dimensionless multiplier on per-link baselines; whether timing to the pitch is a separate rating goes to the owner (§14); mass against weight × height is run both ways and left to phase 1.
+- **P3-2 (sources): fixed** (`f92b4c6`; the lateral-force sign from Appendix C; [E] tags; the stop rule copied into §13).
+- **Missing owner decisions:** D9 is complied with, not reopened. A two-strike approach is in §5.5 as a planned program; its design is on PLAN §14.1's separate track. Stance variety with load depth is left to phase 1.
+
+Not re-reviewed: this is a design document and probes, nothing here runs in games, and PLAN §14.1's phase 1 gate (now numeric in the spec's §13) is the next check. The Coordinator reran `breakdowns.py`, `checks.py`, `ratings.py` and `swing.py` on the fixed branch (identical to the worker's outputs), the docs check and the oracle tests (76 pass, 8 expected failures).
