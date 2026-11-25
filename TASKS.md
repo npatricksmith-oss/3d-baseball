@@ -19,9 +19,9 @@ Status: `[ ]` not started · `[~]` partly done · `[?]` needs an owner decision
 
 **State.** PLAN D31–D33 (owner: Q54 b, Q55 a with outliers, Q56 b, Q57 go): a force-driven body; plan PLAN §14.1, spec [docs/body-motion.md](docs/body-motion.md).
 
-**Phase 1 stopped at its gate (spec §4.4; sessions 1–4 merged):** the legs turn the pelvis in time; the hips and lead knee need 70–95% of full strength at speeds where the law leaves 25–60%; the trunk's excess is not robust. Sources: [note 8](docs/research/body/8-strength-at-speed.md).
+**Phase 1 (spec §4.4–§4.6; sessions 1–5 merged, `d47e1e0`):** on measured limits (owner Q58 = a, PLAN D34) the lower body is inside the gate; the bat is still 21–28 ms late at 18.6 m/s; the arms' limits are still estimates.
 
-**Owner: Q58 = a (PLAN D34): sourced limits only.** Running: `body-3d` (Fable, pane t4c, worktree `swing-research`), session 5, job WORKER-BODY-3D-5.md: sourced limits written first, then the refit. Then: tests, merge; if it swings, an Opus review; a remaining gap: the owner.
+**Running:** `arm-research` (Sonnet, Workers tab, own worktree, job file there): note 9, measured arm limits and when arm muscles switch on. Then: merge it; `body-3d` (Fable, pane t4c, worktree `swing-research`, idle) writes the arms' limits into §4.5 first, then refits. If it swings: an Opus review. A remaining gap: the owner.
 
 **Next:** §2: the ground-dive leftovers ([note](docs/calibration/2026-11-23-of-ground-dive.md) §9).
 
