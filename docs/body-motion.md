@@ -4,7 +4,7 @@
 
 ## Status and what is left
 
-- **Done:** the probes of §3 (stdlib Python, committed under `analysis/research/body/`), this spec, the owner's walkthrough as [research note 0](research/body/0-owner-walkthrough.md). The source notes 1–2 of worker body-research are merged ([1](research/body/1-forward-dynamics-precedents.md), [2](research/body/2-hitting-kinetics.md)); its notes 3–6 (segment tables, strength limits, movement variability, datasets) had not landed when this was written, and the numbers here that they would source are tagged [E] or cite the paper directly.
+- **Done:** the probes of §3 (stdlib Python, committed under `analysis/research/body/`), this spec, the owner's walkthrough as [research note 0](research/body/0-owner-walkthrough.md). Worker body-research's notes 1–7 are merged ([index](research/body/README.md)). Their three main findings are taken in: §5.1 and §11 (the last links are driven by inertia and elastic storage, not their own muscles), §6.1 (error sizes back-solved from published outcome spreads) and §14 (no published model makes a motion without fitting to a measured one).
 - **Built in the probes:** the smallest model that answers the questions honestly, a driven pelvis–trunk–arms–bat chain over planted feet, in the horizontal plane (§4.2). Not built: any three-dimensional body (§4.1 designs it; phase 1 builds it), the pitcher's body (§11, design depth only).
 - **Left for whoever continues:** the independent review; the owner's decisions of §14; then phase 1 (§13).
 
@@ -28,7 +28,7 @@ The wrists' own drive switched itself off in the fit: the bat is whipped through
 | Lead foot down 160 ms late, the hips' drive on its own clock | the hips fire with no front foot to turn against: the pelvis is only 4° open at the meeting (64° normally) | 28 ms late, 7 cm toward the handle, 25.2 m/s against 30.7: jammed, weak |
 | The same, the hips waiting for the heel plant (the walkthrough's trigger) | the whole swing slides 77 ms | 85 ms late, 12 cm toward the handle, 22 m/s |
 | Hips 40 ms early | the pelvis leads by 46° (normally 16°) | 7 ms early, 1 cm toward the end, the bat 2.4° further round: pulled |
-| Casting: the hands throw the barrel from −150 ms | the bat swings out wide early | 3 ms early, 10 cm toward the handle, 27.7 m/s, the bat 10.5° further round: rolled over |
+| Casting: the hands throw the barrel from −150 ms | the bat swings out wide early | 3 ms early, 10 cm toward the handle, 27.7 m/s, the bat 10.5° further round: rolled over (at the wrists' measured strength, a smaller version: −1.3 m/s, 4.5 cm, 4.5°) |
 | Pulling off: the trunk's drive 40 ms early | the trunk opens with no separation left | 15 ms early, 4 cm toward the end, pulled 4.5° |
 | Lunging: fooled, the rotation held 100 ms while the stride drifts on | the weight goes forward (0.53 m against 0.44); the pelvis never turns (−1°) | 115 ms later than the fastball, 20 cm toward the handle, 17.6 m/s: arms only |
 
@@ -62,7 +62,7 @@ The wrists' own drive switched itself off in the fit: the bat is whipped through
 
 ## 3. Sources, evidence levels and the probes
 
-Sources by number: **[3]** Welch et al. 1995 ([note](research/swing/3-welch-1995.md)); **[4]** Fortenbaugh 2011 ([note](research/swing/4-miami-study.md)); **[dL]** de Leva 1996, J Biomech 29(9):1223–1230, Table 4 (males), read from the paper (https://robotics.unibs.it/Antropometria/deLeva-ParametriDinamiciAntropometria.pdf); **[N1]**, **[N2]** the body-research notes [1](research/body/1-forward-dynamics-precedents.md), [2](research/body/2-hitting-kinetics.md); **[S10]** MLB's swing length by bat speed ([note 10](research/swing/10-swing-length-by-bat-speed.md)).
+Sources by number: **[3]** Welch et al. 1995 ([note](research/swing/3-welch-1995.md)); **[4]** Fortenbaugh 2011 ([note](research/swing/4-miami-study.md)); **[dL]** de Leva 1996, J Biomech 29(9):1223–1230, Table 4 (males), read from the paper (https://robotics.unibs.it/Antropometria/deLeva-ParametriDinamiciAntropometria.pdf); **[N1]**–**[N7]** the body-research notes: [1 forward-dynamics precedents](research/body/1-forward-dynamics-precedents.md), [2 hitting kinetics](research/body/2-hitting-kinetics.md), [3 pitching kinetics](research/body/3-pitching-kinetics.md), [4 segment parameters](research/body/4-segment-parameters.md), [5 strength limits](research/body/5-strength-limits.md), [6 movement variability](research/body/6-movement-variability.md), [7 datasets and licences](research/body/7-datasets-and-licences.md); **[S10]** MLB's swing length by bat speed ([note 10](research/swing/10-swing-length-by-bat-speed.md)).
 
 Every number below is tagged **measured** (a source gives it), **derived** (computed from measured numbers by a stated method, the probe named), or **[E]** (assumed, with what would settle it).
 
@@ -98,7 +98,12 @@ Every number below is tagged **measured** (a source gives it), **derived** (comp
 
 That is 35 degrees of freedom before constraints.
 
-- **Segment numbers.** [dL] gives each segment's mass as a share of body mass, its centre of mass as a share of its length, and three radii of gyration as shares of its length. Lengths scale with stature, which is de Leva's own assumption. The table is in `analysis/research/body/common.py`. This is **measured** for de Leva's 100 young male athletes (mean 73.0 kg, 1.741 m); applying it to a 92 kg professional is **[E]**. A heavier, more muscular player's share in the trunk and thighs is not in the table; note 3 of body-research is to bring alternatives.
+- **Segment numbers.** [dL] gives each segment's mass as a share of body mass, its centre of mass as a share of its length, and three radii of gyration as shares of its length. Lengths scale with stature, which is de Leva's own assumption. The table is in `analysis/research/body/common.py`. This is **measured** for de Leva's 100 young male athletes (mean 73.0 kg, 1.741 m); applying it to a 92 kg professional is **[E]**. No table measured on baseball players exists ([N4] §5), and [N4] expects errors of 10% or more on some segment for an athlete. The probe's sensitivity (`checks.py` item 6) is modest. With ±10% on the trunk's inertia, the pelvis's or the arms' mass, the fitted drive unchanged:
+
+- contact moves −2.3 to +4.1 ms;
+- bat speed moves 30.59–30.70 m/s against 30.65.
+
+A heavier player's distribution of mass is a phase 1 choice to make with that sensitivity in view.
 - **The feet.** A loaded foot is held to the ground by a contact constraint:
   - no sinking;
   - friction within a cone, μ [E] (shoe on clay, no source yet; the probe used 0.8);
@@ -188,7 +193,19 @@ Cross-checks:
 - Koike 2003's bottom-arm shoulder torque at impact, about 190 N·m ([N2] §2.1).
 - The friction cap on the legs' yaw torque ran at 230–260 N·m. [4]'s measured lateral couple peaks at about 220 N·m (§5.2).
 
-The wrist's switching off agrees with [N1]: Koike: "torques in the last part of the swing do not raise bat speed; they hold it"; Hirashima: the distal joints of a throw are accelerated by velocity-dependent effects, not their own torques.
+- Trunk rotation strength measured isokinetically in 51 professional golfers (74.7 kg): 141 N·m at 0.5 rad/s, falling to 117 at 2.1 rad/s ([N5] §3). Scaled by mass to 92 kg, about 173 N·m at 0.5 rad/s. The model's core reaches 219 N·m, about 1.3 × that. Its Hill curve also falls faster at low speed than the measurement does (31% against 17% by 2.1 rad/s).
+- No measurement exists above about 5 rad/s ([N5] §6), so the drive's fall at swing speeds (10–40 rad/s) is extrapolation for every source.
+
+The wrist's switching off agrees with [N1]: Koike: "torques in the last part of the swing do not raise bat speed; they hold it"; Hirashima: the distal joints of a throw are accelerated by velocity-dependent effects, not their own torques. It also agrees with what the wrists can do: about 10 N·m each in radial–ulnar deviation ([N5] §5).
+
+**The wrist's cock stop is a device, and the swing does not depend on it.** The stop briefly carries up to 257 N·m near −120 ms, more than hands can hold. With its torque capped at what two wrists hold, 20 N·m (`checks.py` item 5):
+
+- the bat speed is 30.53 m/s against 30.65;
+- contact comes 3.3 ms later;
+- the largest lag is 138° against 134°;
+- the lag at contact is 63° against 50°, nearer [4]'s 65°.
+
+So the stop is not what makes the swing. In 3D, the cock is held by the two hands' couple and by the bat's own path; phase 1 should use the sourced wrist strength, not a stiff stop.
 
 ## 5. The drive and its control (§14.1 items 2 and 3)
 
@@ -199,12 +216,19 @@ A drive channel is one muscle group's net torque at a joint, or force along a le
 **τ(t) = T · a(t) · f_v(ω/W)** [form: the golf and bowling generators of [N1] §1.1–§1.2]
 
 - **The excitation u(t)** is the motor command: 0 before the onset t_on, a linear ramp over the rise time t_rise, 1 until the switch-off t_off, then 0.
-- **The activation a(t)** follows u through first-order dynamics: 15 ms rising, 50 ms falling. These are [E], OpenSim's Thelen 2003 defaults; [N1] lists 20 / 40 ms in golf, a minimum 70 ms ramp in bowling, and 5 ms in Attias's pitching model.
+- **The activation a(t)** follows u through first-order dynamics: 15 ms rising, 50 ms falling. These are [E], OpenSim's Thelen 2003 defaults; [N1] lists 20 / 40 ms in golf, a minimum 70 ms ramp in bowling, and 5 ms in Attias's pitching model. Physiology puts the rise of a maximal voluntary drive at about 50–75 ms (Maffiuletti et al. 2016, [N5] §4; no time to 90% of peak torque was found). The fitted rises (legs 138 ms, trunk 192 ms) are slower than that. The shoulder's, 24 ms plus activation, is faster, and phase 1 should bound it from below by the review's 50 ms.
 - **The force–velocity factor f_v** is Hill's: f_v = (1 − w)/(1 + w/0.25) while shortening at w = ω/W of the channel's top speed W. While lengthening it rises to 1.5 × [E]. Golf's generators use the same form with C = 3, i.e. 0.33 ([N1]).
 - **T** is the channel's strength: the player's strength rating for that group times his size factor (§7.1).
 - **W** is the channel's top speed [E]: legs 20, core 25, shoulder 30, wrist 40 rad/s, legs along s 3 m/s. [N1]'s golf values are 30–60 rad/s, also estimated.
 
 A learned swing is one set of (t_on, t_rise, t_off) per channel, made for the player's own body (§5.5). His ratings set T, and the body does the rest.
+
+**Which links get a drive** (the research's second finding, [N1], [N3], [N5]): torque generators drive the proximal links only.
+
+- **For the batter:** legs, push, brake, trunk and shoulders. The elbows and wrists hold position with their small measured strengths.
+- **For the pitcher:** the same, plus a series elastic element at the shoulder. The throwing shoulder's internal-rotation torque in a pitch, 90–120 N·m at about 115 rad/s ([N3]), exceeds the strongest measured voluntary values (52–80 N·m at ≤ 4.7 rad/s, [N5]), and no Hill curve has drive left at 115 rad/s. The last links' speed is made by the segments' dynamics (velocity-dependent torques: Hirashima 2008, Koike) and elastic recoil (Roach 2013/14).
+
+The probe's batter shows the first half: its wrist drive fitted to off.
 
 **What no source gives** (all [E], to be sourced or chosen in phase 1):
 
@@ -215,7 +239,7 @@ A learned swing is one set of (t_on, t_rise, t_off) per channel, made for the pl
 - each foot's free-moment reach;
 - the wrist's cock limit as a stop (its value is [4]'s);
 - the trunk's axial range;
-- strength in N·m by group for professional hitters (note 2 §5: "not found as numbers");
+- strength in N·m by group for professional hitters (note 2 §5: "not found as numbers"). The nearest are trunk rotation in golfers, hip, knee and ankle generator parameters in recreational men, and pitchers' shoulders, all at slow isokinetic speeds ([N5]);
 - the lead foot's loading time in the 3D body (here, [4]'s 170 ms).
 
 ### 5.2 Where the drive's numbers come from
@@ -324,12 +348,23 @@ So the body already turning buys the arms about 24 ms of every 30 ms they wait, 
 
 | Error | Link it enters | Size set by | How it carries |
 | :-- | :-- | :-- | :-- |
-| onset jitter, per channel | the channel's t_on (and t_off) | coordination (§7.4): σ per onset, a few ms [E; body-research note 5 on movement variability is to source it] | everything after the onset, through the dynamics |
-| strength on the day | each channel's T, a common factor plus a small per-channel factor | fatigue, composure (PLAN §8.6) | the whole motion from that channel's onset |
+| onset jitter, per channel | the channel's t_on (and t_off) | coordination (§7.4): σ per onset, back-solved (below) | everything after the onset, through the dynamics |
+| strength on the day | each channel's T, a common factor plus a small per-channel factor, multiplicative (σ ∝ drive, the supported form, [N6]) | fatigue, composure (PLAN §8.6) | the whole motion from that channel's onset |
 | perception error | the plan itself: aim, arrival time, pitch type (agent-models §3.2) | `Vision`, `SpinRecognition` | the program chosen; the body executes it faithfully |
 | the foot's timing | the lead foot's touch-down time (the stride's program) | coordination; the pitcher's timing against his expectation | the block and the hips (§6.2) |
 | finger slip (pitcher) | the fingers' last contact on the ball | `SpinCapacity` or a feel rating [E] | the spin axis and the ball's direction (§11) |
 | release timing (pitcher) | the fingers' opening | coordination | the ball's direction (up and arm-side early, down and glove-side late) |
+
+**How big the errors are.** No study reports the trial-to-trial SD of a muscle group's onset or peak torque in hitting or pitching ([N6]). The sizes are therefore back-solved, in phase 3 for the batter and phase 5 for the pitcher: the onset and strength σ of the average player are set so that the body's own outcome spreads match the published ones. This is Tier B calibration of noise scales (PLAN §13), done on the body's result, never on a per-pitch outcome. Targets ([N6]):
+
+| Target | Value |
+| :-- | :-- |
+| a batter's contact depth, within-batter σ | 0.27 m, about 7 ms at a 40 m/s pitch |
+| a batter's bat speed, within-batter σ | 1.9 m/s (MLB, [S10] §2) |
+| a pitcher's release point σ | 3–6 cm (MLB, 344 starters) |
+| a skilled thrower's release window | about 7 ms; the fingers' release precision 1 ms (Hore and Watts 2011) |
+
+A batter's tolerance of about 9 ± 6 ms ([N6]) is a *check* on the batter's body, which has the bat's path as a result, not an input. The probe gives the sensitivity the back-solve starts from: a 15 ms late start of the whole swing meets the ball 15.0 ms late at −0.9 m/s (§6.2). Late links need the tightest timing (1–10 ms windows); early links bear tens of ms ([N6] §5: Koike's ±50 ms re-timing of the legs). The probe agrees: a foot up to 60 ms late changes nothing (§6.2).
 
 **No error moves anything earlier in the motion.** Each is drawn from `KeyedRng` before the motion starts (the stream's draw order is part of the replay contract, as in `motor::execute_release`). It changes one link at its time, and the integration carries it forward. A slower or weaker swing starts when it was planned and arrives late. The five independent errors of today's swing (height, plane tilt, reach, timing, effort) disappear: height, tilt and reach become results of the onsets and strengths.
 
@@ -348,6 +383,7 @@ So the body already turning buys the arms about 24 ms of every 30 ms they wait, 
 | hips 40 ms early | −7.0 | 0.643 | 31.8 | +2.4 | 46.2 | 101 / 72 |
 | casting: wrists from −150 ms | −2.6 | 0.539 | 27.7 | +10.5 | 16.3 | 62 / 61 |
 | casting: wrists from −100 ms | −1.6 | 0.594 | 29.9 | +3.4 | 16.3 | 63 / 62 |
+| casting from −150 ms at the wrists' measured strength, 20 N·m ([N5]) | −1.3 | 0.589 | 29.4 | +4.5 | 16.3 | 63 / 63 |
 | pulling off: trunk 20 ms early | −10.2 | 0.660 | 32.2 | +3.8 | −0.7 | 56 / 78 |
 | pulling off: trunk 40 ms early | −15.0 | 0.677 | 33.1 | +4.5 | −0.9 | 50 / 85 |
 | lunging: rotation held 60 ms, the drift runs on | +63.2 | 0.560 | 25.1 | −5.9 | 19.3 | 36 / 44 |
@@ -363,7 +399,7 @@ What each shows, with what is real and what is not yet:
 
   Which of the two a hitter does is a control rule (§14).
 - **Hips early.** Early and pulled, with the ball nearer the end of the bat, as the walkthrough says ("off the end of the bat; rollover to the pull side"). The power loss that coaches also describe does *not* come out (31.8 m/s against 30.7). The probe's trunk has no force–length relation: a stretched trunk muscle beyond its best length loses force, and that is the mechanism by which over-separation costs power. Its range stop at 45° only just engages (46°). The 3D body must carry force–length for the trunk channel; this is a known gap.
-- **Casting.** Slower (−3 m/s), the ball 10 cm toward the handle, the bat 10.5° further round: "drastically slows the swing … forces the batter to roll over". The arc widens through the wrist, the only path the reduced arm has; in the 3D body the hands also leave the back shoulder by the elbows.
+- **Casting.** Slower (−3 m/s), the ball 10 cm toward the handle, the bat 10.5° further round: "drastically slows the swing … forces the batter to roll over". The 60 N·m wrist drive used is the fit's own, three times what two wrists hold. At the measured 20 N·m the same error costs 1.3 m/s and 4.5 cm. The arc widens through the wrist, the only path the reduced arm has. In the 3D body the hands also leave the back shoulder by the elbows and shoulders, whose strength is larger, so the 3D figure is expected to lie between the two rows.
 - **Pulling off.** Early and pulled toward the end of the bat. The part the walkthrough stresses, the barrel yanked out of the zone and the head pulled away, is vertical and perceptual and outside the planar probe (§4.2). The 3D body carries both.
 - **Lunging.** The drift runs on, the weight goes forward (0.53 m against 0.44), and the rear foot unloads, so the yaw couple shrinks (cap 212 N·m against 251). The pelvis never turns, and the swing is arms only: 17.6 m/s, off the handle. That is the walkthrough's "only weak arm strength". Against a changeup arriving about 80 ms later than the fastball ([4]: 21.3 against 25.0 m/s over 13 m), the 100 ms hold is roughly on time. The failure is the power, as it should be.
 
@@ -467,10 +503,10 @@ Activation is advanced once per step by its exact exponential (`m::exp`) and hel
 
 **Checks** (`checks.py`, output `sim/target/codex-probes/body/checks.out`):
 
-- **Energy.** The kinetic energy gained equals the work of every force, integrated with the same stages, to 1.1 mJ in 479 J (2.2 × 10⁻⁶; the remainder is the non-smooth caps).
+- **Energy.** The kinetic energy gained equals the work of every force, integrated with the same stages, to 2.4 mJ in 450 J (5.4 × 10⁻⁶; the remainder is the non-smooth caps and stops, where RK4 loses its order).
 - **No forces** from −100 ms: kinetic energy constant to 1 × 10⁻¹¹.
 - **Internal drives only:** forward momentum constant to 7 × 10⁻¹⁰ N·s.
-- **Step size:** at 2, 1, 0.5 and 0.25 ms, contact comes at +0.81 to +0.89 ms and the sweet-spot speed at 30.627–30.630 m/s. A 2 ms step is already within 0.1 ms and 0.003 m/s.
+- **Step size:** at 2, 1, 0.5 and 0.25 ms, contact comes at +0.93, +1.11, +0.97 and +0.94 ms, and the sweet-spot speed at 30.663, 30.648, 30.648 and 30.647 m/s. A 2 ms step is within 0.2 ms and 0.02 m/s of the finest. The wobble of a tenth of a millisecond comes from the activation being held through each step, which phase 1 can remove by integrating activation as a state.
 
 Phase 1 adds angular momentum about the vertical for the free-floating 3D body, and the loop constraints' drift.
 
@@ -538,25 +574,30 @@ Phase 1 adds angular momentum about the vertical for the free-floating 3D body, 
   - the stride foot free through the leg lift;
   - the stride landing as a contact with the mound's slope (the mound's geometry is already in the game);
   - the throwing arm's shoulder (3, its internal rotation the fastest joint in sport), elbow (flexion and forearm rotation) and wrist (2);
+  - a **series elastic element at the shoulder**, stretched in the cocking phase (maximum external rotation) and recoiling into internal rotation;
   - the ball held by the fingers.
+
+  The generators drive the legs, the trunk and the shoulder's early motion. The elbow's and wrist's late speed comes from the segments' dynamics and the elastic recoil ([N3] §6, [N5] §5: the delivery's 90–120 N·m of internal-rotation torque at about 115 rad/s exceeds any measured voluntary strength). The published shoulder and elbow torques (ASMI: internal rotation 90–100 N·m, horizontal adduction 90–120, elbow flexion 49–73, [N3]) are checks on the model, not drive profiles. The delivery's timing pattern is the same at every level ([N3]: pelvis peak at about a quarter, trunk at about half the foot-contact-to-release interval), which supports one delivery shape per pitcher scaled by his strengths.
 - **His release is a result:** the hand's position and velocity, and the fingers' last contact, at the instant the fingers' drive opens them and the ball rolls off.
   - Release speed, point, direction and spin are what the arm and fingers deliver.
   - An early opening lets the ball go while the hand is still rising along its arc and before it has turned in: up and arm-side.
   - A late opening, the opposite: down and glove-side.
-  - Each millisecond of release timing turns the ball's direction by roughly the hand's path speed over its radius [E: 40 m/s over about 0.7 m, about 3° a ms]. That is why command is a matter of milliseconds.
+  - Each millisecond of release timing turns the ball's direction by roughly the hand's path speed over its radius [E: 40 m/s over about 0.7 m, about 3° a ms]. That is why command is a matter of milliseconds. Skilled throwers release within about a 7 ms window, and their fingers time the release to about 1 ms through the ball's back-force on them (Hore and Watts 2011, [N6]); finger forces of 50–100 N end 4–7 ms before release ([N3] §6).
+  - So the release is not a free-running timer. It is a hand-and-finger event that follows the hand's acceleration, and an error earlier in the arm becomes a release error through it.
   - A finger slip moves the last contact and with it the spin axis: the slider that backs up.
 - **Flying open** is the trunk's drive early against the stride foot's plant, as in §6.2, and the arm drags: speed lost, the ball arm-side.
 - **A collapsed front leg** is the lead leg's block channel too weak or late: the knee bends after foot strike, the body's forward momentum is not stopped, and the arm's whip loses what the block would have given it. Felton et al. 2023's bowling model ([N1] §1.2) found that a more extended front knee is common to every optimised delivery, the precedent for this mechanism.
 - **Fatigue** is less drive (lower T, slower activation): speed falls, the onsets' σ grows.
 - **Holding the delivery on its path.** The 1.5 s delivery includes the leg lift on one foot, where §5.3's table says a played-back body falls (1.32 s). The postural feedback carries the lift and stride, and the arm's last 0.15 s is ballistic.
-- **The numbers:** Attias et al. 2026's OpenSim model of one MLB starter (34 DOF, Moco, [N1] §1.4) and the bowling generators. The pitcher's equivalent of [4] is not yet among the research notes: a live-pitching kinematic and kinetic dataset of professionals with its means and bands (Fleisig's ASMI series is the obvious candidate) is phase 5's first task.
+- **The numbers:** Attias et al. 2026's OpenSim model of one MLB starter (34 DOF, Moco, [N1] §1.4), the bowling generators, and the ASMI joint kinetics of [N3]. The pitcher's equivalent of [4] (a live-pitching kinematic and kinetic set of professionals with means and bands over time) is not among the notes. Fleisig's ASMI professional series (n = 60) exists but was not opened as numbers ([N3] §7). Getting it is phase 5's first task. OpenBiomechanics' pitching data stay a cross-check only (D21, [N7]).
 
 ## 12. Not established, and what would settle it
 
 - **The 3D body's fit to [4] and [3].** The probe is planar. Phase 1's gate is the 3D fit within the measurements' SD, including the bat's elevation (+44° to −30° from −340 ms to contact, [4]), the pelvis and trunk at contact (77° and 75°), and the lag at contact (65°).
 - **The sign of [4]'s lateral forces** (§5.2): the dissertation's raw axes, or Fortenbaugh, would settle it.
-- **Strength by joint group for professionals in N·m**, and its spread: not found ([N2] §5). Dynamometer data (the 9-parameter torque functions of Yeadon and King, [N1] §1.2) are the closest; body-research note 4 is to look further.
-- **Movement variability** (σ of onsets for skilled hitters and pitchers): body-research note 5.
+- **Strength by joint group for professionals in N·m**, its spread, and any value above about 5 rad/s: not found ([N2] §5, [N5] §6). The nearest are the isokinetic values of [N5] and the 9-parameter torque functions of Yeadon and King ([N1] §1.2, coefficients not opened).
+- **Movement variability**: no σ of onsets or strengths is published ([N6]). The sizes are back-solved from outcome spreads (§6.1).
+- **Licences for shipped numbers** ([N7]): no open, commercially licensed adult dataset with ground forces exists, so shipped values come from published means and SDs, cited (as [4] and [3] here). The Statcast-derived constants already in the project rest on MLB's terms, which [N7] could not read; that needs settling before release.
 - **What else shortens a weaker hitter's swing** besides the coil (§7.2).
 - **The trunk's force–length relation** and its range of axial rotation (§6.2, hips early).
 - **The decision clock at game speeds** (§5.4): how the stride and the hips compress at 90+ mph.
@@ -588,6 +629,7 @@ Sizes are in worker sessions of about the length of this one; Opus for physics, 
 - *Now:* the swing is drawn to meet the planned contact on every pitch, which the owner has ruled out.
 - *What is proposed:* each player's swings are found once, when he is created, by a search over the drive's timings that "practises" until the swing meets the target fast. On every pitch his body then runs one of those swings forward, with its errors, and meets the ball wherever it goes.
 - *The question:* is a swing found by practice at roster time acceptable under "no motion is fitted to its planned end", given that the pitch-by-pitch motion is never fitted?
+- *What the literature says* ([N1], the research's first finding): every published model of this kind, in golf, cricket, batting and pitching, finds its drive timings by a search against a measured motion. None produces a motion any other way. A one-time search is therefore the established method, here pointed at the player's own target instead of at a recording.
 - *Recommendation:* yes; it is how a hitter's swing comes to be. No game motion is adjusted to its result.
 
 **What the hips do when the front foot is late.**

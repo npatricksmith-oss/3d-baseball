@@ -93,12 +93,12 @@ def main():
         cases.append(("late foot +%d, hips wait %d" % (d * 1000, wait * 1000), p))
     for d in (0.02, 0.04):
         cases.append(("hips early %d ms" % (d * 1000), shifted(plan0, ("legs",), -d)))
-    for ton in (-0.15, -0.10):
+    for ton, Tw in ((-0.15, None), (-0.10, None), (-0.15, 20.0)):
         # casting: the hands throw the barrel out early, an uncocking drive the plan does not have, at
         # the batter's own wrist strength (the fit's T_wr), rising in 20 ms
         p = copy.deepcopy(plan0)
-        p.ch["wrist"] = [plan0.ch["wrist"][0], ton, 1.0, plan0.ch["wrist"][3], 0.02]
-        cases.append(("casting: wrists from %d ms" % (ton * 1000), p))
+        p.ch["wrist"] = [Tw or plan0.ch["wrist"][0], ton, 1.0, plan0.ch["wrist"][3], 0.02]
+        cases.append(("casting: wrists from %d ms%s" % (ton * 1000, ", 20 N m" if Tw else ""), p))
     for d in (0.02, 0.04):
         cases.append(("pulling off: trunk %d ms early" % (d * 1000), shifted(plan0, ("core",), -d)))
     for d in (0.06, 0.10):
