@@ -21,6 +21,7 @@ Cases (docs 6.2):
   lunging         fooled by off-speed: the rotation held 60 / 100 ms while the stride's drift runs on
                   (no block until the hips go)
   late swing      everything after the foot 15 ms late (a plain timing error, for scale)
+  arms committed  the hips and trunk on their own clock (D22), the arms' drive 30 / 60 / 90 ms later
 Usage: python3 analysis/research/body/breakdowns.py
 """
 import json, math, sys, os, copy
@@ -105,6 +106,9 @@ def main():
         p.ch["rear"][2] += d                                     # the drift's push runs on
         cases.append(("lunging: hips held %d ms" % (d * 1000), p))
     cases.append(("late swing 15 ms", shifted(plan0, ROT + ("lead",), 0.015)))
+    for d in (0.03, 0.06, 0.09):
+        # the decision clock (docs 5.4): the hips go on their own clock (D22), the arms wait for the decision
+        cases.append(("arms committed %d ms later" % (d * 1000), shifted(plan0, ("shoulder", "wrist"), d)))
     print("ball point (the average swing's sweet spot at contact): (%.3f, %.3f) m; its speed %.1f m/s; u_ss %.3f m" % (P[0], P[1], m0[2], body.ss))
     print("%-34s %7s %6s %6s %7s %6s %6s %6s %6s %6s" % ("case", "meet ms", "u m", "m/s", "angle", "sep", "pelvis", "trunk", "s m", "cap Nm"))
     res = {}

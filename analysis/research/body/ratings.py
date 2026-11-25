@@ -4,7 +4,7 @@
 The model always integrates the same six drive channels; what varies is how many ratings feed them.
 Each hitter's learned swing (docs 5.1) is the average batter's drive pattern (fit_params.json) with
 his own strengths, re-timed as a whole so that contact comes at the planned instant, and with its
-launch wrap chosen so that the swing takes the time his decision clock allows (the average batter's
+launch coil (the whole body's turn back at launch: pelvis, trunk, arms and bat together) chosen so that the swing takes the time his decision clock allows (the average batter's
 time from his first drive to contact). Strength follows body mass (torque ~ M at equal build, by
 geometric similarity [E]; Yanaka & Morishita 2026: torque follows muscle and body size).
 
@@ -40,7 +40,8 @@ def plan_for(body, scales, wrap=0.0, shift=0.0, base=None):
             p.ch[n][2] += shift
     st = list(p.start)
     st[0] += shift
-    st[4] += wrap; st[5] += wrap
+    for k in (2, 3, 4, 5):  # the launch coil: pelvis, trunk, arms and bat start `wrap` further round (less coiled)
+        st[k] += wrap
     # stature: the base starts at the same share of the stride
     st[1] *= body.H / 1.84
     p.start = st
@@ -87,19 +88,26 @@ def timed(body, scales, wrap=0.0, base=None):
     return m, s
 
 
-def learned(body, scales, T_target, base=None):
-    """choose the launch wrap so that the swing from the first drive takes T_target (bisection)."""
-    lo, hi = -0.6, 1.2
-    best = None
-    for _ in range(14):
-        w = 0.5 * (lo + hi)
-        m, s = timed(body, scales, w, base)
-        best = (m, s, w)
-        if m["T_first"] > T_target:
-            lo = w
-        else:
-            hi = w
-    return best
+def learned(body, scales, T_target, base=None, show=False):
+    """choose the launch wrap (bat's cock at launch) so that the swing from the first drive takes
+    T_target: a scan over -45..+45 deg (5 deg steps), then linear interpolation between the two
+    scan points that bracket the target, then one check run there."""
+    scan = []
+    for wd in range(-45, 46, 5):
+        m, s = timed(body, scales, wd * D2R, base)
+        if m is not None:
+            scan.append((wd * D2R, m["T_first"]))
+    if show:
+        print("   scan (coil deg, + = more coiled than the average: ms from the first drive): " + ", ".join("%+.0f: %.0f" % (-w / D2R, t * 1000) for w, t in scan))
+    pick = None
+    for (w0, t0), (w1, t1) in zip(scan, scan[1:]):
+        if (t0 - T_target) * (t1 - T_target) <= 0 and t0 != t1:
+            pick = w0 + (T_target - t0) * (w1 - w0) / (t1 - t0)
+            break
+    if pick is None:          # out of reach: the nearest end of the scan
+        pick = min(scan, key=lambda p: abs(p[1] - T_target))[0]
+    m, s = timed(body, scales, pick, base)
+    return m, s, pick
 
 
 def main():
@@ -113,10 +121,10 @@ def main():
         m0["v"], m0["T_first"] * 1000, m0["T_bat"] * 1000, m0["L"], m0["L_v"] * 1000))
     print()
     print("A. one strength rating, launch re-learned to the same swing time (%.0f ms from the first drive):" % (T_target * 1000))
-    print("   strength  bat m/s  time ms  from bat ms  wrap deg  path m  length/speed ms")
+    print("   strength  bat m/s  time ms  from bat ms  coil+ deg  path m  length/speed ms")
     A = []
     for f in (0.70, 0.85, 1.0, 1.15, 1.30):
-        m, s, w = learned(avg, {n: f for n in CHANNELS}, T_target, base)
+        m, s, w = learned(avg, {n: f for n in CHANNELS}, T_target, base, show=(f in (0.7, 1.0, 1.3)))
         A.append((f, m["v"], m["L"]))
         print("   x%.2f     %6.1f   %6.0f   %6.0f      %+6.1f   %5.2f   %5.1f" % (f, m["v"], m["T_first"] * 1000, m["T_bat"] * 1000, -w / D2R, m["L"], m["L_v"] * 1000))
     # slope of length on speed
@@ -130,7 +138,7 @@ def main():
         m, s = timed(avg, {n: f for n in CHANNELS}, 0.0, base)
         print("   x%.1f    %6.1f   %6.0f   %5.2f   %6.2f" % (f, m["v"], m["T_first"] * 1000, m["L"], m["T_first"] * m["v"]))
     print()
-    print("C. two hitters at the same bat speed, built differently (strengths found to match the average's bat speed):")
+    print("C. two hitters at the same bat speed, built differently (strengths found to match the average's bat speed; launch as the average's, re-timed only):")
 
     def match(body, shape):
         """common factor k on the shape so that the bat speed equals the average's, launch re-learned"""
@@ -138,7 +146,7 @@ def main():
         for _ in range(12):
             k = 0.5 * (lo + hi)
             sc = {n: k * shape.get(n, 1.0) for n in CHANNELS}
-            m, s, w = learned(body, sc, T_target, base)
+            m, s = timed(body, sc, 0.0, base); w = 0.0
             if m["v"] < m0["v"]:
                 lo = k
             else:
@@ -149,7 +157,7 @@ def main():
                ("tall lean 1.95 m 85 kg", Body(1.95, 85.0), {}),
                ("short thick 1.75 m 100 kg", Body(1.75, 100.0), {})]
     res = {}
-    print("   hitter                      strengths                         bat  pelvis peak  trunk peak  arm peak  wrap  late-start cost  late-foot cost")
+    print("   hitter                      strengths                         bat  pelvis peak  trunk peak  arm peak  coil+  late-start cost  late-foot cost")
     for name, body, shape in hitters:
         sc, m, s, w = match(body, shape)
         pl = plan_for(body, sc, w, s, base)
