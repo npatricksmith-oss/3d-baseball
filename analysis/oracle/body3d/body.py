@@ -54,6 +54,9 @@ TRUNK_FLEX = 15.0         # deg, the trunk bent forward over the pelvis
 REAR_FOOT_YAW = 0.0       # deg from +X: the rear foot square to the plate
 STRIDE = 0.42             # x H between the ankles ([4]: 42 % of height, toe to toe; measured)
 STRIDE_CLOSED = 0.11      # m, lead foot toward the plate ([4], measured)
+HEEL_MAX = 60.0           # deg [E] the most a heel can be raised on the ball of the foot
+MU_START = 0.8            # the starting horizontal force on a foot is kept inside this friction cone
+VEL_DT = 0.010            # s: the starting velocities are slopes of [4]'s curves over +-10 ms [E: 3, 5, 10 tried, body-motion 4.4]
 HANDS_GUESS = (0.10, -0.05, 0.02)   # m, first guess of the hands from the rear shoulder (trunk frame); the solve moves it
 
 SIDES = (("L", 1.0), ("R", -1.0))
@@ -229,49 +232,99 @@ def _two_link(top, end, l1, l2, toward):
     return E.add(E.add(top, E.scale(dh, a)), E.scale(E.unit(perp), h))
 
 
-def place(mdl, t0, report=None):
-    """The body at [4]'s mean state at time t0 (s before contact, negative): feet flat on the ground a
-    stride apart, pelvis and trunk at their measured rotations and the pelvis at its measured travel,
-    the lead knee at its measured bend, the bat at its measured azimuth and elevation, the hands where
-    both measured elbow bends and the measured lag put them. What [4] does not give is the [E] list at
-    the top. The joints are then closed by the engine's projection (feet held, pelvis, trunk and bat
-    hardly moved) and the velocities set from [4]'s rates the same way. Nothing here looks at where the
-    swing ends. Returns the state; `report` (a dict) receives placed-against-measured angles."""
+def pose(mdl, t0, heel="solve", report=None):
+    """The body's posture at [4]'s mean state at time t0 (s before contact, negative), at rest:
+
+    - feet a stride apart ([4]: 42 % of height between the ankle joints, the lead one 11 cm closed), the
+      rear foot flat; pelvis and trunk at their measured rotations; the pelvis's travel as [4] gives it,
+      its zero read as the lead ankle ([4] measures it from the centre of home plate and does not say
+      where the feet are; the flat probe's reading, checked against [4]'s ground forces in body-motion 4.4);
+    - the pelvis's height from the REAR knee's measured bend, and the lead knee's measured bend met by
+      the lead heel's height (heel = "solve"): at foot down the lead foot is on its ball and the heel
+      comes down as the weight comes on. heel = "flat" is session 1's placement (lead foot flat, the
+      pelvis's height from the lead knee, the rear knee left to come out wrong);
+    - the bat at its measured azimuth and elevation, the hands where both measured elbow bends and the
+      measured lag put them.
+
+    What [4] does not give is the [E] list at the top. The joints are closed by the engine's projection
+    (feet held, pelvis, trunk and bat hardly moved). Each sole point in contact starts as deep as [4]'s
+    vertical load on that foot presses it, and with its friction spring stretched to carry [4]'s
+    horizontal force. Nothing here looks at where the swing ends. Returns (state, friction anchors)."""
     s, b, H = mdl.sys, mdl.b, mdl.H
     st = s.new_state()
     L = mdl.len
     up = (0.0, 0.0, 1.0)
     stride = STRIDE * H
-    # feet
-    ank = {"R": (0.0, -0.5 * stride, ANKLE_H * H), "L": (STRIDE_CLOSED, 0.5 * stride, ANKLE_H * H)}
-    yaw = {"R": REAR_FOOT_YAW * D2R, "L": (90.0 - curve_lead_foot(t0)) * D2R}
-    fdir = {}
     BW = mdl.M * E.G
-    for sd, sg in SIDES:
-        fx = (math.cos(yaw[sd]), math.sin(yaw[sd]), 0.0)
-        fdir[sd] = fx
-        q = E.axes_to_q(fx, E.cross(up, fx), up)
-        load = max(0.0, curve(("lead" if sd == "L" else "trail") + "_grf_z", t0)) / 100.0 * BW
-        sink = load / (4 * KN)                      # the sole starts as deep as [4]'s vertical load presses it
-        x = E.sub(ank[sd], E.mv(E.qR(q), mdl.ankle_f))
-        x = (x[0], x[1], -mdl.sole_z - sink)
-        ank[sd] = E.add(x, E.mv(E.qR(q), mdl.ankle_f))
-        s.set_body(st, b["foot_" + sd], x, q)
-    # pelvis: measured rotation and travel ([4]'s zero is at the lead ankle: the flat probe's reading, 4.2);
-    # its height from the lead knee's measured bend; set back so the hips are over the ankles' line [E]
+    reach_of = lambda deg: math.sqrt(L["thigh"] ** 2 + L["shank"] ** 2 + 2 * L["thigh"] * L["shank"] * math.cos(deg * D2R))
+    ank0 = {"R": (0.0, -0.5 * stride, ANKLE_H * H), "L": (STRIDE_CLOSED, 0.5 * stride, ANKLE_H * H)}
+    yaw = {"R": REAR_FOOT_YAW * D2R, "L": (90.0 - curve_lead_foot(t0)) * D2R}
+    fdir = {sd: (math.cos(yaw[sd]), math.sin(yaw[sd]), 0.0) for sd, sg in SIDES}
+    load = {sd: max(0.0, curve(("lead" if sd == "L" else "trail") + "_grf_z", t0)) / 100.0 * BW for sd, sg in SIDES}
+    cf_L = C.DE_LEVA["foot"][2]
+    ball_loc = ((BALL_FWD - cf_L) * L["foot"], 0.0, mdl.sole_z)
+
+    def foot(sd, pitch):
+        """the foot with its heel raised by `pitch` on the ball of the foot, the ankle joint staying over
+        its place on the ground ([4]'s stride is between the ankle joints). Flat (pitch 0) it sinks on
+        four points, raised on the ball's two. Returns position, orientation, ankle joint."""
+        fx = fdir[sd]
+        q0 = E.axes_to_q(fx, E.cross(up, fx), up)
+        q = E.qmul(q0, E.qaxis((0, 1, 0), pitch))
+        Rf = E.qR(q)
+        sink = load[sd] / ((4 if pitch == 0.0 else 2) * KN)
+        da = E.mv(Rf, E.sub(mdl.ankle_f, ball_loc))            # from the ball's point to the ankle
+        ankle = (ank0[sd][0], ank0[sd][1], -sink + da[2])
+        return E.sub(ankle, E.mv(Rf, mdl.ankle_f)), q, ankle
+
     psi = curve("pelvis_rot", t0) * D2R
-    qp = E.qaxis(up, psi)
-    a_, ra, _, rb = mdl.jp["hip_L"]
-    hipL_loc = ra
-    flex = curve("lead_knee_flex", t0) * D2R
-    reach = math.sqrt(L["thigh"] ** 2 + L["shank"] ** 2 + 2 * L["thigh"] * L["shank"] * math.cos(flex))
-    py = ank["L"][1] + curve("pelvis_x_cm", t0) / 100.0 * H / 1.84
-    off = E.mv(E.qR(qp), hipL_loc)
-    hx, hy = off[0], py + off[1]
-    dz = math.sqrt(max(0.0, reach ** 2 - (hx - ank["L"][0]) ** 2 - (hy - ank["L"][1]) ** 2))
-    xp = (0.0, py, ank["L"][2] + dz - off[2])
-    s.set_body(st, b["pelvis"], xp, qp)
+    obl = 0.0 if heel == "flat" else curve_obliquity(t0) * D2R
+    qp = E.qmul(E.qaxis(up, psi), E.qaxis((1, 0, 0), obl))      # +: the trail hip toward the ground ([4])
     Rp = E.qR(qp)
+    py = ank0["L"][1] + curve("pelvis_x_cm", t0) / 100.0 * H / 1.84
+    hip_off = {sd: E.mv(Rp, mdl.jp["hip_" + sd][1]) for sd, sg in SIDES}
+    knee_deg = {"L": curve("lead_knee_flex", t0), "R": curve_trail_knee(t0)}
+
+    def pelvis_z(sd, ankle):
+        """the pelvis's height that puts side sd's knee at its measured bend, the pelvis over (0, py)."""
+        hx, hy = hip_off[sd][0], py + hip_off[sd][1]
+        return ankle[2] + math.sqrt(max(0.0, reach_of(knee_deg[sd]) ** 2 - (hx - ankle[0]) ** 2 - (hy - ankle[1]) ** 2)) - hip_off[sd][2]
+
+    flat = {sd: foot(sd, 0.0) for sd, sg in SIDES}
+    zf = {sd: pelvis_z(sd, flat[sd][2]) for sd, sg in SIDES}
+    pitch = {"L": 0.0, "R": 0.0}
+    if heel == "flat":
+        pz = zf["L"]
+    else:
+        # the foot whose flat placement asks for the higher pelvis stays flat; the other heel is raised
+        # until its knee has its measured bend too (early: the lead heel, toe touch; late: the rear heel)
+        low, high = ("L", "R") if zf["R"] >= zf["L"] else ("R", "L")
+        pz = zf[high]
+        hip = E.add((0.0, py, pz), hip_off[low])
+        want = reach_of(knee_deg[low])
+        gap = lambda th: E.norm(E.sub(hip, foot(low, th)[2])) - want     # > 0: the leg too long for its knee's bend
+        if heel != "solve":
+            pitch[low] = float(heel) * D2R
+        elif gap(0.0) > 0.0:
+            lo, hi = 0.0, HEEL_MAX * D2R
+            if gap(hi) > 0.0:
+                pitch[low] = hi
+            else:
+                for _ in range(60):
+                    mid = 0.5 * (lo + hi)
+                    lo, hi = (mid, hi) if gap(mid) > 0.0 else (lo, mid)
+                pitch[low] = 0.5 * (lo + hi)
+    xR, qR_, ankR = foot("R", pitch["R"])
+    xL, qL, ankL = foot("L", pitch["L"])
+    ank = {"R": ankR, "L": ankL}
+    s.set_body(st, b["foot_R"], xR, qR_)
+    s.set_body(st, b["foot_L"], xL, qL)
+    xp = (0.0, py, pz)
+    s.set_body(st, b["pelvis"], xp, qp)
+    if report is not None:
+        report["lead_heel_deg"] = pitch["L"] / D2R
+        report["rear_heel_deg"] = pitch["R"] / D2R
+        report["pelvis_z_from_each_knee_flat"] = (zf["L"], zf["R"])
     for sd, sg in SIDES:
         hip = E.add(xp, E.mv(Rp, mdl.jp["hip_" + sd][1]))
         knee = _two_link(hip, ank[sd], L["thigh"], L["shank"], fdir[sd])
@@ -334,6 +387,7 @@ def place(mdl, t0, report=None):
     xb, qb, wr, ang = hands(p)
     if report is not None:
         report["hands_solve_residual_deg"] = [ang[i] - want[i] for i in range(3)]
+        report["hands_from_rear_shoulder"] = E.mtv(Rt, E.sub(p, sho["R"]))
     s.set_body(st, b["bat"], xb, qb)
     by = E.mv(E.qR(qb), (0, 1, 0))
     for sd, sg in SIDES:
@@ -345,14 +399,6 @@ def place(mdl, t0, report=None):
         fxa = E.unit(E.cross(by, zf))             # the wrist's flexion axis, square to the cock's axis
         q = E.axes_to_q(fxa, E.cross(zf, fxa), zf)
         s.set_body(st, b["farm_" + sd], E.sub(elbow, E.mv(E.qR(q), mdl.jp["elbow_" + sd][3])), q)
-    # velocities from [4]'s rates: pelvis and trunk about the vertical, the pelvis forward, the bat's azimuth
-    o = 13 * b["pelvis"]
-    st[o + 8] = curve_rate("pelvis_x_cm", t0) / 100.0
-    st[o + 12] = curve("pelvis_rot_vel", t0) * D2R
-    st[13 * b["trunk"] + 12] = curve("trunk_rot_vel", t0) * D2R
-    st[13 * b["trunk"] + 8] = st[o + 8]
-    st[13 * b["bat"] + 12] = curve("bat_az_vel", t0) * D2R
-    st[13 * b["bat"] + 8] = st[o + 8]
     # close the joints: feet held, pelvis, trunk and bat a thousand times harder to move than the limbs
     lin = [1.0 / m for m in s.m]
     ang_w = [1.0] * s.nb
@@ -363,6 +409,22 @@ def place(mdl, t0, report=None):
             lin[i] *= 1e-3; ang_w[i] = 1e-3
     before = mdl.observe(st)
     st = s.project(st, lin, ang_w)
+    # friction anchors: each sole point in contact carries its share of [4]'s horizontal force on that foot
+    # ([4]'s GRFx is toward the pitcher, world +Y; its GRFy toward home plate, world +X: body-motion 5.2)
+    aux = s.new_aux()
+    s.anchors(st, aux)
+    for sd, nm in (("L", "lead"), ("R", "trail")):
+        idx = [j for j, c in enumerate(s.contacts) if c[0][0] == sd and aux[j] is not None]
+        if not idx:
+            continue
+        fx = curve(nm + "_grf_y", t0) / 100.0 * BW / len(idx)
+        fy = curve(nm + "_grf_x", t0) / 100.0 * BW / len(idx)
+        lim = MU_START * load[sd] / len(idx)
+        f = math.hypot(fx, fy)
+        if f > lim > 0.0:
+            fx, fy = fx * lim / f, fy * lim / f
+        for j in idx:
+            aux[j] = (aux[j][0] + fx / KT, aux[j][1] + fy / KT)
     if report is not None:
         after = mdl.observe(st)
         report["placed"] = after
@@ -370,7 +432,88 @@ def place(mdl, t0, report=None):
         report["measured"] = {k: curve(k, t0) for k in after
                               if k in ("pelvis_rot", "trunk_rot", "bat_az", "bat_elev", "bat_lag", "lead_elbow_flex",
                                        "trail_elbow_flex", "lead_knee_flex", "pelvis_rot_vel", "trunk_rot_vel", "bat_az_vel")}
+        report["measured"]["trail_knee_flex"] = curve_trail_knee(t0)
+    return st, aux
+
+
+def place(mdl, t0, report=None, heel="solve", dt=VEL_DT, moving=True):
+    """The body at [4]'s mean state at t0, MOVING: the posture of pose(t0), and every segment's velocity
+    from the postures a moment before and after (pose(t0 - dt), pose(t0 + dt)), so each velocity is the
+    slope of the same curves of [4] the posture is built on: the pelvis's travel and rotation, the trunk's
+    rotation, the bat's azimuth and elevation, the lag, both elbows, both knees, the lead heel coming
+    down. What is held fixed in the posture ([E]: the trunk's forward bend, the pelvis's tilt, the feet's
+    places) has no rate. The velocities are then made exactly consistent with the joints (least change).
+    moving = False starts at rest (a sensitivity case). The friction anchors are left in mdl.start_aux.
+    Returns the state."""
+    s = mdl.sys
+    st, aux = pose(mdl, t0, heel, report)
+    mdl.start_aux = aux
+    if not moving:
+        return st
+    sm, _ = pose(mdl, t0 - dt, heel)
+    sp, _ = pose(mdl, t0 + dt, heel)
+    for i in range(s.nb):
+        o = 13 * i
+        for c in range(3):
+            st[o + 7 + c] = (sp[o + c] - sm[o + c]) / (2 * dt)
+        dq = E.qmul(tuple(sp[o + 3:o + 7]), E.qconj(tuple(sm[o + 3:o + 7])))
+        if dq[0] < 0:
+            dq = tuple(-c for c in dq)
+        sn = math.sqrt(dq[1] ** 2 + dq[2] ** 2 + dq[3] ** 2)
+        k = 2.0 * math.atan2(sn, dq[0]) / sn / (2 * dt) if sn > 1e-14 else 0.0
+        st[o + 10:o + 13] = [dq[1] * k, dq[2] * k, dq[3] * k]
+    X, R, V, Wv = s._kin(st)
+    rows = s._rows(X, R, V, Wv)
+    lin = [1.0 / m for m in s.m]
+    A, per = s._assemble(rows, R, lin, [1.0] * s.nb)
+    mu_ = E.chol_solve(A, [-r[5] for r in rows])
+    for i, lst in enumerate(per):
+        o = 13 * i + 7
+        for k, Jk, Yk in lst:
+            for c in range(6):
+                st[o + c] += mu_[k] * Yk[c]
+    if report is not None:
+        report["placed"] = mdl.observe(st)
     return st
+
+
+def com(mdl, st):
+    """the whole body's centre of mass (with the bat): position and velocity."""
+    s = mdl.sys
+    M = sum(s.m)
+    x = [sum(s.m[i] * st[13 * i + c] for i in range(s.nb)) / M for c in range(3)]
+    v = [sum(s.m[i] * st[13 * i + 7 + c] for i in range(s.nb)) / M for c in range(3)]
+    return x, v
+
+
+OBLIQUITY = ((-0.170, 1.0), (-0.093, 14.0), (0.0, 27.0))
+
+
+def curve_obliquity(t0):
+    """[4]'s pelvis obliquity from its text (trail hip toward the ground): 1 deg at -170 ms, 14 at -93,
+    27 at contact; before -170 ms the text gives none and it is held at 1 [E: range -10 to +5]."""
+    pts = OBLIQUITY
+    if t0 <= pts[0][0]:
+        return pts[0][1]
+    for (ta, va), (tb, vb) in zip(pts, pts[1:]):
+        if t0 <= tb:
+            return va + (vb - va) * (t0 - ta) / (tb - ta)
+    return pts[-1][1]
+
+
+TRAIL_KNEE = ((-0.621, 56.0), (-0.340, 50.0), (-0.220, 44.0), (-0.170, 47.0), (-0.093, 54.0), (0.0, 54.0))
+
+
+def curve_trail_knee(t0):
+    """[4]'s trail knee bend from its text (no digitised curve): 56 deg at foot off, 50 at foot down, 44
+    (its straightest) at -220 ms, 47 at -170, 54 at -93; held at 54 to contact [E: the text gives none]."""
+    pts = TRAIL_KNEE
+    if t0 <= pts[0][0]:
+        return pts[0][1]
+    for (ta, va), (tb, vb) in zip(pts, pts[1:]):
+        if t0 <= tb:
+            return va + (vb - va) * (t0 - ta) / (tb - ta)
+    return pts[-1][1]
 
 
 def curve_lead_foot(t0):
