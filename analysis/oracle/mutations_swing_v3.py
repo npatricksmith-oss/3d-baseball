@@ -1,7 +1,9 @@
 """Run the v3 oracle tests (test_swing_v3.py) under deliberate mistakes and list the tests that catch
 each: a wrong frame, a wrong sign, a wrong anchor instant, a wrong s_T, a wrong mirror, and the swing
 family's (§6.7): effort in the travel instead of the time, the travel without the batter's own time,
-no fade, the template at one time for every aim, the re-plan's travel held, the step-1 anchor back.
+no fade, the template at one time for every aim, the re-plan's travel held, the step-1 anchor back;
+and the stance refit's (PLAN D28): today's stance spot, the rate shape on the azimuth rate, the hands'
+travel uncapped, the κ-scaled elevation, the offset finished at contact.
 Run from the repository root: python3 analysis/oracle/mutations_swing_v3.py"""
 import sys, math, unittest, io
 sys.path.insert(0, 'analysis/oracle')
@@ -59,11 +61,11 @@ def m_omega_mirror():
 # The step-1 review's mutations (sim/target/review-probes/my_mutations*.py), the elevation join's
 # ported to the blend that replaced δ_E.
 def m_join_chain():
-    f = s.SwingStep1._baseA
+    f = s.Template._baseA
     def g(self, u, k=0):
-        if k == 2: return self.A_c[1] * self.T * s.RATE4_RATIO(1e3 * s.T4 * u, 1)
+        if k == 2: return self.A1s * self.T * s.RATE4_RATIO(1e3 * s.T4 * u, 1)
         return f(self, u, k)
-    patch(s.SwingStep1, '_baseA', g)
+    patch(s.Template, '_baseA', g)
 def m_blend_rate():
     f = s.SwingStep1._seg2E
     def g(self, u, k=0):
@@ -105,12 +107,57 @@ def m_brake_travel():
         s_ = min(tau - tau_b, s.BRAKE_S)
         return tau_b + s_ - s_ * s_ / (4 * s.BRAKE_S), 1.0 - s_ / s.BRAKE_S
     patch(s.Swing, 'sigma', g)
-def m_kappa1():
+def m_offset_dropped():
+    # the aim's contact-elevation offset left out of [4]'s fall (step 1's κ = 1): the blend alone brings
+    # the bat to the jet
     b = s.Template._build_v3
     def g(self):
-        b(self); self.kappa = 1.0
+        b(self); self.E_off = 0.0
         self.c1E = s.poly_fit([(-1.0, 0, self.E_L), (-1.0, 1, 0.0), (-1.0, 2, 0.0)] + [(self.u93, k, self._seg2E(self.u93, k)) for k in range(3)])
     patch(s.Template, '_build_v3', g)
+
+# The stance refit's (PLAN D28).
+def m_stance_today():
+    patch(s, 'P_STANCE', s.P_TODAY)
+def m_rate_on_azimuth():
+    # the rate shape scaled to the contact azimuth rate, as before the refit
+    patch(s, 'h_scale', lambda E_c: 1.0)
+def m_hands_uncapped():
+    patch(s, 'LAM_W_MAX', 10.0)
+def m_kappa_back():
+    # step 1's κ-scaled fall instead of the offset
+    def g(self, u, k=0):
+        t = 1e3 * s.T4 * u
+        kap = (self.E_c[0] - s.ARMS['93']['bat_elev'] * s.DEG) / ((s.EL4(0.0) - s.EL4(1e3 * s.T4_93)) * s.DEG)
+        if k == 0: return s.ARMS['93']['bat_elev'] * s.DEG + kap * (s.EL4(t) - s.EL4(1e3 * s.T4_93)) * s.DEG
+        return kap * (1e3 * s.T4) ** k * s.EL4(t, k) * s.DEG
+    patch(s.Template, '_baseE', g)
+def m_offset_to_contact():
+    # the offset finished at contact instead of at u_w
+    f = s.Template._baseE
+    def g(self, u, k=0):
+        uw = self.uw; self.uw = 0.0
+        try: return f(self, u, k)
+        finally: self.uw = uw
+    patch(s.Template, '_baseE', g)
+
+# The stance review's P1-1.
+def m_knots_old():
+    patch(s, 'BODY', {'L': (0.12, 0.00, -22.0, 8.0, 10.0), '93': (0.17, 0.00, 2.0, 13.0, 23.0), 'c': (0.17, 0.05, 75.0, 15.0, 31.0)})
+def m_px_game():
+    patch(s, 'P_STANCE', (-0.95, s.P_STANCE[1], 0.0))
+def m_no_bend():
+    patch(s, 'contact_body_params', lambda aim, side, H: s.BODY['c'])
+def m_bend_inside():
+    f = s.contact_body_params
+    patch(s, 'contact_body_params', lambda aim, side, H: f((-aim[0], aim[1], aim[2]), side, H))
+
+MUT_REVIEW2 = [('review 2: pelvis knots from the set-up (0.12 / 0.17 / 0.17 m)', m_knots_old), ('review 2: the game\'s 0.95 m off the plate', m_px_game),
+               ('review 2: no contact-body bend', m_no_bend), ('review 2: the bend for inside pitches instead of outside', m_bend_inside)]
+
+MUT_STANCE = [('stance: today\'s spot (P_y +0.30)', m_stance_today), ('stance: rate shape on the contact azimuth rate (no h_scale)', m_rate_on_azimuth),
+              ('stance: the hands\' travel not capped', m_hands_uncapped), ('stance: κ-scaled elevation fall instead of the offset', m_kappa_back),
+              ('stance: the elevation offset finished at contact', m_offset_to_contact)]
 def m_W93_unscaled():
     c = s.SwingStep1._conds_W
     def g(self, i):
@@ -163,7 +210,7 @@ MUT_REVIEW = [('review: rate shape 2nd derivative chain factor dropped', m_join_
               ('review: elevation blend rate without the smoothstep-rate term', m_blend_rate),
               ('review: δ_A acceleration not less the shape', m_join_Aacc), ('review: u_w at -20 ms', m_uw20),
               ('review: ruling on the unbraked path', m_brake_ruling), ('review: braked velocity not scaled by σ̇', m_brake_rate),
-              ('review: brake travel 3B/4', m_brake_travel), ('review: κ = 1', m_kappa1),
+              ('review: brake travel 3B/4', m_brake_travel), ('review: the aim\'s elevation offset dropped (κ = 1)', m_offset_dropped),
               ('review: hands pass W_93 at the unscaled -93 ms', m_W93_unscaled), ('review: S piecewise linear', m_S_linear)]
 
 MUT = [('frame: shoulder azimuth reading 2', m_reading2), ('frame: trunk x_T and y_T swapped', m_frame_swap),
@@ -171,7 +218,7 @@ MUT = [('frame: shoulder azimuth reading 2', m_reading2), ('frame: trunk x_T and
        ('anchor instant: -93 ms unscaled by s_T', m_anchor_unscaled), ('s_T = T/0.150 (T4 0.150)', m_sT_150),
        ('s_T = 1 (no scaling)', m_sT_none), ('mirror: omega as a polar vector', m_omega_mirror)]
 only = sys.argv[1:]
-for name, m in [('none', lambda: None)] + MUT + MUT_REVIEW + MUT_FAMILY:
+for name, m in [('none', lambda: None)] + MUT + MUT_REVIEW + MUT_FAMILY + MUT_STANCE + MUT_REVIEW2:
     if only and not any(o in name for o in only):
         continue
     m()
