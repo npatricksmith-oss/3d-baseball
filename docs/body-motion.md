@@ -425,6 +425,50 @@ A stop moves contact 3–5 ms and the bat's speed not at all. In the flat chain 
 
 **Next:** the owner's decision above. If it is (a), a research job: trunk rotation strength in hitters or other rotational athletes; hip and trunk torque at 3–7 rad/s in athletes; knee flexion strength; hip adduction strength from a dynamometer. If it is (b) or (c), then in this order: the knee flexors; the hip channels moved to the thigh's own axes (the engine needs a drive about an axis fixed in the child, which it has, and the probe's copy); the whole-body fit with all 20 channels, the rules one at a time, the small frame and the wrists; the hands' path by a continuation that keeps both elbows inside their measured bands; then the breakdowns of §6.2.
 
+### 4.5 The limits after the owner's ruling (PLAN D34), written before the refit
+
+The owner ruled on 2026-11-25 (Q58 = a): the body's strength limits come only from measurements. The machine-test limits that were too tight for the measured swing may be replaced by what a source supports and by nothing else. **This subsection was written and committed before any refit**, so that no limit is chosen by what the swing then does. It replaces §4.4's per-joint bounds, the single force–velocity law of §5.1 for the legs and trunk, and the gate's reading of [4]. Reading status as in [N8]: FT full text, TAB a table, AB abstract only, EXC a search excerpt, 2nd second hand; "arith." marks arithmetic done here or in [N8]. For [4]'s mean batter, weight × height is 1,660.6 N·m.
+
+**Full strength.** One rule for every joint that has a sample: the source's mean plus two SDs, scaled by weight × height. That is how the trunk's bound was already made. It replaces "the mean × 1.3 [E]" at the legs: the 1.3 had no source.
+
+| Channel | Bound, N·m | From | Read | Range a rerun tests |
+| :-- | --: | :-- | :-- | :-- |
+| hip extension, each side | 430 | Anderson 2007: C1 0.161 (SD 0.049) × weight × height, mean + 2 SD | TAB ([N5] §1) | 267 (the mean); 524 (one elite jumper's 480 N·m, Wilson 2006, TAB, scaled from 82 kg and 1.89 m; the subject's size is from Yeadon 2006 and was not confirmed for this table) |
+| hip flexion | 271 | Anderson: 0.113 (0.025) | TAB | 188 |
+| knee extension | 404 | Anderson: 0.163 (0.040) | TAB | 271 (the jumper's 328 N·m scales to 358, inside the bound) |
+| knee flexion (new channel) | 194 | Anderson: 0.087 (0.015) | TAB | 144 |
+| ankle plantar flexion | 231 | Anderson: 0.095 (0.022) | TAB | 158 |
+| hip abduction | 132 | college pitchers' 109 ± 16.4 N·m at 96.1 kg, 1.89 m, hand-held dynamometer | 2nd ([N5] §2) | unchanged from session 3 |
+| hip adduction | 132 | **[E]: set equal to abduction; no dynamometer value found** | — | 92–185 (0.7–1.4 ×); amateurs' swings are reported to use 221 scaled ([N8] §4, EXC), a check on what a swing asks, not a bound |
+| hip rotators | 78 | **[E]: no source** (§4.3) | — | 50–110 |
+| trunk rotation | 260 at 0.52 rad/s and slower | Bae 2012, professional golfers: 140.6 ± 30.9 N·m at 30°/s, mean + 2 SD, scaled | FT ([N8] §1.1) | 250–290 ([N8] §5). The old 288 was this 260 divided by the old law's factor; no higher value is used |
+| each shoulder, each elbow | 100, 70 | [E], unchanged (§4.3) | — | not varied this session |
+| each wrist | 9.5 | Delp 1996 | AB | not varied |
+
+**Strength at speed.** Each joint group gets its own measured curve: the fraction of full strength at the joint's speed, straight lines between the points. Above the last measured speed every curve is an extrapolation and is marked.
+
+| Group | Points (rad/s: fraction) | From | Read | The alternative a rerun tests |
+| :-- | :-- | :-- | :-- | :-- |
+| hip extension | 0: 1.00; 1.05: 0.83; 3.14: 0.70; 4.19: 0.66; 14.2: 0 | 0.83 at 1.05 rad/s is Anderson's fitted law (arith. in [N8] §2.1); athletes keep 84% of that at 3.14 rad/s (Silva 2018, runners) and 79–80% at 4.19 (Rodrigues 2023, CrossFit); zero at the elite jumper's 14.2 rad/s (Wilson 2006, set from the task, not measured as zero torque) | TAB, TAB (EXC), TAB | Anderson's own curve: 1.578: 0.75; 3.19: 0.50; 6.4: 0. **Above 4.19 rad/s: [E]** |
+| hip abduction, adduction, rotators | the hip extension curve | **[E]: no torque–speed data exist for these at any speed above 2 rad/s** ([N8] §6); assumed to fall as the same joint's extensors do | — | the first law (top speed 20 rad/s, curvature 0.25) |
+| hip flexion | 0: 1; 2.095: 0.75; 4.267: 0.50; 8.6: 0 | Anderson's C4 and C5; the line through them continued to zero | TAB | — |
+| knee extension | 0: 1; 1.517: 0.75; 3.952: 0.50; 5.24: 0.43; 13.4: 0 | Anderson's C4 and C5; athletes keep 52–55% of the 1.05 rad/s value at 5.24 (Ning & Faro 1996; pro soccer 2011), times Anderson's 0.82; zero at the jumper's 13.4 rad/s (Wilson) | TAB; AB, EXC; TAB | **above 5.24 rad/s: [E]** |
+| knee flexion | 0: 1; 2.008: 0.75; 5.233: 0.50; 11.7: 0 | Anderson | TAB | — |
+| ankle plantar flexion | 0: 1; 0.987: 0.75; 3.558: 0.50; 8.7: 0 | Anderson | TAB | — |
+| trunk rotation | 0: 1; 0.52: 1; 1.05: 0.906; 2.09: 0.832; 4.19: 0.671; 12.9: 0 | Bae 2012: 140.6, 127.4, 117.0 N·m at 0.52, 1.05, 2.09 rad/s; Gifford's golfers keep 81% of the 2.09 rad/s value at 4.19; the last line continued to zero | FT; EXC | **above 4.19 rad/s: [E]** |
+| shoulders, elbows, wrists | the first law (top speeds 30, 35, 40 rad/s, curvature 0.25) | [E], unchanged | — | — |
+| a muscle being stretched, every group | rises to 1.5 × full strength | Wilson 2006: T_max = 1.5 T0 in every generator | TAB | the approach to 1.5 keeps the first law's slope [E] |
+
+**Tendon stretch at the leg joints,** as Yeadon, King and Wilson's generators have it: the muscle acts through a spring in series. The spring's stretch at full strength is taken from Wilson 2006's tabulated stiffness and full strength for one elite jumper (TAB): hip extension 480 N·m over 5,092 N·m/rad, 5.4°; knee extension 328 over 857, 21.9°; hip flexion 289 over 496, 33.4°; plantar flexion 283 over 767, 21.1°. The stiffness here is the bound above divided by that angle (the models' own rule: the same stretch at full strength): 4,560, 1,055, 465 and 626 N·m/rad. No value is tabulated for knee flexion or for hip abduction, adduction or rotation, so they get none. **None at the trunk** ([N8] §3.3: no value exists).
+
+**Muscles tensed before they fire.** The legs' and trunk's drives may already be on at the start of the fitted window, each at a level between 0 and its full activation that the fit finds, and so loaded while they are being stretched ([N8] §3.1: most of the measured gain after a stretch is this active state, Walshe 1998, FT). The load and stride are on every pitch (§5.4), so this is not a decision made early. A channel holds its starting level until its onset, then rises to full. The arms' channels start at zero and no earlier than −170 ms, as before. The constant starting joint torques of §4.4 are kept: they also carry directions that have no drive (the trunk's bending, the ankles' roll).
+
+**Parts added.** Knee flexors (above). The nine hip channels act about the thigh's own three axes (extension and flexion about its side-to-side axis, abduction and adduction about its front-to-back axis, the rotators about its long axis), the way hip strength is tested and the way §4.4's table reports the need.
+
+**The gate reads [4]'s rate curves.** [4]'s pelvis and trunk angle curves turn 12–13° further than its rate curves integrate to (§4.4). The gate's curves are the rate curves, because the peaks and their times that [4] and [3] report are rates and because the bat's rate and angle agree. At contact the pelvis is therefore asked for what its rate curve gives from the start of the window: −20.7° at −250 ms plus 85.2°, **65 ± 6°** in place of 77 ± 6°. The placement at −250 ms uses the angle curves; the two readings agree there.
+
+**What rests on an assumption, for the owner:** hip adduction's and the hip rotators' full strength; the speed curve of hip abduction, adduction and rotation; every curve above 4–5 rad/s; the shoulders' and elbows' strength and speed curve; the slope toward the 1.5 × of a stretched muscle. Everything else in the three tables is a measured number.
+
 ## 5. The drive and its control (§14.1 items 2 and 3)
 
 ### 5.1 What a drive is
