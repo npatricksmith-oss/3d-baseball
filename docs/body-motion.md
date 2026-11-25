@@ -1,6 +1,6 @@
 # Body motion: a force-driven batter and pitcher (PLAN D31, §14.1 phase 0)
 
-**Status: design; phase 1 in progress.** Written 2026-11-25 by worker body-design on branch `work/body-motion`, revised the same day after three independent reviews. Phase 1's first two sessions (worker body-3d, 2026-11-25) built the three-dimensional checking engine, a compiled probe of it, the placed and moving body, and ran the fit under the design's rules: as the body stands it does not reach the ball in time, and the cause found is the pelvis's turn, not only the arms' clock (§4.4). The main open finding below is still open. This file is phase 0 of [PLAN §14.1](../PLAN.md#141-the-body-motion-rebuild-d31): it settles the seven items of the plan and the owner's question on consolidating muscle groups and ratings, as far as a flat probe can. Nothing here is in Rust; today's swing and release stay in games until phase 4.
+**Status: design; phase 1 stopped at its gate for the owner's decision (§4.4).** Written 2026-11-25 by worker body-design on branch `work/body-motion`, revised the same day after three independent reviews. Phase 1's first three sessions (worker body-3d, 2026-11-25) built the three-dimensional checking engine, a compiled probe of it, the placed and moving body, the fit under the design's rules and a 3D inverse dynamics. The body does not reach the ball in time under the rules. The legs can turn the pelvis in time; what is short is the trunk's strength against its sourced bound and the hips' and trunk's strength at the speeds they turn at (§4.4). This file is phase 0 of [PLAN §14.1](../PLAN.md#141-the-body-motion-rebuild-d31): it settles the seven items of the plan and the owner's question on consolidating muscle groups and ratings, as far as a flat probe can. Nothing here is in Rust; today's swing and release stay in games until phase 4.
 
 ## Status and what is left
 
@@ -8,8 +8,9 @@
 - **Reviewed and revised.** Three independent reviews (2026-11-25: [Codex Sol](reviews/2026-11-25-codex-sol-body-motion-review.md), [Gemini Carbon](reviews/2026-11-25-gemini-carbon-body-motion-review.md), [Gemini Neon](reviews/2026-11-25-gemini-neon-body-motion-review.md)) found errors in the probes and the spec. This version is rewritten from the corrected runs; "What the first version got wrong" below lists what changed.
 - **Built in the probes:** a driven pelvis–trunk–arms–bat chain over planted feet, in the horizontal plane (§4.2). Not built: any three-dimensional body (§4.1 designs it; phase 1 builds it), the pitcher's body (§11, design depth only).
 - **The main open finding.** Under the design's own rules (the arms start no earlier than the decision allows, drives rise no faster than 50 ms, strengths inside sourced bounds), the flat chain does not reach the ball in time (§4.3). The fit that does reproduce [4] breaks those rules. Phase 1's first job is to show that the three-dimensional body can swing under them; if it cannot, the work stops there (§13).
+- **Phase 1, session 3 (2026-11-25):** the lower body alone turns the pelvis in time inside the bounds; the 3D inverse dynamics has [4]'s swing needing 330–440 N·m of trunk rotation against a bound of 288, and 70–95% of the hips' and lead knee's full strength at speeds where the force–velocity law leaves 25–60%. **Stopped for the owner under §13's rule; §4.4 has the question, the options and a recommendation.**
 - **Phase 1, sessions 1 and 2 (2026-11-25):** the 3D engine in Python with its checks (§8.1); a compiled probe of it, agreeing to 2 × 10⁻¹² and measured at 50 µs a step (§8.2); the body placed on [4]'s measured state, moving, with both knees resolved; the fit under the rules, the rules relaxed one at a time, the small frame and the wrists (§4.4). **The 3D body as built comes round about 41 ms late at 17 m/s. The pelvis is turned too late, which is upstream of the arms' rules, so this is not yet the answer to whether a body can swing under them.**
-- **Left for whoever continues:** phase 1 from §4.4's "next" list, the pelvis first.
+- **Left for whoever continues:** the owner's decision in §4.4; dead ends are listed in the [research index](research/body/README.md) under "Tried and ruled out".
 
 **What the first version got wrong** (and what the reviews found):
 
@@ -98,6 +99,8 @@ Every number below is tagged **measured** (a source gives it), **derived** (comp
 | the 3D placed body | `python3 analysis/research/body/placed3d.py` (20 s; job queue), output `sim/target/codex-probes/body3d/placed3d.out` | the two knees, the starting velocities, undriven runs (§4.4) |
 | the 3D fit, the design's rules | `python3 analysis/research/body/fit3d.py --rules design --starts 3` (7 min; job queue); writes `fit3d_design.json`; `--no-shoulder-stops` writes `fit3d_design_nostop.json` | the 16 channels fitted to [4] under the rules (§4.4) |
 | which rule binds, 3D | `python3 analysis/research/body/fit3d.py --limits` (7 min; job queue) | the design fit continued, and one rule relaxed at a time (§4.4) |
+| the legs alone, 3D | `python3 analysis/research/body/fit3d.py --lower forces` (also `pelvis`, `rate`; 3–4 min each; job queue) | whether the legs turn the pelvis in time inside the bounds, under three stated weightings (§4.4) |
+| inverse dynamics, 3D | `python3 analysis/research/body/inverse3d.py` (20 s; job queue), output `sim/target/codex-probes/body3d/inverse3d.out` | the joint torques [4]'s motion needs against the bounds, and the turn about the vertical against [4]'s ground forces (§4.4) |
 | the small frame; the wrists | `python3 analysis/research/body/fit3d.py --small`, `--wrists` (2–3 min each; job queue) | PLAN D32's small frame; with and without a stop on the wrists' cock (§4.4) |
 | Rust cost, 3D kernel | `rustc -C opt-level=3 -C linker=$HOME/.local/bin/zigcc -o sim/target/codex-probes/body3d/bench_body3d analysis/research/body/bench_body3d.rs`, then run it | the 49-row dense solve alone (§8.2; superseded by the probe's measured step) |
 | Rust cost | `rustc -C opt-level=3 -C linker=$HOME/.local/bin/zigcc -o sim/target/codex-probes/body/bench_chain analysis/research/body/bench_chain.rs`, then run it | time per step of the flat chain in Rust (§8.2) |
@@ -193,7 +196,7 @@ The model answers questions about the drive, control, errors, ratings, replay an
 | sweet-spot speed at contact | 30.2 m/s | 29 at contact, 31 peak (barrel end, tee) [3]; [4] none; MLB average 32.1 (Statcast, [S10]) |
 | residuals, RMS in band units | pelvis 0.35, trunk 0.39, bat 0.38, travel 0.06 | — |
 
-- **Where it falls short.** The pelvis and trunk end 13° and 12° short of [4]'s turn at contact (2 SD); the bat peaks at contact, not 10 ms before it; its cock at contact is 49°, not 65°. The arm link has no elbows, so nothing slows the hands before contact as [4]'s lead arm does, and nothing carries the lead hip back as the front knee's extension does ([3]).
+- **Where it falls short.** The pelvis and trunk end 13° and 12° short of [4]'s turn at contact (2 SD; session 3 of phase 1 found that [4]'s own rate curves integrate to 12° and 13° less than its angle curves over this window, so this shortfall is the data's, §4.4); the bat peaks at contact, not 10 ms before it; its cock at contact is 49°, not 65°. The arm link has no elbows, so nothing slows the hands before contact as [4]'s lead arm does, and nothing carries the lead hip back as the front knee's extension does ([3]).
 - **What the fit cannot tell apart.** Between the three starts the brake runs 12–682 N and the push 5–382 N with almost the same cost: the fit does not identify them. Strength, rise time, switch-off and the force–velocity curve trade against each other.
 - **The wrists.** With the wrist channel visible, the three starts put 1.1, 0.3 and 12.6 N·m on it (the last switching on 11 ms before contact): effectively no drive. The fit's statement is that the bat needs no wrist drive in this model; it is not evidence that real wrists are inactive (the flat arm already over-uncocks, to 49°).
 - **The strengths it used.** Isometric T (applied peak in the swing): legs 1,234 N·m (201), core 292 (196), shoulder 253 (150), push 124 N (61), brake 243 N (263 with the eccentric gain). Against sources: the core at 0.52 rad/s is 264 N·m, against professional golfers' 141 ± 31 N·m at 74.7 kg, 1.765 m ([N5] §2, FT), which is 180 ± 40 scaled by weight × height to 92 kg and 1.84 m: 1.5 × the mean. The legs' 1,234 N·m is about four times one hip's extension strength (Anderson 2007, [N5] §1), but the legs' channel is not one hip (below). The model's Hill curve falls 24% from 0.52 to 2.1 rad/s against the golfers' 17%. No measurement exists above about 5 rad/s ([N5] §6): every drive's fall at swing speeds is extrapolation.
@@ -235,9 +238,69 @@ The decision clock binds: in the flat chain, a rigid arm turned by the shoulder 
 
 So what holds the cock does decide where the ball meets the bat. The stiff stop is a device that carries far more than hands can. In 3D the cock is held by the two hands' couple, each wrist bounded by its sourced strength, and a passive limit (if any) must have an anatomical value, never pull, and have its work and reaction recorded. Phase 1 runs with and without it.
 
-### 4.4 The three-dimensional body: where phase 1 stands after its second session
+### 4.4 The three-dimensional body: where phase 1 stands after its third session
 
-**In one paragraph.** The engine, its checks, a compiled probe of it (§8.2) and the placed, moving body are built. The fit under the design's rules has run: **as this body stands it does not reach the ball in time.** In three cold starts the bat comes round 41–52 ms late at 17–18 m/s (measured: 27 m/s read in 3D from [4]'s curves, 29–31 in [3]), with half of the 64 drive numbers on a bound. Relaxing one rule at a time, the arms' earliest onset matters most (16 ms late), as in the flat chain, but no single rule brings contact inside ±5 ms and none brings the bat's speed above 21 m/s. **The failure starts below the arms:** the pelvis peaks after contact instead of 70 ms before it, and the lead foot takes 103–116% of body weight where [4]'s takes 130%. That is upstream of the rules about the arms, so this result is **not yet the stop of §13**: it says this body's lower half, with the hip channels it has, does not turn the pelvis in time. What would settle it is the list at the end.
+**In one paragraph.** The engine, its checks, a compiled probe of it (§8.2) and the placed, moving body are built. Session 2's whole-body fit under the design's rules does not reach the ball (41–52 ms late at 17–18 m/s), and its pelvis peaks after contact. Session 3 asked whether that is a missing part or a real limit, two ways. **The legs alone can turn the pelvis in time:** fitted without the arms, inside the bounds, the pelvis is at 497–588°/s at −93 ms ([4]: 558) with the lead foot at 125–136% of body weight ([4]: 130). **But worked back from [4]'s motion, with no search, the swing asks for more than the body is allowed:** the trunk's rotation needs 330–440 N·m against a sourced bound of 288, and the hips and the lead knee must give 70–95% of their full strength while turning at 2.5–7 rad/s, where the design's force–velocity law leaves them 25–60% of it. That is why the fitted drives deliver about half their strengths and the swing is late. Under §13's rule the work on the swing stops here for the owner's decision, below.
+
+**For the owner.** In baseball terms:
+
+- *What the body does now:* a hitter with the strongest legs, trunk and arms the sources allow, starting his arms when the decision allows, gets the bat to the ball about 40 ms late at about 60% of a professional's bat speed.
+- *What is short:* not the timing of the arms first, and not the hips' ability to turn. It is how hard the trunk and hips can pull **while they are already turning fast**. The pros' average swing, worked back through this body, needs the trunk to turn the shoulders with 330–440 N·m; the strongest value a source gives (professional golfers, their mean plus two SDs, scaled to a 92 kg hitter) is 288. It needs the rear hip to drive at 256 N·m while turning at 3.3 rad/s; the hip's sourced full strength is 348, but the force–velocity law leaves 175 at that speed. The lead hip and lead knee are in the same position (table below).
+- *What could explain it,* without changing anything yet:
+  1. **The trunk's bound is too low for professional hitters.** It comes from golfers of 75 kg, tested slowly on a machine. A source would have to show hitters' trunk rotation strength of 330–440 N·m, 1.15–1.5 times the golfers' strongest. None of the research notes has one ([N5] §2: "not published as N·m in anything I could open").
+  2. **Strength at speed is under-rated.** The law used matches the one measured on recreational adults up to 4 rad/s (below) and is extrapolation above it. A source would have to show athletes' hips or trunk holding 70% or more of full strength at 3–7 rad/s. [N5] found no measurement at swing speeds.
+  3. **The body lacks a part that carries load without muscle drive:** the stretch of the trunk and hips as the hips lead the shoulders (elastic recoil, as §11 already proposes for the pitcher's shoulder). The force–velocity law has an eccentric gain of 1.5 for a muscle being stretched, but no stored energy.
+  4. **The reading of [4].** Its pelvis and trunk angle curves turn 12–13° further than its own rate curves integrate to (below). Read from the rate curves, the trunk needs 344 N·m instead of 438, still over 288. The curves are also averages over 33 hitters, and no one of them swings the average.
+- *The decision:* (a) look for a source for 1 or 2 before anything is changed, and keep the swing work stopped until then; (b) accept, as a stated assumption with a range, a higher trunk bound or a flatter force–velocity law for professionals, and run the whole-body fit again; (c) design the elastic part of 3 with its own evidence and checks. Nothing in this session changed a bound or added a term.
+- *Recommendation:* (a) first, a short research job on trunk rotation strength and on strength at speed in rotational athletes, because it decides between (b) and (c).
+
+**Can the legs turn the pelvis in time? Yes** (`fit3d.py --lower`: the 14 leg and trunk channels, the arms undriven, the design's rules, three cold starts each, 40 iterations). Hip abduction and adduction were added first, each bounded at 132 N·m: abduction from college pitchers' isometric 109 ± 16 N·m (mean + 2 SD scaled by weight × height; [N5] §2, second hand, hand-held dynamometer), adduction set equal [E: range 0.7–1.4 ×; the one comparison found has non-athletes' adductors at 70 N·m against abductors at 87, read from a search summary only]. The weightings were stated before each run:
+
+| Fitted against | Pelvis rate at −93 ms, three starts ([4]: 558°/s) | Lead foot's peak load ([4]: 130% at −93 ms) | Note |
+| :-- | :-- | :-- | :-- |
+| the pelvis's rate only | 588, 482, 533 | 170% at +55 ms, 83%, 100% | what the legs can do for the turn if nothing else is asked |
+| pelvis rate, travel, lead knee | 519, 575, 511 | — | |
+| those and both feet's three forces and the trunk's rate (session 2's stage A) | **569, 567, 497** | **128% at −115 ms, 125%, 136%** | residuals of the best start in band units: pelvis rate 0.68, travel 0.19, the feet's forces 0.67–2.09, lead knee 0.72 |
+
+- **The weighting was not the fault.** With the ground forces in the fit, the pelvis is on time and the lead foot is loaded as measured. The knees still reach their stops (278 and 348 N·m).
+- **Why it was late in the whole-body fit.** Without the arms the pelvis then slows early (449°/s at −70 ms; turned 62° at contact against 77°), and the ground's turning moment about the pelvis's vertical peaks at 149 N·m at −140 ms (from [4]'s forces: 164 N·m at −140 ms) but sums to only 2–4 N·m·s from −170 ms to contact. Turning the pelvis is cheap. Turning the trunk, the arms and the bat behind it is what costs, and that is what the next table measures.
+
+**What [4]'s swing asks of each joint** (`inverse3d.py`; no search). The body is placed on [4]'s curves every 10 ms, velocities and accelerations are differences of those postures (made exactly consistent with the joints), and the engine's equations are solved for the joint torques. The legs' torques come up from [4]'s measured ground forces, so they do not depend on the upper body's reconstruction; the trunk's and arms' come down from the reconstructed upper body. Hip torques are along the thigh's own three axes, the way hip strength is tested.
+
+| Joint and direction | Needed at its peak (when) | Range over the cases below | Bound (full strength) | What the force–velocity law allows at the joint's speed then |
+| :-- | --: | --: | --: | --: |
+| trunk rotation toward the pitcher | **438 N·m (−90 ms)** | 329–439 | **288** | 239 (1.0 rad/s) |
+| rear hip extension | 256 (−120) | 237–256 | 348 | **175** (3.3 rad/s) |
+| lead hip adduction | 123 (−140) | 123–134 | 132 | **35** (7.1 rad/s) |
+| lead knee extension | 250 (−110) | 220–250 | 352 | **204** (2.5 rad/s) |
+| lead hip abduction | 180 (−10) | 87–180 | 132 | 166 (being stretched) |
+| rear hip rotators | 68 (−90) | 18–68 | 78 [E] | 26 (5.6 rad/s) |
+| lead hip rotators | 236 (−90) | 37–236 | 78 [E] | 23 (6.4 rad/s) |
+| lead hip flexion | 114 (−140) | 92–114 | 244 | 269 |
+| rear knee flexion | 114 (−140) | 102–114 | no channel in the body (Anderson's value × 1.3 would be 188) | — |
+| ankles' plantar flexion, rear and lead | 88, 70 | 63–90 | 205 | 106, 250 |
+| each shoulder about the trunk's axis | 47, 57 | 34–57 | 100 | 56, 111 |
+| rear elbow extension | 61 (−80) | 48–61 | 70 | 39 (4.8 rad/s) |
+
+- **The cases in the range:** differencing over 10 and 15 ms; the pelvis's and trunk's rotation read from [4]'s rate curves instead of its angle curves; the turning moment [4]'s forces do not explain put on the pelvis directly instead of under the feet. Differencing over 5 ms doubles most peaks (trunk 756 N·m) and is noise.
+- **Over its full strength: the trunk only,** by 15–50%. Everything in the legs is inside its bound, with the lead hip's adduction at it. The lead hip's rotators are over their [E] bound only if the unexplained turning moment (below) reaches the ground through that leg.
+- **Over what the force–velocity law leaves at the joint's speed:** the trunk (1.4–1.8 ×), the rear hip's extension (1.5 ×), the lead knee (1.2 ×), the rear elbow (1.6 ×), the lead hip's adduction and both hips' rotators (2.6 × and more). The law gives 75% of full strength at 1.25 rad/s and 50% at 3.3; Anderson 2007 measured 75% at 1.6 and 50% at 3.2 rad/s for hip extension in recreational adults ([N5] §1). So the law is the measured one where there is a measurement, and the swing needs more than it.
+- **Not built:** the rear knee needs 114 N·m of flexion and the body has no knee flexors.
+- **How far to trust it.** [4]'s forces leave up to 1,580 N unexplained on the pelvis (twice-differenced knee and heel angles set its height), which is why the legs are worked up from the forces and not down from the pelvis. The hands' path is [E] ([4] does not report it); between −85 and −30 ms the two elbows and the lag cannot all be met from these shoulders, by up to 7°, and the nearest smoothed path is used. The trunk's number rests on that reconstruction.
+
+**The turn about the vertical** (the same run; N·m·s about the vertical through the centre of mass; the range is differencing over 5, 10 and 15 ms, then the rate-curve reading):
+
+| | The motion needs | [4]'s ground forces give | Left for the feet's free moments, which [4] does not report |
+| :-- | --: | --: | --: |
+| −250 ms to contact | 33.1–35.0 (31.0) | 23.5–23.8 | 9.6–11.3 (7.2) |
+| −170 ms to contact | 28.7–31.0 (27.3) | 16.8–18.1 | 11.9–13.0 (9.2) |
+| −250 to −93 ms | 18.6–22.6 (20.3) | 18.9–19.2 | −0.6 to 3.4 (1.4) |
+
+In three dimensions [4]'s forces give two thirds of the turn (the flat analysis of §5.2 had 13 of 36). Up to −93 ms they give all of it. The shortfall is in the last 93 ms, 6–9 N·m·s, an average free moment of 60–100 N·m, where friction under the feet allows about 58–117 N·m at −90 ms and half that at contact (0.8 × the load × a reach of 0.05–0.10 m [E]). So the ground can plausibly supply the turn; it is not what is short.
+
+**[4]'s angle curves and rate curves disagree.** From −250 ms to contact [4]'s pelvis angle turns 97.5° and its own pelvis rate curve integrates to 85.2°; the trunk's 94.7° and 81.8°; 10 of each 12–13° is in the last 93 ms. (The bat's agree: 221.6° and 223.7°.) [4]'s text has the same gap (19° to 77° in 93 ms is a mean of 624°/s; the stated peak is 581°/s). The flat fit of §4.3, fitted to the rate curves, ended 13° and 12° short of the angles at contact: that was this, not a fault of the flat chain. The gate of §13 asks for both the rate curves and 77° at contact, which cannot both be met. The placement uses the angle curves; the fits' misfit uses the rate curves.
+
+**Not run this session:** the whole-body fit again, the rules one at a time, the small frame and the wrists (the job's step 3), because of the stop above. Session 2's results for them follow and stand as they were, from a body with 16 channels (no hip abduction or adduction).
 
 Everything below is from `placed3d.py`, `fit3d.py` and `probe3d.py` (§3), for [4]'s mean batter (1.84 m, 92 kg), from −250 ms.
 
@@ -316,13 +379,7 @@ The moving body follows [4]'s pelvis travel for 100 ms with no drive at all, whi
 
 The decision clock binds most, as in the flat chain (§4.3: +5.8 ms there). But here no single rule is enough, the bat never passes 21 m/s, and **in every row the pelvis peaks after contact.** Stronger legs do not fix that. So the arms' rules are not the first thing wrong.
 
-**What the body lacks, as far as this session can say.** The pelvis is not turned early. In [4] it is at 558°/s by −93 ms; here it is still accelerating at contact. Candidates, none tested:
-
-- **Hip channels the body does not have.** The pelvis is driven by hip extension, flexion and the rotators only. There is no hip abduction or adduction, and with the feet 0.77 m apart the rear leg's adductors and the lead leg's abductors act across the stance. [N5] has pitchers' hip abduction at about 107 N·m (second hand).
-- **The force–velocity law, probably not.** With a top speed of 20 rad/s and a curvature of 0.25, a hip turning at 5 rad/s has 37% of its strength left, which is why the drives deliver about half their strengths. But the law gives 75% at 1.25 rad/s and 50% at 3.3 rad/s, and Anderson 2007 measured 75% at 1.6 and 50% at 3.2 rad/s for hip extension (2.1 and 4.3 for hip flexion, 1.5 and 4.0 for knee extension; [N5] §1). The law is close to the measured one where it was measured; above 4 rad/s both are extrapolation.
-- **The legs are being straightened, not used to turn.** Both knees end in their stops at up to 407 N·m. The fit may be spending the legs on the ground-force terms; a different weighting has not been tried.
-- **The starting muscle level is held constant** through the swing, a stand-in for the postural program (§5.3).
-- **§5.2's open item:** [4]'s lateral ground forces give 13 of the 36 N·m·s the flat chain needed to turn. The same shortfall may be what shows here.
+**What the body lacks** was answered by session 3, above: not hip channels, not the weighting, not the force–velocity law's agreement with the one measured, but strength at speed and at the trunk. Session 2's list of candidates is in the research index's "Tried and ruled out" where each was tested.
 
 **The wrists' cock, with and without a stop** (`fit3d.py --wrists`; a one-sided stop on each wrist's cock a margin past its angle at the start [E: the starting angle is not known to be neutral], re-fitted from the design fit):
 
@@ -338,12 +395,7 @@ A stop moves contact 3–5 ms and the bat's speed not at all. In the flat chain 
 
 **Where the fits without the shoulders' range stops went** (the first run of this session, kept as `fit3d_design_nostop.json`): contact +36 to +44 ms at 18–19 m/s, the same picture. The stops were added because the lead arm is placed at its anatomical limit across the chest; they changed nothing that matters.
 
-**Next, in order:**
-
-1. The pelvis. Compare the force–velocity law with Anderson's measured speeds; add hip abduction and adduction with sourced bounds; fit the lower body alone against [4]'s pelvis rate and ground forces and see whether the pelvis can be at 558°/s by −93 ms under the bounds. If it cannot, that is the finding for the owner, and it is about the legs, not the decision clock.
-2. A three-dimensional inverse dynamics along the placed postures (§5.2 asks for it): the joint torques [4]'s motion needs, against the bounds, joint by joint. The placement reproduces both knees to contact; the hands' solve fails near −50 ms and needs a continuation in time first.
-3. Only then the arms: the fit again, the rules one at a time, the small frame, the wrists.
-4. The fit's convergence (more iterations or a better search), and the breakdowns of §6.2, wait for a body that swings.
+**Next:** the owner's decision above. If it is (a), a research job: trunk rotation strength in hitters or other rotational athletes; hip and trunk torque at 3–7 rad/s in athletes; knee flexion strength; hip adduction strength from a dynamometer. If it is (b) or (c), then in this order: the knee flexors; the hip channels moved to the thigh's own axes (the engine needs a drive about an axis fixed in the child, which it has, and the probe's copy); the whole-body fit with all 20 channels, the rules one at a time, the small frame and the wrists; the hands' path by a continuation that keeps both elbows inside their measured bands; then the breakdowns of §6.2.
 
 ## 5. The drive and its control (§14.1 items 2 and 3)
 
@@ -790,6 +842,8 @@ PLAN D9 is decided: a saved play stores the build's commit and the recorded play
 
 - **Pass:** under the design's rules (the arms after the decision, rises of at least 50 ms, strengths inside sourced bounds, the wrists bounded by their measured strength), the average batter's fitted swing reaches contact within ±5 ms of plan; the pelvis, trunk, arm and bat rate curves within 1 band unit RMS each from −250 ms to contact; at contact pelvis 77 ± 6°, lag 65 ± 10°, bat elevation −30 ± 5° ([4] Table 1); the bat's speed within [3]'s and Statcast's range (29–34 m/s at the sweet spot); [4]'s vertical and lateral ground forces within their bands; momentum, angular momentum, energy and the Euler–Lagrange identity to their tolerances; every named breakdown run as one change (or a stated two), its consequence reported as the body gives it.
 - **Stop:** if no fit within the rules reaches contact, or the rate curves stay beyond 2 band units, or contact needs a rule broken. The owner is told which rule binds and what the body lacks, as §4.3 does for the flat chain.
+
+**Phase 1 after its third session (2026-11-25): stopped at the gate.** The legs alone turn the pelvis in time; the inverse dynamics has [4]'s swing needing more than the trunk's bound and more than the force–velocity law leaves the hips at their speeds (§4.4). No bound was changed and no term added. The owner decides between looking for sources, stated assumptions and an elastic part. Note for the gate itself: [4]'s rate curves and its angles at contact cannot both be met (§4.4), so "the rate curves within 1 band unit" and "pelvis 77 ± 6° at contact" need one of them chosen.
 
 **Phase 1 after its second session (2026-11-25):** the engine, its checks, the compiled probe, the placed and moving body and the cost are done (§4.4, §8.1, §8.2). The fit under the rules has run and **is on the gate's "stop" side as the body stands** (§4.4): the bat comes round about 41 ms late at 17 m/s, the pelvis's rate curve is 2.8 band units off, and no single relaxed rule brings contact inside ±5 ms. §4.4 says why that is not yet a finding about bodies: the pelvis is not turned in time by the hip channels this body has, which is upstream of the rules about the arms. Next: §4.4's list.
 

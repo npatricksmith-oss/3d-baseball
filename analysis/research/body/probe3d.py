@@ -45,6 +45,7 @@ def tree_order(mdl):
 
 
 def write_model(path, s, st, aux, t0, nsteps, h, every, order=()):
+    assert not s.ext, "the probe has no external loads (inverse dynamics runs in the Python engine)"
     w = []
     f = lambda *xs: " ".join(repr(float(x)) for x in xs)
     w.append("g " + f(*s.g))
@@ -126,9 +127,16 @@ def simulate(mdl, st, t0, t1, h=1e-3, every=5, aux=None, tree=True):
         o["act"] = {a[0]: v for a, v in zip(s.acts, act)}
         o["stops"] = {a[0]: v for a, v in zip(s.stops, stop)}
         grf = {"L": [0.0, 0.0, 0.0], "R": [0.0, 0.0, 0.0]}
+        xp = s.pose(state, mdl.b["pelvis"])[0]
+        mz = 0.0                                      # the ground's turning moment about the vertical through the pelvis
         for c, fc in zip(s.contacts, con):
             for k in range(3):
                 grf[c[0][0]][k] += fc[k]
+            if fc[2] > 0.0:
+                xb, qb, _, _ = s.pose(state, c[1])
+                pc = E.add(xb, E.mv(E.qR(qb), c[2]))
+                mz += (pc[0] - xp[0]) * fc[1] - (pc[1] - xp[1]) * fc[0]
+        o["ground_mz"] = mz
         rows.append((t, o, grf))
     return rows, recs[-1][1]
 
@@ -160,9 +168,9 @@ def _cases():
         import json
         import fit3d
         ctx = fit3d.Ctx()
-        for a, (n, v) in zip(ctx.m.sys.acts, json.load(open(fitted))["plan"].items()):
-            assert a[0] == n
-            a[4], a[6], a[7], a[8] = v
+        plan = json.load(open(fitted))["plan"]
+        for a in ctx.m.sys.acts:                     # channels added since that fit stay off
+            a[4], a[6], a[7], a[8] = plan.get(a[0], (0.0, 0.0, 0.05, 0.1))
         ctx.m.check_aux = list(ctx.aux0)
         out.append(("the fitted swing (design rules)", ctx.m, ctx.st, fit3d.T0, 310))
     return out

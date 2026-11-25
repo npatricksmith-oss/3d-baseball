@@ -66,6 +66,8 @@ SIDES = (("L", 1.0), ("R", -1.0))
 
 def curve(name, t):
     """[4]'s digitised mean curve at time t (s), by linear interpolation."""
+    if name in CURVE_OVERRIDE:                      # a sensitivity case's own reading of a curve (inverse3d.py)
+        return CURVE_OVERRIDE[name](t)
     rows = _CURVES.get(name)
     if rows is None:
         rows = _CURVES[name] = C.load(name)
@@ -73,6 +75,7 @@ def curve(name, t):
 
 
 _CURVES = {}
+CURVE_OVERRIDE = {}
 
 
 def curve_rate(name, t, h=0.005):
@@ -238,7 +241,7 @@ def _two_link(top, end, l1, l2, toward):
     return E.add(E.add(top, E.scale(dh, a)), E.scale(E.unit(perp), h))
 
 
-def pose(mdl, t0, heel="solve", report=None):
+def pose(mdl, t0, heel="solve", report=None, hands_guess=None, hands_solve=True):
     """The body's posture at [4]'s mean state at time t0 (s before contact, negative), at rest:
 
     - feet a stride apart ([4]: 42 % of height between the ankle joints, the lead one 11 cm closed), the
@@ -370,26 +373,48 @@ def pose(mdl, t0, heel="solve", report=None):
         ang.append(math.acos(max(-1.0, min(1.0, E.dot(E.unit(E.sub(wr["L"], sho["L"])), bz)))) / D2R)
         return xb, qb, wr, ang
 
-    p = E.add(sho["R"], E.mv(Rt, HANDS_GUESS))
-    for it in range(60):                          # Newton on the hands' point: three angles, three unknowns
-        _, _, _, a0 = hands(p)
-        r = [a0[i] - want[i] for i in range(3)]
-        if max(abs(c) for c in r) < 1e-9:
+    # the hands' point: three measured angles, three unknowns. Damped least squares (Levenberg-Marquardt), so
+    # that where the three angles cannot all be met (the arms too short for them from these shoulders) the
+    # nearest posture is taken and its misfit reported, instead of a failed solve. hands_guess (the lead grip's
+    # point in the trunk's frame from the rear shoulder) continues a solution from a neighbouring time.
+    p = E.add(sho["R"], E.mv(Rt, HANDS_GUESS if hands_guess is None else hands_guess))
+    resid = lambda q_: [a_ - w_ for a_, w_ in zip(hands(q_)[3], want)]
+    r = resid(p)
+    c0 = sum(x * x for x in r)
+    lam = 1e-3
+    for it in range(200 if hands_solve else 0):      # hands_solve = False: the hands exactly at hands_guess
+        if c0 < 1e-20:
             break
         Jm = [[0.0] * 3 for _ in range(3)]
         for k in range(3):
             pk = list(p); pk[k] += 1e-6
-            ak = hands(tuple(pk))[3]
+            rk = resid(tuple(pk))
             for i in range(3):
-                Jm[i][k] = (ak[i] - a0[i]) / 1e-6
-        try:
-            dp = _solve3(Jm, [-c for c in r])
-        except ZeroDivisionError:
+                Jm[i][k] = (rk[i] - r[i]) / 1e-6
+        JtJ = [[sum(Jm[i][a_] * Jm[i][b_] for i in range(3)) for b_ in range(3)] for a_ in range(3)]
+        g = [sum(Jm[i][a_] * r[i] for i in range(3)) for a_ in range(3)]
+        moved = False
+        for _ in range(30):
+            A = [[JtJ[a_][b_] + (lam * (JtJ[a_][a_] + 1e-9) if a_ == b_ else 0.0) for b_ in range(3)] for a_ in range(3)]
+            try:
+                dp = _solve3(A, [-x for x in g])
+            except ZeroDivisionError:
+                lam *= 10.0
+                continue
+            n = E.norm(dp)
+            if n > 0.05:
+                dp = E.scale(dp, 0.05 / n)
+            pn = E.add(p, dp)
+            rn = resid(pn)
+            cn = sum(x * x for x in rn)
+            if cn < c0:
+                moved = n > 1e-12 and (c0 - cn) > 1e-14 * c0
+                p, r, c0 = pn, rn, cn
+                lam = max(1e-9, lam / 5.0)
+                break
+            lam *= 5.0
+        if not moved:
             break
-        n = E.norm(dp)
-        if n > 0.05:
-            dp = E.scale(dp, 0.05 / n)
-        p = E.add(p, dp)
     xb, qb, wr, ang = hands(p)
     if report is not None:
         report["hands_solve_residual_deg"] = [ang[i] - want[i] for i in range(3)]

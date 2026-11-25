@@ -25,3 +25,25 @@ Written 2026-11-25 by the worker `body-research`. Docs only; nothing here change
 - **Within-athlete SDs of muscle onset times or strength**; a **body table measured on baseball players**.
 - Any **openly, commercially licensed adult hitting or pitching dataset with ground forces** (OpenBiomechanics is non-commercial; the CC BY set is youth, positions only).
 - Cross 2005/2009 (bat as a double pendulum), Alexander 1991, Herring & Chapman 1992, Hirashima 2002/2003, Feltner & Dapena 1986 and Werner et al. were not opened.
+
+## Tried and ruled out
+
+Phase 1's dead ends (worker body-3d, 2026-11-25), one line each, so nobody retries them. Detail: [body-motion §4.4](../../body-motion.md). The commit is where the attempt or its replacement is.
+
+| Tried | Why it failed | Commit |
+| :-- | :-- | :-- |
+| Placing the 3D body with both feet flat and the pelvis level | [4]'s two knees then ask for pelvis heights 9.5 cm apart at −340 ms and 12.9 cm apart the other way at contact; the rear knee came out at 62–73° against 44–50°, and undriven the lead foot never took more than 18% of body weight | `a3389b8`, replaced in `6df9026` |
+| Moving the pelvis forward until both knees fit with flat feet | needs 8–12 cm, puts the centre of mass where [4]'s ground forces say it is not, and makes the pelvis travel backward after −170 ms | `6df9026` |
+| Every drive on its bound, set by hand | a leg on its bound is a jump: both feet off the ground by −110 ms | `a3389b8` |
+| Starting the placed body at rest, or with four rates set by hand | the pelvis stays back; with every velocity taken as a slope of [4]'s curves it follows [4]'s travel for 100 ms undriven | `6df9026` |
+| Starting velocities as slopes over ±3 ms | the digitised pelvis curve's steps give 0.41 m/s instead of 0.62; ±5 and ±10 ms agree | `6df9026` |
+| The whole-body fit under the rules, 16 channels, no range stop at the shoulders | bat round 36–44 ms late at 18–19 m/s | `a60e856` |
+| The same with the shoulders' range stops (135°) | 41–52 ms late at 17–18 m/s; the stop carries only 63 N·m | `987e92d` |
+| One rule relaxed at a time on that fit (arms' onset free; shoulders and elbows × 2; no rise floor; legs and trunk × 1.5; wrists × 3) | contact +15.7, +28.1, +30.2, +29.4, +32.0 ms; never inside ±5 ms, never over 21 m/s; the pelvis peaks after contact in every one | `987e92d` |
+| A stop on the wrists' cock (5° or 20° past the start) | moves contact 3–5 ms, the bat's speed not at all | `987e92d` |
+| "The legs cannot turn the pelvis in time" | they can: the lower body alone, inside the bounds, has the pelvis at 497–588°/s at −93 ms under three weightings; the pelvis was late in the whole-body fit because of what the upper body asks of it | `876b3aa` |
+| "The fit's ground-force terms straighten the legs and delay the pelvis" | with those terms the lower-body fit has the pelvis at 569°/s at −93 ms and the lead foot at 128% of body weight; the knees still reach their stops | `876b3aa` |
+| Hip abduction and adduction as the missing part | adding them (about the pelvis's forward axis) was not what the pelvis needed; the inverse dynamics has them inside their bounds except the lead hip's adduction, which is at it | `876b3aa` |
+| Solving the hands' point exactly from both elbows and the lag at every instant | no exact solution from −85 to −30 ms (up to 7° of misfit); the nearest point is taken and the path smoothed | `504b263` |
+| Reading peak torques off the inverse dynamics at a 5 ms differencing | noise: peaks double against 10 and 15 ms; the impulses and the 10–15 ms peaks are what hold | `504b263` |
+| Splitting a hip's torque about the pelvis's own axes, or about the clinical flexion, floating and thigh axes (not square to each other) | both put 200–280 N·m on "the rotators"; along the thigh's own three axes, how strength is tested, the rotators need 49–68 N·m | `504b263` |

@@ -18,6 +18,15 @@ ATHLETE = 1.3              # [E] professional over recreationally active adults 
 # strength bounds, N m. WH = weight x height (N m). Anderson 2007's C1 (note 5 section 1, full text) for the legs.
 C1_HIP_EXT, C1_HIP_FLEX, C1_KNEE_EXT, C1_ANKLE_PF = 0.161, 0.113, 0.163, 0.095
 HIP_ROT = 60.0             # [E] one hip's rotators, 40-60 N m, no source (4.3)
+# hip abduction and adduction (session 3; set before any run with them):
+# abduction: college pitchers' isometric trail-hip abduction 109 +- 16.4 N m at 96.1 kg, 1.89 m (note 5 section 2,
+#   second hand: a search excerpt of PMC4527197's table, hand-held dynamometer). Bound = mean + 2 SD, scaled by
+#   weight x height. No athlete factor: they are athletes. The same paper's hip extension by that method is 75 N m
+#   where Anderson's dynamometer model gives 282, so the method may read low by a large factor: see body-motion 4.4.
+# adduction: [E] equal to abduction, range 0.7-1.4 x. The one comparison found (PMC6522434, healthy non-athletes at
+#   60 deg/s on a Biodex, read from a search summary only) has adductors about 70 N m against abductors 87.
+HIP_ABD_REF, HIP_ABD_REF_WH = 109.0 + 2 * 16.4, 96.1 * E.G * 1.89
+HIP_ADD_OVER_ABD = 1.0
 CORE_REF = 288.0           # golfers' mean + 2 SD scaled to 92 kg, 1.84 m, over the f-v factor at the tested speed (4.3)
 SHOULDER = 100.0           # [E] one shoulder (4.3: pitchers' internal rotation 66-80 measured)
 ELBOW_EXT = 70.0           # [E] one elbow's extension, range 50-100; note 5 found no N m value
@@ -38,6 +47,9 @@ def bounds(H, M):
     k = wh / REF_WH
     b = {"hip_ext_R": C1_HIP_EXT * wh * ATHLETE, "hip_flex_L": C1_HIP_FLEX * wh * ATHLETE,
          "hip_ext_L": C1_HIP_EXT * wh * ATHLETE,
+         "hip_abd_R": HIP_ABD_REF * wh / HIP_ABD_REF_WH, "hip_abd_L": HIP_ABD_REF * wh / HIP_ABD_REF_WH,
+         "hip_add_R": HIP_ADD_OVER_ABD * HIP_ABD_REF * wh / HIP_ABD_REF_WH,
+         "hip_add_L": HIP_ADD_OVER_ABD * HIP_ABD_REF * wh / HIP_ABD_REF_WH,
          "ankle_pf_R": C1_ANKLE_PF * wh * ATHLETE, "ankle_pf_L": C1_ANKLE_PF * wh * ATHLETE,
          "hip_rot_R": HIP_ROT * ATHLETE * k, "hip_rot_L": HIP_ROT * ATHLETE * k,
          "knee_ext_L": C1_KNEE_EXT * wh * ATHLETE, "knee_ext_R": C1_KNEE_EXT * wh * ATHLETE,
@@ -54,6 +66,9 @@ CHANNELS = {
     "hip_ext_R": ("pelvis", "thigh_R", (0, 1, 0), "hip"),      # the rear thigh driven back under the pelvis
     "hip_flex_L": ("pelvis", "thigh_L", (0, -1, 0), "hip"),    # the lead thigh driven forward
     "hip_ext_L": ("pelvis", "thigh_L", (0, 1, 0), "hip"),      # the lead hip's extensors: the block (4.1)
+    # abduction carries the thigh's far end out to its own side, about the pelvis's forward axis
+    "hip_abd_L": ("pelvis", "thigh_L", (1, 0, 0), "hip"), "hip_add_L": ("pelvis", "thigh_L", (-1, 0, 0), "hip"),
+    "hip_abd_R": ("pelvis", "thigh_R", (-1, 0, 0), "hip"), "hip_add_R": ("pelvis", "thigh_R", (1, 0, 0), "hip"),
     "ankle_pf_R": ("shank_R", "foot_R", (0, 1, 0), "ankle"),   # plantar flexion: the push off the rear foot
     "ankle_pf_L": ("shank_L", "foot_L", (0, 1, 0), "ankle"),
     "hip_rot_R": ("pelvis", "thigh_R", (0, 0, -1), "hip"),     # rotators: the pelvis turned toward the pitcher over each thigh
