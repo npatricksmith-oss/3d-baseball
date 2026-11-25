@@ -19,9 +19,11 @@ Status: `[ ]` not started · `[~]` partly done · `[?]` needs an owner decision
 
 **State.** **PLAN D31 (Q54 = b): a force-driven body for the swing and the delivery; plan PLAN §14.1.** Swing v3's Rust step, D30 and Q53 are dropped.
 
-**Phase 0 is merged (`262d0f3`):** [docs/body-motion.md](docs/body-motion.md), probes in `analysis/research/body/`, three reviews resolved. Open finding (spec §4.3): held to the design's own rules the flat test body does not reach the ball; phase 1 must show the 3D body does, or stop (spec §13).
+**Phase 0 is merged (`262d0f3`):** [docs/body-motion.md](docs/body-motion.md), probes in `analysis/research/body/`, three reviews resolved. Open finding (spec §4.3): held to the design's rules the flat body does not reach the ball; the 3D body must, or phase 1 stops (§13).
 
-**Waiting on the owner:** `[?]` Q55 (may a player's swings be found by practice when he is created; recommended yes), `[?]` Q56 (timing to the pitch and sequencing within the body: one rating or two; recommended two), `[?]` Q57 (go-ahead for phase 1: 6–9 Opus sessions; ask him to check `/usage` first). The budget question waits for phase 1. No workers running.
+**Owner:** Q55 = a, outliers allowed (D32); Q56 = b (D33); Q57 = go.
+
+**Phase 1 running:** worker `body-3d` (Fable; owner: Fable for complex work), Workers tab, worktree `swing-research`, branch `work/body-3d`, job WORKER-BODY-3D.md there: the 3D body in the Python checking model. On stop: report, `git status`, tests, merge; next session per spec §13. Opus review at the gate.
 
 **Next:** §2: the ground-dive leftovers ([note](docs/calibration/2026-11-23-of-ground-dive.md) §9).
 

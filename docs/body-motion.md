@@ -654,7 +654,7 @@ Sizes are in worker sessions of about this one's length; Opus for physics, Sonne
 
 ## 14. For the owner to decide
 
-**Whether a player's swings may be built by practice when he is created.** *(Pending your ruling.)*
+**Whether a player's swings may be built by practice when he is created.** *(Answered 2026-11-25: yes, PLAN D32, and players must not be bound to body-type archetypes: a small-framed shortstop with real power has to be possible. Phase 1 checks what a small frame can reach inside the strength bounds.)*
 
 - *Now:* the swing is drawn to meet the planned contact on every pitch, which you have ruled out.
 - *What is proposed:* when a player is created, a search over his drive's timings "practises" each swing on his own body until it meets its target as well as his body allows. Some aims fail and stay failed. The finished set is frozen before he plays. On every pitch his body then runs one of those swings (or a blend of neighbours) forward, with its errors, and meets the ball wherever the motion takes it.
@@ -663,7 +663,7 @@ Sizes are in worker sessions of about this one's length; Opus for physics, Sonne
 - *Options:* (a) yes, practice once at creation, frozen, failures kept; (b) no: a player's swings would then have to be copied from recorded motions, which exist only as averages over many hitters.
 - *Recommendation:* (a). It is how a hitter's swing comes to be, and nothing in a game is adjusted to its result.
 
-**The ratings players have.**
+**The ratings players have.** *(Answered 2026-11-25: two timing ratings, option (b), PLAN D33.)*
 
 - *Now:* `BatSpeed`, `QuickHands`, `BatControl` and `Timing` for batters, `ArmSpeed` and `Command` for pitchers set results directly.
 - *What is wrong:* under D31 bat speed, swing time and command are results of the body. They become what the manager is *shown* (as measured), and the ratings become the causes.
