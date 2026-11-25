@@ -152,4 +152,15 @@ All under `sim/target/codex-probes/review-body-3d-7/`, output beside each script
 
 ## Resolution
 
-Open.
+Handed to worker `body-3d-7fix` (Opus, job `WORKER-BODY-3D-7FIX.md`, branch `work/body-3d`), 2026-11-25, except where said. The Coordinator updates this section when that work is merged.
+
+- **P1-1, P1-2, P3-1 (the smoothing's size, its basis, the unsmoothed elevation as a target):** handed. `unsmooth()` joined to [4]'s curve at the window's edges, Winter's correction fixed, the variants rerun with straight, accelerating and plateau rises, the attack angle given for each, §4.8 rewritten with the size as a range. "Matched to unsmoothed curves" is withdrawn from Q59's options; the owner has been told (2026-11-25) that 62–67 mph is an estimate inside a wide range.
+- **P2-1 (the fitted swing comes down on the ball at 7.8°):** handed: the attack angle at contact becomes a held-out check, reported for sessions 6 and 7's fits and said to the owner.
+- **P2-2 (opposing muscles on together; the search not at its best fit):** deferred to the next fitting session, which waits on the owner (Q59; and Q60, whether the practice search may carry a cost on effort, whose weight would be an estimate). The trunk's second channel stays in the body until then.
+- **P2-3, P3-4 (the caveats in the owner's paragraph):** handed.
+- **P2-4 (the strongest batter):** handed: one run held to a hitter's swing, stated before it is started.
+- **P3-2 (source statements):** handed, except one point not taken: note 6's table does give the bat's peak at −2 ms with SD 5, and the source's own figures (66.2 against 67.1 mph) give 98% at contact; the 94.5% is the note-writer's finite difference, which the note says not to use. Both will be given once.
+- **P3-3 (stale status lines, §13's pelvis reading):** handed.
+- **P3-5 (the floating axis singular with the arm hanging):** handed as a line for phase 2; no code now.
+
+No re-review of the fixes is planned if the reworked smoothing figures agree with this review's own (`filt.py`, `filt2.py`); if they disagree, the disagreement goes back to a reviewer.

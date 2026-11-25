@@ -21,9 +21,9 @@ Status: `[ ]` not started · `[~]` partly done · `[?]` needs an owner decision
 
 **Phase 1 (spec §4.4, §4.8, §4.9; sessions 1–7 merged):** every designed freedom driven: contact +0.8 ms, every gated curve inside a band; the bat 21.3 m/s (48 mph), outside. [4]'s "51 mph" is its smoothing through impact (62–67 mph undone).
 
-**[?] Q59, restated (§4.4):** (a) gate 29–34 m/s, the last 40 ms fitted to unsmoothed curves; (b) gate 27–34, same; (c) no change. Recommended: (b).
+**[?] Q59** (gate 65–76 mph, 60–76, or none; unsmoothed targets withdrawn) and **Q60** (a cost on effort in the practice search).
 
-**Running:** `rev-body-3d-7` (Opus, pane t4c, worktree `swing-research`, REVIEW-BODY-3D-7.md): commit, resolve, merge. Session 8 after it and Q59: the trunk's second channel out, more cold starts, the hands' speed.
+**Running:** `body-3d-7fix` (Opus, pane t4c, worktree `swing-research`, WORKER-BODY-3D-7FIX.md): the [review](docs/reviews/2026-11-25-opus-body-3d-s7-review.md)'s fixes. Then merge, Resolution. Session 8 (review P2-2) waits on Q59/Q60.
 
 **Next:** §2: the ground-dive leftovers ([note](docs/calibration/2026-11-23-of-ground-dive.md) §9).
 
