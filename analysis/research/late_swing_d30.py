@@ -89,7 +89,7 @@ def report(label):
         for x in (-0.15, 0.0, 0.15):
             for z in (0.55, 0.75, 0.95):
                 for i, row in enumerate(by_depth(S.Swing(S.aim_at(x, z), **kw))): acc[i].append(row)
-    print('   by Savant\\'s depth bins (the zone\\'s nine pitches x seven batters): depth, ms before t_c, speed vs on time [range] (MLB), attack angle (MLB)')
+    print("   by Savant's depth bins (the zone's nine pitches x seven batters): depth, ms before t_c, speed vs on time [range] (MLB), attack angle (MLB)")
     for i, (d, mv, ma) in enumerate(MLB):
         rows = acc[i]; m = lambda j: sum(r[j] for r in rows) / len(rows)
         print('   %+6.1f in  %+5.1f ms  %+5.1f mph [%+.1f..%+.1f] (%+.1f)  %+6.1f deg (%+.1f)' % (d, m(0), m(1), min(r[1] for r in rows), max(r[1] for r in rows), mv, m(2), ma))
@@ -111,7 +111,7 @@ def report(label):
 
 
 def blocker():
-    print('== the two swings in mid-swing (template, the lab\\'s path against v2\\'s own for the plan)')
+    print("== the two swings in mid-swing (template, the lab's path against v2's own for the plan)")
     for name, a in (('middle', S.GOLDEN_AIMS['rhb_middle']), ('inside-low', S.GOLDEN_AIMS['rhb_inside_low'])):
         tm = T0(a); lj = LateJoin(a)
         for ms in (-93, -60, -40, -30, -20):
@@ -123,10 +123,10 @@ def blocker():
 
 
 if __name__ == '__main__':
-    report('the present path (the lab\\'s to the ball)')
+    report("the present path (the lab's to the ball)")
     S.Template = LateJoin
     try:
-        report('joined into v2\\'s swing: the bat over %s ms, the hands over %s ms' % (BAT_MS, HANDS_MS))
+        report("joined into v2's swing: the bat over %s ms, the hands over %s ms" % (BAT_MS, HANDS_MS))
     finally:
         S.Template = T0
     blocker()
