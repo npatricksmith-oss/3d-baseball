@@ -747,6 +747,31 @@ class BodyChecks(unittest.TestCase):
                 self.assertGreater(z, 0.02, n)
 
     @NEED
+    def test_attack_angle_of_a_constructed_swing(self):
+        """the attack angle observe() reports is the angle above level of the sweet spot's path, for a bat placed
+        level along +X and turned about the lead grip on an axis tilted by a known angle from the vertical: the
+        sweet spot then moves toward +Y and climbs at exactly that angle (constructed here by hand; down for a
+        negative tilt). The bat's own speed and the pose of the other bodies do not enter."""
+        m = B.Model(1.84, 92.0, contacts=False)
+        st = list(B.place(m, T0))
+        i = 13 * m.b["bat"]
+        h = math.sqrt(0.5)
+        st[i + 3:i + 7] = [h, 0.0, h, 0.0]               # the bat's +z (knob to end) along world +X
+        grip = (0.3, -0.1, 1.0)                          # the lead grip, anywhere
+        for alpha_deg in (12.0, -20.0, 0.0):
+            a = alpha_deg * math.pi / 180.0
+            w = (0.0, -35.0 * math.sin(a), 35.0 * math.cos(a))
+            xcm = (grip[0] + (m.bat_ucm - B.GRIP_L), grip[1], grip[2])
+            r = (xcm[0] - grip[0], 0.0, 0.0)
+            v = (w[1] * r[2] - w[2] * r[1], w[2] * r[0] - w[0] * r[2], w[0] * r[1] - w[1] * r[0])
+            st[i:i + 3] = list(xcm)
+            st[i + 7:i + 10] = list(v)
+            st[i + 10:i + 13] = list(w)
+            o = m.observe(st)
+            self.assertAlmostEqual(o["attack"], alpha_deg, delta=1e-9)
+            self.assertAlmostEqual(o["sweet_speed"], 35.0 * (B.C.BAT_SS - B.GRIP_L), delta=1e-9)
+
+    @NEED
     def test_starts_moving_as_measured(self):
         """the placed body's velocities are [4]'s slopes: the rotation rates of pelvis, trunk and bat (read
         here from [4]'s digitised rate curves, which the placement does not use) and the pelvis's travel."""
