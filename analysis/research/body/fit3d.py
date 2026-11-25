@@ -58,6 +58,7 @@ START_T, START_RISE, START_OFF = 0.5, 0.080, 0.050
 
 RULES = {
     "design": {},
+    "continued": {},                                       # no rule relaxed: the same extra iterations, for a fair comparison
     "arms_free": {"arms_earliest": T0},                    # the arms may start any time in the window
     "shoulders_x2": {"scale": {"shoulder_L": 2.0, "shoulder_R": 2.0, "elbow_ext_L": 2.0, "elbow_ext_R": 2.0}},
     "no_rise_floor": {"rise_min": 0.005},
@@ -69,10 +70,10 @@ RULES = {
 class Ctx:
     """one placed, toned, damped body with its sixteen channels, reused for every evaluation."""
 
-    def __init__(self, H=1.84, M=92.0, rules="design", cock_stop=None, t0=T0):
+    def __init__(self, H=1.84, M=92.0, rules="design", cock_stop=None, t0=T0, shoulder_stops=True):
         self.rules = dict(RULES[rules]) if isinstance(rules, str) else dict(rules)
         self.t0 = t0
-        self.m = m = B.Model(H, M)
+        self.m = m = B.Model(H, M, shoulder_stops=shoulder_stops)
         st = B.place(m, t0)
         self.aux0 = list(m.start_aux)
         self.bd = Dr.bounds(H, M)
@@ -250,6 +251,7 @@ def summary(ctx, u, h=H_STEP):
     out["bat_az_at_0"] = next(o["bat_az"] for t, o, g in rows if abs(t) < 1e-9)
     out["sweet_speed_at_0"] = next(o["sweet_speed"] for t, o, g in rows if abs(t) < 1e-9)
     out["applied_peak"] = {a[0]: max(abs(o["act"][a[0]][0]) for t, o, g in rows) for a in ctx.m.sys.acts}
+    out["stop_peak"] = {n: max(abs(o["stops"][n][0]) for t, o, g in rows) for n in rows[0][1]["stops"]}
     p = ctx.plan(u)
     out["plan"] = {n: list(v) for n, v in p.items()}
     on = []
@@ -275,12 +277,13 @@ def show(out, log=print):
     log("   residual RMS in band units, -250 ms to 0: " + ", ".join("%s %.2f" % (k, v) for k, v in out["rms_band_units"].items()))
     log("   plan (T N m [applied peak] of bound, onset, rise, off ms): " + "; ".join(
         "%s %.0f [%.0f] %.0f %.0f %.0f" % (n, v[0], out["applied_peak"][n], v[1] * 1e3, v[2] * 1e3, v[3] * 1e3) for n, v in out["plan"].items()))
-    log("   on a bound: " + ("; ".join(out["on_bounds"]) or "none"))
+    log("   stops' largest torques (N m): " + ", ".join("%s %.0f" % (k, v) for k, v in out.get("stop_peak", {}).items()))
+    log("   on a bound (%d of %d numbers): " % (len(out["on_bounds"]), 4 * len(CH)) + ("; ".join(out["on_bounds"]) or "none"))
     log("   rules: %s" % (out["rules_broken"] or "none broken"))
 
 
-def fit(rules="design", starts=3, H=1.84, M=92.0, log=print, iters=(20, 20, 30), u_from=None, cock_stop=None):
-    ctx = Ctx(H, M, rules, cock_stop)
+def fit(rules="design", starts=3, H=1.84, M=92.0, log=print, iters=(20, 20, 30), u_from=None, cock_stop=None, shoulder_stops=True):
+    ctx = Ctx(H, M, rules, cock_stop, shoulder_stops=shoulder_stops)
     iA = [4 * i + k for i, n in enumerate(CH) if n in LOWER for k in range(4)]
     iB = [4 * i + k for i, n in enumerate(CH) if n in ARMS for k in range(4)]
     best = None
@@ -318,28 +321,53 @@ def main():
     P.build()
     a = sys.argv[1:]
     arg = lambda k, d: a[a.index(k) + 1] if k in a else d
+    stops = "--no-shoulder-stops" not in a
+    tag = "" if stops else "_nostop"
+    base_file = os.path.join(HERE, "fit3d_design%s.json" % tag)
+    it = int(arg("--iters", 25))
     if "--limits" in a:
-        base = json.load(open(os.path.join(HERE, "fit3d_design.json")))
+        base = json.load(open(base_file))
         for name in RULES:
             if name == "design":
                 continue
             print("\n== relaxed: %s (re-fitted from the design fit, all numbers free)" % name)
-            ctx, best = fit(name, 1, u_from=base["plan"], iters=(0, 0, int(arg("--iters", 25))))
-            json.dump(best, open(os.path.join(P.OUT, "fit3d_%s.json" % name), "w"), indent=1)
+            ctx, best = fit(name, 1, u_from=base["plan"], iters=(0, 0, it), shoulder_stops=stops)
+            json.dump(best, open(os.path.join(P.OUT, "fit3d_%s%s.json" % (name, tag)), "w"), indent=1)
         return
     if "--show" in a:
-        d = json.load(open(os.path.join(HERE, arg("--show", "fit3d_design.json"))))
-        show(d)
+        show(json.load(open(os.path.join(HERE, arg("--show", "fit3d_design.json")))))
+        return
+    if "--small" in a:
+        base = json.load(open(base_file))
+        Hs, Ms = float(arg("--height", 1.75)), float(arg("--mass", 77.0))
+        print("the small frame (PLAN D32): %.2f m, %.0f kg [E]; his bounds are the same sourced bounds at his weight x height;" % (Hs, Ms))
+        print("re-fitted under the design's rules from the average batter's plan (strengths over his bounds start at his bounds)")
+        ctx, best = fit("design", 1, Hs, Ms, u_from=base["plan"], iters=(0, 0, it), shoulder_stops=stops)
+        print("\nthe average batter (1.84 m, 92 kg), for comparison:")
+        show(base)
+        json.dump(best, open(os.path.join(P.OUT, "fit3d_small%s.json" % tag), "w"), indent=1)
+        return
+    if "--wrists" in a:
+        base = json.load(open(base_file))
+        print("WITHOUT a stop on the wrists' cock (the design fit):")
+        show(base)
+        for margin in (5.0, 20.0):
+            print("\nWITH a one-sided stop %.0f deg past the wrists' cock at the start [E], re-fitted from the design fit:" % margin)
+            ctx, best = fit("design", 1, u_from=base["plan"], iters=(0, 0, it), cock_stop=margin, shoulder_stops=stops)
+            json.dump(best, open(os.path.join(P.OUT, "fit3d_cock%d%s.json" % (margin, tag)), "w"), indent=1)
         return
     rules = arg("--rules", "design")
     starts = int(arg("--starts", 3))
-    it = int(arg("--iters", 25))
-    print("rules %s, %d start(s), body 1.84 m 92 kg, from %.0f ms, step %.1f ms" % (rules, starts, T0 * 1e3, H_STEP * 1e3))
-    ctx, best = fit(rules, starts, iters=(it, it, int(1.5 * it)))
+    print("rules %s, %d start(s), body 1.84 m 92 kg, from %.0f ms, step %.1f ms, shoulders' range stops %s" % (rules, starts, T0 * 1e3, H_STEP * 1e3, "on" if stops else "off"))
+    ctx, best = fit(rules, starts, iters=(it, it, int(1.5 * it)), shoulder_stops=stops)
     print("\nbest start: %d, cost %.3f" % (best["start"], best["cost"]))
     show(best)
     if rules == "design":
-        json.dump(best, open(os.path.join(HERE, "fit3d_design.json"), "w"), indent=1)
+        json.dump(best, open(base_file, "w"), indent=1)
+        out, rows = summary(ctx, [min(1.0, max(0.0, (best["plan"][n][k] - lo) / (hi - lo))) for n in CH
+                                  for k, (_, _, lo, hi) in enumerate(ctx.box[4 * CH.index(n):4 * CH.index(n) + 4])], h=5e-4)
+        print("\nthe same plan at a 0.5 ms step:")
+        show(out)
 
 
 if __name__ == "__main__":

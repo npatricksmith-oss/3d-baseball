@@ -47,6 +47,8 @@ HAND_R = 0.03             # m, a gripping hand's radius of gyration about the ha
 # contact [E]: stiff enough that a foot sinks under a millimetre, soft enough for a 1 ms RK4 step
 KN, CN, KT, CT = 2.0e5, 300.0, 2.0e5, 300.0
 MU = 0.8                  # [E] shoe on clay (the flat probe's value; no source, body-motion 5.1)
+SH_ADD_MAX = 135.0        # deg [E] the shoulder's horizontal adduction, from the arm straight out to the side: the
+#                           clinical normal range is 130-135 (AAOS); range tried 125-145. One-sided, as every stop.
 FLEX_MAX = 150.0          # deg [E] knee's and elbow's full bend; 0 = straight, no hyperextension
 STOP_K, STOP_C = 2000.0, 20.0   # [E] N m/rad, N m s/rad: a joint's end-of-range stop (one-sided, never pulls)
 # posture [4] does not give, [E]
@@ -80,7 +82,7 @@ def curve_rate(name, t, h=0.005):
 class Model:
     """the engine System of a batter of stature H (m) and mass M (kg), with named bodies and joint points."""
 
-    def __init__(self, H=1.84, M=92.0, contacts=True, mu=MU):
+    def __init__(self, H=1.84, M=92.0, contacts=True, mu=MU, shoulder_stops=True):
         self.H, self.M = H, M
         s = self.sys = E.System()
         seg = lambda n: C.segment(n, H, M)
@@ -151,6 +153,10 @@ class Model:
             # +y its flexion axis, so the angle from the upper segment's z to the lower one's about +y is the bend)
             s.stop("knee_" + sd, th, sh, (0, 1, 0), (0, 0, 1), (0, 0, 1), 0.0, FLEX_MAX * D2R, STOP_K, STOP_C)
             s.stop("elbow_" + sd, ua, fa, (0, 1, 0), (0, 0, 1), (0, 0, 1), 0.0, FLEX_MAX * D2R, STOP_K, STOP_C)
+            if shoulder_stops:
+                # the upper arm cannot be brought further across the chest than its end of range: the angle,
+                # seen down the trunk's axis, from straight out to its own side round to the front and across
+                s.stop("shoulder_" + sd, b["trunk"], ua, (0, 0, -sg), (0, sg, 0), (0, 0, -1), -10.0, SH_ADD_MAX * D2R, STOP_K, STOP_C)
             if contacts:
                 for nm, px in (("heel", -cf * Lf), ("ball", (BALL_FWD - cf) * Lf)):
                     for wn, py in (("in", -sg * SOLE_HALF_W), ("out", sg * SOLE_HALF_W)):

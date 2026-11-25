@@ -1,6 +1,6 @@
 """Runs the compiled copy of the 3D body engine (body3d_probe.rs) and checks it against the Python one.
 
-    python3 analysis/research/body/probe3d.py --check      state for state against analysis/oracle/body3d (40 s)
+    python3 analysis/research/body/probe3d.py --check      state for state against analysis/oracle/body3d (50 s)
     python3 analysis/research/body/probe3d.py --bench      microseconds per RK4 step, dense and tree-ordered
 
 The Python engine is the checking model (docs/body-motion.md 8.1); the probe exists so fits can run
@@ -155,6 +155,16 @@ def _cases():
     st = Dr.add_drives(m, st, {n: (0.5 * bd[n], -0.250, 0.05, 1.0) for n in bd})
     Dr.add_damping(m, st)
     out.append(("off the ground, half drive", m, st, -0.250, 150))
+    fitted = os.path.join(HERE, "fit3d_design.json")
+    if os.path.isfile(fitted):                       # the fitted swing itself, from its own starting ground forces
+        import json
+        import fit3d
+        ctx = fit3d.Ctx()
+        for a, (n, v) in zip(ctx.m.sys.acts, json.load(open(fitted))["plan"].items()):
+            assert a[0] == n
+            a[4], a[6], a[7], a[8] = v
+        ctx.m.check_aux = list(ctx.aux0)
+        out.append(("the fitted swing (design rules)", ctx.m, ctx.st, fit3d.T0, 310))
     return out
 
 
@@ -163,7 +173,8 @@ def check():
     worst = 0.0
     for label, m, st, t0, n in _cases():
         ref = []
-        aux = m.sys.new_aux()
+        aux0 = getattr(m, "check_aux", None)
+        aux = m.sys.new_aux() if aux0 is None else list(aux0)
         m.sys.anchors(st, aux)
         s1 = list(st)
         for i in range(n):
@@ -171,7 +182,7 @@ def check():
             if (i + 1) % 10 == 0:
                 ref.append(list(s1))
         for nm, order in (("dense", ()), ("tree-ordered", tree_order(m))):
-            recs = run_raw(m.sys, st, t0, n, 1e-3, 10, order=order)[1:]
+            recs = run_raw(m.sys, st, t0, n, 1e-3, 10, aux=None if aux0 is None else list(aux0), order=order)[1:]
             d = max(abs(a - b) for (t, state, *_), r in zip(recs, ref) for a, b in zip(state, r))
             dend = max(abs(a - b) for a, b in zip(recs[-1][1], ref[-1]))
             print("%-28s %-13s largest state difference over %d records: %.2e (at the end %.2e)" % (label, nm, len(ref), d, dend))
