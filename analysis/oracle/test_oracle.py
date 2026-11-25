@@ -382,6 +382,12 @@ except ImportError:
     from test_swing_v3 import (HandWorkedCase, ReadingAndBody, Jet, PathInvariants, AppendixE, Braking,
                                AimRange, SourceBounds, Family, RatingRange, HandsSpeed, GoldenFile)
 
+# The three-dimensional body engine's checks (docs/body-motion.md §8.1) run with this file.
+try:
+    from .test_body3d import EngineChecks, BodyChecks, Mutations
+except ImportError:
+    from test_body3d import EngineChecks, BodyChecks, Mutations
+
 
 if __name__ == '__main__':
     unittest.main()

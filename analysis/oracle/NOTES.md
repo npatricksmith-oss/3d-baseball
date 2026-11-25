@@ -200,3 +200,33 @@ The bat rounds close to §6.2 (the quoted I_cm and 6-in MOI differ by
 about 0.38% and 0.27%). Its mass, 0.96447 kg, exceeds the stated 0.85–0.95 kg
 validation band; this is already inconsistent with the spec’s own 0.965 kg default.
 No coefficients, geometry, or golden outputs have been adjusted to force those checks.
+
+## The three-dimensional body engine (`body3d/`, PLAN D31 phase 1)
+
+`analysis/oracle/body3d/` is the checking model of the force-driven body
+(docs/body-motion.md §4.1, §4.4, §8.1). It is a second, separate oracle: it
+shares nothing with `bbphys.py` and was derived from the body-motion spec.
+Standard library only. Unlike the flight oracle it reads one thing outside
+`analysis/oracle/`: de Leva's segment table, the bat and the loader of
+Fortenbaugh's digitised curves in `analysis/research/body/common.py` (one
+checked copy of the table, not two).
+
+- `engine.py`: rigid bodies in maximal coordinates, joints as constraint
+  rows (point and axis-pair primitives), Cholesky solve in a fixed order,
+  Baumgarte stabilisation, one-sided stops, penalty contact points with a
+  stick-spring friction cone, the drive law τ = T·a·f_v, classical RK4.
+- `body.py`: the batter's 13 bodies from `Height` and `Mass`, the bat held
+  by both hands as a closed loop, the feet's contact points, and `place`,
+  which puts the body on Fortenbaugh's measured state at a given time.
+- `drive.py`: the 13 drive channels, the design's rules and strength
+  bounds, the muscles' level at the start, and a run that records what
+  Fortenbaugh measured.
+- `test_body3d.py` (19 tests, also run by `test_oracle.py`): each check
+  compares the engine with something it did not produce; three mutations
+  show the checks can fail. The whole-body tests need the digitised curves
+  under `sim/target/research-dl/4/csv` (or `BB_FORT_CSV`) and are skipped
+  without them.
+
+The fit of the drives is not in this package. A compiled probe of the same
+engine is planned for it (docs/body-motion.md §8.2); this Python engine
+stays the reference it is checked against.

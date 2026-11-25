@@ -73,9 +73,16 @@ def main():
         st = Dr.add_drives(m, st, plan)
         Dr.solve_tone(m, st, -0.250)
         Dr.add_damping(m, st)
-        rows, s1 = Dr.simulate(m, st, -0.250, 0.060, every=10)
+        rows, s1 = Dr.simulate(m, st, -0.250, 0.060, every=5)
         print("\nHAND-SET, not a fit: %s; rises 50 ms; rules broken: %s" % (label, Dr.check_rules(m, plan) or "none"))
-        show(rows, 2)
+        show(rows, 5)
+        for k, nm in (("pelvis_rot_vel", "pelvis"), ("trunk_rot_vel", "trunk"), ("bat_az_vel", "bat azimuth")):
+            v, tp = max((o[k], t) for t, o, g in rows if t <= 0.0)
+            print("   %s rate, largest up to 0 ms (5 ms samples): %.0f deg/s at %.0f ms" % (nm, v, tp * 1e3))
+        for sd, nm in (("L", "lead"), ("R", "rear")):
+            off = [t for t, o, g in rows if g[sd][2] <= 0.0]
+            print("   %s foot: largest load %.0f N; %s" % (nm, max(g[sd][2] for t, o, g in rows),
+                                                          "first unloaded at %.0f ms" % (off[0] * 1e3) if off else "never unloaded"))
         print("   work J: drives %.0f, stops %.0f, damping and starting level %.0f, ground %.0f; joints' drift %.1e m"
               % (s1[-4], s1[-3], s1[-2], s1[-1], m.sys.residual(s1)[0]))
 
