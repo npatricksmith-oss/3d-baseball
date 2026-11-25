@@ -23,7 +23,7 @@ Status: `[ ]` not started · `[~]` partly done · `[?]` needs an owner decision
 
 **Owner:** Q55 = a, outliers allowed (D32); Q56 = b (D33); Q57 = go.
 
-**Phase 1 running:** worker `body-3d` (Fable; owner: Fable for complex work), Workers tab, worktree `swing-research`, branch `work/body-3d`, job WORKER-BODY-3D.md there: the 3D body in the Python checking model. On stop: report, `git status`, tests, merge; next session per spec §13. Opus review at the gate.
+**Phase 1 running:** worker `body-3d` (Fable), Workers tab t4c, worktree `swing-research`, branch `work/body-3d`. Session 1 merged (`385f206`: 3D engine, 19 checks, spec §4.4). Session 2 (job WORKER-BODY-3D-2.md there): the fit under the design's rules. On stop: report, `git status`, tests, merge. Opus review at the gate.
 
 **Next:** §2: the ground-dive leftovers ([note](docs/calibration/2026-11-23-of-ground-dive.md) §9).
 
