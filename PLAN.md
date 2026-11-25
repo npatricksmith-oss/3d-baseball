@@ -421,6 +421,8 @@ Written 2026-11-24 by the Coordinator on the owner's Q54 = b. It cuts across M3 
 | **5. The pitcher** | The delivery on the same engine: release point, speed, spin and direction are results; fatigue is less drive. | The same gates as phases 1–4, for the delivery. |
 | **6. After** | Fielders' and the catcher's throws on the same engine. | — |
 
+**Phase 0 done 2026-11-25:** [docs/body-motion.md](docs/body-motion.md), reviewed by Codex Sol 6.2, Gemini Carbon and Gemini Neon (the owner's choice of reviewers), all three resolved. It sizes phase 1 at 6–9 Opus sessions, phase 2 at 3–5, phase 3 at 4–6, phase 4 at 3–5 and phase 5 at 7–10, and gives phase 1 a numeric pass/stop gate (spec §13). Its main open finding: held to the design's own rules, the flat probe does not reach the ball (spec §4.3), so phase 1's first question is whether the 3D body can. Open with the owner: Q55 (swings found by practice at creation), Q56 (one timing rating or two), Q57 (go-ahead for phase 1).
+
 **What the study must settle** (each with its source, or marked [E]):
 
 1. **The body:** which segments and joints, in three dimensions; segment masses and inertias from published tables by `Height` and `Mass`; how the feet hold the ground and how the front leg blocks.

@@ -19,9 +19,9 @@ Status: `[ ]` not started · `[~]` partly done · `[?]` needs an owner decision
 
 **State.** **PLAN D31 (Q54 = b): a force-driven body for the swing and the delivery; plan PLAN §14.1.** Swing v3's Rust step, D30 and Q53 are dropped.
 
-**Phase 0 design reviewed, fixes running, not merged:** `work/body-motion` (worktree `swing-research`; `body-design`, Opus, pane t46, job FIX-BODY-MOTION.md there). Three reviews (Codex Sol 6.2, Gemini Carbon, Neon) committed on the branch at `4fb522d`, Resolutions open: keep the driven body; the lunging, late-foot-wait and wrist results were probe faults, the fit breaks its own clock, replay must follow D9.
+**Phase 0 is merged (`262d0f3`):** [docs/body-motion.md](docs/body-motion.md), probes in `analysis/research/body/`, three reviews resolved. Open finding (spec §4.3): held to the design's own rules the flat test body does not reach the ball; phase 1 must show the 3D body does, or stop (spec §13).
 
-**Then:** check its per-finding report, write the three Resolutions, check-docs and the oracle test, merge, remove worktrees `rev-body-*`. Then the owner's questions (spec §14) from Q55 and his go-ahead for phase 1.
+**Waiting on the owner:** `[?]` Q55 (may a player's swings be found by practice when he is created; recommended yes), `[?]` Q56 (timing to the pitch and sequencing within the body: one rating or two; recommended two), `[?]` Q57 (go-ahead for phase 1: 6–9 Opus sessions; ask him to check `/usage` first). The budget question waits for phase 1. No workers running.
 
 **Next:** §2: the ground-dive leftovers ([note](docs/calibration/2026-11-23-of-ground-dive.md) §9).
 
