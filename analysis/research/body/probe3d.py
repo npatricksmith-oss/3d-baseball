@@ -126,9 +126,16 @@ def simulate(mdl, st, t0, t1, h=1e-3, every=5, aux=None, tree=True):
         o["act"] = {a[0]: v for a, v in zip(s.acts, act)}
         o["stops"] = {a[0]: v for a, v in zip(s.stops, stop)}
         grf = {"L": [0.0, 0.0, 0.0], "R": [0.0, 0.0, 0.0]}
+        xp = s.pose(state, mdl.b["pelvis"])[0]
+        mz = 0.0                                      # the ground's turning moment about the vertical through the pelvis
         for c, fc in zip(s.contacts, con):
             for k in range(3):
                 grf[c[0][0]][k] += fc[k]
+            if fc[2] > 0.0:
+                xb, qb, _, _ = s.pose(state, c[1])
+                pc = E.add(xb, E.mv(E.qR(qb), c[2]))
+                mz += (pc[0] - xp[0]) * fc[1] - (pc[1] - xp[1]) * fc[0]
+        o["ground_mz"] = mz
         rows.append((t, o, grf))
     return rows, recs[-1][1]
 

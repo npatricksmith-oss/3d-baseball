@@ -34,8 +34,13 @@ import probe3d as P                                    # noqa: E402
 from probe3d import E, B, Dr                           # noqa: E402
 
 T0, T_END, H_STEP, EVERY = -0.250, 0.060, 1e-3, 5
-LOWER = ("hip_ext_R", "hip_flex_L", "hip_ext_L", "hip_rot_R", "hip_rot_L", "knee_ext_R", "knee_ext_L",
-         "ankle_pf_R", "ankle_pf_L", "core")
+LOWER = ("hip_ext_R", "hip_flex_L", "hip_ext_L", "hip_rot_R", "hip_rot_L", "hip_abd_R", "hip_add_R", "hip_abd_L", "hip_add_L",
+         "knee_ext_R", "knee_ext_L", "ankle_pf_R", "ankle_pf_L", "core")
+# the lower-body fits' weightings (session 3), each stated before its run:
+#   forces: session 2's stage A (pelvis and trunk rates, travel, both feet's three forces, the lead knee)
+#   pelvis: the pelvis's rate and travel and the lead knee only: no ground forces
+#   rate:   the pelvis's rate alone: what the legs can do for the turn if nothing else is asked of them
+LOWER_SETS = {"forces": None, "pelvis": ("pelvis_rot_vel", "pelvis_y", "lead_knee_flex"), "rate": ("pelvis_rot_vel",)}
 ARMS = Dr.ARM_CHANNELS
 CH = LOWER + ARMS
 # the bands the misfits are scaled by. Rates and travel: fit.py's (read off [4]'s graphs, about one
@@ -50,7 +55,7 @@ CONTACT_AZ = -8.0            # [4]: the bat's azimuth at contact
 CONTACT_BAND = 0.005         # s: the gate's +-5 ms
 # start 0: onsets from [4]'s events (pelvis rate rises from -245 ms; the lead foot loads from -200; first
 # move -170; the bat's second acceleration from about -90), every strength at half its bound, rises 80 ms
-START_ON = {"hip_ext_R": -0.245, "hip_flex_L": -0.245, "hip_ext_L": -0.200, "hip_rot_R": -0.245, "hip_rot_L": -0.245,
+START_ON = {"hip_abd_R": -0.245, "hip_add_R": -0.245, "hip_abd_L": -0.200, "hip_add_L": -0.200, "hip_ext_R": -0.245, "hip_flex_L": -0.245, "hip_ext_L": -0.200, "hip_rot_R": -0.245, "hip_rot_L": -0.245,
             "knee_ext_R": -0.245, "knee_ext_L": -0.200, "ankle_pf_R": -0.245, "ankle_pf_L": -0.200, "core": -0.200,
             "shoulder_L": -0.170, "shoulder_R": -0.170, "elbow_ext_L": -0.170, "elbow_ext_R": -0.120,
             "wrist_L": -0.090, "wrist_R": -0.090}
@@ -248,6 +253,13 @@ def summary(ctx, u, h=H_STEP):
         out["peaks"][k] = (v, t * 1e3)
     out["grf_peak_lead_z"] = max((100 * g["L"][2] / ctx.BW, t * 1e3) for t, o, g in rows)
     out["came_round"] = any(o["bat_az"] >= CONTACT_AZ for t, o, g in rows)
+    at = lambda tt, k: next(o[k] for t, o, g in rows if abs(t - tt) < 1e-9)
+    out["pelvis_rate_at_-93"] = 0.4 * at(-0.095, "pelvis_rot_vel") + 0.6 * at(-0.090, "pelvis_rot_vel")
+    out["pelvis_rate_at_-70"] = at(-0.070, "pelvis_rot_vel")
+    dt_rec = rows[1][0] - rows[0][0]
+    out["ground_mz_impulse_-170_0"] = sum(o["ground_mz"] for t, o, g in rows if -0.170 <= t < 0.0) * dt_rec
+    out["ground_mz_peak"] = max((o["ground_mz"], t * 1e3) for t, o, g in rows if t <= 0.0)
+    out["pelvis_turn_at_0"] = at(0.0, "pelvis_rot")
     out["bat_az_at_0"] = next(o["bat_az"] for t, o, g in rows if abs(t) < 1e-9)
     out["sweet_speed_at_0"] = next(o["sweet_speed"] for t, o, g in rows if abs(t) < 1e-9)
     out["applied_peak"] = {a[0]: max(abs(o["act"][a[0]][0]) for t, o, g in rows) for a in ctx.m.sys.acts}
@@ -274,6 +286,9 @@ def show(out, log=print):
     log("   peaks: pelvis %.0f deg/s at %.0f ms (581 at -70), trunk %.0f at %.0f (766 at -57), bat azimuth %.0f at %.0f (2,435 at -10); lead foot %.0f %% BW at %.0f ms (130 at -93)"
         % (pk["pelvis_rot_vel"][0], pk["pelvis_rot_vel"][1], pk["trunk_rot_vel"][0], pk["trunk_rot_vel"][1],
            pk["bat_az_vel"][0], pk["bat_az_vel"][1], out["grf_peak_lead_z"][0], out["grf_peak_lead_z"][1]))
+    if "pelvis_rate_at_-93" in out:
+        log("   pelvis rate %.0f deg/s at -93 ms (558), %.0f at -70 (581); pelvis turned to %.0f deg at 0 ms (77); the ground's turning moment about the pelvis's vertical: peak %.0f N m at %.0f ms, impulse %.1f N m s over -170 ms to 0"
+            % (out["pelvis_rate_at_-93"], out["pelvis_rate_at_-70"], out["pelvis_turn_at_0"], out["ground_mz_peak"][0], out["ground_mz_peak"][1], out["ground_mz_impulse_-170_0"]))
     log("   residual RMS in band units, -250 ms to 0: " + ", ".join("%s %.2f" % (k, v) for k, v in out["rms_band_units"].items()))
     log("   plan (T N m [applied peak] of bound, onset, rise, off ms): " + "; ".join(
         "%s %.0f [%.0f] %.0f %.0f %.0f" % (n, v[0], out["applied_peak"][n], v[1] * 1e3, v[2] * 1e3, v[3] * 1e3) for n, v in out["plan"].items()))
@@ -317,6 +332,30 @@ def fit(rules="design", starts=3, H=1.84, M=92.0, log=print, iters=(20, 20, 30),
     return ctx, best
 
 
+def fit_lower(weighting, starts=3, iters=40, log=print, scale=None):
+    """the lower body alone (the 14 leg and trunk channels; the arms undriven), under the design's rules, against
+    one of LOWER_SETS. scale = {channel: factor} relaxes bounds for a diagnosis."""
+    ctx = Ctx(rules="design" if not scale else {"scale": scale})
+    which = LOWER_SETS[weighting] or STAGE_A
+    iA = [4 * i + k for i, n in enumerate(CH) if n in LOWER for k in range(4)]
+    best = None
+    for sidx in range(starts):
+        t = time.time()
+        u = ctx.start(sidx)
+        for i, n in enumerate(CH):
+            if n in ARMS:
+                u[4 * i] = 0.0
+        log("  start %d (lower body alone, weighting '%s': %s)" % (sidx, weighting, ", ".join(which)))
+        u, c = lm(ctx, u, iA, which, iters, log)
+        out, rows = summary(ctx, u)
+        out["cost"], out["start"], out["runs"] = c, sidx, ctx.evals
+        log("  start %d done: cost %.3f, %d runs so far, %.0f s" % (sidx, c, ctx.evals, time.time() - t))
+        show(out, log)
+        if best is None or c < best["cost"]:
+            best = out
+    return ctx, best
+
+
 def main():
     P.build()
     a = sys.argv[1:]
@@ -325,6 +364,18 @@ def main():
     tag = "" if stops else "_nostop"
     base_file = os.path.join(HERE, "fit3d_design%s.json" % tag)
     it = int(arg("--iters", 25))
+    if "--lower" in a:
+        w = arg("--lower", "forces")
+        sc = None
+        if "--scale-legs" in a:
+            k = float(arg("--scale-legs", 1.5))
+            sc = {n: k for n in LOWER}
+        print("the lower body alone, weighting '%s', %d starts%s" % (w, int(arg("--starts", 3)), "" if not sc else ", EVERY LEG AND TRUNK BOUND x %.2f (a diagnosis, not the design)" % k))
+        ctx, best = fit_lower(w, int(arg("--starts", 3)), int(arg("--iters", 40)), scale=sc)
+        print("\nbest start: %d, cost %.3f" % (best["start"], best["cost"]))
+        show(best)
+        json.dump(best, open(os.path.join(P.OUT, "fit3d_lower_%s%s.json" % (w, "" if not sc else "_x%.2f" % k)), "w"), indent=1)
+        return
     if "--limits" in a:
         base = json.load(open(base_file))
         for name in RULES:
