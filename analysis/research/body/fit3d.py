@@ -1,5 +1,5 @@
 """The three-dimensional body's fit to Fortenbaugh's mean swing under the design's rules
-(docs/body-motion.md 4.3's rules, 4.5's limits, 13's gate; PLAN D31 phase 1, sessions 2 and 5; PLAN D34).
+(docs/body-motion.md 4.3's rules, 4.5's limits, 13's gate; PLAN D31 phase 1, sessions 2, 5 and 6; PLAN D34).
 
     python3 analysis/research/body/fit3d.py --starts 3        the whole body under body-motion 4.5's limits (job queue)
     python3 analysis/research/body/fit3d.py --relax           one rule relaxed at a time, from that fit
@@ -7,22 +7,23 @@
     python3 analysis/research/body/fit3d.py --small           PLAN D32's small frame
     python3 analysis/research/body/fit3d.py --wrists          with a stop on the wrists' cock
     python3 analysis/research/body/fit3d.py --lower forces    the legs and trunk alone (also: pelvis, rate)
-    python3 analysis/research/body/fit3d.py --show fit3d_d34.json
+    python3 analysis/research/body/fit3d.py --rules wrist_delp --starts 2   the same with the wrists on Delp's reading (4.5)
+    python3 analysis/research/body/fit3d.py --show fit3d_d34_arms.json
 
 This FITS THE MODEL'S DRIVE NUMBERS TO A RECORDED AVERAGE SWING in the laboratory. Nothing in a game is
 fitted; nothing here tells the body where the bat should end, except as a recorded curve to compare with.
 
-The body starts at -250 ms on [4]'s measured state, moving (body3d.body.place). 22 drive channels: 16 of the
-legs and trunk, each (strength, onset, rise, switch-off, starting level), and 6 of the arms, each (strength,
-onset, rise, switch-off): 104 numbers. The rules are the search's box: strengths inside body-motion 4.5's
-bounds, rises of at least 50 ms, the arms' channels off until -170 ms at the earliest, every onset inside
-the window, the legs' and trunk's starting levels between 0 and 1. The search is Levenberg-Marquardt on the
-residuals in band units with a finite-difference Jacobian, projected onto the box, run through the compiled
-probe (probe3d.py). It is staged: (A) the lower body and trunk against [4]'s ground forces, pelvis, trunk
-and lead knee, the arms undriven; (B) the arms against the bat and elbows, A's numbers held; (C) all the
-numbers against everything. The reported numbers are from one run of the whole body with C's result.
-Starts: start 0 is a hand estimate from [4]'s event times at half strength; the others perturb it with a
-fixed seed. The gate's curves are [4]'s RATE curves (4.5).
+The body starts at -250 ms on [4]'s measured state, moving (body3d.body.place). 22 drive channels, each
+(strength, onset, rise, switch-off, starting level): 110 numbers. The rules are the search's box: strengths
+inside body-motion 4.5's bounds, rises of at least 50 ms, every onset inside the window, no arm drive rising
+above its holding level more than 70 ms (the measured electromechanical delay's top) before -170 ms, and the
+bat's first motion (its azimuth rate through [4]'s 236 deg/s) asked for at -170 ms. The search is
+Levenberg-Marquardt on the residuals in band units with a finite-difference Jacobian, projected onto the
+box, run through the compiled probe (probe3d.py). It is staged: (A) the lower body and trunk against [4]'s
+ground forces, pelvis, trunk and lead knee, the arms undriven; (B) the arms against the bat and elbows, A's
+numbers held; (C) all the numbers against everything. The reported numbers are from one run of the whole
+body with C's result. Starts: start 0 is a hand estimate from [4]'s event times at half strength; the
+others perturb it with a fixed seed. The gate's curves are [4]'s RATE curves (4.5).
 """
 import json
 import math
@@ -62,7 +63,8 @@ START_ON = {"hip_ext_R": -0.245, "hip_ext_L": -0.200, "hip_flex_L": -0.245, "hip
             "ankle_pf_R": -0.245, "ankle_pf_L": -0.200, "core": -0.200,
             "shoulder_L": -0.170, "shoulder_R": -0.170, "elbow_ext_L": -0.170, "elbow_ext_R": -0.120,
             "wrist_L": -0.090, "wrist_R": -0.090}
-START_T, START_RISE, START_OFF, START_A0 = 0.5, 0.080, 0.050, 0.2
+START_T, START_RISE, START_OFF, START_A0, START_A0_ARMS = 0.5, 0.080, 0.050, 0.2, 0.1
+FIRST_MOTION_BAND = 0.5 * Dr.FIRST_MOTION_TOL     # the bat's first motion: the tolerance's edge costs as much as 2 band units
 
 _c1 = lambda n: Dr.C1[n][0] / (Dr.C1[n][0] + Dr.SD_COUNT * Dr.C1[n][1])
 _pre = lambda *ps: {n: None for n in CH if n.startswith(ps)}
@@ -71,29 +73,32 @@ def _sc(k, *ps):
 # one rule relaxed at a time (a diagnosis; not the design)
 RELAX = {
     "continued": {},
-    "arms_free": {"arms_earliest": T0},
+    "no_first_motion_rule": {"first_motion": False, "emd": 0.080},     # the arms' drive from the window's start, the bat's first motion not asked for
     "shoulders_elbows_x2": {"scale": _sc(2.0, "shoulder", "elbow")},
     "no_rise_floor": {"rise_min": 0.005},
     "legs_trunk_x1.5": {"scale": {n: 1.5 for n in LOWER}},
     "wrists_x3": {"scale": _sc(3.0, "wrist")},
 }
-# the range ends of body-motion 4.5: what the answer rests on
+# the range ends of body-motion 4.5: what the answer rests on (session 5's leg and trunk ends, then the arms')
 RANGES = {
     "hip_extension_524": {"scale": _sc(524.0 / 430.1, "hip_ext")},
     "legs_at_the_sources_means": {"scale": {**_sc(_c1("hip_ext"), "hip_ext"), **_sc(_c1("hip_flex"), "hip_flex"), **_sc(_c1("knee_ext"), "knee_ext"),
                                             **_sc(_c1("knee_flex"), "knee_flex"), **_sc(_c1("ankle_pf"), "ankle_pf")}},
     "trunk_290": {"scale": {"core": 290.0 / 260.0}},
-    "trunk_250": {"scale": {"core": 250.0 / 260.0}},
-    "adduction_185": {"scale": _sc(1.4, "hip_add")},
-    "adduction_92": {"scale": _sc(0.7, "hip_add")},
-    "rotators_110": {"scale": _sc(110.0 / 78.0, "hip_rot")},
-    "rotators_50": {"scale": _sc(50.0 / 78.0, "hip_rot")},
     "hip_extension_curve_andersons": {"hip_curve": "hip_ext_anderson"},
-    "hip_side_muscles_on_the_first_law": {"side_curve": None},
-    "no_tendon_springs": {"tendons": False},
-    "nothing_tensed_beforehand": {"pretension": False},
+    "no_tendon_springs_at_the_legs": {"tendons": False},
+    "legs_and_trunk_not_tensed_beforehand": {"pretension": False},
+    "shoulders_kentels_player": {"scale": {"shoulder_R": 97.48 / Dr.SHOULDER_HADD, "shoulder_L": 71.90 / Dr.SHOULDER_HABD}, "shoulder_curves": "kentel"},
+    "shoulders_136_112": {"scale": {"shoulder_R": 136.0 / Dr.SHOULDER_HADD, "shoulder_L": 112.0 / Dr.SHOULDER_HABD}},
+    "elbows_52": {"scale": _sc(52.0 / Dr.ELBOW_EXT, "elbow")},
+    "elbows_76": {"scale": _sc(76.0 / Dr.ELBOW_EXT, "elbow")},
+    "no_tendon_springs_at_the_arms": {"arm_tendons": {"sh_hadd": False, "sh_habd": False, "elbow_ext": False, "wrist": False}},
+    "elbows_without_tendon_springs": {"arm_tendons": {"sh_hadd": True, "sh_habd": True, "elbow_ext": False, "wrist": False}},
+    "wrists_with_their_printed_tendon": {"arm_tendons": {"sh_hadd": True, "sh_habd": True, "elbow_ext": True, "wrist": True}},
+    "arms_not_tensed_beforehand": {"arm_pretension": False},
+    "delay_at_most_10_ms": {"emd": Dr.EMD_MIN},
 }
-RULES = {"design": {}, **RELAX, **RANGES}
+RULES = {"design": {}, "wrist_delp": {"wrist": "delp"}, **RELAX, **RANGES}
 
 
 class Ctx:
@@ -106,18 +111,25 @@ class Ctx:
         self.m = m = B.Model(H, M, shoulder_stops=shoulder_stops)
         st = B.place(m, t0)
         self.aux0 = list(m.start_aux)
-        self.bd = Dr.bounds(H, M)
-        for n, k in r.get("scale", {}).items():
-            self.bd[n] *= k
-        keep = (Dr.HIP_SIDE_CURVE, Dr.CURVES["hip_ext"], Dr.TENDONS)
+        keep = (Dr.HIP_SIDE_CURVE, Dr.CURVES["hip_ext"], Dr.TENDONS, Dr.WRIST_READING, Dr.SHOULDER_CURVES, dict(Dr.ARM_TENDONS))
         if "side_curve" in r:
             Dr.HIP_SIDE_CURVE = r["side_curve"]
         if "hip_curve" in r:
             Dr.CURVES["hip_ext"] = Dr.CURVES[r["hip_curve"]]
         if "tendons" in r:
             Dr.TENDONS = r["tendons"]
+        if "wrist" in r:
+            Dr.WRIST_READING = r["wrist"]
+        if "shoulder_curves" in r:
+            Dr.SHOULDER_CURVES = r["shoulder_curves"]
+        if "arm_tendons" in r:
+            Dr.ARM_TENDONS.update(r["arm_tendons"])
+        self.bd = Dr.bounds(H, M)                        # after the switches: the wrists' reading sets their bound
+        for n, k in r.get("scale", {}).items():
+            self.bd[n] *= k
         st = Dr.add_drives(m, st, {n: (0.0, 0.0, 0.05, 0.1, 0.0) for n in CH})
-        Dr.HIP_SIDE_CURVE, Dr.CURVES["hip_ext"], Dr.TENDONS = keep
+        Dr.HIP_SIDE_CURVE, Dr.CURVES["hip_ext"], Dr.TENDONS, Dr.WRIST_READING, Dr.SHOULDER_CURVES = keep[:5]
+        Dr.ARM_TENDONS.clear(); Dr.ARM_TENDONS.update(keep[5])
         self.tone, self.tone_rest = Dr.solve_tone(m, st, t0, aux=list(self.aux0))
         Dr.add_damping(m, st)
         if cock_stop is not None:
@@ -125,12 +137,15 @@ class Ctx:
         self.st = st
         self.BW = M * E.G
         rise_min = r.get("rise_min", Dr.RISE_MIN)
-        arms = r.get("arms_earliest", Dr.ARMS_EARLIEST)
+        self.emd = r.get("emd", Dr.EMD_MAX)
+        arms = max(t0, Dr.FIRST_MOTION_T - self.emd)     # no arm drive rises above its holding level before this
+        self.first_motion = r.get("first_motion", True)
         pre = 1.0 if r.get("pretension", True) else 0.0
+        pre_arms = 1.0 if r.get("arm_pretension", True) else 0.0
         self.box = []                                   # (channel, field, lo, hi)
         for n in CH:
             self.box += [(n, "T", 0.0, self.bd[n]), (n, "on", arms if n in ARMS else t0, 0.0),
-                         (n, "rise", rise_min, 0.250), (n, "off", -0.150, 0.100), (n, "start", 0.0, 0.0 if n in ARMS else pre)]
+                         (n, "rise", rise_min, 0.250), (n, "off", -0.150, 0.100), (n, "start", 0.0, pre_arms if n in ARMS else pre)]
         self.free = [i for i, (n, f, lo, hi) in enumerate(self.box) if hi > lo]
         self.times = [t0 + i * H_STEP * EVERY for i in range(int(round((0.0 - t0) / (H_STEP * EVERY))) + 1)]
         self.target = {k: [B.curve(k, t) for t in self.times] for k in BAND if k != "pelvis_y"}
@@ -156,7 +171,7 @@ class Ctx:
 
     def start(self, seed=0):
         rng = random.Random(seed)
-        plan = {n: (START_T * self.bd[n], START_ON[n], START_RISE, START_OFF, 0.0 if n in ARMS else START_A0) for n in CH}
+        plan = {n: (START_T * self.bd[n], START_ON[n], START_RISE, START_OFF, START_A0_ARMS if n in ARMS else START_A0) for n in CH}
         u = self.u_of(plan)
         if seed:
             u = [min(1.0, max(0.0, x + rng.uniform(-0.2, 0.2))) if i in self.free else x for i, x in enumerate(u)]
@@ -208,6 +223,17 @@ class Ctx:
             oc = {k: v for k, v in o_last.items() if isinstance(v, float)}
         return val, tc, oc
 
+    def first_motion_time(self, rows):
+        """when the bat's azimuth rate first rises through [4]'s 236 deg/s (4.5): the bat's first visible motion.
+        If it starts above or never gets there, the window's start or the run's end."""
+        thr = Dr.FIRST_MOTION_RATE
+        if rows[0][1]["bat_az_vel"] >= thr:
+            return rows[0][0]
+        for (ta, oa, _), (tb, ob, _) in zip(rows, rows[1:]):
+            if oa["bat_az_vel"] < thr <= ob["bat_az_vel"]:
+                return ta + (thr - oa["bat_az_vel"]) / (ob["bat_az_vel"] - oa["bat_az_vel"]) * (tb - ta)
+        return rows[-1][0]
+
     def residuals(self, u, which=None):
         try:
             rows = self.run(u)
@@ -223,6 +249,8 @@ class Ctx:
             r.append(tc / CONTACT_BAND)
             for k, (mean, sd) in AT_CONTACT.items():
                 r.append((oc[k] - mean) / sd)
+            if self.first_motion:
+                r.append((self.first_motion_time(rows) - Dr.FIRST_MOTION_T) / FIRST_MOTION_BAND)
         if any(x != x for x in r):
             return None
         return r
@@ -309,6 +337,12 @@ def summary(ctx, u, h=H_STEP):
     out["sweet_speed_at_0"] = at(0.0, "sweet_speed")
     out["sweet_speed_peak"] = max((o["sweet_speed"], t * 1e3) for t, o, g in rows)
     out["pelvis_rate_at_-93"] = 0.4 * at(-0.095, "pelvis_rot_vel") + 0.6 * at(-0.090, "pelvis_rot_vel")
+    tfm = ctx.first_motion_time(rows)
+    pl = ctx.plan(u)
+    arm_on = [(pl[nm][1], nm) for nm in ARMS if pl[nm][0] > 0.01 * ctx.bd[nm]]
+    out["first_motion_ms"] = tfm * 1e3
+    out["arm_onset_first"] = (min(arm_on)[0] * 1e3, min(arm_on)[1]) if arm_on else None
+    out["delay_ms"] = (tfm - min(arm_on)[0]) * 1e3 if arm_on else None
     names = [a[0] for a in ctx.m.sys.acts]
     out["applied_peak"] = {nm: max(abs(o["act"][nm][0]) for t, o, g in rows) for nm in names}
     out["applied_at_speed"] = {nm: max((abs(o["act"][nm][0]), o["act"][nm][1]) for t, o, g in rows) for nm in names}
@@ -324,7 +358,12 @@ def summary(ctx, u, h=H_STEP):
             on.append("%s %s %s" % (nm, f, "low" if u[i] <= 1e-6 else "HIGH"))
     out["on_bounds"] = on
     out["n_free"] = len(ctx.free)
-    out["rules_broken"] = Dr.check_rules(ctx.m, p) if not ctx.rules else "changed for this run: %s" % ", ".join(ctx.rules)
+    broken = Dr.check_rules(ctx.m, p)
+    if abs(tfm - Dr.FIRST_MOTION_T) > Dr.FIRST_MOTION_TOL + 1e-9:
+        broken.append("the bat's first motion is at %.0f ms, outside -170 +- 15" % (tfm * 1e3))
+    if out["delay_ms"] is not None and out["delay_ms"] > Dr.EMD_MAX * 1e3 + 1e-6:
+        broken.append("the first arm drive rises %.0f ms before the bat's first motion (at most 70)" % out["delay_ms"])
+    out["rules_broken"] = broken if not ctx.rules or set(ctx.rules) == {"wrist"} else "changed for this run: %s%s" % (", ".join(ctx.rules), ("; and " + "; ".join(broken)) if broken else "")
     return out, rows
 
 
@@ -339,6 +378,10 @@ def show(out, log=print):
     log("   peaks: pelvis %.0f deg/s at %.0f ms (581 at -70), %.0f at -93 ms (558); trunk %.0f at %.0f (766 at -57); bat azimuth %.0f at %.0f (2,435 at -10); lead foot %.0f %% BW at %.0f ms (130 at -93)"
         % (pk["pelvis_rot_vel"][0], pk["pelvis_rot_vel"][1], out["pelvis_rate_at_-93"], pk["trunk_rot_vel"][0], pk["trunk_rot_vel"][1],
            pk["bat_az_vel"][0], pk["bat_az_vel"][1], out["grf_peak_lead_z"][0], out["grf_peak_lead_z"][1]))
+    if "first_motion_ms" in out:
+        ao = out["arm_onset_first"]
+        log("   the bat's first motion (its rate through 236 deg/s) at %.0f ms (-170 +- 15); the first arm drive rises at %s; the delay between them %s ms (measured range 10-70)"
+            % (out["first_motion_ms"], "-" if not ao else "%.0f ms (%s)" % tuple(ao), "-" if out["delay_ms"] is None else "%.0f" % out["delay_ms"]))
     log("   residual RMS in band units, -250 ms to 0: " + ", ".join("%s %.2f" % (k, v) for k, v in out["rms_band_units"].items()))
     log("   plan: channel  strength of bound [applied peak, at rad/s]  onset rise off ms  starting level")
     for nm, v in out["plan"].items():
@@ -411,10 +454,10 @@ def main():
     P.build()
     a = sys.argv[1:]
     arg = lambda k, d: a[a.index(k) + 1] if k in a else d
-    base_file = os.path.join(HERE, "fit3d_d34.json")
+    base_file = os.path.join(HERE, "fit3d_d34_arms.json")       # session 5's fit (arms on estimates) stays in fit3d_d34.json
     it = int(arg("--iters", 25))
     if "--show" in a:
-        show(json.load(open(os.path.join(HERE, arg("--show", "fit3d_d34.json")))))
+        show(json.load(open(os.path.join(HERE, arg("--show", "fit3d_d34_arms.json")))))
         return
     if "--lower" in a:
         w = arg("--lower", "forces")
@@ -430,7 +473,7 @@ def main():
                 continue
             print("\n== %s (re-fitted from the design fit, all numbers free)" % name)
             ctx, best = fit(name, 1, u_from=base["plan"], iters=(0, 0, it))
-            json.dump(best, open(os.path.join(P.OUT, "fit3d_d34_%s.json" % name), "w"), indent=1)
+            json.dump(best, open(os.path.join(P.OUT, "fit3d_arms_%s.json" % name), "w"), indent=1)
         return
     if "--small" in a:
         base = json.load(open(base_file))
@@ -440,18 +483,21 @@ def main():
         ctx, best = fit("design", 1, Hs, Ms, u_from=base["plan"], iters=(0, 0, it))
         print("\nthe average batter (1.84 m, 92 kg), for comparison:")
         show(base)
-        json.dump(best, open(os.path.join(P.OUT, "fit3d_d34_small.json"), "w"), indent=1)
+        json.dump(best, open(os.path.join(P.OUT, "fit3d_arms_small.json"), "w"), indent=1)
         return
     if "--wrists" in a:
         base = json.load(open(base_file))
         for margin in (5.0, 20.0):
             print("\nWITH a one-sided stop %.0f deg past the wrists' cock at the start [E], re-fitted from the design fit:" % margin)
             ctx, best = fit("design", 1, u_from=base["plan"], iters=(0, 0, it), cock_stop=margin)
-            json.dump(best, open(os.path.join(P.OUT, "fit3d_d34_cock%d.json" % margin), "w"), indent=1)
+            json.dump(best, open(os.path.join(P.OUT, "fit3d_arms_cock%d.json" % margin), "w"), indent=1)
         return
     starts = int(arg("--starts", 3))
-    print("body-motion 4.5's limits, %d start(s), body 1.84 m 92 kg, from %.0f ms, step %.1f ms" % (starts, T0 * 1e3, H_STEP * 1e3))
-    ctx, best = fit("design", starts, iters=(it, it, int(1.5 * it)))
+    rules = arg("--rules", "design")                 # "wrist_delp": the wrists on Delp's reading (4.5), a whole fit of its own
+    if rules != "design":
+        base_file = os.path.join(HERE, "fit3d_d34_arms_%s.json" % rules)
+    print("body-motion 4.5's limits (%s), %d start(s), body 1.84 m 92 kg, from %.0f ms, step %.1f ms" % (rules, starts, T0 * 1e3, H_STEP * 1e3))
+    ctx, best = fit(rules, starts, iters=(it, it, int(arg("--iters-all", int(1.5 * it)))))
     print("\nbest start: %d, cost %.3f" % (best["start"], best["cost"]))
     show(best)
     json.dump(best, open(base_file, "w"), indent=1)

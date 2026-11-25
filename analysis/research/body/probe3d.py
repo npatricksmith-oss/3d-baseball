@@ -62,8 +62,8 @@ def write_model(path, s, st, aux, t0, nsteps, h, every, order=()):
         w.append("%d %d %s %s" % (a, b, f(*ua), f(*wb)))
     w.append("order %d %s" % (len(order), " ".join(str(i) for i in order)))
     w.append("fvtabs %d" % len(s.fvtabs))
-    for tab in s.fvtabs:
-        w.append("%d %s" % (len(tab), " ".join(f(*pt) for pt in tab)))
+    for k, tab in enumerate(s.fvtabs):
+        w.append("%d %s %s" % (len(tab), f(s.tab_ecc(k)), " ".join(f(*pt) for pt in tab)))
     w.append("acts %d" % len(s.acts))
     for name, a, b, ax, T, W, t_on, rise, t_off, a0, tab, ksec in s.acts:
         w.append("%d %d %s %s %d %s" % (a, b, f(*ax), f(T, W, t_on, rise, t_off, a0), tab, f(ksec)))
@@ -162,21 +162,21 @@ def _cases():
     st = B.place(m, -0.250)
     bd = Dr.bounds(m.H, m.M)
     arm = lambda n: n.startswith(("shoulder", "elbow", "wrist"))
-    st = Dr.add_drives(m, st, {n: (bd[n], -0.170 if arm(n) else -0.245, 0.05, 0.1, 0.0 if arm(n) else 0.3) for n in bd})
+    st = Dr.add_drives(m, st, {n: (bd[n], -0.170 if arm(n) else -0.245, 0.05, 0.1, 0.2 if arm(n) else 0.3) for n in bd})
     Dr.solve_tone(m, st, -0.250)
     Dr.add_damping(m, st)
     aux = m.sys.new_aux()
     m.sys.anchors(st, aux)
     m.sys.sec_start(st, aux)                         # the leg drives tensed at 0.3, their tendon springs loaded to match
     m.check_aux = aux
-    out.append(("every drive at its bound, legs tensed, tendons", m, st, -0.250, 310))
+    out.append(("every drive at its bound, all tensed, tendons", m, st, -0.250, 310))
     m = B.Model(contacts=False)
     m.sys.g = (0.0, 0.0, 0.0)
     st = B.place(m, -0.250)
     st = Dr.add_drives(m, st, {n: (0.5 * bd[n], -0.250, 0.05, 1.0) for n in bd})
     Dr.add_damping(m, st)
     out.append(("off the ground, half drive", m, st, -0.250, 150))
-    fitted = os.path.join(HERE, "fit3d_d34.json")
+    fitted = os.path.join(HERE, "fit3d_d34_arms.json")
     if os.path.isfile(fitted):                       # the fitted swing itself (4.5's limits), from its own start
         import json
         import fit3d

@@ -1,6 +1,6 @@
 # Body motion: a force-driven batter and pitcher (PLAN D31, §14.1 phase 0)
 
-**Status: design; phase 1 at its gate: refitted on measured limits (PLAN D34), still short at the arms, for the owner's decision (§4.4, §4.6).** Written 2026-11-25 by worker body-design on branch `work/body-motion`, revised the same day after three independent reviews. Phase 1's first three sessions (worker body-3d, 2026-11-25) built the three-dimensional checking engine, a compiled probe of it, the placed and moving body, the fit under the design's rules and a 3D inverse dynamics. The body does not reach the ball in time under the rules. The legs can turn the pelvis in time; what is short is the hips' and lead knee's strength at the speeds they turn at. Whether the trunk is also over its sourced bound is not established: session 4 has its need at 216–355 N·m against 288 (§4.4). This file is phase 0 of [PLAN §14.1](../PLAN.md#141-the-body-motion-rebuild-d31): it settles the seven items of the plan and the owner's question on consolidating muscle groups and ratings, as far as a flat probe can. Nothing here is in Rust; today's swing and release stay in games until phase 4.
+**Status: design; phase 1 at its gate: on measured limits throughout (PLAN D34) the body reaches the ball on time; the bat's speed and the trunk's curve are outside the gate, for the owner's decision (§4.4, §4.7).** Written 2026-11-25 by worker body-design on branch `work/body-motion`, revised the same day after three independent reviews. Phase 1's first three sessions (worker body-3d, 2026-11-25) built the three-dimensional checking engine, a compiled probe of it, the placed and moving body, the fit under the design's rules and a 3D inverse dynamics. The body does not reach the ball in time under the rules. The legs can turn the pelvis in time; what is short is the hips' and lead knee's strength at the speeds they turn at. Whether the trunk is also over its sourced bound is not established: session 4 has its need at 216–355 N·m against 288 (§4.4). This file is phase 0 of [PLAN §14.1](../PLAN.md#141-the-body-motion-rebuild-d31): it settles the seven items of the plan and the owner's question on consolidating muscle groups and ratings, as far as a flat probe can. Nothing here is in Rust; today's swing and release stay in games until phase 4.
 
 ## Status and what is left
 
@@ -8,11 +8,12 @@
 - **Reviewed and revised.** Three independent reviews (2026-11-25: [Codex Sol](reviews/2026-11-25-codex-sol-body-motion-review.md), [Gemini Carbon](reviews/2026-11-25-gemini-carbon-body-motion-review.md), [Gemini Neon](reviews/2026-11-25-gemini-neon-body-motion-review.md)) found errors in the probes and the spec. This version is rewritten from the corrected runs; "What the first version got wrong" below lists what changed.
 - **Built in the probes:** a driven pelvis–trunk–arms–bat chain over planted feet, in the horizontal plane (§4.2). Not built: any three-dimensional body (§4.1 designs it; phase 1 builds it), the pitcher's body (§11, design depth only).
 - **The main open finding.** Under the design's own rules (the arms start no earlier than the decision allows, drives rise no faster than 50 ms, strengths inside sourced bounds), the flat chain does not reach the ball in time (§4.3). The fit that does reproduce [4] breaks those rules. Phase 1's first job is to show that the three-dimensional body can swing under them; if it cannot, the work stops there (§13).
+- **Phase 1, session 6 (2026-11-25):** the arms' limits were written down with their sources before any refit (§4.5: strength by direction, speed curves, tendon stretch at shoulders and elbows, a starting level, the clock restated as the bat's measured first motion at −170 ms with the arm muscles rising at most 70 ms earlier). **Refitted, contact is +4 ms, the bat first moves at −172 ms, and every gated curve but the trunk's is inside one band unit. The bat is at 20.1 m/s: the gate asks 29–34, [4]'s own motion on this body has 22.9.** Nothing was added; the gate is not passed (§4.7).
 - **Phase 1, session 5 (2026-11-25), after the owner's ruling that limits come only from measurements (PLAN D34):** the limits were written down with their sources before any refit (§4.5); the engine got measured strength-at-speed curves, tendon springs at the leg joints and muscles tensed beforehand, with their checks (§8.1). **Refitted, the lower body is inside the gate (pelvis 573°/s at −93 ms, the feet's forces within a band) and the bat is still 21–28 ms late at 18.6 m/s. What is short is the arms, whose limits are estimates and were not touched. Nothing was added to close the gap** (§4.6).
 - **Phase 1, session 4 (2026-11-25, diagnosis only):** session 3's 330–440 N·m for the trunk was the lumbar torque about the pelvis's long axis, which takes in part of a large bending moment. About the trunk's own long axis, the way strength is tested, the need is 321 N·m as placed and 216–355 over the things it rests on; worked up from [4]'s ground forces it is 131–172 before the feet's unreported free moments. **So the trunk's excess over 288 is not robust.** The hips' and lead knee's shortfall at speed stands (§4.4).
 - **Phase 1, session 3 (2026-11-25):** the lower body alone turns the pelvis in time inside the bounds; the 3D inverse dynamics has [4]'s swing needing 330–440 N·m of trunk rotation against a bound of 288, and 70–95% of the hips' and lead knee's full strength at speeds where the force–velocity law leaves 25–60%. **Stopped for the owner under §13's rule; §4.4 has the question, the options and a recommendation.**
 - **Phase 1, sessions 1 and 2 (2026-11-25):** the 3D engine in Python with its checks (§8.1); a compiled probe of it, agreeing to 2 × 10⁻¹² and measured at 50 µs a step (§8.2); the body placed on [4]'s measured state, moving, with both knees resolved; the fit under the rules, the rules relaxed one at a time, the small frame and the wrists (§4.4). **The 3D body as built comes round about 41 ms late at 17 m/s. The pelvis is turned too late, which is upstream of the arms' rules, so this is not yet the answer to whether a body can swing under them.**
-- **Left for whoever continues:** the owner's decision in §4.4 (whether the arms get measured limits too); dead ends are listed in the [research index](research/body/README.md) under "Tried and ruled out".
+- **Left for whoever continues:** the owner's decision in §4.4 (which bat speed the gate reads; the missing arm and trunk parts); then an independent review; dead ends are listed in the [research index](research/body/README.md) under "Tried and ruled out".
 
 **What the first version got wrong** (and what the reviews found):
 
@@ -99,7 +100,7 @@ Every number below is tagged **measured** (a source gives it), **derived** (comp
 | the 3D engine's checks | `python3 -m unittest analysis/oracle/test_body3d.py` (13 s; also run by `test_oracle.py`) | closed forms, independent derivations, conservation, mutations (§8.1) |
 | the 3D engine's compiled probe | `python3 analysis/research/body/probe3d.py --check` (50 s; builds `body3d_probe.rs` with `rustc` into `sim/target/codex-probes/body3d/`); `--bench` | the probe state for state against the Python engine on four runs; its time per step (§8.2) |
 | the 3D placed body | `python3 analysis/research/body/placed3d.py` (20 s; job queue), output `sim/target/codex-probes/body3d/placed3d.out` | the two knees, the starting velocities, undriven runs (§4.4) |
-| the 3D fit on the measured limits | `python3 analysis/research/body/fit3d.py --starts 3` (13 min; job queue); writes `fit3d_d34.json` | the 22 channels fitted to [4] under the rules with §4.5's limits (§4.6). Session 2's fits (`fit3d_design.json`, `fit3d_design_nostop.json`) came from this script at `987e92d` |
+| the 3D fit on the measured limits | `python3 analysis/research/body/fit3d.py --starts 3` (16 min; job queue); writes `fit3d_d34_arms.json`; `--rules wrist_delp` for the wrists' other reading | the 22 channels fitted to [4] under the rules with §4.5's limits, the arms included (§4.7). Session 5's fit with the arms on estimates is `fit3d_d34.json` (from `76d3293`, §4.6); session 2's (`fit3d_design.json`, `fit3d_design_nostop.json`) from `987e92d` |
 | which rule binds; what the answer rests on | `python3 analysis/research/body/fit3d.py --relax`; `--ranges` (9 and 13 min; job queue) | that fit continued with one rule relaxed, or one of §4.5's range ends, at a time (§4.6) |
 | the legs alone, 3D | `python3 analysis/research/body/fit3d.py --lower forces` (also `pelvis`, `rate`; 3–4 min each; job queue) | whether the legs turn the pelvis in time inside the bounds, under three stated weightings (§4.4's numbers are from `876b3aa`, before §4.5's limits) |
 | the trunk's torque, three ways | `python3 analysis/research/body/trunk3d.py` (2 min), output `sim/target/codex-probes/body3d/trunk3d.out` | the lumbar torque from above, from below and from the angular momentum, by axis, with its sensitivities (§4.4) |
@@ -243,18 +244,22 @@ So what holds the cock does decide where the ball meets the bat. The stiff stop 
 
 ### 4.4 The three-dimensional body: where phase 1 stands (sessions 1 to 5)
 
-**In one paragraph.** The engine, its checks, a compiled probe of it (§8.2) and the placed, moving body are built. Session 2's whole-body fit under the design's rules did not reach the ball (41–52 ms late at 17–18 m/s) and its pelvis peaked after contact. Session 3 found the legs alone could turn the pelvis in time, but that [4]'s motion asked the hips and lead knee for 70–95% of their full strength at speeds where the first force–velocity law left 25–60%. Session 4 found the trunk's apparent excess over its bound was not robust. The owner then ruled that limits come only from measurements (PLAN D34); §4.5 writes them down, and **§4.6 has the refit: the lower body is now inside the gate, the bat is still 21–28 ms late at 18.6 m/s, and what is short is the arms, whose limits are estimates.** The history below (the knees, the moving start, the lower body alone, the inverse dynamics, the trunk) stands as it was found; its numbers are from the limits of the time.
+**In one paragraph.** The engine, its checks, a compiled probe of it (§8.2) and the placed, moving body are built. Session 2's whole-body fit under the design's rules did not reach the ball (41–52 ms late at 17–18 m/s). Sessions 3 and 4 found why: the first limits were too tight for the legs at speed, and the trunk's apparent excess was not robust. The owner ruled that limits come only from measurements (PLAN D34); §4.5 writes them down. With measured limits at the legs and trunk the lower body came inside the gate and the bat was still 21–28 ms late (§4.6). **With measured limits at the arms too, and the clock restated as the bat's measured first motion, the body reaches the ball: contact +4 ms, every curve but the trunk's inside the gate, the bat at 20 m/s against 22.9 for the measured motion itself and 29–34 in the gate (§4.7).** The history below stands as it was found; its numbers are from the limits of the time.
 
-**For the owner** (rewritten after session 5; the numbers are §4.6's). In baseball terms:
+**For the owner** (rewritten after session 6; the numbers are §4.7's). In baseball terms:
 
-- *What was done on your ruling (PLAN D34):* the legs' and trunk's limits were replaced by measured ones and by nothing else: each source's strongest values, each joint's own measured loss of strength with speed, tendon stretch at the hips, knees and ankles as published models set it, and muscles already tensed before they fire. The limits were written down with their sources before the swing was refitted (§4.5).
-- *What the body does now:* **from the ground up to the hips it swings like the pros.** The pelvis is at 573°/s at −93 ms (pros 558), the front foot takes 120% of body weight (pros 130), and both feet's forces and the pelvis's turn are inside the pros' own spread. **The bat is still late and slow:** it reaches the ball 21–28 ms late at about 18.6 m/s, where the pros are at 27–31. The trunk gets away from the arms (it reaches 960–1,070°/s where the pros' reaches 766) and the bat stays cocked.
-- *What is short now is the arms,* and nothing about the arms was changed this session. Every arm number sits on its limit: full strength, started at the earliest instant the decision allows, at the fastest rise.
-- *Which arm rule matters:* letting the arms start earlier than −170 ms brings the bat to within 8 ms. Twice the shoulder and elbow strength, three times the wrists, or no limit on how fast a muscle can come on, each bring it to within 14–16 ms. Stronger legs and a stronger trunk change nothing any more. In no run does the bat pass 22 m/s.
-- *What that rests on:* **the arms' strength limits (100 N·m a shoulder, 70 an elbow) were never measured values; they are estimates,** and so is the way their strength falls with speed. The arms have no tendon stretch and are not tensed beforehand, because your ruling named the legs and trunk. The −170 ms is when the pros' hands are first seen to move against 56 mph pitching (§5.4), not when their arm muscles switch on.
-- *Nothing was added to close the gap.* What would be needed, none of it measured here: (1) measured shoulder and elbow strength and strength at speed (one published tennis model, Kentel 2011, has an elite player's values and tendon stretch for the shoulder, elbow and wrist; [N8] read only part of its table); (2) a ruling on whether the arms, like the legs, may be tensed before the decision, since the hands hold the bat on every pitch; (3) a source for when a hitter's arm muscles switch on relative to the hands' first visible move.
-- *The decision:* (a) extend the same rule to the arms (measured strength and speed curves, tendon stretch from a published model, tensed beforehand) with a short source search first, and refit; (b) hold the arms as they are and take "about 20 ms late, two thirds of the pros' bat speed" as what the measured limits give; (c) stop the rebuild here.
-- *Recommendation:* (a). The legs and trunk came inside the gate once their limits were measured ones, and the arms are the only part still running on estimates.
+- *What was done:* your ruling (PLAN D34) was applied to the arms as it had been to the legs and trunk: measured strength by direction, measured loss of strength with speed, tendon stretch at the shoulders and elbows as a published model sets it, and the arms allowed to be tensed while they hold the bat. The clock was restated as what was measured: the bat must be seen to start at −170 ms as the pros' does, and the arm muscles may rise from their holding level no more than 70 ms before that, the top of the measured delay between a muscle switching on and its joint moving. The arms' forward drive before the batter could have decided was not allowed and not tried. The limits were written down before the swing was refitted (§4.5).
+- *What the body does now:* **it reaches the ball on time.** Contact is 4 ms late in the best fit (4, 4 and 6 ms in three tries; the gate is ±5). The pelvis, the bat's turn, both feet's forces, the bat's angle at contact and how far it is still cocked are all inside the pros' spread. The bat is first seen to move at −172 ms, with its arm muscles rising 65 ms earlier.
+- *What is still outside the gate, two things:*
+  1. **The bat's speed: 20 m/s at contact, where the gate asks for 29–34.** But the gate's figure comes from other studies (a tee study and game swings), not from the batters whose motion the body is fitted to. The same body moved exactly along those batters' measured curves has **22.9 m/s** at contact (25 at its fastest, just before). Against that the body is 12% slow, and the difference is in the hands: 3.6 m/s at contact against 5–7.
+  2. **The trunk does not slow down.** The pros' shoulders are turning at 430°/s by contact after peaking at 766; the model's are still at 800. Its curve is 1.4 of the pros' spread off where the gate asks for 1.
+- *What these sit on.* No rule and no limit: doubling the shoulders' and elbows' strength gives 22 m/s, and nothing else moves the speed. They sit on parts the arms and trunk do not have: the shoulders turn about one axis only, the forearms cannot roll, the elbows cannot pull, and nothing can brake the trunk. Each of these has measured strengths ([N9], [N8]); none was added.
+- *What the answer leans on most:* the legs and trunk being tensed beforehand (30 ms late without it) and the arms rising 65 ms before the bat moves (11 ms late if held to 10 ms). The two wrist readings, the arms' tendon stretch, the arms being tensed and every range end of the arms' strength change contact by under 4 ms.
+- *The decision:*
+  - (a) take the gate's bat speed from the batters the body is fitted to (22.9 m/s at contact, 25 at its fastest, as their own motion gives on this body), since two different sets of hitters cannot both be matched, and send the body to independent review with the bat's speed and the trunk's curve listed as its two open items;
+  - (b) keep 29–34 m/s as the gate and add the missing arm and trunk parts under the same measured-only rule before any review;
+  - (c) both: the missing parts first, then the review, with the gate's speed read as in (a).
+- *Recommendation:* (c). The gate cannot ask for 29–34 m/s from a motion that has 23 in it; and the parts that are missing are real ones with measured strengths, which is the same case the legs and then the arms were.
 
 **Can the legs turn the pelvis in time? Yes** (`fit3d.py --lower`: the 14 leg and trunk channels, the arms undriven, the design's rules, three cold starts each, 40 iterations). Hip abduction and adduction were added first, each bounded at 132 N·m: abduction from college pitchers' isometric 109 ± 16 N·m (mean + 2 SD scaled by weight × height; [N5] §2, second hand, hand-held dynamometer), adduction set equal [E: range 0.7–1.4 ×; the one comparison found has non-athletes' adductors at 70 N·m against abductors at 87, read from a search summary only]. The weightings were stated before each run:
 
@@ -469,6 +474,40 @@ The owner ruled on 2026-11-25 (Q58 = a): the body's strength limits come only fr
 
 **What rests on an assumption, for the owner:** hip adduction's and the hip rotators' full strength; the speed curve of hip abduction, adduction and rotation; every curve above 4–5 rad/s; the shoulders' and elbows' strength and speed curve; the slope toward the 1.5 × of a stretched muscle. Everything else in the three tables is a measured number.
 
+**The arms' limits (session 6), written before the arms were refitted.** The owner's ruling is applied to the arms the way the tables above apply it to the legs and trunk. This block was written and committed before any run with it. It replaces the arm rows of the three tables above (100 and 70 N·m, the first law, no tendon stretch, no starting level, onsets from −170 ms). Sources are [N9]'s, with its reading statuses. Which way each channel acts decides which measurement applies: the lead shoulder's channel sweeps the lead arm out from across the chest about the trunk's axis (horizontal abduction); the rear shoulder's brings the rear arm forward and round (horizontal adduction); the elbows' extend; the wrists' uncock the bat (ulnar deviation, both hands).
+
+| Channel | Bound, N·m | From | Read | Range a rerun tests |
+| :-- | --: | :-- | :-- | :-- |
+| rear shoulder (horizontal adduction) | 123 at 1.05 rad/s and slower | Silva 2006: 23 elite junior tennis players, 90.9 ± 21.3 N·m per 100 kg at 60°/s, mean + 2 SD × 92 kg. The only sample with SDs in this direction; **boys of 14, scaled by mass**, which is its weakness | TAB | 97.5 (one elite adult, Kentel 2011, FT, his size not given, so unscaled); 136 (Holzbaur 2007, 5 men, adduction in the frontal plane, another direction, mean + 2 SD scaled) |
+| lead shoulder (horizontal abduction) | 92 at 1.05 rad/s and slower | Silva: 69.8 ± 15.0 per 100 kg, the same way | TAB | 71.9 (Kentel); 112 (Holzbaur, abduction) |
+| each elbow's extension | 85 | Holzbaur 2007: 5 men, isometric 60.5 ± 6.2 N·m at 81.6 kg, 1.778 m, mean + 2 SD scaled. An SD from five men is very uncertain | TAB (text layer garbled) | 52 (Kentel); 76 (Danneskiold-Samsøe, men of 20–29, mean + 2 SD, sizes unread, unscaled, EXC) |
+| each wrist's uncocking (ulnar deviation) | **two readings, both run** | see below | | |
+
+**The wrists: why the sources differ, and which the channel is.** Delp 1996 (AB): isometric, ten men, ulnar deviation 9.5 ± 2.2 N·m, so 13.9 at mean + 2 SD (sizes unread). Peleg 2025 (TAB): twenty men on a Biodex at 90°/s, 26.5 ± 6.6 N·m, 51 at mean + 2 SD scaled; Kentel's one player 41.4. All are one wrist, in N·m, in the same direction; units and counting are not the difference. The gap is not uniform across directions: against the other samples Delp's extension is 1.2–1.9 times lower, radial deviation 1.35, flexion 2, ulnar deviation 2.8. That pattern is what a hand gripping a handle would give against a hand held open, since the finger flexors, recruited by a grip, add most to flexion and ulnar deviation. **That is an inference here: Delp's fixture was not read** (abstract only), so it is not settled. A batter grips a handle, so if the inference holds the channel is Peleg's. Both ends are run as whole fits: **51 N·m** (Peleg) and **13.9 N·m** (Delp), and reported side by side.
+
+**The arms' strength at speed.** The only arm curves to 6.1 rad/s are one elite tennis player's fitted hyperbolas (Kentel 2011, FT); samples reach 3.14 rad/s in these directions (Silva) and 5.2–7.9 rad/s only for shoulder rotation, which no channel here uses. Each curve is 1 at and below the speed its bound was measured at, then follows the sample where there is one and the player's hyperbola beyond it, as a ratio to its own value at the join. Above 6.1 rad/s the player's curve is itself an extrapolation.
+
+| Group | Points (rad/s: fraction) | From | The alternative a rerun tests |
+| :-- | :-- | :-- | :-- |
+| rear shoulder, horizontal adduction | 0–3.14: 1.00; 4: 0.865; 5.24: 0.705; 6.1: 0.612; 9: 0.376; 13: 0.167; 18.05: 0 | Silva: 100% kept from 1.05 to 3.14 rad/s (TAB); beyond, Kentel's hyperbola (top speed 18.05, ω_c 6.43 rad/s) relative to its value at 3.14 | Kentel's hyperbola alone from zero speed (0.57 at 3 rad/s, 0.41 at 5), on his 97.5 N·m |
+| lead shoulder, horizontal abduction | 0–1.05: 1; 3.14: 0.93; 4: 0.807; 5.24: 0.661; 6.1: 0.576; 9: 0.356; 13: 0.158; 18.0: 0 | Silva: 93% kept; Kentel (18.0, 6.93) beyond | the same, on his 71.9 |
+| elbow extension | 0: 1; 1: 0.801; 2: 0.655; 3: 0.544; 4: 0.455; 5: 0.384; 6.1: 0.319; 9: 0.195; 13: 0.088; 18.45: 0 | Kentel's hyperbola (18.45, 5.55) from zero speed: Holzbaur's bound is isometric. One player; no sample measured elbow extension against speed | — |
+| wrist, ulnar deviation, on Peleg's 51 | 0–1.57: 1; 2: 0.920; 3: 0.765; 4: 0.642; 5: 0.541; 6.1: 0.449; 9: 0.274; 13: 0.120; 18.02: 0 | Kentel (18.02, 5.83) relative to its value at 1.57 rad/s, where Peleg measured | — |
+| wrist, on Delp's 13.9 | Kentel's hyperbola from zero speed: 1: 0.80; 3: 0.55; 5: 0.39; 6.1: 0.32 | Delp's value is isometric | — |
+| an arm muscle being stretched | rises to 1.4 × | Kentel: T_max = 1.4 T₀ in every arm row (FT) | (the legs and trunk keep 1.5 ×) |
+
+**Tendon stretch at the arm joints,** from Kentel's printed stiffness and full strength, as the stretch at full strength: rear shoulder (horizontal adduction) 97.48 over 1,968.5 N·m/rad, 2.8°; lead shoulder (horizontal abduction) 71.90 over 785.9, 5.2°; elbow extension 51.95 over 280.3, 10.6°. The stiffness here is the bound divided by that angle. Kentel set his stiffness from an assumed 5% tendon stretch; nothing is measured at these joints. **The wrists get none:** the printed wrist rows give 49–102° of stretch at full strength, which [N9] doubts as read and no wrist can turn through. A rerun tests the elbows without theirs and the wrists with their printed value (102°).
+
+**The arms may be tensed beforehand.** Each arm channel has a starting level between 0 and 1 that the fit finds, as the legs and trunk have: the hands hold the bat and load it on every pitch, and the one quantitative recording of professional batters has the lead arm's shoulder and elbow muscles strongly active before the swing ([N9] §4.1, second hand).
+
+**The clock, restated as what was measured.** [4] has no event for the hands' first move. Its event at −170 ms is the lead foot passing half of body weight, which begins the phase it calls swing initiation: "the batter's arms finally began to move significantly" and "the bat finally began to rotate forward". What [4] measured there is its bat curve: the bat turns round at −245 ms, is 6.7° past that at −170 ms and moving at 236°/s (its text) to 239°/s (its curve), on its way up. The spec's "[4]'s first move at −170 ms" was this read as the decision. So the measured quantity becomes the rule:
+
+- **the bat's first visible motion:** the model's bat azimuth rate must rise through 236°/s at −170 ms **± 15 ms** [E for the tolerance: [4]'s curve is a mean, and the one sample that reports the spread of the hands' start between batters has 44 ms (Stewart, tee, [N9] §4.1)];
+- **the arms' drive may rise above its holding level no more than 70 ms before that,** the top of the measured electromechanical delay's range (10–70 ms, [N9] §4.2; about 70 ms for the one upper-limb figure, second hand; none is measured for a shoulder or in a swing). So no arm channel's onset is earlier than −240 ms. The delay the fit ends with (the bat's first motion minus the earliest arm onset) is reported against 10–70 ms, and a rerun tests 10 ms.
+- **Not allowed, and not tried:** the arms' forward drive starting before the batter could have decided. The holding level is a level, not a start: it is constant until the onset.
+
+**What rests on an assumption in the arms, for the owner:** the rear and lead shoulders' bounds rest on one sample of boys scaled by mass; the elbows' on five men; every arm speed curve beyond 3 rad/s, and the elbows' and wrists' at any speed, on one tennis player; all tendon stretch in the arms on an assumed 5%; which wrist reading applies; the ± 15 ms; and the shoulders act about one axis only (the trunk's), with no channel for raising or lowering the arm, bending the elbow or turning the forearm.
+
 ### 4.6 The refit on the measured limits (session 5)
 
 `fit3d.py` on §4.5's limits, written before it: 22 channels (16 of the legs and trunk with a starting level each, 6 of the arms), 104 numbers, three cold starts, staged as before, the reported numbers from one run of the whole body (the same at a 0.5 ms step). 19,450 swings, 13 minutes. The compiled probe agrees with the Python engine on this fitted swing (`probe3d.py --check`).
@@ -534,6 +573,79 @@ The owner ruled on 2026-11-25 (Q58 = a): the body's strength limits come only fr
 **Not converged to a tolerance:** each search stopped at its iteration limit; continuing the best start 20 iterations moved contact from +22.4 to +21.0 ms. The three starts agree on the picture, and differ by 5 ms in contact.
 
 **Next, if the owner extends the rule to the arms** (§4.4, "For the owner"): read Kentel 2011's table in full (shoulder, elbow, wrist full strength, speed curves and series stiffness of one elite tennis player) and look for a shoulder and elbow sample with SDs; write the arms' limits into §4.5 before any run; give the arms' channels their curves, tendon springs and starting levels; refit; then the breakdowns of §6.2. An independent review comes before anyone calls the gate passed.
+
+### 4.7 The refit with the arms on measured limits (session 6)
+
+`fit3d.py` on §4.5's limits with its arm block, written before it: 22 channels, each with a strength, an onset, a rise, a switch-off and a starting level, 110 numbers; three cold starts, staged as before, the last stage 45 iterations; one run of the whole body for the reported numbers (the same at a 0.5 ms step). 21,300 swings, 14 minutes. The compiled probe agrees with the Python engine on the fitted swing. The wrists' two readings were each fitted whole.
+
+| | Start 0 | Start 1 | Start 2 (best) | Wrists on Delp's 13.9 N·m (two starts) | The gate |
+| :-- | --: | --: | --: | --: | :-- |
+| contact (bat at −8°) | +6.1 ms | +3.9 | **+4.0** | +7.0, +5.9 | 0 ± 5 ms |
+| the bat's first motion (rate through 236°/s) | −174 ms | −173 | **−172** | −176, −174 | −170 ± 15 ms (§4.5) |
+| the first arm drive's rise before that | 66 ms | 67 | **65** | 64, 66 | at most 70 ms (measured 10–70) |
+| sweet spot at contact (its fastest) | 19.7 m/s (20.2) | 20.6 (22.2) | **20.1 (21.5)** | 19.6, 20.1 | 29–34 m/s; [4]'s own motion on this body: 22.9 (25.0) |
+| pelvis rate at −93 ms | 539°/s | 528 | **562** | 554, 575 | 558 |
+| trunk peak rate | 925°/s at +60 ms | 896 at +60 | 836 at +60 | 877, 840 | 766 at −57 |
+| bat azimuth peak rate | 2,149°/s at +10 ms | 2,113 at +10 | 2,060 at +10 | 2,223, 2,082 | 2,435 at −10 |
+| lead foot's peak load | 116% BW | 125 | **130 at −95 ms** | 115, 120 | 130 at −93 |
+| at contact: pelvis; lag; bat elevation | 64°; 72°; −28° | 66°; 73°; −27° | **66°; 72°; −27°** | 66°; 83°, 79°; −29°, −27° | 65 ± 6°; 65 ± 10°; −30 ± 5° |
+| at contact: trunk; lead knee; elbows | 100°; 29°; 39°, 86° | 99°; 5°; 38°, 94° | 99°; 12°; 36°, 93° | 108°, 104° | 62°; 18°; 56°, 81° |
+| cost | 15.9 | 11.0 | 10.1 | 19.3, 14.6 | (session 5: 66.8) |
+
+**Residuals of the best start, RMS in band units** (the gate asks for 1): pelvis rate 0.54, bat rate 0.89, pelvis travel 0.35, the lead foot's forces 0.40, 0.76, 0.53, the rear foot's 0.59, 0.54, 0.58, lead knee 0.24, lead elbow 0.94, rear elbow 0.69, bat elevation 0.27; **over 1: trunk rate 1.42, lag 1.30.**
+
+**Against the gate of §13:**
+
+- **Inside:** contact (best start and one other; the third is at +6.1 ms); the pelvis's and the bat's rate curves; the pelvis, the lag and the bat's elevation at contact; all six ground-force curves; the bat's first motion and the delay before it; no rule broken; the engine's checks.
+- **Outside:** the bat's speed against 29–34 m/s; the trunk's rate curve (1.42 band units). Not evaluated: the arm's rate curve of [3] (a different observable) and the breakdowns of §6.2.
+- **The searches settled:** continuing the best start 20 iterations moved contact by 0.1 ms and the cost from 10.15 to 10.08.
+
+**On a bound (best start): 30 of 110 numbers.** Both shoulders, both elbows and the lead wrist are at their strength bounds and at the 50 ms rise; the rear wrist is switched off. In the legs only the lead knee's flexors are at their strength bound (the rear knee's flexors, the rear hip's extensors and rotators within 5% of theirs). The trunk is at 125 of 260 N·m. The earliest arm drive is the lead elbow's, at −237 ms, 3 ms inside its limit. Starting levels: the lead shoulder 0.55 and lead elbow 0.09; the others 0.
+
+**The bat's speed, and what the gate should read.** [4] did not measure bat speed; the gate's 29–34 m/s is [3]'s tee study and Statcast's game swings. The body moved exactly along [4]'s curves (`inverse3d.py`'s placed motion) has the sweet spot at **22.9 m/s at contact and 25.0 at its fastest, 10 ms earlier**, on either reading of the trunk's curves and with the elbows ± 8°; its bat turns at 1,850°/s at contact (2,212 at its peak) and its hands move at 7.0 m/s (4.9 on the rate-curve reading). The fitted swing: 20.1 m/s at contact, the bat turning at 1,824°/s and the hands at 3.6 m/s. So the body turns the bat as fast as [4]'s motion does and is slow in the hands. Against [4]'s own motion it is 12% slow at contact and 14% at its fastest; against the gate's band it is 9 m/s short. A gate of 29–34 m/s and [4]'s curves cannot both be met by one body: that is the second inconsistency in the gate, after the angle and rate curves (§4.5).
+
+**The trunk.** It reaches the right speed at the right time (786°/s at −80 ms against [4]'s 696 at −80 and 766 at −57) and then does not slow: 797°/s at contact where [4]'s is at 429. It ends 99° round at contact, against 62° on [4]'s rate curve and 75° on its angle curve. The body has one trunk channel, toward the pitcher, and nothing that brakes the trunk.
+
+**One rule relaxed at a time** (`--relax`, the best start continued 20 iterations):
+
+| Relaxed | Contact | Sweet spot at contact |
+| :-- | --: | --: |
+| nothing | +3.9 ms | 20.1 m/s |
+| no first-motion rule, the arms' drive from the window's start | +2.8 ms | 20.3 (the bat then starts at −180 ms) |
+| shoulders' and elbows' bounds doubled | +1.5 ms | **22.3** |
+| no 50 ms rise floor | +3.5 ms | 20.2 |
+| wrists' bound × 3 | +3.3 ms | 20.3 |
+| legs' and trunk's bounds × 1.5 | +3.8 ms | 20.1 |
+
+No rule binds contact any more. Only the shoulders' and elbows' strength moves the bat's speed, to 22.3 m/s with twice the measured bounds.
+
+**What the answer rests on** (`--ranges`, re-fitted 12 iterations from the best start; the baseline is +3.9 ms, 20.1 m/s):
+
+| Changed | Contact | Sweet spot at contact |
+| :-- | --: | --: |
+| **the legs and trunk not tensed beforehand** | **+29.9 ms** | 19.6 m/s |
+| **the arms' rise at most 10 ms before the bat's first motion** (the bottom of the measured delay) | **+10.6 ms** | 19.9 |
+| the shoulders on Kentel's one player (97.5 and 71.9 N·m, his curve alone) | +7.4 ms | 18.5 |
+| the wrists on Delp's reading (whole fits, above) | +5.9 ms | 20.1 |
+| elbows 52 N·m | +5.5 ms | 19.3 |
+| the wrists with their printed tendon stretch | +5.5 ms | 20.4 |
+| elbows 76 N·m; the arms not tensed beforehand | +4.3 ms | 19.8–19.9 |
+| no tendon springs at the arms; none at the elbows; shoulders 136 and 112 N·m | +3.6 to +4.0 ms | 20.1–20.6 |
+| a stop on the wrists' cock, 5° or 20° past the start (`--wrists`) | +4.3, +3.7 ms | 20.2 |
+
+- **Most sensitive to:** the legs and trunk being tensed beforehand, and how long before the bat moves the arms' drive may rise. On the delay the fit sits at 65 ms, near the top of the measured 10–70 ms; no delay is measured for a shoulder muscle or in a swing ([N9] §4.2).
+- **Not sensitive to:** which wrist reading (2 ms), the arms' tendon stretch (under 2 ms), the arms being tensed (0.4 ms), the elbows' and shoulders' range ends except Kentel's player (under 2 ms), a wrist stop.
+
+**The small frame of PLAN D32** (`--small`: 1.75 m, 77 kg [E], his own timings, re-fitted 20 iterations from the average's plan): contact **+5.6 ms**, the bat's first motion at −175 ms, **18.1 m/s at contact against the average's 20.1 (90%)**, 19.9 against 21.5 at its fastest, the lead foot at 131% of his body weight. He reaches the ball as the average does, 10% slower in the bat.
+
+**What the body still lacks** (each has measured strengths in [N8] or [N9]; none was added):
+
+- the shoulders act about the trunk's axis only: nothing raises or lowers the arm ([4]'s rear shoulder drops 22° in the swing);
+- no forearm rotation, no elbow flexors, no wrist flexion;
+- nothing that brakes the trunk (Bae's golfers were tested turning both ways);
+- the hands' roll about the handle is fixed and the same for both hands.
+
+**Next:** the owner's decision in §4.4. Before any review: the breakdowns of §6.2 are not run, and the gate's two inconsistencies (angle against rate curves; 29–34 m/s against [4]'s own 23–25) need one reading each.
 
 ## 5. The drive and its control (§14.1 items 2 and 3)
 
@@ -840,14 +952,14 @@ Activation is advanced once per step by its exact exponential (`m::exp`) and hel
 - **Constraint drift:** Baumgarte's stabilisation, C̈ + 2aĊ + b²C = 0 with a = b = 50 s⁻¹ [E], evaluated at every stage. Measured on the driven body over 80 ms: 0.33 µm at a 1 ms step, 0.01 µm at 0.5 ms; 19 µm without stabilisation. No projection per step. In the violent hand-set runs of §4.4 (stops and landings) the drift reaches 10 µm at 1 ms, so the fit should run at 0.5 ms or with stronger gains until the event tests settle it.
 - **Contact:** points on each sole (heel and ball, inside and outside) against the ground plane. The normal force is a one-sided spring and damper that is never negative; friction is a stick spring to an anchor, capped by the cone μN, the anchor dragged when the cap is reached. Anchors move once per step and are held through the stages, like the activation's corner. Four points per foot give §4.1's requirements without more machinery: no sinking beyond the spring's fraction of a millimetre, the centre of pressure inside the sole (each point's force is ≥ 0), and the foot's horizontal force and twisting moment from one set of contact forces.
 - **Joint limits:** one-sided spring-damper stops on an angle: the knees' and elbows' straight end, and (session 2) each shoulder's end of range across the chest, 135° from the arm straight out to its side [E: the clinical normal range is 130–135°]. A stop's torque is clamped so it can push out of the limit and never pull. The lead arm is placed at that limit at −250 ms, so the turning trunk pushes it; in the fitted swing the stop carries at most 63 N·m (§4.4). The wrists have no stop unless a run says so.
-- **Strength at speed** (session 5, §4.5): a drive either follows the first law of §5.1 or a measured curve, the fraction of full strength at the joint's speed as straight lines between points; a muscle being stretched rises toward 1.5 × on the curve's own top speed.
+- **Strength at speed** (session 5, §4.5): a drive either follows the first law of §5.1 or a measured curve, the fraction of full strength at the joint's speed as straight lines between points; a muscle being stretched rises toward the curve's own plateau (1.5 × for the legs and trunk, 1.4 × for the arms) on the curve's own top speed.
 - **Muscles tensed beforehand** (§4.5): a drive's excitation holds a starting level until its onset and then rises to full; its activation starts at that level.
 - **Tendon stretch** (§4.5): a drive may act through a spring in series. The joint gets the spring's stiffness times its stretch. The stretch follows stretch′ = (the muscle's shortening speed) − (the joint's), where the muscle's speed is the one at which its strength-at-speed curve gives the spring's torque. It is advanced once per step by a backward Euler step solved with 40 bisections (fixed, for replay) and held through the step's stages, like the friction anchors, so any stiffness is stable; it is first order in the step.
 - **A failed solve** (a pivot that is not safely positive: a singular posture or redundant joints) raises an error. It is never regularised away.
 - **Activation** is integrated as a state (15 ms up, 50 ms down), not held through the step.
 - **Work** of the drives, stops, damping and contacts is integrated beside the motion as four more states.
 
-**Its checks** (`analysis/oracle/test_body3d.py`, 24 tests, each against something the engine did not produce):
+**Its checks** (`analysis/oracle/test_body3d.py`, 25 tests, each against something the engine did not produce):
 
 - a free symmetric body against Euler's closed form (the body-frame precession, the cone about the angular momentum, the straight-line centre): 2 × 10⁻⁹;
 - a hinged rod released at 2.0 rad against the pendulum's exact (elliptic) period: 5 × 10⁻⁹ rad;
@@ -859,7 +971,7 @@ Activation is advanced once per step by its exact exponential (`m::exp`) and hel
 - the whole body on the ground, driven: energy gained equals work booked to 2 mJ in 16 J at 1 ms, 0.07 mJ at 0.5 ms and 0.004 mJ at 0.25 ms (fourth order);
 - a block on four contact points: it stays under μmg, accelerates at F/m − μg above it, and no contact force is ever negative, also when dropped;
 - a pendulum swung into a stop: the stop never pulls;
-- a measured speed curve passes through its points, falls with speed, and its inverse undoes it on both sides;
+- a measured speed curve passes through its points, falls with speed, and its inverse undoes it on both sides, also with the arms' plateau; the arms' bounds, curve points and tendon angles are §4.5's, typed into the test from its tables;
 - a tendon spring against a body too heavy to move ends carrying exactly the muscle's full strength at its activation;
 - **the tendon's energy:** for a rod driven through a spring, the muscle's own work (its curve at its own speed) equals the work the rod receives plus the energy in the spring, to 0.06 J in 73 J at a 0.25 ms step, halving with the step (0.11, 0.22 J at 0.5 and 1 ms);
 - **mutations:** the spring advanced with the joint's speed reversed breaks that account by 1,400 J; the gyroscopic term removed fails the free body; the centripetal term's sign flipped fails the double pendulum and the identity; a drive's reaction on its parent removed fails angular momentum.
@@ -986,6 +1098,8 @@ PLAN D9 is decided: a saved play stores the build's commit and the recorded play
 
 - **Pass:** under the design's rules (the arms after the decision, rises of at least 50 ms, strengths inside sourced bounds, the wrists bounded by their measured strength), the average batter's fitted swing reaches contact within ±5 ms of plan; the pelvis, trunk, arm and bat rate curves within 1 band unit RMS each from −250 ms to contact; at contact pelvis 77 ± 6°, lag 65 ± 10°, bat elevation −30 ± 5° ([4] Table 1); the bat's speed within [3]'s and Statcast's range (29–34 m/s at the sweet spot); [4]'s vertical and lateral ground forces within their bands; momentum, angular momentum, energy and the Euler–Lagrange identity to their tolerances; every named breakdown run as one change (or a stated two), its consequence reported as the body gives it.
 - **Stop:** if no fit within the rules reaches contact, or the rate curves stay beyond 2 band units, or contact needs a rule broken. The owner is told which rule binds and what the body lacks, as §4.3 does for the flat chain.
+
+**Phase 1 after its sixth session (2026-11-25):** with the arms on measured limits too the fitted swing meets the gate's contact time, the pelvis's and bat's rate curves, the three angles at contact and the ground forces. Outside: the bat's speed (20.1 m/s against 29–34; [4]'s own motion gives 22.9, so this criterion and [4]'s curves cannot both be met and needs one reading) and the trunk's rate curve (1.42 band units; nothing in the body brakes the trunk). The breakdowns are not run. Not passed; an independent review comes after the owner's decision (§4.4, §4.7).
 
 **Phase 1 after its fifth session (2026-11-25):** refitted on the measured limits of §4.5. Inside the gate: the pelvis's rate and angle at contact, both feet's forces, the lead knee, the pelvis's travel. Outside it: contact (21–28 ms late), the bat's speed (18.6 m/s), the trunk's rate, the lag and the bat's elevation at contact. The gap is at the arms (§4.6). The gate is not passed; the owner decides whether the arms' limits are to be sourced the same way.
 

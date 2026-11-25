@@ -373,7 +373,7 @@ def block(push, mu=0.6, t_end=0.5, h=1e-3):
 SEC_TAB = ((0.0, 1.0), (1.517, 0.75), (3.952, 0.50), (5.24, 0.43), (13.4, 0.0))
 
 
-def tendon_ledger(h):
+def tendon_ledger(h, ecc=None):
     """a hinged rod under gravity, driven through a series spring. The muscle's own work, from its
     strength-at-speed law at its own speed (the joint's plus the spring's rate of stretch), must equal the work
     the rod receives plus the energy the spring holds. Returns (the gap, the muscle's work, the spring's largest
@@ -383,6 +383,8 @@ def tendon_ledger(h):
     b = sys.body("rod", 4.0, (0.3, 0.5, 0.05))
     sys.hinge(-1, b, (0, 0, 0), (0, 0, 0.3), (0, 1, 0), (0, 1, 0))
     sys.fvtabs = [SEC_TAB]
+    if ecc is not None:
+        sys.fvecc = [ecc]
     sys.actuator("m", -1, b, (0, 1, 0), T, 20.0, 0.02, 0.05, 0.25, 0.2, 0, K)
     s = sys.new_state()
     q = E.qaxis((0, 1, 0), 0.4)
@@ -397,7 +399,7 @@ def tendon_ledger(h):
         th.append(aux[0])
         log.append((st[13], st[11], (th[-1] - th[-2]) / h))      # activation, the joint's speed about y, the stretch's rate
     s = sys.run(s, 0.0, 0.4, h, aux=aux, each=each)
-    w_ce = sum(T * a * E.fv_tab(SEC_TAB, wj + dth) * (wj + dth) * h for a, wj, dth in log)
+    w_ce = sum(T * a * E.fv_tab(SEC_TAB, wj + dth, ecc) * (wj + dth) * h for a, wj, dth in log)
     stored = 0.5 * K * (th[-1] ** 2 - th[0] ** 2)
     return w_ce - (s[-E.NW] + stored), w_ce, 0.5 * K * max(th) ** 2, max(th)
 
@@ -415,6 +417,26 @@ class EngineChecks(unittest.TestCase):
         for w in ws:
             if w < 13.4:
                 self.assertAlmostEqual(E.fv_tab_inv(SEC_TAB, E.fv_tab(SEC_TAB, w)), w, places=9)
+        # a curve with its own plateau for a stretched muscle (the arms' 1.4, body-motion 4.5)
+        fa = [E.fv_tab(SEC_TAB, w, 1.4) for w in ws]
+        self.assertLess(max(fa), 1.4)
+        self.assertGreater(E.fv_tab(SEC_TAB, -2000.0, 1.4), 1.39)
+        for w in ws:
+            if w < 13.4:
+                self.assertAlmostEqual(E.fv_tab_inv(SEC_TAB, E.fv_tab(SEC_TAB, w, 1.4), 1.4), w, places=9)
+
+    def test_the_arms_curves_and_bounds_are_the_committed_ones(self):
+        """body-motion 4.5's arm numbers, typed here from its tables (not read from drive.py): the bounds for
+        [4]'s mean batter and a point on each curve."""
+        bd = Dr.bounds(1.84, 92.0)
+        for n, v in (("shoulder_R", 123.0), ("shoulder_L", 92.0), ("elbow_ext_L", 85.0), ("wrist_L", 51.0)):
+            self.assertAlmostEqual(bd[n], v, delta=0.6, msg=n)
+        for name, w, f in (("sh_hadd", 3.14, 1.0), ("sh_hadd", 5.24, 0.705), ("sh_habd", 3.14, 0.93), ("sh_habd", 6.1, 0.576),
+                           ("elbow_ext", 3.0, 0.544), ("elbow_ext", 6.1, 0.319), ("wrist_peleg", 1.57, 1.0), ("wrist_peleg", 5.0, 0.541),
+                           ("wrist_delp", 3.0, 0.55)):
+            self.assertAlmostEqual(E.fv_tab(Dr.CURVES[name], w), f, delta=0.006, msg=name)
+        for name, deg in (("sh_hadd", 2.8), ("sh_habd", 5.2), ("elbow_ext", 10.6)):
+            self.assertAlmostEqual(math.degrees(Dr.SEC_STRETCH[name]), deg, delta=0.06)
 
     def test_tendon_spring_holds_the_muscles_full_strength_when_nothing_moves(self):
         """against a rod too heavy to move, the spring stretches until it carries exactly the muscle's
@@ -443,6 +465,8 @@ class EngineChecks(unittest.TestCase):
         self.assertGreater(abs(w2), 10.0)                 # and the muscle really worked
         self.assertLess(abs(g2), 0.02 * abs(w2))
         self.assertLess(abs(g2), 0.7 * abs(g1))
+        g3, w3, e3, th3 = tendon_ledger(2.5e-4, ecc=1.4)      # the same account on a curve with the arms' plateau
+        self.assertLess(abs(g3), 0.02 * abs(w3))
 
 
     def test_free_body_closed_form(self):

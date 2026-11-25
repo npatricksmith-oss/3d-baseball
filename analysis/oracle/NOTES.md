@@ -222,7 +222,7 @@ checked copy of the table, not two).
   and tendon springs (docs/body-motion.md §4.5), the design's rules and strength
   bounds, the muscles' level at the start, and a run that records what
   Fortenbaugh measured.
-- `test_body3d.py` (24 tests, also run by `test_oracle.py`): each check
+- `test_body3d.py` (25 tests, also run by `test_oracle.py`): each check
   compares the engine with something it did not produce; three mutations
   show the checks can fail. The whole-body tests need the digitised curves
   under `sim/target/research-dl/4/csv` (or `BB_FORT_CSV`) and are skipped

@@ -60,7 +60,7 @@ struct Sys {
     m: Vec<f64>, inr: Vec<V3>,
     pts: Vec<Pt>, dots: Vec<Dt>, order: Vec<usize>, first: Vec<usize>,
     acts: Vec<Act>, stops: Vec<Stop>, holds: Vec<Hold>, tones: Vec<Tone>, cons: Vec<Con>,
-    fvtabs: Vec<Vec<[f64; 2]>>,
+    fvtabs: Vec<Vec<[f64; 2]>>, fvecc: Vec<f64>,
 }
 
 const SEC_ITERS: usize = 40;
@@ -84,7 +84,7 @@ impl Sys {
         1.0
     }
     /// engine.py's fv_tab: a measured strength-at-speed curve, straight lines between its points.
-    fn fv_tab(&self, tab: &[[f64; 2]], w: f64) -> f64 {
+    fn fv_tab(&self, tab: &[[f64; 2]], ecc: f64, w: f64) -> f64 {
         let top = tab[tab.len() - 1][0];
         if w >= top { return 0.0; }
         if w >= 0.0 {
@@ -94,9 +94,9 @@ impl Sys {
             }
             return 0.0;
         }
-        self.ecc - (self.ecc - 1.0) / (1.0 - self.ecc_slope * (w / top))
+        ecc - (ecc - 1.0) / (1.0 - self.ecc_slope * (w / top))
     }
-    fn fv_tab_inv(&self, tab: &[[f64; 2]], f: f64) -> f64 {
+    fn fv_tab_inv(&self, tab: &[[f64; 2]], ecc: f64, f: f64) -> f64 {
         let top = tab[tab.len() - 1][0];
         if f <= 0.0 { return top; }
         if f <= 1.0 {
@@ -106,7 +106,7 @@ impl Sys {
             }
             return top;
         }
-        top * (1.0 - (self.ecc - 1.0) / (self.ecc - f)) / self.ecc_slope
+        top * (1.0 - (ecc - 1.0) / (ecc - f)) / self.ecc_slope
     }
     fn act_speed(&self, j: usize, s: &[f64]) -> f64 {
         let a = &self.acts[j];
@@ -124,11 +124,12 @@ impl Sys {
             let k = a.ksec;
             if k <= 0.0 { continue; }
             let tab = &self.fvtabs[a.tab as usize];
+            let ecc = self.fvecc[a.tab as usize];
             let cap = a.t * f64::max(s[oa + j], A_MIN);
             let wj = self.act_speed(j, s);
             let old = sec[j];
-            let g = |th: f64| th - old - h * (self.fv_tab_inv(tab, k * th / cap) - wj);
-            let mut hi = (self.ecc - 1e-6) * cap / k;
+            let g = |th: f64| th - old - h * (self.fv_tab_inv(tab, ecc, k * th / cap) - wj);
+            let mut hi = (ecc - 1e-6) * cap / k;
             if cap <= 0.0 || g(0.0) >= 0.0 { sec[j] = 0.0; }
             else if g(hi) <= 0.0 { sec[j] = hi; }
             else {
@@ -212,7 +213,7 @@ impl Sys {
             let n = if a.a >= 0 { mv(&r[a.a as usize], &a.ax) } else { a.ax };
             let wa = if a.a >= 0 { w[a.a as usize] } else { ZERO };
             let wrel = dot(&sub(&w[a.b], &wa), &n);
-            let tau = if a.ksec > 0.0 { a.ksec * sec[j] } else if a.tab >= 0 { a.t * act * self.fv_tab(&self.fvtabs[a.tab as usize], wrel) } else { a.t * act * self.fv(wrel / a.w) };
+            let tau = if a.ksec > 0.0 { a.ksec * sec[j] } else if a.tab >= 0 { a.t * act * self.fv_tab(&self.fvtabs[a.tab as usize], self.fvecc[a.tab as usize], wrel) } else { a.t * act * self.fv(wrel / a.w) };
             let tv = scale(&n, tau);
             tq[a.b] = add(&tq[a.b], &tv);
             if a.a >= 0 { tq[a.a as usize] = sub(&tq[a.a as usize], &tv); }
@@ -457,7 +458,8 @@ fn main() {
     let order: Vec<usize> = (0..n).map(|_| tk.u()).collect();
     tk.key("fvtabs"); let n = tk.u();
     let mut fvtabs: Vec<Vec<[f64; 2]>> = Vec::new();
-    for _ in 0..n { let np = tk.u(); fvtabs.push((0..np).map(|_| [tk.f(), tk.f()]).collect()); }
+    let mut fvecc: Vec<f64> = Vec::new();
+    for _ in 0..n { let np = tk.u(); fvecc.push(tk.f()); fvtabs.push((0..np).map(|_| [tk.f(), tk.f()]).collect()); }
     tk.key("acts"); let n = tk.u();
     let acts: Vec<Act> = (0..n).map(|_| Act { a: tk.i(), b: tk.u(), ax: tk.v3(), t: tk.f(), w: tk.f(), ton: tk.f(), rise: tk.f(), toff: tk.f(),
                                                a0: tk.f(), tab: tk.i(), ksec: tk.f() }).collect();
@@ -479,7 +481,7 @@ fn main() {
     let s0: Vec<f64> = (0..n).map(|_| tk.f()).collect();
     let nrows = 3 * pts.len() + dots.len();
     let mut sys = Sys { g, baum_a, baum_b, ta_up, ta_dn, k_fv, ecc, ecc_slope, d0, m, inr, pts, dots, order, first: vec![0; nrows],
-                        acts, stops, holds, tones, cons, fvtabs };
+                        acts, stops, holds, tones, cons, fvtabs, fvecc };
     if !sys.order.is_empty() {
         // each row's first structural non-zero: the earliest row sharing a body with it; then the
         // envelope is closed under fill (a row's envelope reaches at least as far left as ... its own first)
