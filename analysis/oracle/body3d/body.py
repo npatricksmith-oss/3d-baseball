@@ -504,7 +504,8 @@ def curve_rate(name, t, h=0.005):
 class Model:
     """the engine System of a batter of stature H (m) and mass M (kg), with named bodies and joint points."""
 
-    def __init__(self, H=1.84, M=92.0, contacts=True, mu=None, shoulder_stops=True, ranges=None, grip="weld", feet="plate", wrist="box", shift=None):
+    def __init__(self, H=1.84, M=92.0, contacts=True, mu=None, shoulder_stops=True, ranges=None, grip="weld", feet="plate", wrist="box", shift=None,
+                 loads="measured"):
         """ranges: None, the stops of sessions 1-7 (the knees' and elbows' bend, the shoulders' sweep across, at
         STOP_K); or a set of names from range_specs() ("all" for every one): those ranges as stops at RANGE_K, in
         place of the old ones (body-motion 4.10).
@@ -524,6 +525,10 @@ class Model:
         # by pose() (POSTURE_NUMBERS; START_CLEAR is the cleared start's); with one, add_ranges() moves no stop.
         self.wrist = wrist
         self.shift = dict(shift) if shift else None
+        # loads: what each foot carries at the start. "measured": [4]'s vertical and horizontal ground forces at that instant
+        # (sessions 1-10). "balance" (body-motion 4.13, rung 5): the body's own weight, shared between the feet by where its
+        # centre of mass stands between them, and no horizontal force (pose)
+        self.loads = loads
         if mu is None:
             mu = MU_CLEAT if feet == "cleats" else MU
         self.mu = mu
@@ -866,6 +871,17 @@ def pose(mdl, t0, heel="solve", report=None, hands_guess=None, hands_solve=True,
     if getattr(mdl, "shift", None) and not _SHIFT_ON[0]:
         with _shifted(mdl.shift, mdl.H):
             return pose(mdl, t0, heel, report, hands_guess, hands_solve, arms)
+    if getattr(mdl, "loads", "measured") == "balance" and _BALANCE[0] is None:
+        # the feet's loads by balance (4.13, rung 5): the posture is placed once on [4]'s loads to find where the weight
+        # stands (a foot's sink under its load moves the body by a millimetre), then again on the loads that carry it
+        _BALANCE[0] = "first"
+        try:
+            s0, a0 = pose(mdl, t0, heel, None, hands_guess, hands_solve, arms)
+            held_arms = getattr(mdl, "arm_choices", None) if arms is None else arms
+            _BALANCE[0] = balance_loads(mdl, s0, a0)
+            return pose(mdl, t0, heel, report, hands_guess, hands_solve, held_arms if mdl.grip == "hands" else arms)
+        finally:
+            _BALANCE[0] = None
     s, b, H = mdl.sys, mdl.b, mdl.H
     st = s.new_state()
     L = mdl.len
@@ -877,6 +893,9 @@ def pose(mdl, t0, heel="solve", report=None, hands_guess=None, hands_solve=True,
     yaw = {"R": REAR_FOOT_YAW * D2R, "L": (90.0 - curve_lead_foot(t0) - LEAD_FOOT_SHIFT[0]) * D2R}
     fdir = {sd: (math.cos(yaw[sd]), math.sin(yaw[sd]), 0.0) for sd, sg in SIDES}
     load = {sd: max(0.0, curve(("lead" if sd == "L" else "trail") + "_grf_z", t0)) / 100.0 * BW for sd, sg in SIDES}
+    by_balance = isinstance(_BALANCE[0], dict)
+    if by_balance:
+        load = dict(_BALANCE[0])
     cf_L = C.DE_LEVA["foot"][2]
     ball_loc = ((BALL_FWD - cf_L) * L["foot"], 0.0, mdl.sole_z)
 
@@ -1132,6 +1151,8 @@ def pose(mdl, t0, heel="solve", report=None, hands_guess=None, hands_solve=True,
         idx = [j for j, c in enumerate(s.contacts) if c[0][0] == sd and aux[j] is not None]
         if not idx:
             continue
+        if by_balance:
+            continue                                  # a body standing in balance pushes on the ground straight down
         fx = curve(nm + "_grf_y", t0) / 100.0 * BW / len(idx)
         fy = curve(nm + "_grf_x", t0) / 100.0 * BW / len(idx)
         lim = MU_START * load[sd] / len(idx)
@@ -1149,6 +1170,31 @@ def pose(mdl, t0, heel="solve", report=None, hands_guess=None, hands_solve=True,
                                        "trail_elbow_flex", "lead_knee_flex", "pelvis_rot_vel", "trunk_rot_vel", "bat_az_vel")}
         report["measured"]["trail_knee_flex"] = curve_trail_knee(t0)
     return st, aux
+
+
+_BALANCE = [None]
+
+
+def balance_loads(mdl, st, aux):
+    """{foot: N}: the body's weight shared between the feet by statics along the line of the feet: each foot's load acts
+    at the middle of its sole points on the ground (a flat foot's four, a raised heel's two under the ball), and the two
+    loads' moments about the centre of mass along that line cancel. If the centre of mass is not between the two points
+    the nearer foot takes it all. st, aux: a placed posture and its contacts (aux[j] is None for a point off the ground)."""
+    s = mdl.sys
+    BW = mdl.M * E.G
+    pt = {}
+    for sd in "LR":
+        ys = []
+        for j, c in enumerate(s.contacts):
+            if c[0][0] == sd and aux[j] is not None:
+                xb, qb, _, _ = s.pose(st, c[1])
+                ys.append(E.add(xb, E.mv(E.qR(qb), c[2]))[1])
+        pt[sd] = sum(ys) / len(ys) if ys else None
+    yc = com(mdl, st)[0][1]
+    if pt["L"] is None or pt["R"] is None:
+        return {"L": BW if pt["R"] is None else 0.0, "R": BW if pt["L"] is None else 0.0}
+    f = min(1.0, max(0.0, (yc - pt["R"]) / (pt["L"] - pt["R"])))
+    return {"L": f * BW, "R": (1.0 - f) * BW}
 
 
 def place(mdl, t0, report=None, heel="solve", dt=VEL_DT, moving=True):

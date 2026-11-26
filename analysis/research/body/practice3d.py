@@ -155,7 +155,9 @@ class Ctx:
         self.m = m = B.Model(H, M, ranges=(), grip=o.get("grip", "weld"), feet=o.get("feet", "plate"), mu=o.get("mu"),
                              wrist=o.get("wrist", "box"),
                              # stance="mlb" (4.13, rung 3): the start on major leaguers' feet (body.START_STANCE) in place of [4]'s
-                             shift=B.START_STANCE if o.get("stance") == "mlb" else B.START_CLEAR if o.get("clear") else None)
+                             shift=B.START_STANCE if o.get("stance") == "mlb" else B.START_CLEAR if o.get("clear") else None,
+                             # loads="balance" (4.13, rung 5): the feet's starting loads from his own weight and balance, not [4]'s forces
+                             loads=o.get("loads", "measured"))
         for k, shift in o.get("start", {}).items():          # the start moved by a stated amount (a sensitivity run)
             B.CURVE_OVERRIDE[k] = (lambda kk, sh: (lambda t: C.resample(B._CURVES.setdefault(kk, C.load(kk)), t, t, 1.0)[0] + sh))(k, shift)
         vel = o.get("vel", 1.0)
@@ -173,6 +175,10 @@ class Ctx:
         st = Dr.add_drives(m, st, {n: (0.0, 0.0, 0.05, 0.1, 0.0) for n in CH}, held=o.get("hold") == "let_go")
         Dr.BOUND_SCALE.clear()
         self.limits = B.add_ranges(m, st, k_big=o.get("k_big"), wrists=o.get("wrists", "cocked"), rom=o.get("rom"))
+        self.spread = None
+        if o.get("loads") == "balance":
+            # standing still in balance (4.13, rung 5): the feet's outward push that costs the hold least (drive.solve_spread)
+            self.spread = Dr.solve_spread(m, st, T0, self.aux0)
         self.tone, self.tone_rest = Dr.solve_tone(m, st, T0, aux=list(self.aux0))
         # An arm muscle tensed beforehand (review P2-4). It COUNTS UNDER THE CLOCK: a starting level is drive from the
         # first instant, so in residuals() it is an arm drive that rose at the start. The other way, hold="resolve",

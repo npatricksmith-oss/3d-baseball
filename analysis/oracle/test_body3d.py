@@ -2506,6 +2506,87 @@ class StanceChecks(unittest.TestCase):
             x, _ = B.clear_start(T0, given=given, grip="hands", feet="cleats", wrist="oval")
             self.assertEqual(x, B.START_STANCE)
 
+    @NEED
+    def test_the_feet_loaded_by_balance_carry_his_weight_and_no_more(self):
+        """body-motion 4.13, rung 5 (built, not run in a search): Model(loads="balance") gives each foot the share of his
+        weight that statics asks along the line of the feet, in place of [4]'s measured forces. On the start at rest:
+        the ground's upward force, read from the engine's own contacts at the first instant, is his weight (92 kg x g)
+        to a part in a thousand, where [4]'s loads at that instant are 0.79 of it; there is no level force; the lead
+        foot's share is the lever rule worked here from the centre of mass and the two feet's points on the ground; and
+        the centre of mass does not start to fall (under 0.2 m/s2, against 2.1 on [4]'s loads)."""
+        got = {}
+        for loads in ("measured", "balance"):
+            m = B.Model(ranges=(), grip="hands", feet="cleats", wrist="oval", shift=B.START_STANCE, loads=loads)
+            st = B.place(m, T0, moving=False)
+            s = m.sys
+            aux = list(m.start_aux)
+            s.diag = {}
+            ds = s.deriv(T0, st, aux)
+            con = s.diag["contact"]
+            s.diag = None
+            N = {sd: sum(f[2] for n, f in con.items() if n[0] == sd) for sd in "LR"}
+            level = max(abs(sum(f[k] for f in con.values())) for k in (0, 1))
+            pts = {sd: [E.add(s.pose(st, c[1])[0], E.mv(E.qR(s.pose(st, c[1])[1]), c[2]))[1] for j, c in enumerate(s.contacts) if c[0][0] == sd and aux[j] is not None] for sd in "LR"}
+            y = {sd: sum(v) / len(v) for sd, v in pts.items()}
+            yc = B.com(m, st)[0][1]
+            got[loads] = (N, level, (yc - y["R"]) / (y["L"] - y["R"]))
+        BW = 92.0 * E.G
+        N, level, share = got["balance"]
+        self.assertAlmostEqual((N["L"] + N["R"]) / BW, 1.0, delta=1e-3)
+        self.assertLess(level, 1e-6)
+        self.assertAlmostEqual(N["L"] / (N["L"] + N["R"]), share, delta=5e-3)
+        self.assertTrue(0.3 < share < 0.6)
+        N0, level0, _ = got["measured"]
+        self.assertLess((N0["L"] + N0["R"]) / BW, 0.85)
+        self.assertGreater(level0, 50.0)
+
+    @NEED
+    def test_the_feet_push_apart_as_much_as_costs_the_hold_least(self):
+        """rung 5: on the still start in balance, drive.solve_spread's push between the feet. The two feet's level forces,
+        read from the engine's contacts, are equal and opposite along the line of the feet (the lead foot pushed toward
+        the rear one) and inside the grip's cone; the hold-still torques' sum of squares is smaller at the solved push
+        than at none and than at 30 N either side of it (worked here by solving the hold at each); and with the push the
+        rear hip's adductors hold a wide base with a quarter of their strength where without it they could not hold it."""
+        PR = _practice()
+        o = dict(grip="hands", feet="cleats", hold="let_go", wrist="oval", clear=True, stance="mlb", stand="muscle", loads="balance", vel=0.0)
+        c = PR.Ctx(**o)
+        F, at_F, at_0 = c.spread
+        self.assertGreater(F, 50.0)
+        self.assertLess(at_F, 0.5 * at_0)
+        m, s = c.m, c.m.sys
+        st, aux = c.prepare(c.u_of({}))
+        s.diag = {}
+        s.deriv(PR.T0, st, aux)
+        con = s.diag["contact"]
+        s.diag = None
+        fy = {sd: sum(f[1] for n, f in con.items() if n[0] == sd) for sd in "LR"}
+        fz = {sd: sum(f[2] for n, f in con.items() if n[0] == sd) for sd in "LR"}
+        self.assertAlmostEqual(fy["L"], -F, delta=1e-6 * F)
+        self.assertAlmostEqual(fy["R"], F, delta=1e-6 * F)
+        self.assertLess(F, c.m.mu * min(fz.values()))
+        kt = s.contacts[0][5]
+        idx = {sd: [j for j, cc in enumerate(s.contacts) if cc[0][0] == sd and c.aux0[j] is not None] for sd in "LR"}
+
+        still = list(c.st)                                      # the same start with the holding drives let go, so that the
+        oa = 13 * s.nb                                          # hold-still solve below is asked for the whole hold again
+        for j in c.hold_ix.values():
+            still[oa + j] = 0.0
+
+        def hold_at(dF):
+            a = list(c.aux0)
+            for sd, sgn in (("L", -1.0), ("R", 1.0)):
+                for j in idx[sd]:
+                    a[j] = (a[j][0], a[j][1] + sgn * dF / len(idx[sd]) / kt)
+            keep = list(s.tones)
+            tone, _ = PR.Dr.solve_tone(m, still, PR.T0, aux=a)
+            s.tones = keep
+            return sum(PR.E.dot(v, v) for v in tone.values())
+        here = hold_at(0.0)
+        self.assertAlmostEqual(here, at_F, delta=1e-6 * at_F)
+        self.assertGreater(hold_at(30.0), here)
+        self.assertGreater(hold_at(-30.0), here)
+        self.assertLess(c.hold_T["hip_add_R"] / c.bd["hip_add_R"], 0.3)
+
     def test_the_hips_active_turn_is_the_one_measured_with_the_hip_straight(self):
         """rung 4: the hips' ends of turn by their own muscles are Simoneau 1998's men measured prone, the hip straight
         (turning in 32 +- 9 deg, out 44 +- 7; note 15 C), not Boone & Azen's 44 and 44, which were measured seated with

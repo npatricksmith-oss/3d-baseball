@@ -46,6 +46,8 @@ RUNGS = {
     "r2": {"damp": "read", "stand": "muscle"},         # rung 2: rung 1 with the posture held by muscle
     "r3": {"damp": "read", "stand": "muscle", "stance": "mlb"},      # rung 3: rung 2 on major leaguers' feet (body.START_STANCE, note 15)
     "r4": {"damp": "read", "stand": "muscle", "stance": "mlb", "rom": dict(B.ROM_ACTIVE_HIP)},   # rung 4: the hips' turn by their own muscles
+    # rung 5: the launch state by a rule and not [4]'s: standing still (no starting velocity), the feet's loads by balance, their push by least hold
+    "r5": {"damp": "read", "stand": "muscle", "stance": "mlb", "rom": dict(B.ROM_ACTIVE_HIP), "loads": "balance", "vel": 0.0},
 }
 
 

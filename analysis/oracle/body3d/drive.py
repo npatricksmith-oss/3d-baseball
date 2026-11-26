@@ -446,6 +446,55 @@ def solve_tone(mdl, st, t0, aux=None):
     return out, (lin, ang)
 
 
+def solve_spread(mdl, st, t0, aux, steps=24):
+    """A body standing still on a wide base pushes its feet apart against the ground's grip, and how hard is not set by
+    statics (the two feet's level forces are equal and opposite, an inner load). The rule (body-motion 4.13, rung 5):
+    the push F along the line of the feet, from none to what the less loaded foot's grip allows, that leaves the
+    hold-still torques smallest (the sum of their squares), found by a golden-section search of solve_tone. The friction
+    anchors in aux are moved to carry it: the ground pushes the lead foot toward the rear one and the rear toward the
+    lead. Returns (F in N, the sum of squares at F, the sum at no push)."""
+    s = mdl.sys
+    nc = len(s.contacts)
+    base = list(aux)
+    idx = {sd: [j for j, c in enumerate(s.contacts) if c[0][0] == sd and base[j] is not None] for sd in "LR"}
+    if not idx["L"] or not idx["R"]:
+        return 0.0, None, None
+    s.diag = {}
+    s.deriv(t0, st, base)
+    load = {sd: sum(s.diag["contact"][s.contacts[j][0]][2] for j in idx[sd]) for sd in "LR"}
+    s.diag = None
+    kt, mu = s.contacts[idx["L"][0]][5], s.contacts[idx["L"][0]][7]
+    top = 0.95 * mu * min(load.values())
+
+    def at(F):
+        a = list(base)
+        for sd, sgn in (("L", -1.0), ("R", 1.0)):
+            for j in idx[sd]:
+                a[j] = (base[j][0], base[j][1] + sgn * F / len(idx[sd]) / kt)
+        tone, _ = solve_tone(mdl, st, t0, aux=list(a))
+        return sum(E.dot(v, v) for v in tone.values()), a
+    g = 0.5 * (math.sqrt(5.0) - 1.0)
+    lo, hi = 0.0, top
+    x1, x2 = hi - g * (hi - lo), lo + g * (hi - lo)
+    f1, f2 = at(x1)[0], at(x2)[0]
+    for _ in range(steps):
+        if f1 < f2:
+            hi, x2, f2 = x2, x1, f1
+            x1 = hi - g * (hi - lo)
+            f1 = at(x1)[0]
+        else:
+            lo, x1, f1 = x1, x2, f2
+            x2 = lo + g * (hi - lo)
+            f2 = at(x2)[0]
+    f0 = at(0.0)[0]
+    F = 0.5 * (lo + hi)
+    fF, a = at(F)
+    if f0 <= fF:
+        F, fF, a = 0.0, f0, base
+    aux[:nc] = a[:nc]
+    return F, fF, f0
+
+
 # ---- the launch posture held by muscle (body-motion 4.13, rung 2; PLAN D42) ---------------------------------------
 # A standing hitter's posture is held by the muscles that later swing: each carries a holding level. So each hold-still
 # torque of solve_tone is handed to the muscle group that acts about that axis in that direction, as a HOLDING DRIVE:
