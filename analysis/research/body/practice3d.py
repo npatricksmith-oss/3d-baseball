@@ -37,6 +37,7 @@ T0, T_END, H_STEP, EVERY = -0.250, 0.200, 5e-4, 10     # T0 is only the placed s
 #   the end of a 350 ms run, where nothing after contact is seen. Contact counts only if the 50 ms after it lie inside the run.
 VERIFY_H = 1.25e-4
 WORKERS = 4                                            # processes for the search's finite differences (inside one queued job)
+FALLBACK = False                                       # lm(): take the best single difference when no damped step is accepted (--fallback)
 # ---- the pitch (4.10): the game's average four-seam fastball where it is met (sim-cli pitch --type FF, 200 pitches)
 BALL_SPEED, BALL_DESCENT, BALL_ACROSS, BALL_FLIGHT, BALL_Z = 37.98, 5.27, 1.62, 0.403, 0.78
 MEET_ACROSS, MEET_AHEAD = 0.92, 0.72                   # m from the hips' midpoint at the start (PLAN D28, D29; AHEAD [E: 0.61-0.84])
@@ -70,6 +71,10 @@ VARY = {
     "meet_061": {"ahead": 0.61}, "meet_084": {"ahead": 0.84},
     "wrists_mirrored": {"wrists": "mirrored"}, "wrists_square": {"wrists": "square"},
     "arms_held_by_resolving": {"hold": "resolve"},
+    # body-motion 4.11, part 2: a tensed muscle held until its onset, the clock reading onsets, at the two viewing times
+    "view_010": {"hold": "let_go", "t_view": 0.10}, "view_020": {"hold": "let_go", "t_view": 0.20},
+    # part 3: the feet on dirt, and the same with the old grip alone put back (to see the grip's share apart)
+    "cleats": {"hold": "let_go", "t_view": 0.10, "feet": "cleats"}, "cleats_grip_08": {"hold": "let_go", "t_view": 0.10, "feet": "cleats", "mu": 0.8},
     # the reach one coordinate at a time, from the high-and-close ball (review P2-1)
     "height_alone_078": {"z": 0.78, "across": 0.75, "ahead": 0.40},
     "ahead_alone_072": {"z": 1.20, "across": 0.75, "ahead": 0.72},
@@ -117,13 +122,33 @@ def outside(poly, p):
     return best
 
 
+def clock_residuals(fired, tx, t_avail, form="each"):
+    """the score's charge for arm muscles that fire before the batter could have decided (body-motion 4.10 item 7, 4.11).
+    fired: [(when the arm muscle first drives, s; its asked strength as a share of its bound)] for each arm muscle used;
+    tx: contact; t_avail: how long before contact an arm muscle may fire. Returns one residual per entry.
+    form "each" (since session 9's review, P1-1): each muscle's OWN overrun, max(0, (tx - t_avail) - its onset), per
+    CLOCK_UNIT, weighted by its share of the arms' asked strength (the weights sum to 1; the residual carries the
+    weight's square root). With every muscle tied at one onset the sum of squares is the old form's.
+    form "earliest" (sessions 8 and 9): the earliest onset's overrun alone, in the first entry. With two muscles tied
+    at the earliest, moving one of them later changes nothing in it, so a search saw no slope there."""
+    if not fired:
+        return []
+    if form == "earliest":
+        return [max(0.0, (tx - t_avail) - min(t for t, w in fired)) / CLOCK_UNIT] + [0.0] * (len(fired) - 1)
+    tot = sum(w for t, w in fired)
+    return [math.sqrt(w / tot) * max(0.0, (tx - t_avail) - t) / CLOCK_UNIT for t, w in fired]
+
+
 class Ctx:
     """one body with its ranges, its start and the pitch, reused for every swing of a search."""
 
     def __init__(self, **o):
         self.o = o
         H, M = o.get("H", 1.84), o.get("M", 92.0)
-        self.m = m = B.Model(H, M, ranges=())
+        # grip: "weld", the body of sessions 1-8 (the default, so that a saved result without the option replays on the body
+        # it was found on); "hands", each hand's own grip (body-motion 4.11, session 9; --grip hands)
+        # feet: "plate" (sessions 1-8, the default) or "cleats" (4.11, part 3: the measured grip, the ankles' ends; --feet cleats)
+        self.m = m = B.Model(H, M, ranges=(), grip=o.get("grip", "weld"), feet=o.get("feet", "plate"), mu=o.get("mu"))
         for k, shift in o.get("start", {}).items():          # the start moved by a stated amount (a sensitivity run)
             B.CURVE_OVERRIDE[k] = (lambda kk, sh: (lambda t: C.resample(B._CURVES.setdefault(kk, C.load(kk)), t, t, 1.0)[0] + sh))(k, shift)
         vel = o.get("vel", 1.0)
@@ -136,7 +161,9 @@ class Ctx:
         self.aux0 = list(m.start_aux)
         Dr.BOUND_SCALE.clear(); Dr.BOUND_SCALE.update(o.get("bound_scale", {}))
         self.bd = Dr.bounds(H, M)
-        st = Dr.add_drives(m, st, {n: (0.0, 0.0, 0.05, 0.1, 0.0) for n in CH})
+        # hold="let_go" (body-motion 4.11, part 2): every muscle's level beforehand is held with no net torque until its
+        # onset, and the hold then lets go (engine.actuator's held). The clock then reads onsets only.
+        st = Dr.add_drives(m, st, {n: (0.0, 0.0, 0.05, 0.1, 0.0) for n in CH}, held=o.get("hold") == "let_go")
         Dr.BOUND_SCALE.clear()
         self.limits = B.add_ranges(m, st, k_big=o.get("k_big"), wrists=o.get("wrists", "cocked"), rom=o.get("rom"))
         self.tone, self.tone_rest = Dr.solve_tone(m, st, T0, aux=list(self.aux0))
@@ -169,7 +196,7 @@ class Ctx:
         self.el = E.cross(self.nb, self.ev)                                       # level, square to it
         self.effort_w = o.get("effort_w", EFFORT_W)
         self.strain_w = o.get("strain_w", 0.0)
-        self.t_avail = BALL_FLIGHT - T_VIEW - T_LATENCY
+        self.t_avail = BALL_FLIGHT - o.get("t_view", T_VIEW) - T_LATENCY      # how long before contact an arm muscle may fire
         self.z0 = B.com(m, st)[0][2]
         self.evals = 0
 
@@ -190,11 +217,30 @@ class Ctx:
         s.tones = [(nm, a, b, tuple(tv[3 * k:3 * k + 3])) for k, (nm, a, b, _) in enumerate(s.tones)]
         return st, aux
 
+    run_end, failed_after = T_END, None
+
     def run(self, u, every=EVERY, t_end=T_END, h=H_STEP):
+        """the plan's run, as records. A run is not failed by what happens after the last instant the score reads
+        (body-motion 4.11; session 9's review, P2-2): if the run fails but the sweet spot crossed the ball's plane at
+        least AFTER before the last record made, the records to the failure are returned (they hold everything the score
+        and the report read) and failed_after says how long after contact the last record was, with the failure's
+        message. A failure before that is raised, as before. run_end is where the records end, for contact() and nearest()."""
         st, aux = self.prepare(u)
         self.evals += 1
         n = int(round((t_end - T0) / h))
-        return P.run_raw(self.m.sys, st, T0, n, h, every, aux, self.order)
+        self.run_end, self.failed_after = t_end, None
+        try:
+            return P.run_raw(self.m.sys, st, T0, n, h, every, aux, self.order)
+        except E.SolveError as e:
+            recs = getattr(e, "recs", None)
+            if recs:
+                self.run_end = recs[-1][0]
+                tx, p, v, i, came = self.contact(recs)
+                if came:
+                    self.failed_after = (recs[-1][0] - tx, str(e))
+                    return recs
+            self.run_end = t_end
+            raise
 
     def contact(self, recs):
         """(t_x, sweet spot position, velocity, index of the record before, came round?) where the sweet spot crosses
@@ -204,7 +250,7 @@ class Ctx:
         for i, rec in enumerate(recs):
             p, v = m.bat_point(rec[1], C.BAT_SS)
             a = -E.dot(E.sub(p, self.Pc), self.nb)
-            if rec[0] > T_END - AFTER + 1e-9:
+            if rec[0] > self.run_end - AFTER + 1e-9:
                 break                                    # too late for the 50 ms after contact to be seen: not a contact
             if prev is not None and prev[0] < 0.0 <= a and -E.dot(v, self.nb) > 0.0:
                 a0, p0, v0, t0 = prev
@@ -226,7 +272,7 @@ class Ctx:
         """(time, sweet spot position, velocity, index of the record before) where the sweet spot comes nearest the
         ball's place in the run, by cubic interpolation between records: the reach stage's reading (4.10)."""
         m = self.m
-        recs = [rec for rec in recs if rec[0] <= T_END - AFTER + 1e-9]      # the 50 ms after it must lie inside the run
+        recs = [rec for rec in recs if rec[0] <= self.run_end - AFTER + 1e-9]      # the 50 ms after it must lie inside the run
         pv = [m.bat_point(rec[1], C.BAT_SS) for rec in recs]
         k = min(range(len(recs)), key=lambda q: E.norm(E.sub(pv[q][0], self.Pc)))
         best = (E.norm(E.sub(pv[k][0], self.Pc)), recs[k][0], pv[k][0], pv[k][1], max(0, k - 1))
@@ -273,20 +319,46 @@ class Ctx:
         """{channel: mean over the swing of (level x strength / bound) squared}."""
         acc = {n: 0.0 for n in CH}
         k = 0
+        held = self.o.get("hold") == "let_go"
         for t, state, con, act, stop, sec in recs:
             if t > tx + 1e-9:
                 break
             k += 1
             for n, a in zip(CH, act):
-                acc[n] += (a[2] * pl[n][0] / self.bd[n]) ** 2 if self.bd[n] > 0 else 0.0
+                if self.bd[n] <= 0:
+                    continue
+                acc[n] += (a[2] * pl[n][0] / self.bd[n]) ** 2
+                if held and pl[n][4] > 0.0:
+                    # what holds a tensed muscle is working too, at the muscle's own level, until it has let go (4.11)
+                    left = 1.0 if t < pl[n][1] else math.exp(-(t - pl[n][1]) / E.TA_REL)
+                    acc[n] += (min(a[2], pl[n][4] * left) * pl[n][0] / self.bd[n]) ** 2
         return {n: v / max(1, k) for n, v in acc.items()}
 
+    def arm_fired(self, pl):
+        """[(channel, when it first drives, its asked strength over its bound)] for every arm muscle used (strength over
+        1 % of its bound). When it first drives is its onset; under the rule of sessions 8 and part 1 (no hold) a muscle
+        tensed beforehand drives from the first instant (a starting level over 1 % of its bound; review P2-4 of session 8)."""
+        held = self.o.get("hold") in ("resolve", "let_go")          # a held muscle has not fired until its onset
+        out = []
+        for n in ARMS:
+            if self.bd[n] > 0 and pl[n][0] > 0.01 * self.bd[n]:
+                t = pl[n][1] if (held or pl[n][0] * pl[n][4] <= 0.01 * self.bd[n]) else T0
+                out.append((n, t, pl[n][0] / self.bd[n]))
+        return out
+
     def arm_onsets(self, pl):
-        """when each arm muscle of any size first drives: its onset, or the start if it is tensed beforehand (a starting
-        level over 1 % of its bound is drive from the first instant; review P2-4)."""
-        if self.o.get("hold") == "resolve":
-            return [pl[n][1] for n in ARMS if pl[n][0] > 0.01 * self.bd[n]]
-        return [T0 if pl[n][0] * pl[n][4] > 0.01 * self.bd[n] else pl[n][1] for n in ARMS if pl[n][0] > 0.01 * self.bd[n]]
+        """when each arm muscle used first drives (arm_fired)."""
+        return [t for n, t, w in self.arm_fired(pl)]
+
+    def clock(self, pl, tx, on=True):
+        """the clock's residuals, one for each of the arm channels (zero for one not used, or when on is False):
+        clock_residuals() in the form this search uses (clock="each" unless the options say "earliest")."""
+        fired = self.arm_fired(pl) if on else []
+        vals = clock_residuals([(t, w) for n, t, w in fired], tx, self.t_avail, self.o.get("clock", "each"))
+        by = {n: v for (n, t, w), v in zip(fired, vals)}
+        if self.o.get("clock", "each") == "earliest":               # the one term, in the first place
+            return [vals[0] if vals else 0.0] + [0.0] * (len(ARMS) - 1)
+        return [by.get(n, 0.0) for n in ARMS]
 
     def residuals(self, u):
         try:
@@ -305,8 +377,7 @@ class Ctx:
             r += [math.sqrt(self.effort_w * eff[n] / len(CH)) for n in CH]
             xo, least, zr = self.balance(recs, tx)
             r += [xo / XCOM_UNIT, max(0.0, JUMP_MIN - least) / JUMP_UNIT, max(0.0, SINK_MIN - zr) * self.z0 / SINK_UNIT]
-            on = self.arm_onsets(pl)
-            r.append(max(0.0, (tx - self.t_avail) - min(on)) / CLOCK_UNIT if on else 0.0)
+            r += self.clock(pl, tx)
             return None if any(x != x for x in r) else r
         if self.o.get("contact") == "nearest":
             # the whole aim with no cliff (4.10, session 8's fix): contact is read where the sweet spot comes nearest the
@@ -330,10 +401,9 @@ class Ctx:
         r += [math.sqrt(self.effort_w * eff[n] / len(CH)) for n in CH]
         xo, least, zr = self.balance(recs, tx)
         r += [xo / XCOM_UNIT, max(0.0, JUMP_MIN - least) / JUMP_UNIT, max(0.0, SINK_MIN - zr) * self.z0 / SINK_UNIT]
-        on = self.arm_onsets(pl)
         # the clock is read against a contact that happened; a bat that never comes round is charged for that, above,
         # and not for the clock against the run's end (review P2-3)
-        r.append(max(0.0, (tx - self.t_avail) - min(on)) / CLOCK_UNIT if on and came else 0.0)
+        r += self.clock(pl, tx, came)
         if self.strain_w > 0.0:
             names = [s_[0] for s_ in self.m.sys.stops]
             for j, nm in enumerate(names):
@@ -347,9 +417,10 @@ def terms(ctx, r):
     n = len(CH)
     sq = lambda xs: sum(x * x for x in xs)
     out = {"miss": sq(r[0:2]), "off the ball's line": sq(r[2:4]), "bat not square": sq(r[4:5]), "speed short of 45 m/s": sq(r[5:6]),
-           "never came round": sq(r[6:7]), "effort": sq(r[7:7 + n]), "balance": sq(r[7 + n:10 + n]), "the arms' clock": sq(r[10 + n:11 + n])}
-    if len(r) > 11 + n:
-        out["load on a joint's end"] = sq(r[11 + n:])
+           "never came round": sq(r[6:7]), "effort": sq(r[7:7 + n]), "balance": sq(r[7 + n:10 + n]),
+           "the arms' clock": sq(r[10 + n:10 + n + len(ARMS)])}
+    if len(r) > 10 + n + len(ARMS):
+        out["load on a joint's end"] = sq(r[10 + n + len(ARMS):])
     return out
 
 
@@ -399,6 +470,19 @@ def lm(ctx, u, iters, log, pool):
                 improved = True
                 break
             lam *= 4.0
+        if not improved and FALLBACK:
+            # no damped step was accepted. Before taking the differences closer in: the differences themselves are 205
+            # plans already run, each one number away; if the best of them is lower, take it (one coordinate step). Added
+            # in session 9 after searches on the hands' body stopped within 3-16 iterations with lower scores beside them
+            # and no failed runs (body-motion 4.11); off (FALLBACK = False) it is the search of session 8.
+            cs = [(sum(x * x for x in rp), k) for k, rp in enumerate(rps) if rp is not None]
+            if cs and min(cs)[0] < cost:
+                cb, kb = min(cs)
+                gain = cost - cb
+                u, r, cost = ups[kb], rps[kb], cb
+                improved = True
+                lam = 1e-2
+                log("      (no damped step accepted: the best single difference taken, %s of %s)" % (ctx.box[free[kb]][1], ctx.box[free[kb]][0]))
         hist.append(cost)
         log("      iteration %2d: cost %.3f (miss %.1f, %.1f cm; speed along the line %.2f m/s), lambda %.0e"
             % (it + 1, cost, r[0] * MISS_UNIT * 100, r[1] * MISS_UNIT * 100, SPEED_ASK - r[5] ** 2 / SPEED_W, lam))
@@ -473,6 +557,10 @@ def report(ctx, u, log=print):
     out["bat_square_deg"] = math.asin(max(-1.0, min(1.0, (bz[0] * ctx.nb[0] + bz[1] * ctx.nb[1]) / (math.hypot(bz[0], bz[1]) * math.hypot(ctx.nb[0], ctx.nb[1]))))) / B.D2R
     out["bat_elev_deg"] = obs[ic][1]["bat_elev"]
     log("   FROM THE START PLACED ON [4]'s STATE (an input, flagged): contact %.0f ms after the start%s" % ((tx - T0) * 1e3, "" if came else "  (THE BAT NEVER REACHED THE BALL; figures are at the run's end)"))
+    out["failed_after_contact_ms"] = None if ctx.failed_after is None else ctx.failed_after[0] * 1e3
+    if ctx.failed_after is not None:
+        log("   THE RUN FAILED %.0f ms AFTER CONTACT, after everything the score and these checks read (\"%s\"); the records to there are used"
+            % (ctx.failed_after[0] * 1e3, ctx.failed_after[1][:90]))
     log("   the ball: missed by %+.1f cm up, %+.1f cm along the bat; the bat %+.1f deg from square; barrel %.0f deg below level" % (out["miss_cm"] + (out["bat_square_deg"], -out["bat_elev_deg"])))
     sw = [(E.norm(m.bat_point(st, C.BAT_SS)[1]), t) for t, st, *_ in recs]
     before = max(x for x in sw if x[1] <= tx)
@@ -534,6 +622,24 @@ def report(ctx, u, log=print):
     out["trail_knee"] = (obs[0][1]["trail_knee_flex"], obs[ic][1]["trail_knee_flex"])
     log("   CHECK the front leg braced: the lead knee %.0f deg bent at the start, %.0f at -50 ms, %.0f at contact, straightening at up to %.0f deg/s   [46 at foot plant, 14 +- 12 at contact, 350 deg/s (OpenBiomechanics); 15 at contact ([3])]" % out["lead_knee"])
     log("   CHECK the front foot's greatest load: %.2f x body weight at %.0f ms; at contact front %.2f, rear %.2f   [2.0 +- 0.4, p10-p90 1.5-2.6]; the rear knee %.0f -> %.0f deg" % (pk[0], rel(pk[1]), fz[ic][0], fzr[ic][0], out["trail_knee"][0], out["trail_knee"][1]))
+    # what each foot did on the ground (4.11, part 3): its heel's greatest height before contact, how far it turned on the
+    # ground from the start to contact (+ is the toe going toward the pitcher), and the pelvis's turn over the same time
+    out["feet"] = {}
+    yaw_of = lambda body, state: math.atan2(*reversed(m.axis(state, body, (1, 0, 0))[:2])) / B.D2R
+    for sd in "RL":
+        fb = m.b["foot_" + sd]
+        heel = [c_[2] for c_ in s.contacts if c_[0].startswith(sd + "_heel")]
+        hz = []
+        for rec in recs[:ic + 1]:
+            xb, qb, _, _ = s.pose(rec[1], fb)
+            Rf = E.qR(qb)
+            hz.append(min(E.add(xb, E.mv(Rf, p_))[2] for p_ in heel))
+        yw = unwrap([yaw_of("foot_" + sd, rec[1]) for rec in recs[:ic + 1]])
+        out["feet"][sd] = (max(hz) * 100, hz[-1] * 100, yw[-1] - yw[0], min(yw) - yw[0], max(yw) - yw[0])
+    pyaw = unwrap([o["pelvis_rot"] for t, o in obs[:ic + 1]])
+    out["pelvis_turn"] = pyaw[-1] - pyaw[0]
+    log("   the feet on the ground: the REAR heel's greatest height before contact %.1f cm (%.1f at contact), the rear foot turned %+.0f deg on the ground by contact (between %+.0f and %+.0f; + is the toe toward the pitcher); the FRONT heel %.1f cm (%.1f), turned %+.0f deg; the pelvis turned %+.0f deg in that time"
+        % (out["feet"]["R"][:5] + out["feet"]["L"][:3] + (out["pelvis_turn"],)))
     for key, label, band in (("pelvis_rot_vel", "the hips' fastest turning", "705 +- 75 (OpenBiomechanics); 714 +- 76 at -75 ms ([3])"), ("trunk_rot_vel", "the trunk's fastest turning", "915 +- 80"), ("bat_az_vel", "the bat's fastest turning (seen from above)", "no direct measurement kept")):
         x = max((o[key], t) for t, o in obs if t <= tx + 1e-9)
         out[key + "_peak"] = (x[0], rel(x[1]))
@@ -573,8 +679,9 @@ def report(ctx, u, log=print):
     on = ctx.arm_onsets(pl)
     out["clock_ms"] = (tx - min(on)) * 1e3 if on else None
     out["arms_tensed_beforehand"] = sorted(n for n in ARMS if pl[n][0] * pl[n][4] > 0.01 * ctx.bd[n])
-    log("   effort %.3f (0 = nothing, 1 = everything flat out all swing); the first arm drive of any size, a muscle tensed from the start counted, is %.0f ms before contact (the clock allows %.0f); arm muscles tensed from the start: %s"
-        % (out["effort"], out["clock_ms"] or 0.0, ctx.t_avail * 1e3, ", ".join(out["arms_tensed_beforehand"]) or "none"))
+    log("   effort %.3f (0 = nothing, 1 = everything flat out all swing); the first arm drive of any size, %s, is %.0f ms before contact (the clock allows %.0f); arm muscles tensed from the start: %s"
+        % (out["effort"], "a tensed muscle held until its onset and not counted" if ctx.o.get("hold") == "let_go" else "a muscle tensed from the start counted",
+           out["clock_ms"] or 0.0, ctx.t_avail * 1e3, ", ".join(out["arms_tensed_beforehand"]) or "none"))
     pairs = (("core", "core_back"), ("sh_raise_L", "sh_lower_L"), ("sh_raise_R", "sh_lower_R"), ("sh_irot_L", "sh_erot_L"), ("sh_irot_R", "sh_erot_R"),
              ("elbow_ext_L", "elbow_flex_L"), ("elbow_ext_R", "elbow_flex_R"), ("wrist_flex_L", "wrist_ext_L"), ("wrist_flex_R", "wrist_ext_R"),
              ("pron_L", "sup_L"), ("pron_R", "sup_R"), ("hip_abd_L", "hip_add_L"), ("hip_abd_R", "hip_add_R"), ("knee_ext_L", "knee_flex_L"),
@@ -597,7 +704,21 @@ def report(ctx, u, log=print):
     out["ligaments_over_50"] = sorted(k_ for k_, x in out["stops"].items() if k_ != "shoulder_L" and x[0] > STRAIN_FREE)
     log("   LEANING ON A LIGAMENT (a stop other than the lead arm against the chest over %.0f N m): %s" % (STRAIN_FREE, ", ".join(out["ligaments_over_50"]) or "none"))
     out["unheld"] = {}
-    for key, rng_ in (("pron_L", 161.9), ("pron_R", 161.9), ("sh_rot_L", 173.0), ("sh_rot_R", 173.0), ("ankle_L", 67.3), ("ankle_R", 67.3)):
+    hands = m.grip == "hands"
+    if hands:
+        # the hands' body (4.11): each wrist, forearm and upper arm in its clinical sense at the start, 50 ms before contact
+        # and at contact, with hitters measured directly beside them (never given to the search; research note 11 A5)
+        cl = [B.clinical(m, recs[q][1]) for q in (0, i50, ic)]
+        out["arms_clinical"] = {"%s_%s" % k: [c_[k] for c_ in cl] for k in cl[0]}
+        log("   the arm joints, clinical senses (toward the thumb +, toward the palm +, palm-down +, turned in +), at the start, -50 ms and contact:")
+        meas = {("wrist_dev", "L"): "hitters +10 +- 10 at foot plant, -16 +- 9 at contact", ("wrist_flex", "L"): "-19 +- 18, +8 +- 10",
+                ("wrist_dev", "R"): "+5 +- 12, -8 +- 12", ("wrist_flex", "R"): "-52 +- 14, -47 +- 17",
+                ("forearm_to_barrel", "L"): "138-157 at contact (Gelinas 1988)"}
+        ar = B.arm_range()
+        for k in sorted(cl[0], key=lambda kk: (kk[1], kk[0])):
+            log("      %-18s %s: %6.1f %6.1f %6.1f   range %s   %s" % (k[0], k[1], cl[0][k], cl[1][k], cl[2][k],
+                                                                    "%.0f to %.0f" % ar[k[0]] if k[0] in ar else "-", "[" + meas[k] + "]" if k in meas else ""))
+    for key, rng_ in ((("ankle_L", 67.3), ("ankle_R", 67.3)) if hands else (("pron_L", 161.9), ("pron_R", 161.9), ("sh_rot_L", 173.0), ("sh_rot_R", 173.0), ("ankle_L", 67.3), ("ankle_R", 67.3))):
         vv = unwrap([a[key] for a in ang])
         out["unheld"][key] = (max(vv) - min(vv), rng_)
     out["unheld_overrun"] = sorted(k_ for k_, x in out["unheld"].items() if x[0] > x[1])
@@ -625,6 +746,22 @@ def report(ctx, u, log=print):
     return out
 
 
+def failed_differences(ctx, u, log=print):
+    """how many of the plan's one-number differences (each free number moved 2 % of its range, as the search moves it)
+    fail to run. A failed run is a refused step, so a count above zero means the search could not see its slope there:
+    the check that session 9's first runs lacked (body-motion 4.11)."""
+    bad = 0
+    for i in ctx.free:
+        un = list(u)
+        un[i] = u[i] + (0.02 if u[i] + 0.02 <= 1.0 else -0.02)
+        try:
+            ctx.run(un)
+        except E.SolveError:
+            bad += 1
+    log("   of the plan's %d one-number differences, %d fail to run%s" % (len(ctx.free), bad, "" if bad == 0 else "  (THE SEARCH COULD NOT SEE ITS SLOPE HERE)"))
+    return bad
+
+
 def verify(ctx, u, log=print):
     """the same plan at a quarter of the step: what the result's numbers are worth."""
     out = {}
@@ -647,9 +784,20 @@ def main():
     a = sys.argv[1:]
     arg = lambda k, d: a[a.index(k) + 1] if k in a else d
     main_file = os.path.join(HERE, "practice3d_main.json")
+    body = {"grip": arg("--grip", None)} if "--grip" in a else {}      # the body a new search runs on; kept in the result's options
+    global FALLBACK
+    FALLBACK = "--fallback" in a
+    if "--hold" in a:
+        body["hold"] = arg("--hold", None)
+    if "--view" in a:
+        body["t_view"] = float(arg("--view", T_VIEW))
+    if "--feet" in a:
+        body["feet"] = arg("--feet", None)
+    if "--mu" in a:
+        body["mu"] = float(arg("--mu", B.MU))
     if "--show" in a:
         d = json.load(open(arg("--show", main_file)))
-        ctx = Ctx(**d.get("options", {}))
+        ctx = Ctx(**dict(d.get("options", {}), **body))
         report(ctx, ctx.u_of(d["plan"]))
         return
     iters = int(arg("--iters", 30))
@@ -686,14 +834,19 @@ def main():
         names = arg("--staged", "main").split(",")
         n1, n2 = int(arg("--reach", 15)), iters
         for name in names:
-            o = {} if name == "main" else dict(VARY[name])
+            o = dict(body) if name == "main" else dict(VARY[name], **body)
             ctx = Ctx(contact="nearest", **o)
             reach = Ctx(stage="reach", **o)
             print("\n== staged, %s: %s; from each start %d iterations of the reach stage, then %d of the whole aim" % (name, o, n1, n2))
-            starts = (("A", json.load(open(os.path.join(HERE, "fit3d_d34_all.json")))["plan"]),
-                      ("B", json.load(open(os.path.join(P.OUT, "fit3d_all_strongest_on_time.json")))["plan"]),
-                      ("C", hand_plan(ctx, 0.6)), ("D", hand_plan(ctx, 0.3, seed=1)))
+            starts = [("A", json.load(open(os.path.join(HERE, "fit3d_d34_all.json")))["plan"]),
+                      ("C", hand_plan(ctx, 0.6)), ("D", hand_plan(ctx, 0.3, seed=1)),
+                      ("S", json.load(open(os.path.join(HERE, "practice3d_main.json")))["plan"])]     # S: session 8's practised swing (found from A, on the weld)
+            if "B" in arg("--starts", "ABCD"):
+                starts.append(("B", json.load(open(os.path.join(P.OUT, "fit3d_all_strongest_on_time.json")))["plan"]))
+            if "--from-file" in a:                               # a start from a saved result, labelled F
+                starts.append(("F", json.load(open(arg("--from-file", "")))["plan"]))
             best = None
+            tag = arg("--tag", "")
             for label, plan in starts:
                 if label not in arg("--starts", "ABCD"):
                     continue
@@ -705,28 +858,29 @@ def main():
                 print("-- start %s, the whole aim" % label)
                 u, cost, hist2 = search(ctx, reach.plan(u), n2)
                 out = report(ctx, u)
-                out.update(cost=cost, start=label + ", staged", history=hist2, reach_history=hist, step_check=verify(ctx, u))
-                json.dump(out, open(os.path.join(P.OUT, "practice3d_staged_%s_%s.json" % (name, label)), "w"), indent=1)
+                out.update(cost=cost, start=label + ", staged", history=hist2, reach_history=hist, step_check=verify(ctx, u), failed_differences=failed_differences(ctx, u))
+                json.dump(out, open(os.path.join(P.OUT, "practice3d_staged_%s%s_%s.json" % (name, tag, label)), "w"), indent=1)
                 if best is None or cost < best["cost"]:
                     best = out
-            json.dump(best, open(os.path.join(P.OUT, "practice3d_staged_%s.json" % name), "w"), indent=1)
+            json.dump(best, open(os.path.join(P.OUT, "practice3d_staged_%s%s.json" % (name, tag)), "w"), indent=1)
             print("\nthe best of the staged starts for %s: start %s, cost %.3f" % (name, best["start"], best["cost"]))
         return
     if "--continue" in a:
         # the search carried on from a saved result (contact read at the nearest approach, as in the staged search)
         d = json.load(open(arg("--continue", main_file)))
         o = {k: v for k, v in d.get("options", {}).items() if k not in ("contact", "stage")}
+        o.update(body)
         ctx = Ctx(contact="nearest", **o)
         print("== continued %d iterations from %s (start %s, cost %.3f)" % (iters, os.path.basename(arg("--continue", main_file)), d.get("start"), d.get("cost", float("nan"))))
         u, cost, hist = search(ctx, d["plan"], iters)
         out = report(ctx, u)
-        out.update(cost=cost, start=str(d.get("start")) + ", continued", history=hist, step_check=verify(ctx, u))
+        out.update(cost=cost, start=str(d.get("start")) + ", continued", history=hist, step_check=verify(ctx, u), failed_differences=failed_differences(ctx, u))
         json.dump(out, open(arg("--out", main_file), "w"), indent=1)
         return
     if "--vary" in a:
         base = json.load(open(arg("--from", main_file)))
         for name in arg("--vary", "").split(","):
-            o = dict(VARY[name])
+            o = dict(VARY[name], **body)
             print("\n== %s: %s; %d iterations from the main result" % (name, o, iters))
             ctx = Ctx(contact="nearest", **o)
             plan = {n: [min(v[0], ctx.bd[n])] + list(v[1:]) for n, v in base["plan"].items()}

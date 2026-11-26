@@ -727,6 +727,126 @@ class EngineChecks(unittest.TestCase):
             sys.set_body(st, b, (0.0, 0.0, -0.3), (1.0, 0.0, 0.0, 0.0))
             with self.assertRaises(E.SolveError):
                 sys.deriv(0.0, st, sys.new_aux())
+        sys = E.System(g=(0.0, 0.0, 0.0))                   # kind 2: the limb's own axis turned right over from its rest direction
+        b = sys.body("rod", 2.0, (0.15, 0.15, 0.002))
+        sys.ball(-1, b, (0, 0, 0), (0, 0, 0.3))
+        sys.stop("st", -1, b, (0, 0, 1), (1, 0, 0), (1, 0, 0), -0.1, 0.1, 2000.0, 0.0, 2, (0, 0, 1))
+        st = sys.new_state()
+        for deg, fails in ((170.0, False), (177.0, True)):
+            q = E.qaxis((0, 1, 0), math.radians(deg))
+            sys.set_body(st, b, E.scale(E.mv(E.qR(q), (0, 0, 0.3)), -1.0), q)
+            if fails:
+                with self.assertRaises(E.SolveError):
+                    sys.deriv(0.0, st, sys.new_aux())
+            else:
+                sys.deriv(0.0, st, sys.new_aux())
+
+    def test_a_limbs_turn_is_read_as_its_swing_twist_and_its_gradient_is_its_rate(self):
+        """the kind 2 stop (body-motion 4.11): its reading equals the turn left over when the limb's quaternion is
+        split into a swing and a twist about its own axis (computed here, 2 atan2(q_z, q_w)), at swings up to 150 deg
+        in any direction; it does not move when the limb is swung further without turning; and its rate under any
+        angular velocity w is w . g with the engine's gradient g (finite differences of the reading)."""
+        S = E.System
+        e, n = (1.0, 0.0, 0.0), (0.0, 0.0, 1.0)
+        rd = lambda q: S.stop_angle(n, e, E.mv(E.qR(q), e), 2, v=E.mv(E.qR(q), n))
+        for az in (0.0, 70.0, 200.0, 310.0):
+            ax = (math.cos(math.radians(az)), math.sin(math.radians(az)), 0.0)
+            for swing in (0.0, 35.0, 90.0, 150.0):
+                for turn in (-100.0, -20.0, 0.0, 60.0):
+                    q = E.qmul(E.qaxis(ax, math.radians(swing)), E.qaxis(n, math.radians(turn)))
+                    th, g = rd(q)
+                    msg = "swing %.0f about %.0f, turn %.0f" % (swing, az, turn)
+                    self.assertAlmostEqual(math.degrees(th), turn, delta=1e-9, msg=msg)          # a swing about a level axis is the shortest one
+                    tw = 2.0 * math.atan2(q[3], q[0])
+                    self.assertAlmostEqual((math.degrees(tw) - turn + 180.0) % 360.0 - 180.0, 0.0, delta=1e-9, msg=msg)
+                    for w in ((0.3, -0.2, 0.9), (1.0, 0.4, -0.5), (-0.6, 0.8, 0.1)):
+                        d = 1e-6
+                        q2 = E.qmul(E.qaxis(w, E.norm(w) * d), q)
+                        rate = (rd(q2)[0] - rd(E.qmul(E.qaxis(w, -E.norm(w) * d), q))[0]) / (2 * d)
+                        self.assertAlmostEqual(rate, E.dot(w, g), delta=1e-6 * (1.0 + abs(rate)), msg=msg)
+
+    def test_a_limbs_turn_stop_does_no_net_positive_work(self):
+        """the passivity check for the kind 2 stop (session 8's lesson, before any search uses it): the rod alone,
+        swung 0, 40, 90 and 130 deg from its rest direction, damped and not, and with a 30 N m torque driving it into
+        the stop: its energy never exceeds what it started with plus what the drive put in, the stop's booked work
+        plus what its spring holds is never positive, and the engine's reading agrees with the quaternion's."""
+        for tilt in (0.0, 40.0, 90.0, 130.0):
+            for c in (0.0, 20.0):
+                for drive in (0.0, 30.0):
+                    e0, e1, emax, booked, worst, wd = rod_on_a_turn_stop(tilt, c=c, drive=drive)
+                    msg = "tilt %.0f, damping %.0f, drive %.0f" % (tilt, c, drive)
+                    self.assertLess(worst, 1e-9, msg=msg)
+                    self.assertLess(booked, 1e-3 * e0, msg=msg)
+                    if not drive:
+                        self.assertLess(emax, e0 * (1.0 + 1e-3), msg=msg)
+                        if c == 0.0:
+                            self.assertAlmostEqual(e1, e0, delta=1e-3 * e0, msg=msg)
+                        else:
+                            self.assertLess(e1, 0.95 * e0, msg=msg)
+                    else:
+                        self.assertLess(e1, e0 + wd + 1e-3 * e0, msg=msg)
+
+    def test_a_limbs_turn_stop_with_the_torque_about_the_limbs_axis_alone_fails_that_check(self):
+        """the mutation: the kind 2 stop's torque about the limb's own axis instead of the reading's gradient. A rod
+        swung 130 deg from its rest direction gains a fifth of its energy from the stop (swung 40 deg it loses 3 %,
+        which is as wrong); unswung the two laws are the same."""
+        E.MUT.add("twist_fixed_axis")
+        try:
+            e0, e1, emax, booked, worst, wd = rod_on_a_turn_stop(130.0)
+            f0 = rod_on_a_turn_stop(0.0)
+        finally:
+            E.MUT.discard("twist_fixed_axis")
+        self.assertGreater(emax, 1.1 * e0)
+        self.assertGreater(booked, 0.1 * e0)
+        self.assertLess(f0[2], f0[0] * (1.0 + 1e-3))
+
+
+def rod_on_a_turn_stop(tilt_deg, c=0.0, k=2000.0, T=0.1, h=1e-4, drive=0.0):
+    """a 2 kg rod on a ball joint at the world's origin, no gravity, turning about its own length into a kind 2 stop
+    (a limb's turn, body-motion 4.11) whose rest direction is the world's z: the rod starts swung `tilt_deg` from that
+    direction, spinning about its own axis into the stop and swinging as well. drive: a constant torque (N m) about the
+    rod's own axis pushing it into the stop. The turn is read HERE from the rod's quaternion (its swing-twist split,
+    2 atan2(q_z, q_w)), not by the engine's carried-direction formula.
+    Returns (energy at the start, at the end, the largest seen, the stop's booked work + what its spring still holds,
+    the largest difference between the engine's reading and this one, the drive's booked work)."""
+    s = E.System(g=(0.0, 0.0, 0.0))
+    I = (0.15, 0.15, 0.002)
+    b = s.body("rod", 2.0, I)
+    s.ball(-1, b, (0.0, 0.0, 0.0), (0.0, 0.0, 0.3))
+    s.stop("st", -1, b, (0, 0, 1), (1, 0, 0), (1, 0, 0), -10.0, 0.0, k, c, 2, (0, 0, 1))
+    if drive:
+        s.actuator("push", b, -1, (0, 0, -1), drive, 1e9, -1.0, 0.0, 1e9, 1.0)     # on the rod about its own +z; no fall with speed
+    st = s.new_state()
+    q = E.qmul(E.qaxis((0, 1, 0), math.radians(tilt_deg)), E.qaxis((0, 0, 1), -0.05))
+    R = E.qR(q)
+    x = E.scale(E.mv(R, (0, 0, 0.3)), -1.0)
+    w = E.add(E.scale(E.mv(R, (0, 0, 1)), 3.0), (0.7, 0.4, 0.0))       # spin into the stop, and a swing
+    s.set_body(st, b, x, q, E.cross(w, x), w)
+    if drive:
+        st[13 * s.nb] = 1.0
+    aux = s.new_aux()
+    ow = 13 * s.nb + len(s.acts)
+
+    def energy(state):
+        xx, qq, vv, ww = s.pose(state, b)
+        wl = E.mtv(E.qR(qq), ww)
+        th = 2.0 * math.atan2(qq[3], qq[0])
+        th = (th + math.pi) % (2.0 * math.pi) - math.pi
+        pe = 0.5 * k * th * th if th > 0 else 0.0
+        return 0.5 * 2.0 * E.dot(vv, vv) + 0.5 * sum(I[i] * wl[i] ** 2 for i in range(3)) + pe, pe, th
+    e0 = energy(st)[0]
+    emax, worst = e0, 0.0
+    s.diag = {}
+    for i in range(int(round(T / h))):
+        st = s.step(i * h, st, aux, h)
+        if i % 10 == 0:
+            e, pe, th = energy(st)
+            emax = max(emax, e)
+            s.deriv(i * h, st, aux)
+            worst = max(worst, abs(s.diag["stop"]["st"][1] - th))
+    s.diag = None
+    e1, pe1, th = energy(st)
+    return e0, e1, emax, st[ow + 1] + pe1, worst, st[ow]
 
 
 # ---- 7. the whole body ---------------------------------------------------------------------------
@@ -1138,22 +1258,15 @@ class RangeChecks(unittest.TestCase):
     WRIST_REACH = (68.0 - B.RANGE_CLEAR, 157.0 + B.RANGE_CLEAR)
 
     @NEED
-    def test_the_lead_wrists_range_is_one_a_wrist_reaches(self):
-        """the lead wrist's stops, as angles between forearm and barrel (91 to 149 deg), lie inside what a wrist reaches."""
+    def test_the_welds_lead_wrist_was_inside_a_wrists_reach_and_its_rear_wrist_was_not(self):
+        """the record of session 8's second review, P1-1, on the old weld (kept for the dated results): the lead wrist's
+        stops, as angles between forearm and barrel (91 to 149 deg), lie inside what a wrist reaches; the rear's (151
+        deg through the line of the bat to 29 deg past it) do not. The hands' body's wrists are HandsChecks' business."""
         lo, hi = self._wrist_range_between_forearm_and_barrel("L")
         self.assertGreaterEqual(lo, self.WRIST_REACH[0])
         self.assertLessEqual(hi, self.WRIST_REACH[1])
-
-    @NEED
-    @unittest.expectedFailure
-    def test_the_rear_wrists_range_is_one_a_wrist_reaches(self):
-        """EXPECTED TO FAIL until each hand has its own grip (session 8's second review, P1-1). Both hands are welded
-        to the handle at one roll, so the rear forearm starts 156 deg from the barrel, 60 deg more opened out than
-        the lead's, and its 58 deg of travel runs from 151 deg through the line of the bat (180) and 29 deg past it:
-        no wrist's range. Its stop is not moved here; what removes this failure is the rear hand's own grip."""
         lo, hi = self._wrist_range_between_forearm_and_barrel("R")
-        self.assertGreaterEqual(lo, self.WRIST_REACH[0])
-        self.assertLessEqual(hi, self.WRIST_REACH[1])
+        self.assertGreater(hi, 180.0)
 
     @NEED
     def test_a_stop_pushes_back_only_past_its_end(self):
@@ -1163,14 +1276,693 @@ class RangeChecks(unittest.TestCase):
         st = B.place(m, T0)
         lim = B.add_ranges(m, st)
         j = [x[0] for x in m.sys.stops].index("knee_L")
-        name, a_, b_, ax, ea, fb, lo, hi, k, c, kind = m.sys.stops[j]
+        name, a_, b_, ax, ea, fb, lo, hi, k, c, kind, axb = m.sys.stops[j]
         self.assertAlmostEqual(hi / B.D2R, B.ROM["knee_flex"], delta=1e-9)
-        m.sys.stops[j] = (name, a_, b_, ax, ea, fb, lo, (B.range_angles(m, st)["knee_L"] - 3.0) * B.D2R, k, 0.0, kind)   # the end moved 3 deg inside the knee's angle
+        m.sys.stops[j] = (name, a_, b_, ax, ea, fb, lo, (B.range_angles(m, st)["knee_L"] - 3.0) * B.D2R, k, 0.0, kind, axb)   # the end moved 3 deg inside the knee's angle
         m.sys.diag = {}
         m.sys.deriv(T0, st, m.sys.new_aux())
         tau, th = m.sys.diag["stop"]["knee_L"]
         m.sys.diag = None
         self.assertAlmostEqual(tau, -B.RANGE_K["big"] * 3.0 * B.D2R, delta=1e-6 * B.RANGE_K["big"])
+
+
+def clinical_arm(m, st, sd, raise_axis=(1.0, 0.0, 0.0), raise_deg=0.0, turn_in=0.0, elbow=90.0, palm_down=0.0, tilt=0.0, bend=0.0):
+    """the state st with arm sd rebuilt from the clinical definitions on the trunk as it stands (orientations only):
+    the upper arm hanging along the trunk with the elbow bending straight forward, then turned in `turn_in` about its
+    own length, then carried `raise_deg` about the trunk's level axis `raise_axis` by a single turn; the elbow bent
+    `elbow`; the forearm in neutral (thumb toward the upper arm's side, the way it lies with the thumb up when the
+    elbow is bent at the side) and then turned palm-down by `palm_down`; the hand in line with the forearm, then tilted
+    `tilt` toward the thumb about the palm's own normal and bent `bend` toward the palm about the forearm's radial line.
+    Built from rotations only: no reading of body.py is used. Returns (state, forearm z, forearm x, palm direction)."""
+    sg = 1.0 if sd == "L" else -1.0
+    r = math.radians
+    qt = tuple(st[13 * m.b["trunk"] + 3:13 * m.b["trunk"] + 7])
+    turn = lambda ax, deg: E.qaxis(ax, r(deg))
+    qu = E.qmul(E.qmul(qt, turn(raise_axis, raise_deg)), E.qmul(turn((0, 0, 1), 180.0), turn((0, 0, 1), -sg * turn_in)))
+    qf = E.qmul(E.qmul(qu, turn((0, 1, 0), elbow)), E.qmul(turn((0, 0, 1), 180.0), turn((0, 0, 1), -sg * palm_down)))
+    Rf = E.qR(qf)
+    zf, xf = E.mv(Rf, (0, 0, 1)), E.mv(Rf, (1, 0, 0))
+    palm = E.scale(E.mv(Rf, (0, 1, 0)), -sg)                 # the forearm's palm side
+    # the hand: knuckles along -zf, thumb side along xf, palm along `palm`; then tilted and bent
+    d, rr, pp = E.scale(zf, -1.0), xf, palm
+    qh = E.qaxis(pp, -r(tilt) if sd == "R" else r(tilt))     # toward the thumb: the knuckles' line turns toward the thumb's side
+    d, rr = E.mv(E.qR(qh), d), E.mv(E.qR(qh), rr)
+    assert E.dot(d, xf) * tilt >= 0.0                        # the knuckles did move toward the thumb's side of the forearm
+    qb_ = E.qaxis(xf, r(bend) if sd == "R" else -r(bend))    # toward the palm
+    d, rr, pp = (E.mv(E.qR(qb_), v) for v in (d, rr, pp))
+    assert E.dot(d, palm) * bend >= 0.0                      # the knuckles did move toward the palm's side
+    db, rb, pb = B.hand_frame(sd)
+    # the bat's rotation takes the hand's own directions, as fixed in the bat, to where the hand now is
+    Rb = [sum(w[i] * b_[j] for w, b_ in ((d, db), (rr, rb), (pp, pb))) for i in range(3) for j in range(3)]
+    out = list(st)
+    for body, q in (("uarm_" + sd, qu), ("farm_" + sd, qf), ("bat", E.R_to_q(tuple(Rb)))):
+        out[13 * m.b[body] + 3:13 * m.b[body] + 7] = q
+    return out, zf, xf, palm
+
+
+class HandsChecks(unittest.TestCase):
+    """each hand's own grip (body-motion 4.11, session 9): the hands' body's readings as a clinician defines them,
+    each side separately; each carried through its joint's other freedoms; the start; a hitter's contact posture."""
+
+    @classmethod
+    def setUpClass(cls):
+        if not B.have_curves():
+            raise unittest.SkipTest("[4]'s digitised curves are not on this machine (docs/body-motion.md 3)")
+        cls.m = B.Model(ranges=(), grip="hands")
+        cls.st = B.place(cls.m, T0)
+        cls.lim = B.add_ranges(cls.m, cls.st)
+
+    def test_the_forearms_turn_reads_as_a_clinician_reads_it_and_does_not_move_with_the_elbow_or_the_wrist(self):
+        """a forearm turned 40 deg palm-down reads 40 on either side, whatever the elbow's bend (10 to 140 deg), the upper
+        arm's posture or the wrist's two angles; in neutral, with the arm hanging and the elbow at 90, the thumb is up
+        and the palm faces the body's midline; turned 90 palm-down the palm faces the ground."""
+        m, st = self.m, self.st
+        zt, yt = m.axis(st, "trunk", (0, 0, 1)), m.axis(st, "trunk", (0, 1, 0))
+        for sd, sg in B.SIDES:
+            s0, zf, xf, palm = clinical_arm(m, st, sd)
+            self.assertAlmostEqual(E.dot(xf, zt), 1.0, delta=1e-9)                       # thumb up
+            self.assertAlmostEqual(E.dot(palm, E.scale(yt, -sg)), 1.0, delta=1e-9)       # palm to the midline
+            s90, zf, xf, palm = clinical_arm(m, st, sd, palm_down=90.0)
+            self.assertAlmostEqual(E.dot(palm, zt), -1.0, delta=1e-9)                    # palm down
+            for want in (-80.0, -30.0, 0.0, 40.0, 75.0):
+                for kw in ({}, {"elbow": 10.0}, {"elbow": 140.0}, {"raise_deg": sg * 80.0, "turn_in": 30.0}, {"tilt": -30.0, "bend": 40.0},
+                           {"tilt": 20.0, "bend": -70.0}, {"raise_axis": (0, 1, 0), "raise_deg": -100.0, "turn_in": -60.0, "elbow": 60.0}):
+                    c = B.clinical(m, clinical_arm(m, st, sd, palm_down=want, **kw)[0])
+                    self.assertAlmostEqual(c[("forearm", sd)], want, delta=1e-7, msg="%s %s" % (sd, kw))
+
+    def test_the_upper_arms_turn_reads_as_a_clinician_reads_it_and_does_not_move_as_the_arm_is_raised(self):
+        """an upper arm turned out 60 deg reads -60 hanging, raised forward, raised to the side and raised obliquely to
+        150 deg, on either side, whatever the elbow and forearm do. By the clinical picture: hanging with the elbow at
+        90 and no turn the forearm points forward, turned in 90 it lies across the belly; straight out to the side with
+        no turn the forearm is level and forward, turned out 90 it points up."""
+        m, st = self.m, self.st
+        xt, yt, zt = (m.axis(st, "trunk", e) for e in E.E3)
+        for sd, sg in B.SIDES:
+            fore = lambda **kw: E.scale(clinical_arm(m, st, sd, **kw)[1], -1.0)          # from the elbow toward the wrist
+            self.assertAlmostEqual(E.dot(fore(), xt), 1.0, delta=1e-9)
+            self.assertAlmostEqual(E.dot(fore(turn_in=90.0), E.scale(yt, -sg)), 1.0, delta=1e-9)
+            self.assertAlmostEqual(E.dot(fore(raise_deg=sg * 90.0), xt), 1.0, delta=1e-9)
+            self.assertAlmostEqual(E.dot(fore(raise_deg=sg * 90.0, turn_in=-90.0), zt), 1.0, delta=1e-9)
+            up = E.scale(m.axis(clinical_arm(m, st, sd, raise_deg=sg * 90.0)[0], "uarm_" + sd, (0, 0, 1)), -1.0)
+            self.assertAlmostEqual(E.dot(up, E.scale(yt, sg)), 1.0, delta=1e-9)          # that arm does point out to its own side
+            # how far the arm is raised reads the raise, whichever way it is raised and however it is turned
+            for kw, want in (({}, 0.0), ({"raise_deg": sg * 90.0, "turn_in": 40.0}, 90.0), ({"raise_axis": (0, 1, 0), "raise_deg": -150.0}, 150.0),
+                             ({"raise_axis": (0.6, 0.8, 0.0), "raise_deg": 165.0, "turn_in": -70.0, "elbow": 30.0}, 165.0)):
+                self.assertAlmostEqual(B.clinical(m, clinical_arm(m, st, sd, **kw)[0])[("raised", sd)], want, delta=1e-6, msg="%s %s" % (sd, kw))
+            for want in (-100.0, -60.0, 0.0, 35.0, 65.0):
+                for kw in ({}, {"raise_deg": sg * 90.0}, {"raise_axis": (0, 1, 0), "raise_deg": -90.0}, {"raise_axis": (0.6, -0.8, 0.0), "raise_deg": 150.0},
+                           {"raise_axis": (0.6, 0.8, 0.0), "raise_deg": -120.0, "elbow": 20.0, "palm_down": 50.0, "tilt": 15.0}):
+                    c = B.clinical(m, clinical_arm(m, st, sd, turn_in=want, **kw)[0])
+                    self.assertAlmostEqual(c[("upper_arm", sd)], want, delta=1e-7, msg="%s %s" % (sd, kw))
+
+    def test_the_wrists_two_angles_read_as_a_clinician_reads_them_and_neither_moves_with_the_other(self):
+        """with the hand in line with the forearm both read 0 and forearm and barrel are 90 deg + the grip's obliqueness
+        apart; a wrist tilted 20 deg toward the thumb reads +20 and closes that angle by 20, tilted 30 away it opens it
+        by 30, on either side; bent toward the palm reads +, back -, the tilt's reading unmoved through 70 deg of bend
+        either way and the bend's unmoved through the tilt; neither moves with the forearm's turn or the elbow."""
+        m, st = self.m, self.st
+        for sd, sg in B.SIDES:
+            c = B.clinical(m, clinical_arm(m, st, sd)[0])
+            self.assertAlmostEqual(c[("wrist_dev", sd)], 0.0, delta=1e-7)
+            self.assertAlmostEqual(c[("wrist_flex", sd)], 0.0, delta=1e-7)
+            self.assertAlmostEqual(c[("forearm_to_barrel", sd)], 90.0 + B.GRIP_OBLIQUE, delta=1e-7)
+            for tilt in (-30.0, -10.0, 20.0):
+                c = B.clinical(m, clinical_arm(m, st, sd, tilt=tilt)[0])
+                self.assertAlmostEqual(c[("forearm_to_barrel", sd)], 90.0 + B.GRIP_OBLIQUE - tilt, delta=1e-7)
+                for bend in (-70.0, -20.0, 0.0, 30.0, 60.0):
+                    for kw in ({}, {"palm_down": 60.0, "elbow": 30.0}, {"raise_deg": sg * 70.0, "turn_in": -40.0, "palm_down": -50.0}):
+                        c = B.clinical(m, clinical_arm(m, st, sd, tilt=tilt, bend=bend, **kw)[0])
+                        self.assertAlmostEqual(c[("wrist_dev", sd)], tilt, delta=1e-7, msg="%s tilt %.0f bend %.0f %s" % (sd, tilt, bend, kw))
+                        self.assertAlmostEqual(c[("wrist_flex", sd)], bend, delta=1e-7, msg="%s tilt %.0f bend %.0f %s" % (sd, tilt, bend, kw))
+
+    WRIST_REACH = RangeChecks.WRIST_REACH
+
+    def test_each_wrists_range_is_one_a_wrist_reaches(self):
+        """each wrist's stops, as the angle between its forearm and the barrel with the wrist posed at each end of its
+        tilt (unbent, and bent to each end of its bend), lie inside what a wrist reaches (68 to 157 deg: session 8's
+        second review, P1-1, whose test this replaces: it was an expected failure for the rear wrist on the weld)."""
+        m, st = self.m, self.st
+        ar = B.arm_range()
+        for sd, sg in B.SIDES:
+            sign = B.clinical_sign("wrist_dev", sg)
+            lo, hi = sorted(sign * x for x in self.lim["wrist_dev_" + sd])
+            self.assertAlmostEqual(lo, ar["wrist_dev"][0], delta=1e-9)
+            self.assertAlmostEqual(hi, ar["wrist_dev"][1], delta=1e-9)
+            for tilt in (lo, hi):
+                for bend in (0.0,) + ar["wrist_flex"]:
+                    ang = B.clinical(m, clinical_arm(m, st, sd, tilt=tilt, bend=bend)[0])[("forearm_to_barrel", sd)]
+                    self.assertGreaterEqual(ang, self.WRIST_REACH[0], msg="%s tilt %.1f bend %.1f" % (sd, tilt, bend))
+                    self.assertLessEqual(ang, self.WRIST_REACH[1], msg="%s tilt %.1f bend %.1f" % (sd, tilt, bend))
+
+    def test_the_start_lies_inside_every_arm_range_with_no_stop_moved_and_its_elbows_clear(self):
+        """the start placed on [4] (flagged), with the bat's roll and the two elbows' swivels set by pose()'s rule: every
+        wrist, forearm and upper-arm angle is inside its anatomical range as the stops have it (none widened), no stop
+        carries anything, each elbow is ARM_CLEAR from the other arm, [4]'s elbows and lag are met, and the placement's
+        own geometry (arm_angles) reads what the stops read."""
+        m, st, lim = self.m, self.st, self.lim
+        a, c, ar = B.range_angles(m, st), B.clinical(m, st), B.arm_range()
+        for sd, sg in B.SIDES:
+            for k in B.ARM_STOPS:
+                lo, hi = lim[k + "_" + sd]
+                self.assertEqual(sorted(B.clinical_sign(k, sg) * x for x in (lo, hi)), list(ar[k]), msg=k + sd)   # the anatomical ends, not moved
+                self.assertGreater(a[k + "_" + sd], lo, msg=k + sd)
+                self.assertLess(a[k + "_" + sd], hi, msg=k + sd)
+            self.assertLess(a["shoulder_" + sd], B.ROM["sh_hadd"] - 90.0)
+            self.assertLess(a["shoulder_back_" + sd], B.ROM["sh_habd"])
+            self.assertEqual(lim["shoulder_up_" + sd][0], 90.0 - B.ROM["sh_raise"])      # the raise's end, not moved
+            self.assertLess(c[("raised", sd)], B.ROM["sh_raise"] - 30.0)                 # and the start well inside it (the rear arm 132 deg)
+            zu, zf = m.axis(st, "uarm_" + sd, (0, 0, 1)), m.axis(st, "farm_" + sd, (0, 0, 1))
+            g = B.arm_angles(sd, zu, zf, E.qR(m.sys.pose(st, m.b["bat"])[1]), E.qR(m.sys.pose(st, m.b["trunk"])[1]))
+            for k in B.ARM_STOPS:
+                self.assertAlmostEqual(g[k], c[(k, sd)], delta=1e-6, msg=k + sd)
+            other = "R" if sd == "L" else "L"
+            el, S, El, W = m.joint_pos(st, "elbow_" + sd), m.joint_pos(st, "shoulder_" + other), m.joint_pos(st, "elbow_" + other), m.joint_pos(st, "wrist_" + other)
+            self.assertGreaterEqual(min(B._seg_dist(el, S, El), B._seg_dist(el, El, W)), B.ARM_CLEAR - 1e-3)
+        o = m.observe(st)
+        for k in ("lead_elbow_flex", "trail_elbow_flex", "bat_lag", "bat_az", "bat_elev"):
+            self.assertAlmostEqual(o[k] % 360.0, B.curve(k, T0) % 360.0, delta=0.6, msg=k)
+        m.sys.diag = {}
+        m.sys.deriv(T0, st, m.sys.new_aux())
+        self.assertTrue(all(tau == 0.0 for tau, th in m.sys.diag["stop"].values()))
+        m.sys.diag = None
+
+    def test_a_hitters_contact_posture_lies_inside_every_arm_range(self):
+        """a posture a hitter is measured in at contact can be taken without leaving any arm range (for checking; nothing
+        here is given to a search): the sweet spot at the aim's ball (body-motion 4.10: 0.92 m toward the plate and
+        0.72 m toward the pitcher from the hips at the start, 0.78 m up), the bat within 10 deg of square to the pitch
+        and its barrel below the hands, the lead elbow bent 53 +- 15 deg and the rear 79 +- 13 (OpenBiomechanics), the
+        trunk turned to the pitcher and leaning over the plate. Among such postures (the trunk's lean, the bat's roll
+        and the elbows' swivels free) at least one has every wrist, forearm and upper-arm angle inside its range and
+        the elbows clear of each other."""
+        m, st = self.m, self.st
+        s = m.sys
+        lu, lf = m.len["upperarm"], m.len["forearm"]
+        xp = s.pose(st, m.b["pelvis"])[0]
+        ball = (xp[0] + 0.92, xp[1] + 0.72, 0.78)
+        up = (0.0, 0.0, 1.0)
+        r = math.radians
+        found = []
+        for yaw, fwd, side, shift in ((90.0, 40.0, 30.0, 0.20), (90.0, 40.0, 30.0, 0.10), (75.0, 25.0, 30.0, 0.20), (90.0, 25.0, 15.0, 0.20)):
+            lum = E.add((xp[0], xp[1] + shift, xp[2] - 0.05), E.mv(E.qR(E.qaxis(up, r(yaw - 15.0))), m.jp["lumbar"][1]))
+            Rt = E.qR(E.qmul(E.qmul(E.qaxis(up, r(yaw)), E.qaxis((0, 1, 0), r(fwd))), E.qaxis((1, 0, 0), r(side))))
+            xt = E.sub(lum, E.mv(Rt, m.jp["lumbar"][3]))
+            sho = {sd: E.add(xt, E.mv(Rt, m.jp["shoulder_" + sd][1])) for sd in "LR"}
+            for az in (-10.0, 0.0, 10.0):
+                for el in (-10.0, -20.0, -30.0):
+                    bz = (math.cos(r(el)) * math.cos(r(az)), math.cos(r(el)) * math.sin(r(az)), math.sin(r(el)))
+                    knob = E.sub(ball, E.scale(bz, B.C.BAT_SS))
+                    bx0 = E.unit(E.cross(E.cross(bz, up), bz))
+                    for roll in range(-180, 180, 20):
+                        bx = E.mv(E.qR(E.qaxis(bz, r(roll))), bx0)
+                        Rb = E.qR(E.axes_to_q(bx, E.cross(bz, bx), bz))
+                        best, elbows = {}, {}
+                        for sd, sg in B.SIDES:
+                            w = E.add(E.add(knob, E.scale(bz, m.bat_ucm)), E.mv(Rb, m.wrist_b[sd]))
+                            if E.norm(E.sub(w, sho[sd])) > 0.999 * (lu + lf):
+                                break
+                            dh = E.unit(E.sub(w, sho[sd]))
+                            ref = E.sub((0.0, 0.0, -1.0), E.scale(dh, -dh[2]))
+                            for sw in range(-180, 180, 20):
+                                elb = B._two_link(sho[sd], w, lu, lf, E.mv(E.qR(E.qaxis(dh, r(sw))), ref))
+                                zu, zf = E.unit(E.sub(sho[sd], elb)), E.unit(E.sub(elb, w))
+                                bend = math.degrees(math.acos(max(-1.0, min(1.0, E.dot(zu, zf)))))
+                                if abs(bend - (53.0 if sd == "L" else 79.0)) > (15.0 if sd == "L" else 13.0):
+                                    continue
+                                c = B.strain(B.arm_angles(sd, zu, zf, Rb, Rt))
+                                if sd not in best or c < best[sd]:
+                                    best[sd], elbows[sd] = c, (elb, w)
+                        if len(best) == 2 and max(best.values()) < 1.0:
+                            (eL, wL), (eR, wR) = elbows["L"], elbows["R"]
+                            if min(B._seg_dist(eL, sho["R"], eR), B._seg_dist(eL, eR, wR), B._seg_dist(eR, sho["L"], eL), B._seg_dist(eR, eL, wL)) >= B.ARM_CLEAR:
+                                found.append((max(best.values()), yaw, fwd, side, shift, az, el, roll))
+        self.assertTrue(found, msg="no hitter-like contact posture inside every arm range")
+        self.assertLess(min(found)[0], 0.9)                 # and not only just: the best is a tenth of a half-range inside
+
+    def test_each_wrists_drive_tilts_it_away_from_the_thumb_and_lets_the_bat_out(self):
+        """the body driven by its two "wrist" muscles alone for 40 ms: each wrist's tilt moves away from the thumb (the
+        reading falls), the lag falls (the direction a swing uncocks), and the lead forearm-to-barrel angle opens. (The
+        rear wrist starts bent back 74 deg, where the angle between forearm and barrel hardly depends on the tilt:
+        cos(angle) = sin(tilt - obliqueness) x cos(bend); so that angle is asked of the lead wrist only.)"""
+        m = B.Model(ranges=(), grip="hands")
+        st = B.place(m, T0)
+        bd = Dr.bounds(m.H, m.M)
+        st = Dr.add_drives(m, st, {n: (bd[n], T0, 0.05, 1.0) for n in ("wrist_L", "wrist_R")})
+        B.add_ranges(m, st)
+        Dr.solve_tone(m, st, T0, aux=list(m.start_aux))
+        Dr.add_damping(m, st)
+        aux = list(m.start_aux)
+        m.sys.sec_start(st, aux)
+        c0, lag0 = B.clinical(m, st), m.observe(st)["bat_lag"]
+        s1 = list(st)
+        for i in range(40):
+            s1 = m.sys.step(T0 + i * 1e-3, s1, aux, 1e-3)
+        c1, lag1 = B.clinical(m, s1), m.observe(s1)["bat_lag"]
+        self.assertLess(lag1, lag0 - 1.0)
+        for sd in "LR":
+            self.assertLess(c1[("wrist_dev", sd)], c0[("wrist_dev", sd)] - 0.5, msg=sd)
+        self.assertGreater(c1[("forearm_to_barrel", "L")], c0[("forearm_to_barrel", "L")] + 0.3)
+
+    def test_the_arm_stops_take_and_never_give_when_the_body_is_driven_into_them(self):
+        """the passivity check on the whole hands' body: eight arm muscles that drive joints toward the ends of their
+        ranges held at their bounds for 100 ms. At least four of the new stops engage, each only ever pushes back, the
+        stops' net work is not positive, and the energy account closes (energy gained = work booked). Run at a
+        0.25 ms step: muscles at full strength against stiff stops do not integrate at 1 ms (the account is then
+        hundreds of joules out, which is how the step was found too coarse; body-motion 4.10 has the same for swings)."""
+        m = B.Model(ranges=(), grip="hands")
+        st = B.place(m, T0)
+        bd = Dr.bounds(m.H, m.M)
+        push = ("wrist_L", "wrist_R", "wrist_ext_L", "wrist_ext_R", "pron_L", "sup_R", "sh_irot_L", "sh_erot_R")
+        st = Dr.add_drives(m, st, {n: (bd[n], T0, 0.05, 1.0) for n in push})
+        lim = B.add_ranges(m, st)
+        Dr.add_damping(m, st)
+        aux = list(m.start_aux)
+        m.sys.sec_start(st, aux)
+        e0 = kinetic(m.sys, st) + potential(m.sys, st)
+        s1, peak = list(st), {}
+        m.sys.diag = {}
+        h = 2.5e-4
+        for i in range(400):
+            s1 = m.sys.step(T0 + i * h, s1, aux, h)
+            if i % 4 != 3:
+                continue
+            m.sys.deriv(T0 + (i + 1) * h, s1, aux)
+            for k, (tau, th) in m.sys.diag["stop"].items():
+                lo, hi = lim[k]
+                if tau != 0.0:
+                    self.assertTrue((tau < 0.0 and math.degrees(th) > hi) or (tau > 0.0 and math.degrees(th) < lo), msg=k)
+                    peak[k] = max(peak.get(k, 0.0), abs(tau))
+        m.sys.diag = None
+        arm = [k for k in peak if k.startswith(B.ARM_STOPS)]
+        self.assertGreaterEqual(len(arm), 4, msg=str(peak))
+        ow = 13 * m.sys.nb + len(m.sys.acts)
+        self.assertLess(s1[ow + 1], 1e-6)                    # the stops' net work
+        e1 = kinetic(m.sys, s1) + potential(m.sys, s1)
+        self.assertAlmostEqual(e1 - e0, work(m.sys, s1), delta=0.03 * (abs(s1[ow]) + abs(s1[ow + 2]) + 1.0))   # 3 % of the gross work booked
+
+
+def held_rod(T=40.0, a0=0.6, t_on=0.020, held=True, t_end=0.40, h=1e-3):
+    """a heavy rod on a hinge, no gravity, one drive about the hinge tensed at a0 before its onset at t_on (rise 50 ms),
+    held or not. Returns [(t, torque on the joint, joint speed, activation)] after every step."""
+    s = E.System(g=(0.0, 0.0, 0.0))
+    b = s.body("rod", 30.0, (4.0, 4.0, 0.5))
+    s.hinge(-1, b, (0, 0, 0), (0, 0, 0.5), (0, 1, 0), (0, 1, 0))
+    s.actuator("m", -1, b, (0, 1, 0), T, 20.0, t_on, 0.05, 1e9, a0, held=held)
+    st = s.new_state()
+    s.set_body(st, b, (0.0, 0.0, -0.5), (1.0, 0.0, 0.0, 0.0))
+    st[13 * s.nb] = a0
+    aux = s.new_aux()
+    s.diag = {}
+    out = []
+    for i in range(int(round(t_end / h))):
+        st = s.step(i * h, st, aux, h)
+        s.deriv((i + 1) * h, st, aux)
+        out.append(((i + 1) * h,) + tuple(s.diag["act"]["m"]))
+    return out, st, s
+
+
+class HeldChecks(unittest.TestCase):
+    """a muscle tensed before the pitch only holds (body-motion 4.11, part 2)."""
+
+    def test_a_held_muscle_gives_nothing_before_its_onset_then_rises_without_a_step_to_its_whole_torque(self):
+        """the rod's drive, tensed at 0.6 and held: no torque and no motion before its onset; from the onset the torque
+        rises with no step larger than a twentieth of its strength per millisecond; a quarter of a second later it is
+        the whole torque of the same muscle un-held (strength x activation x the speed curve, computed here). Not held,
+        the same muscle pushes from the first instant."""
+        T = 40.0
+        rows, st, s = held_rod(T=T)
+        before = [r for r in rows if r[0] < 0.020 - 1e-9]
+        self.assertTrue(all(r[1] == 0.0 and r[2] == 0.0 for r in before))
+        taus = [0.0] + [r[1] for r in rows]
+        self.assertLess(max(abs(b_ - a_) for a_, b_ in zip(taus, taus[1:])), 0.05 * T)
+        self.assertGreater(max(taus), 0.5 * T)
+        t, tau, w, act = rows[-1]
+        self.assertGreater(t, 0.020 + 5 * E.TA_REL)
+        self.assertAlmostEqual(tau, T * act * E.fv(w / 20.0), delta=0.01 * T)
+        loose, _, _ = held_rod(T=T, held=False)
+        self.assertAlmostEqual(loose[0][1], T * 0.6, delta=0.02 * T)
+
+    def test_a_hold_that_never_lets_go_fails_that_check(self):
+        """the mutation, and session 8's dead end (the balancing torque left on all swing): the muscle never gets its
+        whole torque."""
+        E.MUT.add("hold_stays")
+        try:
+            rows, st, s = held_rod()
+        finally:
+            E.MUT.discard("hold_stays")
+        t, tau, w, act = rows[-1]
+        self.assertLess(tau, 0.6 * 40.0 * act * E.fv(w / 20.0))
+
+    def test_the_holds_share_is_zero_to_the_onset_never_negative_and_ends_at_one(self):
+        """hold_share over time for a muscle tensed at 0.7: 0 before the onset whatever its activation is doing below
+        the level; between 0 and 1 and never falling while the activation rises; within 1 % of 1 after five time
+        constants; and 0, not negative, for a muscle switched off under its hold."""
+        f = E.System.hold_share
+        self.assertEqual(f(0.0, 0.1, 0.7, 0.7), 0.0)
+        self.assertEqual(f(0.05, 0.1, 0.7, 0.3), 0.0)
+        prev = 0.0
+        for k in range(1, 400):
+            t = 0.1 + k * 1e-3
+            act = min(1.0, 0.7 + 0.3 * k / 60.0)
+            x = f(t, 0.1, 0.7, act)
+            self.assertGreaterEqual(x, prev - 1e-12)
+            self.assertLessEqual(x, 1.0)
+            prev = x
+        self.assertGreater(prev, 0.99)
+        self.assertEqual(f(0.11, 0.1, 0.7, 0.05), 0.0)
+        self.assertEqual(f(0.5, 0.1, 0.0, 0.3), 1.0)             # nothing tensed: nothing held
+
+    @NEED
+    def test_a_body_with_every_muscle_tensed_and_held_moves_as_the_body_with_none_tensed_until_the_first_onset(self):
+        """the hands' body under gravity, its hold-still torques and damping, every one of its 41 muscles at its bound
+        with a late onset: tensed at 0.7 and held, its segments' states are the untensed body's, entry for entry, for
+        the 55 ms before the first onset, while the body moves (not only at the first instant), and the drives have
+        booked no work. Tensed and not held it is elsewhere within 5 ms."""
+        on = T0 + 0.060
+        runs = {}
+        for tag, level, held in (("none", 0.0, False), ("held", 0.7, True), ("loose", 0.7, False)):
+            m = B.Model(ranges=(), grip="hands")
+            st = B.place(m, T0)
+            bd = Dr.bounds(m.H, m.M)
+            # "none": no muscle at all (strength 0). A muscle at its bound with activation 0 is not quite nothing: its
+            # tendon spring is worked as if a thousandth active (engine.MUT_A_MIN), up to 0.15 % of its strength.
+            st = Dr.add_drives(m, st, {n: (bd[n] if level else 0.0, on, 0.05, 1.0, 0.0) for n in bd}, held=held)
+            B.add_ranges(m, st)
+            Dr.solve_tone(m, st, T0, aux=list(m.start_aux))
+            Dr.add_damping(m, st)
+            oa = 13 * m.sys.nb
+            for j, a in enumerate(m.sys.acts):
+                a[9] = level
+                st[oa + j] = level
+            aux = list(m.start_aux)
+            m.sys.sec_start(st, aux)
+            s1, seq = list(st), []
+            for i in range(55):
+                s1 = m.sys.step(T0 + i * 1e-3, s1, aux, 1e-3)
+                seq.append(s1[:oa])
+            runs[tag] = (seq, s1, m)
+        moved = max(abs(a - b) for a, b in zip(runs["none"][0][-1], B.place(B.Model(ranges=(), grip="hands"), T0)[:13 * runs["none"][2].sys.nb]))
+        self.assertGreater(moved, 1e-3)                              # the body did move in those 55 ms
+        for a_, b_ in zip(runs["held"][0], runs["none"][0]):
+            self.assertLess(max(abs(x - y) for x, y in zip(a_, b_)), 1e-12)
+        seq, s1, m = runs["held"]
+        self.assertEqual(s1[13 * m.sys.nb + len(m.sys.acts)], 0.0)   # the drives' booked work
+        self.assertGreater(max(abs(x - y) for x, y in zip(runs["loose"][0][4], runs["none"][0][4])), 1e-3)
+
+    @NEED
+    def test_the_energy_account_closes_with_held_muscles_firing(self):
+        """every channel of the driven test body tensed at 0.5 and held, firing 10 ms after the start: the energy gained
+        equals the work booked, as for the un-held body (test_work_against_energy), over 80 ms."""
+        m = B.Model()
+        st = B.place(m, T0)
+        bd = Dr.bounds(m.H, m.M)
+        st = Dr.add_drives(m, st, {n: (bd[n] * k, T0 + 0.010, 0.05, 1.0, 0.5) for n, k in MODEST.items()}, held=True)
+        Dr.add_damping(m, st)
+        aux = m.sys.new_aux()
+        m.sys.anchors(st, aux)
+        nc = len(m.sys.contacts)
+        tend = lambda: sum(0.5 * a[11] * aux[nc + j] ** 2 for j, a in enumerate(m.sys.acts))
+        m.sys.sec_start(st, aux)
+        e0 = kinetic(m.sys, st) + potential(m.sys, st)
+        s1 = m.sys.run(list(st), T0, T0 + 0.080, 2.5e-4, aux=aux)
+        e1 = kinetic(m.sys, s1) + potential(m.sys, s1)
+        gross = sum(abs(w) for w in s1[-E.NW:])
+        self.assertGreater(abs(s1[-E.NW]), 5.0)                      # the drives did work (J)
+        self.assertAlmostEqual(e1 - e0, work(m.sys, s1), delta=0.03 * gross)
+
+
+def forefoot_rig(load=1190.0, half_w=None, mu=None, h=2.5e-4):
+    """Brosnan, McNitt & Serensits' rig in the engine (research note 12 D5): a shoe's forefoot alone on the ground under
+    `load` N, kept level, twisted about the vertical by a moment that rises 400 N m a second until the forefoot has
+    turned 40 deg. The forefoot's two stud points are BALL_HALF_W either side of its line; the grip MU_CLEAT; the
+    contact law and its stiffness are the body's own. Returns (the largest twisting moment the ground gave, N m, read
+    here from the two points' forces; the angle turned, deg; the ground's booked work, J; the largest the two normal
+    forces summed to, N)."""
+    half_w = B.BALL_HALF_W if half_w is None else half_w
+    mu = B.MU_CLEAT if mu is None else mu
+    s = E.System(g=(0.0, 0.0, 0.0))
+    b = s.body("forefoot", 1.3, (0.002, 0.006, 0.006))
+    s.dotc(-1, b, (1, 0, 0), (0, 0, 1))                      # kept level: only sliding and turning about the vertical are free
+    s.dotc(-1, b, (0, 1, 0), (0, 0, 1))
+    pts = [(0.0, half_w, -0.02), (0.0, -half_w, -0.02)]
+    for k, p in enumerate(pts):
+        s.contact("stud%d" % k, b, p, B.KN, B.CN, B.KT, B.CT, mu)
+    st = s.new_state()
+    s.set_body(st, b, (0.0, 0.0, 0.02 - load / (2 * B.KN)), (1.0, 0.0, 0.0, 0.0))
+    aux = s.new_aux()
+    s.anchors(st, aux)
+    s.diag = {}
+    peak, nmax, t, mz = 0.0, 0.0, 0.0, 0.0
+    yaw = lambda state: math.degrees(2.0 * math.atan2(state[6], state[3]))
+    while yaw(st) < 40.0 and t < 1.5:
+        mz = min(400.0 * max(0.0, t - 0.05), 1.05 * mu * load * half_w + 3.0)     # after it lets go: a little over what it held
+        s.ext = [(b, (0.0, 0.0, 0.0), (0.0, 0.0, -load), (0.0, 0.0, mz))]
+        st = s.step(t, st, aux, h)
+        t += h
+        s.deriv(t, st, aux)
+        x, q, _, _ = s.pose(st, b)
+        R = E.qR(q)
+        tw = sum(E.cross(E.mv(R, p), s.diag["contact"]["stud%d" % k])[2] for k, p in enumerate(pts))
+        peak = max(peak, abs(tw))
+        nmax = max(nmax, sum(s.diag["contact"]["stud%d" % k][2] for k in range(2)))
+    s.diag = None
+    return peak, yaw(st), st[13 * s.nb + len(s.acts) + 3], nmax
+
+
+def clinical_ankle(m, st, sd, down=0.0, inward=0.0):
+    """the state st with foot sd rebuilt on its shank from the clinical definitions (orientation only): square to the
+    shin, then pointed `down` (deg; negative is the shin forward over the foot) about the shin's side-to-side axis, then
+    its sole rolled `inward` (toward the body's midline) about the foot's own length. Returns (state, the sole's normal)."""
+    sg = 1.0 if sd == "L" else -1.0
+    qs = tuple(st[13 * m.b["shank_" + sd] + 3:13 * m.b["shank_" + sd] + 7])
+    q = E.qmul(qs, E.qaxis((0, 1, 0), math.radians(down)))
+    length = E.mv(E.qR(q), (1, 0, 0))
+    medial = E.scale(E.mv(E.qR(qs), (0, 1, 0)), -sg)
+    for sign in (1.0, -1.0):                                 # whichever sense turns the sole toward the midline
+        q2 = E.qmul(E.qaxis(length, sign * math.radians(inward)), q)
+        sole = E.scale(E.mv(E.qR(q2), (0, 0, 1)), -1.0)
+        if E.dot(sole, medial) * inward >= 0.0:
+            break
+    out = list(st)
+    out[13 * m.b["foot_" + sd] + 3:13 * m.b["foot_" + sd] + 7] = q2
+    return out, sole
+
+
+class RaiseChecks(unittest.TestCase):
+    """the end of how far an arm is raised, which keeps the upper arm's turn defined (body-motion 4.11)."""
+
+    def test_an_arm_driven_overhead_meets_its_raises_end_before_its_turn_goes_undefined(self):
+        """session 9's first practice runs failed wherever a swing's follow-through took the lead arm straight overhead:
+        the upper arm's turn has no value there and the run raised an error, which the search read as a refused step.
+        An upper arm alone on a ball joint, with the hands' body's two stops (its turn, kind 2; its raise, 168.8 deg)
+        and a 5 N m muscle raising it from 30 deg for 0.6 s: it is stopped within 3 deg of its end, the run never
+        fails, and the stops' work is not positive. Without the raise's stop the same run does fail: the fault."""
+        def go(with_stop):
+            s = E.System(g=(0.0, 0.0, 0.0))
+            b = s.body("uarm", 2.5, (0.15, 0.15, 0.004))
+            s.ball(-1, b, (0, 0, 0), (0, 0, 0.13))
+            lo, hi = sorted(-x for x in B.arm_range()["upper_arm"])
+            s.stop("turn", -1, b, (0, 0, 1), (0, -1, 0), (0, 1, 0), math.radians(lo), math.radians(hi), B.RANGE_K["small"], B.RANGE_C["small"], 2)
+            if with_stop:
+                s.stop("up", -1, b, (0, 0, 1), (0, 0, 1), (0, 0, 1), math.radians(90.0 - B.ROM["sh_raise"]), math.radians(91.0), B.RANGE_K["big"], B.RANGE_C["big"], 1)
+            s.actuator("raise", -1, b, (0, 0, 1), 5.0, 1e9, -1.0, 0.0, 1e9, 1.0, axis_b=(0, 0, 1))
+            st = s.new_state()
+            q = E.qmul(E.qaxis((0.6, 0.8, 0.0), math.radians(30.0)), E.qaxis((0, 0, 1), math.radians(180.0)))
+            s.set_body(st, b, E.scale(E.mv(E.qR(q), (0, 0, 0.13)), -1.0), q)
+            st[13 * s.nb] = 1.0
+            aux = s.new_aux()
+            top = 0.0
+            for i in range(600):
+                st = s.step(i * 1e-3, st, aux, 1e-3)
+                zu = E.mv(E.qR(s.pose(st, b)[1]), (0, 0, 1))
+                top = max(top, math.degrees(math.acos(max(-1.0, min(1.0, zu[2])))))
+            return top, st[13 * s.nb + len(s.acts) + 1]
+        top, stops_work = go(True)
+        self.assertGreater(top, B.ROM["sh_raise"] - 1.0)
+        self.assertLess(top, B.ROM["sh_raise"] + 3.0)
+        self.assertLess(stops_work, 1e-6)
+        with self.assertRaises(E.SolveError):
+            go(False)
+
+
+class FeetChecks(unittest.TestCase):
+    """the feet on dirt (body-motion 4.11, part 3)."""
+
+    def test_the_forefoots_twisting_resistance_is_a_cleats_on_dirt(self):
+        """the forefoot in Brosnan's rig (a baseball shoe on basepath dirt, 1,190 N on the forefoot, turned through 40 deg:
+        68.5-100.1 N m over three compactions and two dates): the engine's forefoot gives 68 N m, the low end of what was
+        measured, because nothing ahead of the ball carries load (the toes have no flexor, body-motion 4.11); it is what
+        Coulomb's law gives two points (grip x load x half-width, computed here); the ground takes work and gives none;
+        and with the old grip of 0.8 and studs 4 cm either side it gave 38, about half of the least measured."""
+        peak, turned, work_, nmax = forefoot_rig()
+        self.assertGreaterEqual(turned, 40.0)
+        self.assertAlmostEqual(nmax, 1190.0, delta=25.0)
+        self.assertAlmostEqual(peak, B.MU_CLEAT * 1190.0 * B.BALL_HALF_W, delta=0.04 * peak)
+        self.assertGreaterEqual(peak, 0.97 * 68.5)
+        self.assertLessEqual(peak, 100.1)
+        self.assertLess(work_, -10.0)                        # it slid 40 deg against about 68 N m: the ground took the work
+        old = forefoot_rig(half_w=B.SOLE_HALF_W, mu=B.MU)[0]
+        self.assertLess(old, 0.6 * 68.5)
+
+    @NEED
+    def test_the_ankles_two_angles_read_as_a_clinician_reads_them_and_the_start_is_inside_both(self):
+        """on the body with cleats: a foot pointed down 30 deg reads +30 and the shin 25 deg forward over the foot -25; a
+        sole rolled 20 deg toward the midline reads 20 toward its inversion end on either side (the left's positive, the
+        right's negative, as range_specs says) and its normal does face the midline; neither reading moves with the
+        other; the ends are the loaded ankle's (39 and 50; 34.6 in, 19.1 out) with no stop moved; the start lies inside
+        all four and no stop carries anything there."""
+        m = B.Model(ranges=(), grip="hands", feet="cleats")
+        st = B.place(m, T0)
+        lim = B.add_ranges(m, st)
+        a0 = B.range_angles(m, st)
+        for sd, sg in B.SIDES:
+            self.assertEqual(lim["ankle_" + sd], (-39.0, 50.0))
+            self.assertEqual(sorted(sg * x for x in lim["ankle_roll_" + sd]), [-19.1, 34.6])
+            for k in ("ankle_", "ankle_roll_"):
+                self.assertGreater(a0[k + sd], lim[k + sd][0] + 2.0, msg=k + sd)
+                self.assertLess(a0[k + sd], lim[k + sd][1] - 2.0, msg=k + sd)
+            medial = E.scale(m.axis(st, "shank_" + sd, (0, 1, 0)), -sg)
+            for down in (-25.0, 0.0, 30.0):
+                for inward in (-15.0, 0.0, 20.0):
+                    s2, sole = clinical_ankle(m, st, sd, down, inward)
+                    a = B.range_angles(m, s2)
+                    self.assertAlmostEqual(a["ankle_" + sd], down, delta=1e-7, msg="%s %s %s" % (sd, down, inward))
+                    self.assertAlmostEqual(sg * a["ankle_roll_" + sd], inward, delta=1e-7, msg="%s %s %s" % (sd, down, inward))
+                    self.assertAlmostEqual(E.dot(sole, medial), math.sin(math.radians(inward)), delta=1e-7)
+        m.sys.diag = {}
+        m.sys.deriv(T0, st, list(m.start_aux))
+        self.assertTrue(all(tau == 0.0 for tau, th in m.sys.diag["stop"].values()))
+        m.sys.diag = None
+        self.assertEqual(m.mu, B.MU_CLEAT)
+        self.assertEqual(B.Model(ranges=()).mu, B.MU)        # the plate's body is as it was
+
+
+def _practice():
+    """the practice search's module (analysis/research/body/practice3d.py), for the checks of its score's own rules."""
+    import os
+    import sys
+    here = os.path.join(os.path.dirname(os.path.abspath(__file__)), "..", "research", "body")
+    if here not in sys.path:
+        sys.path.insert(0, here)
+    import practice3d
+    return practice3d
+
+
+class SearchChecks(unittest.TestCase):
+    """the practice search's own rules (body-motion 4.11, after session 9's review)."""
+
+    def test_the_clock_charges_each_arm_muscle_its_own_overrun(self):
+        """review P1-1. Five arm muscles tied at the run's first instant, contact 30 ms later than the clock allows them,
+        and a sixth inside it. Worked by hand here: moving ALL the tied onsets 10 ms later lowers the charge to (20/30)^2
+        of itself; moving ONE of them 10 ms later, alone, lowers it (its own slope has the right sign), and still does
+        when that delays contact by a tenth of the move; with every muscle tied the charge is the old form's; a muscle
+        inside the clock is charged nothing, and the charge is zero when all are inside. The old form (the earliest
+        onset alone) FAILS the one-muscle check: its charge does not fall, and rises with the later contact."""
+        PR = _practice()
+        sq = lambda xs: sum(x * x for x in xs)
+        t_avail, t0 = 0.253, -0.250
+        tx = t0 + t_avail + 0.030
+        tied = [(t0, w) for w in (1.0, 0.6, 0.9, 0.3, 0.7)]
+        late = [(tx - 0.200, 0.8)]
+        f = lambda fired, tx_=tx, form="each": sq(PR.clock_residuals(fired, tx_, t_avail, form))
+        unit = PR.CLOCK_UNIT
+        base = f(tied + late)
+        share = sum(w for t, w in tied) / (sum(w for t, w in tied) + 0.8)
+        self.assertAlmostEqual(base, share * (0.030 / unit) ** 2, delta=1e-9 * base)             # by hand: the tied ones' share
+        self.assertAlmostEqual(f(tied), (0.030 / unit) ** 2, delta=1e-9 * base)                   # all tied: the old form's value
+        self.assertAlmostEqual(f(tied), f(tied, form="earliest"), delta=1e-9 * base)
+        together = [(t + 0.010, w) for t, w in tied]
+        self.assertAlmostEqual(f(together + late), base * (20.0 / 30.0) ** 2, delta=1e-9 * base)
+        self.assertEqual(f([(tx - 0.100, 1.0), (tx - 0.250, 0.5)]), 0.0)
+        for k in range(len(tied)):
+            one = [(t + (0.010 if j == k else 0.0), w) for j, (t, w) in enumerate(tied)]
+            self.assertLess(f(one + late), base, msg="muscle %d alone" % k)
+            if tied[k][1] >= 0.6:                                 # a muscle asked for enough: still downhill with contact a tenth later
+                self.assertLess(f(one + late, tx + 0.001), base, msg="muscle %d alone, contact 1 ms later" % k)
+            old0 = f(tied + late, form="earliest")
+            self.assertEqual(f(one + late, form="earliest"), old0)                              # the old form: no slope at all
+            self.assertGreater(f(one + late, tx + 0.001, form="earliest"), old0)                 # and uphill once contact moves
+
+
+    def test_a_failed_run_hands_back_its_records_and_a_failure_after_the_last_instant_read_does_not_fail_it(self):
+        """review P2-2. (1) The compiled probe on a run that fails (the lone upper arm of RaiseChecks without its raise's
+        end, driven overhead): it raises, and the error carries every record made before the failure, each the Python
+        engine's own state to 1e-9; the Python engine fails within one record's interval after the last of them.
+        (2) The rule, on records built here (a bat whose sweet spot crosses the ball's plane 100 ms into a run): if the
+        probe fails 60 ms or more after that crossing the run is used as it is and says so; if it fails 40 ms after,
+        or before the crossing, the failure is raised as before."""
+        PR = _practice()
+        P = PR.P
+        try:
+            P.build()
+        except Exception as e:                               # no compiler on this machine
+            self.skipTest("the compiled probe cannot be built here: %s" % e)
+        s = E.System(g=(0.0, 0.0, 0.0))
+        b = s.body("uarm", 2.5, (0.15, 0.15, 0.004))
+        s.ball(-1, b, (0, 0, 0), (0, 0, 0.13))
+        lo, hi = sorted(-x for x in B.arm_range()["upper_arm"])
+        s.stop("turn", -1, b, (0, 0, 1), (0, -1, 0), (0, 1, 0), math.radians(lo), math.radians(hi), B.RANGE_K["small"], B.RANGE_C["small"], 2)
+        s.actuator("raise", -1, b, (0, 0, 1), 5.0, 1e9, -1.0, 0.0, 1e9, 1.0, axis_b=(0, 0, 1))
+        st = s.new_state()
+        q = E.qmul(E.qaxis((0.6, 0.8, 0.0), math.radians(30.0)), E.qaxis((0, 0, 1), math.radians(180.0)))
+        s.set_body(st, b, E.scale(E.mv(E.qR(q), (0, 0, 0.13)), -1.0), q)
+        st[13 * s.nb] = 1.0
+        with self.assertRaises(P.RunFailed) as cm:
+            P.run_raw(s, st, 0.0, 600, 1e-3, 10)
+        recs = cm.exception.recs
+        self.assertGreater(len(recs), 20)
+        aux, s1, ref, failed_at = s.new_aux(), list(st), {}, None
+        for i in range(600):
+            try:
+                s1 = s.step(i * 1e-3, s1, aux, 1e-3)
+            except E.SolveError:
+                failed_at = i * 1e-3
+                break
+            if (i + 1) % 10 == 0:
+                ref[i + 1] = list(s1)
+        self.assertIsNotNone(failed_at)
+        t_last = recs[-1][0]
+        self.assertLess(t_last, failed_at + 1e-3 + 1e-9)
+        self.assertGreater(t_last, failed_at - 0.010 - 1e-9)
+        for t, state, *_ in recs[1:]:
+            r = ref[int(round(t * 1e3))]
+            self.assertLess(max(abs(x - y) for x, y in zip(state, r)), 1e-9)
+        # (2) the rule
+        m = B.Model(contacts=False)
+        ctx = PR.Ctx.__new__(PR.Ctx)
+        ctx.m, ctx.evals, ctx.order = m, 0, ()
+        ctx.Pc, ctx.nb = (0.5, 0.0, 1.0), (0.0, -1.0, 0.0)   # the ball's place; its line of travel (toward -y)
+        ctx.prepare = lambda u: ([], [])
+        zero = m.sys.new_state()
+
+        def rec_at(t):                                       # the bat level along +x, its sweet spot moving 10 m/s against the ball
+            state = list(zero)
+            qb = E.axes_to_q((0.0, 0.0, -1.0), (0.0, 1.0, 0.0), (1.0, 0.0, 0.0))
+            ss = (0.5, -1.0 + 10.0 * t, 1.0)
+            x = E.sub(ss, E.mv(E.qR(qb), (0.0, 0.0, B.C.BAT_SS - m.bat_ucm)))
+            m.sys.set_body(state, m.b["bat"], x, qb, (0.0, 10.0, 0.0))
+            return (PR.T0 + t, state, [], [], [], [])
+        keep = P.run_raw
+        try:
+            for fail_after, used in ((0.060, True), (0.200, True), (0.040, False), (-0.030, False)):
+                made = [rec_at(k * 0.005) for k in range(int(round((0.100 + fail_after) / 0.005)) + 1)]
+
+                def fake(*a, **kw):
+                    raise P.RunFailed("made to fail", made)
+                P.run_raw = fake
+                if used:
+                    got = ctx.run(None)
+                    self.assertEqual(len(got), len(made))
+                    self.assertAlmostEqual(ctx.failed_after[0], fail_after, delta=1e-6)
+                    tx, p, v, i, came = ctx.contact(got)
+                    self.assertTrue(came)
+                    self.assertAlmostEqual(tx, PR.T0 + 0.100, delta=1e-6)
+                else:
+                    with self.assertRaises(PR.E.SolveError):       # the search's own engine module (the same class under another import)
+                        ctx.run(None)
+                    self.assertIsNone(ctx.failed_after)
+                    self.assertEqual(ctx.run_end, PR.T_END)
+        finally:
+            P.run_raw = keep
 
 
 class Mutations(unittest.TestCase):

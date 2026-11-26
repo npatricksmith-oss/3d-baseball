@@ -253,11 +253,12 @@ def check_rules(mdl, plan):
     return bad
 
 
-def add_drives(mdl, st, plan):
+def add_drives(mdl, st, plan, held=False):
     """add the plan's channels {name: (T, onset, rise, off[, starting level])} to the model, each with its
     strength-at-speed curve and, at the leg joints that have one, its tendon spring (4.5). Returns the state
     with the channels' activations at their starting levels. The placed state is only read to sign the
-    wrists' axis: the drive must reduce the lag (uncock). Call sec_start afterwards for the springs."""
+    wrists' axis: the drive must reduce the lag (uncock). Call sec_start afterwards for the springs.
+    held: every channel's starting level is held without net torque until its onset (engine.actuator, 4.11)."""
     s, b = mdl.sys, mdl.b
     nold = len(s.acts)
     s.acts = []
@@ -284,6 +285,10 @@ def add_drives(mdl, st, plan):
             # turning the bat by +d about its y moves its axis by d (by x bz); the lag falls if that is toward the arm
             toward = E.dot(E.cross(by, bz), arm)
             ax = (0, -1, 0) if toward > 0 else (0, 1, 0)      # the torque on the forearm is the reaction of the bat's
+            if getattr(mdl, "grip", "weld") == "hands":
+                # the hands' body (4.11): the wrist's tilt AWAY from the thumb, about the hand's own p, by anatomy and not
+                # by which way the lag falls at the start: the right forearm turns about -p against its hand, the left about +p
+                ax = E.scale(mdl.palm[sd], 1.0 if sd == "L" else -1.0)
         curve, tendon = curve_of(n), tendon_of(n)
         tab = -1
         if curve is not None:
@@ -293,7 +298,7 @@ def add_drives(mdl, st, plan):
                 s.fvecc.append(curve_ecc(curve))
             tab = tab_of[curve]
         ksec = bd[n] / SEC_STRETCH[tendon] if (tendon and tab >= 0) else 0.0
-        s.actuator(n, b[pa], b[ch], ax, T, W_TOP[grp], t_on, rise, t_off, a0, tab, ksec, axb)
+        s.actuator(n, b[pa], b[ch], ax, T, W_TOP[grp], t_on, rise, t_off, a0, tab, ksec, axb, held)
     nb13 = 13 * s.nb
     return st[:nb13] + [a[9] for a in s.acts] + st[nb13 + nold:]
 

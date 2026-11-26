@@ -24,6 +24,7 @@ TREE_ORDER = (("shank_L", "foot_L"), ("thigh_L", "shank_L"), ("pelvis", "thigh_L
               ("farm_L", "bat"), ("uarm_L", "farm_L"), ("trunk", "uarm_L"),
               ("farm_R", "bat"), ("uarm_R", "farm_R"), ("trunk", "uarm_R"), ("pelvis", "trunk"))
 CHECK_TOL = 1e-9          # largest allowed difference of any state entry (m, quaternion part, m/s, rad/s) in --check
+SELF_NUDGE, SELF_FACTOR = 1e-13, 10   # a sensitive case: the engines may differ by this many times the Python engine's own difference from itself so nudged
 
 
 def build(force=False):
@@ -50,7 +51,7 @@ def write_model(path, s, st, aux, t0, nsteps, h, every, order=()):
     f = lambda *xs: " ".join(repr(float(x)) for x in xs)
     w.append("g " + f(*s.g))
     w.append("baum " + f(s.baum_a, s.baum_b))
-    w.append("consts " + f(E.TA_UP, E.TA_DN, E.K_FV, E.ECC, E.ECC_SLOPE, E.CONTACT_D0))
+    w.append("consts " + f(E.TA_UP, E.TA_DN, E.K_FV, E.ECC, E.ECC_SLOPE, E.CONTACT_D0, E.TA_REL))
     w.append("bodies %d" % s.nb)
     for m, I in zip(s.m, s.I):
         w.append(f(m, *I))
@@ -65,11 +66,11 @@ def write_model(path, s, st, aux, t0, nsteps, h, every, order=()):
     for k, tab in enumerate(s.fvtabs):
         w.append("%d %s %s" % (len(tab), f(s.tab_ecc(k)), " ".join(f(*pt) for pt in tab)))
     w.append("acts %d" % len(s.acts))
-    for name, a, b, ax, T, W, t_on, rise, t_off, a0, tab, ksec, axb in s.acts:
-        w.append("%d %d %s %s %d %s %s" % (a, b, f(*ax), f(T, W, t_on, rise, t_off, a0), tab, f(ksec), f(*axb)))
+    for name, a, b, ax, T, W, t_on, rise, t_off, a0, tab, ksec, axb, held in s.acts:
+        w.append("%d %d %s %s %d %s %s %d" % (a, b, f(*ax), f(T, W, t_on, rise, t_off, a0), tab, f(ksec), f(*axb), int(held)))
     w.append("stops %d" % len(s.stops))
-    for name, a, b, ax, ea, fb, lo, hi, k, c, kind in s.stops:
-        w.append("%d %d %s %s %s %s %d" % (a, b, f(*ax), f(*ea), f(*fb), f(lo, hi, k, c), kind))
+    for name, a, b, ax, ea, fb, lo, hi, k, c, kind, axb in s.stops:
+        w.append("%d %d %s %s %s %s %d %s" % (a, b, f(*ax), f(*ea), f(*fb), f(lo, hi, k, c), kind, f(*axb)))
     w.append("holds %d" % len(s.holds))
     for name, a, b, qref, K, Cc, cap in s.holds:
         w.append("%d %d %s %s %s %s" % (a, b, f(*qref), f(*K), f(*Cc), f(cap)))
@@ -89,8 +90,18 @@ def write_model(path, s, st, aux, t0, nsteps, h, every, order=()):
         fh.write("\n".join(w) + "\n")
 
 
+class RunFailed(E.SolveError):
+    """the probe's run failed (a singular posture, an undefined stop). recs: every record it made before the failure,
+    in run_raw's form; the failure came after the last of them and before the next would have been made."""
+
+    def __init__(self, msg, recs):
+        E.SolveError.__init__(self, msg)
+        self.recs = recs
+
+
 def run_raw(s, st, t0, nsteps, h, every, aux=None, order=(), tag="run", reps=0):
-    """records [(t, state, contact forces, drives (tau, speed, activation), stops (tau, angle))] from the probe."""
+    """records [(t, state, contact forces, drives (tau, speed, activation), stops (tau, angle))] from the probe.
+    A run that fails raises RunFailed, which carries the records made before the failure."""
     aux = s.new_aux() if aux is None else aux
     path = os.path.join(OUT, "model_%s_%d.txt" % (tag, os.getpid()))
     write_model(path, s, st, aux, t0, nsteps, h, every, order)
@@ -98,19 +109,24 @@ def run_raw(s, st, t0, nsteps, h, every, aux=None, order=(), tag="run", reps=0):
         r = subprocess.run([BIN, path] + ([str(reps)] if reps else []), capture_output=True, text=True)
     finally:
         os.remove(path)
-    if r.returncode != 0:
+    if r.returncode != 0 and reps:
         raise E.SolveError(r.stderr.strip() or "probe failed")
     if reps:
         return r.stdout.strip()
     n, nc, na, ns = len(st), len(s.contacts), len(s.acts), len(s.stops)
+    width = 1 + n + 3 * nc + 3 * na + 2 * ns + na
     recs = []
     for line in r.stdout.splitlines():
         v = [float(x) for x in line.split()]
+        if len(v) != width:                          # a line cut short by the failure: not a record
+            break
         o = 1 + n
         recs.append((v[0], v[1:o], [tuple(v[o + 3 * i:o + 3 * i + 3]) for i in range(nc)],
                      [tuple(v[o + 3 * nc + 3 * i:o + 3 * nc + 3 * i + 3]) for i in range(na)],
                      [tuple(v[o + 3 * nc + 3 * na + 2 * i:o + 3 * nc + 3 * na + 2 * i + 2]) for i in range(ns)],
                      v[o + 3 * nc + 3 * na + 2 * ns:]))
+    if r.returncode != 0:
+        raise RunFailed(r.stderr.strip() or "probe failed", recs)
     return recs
 
 
@@ -187,6 +203,45 @@ def _cases():
     m.sys.sec_start(st, aux)
     m.check_aux = aux
     out.append(("every drive at its bound, the joints' ranges on", m, st, -0.250, 200))
+    m = B.Model(ranges=(), grip="hands")             # the hands' body (4.11): its arm stops (the upper arm's is the new kind 2) driven into
+    st = B.place(m, -0.250)
+    st = Dr.add_drives(m, st, {n: (bd[n], -0.245, 0.05, 0.1, 0.2 if arm(n) or n.startswith(("sh_", "pron", "sup")) else 0.3) for n in bd})
+    B.add_ranges(m, st)
+    Dr.solve_tone(m, st, -0.250)
+    Dr.add_damping(m, st)
+    aux = m.sys.new_aux()
+    m.sys.anchors(st, aux)
+    m.sys.sec_start(st, aux)
+    m.check_aux = aux
+    out.append(("the hands' body, every drive at its bound", m, st, -0.250, 200))
+    m = B.Model(ranges=(), grip="hands")             # held muscles (4.11, part 2): tensed at 0.6, firing at staggered onsets, tendons loaded
+    st = B.place(m, -0.250)
+    names = sorted(bd)
+    st = Dr.add_drives(m, st, {n: (bd[n], -0.240 + 0.004 * k, 0.05, 0.1, 0.6) for k, n in enumerate(names)}, held=True)
+    B.add_ranges(m, st)
+    Dr.solve_tone(m, st, -0.250)
+    Dr.add_damping(m, st)
+    aux = m.sys.new_aux()
+    m.sys.anchors(st, aux)
+    m.sys.sec_start(st, aux)
+    m.check_aux = aux
+    out.append(("the hands' body, every muscle tensed and held", m, st, -0.250, 200))
+    m = B.Model(ranges=(), grip="hands", feet="cleats")   # the feet on dirt (4.11, part 3): the measured grip, the ankles' ends
+    st = B.place(m, -0.250)
+    st = Dr.add_drives(m, st, {n: (bd[n], -0.245, 0.05, 0.1, 0.3) for n in bd if not (arm(n) or n.startswith(("sh_", "pron", "sup")))}, held=True)
+    B.add_ranges(m, st)
+    Dr.solve_tone(m, st, -0.250)
+    Dr.add_damping(m, st)
+    aux = m.sys.new_aux()
+    m.sys.anchors(st, aux)
+    m.sys.sec_start(st, aux)
+    m.check_aux = aux
+    # A SENSITIVE case, judged against itself (the sixth entry; session 9's review, P3-1): with every leg muscle at its
+    # bound the body is on two of its sole's points by 80 ms, and from 100 ms the motion multiplies rounding differences
+    # (about three times every 10 ms on average, in bursts of 10 to 40). The two engines cannot agree to 1e-9 over
+    # 200 ms of that, and need not: each record's difference is held to ten times what the Python engine differs from
+    # ITSELF when one velocity of its start is moved by 1e-13 (and to CHECK_TOL wherever that is larger).
+    out.append(("cleats, the legs and trunk at their bounds", m, st, -0.250, 200, "sensitive"))
     fitted = os.path.join(HERE, "fit3d_d34_all.json")
     if not os.path.isfile(fitted):                   # session 6's fit (its 22 channels; session 7's then switched off)
         fitted = os.path.join(HERE, "fit3d_d34_arms.json")
@@ -202,30 +257,48 @@ def _cases():
 
 def check():
     build()
-    worst = 0.0
-    for label, m, st, t0, n in _cases():
-        ref = []
+    worst, ok = 0.0, True
+    for case in _cases():
+        label, m, st, t0, n = case[:5]
+        sensitive = len(case) > 5
         aux0 = getattr(m, "check_aux", None)
-        aux = m.sys.new_aux() if aux0 is None else list(aux0)
-        m.sys.anchors(st, aux)
-        s1 = list(st)
-        for i in range(n):
-            s1 = m.sys.step(t0 + i * 1e-3, s1, aux, 1e-3)
-            if (i + 1) % 10 == 0:
-                ref.append(list(s1))
+
+        def python_run(start):
+            aux = m.sys.new_aux() if aux0 is None else list(aux0)
+            m.sys.anchors(start, aux)
+            s1, out = list(start), []
+            for i in range(n):
+                s1 = m.sys.step(t0 + i * 1e-3, s1, aux, 1e-3)
+                if (i + 1) % 10 == 0:
+                    out.append(list(s1))
+            return out
+        ref = python_run(st)
+        allow = [CHECK_TOL] * len(ref)
+        if sensitive:                                    # the Python engine against itself, one velocity moved by 1e-13
+            st2 = list(st)
+            st2[7] += SELF_NUDGE
+            own = [max(abs(a - b) for a, b in zip(x, y)) for x, y in zip(python_run(st2), ref)]
+            allow = [max(CHECK_TOL, SELF_FACTOR * d) for d in own]
         for nm, order in (("dense", ()), ("tree-ordered", tree_order(m))):
             recs = run_raw(m.sys, st, t0, n, 1e-3, 10, aux=None if aux0 is None else list(aux0), order=order)[1:]
-            d = max(abs(a - b) for (t, state, *_), r in zip(recs, ref) for a, b in zip(state, r))
-            dend = max(abs(a - b) for a, b in zip(recs[-1][1], ref[-1]))
-            print("%-46s %-13s largest state difference over %d records: %.2e (at the end %.2e)" % (label, nm, len(ref), d, dend))
-            worst = max(worst, d)
-    print("worst %.2e, tolerance %.0e: %s" % (worst, CHECK_TOL, "PASS" if worst <= CHECK_TOL else "FAIL"))
-    return worst <= CHECK_TOL
+            ds = [max(abs(a - b) for a, b in zip(state, r)) for (t, state, *_), r in zip(recs, ref)]
+            d, dend = max(ds), ds[-1]
+            if sensitive:
+                good = all(x <= lim for x, lim in zip(ds, allow))
+                print("%-46s %-13s largest state difference over %d records: %.2e (at the end %.2e); against itself moved %.0e the Python engine ends %.2e apart: %s"
+                      % (label, nm, len(ref), d, dend, SELF_NUDGE, own[-1], "within %d times that at every record" % SELF_FACTOR if good else "MORE THAN %d TIMES THAT" % SELF_FACTOR))
+                ok = ok and good
+            else:
+                print("%-46s %-13s largest state difference over %d records: %.2e (at the end %.2e)" % (label, nm, len(ref), d, dend))
+                worst = max(worst, d)
+    ok = ok and worst <= CHECK_TOL
+    print("worst %.2e (the sensitive case apart), tolerance %.0e: %s" % (worst, CHECK_TOL, "PASS" if ok else "FAIL"))
+    return ok
 
 
 def bench():
     build()
-    label, m, st, t0, n = _cases()[1]
+    label, m, st, t0, n = _cases()[1][:5]
     for nm, order in (("dense, engine.py's row order", ()), ("tree-ordered envelope", tree_order(m))):
         print("%-30s %s" % (nm, run_raw(m.sys, st, t0, n, 1e-3, 10, order=order, reps=20)))
 

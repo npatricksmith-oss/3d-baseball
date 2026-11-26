@@ -65,6 +65,87 @@ HANDS_GUESS = (0.10, -0.05, 0.02)   # m, first guess of the hands from the rear 
 
 SIDES = (("L", 1.0), ("R", -1.0))
 
+# ---- the feet on dirt (body-motion 4.11, part 3; research note 12 D) ------------------------------
+MU_CLEAT = 1.15           # a baseball shoe (metal studs) on a basepath mix: static 1.04-1.27, dynamic 1.02-1.20 (Brosnan, McNitt &
+#                           Serensits 2009, FT). It replaces MU = 0.8, which had no source, in Model(feet="cleats").
+BALL_HALF_W = 0.05        # m [E: 0.045-0.055]: the forefoot's studs either side of the foot's line (a forefoot is about 10 cm wide)
+
+# ---- each hand's own grip (body-motion 4.11, session 9) ------------------------------------------
+# A hand's own directions: d from the wrist toward the knuckles, r toward the thumb, p out of the palm (a right hand
+# has r = d x p, a left hand r = p x d). Both hands hold the bat thumb toward the barrel with the palms facing each
+# other across the handle: the rear (right) palm faces along the bat's +y, the lead's along -y, and so both wrists
+# lie to the bat's -x side.
+GRIP_OBLIQUE = 15.0       # deg [E: 10-20]: the barrel's end of the handle tilted away from the wrist in the closed hand, so
+#                           that with the wrist straight forearm and barrel are 105 deg apart (Kapandji: 100-110, from memory,
+#                           not re-read; ergonomics texts treat the power grip as square, 0). 4.11 says what 0 and 30 do.
+GRIP_ROLL = {"L": 0.0, "R": 0.0}   # deg [E: +-20]: each hand's roll about the handle from the palms squarely opposed
+# the closed hand's loss of wrist range (Gehrmann 2008, a hand on a 25 mm cylinder; research note 11 A1)
+CLOSED_HAND = {"wrist_uln": 0.90, "wrist_flex": 0.84}
+ARM_STOPS = ("wrist_dev", "wrist_flex", "forearm", "upper_arm")   # the arm ranges the hands' body holds at anatomical ends
+
+
+def hand_frame(sd, oblique=None, roll=None):
+    """(d, r, p) of hand sd in the bat's own axes (the bat's z runs knob to barrel): see the block above."""
+    sg = 1.0 if sd == "L" else -1.0
+    be = (GRIP_OBLIQUE if oblique is None else oblique) * D2R
+    cb, sb = math.cos(be), math.sin(be)
+    Rz = E.qR(E.qaxis((0, 0, 1), (GRIP_ROLL[sd] if roll is None else roll) * D2R))
+    return E.mv(Rz, (cb, 0.0, sb)), E.mv(Rz, (-sb, 0.0, cb)), E.mv(Rz, (0.0, -sg, 0.0))
+
+
+def arm_range(R=None):
+    """{angle: (lo, hi)} deg, each in its clinical sense: the wrist tilted toward the thumb +, bent toward the palm +,
+    the forearm turned palm-down +, the upper arm turned in +; the wrist's as a closed hand has them (4.11)."""
+    R = R or ROM
+    return {"wrist_dev": (-R["wrist_uln"] * CLOSED_HAND["wrist_uln"], R["wrist_rad"]),
+            "wrist_flex": (-R["wrist_ext"], R["wrist_flex"] * CLOSED_HAND["wrist_flex"]),
+            "forearm": (-R["sup"], R["pron"]), "upper_arm": (-R["sh_erot"], R["sh_irot"])}
+
+
+# which way each stop's own reading runs against the clinical sense above: clinical = sign x reading
+def clinical_sign(name, sg):
+    return sg if name == "forearm" else -sg
+
+
+def arm_angles(sd, zu, zf, Rb, Rt):
+    """the four clinical angles of arm_range(), deg, from directions alone (world axes): zu the upper arm from elbow to
+    shoulder, zf the forearm from wrist to elbow, Rb the bat's and Rt the trunk's rotation. The placement's own
+    geometry; the engine's stops read the same angles from the bodies' frames and the tests hold the two together."""
+    sg = 1.0 if sd == "L" else -1.0
+    d, r, p = (E.mv(Rb, v) for v in hand_frame(sd))
+    xf = E.scale(E.unit(E.cross(p, zf)), -sg)                    # the forearm's radial line: the wrist's first axis, square to p
+    dev = -sg * math.atan2(E.dot(p, E.cross(r, xf)), E.dot(r, xf))
+    q = E.scale(E.cross(zf, xf), -sg)                            # the forearm's palm side
+    flex = -sg * math.atan2(E.dot(xf, E.cross(q, p)), E.dot(q, p))
+    yu = E.unit(E.cross(zu, zf))                                 # the elbow's hinge, flexion positive about it
+    n0 = E.cross(zf, yu)                                         # where the radial line lies with the forearm in neutral
+    pron = -sg * math.atan2(E.dot(zf, E.cross(n0, xf)), E.dot(n0, xf))
+    u, e0 = E.mv(Rt, (0, 0, 1)), E.mv(Rt, (0, -1, 0))
+    kx = E.cross(u, zu)
+    ke = E.cross(kx, e0)
+    ec = E.add(E.add(e0, ke), E.scale(E.cross(kx, ke), 1.0 / (1.0 + E.dot(u, zu))))
+    irot = -sg * math.atan2(E.dot(zu, E.cross(ec, yu)), E.dot(ec, yu))
+    arm = E.scale(zu, -1.0)                                      # shoulder toward elbow
+    across = math.asin(max(-1.0, min(1.0, E.dot(E.mv(Rt, (0, -sg, 0)), arm))))    # as the "shoulder_" stop reads it
+    back = math.asin(max(-1.0, min(1.0, E.dot(E.mv(Rt, (-1, 0, 0)), arm))))       # as "shoulder_back_"
+    return {"wrist_dev": dev / D2R, "wrist_flex": flex / D2R, "forearm": pron / D2R, "upper_arm": irot / D2R,
+            "across": across / D2R, "back": back / D2R}
+
+
+SWEEP_SPAN = 45.0          # deg [E]: the shoulder's sweep counts toward the start's strain over the last 45 deg before its end
+
+
+def strain(angles, rng=None):
+    """how near an arm's joint is to an end of its range, the worst of them, 1 = at an end: each of the four angles of
+    arm_range() by its distance from the middle of its range in half-ranges, and (where given) the upper arm's sweep
+    across the chest and back behind the shoulders' line, which have one end each, over the last SWEEP_SPAN before it."""
+    rng = rng or arm_range()
+    worst = max(abs((angles[k] - 0.5 * (lo + hi)) / (0.5 * (hi - lo))) for k, (lo, hi) in rng.items())
+    for k, hi in (("across", ROM["sh_hadd"] - 90.0), ("back", ROM["sh_habd"])):
+        if k in angles:
+            worst = max(worst, (angles[k] - (hi - SWEEP_SPAN)) / SWEEP_SPAN)
+    return worst
+
 # ---- the joints' ranges (body-motion 4.10, session 8; PLAN D37) ------------------------------------
 # Where each joint's range ends, deg: the mean of a sample of adult men measured passively with a goniometer.
 # One rule for which sample: Soucie 2011 (CDC; 114 men of 20-44) where it measured the motion; else Roaas &
@@ -78,7 +159,14 @@ ROM = {"hip_flex": 130.4, "hip_ext": 17.4, "hip_abd": 38.8, "hip_add": 30.5, "hi
        "wrist_rad": 22.0, "wrist_uln": 36.0, "wrist_flex": 76.0, "wrist_ext": 75.0,
        "trunk_twist": 55.0,                 # [E: 46-64]
        "trunk_fwd": 80.0, "trunk_back": 25.0, "trunk_side": 35.0,   # [E] AAOS's thoracolumbar values, not read this session
-       "sh_hadd": SH_ADD_MAX, "sh_habd": 45.0}                      # [E] 135: clinical; 45 behind the frontal plane: not read
+       "sh_hadd": SH_ADD_MAX, "sh_habd": 45.0,                      # [E] 135: clinical; 45 behind the frontal plane: not read
+       "sh_irot": 69.0, "sh_erot": 104.0,                           # the upper arm's turn about its own length (Boone & Azen, as the wrist)
+       "sh_raise": 168.8,                                           # how far the arm is raised from hanging: Soucie 2011, forward, men 20-44. ONE value in every
+       #                                                              direction [E]: sideways a shoulder goes to 184 (Boone & Azen), so sideways this end is 15 deg tighter than anatomy
+       # the ankle with weight on it (4.11, part 3): the shin forward over the foot with the knee bent 20 deg or more
+       # (Baumbach 2014; 25 with the knee straight, which a stop cannot know: [E]); the foot pointed down and the sole
+       # rolled in and out (Hallaceli 2014, passive; the roll its men's)
+       "ankle_df_loaded": 39.0, "ankle_pf_loaded": 50.0, "ankle_inv": 34.6, "ankle_ever": 19.1}
 # Past the end of a range the joint resists as a one-sided spring. NO measurement of that resistance was found for
 # any joint here (body-motion 4.10): the stiffness is [E]. "big": the trunk, hips, knees, ankles and the shoulders'
 # sweep; "small": the elbows, forearms and wrists (their strengths are 17-112 N m, and a stiffer spring on so
@@ -95,8 +183,10 @@ def cock_reference(mdl, st):
     return {sd: (1.0 if E.dot(mdl.axis(st, "farm_" + sd, (1, 0, 0)), bz) > 0 else -1.0) for sd, sg in SIDES}
 
 
-def range_specs(cock_ref=None):
+def range_specs(cock_ref=None, grip="weld", feet="plate"):
     """every joint range as an engine stop: (name, body a, body b, axis in a, e in a, f in b, lo deg, hi deg, size, kind).
+    grip="hands" (4.11): the wrists' two angles, the forearms' turn and the upper arms' turn at their anatomical ends,
+    each read on the joint's own axis (the upper arm's by a kind 2 stop), in place of the weld's two wrist stops.
     The angle is the one engine.System.stop measures. kind 0: about the axis (fixed in a), from e (in a) to f (in b)
     projected square to the axis. kind 1: f's angle out of the plane square to the axis. Where each is undefined
     (f along the axis) is said beside it and in body-motion 4.10; the engine fails loudly within 5 deg of it.
@@ -122,7 +212,12 @@ def range_specs(cock_ref=None):
              -(R["hip_erot"] if L else R["hip_irot"]), R["hip_irot"] if L else R["hip_erot"], "big"),
             ("knee_" + sd, "thigh_" + sd, "shank_" + sd, (0, 1, 0), (0, 0, 1), (0, 0, 1), -R["knee_hyper"], R["knee_flex"], "big"),
             # the foot's toe turned down about the shank's hinge is positive
-            ("ankle_" + sd, "shank_" + sd, "foot_" + sd, (0, 1, 0), (1, 0, 0), (1, 0, 0), -R["ankle_df"], R["ankle_pf"], None),   # reported, not held: the range is a straight knee's, unloaded
+            ("ankle_" + sd, "shank_" + sd, "foot_" + sd, (0, 1, 0), (1, 0, 0), (1, 0, 0), -R["ankle_df"], R["ankle_pf"], None)   # reported, not held: the range is a straight knee's, unloaded
+            if feet != "cleats" else
+            # feet="cleats" (4.11, part 3): both of the ankle's angles held at their ends with weight on. The bend as above;
+            # the roll about the foot's own length, from the foot's y to the shank's hinge (which the ankle holds square
+            # to the foot's length): positive is the LEFT sole rolled toward the midline (inversion), the right sole away
+            ("ankle_" + sd, "shank_" + sd, "foot_" + sd, (0, 1, 0), (1, 0, 0), (1, 0, 0), -R["ankle_df_loaded"], R["ankle_pf_loaded"], "big"),
             # the upper arm across the chest: its angle, shoulder toward elbow, out of the trunk's fore-and-aft plane toward
             # the other side (kind 1). 0 is the arm anywhere in that plane, hanging included; the range's end is 135 deg
             # from straight out to its own side, so +45 here. (The projection "seen down the trunk's axis" of sessions
@@ -131,7 +226,35 @@ def range_specs(cock_ref=None):
             ("shoulder_" + sd, "trunk", "uarm_" + sd, (0, -sg, 0), (0, 0, 1), (0, 0, -1), -91.0, R["sh_hadd"] - 90.0, "big", 1),
             # and drawn back behind the shoulders' line: its angle out of the trunk's side-to-side plane, backward
             ("shoulder_back_" + sd, "trunk", "uarm_" + sd, (-1, 0, 0), (0, 0, 1), (0, 0, -1), -91.0, R["sh_habd"], "big", 1),
-            ("elbow_" + sd, "uarm_" + sd, "farm_" + sd, (0, 1, 0), (0, 0, 1), (0, 0, 1), -R["elbow_hyper"], R["elbow_flex"], "small"),
+            ("elbow_" + sd, "uarm_" + sd, "farm_" + sd, (0, 1, 0), (0, 0, 1), (0, 0, 1), -R["elbow_hyper"], R["elbow_flex"], "small")]
+        if feet == "cleats":
+            out.append(("ankle_roll_" + sd, "foot_" + sd, "shank_" + sd, (1, 0, 0), (0, 1, 0), (0, 1, 0),
+                        -(R["ankle_ever"] if L else R["ankle_inv"]), R["ankle_inv"] if L else R["ankle_ever"], "big"))
+        if grip == "hands":
+            d, r, p = hand_frame(sd)
+            ar = arm_range(R)
+
+            def ends(name):
+                lo, hi = ar[name]
+                return (lo, hi) if clinical_sign(name, sg) > 0 else (-hi, -lo)
+            out += [
+                # the wrist's tilt toward and away from the thumb: about the hand's p (fixed in the bat), from the hand's r
+                # to the forearm's radial line (its x), which the joint holds square to p
+                ("wrist_dev_" + sd, "bat", "farm_" + sd, p, r, (1, 0, 0)) + ends("wrist_dev") + ("small",),
+                # its bend toward the palm and back: about the forearm's radial line, from the forearm's palm side to p
+                ("wrist_flex_" + sd, "farm_" + sd, "bat", (1, 0, 0), (0, -sg, 0), p) + ends("wrist_flex") + ("small",),
+                # the forearm's turn: about its own length, from where the elbow's hinge lies in neutral (thumb toward the
+                # upper arm with the elbow bent) to the hinge, which the elbow holds square to the forearm
+                ("forearm_" + sd, "farm_" + sd, "uarm_" + sd, (0, 0, 1), (0, -1, 0), (0, 1, 0)) + ends("forearm") + ("small",),
+                # the upper arm's turn about its own length (kind 2): from hanging along the trunk's z; zero is the elbow's
+                # hinge along the trunk's -y (the elbow bending straight forward)
+                ("upper_arm_" + sd, "trunk", "uarm_" + sd, (0, 0, 1), (0, -1, 0), (0, 1, 0)) + ends("upper_arm") + ("small", 2),
+                # how far the arm is raised (kind 1): the angle of the upper arm's own z out of the trunk's level plane, 90 deg
+                # hanging and 90 - (the raise) otherwise. A shoulder's end, and what keeps the stop above defined: its
+                # reading has no value with the arm straight overhead, and session 9's first runs went there (4.11)
+                ("shoulder_up_" + sd, "trunk", "uarm_" + sd, (0, 0, 1), (0, 0, 1), (0, 0, 1), 90.0 - R["sh_raise"], 91.0, "big", 1)]
+            continue
+        out += [
             # the wrist's cock, on the joint's own axis: the wrist is a universal joint whose second axis is the bat's
             # y, and the forearm's x (its first axis) is held square to it, so the angle of the forearm's x about the
             # bat's y, from the handle, IS the cock. (Until session 8's review this read the forearm's long axis
@@ -184,8 +307,9 @@ def add_ranges(mdl, st, k_big=None, wrists="cocked", rom=None):
     R = dict(ROM, **(rom or {}))
     keep = dict(ROM)
     ROM.update(R)
-    mdl.cock_ref = cock_reference(mdl, st)
-    specs = range_specs(mdl.cock_ref)
+    hands = getattr(mdl, "grip", "weld") == "hands"
+    mdl.cock_ref = None if hands else cock_reference(mdl, st)
+    specs = range_specs(mdl.cock_ref, mdl.grip if hands else "weld", getattr(mdl, "feet", "plate"))
     ROM.clear(); ROM.update(keep)
     ang = range_angles(mdl, st)
     out = {}
@@ -193,6 +317,13 @@ def add_ranges(mdl, st, k_big=None, wrists="cocked", rom=None):
         if size is None:
             continue
         a0 = ang[name]
+        if hands and name.startswith(ARM_STOPS):
+            # the hands' body (4.11): the anatomical ends as they are. No travel is placed from the start and no stop is
+            # moved to clear it; that the start lies inside is a test's business, not this function's.
+            k = RANGE_K[size]
+            s.stop(name, b[a], b[b_], ax, ea, fb, lo * D2R, hi * D2R, k, RANGE_C[size], kind)
+            out[name] = (lo, hi)
+            continue
         if name.startswith("wrist_dev"):
             span = R["wrist_rad"] + R["wrist_uln"]
             up = uncock_sign(mdl, st) > 0                # the reading rises as the bat uncocks: the travel lies above the start
@@ -228,9 +359,13 @@ def range_angles(mdl, st):
     s = mdl.sys
     out = {}
     Rm = {n: E.qR(s.pose(st, i)[1]) for n, i in mdl.b.items()}
-    ref = getattr(mdl, "cock_ref", None) or cock_reference(mdl, st)
-    for name, a, b_, ax, ea, fb, lo, hi, size, kind in range_specs(ref):
+    hands = getattr(mdl, "grip", "weld") == "hands"
+    ref = {"L": 1.0, "R": 1.0} if hands else (getattr(mdl, "cock_ref", None) or cock_reference(mdl, st))
+    for name, a, b_, ax, ea, fb, lo, hi, size, kind in range_specs(ref, "hands" if hands else "weld", getattr(mdl, "feet", "plate")):
         n = E.mv(Rm[a], E.unit(ax)); e = E.mv(Rm[a], E.unit(ea)); f = E.mv(Rm[b_], E.unit(fb))
+        if kind == 2:
+            out[name] = s.stop_angle(n, e, f, 2, v=E.mv(Rm[b_], (0.0, 0.0, 1.0)))[0] / D2R
+            continue
         out[name] = (math.asin(max(-1.0, min(1.0, E.dot(n, f)))) if kind == 1 else math.atan2(E.dot(n, E.cross(e, f)), E.dot(e, f))) / D2R
     for sd, sg in SIDES:
         zf = E.mv(Rm["farm_" + sd], (0, 0, 1))
@@ -251,6 +386,19 @@ def range_angles(mdl, st):
         out["sh_rot_" + sd] = -sg * tw                           # the right arm turns in about its own +z, the left about -z
         zt = E.mv(Rm["trunk"], (0, 0, 1)); zu = E.mv(Rm["uarm_" + sd], (0, 0, 1))
         out["sh_elev_" + sd] = math.acos(max(-1.0, min(1.0, E.dot(zu, zt)))) / D2R
+    return out
+
+
+def clinical(mdl, st):
+    """{(angle, side): deg} of the hands' body's four arm angles a side, in arm_range()'s clinical senses, read as the
+    engine's stops read them (range_angles), and each forearm's angle to the barrel."""
+    a = range_angles(mdl, st)
+    out = {}
+    for sd, sg in SIDES:
+        for k in ARM_STOPS:
+            out[(k, sd)] = clinical_sign(k, sg) * a[k + "_" + sd]
+        out[("raised", sd)] = 90.0 - a["shoulder_up_" + sd]
+        out[("forearm_to_barrel", sd)] = math.acos(max(-1.0, min(1.0, E.dot(mdl.axis(st, "farm_" + sd, (0, 0, 1)), mdl.axis(st, "bat", (0, 0, 1)))))) / D2R
     return out
 
 
@@ -275,12 +423,24 @@ def curve_rate(name, t, h=0.005):
 class Model:
     """the engine System of a batter of stature H (m) and mass M (kg), with named bodies and joint points."""
 
-    def __init__(self, H=1.84, M=92.0, contacts=True, mu=MU, shoulder_stops=True, ranges=None):
+    def __init__(self, H=1.84, M=92.0, contacts=True, mu=None, shoulder_stops=True, ranges=None, grip="weld", feet="plate"):
         """ranges: None, the stops of sessions 1-7 (the knees' and elbows' bend, the shoulders' sweep across, at
         STOP_K); or a set of names from range_specs() ("all" for every one): those ranges as stops at RANGE_K, in
-        place of the old ones (body-motion 4.10)."""
+        place of the old ones (body-motion 4.10).
+        grip: "weld", the body of sessions 1-8 (both wrists 7 cm square off the handle, the start's free choices set by
+        hand, the wrists' travel held from the start), kept so that the dated results of body-motion 4.4-4.10 and the
+        probe's check still run; "hands", each hand's own grip (4.11): the handle oblique in the hand, anatomical wrist,
+        forearm and upper-arm ranges, the start's free choices by a rule (pose).
+        feet: "plate", the feet of sessions 1-8 (the grip MU with no source, the ball's contact points SOLE_HALF_W either
+        side, no end to either of the ankle's angles); "cleats" (4.11, part 3): the measured grip of a baseball shoe on
+        dirt, the forefoot's studs BALL_HALF_W either side, and add_ranges() holds both of the ankle's angles."""
         self.H, self.M = H, M
         self.ranges = ranges
+        self.grip = grip
+        self.feet = feet
+        if mu is None:
+            mu = MU_CLEAT if feet == "cleats" else MU
+        self.mu = mu
         s = self.sys = E.System()
         seg = lambda n: C.segment(n, H, M)
         self.b = b = {}
@@ -325,6 +485,12 @@ class Model:
         b["bat"] = s.body("bat", mb, (It_b, It_b, C.BAT_IAX + 2 * mh * HAND_R ** 2))
         self.bat_ucm = ucm
         self.wrist_b = {"L": (-WRIST_TO_GRIP, 0.0, GRIP_L - ucm), "R": (-WRIST_TO_GRIP, 0.0, GRIP_R - ucm)}
+        self.palm = {"L": (0.0, 1.0, 0.0), "R": (0.0, 1.0, 0.0)}          # the wrists' second axis, fixed in the bat (the weld's: its y)
+        if grip == "hands":
+            for sd, g in (("L", GRIP_L), ("R", GRIP_R)):
+                d, r, p_ = hand_frame(sd)
+                self.wrist_b[sd] = E.sub((0.0, 0.0, g - ucm), E.scale(d, WRIST_TO_GRIP))   # the wrist's centre, back along the hand from the handle's axis
+                self.palm[sd] = p_
         for sd, sg in SIDES:
             th = b["thigh_" + sd] = s.body("thigh_" + sd, mth, Ith)
             sh = b["shank_" + sd] = s.body("shank_" + sd, msh, Ish)
@@ -345,7 +511,7 @@ class Model:
             s.universal(*_j(J["ankle_" + sd]), (0, 1, 0), (1, 0, 0))       # flexion (shank's y), inversion (foot's x)
             s.ball(*_j(J["shoulder_" + sd]))
             s.universal(*_j(J["elbow_" + sd]), (0, 1, 0), (0, 0, 1))       # flexion (upper arm's y), forearm rotation
-            s.universal(*_j(J["wrist_" + sd]), (1, 0, 0), (0, 1, 0))       # flexion (forearm's x), the cock (bat's y)
+            s.universal(*_j(J["wrist_" + sd]), (1, 0, 0), self.palm[sd])   # flexion (forearm's x), the cock (the hand's p: the bat's y in the weld)
             # no hyperextension: one-sided stops on the knee's and elbow's bend (place() makes each joint's own
             # +y its flexion axis, so the angle from the upper segment's z to the lower one's about +y is the bend)
             if ranges is None:
@@ -357,7 +523,8 @@ class Model:
                 s.stop("shoulder_" + sd, b["trunk"], ua, (0, 0, -sg), (0, sg, 0), (0, 0, -1), -10.0, SH_ADD_MAX * D2R, STOP_K, STOP_C)
             if contacts:
                 for nm, px in (("heel", -cf * Lf), ("ball", (BALL_FWD - cf) * Lf)):
-                    for wn, py in (("in", -sg * SOLE_HALF_W), ("out", sg * SOLE_HALF_W)):
+                    hw = BALL_HALF_W if (feet == "cleats" and nm == "ball") else SOLE_HALF_W
+                    for wn, py in (("in", -sg * hw), ("out", sg * hw)):
                         s.contact("%s_%s_%s" % (sd, nm, wn), ft, (px, py, -fcm_h), KN, CN, KT, CT, mu)
 
     # ---- measures ----
@@ -448,7 +615,19 @@ def _two_link(top, end, l1, l2, toward):
     return E.add(E.add(top, E.scale(dh, a)), E.scale(E.unit(perp), h))
 
 
-def pose(mdl, t0, heel="solve", report=None, hands_guess=None, hands_solve=True):
+ARM_GRID, ARM_FINE = 5, 1      # deg: the search for the start's free choices (pose): a grid, then a finer one about its best
+ARM_CLEAR = 0.10               # m [E: 0.08-0.12, about an upper arm's thickness]: an elbow's centre stays this far from the other arm's bones
+
+
+def _seg_dist(p, a, b):
+    """distance from point p to the segment a-b."""
+    ab = E.sub(b, a)
+    t = max(0.0, min(1.0, E.dot(E.sub(p, a), ab) / E.dot(ab, ab)))
+    return E.norm(E.sub(p, E.add(a, E.scale(ab, t))))
+_ARM_CACHE = {}
+
+
+def pose(mdl, t0, heel="solve", report=None, hands_guess=None, hands_solve=True, arms=None):
     """The body's posture at [4]'s mean state at time t0 (s before contact, negative), at rest:
 
     - feet a stride apart ([4]: 42 % of height between the ankle joints, the lead one 11 cm closed), the
@@ -461,6 +640,14 @@ def pose(mdl, t0, heel="solve", report=None, hands_guess=None, hands_solve=True)
       pelvis's height from the lead knee, the rear knee left to come out wrong);
     - the bat at its measured azimuth and elevation, the hands where both measured elbow bends and the
       measured lag put them.
+
+    The hands' body (mdl.grip == "hands", body-motion 4.11): [4] does not give how the bat is rolled about its own
+    length nor where each elbow points (each arm can swivel about the line from its shoulder to its wrist). The weld's
+    body faces the bat's wrist side at the shoulders and points both elbows down and a little out. The hands' body
+    sets the three by a rule: the arm joint nearest an end of its range (arm_range: both wrists' two angles, both
+    forearms' turns, both upper arms' turns) is as far from it as can be (strain), searched on a grid and held in
+    mdl.arm_choices (deg: the bat's roll from the weld's, the lead and rear swivels from the weld's). arms: those
+    three given, not searched (place() gives the start's to the two neighbouring postures).
 
     What [4] does not give is the [E] list at the top. The joints are closed by the engine's projection
     (feet held, pelvis, trunk and bat hardly moved). Each sole point in contact starts as deep as [4]'s
@@ -565,12 +752,18 @@ def pose(mdl, t0, heel="solve", report=None, hands_guess=None, hands_solve=True)
     lu, lf = L["upperarm"], L["forearm"]
     want = (curve("lead_elbow_flex", t0), curve("trail_elbow_flex", t0), curve("bat_lag", t0))
 
+    hands_body = mdl.grip == "hands"
+    roll = [0.0]                                   # the bat's roll about its own length from the weld's (rad): the hands' body only
+
     def hands(p):
         """bat frame, wrists and the three measured angles for the lead grip point at p."""
         mid = E.scale(E.add(sho["L"], sho["R"]), 0.5)
         toward = E.sub(mid, p)
         bx = E.unit(E.sub(E.scale(bz, E.dot(toward, bz)), toward))     # -x of the bat faces the shoulders
         by = E.cross(bz, bx)
+        if roll[0] != 0.0:
+            bx = E.add(E.scale(bx, math.cos(roll[0])), E.scale(by, math.sin(roll[0])))
+            by = E.cross(bz, bx)
         qb = E.axes_to_q(bx, by, bz)
         Rb = E.qR(qb)
         xb = E.sub(p, E.mv(Rb, (0.0, 0.0, GRIP_L - mdl.bat_ucm)))
@@ -588,6 +781,68 @@ def pose(mdl, t0, heel="solve", report=None, hands_guess=None, hands_solve=True)
     # point in the trunk's frame from the rear shoulder) continues a solution from a neighbouring time.
     p = E.add(sho["R"], E.mv(Rt, HANDS_GUESS if hands_guess is None else hands_guess))
     resid = lambda q_: [a_ - w_ for a_, w_ in zip(hands(q_)[3], want)]
+
+    def elbow_of(sd, sg, wrist, swivel):
+        """the elbow of arm sd: bent down and a little out (the weld's choice), turned `swivel` (rad) about the line
+        from the shoulder to the wrist."""
+        toward = E.add((0.0, 0.0, -1.0), E.scale(E.mv(Rt, (0, 1, 0)), 0.3 * sg))
+        if swivel != 0.0:
+            dh = E.unit(E.sub(wrist, sho[sd]))
+            toward = E.mv(E.qR(E.qaxis(dh, swivel)), E.sub(toward, E.scale(dh, E.dot(toward, dh))))
+        return _two_link(sho[sd], wrist, lu, lf, toward)
+
+    swivel = {"L": 0.0, "R": 0.0}
+    if hands_body:
+        key = (repr(sho), repr(Rt), repr(bz), repr(want), GRIP_OBLIQUE, repr(GRIP_ROLL), repr(arm_range()), repr(p), ROM["sh_hadd"], ROM["sh_habd"], ARM_CLEAR)
+        if arms is None and key in _ARM_CACHE:
+            arms = _ARM_CACHE[key]
+        if arms is None:
+            p_start = p
+
+            def try_roll(deg, around=None):
+                """(strain of the worse arm, of the other, roll, {side: swivel}) at this roll of the bat: the hands solved
+                for [4]'s three angles, then the pair of swivels that strains the arms' joints least among those that
+                keep each elbow ARM_CLEAR from the other arm (two arms cannot pass through each other)."""
+                roll[0] = deg * D2R
+                pk = _hands_lm(resid, p_start)
+                rr = resid(pk)
+                if max(abs(x) for x in rr) > 0.5:               # this roll cannot take [4]'s elbows and lag (deg)
+                    return None
+                xb_, qb_, wr_, _ = hands(pk)
+                Rb_ = E.qR(qb_)
+                cand = {}
+                for sd, sg in SIDES:
+                    rng_ = range(-180, 180, ARM_GRID) if around is None else range(around[sd] - ARM_GRID + 1, around[sd] + ARM_GRID, ARM_FINE)
+                    cand[sd] = []
+                    for sdeg in rng_:
+                        el = elbow_of(sd, sg, wr_[sd], sdeg * D2R)
+                        cand[sd].append((strain(arm_angles(sd, E.unit(E.sub(sho[sd], el)), E.unit(E.sub(el, wr_[sd])), Rb_, Rt)), sdeg, el))
+                best = None
+                for cl, sl, el_l in cand["L"]:
+                    for cr, sr, el_r in cand["R"]:
+                        k_ = (max(cl, cr), min(cl, cr))
+                        if best is not None and k_ >= best[0]:
+                            continue
+                        if min(_seg_dist(el_l, sho["R"], el_r), _seg_dist(el_l, el_r, wr_["R"]),
+                               _seg_dist(el_r, sho["L"], el_l), _seg_dist(el_r, el_l, wr_["L"])) < ARM_CLEAR:
+                            continue
+                        best = (k_, sl, sr)
+                if best is None:
+                    return None
+                return (best[0][0], best[0][1], deg, {"L": best[1], "R": best[2]})
+            tried = [x for x in (try_roll(deg) for deg in range(-90, 91, ARM_GRID)) if x is not None]
+            if not tried:
+                raise E.SolveError("no roll of the bat takes [4]'s elbows and lag")
+            best = min(tried, key=lambda x: (x[0], x[1], abs(x[2])))
+            fine = [x for x in (try_roll(deg, best[3]) for deg in range(best[2] - ARM_GRID + 1, best[2] + ARM_GRID, ARM_FINE)) if x is not None]
+            best = min(fine + [best], key=lambda x: (x[0], x[1], abs(x[2])))
+            arms = (float(best[2]), float(best[3]["L"]), float(best[3]["R"]))
+            _ARM_CACHE[key] = arms
+        mdl.arm_choices = tuple(arms)
+        roll[0] = arms[0] * D2R
+        swivel = {"L": arms[1] * D2R, "R": arms[2] * D2R}
+        if report is not None:
+            report["arm_choices_deg"] = tuple(arms)
     r = resid(p)
     c0 = sum(x * x for x in r)
     lam = 1e-3
@@ -631,12 +886,17 @@ def pose(mdl, t0, heel="solve", report=None, hands_guess=None, hands_solve=True)
     s.set_body(st, b["bat"], xb, qb)
     by = E.mv(E.qR(qb), (0, 1, 0))
     for sd, sg in SIDES:
-        elbow = _two_link(sho[sd], wr[sd], lu, lf, E.add((0.0, 0.0, -1.0), E.scale(E.mv(Rt, (0, 1, 0)), 0.3 * sg)))
+        if hands_body:
+            elbow = elbow_of(sd, sg, wr[sd], swivel[sd])
+        else:
+            elbow = _two_link(sho[sd], wr[sd], lu, lf, E.add((0.0, 0.0, -1.0), E.scale(E.mv(Rt, (0, 1, 0)), 0.3 * sg)))
         zu = E.unit(E.sub(sho[sd], elbow)); zf = E.unit(E.sub(elbow, wr[sd]))
         ex, ey, ez = _frame_z(zu, E.unit(E.cross(zu, zf)))
         q = E.axes_to_q(ex, ey, ez)
         s.set_body(st, b["uarm_" + sd], E.sub(sho[sd], E.mv(E.qR(q), mdl.jp["shoulder_" + sd][3])), q)
         fxa = E.unit(E.cross(by, zf))             # the wrist's flexion axis, square to the cock's axis
+        if hands_body:                            # the forearm's radial line (toward the thumb), square to the hand's p
+            fxa = E.scale(E.unit(E.cross(E.mv(E.qR(qb), mdl.palm[sd]), zf)), -sg)
         q = E.axes_to_q(fxa, E.cross(zf, fxa), zf)
         s.set_body(st, b["farm_" + sd], E.sub(elbow, E.mv(E.qR(q), mdl.jp["elbow_" + sd][3])), q)
     # close the joints: feet held, pelvis, trunk and bat a thousand times harder to move than the limbs
@@ -690,8 +950,11 @@ def place(mdl, t0, report=None, heel="solve", dt=VEL_DT, moving=True):
     mdl.start_aux = aux
     if not moving:
         return st
-    sm, _ = pose(mdl, t0 - dt, heel)
-    sp, _ = pose(mdl, t0 + dt, heel)
+    held = getattr(mdl, "arm_choices", None) if mdl.grip == "hands" else None    # the start's free choices, held for its neighbours
+    sm, _ = pose(mdl, t0 - dt, heel, arms=held)
+    sp, _ = pose(mdl, t0 + dt, heel, arms=held)
+    if held is not None:
+        mdl.arm_choices = held
     for i in range(s.nb):
         o = 13 * i
         for c in range(3):
@@ -761,6 +1024,48 @@ def curve_lead_foot(t0):
     coiling (text values; no digitised curve), interpolated between -340 and -170 ms."""
     f = min(1.0, max(0.0, (t0 + 0.340) / 0.170))
     return 63.0 + (56.0 - 63.0) * f
+
+
+def _hands_lm(resid, p):
+    """pose()'s damped least squares for the hands' point, as a function (the hands' body tries it at many rolls of the
+    bat): the point nearest [4]'s three angles from the guess p."""
+    r = resid(p)
+    c0 = sum(x * x for x in r)
+    lam = 1e-3
+    for it in range(200):
+        if c0 < 1e-20:
+            break
+        Jm = [[0.0] * 3 for _ in range(3)]
+        for k in range(3):
+            pk = list(p); pk[k] += 1e-6
+            rk = resid(tuple(pk))
+            for i in range(3):
+                Jm[i][k] = (rk[i] - r[i]) / 1e-6
+        JtJ = [[sum(Jm[i][a_] * Jm[i][b_] for i in range(3)) for b_ in range(3)] for a_ in range(3)]
+        g = [sum(Jm[i][a_] * r[i] for i in range(3)) for a_ in range(3)]
+        moved = False
+        for _ in range(30):
+            A = [[JtJ[a_][b_] + (lam * (JtJ[a_][a_] + 1e-9) if a_ == b_ else 0.0) for b_ in range(3)] for a_ in range(3)]
+            try:
+                dp = _solve3(A, [-x for x in g])
+            except ZeroDivisionError:
+                lam *= 10.0
+                continue
+            n = E.norm(dp)
+            if n > 0.05:
+                dp = E.scale(dp, 0.05 / n)
+            pn = E.add(p, dp)
+            rn = resid(pn)
+            cn = sum(x * x for x in rn)
+            if cn < c0:
+                moved = n > 1e-12 and (c0 - cn) > 1e-14 * c0
+                p, r, c0 = pn, rn, cn
+                lam = max(1e-9, lam / 5.0)
+                break
+            lam *= 5.0
+        if not moved:
+            break
+    return p
 
 
 def _solve3(A, r):

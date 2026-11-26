@@ -6,7 +6,7 @@
 // The only thing it does differently: the joint rows may be reordered (the model's `order` line) so
 // that the Cholesky factor can skip each row's leading zeros (an envelope factorisation that follows
 // the body's tree). With no order line the solve is the dense one, in engine.py's row order.
-// f64, std sqrt and atan2 only; no SIMD intrinsics, no mul_add.
+// f64, std sqrt, atan2, asin and (for a held muscle's release) exp only; no SIMD intrinsics, no mul_add.
 // Build:  rustc -C opt-level=3 -C linker=$HOME/.local/bin/zigcc -o sim/target/codex-probes/body3d/body3d_probe \
 //           analysis/research/body/body3d_probe.rs
 // Run:    body3d_probe <model file> [repeats]     (repeats > 0: time the run, print microseconds per step)
@@ -52,8 +52,8 @@ const E3: [V3; 3] = [[1.0, 0.0, 0.0], [0.0, 1.0, 0.0], [0.0, 0.0, 1.0]];
 
 struct Pt { a: i32, b: i32, ra: V3, rb: V3 }
 struct Dt { a: i32, b: i32, ua: V3, wb: V3 }
-struct Act { a: i32, b: usize, ax: V3, t: f64, w: f64, ton: f64, rise: f64, toff: f64, a0: f64, tab: i32, ksec: f64, axb: V3 }
-struct Stop { a: i32, b: usize, ax: V3, ea: V3, fb: V3, lo: f64, hi: f64, k: f64, c: f64, kind: i32 }
+struct Act { a: i32, b: usize, ax: V3, t: f64, w: f64, ton: f64, rise: f64, toff: f64, a0: f64, tab: i32, ksec: f64, axb: V3, held: i32 }
+struct Stop { a: i32, b: usize, ax: V3, ea: V3, fb: V3, lo: f64, hi: f64, k: f64, c: f64, kind: i32, axb: V3 }
 const STOP_SINGULAR: f64 = 0.0872;   // engine.py's: a stop's direction this near its axis has no usable angle
 struct Hold { a: i32, b: usize, qref: [f64; 4], k: V3, c: V3, cap: f64 }
 struct Tone { a: i32, b: usize, tl: V3 }
@@ -63,7 +63,7 @@ struct Row { a: i32, ja: V6, b: i32, jb: V6, c: f64, cd: f64, gam: f64 }
 
 struct Sys {
     g: V3, baum_a: f64, baum_b: f64,
-    ta_up: f64, ta_dn: f64, k_fv: f64, ecc: f64, ecc_slope: f64, d0: f64,
+    ta_up: f64, ta_dn: f64, k_fv: f64, ecc: f64, ecc_slope: f64, d0: f64, ta_rel: f64,
     m: Vec<f64>, inr: Vec<V3>,
     pts: Vec<Pt>, dots: Vec<Dt>, order: Vec<usize>, first: Vec<usize>,
     acts: Vec<Act>, stops: Vec<Stop>, holds: Vec<Hold>, tones: Vec<Tone>, cons: Vec<Con>,
@@ -82,6 +82,13 @@ impl Sys {
         if w >= 1.0 { return 0.0; }
         if w >= 0.0 { return (1.0 - w) / (1.0 + w / self.k_fv); }
         self.ecc - (self.ecc - 1.0) / (1.0 - self.ecc_slope * w)
+    }
+    /// engine.py's hold_share: the share of a held muscle's own torque that reaches its joint.
+    fn hold_share(&self, t: f64, ton: f64, a0: f64, act: f64) -> f64 {
+        if a0 <= 0.0 { return 1.0; }
+        let left = if t < ton { 1.0 } else { (-(t - ton) / self.ta_rel).exp() };
+        if act <= a0 * left { return 0.0; }
+        1.0 - a0 * left / act
     }
     fn excitation(&self, j: usize, t: f64) -> f64 {
         let a = &self.acts[j];
@@ -222,7 +229,8 @@ impl Sys {
             if a.axb != ZERO { n = float_axis(&n, &mv(&r[a.b], &a.axb)); }
             let wa = if a.a >= 0 { w[a.a as usize] } else { ZERO };
             let wrel = dot(&sub(&w[a.b], &wa), &n);
-            let tau = if a.ksec > 0.0 { a.ksec * sec[j] } else if a.tab >= 0 { a.t * act * self.fv_tab(&self.fvtabs[a.tab as usize], self.fvecc[a.tab as usize], wrel) } else { a.t * act * self.fv(wrel / a.w) };
+            let mut tau = if a.ksec > 0.0 { a.ksec * sec[j] } else if a.tab >= 0 { a.t * act * self.fv_tab(&self.fvtabs[a.tab as usize], self.fvecc[a.tab as usize], wrel) } else { a.t * act * self.fv(wrel / a.w) };
+            if a.held != 0 { tau *= self.hold_share(t, a.ton, a.a0, act); }
             let tv = scale(&n, tau);
             tq[a.b] = add(&tq[a.b], &tv);
             if a.a >= 0 { tq[a.a as usize] = sub(&tq[a.a as usize], &tv); }
@@ -235,7 +243,18 @@ impl Sys {
             let fb = mv(&r[st.b], &st.fb);
             // engine.py's stop_angle: the angle and its own gradient g (d(angle)/dt = w_rel . g); the torque acts along g
             let nf = dot(&n, &fb);
-            let (th, g) = if st.kind == 1 {
+            let (th, g) = if st.kind == 2 {
+                // a limb's turn about its own axis v from its rest direction n (engine.py's kind 2): e carried by the
+                // shortest turn n -> v, the angle about v from that to f; the gradient (n + v) / (1 + n.v)
+                let v2 = mv(&r[st.b], &st.axb);
+                let w2 = add(&n, &v2);
+                if dot(&w2, &w2) < STOP_SINGULAR * STOP_SINGULAR { eprintln!("a limb's own axis is turned right over from its rest direction: its turn is undefined there"); std::process::exit(3); }
+                let c1 = 1.0 + dot(&n, &v2);
+                let kx = cross(&n, &v2);
+                let ke = cross(&kx, &e);
+                let ec = add(&add(&e, &ke), &scale(&cross(&kx, &ke), 1.0 / (1.0 + dot(&n, &v2))));
+                (dot(&v2, &cross(&ec, &fb)).atan2(dot(&ec, &fb)), scale(&w2, 1.0 / c1))
+            } else if st.kind == 1 {
                 let th = f64::max(-1.0, f64::min(1.0, nf)).asin();
                 if st.lo <= th && th <= st.hi { (th, ZERO) } else {
                     let gv = cross(&fb, &n);
@@ -470,7 +489,7 @@ fn main() {
     let mut tk = Tok { v: text.split_whitespace().map(|s| s.to_string()).collect(), i: 0 };
     tk.key("g"); let g = tk.v3();
     tk.key("baum"); let (baum_a, baum_b) = (tk.f(), tk.f());
-    tk.key("consts"); let (ta_up, ta_dn, k_fv, ecc, ecc_slope, d0) = (tk.f(), tk.f(), tk.f(), tk.f(), tk.f(), tk.f());
+    tk.key("consts"); let (ta_up, ta_dn, k_fv, ecc, ecc_slope, d0, ta_rel) = (tk.f(), tk.f(), tk.f(), tk.f(), tk.f(), tk.f(), tk.f());
     tk.key("bodies"); let nb = tk.u();
     let (mut m, mut inr) = (Vec::new(), Vec::new());
     for _ in 0..nb { m.push(tk.f()); inr.push(tk.v3()); }
@@ -486,9 +505,9 @@ fn main() {
     for _ in 0..n { let np = tk.u(); fvecc.push(tk.f()); fvtabs.push((0..np).map(|_| [tk.f(), tk.f()]).collect()); }
     tk.key("acts"); let n = tk.u();
     let acts: Vec<Act> = (0..n).map(|_| Act { a: tk.i(), b: tk.u(), ax: tk.v3(), t: tk.f(), w: tk.f(), ton: tk.f(), rise: tk.f(), toff: tk.f(),
-                                               a0: tk.f(), tab: tk.i(), ksec: tk.f(), axb: tk.v3() }).collect();
+                                               a0: tk.f(), tab: tk.i(), ksec: tk.f(), axb: tk.v3(), held: tk.i() }).collect();
     tk.key("stops"); let n = tk.u();
-    let stops: Vec<Stop> = (0..n).map(|_| Stop { a: tk.i(), b: tk.u(), ax: tk.v3(), ea: tk.v3(), fb: tk.v3(), lo: tk.f(), hi: tk.f(), k: tk.f(), c: tk.f(), kind: tk.i() }).collect();
+    let stops: Vec<Stop> = (0..n).map(|_| Stop { a: tk.i(), b: tk.u(), ax: tk.v3(), ea: tk.v3(), fb: tk.v3(), lo: tk.f(), hi: tk.f(), k: tk.f(), c: tk.f(), kind: tk.i(), axb: tk.v3() }).collect();
     tk.key("holds"); let n = tk.u();
     let holds: Vec<Hold> = (0..n).map(|_| Hold { a: tk.i(), b: tk.u(), qref: [tk.f(), tk.f(), tk.f(), tk.f()], k: tk.v3(), c: tk.v3(), cap: tk.f() }).collect();
     tk.key("tones"); let n = tk.u();
@@ -504,7 +523,7 @@ fn main() {
     tk.key("state"); let n = tk.u();
     let s0: Vec<f64> = (0..n).map(|_| tk.f()).collect();
     let nrows = 3 * pts.len() + dots.len();
-    let mut sys = Sys { g, baum_a, baum_b, ta_up, ta_dn, k_fv, ecc, ecc_slope, d0, m, inr, pts, dots, order, first: vec![0; nrows],
+    let mut sys = Sys { g, baum_a, baum_b, ta_up, ta_dn, k_fv, ecc, ecc_slope, d0, ta_rel, m, inr, pts, dots, order, first: vec![0; nrows],
                         acts, stops, holds, tones, cons, fvtabs, fvecc };
     if !sys.order.is_empty() {
         // each row's first structural non-zero: the earliest row sharing a body with it; then the
@@ -540,7 +559,8 @@ fn main() {
         return;
     }
     let out = std::io::stdout();
-    let mut out = std::io::BufWriter::new(out.lock());
+    // a line at a time: a run that fails (exit 3) has then already handed over every record it made (body-motion 4.11)
+    let mut out = std::io::LineWriter::new(out.lock());
     let mut s = s0.clone();
     let mut aux = aux0.clone();
     let mut sec = sec0.clone();

@@ -36,6 +36,7 @@ G = 9.81
 BAUM_A = 50.0             # [E] 1/s, Baumgarte velocity gain (range 10-200; drift is ~1e-9 m either way)
 BAUM_B = 50.0             # [E] 1/s, Baumgarte position gain
 TA_UP, TA_DN = 0.015, 0.050   # [E] activation time constants, s (OpenSim Thelen2003 defaults, body-motion 5.1)
+TA_REL = TA_DN            # [E: 0.015-0.050] s: what holds a tensed muscle lets go at the muscle's onset as a muscle switches off (4.11)
 K_FV = 0.25               # [E] Hill curvature (body-motion 5.1)
 ECC = 1.5                 # [E] eccentric plateau
 ECC_SLOPE = 4.0           # [E]
@@ -274,7 +275,7 @@ class System:
         for i in range(3):
             self.dotc(a, b, E3[i], mtv(Rb, mv(Ra, E3[(i + 1) % 3])))
 
-    def actuator(self, name, a, b, axis_a, T, W, t_on, t_rise, t_off, a0=0.0, tab=-1, ksec=0.0, axis_b=None):
+    def actuator(self, name, a, b, axis_a, T, W, t_on, t_rise, t_off, a0=0.0, tab=-1, ksec=0.0, axis_b=None, held=False):
         """a drive between a and b about an axis fixed in a (5.1): on b the torque T act f_v about +axis,
         on a its reaction. Its shortening speed is b's angular velocity relative to a about the axis.
         a0: the excitation it holds before its onset (a muscle tensed before it fires; 4.5).
@@ -283,10 +284,25 @@ class System:
         gets ksec x the spring's stretch, and the stretch follows the muscle (sec_update).
         axis_b (a direction fixed in b): the drive acts about the FLOATING axis square to both, the unit vector
         along axis_a x axis_b, which turns axis_b away from axis_a (4.5, session 7: raising and lowering the arm, the axis square to the trunk's long axis and the
-        upper arm). Where the two are parallel there is no such axis and the drive gives nothing."""
+        upper arm). Where the two are parallel there is no such axis and the drive gives nothing.
+        held (body-motion 4.11): the level a0 it is tensed at before its onset is held by its opposite number, so that
+        the pair puts NO net torque on the joint until the onset, whatever the joint does; from the onset the hold
+        falls away with the time constant TA_REL. The joint gets the muscle's own torque times hold_share()."""
         self.acts.append([name, a, b, unit(axis_a), float(T), float(W), float(t_on), float(t_rise), float(t_off),
-                          float(a0), int(tab), float(ksec), ZERO if axis_b is None else unit(axis_b)])
+                          float(a0), int(tab), float(ksec), ZERO if axis_b is None else unit(axis_b), 1.0 if held else 0.0])
         return len(self.acts) - 1
+
+    @staticmethod
+    def hold_share(t, t_on, a0, act):
+        """the share of a held muscle's own torque that reaches its joint: 1 less (the level it was tensed at x what is
+        left of its hold) over its activation now. 0 until the onset (its activation is then the level itself), rising
+        without a step, 1 once the hold is gone. Never negative: a muscle switched off under a hold gives nothing."""
+        if a0 <= 0.0:
+            return 1.0
+        left = 1.0 if t < t_on else (1.0 if "hold_stays" in MUT else math.exp(-(t - t_on) / TA_REL))
+        if act <= a0 * left:
+            return 0.0
+        return 1.0 - a0 * left / act
 
     @staticmethod
     def float_axis(na, nb):
@@ -295,25 +311,41 @@ class System:
         l = math.sqrt(dot(c, c))
         return scale(c, 1.0 / l) if l > FLOAT_EPS else ZERO
 
-    def stop(self, name, a, b, axis_a, e_a, f_b, lo, hi, k, c, kind=0):
+    def stop(self, name, a, b, axis_a, e_a, f_b, lo, hi, k, c, kind=0, axis_b=(0.0, 0.0, 1.0)):
         """a one-sided limit on an angle between a and b: a spring k and a damper c once the angle is past lo or hi.
         kind 0: the angle about axis_a (fixed in a) from e_a (in a) to f_b (in b), f_b projected onto the plane
         square to the axis. kind 1: the angle of f_b (in b) out of the plane square to axis_a, toward the axis
         (asin of their dot product; e_a is not used).
+        kind 2 (body-motion 4.11): b's turn about its OWN long axis axis_b (fixed in b), the way a limb's turn is
+        defined at a ball joint: b's axis is carried from where it lies at rest, along axis_a (fixed in a), to where
+        it is by the shortest turn, and the angle left over about b's axis, from e_a (in a, square to axis_a) so
+        carried to f_b (in b, square to axis_b), is the reading. With u the rest direction and v b's axis its
+        gradient is g = (u + v) / (1 + u.v). Undefined only where v = -u (b's axis turned right over).
         The stop's torque acts along the read angle's own gradient g, the vector with d(angle)/dt = w_rel . g, and its
         work is booked with the same g, so a stop can never give back more than it took in (body-motion 8.1; until
         session 8's review the torque acted about axis_a, which is the gradient only on a hinge, and on a ball joint
         did work nothing stored paid for). kind 0: g = n - (n.f) f_p / |f_p|^2, with f_p the projection. kind 1:
         g = (f x n) / |f x n|. Each is undefined where f lies along the axis (kind 0: the angle itself is; kind 1:
         the angle is 90 deg); within STOP_SINGULAR of that the run fails loudly, not silently: a kind 0 stop always, a kind 1 stop (whose angle is defined everywhere; only its gradient fails, at +-90 deg) while it is engaged."""
-        self.stops.append((name, a, b, unit(axis_a), unit(e_a), unit(f_b), lo, hi, k, c, int(kind)))
+        self.stops.append((name, a, b, unit(axis_a), unit(e_a), unit(f_b), lo, hi, k, c, int(kind), unit(axis_b)))
 
     @staticmethod
-    def stop_angle(n, e, f, kind, lo=None, hi=None):
-        """(angle, gradient g) of a stop from its axis n and directions e, f in world axes; raises SolveError where the
-        angle's gradient is undefined. A kind 1 stop's angle is defined everywhere and only its gradient fails (at
-        +-90 deg), so with lo and hi given the gradient is asked for, and can fail, only while the stop is engaged:
-        a posture at the far end of a side the stop does not limit is none of its business."""
+    def stop_angle(n, e, f, kind, lo=None, hi=None, v=None):
+        """(angle, gradient g) of a stop from its axis n and directions e, f in world axes (kind 2: and b's own axis
+        v); raises SolveError where the angle's gradient is undefined. A kind 1 stop's angle is defined everywhere and
+        only its gradient fails (at +-90 deg), so with lo and hi given the gradient is asked for, and can fail, only
+        while the stop is engaged: a posture at the far end of a side the stop does not limit is none of its business."""
+        if kind == 2:
+            w = add(n, v)
+            if dot(w, w) < STOP_SINGULAR * STOP_SINGULAR:
+                raise SolveError("a limb's own axis is turned right over from its rest direction: its turn is undefined there")
+            c1 = 1.0 + dot(n, v)
+            if "twist_fixed_axis" in MUT:            # a mutation: the torque about the limb's axis alone (wrong off the rest direction)
+                w, c1 = v, 1.0
+            kx = cross(n, v)
+            ke = cross(kx, e)
+            ec = add(add(e, ke), scale(cross(kx, ke), 1.0 / (1.0 + dot(n, v))))      # e carried by the shortest turn n -> v
+            return math.atan2(dot(v, cross(ec, f)), dot(ec, f)), scale(w, 1.0 / c1)
         nf = dot(n, f)
         if kind == 1:
             th = math.asin(max(-1.0, min(1.0, nf)))
@@ -526,7 +558,7 @@ class System:
         diag = self.diag
         p_act = p_stop = p_hold = p_con = 0.0
         nc = len(self.contacts)
-        for j, (name, a, b, ax, T, W, t_on, rise, t_off, a0, tab, ksec, axb) in enumerate(self.acts):
+        for j, (name, a, b, ax, T, W, t_on, rise, t_off, a0, tab, ksec, axb, held) in enumerate(self.acts):
             act = s[oa + j]
             u = self.excitation(j, t)
             ds[oa + j] = (u - act) / (TA_UP if u > act else TA_DN)
@@ -540,6 +572,8 @@ class System:
                 tau = T * act * fv_tab(self.fvtabs[tab], wrel, self.tab_ecc(tab))
             else:
                 tau = T * act * fv(wrel / W)
+            if held != 0.0:
+                tau *= self.hold_share(t, t_on, a0, act)
             tv = scale(n, tau)
             Tq[b] = add(Tq[b], tv)
             if a >= 0 and "no_reaction" not in MUT:
@@ -547,11 +581,11 @@ class System:
             p_act += tau * wrel
             if diag is not None:
                 diag.setdefault("act", {})[name] = (tau, wrel, act)
-        for name, a, b, ax, ea, fb, lo, hi, k, c, kind in self.stops:
+        for name, a, b, ax, ea, fb, lo, hi, k, c, kind, axb in self.stops:
             n = mv(R[a], ax) if a >= 0 else ax
             e = mv(R[a], ea) if a >= 0 else ea
             f = mv(R[b], fb)
-            th, g = self.stop_angle(n, e, f, kind, lo, hi)
+            th, g = self.stop_angle(n, e, f, kind, lo, hi, mv(R[b], axb) if kind == 2 else None)
             rate = dot(sub(Wv[b], Wv[a] if a >= 0 else ZERO), g)
             tau = 0.0
             if th > hi:
