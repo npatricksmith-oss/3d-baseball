@@ -125,7 +125,11 @@ def range_specs(cock_ref=None):
             # y, and the forearm's x (its first axis) is held square to it, so the angle of the forearm's x about the
             # bat's y, from the handle, IS the cock. (Until session 8's review this read the forearm's long axis
             # projected onto the bat's x-z plane, which turns over by 180 deg when the wrist's flexion passes 90.)
-            # Which way is uncocking is not written here: add_ranges takes it from the model.
+            # What the number means: 90 deg less the angle between the forearm (wrist toward elbow) and the barrel. Zero is
+            # the forearm square to the handle; positive is the barrel folded back toward the elbow (the thumb's side,
+            # radial deviation, since both hands hold the bat thumb toward the barrel); negative is the bat opened out
+            # toward a straight line with the forearm (the bat released). Which way is uncocking is not written
+            # here: add_ranges takes it from the model.
             ("wrist_dev_" + sd, "bat", "farm_" + sd, (0, 1, 0), (0, 0, cock_ref[sd]), (1, 0, 0), -R["wrist_uln"], R["wrist_rad"], "small"),
             # the wrist's flexion and extension: about the forearm's x, from the forearm's y to the bat's y
             ("wrist_flex_" + sd, "farm_" + sd, "bat", (1, 0, 0), (0, 1, 0), (0, 1, 0), -R["wrist_ext"], R["wrist_flex"], "small")]
@@ -133,15 +137,37 @@ def range_specs(cock_ref=None):
 
 
 RANGE_CLEAR = 2.0          # deg: a stop begins at least this far beyond the start's own angle (the start is a hitter's posture)
-WRIST_COCK_INSIDE = 5.0    # deg [E]: at the start each wrist is this far inside the thumb-side end of its 58 deg of travel
+WRIST_COCK_INSIDE = 5.0    # deg [E]: at the start each wrist is this far inside the cocked end of its 58 deg of travel
+
+
+def uncock_sign(mdl, st, d=1e-3):
+    """+1 if the wrists' cock readings RISE as the bat uncocks, -1 if they fall, found from the model itself: the bat
+    is turned a little about its own y, whichever way brings its barrel toward the lead arm's line (the lag falls,
+    as it does through a swing), and the readings are read again. Both wrists share the bat's y, so one sign serves both."""
+    i = mdl.b["bat"]
+    lag0 = mdl.observe(st)["bat_lag"]
+    a0 = range_angles(mdl, st)
+    by = mdl.axis(st, "bat", (0, 1, 0))
+    for turn in (d, -d):
+        s2 = list(st)
+        s2[13 * i + 3:13 * i + 7] = E.qmul(E.qaxis(by, turn), tuple(st[13 * i + 3:13 * i + 7]))
+        if mdl.observe(s2)["bat_lag"] < lag0:
+            a1 = range_angles(mdl, s2)
+            return 1.0 if a1["wrist_dev_L"] > a0["wrist_dev_L"] else -1.0
+    raise ValueError("turning the bat about its y does not change the lag")
 
 
 def add_ranges(mdl, st, k_big=None, wrists="cocked", rom=None):
     """the joints' ranges as one-sided stops on a model built with ranges=() and placed in state st (body-motion
     4.10). Every stop of range_specs() that has a size, with two rules: a wrist has no anatomical zero in this body
     (both hands are welded to the handle at one roll), so its TRAVEL is held, placed from its angle at the start
-    (the cock: the start WRIST_COCK_INSIDE inside the thumb-side end, or wrists="middle"; flexion: the start in the
-    middle); and no stop begins nearer than RANGE_CLEAR beyond the start's own angle. Returns {name: (lo, hi)} deg."""
+    (the cock: the start WRIST_COCK_INSIDE inside its COCKED end, so that the rest of the 58 deg lies the way the bat
+    uncocks, which is found from the model by uncock_sign, not from a sign written here; flexion: the start in the
+    middle); and no stop begins nearer than RANGE_CLEAR beyond the start's own angle. The other placings of the
+    cock, each [E] and each a rerun's: wrists="mirrored" (the travel the other way, toward the barrel folding back on
+    the forearm, which is the way the wrists of the swings fitted to [4] went), "middle", and "square" (the clinical
+    22 and 36 deg either side of the forearm square to the handle, widened to clear the start).
+    Returns {name: (lo, hi)} deg."""
     s, b = mdl.sys, mdl.b
     R = dict(ROM, **(rom or {}))
     keep = dict(ROM)
@@ -157,8 +183,19 @@ def add_ranges(mdl, st, k_big=None, wrists="cocked", rom=None):
         a0 = ang[name]
         if name.startswith("wrist_dev"):
             span = R["wrist_rad"] + R["wrist_uln"]
-            hi = a0 + (WRIST_COCK_INSIDE if wrists == "cocked" else 0.5 * span)
-            lo = hi - span
+            up = uncock_sign(mdl, st) > 0                # the reading rises as the bat uncocks: the travel lies above the start
+            if wrists == "square":                       # the range about the forearm square to the handle [E], wherever the start is
+                lo, hi = -R["wrist_uln"], R["wrist_rad"]
+            else:
+                if wrists == "mirrored":                 # the review's placing: the travel the way the earlier swings' wrists went
+                    up = not up
+                inside = 0.5 * span if wrists == "middle" else WRIST_COCK_INSIDE
+                if up:
+                    lo = a0 - inside
+                    hi = lo + span
+                else:
+                    hi = a0 + inside
+                    lo = hi - span
         elif name.startswith("wrist_flex"):
             span = R["wrist_flex"] + R["wrist_ext"]
             lo, hi = a0 - 0.5 * span, a0 + 0.5 * span

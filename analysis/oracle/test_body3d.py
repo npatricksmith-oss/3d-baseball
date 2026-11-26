@@ -989,6 +989,44 @@ class RangeChecks(unittest.TestCase):
                         self.assertGreater(worst, 90.0, msg="the old reading should have turned over on side %s" % sd)
 
     @NEED
+    def test_the_wrists_travel_lies_the_way_the_swing_uncocks(self):
+        """the body driven by its two uncocking wrist muscles alone for 40 ms: the lag falls, and each wrist's cock
+        moves toward the end of its range that has more than half of the 58 deg (review P1-2: the travel had been
+        placed on the other side, leaving 5 deg to uncock). The motion is the engine's, not add_ranges' own sign."""
+        m = B.Model(ranges=())
+        st = B.place(m, T0)
+        bd = Dr.bounds(m.H, m.M)
+        st = Dr.add_drives(m, st, {n: (bd[n], T0, 0.05, 1.0) for n in ("wrist_L", "wrist_R")})
+        lim = B.add_ranges(m, st)
+        Dr.solve_tone(m, st, T0, aux=list(m.start_aux))
+        Dr.add_damping(m, st)
+        aux = list(m.start_aux)
+        m.sys.sec_start(st, aux)
+        a0, lag0 = B.range_angles(m, st), m.observe(st)["bat_lag"]
+        s1 = list(st)
+        for i in range(40):
+            s1 = m.sys.step(T0 + i * 1e-3, s1, aux, 1e-3)
+        a1, lag1 = B.range_angles(m, s1), m.observe(s1)["bat_lag"]
+        self.assertLess(lag1, lag0 - 1.0)                                  # the bat uncocked (deg)
+        for k in ("wrist_dev_L", "wrist_dev_R"):
+            lo, hi = lim[k]
+            moved = a1[k] - a0[k]
+            self.assertGreater(abs(moved), 0.5, msg=k)
+            room = hi - a0[k] if moved > 0 else a0[k] - lo
+            self.assertGreater(room, 0.5 * (hi - lo), msg="%s can uncock only %.1f of %.1f deg" % (k, room, hi - lo))
+            # what the reading means, by another route: 90 deg less the angle from the forearm (toward the elbow) to the
+            # barrel; uncocking opens that angle (the bat toward a straight line with the forearm)
+            for a_, s_ in ((a0, st), (a1, s1)):
+                zf, bz = m.axis(s_, "farm_" + k[-1], (0, 0, 1)), m.axis(s_, "bat", (0, 0, 1))
+                self.assertAlmostEqual(a_[k], 90.0 - math.acos(E.dot(zf, bz)) / B.D2R, delta=2.5, msg=k)
+            self.assertLess(moved, 0.0, msg=k)
+        mir = B.Model(ranges=())                                           # the review's placing fails this test, as it must
+        stm = B.place(mir, T0)
+        limm = B.add_ranges(mir, stm, wrists="mirrored")
+        for k in ("wrist_dev_L", "wrist_dev_R"):
+            self.assertLess(a0[k] - limm[k][0], 0.5 * (limm[k][1] - limm[k][0]))
+
+    @NEED
     def test_a_stop_pushes_back_only_past_its_end(self):
         """a knee turned past its range is pushed back toward it by the stop's stiffness times the excess, and a knee
         inside its range is not pushed at all (the check fails if the stop's sign or its limits are wrong)."""
