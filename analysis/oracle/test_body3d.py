@@ -1684,6 +1684,115 @@ class HeldChecks(unittest.TestCase):
         self.assertAlmostEqual(e1 - e0, work(m.sys, s1), delta=0.03 * gross)
 
 
+def forefoot_rig(load=1190.0, half_w=None, mu=None, h=2.5e-4):
+    """Brosnan, McNitt & Serensits' rig in the engine (research note 12 D5): a shoe's forefoot alone on the ground under
+    `load` N, kept level, twisted about the vertical by a moment that rises 400 N m a second until the forefoot has
+    turned 40 deg. The forefoot's two stud points are BALL_HALF_W either side of its line; the grip MU_CLEAT; the
+    contact law and its stiffness are the body's own. Returns (the largest twisting moment the ground gave, N m, read
+    here from the two points' forces; the angle turned, deg; the ground's booked work, J; the largest the two normal
+    forces summed to, N)."""
+    half_w = B.BALL_HALF_W if half_w is None else half_w
+    mu = B.MU_CLEAT if mu is None else mu
+    s = E.System(g=(0.0, 0.0, 0.0))
+    b = s.body("forefoot", 1.3, (0.002, 0.006, 0.006))
+    s.dotc(-1, b, (1, 0, 0), (0, 0, 1))                      # kept level: only sliding and turning about the vertical are free
+    s.dotc(-1, b, (0, 1, 0), (0, 0, 1))
+    pts = [(0.0, half_w, -0.02), (0.0, -half_w, -0.02)]
+    for k, p in enumerate(pts):
+        s.contact("stud%d" % k, b, p, B.KN, B.CN, B.KT, B.CT, mu)
+    st = s.new_state()
+    s.set_body(st, b, (0.0, 0.0, 0.02 - load / (2 * B.KN)), (1.0, 0.0, 0.0, 0.0))
+    aux = s.new_aux()
+    s.anchors(st, aux)
+    s.diag = {}
+    peak, nmax, t, mz = 0.0, 0.0, 0.0, 0.0
+    yaw = lambda state: math.degrees(2.0 * math.atan2(state[6], state[3]))
+    while yaw(st) < 40.0 and t < 1.5:
+        mz = min(400.0 * max(0.0, t - 0.05), 1.05 * mu * load * half_w + 3.0)     # after it lets go: a little over what it held
+        s.ext = [(b, (0.0, 0.0, 0.0), (0.0, 0.0, -load), (0.0, 0.0, mz))]
+        st = s.step(t, st, aux, h)
+        t += h
+        s.deriv(t, st, aux)
+        x, q, _, _ = s.pose(st, b)
+        R = E.qR(q)
+        tw = sum(E.cross(E.mv(R, p), s.diag["contact"]["stud%d" % k])[2] for k, p in enumerate(pts))
+        peak = max(peak, abs(tw))
+        nmax = max(nmax, sum(s.diag["contact"]["stud%d" % k][2] for k in range(2)))
+    s.diag = None
+    return peak, yaw(st), st[13 * s.nb + len(s.acts) + 3], nmax
+
+
+def clinical_ankle(m, st, sd, down=0.0, inward=0.0):
+    """the state st with foot sd rebuilt on its shank from the clinical definitions (orientation only): square to the
+    shin, then pointed `down` (deg; negative is the shin forward over the foot) about the shin's side-to-side axis, then
+    its sole rolled `inward` (toward the body's midline) about the foot's own length. Returns (state, the sole's normal)."""
+    sg = 1.0 if sd == "L" else -1.0
+    qs = tuple(st[13 * m.b["shank_" + sd] + 3:13 * m.b["shank_" + sd] + 7])
+    q = E.qmul(qs, E.qaxis((0, 1, 0), math.radians(down)))
+    length = E.mv(E.qR(q), (1, 0, 0))
+    medial = E.scale(E.mv(E.qR(qs), (0, 1, 0)), -sg)
+    for sign in (1.0, -1.0):                                 # whichever sense turns the sole toward the midline
+        q2 = E.qmul(E.qaxis(length, sign * math.radians(inward)), q)
+        sole = E.scale(E.mv(E.qR(q2), (0, 0, 1)), -1.0)
+        if E.dot(sole, medial) * inward >= 0.0:
+            break
+    out = list(st)
+    out[13 * m.b["foot_" + sd] + 3:13 * m.b["foot_" + sd] + 7] = q2
+    return out, sole
+
+
+class FeetChecks(unittest.TestCase):
+    """the feet on dirt (body-motion 4.11, part 3)."""
+
+    def test_the_forefoots_twisting_resistance_is_a_cleats_on_dirt(self):
+        """the forefoot in Brosnan's rig (a baseball shoe on basepath dirt, 1,190 N on the forefoot, turned through 40 deg:
+        68.5-100.1 N m over three compactions and two dates): the engine's forefoot gives 68 N m, the low end of what was
+        measured, because nothing ahead of the ball carries load (the toes have no flexor, body-motion 4.11); it is what
+        Coulomb's law gives two points (grip x load x half-width, computed here); the ground takes work and gives none;
+        and with the old grip of 0.8 and studs 4 cm either side it gave 38, about half of the least measured."""
+        peak, turned, work_, nmax = forefoot_rig()
+        self.assertGreaterEqual(turned, 40.0)
+        self.assertAlmostEqual(nmax, 1190.0, delta=25.0)
+        self.assertAlmostEqual(peak, B.MU_CLEAT * 1190.0 * B.BALL_HALF_W, delta=0.04 * peak)
+        self.assertGreaterEqual(peak, 0.97 * 68.5)
+        self.assertLessEqual(peak, 100.1)
+        self.assertLess(work_, -10.0)                        # it slid 40 deg against about 68 N m: the ground took the work
+        old = forefoot_rig(half_w=B.SOLE_HALF_W, mu=B.MU)[0]
+        self.assertLess(old, 0.6 * 68.5)
+
+    @NEED
+    def test_the_ankles_two_angles_read_as_a_clinician_reads_them_and_the_start_is_inside_both(self):
+        """on the body with cleats: a foot pointed down 30 deg reads +30 and the shin 25 deg forward over the foot -25; a
+        sole rolled 20 deg toward the midline reads 20 toward its inversion end on either side (the left's positive, the
+        right's negative, as range_specs says) and its normal does face the midline; neither reading moves with the
+        other; the ends are the loaded ankle's (39 and 50; 34.6 in, 19.1 out) with no stop moved; the start lies inside
+        all four and no stop carries anything there."""
+        m = B.Model(ranges=(), grip="hands", feet="cleats")
+        st = B.place(m, T0)
+        lim = B.add_ranges(m, st)
+        a0 = B.range_angles(m, st)
+        for sd, sg in B.SIDES:
+            self.assertEqual(lim["ankle_" + sd], (-39.0, 50.0))
+            self.assertEqual(sorted(sg * x for x in lim["ankle_roll_" + sd]), [-19.1, 34.6])
+            for k in ("ankle_", "ankle_roll_"):
+                self.assertGreater(a0[k + sd], lim[k + sd][0] + 2.0, msg=k + sd)
+                self.assertLess(a0[k + sd], lim[k + sd][1] - 2.0, msg=k + sd)
+            medial = E.scale(m.axis(st, "shank_" + sd, (0, 1, 0)), -sg)
+            for down in (-25.0, 0.0, 30.0):
+                for inward in (-15.0, 0.0, 20.0):
+                    s2, sole = clinical_ankle(m, st, sd, down, inward)
+                    a = B.range_angles(m, s2)
+                    self.assertAlmostEqual(a["ankle_" + sd], down, delta=1e-7, msg="%s %s %s" % (sd, down, inward))
+                    self.assertAlmostEqual(sg * a["ankle_roll_" + sd], inward, delta=1e-7, msg="%s %s %s" % (sd, down, inward))
+                    self.assertAlmostEqual(E.dot(sole, medial), math.sin(math.radians(inward)), delta=1e-7)
+        m.sys.diag = {}
+        m.sys.deriv(T0, st, list(m.start_aux))
+        self.assertTrue(all(tau == 0.0 for tau, th in m.sys.diag["stop"].values()))
+        m.sys.diag = None
+        self.assertEqual(m.mu, B.MU_CLEAT)
+        self.assertEqual(B.Model(ranges=()).mu, B.MU)        # the plate's body is as it was
+
+
 class Mutations(unittest.TestCase):
     """each fault is caught by a named check (and the checks pass without it, above)."""
 

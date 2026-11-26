@@ -210,6 +210,17 @@ def _cases():
     m.sys.sec_start(st, aux)
     m.check_aux = aux
     out.append(("the hands' body, every muscle tensed and held", m, st, -0.250, 200))
+    m = B.Model(ranges=(), grip="hands", feet="cleats")   # the feet on dirt (4.11, part 3): the measured grip, the ankles' ends
+    st = B.place(m, -0.250)
+    st = Dr.add_drives(m, st, {n: (bd[n], -0.245, 0.05, 0.1, 0.3) for n in bd if not (arm(n) or n.startswith(("sh_", "pron", "sup")))}, held=True)
+    B.add_ranges(m, st)
+    Dr.solve_tone(m, st, -0.250)
+    Dr.add_damping(m, st)
+    aux = m.sys.new_aux()
+    m.sys.anchors(st, aux)
+    m.sys.sec_start(st, aux)
+    m.check_aux = aux
+    out.append(("cleats, the legs and trunk at their bounds", m, st, -0.250, 200))
     fitted = os.path.join(HERE, "fit3d_d34_all.json")
     if not os.path.isfile(fitted):                   # session 6's fit (its 22 channels; session 7's then switched off)
         fitted = os.path.join(HERE, "fit3d_d34_arms.json")

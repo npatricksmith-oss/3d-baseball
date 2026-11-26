@@ -72,6 +72,8 @@ VARY = {
     "arms_held_by_resolving": {"hold": "resolve"},
     # body-motion 4.11, part 2: a tensed muscle held until its onset, the clock reading onsets, at the two viewing times
     "view_010": {"hold": "let_go", "t_view": 0.10}, "view_020": {"hold": "let_go", "t_view": 0.20},
+    # part 3: the feet on dirt, and the same with the old grip alone put back (to see the grip's share apart)
+    "cleats": {"hold": "let_go", "t_view": 0.10, "feet": "cleats"}, "cleats_grip_08": {"hold": "let_go", "t_view": 0.10, "feet": "cleats", "mu": 0.8},
     # the reach one coordinate at a time, from the high-and-close ball (review P2-1)
     "height_alone_078": {"z": 0.78, "across": 0.75, "ahead": 0.40},
     "ahead_alone_072": {"z": 1.20, "across": 0.75, "ahead": 0.72},
@@ -127,7 +129,8 @@ class Ctx:
         H, M = o.get("H", 1.84), o.get("M", 92.0)
         # grip: "weld", the body of sessions 1-8 (the default, so that a saved result without the option replays on the body
         # it was found on); "hands", each hand's own grip (body-motion 4.11, session 9; --grip hands)
-        self.m = m = B.Model(H, M, ranges=(), grip=o.get("grip", "weld"))
+        # feet: "plate" (sessions 1-8, the default) or "cleats" (4.11, part 3: the measured grip, the ankles' ends; --feet cleats)
+        self.m = m = B.Model(H, M, ranges=(), grip=o.get("grip", "weld"), feet=o.get("feet", "plate"), mu=o.get("mu"))
         for k, shift in o.get("start", {}).items():          # the start moved by a stated amount (a sensitivity run)
             B.CURVE_OVERRIDE[k] = (lambda kk, sh: (lambda t: C.resample(B._CURVES.setdefault(kk, C.load(kk)), t, t, 1.0)[0] + sh))(k, shift)
         vel = o.get("vel", 1.0)
@@ -547,6 +550,24 @@ def report(ctx, u, log=print):
     out["trail_knee"] = (obs[0][1]["trail_knee_flex"], obs[ic][1]["trail_knee_flex"])
     log("   CHECK the front leg braced: the lead knee %.0f deg bent at the start, %.0f at -50 ms, %.0f at contact, straightening at up to %.0f deg/s   [46 at foot plant, 14 +- 12 at contact, 350 deg/s (OpenBiomechanics); 15 at contact ([3])]" % out["lead_knee"])
     log("   CHECK the front foot's greatest load: %.2f x body weight at %.0f ms; at contact front %.2f, rear %.2f   [2.0 +- 0.4, p10-p90 1.5-2.6]; the rear knee %.0f -> %.0f deg" % (pk[0], rel(pk[1]), fz[ic][0], fzr[ic][0], out["trail_knee"][0], out["trail_knee"][1]))
+    # what each foot did on the ground (4.11, part 3): its heel's greatest height before contact, how far it turned on the
+    # ground from the start to contact (+ is the toe going toward the pitcher), and the pelvis's turn over the same time
+    out["feet"] = {}
+    yaw_of = lambda body, state: math.atan2(*reversed(m.axis(state, body, (1, 0, 0))[:2])) / B.D2R
+    for sd in "RL":
+        fb = m.b["foot_" + sd]
+        heel = [c_[2] for c_ in s.contacts if c_[0].startswith(sd + "_heel")]
+        hz = []
+        for rec in recs[:ic + 1]:
+            xb, qb, _, _ = s.pose(rec[1], fb)
+            Rf = E.qR(qb)
+            hz.append(min(E.add(xb, E.mv(Rf, p_))[2] for p_ in heel))
+        yw = unwrap([yaw_of("foot_" + sd, rec[1]) for rec in recs[:ic + 1]])
+        out["feet"][sd] = (max(hz) * 100, hz[-1] * 100, yw[-1] - yw[0], min(yw) - yw[0], max(yw) - yw[0])
+    pyaw = unwrap([o["pelvis_rot"] for t, o in obs[:ic + 1]])
+    out["pelvis_turn"] = pyaw[-1] - pyaw[0]
+    log("   the feet on the ground: the REAR heel's greatest height before contact %.1f cm (%.1f at contact), the rear foot turned %+.0f deg on the ground by contact (between %+.0f and %+.0f; + is the toe toward the pitcher); the FRONT heel %.1f cm (%.1f), turned %+.0f deg; the pelvis turned %+.0f deg in that time"
+        % (out["feet"]["R"][:5] + out["feet"]["L"][:3] + (out["pelvis_turn"],)))
     for key, label, band in (("pelvis_rot_vel", "the hips' fastest turning", "705 +- 75 (OpenBiomechanics); 714 +- 76 at -75 ms ([3])"), ("trunk_rot_vel", "the trunk's fastest turning", "915 +- 80"), ("bat_az_vel", "the bat's fastest turning (seen from above)", "no direct measurement kept")):
         x = max((o[key], t) for t, o in obs if t <= tx + 1e-9)
         out[key + "_peak"] = (x[0], rel(x[1]))
@@ -680,6 +701,10 @@ def main():
         body["hold"] = arg("--hold", None)
     if "--view" in a:
         body["t_view"] = float(arg("--view", T_VIEW))
+    if "--feet" in a:
+        body["feet"] = arg("--feet", None)
+    if "--mu" in a:
+        body["mu"] = float(arg("--mu", B.MU))
     if "--show" in a:
         d = json.load(open(arg("--show", main_file)))
         ctx = Ctx(**dict(d.get("options", {}), **body))

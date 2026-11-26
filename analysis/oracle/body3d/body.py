@@ -65,6 +65,11 @@ HANDS_GUESS = (0.10, -0.05, 0.02)   # m, first guess of the hands from the rear 
 
 SIDES = (("L", 1.0), ("R", -1.0))
 
+# ---- the feet on dirt (body-motion 4.11, part 3; research note 12 D) ------------------------------
+MU_CLEAT = 1.15           # a baseball shoe (metal studs) on a basepath mix: static 1.04-1.27, dynamic 1.02-1.20 (Brosnan, McNitt &
+#                           Serensits 2009, FT). It replaces MU = 0.8, which had no source, in Model(feet="cleats").
+BALL_HALF_W = 0.05        # m [E: 0.045-0.055]: the forefoot's studs either side of the foot's line (a forefoot is about 10 cm wide)
+
 # ---- each hand's own grip (body-motion 4.11, session 9) ------------------------------------------
 # A hand's own directions: d from the wrist toward the knuckles, r toward the thumb, p out of the palm (a right hand
 # has r = d x p, a left hand r = p x d). Both hands hold the bat thumb toward the barrel with the palms facing each
@@ -155,7 +160,11 @@ ROM = {"hip_flex": 130.4, "hip_ext": 17.4, "hip_abd": 38.8, "hip_add": 30.5, "hi
        "trunk_twist": 55.0,                 # [E: 46-64]
        "trunk_fwd": 80.0, "trunk_back": 25.0, "trunk_side": 35.0,   # [E] AAOS's thoracolumbar values, not read this session
        "sh_hadd": SH_ADD_MAX, "sh_habd": 45.0,                      # [E] 135: clinical; 45 behind the frontal plane: not read
-       "sh_irot": 69.0, "sh_erot": 104.0}                           # the upper arm's turn about its own length (Boone & Azen, as the wrist)
+       "sh_irot": 69.0, "sh_erot": 104.0,                           # the upper arm's turn about its own length (Boone & Azen, as the wrist)
+       # the ankle with weight on it (4.11, part 3): the shin forward over the foot with the knee bent 20 deg or more
+       # (Baumbach 2014; 25 with the knee straight, which a stop cannot know: [E]); the foot pointed down and the sole
+       # rolled in and out (Hallaceli 2014, passive; the roll its men's)
+       "ankle_df_loaded": 39.0, "ankle_pf_loaded": 50.0, "ankle_inv": 34.6, "ankle_ever": 19.1}
 # Past the end of a range the joint resists as a one-sided spring. NO measurement of that resistance was found for
 # any joint here (body-motion 4.10): the stiffness is [E]. "big": the trunk, hips, knees, ankles and the shoulders'
 # sweep; "small": the elbows, forearms and wrists (their strengths are 17-112 N m, and a stiffer spring on so
@@ -172,7 +181,7 @@ def cock_reference(mdl, st):
     return {sd: (1.0 if E.dot(mdl.axis(st, "farm_" + sd, (1, 0, 0)), bz) > 0 else -1.0) for sd, sg in SIDES}
 
 
-def range_specs(cock_ref=None, grip="weld"):
+def range_specs(cock_ref=None, grip="weld", feet="plate"):
     """every joint range as an engine stop: (name, body a, body b, axis in a, e in a, f in b, lo deg, hi deg, size, kind).
     grip="hands" (4.11): the wrists' two angles, the forearms' turn and the upper arms' turn at their anatomical ends,
     each read on the joint's own axis (the upper arm's by a kind 2 stop), in place of the weld's two wrist stops.
@@ -201,7 +210,12 @@ def range_specs(cock_ref=None, grip="weld"):
              -(R["hip_erot"] if L else R["hip_irot"]), R["hip_irot"] if L else R["hip_erot"], "big"),
             ("knee_" + sd, "thigh_" + sd, "shank_" + sd, (0, 1, 0), (0, 0, 1), (0, 0, 1), -R["knee_hyper"], R["knee_flex"], "big"),
             # the foot's toe turned down about the shank's hinge is positive
-            ("ankle_" + sd, "shank_" + sd, "foot_" + sd, (0, 1, 0), (1, 0, 0), (1, 0, 0), -R["ankle_df"], R["ankle_pf"], None),   # reported, not held: the range is a straight knee's, unloaded
+            ("ankle_" + sd, "shank_" + sd, "foot_" + sd, (0, 1, 0), (1, 0, 0), (1, 0, 0), -R["ankle_df"], R["ankle_pf"], None)   # reported, not held: the range is a straight knee's, unloaded
+            if feet != "cleats" else
+            # feet="cleats" (4.11, part 3): both of the ankle's angles held at their ends with weight on. The bend as above;
+            # the roll about the foot's own length, from the foot's y to the shank's hinge (which the ankle holds square
+            # to the foot's length): positive is the LEFT sole rolled toward the midline (inversion), the right sole away
+            ("ankle_" + sd, "shank_" + sd, "foot_" + sd, (0, 1, 0), (1, 0, 0), (1, 0, 0), -R["ankle_df_loaded"], R["ankle_pf_loaded"], "big"),
             # the upper arm across the chest: its angle, shoulder toward elbow, out of the trunk's fore-and-aft plane toward
             # the other side (kind 1). 0 is the arm anywhere in that plane, hanging included; the range's end is 135 deg
             # from straight out to its own side, so +45 here. (The projection "seen down the trunk's axis" of sessions
@@ -211,6 +225,9 @@ def range_specs(cock_ref=None, grip="weld"):
             # and drawn back behind the shoulders' line: its angle out of the trunk's side-to-side plane, backward
             ("shoulder_back_" + sd, "trunk", "uarm_" + sd, (-1, 0, 0), (0, 0, 1), (0, 0, -1), -91.0, R["sh_habd"], "big", 1),
             ("elbow_" + sd, "uarm_" + sd, "farm_" + sd, (0, 1, 0), (0, 0, 1), (0, 0, 1), -R["elbow_hyper"], R["elbow_flex"], "small")]
+        if feet == "cleats":
+            out.append(("ankle_roll_" + sd, "foot_" + sd, "shank_" + sd, (1, 0, 0), (0, 1, 0), (0, 1, 0),
+                        -(R["ankle_ever"] if L else R["ankle_inv"]), R["ankle_inv"] if L else R["ankle_ever"], "big"))
         if grip == "hands":
             d, r, p = hand_frame(sd)
             ar = arm_range(R)
@@ -286,7 +303,7 @@ def add_ranges(mdl, st, k_big=None, wrists="cocked", rom=None):
     ROM.update(R)
     hands = getattr(mdl, "grip", "weld") == "hands"
     mdl.cock_ref = None if hands else cock_reference(mdl, st)
-    specs = range_specs(mdl.cock_ref, mdl.grip if hands else "weld")
+    specs = range_specs(mdl.cock_ref, mdl.grip if hands else "weld", getattr(mdl, "feet", "plate"))
     ROM.clear(); ROM.update(keep)
     ang = range_angles(mdl, st)
     out = {}
@@ -338,7 +355,7 @@ def range_angles(mdl, st):
     Rm = {n: E.qR(s.pose(st, i)[1]) for n, i in mdl.b.items()}
     hands = getattr(mdl, "grip", "weld") == "hands"
     ref = {"L": 1.0, "R": 1.0} if hands else (getattr(mdl, "cock_ref", None) or cock_reference(mdl, st))
-    for name, a, b_, ax, ea, fb, lo, hi, size, kind in range_specs(ref, "hands" if hands else "weld"):
+    for name, a, b_, ax, ea, fb, lo, hi, size, kind in range_specs(ref, "hands" if hands else "weld", getattr(mdl, "feet", "plate")):
         n = E.mv(Rm[a], E.unit(ax)); e = E.mv(Rm[a], E.unit(ea)); f = E.mv(Rm[b_], E.unit(fb))
         if kind == 2:
             out[name] = s.stop_angle(n, e, f, 2, v=E.mv(Rm[b_], (0.0, 0.0, 1.0)))[0] / D2R
@@ -399,17 +416,24 @@ def curve_rate(name, t, h=0.005):
 class Model:
     """the engine System of a batter of stature H (m) and mass M (kg), with named bodies and joint points."""
 
-    def __init__(self, H=1.84, M=92.0, contacts=True, mu=MU, shoulder_stops=True, ranges=None, grip="weld"):
+    def __init__(self, H=1.84, M=92.0, contacts=True, mu=None, shoulder_stops=True, ranges=None, grip="weld", feet="plate"):
         """ranges: None, the stops of sessions 1-7 (the knees' and elbows' bend, the shoulders' sweep across, at
         STOP_K); or a set of names from range_specs() ("all" for every one): those ranges as stops at RANGE_K, in
         place of the old ones (body-motion 4.10).
         grip: "weld", the body of sessions 1-8 (both wrists 7 cm square off the handle, the start's free choices set by
         hand, the wrists' travel held from the start), kept so that the dated results of body-motion 4.4-4.10 and the
         probe's check still run; "hands", each hand's own grip (4.11): the handle oblique in the hand, anatomical wrist,
-        forearm and upper-arm ranges, the start's free choices by a rule (pose)."""
+        forearm and upper-arm ranges, the start's free choices by a rule (pose).
+        feet: "plate", the feet of sessions 1-8 (the grip MU with no source, the ball's contact points SOLE_HALF_W either
+        side, no end to either of the ankle's angles); "cleats" (4.11, part 3): the measured grip of a baseball shoe on
+        dirt, the forefoot's studs BALL_HALF_W either side, and add_ranges() holds both of the ankle's angles."""
         self.H, self.M = H, M
         self.ranges = ranges
         self.grip = grip
+        self.feet = feet
+        if mu is None:
+            mu = MU_CLEAT if feet == "cleats" else MU
+        self.mu = mu
         s = self.sys = E.System()
         seg = lambda n: C.segment(n, H, M)
         self.b = b = {}
@@ -492,7 +516,8 @@ class Model:
                 s.stop("shoulder_" + sd, b["trunk"], ua, (0, 0, -sg), (0, sg, 0), (0, 0, -1), -10.0, SH_ADD_MAX * D2R, STOP_K, STOP_C)
             if contacts:
                 for nm, px in (("heel", -cf * Lf), ("ball", (BALL_FWD - cf) * Lf)):
-                    for wn, py in (("in", -sg * SOLE_HALF_W), ("out", sg * SOLE_HALF_W)):
+                    hw = BALL_HALF_W if (feet == "cleats" and nm == "ball") else SOLE_HALF_W
+                    for wn, py in (("in", -sg * hw), ("out", sg * hw)):
                         s.contact("%s_%s_%s" % (sd, nm, wn), ft, (px, py, -fcm_h), KN, CN, KT, CT, mu)
 
     # ---- measures ----
