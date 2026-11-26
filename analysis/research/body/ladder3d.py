@@ -265,8 +265,8 @@ def run_rung(rung, start, seed, g_reach, g_aim, g_more, tag, log, max_blocks=MAX
 
 def table(log=print):
     """the ladder so far, from the results kept: one line a result."""
-    log("| Result | Start | Sweet spot at contact | Miss | Score | Settled | Muscles; holding; hold-still; damping (J) |")
-    log("| :-- | :-- | --: | --: | --: | :-- | :-- |")
+    log("| Result | Start | Sweet spot at contact | Its fastest before | Miss | Score | Settled | Muscles; holding; hold-still; damping (J) |")
+    log("| :-- | :-- | --: | --: | --: | --: | :-- | :-- |")
     if not os.path.isdir(OUT):
         return
     for f in sorted(os.listdir(OUT)):
@@ -276,7 +276,7 @@ def table(log=print):
         if "sweet_speed" not in d:
             continue
         en = d.get("energy_J", {})
-        log("| %s | %s | %.2f m/s (%.1f mph) | %.1f cm | %.1f | %s | %s |" % (f[:-5], os.path.basename(str(d.get("start"))), d["sweet_speed"], d["sweet_speed"] / MPH, math.hypot(*d["miss_cm"]), d.get("cost", float("nan")),
+        log("| %s | %s | %.2f m/s (%.1f mph) | %.2f | %.1f cm | %.1f | %s | %s |" % (f[:-5], os.path.basename(str(d.get("start"))), d["sweet_speed"], d["sweet_speed"] / MPH, d["sweet_fastest_before"][0], math.hypot(*d["miss_cm"]), d.get("cost", float("nan")),
             ("yes (%.2f)" if d.get("settled") else "NO (%.2f)") % d.get("fall_last_50", float("nan")),
             "%.0f; %.0f; %.0f; %.0f" % (en.get("muscles", 0), en.get("holding muscles", 0), en.get("hold-still torques", 0), en.get("damping", 0)) if en else "-"))
 

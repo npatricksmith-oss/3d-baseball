@@ -1979,11 +1979,15 @@ Part 2 made no motion that could be turned into a plan. Each result is read agai
 
 Session 11 (2026-11-26) works under the owner's rulings of that day ([PLAN D42](../PLAN.md)): the cap of three sessions is lifted and the work goes on while each session gains honest bat speed ("honest": speed that comes from a measured part of the body, not from an unmeasured allowance, a bug or a loophole in the score); joint friction takes sourced values where a paper can be read and a stated range, run at several values, where none can; what is left of the lab study goes from the stance; no strength without a measurement (D34), and if he is still short the owner is told which muscles and by how much; **the fixes are made one at a time, with a measured bat speed after each.** The gate is §13's, unchanged. Written in the order the work was done; each rung is written here before it is built or run.
 
-**The ladder's table** (kept up to date; every figure is the sweet spot's speed at contact in a settled search by the protocol below; "gain" is over the rung before, and a gain smaller than the spread of two searches from the same start is no gain):
+**The ladder's table** (kept up to date; speeds are the sweet spot's, in settled searches from the same plan by the protocol below, two searches a rung with different random draws; the rung's figure is the better-scoring search's; "gain" is at contact, over the rung before, and counts only if it is larger than the 1.95 m/s (4.4 mph) by which rung 0's own two searches differ, or if both of the rung's searches beat both of the rung before's):
 
-| Rung | The one change | Sweet spot at contact: the better-scoring of two searches; the other | Gain over the rung before | What it rests on |
-| :-- | :-- | --: | --: | :-- |
-| 0 | none: session 10's body | **17.7 m/s (39.6 mph)**; the second search 15.7 (35.2) | — (the two searches differ by 1.95 m/s, 4.4 mph: the yardstick) | unsourced damping (1.0 N·m·s/rad everywhere), constant hold-still torques, [4]'s stance |
+| Rung | The one change | At contact: the rung's figure; the other search | The bat's fastest before contact (the same two) | Gain at contact over the rung before | What it rests on |
+| :-- | :-- | --: | --: | :-- | :-- |
+| 0 | none: session 10's body | **17.7 m/s (39.6 mph)**; 15.7 (35.2) | 19.2; 17.8 m/s | — (the two differ by 1.95 m/s: the yardstick) | unsourced friction (1.0 N·m·s/rad everywhere), constant hold-still torques, [4]'s stance and launch state |
+| 1 | joint friction at the values read; middles of stated ranges at the hips and trunk | **14.7 m/s (32.9 mph)**; 14.9 (33.2) | **20.4; 19.7 m/s** | **−3.0 m/s (−6.6 mph): a loss at contact, both searches under both of rung 0's.** The bat is faster before contact (+1.2 and +1.9 m/s) and slows by a quarter in the last 20–30 ms as an arm reaches its elbow's end | read: wrist's bend, shoulder, knee, ankle; the elbow with the arm holding its place; **not measured: hip, trunk** (150 J of the swing's losses), forearm's turn, wrist's tilt |
+| 2, alone on rung 0's body | the posture held by his muscles, under their rules, in place of the constant hold-still torques | 16.7 m/s (37.3 mph); 15.7 (35.2) | 18.8; 17.7 m/s | −1.0 m/s against rung 0: **no loss shown** (inside the yardstick; both searches inside rung 0's pair) | measured strengths and strength-at-speed curves; Schultz 1987's trunk bending strength; 12 N·m at the ankles' roll left as constant torque |
+
+**Where the session stands while this is written** (for whoever picks it up if it is cut short): every rung through 6 is designed below and committed before its runs; the runs are in the job queue (`bin/job.sh status`, labels `body-3d-11 …`) and write to `sim/target/codex-probes/body3d/s11/<rung>.out` and `.json`; `ladder3d.py --table` and `--block <rung>` print what has finished.
 
 #### The protocol, the same for every rung (written before any run)
 
