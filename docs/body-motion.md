@@ -1985,7 +1985,8 @@ Session 11 (2026-11-26) works under the owner's rulings of that day ([PLAN D42](
 | :-- | :-- | --: | --: | :-- | :-- |
 | 0 | none: session 10's body | **17.7 m/s (39.6 mph)**; 15.7 (35.2) | 19.2; 17.8 m/s | — (the two differ by 1.95 m/s: the yardstick) | unsourced friction (1.0 N·m·s/rad everywhere), constant hold-still torques, [4]'s stance and launch state |
 | 1 | joint friction at the values read; middles of stated ranges at the hips and trunk | **14.7 m/s (32.9 mph)**; 14.9 (33.2) | **20.4; 19.7 m/s** | **−3.0 m/s (−6.6 mph): a loss at contact, both searches under both of rung 0's.** The bat is faster before contact (+1.2 and +1.9 m/s) and slows by a quarter in the last 20–30 ms as an arm reaches its elbow's end | read: wrist's bend, shoulder, knee, ankle; the elbow with the arm holding its place; **not measured: hip, trunk** (150 J of the swing's losses), forearm's turn, wrist's tilt |
-| 2, alone on rung 0's body | the posture held by his muscles, under their rules, in place of the constant hold-still torques | 16.7 m/s (37.3 mph); 15.7 (35.2) | 18.8; 17.7 m/s | −1.0 m/s against rung 0: **no loss shown** (inside the yardstick; both searches inside rung 0's pair) | measured strengths and strength-at-speed curves; Schultz 1987's trunk bending strength; 12 N·m at the ankles' roll left as constant torque |
+| 2 | on rung 1's body: the posture held by his muscles, under their rules, in place of the constant hold-still torques | **16.9 m/s (37.7 mph)**; 16.6 (37.1) | 18.6; 19.3 m/s | **+2.1 m/s (+4.8 mph) over rung 1: a gain by the rule** (both searches over both of rung 1's); against rung 0: −0.8, no change shown | measured strengths and strength-at-speed curves; Schultz 1987's trunk bending strength; 12 N·m at the ankles' roll left as constant torque; the hips' and trunk's friction not measured |
+| (2 alone, on rung 0's body) | the same change without rung 1 | 16.7 m/s (37.3 mph); 15.7 (35.2) | 18.8; 17.7 m/s | −1.0 m/s against rung 0: **no loss shown** (inside the yardstick; both searches inside rung 0's pair) | measured strengths and strength-at-speed curves; Schultz 1987's trunk bending strength; 12 N·m at the ankles' roll left as constant torque |
 
 **Where the session stands while this is written** (for whoever picks it up if it is cut short): every rung through 6 is designed below and committed before its runs; the runs are in the job queue (`bin/job.sh status`, labels `body-3d-11 …`) and write to `sim/target/codex-probes/body3d/s11/<rung>.out` and `.json`; `ladder3d.py --table` and `--block <rung>` print what has finished.
 
@@ -2221,6 +2222,64 @@ Code: `analysis/research/body/ladder3d.py` (the protocol, the energy account, th
 - **The energy moved as expected even where the speed did not:** the constant torques' +157 J and +82 J (rung 0's two swings) are gone; the holding muscles give +20 and +15 J, and the muscles themselves 443 and 506 J where they gave 417 and 439. What is left as constant torque (the ankles' roll, the rear hip's turn the other way) does −1 and +5 J.
 - **Against what I expected:** I expected 1–3 m/s slower. By the rule's figure it is 1.0 slower, by the pair it is no different; I had not weighed that the search would simply ask more of the muscles (their work is up 26–67 J). Right that the front knee no longer snaps straight into its end: it is 41° and 28° bent at contact (rung 0: 1° and 40°), and the heaviest joint end is no longer the knee.
 - *What it shows:* on this body, by this search, the 27% of the swing's energy that the review found coming from torques under no muscle rule was not what held the speed up: the muscles can carry it. *What it does not show:* anything finer than about 2 m/s.
+
+**Rung 2 as run, on rung 1's body** (the read friction and the posture held by muscle; jobs 417 and 418; `s11/r2.out`, `r2_b.out`, `.json`). **16.85 and 16.58 m/s (37.7 and 37.1 mph): both searches faster at contact than both of rung 1's (14.72, 14.85). By the ladder's rule a gain of 2.1 m/s (4.8 mph) over rung 1, the first the ladder shows; against rung 0 it is 0.8 m/s less, inside the yardstick.**
+
+| | seeds 1, 11 | seeds 2, 12 |
+| :-- | --: | --: |
+| the sweet spot at contact | **16.85 m/s (37.7 mph)** | **16.58 m/s (37.1 mph)** |
+| the miss | 0.3 cm | 0.6 cm |
+| the score (lower is better) | 33.1 | 33.8 |
+| settled: the fall over the last 50 generations | 0.66 | 0.56 |
+| the speed at 0.5, 0.25, 0.125 ms | 16.84, 16.85, 16.85 | 16.53, 16.58, 16.59 |
+| failed runs among the plan's 205 one-number changes | 0 | 0 |
+| the line from the starting plan to the result (11 points, then one beyond) | 369 378 405 444 479 365 211 158 72 38 33 51 | 369 337 346 154 123 98 86 78 54 40 34 46 |
+| the bat at its fastest at contact | 91% | 86% |
+| the hands' fastest | 7.4 m/s | 7.6 m/s |
+| the attack angle | -3.1° | -3.8° |
+| the hips'; the trunk's fastest turning | 208; 337°/s | 385; 399°/s |
+| the pelvis's turn from the start to contact | 24° | 46° |
+| first rises: legs, trunk, arms (ms before contact) | 320, 326, 253 | 339, 317, 255 |
+| the first arm muscle before contact (253 allowed) | 253 ms | 255 ms |
+| the lead knee at contact; the front foot's greatest load | 34°; 1.04 x body weight | 39°; 1.53 x body weight |
+| balance: outside his feet; least on the feet; height kept | 2.0 cm; 0.12; 0.88 | 0.0 cm; 0.09; 0.89 |
+| joints past their range: to contact; to 50 ms after | 2.1° (the lead upper arm's turn); 3.7 (the lead forearm) | 2.5° (forearm R); 5.0 (the lead forearm) |
+| joint ends over 50 N·m; the heaviest | 14; 1010 N·m (shoulder up L) | 16; 890 N·m (shoulder up L) |
+| groups at 90% or more of their bounds | 6 | 9 |
+| WORK TO CONTACT, J: muscles | +381 | +459 |
+| holding muscles | +25 | +28 |
+| hold-still torques (constant, under no muscle rule) | +1 | +6 |
+| the joints' damping | -168 | -215 |
+| stops; ground; gravity | -38; -25; +74 | -77; -40; +71 |
+| kinetic energy gained | 250 | 247 |
+| muscles (with holding) by joint, the five largest | hip R +152, lumbar +84, shoulder L +83, shoulder R +50, knee R +24 | hip R +207, shoulder L +81, lumbar +77, shoulder R +59, hip L +41 |
+| damping by joint, the five largest | lumbar -42, shoulder R -39, hip R -24, elbow R -22, hip L -15 | lumbar -83, shoulder R -34, hip R -28, hip L -23, elbow R -18 |
+| hold-still torques by joint, the three largest | ankle L +4, hip R -4, ankle R +0 | ankle R +6, hip R -4, ankle L +4 |
+| GATE: meets the ball | passes (-0.7 cm) | passes (-0.4 cm) |
+| GATE: the sweet spot at contact | fails (short by 12.1 m/s) | fails (short by 12.4 m/s) |
+| GATE: the bat at its fastest at contact | fails (-7 points) | fails (-12 points) |
+| GATE: the hands' fastest | fails (short by 2.9 m/s) | fails (short by 2.7 m/s) |
+| GATE: the attack angle | fails (short by 0.1°) | fails (short by 0.8°) |
+| GATE: the hips' fastest turning | fails (short by 347°/s) | fails (short by 170°/s) |
+| GATE: the trunk's fastest turning | fails (short by 418°/s) | fails (short by 356°/s) |
+| GATE: first rises legs, trunk, arms | fails (-320, -326, -253 ms) | passes (-339, -317, -255 ms) |
+| GATE: no arm muscle before he could decide | passes (+0 ms) | fails (+2 ms) |
+| GATE: the hands' first motion before contact | fails (over by 39 ms) | fails (over by 45 ms) |
+| GATE: the lead knee at contact | fails (over by 8°) | fails (over by 13°) |
+| GATE: the front foot's greatest load | fails (short by 0.46 x body weight) | passes (inside by 0.03 x body weight) |
+| GATE: in balance | fails (+2.0 cm) | passes (+0.0 cm) |
+| GATE: does not jump | passes (+0.02) | fails (-0.01) |
+| GATE: legs have not given way | fails (-0.02) | fails (-0.01) |
+| GATE: no joint more than 2° past its range | fails (+1.7°) | fails (+3.0°) |
+| GATE: no joint end heavily loaded (D39, not built) | fails (14 ends over 50 N·m; the most 1010 N·m (shoulder up L)) | fails (16 ends over 50 N·m; the most 890 N·m (shoulder up L)) |
+| GATE: no passive element does net positive work | passes (stops -38 J, ground -25 J, damping -168 J) | passes (stops -78 J, ground -40 J, damping -215 J) |
+
+- **I expected this rung to cost speed, and on rung 1's body it gains.** Why, as far as the swings show: rung 1's swings had the constant torques putting in 185 and 177 J (84–105 J at the front hip, 58 J at the front knee, both of which they threw straight) on a body with light arms, and the bat was past its peak at contact (72–75% of its fastest). With the hold under the muscles' rules the body gains 250 and 247 J of kinetic energy instead of 426 and 525, the hands are back at 7.4–7.6 m/s, the bat's fastest before contact is lower (18.6 and 19.3 m/s against 20.4 and 19.7) and **it arrives at 91% and 86% of that fastest instead of 72–75%.** A slower body that the search can time meets the ball faster than a faster one it cannot.
+- **Seen with rung 2 alone** (on rung 0's body: no loss shown), the hold under the muscles' rules has not cost bat speed on either body. The honest figure the job expected to be a cost is, by these searches, between −1.0 (alone) and +2.1 m/s (on rung 1).
+- **Rungs 1 and 2 do not add.** Alone from rung 0: rung 1 −3.0, rung 2 −1.0; together −0.8. The two changes work on each other through what the search can time, and through the noise of the searches themselves.
+- *The energy:* muscles 381 and 459 J, holding muscles +25 and +28 J, what is left as constant torque +1 and +6 J; the friction takes 168 and 215 J, 42 and 83 J of it at the trunk; the stops 38 and 77 J.
+- *Against the gate,* the first search: meets the ball (0.3 cm); the attack angle −3.1° (fails by 0.1°); first rises in order with the arms exactly on the clock (253 ms); the front leg 34° bent and loaded to 1.04 times his weight; hips 208°/s and trunk 337°/s, slower than rung 0's.
+- *What it shows:* with friction at the read values and the hold carried by muscle, both parts the review found unmeasured are out of the swing, and it meets the ball at 16.6–16.9 m/s: about what rung 0's two searches gave (15.7–17.7) with them in. *What it does not show:* a gain or a loss against rung 0.
 
 #### Rung 3: the front foot's place and angle from MLB's data (the design, written before any search)
 
