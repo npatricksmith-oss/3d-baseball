@@ -2062,6 +2062,64 @@ Code: `analysis/research/body/ladder3d.py` (the protocol, the energy account, th
 
 **The dependence, as the owner asked** (after the rung's searches): rung 1's better result carried on for 500 generations on the body with the unread joints' values at the low ends, at the middle (unchanged) and at the high ends, all together; then, if the bat's speed moves by more than the yardstick, one group at a time (the arms' unread values, the trunk's, the hips'), each at its low and high end with the others in the middle.
 
+**Rung 1 as run** (jobs 415 and 416; `s11/r1.out`, `r1_b.out`, `.json`; the first search needed one extra block of 250 generations to settle). **With the joints' friction at the values read, both searches meet the ball slower than both of rung 0's: 14.72 and 14.85 m/s (33 mph) against 17.69 and 15.74. But the body is faster, not slower: the bat reaches 20.4 and 19.7 m/s before contact (rung 0: 19.2 and 17.8), the hands 11.2 and 11.0 m/s (7.6 and 7.5; the gate's band is 10.3–13.0), and it then loses a quarter of the bat's speed in the last 20–30 ms, when an arm runs straight into its elbow's end.**
+
+| | seeds 1, 11 | seeds 2, 12 |
+| :-- | --: | --: |
+| the sweet spot at contact | **14.72 m/s (32.9 mph)** | **14.85 m/s (33.2 mph)** |
+| the miss | 1.0 cm | 0.8 cm |
+| the score (lower is better) | 37.6 | 37.7 |
+| settled: the fall over the last 50 generations | 0.39 | 0.15 |
+| the speed at 0.5, 0.25, 0.125 ms | 14.72, 14.72, 14.74 | 14.60, 14.85, 15.01 |
+| failed runs among the plan's 205 one-number changes | 0 | 0 |
+| the line from the starting plan to the result (11 points, then one beyond) | 343 290 264 248 225 170 140 111 81 51 38 83 | 343 299 255 225 188 155 111 81 59 44 38 45 |
+| the bat at its fastest at contact | 72% | 75% |
+| the hands' fastest | 11.2 m/s | 11.0 m/s |
+| the attack angle | -2.6° | -2.4° |
+| the hips'; the trunk's fastest turning | 511; 598°/s | 437; 345°/s |
+| the pelvis's turn from the start to contact | 48° | 34° |
+| first rises: legs, trunk, arms (ms before contact) | 306, 263, 255 | 299, 257, 259 |
+| the first arm muscle before contact (253 allowed) | 255 ms | 259 ms |
+| the lead knee at contact; the front foot's greatest load | 1°; 1.08 x body weight | 1°; 0.35 x body weight |
+| balance: outside his feet; least on the feet; height kept | 2.0 cm; 0.12; 0.88 | 2.0 cm; 0.03; 0.88 |
+| joints past their range: to contact; to 50 ms after | 4.2° (the lead upper arm's turn); 4.2 (the lead upper arm's turn) | 3.9° (the lead upper arm's turn); 3.9 (the lead upper arm's turn) |
+| joint ends over 50 N·m; the heaviest | 15; 772 N·m (elbow R) | 16; 1229 N·m (shoulder up L) |
+| groups at 90% or more of their bounds | 12 | 9 |
+| WORK TO CONTACT, J: muscles | +489 | +656 |
+| holding muscles | +0 | +0 |
+| hold-still torques (constant, under no muscle rule) | +185 | +177 |
+| the joints' damping | -234 | -274 |
+| stops; ground; gravity | -63; -38; +83 | -84; -37; +73 |
+| kinetic energy gained | 426 | 525 |
+| muscles (with holding) by joint, the five largest | hip R +233, hip L +79, shoulder R +77, lumbar +68, shoulder L +38 | hip R +264, hip L +136, lumbar +111, shoulder L +82, shoulder R +74 |
+| damping by joint, the five largest | lumbar -80, hip L -33, hip R -30, shoulder R -29, elbow R -25 | lumbar -86, hip L -47, shoulder R -46, hip R -31, elbow R -27 |
+| hold-still torques by joint, the three largest | hip L +84, knee L +58, knee R +29 | hip L +105, knee L +58, lumbar -30 |
+| GATE: meets the ball | passes (-0.0 cm) | passes (-0.2 cm) |
+| GATE: the sweet spot at contact | fails (short by 14.3 m/s) | fails (short by 14.1 m/s) |
+| GATE: the bat at its fastest at contact | fails (-26 points) | fails (-23 points) |
+| GATE: the hands' fastest | passes (inside by 0.9 m/s) | passes (inside by 0.7 m/s) |
+| GATE: the attack angle | passes (inside by 0.4°) | passes (inside by 0.6°) |
+| GATE: the hips' fastest turning | fails (short by 44°/s) | fails (short by 118°/s) |
+| GATE: the trunk's fastest turning | fails (short by 157°/s) | fails (short by 410°/s) |
+| GATE: first rises legs, trunk, arms | passes (-306, -263, -255 ms) | fails (-299, -257, -259 ms) |
+| GATE: no arm muscle before he could decide | fails (+2 ms) | fails (+6 ms) |
+| GATE: the hands' first motion before contact | fails (over by 11 ms) | fails (over by 12 ms) |
+| GATE: the lead knee at contact | fails (short by 1°) | fails (short by 1°) |
+| GATE: the front foot's greatest load | fails (short by 0.42 x body weight) | fails (short by 1.15 x body weight) |
+| GATE: in balance | fails (+2.0 cm) | fails (+2.0 cm) |
+| GATE: does not jump | passes (+0.02) | fails (-0.07) |
+| GATE: legs have not given way | fails (-0.02) | fails (-0.02) |
+| GATE: no joint more than 2° past its range | fails (+2.2°) | fails (+1.9°) |
+| GATE: no joint end heavily loaded (D39, not built) | fails (15 ends over 50 N·m; the most 772 N·m (elbow R)) | fails (16 ends over 50 N·m; the most 1229 N·m (shoulder up L)) |
+| GATE: no passive element does net positive work | passes (stops -63 J, ground -38 J, damping -234 J) | passes (stops -84 J, ground -37 J, damping -274 J) |
+
+- **By the ladder's rule: 14.72 m/s, 2.97 m/s (6.6 mph) less than rung 0, with both searches under both of rung 0's. A loss at contact, larger than the yardstick.**
+- **What happened, read from the two swings.** In the first the sweet spot is at 18.6 m/s 50 ms before contact, 20.4 at −20 ms and 14.9 at contact; the lead elbow is dead straight at contact (2°) and the heaviest joint end is the rear elbow's (772 N·m). In the second the rear elbow is the straight one (2°). With the arms' friction at a half to a twenty-fifth of what it was, the arms fly out, reach the end of the elbow's range before the ball, and the end takes the speed (the stops' work is −63 and −84 J to contact where rung 0's was −51 and −37). The bat is at 72% and 75% of its fastest at contact (rung 0: 92% and 89%; the gate asks 98%).
+- **This is a swing the search could not time, not a slower body.** The body gains 426 and 525 J of kinetic energy by contact (rung 0: 274 and 293), the hips turn at 511 and 437°/s (361 and 258) and the trunk at 598 and 345 (414 and 421). The score reads the bat's speed along the ball's line at contact and nothing before it; from S, both searches settled on swings that are past their peak when the ball arrives. Meeting the ball 20 ms earlier in the same motion would be worth about 5 m/s; neither search found that.
+- **The friction's work did not fall as I expected** (−234 and −274 J; I expected 80–140): it moved. The arms' friction took 196 J in rung 0 and takes 75–95 J now; the trunk's takes 80 and 86 J (13 before) and the hips' 64 and 78 J (30). **So about 150 J of this swing's losses now sit at the two joints whose values nobody has measured** (the trunk at 5.0 and the hips at 2.0, the middles of their ranges). The dependence runs below are for that.
+- **Against what I expected:** wrong on the figure that counts. I expected 18.5–21 m/s at contact; the bat does reach 19.7–20.4 m/s, before contact, and arrives at 14.7–14.9. I did not foresee that lighter arms would outrun the plan's timing into the elbows' ends. Wrong too on the friction's total.
+- *What it shows:* at read friction this search, from this plan, does not turn a faster body into a faster bat at the ball. *What it does not show:* that the read friction costs bat speed in a swing that is timed. The chain below, which carries rung 0's own swing onto this body, is the other reading.
+
 #### A second measure of every rung: one swing carried through the changes (added after rung 1's first search, before any of it was run)
 
 **Why.** Rung 0's two searches from S differ by 1.95 m/s, rung 2 alone's by 0.91, and rung 1's first search (below) ended 3.0 m/s *under* rung 0's with the same draws, at a different kind of swing. A search from S draws a basin as much as it measures a body. If every rung's effect is smaller than that, the protocol above cannot show any of them, however many rungs are run. So each rung is also measured a second way, which holds the swing fixed and changes only the body:
