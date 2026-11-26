@@ -70,6 +70,8 @@ VARY = {
     "meet_061": {"ahead": 0.61}, "meet_084": {"ahead": 0.84},
     "wrists_mirrored": {"wrists": "mirrored"}, "wrists_square": {"wrists": "square"},
     "arms_held_by_resolving": {"hold": "resolve"},
+    # body-motion 4.11, part 2: a tensed muscle held until its onset, the clock reading onsets, at the two viewing times
+    "view_010": {"hold": "let_go", "t_view": 0.10}, "view_020": {"hold": "let_go", "t_view": 0.20},
     # the reach one coordinate at a time, from the high-and-close ball (review P2-1)
     "height_alone_078": {"z": 0.78, "across": 0.75, "ahead": 0.40},
     "ahead_alone_072": {"z": 1.20, "across": 0.75, "ahead": 0.72},

@@ -198,6 +198,18 @@ def _cases():
     m.sys.sec_start(st, aux)
     m.check_aux = aux
     out.append(("the hands' body, every drive at its bound", m, st, -0.250, 200))
+    m = B.Model(ranges=(), grip="hands")             # held muscles (4.11, part 2): tensed at 0.6, firing at staggered onsets, tendons loaded
+    st = B.place(m, -0.250)
+    names = sorted(bd)
+    st = Dr.add_drives(m, st, {n: (bd[n], -0.240 + 0.004 * k, 0.05, 0.1, 0.6) for k, n in enumerate(names)}, held=True)
+    B.add_ranges(m, st)
+    Dr.solve_tone(m, st, -0.250)
+    Dr.add_damping(m, st)
+    aux = m.sys.new_aux()
+    m.sys.anchors(st, aux)
+    m.sys.sec_start(st, aux)
+    m.check_aux = aux
+    out.append(("the hands' body, every muscle tensed and held", m, st, -0.250, 200))
     fitted = os.path.join(HERE, "fit3d_d34_all.json")
     if not os.path.isfile(fitted):                   # session 6's fit (its 22 channels; session 7's then switched off)
         fitted = os.path.join(HERE, "fit3d_d34_arms.json")
