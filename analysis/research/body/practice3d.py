@@ -130,10 +130,17 @@ class Ctx:
         Dr.BOUND_SCALE.clear()
         self.limits = B.add_ranges(m, st, k_big=o.get("k_big"), wrists=o.get("wrists", "cocked"), rom=o.get("rom"))
         self.tone, self.tone_rest = Dr.solve_tone(m, st, T0, aux=list(self.aux0))
-        # an arm muscle tensed beforehand only holds (4.10; review P2-4): the hold-still torques are re-solved for each
-        # plan's starting levels at the arms, which is linear, so its pieces are found once here
-        self.hold_w = Dr.hold_response(m, st, T0, list(self.aux0), ARMS, self.bd)
-        self.tone0 = [c for j in Dr.JOINTS for c in self.tone[j]]
+        # An arm muscle tensed beforehand (review P2-4). It COUNTS UNDER THE CLOCK: a starting level is drive from the
+        # first instant, so in residuals() it is an arm drive that rose at the start. The other way, hold="resolve",
+        # re-solves the hold-still torques for each plan's starting levels at the arms so that a tensed muscle moves
+        # nothing at the start (drive.hold_response; linear, so its pieces are found once here). It is not the default
+        # because the hold-still torque that balanced the muscle then stays on all swing and takes that share of the
+        # muscle's strength away (the fit to [4]'s plan replayed that way has the bat at 2.4 m/s). A muscle that is
+        # tensed, holds, and then fires with all its strength needs a drive that carries no net torque before its
+        # onset, which the engine does not have (body-motion 4.10).
+        if o.get("hold") == "resolve":
+            self.hold_w = Dr.hold_response(m, st, T0, list(self.aux0), ARMS, self.bd)
+            self.tone0 = [c for j in Dr.JOINTS for c in self.tone[j]]
         Dr.add_damping(m, st)
         self.st = st
         self.BW = M * E.G
@@ -161,6 +168,8 @@ class Ctx:
 
     def prepare(self, u):
         st, aux = F.Ctx.prepare(self, u)
+        if self.o.get("hold") != "resolve":
+            return st, aux
         pl = self.plan(u)
         tv = list(self.tone0)
         for n in ARMS:
@@ -234,6 +243,13 @@ class Ctx:
                 acc[n] += (a[2] * pl[n][0] / self.bd[n]) ** 2 if self.bd[n] > 0 else 0.0
         return {n: v / max(1, k) for n, v in acc.items()}
 
+    def arm_onsets(self, pl):
+        """when each arm muscle of any size first drives: its onset, or the start if it is tensed beforehand (a starting
+        level over 1 % of its bound is drive from the first instant; review P2-4)."""
+        if self.o.get("hold") == "resolve":
+            return [pl[n][1] for n in ARMS if pl[n][0] > 0.01 * self.bd[n]]
+        return [T0 if pl[n][0] * pl[n][4] > 0.01 * self.bd[n] else pl[n][1] for n in ARMS if pl[n][0] > 0.01 * self.bd[n]]
+
     def residuals(self, u):
         try:
             recs = self.run(u)
@@ -255,7 +271,7 @@ class Ctx:
         r += [math.sqrt(self.effort_w * eff[n] / len(CH)) for n in CH]
         xo, least, zr = self.balance(recs, tx)
         r += [xo / XCOM_UNIT, max(0.0, JUMP_MIN - least) / JUMP_UNIT, max(0.0, SINK_MIN - zr) * self.z0 / SINK_UNIT]
-        on = [pl[n][1] for n in ARMS if pl[n][0] > 0.01 * self.bd[n]]
+        on = self.arm_onsets(pl)
         # the clock is read against a contact that happened; a bat that never comes round is charged for that, above,
         # and not for the clock against the run's end (review P2-3)
         r.append(max(0.0, (tx - self.t_avail) - min(on)) / CLOCK_UNIT if on and came else 0.0)
@@ -265,6 +281,17 @@ class Ctx:
                 pk = max(abs(rec[4][j][0]) for rec in recs if rec[0] <= tx + AFTER + 1e-9)
                 r.append(0.0 if nm == "shoulder_L" else math.sqrt(self.strain_w) * max(0.0, pk - STRAIN_FREE) / STRAIN_UNIT)
         return None if any(x != x for x in r) else r
+
+
+def terms(ctx, r):
+    """the score (the sum of the residuals' squares) by term."""
+    n = len(CH)
+    sq = lambda xs: sum(x * x for x in xs)
+    out = {"miss": sq(r[0:2]), "off the ball's line": sq(r[2:4]), "bat not square": sq(r[4:5]), "speed short of 45 m/s": sq(r[5:6]),
+           "never came round": sq(r[6:7]), "effort": sq(r[7:7 + n]), "balance": sq(r[7 + n:10 + n]), "the arms' clock": sq(r[10 + n:11 + n])}
+    if len(r) > 11 + n:
+        out["load on a joint's end"] = sq(r[11 + n:])
+    return out
 
 
 _CTX = None
@@ -457,16 +484,32 @@ def report(ctx, u, log=print):
     ar = max(((az[q + 5] - az[q - 5]) / 0.010, recs[q][0]) for q in range(5, ic - 4)) if ic > 12 else (0.0, tx)
     out["lead_arm_rate"] = (ar[0], rel(ar[1]))
     log("   CHECK the lead arm's turning rate: %.0f deg/s at %.0f ms   [1,160 +- 96 at -65 ms ([3])]" % out["lead_arm_rate"])
+    # the work done on the body up to contact, from the engine's own integrals: no passive element may do net positive work
+    ow = 13 * s.nb + len(s.acts)
+    wk = [recs[ic][1][ow + q] - recs[0][1][ow + q] for q in range(4)]
+    wk_end = recs[min(len(recs) - 1, ic + 50)][1][ow + 1] - recs[0][1][ow + 1]
+    out["work_J"] = {"drives": wk[0], "stops": wk[1], "damping and hold-still torques": wk[2], "ground": wk[3], "stops to +50 ms": wk_end}
+    log("   CHECK no passive element does net positive work: to contact the muscles did %.0f J, the joints' stops %+.0f J (%+.0f by 50 ms after), the ground %+.0f J; damping and the hold-still torques %+.0f J   [stops and ground at most 0: %s]"
+        % (wk[0], wk[1], wk_end, wk[3], wk[2], "met" if wk[1] <= 0.5 and wk_end <= 0.5 and wk[3] <= 0.5 else "NOT MET"))
     # balance, effort, the clock
     xo, least, zr = ctx.balance(recs, tx)
     out["balance"] = (xo * 100, least, zr)
+    out["left_the_ground"] = least < 0.02
+    if out["left_the_ground"]:
+        log("   BOTH FEET LEFT THE GROUND at some instant before 50 ms after contact")
+    rr = ctx.residuals(u)
+    if rr is not None:
+        out["score_terms"] = terms(ctx, rr)
+        log("   the score, %.1f, by term: %s" % (sum(out["score_terms"].values()), "; ".join("%s %.1f" % kv for kv in out["score_terms"].items())))
     log("   the aim's balance: the centre of mass's heading %.1f cm outside the feet's area at worst (0 = inside); the feet never carry under %.2f of body weight; the centre of mass ends at %.2f of its starting height" % out["balance"])
     eff = ctx.effort(recs, tx, pl)
     out["effort"] = sum(eff.values()) / len(CH)
     out["effort_by_channel"] = eff
-    on = [pl[n][1] for n in ARMS if pl[n][0] > 0.01 * ctx.bd[n]]
+    on = ctx.arm_onsets(pl)
     out["clock_ms"] = (tx - min(on)) * 1e3 if on else None
-    log("   effort %.3f (0 = nothing, 1 = everything flat out all swing); the first arm drive of any size rises %.0f ms before contact (the clock allows %.0f)" % (out["effort"], out["clock_ms"] or 0.0, ctx.t_avail * 1e3))
+    out["arms_tensed_beforehand"] = sorted(n for n in ARMS if pl[n][0] * pl[n][4] > 0.01 * ctx.bd[n])
+    log("   effort %.3f (0 = nothing, 1 = everything flat out all swing); the first arm drive of any size, a muscle tensed from the start counted, is %.0f ms before contact (the clock allows %.0f); arm muscles tensed from the start: %s"
+        % (out["effort"], out["clock_ms"] or 0.0, ctx.t_avail * 1e3, ", ".join(out["arms_tensed_beforehand"]) or "none"))
     pairs = (("core", "core_back"), ("sh_raise_L", "sh_lower_L"), ("sh_raise_R", "sh_lower_R"), ("sh_irot_L", "sh_erot_L"), ("sh_irot_R", "sh_erot_R"),
              ("elbow_ext_L", "elbow_flex_L"), ("elbow_ext_R", "elbow_flex_R"), ("wrist_flex_L", "wrist_ext_L"), ("wrist_flex_R", "wrist_ext_R"),
              ("pron_L", "sup_L"), ("pron_R", "sup_R"), ("hip_abd_L", "hip_add_L"), ("hip_abd_R", "hip_add_R"), ("knee_ext_L", "knee_flex_L"),
@@ -492,6 +535,7 @@ def report(ctx, u, log=print):
     for key, rng_ in (("pron_L", 161.9), ("pron_R", 161.9), ("sh_rot_L", 173.0), ("sh_rot_R", 173.0), ("ankle_L", 67.3), ("ankle_R", 67.3)):
         vv = unwrap([a[key] for a in ang])
         out["unheld"][key] = (max(vv) - min(vv), rng_)
+    out["unheld_overrun"] = sorted(k_ for k_, x in out["unheld"].items() if x[0] > x[1])
     log("   not held, travel to 50 ms after contact against the real range, deg: " + "; ".join("%s %.0f of %.0f%s" % (k_, x[0], x[1], "  MORE THAN A BODY HAS" if x[0] > x[1] else "") for k_, x in out["unheld"].items()))
     onb = []
     for q, (nm, f, lo, hi) in enumerate(ctx.box):
