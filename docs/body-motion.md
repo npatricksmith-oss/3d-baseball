@@ -1556,6 +1556,25 @@ Outputs under `sim/target/codex-probes/body3d/`: `s9/rerun_staged.out`, `practic
 - `probe3d.py --check`: PASS, worst 3.6 × 10⁻¹¹ against 10⁻⁹ over eight cases, three of them new (the hands' body driven into its stops; every muscle tensed and held; cleats). **The cleats case is 100 ms long, not 200:** with every leg muscle at its bound the body is on two of its sole's points by 80 ms, and from 100 ms that motion multiplies rounding differences about twenty times every 10 ms (the two engines, and the probe's own two elimination orders, agree to 10⁻¹³ until then and are 2 × 10⁻⁷ and 7 × 10⁻⁷ apart at 200 ms). The first run of the check failed on it; it is the motion's sensitivity, not a difference of laws, and part 3 changed no law in either engine.
 - `bin/check-docs.py`: clean. Session 8's saved swing replays on the weld at 17.8 m/s, as before; part 3's end result replays at 19.0 m/s, 3.1 and 7.9 cm from the ball.
 
+#### After the independent review of session 9 (2026-11-26): two fixes to the search, stated before they were built
+
+[The review](reviews/2026-11-26-opus-body-3d-s9-review.md) found nothing at fault in what parts 1–3 built and two defects in the search, one of them in its score. Both are fixed here with tests. **No search is rerun in this job:** the results above stand as what the old score and the old run rule found, and what the review shows about them is written into them below.
+
+**1. The clock charges each arm muscle its own overrun (review P1-1).**
+
+- *The old form:* one term, the overrun of the earliest arm onset alone: max(0, (contact − allowed time) − the earliest onset), per 2 ms.
+- *What was wrong with it:* with two or more arm muscles tied at the earliest onset, moving any one of them later leaves the earliest where it was; all the search sees is contact arriving a little later, so the term rises. Every plan of sessions 8 and 9 starts at such a tie (the box's lower bound for an onset is the run's first instant).
+- *The new form:* one term for each arm muscle that is used (strength over 1% of its bound): its own overrun, max(0, (contact − allowed time) − its onset), per 2 ms, **weighted by its share of the arms' asked strength** (its strength over its bound, divided by the sum of that over the arm muscles used; the weights sum to 1).
+- *Why that weight:* with every arm muscle tied at one onset the sum of squares is exactly the old term, so the clock's size against the rest of the score is unchanged; a muscle asked for 2% of its strength that fires early is charged 2% of what a full-strength one is, in place of the old cliff at 1%; and every onset has its own slope, so a search can see both one muscle moving and all moving together.
+- *What it leaves:* the term is still zero for a plan whose arm muscles all fire inside the allowed time, so the rule itself is unchanged: no arm muscle fires before he could have decided.
+- The old form is kept as `clock="earliest"` for the test that shows it fails.
+
+**2. A run is not failed by what happens after the last instant the score reads (review P2-2).**
+
+- *What was wrong:* a run that fails anywhere in its 450 ms is a refused step, though the score reads nothing later than 50 ms after contact. The raise's end keeps the upper arm's turn defined up to about 2,200 N·m; a follow-through at the gate's bat speed is estimated to put about that much into it (the review's estimate, from 899 N·m at 19 m/s). A swing nearing the gate would become refused steps again, from a part of the run nobody reads.
+- *The choice:* the run is not ended at contact (the probe does not know where the ball is); instead **a failure later than 50 ms after the plane's crossing does not fail the run.** The compiled probe now hands back every record it made before a failure. If the sweet spot crossed the ball's plane at least 50 ms before the failure, those records hold everything the score and the report read, and they are used; the result says that the run failed and when. A failure before that is a failed run, as before, and is still counted among the failed differences.
+- **The raise's end stays** (168.8°, a shoulder's own end). One value is used in every direction; raised sideways a shoulder goes to 184° (Boone & Azen), so sideways this end is 15° tighter than anatomy [E].
+
 ## 5. The drive and its control (§14.1 items 2 and 3)
 
 ### 5.1 What a drive is
