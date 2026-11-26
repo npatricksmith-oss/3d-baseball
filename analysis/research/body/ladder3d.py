@@ -51,6 +51,30 @@ RUNGS = {
 }
 
 
+# rung 6 (4.13): which muscles, and by how much. No strength is added to the body: each of these is a WHAT-IF body with one
+# group of muscles' measured bounds scaled, searched on from the last rung's result, to see what moves the bat
+GROUPS = {"hips": ("hip_ext_R", "hip_ext_L", "hip_flex_L", "hip_rot_R", "hip_rot_L", "hip_abd_R", "hip_add_R", "hip_abd_L", "hip_add_L"),
+          "knees": ("knee_ext_L", "knee_ext_R", "knee_flex_L", "knee_flex_R", "ankle_pf_R", "ankle_pf_L"),
+          "trunk": ("core", "core_back"),
+          "shoulders": tuple(n + sd for sd in "LR" for n in ("shoulder_", "sh_raise_", "sh_lower_", "sh_irot_", "sh_erot_")),
+          "elbows": tuple(n + sd for sd in "LR" for n in ("elbow_ext_", "elbow_flex_")),
+          "forearms": tuple(n + sd for sd in "LR" for n in ("pron_", "sup_", "wrist_", "wrist_flex_", "wrist_ext_"))}
+LAST = "r5"                                            # the rung the what-ifs stand on
+for _g, _names in GROUPS.items():
+    RUNGS["r6_" + _g] = dict(RUNGS[LAST], bound_scale={n: 1.5 for n in _names})
+RUNGS["r6_all15"] = dict(RUNGS[LAST], bound_scale={n: 1.5 for n in PR.CH})
+RUNGS["r6_all20"] = dict(RUNGS[LAST], bound_scale={n: 2.0 for n in PR.CH})
+RUNGS["r6_strongest"] = dict(RUNGS[LAST], bound_scale=dict(PR.STRONGEST))   # each bound at the top of its tested range in 4.5
+RUNGS["r6_ref"] = dict(RUNGS[LAST])
+
+
+def best_of(rung):
+    """the kept result of a rung with the better (lower) score: its first search or its second (the ladder's rule)."""
+    paths = [os.path.join(OUT, "%s%s.json" % (rung, t)) for t in ("", "_b")]
+    paths = [p_ for p_ in paths if os.path.isfile(p_)]
+    return min(paths, key=lambda p_: json.load(open(p_))["cost"])
+
+
 def options(rung):
     o = dict(BASE)
     o.update(RUNGS[rung])
@@ -189,8 +213,10 @@ def show(ctx, u, log=print):
     return out
 
 
-def run_rung(rung, start, seed, g_reach, g_aim, g_more, tag, log):
+def run_rung(rung, start, seed, g_reach, g_aim, g_more, tag, log, max_blocks=MAX_BLOCKS):
     o = options(rung)
+    if start.startswith("best:"):
+        start = best_of(start[5:])
     ctx = PR.Ctx(contact="nearest", **o)
     reach = PR.Ctx(stage="reach", **o)
     if start == "S":
@@ -200,7 +226,7 @@ def run_rung(rung, start, seed, g_reach, g_aim, g_more, tag, log):
     plan = ctx.fit_plan(plan) if hasattr(ctx, "fit_plan") else {n: [min(v[0], ctx.bd[n])] + list(v[1:]) for n, v in plan.items()}
     u0 = ctx.u_of(plan)
     log("== ladder rung %s%s from %s; body %s; %d generations of the reach stage, %d of the whole aim, %d more, then blocks of %d until it has fallen under %.1f over its last 50 (at most %d blocks); %d plans each, every run at %.3f ms; seed %d"
-        % (rung, tag, start, o, g_reach, g_aim, g_more, BLOCK, SETTLED, MAX_BLOCKS, PR.CMA_LAMBDA, o["h"] * 1e3, seed))
+        % (rung, tag, start, o, g_reach, g_aim, g_more, BLOCK, SETTLED, max_blocks, PR.CMA_LAMBDA, o["h"] * 1e3, seed))
     r0 = ctx.residuals(u0)
     log("   the starting plan's score on this body: %s; by term: %s" % ("THE RUN FAILS" if r0 is None else "%.1f" % PR.cost_of(r0), "" if r0 is None else "; ".join("%s %.1f" % kv for kv in PR.terms(ctx, r0).items())))
     t = time.time()
@@ -221,7 +247,7 @@ def run_rung(rung, start, seed, g_reach, g_aim, g_more, tag, log):
         hist_all.append((name, hist))
         log("   %s: %d generations, %.0f s so far; best score %.2f; it fell %.2f over the last 50 generations; spreads at the end: largest %.4f, median %.4f; failed runs %d"
             % (name, gens, time.time() - t, cost, fall, spread[0], spread[1], sum(h_[5] for h_ in hist)))
-        if not stages and c is ctx and fall >= SETTLED and blocks < MAX_BLOCKS:
+        if not stages and c is ctx and fall >= SETTLED and blocks < max_blocks:
             blocks += 1
             stages.append(("carried on, block %d" % blocks, ctx, BLOCK, seed + 11 + 10 * blocks))
     settled = fall < SETTLED
@@ -277,7 +303,8 @@ def main():
             json.dump(out, open(arg("--out", ""), "w"), indent=1)
         return
     if "--rung" in a:
-        run_rung(arg("--rung", "r0"), arg("--from", "S"), int(arg("--seed", 1)), int(arg("--reach", 100)), int(arg("--gens", 250)), int(arg("--more", 500)), arg("--tag", ""), log)
+        run_rung(arg("--rung", "r0"), arg("--from", "S"), int(arg("--seed", 1)), int(arg("--reach", 100)), int(arg("--gens", 250)), int(arg("--more", 500)), arg("--tag", ""), log,
+                 int(arg("--blocks", MAX_BLOCKS)))
         return
     print(__doc__)
 

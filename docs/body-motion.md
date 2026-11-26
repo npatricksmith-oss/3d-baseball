@@ -2160,6 +2160,20 @@ Code: `analysis/research/body/ladder3d.py` (the protocol, the energy account, th
 
 **What I expect** (rung 5, from S, two searches): **slower than rung 4 by 0–2 m/s, and it may not clear the yardstick either way.** He no longer starts with [4]'s forward travel (0.63 m/s, 18 J) or its turning, and S's timings were tuned to a body already moving; against that, his legs now hold him properly and their bursts keep more of their bounds (the rear hip's adductors 0.80 of theirs against 0.46). Contact will come later after the start (it has to build everything from rest). *What it would show:* what [4]'s launch velocities and forces were worth to this search. *What it would not show:* what a hitter's own stride would give him.
 
+#### Rung 6: which muscles, and by how much (the design, written before any run; queued behind rung 5 on the expectation that he is still short)
+
+**No strength is added to the body (PLAN D34).** This is a measurement of the gap for the owner: what-if bodies, each labelled as that, searched to see what moves the bat.
+
+- *Where the bounds already stand.* Every muscle group's bound in §4.5 is its source's mean + 2 SD, scaled to this batter's size: already the strength of about the strongest man in forty of each sample. So any scaling above 1.0 asks for more than that.
+- *The reference:* the last rung's better-scoring result carried on for 500 generations on the unchanged body, **twice with different draws** (the difference is the yardstick for these carried-on searches, as rung 0's was for the ladder).
+- *One group at a time:* the same result carried on for 500 generations on a body with one group's bounds at 1.5 times (hips: extensors, the front flexor, rotators and the side muscles; knees and calves; the trunk's rotators; shoulders; elbows; forearms and wrists: the six make up all 41 groups). The plan starts with the same torques, so the search begins from the same swing and may use the extra. Read as m/s per 10% of that group's strength (a fifth of the gain at 1.5), only where the gain is larger than the reference's own spread.
+- *All together:* every bound at 1.5 and at 2.0 times, the same way: with the reference, three points for the smallest scaling of everything that would reach 29 m/s (a straight line through them, or "beyond 2.0" if it does not reach). **A what-if:** nobody has muscles 1.5 times the strongest measured.
+- *The strongest batter the measured limits allow:* each bound at the top of its tested range in §4.5 (the hips' extensors 1.22 times, the trunk's rotators 1.12, the shoulders' sweep 1.11–1.22, the hips' adductors 1.4 and rotators 1.41), one carried-on search.
+- *On the last rung's settled swing itself:* the groups at 90% or more of their bounds, with the speed each is shortening at when it works hardest.
+- **What it would show:** which groups, given more, this search turns into bat speed, and roughly how much. **What it would not show:** that strength is what he lacks. A search that cannot use a muscle well gains nothing from more of it; a body whose start or joints hold the swing back would stay slow at any strength; and the carried-on searches are local, from one swing.
+
+*What I expect:* the shoulders and the trunk's rotators move the bat most (they do the most work in every swing so far and sit at 91–99% of their bounds); the knees and calves least. Everything at 1.5 times gains 3–6 m/s; 29 m/s is not reached below 2.0 times, if at all. The strongest measured batter gains 1–2 m/s.
+
 ## 5. The drive and its control (§14.1 items 2 and 3)
 
 ### 5.1 What a drive is
