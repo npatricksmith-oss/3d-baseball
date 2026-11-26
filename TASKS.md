@@ -19,13 +19,11 @@ Status: `[ ]` not started · `[~]` partly done · `[?]` needs an owner decision
 
 **State.** PLAN D31–D41: a force-driven body; PLAN §14.1, spec [docs/body-motion.md](docs/body-motion.md). **D37: the lab study [4] is dropped.** The swing is learned by practice, checked against directly measured hitters.
 
-**Session 8 is merged (two reviews, resolved; spec §4.10):** practice finds a swing: 40 mph, failing D40's gate. Left: spec "Status and what is left", items 1–7.
+**Sessions 8 and 9 are merged (reviews resolved; spec §4.10, §4.11).** Real hands, a holding muscle, feet on dirt: no swing found yet; the review blames the search and the jammed start, nothing built. D41: two sessions left.
 
 **Ruled:** Q61 = b, Q62 = a, Q63 = a (PLAN D39–D41). Nothing waits on the owner.
 
-**Session 9 (`work/body-3d` `1bd190f`, worktree `swing-research`; spec §4.11 there), unreviewed:** the grip, a holding muscle, the feet; no swing on it.
-
-**Running: `rev-body-3d-9`** (Opus; Workers tab; that worktree). Then: commit its review, fixes, merge.
+**Not running. Next: session 10** (job file WORKER-BODY-3D-10, worktree `swing-research`, branch `work/body-3d`). Have the owner check `/usage` first (a limit was hit 2026-11-26).
 
 **Next:** §2: the ground-dive leftovers ([note](docs/calibration/2026-11-23-of-ground-dive.md) §9).
 

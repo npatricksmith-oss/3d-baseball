@@ -265,3 +265,5 @@ Written 2026-11-26 by worker body-3d-9 (job `WORKER-BODY-3D-9FIX.md`). Two code 
 **The order of what is left** is the review's, unchanged: the clock term (done); a start off the ends with the rear wrist inside a real wrist's reach; a motion built by hand and solved by inverse dynamics as the test of whether the body can swing without a search, written as a diagnosis with what a pass and a fail would and would not show; the search at a finer step by a method without slopes, both viewing times; then D39, the parked basin and the rest.
 
 **Checks after the fixes:** in [body-motion](../body-motion.md) §4.11, the last block.
+
+**Coordinator, 2026-11-26:** merged to main after its own run of the checks (job 390: 62 body tests, 112 oracle tests with the same 8 expected failures, `probe3d.py --check`, the docs check). No re-review of the two fixes: each is small and has a test the old form fails. Everything left is in [body-motion](../body-motion.md) "Status and what is left".
