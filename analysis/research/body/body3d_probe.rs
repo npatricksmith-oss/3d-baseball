@@ -559,7 +559,8 @@ fn main() {
         return;
     }
     let out = std::io::stdout();
-    let mut out = std::io::BufWriter::new(out.lock());
+    // a line at a time: a run that fails (exit 3) has then already handed over every record it made (body-motion 4.11)
+    let mut out = std::io::LineWriter::new(out.lock());
     let mut s = s0.clone();
     let mut aux = aux0.clone();
     let mut sec = sec0.clone();

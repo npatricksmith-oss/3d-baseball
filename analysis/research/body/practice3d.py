@@ -217,11 +217,30 @@ class Ctx:
         s.tones = [(nm, a, b, tuple(tv[3 * k:3 * k + 3])) for k, (nm, a, b, _) in enumerate(s.tones)]
         return st, aux
 
+    run_end, failed_after = T_END, None
+
     def run(self, u, every=EVERY, t_end=T_END, h=H_STEP):
+        """the plan's run, as records. A run is not failed by what happens after the last instant the score reads
+        (body-motion 4.11; session 9's review, P2-2): if the run fails but the sweet spot crossed the ball's plane at
+        least AFTER before the last record made, the records to the failure are returned (they hold everything the score
+        and the report read) and failed_after says how long after contact the last record was, with the failure's
+        message. A failure before that is raised, as before. run_end is where the records end, for contact() and nearest()."""
         st, aux = self.prepare(u)
         self.evals += 1
         n = int(round((t_end - T0) / h))
-        return P.run_raw(self.m.sys, st, T0, n, h, every, aux, self.order)
+        self.run_end, self.failed_after = t_end, None
+        try:
+            return P.run_raw(self.m.sys, st, T0, n, h, every, aux, self.order)
+        except E.SolveError as e:
+            recs = getattr(e, "recs", None)
+            if recs:
+                self.run_end = recs[-1][0]
+                tx, p, v, i, came = self.contact(recs)
+                if came:
+                    self.failed_after = (recs[-1][0] - tx, str(e))
+                    return recs
+            self.run_end = t_end
+            raise
 
     def contact(self, recs):
         """(t_x, sweet spot position, velocity, index of the record before, came round?) where the sweet spot crosses
@@ -231,7 +250,7 @@ class Ctx:
         for i, rec in enumerate(recs):
             p, v = m.bat_point(rec[1], C.BAT_SS)
             a = -E.dot(E.sub(p, self.Pc), self.nb)
-            if rec[0] > T_END - AFTER + 1e-9:
+            if rec[0] > self.run_end - AFTER + 1e-9:
                 break                                    # too late for the 50 ms after contact to be seen: not a contact
             if prev is not None and prev[0] < 0.0 <= a and -E.dot(v, self.nb) > 0.0:
                 a0, p0, v0, t0 = prev
@@ -253,7 +272,7 @@ class Ctx:
         """(time, sweet spot position, velocity, index of the record before) where the sweet spot comes nearest the
         ball's place in the run, by cubic interpolation between records: the reach stage's reading (4.10)."""
         m = self.m
-        recs = [rec for rec in recs if rec[0] <= T_END - AFTER + 1e-9]      # the 50 ms after it must lie inside the run
+        recs = [rec for rec in recs if rec[0] <= self.run_end - AFTER + 1e-9]      # the 50 ms after it must lie inside the run
         pv = [m.bat_point(rec[1], C.BAT_SS) for rec in recs]
         k = min(range(len(recs)), key=lambda q: E.norm(E.sub(pv[q][0], self.Pc)))
         best = (E.norm(E.sub(pv[k][0], self.Pc)), recs[k][0], pv[k][0], pv[k][1], max(0, k - 1))
@@ -538,6 +557,10 @@ def report(ctx, u, log=print):
     out["bat_square_deg"] = math.asin(max(-1.0, min(1.0, (bz[0] * ctx.nb[0] + bz[1] * ctx.nb[1]) / (math.hypot(bz[0], bz[1]) * math.hypot(ctx.nb[0], ctx.nb[1]))))) / B.D2R
     out["bat_elev_deg"] = obs[ic][1]["bat_elev"]
     log("   FROM THE START PLACED ON [4]'s STATE (an input, flagged): contact %.0f ms after the start%s" % ((tx - T0) * 1e3, "" if came else "  (THE BAT NEVER REACHED THE BALL; figures are at the run's end)"))
+    out["failed_after_contact_ms"] = None if ctx.failed_after is None else ctx.failed_after[0] * 1e3
+    if ctx.failed_after is not None:
+        log("   THE RUN FAILED %.0f ms AFTER CONTACT, after everything the score and these checks read (\"%s\"); the records to there are used"
+            % (ctx.failed_after[0] * 1e3, ctx.failed_after[1][:90]))
     log("   the ball: missed by %+.1f cm up, %+.1f cm along the bat; the bat %+.1f deg from square; barrel %.0f deg below level" % (out["miss_cm"] + (out["bat_square_deg"], -out["bat_elev_deg"])))
     sw = [(E.norm(m.bat_point(st, C.BAT_SS)[1]), t) for t, st, *_ in recs]
     before = max(x for x in sw if x[1] <= tx)

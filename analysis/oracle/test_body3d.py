@@ -1883,6 +1883,88 @@ class SearchChecks(unittest.TestCase):
             self.assertGreater(f(one + late, tx + 0.001, form="earliest"), old0)                 # and uphill once contact moves
 
 
+    def test_a_failed_run_hands_back_its_records_and_a_failure_after_the_last_instant_read_does_not_fail_it(self):
+        """review P2-2. (1) The compiled probe on a run that fails (the lone upper arm of RaiseChecks without its raise's
+        end, driven overhead): it raises, and the error carries every record made before the failure, each the Python
+        engine's own state to 1e-9; the Python engine fails within one record's interval after the last of them.
+        (2) The rule, on records built here (a bat whose sweet spot crosses the ball's plane 100 ms into a run): if the
+        probe fails 60 ms or more after that crossing the run is used as it is and says so; if it fails 40 ms after,
+        or before the crossing, the failure is raised as before."""
+        PR = _practice()
+        P = PR.P
+        try:
+            P.build()
+        except Exception as e:                               # no compiler on this machine
+            self.skipTest("the compiled probe cannot be built here: %s" % e)
+        s = E.System(g=(0.0, 0.0, 0.0))
+        b = s.body("uarm", 2.5, (0.15, 0.15, 0.004))
+        s.ball(-1, b, (0, 0, 0), (0, 0, 0.13))
+        lo, hi = sorted(-x for x in B.arm_range()["upper_arm"])
+        s.stop("turn", -1, b, (0, 0, 1), (0, -1, 0), (0, 1, 0), math.radians(lo), math.radians(hi), B.RANGE_K["small"], B.RANGE_C["small"], 2)
+        s.actuator("raise", -1, b, (0, 0, 1), 5.0, 1e9, -1.0, 0.0, 1e9, 1.0, axis_b=(0, 0, 1))
+        st = s.new_state()
+        q = E.qmul(E.qaxis((0.6, 0.8, 0.0), math.radians(30.0)), E.qaxis((0, 0, 1), math.radians(180.0)))
+        s.set_body(st, b, E.scale(E.mv(E.qR(q), (0, 0, 0.13)), -1.0), q)
+        st[13 * s.nb] = 1.0
+        with self.assertRaises(P.RunFailed) as cm:
+            P.run_raw(s, st, 0.0, 600, 1e-3, 10)
+        recs = cm.exception.recs
+        self.assertGreater(len(recs), 20)
+        aux, s1, ref, failed_at = s.new_aux(), list(st), {}, None
+        for i in range(600):
+            try:
+                s1 = s.step(i * 1e-3, s1, aux, 1e-3)
+            except E.SolveError:
+                failed_at = i * 1e-3
+                break
+            if (i + 1) % 10 == 0:
+                ref[i + 1] = list(s1)
+        self.assertIsNotNone(failed_at)
+        t_last = recs[-1][0]
+        self.assertLess(t_last, failed_at + 1e-3 + 1e-9)
+        self.assertGreater(t_last, failed_at - 0.010 - 1e-9)
+        for t, state, *_ in recs[1:]:
+            r = ref[int(round(t * 1e3))]
+            self.assertLess(max(abs(x - y) for x, y in zip(state, r)), 1e-9)
+        # (2) the rule
+        m = B.Model(contacts=False)
+        ctx = PR.Ctx.__new__(PR.Ctx)
+        ctx.m, ctx.evals, ctx.order = m, 0, ()
+        ctx.Pc, ctx.nb = (0.5, 0.0, 1.0), (0.0, -1.0, 0.0)   # the ball's place; its line of travel (toward -y)
+        ctx.prepare = lambda u: ([], [])
+        zero = m.sys.new_state()
+
+        def rec_at(t):                                       # the bat level along +x, its sweet spot moving 10 m/s against the ball
+            state = list(zero)
+            qb = E.axes_to_q((0.0, 0.0, -1.0), (0.0, 1.0, 0.0), (1.0, 0.0, 0.0))
+            ss = (0.5, -1.0 + 10.0 * t, 1.0)
+            x = E.sub(ss, E.mv(E.qR(qb), (0.0, 0.0, B.C.BAT_SS - m.bat_ucm)))
+            m.sys.set_body(state, m.b["bat"], x, qb, (0.0, 10.0, 0.0))
+            return (PR.T0 + t, state, [], [], [], [])
+        keep = P.run_raw
+        try:
+            for fail_after, used in ((0.060, True), (0.200, True), (0.040, False), (-0.030, False)):
+                made = [rec_at(k * 0.005) for k in range(int(round((0.100 + fail_after) / 0.005)) + 1)]
+
+                def fake(*a, **kw):
+                    raise P.RunFailed("made to fail", made)
+                P.run_raw = fake
+                if used:
+                    got = ctx.run(None)
+                    self.assertEqual(len(got), len(made))
+                    self.assertAlmostEqual(ctx.failed_after[0], fail_after, delta=1e-6)
+                    tx, p, v, i, came = ctx.contact(got)
+                    self.assertTrue(came)
+                    self.assertAlmostEqual(tx, PR.T0 + 0.100, delta=1e-6)
+                else:
+                    with self.assertRaises(PR.E.SolveError):       # the search's own engine module (the same class under another import)
+                        ctx.run(None)
+                    self.assertIsNone(ctx.failed_after)
+                    self.assertEqual(ctx.run_end, PR.T_END)
+        finally:
+            P.run_raw = keep
+
+
 class Mutations(unittest.TestCase):
     """each fault is caught by a named check (and the checks pass without it, above)."""
 

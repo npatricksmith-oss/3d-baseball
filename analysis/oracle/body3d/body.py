@@ -161,7 +161,8 @@ ROM = {"hip_flex": 130.4, "hip_ext": 17.4, "hip_abd": 38.8, "hip_add": 30.5, "hi
        "trunk_fwd": 80.0, "trunk_back": 25.0, "trunk_side": 35.0,   # [E] AAOS's thoracolumbar values, not read this session
        "sh_hadd": SH_ADD_MAX, "sh_habd": 45.0,                      # [E] 135: clinical; 45 behind the frontal plane: not read
        "sh_irot": 69.0, "sh_erot": 104.0,                           # the upper arm's turn about its own length (Boone & Azen, as the wrist)
-       "sh_raise": 168.8,                                           # how far the arm is raised from hanging: Soucie 2011, forward, men 20-44 (sideways 184, Boone & Azen)
+       "sh_raise": 168.8,                                           # how far the arm is raised from hanging: Soucie 2011, forward, men 20-44. ONE value in every
+       #                                                              direction [E]: sideways a shoulder goes to 184 (Boone & Azen), so sideways this end is 15 deg tighter than anatomy
        # the ankle with weight on it (4.11, part 3): the shin forward over the foot with the knee bent 20 deg or more
        # (Baumbach 2014; 25 with the knee straight, which a stop cannot know: [E]); the foot pointed down and the sole
        # rolled in and out (Hallaceli 2014, passive; the roll its men's)

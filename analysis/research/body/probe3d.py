@@ -89,8 +89,18 @@ def write_model(path, s, st, aux, t0, nsteps, h, every, order=()):
         fh.write("\n".join(w) + "\n")
 
 
+class RunFailed(E.SolveError):
+    """the probe's run failed (a singular posture, an undefined stop). recs: every record it made before the failure,
+    in run_raw's form; the failure came after the last of them and before the next would have been made."""
+
+    def __init__(self, msg, recs):
+        E.SolveError.__init__(self, msg)
+        self.recs = recs
+
+
 def run_raw(s, st, t0, nsteps, h, every, aux=None, order=(), tag="run", reps=0):
-    """records [(t, state, contact forces, drives (tau, speed, activation), stops (tau, angle))] from the probe."""
+    """records [(t, state, contact forces, drives (tau, speed, activation), stops (tau, angle))] from the probe.
+    A run that fails raises RunFailed, which carries the records made before the failure."""
     aux = s.new_aux() if aux is None else aux
     path = os.path.join(OUT, "model_%s_%d.txt" % (tag, os.getpid()))
     write_model(path, s, st, aux, t0, nsteps, h, every, order)
@@ -98,19 +108,24 @@ def run_raw(s, st, t0, nsteps, h, every, aux=None, order=(), tag="run", reps=0):
         r = subprocess.run([BIN, path] + ([str(reps)] if reps else []), capture_output=True, text=True)
     finally:
         os.remove(path)
-    if r.returncode != 0:
+    if r.returncode != 0 and reps:
         raise E.SolveError(r.stderr.strip() or "probe failed")
     if reps:
         return r.stdout.strip()
     n, nc, na, ns = len(st), len(s.contacts), len(s.acts), len(s.stops)
+    width = 1 + n + 3 * nc + 3 * na + 2 * ns + na
     recs = []
     for line in r.stdout.splitlines():
         v = [float(x) for x in line.split()]
+        if len(v) != width:                          # a line cut short by the failure: not a record
+            break
         o = 1 + n
         recs.append((v[0], v[1:o], [tuple(v[o + 3 * i:o + 3 * i + 3]) for i in range(nc)],
                      [tuple(v[o + 3 * nc + 3 * i:o + 3 * nc + 3 * i + 3]) for i in range(na)],
                      [tuple(v[o + 3 * nc + 3 * na + 2 * i:o + 3 * nc + 3 * na + 2 * i + 2]) for i in range(ns)],
                      v[o + 3 * nc + 3 * na + 2 * ns:]))
+    if r.returncode != 0:
+        raise RunFailed(r.stderr.strip() or "probe failed", recs)
     return recs
 
 
