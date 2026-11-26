@@ -758,7 +758,7 @@ def start_margins(mdl, st):
     return out
 
 
-def clear_start(t0=-0.250, clear=None, log=None, **model):
+def clear_start(t0=-0.250, clear=None, log=None, given=None, **model):
     """The rule for the start (body-motion 4.12): a least change to the launch posture's numbers (POSTURE_NUMBERS; the
     sum of the changes' squares, a degree and a centimetre counted alike [E]) that puts every joint at least `clear`
     (START_CLEAR_DEG) inside its anatomical end and each wrist that far inside its ellipse, FOUND BY A COMPASS SEARCH
@@ -766,9 +766,14 @@ def clear_start(t0=-0.250, clear=None, log=None, **model):
     P3-5). From no change, each number
     in turn is tried a step up and a step down and what lowers (the sum of squares + a penalty on every margin's
     shortfall, squared) is kept; the steps halve from 2 to 1/8 and the penalty's weight rises in four stages.
-    Deterministic. model: Model()'s options (the hands' body). Returns ({number: change}, {range: margin})."""
+    Deterministic. model: Model()'s options (the hands' body). Returns ({number: change}, {range: margin}).
+    given (body-motion 4.13, rung 3): {number: change} for numbers that are SET from outside (the front foot's place and
+    angle, from MLB's data): they are held at those changes, are not counted in the sum of squares, and the rule finds
+    the least change to the OTHER numbers on them."""
     clear = START_CLEAR_DEG if clear is None else clear
     n = len(POSTURE_NUMBERS)
+    given = given or {}
+    free = [i for i, k in enumerate(POSTURE_NUMBERS) if k not in given]
 
     def margins(x):
         m = Model(ranges=(), shift={k: v for k, v in zip(POSTURE_NUMBERS, x) if v != 0.0} or None, **model)
@@ -779,14 +784,14 @@ def clear_start(t0=-0.250, clear=None, log=None, **model):
             mg = margins(x)
         except E.SolveError:
             return 1e12, None
-        return sum(v * v for v in x) + mu * sum(max(0.0, clear - v) ** 2 for v in mg.values()), mg
-    x = [0.0] * n
+        return sum(x[i] * x[i] for i in free) + mu * sum(max(0.0, clear - v) ** 2 for v in mg.values()), mg
+    x = [float(given.get(k, 0.0)) for k in POSTURE_NUMBERS]
     for mu in (10.0, 100.0, 1000.0, 1e4):
         step = 2.0
         f, mg = cost(x, mu)
         while step >= 0.124:
             moved = False
-            for i in range(n):
+            for i in free:
                 for sgn in (1.0, -1.0):
                     xn = list(x); xn[i] += sgn * step
                     fn, mgn = cost(xn, mu)
@@ -796,7 +801,7 @@ def clear_start(t0=-0.250, clear=None, log=None, **model):
             if not moved:
                 step *= 0.5
         if log:
-            log("   penalty %.0f: sum of squares %.2f, least margin %.2f deg (%s)" % (mu, sum(v * v for v in x), min(mg.values()), min(mg, key=mg.get)))
+            log("   penalty %.0f: sum of squares %.2f, least margin %.2f deg (%s)" % (mu, sum(x[i] * x[i] for i in free), min(mg.values()), min(mg, key=mg.get)))
     return {k: v for k, v in zip(POSTURE_NUMBERS, x) if v != 0.0}, mg
 
 

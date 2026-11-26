@@ -33,6 +33,7 @@ For [PLAN D42](../../../PLAN.md) and [body-motion §4.13](../../body-motion.md) 
 | the same in the stance; at release | +6.8 ± 12.9°; +8.8 ± 11.4° | |
 | the back foot's direction in the stance; at intercept | −4.5 ± 8.7°; +1.2 ± 14.1° | |
 
+- **Checked by me** (2026's points, 231 hitter-sides, `s11/` scratch script): the stance separation rebuilt from the points follows the published column hitter by hitter (correlation 0.986; 3.5 cm more), so the points are in feet. At the intercept: the feet's centres 106.8 ± 7.9 cm apart (10th–90th percentile 96.7–116.7); **the ankle joints, taken a quarter of the foot's length ahead of the heel as the body model places them, 102.6 ± 7.9 cm apart along the line to the pitcher (92.3–112.6)**, the lead one 1 ± 10 cm across that line; the front foot turned 43.8 ± 10.2° toward the pitcher from square.
 - **Not in the data at all:** the feet at foot plant. At release the front foot is often in the air. A front foot can turn open between foot plant and contact, so the intercept's 41–44° is an upper reading of the angle at foot plant.
 
 ## B. Foot plant measured directly
