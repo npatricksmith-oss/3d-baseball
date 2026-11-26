@@ -281,6 +281,49 @@ def table(log=print):
             "%.0f; %.0f; %.0f; %.0f" % (en.get("muscles", 0), en.get("holding muscles", 0), en.get("hold-still torques", 0), en.get("damping", 0)) if en else "-"))
 
 
+def block(rung, log=print):
+    """a rung's two searches side by side, as a table for body-motion 4.13: every figure the job asks after a rung."""
+    ds = [json.load(open(p_)) for p_ in (os.path.join(OUT, rung + t + ".json") for t in ("", "_b")) if os.path.isfile(p_)]
+    if not ds:
+        return
+    cols = ["seeds %d, %d" % (d.get("seed", 0), d.get("seed", 0) + 10) for d in ds]
+    row = lambda name, f: log("| %s | %s |" % (name, " | ".join(f(d) for d in ds)))
+    log("| | " + " | ".join(cols) + " |")
+    log("| :-- | " + " | ".join("--:" for _ in ds) + " |")
+    row("the sweet spot at contact", lambda d: "**%.2f m/s (%.1f mph)**" % (d["sweet_speed"], d["sweet_speed"] / MPH))
+    row("the miss", lambda d: "%.1f cm" % math.hypot(*d["miss_cm"]))
+    row("the score (lower is better)", lambda d: "%.1f" % d["cost"])
+    row("settled: the fall over the last 50 generations", lambda d: ("%.2f" if d.get("settled") else "NOT SETTLED: %.2f") % d["fall_last_50"])
+    row("the speed at 0.5, 0.25, 0.125 ms", lambda d: ", ".join("%.2f" % v[1] if v else "fails" for v in d["step_check"].values()) if d.get("step_check") else "-")
+    row("failed runs among the plan's 205 one-number changes", lambda d: "%s" % d.get("failed_differences", "-"))
+    row("the line from the starting plan to the result (11 points, then one beyond)", lambda d: " ".join("%.0f" % v for v in d["search_checks"]["line"]["0.250"]) if d.get("search_checks") else "-")
+    row("the bat at its fastest at contact", lambda d: "%.0f%%" % (100 * d["sweet_speed"] / d["sweet_fastest_before"][0]))
+    row("the hands' fastest", lambda d: "%.1f m/s" % d["hands_fastest"][0])
+    row("the attack angle", lambda d: "%+.1f deg" % d["attack_deg"])
+    row("the hips'; the trunk's fastest turning", lambda d: "%.0f; %.0f deg/s" % (d["pelvis_rot_vel_peak"][0], d["trunk_rot_vel_peak"][0]))
+    row("the pelvis's turn from the start to contact", lambda d: "%.0f deg" % d["pelvis_turn"])
+    row("first rises: legs, trunk, arms (ms before contact)", lambda d: "%.0f, %.0f, %.0f" % tuple(-d["first_rise_ms"][g][0] for g in ("legs", "trunk", "arms")))
+    row("the first arm muscle before contact (253 allowed)", lambda d: "%.0f ms" % (d["clock_ms"] or 0.0))
+    row("the lead knee at contact; the front foot's greatest load", lambda d: "%.0f deg; %.2f x body weight" % (d["lead_knee"][2], d["lead_foot_peak"][0]))
+    row("balance: outside his feet; least on the feet; height kept", lambda d: "%.1f cm; %.2f; %.2f" % tuple(d["balance"]))
+    row("joints past their range: to contact; to 50 ms after", lambda d: "%.1f deg (%s); %.1f (%s)" % (max((x[3], k) for k, x in d["stops"].items()) + max((x[1], k) for k, x in d["stops"].items())))
+    row("joint ends over 50 N m; the heaviest", lambda d: "%d; %.0f N m (%s)" % ((len(d["ligaments_over_50"]),) + max(((x[0], k) for k, x in d["stops"].items() if k != "shoulder_L"), default=(0.0, "-"))))
+    row("groups at 90% or more of their bounds", lambda d: "%d" % len(d["near_full_strength"]))
+    e = lambda d: d["energy_J"]
+    row("WORK TO CONTACT, J: muscles", lambda d: "%+.0f" % e(d)["muscles"])
+    row("holding muscles", lambda d: "%+.0f" % e(d)["holding muscles"])
+    row("hold-still torques (constant, under no muscle rule)", lambda d: "%+.0f" % e(d)["hold-still torques"])
+    row("the joints' damping", lambda d: "%+.0f" % e(d)["damping"])
+    row("stops; ground; gravity", lambda d: "%+.0f; %+.0f; %+.0f" % (e(d)["stops"], e(d)["ground"], e(d)["gravity"]))
+    row("kinetic energy gained", lambda d: "%.0f" % e(d)["kinetic energy gained"])
+    top = lambda dd, n=5: ", ".join("%s %+.0f" % kv for kv in sorted(dd.items(), key=lambda kv: -abs(kv[1]))[:n])
+    row("muscles (with holding) by joint, the five largest", lambda d: top(e(d)["muscles and holding muscles by joint"]))
+    row("damping by joint, the five largest", lambda d: top(e(d)["damping by joint"]))
+    row("hold-still torques by joint, the three largest", lambda d: top(e(d)["hold-still torques by joint"], 3))
+    for i, g in enumerate(ds[0]["gate"]):
+        row("GATE: " + g[0], lambda d, i=i: "%s (%s)" % ("passes" if d["gate"][i][4] else "fails", d["gate"][i][3] or d["gate"][i][1]))
+
+
 def main():
     P.build()
     a = sys.argv[1:]
@@ -288,6 +331,9 @@ def main():
     log = lambda s_: print(s_, flush=True)
     if "--table" in a:
         table(log)
+        return
+    if "--block" in a:
+        block(arg("--block", "r0"), log)
         return
     if "--show" in a:
         d = json.load(open(arg("--show", "")))
