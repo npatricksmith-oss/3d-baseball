@@ -14,6 +14,8 @@ Written 2026-11-25 by the worker `body-research`. Docs only; nothing here change
 | 8 | [Strength at speed and elastic stretch](8-strength-at-speed.md) | Trunk rotation strength in N·m, torque against joint speed at 3–9 rad/s in athletes, stretch-shortening gains and how torque-driven models represent them, two-joint transfer (the evidence for §4.4's choice) | Bae 2012 (professional golfers' trunk rotation, FT); Walshe 1998 and Groeber 2021 (stretch-shortening work gains); Wilson/Yeadon 2006 (torque-generator parameters) | Trunk rotation N·m in baseball players; any strength value at 7–9 rad/s; any measured trunk elastic store or stiffness |
 | 9 | [Arm limits](9-arm-limits.md) | Shoulder, elbow, forearm and wrist strength in N·m with SDs (healthy adults and baseball, tennis, handball players), strength at 3–8 rad/s, Kentel 2011's full 14-generator table, when the arm muscles are active in batting, electromechanical delay, tendon stretch in other models (the evidence for the arms' limits in §4.4) | Kentel, King & Mitchell 2011 (full Table 2, one elite tennis player); Holzbaur 2007 (5 men's isometric moments); Shaffer 1993 (arm EMG levels by phase, second hand) | Adult-male forearm and horizontal adduction in N·m; any arm value above 5.2 rad/s except one player; any arm-muscle EMG onset in ms before hands move; shoulder electromechanical delay |
 | 10 | [Smoothed sources](10-smoothed-sources.md) | Which recorded motions the project fits, gates or checks against were smoothed by their source (filters through the bat's impact, mean curves), where that changes what we read and by how much, and what PLAN D35 then asks (owner, 2026-11-25) | Fortenbaugh 2011 §3.4–3.5 and Tables 2–5 (FT, TAB); OpenBiomechanics' datasheet (FT); the filters run on stated shapes (derived) | Statcast's and Blast's processing; [4]'s filter order; OpenBiomechanics' contact event |
+| 11 | [The hands around a handle, and a joint's end](11-hands-and-joint-ends.md) | The wrist's range with the fingers closed on a handle, forearm and wrist strength in N·m, measured wrist and forearm angles through a baseball and a golf swing (each hand), what is known about a bat moving in the hands and about a hand's grip stiffness and slip torque; passive resistance near a joint's end, how much energy a stretch gives back, which loads injure a ligament, Wilk's zero, trunk ranges, roster sizes | Gehrmann 2008 (15 men, circles of the wrist with a cylinder or a fist); OpenBiomechanics' joint angles computed here (677 swings, both wrists); Langston (21 hitters, both wrists, three axes); Köykkä 2025 (forearm turn); Kubo 2001–2002 and Obst 2023 (hysteresis 13–22%); Ahmad 2003 (UCL 34 N·m) | Any bat moving in a hand; the torque a hand holds across a handle; any passive moment past a joint's end (Engin & Chen's are in coefficients I could not read); energy returned at a joint's end or at a swing's speed; Wilk 2012's zero |
+| 12 | [The trunk's bending, and the legs and feet turning](12-trunk-bending-and-feet.md) | Trunk strength in N·m forward, back and sideways; how the bending divides between hips, lumbar and upper back; hitters' trunk tilt (OpenBiomechanics computed here, Welch, Fortenbaugh); the ankle's lean with weight on, its other motions and strengths; the big toe's range; the knee's turn about the shin; the rear foot in a swing; a cleat's resistance to turning on dirt and turf | Schultz 1987 (10 men, standing, 204/191/164–180 N·m); Narimani 2018 and Mousavi 2018 (where the bending is); Mossberg 1983 (85 women's knee turn); Brosnan 2009 (baseball shoe on basepath dirt, 68–100 N·m) | Side-bend strength in athletes; anything above 2 rad/s; rear-foot yaw and heel lift in any baseball swing; per-foot free moment; tibial-rotation strength; a dirt friction coefficient |
 
 ## The three findings that most change what the design can rest on
 
@@ -28,6 +30,26 @@ Written 2026-11-25 by the worker `body-research`. Docs only; nothing here change
 - **Within-athlete SDs of muscle onset times or strength**; a **body table measured on baseball players**.
 - Any **openly, commercially licensed adult hitting or pitching dataset with ground forces** (OpenBiomechanics is non-commercial; the CC BY set is youth, positions only).
 - Cross 2005/2009 (bat as a double pendulum), Alexander 1991, Herring & Chapman 1992, Hirashima 2002/2003, Feltner & Dapena 1986 and Werner et al. were not opened.
+
+## Searches that came up empty (notes 11 and 12)
+
+One line each (worker body-research-2, 2026-11-25), so nobody retries them. Detail is in each note's last section.
+
+| Searched | Result |
+| :-- | :-- |
+| A measurement of a bat or club handle turning, pivoting or sliding in a hitter's hand | none: the instrumented bats (Koike, Miyanishi, Crisco, Takahashi) report forces, moments and pressures, not motion against the hand |
+| A hand's torsional stiffness for large angles, and the torque it holds across a handle | only small-vibration impedance at 10–100 Hz (magnitudes in figures) and twist torque about the handle's own axis (3–8 N·m) |
+| Forearm turn or wrist torque in N·m at speed in athletes | Laudner 2012's tables not reachable; Ellenbecker's girls only (note 9) |
+| Passive moment past a joint's end, in N·m | Engin & Chen 1986–87 (coefficients only), Riener & Edrich 1999 (equations 2nd with disagreeing knee signs), Silder 2007 (plots); nobody loads a living joint past its end |
+| Energy returned from a stretch at the shoulder, hip, wrist or trunk, or at any joint's end or above 180°/s | none (tendon 18–22% lost, ankle 13–17%, both inside the range) |
+| OpenSim limit-force stiffness for Rajagopal 2016 or Holzbaur 2005 | none; Saul 2015's are fits whose authors call them non-physical; the docs' formula is an image |
+| Ultimate shoulder external-rotation torque; hip, wrist flexion, elbow or knee hyperextension failure moments | forces only (a shoulder capsule 713 N) or nothing |
+| Wilk 2012's zero for horizontal adduction | not stated anywhere in the paper; other papers' zeros differ |
+| Trunk side-bend, flexion and extension strength in N·m for baseball players, golfers, hockey players, rowers | none; wrestlers and tennis players in newtons only |
+| Trunk strength above 2.1 rad/s (flexion, extension) or 1.05 rad/s (side bend) | none |
+| A rear-foot yaw angle or heel lift against time in a baseball or cricket swing; a free moment per foot | none; OpenBiomechanics has no toe or heel marker and its ankle "rotation" is the foot against the shank |
+| A rotational friction coefficient for a cleat on dirt, or wet dirt, a batter's box or a mound | none; one baseball shoe on one basepath mix at one load (Brosnan 2009) |
+| Voluntary tibial-rotation torque in N·m in healthy men | Hester & Falkel 1984 (a 403), Osternig 1980 (abstract), Armour 2004 (patients) |
 
 ## Tried and ruled out
 
