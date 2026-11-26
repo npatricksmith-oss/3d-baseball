@@ -313,7 +313,7 @@ def check():
                 print("%-46s %-13s largest state difference over %d records: %.2e (at the end %.2e)" % (label, nm, len(ref), d, dend))
                 worst = max(worst, d)
     ok = ok and worst <= CHECK_TOL
-    print("worst %.2e (the sensitive case apart), tolerance %.0e: %s" % (worst, CHECK_TOL, "PASS" if ok else "FAIL"))
+    print("worst %.2e (the sensitive cases apart), tolerance %.0e: %s" % (worst, CHECK_TOL, "PASS" if ok else "FAIL"))
     return ok
 
 

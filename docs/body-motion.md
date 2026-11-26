@@ -1966,6 +1966,8 @@ Part 2 made no motion that could be turned into a plan. Each result is read agai
 
 **What is left for the last session is reordered by this** ("Status and what is left"): the damping at a read value and a hold that lets go or follows the muscles' law come first, each as one change with a search run until it has settled; no such search is run in this job.
 
+**The checks after the review's changes, every changed source touched first** (job 410; `sim/target/codex-probes/body3d/s10/fix_*.out`): `test_body3d.py` 72 tests, OK (the one new is the hold-still split's); `test_oracle.py` 112, OK (8 expected failures); `built3d.py --check` PASS; `bin/check-docs.py` clean; `probe3d.py --check` PASS, worst 3.6 × 10⁻¹¹ over the seven plain cases, and the two sensitive cases each within ten times the Python engine's own difference from itself at every record of their 200 ms. On the ellipse case the engines are 1.4 × 10⁻⁸ apart at most in the whole state and **2.2 × 10⁻⁹ in the bodies' own entries**, against the Python engine's 1.5 × 10⁻⁸ from itself: the review's reading, reproduced. The two kept results re-read give the figures above (17.69 m/s, 0.2 and −0.1 cm; 17.5 m/s, 1.7 and 0.9 cm).
+
 **The checks, after touching every changed source** (jobs 405 and 406; outputs `sim/target/codex-probes/body3d/s10/final_*.out`):
 
 - `python3 -m unittest analysis/oracle/test_body3d.py`: 71 tests, OK (62 before the session; the nine new are `OvalChecks` 5, `StartChecks` 3 and the search's own). `test_oracle.py`: 112, OK (8 expected failures, as before).
