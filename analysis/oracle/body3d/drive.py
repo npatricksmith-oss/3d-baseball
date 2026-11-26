@@ -117,7 +117,13 @@ ARM_TENDONS = {"sh_hadd": True, "sh_habd": True, "elbow_ext": True, "wrist": Fal
                "sh_raise": True, "sh_lower": True, "sh_irot": True, "elbow_flex": True}
 # the first law's top speeds W, rad/s [E] (5.1), still used by the arms and wherever a curve is None
 W_TOP = {"hip": 20.0, "knee": 20.0, "ankle": 20.0, "core": 25.0, "shoulder": 30.0, "elbow": 35.0, "wrist": 40.0}
-# intrinsic joint damping [E]: N m s/rad on every joint, capped; stiffness none
+# intrinsic joint damping: N m s/rad on every axis of every joint, its torque capped; stiffness none.
+# [E], UNSOURCED (session 1's value, kept since; session 10's review, P1-2): in the best practised swing it takes 266 J,
+# 64 % of the muscles' work, 196 J of it at the arms, and reaches 29 N m at the rear elbow and 16 N m at a wrist whose
+# muscles have 24-51. Range until a source is read: [E: 0.02-1.0, by joint]. Pointers, from search summaries only, no
+# paper opened (2026-11-26): the relaxed wrist 0.02-0.06; the elbow about 0.2-0.4 and the shoulder about 0.7 while a
+# posture is held (Gomi & Osu 1998 and the single-joint work it cites); nothing found for the hips, knees or trunk.
+# The next session reads a source and sets it by joint BEFORE any other single change (body-motion "what is left").
 JOINT_DAMP = 1.0
 JOINT_DAMP_CAP = 30.0
 TONE_RIDGE = 1e-8          # relative to the largest diagonal of the normal equations
@@ -314,7 +320,13 @@ def add_damping(mdl, st, damp=JOINT_DAMP, cap=JOINT_DAMP_CAP):
 
 
 def solve_tone(mdl, st, t0, aux=None):
-    """The joint torques the placed body carries at the start: the constant torques (one vector per joint,
+    """NOTE (session 10's review, P1-1): these constant torques stand for muscle and follow NO muscle rule (no
+    strength-at-speed law, no onset or rise, no effort, no clock). In the best practised swing they do +157 J, 27 % of
+    what they and the muscles put in, 58 J of it at a lead knee straightening at 870 deg/s. Every practice result now
+    reports their work apart from the damping's, by joint (practice3d.hold_work); a hold that lets go or follows the
+    muscles' law is the next session's (body-motion "what is left").
+
+    The joint torques the placed body carries at the start: the constant torques (one vector per joint,
     fixed in the parent's frame) that bring every segment's acceleration at t0 as near zero as the ground
     forces allow (least squares, a small ridge picking the smallest torques among equals). It is the
     muscles' level in the measured posture, held constant afterwards [E: a stand-in for the postural
