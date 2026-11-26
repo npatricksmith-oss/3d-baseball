@@ -229,6 +229,7 @@ class System:
         self.pts, self.dots = [], []        # constraint primitives
         self.acts, self.stops, self.holds, self.contacts = [], [], [], []
         self.tones = []
+        self.ovals = {}                     # a kind 3 stop's second angle and its ellipse, by the stop's name (stop())
         self.fvtabs = []                    # measured strength-at-speed curves (fv_tab), by index
         self.fvecc = []                     # each curve's plateau for a stretched muscle (ECC where not given)
         self.ext = []                       # external loads (body, point in the body, force, moment; world axes): inverse dynamics only
@@ -311,7 +312,7 @@ class System:
         l = math.sqrt(dot(c, c))
         return scale(c, 1.0 / l) if l > FLOAT_EPS else ZERO
 
-    def stop(self, name, a, b, axis_a, e_a, f_b, lo, hi, k, c, kind=0, axis_b=(0.0, 0.0, 1.0)):
+    def stop(self, name, a, b, axis_a, e_a, f_b, lo, hi, k, c, kind=0, axis_b=(0.0, 0.0, 1.0), oval=None):
         """a one-sided limit on an angle between a and b: a spring k and a damper c once the angle is past lo or hi.
         kind 0: the angle about axis_a (fixed in a) from e_a (in a) to f_b (in b), f_b projected onto the plane
         square to the axis. kind 1: the angle of f_b (in b) out of the plane square to axis_a, toward the axis
@@ -327,7 +328,48 @@ class System:
         did work nothing stored paid for). kind 0: g = n - (n.f) f_p / |f_p|^2, with f_p the projection. kind 1:
         g = (f x n) / |f x n|. Each is undefined where f lies along the axis (kind 0: the angle itself is; kind 1:
         the angle is 90 deg); within STOP_SINGULAR of that the run fails loudly, not silently: a kind 0 stop always, a kind 1 stop (whose angle is defined everywhere; only its gradient fails, at +-90 deg) while it is engaged."""
+        if kind == 3:
+            # (body-motion 4.12) a stop that reads TWO angles of a two-axis joint and holds the pair inside an ellipse: the
+            # first is kind 0's (about axis_a fixed in a, from e_a in a to f_b in b); the second is the same kind of angle
+            # with the bodies' roles exchanged, about an axis fixed in b from a direction in b to one in a. oval =
+            # (axis2 in b, e2 in b, f2 in a, centre 1, centre 2, half-axis 1, half-axis 2, tilt): the ellipse in the plane
+            # of the two angles (rad), its first half-axis turned `tilt` from the first angle's axis toward the second's.
+            # The reading is how far OUTSIDE the ellipse the pair lies, along the line from the ellipse's centre (rad;
+            # negative inside), so lo is unused and hi is 0. Its gradient is the two angles' gradients combined by the
+            # reading's partial derivatives; the reading is a function of the joint's posture alone and the torque acts
+            # along its gradient, so the stop is passive as the others are.
+            n2, e2, f2, c1, c2, h1, h2, tilt = oval
+            self.ovals[name] = (unit(n2), unit(e2), unit(f2), float(c1), float(c2), float(h1), float(h2), math.cos(tilt), math.sin(tilt))
+            lo, hi = -1e9, 0.0
         self.stops.append((name, a, b, unit(axis_a), unit(e_a), unit(f_b), lo, hi, k, c, int(kind), unit(axis_b)))
+
+    @staticmethod
+    def oval_reading(t1, t2, c1, c2, h1, h2, ct, sn):
+        """(d, dd/dt1, dd/dt2): how far the pair of angles (t1, t2) lies outside the ellipse, measured along the line from
+        its centre (rad), and that distance's partial derivatives. Inside (d <= 0) the derivatives are not asked for and
+        are returned as zero. With L the pair's distance from the centre and rho its place in the ellipse (1 on the
+        edge), d = L (1 - 1 / rho)."""
+        x, y = t1 - c1, t2 - c2
+        xr, yr = x * ct + y * sn, -x * sn + y * ct
+        rho = math.sqrt((xr / h1) ** 2 + (yr / h2) ** 2)
+        if rho <= 1.0:
+            return (math.sqrt(x * x + y * y) * (1.0 - 1.0 / rho) if rho > 1e-12 else -min(h1, h2)), 0.0, 0.0
+        L = math.sqrt(x * x + y * y)
+        rx = (xr * ct / (h1 * h1) - yr * sn / (h2 * h2)) / rho
+        ry = (xr * sn / (h1 * h1) + yr * ct / (h2 * h2)) / rho
+        k1 = (1.0 - 1.0 / rho) / L
+        k2 = L / (rho * rho)
+        if "oval_one_angle" in MUT:                  # a mutation: the torque along the first angle's gradient alone
+            return L * (1.0 - 1.0 / rho), x * k1 + k2 * rx, 0.0
+        return L * (1.0 - 1.0 / rho), x * k1 + k2 * rx, y * k1 + k2 * ry
+
+    def oval_angle(self, name, Ra, Rb, n, e, f):
+        """a kind 3 stop's reading and its gradient g (d(reading)/dt = (w_b - w_a) . g), and its two angles (rad)."""
+        n2b, e2b, f2a, c1, c2, h1, h2, ct, sn = self.ovals[name]
+        t1, g1 = self.stop_angle(n, e, f, 0)
+        t2, g2 = self.stop_angle(mv(Rb, n2b), mv(Rb, e2b), mv(Ra, f2a), 0)      # read from b: its rate is (w_a - w_b) . g2
+        d, d1, d2 = self.oval_reading(t1, t2, c1, c2, h1, h2, ct, sn)
+        return d, sub(scale(g1, d1), scale(g2, d2)), t1, t2
 
     @staticmethod
     def stop_angle(n, e, f, kind, lo=None, hi=None, v=None):
@@ -585,7 +627,10 @@ class System:
             n = mv(R[a], ax) if a >= 0 else ax
             e = mv(R[a], ea) if a >= 0 else ea
             f = mv(R[b], fb)
-            th, g = self.stop_angle(n, e, f, kind, lo, hi, mv(R[b], axb) if kind == 2 else None)
+            if kind == 3:
+                th, g = self.oval_angle(name, R[a] if a >= 0 else IDENT, R[b], n, e, f)[:2]
+            else:
+                th, g = self.stop_angle(n, e, f, kind, lo, hi, mv(R[b], axb) if kind == 2 else None)
             rate = dot(sub(Wv[b], Wv[a] if a >= 0 else ZERO), g)
             tau = 0.0
             if th > hi:

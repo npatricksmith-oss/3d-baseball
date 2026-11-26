@@ -82,6 +82,58 @@ GRIP_ROLL = {"L": 0.0, "R": 0.0}   # deg [E: +-20]: each hand's roll about the h
 # the closed hand's loss of wrist range (Gehrmann 2008, a hand on a 25 mm cylinder; research note 11 A1)
 CLOSED_HAND = {"wrist_uln": 0.90, "wrist_flex": 0.84}
 ARM_STOPS = ("wrist_dev", "wrist_flex", "forearm", "upper_arm")   # the arm ranges the hands' body holds at anatomical ends
+# ---- the wrist's oblique range (body-motion 4.12, session 10; research note 11 A1) -----------------
+# A wrist's reach is not a box: bent right back it cannot also be tilted right away from the thumb. Model(wrist="oval")
+# holds each wrist's two angles inside the ellipse through the box's four ends (the single-direction ranges, which
+# stay as measured), by one stop that reads both (engine kind 3), in place of the two box stops.
+WRIST_OVAL_TILT = 0.0     # deg [E: 0-8]: the ellipse's long axis turned from pure bending toward bent-forward-and-away-from-
+#                           the-thumb (Crisco 2011's cadaver wrists: 26.6 +- 4.4; no ellipse through the four measured ends
+#                           has that tilt, body-motion 4.12)
+START_CLEAR_DEG = 5.0     # deg [E: 3-8]: the cleared start has every joint this far inside its end (clear_start)
+
+
+def wrist_oval(R=None, tilt=None):
+    """(centre bend, centre tilt, half-axis bend, half-axis tilt, tilt of the long axis), deg, in the clinical senses
+    of arm_range() (bent toward the palm +, tilted toward the thumb +): the ellipse through the box's four ends. Not
+    tilted its centre is the box's and its half-axes the box's half-ranges; tilted (the long axis turned toward
+    bend + with tilt -), the conic through the same four ends with that axis, which exists up to about 21 deg."""
+    ar = arm_range(R)
+    (x2, x1), (y2, y1) = ar["wrist_flex"], ar["wrist_dev"]
+    tilt = WRIST_OVAL_TILT if tilt is None else tilt
+    a11 = -1.0 / (x1 * x2); b1 = -a11 * (x1 + x2) / 2.0
+    a22 = -1.0 / (y1 * y2); b2 = -a22 * (y1 + y2) / 2.0
+    a12 = 0.5 * math.tan(-2.0 * tilt * D2R) * (a11 - a22)
+    det = a11 * a22 - a12 * a12
+    if det <= 0.0:
+        raise ValueError("no ellipse through the wrist's four ends is tilted %.1f deg" % tilt)
+    cx = (-b1 * a22 + b2 * a12) / det; cy = (-b2 * a11 + b1 * a12) / det
+    k = 1.0 + a11 * cx * cx + 2 * a12 * cx * cy + a22 * cy * cy
+    tr, d = a11 + a22, math.sqrt((a11 - a22) ** 2 + 4 * a12 * a12)
+    return cx, cy, math.sqrt(2.0 * k / (tr - d)), math.sqrt(2.0 * k / (tr + d)), tilt
+
+
+def oval_place(flex, dev, R=None, tilt=None):
+    """(rho, deg inside): where a wrist bent `flex` and tilted `dev` (clinical senses, deg) lies in wrist_oval(): rho is
+    1 on the ellipse's edge and under 1 inside; the second is how far inside the edge it is along the line from the
+    centre (negative: outside), the engine's kind 3 reading with its sign turned."""
+    cx, cy, ha, hb, tl = wrist_oval(R, tilt)
+    ct, sn = math.cos(tl * D2R), math.sin(tl * D2R)
+    x, y = flex - cx, dev - cy
+    rho = math.hypot((x * ct - y * sn) / ha, (x * sn + y * ct) / hb)
+    return rho, (math.hypot(x, y) * (1.0 / rho - 1.0) if rho > 1e-12 else min(ha, hb))
+
+
+def oval_spec(sd):
+    """engine.System.stop's `oval` for hand sd: the second angle (the wrist's bend, read from the forearm as the box's
+    wrist_flex stop reads it) and the ellipse in the plane of the two READINGS (rad). Both readings run against the
+    clinical sense by the same sign (clinical_sign), a turn of the plane through 180 deg about its origin, which
+    leaves the ellipse's shape and tilt as they are and moves only its centre."""
+    sg = 1.0 if sd == "L" else -1.0
+    cx, cy, ha, hb, tl = wrist_oval()
+    k = clinical_sign("wrist_dev", sg)
+    # first angle the tilt (centre k x cy, half-axis hb), second the bend (centre k x cx, half-axis ha); the long axis
+    # lies along (-sin, cos) of the tilt in (tilt, bend), so the first half-axis is turned +tilt toward the second
+    return ((1, 0, 0), (0, -sg, 0), hand_frame(sd)[2], k * cy * D2R, k * cx * D2R, hb * D2R, ha * D2R, tl * D2R)
 
 
 def hand_frame(sd, oblique=None, roll=None):
@@ -135,12 +187,15 @@ def arm_angles(sd, zu, zf, Rb, Rt):
 SWEEP_SPAN = 45.0          # deg [E]: the shoulder's sweep counts toward the start's strain over the last 45 deg before its end
 
 
-def strain(angles, rng=None):
+def strain(angles, rng=None, oval=False):
     """how near an arm's joint is to an end of its range, the worst of them, 1 = at an end: each of the four angles of
     arm_range() by its distance from the middle of its range in half-ranges, and (where given) the upper arm's sweep
-    across the chest and back behind the shoulders' line, which have one end each, over the last SWEEP_SPAN before it."""
+    across the chest and back behind the shoulders' line, which have one end each, over the last SWEEP_SPAN before it.
+    oval (4.12): the wrist's two angles count together, by their place in the wrist's ellipse (1 on its edge)."""
     rng = rng or arm_range()
-    worst = max(abs((angles[k] - 0.5 * (lo + hi)) / (0.5 * (hi - lo))) for k, (lo, hi) in rng.items())
+    worst = max(abs((angles[k] - 0.5 * (lo + hi)) / (0.5 * (hi - lo))) for k, (lo, hi) in rng.items() if not (oval and k.startswith("wrist")))
+    if oval:
+        worst = max(worst, oval_place(angles["wrist_flex"], angles["wrist_dev"])[0])
     for k, hi in (("across", ROM["sh_hadd"] - 90.0), ("back", ROM["sh_habd"])):
         if k in angles:
             worst = max(worst, (angles[k] - (hi - SWEEP_SPAN)) / SWEEP_SPAN)
@@ -183,7 +238,7 @@ def cock_reference(mdl, st):
     return {sd: (1.0 if E.dot(mdl.axis(st, "farm_" + sd, (1, 0, 0)), bz) > 0 else -1.0) for sd, sg in SIDES}
 
 
-def range_specs(cock_ref=None, grip="weld", feet="plate"):
+def range_specs(cock_ref=None, grip="weld", feet="plate", wrist="box"):
     """every joint range as an engine stop: (name, body a, body b, axis in a, e in a, f in b, lo deg, hi deg, size, kind).
     grip="hands" (4.11): the wrists' two angles, the forearms' turn and the upper arms' turn at their anatomical ends,
     each read on the joint's own axis (the upper arm's by a kind 2 stop), in place of the weld's two wrist stops.
@@ -237,12 +292,17 @@ def range_specs(cock_ref=None, grip="weld", feet="plate"):
             def ends(name):
                 lo, hi = ar[name]
                 return (lo, hi) if clinical_sign(name, sg) > 0 else (-hi, -lo)
+            box = None if wrist == "oval" else "small"      # wrist="oval" (4.12): the two angles are read and reported, and held together
+            if wrist == "oval":
+                # both of the wrist's angles inside its ellipse (kind 3): the first angle is the tilt's below; the second
+                # (the bend's) and the ellipse are oval_spec()'s. The reading is how far outside the ellipse, 0 at its edge
+                out.append(("wrist_oval_" + sd, "bat", "farm_" + sd, p, r, (1, 0, 0), -1e9, 0.0, "small", 3))
             out += [
                 # the wrist's tilt toward and away from the thumb: about the hand's p (fixed in the bat), from the hand's r
                 # to the forearm's radial line (its x), which the joint holds square to p
-                ("wrist_dev_" + sd, "bat", "farm_" + sd, p, r, (1, 0, 0)) + ends("wrist_dev") + ("small",),
+                ("wrist_dev_" + sd, "bat", "farm_" + sd, p, r, (1, 0, 0)) + ends("wrist_dev") + (box,),
                 # its bend toward the palm and back: about the forearm's radial line, from the forearm's palm side to p
-                ("wrist_flex_" + sd, "farm_" + sd, "bat", (1, 0, 0), (0, -sg, 0), p) + ends("wrist_flex") + ("small",),
+                ("wrist_flex_" + sd, "farm_" + sd, "bat", (1, 0, 0), (0, -sg, 0), p) + ends("wrist_flex") + (box,),
                 # the forearm's turn: about its own length, from where the elbow's hinge lies in neutral (thumb toward the
                 # upper arm with the elbow bent) to the hinge, which the elbow holds square to the forearm
                 ("forearm_" + sd, "farm_" + sd, "uarm_" + sd, (0, 0, 1), (0, -1, 0), (0, 1, 0)) + ends("forearm") + ("small",),
@@ -309,7 +369,7 @@ def add_ranges(mdl, st, k_big=None, wrists="cocked", rom=None):
     ROM.update(R)
     hands = getattr(mdl, "grip", "weld") == "hands"
     mdl.cock_ref = None if hands else cock_reference(mdl, st)
-    specs = range_specs(mdl.cock_ref, mdl.grip if hands else "weld", getattr(mdl, "feet", "plate"))
+    specs = range_specs(mdl.cock_ref, mdl.grip if hands else "weld", getattr(mdl, "feet", "plate"), getattr(mdl, "wrist", "box"))
     ROM.clear(); ROM.update(keep)
     ang = range_angles(mdl, st)
     out = {}
@@ -317,6 +377,10 @@ def add_ranges(mdl, st, k_big=None, wrists="cocked", rom=None):
         if size is None:
             continue
         a0 = ang[name]
+        if kind == 3:                                   # a wrist's ellipse (4.12): its reading is in degrees outside, 0 at the edge
+            s.stop(name, b[a], b[b_], ax, ea, fb, 0.0, 0.0, RANGE_K[size], RANGE_C[size], 3, oval=oval_spec(name[-1]))
+            out[name] = (-1e9, 0.0)
+            continue
         if hands and name.startswith(ARM_STOPS):
             # the hands' body (4.11): the anatomical ends as they are. No travel is placed from the start and no stop is
             # moved to clear it; that the start lies inside is a test's business, not this function's.
@@ -342,7 +406,12 @@ def add_ranges(mdl, st, k_big=None, wrists="cocked", rom=None):
         elif name.startswith("wrist_flex"):
             span = R["wrist_flex"] + R["wrist_ext"]
             lo, hi = a0 - 0.5 * span, a0 + 0.5 * span
-        lo, hi = min(lo, a0 - RANGE_CLEAR), max(hi, a0 + RANGE_CLEAR)
+        if getattr(mdl, "shift", None):
+            # the cleared start (4.12): every stop stands at its anatomical end; none is moved to clear the start
+            if not lo < a0 < hi:
+                raise ValueError("%s: the start (%.1f deg) is not inside its range (%.1f to %.1f)" % (name, a0, lo, hi))
+        else:
+            lo, hi = min(lo, a0 - RANGE_CLEAR), max(hi, a0 + RANGE_CLEAR)
         k = RANGE_K[size] if (k_big is None or size != "big") else k_big
         c = RANGE_C[size] * (k / RANGE_K[size]) ** 0.5
         s.stop(name, b[a], b[b_], ax, ea, fb, lo * D2R, hi * D2R, k, c, kind)
@@ -361,8 +430,15 @@ def range_angles(mdl, st):
     Rm = {n: E.qR(s.pose(st, i)[1]) for n, i in mdl.b.items()}
     hands = getattr(mdl, "grip", "weld") == "hands"
     ref = {"L": 1.0, "R": 1.0} if hands else (getattr(mdl, "cock_ref", None) or cock_reference(mdl, st))
-    for name, a, b_, ax, ea, fb, lo, hi, size, kind in range_specs(ref, "hands" if hands else "weld", getattr(mdl, "feet", "plate")):
+    for name, a, b_, ax, ea, fb, lo, hi, size, kind in range_specs(ref, "hands" if hands else "weld", getattr(mdl, "feet", "plate"), getattr(mdl, "wrist", "box")):
         n = E.mv(Rm[a], E.unit(ax)); e = E.mv(Rm[a], E.unit(ea)); f = E.mv(Rm[b_], E.unit(fb))
+        if kind == 3:                                   # how far outside the wrist's ellipse, deg (negative inside)
+            n2, e2, f2, c1, c2, h1, h2, tl = oval_spec(name[-1])
+            t1 = math.atan2(E.dot(n, E.cross(e, f)), E.dot(e, f))
+            m2, g2, k2 = E.mv(Rm[b_], E.unit(n2)), E.mv(Rm[b_], E.unit(e2)), E.mv(Rm[a], E.unit(f2))
+            t2 = math.atan2(E.dot(m2, E.cross(g2, k2)), E.dot(g2, k2))
+            out[name] = s.oval_reading(t1, t2, c1, c2, h1, h2, math.cos(tl), math.sin(tl))[0] / D2R
+            continue
         if kind == 2:
             out[name] = s.stop_angle(n, e, f, 2, v=E.mv(Rm[b_], (0.0, 0.0, 1.0)))[0] / D2R
             continue
@@ -423,7 +499,7 @@ def curve_rate(name, t, h=0.005):
 class Model:
     """the engine System of a batter of stature H (m) and mass M (kg), with named bodies and joint points."""
 
-    def __init__(self, H=1.84, M=92.0, contacts=True, mu=None, shoulder_stops=True, ranges=None, grip="weld", feet="plate"):
+    def __init__(self, H=1.84, M=92.0, contacts=True, mu=None, shoulder_stops=True, ranges=None, grip="weld", feet="plate", wrist="box", shift=None):
         """ranges: None, the stops of sessions 1-7 (the knees' and elbows' bend, the shoulders' sweep across, at
         STOP_K); or a set of names from range_specs() ("all" for every one): those ranges as stops at RANGE_K, in
         place of the old ones (body-motion 4.10).
@@ -438,6 +514,11 @@ class Model:
         self.ranges = ranges
         self.grip = grip
         self.feet = feet
+        # wrist: "box" (session 9: each of the wrist's two angles held at its own ends) or "oval" (4.12: both inside the
+        # wrist's ellipse, one stop reading both). shift: {posture number: change} applied to the launch posture's numbers
+        # by pose() (POSTURE_NUMBERS; START_CLEAR is the cleared start's); with one, add_ranges() moves no stop.
+        self.wrist = wrist
+        self.shift = dict(shift) if shift else None
         if mu is None:
             mu = MU_CLEAT if feet == "cleats" else MU
         self.mu = mu
@@ -615,6 +696,110 @@ def _two_link(top, end, l1, l2, toward):
     return E.add(E.add(top, E.scale(dh, a)), E.scale(E.unit(perp), h))
 
 
+# ---- the launch posture's numbers, and the cleared start (body-motion 4.12, session 10) --------------------------
+# What pose() builds the launch posture from: [4]'s digitised curves (deg; the pelvis's travel in cm), [4]'s text values
+# (the pelvis's side tilt, the rear knee, the lead foot's angle, the stride's length and how closed it is, cm) and the
+# three the placement sets by hand ([E]: the trunk's forward and side bend, the rear foot's angle). A shift is a change
+# to some of them, a degree or a centimetre each: Model(shift=...).
+POSTURE_CURVES = ("pelvis_rot", "trunk_rot", "bat_az", "bat_elev", "bat_lag", "lead_elbow_flex", "trail_elbow_flex", "lead_knee_flex", "pelvis_x_cm")
+POSTURE_NUMBERS = POSTURE_CURVES + ("trunk_flex", "trunk_side", "rear_foot_yaw", "stride_cm", "stride_closed_cm", "obliquity", "trail_knee", "lead_foot")
+# The cleared start: clear_start()'s result for the average batter (1.84 m, 92 kg) on the hands' body with cleats and the
+# wrists' ellipses, the elbows ARM_CLEAR apart (job 391, 264 s; test_body3d.StartChecks holds it to the rule). Still
+# [4]'s launch posture, moved by the rule: every joint START_CLEAR_DEG inside its end, no number changed by more than 2.5.
+START_CLEAR = {"pelvis_rot": 1.75, "trunk_rot": -1.75, "bat_az": 2.0, "bat_elev": 2.125, "bat_lag": 2.5, "trail_elbow_flex": -0.625,
+               "lead_knee_flex": -0.75, "trunk_side": -0.25, "stride_cm": -0.375, "stride_closed_cm": -0.625, "obliquity": 1.5,
+               "trail_knee": 1.0, "lead_foot": 0.625}
+LEAD_FOOT_SHIFT = [0.0]
+_SHIFT_ON = [False]
+
+
+class _shifted:
+    """the launch posture's numbers changed by `shift` while a posture is placed, and put back afterwards. A changed
+    curve is the curve plus a constant (over whatever CURVE_OVERRIDE already holds for it), so its slope is unchanged."""
+
+    def __init__(self, shift, H):
+        self.shift, self.H = shift, H
+
+    def __enter__(self):
+        global TRUNK_FLEX, TRUNK_SIDE, REAR_FOOT_YAW, STRIDE, STRIDE_CLOSED, OBLIQUITY, TRAIL_KNEE
+        d = lambda k: float(self.shift.get(k, 0.0))
+        bad = set(self.shift) - set(POSTURE_NUMBERS)
+        if bad:
+            raise ValueError("not a posture number: %s" % sorted(bad))
+        self.keep = (dict(CURVE_OVERRIDE), TRUNK_FLEX, TRUNK_SIDE, REAR_FOOT_YAW, STRIDE, STRIDE_CLOSED, OBLIQUITY, TRAIL_KNEE, LEAD_FOOT_SHIFT[0])
+        for k in POSTURE_CURVES:
+            if d(k) != 0.0:
+                under = CURVE_OVERRIDE.get(k)
+                CURVE_OVERRIDE[k] = (lambda kk, sh, un: (lambda t: (un(t) if un else C.resample(_CURVES.setdefault(kk, C.load(kk)), t, t, 1.0)[0]) + sh))(k, d(k), under)
+        TRUNK_FLEX += d("trunk_flex"); TRUNK_SIDE += d("trunk_side"); REAR_FOOT_YAW += d("rear_foot_yaw")
+        STRIDE += d("stride_cm") / 100.0 / self.H; STRIDE_CLOSED += d("stride_closed_cm") / 100.0
+        OBLIQUITY = tuple((t, v + d("obliquity")) for t, v in OBLIQUITY)
+        TRAIL_KNEE = tuple((t, v + d("trail_knee")) for t, v in TRAIL_KNEE)
+        LEAD_FOOT_SHIFT[0] += d("lead_foot")
+        _SHIFT_ON[0] = True
+
+    def __exit__(self, *exc):
+        global TRUNK_FLEX, TRUNK_SIDE, REAR_FOOT_YAW, STRIDE, STRIDE_CLOSED, OBLIQUITY, TRAIL_KNEE
+        ov, TRUNK_FLEX, TRUNK_SIDE, REAR_FOOT_YAW, STRIDE, STRIDE_CLOSED, OBLIQUITY, TRAIL_KNEE, LEAD_FOOT_SHIFT[0] = self.keep
+        CURVE_OVERRIDE.clear(); CURVE_OVERRIDE.update(ov)
+        _SHIFT_ON[0] = False
+        return False
+
+
+def start_margins(mdl, st):
+    """{range: deg inside its anatomical end} for every range the body holds (range_specs with a size), in state st: the
+    distance from the nearer end; a wrist's ellipse by how far inside its edge along the line from its centre.
+    Negative: past the end."""
+    ang = range_angles(mdl, st)
+    out = {}
+    for name, a, b_, ax, ea, fb, lo, hi, size, kind in range_specs(None, mdl.grip, mdl.feet, mdl.wrist):
+        if size is not None:
+            out[name] = -ang[name] if kind == 3 else min(ang[name] - lo, hi - ang[name])
+    return out
+
+
+def clear_start(t0=-0.250, clear=None, log=None, **model):
+    """The rule for the start (body-motion 4.12): a least change to the launch posture's numbers (POSTURE_NUMBERS; the
+    sum of the changes' squares, a degree and a centimetre counted alike [E]) that puts every joint at least `clear`
+    (START_CLEAR_DEG) inside its anatomical end and each wrist that far inside its ellipse, FOUND BY A COMPASS SEARCH
+    WITH A PENALTY: what it returns is least number by number, not shown to be the least of all (session 10's review,
+    P3-5). From no change, each number
+    in turn is tried a step up and a step down and what lowers (the sum of squares + a penalty on every margin's
+    shortfall, squared) is kept; the steps halve from 2 to 1/8 and the penalty's weight rises in four stages.
+    Deterministic. model: Model()'s options (the hands' body). Returns ({number: change}, {range: margin})."""
+    clear = START_CLEAR_DEG if clear is None else clear
+    n = len(POSTURE_NUMBERS)
+
+    def margins(x):
+        m = Model(ranges=(), shift={k: v for k, v in zip(POSTURE_NUMBERS, x) if v != 0.0} or None, **model)
+        return start_margins(m, pose(m, t0)[0])
+
+    def cost(x, mu):
+        try:
+            mg = margins(x)
+        except E.SolveError:
+            return 1e12, None
+        return sum(v * v for v in x) + mu * sum(max(0.0, clear - v) ** 2 for v in mg.values()), mg
+    x = [0.0] * n
+    for mu in (10.0, 100.0, 1000.0, 1e4):
+        step = 2.0
+        f, mg = cost(x, mu)
+        while step >= 0.124:
+            moved = False
+            for i in range(n):
+                for sgn in (1.0, -1.0):
+                    xn = list(x); xn[i] += sgn * step
+                    fn, mgn = cost(xn, mu)
+                    if fn < f - 1e-12:
+                        x, f, mg, moved = xn, fn, mgn, True
+                        break
+            if not moved:
+                step *= 0.5
+        if log:
+            log("   penalty %.0f: sum of squares %.2f, least margin %.2f deg (%s)" % (mu, sum(v * v for v in x), min(mg.values()), min(mg, key=mg.get)))
+    return {k: v for k, v in zip(POSTURE_NUMBERS, x) if v != 0.0}, mg
+
+
 ARM_GRID, ARM_FINE = 5, 1      # deg: the search for the start's free choices (pose): a grid, then a finer one about its best
 ARM_CLEAR = 0.10               # m [E: 0.08-0.12, about an upper arm's thickness]: an elbow's centre stays this far from the other arm's bones
 
@@ -653,6 +838,9 @@ def pose(mdl, t0, heel="solve", report=None, hands_guess=None, hands_solve=True,
     (feet held, pelvis, trunk and bat hardly moved). Each sole point in contact starts as deep as [4]'s
     vertical load on that foot presses it, and with its friction spring stretched to carry [4]'s
     horizontal force. Nothing here looks at where the swing ends. Returns (state, friction anchors)."""
+    if getattr(mdl, "shift", None) and not _SHIFT_ON[0]:
+        with _shifted(mdl.shift, mdl.H):
+            return pose(mdl, t0, heel, report, hands_guess, hands_solve, arms)
     s, b, H = mdl.sys, mdl.b, mdl.H
     st = s.new_state()
     L = mdl.len
@@ -661,7 +849,7 @@ def pose(mdl, t0, heel="solve", report=None, hands_guess=None, hands_solve=True,
     BW = mdl.M * E.G
     reach_of = lambda deg: math.sqrt(L["thigh"] ** 2 + L["shank"] ** 2 + 2 * L["thigh"] * L["shank"] * math.cos(deg * D2R))
     ank0 = {"R": (0.0, -0.5 * stride, ANKLE_H * H), "L": (STRIDE_CLOSED, 0.5 * stride, ANKLE_H * H)}
-    yaw = {"R": REAR_FOOT_YAW * D2R, "L": (90.0 - curve_lead_foot(t0)) * D2R}
+    yaw = {"R": REAR_FOOT_YAW * D2R, "L": (90.0 - curve_lead_foot(t0) - LEAD_FOOT_SHIFT[0]) * D2R}
     fdir = {sd: (math.cos(yaw[sd]), math.sin(yaw[sd]), 0.0) for sd, sg in SIDES}
     load = {sd: max(0.0, curve(("lead" if sd == "L" else "trail") + "_grf_z", t0)) / 100.0 * BW for sd, sg in SIDES}
     cf_L = C.DE_LEVA["foot"][2]
@@ -793,7 +981,9 @@ def pose(mdl, t0, heel="solve", report=None, hands_guess=None, hands_solve=True,
 
     swivel = {"L": 0.0, "R": 0.0}
     if hands_body:
-        key = (repr(sho), repr(Rt), repr(bz), repr(want), GRIP_OBLIQUE, repr(GRIP_ROLL), repr(arm_range()), repr(p), ROM["sh_hadd"], ROM["sh_habd"], ARM_CLEAR)
+        oval = getattr(mdl, "wrist", "box") == "oval"
+        key = (repr(sho), repr(Rt), repr(bz), repr(want), GRIP_OBLIQUE, repr(GRIP_ROLL), repr(arm_range()), repr(p), ROM["sh_hadd"], ROM["sh_habd"], ARM_CLEAR,
+               oval, WRIST_OVAL_TILT)
         if arms is None and key in _ARM_CACHE:
             arms = _ARM_CACHE[key]
         if arms is None:
@@ -816,7 +1006,7 @@ def pose(mdl, t0, heel="solve", report=None, hands_guess=None, hands_solve=True,
                     cand[sd] = []
                     for sdeg in rng_:
                         el = elbow_of(sd, sg, wr_[sd], sdeg * D2R)
-                        cand[sd].append((strain(arm_angles(sd, E.unit(E.sub(sho[sd], el)), E.unit(E.sub(el, wr_[sd])), Rb_, Rt)), sdeg, el))
+                        cand[sd].append((strain(arm_angles(sd, E.unit(E.sub(sho[sd], el)), E.unit(E.sub(el, wr_[sd])), Rb_, Rt), oval=oval), sdeg, el))
                 best = None
                 for cl, sl, el_l in cand["L"]:
                     for cr, sr, el_r in cand["R"]:
