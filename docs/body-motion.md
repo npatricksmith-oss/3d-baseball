@@ -1660,6 +1660,58 @@ Session 10 (2026-11-26, PLAN D41: the second of three) has one question: **can t
 
 **What a start that owes [4] nothing would add** (not built here; §4.10 sized it). The launch posture and its velocities would be results of the batter's own stance, load and stride, so nothing of the lab study would be left in the swing at all; and the two things this rule cannot do would be done: the weight would be where his own motion put it (so the feet's forces would balance his body, and "hold still" would mean something), and the grip's obliqueness would be chosen without [4]'s posture (§4.11, the review's P3-3). It needs postural feedback through the stance and stride (§5.3) and is not inside this session.
 
+#### Part 2: the test without a search (the design, written before it was built or run)
+
+**The question this part can answer:** is there a motion from the cleared start to a hitter's contact posture, putting the sweet spot through the aim's ball along the ball's line at the gate's speed, that asks no muscle group for more than its strength at the speed it is moving, no foot for more than the ground can give, and no joint to go past its range? **This is a diagnosis.** The motion is no target, nothing is fitted to it and no score reads it (PLAN D37). It is built from joint ranges, the aim's ball and stated time laws, and is not shaped on [4]'s curves; the one thing of [4]'s in it is the start, as everywhere.
+
+**How a motion is built** (`analysis/research/body/built3d.py`).
+
+- *A posture is the 17 numbers of part 1 and three more:* the pelvis's turn, travel and side tilt; both knees' bends (the pelvis's height and the raised heel follow from them, as the placement has always worked); both feet's angles, the stride; the trunk's turn, forward bend and side bend; the bat's direction seen from above and its tilt; where the hands are (the lead hand's place, carried in the trunk's frame, in place of [4]'s two elbows and lag); the bat's roll and the two elbows' swivels.
+- *The start:* part 1's, with its starting velocities.
+- *The contact posture,* built as `test_a_hitters_contact_posture_lies_inside_every_arm_range` builds one, for the whole body:
+  - the sweet spot at the aim's ball; the bat square to the ball's line seen from above and its barrel 20° below the hands [E: 10–30];
+  - the pelvis turned 75° toward the pitcher from facing the plate [E: 60–90; hitters' hips face the pitcher or nearly at contact] and carried forward 10 cm [E: 0–17, OpenBiomechanics' travel];
+  - the trunk turned 15° further than the pelvis, bent forward 30° and to the side 20° [E, inside the test's 25–40° and 15–30°; hitters' side tilt at contact is 32°, OpenBiomechanics];
+  - the lead knee 14° bent, the rear 70° [E: 55–90], the rear foot turned 60° toward the pitcher on its ball (its heel's height follows from the knees);
+  - the bat's roll and the two swivels by part 1's rule of least strain with the elbows clear; the elbows' bends are then results, reported against OpenBiomechanics' 53 ± 15° and 79 ± 13°.
+- *What moves at contact:* the sweet spot's velocity is the gate's speed along the ball's line, coming up through it (+5.3°). The hands carry a fifth of it [E: 0.15–0.30; measured hands are at 4–7 m/s at contact] and the bat's turning about the hands the rest, about the axis square to the bat and to that line. The pelvis is still turning at half its average rate and the trunk at its average rate [E].
+- *The time law:* each number runs from its start to its contact value on a cubic in time that meets its starting rate and its rate at contact; before its own onset it carries on at its starting rate. Three onsets: the legs and pelvis, the trunk, the arms and bat.
+- *After contact* the same laws run on for 20 ms, so that the accelerations at contact are differences of real postures.
+- **The base motion:** 200 ms from the start to contact; the trunk starts 30 ms after the legs and the arms 60 ms after; the pelvis carried forward 10 cm; 29 m/s.
+
+**The motions, varied in a stated way** (one thing at a time from the base, then every combination of the first three):
+
+| Varied | Values |
+| :-- | :-- |
+| how long it takes, start to contact | 160, **200**, 250 ms |
+| the order: the trunk's and the arms' onsets after the legs' | 0 and 0 (all together); **30 and 60**; 50 and 100 ms |
+| the weight shift: the pelvis carried forward | 0, **10**, 17 cm |
+| the sweet spot's speed | 17, 21, 25, **29**, 32 m/s |
+| the hands' share of that speed | 0.15, **0.20**, 0.30 |
+| the barrel below the hands | 10, **20**, 30° |
+| the pelvis's turn at contact | 60, **75**, 90° |
+
+27 combinations of the first three at 29 m/s and at 21 m/s, and the single changes: about 70 motions. Each is first checked as geometry: every joint inside its range at every instant (how far inside is reported), the elbows clear, the feet where they were. A motion that leaves a range is reported as that and is not solved.
+
+**How the torques are solved** (the engine's own equations, as `inverse3d.py` does; the Python engine, no ground model).
+
+- Every 5 ms the body is placed on the motion; velocities and accelerations are differences of postures 2 ms apart, made exactly consistent with the joints.
+- The unknowns are the loads that can act on this body: **a torque about each of the 29 joint axes the muscles act about** (the trunk's three about the pelvis's axes; each hip's three about the thigh's own axes, the way hip strength is tested; each knee's hinge; each ankle's bend and roll; each shoulder's three, about the trunk's long axis, about the floating axis that raises and lowers the arm, and about the upper arm's own length; each elbow's bend and the forearm's turn; each wrist's bend and tilt), and **a force at each sole point that is on the ground**, which can only push, inside the friction cone of the measured grip (1.15).
+- The joints' own damping [E] is in the equations, so the torques are what the muscles must give. The hold-still torques are not: they stand for muscle.
+- **Each torque is held against the muscle group that makes it, at the speed that joint axis is turning** (strength × its measured strength-at-speed curve, §4.5; a muscle being stretched has its eccentric plateau). The two arms and the bat are a closed ring and the two feet another, so the loads are not determined by the motion: twelve numbers are free. They are chosen, at each instant, **to make the hardest-worked muscle group's share of its strength at that speed as small as it can be** (a linear programme; `scipy`'s solver, run through `uv`). So the answer at each instant is the best this body could do for that motion, not one arbitrary sharing.
+- **Directions no muscle of this body acts in** (§4.5 lists them: the trunk's bending forward, back and sideways; the lead arm drawn across and the rear arm drawn back about the trunk's axis; the rear hip's flexion; each hip's rotators the other way; each ankle's pull-up and roll; each wrist's tilt toward the thumb) are left free in that solve and then made as small as they can be without raising the worst share; what they are asked for is reported in N·m beside a measured strength where one exists (the trunk's bending: Schultz 1987's standing men, mean + 2 SD scaled as §4.5 scales, 370–480 N·m; for scale only, the body has no such muscle).
+- **A joint's end carries nothing by construction:** the motion is inside every range, so no stop is engaged; the margins are the report.
+- *Checks of the solve itself:* a forward run of a known plan (a saved practice result) is fed back as a motion and its drives' torques, read from the run, must come back as a feasible sharing with a worst share no larger than the run's own; the solved loads put back into the engine's equations must reproduce the motion's accelerations (to 10⁻⁶ of their size); the result at a 2.5 ms sampling and with the differences taken over 1 ms and 4 ms.
+
+**What a pass and a fail would and would not show** (written before any run).
+
+- *A pass* (some motion whose worst share stays at or under 1 at every instant, on its feet): that one motion is inside this body's strengths, ranges and grip, **so the body is strong enough to swing at that speed** and the search's job is to find and control such a motion. It would not show that muscles can drive it: a muscle's torque here may jump from one 5 ms to the next, where the body's muscles need at least 50 ms to rise and 50 ms to let go and act through tendon springs; nor that it balances after contact; nor that it is a hitter's swing; nor that the practice search can find it.
+- *A fail at 29 m/s with a pass at a lower speed:* this family of motions is short of the gate, by a named muscle group at a named instant. The speed at which the worst share crosses 1, motion by motion, is the body's limit **for this family**.
+- *When "this body cannot" may be said:* only if every motion of the table fails at the same named joint with a wide margin (a worst share over 1.5), and making that joint's work easier in the ways the table allows (longer, a different order, more or less weight shift, more from the hands) does not bring it under. About 70 motions in seven directions is a family, not every motion; a fail is "no motion of this family", and the write-up says which freedoms the family did not vary (the path between start and contact; the contact posture's other numbers).
+- *A muscle that is asked for something in a direction it does not have* is a statement about the body's list of muscles (§4.5), not about strength; it is reported apart.
+
+**What I expect:** the base motion at 29 m/s fails. The arms' muscles are small (the forearms' 17–18 N·m, the wrists' 24–51, the shoulders' turn 39–70) and the bat's last 60 ms asks most of them; I expect the worst share between 1.5 and 4 there, at the wrists or the forearms' turn, and the trunk's side bend asked for 200–400 N·m with no muscle to give it. The legs and the trunk's turn under 1. The speed at which the base motion's worst share crosses 1: 17–23 m/s. Longer and more staggered motions do better than short ones. I do not know whether any of the 70 passes at 29.
+
 ## 5. The drive and its control (§14.1 items 2 and 3)
 
 ### 5.1 What a drive is
