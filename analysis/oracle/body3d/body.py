@@ -65,6 +65,194 @@ HANDS_GUESS = (0.10, -0.05, 0.02)   # m, first guess of the hands from the rear 
 
 SIDES = (("L", 1.0), ("R", -1.0))
 
+# ---- the joints' ranges (body-motion 4.10, session 8; PLAN D37) ------------------------------------
+# Where each joint's range ends, deg: the mean of a sample of adult men measured passively with a goniometer.
+# One rule for which sample: Soucie 2011 (CDC; 114 men of 20-44) where it measured the motion; else Roaas &
+# Andersson 1982 (105 men of 30-40; the hip's sideways and turning ranges); else Boone & Azen 1979 (109 males,
+# active; the wrist, through Norkin & White's table). The trunk's twist is the largest that professional batters
+# and pitchers were measured to reach (Fleisig 2013: 46 +- 9 and 55 +- 6 deg), so it is a floor on the range.
+# The sources and how each was read are in body-motion 4.10's table. Nothing here is from [4].
+ROM = {"hip_flex": 130.4, "hip_ext": 17.4, "hip_abd": 38.8, "hip_add": 30.5, "hip_irot": 32.6, "hip_erot": 33.6,
+       "knee_flex": 137.7, "knee_hyper": 1.0, "ankle_df": 12.7, "ankle_pf": 54.6,
+       "elbow_flex": 144.6, "elbow_hyper": 0.8, "pron": 76.9, "sup": 85.0,
+       "wrist_rad": 22.0, "wrist_uln": 36.0, "wrist_flex": 76.0, "wrist_ext": 75.0,
+       "trunk_twist": 55.0,                 # [E: 46-64]
+       "trunk_fwd": 80.0, "trunk_back": 25.0, "trunk_side": 35.0,   # [E] AAOS's thoracolumbar values, not read this session
+       "sh_hadd": SH_ADD_MAX, "sh_habd": 45.0}                      # [E] 135: clinical; 45 behind the frontal plane: not read
+# Past the end of a range the joint resists as a one-sided spring. NO measurement of that resistance was found for
+# any joint here (body-motion 4.10): the stiffness is [E]. "big": the trunk, hips, knees, ankles and the shoulders'
+# sweep; "small": the elbows, forearms and wrists (their strengths are 17-112 N m, and a stiffer spring on so
+# little inertia would need a smaller step). Ranges tested: 2,000 and 6,000 for the big joints.
+RANGE_K = {"big": 20000.0, "small": 2000.0}      # N m/rad
+RANGE_C = {"big": 60.0, "small": 20.0}           # N m s/rad
+
+
+def cock_reference(mdl, st):
+    """{side: +1 or -1}: which way along the handle each forearm's x points in state st (it is set by how the
+    placement closes the hands; drive.add_drives reads the same thing for the wrists' flexion drives). The cock is
+    read from that end of the handle, so its reading starts within 90 deg of zero and its 58 deg cannot reach the wrap."""
+    bz = mdl.axis(st, "bat", (0, 0, 1))
+    return {sd: (1.0 if E.dot(mdl.axis(st, "farm_" + sd, (1, 0, 0)), bz) > 0 else -1.0) for sd, sg in SIDES}
+
+
+def range_specs(cock_ref=None):
+    """every joint range as an engine stop: (name, body a, body b, axis in a, e in a, f in b, lo deg, hi deg, size, kind).
+    The angle is the one engine.System.stop measures. kind 0: about the axis (fixed in a), from e (in a) to f (in b)
+    projected square to the axis. kind 1: f's angle out of the plane square to the axis. Where each is undefined
+    (f along the axis) is said beside it and in body-motion 4.10; the engine fails loudly within 5 deg of it.
+    cock_ref: cock_reference()'s signs (default +1)."""
+    R = ROM
+    cock_ref = cock_ref or {"L": 1.0, "R": 1.0}
+    out = [("trunk_twist", "pelvis", "trunk", (0, 0, 1), (1, 0, 0), (1, 0, 0), -R["trunk_twist"], R["trunk_twist"], "big"),
+           ("trunk_bend", "pelvis", "trunk", (0, 1, 0), (0, 0, 1), (0, 0, 1), -R["trunk_back"], R["trunk_fwd"], "big"),
+           ("trunk_side", "pelvis", "trunk", (1, 0, 0), (0, 0, 1), (0, 0, 1), -R["trunk_side"], R["trunk_side"], "big")]
+    for sd, sg in SIDES:
+        L = sg > 0
+        out += [
+            # the thigh swung forward (flexion) is a turn of its long axis about the pelvis's y by a negative angle
+            ("hip_flex_" + sd, "pelvis", "thigh_" + sd, (0, 1, 0), (0, 0, 1), (0, 0, 1), -R["hip_flex"], R["hip_ext"], "big"),
+            # the thigh's sideways angle as the joint's own (the ISB hip's ab/adduction): the angle of the thigh, hip toward
+            # knee, out of the pelvis's fore-and-aft plane, positive toward the body's left (abduction on the left leg).
+            # A stop of kind 1. (Until session 8's review this was the thigh projected about the pelvis's x, which reads
+            # 39 deg for a true 30 when the hip is also bent 45.) Undefined only with the thigh straight out to the side.
+            ("hip_abd_" + sd, "pelvis", "thigh_" + sd, (0, 1, 0), (0, 0, 1), (0, 0, -1),
+             -(R["hip_add"] if L else R["hip_abd"]), R["hip_abd"] if L else R["hip_add"], "big", 1),
+            # about the thigh's own axis, from the knee's hinge to the pelvis's y: positive is the left thigh turned in
+            ("hip_rot_" + sd, "thigh_" + sd, "pelvis", (0, 0, 1), (0, 1, 0), (0, 1, 0),
+             -(R["hip_erot"] if L else R["hip_irot"]), R["hip_irot"] if L else R["hip_erot"], "big"),
+            ("knee_" + sd, "thigh_" + sd, "shank_" + sd, (0, 1, 0), (0, 0, 1), (0, 0, 1), -R["knee_hyper"], R["knee_flex"], "big"),
+            # the foot's toe turned down about the shank's hinge is positive
+            ("ankle_" + sd, "shank_" + sd, "foot_" + sd, (0, 1, 0), (1, 0, 0), (1, 0, 0), -R["ankle_df"], R["ankle_pf"], None),   # reported, not held: the range is a straight knee's, unloaded
+            # the upper arm across the chest: its angle, shoulder toward elbow, out of the trunk's fore-and-aft plane toward
+            # the other side (kind 1). 0 is the arm anywhere in that plane, hanging included; the range's end is 135 deg
+            # from straight out to its own side, so +45 here. (The projection "seen down the trunk's axis" of sessions
+            # 2-8 has no value with the arm hanging, where its gradient grows without limit: 2.4 times at 25 deg from
+            # hanging, which swings reach. This reading is undefined only with the arm pointing straight across.)
+            ("shoulder_" + sd, "trunk", "uarm_" + sd, (0, -sg, 0), (0, 0, 1), (0, 0, -1), -91.0, R["sh_hadd"] - 90.0, "big", 1),
+            # and drawn back behind the shoulders' line: its angle out of the trunk's side-to-side plane, backward
+            ("shoulder_back_" + sd, "trunk", "uarm_" + sd, (-1, 0, 0), (0, 0, 1), (0, 0, -1), -91.0, R["sh_habd"], "big", 1),
+            ("elbow_" + sd, "uarm_" + sd, "farm_" + sd, (0, 1, 0), (0, 0, 1), (0, 0, 1), -R["elbow_hyper"], R["elbow_flex"], "small"),
+            # the wrist's cock, on the joint's own axis: the wrist is a universal joint whose second axis is the bat's
+            # y, and the forearm's x (its first axis) is held square to it, so the angle of the forearm's x about the
+            # bat's y, from the handle, IS the cock. (Until session 8's review this read the forearm's long axis
+            # projected onto the bat's x-z plane, which turns over by 180 deg when the wrist's flexion passes 90.)
+            # What the number means: with the wrist unflexed, 90 deg less the angle between the forearm (wrist toward elbow)
+            # and the barrel (in general cos of that angle = sin(cock) x cos(flexion)). Zero is
+            # the forearm square to the handle; positive is the barrel folded back toward the elbow (the thumb's side,
+            # radial deviation, since both hands hold the bat thumb toward the barrel); negative is the bat opened out
+            # toward a straight line with the forearm (the bat released). Which way is uncocking is not written
+            # here: add_ranges takes it from the model.
+            ("wrist_dev_" + sd, "bat", "farm_" + sd, (0, 1, 0), (0, 0, cock_ref[sd]), (1, 0, 0), -R["wrist_uln"], R["wrist_rad"], "small"),
+            # the wrist's flexion and extension: about the forearm's x, from the forearm's y to the bat's y
+            ("wrist_flex_" + sd, "farm_" + sd, "bat", (1, 0, 0), (0, 1, 0), (0, 1, 0), -R["wrist_ext"], R["wrist_flex"], "small")]
+    return [t if len(t) == 10 else t + (0,) for t in out]      # the tenth entry: the stop's kind (engine.System.stop)
+
+
+RANGE_CLEAR = 2.0          # deg: a stop begins at least this far beyond the start's own angle (the start is a hitter's posture)
+WRIST_COCK_INSIDE = 5.0    # deg [E]: at the start each wrist is this far inside the cocked end of its 58 deg of travel
+
+
+def uncock_sign(mdl, st, d=1e-3):
+    """+1 if the wrists' cock readings RISE as the bat uncocks, -1 if they fall, found from the model itself: the bat
+    is turned a little about its own y, whichever way brings its barrel toward the lead arm's line (the lag falls,
+    as it does through a swing), and the readings are read again. Both wrists share the bat's y, so one sign serves both."""
+    i = mdl.b["bat"]
+    lag0 = mdl.observe(st)["bat_lag"]
+    a0 = range_angles(mdl, st)
+    by = mdl.axis(st, "bat", (0, 1, 0))
+    for turn in (d, -d):
+        s2 = list(st)
+        s2[13 * i + 3:13 * i + 7] = E.qmul(E.qaxis(by, turn), tuple(st[13 * i + 3:13 * i + 7]))
+        if mdl.observe(s2)["bat_lag"] < lag0:
+            a1 = range_angles(mdl, s2)
+            return 1.0 if a1["wrist_dev_L"] > a0["wrist_dev_L"] else -1.0
+    raise ValueError("turning the bat about its y does not change the lag")
+
+
+def add_ranges(mdl, st, k_big=None, wrists="cocked", rom=None):
+    """the joints' ranges as one-sided stops on a model built with ranges=() and placed in state st (body-motion
+    4.10). Every stop of range_specs() that has a size, with two rules: a wrist has no anatomical zero in this body
+    (both hands are welded to the handle at one roll), so its TRAVEL is held, placed from its angle at the start
+    (the cock: the start WRIST_COCK_INSIDE inside its COCKED end, so that the rest of the 58 deg lies the way the bat
+    uncocks, which is found from the model by uncock_sign, not from a sign written here; flexion: the start in the
+    middle); and no stop begins nearer than RANGE_CLEAR beyond the start's own angle. The other placings of the
+    cock, each [E] and each a rerun's: wrists="mirrored" (the travel the other way, toward the barrel folding back on
+    the forearm, which is the way the wrists of the swings fitted to [4] went), "middle", and "square" (the clinical
+    22 and 36 deg either side of the forearm square to the handle, widened to clear the start).
+    Returns {name: (lo, hi)} deg."""
+    s, b = mdl.sys, mdl.b
+    R = dict(ROM, **(rom or {}))
+    keep = dict(ROM)
+    ROM.update(R)
+    mdl.cock_ref = cock_reference(mdl, st)
+    specs = range_specs(mdl.cock_ref)
+    ROM.clear(); ROM.update(keep)
+    ang = range_angles(mdl, st)
+    out = {}
+    for name, a, b_, ax, ea, fb, lo, hi, size, kind in specs:
+        if size is None:
+            continue
+        a0 = ang[name]
+        if name.startswith("wrist_dev"):
+            span = R["wrist_rad"] + R["wrist_uln"]
+            up = uncock_sign(mdl, st) > 0                # the reading rises as the bat uncocks: the travel lies above the start
+            if wrists == "square":                       # the range about the forearm square to the handle [E], wherever the start is
+                lo, hi = -R["wrist_uln"], R["wrist_rad"]
+            else:
+                if wrists == "mirrored":                 # the review's placing: the travel the way the earlier swings' wrists went
+                    up = not up
+                inside = 0.5 * span if wrists == "middle" else WRIST_COCK_INSIDE
+                if up:
+                    lo = a0 - inside
+                    hi = lo + span
+                else:
+                    hi = a0 + inside
+                    lo = hi - span
+        elif name.startswith("wrist_flex"):
+            span = R["wrist_flex"] + R["wrist_ext"]
+            lo, hi = a0 - 0.5 * span, a0 + 0.5 * span
+        lo, hi = min(lo, a0 - RANGE_CLEAR), max(hi, a0 + RANGE_CLEAR)
+        k = RANGE_K[size] if (k_big is None or size != "big") else k_big
+        c = RANGE_C[size] * (k / RANGE_K[size]) ** 0.5
+        s.stop(name, b[a], b[b_], ax, ea, fb, lo * D2R, hi * D2R, k, c, kind)
+        out[name] = (lo, hi)
+    return out
+
+
+def range_angles(mdl, st):
+    """{name: angle, deg} of every range_specs() entry in state st, measured as the engine's stop measures it, and
+    three more that no stop holds: each forearm's turn (pronation +) and each upper arm's turn about its own axis
+    (internal rotation +, by the swing-twist split from the trunk; zero with the arm hanging and the elbow's hinge
+    along the trunk's y), and the arm's angle from hanging. The cock is read from the end of the handle the model
+    was given at its start (mdl.cock_ref, set by add_ranges; otherwise taken from st itself)."""
+    s = mdl.sys
+    out = {}
+    Rm = {n: E.qR(s.pose(st, i)[1]) for n, i in mdl.b.items()}
+    ref = getattr(mdl, "cock_ref", None) or cock_reference(mdl, st)
+    for name, a, b_, ax, ea, fb, lo, hi, size, kind in range_specs(ref):
+        n = E.mv(Rm[a], E.unit(ax)); e = E.mv(Rm[a], E.unit(ea)); f = E.mv(Rm[b_], E.unit(fb))
+        out[name] = (math.asin(max(-1.0, min(1.0, E.dot(n, f)))) if kind == 1 else math.atan2(E.dot(n, E.cross(e, f)), E.dot(e, f))) / D2R
+    for sd, sg in SIDES:
+        zf = E.mv(Rm["farm_" + sd], (0, 0, 1))
+        fx = E.mv(Rm["farm_" + sd], (1, 0, 0))
+        # the forearm's turn on the elbow's own second axis: the forearm's x about its z, from a reference the upper arm
+        # carries (the elbow's hinge crossed with the forearm). Which end of its x counts is fixed once, from the start
+        # (ref, the same sign the cock is read with), so the reading cannot turn over. (Until session 8's second review
+        # the end was chosen at every instant by which way the forearm's x lay along the bat, which changes when the
+        # wrist's cock passes the line of the bat: a 180 deg jump that read a 106 deg turn as 285.)
+        g = E.scale(fx, ref[sd])
+        r = E.cross(E.mv(Rm["uarm_" + sd], (0, 1, 0)), zf)       # where it points with the forearm neither pronated nor supinated
+        ang = math.atan2(E.dot(zf, E.cross(r, g)), E.dot(r, g)) / D2R
+        out["pron_" + sd] = -sg * ang                            # the right forearm pronates about its own +z, the left about -z
+        qt = s.pose(st, mdl.b["trunk"])[1]; qu = s.pose(st, mdl.b["uarm_" + sd])[1]
+        q = E.qmul(E.qconj(qt), qu)
+        tw = 2.0 * math.atan2(q[3], q[0]) / D2R
+        tw = (tw + 180.0) % 360.0 - 180.0
+        out["sh_rot_" + sd] = -sg * tw                           # the right arm turns in about its own +z, the left about -z
+        zt = E.mv(Rm["trunk"], (0, 0, 1)); zu = E.mv(Rm["uarm_" + sd], (0, 0, 1))
+        out["sh_elev_" + sd] = math.acos(max(-1.0, min(1.0, E.dot(zu, zt)))) / D2R
+    return out
+
 
 def curve(name, t):
     """[4]'s digitised mean curve at time t (s), by linear interpolation."""
@@ -87,8 +275,12 @@ def curve_rate(name, t, h=0.005):
 class Model:
     """the engine System of a batter of stature H (m) and mass M (kg), with named bodies and joint points."""
 
-    def __init__(self, H=1.84, M=92.0, contacts=True, mu=MU, shoulder_stops=True):
+    def __init__(self, H=1.84, M=92.0, contacts=True, mu=MU, shoulder_stops=True, ranges=None):
+        """ranges: None, the stops of sessions 1-7 (the knees' and elbows' bend, the shoulders' sweep across, at
+        STOP_K); or a set of names from range_specs() ("all" for every one): those ranges as stops at RANGE_K, in
+        place of the old ones (body-motion 4.10)."""
         self.H, self.M = H, M
+        self.ranges = ranges
         s = self.sys = E.System()
         seg = lambda n: C.segment(n, H, M)
         self.b = b = {}
@@ -156,9 +348,10 @@ class Model:
             s.universal(*_j(J["wrist_" + sd]), (1, 0, 0), (0, 1, 0))       # flexion (forearm's x), the cock (bat's y)
             # no hyperextension: one-sided stops on the knee's and elbow's bend (place() makes each joint's own
             # +y its flexion axis, so the angle from the upper segment's z to the lower one's about +y is the bend)
-            s.stop("knee_" + sd, th, sh, (0, 1, 0), (0, 0, 1), (0, 0, 1), 0.0, FLEX_MAX * D2R, STOP_K, STOP_C)
-            s.stop("elbow_" + sd, ua, fa, (0, 1, 0), (0, 0, 1), (0, 0, 1), 0.0, FLEX_MAX * D2R, STOP_K, STOP_C)
-            if shoulder_stops:
+            if ranges is None:
+                s.stop("knee_" + sd, th, sh, (0, 1, 0), (0, 0, 1), (0, 0, 1), 0.0, FLEX_MAX * D2R, STOP_K, STOP_C)
+                s.stop("elbow_" + sd, ua, fa, (0, 1, 0), (0, 0, 1), (0, 0, 1), 0.0, FLEX_MAX * D2R, STOP_K, STOP_C)
+            if shoulder_stops and ranges is None:
                 # the upper arm cannot be brought further across the chest than its end of range: the angle,
                 # seen down the trunk's axis, from straight out to its own side round to the front and across
                 s.stop("shoulder_" + sd, b["trunk"], ua, (0, 0, -sg), (0, sg, 0), (0, 0, -1), -10.0, SH_ADD_MAX * D2R, STOP_K, STOP_C)

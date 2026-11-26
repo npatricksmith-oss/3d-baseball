@@ -53,7 +53,8 @@ const E3: [V3; 3] = [[1.0, 0.0, 0.0], [0.0, 1.0, 0.0], [0.0, 0.0, 1.0]];
 struct Pt { a: i32, b: i32, ra: V3, rb: V3 }
 struct Dt { a: i32, b: i32, ua: V3, wb: V3 }
 struct Act { a: i32, b: usize, ax: V3, t: f64, w: f64, ton: f64, rise: f64, toff: f64, a0: f64, tab: i32, ksec: f64, axb: V3 }
-struct Stop { a: i32, b: usize, ax: V3, ea: V3, fb: V3, lo: f64, hi: f64, k: f64, c: f64 }
+struct Stop { a: i32, b: usize, ax: V3, ea: V3, fb: V3, lo: f64, hi: f64, k: f64, c: f64, kind: i32 }
+const STOP_SINGULAR: f64 = 0.0872;   // engine.py's: a stop's direction this near its axis has no usable angle
 struct Hold { a: i32, b: usize, qref: [f64; 4], k: V3, c: V3, cap: f64 }
 struct Tone { a: i32, b: usize, tl: V3 }
 struct Con { b: usize, p: V3, kn: f64, cn: f64, kt: f64, ct: f64, mu: f64 }
@@ -232,14 +233,29 @@ impl Sys {
             let n = if st.a >= 0 { mv(&r[st.a as usize], &st.ax) } else { st.ax };
             let e = if st.a >= 0 { mv(&r[st.a as usize], &st.ea) } else { st.ea };
             let fb = mv(&r[st.b], &st.fb);
-            let th = dot(&n, &cross(&e, &fb)).atan2(dot(&e, &fb));
+            // engine.py's stop_angle: the angle and its own gradient g (d(angle)/dt = w_rel . g); the torque acts along g
+            let nf = dot(&n, &fb);
+            let (th, g) = if st.kind == 1 {
+                let th = f64::max(-1.0, f64::min(1.0, nf)).asin();
+                if st.lo <= th && th <= st.hi { (th, ZERO) } else {
+                    let gv = cross(&fb, &n);
+                    let l = dot(&gv, &gv).sqrt();
+                    if l < STOP_SINGULAR { eprintln!("a stop's direction lies along its axis: its angle has no gradient there"); std::process::exit(3); }
+                    (th, scale(&gv, 1.0 / l))
+                }
+            } else {
+                let fp = sub(&fb, &scale(&n, nf));
+                let l2 = dot(&fp, &fp);
+                if l2 < STOP_SINGULAR * STOP_SINGULAR { eprintln!("a stop's direction lies along its axis: the angle it reads is undefined there"); std::process::exit(3); }
+                (dot(&n, &cross(&e, &fb)).atan2(dot(&e, &fb)), sub(&n, &scale(&fp, nf / l2)))
+            };
             let wa = if st.a >= 0 { w[st.a as usize] } else { ZERO };
-            let rate = dot(&sub(&w[st.b], &wa), &n);
+            let rate = dot(&sub(&w[st.b], &wa), &g);
             let mut tau = 0.0;
             if th > st.hi { tau = -f64::max(0.0, st.k * (th - st.hi) + st.c * rate); }
             else if th < st.lo { tau = f64::max(0.0, st.k * (st.lo - th) - st.c * rate); }
             if tau != 0.0 {
-                let tv = scale(&n, tau);
+                let tv = scale(&g, tau);
                 tq[st.b] = add(&tq[st.b], &tv);
                 if st.a >= 0 { tq[st.a as usize] = sub(&tq[st.a as usize], &tv); }
                 p_stop += tau * rate;
@@ -472,7 +488,7 @@ fn main() {
     let acts: Vec<Act> = (0..n).map(|_| Act { a: tk.i(), b: tk.u(), ax: tk.v3(), t: tk.f(), w: tk.f(), ton: tk.f(), rise: tk.f(), toff: tk.f(),
                                                a0: tk.f(), tab: tk.i(), ksec: tk.f(), axb: tk.v3() }).collect();
     tk.key("stops"); let n = tk.u();
-    let stops: Vec<Stop> = (0..n).map(|_| Stop { a: tk.i(), b: tk.u(), ax: tk.v3(), ea: tk.v3(), fb: tk.v3(), lo: tk.f(), hi: tk.f(), k: tk.f(), c: tk.f() }).collect();
+    let stops: Vec<Stop> = (0..n).map(|_| Stop { a: tk.i(), b: tk.u(), ax: tk.v3(), ea: tk.v3(), fb: tk.v3(), lo: tk.f(), hi: tk.f(), k: tk.f(), c: tk.f(), kind: tk.i() }).collect();
     tk.key("holds"); let n = tk.u();
     let holds: Vec<Hold> = (0..n).map(|_| Hold { a: tk.i(), b: tk.u(), qref: [tk.f(), tk.f(), tk.f(), tk.f()], k: tk.v3(), c: tk.v3(), cap: tk.f() }).collect();
     tk.key("tones"); let n = tk.u();

@@ -441,6 +441,50 @@ def tendon_ledger(h, ecc=None):
     return w_ce - (s[-E.NW] + stored), w_ce, 0.5 * K * max(th) ** 2, max(th)
 
 
+def rod_on_a_stop(tilt_deg, kind, k=2000.0, c=0.0, T=0.1, h=1e-4):
+    """a 2 kg rod on a ball joint at the world's origin, no gravity, turned into one stop (the reviewer's probe 5).
+    kind 0: the stop reads the rod's direction about the vertical, from +x, and ends at 0; the rod starts along +x
+    tilted `tilt_deg` below the horizontal, turning into the stop with some spin about its own projection.
+    kind 1: the stop reads the rod's angle out of the x-z plane toward +y and ends at 0; the same start.
+    Returns (energy at the start, at the end, the largest seen, the stop's booked work + what its spring still holds):
+    energy is the kinetic energy plus the spring's stored half k x^2."""
+    s = E.System(g=(0.0, 0.0, 0.0))
+    I = (0.15, 0.15, 0.002)
+    b = s.body("rod", 2.0, I)
+    s.ball(-1, b, (0.0, 0.0, 0.0), (0.0, 0.0, 0.3))
+    if kind == 0:
+        s.stop("st", -1, b, (0, 0, 1), (1, 0, 0), (0, 0, -1), -10.0, 0.0, k, c, 0)
+    else:
+        s.stop("st", -1, b, (0, 1, 0), (1, 0, 0), (0, 0, -1), -10.0, 0.0, k, c, 1)
+    st = s.new_state()
+    a = math.radians(tilt_deg)
+    d = (math.cos(a), 0.0, -math.sin(a))                 # from the joint to the rod's far end: the body's -z
+    ez = (-d[0], -d[1], -d[2]); ey = (0.0, 1.0, 0.0)
+    q = E.axes_to_q(E.cross(ey, ez), ey, ez)
+    x = E.scale(d, 0.3)
+    w = (0.3 * math.cos(a), 0.0, 3.0)                    # into the stop (+z turns the rod toward +y), with spin about its projection
+    s.set_body(st, b, x, q, E.cross(w, x), w)
+    aux = s.new_aux()
+    ow = 13 * s.nb + len(s.acts)
+
+    def energy(state):
+        xx, qq, vv, ww = s.pose(state, b)
+        R = E.qR(qq)
+        wl = E.mtv(R, ww)
+        f = E.mv(R, (0, 0, -1))
+        th = math.atan2(f[1], f[0]) if kind == 0 else math.asin(max(-1.0, min(1.0, f[1])))
+        pe = 0.5 * k * th * th if th > 0 else 0.0
+        return 0.5 * 2.0 * E.dot(vv, vv) + 0.5 * sum(I[i] * wl[i] ** 2 for i in range(3)) + pe, pe
+    e0 = energy(st)[0]
+    emax = e0
+    for i in range(int(round(T / h))):
+        st = s.step(i * h, st, aux, h)
+        if i % 10 == 0:
+            emax = max(emax, energy(st)[0])
+    e1, pe1 = energy(st)
+    return e0, e1, emax, st[ow + 1] + pe1
+
+
 class EngineChecks(unittest.TestCase):
     def test_speed_curve_and_its_inverse(self):
         """a measured strength-at-speed curve passes through its points, falls with speed, rises for a stretched
@@ -643,6 +687,47 @@ class EngineChecks(unittest.TestCase):
         self.assertTrue(all(tau == 0.0 for tau, th in seen if th >= -0.3))
         self.assertGreater(min(th for tau, th in seen), -0.6)
 
+    def test_no_passive_stop_does_net_positive_work(self):
+        """a rod alone on a ball joint, no gravity, no drive, turned into one stop: its kinetic energy plus the spring's
+        stored energy never exceeds what it started with, whatever the rod's tilt out of the stop's plane and its spin
+        (session 8's review, P1-1: the rod tilted 30 and 60 deg). With damping it only loses. Both kinds of stop."""
+        for kind in (0, 1):
+            for tilt in (0.0, 30.0, 60.0):
+                for c in (0.0, 20.0):
+                    e0, e1, emax, booked = rod_on_a_stop(tilt, kind, c=c)
+                    msg = "kind %d, tilt %.0f, damping %.0f" % (kind, tilt, c)
+                    self.assertLess(emax, e0 * (1.0 + 1e-3), msg=msg)
+                    self.assertLess(booked, 1e-3 * e0, msg=msg)          # the work the engine books to the stop, with what it still stores
+                    if c == 0.0:
+                        self.assertAlmostEqual(e1, e0, delta=1e-3 * e0, msg=msg)     # and with no damper it gives it all back
+                    else:
+                        self.assertLess(e1, 0.9 * e0, msg=msg)
+
+    def test_the_stop_law_before_the_review_fails_that_check(self):
+        """the same rod with the stop's torque about its fixed axis (the law until session 8's review) gains energy
+        many times over once it is tilted out of the stop's plane: the check above can fail."""
+        E.MUT.add("stop_fixed_axis")
+        try:
+            e0, e1, emax, booked = rod_on_a_stop(30.0, 0)
+        finally:
+            E.MUT.discard("stop_fixed_axis")
+        self.assertGreater(emax, 10.0 * e0)
+        e0, e1, emax, booked = rod_on_a_stop(0.0, 0)                      # in the stop's own plane the two laws are the same
+        self.assertLess(emax, e0 * (1.0 + 1e-3))
+
+    def test_a_stop_fails_loudly_where_its_angle_is_undefined(self):
+        """a stop whose direction lies along its own axis has no angle (kind 0) or no gradient (kind 1): the run
+        raises instead of returning a clamped torque."""
+        for kind, f in ((0, (0, 0, 1)), (1, (0, 0, 1))):
+            sys = E.System(g=(0.0, 0.0, 0.0))
+            b = sys.body("rod", 2.0, (0.15, 0.15, 0.002))
+            sys.ball(-1, b, (0, 0, 0), (0, 0, 0.3))
+            sys.stop("st", -1, b, (0, 0, 1), (1, 0, 0), f, -0.1, 0.1, 2000.0, 0.0, kind)
+            st = sys.new_state()
+            sys.set_body(st, b, (0.0, 0.0, -0.3), (1.0, 0.0, 0.0, 0.0))
+            with self.assertRaises(E.SolveError):
+                sys.deriv(0.0, st, sys.new_aux())
+
 
 # ---- 7. the whole body ---------------------------------------------------------------------------
 T0 = -0.250
@@ -844,6 +929,248 @@ class BodyChecks(unittest.TestCase):
         g2, _, (c2, _) = body_energy(steps=40, h=5e-4)
         self.assertLess(abs(g2), abs(g1) / 8.0)
         self.assertLess(c2, c1 / 8.0)
+
+
+class RangeChecks(unittest.TestCase):
+    """the joints' ranges as stops (body-motion 4.10, session 8)."""
+
+    @NEED
+    def test_ranges_against_independent_measures_and_clear_of_the_start(self):
+        """range_angles reads the knees' and elbows' bends as observe() does by another route (the angle between
+        the segments' long axes) and the trunk's twist as the difference of the two measured rotations; every stop
+        begins at least RANGE_CLEAR beyond the start, so none carries anything there; and the old body is unchanged."""
+        m = B.Model(ranges=())
+        st = B.place(m, T0)
+        lim = B.add_ranges(m, st)
+        a, o = B.range_angles(m, st), m.observe(st)
+        for k, ok in (("knee_L", "lead_knee_flex"), ("knee_R", "trail_knee_flex"), ("elbow_L", "lead_elbow_flex"), ("elbow_R", "trail_elbow_flex")):
+            self.assertAlmostEqual(a[k], o[ok], delta=0.05, msg=k)
+        self.assertAlmostEqual(a["trunk_twist"], o["trunk_rot"] - o["pelvis_rot"], delta=1.5)   # the trunk leans 15 deg, so not exact
+        self.assertEqual(len(lim), 21)
+        for k, (lo, hi) in lim.items():
+            self.assertGreaterEqual(a[k] - lo, B.RANGE_CLEAR - 1e-9, msg=k)
+            self.assertGreaterEqual(hi - a[k], B.RANGE_CLEAR - 1e-9, msg=k)
+        for k in ("wrist_dev_L", "wrist_dev_R"):          # a wrist's cock has 58 deg of travel, wherever it starts
+            self.assertAlmostEqual(lim[k][1] - lim[k][0], 58.0, delta=1e-9)
+        m.sys.diag = {}
+        m.sys.deriv(T0, st, m.sys.new_aux())
+        self.assertTrue(all(tau == 0.0 for tau, th in m.sys.diag["stop"].values()))
+        m.sys.diag = None
+        self.assertEqual([x[0] for x in B.Model().sys.stops], ["knee_L", "elbow_L", "shoulder_L", "knee_R", "elbow_R", "shoulder_R"])
+
+    @NEED
+    def test_the_cocks_reading_does_not_move_when_flexion_passes_90(self):
+        """a wrist's cock read on the joint's own axis: turning the forearm about its own x (the wrist's flexion)
+        through 130 deg changes the flexion reading by that much and the cock's reading not at all. The reading
+        used until session 8's review (the forearm's long axis projected onto the bat's x-z plane) turns over by
+        180 deg on the way, which is what this test is for (review P1-3)."""
+        m = B.Model(ranges=())
+        st0 = B.place(m, T0)
+        m.cock_ref = B.cock_reference(m, st0)
+        for sd in "LR":
+            i = m.b["farm_" + sd]
+            a0 = B.range_angles(m, st0)
+            fx = m.axis(st0, "farm_" + sd, (1, 0, 0))
+            old0 = None
+            for sign in (1.0, -1.0):
+                for deg in range(0, 131, 10):
+                    st = list(st0)
+                    q = E.qmul(E.qaxis(fx, sign * deg * B.D2R), tuple(st0[13 * i + 3:13 * i + 7]))
+                    st[13 * i + 3:13 * i + 7] = q
+                    a = B.range_angles(m, st)
+                    self.assertAlmostEqual(a["wrist_dev_" + sd], a0["wrist_dev_" + sd], delta=1e-6, msg="%s %+.0f" % (sd, sign * deg))
+                    turned = (a["wrist_flex_" + sd] - a0["wrist_flex_" + sd] + 180.0) % 360.0 - 180.0
+                    self.assertAlmostEqual(abs(turned), deg, delta=1e-6)
+                    zf, bx, bz = m.axis(st, "farm_" + sd, (0, 0, 1)), m.axis(st, "bat", (1, 0, 0)), m.axis(st, "bat", (0, 0, 1))
+                    old = math.atan2(E.dot(zf, bz), -E.dot(zf, bx)) / B.D2R       # the reading before the review
+                    old0 = old if deg == 0 else old0
+                    worst = max(abs((old - old0 + 180.0) % 360.0 - 180.0), 0.0)
+                    if deg == 130:
+                        self.assertGreater(worst, 90.0, msg="the old reading should have turned over on side %s" % sd)
+
+    @NEED
+    def test_the_wrists_travel_lies_the_way_the_swing_uncocks(self):
+        """the body driven by its two uncocking wrist muscles alone for 40 ms: the lag falls, and each wrist's cock
+        moves toward the end of its range that has more than half of the 58 deg (review P1-2: the travel had been
+        placed on the other side, leaving 5 deg to uncock). The motion is the engine's, not add_ranges' own sign."""
+        m = B.Model(ranges=())
+        st = B.place(m, T0)
+        bd = Dr.bounds(m.H, m.M)
+        st = Dr.add_drives(m, st, {n: (bd[n], T0, 0.05, 1.0) for n in ("wrist_L", "wrist_R")})
+        lim = B.add_ranges(m, st)
+        Dr.solve_tone(m, st, T0, aux=list(m.start_aux))
+        Dr.add_damping(m, st)
+        aux = list(m.start_aux)
+        m.sys.sec_start(st, aux)
+        a0, lag0 = B.range_angles(m, st), m.observe(st)["bat_lag"]
+        s1 = list(st)
+        for i in range(40):
+            s1 = m.sys.step(T0 + i * 1e-3, s1, aux, 1e-3)
+        a1, lag1 = B.range_angles(m, s1), m.observe(s1)["bat_lag"]
+        self.assertLess(lag1, lag0 - 1.0)                                  # the bat uncocked (deg)
+        for k in ("wrist_dev_L", "wrist_dev_R"):
+            lo, hi = lim[k]
+            moved = a1[k] - a0[k]
+            self.assertGreater(abs(moved), 0.5, msg=k)
+            room = hi - a0[k] if moved > 0 else a0[k] - lo
+            self.assertGreater(room, 0.5 * (hi - lo), msg="%s can uncock only %.1f of %.1f deg" % (k, room, hi - lo))
+            # what the reading means, by another route: 90 deg less the angle from the forearm (toward the elbow) to the
+            # barrel; uncocking opens that angle (the bat toward a straight line with the forearm)
+            for a_, s_ in ((a0, st), (a1, s1)):
+                zf, bz = m.axis(s_, "farm_" + k[-1], (0, 0, 1)), m.axis(s_, "bat", (0, 0, 1))
+                self.assertAlmostEqual(a_[k], 90.0 - math.acos(E.dot(zf, bz)) / B.D2R, delta=2.5, msg=k)
+            self.assertLess(moved, 0.0, msg=k)
+        mir = B.Model(ranges=())                                           # the review's placing fails this test, as it must
+        stm = B.place(mir, T0)
+        limm = B.add_ranges(mir, stm, wrists="mirrored")
+        for k in ("wrist_dev_L", "wrist_dev_R"):
+            self.assertLess(a0[k] - limm[k][0], 0.5 * (limm[k][1] - limm[k][0]))
+
+    @NEED
+    def test_the_hips_sideways_angle_is_the_joints_own(self):
+        """a thigh set 30 deg out to the side reads 30 deg however far the hip is also bent forward (0, 45, 70 deg),
+        and for either sign; the projection about the pelvis's x used until session 8's review reads 39 at 45 (the
+        review's P3). The arm across the chest is read the same way: 0 with the arm hanging."""
+        m = B.Model(ranges=())
+        st0 = B.place(m, T0)
+        qp = tuple(st0[13 * m.b["pelvis"] + 3:13 * m.b["pelvis"] + 7])
+        i = m.b["thigh_L"]
+        for flex in (0.0, 45.0, 70.0):
+            for abd in (30.0, -20.0):
+                st = list(st0)
+                st[13 * i + 3:13 * i + 7] = E.qmul(qp, E.qmul(E.qaxis((0, 1, 0), -flex * B.D2R), E.qaxis((1, 0, 0), abd * B.D2R)))
+                a = B.range_angles(m, st)
+                self.assertAlmostEqual(a["hip_abd_L"], abd, delta=1e-6, msg="flexion %.0f" % flex)
+                self.assertAlmostEqual(a["hip_flex_L"], -flex, delta=1e-6)
+                zt, px, pz = m.axis(st, "thigh_L", (0, 0, 1)), m.axis(st, "pelvis", (1, 0, 0)), m.axis(st, "pelvis", (0, 0, 1))
+                old = math.atan2(E.dot(px, E.cross(pz, zt)), E.dot(pz, zt)) / B.D2R
+                if flex == 45.0 and abd == 30.0:
+                    self.assertAlmostEqual(old, 39.2, delta=0.1)
+        qt = tuple(st0[13 * m.b["trunk"] + 3:13 * m.b["trunk"] + 7])
+        j = m.b["uarm_L"]
+        st = list(st0)
+        st[13 * j + 3:13 * j + 7] = qt                                     # the arm hanging along the trunk
+        a = B.range_angles(m, st)
+        self.assertAlmostEqual(a["shoulder_L"], 0.0, delta=1e-6)
+        self.assertAlmostEqual(a["shoulder_back_L"], 0.0, delta=1e-6)
+        st[13 * j + 3:13 * j + 7] = E.qmul(qt, E.qaxis((1, 0, 0), -60.0 * B.D2R))   # swung 60 deg across the body (the left arm toward the right)
+        self.assertAlmostEqual(B.range_angles(m, st)["shoulder_L"], 60.0, delta=1e-6)
+        st[13 * j + 3:13 * j + 7] = E.qmul(qt, E.qaxis((0, 1, 0), 50.0 * B.D2R))    # swung 50 deg back behind the shoulders' line
+        self.assertAlmostEqual(B.range_angles(m, st)["shoulder_back_L"], 50.0, delta=1e-6)
+
+    @NEED
+    def test_an_arm_muscle_tensed_beforehand_only_holds(self):
+        """with the hold-still torques re-solved for the starting levels (drive.hold_response), a body whose arm
+        muscles are all tensed at 0.7 of their bounds starts with the accelerations of the body with none tensed; left
+        as they were, the same tensing moves it (review P2-4: a starting level was net drive from the first instant)."""
+        m = B.Model(ranges=())
+        st = B.place(m, T0)
+        bd = Dr.bounds(m.H, m.M)
+        arms = Dr.ARM_CHANNELS + Dr.NEW_ARM_CHANNELS
+        st = Dr.add_drives(m, st, {n: (0.0, 0.0, 0.05, 0.1, 0.0) for n in arms})
+        B.add_ranges(m, st)
+        tone, _ = Dr.solve_tone(m, st, T0, aux=list(m.start_aux))
+        W = Dr.hold_response(m, st, T0, list(m.start_aux), arms, bd)
+        s = m.sys
+
+        def acc(state):
+            aux = list(m.start_aux)
+            s.anchors(state, aux)
+            s.sec_start(state, aux)
+            ds = s.deriv(T0, state, aux)
+            return [ds[13 * i + 7 + c] for i in range(s.nb) for c in range(6)]
+        base = acc(st)
+        oa = 13 * s.nb
+        st2 = list(st)
+        for j, a in enumerate(s.acts):
+            a[4], a[9] = bd[a[0]], 0.7
+            st2[oa + j] = 0.7
+        moved = max(abs(x - y) for x, y in zip(acc(st2), base))
+        self.assertGreater(moved, 10.0)                                    # tensed and not held: it moves (rad/s^2)
+        tv = [c for j in Dr.JOINTS for c in tone[j]]
+        for n in arms:
+            tv = [x + 0.7 * y for x, y in zip(tv, W[n])]
+        s.tones = [(nm, a, b, tuple(tv[3 * k:3 * k + 3])) for k, (nm, a, b, _) in enumerate(s.tones)]
+        held = max(abs(x - y) for x, y in zip(acc(st2), base))
+        self.assertLess(held, 1e-3 * moved)
+
+    @NEED
+    def test_the_forearms_turn_does_not_move_when_the_cock_passes_the_line_of_the_bat(self):
+        """the forearm's turn is read on the elbow's own axis: turning the BAT about the wrists' axis (the cock) through
+        150 deg either way, the forearm and upper arm left where they are, changes the cock's reading by that much
+        and the forearm's turn not at all. The reading used until session 8's second review chose which end of the
+        forearm's x to read by the bat's direction and jumps 180 deg on the way (review P1-2: 106 deg read as 285)."""
+        m = B.Model(ranges=())
+        st0 = B.place(m, T0)
+        m.cock_ref = B.cock_reference(m, st0)
+        i = m.b["bat"]
+        by = m.axis(st0, "bat", (0, 1, 0))
+        a0 = B.range_angles(m, st0)
+        for sd, sg in B.SIDES:
+            jumped = False
+            for sign in (1.0, -1.0):
+                for deg in range(0, 151, 10):
+                    st = list(st0)
+                    st[13 * i + 3:13 * i + 7] = E.qmul(E.qaxis(by, sign * deg * B.D2R), tuple(st0[13 * i + 3:13 * i + 7]))
+                    a = B.range_angles(m, st)
+                    self.assertAlmostEqual(a["pron_" + sd], a0["pron_" + sd], delta=1e-6, msg="%s %+.0f" % (sd, sign * deg))
+                    moved = (a["wrist_dev_" + sd] - a0["wrist_dev_" + sd] + 180.0) % 360.0 - 180.0
+                    self.assertAlmostEqual(abs((moved + sign * deg + 180.0) % 360.0 - 180.0), 0.0, delta=1e-6)
+                    fx, zf, bz = m.axis(st, "farm_" + sd, (1, 0, 0)), m.axis(st, "farm_" + sd, (0, 0, 1)), m.axis(st, "bat", (0, 0, 1))
+                    g = fx if E.dot(fx, bz) > 0 else E.scale(fx, -1.0)          # the reading before the second review
+                    r = E.cross(m.axis(st, "uarm_" + sd, (0, 1, 0)), zf)
+                    old = -sg * math.atan2(E.dot(zf, E.cross(r, g)), E.dot(r, g)) / B.D2R
+                    if abs((old - a0["pron_" + sd] + 180.0) % 360.0 - 180.0) > 90.0:
+                        jumped = True
+            self.assertTrue(jumped, msg="the old reading should have turned over on side %s" % sd)
+
+    def _wrist_range_between_forearm_and_barrel(self, sd):
+        """a wrist's stops as angles between the forearm (wrist toward elbow) and the barrel, with the wrist unflexed:
+        90 deg less the cock's reading."""
+        m = B.Model(ranges=())
+        st = B.place(m, T0)
+        lo, hi = B.add_ranges(m, st)["wrist_dev_" + sd]
+        return 90.0 - hi, 90.0 - lo
+
+    # what a wrist reaches, as an angle between forearm and barrel: from 22 deg toward the thumb of square (68 deg; Boone &
+    # Azen through Norkin & White) to the most opened-out bat-to-lead-forearm angle measured on hitters at contact
+    # (157 deg; Gelinas 1988, research note 11 A5), each with the stops' own 2 deg of clearance
+    WRIST_REACH = (68.0 - B.RANGE_CLEAR, 157.0 + B.RANGE_CLEAR)
+
+    @NEED
+    def test_the_lead_wrists_range_is_one_a_wrist_reaches(self):
+        """the lead wrist's stops, as angles between forearm and barrel (91 to 149 deg), lie inside what a wrist reaches."""
+        lo, hi = self._wrist_range_between_forearm_and_barrel("L")
+        self.assertGreaterEqual(lo, self.WRIST_REACH[0])
+        self.assertLessEqual(hi, self.WRIST_REACH[1])
+
+    @NEED
+    @unittest.expectedFailure
+    def test_the_rear_wrists_range_is_one_a_wrist_reaches(self):
+        """EXPECTED TO FAIL until each hand has its own grip (session 8's second review, P1-1). Both hands are welded
+        to the handle at one roll, so the rear forearm starts 156 deg from the barrel, 60 deg more opened out than
+        the lead's, and its 58 deg of travel runs from 151 deg through the line of the bat (180) and 29 deg past it:
+        no wrist's range. Its stop is not moved here; what removes this failure is the rear hand's own grip."""
+        lo, hi = self._wrist_range_between_forearm_and_barrel("R")
+        self.assertGreaterEqual(lo, self.WRIST_REACH[0])
+        self.assertLessEqual(hi, self.WRIST_REACH[1])
+
+    @NEED
+    def test_a_stop_pushes_back_only_past_its_end(self):
+        """a knee turned past its range is pushed back toward it by the stop's stiffness times the excess, and a knee
+        inside its range is not pushed at all (the check fails if the stop's sign or its limits are wrong)."""
+        m = B.Model(ranges=())
+        st = B.place(m, T0)
+        lim = B.add_ranges(m, st)
+        j = [x[0] for x in m.sys.stops].index("knee_L")
+        name, a_, b_, ax, ea, fb, lo, hi, k, c, kind = m.sys.stops[j]
+        self.assertAlmostEqual(hi / B.D2R, B.ROM["knee_flex"], delta=1e-9)
+        m.sys.stops[j] = (name, a_, b_, ax, ea, fb, lo, (B.range_angles(m, st)["knee_L"] - 3.0) * B.D2R, k, 0.0, kind)   # the end moved 3 deg inside the knee's angle
+        m.sys.diag = {}
+        m.sys.deriv(T0, st, m.sys.new_aux())
+        tau, th = m.sys.diag["stop"]["knee_L"]
+        m.sys.diag = None
+        self.assertAlmostEqual(tau, -B.RANGE_K["big"] * 3.0 * B.D2R, delta=1e-6 * B.RANGE_K["big"])
 
 
 class Mutations(unittest.TestCase):
