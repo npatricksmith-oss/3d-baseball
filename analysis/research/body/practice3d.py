@@ -29,8 +29,10 @@ import fit3d as F                                      # noqa: E402  (the channe
 
 C = B.C
 CH, NP, LOWER, ARMS = F.CH, F.NP, F.LOWER, F.ARMS
-T0, T_END, H_STEP, EVERY = -0.250, 0.100, 5e-4, 10     # T0 is only the placed start's label on [4]'s clock. The step is 0.5 ms:
+T0, T_END, H_STEP, EVERY = -0.250, 0.200, 5e-4, 10     # T0 is only the placed start's label on [4]'s clock. The step is 0.5 ms:
 #   with the joints' stiff stops a violent swing does not integrate at 1 ms (body-motion 4.10); every result is rerun at 0.125 ms
+#   The run is 450 ms long (350 until session 8's fix): a search on the corrected body brought the bat to the ball exactly at
+#   the end of a 350 ms run, where nothing after contact is seen. Contact counts only if the 50 ms after it lie inside the run.
 VERIFY_H = 1.25e-4
 WORKERS = 4                                            # processes for the search's finite differences (inside one queued job)
 # ---- the pitch (4.10): the game's average four-seam fastball where it is met (sim-cli pitch --type FF, 200 pitches)
@@ -64,6 +66,12 @@ VARY = {
     "strongest": {"bound_scale": STRONGEST}, "small": {"H": 1.75, "M": 77.0},
     "strain_counted": {"strain_w": 1.0},
     "meet_061": {"ahead": 0.61}, "meet_084": {"ahead": 0.84},
+    "wrists_mirrored": {"wrists": "mirrored"}, "wrists_square": {"wrists": "square"},
+    "arms_held_by_resolving": {"hold": "resolve"},
+    # the reach one coordinate at a time, from the high-and-close ball (review P2-1)
+    "height_alone_078": {"z": 0.78, "across": 0.75, "ahead": 0.40},
+    "ahead_alone_072": {"z": 1.20, "across": 0.75, "ahead": 0.72},
+    "across_alone_092": {"z": 1.20, "across": 0.92, "ahead": 0.40},
     # diagnoses added after the main run (body-motion 4.10, step 2): is it where the ball is that defeats the body?
     "ball_at_the_top_of_the_zone": {"z": 1.05},
     "ball_high_and_close": {"z": 1.20, "across": 0.75, "ahead": 0.40},     # about where the earlier swings' bats went; no pitch a hitter is thrown
@@ -194,6 +202,8 @@ class Ctx:
         for i, rec in enumerate(recs):
             p, v = m.bat_point(rec[1], C.BAT_SS)
             a = -E.dot(E.sub(p, self.Pc), self.nb)
+            if rec[0] > T_END - AFTER + 1e-9:
+                break                                    # too late for the 50 ms after contact to be seen: not a contact
             if prev is not None and prev[0] < 0.0 <= a and -E.dot(v, self.nb) > 0.0:
                 a0, p0, v0, t0 = prev
                 h = rec[0] - t0
@@ -207,7 +217,32 @@ class Ctx:
                 vq = tuple(v0[c] + q * (v[c] - v0[c]) for c in range(3))
                 return t0 + q * h, herm(q), vq, i - 1, True
             prev = (a, p, v, rec[0])
-        return recs[-1][0], prev[1], prev[2], len(recs) - 2, False
+        p, v = m.bat_point(recs[-1][1], C.BAT_SS)
+        return recs[-1][0], p, v, len(recs) - 2, False
+
+    def nearest(self, recs):
+        """(time, sweet spot position, velocity, index of the record before) where the sweet spot comes nearest the
+        ball's place in the run, by cubic interpolation between records: the reach stage's reading (4.10)."""
+        m = self.m
+        pv = [m.bat_point(rec[1], C.BAT_SS) for rec in recs]
+        k = min(range(len(recs)), key=lambda q: E.norm(E.sub(pv[q][0], self.Pc)))
+        best = (E.norm(E.sub(pv[k][0], self.Pc)), recs[k][0], pv[k][0], pv[k][1], max(0, k - 1))
+        for i in (k - 1, k):
+            if i < 0 or i + 1 >= len(recs):
+                continue
+            (p0, v0), (p1, v1) = pv[i], pv[i + 1]
+            h = recs[i + 1][0] - recs[i][0]
+            herm = lambda q: tuple((2 * q ** 3 - 3 * q ** 2 + 1) * p0[c] + (q ** 3 - 2 * q ** 2 + q) * h * v0[c]
+                                   + (-2 * q ** 3 + 3 * q ** 2) * p1[c] + (q ** 3 - q ** 2) * h * v1[c] for c in range(3))
+            dist = lambda q: E.norm(E.sub(herm(q), self.Pc))
+            lo, hi = 0.0, 1.0
+            for _ in range(40):
+                q1, q2 = lo + (hi - lo) / 3.0, hi - (hi - lo) / 3.0
+                lo, hi = (lo, q2) if dist(q1) < dist(q2) else (q1, hi)
+            q = 0.5 * (lo + hi)
+            if dist(q) < best[0]:
+                best = (dist(q), recs[i][0] + q * h, herm(q), tuple(v0[c] + q * (v1[c] - v0[c]) for c in range(3)), i)
+        return best[1], best[2], best[3], best[4]
 
     def balance(self, recs, tx):
         """(the extrapolated centre of mass's largest distance outside the feet's area from contact to AFTER, m;
@@ -256,6 +291,20 @@ class Ctx:
         except E.SolveError:
             return None
         pl = self.plan(u)
+        if self.o.get("stage") == "reach":
+            # the first stage of a staged search (4.10): only bring the sweet spot to the ball's place, in balance, inside
+            # the clock, effort counted. Read where the sweet spot comes nearest the ball, so there is no cliff between a
+            # bat that reaches the ball's plane and one that does not. No speed, no line, no squareness asked.
+            tx, p, v, i = self.nearest(recs)
+            d = E.sub(p, self.Pc)
+            r = [E.dot(d, self.ev) / MISS_UNIT, E.dot(d, self.el) / MISS_UNIT, 0.0, 0.0, 0.0, 0.0, E.dot(d, self.nb) / MISS_UNIT]
+            eff = self.effort(recs, tx, pl)
+            r += [math.sqrt(self.effort_w * eff[n] / len(CH)) for n in CH]
+            xo, least, zr = self.balance(recs, tx)
+            r += [xo / XCOM_UNIT, max(0.0, JUMP_MIN - least) / JUMP_UNIT, max(0.0, SINK_MIN - zr) * self.z0 / SINK_UNIT]
+            on = self.arm_onsets(pl)
+            r.append(max(0.0, (tx - self.t_avail) - min(on)) / CLOCK_UNIT if on else 0.0)
+            return None if any(x != x for x in r) else r
         tx, p, v, i, came = self.contact(recs)
         d = E.sub(p, self.Pc)
         vpar = -E.dot(v, self.nb)
@@ -615,6 +664,37 @@ def main():
         out = report(ctx, u)
         out.update(cost=cost, start=best["start"] + ", continued", history=hist, step_check=verify(ctx, u))
         json.dump(out, open(main_file, "w"), indent=1)
+        return
+    if "--staged" in a:
+        # a staged search (4.10): from each start, first the reach stage, then the whole aim from where that ended
+        names = arg("--staged", "main").split(",")
+        n1, n2 = int(arg("--reach", 15)), iters
+        for name in names:
+            o = {} if name == "main" else dict(VARY[name])
+            ctx = Ctx(**o)
+            reach = Ctx(stage="reach", **o)
+            print("\n== staged, %s: %s; from each start %d iterations of the reach stage, then %d of the whole aim" % (name, o, n1, n2))
+            starts = (("A", json.load(open(os.path.join(HERE, "fit3d_d34_all.json")))["plan"]),
+                      ("B", json.load(open(os.path.join(P.OUT, "fit3d_all_strongest_on_time.json")))["plan"]),
+                      ("C", hand_plan(ctx, 0.6)), ("D", hand_plan(ctx, 0.3, seed=1)))
+            best = None
+            for label, plan in starts:
+                if label not in arg("--starts", "ABCD"):
+                    continue
+                plan = {n: [min(v[0], ctx.bd[n])] + list(v[1:]) for n, v in plan.items()}
+                print("\n-- start %s, the reach stage" % label)
+                u, cost, hist = search(reach, plan, n1)
+                rr = reach.residuals(u)
+                print("   nearest the ball: %.1f cm up, %.1f cm along the bat, %.1f cm along the ball's line" % (rr[0] * MISS_UNIT * 100, rr[1] * MISS_UNIT * 100, rr[6] * MISS_UNIT * 100))
+                print("-- start %s, the whole aim" % label)
+                u, cost, hist2 = search(ctx, reach.plan(u), n2)
+                out = report(ctx, u)
+                out.update(cost=cost, start=label + ", staged", history=hist2, reach_history=hist, step_check=verify(ctx, u))
+                json.dump(out, open(os.path.join(P.OUT, "practice3d_staged_%s_%s.json" % (name, label)), "w"), indent=1)
+                if best is None or cost < best["cost"]:
+                    best = out
+            json.dump(best, open(os.path.join(P.OUT, "practice3d_staged_%s.json" % name), "w"), indent=1)
+            print("\nthe best of the staged starts for %s: start %s, cost %.3f" % (name, best["start"], best["cost"]))
         return
     if "--vary" in a:
         base = json.load(open(arg("--from", main_file)))
