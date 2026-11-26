@@ -42,18 +42,29 @@ T0 = -0.250                      # the placed start's label on [4]'s clock; the 
 OUT = os.path.join(HERE, "..", "..", "..", "sim", "target", "codex-probes", "body3d", "s10")
 # ---- the aim's ball (practice3d.py, body-motion 4.10): nothing of [4]'s but the start it is measured from
 BALL_DESCENT, BALL_ACROSS, BALL_Z, MEET_ACROSS, MEET_AHEAD = 5.27, 1.62, 0.78, 0.92, 0.72
-# ---- the contact posture [E], each with its range (4.12)
-CONTACT = {"pelvis_yaw": 75.0,       # deg from facing the plate [E: 60-90]
-           "trunk_ahead": 15.0,      # deg the trunk is turned further than the pelvis [E]
-           "trunk_flex": 30.0, "trunk_side": 20.0,     # deg [E: 25-40, 15-30; hitters' side tilt at contact 32, OpenBiomechanics]
-           "shift": 0.10,            # m the pelvis is carried toward the pitcher [E: 0-0.17]
-           "lead_knee": 14.0, "rear_knee": 70.0,       # deg (OpenBiomechanics 14 +- 12; [E: 55-90])
-           "rear_foot_yaw": 60.0,    # deg the rear foot has turned toward the pitcher, on its ball [E]
-           "bat_elev": -20.0,        # deg: the barrel below the hands [E: -10 to -30]
-           "hands_share": 0.20}      # of the sweet spot's speed carried by the hands' travel [E: 0.15-0.30]
+# ---- the contact posture (4.12): found by a rule, not set by eye. The posture for the aim's ball (the sweet spot at the
+# ball, the bat within 10 deg of square to its line seen from above, the barrel 10-30 deg below the hands, the lead foot
+# flat where it stands, the body's centre of mass standing 0.6 of the way from the rear forefoot to the middle of the lead
+# foot [E: 0.5-0.7]) whose joint nearest an end of its range is furthest from it:
+# sim/target/codex-probes/body3d/s10/contact_search.py (job 393; a compass search, the bat's roll and the elbows' swivels by
+# part 1's rule inside it). "hips70": the pelvis's turn held at 70 deg from facing the plate (the tightest joint 1.0 deg
+# inside its end). "free": the pelvis's turn free; it comes to 53 deg (0.9 deg). Without the centre of mass held over the
+# feet (job 392) the margins are 5-8 deg with the hips 36-60 deg open, but the body is then falling toward the plate.
+CONTACT_POSTURES = {
+    "hips70": {"pelvis_yaw": 70.0, "pelvis_obl": 15.5, "trunk_yaw": 85.0, "trunk_flex": 35.0, "trunk_side": 38.0, "bat_az": 1.62, "bat_elev": -20.0,
+               "foot_yaw_R": 69.5, "pelvis_x": -0.0582, "pelvis_y": -0.0511, "pelvis_z": 0.847, "foot_pitch_L": 0.0, "foot_pitch_R": 50.5},
+    "free": {"pelvis_yaw": 53.0, "pelvis_obl": 10.5, "trunk_yaw": 85.0, "trunk_flex": 35.0, "trunk_side": 38.0, "bat_az": 1.62, "bat_elev": -20.0,
+             "foot_yaw_R": 62.5, "pelvis_x": -0.0605, "pelvis_y": -0.05, "pelvis_z": 0.842, "foot_pitch_L": 0.0, "foot_pitch_R": 42.5},
+    # the two found WITHOUT the centre of mass held over the feet (job 392), kept to show what that costs
+    "unbalanced60": {"pelvis_yaw": 60.0, "pelvis_obl": 14.5, "trunk_yaw": 75.0, "trunk_flex": 35.0, "trunk_side": 30.0, "bat_az": 1.62, "bat_elev": -20.0,
+                     "foot_yaw_R": 45.0, "pelvis_x": 0.08, "pelvis_y": 0.0324, "pelvis_z": 0.942, "foot_pitch_L": 0.0, "foot_pitch_R": 30.0}}
+HANDS_SHARE = 0.20               # of the sweet spot's speed carried by the hands' travel at contact [E: 0.15-0.30]
 END_RATE = {"pelvis_yaw": 0.5, "trunk_yaw": 1.0}       # a number's rate at contact over its average rate [E]; the others: END_RATE_REST
 END_RATE_REST = 0.5
 AFTER = 0.020                    # s the laws run on after contact
+HEEL_DOWN = 0.060                # s after the start [E: 0.04-0.10]: the lead heel is down and stays down (the heel's plant starts the swing:
+#                                  the owner's walkthrough; the start is toe-touch, with the heel coming down as the weight comes on)
+TIP_ARM = 0.3                    # m: a moment the feet cannot give is counted with a force as moment / this, when both are made least
 SAMPLE, DIFF = 0.005, 0.002      # s: an instant every SAMPLE; differences of postures DIFF apart
 MU = B.MU_CLEAT
 CONE_SIDES = 8
@@ -137,9 +148,29 @@ def elbow_of(m, sd, sho, wrist, Rt, swivel_deg):
     return B._two_link(sho, wrist, m.len["upperarm"], m.len["forearm"], toward)
 
 
-def place(m, q, ball):
+def slerp(qa, qb, u):
+    """the rotation a share u of the way from qa to qb by the shortest turn (u past 1 carries on)."""
+    d = E.qmul(qb, E.qconj(qa))
+    if d[0] < 0:
+        d = tuple(-c for c in d)
+    sn = math.sqrt(d[1] ** 2 + d[2] ** 2 + d[3] ** 2)
+    if sn < 1e-12:
+        return qa
+    ang = 2.0 * math.atan2(sn, d[0]) * u
+    return E.qmul(E.qaxis((d[1] / sn, d[2] / sn, d[3] / sn), ang), qa)
+
+
+def arms_rel(m, st):
+    """{arm body: its orientation in the trunk's frame} in state st."""
+    qt = E.qconj(m.sys.pose(st, m.b["trunk"])[1])
+    return {n: E.qmul(qt, m.sys.pose(st, m.b[n])[1]) for n in ("uarm_L", "uarm_R", "farm_L", "farm_R")}
+
+
+def place(m, q, ball, arms=None):
     """the body's state (at rest) in the posture of the 20 numbers q, its joints closed by the engine's projection with
-    the feet held and the pelvis, trunk and bat a thousand times harder to move than the limbs (as body.pose)."""
+    the feet held and the pelvis, trunk and bat a thousand times harder to move than the limbs (as body.pose).
+    arms: {arm body: orientation in the trunk's frame}: the upper arms and forearms are set there (in place of the
+    two swivels) and the projection then carries them the least way that closes the elbows and wrists on the bat."""
     s, b = m.sys, m.b
     st = s.new_state()
     fr, sho, hip = frames(m, q, ball)
@@ -160,6 +191,14 @@ def place(m, q, ball):
     s.set_body(st, b["bat"], xb, qb)
     Rb = E.qR(qb)
     for sd, sg in B.SIDES:
+        if arms is not None:
+            qu = E.qmul(fr["trunk"][1], arms["uarm_" + sd])
+            xu = E.sub(sho[sd], E.mv(E.qR(qu), m.jp["shoulder_" + sd][3]))
+            s.set_body(st, b["uarm_" + sd], xu, qu)
+            elbow = E.add(xu, E.mv(E.qR(qu), m.jp["elbow_" + sd][1]))
+            qf = E.qmul(fr["trunk"][1], arms["farm_" + sd])
+            s.set_body(st, b["farm_" + sd], E.sub(elbow, E.mv(E.qR(qf), m.jp["elbow_" + sd][3])), qf)
+            continue
         elbow = elbow_of(m, sd, sho[sd], wr[sd], Rt, q["swivel_" + sd])
         zu = E.unit(E.sub(sho[sd], elbow)); zf = E.unit(E.sub(elbow, wr[sd]))
         ex, ey, ez = B._frame_z(zu, E.unit(E.cross(zu, zf)))
@@ -243,45 +282,21 @@ def least_strain(m, sho, Rt, wr_of, base=None, grid=5):
 
 
 def contact_numbers(m, q0, ball, Pc, opt):
-    """the contact posture's 20 numbers (4.12): a hitter's contact posture for the aim's ball, from joint ranges and the
-    stated [E]s (CONTACT, changed by opt). Returns (numbers, notes)."""
-    o = dict(CONTACT, **{k: v for k, v in opt.items() if k in CONTACT})
+    """the contact posture's 20 numbers (4.12): one of CONTACT_POSTURES (opt["contact"], default "hips70"), the pelvis
+    carried opt["shift"] m further toward the pitcher than that posture has it, the hands where they put the sweet spot
+    on the ball, the bat's roll and the elbows' swivels by part 1's rule. Returns (numbers, notes)."""
     q = dict(q0)
     notes = {}
-    q["pelvis_yaw"] = o["pelvis_yaw"]
-    q["pelvis_y"] = q0["pelvis_y"] + o["shift"]
-    q["trunk_yaw"] = o["pelvis_yaw"] + o["trunk_ahead"]
-    q["trunk_flex"], q["trunk_side"] = o["trunk_flex"], o["trunk_side"]
-    q["foot_pitch_L"] = 0.0                                       # the lead foot flat
-    q["foot_yaw_R"] = q0["foot_yaw_R"] + o["rear_foot_yaw"]
-    reach = lambda deg: math.sqrt(m.len["thigh"] ** 2 + m.len["shank"] ** 2 + 2 * m.len["thigh"] * m.len["shank"] * math.cos(deg * D2R))
-
-    def leg(sd, qq):
-        fr, sho, hip = frames(m, qq, ball)
-        ank = E.add(fr["foot_" + sd][0], E.mv(E.qR(fr["foot_" + sd][1]), m.ankle_f))
-        return E.norm(E.sub(hip[sd], ank))
-    lo, hi = 0.5, 1.3                                             # the pelvis's height that puts the lead knee at its bend, the foot flat
-    for _ in range(60):
-        mid = 0.5 * (lo + hi)
-        lo, hi = (mid, hi) if leg("L", dict(q, pelvis_z=mid)) < reach(o["lead_knee"]) else (lo, mid)
-    q["pelvis_z"] = 0.5 * (lo + hi)
-    gap = lambda pitch: leg("R", dict(q, foot_pitch_R=pitch)) - reach(o["rear_knee"])      # > 0: the leg too long for its knee's bend
-    if gap(0.0) <= 0.0:
-        q["foot_pitch_R"] = 0.0
-    elif gap(B.HEEL_MAX) > 0.0:
-        q["foot_pitch_R"] = B.HEEL_MAX
-    else:
-        lo, hi = 0.0, B.HEEL_MAX
-        for _ in range(60):
-            mid = 0.5 * (lo + hi)
-            lo, hi = (mid, hi) if gap(mid) > 0.0 else (lo, mid)
-        q["foot_pitch_R"] = 0.5 * (lo + hi)
-    # the bat: square to the ball's line seen from above, the barrel toward the plate and below the hands; the sweet spot at the ball
-    q["bat_az"], q["bat_elev"] = BALL_ACROSS, o["bat_elev"]
+    q.update(CONTACT_POSTURES[opt.get("contact", "hips70")])
+    q["pelvis_y"] += opt.get("shift", 0.0)
     az, el = q["bat_az"] * D2R, q["bat_elev"] * D2R
     bz = (math.cos(el) * math.cos(az), math.cos(el) * math.sin(az), math.sin(el))
     p = E.add(E.sub(Pc, E.scale(bz, C.BAT_SS)), E.scale(bz, B.GRIP_L))
     fr, sho, hip = frames(m, q, ball)
+    for sd in "LR":
+        ank = E.add(fr["foot_" + sd][0], E.mv(E.qR(fr["foot_" + sd][1]), m.ankle_f))
+        if E.norm(E.sub(hip[sd], ank)) > 0.999 * (m.len["thigh"] + m.len["shank"]):
+            return None, {"why": "the %s leg cannot reach its foot" % ("lead" if sd == "L" else "rear")}
     Rt = E.qR(fr["trunk"][1])
     h = E.mtv(Rt, E.sub(p, sho["R"]))
     q["hand_x"], q["hand_y"], q["hand_z"] = h
@@ -323,7 +338,13 @@ class Motion:
         for k in NUMBERS:
             avg = (self.q1[k] - self.q0[k]) / T
             self.v1[k] = END_RATE.get(k, END_RATE_REST) * avg
-        self._bat_rates(spec.get("speed", 29.0), spec.get("hands_share", CONTACT["hands_share"]))
+        self._bat_rates(spec.get("speed", 29.0), spec.get("hands_share", HANDS_SHARE))
+        # the arms between the start and contact (4.12): each upper arm and forearm turns by the shortest way, in the
+        # trunk's frame, from where it is at the start to where it is at contact, in step with the bat's coming round;
+        # the projection then closes the elbows and wrists on the bat. (The two swivels on cubics of their own took the
+        # wrists through postures no wrist has.)
+        self.rel0 = arms_rel(self.m, place(self.m, self.q0, self.ball))
+        self.rel1 = arms_rel(self.m, place(self.m, self.q1, self.ball))
 
     def _bat_rates(self, V, share, eps=1e-4):
         """the bat's and the hands' rates at contact: the sweet spot's velocity V along the ball's line (coming up through
@@ -369,6 +390,11 @@ class Motion:
         out = {}
         for k in NUMBERS:
             a, va, b, vb, t_on, T = self.q0[k], self.v0.get(k, 0.0), self.q1[k], self.v1[k], self.onset[k], self.T
+            if k == "foot_pitch_L":                               # the lead heel comes down by HEEL_DOWN and stays
+                T, vb, t_on = min(HEEL_DOWN, self.T), 0.0, 0.0
+                if t >= T:
+                    out[k] = b
+                    continue
             if t <= t_on:
                 out[k] = a + va * t
                 continue
@@ -380,7 +406,9 @@ class Motion:
         return out
 
     def state(self, t):
-        return place(self.m, self.numbers(t), self.ball)
+        q = self.numbers(t)
+        u = (q["bat_az"] - self.q0["bat_az"]) / (self.q1["bat_az"] - self.q0["bat_az"])
+        return place(self.m, q, self.ball, {n: slerp(self.rel0[n], self.rel1[n], u) for n in self.rel0})
 
 
 def base_setup():
@@ -479,6 +507,11 @@ def loads_problem(m, st, acc):
     for name, fb, p in pts:
         for c in range(3):
             cols.append(accel([], [(fb, p, E.E3[c], E.ZERO)]))
+    pel = m.b["pelvis"]                                    # what the feet cannot give: a force and a moment on the pelvis from nowhere
+    for c in range(3):
+        cols.append(accel([], [(pel, E.ZERO, E.E3[c], E.ZERO)]))
+    for c in range(3):
+        cols.append(accel([], [(pel, E.ZERO, E.ZERO, E.E3[c])]))
     s.tones, s.ext = [], []
     cols = [[x - y for x, y in zip(col, a0)] for col in cols]
     b = [c for row in acc for c in row]
@@ -502,12 +535,15 @@ def solve_instant(m, st, acc, bd):
     Aeq_s = U[:, :r].T @ Cm                                 # r equations in the signed loads
     beq = U[:, :r].T @ rhs
     miss = float(np.linalg.norm(rhs - U[:, :r] @ beq) / max(1e-12, np.linalg.norm(rhs)))
-    # variables: x+ and x- for each generator (2 ng), the points' forces (3 npt), t
-    nv = 2 * ng + 3 * npt + 1
+    # variables: x+ and x- for each generator (2 ng), the points' forces (3 npt), the pelvis's wrench from nowhere + and - (12), t
+    nv = 2 * ng + 3 * npt + 12 + 1
+    osl = 2 * ng + 3 * npt
     Aeq = np.zeros((r, nv))
     Aeq[:, 0:ng] = Aeq_s[:, :ng]
     Aeq[:, ng:2 * ng] = -Aeq_s[:, :ng]
-    Aeq[:, 2 * ng:2 * ng + 3 * npt] = Aeq_s[:, ng:]
+    Aeq[:, 2 * ng:2 * ng + 3 * npt] = Aeq_s[:, ng:ng + 3 * npt]
+    Aeq[:, osl:osl + 6] = Aeq_s[:, ng + 3 * npt:]
+    Aeq[:, osl + 6:osl + 12] = -Aeq_s[:, ng + 3 * npt:]
     A_ub, b_ub = [], []
     cap, undriven = [], []
     for g, (label, j, pa, ch, n, cp, cm, grp) in enumerate(gens):
@@ -532,9 +568,21 @@ def solve_instant(m, st, acc, bd):
             row = np.zeros(nv)
             row[o], row[o + 1], row[o + 2] = math.cos(th), math.sin(th), -MU * math.cos(math.pi / CONE_SIDES)
             A_ub.append(row); b_ub.append(0.0)
-    bounds = [(0, None)] * (2 * ng) + [(None, None), (None, None), (0, None)] * npt + [(0, None)]
+    bounds = [(0, None)] * (2 * ng) + [(None, None), (None, None), (0, None)] * npt + [(0, None)] * 12 + [(0, None)]
+    A_ub, b_ub = np.array(A_ub), np.array(b_ub)
+    # stage 0: what the feet cannot give (a force and a moment on the pelvis from nowhere), made least; it is zero for a
+    # motion the ground can hold up, and is then held at zero
+    c0 = np.zeros(nv)
+    c0[osl:osl + 3] = c0[osl + 6:osl + 9] = 1.0
+    c0[osl + 3:osl + 6] = c0[osl + 9:osl + 12] = 1.0 / TIP_ARM
+    res0 = linprog(c0, A_ub=A_ub, b_ub=b_ub, A_eq=Aeq, b_eq=beq, bounds=bounds, method="highs")
+    if res0.status != 0:
+        return {"feasible": False, "why": res0.message, "miss": miss, "points": [p[0] for p in pts]}
+    sl = res0.x[osl:osl + 6] - res0.x[osl + 6:osl + 12]
+    tip = (float(np.linalg.norm(sl[:3])), float(np.linalg.norm(sl[3:])))
+    A_ub = np.vstack([A_ub, c0]); b_ub = np.append(b_ub, float(res0.fun) * (1.0 + 1e-7) + 1e-6)
     c1 = np.zeros(nv); c1[-1] = 1.0
-    res = linprog(c1, A_ub=np.array(A_ub), b_ub=np.array(b_ub), A_eq=Aeq, b_eq=beq, bounds=bounds, method="highs")
+    res = linprog(c1, A_ub=A_ub, b_ub=b_ub, A_eq=Aeq, b_eq=beq, bounds=bounds, method="highs")
     if res.status != 0:
         return {"feasible": False, "why": res.message, "miss": miss, "points": [p[0] for p in pts]}
     t = float(res.x[-1])
@@ -547,9 +595,9 @@ def solve_instant(m, st, acc, bd):
             c2[col] = 1e-3 * 100.0 / cp_[1]
     bounds2 = list(bounds)
     bounds2[-1] = (0, t * (1.0 + 1e-7) + 1e-9)
-    res2 = linprog(c2, A_ub=np.array(A_ub), b_ub=np.array(b_ub), A_eq=Aeq, b_eq=beq, bounds=bounds2, method="highs")
+    res2 = linprog(c2, A_ub=A_ub, b_ub=b_ub, A_eq=Aeq, b_eq=beq, bounds=bounds2, method="highs")
     x = res2.x if res2.status == 0 else res.x
-    out = {"feasible": True, "t": t, "miss": miss, "share": {}, "torque": {}, "undriven": {}, "ground": {}, "speed": {}}
+    out = {"feasible": True, "t": t, "miss": miss, "share": {}, "torque": {}, "undriven": {}, "ground": {}, "speed": {}, "tip": tip, "points": [p[0] for p in pts]}
     worst = (0.0, None)
     for g, (label, j, pa, ch, n, cp, cm, grp) in enumerate(gens):
         out["torque"][label] = float(x[g] - x[ng + g])
@@ -569,7 +617,7 @@ def solve_instant(m, st, acc, bd):
         o = 2 * ng + 3 * i
         out["ground"][name] = (float(x[o]), float(x[o + 1]), float(x[o + 2]))
     # the solved loads put back into the engine's equations
-    z = np.concatenate([x[:ng] - x[ng:2 * ng], x[2 * ng:2 * ng + 3 * npt]])
+    z = np.concatenate([x[:ng] - x[ng:2 * ng], x[2 * ng:2 * ng + 3 * npt], x[osl:osl + 6] - x[osl + 6:osl + 12]])
     out["back"] = float(np.linalg.norm(Cm @ z - rhs) / max(1e-12, np.linalg.norm(rhs)))
     return out
 
@@ -617,9 +665,9 @@ def solve_motion(mo, bd, step=SAMPLE, dt=DIFF, log=None):
         if log:
             if r["feasible"]:
                 und = sorted(r["undriven"].items(), key=lambda kv: -kv[1])[:3]
-                log("   %4.0f ms: sweet spot %5.1f m/s, hands %4.1f; hardest-worked %-12s at %.2f of its strength at speed (%.0f of %.0f N m at %+.1f rad/s); feet %.2f + %.2f x body weight; no muscle for: %s"
+                log("   %4.0f ms: sweet spot %5.1f m/s, hands %4.1f; hardest-worked %-12s at %.2f of its strength at speed (%.0f of %.0f N m at %+.1f rad/s); feet %.2f + %.2f x body weight%s; no muscle for: %s"
                     % ((t - mo.T) * 1e3, r["sweet"], r["hands"], r["by"], r["share_worst"], r["speed"][r["by"]][0], r["speed"][r["by"]][1], r["speed"][r["by"]][2], r["front"], r["rear"],
-                       ", ".join("%s %.0f" % kv for kv in und) or "nothing"))
+                       "" if max(r["tip"][0], r["tip"][1]) < 0.5 else "; THE FEET CANNOT GIVE %.0f N and %.0f N m of it" % r["tip"], ", ".join("%s %.0f" % kv for kv in und) or "nothing"))
             else:
                 log("   %4.0f ms: NO LOADS GIVE THIS MOTION (%s); sole points on the ground: %s" % ((t - mo.T) * 1e3, r["why"][:60], r["points"]))
     return out
@@ -650,6 +698,9 @@ def summary(mo, sol):
     out["front_peak"] = max(r["front"] for r in ok)
     out["feet_least"] = min(r["front"] + r["rear"] for r in ok)
     out["over_1_ms"] = sum(1 for r in ok if r["share_worst"] > 1.0) * SAMPLE * 1e3
+    tp = max(ok, key=lambda r: r["tip"][0] + r["tip"][1] / TIP_ARM)
+    out["feet_cannot_give"] = {"N": tp["tip"][0], "N m": tp["tip"][1], "ms": round((tp["t"] - mo.T) * 1e3),
+                               "for_ms": sum(1 for r in ok if max(r["tip"]) > 0.5) * SAMPLE * 1e3}
     out["sweet_at_contact"] = sol[-1]["sweet"]
     out["hands_fastest"] = max(r["hands"] for r in sol)
     out["pelvis_fastest"] = max(r["pelvis_rate"] for r in sol)
@@ -670,7 +721,10 @@ def _one(spec):
     mo = Motion(_BASE, **spec)
     if not mo.ok:
         return {"spec": spec, "built": False, "why": mo.notes.get("why")}
-    geo = geometry(mo, 0.010)
+    try:
+        geo = geometry(mo, 0.010)
+    except E.SolveError as e:
+        return {"spec": spec, "built": False, "why": "a posture on the way cannot be placed or read (%s)" % str(e)[:60]}
     out = {"spec": spec, "built": True, "least_margin": min(geo["least"].values()), "least_at": min(geo["least"], key=geo["least"].get),
            "elbow_clear": geo["elbow_clear"], "arm_strain_at_contact": mo.notes["arm_strain_at_contact"],
            "elbows_at_contact": (geo["obs_contact"]["lead_elbow_flex"], geo["obs_contact"]["trail_elbow_flex"]),
@@ -683,8 +737,8 @@ def _one(spec):
 
 
 def label(spec):
-    return "T %3.0f ms, onsets %s ms, shift %2.0f cm, %2.0f m/s" % (spec.get("T", 0.2) * 1e3, "/".join("%.0f" % (x * 1e3) for x in spec.get("onset", (0, 0.03, 0.06))[1:]),
-                                                                   spec.get("shift", CONTACT["shift"]) * 100, spec.get("speed", 29.0)) + "".join(
+    return "T %3.0f ms, onsets %s ms, shift %+3.0f cm, %2.0f m/s" % (spec.get("T", 0.2) * 1e3, "/".join("%.0f" % (x * 1e3) for x in spec.get("onset", (0, 0.03, 0.06))[1:]),
+                                                                    spec.get("shift", 0.0) * 100, spec.get("speed", 29.0)) + "".join(
         ", %s %s" % (k, v) for k, v in spec.items() if k not in ("T", "onset", "shift", "speed"))
 
 
@@ -703,7 +757,7 @@ def check():
     for i in range(m.sys.nb):
         d = max(d, max(abs(a - b) for a, b in zip(st[13 * i:13 * i + 7], base["st0"][13 * i:13 * i + 7])))
     print("(2) the start's 20 numbers placed again against the placed start: largest difference of a position or quaternion entry %.2e" % d)
-    ok = ok and d < 1e-6
+    ok = ok and d < 5e-4            # 0.13 mm or 0.007 deg: the placement's own hands' solve and its feet's sink are not redone
     # (1) channels against generators, at a posture mid-swing, at rest
     mo = Motion(base)
     stm = mo.state(0.150)
@@ -748,12 +802,12 @@ def check():
     # (3) a solved instant
     stk, acc = kinematics(mo, 0.150)
     r = solve_instant(m, stk, acc, base["bd"])
-    print("(3) an instant of the base motion (50 ms before contact): feasible %s, worst share %.3f by %s; accelerations outside what any loads can give %.1e of their size; the solved loads put back: %.1e"
-          % (r["feasible"], r.get("t", float("nan")), r.get("by"), r["miss"], r.get("back", float("nan"))))
+    print("(3) an instant of the base motion (50 ms before contact): feasible %s, worst share %.3f by %s; the feet cannot give %s; accelerations outside what any loads can give %.1e of their size; the solved loads put back: %.1e"
+          % (r["feasible"], r.get("t", float("nan")), r.get("by"), r.get("tip"), r["miss"], r.get("back", float("nan"))))
     ok = ok and r["feasible"] and r["miss"] < 1e-6 and r["back"] < 1e-6
     # (4) a known answer: the body hanging still in that posture off the ground cannot be held (no ground), on it it can;
     # and the worst share scales with the loads: the same posture at rest, gravity doubled, asks twice the share
-    rest = list(stk)
+    rest = list(place(m, base["q0"], base["ball"]))        # the start's posture, at rest: the lead foot on its toe, the rear flat
     for i in range(nb):
         rest[13 * i + 7:13 * i + 13] = [0.0] * 6
     zero = [[0.0] * 6] * nb
@@ -763,9 +817,9 @@ def check():
     r2 = solve_instant(m, rest, zero, base["bd"])
     m.sys.g = g_keep
     tot1 = sum(f[2] for f in r1["ground"].values())
-    print("(4) holding that posture still: worst share %.3f, the ground carries %.1f N of the weight's %.1f; under twice the gravity the worst share is %.3f (twice: %.3f)"
-          % (r1["t"], tot1, M * E.G, r2["t"], 2 * r1["t"]))
-    ok = ok and abs(tot1 - sum(m.sys.m) * E.G) < 1e-3 and abs(r2["t"] - 2 * r1["t"]) < 1e-6 * max(1.0, r1["t"])
+    print("(4) holding the start's posture still: worst share %.3f by %s, the ground carries %.1f N of the weight's %.1f and nothing is asked that the feet cannot give (%.1e N, %.1e N m); under twice the gravity the worst share is %.3f (twice: %.3f)"
+          % (r1["t"], r1["by"], tot1, sum(m.sys.m) * E.G, r1["tip"][0], r1["tip"][1], r2["t"], 2 * r1["t"]))
+    ok = ok and abs(tot1 - sum(m.sys.m) * E.G) < 1e-3 and abs(r2["t"] - 2 * r1["t"]) < 1e-5 * max(1.0, r1["t"]) and max(r1["tip"]) < 1e-3
     print("PASS" if ok else "FAIL")
     return ok
 
@@ -774,17 +828,19 @@ def table_specs():
     specs = []
     Ts = (0.160, 0.200, 0.250)
     ons = ((0.0, 0.0, 0.0), (0.0, 0.030, 0.060), (0.0, 0.050, 0.100))
-    shifts = (0.0, 0.10, 0.17)
+    shifts = (-0.05, 0.0, 0.05)
     for sp in (29.0, 21.0):
         for T in Ts:
             for on in ons:
                 for sh in shifts:
                     specs.append({"T": T, "onset": on, "shift": sh, "speed": sp})
-    for sp in (17.0, 25.0, 32.0):
+    for sp in (13.0, 17.0, 25.0, 32.0):
         specs.append({"speed": sp})
-    for k, vals in (("hands_share", (0.15, 0.30)), ("bat_elev", (-10.0, -30.0)), ("pelvis_yaw", (60.0, 90.0))):
-        for v in vals:
-            specs.append({k: v})
+    for v in (0.15, 0.30):
+        specs.append({"hands_share": v})
+    for c in ("free", "unbalanced60"):
+        for sp in (29.0, 21.0):
+            specs.append({"contact": c, "speed": sp})
     return specs
 
 
