@@ -23,7 +23,7 @@ Status: `[ ]` not started · `[~]` partly done · `[?]` needs an owner decision
 
 **Ruled:** Q61 = b, Q62 = a, Q63 = a (PLAN D39–D41). Nothing waits on the owner.
 
-**Not running. Next: session 10** (job file WORKER-BODY-3D-10, worktree `swing-research`, branch `work/body-3d`). Have the owner check `/usage` first (a limit was hit 2026-11-26).
+**Running since 2026-11-26 06:00: session 10** (Fable worker `body-3d-10`, Workers tab, worktree `swing-research`, branch `work/body-3d`). Then an Opus review.
 
 **Next:** §2: the ground-dive leftovers ([note](docs/calibration/2026-11-23-of-ground-dive.md) §9).
 
