@@ -69,8 +69,9 @@ RUNGS["r6_ref"] = dict(RUNGS[LAST])
 
 
 def best_of(rung):
-    """the kept result of a rung with the better (lower) score: its first search or its second (the ladder's rule)."""
-    paths = [os.path.join(OUT, "%s%s.json" % (rung, t)) for t in ("", "_b")]
+    """the kept result on a rung's body with the best (lowest) score: its first search from S, its second, or the chain's
+    swing carried onto it (each is a settled search on that body)."""
+    paths = [os.path.join(OUT, "%s%s.json" % (rung, t)) for t in ("", "_b", "_c")]
     paths = [p_ for p_ in paths if os.path.isfile(p_)]
     return min(paths, key=lambda p_: json.load(open(p_))["cost"])
 
