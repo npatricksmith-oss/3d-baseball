@@ -21,9 +21,9 @@ Status: `[ ]` not started · `[~]` partly done · `[?]` needs an owner decision
 
 **Session 8 (`work/body-3d` `d164b96`, worktree `swing-research`; spec §4.10 there): no swing found** with the joints held to real ranges; the old 68 mph was a bounce off a joint's spring stop.
 
-**Waiting on the owner (spec §4.4 there):** Q61 a joint's end, Q62 the gate (§13), Q63 go on or stop.
+**Ruled:** Q61 = b, Q62 = a, Q63 = a (PLAN D39–D41). Nothing waits on the owner.
 
-**Running: `rev-body-3d-8`** (Opus, high; Workers tab; that worktree; job file REVIEW-BODY-3D-8 there). Then: commit its review, fixes to a worker, merge.
+**Running: `rev-body-3d-8`** (Opus; Workers tab; that worktree). Then: commit its review; a worker fixes and writes D39–D41 into the spec; merge; D41's research job.
 
 **Next:** §2: the ground-dive leftovers ([note](docs/calibration/2026-11-23-of-ground-dive.md) §9).
 
