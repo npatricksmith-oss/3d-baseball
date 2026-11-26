@@ -1987,6 +1987,7 @@ Session 11 (2026-11-26) works under the owner's rulings of that day ([PLAN D42](
 | 1 | joint friction at the values read; middles of stated ranges at the hips and trunk | **14.7 m/s (32.9 mph)**; 14.9 (33.2) | **20.4; 19.7 m/s** | **−3.0 m/s (−6.6 mph): a loss at contact, both searches under both of rung 0's.** The bat is faster before contact (+1.2 and +1.9 m/s) and slows by a quarter in the last 20–30 ms as an arm reaches its elbow's end | read: wrist's bend, shoulder, knee, ankle; the elbow with the arm holding its place; **not measured: hip, trunk** (150 J of the swing's losses), forearm's turn, wrist's tilt |
 | 2 | on rung 1's body: the posture held by his muscles, under their rules, in place of the constant hold-still torques | **16.9 m/s (37.7 mph)**; 16.6 (37.1) | 18.6; 19.3 m/s | **+2.1 m/s (+4.8 mph) over rung 1: a gain by the rule** (both searches over both of rung 1's); against rung 0: −0.8, no change shown | measured strengths and strength-at-speed curves; Schultz 1987's trunk bending strength; 12 N·m at the ankles' roll left as constant torque; the hips' and trunk's friction not measured |
 | 3 | the feet where major leaguers' are (1.03 m apart, level, the front foot 44° open), the ball level with the front ankle; the rest of the start by its rule | **21.5 m/s (48.2 mph)**; 20.7 (46.2) | 22.4; 21.3 m/s | **+4.7 m/s (+10.5 mph) over rung 2; +3.8 m/s (+8.6 mph) over rung 0: a gain,** both searches over both of every rung before | Statcast's foot points at the intercept (my reading of the page's data, checked against its published column); the posture's other numbers still [4]'s, bent by the rule to within 4.0° of four joint ends |
+| 4 | the hips' ends of turn by their own muscles, measured with the hip straight (in 32°, out 44°; they were 32.6° and 33.6°) | 21.1 m/s (47.2 mph); 20.9 (46.7) | 22.0; 21.4 m/s | −0.4 m/s: **no change shown** (both searches inside rung 3's pair) | Simoneau 1998's 21 college men; Boone & Azen's 44° both ways was measured seated and is not used |
 | (2 alone, on rung 0's body) | the same change without rung 1 | 16.7 m/s (37.3 mph); 15.7 (35.2) | 18.8; 17.7 m/s | −1.0 m/s against rung 0: **no loss shown** (inside the yardstick; both searches inside rung 0's pair) | measured strengths and strength-at-speed curves; Schultz 1987's trunk bending strength; 12 N·m at the ankles' roll left as constant torque |
 
 **Where the session stands while this is written** (for whoever picks it up if it is cut short): every rung through 6 is designed below and committed before its runs; the runs are in the job queue (`bin/job.sh status`, labels `body-3d-11 …`) and write to `sim/target/codex-probes/body3d/s11/<rung>.out` and `.json`; `ladder3d.py --table` and `--block <rung>` print what has finished.
@@ -2384,6 +2385,63 @@ Code: `analysis/research/body/ladder3d.py` (the protocol, the energy account, th
 - *Test:* the two ends as stops on each side (`StanceChecks`).
 
 **What I expect** (rung 4, from S, two searches): **no gain that clears the yardstick.** The end that limits the front hip has not moved; the rear hip's turn out carried 663 N·m at its end in session 10's swing, so its 10° more may let the pelvis turn a little further (a few degrees more at contact) and take load off that end. *What it would show:* whether the rear hip's end was holding the pelvis. *What it would not:* anything about the front hip, whose range by its own muscles is what it already had.
+
+#### Rung 4 as run: the hips' turn by their own muscles changes nothing that can be seen (jobs 453 and 454; `s11/r4.out`, `r4_b.out`, `.json`)
+
+**20.89 and 21.11 m/s (46.7 and 47.2 mph), both inside rung 3's pair (20.66 and 21.53). By the ladder's rule 21.1 against 21.5: 0.4 m/s less, far inside the yardstick. No gain and no loss shown,** as expected; the chain's step said the same (+0.06 m/s).
+
+| | seeds 1, 11 | seeds 2, 12 |
+| :-- | --: | --: |
+| the sweet spot at contact | **20.89 m/s (46.7 mph)** | **21.11 m/s (47.2 mph)** |
+| the miss | 0.2 cm | 0.0 cm |
+| the score (lower is better) | 26.6 | 26.2 |
+| settled: the fall over the last 50 generations | 0.55 | 0.33 |
+| the speed at 0.5, 0.25, 0.125 ms | 20.88, 20.89, 20.89 | 21.12, 21.11, 21.11 |
+| failed runs among the plan's 205 one-number changes | 0 | 0 |
+| the line from the starting plan to the result (11 points, then one beyond) | 153 115 90 75 67 52 44 38 35 29 27 36 | 153 119 109 99 80 61 51 40 32 29 26 30 |
+| the bat at its fastest at contact | 98% | 96% |
+| the hands' fastest | 8.1 m/s | 8.1 m/s |
+| the attack angle | -0.6° | -0.7° |
+| the hips'; the trunk's fastest turning | 207; 379°/s | 188; 331°/s |
+| the pelvis's turn from the start to contact | 4° | 11° |
+| first rises: legs, trunk, arms (ms before contact) | 258, 239, 253 | 266, 233, 253 |
+| the first arm muscle before contact (253 allowed) | 253 ms | 253 ms |
+| the lead knee at contact; the front foot's greatest load | 61°; 2.38 x body weight | 41°; 2.35 x body weight |
+| balance: outside his feet; least on the feet; height kept | 0.0 cm; 0.21; 0.90 | 0.0 cm; 0.13; 0.90 |
+| joints past their range: to contact; to 50 ms after | 3.0° (the lead upper arm's turn); 3.0 (the lead upper arm's turn) | 2.8° (the lead upper arm's turn); 4.7 (wrist oval L) |
+| joint ends over 50 N·m; the heaviest | 12; 1177 N·m (shoulder up L) | 13; 1330 N·m (shoulder up L) |
+| groups at 90% or more of their bounds | 8 | 12 |
+| WORK TO CONTACT, J: muscles | +463 | +483 |
+| holding muscles | +22 | +32 |
+| hold-still torques (constant, under no muscle rule) | +3 | +1 |
+| the joints' damping | -166 | -192 |
+| stops; ground; gravity | -38; -47; +62 | -29; -62; +59 |
+| kinetic energy gained | 303 | 292 |
+| muscles (with holding) by joint, the five largest | shoulder L +121, hip R +113, lumbar +87, hip L +72, shoulder R +61 | hip R +136, shoulder L +114, lumbar +85, hip L +70, shoulder R +65 |
+| damping by joint, the five largest | lumbar -44, shoulder R -32, hip R -26, hip L -24, elbow R -19 | lumbar -65, shoulder R -37, hip L -29, hip R -27, elbow R -15 |
+| hold-still torques by joint, the three largest | ankle R +6, hip L -4, ankle L +2 | hip L -5, ankle R +4, ankle L +2 |
+| GATE: meets the ball | passes (-0.8 cm) | passes (-1.0 cm) |
+| GATE: the sweet spot at contact | fails (short by 8.1 m/s) | fails (short by 7.9 m/s) |
+| GATE: the bat at its fastest at contact | fails (-0 points) | fails (-2 points) |
+| GATE: the hands' fastest | fails (short by 2.2 m/s) | fails (short by 2.2 m/s) |
+| GATE: the attack angle | passes (inside by 2.4°) | passes (inside by 2.3°) |
+| GATE: the hips' fastest turning | fails (short by 348°/s) | fails (short by 367°/s) |
+| GATE: the trunk's fastest turning | fails (short by 376°/s) | fails (short by 424°/s) |
+| GATE: first rises legs, trunk, arms | fails (-258, -239, -253 ms) | fails (-266, -233, -253 ms) |
+| GATE: no arm muscle before he could decide | passes (+0 ms) | passes (+0 ms) |
+| GATE: the hands' first motion before contact | fails (over by 9 ms) | passes (inside by 9 ms) |
+| GATE: the lead knee at contact | fails (over by 35°) | fails (over by 15°) |
+| GATE: the front foot's greatest load | passes (inside by 0.22 x body weight) | passes (inside by 0.25 x body weight) |
+| GATE: in balance | passes (+0.0 cm) | passes (+0.0 cm) |
+| GATE: does not jump | passes (+0.11) | passes (+0.03) |
+| GATE: legs have not given way | fails (-0.00) | passes (+0.00) |
+| GATE: no joint more than 2° past its range | fails (+1.0°) | fails (+2.7°) |
+| GATE: no joint end heavily loaded (D39, not built) | fails (12 ends over 50 N·m; the most 1177 N·m (shoulder up L)) | fails (13 ends over 50 N·m; the most 1330 N·m (shoulder up L)) |
+| GATE: no passive element does net positive work | passes (stops -38 J, ground -47 J, damping -166 J) | passes (stops -29 J, ground -62 J, damping -192 J) |
+
+- **The front hip's limiting end did not move, and the swings still lean on both hips' ends of turn:** the front hip's carries 601 and 570 N·m and the rear hip's 641 and 856 N·m (rung 3: 443 and 326; 665 and 822). Ten degrees more turn out at the rear hip did not free the pelvis: it turns 4° and 11° from the start to contact, at 207 and 188°/s.
+- *Small things that did move, none beyond what two searches of one body differ by:* the bat at 98% and 96% of its fastest at contact (the first search is the first swing to meet the gate's 98%); the front foot's load 2.38 and 2.35 times his weight (inside the gate's 1.5–2.6, near its top); both first arm muscles exactly on the clock.
+- *What it shows:* the owner's ruling is applied (the hips at their active range, read with the hip straight) and is worth nothing measurable to this swing. *What it does not show:* that hip range is unimportant. His hips are not turning for some other reason, and a swing that did turn them would meet these ends.
 
 #### Rung 5: what else of the lab study is still in the start (the list, and the one part a rule can carry; written before any search)
 
