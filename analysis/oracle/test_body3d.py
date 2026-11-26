@@ -2099,6 +2099,48 @@ def _practice():
 class SearchChecks(unittest.TestCase):
     """the practice search's own rules (body-motion 4.11, after session 9's review)."""
 
+    def test_the_search_without_slopes_finds_a_known_minimum_on_a_score_its_slopes_would_miss(self):
+        """the evolution strategy of body-motion 4.12 (practice3d.cma) on a score with a known answer, built here: 30
+        numbers in the unit box, the score the squared distance from a point known in advance (some of its numbers ON
+        the box's edge), plus a step of 0.05 at every 0.003 of each number (a score that jumps at a scale far below the
+        search's spread, as the practice score does) and one plan in fifty that fails to run. From 0.2 away in every number the search ends within 0.02 of the known point in every number and lowers the
+        smooth part of the score a hundredfold; it gives the same result twice from the same seed and another from
+        another; it never returns a plan outside the box; a failed run is never the best."""
+        PR = _practice()
+        n = 30
+        target = [0.0 if k % 7 == 0 else 1.0 if k % 7 == 3 else 0.15 + 0.7 * ((k * 37) % 11) / 10.0 for k in range(n)]
+
+        class Fake:
+            free = list(range(n))
+            calls = 0
+
+            def residuals(self, u):
+                Fake.calls += 1
+                assert all(0.0 <= x <= 1.0 for x in u)                      # the search never runs a plan outside the box
+                if int(sum(u) * 1e6) % 50 == 7:
+                    return None                                             # a run that fails
+                smooth = [10.0 * (x - t) for x, t in zip(u, target)]
+                rough = math.sqrt(0.05 * sum(math.floor(x / 0.003) % 2 for x in u))
+                return smooth + [rough]
+
+        class Pool:
+            @staticmethod
+            def map(f, xs, chunksize=1):
+                return [f(x) for x in xs]
+        fake = Fake()
+        PR._CTX = fake
+        u0 = [min(1.0, max(0.0, t + (0.2 if k % 2 else -0.2))) for k, t in enumerate(target)]
+        smooth = lambda u: sum((10.0 * (x - t)) ** 2 for x, t in zip(u, target))
+        u, cost, hist, centre, spread = PR.cma(fake, u0, 250, lambda s_: None, Pool, seed=3)
+        self.assertLess(max(abs(x - t) for x, t in zip(u, target)), 0.02)
+        self.assertLess(smooth(u), 0.01 * smooth(u0))
+        self.assertEqual(cost, PR.cost_of(fake.residuals(u)))                # the best is a plan that ran, with its own score
+        self.assertTrue(all(h[1] <= g[1] for g, h in zip(hist, hist[1:])))   # the best ever never rises
+        self.assertGreater(sum(h[5] for h in hist), 0)                       # and some runs did fail on the way
+        u2 = PR.cma(fake, u0, 250, lambda s_: None, Pool, seed=3)[0]
+        self.assertEqual(u, u2)
+        self.assertNotEqual(u, PR.cma(fake, u0, 60, lambda s_: None, Pool, seed=4)[0])
+
     def test_the_clock_charges_each_arm_muscle_its_own_overrun(self):
         """review P1-1. Five arm muscles tied at the run's first instant, contact 30 ms later than the clock allows them,
         and a sixth inside it. Worked by hand here: moving ALL the tied onsets 10 ms later lowers the charge to (20/30)^2

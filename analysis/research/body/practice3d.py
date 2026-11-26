@@ -203,6 +203,9 @@ class Ctx:
         self.t_avail = BALL_FLIGHT - o.get("t_view", T_VIEW) - T_LATENCY      # how long before contact an arm muscle may fire
         self.z0 = B.com(m, st)[0][2]
         self.evals = 0
+        # h: the integration step of this search's runs (body-motion 4.12: 0.25 ms; sessions 8 and 9: H_STEP, 0.5 ms).
+        # Records stay 5 ms apart whatever the step.
+        self.h = o.get("h", H_STEP)
 
     plan = F.Ctx.plan
     u_of = F.Ctx.u_of
@@ -223,7 +226,7 @@ class Ctx:
 
     run_end, failed_after = T_END, None
 
-    def run(self, u, every=EVERY, t_end=T_END, h=H_STEP):
+    def run(self, u, every=None, t_end=T_END, h=None):
         """the plan's run, as records. A run is not failed by what happens after the last instant the score reads
         (body-motion 4.11; session 9's review, P2-2): if the run fails but the sweet spot crossed the ball's plane at
         least AFTER before the last record made, the records to the failure are returned (they hold everything the score
@@ -231,6 +234,8 @@ class Ctx:
         message. A failure before that is raised, as before. run_end is where the records end, for contact() and nearest()."""
         st, aux = self.prepare(u)
         self.evals += 1
+        h = getattr(self, "h", H_STEP) if h is None else h
+        every = int(round(EVERY * H_STEP / h)) if every is None else every
         n = int(round((t_end - T0) / h))
         self.run_end, self.failed_after = t_end, None
         try:
@@ -540,7 +545,7 @@ def unwrap(v):
 def report(ctx, u, log=print):
     """the practised swing against the checks of body-motion 4.10 (never given to the search). One run, 1 ms records."""
     m, s = ctx.m, ctx.m.sys
-    recs = ctx.run(u, every=int(round(1e-3 / H_STEP)))
+    recs = ctx.run(u, every=int(round(1e-3 / ctx.h)))
     pl = ctx.plan(u)
     tx, p, v, i, came = ctx.contact(recs)
     out = {"plan": {n: list(x) for n, x in pl.items()}, "bounds": dict(ctx.bd), "options": {k: x for k, x in ctx.o.items()},
@@ -560,7 +565,7 @@ def report(ctx, u, log=print):
     bz = m.axis(recs[ic][1], "bat", (0, 0, 1))
     out["bat_square_deg"] = math.asin(max(-1.0, min(1.0, (bz[0] * ctx.nb[0] + bz[1] * ctx.nb[1]) / (math.hypot(bz[0], bz[1]) * math.hypot(ctx.nb[0], ctx.nb[1]))))) / B.D2R
     out["bat_elev_deg"] = obs[ic][1]["bat_elev"]
-    log("   FROM THE START PLACED ON [4]'s STATE (an input, flagged): contact %.0f ms after the start%s" % ((tx - T0) * 1e3, "" if came else "  (THE BAT NEVER REACHED THE BALL; figures are at the run's end)"))
+    log("   FROM THE START PLACED ON [4]'s STATE%s (an input, flagged): contact %.0f ms after the start%s" % (", MOVED OFF ITS JOINTS' ENDS BY THE RULE OF 4.12" if ctx.o.get("clear") else "", (tx - T0) * 1e3, "" if came else "  (THE BAT NEVER REACHED THE BALL; figures are at the run's end)"))
     out["failed_after_contact_ms"] = None if ctx.failed_after is None else ctx.failed_after[0] * 1e3
     if ctx.failed_after is not None:
         log("   THE RUN FAILED %.0f ms AFTER CONTACT, after everything the score and these checks read (\"%s\"); the records to there are used"
@@ -722,6 +727,14 @@ def report(ctx, u, log=print):
         for k in sorted(cl[0], key=lambda kk: (kk[1], kk[0])):
             log("      %-18s %s: %6.1f %6.1f %6.1f   range %s   %s" % (k[0], k[1], cl[0][k], cl[1][k], cl[2][k],
                                                                     "%.0f to %.0f" % ar[k[0]] if k[0] in ar else "-", "[" + meas[k] + "]" if k in meas else ""))
+        # each wrist's place in its ellipse (4.12): 1 is the edge; at the start, at its largest up to contact, at contact; and on an ellipse tilted 8 deg
+        out["wrist_oval"] = {}
+        for sd in "LR":
+            rho = [B.oval_place(c_[("wrist_flex", sd)], c_[("wrist_dev", sd)])[0] for c_ in (B.clinical(m, rec[1]) for rec in recs[:ic + 1:5])]
+            c0_, c1_ = cl[0], cl[2]
+            out["wrist_oval"][sd] = (rho[0], max(rho), B.oval_place(c1_[("wrist_flex", sd)], c1_[("wrist_dev", sd)])[0], B.oval_place(c0_[("wrist_flex", sd)], c0_[("wrist_dev", sd)], tilt=8.0)[0])
+        log("   each wrist's place in its ellipse (1 = its edge): lead %.2f at the start, %.2f at most, %.2f at contact; rear %.2f, %.2f, %.2f; at the start on an ellipse tilted 8 deg: lead %.2f, rear %.2f"
+            % (out["wrist_oval"]["L"][:3] + out["wrist_oval"]["R"][:3] + (out["wrist_oval"]["L"][3], out["wrist_oval"]["R"][3])))
     for key, rng_ in ((("ankle_L", 67.3), ("ankle_R", 67.3)) if hands else (("pron_L", 161.9), ("pron_R", 161.9), ("sh_rot_L", 173.0), ("sh_rot_R", 173.0), ("ankle_L", 67.3), ("ankle_R", 67.3))):
         vv = unwrap([a[key] for a in ang])
         out["unheld"][key] = (max(vv) - min(vv), rng_)
@@ -767,9 +780,9 @@ def failed_differences(ctx, u, log=print):
 
 
 def verify(ctx, u, log=print):
-    """the same plan at a quarter of the step: what the result's numbers are worth."""
+    """the same plan at 0.5, 0.25 and 0.125 ms: what the result's numbers are worth."""
     out = {}
-    for h in (H_STEP, VERIFY_H):
+    for h in (H_STEP, 2.5e-4, VERIFY_H):
         try:
             recs = ctx.run(u, every=int(round(1e-3 / h)), h=h)
         except E.SolveError:
@@ -778,9 +791,136 @@ def verify(ctx, u, log=print):
             continue
         tx, p, v, i, came = ctx.contact(recs)
         d = E.sub(p, ctx.Pc)
-        out[h] = ((tx - T0) * 1e3, E.norm(v), E.dot(d, ctx.ev) * 100)
-        log("   at a %.3f ms step: contact %.1f ms after the start, the sweet spot at %.2f m/s, the miss %+.1f cm up" % ((h * 1e3,) + out[h]))
+        out[h] = ((tx - T0) * 1e3, E.norm(v), E.dot(d, ctx.ev) * 100, E.dot(d, ctx.el) * 100, came)
+        log("   at a %.3f ms step: contact %.1f ms after the start, the sweet spot at %.2f m/s, the miss %+.1f cm up and %+.1f cm along the bat%s" % ((h * 1e3,) + out[h][:4] + ("" if came else "  (never crossed the ball's plane)",)))
     return {"%.3f ms" % (h * 1e3): v for h, v in out.items()}
+
+
+def cost_of(r):
+    return float("inf") if r is None else sum(x * x for x in r)
+
+
+CMA_LAMBDA, CMA_SIGMA, CMA_OUT = 24, 0.03, 1e4          # plans a generation; the first spread, of each number's range; the charge for leaving the box [E]
+
+
+def cma(ctx, u0, gens, log, pool, seed=1, lam=CMA_LAMBDA, sigma0=CMA_SIGMA):
+    """The practice search without slopes (body-motion 4.12): the separable form of CMA-ES (Ros & Hansen 2008) on the free
+    numbers of the plan, in the unit box. Each generation `lam` plans are drawn about a centre with one spread per number,
+    all are run, they are RANKED by score, the centre moves to the weighted mean of the better half and each number's
+    spread follows how the better plans were spread. Only the order of the scores is used. A plan outside the box is run
+    at the box's edge and charged CMA_OUT x its squared distance outside; a failed run ranks last. Deterministic (seed).
+    Returns (the best plan ever run, its score, history [(generation, best ever, this generation's best, median, the
+    overall step, failed runs)], the last centre, the spreads at the end)."""
+    free = ctx.free
+    n = len(free)
+    rng = random.Random(seed)
+    mu = lam // 2
+    w = [math.log(mu + 0.5) - math.log(i + 1) for i in range(mu)]
+    sw = sum(w)
+    w = [x / sw for x in w]
+    mueff = 1.0 / sum(x * x for x in w)
+    cc = (4.0 + mueff / n) / (n + 4.0 + 2.0 * mueff / n)
+    cs = (mueff + 2.0) / (n + mueff + 5.0)
+    c1 = 2.0 / ((n + 1.3) ** 2 + mueff)
+    cmu = min(1.0 - c1, 2.0 * (mueff - 2.0 + 1.0 / mueff) / ((n + 2.0) ** 2 + mueff))
+    c1 *= (n + 2.0) / 3.0                                   # the separable form learns one number each, so faster
+    cmu = min(1.0 - c1, cmu * (n + 2.0) / 3.0)
+    damps = 1.0 + 2.0 * max(0.0, math.sqrt((mueff - 1.0) / (n + 1.0)) - 1.0) + cs
+    chi = math.sqrt(n) * (1.0 - 1.0 / (4.0 * n) + 1.0 / (21.0 * n * n))
+    m = [u0[i] for i in free]
+    C = [1.0] * n
+    ps, pc = [0.0] * n, [0.0] * n
+    sigma = sigma0
+    r0 = ctx.residuals(u0)
+    best_u, best = list(u0), cost_of(r0)
+    hist = [(0, best, best, best, sigma, 0)]
+    for g in range(1, gens + 1):
+        zs = [[rng.gauss(0.0, 1.0) for _ in range(n)] for _ in range(lam)]
+        ys = [[math.sqrt(C[k]) * z[k] for k in range(n)] for z in zs]
+        us, pens = [], []
+        for y in ys:
+            u = list(u0)
+            pen = 0.0
+            for k, i in enumerate(free):
+                x = m[k] + sigma * y[k]
+                xc = min(1.0, max(0.0, x))
+                pen += (x - xc) ** 2
+                u[i] = xc
+            us.append(u); pens.append(CMA_OUT * pen)
+        rs = pool.map(_res, us, chunksize=max(1, lam // WORKERS))
+        raw = [cost_of(r) for r in rs]
+        fs = [c + p_ for c, p_ in zip(raw, pens)]
+        failed = sum(1 for c in raw if c == float("inf"))
+        order = sorted(range(lam), key=lambda k: fs[k])
+        kb = min(range(lam), key=lambda k: raw[k])
+        if raw[kb] < best:
+            best, best_u = raw[kb], us[kb]
+        yw = [sum(w[j] * ys[order[j]][k] for j in range(mu)) for k in range(n)]
+        zw = [sum(w[j] * zs[order[j]][k] for j in range(mu)) for k in range(n)]
+        m = [m[k] + sigma * yw[k] for k in range(n)]
+        ps = [(1.0 - cs) * ps[k] + math.sqrt(cs * (2.0 - cs) * mueff) * zw[k] for k in range(n)]
+        pn = math.sqrt(sum(x * x for x in ps))
+        hsig = 1.0 if pn / math.sqrt(1.0 - (1.0 - cs) ** (2 * g)) / chi < 1.4 + 2.0 / (n + 1.0) else 0.0
+        pc = [(1.0 - cc) * pc[k] + hsig * math.sqrt(cc * (2.0 - cc) * mueff) * yw[k] for k in range(n)]
+        for k in range(n):
+            C[k] = ((1.0 - c1 - cmu) * C[k] + c1 * (pc[k] * pc[k] + (1.0 - hsig) * cc * (2.0 - cc) * C[k])
+                    + cmu * sum(w[j] * ys[order[j]][k] ** 2 for j in range(mu)))
+        sigma *= math.exp((cs / damps) * (pn / chi - 1.0))
+        srt = sorted(c for c in raw)
+        hist.append((g, best, raw[kb], srt[lam // 2], sigma, failed))
+        if g % 10 == 0 or g == gens:
+            log("      generation %3d: best ever %.2f; this generation's best %.2f, median %.2f; overall step %.4f; failed runs %d" % (g, best, raw[kb], srt[lam // 2], sigma, failed))
+    mfull = list(u0)
+    for k, i in enumerate(free):
+        mfull[i] = min(1.0, max(0.0, m[k]))
+    return best_u, best, hist, mfull, [sigma * math.sqrt(c) for c in C]
+
+
+def search_checks(o, u0, u, log=print, pool=None):
+    """the search itself, checked (body-motion 4.12, rule 6), at a result u found from u0 under options o:
+    (1) the result at three steps; (2) the score along the line from u0 to u and one step beyond it, at 0.25 and at
+    0.125 ms; (3) slopes forward and backward for the eight numbers moved furthest, at two differences. Printed and
+    returned; nothing here feeds the search."""
+    out = {}
+    ctxs = {h: Ctx(**dict(o, h=h)) for h in (5e-4, 2.5e-4, 1.25e-4)}
+    out["steps"] = {}
+    for h, c in ctxs.items():
+        r = c.residuals(u)
+        out["steps"]["%.3f" % (h * 1e3)] = None if r is None else (cost_of(r), r[0] * MISS_UNIT * 100, r[1] * MISS_UNIT * 100, SPEED_ASK - r[5] ** 2 / SPEED_W)
+    log("   CHECK OF THE SEARCH 1, the result's score at 0.5, 0.25, 0.125 ms (with its miss up and along the bat, cm, and its speed along the line): "
+        + "; ".join("%s ms: %s" % (k, "FAILS" if v is None else "%.1f (%+.1f, %+.1f, %.1f m/s)" % v) for k, v in out["steps"].items()))
+    out["line"] = {}
+    alphas = [0.0, 0.1, 0.2, 0.3, 0.4, 0.5, 0.6, 0.7, 0.8, 0.9, 1.0, 1.1]
+    for h in (2.5e-4, 1.25e-4):
+        vals = []
+        for a in alphas:
+            ua = [min(1.0, max(0.0, x0 + a * (x1 - x0))) for x0, x1 in zip(u0, u)]
+            vals.append(cost_of(ctxs[h].residuals(ua)))
+        out["line"]["%.3f" % (h * 1e3)] = vals
+        log("   CHECK OF THE SEARCH 2, the score along the line from the start (0) to the result (1) and beyond (1.1), at %.3f ms: %s" % (h * 1e3, " ".join("%.0f" % v for v in vals)))
+    c = ctxs[2.5e-4]
+    moved = sorted(c.free, key=lambda i: -abs(u[i] - u0[i]))[:8]
+    f0 = cost_of(c.residuals(u))
+    out["slopes"] = []
+    for i in moved:
+        row = []
+        for fd in (0.02, 0.005):
+            for sgn in (1.0, -1.0):
+                un = list(u); un[i] = min(1.0, max(0.0, u[i] + sgn * fd))
+                hh = un[i] - u[i]
+                row.append(float("nan") if hh == 0 else (cost_of(c.residuals(un)) - f0) / hh)
+        out["slopes"].append((c.box[i][0], c.box[i][1], u[i] - u0[i]) + tuple(row))
+    log("   CHECK OF THE SEARCH 3, slopes of the score at the result (forward, backward at 0.02; forward, backward at 0.005), the eight numbers moved furthest:")
+    for row in out["slopes"]:
+        log("      %-14s %-5s moved %+.3f:  %9.0f %9.0f | %9.0f %9.0f" % row)
+    return out
+
+
+def calf_plan(plan, bd):
+    """start K (4.12): a plan with the rear calf at half its strength from 100 ms after the start, rising in 80 ms [E]."""
+    out = {n: list(v) for n, v in plan.items()}
+    out["ankle_pf_R"] = [0.5 * bd["ankle_pf_R"], T0 + 0.100, 0.080, 0.100, 0.0]
+    return out
 
 
 def main():
@@ -797,6 +937,10 @@ def main():
         body["t_view"] = float(arg("--view", T_VIEW))
     if "--feet" in a:
         body["feet"] = arg("--feet", None)
+    if "--wrist" in a:
+        body["wrist"] = arg("--wrist", None)
+    if "--clear" in a:
+        body["clear"] = True
     if "--mu" in a:
         body["mu"] = float(arg("--mu", B.MU))
     if "--show" in a:
@@ -832,6 +976,44 @@ def main():
         out = report(ctx, u)
         out.update(cost=cost, start=best["start"] + ", continued", history=hist, step_check=verify(ctx, u))
         json.dump(out, open(main_file, "w"), indent=1)
+        return
+    if "--cma" in a:
+        # the search of body-motion 4.12: no slopes, every run at 0.25 ms, on the cleared start with the wrists' ellipses
+        o = dict(grip="hands", feet="cleats", hold="let_go", wrist="oval", clear=True, h=2.5e-4)
+        o.update(body)
+        o["t_view"] = float(arg("--view", T_VIEW))
+        label = arg("--cma", "S")
+        g1, g2 = int(arg("--reach", 100)), int(arg("--gens", 250))
+        seed = int(arg("--seed", 1))
+        ctx = Ctx(contact="nearest", **o)
+        reach = Ctx(stage="reach", **o)
+        s9 = json.load(open(os.path.join(HERE, "practice3d_s9_cleats_S.json")))["plan"]
+        plan = {"S": s9, "K": calf_plan(s9, ctx.bd), "C": hand_plan(ctx, 0.6), "D": hand_plan(ctx, 0.3, seed=1)}[label] if label in "SKCD" else json.load(open(label))["plan"]
+        plan = {n: [min(v[0], ctx.bd[n])] + list(v[1:]) for n, v in plan.items()}
+        u0 = ctx.u_of(plan)
+        print("== the search of 4.12 from start %s, watching %.2f s (the arms may fire %.0f ms before contact); %s; %d generations of the reach stage, then %d of the whole aim, %d plans each, every run at %.3f ms; seed %d"
+              % (label, o["t_view"], ctx.t_avail * 1e3, o, g1, g2, CMA_LAMBDA, o["h"] * 1e3, seed), flush=True)
+        r0 = ctx.residuals(u0)
+        print("   the starting plan's score on this body: %s; by term: %s" % ("THE RUN FAILS" if r0 is None else "%.1f" % cost_of(r0), "" if r0 is None else "; ".join("%s %.1f" % kv for kv in terms(ctx, r0).items())), flush=True)
+        global _CTX
+        t = time.time()
+        _CTX = reach
+        with multiprocessing.get_context("fork").Pool(WORKERS) as pool:
+            print("-- the reach stage", flush=True)
+            u1, c1_, h1, m1, sp1 = cma(reach, u0, g1, lambda s_: print(s_, flush=True), pool, seed)
+        rr = reach.residuals(u1)
+        print("   nearest the ball: %.1f cm up, %.1f cm along the bat, %.1f cm along the ball's line; %.0f s" % (rr[0] * MISS_UNIT * 100, rr[1] * MISS_UNIT * 100, rr[6] * MISS_UNIT * 100, time.time() - t), flush=True)
+        _CTX = ctx
+        with multiprocessing.get_context("fork").Pool(WORKERS) as pool:
+            print("-- the whole aim", flush=True)
+            u, cost, hist, mfull, spread = cma(ctx, u1, g2, lambda s_: print(s_, flush=True), pool, seed + 1)
+        print("   %d generations, %.0f s; best score %.2f (the last centre's %.2f); it fell %.2f over the last 50 generations; the spreads at the end: largest %.4f, median %.4f of a number's range; failed runs in all %d"
+              % (g2, time.time() - t, cost, cost_of(ctx.residuals(mfull)), hist[max(0, len(hist) - 51)][1] - hist[-1][1], max(spread), sorted(spread)[len(spread) // 2], sum(h_[5] for h_ in hist)), flush=True)
+        out = report(ctx, u)
+        out.update(cost=cost, start=label + ", the search of 4.12", history=hist, reach_history=h1, step_check=verify(ctx, u), failed_differences=failed_differences(ctx, u),
+                   search_checks=search_checks(dict(o, contact="nearest"), u0, u), start_plan=plan, spread_end=(max(spread), sorted(spread)[len(spread) // 2]))
+        os.makedirs(os.path.join(P.OUT, "s10"), exist_ok=True)
+        json.dump(out, open(os.path.join(P.OUT, "s10", "cma_%s_view%03d%s.json" % (label if label in "SKCD" else "F", int(round(o["t_view"] * 1e3)), arg("--tag", ""))), "w"), indent=1)
         return
     if "--staged" in a:
         # a staged search (4.10): from each start, first the reach stage, then the whole aim from where that ended
