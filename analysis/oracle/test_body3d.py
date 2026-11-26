@@ -846,6 +846,51 @@ class BodyChecks(unittest.TestCase):
         self.assertLess(c2, c1 / 8.0)
 
 
+class RangeChecks(unittest.TestCase):
+    """the joints' ranges as stops (body-motion 4.10, session 8)."""
+
+    @NEED
+    def test_ranges_against_independent_measures_and_clear_of_the_start(self):
+        """range_angles reads the knees' and elbows' bends as observe() does by another route (the angle between
+        the segments' long axes) and the trunk's twist as the difference of the two measured rotations; every stop
+        begins at least RANGE_CLEAR beyond the start, so none carries anything there; and the old body is unchanged."""
+        m = B.Model(ranges=())
+        st = B.place(m, T0)
+        lim = B.add_ranges(m, st)
+        a, o = B.range_angles(m, st), m.observe(st)
+        for k, ok in (("knee_L", "lead_knee_flex"), ("knee_R", "trail_knee_flex"), ("elbow_L", "lead_elbow_flex"), ("elbow_R", "trail_elbow_flex")):
+            self.assertAlmostEqual(a[k], o[ok], delta=0.05, msg=k)
+        self.assertAlmostEqual(a["trunk_twist"], o["trunk_rot"] - o["pelvis_rot"], delta=1.5)   # the trunk leans 15 deg, so not exact
+        self.assertEqual(len(lim), 19)
+        for k, (lo, hi) in lim.items():
+            self.assertGreaterEqual(a[k] - lo, B.RANGE_CLEAR - 1e-9, msg=k)
+            self.assertGreaterEqual(hi - a[k], B.RANGE_CLEAR - 1e-9, msg=k)
+        for k in ("wrist_dev_L", "wrist_dev_R"):          # a wrist's cock has 58 deg of travel, wherever it starts
+            self.assertAlmostEqual(lim[k][1] - lim[k][0], 58.0, delta=1e-9)
+        m.sys.diag = {}
+        m.sys.deriv(T0, st, m.sys.new_aux())
+        self.assertTrue(all(tau == 0.0 for tau, th in m.sys.diag["stop"].values()))
+        m.sys.diag = None
+        self.assertEqual([x[0] for x in B.Model().sys.stops], ["knee_L", "elbow_L", "shoulder_L", "knee_R", "elbow_R", "shoulder_R"])
+
+    @NEED
+    def test_a_stop_pushes_back_only_past_its_end(self):
+        """a knee turned past its range is pushed back toward it by the stop's stiffness times the excess, and a knee
+        inside its range is not pushed at all (the check fails if the stop's sign or its limits are wrong)."""
+        m = B.Model(ranges=())
+        st = B.place(m, T0)
+        lim = B.add_ranges(m, st)
+        j = [x[0] for x in m.sys.stops].index("knee_L")
+        name, a_, b_, ax, ea, fb, lo, hi, k, c = m.sys.stops[j]
+        self.assertAlmostEqual(hi / B.D2R, B.ROM["knee_flex"], delta=1e-9)
+        m.sys.stops[j] = (name, a_, b_, ax, ea, fb, lo, (B.range_angles(m, st)["knee_L"] - 3.0) * B.D2R, k, 0.0)   # the end moved 3 deg inside the knee's angle
+        m.sys.diag = {}
+        m.sys.deriv(T0, st, m.sys.new_aux())
+        tau, th = m.sys.diag["stop"]["knee_L"]
+        m.sys.diag = None
+        self.assertAlmostEqual(tau, -B.RANGE_K["big"] * 3.0 * B.D2R, delta=1e-6 * B.RANGE_K["big"])
+
+
 class Mutations(unittest.TestCase):
     """each fault is caught by a named check (and the checks pass without it, above)."""
 

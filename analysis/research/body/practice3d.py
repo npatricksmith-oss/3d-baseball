@@ -64,6 +64,9 @@ VARY = {
     "strongest": {"bound_scale": STRONGEST}, "small": {"H": 1.75, "M": 77.0},
     "strain_counted": {"strain_w": 1.0},
     "meet_061": {"ahead": 0.61}, "meet_084": {"ahead": 0.84},
+    # diagnoses added after the main run (body-motion 4.10, step 2): is it where the ball is that defeats the body?
+    "ball_at_the_top_of_the_zone": {"z": 1.05},
+    "ball_high_and_close": {"z": 1.20, "across": 0.75, "ahead": 0.40},     # about where the earlier swings' bats went; no pitch a hitter is thrown
 }
 
 
@@ -138,7 +141,7 @@ class Ctx:
         self.free = [i for i, (n, f, lo, hi) in enumerate(self.box) if hi > lo and self.bd[n] > 0.0]
         k = H / 1.84                                          # [E] a smaller batter stands and is pitched to in proportion
         xp = m.sys.pose(st, m.b["pelvis"])[0]
-        self.Pc = (xp[0] + MEET_ACROSS * k, xp[1] + o.get("ahead", MEET_AHEAD) * k, BALL_Z * k)
+        self.Pc = (xp[0] + o.get("across", MEET_ACROSS) * k, xp[1] + o.get("ahead", MEET_AHEAD) * k, o.get("z", BALL_Z) * k)
         d, a = BALL_DESCENT * B.D2R, BALL_ACROSS * B.D2R
         self.nb = (math.cos(d) * math.sin(a), -math.cos(d) * math.cos(a), -math.sin(d))
         self.ev = E.unit(E.sub((0.0, 0.0, 1.0), E.scale(self.nb, self.nb[2])))    # up, square to the ball's line
