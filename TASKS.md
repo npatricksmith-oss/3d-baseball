@@ -23,7 +23,9 @@ Status: `[ ]` not started · `[~]` partly done · `[?]` needs an owner decision
 
 **Ruled:** Q61 = b, Q62 = a, Q63 = a (PLAN D39–D41). Nothing waits on the owner.
 
-**Running: `body-3d-9`** (Fable, high; Workers tab; worktree `swing-research`, branch `work/body-3d`; job file WORKER-BODY-3D-9 there): the first of D41's three sessions (items 1–3). Check its branch log, status file and the job queue. Then: Opus review, merge.
+**Session 9 (`work/body-3d` `1bd190f`, worktree `swing-research`; spec §4.11 there), unreviewed:** the grip, a holding muscle, the feet; no swing on it.
+
+**Running: `rev-body-3d-9`** (Opus; Workers tab; that worktree). Then: commit its review, fixes, merge.
 
 **Next:** §2: the ground-dive leftovers ([note](docs/calibration/2026-11-23-of-ground-dive.md) §9).
 
