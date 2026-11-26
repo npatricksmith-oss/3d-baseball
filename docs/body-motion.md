@@ -2500,14 +2500,18 @@ Code: `analysis/research/body/ladder3d.py` (the protocol, the energy account, th
 - **Step 4, the hips' turn by their own muscles: +0.06 m/s. Nothing,** as expected: the front hip's limiting end did not move.
 - *Against what I expected:* the reference does not creep (I expected 0.1–0.5 a step); rung 1 by continuation loses a little where I expected +1–3; rung 2 gains 2.4 where I expected a loss; rung 4 nothing (right); rung 5 loses more than I expected, unsettled.
 
-#### The dependence on friction nobody has measured: the design as run (changed before any of it ran)
+#### The dependence on friction nobody has measured: the design as run (changed twice before any of it ran)
 
-Rung 1's design put these runs on rung 1's body, from rung 1's better search. They are moved, before any ran, **onto rung 2's body and the chain's swing there (19.66 m/s)**: that is the best swing the body has, it is the one the session's answer rests on, and it stands on a body where the friction is the only unmeasured part left in the swing's energy. (The three runs queued on rung 1's body are stopped as they come up.)
+Rung 1's design put these runs on rung 1's body. After the chain they were moved to rung 2's body and the chain's swing there; after rungs 3 and 4 they are moved once more, **onto rung 4's body and its better-scoring swing (21.11 m/s)**: the body after all four of the owner's changes, where the session's fastest swings stand and the figure the session's answer rests on. None of the earlier copies ran (they are stopped as they come up in the queue).
 
-- *Each run:* the chain's rung 2 swing carried on for 500 generations (the same draws, no extra blocks) on rung 2's body with some joints' friction moved to an end of its range. The middle is the same swing carried on with nothing moved.
+- *Each run:* rung 4's better swing carried on for 500 generations (the same draws, no extra blocks) on rung 4's body with some joints' friction moved to an end of its range. The middle is that swing itself (a settled swing carried on its own body returns unchanged: the chain's reference showed it, and rung 6's reference run checks it here).
 - *All together:* every unread value at its low end (hips 0.5, trunk 1.0, elbow's bend 0.22, forearm's turn 0.02, wrist's tilt 0.03); at its high end (4.6, 27.5, 0.97, 0.10, 0.20).
-- *One group at a time, the others in the middle:* the trunk at 1.0 and at 27.5; the hips at 0.5 and at 4.6; the arms' three unread values at their low and at their high ends. These are queued without waiting to see whether the all-together runs move the bat by more than the yardstick: the queue is long and they are the owner's question.
-- *What I expect:* the middle run returns the swing unchanged (as the reference did on rung 0's body). Low ends together: +1 to +2.5 m/s (120 J of the swing's 203 J of friction is at the trunk and hips). High ends together: a large loss, 4 m/s or more, nearly all of it the trunk's 27.5 (a value measured with the trunk's muscles holding a load, which at this swing's speeds asks the trunk's damper for more torque than its rotators have). The arms' unread values: under 0.5 m/s either way.
+- *One group at a time, the others in the middle:* the trunk at 1.0 and at 27.5; the hips at 0.5 and at 4.6. (The arms' three unread values are not run apart: in rung 4's swings the elbows' and wrists' friction takes under 25 J in all.) These are queued without waiting on the all-together runs: the queue is long and it is the owner's question.
+- *What I expect:* low ends together: +0.5 to +2 m/s (about 110 J of the swing's 166–177 J of friction is at the trunk and hips). High ends together: a large loss, 3 m/s or more, nearly all of it the trunk's 27.5 (a value measured with the trunk's muscles holding a load; at this swing's 330–380°/s of trunk turn a damper that size asks for 160–180 N·m, two thirds of what the trunk's rotators have). The hips apart: under 1 m/s either way; they hardly turn in these swings.
+
+#### Rung 6 stands on rung 4's body (decided before rung 5's searches finished, and before any of rung 6 ran)
+
+Rung 6's design above says "the last rung's result". **It is run on rung 4's body, from rung 4's better-scoring swing (21.11 m/s), whatever rung 5 gives:** rung 4 is the body after the four changes the owner ruled (friction, the hold, the feet, the hips); rung 5's still start is a rule of mine that replaces a measured moving state with an assumed one, and "which muscles and by how much" should not rest on it. One reference run, not two (the chain's two references on rung 0's body were identical to the last digit).
 
 ## 5. The drive and its control (§14.1 items 2 and 3)
 

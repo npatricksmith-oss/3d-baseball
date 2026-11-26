@@ -65,7 +65,14 @@ GROUPS = {"hips": ("hip_ext_R", "hip_ext_L", "hip_flex_L", "hip_rot_R", "hip_rot
           "shoulders": tuple(n + sd for sd in "LR" for n in ("shoulder_", "sh_raise_", "sh_lower_", "sh_irot_", "sh_erot_")),
           "elbows": tuple(n + sd for sd in "LR" for n in ("elbow_ext_", "elbow_flex_")),
           "forearms": tuple(n + sd for sd in "LR" for n in ("pron_", "sup_", "wrist_", "wrist_flex_", "wrist_ext_"))}
-LAST = "r5"                                            # the rung the what-ifs stand on
+LAST = "r4"                                            # the rung the what-ifs stand on: the body after the owner's four changes (4.13)
+_R4 = dict(RUNGS["r4"])
+# the dependence on the unread joints' friction, on rung 4's body: all together, then the trunk and the hips apart
+RUNGS.update({"r4_low": dict(_R4, damp="low"), "r4_high": dict(_R4, damp="high"),
+              "r4_trunk_low": dict(_R4, damp={"set": "read", "from": {"trunk": "low"}}), "r4_trunk_high": dict(_R4, damp={"set": "read", "from": {"trunk": "high"}}),
+              "r4_hips_low": dict(_R4, damp={"set": "read", "from": {"hip_L": "low", "hip_R": "low"}}),
+              "r4_hips_high": dict(_R4, damp={"set": "read", "from": {"hip_L": "high", "hip_R": "high"}}),
+              "r4_arms_low": dict(_R4, damp={"set": "read", "from": {"arms": "low"}}), "r4_arms_high": dict(_R4, damp={"set": "read", "from": {"arms": "high"}})})
 for _g, _names in GROUPS.items():
     RUNGS["r6_" + _g] = dict(RUNGS[LAST], bound_scale={n: 1.5 for n in _names})
 RUNGS["r6_all15"] = dict(RUNGS[LAST], bound_scale={n: 1.5 for n in PR.CH})
