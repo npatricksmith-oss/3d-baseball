@@ -233,9 +233,13 @@ def range_angles(mdl, st):
         out[name] = (math.asin(max(-1.0, min(1.0, E.dot(n, f)))) if kind == 1 else math.atan2(E.dot(n, E.cross(e, f)), E.dot(e, f))) / D2R
     for sd, sg in SIDES:
         zf = E.mv(Rm["farm_" + sd], (0, 0, 1))
-        bz = E.mv(Rm["bat"], (0, 0, 1))
         fx = E.mv(Rm["farm_" + sd], (1, 0, 0))
-        g = fx if E.dot(fx, bz) > 0 else E.scale(fx, -1.0)       # the handle's direction, knob to barrel, as the forearm carries it
+        # the forearm's turn on the elbow's own second axis: the forearm's x about its z, from a reference the upper arm
+        # carries (the elbow's hinge crossed with the forearm). Which end of its x counts is fixed once, from the start
+        # (ref, the same sign the cock is read with), so the reading cannot turn over. (Until session 8's second review
+        # the end was chosen at every instant by which way the forearm's x lay along the bat, which changes when the
+        # wrist's cock passes the line of the bat: a 180 deg jump that read a 106 deg turn as 285.)
+        g = E.scale(fx, ref[sd])
         r = E.cross(E.mv(Rm["uarm_" + sd], (0, 1, 0)), zf)       # where it points with the forearm neither pronated nor supinated
         ang = math.atan2(E.dot(zf, E.cross(r, g)), E.dot(r, g)) / D2R
         out["pron_" + sd] = -sg * ang                            # the right forearm pronates about its own +z, the left about -z
