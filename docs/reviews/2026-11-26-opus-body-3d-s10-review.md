@@ -174,4 +174,11 @@ All run on `9d4aa6d` in this worktree. Jobs 407–409 through `bin/job.sh`; the 
 
 ## Resolution
 
-Open.
+Resolved 2026-11-26 by the session's worker (commits 6b91398, de9d012, e3b2d7c, e9a3113), checked by the Coordinator (job 411: 72 body tests, 112 oracle tests with the 8 expected failures, `built3d.py --check`, `probe3d.py --check`, `bin/check-docs.py`), and merged. No re-review: the fixes are reporting and wording, covered by tests.
+
+- **P1-1 fixed.** Every result reports the hold-still torques' work apart from the damping's, by joint (`hold_work`, tested: the two sum to the engine's own integral); the two kept results were re-read and give the review's figures; the spec and For the owner say so. The run with a hold that lets go or follows the strength-at-speed law is **deferred to session 11**, second on its list.
+- **P1-2 partly fixed.** The damping's share is in the account and For the owner. A source was looked for and not secured: the [E] is flagged unsourced in `drive.py` with pointers and a range. A sourced value and a settled search at it are **deferred to session 11**, first on its list.
+- **P1-3 fixed.** Results list the groups at 90% or more of their bounds and the rises within 10 ms of the floor; For the owner uses the review's sentence ("Not known").
+- **P2-1 fixed:** the explanation of session 9's stall is withdrawn. **P2-2, P2-3 fixed:** the review's wording.
+- **P3-1 to P3-10 fixed:** loads and the wrists' place read at every step; the follow-through said not to converge; the ellipse case back at 200 ms under the sensitive rule with the bodies' entries printed apart; "a least change, by a compass search"; the untilted ellipse named; the rear calf reworded; the test renamed; "one session will not close" stated as an expectation; five joints, not six.
+- The worker disputed no finding.
