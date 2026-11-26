@@ -122,6 +122,23 @@ def outside(poly, p):
     return best
 
 
+def clock_residuals(fired, tx, t_avail, form="each"):
+    """the score's charge for arm muscles that fire before the batter could have decided (body-motion 4.10 item 7, 4.11).
+    fired: [(when the arm muscle first drives, s; its asked strength as a share of its bound)] for each arm muscle used;
+    tx: contact; t_avail: how long before contact an arm muscle may fire. Returns one residual per entry.
+    form "each" (since session 9's review, P1-1): each muscle's OWN overrun, max(0, (tx - t_avail) - its onset), per
+    CLOCK_UNIT, weighted by its share of the arms' asked strength (the weights sum to 1; the residual carries the
+    weight's square root). With every muscle tied at one onset the sum of squares is the old form's.
+    form "earliest" (sessions 8 and 9): the earliest onset's overrun alone, in the first entry. With two muscles tied
+    at the earliest, moving one of them later changes nothing in it, so a search saw no slope there."""
+    if not fired:
+        return []
+    if form == "earliest":
+        return [max(0.0, (tx - t_avail) - min(t for t, w in fired)) / CLOCK_UNIT] + [0.0] * (len(fired) - 1)
+    tot = sum(w for t, w in fired)
+    return [math.sqrt(w / tot) * max(0.0, (tx - t_avail) - t) / CLOCK_UNIT for t, w in fired]
+
+
 class Ctx:
     """one body with its ranges, its start and the pitch, reused for every swing of a search."""
 
@@ -298,12 +315,31 @@ class Ctx:
                     acc[n] += (min(a[2], pl[n][4] * left) * pl[n][0] / self.bd[n]) ** 2
         return {n: v / max(1, k) for n, v in acc.items()}
 
+    def arm_fired(self, pl):
+        """[(channel, when it first drives, its asked strength over its bound)] for every arm muscle used (strength over
+        1 % of its bound). When it first drives is its onset; under the rule of sessions 8 and part 1 (no hold) a muscle
+        tensed beforehand drives from the first instant (a starting level over 1 % of its bound; review P2-4 of session 8)."""
+        held = self.o.get("hold") in ("resolve", "let_go")          # a held muscle has not fired until its onset
+        out = []
+        for n in ARMS:
+            if self.bd[n] > 0 and pl[n][0] > 0.01 * self.bd[n]:
+                t = pl[n][1] if (held or pl[n][0] * pl[n][4] <= 0.01 * self.bd[n]) else T0
+                out.append((n, t, pl[n][0] / self.bd[n]))
+        return out
+
     def arm_onsets(self, pl):
-        """when each arm muscle of any size first drives: its onset, or the start if it is tensed beforehand (a starting
-        level over 1 % of its bound is drive from the first instant; review P2-4)."""
-        if self.o.get("hold") in ("resolve", "let_go"):      # a held muscle has not fired until its onset
-            return [pl[n][1] for n in ARMS if pl[n][0] > 0.01 * self.bd[n]]
-        return [T0 if pl[n][0] * pl[n][4] > 0.01 * self.bd[n] else pl[n][1] for n in ARMS if pl[n][0] > 0.01 * self.bd[n]]
+        """when each arm muscle used first drives (arm_fired)."""
+        return [t for n, t, w in self.arm_fired(pl)]
+
+    def clock(self, pl, tx, on=True):
+        """the clock's residuals, one for each of the arm channels (zero for one not used, or when on is False):
+        clock_residuals() in the form this search uses (clock="each" unless the options say "earliest")."""
+        fired = self.arm_fired(pl) if on else []
+        vals = clock_residuals([(t, w) for n, t, w in fired], tx, self.t_avail, self.o.get("clock", "each"))
+        by = {n: v for (n, t, w), v in zip(fired, vals)}
+        if self.o.get("clock", "each") == "earliest":               # the one term, in the first place
+            return [vals[0] if vals else 0.0] + [0.0] * (len(ARMS) - 1)
+        return [by.get(n, 0.0) for n in ARMS]
 
     def residuals(self, u):
         try:
@@ -322,8 +358,7 @@ class Ctx:
             r += [math.sqrt(self.effort_w * eff[n] / len(CH)) for n in CH]
             xo, least, zr = self.balance(recs, tx)
             r += [xo / XCOM_UNIT, max(0.0, JUMP_MIN - least) / JUMP_UNIT, max(0.0, SINK_MIN - zr) * self.z0 / SINK_UNIT]
-            on = self.arm_onsets(pl)
-            r.append(max(0.0, (tx - self.t_avail) - min(on)) / CLOCK_UNIT if on else 0.0)
+            r += self.clock(pl, tx)
             return None if any(x != x for x in r) else r
         if self.o.get("contact") == "nearest":
             # the whole aim with no cliff (4.10, session 8's fix): contact is read where the sweet spot comes nearest the
@@ -347,10 +382,9 @@ class Ctx:
         r += [math.sqrt(self.effort_w * eff[n] / len(CH)) for n in CH]
         xo, least, zr = self.balance(recs, tx)
         r += [xo / XCOM_UNIT, max(0.0, JUMP_MIN - least) / JUMP_UNIT, max(0.0, SINK_MIN - zr) * self.z0 / SINK_UNIT]
-        on = self.arm_onsets(pl)
         # the clock is read against a contact that happened; a bat that never comes round is charged for that, above,
         # and not for the clock against the run's end (review P2-3)
-        r.append(max(0.0, (tx - self.t_avail) - min(on)) / CLOCK_UNIT if on and came else 0.0)
+        r += self.clock(pl, tx, came)
         if self.strain_w > 0.0:
             names = [s_[0] for s_ in self.m.sys.stops]
             for j, nm in enumerate(names):
@@ -364,9 +398,10 @@ def terms(ctx, r):
     n = len(CH)
     sq = lambda xs: sum(x * x for x in xs)
     out = {"miss": sq(r[0:2]), "off the ball's line": sq(r[2:4]), "bat not square": sq(r[4:5]), "speed short of 45 m/s": sq(r[5:6]),
-           "never came round": sq(r[6:7]), "effort": sq(r[7:7 + n]), "balance": sq(r[7 + n:10 + n]), "the arms' clock": sq(r[10 + n:11 + n])}
-    if len(r) > 11 + n:
-        out["load on a joint's end"] = sq(r[11 + n:])
+           "never came round": sq(r[6:7]), "effort": sq(r[7:7 + n]), "balance": sq(r[7 + n:10 + n]),
+           "the arms' clock": sq(r[10 + n:10 + n + len(ARMS)])}
+    if len(r) > 10 + n + len(ARMS):
+        out["load on a joint's end"] = sq(r[10 + n + len(ARMS):])
     return out
 
 

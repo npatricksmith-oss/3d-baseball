@@ -1836,6 +1836,53 @@ class FeetChecks(unittest.TestCase):
         self.assertEqual(B.Model(ranges=()).mu, B.MU)        # the plate's body is as it was
 
 
+def _practice():
+    """the practice search's module (analysis/research/body/practice3d.py), for the checks of its score's own rules."""
+    import os
+    import sys
+    here = os.path.join(os.path.dirname(os.path.abspath(__file__)), "..", "research", "body")
+    if here not in sys.path:
+        sys.path.insert(0, here)
+    import practice3d
+    return practice3d
+
+
+class SearchChecks(unittest.TestCase):
+    """the practice search's own rules (body-motion 4.11, after session 9's review)."""
+
+    def test_the_clock_charges_each_arm_muscle_its_own_overrun(self):
+        """review P1-1. Five arm muscles tied at the run's first instant, contact 30 ms later than the clock allows them,
+        and a sixth inside it. Worked by hand here: moving ALL the tied onsets 10 ms later lowers the charge to (20/30)^2
+        of itself; moving ONE of them 10 ms later, alone, lowers it (its own slope has the right sign), and still does
+        when that delays contact by a tenth of the move; with every muscle tied the charge is the old form's; a muscle
+        inside the clock is charged nothing, and the charge is zero when all are inside. The old form (the earliest
+        onset alone) FAILS the one-muscle check: its charge does not fall, and rises with the later contact."""
+        PR = _practice()
+        sq = lambda xs: sum(x * x for x in xs)
+        t_avail, t0 = 0.253, -0.250
+        tx = t0 + t_avail + 0.030
+        tied = [(t0, w) for w in (1.0, 0.6, 0.9, 0.3, 0.7)]
+        late = [(tx - 0.200, 0.8)]
+        f = lambda fired, tx_=tx, form="each": sq(PR.clock_residuals(fired, tx_, t_avail, form))
+        unit = PR.CLOCK_UNIT
+        base = f(tied + late)
+        share = sum(w for t, w in tied) / (sum(w for t, w in tied) + 0.8)
+        self.assertAlmostEqual(base, share * (0.030 / unit) ** 2, delta=1e-9 * base)             # by hand: the tied ones' share
+        self.assertAlmostEqual(f(tied), (0.030 / unit) ** 2, delta=1e-9 * base)                   # all tied: the old form's value
+        self.assertAlmostEqual(f(tied), f(tied, form="earliest"), delta=1e-9 * base)
+        together = [(t + 0.010, w) for t, w in tied]
+        self.assertAlmostEqual(f(together + late), base * (20.0 / 30.0) ** 2, delta=1e-9 * base)
+        self.assertEqual(f([(tx - 0.100, 1.0), (tx - 0.250, 0.5)]), 0.0)
+        for k in range(len(tied)):
+            one = [(t + (0.010 if j == k else 0.0), w) for j, (t, w) in enumerate(tied)]
+            self.assertLess(f(one + late), base, msg="muscle %d alone" % k)
+            if tied[k][1] >= 0.6:                                 # a muscle asked for enough: still downhill with contact a tenth later
+                self.assertLess(f(one + late, tx + 0.001), base, msg="muscle %d alone, contact 1 ms later" % k)
+            old0 = f(tied + late, form="earliest")
+            self.assertEqual(f(one + late, form="earliest"), old0)                              # the old form: no slope at all
+            self.assertGreater(f(one + late, tx + 0.001, form="earliest"), old0)                 # and uphill once contact moves
+
+
 class Mutations(unittest.TestCase):
     """each fault is caught by a named check (and the checks pass without it, above)."""
 
