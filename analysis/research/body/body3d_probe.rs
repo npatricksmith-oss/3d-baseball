@@ -53,7 +53,7 @@ const E3: [V3; 3] = [[1.0, 0.0, 0.0], [0.0, 1.0, 0.0], [0.0, 0.0, 1.0]];
 struct Pt { a: i32, b: i32, ra: V3, rb: V3 }
 struct Dt { a: i32, b: i32, ua: V3, wb: V3 }
 struct Act { a: i32, b: usize, ax: V3, t: f64, w: f64, ton: f64, rise: f64, toff: f64, a0: f64, tab: i32, ksec: f64, axb: V3 }
-struct Stop { a: i32, b: usize, ax: V3, ea: V3, fb: V3, lo: f64, hi: f64, k: f64, c: f64, kind: i32 }
+struct Stop { a: i32, b: usize, ax: V3, ea: V3, fb: V3, lo: f64, hi: f64, k: f64, c: f64, kind: i32, axb: V3 }
 const STOP_SINGULAR: f64 = 0.0872;   // engine.py's: a stop's direction this near its axis has no usable angle
 struct Hold { a: i32, b: usize, qref: [f64; 4], k: V3, c: V3, cap: f64 }
 struct Tone { a: i32, b: usize, tl: V3 }
@@ -235,7 +235,18 @@ impl Sys {
             let fb = mv(&r[st.b], &st.fb);
             // engine.py's stop_angle: the angle and its own gradient g (d(angle)/dt = w_rel . g); the torque acts along g
             let nf = dot(&n, &fb);
-            let (th, g) = if st.kind == 1 {
+            let (th, g) = if st.kind == 2 {
+                // a limb's turn about its own axis v from its rest direction n (engine.py's kind 2): e carried by the
+                // shortest turn n -> v, the angle about v from that to f; the gradient (n + v) / (1 + n.v)
+                let v2 = mv(&r[st.b], &st.axb);
+                let w2 = add(&n, &v2);
+                if dot(&w2, &w2) < STOP_SINGULAR * STOP_SINGULAR { eprintln!("a limb's own axis is turned right over from its rest direction: its turn is undefined there"); std::process::exit(3); }
+                let c1 = 1.0 + dot(&n, &v2);
+                let kx = cross(&n, &v2);
+                let ke = cross(&kx, &e);
+                let ec = add(&add(&e, &ke), &scale(&cross(&kx, &ke), 1.0 / (1.0 + dot(&n, &v2))));
+                (dot(&v2, &cross(&ec, &fb)).atan2(dot(&ec, &fb)), scale(&w2, 1.0 / c1))
+            } else if st.kind == 1 {
                 let th = f64::max(-1.0, f64::min(1.0, nf)).asin();
                 if st.lo <= th && th <= st.hi { (th, ZERO) } else {
                     let gv = cross(&fb, &n);
@@ -488,7 +499,7 @@ fn main() {
     let acts: Vec<Act> = (0..n).map(|_| Act { a: tk.i(), b: tk.u(), ax: tk.v3(), t: tk.f(), w: tk.f(), ton: tk.f(), rise: tk.f(), toff: tk.f(),
                                                a0: tk.f(), tab: tk.i(), ksec: tk.f(), axb: tk.v3() }).collect();
     tk.key("stops"); let n = tk.u();
-    let stops: Vec<Stop> = (0..n).map(|_| Stop { a: tk.i(), b: tk.u(), ax: tk.v3(), ea: tk.v3(), fb: tk.v3(), lo: tk.f(), hi: tk.f(), k: tk.f(), c: tk.f(), kind: tk.i() }).collect();
+    let stops: Vec<Stop> = (0..n).map(|_| Stop { a: tk.i(), b: tk.u(), ax: tk.v3(), ea: tk.v3(), fb: tk.v3(), lo: tk.f(), hi: tk.f(), k: tk.f(), c: tk.f(), kind: tk.i(), axb: tk.v3() }).collect();
     tk.key("holds"); let n = tk.u();
     let holds: Vec<Hold> = (0..n).map(|_| Hold { a: tk.i(), b: tk.u(), qref: [tk.f(), tk.f(), tk.f(), tk.f()], k: tk.v3(), c: tk.v3(), cap: tk.f() }).collect();
     tk.key("tones"); let n = tk.u();

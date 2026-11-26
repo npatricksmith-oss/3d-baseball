@@ -284,6 +284,10 @@ def add_drives(mdl, st, plan):
             # turning the bat by +d about its y moves its axis by d (by x bz); the lag falls if that is toward the arm
             toward = E.dot(E.cross(by, bz), arm)
             ax = (0, -1, 0) if toward > 0 else (0, 1, 0)      # the torque on the forearm is the reaction of the bat's
+            if getattr(mdl, "grip", "weld") == "hands":
+                # the hands' body (4.11): the wrist's tilt AWAY from the thumb, about the hand's own p, by anatomy and not
+                # by which way the lag falls at the start: the right forearm turns about -p against its hand, the left about +p
+                ax = E.scale(mdl.palm[sd], 1.0 if sd == "L" else -1.0)
         curve, tendon = curve_of(n), tendon_of(n)
         tab = -1
         if curve is not None:

@@ -68,8 +68,8 @@ def write_model(path, s, st, aux, t0, nsteps, h, every, order=()):
     for name, a, b, ax, T, W, t_on, rise, t_off, a0, tab, ksec, axb in s.acts:
         w.append("%d %d %s %s %d %s %s" % (a, b, f(*ax), f(T, W, t_on, rise, t_off, a0), tab, f(ksec), f(*axb)))
     w.append("stops %d" % len(s.stops))
-    for name, a, b, ax, ea, fb, lo, hi, k, c, kind in s.stops:
-        w.append("%d %d %s %s %s %s %d" % (a, b, f(*ax), f(*ea), f(*fb), f(lo, hi, k, c), kind))
+    for name, a, b, ax, ea, fb, lo, hi, k, c, kind, axb in s.stops:
+        w.append("%d %d %s %s %s %s %d %s" % (a, b, f(*ax), f(*ea), f(*fb), f(lo, hi, k, c), kind, f(*axb)))
     w.append("holds %d" % len(s.holds))
     for name, a, b, qref, K, Cc, cap in s.holds:
         w.append("%d %d %s %s %s %s" % (a, b, f(*qref), f(*K), f(*Cc), f(cap)))
@@ -187,6 +187,17 @@ def _cases():
     m.sys.sec_start(st, aux)
     m.check_aux = aux
     out.append(("every drive at its bound, the joints' ranges on", m, st, -0.250, 200))
+    m = B.Model(ranges=(), grip="hands")             # the hands' body (4.11): its arm stops (the upper arm's is the new kind 2) driven into
+    st = B.place(m, -0.250)
+    st = Dr.add_drives(m, st, {n: (bd[n], -0.245, 0.05, 0.1, 0.2 if arm(n) or n.startswith(("sh_", "pron", "sup")) else 0.3) for n in bd})
+    B.add_ranges(m, st)
+    Dr.solve_tone(m, st, -0.250)
+    Dr.add_damping(m, st)
+    aux = m.sys.new_aux()
+    m.sys.anchors(st, aux)
+    m.sys.sec_start(st, aux)
+    m.check_aux = aux
+    out.append(("the hands' body, every drive at its bound", m, st, -0.250, 200))
     fitted = os.path.join(HERE, "fit3d_d34_all.json")
     if not os.path.isfile(fitted):                   # session 6's fit (its 22 channels; session 7's then switched off)
         fitted = os.path.join(HERE, "fit3d_d34_arms.json")

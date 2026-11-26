@@ -123,7 +123,9 @@ class Ctx:
     def __init__(self, **o):
         self.o = o
         H, M = o.get("H", 1.84), o.get("M", 92.0)
-        self.m = m = B.Model(H, M, ranges=())
+        # grip: "weld", the body of sessions 1-8 (the default, so that a saved result without the option replays on the body
+        # it was found on); "hands", each hand's own grip (body-motion 4.11, session 9; --grip hands)
+        self.m = m = B.Model(H, M, ranges=(), grip=o.get("grip", "weld"))
         for k, shift in o.get("start", {}).items():          # the start moved by a stated amount (a sensitivity run)
             B.CURVE_OVERRIDE[k] = (lambda kk, sh: (lambda t: C.resample(B._CURVES.setdefault(kk, C.load(kk)), t, t, 1.0)[0] + sh))(k, shift)
         vel = o.get("vel", 1.0)
@@ -597,7 +599,21 @@ def report(ctx, u, log=print):
     out["ligaments_over_50"] = sorted(k_ for k_, x in out["stops"].items() if k_ != "shoulder_L" and x[0] > STRAIN_FREE)
     log("   LEANING ON A LIGAMENT (a stop other than the lead arm against the chest over %.0f N m): %s" % (STRAIN_FREE, ", ".join(out["ligaments_over_50"]) or "none"))
     out["unheld"] = {}
-    for key, rng_ in (("pron_L", 161.9), ("pron_R", 161.9), ("sh_rot_L", 173.0), ("sh_rot_R", 173.0), ("ankle_L", 67.3), ("ankle_R", 67.3)):
+    hands = m.grip == "hands"
+    if hands:
+        # the hands' body (4.11): each wrist, forearm and upper arm in its clinical sense at the start, 50 ms before contact
+        # and at contact, with hitters measured directly beside them (never given to the search; research note 11 A5)
+        cl = [B.clinical(m, recs[q][1]) for q in (0, i50, ic)]
+        out["arms_clinical"] = {"%s_%s" % k: [c_[k] for c_ in cl] for k in cl[0]}
+        log("   the arm joints, clinical senses (toward the thumb +, toward the palm +, palm-down +, turned in +), at the start, -50 ms and contact:")
+        meas = {("wrist_dev", "L"): "hitters +10 +- 10 at foot plant, -16 +- 9 at contact", ("wrist_flex", "L"): "-19 +- 18, +8 +- 10",
+                ("wrist_dev", "R"): "+5 +- 12, -8 +- 12", ("wrist_flex", "R"): "-52 +- 14, -47 +- 17",
+                ("forearm_to_barrel", "L"): "138-157 at contact (Gelinas 1988)"}
+        ar = B.arm_range()
+        for k in sorted(cl[0], key=lambda kk: (kk[1], kk[0])):
+            log("      %-18s %s: %6.1f %6.1f %6.1f   range %s   %s" % (k[0], k[1], cl[0][k], cl[1][k], cl[2][k],
+                                                                    "%.0f to %.0f" % ar[k[0]] if k[0] in ar else "-", "[" + meas[k] + "]" if k in meas else ""))
+    for key, rng_ in ((("ankle_L", 67.3), ("ankle_R", 67.3)) if hands else (("pron_L", 161.9), ("pron_R", 161.9), ("sh_rot_L", 173.0), ("sh_rot_R", 173.0), ("ankle_L", 67.3), ("ankle_R", 67.3))):
         vv = unwrap([a[key] for a in ang])
         out["unheld"][key] = (max(vv) - min(vv), rng_)
     out["unheld_overrun"] = sorted(k_ for k_, x in out["unheld"].items() if x[0] > x[1])
@@ -647,9 +663,10 @@ def main():
     a = sys.argv[1:]
     arg = lambda k, d: a[a.index(k) + 1] if k in a else d
     main_file = os.path.join(HERE, "practice3d_main.json")
+    body = {"grip": arg("--grip", None)} if "--grip" in a else {}      # the body a new search runs on; kept in the result's options
     if "--show" in a:
         d = json.load(open(arg("--show", main_file)))
-        ctx = Ctx(**d.get("options", {}))
+        ctx = Ctx(**dict(d.get("options", {}), **body))
         report(ctx, ctx.u_of(d["plan"]))
         return
     iters = int(arg("--iters", 30))
@@ -686,14 +703,19 @@ def main():
         names = arg("--staged", "main").split(",")
         n1, n2 = int(arg("--reach", 15)), iters
         for name in names:
-            o = {} if name == "main" else dict(VARY[name])
+            o = dict(body) if name == "main" else dict(VARY[name], **body)
             ctx = Ctx(contact="nearest", **o)
             reach = Ctx(stage="reach", **o)
             print("\n== staged, %s: %s; from each start %d iterations of the reach stage, then %d of the whole aim" % (name, o, n1, n2))
-            starts = (("A", json.load(open(os.path.join(HERE, "fit3d_d34_all.json")))["plan"]),
-                      ("B", json.load(open(os.path.join(P.OUT, "fit3d_all_strongest_on_time.json")))["plan"]),
-                      ("C", hand_plan(ctx, 0.6)), ("D", hand_plan(ctx, 0.3, seed=1)))
+            starts = [("A", json.load(open(os.path.join(HERE, "fit3d_d34_all.json")))["plan"]),
+                      ("C", hand_plan(ctx, 0.6)), ("D", hand_plan(ctx, 0.3, seed=1)),
+                      ("S", json.load(open(os.path.join(HERE, "practice3d_main.json")))["plan"])]     # S: session 8's practised swing (found from A, on the weld)
+            if "B" in arg("--starts", "ABCD"):
+                starts.append(("B", json.load(open(os.path.join(P.OUT, "fit3d_all_strongest_on_time.json")))["plan"]))
+            if "--from-file" in a:                               # a start from a saved result, labelled F
+                starts.append(("F", json.load(open(arg("--from-file", "")))["plan"]))
             best = None
+            tag = arg("--tag", "")
             for label, plan in starts:
                 if label not in arg("--starts", "ABCD"):
                     continue
@@ -706,16 +728,17 @@ def main():
                 u, cost, hist2 = search(ctx, reach.plan(u), n2)
                 out = report(ctx, u)
                 out.update(cost=cost, start=label + ", staged", history=hist2, reach_history=hist, step_check=verify(ctx, u))
-                json.dump(out, open(os.path.join(P.OUT, "practice3d_staged_%s_%s.json" % (name, label)), "w"), indent=1)
+                json.dump(out, open(os.path.join(P.OUT, "practice3d_staged_%s%s_%s.json" % (name, tag, label)), "w"), indent=1)
                 if best is None or cost < best["cost"]:
                     best = out
-            json.dump(best, open(os.path.join(P.OUT, "practice3d_staged_%s.json" % name), "w"), indent=1)
+            json.dump(best, open(os.path.join(P.OUT, "practice3d_staged_%s%s.json" % (name, tag)), "w"), indent=1)
             print("\nthe best of the staged starts for %s: start %s, cost %.3f" % (name, best["start"], best["cost"]))
         return
     if "--continue" in a:
         # the search carried on from a saved result (contact read at the nearest approach, as in the staged search)
         d = json.load(open(arg("--continue", main_file)))
         o = {k: v for k, v in d.get("options", {}).items() if k not in ("contact", "stage")}
+        o.update(body)
         ctx = Ctx(contact="nearest", **o)
         print("== continued %d iterations from %s (start %s, cost %.3f)" % (iters, os.path.basename(arg("--continue", main_file)), d.get("start"), d.get("cost", float("nan"))))
         u, cost, hist = search(ctx, d["plan"], iters)
@@ -726,7 +749,7 @@ def main():
     if "--vary" in a:
         base = json.load(open(arg("--from", main_file)))
         for name in arg("--vary", "").split(","):
-            o = dict(VARY[name])
+            o = dict(VARY[name], **body)
             print("\n== %s: %s; %d iterations from the main result" % (name, o, iters))
             ctx = Ctx(contact="nearest", **o)
             plan = {n: [min(v[0], ctx.bd[n])] + list(v[1:]) for n, v in base["plan"].items()}

@@ -295,25 +295,41 @@ class System:
         l = math.sqrt(dot(c, c))
         return scale(c, 1.0 / l) if l > FLOAT_EPS else ZERO
 
-    def stop(self, name, a, b, axis_a, e_a, f_b, lo, hi, k, c, kind=0):
+    def stop(self, name, a, b, axis_a, e_a, f_b, lo, hi, k, c, kind=0, axis_b=(0.0, 0.0, 1.0)):
         """a one-sided limit on an angle between a and b: a spring k and a damper c once the angle is past lo or hi.
         kind 0: the angle about axis_a (fixed in a) from e_a (in a) to f_b (in b), f_b projected onto the plane
         square to the axis. kind 1: the angle of f_b (in b) out of the plane square to axis_a, toward the axis
         (asin of their dot product; e_a is not used).
+        kind 2 (body-motion 4.11): b's turn about its OWN long axis axis_b (fixed in b), the way a limb's turn is
+        defined at a ball joint: b's axis is carried from where it lies at rest, along axis_a (fixed in a), to where
+        it is by the shortest turn, and the angle left over about b's axis, from e_a (in a, square to axis_a) so
+        carried to f_b (in b, square to axis_b), is the reading. With u the rest direction and v b's axis its
+        gradient is g = (u + v) / (1 + u.v). Undefined only where v = -u (b's axis turned right over).
         The stop's torque acts along the read angle's own gradient g, the vector with d(angle)/dt = w_rel . g, and its
         work is booked with the same g, so a stop can never give back more than it took in (body-motion 8.1; until
         session 8's review the torque acted about axis_a, which is the gradient only on a hinge, and on a ball joint
         did work nothing stored paid for). kind 0: g = n - (n.f) f_p / |f_p|^2, with f_p the projection. kind 1:
         g = (f x n) / |f x n|. Each is undefined where f lies along the axis (kind 0: the angle itself is; kind 1:
         the angle is 90 deg); within STOP_SINGULAR of that the run fails loudly, not silently: a kind 0 stop always, a kind 1 stop (whose angle is defined everywhere; only its gradient fails, at +-90 deg) while it is engaged."""
-        self.stops.append((name, a, b, unit(axis_a), unit(e_a), unit(f_b), lo, hi, k, c, int(kind)))
+        self.stops.append((name, a, b, unit(axis_a), unit(e_a), unit(f_b), lo, hi, k, c, int(kind), unit(axis_b)))
 
     @staticmethod
-    def stop_angle(n, e, f, kind, lo=None, hi=None):
-        """(angle, gradient g) of a stop from its axis n and directions e, f in world axes; raises SolveError where the
-        angle's gradient is undefined. A kind 1 stop's angle is defined everywhere and only its gradient fails (at
-        +-90 deg), so with lo and hi given the gradient is asked for, and can fail, only while the stop is engaged:
-        a posture at the far end of a side the stop does not limit is none of its business."""
+    def stop_angle(n, e, f, kind, lo=None, hi=None, v=None):
+        """(angle, gradient g) of a stop from its axis n and directions e, f in world axes (kind 2: and b's own axis
+        v); raises SolveError where the angle's gradient is undefined. A kind 1 stop's angle is defined everywhere and
+        only its gradient fails (at +-90 deg), so with lo and hi given the gradient is asked for, and can fail, only
+        while the stop is engaged: a posture at the far end of a side the stop does not limit is none of its business."""
+        if kind == 2:
+            w = add(n, v)
+            if dot(w, w) < STOP_SINGULAR * STOP_SINGULAR:
+                raise SolveError("a limb's own axis is turned right over from its rest direction: its turn is undefined there")
+            c1 = 1.0 + dot(n, v)
+            if "twist_fixed_axis" in MUT:            # a mutation: the torque about the limb's axis alone (wrong off the rest direction)
+                w, c1 = v, 1.0
+            kx = cross(n, v)
+            ke = cross(kx, e)
+            ec = add(add(e, ke), scale(cross(kx, ke), 1.0 / (1.0 + dot(n, v))))      # e carried by the shortest turn n -> v
+            return math.atan2(dot(v, cross(ec, f)), dot(ec, f)), scale(w, 1.0 / c1)
         nf = dot(n, f)
         if kind == 1:
             th = math.asin(max(-1.0, min(1.0, nf)))
@@ -547,11 +563,11 @@ class System:
             p_act += tau * wrel
             if diag is not None:
                 diag.setdefault("act", {})[name] = (tau, wrel, act)
-        for name, a, b, ax, ea, fb, lo, hi, k, c, kind in self.stops:
+        for name, a, b, ax, ea, fb, lo, hi, k, c, kind, axb in self.stops:
             n = mv(R[a], ax) if a >= 0 else ax
             e = mv(R[a], ea) if a >= 0 else ea
             f = mv(R[b], fb)
-            th, g = self.stop_angle(n, e, f, kind, lo, hi)
+            th, g = self.stop_angle(n, e, f, kind, lo, hi, mv(R[b], axb) if kind == 2 else None)
             rate = dot(sub(Wv[b], Wv[a] if a >= 0 else ZERO), g)
             tau = 0.0
             if th > hi:
