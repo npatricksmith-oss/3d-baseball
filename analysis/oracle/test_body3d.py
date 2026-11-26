@@ -2105,7 +2105,7 @@ class SearchChecks(unittest.TestCase):
     def test_the_hold_still_torques_work_is_told_apart_from_the_dampings(self):
         """session 10's review, P1-1: the engine books the constant hold-still torques' work and the joints' damping's as
         one integral; practice3d.hold_work splits them from the states. On a rod on a hinge with a constant torque of
-        5 N m about the hinge and a damper of 0.7 N m s/rad (capped at 3 N m, which it reaches), swung from rest for
+        5 N m about the hinge and a damper of 0.7 N m s/rad (capped at 1.5 N m, which it reaches), swung from rest for
         0.3 s: the torque's work is 5 N m x the angle turned, worked here from the rod's own orientation; the two parts
         sum to the engine's integral; the damping's part is negative and its largest torque is the cap; and with the
         constant torque turned the other way its work changes sign (the damper's does not)."""
@@ -2115,7 +2115,7 @@ class SearchChecks(unittest.TestCase):
             b = s.body("rod", 2.0, (0.15, 0.15, 0.002))
             s.hinge(-1, b, (0.0, 0.0, 0.0), (0.0, 0.0, 0.3), (0, 1, 0), (0, 1, 0))
             s.tone("hinge", -1, b, (0.0, tau, 0.0))
-            s.hold("hinge", -1, b, (1.0, 0.0, 0.0, 0.0), (0.0, 0.0, 0.0), (0.7, 0.7, 0.7), 3.0)
+            s.hold("hinge", -1, b, (1.0, 0.0, 0.0, 0.0), (0.0, 0.0, 0.0), (0.7, 0.7, 0.7), 1.5)
             st = s.new_state()
             s.set_body(st, b, (0.0, 0.0, -0.3), (1.0, 0.0, 0.0, 0.0))
             aux, h = s.new_aux(), 1e-4
@@ -2132,7 +2132,7 @@ class SearchChecks(unittest.TestCase):
             self.assertGreater(tone["hinge"], 0.0)                      # either way round, a torque that starts the rod does positive work
             self.assertLess(damp["hinge"], -0.5)
             self.assertAlmostEqual(tone["hinge"] + damp["hinge"], st[ow + 2], delta=1e-5 * abs(tone["hinge"]))
-            self.assertAlmostEqual(peak["hinge"], 3.0, delta=1e-9)
+            self.assertAlmostEqual(peak["hinge"], 1.5, delta=1e-9)
             half = PR.hold_work(s, recs, 0.15)                           # to an earlier instant: less of each
             self.assertLess(half[0]["hinge"], tone["hinge"])
             self.assertGreater(half[1]["hinge"], damp["hinge"])
