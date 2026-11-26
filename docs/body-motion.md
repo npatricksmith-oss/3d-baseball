@@ -1986,6 +1986,7 @@ Session 11 (2026-11-26) works under the owner's rulings of that day ([PLAN D42](
 | 0 | none: session 10's body | **17.7 m/s (39.6 mph)**; 15.7 (35.2) | 19.2; 17.8 m/s | — (the two differ by 1.95 m/s: the yardstick) | unsourced friction (1.0 N·m·s/rad everywhere), constant hold-still torques, [4]'s stance and launch state |
 | 1 | joint friction at the values read; middles of stated ranges at the hips and trunk | **14.7 m/s (32.9 mph)**; 14.9 (33.2) | **20.4; 19.7 m/s** | **−3.0 m/s (−6.6 mph): a loss at contact, both searches under both of rung 0's.** The bat is faster before contact (+1.2 and +1.9 m/s) and slows by a quarter in the last 20–30 ms as an arm reaches its elbow's end | read: wrist's bend, shoulder, knee, ankle; the elbow with the arm holding its place; **not measured: hip, trunk** (150 J of the swing's losses), forearm's turn, wrist's tilt |
 | 2 | on rung 1's body: the posture held by his muscles, under their rules, in place of the constant hold-still torques | **16.9 m/s (37.7 mph)**; 16.6 (37.1) | 18.6; 19.3 m/s | **+2.1 m/s (+4.8 mph) over rung 1: a gain by the rule** (both searches over both of rung 1's); against rung 0: −0.8, no change shown | measured strengths and strength-at-speed curves; Schultz 1987's trunk bending strength; 12 N·m at the ankles' roll left as constant torque; the hips' and trunk's friction not measured |
+| 3 | the feet where major leaguers' are (1.03 m apart, level, the front foot 44° open), the ball level with the front ankle; the rest of the start by its rule | **21.5 m/s (48.2 mph)**; 20.7 (46.2) | 22.4; 21.3 m/s | **+4.7 m/s (+10.5 mph) over rung 2; +3.8 m/s (+8.6 mph) over rung 0: a gain,** both searches over both of every rung before | Statcast's foot points at the intercept (my reading of the page's data, checked against its published column); the posture's other numbers still [4]'s, bent by the rule to within 4.0° of four joint ends |
 | (2 alone, on rung 0's body) | the same change without rung 1 | 16.7 m/s (37.3 mph); 15.7 (35.2) | 18.8; 17.7 m/s | −1.0 m/s against rung 0: **no loss shown** (inside the yardstick; both searches inside rung 0's pair) | measured strengths and strength-at-speed curves; Schultz 1987's trunk bending strength; 12 N·m at the ankles' roll left as constant torque |
 
 **Where the session stands while this is written** (for whoever picks it up if it is cut short): every rung through 6 is designed below and committed before its runs; the runs are in the job queue (`bin/job.sh status`, labels `body-3d-11 …`) and write to `sim/target/codex-probes/body3d/s11/<rung>.out` and `.json`; `ladder3d.py --table` and `--block <rung>` print what has finished.
@@ -2305,6 +2306,67 @@ Code: `analysis/research/body/ladder3d.py` (the protocol, the energy account, th
 - *The replay of session 10's plan on this body, no search* (indicative): it crosses the ball's plane 14 cm high at 22.0 m/s, the pelvis turned 30° past facing the plate.
 - *The search:* meets the ball within 1 cm; **I do not know which way the speed goes.** For it: the front foot is 14° more open, so the front hip has 14° more turn before its end; the ball is level with the front foot instead of 27 cm ahead of it, so he need not reach; the replay is fast. Against it: S was tuned on the narrow base and is a worse place to start from; the rear hip's adductors and rotators have a half and a third of their strength taken by holding the base; the stance sits within a degree of four joint ends. If both searches from S end clearly worse than rung 2's, rung 2's result is carried on for 500 generations on this body too (the protocol's rule).
 - *What it would show:* what [4]'s feet were worth, at MLB's mean feet. *What it would not show:* the best feet for this body (no practice over them), or a hitter's launch posture on a wide base (the pelvis's turn, the knees and the velocities are still [4]'s, bent to fit by a rule).
+
+#### Rung 3 as run: on major leaguers' feet both searches find the fastest swings this body has made (jobs 451 and 452; `s11/r3.out`, `r3_b.out`, `.json`; the better kept as `analysis/research/body/practice3d_s11_rung3.json`)
+
+**20.66 and 21.53 m/s (46.2 and 48.2 mph), 0.7 and 0.1 cm from the ball, settled, the same at three steps, with the two best scores of any search (28.1 and 25.2). Both are faster than both searches of every rung before. By the ladder's rule: 21.5 m/s, a gain of 4.7 m/s (10.5 mph) over rung 2 and of 3.8 m/s (8.6 mph) over rung 0's 17.7.**
+
+| | seeds 1, 11 | seeds 2, 12 |
+| :-- | --: | --: |
+| the sweet spot at contact | **20.66 m/s (46.2 mph)** | **21.53 m/s (48.2 mph)** |
+| the miss | 0.7 cm | 0.1 cm |
+| the score (lower is better) | 28.1 | 25.2 |
+| settled: the fall over the last 50 generations | 0.11 | 0.25 |
+| the speed at 0.5, 0.25, 0.125 ms | 20.67, 20.66, 20.66 | 21.56, 21.53, 21.53 |
+| failed runs among the plan's 205 one-number changes | 0 | 0 |
+| the line from the starting plan to the result (11 points, then one beyond) | 143 112 99 92 87 78 63 52 39 33 28 35 | 143 106 92 77 59 49 36 33 29 28 25 29 |
+| the bat at its fastest at contact | 97% | 96% |
+| the hands' fastest | 9.6 m/s | 7.5 m/s |
+| the attack angle | -2.7° | -0.0° |
+| the hips'; the trunk's fastest turning | 199; 372°/s | 225; 409°/s |
+| the pelvis's turn from the start to contact | -1° | 16° |
+| first rises: legs, trunk, arms (ms before contact) | 254, 253, 255 | 268, 223, 253 |
+| the first arm muscle before contact (253 allowed) | 255 ms | 253 ms |
+| the lead knee at contact; the front foot's greatest load | 58°; 1.97 x body weight | 50°; 2.10 x body weight |
+| balance: outside his feet; least on the feet; height kept | 0.0 cm; 0.21; 0.89 | 0.0 cm; 0.21; 0.91 |
+| joints past their range: to contact; to 50 ms after | 3.7° (the lead upper arm's turn); 3.7 (the lead upper arm's turn) | 2.7° (the lead upper arm's turn); 4.3 (wrist oval L) |
+| joint ends over 50 N·m; the heaviest | 10; 956 N·m (knee R) | 13; 1272 N·m (shoulder up L) |
+| groups at 90% or more of their bounds | 10 | 7 |
+| WORK TO CONTACT, J: muscles | +478 | +513 |
+| holding muscles | +20 | +13 |
+| hold-still torques (constant, under no muscle rule) | +1 | +4 |
+| the joints' damping | -172 | -177 |
+| stops; ground; gravity | -30; -55; +68 | -29; -70; +52 |
+| kinetic energy gained | 314 | 307 |
+| muscles (with holding) by joint, the five largest | lumbar +127, hip R +116, shoulder L +105, shoulder R +60, hip L +47 | hip R +143, shoulder L +113, hip L +86, lumbar +75, shoulder R +61 |
+| damping by joint, the five largest | lumbar -54, shoulder R -37, hip R -25, hip L -20, elbow R -19 | lumbar -65, shoulder R -36, hip R -25, hip L -20, elbow R -12 |
+| hold-still torques by joint, the three largest | hip L -6, ankle R +5, ankle L +2 | ankle R +6, hip L -3, ankle L +2 |
+| GATE: meets the ball | passes (-0.3 cm) | passes (-0.9 cm) |
+| GATE: the sweet spot at contact | fails (short by 8.3 m/s) | fails (short by 7.5 m/s) |
+| GATE: the bat at its fastest at contact | fails (-1 points) | fails (-2 points) |
+| GATE: the hands' fastest | fails (short by 0.7 m/s) | fails (short by 2.8 m/s) |
+| GATE: the attack angle | passes (inside by 0.3°) | passes (inside by 3.0°) |
+| GATE: the hips' fastest turning | fails (short by 356°/s) | fails (short by 330°/s) |
+| GATE: the trunk's fastest turning | fails (short by 383°/s) | fails (short by 346°/s) |
+| GATE: first rises legs, trunk, arms | fails (-254, -253, -255 ms) | fails (-268, -223, -253 ms) |
+| GATE: no arm muscle before he could decide | fails (+2 ms) | passes (-0 ms) |
+| GATE: the hands' first motion before contact | passes (inside by 4 ms) | passes (inside by 2 ms) |
+| GATE: the lead knee at contact | fails (over by 32°) | fails (over by 24°) |
+| GATE: the front foot's greatest load | passes (inside by 0.47 x body weight) | passes (inside by 0.50 x body weight) |
+| GATE: in balance | passes (+0.0 cm) | passes (+0.0 cm) |
+| GATE: does not jump | passes (+0.11) | passes (+0.11) |
+| GATE: legs have not given way | fails (-0.01) | passes (+0.01) |
+| GATE: no joint more than 2° past its range | fails (+1.7°) | fails (+2.3°) |
+| GATE: no joint end heavily loaded (D39, not built) | fails (10 ends over 50 N·m; the most 956 N·m (knee R)) | fails (13 ends over 50 N·m; the most 1272 N·m (shoulder up L)) |
+| GATE: no passive element does net positive work | passes (stops -30 J, ground -55 J, damping -172 J) | passes (stops -29 J, ground -70 J, damping -177 J) |
+
+- **What changed in the swing.** He lands on his front foot and loads it: 1.97 and 2.10 times his weight at its most (the gate asks 1.5–2.6; no swing before reached 1.6, and rung 0's kept swing had 0.51). The ball is level with his front foot and he no longer has to reach for it: the bat arrives at 97% and 96% of its fastest (the gate asks 98%), neither elbow is at its end at contact (12° and 51° in the first), and the stops take 30 J where they took 38–84 J on the narrow base. Contact comes 260 ms after the start, 50 ms sooner than on [4]'s feet. The bat comes through level (−2.7° and 0.0°: inside the gate's band).
+- **What did not change, and is now the plainest fault:** his hips hardly turn. The pelvis turns −1° and 16° from the start to contact, at 199 and 225°/s at its fastest (the gate asks 555–855), and the front knee is still bent 58° and 50° at contact (2–26° asked): he swings with his trunk (372 and 409°/s; 755 asked) and arms from a planted, bent front leg. The front foot being 14° more open did not make the hips turn.
+- **Against the gate** (the better-scoring search): passes nine rows: meets the ball; the attack angle; no arm muscle before he could decide (253 ms: on the clock); the hands' first motion (218 ms); the front foot's load; in balance; does not jump; the legs have not given way; no passive element adds energy. Fails: the bat's speed, 7.5 m/s (17 mph) short; the bat at its fastest at contact by 2 points; the hands, 7.5 m/s (10.3 asked); hips and trunk; the order of first rises (the trunk's rotators first rise 30 ms *after* the arms'); the front knee; a joint 2.7° past its range before contact (the lead upper arm's turn) and 4.3° after (the lead wrist's ellipse); 13 joint ends loaded (D39 is not built).
+- **The energy:** muscles 478 and 513 J, holding muscles +20 and +13 J, constant torques +1 and +4 J; friction −172 and −177 J (the trunk 54 and 65, the hips 45, the rear shoulder 37); the stops −30 and −29 J; the body gains 314 and 307 J.
+- **Against what I expected:** I wrote that I did not know which way the speed would go. It went up by more than any change so far. The reasons I gave for a gain are the ones the swings show (no reach, a foot to land on); the reason against (S being a poor start on this base) was wrong: both searches from S went straight down the line to their results with no ridge (143, 112, 99, … 28).
+- **The chain's step 3 said the opposite (−3.6 m/s), and it was the measure at fault,** as I warned before running it: it carried a swing grown on the narrow base onto the wide one and ended with the pelvis turning backward. On a change this large the searches from S are the reading to keep.
+- *What it shows:* [4]'s feet and the ball's place in front of them were costing this body about 4 m/s. The speed gained comes from where major leaguers' feet are measured to be. *What it does not show:* that these are the best feet for him (no practice over them); and the posture standing on them is still [4]'s other numbers bent by a rule, within a degree of four joint ends.
 
 #### Rung 4: the hips' turn by their own muscles (the design, written before any search)
 
