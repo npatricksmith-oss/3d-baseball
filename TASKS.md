@@ -23,7 +23,7 @@ Status: `[ ]` not started · `[~]` partly done · `[?]` needs an owner decision
 
 **Ruled:** Q61 = b, Q62 = a, Q63 = a (PLAN D39–D41). Nothing waits on the owner.
 
-**Running (Workers tab):** `body-3d-8` (Fable; job file WORKER-BODY-3D-8FIX there): the fixes, the runs again, the Resolution; then test, merge. `body-research-2` (Sonnet; worktree `body-research`): notes 11–12.
+**Running (Workers tab):** `body-3d-8` (Fable; job file WORKER-BODY-3D-8FIX there): the fixes, the runs again, the Resolution; then test, merge. Research notes 11–12 (D41's job) are merged.
 
 **Next:** §2: the ground-dive leftovers ([note](docs/calibration/2026-11-23-of-ground-dive.md) §9).
 
