@@ -182,6 +182,19 @@ class Ctx:
         if o.get("hold") == "resolve":
             self.hold_w = Dr.hold_response(m, st, T0, list(self.aux0), ARMS, self.bd)
             self.tone0 = [c for j in Dr.JOINTS for c in self.tone[j]]
+        # stand: "tone" (sessions 2-10, the default: solve_tone's constant hold-still torques, under no muscle rule) or
+        # "muscle" (body-motion 4.13, rung 2): each hold-still torque handed to the muscle group that acts that way, as a
+        # holding drive under that group's strength-at-speed curve (drive.solve_hold_muscles). hold_T: each group's
+        # holding strength; the plan's burst may ask at most the bound less it. What no measured muscle takes stays a
+        # torque (tone_left) and is reported apart.
+        self.hold_T, self.hold_at_start, self.tone_left, self.hold_ix = {}, {}, {}, {}
+        if o.get("stand") == "muscle":
+            holds, self.tone_left, self.hold_at_start = Dr.solve_hold_muscles(m, st, self.tone, self.bd)
+            st = Dr.add_hold_muscles(m, st, holds, self.tone_left)
+            self.hold_T = {n: v[0] for n, v in holds.items()}
+            self.hold_ix = {a_[0][len(Dr.HOLD_PREFIX):]: j for j, a_ in enumerate(m.sys.acts) if a_[0].startswith(Dr.HOLD_PREFIX)}
+            self.hold_bd = dict(self.bd, **{n: v[5] * (M * E.G * H) / Dr.REF_WH for n, v in Dr.HOLD_ONLY.items()})
+        self.cap = {n: self.bd[n] - self.hold_T.get(n, 0.0) for n in CH}      # the most a burst may ask of each group
         # damp: None (sessions 1-10: 1.0 N m s/rad at every joint, capped at 30 N m) or drive.damping_of()'s other forms
         # (a set of drive.DAMPING by name; body-motion 4.13)
         Dr.add_damping(m, st, o.get("damp"))
@@ -191,7 +204,7 @@ class Ctx:
         self.order = P.tree_order(m)
         self.box = []
         for n in CH:
-            self.box += [(n, "T", 0.0, self.bd[n]), (n, "on", T0, 0.050), (n, "rise", Dr.RISE_MIN, 0.250),
+            self.box += [(n, "T", 0.0, self.cap[n]), (n, "on", T0, 0.050), (n, "rise", Dr.RISE_MIN, 0.250),
                          (n, "off", -0.150, 0.150), (n, "start", 0.0, 1.0)]
         self.free = [i for i, (n, f, lo, hi) in enumerate(self.box) if hi > lo and self.bd[n] > 0.0]
         k = H / 1.84                                          # [E] a smaller batter stands and is pitched to in proportion
@@ -215,6 +228,11 @@ class Ctx:
 
     def prepare(self, u):
         st, aux = F.Ctx.prepare(self, u)
+        if self.hold_ix:
+            # a holding drive goes when the plan switches its muscle off (4.13, rung 2); a hold-only group never does
+            pl = self.plan(u)
+            for n, j in self.hold_ix.items():
+                self.m.sys.acts[j][8] = pl[n][3] if n in pl else 1e9
         if self.o.get("hold") != "resolve":
             return st, aux
         pl = self.plan(u)
@@ -339,11 +357,15 @@ class Ctx:
             for n, a in zip(CH, act):
                 if self.bd[n] <= 0:
                     continue
-                acc[n] += (a[2] * pl[n][0] / self.bd[n]) ** 2
+                # with the posture held by muscle (4.13, rung 2) the group's level is its burst's and its holding drive's together
+                acc[n] += ((a[2] * pl[n][0] + (act[self.hold_ix[n]][2] * self.hold_T[n] if n in self.hold_ix else 0.0)) / self.bd[n]) ** 2
                 if held and pl[n][4] > 0.0:
                     # what holds a tensed muscle is working too, at the muscle's own level, until it has let go (4.11)
                     left = 1.0 if t < pl[n][1] else math.exp(-(t - pl[n][1]) / E.TA_REL)
                     acc[n] += (min(a[2], pl[n][4] * left) * pl[n][0] / self.bd[n]) ** 2
+            for n, j in self.hold_ix.items():
+                if n not in acc:                        # a hold-only group (the trunk's bending): booked with the trunk's rotators
+                    acc["core"] += (act[j][2] * self.hold_T[n] / self.hold_bd[n]) ** 2
         return {n: v / max(1, k) for n, v in acc.items()}
 
     def arm_fired(self, pl):
@@ -811,12 +833,18 @@ def report(ctx, u, log=print):
     log("   at full strength (%d of %d): %s;  %d used muscles rise at the 50 ms floor" % (len(onb), len(CH), ", ".join(onb) or "none", out["rises_at_floor"]))
     # "exactly on its bound" says little of a search that is charged for effort and does not settle on a box's edge
     # (session 10's review, P1-3): the groups near their bounds, their largest activation, the rises near the floor
-    near = {n: pl[n][0] / ctx.bd[n] for n in CH if ctx.bd[n] > 0 and pl[n][0] >= NEAR_BOUND * ctx.bd[n]}
+    near = {n: (pl[n][0] + ctx.hold_T.get(n, 0.0)) / ctx.bd[n] for n in CH if ctx.bd[n] > 0 and pl[n][0] + ctx.hold_T.get(n, 0.0) >= NEAR_BOUND * ctx.bd[n]}
     act_pk = {n: max(rec[3][ix[n]][2] for rec in recs[:ic + 1]) for n in near}
     floor = {n: pl[n][2] * 1e3 for n in CH if used(n) and pl[n][2] <= Dr.RISE_MIN + NEAR_FLOOR}
     out["near_full_strength"], out["near_full_strength_activation"], out["rises_near_floor_ms"] = near, act_pk, floor
     log("   asked for %.0f %% or more of its bound (%d of %d; its largest activation to contact): %s" % (100 * NEAR_BOUND, len(near), len(CH), ", ".join("%s %.3f (%.2f)" % (n, x, act_pk[n]) for n, x in sorted(near.items(), key=lambda kv: -kv[1])) or "none"))
     log("   used muscles whose rise is within %.0f ms of the %.0f ms floor: %s" % (NEAR_FLOOR * 1e3, Dr.RISE_MIN * 1e3, ", ".join("%s %.0f ms" % kv for kv in sorted(floor.items(), key=lambda kv: kv[1])) or "none"))
+    if ctx.hold_T:
+        out["holding_strength_Nm"], out["holding_at_start_Nm"] = dict(ctx.hold_T), dict(ctx.hold_at_start)
+        out["hold_still_left_Nm"] = {j: E.norm(v) for j, v in ctx.tone_left.items()}
+        log("   THE POSTURE HELD BY MUSCLE (4.13, rung 2): each group's holding torque at the start, N m (of its bound): "
+            + ", ".join("%s %.1f (%.2f)" % (n, x, ctx.hold_T[n] / ctx.hold_bd[n]) for n, x in sorted(ctx.hold_at_start.items(), key=lambda kv: -kv[1]))
+            + ";   left as a constant torque, with no measured muscle that way (N m): " + ", ".join("%s %.1f" % kv for kv in sorted(out["hold_still_left_Nm"].items(), key=lambda kv: -kv[1]) if kv[1] >= 0.5))
     log("   the plan: channel, strength of bound, onset and switch-off relative to contact ms, rise ms, level beforehand")
     for n in CH:
         x = pl[n]

@@ -395,6 +395,116 @@ def solve_tone(mdl, st, t0, aux=None):
     return out, (lin, ang)
 
 
+# ---- the launch posture held by muscle (body-motion 4.13, rung 2; PLAN D42) ---------------------------------------
+# A standing hitter's posture is held by the muscles that later swing: each carries a holding level. So each hold-still
+# torque of solve_tone is handed to the muscle group that acts about that axis in that direction, as a HOLDING DRIVE:
+# an ordinary drive of the engine, about the channel's own axis, on the channel's own strength-at-speed curve, fully on
+# from the start, its strength set so that at the start's own joint speed it gives exactly the hold-still torque. From
+# then on it obeys what every muscle obeys: it gives less as the joint moves its way and nothing at the curve's top
+# speed, more (to the stretched muscle's plateau) when the joint is forced back; it counts as effort; it takes its share
+# of the group's bound away from the burst (practice3d: the burst's strength may be at most the bound less the holding
+# strength); and it goes when the plan switches the muscle off. It has no tendon spring [E: at 69 N m the knee
+# extensor's spring holds about 2 J].
+# The trunk's bending has no muscle in the plan (4.5). Its holding level is carried by HOLD-ONLY groups with a measured
+# strength: Schultz et al. 1987 (10 men of 19-25, 1.78 m, about 71 kg; standing, pelvis strapped, isometric, the moment
+# about L3; note 12 C1, its Table 2 read), mean + 2 SD scaled by weight x height as every bound here. The search cannot
+# fire them. Their strength at speed: Thompson et al. 1985's standing extension at 0.52, 1.05, 1.57 and 2.09 rad/s
+# (267.5, 259.6, 248.5, 242.7 N m; note 12 C1, full text); beyond 2.09 rad/s nothing is measured for a trunk's bending
+# and the line runs to zero at the twist's top speed [E].
+_SCHULTZ = (92.0 * 1.84) / (71.0 * 1.78)
+HOLD_ONLY = {   # name: (parent, child, axis in the parent, first-law speed group, curve, strength for 92 kg and 1.84 m)
+    "trunk_fwd": ("pelvis", "trunk", (0, 1, 0), "core", "trunk_bend", (191.0 + 2 * 70.0) * _SCHULTZ),      # flexion
+    "trunk_ext": ("pelvis", "trunk", (0, -1, 0), "core", "trunk_bend", (204.0 + 2 * 78.0) * _SCHULTZ),     # extension
+    "trunk_side_R": ("pelvis", "trunk", (1, 0, 0), "core", "trunk_bend", (164.0 + 2 * 56.0) * _SCHULTZ),   # bent toward his right
+    "trunk_side_L": ("pelvis", "trunk", (-1, 0, 0), "core", "trunk_bend", (180.0 + 2 * 65.0) * _SCHULTZ),  # toward his left
+}
+CURVES["trunk_bend"] = ((0.0, 1.0), (0.52, 1.0), (1.05, 259.6 / 267.5), (1.57, 248.5 / 267.5), (2.09, 242.7 / 267.5), (12.9, 0.0))
+HOLD_MIN_FV = 0.2          # a muscle shortening so fast at the start that it has under this share of its strength cannot hold: left as a torque
+HOLD_PREFIX = "hold:"
+
+
+def solve_hold_muscles(mdl, st, tone, bd):
+    """solve_tone's hold-still torques handed to the body's muscles (above). For each joint the torque (on the joint's
+    child, in the world) is written as a sum over the axes the joint's muscle groups act about (least squares; three
+    independent axes at a ball joint, so exact there; at a hinge or a two-axis joint what is left over is about an axis
+    the joint itself holds and does nothing). Each axis's share goes to the group that pulls that way, as the strength
+    T of its holding drive: share / (the group's strength-at-speed fraction at the start's own speed). A share with no
+    group that way (4.5's list of directions with no muscle), or whose group could not hold it, STAYS A TORQUE, and is
+    returned apart to be reported. mdl must carry the plan's channels (add_drives). bd: the plan channels' bounds.
+    Returns ({group: (T, parent, child, axis, W, curve table index or -1, floating direction or None)},
+             {joint: the torque left, in the parent's frame}, {group: its torque at the start, N m})."""
+    s, b = mdl.sys, mdl.b
+    k = (mdl.M * E.G * mdl.H) / REF_WH
+    Rof = lambda i: E.qR(s.pose(st, i)[1])
+    wof = lambda i: s.pose(st, i)[3]
+    groups = []                    # (name, a, b, axis in a, W, tab, axis_b, bound)
+    for a_ in s.acts:
+        if not a_[0].startswith(HOLD_PREFIX):
+            groups.append((a_[0], a_[1], a_[2], a_[3], a_[5], a_[10], a_[12], bd[a_[0]]))
+    for n, (pa, ch, ax, grp, curve, T) in HOLD_ONLY.items():
+        if curve not in [None] and tuple(CURVES[curve]) not in s.fvtabs:
+            s.fvtabs.append(tuple(CURVES[curve]))
+            s.fvecc.append(curve_ecc(curve))
+        groups.append((n, b[pa], b[ch], E.unit(ax), W_TOP[grp], s.fvtabs.index(tuple(CURVES[curve])), E.ZERO, T * k))
+    holds, left, at_start = {}, {}, {}
+    for j in JOINTS:
+        A, ra, Bc, rb = mdl.jp[j]
+        tw = E.mv(Rof(A), tone[j])                                   # on the child, world
+        axes = []                                                    # [unit axis e (torque on the child), {+1: group, -1: group}]
+        for g in groups:
+            name, a, bb, ax, W, tab, axb, bound = g
+            if {a, bb} != {A, Bc}:
+                continue
+            n = E.mv(Rof(a), ax)
+            if axb != E.ZERO:
+                n = s.float_axis(n, E.mv(Rof(bb), axb))
+                if n == E.ZERO:
+                    continue
+            gen = n if bb == Bc else E.scale(n, -1.0)                 # the group's torque on the joint's child, per N m
+            for e in axes:
+                c = E.dot(gen, e[0])
+                if abs(c) > 0.999:
+                    e[1].setdefault(1 if c > 0 else -1, g)
+                    break
+            else:
+                axes.append([gen, {1: g}])
+        rest = tw
+        if axes:
+            n_ = len(axes)
+            Am = [[E.dot(axes[i][0], axes[q][0]) + (1e-12 if i == q else 0.0) for q in range(i + 1)] for i in range(n_)]
+            sh = E.chol_solve(Am, [E.dot(axes[i][0], tw) for i in range(n_)])
+            for (e, by), x in zip(axes, sh):
+                g = by.get(1 if x > 0 else -1)
+                if g is None or x == 0.0:
+                    continue
+                name, a, bb, ax, W, tab, axb, bound = g
+                nw = E.mv(Rof(a), ax)
+                if axb != E.ZERO:
+                    nw = s.float_axis(nw, E.mv(Rof(bb), axb))
+                w0 = E.dot(E.sub(wof(bb), wof(a)), nw)
+                f = E.fv(w0 / W) if tab < 0 else E.fv_tab(s.fvtabs[tab], w0, s.tab_ecc(tab))
+                T = abs(x) / f if f >= HOLD_MIN_FV else float("inf")
+                if T > bound:
+                    continue                                         # the group could not hold it: it stays a torque
+                holds[name] = (T, a, bb, ax, W, tab, None if axb == E.ZERO else axb)
+                at_start[name] = abs(x)
+                rest = E.sub(rest, E.scale(e, x))
+        left[j] = E.mtv(Rof(A), rest)
+    return holds, left, at_start
+
+
+def add_hold_muscles(mdl, st, holds, left):
+    """the holding drives added to a model that carries the plan's channels, and the hold-still torques cut down to what
+    no muscle took (solve_hold_muscles). Each holding drive is fully on (level 1) and never fires; its switch-off is set
+    by the plan (practice3d.Ctx.prepare). Returns the state with their levels in place."""
+    s = mdl.sys
+    nb13, nold = 13 * s.nb, len(s.acts)
+    for name, (T, a, bb, ax, W, tab, axb) in holds.items():
+        s.actuator(HOLD_PREFIX + name, a, bb, ax, T, W, 1e9, RISE_MIN, 1e9, 1.0, tab, 0.0, axb, False)
+    s.tones = [(nm, a, bb, tuple(left[nm])) for nm, a, bb, _ in s.tones]
+    return st[:nb13 + nold] + [1.0] * len(holds) + st[nb13 + nold:]
+
+
 def hold_response(mdl, st, t0, aux, names, bd):
     """{channel: the change of the hold-still torques (solve_tone's, three per joint in JOINTS' order) that cancels that
     channel held at its full bound from the start}. The body's accelerations at the start are linear in the hold-still

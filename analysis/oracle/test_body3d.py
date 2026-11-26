@@ -2294,6 +2294,128 @@ class SearchChecks(unittest.TestCase):
             P.run_raw = keep
 
 
+class LadderChecks(unittest.TestCase):
+    """session 11's changes to the body (body-motion 4.13): the joints' damping by joint, the posture held by muscle."""
+
+    O = dict(grip="hands", feet="cleats", hold="let_go", wrist="oval", clear=True, h=2.5e-4)
+
+    def test_a_damper_takes_a_spinning_rods_speed_as_the_worked_decay(self):
+        """a rod on a hinge, no gravity, spun at 6 rad/s against a damper of C N m s/rad with no cap: its speed must
+        fall as exp(-C t / I), I its moment of inertia about the hinge worked here by hand (0.15 + 2 x 0.3^2); and the
+        work booked to the damper is the kinetic energy lost. With drive.damping_of's cap (a number: no cap) and with
+        the old capped form the law is the same below the cap."""
+        for C in (0.05, 0.4, 1.0):
+            s = E.System(g=(0.0, 0.0, 0.0))
+            b = s.body("rod", 2.0, (0.15, 0.15, 0.002))
+            s.hinge(-1, b, (0.0, 0.0, 0.0), (0.0, 0.0, 0.3), (0, 1, 0), (0, 1, 0))
+            s.hold("hinge", -1, b, (1.0, 0.0, 0.0, 0.0), (0.0, 0.0, 0.0), (C, C, C), Dr.NO_CAP)
+            st = s.new_state()
+            w0 = 6.0
+            s.set_body(st, b, (0.0, 0.0, -0.3), (1.0, 0.0, 0.0, 0.0), (-0.3 * w0, 0.0, 0.0), (0.0, w0, 0.0))
+            aux, h = s.new_aux(), 1e-4
+            for i in range(2000):
+                st = s.step(i * h, st, aux, h)
+            I = 0.15 + 2.0 * 0.3 ** 2
+            w = s.pose(st, b)[3][1]
+            self.assertAlmostEqual(w, w0 * math.exp(-C * 0.2 / I), delta=1e-6 * w0)
+            ow = 13 * s.nb + len(s.acts)
+            self.assertAlmostEqual(st[ow + 2], 0.5 * I * (w * w - w0 * w0), delta=1e-6)
+            self.assertLess(st[ow + 2], 0.0)
+
+    def test_the_damping_table_is_read_as_written(self):
+        """drive.damping_of: no option is sessions 1-10's body (1.0 everywhere, capped at 30 N m); a number is that value
+        everywhere with no cap; a set by name is the set; a scale moves only the named group's joints."""
+        t, cap = Dr.damping_of(None)
+        self.assertEqual(set(t.values()), {1.0})
+        self.assertEqual(cap, 30.0)
+        t, cap = Dr.damping_of(0.3)
+        self.assertEqual(set(t.values()), {0.3})
+        self.assertEqual(cap, Dr.NO_CAP)
+        for name, table in Dr.DAMPING.items():
+            self.assertEqual(set(table), set(Dr.JOINTS))
+            self.assertTrue(all(v >= 0.0 for v in table.values()))
+            t, cap = Dr.damping_of({"set": name, "scale": {"arms": 2.0}})
+            for j in Dr.JOINTS:
+                self.assertAlmostEqual(t[j], table[j] * (2.0 if j in Dr.DAMP_GROUPS["arms"] else 1.0))
+
+    @NEED
+    def test_the_posture_held_by_muscle_starts_as_the_constant_torques_did_and_then_obeys_the_muscles_rules(self):
+        """body-motion 4.13, rung 2. With each hold-still torque handed to the muscle group that pulls that way:
+        (1) at the first instant every body's acceleration is what the constant torques gave (the split is exact);
+        (2) every holding strength is positive and, with the most its group's burst may ask, makes the group's measured
+        bound; a knee, which has one axis and a muscle each way, keeps no constant torque, and neither does the trunk,
+        which has holding groups on all three axes; the ankle's roll, which has no muscle, keeps its torque;
+        (3) the front knee extensor's holding torque follows that group's measured strength-at-speed curve (4.5: half its
+        strength at 3.952 rad/s, none at 13.4 rad/s and beyond), read here from the curve's printed points and not from
+        the engine: with the shank turning that fast about the knee the holding drive gives half, and nothing; forced
+        the other way it gives more, never over the stretched muscle's plateau of 1.5;
+        (4) it goes when the plan switches its muscle off, and a hold-only group (the trunk's bending) never fires;
+        (5) held and doing nothing else, a group's effort is (its holding strength / its bound) squared."""
+        PR = _practice()
+        acc = {}
+        for stand in ("tone", "muscle"):
+            c = PR.Ctx(stand=stand, **self.O)
+            s = c.m.sys
+            st, aux = c.prepare(c.u_of({}))
+            ds = s.deriv(PR.T0, st, aux)
+            acc[stand] = [ds[13 * i + 7 + k] for i in range(s.nb) for k in range(6)]
+        self.assertLess(max(abs(x - y) for x, y in zip(acc["tone"], acc["muscle"])), 1e-9 * max(abs(x) for x in acc["tone"]))
+        self.assertGreater(len(c.hold_T), 15)
+        for n, T in c.hold_T.items():
+            self.assertGreater(T, 0.0)
+            self.assertLessEqual(T, c.hold_bd[n])
+            if n in c.cap:
+                self.assertAlmostEqual(c.cap[n] + T, c.bd[n], delta=1e-9)
+        for n, f, lo, hi in c.box:
+            if f == "T":
+                self.assertAlmostEqual(hi, c.cap[n], delta=1e-12)
+        for j in ("knee_L", "knee_R", "lumbar"):
+            self.assertLess(E.norm(c.tone_left[j]), 1e-6)
+        self.assertGreater(E.norm(c.tone_left["ankle_R"]), 5.0)
+        self.assertGreater(c.hold_at_start["knee_ext_L"], 50.0)                 # the bent front knee is held by its extensor
+        self.assertNotIn("knee_flex_L", c.hold_T)
+        # (3) the holding drive at speed: the lead shank given a turning rate about the knee's hinge
+        j = c.hold_ix["knee_ext_L"]
+        a_ = s.acts[j]
+        thigh, shank = a_[1], a_[2]
+        n_w = E.mv(E.qR(s.pose(st, thigh)[1]), a_[3])
+        T = c.hold_T["knee_ext_L"]
+
+        def torque_at(w):
+            s2 = list(st)
+            wt = s.pose(st, thigh)[3]
+            s2[13 * shank + 10:13 * shank + 13] = E.add(wt, E.scale(n_w, w))
+            s.diag = {}
+            s.deriv(PR.T0, s2, aux)
+            tau, wrel, act = s.diag["act"][a_[0]]
+            s.diag = None
+            self.assertAlmostEqual(wrel, w, delta=1e-9)
+            return tau
+        self.assertAlmostEqual(torque_at(0.0), T, delta=1e-9 * T)
+        self.assertAlmostEqual(torque_at(3.952), 0.50 * T, delta=1e-9 * T)
+        self.assertAlmostEqual(torque_at(1.517), 0.75 * T, delta=1e-9 * T)
+        self.assertEqual(torque_at(13.4), 0.0)
+        self.assertEqual(torque_at(20.0), 0.0)
+        self.assertGreater(torque_at(-3.0), T)
+        self.assertLess(torque_at(-50.0), 1.5 * T)
+        # (4) letting go
+        pl = {n: (0.0, PR.T0, 0.05, 0.02 + 0.001 * k, 0.0) for k, n in enumerate(PR.CH)}
+        st, aux = c.prepare(c.u_of(pl))
+        off = c.plan(c.u_of(pl))["knee_ext_L"][3]
+        self.assertEqual(s.excitation(j, off - 1e-6), 1.0)
+        self.assertEqual(s.excitation(j, off + 1e-6), 0.0)
+        jt = c.hold_ix["trunk_side_L"]
+        self.assertEqual(s.excitation(jt, 10.0), 1.0)
+        self.assertNotIn("trunk_side_L", PR.CH)
+        # (5) effort
+        act = [(0.0, 0.0, 0.0)] * len(PR.CH) + [(0.0, 0.0, 1.0)] * len(c.hold_ix)
+        recs = [(PR.T0 + 0.001 * k, None, None, act, None, None) for k in range(5)]
+        eff = c.effort(recs, PR.T0 + 0.1, c.plan(c.u_of({})))
+        self.assertAlmostEqual(eff["knee_ext_L"], (T / c.bd["knee_ext_L"]) ** 2, delta=1e-12)
+        self.assertAlmostEqual(eff["hip_flex_L"], (c.hold_T["hip_flex_L"] / c.bd["hip_flex_L"]) ** 2, delta=1e-12)
+        self.assertEqual(eff["knee_flex_L"], 0.0)
+
+
 class Mutations(unittest.TestCase):
     """each fault is caught by a named check (and the checks pass without it, above)."""
 

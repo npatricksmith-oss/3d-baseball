@@ -2005,6 +2005,38 @@ Code: `analysis/research/body/ladder3d.py` (the protocol, the energy account, th
 - *What I expect:* a swing that meets the ball within 1 cm at 16–19 m/s. The first search fell 0.65 over its last 50 generations, so it was still creeping; two searches of 205 numbers from one plan with different draws need not end at the same plan, and I expect them 0.3–1.5 m/s apart.
 - *What it would and would not show:* the difference is the yardstick for every gain below. It would not show the body's best at this rung: both searches are local, from one plan.
 
+#### Rung 2: a hold that obeys the muscles' rules (the design, written before any search; built and checked at the start instant first)
+
+*(Written before rung 1's values were settled, because it does not wait on the reading; it is run "alone", on rung 0's body, while the damping's sources are read, and again on rung 1's body as the ladder's rung 2.)*
+
+**What a standing hitter's muscles do.** Nothing but his muscles holds him in his launch posture: the thighs' front muscles hold the bent knees, the hips' extensors and side muscles hold the pelvis, the calves hold the ankles, the trunk's muscles hold its lean, the shoulders hold the bat up. Each of those muscles is working at a low level before the swing, and it is the same muscle that then fires. So a holding torque is a muscle's torque and is under everything a muscle is under.
+
+**The choices.**
+
+1. *The hold lets go as each muscle's drive starts* (as §4.11's tensed muscle does). Rejected: until it lets go the torque is still under no strength-at-speed law and no effort charge, and a search can keep a useful hold for nothing by never firing a muscle at that joint. At the lead knee, session 10's swing got twice its extensor's work from the hold; a plan that left the knee's muscles unfired would keep all of it.
+2. *The hold is carried by the muscles themselves.* **Taken.** It obeys every rule the muscles are under, and it is what the body does.
+
+**The rule, as built** (`drive.solve_hold_muscles`, `add_hold_muscles`; `practice3d.Ctx(stand="muscle")`).
+
+- The hold-still torques are solved as before (`solve_tone`: the torques that make the placed body's accelerations least). Each joint's torque is then split along the axes its muscle groups act about (exactly, at a joint with three such axes; at a hinge or a two-axis joint the part about an axis the joint itself holds does nothing and is dropped), and each share is handed to the group that pulls that way.
+- **A group's holding level is a drive of the engine like any other:** about the group's own axis, on the group's own measured strength-at-speed curve (§4.5), fully on from the start, its strength set so that at the start's own joint speed it gives exactly the hold-still torque. So the body's accelerations at the first instant are what they were (checked: the largest difference of any body's acceleration is 3 × 10⁻¹³ of 1,668). From then on:
+  - *strength at speed:* it gives less as the joint moves its way and nothing at its curve's top speed (the knee extensor's holding 69 N·m is half at 3.95 rad/s and gone at 13.4 rad/s, 770°/s); it gives more, to the stretched muscle's plateau, when the joint is forced back, as an active muscle does;
+  - *the bound:* the group's burst may ask at most its bound less its holding strength, so holding and burst together never exceed the measured strength;
+  - *effort:* the group's level in the score is its burst's and its holding level's together;
+  - *letting go:* it goes when the plan switches that muscle off (the plan's own switch-off time, 100 ms after the start at the earliest), with a muscle's 50 ms fall;
+  - *the clock:* a holding level is not a fired arm muscle; the clock reads onsets, as since §4.11;
+  - *no tendon spring* [E]: at 69 N·m the knee extensor's spring holds about 2 J.
+- **The trunk's bending has no muscle in the plan** (§4.5), and the largest hold with nowhere to go is there: 43 N·m bending the trunk toward his front side. It is carried by **holding-only groups with a measured strength**: Schultz et al. 1987's standing men ([note 12](research/body/12-trunk-bending-and-feet.md) C1: 10 men of 19–25, isometric, about L3; flexion 191 ± 70, extension 204 ± 78, side bend 180 ± 65 and 164 ± 56 N·m), each at mean + 2 SD scaled by weight × height as every bound of §4.5 is (443, 482, 415 and 370 N·m). Their strength at speed is Thompson 1985's standing extension over 0.52–2.09 rad/s (9% lost), then a straight line to zero at the twist's top speed, 12.9 rad/s [E: nothing is measured above 2.1 rad/s for a trunk's bending]. **The search cannot fire them:** they hold, under the curve, and that is all. Giving the trunk's bending muscles to the search is a different change (more muscle for the swing) and is not made here.
+- **What is left as a constant torque,** because no muscle of this body acts that way and no strength for one has been read (D34): the rear ankle's roll 11.8 N·m, the lead ankle's pull-up 7.7, the rear hip's turn the other way 4.5. Reported apart in every result, with their work.
+
+**At the start** (`s11/hold_check.py`, `s11/tones.py`): 25 groups hold. The front knee's extensor 69.1 N·m (0.17 of its bound), the rear knee's 59.6 (0.17), the front hip's flexor 58.5 (0.21), the rear hip's extensor 44.5 (0.11), the trunk's side benders 43.1 (0.10), the rear calf 22.8, the front hip's side muscles 22.3, the trunk's rotators 19.2, the rest under 12 each (the arms' 1–6 N·m: the shoulders' raisers holding the arms and bat up).
+
+**What I expect** (rung 2 alone, on rung 0's body, from S by the protocol):
+
+- *The replay of session 10's kept plan on this body, before any search* (indicative only, rule 4): it passes 10.6 cm under the ball at 15.2 m/s; the holding muscles do +20 J net where the constant torques did +157 J, and the muscles themselves 456 J where they did 417.
+- *The search:* it meets the ball within 1 cm again. **Slower than rung 0 by 1–3 m/s** (14.5–17 m/s): 157 J of the kept swing came from the constant torques, the replay keeps 20 J of it, and the bursts at the knees and hips have 11–21% less of their bound to ask. The front knee no longer snaps straight at 870°/s into its end; its end's load falls well under 1,005 N·m.
+- *What it would show:* what the constant torques were worth in bat speed on this body, by this search. *What it would not show:* whether a real hitter's legs give more; the holding levels are worked from [4]'s launch posture and its ground forces (rung 5's list), and the trunk's bending still cannot be driven.
+
 ## 5. The drive and its control (§14.1 items 2 and 3)
 
 ### 5.1 What a drive is

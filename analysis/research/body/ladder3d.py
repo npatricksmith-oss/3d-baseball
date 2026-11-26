@@ -37,6 +37,7 @@ MPH = 0.44704
 # ---- the rungs: each is the options of the rung before with one thing changed (4.13's table) ----
 RUNGS = {
     "r0": {},                                          # session 10's body: its settled swing, run again
+    "r2a": {"stand": "muscle"},                        # rung 2 alone, on rung 0's body: the posture held by muscle (4.13)
 }
 
 
