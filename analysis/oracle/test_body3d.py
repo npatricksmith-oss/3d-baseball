@@ -1124,6 +1124,37 @@ class RangeChecks(unittest.TestCase):
                         jumped = True
             self.assertTrue(jumped, msg="the old reading should have turned over on side %s" % sd)
 
+    def _wrist_range_between_forearm_and_barrel(self, sd):
+        """a wrist's stops as angles between the forearm (wrist toward elbow) and the barrel, with the wrist unflexed:
+        90 deg less the cock's reading."""
+        m = B.Model(ranges=())
+        st = B.place(m, T0)
+        lo, hi = B.add_ranges(m, st)["wrist_dev_" + sd]
+        return 90.0 - hi, 90.0 - lo
+
+    # what a wrist reaches, as an angle between forearm and barrel: from 22 deg toward the thumb of square (68 deg; Boone &
+    # Azen through Norkin & White) to the most opened-out bat-to-lead-forearm angle measured on hitters at contact
+    # (157 deg; Gelinas 1988, research note 11 A5), each with the stops' own 2 deg of clearance
+    WRIST_REACH = (68.0 - B.RANGE_CLEAR, 157.0 + B.RANGE_CLEAR)
+
+    @NEED
+    def test_the_lead_wrists_range_is_one_a_wrist_reaches(self):
+        """the lead wrist's stops, as angles between forearm and barrel (91 to 149 deg), lie inside what a wrist reaches."""
+        lo, hi = self._wrist_range_between_forearm_and_barrel("L")
+        self.assertGreaterEqual(lo, self.WRIST_REACH[0])
+        self.assertLessEqual(hi, self.WRIST_REACH[1])
+
+    @NEED
+    @unittest.expectedFailure
+    def test_the_rear_wrists_range_is_one_a_wrist_reaches(self):
+        """EXPECTED TO FAIL until each hand has its own grip (session 8's second review, P1-1). Both hands are welded
+        to the handle at one roll, so the rear forearm starts 156 deg from the barrel, 60 deg more opened out than
+        the lead's, and its 58 deg of travel runs from 151 deg through the line of the bat (180) and 29 deg past it:
+        no wrist's range. Its stop is not moved here; what removes this failure is the rear hand's own grip."""
+        lo, hi = self._wrist_range_between_forearm_and_barrel("R")
+        self.assertGreaterEqual(lo, self.WRIST_REACH[0])
+        self.assertLessEqual(hi, self.WRIST_REACH[1])
+
     @NEED
     def test_a_stop_pushes_back_only_past_its_end(self):
         """a knee turned past its range is pushed back toward it by the stop's stiffness times the excess, and a knee
