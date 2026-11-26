@@ -351,6 +351,54 @@ def solve_tone(mdl, st, t0, aux=None):
     return out, (lin, ang)
 
 
+def hold_response(mdl, st, t0, aux, names, bd):
+    """{channel: the change of the hold-still torques (solve_tone's, three per joint in JOINTS' order) that cancels that
+    channel held at its full bound from the start}. The body's accelerations at the start are linear in the hold-still
+    torques and in each channel's starting torque (strength x starting level, through its strength-at-speed curve and
+    its tendon spring as sec_start loads it), so the answer for any plan is the sum of these times strength x level /
+    bound. With it a muscle tensed beforehand only holds: it moves nothing until it fires or its joint moves
+    (body-motion 4.10; session 8's review, P2-4). st: the placed state with every channel at zero; the model's
+    tones are left as they were."""
+    s = mdl.sys
+    nb, oa = s.nb, 13 * s.nb
+    tones = list(s.tones)
+
+    def acc(state, ax):
+        ds = s.deriv(t0, state, ax)
+        return [ds[13 * i + 7 + c] for i in range(nb) for c in range(6)]
+    ax0 = list(aux)
+    s.anchors(st, ax0)
+    s.sec_start(st, ax0)
+    base = acc(st, ax0)
+    cols = []
+    for j in JOINTS:
+        a, ra, bb, rb = mdl.jp[j]
+        for c in range(3):
+            s.tones = tones + [(j, a, bb, E.E3[c])]
+            cols.append([x - y for x, y in zip(acc(st, ax0), base)])
+    s.tones = tones
+    n = len(cols)
+    A = [[sum(x * y for x, y in zip(cols[i], cols[k])) for k in range(i + 1)] for i in range(n)]
+    ridge = TONE_RIDGE * max(A[i][i] for i in range(n))
+    for i in range(n):
+        A[i][i] += ridge
+    index = {a[0]: j for j, a in enumerate(s.acts)}
+    out = {}
+    for nm in names:
+        j = index[nm]
+        keep = (s.acts[j][4], s.acts[j][9])
+        s.acts[j][4], s.acts[j][9] = bd[nm], 1.0
+        st2 = list(st)
+        st2[oa + j] = 1.0
+        ax2 = list(aux)
+        s.anchors(st2, ax2)
+        s.sec_start(st2, ax2)
+        resp = [x - y for x, y in zip(acc(st2, ax2), base)]
+        s.acts[j][4], s.acts[j][9] = keep
+        out[nm] = E.chol_solve([row[:] for row in A], [-sum(x * y for x, y in zip(cols[i], resp)) for i in range(n)])
+    return out
+
+
 def simulate(mdl, st, t0, t1, h=1e-3, every=5, on_step=None):
     """integrate the placed, driven body and record what [4] measured every `every` steps.
     Returns (rows, final state); a row is (t, observables, {foot: ground force N})."""

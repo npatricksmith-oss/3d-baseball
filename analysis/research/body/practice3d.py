@@ -130,6 +130,10 @@ class Ctx:
         Dr.BOUND_SCALE.clear()
         self.limits = B.add_ranges(m, st, k_big=o.get("k_big"), wrists=o.get("wrists", "cocked"), rom=o.get("rom"))
         self.tone, self.tone_rest = Dr.solve_tone(m, st, T0, aux=list(self.aux0))
+        # an arm muscle tensed beforehand only holds (4.10; review P2-4): the hold-still torques are re-solved for each
+        # plan's starting levels at the arms, which is linear, so its pieces are found once here
+        self.hold_w = Dr.hold_response(m, st, T0, list(self.aux0), ARMS, self.bd)
+        self.tone0 = [c for j in Dr.JOINTS for c in self.tone[j]]
         Dr.add_damping(m, st)
         self.st = st
         self.BW = M * E.G
@@ -154,7 +158,18 @@ class Ctx:
 
     plan = F.Ctx.plan
     u_of = F.Ctx.u_of
-    prepare = F.Ctx.prepare
+
+    def prepare(self, u):
+        st, aux = F.Ctx.prepare(self, u)
+        pl = self.plan(u)
+        tv = list(self.tone0)
+        for n in ARMS:
+            x = pl[n][0] * pl[n][4] / self.bd[n] if self.bd[n] > 0 else 0.0
+            if x > 0.0:
+                tv = [a + x * b for a, b in zip(tv, self.hold_w[n])]
+        s = self.m.sys
+        s.tones = [(nm, a, b, tuple(tv[3 * k:3 * k + 3])) for k, (nm, a, b, _) in enumerate(s.tones)]
+        return st, aux
 
     def run(self, u, every=EVERY, t_end=T_END, h=H_STEP):
         st, aux = self.prepare(u)
@@ -241,7 +256,9 @@ class Ctx:
         xo, least, zr = self.balance(recs, tx)
         r += [xo / XCOM_UNIT, max(0.0, JUMP_MIN - least) / JUMP_UNIT, max(0.0, SINK_MIN - zr) * self.z0 / SINK_UNIT]
         on = [pl[n][1] for n in ARMS if pl[n][0] > 0.01 * self.bd[n]]
-        r.append(max(0.0, (tx - self.t_avail) - min(on)) / CLOCK_UNIT if on else 0.0)
+        # the clock is read against a contact that happened; a bat that never comes round is charged for that, above,
+        # and not for the clock against the run's end (review P2-3)
+        r.append(max(0.0, (tx - self.t_avail) - min(on)) / CLOCK_UNIT if on and came else 0.0)
         if self.strain_w > 0.0:
             names = [s_[0] for s_ in self.m.sys.stops]
             for j, nm in enumerate(names):

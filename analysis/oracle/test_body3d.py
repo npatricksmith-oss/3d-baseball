@@ -1059,6 +1059,42 @@ class RangeChecks(unittest.TestCase):
         self.assertAlmostEqual(B.range_angles(m, st)["shoulder_back_L"], 50.0, delta=1e-6)
 
     @NEED
+    def test_an_arm_muscle_tensed_beforehand_only_holds(self):
+        """with the hold-still torques re-solved for the starting levels (drive.hold_response), a body whose arm
+        muscles are all tensed at 0.7 of their bounds starts with the accelerations of the body with none tensed; left
+        as they were, the same tensing moves it (review P2-4: a starting level was net drive from the first instant)."""
+        m = B.Model(ranges=())
+        st = B.place(m, T0)
+        bd = Dr.bounds(m.H, m.M)
+        arms = Dr.ARM_CHANNELS + Dr.NEW_ARM_CHANNELS
+        st = Dr.add_drives(m, st, {n: (0.0, 0.0, 0.05, 0.1, 0.0) for n in arms})
+        B.add_ranges(m, st)
+        tone, _ = Dr.solve_tone(m, st, T0, aux=list(m.start_aux))
+        W = Dr.hold_response(m, st, T0, list(m.start_aux), arms, bd)
+        s = m.sys
+
+        def acc(state):
+            aux = list(m.start_aux)
+            s.anchors(state, aux)
+            s.sec_start(state, aux)
+            ds = s.deriv(T0, state, aux)
+            return [ds[13 * i + 7 + c] for i in range(s.nb) for c in range(6)]
+        base = acc(st)
+        oa = 13 * s.nb
+        st2 = list(st)
+        for j, a in enumerate(s.acts):
+            a[4], a[9] = bd[a[0]], 0.7
+            st2[oa + j] = 0.7
+        moved = max(abs(x - y) for x, y in zip(acc(st2), base))
+        self.assertGreater(moved, 10.0)                                    # tensed and not held: it moves (rad/s^2)
+        tv = [c for j in Dr.JOINTS for c in tone[j]]
+        for n in arms:
+            tv = [x + 0.7 * y for x, y in zip(tv, W[n])]
+        s.tones = [(nm, a, b, tuple(tv[3 * k:3 * k + 3])) for k, (nm, a, b, _) in enumerate(s.tones)]
+        held = max(abs(x - y) for x, y in zip(acc(st2), base))
+        self.assertLess(held, 1e-3 * moved)
+
+    @NEED
     def test_a_stop_pushes_back_only_past_its_end(self):
         """a knee turned past its range is pushed back toward it by the stop's stiffness times the excess, and a knee
         inside its range is not pushed at all (the check fails if the stop's sign or its limits are wrong)."""
