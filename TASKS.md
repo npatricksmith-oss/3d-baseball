@@ -17,13 +17,13 @@ Status: `[ ]` not started · `[~]` partly done · `[?]` needs an owner decision
 
 ## Resume here (2026-11-25)
 
-**State.** PLAN D31–D34: a force-driven body; PLAN §14.1, spec [docs/body-motion.md](docs/body-motion.md).
+**State.** PLAN D31–D37: a force-driven body; PLAN §14.1, spec [docs/body-motion.md](docs/body-motion.md). **D37 (owner, 2026-11-25): the lab study [4] is dropped as target and gate.** The swing is learned by practice (D32, D36), checked against directly measured hitters.
 
-**Phase 1 (spec §4.4, §4.8, §4.9; session 7, its review and fixes merged):** contact +0.8 ms, gated curves inside their bands; the bat 48 mph and coming down 7° on the ball. PLAN D35: the curves' last 40 ms are not a target. The strongest batter held to a hitter's swing: 50 mph (one search).
+**Before D37 (spec §4.9), fitted to [4]:** bat 48 mph, down 7° on the ball; hands 17 mph (MLB 23–29).
 
-**[?] Q59** (gate 65–76 or 60–76 mph). Q60 = a (PLAN D36): a small cost on effort, stated and swept.
+**[?] Q59** (bat-speed check 65–76 or 60–76 mph); holds nothing up.
 
-**Nothing running.** Session 8 after Q59: free the last 40 ms, review P2-2, the held search again; [note 10](docs/research/body/10-smoothed-sources.md) §6 and §1a (averaged peaks, "about 2%", the handle kick, swing v3).
+**Running: `body-3d-8`** (Fable, high; Workers tab; worktree `swing-research`, branch `work/body-3d`; job `WORKER-BODY-3D-8.md` there). Check its branch log, status file and `bin/job.sh status`. Then: Opus review, merge, the proposed gate (spec §13) to the owner as a question.
 
 **Next:** §2: the ground-dive leftovers ([note](docs/calibration/2026-11-23-of-ground-dive.md) §9).
 
