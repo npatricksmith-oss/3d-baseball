@@ -148,7 +148,11 @@ class Ctx:
         # grip: "weld", the body of sessions 1-8 (the default, so that a saved result without the option replays on the body
         # it was found on); "hands", each hand's own grip (body-motion 4.11, session 9; --grip hands)
         # feet: "plate" (sessions 1-8, the default) or "cleats" (4.11, part 3: the measured grip, the ankles' ends; --feet cleats)
-        self.m = m = B.Model(H, M, ranges=(), grip=o.get("grip", "weld"), feet=o.get("feet", "plate"), mu=o.get("mu"))
+        # wrist: "box" (session 9, the default) or "oval" (4.12: both of a wrist's angles inside its ellipse; --wrist oval)
+        # clear: the cleared start of 4.12 (body.START_CLEAR: [4]'s launch posture moved by the rule so that every joint is
+        # 5 deg inside its end; no stop moved; --clear). STILL [4]'s LAUNCH POSTURE, MOVED BY A RULE, AND FLAGGED AS THAT.
+        self.m = m = B.Model(H, M, ranges=(), grip=o.get("grip", "weld"), feet=o.get("feet", "plate"), mu=o.get("mu"),
+                             wrist=o.get("wrist", "box"), shift=B.START_CLEAR if o.get("clear") else None)
         for k, shift in o.get("start", {}).items():          # the start moved by a stated amount (a sensitivity run)
             B.CURVE_OVERRIDE[k] = (lambda kk, sh: (lambda t: C.resample(B._CURVES.setdefault(kk, C.load(kk)), t, t, 1.0)[0] + sh))(k, shift)
         vel = o.get("vel", 1.0)

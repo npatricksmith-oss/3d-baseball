@@ -1784,6 +1784,255 @@ class RaiseChecks(unittest.TestCase):
             go(False)
 
 
+def hand_on_an_oval(az_deg, c=0.0, k=2000.0, T=0.25, h=1e-4, drive=0.0, tilt=0.3, speed=10.0):
+    """a 1.2 kg forearm-like body on a two-axis joint at the world's origin (the world's z and its own x, held square:
+    the wrist's joint, with the world as the hand), no gravity, thrown outward from inside an ellipse of its two angles
+    (kind 3, body-motion 4.12: half-axes 0.3 and 0.6 rad, centre (0.05, -0.10), tilted `tilt`) in the direction
+    `az_deg` of the plane of the two angles. drive: a constant torque (N m) about the world's z pushing the first angle up.
+    The two angles and the distance outside the ellipse are worked out HERE from the body's rotation, by the test's own
+    formulas. Returns (energy at the start, at the end, the largest seen, the stop's booked work + what its spring
+    holds, the largest difference between the engine's reading and this one while outside, the drive's booked work,
+    the deepest it went, the distance at the end)."""
+    s = E.System(g=(0.0, 0.0, 0.0))
+    I = (0.05, 0.05, 0.004)
+    b = s.body("forearm", 1.2, I)
+    s.universal(-1, b, (0.0, 0.0, 0.0), (0.0, 0.0, 0.12), (0, 0, 1), (1, 0, 0))
+    c1, c2, h1, h2 = 0.05, -0.10, 0.3, 0.6
+    s.stop("oval", -1, b, (0, 0, 1), (1, 0, 0), (1, 0, 0), 0.0, 0.0, k, c, 3, oval=((1, 0, 0), (0, 0, 1), (0, 0, 1), c1, c2, h1, h2, tilt))
+    if drive:
+        s.actuator("push", -1, b, (0, 0, 1), drive, 1e9, -1.0, 0.0, 1e9, 1.0)
+    st = s.new_state()
+    # the posture with the two angles at the ellipse's centre: turned c1 about the world's z, then -c2 about its own x
+    # (the second angle is read about the body's x from the body's z to the world's z, so it falls as the body turns)
+    q = E.qmul(E.qaxis((0, 0, 1), c1), E.qaxis((1, 0, 0), -c2))
+    R = E.qR(q)
+    x = E.scale(E.mv(R, (0, 0, 0.12)), -1.0)
+    a = math.radians(az_deg)
+    w = E.add(E.scale((0, 0, 1), speed * math.cos(a)), E.scale(E.mv(R, (1, 0, 0)), -speed * math.sin(a)))
+    s.set_body(st, b, x, q, E.cross(w, x), w)
+    if drive:
+        st[13 * s.nb] = 1.0
+    aux = s.new_aux()
+    ow = 13 * s.nb + len(s.acts)
+    ct, sn = math.cos(tilt), math.sin(tilt)
+
+    def reading(state):
+        Rb = E.qR(s.pose(state, b)[1])
+        bx, bz = E.mv(Rb, (1, 0, 0)), E.mv(Rb, (0, 0, 1))
+        t1 = math.atan2(bx[1], bx[0])                              # the body's x about the world's z, from the world's x
+        t2 = math.atan2(E.dot(bx, E.cross(bz, (0, 0, 1))), bz[2])  # the world's z about the body's x, from the body's z
+        u, v = t1 - c1, t2 - c2
+        rho = math.hypot((u * ct + v * sn) / h1, (-u * sn + v * ct) / h2)
+        return math.hypot(u, v) * (1.0 - 1.0 / rho) if rho > 1e-9 else -1.0
+
+    def energy(state):
+        xx, qq, vv, ww = s.pose(state, b)
+        wl = E.mtv(E.qR(qq), ww)
+        d = reading(state)
+        pe = 0.5 * k * d * d if d > 0 else 0.0
+        return 0.5 * 1.2 * E.dot(vv, vv) + 0.5 * sum(I[i] * wl[i] ** 2 for i in range(3)) + pe, pe, d
+    e0 = energy(st)[0]
+    emax, worst, deep = e0, 0.0, 0.0
+    s.diag = {}
+    for i in range(int(round(T / h))):
+        st = s.step(i * h, st, aux, h)
+        if i % 5 == 0:
+            e, pe, d = energy(st)
+            emax, deep = max(emax, e), max(deep, d)
+            s.deriv((i + 1) * h, st, aux)
+            if d > 0:
+                worst = max(worst, abs(s.diag["stop"]["oval"][1] - d))
+    s.diag = None
+    e1, pe1, d1 = energy(st)
+    return e0, e1, emax, st[ow + 1] + pe1, worst, st[ow], deep, d1
+
+
+class OvalChecks(unittest.TestCase):
+    """the wrist's oblique range (body-motion 4.12, session 10): the ellipse, the stop that reads both of the wrist's
+    angles (engine kind 3), its passivity, and the cleared start."""
+
+    def test_the_wrists_ellipse_passes_through_the_four_measured_ends(self):
+        """worked by hand for the untilted ellipse: centred on the box's centre, its two half-axes from the two
+        conditions that it pass through the ends on each axis (a 2 x 2 linear solve for 1/a^2 and 1/b^2); the body's
+        ellipse is that one; each measured end lies on it; the corner of the box where session 9's rear wrist started
+        is 1.40 times its radius; tilted 8 deg it still passes through the four ends; tilted 25 it does not exist."""
+        ar = B.arm_range()
+        (f2, f1), (d2, d1) = ar["wrist_flex"], ar["wrist_dev"]
+        cx, cy, hx, hy = 0.5 * (f1 + f2), 0.5 * (d1 + d2), 0.5 * (f1 - f2), 0.5 * (d1 - d2)
+        # hx^2 A + cy^2 B = 1 and cx^2 A + hy^2 B = 1
+        det = hx * hx * hy * hy - cy * cy * cx * cx
+        A, Bq = (hy * hy - cy * cy) / det, (hx * hx - cx * cx) / det
+        ov = B.wrist_oval()
+        for got, want in zip(ov, (cx, cy, 1.0 / math.sqrt(A), 1.0 / math.sqrt(Bq), 0.0)):
+            self.assertAlmostEqual(got, want, delta=1e-9)
+        for tilt in (0.0, 8.0):
+            for f, d in ((f1, 0.0), (f2, 0.0), (0.0, d1), (0.0, d2)):
+                rho, inside = B.oval_place(f, d, tilt=tilt)
+                self.assertAlmostEqual(rho, 1.0, delta=1e-9)
+                self.assertAlmostEqual(inside, 0.0, delta=1e-7)
+        self.assertLess(B.oval_place(0.0, 0.0)[0], 0.25)
+        self.assertAlmostEqual(B.oval_place(f2, d2)[0], 1.40, delta=0.01)          # bent right back and tilted right away from the thumb
+        self.assertGreater(B.oval_place(f2, d2, tilt=8.0)[0], 1.6)                 # tilted, that corner is further outside
+        with self.assertRaises(ValueError):
+            B.wrist_oval(tilt=25.0)
+
+    def test_the_ellipses_reading_is_the_distance_outside_and_does_not_move_with_the_arms_other_joints(self):
+        """the body's reading of each wrist's ellipse (range_angles, as the engine's stop reads it) for a wrist posed
+        from the clinical definitions (clinical_arm: rotations only) equals the distance outside the ellipse worked
+        from the posed angles, inside and outside, in the four quadrants, on either hand; and it is the same whatever
+        the forearm's turn, the elbow and the upper arm do."""
+        if not B.have_curves():
+            self.skipTest("[4]'s digitised curves are not on this machine")
+        m = B.Model(ranges=(), grip="hands", wrist="oval")
+        st = B.place(m, T0)
+        for sd, sg in B.SIDES:
+            for tilt, bend in ((0.0, 0.0), (15.0, 30.0), (-30.0, -70.0), (20.0, -74.0), (-31.0, 60.0), (10.0, 50.0), (-20.0, -40.0)):
+                want = -B.oval_place(bend, tilt)[1]
+                for kw in ({}, {"palm_down": 60.0, "elbow": 30.0}, {"raise_deg": sg * 70.0, "turn_in": -40.0, "palm_down": -50.0, "elbow": 120.0}):
+                    got = B.range_angles(m, clinical_arm(m, st, sd, tilt=tilt, bend=bend, **kw)[0])["wrist_oval_" + sd]
+                    self.assertAlmostEqual(got, want, delta=1e-7, msg="%s tilt %.0f bend %.0f %s" % (sd, tilt, bend, kw))
+
+    def test_the_ellipses_gradient_is_its_readings_rate(self):
+        """the kind 3 stop's gradient g against finite differences: on the reading's two partial derivatives (the pure
+        function), and on the whole stop, a forearm turned a little about each of the wrist's two axes and about an
+        oblique one: the reading's rate is w . g."""
+        S = E.System
+        ov = (0.05, -0.10, 0.3, 0.6, math.cos(0.3), math.sin(0.3))
+        for t1, t2 in ((0.5, 0.2), (-0.4, 0.5), (0.1, -0.9), (-0.3, -0.6), (0.45, -0.1)):
+            d, d1, d2 = S.oval_reading(t1, t2, *ov)
+            self.assertGreater(d, 0.0)
+            e = 1e-6
+            self.assertAlmostEqual(d1, (S.oval_reading(t1 + e, t2, *ov)[0] - S.oval_reading(t1 - e, t2, *ov)[0]) / (2 * e), delta=1e-7)
+            self.assertAlmostEqual(d2, (S.oval_reading(t1, t2 + e, *ov)[0] - S.oval_reading(t1, t2 - e, *ov)[0]) / (2 * e), delta=1e-7)
+        s = S()
+        s.ovals["o"] = ((1.0, 0.0, 0.0), (0.0, 0.0, 1.0), (0.0, 0.0, 1.0)) + ov
+        Ra = E.qR(E.qaxis((0.3, -0.5, 0.8), 0.7))                    # the hand, anyhow in space
+        n, e_ = E.mv(Ra, (0, 0, 1)), E.mv(Ra, (1, 0, 0))
+        for a1, a2 in ((0.5, 0.3), (-0.5, 0.6), (0.2, -0.9)):
+            qb = E.qmul(E.R_to_q(Ra), E.qmul(E.qaxis((0, 0, 1), a1), E.qaxis((1, 0, 0), a2)))
+            rd = lambda q: s.oval_angle("o", Ra, E.qR(q), n, e_, E.mv(E.qR(q), (1, 0, 0)))
+            d, g, t1, t2 = rd(qb)
+            self.assertGreater(d, 0.0)
+            for w in (n, E.mv(E.qR(qb), (1, 0, 0)), E.add(E.scale(n, 0.6), E.scale(E.mv(E.qR(qb), (1, 0, 0)), -0.8))):
+                dl = 1e-6
+                rate = (rd(E.qmul(E.qaxis(w, E.norm(w) * dl), qb))[0] - rd(E.qmul(E.qaxis(w, -E.norm(w) * dl), qb))[0]) / (2 * dl)
+                self.assertAlmostEqual(rate, E.dot(w, g), delta=1e-6 * (1.0 + abs(rate)))
+
+    def test_the_ellipses_stop_does_no_net_positive_work(self):
+        """the passivity check for the kind 3 stop, before any search uses it: a body on the wrist's two-axis joint
+        thrown into the ellipse in eight directions. Elastic, its energy comes back (to within an error that shrinks
+        with the step) and never exceeds the start's; damped, it loses energy; driven in by a 15 N m torque it never has
+        more than it started with plus the drive's work; and the engine's reading is the distance worked out here."""
+        for az in (0.0, 50.0, 90.0, 140.0, 180.0, 235.0, 270.0, 320.0):
+            e0, e1, emax, booked, worst, wd, deep, d1 = hand_on_an_oval(az)
+            msg = "direction %.0f" % az
+            self.assertGreater(deep, 0.01, msg=msg)                        # it did go into the stop
+            self.assertLess(worst, 1e-9, msg=msg)
+            self.assertLess(emax, e0 * (1.0 + 1e-3), msg=msg)
+            self.assertLess(booked, 1e-3 * e0, msg=msg)
+            self.assertAlmostEqual(e1, e0, delta=2e-3 * e0, msg=msg)
+            e0, e1, emax, booked, worst, wd, deep, d1 = hand_on_an_oval(az, c=20.0)
+            self.assertLess(emax, e0 * (1.0 + 1e-3), msg=msg)
+            self.assertLess(e1, 0.9 * e0, msg=msg)
+            e0, e1, emax, booked, worst, wd, deep, d1 = hand_on_an_oval(az, c=20.0, drive=15.0)
+            self.assertLess(e1, e0 + wd + 1e-3 * e0, msg=msg)
+            self.assertLess(booked, 1e-3 * e0, msg=msg)
+        # the elastic run's error takes either sign from one direction to the next and shrinks with the step (over the
+        # eight directions 8.0e-4 of the energy at 0.1 ms, 2.6e-5 at 0.025 ms): the integrator at the stop's edge, not the law
+        err = lambda h: sum(abs(r[1] - r[0]) / r[0] for r in (hand_on_an_oval(az, h=h) for az in (0.0, 50.0, 90.0, 140.0, 180.0, 235.0, 270.0, 320.0)))
+        self.assertLess(err(2.5e-5), 0.25 * err(1e-4))
+
+    def test_the_ellipses_stop_with_the_torque_along_one_angle_alone_fails_that_check(self):
+        """the mutation: the stop's torque along the first angle's gradient only. Thrown obliquely into the ellipse the
+        body ends with hundreds of times the energy it started with."""
+        E.MUT.add("oval_one_angle")
+        try:
+            bad = [hand_on_an_oval(az) for az in (50.0, 140.0, 235.0, 320.0)]
+        finally:
+            E.MUT.discard("oval_one_angle")
+        self.assertGreater(min((r[1] - r[0]) / r[0] for r in bad), 10.0)
+
+
+class StartChecks(unittest.TestCase):
+    """the cleared start (body-motion 4.12, part 1): [4]'s launch posture moved by a stated rule so that no joint
+    starts at an end."""
+
+    @classmethod
+    def setUpClass(cls):
+        if not B.have_curves():
+            raise unittest.SkipTest("[4]'s digitised curves are not on this machine (docs/body-motion.md 3)")
+        cls.kw = dict(grip="hands", feet="cleats", wrist="oval")
+        cls.m = B.Model(ranges=(), shift=B.START_CLEAR, **cls.kw)
+        cls.st = B.place(cls.m, T0)
+
+    def margins(self, shift):
+        m = B.Model(ranges=(), shift=shift or None, **self.kw)
+        return B.start_margins(m, B.pose(m, T0)[0])
+
+    def test_every_joint_starts_five_degrees_inside_its_end_and_no_stop_is_moved(self):
+        """every range the body holds, each side: the start is START_CLEAR_DEG inside its anatomical end (the wrists
+        that far inside their ellipses); add_ranges() puts every stop at its anatomical end and none carries anything;
+        both wrists are inside the ellipse and the elbows are clear of the other arm. Session 9's start fails this at
+        six joints, and its rear wrist is outside the ellipse."""
+        m, st = self.m, self.st
+        mg = B.start_margins(m, st)
+        self.assertEqual(len(mg), 3 + 2 * (5 + 2 + 5 + 1))          # the trunk's 3; a side: hip 3, knee, ankle 2 | elbow, shoulder 3, forearm, upper arm | the wrist's ellipse
+        for k, v in mg.items():
+            self.assertGreaterEqual(v, B.START_CLEAR_DEG - 0.02, msg=k)
+        lim = B.add_ranges(m, st)
+        want = {t[0]: (t[6], t[7]) for t in B.range_specs(None, "hands", "cleats", "oval") if t[8] is not None and t[9] != 3}
+        for k, (lo, hi) in want.items():
+            self.assertEqual(lim[k], (lo, hi), msg=k)                 # the anatomical ends, none moved to clear the start
+        self.assertAlmostEqual(lim["shoulder_L"][1], B.ROM["sh_hadd"] - 90.0)
+        m.sys.diag = {}
+        m.sys.deriv(T0, st, m.sys.new_aux())
+        self.assertTrue(all(tau == 0.0 for tau, th in m.sys.diag["stop"].values()))
+        m.sys.diag = None
+        cl = B.clinical(m, st)
+        for sd in "LR":
+            self.assertLess(B.oval_place(cl[("wrist_flex", sd)], cl[("wrist_dev", sd)])[0], 0.95, msg=sd)
+            other = "R" if sd == "L" else "L"
+            el, S, El, W = m.joint_pos(st, "elbow_" + sd), m.joint_pos(st, "shoulder_" + other), m.joint_pos(st, "elbow_" + other), m.joint_pos(st, "wrist_" + other)
+            self.assertGreaterEqual(min(B._seg_dist(el, S, El), B._seg_dist(el, El, W)), B.ARM_CLEAR - 1e-3)
+        old = self.margins(None)
+        self.assertEqual(sorted(k for k, v in old.items() if v < B.START_CLEAR_DEG),
+                         ["ankle_roll_L", "hip_abd_L", "shoulder_L", "upper_arm_L", "wrist_oval_R"])
+        m9 = B.Model(ranges=(), grip="hands", feet="cleats")          # session 9's own start (the wrists' box, its free choices by the box)
+        c9 = B.clinical(m9, B.pose(m9, T0)[0])
+        self.assertGreater(B.oval_place(c9[("wrist_flex", "R")], c9[("wrist_dev", "R")])[0], 1.3)
+
+    def test_the_cleared_start_is_the_least_change_the_rule_finds(self):
+        """the stored change against the rule's own conditions, without rerunning its search: no number is changed by
+        more than 2.5 (deg or cm); and it is a least change number by number: each changed number moved an eighth back
+        toward [4]'s value leaves some joint short of 5 deg, so no smaller change of that number alone would do. (The
+        whole rule is rerun, 4 minutes, with BB_SLOW=1: it must return the stored change.)"""
+        x = B.START_CLEAR
+        self.assertGreater(min(self.margins(x).values()), B.START_CLEAR_DEG - 0.005)
+        self.assertLessEqual(max(abs(v) for v in x.values()), 2.5)
+        self.assertLess(math.sqrt(sum(v * v for v in x.values())), 5.2)
+        for k, v in x.items():
+            back = dict(x)
+            back[k] = v - math.copysign(0.125, v)
+            self.assertLess(min(self.margins(back).values()), B.START_CLEAR_DEG - 0.01, msg=k)      # the stored start's least margin is 4.998
+        import os
+        if os.environ.get("BB_SLOW"):
+            got, mg = B.clear_start(**self.kw)
+            self.assertEqual(got, x)
+
+    def test_the_start_is_still_the_launch_posture_and_its_slopes(self):
+        """what the rule leaves alone: the placed posture reads [4]'s numbers plus the stored changes (the pelvis's and
+        the trunk's turn, the bat's direction, the lag, both elbows), and the starting velocities are the slopes of
+        [4]'s curves as before (a constant change does not alter a slope): the pelvis's, the trunk's and the bat's
+        rates equal the unchanged start's within what the changed posture moves them."""
+        o = self.m.observe(self.st)
+        m0 = B.Model(ranges=(), grip="hands", feet="cleats")
+        o0 = m0.observe(B.place(m0, T0))
+        for k in ("pelvis_rot", "trunk_rot", "bat_az", "bat_elev", "bat_lag", "lead_elbow_flex", "trail_elbow_flex"):
+            self.assertAlmostEqual((o[k] - B.curve(k, T0) - B.START_CLEAR.get(k, 0.0) + 180.0) % 360.0 - 180.0, 0.0, delta=0.6, msg=k)
+        for k, tol in (("pelvis_rot_vel", 5.0), ("trunk_rot_vel", 5.0), ("bat_az_vel", 25.0)):
+            self.assertAlmostEqual(o[k], o0[k], delta=tol, msg=k)
+
+
 class FeetChecks(unittest.TestCase):
     """the feet on dirt (body-motion 4.11, part 3)."""
 

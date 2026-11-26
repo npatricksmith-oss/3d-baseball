@@ -53,7 +53,35 @@ const E3: [V3; 3] = [[1.0, 0.0, 0.0], [0.0, 1.0, 0.0], [0.0, 0.0, 1.0]];
 struct Pt { a: i32, b: i32, ra: V3, rb: V3 }
 struct Dt { a: i32, b: i32, ua: V3, wb: V3 }
 struct Act { a: i32, b: usize, ax: V3, t: f64, w: f64, ton: f64, rise: f64, toff: f64, a0: f64, tab: i32, ksec: f64, axb: V3, held: i32 }
-struct Stop { a: i32, b: usize, ax: V3, ea: V3, fb: V3, lo: f64, hi: f64, k: f64, c: f64, kind: i32, axb: V3 }
+struct Stop { a: i32, b: usize, ax: V3, ea: V3, fb: V3, lo: f64, hi: f64, k: f64, c: f64, kind: i32, axb: V3,
+              // kind 3 (engine.py's oval): the second angle's axis and direction in b, its direction in a, and the ellipse
+              // (centre 1, centre 2, half-axis 1, half-axis 2, cos and sin of its tilt)
+              n2: V3, e2: V3, f2: V3, ov: [f64; 6] }
+/// engine.py's kind 0 stop_angle: the angle about n from e to f (f projected square to n) and its gradient.
+fn angle0(n: &V3, e: &V3, f: &V3) -> (f64, V3) {
+    let nf = dot(n, f);
+    let fp = sub(f, &scale(n, nf));
+    let l2 = dot(&fp, &fp);
+    if l2 < STOP_SINGULAR * STOP_SINGULAR { eprintln!("a stop's direction lies along its axis: the angle it reads is undefined there"); std::process::exit(3); }
+    (dot(n, &cross(e, f)).atan2(dot(e, f)), sub(n, &scale(&fp, nf / l2)))
+}
+/// engine.py's oval_reading: how far the pair (t1, t2) lies outside the ellipse along the line from its centre, and
+/// that distance's two partial derivatives (zero inside, where they are not asked for).
+fn oval_reading(t1: f64, t2: f64, ov: &[f64; 6]) -> (f64, f64, f64) {
+    let (c1, c2, h1, h2, ct, sn) = (ov[0], ov[1], ov[2], ov[3], ov[4], ov[5]);
+    let (x, y) = (t1 - c1, t2 - c2);
+    let (xr, yr) = (x * ct + y * sn, -x * sn + y * ct);
+    let rho = ((xr / h1) * (xr / h1) + (yr / h2) * (yr / h2)).sqrt();
+    if rho <= 1.0 {
+        return (if rho > 1e-12 { (x * x + y * y).sqrt() * (1.0 - 1.0 / rho) } else { -f64::min(h1, h2) }, 0.0, 0.0);
+    }
+    let l = (x * x + y * y).sqrt();
+    let rx = (xr * ct / (h1 * h1) - yr * sn / (h2 * h2)) / rho;
+    let ry = (xr * sn / (h1 * h1) + yr * ct / (h2 * h2)) / rho;
+    let k1 = (1.0 - 1.0 / rho) / l;
+    let k2 = l / (rho * rho);
+    (l * (1.0 - 1.0 / rho), x * k1 + k2 * rx, y * k1 + k2 * ry)
+}
 const STOP_SINGULAR: f64 = 0.0872;   // engine.py's: a stop's direction this near its axis has no usable angle
 struct Hold { a: i32, b: usize, qref: [f64; 4], k: V3, c: V3, cap: f64 }
 struct Tone { a: i32, b: usize, tl: V3 }
@@ -243,7 +271,14 @@ impl Sys {
             let fb = mv(&r[st.b], &st.fb);
             // engine.py's stop_angle: the angle and its own gradient g (d(angle)/dt = w_rel . g); the torque acts along g
             let nf = dot(&n, &fb);
-            let (th, g) = if st.kind == 2 {
+            let (th, g) = if st.kind == 3 {
+                // both of a two-axis joint's angles held inside an ellipse (engine.py's kind 3, body-motion 4.12)
+                let f2 = if st.a >= 0 { mv(&r[st.a as usize], &st.f2) } else { st.f2 };
+                let (t1, g1) = angle0(&n, &e, &fb);
+                let (t2, g2) = angle0(&mv(&r[st.b], &st.n2), &mv(&r[st.b], &st.e2), &f2);
+                let (d, d1, d2) = oval_reading(t1, t2, &st.ov);
+                (d, sub(&scale(&g1, d1), &scale(&g2, d2)))
+            } else if st.kind == 2 {
                 // a limb's turn about its own axis v from its rest direction n (engine.py's kind 2): e carried by the
                 // shortest turn n -> v, the angle about v from that to f; the gradient (n + v) / (1 + n.v)
                 let v2 = mv(&r[st.b], &st.axb);
@@ -507,7 +542,12 @@ fn main() {
     let acts: Vec<Act> = (0..n).map(|_| Act { a: tk.i(), b: tk.u(), ax: tk.v3(), t: tk.f(), w: tk.f(), ton: tk.f(), rise: tk.f(), toff: tk.f(),
                                                a0: tk.f(), tab: tk.i(), ksec: tk.f(), axb: tk.v3(), held: tk.i() }).collect();
     tk.key("stops"); let n = tk.u();
-    let stops: Vec<Stop> = (0..n).map(|_| Stop { a: tk.i(), b: tk.u(), ax: tk.v3(), ea: tk.v3(), fb: tk.v3(), lo: tk.f(), hi: tk.f(), k: tk.f(), c: tk.f(), kind: tk.i(), axb: tk.v3() }).collect();
+    let stops: Vec<Stop> = (0..n).map(|_| {
+        let mut st = Stop { a: tk.i(), b: tk.u(), ax: tk.v3(), ea: tk.v3(), fb: tk.v3(), lo: tk.f(), hi: tk.f(), k: tk.f(), c: tk.f(), kind: tk.i(), axb: tk.v3(),
+                            n2: ZERO, e2: ZERO, f2: ZERO, ov: [0.0; 6] };
+        if st.kind == 3 { st.n2 = tk.v3(); st.e2 = tk.v3(); st.f2 = tk.v3(); for q in 0..6 { st.ov[q] = tk.f(); } }
+        st
+    }).collect();
     tk.key("holds"); let n = tk.u();
     let holds: Vec<Hold> = (0..n).map(|_| Hold { a: tk.i(), b: tk.u(), qref: [tk.f(), tk.f(), tk.f(), tk.f()], k: tk.v3(), c: tk.v3(), cap: tk.f() }).collect();
     tk.key("tones"); let n = tk.u();
