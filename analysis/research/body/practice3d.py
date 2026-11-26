@@ -41,6 +41,7 @@ FALLBACK = False                                       # lm(): take the best sin
 # ---- the pitch (4.10): the game's average four-seam fastball where it is met (sim-cli pitch --type FF, 200 pitches)
 BALL_SPEED, BALL_DESCENT, BALL_ACROSS, BALL_FLIGHT, BALL_Z = 37.98, 5.27, 1.62, 0.403, 0.78
 MEET_ACROSS, MEET_AHEAD = 0.92, 0.72                   # m from the hips' midpoint at the start (PLAN D28, D29; AHEAD [E: 0.61-0.84])
+MEET_FROM_REAR_ANKLE = 1.022                           # m: Statcast's intercept is 102.2 +- 8.8 cm toward the pitcher from the rear ankle, level with the lead ankle (-0.4 +- 9.4 cm; note 15)
 # ---- the aim's units (4.10) ----
 MISS_UNIT = 0.01              # m [E]
 TIMING_ERR = 0.007            # s: the measured spread of where hitters meet the ball, as a time (note 6)
@@ -152,7 +153,9 @@ class Ctx:
         # clear: the cleared start of 4.12 (body.START_CLEAR: [4]'s launch posture moved by the rule so that every joint is
         # 5 deg inside its end; no stop moved; --clear). STILL [4]'s LAUNCH POSTURE, MOVED BY A RULE, AND FLAGGED AS THAT.
         self.m = m = B.Model(H, M, ranges=(), grip=o.get("grip", "weld"), feet=o.get("feet", "plate"), mu=o.get("mu"),
-                             wrist=o.get("wrist", "box"), shift=B.START_CLEAR if o.get("clear") else None)
+                             wrist=o.get("wrist", "box"),
+                             # stance="mlb" (4.13, rung 3): the start on major leaguers' feet (body.START_STANCE) in place of [4]'s
+                             shift=B.START_STANCE if o.get("stance") == "mlb" else B.START_CLEAR if o.get("clear") else None)
         for k, shift in o.get("start", {}).items():          # the start moved by a stated amount (a sensitivity run)
             B.CURVE_OVERRIDE[k] = (lambda kk, sh: (lambda t: C.resample(B._CURVES.setdefault(kk, C.load(kk)), t, t, 1.0)[0] + sh))(k, shift)
         vel = o.get("vel", 1.0)
@@ -210,6 +213,10 @@ class Ctx:
         k = H / 1.84                                          # [E] a smaller batter stands and is pitched to in proportion
         xp = m.sys.pose(st, m.b["pelvis"])[0]
         self.Pc = (xp[0] + o.get("across", MEET_ACROSS) * k, xp[1] + o.get("ahead", MEET_AHEAD) * k, o.get("z", BALL_Z) * k)
+        if o.get("stance") == "mlb":
+            # on major leaguers' feet the ball is met where they meet it relative to their feet: MEET_FROM_REAR_ANKLE
+            # toward the pitcher from the rear ankle (which is level with the lead ankle, 4.13)
+            self.Pc = (self.Pc[0], m.joint_pos(st, "ankle_R")[1] + MEET_FROM_REAR_ANKLE * k, self.Pc[2])
         d, a = BALL_DESCENT * B.D2R, BALL_ACROSS * B.D2R
         self.nb = (math.cos(d) * math.sin(a), -math.cos(d) * math.cos(a), -math.sin(d))
         self.ev = E.unit(E.sub((0.0, 0.0, 1.0), E.scale(self.nb, self.nb[2])))    # up, square to the ball's line
@@ -631,7 +638,7 @@ def report(ctx, u, log=print):
     bz = m.axis(recs[ic][1], "bat", (0, 0, 1))
     out["bat_square_deg"] = math.asin(max(-1.0, min(1.0, (bz[0] * ctx.nb[0] + bz[1] * ctx.nb[1]) / (math.hypot(bz[0], bz[1]) * math.hypot(ctx.nb[0], ctx.nb[1]))))) / B.D2R
     out["bat_elev_deg"] = obs[ic][1]["bat_elev"]
-    log("   FROM THE START PLACED ON [4]'s STATE%s (an input, flagged): contact %.0f ms after the start%s" % (", MOVED OFF ITS JOINTS' ENDS BY THE RULE OF 4.12" if ctx.o.get("clear") else "", (tx - T0) * 1e3, "" if came else "  (THE BAT NEVER REACHED THE BALL; figures are at the run's end)"))
+    log("   FROM THE START PLACED ON [4]'s STATE%s (an input, flagged): contact %.0f ms after the start%s" % (", ON MAJOR LEAGUERS' FEET (4.13, rung 3), THE REST MOVED BY THE RULE OF 4.12" if ctx.o.get("stance") == "mlb" else ", MOVED OFF ITS JOINTS' ENDS BY THE RULE OF 4.12" if ctx.o.get("clear") else "", (tx - T0) * 1e3, "" if came else "  (THE BAT NEVER REACHED THE BALL; figures are at the run's end)"))
     out["failed_after_contact_ms"] = None if ctx.failed_after is None else ctx.failed_after[0] * 1e3
     if ctx.failed_after is not None:
         log("   THE RUN FAILED %.0f ms AFTER CONTACT, after everything the score and these checks read (\"%s\"); the records to there are used"

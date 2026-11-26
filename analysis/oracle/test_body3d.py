@@ -2469,6 +2469,60 @@ class LadderChecks(unittest.TestCase):
         self.assertEqual(eff["knee_flex_L"], 0.0)
 
 
+class StanceChecks(unittest.TestCase):
+    """body-motion 4.13, rungs 3 and 4: the start on major leaguers' feet; the hips' turn by their own muscles."""
+
+    @NEED
+    def test_the_start_on_major_leaguers_feet_is_where_statcast_has_them(self):
+        """body.START_STANCE. The placed ankle joints are 1.03 m apart along the line to the pitcher and level across it
+        (Statcast's foot points at the intercept: 102.6 cm and 1 cm, note 15), the front foot points 44 deg toward the
+        pitcher from square to the plate, the rear foot is flat; every joint is inside its anatomical end by at least the
+        4.0 deg the rule reached (it asks 5: the rear ankle's roll, both hips sideways and the lead ankle's roll are the
+        ones short, as stated with the stored result), and no stop is moved (add_ranges fails if the start is outside).
+        On that start the practice search's ball is 1.022 m toward the pitcher from the rear ankle, within a centimetre
+        of level with the lead ankle, where Statcast has the intercept (-0.4 +- 9.4 cm). With BB_SLOW=1 the rule is
+        rerun on the given feet (7 minutes) and must return the stored numbers."""
+        import os
+        m = B.Model(ranges=(), grip="hands", feet="cleats", wrist="oval", shift=B.START_STANCE)
+        st = B.place(m, T0)
+        aL, aR = m.joint_pos(st, "ankle_L"), m.joint_pos(st, "ankle_R")
+        self.assertAlmostEqual(aL[1] - aR[1], 1.03, delta=2e-3)
+        self.assertAlmostEqual(aL[0] - aR[0], 0.0, delta=2e-3)
+        fx = m.axis(st, "foot_L", (1, 0, 0))
+        self.assertAlmostEqual(math.degrees(math.atan2(fx[1], fx[0])), 44.0, delta=0.5)
+        self.assertLess(abs(m.axis(st, "foot_R", (0, 0, 1))[2] - 1.0), 1e-6)
+        mg = B.start_margins(m, st)
+        self.assertGreaterEqual(min(mg.values()), 4.0)
+        self.assertEqual(sorted(k for k, v in mg.items() if v < 4.99), ["ankle_roll_L", "ankle_roll_R", "hip_abd_L", "hip_abd_R"])
+        B.add_ranges(m, st)                                      # every stop at its anatomical end, the start inside
+        PR = _practice()
+        c = PR.Ctx(grip="hands", feet="cleats", hold="let_go", wrist="oval", clear=True, stance="mlb")
+        aL, aR = c.m.joint_pos(c.st, "ankle_L"), c.m.joint_pos(c.st, "ankle_R")
+        self.assertAlmostEqual(c.Pc[1] - aR[1], 1.022, delta=1e-9)
+        self.assertLess(abs(c.Pc[1] - aL[1]), 0.012)
+        self.assertAlmostEqual(c.Pc[2], 0.78, delta=1e-12)
+        if os.environ.get("BB_SLOW"):
+            given = {k: B.START_STANCE[k] for k in ("stride_cm", "stride_closed_cm", "lead_foot")}
+            x, _ = B.clear_start(T0, given=given, grip="hands", feet="cleats", wrist="oval")
+            self.assertEqual(x, B.START_STANCE)
+
+    def test_the_hips_active_turn_is_the_one_measured_with_the_hip_straight(self):
+        """rung 4: the hips' ends of turn by their own muscles are Simoneau 1998's men measured prone, the hip straight
+        (turning in 32 +- 9 deg, out 44 +- 7; note 15 C), not Boone & Azen's 44 and 44, which were measured seated with
+        the hip bent to a right angle. With them the stops stand at those ends: for the lead (left) hip the turn in is
+        the reading's positive end."""
+        self.assertEqual(B.ROM_ACTIVE_HIP, {"hip_irot": 32.0, "hip_erot": 44.0})
+        keep = dict(B.ROM)
+        try:
+            B.ROM.update(B.ROM_ACTIVE_HIP)
+            specs = {t[0]: t for t in B.range_specs(None, "hands", "cleats", "oval")}
+        finally:
+            B.ROM.clear(); B.ROM.update(keep)
+        self.assertEqual(specs["hip_rot_L"][6:8], (-44.0, 32.0))
+        self.assertEqual(specs["hip_rot_R"][6:8], (-32.0, 44.0))
+        self.assertEqual(B.ROM["hip_irot"], 32.6)                # the body's own table is as it was
+
+
 class Mutations(unittest.TestCase):
     """each fault is caught by a named check (and the checks pass without it, above)."""
 

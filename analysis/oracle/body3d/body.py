@@ -222,6 +222,11 @@ ROM = {"hip_flex": 130.4, "hip_ext": 17.4, "hip_abd": 38.8, "hip_add": 30.5, "hi
        # (Baumbach 2014; 25 with the knee straight, which a stop cannot know: [E]); the foot pointed down and the sole
        # rolled in and out (Hallaceli 2014, passive; the roll its men's)
        "ankle_df_loaded": 39.0, "ankle_pf_loaded": 50.0, "ankle_inv": 34.6, "ankle_ever": 19.1}
+# The hips' turn by their own muscles (body-motion 4.13, rung 4; PLAN D42: "the hips use their active range"): Simoneau
+# et al. 1998, 21 college men, active, measured prone with the hip straight (turning in 32 +- 9, out 44 +- 7 deg). NOT
+# Boone & Azen's 44.4 and 44.2: those are active but seated, the hip bent 90 deg (note 15 C), and a hitter's front hip at
+# contact is near straight. A practice run takes these by rom=ROM_ACTIVE_HIP.
+ROM_ACTIVE_HIP = {"hip_irot": 32.0, "hip_erot": 44.0}
 # Past the end of a range the joint resists as a one-sided spring. NO measurement of that resistance was found for
 # any joint here (body-motion 4.10): the stiffness is [E]. "big": the trunk, hips, knees, ankles and the shoulders'
 # sweep; "small": the elbows, forearms and wrists (their strengths are 17-112 N m, and a stiffer spring on so
@@ -709,6 +714,21 @@ POSTURE_NUMBERS = POSTURE_CURVES + ("trunk_flex", "trunk_side", "rear_foot_yaw",
 START_CLEAR = {"pelvis_rot": 1.75, "trunk_rot": -1.75, "bat_az": 2.0, "bat_elev": 2.125, "bat_lag": 2.5, "trail_elbow_flex": -0.625,
                "lead_knee_flex": -0.75, "trunk_side": -0.25, "stride_cm": -0.375, "stride_closed_cm": -0.625, "obliquity": 1.5,
                "trail_knee": 1.0, "lead_foot": 0.625}
+# The start on major leaguers' feet (body-motion 4.13, rung 3; PLAN D42; research note 15): the front foot's place and
+# angle are no longer [4]'s. GIVEN, from Statcast's foot points at the bat's intercept (2026, 231 hitter-sides; the
+# planted front foot is where it landed): the ankle joints STANCE_APART apart along the line to the pitcher (102.6 +- 7.9
+# cm; [4]: 77.3), the lead ankle STANCE_ACROSS toward the plate from the rear one (1 +- 10 cm; [4]: 11), the front foot
+# turned STANCE_FOOT toward the pitcher from square to the plate (43.8 +- 10.2 deg at the intercept; [4]: 30.7; a foot
+# that cannot pivot in this body stands at its contact angle from the start). The other numbers are then clear_start's
+# least change ON those feet (given=...; job 419, 444 s): the pelvis 9.9 deg more open, 6.1 cm further back from the lead
+# ankle, tilted 8.3 deg more, the rear knee 6.9 deg straighter, the rear foot's toe turned 7.8 deg back; the arms' numbers
+# as START_CLEAR's. The rule stops with the rear ankle's roll 4.0 deg inside its end and both hips' sideways margins
+# and the lead ankle's roll at 4.7 (it asks 5; START_CLEAR_DEG is [E: 3-8]): on a base this wide the hips' sideways range
+# and the ankles' roll are what give out. The posture's other numbers and its velocities are STILL [4]'s, flagged.
+STANCE_APART, STANCE_ACROSS, STANCE_FOOT = 1.03, 0.0, 44.0       # m, m, deg
+START_STANCE = {"pelvis_rot": 9.875, "trunk_rot": -1.75, "bat_az": 2.0, "bat_elev": 2.125, "bat_lag": 2.5, "trail_elbow_flex": -0.625,
+                "lead_knee_flex": 0.625, "pelvis_x_cm": -6.125, "trunk_side": -0.25, "rear_foot_yaw": -7.75, "stride_cm": 25.72,
+                "stride_closed_cm": -11.0, "obliquity": 8.25, "trail_knee": -6.875, "lead_foot": -13.294117647058826}
 LEAD_FOOT_SHIFT = [0.0]
 _SHIFT_ON = [False]
 

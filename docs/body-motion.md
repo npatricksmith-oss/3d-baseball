@@ -2094,6 +2094,48 @@ Code: `analysis/research/body/ladder3d.py` (the protocol, the energy account, th
 - *The search:* it meets the ball within 1 cm again. **Slower than rung 0 by 1–3 m/s** (14.5–17 m/s): 157 J of the kept swing came from the constant torques, the replay keeps 20 J of it, and the bursts at the knees and hips have 11–21% less of their bound to ask. The front knee no longer snaps straight at 870°/s into its end; its end's load falls well under 1,005 N·m.
 - *What it would show:* what the constant torques were worth in bat speed on this body, by this search. *What it would not show:* whether a real hitter's legs give more; the holding levels are worked from [4]'s launch posture and its ground forces (rung 5's list), and the trunk's bending still cannot be driven.
 
+#### Rung 3: the front foot's place and angle from MLB's data (the design, written before any search)
+
+**What was read** is [research note 15](research/body/15-stance-and-hip-turn.md) A and B. Statcast's published stance columns are the feet *before the stride* (one second before release) and are no use for a body whose feet are already planted. But the leaderboard page carries each hitter's foot points at the bat's intercept, and a planted front foot is where it landed. Recomputed by me from those points (2026, 231 hitter-sides; the units checked against the published stance column, correlation 0.986):
+
+| | Major leaguers at the intercept | The body until now ([4]'s) |
+| :-- | --: | --: |
+| the ankle joints apart, along the line to the pitcher | **102.6 ± 7.9 cm** (10th–90th percentile 92–113) | 77 cm |
+| the lead ankle toward the plate from the rear one | **1 ± 10 cm** | 10.4 cm |
+| the front foot turned toward the pitcher from square to the plate | **43.8 ± 10.2°** (31–58) | 30° |
+| the ball met, toward the pitcher from the lead ankle; from the rear ankle | **−0.4 ± 9.4 cm** (level with it); 102.2 ± 8.8 cm | +27 cm; 103.7 cm |
+
+- **He has been standing on a base 26 cm narrower than a major leaguer's, meeting the ball 27 cm in front of his front foot where they meet it level with theirs.** [4]'s hitters (0.42 of height) and Welch's seven off a tee (85 cm toe to toe) stride shorter than major leaguers do in games; §4.10 took the ball's place from Savant's figure measured from the hips *in the stance* and applied it from the hips at launch, which are further forward.
+- **The choice: MLB's averages, not practice.** The job allows either and prefers practice inside MLB's range. Practice over the feet would mean a search per candidate stance (each with the start's rule rerun, 7 minutes, and two searches, 40 minutes), and two searches of the *same* body differ by 1.95 m/s (rung 0): a handful of candidates could not be told apart. So the feet take the league's means, which are real figures: **1.03 m apart, level across, the front foot 44° open.** The angle is the intercept's: a major leaguer's front foot may land less open and turn (Welch's seven landed at 29°); this body's cleated foot cannot pivot, so it stands at its contact angle from the start [E: 29–44°].
+- **The rest of the start, by the start's own rule** (§4.12's, `clear_start`, with the three numbers given and not counted): the least change to the other fourteen numbers that puts every joint 5° inside its end on those feet (job 419, 444 s). On [4]'s other numbers unchanged the wide base cannot be stood on at all (both knees' bends cannot be met, a heel lifts 60°); the rule moves the pelvis 9.9° more open, 6.1 cm back from the lead ankle, tilted 8.3° more, the rear knee 6.9° straighter and the rear toe 7.8° back; the arms' numbers stay as §4.12's. **The rule stops with the rear ankle's roll 4.0° inside its end and both hips' sideways margins and the lead ankle's roll at 4.7°, not the 5° it asks** (its [E] is 3–8°): on a base this wide the hips' sideways range and the ankles' roll are what give out. The pelvis is 5.5 cm lower and the centre of mass 0.47 of the way from the rear ankle to the lead (it was 0.38).
+- **The ball's place follows the feet:** 1.022 m toward the pitcher from the rear ankle, which is level with the lead ankle, as Statcast has it; its height and its distance across are unchanged. PLAN D28 and D29 are in the plate's frame and are not touched: this fixes where the model's feet are under them. Without this the old rule (0.72 m ahead of the hips at launch) would put the ball 21 cm in front of his front foot, 2.3 SD from where major leaguers meet it.
+- *Still [4]'s after this rung:* the pelvis's and trunk's turn, the knees, the tilt, the arms and bat, every starting velocity, the feet's starting loads (rung 5's list). The start is flagged as that in every result.
+- *Held by muscle on this base* (rung 2's solve): the trunk's side benders 91 N·m (43 before), **the rear hip's adductors 78 N·m, 0.54 of their bound** (the wide base hangs on them, and their burst keeps 46%), the front knee's extensor 63, the rear hip's rotators 28 (0.35 of their bound).
+- *Tests:* the placed ankles, foot angle and margins against the figures above; the ball level with the lead ankle within 1.2 cm; with `BB_SLOW=1` the rule rerun returns the stored numbers (`StanceChecks`).
+
+**What I expect** (rung 3, from S by the protocol, two searches):
+
+- *The replay of session 10's plan on this body, no search* (indicative): it crosses the ball's plane 14 cm high at 22.0 m/s, the pelvis turned 30° past facing the plate.
+- *The search:* meets the ball within 1 cm; **I do not know which way the speed goes.** For it: the front foot is 14° more open, so the front hip has 14° more turn before its end; the ball is level with the front foot instead of 27 cm ahead of it, so he need not reach; the replay is fast. Against it: S was tuned on the narrow base and is a worse place to start from; the rear hip's adductors and rotators have a half and a third of their strength taken by holding the base; the stance sits within a degree of four joint ends. If both searches from S end clearly worse than rung 2's, rung 2's result is carried on for 500 generations on this body too (the protocol's rule).
+- *What it would show:* what [4]'s feet were worth, at MLB's mean feet. *What it would not show:* the best feet for this body (no practice over them), or a hitter's launch posture on a wide base (the pelvis's turn, the knees and the velocities are still [4]'s, bent to fit by a rule).
+
+#### Rung 4: the hips' turn by their own muscles (the design, written before any search)
+
+**What was read** ([note 15](research/body/15-stance-and-hip-turn.md) C) **is not what session 10's review and §4.12 assumed.** They took "an active range gives about 11° more" from Boone & Azen's 44.4° and 44.2°. Those are active, but **measured seated, with the hip bent to a right angle** (so say Roaas & Andersson, Simoneau and a NASA report; Boone & Azen itself was not opened). A hitter's front hip at contact is near straight. With the hip straight:
+
+| Source | Men | Turning in | Turning out |
+| :-- | :-- | --: | --: |
+| the body until now: Roaas & Andersson 1982, passive, prone | 105, aged 30–40 | 32.6 ± 8.2° | 33.6 ± 6.8° |
+| **Simoneau 1998, active, prone** (the same men seated: 30 ± 7° and 35 ± 8°) | 21 college men | **32 ± 9°** | **44 ± 7°** |
+| Ellenbecker 2007, active, prone | 101 professional pitchers | 23 ± 8° | 35 ± 9° |
+| the same | 64 elite male tennis players | 27 ± 10° | 37 ± 9° |
+
+- **The change:** each hip's end of turn moves to Simoneau's active, hip-straight means: **turning in 32° (it was 32.6°), turning out 44° (it was 33.6°).** The stop stays what it is. It is the one sample of ordinary young men measured actively with the hip straight; the two athlete samples have *less* of both, and taking the pitchers' would cut the turn in by 10° (said, not done: the owner's ruling is the active range, and the ladder changes one thing).
+- **So the active range gives the front hip no more turn in.** The front hip's limit at contact is its turn in (the pelvis turning toward the pitcher over the planted front thigh), and that end does not move. What gains 10° is the turn out: the rear hip as the pelvis turns away from that thigh, and either hip in the load.
+- *Test:* the two ends as stops on each side (`StanceChecks`).
+
+**What I expect** (rung 4, from S, two searches): **no gain that clears the yardstick.** The end that limits the front hip has not moved; the rear hip's turn out carried 663 N·m at its end in session 10's swing, so its 10° more may let the pelvis turn a little further (a few degrees more at contact) and take load off that end. *What it would show:* whether the rear hip's end was holding the pelvis. *What it would not:* anything about the front hip, whose range by its own muscles is what it already had.
+
 ## 5. The drive and its control (§14.1 items 2 and 3)
 
 ### 5.1 What a drive is

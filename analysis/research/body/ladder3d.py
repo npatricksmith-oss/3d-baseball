@@ -44,6 +44,8 @@ RUNGS = {
     "r1_trunk_low": {"damp": {"set": "read", "from": {"trunk": "low"}}}, "r1_trunk_high": {"damp": {"set": "read", "from": {"trunk": "high"}}},
     "r1_hips_low": {"damp": {"set": "read", "from": {"hip_L": "low", "hip_R": "low"}}}, "r1_hips_high": {"damp": {"set": "read", "from": {"hip_L": "high", "hip_R": "high"}}},
     "r2": {"damp": "read", "stand": "muscle"},         # rung 2: rung 1 with the posture held by muscle
+    "r3": {"damp": "read", "stand": "muscle", "stance": "mlb"},      # rung 3: rung 2 on major leaguers' feet (body.START_STANCE, note 15)
+    "r4": {"damp": "read", "stand": "muscle", "stance": "mlb", "rom": dict(B.ROM_ACTIVE_HIP)},   # rung 4: the hips' turn by their own muscles
 }
 
 
