@@ -176,6 +176,17 @@ def _cases():
     st = Dr.add_drives(m, st, {n: (0.5 * bd[n], -0.250, 0.05, 1.0) for n in bd})
     Dr.add_damping(m, st)
     out.append(("off the ground, half drive", m, st, -0.250, 150))
+    m = B.Model(ranges=())                           # the body with its joints' ranges as stops (both kinds), driven hard into them
+    st = B.place(m, -0.250)
+    st = Dr.add_drives(m, st, {n: (bd[n], -0.170 if arm(n) else -0.245, 0.05, 0.1, 0.2 if arm(n) else 0.3) for n in bd})
+    B.add_ranges(m, st)
+    Dr.solve_tone(m, st, -0.250)
+    Dr.add_damping(m, st)
+    aux = m.sys.new_aux()
+    m.sys.anchors(st, aux)
+    m.sys.sec_start(st, aux)
+    m.check_aux = aux
+    out.append(("every drive at its bound, the joints' ranges on", m, st, -0.250, 200))
     fitted = os.path.join(HERE, "fit3d_d34_all.json")
     if not os.path.isfile(fitted):                   # session 6's fit (its 22 channels; session 7's then switched off)
         fitted = os.path.join(HERE, "fit3d_d34_arms.json")

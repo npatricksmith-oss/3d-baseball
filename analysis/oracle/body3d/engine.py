@@ -305,20 +305,25 @@ class System:
         session 8's review the torque acted about axis_a, which is the gradient only on a hinge, and on a ball joint
         did work nothing stored paid for). kind 0: g = n - (n.f) f_p / |f_p|^2, with f_p the projection. kind 1:
         g = (f x n) / |f x n|. Each is undefined where f lies along the axis (kind 0: the angle itself is; kind 1:
-        the angle is 90 deg); within STOP_SINGULAR of that the run fails loudly, not silently."""
+        the angle is 90 deg); within STOP_SINGULAR of that the run fails loudly, not silently: a kind 0 stop always, a kind 1 stop (whose angle is defined everywhere; only its gradient fails, at +-90 deg) while it is engaged."""
         self.stops.append((name, a, b, unit(axis_a), unit(e_a), unit(f_b), lo, hi, k, c, int(kind)))
 
     @staticmethod
-    def stop_angle(n, e, f, kind):
+    def stop_angle(n, e, f, kind, lo=None, hi=None):
         """(angle, gradient g) of a stop from its axis n and directions e, f in world axes; raises SolveError where the
-        angle's gradient is undefined."""
+        angle's gradient is undefined. A kind 1 stop's angle is defined everywhere and only its gradient fails (at
+        +-90 deg), so with lo and hi given the gradient is asked for, and can fail, only while the stop is engaged:
+        a posture at the far end of a side the stop does not limit is none of its business."""
         nf = dot(n, f)
         if kind == 1:
+            th = math.asin(max(-1.0, min(1.0, nf)))
+            if lo is not None and lo <= th <= hi:
+                return th, ZERO
             gv = cross(f, n)
             l = math.sqrt(dot(gv, gv))
             if l < STOP_SINGULAR:
                 raise SolveError("a stop's direction lies along its axis: its angle has no gradient there")
-            return math.asin(max(-1.0, min(1.0, nf))), scale(gv, 1.0 / l)
+            return th, scale(gv, 1.0 / l)
         th = math.atan2(dot(n, cross(e, f)), dot(e, f))
         if "stop_fixed_axis" in MUT:                 # the law before session 8's review: the torque about the fixed axis
             return th, n
@@ -546,7 +551,7 @@ class System:
             n = mv(R[a], ax) if a >= 0 else ax
             e = mv(R[a], ea) if a >= 0 else ea
             f = mv(R[b], fb)
-            th, g = self.stop_angle(n, e, f, kind)
+            th, g = self.stop_angle(n, e, f, kind, lo, hi)
             rate = dot(sub(Wv[b], Wv[a] if a >= 0 else ZERO), g)
             tau = 0.0
             if th > hi:

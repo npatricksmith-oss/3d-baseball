@@ -96,8 +96,10 @@ def cock_reference(mdl, st):
 
 
 def range_specs(cock_ref=None):
-    """every joint range as an engine stop: (name, body a, body b, axis in a, e in a, f in b, lo deg, hi deg, size).
-    The angle is the one engine.System.stop measures: about the axis (fixed in a), from e (in a) to f (in b).
+    """every joint range as an engine stop: (name, body a, body b, axis in a, e in a, f in b, lo deg, hi deg, size, kind).
+    The angle is the one engine.System.stop measures. kind 0: about the axis (fixed in a), from e (in a) to f (in b)
+    projected square to the axis. kind 1: f's angle out of the plane square to the axis. Where each is undefined
+    (f along the axis) is said beside it and in body-motion 4.10; the engine fails loudly within 5 deg of it.
     cock_ref: cock_reference()'s signs (default +1)."""
     R = ROM
     cock_ref = cock_ref or {"L": 1.0, "R": 1.0}
@@ -109,17 +111,26 @@ def range_specs(cock_ref=None):
         out += [
             # the thigh swung forward (flexion) is a turn of its long axis about the pelvis's y by a negative angle
             ("hip_flex_" + sd, "pelvis", "thigh_" + sd, (0, 1, 0), (0, 0, 1), (0, 0, 1), -R["hip_flex"], R["hip_ext"], "big"),
-            # about the pelvis's x a positive angle carries the knee toward the body's left: abduction on the left leg
-            ("hip_abd_" + sd, "pelvis", "thigh_" + sd, (1, 0, 0), (0, 0, 1), (0, 0, 1),
-             -(R["hip_add"] if L else R["hip_abd"]), R["hip_abd"] if L else R["hip_add"], "big"),
+            # the thigh's sideways angle as the joint's own (the ISB hip's ab/adduction): the angle of the thigh, hip toward
+            # knee, out of the pelvis's fore-and-aft plane, positive toward the body's left (abduction on the left leg).
+            # A stop of kind 1. (Until session 8's review this was the thigh projected about the pelvis's x, which reads
+            # 39 deg for a true 30 when the hip is also bent 45.) Undefined only with the thigh straight out to the side.
+            ("hip_abd_" + sd, "pelvis", "thigh_" + sd, (0, 1, 0), (0, 0, 1), (0, 0, -1),
+             -(R["hip_add"] if L else R["hip_abd"]), R["hip_abd"] if L else R["hip_add"], "big", 1),
             # about the thigh's own axis, from the knee's hinge to the pelvis's y: positive is the left thigh turned in
             ("hip_rot_" + sd, "thigh_" + sd, "pelvis", (0, 0, 1), (0, 1, 0), (0, 1, 0),
              -(R["hip_erot"] if L else R["hip_irot"]), R["hip_irot"] if L else R["hip_erot"], "big"),
             ("knee_" + sd, "thigh_" + sd, "shank_" + sd, (0, 1, 0), (0, 0, 1), (0, 0, 1), -R["knee_hyper"], R["knee_flex"], "big"),
             # the foot's toe turned down about the shank's hinge is positive
             ("ankle_" + sd, "shank_" + sd, "foot_" + sd, (0, 1, 0), (1, 0, 0), (1, 0, 0), -R["ankle_df"], R["ankle_pf"], None),   # reported, not held: the range is a straight knee's, unloaded
-            # the upper arm, seen down the trunk's axis, from straight out to its own side round to the front and across
-            ("shoulder_" + sd, "trunk", "uarm_" + sd, (0, 0, -sg), (0, sg, 0), (0, 0, -1), -R["sh_habd"], R["sh_hadd"], "big"),
+            # the upper arm across the chest: its angle, shoulder toward elbow, out of the trunk's fore-and-aft plane toward
+            # the other side (kind 1). 0 is the arm anywhere in that plane, hanging included; the range's end is 135 deg
+            # from straight out to its own side, so +45 here. (The projection "seen down the trunk's axis" of sessions
+            # 2-8 has no value with the arm hanging, where its gradient grows without limit: 2.4 times at 25 deg from
+            # hanging, which swings reach. This reading is undefined only with the arm pointing straight across.)
+            ("shoulder_" + sd, "trunk", "uarm_" + sd, (0, -sg, 0), (0, 0, 1), (0, 0, -1), -91.0, R["sh_hadd"] - 90.0, "big", 1),
+            # and drawn back behind the shoulders' line: its angle out of the trunk's side-to-side plane, backward
+            ("shoulder_back_" + sd, "trunk", "uarm_" + sd, (-1, 0, 0), (0, 0, 1), (0, 0, -1), -91.0, R["sh_habd"], "big", 1),
             ("elbow_" + sd, "uarm_" + sd, "farm_" + sd, (0, 1, 0), (0, 0, 1), (0, 0, 1), -R["elbow_hyper"], R["elbow_flex"], "small"),
             # the wrist's cock, on the joint's own axis: the wrist is a universal joint whose second axis is the bat's
             # y, and the forearm's x (its first axis) is held square to it, so the angle of the forearm's x about the
@@ -133,7 +144,7 @@ def range_specs(cock_ref=None):
             ("wrist_dev_" + sd, "bat", "farm_" + sd, (0, 1, 0), (0, 0, cock_ref[sd]), (1, 0, 0), -R["wrist_uln"], R["wrist_rad"], "small"),
             # the wrist's flexion and extension: about the forearm's x, from the forearm's y to the bat's y
             ("wrist_flex_" + sd, "farm_" + sd, "bat", (1, 0, 0), (0, 1, 0), (0, 1, 0), -R["wrist_ext"], R["wrist_flex"], "small")]
-    return out
+    return [t if len(t) == 10 else t + (0,) for t in out]      # the tenth entry: the stop's kind (engine.System.stop)
 
 
 RANGE_CLEAR = 2.0          # deg: a stop begins at least this far beyond the start's own angle (the start is a hitter's posture)
@@ -177,7 +188,7 @@ def add_ranges(mdl, st, k_big=None, wrists="cocked", rom=None):
     ROM.clear(); ROM.update(keep)
     ang = range_angles(mdl, st)
     out = {}
-    for name, a, b_, ax, ea, fb, lo, hi, size in specs:
+    for name, a, b_, ax, ea, fb, lo, hi, size, kind in specs:
         if size is None:
             continue
         a0 = ang[name]
@@ -202,7 +213,7 @@ def add_ranges(mdl, st, k_big=None, wrists="cocked", rom=None):
         lo, hi = min(lo, a0 - RANGE_CLEAR), max(hi, a0 + RANGE_CLEAR)
         k = RANGE_K[size] if (k_big is None or size != "big") else k_big
         c = RANGE_C[size] * (k / RANGE_K[size]) ** 0.5
-        s.stop(name, b[a], b[b_], ax, ea, fb, lo * D2R, hi * D2R, k, c)
+        s.stop(name, b[a], b[b_], ax, ea, fb, lo * D2R, hi * D2R, k, c, kind)
         out[name] = (lo, hi)
     return out
 
@@ -217,9 +228,9 @@ def range_angles(mdl, st):
     out = {}
     Rm = {n: E.qR(s.pose(st, i)[1]) for n, i in mdl.b.items()}
     ref = getattr(mdl, "cock_ref", None) or cock_reference(mdl, st)
-    for name, a, b_, ax, ea, fb, lo, hi, size in range_specs(ref):
+    for name, a, b_, ax, ea, fb, lo, hi, size, kind in range_specs(ref):
         n = E.mv(Rm[a], E.unit(ax)); e = E.mv(Rm[a], E.unit(ea)); f = E.mv(Rm[b_], E.unit(fb))
-        out[name] = math.atan2(E.dot(n, E.cross(e, f)), E.dot(e, f)) / D2R
+        out[name] = (math.asin(max(-1.0, min(1.0, E.dot(n, f)))) if kind == 1 else math.atan2(E.dot(n, E.cross(e, f)), E.dot(e, f))) / D2R
     for sd, sg in SIDES:
         zf = E.mv(Rm["farm_" + sd], (0, 0, 1))
         bz = E.mv(Rm["bat"], (0, 0, 1))

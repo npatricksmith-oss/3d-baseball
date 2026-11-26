@@ -20,7 +20,7 @@ EXTRA = {"pron": ("sup", "pron"), "sh_rot": (None, None), "sh_elev": (None, None
 
 
 def limits():
-    out = {name: (lo, hi) for name, a, b, ax, ea, fb, lo, hi, size in B.range_specs()}
+    out = {name: (lo, hi) for name, a, b, ax, ea, fb, lo, hi, size, kind in B.range_specs()}
     for sd in "LR":
         out["pron_" + sd] = (-B.ROM["sup"], B.ROM["pron"])
     return out

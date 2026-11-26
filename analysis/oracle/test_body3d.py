@@ -946,7 +946,7 @@ class RangeChecks(unittest.TestCase):
         for k, ok in (("knee_L", "lead_knee_flex"), ("knee_R", "trail_knee_flex"), ("elbow_L", "lead_elbow_flex"), ("elbow_R", "trail_elbow_flex")):
             self.assertAlmostEqual(a[k], o[ok], delta=0.05, msg=k)
         self.assertAlmostEqual(a["trunk_twist"], o["trunk_rot"] - o["pelvis_rot"], delta=1.5)   # the trunk leans 15 deg, so not exact
-        self.assertEqual(len(lim), 19)
+        self.assertEqual(len(lim), 21)
         for k, (lo, hi) in lim.items():
             self.assertGreaterEqual(a[k] - lo, B.RANGE_CLEAR - 1e-9, msg=k)
             self.assertGreaterEqual(hi - a[k], B.RANGE_CLEAR - 1e-9, msg=k)
@@ -1025,6 +1025,38 @@ class RangeChecks(unittest.TestCase):
         limm = B.add_ranges(mir, stm, wrists="mirrored")
         for k in ("wrist_dev_L", "wrist_dev_R"):
             self.assertLess(a0[k] - limm[k][0], 0.5 * (limm[k][1] - limm[k][0]))
+
+    @NEED
+    def test_the_hips_sideways_angle_is_the_joints_own(self):
+        """a thigh set 30 deg out to the side reads 30 deg however far the hip is also bent forward (0, 45, 70 deg),
+        and for either sign; the projection about the pelvis's x used until session 8's review reads 39 at 45 (the
+        review's P3). The arm across the chest is read the same way: 0 with the arm hanging."""
+        m = B.Model(ranges=())
+        st0 = B.place(m, T0)
+        qp = tuple(st0[13 * m.b["pelvis"] + 3:13 * m.b["pelvis"] + 7])
+        i = m.b["thigh_L"]
+        for flex in (0.0, 45.0, 70.0):
+            for abd in (30.0, -20.0):
+                st = list(st0)
+                st[13 * i + 3:13 * i + 7] = E.qmul(qp, E.qmul(E.qaxis((0, 1, 0), -flex * B.D2R), E.qaxis((1, 0, 0), abd * B.D2R)))
+                a = B.range_angles(m, st)
+                self.assertAlmostEqual(a["hip_abd_L"], abd, delta=1e-6, msg="flexion %.0f" % flex)
+                self.assertAlmostEqual(a["hip_flex_L"], -flex, delta=1e-6)
+                zt, px, pz = m.axis(st, "thigh_L", (0, 0, 1)), m.axis(st, "pelvis", (1, 0, 0)), m.axis(st, "pelvis", (0, 0, 1))
+                old = math.atan2(E.dot(px, E.cross(pz, zt)), E.dot(pz, zt)) / B.D2R
+                if flex == 45.0 and abd == 30.0:
+                    self.assertAlmostEqual(old, 39.2, delta=0.1)
+        qt = tuple(st0[13 * m.b["trunk"] + 3:13 * m.b["trunk"] + 7])
+        j = m.b["uarm_L"]
+        st = list(st0)
+        st[13 * j + 3:13 * j + 7] = qt                                     # the arm hanging along the trunk
+        a = B.range_angles(m, st)
+        self.assertAlmostEqual(a["shoulder_L"], 0.0, delta=1e-6)
+        self.assertAlmostEqual(a["shoulder_back_L"], 0.0, delta=1e-6)
+        st[13 * j + 3:13 * j + 7] = E.qmul(qt, E.qaxis((1, 0, 0), -60.0 * B.D2R))   # swung 60 deg across the body (the left arm toward the right)
+        self.assertAlmostEqual(B.range_angles(m, st)["shoulder_L"], 60.0, delta=1e-6)
+        st[13 * j + 3:13 * j + 7] = E.qmul(qt, E.qaxis((0, 1, 0), 50.0 * B.D2R))    # swung 50 deg back behind the shoulders' line
+        self.assertAlmostEqual(B.range_angles(m, st)["shoulder_back_L"], 50.0, delta=1e-6)
 
     @NEED
     def test_a_stop_pushes_back_only_past_its_end(self):

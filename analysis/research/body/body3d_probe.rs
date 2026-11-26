@@ -236,10 +236,13 @@ impl Sys {
             // engine.py's stop_angle: the angle and its own gradient g (d(angle)/dt = w_rel . g); the torque acts along g
             let nf = dot(&n, &fb);
             let (th, g) = if st.kind == 1 {
-                let gv = cross(&fb, &n);
-                let l = dot(&gv, &gv).sqrt();
-                if l < STOP_SINGULAR { eprintln!("a stop's direction lies along its axis: its angle has no gradient there"); std::process::exit(3); }
-                (f64::max(-1.0, f64::min(1.0, nf)).asin(), scale(&gv, 1.0 / l))
+                let th = f64::max(-1.0, f64::min(1.0, nf)).asin();
+                if st.lo <= th && th <= st.hi { (th, ZERO) } else {
+                    let gv = cross(&fb, &n);
+                    let l = dot(&gv, &gv).sqrt();
+                    if l < STOP_SINGULAR { eprintln!("a stop's direction lies along its axis: its angle has no gradient there"); std::process::exit(3); }
+                    (th, scale(&gv, 1.0 / l))
+                }
             } else {
                 let fp = sub(&fb, &scale(&n, nf));
                 let l2 = dot(&fp, &fp);
