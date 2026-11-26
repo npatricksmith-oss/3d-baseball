@@ -1973,7 +1973,8 @@ class StartChecks(unittest.TestCase):
         """every range the body holds, each side: the start is START_CLEAR_DEG inside its anatomical end (the wrists
         that far inside their ellipses); add_ranges() puts every stop at its anatomical end and none carries anything;
         both wrists are inside the ellipse and the elbows are clear of the other arm. Session 9's start fails this at
-        six joints, and its rear wrist is outside the ellipse."""
+        five joints (six readings on its own body, where the rear wrist's two angles were held apart; five here, where
+        they are one ellipse), and on its own free choices its rear wrist is outside the ellipse."""
         m, st = self.m, self.st
         mg = B.start_margins(m, st)
         self.assertEqual(len(mg), 3 + 2 * (5 + 2 + 5 + 1))          # the trunk's 3; a side: hip 3, knee, ankle 2 | elbow, shoulder 3, forearm, upper arm | the wrist's ellipse
@@ -2003,9 +2004,11 @@ class StartChecks(unittest.TestCase):
 
     def test_the_cleared_start_is_the_least_change_the_rule_finds(self):
         """the stored change against the rule's own conditions, without rerunning its search: no number is changed by
-        more than 2.5 (deg or cm); and it is a least change number by number: each changed number moved an eighth back
-        toward [4]'s value leaves some joint short of 5 deg, so no smaller change of that number alone would do. (The
-        whole rule is rerun, 4 minutes, with BB_SLOW=1: it must return the stored change.)"""
+        more than 2.5 (deg or cm); and it is A least change, one number at a time: each changed number moved an eighth
+        back toward [4]'s value leaves some joint short of 5 deg, so no smaller change of that number alone would do.
+        That is a condition number by number, as the rule's compass search is; a smaller change of several numbers
+        together is not ruled out by it. (The whole rule is rerun, 4 minutes, with BB_SLOW=1: it must return the stored
+        change.)"""
         x = B.START_CLEAR
         self.assertGreater(min(self.margins(x).values()), B.START_CLEAR_DEG - 0.005)
         self.assertLessEqual(max(abs(v) for v in x.values()), 2.5)
@@ -2099,7 +2102,42 @@ def _practice():
 class SearchChecks(unittest.TestCase):
     """the practice search's own rules (body-motion 4.11, after session 9's review)."""
 
-    def test_the_search_without_slopes_finds_a_known_minimum_on_a_score_its_slopes_would_miss(self):
+    def test_the_hold_still_torques_work_is_told_apart_from_the_dampings(self):
+        """session 10's review, P1-1: the engine books the constant hold-still torques' work and the joints' damping's as
+        one integral; practice3d.hold_work splits them from the states. On a rod on a hinge with a constant torque of
+        5 N m about the hinge and a damper of 0.7 N m s/rad (capped at 3 N m, which it reaches), swung from rest for
+        0.3 s: the torque's work is 5 N m x the angle turned, worked here from the rod's own orientation; the two parts
+        sum to the engine's integral; the damping's part is negative and its largest torque is the cap; and with the
+        constant torque turned the other way its work changes sign (the damper's does not)."""
+        PR = _practice()
+        for tau in (5.0, -5.0):
+            s = E.System(g=(0.0, 0.0, 0.0))
+            b = s.body("rod", 2.0, (0.15, 0.15, 0.002))
+            s.hinge(-1, b, (0.0, 0.0, 0.0), (0.0, 0.0, 0.3), (0, 1, 0), (0, 1, 0))
+            s.tone("hinge", -1, b, (0.0, tau, 0.0))
+            s.hold("hinge", -1, b, (1.0, 0.0, 0.0, 0.0), (0.0, 0.0, 0.0), (0.7, 0.7, 0.7), 3.0)
+            st = s.new_state()
+            s.set_body(st, b, (0.0, 0.0, -0.3), (1.0, 0.0, 0.0, 0.0))
+            aux, h = s.new_aux(), 1e-4
+            recs = [(0.0, list(st))]
+            for i in range(3000):
+                st = s.step(i * h, st, aux, h)
+                recs.append(((i + 1) * h, list(st)))
+            q = s.pose(st, b)[1]
+            turned = 2.0 * math.atan2(q[2], q[0])                      # about the hinge's y, from the rod's own quaternion
+            tone, damp, peak = PR.hold_work(s, recs, 0.3)
+            ow = 13 * s.nb + len(s.acts)
+            self.assertGreater(abs(turned), 0.3)
+            self.assertAlmostEqual(tone["hinge"], tau * turned, delta=1e-6 * abs(tau * turned))
+            self.assertGreater(tone["hinge"], 0.0)                      # either way round, a torque that starts the rod does positive work
+            self.assertLess(damp["hinge"], -0.5)
+            self.assertAlmostEqual(tone["hinge"] + damp["hinge"], st[ow + 2], delta=1e-5 * abs(tone["hinge"]))
+            self.assertAlmostEqual(peak["hinge"], 3.0, delta=1e-9)
+            half = PR.hold_work(s, recs, 0.15)                           # to an earlier instant: less of each
+            self.assertLess(half[0]["hinge"], tone["hinge"])
+            self.assertGreater(half[1]["hinge"], damp["hinge"])
+
+    def test_the_search_without_slopes_finds_a_known_minimum_on_a_stepped_score_with_failing_runs(self):
         """the evolution strategy of body-motion 4.12 (practice3d.cma) on a score with a known answer, built here: 30
         numbers in the unit box, the score the squared distance from a point known in advance (some of its numbers ON
         the box's edge), plus a step of 0.05 at every 0.003 of each number (a score that jumps at a scale far below the

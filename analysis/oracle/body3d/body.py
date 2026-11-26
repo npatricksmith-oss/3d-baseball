@@ -759,9 +759,11 @@ def start_margins(mdl, st):
 
 
 def clear_start(t0=-0.250, clear=None, log=None, **model):
-    """The rule for the start (body-motion 4.12): the least change to the launch posture's numbers (POSTURE_NUMBERS; the
+    """The rule for the start (body-motion 4.12): a least change to the launch posture's numbers (POSTURE_NUMBERS; the
     sum of the changes' squares, a degree and a centimetre counted alike [E]) that puts every joint at least `clear`
-    (START_CLEAR_DEG) inside its anatomical end and each wrist that far inside its ellipse. From no change, each number
+    (START_CLEAR_DEG) inside its anatomical end and each wrist that far inside its ellipse, FOUND BY A COMPASS SEARCH
+    WITH A PENALTY: what it returns is least number by number, not shown to be the least of all (session 10's review,
+    P3-5). From no change, each number
     in turn is tried a step up and a step down and what lowers (the sum of squares + a penalty on every margin's
     shortfall, squared) is kept; the steps halve from 2 to 1/8 and the penalty's weight rises in four stages.
     Deterministic. model: Model()'s options (the hands' body). Returns ({number: change}, {range: margin})."""

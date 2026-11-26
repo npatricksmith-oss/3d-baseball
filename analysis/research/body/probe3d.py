@@ -237,7 +237,7 @@ def _cases():
     m.sys.anchors(st, aux)
     m.sys.sec_start(st, aux)
     m.check_aux = aux
-    # A SENSITIVE case, judged against itself (the sixth entry; session 9's review, P3-1): with every leg muscle at its
+    # A SENSITIVE case, judged against itself (session 9's review, P3-1): with every leg muscle at its
     # bound the body is on two of its sole's points by 80 ms, and from 100 ms the motion multiplies rounding differences
     # (about three times every 10 ms on average, in bursts of 10 to 40). The two engines cannot agree to 1e-9 over
     # 200 ms of that, and need not: each record's difference is held to ten times what the Python engine differs from
@@ -254,11 +254,13 @@ def _cases():
     m.sys.anchors(st, aux)
     m.sys.sec_start(st, aux)
     m.check_aux = aux
-    # 100 ms, not 200: both wrists' ellipses are engaged inside it (the rear at 30 and at 90 ms, up to 1,275 N m) and the
-    # engines agree to 3e-11; from 110 ms this motion multiplies rounding differences five-hundredfold in 20 ms and the
-    # engines' difference (1.3e-8) then tracks the Python engine's own difference from itself under a 1e-13 nudge (1.5e-8),
-    # as the cleats case does (sim/target/codex-probes/body3d/s10/oval_diverge.py)
-    out.append(("the wrists' ellipses, every drive at its bound", m, st, -0.250, 100))
+    # A SENSITIVE case, judged against itself like the cleats case above (session 10's review, P3-4). Both wrists'
+    # ellipses engage in the first 100 ms (the rear at 25-31 and 90 ms, up to 1,275 N m; the lead at 89 and 106-108 ms) and
+    # the engines agree there to 3e-11, which the rule below still holds to 1e-9; the lead wrist's longest engagement is at
+    # 165-184 ms, so the case runs the whole 200 ms. From 110 ms the engines are 1.3e-8 apart, and that plateau is in the
+    # stops' booked-WORK integral (a state entry), not in the motion: the bodies' own entries differ by at most 2e-9 and
+    # fall back to 2e-10. It lies inside the Python engine's own spread under 1e-13 nudges (6e-10 to 2.9e-8).
+    out.append(("the wrists' ellipses, every drive at its bound", m, st, -0.250, 200, "sensitive"))
     fitted = os.path.join(HERE, "fit3d_d34_all.json")
     if not os.path.isfile(fitted):                   # session 6's fit (its 22 channels; session 7's then switched off)
         fitted = os.path.join(HERE, "fit3d_d34_arms.json")
@@ -302,8 +304,10 @@ def check():
             d, dend = max(ds), ds[-1]
             if sensitive:
                 good = all(x <= lim for x, lim in zip(ds, allow))
-                print("%-46s %-13s largest state difference over %d records: %.2e (at the end %.2e); against itself moved %.0e the Python engine ends %.2e apart: %s"
-                      % (label, nm, len(ref), d, dend, SELF_NUDGE, own[-1], "within %d times that at every record" % SELF_FACTOR if good else "MORE THAN %d TIMES THAT" % SELF_FACTOR))
+                nbody = 13 * m.sys.nb                                   # the bodies' own entries apart from the drives' levels and the work integrals
+                dm = max(max(abs(a - b) for a, b in zip(state[:nbody], r[:nbody])) for (t, state, *_), r in zip(recs, ref))
+                print("%-46s %-13s largest state difference over %d records: %.2e (at the end %.2e; the bodies' own entries, without the work integrals: %.2e); against itself moved %.0e the Python engine is at most %.2e apart: %s"
+                      % (label, nm, len(ref), d, dend, dm, SELF_NUDGE, max(own), "within %d times that at every record" % SELF_FACTOR if good else "MORE THAN %d TIMES THAT" % SELF_FACTOR))
                 ok = ok and good
             else:
                 print("%-46s %-13s largest state difference over %d records: %.2e (at the end %.2e)" % (label, nm, len(ref), d, dend))

@@ -421,6 +421,47 @@ class Ctx:
         return None if any(x != x for x in r) else r
 
 
+NEAR_BOUND = 0.90             # a muscle group asked for this share of its bound or more is reported as near its full strength
+NEAR_FLOOR = 0.010            # s: a rise within this of the 50 ms floor is reported as near it
+
+
+def hold_work(s, recs, t_end):
+    """the work of the two things the engine books as one integral, apart, each by name, from the first record to
+    t_end (session 10's review, P1-1 and P1-2): the constant hold-still torques (system.tones: fixed in the parent's
+    frame, no strength-at-speed law, no onset, not counted as effort or under the clock) and the joints' own damping
+    (system.holds: -C x the joint's speed, its size capped). Each power is worked from the record's state by the engine's
+    own law and integrated by the trapezoid rule over the records given, so give it every step.
+    Returns ({hold-still torque: J}, {damping: J}, {damping: its largest torque, N m})."""
+    Rof = lambda st, i: E.qR(tuple(st[13 * i + 3:13 * i + 7]))
+    wrel = lambda st, a, b: E.sub(tuple(st[13 * b + 10:13 * b + 13]), tuple(st[13 * a + 10:13 * a + 13]) if a >= 0 else E.ZERO)
+    tone, damp, peak = {x[0]: 0.0 for x in s.tones}, {x[0]: 0.0 for x in s.holds}, {x[0]: 0.0 for x in s.holds}
+    prev = None
+    for rec in recs:
+        t, st = rec[0], rec[1]
+        if t > t_end + 1e-12:
+            break
+        pt, pd = {}, {}
+        for name, a, b, tl in s.tones:
+            pt[name] = E.dot(E.mv(Rof(st, a), tl) if a >= 0 else tl, wrel(st, a, b))
+        for name, a, b, qref, K, Cc, cap in s.holds:
+            wr = wrel(st, a, b)
+            wl = E.mtv(Rof(st, a), wr) if a >= 0 else wr
+            tl = (-Cc[0] * wl[0], -Cc[1] * wl[1], -Cc[2] * wl[2])       # the damping alone (the body's holds have no stiffness)
+            mag = E.norm(tl)
+            if mag > cap:
+                tl = E.scale(tl, cap / mag)
+            pd[name] = E.dot(tl, wl)
+            peak[name] = max(peak[name], min(mag, cap))
+        if prev is not None:
+            dt = t - prev[0]
+            for k in pt:
+                tone[k] += 0.5 * (pt[k] + prev[1][k]) * dt
+            for k in pd:
+                damp[k] += 0.5 * (pd[k] + prev[2][k]) * dt
+        prev = (t, pt, pd)
+    return tone, damp, peak
+
+
 def terms(ctx, r):
     """the score (the sum of the residuals' squares) by term."""
     n = len(CH)
@@ -671,6 +712,17 @@ def report(ctx, u, log=print):
     out["work_J"] = {"drives": wk[0], "stops": wk[1], "damping and hold-still torques": wk[2], "ground": wk[3], "stops to +50 ms": wk_end}
     log("   CHECK no passive element does net positive work: to contact the muscles did %.0f J, the joints' stops %+.0f J (%+.0f by 50 ms after), the ground %+.0f J; damping and the hold-still torques %+.0f J   [stops and ground at most 0: %s]"
         % (wk[0], wk[1], wk_end, wk[3], wk[2], "met" if wk[1] <= 0.5 and wk_end <= 0.5 and wk[3] <= 0.5 else "NOT MET"))
+    # the hold-still torques' work apart from the damping's, by joint (session 10's review, P1-1, P1-2): read at EVERY step
+    fine = ctx.run(u, every=1)
+    tone_by, damp_by, damp_pk = hold_work(s, fine, tx)
+    tw, dw = sum(tone_by.values()), sum(damp_by.values())
+    out["hold_still_J"], out["damping_J"], out["damping_peak_Nm"] = tone_by, damp_by, damp_pk
+    out["work_J"].update({"hold-still torques": tw, "damping": dw, "hold-still share of the positive work": tw / (wk[0] + tw) if wk[0] + tw > 0 else 0.0})
+    srt = lambda d_: ", ".join("%s %+.1f" % kv for kv in sorted(d_.items(), key=lambda kv: -abs(kv[1])) if abs(kv[1]) >= 2.0)
+    log("   THE HOLD-STILL TORQUES (constant, one a joint; they stand for muscle and follow no muscle rule: no strength-at-speed law, no onset, no effort, no clock) did %+.1f J to contact, %.0f %% of what they and the muscles put in; by joint: %s"
+        % (tw, 100 * out["work_J"]["hold-still share of the positive work"], srt(tone_by)))
+    log("   THE JOINTS' OWN DAMPING ([E], %.1f N m s/rad on every joint axis, capped at %.0f N m) took %+.1f J to contact, %.0f %% of the muscles' work; by joint: %s; its largest torque: %s   (the two sum to %+.1f J; the engine's own integral of both: %+.1f)"
+        % (Dr.JOINT_DAMP, Dr.JOINT_DAMP_CAP, dw, -100 * dw / wk[0] if wk[0] > 0 else 0.0, srt(damp_by), ", ".join("%s %.0f" % kv for kv in sorted(damp_pk.items(), key=lambda kv: -kv[1])[:6]), tw + dw, wk[2]))
     # balance, effort, the clock
     xo, least, zr = ctx.balance(recs, tx)
     out["balance"] = (xo * 100, least, zr)
@@ -703,13 +755,17 @@ def report(ctx, u, log=print):
     out["stops"] = {}
     for j, nm in enumerate(names):
         lo, hi = ctx.limits[nm]
-        tau = max(abs(rec[4][j][0]) for rec in recs[:ic + 51])
-        over = max(max(rec[4][j][1] / B.D2R - hi, lo - rec[4][j][1] / B.D2R) for rec in recs[:ic + 51])
-        before_c = max(abs(rec[4][j][0]) for rec in recs[:ic + 1])
-        out["stops"][nm] = (tau, max(0.0, over), before_c)
+        # read at every step (session 10's review, P3-1: 1 ms records understate a peak by up to a tenth)
+        to_after = [rec[4][j] for rec in fine if rec[0] <= tx + AFTER + 1e-9]
+        to_contact = [rec[4][j] for rec in fine if rec[0] <= tx + 1e-9]
+        tau = max(abs(x[0]) for x in to_after)
+        over = max(max(x[1] / B.D2R - hi, lo - x[1] / B.D2R) for x in to_after)
+        before_c = max(abs(x[0]) for x in to_contact)
+        over_c = max(max(x[1] / B.D2R - hi, lo - x[1] / B.D2R) for x in to_contact)
+        out["stops"][nm] = (tau, max(0.0, over), before_c, max(0.0, over_c))
     lean = {k_: x for k_, x in out["stops"].items() if x[0] > 1.0}
-    log("   the joints' stops that carried load to 50 ms after contact (N m at most; deg past the end; N m at most up to contact): "
-        + ("; ".join("%s %.0f, %.1f, %.0f" % ((k_,) + x) for k_, x in sorted(lean.items(), key=lambda kv: -kv[1][0])) or "none"))
+    log("   the joints' stops that carried load to 50 ms after contact (N m at most; deg past the end; then up to contact: N m at most; deg past the end): "
+        + ("; ".join("%s %.0f, %.1f, %.0f, %.1f" % ((k_,) + x) for k_, x in sorted(lean.items(), key=lambda kv: -kv[1][0])) or "none"))
     out["ligaments_over_50"] = sorted(k_ for k_, x in out["stops"].items() if k_ != "shoulder_L" and x[0] > STRAIN_FREE)
     log("   LEANING ON A LIGAMENT (a stop other than the lead arm against the chest over %.0f N m): %s" % (STRAIN_FREE, ", ".join(out["ligaments_over_50"]) or "none"))
     out["unheld"] = {}
@@ -730,11 +786,13 @@ def report(ctx, u, log=print):
         # each wrist's place in its ellipse (4.12): 1 is the edge; at the start, at its largest up to contact, at contact; and on an ellipse tilted 8 deg
         out["wrist_oval"] = {}
         for sd in "LR":
-            rho = [B.oval_place(c_[("wrist_flex", sd)], c_[("wrist_dev", sd)])[0] for c_ in (B.clinical(m, rec[1]) for rec in recs[:ic + 1:5])]
+            place_of = lambda st_: (lambda c_: B.oval_place(c_[("wrist_flex", sd)], c_[("wrist_dev", sd)])[0])(B.clinical(m, st_))
+            rho = [place_of(rec[1]) for rec in recs[:ic + 1]]              # every 1 ms record to contact (P3-3: it was every fifth, and missed contact itself)
+            after = [place_of(rec[1]) for rec in recs[ic:ic + 51]]
             c0_, c1_ = cl[0], cl[2]
-            out["wrist_oval"][sd] = (rho[0], max(rho), B.oval_place(c1_[("wrist_flex", sd)], c1_[("wrist_dev", sd)])[0], B.oval_place(c0_[("wrist_flex", sd)], c0_[("wrist_dev", sd)], tilt=8.0)[0])
-        log("   each wrist's place in its ellipse (1 = its edge): lead %.2f at the start, %.2f at most, %.2f at contact; rear %.2f, %.2f, %.2f; at the start on an ellipse tilted 8 deg: lead %.2f, rear %.2f"
-            % (out["wrist_oval"]["L"][:3] + out["wrist_oval"]["R"][:3] + (out["wrist_oval"]["L"][3], out["wrist_oval"]["R"][3])))
+            out["wrist_oval"][sd] = (rho[0], max(rho), rho[-1], B.oval_place(c0_[("wrist_flex", sd)], c0_[("wrist_dev", sd)], tilt=8.0)[0], max(after))
+        log("   each wrist's place in its ellipse (1 = its edge): lead %.2f at the start, %.2f at most to contact, %.2f at contact, %.2f at most in the 50 ms after; rear %.2f, %.2f, %.2f, %.2f; at the start on an ellipse tilted 8 deg: lead %.2f, rear %.2f"
+            % (out["wrist_oval"]["L"][:3] + out["wrist_oval"]["L"][4:] + out["wrist_oval"]["R"][:3] + out["wrist_oval"]["R"][4:] + (out["wrist_oval"]["L"][3], out["wrist_oval"]["R"][3])))
     for key, rng_ in ((("ankle_L", 67.3), ("ankle_R", 67.3)) if hands else (("pron_L", 161.9), ("pron_R", 161.9), ("sh_rot_L", 173.0), ("sh_rot_R", 173.0), ("ankle_L", 67.3), ("ankle_R", 67.3))):
         vv = unwrap([a[key] for a in ang])
         out["unheld"][key] = (max(vv) - min(vv), rng_)
@@ -747,6 +805,14 @@ def report(ctx, u, log=print):
     out["at_full_strength"] = onb
     out["rises_at_floor"] = sum(1 for q, (nm, f, lo, hi) in enumerate(ctx.box) if f == "rise" and u[q] <= 1e-6 and used(nm))
     log("   at full strength (%d of %d): %s;  %d used muscles rise at the 50 ms floor" % (len(onb), len(CH), ", ".join(onb) or "none", out["rises_at_floor"]))
+    # "exactly on its bound" says little of a search that is charged for effort and does not settle on a box's edge
+    # (session 10's review, P1-3): the groups near their bounds, their largest activation, the rises near the floor
+    near = {n: pl[n][0] / ctx.bd[n] for n in CH if ctx.bd[n] > 0 and pl[n][0] >= NEAR_BOUND * ctx.bd[n]}
+    act_pk = {n: max(rec[3][ix[n]][2] for rec in recs[:ic + 1]) for n in near}
+    floor = {n: pl[n][2] * 1e3 for n in CH if used(n) and pl[n][2] <= Dr.RISE_MIN + NEAR_FLOOR}
+    out["near_full_strength"], out["near_full_strength_activation"], out["rises_near_floor_ms"] = near, act_pk, floor
+    log("   asked for %.0f %% or more of its bound (%d of %d; its largest activation to contact): %s" % (100 * NEAR_BOUND, len(near), len(CH), ", ".join("%s %.3f (%.2f)" % (n, x, act_pk[n]) for n, x in sorted(near.items(), key=lambda kv: -kv[1])) or "none"))
+    log("   used muscles whose rise is within %.0f ms of the %.0f ms floor: %s" % (NEAR_FLOOR * 1e3, Dr.RISE_MIN * 1e3, ", ".join("%s %.0f ms" % kv for kv in sorted(floor.items(), key=lambda kv: kv[1])) or "none"))
     log("   the plan: channel, strength of bound, onset and switch-off relative to contact ms, rise ms, level beforehand")
     for n in CH:
         x = pl[n]
@@ -946,7 +1012,14 @@ def main():
     if "--show" in a:
         d = json.load(open(arg("--show", main_file)))
         ctx = Ctx(**dict(d.get("options", {}), **body))
-        report(ctx, ctx.u_of(d["plan"]))
+        out = report(ctx, ctx.u_of(d["plan"]))
+        if "--update" in a:
+            # a kept result re-read (no search): what the report now adds or reads more finely is written into its file
+            for k in ("work_J", "hold_still_J", "damping_J", "damping_peak_Nm", "stops", "ligaments_over_50", "wrist_oval", "near_full_strength",
+                      "near_full_strength_activation", "rises_near_floor_ms"):
+                if k in out:
+                    d[k] = out[k]
+            json.dump(d, open(arg("--show", main_file), "w"), indent=1)
         return
     iters = int(arg("--iters", 30))
     if "--main" in a:
