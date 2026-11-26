@@ -400,7 +400,13 @@ def lm(ctx, u, iters, log, pool):
         hist.append(cost)
         log("      iteration %2d: cost %.3f (miss %.1f, %.1f cm; speed along the line %.2f m/s), lambda %.0e"
             % (it + 1, cost, r[0] * MISS_UNIT * 100, r[1] * MISS_UNIT * 100, SPEED_ASK - r[5] ** 2 / SPEED_W, lam))
-        if not improved or gain < 1e-6 * cost:
+        if not improved:
+            if fd <= 0.0051:
+                break
+            fd *= 0.5                                    # a refused step: the differences are taken closer in, twice, before giving up
+            lam = 1e-2
+            log("      (no step accepted: the differences now over %.3f of each number's range)" % fd)
+        elif gain < 1e-6 * cost:
             break
     return u, cost, hist
 
@@ -704,12 +710,23 @@ def main():
             json.dump(best, open(os.path.join(P.OUT, "practice3d_staged_%s.json" % name), "w"), indent=1)
             print("\nthe best of the staged starts for %s: start %s, cost %.3f" % (name, best["start"], best["cost"]))
         return
+    if "--continue" in a:
+        # the search carried on from a saved result (contact read at the nearest approach, as in the staged search)
+        d = json.load(open(arg("--continue", main_file)))
+        o = {k: v for k, v in d.get("options", {}).items() if k not in ("contact", "stage")}
+        ctx = Ctx(contact="nearest", **o)
+        print("== continued %d iterations from %s (start %s, cost %.3f)" % (iters, os.path.basename(arg("--continue", main_file)), d.get("start"), d.get("cost", float("nan"))))
+        u, cost, hist = search(ctx, d["plan"], iters)
+        out = report(ctx, u)
+        out.update(cost=cost, start=str(d.get("start")) + ", continued", history=hist, step_check=verify(ctx, u))
+        json.dump(out, open(arg("--out", main_file), "w"), indent=1)
+        return
     if "--vary" in a:
         base = json.load(open(arg("--from", main_file)))
         for name in arg("--vary", "").split(","):
             o = dict(VARY[name])
             print("\n== %s: %s; %d iterations from the main result" % (name, o, iters))
-            ctx = Ctx(**o)
+            ctx = Ctx(contact="nearest", **o)
             plan = {n: [min(v[0], ctx.bd[n])] + list(v[1:]) for n, v in base["plan"].items()}
             if name in ("strongest",):                       # his strengths start where the average batter used the same share of his own
                 plan = {n: [v[0] * ctx.bd[n] / base["bounds"][n] if base["bounds"][n] > 0 else 0.0] + list(v[1:]) for n, v in base["plan"].items()}
