@@ -44,6 +44,12 @@ RUNGS = {
     "r1_trunk_low": {"damp": {"set": "read", "from": {"trunk": "low"}}}, "r1_trunk_high": {"damp": {"set": "read", "from": {"trunk": "high"}}},
     "r1_hips_low": {"damp": {"set": "read", "from": {"hip_L": "low", "hip_R": "low"}}}, "r1_hips_high": {"damp": {"set": "read", "from": {"hip_L": "high", "hip_R": "high"}}},
     "r2": {"damp": "read", "stand": "muscle"},         # rung 2: rung 1 with the posture held by muscle
+    # the dependence on the unread joints' friction, on rung 2's body (where the best swing stands): all together, then a group at a time
+    "r2_low": {"damp": "low", "stand": "muscle"}, "r2_high": {"damp": "high", "stand": "muscle"},
+    "r2_trunk_low": {"damp": {"set": "read", "from": {"trunk": "low"}}, "stand": "muscle"}, "r2_trunk_high": {"damp": {"set": "read", "from": {"trunk": "high"}}, "stand": "muscle"},
+    "r2_hips_low": {"damp": {"set": "read", "from": {"hip_L": "low", "hip_R": "low"}}, "stand": "muscle"},
+    "r2_hips_high": {"damp": {"set": "read", "from": {"hip_L": "high", "hip_R": "high"}}, "stand": "muscle"},
+    "r2_arms_low": {"damp": {"set": "read", "from": {"arms": "low"}}, "stand": "muscle"}, "r2_arms_high": {"damp": {"set": "read", "from": {"arms": "high"}}, "stand": "muscle"},
     "r3": {"damp": "read", "stand": "muscle", "stance": "mlb"},      # rung 3: rung 2 on major leaguers' feet (body.START_STANCE, note 15)
     "r4": {"damp": "read", "stand": "muscle", "stance": "mlb", "rom": dict(B.ROM_ACTIVE_HIP)},   # rung 4: the hips' turn by their own muscles
     # rung 5: the launch state by a rule and not [4]'s: standing still (no starting velocity), the feet's loads by balance, their push by least hold

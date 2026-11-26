@@ -2380,6 +2380,15 @@ Code: `analysis/research/body/ladder3d.py` (the protocol, the energy account, th
 - **Step 4, the hips' turn by their own muscles: +0.06 m/s. Nothing,** as expected: the front hip's limiting end did not move.
 - *Against what I expected:* the reference does not creep (I expected 0.1–0.5 a step); rung 1 by continuation loses a little where I expected +1–3; rung 2 gains 2.4 where I expected a loss; rung 4 nothing (right); rung 5 loses more than I expected, unsettled.
 
+#### The dependence on friction nobody has measured: the design as run (changed before any of it ran)
+
+Rung 1's design put these runs on rung 1's body, from rung 1's better search. They are moved, before any ran, **onto rung 2's body and the chain's swing there (19.66 m/s)**: that is the best swing the body has, it is the one the session's answer rests on, and it stands on a body where the friction is the only unmeasured part left in the swing's energy. (The three runs queued on rung 1's body are stopped as they come up.)
+
+- *Each run:* the chain's rung 2 swing carried on for 500 generations (the same draws, no extra blocks) on rung 2's body with some joints' friction moved to an end of its range. The middle is the same swing carried on with nothing moved.
+- *All together:* every unread value at its low end (hips 0.5, trunk 1.0, elbow's bend 0.22, forearm's turn 0.02, wrist's tilt 0.03); at its high end (4.6, 27.5, 0.97, 0.10, 0.20).
+- *One group at a time, the others in the middle:* the trunk at 1.0 and at 27.5; the hips at 0.5 and at 4.6; the arms' three unread values at their low and at their high ends. These are queued without waiting to see whether the all-together runs move the bat by more than the yardstick: the queue is long and they are the owner's question.
+- *What I expect:* the middle run returns the swing unchanged (as the reference did on rung 0's body). Low ends together: +1 to +2.5 m/s (120 J of the swing's 203 J of friction is at the trunk and hips). High ends together: a large loss, 4 m/s or more, nearly all of it the trunk's 27.5 (a value measured with the trunk's muscles holding a load, which at this swing's speeds asks the trunk's damper for more torque than its rotators have). The arms' unread values: under 0.5 m/s either way.
+
 ## 5. The drive and its control (§14.1 items 2 and 3)
 
 ### 5.1 What a drive is
