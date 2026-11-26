@@ -42,6 +42,7 @@ ECC_SLOPE = 4.0           # [E]
 CONTACT_D0 = 1.0e-3       # [E] m, depth over which the contact's damping fades in (keeps the force continuous)
 NW = 4                    # work integrals carried in the state: drives, stops, holds, contacts
 FLOAT_EPS = 1e-9          # a floating drive axis (actuator's axis_b) is taken as absent where its two directions are this near parallel
+STOP_SINGULAR = 0.0872      # sin 5 deg: a stop whose direction comes this near its own axis has no usable angle; the run fails
 MUT = set()               # mutations, for the tests that show a check can fail (never set in real runs)
 
 
@@ -294,9 +295,38 @@ class System:
         l = math.sqrt(dot(c, c))
         return scale(c, 1.0 / l) if l > FLOAT_EPS else ZERO
 
-    def stop(self, name, a, b, axis_a, e_a, f_b, lo, hi, k, c):
-        """a one-sided limit on the angle about axis_a (fixed in a) from e_a (in a) to f_b (in b)."""
-        self.stops.append((name, a, b, unit(axis_a), unit(e_a), unit(f_b), lo, hi, k, c))
+    def stop(self, name, a, b, axis_a, e_a, f_b, lo, hi, k, c, kind=0):
+        """a one-sided limit on an angle between a and b: a spring k and a damper c once the angle is past lo or hi.
+        kind 0: the angle about axis_a (fixed in a) from e_a (in a) to f_b (in b), f_b projected onto the plane
+        square to the axis. kind 1: the angle of f_b (in b) out of the plane square to axis_a, toward the axis
+        (asin of their dot product; e_a is not used).
+        The stop's torque acts along the read angle's own gradient g, the vector with d(angle)/dt = w_rel . g, and its
+        work is booked with the same g, so a stop can never give back more than it took in (body-motion 8.1; until
+        session 8's review the torque acted about axis_a, which is the gradient only on a hinge, and on a ball joint
+        did work nothing stored paid for). kind 0: g = n - (n.f) f_p / |f_p|^2, with f_p the projection. kind 1:
+        g = (f x n) / |f x n|. Each is undefined where f lies along the axis (kind 0: the angle itself is; kind 1:
+        the angle is 90 deg); within STOP_SINGULAR of that the run fails loudly, not silently."""
+        self.stops.append((name, a, b, unit(axis_a), unit(e_a), unit(f_b), lo, hi, k, c, int(kind)))
+
+    @staticmethod
+    def stop_angle(n, e, f, kind):
+        """(angle, gradient g) of a stop from its axis n and directions e, f in world axes; raises SolveError where the
+        angle's gradient is undefined."""
+        nf = dot(n, f)
+        if kind == 1:
+            gv = cross(f, n)
+            l = math.sqrt(dot(gv, gv))
+            if l < STOP_SINGULAR:
+                raise SolveError("a stop's direction lies along its axis: its angle has no gradient there")
+            return math.asin(max(-1.0, min(1.0, nf))), scale(gv, 1.0 / l)
+        th = math.atan2(dot(n, cross(e, f)), dot(e, f))
+        if "stop_fixed_axis" in MUT:                 # the law before session 8's review: the torque about the fixed axis
+            return th, n
+        fp = sub(f, scale(n, nf))
+        l2 = dot(fp, fp)
+        if l2 < STOP_SINGULAR * STOP_SINGULAR:
+            raise SolveError("a stop's direction lies along its axis: the angle it reads is undefined there")
+        return th, sub(n, scale(fp, nf / l2))
 
     def hold(self, name, a, b, qref, K, C, cap):
         """intrinsic stiffness and damping of a joint about a reference relative orientation qref (b in a's
@@ -512,19 +542,19 @@ class System:
             p_act += tau * wrel
             if diag is not None:
                 diag.setdefault("act", {})[name] = (tau, wrel, act)
-        for name, a, b, ax, ea, fb, lo, hi, k, c in self.stops:
+        for name, a, b, ax, ea, fb, lo, hi, k, c, kind in self.stops:
             n = mv(R[a], ax) if a >= 0 else ax
             e = mv(R[a], ea) if a >= 0 else ea
             f = mv(R[b], fb)
-            th = math.atan2(dot(n, cross(e, f)), dot(e, f))
-            rate = dot(sub(Wv[b], Wv[a] if a >= 0 else ZERO), n)
+            th, g = self.stop_angle(n, e, f, kind)
+            rate = dot(sub(Wv[b], Wv[a] if a >= 0 else ZERO), g)
             tau = 0.0
             if th > hi:
                 tau = -max(0.0, k * (th - hi) + c * rate)
             elif th < lo:
                 tau = max(0.0, k * (lo - th) - c * rate)
             if tau != 0.0:
-                tv = scale(n, tau)
+                tv = scale(g, tau)
                 Tq[b] = add(Tq[b], tv)
                 if a >= 0:
                     Tq[a] = sub(Tq[a], tv)

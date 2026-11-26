@@ -441,6 +441,50 @@ def tendon_ledger(h, ecc=None):
     return w_ce - (s[-E.NW] + stored), w_ce, 0.5 * K * max(th) ** 2, max(th)
 
 
+def rod_on_a_stop(tilt_deg, kind, k=2000.0, c=0.0, T=0.1, h=1e-4):
+    """a 2 kg rod on a ball joint at the world's origin, no gravity, turned into one stop (the reviewer's probe 5).
+    kind 0: the stop reads the rod's direction about the vertical, from +x, and ends at 0; the rod starts along +x
+    tilted `tilt_deg` below the horizontal, turning into the stop with some spin about its own projection.
+    kind 1: the stop reads the rod's angle out of the x-z plane toward +y and ends at 0; the same start.
+    Returns (energy at the start, at the end, the largest seen, the stop's booked work + what its spring still holds):
+    energy is the kinetic energy plus the spring's stored half k x^2."""
+    s = E.System(g=(0.0, 0.0, 0.0))
+    I = (0.15, 0.15, 0.002)
+    b = s.body("rod", 2.0, I)
+    s.ball(-1, b, (0.0, 0.0, 0.0), (0.0, 0.0, 0.3))
+    if kind == 0:
+        s.stop("st", -1, b, (0, 0, 1), (1, 0, 0), (0, 0, -1), -10.0, 0.0, k, c, 0)
+    else:
+        s.stop("st", -1, b, (0, 1, 0), (1, 0, 0), (0, 0, -1), -10.0, 0.0, k, c, 1)
+    st = s.new_state()
+    a = math.radians(tilt_deg)
+    d = (math.cos(a), 0.0, -math.sin(a))                 # from the joint to the rod's far end: the body's -z
+    ez = (-d[0], -d[1], -d[2]); ey = (0.0, 1.0, 0.0)
+    q = E.axes_to_q(E.cross(ey, ez), ey, ez)
+    x = E.scale(d, 0.3)
+    w = (0.3 * math.cos(a), 0.0, 3.0)                    # into the stop (+z turns the rod toward +y), with spin about its projection
+    s.set_body(st, b, x, q, E.cross(w, x), w)
+    aux = s.new_aux()
+    ow = 13 * s.nb + len(s.acts)
+
+    def energy(state):
+        xx, qq, vv, ww = s.pose(state, b)
+        R = E.qR(qq)
+        wl = E.mtv(R, ww)
+        f = E.mv(R, (0, 0, -1))
+        th = math.atan2(f[1], f[0]) if kind == 0 else math.asin(max(-1.0, min(1.0, f[1])))
+        pe = 0.5 * k * th * th if th > 0 else 0.0
+        return 0.5 * 2.0 * E.dot(vv, vv) + 0.5 * sum(I[i] * wl[i] ** 2 for i in range(3)) + pe, pe
+    e0 = energy(st)[0]
+    emax = e0
+    for i in range(int(round(T / h))):
+        st = s.step(i * h, st, aux, h)
+        if i % 10 == 0:
+            emax = max(emax, energy(st)[0])
+    e1, pe1 = energy(st)
+    return e0, e1, emax, st[ow + 1] + pe1
+
+
 class EngineChecks(unittest.TestCase):
     def test_speed_curve_and_its_inverse(self):
         """a measured strength-at-speed curve passes through its points, falls with speed, rises for a stretched
@@ -642,6 +686,47 @@ class EngineChecks(unittest.TestCase):
         self.assertTrue(all(tau >= 0.0 for tau, th in seen))
         self.assertTrue(all(tau == 0.0 for tau, th in seen if th >= -0.3))
         self.assertGreater(min(th for tau, th in seen), -0.6)
+
+    def test_no_passive_stop_does_net_positive_work(self):
+        """a rod alone on a ball joint, no gravity, no drive, turned into one stop: its kinetic energy plus the spring's
+        stored energy never exceeds what it started with, whatever the rod's tilt out of the stop's plane and its spin
+        (session 8's review, P1-1: the rod tilted 30 and 60 deg). With damping it only loses. Both kinds of stop."""
+        for kind in (0, 1):
+            for tilt in (0.0, 30.0, 60.0):
+                for c in (0.0, 20.0):
+                    e0, e1, emax, booked = rod_on_a_stop(tilt, kind, c=c)
+                    msg = "kind %d, tilt %.0f, damping %.0f" % (kind, tilt, c)
+                    self.assertLess(emax, e0 * (1.0 + 1e-3), msg=msg)
+                    self.assertLess(booked, 1e-3 * e0, msg=msg)          # the work the engine books to the stop, with what it still stores
+                    if c == 0.0:
+                        self.assertAlmostEqual(e1, e0, delta=1e-3 * e0, msg=msg)     # and with no damper it gives it all back
+                    else:
+                        self.assertLess(e1, 0.9 * e0, msg=msg)
+
+    def test_the_stop_law_before_the_review_fails_that_check(self):
+        """the same rod with the stop's torque about its fixed axis (the law until session 8's review) gains energy
+        many times over once it is tilted out of the stop's plane: the check above can fail."""
+        E.MUT.add("stop_fixed_axis")
+        try:
+            e0, e1, emax, booked = rod_on_a_stop(30.0, 0)
+        finally:
+            E.MUT.discard("stop_fixed_axis")
+        self.assertGreater(emax, 10.0 * e0)
+        e0, e1, emax, booked = rod_on_a_stop(0.0, 0)                      # in the stop's own plane the two laws are the same
+        self.assertLess(emax, e0 * (1.0 + 1e-3))
+
+    def test_a_stop_fails_loudly_where_its_angle_is_undefined(self):
+        """a stop whose direction lies along its own axis has no angle (kind 0) or no gradient (kind 1): the run
+        raises instead of returning a clamped torque."""
+        for kind, f in ((0, (0, 0, 1)), (1, (0, 0, 1))):
+            sys = E.System(g=(0.0, 0.0, 0.0))
+            b = sys.body("rod", 2.0, (0.15, 0.15, 0.002))
+            sys.ball(-1, b, (0, 0, 0), (0, 0, 0.3))
+            sys.stop("st", -1, b, (0, 0, 1), (1, 0, 0), f, -0.1, 0.1, 2000.0, 0.0, kind)
+            st = sys.new_state()
+            sys.set_body(st, b, (0.0, 0.0, -0.3), (1.0, 0.0, 0.0, 0.0))
+            with self.assertRaises(E.SolveError):
+                sys.deriv(0.0, st, sys.new_aux())
 
 
 # ---- 7. the whole body ---------------------------------------------------------------------------
@@ -881,9 +966,9 @@ class RangeChecks(unittest.TestCase):
         st = B.place(m, T0)
         lim = B.add_ranges(m, st)
         j = [x[0] for x in m.sys.stops].index("knee_L")
-        name, a_, b_, ax, ea, fb, lo, hi, k, c = m.sys.stops[j]
+        name, a_, b_, ax, ea, fb, lo, hi, k, c, kind = m.sys.stops[j]
         self.assertAlmostEqual(hi / B.D2R, B.ROM["knee_flex"], delta=1e-9)
-        m.sys.stops[j] = (name, a_, b_, ax, ea, fb, lo, (B.range_angles(m, st)["knee_L"] - 3.0) * B.D2R, k, 0.0)   # the end moved 3 deg inside the knee's angle
+        m.sys.stops[j] = (name, a_, b_, ax, ea, fb, lo, (B.range_angles(m, st)["knee_L"] - 3.0) * B.D2R, k, 0.0, kind)   # the end moved 3 deg inside the knee's angle
         m.sys.diag = {}
         m.sys.deriv(T0, st, m.sys.new_aux())
         tau, th = m.sys.diag["stop"]["knee_L"]

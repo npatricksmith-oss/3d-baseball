@@ -68,8 +68,8 @@ def write_model(path, s, st, aux, t0, nsteps, h, every, order=()):
     for name, a, b, ax, T, W, t_on, rise, t_off, a0, tab, ksec, axb in s.acts:
         w.append("%d %d %s %s %d %s %s" % (a, b, f(*ax), f(T, W, t_on, rise, t_off, a0), tab, f(ksec), f(*axb)))
     w.append("stops %d" % len(s.stops))
-    for name, a, b, ax, ea, fb, lo, hi, k, c in s.stops:
-        w.append("%d %d %s %s %s %s" % (a, b, f(*ax), f(*ea), f(*fb), f(lo, hi, k, c)))
+    for name, a, b, ax, ea, fb, lo, hi, k, c, kind in s.stops:
+        w.append("%d %d %s %s %s %s %d" % (a, b, f(*ax), f(*ea), f(*fb), f(lo, hi, k, c), kind))
     w.append("holds %d" % len(s.holds))
     for name, a, b, qref, K, Cc, cap in s.holds:
         w.append("%d %d %s %s %s %s" % (a, b, f(*qref), f(*K), f(*Cc), f(cap)))
