@@ -17,11 +17,11 @@ Status: `[ ]` not started · `[~]` partly done · `[?]` needs an owner decision
 
 ## Resume here (2026-11-25)
 
-**State.** PLAN D31–D37: a force-driven body; PLAN §14.1, spec [docs/body-motion.md](docs/body-motion.md). **D37 (owner, 2026-11-25): the lab study [4] is dropped as target and gate.** The swing is learned by practice (D32, D36), checked against directly measured hitters.
+**State.** PLAN D31–D38: a force-driven body; PLAN §14.1, spec [docs/body-motion.md](docs/body-motion.md). **D37 (owner, 2026-11-25): the lab study [4] is dropped as target and gate.** The swing is learned by practice (D32, D36), checked against directly measured hitters.
 
 **Before D37 (spec §4.9), fitted to [4]:** bat 48 mph, down 7° on the ball; hands 17 mph (MLB 23–29).
 
-**[?] Q59** (bat-speed check 65–76 or 60–76 mph); holds nothing up.
+Q59 = a (D38): the bat-speed check is 65–76 mph. Nothing waits on the owner.
 
 **Running: `body-3d-8`** (Fable, high; Workers tab; worktree `swing-research`, branch `work/body-3d`; job `WORKER-BODY-3D-8.md` there). Check its branch log, status file and `bin/job.sh status`. Then: Opus review, merge, the proposed gate (spec §13) to the owner as a question.
 
