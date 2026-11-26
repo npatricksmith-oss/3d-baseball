@@ -1365,6 +1365,10 @@ class HandsChecks(unittest.TestCase):
             self.assertAlmostEqual(E.dot(fore(raise_deg=sg * 90.0, turn_in=-90.0), zt), 1.0, delta=1e-9)
             up = E.scale(m.axis(clinical_arm(m, st, sd, raise_deg=sg * 90.0)[0], "uarm_" + sd, (0, 0, 1)), -1.0)
             self.assertAlmostEqual(E.dot(up, E.scale(yt, sg)), 1.0, delta=1e-9)          # that arm does point out to its own side
+            # how far the arm is raised reads the raise, whichever way it is raised and however it is turned
+            for kw, want in (({}, 0.0), ({"raise_deg": sg * 90.0, "turn_in": 40.0}, 90.0), ({"raise_axis": (0, 1, 0), "raise_deg": -150.0}, 150.0),
+                             ({"raise_axis": (0.6, 0.8, 0.0), "raise_deg": 165.0, "turn_in": -70.0, "elbow": 30.0}, 165.0)):
+                self.assertAlmostEqual(B.clinical(m, clinical_arm(m, st, sd, **kw)[0])[("raised", sd)], want, delta=1e-6, msg="%s %s" % (sd, kw))
             for want in (-100.0, -60.0, 0.0, 35.0, 65.0):
                 for kw in ({}, {"raise_deg": sg * 90.0}, {"raise_axis": (0, 1, 0), "raise_deg": -90.0}, {"raise_axis": (0.6, -0.8, 0.0), "raise_deg": 150.0},
                            {"raise_axis": (0.6, 0.8, 0.0), "raise_deg": -120.0, "elbow": 20.0, "palm_down": 50.0, "tilt": 15.0}):
@@ -1425,6 +1429,8 @@ class HandsChecks(unittest.TestCase):
                 self.assertLess(a[k + "_" + sd], hi, msg=k + sd)
             self.assertLess(a["shoulder_" + sd], B.ROM["sh_hadd"] - 90.0)
             self.assertLess(a["shoulder_back_" + sd], B.ROM["sh_habd"])
+            self.assertEqual(lim["shoulder_up_" + sd][0], 90.0 - B.ROM["sh_raise"])      # the raise's end, not moved
+            self.assertLess(c[("raised", sd)], B.ROM["sh_raise"] - 30.0)                 # and the start well inside it (the rear arm 132 deg)
             zu, zf = m.axis(st, "uarm_" + sd, (0, 0, 1)), m.axis(st, "farm_" + sd, (0, 0, 1))
             g = B.arm_angles(sd, zu, zf, E.qR(m.sys.pose(st, m.b["bat"])[1]), E.qR(m.sys.pose(st, m.b["trunk"])[1]))
             for k in B.ARM_STOPS:
@@ -1739,6 +1745,43 @@ def clinical_ankle(m, st, sd, down=0.0, inward=0.0):
     out = list(st)
     out[13 * m.b["foot_" + sd] + 3:13 * m.b["foot_" + sd] + 7] = q2
     return out, sole
+
+
+class RaiseChecks(unittest.TestCase):
+    """the end of how far an arm is raised, which keeps the upper arm's turn defined (body-motion 4.11)."""
+
+    def test_an_arm_driven_overhead_meets_its_raises_end_before_its_turn_goes_undefined(self):
+        """session 9's first practice runs failed wherever a swing's follow-through took the lead arm straight overhead:
+        the upper arm's turn has no value there and the run raised an error, which the search read as a refused step.
+        An upper arm alone on a ball joint, with the hands' body's two stops (its turn, kind 2; its raise, 168.8 deg)
+        and a 5 N m muscle raising it from 30 deg for 0.6 s: it is stopped within 3 deg of its end, the run never
+        fails, and the stops' work is not positive. Without the raise's stop the same run does fail: the fault."""
+        def go(with_stop):
+            s = E.System(g=(0.0, 0.0, 0.0))
+            b = s.body("uarm", 2.5, (0.15, 0.15, 0.004))
+            s.ball(-1, b, (0, 0, 0), (0, 0, 0.13))
+            lo, hi = sorted(-x for x in B.arm_range()["upper_arm"])
+            s.stop("turn", -1, b, (0, 0, 1), (0, -1, 0), (0, 1, 0), math.radians(lo), math.radians(hi), B.RANGE_K["small"], B.RANGE_C["small"], 2)
+            if with_stop:
+                s.stop("up", -1, b, (0, 0, 1), (0, 0, 1), (0, 0, 1), math.radians(90.0 - B.ROM["sh_raise"]), math.radians(91.0), B.RANGE_K["big"], B.RANGE_C["big"], 1)
+            s.actuator("raise", -1, b, (0, 0, 1), 5.0, 1e9, -1.0, 0.0, 1e9, 1.0, axis_b=(0, 0, 1))
+            st = s.new_state()
+            q = E.qmul(E.qaxis((0.6, 0.8, 0.0), math.radians(30.0)), E.qaxis((0, 0, 1), math.radians(180.0)))
+            s.set_body(st, b, E.scale(E.mv(E.qR(q), (0, 0, 0.13)), -1.0), q)
+            st[13 * s.nb] = 1.0
+            aux = s.new_aux()
+            top = 0.0
+            for i in range(600):
+                st = s.step(i * 1e-3, st, aux, 1e-3)
+                zu = E.mv(E.qR(s.pose(st, b)[1]), (0, 0, 1))
+                top = max(top, math.degrees(math.acos(max(-1.0, min(1.0, zu[2])))))
+            return top, st[13 * s.nb + len(s.acts) + 1]
+        top, stops_work = go(True)
+        self.assertGreater(top, B.ROM["sh_raise"] - 1.0)
+        self.assertLess(top, B.ROM["sh_raise"] + 3.0)
+        self.assertLess(stops_work, 1e-6)
+        with self.assertRaises(E.SolveError):
+            go(False)
 
 
 class FeetChecks(unittest.TestCase):

@@ -1374,7 +1374,7 @@ Session 9 (2026-11-26, PLAN D41: the first of up to three more sessions) builds 
 
 *What I expect:* S becomes a swing that meets the ball within 3 cm at 14–18 m/s, no faster than session 8's 17.8: nothing was added that makes speed, and the rear forearm (which turned 106° on the weld) and the rear upper arm (176°) are now held. The arms' new stops carry load (the rear wrist starts 1.2° from one). The hips still turn under 350°/s and the hip and trunk ends still carry hundreds of N·m: part 1 does not touch them. C and D do not become swings (they did not in session 8, and this start is more strained).
 
-**The runs after part 1: no start became a swing on the hands' body** (job 368, 9 minutes; `sim/target/codex-probes/body3d/s9/p1_staged.out`, `practice3d_staged_main_p1_{S,C,D}.json`; every figure at the plane's crossing, at a 0.5 ms step and again at 0.125 ms; from [4]'s launch posture as placed above, an input, flagged).
+**WITHDRAWN as a result about the body (see "A fault in part 1's new stop" below): these first runs were made with a stop whose reading failed in the follow-through, and most of the search's trial runs failed with it. Kept as the record of what was first found and said.** As first written: **The runs after part 1: no start became a swing on the hands' body** (job 368, 9 minutes; the output is now `p1_staged_first_undefined_turn.out`; `sim/target/codex-probes/body3d/s9/p1_staged.out`, `practice3d_staged_main_p1_{S,C,D}.json`; every figure at the plane's crossing, at a 0.5 ms step and again at 0.125 ms; from [4]'s launch posture as placed above, an input, flagged).
 
 | Start | Reach stage (15) | Whole aim (30 asked) | The bat at the plane's crossing | Not a swing because |
 | :-- | :-- | :-- | :-- | :-- |
@@ -1464,6 +1464,30 @@ So this body's rear foot was never "planted and unable to pivot" (§4.10 and bot
 - **The ankles' readings are a clinician's, each side:** a foot pointed down 30° reads +30, the shin 25° forward over the foot −25; a sole rolled 20° toward the midline reads 20° toward its inversion end and its normal does face the midline; neither moves with the other (10⁻⁷°). The ends are 39° and 50°, 34.6° in and 19.1° out, no stop moved.
 - **The start is inside all four:** the lead foot, on its ball at toe-touch, is pointed down 25.5° and rolled in 30.5° (4° inside); the rear shin is 20.3° forward and the rear sole rolled in 16.5°. No stop carries anything at the start.
 - The two engines' agreement on the body with cleats and the whole test run are in "The checks" below.
+
+#### A fault in part 1's new stop, found when part 2's first runs stopped the way part 1's had
+
+**What happened.** Part 2's first runs (job 371; `p2_staged_first_undefined_turn.out`) ended like part 1's: the whole-aim search stopped after 3–9 iterations with no step accepted, from every start but one. That is not how a search settles, so I probed it before reading anything into it (`sim/target/codex-probes/body3d/s9/stuck.py`, at start S's two results):
+
+| At start S's result | Part 1's | Part 2's (watching 0.10 s) |
+| :-- | --: | --: |
+| of the search's 205 one-number differences, how many fail to run | **124** | **59** |
+| of 60 plans with every number moved at random by up to 2% | 24 fail | 21 fail |
+| the lowest score among those that ran (the result's own score) | 409.6 (481.0) | 311.1 (327.3) |
+| every failure's message | "a limb's own axis is turned right over" | the same |
+| the lead upper arm's greatest angle from hanging in that motion | 175° | 175° |
+
+**The cause is mine, and it is session 8's second lesson again.** The upper arm's turn (the kind 2 stop of part 1) has no value with the arm pointing straight overhead, and the engine fails the run within 5° of that, loudly, as designed. I wrote in part 1's design that this posture "is never near in a swing" (§4.10 had said the same of the arm's raise) and did not test it. In these motions the lead arm goes overhead in the follow-through, after contact, where nothing in the aim looks; the run fails; a failed run is a refused step; and with 59–124 of 205 differences failing the search has no slope to follow. Lower scores were there to be found beside both results. **So "no start became a swing" after part 1 was the search stopped by a reading fault, not a finding about a body with a hitter's hands, and my reading of it above ("held, that swing is gone") went further than a stopped search can carry.** The follow-up's result (stopped again after 3 iterations, as I had "expected") was the same fault and tested nothing.
+
+**The fix is a shoulder's own end, which the body lacked:** the arm is raised no further than **168.8°** from hanging (Soucie 2011, the forward raise, men of 20–44, as §4.10's table; 184° sideways in Boone & Azen's sample is the range's other end [E]). A kind 1 stop on the upper arm's angle out of the trunk's level plane, at the large joints' stiffness; it reads 90° less the raise and is never asked for its gradient with the arm hanging. It keeps the turn's reading 6° clear of where the run fails; to get there a swing would have to push 2,200 N·m into the raise's end, which is reported like every other end's load.
+
+- *Tests:* the raise reads 0, 90, 150 and 165° for arms so raised in four directions and however turned (`HandsChecks`); an upper arm alone, driven up by a 5 N·m muscle from 30°, is stopped within 3° of 168.8°, the run never fails and the two stops' work is not positive; **without the raise's stop the same run fails, which is the fault** (`RaiseChecks`).
+- *At start S's part 1 result, with the stop in:* 0 of 205 differences and 0 of 60 random plans fail; the motion to contact is unchanged (the same score, 481.04; the arm now stops at 169°).
+- *What I should have done:* tested "no swing posture is near it" on a swing before saying it. The check that would have caught it at once is now made after every search: the report counts how many of the plan's one-number differences fail to run (below).
+
+**The runs again, stated before any** (one job, the four bodies in the order they were built, so that each differs from the one before by one part): (1) part 1's body, the clock counting a tensed arm muscle; (2) part 2's hold, watching 0.10 s; (3) the same watching 0.20 s; (4) part 3's feet, with the hold, watching 0.10 s. Each from the three starts S, C and D, 15 iterations of the reach stage and 30 of the whole aim, as stated for part 1. Each result is followed by the count of failed differences at its end.
+
+*What I expect now:* what I first wrote for each part stands as the expectation (part 1: S a swing within 3 cm at 14–18 m/s; C and D not; part 2 and part 3 as written under each), with one change: **I no longer expect the searches to stop on refused steps; if one still does with no failed differences, the roughness is the body's (stiff ends near a strained start) and is said so.**
 
 ## 5. The drive and its control (§14.1 items 2 and 3)
 

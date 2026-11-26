@@ -674,6 +674,22 @@ def report(ctx, u, log=print):
     return out
 
 
+def failed_differences(ctx, u, log=print):
+    """how many of the plan's one-number differences (each free number moved 2 % of its range, as the search moves it)
+    fail to run. A failed run is a refused step, so a count above zero means the search could not see its slope there:
+    the check that session 9's first runs lacked (body-motion 4.11)."""
+    bad = 0
+    for i in ctx.free:
+        un = list(u)
+        un[i] = u[i] + (0.02 if u[i] + 0.02 <= 1.0 else -0.02)
+        try:
+            ctx.run(un)
+        except E.SolveError:
+            bad += 1
+    log("   of the plan's %d one-number differences, %d fail to run%s" % (len(ctx.free), bad, "" if bad == 0 else "  (THE SEARCH COULD NOT SEE ITS SLOPE HERE)"))
+    return bad
+
+
 def verify(ctx, u, log=print):
     """the same plan at a quarter of the step: what the result's numbers are worth."""
     out = {}
@@ -768,7 +784,7 @@ def main():
                 print("-- start %s, the whole aim" % label)
                 u, cost, hist2 = search(ctx, reach.plan(u), n2)
                 out = report(ctx, u)
-                out.update(cost=cost, start=label + ", staged", history=hist2, reach_history=hist, step_check=verify(ctx, u))
+                out.update(cost=cost, start=label + ", staged", history=hist2, reach_history=hist, step_check=verify(ctx, u), failed_differences=failed_differences(ctx, u))
                 json.dump(out, open(os.path.join(P.OUT, "practice3d_staged_%s%s_%s.json" % (name, tag, label)), "w"), indent=1)
                 if best is None or cost < best["cost"]:
                     best = out

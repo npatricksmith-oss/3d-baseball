@@ -161,6 +161,7 @@ ROM = {"hip_flex": 130.4, "hip_ext": 17.4, "hip_abd": 38.8, "hip_add": 30.5, "hi
        "trunk_fwd": 80.0, "trunk_back": 25.0, "trunk_side": 35.0,   # [E] AAOS's thoracolumbar values, not read this session
        "sh_hadd": SH_ADD_MAX, "sh_habd": 45.0,                      # [E] 135: clinical; 45 behind the frontal plane: not read
        "sh_irot": 69.0, "sh_erot": 104.0,                           # the upper arm's turn about its own length (Boone & Azen, as the wrist)
+       "sh_raise": 168.8,                                           # how far the arm is raised from hanging: Soucie 2011, forward, men 20-44 (sideways 184, Boone & Azen)
        # the ankle with weight on it (4.11, part 3): the shin forward over the foot with the knee bent 20 deg or more
        # (Baumbach 2014; 25 with the knee straight, which a stop cannot know: [E]); the foot pointed down and the sole
        # rolled in and out (Hallaceli 2014, passive; the roll its men's)
@@ -246,7 +247,11 @@ def range_specs(cock_ref=None, grip="weld", feet="plate"):
                 ("forearm_" + sd, "farm_" + sd, "uarm_" + sd, (0, 0, 1), (0, -1, 0), (0, 1, 0)) + ends("forearm") + ("small",),
                 # the upper arm's turn about its own length (kind 2): from hanging along the trunk's z; zero is the elbow's
                 # hinge along the trunk's -y (the elbow bending straight forward)
-                ("upper_arm_" + sd, "trunk", "uarm_" + sd, (0, 0, 1), (0, -1, 0), (0, 1, 0)) + ends("upper_arm") + ("small", 2)]
+                ("upper_arm_" + sd, "trunk", "uarm_" + sd, (0, 0, 1), (0, -1, 0), (0, 1, 0)) + ends("upper_arm") + ("small", 2),
+                # how far the arm is raised (kind 1): the angle of the upper arm's own z out of the trunk's level plane, 90 deg
+                # hanging and 90 - (the raise) otherwise. A shoulder's end, and what keeps the stop above defined: its
+                # reading has no value with the arm straight overhead, and session 9's first runs went there (4.11)
+                ("shoulder_up_" + sd, "trunk", "uarm_" + sd, (0, 0, 1), (0, 0, 1), (0, 0, 1), 90.0 - R["sh_raise"], 91.0, "big", 1)]
             continue
         out += [
             # the wrist's cock, on the joint's own axis: the wrist is a universal joint whose second axis is the bat's
@@ -391,6 +396,7 @@ def clinical(mdl, st):
     for sd, sg in SIDES:
         for k in ARM_STOPS:
             out[(k, sd)] = clinical_sign(k, sg) * a[k + "_" + sd]
+        out[("raised", sd)] = 90.0 - a["shoulder_up_" + sd]
         out[("forearm_to_barrel", sd)] = math.acos(max(-1.0, min(1.0, E.dot(mdl.axis(st, "farm_" + sd, (0, 0, 1)), mdl.axis(st, "bat", (0, 0, 1)))))) / D2R
     return out
 
