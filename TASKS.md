@@ -19,11 +19,11 @@ Status: `[ ]` not started · `[~]` partly done · `[?]` needs an owner decision
 
 **State.** PLAN D31–D41: a force-driven body; PLAN §14.1, spec [docs/body-motion.md](docs/body-motion.md). **D37: the lab study [4] is dropped.** The swing is learned by practice, checked against directly measured hitters.
 
-**Session 8 and its fixes (`work/body-3d` `d59d64e`, worktree `swing-research`; spec §4.10 there):** the joint stops that created energy are fixed; the practice search has a swing, 40 mph, failing the gate. Worker and first review disagree on a wrist's uncocking (P1-2).
+**Session 8, reviewed twice (`work/body-3d`, worktree `swing-research`; spec §4.10, both reviews there):** the stops that created energy are fixed; practice finds a swing: 40 mph, failing the gate.
 
-**Ruled:** Q61 = b, Q62 = a, Q63 = a (PLAN D39–D41). **After the second review, for the owner:** Q64.
+**Ruled:** Q61 = b, Q62 = a, Q63 = a (PLAN D39–D41). Nothing waits on the owner (Q64 withdrawn by the second review).
 
-**Running (Workers tab):** `rev-body-3d-8fix` (Opus; that worktree). Then: commit its review, fixes, test, merge. `body-3d-8`: stopped.
+**Running (Workers tab):** `body-3d-8` (Fable; job file WORKER-BODY-3D-8FIX2 there): the second review's account fixes. Then: test, merge; D41's first session, order in spec §13.
 
 **Next:** §2: the ground-dive leftovers ([note](docs/calibration/2026-11-23-of-ground-dive.md) §9).
 
