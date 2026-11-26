@@ -2062,6 +2062,16 @@ Code: `analysis/research/body/ladder3d.py` (the protocol, the energy account, th
 
 **The dependence, as the owner asked** (after the rung's searches): rung 1's better result carried on for 500 generations on the body with the unread joints' values at the low ends, at the middle (unchanged) and at the high ends, all together; then, if the bat's speed moves by more than the yardstick, one group at a time (the arms' unread values, the trunk's, the hips'), each at its low and high end with the others in the middle.
 
+#### A second measure of every rung: one swing carried through the changes (added after rung 1's first search, before any of it was run)
+
+**Why.** Rung 0's two searches from S differ by 1.95 m/s, rung 2 alone's by 0.91, and rung 1's first search (below) ended 3.0 m/s *under* rung 0's with the same draws, at a different kind of swing. A search from S draws a basin as much as it measures a body. If every rung's effect is smaller than that, the protocol above cannot show any of them, however many rungs are run. So each rung is also measured a second way, which holds the swing fixed and changes only the body:
+
+- **The chain.** It starts from rung 0's better swing (session 10's kept 17.69 m/s). Rung 1's body is searched on *from that swing* for 500 generations (the whole aim, the same draws every time, no extra blocks); rung 2's body from where that ended; and so on to rung 5. Each step is a settled search, not a replay: the plan adapts to the new body.
+- **The reference chain.** The same swing carried on for the same 500 generations a step **on rung 0's unchanged body**, five steps. A chain gets 500 more generations at every step, and the reference says what that alone is worth.
+- **The reading.** A rung's gain by continuation is (the chain's speed after the rung − before it) less (the reference's change over the same step). The first reference step is run twice with different draws; their difference is this measure's own yardstick.
+- **What it gives up.** It is local: it says what each change is worth *to this swing and its neighbours*, a swing that grew up on the old body. A change that only pays with a different kind of swing (rung 3's wider base may be one) shows here as less than it is worth, or as a loss. The searches from S are the other view. Both are reported for every rung; where they disagree, both are said.
+- *What I expect:* the reference creeps up by 0.1–0.5 m/s a step, its two draws within 0.5 m/s of each other. Rung 1 gains 1–3 m/s by continuation (the replay of this same plan gained 2.0 before any search), rung 2 loses 0–2, rung 3 is the least certain (the replay of the plan on MLB's feet is fast, 22 m/s, and misses by 14 cm), rung 4 nothing, rung 5 loses 0–2.
+
 #### Rung 2: a hold that obeys the muscles' rules (the design, written before any search; built and checked at the start instant first)
 
 *(Written before rung 1's values were settled, because it does not wait on the reading; it is run "alone", on rung 0's body, while the damping's sources are read, and again on rung 1's body as the ladder's rung 2.)*
