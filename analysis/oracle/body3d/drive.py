@@ -243,10 +243,59 @@ JOINTS = ("lumbar", "hip_L", "hip_R", "knee_L", "knee_R", "ankle_L", "ankle_R",
 
 
 # ---- the joints' own damping by joint (body-motion 4.13, session 11; PLAN D42; research note 14) -------------------
-# FILLED FROM THE SOURCES READ (note 14) BEFORE ANY RUN; see DAMPING below.
+# N m s/rad. A joint's value is one number (every axis alike) or three, about the axes of the joint's PARENT body, where
+# the joint's two movements can be told apart there: the elbow's hinge is the upper arm's y and the forearm's turn is
+# about the forearm's length, which the hinge keeps in the upper arm's x-z plane, so (turn, bend, turn); the wrist's bend
+# is about the forearm's x and its tilt about an axis the joint keeps square to that, so (bend, tilt, tilt); the ankle's
+# bend is about the shank's y and its roll square to that, so (roll, bend, roll).
+# ONLY THE RELAXED JOINT'S VALUE BELONGS HERE: every source that measured both has damping rising with the muscles'
+# effort, and that part is the muscles' own strength-at-speed behaviour, which this body's drives already carry (at
+# the elbow: Gomi & Osu measured +0.18-0.19 N m s/rad per N m of torque held; the elbow extensor's curve of 4.5 gives
+# 0.23 per N m at low speed). No cap: a linear damper at these values never comes near sessions 1-10's 30 N m, which
+# had no source. The linear law itself overstates a relaxed joint at a swing's speeds (note 14: the coefficient falls
+# as the movement gets larger and faster), so these are upper readings on that side.
+# "read": the central set. READ = a relaxed value read from a paper's text or table. NOT MEASURED / NOT READ = the middle
+# of a stated range, flagged; "low" and "high" move those to the range's ends and leave the read ones.
+#   wrist bend 0.04       READ: the mean of four studies of the relaxed wrist as Salmond, Davidson & Charles 2017 tabulate
+#                         them (0.014-0.09, mean 0.038; Lakie 1984's relaxed wrist read apart: 0.07-0.14 off its figure)
+#   wrist tilt 0.09       NOT MEASURED by anyone (Peaden & Charles 2014: "unknown"); their assumed value, scaled from
+#                         stiffness: 0.088. Range 0.03-0.20 [E: from the bend's read value to about twice the assumption]
+#   forearm's turn 0.03   NOT MEASURED; the same authors' assumption 0.024 (men). Range 0.02-0.10 [E: as the wrist's]
+#   elbow bend 0.43       READ, but with the arm holding its place and reflexes in (Tsuji 1995: 0.22-0.63, mean 0.43;
+#                         "asked to relax his arm"): an upper reading. The truly relaxed elbow was not read (Hayes &
+#                         Hatze 1977, MacKay 1986: closed). Range 0.22-0.97 (Tsuji's least; Gomi & Osu's largest
+#                         zero-torque value)
+#   shoulder 0.47         READ: Lipps et al. 2020, at rest (0 % of maximum): 0.61 raised and lowered, 0.33 turned about
+#                         the upper arm, 0.46 swept in the level plane; their mean (the shoulder's axes cannot be told
+#                         apart in the trunk's frame)
+#   ankle bend 0.40       READ: Lee, Krebs & Hogan 2014, relaxed: 0.34 seated, 0.45 knee straight
+#   ankle roll 0.165      READ: the same: 0.15, 0.18
+#   knee 0.25             READ: the relaxed lower leg left to swing (Casabona, Valle et al. 2012: 0.18 +- 0.08 swinging
+#                         down, 0.31 +- 0.09 swinging up). Small perturbations about a held angle give 1.0 (Koopman 2016,
+#                         elderly) to 2: the two methods disagree fivefold; the free swing is the nearer to a swing
+#   hip 2.0               NOT READ as a relaxed mean. Range 0.5-4.6: Huang 2020's relaxed subjects 2-21 forward and back
+#                         from 1 deg pulls (a poor fit, its authors say), the swinging leg in walking 1.9-4.6 (van der Kooij
+#                         2022), Koopman's relaxed 0.5-10 (second hand); Amankwah 2004's relaxed hip moved through its
+#                         range resists with 14-17 N m at 300-700 deg/s (its fit carried up from 90 deg/s), which is
+#                         1.4-2.7 as a coefficient. Nothing at all for the hip sideways or about the thigh
+#   trunk 5.0             NOT READ. Range 1.0-27.5: relaxed sitting 4-7 forward and back (Hodges 2009, second hand, my
+#                         lever); 27.5 +- 9.0 with the trunk's muscles holding 100-170 N (Moorhouse & Granata 2005: the
+#                         relaxed trunk cannot have more); the least quick-release mean 1.2. NOTHING for the twist relaxed
 DAMP_GROUPS = {"arms": ("shoulder_L", "shoulder_R", "elbow_L", "elbow_R", "wrist_L", "wrist_R"), "trunk": ("lumbar",),
                "legs": ("hip_L", "hip_R", "knee_L", "knee_R", "ankle_L", "ankle_R")}
-DAMPING = {}
+
+
+def _damp_set(wrist_tilt, forearm, elbow, hip, trunk):
+    t = {"lumbar": trunk}
+    for sd in "LR":
+        t.update({"hip_" + sd: hip, "knee_" + sd: 0.25, "ankle_" + sd: (0.165, 0.40, 0.165), "shoulder_" + sd: 0.47,
+                  "elbow_" + sd: (forearm, elbow, forearm), "wrist_" + sd: (0.04, wrist_tilt, wrist_tilt)})
+    return t
+
+
+DAMPING = {"read": _damp_set(0.09, 0.03, 0.43, 2.0, 5.0),
+           "low": _damp_set(0.03, 0.02, 0.22, 0.5, 1.0),
+           "high": _damp_set(0.20, 0.10, 0.97, 4.6, 27.5)}
 
 
 def check_rules(mdl, plan):
@@ -315,35 +364,37 @@ def add_drives(mdl, st, plan, held=False):
 
 
 def damping_of(damp=None):
-    """{joint: N m s/rad} and the cap (N m) for `damp`: None (sessions 1-10: JOINT_DAMP everywhere, capped at
-    JOINT_DAMP_CAP), the name of a set in DAMPING, a number (that value at every joint, no cap), or a dict
-    {"set": name, "scale": {group or joint: factor}, "cap": N m} (a set with some joints' values scaled: the runs across
-    an unread joint's range, body-motion 4.13)."""
+    """{joint: (cx, cy, cz) N m s/rad about the parent body's axes} and the cap (N m) for `damp`: None (sessions 1-10:
+    JOINT_DAMP everywhere, capped at JOINT_DAMP_CAP), the name of a set in DAMPING (no cap), a number (that value at
+    every joint, no cap), or a dict {"set": name, "from": {group or joint: another set's name}, "scale": {group or
+    joint: factor}, "cap": N m}: a set with some joints' values taken from another set or scaled (the runs across an
+    unread joint's range, one group at a time; body-motion 4.13)."""
+    tri = lambda v: tuple(float(x) for x in v) if isinstance(v, (tuple, list)) else (float(v),) * 3
     if damp is None:
-        return {j: JOINT_DAMP for j in JOINTS}, JOINT_DAMP_CAP
+        return {j: tri(JOINT_DAMP) for j in JOINTS}, JOINT_DAMP_CAP
     if isinstance(damp, (int, float)):
-        return {j: float(damp) for j in JOINTS}, NO_CAP
+        return {j: tri(damp) for j in JOINTS}, NO_CAP
     spec = {"set": damp} if isinstance(damp, str) else dict(damp)
-    out = dict(DAMPING[spec["set"]])
+    out = {j: tri(v) for j, v in DAMPING[spec["set"]].items()}
+    for key, other in spec.get("from", {}).items():
+        for j in DAMP_GROUPS.get(key, (key,)):
+            out[j] = tri(DAMPING[other][j])
     for key, f in spec.get("scale", {}).items():
         for j in DAMP_GROUPS.get(key, (key,)):
-            out[j] = out[j] * f
-    for j, v in spec.get("value", {}).items():
-        out[j] = float(v)
+            out[j] = tuple(x * f for x in out[j])
     return out, spec.get("cap", NO_CAP)
 
 
 def add_damping(mdl, st, damp=None):
-    """the joints' own damping (damping_of): about every axis of the joint alike, no stiffness, so nothing pulls
-    toward a posture. A damper only ever takes energy (its torque is -C x the joint's speed, scaled down to the cap)."""
+    """the joints' own damping (damping_of): no stiffness, so nothing pulls toward a posture. A damper only ever takes
+    energy (its torque is -C x the joint's speed axis by axis in the parent's frame, scaled down to the cap)."""
     s = mdl.sys
     s.holds = []
     table, cap = damping_of(damp)
     for j in JOINTS:
         a, ra, bb, rb = mdl.jp[j]
         qa = s.pose(st, a)[1]; qb = s.pose(st, bb)[1]
-        c = table[j]
-        s.hold(j, a, bb, E.qmul(E.qconj(qa), qb), (0.0, 0.0, 0.0), (c, c, c), cap)
+        s.hold(j, a, bb, E.qmul(E.qconj(qa), qb), (0.0, 0.0, 0.0), table[j], cap)
 
 
 def solve_tone(mdl, st, t0, aux=None):

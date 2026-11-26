@@ -38,6 +38,12 @@ MPH = 0.44704
 RUNGS = {
     "r0": {},                                          # session 10's body: its settled swing, run again
     "r2a": {"stand": "muscle"},                        # rung 2 alone, on rung 0's body: the posture held by muscle (4.13)
+    "r1": {"damp": "read"},                            # rung 1: the joints' damping at the values read (drive.DAMPING, note 14)
+    "r1_low": {"damp": "low"}, "r1_high": {"damp": "high"},   # the unread joints at the ends of their ranges, all together
+    "r1_arms_low": {"damp": {"set": "read", "from": {"arms": "low"}}}, "r1_arms_high": {"damp": {"set": "read", "from": {"arms": "high"}}},
+    "r1_trunk_low": {"damp": {"set": "read", "from": {"trunk": "low"}}}, "r1_trunk_high": {"damp": {"set": "read", "from": {"trunk": "high"}}},
+    "r1_hips_low": {"damp": {"set": "read", "from": {"hip_L": "low", "hip_R": "low"}}}, "r1_hips_high": {"damp": {"set": "read", "from": {"hip_L": "high", "hip_R": "high"}}},
+    "r2": {"damp": "read", "stand": "muscle"},         # rung 2: rung 1 with the posture held by muscle
 }
 
 

@@ -2324,19 +2324,72 @@ class LadderChecks(unittest.TestCase):
 
     def test_the_damping_table_is_read_as_written(self):
         """drive.damping_of: no option is sessions 1-10's body (1.0 everywhere, capped at 30 N m); a number is that value
-        everywhere with no cap; a set by name is the set; a scale moves only the named group's joints."""
+        everywhere with no cap; a set by name is the set, with no cap; "from" takes only the named group's joints from
+        another set and "scale" multiplies only those. The central set's values are the ones body-motion 4.13 writes
+        from the sources (note 14): the relaxed wrist's bend 0.04 on the forearm's x, the knee's 0.25, the ankle's bend
+        0.40 on the shank's y and roll 0.165, the shoulder's 0.47; and the sets differ only at the joints not read."""
         t, cap = Dr.damping_of(None)
-        self.assertEqual(set(t.values()), {1.0})
+        self.assertEqual(set(t.values()), {(1.0, 1.0, 1.0)})
         self.assertEqual(cap, 30.0)
         t, cap = Dr.damping_of(0.3)
-        self.assertEqual(set(t.values()), {0.3})
+        self.assertEqual(set(t.values()), {(0.3, 0.3, 0.3)})
         self.assertEqual(cap, Dr.NO_CAP)
-        for name, table in Dr.DAMPING.items():
-            self.assertEqual(set(table), set(Dr.JOINTS))
-            self.assertTrue(all(v >= 0.0 for v in table.values()))
-            t, cap = Dr.damping_of({"set": name, "scale": {"arms": 2.0}})
+        read, cap = Dr.damping_of("read")
+        self.assertEqual(cap, Dr.NO_CAP)
+        self.assertEqual(read["wrist_R"][0], 0.04)
+        self.assertEqual(read["knee_L"], (0.25, 0.25, 0.25))
+        self.assertEqual(read["ankle_R"], (0.165, 0.40, 0.165))
+        self.assertEqual(read["shoulder_L"], (0.47, 0.47, 0.47))
+        self.assertEqual(read["elbow_L"], (0.03, 0.43, 0.03))
+        for name in ("low", "high"):
+            other = Dr.damping_of(name)[0]
+            self.assertEqual(set(other), set(Dr.JOINTS))
             for j in Dr.JOINTS:
-                self.assertAlmostEqual(t[j], table[j] * (2.0 if j in Dr.DAMP_GROUPS["arms"] else 1.0))
+                if j.startswith(("knee", "ankle", "shoulder")):
+                    self.assertEqual(other[j], read[j])
+                elif j.startswith("wrist"):
+                    self.assertEqual(other[j][0], read[j][0])            # the bend is read; the tilt is not
+                    self.assertNotEqual(other[j][1], read[j][1])
+                else:
+                    self.assertNotEqual(other[j], read[j])
+            for a_, b_ in zip(sorted(Dr.damping_of("low")[0].items()), sorted(Dr.damping_of("high")[0].items())):
+                self.assertTrue(all(x <= y for x, y in zip(a_[1], b_[1])))
+        t = Dr.damping_of({"set": "read", "from": {"trunk": "high"}, "scale": {"arms": 2.0}})[0]
+        for j in Dr.JOINTS:
+            want = Dr.damping_of("high")[0][j] if j == "lumbar" else tuple(x * (2.0 if j in Dr.DAMP_GROUPS["arms"] else 1.0) for x in read[j])
+            self.assertEqual(t[j], want)
+
+    @NEED
+    def test_a_joints_two_dampings_act_on_its_two_movements(self):
+        """the elbow's damping is written as (turn, bend, turn) about the upper arm's axes and the wrist's as (bend, tilt,
+        tilt) about the forearm's. On the placed body: with the forearm given a turning rate about the elbow's HINGE alone
+        (the upper arm's y) the damper's torque is the bend's coefficient x that rate about the hinge; with a rate about
+        the forearm's own LENGTH alone it is the turn's coefficient x that rate; the two coefficients differ fourteenfold
+        in the central set, so a mix-up would show. The same at the wrist for its bend (the forearm's x)."""
+        m = B.Model(ranges=(), grip="hands", feet="cleats", wrist="oval")
+        st = B.place(m, T0, moving=False)
+        Dr.add_damping(m, st, "read")
+        s = m.sys
+        holds = {h[0]: h for h in s.holds}
+
+        def torque(joint, axis_w, rate):
+            name, a, b, qref, K, C, cap = holds[joint]
+            s2 = list(st)
+            s2[13 * b + 10:13 * b + 13] = E.scale(axis_w, rate)          # the parent at rest
+            Ra = E.qR(s.pose(s2, a)[1])
+            wl = E.mtv(Ra, E.scale(axis_w, rate))
+            return E.mv(Ra, tuple(-c * w for c, w in zip(C, wl)))
+        hinge = m.axis(st, "uarm_L", (0, 1, 0))
+        length = m.axis(st, "farm_L", (0, 0, 1))
+        self.assertLess(abs(E.dot(hinge, length)), 1e-9)                   # the hinge holds the forearm's length square to it
+        t1 = torque("elbow_L", hinge, 3.0)
+        self.assertAlmostEqual(E.dot(t1, hinge), -0.43 * 3.0, delta=1e-12)
+        t2 = torque("elbow_L", length, 3.0)
+        self.assertAlmostEqual(E.dot(t2, length), -0.03 * 3.0, delta=1e-12)
+        self.assertLess(E.norm(E.sub(t2, E.scale(length, -0.09))), 1e-12)
+        bend = m.axis(st, "farm_R", (1, 0, 0))
+        t3 = torque("wrist_R", bend, 5.0)
+        self.assertAlmostEqual(E.dot(t3, bend), -0.04 * 5.0, delta=1e-12)
 
     @NEED
     def test_the_posture_held_by_muscle_starts_as_the_constant_torques_did_and_then_obeys_the_muscles_rules(self):

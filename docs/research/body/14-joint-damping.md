@@ -64,8 +64,43 @@ For [PLAN D42](../../../PLAN.md) rule 1 and [body-motion §4.13](../../body-moti
 
 ## Part B. The arms
 
-*(Added below when the arm sources were read.)*
+### B1. Shoulder
+
+| Source | Subjects, method | Condition | B, N·m·s/rad | Read |
+| :-- | :-- | :-- | :-- | :-- |
+| Lipps, Baillargeon, Ludvig & Perreault, Ann Biomed Eng 2020;48:2354 | 11 (6 men), 29 y; the arm in a cast on a motor, raised 90° to the side, elbow at 90°; position steps of 0.06 rad | **at rest (0% of maximum)**; then a torque held at 5 and 10% | at rest: raising and lowering **0.61 ± 0.22**; turning about the upper arm **0.33 ± 0.10**; swept forward and back in the level plane **0.46 ± 0.16** ("at rest (0.46±0.16 Nm-sec/rad)"); rising 0.09–0.21 per N·m of held torque | **FT** (its Table 2: the intercepts) |
+| Gomi & Osu, J Neurosci 1998;18:8965 | 4 (2 men); the hand pushed 6–8 mm, forearm supported | a force held at the hand, no co-contraction; the fit's value at zero torque | shoulder 0.77 and 0.49 (two subjects); **elbow 0.97 and 0.55**; rising 0.09–0.10 per N·m at the shoulder and **0.18–0.19 per N·m at the elbow** | **FT** (Table 3) |
+| Tsuji, Morasso, Goto & Ito, Biol Cybern 1995;72:475 | 4 men, 21–23; the hand moved 10 mm | "asked to relax his arm" and keep the hand in place | shoulder 0.42–1.05 (mean of 16 cells 0.71, **mine**); **elbow 0.22–0.63 (mean 0.43)** | **FT** (scan, Table 3) |
+| Chang, Hunt, Atkins & Lee (an exoskeleton study) | 5; the arm held up unsupported | holding the arm against gravity | 2.5–4.0 | **FT**; a held arm with a cuff in series |
+| Zhang et al., J Orthop Res 2000;18:94; Engin 1984 | | | not reached; Zhang: 0.08 per N·m (Lipps's words) | **AB**, **2nd** |
+
+### B2. Elbow
+
+- Gomi & Osu and Tsuji, above: **0.22–0.63 with the arm "relaxed" but holding its place** (reflexes included), 0.55–0.97 at zero torque by regression.
+- Selen, Beek & van Dieën, Exp Brain Res 2006 (12 subjects, a fast elbow extension, perturbed late; **FT**): moving, about 0.30–0.38 (read off its Fig. 7, **mine**); "Stiffness and damping during maximal co-contraction ranged from 24.4 to 99.5 Nm/rad and 0.18 to 1.39 Nms/rad". It quotes Bennett 1992: 0 to 0.7 within a cycle; Popescu 2003: 0.4 to 1.2 between subjects.
+- **A truly relaxed elbow: not found.** Hayes & Hatze 1977 and MacKay et al. 1986 measured it and neither could be opened (publisher fetches refused; no open copy).
+
+### B3. Wrist, bent forward and back
+
+| Source | Subjects, method | Condition | B, N·m·s/rad | Read |
+| :-- | :-- | :-- | :-- | :-- |
+| Salmond, Davidson & Charles, J Neurophysiol 2017;117:1239 (a paper that tabulates the others) | | relaxed; active | "prior measurements of passive damping in FE (range 0.014–0.09 Nms/rad, **mean 0.038** Nms/rad) (Gielen and Houk 1984; Klomp et al. 2014; Lakie et al. 1984; Park et al. 2011)"; "active damping in FE (range 0.01–0.11 Nms/rad, mean 0.069 Nms/rad)" | **FT** |
+| Lakie, Walsh & Wright, J Physiol 1984;353:265 | 12 men, 11 women; the wrist driven at its resonance, about 2 Hz | **relaxed** (EMG silent) | "a damping ratio of about 0·25"; the coefficient "changes little over a wide range of torques"; read off its Fig. 7 (**mine**): men 0.10–0.14, women 0.065–0.09 | **FT** (scan) |
+| Gielen & Houk, J Neurophysiol 1984;52:553 | | relaxed | 0.02–0.03 | **2nd** (Milner & Cloutier 1998; Peaden & Charles 2014); the paper **AB** |
+| Halaki, O'Dwyer & Cathers, J Biomech 2006;39:2171 | 10; sinusoids of 0.4–6° | a flexor held at 15% of maximum | 0.11, 0.11, 0.11, 0.07, 0.04, 0.03 as the movement grows from 0.4° to 6°: **73% less at the largest** | **TAB** |
+| Milner & Cloutier, Exp Brain Res 1998;122:309 | 10; a fast wrist flexion (500°/s) against an unstable load | moving, co-contracting | about 0.04–0.09 (its Fig. 5C, **mine**); it rose as the movement's size and speed fell | **FT** |
+| Falzarano et al., Front Hum Neurosci 2021 | 13; a ramp of 0.34 rad at 100–150°/s | gripping a handle at up to 60% of maximum grip | 0.02 ± 0.01 to 0.06 ± 0.02; "did not differ significantly under the different velocity and grip conditions" | **FT** (Table 5) |
+
+### B4. The wrist tilted toward and away from the thumb; the forearm's turn
+
+**Never measured, as far as could be read.** Peaden & Charles, J Biomech 2014;47:2779 (**FT** of a copy): "The passive damping associated with coupled wrist and forearm rotations is unknown … damping of the wrist and forearm was assumed to be proportional to wrist and forearm stiffness (the constant of proportionality was chosen so that the damping in FE would be 0.03 Nm s/rad)". Their assumed values: the forearm's turn 0.024 (men), the wrist's tilt 0.088. Davidson & Charles 2017 assume the same way (0.021 and 0.082). Park, Chang & Kang 2017 claims a measured three-axis forearm and wrist impedance in 8 subjects; only its abstract was reached, with no numbers.
+
+### B5. What an arm model assumes
+
+Chadwick et al., IEEE TBME 2014 (**FT**): every arm joint "b is a small damping coefficient (1Nms/rad)", with no source. It is the value this body has carried.
+
+**Across the arm sources:** every "relaxed" shoulder and elbow value except Lipps's is a posture held, reflexes included, so it is an upper reading of the passive value; and the wrist sources agree that the coefficient falls as the movement gets larger or faster. No source read measured a joint's damping at a swing's speeds.
 
 ## Not found
 
-A relaxed linear damping for: the hip sideways and about the thigh; the knee about the shin; the trunk's twist and side bend. Kearney & Hunter 1990's review and Zatsiorsky 2002's table (neither reached). The passive damping a published whole-body model uses, with its source.
+A relaxed linear damping for: the hip sideways and about the thigh; the knee about the shin; the trunk's twist and side bend; the elbow truly relaxed (Hayes & Hatze 1977, MacKay 1986: closed); the forearm's turn and the wrist's tilt (never measured); Gielen & Houk's own table. Kearney & Hunter 1990's review and Zatsiorsky 2002's table (neither reached). The passive damping a published whole-body model uses, with its source.
