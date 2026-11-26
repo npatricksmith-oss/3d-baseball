@@ -1,6 +1,6 @@
 # Task List
 
-**Last updated:** 2026-11-25 (body-motion phase 0 started).
+**Last updated:** 2026-11-26 (body-motion session 11 running).
 
 What is next and what is open. Other files hold the rest:
 
@@ -15,15 +15,13 @@ Status: `[ ]` not started · `[~]` partly done · `[?]` needs an owner decision
 
 ---
 
-## Resume here (2026-11-25)
+## Resume here (2026-11-26)
 
-**State.** PLAN D31–D41: a force-driven body; PLAN §14.1, spec [docs/body-motion.md](docs/body-motion.md). **D37: the lab study [4] is dropped.** The swing is learned by practice, checked against directly measured hitters.
+**State.** PLAN D31–D42: a force-driven body; PLAN §14.1, spec [docs/body-motion.md](docs/body-motion.md). **D37: the lab study [4] is dropped.** The swing is learned by practice.
 
-**Sessions 8–10 are merged (reviews resolved; spec §4.10–§4.12).** The body swings: 17.7 m/s (40 mph; the gate asks 29). Its review: hold-still torques give 27% of the energy, unsourced joint damping takes 64% of the muscles' work. D41: one session left.
+**Sessions 8–10 are merged** (spec §4.10–§4.12): 17.7 m/s (40 mph; the gate asks 29). **D42 (owner, 2026-11-26): D41's cap is lifted;** on while each session gains honest bat speed, back to him if two in a row gain nothing.
 
-**Ruled:** Q61 = b, Q62 = a, Q63 = a (PLAN D39–D41). Nothing waits on the owner.
-
-**Not running. Next: session 11, the last** (WORKER-BODY-3D-11, worktree `swing-research`, branch `work/body-3d`; Fable, then an Opus review). Owner checks `/usage`.
+**Running: session 11.** Worker `body-3d-11` (Fable), Workers tab pane `t4v`, worktree `swing-research`, branch `work/body-3d`, brief WORKER-BODY-3D-11 there. Restart it if stopped short. Then: an Opus review, fixes, the checks once, merge, push, the ladder in mph to the owner. Nothing waits on him.
 
 **Next:** §2: the ground-dive leftovers ([note](docs/calibration/2026-11-23-of-ground-dive.md) §9).
 
