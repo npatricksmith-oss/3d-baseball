@@ -294,7 +294,7 @@ Written 2026-11-26 by worker body-3d (job `WORKER-BODY-3D-8FIX2.md`). No search 
 | **P2-3** where the swing came from | **Accepted.** One clause in the status line, the "Status" bullet, "In one paragraph", §4.4 and §4.10's results | — |
 | **P2-4** the parked basin | **Not changed, as the job says.** §4.10 states it with the review's arithmetic; the remedy is item 5 of what is left, to be stated before any run | The remedy |
 | **P2-5** the variants | **Accepted.** §4.10's table gives each against 18.0 m/s (the baseline carried the same 15 iterations) with "both feet left the ground" beside it, says differences under about 1 m/s are inside what an unsettled search moves, and restates the hips' run (the rear hip went to its new end, the pelvis turned 3° more: the planted feet first). The review's other candidates are listed | No baseline run was added; 18.0 is the effort rows' |
-| **P2-6** corrections on main | Research note 11, line 5 is corrected (the job gave it to this worker). **PLAN D41's and D39's reasons are the Coordinator's files and are not touched here** | The Coordinator |
+| **P2-6** corrections on main | Research note 11, line 5 is corrected (the job gave it to this worker). PLAN D39's and D41's reasons were rewritten on main by the Coordinator (`a416716`): the energy came from a fault in the stop, not a bounce; the wrists uncock the right way and the rear hand's weld is the fault | — |
 | **P3** "with the wrist unflexed" | Said in §4.10's table and in `body.py`'s comment | — |
 | **P3** on which body the fit's wrist figures were read | Said (the body of sessions 1–7 at 0 ms on its clock), with the review's figures on the practice body beside them | — |
 | **P3** three stale lines | Struck or marked | — |
@@ -302,3 +302,5 @@ Written 2026-11-26 by worker body-3d (job `WORKER-BODY-3D-8FIX2.md`). No search 
 | **P3** the passivity check's tolerance | Not changed; noted here. The engine's test asks the booked work plus the stored energy to stay under a thousandth of the starting energy on the lone rod | A stated tolerance for multi-body runs, if wanted |
 
 **The order of what is left** is the review's and the job's, unchanged: each hand's own grip; how a tensed muscle holds, then the clock's question; a rear foot that can pivot or a knee that can twist; PLAN D39; the score's parked basin; a start that owes the lab study nothing; then the practice runs and the gate.
+
+**Coordinator, 2026-11-26:** merged to main after its own run of the checks (job 366: 42 body tests with the one expected failure, 109 oracle tests, `probe3d.py --check`, the docs check, the saved swing replayed at 17.8 m/s). No third review: what followed this one is the account and one reading fix covered by a test. Everything in the "Left" column is carried in [body-motion](../body-motion.md) "Status and what is left", items 1–7.
