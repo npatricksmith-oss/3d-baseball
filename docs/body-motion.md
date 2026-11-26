@@ -1791,6 +1791,46 @@ Session 10 (2026-11-26, PLAN D41: the second of three) has one question: **can t
   - *Not turned into a plan:* nothing of part 2 enters part 3.
   - *What would make the test decide* (for the last session): the motion's shape between the two ends has to be found, not written: the same solve inside a search over the posture numbers' paths (a few knots each), asking for the least worst share with every range held and the feet's limits kept. That is a search, but over smooth kinematics with no stiff ends, no ground that sticks and slips and no time step, which are what make the practice search's score rough. It is still a diagnosis: no recorded motion enters it and nothing of it need enter the practice search.
 
+#### Part 3: the search, made to work, then run (the method, written before any run)
+
+**What is searched and scored is unchanged:** the plan's 205 numbers (each muscle group's strength, onset, rise, switch-off and level beforehand), the aim of §4.10 with contact read at the sweet spot's nearest approach, the clock charging each arm muscle its own overrun (§4.11). The body is session 9's with part 1's two changes: hands, a muscle that holds, cleats, **the wrists' ellipses, the cleared start** (still [4]'s launch posture moved by part 1's rule, flagged in every result). Every muscle is free, the rear calf among them (nothing is switched off or held at its old level).
+
+**The method: an evolution strategy that needs no slopes** (`practice3d.py`, `cma()`; the separable form of CMA-ES, Ros & Hansen 2008, written out in the standard library).
+
+- *What it does.* It keeps a centre plan and, for each of the 205 numbers, a spread. Each generation it draws 24 plans about the centre, runs them all, ranks them by score, moves the centre to the weighted mean of the better half, and widens or narrows each number's spread by how the better plans were spread. Only the order of the scores is used.
+- *Why this one:* the review measured the score's slopes as unusable (they disagree forward and backward and do not settle as the difference shrinks) and its value as jumping by fractions of a unit under a 0.03 ms change of one onset. A method that uses ranks of whole runs over a spread of plans is not misled by a jump smaller than the spread's own effect, needs no difference to be small, and cannot be refused a step. The separable form (one spread per number, no cross terms) is used because with 205 numbers and a few thousand runs a full covariance could not be learned. *What it gives up:* it cannot learn that two numbers must move together except through the centre's own drift, and it is a local method from where it starts.
+- *Its settings, all [E] and stated:* 24 plans a generation (the standard 4 + 3 ln 205 is 19; 24 is four workers' six each), the better 12 weighted by rank; the first spread 0.03 of each number's range (the old search's difference was 0.02); the standard learning rates for the separable form; a plan outside the box is run at the box's edge and charged 10⁴ times its squared distance outside; a failed run ranks last and is counted; the random draws are a fixed seed's. The result is the best plan ever run, not the last centre.
+- *The step:* **every run at 0.25 ms** (0.18 s a run; session 9's searches ran at 0.5 ms). On the nearest plan the bat's speed at 0.25 ms and at 0.125 ms agree to 0.01 m/s, where 0.5 ms differs by 0.2.
+- *Two stages, as before:* 100 generations of the reach stage (only bring the sweet spot to the ball, in balance, inside the clock), then 250 of the whole aim; 8,400 runs a start, about ten minutes.
+
+**The search's own checks, built in** (rule 6; printed with every result):
+
+1. *The result at three steps:* the best plan run at 0.5, 0.25 and 0.125 ms: its score, its miss and its speed at each. A result that holds only at the search's own step is not a result.
+2. *The line from where it started to where it ended:* the score at eleven points between the starting plan and the result and one beyond it, at 0.25 and at 0.125 ms. It should fall along the line; how rough it is on the way says what the search was working against.
+3. *Slopes forward and backward,* for the eight numbers the search moved furthest, at differences of 0.02 and 0.005: reported, not used, as the measure of how rough the score is at the result.
+4. *The spread at the end* (the largest and the median of the 205) and the score's fall over the last 50 generations: whether it had settled.
+5. *Failed runs,* counted every generation; and the old count of failed one-number differences at the result.
+
+**The runs** (one job each, one at a time):
+
+| Start | What it is | Viewing times |
+| :-- | :-- | :-- |
+| S | session 9's nearest plan (it came from the fit to [4], through sessions 8 and 9: flagged) | 0.10 s and 0.20 s |
+| K | S with the rear calf at half its strength from 100 ms after the start, rising in 80 ms [E]: the review showed the heel comes up when the calf works and that no kept plan used it | 0.10 s and 0.20 s |
+| C | written by hand, 0.6 of every forward muscle (owes [4] nothing) | 0.10 s and 0.20 s |
+| D | written by hand, 0.3 of every muscle, random timings (owes [4] nothing) | 0.10 s and 0.20 s |
+
+Part 2 made no motion that could be turned into a plan. Each result is read against every gate check with its margin, with each passive element's net work, the joint ends' loads, and both wrists' place in their ellipses.
+
+**What I expect:**
+
+- *The search moves.* From S the score (315 on the cleared start: the miss 57, balance 156, the line 34, speed 32, the clock 15) falls below 150 at 0.10 s within the 350 generations, mostly by balance and the miss; the line check shows a fall from start to result at both steps.
+- *It does not reach the gate.* The best of the eight meets the ball within 3 cm at 17–22 m/s; none is inside 29–34. The hips stay under 450°/s (the lead hip's range, part 2). Joint ends still carry hundreds of N·m (D39 is not built).
+- *The viewing time:* at 0.20 s the arms may fire only 153 ms before contact; I expect contact speeds 1–3 m/s lower than at 0.10 s from the same start, with the legs and trunk starting earlier relative to the arms. This is the first run that can show it.
+- *C and D:* they cross the ball's plane (they did on cleats in session 9) and come within 10 cm; I do not expect either to beat S.
+- *K:* the rear heel comes up; whether that buys hip speed I do not know.
+- If the search does not move from S (the score falling less than 5% in 350 generations), the method is at fault again and that is the finding.
+
 ## 5. The drive and its control (§14.1 items 2 and 3)
 
 ### 5.1 What a drive is
