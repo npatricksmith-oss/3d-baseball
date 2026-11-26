@@ -254,7 +254,11 @@ def _cases():
     m.sys.anchors(st, aux)
     m.sys.sec_start(st, aux)
     m.check_aux = aux
-    out.append(("the wrists' ellipses, every drive at its bound", m, st, -0.250, 200))
+    # 100 ms, not 200: both wrists' ellipses are engaged inside it (the rear at 30 and at 90 ms, up to 1,275 N m) and the
+    # engines agree to 3e-11; from 110 ms this motion multiplies rounding differences five-hundredfold in 20 ms and the
+    # engines' difference (1.3e-8) then tracks the Python engine's own difference from itself under a 1e-13 nudge (1.5e-8),
+    # as the cleats case does (sim/target/codex-probes/body3d/s10/oval_diverge.py)
+    out.append(("the wrists' ellipses, every drive at its bound", m, st, -0.250, 100))
     fitted = os.path.join(HERE, "fit3d_d34_all.json")
     if not os.path.isfile(fitted):                   # session 6's fit (its 22 channels; session 7's then switched off)
         fitted = os.path.join(HERE, "fit3d_d34_arms.json")
