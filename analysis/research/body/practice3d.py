@@ -138,7 +138,9 @@ class Ctx:
         self.aux0 = list(m.start_aux)
         Dr.BOUND_SCALE.clear(); Dr.BOUND_SCALE.update(o.get("bound_scale", {}))
         self.bd = Dr.bounds(H, M)
-        st = Dr.add_drives(m, st, {n: (0.0, 0.0, 0.05, 0.1, 0.0) for n in CH})
+        # hold="let_go" (body-motion 4.11, part 2): every muscle's level beforehand is held with no net torque until its
+        # onset, and the hold then lets go (engine.actuator's held). The clock then reads onsets only.
+        st = Dr.add_drives(m, st, {n: (0.0, 0.0, 0.05, 0.1, 0.0) for n in CH}, held=o.get("hold") == "let_go")
         Dr.BOUND_SCALE.clear()
         self.limits = B.add_ranges(m, st, k_big=o.get("k_big"), wrists=o.get("wrists", "cocked"), rom=o.get("rom"))
         self.tone, self.tone_rest = Dr.solve_tone(m, st, T0, aux=list(self.aux0))
@@ -171,7 +173,7 @@ class Ctx:
         self.el = E.cross(self.nb, self.ev)                                       # level, square to it
         self.effort_w = o.get("effort_w", EFFORT_W)
         self.strain_w = o.get("strain_w", 0.0)
-        self.t_avail = BALL_FLIGHT - T_VIEW - T_LATENCY
+        self.t_avail = BALL_FLIGHT - o.get("t_view", T_VIEW) - T_LATENCY      # how long before contact an arm muscle may fire
         self.z0 = B.com(m, st)[0][2]
         self.evals = 0
 
@@ -275,18 +277,25 @@ class Ctx:
         """{channel: mean over the swing of (level x strength / bound) squared}."""
         acc = {n: 0.0 for n in CH}
         k = 0
+        held = self.o.get("hold") == "let_go"
         for t, state, con, act, stop, sec in recs:
             if t > tx + 1e-9:
                 break
             k += 1
             for n, a in zip(CH, act):
-                acc[n] += (a[2] * pl[n][0] / self.bd[n]) ** 2 if self.bd[n] > 0 else 0.0
+                if self.bd[n] <= 0:
+                    continue
+                acc[n] += (a[2] * pl[n][0] / self.bd[n]) ** 2
+                if held and pl[n][4] > 0.0:
+                    # what holds a tensed muscle is working too, at the muscle's own level, until it has let go (4.11)
+                    left = 1.0 if t < pl[n][1] else math.exp(-(t - pl[n][1]) / E.TA_REL)
+                    acc[n] += (min(a[2], pl[n][4] * left) * pl[n][0] / self.bd[n]) ** 2
         return {n: v / max(1, k) for n, v in acc.items()}
 
     def arm_onsets(self, pl):
         """when each arm muscle of any size first drives: its onset, or the start if it is tensed beforehand (a starting
         level over 1 % of its bound is drive from the first instant; review P2-4)."""
-        if self.o.get("hold") == "resolve":
+        if self.o.get("hold") in ("resolve", "let_go"):      # a held muscle has not fired until its onset
             return [pl[n][1] for n in ARMS if pl[n][0] > 0.01 * self.bd[n]]
         return [T0 if pl[n][0] * pl[n][4] > 0.01 * self.bd[n] else pl[n][1] for n in ARMS if pl[n][0] > 0.01 * self.bd[n]]
 
@@ -575,8 +584,9 @@ def report(ctx, u, log=print):
     on = ctx.arm_onsets(pl)
     out["clock_ms"] = (tx - min(on)) * 1e3 if on else None
     out["arms_tensed_beforehand"] = sorted(n for n in ARMS if pl[n][0] * pl[n][4] > 0.01 * ctx.bd[n])
-    log("   effort %.3f (0 = nothing, 1 = everything flat out all swing); the first arm drive of any size, a muscle tensed from the start counted, is %.0f ms before contact (the clock allows %.0f); arm muscles tensed from the start: %s"
-        % (out["effort"], out["clock_ms"] or 0.0, ctx.t_avail * 1e3, ", ".join(out["arms_tensed_beforehand"]) or "none"))
+    log("   effort %.3f (0 = nothing, 1 = everything flat out all swing); the first arm drive of any size, %s, is %.0f ms before contact (the clock allows %.0f); arm muscles tensed from the start: %s"
+        % (out["effort"], "a tensed muscle held until its onset and not counted" if ctx.o.get("hold") == "let_go" else "a muscle tensed from the start counted",
+           out["clock_ms"] or 0.0, ctx.t_avail * 1e3, ", ".join(out["arms_tensed_beforehand"]) or "none"))
     pairs = (("core", "core_back"), ("sh_raise_L", "sh_lower_L"), ("sh_raise_R", "sh_lower_R"), ("sh_irot_L", "sh_erot_L"), ("sh_irot_R", "sh_erot_R"),
              ("elbow_ext_L", "elbow_flex_L"), ("elbow_ext_R", "elbow_flex_R"), ("wrist_flex_L", "wrist_ext_L"), ("wrist_flex_R", "wrist_ext_R"),
              ("pron_L", "sup_L"), ("pron_R", "sup_R"), ("hip_abd_L", "hip_add_L"), ("hip_abd_R", "hip_add_R"), ("knee_ext_L", "knee_flex_L"),
@@ -664,6 +674,10 @@ def main():
     arg = lambda k, d: a[a.index(k) + 1] if k in a else d
     main_file = os.path.join(HERE, "practice3d_main.json")
     body = {"grip": arg("--grip", None)} if "--grip" in a else {}      # the body a new search runs on; kept in the result's options
+    if "--hold" in a:
+        body["hold"] = arg("--hold", None)
+    if "--view" in a:
+        body["t_view"] = float(arg("--view", T_VIEW))
     if "--show" in a:
         d = json.load(open(arg("--show", main_file)))
         ctx = Ctx(**dict(d.get("options", {}), **body))

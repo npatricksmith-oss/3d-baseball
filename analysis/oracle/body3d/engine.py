@@ -36,6 +36,7 @@ G = 9.81
 BAUM_A = 50.0             # [E] 1/s, Baumgarte velocity gain (range 10-200; drift is ~1e-9 m either way)
 BAUM_B = 50.0             # [E] 1/s, Baumgarte position gain
 TA_UP, TA_DN = 0.015, 0.050   # [E] activation time constants, s (OpenSim Thelen2003 defaults, body-motion 5.1)
+TA_REL = TA_DN            # [E: 0.015-0.050] s: what holds a tensed muscle lets go at the muscle's onset as a muscle switches off (4.11)
 K_FV = 0.25               # [E] Hill curvature (body-motion 5.1)
 ECC = 1.5                 # [E] eccentric plateau
 ECC_SLOPE = 4.0           # [E]
@@ -274,7 +275,7 @@ class System:
         for i in range(3):
             self.dotc(a, b, E3[i], mtv(Rb, mv(Ra, E3[(i + 1) % 3])))
 
-    def actuator(self, name, a, b, axis_a, T, W, t_on, t_rise, t_off, a0=0.0, tab=-1, ksec=0.0, axis_b=None):
+    def actuator(self, name, a, b, axis_a, T, W, t_on, t_rise, t_off, a0=0.0, tab=-1, ksec=0.0, axis_b=None, held=False):
         """a drive between a and b about an axis fixed in a (5.1): on b the torque T act f_v about +axis,
         on a its reaction. Its shortening speed is b's angular velocity relative to a about the axis.
         a0: the excitation it holds before its onset (a muscle tensed before it fires; 4.5).
@@ -283,10 +284,25 @@ class System:
         gets ksec x the spring's stretch, and the stretch follows the muscle (sec_update).
         axis_b (a direction fixed in b): the drive acts about the FLOATING axis square to both, the unit vector
         along axis_a x axis_b, which turns axis_b away from axis_a (4.5, session 7: raising and lowering the arm, the axis square to the trunk's long axis and the
-        upper arm). Where the two are parallel there is no such axis and the drive gives nothing."""
+        upper arm). Where the two are parallel there is no such axis and the drive gives nothing.
+        held (body-motion 4.11): the level a0 it is tensed at before its onset is held by its opposite number, so that
+        the pair puts NO net torque on the joint until the onset, whatever the joint does; from the onset the hold
+        falls away with the time constant TA_REL. The joint gets the muscle's own torque times hold_share()."""
         self.acts.append([name, a, b, unit(axis_a), float(T), float(W), float(t_on), float(t_rise), float(t_off),
-                          float(a0), int(tab), float(ksec), ZERO if axis_b is None else unit(axis_b)])
+                          float(a0), int(tab), float(ksec), ZERO if axis_b is None else unit(axis_b), 1.0 if held else 0.0])
         return len(self.acts) - 1
+
+    @staticmethod
+    def hold_share(t, t_on, a0, act):
+        """the share of a held muscle's own torque that reaches its joint: 1 less (the level it was tensed at x what is
+        left of its hold) over its activation now. 0 until the onset (its activation is then the level itself), rising
+        without a step, 1 once the hold is gone. Never negative: a muscle switched off under a hold gives nothing."""
+        if a0 <= 0.0:
+            return 1.0
+        left = 1.0 if t < t_on else (1.0 if "hold_stays" in MUT else math.exp(-(t - t_on) / TA_REL))
+        if act <= a0 * left:
+            return 0.0
+        return 1.0 - a0 * left / act
 
     @staticmethod
     def float_axis(na, nb):
@@ -542,7 +558,7 @@ class System:
         diag = self.diag
         p_act = p_stop = p_hold = p_con = 0.0
         nc = len(self.contacts)
-        for j, (name, a, b, ax, T, W, t_on, rise, t_off, a0, tab, ksec, axb) in enumerate(self.acts):
+        for j, (name, a, b, ax, T, W, t_on, rise, t_off, a0, tab, ksec, axb, held) in enumerate(self.acts):
             act = s[oa + j]
             u = self.excitation(j, t)
             ds[oa + j] = (u - act) / (TA_UP if u > act else TA_DN)
@@ -556,6 +572,8 @@ class System:
                 tau = T * act * fv_tab(self.fvtabs[tab], wrel, self.tab_ecc(tab))
             else:
                 tau = T * act * fv(wrel / W)
+            if held != 0.0:
+                tau *= self.hold_share(t, t_on, a0, act)
             tv = scale(n, tau)
             Tq[b] = add(Tq[b], tv)
             if a >= 0 and "no_reaction" not in MUT:

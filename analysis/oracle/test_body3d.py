@@ -1554,6 +1554,136 @@ class HandsChecks(unittest.TestCase):
         self.assertAlmostEqual(e1 - e0, work(m.sys, s1), delta=0.03 * (abs(s1[ow]) + abs(s1[ow + 2]) + 1.0))   # 3 % of the gross work booked
 
 
+def held_rod(T=40.0, a0=0.6, t_on=0.020, held=True, t_end=0.40, h=1e-3):
+    """a heavy rod on a hinge, no gravity, one drive about the hinge tensed at a0 before its onset at t_on (rise 50 ms),
+    held or not. Returns [(t, torque on the joint, joint speed, activation)] after every step."""
+    s = E.System(g=(0.0, 0.0, 0.0))
+    b = s.body("rod", 30.0, (4.0, 4.0, 0.5))
+    s.hinge(-1, b, (0, 0, 0), (0, 0, 0.5), (0, 1, 0), (0, 1, 0))
+    s.actuator("m", -1, b, (0, 1, 0), T, 20.0, t_on, 0.05, 1e9, a0, held=held)
+    st = s.new_state()
+    s.set_body(st, b, (0.0, 0.0, -0.5), (1.0, 0.0, 0.0, 0.0))
+    st[13 * s.nb] = a0
+    aux = s.new_aux()
+    s.diag = {}
+    out = []
+    for i in range(int(round(t_end / h))):
+        st = s.step(i * h, st, aux, h)
+        s.deriv((i + 1) * h, st, aux)
+        out.append(((i + 1) * h,) + tuple(s.diag["act"]["m"]))
+    return out, st, s
+
+
+class HeldChecks(unittest.TestCase):
+    """a muscle tensed before the pitch only holds (body-motion 4.11, part 2)."""
+
+    def test_a_held_muscle_gives_nothing_before_its_onset_then_rises_without_a_step_to_its_whole_torque(self):
+        """the rod's drive, tensed at 0.6 and held: no torque and no motion before its onset; from the onset the torque
+        rises with no step larger than a twentieth of its strength per millisecond; a quarter of a second later it is
+        the whole torque of the same muscle un-held (strength x activation x the speed curve, computed here). Not held,
+        the same muscle pushes from the first instant."""
+        T = 40.0
+        rows, st, s = held_rod(T=T)
+        before = [r for r in rows if r[0] < 0.020 - 1e-9]
+        self.assertTrue(all(r[1] == 0.0 and r[2] == 0.0 for r in before))
+        taus = [0.0] + [r[1] for r in rows]
+        self.assertLess(max(abs(b_ - a_) for a_, b_ in zip(taus, taus[1:])), 0.05 * T)
+        self.assertGreater(max(taus), 0.5 * T)
+        t, tau, w, act = rows[-1]
+        self.assertGreater(t, 0.020 + 5 * E.TA_REL)
+        self.assertAlmostEqual(tau, T * act * E.fv(w / 20.0), delta=0.01 * T)
+        loose, _, _ = held_rod(T=T, held=False)
+        self.assertAlmostEqual(loose[0][1], T * 0.6, delta=0.02 * T)
+
+    def test_a_hold_that_never_lets_go_fails_that_check(self):
+        """the mutation, and session 8's dead end (the balancing torque left on all swing): the muscle never gets its
+        whole torque."""
+        E.MUT.add("hold_stays")
+        try:
+            rows, st, s = held_rod()
+        finally:
+            E.MUT.discard("hold_stays")
+        t, tau, w, act = rows[-1]
+        self.assertLess(tau, 0.6 * 40.0 * act * E.fv(w / 20.0))
+
+    def test_the_holds_share_is_zero_to_the_onset_never_negative_and_ends_at_one(self):
+        """hold_share over time for a muscle tensed at 0.7: 0 before the onset whatever its activation is doing below
+        the level; between 0 and 1 and never falling while the activation rises; within 1 % of 1 after five time
+        constants; and 0, not negative, for a muscle switched off under its hold."""
+        f = E.System.hold_share
+        self.assertEqual(f(0.0, 0.1, 0.7, 0.7), 0.0)
+        self.assertEqual(f(0.05, 0.1, 0.7, 0.3), 0.0)
+        prev = 0.0
+        for k in range(1, 400):
+            t = 0.1 + k * 1e-3
+            act = min(1.0, 0.7 + 0.3 * k / 60.0)
+            x = f(t, 0.1, 0.7, act)
+            self.assertGreaterEqual(x, prev - 1e-12)
+            self.assertLessEqual(x, 1.0)
+            prev = x
+        self.assertGreater(prev, 0.99)
+        self.assertEqual(f(0.11, 0.1, 0.7, 0.05), 0.0)
+        self.assertEqual(f(0.5, 0.1, 0.0, 0.3), 1.0)             # nothing tensed: nothing held
+
+    @NEED
+    def test_a_body_with_every_muscle_tensed_and_held_moves_as_the_body_with_none_tensed_until_the_first_onset(self):
+        """the hands' body under gravity, its hold-still torques and damping, every one of its 41 muscles at its bound
+        with a late onset: tensed at 0.7 and held, its segments' states are the untensed body's, entry for entry, for
+        the 55 ms before the first onset, while the body moves (not only at the first instant), and the drives have
+        booked no work. Tensed and not held it is elsewhere within 5 ms."""
+        on = T0 + 0.060
+        runs = {}
+        for tag, level, held in (("none", 0.0, False), ("held", 0.7, True), ("loose", 0.7, False)):
+            m = B.Model(ranges=(), grip="hands")
+            st = B.place(m, T0)
+            bd = Dr.bounds(m.H, m.M)
+            # "none": no muscle at all (strength 0). A muscle at its bound with activation 0 is not quite nothing: its
+            # tendon spring is worked as if a thousandth active (engine.MUT_A_MIN), up to 0.15 % of its strength.
+            st = Dr.add_drives(m, st, {n: (bd[n] if level else 0.0, on, 0.05, 1.0, 0.0) for n in bd}, held=held)
+            B.add_ranges(m, st)
+            Dr.solve_tone(m, st, T0, aux=list(m.start_aux))
+            Dr.add_damping(m, st)
+            oa = 13 * m.sys.nb
+            for j, a in enumerate(m.sys.acts):
+                a[9] = level
+                st[oa + j] = level
+            aux = list(m.start_aux)
+            m.sys.sec_start(st, aux)
+            s1, seq = list(st), []
+            for i in range(55):
+                s1 = m.sys.step(T0 + i * 1e-3, s1, aux, 1e-3)
+                seq.append(s1[:oa])
+            runs[tag] = (seq, s1, m)
+        moved = max(abs(a - b) for a, b in zip(runs["none"][0][-1], B.place(B.Model(ranges=(), grip="hands"), T0)[:13 * runs["none"][2].sys.nb]))
+        self.assertGreater(moved, 1e-3)                              # the body did move in those 55 ms
+        for a_, b_ in zip(runs["held"][0], runs["none"][0]):
+            self.assertLess(max(abs(x - y) for x, y in zip(a_, b_)), 1e-12)
+        seq, s1, m = runs["held"]
+        self.assertEqual(s1[13 * m.sys.nb + len(m.sys.acts)], 0.0)   # the drives' booked work
+        self.assertGreater(max(abs(x - y) for x, y in zip(runs["loose"][0][4], runs["none"][0][4])), 1e-3)
+
+    @NEED
+    def test_the_energy_account_closes_with_held_muscles_firing(self):
+        """every channel of the driven test body tensed at 0.5 and held, firing 10 ms after the start: the energy gained
+        equals the work booked, as for the un-held body (test_work_against_energy), over 80 ms."""
+        m = B.Model()
+        st = B.place(m, T0)
+        bd = Dr.bounds(m.H, m.M)
+        st = Dr.add_drives(m, st, {n: (bd[n] * k, T0 + 0.010, 0.05, 1.0, 0.5) for n, k in MODEST.items()}, held=True)
+        Dr.add_damping(m, st)
+        aux = m.sys.new_aux()
+        m.sys.anchors(st, aux)
+        nc = len(m.sys.contacts)
+        tend = lambda: sum(0.5 * a[11] * aux[nc + j] ** 2 for j, a in enumerate(m.sys.acts))
+        m.sys.sec_start(st, aux)
+        e0 = kinetic(m.sys, st) + potential(m.sys, st)
+        s1 = m.sys.run(list(st), T0, T0 + 0.080, 2.5e-4, aux=aux)
+        e1 = kinetic(m.sys, s1) + potential(m.sys, s1)
+        gross = sum(abs(w) for w in s1[-E.NW:])
+        self.assertGreater(abs(s1[-E.NW]), 5.0)                      # the drives did work (J)
+        self.assertAlmostEqual(e1 - e0, work(m.sys, s1), delta=0.03 * gross)
+
+
 class Mutations(unittest.TestCase):
     """each fault is caught by a named check (and the checks pass without it, above)."""
 

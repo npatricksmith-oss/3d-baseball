@@ -50,7 +50,7 @@ def write_model(path, s, st, aux, t0, nsteps, h, every, order=()):
     f = lambda *xs: " ".join(repr(float(x)) for x in xs)
     w.append("g " + f(*s.g))
     w.append("baum " + f(s.baum_a, s.baum_b))
-    w.append("consts " + f(E.TA_UP, E.TA_DN, E.K_FV, E.ECC, E.ECC_SLOPE, E.CONTACT_D0))
+    w.append("consts " + f(E.TA_UP, E.TA_DN, E.K_FV, E.ECC, E.ECC_SLOPE, E.CONTACT_D0, E.TA_REL))
     w.append("bodies %d" % s.nb)
     for m, I in zip(s.m, s.I):
         w.append(f(m, *I))
@@ -65,8 +65,8 @@ def write_model(path, s, st, aux, t0, nsteps, h, every, order=()):
     for k, tab in enumerate(s.fvtabs):
         w.append("%d %s %s" % (len(tab), f(s.tab_ecc(k)), " ".join(f(*pt) for pt in tab)))
     w.append("acts %d" % len(s.acts))
-    for name, a, b, ax, T, W, t_on, rise, t_off, a0, tab, ksec, axb in s.acts:
-        w.append("%d %d %s %s %d %s %s" % (a, b, f(*ax), f(T, W, t_on, rise, t_off, a0), tab, f(ksec), f(*axb)))
+    for name, a, b, ax, T, W, t_on, rise, t_off, a0, tab, ksec, axb, held in s.acts:
+        w.append("%d %d %s %s %d %s %s %d" % (a, b, f(*ax), f(T, W, t_on, rise, t_off, a0), tab, f(ksec), f(*axb), int(held)))
     w.append("stops %d" % len(s.stops))
     for name, a, b, ax, ea, fb, lo, hi, k, c, kind, axb in s.stops:
         w.append("%d %d %s %s %s %s %d %s" % (a, b, f(*ax), f(*ea), f(*fb), f(lo, hi, k, c), kind, f(*axb)))

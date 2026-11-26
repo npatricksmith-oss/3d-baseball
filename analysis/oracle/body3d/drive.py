@@ -253,11 +253,12 @@ def check_rules(mdl, plan):
     return bad
 
 
-def add_drives(mdl, st, plan):
+def add_drives(mdl, st, plan, held=False):
     """add the plan's channels {name: (T, onset, rise, off[, starting level])} to the model, each with its
     strength-at-speed curve and, at the leg joints that have one, its tendon spring (4.5). Returns the state
     with the channels' activations at their starting levels. The placed state is only read to sign the
-    wrists' axis: the drive must reduce the lag (uncock). Call sec_start afterwards for the springs."""
+    wrists' axis: the drive must reduce the lag (uncock). Call sec_start afterwards for the springs.
+    held: every channel's starting level is held without net torque until its onset (engine.actuator, 4.11)."""
     s, b = mdl.sys, mdl.b
     nold = len(s.acts)
     s.acts = []
@@ -297,7 +298,7 @@ def add_drives(mdl, st, plan):
                 s.fvecc.append(curve_ecc(curve))
             tab = tab_of[curve]
         ksec = bd[n] / SEC_STRETCH[tendon] if (tendon and tab >= 0) else 0.0
-        s.actuator(n, b[pa], b[ch], ax, T, W_TOP[grp], t_on, rise, t_off, a0, tab, ksec, axb)
+        s.actuator(n, b[pa], b[ch], ax, T, W_TOP[grp], t_on, rise, t_off, a0, tab, ksec, axb, held)
     nb13 = 13 * s.nb
     return st[:nb13] + [a[9] for a in s.acts] + st[nb13 + nold:]
 
