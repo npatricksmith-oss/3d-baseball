@@ -21,9 +21,9 @@ Status: `[ ]` not started · `[~]` partly done · `[?]` needs an owner decision
 
 **Phase 1 (spec §4.4, §4.8, §4.9; session 7, its review and fixes merged):** contact +0.8 ms, gated curves inside their bands; the bat 48 mph and coming down 7° on the ball. PLAN D35: the curves' last 40 ms are not a target. The strongest batter held to a hitter's swing: 50 mph (one search).
 
-**[?] Q59** (gate 65–76 or 60–76 mph) and **Q60** (a cost on effort in the practice search).
+**[?] Q59** (gate 65–76 or 60–76 mph). Q60 = a (PLAN D36): the practice search may carry a small cost on effort, its weight stated before the run and swept.
 
-**Nothing running.** Session 8 after Q59/Q60: free the last 40 ms, review P2-2, the held search again; [note 10](docs/research/body/10-smoothed-sources.md) §6 and §1a (averaged peaks, "about 2%", the handle kick, swing v3).
+**Nothing running.** Session 8 after Q59: free the last 40 ms, review P2-2, the held search again; [note 10](docs/research/body/10-smoothed-sources.md) §6 and §1a (averaged peaks, "about 2%", the handle kick, swing v3).
 
 **Next:** §2: the ground-dive leftovers ([note](docs/calibration/2026-11-23-of-ground-dive.md) §9).
 
