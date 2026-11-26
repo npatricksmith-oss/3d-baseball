@@ -117,15 +117,13 @@ ARM_TENDONS = {"sh_hadd": True, "sh_habd": True, "elbow_ext": True, "wrist": Fal
                "sh_raise": True, "sh_lower": True, "sh_irot": True, "elbow_flex": True}
 # the first law's top speeds W, rad/s [E] (5.1), still used by the arms and wherever a curve is None
 W_TOP = {"hip": 20.0, "knee": 20.0, "ankle": 20.0, "core": 25.0, "shoulder": 30.0, "elbow": 35.0, "wrist": 40.0}
-# intrinsic joint damping: N m s/rad on every axis of every joint, its torque capped; stiffness none.
-# [E], UNSOURCED (session 1's value, kept since; session 10's review, P1-2): in the best practised swing it takes 266 J,
-# 64 % of the muscles' work, 196 J of it at the arms, and reaches 29 N m at the rear elbow and 16 N m at a wrist whose
-# muscles have 24-51. Range until a source is read: [E: 0.02-1.0, by joint]. Pointers, from search summaries only, no
-# paper opened (2026-11-26): the relaxed wrist 0.02-0.06; the elbow about 0.2-0.4 and the shoulder about 0.7 while a
-# posture is held (Gomi & Osu 1998 and the single-joint work it cites); nothing found for the hips, knees or trunk.
-# The next session reads a source and sets it by joint BEFORE any other single change (body-motion "what is left").
+# intrinsic joint damping. Sessions 1-10: JOINT_DAMP N m s/rad on every axis of every joint, its torque capped at
+# JOINT_DAMP_CAP; [E], UNSOURCED (session 10's review, P1-2: in that session's best swing it took 266 J, 64 % of the
+# muscles' work). It stays the default so that a saved result without the option replays on the body it was found on.
+# Since session 11 (PLAN D42, body-motion 4.13, research note 14) a practice run names a set of DAMPING below instead.
 JOINT_DAMP = 1.0
 JOINT_DAMP_CAP = 30.0
+NO_CAP = 1e12              # a damper with no cap (the engine's law takes a number)
 TONE_RIDGE = 1e-8          # relative to the largest diagonal of the normal equations
 
 
@@ -244,6 +242,13 @@ JOINTS = ("lumbar", "hip_L", "hip_R", "knee_L", "knee_R", "ankle_L", "ankle_R",
           "shoulder_L", "shoulder_R", "elbow_L", "elbow_R", "wrist_L", "wrist_R")
 
 
+# ---- the joints' own damping by joint (body-motion 4.13, session 11; PLAN D42; research note 14) -------------------
+# FILLED FROM THE SOURCES READ (note 14) BEFORE ANY RUN; see DAMPING below.
+DAMP_GROUPS = {"arms": ("shoulder_L", "shoulder_R", "elbow_L", "elbow_R", "wrist_L", "wrist_R"), "trunk": ("lumbar",),
+               "legs": ("hip_L", "hip_R", "knee_L", "knee_R", "ankle_L", "ankle_R")}
+DAMPING = {}
+
+
 def check_rules(mdl, plan):
     """the design's rules broken by a plan {channel: (T, t_on, t_rise, t_off)}; empty when it obeys them."""
     bad = []
@@ -309,14 +314,36 @@ def add_drives(mdl, st, plan, held=False):
     return st[:nb13] + [a[9] for a in s.acts] + st[nb13 + nold:]
 
 
-def add_damping(mdl, st, damp=JOINT_DAMP, cap=JOINT_DAMP_CAP):
-    """intrinsic joint damping on every joint [E]; no stiffness, so nothing pulls toward a posture."""
+def damping_of(damp=None):
+    """{joint: N m s/rad} and the cap (N m) for `damp`: None (sessions 1-10: JOINT_DAMP everywhere, capped at
+    JOINT_DAMP_CAP), the name of a set in DAMPING, a number (that value at every joint, no cap), or a dict
+    {"set": name, "scale": {group or joint: factor}, "cap": N m} (a set with some joints' values scaled: the runs across
+    an unread joint's range, body-motion 4.13)."""
+    if damp is None:
+        return {j: JOINT_DAMP for j in JOINTS}, JOINT_DAMP_CAP
+    if isinstance(damp, (int, float)):
+        return {j: float(damp) for j in JOINTS}, NO_CAP
+    spec = {"set": damp} if isinstance(damp, str) else dict(damp)
+    out = dict(DAMPING[spec["set"]])
+    for key, f in spec.get("scale", {}).items():
+        for j in DAMP_GROUPS.get(key, (key,)):
+            out[j] = out[j] * f
+    for j, v in spec.get("value", {}).items():
+        out[j] = float(v)
+    return out, spec.get("cap", NO_CAP)
+
+
+def add_damping(mdl, st, damp=None):
+    """the joints' own damping (damping_of): about every axis of the joint alike, no stiffness, so nothing pulls
+    toward a posture. A damper only ever takes energy (its torque is -C x the joint's speed, scaled down to the cap)."""
     s = mdl.sys
     s.holds = []
+    table, cap = damping_of(damp)
     for j in JOINTS:
         a, ra, bb, rb = mdl.jp[j]
         qa = s.pose(st, a)[1]; qb = s.pose(st, bb)[1]
-        s.hold(j, a, bb, E.qmul(E.qconj(qa), qb), (0.0, 0.0, 0.0), (damp, damp, damp), cap)
+        c = table[j]
+        s.hold(j, a, bb, E.qmul(E.qconj(qa), qb), (0.0, 0.0, 0.0), (c, c, c), cap)
 
 
 def solve_tone(mdl, st, t0, aux=None):

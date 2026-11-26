@@ -182,7 +182,10 @@ class Ctx:
         if o.get("hold") == "resolve":
             self.hold_w = Dr.hold_response(m, st, T0, list(self.aux0), ARMS, self.bd)
             self.tone0 = [c for j in Dr.JOINTS for c in self.tone[j]]
-        Dr.add_damping(m, st)
+        # damp: None (sessions 1-10: 1.0 N m s/rad at every joint, capped at 30 N m) or drive.damping_of()'s other forms
+        # (a set of drive.DAMPING by name; body-motion 4.13)
+        Dr.add_damping(m, st, o.get("damp"))
+        self.damp_table, self.damp_cap = Dr.damping_of(o.get("damp"))
         self.st = st
         self.BW = M * E.G
         self.order = P.tree_order(m)
@@ -721,8 +724,9 @@ def report(ctx, u, log=print):
     srt = lambda d_: ", ".join("%s %+.1f" % kv for kv in sorted(d_.items(), key=lambda kv: -abs(kv[1])) if abs(kv[1]) >= 2.0)
     log("   THE HOLD-STILL TORQUES (constant, one a joint; they stand for muscle and follow no muscle rule: no strength-at-speed law, no onset, no effort, no clock) did %+.1f J to contact, %.0f %% of what they and the muscles put in; by joint: %s"
         % (tw, 100 * out["work_J"]["hold-still share of the positive work"], srt(tone_by)))
-    log("   THE JOINTS' OWN DAMPING ([E], %.1f N m s/rad on every joint axis, capped at %.0f N m) took %+.1f J to contact, %.0f %% of the muscles' work; by joint: %s; its largest torque: %s   (the two sum to %+.1f J; the engine's own integral of both: %+.1f)"
-        % (Dr.JOINT_DAMP, Dr.JOINT_DAMP_CAP, dw, -100 * dw / wk[0] if wk[0] > 0 else 0.0, srt(damp_by), ", ".join("%s %.0f" % kv for kv in sorted(damp_pk.items(), key=lambda kv: -kv[1])[:6]), tw + dw, wk[2]))
+    dsc = ("%s" % (ctx.o.get("damp"),)) if ctx.o.get("damp") is not None else "[E], unsourced: %.1f N m s/rad on every joint axis" % Dr.JOINT_DAMP
+    log("   THE JOINTS' OWN DAMPING (%s; %s) took %+.1f J to contact, %.0f %% of the muscles' work; by joint: %s; its largest torque: %s   (the two sum to %+.1f J; the engine's own integral of both: %+.1f)"
+        % (dsc, "capped at %.0f N m" % ctx.damp_cap if ctx.damp_cap < Dr.NO_CAP else "no cap", dw, -100 * dw / wk[0] if wk[0] > 0 else 0.0, srt(damp_by), ", ".join("%s %.0f" % kv for kv in sorted(damp_pk.items(), key=lambda kv: -kv[1])[:6]), tw + dw, wk[2]))
     # balance, effort, the clock
     xo, least, zr = ctx.balance(recs, tx)
     out["balance"] = (xo * 100, least, zr)

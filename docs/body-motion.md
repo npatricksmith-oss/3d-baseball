@@ -1975,6 +1975,36 @@ Part 2 made no motion that could be turned into a plan. Each result is read agai
 - `built3d.py --check`: PASS. `bin/check-docs.py`: clean.
 - The two kept results replay: `practice3d.py --show analysis/research/body/practice3d_s10_S_view100.json` gives 17.69 m/s, 0.2 and −0.1 cm.
 
+### 4.13 What each unmeasured part is worth in bat speed: a ladder of single changes (session 11)
+
+Session 11 (2026-11-26) works under the owner's rulings of that day ([PLAN D42](../PLAN.md)): the cap of three sessions is lifted and the work goes on while each session gains honest bat speed ("honest": speed that comes from a measured part of the body, not from an unmeasured allowance, a bug or a loophole in the score); joint friction takes sourced values where a paper can be read and a stated range, run at several values, where none can; what is left of the lab study goes from the stance; no strength without a measurement (D34), and if he is still short the owner is told which muscles and by how much; **the fixes are made one at a time, with a measured bat speed after each.** The gate is §13's, unchanged. Written in the order the work was done; each rung is written here before it is built or run.
+
+**The ladder's table** (kept up to date; every figure is the sweet spot's speed at contact in a settled search by the protocol below; "gain" is over the rung before, and a gain smaller than the spread of two searches from the same start is no gain):
+
+| Rung | The one change | Sweet spot at contact | Gain over the rung before | What it rests on |
+| :-- | :-- | --: | --: | :-- |
+| 0 | none: session 10's body | 17.7 m/s (39.6 mph), session 10's search; the same search run again: *running* | — | unsourced damping (1.0 N·m·s/rad everywhere), constant hold-still torques, [4]'s stance |
+
+#### The protocol, the same for every rung (written before any run)
+
+- **The body of rung *n* is the body of rung *n* − 1 with one thing changed.** Rung 0 is session 10's: hands, cleats, a tensed muscle that holds, the wrists' ellipses, the cleared start (still [4]'s launch posture moved by §4.12's rule, flagged), the 0.10 s viewing time.
+- **The search is session 10's, from the same plan every time:** the evolution strategy of §4.12, every run at 0.25 ms, from start S (session 9's nearest plan, which came from the fit to [4]: flagged), 100 generations of the reach stage, 250 of the whole aim, then 500 more from that result. That is exactly how session 10's 17.7 m/s was found. If the best score has fallen 1.0 or more over its last 50 generations it is carried on in blocks of 250 (two at most) and reported as not settled if it still has.
+  - *Why from S every time and not from the rung before's result:* so that every rung gets the same search from the same plan. A chain of searches each starting where the last ended would give later rungs more searching, and a gain could be that.
+  - *What it gives up:* S was tuned on the body of sessions 8 and 9. On a body far from that one it may be a poor place to start, and the search is local. Where a rung's search from S ends clearly worse than the rung before, the rung before's result is also carried on for 500 generations on the new body, and both are printed.
+- **The spread.** Rung 0 is run twice from S with different random draws (session 10's own run, seeds 1 and 11; the same again with seeds 2 and 12). The difference of the two is the spread of two searches from the same start. Two runs make a poor estimate of a spread; it is the yardstick the job asks for, and where a gain is within twice it I say so.
+- **Dependence runs** (a value moved across its range; one muscle group scaled) are settled searches too, not replays: the rung's result carried on for 500 generations on the changed body, **beside the same result carried on for the same 500 generations on the unchanged body** (so the comparison is between equal amounts of searching).
+- **Rule 6's checks with every result** (§4.12's, printed by the search): the result at 0.5, 0.25 and 0.125 ms; the score along the line from the starting plan to the result; slopes forward and backward; whether it had settled; failed runs.
+- **After every rung:** the sweet spot's speed at contact in m/s and mph and the gain; the distance from the ball; every gate check with its margin; the work of every element to contact, by joint: muscles, hold-still torques, the joints' damping, the stops, gravity, the ground, against the body's gain in kinetic energy (`ladder3d.py`, `energy`: each read at every step; on session 10's kept swing it gives the review's figures: muscles +416.5 J, hold-still +156.8, damping −265.7, stops −51.4, ground −45.2, gravity +62.2, kinetic energy gained 273.7, the sum closing to 0.5 J).
+- **Before each run** I write what I expect and what the result would and would not show.
+
+Code: `analysis/research/body/ladder3d.py` (the protocol, the energy account, the gate's rows; results under `sim/target/codex-probes/body3d/s11/`).
+
+#### Rung 0: session 10's swing, searched for again (the baseline and the spread)
+
+- *What is run:* nothing is changed. The same search from the same plan S with other random draws (job 412: `practice3d.py --cma S --seed 2`, then 500 generations on with seed 12; started before this section was written, as the job's first act, since it changes nothing).
+- *What I expect:* a swing that meets the ball within 1 cm at 16–19 m/s. The first search fell 0.65 over its last 50 generations, so it was still creeping; two searches of 205 numbers from one plan with different draws need not end at the same plan, and I expect them 0.3–1.5 m/s apart.
+- *What it would and would not show:* the difference is the yardstick for every gain below. It would not show the body's best at this rung: both searches are local, from one plan.
+
 ## 5. The drive and its control (§14.1 items 2 and 3)
 
 ### 5.1 What a drive is
