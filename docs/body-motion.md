@@ -1374,6 +1374,30 @@ Session 9 (2026-11-26, PLAN D41: the first of up to three more sessions) builds 
 
 *What I expect:* S becomes a swing that meets the ball within 3 cm at 14–18 m/s, no faster than session 8's 17.8: nothing was added that makes speed, and the rear forearm (which turned 106° on the weld) and the rear upper arm (176°) are now held. The arms' new stops carry load (the rear wrist starts 1.2° from one). The hips still turn under 350°/s and the hip and trunk ends still carry hundreds of N·m: part 1 does not touch them. C and D do not become swings (they did not in session 8, and this start is more strained).
 
+#### Part 2: a muscle tensed before the pitch only holds (the design, written before it was built)
+
+**What is wrong now** (session 8's second review, P2-2; §4.10 the fix, item 5). A plan gives each muscle a level it is held at before it rises. In the engine that level is net torque on its joint from the first instant. So a tensed arm muscle is an arm drive that has started, the clock ("no arm drive before he could have decided") reads it at the run's first instant, and the rule becomes a cap on the whole motion, 253 ms from the starting posture. A hitter's lead shoulder is recorded working at 76–101% before the swing, so a hitter would fail it.
+
+**The dead end, and why** (`hold="resolve"`, session 8; kept in the code as a record). It re-solved the constant hold-still torques so that they cancelled each plan's starting levels. The body then starts still, but the cancelling torque is constant and stays on all swing: when the muscle fires, that share of its strength is still being cancelled (the fit to [4]'s plan replayed that way: the bat at 2.4 m/s).
+
+**The design: what a tensed muscle is held against lets go when it fires.**
+
+- A muscle tensed before its onset is held by its opposite number (co-contraction). **Until its onset the pair puts no net torque on the joint, whatever the joint does:** the opposing hold is equal to the muscle's own torque at every instant (through its strength-at-speed curve and its tendon spring, as the muscle itself is). So a tensed muscle moves nothing and does no work before it fires: there is nothing in it that could add energy.
+- **At its onset the hold lets go:** it falls away as a muscle switching off does, with the engine's deactivation time constant (50 ms; `TA_REL` [E: 15–50 ms, the activation and deactivation constants; no measurement of an antagonist's release before a swing is in the notes]). The net torque on the joint is the muscle's own torque times 1 − (its level beforehand × the hold's remaining share) / (its activation now): zero at the onset, rising without a step as the activation rises and the hold decays, and the muscle's whole torque once the hold is gone.
+- What being tensed still buys: the muscle's activation starts from its held level instead of from zero and its tendon spring is already stretched, so its torque arrives sooner than a slack muscle's; against that, the hold takes 50 ms to clear. Which wins is a result.
+- **Every muscle, not only the arms'.** A leg or trunk muscle tensed beforehand is held the same way until its own onset (it may fire at the first instant; its torque then rises from zero instead of stepping in).
+- **Effort (PLAN D36):** a tensed muscle is working, and so is what holds it. The effort of a channel is counted as before, plus the hold's share (its level beforehand × the hold's remaining share, squared) while the hold lasts.
+- **The clock then means what §4.10 says:** no arm muscle *fires* (its onset) more than the allowed time before contact. A tensed arm muscle no longer counts. The allowed time is the pitch's 0.403 s less how long he watches before he can decide, less 0.05 s for the arms to answer. **How long he watches is not put to the owner yet; both are run:** 0.10 s (as §4.10; the arms may fire 253 ms before contact) and 0.20 s (the game's own figure for its batter, agent-models §3.4; 153 ms).
+- The constant hold-still torques (`solve_tone`) are unchanged: they stand for the postural drives of the launch posture, [E], and do not let go.
+
+**Tests, written with the build:** a body with every muscle tensed at 0.7 of its bound, onsets late, moves state for state as the body with none tensed, while it moves under gravity and its hold-still torques, to the first onset (not only at the first instant); the drives' booked work is zero to then; the net torque at an onset is zero and rises without a step to the muscle's whole torque; the energy account closes with held muscles firing; a mutation (the hold never lets go) fails the "whole torque" test, which is the dead end above; the two engines agree with held muscles (`probe3d.py --check`).
+
+**What I expect of the runs after part 2** (the same three starts and iterations as after part 1; two runs, one for each viewing time; each start's part 1 result is not reused, so that the runs differ from part 1's only by the hold and the clock):
+
+- *Watching 0.10 s (253 ms):* the swing is no longer capped at 253 ms from the starting posture, so start to contact gets longer than part 1's (which I expect on the cap) by 10–60 ms, with the legs and trunk leading; the bat 0–2 m/s faster than part 1's; "legs, then trunk, then arms" met or nearer; the lead shoulder's sweep muscle may be tensed (it is reported).
+- *Watching 0.20 s (153 ms):* session 8's hands first moved 204 ms before contact, so this binds: the bat 1–3 m/s slower than at 0.10 s, or the same speed with more of the turn made before the arms fire.
+- The joint ends' loads and the hips' turning rate do not change in kind: part 2 does not touch them.
+
 ## 5. The drive and its control (§14.1 items 2 and 3)
 
 ### 5.1 What a drive is
