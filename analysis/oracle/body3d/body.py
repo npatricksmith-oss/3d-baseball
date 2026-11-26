@@ -87,10 +87,20 @@ RANGE_K = {"big": 20000.0, "small": 2000.0}      # N m/rad
 RANGE_C = {"big": 60.0, "small": 20.0}           # N m s/rad
 
 
-def range_specs():
+def cock_reference(mdl, st):
+    """{side: +1 or -1}: which way along the handle each forearm's x points in state st (it is set by how the
+    placement closes the hands; drive.add_drives reads the same thing for the wrists' flexion drives). The cock is
+    read from that end of the handle, so its reading starts within 90 deg of zero and its 58 deg cannot reach the wrap."""
+    bz = mdl.axis(st, "bat", (0, 0, 1))
+    return {sd: (1.0 if E.dot(mdl.axis(st, "farm_" + sd, (1, 0, 0)), bz) > 0 else -1.0) for sd, sg in SIDES}
+
+
+def range_specs(cock_ref=None):
     """every joint range as an engine stop: (name, body a, body b, axis in a, e in a, f in b, lo deg, hi deg, size).
-    The angle is the one engine.System.stop measures: about the axis (fixed in a), from e (in a) to f (in b)."""
+    The angle is the one engine.System.stop measures: about the axis (fixed in a), from e (in a) to f (in b).
+    cock_ref: cock_reference()'s signs (default +1)."""
     R = ROM
+    cock_ref = cock_ref or {"L": 1.0, "R": 1.0}
     out = [("trunk_twist", "pelvis", "trunk", (0, 0, 1), (1, 0, 0), (1, 0, 0), -R["trunk_twist"], R["trunk_twist"], "big"),
            ("trunk_bend", "pelvis", "trunk", (0, 1, 0), (0, 0, 1), (0, 0, 1), -R["trunk_back"], R["trunk_fwd"], "big"),
            ("trunk_side", "pelvis", "trunk", (1, 0, 0), (0, 0, 1), (0, 0, 1), -R["trunk_side"], R["trunk_side"], "big")]
@@ -111,9 +121,12 @@ def range_specs():
             # the upper arm, seen down the trunk's axis, from straight out to its own side round to the front and across
             ("shoulder_" + sd, "trunk", "uarm_" + sd, (0, 0, -sg), (0, sg, 0), (0, 0, -1), -R["sh_habd"], R["sh_hadd"], "big"),
             ("elbow_" + sd, "uarm_" + sd, "farm_" + sd, (0, 1, 0), (0, 0, 1), (0, 0, 1), -R["elbow_hyper"], R["elbow_flex"], "small"),
-            # the wrist's cock: about the bat's y from the line grip-to-wrist to the forearm; positive is toward the
-            # barrel (radial deviation, the thumb's side: both hands hold the bat thumb toward the barrel)
-            ("wrist_dev_" + sd, "bat", "farm_" + sd, (0, 1, 0), (-1, 0, 0), (0, 0, 1), -R["wrist_uln"], R["wrist_rad"], "small"),
+            # the wrist's cock, on the joint's own axis: the wrist is a universal joint whose second axis is the bat's
+            # y, and the forearm's x (its first axis) is held square to it, so the angle of the forearm's x about the
+            # bat's y, from the handle, IS the cock. (Until session 8's review this read the forearm's long axis
+            # projected onto the bat's x-z plane, which turns over by 180 deg when the wrist's flexion passes 90.)
+            # Which way is uncocking is not written here: add_ranges takes it from the model.
+            ("wrist_dev_" + sd, "bat", "farm_" + sd, (0, 1, 0), (0, 0, cock_ref[sd]), (1, 0, 0), -R["wrist_uln"], R["wrist_rad"], "small"),
             # the wrist's flexion and extension: about the forearm's x, from the forearm's y to the bat's y
             ("wrist_flex_" + sd, "farm_" + sd, "bat", (1, 0, 0), (0, 1, 0), (0, 1, 0), -R["wrist_ext"], R["wrist_flex"], "small")]
     return out
@@ -133,7 +146,8 @@ def add_ranges(mdl, st, k_big=None, wrists="cocked", rom=None):
     R = dict(ROM, **(rom or {}))
     keep = dict(ROM)
     ROM.update(R)
-    specs = range_specs()
+    mdl.cock_ref = cock_reference(mdl, st)
+    specs = range_specs(mdl.cock_ref)
     ROM.clear(); ROM.update(keep)
     ang = range_angles(mdl, st)
     out = {}
@@ -160,11 +174,13 @@ def range_angles(mdl, st):
     """{name: angle, deg} of every range_specs() entry in state st, measured as the engine's stop measures it, and
     three more that no stop holds: each forearm's turn (pronation +) and each upper arm's turn about its own axis
     (internal rotation +, by the swing-twist split from the trunk; zero with the arm hanging and the elbow's hinge
-    along the trunk's y), and the arm's angle from hanging."""
+    along the trunk's y), and the arm's angle from hanging. The cock is read from the end of the handle the model
+    was given at its start (mdl.cock_ref, set by add_ranges; otherwise taken from st itself)."""
     s = mdl.sys
     out = {}
     Rm = {n: E.qR(s.pose(st, i)[1]) for n, i in mdl.b.items()}
-    for name, a, b_, ax, ea, fb, lo, hi, size in range_specs():
+    ref = getattr(mdl, "cock_ref", None) or cock_reference(mdl, st)
+    for name, a, b_, ax, ea, fb, lo, hi, size in range_specs(ref):
         n = E.mv(Rm[a], E.unit(ax)); e = E.mv(Rm[a], E.unit(ea)); f = E.mv(Rm[b_], E.unit(fb))
         out[name] = math.atan2(E.dot(n, E.cross(e, f)), E.dot(e, f)) / D2R
     for sd, sg in SIDES:

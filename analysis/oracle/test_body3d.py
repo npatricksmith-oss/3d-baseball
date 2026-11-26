@@ -959,6 +959,36 @@ class RangeChecks(unittest.TestCase):
         self.assertEqual([x[0] for x in B.Model().sys.stops], ["knee_L", "elbow_L", "shoulder_L", "knee_R", "elbow_R", "shoulder_R"])
 
     @NEED
+    def test_the_cocks_reading_does_not_move_when_flexion_passes_90(self):
+        """a wrist's cock read on the joint's own axis: turning the forearm about its own x (the wrist's flexion)
+        through 130 deg changes the flexion reading by that much and the cock's reading not at all. The reading
+        used until session 8's review (the forearm's long axis projected onto the bat's x-z plane) turns over by
+        180 deg on the way, which is what this test is for (review P1-3)."""
+        m = B.Model(ranges=())
+        st0 = B.place(m, T0)
+        m.cock_ref = B.cock_reference(m, st0)
+        for sd in "LR":
+            i = m.b["farm_" + sd]
+            a0 = B.range_angles(m, st0)
+            fx = m.axis(st0, "farm_" + sd, (1, 0, 0))
+            old0 = None
+            for sign in (1.0, -1.0):
+                for deg in range(0, 131, 10):
+                    st = list(st0)
+                    q = E.qmul(E.qaxis(fx, sign * deg * B.D2R), tuple(st0[13 * i + 3:13 * i + 7]))
+                    st[13 * i + 3:13 * i + 7] = q
+                    a = B.range_angles(m, st)
+                    self.assertAlmostEqual(a["wrist_dev_" + sd], a0["wrist_dev_" + sd], delta=1e-6, msg="%s %+.0f" % (sd, sign * deg))
+                    turned = (a["wrist_flex_" + sd] - a0["wrist_flex_" + sd] + 180.0) % 360.0 - 180.0
+                    self.assertAlmostEqual(abs(turned), deg, delta=1e-6)
+                    zf, bx, bz = m.axis(st, "farm_" + sd, (0, 0, 1)), m.axis(st, "bat", (1, 0, 0)), m.axis(st, "bat", (0, 0, 1))
+                    old = math.atan2(E.dot(zf, bz), -E.dot(zf, bx)) / B.D2R       # the reading before the review
+                    old0 = old if deg == 0 else old0
+                    worst = max(abs((old - old0 + 180.0) % 360.0 - 180.0), 0.0)
+                    if deg == 130:
+                        self.assertGreater(worst, 90.0, msg="the old reading should have turned over on side %s" % sd)
+
+    @NEED
     def test_a_stop_pushes_back_only_past_its_end(self):
         """a knee turned past its range is pushed back toward it by the stop's stiffness times the excess, and a knee
         inside its range is not pushed at all (the check fails if the stop's sign or its limits are wrong)."""
