@@ -1981,9 +1981,9 @@ Session 11 (2026-11-26) works under the owner's rulings of that day ([PLAN D42](
 
 **The ladder's table** (kept up to date; every figure is the sweet spot's speed at contact in a settled search by the protocol below; "gain" is over the rung before, and a gain smaller than the spread of two searches from the same start is no gain):
 
-| Rung | The one change | Sweet spot at contact | Gain over the rung before | What it rests on |
+| Rung | The one change | Sweet spot at contact: the better-scoring of two searches; the other | Gain over the rung before | What it rests on |
 | :-- | :-- | --: | --: | :-- |
-| 0 | none: session 10's body | 17.7 m/s (39.6 mph), session 10's search; the same search run again: *running* | — | unsourced damping (1.0 N·m·s/rad everywhere), constant hold-still torques, [4]'s stance |
+| 0 | none: session 10's body | **17.7 m/s (39.6 mph)**; the second search 15.7 (35.2) | — (the two searches differ by 1.95 m/s, 4.4 mph: the yardstick) | unsourced damping (1.0 N·m·s/rad everywhere), constant hold-still torques, [4]'s stance |
 
 #### The protocol, the same for every rung (written before any run)
 
@@ -2004,6 +2004,26 @@ Code: `analysis/research/body/ladder3d.py` (the protocol, the energy account, th
 - *What is run:* nothing is changed. The same search from the same plan S with other random draws (job 412: `practice3d.py --cma S --seed 2`, then 500 generations on with seed 12; started before this section was written, as the job's first act, since it changes nothing).
 - *What I expect:* a swing that meets the ball within 1 cm at 16–19 m/s. The first search fell 0.65 over its last 50 generations, so it was still creeping; two searches of 205 numbers from one plan with different draws need not end at the same plan, and I expect them 0.3–1.5 m/s apart.
 - *What it would and would not show:* the difference is the yardstick for every gain below. It would not show the body's best at this rung: both searches are local, from one plan.
+
+**Rung 0 as run** (job 412, 1,061 s; `s11/r0b.out`, `r0b_cont.out`, re-read with the ladder's report in `s11/r0_b_show.json`). **The same search from the same plan with other random draws ends 1.95 m/s (4.4 mph) slower, at a different swing.**
+
+| | Session 10's search (seeds 1, 11) | The same again (seeds 2, 12) |
+| :-- | --: | --: |
+| the sweet spot at contact | **17.69 m/s (39.6 mph)** | **15.74 m/s (35.2 mph)** |
+| the miss | 0.2 cm | 0.9 cm |
+| the score (lower is better) | 32.5 | 39.6 |
+| settled: the fall over the last 50 generations | 0.65 | 0.07 |
+| the same at 0.5, 0.25, 0.125 ms | 17.69 at all three | 15.74 at all three |
+| the attack angle | −3.6° | −8.5° |
+| the hips'; the trunk's fastest turning | 361; 414°/s | 258; 421°/s |
+| the lead knee at contact; the front foot's greatest load | 1°; 0.51 × body weight | 40°; 1.08 |
+| muscles; hold-still torques; damping; stops; ground; gravity (J) | +417; +157; −266; −51; −45; +62 | +439; +82; −269; −37; −22; +99 |
+| kinetic energy gained | 274 J | 293 J |
+| groups at 90% or more of their bounds | 9 | 7 |
+
+- **The spread of two searches from the same start is 1.95 m/s.** Wider than the 0.3–1.5 I expected. Both have settled by the rule, both are the same at three steps, neither has a failed run; they are two different swings (the second keeps its front knee bent 40° and takes half as much from the hold-still torques, mostly at the rear hip). The search is local and the score has many basins; "settled" says a search has stopped, not that it found the best.
+- **What this does to the protocol (changed here, before rung 1 is run): every rung is searched twice from S, with the same two sets of draws (seeds 1, 11 and seeds 2, 12), and the rung's figure is the speed of the search with the better (lower) score**, since the score is what the search works on; choosing by speed would pick the luckier draw. Both are printed. For rung 0 that is 17.69 m/s. **A gain is called a gain only if it is larger than 1.95 m/s, or if both of a rung's searches are faster than both of the rung before's;** anything less is reported as no gain shown. Two searches a rung are still few: the yardstick is rough and is said so wherever a figure is near it.
+- *The line check* (rule 6) for the second search's last 500 generations: 51, 46, 45, 44, 45, 45, 44, 43, 42, 40, 40; beyond 40: flat at the end. Its slopes and the first 350 generations' checks are in the output.
 
 #### Rung 2: a hold that obeys the muscles' rules (the design, written before any search; built and checked at the start instant first)
 
