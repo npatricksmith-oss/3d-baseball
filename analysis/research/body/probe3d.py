@@ -220,7 +220,11 @@ def _cases():
     m.sys.anchors(st, aux)
     m.sys.sec_start(st, aux)
     m.check_aux = aux
-    out.append(("cleats, the legs and trunk at their bounds", m, st, -0.250, 200))
+    # 100 steps, not 200: with every leg muscle at its bound the body is off all but two of its sole's points by 80 ms
+    # and from 100 ms the motion multiplies rounding differences about twenty times every 10 ms (the two engines, and
+    # the probe's own two elimination orders, agree to 1e-13 until then and are 2e-7 and 7e-7 apart at 200 ms). That is
+    # the motion's sensitivity, not a difference of laws; part 3 changed no law in either engine.
+    out.append(("cleats, the legs and trunk at their bounds", m, st, -0.250, 100))
     fitted = os.path.join(HERE, "fit3d_d34_all.json")
     if not os.path.isfile(fitted):                   # session 6's fit (its 22 channels; session 7's then switched off)
         fitted = os.path.join(HERE, "fit3d_d34_arms.json")
