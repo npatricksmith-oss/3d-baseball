@@ -1,8 +1,10 @@
 """The batter's swing learned by practice on his own body (docs/body-motion.md 4.10; PLAN D32, D36, D37).
 
-    python3 analysis/research/body/practice3d.py --main            four starts, the best continued (job queue)
-    python3 analysis/research/body/practice3d.py --vary a,b,...    one thing changed at a time, from the main result
+    python3 analysis/research/body/practice3d.py --staged main --reach 15 --iters 25    four starts: reach the ball, then the whole aim (job queue)
+    python3 analysis/research/body/practice3d.py --continue <json> --iters 30           a start's result carried on; writes practice3d_main.json
+    python3 analysis/research/body/practice3d.py --vary a,b,...    one thing changed at a time, from practice3d_main.json
     python3 analysis/research/body/practice3d.py --show <json>     the checks for a saved plan
+    python3 analysis/research/body/practice3d.py --main            the search as first written: it parks the bat at the run's end (4.10)
 
 NOTHING HERE IS FITTED TO A RECORDED SWING. The search is asked for what a hitter is trying to do with a stated
 pitch: meet it, the bat on the ball's line, square, as fast as the body allows, effort counted, on his feet, no arm

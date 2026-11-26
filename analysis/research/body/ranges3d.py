@@ -4,7 +4,8 @@
 
 For the placed start and for each saved plan (a fit3d.py or practice3d.py json), run once on the body it was found
 on: every joint's angle (body3d.body.range_angles) at the start and its least and greatest up to contact + 50 ms,
-beside the range of body.ROM. No search; a diagnosis. Each plan is run on the body of sessions 1-7 (the old stops).
+beside the range of body.ROM. No search; a diagnosis. Each plan is run on the body of sessions 1-7 (the old stops, now under the corrected
+stop law, so the earlier swings do not reproduce their old speeds: body-motion 4.10).
 """
 import json
 import os
@@ -29,6 +30,7 @@ def limits():
 def excursions(ctx, u, t_to=0.050):
     st, aux = ctx.prepare(u)
     n = int(round((F.T_END - ctx.t0) / F.H_STEP))
+    ctx.m.cock_ref = B.cock_reference(ctx.m, st)         # the cock is read from the same end of the handle all through
     recs = P.run_raw(ctx.m.sys, st, ctx.t0, n, F.H_STEP, 5, aux, P.tree_order(ctx.m))
     rows = [(t, B.range_angles(ctx.m, state)) for t, state, *_ in recs if t <= t_to + 1e-9]
     return rows
