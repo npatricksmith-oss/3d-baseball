@@ -19,11 +19,11 @@ Status: `[ ]` not started · `[~]` partly done · `[?]` needs an owner decision
 
 **State.** PLAN D31–D41: a force-driven body; PLAN §14.1, spec [docs/body-motion.md](docs/body-motion.md). **D37: the lab study [4] is dropped.** The swing is learned by practice, checked against directly measured hitters.
 
-**Sessions 8–10 are merged (reviews resolved; spec §4.10–§4.12).** The body swings: ball met at 17.7 m/s (40 mph; the gate asks 29). Its review: hold-still torques give 27% of the energy, unsourced joint damping takes 64% of the muscles' work. D41: one session left.
+**Sessions 8–10 are merged (reviews resolved; spec §4.10–§4.12).** The body swings: 17.7 m/s (40 mph; the gate asks 29). Its review: hold-still torques give 27% of the energy, unsourced joint damping takes 64% of the muscles' work. D41: one session left.
 
 **Ruled:** Q61 = b, Q62 = a, Q63 = a (PLAN D39–D41). Nothing waits on the owner.
 
-**Not running. Next: session 11, the last** (WORKER-BODY-3D-11, worktree `swing-research`, branch `work/body-3d`; Fable, then an Opus review). Owner checks `/usage` first.
+**Not running. Next: session 11, the last** (WORKER-BODY-3D-11, worktree `swing-research`, branch `work/body-3d`; Fable, then an Opus review). Owner checks `/usage`.
 
 **Next:** §2: the ground-dive leftovers ([note](docs/calibration/2026-11-23-of-ground-dive.md) §9).
 
