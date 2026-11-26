@@ -213,24 +213,33 @@ checked copy of the table, not two).
 
 - `engine.py`: rigid bodies in maximal coordinates, joints as constraint
   rows (point and axis-pair primitives), Cholesky solve in a fixed order,
-  Baumgarte stabilisation, one-sided stops, penalty contact points with a
-  stick-spring friction cone, the drive law τ = T·a·f_v, classical RK4.
+  Baumgarte stabilisation, one-sided stops of four kinds (an angle about an
+  axis, an angle out of a plane, a limb's turn about its own length, and
+  both angles of a two-axis joint held inside an ellipse; each pushes along
+  its reading's own gradient, so none can add energy), penalty contact
+  points with a stick-spring friction cone, the drive law τ = T·a·f_v with
+  measured strength-at-speed curves, tendon springs and a tensed muscle
+  that holds until it fires, classical RK4.
 - `body.py`: the batter's 13 bodies from `Height` and `Mass`, the bat held
-  by both hands as a closed loop, the feet's contact points, and `place`,
-  which puts the body on Fortenbaugh's measured state at a given time.
-- `drive.py`: the 22 drive channels, their measured strength-at-speed curves
+  by both hands as a closed loop (each hand's own grip, the joints' ranges
+  as stops), the feet's contact points, and `place`, which puts the body on
+  Fortenbaugh's measured state at a given time; `clear_start` and
+  `START_CLEAR` move that launch posture by a stated rule until every joint
+  is 5° inside its end (docs/body-motion.md §4.12).
+- `drive.py`: the 41 drive channels, their measured strength-at-speed curves
   and tendon springs (docs/body-motion.md §4.5), the design's rules and strength
   bounds, the muscles' level at the start, and a run that records what
   Fortenbaugh measured.
-- `test_body3d.py` (25 tests, also run by `test_oracle.py`): each check
-  compares the engine with something it did not produce; three mutations
-  show the checks can fail. The whole-body tests need the digitised curves
+- `test_body3d.py` (71 tests after phase 1's tenth session): each check
+  compares the engine with something it did not produce; mutations show
+  the checks can fail. The whole-body tests need the digitised curves
   under `sim/target/research-dl/4/csv` (or `BB_FORT_CSV`) and are skipped
   without them.
 
 The fit of the drives is not in this package. It runs through a compiled
 copy of this engine, `analysis/research/body/body3d_probe.rs`, which
 `python3 analysis/research/body/probe3d.py --check` compares state for
-state with this engine (largest difference 2e-12 over four runs, tolerance
-1e-9). This Python engine stays the reference; the probe is not part of
+state with this engine (largest difference 3.6e-11 over eight runs,
+tolerance 1e-9; a ninth run, whose motion multiplies rounding differences,
+is judged against this engine's own difference from itself). This Python engine stays the reference; the probe is not part of
 the oracle and is not run by `test_oracle.py`.
