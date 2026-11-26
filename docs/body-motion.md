@@ -1422,6 +1422,38 @@ Session 9 (2026-11-26, PLAN D41: the first of up to three more sessions) builds 
 - The energy account closes with held muscles firing (3% of the gross work, at a 0.25 ms step). The two engines agree on the hands' body with every muscle tensed and held, firing at staggered onsets: 2.9 × 10⁻¹³.
 - Nothing passive was added: before its onset the pair's net torque is zero, so it can do no work; after it, the torque is the muscle's own times a share between 0 and 1.
 
+#### Part 3: a back foot that can pivot (the design, written before it was built)
+
+**What the feet did in session 8's swing, read before designing** (one replay in the Python engine, `sim/target/codex-probes/body3d/s9/feet_s8.py`; a reading of that one swing, and no more is drawn from it than it shows):
+
+- The rear foot stayed flat on its four points to contact. Its heel never left the ground.
+- **It did turn on the ground, the wrong way:** 30° with the toe going back toward the catcher, half of it in the 20 ms when the foot carried 0.03 of body weight, while the pelvis turned 37° toward the pitcher. The rear hip's own turn went from 26° turned out to its end at 34° turned in: 60° of turn at the hip for 37° of pelvis.
+- The ground's twisting moment on the loaded, flat rear foot was 30–75 N·m at 0.5–1.4 times body weight.
+
+So this body's rear foot was never "planted and unable to pivot" (§4.10 and both reviews said it was; none of us had looked). It slides round against about what a cleat gives. In that swing it was turned backward: the rear hip's rotators, at full strength all swing, turn the pelvis one way and the leg the other, and the leg went. **What it cannot do is what a hitter's does: come up over its toes, so that the leg can turn with the pelvis.** And two things under it have no source or no end:
+
+1. *No toes.* The foot is one rigid plate with contact points at the heel and at the ball. Raised on the ball it stands on two points 8 cm apart and its front quarter passes through the ground.
+2. *The ankle has no end on either axis* (§4.10 left the bend unheld because the measured range was a straight, unloaded knee's; the roll never had a stop, nor a drive).
+3. *The ground's grip, 0.8, has no source* (§4.1, §5.1).
+
+**The design, from [note 12](research/body/12-trunk-bending-and-feet.md) D.**
+
+- **The rear foot gets toes** (`Model(toes=True)`): the plate is cut across the ball of the foot (`BALL_FWD`, 75% of its length) into a rear foot and a toe piece joined by a hinge. The toes bend back as far as **58°** (the heel-rise test's weight-bearing figure, Nawoczenski 1999, AB; [E: 44° active weight-bearing to 82° passive]) and not the other way (0°), a one-sided stop at each end. The toe piece carries the ball's two contact points and two at the toes' tip; the rear foot keeps the heel's two. The toe piece has `TOE_MASS` = 0.15 of the foot's mass [E: 0.1–0.2; de Leva's table has no toe]. **No muscle and no spring at the toes' joint** [E: the toe flexors carry 60 N·m in running and 112 in sprinting ([note 12](research/body/12-trunk-bending-and-feet.md) D2), so this is the weak end; the load presses the toes flat]. The rear ankle's push-off (`ankle_pf_R`) is what lifts the heel, as before.
+- **The front foot is not changed** (it stays one plate): no source measures a hitter's front foot coming up or turning ([note 12](research/body/12-trunk-bending-and-feet.md) D4: 6° between forefoot and heel contact).
+- **Both ankles get their ends, as measured with weight on:** the shin forward over the foot 39° (Baumbach 2014, 20 adults, the knee bent 20° or more; **25° with the knee straight, which the stop cannot know: [E]**), the foot pointed down 50° (Hallaceli 2014, passive, 987 young adults); the sole rolled inward 34° and outward 19° (the same, men). Stiffness as the other large joints' ([E], §4.10).
+- **The ground's grip is the measured one for a baseball shoe on basepath dirt:** `MU` = **1.15** for every contact point (Brosnan, McNitt & Serensits 2009: static 1.04–1.27, dynamic 1.02–1.20, FT; it replaces 0.8, which had no source). This is both feet's, so part 3's runs change the front foot's grip too; said in the results.
+- **The foot's resistance to turning is not a separate number.** It comes from where the sole's points are and the grip, and is checked against the same paper's rig: a baseball shoe's forefoot under 1,190 N turned through 40° gave 68–100 N·m. The toe piece's four points (the ball's 4 cm either side of the foot's line, the tip's 3 cm [E: where a forefoot's studs sit]) are tested the same way.
+- **The knee's twist is not built.** [Note 12](research/body/12-trunk-bending-and-feet.md) D3: with weight on, the knee's turn about the shin falls by 58–80% and is 5–9° in loaded movements. Whether a run shows a need for it is said after the runs.
+- The start is unchanged: the rear foot flat, its toes in line.
+
+**Tests, written with the build:** the toes' joint reads 0 flat and its angle with the heel raised 30° over toes left flat, and its stop pushes only past 58° and below 0°; the foot alone on its toe piece under 1,190 N, turned 40°: its peak twisting moment against Brosnan's 68–100 N·m, and the ground's work on it never positive (the contact law is the old one; this is its check about the vertical); each ankle's two readings as a clinician defines them, each side (shin forward over the foot is +; the sole turned toward the midline is +), each unmoved by the other; the body with toes standing at the start: no stop engaged and the rear foot's load as the plate's; the two engines agree on the body with toes; the plate's body unchanged.
+
+**What I expect of the runs after part 3** (the same three starts and iterations; the hold of part 2, watching 0.10 s; from [4]'s launch posture):
+
+- **I do not expect the search to find the heel coming up from these starts.** It moves each number 2% at a time from plans that keep the foot flat, and nothing in the aim asks for it. If the heel stays down in all three, that is the result, and what would test the foot is a start with the heel already rising or a term for it, the next session's.
+- The firmer grip (1.15 for 0.8) should hold the rear foot against the rotators' reaction: the backward turn under 15° (it was 30°), the pelvis turning 40–50° (35°), the hips 350–450°/s (331), still under hitters' 555–855.
+- The rear hip's turning end still carries hundreds of N·m. The bat 0–2 m/s faster than part 2's.
+
 ## 5. The drive and its control (§14.1 items 2 and 3)
 
 ### 5.1 What a drive is
