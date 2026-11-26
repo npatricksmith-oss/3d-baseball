@@ -1489,6 +1489,12 @@ So this body's rear foot was never "planted and unable to pivot" (§4.10 and bot
 
 *What I expect now:* what I first wrote for each part stands as the expectation (part 1: S a swing within 3 cm at 14–18 m/s; C and D not; part 2 and part 3 as written under each), with one change: **I no longer expect the searches to stop on refused steps; if one still does with no failed differences, the roughness is the body's (stiff ends near a strained start) and is said so.**
 
+**The reruns stopped too, with no failed runs; a second follow-up, stated before it ran** (the reruns' table is below, written after this). With the raise's end in, no result has a failed difference (0 of 205 at all twelve), yet the whole-aim search still stopped after 3–16 iterations from start S on every body, with no damped step accepted even with the differences four times closer. Lower scores lie beside those points (60 random plans within 2% of part 1's S result: the lowest 409.6 against 481.0). So the search's step, not a failed run, is what stops: the slope it builds from one-number differences does not predict the score across stiff joint ends and a foot that sticks and slips.
+
+- *The change, to the search and not to the body or the aim* (`practice3d.py`, `--fallback`; off, it is session 8's search): when no damped step is accepted, the 205 differences are plans already run, each one number away; if the best of them scores lower it is taken, and the search goes on from there.
+- *The run:* start S's rerun result on each of the four bodies, carried on 40 iterations with the fallback, contact read at the nearest approach as before. Each result judged by the plane's crossing, at both steps, with its failed differences counted.
+- *What I expect:* every score falls. On part 1's body, part 2's at 0.10 s and part 3's, S comes within 3 cm of the ball at 14–19 m/s; whether any is within the gate's 1 cm I do not know. At 0.20 s the clock's term (most of that score) falls and the bat slows below 20.9 m/s. None is settled after 40 iterations of single steps; differences between the bodies under about 1 m/s will mean nothing.
+
 ## 5. The drive and its control (§14.1 items 2 and 3)
 
 ### 5.1 What a drive is

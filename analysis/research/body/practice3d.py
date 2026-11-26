@@ -37,6 +37,7 @@ T0, T_END, H_STEP, EVERY = -0.250, 0.200, 5e-4, 10     # T0 is only the placed s
 #   the end of a 350 ms run, where nothing after contact is seen. Contact counts only if the 50 ms after it lie inside the run.
 VERIFY_H = 1.25e-4
 WORKERS = 4                                            # processes for the search's finite differences (inside one queued job)
+FALLBACK = False                                       # lm(): take the best single difference when no damped step is accepted (--fallback)
 # ---- the pitch (4.10): the game's average four-seam fastball where it is met (sim-cli pitch --type FF, 200 pitches)
 BALL_SPEED, BALL_DESCENT, BALL_ACROSS, BALL_FLIGHT, BALL_Z = 37.98, 5.27, 1.62, 0.403, 0.78
 MEET_ACROSS, MEET_AHEAD = 0.92, 0.72                   # m from the hips' midpoint at the start (PLAN D28, D29; AHEAD [E: 0.61-0.84])
@@ -415,6 +416,19 @@ def lm(ctx, u, iters, log, pool):
                 improved = True
                 break
             lam *= 4.0
+        if not improved and FALLBACK:
+            # no damped step was accepted. Before taking the differences closer in: the differences themselves are 205
+            # plans already run, each one number away; if the best of them is lower, take it (one coordinate step). Added
+            # in session 9 after searches on the hands' body stopped within 3-16 iterations with lower scores beside them
+            # and no failed runs (body-motion 4.11); off (FALLBACK = False) it is the search of session 8.
+            cs = [(sum(x * x for x in rp), k) for k, rp in enumerate(rps) if rp is not None]
+            if cs and min(cs)[0] < cost:
+                cb, kb = min(cs)
+                gain = cost - cb
+                u, r, cost = ups[kb], rps[kb], cb
+                improved = True
+                lam = 1e-2
+                log("      (no damped step accepted: the best single difference taken, %s of %s)" % (ctx.box[free[kb]][1], ctx.box[free[kb]][0]))
         hist.append(cost)
         log("      iteration %2d: cost %.3f (miss %.1f, %.1f cm; speed along the line %.2f m/s), lambda %.0e"
             % (it + 1, cost, r[0] * MISS_UNIT * 100, r[1] * MISS_UNIT * 100, SPEED_ASK - r[5] ** 2 / SPEED_W, lam))
@@ -713,6 +727,8 @@ def main():
     arg = lambda k, d: a[a.index(k) + 1] if k in a else d
     main_file = os.path.join(HERE, "practice3d_main.json")
     body = {"grip": arg("--grip", None)} if "--grip" in a else {}      # the body a new search runs on; kept in the result's options
+    global FALLBACK
+    FALLBACK = "--fallback" in a
     if "--hold" in a:
         body["hold"] = arg("--hold", None)
     if "--view" in a:
@@ -800,7 +816,7 @@ def main():
         print("== continued %d iterations from %s (start %s, cost %.3f)" % (iters, os.path.basename(arg("--continue", main_file)), d.get("start"), d.get("cost", float("nan"))))
         u, cost, hist = search(ctx, d["plan"], iters)
         out = report(ctx, u)
-        out.update(cost=cost, start=str(d.get("start")) + ", continued", history=hist, step_check=verify(ctx, u))
+        out.update(cost=cost, start=str(d.get("start")) + ", continued", history=hist, step_check=verify(ctx, u), failed_differences=failed_differences(ctx, u))
         json.dump(out, open(arg("--out", main_file), "w"), indent=1)
         return
     if "--vary" in a:
