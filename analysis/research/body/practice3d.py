@@ -224,6 +224,7 @@ class Ctx:
         """(time, sweet spot position, velocity, index of the record before) where the sweet spot comes nearest the
         ball's place in the run, by cubic interpolation between records: the reach stage's reading (4.10)."""
         m = self.m
+        recs = [rec for rec in recs if rec[0] <= T_END - AFTER + 1e-9]      # the 50 ms after it must lie inside the run
         pv = [m.bat_point(rec[1], C.BAT_SS) for rec in recs]
         k = min(range(len(recs)), key=lambda q: E.norm(E.sub(pv[q][0], self.Pc)))
         best = (E.norm(E.sub(pv[k][0], self.Pc)), recs[k][0], pv[k][0], pv[k][1], max(0, k - 1))
@@ -305,7 +306,14 @@ class Ctx:
             on = self.arm_onsets(pl)
             r.append(max(0.0, (tx - self.t_avail) - min(on)) / CLOCK_UNIT if on else 0.0)
             return None if any(x != x for x in r) else r
-        tx, p, v, i, came = self.contact(recs)
+        if self.o.get("contact") == "nearest":
+            # the whole aim with no cliff (4.10, session 8's fix): contact is read where the sweet spot comes nearest the
+            # ball's place, which is the plane's crossing when the bat passes through the ball, so a bat that has not
+            # reached the plane is scored by the same rule as one that has. The report still judges by the crossing.
+            tx, p, v, i = self.nearest(recs)
+            came = True
+        else:
+            tx, p, v, i, came = self.contact(recs)
         d = E.sub(p, self.Pc)
         vpar = -E.dot(v, self.nb)
         share = BALL_SPEED / (BALL_SPEED + max(1.0, vpar))
@@ -315,7 +323,7 @@ class Ctx:
              E.dot(v, self.ev) * TIMING_ERR * share / MISS_UNIT, E.dot(v, self.el) * TIMING_ERR * share / MISS_UNIT,
              sq / SQUARE_UNIT,
              math.sqrt(SPEED_W * max(0.0, SPEED_ASK - vpar)),
-             0.0 if came else E.dot(d, self.nb) / MISS_UNIT]          # never came round: how far short along the line
+             E.dot(d, self.nb) / MISS_UNIT if (not came or self.o.get("contact") == "nearest") else 0.0]   # how far short along the line
         eff = self.effort(recs, tx, pl)
         r += [math.sqrt(self.effort_w * eff[n] / len(CH)) for n in CH]
         xo, least, zr = self.balance(recs, tx)
@@ -671,7 +679,7 @@ def main():
         n1, n2 = int(arg("--reach", 15)), iters
         for name in names:
             o = {} if name == "main" else dict(VARY[name])
-            ctx = Ctx(**o)
+            ctx = Ctx(contact="nearest", **o)
             reach = Ctx(stage="reach", **o)
             print("\n== staged, %s: %s; from each start %d iterations of the reach stage, then %d of the whole aim" % (name, o, n1, n2))
             starts = (("A", json.load(open(os.path.join(HERE, "fit3d_d34_all.json")))["plan"]),
