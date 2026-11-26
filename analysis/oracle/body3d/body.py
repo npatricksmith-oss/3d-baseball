@@ -136,7 +136,8 @@ def range_specs(cock_ref=None):
             # y, and the forearm's x (its first axis) is held square to it, so the angle of the forearm's x about the
             # bat's y, from the handle, IS the cock. (Until session 8's review this read the forearm's long axis
             # projected onto the bat's x-z plane, which turns over by 180 deg when the wrist's flexion passes 90.)
-            # What the number means: 90 deg less the angle between the forearm (wrist toward elbow) and the barrel. Zero is
+            # What the number means: with the wrist unflexed, 90 deg less the angle between the forearm (wrist toward elbow)
+            # and the barrel (in general cos of that angle = sin(cock) x cos(flexion)). Zero is
             # the forearm square to the handle; positive is the barrel folded back toward the elbow (the thumb's side,
             # radial deviation, since both hands hold the bat thumb toward the barrel); negative is the bat opened out
             # toward a straight line with the forearm (the bat released). Which way is uncocking is not written
