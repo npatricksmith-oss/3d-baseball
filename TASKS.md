@@ -17,13 +17,13 @@ Status: `[ ]` not started · `[~]` partly done · `[?]` needs an owner decision
 
 ## Resume here (2026-11-25)
 
-**State.** PLAN D31–D37: a force-driven body; PLAN §14.1, spec [docs/body-motion.md](docs/body-motion.md). **D37 (owner, 2026-11-25): the lab study [4] is dropped as target and gate.** The swing is learned by practice (D32, D36), checked against directly measured hitters.
+**State.** PLAN D31–D41: a force-driven body; PLAN §14.1, spec [docs/body-motion.md](docs/body-motion.md). **D37: the lab study [4] is dropped.** The swing is learned by practice, checked against directly measured hitters.
 
-**Before D37 (spec §4.9), fitted to [4]:** bat 48 mph, down 7° on the ball; hands 17 mph (MLB 23–29).
+**Session 8 and its fixes (`work/body-3d` `d59d64e`, worktree `swing-research`; spec §4.10 there):** the joint stops that created energy are fixed; the practice search has a swing, 40 mph, failing the gate. Worker and first review disagree on a wrist's uncocking (P1-2).
 
-**[?] Q59** (bat-speed check 65–76 or 60–76 mph); holds nothing up.
+**Ruled:** Q61 = b, Q62 = a, Q63 = a (PLAN D39–D41). **After the second review, for the owner:** Q64.
 
-**Running: `body-3d-8`** (Fable, high; Workers tab; worktree `swing-research`, branch `work/body-3d`; job `WORKER-BODY-3D-8.md` there). Check its branch log, status file and `bin/job.sh status`. Then: Opus review, merge, the proposed gate (spec §13) to the owner as a question.
+**Running (Workers tab):** `rev-body-3d-8fix` (Opus; that worktree). Then: commit its review, fixes, test, merge. `body-3d-8`: stopped.
 
 **Next:** §2: the ground-dive leftovers ([note](docs/calibration/2026-11-23-of-ground-dive.md) §9).
 
