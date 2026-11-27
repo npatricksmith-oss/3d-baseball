@@ -5,6 +5,9 @@
     python3 analysis/research/body/ladder3d.py --rung r1_low --from <json>    a body searched on from a saved result (--reach 0 --gens 0)
     python3 analysis/research/body/ladder3d.py --table                        the ladder's table from the results kept so far
     python3 analysis/research/body/ladder3d.py --show <json>                  a kept result re-read (no search)
+    python3 analysis/research/body/ladder3d.py --settle <json> --rung r4 --seed 21 --tag _s1_end   a kept result's search carried to its end (4.14)
+    python3 analysis/research/body/ladder3d.py --carry <json> --rung r4 --seed 22 --tag _s2_carry [--leap] [--resume <..._gN.json>]   one search carried on in blocks, its state kept (4.14)
+    ... --dir s12                                                             results kept under that session's folder (default s11)
 
 THE PROTOCOL, the same for every rung (written in 4.13 before any run): session 10's own search (practice3d.cma, every
 run at 0.25 ms, watching 0.10 s) from the same plan S (session 9's nearest plan, which came from the fit to [4]: flagged):
@@ -83,6 +86,14 @@ RUNGS["r6_ref"] = dict(RUNGS[LAST])
 # sim/target/review-probes/s11/). A: major leaguers' feet with the ball where it was relative to the pelvis (0.72 m ahead:
 # on that start the pelvis is 0.517 m ahead of the rear ankle). B: [4]'s feet with the ball where rung 3 puts it relative
 # to the pelvis (0.505 m ahead).
+# 4.14 (session 12), part 2: how much hangs on the cleat's twisting hold, whose measured range is 68.5-100.1 N m at 1,190 N
+# (Brosnan 2009; the body stands at the least) with the grip 1.04-1.27 (the body: 1.15). A WHAT-IF body at the top of both.
+GRIP_TOP, MU_TOP = 100.1 / 68.5, 1.27
+RUNGS["r4_grip_top"] = dict(RUNGS["r4"], sole_wide=GRIP_TOP, mu=MU_TOP)
+# the same question below the loads any dirt figure covers: a twisting hold that does not fall with the load (Wannop's lines on
+# grass leave about 15 N m at no load, on turf about 20; basepath dirt's two figures leave none; a batter's box is not measured).
+# A WHAT-IF body at the far end of that range, to say how much hangs on it. THE BODY STAYS AT NONE.
+RUNGS["r4_twist15"] = dict(RUNGS["r4"], foot_twist=15.0)
 RUNGS["r3_oldball"] = dict(RUNGS["r3"], meet_rear=0.517 + 0.72)
 RUNGS["r2_deepball"] = dict(RUNGS["r2"], ahead=0.505)
 
@@ -278,14 +289,19 @@ def show(ctx, u, log=print):
     return out
 
 
-def run_rung(rung, start, seed, g_reach, g_aim, g_more, tag, log, max_blocks=MAX_BLOCKS):
+def run_rung(rung, start, seed, g_reach, g_aim, g_more, tag, log, max_blocks=MAX_BLOCKS, through=None, square=False):
     o = options(rung)
+    if square:
+        o["square"] = "contact"                           # as settle()'s
     if start.startswith("best:"):
         start = best_of(start[5:])
     ctx = PR.Ctx(contact="nearest", **o)
-    reach = PR.Ctx(stage="reach", **o)
+    # through (4.14, part 3; the parked basin's remedy): the first stage asks the sweet spot through the ball's place at that speed
+    reach = PR.Ctx(stage="reach", **(dict(o, through=through) if through else o))
     if start == "S":
         plan = json.load(open(os.path.join(HERE, "practice3d_s9_cleats_S.json")))["plan"]
+    elif start == "hand:C":                            # 4.12's start C: written by hand, 0.6 of every forward muscle; it owes [4] nothing
+        plan = {n: list(v) for n, v in PR.hand_plan(ctx, 0.6).items()}
     else:
         plan = json.load(open(start))["plan"]
     plan = ctx.fit_plan(plan) if hasattr(ctx, "fit_plan") else {n: [min(v[0], ctx.bd[n])] + list(v[1:]) for n, v in plan.items()}
@@ -328,6 +344,108 @@ def run_rung(rung, start, seed, g_reach, g_aim, g_more, tag, log, max_blocks=MAX
     return out
 
 
+END_SIGMA, END_WINDOW, END_FALL, END_CAP = 0.012, 200, 0.10, 1500   # [E] the search carried to its end (4.14, part 3)
+LEAP = (25, (1.0, 2.0, 4.0, 8.0))                      # [E] the carried-on search's leaps (practice3d.cma): every 25 generations, the centre's travel carried on 1, 2, 4, 8 times
+END_LEAST = 400                                        # [E] generations before which it may not end: a search started afresh finds nothing for its first 80-280 (4.14)
+BRACE_BEFORE = 0.150                                   # s before the kept swing's contact: when the start "brace" has the front knee's extensor push (4.14)
+
+
+def settle(rung, path, seed, tag, log, brace=False, cap=END_CAP, square=False, leap=False):
+    """A kept result's search CARRIED TO ITS END (body-motion 4.14, part 3): the same search (practice3d.cma, the whole aim,
+    24 plans a generation, every run at the body's step) carried on from the result in ONE stage, its first step END_SIGMA
+    of each number's range, until its best score has fallen less than END_FALL over the last END_WINDOW generations and
+    not before generation END_LEAST (END_CAP at most: then it is reported as not at its end). A rule for the search; nothing of the body or the score.
+    brace: the start is the kept plan with the front knee's extensor asked for all it has from BRACE_BEFORE before the
+    kept swing's contact (4.14, part 1's replay B), a start in a neighbouring swing; it owes the kept plan everything."""
+    o = options(rung)
+    if square:
+        o["square"] = "contact"                           # the score reads the bat's squareness at contact, not at the record before (4.14, part 3)
+    d = json.load(open(path))
+    ctx = PR.Ctx(contact="nearest", **o)
+    plan = {n: [min(v[0], ctx.cap[n])] + list(v[1:]) for n, v in d["plan"].items()}
+    if brace:
+        tx = PR.T0 + d["start_to_contact_ms"] * 1e-3
+        plan["knee_ext_L"] = [ctx.cap["knee_ext_L"], tx - BRACE_BEFORE, Dr.RISE_MIN, 0.150, plan["knee_ext_L"][4]]
+    u0 = ctx.u_of(plan)
+    log("== %s carried to its end on rung %s%s; body %s; from %s%s; first step %.3f; until the best score has fallen under %.2f over %d generations, %d at least (at most %d); %d plans each, every run at %.3f ms; seed %d"
+        % (os.path.basename(path), rung, tag, o, path, " WITH THE FRONT KNEE'S EXTENSOR PUSHING from %.0f ms before its contact" % (BRACE_BEFORE * 1e3) if brace else "",
+           END_SIGMA, END_FALL, END_WINDOW, END_LEAST, cap, PR.CMA_LAMBDA, o["h"] * 1e3, seed))
+    r0 = ctx.residuals(u0)
+    c0 = PR.cost_of(r0)
+    log("   the starting plan's score on this body: %s; by term: %s" % ("THE RUN FAILS" if r0 is None else "%.2f" % c0, "" if r0 is None else "; ".join("%s %.1f" % kv for kv in PR.terms(ctx, r0).items())))
+    t = time.time()
+    PR._CTX = ctx
+    with multiprocessing.get_context("fork").Pool(PR.WORKERS) as pool:
+        u, cost, hist, mfull, sp = PR.cma(ctx, u0, cap, log, pool, seed, sigma0=END_SIGMA, stop=(END_WINDOW, END_FALL, END_LEAST), leap=LEAP if leap else None)
+    gens = hist[-1][0]
+    fall = hist[max(0, len(hist) - 1 - END_WINDOW)][1] - hist[-1][1]
+    at_end = fall < END_FALL
+    first = next((h_[0] for h_ in hist if h_[1] < hist[0][1] - 1e-9), None)
+    log("   %s after %d generations (%.0f s): the best score %.2f from %.2f; it fell %.3f over its last %d; the first generation with a better plan: %s; failed runs %d"
+        % ("AT ITS END" if at_end else "NOT AT ITS END (the cap)", gens, time.time() - t, cost, c0, fall, END_WINDOW, first, sum(h_[5] for h_ in hist)))
+    out = show(ctx, u, log)
+    out.update(cost=cost, rung=rung, start=path, seed=seed, history=[("carried to its end", hist)], settled=at_end, at_end=at_end, fall_last_100=fall,
+               fall_last_50=hist[max(0, len(hist) - 51)][1] - hist[-1][1], generations=gens, first_better=first, start_cost=c0, brace=brace,
+               start_speed=d.get("sweet_speed"), leap=bool(leap), step_check=PR.verify(ctx, u, log), failed_differences=PR.failed_differences(ctx, u, log),
+               search_checks=PR.search_checks(dict(o, contact="nearest"), u0, u, log), start_plan=plan, seconds=time.time() - t)
+    os.makedirs(OUT, exist_ok=True)
+    dest = os.path.join(OUT, "%s%s.json" % (rung, tag))
+    json.dump(out, open(dest, "w"), indent=1)
+    log("   kept: %s   (%.0f s)" % (os.path.relpath(dest, os.path.join(HERE, "..", "..", "..")), time.time() - t))
+    return out
+
+
+def carry(rung, path, seed, tag, log, cap=6000, block=500, square=True, leap=False, resume=None):
+    """ONE search carried on in blocks with its state kept (body-motion 4.14, part 3): settle()'s search, but never started
+    afresh: after every `block` generations the result is read (the whole report, so the bat's speed is known at each)
+    and kept as <rung><tag>_g<generations>.json WITH THE SEARCH'S STATE, and the search goes on from that state exactly as
+    if it had not stopped. It ends by settle()'s rule (the best score fallen under END_FALL over END_WINDOW generations,
+    END_LEAST at least) or at `cap`. resume: a kept ..._g<N>.json to go on from (its state), in place of starting at path."""
+    o = options(rung)
+    if square:
+        o["square"] = "contact"
+    ctx = PR.Ctx(contact="nearest", **o)
+    state, hist = None, None
+    if resume:
+        dres = json.load(open(resume))
+        state, u0 = dres["state"], ctx.u_of(dres["start_plan"])
+        path = dres["start"]
+    else:
+        d = json.load(open(path))
+        u0 = ctx.u_of({n: [min(v[0], ctx.cap[n])] + list(v[1:]) for n, v in d["plan"].items()})
+    log("== ONE SEARCH CARRIED ON IN BLOCKS, its state kept, on rung %s%s; body %s; from %s%s; first step %.3f; blocks of %d generations, each read and kept; until the best score has fallen under %.2f over %d generations, %d at least (at most %d); leaps %s; seed %d"
+        % (rung, tag, o, path, " (resumed from %s at generation %d)" % (resume, state["g"]) if resume else "", END_SIGMA, block, END_FALL, END_WINDOW, END_LEAST, cap, LEAP if leap else "none", seed))
+    t = time.time()
+    PR._CTX = ctx
+    c0 = PR.cost_of(ctx.residuals(u0))
+    g = state["g"] if state else 0
+    out = None
+    while g < cap:
+        target = min(cap, (g // block + 1) * block)
+        keep = {}
+        with multiprocessing.get_context("fork").Pool(PR.WORKERS) as pool:
+            u, cost, hist, mfull, sp = PR.cma(ctx, u0, target, log, pool, seed, sigma0=END_SIGMA, stop=(END_WINDOW, END_FALL, END_LEAST), leap=LEAP if leap else None, state=state, keep=keep)
+        state, g = keep, hist[-1][0]
+        ended = g < target
+        fall = hist[max(0, len(hist) - 1 - END_WINDOW)][1] - hist[-1][1]
+        log("-- after %d generations (%.0f s): the best score %.2f from %.2f; it fell %.3f over its last %d; leaps taken %d%s" % (g, time.time() - t, cost, c0, fall, END_WINDOW, keep["leaps"], "; ENDED BY THE RULE" if ended else ""))
+        out = show(ctx, u, log)
+        out.update(cost=cost, rung=rung, start=path, seed=seed, history=[("one search carried on, its state kept", hist)], at_end=ended, settled=ended, fall_last_100=hist[max(0, len(hist) - 101)][1] - hist[-1][1],
+                   fall_last_50=hist[max(0, len(hist) - 51)][1] - hist[-1][1], generations=g, start_cost=c0, leap=bool(leap), leaps=keep["leaps"],
+                   step_check=PR.verify(ctx, u, log), start_plan=ctx.plan(u0) if not isinstance(u0, dict) else u0, state=state, seconds=time.time() - t)
+        out["start_plan"] = {n: list(v) for n, v in ctx.plan(u0).items()}
+        os.makedirs(OUT, exist_ok=True)
+        dest = os.path.join(OUT, "%s%s_g%d.json" % (rung, tag, g))
+        json.dump(out, open(dest, "w"), indent=1)
+        log("   kept: %s   (%.0f s)" % (os.path.relpath(dest, os.path.join(HERE, "..", "..", "..")), time.time() - t))
+        if ended:
+            break
+    if out is not None:
+        out.update(failed_differences=PR.failed_differences(ctx, u, log), search_checks=PR.search_checks(dict(o, contact="nearest"), u0, u, log))
+        json.dump(out, open(os.path.join(OUT, "%s%s.json" % (rung, tag)), "w"), indent=1)
+    return out
+
+
 def table(log=print):
     """the ladder so far, from the results kept: one line a result."""
     log("| Result | Start | Sweet spot at contact | Its fastest before | Miss | Score | Settled | Muscles; holding; hold-still; damping (J) |")
@@ -346,22 +464,26 @@ def table(log=print):
             "%.0f; %.0f; %.0f; %.0f" % (en.get("muscles", 0), en.get("holding muscles", 0), en.get("hold-still torques", 0), en.get("damping", 0)) if en else "-"))
 
 
-def block(rung, log=print):
-    """a rung's two searches side by side, as a table for body-motion 4.13: every figure the job asks after a rung."""
-    ds = [json.load(open(p_)) for p_ in (os.path.join(OUT, rung + t + ".json") for t in ("", "_b")) if os.path.isfile(p_)]
+def block(rung, log=print, paths=None, cols=None):
+    """a rung's two searches side by side, as a table for body-motion 4.13: every figure the job asks after a rung.
+    paths, cols (4.14): any kept results side by side under the given headings, in place of a rung's pair."""
+    ds = [json.load(open(p_)) for p_ in (paths or [os.path.join(OUT, rung + t + ".json") for t in ("", "_b")]) if os.path.isfile(p_)]
     if not ds:
         return
-    cols = ["seeds %d, %d" % (d.get("seed", 0), d.get("seed", 0) + 10) for d in ds]
+    cols = cols or ["seeds %d, %d" % (d.get("seed", 0), d.get("seed", 0) + 10) for d in ds]
     row = lambda name, f: log("| %s | %s |" % (name, " | ".join(f(d) for d in ds)))
     log("| | " + " | ".join(cols) + " |")
     log("| :-- | " + " | ".join("--:" for _ in ds) + " |")
     row("the sweet spot at contact", lambda d: "**%.2f m/s (%.1f mph)**" % (d["sweet_speed"], d["sweet_speed"] / MPH))
     row("the miss", lambda d: "%.1f cm" % math.hypot(*d["miss_cm"]))
     row("the score (lower is better)", lambda d: "%.1f" % d["cost"])
-    row("settled: the fall over the last 50 generations", lambda d: ("%.2f" if d.get("settled") else "NOT SETTLED: %.2f") % d["fall_last_50"])
+    row("settled: the fall over the last 50 generations", lambda d: ("%.2f over the last 100 of %d carried on%s" % (d["fall_last_100"], d["generations"], "" if d.get("at_end") else ": NOT AT ITS END")) if "generations" in d
+        else ("%.2f" if d.get("settled") else "NOT SETTLED: %.2f") % d["fall_last_50"])
     row("the speed at 0.5, 0.25, 0.125 ms", lambda d: ", ".join("%.2f" % v[1] if v else "fails" for v in d["step_check"].values()) if d.get("step_check") else "-")
     row("failed runs among the plan's 205 one-number changes", lambda d: "%s" % d.get("failed_differences", "-"))
-    row("the line from the starting plan to the result (11 points, then one beyond)", lambda d: " ".join("%.0f" % v for v in d["search_checks"]["line"]["0.250"]) if d.get("search_checks") else "-")
+    row("the line from the starting plan to the result (11 points, then one beyond)", lambda d: " ".join("%.1f" % v if v < 60 else "%.0f" % v for v in d["search_checks"]["line"]["0.250"]) if d.get("search_checks") else "-")
+    if any("lead_foot_load" in d for d in ds):
+        row("the front foot: at or over 1.5 x his weight for; mean over the last 100 ms (front, rear)", lambda d: "%.0f ms; %.2f, %.2f" % ((d["lead_foot_load"]["ms at or over 1.5"],) + tuple(d["lead_foot_load"]["mean over the last 100 ms"])) if "lead_foot_load" in d else "-")
     row("the bat at its fastest at contact", lambda d: "%.0f%%" % (100 * d["sweet_speed"] / d["sweet_fastest_before"][0]))
     row("the hands' fastest", lambda d: "%.1f m/s" % d["hands_fastest"][0])
     row("the attack angle", lambda d: "%+.1f deg" % d["attack_deg"])
@@ -397,11 +519,18 @@ def main():
     a = sys.argv[1:]
     arg = lambda k, d: a[a.index(k) + 1] if k in a else d
     log = lambda s_: print(s_, flush=True)
+    if "--dir" in a:                                   # a later session's results beside s11's (--dir s12): body-motion 4.14
+        global OUT
+        OUT = os.path.join(P.OUT, arg("--dir", "s11"))
     if "--table" in a:
         table(log)
         return
     if "--block" in a:
-        block(arg("--block", "r0"), log)
+        files = [x for x in a[a.index("--block") + 1:] if x.endswith(".json")]
+        if files:                                          # --block a.json b.json ... --cols "name;name": any kept results side by side
+            block(None, log, files, arg("--cols", "").split(";") if "--cols" in a else [os.path.basename(f)[:-5] for f in files])
+        else:
+            block(arg("--block", "r0"), log)
         return
     if "--show" in a:
         d = json.load(open(arg("--show", "")))
@@ -416,9 +545,16 @@ def main():
         if "--out" in a:
             json.dump(out, open(arg("--out", ""), "w"), indent=1)
         return
+    if "--carry" in a:
+        carry(arg("--rung", "r4"), arg("--carry", ""), int(arg("--seed", 22)), arg("--tag", "_carry"), log, cap=int(arg("--cap", 6000)), block=int(arg("--block-gens", 500)),
+              square="--old-square" not in a, leap="--leap" in a, resume=arg("--resume", None))
+        return
+    if "--settle" in a:
+        settle(arg("--rung", "r4"), arg("--settle", ""), int(arg("--seed", 21)), arg("--tag", "_end"), log, brace="--brace" in a, cap=int(arg("--cap", END_CAP)), square="--square" in a, leap="--leap" in a)
+        return
     if "--rung" in a:
         run_rung(arg("--rung", "r0"), arg("--from", "S"), int(arg("--seed", 1)), int(arg("--reach", 100)), int(arg("--gens", 250)), int(arg("--more", 500)), arg("--tag", ""), log,
-                 int(arg("--blocks", MAX_BLOCKS)))
+                 int(arg("--blocks", MAX_BLOCKS)), through=float(arg("--through", 0)) or None, square="--square" in a)
         return
     print(__doc__)
 

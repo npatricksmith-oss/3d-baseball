@@ -144,6 +144,21 @@ def clock_residuals(fired, tx, t_avail, form="each"):
     return [math.sqrt(w / tot) * max(0.0, (tx - t_avail) - t) / CLOCK_UNIT for t, w in fired]
 
 
+def bat_between(b0, b1, q):
+    """the bat's direction a share q of the way from one record (direction b0) to the next (b1): the two directions
+    mixed and made a unit vector again (records are 5 ms apart and the bat turns under 20 deg between them, where this
+    is within a few hundredths of a degree of turning at an even rate). q outside 0..1 is held at the nearer record."""
+    q = min(1.0, max(0.0, q))
+    return E.unit(tuple((1.0 - q) * a + q * b for a, b in zip(b0, b1)))
+
+
+def through_charge(through, v_along):
+    """the first stage's charge (its residual; the score squares it) for a sweet spot that is not moving THROUGH the ball's
+    place: what its speed along the ball's line toward the pitcher, where it comes nearest, falls short of `through` m/s
+    (body-motion 4.14, part 3: the parked basin's remedy). Nothing at `through` or faster."""
+    return max(0.0, through - v_along)
+
+
 class Ctx:
     """one body with its ranges, its start and the pitch, reused for every swing of a search."""
 
@@ -156,12 +171,29 @@ class Ctx:
         # wrist: "box" (session 9, the default) or "oval" (4.12: both of a wrist's angles inside its ellipse; --wrist oval)
         # clear: the cleared start of 4.12 (body.START_CLEAR: [4]'s launch posture moved by the rule so that every joint is
         # 5 deg inside its end; no stop moved; --clear). STILL [4]'s LAUNCH POSTURE, MOVED BY A RULE, AND FLAGGED AS THAT.
-        self.m = m = B.Model(H, M, ranges=(), grip=o.get("grip", "weld"), feet=o.get("feet", "plate"), mu=o.get("mu"),
-                             wrist=o.get("wrist", "box"),
-                             # stance="mlb" (4.13, rung 3): the start on major leaguers' feet (body.START_STANCE) in place of [4]'s
-                             shift=B.START_STANCE if o.get("stance") == "mlb" else B.START_CLEAR if o.get("clear") else None,
-                             # loads="balance" (4.13, rung 5): the feet's starting loads from his own weight and balance, not [4]'s forces
-                             loads=o.get("loads", "measured"))
+        # stance="mlb" (4.13, rung 3): the start on major leaguers' feet (body.START_STANCE) in place of [4]'s
+        shift = B.START_STANCE if o.get("stance") == "mlb" else B.START_CLEAR if o.get("clear") else None
+        if o.get("posture"):
+            # posture (4.14, part 4): {posture number: change} on top of the start's own, set by the search with the plan
+            shift = dict(shift or {})
+            for k, v in o["posture"].items():
+                shift[k] = shift.get(k, 0.0) + v
+        # sole_wide (4.14, part 2: a what-if for the grip's measured range): the sole's points this many times further from
+        # the foot's line, which scales the forefoot's twisting hold by the same (1.46: the top of Brosnan 2009's range)
+        wide, keep = o.get("sole_wide"), (B.BALL_HALF_W, B.SOLE_HALF_W)
+        try:
+            if wide:
+                B.BALL_HALF_W, B.SOLE_HALF_W = keep[0] * wide, keep[1] * wide
+            self.m = m = B.Model(H, M, ranges=(), grip=o.get("grip", "weld"), feet=o.get("feet", "plate"), mu=o.get("mu"),
+                                 wrist=o.get("wrist", "box"), shift=shift,
+                                 # loads="balance" (4.13, rung 5): the feet's starting loads from his own weight and balance, not [4]'s forces
+                                 loads=o.get("loads", "measured"))
+        finally:
+            B.BALL_HALF_W, B.SOLE_HALF_W = keep
+        if o.get("arms") is not None:
+            # arms (4.14, part 4): the start's three free choices (the bat's roll, each arm's swivel) held at given values
+            # and not searched for, so that the start changes smoothly with the posture's numbers
+            m.arms_given = tuple(o["arms"])
         for k, shift in o.get("start", {}).items():          # the start moved by a stated amount (a sensitivity run)
             B.CURVE_OVERRIDE[k] = (lambda kk, sh: (lambda t: C.resample(B._CURVES.setdefault(kk, C.load(kk)), t, t, 1.0)[0] + sh))(k, shift)
         vel = o.get("vel", 1.0)
@@ -212,6 +244,16 @@ class Ctx:
         # (a set of drive.DAMPING by name; body-motion 4.13)
         Dr.add_damping(m, st, o.get("damp"))
         self.damp_table, self.damp_cap = Dr.damping_of(o.get("damp"))
+        if o.get("foot_twist"):
+            # foot_twist (4.14, part 2; A WHAT-IF, NOT THE BODY): each foot's heading held to where it starts by a spring from
+            # the ground whose torque is capped at this many N m, on top of the sole points' own grip and whatever the foot's
+            # load: what Wannop's lines for studded shoes on grass (15) and turf (20) have left over at no load, where the two
+            # figures read for basepath dirt have nothing (note 12 D5). The engine's capped hold with the world as its parent;
+            # it acts in the air too and springs back, which a stud in dirt does not. Added after the hold-still solves and the
+            # joints' damping (add_damping starts the system's holds afresh), so that neither sees it.
+            for sd in "LR":
+                fb = m.b["foot_" + sd]
+                m.sys.hold("footcap_" + sd, -1, fb, m.sys.pose(st, fb)[1], (0.0, 0.0, B.RANGE_K["big"]), (0.0, 0.0, B.RANGE_C["big"]), float(o["foot_twist"]))
         self.st = st
         self.BW = M * E.G
         self.order = P.tree_order(m)
@@ -227,6 +269,10 @@ class Ctx:
             # on major leaguers' feet the ball is met where they meet it relative to their feet: MEET_FROM_REAR_ANKLE
             # toward the pitcher from the rear ankle (which is level with the lead ankle, 4.13)
             self.Pc = (self.Pc[0], m.joint_pos(st, "ankle_R")[1] + o.get("meet_rear", MEET_FROM_REAR_ANKLE) * k, self.Pc[2])
+        if o.get("Pc") is not None:
+            # Pc (4.14, part 4): the ball's place given in the world (where it is with the start unmoved), so that a posture
+            # the search moves does not carry the ball with the pelvis: the pitch is where it is, the feet are where they are
+            self.Pc = tuple(o["Pc"])
         d, a = BALL_DESCENT * B.D2R, BALL_ACROSS * B.D2R
         self.nb = (math.cos(d) * math.sin(a), -math.cos(d) * math.cos(a), -math.sin(d))
         self.ev = E.unit(E.sub((0.0, 0.0, 1.0), E.scale(self.nb, self.nb[2])))    # up, square to the ball's line
@@ -429,6 +475,10 @@ class Ctx:
             xo, least, zr = self.balance(recs, tx)
             r += [xo / XCOM_UNIT, max(0.0, JUMP_MIN - least) / JUMP_UNIT, max(0.0, SINK_MIN - zr) * self.z0 / SINK_UNIT]
             r += self.clock(pl, tx)
+            if self.o.get("through"):
+                # the parked basin's remedy (4.14, part 3): the first stage asks the sweet spot THROUGH the ball's place, charged
+                # for what its speed along the ball's line where it comes nearest falls short of `through` m/s (1 a m/s)
+                r.append(through_charge(self.o["through"], -E.dot(v, self.nb)))
             return None if any(x != x for x in r) else r
         if self.o.get("contact") == "nearest":
             # the whole aim with no cliff (4.10, session 8's fix): contact is read where the sweet spot comes nearest the
@@ -442,6 +492,11 @@ class Ctx:
         vpar = -E.dot(v, self.nb)
         share = BALL_SPEED / (BALL_SPEED + max(1.0, vpar))
         bz = self.m.axis(recs[i][1], "bat", (0, 0, 1))
+        if self.o.get("square") == "contact" and i + 1 < len(recs):
+            # square="contact" (4.14, part 3): the bat's direction AT contact, between the two records either side of it.
+            # Without it (every search before session 12) it is read at the record before contact, up to 5 ms early, in
+            # which the bat turns up to 15 deg: the score then jumps by 2.4 whenever contact crosses a record's instant.
+            bz = bat_between(bz, self.m.axis(recs[i + 1][1], "bat", (0, 0, 1)), (tx - recs[i][0]) / (recs[i + 1][0] - recs[i][0]))
         sq = math.asin(max(-1.0, min(1.0, (bz[0] * self.nb[0] + bz[1] * self.nb[1]) / max(1e-9, math.hypot(bz[0], bz[1]) * math.hypot(self.nb[0], self.nb[1]))))) / B.D2R
         r = [E.dot(d, self.ev) / MISS_UNIT, E.dot(d, self.el) / MISS_UNIT,
              E.dot(v, self.ev) * TIMING_ERR * share / MISS_UNIT, E.dot(v, self.el) * TIMING_ERR * share / MISS_UNIT,
@@ -489,6 +544,16 @@ def hold_work(s, recs, t_end):
             wr = wrel(st, a, b)
             wl = E.mtv(Rof(st, a), wr) if a >= 0 else wr
             tl = (-Cc[0] * wl[0], -Cc[1] * wl[1], -Cc[2] * wl[2])       # the damping alone (the body's holds have no stiffness)
+            if any(K):
+                # a hold with a spring (4.14's what-if twisting hold on a foot): the engine's whole law, spring and damper
+                qb = tuple(st[13 * b + 3:13 * b + 7])
+                qe = E.qmul(E.qmul(E.qconj(tuple(st[13 * a + 3:13 * a + 7])), qb) if a >= 0 else qb, E.qconj(qref))
+                if qe[0] < 0:
+                    qe = tuple(-x for x in qe)
+                sn = math.sqrt(qe[1] * qe[1] + qe[2] * qe[2] + qe[3] * qe[3])
+                ang = 2.0 * math.atan2(sn, qe[0]) if sn > 1e-12 else 2.0
+                rv = tuple(x / sn * ang for x in qe[1:]) if sn > 1e-12 else tuple(2.0 * x for x in qe[1:])
+                tl = tuple(t_ - K[c] * rv[c] for c, t_ in enumerate(tl))
             mag = E.norm(tl)
             if mag > cap:
                 tl = E.scale(tl, cap / mag)
@@ -648,7 +713,7 @@ def report(ctx, u, log=print):
     bz = m.axis(recs[ic][1], "bat", (0, 0, 1))
     out["bat_square_deg"] = math.asin(max(-1.0, min(1.0, (bz[0] * ctx.nb[0] + bz[1] * ctx.nb[1]) / (math.hypot(bz[0], bz[1]) * math.hypot(ctx.nb[0], ctx.nb[1]))))) / B.D2R
     out["bat_elev_deg"] = obs[ic][1]["bat_elev"]
-    log("   FROM THE START PLACED ON [4]'s STATE%s (an input, flagged): contact %.0f ms after the start%s" % (", ON MAJOR LEAGUERS' FEET (4.13, rung 3), THE REST MOVED BY THE RULE OF 4.12" if ctx.o.get("stance") == "mlb" else ", MOVED OFF ITS JOINTS' ENDS BY THE RULE OF 4.12" if ctx.o.get("clear") else "", (tx - T0) * 1e3, "" if came else "  (THE BAT NEVER REACHED THE BALL; figures are at the run's end)"))
+    log("   FROM THE START PLACED ON [4]'s STATE%s (an input, flagged): contact %.0f ms after the start%s" % (", ON MAJOR LEAGUERS' FEET (4.13, rung 3), THE REST OF THE POSTURE FOUND BY PRACTICE (4.14, part 4)" if ctx.o.get("stance") == "mlb" and ctx.o.get("posture") else ", ON MAJOR LEAGUERS' FEET (4.13, rung 3), THE REST MOVED BY THE RULE OF 4.12" if ctx.o.get("stance") == "mlb" else ", MOVED OFF ITS JOINTS' ENDS BY THE RULE OF 4.12" if ctx.o.get("clear") else "", (tx - T0) * 1e3, "" if came else "  (THE BAT NEVER REACHED THE BALL; figures are at the run's end)"))
     out["failed_after_contact_ms"] = None if ctx.failed_after is None else ctx.failed_after[0] * 1e3
     if ctx.failed_after is not None:
         log("   THE RUN FAILED %.0f ms AFTER CONTACT, after everything the score and these checks read (\"%s\"); the records to there are used"
@@ -928,14 +993,26 @@ def cost_of(r):
 CMA_LAMBDA, CMA_SIGMA, CMA_OUT = 24, 0.03, 1e4          # plans a generation; the first spread, of each number's range; the charge for leaving the box [E]
 
 
-def cma(ctx, u0, gens, log, pool, seed=1, lam=CMA_LAMBDA, sigma0=CMA_SIGMA):
+def cma(ctx, u0, gens, log, pool, seed=1, lam=CMA_LAMBDA, sigma0=CMA_SIGMA, stop=None, leap=None, state=None, keep=None):
     """The practice search without slopes (body-motion 4.12): the separable form of CMA-ES (Ros & Hansen 2008) on the free
     numbers of the plan, in the unit box. Each generation `lam` plans are drawn about a centre with one spread per number,
     all are run, they are RANKED by score, the centre moves to the weighted mean of the better half and each number's
     spread follows how the better plans were spread. Only the order of the scores is used. A plan outside the box is run
     at the box's edge and charged CMA_OUT x its squared distance outside; a failed run ranks last. Deterministic (seed).
     Returns (the best plan ever run, its score, history [(generation, best ever, this generation's best, median, the
-    overall step, failed runs)], the last centre, the spreads at the end)."""
+    overall step, failed runs)], the last centre, the spreads at the end).
+    stop = (window, fall) or (window, fall, least) (4.14, part 3): the search ends before `gens` once its best score has
+    fallen less than `fall` over the last `window` generations, and not before generation `least` (a search started
+    afresh finds nothing better for its first 80-280 generations, while its spreads form: a quiet start is not an end);
+    None (every search before session 12) runs all `gens`.
+    leap = (every, (b1, b2, ...)) (4.14, part 3): every `every` generations the centre's travel over those generations
+    is tried carried on by each multiple b (the plans at centre + b x travel, held inside the box, run as one more small
+    generation); if the best of them scores under the best ever, the centre moves there. A search creeping down a long
+    valley with a small step gets there sooner; nothing else of the search changes. None: no leaps.
+    state, keep (4.14, part 3): keep = {} is filled with the search's whole state at its last generation (the centre,
+    each number's spread, the paths, the step, the draws' generator, the best plan, the history); given back as state,
+    the search goes on from there to generation `gens` (counted from its first) exactly as if it had never stopped. A
+    search STARTED AFRESH from a result has lost the spreads it had learned and finds nothing for hundreds of generations."""
     free = ctx.free
     n = len(free)
     rng = random.Random(seed)
@@ -959,7 +1036,17 @@ def cma(ctx, u0, gens, log, pool, seed=1, lam=CMA_LAMBDA, sigma0=CMA_SIGMA):
     r0 = ctx.residuals(u0)
     best_u, best = list(u0), cost_of(r0)
     hist = [(0, best, best, best, sigma, 0)]
-    for g in range(1, gens + 1):
+    m_marks, leaps = {0: list(m)}, 0
+    g0 = 0
+    if state is not None:
+        m, C, ps, pc, sigma = list(state["m"]), list(state["C"]), list(state["ps"]), list(state["pc"]), state["sigma"]
+        best_u, best = list(state["best_u"]), state["best"]
+        hist = [tuple(h_) for h_ in state["hist"]]
+        m_marks = {int(k_): list(v_) for k_, v_ in state["m_marks"].items()}
+        leaps, g0 = state["leaps"], state["g"]
+        rs_ = state["rng"]
+        rng.setstate((rs_[0], tuple(rs_[1]), rs_[2]))
+    for g in range(g0 + 1, gens + 1):
         zs = [[rng.gauss(0.0, 1.0) for _ in range(n)] for _ in range(lam)]
         ys = [[math.sqrt(C[k]) * z[k] for k in range(n)] for z in zs]
         us, pens = [], []
@@ -991,13 +1078,39 @@ def cma(ctx, u0, gens, log, pool, seed=1, lam=CMA_LAMBDA, sigma0=CMA_SIGMA):
             C[k] = ((1.0 - c1 - cmu) * C[k] + c1 * (pc[k] * pc[k] + (1.0 - hsig) * cc * (2.0 - cc) * C[k])
                     + cmu * sum(w[j] * ys[order[j]][k] ** 2 for j in range(mu)))
         sigma *= math.exp((cs / damps) * (pn / chi - 1.0))
+        if leap is not None and g % leap[0] == 0:
+            m_then = m_marks.get(g - leap[0])
+            m_marks[g] = list(m)
+            if m_then is not None:
+                trials = []
+                for b_ in leap[1]:
+                    ut = list(u0)
+                    for k, i in enumerate(free):
+                        ut[i] = min(1.0, max(0.0, m[k] + b_ * (m[k] - m_then[k])))
+                    trials.append(ut)
+                rt = [cost_of(r) for r in pool.map(_res, trials, chunksize=1)]
+                kt = min(range(len(trials)), key=lambda k: rt[k])
+                if rt[kt] < best:
+                    log("      generation %3d: a leap of %g times the centre's last %d generations' travel scores %.2f (the best was %.2f): taken" % (g, leap[1][kt], leap[0], rt[kt], best))
+                    best, best_u = rt[kt], trials[kt]
+                    m = [trials[kt][i] for i in free]
+                    m_marks[g] = list(m)
+                    leaps += 1
         srt = sorted(c for c in raw)
         hist.append((g, best, raw[kb], srt[lam // 2], sigma, failed))
         if g % 10 == 0 or g == gens:
             log("      generation %3d: best ever %.2f; this generation's best %.2f, median %.2f; overall step %.4f; failed runs %d" % (g, best, raw[kb], srt[lam // 2], sigma, failed))
+        if stop is not None and g >= max(stop[0], stop[2] if len(stop) > 2 else 0) and hist[g - stop[0]][1] - best < stop[1]:
+            log("      ended at generation %d: the best score fell %.3f over the last %d generations (the rule: under %.2f)" % (g, hist[g - stop[0]][1] - best, stop[0], stop[1]))
+            break
     mfull = list(u0)
     for k, i in enumerate(free):
         mfull[i] = min(1.0, max(0.0, m[k]))
+    if keep is not None:
+        rs_ = rng.getstate()
+        last = max(m_marks) if m_marks else 0
+        keep.update(m=list(m), C=list(C), ps=list(ps), pc=list(pc), sigma=sigma, best_u=list(best_u), best=best, hist=[list(h_) for h_ in hist],
+                    m_marks={str(k_): v_ for k_, v_ in m_marks.items() if k_ == last}, leaps=leaps, g=hist[-1][0], rng=[rs_[0], list(rs_[1]), rs_[2]])
     return best_u, best, hist, mfull, [sigma * math.sqrt(c) for c in C]
 
 

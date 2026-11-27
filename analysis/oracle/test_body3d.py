@@ -2612,6 +2612,387 @@ class ReviewElevenChecks(unittest.TestCase):
             self.assertAlmostEqual(o["front foot's turn (deg)"][0], 48.8141, delta=1e-3)
 
 
+class SessionTwelveChecks(unittest.TestCase):
+    """body-motion 4.14 (session 12): the readings of the diagnosis of what holds the pelvis (pelvis3d.py)."""
+
+    @staticmethod
+    def _pelvis():
+        _practice()
+        import importlib
+        return importlib.import_module("pelvis3d")
+
+    def test_a_bodys_turning_momentum_about_the_vertical_is_the_worked_one(self):
+        """pelvis3d.turning_momentum against a body worked by hand: 2 kg, moments of inertia 0.1, 0.2, 0.3 about its own
+        x, y, z, lying with its own z along the world's x (so its own x is along the world's -z, and the moment of
+        inertia about the vertical is its own x's, 0.1), turning at 5 rad/s about the vertical, its centre 0.5 m along x
+        from the reference point and moving at 3 m/s along y. Its travel's part is m r v = 2 x 0.5 x 3 = 3.0, its own
+        0.1 x 5 = 0.5: 3.5 kg m2/s. About a reference point moving with it at 3 m/s along y the travel's part is gone:
+        0.5. And turned a further 90 deg about the vertical the vertical moment of inertia is unchanged: 3.5 again."""
+        PV = self._pelvis()
+        s = E.System()
+        b = s.body("rod", 2.0, (0.1, 0.2, 0.3))
+        st = s.new_state()
+        q = E.qaxis((0, 1, 0), math.pi / 2)
+        s.set_body(st, b, (0.5, 0.0, 0.0), q, (0.0, 3.0, 0.0), (0.0, 0.0, 5.0))
+        self.assertAlmostEqual(PV.turning_momentum(s, st, [b], (0.0, 0.0, 0.0), (0.0, 0.0, 0.0)), 3.5, delta=1e-9)
+        self.assertAlmostEqual(PV.turning_momentum(s, st, [b], (0.0, 0.0, 0.0), (0.0, 3.0, 0.0)), 0.5, delta=1e-9)
+        s.set_body(st, b, (0.5, 0.0, 0.0), E.qmul(E.qaxis((0, 0, 1), math.pi / 2), q), (0.0, 3.0, 0.0), (0.0, 0.0, 5.0))
+        self.assertAlmostEqual(PV.turning_momentum(s, st, [b], (0.0, 0.0, 0.0), (0.0, 0.0, 0.0)), 3.5, delta=1e-9)
+
+    def test_the_grounds_twist_is_split_into_the_level_forces_lever_and_the_foots_own_twist(self):
+        """pelvis3d.ground_twist against two cases worked by hand. One foot's two sole points at (0.1, +0.05) and
+        (0.1, -0.05) m carry 100 N each, so its centre of pressure is (0.1, 0). (1) Level forces (0, +30) and (0, -10) N:
+        the net (0, 20) at the centre has the moment 0.1 x 20 = 2.0 N m about the vertical through the origin, and about
+        the foot's own centre the two forces have no lever: its own twist is 0. (2) Level forces (+30, 0) and (-10, 0):
+        the net (20, 0) at (0.1, 0) has no moment about the origin; about the centre the first has -(0.05)(30) = -1.5
+        and the second -(-0.05)(-10) = -0.5: the foot's own twist is -2.0. In both the two parts sum to the forces' whole
+        moment about the origin. (3) Loads of 300 and 100 N move the centre to y = +0.025; a point carrying nothing is
+        left out and counted as off the ground."""
+        PV = self._pelvis()
+
+        class M_:
+            pass
+        m = M_()
+        m.sys = E.System()
+        fb = m.sys.body("foot", 1.0, (1.0, 1.0, 1.0))
+        m.sys.contact("L_a", fb, (0.1, 0.05, 0.0), 1, 1, 1, 1, 1)
+        m.sys.contact("L_b", fb, (0.1, -0.05, 0.0), 1, 1, 1, 1, 1)
+        st = m.sys.new_state()
+        for fs, lever, own in ((((0.0, 30.0, 100.0), (0.0, -10.0, 100.0)), 2.0, 0.0), (((30.0, 0.0, 100.0), (-10.0, 0.0, 100.0)), 0.0, -2.0)):
+            g = PV.ground_twist(m, st, list(fs), (0.0, 0.0, 0.0))["L"]
+            self.assertAlmostEqual(g[0], 200.0, delta=1e-12)
+            self.assertAlmostEqual(g[1], lever, delta=1e-12)
+            self.assertAlmostEqual(g[2], own, delta=1e-12)
+            whole = sum(p[0] * f[1] - p[1] * f[0] for p, f in zip(((0.1, 0.05), (0.1, -0.05)), fs))
+            self.assertAlmostEqual(g[1] + g[2], whole, delta=1e-12)
+            self.assertEqual(g[3], 2)
+        g = PV.ground_twist(m, st, [(30.0, 0.0, 300.0), (-10.0, 0.0, 100.0)], (0.0, 0.0, 0.0))["L"]
+        self.assertAlmostEqual(g[1], -(0.025) * 20.0, delta=1e-12)           # the net (20, 0) at (0.1, 0.025)
+        self.assertAlmostEqual(g[1] + g[2], -(0.05 * 30.0) - (-0.05 * -10.0), delta=1e-12)
+        g = PV.ground_twist(m, st, [(30.0, 0.0, 300.0), (0.0, 0.0, 0.0)], (0.0, 0.0, 0.0))["L"]
+        self.assertEqual(g[3], 1)
+        self.assertAlmostEqual(g[2], 0.0, delta=1e-12)                       # one point holds no twist about itself
+        self.assertEqual(PV.ground_twist(m, st, [(0.0, 0.0, 0.0), (0.0, 0.0, 0.0)], (0.0, 0.0, 0.0))["R"], (0.0, 0.0, 0.0, 0))
+
+    def test_the_bats_direction_between_two_records_is_the_even_turn(self):
+        """practice3d.bat_between (4.14, part 3: the bat's squareness read at contact and not at the record before).
+        Two directions 15 deg apart in the level plane, which is about what a bat turns in the 5 ms between records:
+        a third of the way is 5.0 deg by an even turn, and the mix is within 0.02 deg of it; halfway is 7.5 exactly by
+        symmetry; at the ends it is the records' own directions; outside 0..1 it is held at the nearer record; the
+        result is a unit vector."""
+        PR = _practice()
+        a = (1.0, 0.0, 0.0)
+        b = (math.cos(math.radians(15.0)), math.sin(math.radians(15.0)), 0.0)
+        ang = lambda v: math.degrees(math.atan2(v[1], v[0]))
+        self.assertAlmostEqual(ang(PR.bat_between(a, b, 1.0 / 3.0)), 5.0, delta=0.02)
+        self.assertAlmostEqual(ang(PR.bat_between(a, b, 0.5)), 7.5, delta=1e-9)
+        self.assertAlmostEqual(ang(PR.bat_between(a, b, 0.0)), 0.0, delta=1e-12)
+        self.assertAlmostEqual(ang(PR.bat_between(a, b, 1.0)), 15.0, delta=1e-9)
+        self.assertAlmostEqual(ang(PR.bat_between(a, b, 1.7)), 15.0, delta=1e-9)
+        self.assertAlmostEqual(ang(PR.bat_between(a, b, -0.2)), 0.0, delta=1e-12)
+        self.assertAlmostEqual(math.sqrt(sum(x * x for x in PR.bat_between(a, b, 0.3))), 1.0, delta=1e-12)
+
+    def test_the_searchs_leaps_reach_a_known_least_down_a_curved_valley_in_fewer_generations(self):
+        """practice3d.cma's leaps (4.14, part 3), on a score with a long curved valley whose least is known: eight
+        numbers u, the residuals 10 ((u[i+1] - 0.2) - 2 (u[i] - 0.2)^2) for each neighbouring pair and 0.7 - u[i] for
+        each number, all zero at u = 0.7 (0.5 = 2 x 0.25). From 0.3 everywhere, first step 0.012, ended by the rule
+        (under 1e-10 over 200 generations, 400 at least): (1) with leaps every 25 generations of 1, 2, 4, 8 times the
+        centre's travel, and without, the search ends within 1e-5 of 0.7 in every number: the leaps do not change
+        where it ends; (2) with leaps it is under a score of 1e-4 in fewer than two thirds of the generations it takes
+        without (here about half); (3) a leap is only ever taken to a plan scoring under the best so far, so the best
+        score never rises from one generation to the next."""
+        PR = _practice()
+        n = 8
+
+        class Toy:
+            free = list(range(n))
+
+            @staticmethod
+            def residuals(u):
+                return [10.0 * ((u[i + 1] - 0.2) - 2.0 * (u[i] - 0.2) ** 2) for i in range(n - 1)] + [0.7 - x for x in u]
+
+        class Pool:
+            @staticmethod
+            def map(f, us, chunksize=1):
+                return [f(u) for u in us]
+        old = PR._CTX
+        PR._CTX = Toy
+        try:
+            quiet = lambda s_: None
+            under = lambda hist: next(h[0] for h in hist if h[1] < 1e-4)
+            u0, b0, h0, _, _ = PR.cma(Toy, [0.3] * n, 4000, quiet, Pool, seed=1, sigma0=0.012, stop=(200, 1e-10, 400))
+            u1, b1, h1, _, _ = PR.cma(Toy, [0.3] * n, 4000, quiet, Pool, seed=1, sigma0=0.012, stop=(200, 1e-10, 400), leap=(25, (1.0, 2.0, 4.0, 8.0)))
+            for u in (u0, u1):
+                for x in u:
+                    self.assertAlmostEqual(x, 0.7, delta=1e-5)
+            self.assertLess(under(h1), 2.0 / 3.0 * under(h0))
+            self.assertTrue(all(b[1] <= a[1] for a, b in zip(h1, h1[1:])))
+        finally:
+            PR._CTX = old
+
+    def test_a_search_carried_on_from_its_kept_state_is_the_search_that_never_stopped(self):
+        """practice3d.cma's state (4.14, part 3). On the curved valley of the leaps' test: a search of 300 generations
+        run in one go, and the same search stopped at 120 generations, its state kept, turned into text and back (as a
+        result's file does), and carried on to 300: the same best score at every generation and the same plan at the
+        end, to the last digit, with leaps and without. And started AFRESH from the plan it had at 120 generations (what
+        every stage of sessions 10 and 11 did) it is not the same search: its score at 300 differs."""
+        import json
+        PR = _practice()
+        n = 8
+
+        class Toy:
+            free = list(range(n))
+
+            @staticmethod
+            def residuals(u):
+                return [10.0 * ((u[i + 1] - 0.2) - 2.0 * (u[i] - 0.2) ** 2) for i in range(n - 1)] + [0.7 - x for x in u]
+
+        class Pool:
+            @staticmethod
+            def map(f, us, chunksize=1):
+                return [f(u) for u in us]
+        old = PR._CTX
+        PR._CTX = Toy
+        try:
+            quiet = lambda s_: None
+            for leap in (None, (25, (1.0, 2.0, 4.0, 8.0))):
+                u_all, b_all, h_all, _, _ = PR.cma(Toy, [0.3] * n, 300, quiet, Pool, seed=4, sigma0=0.012, leap=leap)
+                keep = {}
+                u_a, b_a, h_a, _, _ = PR.cma(Toy, [0.3] * n, 120, quiet, Pool, seed=4, sigma0=0.012, leap=leap, keep=keep)
+                state = json.loads(json.dumps(keep))
+                u_b, b_b, h_b, _, _ = PR.cma(Toy, [0.3] * n, 300, quiet, Pool, seed=4, sigma0=0.012, leap=leap, state=state)
+                self.assertEqual(h_b[-1][0], 300)
+                self.assertEqual([h[1] for h in h_b], [h[1] for h in h_all])
+                self.assertEqual(list(u_b), list(u_all))
+                u_c, b_c, h_c, _, _ = PR.cma(Toy, list(u_a), 180, quiet, Pool, seed=4, sigma0=0.012, leap=leap)
+                self.assertNotEqual(b_c, b_all)
+        finally:
+            PR._CTX = old
+
+    def test_the_first_stage_charges_a_bat_that_does_not_come_through_the_ball(self):
+        """practice3d.through_charge (4.14, part 3: the parked basin's remedy), worked by hand at 5 m/s asked. A bat
+        parked at the ball (0 m/s along the ball's line where it comes nearest) is charged 5, which the score squares
+        to 25; one moving back at 2.3 m/s there (session 10's parked runs: -0.2 to -2.3) 7.3, squared 53.29; one
+        passing through at exactly 5 m/s, or at a swing's 12, nothing."""
+        PR = _practice()
+        self.assertAlmostEqual(PR.through_charge(5.0, 0.0) ** 2, 25.0, delta=1e-12)
+        self.assertAlmostEqual(PR.through_charge(5.0, -2.3) ** 2, 53.29, delta=1e-9)
+        self.assertEqual(PR.through_charge(5.0, 5.0), 0.0)
+        self.assertEqual(PR.through_charge(5.0, 12.0), 0.0)
+
+    def test_the_search_carried_to_its_end_stops_by_its_rule_and_finds_a_known_least(self):
+        """practice3d.cma's end rule (4.14, part 3), on a score whose least is known and not the search's own: six
+        numbers, the score the sum of (10 (x - c))^2 with c = 0.2, 0.3, ..., 0.7, least 0 at x = c. From x = 0.5
+        everywhere: (1) with stop = (40, 1e-9) it ends before the 5,000 generations allowed, at a score under 1e-6 and
+        every number within 1e-4 of its c, and over its last 40 generations the best score fell less than 1e-9; (2) with
+        no end rule the same search runs every generation asked (60) and has not yet reached that score; (3) a rule
+        that can never be met (a fall under 0) runs to the cap; (4) the least number of generations (below)."""
+        PR = _practice()
+        c = [0.2, 0.3, 0.4, 0.5, 0.6, 0.7]
+
+        class Toy:
+            free = list(range(6))
+
+            @staticmethod
+            def residuals(u):
+                return [10.0 * (x - k) for x, k in zip(u, c)]
+
+        class Pool:
+            @staticmethod
+            def map(f, us, chunksize=1):
+                return [f(u) for u in us]
+        old = PR._CTX
+        PR._CTX = Toy
+        try:
+            quiet = lambda s_: None
+            u, best, hist, _, _ = PR.cma(Toy, [0.5] * 6, 5000, quiet, Pool, seed=3, stop=(40, 1e-9))
+            self.assertLess(hist[-1][0], 5000)
+            self.assertLess(best, 1e-6)
+            for x, k in zip(u, c):
+                self.assertAlmostEqual(x, k, delta=1e-4)
+            self.assertLess(hist[-41][1] - hist[-1][1], 1e-9)
+            self.assertGreaterEqual(hist[-42][1] - hist[-2][1], 1e-9)       # it did not stop a generation late
+            u2, best2, hist2, _, _ = PR.cma(Toy, [0.5] * 6, 60, quiet, Pool, seed=3)
+            self.assertEqual(hist2[-1][0], 60)
+            self.assertGreater(best2, best)
+            self.assertEqual([h[1] for h in hist2], [h[1] for h in hist[:61]])   # the rule changes nothing before it ends the search
+            u3, best3, hist3, _, _ = PR.cma(Toy, [0.5] * 6, 80, quiet, Pool, seed=3, stop=(40, 0.0))
+            self.assertEqual(hist3[-1][0], 80)
+            # (4) a least number of generations: a rule that would end the search at once (any fall counts as none) ends
+            # it at generation 40 without one and at generation 70 with a least of 70, the scores the same up to there
+            u4, best4, hist4, _, _ = PR.cma(Toy, [0.5] * 6, 200, quiet, Pool, seed=3, stop=(40, 1e9))
+            u5, best5, hist5, _, _ = PR.cma(Toy, [0.5] * 6, 200, quiet, Pool, seed=3, stop=(40, 1e9, 70))
+            self.assertEqual(hist4[-1][0], 40)
+            self.assertEqual(hist5[-1][0], 70)
+            self.assertEqual([h[1] for h in hist5[:41]], [h[1] for h in hist4])
+        finally:
+            PR._CTX = old
+
+    def test_the_posture_given_to_the_search_is_rung_fours_start_until_it_is_moved_and_then_moves_what_it_names(self):
+        """body-motion 4.14, part 4 (posture3d.py, practice3d.Ctx's posture, arms and Pc). (1) With no posture change, the
+        start's three free choices given as rung 4's own and the ball's place given as rung 4's, the placed start is rung
+        4's to the last digit: nothing else came in with the options. (2) The pelvis's place +3 cm moves the pelvis's
+        centre 3.0 cm toward the pitcher (+Y) and not across; both ankles stay where they were along and across within
+        0.5 mm (the feet's places are Statcast's, not the search's; the front ankle is lower, since the front heel, raised
+        on the ball of the foot at launch, comes down as the pelvis comes over it); the ball's place is unchanged. (3) The front knee's number +2 bends the front knee 2.0 deg more and leaves the rear knee's bend.
+        (4) A number that is the feet's (the stride) is not among the fourteen, and each of the fourteen is a posture
+        number of body.py."""
+        PR = _practice()
+        import importlib
+        Q = importlib.import_module("posture3d")
+        L = importlib.import_module("ladder3d")
+        o = dict(L.options("r4"), contact="nearest")
+        pc = Q.PostureCtx(o)
+        base = pc.base
+        same = PR.Ctx(**dict(pc.o, posture={}))
+        self.assertEqual(max(abs(a - b) for a, b in zip(same.st, base.st)), 0.0)
+        self.assertEqual(tuple(same.Pc), tuple(base.Pc))
+        ank = lambda c, sd: c.m.joint_pos(c.st, "ankle_" + sd)
+        pel = lambda c: c.m.sys.pose(c.st, c.m.b["pelvis"])[0]
+        moved = PR.Ctx(**dict(pc.o, posture={"pelvis_x_cm": 3.0}))
+        self.assertAlmostEqual(pel(moved)[1] - pel(base)[1], 0.030, delta=2e-4)
+        self.assertAlmostEqual(pel(moved)[0] - pel(base)[0], 0.0, delta=2e-4)
+        for sd in "LR":
+            for c in range(2):                                   # each ankle's place along and across is the feet's measurement
+                self.assertAlmostEqual(ank(moved, sd)[c], ank(base, sd)[c], delta=5e-4)
+        self.assertAlmostEqual(ank(moved, "R")[2], ank(base, "R")[2], delta=5e-4)
+        self.assertLess(ank(moved, "L")[2], ank(base, "L")[2] - 0.02)   # the front heel comes down as the pelvis comes over it
+        self.assertEqual(tuple(moved.Pc), tuple(base.Pc))
+        free = PR.Ctx(**dict({k: v for k, v in pc.o.items() if k != "Pc"}, posture={"pelvis_rot": 2.0}))
+        held = PR.Ctx(**dict(pc.o, posture={"pelvis_rot": 2.0}))
+        self.assertEqual(tuple(held.Pc), tuple(base.Pc))        # given, the ball's place is exactly rung 4's
+        for c in range(3):                                       # not given, these numbers would not carry it anyway: under 0.1 mm
+            self.assertAlmostEqual(free.Pc[c], base.Pc[c], delta=1e-4)
+        knee = lambda c, sd: c.m.flexion(c.st, "thigh_" + sd, "shank_" + sd)
+        bent = PR.Ctx(**dict(pc.o, posture={"lead_knee_flex": 2.0}))
+        self.assertAlmostEqual(knee(bent, "L") - knee(base, "L"), 2.0, delta=0.05)
+        self.assertAlmostEqual(knee(bent, "R") - knee(base, "R"), 0.0, delta=0.05)
+        self.assertEqual(len(Q.NUMBERS), 14)
+        self.assertNotIn("stride_cm", Q.NUMBERS)
+        self.assertTrue(set(Q.NUMBERS) <= set(B.POSTURE_NUMBERS))
+        # the search's numbers for the kept posture are the middle of each range, and come back as no change
+        u = pc.u_of({n: (0.0, 0.0, 0.05, 0.1, 0.0) for n in PR.CH}, {"trail_knee": -5.0})
+        self.assertAlmostEqual(pc.posture_of(u)["trail_knee"], -5.0, delta=1e-12)
+        self.assertAlmostEqual(pc.posture_of(u)["pelvis_rot"], 0.0, delta=1e-12)
+
+    @staticmethod
+    def _squareness_reads(name, square):
+        """for the kept swing `name` (analysis/research/body): the score's squareness at contact (degrees: residual 4 times its
+        unit), and the bat's angle to the ball's line read from a 0.25 ms record at the instant of contact (a run of its own at
+        every step, which the score does not use); then the score's squareness while one plan number is nudged so that contact
+        walks across the 5 ms record at 25.0 ms, in steps of 0.07 degrees of score."""
+        import json
+        import os
+        PR = _practice()
+        here = os.path.join(os.path.dirname(os.path.abspath(__file__)), "..", "research", "body")
+        with open(os.path.join(here, name)) as f:
+            kept = json.load(f)
+        o = dict(kept["options"], contact="nearest")
+        o.pop("square", None)
+        if square:
+            o["square"] = square
+        ctx = PR.Ctx(**o)
+        u = ctx.u_of(kept["plan"])
+        at_result = ctx.residuals(u)[4] * PR.SQUARE_UNIT
+        fine = ctx.run(u, every=1)
+        tx = ctx.nearest(fine)[0]
+        k = min(range(len(fine)), key=lambda q: abs(fine[q][0] - tx))
+        bz = ctx.m.axis(fine[k][1], "bat", (0, 0, 1))
+        nb = ctx.nb
+        truth = math.asin((bz[0] * nb[0] + bz[1] * nb[1]) / (math.hypot(bz[0], bz[1]) * math.hypot(nb[0], nb[1]))) / PR.B.D2R
+        walk = []
+        for j in range(9):
+            pl = {n: list(v) for n, v in kept["plan"].items()}
+            pl["hip_ext_R"][1] += j * 0.0003
+            walk.append(ctx.residuals(ctx.u_of(pl))[4] * PR.SQUARE_UNIT)
+        return at_result, truth, walk
+
+    def _assert_squareness_is_read_at_contact(self, square):
+        for name in ("practice3d_s12_posture.json", "practice3d_s12_carried.json"):
+            at_result, truth, walk = self._squareness_reads(name, square)
+            self.assertAlmostEqual(at_result, truth, delta=0.3, msg=name)          # against a fine-step run, not the score's own arithmetic
+        # the walk across the 5 ms record (the posture swing's contact is at 24.70 to 25.23 ms in it): contact moves 0.06 ms
+        # a step and the bat turns about 3 degrees a ms, so a true reading moves under 0.3 degrees a step; the old one, which
+        # reads the record before contact, jumps 17 degrees as contact crosses the record
+        _, _, walk = self._squareness_reads("practice3d_s12_posture.json", square)
+        self.assertLess(max(abs(b - a) for a, b in zip(walk, walk[1:])), 0.3)
+
+    def test_the_scores_squareness_is_the_bats_angle_at_contact_and_does_not_jump_as_contact_crosses_a_record(self):
+        """body-motion 4.14, part 3, review P3-5: Ctx.residuals's squareness (square="contact": the index, the share and
+        the guard on the next record) at two kept results agrees within 0.3 degrees with the bat's angle read from a run
+        recorded every 0.25 ms at contact, and does not jump as contact is walked across a record's instant. Against the fine run,
+        which is not the function's own arithmetic. (The old reading, the record before contact, fails both: the commit
+        that added this test shows it once.)"""
+        self._assert_squareness_is_read_at_contact("contact")
+
+    def test_the_starts_margins_are_charged_as_worked_by_hand(self):
+        """posture3d.margin_residuals (4.14, part 4): each joint's shortfall of 5 deg inside its end at the start, one
+        unit a degree; the score squares each. Worked: margins of 4.0, 4.7, 5.0, 9.0 and -1.0 deg (one past its end)
+        give shortfalls 1.0, 0.3, 0, 0 and 6.0, whose squares sum to 1 + 0.09 + 36 = 37.09. And on rung 4's own start,
+        whose margins body-motion 4.13 printed from the start's rule (the rear ankle's roll 4.0 deg inside its end, both
+        hips' sideways margins and the lead ankle's roll at 4.7, every other joint 5 or more), the charge is
+        1.0^2 + 3 x 0.3^2 = 1.27 by those rounded figures: 1.17 from the margins themselves, within 0.15 of it."""
+        PR = _practice()
+        import importlib
+        Q = importlib.import_module("posture3d")
+        L = importlib.import_module("ladder3d")
+        r = Q.margin_residuals({"a": 4.0, "b": 4.7, "c": 5.0, "d": 9.0, "e": -1.0})
+        self.assertAlmostEqual(sum(x * x for x in r), 37.09, delta=1e-9)
+        self.assertEqual(sum(1 for x in r if x == 0.0), 2)
+        base = PR.Ctx(**dict(L.options("r4"), contact="nearest"))
+        mg = B.start_margins(base.m, base.st)
+        self.assertAlmostEqual(sum(x * x for x in Q.margin_residuals(mg)), 1.27, delta=0.15)
+        self.assertEqual(sum(1 for v in mg.values() if v < 4.9), 4)
+
+    def test_what_the_ground_and_a_held_foot_give_is_the_change_of_the_bodys_turning_momentum(self):
+        """The two readings against each other, by a law neither is built from: gravity has no moment about the centre
+        of mass, so the whole body's turning momentum about the vertical through it changes only by the ground's twist
+        (the feet's level forces and their own twist) and by whatever holds a foot's heading. On rung 4's body with both
+        feet held (pelvis3d's replay FR) and its kept plan, 40 ms in the Python engine at the search's 0.25 ms step: the
+        twist summed over the time (by the trapezium rule) is the momentum's change to 1.2% of the twists' summed sizes
+        (0.7% at this step and half that at half the step: the rule's own error on the stiff contact forces). No part
+        can be left out: the holds' share alone is more than ten times that allowance, and so are the level forces' and
+        the feet's own twist. And the held feet do not turn (under 0.5 deg)."""
+        import json
+        import os
+        PV = self._pelvis()
+        PR = _practice()
+        with open(os.path.join(os.path.dirname(os.path.abspath(PR.__file__)), "practice3d_s11_rung4.json")) as fh:
+            d = json.load(fh)
+        ctx, u = PV.build(d, "FR")
+        m, s = ctx.m, ctx.m.sys
+        st, aux = ctx.prepare(u)
+        aux = list(aux)
+        s.anchors(st, aux)
+        h, n = ctx.h, 160
+        bodies = list(range(s.nb))
+
+        def reading(t, x):
+            s.diag = {}
+            s.deriv(t, x, aux)
+            c, vc = B.com(m, x)
+            gt = PV.ground_twist(m, x, [s.diag["contact"][cd[0]] for cd in s.contacts], c)
+            parts = (sum(gt[sd][1] for sd in "LR"), sum(gt[sd][2] for sd in "LR"), sum(s.diag["stop"]["foothold_" + sd][0] for sd in "LR"))
+            s.diag = None
+            return parts, PV.turning_momentum(s, x, bodies, c, vc)
+        prev, H0 = reading(PR.T0, st)
+        given, size, x = [0.0, 0.0, 0.0], 0.0, list(st)
+        f0 = {sd: PV.heading(m, st, "foot_" + sd) for sd in "LR"}
+        for i in range(n):
+            x = s.step(PR.T0 + i * h, x, aux, h)
+            parts, H = reading(PR.T0 + (i + 1) * h, x)
+            for k in range(3):
+                given[k] += 0.5 * (parts[k] + prev[k]) * h
+                size += 0.5 * (abs(parts[k]) + abs(prev[k])) * h
+            prev = parts
+        allow = 0.012 * size
+        self.assertAlmostEqual(H - H0, sum(given), delta=allow)
+        for part in given:                                    # the level forces' lever, the feet's own twist, the holds
+            self.assertGreater(abs(part), 10.0 * allow)
+        for sd in "LR":
+            self.assertLess(abs(PV.wrap(PV.heading(m, x, "foot_" + sd) - f0[sd])), 0.5)
+
+
 class StanceChecks(unittest.TestCase):
     """body-motion 4.13, rungs 3 and 4: the start on major leaguers' feet; the hips' turn by their own muscles."""
 

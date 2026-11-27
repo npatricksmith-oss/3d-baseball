@@ -1028,6 +1028,8 @@ def pose(mdl, t0, heel="solve", report=None, hands_guess=None, hands_solve=True,
         oval = getattr(mdl, "wrist", "box") == "oval"
         key = (repr(sho), repr(Rt), repr(bz), repr(want), GRIP_OBLIQUE, repr(GRIP_ROLL), repr(arm_range()), repr(p), ROM["sh_hadd"], ROM["sh_habd"], ARM_CLEAR,
                oval, WRIST_OVAL_TILT)
+        if arms is None and getattr(mdl, "arms_given", None) is not None:
+            arms = tuple(mdl.arms_given)                  # the three free choices given from outside and not searched (body-motion 4.14, part 4)
         if arms is None and key in _ARM_CACHE:
             arms = _ARM_CACHE[key]
         if arms is None:
