@@ -146,3 +146,4 @@ Watch any of them again with `client/run.sh -BbSavedPlay="saved-plays/<file>.tom
 # The force-driven body, 2026-11-27
 
 - [x] I would like to implement the force driven body into today's game so I can have a proper look. *Done 2026-11-27 (Q65): `bin/body-swing.sh` plays the body's practised swing in the viewer, as the model computed it; add `--tree .claude/worktrees/swing-research` for the newest unmerged one. Games keep today's swing. The keys have not been tried by hand.*
+- [ ] I looked at the swing and it's a mess. Looks highly unnatural and no wonder why we can't get up to speed. Has any agent watched it? *No agent had watched it move; a few still frames only. Session 13's worker now reads a frame every 10 ms and writes what is wrong, position by position, before more searches.*
