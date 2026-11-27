@@ -141,6 +141,36 @@ def widened(pc, state, start_u, log, step=L.END_SIGMA):
     return st, list(start_u) + [u_meet]
 
 
+def rebodied(pc, state, start_u, caps_then, log):
+    """a kept state of the search carried onto a body whose muscles' bounds differ (a what-if body: 4.15, part 2, the
+    owner's D34 question), so that the search goes on FROM THE SAME SWING: the search's number for a muscle's strength is
+    a share of the most its burst may ask (its bound less its holding strength), so on a body with other bounds the same
+    number would be another torque. Each strength number of the centre, the best plan, the start and the marks is
+    multiplied by (the most then) / (the most now), its spread and path with it; a share over 1 is held at 1. Timings,
+    the posture and the ball's place are not touched. caps_then: {channel: the most a burst might ask on the body the
+    state was kept on}. Returns (state, start_u)."""
+    np_ = len(pc.base.box) // len(PR.CH)
+    ratio = {}                                             # by the search's number (index into u)
+    for i, n in enumerate(PR.CH):
+        now = pc.base.cap[n]
+        if now > 0.0 and caps_then[n] > 0.0 and abs(now - caps_then[n]) > 1e-12:
+            ratio[np_ * i] = caps_then[n] / now
+    if not ratio:
+        return state, start_u
+    st = dict(state)
+    at = {i: k for k, i in enumerate(pc.free)}             # the search's number -> its place among the free ones
+    scale_u = lambda u: [min(1.0, x * ratio.get(i, 1.0)) for i, x in enumerate(u)]
+    scale_free = lambda v, power=1: [x * ratio.get(i, 1.0) ** power for i, x in zip(pc.free, v)]
+    st["best_u"], start_u = scale_u(state["best_u"]), scale_u(start_u)
+    st["m"], st["pc"] = scale_free(state["m"]), scale_free(state["pc"])
+    st["C"] = scale_free(state["C"], 2)
+    st["m_marks"] = {k_: scale_free(v_) for k_, v_ in state["m_marks"].items()}
+    log("   THE KEPT SEARCH CARRIED ONTO A BODY WITH OTHER BOUNDS: %d strength numbers rescaled so that each is the torque it was (the most a burst may ask is now %.2f to %.2f times what it was)"
+        % (len(ratio), 1.0 / max(ratio.values()), 1.0 / min(ratio.values())))
+    assert all(i in at for i in ratio)
+    return st, start_u
+
+
 def run(rung, path, seed, tag, log, cap=L.END_CAP, square=False, leap=False, resume=None, block=500, extra=None, meet=False, sigma0=L.END_SIGMA, stage=False):
     """the posture given to the search with the plan, as ONE search with its state kept (4.14, part 4; 4.15, part 0): after
     every `block` generations the result is read whole (so the bat's speed is known at each) and kept as
@@ -167,6 +197,11 @@ def run(rung, path, seed, tag, log, cap=L.END_CAP, square=False, leap=False, res
         since = dres.get("since", 0)
         if len(state["m"]) != len(pc.free):
             state, u0 = widened(pc, state, u0, log)
+            since = state["g"]
+        if dres.get("rung", rung) != rung:
+            # a what-if body: the kept swing's strengths carried over as the torques they were
+            then = PR.Ctx(**{k: v for k, v in dres["options"].items() if k not in ("posture", "meet")})
+            state, u0 = rebodied(pc, state, u0, then.cap, log)
             since = state["g"]
         if stage:
             since = state["g"]

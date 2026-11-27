@@ -3129,6 +3129,40 @@ class SessionThirteenChecks(unittest.TestCase):
         self.assertAlmostEqual(ub[0], 0.30, delta=0.01)
         self.assertLess(cb, 0.02)
 
+    def test_a_kept_search_carried_onto_a_stronger_body_asks_the_torques_it_asked(self):
+        """body-motion 4.15, part 2 (the owner's D34 question; a what-if body, not the batter): posture3d.rebodied carries
+        a kept state onto a body whose muscles' bounds are 1.5 times as great. Checked through the plan itself, in N m and
+        seconds: the kept best's plan on the stronger body is the plan it was on the body it was kept on, channel for
+        channel (every strength to 1e-9 N m, every timing and starting level untouched), where without the carrying the
+        same numbers would ask more of every muscle (the strongest by half as much again); and a number's spread shrinks
+        by the same ratio as the number, so the step is the same step in N m."""
+        import importlib
+        import random
+        PR = _practice()
+        Q = importlib.import_module("posture3d")
+        L = importlib.import_module("ladder3d")
+        o = dict(L.options("r4"), contact="nearest")
+        then, now = Q.PostureCtx(o, meet=True), Q.PostureCtx(dict(L.options("r6_all15"), contact="nearest"), meet=True)
+        rng = random.Random(5)
+        u = [rng.uniform(0.05, 0.95) for _ in range(then.nplan + len(Q.NUMBERS) + 1)]
+        nfree = len(then.free)
+        state = {"m": [u[i] for i in then.free], "C": [1.0 + 0.1 * k for k in range(nfree)], "ps": [0.1] * nfree, "pc": [0.2] * nfree, "sigma": 0.004,
+                 "best_u": list(u), "m_marks": {"100": [u[i] for i in then.free]}, "g": 100}
+        wide, start = Q.rebodied(now, state, list(u), then.base.cap, lambda s_: None)
+        p_then, p_now, p_raw = then.base.plan(u[:then.nplan]), now.base.plan(wide["best_u"][:now.nplan]), now.base.plan(u[:now.nplan])
+        more = 0.0
+        for n in PR.CH:
+            self.assertAlmostEqual(p_now[n][0], p_then[n][0], delta=1e-9, msg=n)
+            self.assertEqual(p_now[n][1:], p_then[n][1:], msg=n)
+            more = max(more, p_raw[n][0] / p_then[n][0] if p_then[n][0] > 1.0 else 0.0)
+        self.assertGreater(more, 1.5)                                   # the bound is 1.5 times; the holding strength is not, so the burst's most is more than 1.5 times
+        self.assertEqual(wide["best_u"][then.nplan:], u[then.nplan:])   # the posture and the ball's place are not touched
+        k = then.free.index(0)                                          # the first channel's strength number
+        r = then.base.cap[PR.CH[0]] / now.base.cap[PR.CH[0]]
+        self.assertAlmostEqual(wide["m"][k], state["m"][k] * r, delta=1e-12)
+        self.assertAlmostEqual(math.sqrt(wide["C"][k]) * now.base.cap[PR.CH[0]], math.sqrt(state["C"][k]) * then.base.cap[PR.CH[0]], delta=1e-9)
+        self.assertEqual(wide["ps"], state["ps"])
+
     def test_where_the_ball_goes_is_read_by_the_games_collision(self):
         """body-motion 4.15, part 1: contact3d's reading (physics-spec 7's detection around the oracle's own impulse
         solver, bbphys) against its worked cases: the head-on formula, the instant of touch, a turned bat."""
