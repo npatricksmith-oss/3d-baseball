@@ -1,6 +1,6 @@
 # Task List
 
-**Last updated:** 2026-11-27 (swing-flow merged).
+**Last updated:** 2026-11-27 (body-track design running).
 
 What is next and what is open. Other files hold the rest:
 
@@ -17,13 +17,11 @@ Status: `[ ]` not started · `[~]` partly done · `[?]` needs an owner decision
 
 ## Resume here (2026-11-27)
 
-**State.** PLAN D31–D44: a force-driven body; PLAN §14.1, spec [docs/body-motion.md](docs/body-motion.md).
+**State.** PLAN D31–D47: a force-driven body; PLAN §14.1, spec [docs/body-motion.md](docs/body-motion.md). Its own practised swing (sessions 8–13, 58.7 mph) was a chop; the owner cancelled its searches.
 
-**Sessions 8–12 are merged** (spec §4.10–§4.14): 26.25 m/s (58.7 mph; the gate asks 29). **D42:** on while each session gains honest bat speed. Session 12 gained.
+**Owner, 2026-11-27.** D45: a real batter's swing is the base; it plays in the viewer, `bin/body-swing.sh --real` (player-visuals §14.1, [note](docs/research/swing/12-real-swing-on-the-figure.md)); he says it looks a lot better. D46: its data is looked at, never shipped. D47: the body practises toward it; how batters differ: later.
 
-**Owner, 2026-11-27 (D45): not a baseball swing; searches cancelled. "Just watch a real batter's swing and mimic it":** the motion first, forces later.
-
-**Merged:** the real swing in the viewer, `bin/body-swing.sh --real` (player-visuals §14.1, [note](docs/research/swing/12-real-swing-on-the-figure.md)). Owner: "better". **Waiting on him: Q68** (will the game be sold: the data's licence), **Q69** (what the body does with the real swing), **Q70** (how batters differ).
+**Running:** worker `body-track-design` (Opus, `.claude/worktrees/swing-research`, `work/body-track`, JOB.md): the design for D47 in the spec, no search run. Then a review, then the owner.
 
 **Next:** §2: the ground-dive leftovers ([note](docs/calibration/2026-11-23-of-ground-dive.md) §9).
 
