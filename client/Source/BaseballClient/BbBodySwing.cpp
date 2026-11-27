@@ -131,6 +131,18 @@ bool FBbSwingFile::Load(const FString& InPath, FString& OutError)
 		{
 			bFormat = Rest() == SwingFormat;
 		}
+		else if (K == TEXT("kind"))
+		{
+			bRecorded = Tok.Num() > 1 && Tok[1] == TEXT("recorded");
+		}
+		else if (K == TEXT("title"))
+		{
+			Title = Rest();
+		}
+		else if (K == TEXT("ball_after_contact"))
+		{
+			bBallAfter = Tok.Num() > 1 && Tok[1] == TEXT("shown");
+		}
 		else if (K == TEXT("plan"))
 		{
 			Plan = Rest();
@@ -390,6 +402,11 @@ bool ABbBodySwing::BuildFigure(FString& OutError)
 		Segs[SegTrunk].WideA = J(TEXT("shoulder_L"));
 		Segs[SegTrunk].WideB = J(TEXT("shoulder_R"));
 	}
+	// A recorded swing's head turns on its own (the file's head body): about the mannequin's head
+	// bone, its forward the mannequin's ahead.
+	HeadBody = File.Body(TEXT("head"));
+	HeadPivotMesh = M(TEXT("head"));
+	HeadAheadMesh = Ahead;
 	if (!bOk)
 	{
 		return false;
@@ -458,6 +475,7 @@ bool ABbBodySwing::BuildFigure(FString& OutError)
 		FBbSwingPart Part;
 		Part.Seg = S->Seg;
 		Part.bRigid = S->bRigid;
+		Part.bHead = P.Bone == FName(TEXT("head"));
 		Part.Ref = P.OnBone * BoneRef;
 		if (!Part.bRigid)
 		{
@@ -507,6 +525,8 @@ bool ABbBodySwing::BuildFigure(FString& OutError)
 		Segs[SegPelvis].Wide, (ToCm(File.JointPos(0, Segs[SegPelvis].WideA)) - ToCm(File.JointPos(0, Segs[SegPelvis].WideB))).Size(),
 		Segs[SegTrunk].Len, (ToCm(File.JointPos(0, Segs[SegTrunk].Near)) - ToCm((File.JointPos(0, Segs[SegTrunk].WideA) + File.JointPos(0, Segs[SegTrunk].WideB)) * 0.5)).Size(),
 		Segs[SegTrunk].Wide, (ToCm(File.JointPos(0, Segs[SegTrunk].WideA)) - ToCm(File.JointPos(0, Segs[SegTrunk].WideB))).Size());
+	UE_LOG(LogBbSwing, Display, TEXT("BB_BODYSWING the mannequin's foot: ankle %.2f cm above the sole, ball of the foot %.2f cm ahead of the ankle (ratio %.4f)"),
+		Segs[SegFootL].Len, Segs[SegFootL].Fwd, Segs[SegFootL].Fwd / FMath::Max(1e-6, Segs[SegFootL].Len));
 	return true;
 }
 
@@ -602,6 +622,17 @@ void ABbBodySwing::Pose(const FBbSwingPose& P)
 			const FQuat Turn = FQuat(FMatrix(G.FM, G.LM, G.AM, FVector::ZeroVector)) * FQuat(FMatrix(G.F, G.L, G.A, FVector::ZeroVector)).Inverse();
 			const FVector FarMesh = G.O + G.A * G.Len, FarModel = G.OM + G.AM * G.Len * G.SA;
 			W = FTransform(Turn * Part.Ref.GetRotation(), FarModel + Turn.RotateVector(Part.Ref.GetLocation() - FarMesh));
+			if (Part.bHead && HeadBody != INDEX_NONE)
+			{
+				// The head turned as the file's head is (its x the face's forward, its z up through the
+				// crown), about the head bone where the trunk carries it.
+				const FVector HA = AxisUE(P, HeadBody, FVector(0, 0, 1)).GetSafeNormal();
+				const FVector HF = SquareTo(HA, AxisUE(P, HeadBody, FVector(1, 0, 0)), HA);
+				const FVector MA(0, 0, 1), MF = SquareTo(MA, HeadAheadMesh, FVector(1, 0, 0));
+				const FQuat HeadTurn = FQuat(FMatrix(HF, HA ^ HF, HA, FVector::ZeroVector)) * FQuat(FMatrix(MF, MA ^ MF, MA, FVector::ZeroVector)).Inverse();
+				const FVector Pivot = FarModel + Turn.RotateVector(HeadPivotMesh - FarMesh);
+				W = FTransform(HeadTurn * Part.Ref.GetRotation(), Pivot + HeadTurn.RotateVector(Part.Ref.GetLocation() - HeadPivotMesh));
+			}
 		}
 		else
 		{
@@ -683,8 +714,9 @@ int32 ABbBodySwing::Start(const FString& Path, UBbFigureShop* InShop, ABbPark* I
 	BallC->SetupAttachment(RootComponent);
 	BallC->RegisterComponent();
 	BallC->SetWorldScale3D(FVector(BallCm / 100.0));
-	UE_LOG(LogBbSwing, Display, TEXT("BB_BODYSWING %s: %d samples from %.1f to %.1f ms (contact 0), plan %s, commit %s, contact %.2f m/s (%.1f mph), missed by %.2f cm"),
-		*File.Name, File.Num(), 1e3 * File.T(0), 1e3 * File.T(File.Num() - 1), *File.Plan, *File.Commit, File.ContactMps, File.ContactMph, File.MissCm);
+	UE_LOG(LogBbSwing, Display, TEXT("BB_BODYSWING %s: %d samples from %.1f to %.1f ms (contact 0), plan %s, commit %s, contact %.2f m/s (%.1f mph)%s"),
+		*File.Name, File.Num(), 1e3 * File.T(0), 1e3 * File.T(File.Num() - 1), *File.Plan, *File.Commit, File.ContactMps, File.ContactMph,
+		File.MissCm >= 0.0 ? *FString::Printf(TEXT(", missed by %.2f cm"), File.MissCm) : TEXT(", a recording (no miss)"));
 	if (bCheck)
 	{
 		return RunCheck();
@@ -704,11 +736,12 @@ int32 ABbBodySwing::Start(const FString& Path, UBbFigureShop* InShop, ABbPark* I
 	{
 		if (bStep)
 		{
-			// Every StepMs, from the model's first instant to 60 ms after contact, from three sides.
+			// Every StepMs, from the file's first instant to 60 ms after contact (a recorded swing: to its last
+			// sample, the end of the finish), from three sides.
 			ShotViews = 3;
 			ShotBefore = 0.6;
 			ShotAfter = 0.3;
-			const double LastMs = FMath::Min(60.0, 1e3 * File.T(File.Num() - 1));
+			const double LastMs = File.bRecorded ? 1e3 * File.T(File.Num() - 1) : FMath::Min(60.0, 1e3 * File.T(File.Num() - 1));
 			for (int32 K = (int32)FMath::CeilToDouble(1e3 * File.T(0) / StepMs - 1e-6); K * StepMs <= LastMs + 1e-6; ++K)
 			{
 				const int32 Ms = (int32)FMath::RoundToDouble(K * StepMs);
@@ -938,15 +971,16 @@ void ABbBodySwing::UpdateText()
 		return;
 	}
 	Hud->BodyLines.Reset();
-	Hud->BodyLines.Add(TEXT("THE BODY'S PRACTISED SWING AS THE MODEL COMPUTED IT (PLAN D43): a viewing aid, not the game's swing"));
+	Hud->BodyLines.Add(!File.Title.IsEmpty() ? File.Title : FString(TEXT("THE BODY'S PRACTISED SWING AS THE MODEL COMPUTED IT (PLAN D43): a viewing aid, not the game's swing")));
 	if (!Error.IsEmpty())
 	{
 		Hud->BodyLines.Add(FString::Printf(TEXT("CANNOT SHOW %s: %s"), *File.Name, *Error));
 		Hud->Footer = TEXT("Q quit");
 		return;
 	}
-	Hud->BodyLines.Add(FString::Printf(TEXT("%s   (plan %s, commit %s)   met at %.1f mph (%.2f m/s), missed by %.2f cm"),
-		*File.Name, *File.Plan, *File.Commit, File.ContactMph, File.ContactMps, File.MissCm));
+	Hud->BodyLines.Add(File.MissCm >= 0.0
+		? FString::Printf(TEXT("%s   (plan %s, commit %s)   met at %.1f mph (%.2f m/s), missed by %.2f cm"), *File.Name, *File.Plan, *File.Commit, File.ContactMph, File.ContactMps, File.MissCm)
+		: FString::Printf(TEXT("%s   (commit %s)   sweet spot %.1f mph at the contact sample"), *File.Name, *File.Commit, File.ContactMph));
 	FBbSwingPose P;
 	Sample(Clock, P);
 	FString Last;
@@ -962,17 +996,18 @@ void ABbBodySwing::UpdateText()
 	const int32 N = File.Num();
 	if (Clock <= File.T(0) + 1e-9)
 	{
-		Hud->BodyLines.Add(TEXT("The model's first computed pose (it has nothing before this instant)"));
+		Hud->BodyLines.Add(File.bRecorded ? TEXT("The recording's first sample (it starts here)") : TEXT("The model's first computed pose (it has nothing before this instant)"));
 	}
 	else if (Clock >= File.T(N - 1) - 1e-9)
 	{
-		Hud->BodyLines.Add(TEXT("The model's last computed pose (its run ends here)"));
+		Hud->BodyLines.Add(File.bRecorded ? TEXT("The recording's last sample (it ends here)") : TEXT("The model's last computed pose (its run ends here)"));
 	}
 	if (Clock > 1e-9)
 	{
-		Hud->BodyLines.Add(TEXT("After contact the ball is not shown: no batted ball is computed"));
+		Hud->BodyLines.Add(File.bBallAfter ? TEXT("After contact: the batted ball at the measured exit speed, launch and spray, under gravity (a picture, not computed)")
+			: TEXT("After contact the ball is not shown: no batted ball is computed"));
 	}
-	Hud->Footer = TEXT("Space pause   Left/Right step 1 ms   R restart   - / = slower, faster   1 pitcher's side  2 open side  3 above  4 orbit (right-drag or J L I K, wheel or U O)   Q quit");
+	Hud->Footer = TEXT("Space pause   Left/Right step one sample   R restart   - / = slower, faster   1 pitcher's side  2 open side  3 above  4 orbit (right-drag or J L I K, wheel or U O)   Q quit");
 }
 
 void ABbBodySwing::TickShots(float DeltaSeconds)
@@ -997,7 +1032,7 @@ void ABbBodySwing::TickShots(float DeltaSeconds)
 		FBbSwingPose P;
 		Sample(Clock, P);
 		Pose(P);
-		BallC->SetVisibility(Clock <= 1e-9);
+		BallC->SetVisibility(Clock <= 1e-9 || File.bBallAfter);
 		SetView(Shot % ShotViews);
 		UpdateText();
 		ShotSince = Wall;
@@ -1136,6 +1171,6 @@ void ABbBodySwing::Tick(float DeltaSeconds)
 	FBbSwingPose P;
 	Sample(Clock, P);
 	Pose(P);
-	BallC->SetVisibility(Clock <= 1e-9);
+	BallC->SetVisibility(Clock <= 1e-9 || File.bBallAfter);
 	UpdateText();
 }

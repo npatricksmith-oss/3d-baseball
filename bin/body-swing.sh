@@ -5,6 +5,9 @@
 #   bin/body-swing.sh <plan.json>              that kept swing
 #   bin/body-swing.sh --tree <checkout>        the newest kept swing of another checkout, run on that
 #                                              checkout's body code (read only; e.g. a research worktree)
+#   bin/body-swing.sh --real [<swing id>]      a real hitter's recorded swing on the figure (PLAN D45; default
+#                                              OpenBiomechanics swing 478_5): analysis/research/body/real_swing.py,
+#                                              whose data must be fetched first (its docstring; never committed)
 #   bin/body-swing.sh ... -BbBodySwingShots    any argument starting with - goes to the viewer
 #
 # Exports the swing every time (about 2 s: the file then always shows the plan run on the body code
@@ -15,9 +18,14 @@ HERE="$(cd "$(dirname "$0")/.." && pwd)"
 UE="${UE_ROOT:-$HOME/UnrealEngine/5.8.4}"
 TREE="$HERE"
 PLAN=""
+REAL=""
 EXTRA=()
 while [ $# -gt 0 ]; do
   case "$1" in
+    --real)
+      REAL="478_5"
+      if [ $# -ge 2 ] && [[ "$2" != -* ]]; then REAL="$2"; shift; fi
+      shift ;;
     --tree)
       if [ $# -lt 2 ] || [[ "$2" == -* ]]; then
         echo "--tree needs the path of a checkout after it, e.g. bin/body-swing.sh --tree .claude/worktrees/swing-research" >&2
@@ -36,6 +44,15 @@ done
 if [ ! -x "$UE/Engine/Build/BatchFiles/Linux/Build.sh" ]; then
   echo "Unreal Engine is not at $UE: install Unreal Engine 5.8.4 at ~/UnrealEngine/5.8.4 (or set UE_ROOT to where it is)" >&2
   exit 1
+fi
+if [ -n "$REAL" ]; then
+  # a recorded swing: numpy and the c3d reader through uv (~/.local/bin); about 3 s
+  export PATH="$HOME/.local/bin:$PATH"
+  RS="$HERE/analysis/research/body/real_swing.py"
+  OUT="$(uv run -q --with numpy --with c3d python3 "$RS" "$REAL" --print-out)"
+  uv run -q --with numpy --with c3d python3 "$RS" "$REAL" --out "$OUT"
+  echo "showing $OUT"
+  exec "$HERE/client/run.sh" 7 -BbBodySwing="$OUT" "${EXTRA[@]}"
 fi
 EXPORTER="$HERE/analysis/research/body/swing_export.py"
 if [ -z "$PLAN" ]; then

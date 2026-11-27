@@ -46,7 +46,15 @@ struct FBbSwingFile
 	bool Event(const TCHAR* Name, double& Out) const;
 
 	FString Path, Name, Plan, Commit, Tree;
-	double HeightM = 0.0, ContactMps = 0.0, ContactMph = 0.0, MissCm = 0.0;
+	/** `kind recorded` (a real hitter's recorded swing, real_swing.py; PLAN D45) or the model's (the default):
+	 *  what the screen says, and -BbBodySwingShots=<ms> runs to the file's end instead of 60 ms after contact. */
+	bool bRecorded = false;
+	/** `ball_after_contact shown`: the file's ball after contact is drawn (a recorded swing's batted ball). */
+	bool bBallAfter = false;
+	/** `title <text>`: the screen's first line, in place of the model's. */
+	FString Title;
+	/** -1 when the file gives no miss (a recorded swing). */
+	double HeightM = 0.0, ContactMps = 0.0, ContactMph = 0.0, MissCm = -1.0;
 	double BatLengthM = 0.0, SweetFromKnobM = 0.0;
 	TArray<FString> Bodies, Joints, Points, Contacts;
 	TArray<TPair<FString, double>> Events;
@@ -92,6 +100,8 @@ struct FBbSwingPart
 	int32 Seg = 0;
 	/** Rides with the trunk's far end unscaled (neck, head). */
 	bool bRigid = false;
+	/** A piece on the head bone: turned by the file's head body when it has one. */
+	bool bHead = false;
 	/** The piece as the mannequin wears it, in the mesh frame. */
 	FTransform Ref;
 	/** Joints this piece carries: the file's index and where the joint is in the piece's own frame. */
@@ -133,6 +143,10 @@ private:
 	void TickShots(float DeltaSeconds);
 
 	FBbSwingFile File;
+	/** The file's head body (a recorded swing's head markers), or INDEX_NONE: then the head rides on the trunk. */
+	int32 HeadBody = INDEX_NONE;
+	/** The mannequin's head bone (the head's pivot on the neck) and its forward, mesh frame. */
+	FVector HeadPivotMesh = FVector::ZeroVector, HeadAheadMesh = FVector::ZeroVector;
 	/** Why the file cannot be shown, on screen. */
 	FString Error;
 	/** -BbBodySwingCheckFault=<name>: a fault planted in the drawing so that the check must fail
