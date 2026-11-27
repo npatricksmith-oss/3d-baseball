@@ -407,22 +407,26 @@ def table(log=print):
             "%.0f; %.0f; %.0f; %.0f" % (en.get("muscles", 0), en.get("holding muscles", 0), en.get("hold-still torques", 0), en.get("damping", 0)) if en else "-"))
 
 
-def block(rung, log=print):
-    """a rung's two searches side by side, as a table for body-motion 4.13: every figure the job asks after a rung."""
-    ds = [json.load(open(p_)) for p_ in (os.path.join(OUT, rung + t + ".json") for t in ("", "_b")) if os.path.isfile(p_)]
+def block(rung, log=print, paths=None, cols=None):
+    """a rung's two searches side by side, as a table for body-motion 4.13: every figure the job asks after a rung.
+    paths, cols (4.14): any kept results side by side under the given headings, in place of a rung's pair."""
+    ds = [json.load(open(p_)) for p_ in (paths or [os.path.join(OUT, rung + t + ".json") for t in ("", "_b")]) if os.path.isfile(p_)]
     if not ds:
         return
-    cols = ["seeds %d, %d" % (d.get("seed", 0), d.get("seed", 0) + 10) for d in ds]
+    cols = cols or ["seeds %d, %d" % (d.get("seed", 0), d.get("seed", 0) + 10) for d in ds]
     row = lambda name, f: log("| %s | %s |" % (name, " | ".join(f(d) for d in ds)))
     log("| | " + " | ".join(cols) + " |")
     log("| :-- | " + " | ".join("--:" for _ in ds) + " |")
     row("the sweet spot at contact", lambda d: "**%.2f m/s (%.1f mph)**" % (d["sweet_speed"], d["sweet_speed"] / MPH))
     row("the miss", lambda d: "%.1f cm" % math.hypot(*d["miss_cm"]))
     row("the score (lower is better)", lambda d: "%.1f" % d["cost"])
-    row("settled: the fall over the last 50 generations", lambda d: ("%.2f" if d.get("settled") else "NOT SETTLED: %.2f") % d["fall_last_50"])
+    row("settled: the fall over the last 50 generations", lambda d: ("%.2f over the last 100 of %d carried on%s" % (d["fall_last_100"], d["generations"], "" if d.get("at_end") else ": NOT AT ITS END")) if "generations" in d
+        else ("%.2f" if d.get("settled") else "NOT SETTLED: %.2f") % d["fall_last_50"])
     row("the speed at 0.5, 0.25, 0.125 ms", lambda d: ", ".join("%.2f" % v[1] if v else "fails" for v in d["step_check"].values()) if d.get("step_check") else "-")
     row("failed runs among the plan's 205 one-number changes", lambda d: "%s" % d.get("failed_differences", "-"))
-    row("the line from the starting plan to the result (11 points, then one beyond)", lambda d: " ".join("%.0f" % v for v in d["search_checks"]["line"]["0.250"]) if d.get("search_checks") else "-")
+    row("the line from the starting plan to the result (11 points, then one beyond)", lambda d: " ".join("%.1f" % v if v < 60 else "%.0f" % v for v in d["search_checks"]["line"]["0.250"]) if d.get("search_checks") else "-")
+    if any("lead_foot_load" in d for d in ds):
+        row("the front foot: at or over 1.5 x his weight for; mean over the last 100 ms (front, rear)", lambda d: "%.0f ms; %.2f, %.2f" % ((d["lead_foot_load"]["ms at or over 1.5"],) + tuple(d["lead_foot_load"]["mean over the last 100 ms"])) if "lead_foot_load" in d else "-")
     row("the bat at its fastest at contact", lambda d: "%.0f%%" % (100 * d["sweet_speed"] / d["sweet_fastest_before"][0]))
     row("the hands' fastest", lambda d: "%.1f m/s" % d["hands_fastest"][0])
     row("the attack angle", lambda d: "%+.1f deg" % d["attack_deg"])
@@ -465,7 +469,11 @@ def main():
         table(log)
         return
     if "--block" in a:
-        block(arg("--block", "r0"), log)
+        files = [x for x in a[a.index("--block") + 1:] if x.endswith(".json")]
+        if files:                                          # --block a.json b.json ... --cols "name;name": any kept results side by side
+            block(None, log, files, arg("--cols", "").split(";") if "--cols" in a else [os.path.basename(f)[:-5] for f in files])
+        else:
+            block(arg("--block", "r0"), log)
         return
     if "--show" in a:
         d = json.load(open(arg("--show", "")))
