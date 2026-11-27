@@ -2607,6 +2607,48 @@ Rung 6's design above says "the last rung's result". **It is run on rung 4's bod
 
 **Added while rung 6 ran, before these two were run** (after the one-group runs and "everything at 1.5 times" had come in at +0.5 m/s or less): the carried-on searches start from rung 4's swing and may simply not be able to use more muscle from there. So **the body with every bound at 1.5 times is also searched from S by the ladder's protocol, twice** (as every rung is). If strength is what he lacks, a search that starts over on the stronger body should find a clearly faster swing than rung 4's pair (20.9, 21.1 m/s); if it finds about the same, more muscle is not what this search turns into bat speed, from either end. *What I expect:* 21–24 m/s; I do not know.
 
+#### Rung 6 as run: more muscle is not what this swing lacks (jobs 487–496, 11 minutes each; `s11/r6_*_w.out`, `.json`; `s11/near.py`)
+
+**On rung 4's better swing (21.11 m/s), the groups asked for 90% or more of their bounds, with the speed each is shortening at when it does the most work:**
+
+| Group | Asked: burst + holding, of its bound | Its largest level | Work to contact | When it does the most work: ms before contact; shortening at; its strength there | Its torque then, of a bound of | Shortening at contact |
+| :-- | --: | --: | --: | :-- | --: | --: |
+| the trunk's rotators | 0.88 + 0.12 = 0.99 | 1.00 | +95 J | 20 ms; 371°/s (6.5 rad/s); 0.50 | 113 of 260 N·m | 436°/s |
+| the lead elbow's extensor | 0.98 + 0.00 = 0.98 | 1.00 | -4 J | 37 ms; 128°/s (2.2 rad/s); 0.63 | 88 of 85 N·m | -336°/s |
+| the lead arm's raiser | 0.94 + 0.04 = 0.98 | 1.00 | +27 J | 6 ms; 457°/s (8.0 rad/s); 0.29 | 30 of 112 N·m | 502°/s |
+| the lead shoulder's inward rotators | 0.97 + 0.01 = 0.98 | 1.00 | +53 J | 27 ms; 406°/s (7.1 rad/s); 0.68 | 51 of 70 N·m | 252°/s |
+| the rear hip's rotators | 0.63 + 0.35 = 0.97 | 1.00 | +11 J | 91 ms; 409°/s (7.1 rad/s); 0.47 | 23 of 78 N·m | -110°/s |
+| the rear hip's adductors | 0.42 + 0.54 = 0.97 | 1.00 | +4 J | 104 ms; 242°/s (4.2 rad/s); 0.66 | 36 of 132 N·m | -249°/s |
+| the lead forearm's pronators | 0.95 + 0.00 = 0.95 | 1.00 | +7 J | 7 ms; 588°/s (10.3 rad/s); 0.31 | 5 of 17 N·m | 750°/s |
+| the lead wrist's flexors | 0.91 + 0.03 = 0.94 | 1.00 | +12 J | 117 ms; 477°/s (8.3 rad/s); 0.35 | 13 of 46 N·m | 1053°/s |
+| the rear shoulder's outward rotators | 0.85 + 0.09 = 0.93 | 1.00 | +5 J | 36 ms; 688°/s (12.0 rad/s); 0.24 | 7 of 39 N·m | 959°/s |
+| the rear wrist's tilt away from the thumb | 0.90 + 0.02 = 0.93 | 0.60 | +0 J | 0 ms; 662°/s (11.5 rad/s); 0.18 | 2 of 51 N·m | 662°/s |
+| the lead shoulder's sweep | 0.91 + 0.02 = 0.93 | 1.00 | +46 J | 89 ms; 349°/s (6.1 rad/s); 0.58 | 49 of 92 N·m | 250°/s |
+| the rear forearm's supinators | 0.80 + 0.10 = 0.90 | 1.00 | -2 J | 37 ms; 630°/s (11.0 rad/s); 0.42 | 6 of 18 N·m | -253°/s |
+
+- Twelve of the 41 groups are at 90% or more, eleven of them reaching full level. **Most are working where their measured curves leave them little:** the trunk's rotators give 113 N·m of their 260 at 371°/s (half their strength at that speed); the lead arm's raiser 30 of 112 N·m at 457°/s; the forearms' and wrists' muscles 2–13 N·m at 480–660°/s. The rear hip's rotators and adductors are near their bounds mostly because holding the wide base takes 0.35 and 0.54 of them.
+
+**The what-ifs** (each: rung 4's better swing carried on for 500 generations on a body with some bounds scaled, starting from the same torques; every result settled, within 0.4 cm of the ball, the same at three steps; the reference is the same swing carried on with nothing scaled):
+
+| What-if body | The sweet spot at contact | Against the reference | m/s for each 10% of that strength |
+| :-- | --: | --: | --: |
+| **the reference: nothing scaled** | **21.11 m/s (47.2 mph)** (the score 26.0 from 26.2; the speed unchanged) | | |
+| hips' muscles at 1.5 times | 21.21 (47.4) | +0.10 | 0.02 |
+| knees' and calves' | 21.11 (47.2) | 0.00 | 0.00 |
+| the trunk's rotators | 21.17 (47.4) | +0.06 | 0.01 |
+| shoulders' | 21.37 (47.8) | +0.26 | 0.05 |
+| elbows' | 20.93 (46.8) | −0.18 | — |
+| forearms' and wrists' | 21.59 (48.3) | +0.48 | 0.10 |
+| **every muscle at 1.5 times** | 21.51 (48.1) | **+0.40** | 0.08 |
+| **every muscle at 2.0 times** | 22.23 (49.7) | **+1.12** | 0.11 |
+| the strongest batter the measured limits allow (each bound at the top of its tested range) | 21.29 (47.6) | +0.18 | |
+
+- **No one group, given half as much again, moves the bat by more than 0.5 m/s, and none of these differences is larger than what two carried-on searches differ by (1.27 m/s on the chain's first step).** In order of what they did: forearms and wrists +0.5, shoulders +0.3, hips +0.1, the trunk's rotators +0.1, knees and calves 0.0, elbows −0.2. The per-10% figures are in the table because the job asks for them; read with that yardstick, none is shown to be different from zero.
+- **Every muscle at twice the strongest measured man's: +1.1 m/s. The smallest scaling of everything that would reach 29 m/s is far beyond 2.0** (on the line through 1.0, 1.5 and 2.0 it would be about eight times; a what-if, and past any meaning). **So the answer to "which muscles, and by how much" is, as far as these runs show: none, by any amount inside what a man has.** The bounds are already each sample's mean + 2 SD; the strongest batter the measurements allow gains 0.2 m/s.
+- **Why more muscle does so little here, read from the table above:** the muscles that are "at their limit" are at the limit of what they can give *at the speed they are moving*, late in the swing, and the swing does not get to them through the legs and hips, which have strength to spare and are not turning. What he lacks is a swing that uses the strength he has, not strength.
+- *Against what I expected:* wrong in size. I expected everything at 1.5 times to gain 3–6 m/s and the shoulders and trunk to lead; it gains 0.4 and no group leads. Right that 29 m/s is not reached below 2.0 times and that the knees and calves give least.
+- *What this does not show.* These searches carry one swing on; a swing of another kind (hips turning, front leg firming) might use muscle that this one cannot. The two searches from S on the body with everything at 1.5 times, below, are the check on that.
+
 ## 5. The drive and its control (§14.1 items 2 and 3)
 
 ### 5.1 What a drive is
