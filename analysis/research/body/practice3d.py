@@ -236,6 +236,16 @@ class Ctx:
         # (a set of drive.DAMPING by name; body-motion 4.13)
         Dr.add_damping(m, st, o.get("damp"))
         self.damp_table, self.damp_cap = Dr.damping_of(o.get("damp"))
+        if o.get("foot_twist"):
+            # foot_twist (4.14, part 2; A WHAT-IF, NOT THE BODY): each foot's heading held to where it starts by a spring from
+            # the ground whose torque is capped at this many N m, on top of the sole points' own grip and whatever the foot's
+            # load: what Wannop's lines for studded shoes on grass (15) and turf (20) have left over at no load, where the two
+            # figures read for basepath dirt have nothing (note 12 D5). The engine's capped hold with the world as its parent;
+            # it acts in the air too and springs back, which a stud in dirt does not. Added after the hold-still solves and the
+            # joints' damping (add_damping starts the system's holds afresh), so that neither sees it.
+            for sd in "LR":
+                fb = m.b["foot_" + sd]
+                m.sys.hold("footcap_" + sd, -1, fb, m.sys.pose(st, fb)[1], (0.0, 0.0, B.RANGE_K["big"]), (0.0, 0.0, B.RANGE_C["big"]), float(o["foot_twist"]))
         self.st = st
         self.BW = M * E.G
         self.order = P.tree_order(m)
@@ -521,6 +531,16 @@ def hold_work(s, recs, t_end):
             wr = wrel(st, a, b)
             wl = E.mtv(Rof(st, a), wr) if a >= 0 else wr
             tl = (-Cc[0] * wl[0], -Cc[1] * wl[1], -Cc[2] * wl[2])       # the damping alone (the body's holds have no stiffness)
+            if any(K):
+                # a hold with a spring (4.14's what-if twisting hold on a foot): the engine's whole law, spring and damper
+                qb = tuple(st[13 * b + 3:13 * b + 7])
+                qe = E.qmul(E.qmul(E.qconj(tuple(st[13 * a + 3:13 * a + 7])), qb) if a >= 0 else qb, E.qconj(qref))
+                if qe[0] < 0:
+                    qe = tuple(-x for x in qe)
+                sn = math.sqrt(qe[1] * qe[1] + qe[2] * qe[2] + qe[3] * qe[3])
+                ang = 2.0 * math.atan2(sn, qe[0]) if sn > 1e-12 else 2.0
+                rv = tuple(x / sn * ang for x in qe[1:]) if sn > 1e-12 else tuple(2.0 * x for x in qe[1:])
+                tl = tuple(t_ - K[c] * rv[c] for c, t_ in enumerate(tl))
             mag = E.norm(tl)
             if mag > cap:
                 tl = E.scale(tl, cap / mag)

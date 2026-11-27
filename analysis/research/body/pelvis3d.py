@@ -30,7 +30,11 @@ HOLD_K, HOLD_C = B.RANGE_K["big"], B.RANGE_C["big"]    # N m/rad, N m s/rad [E]:
 HIP_OUT = 30.0                                         # deg: how far replay H moves each end of the hips' turn
 UPPER = ("pelvis", "trunk", "bat", "uarm_L", "farm_L", "uarm_R", "farm_R")
 LEGS = ("thigh_L", "shank_L", "foot_L", "thigh_R", "shank_R", "foot_R")
-REPLAYS = ("0", "F", "R", "FR", "L1", "L2", "L3", "H", "FR+H", "W", "M", "W+M", "B", "B+F")
+REPLAYS = ("0", "F", "R", "FR", "L1", "L2", "L3", "H", "FR+H", "W", "M", "W+M", "B", "B+F", "C15", "C20")
+# Wannop's lines (PhD thesis, Calgary, ch. 4; forefoot, 335-776 N; read by a reader agent, the plot's values to +-0.5 N m): a studded
+# shoe's peak twisting torque (N m) against its load (N), as (at no load, per N). Nothing is measured under WANNOP_LEAST.
+WANNOP = {"grass": (15.0, 0.020), "turf": (20.5, 0.036)}
+WANNOP_LEAST = 335.0
 GRIP_TOP = 100.1 / 68.5                                # Brosnan 2009: the baseball shoe's twisting hold on basepath dirt, its largest over its least (the model stands at the least)
 BRACE_BEFORE = 0.150                                   # s before contact: when replay B's front knee extensor starts
 MU_TOP = 1.27                                          # the same paper's largest static traction coefficient (the model's 1.15 is the middle of 1.04-1.27)
@@ -65,6 +69,9 @@ def build(d, replay, extra=None):
             B.KN, B.CN = kn / 4.0, cn / 2.0
         if "L3" in parts:
             o["vel"] = 0.5
+        for p_ in parts:
+            if p_ in ("C15", "C20"):
+                o["foot_twist"] = float(p_[1:])
         if "H" in parts:
             rom = dict(o.get("rom") or {})
             rom["hip_irot"] = rom.get("hip_irot", B.ROM["hip_irot"]) + HIP_OUT
@@ -79,6 +86,11 @@ def build(d, replay, extra=None):
             hold_foot(ctx, "L")
         if p_ in ("R", "FR"):
             hold_foot(ctx, "R")
+        if p_ in ("C15", "C20"):
+            # a twisting hold of 15 or 20 N m on each foot's heading ON TOP of this ground's, whatever the foot's load: what
+            # Wannop's lines on grass and turf have left over at no load (note 12 D5), as a capped spring from the ground
+            # (the engine's hold with the world as its parent). It acts in the air too, and no measurement reaches below 335 N.
+            pass                                           # made by practice3d.Ctx(foot_twist=...), below
     plan = d["plan"]
     plan = {n: [min(v[0], ctx.cap[n])] + list(v[1:]) for n, v in plan.items()}
     if "B" in parts:
@@ -226,7 +238,9 @@ def held_against_cleat(out, BW):
             continue
         over = sum(1 for r in rs if abs(r["hold"][sd]) > CLEAT_M[1] * r["ground"][sd][0])
         rp = max(rs, key=lambda r: abs(r["hold"][sd]))
-        res[sd] = dict(share_over=over / len(rs), peak=abs(rp["hold"][sd]), load_at_peak=rp["ground"][sd][0] / BW,
+        meas = [r for r in rs if r["ground"][sd][0] >= WANNOP_LEAST]
+        law = {k: (sum(1 for r in meas if abs(r["hold"][sd]) > a + b * r["ground"][sd][0]) / len(meas) if meas else None) for k, (a, b) in WANNOP.items()}
+        res[sd] = dict(share_over=over / len(rs), peak=abs(rp["hold"][sd]), load_at_peak=rp["ground"][sd][0] / BW, light=1.0 - len(meas) / len(rs), wannop=law,
                        cleat_at_peak=(CLEAT_M[0] * rp["ground"][sd][0], CLEAT_M[1] * rp["ground"][sd][0]),
                        mean_hold=sum(abs(r["hold"][sd]) for r in rs) / len(rs),
                        mean_cleat=CLEAT_M[1] * sum(r["ground"][sd][0] for r in rs) / len(rs))
@@ -251,6 +265,8 @@ def line(tag, o, BW):
             x = hc[sd]
             s_ += "\n      the %s foot's hold over the last 150 ms: mean %.0f N m where a cleat's measured hold at its load averages %.0f; at its most %.0f N m with %.2f BW on the foot (a cleat there: %.0f-%.0f); over a cleat's hold %.0f%% of the time" % (
                 nm, x["mean_hold"], x["mean_cleat"], x["peak"], x["load_at_peak"], x["cleat_at_peak"][0], x["cleat_at_peak"][1], 100 * x["share_over"])
+            s_ += "\n         by Wannop's lines: the foot carries under 335 N (nothing measured) %.0f%% of that time; of the rest, over grass's line %s, over turf's %s" % (
+                100 * x["light"], *("%.0f%%" % (100 * x["wannop"][k]) if x["wannop"][k] is not None else "-" for k in ("grass", "turf")))
     return s_
 
 

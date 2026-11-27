@@ -89,6 +89,10 @@ RUNGS["r6_ref"] = dict(RUNGS[LAST])
 # (Brosnan 2009; the body stands at the least) with the grip 1.04-1.27 (the body: 1.15). A WHAT-IF body at the top of both.
 GRIP_TOP, MU_TOP = 100.1 / 68.5, 1.27
 RUNGS["r4_grip_top"] = dict(RUNGS["r4"], sole_wide=GRIP_TOP, mu=MU_TOP)
+# the same question below the loads any dirt figure covers: a twisting hold that does not fall with the load (Wannop's lines on
+# grass leave about 15 N m at no load, on turf about 20; basepath dirt's two figures leave none; a batter's box is not measured).
+# A WHAT-IF body at the far end of that range, to say how much hangs on it. THE BODY STAYS AT NONE.
+RUNGS["r4_twist15"] = dict(RUNGS["r4"], foot_twist=15.0)
 RUNGS["r3_oldball"] = dict(RUNGS["r3"], meet_rear=0.517 + 0.72)
 RUNGS["r2_deepball"] = dict(RUNGS["r2"], ahead=0.505)
 
