@@ -23,22 +23,24 @@ WHAT THE DATA HOLD, AND WHAT IS MY CONSTRUCTION (flagged in note 15):
     the body model has it, body.py's foot); left-handers mirrored onto right-handers (x -> -x); the foot's direction heel
     to toe, 0 = square to the plate, + = turned toward the pitcher.
 
-THE FIGURES IT PRINTED on the copy read 2026-11-26 (n = 231), which the body stands on (body.py STANCE_APART, STANCE_ACROSS,
-STANCE_FOOT; practice3d.MEET_FROM_REAR_ANKLE):
+THE FIGURES IT PRINTED on the copy read 2026-11-26 (n = 231; mean +- SD over the hitter-sides), which the body stands on
+(body.py STANCE_APART, STANCE_ACROSS, STANCE_FOOT; practice3d.MEET_FROM_REAR_ANKLE):
     the ankle joints apart along the line to the pitcher, at the intercept   102.59 +- 7.94 cm     -> 1.03 m
     the lead ankle toward the plate from the rear one                          1.28 +- 9.89 cm     -> 0.0 (level across)
     the front foot turned toward the pitcher from square                      43.81 +- 10.15 deg   -> 44 deg
-    the ball (intercept) toward the pitcher from the rear ankle              102.19 +- 8.82 cm     -> 1.022 m
-    the ball toward the pitcher from the lead ankle                           -0.40 +- 9.42 cm     (level with it)
+    the ball (intercept) toward the pitcher from the rear ankle              102.24 +- 8.81 cm     -> 1.022 m
+    the ball toward the pitcher from the lead ankle                           -0.36 +- 9.38 cm     (level with it)
     the stance's separation, published against rebuilt from the points: correlation 0.9864, the points 3.51 cm more
-and, for where the ball is met relative to the HIPS (4.13, "After the independent review of session 11", P1-1):
-    the ball ahead of the hips in the stance (the published column)           78.98 +- 9.37 cm  (31.1 in)
-    the hips in the stance, ahead of the stance's rear ankle                  40.9 +- 7.7 cm, 0.535 of the way to the lead ankle
-    the rear ankle's travel toward the pitcher, stance to intercept           17.7 +- 6.7 cm;  the lead ankle's 43.8 +- 18.0 cm
-    the ball ahead of the hips at the intercept IF the hips keep their share of the way between the ankles:  47.7 cm
-                                               IF the hips travel as the ankles' midpoint does:              48.2 cm
-                                               IF the hips do not travel at all:                             79.0 cm
+(note 15 quotes the last two ball figures as 102.2 +- 8.8 and -0.4 +- 9.4.)
+And, for where the ball is met relative to the HIPS (4.13, "After the independent review of session 11", P1-1):
+    the ball ahead of the hips in the stance (the published column)           79.00 +- 9.42 cm  (31.1 in)
+    the hips in the stance, ahead of the stance's rear ankle                  33.67 +- 4.57 cm, 0.46 +- 0.10 of the way to the lead ankle
+    the rear ankle's travel toward the pitcher, stance to intercept           10.43 +- 6.11 cm;  the lead ankle's 37.14 +- 16.70 cm
+    the ball ahead of the hips at the intercept IF the hips keep their share of the way between the ankles:  55.21 cm
+                                               IF the hips travel as the ankles' midpoint does:              55.22 cm
+                                               IF the hips do not travel at all:                             79.00 cm
 (the hips' place at the intercept is NOT in the data; the three lines are assumptions, labelled as that).
+The 2025 page (253 hitter-sides) gives 103.14, 0.52, 41.35 deg, 102.31, -0.83; 78.13; 54.76 and 54.83.
 """
 import json
 import math
