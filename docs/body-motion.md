@@ -3180,6 +3180,8 @@ PLAN D9 is decided: a saved play stores the build's commit and the recorded play
 - **Hand IK is not needed.** The hands are on the bat because the body put them there.
 - **Contact and the follow-through.** At contact the body receives the reaction of the bat–ball collision (physics-spec §8) as an impulse on the bat, equal and opposite to the ball's; it changes only the continuation of the motion. The follow-through is integrated past contact with the drives switching to braking (the eccentric absorption of [N2] §2.4) until the finish. PLAN D24 (the sim's bat track ends 0.03 s after contact) then applies only to what the world reads; the timeline carries the body's own finish.
 
+**Before then, a viewing aid (PLAN D43).** The practised swing of §4.10–§4.13 can already be looked at in the Unreal viewer: `bin/body-swing.sh` writes the kept swing's run, every body, joint and bat point each millisecond, into a `.swing` file and plays it on the batter's figure ([player-visuals.md §14](player-visuals.md#14-the-bodys-practised-swing-in-the-viewer-plan-d43)). That file is not this section's timeline format: it carries world positions and turns from the Python checking model, not q(t), no game writes or reads it, and phase 2 still sets the format above.
+
 ## 10. Where the model lives in the crates
 
 - **`bb_physics::body`** (new, pure):

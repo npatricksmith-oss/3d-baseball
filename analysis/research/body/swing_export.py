@@ -42,7 +42,8 @@ POINTS = ("knob", "sweet", "tip", "grip_L", "grip_R")
 
 
 def newest_plan(tree):
-    """the newest kept swing of a tree: the practice3d_s<N>_*.json with the highest session, then the newest file."""
+    """the newest kept swing of a tree: of the practice3d_s<N>_*.json files of the highest session N, the one last
+    committed (git), else (none committed) the newest file."""
     best = None
     for p in glob.glob(os.path.join(tree, "analysis", "research", "body", "practice3d_s*_*.json")):
         b = os.path.basename(p)
@@ -50,7 +51,8 @@ def newest_plan(tree):
             n = int(b[len("practice3d_s"):].split("_")[0])
         except ValueError:
             continue
-        key = (n, os.path.getmtime(p))
+        ct = git(tree, "log", "-1", "--format=%ct", "--", os.path.relpath(p, tree))
+        key = (n, int(ct) if ct.isdigit() else 0, os.path.getmtime(p))
         if best is None or key > best[0]:
             best = (key, p)
     return best[1] if best else None
