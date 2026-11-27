@@ -317,6 +317,7 @@ bool ABbBodySwing::BuildFigure(FString& OutError)
 		return T.GetLocation();
 	};
 	const FVector Up(0, 0, 1);
+	FVector Lumbar = FVector::ZeroVector;
 	const double Fwd = M(TEXT("ball_l")).Y >= M(TEXT("foot_l")).Y ? 1.0 : -1.0;
 	const FVector Ahead(0, Fwd, 0), Across(1, 0, 0);
 	Segs.SetNum(SegNumSeg);
@@ -364,11 +365,22 @@ bool ABbBodySwing::BuildFigure(FString& OutError)
 	{
 		const FVector HipL = M(TEXT("thigh_l")), HipR = M(TEXT("thigh_r")), Spine = M(TEXT("spine_01"));
 		const FVector ShL = M(TEXT("upperarm_l")), ShR = M(TEXT("upperarm_r"));
-		Limb(SegPelvis, (HipL + HipR) * 0.5, Spine, TEXT("pelvis"), INDEX_NONE, J(TEXT("lumbar")));
+		// The model's lumbar joint is at the navel (de Leva's lower trunk, omphalion to the hips),
+		// higher up the back than the mannequin's spine_01: its point on the mannequin is put on
+		// the line from between his hips to between his shoulders, as far up it as the model's is
+		// up its own (at the file's first sample), so that the pelvis and the trunk are stretched
+		// alike to the model's lengths.
+		const FVector HipMid = (HipL + HipR) * 0.5, ShMid = (ShL + ShR) * 0.5;
+		const double PelvisLen = (File.JointPos(0, J(TEXT("lumbar"))) - (File.JointPos(0, J(TEXT("hip_L"))) + File.JointPos(0, J(TEXT("hip_R")))) * 0.5).Size();
+		const double TrunkLen = ((File.JointPos(0, J(TEXT("shoulder_L"))) + File.JointPos(0, J(TEXT("shoulder_R")))) * 0.5 - File.JointPos(0, J(TEXT("lumbar")))).Size();
+		Lumbar = HipMid + (ShMid - HipMid) * (PelvisLen / FMath::Max(1e-6, PelvisLen + TrunkLen));
+		UE_LOG(LogBbSwing, Display, TEXT("BB_BODYSWING the model's lumbar joint on the mannequin: %.1f cm above his hips (his spine_01 is %.1f above them)"),
+			Lumbar.Z - HipMid.Z, Spine.Z - HipMid.Z);
+		Limb(SegPelvis, HipMid, Lumbar, TEXT("pelvis"), INDEX_NONE, J(TEXT("lumbar")));
 		Segs[SegPelvis].Wide = (HipL - HipR).Size();
 		Segs[SegPelvis].WideA = J(TEXT("hip_L"));
 		Segs[SegPelvis].WideB = J(TEXT("hip_R"));
-		Limb(SegTrunk, Spine, (ShL + ShR) * 0.5, TEXT("trunk"), J(TEXT("lumbar")), INDEX_NONE);
+		Limb(SegTrunk, Lumbar, ShMid, TEXT("trunk"), J(TEXT("lumbar")), INDEX_NONE);
 		Segs[SegTrunk].Wide = (ShL - ShR).Size();
 		Segs[SegTrunk].WideA = J(TEXT("shoulder_L"));
 		Segs[SegTrunk].WideB = J(TEXT("shoulder_R"));
@@ -384,8 +396,8 @@ bool ABbBodySwing::BuildFigure(FString& OutError)
 	auto Carry = [&Carried](int32 S, int32 FileJoint, const FVector& MeshJoint) { Carried[S].Emplace(FileJoint, MeshJoint); };
 	Carry(SegPelvis, J(TEXT("hip_L")), M(TEXT("thigh_l")));
 	Carry(SegPelvis, J(TEXT("hip_R")), M(TEXT("thigh_r")));
-	Carry(SegPelvis, J(TEXT("lumbar")), M(TEXT("spine_01")));
-	Carry(SegTrunk, J(TEXT("lumbar")), M(TEXT("spine_01")));
+	Carry(SegPelvis, J(TEXT("lumbar")), Lumbar);
+	Carry(SegTrunk, J(TEXT("lumbar")), Lumbar);
 	Carry(SegTrunk, J(TEXT("shoulder_L")), M(TEXT("upperarm_l")));
 	Carry(SegTrunk, J(TEXT("shoulder_R")), M(TEXT("upperarm_r")));
 	for (int32 K = 0; K < 2; ++K)
@@ -660,7 +672,7 @@ int32 ABbBodySwing::Start(const FString& Path, UBbFigureShop* InShop, ABbPark* I
 		FBbSwingPose AtContact;
 		Sample(Contact, AtContact);
 		const FVector Hips = File.BodyPos(0, File.Body(TEXT("pelvis")));
-		Target = FVector((Hips.X + AtContact.Ball.X) * 0.5, (Hips.Y + AtContact.Ball.Y) * 0.5, 0.95);
+		Target = FVector((Hips.X + AtContact.Ball.X) * 0.5, (Hips.Y + AtContact.Ball.Y) * 0.5, 1.0);
 	}
 	Clock = File.T(0);
 	HoldStart = HoldStartS;
@@ -768,9 +780,9 @@ void ABbBodySwing::SetView(int32 InView)
 	float Fov = 40.f;
 	switch (View)
 	{
-	case 0: Eye = Target + FVector(0.3, 7.5, 0.45); Fov = 26.f; break;
-	case 1: Eye = Target + FVector(4.8, 0.5, 0.3); Fov = 34.f; break;
-	case 2: Eye = Target + FVector(0.0, -0.4, 5.5); Fov = 42.f; break;
+	case 0: Eye = Target + FVector(0.3, 7.5, 0.35); Fov = 36.f; break;
+	case 1: Eye = Target + FVector(4.8, 0.5, 0.25); Fov = 52.f; break;
+	case 2: Eye = Target + FVector(0.0, -0.4, 6.0); Fov = 50.f; break;
 	default:
 	{
 		const double Yaw = FMath::DegreesToRadians(OrbitYaw), Pitch = FMath::DegreesToRadians(OrbitPitch);

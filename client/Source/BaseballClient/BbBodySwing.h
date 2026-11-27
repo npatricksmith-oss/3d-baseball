@@ -29,10 +29,10 @@ struct FBbSwingFile
 	int32 Num() const { return Samples; }
 	double T(int32 I) const { return Data[(int64)I * Columns]; }
 	/** Column index of a named body, joint, point or contact point, or INDEX_NONE. */
-	int32 Body(const TCHAR* Name) const { return Bodies.IndexOfByKey(FString(Name)); }
-	int32 Joint(const TCHAR* Name) const { return Joints.IndexOfByKey(FString(Name)); }
-	int32 Point(const TCHAR* Name) const { return Points.IndexOfByKey(FString(Name)); }
-	int32 Contact(const TCHAR* Name) const { return Contacts.IndexOfByKey(FString(Name)); }
+	int32 Body(const TCHAR* What) const { return Bodies.IndexOfByKey(FString(What)); }
+	int32 Joint(const TCHAR* What) const { return Joints.IndexOfByKey(FString(What)); }
+	int32 Point(const TCHAR* What) const { return Points.IndexOfByKey(FString(What)); }
+	int32 Contact(const TCHAR* What) const { return Contacts.IndexOfByKey(FString(What)); }
 	FVector BodyPos(int32 I, int32 B) const { return Vec(I, 1 + 7 * B); }
 	/** The body's turn as a quaternion acting on sim-frame vectors (world = q local). */
 	FQuat BodyRot(int32 I, int32 B) const;
@@ -116,7 +116,7 @@ public:
 
 	/** Reads the file and builds the figure. Returns -1 to go on playing (or taking pictures), or
 	 *  an exit status: 0 the check passed, 1 it failed or the file would not open. */
-	int32 Start(const FString& File, UBbFigureShop* Shop, ABbPark* Park, ACameraActor* Camera, UStaticMesh* Sphere, UMaterialInterface* BaseMaterial);
+	int32 Start(const FString& InFile, UBbFigureShop* InShop, ABbPark* InPark, ACameraActor* InCamera, UStaticMesh* Sphere, UMaterialInterface* BaseMaterial);
 
 private:
 	bool BuildFigure(FString& OutError);
@@ -128,7 +128,7 @@ private:
 	FVector MapVector(const FBbSwingSeg& S, const FVector& Mesh) const;
 	/** -BbBodySwingCheck: every sample drawn and measured against the file. 0 passed, 1 failed. */
 	int32 RunCheck();
-	void SetView(int32 View);
+	void SetView(int32 InView);
 	void UpdateText();
 	void TickShots(float DeltaSeconds);
 
