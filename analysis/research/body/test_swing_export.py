@@ -6,8 +6,8 @@
   kept in the plan's file: 21.11 m/s and 0.035, 0.019 cm for rung 4);
 - every rigid segment's length between its two joints, read from the file's joint columns, does not change;
 - the hands do not slide on the handle: each wrist's place along the bat, read from the file's knob and tip, does not change;
-- the ball passes the meeting point at contact at the pitch's speed, and the file's sweet spot at contact is the
-  contact line's.
+- the ball is on the practice search's own pitch (practice3d's speed, meeting point and line for the plan's options)
+  and the sweet spot meets it within the plan's miss.
 The file is parsed here by its own few lines, not by the exporter.
 """
 import json
@@ -114,18 +114,26 @@ class SwingFile(unittest.TestCase):
             self.assertLess(max(along), 0.25, w)       # on the handle, not the barrel
 
     def test_ball_line(self):
-        c = self.head["contact"][0].split()
-        meet = [float(x) for x in c[c.index("meet_point") + 1:c.index("meet_point") + 4]]
+        # the pitch from the practice search itself (practice3d's BALL_SPEED and its Ctx's meeting point and line for the
+        # plan's options), not from the file: the plan file records neither. The file's rows, less its `placed` shift,
+        # must put the ball on that line, at that speed, at the meeting point at contact.
+        Pr = sys.modules["practice3d"]
+        ctx = Pr.Ctx(**self.plan.get("options", {}))
+        shift = [float(x) for x in self.head["placed"][0].split()[:3]]
+        self.assertEqual(shift[2], 0.0)
         r0 = min(self.rows, key=lambda r: abs(r[0]))
         nxt = self.rows[self.rows.index(r0) + 1]
         b0, b1 = r0[-3:], nxt[-3:]
-        speed = dist(b0, b1) / (nxt[0] - r0[0])
-        self.assertAlmostEqual(speed, 37.98, delta=1e-3)
-        at0 = [x + (y - x) * (0.0 - r0[0]) / (nxt[0] - r0[0]) for x, y in zip(b0, b1)]
-        self.assertLess(dist(at0, meet), 1e-5)
-        # the sweet spot at contact is on the ball's plane, within the miss the plan reports
-        sw = [x + (y - x) * (0.0 - r0[0]) / (nxt[0] - r0[0]) for x, y in zip(self.P(r0, "sweet"), self.P(nxt, "sweet"))]
-        self.assertLess(dist(sw, meet), 0.01)
+        dt = nxt[0] - r0[0]
+        vel = [(y - x) / dt for x, y in zip(b0, b1)]
+        self.assertAlmostEqual(math.sqrt(sum(v * v for v in vel)), Pr.BALL_SPEED, delta=1e-3)
+        for c in range(3):
+            self.assertAlmostEqual(vel[c] / Pr.BALL_SPEED, ctx.nb[c], delta=1e-5)
+        at0 = [x + (y - x) * (0.0 - r0[0]) / dt - s for x, y, s in zip(b0, b1, shift)]
+        self.assertLess(dist(at0, ctx.Pc), 1e-5)
+        # the sweet spot at contact is at the meeting point, within the miss the plan reports
+        sw = [x + (y - x) * (0.0 - r0[0]) / dt - s for x, y, s in zip(self.P(r0, "sweet"), self.P(nxt, "sweet"), shift)]
+        self.assertLess(dist(sw, ctx.Pc), math.hypot(*self.plan["miss_cm"]) / 100 + 2e-4)
 
     def test_feet_on_the_ground_at_the_start(self):
         # the sole's points sit at the ground (z = 0) within the contact's sink where the model says they carry load
