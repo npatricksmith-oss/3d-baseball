@@ -5,6 +5,7 @@
     python3 analysis/research/body/ladder3d.py --rung r1_low --from <json>    a body searched on from a saved result (--reach 0 --gens 0)
     python3 analysis/research/body/ladder3d.py --table                        the ladder's table from the results kept so far
     python3 analysis/research/body/ladder3d.py --show <json>                  a kept result re-read (no search)
+    ... --dir s12                                                             results kept under that session's folder (default s11)
 
 THE PROTOCOL, the same for every rung (written in 4.13 before any run): session 10's own search (practice3d.cma, every
 run at 0.25 ms, watching 0.10 s) from the same plan S (session 9's nearest plan, which came from the fit to [4]: flagged):
@@ -397,6 +398,9 @@ def main():
     a = sys.argv[1:]
     arg = lambda k, d: a[a.index(k) + 1] if k in a else d
     log = lambda s_: print(s_, flush=True)
+    if "--dir" in a:                                   # a later session's results beside s11's (--dir s12): body-motion 4.14
+        global OUT
+        OUT = os.path.join(P.OUT, arg("--dir", "s11"))
     if "--table" in a:
         table(log)
         return

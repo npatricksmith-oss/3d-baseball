@@ -2783,6 +2783,58 @@ Rung 6's design above says "the last rung's result". **It is run on rung 4's bod
 
 **The checks after these changes** are in "Session 11: the checks" above ("The checks again after the review's fixes").
 
+### 4.14 What holds his pelvis, and a search that can be trusted (session 12)
+
+Session 12 (2026-11-27) works under PLAN D42 as session 11 did: one change at a time, a measured bat speed after each, no strength without a measurement, nothing added to make him fast. The body it starts from is rung 4's (`practice3d_s11_rung4.json`: 21.11 m/s, 47.2 mph); the ball's place is not changed except as a labelled what-if (Q64 is open). Written in the order the work was done; each part is written here before it is built or run. Results are under `sim/target/codex-probes/body3d/s12/`.
+
+**The session's table** is at the end of this section ("Session 12: the table"), kept up to date as the runs come in.
+
+#### The search's spread, measured first because it changes nothing (part 3's first step, queued while part 1 is worked)
+
+- *What is run:* rung 4's body searched from S by §4.13's protocol three more times, with seeds 3 (and 13), 4 (14) and 5 (15) beside the two kept (seeds 1, 11: 20.89 m/s; seeds 2, 12: 21.11). Nothing of the body or the search is changed. It is queued now because it needs nothing from part 1 and the queue would otherwise stand idle through the diagnosis; if part 2 changes the body, this is still the spread of the search on the body the session started from, and it is said so.
+- *What I expect:* five results spread wider than rung 4's own pair (0.22 m/s), which was the narrowest pair of session 11's eight: a range of 1.5–3 m/s across the five, a standard deviation of 0.6–1.2 m/s. All five meet the ball within 1 cm and are the same kind of swing (the pelvis turning under 30°, the feet turning back).
+- *What it would and would not show:* how far apart five searches of one body land, which is the yardstick every later rung is read against (a range and a standard deviation, where session 11 had one difference of two). It would not show the spread on another body, and not what the body's best is: all five start from S.
+
+#### Part 1: what holds the pelvis (a diagnosis by replays; the design, written before any of it was run)
+
+**What is known** (§4.13, "After the independent review of session 11", P1-2): on rung 4's kept swing both hip joints turn through their whole range by their own muscles and sit on their ends from 61 and 31 ms before contact; the pelvis turns 11° in the world while both thighs turn 31° and 44° the other way and both feet 46° and 42°, toe back; the ground carries 0.35–0.65 of his weight over the last 100 ms; the rear foot stands on the inside point of its heel from −91 ms; the front foot's large loads are two impacts of 6–7 ms.
+
+**How this leg can turn back at all.** The model's knee is a hinge and its ankle has two axes (the bend and the roll), so the foot's heading is tied to the leg's: with a foot that cannot turn on the ground and a hip that stays in place, the knee cannot swing round the line from hip to foot. A leg turns backward under the pelvis only if its foot turns on the ground. What resists that is the ground's twisting moment on the foot about the vertical; what resists the two legs turning *together* is also the pair of level forces at the two feet, a metre apart. The first needs load on that foot and at least two of its sole's four points down (Coulomb's law on the points, §4.11); the second needs load on both.
+
+**The replays.** Each takes a kept plan and its body, changes one thing, and runs once at 0.25 ms. A replay is not a swing he would make: the plan was tuned on the unchanged body, so the bat will miss the ball and the bat's speed means little (rule 4). What is read is what the legs and pelvis do with the same muscle bursts.
+
+| Replay | The one change | How it is made |
+| :-- | :-- | :-- |
+| 0 | none | the kept plan on its own body (it must return the stored speed) |
+| F | the front foot held from turning about the vertical | a spring from the ground on the foot's heading (the direction of the foot's length, seen from above), both ways, 20,000 N·m/rad with 60 N·m·s/rad [E: the stiffness of the body's large joint ends; it lets the foot turn 0.3° for each 100 N·m]: the engine's own stop with the ground as its parent, so it is passive, and its torque is recorded at every step. It acts whether the foot is on the ground or not; that is what "held" means here, and no foot is like that |
+| R | the rear foot held the same way | |
+| FR | both | |
+| L1 | a ground that takes the bounce out: each sole point's damping four times (300 → 1,200 N·s/m) | `body.CN` [E]; the start's sink is unchanged |
+| L2 | a softer ground: each point's stiffness a quarter (2 × 10⁵ → 5 × 10⁴ N/m), its damping halved to keep the same damping ratio | `body.KN`, `CN` [E]; the feet start four times as deep (a few millimetres) |
+| L3 | [4]'s launch velocities at half | the option `vel` = 0.5 |
+| H | the hips' ends of turn 30° further out each way (in 62°, out 74°) | the option `rom`; **a diagnosis only: no stop is moved in the body** |
+| FR+H | both feet held and the hips' ends out | |
+
+- **On which swings:** rung 4's two (the kept one, seeds 2 and 12; seeds 1 and 11), rung 3's two, and the review's two on major leaguers' feet with the ball where it was (A). Six wide-base swings, from three bodies that differ only in the hips' ends and the ball's place.
+- **What is read from each** (`analysis/research/body/pelvis3d.py`, new; the readings are tested against worked cases before they are used):
+  - the pelvis's turn in the world from the start to the instant the unchanged swing meets the ball, and its fastest turning before that; each thigh's and each foot's turn over the same time;
+  - when each hip reaches an end of turn and the heaviest load on it;
+  - each foot's load: its mean over the last 100 ms, how long it is on fewer than two points;
+  - **the ground's twist on the whole body, split in two:** the moment about the vertical through his centre of mass from the feet's level forces (the couple of the two feet, and each force's lever), and each foot's own twisting moment about its centre of pressure; with the held feet, the hold's torque beside the foot's load at the same instant;
+  - **the body's turning momentum about the vertical through its centre of mass, in two parts:** the pelvis, trunk, arms and bat; the legs and feet. If the ground gives little twist, the two parts must be nearly equal and opposite: he is turning his upper body against his legs, as a man does in the air;
+  - the sweet spot's speed and how far it passes from the ball (indicative only).
+- **The test of whether a real cleat would hold.** With a foot held, the hold's torque at each instant is what the ground would have had to give to keep that foot from turning under this plan. Beside it go the foot's load at that instant and what has been measured for a studded shoe turning at such a load ([note 12](research/body/12-trunk-bending-and-feet.md) D5): on basepath dirt 68–100 N·m at 1,190 N (Brosnan 2009, the forefoot; the model's forefoot gives 68.4 there) and about 24 N·m at 441 N (Goodall 2005, second hand): both about 0.055–0.084 m times the load, which is what the model's law gives; on turf more at light loads (Serensits 2014: 47.5 N·m at 787 N, rising 0.016 N·m per N; Lambson 1996: 21–31 N·m at 446 N; Torg: 38–74 N·m at 445 N with the foot flat). So: **if the hold asks for no more than a cleat is measured to give at the load the foot then carries, the model's ground is letting go where dirt would hold, and the ground contact is at fault. If it asks for several times that, a real foot would spin under this swing too, and the fault is in the swing (the load on his feet, and so the launch state or the plan), not in the ground.**
+
+**What I expect, written before any replay:**
+
+- *The twist account on the unchanged swing:* the ground gives the body little turning momentum; the upper body's and the legs' are nearly equal and opposite through the last 100 ms. I expect the legs' backward momentum to be more than half the upper body's forward momentum.
+- *Feet held (FR):* the pelvis turns much further by the same instant, 40–70° against 11°, since the hips' turn (71° at the front hip) can no longer go into the legs; the hips still reach their ends, and their ends' loads rise. The hold carries 60–250 N·m at its most on feet that carry under half his weight, which is two to ten times what dirt is measured to hold at such loads. **So I expect the answer "a real foot would spin too under this load", with the heel's single point a small part of it** (a real heel's three studs sit 2–3 cm from their middle and would hold under 10 N·m at these loads).
+- *F against R:* I do not know which foot matters more. The front hip turns through more (71°) and the rear foot is the one on a single point.
+- *L1, L2 (the ground's own numbers):* the impacts' peaks fall (by a half or more with four times the damping) and the mean load over the last 100 ms hardly moves (within 0.1 of his weight), because the mean is set by how fast his body is falling, which the muscles and the launch set, not the ground's spring. The pelvis's turn changes by under 5°.
+- *L3 (half of [4]'s launch velocities):* the first impact is smaller; the plan's timing no longer fits and the replay says little else.
+- *H (the hips' ends out):* the hip joints turn further; the pelvis's turn in the world changes by under 10°, because the legs give way first.
+- *What the replays would show:* which of the three, changed alone, lets the same muscle bursts turn the pelvis; and, from the hold's torque against the load, whether the feet's spinning is the ground's fault or the swing's. *What they would not show:* what swing a search would find on a changed body (a plan tuned to spinning feet is replayed on feet that hold), nor any bat speed. Six swings from one start S and one launch state are also one family of swings: "every wide-base swing found so far" is not "every swing this body can make".
+
 ## 5. The drive and its control (§14.1 items 2 and 3)
 
 ### 5.1 What a drive is
