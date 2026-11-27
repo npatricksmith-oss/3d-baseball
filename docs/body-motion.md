@@ -3173,6 +3173,35 @@ Part 1's answer leaned on "nothing is measured below 441 N". While part 3's sear
 - **What kind of swing it is: the same one, done harder.** His pelvis turns 11° (it turned 11°), his front knee is bent 53° (41°), his front foot carries 0.26 of his weight over the last 100 ms and 0.07 at contact, his rear hip is on its end from 39 ms before contact. What rose with the bat: the hips' fastest turning (341°/s from 188), the trunk's (458 from 331), the muscles' work (576 J from 483), with the rear knee's extensor now doing 67 J and fifteen groups at 90% or more of their bounds where twelve were. **It is still an upper-body swing off a bent front leg on feet that carry little, and it now leaves the ground further than the gate allows** (0.07 of his weight at the least).
 - *What it does not show:* a second search to its end (the swing of seeds 1 and 11, queued next: the pair is the rung's figure); that this is the body's best (one start S, one launch state, one kind of swing); what a search of the same length would have made of rungs 0 to 3.
 
+#### Part 3 as run, seventh: the second search to its end, 24.67 m/s (55.2 mph); the two agree within 0.43 m/s; and one more reading of the score that 5 ms records blur (job 525; `s12/r4_s1_carry.out`, `r4_s1_carry_g*.json`)
+
+**Rung 4's other kept swing (seeds 1 and 11) by the same rule: one search, its state kept, leaps, the squareness read at contact. It ended by the rule after 2,645 generations (0.085 over its last 200): 24.67 m/s (55.2 mph), 0.1 cm from the ball, the same at three steps (24.68, 24.67, 24.67), score 21.92, no failed run.**
+
+| Generations | 0 | 500 | 1,000 | 1,500 | 2,000 | 2,500 | the end |
+| :-- | --: | --: | --: | --: | --: | --: | --: |
+| seeds 2, 12: m/s (score) | 21.11 (26.20) | 21.69 (25.28) | 22.63 (23.97) | 23.20 (23.36) | 23.73 (22.69) | 24.20 (22.27) | **24.24 (22.19)** at 2,642 |
+| seeds 1, 11: m/s (score) | 20.89 (26.93) | 21.69 (25.50) | 22.25 (24.41) | 23.39 (23.30) | 24.12 (22.48) | 24.61 (21.99) | **24.67 (21.92)** at 2,645 |
+
+| | Seeds 2, 12 (above) | Seeds 1, 11 |
+| :-- | --: | --: |
+| the sweet spot at contact | **24.24 m/s (54.2 mph)** | **24.67 m/s (55.2 mph)** |
+| the bat at its fastest at contact; the hands' fastest; the attack angle | 98%; 8.1 m/s; +2.0° | 99.9%; 9.1 m/s; +1.5° |
+| the hips'; the trunk's fastest turning; **the pelvis's turn** | 341; 458°/s; **11°** | 325; 453°/s; **42°** |
+| the lead knee at contact; the front foot's load: mean of the last 100 ms; at contact (both feet) | 53°; 0.26; 0.07 (0.57) | 65°; 0.27; **0.00** (0.36) |
+| the feet's turn (front; rear); the hips on an end from (front; rear) | 13°; 31°; never; 39 ms before contact | 19°; −2°; 68 ms; 49 ms before contact |
+| what the ground gave his turning | 33.2 kg·m²/s | 32.6 |
+| balance: outside his feet; least on the feet; height kept | 0.0 cm; 0.07; 0.93 | 0.5 cm; **0.00**; 0.89 |
+| joints past their range; joint ends over 50 N·m (the heaviest); groups at 90% or more | 3.2°; 12 (876 N·m, the rear knee); 15 | 2.7°; 12 (960 N·m, the rear knee); 14 |
+| WORK TO CONTACT, J: muscles; holding; constant; damping; stops; ground; gravity; kinetic energy gained | +576; +13; +12; −195; −28; −68; +34; 349 | +608; −11; +1; −160; −32; −80; +62; 390 |
+| muscles (with holding) by joint, the largest | hip R +122, shoulder L +102, hip L +96, lumbar +95, shoulder R +67, knee R +67 | hip L +167, hip R +163, shoulder L +114, shoulder R +82, lumbar +36, knee R +20 |
+| GATE, passes outright | six (above) | five: meets the ball; **the bat at its fastest at contact (99.9%)**; the attack angle; the hands' first motion (156 ms before contact); no passive element adds energy. The front foot's load on its size only |
+| GATE, fails | eleven (above) | twelve: the bat's speed, short by 4.3 m/s; the hands (9.1 m/s, short by 1.2); the hips (325°/s) and trunk (453); the order; the arms' clock by 1 ms; the lead knee (65°); **in balance (0.5 cm outside); does not jump (his feet off the ground); legs have not given way (0.89 of his height)**; a joint 2.7° past its range; 12 joint ends |
+
+- **The two searches to their ends agree within 0.43 m/s (24.24 and 24.67), which is inside the range of five searches by the old protocol (0.56).** Both ended by the rule at almost the same length. So the search now lands in the same place twice from the two swings it was given; they are both S's, so this is repeatability, not two independent starts.
+- **They are not the same swing.** One turns the pelvis 11° and the other 42°, at the same bat speed: once more the bat's speed in these searches does not follow the pelvis's turn (§4.13, P1-2).
+- **Which is the session's figure: 24.24 m/s (54.2 mph), the lower, though the search's own score prefers the other** (21.92 against 22.19, and §4.13's rule takes the better-scoring search). The reason is a reading of the score, measured before choosing (`s12`, one replay of each at every step): **the score reads the feet's load at its 5 ms records, and both swings have a dip under the gate's 0.10 of his weight that falls between two records,** 3.0 ms long, 42–50 ms *after* contact (in the follow-through; the score's own readings there are 0.146 and 0.229). In the first swing the dip's bottom is 0.068; **in the second his feet are off the ground (under 0.02) for 1.75 ms.** Read at every step the score's own "does not jump" term would have charged 0.41 and 4.00, and the scores would be 22.60 and 25.92: the first is then the better. The bat's speed at contact does not come from a dip 45 ms after it, but a figure whose swing leaves the ground should not be the one reported. **Not changed in the score** (it would need the searches rerun): it is the third reading this session that 5 ms records blur (the squareness, corrected; the effort's mean, 0.02; this), and reading the feet's load at every step is next session's first small fix.
+- **So the rung, by two searches to their ends: 24.24 m/s (54.2 mph), the other 24.67 (55.2). Over the 21.11 the session started from: +3.13 m/s (+7.0 mph), and +3.78 for the other from its own 20.89.**
+
 #### Two starts that owe each other nothing, as run: the hand-written plan does not become a swing, so the two are not within 1 m/s but 16 to 19 apart (job 524; `s12/r4_handC.out`, `.json`)
 
 **The plan written by hand (0.6 of every forward muscle; it owes [4] nothing), on rung 4's body by §4.13's protocol with the first stage asked to come through the ball at 5 m/s: a score of 52.0 after 1,100 generations (100, 250, 500 and one more block of 250), where S's five searches by the same protocol score 26.2–27.9.**
