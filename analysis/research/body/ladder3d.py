@@ -85,6 +85,10 @@ RUNGS["r6_ref"] = dict(RUNGS[LAST])
 # sim/target/review-probes/s11/). A: major leaguers' feet with the ball where it was relative to the pelvis (0.72 m ahead:
 # on that start the pelvis is 0.517 m ahead of the rear ankle). B: [4]'s feet with the ball where rung 3 puts it relative
 # to the pelvis (0.505 m ahead).
+# 4.14 (session 12), part 2: how much hangs on the cleat's twisting hold, whose measured range is 68.5-100.1 N m at 1,190 N
+# (Brosnan 2009; the body stands at the least) with the grip 1.04-1.27 (the body: 1.15). A WHAT-IF body at the top of both.
+GRIP_TOP, MU_TOP = 100.1 / 68.5, 1.27
+RUNGS["r4_grip_top"] = dict(RUNGS["r4"], sole_wide=GRIP_TOP, mu=MU_TOP)
 RUNGS["r3_oldball"] = dict(RUNGS["r3"], meet_rear=0.517 + 0.72)
 RUNGS["r2_deepball"] = dict(RUNGS["r2"], ahead=0.505)
 

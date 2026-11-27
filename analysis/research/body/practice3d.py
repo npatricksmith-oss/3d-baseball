@@ -170,10 +170,18 @@ class Ctx:
             shift = dict(shift or {})
             for k, v in o["posture"].items():
                 shift[k] = shift.get(k, 0.0) + v
-        self.m = m = B.Model(H, M, ranges=(), grip=o.get("grip", "weld"), feet=o.get("feet", "plate"), mu=o.get("mu"),
-                             wrist=o.get("wrist", "box"), shift=shift,
-                             # loads="balance" (4.13, rung 5): the feet's starting loads from his own weight and balance, not [4]'s forces
-                             loads=o.get("loads", "measured"))
+        # sole_wide (4.14, part 2: a what-if for the grip's measured range): the sole's points this many times further from
+        # the foot's line, which scales the forefoot's twisting hold by the same (1.46: the top of Brosnan 2009's range)
+        wide, keep = o.get("sole_wide"), (B.BALL_HALF_W, B.SOLE_HALF_W)
+        try:
+            if wide:
+                B.BALL_HALF_W, B.SOLE_HALF_W = keep[0] * wide, keep[1] * wide
+            self.m = m = B.Model(H, M, ranges=(), grip=o.get("grip", "weld"), feet=o.get("feet", "plate"), mu=o.get("mu"),
+                                 wrist=o.get("wrist", "box"), shift=shift,
+                                 # loads="balance" (4.13, rung 5): the feet's starting loads from his own weight and balance, not [4]'s forces
+                                 loads=o.get("loads", "measured"))
+        finally:
+            B.BALL_HALF_W, B.SOLE_HALF_W = keep
         if o.get("arms") is not None:
             # arms (4.14, part 4): the start's three free choices (the bat's roll, each arm's swivel) held at given values
             # and not searched for, so that the start changes smoothly with the posture's numbers
