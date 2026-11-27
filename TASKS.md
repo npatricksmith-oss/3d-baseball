@@ -19,11 +19,11 @@ Status: `[ ]` not started · `[~]` partly done · `[?]` needs an owner decision
 
 **State.** PLAN D31–D44: a force-driven body; PLAN §14.1, spec [docs/body-motion.md](docs/body-motion.md).
 
-**Sessions 8–11 are merged** (spec §4.10–§4.13): 21.1 m/s (47 mph; the gate asks 29). **D42:** on while each session gains honest bat speed, back to the owner if two in a row gain nothing. Session 11 gained.
+**Sessions 8–11 are merged** (spec §4.10–§4.13): 21.1 m/s (47 mph; the gate asks 29). **D42:** on while each session gains honest bat speed. **Session 12, unmerged:** 26.25 m/s claimed.
 
 **Q64 answered (D44):** session 13's first step: the on-time swing up the middle, the ball's place found by practice; the spec's Q64 lines then.
 
-**Running** (restart if stopped): session 12, `body-3d-12` (Fable), worktree `swing-research`, `work/body-3d`; then an Opus review, merge. **The swing in the viewer (D43):** `bin/body-swing.sh`, player-visuals §14. Deferred: its tests skip on main (no [4] curves here).
+**Running** (restart if stopped): its Opus review, `review-body-3d-s12`, worktree `swing-research`, `work/body-3d`, brief REVIEW-body-3d-s12; then fixes, merge. **The swing in the viewer (D43):** `bin/body-swing.sh`, player-visuals §14. Deferred: its tests skip on main (no [4] curves here).
 
 **Next:** §2: the ground-dive leftovers ([note](docs/calibration/2026-11-23-of-ground-dive.md) §9).
 
