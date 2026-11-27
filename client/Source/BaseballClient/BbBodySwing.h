@@ -135,6 +135,10 @@ private:
 	FBbSwingFile File;
 	/** Why the file cannot be shown, on screen. */
 	FString Error;
+	/** -BbBodySwingCheckFault=<name>: a fault planted in the drawing so that the check must fail
+	 *  (player-visuals §14): "nostretch" (the limbs left at the mannequin's lengths), "mirror" (the
+	 *  places' x turned over, the turns not), "twist" (each limb and hand turned 90° about its own axis). */
+	FString Fault;
 	TArray<FBbSwingSeg> Segs;
 	TArray<FBbSwingPart> Parts;
 	UPROPERTY()

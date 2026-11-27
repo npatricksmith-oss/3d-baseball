@@ -23,9 +23,12 @@ DEFINE_LOG_CATEGORY_STATIC(LogBbSwing, Log, All);
 namespace
 {
 	const TCHAR* const SwingFormat = TEXT("bb-body-swing 1");
-	/** The check's limit (player-visuals §14): every drawn joint, the knob, the sweet spot and each
-	 *  hand's grip within this of the file's, cm. */
-	constexpr double CheckLimitCm = 1.0;
+	/** The check's limits (player-visuals §14): every drawn joint, the knob, the sweet spot and each
+	 *  hand's grip within this of the file's, mm (the honest largest is the shoulders' 4.2 mm as the
+	 *  chest piece carries them); every drawn segment's forward axis and the bat's roll within this
+	 *  of the file's turn, degrees. */
+	constexpr double CheckLimitMm = 6.0;
+	constexpr double TurnLimitDeg = 3.0;
 	/** Playback speeds, shares of real time. */
 	const double Speeds[] = { 1.0, 0.5, 0.25, 0.1, 0.05 };
 	const TCHAR* const SpeedNames[] = { TEXT("real speed"), TEXT("1/2"), TEXT("1/4"), TEXT("1/10"), TEXT("1/20") };
@@ -248,7 +251,9 @@ ABbBodySwing::ABbBodySwing()
 
 FVector ABbBodySwing::ToCm(const FVector& Sim) const
 {
-	return FVector(100.0 * Sim.Y, 100.0 * Sim.X, 100.0 * Sim.Z + GroundCm);
+	// -BbBodySwingCheckFault=mirror: a slip in this map alone (x turned over), which the check must catch.
+	const double X = Fault == TEXT("mirror") ? -Sim.X : Sim.X;
+	return FVector(100.0 * Sim.Y, 100.0 * X, 100.0 * Sim.Z + GroundCm);
 }
 
 FVector ABbBodySwing::AxisUE(const FBbSwingPose& P, int32 Body, const FVector& Local) const
@@ -574,6 +579,14 @@ void ABbBodySwing::Pose(const FBbSwingPose& P)
 		G.AM = D.GetSafeNormal();
 		G.SA = D.Size() / G.Len;
 		G.FM = SquareTo(G.AM, AxisUE(P, G.Body, FVector(1, 0, 0)), AxisUE(P, G.Body, FVector(0, 1, 0)));
+		if (Fault == TEXT("nostretch") && S != SegPelvis && S != SegTrunk)
+		{
+			G.SA = 1.0;                                     // planted: the limb left at the mannequin's length
+		}
+		if (Fault == TEXT("twist") && S != SegPelvis && S != SegTrunk)
+		{
+			G.FM = G.AM ^ G.FM;                             // planted: the limb turned 90 degrees about its own axis
+		}
 		G.LM = G.AM ^ G.FM;
 		G.SF = 1.0;
 		G.SL = G.Wide > 0.0 ? (ToCm(P.JointPos[G.WideA]) - ToCm(P.JointPos[G.WideB])).Size() / G.Wide : 1.0;
@@ -621,7 +634,13 @@ int32 ABbBodySwing::Start(const FString& Path, UBbFigureShop* InShop, ABbPark* I
 	Park = InPark;
 	Camera = InCamera;
 	const TCHAR* Cmd = FCommandLine::Get();
-	const bool bCheck = FParse::Param(Cmd, TEXT("BbBodySwingCheck"));
+	FParse::Value(Cmd, TEXT("BbBodySwingCheckFault="), Fault);
+	const bool bCheck = FParse::Param(Cmd, TEXT("BbBodySwingCheck")) || !Fault.IsEmpty();
+	if (!Fault.IsEmpty() && Fault != TEXT("nostretch") && Fault != TEXT("mirror") && Fault != TEXT("twist"))
+	{
+		UE_LOG(LogBbSwing, Error, TEXT("BB_BODYCHECK result FAIL: no such fault %s (nostretch, mirror or twist)"), *Fault);
+		return 1;
+	}
 	const bool bShots = FParse::Param(Cmd, TEXT("BbBodySwingShots"));
 	GroundCm = Park ? 100.0 * Park->GroundZ(0.0, 0.4) : 0.0;
 	bool bOk = File.Load(Path, Error);
@@ -704,14 +723,33 @@ int32 ABbBodySwing::Start(const FString& Path, UBbFigureShop* InShop, ABbPark* I
 
 int32 ABbBodySwing::RunCheck()
 {
+	// The sim-to-Unreal map written out again here, apart from ToCm and AxisUE, so that a slip in
+	// those is caught (the frames: AGENTS.md "Units and frames"; BbFrame.h): Unreal X is the sim's Y
+	// (toward the pitcher), Unreal Y the sim's X (toward first base), Unreal Z up; centimetres; the
+	// file's ground (z = 0) on the drawn ground under the plate.
+	auto UeVec = [](const FVector& S) { return FVector(S.Y, S.X, S.Z); };
+	auto Ue = [this](const FVector& S) { return FVector(100.0 * S.Y, 100.0 * S.X, 100.0 * S.Z + GroundCm); };
+	auto SimOf = [this](const FVector& U) { return FVector(U.Y / 100.0, U.X / 100.0, (U.Z - GroundCm) / 100.0); };
+	auto Across = [](const FVector& V, const FVector& Axis) { return (V - Axis * (V | Axis)).GetSafeNormal(); };
+	auto Deg = [](const FVector& A, const FVector& B) { return FMath::RadiansToDegrees(FMath::Acos(FMath::Clamp(A | B, -1.0, 1.0))); };
+
 	TArray<double> JointWorst, JointAt;
 	JointWorst.Init(0.0, File.Joints.Num());
 	JointAt.Init(0.0, File.Joints.Num());
-	double KnobWorst = 0.0, KnobAt = 0.0, SweetWorst = 0.0, SweetAt = 0.0;
+	TArray<double> TurnWorst, TurnAt;
+	TurnWorst.Init(0.0, SegNumSeg);
+	TurnAt.Init(0.0, SegNumSeg);
+	double KnobWorst = 0.0, KnobAt = 0.0, SweetWorst = 0.0, SweetAt = 0.0, RollWorst = 0.0, RollAt = 0.0;
 	double GripWorst[2] = { 0.0, 0.0 }, GripAt[2] = { 0.0, 0.0 }, SoleWorst[2] = { 0.0, 0.0 };
-	const int32 Knob = File.Point(TEXT("knob")), Sweet = File.Point(TEXT("sweet"));
+	int32 LeftWrong = 0;
+	double LeftFirstWrong = 0.0;
+	bool bStartRight = true;
+	FString StartNote;
+	const int32 Knob = File.Point(TEXT("knob")), Sweet = File.Point(TEXT("sweet")), Tip = File.Point(TEXT("tip")), BatBody = File.Body(TEXT("bat"));
 	const double SweetLocal = 100.0 * File.SweetFromKnobM * UBbFigureShop::BatCm / (100.0 * File.BatLengthM);
-	int32 Measured = 0;
+	int32 Measured = 0, Turns = 0;
+	static const TCHAR* const SegNames[] = { TEXT("pelvis"), TEXT("trunk"), TEXT("thigh_L"), TEXT("shank_L"), TEXT("foot_L"), TEXT("thigh_R"), TEXT("shank_R"),
+		TEXT("foot_R"), TEXT("uarm_L"), TEXT("farm_L"), TEXT("hand_L"), TEXT("uarm_R"), TEXT("farm_R"), TEXT("hand_R") };
 	for (int32 I = 0; I < File.Num(); ++I)
 	{
 		FBbSwingPose P;
@@ -726,46 +764,121 @@ int32 ABbBodySwing::RunCheck()
 				At = Ms;
 			}
 		};
+		// The drawn hips and ankles of each leg, from the leg's own pieces, for the handedness tests.
+		FVector Hip[2], Ankle[2], PelvisFwd = FVector::ZeroVector;
 		for (const FBbSwingPart& Part : Parts)
 		{
 			const FTransform& W = Part.C->GetComponentTransform();
 			for (const TPair<int32, FVector>& C : Part.Carries)
 			{
-				Worse((W.TransformPosition(C.Value) - ToCm(File.JointPos(I, C.Key))).Size(), JointWorst[C.Key], JointAt[C.Key]);
+				Worse(10.0 * (W.TransformPosition(C.Value) - Ue(File.JointPos(I, C.Key))).Size(), JointWorst[C.Key], JointAt[C.Key]);
 				++Measured;
+			}
+			if (Part.Seg == SegThighL || Part.Seg == SegThighR)
+			{
+				Hip[Part.Seg == SegThighL ? 0 : 1] = SimOf(W.TransformPosition(Part.Carries[0].Value));
+			}
+			if (Part.Seg == SegShankL || Part.Seg == SegShankR)
+			{
+				Ankle[Part.Seg == SegShankL ? 0 : 1] = SimOf(W.TransformPosition(Part.Carries[1].Value));
 			}
 			if (Part.Grip != INDEX_NONE)
 			{
 				const int32 K = Part.Seg == SegHandL ? 0 : 1;
-				Worse((W.TransformPosition(Part.GripLocal) - ToCm(File.PointPos(I, Part.Grip))).Size(), GripWorst[K], GripAt[K]);
+				Worse(10.0 * (W.TransformPosition(Part.GripLocal) - Ue(File.PointPos(I, Part.Grip))).Size(), GripWorst[K], GripAt[K]);
 			}
 			if (Part.BallIn != INDEX_NONE)
 			{
 				const int32 K = Part.Seg == SegFootL ? 0 : 1;
 				double Unused = 0.0;
-				Worse((W.TransformPosition(Part.SoleLocal) - ToCm((File.ContactPos(I, Part.BallIn) + File.ContactPos(I, Part.BallOut)) * 0.5)).Size(), SoleWorst[K], Unused);
+				Worse(10.0 * (W.TransformPosition(Part.SoleLocal) - Ue((File.ContactPos(I, Part.BallIn) + File.ContactPos(I, Part.BallOut)) * 0.5)).Size(), SoleWorst[K], Unused);
+			}
+			if (Part.bRigid)
+			{
+				continue;
+			}
+			// The segment's forward as drawn (the piece's image of the mannequin's forward, square to
+			// the piece's image of the segment's axis) against the file's: its body's x turned by the
+			// file's quaternion, square to the segment's axis from the file's joints (the foot: its z).
+			const FBbSwingSeg& G = Segs[Part.Seg];
+			const FVector DrawnA = W.TransformVector(Part.Ref.InverseTransformVectorNoScale(G.A)).GetSafeNormal();
+			const FVector DrawnF = Across(W.TransformVector(Part.Ref.InverseTransformVectorNoScale(G.F)), DrawnA);
+			const FQuat Q = File.BodyRot(I, G.Body);
+			FVector FileA;
+			if (Part.Seg == SegFootL || Part.Seg == SegFootR)
+			{
+				FileA = UeVec(Q.RotateVector(FVector(0, 0, 1)));
+			}
+			else
+			{
+				auto Mid = [&](int32 A, int32 B) { return (File.JointPos(I, A) + File.JointPos(I, B)) * 0.5; };
+				const FVector Near = G.Near != INDEX_NONE ? File.JointPos(I, G.Near) : Mid(G.WideA, G.WideB);
+				const FVector Far = G.Far != INDEX_NONE ? File.JointPos(I, G.Far) : G.FarPoint != INDEX_NONE ? File.PointPos(I, G.FarPoint) : Mid(G.WideA, G.WideB);
+				FileA = (Ue(Far) - Ue(Near)).GetSafeNormal();
+			}
+			const FVector FileF = Across(UeVec(Q.RotateVector(FVector(1, 0, 0))), FileA);
+			Worse(Deg(DrawnF, FileF), TurnWorst[Part.Seg], TurnAt[Part.Seg]);
+			++Turns;
+			if (Part.Seg == SegPelvis)
+			{
+				PelvisFwd = SimOf(Ue(FVector::ZeroVector) + DrawnF * 100.0) - SimOf(Ue(FVector::ZeroVector));
 			}
 		}
 		const FTransform& B = BatC->GetComponentTransform();
-		Worse((B.TransformPosition(FVector::ZeroVector) - ToCm(File.PointPos(I, Knob))).Size(), KnobWorst, KnobAt);
-		Worse((B.TransformPosition(FVector(0, 0, SweetLocal)) - ToCm(File.PointPos(I, Sweet))).Size(), SweetWorst, SweetAt);
+		Worse(10.0 * (B.TransformPosition(FVector::ZeroVector) - Ue(File.PointPos(I, Knob))).Size(), KnobWorst, KnobAt);
+		Worse(10.0 * (B.TransformPosition(FVector(0, 0, SweetLocal)) - Ue(File.PointPos(I, Sweet))).Size(), SweetWorst, SweetAt);
+		{
+			const FVector FileA = (Ue(File.PointPos(I, Tip)) - Ue(File.PointPos(I, Knob))).GetSafeNormal();
+			Worse(Deg(Across(B.GetUnitAxis(EAxis::X), FileA), Across(UeVec(File.BodyRot(I, BatBody).RotateVector(FVector(1, 0, 0))), FileA)), RollWorst, RollAt);
+		}
+		// Handedness, read from the drawing in the sim's frame: the leg drawn as his left (the
+		// mannequin's left leg) is on his own left as he is drawn facing (left = up x forward in the
+		// sim's right-handed frame), at every sample.
+		const FVector Left = FVector(0, 0, 1) ^ FVector(PelvisFwd.X, PelvisFwd.Y, 0.0).GetSafeNormal();
+		if (((Hip[0] - Hip[1]) | Left) <= 0.0)
+		{
+			if (LeftWrong++ == 0)
+			{
+				LeftFirstWrong = Ms;
+			}
+		}
+		if (I == 0)
+		{
+			// At the start: a right-hander on the third-base side of the plate (-X), facing it (+X),
+			// his lead (left) side toward the pitcher (+Y).
+			const FVector Hips = (Hip[0] + Hip[1]) * 0.5;
+			bStartRight = Hips.X < 0.0 && PelvisFwd.X > 0.0 && Ankle[0].Y > Ankle[1].Y;
+			StartNote = FString::Printf(TEXT("hips at x %+.3f m (wants < 0), facing (%+.2f, %+.2f) (wants x > 0), lead ankle y %+.3f against rear %+.3f (wants lead > rear)"),
+				Hips.X, PelvisFwd.X, PelvisFwd.Y, Ankle[0].Y, Ankle[1].Y);
+		}
 	}
 	double Largest = FMath::Max3(KnobWorst, SweetWorst, FMath::Max(GripWorst[0], GripWorst[1]));
-	UE_LOG(LogBbSwing, Display, TEXT("BB_BODYCHECK file=%s samples=%d joint_readings=%d limit_mm=%.1f (each drawn joint read back from every piece that carries it)"),
-		*File.Name, File.Num(), Measured, 10.0 * CheckLimitCm);
+	UE_LOG(LogBbSwing, Display, TEXT("BB_BODYCHECK file=%s samples=%d joint_readings=%d turn_readings=%d limit_mm %.1f turn_limit_deg %.1f fault=%s (positions through the check's own sim-to-Unreal map)"),
+		*File.Name, File.Num(), Measured, Turns, CheckLimitMm, TurnLimitDeg, Fault.IsEmpty() ? TEXT("none") : *Fault);
 	for (int32 J = 0; J < File.Joints.Num(); ++J)
 	{
-		UE_LOG(LogBbSwing, Display, TEXT("BB_BODYCHECK joint %-10s max_mm %.4f at_ms %+.1f"), *File.Joints[J], 10.0 * JointWorst[J], JointAt[J]);
+		UE_LOG(LogBbSwing, Display, TEXT("BB_BODYCHECK joint %-10s max_mm %.4f at_ms %+.1f"), *File.Joints[J], JointWorst[J], JointAt[J]);
 		Largest = FMath::Max(Largest, JointWorst[J]);
 	}
-	UE_LOG(LogBbSwing, Display, TEXT("BB_BODYCHECK bat knob max_mm %.4f at_ms %+.1f"), 10.0 * KnobWorst, KnobAt);
-	UE_LOG(LogBbSwing, Display, TEXT("BB_BODYCHECK bat sweet_spot max_mm %.4f at_ms %+.1f"), 10.0 * SweetWorst, SweetAt);
+	UE_LOG(LogBbSwing, Display, TEXT("BB_BODYCHECK bat knob max_mm %.4f at_ms %+.1f"), KnobWorst, KnobAt);
+	UE_LOG(LogBbSwing, Display, TEXT("BB_BODYCHECK bat sweet_spot max_mm %.4f at_ms %+.1f"), SweetWorst, SweetAt);
 	UE_LOG(LogBbSwing, Display, TEXT("BB_BODYCHECK hand_on_handle L max_mm %.4f at_ms %+.1f  R max_mm %.4f at_ms %+.1f (the drawn hand's knuckles against the file's grip point on the handle's axis)"),
-		10.0 * GripWorst[0], GripAt[0], 10.0 * GripWorst[1], GripAt[1]);
+		GripWorst[0], GripAt[0], GripWorst[1], GripAt[1]);
 	UE_LOG(LogBbSwing, Display, TEXT("BB_BODYCHECK sole_under_ball (information, not checked) L max_mm %.2f R max_mm %.2f (the drawn sole under the ball of the foot against the file's ball contact points)"),
-		10.0 * SoleWorst[0], 10.0 * SoleWorst[1]);
-	const bool bPass = Largest <= CheckLimitCm && Measured > 0;
-	UE_LOG(LogBbSwing, Display, TEXT("BB_BODYCHECK result %s largest_mm %.4f limit_mm %.1f"), bPass ? TEXT("PASS") : TEXT("FAIL"), 10.0 * Largest, 10.0 * CheckLimitCm);
+		SoleWorst[0], SoleWorst[1]);
+	double TurnLargest = RollWorst;
+	for (int32 S = 0; S < SegNumSeg; ++S)
+	{
+		UE_LOG(LogBbSwing, Display, TEXT("BB_BODYCHECK turn %-8s max_deg %.3f at_ms %+.1f (the drawn forward axis against the file's quaternion)"), SegNames[S], TurnWorst[S], TurnAt[S]);
+		TurnLargest = FMath::Max(TurnLargest, TurnWorst[S]);
+	}
+	UE_LOG(LogBbSwing, Display, TEXT("BB_BODYCHECK turn bat_roll max_deg %.3f at_ms %+.1f"), RollWorst, RollAt);
+	UE_LOG(LogBbSwing, Display, TEXT("BB_BODYCHECK hand start %s: %s"), bStartRight ? TEXT("PASS") : TEXT("FAIL"), *StartNote);
+	UE_LOG(LogBbSwing, Display, TEXT("BB_BODYCHECK hand left_leg_on_his_left %s: wrong at %d of %d samples%s"), LeftWrong == 0 ? TEXT("PASS") : TEXT("FAIL"), LeftWrong, File.Num(),
+		LeftWrong ? *FString::Printf(TEXT(", first at %+.1f ms"), LeftFirstWrong) : TEXT(""));
+	const bool bPass = Largest <= CheckLimitMm && TurnLargest <= TurnLimitDeg && bStartRight && LeftWrong == 0 && Measured > 0 && Turns > 0;
+	UE_LOG(LogBbSwing, Display, TEXT("BB_BODYCHECK result %s largest_mm %.4f limit_mm %.1f largest_turn_deg %.3f turn_limit_deg %.1f handedness %s"), bPass ? TEXT("PASS") : TEXT("FAIL"),
+		Largest, CheckLimitMm, TurnLargest, TurnLimitDeg, bStartRight && LeftWrong == 0 ? TEXT("right") : TEXT("WRONG"));
 	return bPass ? 0 : 1;
 }
 
