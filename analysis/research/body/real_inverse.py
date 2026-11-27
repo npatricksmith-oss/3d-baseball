@@ -4,7 +4,7 @@ what joint torques his recorded motion needs, joint by joint, against the measur
 is held to (PLAN D34, analysis/oracle/body3d/drive.py), and whether the dataset's force plates agree with his motion.
 
     uv run --with numpy --with scipy --with c3d python3 analysis/research/body/real_inverse.py [<swing id>] [--cut <Hz>]
-        [--to <ms before contact, default -20>] [--com-markers] [--parts] [--plates-as-read] > sim/target/codex-probes/body3d/s14/real_inverse.out
+        [--to <ms before contact, default -20>] [--com-markers] [--trunk-thorax] [--parts] [--plates-as-read] > sim/target/codex-probes/body3d/s14/real_inverse.out
     ... real_inverse.py --sign-check     the plates' force integrated against the markers' centre of mass, each sign of the
         plates' sideways component (set T_FROM to -1.45 s first: see plates())
 
@@ -124,6 +124,14 @@ def main(argv):
     Hh = float(sw.meta["session_height_in"]) * 0.0254
     F = {k: lowpass(v, cut, rate) for k, v in O.items()}
     Q = {k: reorth(lowpass(frames(v)[:n], cut, rate)) for k, v in sw.Q.items()}
+    if "--trunk-thorax" in argv:
+        # the trunk's frame from his four thorax markers (C7, T10, clavicle, sternum) in place of the lumbar-to-shoulder-
+        # centres line: the dataset's shoulder centres move on his thorax (the design's review, P2-2)
+        mk = {k: lowpass(true(lab_rot(sw, k)), cut, rate) for k in ("C7", "T10", "CLAV", "STRN")}
+        zt = unit((mk["C7"] + mk["CLAV"]) / 2 - (mk["T10"] + mk["STRN"]) / 2)
+        fw = (mk["CLAV"] + mk["STRN"]) / 2 - (mk["C7"] + mk["T10"]) / 2
+        xt = unit(fw - zt * np.sum(fw * zt, axis=1, keepdims=True))
+        Q["trunk"] = np.stack([xt, np.cross(zt, xt), zt], axis=-1)
     bax = unit(lowpass(bax, cut, rate))
     lab = sw.lab
     medlen = lambda a, b: float(np.median(np.linalg.norm(lab[a][:n] - lab[b][:n], axis=1)))
@@ -358,7 +366,11 @@ def main(argv):
     def curve(cname, w):
         tab = DR.CURVES[cname]
         if w < 0:
-            return 1.5 if not cname.startswith(("sh_", "elbow", "wrist")) else DR.ARM_ECC
+            # stretched: rising from 1 to the plateau with slope 4 in units of the curve's top speed (body-motion 5.1),
+            # not at once (the design's review, P3-3)
+            top = tab[-1][0]
+            ecc = 1.5 if not cname.startswith(("sh_", "elbow", "wrist")) else DR.ARM_ECC
+            return min(ecc, 1.0 + 4.0 * (-w) / top)
         for (w0, f0), (w1, f1) in zip(tab, tab[1:]):
             if w <= w1:
                 return f0 + (f1 - f0) * (w - w0) / (w1 - w0)
@@ -366,8 +378,11 @@ def main(argv):
 
     # (label, joint, frame body, axis index, sign so + is the muscle's direction, child, parent, bound name, curve)
     spec = [
-        ("trunk twist toward the pitcher", "lumbar", "trunk", 2, +1, "trunk", "pelvis", "core", "trunk"),
-        ("trunk twist back (brake)", "lumbar", "trunk", 2, -1, "trunk", "pelvis", "core_back", "trunk_back"),
+        # the model's core channels act about the PELVIS's long axis (drive.CHANNELS: the axis is in the parent's frame;
+        # the design's review, P3-3); the trunk's own axis is printed beside it
+        ("trunk twist toward the pitcher (about the pelvis's axis)", "lumbar", "pelvis", 2, +1, "trunk", "pelvis", "core", "trunk"),
+        ("trunk twist back, brake (about the pelvis's axis)", "lumbar", "pelvis", 2, -1, "trunk", "pelvis", "core_back", "trunk_back"),
+        ("  the same toward the pitcher, about the trunk's axis", "lumbar", "trunk", 2, +1, "trunk", "pelvis", "core", "trunk"),
         ("trunk bend forward", "lumbar", "trunk", 1, +1, "trunk", "pelvis", ("hold", "trunk_fwd"), "trunk_bend"),
         ("trunk bend back", "lumbar", "trunk", 1, -1, "trunk", "pelvis", ("hold", "trunk_ext"), "trunk_bend"),
         ("trunk bend to his right", "lumbar", "trunk", 0, +1, "trunk", "pelvis", ("hold", "trunk_side_R"), "trunk_bend"),
@@ -386,7 +401,7 @@ def main(argv):
             ("%s ankle plantar flexion" % side, "ankle_" + sd, "foot_" + sd, 1, +1, "foot_" + sd, "shank_" + sd, "ankle_pf_" + sd, "ankle_pf"),
             ("%s elbow extension" % side, "elbow_" + sd, "uarm_" + sd, 1, +1, "farm_" + sd, "uarm_" + sd, "elbow_ext_" + sd, "elbow_ext"),
             ("%s elbow flexion" % side, "elbow_" + sd, "uarm_" + sd, 1, -1, "farm_" + sd, "uarm_" + sd, "elbow_flex_" + sd, "elbow_flex"),
-            ("%s shoulder about the trunk's axis, arm toward the pitcher" % side, "shoulder_" + sd, "trunk", 2, +1, "uarm_" + sd, "trunk",
+            ("%s shoulder about the trunk's axis (sweep, raise, turn share it; bound: the sweep's)" % side, "shoulder_" + sd, "trunk", 2, +1, "uarm_" + sd, "trunk",
              "shoulder_" + sd, "sh_habd" if sd == "L" else "sh_hadd"),
         ]
     hold = {nm: v[5] * k for nm, v in DR.HOLD_ONLY.items()}
@@ -405,9 +420,11 @@ def main(argv):
         jj = i0 + int(np.argmax(ratio[win]))
         rng = ""
         if jn.startswith(("hip", "knee", "ankle")):
-            vals = [sg * np.einsum("ni,ni->n", Lx[jn][1], Q[fb][:, :, ax])[win].max() for Lx in (Lm, Lp)]
+            vals = [(sg * np.einsum("ni,ni->n", Lx[jn][1], Q[fb][:, :, ax]))[win].max() for Lx in (Lm, Lp)]
             rng = "[%.0f, %.0f]" % (min(vals), max(vals))
-        say("%-55s %8.0f %8.0f %9.0f %8.2f %9.2f@%4.0f  %s" % (lab_, B, tau[ii], 1e3 * t[ii], tau[ii] / B, ratio[jj], 1e3 * t[jj], rng))
+        over = np.nonzero(tau[win] > B)[0]
+        span = ("over held still %3.0f ms (%.0f to %.0f)" % (len(over) * 1e3 / rate, 1e3 * t[i0 + over[0]], 1e3 * t[i0 + over[-1]])) if len(over) else ""
+        say("%-55s %8.0f %8.0f %9.0f %8.2f %9.2f@%4.0f  %s %s" % (lab_, B, tau[ii], 1e3 * t[ii], tau[ii] / B, ratio[jj], 1e3 * t[jj], rng, span))
         worst.append((ratio[jj], lab_))
     say("\nover their measured strength at their speed (need/at-speed > 1), worst first:")
     for r, l in sorted(worst, reverse=True):
@@ -415,7 +432,7 @@ def main(argv):
             say("  %.2f  %s" % (r, l))
 
     say("\n## 4. Through time: the largest needs (N m), every 10 ms")
-    keys = [("trunk twist +", "lumbar", "trunk", 2, 1), ("trunk side R", "lumbar", "trunk", 0, 1), ("trunk fwd", "lumbar", "trunk", 1, 1),
+    keys = [("trunk twist +", "lumbar", "pelvis", 2, 1), ("trunk side R", "lumbar", "trunk", 0, 1), ("trunk fwd", "lumbar", "trunk", 1, 1),
             ("lead hip ext", "hip_L", "thigh_L", 1, 1), ("rear hip ext", "hip_R", "thigh_R", 1, 1),
             ("lead knee ext", "knee_L", "shank_L", 1, -1), ("rear knee ext", "knee_R", "shank_R", 1, -1),
             ("lead sh z", "shoulder_L", "trunk", 2, 1), ("rear sh z", "shoulder_R", "trunk", 2, 1),
