@@ -69,6 +69,42 @@ struct FBbSwingPose
 	double Sweet = 0.0;
 };
 
+/** The segments a piece of the swing's figure can ride on. */
+enum EBbSwingSeg : uint8 { SegPelvis, SegTrunk, SegThighL, SegShankL, SegFootL, SegThighR, SegShankR, SegFootR, SegUarmL, SegFarmL, SegHandL, SegUarmR, SegFarmR, SegHandR, SegNumSeg };
+struct FBbSwingSeg
+{
+	/** The mannequin's side, in its mesh frame (cm): where the segment starts, its unit
+	 *  axis to its far end, its unit forward and side, and the lengths the file's are set
+	 *  against (along the axis, across for the pelvis and trunk, forward for the foot). */
+	FVector O, A, F, L;
+	double Len = 1.0, Wide = 0.0, Fwd = 0.0;
+	/** The file's body that gives its forward; its near and far joints (or point for the
+	 *  hand's far end), and for the pelvis and trunk the two joints that give the width. */
+	int32 Body = INDEX_NONE, Near = INDEX_NONE, Far = INDEX_NONE, FarPoint = INDEX_NONE, WideA = INDEX_NONE, WideB = INDEX_NONE;
+	int32 FarJointB = INDEX_NONE;
+	/** The model's side as now posed, Unreal frame. */
+	FVector OM, AM, FM, LM;
+	double SA = 1.0, SF = 1.0, SL = 1.0;
+};
+struct FBbSwingPart
+{
+	UStaticMeshComponent* C = nullptr;
+	int32 Seg = 0;
+	/** Rides with the trunk's far end unscaled (neck, head). */
+	bool bRigid = false;
+	/** The piece as the mannequin wears it, in the mesh frame. */
+	FTransform Ref;
+	/** Joints this piece carries: the file's index and where the joint is in the piece's own frame. */
+	TArray<TPair<int32, FVector>> Carries;
+	/** A hand: the file's grip point and the knuckles in the piece's frame. */
+	int32 Grip = INDEX_NONE;
+	FVector GripLocal = FVector::ZeroVector;
+	/** A shoe: the foot's two ball-of-foot contact points and the sole under the ball in its frame. */
+	int32 BallIn = INDEX_NONE, BallOut = INDEX_NONE;
+	FVector SoleLocal = FVector::ZeroVector;
+};
+
+
 UCLASS()
 class ABbBodySwing : public AActor
 {
@@ -83,48 +119,13 @@ public:
 	int32 Start(const FString& File, UBbFigureShop* Shop, ABbPark* Park, ACameraActor* Camera, UStaticMesh* Sphere, UMaterialInterface* BaseMaterial);
 
 private:
-	/** The segments a piece can ride on. */
-	enum ESeg : uint8 { Pelvis, Trunk, ThighL, ShankL, FootL, ThighR, ShankR, FootR, UarmL, FarmL, HandL, UarmR, FarmR, HandR, NumSeg };
-	struct FSeg
-	{
-		/** The mannequin's side, in its mesh frame (cm): where the segment starts, its unit
-		 *  axis to its far end, its unit forward and side, and the lengths the file's are set
-		 *  against (along the axis, across for the pelvis and trunk, forward for the foot). */
-		FVector O, A, F, L;
-		double Len = 1.0, Wide = 0.0, Fwd = 0.0;
-		/** The file's body that gives its forward; its near and far joints (or point for the
-		 *  hand's far end), and for the pelvis and trunk the two joints that give the width. */
-		int32 Body = INDEX_NONE, Near = INDEX_NONE, Far = INDEX_NONE, FarPoint = INDEX_NONE, WideA = INDEX_NONE, WideB = INDEX_NONE;
-		int32 FarJointB = INDEX_NONE;
-		/** The model's side as now posed, Unreal frame. */
-		FVector OM, AM, FM, LM;
-		double SA = 1.0, SF = 1.0, SL = 1.0;
-	};
-	struct FPart
-	{
-		UStaticMeshComponent* C = nullptr;
-		int32 Seg = 0;
-		/** Rides with the trunk's far end unscaled (neck, head). */
-		bool bRigid = false;
-		/** The piece as the mannequin wears it, in the mesh frame. */
-		FTransform Ref;
-		/** Joints this piece carries: the file's index and where the joint is in the piece's own frame. */
-		TArray<TPair<int32, FVector>> Carries;
-		/** A hand: the file's grip point and the knuckles in the piece's frame. */
-		int32 Grip = INDEX_NONE;
-		FVector GripLocal = FVector::ZeroVector;
-		/** A shoe: the foot's two ball-of-foot contact points and the sole under the ball in its frame. */
-		int32 BallIn = INDEX_NONE, BallOut = INDEX_NONE;
-		FVector SoleLocal = FVector::ZeroVector;
-	};
-
 	bool BuildFigure(FString& OutError);
 	void Sample(double T, FBbSwingPose& Out) const;
 	void Pose(const FBbSwingPose& P);
 	FVector ToCm(const FVector& Sim) const;
 	FVector AxisUE(const FBbSwingPose& P, int32 Body, const FVector& Local) const;
-	FVector MapPoint(const FSeg& S, const FVector& Mesh) const;
-	FVector MapVector(const FSeg& S, const FVector& Mesh) const;
+	FVector MapPoint(const FBbSwingSeg& S, const FVector& Mesh) const;
+	FVector MapVector(const FBbSwingSeg& S, const FVector& Mesh) const;
 	/** -BbBodySwingCheck: every sample drawn and measured against the file. 0 passed, 1 failed. */
 	int32 RunCheck();
 	void SetView(int32 View);
@@ -134,8 +135,8 @@ private:
 	FBbSwingFile File;
 	/** Why the file cannot be shown, on screen. */
 	FString Error;
-	TArray<FSeg> Segs;
-	TArray<FPart> Parts;
+	TArray<FBbSwingSeg> Segs;
+	TArray<FBbSwingPart> Parts;
 	UPROPERTY()
 	TObjectPtr<UBbFigureShop> Shop;
 	UPROPERTY()

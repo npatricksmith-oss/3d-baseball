@@ -22,7 +22,7 @@ DEFINE_LOG_CATEGORY_STATIC(LogBbSwing, Log, All);
 
 namespace
 {
-	const TCHAR* const Format = TEXT("bb-body-swing 1");
+	const TCHAR* const SwingFormat = TEXT("bb-body-swing 1");
 	/** The check's limit (player-visuals §14): every drawn joint, the knob, the sweet spot and each
 	 *  hand's grip within this of the file's, cm. */
 	constexpr double CheckLimitCm = 1.0;
@@ -39,7 +39,7 @@ namespace
 	constexpr double BallCm = 7.32;
 
 	/** A unit vector square to A, as near Hint as can be (or to Spare if Hint lies along A). */
-	FVector Square(const FVector& A, const FVector& Hint, const FVector& Spare)
+	FVector SquareTo(const FVector& A, const FVector& Hint, const FVector& Spare)
 	{
 		FVector F = Hint - A * (Hint | A);
 		if (F.SizeSquared() < 1e-8)
@@ -126,7 +126,7 @@ bool FBbSwingFile::Load(const FString& InPath, FString& OutError)
 		}
 		else if (K == TEXT("format"))
 		{
-			bFormat = Rest() == Format;
+			bFormat = Rest() == SwingFormat;
 		}
 		else if (K == TEXT("plan"))
 		{
@@ -163,7 +163,7 @@ bool FBbSwingFile::Load(const FString& InPath, FString& OutError)
 		}
 		else if (K == TEXT("event") && Tok.Num() > 2)
 		{
-			Events.Add({ Tok[1], FCString::Atod(*Tok[2]) });
+			Events.Emplace(Tok[1], FCString::Atod(*Tok[2]));
 		}
 		else if ((K == TEXT("bodies") && !List(Bodies)) || (K == TEXT("joints") && !List(Joints)) || (K == TEXT("points") && !List(Points))
 			|| (K == TEXT("contacts") && !List(Contacts)))
@@ -188,7 +188,7 @@ bool FBbSwingFile::Load(const FString& InPath, FString& OutError)
 	}
 	if (!bFormat)
 	{
-		OutError = FString::Printf(TEXT("%s is not a body-swing file (no \"format %s\" line)"), *Name, Format);
+		OutError = FString::Printf(TEXT("%s is not a body-swing file (no \"format %s\" line)"), *Name, SwingFormat);
 		return false;
 	}
 	if (Samples < 2 || Samples != WantSamples)
@@ -257,12 +257,12 @@ FVector ABbBodySwing::AxisUE(const FBbSwingPose& P, int32 Body, const FVector& L
 	return FVector(V.Y, V.X, V.Z);
 }
 
-FVector ABbBodySwing::MapVector(const FSeg& S, const FVector& V) const
+FVector ABbBodySwing::MapVector(const FBbSwingSeg& S, const FVector& V) const
 {
 	return S.FM * (S.SF * (V | S.F)) + S.LM * (S.SL * (V | S.L)) + S.AM * (S.SA * (V | S.A));
 }
 
-FVector ABbBodySwing::MapPoint(const FSeg& S, const FVector& P) const
+FVector ABbBodySwing::MapPoint(const FBbSwingSeg& S, const FVector& P) const
 {
 	return S.OM + MapVector(S, P - S.O);
 }
@@ -319,15 +319,15 @@ bool ABbBodySwing::BuildFigure(FString& OutError)
 	const FVector Up(0, 0, 1);
 	const double Fwd = M(TEXT("ball_l")).Y >= M(TEXT("foot_l")).Y ? 1.0 : -1.0;
 	const FVector Ahead(0, Fwd, 0), Across(1, 0, 0);
-	Segs.SetNum(NumSeg);
+	Segs.SetNum(SegNumSeg);
 	// A segment from Near to Far on the mannequin; the model's from its near joint to its far one.
-	auto Limb = [&](ESeg S, const FVector& Near, const FVector& Far, const TCHAR* Body, int32 NearJ, int32 FarJ, int32 FarP = INDEX_NONE)
+	auto Limb = [&](EBbSwingSeg S, const FVector& Near, const FVector& Far, const TCHAR* Body, int32 NearJ, int32 FarJ, int32 FarP = INDEX_NONE)
 	{
-		FSeg& G = Segs[S];
+		FBbSwingSeg& G = Segs[S];
 		G.O = Near;
 		G.A = (Far - Near).GetSafeNormal();
 		G.Len = (Far - Near).Size();
-		G.F = Square(G.A, Ahead, Across);
+		G.F = SquareTo(G.A, Ahead, Across);
 		G.L = G.A ^ G.F;
 		G.Body = File.Body(Body);
 		G.Near = NearJ;
@@ -343,18 +343,18 @@ bool ABbBodySwing::BuildFigure(FString& OutError)
 		const FVector Hip = M(*(TEXT("thigh_") + l)), Knee = M(*(TEXT("calf_") + l)), Ankle = M(*(TEXT("foot_") + l)), Ball = M(*(TEXT("ball_") + l));
 		const FVector Shoulder = M(*(TEXT("upperarm_") + l)), Elbow = M(*(TEXT("lowerarm_") + l)), Wrist = M(*(TEXT("hand_") + l)), Knuckle = M(*(TEXT("middle_01_") + l));
 		const int32 Off = K == 0 ? 0 : 3;
-		Limb((ESeg)(ThighL + Off), Hip, Knee, *(TEXT("thigh_") + R), J(TEXT("hip_") + R), J(TEXT("knee_") + R));
-		Limb((ESeg)(ShankL + Off), Knee, Ankle, *(TEXT("shank_") + R), J(TEXT("knee_") + R), J(TEXT("ankle_") + R));
+		Limb((EBbSwingSeg)(SegThighL + Off), Hip, Knee, *(TEXT("thigh_") + R), J(TEXT("hip_") + R), J(TEXT("knee_") + R));
+		Limb((EBbSwingSeg)(SegShankL + Off), Knee, Ankle, *(TEXT("shank_") + R), J(TEXT("knee_") + R), J(TEXT("ankle_") + R));
 		const int32 AOff = K == 0 ? 0 : 3;
-		Limb((ESeg)(UarmL + AOff), Shoulder, Elbow, *(TEXT("uarm_") + R), J(TEXT("shoulder_") + R), J(TEXT("elbow_") + R));
-		Limb((ESeg)(FarmL + AOff), Elbow, Wrist, *(TEXT("farm_") + R), J(TEXT("elbow_") + R), J(TEXT("wrist_") + R));
+		Limb((EBbSwingSeg)(SegUarmL + AOff), Shoulder, Elbow, *(TEXT("uarm_") + R), J(TEXT("shoulder_") + R), J(TEXT("elbow_") + R));
+		Limb((EBbSwingSeg)(SegFarmL + AOff), Elbow, Wrist, *(TEXT("farm_") + R), J(TEXT("elbow_") + R), J(TEXT("wrist_") + R));
 		// The hand is part of the bat in the model: from the wrist to the handle's axis.
-		Limb((ESeg)(HandL + AOff), Wrist, Knuckle, TEXT("bat"), J(TEXT("wrist_") + R), INDEX_NONE, File.Point(*(TEXT("grip_") + R)));
+		Limb((EBbSwingSeg)(SegHandL + AOff), Wrist, Knuckle, TEXT("bat"), J(TEXT("wrist_") + R), INDEX_NONE, File.Point(*(TEXT("grip_") + R)));
 		// The foot: up its own vertical from the ankle, forward along the shoe to the ball of the foot.
-		FSeg& G = Segs[FootL + Off];
+		FBbSwingSeg& G = Segs[SegFootL + Off];
 		G.O = Ankle;
 		G.A = Up;
-		G.F = Square(Up, Ball - Ankle, Ahead);
+		G.F = SquareTo(Up, Ball - Ankle, Ahead);
 		G.L = G.A ^ G.F;
 		G.Len = Ankle.Z;                                   // the ankle above the ground (the mesh stands on z = 0)
 		G.Fwd = (Ball - Ankle) | G.F;
@@ -364,14 +364,14 @@ bool ABbBodySwing::BuildFigure(FString& OutError)
 	{
 		const FVector HipL = M(TEXT("thigh_l")), HipR = M(TEXT("thigh_r")), Spine = M(TEXT("spine_01"));
 		const FVector ShL = M(TEXT("upperarm_l")), ShR = M(TEXT("upperarm_r"));
-		Limb(Pelvis, (HipL + HipR) * 0.5, Spine, TEXT("pelvis"), INDEX_NONE, J(TEXT("lumbar")));
-		Segs[Pelvis].Wide = (HipL - HipR).Size();
-		Segs[Pelvis].WideA = J(TEXT("hip_L"));
-		Segs[Pelvis].WideB = J(TEXT("hip_R"));
-		Limb(Trunk, Spine, (ShL + ShR) * 0.5, TEXT("trunk"), J(TEXT("lumbar")), INDEX_NONE);
-		Segs[Trunk].Wide = (ShL - ShR).Size();
-		Segs[Trunk].WideA = J(TEXT("shoulder_L"));
-		Segs[Trunk].WideB = J(TEXT("shoulder_R"));
+		Limb(SegPelvis, (HipL + HipR) * 0.5, Spine, TEXT("pelvis"), INDEX_NONE, J(TEXT("lumbar")));
+		Segs[SegPelvis].Wide = (HipL - HipR).Size();
+		Segs[SegPelvis].WideA = J(TEXT("hip_L"));
+		Segs[SegPelvis].WideB = J(TEXT("hip_R"));
+		Limb(SegTrunk, Spine, (ShL + ShR) * 0.5, TEXT("trunk"), J(TEXT("lumbar")), INDEX_NONE);
+		Segs[SegTrunk].Wide = (ShL - ShR).Size();
+		Segs[SegTrunk].WideA = J(TEXT("shoulder_L"));
+		Segs[SegTrunk].WideB = J(TEXT("shoulder_R"));
 	}
 	if (!bOk)
 	{
@@ -380,62 +380,84 @@ bool ABbBodySwing::BuildFigure(FString& OutError)
 
 	// The joints each segment carries: the file's joint and the mannequin's.
 	TArray<TArray<TPair<int32, FVector>>> Carried;
-	Carried.SetNum(NumSeg);
-	Carried[Pelvis] = { { J(TEXT("hip_L")), M(TEXT("thigh_l")) }, { J(TEXT("hip_R")), M(TEXT("thigh_r")) }, { J(TEXT("lumbar")), M(TEXT("spine_01")) } };
-	Carried[Trunk] = { { J(TEXT("lumbar")), M(TEXT("spine_01")) }, { J(TEXT("shoulder_L")), M(TEXT("upperarm_l")) }, { J(TEXT("shoulder_R")), M(TEXT("upperarm_r")) } };
+	Carried.SetNum(SegNumSeg);
+	auto Carry = [&Carried](int32 S, int32 FileJoint, const FVector& MeshJoint) { Carried[S].Emplace(FileJoint, MeshJoint); };
+	Carry(SegPelvis, J(TEXT("hip_L")), M(TEXT("thigh_l")));
+	Carry(SegPelvis, J(TEXT("hip_R")), M(TEXT("thigh_r")));
+	Carry(SegPelvis, J(TEXT("lumbar")), M(TEXT("spine_01")));
+	Carry(SegTrunk, J(TEXT("lumbar")), M(TEXT("spine_01")));
+	Carry(SegTrunk, J(TEXT("shoulder_L")), M(TEXT("upperarm_l")));
+	Carry(SegTrunk, J(TEXT("shoulder_R")), M(TEXT("upperarm_r")));
 	for (int32 K = 0; K < 2; ++K)
 	{
 		const FString l = Sd[K], R = SD[K];
 		const int32 Off = K == 0 ? 0 : 3;
-		Carried[ThighL + Off] = { { J(TEXT("hip_") + R), M(*(TEXT("thigh_") + l)) }, { J(TEXT("knee_") + R), M(*(TEXT("calf_") + l)) } };
-		Carried[ShankL + Off] = { { J(TEXT("knee_") + R), M(*(TEXT("calf_") + l)) }, { J(TEXT("ankle_") + R), M(*(TEXT("foot_") + l)) } };
-		Carried[FootL + Off] = { { J(TEXT("ankle_") + R), M(*(TEXT("foot_") + l)) } };
-		Carried[UarmL + Off] = { { J(TEXT("shoulder_") + R), M(*(TEXT("upperarm_") + l)) }, { J(TEXT("elbow_") + R), M(*(TEXT("lowerarm_") + l)) } };
-		Carried[FarmL + Off] = { { J(TEXT("elbow_") + R), M(*(TEXT("lowerarm_") + l)) }, { J(TEXT("wrist_") + R), M(*(TEXT("hand_") + l)) } };
-		Carried[HandL + Off] = { { J(TEXT("wrist_") + R), M(*(TEXT("hand_") + l)) } };
+		Carry(SegThighL + Off, J(TEXT("hip_") + R), M(*(TEXT("thigh_") + l)));
+		Carry(SegThighL + Off, J(TEXT("knee_") + R), M(*(TEXT("calf_") + l)));
+		Carry(SegShankL + Off, J(TEXT("knee_") + R), M(*(TEXT("calf_") + l)));
+		Carry(SegShankL + Off, J(TEXT("ankle_") + R), M(*(TEXT("foot_") + l)));
+		Carry(SegFootL + Off, J(TEXT("ankle_") + R), M(*(TEXT("foot_") + l)));
+		Carry(SegUarmL + Off, J(TEXT("shoulder_") + R), M(*(TEXT("upperarm_") + l)));
+		Carry(SegUarmL + Off, J(TEXT("elbow_") + R), M(*(TEXT("lowerarm_") + l)));
+		Carry(SegFarmL + Off, J(TEXT("elbow_") + R), M(*(TEXT("lowerarm_") + l)));
+		Carry(SegFarmL + Off, J(TEXT("wrist_") + R), M(*(TEXT("hand_") + l)));
+		Carry(SegHandL + Off, J(TEXT("wrist_") + R), M(*(TEXT("hand_") + l)));
 	}
 
 	// The pieces: a batter's (his helmet, bare hands), each on its segment.
-	const TMap<FString, TPair<int32, bool>> OnSeg = {
-		{ TEXT("pelvis"), { Pelvis, false } }, { TEXT("spine_02"), { Trunk, false } }, { TEXT("spine_04"), { Trunk, false } },
-		{ TEXT("neck_01"), { Trunk, true } }, { TEXT("head"), { Trunk, true } },
-		{ TEXT("thigh_l"), { ThighL, false } }, { TEXT("calf_l"), { ShankL, false } }, { TEXT("foot_l"), { FootL, false } },
-		{ TEXT("thigh_r"), { ThighR, false } }, { TEXT("calf_r"), { ShankR, false } }, { TEXT("foot_r"), { FootR, false } },
-		{ TEXT("upperarm_l"), { UarmL, false } }, { TEXT("lowerarm_l"), { FarmL, false } }, { TEXT("hand_l"), { HandL, false } },
-		{ TEXT("upperarm_r"), { UarmR, false } }, { TEXT("lowerarm_r"), { FarmR, false } }, { TEXT("hand_r"), { HandR, false } } };
+	struct FOnSeg
+	{
+		const TCHAR* Bone;
+		int32 Seg;
+		bool bRigid;
+	};
+	static const FOnSeg OnSeg[] = {
+		{ TEXT("pelvis"), SegPelvis, false }, { TEXT("spine_02"), SegTrunk, false }, { TEXT("spine_04"), SegTrunk, false },
+		{ TEXT("neck_01"), SegTrunk, true }, { TEXT("head"), SegTrunk, true },
+		{ TEXT("thigh_l"), SegThighL, false }, { TEXT("calf_l"), SegShankL, false }, { TEXT("foot_l"), SegFootL, false },
+		{ TEXT("thigh_r"), SegThighR, false }, { TEXT("calf_r"), SegShankR, false }, { TEXT("foot_r"), SegFootR, false },
+		{ TEXT("upperarm_l"), SegUarmL, false }, { TEXT("lowerarm_l"), SegFarmL, false }, { TEXT("hand_l"), SegHandL, false },
+		{ TEXT("upperarm_r"), SegUarmR, false }, { TEXT("lowerarm_r"), SegFarmR, false }, { TEXT("hand_r"), SegHandR, false } };
 	for (const FBbPiece& P : Shop->Pieces())
 	{
 		if (P.Wear != EBbWear::Always && P.Wear != EBbWear::Helmet && P.Wear != EBbWear::HelmetBill)
 		{
 			continue;
 		}
-		const TPair<int32, bool>* S = OnSeg.Find(P.Bone.ToString());
+		const FOnSeg* S = nullptr;
+		for (const FOnSeg& O : OnSeg)
+		{
+			if (P.Bone == FName(O.Bone))
+			{
+				S = &O;
+			}
+		}
 		FTransform BoneRef;
 		if (!S || !Shop->RefBone(P.Bone, BoneRef))
 		{
 			UE_LOG(LogBbSwing, Warning, TEXT("BB_BODYSWING a piece on bone %s has no segment: not drawn"), *P.Bone.ToString());
 			continue;
 		}
-		FPart Part;
-		Part.Seg = S->Key;
-		Part.bRigid = S->Value;
+		FBbSwingPart Part;
+		Part.Seg = S->Seg;
+		Part.bRigid = S->bRigid;
 		Part.Ref = P.OnBone * BoneRef;
 		if (!Part.bRigid)
 		{
 			for (const TPair<int32, FVector>& C : Carried[Part.Seg])
 			{
-				Part.Carries.Add({ C.Key, Part.Ref.InverseTransformPosition(C.Value) });
+				Part.Carries.Emplace(C.Key, Part.Ref.InverseTransformPosition(C.Value));
 			}
 		}
-		if (Part.Seg == HandL || Part.Seg == HandR)
+		if (Part.Seg == SegHandL || Part.Seg == SegHandR)
 		{
-			const FString l = Part.Seg == HandL ? TEXT("l") : TEXT("r");
+			const FString l = Part.Seg == SegHandL ? TEXT("l") : TEXT("r");
 			Part.Grip = Segs[Part.Seg].FarPoint;
 			Part.GripLocal = Part.Ref.InverseTransformPosition(M(*(TEXT("middle_01_") + l)));
 		}
-		if (Part.Seg == FootL || Part.Seg == FootR)
+		if (Part.Seg == SegFootL || Part.Seg == SegFootR)
 		{
-			const FString l = Part.Seg == FootL ? TEXT("l") : TEXT("r"), R = Part.Seg == FootL ? TEXT("L") : TEXT("R");
+			const FString l = Part.Seg == SegFootL ? TEXT("l") : TEXT("r"), R = Part.Seg == SegFootL ? TEXT("L") : TEXT("R");
 			const FVector Ball = M(*(TEXT("ball_") + l));
 			Part.SoleLocal = Part.Ref.InverseTransformPosition(FVector(Ball.X, Ball.Y, 0.0));
 			Part.BallIn = File.Contact(*(R + TEXT("_ball_in")));
@@ -459,15 +481,15 @@ bool ABbBodySwing::BuildFigure(FString& OutError)
 	BatC->SetupAttachment(RootComponent);
 	BatC->RegisterComponent();
 	UE_LOG(LogBbSwing, Display, TEXT("BB_BODYSWING %d pieces; the mannequin's segments against the file's at its first sample (cm): thigh %.1f/%.1f shank %.1f/%.1f upper arm %.1f/%.1f forearm %.1f/%.1f hand %.1f/%.1f pelvis %.1f/%.1f wide %.1f/%.1f trunk %.1f/%.1f wide %.1f/%.1f"),
-		Parts.Num(), Segs[ThighL].Len, (ToCm(File.JointPos(0, Segs[ThighL].Near)) - ToCm(File.JointPos(0, Segs[ThighL].Far))).Size(),
-		Segs[ShankL].Len, (ToCm(File.JointPos(0, Segs[ShankL].Near)) - ToCm(File.JointPos(0, Segs[ShankL].Far))).Size(),
-		Segs[UarmL].Len, (ToCm(File.JointPos(0, Segs[UarmL].Near)) - ToCm(File.JointPos(0, Segs[UarmL].Far))).Size(),
-		Segs[FarmL].Len, (ToCm(File.JointPos(0, Segs[FarmL].Near)) - ToCm(File.JointPos(0, Segs[FarmL].Far))).Size(),
-		Segs[HandL].Len, (ToCm(File.JointPos(0, Segs[HandL].Near)) - ToCm(File.PointPos(0, Segs[HandL].FarPoint))).Size(),
-		Segs[Pelvis].Len, (ToCm(File.JointPos(0, Segs[Pelvis].Far)) - ToCm((File.JointPos(0, Segs[Pelvis].WideA) + File.JointPos(0, Segs[Pelvis].WideB)) * 0.5)).Size(),
-		Segs[Pelvis].Wide, (ToCm(File.JointPos(0, Segs[Pelvis].WideA)) - ToCm(File.JointPos(0, Segs[Pelvis].WideB))).Size(),
-		Segs[Trunk].Len, (ToCm(File.JointPos(0, Segs[Trunk].Near)) - ToCm((File.JointPos(0, Segs[Trunk].WideA) + File.JointPos(0, Segs[Trunk].WideB)) * 0.5)).Size(),
-		Segs[Trunk].Wide, (ToCm(File.JointPos(0, Segs[Trunk].WideA)) - ToCm(File.JointPos(0, Segs[Trunk].WideB))).Size());
+		Parts.Num(), Segs[SegThighL].Len, (ToCm(File.JointPos(0, Segs[SegThighL].Near)) - ToCm(File.JointPos(0, Segs[SegThighL].Far))).Size(),
+		Segs[SegShankL].Len, (ToCm(File.JointPos(0, Segs[SegShankL].Near)) - ToCm(File.JointPos(0, Segs[SegShankL].Far))).Size(),
+		Segs[SegUarmL].Len, (ToCm(File.JointPos(0, Segs[SegUarmL].Near)) - ToCm(File.JointPos(0, Segs[SegUarmL].Far))).Size(),
+		Segs[SegFarmL].Len, (ToCm(File.JointPos(0, Segs[SegFarmL].Near)) - ToCm(File.JointPos(0, Segs[SegFarmL].Far))).Size(),
+		Segs[SegHandL].Len, (ToCm(File.JointPos(0, Segs[SegHandL].Near)) - ToCm(File.PointPos(0, Segs[SegHandL].FarPoint))).Size(),
+		Segs[SegPelvis].Len, (ToCm(File.JointPos(0, Segs[SegPelvis].Far)) - ToCm((File.JointPos(0, Segs[SegPelvis].WideA) + File.JointPos(0, Segs[SegPelvis].WideB)) * 0.5)).Size(),
+		Segs[SegPelvis].Wide, (ToCm(File.JointPos(0, Segs[SegPelvis].WideA)) - ToCm(File.JointPos(0, Segs[SegPelvis].WideB))).Size(),
+		Segs[SegTrunk].Len, (ToCm(File.JointPos(0, Segs[SegTrunk].Near)) - ToCm((File.JointPos(0, Segs[SegTrunk].WideA) + File.JointPos(0, Segs[SegTrunk].WideB)) * 0.5)).Size(),
+		Segs[SegTrunk].Wide, (ToCm(File.JointPos(0, Segs[SegTrunk].WideA)) - ToCm(File.JointPos(0, Segs[SegTrunk].WideB))).Size());
 	return true;
 }
 
@@ -516,17 +538,17 @@ void ABbBodySwing::Pose(const FBbSwingPose& P)
 {
 	// Each segment as the model has it now: from its near joint to its far one, turned as its body is.
 	auto Mid = [&P](int32 A, int32 B) { return (P.JointPos[A] + P.JointPos[B]) * 0.5; };
-	for (int32 S = 0; S < NumSeg; ++S)
+	for (int32 S = 0; S < SegNumSeg; ++S)
 	{
-		FSeg& G = Segs[S];
-		if (S == FootL || S == FootR)
+		FBbSwingSeg& G = Segs[S];
+		if (S == SegFootL || S == SegFootR)
 		{
-			const int32 Bi = S == FootL ? File.Contact(TEXT("L_ball_in")) : File.Contact(TEXT("R_ball_in"));
-			const int32 Bo = S == FootL ? File.Contact(TEXT("L_ball_out")) : File.Contact(TEXT("R_ball_out"));
+			const int32 Bi = S == SegFootL ? File.Contact(TEXT("L_ball_in")) : File.Contact(TEXT("R_ball_in"));
+			const int32 Bo = S == SegFootL ? File.Contact(TEXT("L_ball_out")) : File.Contact(TEXT("R_ball_out"));
 			const FVector BallM = ToCm((P.ContactPos[Bi] + P.ContactPos[Bo]) * 0.5);
 			G.OM = ToCm(P.JointPos[G.Near]);
 			G.AM = AxisUE(P, G.Body, FVector(0, 0, 1));
-			G.FM = Square(G.AM, AxisUE(P, G.Body, FVector(1, 0, 0)), G.AM);
+			G.FM = SquareTo(G.AM, AxisUE(P, G.Body, FVector(1, 0, 0)), G.AM);
 			G.LM = G.AM ^ G.FM;
 			G.SA = ((G.OM - BallM) | G.AM) / G.Len;
 			G.SF = ((BallM - G.OM) | G.FM) / G.Fwd;
@@ -539,14 +561,14 @@ void ABbBodySwing::Pose(const FBbSwingPose& P)
 		const FVector D = ToCm(Far) - G.OM;
 		G.AM = D.GetSafeNormal();
 		G.SA = D.Size() / G.Len;
-		G.FM = Square(G.AM, AxisUE(P, G.Body, FVector(1, 0, 0)), AxisUE(P, G.Body, FVector(0, 1, 0)));
+		G.FM = SquareTo(G.AM, AxisUE(P, G.Body, FVector(1, 0, 0)), AxisUE(P, G.Body, FVector(0, 1, 0)));
 		G.LM = G.AM ^ G.FM;
 		G.SF = 1.0;
 		G.SL = G.Wide > 0.0 ? (ToCm(P.JointPos[G.WideA]) - ToCm(P.JointPos[G.WideB])).Size() / G.Wide : 1.0;
 	}
-	for (const FPart& Part : Parts)
+	for (const FBbSwingPart& Part : Parts)
 	{
-		const FSeg& G = Segs[Part.Seg];
+		const FBbSwingSeg& G = Segs[Part.Seg];
 		FTransform W;
 		if (Part.bRigid)
 		{
@@ -650,14 +672,14 @@ int32 ABbBodySwing::Start(const FString& Path, UBbFigureShop* InShop, ABbPark* I
 			double T;
 			if (File.Event(E, T))
 			{
-				ShotTimes.Add({ E, T });
+				ShotTimes.Emplace(E, T);
 			}
 		}
-		ShotTimes.Add({ TEXT("m100ms"), -0.100 });
-		ShotTimes.Add({ TEXT("m050ms"), -0.050 });
-		ShotTimes.Add({ TEXT("m020ms"), -0.020 });
-		ShotTimes.Add({ TEXT("contact"), 0.0 });
-		ShotTimes.Add({ TEXT("end"), File.T(File.Num() - 1) });
+		ShotTimes.Emplace(TEXT("m100ms"), -0.100);
+		ShotTimes.Emplace(TEXT("m050ms"), -0.050);
+		ShotTimes.Emplace(TEXT("m020ms"), -0.020);
+		ShotTimes.Emplace(TEXT("contact"), 0.0);
+		ShotTimes.Emplace(TEXT("end"), File.T(File.Num() - 1));
 		Shot = 0;
 	}
 	SetView(0);
@@ -692,7 +714,7 @@ int32 ABbBodySwing::RunCheck()
 				At = Ms;
 			}
 		};
-		for (const FPart& Part : Parts)
+		for (const FBbSwingPart& Part : Parts)
 		{
 			const FTransform& W = Part.C->GetComponentTransform();
 			for (const TPair<int32, FVector>& C : Part.Carries)
@@ -702,12 +724,12 @@ int32 ABbBodySwing::RunCheck()
 			}
 			if (Part.Grip != INDEX_NONE)
 			{
-				const int32 K = Part.Seg == HandL ? 0 : 1;
+				const int32 K = Part.Seg == SegHandL ? 0 : 1;
 				Worse((W.TransformPosition(Part.GripLocal) - ToCm(File.PointPos(I, Part.Grip))).Size(), GripWorst[K], GripAt[K]);
 			}
 			if (Part.BallIn != INDEX_NONE)
 			{
-				const int32 K = Part.Seg == FootL ? 0 : 1;
+				const int32 K = Part.Seg == SegFootL ? 0 : 1;
 				double Unused = 0.0;
 				Worse((W.TransformPosition(Part.SoleLocal) - ToCm((File.ContactPos(I, Part.BallIn) + File.ContactPos(I, Part.BallOut)) * 0.5)).Size(), SoleWorst[K], Unused);
 			}
