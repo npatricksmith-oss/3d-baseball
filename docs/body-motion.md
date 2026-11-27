@@ -2007,7 +2007,7 @@ Session 11 (2026-11-26) works under the owner's rulings of that day ([PLAN D42](
 | (what-if, on rung 4's body: not the batter) | every muscle's bound at 1.5 times | 22.2 m/s (49.6 mph); 22.0 (49.2) | 23.0; 22.6 m/s | +1.05 m/s over rung 4, both searches over both of rung 4's | a what-if: the bounds are already each sample's mean + 2 SD |
 | (2 alone, on rung 0's body) | the same change without rung 1 | 16.7 m/s (37.3 mph); 15.7 (35.2) | 18.8; 17.7 m/s | −1.0 m/s against rung 0: **no loss shown** (inside the yardstick; both searches inside rung 0's pair) | measured strengths and strength-at-speed curves; Schultz 1987's trunk bending strength; 12 N·m at the ankles' roll left as constant torque |
 
-**Where the session stands while this is written** (for whoever picks it up if it is cut short): every rung through 6 is designed below and committed before its runs; the runs are in the job queue (`bin/job.sh status`, labels `body-3d-11 …`) and write to `sim/target/codex-probes/body3d/s11/<rung>.out` and `.json`; `ladder3d.py --table` and `--block <rung>` print what has finished.
+**Every run of the session has finished** (jobs 412–499); results are under `sim/target/codex-probes/body3d/s11/` (`<rung>.out` and `.json`; `ladder3d.py --table` and `--block <rung>` print them).
 
 #### The protocol, the same for every rung (written before any run)
 
