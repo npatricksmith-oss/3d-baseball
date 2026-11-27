@@ -5,6 +5,7 @@
     python3 analysis/research/body/ladder3d.py --rung r1_low --from <json>    a body searched on from a saved result (--reach 0 --gens 0)
     python3 analysis/research/body/ladder3d.py --table                        the ladder's table from the results kept so far
     python3 analysis/research/body/ladder3d.py --show <json>                  a kept result re-read (no search)
+    python3 analysis/research/body/ladder3d.py --settle <json> --rung r4 --seed 21 --tag _s1_end   a kept result's search carried to its end (4.14)
     ... --dir s12                                                             results kept under that session's folder (default s11)
 
 THE PROTOCOL, the same for every rung (written in 4.13 before any run): session 10's own search (practice3d.cma, every
@@ -279,14 +280,17 @@ def show(ctx, u, log=print):
     return out
 
 
-def run_rung(rung, start, seed, g_reach, g_aim, g_more, tag, log, max_blocks=MAX_BLOCKS):
+def run_rung(rung, start, seed, g_reach, g_aim, g_more, tag, log, max_blocks=MAX_BLOCKS, through=None):
     o = options(rung)
     if start.startswith("best:"):
         start = best_of(start[5:])
     ctx = PR.Ctx(contact="nearest", **o)
-    reach = PR.Ctx(stage="reach", **o)
+    # through (4.14, part 3; the parked basin's remedy): the first stage asks the sweet spot through the ball's place at that speed
+    reach = PR.Ctx(stage="reach", **(dict(o, through=through) if through else o))
     if start == "S":
         plan = json.load(open(os.path.join(HERE, "practice3d_s9_cleats_S.json")))["plan"]
+    elif start == "hand:C":                            # 4.12's start C: written by hand, 0.6 of every forward muscle; it owes [4] nothing
+        plan = {n: list(v) for n, v in PR.hand_plan(ctx, 0.6).items()}
     else:
         plan = json.load(open(start))["plan"]
     plan = ctx.fit_plan(plan) if hasattr(ctx, "fit_plan") else {n: [min(v[0], ctx.bd[n])] + list(v[1:]) for n, v in plan.items()}
@@ -326,6 +330,53 @@ def run_rung(rung, start, seed, g_reach, g_aim, g_more, tag, log, max_blocks=MAX
     path = os.path.join(OUT, "%s%s.json" % (rung, tag))
     json.dump(out, open(path, "w"), indent=1)
     log("   kept: %s   (%.0f s)" % (os.path.relpath(path, os.path.join(HERE, "..", "..", "..")), time.time() - t))
+    return out
+
+
+END_SIGMA, END_WINDOW, END_FALL, END_CAP = 0.012, 100, 0.10, 1500   # [E] the search carried to its end (4.14, part 3)
+BRACE_BEFORE = 0.150                                   # s before the kept swing's contact: when the start "brace" has the front knee's extensor push (4.14)
+
+
+def settle(rung, path, seed, tag, log, brace=False, cap=END_CAP):
+    """A kept result's search CARRIED TO ITS END (body-motion 4.14, part 3): the same search (practice3d.cma, the whole aim,
+    24 plans a generation, every run at the body's step) carried on from the result in ONE stage, its first step END_SIGMA
+    of each number's range, until its best score has fallen less than END_FALL over the last END_WINDOW generations
+    (END_CAP at most: then it is reported as not at its end). A rule for the search; nothing of the body or the score.
+    brace: the start is the kept plan with the front knee's extensor asked for all it has from BRACE_BEFORE before the
+    kept swing's contact (4.14, part 1's replay B), a start in a neighbouring swing; it owes the kept plan everything."""
+    o = options(rung)
+    d = json.load(open(path))
+    ctx = PR.Ctx(contact="nearest", **o)
+    plan = {n: [min(v[0], ctx.cap[n])] + list(v[1:]) for n, v in d["plan"].items()}
+    if brace:
+        tx = PR.T0 + d["start_to_contact_ms"] * 1e-3
+        plan["knee_ext_L"] = [ctx.cap["knee_ext_L"], tx - BRACE_BEFORE, Dr.RISE_MIN, 0.150, plan["knee_ext_L"][4]]
+    u0 = ctx.u_of(plan)
+    log("== %s carried to its end on rung %s%s; body %s; from %s%s; first step %.3f; until the best score has fallen under %.2f over %d generations (at most %d); %d plans each, every run at %.3f ms; seed %d"
+        % (os.path.basename(path), rung, tag, o, path, " WITH THE FRONT KNEE'S EXTENSOR PUSHING from %.0f ms before its contact" % (BRACE_BEFORE * 1e3) if brace else "",
+           END_SIGMA, END_FALL, END_WINDOW, cap, PR.CMA_LAMBDA, o["h"] * 1e3, seed))
+    r0 = ctx.residuals(u0)
+    c0 = PR.cost_of(r0)
+    log("   the starting plan's score on this body: %s; by term: %s" % ("THE RUN FAILS" if r0 is None else "%.2f" % c0, "" if r0 is None else "; ".join("%s %.1f" % kv for kv in PR.terms(ctx, r0).items())))
+    t = time.time()
+    PR._CTX = ctx
+    with multiprocessing.get_context("fork").Pool(PR.WORKERS) as pool:
+        u, cost, hist, mfull, sp = PR.cma(ctx, u0, cap, log, pool, seed, sigma0=END_SIGMA, stop=(END_WINDOW, END_FALL))
+    gens = hist[-1][0]
+    fall = hist[max(0, len(hist) - 1 - END_WINDOW)][1] - hist[-1][1]
+    at_end = fall < END_FALL
+    first = next((h_[0] for h_ in hist if h_[1] < hist[0][1] - 1e-9), None)
+    log("   %s after %d generations (%.0f s): the best score %.2f from %.2f; it fell %.3f over its last %d; the first generation with a better plan: %s; failed runs %d"
+        % ("AT ITS END" if at_end else "NOT AT ITS END (the cap)", gens, time.time() - t, cost, c0, fall, END_WINDOW, first, sum(h_[5] for h_ in hist)))
+    out = show(ctx, u, log)
+    out.update(cost=cost, rung=rung, start=path, seed=seed, history=[("carried to its end", hist)], settled=at_end, at_end=at_end, fall_last_100=fall,
+               fall_last_50=hist[max(0, len(hist) - 51)][1] - hist[-1][1], generations=gens, first_better=first, start_cost=c0, brace=brace,
+               start_speed=d.get("sweet_speed"), step_check=PR.verify(ctx, u, log), failed_differences=PR.failed_differences(ctx, u, log),
+               search_checks=PR.search_checks(dict(o, contact="nearest"), u0, u, log), start_plan=plan, seconds=time.time() - t)
+    os.makedirs(OUT, exist_ok=True)
+    dest = os.path.join(OUT, "%s%s.json" % (rung, tag))
+    json.dump(out, open(dest, "w"), indent=1)
+    log("   kept: %s   (%.0f s)" % (os.path.relpath(dest, os.path.join(HERE, "..", "..", "..")), time.time() - t))
     return out
 
 
@@ -420,9 +471,12 @@ def main():
         if "--out" in a:
             json.dump(out, open(arg("--out", ""), "w"), indent=1)
         return
+    if "--settle" in a:
+        settle(arg("--rung", "r4"), arg("--settle", ""), int(arg("--seed", 21)), arg("--tag", "_end"), log, brace="--brace" in a, cap=int(arg("--cap", END_CAP)))
+        return
     if "--rung" in a:
         run_rung(arg("--rung", "r0"), arg("--from", "S"), int(arg("--seed", 1)), int(arg("--reach", 100)), int(arg("--gens", 250)), int(arg("--more", 500)), arg("--tag", ""), log,
-                 int(arg("--blocks", MAX_BLOCKS)))
+                 int(arg("--blocks", MAX_BLOCKS)), through=float(arg("--through", 0)) or None)
         return
     print(__doc__)
 

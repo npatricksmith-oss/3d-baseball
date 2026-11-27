@@ -144,6 +144,13 @@ def clock_residuals(fired, tx, t_avail, form="each"):
     return [math.sqrt(w / tot) * max(0.0, (tx - t_avail) - t) / CLOCK_UNIT for t, w in fired]
 
 
+def through_charge(through, v_along):
+    """the first stage's charge (its residual; the score squares it) for a sweet spot that is not moving THROUGH the ball's
+    place: what its speed along the ball's line toward the pitcher, where it comes nearest, falls short of `through` m/s
+    (body-motion 4.14, part 3: the parked basin's remedy). Nothing at `through` or faster."""
+    return max(0.0, through - v_along)
+
+
 class Ctx:
     """one body with its ranges, its start and the pitch, reused for every swing of a search."""
 
@@ -429,6 +436,10 @@ class Ctx:
             xo, least, zr = self.balance(recs, tx)
             r += [xo / XCOM_UNIT, max(0.0, JUMP_MIN - least) / JUMP_UNIT, max(0.0, SINK_MIN - zr) * self.z0 / SINK_UNIT]
             r += self.clock(pl, tx)
+            if self.o.get("through"):
+                # the parked basin's remedy (4.14, part 3): the first stage asks the sweet spot THROUGH the ball's place, charged
+                # for what its speed along the ball's line where it comes nearest falls short of `through` m/s (1 a m/s)
+                r.append(through_charge(self.o["through"], -E.dot(v, self.nb)))
             return None if any(x != x for x in r) else r
         if self.o.get("contact") == "nearest":
             # the whole aim with no cliff (4.10, session 8's fix): contact is read where the sweet spot comes nearest the
@@ -928,14 +939,16 @@ def cost_of(r):
 CMA_LAMBDA, CMA_SIGMA, CMA_OUT = 24, 0.03, 1e4          # plans a generation; the first spread, of each number's range; the charge for leaving the box [E]
 
 
-def cma(ctx, u0, gens, log, pool, seed=1, lam=CMA_LAMBDA, sigma0=CMA_SIGMA):
+def cma(ctx, u0, gens, log, pool, seed=1, lam=CMA_LAMBDA, sigma0=CMA_SIGMA, stop=None):
     """The practice search without slopes (body-motion 4.12): the separable form of CMA-ES (Ros & Hansen 2008) on the free
     numbers of the plan, in the unit box. Each generation `lam` plans are drawn about a centre with one spread per number,
     all are run, they are RANKED by score, the centre moves to the weighted mean of the better half and each number's
     spread follows how the better plans were spread. Only the order of the scores is used. A plan outside the box is run
     at the box's edge and charged CMA_OUT x its squared distance outside; a failed run ranks last. Deterministic (seed).
     Returns (the best plan ever run, its score, history [(generation, best ever, this generation's best, median, the
-    overall step, failed runs)], the last centre, the spreads at the end)."""
+    overall step, failed runs)], the last centre, the spreads at the end).
+    stop = (window, fall) (4.14, part 3): the search ends before `gens` once its best score has fallen less than `fall`
+    over the last `window` generations; None (every search before session 12) runs all `gens`."""
     free = ctx.free
     n = len(free)
     rng = random.Random(seed)
@@ -995,6 +1008,9 @@ def cma(ctx, u0, gens, log, pool, seed=1, lam=CMA_LAMBDA, sigma0=CMA_SIGMA):
         hist.append((g, best, raw[kb], srt[lam // 2], sigma, failed))
         if g % 10 == 0 or g == gens:
             log("      generation %3d: best ever %.2f; this generation's best %.2f, median %.2f; overall step %.4f; failed runs %d" % (g, best, raw[kb], srt[lam // 2], sigma, failed))
+        if stop is not None and g >= stop[0] and hist[g - stop[0]][1] - best < stop[1]:
+            log("      ended at generation %d: the best score fell %.3f over the last %d generations (the rule: under %.2f)" % (g, hist[g - stop[0]][1] - best, stop[0], stop[1]))
+            break
     mfull = list(u0)
     for k, i in enumerate(free):
         mfull[i] = min(1.0, max(0.0, m[k]))

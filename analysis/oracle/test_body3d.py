@@ -2674,6 +2674,58 @@ class SessionTwelveChecks(unittest.TestCase):
         self.assertAlmostEqual(g[2], 0.0, delta=1e-12)                       # one point holds no twist about itself
         self.assertEqual(PV.ground_twist(m, st, [(0.0, 0.0, 0.0), (0.0, 0.0, 0.0)], (0.0, 0.0, 0.0))["R"], (0.0, 0.0, 0.0, 0))
 
+    def test_the_first_stage_charges_a_bat_that_does_not_come_through_the_ball(self):
+        """practice3d.through_charge (4.14, part 3: the parked basin's remedy), worked by hand at 5 m/s asked. A bat
+        parked at the ball (0 m/s along the ball's line where it comes nearest) is charged 5, which the score squares
+        to 25; one moving back at 2.3 m/s there (session 10's parked runs: -0.2 to -2.3) 7.3, squared 53.29; one
+        passing through at exactly 5 m/s, or at a swing's 12, nothing."""
+        PR = _practice()
+        self.assertAlmostEqual(PR.through_charge(5.0, 0.0) ** 2, 25.0, delta=1e-12)
+        self.assertAlmostEqual(PR.through_charge(5.0, -2.3) ** 2, 53.29, delta=1e-9)
+        self.assertEqual(PR.through_charge(5.0, 5.0), 0.0)
+        self.assertEqual(PR.through_charge(5.0, 12.0), 0.0)
+
+    def test_the_search_carried_to_its_end_stops_by_its_rule_and_finds_a_known_least(self):
+        """practice3d.cma's end rule (4.14, part 3), on a score whose least is known and not the search's own: six
+        numbers, the score the sum of (10 (x - c))^2 with c = 0.2, 0.3, ..., 0.7, least 0 at x = c. From x = 0.5
+        everywhere: (1) with stop = (40, 1e-9) it ends before the 5,000 generations allowed, at a score under 1e-6 and
+        every number within 1e-4 of its c, and over its last 40 generations the best score fell less than 1e-9; (2) with
+        no end rule the same search runs every generation asked (60) and has not yet reached that score; (3) a rule
+        that can never be met (a fall under 0) runs to the cap."""
+        PR = _practice()
+        c = [0.2, 0.3, 0.4, 0.5, 0.6, 0.7]
+
+        class Toy:
+            free = list(range(6))
+
+            @staticmethod
+            def residuals(u):
+                return [10.0 * (x - k) for x, k in zip(u, c)]
+
+        class Pool:
+            @staticmethod
+            def map(f, us, chunksize=1):
+                return [f(u) for u in us]
+        old = PR._CTX
+        PR._CTX = Toy
+        try:
+            quiet = lambda s_: None
+            u, best, hist, _, _ = PR.cma(Toy, [0.5] * 6, 5000, quiet, Pool, seed=3, stop=(40, 1e-9))
+            self.assertLess(hist[-1][0], 5000)
+            self.assertLess(best, 1e-6)
+            for x, k in zip(u, c):
+                self.assertAlmostEqual(x, k, delta=1e-4)
+            self.assertLess(hist[-41][1] - hist[-1][1], 1e-9)
+            self.assertGreaterEqual(hist[-42][1] - hist[-2][1], 1e-9)       # it did not stop a generation late
+            u2, best2, hist2, _, _ = PR.cma(Toy, [0.5] * 6, 60, quiet, Pool, seed=3)
+            self.assertEqual(hist2[-1][0], 60)
+            self.assertGreater(best2, best)
+            self.assertEqual([h[1] for h in hist2], [h[1] for h in hist[:61]])   # the rule changes nothing before it ends the search
+            u3, best3, hist3, _, _ = PR.cma(Toy, [0.5] * 6, 80, quiet, Pool, seed=3, stop=(40, 0.0))
+            self.assertEqual(hist3[-1][0], 80)
+        finally:
+            PR._CTX = old
+
     def test_what_the_ground_and_a_held_foot_give_is_the_change_of_the_bodys_turning_momentum(self):
         """The two readings against each other, by a law neither is built from: gravity has no moment about the centre
         of mass, so the whole body's turning momentum about the vertical through it changes only by the ground's twist
@@ -2687,7 +2739,8 @@ class SessionTwelveChecks(unittest.TestCase):
         import os
         PV = self._pelvis()
         PR = _practice()
-        d = json.load(open(os.path.join(os.path.dirname(os.path.abspath(PR.__file__)), "practice3d_s11_rung4.json")))
+        with open(os.path.join(os.path.dirname(os.path.abspath(PR.__file__)), "practice3d_s11_rung4.json")) as fh:
+            d = json.load(fh)
         ctx, u = PV.build(d, "FR")
         m, s = ctx.m, ctx.m.sys
         st, aux = ctx.prepare(u)
