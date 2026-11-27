@@ -341,15 +341,16 @@ def run_rung(rung, start, seed, g_reach, g_aim, g_more, tag, log, max_blocks=MAX
     return out
 
 
-END_SIGMA, END_WINDOW, END_FALL, END_CAP = 0.012, 100, 0.10, 1500   # [E] the search carried to its end (4.14, part 3)
+END_SIGMA, END_WINDOW, END_FALL, END_CAP = 0.012, 200, 0.10, 1500   # [E] the search carried to its end (4.14, part 3)
+END_LEAST = 400                                        # [E] generations before which it may not end: a search started afresh finds nothing for its first 80-280 (4.14)
 BRACE_BEFORE = 0.150                                   # s before the kept swing's contact: when the start "brace" has the front knee's extensor push (4.14)
 
 
 def settle(rung, path, seed, tag, log, brace=False, cap=END_CAP):
     """A kept result's search CARRIED TO ITS END (body-motion 4.14, part 3): the same search (practice3d.cma, the whole aim,
     24 plans a generation, every run at the body's step) carried on from the result in ONE stage, its first step END_SIGMA
-    of each number's range, until its best score has fallen less than END_FALL over the last END_WINDOW generations
-    (END_CAP at most: then it is reported as not at its end). A rule for the search; nothing of the body or the score.
+    of each number's range, until its best score has fallen less than END_FALL over the last END_WINDOW generations and
+    not before generation END_LEAST (END_CAP at most: then it is reported as not at its end). A rule for the search; nothing of the body or the score.
     brace: the start is the kept plan with the front knee's extensor asked for all it has from BRACE_BEFORE before the
     kept swing's contact (4.14, part 1's replay B), a start in a neighbouring swing; it owes the kept plan everything."""
     o = options(rung)
@@ -360,16 +361,16 @@ def settle(rung, path, seed, tag, log, brace=False, cap=END_CAP):
         tx = PR.T0 + d["start_to_contact_ms"] * 1e-3
         plan["knee_ext_L"] = [ctx.cap["knee_ext_L"], tx - BRACE_BEFORE, Dr.RISE_MIN, 0.150, plan["knee_ext_L"][4]]
     u0 = ctx.u_of(plan)
-    log("== %s carried to its end on rung %s%s; body %s; from %s%s; first step %.3f; until the best score has fallen under %.2f over %d generations (at most %d); %d plans each, every run at %.3f ms; seed %d"
+    log("== %s carried to its end on rung %s%s; body %s; from %s%s; first step %.3f; until the best score has fallen under %.2f over %d generations, %d at least (at most %d); %d plans each, every run at %.3f ms; seed %d"
         % (os.path.basename(path), rung, tag, o, path, " WITH THE FRONT KNEE'S EXTENSOR PUSHING from %.0f ms before its contact" % (BRACE_BEFORE * 1e3) if brace else "",
-           END_SIGMA, END_FALL, END_WINDOW, cap, PR.CMA_LAMBDA, o["h"] * 1e3, seed))
+           END_SIGMA, END_FALL, END_WINDOW, END_LEAST, cap, PR.CMA_LAMBDA, o["h"] * 1e3, seed))
     r0 = ctx.residuals(u0)
     c0 = PR.cost_of(r0)
     log("   the starting plan's score on this body: %s; by term: %s" % ("THE RUN FAILS" if r0 is None else "%.2f" % c0, "" if r0 is None else "; ".join("%s %.1f" % kv for kv in PR.terms(ctx, r0).items())))
     t = time.time()
     PR._CTX = ctx
     with multiprocessing.get_context("fork").Pool(PR.WORKERS) as pool:
-        u, cost, hist, mfull, sp = PR.cma(ctx, u0, cap, log, pool, seed, sigma0=END_SIGMA, stop=(END_WINDOW, END_FALL))
+        u, cost, hist, mfull, sp = PR.cma(ctx, u0, cap, log, pool, seed, sigma0=END_SIGMA, stop=(END_WINDOW, END_FALL, END_LEAST))
     gens = hist[-1][0]
     fall = hist[max(0, len(hist) - 1 - END_WINDOW)][1] - hist[-1][1]
     at_end = fall < END_FALL

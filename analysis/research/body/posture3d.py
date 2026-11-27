@@ -86,8 +86,8 @@ def run(rung, path, seed, tag, log, cap=L.END_CAP):
     pc = PostureCtx(o)
     plan = {n: [min(v[0], pc.base.cap[n])] + list(v[1:]) for n, v in d["plan"].items()}
     u0 = pc.u_of(plan, d.get("options", {}).get("posture"))
-    log("== the launch posture by practice (4.14, part 4): %s carried to its end on rung %s with the posture's %d numbers given to the search; body %s; first step %.3f; until the best score has fallen under %.2f over %d generations (at most %d); seed %d"
-        % (os.path.basename(path), rung, len(NUMBERS), pc.o, L.END_SIGMA, L.END_FALL, L.END_WINDOW, cap, seed))
+    log("== the launch posture by practice (4.14, part 4): %s carried to its end on rung %s with the posture's %d numbers given to the search; body %s; first step %.3f; until the best score has fallen under %.2f over %d generations, %d at least (at most %d); seed %d"
+        % (os.path.basename(path), rung, len(NUMBERS), pc.o, L.END_SIGMA, L.END_FALL, L.END_WINDOW, L.END_LEAST, cap, seed))
     r0 = pc.residuals(u0)
     c0 = PR.cost_of(r0)
     mg0 = B.start_margins(pc.base.m, pc.base.st)
@@ -97,7 +97,7 @@ def run(rung, path, seed, tag, log, cap=L.END_CAP):
     t = time.time()
     PR._CTX = pc
     with multiprocessing.get_context("fork").Pool(PR.WORKERS) as pool:
-        u, cost, hist, mfull, sp = PR.cma(pc, u0, cap, log, pool, seed, sigma0=L.END_SIGMA, stop=(L.END_WINDOW, L.END_FALL))
+        u, cost, hist, mfull, sp = PR.cma(pc, u0, cap, log, pool, seed, sigma0=L.END_SIGMA, stop=(L.END_WINDOW, L.END_FALL, L.END_LEAST))
     gens = hist[-1][0]
     fall = hist[max(0, len(hist) - 1 - L.END_WINDOW)][1] - hist[-1][1]
     at_end = fall < L.END_FALL

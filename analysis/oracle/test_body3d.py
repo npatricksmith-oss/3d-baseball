@@ -2691,7 +2691,7 @@ class SessionTwelveChecks(unittest.TestCase):
         everywhere: (1) with stop = (40, 1e-9) it ends before the 5,000 generations allowed, at a score under 1e-6 and
         every number within 1e-4 of its c, and over its last 40 generations the best score fell less than 1e-9; (2) with
         no end rule the same search runs every generation asked (60) and has not yet reached that score; (3) a rule
-        that can never be met (a fall under 0) runs to the cap."""
+        that can never be met (a fall under 0) runs to the cap; (4) the least number of generations (below)."""
         PR = _practice()
         c = [0.2, 0.3, 0.4, 0.5, 0.6, 0.7]
 
@@ -2723,6 +2723,13 @@ class SessionTwelveChecks(unittest.TestCase):
             self.assertEqual([h[1] for h in hist2], [h[1] for h in hist[:61]])   # the rule changes nothing before it ends the search
             u3, best3, hist3, _, _ = PR.cma(Toy, [0.5] * 6, 80, quiet, Pool, seed=3, stop=(40, 0.0))
             self.assertEqual(hist3[-1][0], 80)
+            # (4) a least number of generations: a rule that would end the search at once (any fall counts as none) ends
+            # it at generation 40 without one and at generation 70 with a least of 70, the scores the same up to there
+            u4, best4, hist4, _, _ = PR.cma(Toy, [0.5] * 6, 200, quiet, Pool, seed=3, stop=(40, 1e9))
+            u5, best5, hist5, _, _ = PR.cma(Toy, [0.5] * 6, 200, quiet, Pool, seed=3, stop=(40, 1e9, 70))
+            self.assertEqual(hist4[-1][0], 40)
+            self.assertEqual(hist5[-1][0], 70)
+            self.assertEqual([h[1] for h in hist5[:41]], [h[1] for h in hist4])
         finally:
             PR._CTX = old
 

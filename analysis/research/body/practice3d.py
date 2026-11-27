@@ -988,8 +988,10 @@ def cma(ctx, u0, gens, log, pool, seed=1, lam=CMA_LAMBDA, sigma0=CMA_SIGMA, stop
     at the box's edge and charged CMA_OUT x its squared distance outside; a failed run ranks last. Deterministic (seed).
     Returns (the best plan ever run, its score, history [(generation, best ever, this generation's best, median, the
     overall step, failed runs)], the last centre, the spreads at the end).
-    stop = (window, fall) (4.14, part 3): the search ends before `gens` once its best score has fallen less than `fall`
-    over the last `window` generations; None (every search before session 12) runs all `gens`."""
+    stop = (window, fall) or (window, fall, least) (4.14, part 3): the search ends before `gens` once its best score has
+    fallen less than `fall` over the last `window` generations, and not before generation `least` (a search started
+    afresh finds nothing better for its first 80-280 generations, while its spreads form: a quiet start is not an end);
+    None (every search before session 12) runs all `gens`."""
     free = ctx.free
     n = len(free)
     rng = random.Random(seed)
@@ -1049,7 +1051,7 @@ def cma(ctx, u0, gens, log, pool, seed=1, lam=CMA_LAMBDA, sigma0=CMA_SIGMA, stop
         hist.append((g, best, raw[kb], srt[lam // 2], sigma, failed))
         if g % 10 == 0 or g == gens:
             log("      generation %3d: best ever %.2f; this generation's best %.2f, median %.2f; overall step %.4f; failed runs %d" % (g, best, raw[kb], srt[lam // 2], sigma, failed))
-        if stop is not None and g >= stop[0] and hist[g - stop[0]][1] - best < stop[1]:
+        if stop is not None and g >= max(stop[0], stop[2] if len(stop) > 2 else 0) and hist[g - stop[0]][1] - best < stop[1]:
             log("      ended at generation %d: the best score fell %.3f over the last %d generations (the rule: under %.2f)" % (g, hist[g - stop[0]][1] - best, stop[0], stop[1]))
             break
     mfull = list(u0)
