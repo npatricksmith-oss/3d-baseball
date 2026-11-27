@@ -2556,9 +2556,11 @@ class ReviewElevenChecks(unittest.TestCase):
                                      for k in range(5)], PR.T0 + 0.1, c.plan(c.u_of({})))
         ea, eb = effort(a), effort(b)
         self.assertGreater(ea["knee_ext_L"], 1e-4)
-        for n in ("knee_ext_L", "hip_flex_L", "hip_ext_R", "core"):
+        for n in ("knee_ext_L", "hip_flex_L", "hip_ext_R", "hip_abd_L"):
             self.assertGreater(ea[n], 0.0)
             self.assertAlmostEqual(eb[n], ea[n] / 2.25, delta=1e-6 * ea[n])
+        self.assertGreater(eb["core"], ea["core"] / 2.25)     # booked with the hold-only trunk groups' effort, which is not scaled (6)
+        self.assertLess(eb["core"], ea["core"])
         for n in Dr.HOLD_ONLY:
             self.assertAlmostEqual(b.hold_bd[n], a.hold_bd[n], delta=1e-12)
 
