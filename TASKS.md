@@ -23,7 +23,7 @@ Status: `[ ]` not started · `[~]` partly done · `[?]` needs an owner decision
 
 **Owner, 2026-11-27 (D45): not a baseball swing; searches cancelled. "Just watch a real batter's swing and mimic it":** the motion first, forces later.
 
-**Running:** worker `swing-flow` (Opus, Workers tab, `.claude/worktrees/swing-research`, `work/swing-flow`, JOB.md there): one real hitter's recorded swing on the figure in the viewer (`bin/body-swing.sh`, player-visuals §14). Then a Sonnet review, merge, the owner looks; Q68 (D45) after.
+**Done, to review, merge:** `work/swing-flow` (`.claude/worktrees/swing-research`): OBP swing 478_5 on the figure, `bin/body-swing.sh --real` (player-visuals §14.1, [note](docs/research/swing/12-real-swing-on-the-figure.md)). Then a Sonnet review, merge, the owner looks; Q68 (D45) after.
 
 **Next:** §2: the ground-dive leftovers ([note](docs/calibration/2026-11-23-of-ground-dive.md) §9).
 
