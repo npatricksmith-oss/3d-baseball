@@ -142,3 +142,7 @@ Watch any of them again with `client/run.sh -BbSavedPlay="saved-plays/<file>.tom
 - [ ] 3. Fix first baseman's catching ball. A first baseman plants one foot on the base and then steps (stretches) to catch the ball sooner to help the ball beat the runner to the base. *Same as 86 above; not built.*
 - [ ] 52. Fielders appear to stop too quickly as they converge on a fly ball.
 - [ ] 56. Third baseman should have either tried to tag the runner out or immediately thrown to 2nd base. Instead he ran part way to the base looking for a force out. But then threw to first base instead.
+
+# The force-driven body, 2026-11-27
+
+- [~] I would like to implement the force driven body into today's game so I can have a proper look. *Started 2026-11-27 (Q65: the viewer draws the practised swing; games keep today's swing). Left: the viewer itself, being built.*
