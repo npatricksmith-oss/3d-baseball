@@ -3053,6 +3053,102 @@ class SessionThirteenChecks(unittest.TestCase):
         self.assertAlmostEqual(seen["practice3d_s12_posture.json"][1], 0.129, delta=0.002)
 
 
+    def test_the_balls_place_moves_along_its_line_and_takes_the_arms_time_with_it(self):
+        """body-motion 4.15, part 1 (PLAN D44): Ctx(meet=s) puts the ball's place s metres toward the pitcher ALONG THE
+        BALL'S LINE and shortens the time the arms may fire before contact by the ball's flight over s. Worked by hand
+        from the pitch's own figures: at 37.98 m/s, 0.10 m is 2.633 ms; a line coming down 5.27 deg and moving 1.62 deg
+        toward first base rises 0.10 sin(5.27) = 0.92 cm and comes back 0.10 cos(5.27) sin(1.62) = 0.28 cm toward third
+        over 10 cm toward the pitcher. Nothing else of the body or the start changes. And the replay that shows the cost
+        bites: the kept 26.25 swing, its plan untouched, with the ball 20 cm further out, is charged by the clock (its
+        first arm muscle is then earlier than the rule allows) where at its own place it is not."""
+        import json
+        import os
+        PR = _practice()
+        with open(os.path.join(os.path.dirname(os.path.abspath(PR.__file__)), "practice3d_s12_posture.json")) as fh:
+            d = json.load(fh)
+        base = PR.Ctx(**d["options"])
+        out = PR.Ctx(**dict(d["options"], meet=0.10))
+        self.assertAlmostEqual((base.t_avail - out.t_avail) * 1e3, 2.633, delta=0.001)
+        self.assertAlmostEqual(base.t_avail, 0.403 - 0.10 - 0.05, delta=1e-12)
+        dx, dy, dz = (out.Pc[c] - base.Pc[c] for c in range(3))
+        self.assertAlmostEqual(dz * 100, 10.0 * math.sin(math.radians(5.27)), delta=1e-6)
+        self.assertAlmostEqual(dx * 100, -10.0 * math.cos(math.radians(5.27)) * math.sin(math.radians(1.62)), delta=1e-6)
+        self.assertAlmostEqual(math.sqrt(dx * dx + dy * dy + dz * dz), 0.10, delta=1e-12)
+        self.assertGreater(dy, 0.099)
+        self.assertEqual(list(out.st), list(base.st))                       # the body's start is untouched
+        u = base.u_of(d["plan"])
+        clock = lambda c: PR.terms(c, c.residuals(u))["the arms' clock"]
+        self.assertEqual(clock(base), 0.0)
+        self.assertGreater(clock(PR.Ctx(**dict(d["options"], meet=0.20))), 1.0)
+        self.assertEqual(clock(PR.Ctx(**dict(d["options"], meet=-0.20))), 0.0)
+
+    def test_a_search_given_one_more_number_goes_on_from_its_kept_state(self):
+        """body-motion 4.15, part 1: posture3d.widened gives a kept state of the search one more number without starting
+        it afresh. On a score whose least is known (a bowl in three numbers, the third of which the first search does
+        not have): the first search, on two numbers, ends near their least; widened, the kept centre, spreads and paths
+        of the two are untouched to the last digit, the third starts where it is told with the first step asked
+        (whatever the overall step has become), and the search gone on finds the third number's least as well."""
+        import importlib
+        import multiprocessing
+        PR = _practice()
+        Q = importlib.import_module("posture3d")
+
+        class Bowl:
+            def __init__(self, free):
+                self.free = free
+
+            def residuals(self, u):
+                return [10.0 * (u[0] - 0.30), 10.0 * (u[1] - 0.70), 10.0 * (u[2] - 0.55)]
+
+        class Pc:                                       # what widened() reads of a posture search: its free numbers and that it has the ball's place
+            meet, free = True, [0, 1, 2]
+        two = Bowl([0, 1])
+        u0 = [0.5, 0.5, 0.40]
+        keep = {}
+        PR._CTX = two
+        with multiprocessing.get_context("fork").Pool(2) as pool:
+            PR.cma(two, u0, 120, lambda s_: None, pool, seed=3, lam=8, sigma0=0.05, keep=keep)
+        self.assertAlmostEqual(keep["best_u"][0], 0.30, delta=0.01)
+        self.assertAlmostEqual(keep["best_u"][1], 0.70, delta=0.01)
+        keep["best_u"], start = keep["best_u"][:2], u0[:2]                     # as a posture search without the ball's place keeps them
+        keep["m_marks"] = {k: v[:2] for k, v in keep["m_marks"].items()}
+        wide, start = Q.widened(Pc, json_round(keep), start, lambda s_: None, step=0.012)
+        self.assertEqual(wide["m"][:2], keep["m"])
+        self.assertEqual(wide["C"][:2], keep["C"])
+        self.assertEqual((wide["ps"][:2], wide["pc"][:2]), (keep["ps"], keep["pc"]))
+        self.assertAlmostEqual(wide["sigma"] * math.sqrt(wide["C"][2]), 0.012, delta=1e-12)      # the new number's first step
+        self.assertAlmostEqual(wide["m"][2], 0.40, delta=1e-12)                                  # the body's own place: 40 cm into a range of -40 to +60
+        self.assertEqual(len(start), 3)
+        three = Bowl([0, 1, 2])
+        PR._CTX = three
+        keep2 = {}
+        with multiprocessing.get_context("fork").Pool(2) as pool:
+            ub, cb, hist, mfull, sp = PR.cma(three, start, 420, lambda s_: None, pool, seed=3, lam=8, sigma0=0.05, state=wide, keep=keep2)
+        self.assertEqual(hist[120][0], 120)                                                      # it went on from generation 120, not from 0
+        self.assertAlmostEqual(ub[2], 0.55, delta=0.01)
+        self.assertAlmostEqual(ub[0], 0.30, delta=0.01)
+        self.assertLess(cb, 0.02)
+
+    def test_where_the_ball_goes_is_read_by_the_games_collision(self):
+        """body-motion 4.15, part 1: contact3d's reading (physics-spec 7's detection around the oracle's own impulse
+        solver, bbphys) against its worked cases: the head-on formula, the instant of touch, a turned bat."""
+        import importlib
+        import io
+        import contextlib
+        _practice()
+        K = importlib.import_module("contact3d")
+        buf = io.StringIO()
+        with contextlib.redirect_stdout(buf):
+            ok = K.check()
+        self.assertTrue(ok, buf.getvalue())
+
+
+def json_round(state):
+    """a search's kept state as it comes back from its file."""
+    import json
+    return json.loads(json.dumps(state))
+
+
 class StanceChecks(unittest.TestCase):
     """body-motion 4.13, rungs 3 and 4: the start on major leaguers' feet; the hips' turn by their own muscles."""
 

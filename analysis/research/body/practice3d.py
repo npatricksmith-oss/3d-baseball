@@ -275,11 +275,20 @@ class Ctx:
             self.Pc = tuple(o["Pc"])
         d, a = BALL_DESCENT * B.D2R, BALL_ACROSS * B.D2R
         self.nb = (math.cos(d) * math.sin(a), -math.cos(d) * math.cos(a), -math.sin(d))
+        # meet (body-motion 4.15, part 1; PLAN D44): the ball's place moved this many metres TOWARD THE PITCHER ALONG THE
+        # BALL'S OWN LINE from where the body's rule (or Pc) has it, so that the place can be the search's to find (the same
+        # pitch, met further out or deeper; further out it is also a little higher, as the ball is coming down). What a
+        # hitter pays for meeting it further out is in t_avail below: the ball gets there sooner.
+        self.meet = o.get("meet", 0.0)
+        self.Pc = tuple(pc_ - self.meet * n_ for pc_, n_ in zip(self.Pc, self.nb))
         self.ev = E.unit(E.sub((0.0, 0.0, 1.0), E.scale(self.nb, self.nb[2])))    # up, square to the ball's line
         self.el = E.cross(self.nb, self.ev)                                       # level, square to it
         self.effort_w = o.get("effort_w", EFFORT_W)
         self.strain_w = o.get("strain_w", 0.0)
-        self.t_avail = BALL_FLIGHT - o.get("t_view", T_VIEW) - T_LATENCY      # how long before contact an arm muscle may fire
+        # how long before contact an arm muscle may fire: the ball's flight to where it is met, less the look he must have had
+        # and his latency. A ball met `meet` further out has flown that much less (meet / its speed there: 2.6 ms for 10 cm),
+        # so the decision came that much earlier on the same look, and the arms have that much less time (4.15, part 1)
+        self.t_avail = BALL_FLIGHT - self.meet / BALL_SPEED - o.get("t_view", T_VIEW) - T_LATENCY
         self.z0 = B.com(m, st)[0][2]
         self.evals = 0
         # h: the integration step of this search's runs (body-motion 4.12: 0.25 ms; sessions 8 and 9: H_STEP, 0.5 ms).

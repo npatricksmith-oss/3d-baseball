@@ -86,6 +86,7 @@ def read(rows_in):
         mir = 1.0 if r.get("stand") == "R" else -1.0
         px, pz = num(r, "plate_x"), num(r, "plate_z")
         out.append(dict(spray=mir * spray_deg(hx, hy), y=y, bat=b, ev=num(r, "launch_speed"), who=(r.get("batter"), r.get("stand")), stand=r.get("stand"),
+                        tilt=num(r, "swing_path_tilt"), pz=pz,
                         fast_mid=r.get("pitch_type") in FAST and px is not None and pz is not None and MID_X[0] <= px <= MID_X[1] and MID_Z[0] <= pz <= MID_Z[1]))
     return out, dict(drop)
 
@@ -124,6 +125,16 @@ def report(rows, drop, out=print):
     res = {"all": table(rows, "EVERY BALL IN PLAY", out=out)}
     res["hard"] = table([r for r in rows if r["ev"] is not None and r["ev"] >= HARD], "HARD-HIT (%.0f mph or more off the bat)" % HARD, out=out)
     res["fast_mid"] = table([r for r in rows if r["fast_mid"]], "FASTBALLS (%s) IN THE MIDDLE OF THE ZONE (plate_x %.2f to %.2f ft, plate_z %.1f to %.1f ft)" % ((", ".join(FAST),) + MID_X + MID_Z), out=out)
+    # the swing's tilt (swing_path_tilt: how far the swing's plane is tipped from level, deg), which sets how much of an early
+    # bat's turn goes into pulling the ball and how much into lifting it (body-motion 4.15, part 1)
+    out("")
+    out("THE SWING'S TILT FROM LEVEL (swing_path_tilt, deg), balls in play")
+    for name, sel in (("every ball in play", rows), ("fastballs in the middle of the zone", [r for r in rows if r["fast_mid"]]),
+                      ("pitches 2.3 to 2.8 ft up (the practised pitch is 0.78 m, 2.56 ft)", [r for r in rows if r["pz"] is not None and 2.3 <= r["pz"] <= 2.8])):
+        v = [r["tilt"] for r in sel if r["tilt"] is not None]
+        n, m_, sd, se = cell(v)
+        res["tilt " + name] = (n, m_, sd)
+        out("%-70s n %5d  %5.1f +- %4.1f (se %.2f); 10th-90th percentile %.0f to %.0f" % (name, n, m_, sd, se, sorted(v)[n // 10], sorted(v)[9 * n // 10]))
     by = defaultdict(list)
     for r in rows:
         by[r["who"]].append(r)
@@ -148,7 +159,7 @@ def report(rows, drop, out=print):
 def check():
     """the script's arithmetic on rows made by hand: the mirroring, the bands, the cut, a cell's mean and SD."""
     def row(batter, stand, hx, hy, y, bat, ev=100.0, desc="hit_into_play", des="", pt="FF"):
-        return dict(batter=batter, stand=stand, hc_x=str(hx), hc_y=str(hy), intercept_ball_minus_batter_pos_y_inches=str(y), bat_speed=str(bat),
+        return dict(batter=batter, stand=stand, hc_x=str(hx), hc_y=str(hy), intercept_ball_minus_batter_pos_y_inches=str(y), bat_speed=str(bat), swing_path_tilt="30",
                     launch_speed=str(ev), description=desc, des=des, events="", pitch_type=pt, plate_x="0.0", plate_z="2.5")
     # a ball fielded 50 units to the left-field side and 100 up the field: atan2(-50, 100) = -26.57 deg for a right-hander (pulled),
     # and the same spot is +26.57 (the other way) for a left-hander
