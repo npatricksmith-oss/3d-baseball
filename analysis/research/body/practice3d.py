@@ -144,6 +144,14 @@ def clock_residuals(fired, tx, t_avail, form="each"):
     return [math.sqrt(w / tot) * max(0.0, (tx - t_avail) - t) / CLOCK_UNIT for t, w in fired]
 
 
+def bat_between(b0, b1, q):
+    """the bat's direction a share q of the way from one record (direction b0) to the next (b1): the two directions
+    mixed and made a unit vector again (records are 5 ms apart and the bat turns under 20 deg between them, where this
+    is within a few hundredths of a degree of turning at an even rate). q outside 0..1 is held at the nearer record."""
+    q = min(1.0, max(0.0, q))
+    return E.unit(tuple((1.0 - q) * a + q * b for a, b in zip(b0, b1)))
+
+
 def through_charge(through, v_along):
     """the first stage's charge (its residual; the score squares it) for a sweet spot that is not moving THROUGH the ball's
     place: what its speed along the ball's line toward the pitcher, where it comes nearest, falls short of `through` m/s
@@ -484,6 +492,11 @@ class Ctx:
         vpar = -E.dot(v, self.nb)
         share = BALL_SPEED / (BALL_SPEED + max(1.0, vpar))
         bz = self.m.axis(recs[i][1], "bat", (0, 0, 1))
+        if self.o.get("square") == "contact" and i + 1 < len(recs):
+            # square="contact" (4.14, part 3): the bat's direction AT contact, between the two records either side of it.
+            # Without it (every search before session 12) it is read at the record before contact, up to 5 ms early, in
+            # which the bat turns up to 15 deg: the score then jumps by 2.4 whenever contact crosses a record's instant.
+            bz = bat_between(bz, self.m.axis(recs[i + 1][1], "bat", (0, 0, 1)), (tx - recs[i][0]) / (recs[i + 1][0] - recs[i][0]))
         sq = math.asin(max(-1.0, min(1.0, (bz[0] * self.nb[0] + bz[1] * self.nb[1]) / max(1e-9, math.hypot(bz[0], bz[1]) * math.hypot(self.nb[0], self.nb[1]))))) / B.D2R
         r = [E.dot(d, self.ev) / MISS_UNIT, E.dot(d, self.el) / MISS_UNIT,
              E.dot(v, self.ev) * TIMING_ERR * share / MISS_UNIT, E.dot(v, self.el) * TIMING_ERR * share / MISS_UNIT,

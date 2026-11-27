@@ -80,8 +80,10 @@ class PostureCtx:
         return r + margin_residuals(mg)
 
 
-def run(rung, path, seed, tag, log, cap=L.END_CAP):
+def run(rung, path, seed, tag, log, cap=L.END_CAP, square=False):
     o = dict(L.options(rung), contact="nearest")
+    if square:
+        o["square"] = "contact"                           # the bat's squareness read at contact (4.14, part 3)
     d = json.load(open(path))
     pc = PostureCtx(o)
     plan = {n: [min(v[0], pc.base.cap[n])] + list(v[1:]) for n, v in d["plan"].items()}
@@ -137,7 +139,7 @@ def main():
         log("margins (deg inside the nearer end), the ten least: " + ", ".join("%s %.2f" % (k, v) for k, v in sorted(mg.items(), key=lambda kv: kv[1])[:10]))
         return
     if "--from" in a:
-        run(arg("--rung", "r4"), arg("--from", ""), int(arg("--seed", 22)), arg("--tag", "_posture"), log, cap=int(arg("--cap", L.END_CAP)))
+        run(arg("--rung", "r4"), arg("--from", ""), int(arg("--seed", 22)), arg("--tag", "_posture"), log, cap=int(arg("--cap", L.END_CAP)), square="--square" in a)
         return
     print(__doc__)
 

@@ -2674,6 +2674,24 @@ class SessionTwelveChecks(unittest.TestCase):
         self.assertAlmostEqual(g[2], 0.0, delta=1e-12)                       # one point holds no twist about itself
         self.assertEqual(PV.ground_twist(m, st, [(0.0, 0.0, 0.0), (0.0, 0.0, 0.0)], (0.0, 0.0, 0.0))["R"], (0.0, 0.0, 0.0, 0))
 
+    def test_the_bats_direction_between_two_records_is_the_even_turn(self):
+        """practice3d.bat_between (4.14, part 3: the bat's squareness read at contact and not at the record before).
+        Two directions 15 deg apart in the level plane, which is about what a bat turns in the 5 ms between records:
+        a third of the way is 5.0 deg by an even turn, and the mix is within 0.02 deg of it; halfway is 7.5 exactly by
+        symmetry; at the ends it is the records' own directions; outside 0..1 it is held at the nearer record; the
+        result is a unit vector."""
+        PR = _practice()
+        a = (1.0, 0.0, 0.0)
+        b = (math.cos(math.radians(15.0)), math.sin(math.radians(15.0)), 0.0)
+        ang = lambda v: math.degrees(math.atan2(v[1], v[0]))
+        self.assertAlmostEqual(ang(PR.bat_between(a, b, 1.0 / 3.0)), 5.0, delta=0.02)
+        self.assertAlmostEqual(ang(PR.bat_between(a, b, 0.5)), 7.5, delta=1e-9)
+        self.assertAlmostEqual(ang(PR.bat_between(a, b, 0.0)), 0.0, delta=1e-12)
+        self.assertAlmostEqual(ang(PR.bat_between(a, b, 1.0)), 15.0, delta=1e-9)
+        self.assertAlmostEqual(ang(PR.bat_between(a, b, 1.7)), 15.0, delta=1e-9)
+        self.assertAlmostEqual(ang(PR.bat_between(a, b, -0.2)), 0.0, delta=1e-12)
+        self.assertAlmostEqual(math.sqrt(sum(x * x for x in PR.bat_between(a, b, 0.3))), 1.0, delta=1e-12)
+
     def test_the_first_stage_charges_a_bat_that_does_not_come_through_the_ball(self):
         """practice3d.through_charge (4.14, part 3: the parked basin's remedy), worked by hand at 5 m/s asked. A bat
         parked at the ball (0 m/s along the ball's line where it comes nearest) is charged 5, which the score squares

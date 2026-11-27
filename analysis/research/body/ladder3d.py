@@ -288,8 +288,10 @@ def show(ctx, u, log=print):
     return out
 
 
-def run_rung(rung, start, seed, g_reach, g_aim, g_more, tag, log, max_blocks=MAX_BLOCKS, through=None):
+def run_rung(rung, start, seed, g_reach, g_aim, g_more, tag, log, max_blocks=MAX_BLOCKS, through=None, square=False):
     o = options(rung)
+    if square:
+        o["square"] = "contact"                           # as settle()'s
     if start.startswith("best:"):
         start = best_of(start[5:])
     ctx = PR.Ctx(contact="nearest", **o)
@@ -346,7 +348,7 @@ END_LEAST = 400                                        # [E] generations before 
 BRACE_BEFORE = 0.150                                   # s before the kept swing's contact: when the start "brace" has the front knee's extensor push (4.14)
 
 
-def settle(rung, path, seed, tag, log, brace=False, cap=END_CAP):
+def settle(rung, path, seed, tag, log, brace=False, cap=END_CAP, square=False):
     """A kept result's search CARRIED TO ITS END (body-motion 4.14, part 3): the same search (practice3d.cma, the whole aim,
     24 plans a generation, every run at the body's step) carried on from the result in ONE stage, its first step END_SIGMA
     of each number's range, until its best score has fallen less than END_FALL over the last END_WINDOW generations and
@@ -354,6 +356,8 @@ def settle(rung, path, seed, tag, log, brace=False, cap=END_CAP):
     brace: the start is the kept plan with the front knee's extensor asked for all it has from BRACE_BEFORE before the
     kept swing's contact (4.14, part 1's replay B), a start in a neighbouring swing; it owes the kept plan everything."""
     o = options(rung)
+    if square:
+        o["square"] = "contact"                           # the score reads the bat's squareness at contact, not at the record before (4.14, part 3)
     d = json.load(open(path))
     ctx = PR.Ctx(contact="nearest", **o)
     plan = {n: [min(v[0], ctx.cap[n])] + list(v[1:]) for n, v in d["plan"].items()}
@@ -489,11 +493,11 @@ def main():
             json.dump(out, open(arg("--out", ""), "w"), indent=1)
         return
     if "--settle" in a:
-        settle(arg("--rung", "r4"), arg("--settle", ""), int(arg("--seed", 21)), arg("--tag", "_end"), log, brace="--brace" in a, cap=int(arg("--cap", END_CAP)))
+        settle(arg("--rung", "r4"), arg("--settle", ""), int(arg("--seed", 21)), arg("--tag", "_end"), log, brace="--brace" in a, cap=int(arg("--cap", END_CAP)), square="--square" in a)
         return
     if "--rung" in a:
         run_rung(arg("--rung", "r0"), arg("--from", "S"), int(arg("--seed", 1)), int(arg("--reach", 100)), int(arg("--gens", 250)), int(arg("--more", 500)), arg("--tag", ""), log,
-                 int(arg("--blocks", MAX_BLOCKS)), through=float(arg("--through", 0)) or None)
+                 int(arg("--blocks", MAX_BLOCKS)), through=float(arg("--through", 0)) or None, square="--square" in a)
         return
     print(__doc__)
 
