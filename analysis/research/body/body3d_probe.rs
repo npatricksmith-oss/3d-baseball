@@ -484,9 +484,11 @@ impl Sys {
         }
     }
 
-    fn step(&self, t: f64, s: &[f64], aux: &mut [Option<[f64; 2]>], sec: &mut [f64], h: f64) -> Vec<f64> {
+    // diag: filled from the step's FIRST evaluation, which is of the state the step starts from (so the forces at t, as a
+    // record made at t has them) at no extra cost: how main() reads the feet's load at every step (body-motion 4.15, part 0)
+    fn step(&self, t: f64, s: &[f64], aux: &mut [Option<[f64; 2]>], sec: &mut [f64], h: f64, diag: Option<&mut Diag>) -> Vec<f64> {
         let n = s.len();
-        let k1 = self.deriv(t, s, aux, sec, None);
+        let k1 = self.deriv(t, s, aux, sec, diag);
         let mut tmp = vec![0.0; n];
         for i in 0..n { tmp[i] = s[i] + 0.5 * h * k1[i]; }
         let k2 = self.deriv(t + 0.5 * h, &tmp, aux, sec, None);
@@ -591,7 +593,7 @@ fn main() {
             let mut aux = aux0.clone();
             let mut sec = sec0.clone();
             sys.anchors(&s, &mut aux);
-            for i in 0..nsteps { s = sys.step(t0 + (i as f64) * h, &s, &mut aux, &mut sec, h); }
+            for i in 0..nsteps { s = sys.step(t0 + (i as f64) * h, &s, &mut aux, &mut sec, h, None); }
             chk += s[0];
         }
         let us = t.elapsed().as_secs_f64() * 1e6 / (reps * nsteps) as f64;
@@ -606,19 +608,26 @@ fn main() {
     let mut sec = sec0.clone();
     sys.anchors(&s, &mut aux);
     let mut diag = Diag::default();
-    let mut record = |t: f64, s: &[f64], aux: &[Option<[f64; 2]>], sec: &[f64], out: &mut dyn Write| {
-        sys.deriv(t, s, aux, sec, Some(&mut diag));
+    // every record ends with the ground's load at EVERY STEP since the record before (body-motion 4.15, part 0): the sum of
+    // the contact points' upward forces, N, at each step's instant after the last record's, this record's own instant last
+    // (`every` numbers; the first record has its own only). A record every 5 ms cannot see a dip between two; the steps can.
+    let up = |d: &Diag| -> f64 { d.con.iter().map(|c| c[2]).sum() };
+    let record = |t: f64, s: &[f64], aux: &[Option<[f64; 2]>], sec: &[f64], loads: &[f64], diag: &mut Diag, out: &mut dyn Write| {
+        sys.deriv(t, s, aux, sec, Some(&mut *diag));
         write!(out, "{:e}", t).unwrap();
         for x in s { write!(out, " {:e}", x).unwrap(); }
         for c in &diag.con { write!(out, " {:e} {:e} {:e}", c[0], c[1], c[2]).unwrap(); }
         for a in &diag.act { write!(out, " {:e} {:e} {:e}", a[0], a[1], a[2]).unwrap(); }
         for st in &diag.stop { write!(out, " {:e} {:e}", st[0], st[1]).unwrap(); }
         for x in sec { write!(out, " {:e}", x).unwrap(); }
-        writeln!(out).unwrap();
+        for x in loads { write!(out, " {:e}", x).unwrap(); }
+        writeln!(out, " {:e}", up(diag)).unwrap();
     };
-    record(t0, &s, &aux, &sec, &mut out);
+    let mut loads: Vec<f64> = Vec::new();
+    record(t0, &s, &aux, &sec, &loads, &mut diag, &mut out);
     for i in 0..nsteps {
-        s = sys.step(t0 + (i as f64) * h, &s, &mut aux, &mut sec, h);
-        if (i + 1) % every == 0 { record(t0 + ((i + 1) as f64) * h, &s, &aux, &sec, &mut out); }
+        s = sys.step(t0 + (i as f64) * h, &s, &mut aux, &mut sec, h, Some(&mut diag));
+        if i % every != 0 { loads.push(up(&diag)); }    // the load at the instant this step started from (a record's own instant is in that record)
+        if (i + 1) % every == 0 { record(t0 + ((i + 1) as f64) * h, &s, &aux, &sec, &loads, &mut diag, &mut out); loads.clear(); }
     }
 }

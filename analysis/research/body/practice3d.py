@@ -388,14 +388,33 @@ class Ctx:
 
     def balance(self, recs, tx):
         """(the extrapolated centre of mass's largest distance outside the feet's area from contact to AFTER, m;
-        the least the feet carry between them at any instant, of body weight; the centre of mass's height at the
-        end of that, of its height at the start)."""
+        the least the feet carry between them at any STEP's instant from the start to AFTER after contact, of body
+        weight; the centre of mass's height at the end of that, of its height at the start)."""
         m, s = self.m, self.m.sys
         worst, least, zend = 0.0, 1e9, None
-        for t, state, con, act, stop, sec in recs:
+        # THE FEET'S LOAD IS READ AT EVERY STEP (body-motion 4.15, part 0): each record carries what the ground bore at every
+        # step since the record before (probe3d.Rec.loads), and every step's instant up to AFTER after contact is read. Until
+        # session 13 it was read at the records' own instants, 5 ms apart in the score, and a dip between two of them was
+        # not seen (five of session 12's kept swings have one; in one his feet are off the ground for 1.75 ms).
+        # jump="records" is that old reading, kept so that a result can be scored as its search scored it; records with no
+        # .loads (the Python engine's) are read at their instants too.
+        at_steps = self.o.get("jump") != "records"
+        t_prev = None
+        for rec in recs:
+            t, state, con = rec[0], rec[1], rec[2]
+            loads = getattr(rec, "loads", None) if at_steps and t_prev is not None else None
+            if loads:
+                # the steps' instants since the record before, this record's own last; each one up to AFTER after contact
+                # is read, so the record that straddles that instant is read as far as it
+                hs = (t - t_prev) / len(loads)
+                for q, f in enumerate(loads):
+                    if t - (len(loads) - 1 - q) * hs <= tx + AFTER + 1e-9:
+                        least = min(least, f / self.BW)
+            t_prev = t
             if t > tx + AFTER + 1e-9:
                 break
-            least = min(least, sum(f[2] for f in con) / self.BW)
+            if not loads:
+                least = min(least, sum(f[2] for f in con) / self.BW)
             if t >= tx - H_STEP * EVERY:
                 x, v = B.com(m, state)
                 w0 = math.sqrt(E.G / max(0.3, x[2]))

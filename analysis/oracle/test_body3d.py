@@ -2993,6 +2993,66 @@ class SessionTwelveChecks(unittest.TestCase):
             self.assertLess(abs(PV.wrap(PV.heading(m, x, "foot_" + sd) - f0[sd])), 0.5)
 
 
+class SessionThirteenChecks(unittest.TestCase):
+    """body-motion 4.15 (session 13): the score's readings corrected or added there."""
+
+    def test_the_feets_least_load_is_read_at_every_step_and_sees_a_dip_between_two_records(self):
+        """body-motion 4.15, part 0: Ctx.balance's "least the feet carry" (the score's and the gate's "does not jump")
+        against a run recorded at EVERY step, with the ground's upward force at each of its states worked here from the
+        contact law (each sole point under the ground pushes up kn x depth - cn x min(1, depth / d0) x its upward speed,
+        never less than nothing), which is neither the reading's arithmetic nor the probe's own force code. On three
+        kept swings of session 12: the one whose feet leave the ground for 1.75 ms between two records 42-50 ms after
+        contact (the last 5 ms record before contact + 50 ms does not reach it: the record that straddles that instant
+        has to be read as far as it), one with a dip to 0.07 of his weight, one with none. The reading from the score's
+        own 5 ms records is the fine run's least to 1e-9 of his weight; the old reading (jump="records": the records'
+        instants only) is 0.23 where his feet are off the ground, and is still there to score a result as it was found."""
+        import json
+        import os
+        PR = _practice()
+        here = os.path.dirname(os.path.abspath(PR.__file__))
+        PR.P.build()
+        seen = {}
+        for name in ("practice3d_s12_carried_b.json", "practice3d_s12_carried.json", "practice3d_s12_posture.json"):
+            with open(os.path.join(here, name)) as fh:
+                d = json.load(fh)
+            ctx = PR.Ctx(**d["options"])
+            u = ctx.u_of(d["plan"])
+            recs = ctx.run(u)                                   # the score's records, 5 ms apart
+            self.assertAlmostEqual(recs[1][0] - recs[0][0], 0.005, delta=1e-9)
+            tx = ctx.nearest(recs)[0]
+            fine = ctx.run(u, every=1)
+            s = ctx.m.sys
+            truth, under = 1e9, 0
+            for rec in fine:
+                if rec[0] > tx + PR.AFTER + 1e-9:
+                    break
+                up = 0.0
+                for cname, b, p, kn, cn, kt, ct, mu in s.contacts:
+                    x, q, v, w = s.pose(rec[1], b)
+                    sp = E.mv(E.qR(q), p)
+                    depth = -(x[2] + sp[2])
+                    if depth > 0.0:
+                        up += max(0.0, kn * depth - cn * min(1.0, depth / E.CONTACT_D0) * E.add(v, E.cross(w, sp))[2])
+                truth = min(truth, up / ctx.BW)
+                under += up / ctx.BW < 0.02
+            new = ctx.balance(recs, tx)[1]
+            self.assertAlmostEqual(new, truth, delta=1e-9, msg=name)
+            ctx.o["jump"] = "records"
+            old = ctx.balance(recs, tx)[1]
+            self.assertGreaterEqual(old, new - 1e-12)
+            seen[name] = (old, new, under * ctx.h)
+            # the report's 1 ms records give the same least: the reading does not depend on how often a record is made
+            del ctx.o["jump"]
+            self.assertAlmostEqual(ctx.balance(ctx.run(u, every=4), tx)[1], truth, delta=1e-9, msg=name)
+        old, new, off = seen["practice3d_s12_carried_b.json"]
+        self.assertLess(new, 0.001)                             # his feet are off the ground ...
+        self.assertAlmostEqual(off, 0.00175, delta=0.0003)      # ... for 1.75 ms (4.14, part 3, seventh)
+        self.assertGreater(old, 0.2)                            # and the records' instants do not see it
+        self.assertAlmostEqual(seen["practice3d_s12_carried.json"][1], 0.068, delta=0.002)
+        self.assertGreater(seen["practice3d_s12_carried.json"][0], 0.14)
+        self.assertAlmostEqual(seen["practice3d_s12_posture.json"][1], 0.129, delta=0.002)
+
+
 class StanceChecks(unittest.TestCase):
     """body-motion 4.13, rungs 3 and 4: the start on major leaguers' feet; the hips' turn by their own muscles."""
 
