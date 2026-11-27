@@ -2,7 +2,8 @@
 what was written by hand at which this body's wrists, forearms and shoulders are inside their ranges, with the bat's
 roll and the elbows' swivels that strain them least. Prints rows to paste. Not part of the motion."""
 import sys, math
-sys.path.insert(0, "analysis/research/body")
+import os
+sys.path.insert(0, os.path.join(os.path.dirname(os.path.abspath(__file__)), ".."))
 import swing_author as A
 E, B = A.E, A.B
 D2R = A.D2R
@@ -98,4 +99,4 @@ def main():
 
 
 main()
-open("sim/target/codex-probes/swing-look/arm_rows.txt", "w").write("\n".join(OUT) + "\n")
+print("\n".join(OUT))

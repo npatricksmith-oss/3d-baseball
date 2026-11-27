@@ -34,7 +34,9 @@ D2R = math.pi / 180.0
 H, M = 1.84, 92.0
 UP = (0.0, 0.0, 1.0)
 DT = 0.001                      # s: the motion is sampled every millisecond
-SMOOTH_S = 0.008                # s [E: 0.008-0.020]: the width (one sigma) of the smoothing of every number's curve
+SMOOTH_S = 0.010                # s [E: 0.008-0.020]: the width (one sigma) of the smoothing of every number's curve
+SMOOTH_ARMS_S = 0.016           # s [E]: the same for where the hands are, the bat's roll and the elbows (their rows are close together)
+ARM_SMOOTH = ("hand_f", "hand_l", "hand_u", "bat_roll", "sw_L", "sw_R")
 MID_HANDS_U = 0.5 * (B.GRIP_L + B.GRIP_R)     # m from the knob: the point between the two hands on the handle's axis
 # The pitch the swing is drawn against: a fastball through the meeting point, the practice aim's own (practice3d.py:
 # 37.98 m/s at the plate, coming down 5.27 deg and across 1.62 deg). A picture for the eye; the motion does not read it.
@@ -42,9 +44,8 @@ BALL_SPEED, BALL_DESCENT, BALL_ACROSS = 37.98, 5.27, 1.62
 
 # ---- the numbers of a pose -----------------------------------------------------------------------------------------
 # hip_x, hip_z  the point midway between the hip joints: toward the plate, and its height (m)
-# com_y       the whole body's centre of mass toward the pitcher (m); the hips are put where that needs them. It is
-#             the centre of mass that is written because that is what the ground can and cannot do: on one
-#             foot a body can only fall away from that foot (com_y_curve)
+# com_y       (not written: found) the whole body's centre of mass toward the pitcher, from where the ground
+#             pushes (push_point, build)
 # pel_yaw     which way the belt buckle faces, deg: 0 toward the plate, 90 toward the pitcher
 # pel_lp/lq   the pelvis's own up-axis leaned toward the plate / toward the pitcher (deg)
 # tr_yaw      which way the chest faces (deg, as the buckle)
@@ -67,7 +68,7 @@ CHANNELS = ("hip_x", "com_y", "hip_z", "pel_yaw", "pel_lp", "pel_lq", "tr_yaw", 
 # the comments say what a hitter is doing there. docs/body-motion.md 4.17 has the account in full sentences.
 T_START, T_END = -1.400, 0.800
 T_LIFT, T_OFF, T_TOP, T_TOUCH, T_HEEL, T_CONTACT = -1.050, -0.700, -0.500, -0.215, -0.165, 0.0
-REAR_Y, LEAD_Y0, LEAD_Y1 = -0.450, 0.190, 0.500       # the balls of the feet toward the pitcher: rear; lead in the stance; lead after the stride
+REAR_Y, LEAD_Y0, LEAD_Y1 = -0.450, 0.190, 0.440       # the balls of the feet toward the pitcher: rear; lead in the stance; lead after the stride
 KEYS = [
     # ---- the stance: feet a little wider than the shoulders, knees and hips bent, chest over the toes, hands by the
     # rear shoulder, the bat tipped back over it toward the pitcher's side of his head, a little more weight on the rear leg
@@ -79,48 +80,48 @@ KEYS = [
                   fL_pitch=0.0, fL_z=0.0, fL_y=LEAD_Y0, fL_x=-0.770, fL_yaw=10.0)),
     # ---- the load: the weight goes into the rear hip, the hips and shoulders turn back a little, the hands go back;
     # the lead heel comes up
-    (-0.800, dict(fL_pitch=0.0, fL_z=0.0, pel_yaw=-4.0, tr_yaw=-9.0)),
-    (T_OFF, dict(fL_pitch=20.0, fL_z=0.0, fL_y=LEAD_Y0, hip_z=0.875, pel_yaw=-6.0, tr_yaw=-13.0, tr_lq=-2.0)),
+    (-0.900, dict(fL_pitch=0.0, fL_z=0.0, pel_yaw=-2.0, tr_yaw=-6.0, hip_z=0.875)),
+    (T_OFF, dict(fL_pitch=20.0, fL_z=0.0, fL_y=LEAD_Y0, hip_z=0.865, pel_yaw=-6.0, tr_yaw=-13.0, tr_lq=-2.0)),
     # ---- the knee comes up and in; he stands on the rear leg and is already drifting toward the pitcher
-    (T_TOP, dict(hip_z=0.865, hip_x=-0.970, pel_yaw=-9.0, pel_lq=-3.0, tr_yaw=-18.0, tr_lq=-3.0, tr_lp=31.0,
+    (T_TOP, dict(hip_z=0.855, hip_x=-0.970, pel_yaw=-9.0, pel_lq=-3.0, tr_yaw=-18.0, tr_lq=-3.0, tr_lp=31.0,
                  fL_z=0.120, fL_y=0.150, fL_x=-0.760, fL_pitch=24.0, fL_yaw=0.0)),
     # ---- the stride: a controlled fall toward the pitcher; the foot reaches out and stays closed; the hands stay back
-    (-0.370, dict(fL_z=0.075, fL_y=0.320, fL_pitch=14.0, hip_z=0.850, pel_yaw=-11.0, tr_yaw=-21.0)),
-    (-0.280, dict(fL_z=0.030, fL_y=0.440, fL_x=-0.740, fL_pitch=14.0, fL_yaw=14.0, hip_z=0.835)),
+    (-0.370, dict(fL_z=0.075, fL_y=0.290, fL_pitch=14.0, hip_z=0.835, pel_yaw=-11.0, tr_yaw=-21.0)),
+    (-0.280, dict(fL_z=0.030, fL_y=0.390, fL_x=-0.740, fL_pitch=14.0, fL_yaw=30.0, hip_z=0.815)),
     # ---- toe touch: the front foot lands softly on its ball, closed; the hips are already starting to open; the
     # chest and the hands are still back (the stretch)
-    (T_TOUCH, dict(fL_z=0.0, fL_y=LEAD_Y1, fL_x=-0.725, fL_pitch=12.0, fL_yaw=25.0, hip_z=0.825, hip_x=-0.960,
+    (T_TOUCH, dict(fL_z=0.0, fL_y=LEAD_Y1, fL_x=-0.725, fL_pitch=12.0, fL_yaw=45.0, hip_z=0.800, hip_x=-0.960,
                    pel_yaw=-7.0, pel_lq=-4.0, pel_lp=17.0, tr_yaw=-24.0, tr_lq=-5.0, tr_lp=30.0,
                    fR_pitch=0.0, fR_yaw=0.0)),
     # ---- heel plant: the weight comes onto the front side; the hips fire
-    (T_HEEL, dict(fL_pitch=0.0, fL_yaw=30.0, hip_z=0.820, pel_yaw=5.0, tr_yaw=-23.0)),
+    (T_HEEL, dict(fL_pitch=0.0, hip_z=0.798, pel_yaw=5.0, tr_yaw=-23.0)),
     # ---- hips lead; the rear elbow drops into the slot; the barrel tips back and flattens behind him
-    (-0.120, dict(pel_yaw=22.0, tr_yaw=-14.0, hip_z=0.825, fR_pitch=5.0, fR_yaw=6.0, tr_lp=29.0, tr_lq=-7.0, hip_x=-0.945)),
-    (-0.080, dict(pel_yaw=46.0, tr_yaw=14.0, hip_z=0.830, fR_pitch=22.0, fR_yaw=30.0, pel_lp=14.0, hip_x=-0.925, tr_lq=-9.0, tr_lp=27.0)),
+    (-0.120, dict(pel_yaw=22.0, tr_yaw=-14.0, hip_z=0.800, fR_pitch=5.0, fR_yaw=6.0, tr_lp=29.0, tr_lq=-7.0, hip_x=-0.945)),
+    (-0.080, dict(pel_yaw=46.0, tr_yaw=14.0, hip_z=0.805, fR_pitch=22.0, fR_yaw=30.0, pel_lp=14.0, hip_x=-0.925, tr_lq=-9.0, tr_lp=27.0)),
     (-0.045, dict(pel_yaw=68.0, tr_yaw=46.0, fR_pitch=36.0, fR_yaw=52.0)),
     (-0.020, dict(pel_yaw=78.0, tr_yaw=66.0)),
     # ---- contact: the front leg firm, the rear knee in and the heel up, the belt buckle at the pitcher, the spine
     # tilted over the plate and a little back, both elbows still bent, the barrel below the hands and coming up
-    (T_CONTACT, dict(pel_yaw=83.0, tr_yaw=79.0, hip_x=-0.900, hip_z=0.822, pel_lp=10.0, pel_lq=-4.0,
-                     tr_lp=25.0, tr_lq=-12.0, fR_pitch=48.0, fR_yaw=68.0, fL_yaw=38.0)),
+    (T_CONTACT, dict(pel_yaw=83.0, tr_yaw=79.0, hip_x=-0.900, hip_z=0.815, pel_lp=10.0, pel_lq=-4.0,
+                     tr_lp=25.0, tr_lq=-12.0, fR_pitch=48.0, fR_yaw=68.0)),
     # ---- extension: the arms straighten out through the ball toward the pitcher
     (0.022, dict(tr_yaw=90.0, pel_yaw=86.0)),
     (0.050, dict(tr_yaw=101.0, pel_yaw=89.0)),
-    (0.090, dict(tr_yaw=112.0, pel_yaw=92.0,
-                 fR_pitch=56.0, fR_yaw=80.0, tr_lq=-12.0, tr_lp=21.0, hip_z=0.828)),
+    (0.090, dict(tr_yaw=113.0, pel_yaw=93.0,
+                 fR_pitch=56.0, fR_yaw=80.0, tr_lq=-12.0, tr_lp=21.0, hip_z=0.822)),
     # ---- the wrap: the hands go up and round over the lead shoulder, the bat behind his head
-    (0.150, dict(tr_yaw=124.0, pel_yaw=95.0, fL_yaw=46.0)),
-    (0.240, dict(tr_yaw=133.0, pel_yaw=98.0,
-                 tr_lp=14.0, tr_lq=-8.0, hip_z=0.840, fL_yaw=54.0, pel_lp=7.0, pel_lq=-3.0, hip_x=-0.900)),
+    (0.150, dict(tr_yaw=126.0, pel_yaw=97.0)),
+    (0.240, dict(tr_yaw=137.0, pel_yaw=100.0,
+                 tr_lp=14.0, tr_lq=-8.0, hip_z=0.840, pel_lp=7.0, pel_lq=-3.0, hip_x=-0.900)),
     # ---- the finish: tall on a firm front leg, the rear foot on its toe, the chest past the pitcher, both hands high
-    (0.380, dict(tr_yaw=138.0, pel_yaw=100.0,
-                 tr_lp=9.0, tr_lq=-5.0, hip_z=0.845, fR_pitch=60.0, fR_yaw=85.0, fL_yaw=58.0, pel_lp=6.0, pel_lq=-2.0)),
-    (0.560, dict(tr_yaw=139.0, pel_yaw=100.0, hip_z=0.845)),
+    (0.380, dict(tr_yaw=145.0, pel_yaw=102.0,
+                 tr_lp=9.0, tr_lq=-5.0, hip_z=0.845, fR_pitch=60.0, fR_yaw=85.0, pel_lp=6.0, pel_lq=-2.0)),
+    (0.560, dict(tr_yaw=148.0, pel_yaw=103.0, hip_z=0.845)),
 ]
 # The hands and the bat. Written by hand first (where the hands are from the chest, where the barrel points), then each
 # row moved as little as it took to bring every joint of both arms inside its range, with the bat's roll and the elbows
-# where the arms are least strained (a search on this body's own joint ranges, sim/target/codex-probes/swing-look/
-# fit_arms.py as it stood on 2026-11-27; body.strain). The wrists' end toward the barrel is taken 19 deg further out than
+# where the arms are least strained (a search on this body's own joint ranges: swing_look_tools/fit_arms.py;
+# body.strain). The wrists' end toward the barrel is taken 19 deg further out than
 # a closed hand's (body-motion 4.17: the handle shifts in the fingers at full extension).
 KEYS += [
     # stance, load, stride: the hands by the rear shoulder, the bat up and tipped back over it
@@ -130,84 +131,75 @@ KEYS += [
     (T_TOUCH, dict(hand_f=0.210, hand_l=-0.270, hand_u=0.000, bat_az=-195, bat_el=55, bat_roll=0, sw_L=-20, sw_R=-20)),
     (T_HEEL, dict(hand_f=0.203, hand_l=-0.270, hand_u=-0.010, bat_az=-195, bat_el=52, bat_roll=10, sw_L=-20, sw_R=-20)),
     # the hands start: the rear elbow comes down into the slot, the barrel tips back and flattens behind him
-    (-0.120, dict(hand_f=0.220, hand_l=-0.255, hand_u=-0.015, bat_az=-178, bat_el=48, bat_roll=10, sw_L=-10, sw_R=-40)),
-    (-0.100, dict(hand_f=0.223, hand_l=-0.268, hand_u=-0.048, bat_az=-158, bat_el=36, bat_roll=20, sw_L=-10, sw_R=-50)),
-    (-0.080, dict(hand_f=0.242, hand_l=-0.280, hand_u=-0.105, bat_az=-134, bat_el=18, bat_roll=20, sw_L=0, sw_R=-70)),
-    (-0.060, dict(hand_f=0.280, hand_l=-0.242, hand_u=-0.198, bat_az=-114, bat_el=0, bat_roll=20, sw_L=20, sw_R=-90)),
-    (-0.045, dict(hand_f=0.307, hand_l=-0.212, hand_u=-0.260, bat_az=-97, bat_el=-12, bat_roll=25, sw_L=40, sw_R=-100)),
-    (-0.030, dict(hand_f=0.320, hand_l=-0.167, hand_u=-0.310, bat_az=-73, bat_el=-20, bat_roll=25, sw_L=50, sw_R=-100)),
-    (-0.015, dict(hand_f=0.330, hand_l=-0.130, hand_u=-0.340, bat_az=-39, bat_el=-24, bat_roll=10, sw_L=50, sw_R=-80)),
+    (-0.120, dict(hand_f=0.220, hand_l=-0.255, hand_u=-0.015, bat_az=-178, bat_el=48, bat_roll=12, sw_L=-10, sw_R=-35)),
+    (-0.100, dict(hand_f=0.223, hand_l=-0.268, hand_u=-0.048, bat_az=-158, bat_el=36)),
+    (-0.080, dict(hand_f=0.242, hand_l=-0.280, hand_u=-0.105, bat_az=-134, bat_el=18, bat_roll=18, sw_L=5, sw_R=-60)),
+    (-0.060, dict(hand_f=0.280, hand_l=-0.242, hand_u=-0.198, bat_az=-114, bat_el=0)),
+    (-0.045, dict(hand_f=0.307, hand_l=-0.212, hand_u=-0.260, bat_az=-97, bat_el=-12, bat_roll=20, sw_L=30, sw_R=-80)),
+    (-0.030, dict(hand_f=0.320, hand_l=-0.167, hand_u=-0.310, bat_az=-73, bat_el=-20)),
+    (-0.015, dict(hand_f=0.330, hand_l=-0.130, hand_u=-0.340, bat_az=-39, bat_el=-24, bat_roll=14, sw_L=42, sw_R=-78)),
     # contact: both elbows bent, the barrel below the hands
     (T_CONTACT, dict(hand_f=0.335, hand_l=-0.100, hand_u=-0.360, bat_az=1, bat_el=-24, bat_roll=10, sw_L=40, sw_R=-70)),
     # extension, the wrap, the finish. FROM HERE THE ROWS ARE AS WRITTEN: the search finds no way through the top hand's
     # roll-over that keeps welded hands inside a wrist's range, so after contact the wrists' and forearms' ranges are not
-    # held (body-motion 4.17, the list of what was loosened)
+    # held (body-motion 4.17, the list of what was loosened). The bat is slowed gently: it carries a good deal of turning
+    # and the feet have to take it out through the dirt.
     (0.015, dict(hand_f=0.380, hand_l=-0.070, hand_u=-0.340, bat_az=40, bat_el=-19)),
-    (0.030, dict(hand_f=0.420, hand_l=-0.030, hand_u=-0.320, bat_az=75, bat_el=-9)),
-    (0.050, dict(hand_f=0.440, hand_l=0.015, hand_u=-0.270, bat_az=112, bat_el=6, bat_roll=0, sw_L=0, sw_R=-30)),
-    (0.070, dict(hand_f=0.450, hand_l=0.055, hand_u=-0.200, bat_az=140, bat_el=20)),
-    (0.090, dict(hand_f=0.450, hand_l=0.095, hand_u=-0.125, bat_az=163, bat_el=32, bat_roll=10, sw_L=20, sw_R=-20)),
-    (0.120, dict(hand_f=0.440, hand_l=0.150, hand_u=-0.040, bat_az=190, bat_el=42)),
-    (0.150, dict(hand_f=0.400, hand_l=0.175, hand_u=0.035, bat_az=212, bat_el=45, bat_roll=0, sw_L=20, sw_R=10)),
-    (0.200, dict(hand_f=0.330, hand_l=0.190, hand_u=0.100, bat_az=240, bat_el=36)),
-    (0.250, dict(hand_f=0.285, hand_l=0.190, hand_u=0.140, bat_az=265, bat_el=20, bat_roll=0, sw_L=0, sw_R=30)),
-    (0.300, dict(hand_f=0.255, hand_l=0.185, hand_u=0.170, bat_az=285, bat_el=5)),
-    (0.380, dict(hand_f=0.225, hand_l=0.180, hand_u=0.190, bat_az=303, bat_el=-8)),
-    (0.560, dict(hand_f=0.200, hand_l=0.165, hand_u=0.200, bat_az=314, bat_el=-16, bat_roll=0, sw_L=10, sw_R=30)),
+    (0.030, dict(hand_f=0.405, hand_l=-0.030, hand_u=-0.320, bat_az=76, bat_el=-10)),
+    (0.050, dict(hand_f=0.415, hand_l=0.015, hand_u=-0.280, bat_az=118, bat_el=3, bat_roll=0, sw_L=0, sw_R=-30)),
+    (0.070, dict(hand_f=0.420, hand_l=0.055, hand_u=-0.225, bat_az=152, bat_el=15)),
+    (0.090, dict(hand_f=0.425, hand_l=0.090, hand_u=-0.165, bat_az=180, bat_el=26, bat_roll=10, sw_L=20, sw_R=-20)),
+    (0.120, dict(hand_f=0.420, hand_l=0.135, hand_u=-0.085, bat_az=212, bat_el=37)),
+    (0.150, dict(hand_f=0.400, hand_l=0.165, hand_u=-0.015, bat_az=236, bat_el=42, bat_roll=0, sw_L=20, sw_R=10)),
+    (0.200, dict(hand_f=0.345, hand_l=0.190, hand_u=0.070, bat_az=264, bat_el=38)),
+    (0.250, dict(hand_f=0.295, hand_l=0.195, hand_u=0.125, bat_az=285, bat_el=26, bat_roll=0, sw_L=0, sw_R=30)),
+    (0.300, dict(hand_f=0.260, hand_l=0.190, hand_u=0.160, bat_az=300, bat_el=12)),
+    (0.380, dict(hand_f=0.230, hand_l=0.180, hand_u=0.185, bat_az=312, bat_el=-4)),
+    (0.560, dict(hand_f=0.200, hand_l=0.165, hand_u=0.200, bat_az=320, bat_el=-16, bat_roll=0, sw_L=10, sw_R=30)),
 ]
 WRIST_ULN_LOOSE = 55.0         # deg: the wrists' end toward the barrel (body.ROM's 36 for a hand in the open, x 0.90 closed)
 
-# ---- the centre of mass toward the pitcher ----------------------------------------------------------------------------
-# A body standing on one foot cannot be pushed along the ground at will: its centre of mass can only fall away from
-# where that foot pushes (an upside-down pendulum: its acceleration is g / height x how far it stands ahead of the push).
-# So the stride is written as that fall, and not as a curve drawn by hand: at the instant the lead foot leaves the
-# ground his centre is COM_AHEAD in front of where the rear foot pushes, still drifting back at COM_V_OFF, and from
-# there it falls toward the pitcher until the front foot is down. Before that (both feet down) and after it (the front
-# leg stopping him) the curve is a smooth join.
-COM_STANCE = -0.175            # m: in the stance, 57 % of his weight on the rear foot [4]
-COM_PUSH = -0.420              # m: where the rear foot's push acts while he stands on it alone (its inside half)
-COM_AHEAD = 0.130              # m [E: 0.10-0.15]
-COM_V_OFF = -0.065             # m/s [E]
-COM_HEIGHT = 0.93              # m: the centre of mass's height in the stride (read off the motion)
-COM_CONTACT = (-0.030, 0.25)   # m, m/s: his centre at contact and its speed there (the front leg has nearly stopped him)
-COM_FINISH = (0.005, 0.250)    # m, s: where it comes to rest, and when
+# ---- where the ground pushes, and the centre of mass that goes with it ---------------------------------------------------
+# A body on the ground cannot be moved along it at will. Where the feet's push acts (it can only act under a foot that is
+# down) decides how his centre of mass moves: it accelerates away from that point, by g / (its height) x how far it
+# stands from it. So what is WRITTEN is where the push acts (PUSH below: under the rear foot while he stands on it, then
+# toward the front foot as it takes the weight), and the centre of mass's path along the ground is the one that goes
+# with it and with everything the arms and the bat do (found in build(): the path is moved until the push the motion
+# asks for acts where it is written). The stride then comes out as it is for a hitter: a fall away from the rear foot,
+# begun before the front foot leaves the ground, caught by the front leg. A bat at 60 mph pulls on him with about his
+# own weight; the same rule has him lean away from it beforehand instead of being asked to hold still.
+PUSH_X = (-0.860, -0.790)      # m: toward the plate, the push acts under the middle of the feet: in the stance; once the front foot is down
+#                                (it lands turned open, so the two feet's ground then lies nearer the plate)
+PUSH_REAR_Y, PUSH_STANCE = -0.420, 0.43      # m: under the rear foot's inside half; in the stance the share of the way to the front foot
+PUSH_FRONT = (0.66, 0.50)      # the share of the way from the rear foot's push to the front foot's ball: through the swing; at rest in the finish
+T_SHIFT = 0.200                # s: the weight goes back onto the rear foot over this long before the lead foot leaves
+T_TAKE = 0.110                 # s: the front foot takes its share over this long from toe touch
+COM_SMOOTH_S = 0.030           # s [E: 0.02-0.04]: his centre of mass's height is the written motion's, smoothed over this
+PUSH_SMOOTH_S = 0.025          # s: the written push point is smoothed over this (a foot takes weight over a few hundredths)
+PUSH_ROUNDS = 4                # how many times the path is moved toward the written push
 
 
-def _quintic(t, t0, t1, y0, v0, a0, y1, v1, a1):
-    """the fifth-order curve from (y0, v0, a0) at t0 to (y1, v1, a1) at t1."""
-    T = t1 - t0
-    s = (t - t0) / T
-    c0, c1, c2 = y0, v0 * T, 0.5 * a0 * T * T
-    d0 = y1 - c0 - c1 - c2
-    d1 = v1 * T - c1 - 2 * c2
-    d2 = a1 * T * T - 2 * c2
-    c3 = 10 * d0 - 4 * d1 + 0.5 * d2
-    c4 = -15 * d0 + 7 * d1 - d2
-    c5 = 6 * d0 - 3 * d1 + 0.5 * d2
-    return c0 + s * (c1 + s * (c2 + s * (c3 + s * (c4 + s * c5))))
-
-
-def com_y_curve(t):
-    """his centre of mass toward the pitcher at time t (m)."""
-    w = math.sqrt(E.G / COM_HEIGHT)
-    A, Bc = COM_AHEAD, COM_V_OFF / w
-    fall = lambda tt: (COM_PUSH + A * math.cosh(w * tt) + Bc * math.sinh(w * tt), w * (A * math.sinh(w * tt) + Bc * math.cosh(w * tt)),
-                       w * w * (A * math.cosh(w * tt) + Bc * math.sinh(w * tt)))
-    y0, v0, a0 = fall(0.0)
-    y1, v1, a1 = fall(T_TOUCH - T_OFF)
-    if t <= T_LIFT:
-        return COM_STANCE
-    if t <= T_OFF:
-        return _quintic(t, T_LIFT, T_OFF, COM_STANCE, 0.0, 0.0, y0, v0, a0)
-    if t <= T_TOUCH:
-        return fall(t - T_OFF)[0]
-    yc, vc = COM_CONTACT
-    if t <= T_CONTACT:
-        return _quintic(t, T_TOUCH, T_CONTACT, y1, v1, a1, yc, vc, -2.0)
-    yf, tf = COM_FINISH
-    if t <= tf:
-        return _quintic(t, T_CONTACT, tf, yc, vc, -2.0, yf, 0.0, 0.0)
-    return yf
+def push_point(t):
+    """(x, y): where on the ground the feet's push is written to act at time t."""
+    front = lambda sh: PUSH_REAR_Y + sh * (LEAD_Y1 - PUSH_REAR_Y)
+    sm = lambda u: u * u * (3.0 - 2.0 * u)
+    stance = PUSH_REAR_Y + PUSH_STANCE * (LEAD_Y0 - PUSH_REAR_Y)
+    if t <= T_OFF - T_SHIFT:
+        y = stance
+    elif t <= T_OFF:
+        y = stance + (PUSH_REAR_Y - stance) * sm((t - (T_OFF - T_SHIFT)) / T_SHIFT)
+    elif t <= T_TOUCH:
+        y = PUSH_REAR_Y
+    elif t <= T_TOUCH + T_TAKE:
+        y = PUSH_REAR_Y + (front(PUSH_FRONT[0]) - PUSH_REAR_Y) * sm((t - T_TOUCH) / T_TAKE)
+    elif t <= 0.10:
+        y = front(PUSH_FRONT[0])
+    elif t <= 0.35:
+        y = front(PUSH_FRONT[0]) + (front(PUSH_FRONT[1]) - front(PUSH_FRONT[0])) * sm((t - 0.10) / 0.25)
+    else:
+        y = front(PUSH_FRONT[1])
+    x = PUSH_X[0] + (PUSH_X[1] - PUSH_X[0]) * sm(min(1.0, max(0.0, (t - T_TOP) / (T_TOUCH + T_TAKE - T_TOP))))
+    return x, y
 
 
 EVENTS = (("start", T_START, "the stance"), ("lead_heel_up", T_LIFT, "the load begins"), ("lead_foot_off", T_OFF, "the lead foot leaves the ground"),
@@ -280,7 +272,7 @@ class Motion:
         self.ch = {}
         for c in CHANNELS:
             if c == "com_y":
-                self.ch[c] = [com_y_curve(t) for t in self.ts]
+                self.ch[c] = [0.0] * self.n           # found in build() from where the ground pushes
                 continue
             rows = [(t, d[c]) for t, d in keys if c in d]
             if not rows:
@@ -290,7 +282,7 @@ class Motion:
                 raise ValueError("the rows of %s are not in order of time" % c)
             ms = _pchip(kt, kv)
             raw = [_hermite(kt, kv, ms, t) for t in self.ts]
-            self.ch[c] = _gauss(raw, smooth / dt)
+            self.ch[c] = _gauss(raw, (SMOOTH_ARMS_S if c in ARM_SMOOTH else smooth) / dt)
 
     def at(self, i):
         return {c: self.ch[c][i] for c in CHANNELS}
@@ -470,24 +462,114 @@ def with_velocities(m, states, dt):
 
 
 def build(motion=None, m=None, log=None, close=True):
-    """(model, times, states with velocities, the worst a limb falls short by): the written motion on the body."""
-    motion = Motion() if motion is None else motion
+    """(model, times, states with velocities, the worst a limb falls short by): the written motion on the body. The
+    default motion's result is kept in sim/target (keyed by this file's and the body's text), since it takes a while."""
+    key = None
     m = new_model() if m is None else m
-    states, worst = [], {}
-    off = 0.03                                   # the hips ahead of the centre of mass: found for each instant
-    motion.hip_y = []
-    for i in range(motion.n):
-        p = motion.at(i)
-        for _ in range(6):
-            rep = {}
-            p["hip_y"] = p["com_y"] + off
-            st = pose(m, p, rep, close)
-            err = B.com(m, st)[0][1] - p["com_y"]
-            if abs(err) < 2e-6:
-                break
-            off -= err
-        motion.hip_y.append(p["hip_y"])
-        states.append(st)
+    if motion is None:
+        import hashlib
+        import pickle
+        hh = hashlib.sha256()
+        for f in (os.path.abspath(__file__), B.__file__, E.__file__, os.path.join(HERE, "common.py")):
+            hh.update(open(f, "rb").read())
+        hh.update(repr(close).encode())
+        cdir = os.path.join(HERE, "..", "..", "..", "sim", "target", "codex-probes", "swing-look", "cache")
+        key = os.path.join(cdir, hh.hexdigest()[:20] + ".pickle")
+        motion = Motion()
+        if os.path.isfile(key):
+            ts, states, worst, extra = pickle.load(open(key, "rb"))
+            motion.__dict__.update(extra)
+            if log is not None:
+                for k, (v, t) in sorted(worst.items()):
+                    if v > 0.0:
+                        log("TOO SHORT: %s cannot reach what is written by %.1f cm at %+.0f ms" % (k, 100 * v, 1e3 * t))
+            return m, ts, states, worst
+    states, worst = _build(motion, m, log, close)
+    if key is not None:
+        import pickle
+        os.makedirs(os.path.dirname(key), exist_ok=True)
+        pickle.dump((motion.ts, states, worst, {k: getattr(motion, k) for k in ("push", "hip", "com", "gave")}), open(key, "wb"))
+    return m, motion.ts, states, worst
+
+
+def _build(motion, m, log, close):
+    # Pass 1: the hips where they are written (toward the plate, and their height), toward the pitcher where a first
+    # guess of the centre of mass puts them (between the feet as the written push has it).
+    worst = {}
+    n = motion.n
+    push = [push_point(t) for t in motion.ts]
+    px = _gauss([q[0] for q in push], PUSH_SMOOTH_S / motion.dt)
+    py = _gauss([q[1] for q in push], PUSH_SMOOTH_S / motion.dt)
+    motion.push = list(zip(px, py))
+    w = math.sqrt(E.G / 0.93)
+
+    def two_sided(e):
+        """the change of a path that moves its push point by -e: the path's change d with d - d'' / w^2 = -e (the
+        upside-down pendulum's law), the solution that dies away both ways in time: e weighed by (w / 2) exp(-w |t|)."""
+        dt = motion.dt
+        k = math.exp(-w * dt)
+        fwd, acc = [0.0] * n, 0.0
+        for i in range(n):
+            acc = acc * k + e[i]
+            fwd[i] = acc
+        bwd, acc = [0.0] * n, 0.0
+        for i in range(n - 1, -1, -1):
+            acc = acc * k + e[i]
+            bwd[i] = acc
+        return [-(fwd[i] + bwd[i] - e[i]) * 0.5 * w * dt for i in range(n)]
+
+    def place(com_x, com_y, com_z, hips, do_close):
+        """the states with the centre of mass at (com_x, com_y, com_z); a coordinate given as None is left to the hips
+        as written. hips: a first guess of the hips' place for each instant, bettered in place."""
+        out = []
+        for i in range(n):
+            p = motion.at(i)
+            want = (None if com_x is None else com_x[i], com_y[i], None if com_z is None else com_z[i])
+            h = hips[i]
+            # (to 1e-11 m: the push the motion asks of the ground is read from second differences of these places a
+            # millisecond apart, and an error of a micrometre there reads as a tenth of his weight)
+            for _ in range(14):
+                p["hip_x"], p["hip_y"], p["hip_z"] = h
+                rep = {}
+                st = pose(m, p, rep, do_close)
+                c = B.com(m, st)[0]
+                err = [0.0 if want[q] is None else c[q] - want[q] for q in range(3)]
+                if max(abs(e) for e in err) < 1e-11:
+                    break
+                h = [h[q] - err[q] / 0.9 for q in range(3)]
+            hips[i] = h
+            out.append((st, c, rep))
+        return out
+
+    y0 = two_sided([-q for q in py])             # a first guess of his centre's path: the pendulum's answer to the written push alone
+    hips = [[motion.ch["hip_x"][i], y0[i] + 0.03, motion.ch["hip_z"][i]] for i in range(n)]
+    first = place(None, y0, None, hips, False)
+    # Pass 2: his centre of mass's height is the written motion's, smoothed (the hands dropping into the slot take weight
+    # off his feet, and the ground cannot answer in an instant: the hips give a centimetre instead). Along the ground the
+    # path is moved, PUSH_ROUNDS times, by what brings the push the motion asks for to where it is written.
+    cz = _gauss([c[2] for st, c, rep in first], COM_SMOOTH_S / motion.dt)
+    cx, cy = _gauss([c[0] for st, c, rep in first], 2 * COM_SMOOTH_S / motion.dt), y0
+    written_hip = [(motion.ch["hip_x"][i], motion.ch["hip_z"][i]) for i in range(n)]
+    for rnd in range(PUSH_ROUNDS + 1):
+        placed = place(cx, cy, cz, hips, close and rnd == PUSH_ROUNDS)
+        if rnd == PUSH_ROUNDS:
+            break
+        sts = with_velocities(m, [st for st, c, rep in placed], motion.dt)
+        ex, ey = [0.0] * n, [0.0] * n
+        for i in range(1, n - 1):
+            (zx, zy), fz, fh, dLz = zmp(m, sts[i - 1], sts[i], sts[i + 1], motion.dt)
+            ex[i], ey[i] = zx - px[i], zy - py[i]
+        # (the push asked for is read from second differences, which are rough at the instants where a written number
+        # changes its course: smoothed before and after, so that the path stays smooth)
+        ex, ey = _gauss(ex, PUSH_SMOOTH_S / motion.dt), _gauss(ey, PUSH_SMOOTH_S / motion.dt)
+        dx, dy = _gauss(two_sided(ex), PUSH_SMOOTH_S / motion.dt), _gauss(two_sided(ey), PUSH_SMOOTH_S / motion.dt)
+        cx = [a_ + d_ for a_, d_ in zip(cx, dx)]
+        cy = [a_ + d_ for a_, d_ in zip(cy, dy)]
+    states = [st for st, c, rep in placed]
+    motion.hip = [tuple(h) for h in hips]
+    motion.com = list(zip(cx, cy, cz))
+    motion.gave = max(math.hypot(h[0] - wh[0], h[2] - wh[1]) for h, wh in zip(hips, written_hip))
+    for i, (st, c, rep) in enumerate(placed):
         for k, v in rep.items():
             if v > worst.get(k, (-1e9, 0.0))[0]:
                 worst[k] = (v, motion.ts[i])
@@ -496,7 +578,7 @@ def build(motion=None, m=None, log=None, close=True):
         for k, (v, t) in sorted(worst.items()):
             if v > 0.0:
                 log("TOO SHORT: %s cannot reach what is written by %.1f cm at %+.0f ms" % (k, 100 * v, 1e3 * t))
-    return m, motion.ts, states, worst
+    return states, worst
 
 
 # ---- what a baseball man would read ------------------------------------------------------------------------------------
@@ -589,6 +671,14 @@ def table(rows, log=print):
             % (r["t"], r["pelvis"], r["trunk"], r["sep"], r["pelvis_rate"], r["trunk_rate"], r["lean_plate"], r["lean_pitcher"], r["knee_L"], r["knee_R"],
                r["elbow_L"], r["elbow_R"], r["hands_speed"], 100 * r["hands_behind"], 100 * r["hands_below"], r["bat_az"], r["bat_down"], r["lag"],
                r["sweet"], r["sweet"] / 0.44704, 100 * r["sweet_z"], r["attack"], 100 * r["com_y"], r["com_vy"], 100 * r["zmp_y"], 100 * r["zmp_x"], r["fz"]))
+
+
+def ground_table(rows, log=print):
+    """what the written motion asks of the ground, from the motion alone: how hard it must push up (x his weight), along
+    the ground (x his weight, toward the plate and toward the pitcher), and where the push must act."""
+    log("t ms | up x weight | along: plate, pitcher | must act at: toward the plate cm, toward the pitcher cm | turning moment N m")
+    for r in rows:
+        log("%+5.0f | %5.2f | %+5.2f %+5.2f | %+5.0f %+5.0f | %+5.0f" % (r["t"], r["fz"], r["fh_x"], r["fh_y"], 100 * r["zmp_x"], 100 * r["zmp_y"], r["turn_moment"]))
 
 
 def ranges_report(m, ts, states, log=print, every=5):
@@ -756,7 +846,8 @@ def contact_point(m, ts, states):
 def write_swing(path, m, ts, states, title, kind, events, loads=None, pc=None, extra=(), name="swing_look", every=1):
     """the viewer's file (docs/player-visuals.md 14) of states on the model m. loads: per state, the upward force on each
     sole point (N) or None (written as 0). pc: the meeting point (default: where the sweet spot is at t = 0). kind:
-    "recorded" has the viewer's pictures run to the last sample. extra: more header lines."""
+    "computed" (the viewer's own word for anything that is not a recording). The file's `shots to_end` line has the
+    viewer's pictures run to the last sample. extra: more header lines."""
     s = m.sys
     i0, p0, v0 = contact_point(m, ts, states)
     pc = p0 if pc is None else pc
@@ -790,7 +881,7 @@ def write_swing(path, m, ts, states, title, kind, events, loads=None, pc=None, e
          "# Sim frame (Statcast): metres, +X toward first base, +Y toward the pitcher, +Z up; a right-handed batter. L is his lead",
          "# (left) side. Quaternions (w, x, y, z): world = R(q) local. Times are seconds from contact.",
          "# The head is DRAWN looking at the ball as far as a neck turns; the model has no neck (the head's mass is the trunk's).",
-         "format %s" % FORMAT, "kind %s" % kind, "title %s" % title, "plan %s" % name,
+         "format %s" % FORMAT, "kind %s" % kind, "shots to_end", "title %s" % title, "plan %s" % name,
          "batter_height_m %.4f" % m.H, "batter_mass_kg %.3f" % m.M,
          "bat length_m %.4f mass_kg %.4f com_from_knob_m %.4f i_cm_kgm2 %.5f i_axis_kgm2 %.6g sweet_from_knob_m %.4f" % (C.BAT_L, C.BAT_M, C.BAT_UCM, C.BAT_ICM, C.BAT_IAX, C.BAT_SS),
          "contact_speed_mps %.4f" % sp, "contact_speed_mph %.2f" % (sp / 0.44704),
@@ -828,21 +919,33 @@ def main():
         t_a, t_b = float(arg("--from", ts[0])), float(arg("--to", ts[-1]))
         table([r for r in read(m, ts, states, step) if t_a * 1e3 - 1e-6 <= r["t"] <= t_b * 1e3 + 1e-6])
         ranges_report(m, ts, states)
+    if "--check" in a:
+        rows = read(m, ts, states, 5.0)
+        lowk = min(rows, key=lambda r: min(r["knee_L"], r["knee_R"]))
+        mo = Motion(); build(mo, m, close=False) if False else None
+        print("the straightest a knee gets: %.0f deg at %+.0f ms (under 10 the leg's joints fly about: lower the hips or shorten the reach)" % (min(lowk["knee_L"], lowk["knee_R"]), lowk["t"]))
+        print("the ground must push up between %.2f and %.2f of his weight" % (min(r["fz"] for r in rows), max(r["fz"] for r in rows)))
+        bad = [r for r in rows if abs(r["fh_x"]) > 0.6 or abs(r["fh_y"]) > 0.6]
+        print("instants (of %d) where it must push along the ground with over 0.6 of his weight: %d%s" % (len(rows), len(bad), "" if not bad else " (first %+.0f, last %+.0f ms)" % (bad[0]["t"], bad[-1]["t"])))
+    if "--ground" in a:
+        t_a, t_b = float(arg("--from", ts[0])), float(arg("--to", ts[-1]))
+        ground_table([r for r in read(m, ts, states, step) if t_a * 1e3 - 1e-6 <= r["t"] <= t_b * 1e3 + 1e-6])
     if "--draw" in a:
         fr = frames_of(m, ts, states, step, float(arg("--from", ts[0])), float(arg("--to", ts[-1])))
         for p in draw(m, fr, arg("--draw", "."), pc=pc, title="THE WRITTEN MOTION (no forces): what the muscles are asked to produce"):
             print("drew " + p)
     if "--arms" in a:
         mo = Motion()
+        build(mo, m, close=False)
         for t, d in KEYS:
             pp = mo.at(mo.index(t))
-            pp["hip_y"] = mo.hip_y[mo.index(t)] if hasattr(mo, "hip_y") else pp["com_y"]
+            pp["hip_x"], pp["hip_y"], pp["hip_z"] = mo.hip[mo.index(t)]
             r = least_strain(m, pp)[:3]
             print("%+6.3f now roll %+4.0f sw %+4.0f %+4.0f | least strain: " % (t, pp["bat_roll"], pp["sw_L"], pp["sw_R"])
                   + "; ".join("%.2f at roll %+4d sw %+4d %+4d" % x[:4] for x in r))
     if "--swing" in a:
         p = write_swing(arg("--swing", None), m, ts, states, "THE SWING AS WRITTEN BY HAND, NO FORCES IN IT (PLAN D48): what the muscles are then asked to produce",
-                        "recorded", EVENTS, name="swing_author.py")
+                        "computed", EVENTS, name="swing_author.py")
         print("wrote " + p)
 
 

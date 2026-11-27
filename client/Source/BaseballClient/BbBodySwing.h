@@ -49,6 +49,8 @@ struct FBbSwingFile
 	/** `kind recorded` (a real hitter's recorded swing, real_swing.py; PLAN D45) or the model's (the default):
 	 *  what the screen says, and -BbBodySwingShots=<ms> runs to the file's end instead of 60 ms after contact. */
 	bool bRecorded = false;
+	// `shots to_end`: -BbBodySwingShots=<ms> runs to the file's last sample, as for a recording (a computed swing with its finish)
+	bool bShotsToEnd = false;
 	/** `ball_after_contact shown`: the file's ball after contact is drawn (a recorded swing's batted ball). */
 	bool bBallAfter = false;
 	/** `title <text>`: the screen's first line, in place of the model's. */
