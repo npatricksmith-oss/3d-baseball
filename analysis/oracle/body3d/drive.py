@@ -266,12 +266,13 @@ JOINTS = ("lumbar", "hip_L", "hip_R", "knee_L", "knee_R", "ankle_L", "ankle_R",
 #                         Hatze 1977, MacKay 1986: closed). Range 0.22-0.97 (Tsuji's least; Gomi & Osu's largest
 #                         zero-torque value)
 #   shoulder 0.47         READ: Lipps et al. 2020, at rest (0 % of maximum): 0.61 raised and lowered, 0.33 turned about
-#                         the upper arm, 0.46 swept in the level plane; their mean (the shoulder's axes cannot be told
-#                         apart in the trunk's frame)
-#   ankle bend 0.40       READ: Lee, Krebs & Hogan 2014, relaxed: 0.34 seated, 0.45 knee straight
-#   ankle roll 0.165      READ: the same: 0.15, 0.18
-#   knee 0.25             READ: the relaxed lower leg left to swing (Casabona, Valle et al. 2012: 0.18 +- 0.08 swinging
-#                         down, 0.31 +- 0.09 swinging up). Small perturbations about a held angle give 1.0 (Koopman 2016,
+#                         the upper arm, 0.46 swept in the level plane (its +- 0.22, 0.10, 0.16 are 95 % confidence
+#                         intervals, not SDs); their mean (the shoulder's axes cannot be told apart in the trunk's frame)
+#   ankle bend 0.40       READ: Lee, Krebs & Hogan 2014, relaxed: 0.34 seated, 0.45 knee straight (SEs 0.02)
+#   ankle roll 0.165      READ: the same: 0.15, 0.18 (SEs 0.03)
+#   knee 0.25             READ: the relaxed lower leg left to swing (Casabona, Valle et al. 2012, controls: 0.18 +- 0.08
+#                         and 0.31 +- 0.09, the two half-swings the paper quotes, where its groups differed least and
+#                         most: two of its figures, not the controls' whole range). Small perturbations about a held angle give 1.0 (Koopman 2016,
 #                         elderly) to 2: the two methods disagree fivefold; the free swing is the nearer to a swing
 #   hip 2.0               NOT READ as a relaxed mean. Range 0.5-4.6: Huang 2020's relaxed subjects 2-21 forward and back
 #                         from 1 deg pulls (a poor fit, its authors say), the swinging leg in walking 1.9-4.6 (van der Kooij
@@ -279,8 +280,10 @@ JOINTS = ("lumbar", "hip_L", "hip_R", "knee_L", "knee_R", "ankle_L", "ankle_R",
 #                         range resists with 14-17 N m at 300-700 deg/s (its fit carried up from 90 deg/s), which is
 #                         1.4-2.7 as a coefficient. Nothing at all for the hip sideways or about the thigh
 #   trunk 5.0             NOT READ. Range 1.0-27.5: relaxed sitting 4-7 forward and back (Hodges 2009, second hand, my
-#                         lever); 27.5 +- 9.0 with the trunk's muscles holding 100-170 N (Moorhouse & Granata 2005: the
-#                         relaxed trunk cannot have more); the least quick-release mean 1.2. NOTHING for the twist relaxed
+#                         lever); 27.5 +- 9.0 with the trunk's muscles holding 100-170 N (Moorhouse & Granata 2005: trunk
+#                         FLEXION-EXTENSION, not twist; the lever of its conversion is not stated, and its own S1-T10
+#                         distance, 0.203 m, would give about 12.9; taken as a ceiling: the relaxed trunk cannot have
+#                         more); the least quick-release mean 1.2. NOTHING for the twist relaxed
 DAMP_GROUPS = {"arms": ("shoulder_L", "shoulder_R", "elbow_L", "elbow_R", "wrist_L", "wrist_R"), "trunk": ("lumbar",),
                "legs": ("hip_L", "hip_R", "knee_L", "knee_R", "ankle_L", "ankle_R")}
 
