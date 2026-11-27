@@ -228,6 +228,34 @@ class RealSwingFile(unittest.TestCase):
             low = np.min(np.stack([self.C(sd + "_" + k)[stance, 2] for k in ("heel_in", "heel_out", "ball_in", "ball_out")]), axis=0)
             self.assertLess(np.abs(low).max(), 0.02, sd)
 
+    def test_feet_against_the_raw_heel_and_toe_markers(self):
+        # review P2-3: the drawn feet held against his raw heel and toe markers (read here), not against the exporter's own
+        # sole points: (1) at every sample the foot's long axis (the drawn shoe's, the viewer's check ties the two) within
+        # 1 deg of his heel-to-toe markers' line (0.04 deg here), and the ball of the foot within 2 cm of that line across the
+        # foot (16 mm; it is the marker's height below it, the markers sit on the shoe's top); (2) in the stance the heel's sole under his raw heel marker within
+        # 1 cm across the ground (2.9 mm), and while the lead foot is planted (30 ms after foot plant to +300 ms) within
+        # 2.5 cm (the foot pitched 8-10 deg puts the sole under the marker's height a little forward: 15.5 mm); (3) the
+        # drawn soles move no more than his raw markers do, plus 5 mm, in the stance (both feet) and the lead heel while
+        # planted (his toe swings open on that heel, so there only the heel is compared)
+        flat = lambda v: v[:, :2]
+        stance = self.t < self.ev["lead_heel_up"] - 0.100
+        planted = (self.t >= self.ev["foot_plant"] + 0.030) & (self.t <= 0.300)
+        moved = lambda p, m: np.linalg.norm(flat(p[m]) - flat(p[m])[0], axis=1).max()
+        for sd in "LR":
+            hee, toe = self.sim(self.mk[sd + "HEE"]), self.sim(self.mk[sd + "TOE"])
+            heel = (self.C(sd + "_heel_in") + self.C(sd + "_heel_out")) / 2
+            ball = (self.C(sd + "_ball_in") + self.C(sd + "_ball_out")) / 2
+            _, fx, fy, _ = self.B("foot_" + sd)
+            raw = (toe - hee) / np.linalg.norm(toe - hee, axis=1, keepdims=True)
+            self.assertLess(np.degrees(np.arccos(np.clip(np.sum(raw * fx, axis=1), -1, 1))).max(), 1.0, "foot_%s heading" % sd)
+            self.assertLess(np.abs(np.sum((ball - hee) * fy, axis=1)).max(), 0.020, "foot_%s ball across the foot" % sd)
+            self.assertLess(np.linalg.norm(flat(heel - hee)[stance], axis=1).max(), 0.010, "foot_%s heel in the stance" % sd)
+            self.assertLessEqual(max(moved(heel, stance), moved(ball, stance)), max(moved(hee, stance), moved(toe, stance)) + 0.005, sd)
+        hee = self.sim(self.mk["LHEE"])
+        heel = (self.C("L_heel_in") + self.C("L_heel_out")) / 2
+        self.assertLess(np.linalg.norm(flat(heel - hee)[planted], axis=1).max(), 0.025)
+        self.assertLessEqual(moved(heel, planted), moved(hee, planted) + 0.005)
+
     def test_hands_on_the_bat(self):
         # each hand's far point (the file's grip point, his hand's centre) on the handle at every sample: within 7 cm of the
         # bat's axis and between the knob and 25 cm up it (he never lets go in this swing)
