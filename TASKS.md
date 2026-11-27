@@ -23,7 +23,7 @@ Status: `[ ]` not started · `[~]` partly done · `[?]` needs an owner decision
 
 **Owner, 2026-11-27: not a baseball swing; searches cancelled** until he rules: Q66 (s13 review), Q67.
 
-**Running** (restart if stopped): session 13, `body-3d-13` (Fable), worktree `swing-research`, `work/body-3d`, brief WORKER-BODY-3D-13, changed by message: it only looks at the swing and proposes. Then: the owner. **The swing in the viewer (D43):** `bin/body-swing.sh`, player-visuals §14. Deferred: its tests skip on main (no [4] curves here).
+**Running:** nothing. Sessions 8–13 merged; session 13 is the look at the swing (spec §4.15) and its review. **The swing in the viewer (D43):** `bin/body-swing.sh`, player-visuals §14. Deferred: its tests skip on main (no [4] curves here).
 
 **Next:** §2: the ground-dive leftovers ([note](docs/calibration/2026-11-23-of-ground-dive.md) §9).
 

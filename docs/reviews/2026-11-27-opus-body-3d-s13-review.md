@@ -164,4 +164,14 @@ Not done: the two "back held" replays (no script; P3-3); no search of any kind.
 
 ## Resolution
 
-Open.
+Resolved 2026-11-27 (Coordinator). Fixes by the session's own worker, no search (`4db1cd3`, `af6c0a0`, `44615f8`); merged as `14e1a60`. No second review: the fixes are this review's own figures written in, two committed scripts and one test.
+
+- **P1-1, P1-2: taken.** The proposal's first two items are one ask: the ball's exit speed and launch angle by the game's collision, on time and 7 ms early and late, direction free; D44's pull and push stay a check never given to the search. The account says the chop already meets the ball at those timings.
+- **P1-3: taken.** Every lab-study [4] figure and the 10 ms bat peak are out of the proposed gate rows; Statcast, OpenBiomechanics and Welch in their place.
+- **P1-4: taken.** D39 is first in the order to build.
+- **P2-1 to P2-8, P3-1, P3-5, P3-6: fixed** in the account and the proposal.
+- **P3-2: added, one word disputed by the worker with a run:** the front foot turns 39° toe-back (from 44° open to 5°), not further open. The substance stands; no second read needed.
+- **P3-3, P3-4: fixed.** `swing_causes.py` reproduces every reading and replay; a test runs the oracle's six golden barrel contacts through `contact3d` and holds its restitution to the game's.
+- **With the owner:** Q66 (what the batter is asked to do: the proposal in the order above, a launch of his own first, or stop) and Q67 (whether this session counts under D42). Nothing is built or searched until he answers.
+
+Checks run by the Coordinator from `main` after the merge (job 538 and two viewer runs): 100 body tests, 112 oracle tests (8 expected failures), `built3d`, `probe3d` (3.6e-11), `pelvis3d`, `contact3d` and the Savant script's `--check`, the exporter's 6 tests, the viewer's check (4.2 mm, 1.5°), `-BbSavedPlayCheck`, `bin/check-docs.py`: all pass. Nothing under `sim/` changed.
