@@ -17,11 +17,11 @@ Status: `[ ]` not started · `[~]` partly done · `[?]` needs an owner decision
 
 ## Resume here (2026-11-27)
 
-**State.** PLAN D31–D43: a force-driven body; PLAN §14.1, spec [docs/body-motion.md](docs/body-motion.md).
+**State.** PLAN D31–D44: a force-driven body; PLAN §14.1, spec [docs/body-motion.md](docs/body-motion.md).
 
 **Sessions 8–11 are merged** (spec §4.10–§4.13): 21.1 m/s (47 mph; the gate asks 29). **D42:** on while each session gains honest bat speed, back to the owner if two in a row gain nothing. Session 11 gained.
 
-**Waiting on the owner: Q64** (where the ball is met, from his hips; spec §4.13, review P1-1). Not blocking.
+**Q64 answered (D44):** session 13's first step: the on-time swing up the middle, the ball's place found by practice; the spec's Q64 lines then.
 
 **Running** (restart if stopped): session 12, `body-3d-12` (Fable), worktree `swing-research`, `work/body-3d`; then an Opus review, merge. The swing in the viewer (D43), `body-viewer` (Opus), worktree `body-research`, `work/body-viewer`; then a Sonnet review, merge.
 
