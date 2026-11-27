@@ -100,8 +100,16 @@ class RunFailed(E.SolveError):
         self.recs = recs
 
 
+class Rec(tuple):
+    """one record of a run: (t, state, contact forces, drives, stops, tendon springs), as before, and with it
+    .loads: what the ground carried (the sum of the contact points' upward forces, N) at EVERY STEP's instant since the
+    record before, in order, this record's own instant last (body-motion 4.15, part 0). The first record has its own only."""
+    loads = None
+
+
 def run_raw(s, st, t0, nsteps, h, every, aux=None, order=(), tag="run", reps=0):
-    """records [(t, state, contact forces, drives (tau, speed, activation), stops (tau, angle))] from the probe.
+    """records [(t, state, contact forces, drives (tau, speed, activation), stops (tau, angle))] from the probe, each a
+    Rec (its .loads: the ground's upward force at every step since the record before).
     A run that fails raises RunFailed, which carries the records made before the failure."""
     aux = s.new_aux() if aux is None else aux
     path = os.path.join(OUT, "model_%s_%d.txt" % (tag, os.getpid()))
@@ -119,13 +127,14 @@ def run_raw(s, st, t0, nsteps, h, every, aux=None, order=(), tag="run", reps=0):
     recs = []
     for line in r.stdout.splitlines():
         v = [float(x) for x in line.split()]
-        if len(v) != width:                          # a line cut short by the failure: not a record
+        if len(v) != width + (every if recs else 1):   # a line cut short by the failure: not a record
             break
         o = 1 + n
-        recs.append((v[0], v[1:o], [tuple(v[o + 3 * i:o + 3 * i + 3]) for i in range(nc)],
-                     [tuple(v[o + 3 * nc + 3 * i:o + 3 * nc + 3 * i + 3]) for i in range(na)],
-                     [tuple(v[o + 3 * nc + 3 * na + 2 * i:o + 3 * nc + 3 * na + 2 * i + 2]) for i in range(ns)],
-                     v[o + 3 * nc + 3 * na + 2 * ns:]))
+        recs.append(Rec((v[0], v[1:o], [tuple(v[o + 3 * i:o + 3 * i + 3]) for i in range(nc)],
+                         [tuple(v[o + 3 * nc + 3 * i:o + 3 * nc + 3 * i + 3]) for i in range(na)],
+                         [tuple(v[o + 3 * nc + 3 * na + 2 * i:o + 3 * nc + 3 * na + 2 * i + 2]) for i in range(ns)],
+                         v[o + 3 * nc + 3 * na + 2 * ns:width])))
+        recs[-1].loads = v[width:]
     if r.returncode != 0:
         raise RunFailed(r.stderr.strip() or "probe failed", recs)
     return recs

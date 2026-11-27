@@ -264,9 +264,49 @@ def gate(out):
     return rows
 
 
+# Statcast's "intercept against the batter" is measured from the hitter's centre of mass AS HE STOOD BEFORE THE PITCH. This body
+# has no stance: it starts at launch. Research note 15's means carry the body's figure into that frame: at the intercept the
+# rear ankle has travelled 10.4 +- 6.1 cm toward the pitcher from where it was in the stance, where the hips were 33.7 +- 4.6 cm
+# ahead of it. So (the ball ahead of the body's rear ankle at contact) + 10.4 - 33.7 cm is the figure to hold against
+# Statcast's column, with those two means' spreads on it (flagged: a conversion by other hitters' averages, not a measurement of him).
+STANCE_REAR_ANKLE_TRAVEL, STANCE_HIPS_AHEAD = 0.104, 0.337
+
+
+def ball_place(ctx, u):
+    """WHERE HE MEETS THE BALL (body-motion 4.15; PLAN D44), m toward the pitcher (the world's +Y): the ball's place ahead of
+    the middle of his hips at contact and at the start, of his whole body's centre of mass at both, of each ankle at
+    contact, and carried into Statcast's frame (above). And where the ball goes by the game's collision (contact3d)."""
+    import contact3d as K
+    m = ctx.m
+    fine = ctx.run(u, every=1)
+    tx = ctx.contact(fine)[0]
+    ic = min(range(len(fine)), key=lambda k: abs(fine[k][0] - tx))
+    y = ctx.Pc[1]
+    hips = lambda st: 0.5 * (m.joint_pos(st, "hip_L")[1] + m.joint_pos(st, "hip_R")[1])
+    s0, s1 = fine[0][1], fine[ic][1]
+    out = {"ahead of his hips at contact": y - hips(s1), "ahead of his hips at the start": y - hips(s0),
+           "ahead of his centre of mass at contact": y - B.com(m, s1)[0][1], "ahead of his centre of mass at the start": y - B.com(m, s0)[0][1],
+           "ahead of the front ankle at contact": y - m.joint_pos(s1, "ankle_L")[1], "ahead of the rear ankle at contact": y - m.joint_pos(s1, "ankle_R")[1],
+           "ahead of the rear ankle at the start": y - m.joint_pos(s0, "ankle_R")[1], "height": ctx.Pc[2], "meet": getattr(ctx, "meet", 0.0)}
+    out["in Statcast's frame (from the stance's centre of mass, by note 15's means)"] = out["ahead of the rear ankle at contact"] + STANCE_REAR_ANKLE_TRAVEL - STANCE_HIPS_AHEAD
+    ball = K.swing_ball(ctx, u, shifts_ms=(0.0,), log=lambda s_: None)[0.0]
+    return out, {k: v for k, v in ball.items() if k != "where"}
+
+
 def show(ctx, u, log=print):
     out = PR.report(ctx, u, log)
     out["clock_allowed_ms"] = ctx.t_avail * 1e3
+    bp, ball = ball_place(ctx, u)
+    out["ball_place_m"], out["ball_by_the_collision"] = bp, ball
+    log("   WHERE HE MEETS THE BALL (m toward the pitcher): ahead of his hips at contact %.3f, at the start %.3f; ahead of his centre of mass at contact %.3f, at the start %.3f; ahead of the front ankle at contact %+.3f, of the rear ankle %.3f; in Statcast's frame (from where his centre of mass stood before the pitch, carried there by other hitters' averages) %.3f m (%.1f in)"
+        % (bp["ahead of his hips at contact"], bp["ahead of his hips at the start"], bp["ahead of his centre of mass at contact"], bp["ahead of his centre of mass at the start"], bp["ahead of the front ankle at contact"],
+           bp["ahead of the rear ankle at contact"], bp["in Statcast's frame (from the stance's centre of mass, by note 15's means)"], bp["in Statcast's frame (from the stance's centre of mass, by note 15's means)"] / 0.0254))
+    if ball.get("hit"):
+        import contact3d as K
+        log("   WHERE THE BALL GOES, by the game's collision (never given to the search): %+.1f deg from straight back (+ toward first base: %s), %+.1f deg up, %.1f m/s (%.0f mph) off the bat; touched %.1f ms before the sweet spot reaches the ball's place, the bat %+.1f deg from square then"
+            % (ball["spray_deg"], K.side(ball["spray_deg"]), ball["launch_deg"], ball["exit_mps"], ball["exit_mps"] / MPH, -ball["t_from_practised_ms"], ball["square_deg"]))
+    else:
+        log("   WHERE THE BALL GOES, by the game's collision: NO CONTACT (%s)" % ball.get("why"))
     en = energy(ctx, u)
     out["energy_J"] = en
     log("   THE WORK OF EVERY ELEMENT TO CONTACT (J): muscles %+.1f; holding muscles %+.1f; hold-still torques %+.1f; the joints' damping %+.1f; stops %+.1f; ground %+.1f; gravity %+.1f;   the body's kinetic energy gained %+.1f (the elements' sum less that: %+.2f)"

@@ -2993,6 +2993,240 @@ class SessionTwelveChecks(unittest.TestCase):
             self.assertLess(abs(PV.wrap(PV.heading(m, x, "foot_" + sd) - f0[sd])), 0.5)
 
 
+class SessionThirteenChecks(unittest.TestCase):
+    """body-motion 4.15 (session 13): the score's readings corrected or added there."""
+
+    def test_the_feets_least_load_is_read_at_every_step_and_sees_a_dip_between_two_records(self):
+        """body-motion 4.15, part 0: Ctx.balance's "least the feet carry" (the score's and the gate's "does not jump")
+        against a run recorded at EVERY step, with the ground's upward force at each of its states worked here from the
+        contact law (each sole point under the ground pushes up kn x depth - cn x min(1, depth / d0) x its upward speed,
+        never less than nothing), which is neither the reading's arithmetic nor the probe's own force code. On three
+        kept swings of session 12: the one whose feet leave the ground for 1.75 ms between two records 42-50 ms after
+        contact (the last 5 ms record before contact + 50 ms does not reach it: the record that straddles that instant
+        has to be read as far as it), one with a dip to 0.07 of his weight, one with none. The reading from the score's
+        own 5 ms records is the fine run's least to 1e-9 of his weight; the old reading (jump="records": the records'
+        instants only) is 0.23 where his feet are off the ground, and is still there to score a result as it was found."""
+        import json
+        import os
+        PR = _practice()
+        here = os.path.dirname(os.path.abspath(PR.__file__))
+        PR.P.build()
+        seen = {}
+        for name in ("practice3d_s12_carried_b.json", "practice3d_s12_carried.json", "practice3d_s12_posture.json"):
+            with open(os.path.join(here, name)) as fh:
+                d = json.load(fh)
+            ctx = PR.Ctx(**d["options"])
+            u = ctx.u_of(d["plan"])
+            recs = ctx.run(u)                                   # the score's records, 5 ms apart
+            self.assertAlmostEqual(recs[1][0] - recs[0][0], 0.005, delta=1e-9)
+            tx = ctx.nearest(recs)[0]
+            fine = ctx.run(u, every=1)
+            s = ctx.m.sys
+            truth, under = 1e9, 0
+            for rec in fine:
+                if rec[0] > tx + PR.AFTER + 1e-9:
+                    break
+                up = 0.0
+                for cname, b, p, kn, cn, kt, ct, mu in s.contacts:
+                    x, q, v, w = s.pose(rec[1], b)
+                    sp = E.mv(E.qR(q), p)
+                    depth = -(x[2] + sp[2])
+                    if depth > 0.0:
+                        up += max(0.0, kn * depth - cn * min(1.0, depth / E.CONTACT_D0) * E.add(v, E.cross(w, sp))[2])
+                truth = min(truth, up / ctx.BW)
+                under += up / ctx.BW < 0.02
+            new = ctx.balance(recs, tx)[1]
+            self.assertAlmostEqual(new, truth, delta=1e-9, msg=name)
+            ctx.o["jump"] = "records"
+            old = ctx.balance(recs, tx)[1]
+            self.assertGreaterEqual(old, new - 1e-12)
+            seen[name] = (old, new, under * ctx.h)
+            # the report's 1 ms records give the same least: the reading does not depend on how often a record is made
+            del ctx.o["jump"]
+            self.assertAlmostEqual(ctx.balance(ctx.run(u, every=4), tx)[1], truth, delta=1e-9, msg=name)
+        old, new, off = seen["practice3d_s12_carried_b.json"]
+        self.assertLess(new, 0.001)                             # his feet are off the ground ...
+        self.assertAlmostEqual(off, 0.00175, delta=0.0003)      # ... for 1.75 ms (4.14, part 3, seventh)
+        self.assertGreater(old, 0.2)                            # and the records' instants do not see it
+        self.assertAlmostEqual(seen["practice3d_s12_carried.json"][1], 0.068, delta=0.002)
+        self.assertGreater(seen["practice3d_s12_carried.json"][0], 0.14)
+        self.assertAlmostEqual(seen["practice3d_s12_posture.json"][1], 0.129, delta=0.002)
+
+
+    def test_the_balls_place_moves_along_its_line_and_takes_the_arms_time_with_it(self):
+        """body-motion 4.15, part 1 (PLAN D44): Ctx(meet=s) puts the ball's place s metres toward the pitcher ALONG THE
+        BALL'S LINE and shortens the time the arms may fire before contact by the ball's flight over s. Worked by hand
+        from the pitch's own figures: at 37.98 m/s, 0.10 m is 2.633 ms; a line coming down 5.27 deg and moving 1.62 deg
+        toward first base rises 0.10 sin(5.27) = 0.92 cm and comes back 0.10 cos(5.27) sin(1.62) = 0.28 cm toward third
+        over 10 cm toward the pitcher. Nothing else of the body or the start changes. And the replay that shows the cost
+        bites: the kept 26.25 swing, its plan untouched, with the ball 20 cm further out, is charged by the clock (its
+        first arm muscle is then earlier than the rule allows) where at its own place it is not."""
+        import json
+        import os
+        PR = _practice()
+        with open(os.path.join(os.path.dirname(os.path.abspath(PR.__file__)), "practice3d_s12_posture.json")) as fh:
+            d = json.load(fh)
+        base = PR.Ctx(**d["options"])
+        out = PR.Ctx(**dict(d["options"], meet=0.10))
+        self.assertAlmostEqual((base.t_avail - out.t_avail) * 1e3, 2.633, delta=0.001)
+        self.assertAlmostEqual(base.t_avail, 0.403 - 0.10 - 0.05, delta=1e-12)
+        dx, dy, dz = (out.Pc[c] - base.Pc[c] for c in range(3))
+        self.assertAlmostEqual(dz * 100, 10.0 * math.sin(math.radians(5.27)), delta=1e-6)
+        self.assertAlmostEqual(dx * 100, -10.0 * math.cos(math.radians(5.27)) * math.sin(math.radians(1.62)), delta=1e-6)
+        self.assertAlmostEqual(math.sqrt(dx * dx + dy * dy + dz * dz), 0.10, delta=1e-12)
+        self.assertGreater(dy, 0.099)
+        self.assertEqual(list(out.st), list(base.st))                       # the body's start is untouched
+        u = base.u_of(d["plan"])
+        clock = lambda c: PR.terms(c, c.residuals(u))["the arms' clock"]
+        self.assertEqual(clock(base), 0.0)
+        self.assertGreater(clock(PR.Ctx(**dict(d["options"], meet=0.20))), 1.0)
+        self.assertEqual(clock(PR.Ctx(**dict(d["options"], meet=-0.20))), 0.0)
+
+    def test_a_search_given_one_more_number_goes_on_from_its_kept_state(self):
+        """body-motion 4.15, part 1: posture3d.widened gives a kept state of the search one more number without starting
+        it afresh. On a score whose least is known (a bowl in three numbers, the third of which the first search does
+        not have): the first search, on two numbers, ends near their least; widened, the kept centre, spreads and paths
+        of the two are untouched to the last digit, the third starts where it is told with the first step asked
+        (whatever the overall step has become), and the search gone on finds the third number's least as well."""
+        import importlib
+        import multiprocessing
+        PR = _practice()
+        Q = importlib.import_module("posture3d")
+
+        class Bowl:
+            def __init__(self, free):
+                self.free = free
+
+            def residuals(self, u):
+                return [10.0 * (u[0] - 0.30), 10.0 * (u[1] - 0.70), 10.0 * (u[2] - 0.55)]
+
+        class Pc:                                       # what widened() reads of a posture search: its free numbers and that it has the ball's place
+            meet, free = True, [0, 1, 2]
+        two = Bowl([0, 1])
+        u0 = [0.5, 0.5, 0.40]
+        keep = {}
+        PR._CTX = two
+        with multiprocessing.get_context("fork").Pool(2) as pool:
+            PR.cma(two, u0, 120, lambda s_: None, pool, seed=3, lam=8, sigma0=0.05, keep=keep)
+        self.assertAlmostEqual(keep["best_u"][0], 0.30, delta=0.01)
+        self.assertAlmostEqual(keep["best_u"][1], 0.70, delta=0.01)
+        keep["best_u"], start = keep["best_u"][:2], u0[:2]                     # as a posture search without the ball's place keeps them
+        keep["m_marks"] = {k: v[:2] for k, v in keep["m_marks"].items()}
+        wide, start = Q.widened(Pc, json_round(keep), start, lambda s_: None, step=0.012)
+        self.assertEqual(wide["m"][:2], keep["m"])
+        self.assertEqual(wide["C"][:2], keep["C"])
+        self.assertEqual((wide["ps"][:2], wide["pc"][:2]), (keep["ps"], keep["pc"]))
+        self.assertAlmostEqual(wide["sigma"] * math.sqrt(wide["C"][2]), 0.012, delta=1e-12)      # the new number's first step
+        self.assertAlmostEqual(wide["m"][2], 0.40, delta=1e-12)                                  # the body's own place: 40 cm into a range of -40 to +60
+        self.assertEqual(len(start), 3)
+        three = Bowl([0, 1, 2])
+        PR._CTX = three
+        keep2 = {}
+        with multiprocessing.get_context("fork").Pool(2) as pool:
+            ub, cb, hist, mfull, sp = PR.cma(three, start, 420, lambda s_: None, pool, seed=3, lam=8, sigma0=0.05, state=wide, keep=keep2)
+        self.assertEqual(hist[120][0], 120)                                                      # it went on from generation 120, not from 0
+        self.assertAlmostEqual(ub[2], 0.55, delta=0.01)
+        self.assertAlmostEqual(ub[0], 0.30, delta=0.01)
+        self.assertLess(cb, 0.02)
+
+    def test_a_kept_search_carried_onto_a_stronger_body_asks_the_torques_it_asked(self):
+        """body-motion 4.15, part 2 (the owner's D34 question; a what-if body, not the batter): posture3d.rebodied carries
+        a kept state onto a body whose muscles' bounds are 1.5 times as great. Checked through the plan itself, in N m and
+        seconds: the kept best's plan on the stronger body is the plan it was on the body it was kept on, channel for
+        channel (every strength to 1e-9 N m, every timing and starting level untouched), where without the carrying the
+        same numbers would ask more of every muscle (the strongest by half as much again); and a number's spread shrinks
+        by the same ratio as the number, so the step is the same step in N m."""
+        import importlib
+        import random
+        PR = _practice()
+        Q = importlib.import_module("posture3d")
+        L = importlib.import_module("ladder3d")
+        o = dict(L.options("r4"), contact="nearest")
+        then, now = Q.PostureCtx(o, meet=True), Q.PostureCtx(dict(L.options("r6_all15"), contact="nearest"), meet=True)
+        rng = random.Random(5)
+        u = [rng.uniform(0.05, 0.95) for _ in range(then.nplan + len(Q.NUMBERS) + 1)]
+        nfree = len(then.free)
+        state = {"m": [u[i] for i in then.free], "C": [1.0 + 0.1 * k for k in range(nfree)], "ps": [0.1] * nfree, "pc": [0.2] * nfree, "sigma": 0.004,
+                 "best_u": list(u), "m_marks": {"100": [u[i] for i in then.free]}, "g": 100}
+        wide, start = Q.rebodied(now, state, list(u), then.base.cap, lambda s_: None)
+        p_then, p_now, p_raw = then.base.plan(u[:then.nplan]), now.base.plan(wide["best_u"][:now.nplan]), now.base.plan(u[:now.nplan])
+        more = 0.0
+        for n in PR.CH:
+            self.assertAlmostEqual(p_now[n][0], p_then[n][0], delta=1e-9, msg=n)
+            self.assertEqual(p_now[n][1:], p_then[n][1:], msg=n)
+            more = max(more, p_raw[n][0] / p_then[n][0] if p_then[n][0] > 1.0 else 0.0)
+        self.assertGreater(more, 1.5)                                   # the bound is 1.5 times; the holding strength is not, so the burst's most is more than 1.5 times
+        self.assertEqual(wide["best_u"][then.nplan:], u[then.nplan:])   # the posture and the ball's place are not touched
+        k = then.free.index(0)                                          # the first channel's strength number
+        r = then.base.cap[PR.CH[0]] / now.base.cap[PR.CH[0]]
+        self.assertAlmostEqual(wide["m"][k], state["m"][k] * r, delta=1e-12)
+        self.assertAlmostEqual(math.sqrt(wide["C"][k]) * now.base.cap[PR.CH[0]], math.sqrt(state["C"][k]) * then.base.cap[PR.CH[0]], delta=1e-9)
+        self.assertEqual(wide["ps"], state["ps"])
+
+    def test_where_the_ball_goes_is_read_by_the_games_collision(self):
+        """body-motion 4.15, part 1: contact3d's reading (physics-spec 7's detection around the oracle's own impulse
+        solver, bbphys) against its worked cases: the head-on formula, the instant of touch, a turned bat."""
+        import importlib
+        import io
+        import contextlib
+        _practice()
+        K = importlib.import_module("contact3d")
+        buf = io.StringIO()
+        with contextlib.redirect_stdout(buf):
+            ok = K.check()
+        self.assertTrue(ok, buf.getvalue())
+
+
+    def test_contact3d_gives_the_oracles_golden_contacts_and_the_games_own_restitution(self):
+        """The review of session 13, P3-4: contact3d's agreement with the game's collision by test and not by reading.
+        (1) The oracle's golden bat-ball contacts (golden/tangential_restitution.json, which the Rust is held to by
+        bb_physics's collision_golden) run through contact3d's own path from the contact state: its station on the bat
+        and its normal (physics-spec 7, worked by contact3d from the ball's place and the bat's) are the fixture's, and
+        with the fixture's restitution given, the ball's velocity and spin after the impulse are the golden result's,
+        to 1e-9. The six cases on the barrel and the cylinder; the seventh is on the taper, where the spec's detection
+        (the ball's centre projected onto the axis) is "close for gentle tapers" and not the fixture's station: it is
+        3.5 mm off there, which is said and not used (the practised swing meets the ball on the barrel).
+        (2) The normal restitution contact3d works for itself, against the game's own figures, none of them worked
+        from contact3d: collision_golden's A8 prints e 0.4585 for the sweet spot at an 85 mph pitch and a 75 mph bat
+        (cargo test -p bb_physics --test collision_golden -- --nocapture, read 2026-11-27); physics-spec 8.2's lab check
+        has 0.478 at 29 in and 110 mph; its table has f = 0.75 at the tip and never under 0.35, on e_ref 0.460 at 70 m/s."""
+        import importlib
+        import json
+        import os
+        _practice()
+        K = importlib.import_module("contact3d")
+        BP = K.BP
+        with open(os.path.join(os.path.dirname(os.path.abspath(__file__)), "golden", "tangential_restitution.json")) as fh:
+            contacts = json.load(fh)["contacts"]
+        on_barrel = [c for c in contacts if c["u"] >= K.U_TAPER]
+        self.assertEqual(len(on_barrel), 6)
+        for c in on_barrel:
+            r = K.impulse_at(tuple(c["ball_r"]), tuple(c["ball_v"]), tuple(c["ball_w"]), tuple(c["knob"]), BP.unit(tuple(c["axis"])), tuple(c["v_cm"]), tuple(c["omega"]),
+                             mu=c["mu"], e_given=c["e_n"])
+            self.assertTrue(r["hit"], c["name"])
+            self.assertAlmostEqual(r["u"], c["u"], delta=1e-9, msg=c["name"])
+            for got, want in ((r["n"], c["n"]), (r["v"], c["result"]["v"]), (r["w"], c["result"]["w"])):
+                for x, y in zip(got, want):
+                    self.assertAlmostEqual(x, y, delta=1e-9, msg=c["name"])
+            self.assertAlmostEqual(r["e_t"], c["result"]["e_t"], delta=1e-12, msg=c["name"])
+        taper = [c for c in contacts if c["u"] < K.U_TAPER][0]
+        r = K.impulse_at(tuple(taper["ball_r"]), tuple(taper["ball_v"]), tuple(taper["ball_w"]), tuple(taper["knob"]), BP.unit(tuple(taper["axis"])), tuple(taper["v_cm"]),
+                         tuple(taper["omega"]), mu=taper["mu"], e_given=taper["e_n"])
+        self.assertLess(abs(r["u"] - taper["u"]), 0.005)                 # close, as the spec says, and not the same
+        self.assertGreater(abs(r["u"] - taper["u"]), 0.001)
+        uss = K.BAT_L - K.SS_FROM_TIP
+        self.assertAlmostEqual(K.e_n(uss, (85.0 + 75.0) * BP.MPH), 0.4585, delta=5e-5)        # the game's printed figure
+        self.assertAlmostEqual(K.e_n(29.0 * BP.INCH, 110.0 * BP.MPH), 0.478, delta=5e-4)      # the spec's lab check
+        self.assertAlmostEqual(K.e_n(K.BAT_L, 70.0), 0.75 * 0.460, delta=1e-12)
+        self.assertAlmostEqual(K.e_n(0.30, 70.0), 0.35 * 0.460, delta=1e-12)
+
+
+def json_round(state):
+    """a search's kept state as it comes back from its file."""
+    import json
+    return json.loads(json.dumps(state))
+
+
 class StanceChecks(unittest.TestCase):
     """body-motion 4.13, rungs 3 and 4: the start on major leaguers' feet; the hips' turn by their own muscles."""
 

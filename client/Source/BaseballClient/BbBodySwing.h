@@ -164,7 +164,11 @@ private:
 	int32 View = 0;
 	float OrbitYaw = 40.f, OrbitPitch = 12.f, OrbitDist = 5.5f;
 
-	/** -BbBodySwingShots: which picture is next, and the wall clock. */
+	/** -BbBodySwingShots: which picture is next, and the wall clock. ShotViews: 2 sides (the fixed
+	 *  instants) or 3 (-BbBodySwingShots=<ms>: a picture every <ms>, from above too); the seconds a pose
+	 *  is given before its picture is asked for and after. */
+	int32 ShotViews = 2;
+	double ShotBefore = 1.0, ShotAfter = 0.5;
 	int32 Shot = -1;
 	double Wall = 0.0, ShotSince = 0.0;
 	bool bShotAsked = false;

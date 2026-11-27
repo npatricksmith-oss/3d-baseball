@@ -641,7 +641,12 @@ int32 ABbBodySwing::Start(const FString& Path, UBbFigureShop* InShop, ABbPark* I
 		UE_LOG(LogBbSwing, Error, TEXT("BB_BODYCHECK result FAIL: no such fault %s (nostretch, mirror or twist)"), *Fault);
 		return 1;
 	}
-	const bool bShots = FParse::Param(Cmd, TEXT("BbBodySwingShots"));
+	// -BbBodySwingShots: the eight fixed instants from two sides. -BbBodySwingShots=<ms>: a picture every <ms> from the
+	// model's first instant to 60 ms after contact (whole multiples of <ms> counted from contact), each from the
+	// pitcher's side, the open side and above (player-visuals §14).
+	float StepMs = 0.f;
+	const bool bStep = FParse::Value(Cmd, TEXT("BbBodySwingShots="), StepMs) && StepMs >= 1.f;
+	const bool bShots = bStep || FParse::Param(Cmd, TEXT("BbBodySwingShots"));
 	GroundCm = Park ? 100.0 * Park->GroundZ(0.0, 0.4) : 0.0;
 	bool bOk = File.Load(Path, Error);
 	if (bOk && !Shop)
@@ -697,20 +702,36 @@ int32 ABbBodySwing::Start(const FString& Path, UBbFigureShop* InShop, ABbPark* I
 	HoldStart = HoldStartS;
 	if (bShots)
 	{
-		// The fixed instants, each from the pitcher's side and from the open side.
-		for (const TCHAR* E : { TEXT("start"), TEXT("launch"), TEXT("front_foot_down") })
+		if (bStep)
 		{
-			double T;
-			if (File.Event(E, T))
+			// Every StepMs, from the model's first instant to 60 ms after contact, from three sides.
+			ShotViews = 3;
+			ShotBefore = 0.6;
+			ShotAfter = 0.3;
+			const double LastMs = FMath::Min(60.0, 1e3 * File.T(File.Num() - 1));
+			for (int32 K = (int32)FMath::CeilToDouble(1e3 * File.T(0) / StepMs - 1e-6); K * StepMs <= LastMs + 1e-6; ++K)
 			{
-				ShotTimes.Emplace(E, T);
+				const int32 Ms = (int32)FMath::RoundToDouble(K * StepMs);
+				ShotTimes.Emplace(FString::Printf(TEXT("%s%03dms"), Ms < 0 ? TEXT("m") : TEXT("p"), FMath::Abs(Ms)), 1e-3 * K * StepMs);
 			}
 		}
-		ShotTimes.Emplace(TEXT("m100ms"), -0.100);
-		ShotTimes.Emplace(TEXT("m050ms"), -0.050);
-		ShotTimes.Emplace(TEXT("m020ms"), -0.020);
-		ShotTimes.Emplace(TEXT("contact"), 0.0);
-		ShotTimes.Emplace(TEXT("end"), File.T(File.Num() - 1));
+		else
+		{
+			// The fixed instants, each from the pitcher's side and from the open side.
+			for (const TCHAR* E : { TEXT("start"), TEXT("launch"), TEXT("front_foot_down") })
+			{
+				double T;
+				if (File.Event(E, T))
+				{
+					ShotTimes.Emplace(E, T);
+				}
+			}
+			ShotTimes.Emplace(TEXT("m100ms"), -0.100);
+			ShotTimes.Emplace(TEXT("m050ms"), -0.050);
+			ShotTimes.Emplace(TEXT("m020ms"), -0.020);
+			ShotTimes.Emplace(TEXT("contact"), 0.0);
+			ShotTimes.Emplace(TEXT("end"), File.T(File.Num() - 1));
+		}
 		Shot = 0;
 	}
 	SetView(0);
@@ -957,19 +978,19 @@ void ABbBodySwing::UpdateText()
 void ABbBodySwing::TickShots(float DeltaSeconds)
 {
 	// Like -BbFigureShots: the park settles for 8 s; then each instant is posed, given a second,
-	// photographed, and given half a second more.
+	// photographed, and given half a second more (0.6 and 0.3 s with -BbBodySwingShots=<ms>, which takes many).
 	if (Wall < 8.0 || Shot < 0)
 	{
 		return;
 	}
-	if (Shot >= 2 * ShotTimes.Num())
+	if (Shot >= ShotViews * ShotTimes.Num())
 	{
 		Shot = -1;
-		UE_LOG(LogBbSwing, Display, TEXT("BB_BODYSWING pictures taken: %d"), 2 * ShotTimes.Num());
+		UE_LOG(LogBbSwing, Display, TEXT("BB_BODYSWING pictures taken: %d"), ShotViews * ShotTimes.Num());
 		FPlatformMisc::RequestExit(false);
 		return;
 	}
-	const TPair<FString, double>& At = ShotTimes[Shot / 2];
+	const TPair<FString, double>& At = ShotTimes[Shot / ShotViews];
 	if (ShotSince == 0.0)
 	{
 		Clock = FMath::Clamp(At.Value, File.T(0), File.T(File.Num() - 1));
@@ -977,18 +998,21 @@ void ABbBodySwing::TickShots(float DeltaSeconds)
 		Sample(Clock, P);
 		Pose(P);
 		BallC->SetVisibility(Clock <= 1e-9);
-		SetView(Shot % 2);
+		SetView(Shot % ShotViews);
 		UpdateText();
 		ShotSince = Wall;
 	}
-	if (!bShotAsked && Wall >= ShotSince + 1.0)
+	if (!bShotAsked && Wall >= ShotSince + ShotBefore)
 	{
-		const FString Name = FString::Printf(TEXT("bodyswing_%02d_%s_%s.png"), Shot / 2 + 1, *At.Key, ViewTags[Shot % 2]);
+		// two sides: bodyswing_<n>_<instant>_<side>; three: bodyswing_<nnn>_<m|p><ms>ms_<side>, so that they sort by time
+		const FString Name = ShotViews == 2
+			? FString::Printf(TEXT("bodyswing_%02d_%s_%s.png"), Shot / ShotViews + 1, *At.Key, ViewTags[Shot % ShotViews])
+			: FString::Printf(TEXT("bodyswing_%03d_%s_%s.png"), Shot / ShotViews + 1, *At.Key, ViewTags[Shot % ShotViews]);
 		FScreenshotRequest::RequestScreenshot(FPaths::Combine(FPaths::ProjectSavedDir(), TEXT("Shots"), Name), false, false);
 		UE_LOG(LogBbSwing, Display, TEXT("BB_BODYSWING picture %s at %+.1f ms"), *Name, 1e3 * Clock);
 		bShotAsked = true;
 	}
-	else if (bShotAsked && Wall >= ShotSince + 1.5)
+	else if (bShotAsked && Wall >= ShotSince + ShotBefore + ShotAfter)
 	{
 		bShotAsked = false;
 		ShotSince = 0.0;

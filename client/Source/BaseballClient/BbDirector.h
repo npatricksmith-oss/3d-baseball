@@ -75,7 +75,9 @@ class UMaterialInterface;
  *               -BbClipSpeeds (log the ground speed each gait clip is animated for as BB_CLIP)
  *               -BbBodySwing=<file.swing> (the force-driven body's practised swing as the checking model
  *               computed it, PLAN D43, player-visuals §14; no game is played); with -BbBodySwingShots
- *               (fixed instants from two views as bodyswing_<n>_<instant>_<view>.png, then quit) or
+ *               (fixed instants from two views as bodyswing_<n>_<instant>_<view>.png, then quit),
+ *               -BbBodySwingShots=<ms> (a picture every <ms> from the first instant to 60 ms after
+ *               contact, from three views, as bodyswing_<nnn>_<m|p><ms>ms_<view>.png, then quit) or
  *               -BbBodySwingCheck (the drawn joints, knob, sweet spot and grips against the file's,
  *               BB_BODYCHECK; exit status 1 if any is over 1 cm or the file will not open)
  */

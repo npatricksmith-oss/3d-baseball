@@ -48,7 +48,7 @@ MEET_FROM_REAR_ANKLE = 1.022                           # m: Statcast's intercept
 # "meet_rear" (from the rear ankle, on it) set either rule on either stance's body; ladder3d's r3_oldball and r2_deepball.
 # ---- the aim's units (4.10) ----
 MISS_UNIT = 0.01              # m [E]
-TIMING_ERR = 0.007            # s: the measured spread of where hitters meet the ball, as a time (note 6)
+TIMING_ERR = 0.007            # s [E]: AN UPPER BOUND, NOT A MEASURED TIMING SPREAD: hitters' within-batter spread of contact depth (27 cm) turned into time as if every depth change were timing (note 6, 3.1). Measured beside it: a batter's sweet-spot tolerance 9.4 +- 6.3 ms, a skilled thrower's release window 7 ms (note 6)
 SQUARE_UNIT = 10.0            # deg [E]
 SPEED_ASK, SPEED_W = 45.0, 1.0   # m/s out of reach; 1 m/s is worth 1 cm of miss [E]
 EFFORT_W = 4.0                # one unit of effort (every muscle at full strength all swing) costs 4 m/s [E]; tried at 0, 1, 16
@@ -275,11 +275,20 @@ class Ctx:
             self.Pc = tuple(o["Pc"])
         d, a = BALL_DESCENT * B.D2R, BALL_ACROSS * B.D2R
         self.nb = (math.cos(d) * math.sin(a), -math.cos(d) * math.cos(a), -math.sin(d))
+        # meet (body-motion 4.15, part 1; PLAN D44): the ball's place moved this many metres TOWARD THE PITCHER ALONG THE
+        # BALL'S OWN LINE from where the body's rule (or Pc) has it, so that the place can be the search's to find (the same
+        # pitch, met further out or deeper; further out it is also a little higher, as the ball is coming down). What a
+        # hitter pays for meeting it further out is in t_avail below: the ball gets there sooner.
+        self.meet = o.get("meet", 0.0)
+        self.Pc = tuple(pc_ - self.meet * n_ for pc_, n_ in zip(self.Pc, self.nb))
         self.ev = E.unit(E.sub((0.0, 0.0, 1.0), E.scale(self.nb, self.nb[2])))    # up, square to the ball's line
         self.el = E.cross(self.nb, self.ev)                                       # level, square to it
         self.effort_w = o.get("effort_w", EFFORT_W)
         self.strain_w = o.get("strain_w", 0.0)
-        self.t_avail = BALL_FLIGHT - o.get("t_view", T_VIEW) - T_LATENCY      # how long before contact an arm muscle may fire
+        # how long before contact an arm muscle may fire: the ball's flight to where it is met, less the look he must have had
+        # and his latency. A ball met `meet` further out has flown that much less (meet / its speed there: 2.6 ms for 10 cm),
+        # so the decision came that much earlier on the same look, and the arms have that much less time (4.15, part 1)
+        self.t_avail = BALL_FLIGHT - self.meet / BALL_SPEED - o.get("t_view", T_VIEW) - T_LATENCY
         self.z0 = B.com(m, st)[0][2]
         self.evals = 0
         # h: the integration step of this search's runs (body-motion 4.12: 0.25 ms; sessions 8 and 9: H_STEP, 0.5 ms).
@@ -388,14 +397,33 @@ class Ctx:
 
     def balance(self, recs, tx):
         """(the extrapolated centre of mass's largest distance outside the feet's area from contact to AFTER, m;
-        the least the feet carry between them at any instant, of body weight; the centre of mass's height at the
-        end of that, of its height at the start)."""
+        the least the feet carry between them at any STEP's instant from the start to AFTER after contact, of body
+        weight; the centre of mass's height at the end of that, of its height at the start)."""
         m, s = self.m, self.m.sys
         worst, least, zend = 0.0, 1e9, None
-        for t, state, con, act, stop, sec in recs:
+        # THE FEET'S LOAD IS READ AT EVERY STEP (body-motion 4.15, part 0): each record carries what the ground bore at every
+        # step since the record before (probe3d.Rec.loads), and every step's instant up to AFTER after contact is read. Until
+        # session 13 it was read at the records' own instants, 5 ms apart in the score, and a dip between two of them was
+        # not seen (five of session 12's kept swings have one; in one his feet are off the ground for 1.75 ms).
+        # jump="records" is that old reading, kept so that a result can be scored as its search scored it; records with no
+        # .loads (the Python engine's) are read at their instants too.
+        at_steps = self.o.get("jump") != "records"
+        t_prev = None
+        for rec in recs:
+            t, state, con = rec[0], rec[1], rec[2]
+            loads = getattr(rec, "loads", None) if at_steps and t_prev is not None else None
+            if loads:
+                # the steps' instants since the record before, this record's own last; each one up to AFTER after contact
+                # is read, so the record that straddles that instant is read as far as it
+                hs = (t - t_prev) / len(loads)
+                for q, f in enumerate(loads):
+                    if t - (len(loads) - 1 - q) * hs <= tx + AFTER + 1e-9:
+                        least = min(least, f / self.BW)
+            t_prev = t
             if t > tx + AFTER + 1e-9:
                 break
-            least = min(least, sum(f[2] for f in con) / self.BW)
+            if not loads:
+                least = min(least, sum(f[2] for f in con) / self.BW)
             if t >= tx - H_STEP * EVERY:
                 x, v = B.com(m, state)
                 w0 = math.sqrt(E.G / max(0.3, x[2]))
@@ -498,11 +526,17 @@ class Ctx:
             # which the bat turns up to 15 deg: the score then jumps by 2.4 whenever contact crosses a record's instant.
             bz = bat_between(bz, self.m.axis(recs[i + 1][1], "bat", (0, 0, 1)), (tx - recs[i][0]) / (recs[i + 1][0] - recs[i][0]))
         sq = math.asin(max(-1.0, min(1.0, (bz[0] * self.nb[0] + bz[1] * self.nb[1]) / max(1e-9, math.hypot(bz[0], bz[1]) * math.hypot(self.nb[0], self.nb[1]))))) / B.D2R
-        r = [E.dot(d, self.ev) / MISS_UNIT, E.dot(d, self.el) / MISS_UNIT,
+        # miss_unit (body-motion 4.15, part 2; A RULE FOR A SEARCH'S EARLY STAGES, NOT THE AIM): the distance by which the
+        # sweet spot misses the ball's place that costs one unit of score. The aim's is MISS_UNIT (1 cm) and every result is
+        # judged by that. A search from a start that is not yet a swing may begin with it wider (10 cm, then 3), so that a
+        # fast pass near the ball scores better than a bat brought to the ball and stopped there (the parked basin, 4.12),
+        # and is then tightened to the aim's.
+        mu_ = self.o.get("miss_unit", MISS_UNIT)
+        r = [E.dot(d, self.ev) / mu_, E.dot(d, self.el) / mu_,
              E.dot(v, self.ev) * TIMING_ERR * share / MISS_UNIT, E.dot(v, self.el) * TIMING_ERR * share / MISS_UNIT,
              sq / SQUARE_UNIT,
              math.sqrt(SPEED_W * max(0.0, SPEED_ASK - vpar)),
-             E.dot(d, self.nb) / MISS_UNIT if (not came or self.o.get("contact") == "nearest") else 0.0]   # how far short along the line
+             E.dot(d, self.nb) / mu_ if (not came or self.o.get("contact") == "nearest") else 0.0]   # how far short along the line
         eff = self.effort(recs, tx, pl)
         r += [math.sqrt(self.effort_w * eff[n] / len(CH)) for n in CH]
         xo, least, zr = self.balance(recs, tx)
