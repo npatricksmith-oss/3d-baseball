@@ -4,7 +4,9 @@ what joint torques his recorded motion needs, joint by joint, against the measur
 is held to (PLAN D34, analysis/oracle/body3d/drive.py), and whether the dataset's force plates agree with his motion.
 
     uv run --with numpy --with scipy --with c3d python3 analysis/research/body/real_inverse.py [<swing id>] [--cut <Hz>]
-        [--to <ms before contact, default -20>] [--com-markers] [--parts] > sim/target/codex-probes/body3d/s14/real_inverse.out
+        [--to <ms before contact, default -20>] [--com-markers] [--parts] [--plates-as-read] > sim/target/codex-probes/body3d/s14/real_inverse.out
+    ... real_inverse.py --sign-check     the plates' force integrated against the markers' centre of mass, each sign of the
+        plates' sideways component (set T_FROM to -1.45 s first: see plates())
 
 THE DATA ARE NOT IN THIS REPOSITORY (CC BY-NC-SA 4.0, PLAN D46); see real_swing.py for where they come from. What this
 prints is derived from them: keep its output under sim/target, out of git.
@@ -217,9 +219,29 @@ def main(argv):
         % (vs[i1], vs[i1] / 0.44704, vs[: i1 + 1].max()))
 
     # ---- the whole body against the plates ----
-    fp = plates(sw, t)
+    fp = plates(sw, t, flip_x="--plates-as-read" not in argv)
     tot = sum(b.m * b.a for b in bodies.values())
     mass = sum(b.m for b in bodies.values())
+    if "--sign-check" in argv:
+        # the centre of mass's speed from the markers against the plates' force integrated forward (mass x acceleration),
+        # each component, with the plates' sideways (sim X) component as read and turned the other way
+        com = sum(b.m * b.com for b in bodies.values()) / mass
+        v_mk = np.gradient(com, dt, axis=0)
+        j0 = int(np.argmin(np.abs(t - (-1.45))))
+        raw = plates(sw, t, flip_x=False)
+        for lab_, sgn in (("as read (lab y turned with the markers)", 1.0), ("sideways turned the other way", -1.0)):
+            f = raw["R"] + raw["L"]
+            f = f * np.array([sgn, 1.0, 1.0]) - np.array([0.0, 0.0, mass * G])
+            v_fp = v_mk[j0] + np.concatenate([np.zeros((1, 3)), np.cumsum((f[j0:-1] + f[j0 + 1:]) / 2 * dt / mass, axis=0)])
+            say("centre of mass's speed, m/s, plates integrated from -1450 ms (%s) against the markers:" % lab_)
+            for tt in (-1.2, -0.9, -0.6, -0.45, -0.3, -0.2, -0.1, -0.03):
+                i = int(np.argmin(np.abs(t - tt)))
+                say("  %6.0f ms  sideways plates %+.3f markers %+.3f | to the pitcher %+.3f %+.3f | up %+.3f %+.3f"
+                    % (1e3 * tt, v_fp[i - j0][0], v_mk[i][0], v_fp[i - j0][1], v_mk[i][1], v_fp[i - j0][2], v_mk[i][2]))
+            need_ = tot[j0:i1 + 1] + np.array([0.0, 0.0, mass * G])
+            say("  correlation of the plates' force with his motion's need, -1450 to %.0f ms: x %+.2f y %+.2f z %+.2f"
+                % (1e3 * t[i1], *[np.corrcoef((f + np.array([0, 0, mass * G]))[j0:i1 + 1, c], need_[:, c])[0, 1] for c in range(3)]))
+        return
     need = tot + mass * np.array([0.0, 0.0, G])
     W = M * G
     say("\n## 1. The whole body against the force plates (body weights; + toward first base, the pitcher, up)")
@@ -236,7 +258,7 @@ def main(argv):
         % (1e3 * t[i0], 1e3 * t[i1], *np.sqrt(np.mean(((fp["R"] + fp["L"] - need)[win] / W) ** 2, axis=0))))
     best = []
     for sh_ms in range(-40, 41, 5):
-        fps = plates(sw, t + sh_ms / 1e3)
+        fps = plates(sw, t + sh_ms / 1e3, flip_x="--plates-as-read" not in argv)
         best.append((float(np.sqrt(np.mean(np.sum(((fps["R"] + fps["L"] - need)[win] / W) ** 2, axis=1)))), sh_ms))
     say("the plates moved in time against the motion (ms: rms of the whole residual, body weights): " + ", ".join("%+d: %.2f" % (b_, a_) for a_, b_ in best))
     lo = int(np.argmin(np.abs(t - (-0.100)))); win2 = slice(i0, lo + 1)
@@ -416,8 +438,14 @@ def lab_rot(sw, key):
     return sw.place(sw.lab[key])
 
 
-def plates(sw, t):
-    """the dataset's force plates resampled at the motion's samples, sim frame, N: {"R": rear, "L": lead}."""
+def plates(sw, t, flip_x=True):
+    """the dataset's force plates resampled at the motion's samples, sim frame, N: {"R": rear, "L": lead}.
+    The plates' lab x and z turn into the sim frame as the markers' do, but their lab y does NOT: turned with the markers
+    the sideways force (sim X) comes out with the wrong sign (the design's review, 2026-11-27, P1-1; reproduced by
+    --sign-check: integrated forward, the plates give the centre of mass's sideways speed as the mirror image of the
+    markers', -0.054 against +0.054 m/s at -900 ms, +0.071 against -0.076 at -300; turned over they agree within
+    0.01-0.06, and the sideways force's correlation with the motion's need goes from -0.36 to +0.36). So flip_x=True,
+    the corrected sign, is the default; flip_x=False (--plates-as-read) is the reading of commit e08f3d8."""
     import csv
     rows = list(csv.DictReader(open(os.path.join(RS.OBP, "fp_%s.csv" % sw.sid))))
     tf = np.array([float(r["time"]) for r in rows]) - float(rows[0]["contact_time"])
@@ -425,6 +453,8 @@ def plates(sw, t):
     for sd, pre in (("R", "rear"), ("L", "lead")):
         lab = np.stack([[float(r["%s_force_%s" % (pre, c)]) for c in "xyz"] for r in rows])
         sim = lab @ RS.LAB_TO_SIM.T
+        if flip_x:
+            sim[:, 0] = -sim[:, 0]
         out[sd] = np.stack([np.interp(t, tf, sim[:, c]) for c in range(3)], axis=1)
     return out
 
