@@ -23,33 +23,32 @@ markers do not give one (shoulders, elbows, wrists, hands, knees, ankles: Visual
 (fp_10: the lead foot carries 10 % of the body's weight; fp_100: all of it; contact); from metadata.csv his height and level;
 from hittrax.csv where the ball was met, relative to the plate, and the pitch's speed and angle.
 
-THE MAPPING (the note, section 2, says why each choice):
+THE MAPPING (the note, section 2, says why each choice and what was tried first):
   1. Lab to sim frame: the lab's +x (toward the pitcher) is the sim's +Y, its +y (toward the right-hander's box) the sim's -X,
      +z up in both: a rotation, no mirror. Heights are the lab's (its z = 0 is the floor the plates are in).
-  2. One uniform scale s about the floor, s = the figure's leg (thigh + shank) over his (median over the swing), so that his
-     knees bend as much on the figure as they did on him. Feet that were still stay still (a uniform scale keeps a still point
-     still); the bat is not scaled (it is his 34-in bat, as the figure's is).
-  3. Placed by one translation in x and y so that the sweet spot at contact is where HitTrax says the ball was met (inches
-     from the plate's back tip), the only placement the data give; z untouched.
-  4. The figure's segment lengths are the body model's (de Leva at 1.84 m, analysis/oracle/body3d; the force-driven swing's
-     figure), each held exactly at every sample:
-       pelvis: hips at his Harrington hip centres' midpoint, apart by the model's width along his pelvis's left (from the
-         four pelvis markers); the lumbar joint the model's pelvis length up his pelvis's own axis (fixed in the pelvis, aimed
-         at his trunk's base at the first sample);
-       trunk: from the lumbar joint toward his shoulders' midpoint, the model's trunk length; the shoulders the model's width
-         apart along his shoulder line (so the chest turns as his shoulder line turns);
-       legs: each ankle where his was (his ankle centre, scaled); the knee by two segments of the model's lengths in the plane
-         of his hip, knee and ankle;
-       bat and hands: the bat where his was (scaled place, his direction); each hand on the handle where his hand was along
-         it (median); the wrist the model's 7 cm from the handle's axis in his wrist's direction from it; the elbow by two
-         segments of the model's lengths in the plane of his shoulder, elbow and wrist;
-       feet: his heel and toe markers' line, the sole under them at his flat-foot marker heights;
-       head: his four head markers' turn (the model has no neck: the viewer turns the head on its own).
-     Where two model segments cannot reach between his two ends, the limb is drawn straight and the shortfall reported
-     (--report); nothing else moves to hide it.
-  5. Each body's turn: pelvis and trunk from the joints above; thigh and shank from his knee's and ankle's two markers (the
-     joint's own axis), the upper arm from his elbow's two, the forearm and hand from his wrist's two (thumb side), the foot
-     heel to toe, the head from its markers, the bat from its markers.
+  2. One uniform scale s about the floor: s = the body model's leg (de Leva at 1.84 m: thigh + shank, analysis/oracle/body3d)
+     over his (median over the swing), so the figure stands as tall in the legs as the force-driven batter (1.81 m in all for
+     478_5, from 1.75 m). Still points stay still under a uniform scale. The bat is not scaled: it is his 34-in bat.
+  3. Placed by one translation in x and y so that the sweet spot at contact is where HitTrax saw the ball met (inches from the
+     plate's back tip), the only placement the data give; z untouched.
+  4. The figure has HIS proportions and HIS joint centres at every sample, not the model's segment lengths: with the model's
+     (upper arm 5 cm shorter, shoulders 9 cm wider) his hands could not be reached on his bat by up to 11 cm, and fixed
+     lengths of his own moved his lead knee up to 7 cm off (his markers ride on skin: his thigh reads 0.44-0.49 m). So:
+       hips: Harrington 2007's hip centres from his four pelvis markers (the dataset's left_hip/right_hip are 0.31 m apart,
+         pelvis landmarks, not hip centres); knees, ankles, elbows, wrists, shoulders and hands: the dataset's own joint
+         centres (Visual3D's), scaled and placed; each segment drawn at the length they give at that sample (the viewer
+         stretches each piece to it);
+       pelvis: rigid, its axis fixed in his pelvis's own frame (from the four pelvis markers), aimed at his shoulders'
+         midpoint at the first sample; the lumbar joint up it at the model's share of his hips-to-shoulders distance;
+       trunk: from the lumbar joint to his shoulders' midpoint; his shoulders that far apart along his shoulder line squared
+         to the trunk's axis (the viewer's chest piece can stretch but not shear; the most a shoulder moves is 22 mm);
+       hands: from his wrist to his hand's centre, which is on the handle as long as he holds it;
+       feet: heading and pitch from his heel and toe markers, no roll (the foot's left kept level); the heel's sole under
+         the heel marker by its flat height; the ball of the foot where the viewer's shoe has it for his ankle's height;
+       head: his four head markers' frame set right by the headband's offset in his standing calibration trial;
+       bat: from his knob-end marker toward his barrel-end markers, its length theirs.
+  5. Each limb's turn about its own axis: the thigh's from his knee's two markers, the shank's from his ankle's two, the
+     upper arm's from his elbow's two, the forearm's toward his thumb from his wrist's two; pelvis and trunk from the joints.
   6. The ball: a machine pitch at HitTrax's speed and angle, under gravity, whose centre arrives touching the barrel's face at
      the sweet spot at his contact instant; after contact the batted ball at HitTrax's exit speed, launch angle and spray,
      under gravity. Pictures for the eye only.
@@ -391,9 +390,7 @@ class Swing:
                 y = across(lat, z)                                   # the body's left
                 Q[seg + "_" + sd] = (np.cross(y, z), y, z)
             z = unit(out["elbow_" + sd] - out["wrist_" + sd])
-            Q["farm_" + sd] = frame_zx(z, radial)                    # x toward the thumb (the viewer's convention for files with hands)
-            z = unit(out["wrist_" + sd] - out["grip_" + sd])
-            Q["hand_" + sd] = frame_zx(z, radial)
+            Q["farm_" + sd] = frame_zx(z, radial)                    # x toward the thumb
             heel, toe = r["LHEE" if sd == "L" else "RHEE"], r["LTOE" if sd == "L" else "RTOE"]
             # heel to toe from his two foot markers (heading and pitch); no roll: the foot's left kept level. (A roll from
             # the ankle's centre against that line was 40 degrees off in the stance; one from the ankle's two markers is the
@@ -593,8 +590,8 @@ class Swing:
         w.append("# is derived from it and under the same licence. Keep it out of git and out of anything shipped.")
         w.append("# Sim frame (Statcast): metres, +X toward first base, +Y toward the pitcher, +Z up; a right-handed batter on the third-base")
         w.append("# side (-X). L is his lead (left) side. Quaternions (w, x, y, z): world = R(q) local. Times are seconds from contact.")
-        w.append("# The mapping (real_swing.py's docstring; docs/research/swing/12): his motion, scaled by `scale` about the floor and placed by")
-        w.append("# `placed`, on the body model's segment lengths. Each body's x is its forward (the forearm's and hand's: toward the thumb),")
+        w.append("# The mapping (real_swing.py's docstring; docs/research/swing/12): his joint centres, scaled by `scale` about the floor and")
+        w.append("# placed by `placed`; his own segment lengths at every sample. Each body's x is its forward (the forearm's and hand's: toward the thumb),")
         w.append("# z its axis; the foot's x heel to toe; the bat's z knob to tip; the head's x the face's forward. Contacts carry no load (0).")
         w.append("format %s" % FORMAT)
         w.append("kind recorded")
