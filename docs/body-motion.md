@@ -2605,6 +2605,8 @@ Rung 1's design put these runs on rung 1's body. After the chain they were moved
 
 Rung 6's design above says "the last rung's result". **It is run on rung 4's body, from rung 4's better-scoring swing (21.11 m/s), whatever rung 5 gives:** rung 4 is the body after the four changes the owner ruled (friction, the hold, the feet, the hips); rung 5's still start is a rule of mine that replaces a measured moving state with an assumed one, and "which muscles and by how much" should not rest on it. One reference run, not two (the chain's two references on rung 0's body were identical to the last digit).
 
+**Added while rung 6 ran, before these two were run** (after the one-group runs and "everything at 1.5 times" had come in at +0.5 m/s or less): the carried-on searches start from rung 4's swing and may simply not be able to use more muscle from there. So **the body with every bound at 1.5 times is also searched from S by the ladder's protocol, twice** (as every rung is). If strength is what he lacks, a search that starts over on the stronger body should find a clearly faster swing than rung 4's pair (20.9, 21.1 m/s); if it finds about the same, more muscle is not what this search turns into bat speed, from either end. *What I expect:* 21–24 m/s; I do not know.
+
 ## 5. The drive and its control (§14.1 items 2 and 3)
 
 ### 5.1 What a drive is
