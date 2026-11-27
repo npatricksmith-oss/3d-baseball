@@ -40,7 +40,12 @@ WORKERS = 4                                            # processes for the searc
 FALLBACK = False                                       # lm(): take the best single difference when no damped step is accepted (--fallback)
 # ---- the pitch (4.10): the game's average four-seam fastball where it is met (sim-cli pitch --type FF, 200 pitches)
 BALL_SPEED, BALL_DESCENT, BALL_ACROSS, BALL_FLIGHT, BALL_Z = 37.98, 5.27, 1.62, 0.403, 0.78
-MEET_ACROSS, MEET_AHEAD = 0.92, 0.72                   # m from the hips' midpoint at the start (PLAN D28, D29; AHEAD [E: 0.61-0.84])
+MEET_ACROSS, MEET_AHEAD = 0.92, 0.72                   # m from the pelvis at the start (PLAN D28, D29; AHEAD [E: 0.61-0.84])
+MEET_FROM_REAR_ANKLE = 1.022                           # m: Statcast's intercept is 102.2 +- 8.8 cm toward the pitcher from the rear ankle, level with the lead ankle (-0.4 +- 9.4 cm; note 15)
+# THE TWO RULES ARE NOT THE SAME PLACE (4.13, after the review of session 11, P1-1; the owner's Q64, open): on major
+# leaguers' feet (stance="mlb") the ball by MEET_FROM_REAR_ANKLE is 0.505 m ahead of the pelvis at the start, 21.5 cm nearer
+# him than MEET_AHEAD and outside its [E] range. Ctx options: "ahead" (from the pelvis, off the "mlb" stance) and
+# "meet_rear" (from the rear ankle, on it) set either rule on either stance's body; ladder3d's r3_oldball and r2_deepball.
 # ---- the aim's units (4.10) ----
 MISS_UNIT = 0.01              # m [E]
 TIMING_ERR = 0.007            # s: the measured spread of where hitters meet the ball, as a time (note 6)
@@ -152,7 +157,11 @@ class Ctx:
         # clear: the cleared start of 4.12 (body.START_CLEAR: [4]'s launch posture moved by the rule so that every joint is
         # 5 deg inside its end; no stop moved; --clear). STILL [4]'s LAUNCH POSTURE, MOVED BY A RULE, AND FLAGGED AS THAT.
         self.m = m = B.Model(H, M, ranges=(), grip=o.get("grip", "weld"), feet=o.get("feet", "plate"), mu=o.get("mu"),
-                             wrist=o.get("wrist", "box"), shift=B.START_CLEAR if o.get("clear") else None)
+                             wrist=o.get("wrist", "box"),
+                             # stance="mlb" (4.13, rung 3): the start on major leaguers' feet (body.START_STANCE) in place of [4]'s
+                             shift=B.START_STANCE if o.get("stance") == "mlb" else B.START_CLEAR if o.get("clear") else None,
+                             # loads="balance" (4.13, rung 5): the feet's starting loads from his own weight and balance, not [4]'s forces
+                             loads=o.get("loads", "measured"))
         for k, shift in o.get("start", {}).items():          # the start moved by a stated amount (a sensitivity run)
             B.CURVE_OVERRIDE[k] = (lambda kk, sh: (lambda t: C.resample(B._CURVES.setdefault(kk, C.load(kk)), t, t, 1.0)[0] + sh))(k, shift)
         vel = o.get("vel", 1.0)
@@ -170,6 +179,10 @@ class Ctx:
         st = Dr.add_drives(m, st, {n: (0.0, 0.0, 0.05, 0.1, 0.0) for n in CH}, held=o.get("hold") == "let_go")
         Dr.BOUND_SCALE.clear()
         self.limits = B.add_ranges(m, st, k_big=o.get("k_big"), wrists=o.get("wrists", "cocked"), rom=o.get("rom"))
+        self.spread = None
+        if o.get("loads") == "balance":
+            # standing still in balance (4.13, rung 5): the feet's outward push that costs the hold least (drive.solve_spread)
+            self.spread = Dr.solve_spread(m, st, T0, self.aux0)
         self.tone, self.tone_rest = Dr.solve_tone(m, st, T0, aux=list(self.aux0))
         # An arm muscle tensed beforehand (review P2-4). It COUNTS UNDER THE CLOCK: a starting level is drive from the
         # first instant, so in residuals() it is an arm drive that rose at the start. The other way, hold="resolve",
@@ -182,18 +195,38 @@ class Ctx:
         if o.get("hold") == "resolve":
             self.hold_w = Dr.hold_response(m, st, T0, list(self.aux0), ARMS, self.bd)
             self.tone0 = [c for j in Dr.JOINTS for c in self.tone[j]]
-        Dr.add_damping(m, st)
+        # stand: "tone" (sessions 2-10, the default: solve_tone's constant hold-still torques, under no muscle rule) or
+        # "muscle" (body-motion 4.13, rung 2): each hold-still torque handed to the muscle group that acts that way, as a
+        # holding drive under that group's strength-at-speed curve (drive.solve_hold_muscles). hold_T: each group's
+        # holding strength; the plan's burst may ask at most the bound less it. What no measured muscle takes stays a
+        # torque (tone_left) and is reported apart.
+        self.hold_T, self.hold_at_start, self.tone_left, self.hold_ix = {}, {}, {}, {}
+        if o.get("stand") == "muscle":
+            holds, self.tone_left, self.hold_at_start = Dr.solve_hold_muscles(m, st, self.tone, self.bd)
+            st = Dr.add_hold_muscles(m, st, holds, self.tone_left)
+            self.hold_T = {n: v[0] for n, v in holds.items()}
+            self.hold_ix = {a_[0][len(Dr.HOLD_PREFIX):]: j for j, a_ in enumerate(m.sys.acts) if a_[0].startswith(Dr.HOLD_PREFIX)}
+            self.hold_bd = dict(self.bd, **{n: v[5] * (M * E.G * H) / Dr.REF_WH for n, v in Dr.HOLD_ONLY.items()})
+        self.cap = {n: self.bd[n] - self.hold_T.get(n, 0.0) for n in CH}      # the most a burst may ask of each group
+        # damp: None (sessions 1-10: 1.0 N m s/rad at every joint, capped at 30 N m) or drive.damping_of()'s other forms
+        # (a set of drive.DAMPING by name; body-motion 4.13)
+        Dr.add_damping(m, st, o.get("damp"))
+        self.damp_table, self.damp_cap = Dr.damping_of(o.get("damp"))
         self.st = st
         self.BW = M * E.G
         self.order = P.tree_order(m)
         self.box = []
         for n in CH:
-            self.box += [(n, "T", 0.0, self.bd[n]), (n, "on", T0, 0.050), (n, "rise", Dr.RISE_MIN, 0.250),
+            self.box += [(n, "T", 0.0, self.cap[n]), (n, "on", T0, 0.050), (n, "rise", Dr.RISE_MIN, 0.250),
                          (n, "off", -0.150, 0.150), (n, "start", 0.0, 1.0)]
         self.free = [i for i, (n, f, lo, hi) in enumerate(self.box) if hi > lo and self.bd[n] > 0.0]
         k = H / 1.84                                          # [E] a smaller batter stands and is pitched to in proportion
         xp = m.sys.pose(st, m.b["pelvis"])[0]
         self.Pc = (xp[0] + o.get("across", MEET_ACROSS) * k, xp[1] + o.get("ahead", MEET_AHEAD) * k, o.get("z", BALL_Z) * k)
+        if o.get("stance") == "mlb":
+            # on major leaguers' feet the ball is met where they meet it relative to their feet: MEET_FROM_REAR_ANKLE
+            # toward the pitcher from the rear ankle (which is level with the lead ankle, 4.13)
+            self.Pc = (self.Pc[0], m.joint_pos(st, "ankle_R")[1] + o.get("meet_rear", MEET_FROM_REAR_ANKLE) * k, self.Pc[2])
         d, a = BALL_DESCENT * B.D2R, BALL_ACROSS * B.D2R
         self.nb = (math.cos(d) * math.sin(a), -math.cos(d) * math.cos(a), -math.sin(d))
         self.ev = E.unit(E.sub((0.0, 0.0, 1.0), E.scale(self.nb, self.nb[2])))    # up, square to the ball's line
@@ -212,6 +245,11 @@ class Ctx:
 
     def prepare(self, u):
         st, aux = F.Ctx.prepare(self, u)
+        if self.hold_ix:
+            # a holding drive goes when the plan switches its muscle off (4.13, rung 2); a hold-only group never does
+            pl = self.plan(u)
+            for n, j in self.hold_ix.items():
+                self.m.sys.acts[j][8] = pl[n][3] if n in pl else 1e9
         if self.o.get("hold") != "resolve":
             return st, aux
         pl = self.plan(u)
@@ -336,11 +374,15 @@ class Ctx:
             for n, a in zip(CH, act):
                 if self.bd[n] <= 0:
                     continue
-                acc[n] += (a[2] * pl[n][0] / self.bd[n]) ** 2
+                # with the posture held by muscle (4.13, rung 2) the group's level is its burst's and its holding drive's together
+                acc[n] += ((a[2] * pl[n][0] + (act[self.hold_ix[n]][2] * self.hold_T[n] if n in self.hold_ix else 0.0)) / self.bd[n]) ** 2
                 if held and pl[n][4] > 0.0:
                     # what holds a tensed muscle is working too, at the muscle's own level, until it has let go (4.11)
                     left = 1.0 if t < pl[n][1] else math.exp(-(t - pl[n][1]) / E.TA_REL)
                     acc[n] += (min(a[2], pl[n][4] * left) * pl[n][0] / self.bd[n]) ** 2
+            for n, j in self.hold_ix.items():
+                if n not in acc:                        # a hold-only group (the trunk's bending): booked with the trunk's rotators
+                    acc["core"] += (act[j][2] * self.hold_T[n] / self.hold_bd[n]) ** 2
         return {n: v / max(1, k) for n, v in acc.items()}
 
     def arm_fired(self, pl):
@@ -606,7 +648,7 @@ def report(ctx, u, log=print):
     bz = m.axis(recs[ic][1], "bat", (0, 0, 1))
     out["bat_square_deg"] = math.asin(max(-1.0, min(1.0, (bz[0] * ctx.nb[0] + bz[1] * ctx.nb[1]) / (math.hypot(bz[0], bz[1]) * math.hypot(ctx.nb[0], ctx.nb[1]))))) / B.D2R
     out["bat_elev_deg"] = obs[ic][1]["bat_elev"]
-    log("   FROM THE START PLACED ON [4]'s STATE%s (an input, flagged): contact %.0f ms after the start%s" % (", MOVED OFF ITS JOINTS' ENDS BY THE RULE OF 4.12" if ctx.o.get("clear") else "", (tx - T0) * 1e3, "" if came else "  (THE BAT NEVER REACHED THE BALL; figures are at the run's end)"))
+    log("   FROM THE START PLACED ON [4]'s STATE%s (an input, flagged): contact %.0f ms after the start%s" % (", ON MAJOR LEAGUERS' FEET (4.13, rung 3), THE REST MOVED BY THE RULE OF 4.12" if ctx.o.get("stance") == "mlb" else ", MOVED OFF ITS JOINTS' ENDS BY THE RULE OF 4.12" if ctx.o.get("clear") else "", (tx - T0) * 1e3, "" if came else "  (THE BAT NEVER REACHED THE BALL; figures are at the run's end)"))
     out["failed_after_contact_ms"] = None if ctx.failed_after is None else ctx.failed_after[0] * 1e3
     if ctx.failed_after is not None:
         log("   THE RUN FAILED %.0f ms AFTER CONTACT, after everything the score and these checks read (\"%s\"); the records to there are used"
@@ -668,10 +710,20 @@ def report(ctx, u, log=print):
     rate = max((kn[q - 5] - kn[q + 5]) / 0.010 for q in range(5, ic - 4)) if ic > 12 else 0.0
     out["lead_foot_peak"] = (pk[0], rel(pk[1]))
     out["feet_at_contact"] = (fz[ic][0], fzr[ic][0])
+    # how long the front foot's load lasts (4.13, after the review of session 11, P2-2): a peak can be an impact of a few
+    # ms. The time at or over the gate's lower figure (1.5 x body weight) to contact, and both feet's mean load over the
+    # last 100 ms (trapezoids over the records).
+    dts = [recs[q + 1][0] - recs[q][0] for q in range(ic)]
+    i100 = at(tx - 0.100)
+    mean = lambda v: sum(0.5 * (v[q][0] + v[q + 1][0]) * dts[q] for q in range(i100, ic)) / max(1e-12, sum(dts[i100:ic]))
+    out["lead_foot_load"] = {"ms at or over 1.5": 1e3 * sum(dts[q] for q in range(ic) if fz[q][0] >= 1.5),
+                             "mean over the last 100 ms": (mean(fz), mean(fzr))}
     out["lead_knee"] = (kn[0], kn[i50], kn[ic], rate)
     out["trail_knee"] = (obs[0][1]["trail_knee_flex"], obs[ic][1]["trail_knee_flex"])
     log("   CHECK the front leg braced: the lead knee %.0f deg bent at the start, %.0f at -50 ms, %.0f at contact, straightening at up to %.0f deg/s   [46 at foot plant, 14 +- 12 at contact, 350 deg/s (OpenBiomechanics); 15 at contact ([3])]" % out["lead_knee"])
     log("   CHECK the front foot's greatest load: %.2f x body weight at %.0f ms; at contact front %.2f, rear %.2f   [2.0 +- 0.4, p10-p90 1.5-2.6]; the rear knee %.0f -> %.0f deg" % (pk[0], rel(pk[1]), fz[ic][0], fzr[ic][0], out["trail_knee"][0], out["trail_knee"][1]))
+    log("      the front foot is at or over 1.5 x body weight for %.1f ms in all before contact; over the last 100 ms the front foot carries %.2f and the rear %.2f of his weight on average"
+        % ((out["lead_foot_load"]["ms at or over 1.5"],) + out["lead_foot_load"]["mean over the last 100 ms"]))
     # what each foot did on the ground (4.11, part 3): its heel's greatest height before contact, how far it turned on the
     # ground from the start to contact (+ is the toe going toward the pitcher), and the pelvis's turn over the same time
     out["feet"] = {}
@@ -721,8 +773,9 @@ def report(ctx, u, log=print):
     srt = lambda d_: ", ".join("%s %+.1f" % kv for kv in sorted(d_.items(), key=lambda kv: -abs(kv[1])) if abs(kv[1]) >= 2.0)
     log("   THE HOLD-STILL TORQUES (constant, one a joint; they stand for muscle and follow no muscle rule: no strength-at-speed law, no onset, no effort, no clock) did %+.1f J to contact, %.0f %% of what they and the muscles put in; by joint: %s"
         % (tw, 100 * out["work_J"]["hold-still share of the positive work"], srt(tone_by)))
-    log("   THE JOINTS' OWN DAMPING ([E], %.1f N m s/rad on every joint axis, capped at %.0f N m) took %+.1f J to contact, %.0f %% of the muscles' work; by joint: %s; its largest torque: %s   (the two sum to %+.1f J; the engine's own integral of both: %+.1f)"
-        % (Dr.JOINT_DAMP, Dr.JOINT_DAMP_CAP, dw, -100 * dw / wk[0] if wk[0] > 0 else 0.0, srt(damp_by), ", ".join("%s %.0f" % kv for kv in sorted(damp_pk.items(), key=lambda kv: -kv[1])[:6]), tw + dw, wk[2]))
+    dsc = ("%s" % (ctx.o.get("damp"),)) if ctx.o.get("damp") is not None else "[E], unsourced: %.1f N m s/rad on every joint axis" % Dr.JOINT_DAMP
+    log("   THE JOINTS' OWN DAMPING (%s; %s) took %+.1f J to contact, %.0f %% of the muscles' work; by joint: %s; its largest torque: %s   (the two sum to %+.1f J; the engine's own integral of both: %+.1f)"
+        % (dsc, "capped at %.0f N m" % ctx.damp_cap if ctx.damp_cap < Dr.NO_CAP else "no cap", dw, -100 * dw / wk[0] if wk[0] > 0 else 0.0, srt(damp_by), ", ".join("%s %.0f" % kv for kv in sorted(damp_pk.items(), key=lambda kv: -kv[1])[:6]), tw + dw, wk[2]))
     # balance, effort, the clock
     xo, least, zr = ctx.balance(recs, tx)
     out["balance"] = (xo * 100, least, zr)
@@ -807,12 +860,18 @@ def report(ctx, u, log=print):
     log("   at full strength (%d of %d): %s;  %d used muscles rise at the 50 ms floor" % (len(onb), len(CH), ", ".join(onb) or "none", out["rises_at_floor"]))
     # "exactly on its bound" says little of a search that is charged for effort and does not settle on a box's edge
     # (session 10's review, P1-3): the groups near their bounds, their largest activation, the rises near the floor
-    near = {n: pl[n][0] / ctx.bd[n] for n in CH if ctx.bd[n] > 0 and pl[n][0] >= NEAR_BOUND * ctx.bd[n]}
+    near = {n: (pl[n][0] + ctx.hold_T.get(n, 0.0)) / ctx.bd[n] for n in CH if ctx.bd[n] > 0 and pl[n][0] + ctx.hold_T.get(n, 0.0) >= NEAR_BOUND * ctx.bd[n]}
     act_pk = {n: max(rec[3][ix[n]][2] for rec in recs[:ic + 1]) for n in near}
     floor = {n: pl[n][2] * 1e3 for n in CH if used(n) and pl[n][2] <= Dr.RISE_MIN + NEAR_FLOOR}
     out["near_full_strength"], out["near_full_strength_activation"], out["rises_near_floor_ms"] = near, act_pk, floor
     log("   asked for %.0f %% or more of its bound (%d of %d; its largest activation to contact): %s" % (100 * NEAR_BOUND, len(near), len(CH), ", ".join("%s %.3f (%.2f)" % (n, x, act_pk[n]) for n, x in sorted(near.items(), key=lambda kv: -kv[1])) or "none"))
     log("   used muscles whose rise is within %.0f ms of the %.0f ms floor: %s" % (NEAR_FLOOR * 1e3, Dr.RISE_MIN * 1e3, ", ".join("%s %.0f ms" % kv for kv in sorted(floor.items(), key=lambda kv: kv[1])) or "none"))
+    if ctx.hold_T:
+        out["holding_strength_Nm"], out["holding_at_start_Nm"] = dict(ctx.hold_T), dict(ctx.hold_at_start)
+        out["hold_still_left_Nm"] = {j: E.norm(v) for j, v in ctx.tone_left.items()}
+        log("   THE POSTURE HELD BY MUSCLE (4.13, rung 2): each group's holding torque at the start, N m (of its bound): "
+            + ", ".join("%s %.1f (%.2f)" % (n, x, ctx.hold_T[n] / ctx.hold_bd[n]) for n, x in sorted(ctx.hold_at_start.items(), key=lambda kv: -kv[1]))
+            + ";   left as a constant torque, with no measured muscle that way (N m): " + ", ".join("%s %.1f" % kv for kv in sorted(out["hold_still_left_Nm"].items(), key=lambda kv: -kv[1]) if kv[1] >= 0.5))
     log("   the plan: channel, strength of bound, onset and switch-off relative to contact ms, rise ms, level beforehand")
     for n in CH:
         x = pl[n]

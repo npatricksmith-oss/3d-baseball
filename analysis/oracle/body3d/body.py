@@ -222,6 +222,11 @@ ROM = {"hip_flex": 130.4, "hip_ext": 17.4, "hip_abd": 38.8, "hip_add": 30.5, "hi
        # (Baumbach 2014; 25 with the knee straight, which a stop cannot know: [E]); the foot pointed down and the sole
        # rolled in and out (Hallaceli 2014, passive; the roll its men's)
        "ankle_df_loaded": 39.0, "ankle_pf_loaded": 50.0, "ankle_inv": 34.6, "ankle_ever": 19.1}
+# The hips' turn by their own muscles (body-motion 4.13, rung 4; PLAN D42: "the hips use their active range"): Simoneau
+# et al. 1998, 21 college men, active, measured prone with the hip straight (turning in 32 +- 9, out 44 +- 7 deg). NOT
+# Boone & Azen's 44.4 and 44.2: those are active but seated, the hip bent 90 deg (note 15 C), and a hitter's front hip at
+# contact is near straight. A practice run takes these by rom=ROM_ACTIVE_HIP.
+ROM_ACTIVE_HIP = {"hip_irot": 32.0, "hip_erot": 44.0}
 # Past the end of a range the joint resists as a one-sided spring. NO measurement of that resistance was found for
 # any joint here (body-motion 4.10): the stiffness is [E]. "big": the trunk, hips, knees, ankles and the shoulders'
 # sweep; "small": the elbows, forearms and wrists (their strengths are 17-112 N m, and a stiffer spring on so
@@ -499,7 +504,8 @@ def curve_rate(name, t, h=0.005):
 class Model:
     """the engine System of a batter of stature H (m) and mass M (kg), with named bodies and joint points."""
 
-    def __init__(self, H=1.84, M=92.0, contacts=True, mu=None, shoulder_stops=True, ranges=None, grip="weld", feet="plate", wrist="box", shift=None):
+    def __init__(self, H=1.84, M=92.0, contacts=True, mu=None, shoulder_stops=True, ranges=None, grip="weld", feet="plate", wrist="box", shift=None,
+                 loads="measured"):
         """ranges: None, the stops of sessions 1-7 (the knees' and elbows' bend, the shoulders' sweep across, at
         STOP_K); or a set of names from range_specs() ("all" for every one): those ranges as stops at RANGE_K, in
         place of the old ones (body-motion 4.10).
@@ -519,6 +525,10 @@ class Model:
         # by pose() (POSTURE_NUMBERS; START_CLEAR is the cleared start's); with one, add_ranges() moves no stop.
         self.wrist = wrist
         self.shift = dict(shift) if shift else None
+        # loads: what each foot carries at the start. "measured": [4]'s vertical and horizontal ground forces at that instant
+        # (sessions 1-10). "balance" (body-motion 4.13, rung 5): the body's own weight, shared between the feet by where its
+        # centre of mass stands between them, and no horizontal force (pose)
+        self.loads = loads
         if mu is None:
             mu = MU_CLEAT if feet == "cleats" else MU
         self.mu = mu
@@ -709,6 +719,21 @@ POSTURE_NUMBERS = POSTURE_CURVES + ("trunk_flex", "trunk_side", "rear_foot_yaw",
 START_CLEAR = {"pelvis_rot": 1.75, "trunk_rot": -1.75, "bat_az": 2.0, "bat_elev": 2.125, "bat_lag": 2.5, "trail_elbow_flex": -0.625,
                "lead_knee_flex": -0.75, "trunk_side": -0.25, "stride_cm": -0.375, "stride_closed_cm": -0.625, "obliquity": 1.5,
                "trail_knee": 1.0, "lead_foot": 0.625}
+# The start on major leaguers' feet (body-motion 4.13, rung 3; PLAN D42; research note 15): the front foot's place and
+# angle are no longer [4]'s. GIVEN, from Statcast's foot points at the bat's intercept (2026, 231 hitter-sides; the
+# planted front foot is where it landed): the ankle joints STANCE_APART apart along the line to the pitcher (102.6 +- 7.9
+# cm; [4]: 77.3), the lead ankle STANCE_ACROSS toward the plate from the rear one (1 +- 10 cm; [4]: 11), the front foot
+# turned STANCE_FOOT toward the pitcher from square to the plate (43.8 +- 10.2 deg at the intercept; [4]: 30.7; a foot
+# that cannot pivot in this body stands at its contact angle from the start). The other numbers are then clear_start's
+# least change ON those feet (given=...; job 419, 444 s): the pelvis 9.9 deg more open, 6.1 cm further back from the lead
+# ankle, tilted 8.3 deg more, the rear knee 6.9 deg straighter, the rear foot's toe turned 7.8 deg back; the arms' numbers
+# as START_CLEAR's. The rule stops with the rear ankle's roll 4.0 deg inside its end and both hips' sideways margins
+# and the lead ankle's roll at 4.7 (it asks 5; START_CLEAR_DEG is [E: 3-8]): on a base this wide the hips' sideways range
+# and the ankles' roll are what give out. The posture's other numbers and its velocities are STILL [4]'s, flagged.
+STANCE_APART, STANCE_ACROSS, STANCE_FOOT = 1.03, 0.0, 44.0       # m, m, deg
+START_STANCE = {"pelvis_rot": 9.875, "trunk_rot": -1.75, "bat_az": 2.0, "bat_elev": 2.125, "bat_lag": 2.5, "trail_elbow_flex": -0.625,
+                "lead_knee_flex": 0.625, "pelvis_x_cm": -6.125, "trunk_side": -0.25, "rear_foot_yaw": -7.75, "stride_cm": 25.72,
+                "stride_closed_cm": -11.0, "obliquity": 8.25, "trail_knee": -6.875, "lead_foot": -13.294117647058826}
 LEAD_FOOT_SHIFT = [0.0]
 _SHIFT_ON = [False]
 
@@ -758,7 +783,7 @@ def start_margins(mdl, st):
     return out
 
 
-def clear_start(t0=-0.250, clear=None, log=None, **model):
+def clear_start(t0=-0.250, clear=None, log=None, given=None, **model):
     """The rule for the start (body-motion 4.12): a least change to the launch posture's numbers (POSTURE_NUMBERS; the
     sum of the changes' squares, a degree and a centimetre counted alike [E]) that puts every joint at least `clear`
     (START_CLEAR_DEG) inside its anatomical end and each wrist that far inside its ellipse, FOUND BY A COMPASS SEARCH
@@ -766,9 +791,14 @@ def clear_start(t0=-0.250, clear=None, log=None, **model):
     P3-5). From no change, each number
     in turn is tried a step up and a step down and what lowers (the sum of squares + a penalty on every margin's
     shortfall, squared) is kept; the steps halve from 2 to 1/8 and the penalty's weight rises in four stages.
-    Deterministic. model: Model()'s options (the hands' body). Returns ({number: change}, {range: margin})."""
+    Deterministic. model: Model()'s options (the hands' body). Returns ({number: change}, {range: margin}).
+    given (body-motion 4.13, rung 3): {number: change} for numbers that are SET from outside (the front foot's place and
+    angle, from MLB's data): they are held at those changes, are not counted in the sum of squares, and the rule finds
+    the least change to the OTHER numbers on them."""
     clear = START_CLEAR_DEG if clear is None else clear
     n = len(POSTURE_NUMBERS)
+    given = given or {}
+    free = [i for i, k in enumerate(POSTURE_NUMBERS) if k not in given]
 
     def margins(x):
         m = Model(ranges=(), shift={k: v for k, v in zip(POSTURE_NUMBERS, x) if v != 0.0} or None, **model)
@@ -779,14 +809,14 @@ def clear_start(t0=-0.250, clear=None, log=None, **model):
             mg = margins(x)
         except E.SolveError:
             return 1e12, None
-        return sum(v * v for v in x) + mu * sum(max(0.0, clear - v) ** 2 for v in mg.values()), mg
-    x = [0.0] * n
+        return sum(x[i] * x[i] for i in free) + mu * sum(max(0.0, clear - v) ** 2 for v in mg.values()), mg
+    x = [float(given.get(k, 0.0)) for k in POSTURE_NUMBERS]
     for mu in (10.0, 100.0, 1000.0, 1e4):
         step = 2.0
         f, mg = cost(x, mu)
         while step >= 0.124:
             moved = False
-            for i in range(n):
+            for i in free:
                 for sgn in (1.0, -1.0):
                     xn = list(x); xn[i] += sgn * step
                     fn, mgn = cost(xn, mu)
@@ -796,7 +826,7 @@ def clear_start(t0=-0.250, clear=None, log=None, **model):
             if not moved:
                 step *= 0.5
         if log:
-            log("   penalty %.0f: sum of squares %.2f, least margin %.2f deg (%s)" % (mu, sum(v * v for v in x), min(mg.values()), min(mg, key=mg.get)))
+            log("   penalty %.0f: sum of squares %.2f, least margin %.2f deg (%s)" % (mu, sum(x[i] * x[i] for i in free), min(mg.values()), min(mg, key=mg.get)))
     return {k: v for k, v in zip(POSTURE_NUMBERS, x) if v != 0.0}, mg
 
 
@@ -841,6 +871,17 @@ def pose(mdl, t0, heel="solve", report=None, hands_guess=None, hands_solve=True,
     if getattr(mdl, "shift", None) and not _SHIFT_ON[0]:
         with _shifted(mdl.shift, mdl.H):
             return pose(mdl, t0, heel, report, hands_guess, hands_solve, arms)
+    if getattr(mdl, "loads", "measured") == "balance" and _BALANCE[0] is None:
+        # the feet's loads by balance (4.13, rung 5): the posture is placed once on [4]'s loads to find where the weight
+        # stands (a foot's sink under its load moves the body by a millimetre), then again on the loads that carry it
+        _BALANCE[0] = "first"
+        try:
+            s0, a0 = pose(mdl, t0, heel, None, hands_guess, hands_solve, arms)
+            held_arms = getattr(mdl, "arm_choices", None) if arms is None else arms
+            _BALANCE[0] = balance_loads(mdl, s0, a0)
+            return pose(mdl, t0, heel, report, hands_guess, hands_solve, held_arms if mdl.grip == "hands" else arms)
+        finally:
+            _BALANCE[0] = None
     s, b, H = mdl.sys, mdl.b, mdl.H
     st = s.new_state()
     L = mdl.len
@@ -852,6 +893,9 @@ def pose(mdl, t0, heel="solve", report=None, hands_guess=None, hands_solve=True,
     yaw = {"R": REAR_FOOT_YAW * D2R, "L": (90.0 - curve_lead_foot(t0) - LEAD_FOOT_SHIFT[0]) * D2R}
     fdir = {sd: (math.cos(yaw[sd]), math.sin(yaw[sd]), 0.0) for sd, sg in SIDES}
     load = {sd: max(0.0, curve(("lead" if sd == "L" else "trail") + "_grf_z", t0)) / 100.0 * BW for sd, sg in SIDES}
+    by_balance = isinstance(_BALANCE[0], dict)
+    if by_balance:
+        load = dict(_BALANCE[0])
     cf_L = C.DE_LEVA["foot"][2]
     ball_loc = ((BALL_FWD - cf_L) * L["foot"], 0.0, mdl.sole_z)
 
@@ -1107,6 +1151,8 @@ def pose(mdl, t0, heel="solve", report=None, hands_guess=None, hands_solve=True,
         idx = [j for j, c in enumerate(s.contacts) if c[0][0] == sd and aux[j] is not None]
         if not idx:
             continue
+        if by_balance:
+            continue                                  # a body standing in balance pushes on the ground straight down
         fx = curve(nm + "_grf_y", t0) / 100.0 * BW / len(idx)
         fy = curve(nm + "_grf_x", t0) / 100.0 * BW / len(idx)
         lim = MU_START * load[sd] / len(idx)
@@ -1124,6 +1170,31 @@ def pose(mdl, t0, heel="solve", report=None, hands_guess=None, hands_solve=True,
                                        "trail_elbow_flex", "lead_knee_flex", "pelvis_rot_vel", "trunk_rot_vel", "bat_az_vel")}
         report["measured"]["trail_knee_flex"] = curve_trail_knee(t0)
     return st, aux
+
+
+_BALANCE = [None]
+
+
+def balance_loads(mdl, st, aux):
+    """{foot: N}: the body's weight shared between the feet by statics along the line of the feet: each foot's load acts
+    at the middle of its sole points on the ground (a flat foot's four, a raised heel's two under the ball), and the two
+    loads' moments about the centre of mass along that line cancel. If the centre of mass is not between the two points
+    the nearer foot takes it all. st, aux: a placed posture and its contacts (aux[j] is None for a point off the ground)."""
+    s = mdl.sys
+    BW = mdl.M * E.G
+    pt = {}
+    for sd in "LR":
+        ys = []
+        for j, c in enumerate(s.contacts):
+            if c[0][0] == sd and aux[j] is not None:
+                xb, qb, _, _ = s.pose(st, c[1])
+                ys.append(E.add(xb, E.mv(E.qR(qb), c[2]))[1])
+        pt[sd] = sum(ys) / len(ys) if ys else None
+    yc = com(mdl, st)[0][1]
+    if pt["L"] is None or pt["R"] is None:
+        return {"L": BW if pt["R"] is None else 0.0, "R": BW if pt["L"] is None else 0.0}
+    f = min(1.0, max(0.0, (yc - pt["R"]) / (pt["L"] - pt["R"])))
+    return {"L": f * BW, "R": (1.0 - f) * BW}
 
 
 def place(mdl, t0, report=None, heel="solve", dt=VEL_DT, moving=True):

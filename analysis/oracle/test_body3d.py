@@ -2294,6 +2294,459 @@ class SearchChecks(unittest.TestCase):
             P.run_raw = keep
 
 
+class LadderChecks(unittest.TestCase):
+    """session 11's changes to the body (body-motion 4.13): the joints' damping by joint, the posture held by muscle."""
+
+    O = dict(grip="hands", feet="cleats", hold="let_go", wrist="oval", clear=True, h=2.5e-4)
+
+    def test_a_damper_takes_a_spinning_rods_speed_as_the_worked_decay(self):
+        """a rod on a hinge, no gravity, spun at 6 rad/s against a damper of C N m s/rad with no cap: its speed must
+        fall as exp(-C t / I), I its moment of inertia about the hinge worked here by hand (0.15 + 2 x 0.3^2); and the
+        work booked to the damper is the kinetic energy lost. With drive.damping_of's cap (a number: no cap) and with
+        the old capped form the law is the same below the cap."""
+        for C in (0.05, 0.4, 1.0):
+            s = E.System(g=(0.0, 0.0, 0.0))
+            b = s.body("rod", 2.0, (0.15, 0.15, 0.002))
+            s.hinge(-1, b, (0.0, 0.0, 0.0), (0.0, 0.0, 0.3), (0, 1, 0), (0, 1, 0))
+            s.hold("hinge", -1, b, (1.0, 0.0, 0.0, 0.0), (0.0, 0.0, 0.0), (C, C, C), Dr.NO_CAP)
+            st = s.new_state()
+            w0 = 6.0
+            s.set_body(st, b, (0.0, 0.0, -0.3), (1.0, 0.0, 0.0, 0.0), (-0.3 * w0, 0.0, 0.0), (0.0, w0, 0.0))
+            aux, h = s.new_aux(), 1e-4
+            for i in range(2000):
+                st = s.step(i * h, st, aux, h)
+            I = 0.15 + 2.0 * 0.3 ** 2
+            w = s.pose(st, b)[3][1]
+            self.assertAlmostEqual(w, w0 * math.exp(-C * 0.2 / I), delta=1e-6 * w0)
+            ow = 13 * s.nb + len(s.acts)
+            self.assertAlmostEqual(st[ow + 2], 0.5 * I * (w * w - w0 * w0), delta=1e-6)
+            self.assertLess(st[ow + 2], 0.0)
+
+    def test_the_damping_table_is_read_as_written(self):
+        """drive.damping_of: no option is sessions 1-10's body (1.0 everywhere, capped at 30 N m); a number is that value
+        everywhere with no cap; a set by name is the set, with no cap; "from" takes only the named group's joints from
+        another set and "scale" multiplies only those. The three sets differ only at the joints nothing was read for
+        (a read joint has one value in all three; an unread one's low end is not above its high end). The values
+        themselves are not restated here (session 11's review, P3-4): they are written once, in drive.DAMPING, from
+        note 14."""
+        t, cap = Dr.damping_of(None)
+        self.assertEqual(set(t.values()), {(1.0, 1.0, 1.0)})
+        self.assertEqual(cap, 30.0)
+        t, cap = Dr.damping_of(0.3)
+        self.assertEqual(set(t.values()), {(0.3, 0.3, 0.3)})
+        self.assertEqual(cap, Dr.NO_CAP)
+        read, cap = Dr.damping_of("read")
+        self.assertEqual(cap, Dr.NO_CAP)
+        for name in ("low", "high"):
+            other = Dr.damping_of(name)[0]
+            self.assertEqual(set(other), set(Dr.JOINTS))
+            for j in Dr.JOINTS:
+                if j.startswith(("knee", "ankle", "shoulder")):
+                    self.assertEqual(other[j], read[j])
+                elif j.startswith("wrist"):
+                    self.assertEqual(other[j][0], read[j][0])            # the bend is read; the tilt is not
+                    self.assertNotEqual(other[j][1], read[j][1])
+                else:
+                    self.assertNotEqual(other[j], read[j])
+            for a_, b_ in zip(sorted(Dr.damping_of("low")[0].items()), sorted(Dr.damping_of("high")[0].items())):
+                self.assertTrue(all(x <= y for x, y in zip(a_[1], b_[1])))
+        t = Dr.damping_of({"set": "read", "from": {"trunk": "high"}, "scale": {"arms": 2.0}})[0]
+        for j in Dr.JOINTS:
+            want = Dr.damping_of("high")[0][j] if j == "lumbar" else tuple(x * (2.0 if j in Dr.DAMP_GROUPS["arms"] else 1.0) for x in read[j])
+            self.assertEqual(t[j], want)
+
+    @NEED
+    def test_a_joints_two_dampings_act_on_its_two_movements(self):
+        """the elbow's damping is written as (turn, bend, turn) about the upper arm's axes and the wrist's as (bend, tilt,
+        tilt) about the forearm's. On the placed body: with the forearm given a turning rate about the elbow's HINGE alone
+        (the upper arm's y) the damper's torque is the bend's coefficient x that rate about the hinge; with a rate about
+        the forearm's own LENGTH alone it is the turn's coefficient x that rate; the two coefficients differ fourteenfold
+        in the central set, so a mix-up would show. The same at the wrist for its bend (the forearm's x)."""
+        m = B.Model(ranges=(), grip="hands", feet="cleats", wrist="oval")
+        st = B.place(m, T0, moving=False)
+        Dr.add_damping(m, st, "read")
+        s = m.sys
+        holds = {h[0]: h for h in s.holds}
+
+        def torque(joint, axis_w, rate):
+            name, a, b, qref, K, C, cap = holds[joint]
+            s2 = list(st)
+            s2[13 * b + 10:13 * b + 13] = E.scale(axis_w, rate)          # the parent at rest
+            Ra = E.qR(s.pose(s2, a)[1])
+            wl = E.mtv(Ra, E.scale(axis_w, rate))
+            return E.mv(Ra, tuple(-c * w for c, w in zip(C, wl)))
+        hinge = m.axis(st, "uarm_L", (0, 1, 0))
+        length = m.axis(st, "farm_L", (0, 0, 1))
+        self.assertLess(abs(E.dot(hinge, length)), 1e-9)                   # the hinge holds the forearm's length square to it
+        t1 = torque("elbow_L", hinge, 3.0)
+        self.assertAlmostEqual(E.dot(t1, hinge), -0.43 * 3.0, delta=1e-12)
+        t2 = torque("elbow_L", length, 3.0)
+        self.assertAlmostEqual(E.dot(t2, length), -0.03 * 3.0, delta=1e-12)
+        self.assertLess(E.norm(E.sub(t2, E.scale(length, -0.09))), 1e-12)
+        bend = m.axis(st, "farm_R", (1, 0, 0))
+        t3 = torque("wrist_R", bend, 5.0)
+        self.assertAlmostEqual(E.dot(t3, bend), -0.04 * 5.0, delta=1e-12)
+
+    @NEED
+    def test_the_posture_held_by_muscle_starts_as_the_constant_torques_did_and_then_obeys_the_muscles_rules(self):
+        """body-motion 4.13, rung 2. With each hold-still torque handed to the muscle group that pulls that way:
+        (1) at the first instant every body's acceleration is what the constant torques gave (the split is exact);
+        (2) every holding strength is positive and, with the most its group's burst may ask, makes the group's measured
+        bound; a knee, which has one axis and a muscle each way, keeps no constant torque, and neither does the trunk,
+        which has holding groups on all three axes; the ankle's roll, which has no muscle, keeps its torque;
+        (3) the front knee extensor's holding torque follows that group's measured strength-at-speed curve (4.5: half its
+        strength at 3.952 rad/s, none at 13.4 rad/s and beyond), read here from the curve's printed points and not from
+        the engine: with the shank turning that fast about the knee the holding drive gives half, and nothing; forced
+        the other way it gives more, never over the stretched muscle's plateau of 1.5;
+        (4) it goes when the plan switches its muscle off, and a hold-only group (the trunk's bending) never fires;
+        (5) held and doing nothing else, a group's effort is (its holding strength / its bound) squared."""
+        PR = _practice()
+        acc = {}
+        for stand in ("tone", "muscle"):
+            c = PR.Ctx(stand=stand, **self.O)
+            s = c.m.sys
+            st, aux = c.prepare(c.u_of({}))
+            ds = s.deriv(PR.T0, st, aux)
+            acc[stand] = [ds[13 * i + 7 + k] for i in range(s.nb) for k in range(6)]
+        self.assertLess(max(abs(x - y) for x, y in zip(acc["tone"], acc["muscle"])), 1e-9 * max(abs(x) for x in acc["tone"]))
+        self.assertGreater(len(c.hold_T), 15)
+        for n, T in c.hold_T.items():
+            self.assertGreater(T, 0.0)
+            self.assertLessEqual(T, c.hold_bd[n])
+            if n in c.cap:
+                self.assertAlmostEqual(c.cap[n] + T, c.bd[n], delta=1e-9)
+        for n, f, lo, hi in c.box:
+            if f == "T":
+                self.assertAlmostEqual(hi, c.cap[n], delta=1e-12)
+        for j in ("knee_L", "knee_R", "lumbar"):
+            self.assertLess(E.norm(c.tone_left[j]), 1e-6)
+        self.assertGreater(E.norm(c.tone_left["ankle_R"]), 5.0)
+        self.assertGreater(c.hold_at_start["knee_ext_L"], 50.0)                 # the bent front knee is held by its extensor
+        self.assertNotIn("knee_flex_L", c.hold_T)
+        # (3) the holding drive at speed: the lead shank given a turning rate about the knee's hinge
+        j = c.hold_ix["knee_ext_L"]
+        a_ = s.acts[j]
+        thigh, shank = a_[1], a_[2]
+        n_w = E.mv(E.qR(s.pose(st, thigh)[1]), a_[3])
+        T = c.hold_T["knee_ext_L"]
+
+        def torque_at(w):
+            s2 = list(st)
+            wt = s.pose(st, thigh)[3]
+            s2[13 * shank + 10:13 * shank + 13] = E.add(wt, E.scale(n_w, w))
+            s.diag = {}
+            s.deriv(PR.T0, s2, aux)
+            tau, wrel, act = s.diag["act"][a_[0]]
+            s.diag = None
+            self.assertAlmostEqual(wrel, w, delta=1e-9)
+            return tau
+        self.assertAlmostEqual(torque_at(0.0), T, delta=1e-9 * T)
+        self.assertAlmostEqual(torque_at(3.952), 0.50 * T, delta=1e-9 * T)
+        self.assertAlmostEqual(torque_at(1.517), 0.75 * T, delta=1e-9 * T)
+        self.assertEqual(torque_at(13.4), 0.0)
+        self.assertEqual(torque_at(20.0), 0.0)
+        self.assertGreater(torque_at(-3.0), T)
+        self.assertLess(torque_at(-50.0), 1.5 * T)
+        # (4) letting go
+        pl = {n: (0.0, PR.T0, 0.05, 0.02 + 0.001 * k, 0.0) for k, n in enumerate(PR.CH)}
+        st, aux = c.prepare(c.u_of(pl))
+        off = c.plan(c.u_of(pl))["knee_ext_L"][3]
+        self.assertEqual(s.excitation(j, off - 1e-6), 1.0)
+        self.assertEqual(s.excitation(j, off + 1e-6), 0.0)
+        jt = c.hold_ix["trunk_side_L"]
+        self.assertEqual(s.excitation(jt, 10.0), 1.0)
+        self.assertNotIn("trunk_side_L", PR.CH)
+        # (5) effort
+        act = [(0.0, 0.0, 0.0)] * len(PR.CH) + [(0.0, 0.0, 1.0)] * len(c.hold_ix)
+        recs = [(PR.T0 + 0.001 * k, None, None, act, None, None) for k in range(5)]
+        eff = c.effort(recs, PR.T0 + 0.1, c.plan(c.u_of({})))
+        self.assertAlmostEqual(eff["knee_ext_L"], (T / c.bd["knee_ext_L"]) ** 2, delta=1e-12)
+        self.assertAlmostEqual(eff["hip_flex_L"], (c.hold_T["hip_flex_L"] / c.bd["hip_flex_L"]) ** 2, delta=1e-12)
+        self.assertEqual(eff["knee_flex_L"], 0.0)
+
+
+class ReviewElevenChecks(unittest.TestCase):
+    """body-motion 4.13, after the independent review of session 11: the front foot's load read with its time; the
+    strength scaling of rung 6's what-ifs; the reading of Statcast's foot points."""
+
+    @staticmethod
+    def _research(name):
+        _practice()
+        import importlib
+        return importlib.import_module(name)
+
+    def test_the_front_foots_load_row_says_when_the_peak_falls_and_what_the_feet_carry_at_contact(self):
+        """ladder3d.front_foot_row (review P2-2), against three made-up swings worked by hand, each 270 ms from launch
+        to contact. (1) A peak of 2.0 x body weight 200 ms before contact is 70 ms after the start, 0.26 of the way:
+        inside the gate's band on its size, marked as passing on size only; the row says both times and the loads at
+        contact, 0.04 on the front foot and 0.04 + 0.31 = 0.35 on both. (2) The same peak 60 ms before contact (210 ms
+        after the start, 0.78 of the way) passes with no mark. (3) A peak of 1.2, late, fails on its size: short by
+        0.30. (4) Without the time from launch to contact the row cannot place the peak and does not mark it; given how
+        long the load lasted (13 ms at or over 1.5) and its mean over the last 100 ms (0.44), it says them.
+        Then rung 4's kept swing, whose figures practice3d prints itself and the review read by its own replay: 2.35 x
+        body weight 201 ms before contact, 70 ms after the start, the front foot 0.04 and both feet 0.35 at contact:
+        passed on size only, so of the gate's eighteen rows eight pass outright, one so, nine fail."""
+        L = self._research("ladder3d")
+        r = L.front_foot_row({"lead_foot_peak": (2.0, -200.0), "feet_at_contact": (0.04, 0.31), "start_to_contact_ms": 270.0})
+        self.assertTrue(r[4])
+        self.assertIn(L.SIZE_ONLY, r[3])
+        self.assertIn("inside by 0.50", r[3])
+        self.assertIn("200 ms before contact", r[1])
+        self.assertIn("70 ms after the start", r[1])
+        self.assertIn("the front foot 0.04, both feet 0.35", r[1])
+        r = L.front_foot_row({"lead_foot_peak": (2.0, -60.0), "feet_at_contact": (0.9, 0.2), "start_to_contact_ms": 270.0})
+        self.assertTrue(r[4])
+        self.assertNotIn(L.SIZE_ONLY, r[3])
+        self.assertIn("210 ms after the start", r[1])
+        self.assertIn("both feet 1.10", r[1])
+        r = L.front_foot_row({"lead_foot_peak": (1.2, -60.0), "feet_at_contact": (0.9, 0.2), "start_to_contact_ms": 270.0})
+        self.assertFalse(r[4])
+        self.assertIn("short by 0.30", r[3])
+        self.assertNotIn(L.SIZE_ONLY, r[3])
+        r = L.front_foot_row({"lead_foot_peak": (2.0, -200.0), "feet_at_contact": (0.04, 0.31)})
+        self.assertTrue(r[4])
+        self.assertNotIn(L.SIZE_ONLY, r[3])
+        self.assertNotIn("at or over 1.5", r[1])
+        r = L.front_foot_row({"lead_foot_peak": (2.0, -60.0), "feet_at_contact": (0.9, 0.2), "start_to_contact_ms": 270.0,
+                              "lead_foot_load": {"ms at or over 1.5": 13.0, "mean over the last 100 ms": (0.44, 0.29)}})
+        self.assertIn("at or over 1.5 for 13 ms in all; the mean over the last 100 ms 0.44", r[1])
+        import json
+        import os
+        with open(os.path.join(os.path.dirname(os.path.abspath(L.__file__)), "practice3d_s11_rung4.json")) as f:
+            kept = json.load(f)
+        rows = L.gate(kept)
+        row = [x for x in rows if x[0] == "the front foot's greatest load"][0]
+        self.assertIn("2.35 x body weight 201 ms before contact (70 ms after the start", row[1])
+        self.assertIn("the front foot 0.04, both feet 0.35", row[1])
+        self.assertIn(L.SIZE_ONLY, row[3])
+        yes, half, no = L.passed(rows)
+        self.assertEqual((len(yes), half, len(no)), (8, ["the front foot's greatest load"], 9))
+
+    @NEED
+    def test_a_scaled_strength_reaches_the_bound_the_tendon_spring_the_bursts_cap_and_the_effort(self):
+        """practice3d's bound_scale (rung 6's what-if bodies; review P1-3 and P3-4), the body with every muscle at 1.5
+        times beside the body as it is, each expectation worked from the unscaled body: (1) every group's bound is 1.5
+        times; (2) every tendon spring is 1.5 times as stiff (a tendon stretches a fixed share of its length at the
+        muscle's full strength, 4.5, so a muscle half as strong again has a spring half as stiff again), and the legs'
+        have one; (3) holding the same posture takes the same torques, so the holding strengths are unchanged in N m
+        and the most a burst may ask is 1.5 x the bound less the same holding strength: more than 1.5 times the old
+        cap wherever the group holds; (4) the search's box lets the plan ask that; (5) held and doing nothing else, a
+        group's effort is 1/2.25 of what it was (the same torque, of a bound 1.5 times as large, squared); (6) the
+        hold-only trunk-bending groups, which cannot fire, are not scaled."""
+        PR = _practice()
+        o = dict(LadderChecks.O, stand="muscle", damp="read")
+        a = PR.Ctx(**o)
+        b = PR.Ctx(bound_scale={n: 1.5 for n in PR.CH}, **o)
+        for n in PR.CH:
+            self.assertAlmostEqual(b.bd[n], 1.5 * a.bd[n], delta=1e-9 * a.bd[n])
+        ka = {x[0]: x[11] for x in a.m.sys.acts}
+        kb = {x[0]: x[11] for x in b.m.sys.acts}
+        self.assertEqual(set(ka), set(kb))
+        sprung = [n for n in PR.CH if ka[n] > 0.0]
+        self.assertTrue({"knee_ext_L", "hip_ext_R", "ankle_pf_L"} <= set(sprung))
+        for n in sprung:
+            self.assertAlmostEqual(kb[n], 1.5 * ka[n], delta=1e-9 * ka[n])
+        self.assertEqual(set(a.hold_T), set(b.hold_T))
+        self.assertGreater(len([n for n in PR.CH if n in a.hold_T]), 10)
+        for n, T in a.hold_T.items():
+            self.assertAlmostEqual(b.hold_T[n], T, delta=1e-6 * max(1.0, T))
+        for n in PR.CH:
+            self.assertAlmostEqual(b.cap[n], 1.5 * a.bd[n] - a.hold_T.get(n, 0.0), delta=1e-6 * a.bd[n])
+            if a.hold_T.get(n, 0.0) > 1.0:
+                self.assertGreater(b.cap[n], 1.5 * a.cap[n])
+        hi = {n: h for n, f, lo, h in b.box if f == "T"}
+        for n in PR.CH:
+            self.assertAlmostEqual(hi[n], b.cap[n], delta=1e-12)
+        effort = lambda c: c.effort([(PR.T0 + 0.001 * k, None, None, [(0.0, 0.0, 0.0)] * len(PR.CH) + [(0.0, 0.0, 1.0)] * len(c.hold_ix), None, None)
+                                     for k in range(5)], PR.T0 + 0.1, c.plan(c.u_of({})))
+        ea, eb = effort(a), effort(b)
+        self.assertGreater(ea["knee_ext_L"], 1e-4)
+        for n in ("knee_ext_L", "hip_flex_L", "hip_ext_R", "hip_abd_L"):
+            self.assertGreater(ea[n], 0.0)
+            self.assertAlmostEqual(eb[n], ea[n] / 2.25, delta=1e-6 * ea[n])
+        self.assertGreater(eb["core"], ea["core"] / 2.25)     # booked with the hold-only trunk groups' effort, which is not scaled (6)
+        self.assertLess(eb["core"], ea["core"])
+        for n in Dr.HOLD_ONLY:
+            self.assertAlmostEqual(b.hold_bd[n], a.hold_bd[n], delta=1e-12)
+
+    def test_a_foots_ankle_and_turn_are_read_from_its_three_points_and_a_left_hander_is_mirrored(self):
+        """statcast_feet.feet and .measures (review P3-3), on a made-up right-handed hitter worked by hand, in feet in the
+        plate's frame as the page has them. His front (left) foot at the intercept: heel at (-2.0, 3.0), big toe at
+        (-1.2, 3.7), small toe at (-1.4, 3.9), so the toe's midpoint is (-1.3, 3.8): heel to toe (0.7, 0.8), turned
+        atan2(0.8, 0.7) = 48.81 deg toward the pitcher from square; the ankle a quarter of the way: (-1.825, 3.2).
+        His rear (right) foot: heel (-2.4, -0.4), toes (-1.5, -0.3) and (-1.5, -0.5): toe (-1.5, -0.4), square (0 deg),
+        ankle (-2.175, -0.4). So the ankles are 3.6 ft = 109.728 cm apart along the line to the pitcher and the lead one
+        0.35 ft = 10.668 cm nearer the plate; with the intercept 3.1 ft ahead of the plate's rear apex the ball is
+        3.5 ft = 106.68 cm ahead of the rear ankle and 0.1 ft = 3.048 cm behind the lead one. His hips in the stance
+        30 in behind the plate's front edge are 17 - 30 = -13 in = -33.02 cm, so the ball is 94.488 + 33.02 = 127.508 cm
+        ahead of them. The same hitter left-handed (every x negated, left and right feet swapped) gives every figure the
+        same."""
+        SF = self._research("statcast_feet")
+
+        def hitter(side):
+            m = 1.0 if side == "R" else -1.0
+            lead, rear = ("l", "r") if side == "R" else ("r", "l")
+            r = {"bat_side": side, "avg_intercept_y": 3.1, "avg_batter_y_position": 30.0, "avg_foot_sep0": 30.0, "avg_intercept_y_in": 37.2,
+                 "avg_intercept_y_vs_batter": 50.2}
+            pts = {(lead, "heel"): (-2.0, 3.0), (lead, "bigtoe"): (-1.2, 3.7), (lead, "smalltoe"): (-1.4, 3.9),
+                   (rear, "heel"): (-2.4, -0.4), (rear, "bigtoe"): (-1.5, -0.3), (rear, "smalltoe"): (-1.5, -0.5)}
+            for (f, part), (x, y) in pts.items():
+                for t in (0, 1, 2):
+                    r["avg_%s%s_x%d" % (f, part, t)] = m * x
+                    r["avg_%s%s_y%d" % (f, part, t)] = y
+            return r
+        for side in "RL":
+            F = SF.feet(hitter(side))
+            self.assertAlmostEqual(F["lead", 2]["turn"], 48.8141, delta=1e-3)
+            self.assertAlmostEqual(F["rear", 2]["turn"], 0.0, delta=1e-9)
+            for got, want in zip(F["lead", 2]["ankle"], (-1.825 * 30.48, 3.2 * 30.48)):
+                self.assertAlmostEqual(got, want, delta=1e-9)
+            for got, want in zip(F["rear", 2]["ankle"], (-2.175 * 30.48, -0.4 * 30.48)):
+                self.assertAlmostEqual(got, want, delta=1e-9)
+            o = SF.measures([hitter(side)])
+            self.assertAlmostEqual(o["ankles apart, along (cm)"][0], 109.728, delta=1e-9)
+            self.assertAlmostEqual(o["lead ankle across (cm)"][0], 10.668, delta=1e-9)
+            self.assertAlmostEqual(o["ball ahead of the rear ankle (cm)"][0], 106.68, delta=1e-9)
+            self.assertAlmostEqual(o["ball ahead of the lead ankle (cm)"][0], -3.048, delta=1e-9)
+            self.assertAlmostEqual(o["ball ahead of the hips in the stance (cm)"][0], 127.508, delta=1e-9)
+            self.assertAlmostEqual(o["front foot's turn (deg)"][0], 48.8141, delta=1e-3)
+
+
+class StanceChecks(unittest.TestCase):
+    """body-motion 4.13, rungs 3 and 4: the start on major leaguers' feet; the hips' turn by their own muscles."""
+
+    @NEED
+    def test_the_start_on_major_leaguers_feet_is_where_statcast_has_them(self):
+        """body.START_STANCE. The placed ankle joints are 1.03 m apart along the line to the pitcher and level across it
+        (Statcast's foot points at the intercept: 102.6 cm and 1 cm, note 15), the front foot points 44 deg toward the
+        pitcher from square to the plate, the rear foot is flat; every joint is inside its anatomical end by at least the
+        4.0 deg the rule reached (it asks 5: the rear ankle's roll, both hips sideways and the lead ankle's roll are the
+        ones short, as stated with the stored result), and no stop is moved (add_ranges fails if the start is outside).
+        On that start the practice search's ball is within 1.2 cm of level with the lead ankle, where Statcast has the
+        intercept (-0.4 +- 9.4 cm; the 1.022 m from the rear ankle is not restated here, review P3-4). With BB_SLOW=1
+        the rule is rerun on the given feet (7 minutes) and must return the stored numbers."""
+        import os
+        m = B.Model(ranges=(), grip="hands", feet="cleats", wrist="oval", shift=B.START_STANCE)
+        st = B.place(m, T0)
+        aL, aR = m.joint_pos(st, "ankle_L"), m.joint_pos(st, "ankle_R")
+        self.assertAlmostEqual(aL[1] - aR[1], 1.03, delta=2e-3)
+        self.assertAlmostEqual(aL[0] - aR[0], 0.0, delta=2e-3)
+        fx = m.axis(st, "foot_L", (1, 0, 0))
+        self.assertAlmostEqual(math.degrees(math.atan2(fx[1], fx[0])), 44.0, delta=0.5)
+        self.assertLess(abs(m.axis(st, "foot_R", (0, 0, 1))[2] - 1.0), 1e-6)
+        mg = B.start_margins(m, st)
+        self.assertGreaterEqual(min(mg.values()), 4.0)
+        self.assertEqual(sorted(k for k, v in mg.items() if v < 4.99), ["ankle_roll_L", "ankle_roll_R", "hip_abd_L", "hip_abd_R"])
+        B.add_ranges(m, st)                                      # every stop at its anatomical end, the start inside
+        PR = _practice()
+        c = PR.Ctx(grip="hands", feet="cleats", hold="let_go", wrist="oval", clear=True, stance="mlb")
+        aL, aR = c.m.joint_pos(c.st, "ankle_L"), c.m.joint_pos(c.st, "ankle_R")
+        self.assertLess(abs(c.Pc[1] - aL[1]), 0.012)
+        self.assertGreater(c.Pc[1] - aR[1], 0.9)
+        self.assertAlmostEqual(c.Pc[2], 0.78, delta=1e-12)
+        if os.environ.get("BB_SLOW"):
+            given = {k: B.START_STANCE[k] for k in ("stride_cm", "stride_closed_cm", "lead_foot")}
+            x, _ = B.clear_start(T0, given=given, grip="hands", feet="cleats", wrist="oval")
+            self.assertEqual(x, B.START_STANCE)
+
+    @NEED
+    def test_the_feet_loaded_by_balance_carry_his_weight_and_no_more(self):
+        """body-motion 4.13, rung 5 (built, not run in a search): Model(loads="balance") gives each foot the share of his
+        weight that statics asks along the line of the feet, in place of [4]'s measured forces. On the start at rest:
+        the ground's upward force, read from the engine's own contacts at the first instant, is his weight (92 kg x g)
+        to a part in a thousand, where [4]'s loads at that instant are 0.79 of it; there is no level force; the lead
+        foot's share is the lever rule worked here from the centre of mass and the two feet's points on the ground; and
+        the centre of mass does not start to fall (under 0.2 m/s2, against 2.1 on [4]'s loads)."""
+        got = {}
+        for loads in ("measured", "balance"):
+            m = B.Model(ranges=(), grip="hands", feet="cleats", wrist="oval", shift=B.START_STANCE, loads=loads)
+            st = B.place(m, T0, moving=False)
+            s = m.sys
+            aux = list(m.start_aux)
+            s.diag = {}
+            ds = s.deriv(T0, st, aux)
+            con = s.diag["contact"]
+            s.diag = None
+            N = {sd: sum(f[2] for n, f in con.items() if n[0] == sd) for sd in "LR"}
+            level = max(abs(sum(f[k] for f in con.values())) for k in (0, 1))
+            pts = {sd: [E.add(s.pose(st, c[1])[0], E.mv(E.qR(s.pose(st, c[1])[1]), c[2]))[1] for j, c in enumerate(s.contacts) if c[0][0] == sd and aux[j] is not None] for sd in "LR"}
+            y = {sd: sum(v) / len(v) for sd, v in pts.items()}
+            yc = B.com(m, st)[0][1]
+            got[loads] = (N, level, (yc - y["R"]) / (y["L"] - y["R"]))
+        BW = 92.0 * E.G
+        N, level, share = got["balance"]
+        self.assertAlmostEqual((N["L"] + N["R"]) / BW, 1.0, delta=1e-3)
+        self.assertLess(level, 1e-6)
+        self.assertAlmostEqual(N["L"] / (N["L"] + N["R"]), share, delta=5e-3)
+        self.assertTrue(0.3 < share < 0.6)
+        N0, level0, _ = got["measured"]
+        self.assertLess((N0["L"] + N0["R"]) / BW, 0.85)
+        self.assertGreater(level0, 50.0)
+
+    @NEED
+    def test_the_feet_push_apart_as_much_as_costs_the_hold_least(self):
+        """rung 5: on the still start in balance, drive.solve_spread's push between the feet. The two feet's level forces,
+        read from the engine's contacts, are equal and opposite along the line of the feet (the lead foot pushed toward
+        the rear one) and inside the grip's cone; the hold-still torques' sum of squares is smaller at the solved push
+        than at none and than at 30 N either side of it (worked here by solving the hold at each); and with the push the
+        rear hip's adductors hold a wide base with a quarter of their strength where without it they could not hold it."""
+        PR = _practice()
+        o = dict(grip="hands", feet="cleats", hold="let_go", wrist="oval", clear=True, stance="mlb", stand="muscle", loads="balance", vel=0.0)
+        c = PR.Ctx(**o)
+        F, at_F, at_0 = c.spread
+        self.assertGreater(F, 50.0)
+        self.assertLess(at_F, 0.5 * at_0)
+        m, s = c.m, c.m.sys
+        st, aux = c.prepare(c.u_of({}))
+        s.diag = {}
+        s.deriv(PR.T0, st, aux)
+        con = s.diag["contact"]
+        s.diag = None
+        fy = {sd: sum(f[1] for n, f in con.items() if n[0] == sd) for sd in "LR"}
+        fz = {sd: sum(f[2] for n, f in con.items() if n[0] == sd) for sd in "LR"}
+        self.assertAlmostEqual(fy["L"], -F, delta=1e-6 * F)
+        self.assertAlmostEqual(fy["R"], F, delta=1e-6 * F)
+        self.assertLess(F, c.m.mu * min(fz.values()))
+        kt = s.contacts[0][5]
+        idx = {sd: [j for j, cc in enumerate(s.contacts) if cc[0][0] == sd and c.aux0[j] is not None] for sd in "LR"}
+
+        still = list(c.st)                                      # the same start with the holding drives let go, so that the
+        oa = 13 * s.nb                                          # hold-still solve below is asked for the whole hold again
+        for j in c.hold_ix.values():
+            still[oa + j] = 0.0
+
+        def hold_at(dF):
+            a = list(c.aux0)
+            for sd, sgn in (("L", -1.0), ("R", 1.0)):
+                for j in idx[sd]:
+                    a[j] = (a[j][0], a[j][1] + sgn * dF / len(idx[sd]) / kt)
+            keep = list(s.tones)
+            tone, _ = PR.Dr.solve_tone(m, still, PR.T0, aux=a)
+            s.tones = keep
+            return sum(PR.E.dot(v, v) for v in tone.values())
+        here = hold_at(0.0)
+        self.assertAlmostEqual(here, at_F, delta=1e-6 * at_F)
+        self.assertGreater(hold_at(30.0), here)
+        self.assertGreater(hold_at(-30.0), here)
+        self.assertLess(c.hold_T["hip_add_R"] / c.bd["hip_add_R"], 0.3)
+
+    def test_the_hips_active_turn_is_the_one_measured_with_the_hip_straight(self):
+        """rung 4: the hips' ends of turn by their own muscles are Simoneau 1998's men measured prone, the hip straight
+        (turning in 32 +- 9 deg, out 44 +- 7; note 15 C), not Boone & Azen's 44 and 44, which were measured seated with
+        the hip bent to a right angle. With them the stops stand at those ends: for the lead (left) hip the turn in is
+        the reading's positive end."""
+        self.assertEqual(B.ROM_ACTIVE_HIP, {"hip_irot": 32.0, "hip_erot": 44.0})
+        keep = dict(B.ROM)
+        try:
+            B.ROM.update(B.ROM_ACTIVE_HIP)
+            specs = {t[0]: t for t in B.range_specs(None, "hands", "cleats", "oval")}
+        finally:
+            B.ROM.clear(); B.ROM.update(keep)
+        self.assertEqual(specs["hip_rot_L"][6:8], (-44.0, 32.0))
+        self.assertEqual(specs["hip_rot_R"][6:8], (-32.0, 44.0))
+        self.assertEqual(B.ROM["hip_irot"], 32.6)                # the body's own table is as it was
+
+
 class Mutations(unittest.TestCase):
     """each fault is caught by a named check (and the checks pass without it, above)."""
 

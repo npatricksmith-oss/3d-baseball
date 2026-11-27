@@ -117,15 +117,13 @@ ARM_TENDONS = {"sh_hadd": True, "sh_habd": True, "elbow_ext": True, "wrist": Fal
                "sh_raise": True, "sh_lower": True, "sh_irot": True, "elbow_flex": True}
 # the first law's top speeds W, rad/s [E] (5.1), still used by the arms and wherever a curve is None
 W_TOP = {"hip": 20.0, "knee": 20.0, "ankle": 20.0, "core": 25.0, "shoulder": 30.0, "elbow": 35.0, "wrist": 40.0}
-# intrinsic joint damping: N m s/rad on every axis of every joint, its torque capped; stiffness none.
-# [E], UNSOURCED (session 1's value, kept since; session 10's review, P1-2): in the best practised swing it takes 266 J,
-# 64 % of the muscles' work, 196 J of it at the arms, and reaches 29 N m at the rear elbow and 16 N m at a wrist whose
-# muscles have 24-51. Range until a source is read: [E: 0.02-1.0, by joint]. Pointers, from search summaries only, no
-# paper opened (2026-11-26): the relaxed wrist 0.02-0.06; the elbow about 0.2-0.4 and the shoulder about 0.7 while a
-# posture is held (Gomi & Osu 1998 and the single-joint work it cites); nothing found for the hips, knees or trunk.
-# The next session reads a source and sets it by joint BEFORE any other single change (body-motion "what is left").
+# intrinsic joint damping. Sessions 1-10: JOINT_DAMP N m s/rad on every axis of every joint, its torque capped at
+# JOINT_DAMP_CAP; [E], UNSOURCED (session 10's review, P1-2: in that session's best swing it took 266 J, 64 % of the
+# muscles' work). It stays the default so that a saved result without the option replays on the body it was found on.
+# Since session 11 (PLAN D42, body-motion 4.13, research note 14) a practice run names a set of DAMPING below instead.
 JOINT_DAMP = 1.0
 JOINT_DAMP_CAP = 30.0
+NO_CAP = 1e12              # a damper with no cap (the engine's law takes a number)
 TONE_RIDGE = 1e-8          # relative to the largest diagonal of the normal equations
 
 
@@ -244,6 +242,65 @@ JOINTS = ("lumbar", "hip_L", "hip_R", "knee_L", "knee_R", "ankle_L", "ankle_R",
           "shoulder_L", "shoulder_R", "elbow_L", "elbow_R", "wrist_L", "wrist_R")
 
 
+# ---- the joints' own damping by joint (body-motion 4.13, session 11; PLAN D42; research note 14) -------------------
+# N m s/rad. A joint's value is one number (every axis alike) or three, about the axes of the joint's PARENT body, where
+# the joint's two movements can be told apart there: the elbow's hinge is the upper arm's y and the forearm's turn is
+# about the forearm's length, which the hinge keeps in the upper arm's x-z plane, so (turn, bend, turn); the wrist's bend
+# is about the forearm's x and its tilt about an axis the joint keeps square to that, so (bend, tilt, tilt); the ankle's
+# bend is about the shank's y and its roll square to that, so (roll, bend, roll).
+# ONLY THE RELAXED JOINT'S VALUE BELONGS HERE: every source that measured both has damping rising with the muscles'
+# effort, and that part is the muscles' own strength-at-speed behaviour, which this body's drives already carry (at
+# the elbow: Gomi & Osu measured +0.18-0.19 N m s/rad per N m of torque held; the elbow extensor's curve of 4.5 gives
+# 0.23 per N m at low speed). No cap: a linear damper at these values never comes near sessions 1-10's 30 N m, which
+# had no source. The linear law itself overstates a relaxed joint at a swing's speeds (note 14: the coefficient falls
+# as the movement gets larger and faster), so these are upper readings on that side.
+# "read": the central set. READ = a relaxed value read from a paper's text or table. NOT MEASURED / NOT READ = the middle
+# of a stated range, flagged; "low" and "high" move those to the range's ends and leave the read ones.
+#   wrist bend 0.04       READ: the mean of four studies of the relaxed wrist as Salmond, Davidson & Charles 2017 tabulate
+#                         them (0.014-0.09, mean 0.038; Lakie 1984's relaxed wrist read apart: 0.07-0.14 off its figure)
+#   wrist tilt 0.09       NOT MEASURED by anyone (Peaden & Charles 2014: "unknown"); their assumed value, scaled from
+#                         stiffness: 0.088. Range 0.03-0.20 [E: from the bend's read value to about twice the assumption]
+#   forearm's turn 0.03   NOT MEASURED; the same authors' assumption 0.024 (men). Range 0.02-0.10 [E: as the wrist's]
+#   elbow bend 0.43       READ, but with the arm holding its place and reflexes in (Tsuji 1995: 0.22-0.63, mean 0.43;
+#                         "asked to relax his arm"): an upper reading. The truly relaxed elbow was not read (Hayes &
+#                         Hatze 1977, MacKay 1986: closed). Range 0.22-0.97 (Tsuji's least; Gomi & Osu's largest
+#                         zero-torque value)
+#   shoulder 0.47         READ: Lipps et al. 2020, at rest (0 % of maximum): 0.61 raised and lowered, 0.33 turned about
+#                         the upper arm, 0.46 swept in the level plane (its +- 0.22, 0.10, 0.16 are 95 % confidence
+#                         intervals, not SDs); their mean (the shoulder's axes cannot be told apart in the trunk's frame)
+#   ankle bend 0.40       READ: Lee, Krebs & Hogan 2014, relaxed: 0.34 seated, 0.45 knee straight (SEs 0.02)
+#   ankle roll 0.165      READ: the same: 0.15, 0.18 (SEs 0.03)
+#   knee 0.25             READ: the relaxed lower leg left to swing (Casabona, Valle et al. 2012, controls: 0.18 +- 0.08
+#                         and 0.31 +- 0.09, the two half-swings the paper quotes, where its groups differed least and
+#                         most: two of its figures, not the controls' whole range). Small perturbations about a held angle give 1.0 (Koopman 2016,
+#                         elderly) to 2: the two methods disagree fivefold; the free swing is the nearer to a swing
+#   hip 2.0               NOT READ as a relaxed mean. Range 0.5-4.6: Huang 2020's relaxed subjects 2-21 forward and back
+#                         from 1 deg pulls (a poor fit, its authors say), the swinging leg in walking 1.9-4.6 (van der Kooij
+#                         2022), Koopman's relaxed 0.5-10 (second hand); Amankwah 2004's relaxed hip moved through its
+#                         range resists with 14-17 N m at 300-700 deg/s (its fit carried up from 90 deg/s), which is
+#                         1.4-2.7 as a coefficient. Nothing at all for the hip sideways or about the thigh
+#   trunk 5.0             NOT READ. Range 1.0-27.5: relaxed sitting 4-7 forward and back (Hodges 2009, second hand, my
+#                         lever); 27.5 +- 9.0 with the trunk's muscles holding 100-170 N (Moorhouse & Granata 2005: trunk
+#                         FLEXION-EXTENSION, not twist; the lever of its conversion is not stated, and its own S1-T10
+#                         distance, 0.203 m, would give about 12.9; taken as a ceiling: the relaxed trunk cannot have
+#                         more); the least quick-release mean 1.2. NOTHING for the twist relaxed
+DAMP_GROUPS = {"arms": ("shoulder_L", "shoulder_R", "elbow_L", "elbow_R", "wrist_L", "wrist_R"), "trunk": ("lumbar",),
+               "legs": ("hip_L", "hip_R", "knee_L", "knee_R", "ankle_L", "ankle_R")}
+
+
+def _damp_set(wrist_tilt, forearm, elbow, hip, trunk):
+    t = {"lumbar": trunk}
+    for sd in "LR":
+        t.update({"hip_" + sd: hip, "knee_" + sd: 0.25, "ankle_" + sd: (0.165, 0.40, 0.165), "shoulder_" + sd: 0.47,
+                  "elbow_" + sd: (forearm, elbow, forearm), "wrist_" + sd: (0.04, wrist_tilt, wrist_tilt)})
+    return t
+
+
+DAMPING = {"read": _damp_set(0.09, 0.03, 0.43, 2.0, 5.0),
+           "low": _damp_set(0.03, 0.02, 0.22, 0.5, 1.0),
+           "high": _damp_set(0.20, 0.10, 0.97, 4.6, 27.5)}
+
+
 def check_rules(mdl, plan):
     """the design's rules broken by a plan {channel: (T, t_on, t_rise, t_off)}; empty when it obeys them."""
     bad = []
@@ -309,14 +366,38 @@ def add_drives(mdl, st, plan, held=False):
     return st[:nb13] + [a[9] for a in s.acts] + st[nb13 + nold:]
 
 
-def add_damping(mdl, st, damp=JOINT_DAMP, cap=JOINT_DAMP_CAP):
-    """intrinsic joint damping on every joint [E]; no stiffness, so nothing pulls toward a posture."""
+def damping_of(damp=None):
+    """{joint: (cx, cy, cz) N m s/rad about the parent body's axes} and the cap (N m) for `damp`: None (sessions 1-10:
+    JOINT_DAMP everywhere, capped at JOINT_DAMP_CAP), the name of a set in DAMPING (no cap), a number (that value at
+    every joint, no cap), or a dict {"set": name, "from": {group or joint: another set's name}, "scale": {group or
+    joint: factor}, "cap": N m}: a set with some joints' values taken from another set or scaled (the runs across an
+    unread joint's range, one group at a time; body-motion 4.13)."""
+    tri = lambda v: tuple(float(x) for x in v) if isinstance(v, (tuple, list)) else (float(v),) * 3
+    if damp is None:
+        return {j: tri(JOINT_DAMP) for j in JOINTS}, JOINT_DAMP_CAP
+    if isinstance(damp, (int, float)):
+        return {j: tri(damp) for j in JOINTS}, NO_CAP
+    spec = {"set": damp} if isinstance(damp, str) else dict(damp)
+    out = {j: tri(v) for j, v in DAMPING[spec["set"]].items()}
+    for key, other in spec.get("from", {}).items():
+        for j in DAMP_GROUPS.get(key, (key,)):
+            out[j] = tri(DAMPING[other][j])
+    for key, f in spec.get("scale", {}).items():
+        for j in DAMP_GROUPS.get(key, (key,)):
+            out[j] = tuple(x * f for x in out[j])
+    return out, spec.get("cap", NO_CAP)
+
+
+def add_damping(mdl, st, damp=None):
+    """the joints' own damping (damping_of): no stiffness, so nothing pulls toward a posture. A damper only ever takes
+    energy (its torque is -C x the joint's speed axis by axis in the parent's frame, scaled down to the cap)."""
     s = mdl.sys
     s.holds = []
+    table, cap = damping_of(damp)
     for j in JOINTS:
         a, ra, bb, rb = mdl.jp[j]
         qa = s.pose(st, a)[1]; qb = s.pose(st, bb)[1]
-        s.hold(j, a, bb, E.qmul(E.qconj(qa), qb), (0.0, 0.0, 0.0), (damp, damp, damp), cap)
+        s.hold(j, a, bb, E.qmul(E.qconj(qa), qb), (0.0, 0.0, 0.0), table[j], cap)
 
 
 def solve_tone(mdl, st, t0, aux=None):
@@ -366,6 +447,165 @@ def solve_tone(mdl, st, t0, aux=None):
     lin = max(abs(rest[6 * i + c]) for i in range(nb) for c in range(3))
     ang = max(abs(rest[6 * i + 3 + c]) for i in range(nb) for c in range(3))
     return out, (lin, ang)
+
+
+def solve_spread(mdl, st, t0, aux, steps=24):
+    """A body standing still on a wide base pushes its feet apart against the ground's grip, and how hard is not set by
+    statics (the two feet's level forces are equal and opposite, an inner load). The rule (body-motion 4.13, rung 5):
+    the push F along the line of the feet, from none to what the less loaded foot's grip allows, that leaves the
+    hold-still torques smallest (the sum of their squares), found by a golden-section search of solve_tone. The friction
+    anchors in aux are moved to carry it: the ground pushes the lead foot toward the rear one and the rear toward the
+    lead. Returns (F in N, the sum of squares at F, the sum at no push)."""
+    s = mdl.sys
+    nc = len(s.contacts)
+    base = list(aux)
+    idx = {sd: [j for j, c in enumerate(s.contacts) if c[0][0] == sd and base[j] is not None] for sd in "LR"}
+    if not idx["L"] or not idx["R"]:
+        return 0.0, None, None
+    s.diag = {}
+    s.deriv(t0, st, base)
+    load = {sd: sum(s.diag["contact"][s.contacts[j][0]][2] for j in idx[sd]) for sd in "LR"}
+    s.diag = None
+    kt, mu = s.contacts[idx["L"][0]][5], s.contacts[idx["L"][0]][7]
+    top = 0.95 * mu * min(load.values())
+
+    def at(F):
+        a = list(base)
+        for sd, sgn in (("L", -1.0), ("R", 1.0)):
+            for j in idx[sd]:
+                a[j] = (base[j][0], base[j][1] + sgn * F / len(idx[sd]) / kt)
+        tone, _ = solve_tone(mdl, st, t0, aux=list(a))
+        return sum(E.dot(v, v) for v in tone.values()), a
+    g = 0.5 * (math.sqrt(5.0) - 1.0)
+    lo, hi = 0.0, top
+    x1, x2 = hi - g * (hi - lo), lo + g * (hi - lo)
+    f1, f2 = at(x1)[0], at(x2)[0]
+    for _ in range(steps):
+        if f1 < f2:
+            hi, x2, f2 = x2, x1, f1
+            x1 = hi - g * (hi - lo)
+            f1 = at(x1)[0]
+        else:
+            lo, x1, f1 = x1, x2, f2
+            x2 = lo + g * (hi - lo)
+            f2 = at(x2)[0]
+    f0 = at(0.0)[0]
+    F = 0.5 * (lo + hi)
+    fF, a = at(F)
+    if f0 <= fF:
+        F, fF, a = 0.0, f0, base
+    aux[:nc] = a[:nc]
+    return F, fF, f0
+
+
+# ---- the launch posture held by muscle (body-motion 4.13, rung 2; PLAN D42) ---------------------------------------
+# A standing hitter's posture is held by the muscles that later swing: each carries a holding level. So each hold-still
+# torque of solve_tone is handed to the muscle group that acts about that axis in that direction, as a HOLDING DRIVE:
+# an ordinary drive of the engine, about the channel's own axis, on the channel's own strength-at-speed curve, fully on
+# from the start, its strength set so that at the start's own joint speed it gives exactly the hold-still torque. From
+# then on it obeys what every muscle obeys: it gives less as the joint moves its way and nothing at the curve's top
+# speed, more (to the stretched muscle's plateau) when the joint is forced back; it counts as effort; it takes its share
+# of the group's bound away from the burst (practice3d: the burst's strength may be at most the bound less the holding
+# strength); and it goes when the plan switches the muscle off. It has no tendon spring [E: at 69 N m the knee
+# extensor's spring holds about 2 J].
+# The trunk's bending has no muscle in the plan (4.5). Its holding level is carried by HOLD-ONLY groups with a measured
+# strength: Schultz et al. 1987 (10 men of 19-25, 1.78 m, about 71 kg; standing, pelvis strapped, isometric, the moment
+# about L3; note 12 C1, its Table 2 read), mean + 2 SD scaled by weight x height as every bound here. The search cannot
+# fire them. Their strength at speed: Thompson et al. 1985's standing extension at 0.52, 1.05, 1.57 and 2.09 rad/s
+# (267.5, 259.6, 248.5, 242.7 N m; note 12 C1, full text); beyond 2.09 rad/s nothing is measured for a trunk's bending
+# and the line runs to zero at the twist's top speed [E].
+_SCHULTZ = (92.0 * 1.84) / (71.0 * 1.78)
+HOLD_ONLY = {   # name: (parent, child, axis in the parent, first-law speed group, curve, strength for 92 kg and 1.84 m)
+    "trunk_fwd": ("pelvis", "trunk", (0, 1, 0), "core", "trunk_bend", (191.0 + 2 * 70.0) * _SCHULTZ),      # flexion
+    "trunk_ext": ("pelvis", "trunk", (0, -1, 0), "core", "trunk_bend", (204.0 + 2 * 78.0) * _SCHULTZ),     # extension
+    "trunk_side_R": ("pelvis", "trunk", (1, 0, 0), "core", "trunk_bend", (164.0 + 2 * 56.0) * _SCHULTZ),   # bent toward his right
+    "trunk_side_L": ("pelvis", "trunk", (-1, 0, 0), "core", "trunk_bend", (180.0 + 2 * 65.0) * _SCHULTZ),  # toward his left
+}
+CURVES["trunk_bend"] = ((0.0, 1.0), (0.52, 1.0), (1.05, 259.6 / 267.5), (1.57, 248.5 / 267.5), (2.09, 242.7 / 267.5), (12.9, 0.0))
+HOLD_MIN_FV = 0.2          # a muscle shortening so fast at the start that it has under this share of its strength cannot hold: left as a torque
+HOLD_PREFIX = "hold:"
+
+
+def solve_hold_muscles(mdl, st, tone, bd):
+    """solve_tone's hold-still torques handed to the body's muscles (above). For each joint the torque (on the joint's
+    child, in the world) is written as a sum over the axes the joint's muscle groups act about (least squares; three
+    independent axes at a ball joint, so exact there; at a hinge or a two-axis joint what is left over is about an axis
+    the joint itself holds and does nothing). Each axis's share goes to the group that pulls that way, as the strength
+    T of its holding drive: share / (the group's strength-at-speed fraction at the start's own speed). A share with no
+    group that way (4.5's list of directions with no muscle), or whose group could not hold it, STAYS A TORQUE, and is
+    returned apart to be reported. mdl must carry the plan's channels (add_drives). bd: the plan channels' bounds.
+    Returns ({group: (T, parent, child, axis, W, curve table index or -1, floating direction or None)},
+             {joint: the torque left, in the parent's frame}, {group: its torque at the start, N m})."""
+    s, b = mdl.sys, mdl.b
+    k = (mdl.M * E.G * mdl.H) / REF_WH
+    Rof = lambda i: E.qR(s.pose(st, i)[1])
+    wof = lambda i: s.pose(st, i)[3]
+    groups = []                    # (name, a, b, axis in a, W, tab, axis_b, bound)
+    for a_ in s.acts:
+        if not a_[0].startswith(HOLD_PREFIX):
+            groups.append((a_[0], a_[1], a_[2], a_[3], a_[5], a_[10], a_[12], bd[a_[0]]))
+    for n, (pa, ch, ax, grp, curve, T) in HOLD_ONLY.items():
+        if curve not in [None] and tuple(CURVES[curve]) not in s.fvtabs:
+            s.fvtabs.append(tuple(CURVES[curve]))
+            s.fvecc.append(curve_ecc(curve))
+        groups.append((n, b[pa], b[ch], E.unit(ax), W_TOP[grp], s.fvtabs.index(tuple(CURVES[curve])), E.ZERO, T * k))
+    holds, left, at_start = {}, {}, {}
+    for j in JOINTS:
+        A, ra, Bc, rb = mdl.jp[j]
+        tw = E.mv(Rof(A), tone[j])                                   # on the child, world
+        axes = []                                                    # [unit axis e (torque on the child), {+1: group, -1: group}]
+        for g in groups:
+            name, a, bb, ax, W, tab, axb, bound = g
+            if {a, bb} != {A, Bc}:
+                continue
+            n = E.mv(Rof(a), ax)
+            if axb != E.ZERO:
+                n = s.float_axis(n, E.mv(Rof(bb), axb))
+                if n == E.ZERO:
+                    continue
+            gen = n if bb == Bc else E.scale(n, -1.0)                 # the group's torque on the joint's child, per N m
+            for e in axes:
+                c = E.dot(gen, e[0])
+                if abs(c) > 0.999:
+                    e[1].setdefault(1 if c > 0 else -1, g)
+                    break
+            else:
+                axes.append([gen, {1: g}])
+        rest = tw
+        if axes:
+            n_ = len(axes)
+            Am = [[E.dot(axes[i][0], axes[q][0]) + (1e-12 if i == q else 0.0) for q in range(i + 1)] for i in range(n_)]
+            sh = E.chol_solve(Am, [E.dot(axes[i][0], tw) for i in range(n_)])
+            for (e, by), x in zip(axes, sh):
+                g = by.get(1 if x > 0 else -1)
+                if g is None or x == 0.0:
+                    continue
+                name, a, bb, ax, W, tab, axb, bound = g
+                nw = E.mv(Rof(a), ax)
+                if axb != E.ZERO:
+                    nw = s.float_axis(nw, E.mv(Rof(bb), axb))
+                w0 = E.dot(E.sub(wof(bb), wof(a)), nw)
+                f = E.fv(w0 / W) if tab < 0 else E.fv_tab(s.fvtabs[tab], w0, s.tab_ecc(tab))
+                T = abs(x) / f if f >= HOLD_MIN_FV else float("inf")
+                if T > bound:
+                    continue                                         # the group could not hold it: it stays a torque
+                holds[name] = (T, a, bb, ax, W, tab, None if axb == E.ZERO else axb)
+                at_start[name] = abs(x)
+                rest = E.sub(rest, E.scale(e, x))
+        left[j] = E.mtv(Rof(A), rest)
+    return holds, left, at_start
+
+
+def add_hold_muscles(mdl, st, holds, left):
+    """the holding drives added to a model that carries the plan's channels, and the hold-still torques cut down to what
+    no muscle took (solve_hold_muscles). Each holding drive is fully on (level 1) and never fires; its switch-off is set
+    by the plan (practice3d.Ctx.prepare). Returns the state with their levels in place."""
+    s = mdl.sys
+    nb13, nold = 13 * s.nb, len(s.acts)
+    for name, (T, a, bb, ax, W, tab, axb) in holds.items():
+        s.actuator(HOLD_PREFIX + name, a, bb, ax, T, W, 1e9, RISE_MIN, 1e9, 1.0, tab, 0.0, axb, False)
+    s.tones = [(nm, a, bb, tuple(left[nm])) for nm, a, bb, _ in s.tones]
+    return st[:nb13 + nold] + [1.0] * len(holds) + st[nb13 + nold:]
 
 
 def hold_response(mdl, st, t0, aux, names, bd):

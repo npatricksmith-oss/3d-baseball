@@ -261,6 +261,27 @@ def _cases():
     # stops' booked-WORK integral (a state entry), not in the motion: the bodies' own entries differ by at most 2e-9 and
     # fall back to 2e-10. It lies inside the Python engine's own spread under 1e-13 nudges (6e-10 to 2.9e-8).
     out.append(("the wrists' ellipses, every drive at its bound", m, st, -0.250, 200, "sensitive"))
+    # session 11 (4.13): the joints' damping at the values read (by joint and by axis, no cap), and with it the launch
+    # posture held by muscle (each hold-still torque a holding drive on its group's strength-at-speed curve). Both on the
+    # hands' body with cleats and the wrists' ellipses, the cleared start, every muscle at its bound; judged as the
+    # sensitive cases above are.
+    for held_by_muscle in (False, True):
+        m = B.Model(ranges=(), grip="hands", feet="cleats", wrist="oval", shift=B.START_CLEAR)
+        st = B.place(m, -0.250)
+        st = Dr.add_drives(m, st, {n: (0.8 * bd[n], -0.245, 0.05, 0.1, 0.2 if arm(n) or n.startswith(("sh_", "pron", "sup")) else 0.3) for n in bd}, held=True)
+        B.add_ranges(m, st)
+        tone, _ = Dr.solve_tone(m, st, -0.250, aux=list(m.start_aux))
+        if held_by_muscle:
+            holds, left, _ = Dr.solve_hold_muscles(m, st, tone, bd)
+            st = Dr.add_hold_muscles(m, st, holds, left)
+        Dr.add_damping(m, st, "read")
+        aux = m.sys.new_aux()
+        m.sys.anchors(st, aux)
+        m.sys.sec_start(st, aux)
+        m.check_aux = aux
+        # at the practice search's own step, 0.25 ms: at the check's 1 ms this case does not integrate (the lighter damping
+        # leaves the stiff stops' rebounds to the step, as 4.10 found for violent swings)
+        out.append(("the read damping" + (", the posture held by muscle" if held_by_muscle else ", every muscle at 0.8 of its bound"), m, st, -0.250, 800, "sensitive", 2.5e-4))
     fitted = os.path.join(HERE, "fit3d_d34_all.json")
     if not os.path.isfile(fitted):                   # session 6's fit (its 22 channels; session 7's then switched off)
         fitted = os.path.join(HERE, "fit3d_d34_arms.json")
@@ -280,6 +301,8 @@ def check():
     for case in _cases():
         label, m, st, t0, n = case[:5]
         sensitive = len(case) > 5
+        h = case[6] if len(case) > 6 else 1e-3              # the step; records every 10 ms either way
+        every = int(round(0.010 / h))
         aux0 = getattr(m, "check_aux", None)
 
         def python_run(start):
@@ -287,8 +310,8 @@ def check():
             m.sys.anchors(start, aux)
             s1, out = list(start), []
             for i in range(n):
-                s1 = m.sys.step(t0 + i * 1e-3, s1, aux, 1e-3)
-                if (i + 1) % 10 == 0:
+                s1 = m.sys.step(t0 + i * h, s1, aux, h)
+                if (i + 1) % every == 0:
                     out.append(list(s1))
             return out
         ref = python_run(st)
@@ -299,7 +322,7 @@ def check():
             own = [max(abs(a - b) for a, b in zip(x, y)) for x, y in zip(python_run(st2), ref)]
             allow = [max(CHECK_TOL, SELF_FACTOR * d) for d in own]
         for nm, order in (("dense", ()), ("tree-ordered", tree_order(m))):
-            recs = run_raw(m.sys, st, t0, n, 1e-3, 10, aux=None if aux0 is None else list(aux0), order=order)[1:]
+            recs = run_raw(m.sys, st, t0, n, h, every, aux=None if aux0 is None else list(aux0), order=order)[1:]
             ds = [max(abs(a - b) for a, b in zip(state, r)) for (t, state, *_), r in zip(recs, ref)]
             d, dend = max(ds), ds[-1]
             if sensitive:

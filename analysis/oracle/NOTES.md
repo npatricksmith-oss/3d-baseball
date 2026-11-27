@@ -226,11 +226,14 @@ checked copy of the table, not two).
   Fortenbaugh's measured state at a given time; `clear_start` and
   `START_CLEAR` move that launch posture by a stated rule until every joint
   is 5° inside its end (docs/body-motion.md §4.12).
-- `drive.py`: the 41 drive channels, their measured strength-at-speed curves
+- `drive.py`: the joints' own damping by joint (session 11: relaxed values
+  read from papers, a stated range where none could be; docs/body-motion.md
+  §4.13), the launch posture held by muscle (`solve_hold_muscles`), and
+  the 41 drive channels, their measured strength-at-speed curves
   and tendon springs (docs/body-motion.md §4.5), the design's rules and strength
   bounds, the muscles' level at the start, and a run that records what
   Fortenbaugh measured.
-- `test_body3d.py` (72 tests after phase 1's tenth session): each check
+- `test_body3d.py` (83 tests after the review of phase 1's eleventh session): each check
   compares the engine with something it did not produce; mutations show
   the checks can fail. The whole-body tests need the digitised curves
   under `sim/target/research-dl/4/csv` (or `BB_FORT_CSV`) and are skipped
@@ -240,6 +243,7 @@ The fit of the drives is not in this package. It runs through a compiled
 copy of this engine, `analysis/research/body/body3d_probe.rs`, which
 `python3 analysis/research/body/probe3d.py --check` compares state for
 state with this engine (largest difference 3.6e-11 over seven runs,
-tolerance 1e-9; two more, whose motions multiply rounding differences,
-are judged against this engine's own difference from itself). This Python engine stays the reference; the probe is not part of
+tolerance 1e-9; four more, whose motions multiply rounding differences,
+are judged against this engine's own difference from itself; two of the
+four, session 11's, run at the practice search's 0.25 ms step). This Python engine stays the reference; the probe is not part of
 the oracle and is not run by `test_oracle.py`.
