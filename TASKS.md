@@ -17,13 +17,13 @@ Status: `[ ]` not started · `[~]` partly done · `[?]` needs an owner decision
 
 ## Resume here (2026-11-27)
 
-**State.** PLAN D31–D42: a force-driven body; PLAN §14.1, spec [docs/body-motion.md](docs/body-motion.md). **D37: the lab study [4] is dropped.** The swing is learned by practice.
+**State.** PLAN D31–D44: a force-driven body; PLAN §14.1, spec [docs/body-motion.md](docs/body-motion.md).
 
-**Sessions 8–11 are merged** (spec §4.10–§4.13): 21.1 m/s (47 mph; the gate asks 29). **D42:** on while each session gains honest bat speed, back to the owner if two in a row gain nothing. Session 11 gained.
+**Sessions 8–11 are merged** (spec §4.10–§4.13): 21.1 m/s (47 mph; the gate asks 29). **D42:** on while each session gains honest bat speed. **Session 12, unmerged:** 26.25 m/s claimed.
 
-**Waiting on the owner: Q64** (where the ball is met, from his hips; spec §4.13, review P1-1). Not blocking.
+**Q64 answered (D44):** session 13's first step: the on-time swing up the middle, the ball's place found by practice; the spec's Q64 lines then.
 
-**Running: session 12.** Worker `body-3d-12` (Fable), Workers tab, worktree `swing-research`, branch `work/body-3d`, brief WORKER-BODY-3D-12 there. Restart it if stopped. Then: an Opus review, fixes, checks, merge, push, report.
+**Running** (restart if stopped): its Opus review, `review-body-3d-s12`, worktree `swing-research`, `work/body-3d`, brief REVIEW-body-3d-s12; then fixes, merge. **The swing in the viewer (D43):** `bin/body-swing.sh`, player-visuals §14. Deferred: its tests skip on main (no [4] curves here).
 
 **Next:** §2: the ground-dive leftovers ([note](docs/calibration/2026-11-23-of-ground-dive.md) §9).
 

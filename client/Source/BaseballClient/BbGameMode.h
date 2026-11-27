@@ -90,6 +90,9 @@ public:
 	float BoxAlpha = 0.f;
 	/** How dark the field is behind the panel (Tab dims it; the final box sits on black). */
 	float BoxDim = 0.f;
+	/** -BbBodySwing (player-visuals §14): lines of plain text, top left, in place of every game
+	 *  panel; the key help is the Footer. */
+	TArray<FString> BodyLines;
 	/** -BbHudHold: every panel stays up (made-up words where the game has none yet) so a still
 	 *  catches them all (hud.md §4). */
 	bool bHold = false;
