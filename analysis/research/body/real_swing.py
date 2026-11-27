@@ -368,9 +368,12 @@ class Swing:
             z = unit(out["wrist_" + sd] - out["grip_" + sd])
             Q["hand_" + sd] = frame_zx(z, radial)
             heel, toe = r["LHEE" if sd == "L" else "RHEE"], r["LTOE" if sd == "L" else "RTOE"]
+            # heel to toe from his two foot markers (heading and pitch); no roll: the foot's left kept level. (A roll from
+            # the ankle's centre against that line was 40 degrees off in the stance; one from the ankle's two markers is the
+            # shin's sideways lean, which the flat foot under it does not share.)
             x = unit(toe - heel)
-            Q["foot_" + sd] = frame_zx(across(out["ankle_" + sd] - heel, x), x)
-            Q["foot_" + sd] = (Q["foot_" + sd][0], Q["foot_" + sd][1], Q["foot_" + sd][2])
+            y = unit(np.cross(np.array([0.0, 0.0, 1.0]), x))
+            Q["foot_" + sd] = (x, y, np.cross(x, y))
         # the bat: z knob to tip, x toward the wrists' side (body3d's -x points to the wrists)
         wmid = (out["wrist_L"] + out["wrist_R"]) / 2 - out["knob"]
         Q["bat"] = frame_zx(axis, -wmid)
