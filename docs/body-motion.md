@@ -2914,6 +2914,42 @@ Part 1 finds no fault in the ground contact that a measurement could correct, so
 - *The launch state:* not shown at fault (above). What part 1 points at is a front leg that pushes, which is a matter of the plan and of the posture he launches from. **That goes to parts 3 and 4:** a search that can find the swing with the front leg pushing (part 3: a second start made from the kept plan with that one muscle changed, among the several starts), and the launch posture set by practice (part 4).
 - **Nothing is added to make him fast:** no grip above what was measured, no stop moved, no hold on a foot. The held feet, the moved hip ends, the wider sole and the stronger grip exist only as replays in `pelvis3d.py`.
 
+#### Part 3: a search that lands on the same swing twice (the method, written before any of it was run)
+
+**What the stored searches show about why two of them differ** (read from the histories kept with session 11's fourteen results; no run):
+
+| Search | The whole aim (250 generations): the score at its start and end; its fall over its last 50 | The 500 more: start and end; **the first generation that found anything better**; its fall over its last 50, last 100 |
+| :-- | :-- | :-- |
+| rung 4 (seeds 1, 11): 20.89 m/s | 50.5 → 30.3; 1.39 | 30.3 → 26.6; **generation 211**; 0.55, 0.86 |
+| rung 4 (2, 12): 21.11 | 51.9 → 30.4; 1.09 | 30.4 → 26.2; **92**; 0.33, 0.63 |
+| rung 3 (1, 11): 20.66 | 55.6 → 29.5; 1.26 | 29.5 → 28.1; **278**; 0.11, 0.17 |
+| rung 3 (2, 12): 21.53 | 48.5 → 30.2; 0.43 | 30.2 → 25.2; **82**; 0.25, 0.41 |
+| rung 2 (1, 11): 16.85 | 66.5 → 39.9; 2.78 | 39.9 → 33.1; **94**; 0.66, 1.10 |
+| rung 2 (2, 12): 16.58 | 84.0 → 36.1; 0.00 | 36.1 → 33.8; **262**; 0.56, 0.57 |
+| rung 5 (1, 11): 18.61 | 102.6 → 37.6; 10.08 | 37.6 → 30.7; **109**; 1.26; then a block of 250 that found nothing at all |
+| every muscle 1.5 times (1, 11): 22.01 | 53.8 → 28.2; 2.36 | 28.2 → 26.9; **215**; 0.00 |
+
+- **Every stage starts the search's step again at 0.03 of each number's range, and for its first 82–278 generations a restarted search finds nothing better than the plan it started from** (in all fourteen; the step has to shrink back to about 0.015 first). So of each rung's "500 more", a fifth to a half was spent finding nothing, and how much is a matter of the draws.
+- **No search had stopped improving when it was stopped.** The whole aim's 250 generations end falling 0.4–10 a 50; the 500 more end falling 0.1–0.7 a 50 in eleven of fourteen, which is a tenth to two thirds of a m/s every 50 generations (the score is, to a point or two, 45 less the bat's speed). **§4.13's rule called that settled** (under 1.0 over the last 50). And where a result read "0.00 over the last 50" (rung 5's block; the reference chain of §4.13; the 1.5-times body), it was a restart that had not yet found its step, not a search at its end.
+- **So two searches of one body differ largely by where each happened to be when it was stopped,** and the 1.95 m/s yardstick is partly that.
+
+**The change, which is a rule for the search and nothing of the body: carry every search to its end.**
+
+- *The search, second form* (`ladder3d.py --settle`): §4.13's protocol exactly as it was (so every result already kept is its first part and nothing is run again), **then the same search carried on from that result with its first step at 0.012 of each number's range** [E: about where the stored histories show a restarted search starting to find better plans; 0.03 before], **in one stage with no restart, until its best score has fallen less than 0.10 over the last 100 generations** [E], 1,500 generations at most. A result that reaches the cap is reported as not at its end. The score, the box, the draws' kind and the 24 plans a generation are unchanged.
+- *What is reported with each:* the generations it took, the first generation that found a better plan (the check that 0.012 is not again a wasted start), the fall at the end, and rule 6's checks as before (the result at three steps, the line, the failed runs).
+- *The spread before and after:* the five searches of rung 4's body by §4.13's protocol (seeds 1 to 5); the same five carried to their ends. Range and standard deviation of the bat's speed at contact, and of the score.
+- *From then on* a rung is two searches carried to their ends, read against the spread of the five so carried.
+- **A gain that comes from this is the search's and not a change to the body: it is reported in its own row** ("the same body, searched to the end"). It is honest in D42's sense as a corrected fault, if the fault is real: the body had that speed all along and the search was stopped short of it. Nothing of the body, its strength or the score is changed. Every earlier rung's figure was found by the shorter search, so **a rung of session 11 may not be compared with a carried-on figure**; only like with like.
+
+**What I expect:** each of the five gains 0.5–2.5 m/s and takes 300–900 more generations; the first better plan comes within 30 generations at the smaller step. **I do not know whether the spread narrows.** If the five are one swing stopped at five places, they close up (a range under 1 m/s). If they are different swings (rung 0's pair were: one with a straight front knee, one bent 40°), carrying each to its own end leaves them apart or spreads them further, and then the remedy is of another kind (several starts and the best of them, a wider first step), tried next. *What it would show:* how much of the yardstick was searches stopped early. *What it would not:* the body's best; all five are from S.
+
+**Two starts that owe each other nothing** (the gate's row; §4.12's start C, the plan written by hand with 0.6 of every forward muscle, which owes [4] nothing):
+
+- *The parked basin's remedy, as §4.12 stated its simpler form:* the search's first stage only brings the sweet spot to the ball's place, with no speed asked, so from a plan that is not already a swing it finds a bat brought to the ball and stopped, and the whole aim then starts in that basin (three of session 10's four hand-written runs). **The first stage now asks that the sweet spot come *through* the ball's place:** it is charged for what its speed along the ball's line, where it comes nearest, falls short of 5 m/s [E: a bat moving, far below any swing's speed], one unit of score a m/s, squared as every term is (`Ctx(stage="reach", through=5.0)`). *Worked by hand:* a bat parked at the ball (0 m/s along the line there, nothing else charged) scores 0 under the old first stage and 25 under the new; one stopped moving back at 2.3 m/s scores 53.3; one passing through at 5 m/s or more scores 0 under both. From S the first stage already passes through at more than that, so for S's searches the rule changes nothing (checked: the first stage's score of S's reach result is the same to the last digit). Used for the hand-written start only.
+- *One search* from C on rung 4's body by the second form. *What I expect:* a swing that meets the ball, slower than S's by 3 m/s or more (session 10: 10.1 against 17.7). The gate asks for two starts within 1 m/s; I expect to report how far apart they are, not that they agree.
+
+**A third start, from part 1:** rung 4's kept plan with the front knee's extensor pushing from 150 ms before contact (replay B: it still meets the ball within 0.6 cm at 21.3 m/s, with 0.81 of his weight on the front foot and the ground giving him a quarter more turning momentum), carried to its end by the same rule. It owes S everything; it is a start in a neighbouring swing that the search has no slope toward, not an independent one. *What I expect:* I do not know. If the front leg's push is worth bat speed once the rest of the plan adapts to it, this ends above the carried-on kept swing by more than the spread; if the search drifts back to the bent front leg, the push is worth nothing to the score. *What it would not show:* that a pushing front leg is or is not what a hitter does; only what this score makes of it.
+
 ## 5. The drive and its control (§14.1 items 2 and 3)
 
 ### 5.1 What a drive is
