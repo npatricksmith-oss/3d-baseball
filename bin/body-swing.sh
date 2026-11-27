@@ -7,33 +7,54 @@
 #                                              checkout's body code (read only; e.g. a research worktree)
 #   bin/body-swing.sh ... -BbBodySwingShots    any argument starting with - goes to the viewer
 #
-# Exports the swing (analysis/research/body/swing_export.py) when its file is missing or older than
-# the plan or the exporter, then opens the viewer (client/run.sh, which builds what has changed).
+# Exports the swing every time (about 2 s: the file then always shows the plan run on the body code
+# as it is now) into analysis/research/body/swings/<checkout's directory name>/<plan>.swing, then
+# opens the viewer (client/run.sh, which builds what has changed).
 set -euo pipefail
 HERE="$(cd "$(dirname "$0")/.." && pwd)"
+UE="${UE_ROOT:-$HOME/UnrealEngine/5.8.4}"
 TREE="$HERE"
 PLAN=""
 EXTRA=()
 while [ $# -gt 0 ]; do
   case "$1" in
-    --tree) TREE="$(cd "$2" && pwd)"; shift 2 ;;
+    --tree)
+      if [ $# -lt 2 ] || [[ "$2" == -* ]]; then
+        echo "--tree needs the path of a checkout after it, e.g. bin/body-swing.sh --tree .claude/worktrees/swing-research" >&2
+        exit 1
+      fi
+      if [ ! -d "$2" ]; then
+        echo "--tree $2: there is no such directory" >&2
+        exit 1
+      fi
+      TREE="$(cd "$2" && pwd)"
+      shift 2 ;;
     -*) EXTRA+=("$1"); shift ;;
     *) PLAN="$1"; shift ;;
   esac
 done
+if [ ! -x "$UE/Engine/Build/BatchFiles/Linux/Build.sh" ]; then
+  echo "Unreal Engine is not at $UE: install Unreal Engine 5.8.4 at ~/UnrealEngine/5.8.4 (or set UE_ROOT to where it is)" >&2
+  exit 1
+fi
 EXPORTER="$HERE/analysis/research/body/swing_export.py"
 if [ -z "$PLAN" ]; then
   PLAN="$(python3 -c 'import sys; sys.path.insert(0, sys.argv[1]); import swing_export as S; print(S.newest_plan(sys.argv[2]) or "")' \
     "$HERE/analysis/research/body" "$TREE")"
   if [ -z "$PLAN" ]; then
-    echo "no kept swing (analysis/research/body/practice3d_s*_*.json) in $TREE" >&2
+    echo "there is no kept swing (analysis/research/body/practice3d_s*_*.json) in $TREE" >&2
     exit 1
   fi
 fi
-PLAN="$(cd "$(dirname "$PLAN")" && pwd)/$(basename "$PLAN")"
-OUT="$HERE/analysis/research/body/swings/$(basename "${PLAN%.json}").swing"
-if [ ! -f "$OUT" ] || [ "$PLAN" -nt "$OUT" ] || [ "$EXPORTER" -nt "$OUT" ]; then
-  python3 "$EXPORTER" "$PLAN" --tree "$TREE" --out "$OUT"
+if [ ! -f "$PLAN" ] && [ -f "$TREE/$PLAN" ]; then
+  PLAN="$TREE/$PLAN"
 fi
+if [ ! -f "$PLAN" ]; then
+  echo "there is no plan file $PLAN" >&2
+  exit 1
+fi
+PLAN="$(cd "$(dirname "$PLAN")" && pwd)/$(basename "$PLAN")"
+OUT="$(python3 "$EXPORTER" "$PLAN" --tree "$TREE" --print-out)"
+python3 "$EXPORTER" "$PLAN" --tree "$TREE" --out "$OUT"
 echo "showing $OUT"
 exec "$HERE/client/run.sh" 7 -BbBodySwing="$OUT" "${EXTRA[@]}"

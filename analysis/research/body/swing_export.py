@@ -10,7 +10,7 @@
 Runs the kept plan forward once on the checking model, exactly as practice3d.py's report runs it (its Ctx, its
 options, its integration step), and writes every rigid body's place and turn, every joint, the bat's knob, sweet
 spot and tip, each foot's contact points and the ball's line, every millisecond, into one text file
-(analysis/research/body/swings/<plan>.swing). Nothing is smoothed, fitted or made up: what the model has is written,
+(analysis/research/body/swings/<the tree's directory name>/<plan>.swing). Nothing is smoothed, fitted or made up: what the model has is written,
 what it does not have is not.
 
 THE FILE IS A VIEWING AID. It is not the timeline's pose format of body-motion 9 (phase 2 sets that), and no game
@@ -42,8 +42,8 @@ POINTS = ("knob", "sweet", "tip", "grip_L", "grip_R")
 
 
 def newest_plan(tree):
-    """the newest kept swing of a tree: of the practice3d_s<N>_*.json files of the highest session N, the one last
-    committed (git), else (none committed) the newest file."""
+    """the newest kept swing of a tree: of the practice3d_s<N>_*.json files of the highest session N, a kept plan not yet
+    committed (untracked or changed) first, the newest file of those; else the one last committed (git)."""
     best = None
     for p in glob.glob(os.path.join(tree, "analysis", "research", "body", "practice3d_s*_*.json")):
         b = os.path.basename(p)
@@ -51,11 +51,22 @@ def newest_plan(tree):
             n = int(b[len("practice3d_s"):].split("_")[0])
         except ValueError:
             continue
-        ct = git(tree, "log", "-1", "--format=%ct", "--", os.path.relpath(p, tree))
-        key = (n, int(ct) if ct.isdigit() else 0, os.path.getmtime(p))
+        rel = os.path.relpath(p, tree)
+        if git(tree, "status", "--porcelain", "--", rel):
+            key = (n, 1, os.path.getmtime(p))                  # uncommitted: by its file's time, ahead of every committed one
+        else:
+            ct = git(tree, "log", "-1", "--format=%ct", "--", rel)
+            key = (n, 0, int(ct) if ct.isdigit() else os.path.getmtime(p))
         if best is None or key > best[0]:
             best = (key, p)
     return best[1] if best else None
+
+
+def default_out(plan_path, tree):
+    """where a swing is written by default: swings/<the tree's directory name>/<the plan's name>.swing, so that two
+    checkouts' plans of the same name never share a file."""
+    tag = os.path.basename(os.path.realpath(tree)).replace(" ", "_")
+    return os.path.join(OUT_DIR, tag, os.path.splitext(os.path.basename(plan_path))[0] + ".swing")
 
 
 def load_tree(tree):
@@ -64,7 +75,8 @@ def load_tree(tree):
     if os.path.realpath(tree) != os.path.realpath(ROOT):
         sys.dont_write_bytecode = True                        # no __pycache__ written into the other tree
     sys.path.insert(0, os.path.join(tree, "analysis", "research", "body"))
-    if "BB_FORT_CSV" not in os.environ:
+    given = "BB_FORT_CSV" in os.environ
+    if not given:
         # [4]'s digitised curves (common.py reads them from a path relative to the working directory): this tree's
         # copy, else the other tree's, else any worktree's of this repository (read only). They are made by analysis/research/fortenbaugh_appendix_e.py.
         others = [ln[len("worktree "):] for ln in git(ROOT, "worktree", "list", "--porcelain").splitlines() if ln.startswith("worktree ")]
@@ -73,6 +85,10 @@ def load_tree(tree):
             if os.path.isdir(csv):
                 os.environ["BB_FORT_CSV"] = csv
                 break
+    csv = os.environ.get("BB_FORT_CSV", "")
+    if not os.path.isfile(os.path.join(csv, "lead_grf_z.csv")):
+        where = ("BB_FORT_CSV=%s has none" % csv) if given else "none in sim/target/research-dl/4/csv of this checkout, of %s or of any worktree" % tree
+        raise SystemExit("[4]'s digitised curves are not found (%s); make them with: python3 analysis/research/fortenbaugh_appendix_e.py" % where)
     import practice3d as Pr                                    # noqa: E402
     P = Pr.P
     here = os.path.realpath(tree) == os.path.realpath(ROOT)
@@ -213,8 +229,8 @@ def export(plan_path, tree=ROOT, out=None, log=print):
     sp = E.norm(v)
     name = os.path.splitext(os.path.basename(plan_path))[0]
     if out is None:
-        os.makedirs(OUT_DIR, exist_ok=True)
-        out = os.path.join(OUT_DIR, name + ".swing")
+        out = default_out(plan_path, tree)
+    os.makedirs(os.path.dirname(os.path.abspath(out)), exist_ok=True)
     rel = lambda path: os.path.relpath(os.path.abspath(path), tree) if os.path.abspath(path).startswith(tree + os.sep) else os.path.abspath(path)
     commit = git(tree, "rev-parse", "--short", "HEAD")
     dirty = git(tree, "status", "--porcelain", "--", os.path.abspath(plan_path))
@@ -284,12 +300,20 @@ def main():
     a = sys.argv[1:]
     arg = lambda k, dflt: a[a.index(k) + 1] if k in a else dflt
     tree = os.path.abspath(arg("--tree", ROOT))
+    for k in ("--tree", "--out"):
+        if k in a and (a.index(k) + 1 >= len(a) or a[a.index(k) + 1].startswith("--")):
+            raise SystemExit("%s needs a path after it" % k)
     pos = [x for j, x in enumerate(a) if not x.startswith("--") and (j == 0 or a[j - 1] not in ("--tree", "--out"))]
     plan = pos[0] if pos else newest_plan(tree)
     if plan is None:
         raise SystemExit("no kept swing (practice3d_s*_*.json) in %s" % tree)
     if not os.path.isabs(plan) and not os.path.exists(plan):
         plan = os.path.join(tree, plan)
+    if not os.path.isfile(plan):
+        raise SystemExit("no plan file %s" % plan)
+    if "--print-out" in a:                     # where the swing would be written, for bin/body-swing.sh
+        print(arg("--out", None) or default_out(plan, tree))
+        return
     export(plan, tree, arg("--out", None))
 
 
