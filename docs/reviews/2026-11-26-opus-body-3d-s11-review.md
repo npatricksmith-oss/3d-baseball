@@ -154,4 +154,12 @@ All under `sim/target/review-probes/s11/`:
 
 ## Resolution
 
-Open.
+Resolved 2026-11-27 by the Coordinator; the fixes are the session's own worker's (Fable; commits `b2668bf..b8d9f36`, body-motion §4.13 "After the independent review of session 11"). The worker disagreed with no finding and added measurements to two. No re-review of the fixes: they are corrections to the account, one reporting change with its test, and a committed script; the Coordinator ran the five checks once before the merge.
+
+- **P1-1: fixed, and put to the owner as Q64.** Rung 3 is written as two changes; the split table is in §4.13 and §4.4; every "all of it from his feet" is withdrawn. The two halves are named bodies (`r3_oldball`, `r2_deepball`) and the review's four results replay on them. The worker's reading of the Statcast page beside it: D28/D29's 0.78 m is a stance figure; at contact the ball is about 55 cm ahead of the hips if they travel with the base, so the new rule (0.36–0.41 m at contact) is 14–19 cm deeper than that and the old rule (0.59–0.63 m) 4–8 cm further out. Which is right is not shown. Until the owner rules the body stays rung 4's.
+- **P1-2: fixed.** The account says the hip joints turn through their range and jam, and the legs and feet turn back on a lightly loaded base. The worker's replay adds that the rear foot is on one point from −91 ms, where the ground holds no twist. A diagnosis of what holds the pelvis is the next session's first item.
+- **P1-3: fixed.** "Not short of muscle" is replaced by what the runs show (strength is not what holds this swing; whether a swing that turns the pelvis needs more is not shown); "three to five times" is deleted; D34's question to the owner stays unanswered.
+- **P2-1: fixed.** "Both over both" results are called suggestive.
+- **P2-2: fixed.** The gate's front-foot row reports the peak's time, how long it lasts and the feet's loads at contact, and marks an early spike as a pass on size only; tested.
+- **P3-1, P3-5, P3-6: fixed** (wording). **P3-3: fixed** (`analysis/research/body/statcast_feet.py`, with the figures it printed). **P3-4: partly:** a test that the strength scaling reaches the tendon springs and caps is added; the two tests that partly restate literals are left, deferred.
+- **Not checked by the review and still open:** the low end of the friction ranges searched from S; the Statcast page itself against the committed script's input.
