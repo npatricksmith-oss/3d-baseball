@@ -79,6 +79,7 @@ from body3d import body as BODY       # noqa: E402  the model batter's geometry 
 
 # ---- the figure: the body model's batter (analysis/oracle/body3d/body.py Model, its defaults) ----------------------------
 FIG_H = 1.84
+SHOE_BALL_PER_ANKLE = 1.8232   # the viewer's shoe: the ball of the foot 15.02 cm ahead of the ankle, the ankle 8.24 cm up (its BB_BODYSWING log)
 
 
 def figure_lengths(H=FIG_H):
@@ -241,6 +242,7 @@ class Swing:
         self.t = lm["time"] - self.tc
         self.ic = int(np.argmin(np.abs(self.t)))
         self.ev_lab = {"front_foot_down": float(lm["fp_10_time"][0]) - self.tc, "foot_plant": float(lm["fp_100_time"][0]) - self.tc}
+        self.i_plant = int(np.argmin(np.abs(self.t - self.ev_lab["foot_plant"])))
         J = lambda k: np.stack([lm[k + "_x"], lm[k + "_y"], lm[k + "_z"]], axis=1)
         # his own points, lab frame
         mk = {k: v for k, v in M.items()}
@@ -378,17 +380,19 @@ class Swing:
         hz = unit(np.cross(hf, hl))
         Q["head"] = frame_zx(hz, hf)
         self.Q = Q
-        # the feet's soles: under each marker by its height when the foot is flat and loaded (the 10th percentile of the
-        # marker's height over the swing, scaled), so the ball of the foot is under the toe marker, the heel under the heel's
+        # the feet's soles. The heel's under his heel marker by that marker's height when the foot is flat (the 10th
+        # percentile of its height over the swing). The ball of the foot is where the viewer's shoe has it for his ankle's
+        # height above that sole: SHOE_BALL_PER_ANKLE times it ahead of the ankle along his foot, so the shoe is stretched
+        # alike forward and down (an Unreal piece cannot be sheared; the viewer's turn check holds it to 3 degrees).
         self.sole = {}
         for sd in "LR":
             fx, fy, fz = Q["foot_" + sd]
-            heel, toe = r["LHEE" if sd == "L" else "RHEE"], r["LTOE" if sd == "L" else "RTOE"]
-            h_toe = np.percentile(toe[:, 2], 10)
+            heel = r["LHEE" if sd == "L" else "RHEE"]
             h_heel = np.percentile(heel[:, 2], 10)
-            ball = toe - fz * h_toe
-            hl_ = heel - fz * h_heel
-            self.sole[sd] = (hl_, ball, h_heel, h_toe)
+            hs = heel - fz * h_heel
+            h_ank = dot(out["ankle_" + sd] - hs, fz)[:, None]
+            ball = out["ankle_" + sd] - fz * h_ank + fx * (SHOE_BALL_PER_ANKLE * h_ank)
+            self.sole[sd] = (hs, ball, h_heel, h_ank)
         # the sweet spot's speed
         dt = 1.0 / self.rate
         self.sweet_speed = np.linalg.norm(np.gradient(out["sweet"], dt, axis=0), axis=1)
@@ -484,6 +488,10 @@ class Swing:
             % (self.shift[0], self.shift[1], self.poi[0], self.poi[1], self.poi[2], o["sweet"][self.ic][2]))
         log("feet at the start: lead ankle x %+.3f y %+.3f, rear ankle x %+.3f y %+.3f (the plate's edge is x = +-0.216, the box's inner line -0.368)"
             % (o["ankle_L"][0][0], o["ankle_L"][0][1], o["ankle_R"][0][0], o["ankle_R"][0][1]))
+        for sd in "LR":
+            hs, ball, hh, ha = self.sole[sd]
+            log("  foot_%s: ankle %.3f-%.3f m above the sole; lowest sole point z: heel %+.3f, ball %+.3f m; ball of the foot moves %.1f mm (heel %.1f) from foot plant on"
+                % (sd, ha.min(), ha.max(), hs[:, 2].min(), ball[:, 2].min(), 1e3 * np.ptp(ball[self.i_plant:], axis=0).max(), 1e3 * np.ptp(hs[self.i_plant:], axis=0).max()))
         log("sweet spot speed at contact %.1f m/s (%.1f mph), fastest %.1f mph at %+.0f ms"
             % (self.sweet_speed[self.ic], self.sweet_speed[self.ic] / MPH, self.sweet_speed.max() / MPH, 1e3 * self.t[int(np.argmax(self.sweet_speed))]))
         for e in self.events:
@@ -491,7 +499,7 @@ class Swing:
 
     # ---- the viewer's file ----
     BODIES = ("pelvis", "trunk", "thigh_L", "shank_L", "foot_L", "thigh_R", "shank_R", "foot_R",
-              "uarm_L", "farm_L", "uarm_R", "farm_R", "bat", "hand_L", "hand_R", "head")
+              "uarm_L", "farm_L", "uarm_R", "farm_R", "bat", "head")
     JOINTS = ("lumbar", "hip_L", "knee_L", "ankle_L", "hip_R", "knee_R", "ankle_R",
               "shoulder_L", "elbow_L", "wrist_L", "shoulder_R", "elbow_R", "wrist_R")
     POINTS = ("knob", "sweet", "tip", "grip_L", "grip_R")
