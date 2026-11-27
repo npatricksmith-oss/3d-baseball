@@ -48,7 +48,7 @@ MEET_FROM_REAR_ANKLE = 1.022                           # m: Statcast's intercept
 # "meet_rear" (from the rear ankle, on it) set either rule on either stance's body; ladder3d's r3_oldball and r2_deepball.
 # ---- the aim's units (4.10) ----
 MISS_UNIT = 0.01              # m [E]
-TIMING_ERR = 0.007            # s: the measured spread of where hitters meet the ball, as a time (note 6)
+TIMING_ERR = 0.007            # s [E]: AN UPPER BOUND, NOT A MEASURED TIMING SPREAD: hitters' within-batter spread of contact depth (27 cm) turned into time as if every depth change were timing (note 6, 3.1). Measured beside it: a batter's sweet-spot tolerance 9.4 +- 6.3 ms, a skilled thrower's release window 7 ms (note 6)
 SQUARE_UNIT = 10.0            # deg [E]
 SPEED_ASK, SPEED_W = 45.0, 1.0   # m/s out of reach; 1 m/s is worth 1 cm of miss [E]
 EFFORT_W = 4.0                # one unit of effort (every muscle at full strength all swing) costs 4 m/s [E]; tried at 0, 1, 16
