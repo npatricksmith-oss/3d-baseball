@@ -73,6 +73,11 @@ class UMaterialInterface;
  *               -BbBaseMapCheck (headless check that the score bug's base map follows the timeline's runners
  *               and ends on the play's recorded result; exit status 1 if anything fails)
  *               -BbClipSpeeds (log the ground speed each gait clip is animated for as BB_CLIP)
+ *               -BbBodySwing=<file.swing> (the force-driven body's practised swing as the checking model
+ *               computed it, PLAN D43, player-visuals §14; no game is played); with -BbBodySwingShots
+ *               (fixed instants from two views as bodyswing_<n>_<instant>_<view>.png, then quit) or
+ *               -BbBodySwingCheck (the drawn joints, knob, sweet spot and grips against the file's,
+ *               BB_BODYCHECK; exit status 1 if any is over 1 cm or the file will not open)
  */
 UCLASS()
 class ABbDirector : public AActor
@@ -134,6 +139,10 @@ private:
 	/** Everything that stands still: field, walls, stands, lights (BbPark). */
 	UPROPERTY()
 	TObjectPtr<ABbPark> Park;
+	/** -BbBodySwing=<file>: the force-driven body's practised swing (player-visuals §14). While it
+	 *  is shown nothing of a game runs. */
+	UPROPERTY()
+	TObjectPtr<class ABbBodySwing> BodySwing;
 	UPROPERTY()
 	TObjectPtr<UStaticMesh> Cube;
 	UPROPERTY()

@@ -27,6 +27,21 @@ void ABbHUD::DrawHUD()
 	}
 	const float S = Canvas->ClipY / 720.f;
 	UFont* Font = GEngine->GetLargeFont();
+	if (BodyLines.Num() > 0)
+	{
+		// The body's swing in the viewer: its own few lines and nothing of a game.
+		float Ly = 20.f * S;
+		for (const FString& Line : BodyLines)
+		{
+			DrawText(Line, FLinearColor(1.f, 1.f, 1.f, 0.92f), 24.f * S, Ly, Font, 0.85f * S);
+			Ly += 21.f * S;
+		}
+		if (!Footer.IsEmpty())
+		{
+			DrawText(Footer, FLinearColor(1.f, 1.f, 1.f, 0.6f), 24.f * S, Canvas->ClipY - 30.f * S, Font, 0.8f * S);
+		}
+		return;
+	}
 	static const bool bHoldFlag = FParse::Param(FCommandLine::Get(), TEXT("BbHudHold"));
 	bHold = bHold || bHoldFlag;
 	// The bug, and under it the pitch, the replay tag and any note.

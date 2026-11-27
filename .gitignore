@@ -31,3 +31,6 @@ __pycache__/
 
 # Worker status files written by bin/worker-status-hook.sh
 /.claude/worker-status/
+
+# The body-swing viewer files (analysis/research/body/swing_export.py), made on demand by bin/body-swing.sh
+/analysis/research/body/swings/

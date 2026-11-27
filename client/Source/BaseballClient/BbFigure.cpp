@@ -195,6 +195,7 @@ bool UBbFigureShop::Init(USkeletalMesh* Skeleton, ABbPark* InPark)
 	{
 		const int32 Parent = Ref.GetParentIndex(I);
 		Cs[I] = Parent >= 0 ? Ref.GetRefBonePose()[I] * Cs[Parent] : Ref.GetRefBonePose()[I];
+		RefCs.Add(Ref.GetBoneName(I), Cs[I]);
 	}
 	bool bOk = true;
 	auto Joint = [&](const FString& Name)

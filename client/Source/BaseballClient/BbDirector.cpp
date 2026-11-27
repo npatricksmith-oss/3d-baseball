@@ -1,5 +1,6 @@
 #include "BbDirector.h"
 #include "BbBaseMap.h"
+#include "BbBodySwing.h"
 #include <limits>
 #include "BbFigure.h"
 #include "BbFrame.h"
@@ -446,6 +447,21 @@ void ABbDirector::BeginPlay()
 		else
 		{
 			FigureShop = nullptr;
+		}
+	}
+	// -BbBodySwing=<file>: the body's practised swing in the park, nothing of a game (player-visuals §14).
+	{
+		FString SwingFile;
+		if (SavedPlayArgument(Cmd, SwingFile, TEXT("-BbBodySwing=")))
+		{
+			bGameOver = true;
+			BodySwing = GetWorld()->SpawnActor<ABbBodySwing>();
+			const int32 Status = BodySwing->Start(SwingFile, FigureShop, Park, Camera, Sphere, BaseMaterial);
+			if (Status >= 0)
+			{
+				FPlatformMisc::RequestExitWithStatus(false, (uint8)Status);
+			}
+			return;
 		}
 	}
 	FParse::Value(Cmd, TEXT("BbSpeed="), Speed);
@@ -4066,6 +4082,11 @@ void ABbDirector::PlaceBallShadow(const BbFrame& Frame, bool bShown)
 void ABbDirector::Tick(float DeltaSeconds)
 {
 	Super::Tick(DeltaSeconds);
+	if (BodySwing)
+	{
+		// The body's swing plays itself (ABbBodySwing::Tick).
+		return;
+	}
 	Wall += DeltaSeconds;
 	++Frames;
 	if (Wall > 5.0)

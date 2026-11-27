@@ -113,6 +113,17 @@ public:
 	UStaticMesh* BatMesh() const { return Bat; }
 	UMaterialInstanceDynamic* BatPaint() const { return WoodPaint; }
 	static constexpr double BatCm = 86.0;
+	/** A bone of the mannequin as it stands when made (its frame in the mesh's own frame, cm):
+	 *  what the pieces were placed from. False if the skeleton has no such bone. */
+	bool RefBone(FName Bone, FTransform& Out) const
+	{
+		const FTransform* T = RefCs.Find(Bone);
+		if (T)
+		{
+			Out = *T;
+		}
+		return T != nullptr;
+	}
 
 private:
 	UStaticMesh* Lathe(const TArray<FBbRing>& Rings, int32 Sides);
@@ -143,6 +154,7 @@ private:
 	UPROPERTY()
 	TMap<int32, TObjectPtr<UTexture2D>> Jerseys;
 	TArray<FBbPiece> Parts;
+	TMap<FName, FTransform> RefCs;
 	double Standing = 180.0;
 };
 
