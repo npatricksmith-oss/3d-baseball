@@ -714,8 +714,9 @@ int32 ABbBodySwing::Start(const FString& Path, UBbFigureShop* InShop, ABbPark* I
 	BallC->SetupAttachment(RootComponent);
 	BallC->RegisterComponent();
 	BallC->SetWorldScale3D(FVector(BallCm / 100.0));
-	UE_LOG(LogBbSwing, Display, TEXT("BB_BODYSWING %s: %d samples from %.1f to %.1f ms (contact 0), plan %s, commit %s, contact %.2f m/s (%.1f mph), missed by %.2f cm"),
-		*File.Name, File.Num(), 1e3 * File.T(0), 1e3 * File.T(File.Num() - 1), *File.Plan, *File.Commit, File.ContactMps, File.ContactMph, File.MissCm);
+	UE_LOG(LogBbSwing, Display, TEXT("BB_BODYSWING %s: %d samples from %.1f to %.1f ms (contact 0), plan %s, commit %s, contact %.2f m/s (%.1f mph)%s"),
+		*File.Name, File.Num(), 1e3 * File.T(0), 1e3 * File.T(File.Num() - 1), *File.Plan, *File.Commit, File.ContactMps, File.ContactMph,
+		File.MissCm >= 0.0 ? *FString::Printf(TEXT(", missed by %.2f cm"), File.MissCm) : TEXT(", a recording (no miss)"));
 	if (bCheck)
 	{
 		return RunCheck();
