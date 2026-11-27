@@ -2875,6 +2875,56 @@ class SessionTwelveChecks(unittest.TestCase):
         self.assertAlmostEqual(pc.posture_of(u)["trail_knee"], -5.0, delta=1e-12)
         self.assertAlmostEqual(pc.posture_of(u)["pelvis_rot"], 0.0, delta=1e-12)
 
+    @staticmethod
+    def _squareness_reads(name, square):
+        """for the kept swing `name` (analysis/research/body): the score's squareness at contact (degrees: residual 4 times its
+        unit), and the bat's angle to the ball's line read from a 0.25 ms record at the instant of contact (a run of its own at
+        every step, which the score does not use); then the score's squareness while one plan number is nudged so that contact
+        walks across the 5 ms record at 25.0 ms, in steps of 0.07 degrees of score."""
+        import json
+        import os
+        PR = _practice()
+        here = os.path.join(os.path.dirname(os.path.abspath(__file__)), "..", "research", "body")
+        with open(os.path.join(here, name)) as f:
+            kept = json.load(f)
+        o = dict(kept["options"], contact="nearest")
+        o.pop("square", None)
+        if square:
+            o["square"] = square
+        ctx = PR.Ctx(**o)
+        u = ctx.u_of(kept["plan"])
+        at_result = ctx.residuals(u)[4] * PR.SQUARE_UNIT
+        fine = ctx.run(u, every=1)
+        tx = ctx.nearest(fine)[0]
+        k = min(range(len(fine)), key=lambda q: abs(fine[q][0] - tx))
+        bz = ctx.m.axis(fine[k][1], "bat", (0, 0, 1))
+        nb = ctx.nb
+        truth = math.asin((bz[0] * nb[0] + bz[1] * nb[1]) / (math.hypot(bz[0], bz[1]) * math.hypot(nb[0], nb[1]))) / PR.B.D2R
+        walk = []
+        for j in range(9):
+            pl = {n: list(v) for n, v in kept["plan"].items()}
+            pl["hip_ext_R"][1] += j * 0.0003
+            walk.append(ctx.residuals(ctx.u_of(pl))[4] * PR.SQUARE_UNIT)
+        return at_result, truth, walk
+
+    def _assert_squareness_is_read_at_contact(self, square):
+        for name in ("practice3d_s12_posture.json", "practice3d_s12_carried.json"):
+            at_result, truth, walk = self._squareness_reads(name, square)
+            self.assertAlmostEqual(at_result, truth, delta=0.3, msg=name)          # against a fine-step run, not the score's own arithmetic
+        # the walk across the 5 ms record (the posture swing's contact is at 24.70 to 25.23 ms in it): contact moves 0.06 ms
+        # a step and the bat turns about 3 degrees a ms, so a true reading moves under 0.3 degrees a step; the old one, which
+        # reads the record before contact, jumps 17 degrees as contact crosses the record
+        _, _, walk = self._squareness_reads("practice3d_s12_posture.json", square)
+        self.assertLess(max(abs(b - a) for a, b in zip(walk, walk[1:])), 0.3)
+
+    def test_the_scores_squareness_is_the_bats_angle_at_contact_and_does_not_jump_as_contact_crosses_a_record(self):
+        """body-motion 4.14, part 3, review P3-5: Ctx.residuals's squareness (square="contact": the index, the share and
+        the guard on the next record) at two kept results agrees within 0.3 degrees with the bat's angle read from a run
+        recorded every 0.25 ms at contact, and does not jump as contact is walked across a record's instant. Against the fine run,
+        which is not the function's own arithmetic. (The old reading, the record before contact, fails both: the commit
+        that added this test shows it once.)"""
+        self._assert_squareness_is_read_at_contact("contact")
+
     def test_the_starts_margins_are_charged_as_worked_by_hand(self):
         """posture3d.margin_residuals (4.14, part 4): each joint's shortfall of 5 deg inside its end at the start, one
         unit a degree; the score squares each. Worked: margins of 4.0, 4.7, 5.0, 9.0 and -1.0 deg (one past its end)

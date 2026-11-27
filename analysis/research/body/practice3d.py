@@ -713,7 +713,7 @@ def report(ctx, u, log=print):
     bz = m.axis(recs[ic][1], "bat", (0, 0, 1))
     out["bat_square_deg"] = math.asin(max(-1.0, min(1.0, (bz[0] * ctx.nb[0] + bz[1] * ctx.nb[1]) / (math.hypot(bz[0], bz[1]) * math.hypot(ctx.nb[0], ctx.nb[1]))))) / B.D2R
     out["bat_elev_deg"] = obs[ic][1]["bat_elev"]
-    log("   FROM THE START PLACED ON [4]'s STATE%s (an input, flagged): contact %.0f ms after the start%s" % (", ON MAJOR LEAGUERS' FEET (4.13, rung 3), THE REST MOVED BY THE RULE OF 4.12" if ctx.o.get("stance") == "mlb" else ", MOVED OFF ITS JOINTS' ENDS BY THE RULE OF 4.12" if ctx.o.get("clear") else "", (tx - T0) * 1e3, "" if came else "  (THE BAT NEVER REACHED THE BALL; figures are at the run's end)"))
+    log("   FROM THE START PLACED ON [4]'s STATE%s (an input, flagged): contact %.0f ms after the start%s" % (", ON MAJOR LEAGUERS' FEET (4.13, rung 3), THE REST OF THE POSTURE FOUND BY PRACTICE (4.14, part 4)" if ctx.o.get("stance") == "mlb" and ctx.o.get("posture") else ", ON MAJOR LEAGUERS' FEET (4.13, rung 3), THE REST MOVED BY THE RULE OF 4.12" if ctx.o.get("stance") == "mlb" else ", MOVED OFF ITS JOINTS' ENDS BY THE RULE OF 4.12" if ctx.o.get("clear") else "", (tx - T0) * 1e3, "" if came else "  (THE BAT NEVER REACHED THE BALL; figures are at the run's end)"))
     out["failed_after_contact_ms"] = None if ctx.failed_after is None else ctx.failed_after[0] * 1e3
     if ctx.failed_after is not None:
         log("   THE RUN FAILED %.0f ms AFTER CONTACT, after everything the score and these checks read (\"%s\"); the records to there are used"
