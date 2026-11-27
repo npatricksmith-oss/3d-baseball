@@ -3177,6 +3177,50 @@ class SessionThirteenChecks(unittest.TestCase):
         self.assertTrue(ok, buf.getvalue())
 
 
+    def test_contact3d_gives_the_oracles_golden_contacts_and_the_games_own_restitution(self):
+        """The review of session 13, P3-4: contact3d's agreement with the game's collision by test and not by reading.
+        (1) The oracle's golden bat-ball contacts (golden/tangential_restitution.json, which the Rust is held to by
+        bb_physics's collision_golden) run through contact3d's own path from the contact state: its station on the bat
+        and its normal (physics-spec 7, worked by contact3d from the ball's place and the bat's) are the fixture's, and
+        with the fixture's restitution given, the ball's velocity and spin after the impulse are the golden result's,
+        to 1e-9. The six cases on the barrel and the cylinder; the seventh is on the taper, where the spec's detection
+        (the ball's centre projected onto the axis) is "close for gentle tapers" and not the fixture's station: it is
+        3.5 mm off there, which is said and not used (the practised swing meets the ball on the barrel).
+        (2) The normal restitution contact3d works for itself, against the game's own figures, none of them worked
+        from contact3d: collision_golden's A8 prints e 0.4585 for the sweet spot at an 85 mph pitch and a 75 mph bat
+        (cargo test -p bb_physics --test collision_golden -- --nocapture, read 2026-11-27); physics-spec 8.2's lab check
+        has 0.478 at 29 in and 110 mph; its table has f = 0.75 at the tip and never under 0.35, on e_ref 0.460 at 70 m/s."""
+        import importlib
+        import json
+        import os
+        _practice()
+        K = importlib.import_module("contact3d")
+        BP = K.BP
+        with open(os.path.join(os.path.dirname(os.path.abspath(__file__)), "golden", "tangential_restitution.json")) as fh:
+            contacts = json.load(fh)["contacts"]
+        on_barrel = [c for c in contacts if c["u"] >= K.U_TAPER]
+        self.assertEqual(len(on_barrel), 6)
+        for c in on_barrel:
+            r = K.impulse_at(tuple(c["ball_r"]), tuple(c["ball_v"]), tuple(c["ball_w"]), tuple(c["knob"]), BP.unit(tuple(c["axis"])), tuple(c["v_cm"]), tuple(c["omega"]),
+                             mu=c["mu"], e_given=c["e_n"])
+            self.assertTrue(r["hit"], c["name"])
+            self.assertAlmostEqual(r["u"], c["u"], delta=1e-9, msg=c["name"])
+            for got, want in ((r["n"], c["n"]), (r["v"], c["result"]["v"]), (r["w"], c["result"]["w"])):
+                for x, y in zip(got, want):
+                    self.assertAlmostEqual(x, y, delta=1e-9, msg=c["name"])
+            self.assertAlmostEqual(r["e_t"], c["result"]["e_t"], delta=1e-12, msg=c["name"])
+        taper = [c for c in contacts if c["u"] < K.U_TAPER][0]
+        r = K.impulse_at(tuple(taper["ball_r"]), tuple(taper["ball_v"]), tuple(taper["ball_w"]), tuple(taper["knob"]), BP.unit(tuple(taper["axis"])), tuple(taper["v_cm"]),
+                         tuple(taper["omega"]), mu=taper["mu"], e_given=taper["e_n"])
+        self.assertLess(abs(r["u"] - taper["u"]), 0.005)                 # close, as the spec says, and not the same
+        self.assertGreater(abs(r["u"] - taper["u"]), 0.001)
+        uss = K.BAT_L - K.SS_FROM_TIP
+        self.assertAlmostEqual(K.e_n(uss, (85.0 + 75.0) * BP.MPH), 0.4585, delta=5e-5)        # the game's printed figure
+        self.assertAlmostEqual(K.e_n(29.0 * BP.INCH, 110.0 * BP.MPH), 0.478, delta=5e-4)      # the spec's lab check
+        self.assertAlmostEqual(K.e_n(K.BAT_L, 70.0), 0.75 * 0.460, delta=1e-12)
+        self.assertAlmostEqual(K.e_n(0.30, 70.0), 0.35 * 0.460, delta=1e-12)
+
+
 def json_round(state):
     """a search's kept state as it comes back from its file."""
     import json

@@ -69,6 +69,29 @@ def normal_at(b, knob, a, u):
     return BP.unit(BP.sub(radial, BP.scale(a, slope)))
 
 
+def impulse_at(b, ball_v, ball_w, knob, a, vcm, om, mu=MU, e_given=None):
+    """The game's impulse for a ball whose centre is at b touching the bat (knob, unit axis a, the bat's own centre of
+    mass's velocity vcm, angular velocity om): physics-spec 7's station and normal, 8.2's normal restitution at that
+    station and closing speed (e_given: a restitution given instead, as the oracle's golden contacts give theirs), then
+    the oracle's bat_ball_contact. Returns strike()'s dict without the time and place."""
+    g, u = gap_at(b, knob, a)
+    nrm = normal_at(b, knob, a, u)
+    bat = BP.bat_mass_properties()
+    c = BP.add(knob, BP.scale(a, bat["u_cm"]))
+    r1 = BP.scale(nrm, -BP.RADIUS)
+    r2 = BP.sub(BP.sub(b, BP.scale(nrm, BP.RADIUS)), c)
+    cn = BP.dot(BP.sub(BP.add(ball_v, BP.cross(ball_w, r1)), BP.add(vcm, BP.cross(om, r2))), nrm)
+    if cn >= 0.0:
+        return dict(hit=False, gap=g, u=u, why="touching but not closing")
+    en = e_n(u, abs(cn)) if e_given is None else e_given
+    res = BP.bat_ball_contact(b, ball_v, ball_w, knob, a, vcm, om, nrm, en, mu, ss_from_tip=SS_FROM_TIP)
+    v = res["v"]
+    lh = math.hypot(ball_v[0], ball_v[1])
+    sq = math.degrees(math.asin(max(-1.0, min(1.0, (a[0] * ball_v[0] + a[1] * ball_v[1]) / max(1e-12, math.hypot(a[0], a[1]) * lh))))) if lh > 1e-9 and math.hypot(a[0], a[1]) > 1e-9 else float("nan")
+    return dict(hit=True, u=u, n=nrm, e_n=en, v=v, w=res["w"], spray_deg=math.degrees(math.atan2(v[0], v[1])), launch_deg=math.degrees(math.atan2(v[2], math.hypot(v[0], v[1]))),
+                exit_mps=BP.norm(v), bat_mps=res["bat_speed"], square_deg=sq, cn=abs(cn), e_t=res["e_t"], impulses=res["impulses"])
+
+
 def strike(ball_at, ball_v, ball_w, bat_at, t_lo, t_hi, mu=MU):
     """The ball met by the bat between t_lo and t_hi, by the game's rules. ball_at(t): its centre; bat_at(t): (knob,
     axis, the bat's own centre of mass's velocity, its angular velocity). Returns a dict: hit (False: no touch; then the
@@ -93,21 +116,9 @@ def strike(ball_at, ball_v, ball_w, bat_at, t_lo, t_hi, mu=MU):
             t = hi
             knob, a, vcm, om = bat_at(t)
             b = ball_at(t)
-            g, u = gap_at(b, knob, a)
-            nrm = normal_at(b, knob, a, u)
-            bat = BP.bat_mass_properties()
-            c = BP.add(knob, BP.scale(a, bat["u_cm"]))
-            r1 = BP.scale(nrm, -BP.RADIUS)
-            r2 = BP.sub(BP.sub(b, BP.scale(nrm, BP.RADIUS)), c)
-            cn = BP.dot(BP.sub(BP.add(ball_v, BP.cross(ball_w, r1)), BP.add(vcm, BP.cross(om, r2))), nrm)
-            if cn >= 0.0:
-                return dict(hit=False, gap=g, t=t, u=u, why="touching but not closing")
-            res = BP.bat_ball_contact(b, ball_v, ball_w, knob, a, vcm, om, nrm, e_n(u, abs(cn)), mu, ss_from_tip=SS_FROM_TIP)
-            v = res["v"]
-            lh = math.hypot(ball_v[0], ball_v[1])
-            sq = math.degrees(math.asin(max(-1.0, min(1.0, (a[0] * ball_v[0] + a[1] * ball_v[1]) / max(1e-12, math.hypot(a[0], a[1]) * lh)))))
-            return dict(hit=True, t=t, u=u, where=b, spray_deg=math.degrees(math.atan2(v[0], v[1])), launch_deg=math.degrees(math.atan2(v[2], math.hypot(v[0], v[1]))),
-                        exit_mps=BP.norm(v), bat_mps=res["bat_speed"], square_deg=sq, cn=abs(cn), e_t=res["e_t"], impulses=res["impulses"])
+            r = impulse_at(b, ball_v, ball_w, knob, a, vcm, om, mu=mu)
+            r.update(t=t, where=b)
+            return r
         prev = (t, g)
     return dict(hit=False, gap=near[0], t=near[1], u=near[2], why="the surfaces never touch")
 
