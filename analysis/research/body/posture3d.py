@@ -80,7 +80,7 @@ class PostureCtx:
         return r + margin_residuals(mg)
 
 
-def run(rung, path, seed, tag, log, cap=L.END_CAP, square=False):
+def run(rung, path, seed, tag, log, cap=L.END_CAP, square=False, leap=False):
     o = dict(L.options(rung), contact="nearest")
     if square:
         o["square"] = "contact"                           # the bat's squareness read at contact (4.14, part 3)
@@ -99,7 +99,7 @@ def run(rung, path, seed, tag, log, cap=L.END_CAP, square=False):
     t = time.time()
     PR._CTX = pc
     with multiprocessing.get_context("fork").Pool(PR.WORKERS) as pool:
-        u, cost, hist, mfull, sp = PR.cma(pc, u0, cap, log, pool, seed, sigma0=L.END_SIGMA, stop=(L.END_WINDOW, L.END_FALL, L.END_LEAST))
+        u, cost, hist, mfull, sp = PR.cma(pc, u0, cap, log, pool, seed, sigma0=L.END_SIGMA, stop=(L.END_WINDOW, L.END_FALL, L.END_LEAST), leap=L.LEAP if leap else None)
     gens = hist[-1][0]
     fall = hist[max(0, len(hist) - 1 - L.END_WINDOW)][1] - hist[-1][1]
     at_end = fall < L.END_FALL
@@ -139,7 +139,7 @@ def main():
         log("margins (deg inside the nearer end), the ten least: " + ", ".join("%s %.2f" % (k, v) for k, v in sorted(mg.items(), key=lambda kv: kv[1])[:10]))
         return
     if "--from" in a:
-        run(arg("--rung", "r4"), arg("--from", ""), int(arg("--seed", 22)), arg("--tag", "_posture"), log, cap=int(arg("--cap", L.END_CAP)), square="--square" in a)
+        run(arg("--rung", "r4"), arg("--from", ""), int(arg("--seed", 22)), arg("--tag", "_posture"), log, cap=int(arg("--cap", L.END_CAP)), square="--square" in a, leap="--leap" in a)
         return
     print(__doc__)
 

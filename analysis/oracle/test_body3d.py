@@ -2692,6 +2692,44 @@ class SessionTwelveChecks(unittest.TestCase):
         self.assertAlmostEqual(ang(PR.bat_between(a, b, -0.2)), 0.0, delta=1e-12)
         self.assertAlmostEqual(math.sqrt(sum(x * x for x in PR.bat_between(a, b, 0.3))), 1.0, delta=1e-12)
 
+    def test_the_searchs_leaps_reach_a_known_least_down_a_curved_valley_in_fewer_generations(self):
+        """practice3d.cma's leaps (4.14, part 3), on a score with a long curved valley whose least is known: eight
+        numbers u, the residuals 10 ((u[i+1] - 0.2) - 2 (u[i] - 0.2)^2) for each neighbouring pair and 0.7 - u[i] for
+        each number, all zero at u = 0.7 (0.5 = 2 x 0.25). From 0.3 everywhere, first step 0.012, ended by the rule
+        (under 1e-10 over 200 generations, 400 at least): (1) with leaps every 25 generations of 1, 2, 4, 8 times the
+        centre's travel, and without, the search ends within 1e-5 of 0.7 in every number: the leaps do not change
+        where it ends; (2) with leaps it is under a score of 1e-4 in fewer than two thirds of the generations it takes
+        without (here about half); (3) a leap is only ever taken to a plan scoring under the best so far, so the best
+        score never rises from one generation to the next."""
+        PR = _practice()
+        n = 8
+
+        class Toy:
+            free = list(range(n))
+
+            @staticmethod
+            def residuals(u):
+                return [10.0 * ((u[i + 1] - 0.2) - 2.0 * (u[i] - 0.2) ** 2) for i in range(n - 1)] + [0.7 - x for x in u]
+
+        class Pool:
+            @staticmethod
+            def map(f, us, chunksize=1):
+                return [f(u) for u in us]
+        old = PR._CTX
+        PR._CTX = Toy
+        try:
+            quiet = lambda s_: None
+            under = lambda hist: next(h[0] for h in hist if h[1] < 1e-4)
+            u0, b0, h0, _, _ = PR.cma(Toy, [0.3] * n, 4000, quiet, Pool, seed=1, sigma0=0.012, stop=(200, 1e-10, 400))
+            u1, b1, h1, _, _ = PR.cma(Toy, [0.3] * n, 4000, quiet, Pool, seed=1, sigma0=0.012, stop=(200, 1e-10, 400), leap=(25, (1.0, 2.0, 4.0, 8.0)))
+            for u in (u0, u1):
+                for x in u:
+                    self.assertAlmostEqual(x, 0.7, delta=1e-5)
+            self.assertLess(under(h1), 2.0 / 3.0 * under(h0))
+            self.assertTrue(all(b[1] <= a[1] for a, b in zip(h1, h1[1:])))
+        finally:
+            PR._CTX = old
+
     def test_the_first_stage_charges_a_bat_that_does_not_come_through_the_ball(self):
         """practice3d.through_charge (4.14, part 3: the parked basin's remedy), worked by hand at 5 m/s asked. A bat
         parked at the ball (0 m/s along the ball's line where it comes nearest) is charged 5, which the score squares

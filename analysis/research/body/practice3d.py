@@ -993,7 +993,7 @@ def cost_of(r):
 CMA_LAMBDA, CMA_SIGMA, CMA_OUT = 24, 0.03, 1e4          # plans a generation; the first spread, of each number's range; the charge for leaving the box [E]
 
 
-def cma(ctx, u0, gens, log, pool, seed=1, lam=CMA_LAMBDA, sigma0=CMA_SIGMA, stop=None):
+def cma(ctx, u0, gens, log, pool, seed=1, lam=CMA_LAMBDA, sigma0=CMA_SIGMA, stop=None, leap=None):
     """The practice search without slopes (body-motion 4.12): the separable form of CMA-ES (Ros & Hansen 2008) on the free
     numbers of the plan, in the unit box. Each generation `lam` plans are drawn about a centre with one spread per number,
     all are run, they are RANKED by score, the centre moves to the weighted mean of the better half and each number's
@@ -1004,7 +1004,11 @@ def cma(ctx, u0, gens, log, pool, seed=1, lam=CMA_LAMBDA, sigma0=CMA_SIGMA, stop
     stop = (window, fall) or (window, fall, least) (4.14, part 3): the search ends before `gens` once its best score has
     fallen less than `fall` over the last `window` generations, and not before generation `least` (a search started
     afresh finds nothing better for its first 80-280 generations, while its spreads form: a quiet start is not an end);
-    None (every search before session 12) runs all `gens`."""
+    None (every search before session 12) runs all `gens`.
+    leap = (every, (b1, b2, ...)) (4.14, part 3): every `every` generations the centre's travel over those generations
+    is tried carried on by each multiple b (the plans at centre + b x travel, held inside the box, run as one more small
+    generation); if the best of them scores under the best ever, the centre moves there. A search creeping down a long
+    valley with a small step gets there sooner; nothing else of the search changes. None: no leaps."""
     free = ctx.free
     n = len(free)
     rng = random.Random(seed)
@@ -1028,6 +1032,7 @@ def cma(ctx, u0, gens, log, pool, seed=1, lam=CMA_LAMBDA, sigma0=CMA_SIGMA, stop
     r0 = ctx.residuals(u0)
     best_u, best = list(u0), cost_of(r0)
     hist = [(0, best, best, best, sigma, 0)]
+    m_marks, leaps = {0: list(m)}, 0
     for g in range(1, gens + 1):
         zs = [[rng.gauss(0.0, 1.0) for _ in range(n)] for _ in range(lam)]
         ys = [[math.sqrt(C[k]) * z[k] for k in range(n)] for z in zs]
@@ -1060,6 +1065,24 @@ def cma(ctx, u0, gens, log, pool, seed=1, lam=CMA_LAMBDA, sigma0=CMA_SIGMA, stop
             C[k] = ((1.0 - c1 - cmu) * C[k] + c1 * (pc[k] * pc[k] + (1.0 - hsig) * cc * (2.0 - cc) * C[k])
                     + cmu * sum(w[j] * ys[order[j]][k] ** 2 for j in range(mu)))
         sigma *= math.exp((cs / damps) * (pn / chi - 1.0))
+        if leap is not None and g % leap[0] == 0:
+            m_then = m_marks.get(g - leap[0])
+            m_marks[g] = list(m)
+            if m_then is not None:
+                trials = []
+                for b_ in leap[1]:
+                    ut = list(u0)
+                    for k, i in enumerate(free):
+                        ut[i] = min(1.0, max(0.0, m[k] + b_ * (m[k] - m_then[k])))
+                    trials.append(ut)
+                rt = [cost_of(r) for r in pool.map(_res, trials, chunksize=1)]
+                kt = min(range(len(trials)), key=lambda k: rt[k])
+                if rt[kt] < best:
+                    log("      generation %3d: a leap of %g times the centre's last %d generations' travel scores %.2f (the best was %.2f): taken" % (g, leap[1][kt], leap[0], rt[kt], best))
+                    best, best_u = rt[kt], trials[kt]
+                    m = [trials[kt][i] for i in free]
+                    m_marks[g] = list(m)
+                    leaps += 1
         srt = sorted(c for c in raw)
         hist.append((g, best, raw[kb], srt[lam // 2], sigma, failed))
         if g % 10 == 0 or g == gens:

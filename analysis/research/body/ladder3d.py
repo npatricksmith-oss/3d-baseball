@@ -344,11 +344,12 @@ def run_rung(rung, start, seed, g_reach, g_aim, g_more, tag, log, max_blocks=MAX
 
 
 END_SIGMA, END_WINDOW, END_FALL, END_CAP = 0.012, 200, 0.10, 1500   # [E] the search carried to its end (4.14, part 3)
+LEAP = (25, (1.0, 2.0, 4.0, 8.0))                      # [E] the carried-on search's leaps (practice3d.cma): every 25 generations, the centre's travel carried on 1, 2, 4, 8 times
 END_LEAST = 400                                        # [E] generations before which it may not end: a search started afresh finds nothing for its first 80-280 (4.14)
 BRACE_BEFORE = 0.150                                   # s before the kept swing's contact: when the start "brace" has the front knee's extensor push (4.14)
 
 
-def settle(rung, path, seed, tag, log, brace=False, cap=END_CAP, square=False):
+def settle(rung, path, seed, tag, log, brace=False, cap=END_CAP, square=False, leap=False):
     """A kept result's search CARRIED TO ITS END (body-motion 4.14, part 3): the same search (practice3d.cma, the whole aim,
     24 plans a generation, every run at the body's step) carried on from the result in ONE stage, its first step END_SIGMA
     of each number's range, until its best score has fallen less than END_FALL over the last END_WINDOW generations and
@@ -374,7 +375,7 @@ def settle(rung, path, seed, tag, log, brace=False, cap=END_CAP, square=False):
     t = time.time()
     PR._CTX = ctx
     with multiprocessing.get_context("fork").Pool(PR.WORKERS) as pool:
-        u, cost, hist, mfull, sp = PR.cma(ctx, u0, cap, log, pool, seed, sigma0=END_SIGMA, stop=(END_WINDOW, END_FALL, END_LEAST))
+        u, cost, hist, mfull, sp = PR.cma(ctx, u0, cap, log, pool, seed, sigma0=END_SIGMA, stop=(END_WINDOW, END_FALL, END_LEAST), leap=LEAP if leap else None)
     gens = hist[-1][0]
     fall = hist[max(0, len(hist) - 1 - END_WINDOW)][1] - hist[-1][1]
     at_end = fall < END_FALL
@@ -384,7 +385,7 @@ def settle(rung, path, seed, tag, log, brace=False, cap=END_CAP, square=False):
     out = show(ctx, u, log)
     out.update(cost=cost, rung=rung, start=path, seed=seed, history=[("carried to its end", hist)], settled=at_end, at_end=at_end, fall_last_100=fall,
                fall_last_50=hist[max(0, len(hist) - 51)][1] - hist[-1][1], generations=gens, first_better=first, start_cost=c0, brace=brace,
-               start_speed=d.get("sweet_speed"), step_check=PR.verify(ctx, u, log), failed_differences=PR.failed_differences(ctx, u, log),
+               start_speed=d.get("sweet_speed"), leap=bool(leap), step_check=PR.verify(ctx, u, log), failed_differences=PR.failed_differences(ctx, u, log),
                search_checks=PR.search_checks(dict(o, contact="nearest"), u0, u, log), start_plan=plan, seconds=time.time() - t)
     os.makedirs(OUT, exist_ok=True)
     dest = os.path.join(OUT, "%s%s.json" % (rung, tag))
@@ -493,7 +494,7 @@ def main():
             json.dump(out, open(arg("--out", ""), "w"), indent=1)
         return
     if "--settle" in a:
-        settle(arg("--rung", "r4"), arg("--settle", ""), int(arg("--seed", 21)), arg("--tag", "_end"), log, brace="--brace" in a, cap=int(arg("--cap", END_CAP)), square="--square" in a)
+        settle(arg("--rung", "r4"), arg("--settle", ""), int(arg("--seed", 21)), arg("--tag", "_end"), log, brace="--brace" in a, cap=int(arg("--cap", END_CAP)), square="--square" in a, leap="--leap" in a)
         return
     if "--rung" in a:
         run_rung(arg("--rung", "r0"), arg("--from", "S"), int(arg("--seed", 1)), int(arg("--reach", 100)), int(arg("--gens", 250)), int(arg("--more", 500)), arg("--tag", ""), log,
