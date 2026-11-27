@@ -3707,6 +3707,8 @@ The recording has 1.6 s of stance, leg lift and stride before contact. The model
 
 #### Part 4: D31 and the owner's causality rule
 
+**In one line for the owner (added after the review, P3-4):** *when the batter is created, he practises his swing many times; after each try, the next try's muscle timing is nudged earlier or later from what went wrong in the last one. That happens only in practice. In a game his swing is fixed, runs forward from the first instant, and nothing that happens later in a swing changes anything earlier in it.*
+
 **What practice finds:** every muscle group's command curve, and nothing else. Practice is many whole forward runs; between runs the command is changed from the last run's errors. That is the same kind of learning D32 rules for (a player's swings learned once, when he is created) and it happens before any game.
 
 **What is given:** his body (lengths, mass, measured strengths, ranges, hands, feet); his recorded motion as the thing practised toward; the pitch; at steps 1 and 2 of part 3, his state at the start.
@@ -3793,6 +3795,8 @@ D46: the OpenBiomechanics data "and anything made from it stay out of the reposi
 - **What this means for the game, said plainly:** the base swing practised toward this recording, and the muscle commands learned for it, cannot go into the game while D46 holds. Sessions 14–20 make a base swing to study, look at and learn the method on. A game swing needs the same practice run again on a recording the game may carry: one licensed from Driveline, or a capture of our own. The method is built to take any recording, so a new one costs a rerun of practice, not a new design. Whether to start on that now is Q75.
 
 #### For the owner to decide
+
+*How the practice works, in one line, so that nothing here is misread:* when the batter is created he practises his swing many times, and after each try the next try's muscle timing is nudged earlier or later from what went wrong in the last one. That happens only in practice. In a game his swing is fixed, runs forward from the first instant, and nothing that happens later in a swing changes anything earlier in it (part 4).
 
 **Q71. If our batter's muscles turn out a little too weak to copy the recorded swing, what do we do?** *To be put to the owner after session 14's solve, with that solve's figures in place of the estimates below.*
 - *What happens now:* our batter's muscles are capped at limits taken from strength tests of other athletes (tennis players, golfers, untrained men), set at the top of their normal range (PLAN D34). Nothing in a game uses this body yet.
