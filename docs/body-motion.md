@@ -3014,6 +3014,63 @@ Part 1's answer leaned on "nothing is measured below 441 N". While part 3's sear
 - **What happened.** The kept swing (seeds 2, 12) carried on with a first step of 0.012 found no better plan in 100 generations (its best generation scored 26.55 against 26.18) and the rule I had written ended it there, "at its end", with the overall step still at 0.0078 and each generation's best closing on the kept score. **That is the same fault the method was written to remove:** a search started afresh finds nothing while its spreads form (80–280 generations in session 11's fourteen; here more than 100 at the smaller first step), and a window of 100 generations cannot tell that quiet start from an end. The check written beside the rule ("the first generation that found a better plan") caught it: none.
 - **The rule, changed before any other carried-on search ran** (`ladder3d.END_WINDOW`, `END_LEAST`; the test extended): the search may not end before generation 400, and ends once its best score has fallen less than 0.10 over the last **200** generations [E both]; 1,500 at most. A search that finds nothing better in 400 generations is reported as that, not as at its end. Job 511's result is withdrawn and the search rerun; the run started with the front knee pushing (job 512) was stopped 67 s in and rerun under the same rule.
 
+#### Part 3 as run, third: carried on 1,500 generations the kept swing is 1.5 m/s faster, and a front leg that pushes is worth nothing to the bat (jobs 514 and 515, 31 minutes each; `s12/r4_s2_end.out`, `r4_s2_brace_end.out`, `.json`, `block_s2.md`)
+
+**The body is rung 4's, unchanged. The kept swing (21.11 m/s) carried on by the changed rule reaches 22.64 m/s (50.6 mph); the same carried on from the plan with the front knee's extensor pushing reaches 22.58 m/s (50.5 mph). Both ran to the cap of 1,500 generations still falling (0.26 and 0.33 over the last 100): neither is at its end.**
+
+| | The kept swing (seeds 2, 12) | Carried on 1,500 generations | The same from the plan with the front knee pushing |
+| :-- | --: | --: | --: |
+| the sweet spot at contact | **21.11 m/s (47.2 mph)** | **22.64 m/s (50.6 mph)** | **22.58 m/s (50.5 mph)** |
+| the miss | 0.0 cm | 0.2 cm | 0.1 cm |
+| the score (lower is better) | 26.18 | 24.15 | 24.34 |
+| the score after 0, 250, 500, 750, 1,000, 1,250, 1,500 generations | | 26.18, 25.90, 25.38, 25.20, 24.83, 24.48, 24.15 | 29.97, 26.23, 25.78, 25.55, 25.10, 24.76, 24.34 |
+| the first generation with a better plan | | 115 | 1 (the start scores 29.97) |
+| the fall over the last 100 generations | 0.63 (of its 500 more) | 0.26: **not at its end** | 0.33: **not at its end** |
+| the speed at 0.5, 0.25, 0.125 ms | 21.12, 21.11, 21.11 | 22.65, 22.64, 22.64 | 22.58, 22.58, 22.58 |
+| failed runs among the plan's 205 one-number changes | 0 | 0 | 0 |
+| the line from the starting plan to the result (11 points, then one beyond) | | 26.2 26.0 25.8 25.6 25.5 25.3 25.2 24.9 24.6 24.3 24.2 26.6 | 30.0 32.7 32.2 31.8 31.4 31.1 30.4 30.6 30.5 30.3 24.3 24.3 |
+| the bat at its fastest at contact | 96% | 97% | 97% |
+| the hands' fastest | 8.1 m/s | 7.9 m/s | 7.6 m/s |
+| the attack angle | −0.7° | +0.6° | +0.4° |
+| the hips'; the trunk's fastest turning | 188; 331°/s | 233; 402°/s | 272; 404°/s |
+| the pelvis's turn from the start to contact | 11° | 15° | 15° |
+| first rises: legs, trunk, arms (ms before contact) | 266, 233, 253 | 266, 229, 255 | 270, 227, 253 |
+| the lead knee at contact | 41° | 46° | 44° |
+| **the front foot's load: mean of the last 100 ms; at contact (both feet at contact)** | 0.45; 0.04 (0.35) | 0.41; 0.08 (0.52) | **0.90; 1.23 (1.47)** |
+| the front foot's greatest load | 2.35 × body weight, 201 ms before contact | 2.15, 199 ms before | 2.07, 197 ms before |
+| the front foot's turn on the dirt; the front hip on its end from | 48°; 65 ms before contact | 26°; 20 ms before | 22°; 4 ms before |
+| what the ground gave his turning (kg·m²/s) | 31.7 | 34.1 | 39.4 |
+| balance: outside his feet; least on the feet; height kept | 0.0 cm; 0.13; 0.90 | 0.0 cm; 0.26; 0.92 | 0.0 cm; 0.14; 0.93 |
+| joints past their range: to contact; to 50 ms after | 2.8° (the lead upper arm's turn); 4.7 (wrist oval L) | 3.0°; 3.2 (the same two) | 2.8° (the lead upper arm's turn); 3.9 (the lead forearm) |
+| joint ends over 50 N·m; the heaviest | 13; 1,330 N·m (shoulder up L) | 12; 1,226 (shoulder up L) | 12; 1,091 (shoulder up L) |
+| groups at 90% or more of their bounds | 12 | 13 | 12 |
+| WORK TO CONTACT, J: muscles; holding muscles; constant torques | +483; +32; +1 | +525; +23; +5 | +529; +26; +3 |
+| the joints' damping; stops; ground; gravity | −192; −29; −62; +59 | −180; −32; −67; +44 | −172; −23; −59; +51 |
+| kinetic energy gained | 292 | 318 | 355 |
+| muscles (with holding) by joint, the five largest | hip R +136, shoulder L +114, lumbar +85, hip L +70, shoulder R +65 | hip R +145, shoulder L +114, hip L +89, lumbar +77, shoulder R +69 | hip R +135, shoulder L +114, hip L +86, lumbar +82, shoulder R +70 |
+| damping by joint, the five largest | lumbar −65, shoulder R −37, hip L −29, hip R −27, elbow R −15 | lumbar −61, shoulder R −36, hip R −28, hip L −23, elbow R −15 | lumbar −57, shoulder R −35, hip R −26, hip L −20, elbow R −13 |
+| GATE: meets the ball | passes (0.0 cm) | passes (0.2 cm) | passes (0.1 cm) |
+| GATE: the sweet spot at contact | fails (short by 7.9 m/s) | fails (short by 6.4 m/s) | fails (short by 6.4 m/s) |
+| GATE: the bat at its fastest at contact | fails (−2 points) | fails (−1 point) | fails (−1 point) |
+| GATE: the hands' fastest | fails (short by 2.2 m/s) | fails (short by 2.4) | fails (short by 2.7) |
+| GATE: the attack angle | passes (inside by 2.3°) | passes (inside by 3.6°) | passes (inside by 3.4°) |
+| GATE: the hips' fastest turning | fails (short by 367°/s) | fails (short by 322) | fails (short by 283) |
+| GATE: the trunk's fastest turning | fails (short by 424°/s) | fails (short by 353) | fails (short by 351) |
+| GATE: first rises legs, trunk, arms | fails (the trunk after the arms) | fails (the same) | fails (the same) |
+| GATE: no arm muscle before he could decide | passes (+0 ms) | fails (+2 ms) | passes (0 ms) |
+| GATE: the hands' first motion before contact | passes (inside by 9 ms) | passes (inside by 10 ms) | fails (over by 11 ms) |
+| GATE: the lead knee at contact | fails (over by 15°) | fails (over by 20°) | fails (over by 18°) |
+| GATE: the front foot's greatest load | passes on size only (an early spike) | passes on size only | passes on size only **by the row's reading (its greatest load is still the early impact); at contact it carries 1.23 × his weight** |
+| GATE: in balance; does not jump; legs have not given way | passes; passes (+0.03); passes | passes; passes (+0.16); passes | passes; passes (+0.04); passes |
+| GATE: no joint more than 2° past its range | fails (+2.7°) | fails (+1.2°) | fails (+1.9°) |
+| GATE: no joint end heavily loaded (D39, not built) | fails (13 ends) | fails (12 ends) | fails (12 ends) |
+| GATE: no passive element does net positive work | passes (stops −29 J, ground −62, damping −192) | passes (−32, −67, −180) | passes (−23, −59, −172) |
+
+- **The gain is the search's: +1.53 m/s (+3.4 mph) on an unchanged body, from 1,500 more generations.** It is nearly seven times the standard deviation of five searches of this body by the shorter protocol and nearly three times their range. Nothing of the body, its strength, its ground or the score was changed; the kept swing had been stopped while it was still improving, as part 3's method found in every stored search. **The search itself is checked as rule 6 asks:** the result is the same at 0.5, 0.25 and 0.125 ms; along the line from the kept plan to the result the score falls all the way (26.2 … 24.2) and rises beyond it (26.6); no failed run.
+- **A front leg that pushes changes the swing and not the bat.** The search kept the push it was started with: the front foot carries 0.90 of his weight through the last 100 ms and 1.23 at contact (the unpushed swing: 0.41 and 0.08), it turns 22° on the dirt against 26°, the front hip reaches its end 4 ms before contact and not 20, and the ground gives him a sixth more turning (39.4 against 34.1 kg·m²/s). **And the bat arrives at 22.58 m/s against 22.64: the same.** His body holds 355 J at contact where the other holds 318; the extra is in the pelvis and legs (the hips turn at 272°/s against 233) and does not reach the bat.
+- **So what part 1 pointed at is not what holds his bat speed.** A swing with a hitter's load on the front foot and one with the front foot nearly off the ground are, on this body by this search, equally fast. The front leg's push answers the gate's reading of the front side (a load at contact) and part of the pelvis's turning; it is not worth bat speed here. *Against what I expected:* I wrote that I did not know; I leaned toward a gain, and there is none.
+- *What it does not show:* the body's best. Both searches were still falling at 1,500 generations at about a third of a m/s every 100; where that ends is the long run below. And one pair is one pair: the second (from seeds 1 and 11's swing) is queued.
+
 #### Part 4: the launch posture by practice on these feet (the design, written before any of it was run; built while part 3's searches ran)
 
 **The one change:** the fourteen numbers of the start that are still [4]'s are given to the search with the plan (`analysis/research/body/posture3d.py`): the pelvis's turn and its place between the feet, the trunk's turn, forward bend and side bend, the pelvis's side tilt, both knees, the rear foot's angle, the bat's direction and tilt, the lag and both elbows. Everything else is rung 4's body.
