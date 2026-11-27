@@ -2726,6 +2726,72 @@ class SessionTwelveChecks(unittest.TestCase):
         finally:
             PR._CTX = old
 
+    def test_the_posture_given_to_the_search_is_rung_fours_start_until_it_is_moved_and_then_moves_what_it_names(self):
+        """body-motion 4.14, part 4 (posture3d.py, practice3d.Ctx's posture, arms and Pc). (1) With no posture change, the
+        start's three free choices given as rung 4's own and the ball's place given as rung 4's, the placed start is rung
+        4's to the last digit: nothing else came in with the options. (2) The pelvis's place +3 cm moves the pelvis's
+        centre 3.0 cm toward the pitcher (+Y) and not across; both ankles stay where they were along and across within
+        0.5 mm (the feet's places are Statcast's, not the search's; the front ankle is lower, since the front heel, raised
+        on the ball of the foot at launch, comes down as the pelvis comes over it); the ball's place is unchanged. (3) The front knee's number +2 bends the front knee 2.0 deg more and leaves the rear knee's bend.
+        (4) A number that is the feet's (the stride) is not among the fourteen, and each of the fourteen is a posture
+        number of body.py."""
+        PR = _practice()
+        import importlib
+        Q = importlib.import_module("posture3d")
+        L = importlib.import_module("ladder3d")
+        o = dict(L.options("r4"), contact="nearest")
+        pc = Q.PostureCtx(o)
+        base = pc.base
+        same = PR.Ctx(**dict(pc.o, posture={}))
+        self.assertEqual(max(abs(a - b) for a, b in zip(same.st, base.st)), 0.0)
+        self.assertEqual(tuple(same.Pc), tuple(base.Pc))
+        ank = lambda c, sd: c.m.joint_pos(c.st, "ankle_" + sd)
+        pel = lambda c: c.m.sys.pose(c.st, c.m.b["pelvis"])[0]
+        moved = PR.Ctx(**dict(pc.o, posture={"pelvis_x_cm": 3.0}))
+        self.assertAlmostEqual(pel(moved)[1] - pel(base)[1], 0.030, delta=2e-4)
+        self.assertAlmostEqual(pel(moved)[0] - pel(base)[0], 0.0, delta=2e-4)
+        for sd in "LR":
+            for c in range(2):                                   # each ankle's place along and across is the feet's measurement
+                self.assertAlmostEqual(ank(moved, sd)[c], ank(base, sd)[c], delta=5e-4)
+        self.assertAlmostEqual(ank(moved, "R")[2], ank(base, "R")[2], delta=5e-4)
+        self.assertLess(ank(moved, "L")[2], ank(base, "L")[2] - 0.02)   # the front heel comes down as the pelvis comes over it
+        self.assertEqual(tuple(moved.Pc), tuple(base.Pc))
+        free = PR.Ctx(**dict({k: v for k, v in pc.o.items() if k != "Pc"}, posture={"pelvis_rot": 2.0}))
+        held = PR.Ctx(**dict(pc.o, posture={"pelvis_rot": 2.0}))
+        self.assertEqual(tuple(held.Pc), tuple(base.Pc))        # given, the ball's place is exactly rung 4's
+        for c in range(3):                                       # not given, these numbers would not carry it anyway: under 0.1 mm
+            self.assertAlmostEqual(free.Pc[c], base.Pc[c], delta=1e-4)
+        knee = lambda c, sd: c.m.flexion(c.st, "thigh_" + sd, "shank_" + sd)
+        bent = PR.Ctx(**dict(pc.o, posture={"lead_knee_flex": 2.0}))
+        self.assertAlmostEqual(knee(bent, "L") - knee(base, "L"), 2.0, delta=0.05)
+        self.assertAlmostEqual(knee(bent, "R") - knee(base, "R"), 0.0, delta=0.05)
+        self.assertEqual(len(Q.NUMBERS), 14)
+        self.assertNotIn("stride_cm", Q.NUMBERS)
+        self.assertTrue(set(Q.NUMBERS) <= set(B.POSTURE_NUMBERS))
+        # the search's numbers for the kept posture are the middle of each range, and come back as no change
+        u = pc.u_of({n: (0.0, 0.0, 0.05, 0.1, 0.0) for n in PR.CH}, {"trail_knee": -5.0})
+        self.assertAlmostEqual(pc.posture_of(u)["trail_knee"], -5.0, delta=1e-12)
+        self.assertAlmostEqual(pc.posture_of(u)["pelvis_rot"], 0.0, delta=1e-12)
+
+    def test_the_starts_margins_are_charged_as_worked_by_hand(self):
+        """posture3d.margin_residuals (4.14, part 4): each joint's shortfall of 5 deg inside its end at the start, one
+        unit a degree; the score squares each. Worked: margins of 4.0, 4.7, 5.0, 9.0 and -1.0 deg (one past its end)
+        give shortfalls 1.0, 0.3, 0, 0 and 6.0, whose squares sum to 1 + 0.09 + 36 = 37.09. And on rung 4's own start,
+        whose margins body-motion 4.13 printed from the start's rule (the rear ankle's roll 4.0 deg inside its end, both
+        hips' sideways margins and the lead ankle's roll at 4.7, every other joint 5 or more), the charge is
+        1.0^2 + 3 x 0.3^2 = 1.27 by those rounded figures: 1.17 from the margins themselves, within 0.15 of it."""
+        PR = _practice()
+        import importlib
+        Q = importlib.import_module("posture3d")
+        L = importlib.import_module("ladder3d")
+        r = Q.margin_residuals({"a": 4.0, "b": 4.7, "c": 5.0, "d": 9.0, "e": -1.0})
+        self.assertAlmostEqual(sum(x * x for x in r), 37.09, delta=1e-9)
+        self.assertEqual(sum(1 for x in r if x == 0.0), 2)
+        base = PR.Ctx(**dict(L.options("r4"), contact="nearest"))
+        mg = B.start_margins(base.m, base.st)
+        self.assertAlmostEqual(sum(x * x for x in Q.margin_residuals(mg)), 1.27, delta=0.15)
+        self.assertEqual(sum(1 for v in mg.values() if v < 4.9), 4)
+
     def test_what_the_ground_and_a_held_foot_give_is_the_change_of_the_bodys_turning_momentum(self):
         """The two readings against each other, by a law neither is built from: gravity has no moment about the centre
         of mass, so the whole body's turning momentum about the vertical through it changes only by the ground's twist

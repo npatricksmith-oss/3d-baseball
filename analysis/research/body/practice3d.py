@@ -163,12 +163,21 @@ class Ctx:
         # wrist: "box" (session 9, the default) or "oval" (4.12: both of a wrist's angles inside its ellipse; --wrist oval)
         # clear: the cleared start of 4.12 (body.START_CLEAR: [4]'s launch posture moved by the rule so that every joint is
         # 5 deg inside its end; no stop moved; --clear). STILL [4]'s LAUNCH POSTURE, MOVED BY A RULE, AND FLAGGED AS THAT.
+        # stance="mlb" (4.13, rung 3): the start on major leaguers' feet (body.START_STANCE) in place of [4]'s
+        shift = B.START_STANCE if o.get("stance") == "mlb" else B.START_CLEAR if o.get("clear") else None
+        if o.get("posture"):
+            # posture (4.14, part 4): {posture number: change} on top of the start's own, set by the search with the plan
+            shift = dict(shift or {})
+            for k, v in o["posture"].items():
+                shift[k] = shift.get(k, 0.0) + v
         self.m = m = B.Model(H, M, ranges=(), grip=o.get("grip", "weld"), feet=o.get("feet", "plate"), mu=o.get("mu"),
-                             wrist=o.get("wrist", "box"),
-                             # stance="mlb" (4.13, rung 3): the start on major leaguers' feet (body.START_STANCE) in place of [4]'s
-                             shift=B.START_STANCE if o.get("stance") == "mlb" else B.START_CLEAR if o.get("clear") else None,
+                             wrist=o.get("wrist", "box"), shift=shift,
                              # loads="balance" (4.13, rung 5): the feet's starting loads from his own weight and balance, not [4]'s forces
                              loads=o.get("loads", "measured"))
+        if o.get("arms") is not None:
+            # arms (4.14, part 4): the start's three free choices (the bat's roll, each arm's swivel) held at given values
+            # and not searched for, so that the start changes smoothly with the posture's numbers
+            m.arms_given = tuple(o["arms"])
         for k, shift in o.get("start", {}).items():          # the start moved by a stated amount (a sensitivity run)
             B.CURVE_OVERRIDE[k] = (lambda kk, sh: (lambda t: C.resample(B._CURVES.setdefault(kk, C.load(kk)), t, t, 1.0)[0] + sh))(k, shift)
         vel = o.get("vel", 1.0)
@@ -234,6 +243,10 @@ class Ctx:
             # on major leaguers' feet the ball is met where they meet it relative to their feet: MEET_FROM_REAR_ANKLE
             # toward the pitcher from the rear ankle (which is level with the lead ankle, 4.13)
             self.Pc = (self.Pc[0], m.joint_pos(st, "ankle_R")[1] + o.get("meet_rear", MEET_FROM_REAR_ANKLE) * k, self.Pc[2])
+        if o.get("Pc") is not None:
+            # Pc (4.14, part 4): the ball's place given in the world (where it is with the start unmoved), so that a posture
+            # the search moves does not carry the ball with the pelvis: the pitch is where it is, the feet are where they are
+            self.Pc = tuple(o["Pc"])
         d, a = BALL_DESCENT * B.D2R, BALL_ACROSS * B.D2R
         self.nb = (math.cos(d) * math.sin(a), -math.cos(d) * math.cos(a), -math.sin(d))
         self.ev = E.unit(E.sub((0.0, 0.0, 1.0), E.scale(self.nb, self.nb[2])))    # up, square to the ball's line
