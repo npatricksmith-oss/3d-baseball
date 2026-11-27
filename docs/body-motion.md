@@ -3091,6 +3091,44 @@ Part 1's answer leaned on "nothing is measured below 441 N". While part 3's sear
 
 **What I expect:** the search falls faster and further than the 26.18 → 24.15 the old reading gave in 1,500 generations: its overall step is no longer held to 0.005 by the edge, so I expect a score under 23.5 and a bat over 23.5 m/s by the cap, and perhaps an end before it. I do not know how far the body's own speed is from there. *What it would show:* how much of every figure of sessions 10 to 12 was the saw in the score. *What it would not:* what limits him once the search is free of it; and a result found under the corrected reading may be compared with an old one only by its bat speed and its other readings, not by its score.
 
+#### Part 3 as run, fifth: with the squareness read at contact the same search reaches 23.11 m/s (51.7 mph); and a search must never be started afresh (jobs 520 and 521; `s12/r4_s2_sq.out`, `r4_s2_sq_leap.out`, `.json`)
+
+**The kept swing carried on 1,500 generations with the bat's squareness read at contact: 23.11 m/s (51.7 mph), 0.0 cm from the ball, the same at 0.5, 0.25 and 0.125 ms, score 23.56.** The same start, draws and rule by the old reading gave 22.64 m/s and 24.15. The body is rung 4's, unchanged.
+
+| | By the old reading (above) | **The squareness read at contact** |
+| :-- | --: | --: |
+| the sweet spot at contact | 22.64 m/s (50.6 mph) | **23.11 m/s (51.7 mph)** |
+| the score after 0, 250, 500, 750, 1,000, 1,250, 1,500 generations | 26.18, 25.90, 25.38, 25.20, 24.83, 24.48, 24.15 | 26.20, 25.73, 25.28, 24.83, 24.31, 23.80, 23.56 |
+| the first generation with a better plan; the fall over the last 100 | 115; 0.26 | 11; 0.22: **not at its end** |
+| the line from the starting plan to the result, then one beyond | 26.2 … 24.2, **26.6** (the edge) | 26.2 25.9 25.5 25.2 24.9 24.6 24.3 24.1 23.9 23.7 23.6, 23.7 |
+| the score's slopes at the result, forward; backward (the three numbers moved furthest) | +112, −4; +119, 0; +119, −2 | 0, 0; −0.1, −0.2; +4.4, −1.3 |
+| the bat at its fastest at contact; the hands' fastest; the attack angle | 97%; 7.9 m/s; +0.6° | 97%; 8.1 m/s; +1.1° |
+| the hips'; the trunk's fastest turning; the pelvis's turn | 233; 402°/s; 15° | 280; 436°/s; 13° |
+| the lead knee at contact; the front foot: mean of the last 100 ms, at contact (both feet) | 46°; 0.41, 0.08 (0.52) | 45°; 0.35, 0.09 (0.35) |
+| the front foot's turn; the front hip on its end from | 26°; 20 ms before contact | 15°; never |
+| what the ground gave his turning | 34.1 kg·m²/s | 33.6 |
+| joints past their range: to contact; to 50 ms after | 3.0°; 3.2 | 3.1° (the lead upper arm's turn); 3.4 (the same) |
+| joint ends over 50 N·m; the heaviest; groups at 90% or more | 12; 1,226 N·m; 13 | 11; 873 N·m (the rear knee); 13 |
+| WORK TO CONTACT, J: muscles; holding; constant | +525; +23; +5 | +533; +24; +5 |
+| damping; stops; ground; gravity; kinetic energy gained | −180; −32; −67; +44; 318 | −185; −24; −61; +39; 331 |
+| muscles (with holding) by joint, the five largest | hip R +145, shoulder L +114, hip L +89, lumbar +77, shoulder R +69 | hip R +133, shoulder L +116, hip L +98, lumbar +77, shoulder R +65 |
+| damping by joint, the five largest | lumbar −61, shoulder R −36, hip R −28, hip L −23, elbow R −15 | lumbar −63, shoulder R −35, hip R −29, hip L −26, elbow R −15 |
+| GATE, passes | meets the ball; the attack angle; the hands' first motion; in balance; does not jump (+0.16); legs have not given way; no passive element adds energy; the front foot's load on its size only | the same seven **and no arm muscle before he could decide (+0 ms)**: eight outright; the front foot's load on its size only (2.08 × his weight, 198 ms before contact) |
+| GATE, fails | the bat's speed (short by 6.4 m/s); fastest at contact (−1 point); hands (short by 2.4); hips (322°/s short); trunk (353); the order of first rises; the arms' clock (+2 ms); the lead knee (20° over); a joint 1.2° over the allowance; 12 joint ends | **the bat's speed, short by 5.9 m/s**; fastest at contact (−1 point); hands (short by 2.2); hips (275°/s short); trunk (319); the order (the trunk's rotators first rise after the arms'); the lead knee (19° over); a joint 1.4° over the allowance; 11 joint ends |
+
+- **The correction is worth +0.47 m/s (+1.1 mph) over the same 1,500 generations,** twice the standard deviation of five searches of this body; by the like-for-like pair it is the reading and nothing else. The slopes at the result are now slopes (the jump is gone), the line from the start falls to the result and turns up gently beyond it, and the first better plan comes at generation 11 where it took 115.
+- **Against what I expected:** less than I wrote. I expected the search to fall "faster and further" to under 23.5 with the bat over 23.5 m/s, perhaps to an end. It fell to 23.56 and 23.11 m/s, at the same steady pace as before (0.2 of score every 100 generations, its overall step still 0.004), and is not at its end. **The saw in the score was costing half a m/s, not the search's pace: the creep is the search's own** (205 numbers, 24 plans a generation).
+- **A search started afresh from a result finds nothing, for longer the further the result has come** (job 521: the 23.56 result carried on by the same rule found no better plan in 400 generations, its best generation still at 24.12, and was ended by the rule as "nothing better in 400 generations"; the kept swing took 115 and 11). What a search has learned by then is each number's own spread, and a fresh start throws that away: every stage boundary of sessions 10 and 11, and my own carried-on runs, paid it.
+
+**So two more rules for the search, written before the run that uses them:**
+
+- **A search keeps its state** (`practice3d.cma(state=, keep=)`, `ladder3d.py --carry`): the centre, every number's spread, the paths, the step, the draws' generator and the history are kept with each result, and the search goes on from them exactly as if it had not stopped. Tested: a search stopped at 120 generations, its state written out and read back, and carried on to 300 gives the same score at every generation and the same plan to the last digit as the search run in one go, and a search started afresh from the same plan does not.
+- **Leaps** (`cma(leap=)`): every 25 generations the centre's travel over those 25 is tried carried on 1, 2, 4 and 8 times (four more runs); the best of them is taken only if it scores under the best plan so far [E: the 25 and the multiples]. For a search creeping along a valley with a small step. Tested on a curved valley with a known least (eight numbers): it ends at the same place and gets under a score of 10⁻⁴ in about half the generations. On the swing's score I do not know what it is worth: the line from the kept swing to the 23.56 result turns up 10% beyond the result, so the valley is not straight over 1,500 generations; over 25 it may be.
+
+**The run** (job 523, `s12/r4_s2_carry*.out`, `.json`): rung 4's kept swing (seeds 2, 12) again, the squareness read at contact, **one search with its state kept and leaps**, read and kept every 500 generations with the whole report, until its best score has fallen under 0.10 over 200 generations, 6,000 at most (two and a quarter hours). Its first 1,500 generations are the like-for-like of the 23.56 result (the same draws until the first leap is taken): under 23.56 at 1,500 means the leaps help, over it that they hurt.
+
+**What I expect:** the leaps help a little (23.0–23.5 at 1,500 generations). Beyond that the pace slows: I expect it to end by the rule between 2,500 and 5,000 generations at a score of 21–23, **a bat of 23.5–25.5 m/s (53–57 mph)**. I do not expect 29. *What it would show:* this body's speed for this family of swings (from S, on [4]'s launch state), free of the three faults of the search found this session (stopped early, the saw, started afresh). *What it would not:* another family of swings; nothing in a search from one start can.
+
 #### Part 4: the launch posture by practice on these feet (the design, written before any of it was run; built while part 3's searches ran)
 
 **The one change:** the fourteen numbers of the start that are still [4]'s are given to the search with the plan (`analysis/research/body/posture3d.py`): the pelvis's turn and its place between the feet, the trunk's turn, forward bend and side bend, the pelvis's side tilt, both knees, the rear foot's angle, the bat's direction and tilt, the lag and both elbows. Everything else is rung 4's body.
