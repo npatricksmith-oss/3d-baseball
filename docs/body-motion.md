@@ -295,7 +295,7 @@ So what holds the cock does decide where the ball meets the bat. The stiff stop 
   - *Your hip ruling rested on a wrong figure.* The "active range gives 11° more" came from a study that measured the hip's turn with the man **sitting**. Measured actively with the hip straight, as a hitter's front hip is, men turn the hip in 32°, which is what he already had (professional pitchers: 23°). Only the turn outward gains 10°. The ruling is applied as you made it (the active range, read with the hip straight); it changes nothing in his swing.
   - *He had been standing on a base 10 inches narrower than a major leaguer's, reaching for a ball 11 inches in front of his front foot.* Statcast's published stance numbers are the feet before the stride; the page also carries where each hitter's feet are when the bat gets to the ball, and major leaguers are 40 inches apart there and meet the ball level with the front foot. The lab study's hitters and the tee studies stride shorter.
   - *The search that finds his swing is noisier than the fixes are large.* Run twice on the same batter it lands on different swings 4.4 mph apart. Only rung 3's gain is clearly larger than that. Every figure in the table should be read with it.
-- **How much rests on friction nobody has measured.** @@DEP@@
+- **How much rests on friction nobody has measured: 2.8 mph.** No paper I could read measures the friction of a relaxed hip or of the trunk's twist (nor of the forearm's turn or the wrist's tilt), so each has a stated range. Run with every one of them at the low end of its range he swings 48.1 mph; at the high end, 45.4; at the middle, 47.2. Most of that is the trunk's value; the hips' does not show at all. It is less than the 4.4 mph the search itself varies by, so his bat speed does not hinge on these numbers. What friction did was shift where the work goes, not how fast the bat is.
 - **Is he short of muscle, which muscles, and by how much?** @@MUSCLE@@
 - **What is not known.**
   - *Why his hips do not turn.* His front foot is open, his hips have their range, his legs load the front foot, and still the pelvis turns 11°. Three suspects, none tested: his launch posture (the lab study's numbers for the pelvis, knees and trunk, bent by a rule to fit the wide base, sitting within a degree of four joint ends); the search (it improves the one plan it is given, and that plan came from an arms-and-trunk swing); and that he may still lean on joint ends for nothing (D39).
@@ -2582,6 +2582,24 @@ Rung 1's design put these runs on rung 1's body. After the chain they were moved
 - *All together:* every unread value at its low end (hips 0.5, trunk 1.0, elbow's bend 0.22, forearm's turn 0.02, wrist's tilt 0.03); at its high end (4.6, 27.5, 0.97, 0.10, 0.20).
 - *One group at a time, the others in the middle:* the trunk at 1.0 and at 27.5; the hips at 0.5 and at 4.6. (The arms' three unread values are not run apart: in rung 4's swings the elbows' and wrists' friction takes under 25 J in all.) These are queued without waiting on the all-together runs: the queue is long and it is the owner's question.
 - *What I expect:* low ends together: +0.5 to +2 m/s (about 110 J of the swing's 166–177 J of friction is at the trunk and hips). High ends together: a large loss, 3 m/s or more, nearly all of it the trunk's 27.5 (a value measured with the trunk's muscles holding a load; at this swing's 330–380°/s of trunk turn a damper that size asks for 160–180 N·m, two thirds of what the trunk's rotators have). The hips apart: under 1 m/s either way; they hardly turn in these swings.
+
+**The dependence as run** (jobs 481–486, 11 minutes each; `s11/r4_low_dep.out` … `r4_hips_high_dep.out`). Rung 4's better swing (21.11 m/s) carried on for 500 generations on rung 4's body with the unread joints' friction moved; every result settled, within 1 cm of the ball, the same at 0.25 and 0.125 ms:
+
+| The friction nobody has measured | The sweet spot at contact | Against the middle (21.11 m/s) | The friction's work to contact: trunk; hips; arms; all |
+| :-- | --: | --: | :-- |
+| all at the low ends (hips 0.5, trunk 1.0, elbow's bend 0.22, forearm's turn 0.02, wrist's tilt 0.03) | 21.52 m/s (48.1 mph) | +0.41 | −26; −22; −54; −106 J |
+| **the middle, as rung 4 has it** (hips 2.0, trunk 5.0, 0.43, 0.03, 0.09) | **21.11 m/s (47.2 mph)** | | −65; −56; −66; −192 J |
+| all at the high ends (hips 4.6, trunk 27.5, 0.97, 0.10, 0.20) | 20.28 m/s (45.4 mph) | −0.83 | −58; −62; −75; −198 J |
+| the trunk alone at 1.0 | 21.14 (47.3) | +0.03 | −18; −62; −64; −148 J |
+| the trunk alone at 27.5 | 20.52 (45.9) | −0.59 | −60; −39; −75; −178 J |
+| the hips alone at 0.5 | 20.97 (46.9) | −0.14 | −81; −18; −61; −166 J |
+| the hips alone at 4.6 | 21.24 (47.5) | +0.13 | −44; −90; −64; −202 J |
+
+- **How many mph hang on numbers nobody has measured: 2.8 mph (1.24 m/s), from 45.4 with every unread value at its high end to 48.1 with every one at its low end.** That is less than the 4.4 mph by which two searches of one body differ, and about what this carried-on measure's own two draws differ by (1.27 m/s on the chain's first step). So the result does not hinge on them: at any value in their ranges he meets the ball at 45–48 mph.
+- **The trunk's value is most of what there is** (−0.6 m/s at its high end, nothing at its low end). **The hips' value does not show at all:** ±0.14 m/s with the signs the wrong way round, which is the size of this measure's noise on a settled swing; his hips hardly turn, so their friction has little to take.
+- *The swing adapts, which is why the high end costs so little.* At a trunk damping of 27.5 the friction's work at the trunk is 60 J, less than at 5.0 (65 J): the search turns the trunk less against the pelvis (its fastest turning 256°/s against 331) and gets the speed elsewhere. A replay of one plan would have shown a far larger loss, and would have been wrong about what the value is worth.
+- *Against what I expected:* the low ends gain less than I wrote (+0.4 against +0.5 to +2); the high ends lose far less (−0.8 against 3 or more): I had reasoned from the damper's torque on a fixed motion. Right that the hips' value matters little.
+- *What it does not show:* what the true values are; and the dependence at the read joints (the knee's two methods disagree fivefold; not run).
 
 #### Rung 6 stands on rung 4's body (decided before rung 5's searches finished, and before any of rung 6 ran)
 
