@@ -1,6 +1,6 @@
 # Task List
 
-**Last updated:** 2026-11-27 (body-track design running).
+**Last updated:** 2026-11-27 (body-track design merged).
 
 What is next and what is open. Other files hold the rest:
 
@@ -21,7 +21,7 @@ Status: `[ ]` not started · `[~]` partly done · `[?]` needs an owner decision
 
 **Owner, 2026-11-27.** D45: a real batter's swing is the base; it plays in the viewer, `bin/body-swing.sh --real` (player-visuals §14.1, [note](docs/research/swing/12-real-swing-on-the-figure.md)); he says it looks a lot better. D46: its data is looked at, never shipped. D47: the body practises toward it; how batters differ: later.
 
-**Running:** worker `body-track-design` (Opus, `.claude/worktrees/swing-research`, `work/body-track`, JOB.md): the design for D47 in the spec, no search run. Then a review, then the owner.
+**Merged:** body-motion §4.16, the design for D47, reviewed ([review](docs/reviews/2026-11-27-opus-body-track-design-review.md)). **Waiting on the owner: Q72–Q75**; then session 14, Q71 after it.
 
 **Next:** §2: the ground-dive leftovers ([note](docs/calibration/2026-11-23-of-ground-dive.md) §9).
 
