@@ -526,11 +526,17 @@ class Ctx:
             # which the bat turns up to 15 deg: the score then jumps by 2.4 whenever contact crosses a record's instant.
             bz = bat_between(bz, self.m.axis(recs[i + 1][1], "bat", (0, 0, 1)), (tx - recs[i][0]) / (recs[i + 1][0] - recs[i][0]))
         sq = math.asin(max(-1.0, min(1.0, (bz[0] * self.nb[0] + bz[1] * self.nb[1]) / max(1e-9, math.hypot(bz[0], bz[1]) * math.hypot(self.nb[0], self.nb[1]))))) / B.D2R
-        r = [E.dot(d, self.ev) / MISS_UNIT, E.dot(d, self.el) / MISS_UNIT,
+        # miss_unit (body-motion 4.15, part 2; A RULE FOR A SEARCH'S EARLY STAGES, NOT THE AIM): the distance by which the
+        # sweet spot misses the ball's place that costs one unit of score. The aim's is MISS_UNIT (1 cm) and every result is
+        # judged by that. A search from a start that is not yet a swing may begin with it wider (10 cm, then 3), so that a
+        # fast pass near the ball scores better than a bat brought to the ball and stopped there (the parked basin, 4.12),
+        # and is then tightened to the aim's.
+        mu_ = self.o.get("miss_unit", MISS_UNIT)
+        r = [E.dot(d, self.ev) / mu_, E.dot(d, self.el) / mu_,
              E.dot(v, self.ev) * TIMING_ERR * share / MISS_UNIT, E.dot(v, self.el) * TIMING_ERR * share / MISS_UNIT,
              sq / SQUARE_UNIT,
              math.sqrt(SPEED_W * max(0.0, SPEED_ASK - vpar)),
-             E.dot(d, self.nb) / MISS_UNIT if (not came or self.o.get("contact") == "nearest") else 0.0]   # how far short along the line
+             E.dot(d, self.nb) / mu_ if (not came or self.o.get("contact") == "nearest") else 0.0]   # how far short along the line
         eff = self.effort(recs, tx, pl)
         r += [math.sqrt(self.effort_w * eff[n] / len(CH)) for n in CH]
         xo, least, zr = self.balance(recs, tx)

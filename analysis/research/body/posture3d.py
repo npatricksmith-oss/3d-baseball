@@ -141,18 +141,21 @@ def widened(pc, state, start_u, log, step=L.END_SIGMA):
     return st, list(start_u) + [u_meet]
 
 
-def run(rung, path, seed, tag, log, cap=L.END_CAP, square=False, leap=False, resume=None, block=500, extra=None, meet=False):
+def run(rung, path, seed, tag, log, cap=L.END_CAP, square=False, leap=False, resume=None, block=500, extra=None, meet=False, sigma0=L.END_SIGMA, stage=False):
     """the posture given to the search with the plan, as ONE search with its state kept (4.14, part 4; 4.15, part 0): after
     every `block` generations the result is read whole (so the bat's speed is known at each) and kept as
     <rung><tag>_g<generations>.json WITH THE SEARCH'S STATE, and the search goes on from that state exactly as if it had
     not stopped (ladder3d.carry's rule), to its end by 4.14's rule or to `cap`. resume: a kept result to go on from.
-    extra: further options of the body or the score (4.15)."""
+    extra: further options of the body or the score (4.15). path "hand:C": the plan written by hand (practice3d.hand_plan,
+    0.6 of every forward muscle; it owes no fit and no kept swing anything). sigma0: the first step of a search begun here.
+    stage: a resumed search whose score has been changed on purpose (a wider miss unit tightened: 4.15, part 2) begins a
+    new stage: its kept best is scored again and its end rule counts from here."""
     o = dict(L.options(rung), contact="nearest")
     if square:
         o["square"] = "contact"                           # the bat's squareness read at contact (4.14, part 3)
     o.update(extra or {})
-    d = json.load(open(path))
     pc = PostureCtx(o, meet=meet)
+    d = {"plan": {n: list(v) for n, v in PR.hand_plan(pc.base, 0.6).items()}} if path == "hand:C" else json.load(open(path))
     plan = {n: [min(v[0], pc.base.cap[n])] + list(v[1:]) for n, v in d["plan"].items()}
     u0 = pc.u_of(plan, d.get("options", {}).get("posture"), d.get("options", {}).get("meet", 0.0))
     state = None
@@ -165,9 +168,11 @@ def run(rung, path, seed, tag, log, cap=L.END_CAP, square=False, leap=False, res
         if len(state["m"]) != len(pc.free):
             state, u0 = widened(pc, state, u0, log)
             since = state["g"]
+        if stage:
+            since = state["g"]
     least = since + L.END_LEAST
     log("== the launch posture by practice (4.14, part 4): %s carried to its end on rung %s with the posture's %d numbers given to the search; body %s; first step %.3f; blocks of %d generations, each read and kept with the search's state; until the best score has fallen under %.2f over %d generations, not before generation %d (at most %d); seed %d%s"
-        % (os.path.basename(path), rung, len(NUMBERS), pc.o, L.END_SIGMA, block, L.END_FALL, L.END_WINDOW, least, cap, seed,
+        % (os.path.basename(path), rung, len(NUMBERS), pc.o, sigma0, block, L.END_FALL, L.END_WINDOW, least, cap, seed,
            " (RESUMED from %s at generation %d)" % (resume, state["g"]) if resume else ""))
     r0 = pc.residuals(u0)
     c0 = PR.cost_of(r0)
@@ -186,7 +191,7 @@ def run(rung, path, seed, tag, log, cap=L.END_CAP, square=False, leap=False, res
         target = min(cap, (g // block + 1) * block)
         keep = {}
         with multiprocessing.get_context("fork").Pool(PR.WORKERS) as pool:
-            u, cost, hist, mfull, sp = PR.cma(pc, u0, target, log, pool, seed, sigma0=L.END_SIGMA, stop=(L.END_WINDOW, L.END_FALL, least), leap=L.LEAP if leap else None, state=state, keep=keep)
+            u, cost, hist, mfull, sp = PR.cma(pc, u0, target, log, pool, seed, sigma0=sigma0, stop=(L.END_WINDOW, L.END_FALL, least), leap=L.LEAP if leap else None, state=state, keep=keep)
         state, g = keep, hist[-1][0]
         at_end = g < target
         fall = hist[max(0, len(hist) - 1 - L.END_WINDOW)][1] - hist[-1][1]
@@ -235,7 +240,8 @@ def main():
         return
     if "--from" in a:
         run(arg("--rung", "r4"), arg("--from", ""), int(arg("--seed", 22)), arg("--tag", "_posture"), log, cap=int(arg("--cap", L.END_CAP)), square="--square" in a, leap="--leap" in a, resume=arg("--resume", None),
-            block=int(arg("--block-gens", 500)), meet="--meet" in a)
+            block=int(arg("--block-gens", 500)), meet="--meet" in a, sigma0=float(arg("--sigma", L.END_SIGMA)), stage="--stage" in a,
+            extra={"miss_unit": float(arg("--miss-unit", 0))} if "--miss-unit" in a else None)
         return
     print(__doc__)
 
