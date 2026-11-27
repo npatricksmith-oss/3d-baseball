@@ -1,6 +1,7 @@
 """The launch posture set by practice with the plan (docs/body-motion.md 4.14, part 4; session 12).
 
     python3 analysis/research/body/posture3d.py --from <result.json> --rung r4 --seed 22 --tag _s2_posture   (job queue)
+    ... --resume <its result.json> --cap 4000        the same search gone on from its kept state
     python3 analysis/research/body/posture3d.py --margins <result.json>                                     a result's start: its numbers and margins
 
 The numbers of the start that are still [4]'s (body.POSTURE_NUMBERS less the three the feet's measurement gives) are
@@ -80,7 +81,7 @@ class PostureCtx:
         return r + margin_residuals(mg)
 
 
-def run(rung, path, seed, tag, log, cap=L.END_CAP, square=False, leap=False):
+def run(rung, path, seed, tag, log, cap=L.END_CAP, square=False, leap=False, resume=None):
     o = dict(L.options(rung), contact="nearest")
     if square:
         o["square"] = "contact"                           # the bat's squareness read at contact (4.14, part 3)
@@ -88,6 +89,11 @@ def run(rung, path, seed, tag, log, cap=L.END_CAP, square=False, leap=False):
     pc = PostureCtx(o)
     plan = {n: [min(v[0], pc.base.cap[n])] + list(v[1:]) for n, v in d["plan"].items()}
     u0 = pc.u_of(plan, d.get("options", {}).get("posture"))
+    state = None
+    if resume:
+        # the same search gone on from its kept state (practice3d.cma): the result's file holds it and the numbers it started from
+        dres = json.load(open(resume))
+        state, u0 = dres["state"], list(dres["start_u"])
     log("== the launch posture by practice (4.14, part 4): %s carried to its end on rung %s with the posture's %d numbers given to the search; body %s; first step %.3f; until the best score has fallen under %.2f over %d generations, %d at least (at most %d); seed %d"
         % (os.path.basename(path), rung, len(NUMBERS), pc.o, L.END_SIGMA, L.END_FALL, L.END_WINDOW, L.END_LEAST, cap, seed))
     r0 = pc.residuals(u0)
@@ -99,7 +105,8 @@ def run(rung, path, seed, tag, log, cap=L.END_CAP, square=False, leap=False):
     t = time.time()
     PR._CTX = pc
     with multiprocessing.get_context("fork").Pool(PR.WORKERS) as pool:
-        u, cost, hist, mfull, sp = PR.cma(pc, u0, cap, log, pool, seed, sigma0=L.END_SIGMA, stop=(L.END_WINDOW, L.END_FALL, L.END_LEAST), leap=L.LEAP if leap else None)
+        keep = {}
+        u, cost, hist, mfull, sp = PR.cma(pc, u0, cap, log, pool, seed, sigma0=L.END_SIGMA, stop=(L.END_WINDOW, L.END_FALL, L.END_LEAST), leap=L.LEAP if leap else None, state=state, keep=keep)
     gens = hist[-1][0]
     fall = hist[max(0, len(hist) - 1 - L.END_WINDOW)][1] - hist[-1][1]
     at_end = fall < L.END_FALL
@@ -116,7 +123,7 @@ def run(rung, path, seed, tag, log, cap=L.END_CAP, square=False, leap=False):
     out = L.show(ctx, up, log)
     out.update(cost=cost, plan_cost=PR.cost_of(ctx.residuals(up)), rung=rung, start=path, seed=seed, history=[("the posture with the plan, carried to its end", hist)],
                settled=at_end, at_end=at_end, fall_last_100=fall, generations=gens, first_better=first, start_cost=c0, start_speed=d.get("sweet_speed"),
-               posture=posture, margins=mg, margins_before=mg0, step_check=PR.verify(ctx, up, log), failed_differences=PR.failed_differences(ctx, up, log), seconds=time.time() - t)
+               posture=posture, margins=mg, margins_before=mg0, state=keep, start_u=list(u0), step_check=PR.verify(ctx, up, log), failed_differences=PR.failed_differences(ctx, up, log), seconds=time.time() - t)
     os.makedirs(L.OUT, exist_ok=True)
     dest = os.path.join(L.OUT, "%s%s.json" % (rung, tag))
     json.dump(out, open(dest, "w"), indent=1)
@@ -139,7 +146,7 @@ def main():
         log("margins (deg inside the nearer end), the ten least: " + ", ".join("%s %.2f" % (k, v) for k, v in sorted(mg.items(), key=lambda kv: kv[1])[:10]))
         return
     if "--from" in a:
-        run(arg("--rung", "r4"), arg("--from", ""), int(arg("--seed", 22)), arg("--tag", "_posture"), log, cap=int(arg("--cap", L.END_CAP)), square="--square" in a, leap="--leap" in a)
+        run(arg("--rung", "r4"), arg("--from", ""), int(arg("--seed", 22)), arg("--tag", "_posture"), log, cap=int(arg("--cap", L.END_CAP)), square="--square" in a, leap="--leap" in a, resume=arg("--resume", None))
         return
     print(__doc__)
 
