@@ -2,10 +2,13 @@
 things the exporter did not make: the raw C3D markers read here directly, HitTrax's own measurement of where the ball was met,
 and the body model's de Leva legs.
 
+How to run it (from the repository root; numpy and the C3D reader come through uv, the system Python has neither):
+
     uv run --with numpy --with c3d python3 -m unittest analysis/research/body/test_real_swing.py
 
-Skipped when OpenBiomechanics' files are not on this machine (real_swing.py's docstring says how to fetch them; they are
-not in git). The file is parsed here by its own few lines and the lab-to-sim turn is written out again from the dataset's
+SKIPPED, not failed, when numpy or the c3d module is missing (plain `python3 -m unittest`) and when OpenBiomechanics' files
+are not on this machine (real_swing.py's docstring says how to fetch them; they are CC BY-NC-SA and never in git), which is
+everywhere but the machine that fetched them: a skip here says nothing about the mapping. The skip's reason is printed. The file is parsed here by its own few lines and the lab-to-sim turn is written out again from the dataset's
 README ("+x from home plate toward the pitcher's mound, +y toward the right-handed batter's box, +z up").
 """
 import math
@@ -14,14 +17,21 @@ import sys
 import tempfile
 import unittest
 
-import numpy as np
+import importlib.util
 
 HERE = os.path.dirname(os.path.abspath(__file__))
 sys.path.insert(0, HERE)
-import real_swing as RS   # noqa: E402  (only for where the data are and the swing's id: nothing it computes is trusted)
-
-SID = RS.DEFAULT_SWING
-HAVE = os.path.isdir(os.path.join(RS.OBP, "c3d")) and os.path.isfile(os.path.join(RS.OBP, "landmarks.csv"))
+# a missing module skips the tests (with the reason), it does not error
+MISSING = [m for m in ("numpy", "c3d") if importlib.util.find_spec(m) is None]
+if not MISSING:
+    import numpy as np
+    import real_swing as RS   # noqa: E402  (only for where the data are and the swing's id: nothing it computes is trusted)
+    SID = RS.DEFAULT_SWING
+    HAVE = os.path.isdir(os.path.join(RS.OBP, "c3d")) and os.path.isfile(os.path.join(RS.OBP, "landmarks.csv"))
+    WHY = "needs OpenBiomechanics' hitting C3D and landmarks under %s (real_swing.py's docstring)" % RS.OBP
+else:
+    HAVE = False
+    WHY = "needs %s: run it with uv run --with numpy --with c3d python3 -m unittest %s" % (" and ".join(MISSING), os.path.relpath(__file__))
 
 
 def parse(path):
@@ -38,7 +48,7 @@ def parse(path):
     return head, np.array(rows)
 
 
-@unittest.skipUnless(HAVE, "needs OpenBiomechanics' hitting C3D and landmarks under %s (real_swing.py's docstring)" % RS.OBP)
+@unittest.skipUnless(HAVE, WHY)
 class RealSwingFile(unittest.TestCase):
     @classmethod
     def setUpClass(cls):
