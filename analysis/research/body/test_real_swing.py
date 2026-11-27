@@ -125,6 +125,64 @@ class RealSwingFile(unittest.TestCase):
             ref = self.sim(np.stack([self.lm[k + "_x"], self.lm[k + "_y"], self.lm[k + "_z"]], axis=1))
             self.assertLess(np.linalg.norm(self.J("shoulder_" + sd) - ref, axis=1).max(), 0.025)
 
+    def B(self, n):
+        """a body's place and its x, y, z axes (rows are samples) from the file's quaternion (w, x, y, z)."""
+        k = 1 + 7 * self.bodies.index(n)
+        w, a, b, c = self.rows[:, k + 3:k + 7].T
+        x = np.stack([1 - 2 * (b * b + c * c), 2 * (a * b + w * c), 2 * (a * c - w * b)], axis=1)
+        y = np.stack([2 * (a * b - w * c), 1 - 2 * (a * a + c * c), 2 * (b * c + w * a)], axis=1)
+        z = np.stack([2 * (a * c + w * b), 2 * (b * c - w * a), 1 - 2 * (a * a + b * b)], axis=1)
+        return self.rows[:, k:k + 3], x, y, z
+
+    def pelvis_markers(self):
+        """his pelvis from its four raw markers: the mid-ASIS point, forward, left and up (unit), the ASIS width."""
+        u = lambda v: v / np.linalg.norm(v, axis=1, keepdims=True)
+        la, ra, lp, rp = (self.sim(self.mk[k]) for k in ("LASI", "RASI", "LPSI", "RPSI"))
+        o = (la + ra) / 2
+        left = u(la - ra)
+        back = o - (lp + rp) / 2
+        fwd = u(back - left * np.sum(back * left, axis=1)[:, None])
+        return o, fwd, left, np.cross(fwd, left), np.linalg.norm(la - ra, axis=1)[:, None]
+
+    def test_hips_against_the_raw_pelvis_markers(self):
+        # the exporter puts the hip centres by Harrington 2007's regression; here they are held against ANOTHER published one,
+        # Bell, Pedersen & Brand 1990 (from the mid-ASIS point: 19 % of the ASIS width back, 30 % down, 36 % out), built here
+        # from the raw ASIS and PSIS markers: within 25 mm (the two regressions differ by 1-2 cm in adults; 12.5 mm here)
+        o, fwd, left, up, pw = self.pelvis_markers()
+        for sd, sg in (("L", 1.0), ("R", -1.0)):
+            bell = o + fwd * (-0.19 * pw) + up * (-0.30 * pw) + left * (sg * 0.36 * pw)
+            d = np.linalg.norm(self.J("hip_" + sd) - bell, axis=1)
+            self.assertLess(d.max(), 0.025, "hip_%s %.1f mm from Bell's" % (sd, 1e3 * d.max()))
+            # and carried by the pelvis: in the raw markers' own frame each hip moves less than 10 mm over the whole swing
+            # (what it does move is the ASIS width the regression scales with, which the skin changes by 5 %)
+            rel = self.J("hip_" + sd) - o
+            loc = np.stack([np.sum(rel * fwd, 1), np.sum(rel * left, 1), np.sum(rel * up, 1)], axis=1)
+            self.assertLess(np.ptp(loc, axis=0).max(), 0.010, "hip_%s wanders in the pelvis" % sd)
+            self.assertGreater(sg * loc[:, 1].min(), 0.05)                     # on its own side, out from the middle
+
+    def test_head_against_its_raw_markers_and_the_ball(self):
+        # the file's head turn is its four raw markers' frame (built here) turned by one fixed offset, the headband's on his
+        # head: so the angle between the file's face line and the markers' front-minus-back line never changes (0.1 deg) ...
+        u = lambda v: v / np.linalg.norm(v, axis=1, keepdims=True)
+        lf, rf, lb, rb = (self.sim(self.mk[k]) for k in ("LFHD", "RFHD", "LBHD", "RBHD"))
+        _, hx, _, hz = self.B("head")
+        ang = np.degrees(np.arccos(np.clip(np.sum(hx * u((lf + rf) - (lb + rb)), axis=1), -1, 1)))
+        self.assertLess(np.ptp(ang), 0.1)
+        # ... and what the offset makes of it is checked against things it was not built from: in the stance his face is
+        # level (within 5 deg) and turned from the plate toward the pitcher (30-90 deg from +X); and from 50 ms before
+        # contact his face points within 20 deg of the line from his head to where the ball is met (16.6 deg at -50 ms,
+        # 10.4 at contact): the ball's place comes from the bat's markers and HitTrax, not from his head
+        stance = self.t < -1.0
+        yaw = np.degrees(np.arctan2(hx[stance, 1], hx[stance, 0]))
+        pitch = np.degrees(np.arcsin(np.clip(hx[stance, 2], -1, 1)))
+        self.assertLess(np.abs(pitch).max(), 5.0)
+        self.assertTrue(30.0 < yaw.min() and yaw.max() < 90.0, (yaw.min(), yaw.max()))
+        ic = int(np.argmin(np.abs(self.t)))
+        centre = (lf + rf + lb + rb) / 4
+        for i in range(ic - 18, ic + 1):                                       # -50 ms to contact, every sample
+            g = self.rows[ic, -3:] - centre[i]
+            self.assertLess(math.degrees(math.acos(min(1.0, float(hx[i] @ g / np.linalg.norm(g))))), 20.0, "at %+.0f ms" % (1e3 * self.t[i]))
+
     def test_scale_is_the_model_leg(self):
         sys.path.insert(0, os.path.join(HERE, "..", "..", "oracle"))
         import common as C
