@@ -249,4 +249,13 @@ All scripts and outputs are in `sim/target/review-probes/s12/`. The probe was bu
 
 ## Resolution
 
-Open.
+Resolved 2026-11-27 (Coordinator). Fixes by a Sonnet worker that ran no search (`16bdf87`, `e4d28c2` on `work/body-3d`, after merging main); merged as `e6ee5ef`. No second review: the fixes are wording taken from this review's own figures and one test.
+
+- **P2-1: fixed in the account; the runs deferred to session 13, first item.** The posture's worth is stated as 0 to 3.1 m/s, with each protocol's own pair beside it; 26.25 m/s stands as the fastest swing found. Both posture searches run to their ends are session 13's item 0.
+- **P2-2, P3-1, P3-2, P3-3, P3-6: fixed** in §4.14, the status section, §4.4 and §13 (the tables, the margins, the reworded sentences, the five figures the every-step reading touches).
+- **P3-5: fixed.** A test that the score's squareness at a kept result is the bat's angle at contact from a fine-step run. `through_charge`'s and the margins' weaker tests are left as they are.
+- **P3-4: nothing to fix.** Wannop's chapter 4 was not opened by the reviewer; its figures enter nothing in the body.
+- **Not settled by this review, carried to session 13:** what charging the load on a joint's end (D39's second half) costs this swing; it needs a search.
+- **Q64:** answered by the owner the same day (PLAN D44); the account's lines are brought up to it.
+
+Checks run by the Coordinator from `main` after the merge (job 532): 94 body tests, 112 oracle tests (8 expected failures), `built3d.py --check`, `probe3d.py --check` (worst 3.6e-11), `pelvis3d.py --check`, the swing exporter's 6 tests, `bin/check-docs.py`: all pass. Nothing under `sim/` changed.
