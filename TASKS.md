@@ -1,6 +1,6 @@
 # Task List
 
-**Last updated:** 2026-11-27 (body-motion session 12 running).
+**Last updated:** 2026-11-27 (swing-flow running).
 
 What is next and what is open. Other files hold the rest:
 
@@ -21,9 +21,9 @@ Status: `[ ]` not started · `[~]` partly done · `[?]` needs an owner decision
 
 **Sessions 8–12 are merged** (spec §4.10–§4.14): 26.25 m/s (58.7 mph; the gate asks 29). **D42:** on while each session gains honest bat speed. Session 12 gained.
 
-**Owner, 2026-11-27: not a baseball swing; searches cancelled** until he rules: Q66 (s13 review), Q67.
+**Owner, 2026-11-27 (D45): not a baseball swing; searches cancelled. "Just watch a real batter's swing and mimic it":** the motion first, forces later.
 
-**Running:** nothing. Sessions 8–13 merged; session 13 is the look at the swing (spec §4.15) and its review. **The swing in the viewer (D43):** `bin/body-swing.sh`, player-visuals §14. Deferred: its tests skip on main (no [4] curves here).
+**Running:** worker `swing-flow` (Opus, Workers tab, `.claude/worktrees/swing-research`, `work/swing-flow`, JOB.md there): one real hitter's recorded swing on the figure in the viewer (`bin/body-swing.sh`, player-visuals §14). Then a Sonnet review, merge, the owner looks; Q68 (D45) after.
 
 **Next:** §2: the ground-dive leftovers ([note](docs/calibration/2026-11-23-of-ground-dive.md) §9).
 
