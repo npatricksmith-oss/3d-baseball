@@ -2835,6 +2835,85 @@ Session 12 (2026-11-27) works under PLAN D42 as session 11 did: one change at a 
 - *H (the hips' ends out):* the hip joints turn further; the pelvis's turn in the world changes by under 10°, because the legs give way first.
 - *What the replays would show:* which of the three, changed alone, lets the same muscle bursts turn the pelvis; and, from the hold's torque against the load, whether the feet's spinning is the ground's fault or the swing's. *What they would not show:* what swing a search would find on a changed body (a plan tuned to spinning feet is replayed on feet that hold), nor any bat speed. Six swings from one start S and one launch state are also one family of swings: "every wide-base swing found so far" is not "every swing this body can make".
 
+#### Part 1 as run: the ground is not at fault; his feet carry too little, and a real cleat would mostly turn too (`pelvis3d.py`; `s12/pelvis_*.out`, `pelvisB_*.out`, `pelvis_table.md`)
+
+**Added before they were run, after the first replays of rung 4's kept swing:** three more replays, each one change. *W:* the sole's points further from the foot's line by 1.46 times, which puts the forefoot's twisting hold at the top of Brosnan's measured range (100.1 N·m at 1,190 N where the body stands at the least, 68.5); *M:* the grip at the top of the same paper's range (1.27 for 1.15); *W+M.* And **B: the front knee's extensor asked for all it has from 150 ms before contact** (one muscle of the plan changed; the body unchanged), with *B+F* and *B+W+M*: does a front leg that pushes load its foot, and does the foot then hold? Twelve swings were read where the design named six: the six, the two what-if swings with every muscle at 1.5 times, rung 5's two (the still start) and rung 2's two ([4]'s feet).
+
+**The checks of the readings** (`pelvis3d.py --check`, and `SessionTwelveChecks`): a worked body's turning momentum (3.5 kg·m²/s by hand); the ground's twist split in two on two worked cases; on rung 4's kept swing, unchanged and with both feet held, the ground's and holds' twist summed over the swing equals the change of the whole body's turning momentum about its centre of mass, read independently (31.67 against 31.64; 36.53 against 36.56 kg·m²/s); the kept swing replays at its stored 21.11 m/s; with both feet held the compiled engine and the Python one agree over 40 ms to 9 × 10⁻¹⁴.
+
+**What each change does to the pelvis's turn** (degrees turned toward the pitcher from the start to the instant the unchanged swing meets the ball, and its fastest turning; replays, indicative):
+
+| Swing | unchanged | front foot held | rear held | both held | hips' ends out | both held, ends out | ground damped × 4 | softer ground | half launch speed | grip at the top of its range |
+| :-- | --: | --: | --: | --: | --: | --: | --: | --: | --: | --: |
+| rung 4, kept (seeds 2, 12) | +11° (189°/s) | +29° (302) | +18° (256) | +30° (267) | +17° (202) | +31° (267) | +15° (214) | +13° (192) | +12° (181) | +11° (183) |
+| rung 4 (seeds 1, 11) | +4° (207) | +21° (307) | +10° (261) | +22° (307) | +6° (207) | +22° (307) | +4° (213) | +5° (191) | +10° (238) | +6° (207) |
+| rung 3 (1, 11) | −1° (199) | +28° (310) | +7° (326) | +28° (312) | −0° (180) | +22° (357) | −3° (200) | −1° (213) | −4° (166) | +0° (177) |
+| rung 3 (2, 12) | +16° (226) | +24° (284) | +19° (292) | +26° (269) | +13° (223) | +25° (270) | +16° (225) | +18° (244) | +10° (206) | +15° (216) |
+| A: major leaguers' feet, the old ball (1, 11) | +21° (258) | +43° (327) | +27° (295) | +38° (327) | +29° (302) | +41° (330) | +19° (259) | +21° (274) | +34° (330) | +24° (292) |
+| A (2, 12) | +29° (223) | +41° (293) | +34° (301) | +42° (330) | +32° (272) | +40° (327) | +29° (234) | +31° (257) | +26° (202) | +30° (247) |
+| what-if, every muscle 1.5 times (1, 11) | −0° (210) | +16° (358) | +8° (241) | +18° (359) | +0° (217) | +19° (359) | −4° (212) | +0° (235) | −1° (137) | +3° (237) |
+| the same (2, 12) | −5° (171) | +8° (287) | +3° (295) | +11° (300) | −8° (206) | +11° (300) | −4° (195) | −3° (190) | −6° (132) | −1° (179) |
+| rung 5, the still start (1, 11) | +39° (305) | +36° (301) | +46° (305) | +36° (301) | +28° (305) | +47° (337) | +38° (307) | +33° (300) | +27° (322) | +39° (299) |
+| the same (2, 12) | +26° (288) | +32° (259) | +35° (308) | +32° (279) | +13° (256) | +54° (397) | +26° (280) | +29° (251) | +30° (335) | +36° (297) |
+
+(Rung 2's two swings on [4]'s feet were read too: one of the two fails with both feet held, the other's front foot is off the ground when held; they are in `pelvis_table.md` and are not used.)
+
+- **The ground's own numbers do nothing.** Four times the damping, a quarter of the stiffness, and the grip and the sole's width at the top of what was measured each move the pelvis's turn by 4° or less in the eight wide-base swings on [4]'s launch state. The impacts are not what holds the pelvis, and neither is how hard this ground grips.
+- **The hips' ends do nothing.** With both ends 30° further out the hip joints turn further and the legs turn back further (the thighs 46° and 68° on rung 4's kept swing, where they turned 32° and 45°); the pelvis's turn changes by −3° to +8°. The legs give way first, as expected.
+- **Half of [4]'s launch velocities: nothing that can be read** (−6° to +13°, both signs).
+- **A front foot that cannot turn lets the pelvis turn 8° to 29° further** with the same muscle bursts (the rear foot held: 3° to 8°; both: about what the front alone gives), and its fastest turning goes from 171–258°/s to 284–358°/s. **So the front foot's turning is what the pelvis's turn goes into, as far as it goes: and with feet that cannot turn at all the pelvis still turns only 11° to 42° at half a hitter's speed** (555–855°/s). The feet are not the whole of it.
+- **Against what I expected:** right that the ground's numbers and the hips' ends do little and that the held feet let the pelvis turn further, though by less than I wrote (11–42° where I expected 40–70°). **Wrong about the twist account, and it matters.** I expected the ground to give the body little turning momentum, the legs turning back against the upper body "as a man does in the air". The readings:
+
+| Swing (the eight on the wide base, [4]'s launch state) | The feet's loads, mean of the last 100 ms (front; rear, of his weight) | The feet's turn (front; rear) | The ground's twist on him, mean of the last 100 ms: by the feet's level forces; by the feet's own twisting grip | His turning momentum at contact: upper body; legs; what the ground gave from the start |
+| :-- | :-- | :-- | :-- | :-- |
+| rung 4, kept | 0.45; 0.29 | −48°; −42° | +221; +14 N·m | +29.0; +2.7; 31.7 kg·m²/s |
+| rung 4 (1, 11) | 0.27; 0.32 | −37°; −47° | +176; +8 | +27.8; −0.1; 27.8 |
+| rung 3 (1, 11) | 0.35; 0.39 | −53°; −44° | +205; +7 | +27.3; −0.0; 27.4 |
+| rung 3 (2, 12) | 0.51; 0.31 | −30°; −23° | +224; +21 | +30.1; +3.7; 33.8 |
+| A (1, 11) | 0.24; 0.42 | −33°; −20° | +146; −0 | +29.1; +2.0; 31.2 |
+| A (2, 12) | 0.46; 0.40 | −24°; −13° | +162; −13 | +29.5; +2.5; 31.9 |
+| every muscle 1.5 times (1, 11) | 0.40; 0.43 | −38°; −45° | +136; +1 | +26.7; −1.1; 25.7 |
+| the same (2, 12) | 0.59; 0.35 | −39°; −40° | +165; +1 | +27.3; +0.5; 27.7 |
+
+  - **All of his upper body's turning momentum comes from the ground, and nearly all of that from the feet's level forces** (one foot pushing the dirt toward the plate and the other away, a metre apart): 136–224 N·m over the last 100 ms, against −13 to +21 N·m from the feet's own twisting grip. That is how measured hitters turn too (Ae 2017: the two legs' sideways forces make the whole-body moment; golf's per-foot twist is "negligible"; [note 12](research/body/12-trunk-bending-and-feet.md) D4). The legs' own turning momentum is about nothing: they turn back in heading without carrying momentum the other way.
+  - **So his feet are already at the edge of their grip making the level forces that turn him, on 0.24–0.59 of his weight (front) and 0.29–0.43 (rear).** A foot sliding at the edge of its grip has no twisting hold left over: every sole point's friction is one budget, in this model and under a real stud alike. The rear foot is on one point for 24–89 of the last 100 ms; the front foot is on two or more for all but 0–57 ms and turns as far.
+- **Would a real cleat have held? Mostly not, at these loads.** With both feet held, on those eight swings:
+  - the front foot's hold carries 24–52 N·m on average over the last 150 ms, where a baseball shoe's measured twisting hold on basepath dirt, at the loads that foot carries then, averages 23–36 N·m (0.084 m times the load, the top of Brosnan's range); at its largest the hold carries 85–116 N·m with 0.05–0.76 of his weight on the foot, where a cleat holds 3–58; **it asks more than a cleat's measured hold 31–81% of the time.** The rear foot's: 15–30 N·m against 21–48, over it 22–66% of the time.
+  - *What the measurements cover:* the model's law (0.0575 m times the load on the forefoot) agrees with every figure read for a studded shoe turning under load between 441 and 1,321 N: 25 N·m at 441 N against Goodall's 24 on basepath dirt and Lambson's 21–31 on grass; 45 at 787 N against Serensits's 47.5 on turf; 68.4 at 1,190 N against Brosnan's 68.5–100.1. **Nothing is measured below 441 N (0.49 of his weight), which is where his feet are in these swings,** nor in a batter's box; the grip at the top of the measured range changes nothing here (the last column above).
+- **A front leg that pushes does load its foot, and the ground then gives him a quarter to a half more turning momentum** (replay B: one muscle of the plan changed, the body unchanged):
+
+| Swing | Unchanged: the front foot's load (mean of the last 100 ms); front knee at contact; the pelvis's turn; what the ground gave him | The front leg pushing: the same four | Then: the front foot's turn; the bat | The same with the front foot held: the hold's mean; a cleat's measured hold at its loads; of the time over it |
+| :-- | :-- | :-- | :-- | :-- |
+| rung 4, kept | 0.45; 41°; +11°; 31.7 kg·m²/s | 0.81; 20°; +19°; 40.3 | −45°; 0.6 cm off at 21.34 m/s (unchanged 21.11) | 46; 45 N·m; 57% |
+| rung 4 (1, 11) | 0.27; 61°; +4°; 27.8 | 0.60; 14°; +11°; 34.9 | −52°; 0.2 cm at 21.30 (20.89) | 45; 42 N·m; 55% |
+| rung 3 (1, 11) | 0.35; 58°; −1°; 27.4 | 0.85; 20°; +9°; 40.2 | −62°; 1.1 cm at 20.49 (20.66) | 35; 50 N·m; 35% |
+| rung 3 (2, 12) | 0.51; 50°; +16°; 33.8 | 0.93; 29°; +22°; 41.2 | −21°; 1.0 cm at 21.52 (21.53) | 27; 58 N·m; 25% |
+| A (1, 11) | 0.24; 47°; +21°; 31.2 | 0.44; 3°; +24°; 34.4 | −45°; 0.6 cm at 21.07 (21.83) | 24; 41 N·m; 29% |
+| A (2, 12) | 0.46; 42°; +29°; 31.9 | 0.77; 12°; +35°; 37.0 | −29°; 0.3 cm at 21.48 (21.15) | 27; 51 N·m; 38% |
+| every muscle 1.5 times (1, 11) | 0.40; 58°; −0°; 25.7 | 0.82; 1°; +14°; 38.8 | −44°; 1.5 cm at 23.61 (22.08) | 54; 48 N·m; 55% |
+| the same (2, 12) | 0.59; 52°; −5°; 27.7 | 0.91; 3°; +9°; 43.2 | −24°; 1.5 cm at 22.90 (22.16) | 34; 53 N·m; 46% |
+
+  - With that one muscle pushing, the front foot carries 0.44–0.93 of his weight over the last 100 ms (it carried 0.24–0.59), the front knee is 1–29° bent at contact (it was 41–61°; the gate asks 2–26°), the ground gives him 34–43 kg·m²/s of turning momentum (26–34), the pelvis turns 3–14° further, **and the bat still passes within 1.5 cm of the ball at about the speed it had** (six within 0.8 m/s of unchanged; the two what-if swings 0.7 and 1.5 faster). The front foot still turns 21–62°; on the grip at the top of its range it turns the same (19–63°).
+  - With the front foot held as well, the hold then asks 24–54 N·m on average where a cleat's measured hold at that foot's loads averages 41–58: **with his weight on it, a cleat holds about what is asked on average, and is over-asked 25–57% of the time.**
+- *What the replays do not show:* a bat speed (a plan tuned to one body is replayed on another); what swing a search would find with a front leg that pushes; anything below 441 N of load on a real cleat.
+
+**The answer to part 1's question, in plain terms.** *Is the feet's spinning what a real foot in cleats would do under that load, or a fault of the model's ground contact?* **As far as replays show, it is what a real foot would do under that load, and the load is what is wrong.** In every swing the search has found on the wide base he has a quarter to six tenths of his weight on his front foot through the last tenth of a second and 4–33% of it at contact, where measured hitters have 84% at contact and 123–130% at its most (Welch 1995; [4]). Feet that light are sliding at the edge of their grip just from the sideways push that turns him, and no shoe measured holds a twist on top of that at such loads. Each suspect in turn:
+
+- *one point of a heel holding no twist:* true of the model (the rear foot is on one point 24–89 of the last 100 ms), and not what matters: holding the rear foot outright is worth 3–8° of pelvis turn, and a real heel's studs sit 2–3 cm from their middle and would hold a few N·m at these loads;
+- *Coulomb twist grip that falls with load where measured cleats hold more at light loads:* the model's law agrees with every measurement read from 441 N up, the surplus at light loads is in turf data (studs through a thatch) and not in the two dirt figures, and nothing is measured at his loads. The grip at the top of its measured range changes nothing. Unknown below 441 N, and said so [E: not built];
+- *contact stiffness and damping:* nothing;
+- *a start that drops [4]'s launch velocities onto a base 26 cm wider:* not shown to be the cause. Half the launch velocity changes nothing that can be read, and on rung 5's still start, where nothing is dropped, the front foot is *off the ground* through the last 100 ms in both swings. What every launch state tried has in common is the search's swing.
+- **So the fault, as far as part 1 can say, is in the swing the search finds: his front leg does not push and his weight is never on his front foot.** The body can do it: one muscle of the plan, changed by hand, puts 0.44–0.93 of his weight on the front foot, straightens the front knee into the gate's band and raises what the ground gives him by a quarter to a half, with the bat still on the ball. The search has not found that, and nothing in its score asks for it: the replay's bat is no faster, so a search that climbs on bat speed alone has no slope toward it.
+
+#### Part 2: no fix is made to the ground (the reasons; written after part 1, before anything else was run)
+
+Part 1 finds no fault in the ground contact that a measurement could correct, so **nothing is built in §4.5/§4.11 and neither engine is changed:**
+
+- *The sole's contact as an area, the heel's studs:* built as a what-if (W: the sole's points 1.46 times further out), it changes nothing in the replays; not adopted.
+- *A cleat's hold at light loads:* no measurement below 441 N was read, on dirt or anywhere. The stated range for the twisting hold is the measured one, 0.0575–0.084 m times the load (Brosnan's least and largest), with the grip 1.04–1.27; the body stands at the low end of the first and the middle of the second. **How much hangs on it** is measured by a search at the top end (the ladder's row "grip at the top of its range", queued behind part 3's runs since the replays expect nothing of it); the low end is where the body is.
+- *The launch state:* not shown at fault (above). What part 1 points at is a front leg that pushes, which is a matter of the plan and of the posture he launches from. **That goes to parts 3 and 4:** a search that can find the swing with the front leg pushing (part 3: a second start made from the kept plan with that one muscle changed, among the several starts), and the launch posture set by practice (part 4).
+- **Nothing is added to make him fast:** no grip above what was measured, no stop moved, no hold on a foot. The held feet, the moved hip ends, the wider sole and the stronger grip exist only as replays in `pelvis3d.py`.
+
 ## 5. The drive and its control (§14.1 items 2 and 3)
 
 ### 5.1 What a drive is

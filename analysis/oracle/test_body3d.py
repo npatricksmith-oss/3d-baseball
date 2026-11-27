@@ -2612,6 +2612,116 @@ class ReviewElevenChecks(unittest.TestCase):
             self.assertAlmostEqual(o["front foot's turn (deg)"][0], 48.8141, delta=1e-3)
 
 
+class SessionTwelveChecks(unittest.TestCase):
+    """body-motion 4.14 (session 12): the readings of the diagnosis of what holds the pelvis (pelvis3d.py)."""
+
+    @staticmethod
+    def _pelvis():
+        _practice()
+        import importlib
+        return importlib.import_module("pelvis3d")
+
+    def test_a_bodys_turning_momentum_about_the_vertical_is_the_worked_one(self):
+        """pelvis3d.turning_momentum against a body worked by hand: 2 kg, moments of inertia 0.1, 0.2, 0.3 about its own
+        x, y, z, lying with its own z along the world's x (so its own x is along the world's -z, and the moment of
+        inertia about the vertical is its own x's, 0.1), turning at 5 rad/s about the vertical, its centre 0.5 m along x
+        from the reference point and moving at 3 m/s along y. Its travel's part is m r v = 2 x 0.5 x 3 = 3.0, its own
+        0.1 x 5 = 0.5: 3.5 kg m2/s. About a reference point moving with it at 3 m/s along y the travel's part is gone:
+        0.5. And turned a further 90 deg about the vertical the vertical moment of inertia is unchanged: 3.5 again."""
+        PV = self._pelvis()
+        s = E.System()
+        b = s.body("rod", 2.0, (0.1, 0.2, 0.3))
+        st = s.new_state()
+        q = E.qaxis((0, 1, 0), math.pi / 2)
+        s.set_body(st, b, (0.5, 0.0, 0.0), q, (0.0, 3.0, 0.0), (0.0, 0.0, 5.0))
+        self.assertAlmostEqual(PV.turning_momentum(s, st, [b], (0.0, 0.0, 0.0), (0.0, 0.0, 0.0)), 3.5, delta=1e-9)
+        self.assertAlmostEqual(PV.turning_momentum(s, st, [b], (0.0, 0.0, 0.0), (0.0, 3.0, 0.0)), 0.5, delta=1e-9)
+        s.set_body(st, b, (0.5, 0.0, 0.0), E.qmul(E.qaxis((0, 0, 1), math.pi / 2), q), (0.0, 3.0, 0.0), (0.0, 0.0, 5.0))
+        self.assertAlmostEqual(PV.turning_momentum(s, st, [b], (0.0, 0.0, 0.0), (0.0, 0.0, 0.0)), 3.5, delta=1e-9)
+
+    def test_the_grounds_twist_is_split_into_the_level_forces_lever_and_the_foots_own_twist(self):
+        """pelvis3d.ground_twist against two cases worked by hand. One foot's two sole points at (0.1, +0.05) and
+        (0.1, -0.05) m carry 100 N each, so its centre of pressure is (0.1, 0). (1) Level forces (0, +30) and (0, -10) N:
+        the net (0, 20) at the centre has the moment 0.1 x 20 = 2.0 N m about the vertical through the origin, and about
+        the foot's own centre the two forces have no lever: its own twist is 0. (2) Level forces (+30, 0) and (-10, 0):
+        the net (20, 0) at (0.1, 0) has no moment about the origin; about the centre the first has -(0.05)(30) = -1.5
+        and the second -(-0.05)(-10) = -0.5: the foot's own twist is -2.0. In both the two parts sum to the forces' whole
+        moment about the origin. (3) Loads of 300 and 100 N move the centre to y = +0.025; a point carrying nothing is
+        left out and counted as off the ground."""
+        PV = self._pelvis()
+
+        class M_:
+            pass
+        m = M_()
+        m.sys = E.System()
+        fb = m.sys.body("foot", 1.0, (1.0, 1.0, 1.0))
+        m.sys.contact("L_a", fb, (0.1, 0.05, 0.0), 1, 1, 1, 1, 1)
+        m.sys.contact("L_b", fb, (0.1, -0.05, 0.0), 1, 1, 1, 1, 1)
+        st = m.sys.new_state()
+        for fs, lever, own in ((((0.0, 30.0, 100.0), (0.0, -10.0, 100.0)), 2.0, 0.0), (((30.0, 0.0, 100.0), (-10.0, 0.0, 100.0)), 0.0, -2.0)):
+            g = PV.ground_twist(m, st, list(fs), (0.0, 0.0, 0.0))["L"]
+            self.assertAlmostEqual(g[0], 200.0, delta=1e-12)
+            self.assertAlmostEqual(g[1], lever, delta=1e-12)
+            self.assertAlmostEqual(g[2], own, delta=1e-12)
+            whole = sum(p[0] * f[1] - p[1] * f[0] for p, f in zip(((0.1, 0.05), (0.1, -0.05)), fs))
+            self.assertAlmostEqual(g[1] + g[2], whole, delta=1e-12)
+            self.assertEqual(g[3], 2)
+        g = PV.ground_twist(m, st, [(30.0, 0.0, 300.0), (-10.0, 0.0, 100.0)], (0.0, 0.0, 0.0))["L"]
+        self.assertAlmostEqual(g[1], -(0.025) * 20.0, delta=1e-12)           # the net (20, 0) at (0.1, 0.025)
+        self.assertAlmostEqual(g[1] + g[2], -(0.05 * 30.0) - (-0.05 * -10.0), delta=1e-12)
+        g = PV.ground_twist(m, st, [(30.0, 0.0, 300.0), (0.0, 0.0, 0.0)], (0.0, 0.0, 0.0))["L"]
+        self.assertEqual(g[3], 1)
+        self.assertAlmostEqual(g[2], 0.0, delta=1e-12)                       # one point holds no twist about itself
+        self.assertEqual(PV.ground_twist(m, st, [(0.0, 0.0, 0.0), (0.0, 0.0, 0.0)], (0.0, 0.0, 0.0))["R"], (0.0, 0.0, 0.0, 0))
+
+    def test_what_the_ground_and_a_held_foot_give_is_the_change_of_the_bodys_turning_momentum(self):
+        """The two readings against each other, by a law neither is built from: gravity has no moment about the centre
+        of mass, so the whole body's turning momentum about the vertical through it changes only by the ground's twist
+        (the feet's level forces and their own twist) and by whatever holds a foot's heading. On rung 4's body with both
+        feet held (pelvis3d's replay FR) and its kept plan, 40 ms in the Python engine at the search's 0.25 ms step: the
+        twist summed over the time (by the trapezium rule) is the momentum's change to 1.2% of the twists' summed sizes
+        (0.7% at this step and half that at half the step: the rule's own error on the stiff contact forces). No part
+        can be left out: the holds' share alone is more than ten times that allowance, and so are the level forces' and
+        the feet's own twist. And the held feet do not turn (under 0.5 deg)."""
+        import json
+        import os
+        PV = self._pelvis()
+        PR = _practice()
+        d = json.load(open(os.path.join(os.path.dirname(os.path.abspath(PR.__file__)), "practice3d_s11_rung4.json")))
+        ctx, u = PV.build(d, "FR")
+        m, s = ctx.m, ctx.m.sys
+        st, aux = ctx.prepare(u)
+        aux = list(aux)
+        s.anchors(st, aux)
+        h, n = ctx.h, 160
+        bodies = list(range(s.nb))
+
+        def reading(t, x):
+            s.diag = {}
+            s.deriv(t, x, aux)
+            c, vc = B.com(m, x)
+            gt = PV.ground_twist(m, x, [s.diag["contact"][cd[0]] for cd in s.contacts], c)
+            parts = (sum(gt[sd][1] for sd in "LR"), sum(gt[sd][2] for sd in "LR"), sum(s.diag["stop"]["foothold_" + sd][0] for sd in "LR"))
+            s.diag = None
+            return parts, PV.turning_momentum(s, x, bodies, c, vc)
+        prev, H0 = reading(PR.T0, st)
+        given, size, x = [0.0, 0.0, 0.0], 0.0, list(st)
+        f0 = {sd: PV.heading(m, st, "foot_" + sd) for sd in "LR"}
+        for i in range(n):
+            x = s.step(PR.T0 + i * h, x, aux, h)
+            parts, H = reading(PR.T0 + (i + 1) * h, x)
+            for k in range(3):
+                given[k] += 0.5 * (parts[k] + prev[k]) * h
+                size += 0.5 * (abs(parts[k]) + abs(prev[k])) * h
+            prev = parts
+        allow = 0.012 * size
+        self.assertAlmostEqual(H - H0, sum(given), delta=allow)
+        for part in given:                                    # the level forces' lever, the feet's own twist, the holds
+            self.assertGreater(abs(part), 10.0 * allow)
+        for sd in "LR":
+            self.assertLess(abs(PV.wrap(PV.heading(m, x, "foot_" + sd) - f0[sd])), 0.5)
+
+
 class StanceChecks(unittest.TestCase):
     """body-motion 4.13, rungs 3 and 4: the start on major leaguers' feet; the hips' turn by their own muscles."""
 
