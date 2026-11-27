@@ -40,8 +40,12 @@ WORKERS = 4                                            # processes for the searc
 FALLBACK = False                                       # lm(): take the best single difference when no damped step is accepted (--fallback)
 # ---- the pitch (4.10): the game's average four-seam fastball where it is met (sim-cli pitch --type FF, 200 pitches)
 BALL_SPEED, BALL_DESCENT, BALL_ACROSS, BALL_FLIGHT, BALL_Z = 37.98, 5.27, 1.62, 0.403, 0.78
-MEET_ACROSS, MEET_AHEAD = 0.92, 0.72                   # m from the hips' midpoint at the start (PLAN D28, D29; AHEAD [E: 0.61-0.84])
+MEET_ACROSS, MEET_AHEAD = 0.92, 0.72                   # m from the pelvis at the start (PLAN D28, D29; AHEAD [E: 0.61-0.84])
 MEET_FROM_REAR_ANKLE = 1.022                           # m: Statcast's intercept is 102.2 +- 8.8 cm toward the pitcher from the rear ankle, level with the lead ankle (-0.4 +- 9.4 cm; note 15)
+# THE TWO RULES ARE NOT THE SAME PLACE (4.13, after the review of session 11, P1-1; the owner's Q64, open): on major
+# leaguers' feet (stance="mlb") the ball by MEET_FROM_REAR_ANKLE is 0.505 m ahead of the pelvis at the start, 21.5 cm nearer
+# him than MEET_AHEAD and outside its [E] range. Ctx options: "ahead" (from the pelvis, off the "mlb" stance) and
+# "meet_rear" (from the rear ankle, on it) set either rule on either stance's body; ladder3d's r3_oldball and r2_deepball.
 # ---- the aim's units (4.10) ----
 MISS_UNIT = 0.01              # m [E]
 TIMING_ERR = 0.007            # s: the measured spread of where hitters meet the ball, as a time (note 6)
@@ -222,7 +226,7 @@ class Ctx:
         if o.get("stance") == "mlb":
             # on major leaguers' feet the ball is met where they meet it relative to their feet: MEET_FROM_REAR_ANKLE
             # toward the pitcher from the rear ankle (which is level with the lead ankle, 4.13)
-            self.Pc = (self.Pc[0], m.joint_pos(st, "ankle_R")[1] + MEET_FROM_REAR_ANKLE * k, self.Pc[2])
+            self.Pc = (self.Pc[0], m.joint_pos(st, "ankle_R")[1] + o.get("meet_rear", MEET_FROM_REAR_ANKLE) * k, self.Pc[2])
         d, a = BALL_DESCENT * B.D2R, BALL_ACROSS * B.D2R
         self.nb = (math.cos(d) * math.sin(a), -math.cos(d) * math.cos(a), -math.sin(d))
         self.ev = E.unit(E.sub((0.0, 0.0, 1.0), E.scale(self.nb, self.nb[2])))    # up, square to the ball's line

@@ -79,6 +79,12 @@ RUNGS["r6_all15"] = dict(RUNGS[LAST], bound_scale={n: 1.5 for n in PR.CH})
 RUNGS["r6_all20"] = dict(RUNGS[LAST], bound_scale={n: 2.0 for n in PR.CH})
 RUNGS["r6_strongest"] = dict(RUNGS[LAST], bound_scale=dict(PR.STRONGEST))   # each bound at the top of its tested range in 4.5
 RUNGS["r6_ref"] = dict(RUNGS[LAST])
+# rung 3 was two changes (the review of session 11, P1-1): each alone, as the review ran them (its probe q1.py; results under
+# sim/target/review-probes/s11/). A: major leaguers' feet with the ball where it was relative to the pelvis (0.72 m ahead:
+# on that start the pelvis is 0.517 m ahead of the rear ankle). B: [4]'s feet with the ball where rung 3 puts it relative
+# to the pelvis (0.505 m ahead).
+RUNGS["r3_oldball"] = dict(RUNGS["r3"], meet_rear=0.517 + 0.72)
+RUNGS["r2_deepball"] = dict(RUNGS["r2"], ahead=0.505)
 
 
 def best_of(rung):
