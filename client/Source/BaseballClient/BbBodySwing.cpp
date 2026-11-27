@@ -735,11 +735,12 @@ int32 ABbBodySwing::Start(const FString& Path, UBbFigureShop* InShop, ABbPark* I
 	{
 		if (bStep)
 		{
-			// Every StepMs, from the model's first instant to 60 ms after contact, from three sides.
+			// Every StepMs, from the file's first instant to 60 ms after contact (a recorded swing: to its last
+			// sample, the end of the finish), from three sides.
 			ShotViews = 3;
 			ShotBefore = 0.6;
 			ShotAfter = 0.3;
-			const double LastMs = FMath::Min(60.0, 1e3 * File.T(File.Num() - 1));
+			const double LastMs = File.bRecorded ? 1e3 * File.T(File.Num() - 1) : FMath::Min(60.0, 1e3 * File.T(File.Num() - 1));
 			for (int32 K = (int32)FMath::CeilToDouble(1e3 * File.T(0) / StepMs - 1e-6); K * StepMs <= LastMs + 1e-6; ++K)
 			{
 				const int32 Ms = (int32)FMath::RoundToDouble(K * StepMs);
