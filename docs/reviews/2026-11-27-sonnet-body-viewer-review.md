@@ -87,4 +87,14 @@ All commands from the repository root of this worktree (`/home/natex/Projects/3D
 
 ## Resolution
 
-Open.
+Resolved 2026-11-27 (Coordinator). Fixes by the worker that built it (commits `648eb02`, `6d7cb33`, `506af0c`, `01bb149`); no second review, since the fixes are small and the check now tests itself. The Coordinator ran everything below from `main` after the merge (`07856f0`).
+
+- **P2-1, P2-2: fixed.** `bin/body-swing.sh` exports every time, into `swings/<checkout>/<plan>.swing`.
+- **P2-3: fixed.** The check maps the sim frame to Unreal's on its own, reads every drawn segment's forward axis and the bat's roll against the file's turns (limit 3°) and tests handedness. On rung 4 and on session 12's posture swing: places within 4.2 mm, turns within 1.5°, handedness right.
+- **P2-4: fixed.** `-BbBodySwingCheckFault=mirror|twist|nostretch`; each exits 1 (run by the Coordinator).
+- **P3-1, P3-5: fixed.** The limit is 6 mm; millimetres throughout.
+- **P3-2, P3-3, P3-4: fixed** (messages; an uncommitted kept plan ranks first; the ball test takes the pitch from the practice search).
+- **Found at the merge, deferred (TASKS.md):** the exporter's tests skip on a checkout without [4]'s curves, which the main checkout is; they pass with `BB_FORT_CSV` pointed at a worktree's copy (6 tests). The test should find the curves as the exporter does.
+- **Not done by anyone:** the keys and the mouse orbit tried by hand (no display in a worker's session); the owner's first run is that test.
+
+Checks from `main`: the exporter's tests (6, with the curves); the viewer's check on both swings; the three faults; `-BbSavedPlayCheck` (39 cases); `-BbShots=6` and the swing's picture set, two pictures read; `bin/check-docs.py`.

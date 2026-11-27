@@ -145,4 +145,4 @@ Watch any of them again with `client/run.sh -BbSavedPlay="saved-plays/<file>.tom
 
 # The force-driven body, 2026-11-27
 
-- [~] I would like to implement the force driven body into today's game so I can have a proper look. *Started 2026-11-27 (Q65: the viewer draws the practised swing; games keep today's swing). Left: the viewer itself, being built.*
+- [x] I would like to implement the force driven body into today's game so I can have a proper look. *Done 2026-11-27 (Q65): `bin/body-swing.sh` plays the body's practised swing in the viewer, as the model computed it; add `--tree .claude/worktrees/swing-research` for the newest unmerged one. Games keep today's swing. The keys have not been tried by hand.*
