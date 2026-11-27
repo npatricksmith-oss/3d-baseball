@@ -3727,7 +3727,7 @@ The recording has 1.6 s of stance, leg lift and stride before contact. The model
 | The same within 25 ms of contact (40 ms for the arms) | **no** | The dataset's 20 Hz filter runs through the impact and spreads it backward and forward (D35; note 10's windows); its contact instant is "an exploratory estimate" |
 | The bat's raw markers (the C3D, unfiltered) up to contact | **yes** | Measured, not smoothed; the bat's path into the ball |
 | The bat's speed as the dataset gives it (72.5 mph), or by differencing (78.9) | **no; a check** | Two processings of one path disagree by 9%; the ball's exit speed by the game's collision against HitTrax's 101.5 mph checks the bat's speed and squareness together, with no smoothing in it |
-| The force plates | **no; a check** | Forces measured (40 Hz), agreeing with his motion within 0.03–0.12 body weights before the swing; no centre of pressure or twisting moment (the probe) |
+| The force plates | **no; a check** | Forces measured (40 Hz), agreeing with his motion within 0.02–0.06 body weights before the swing once their sideways force is turned over (P1-1: read as the markers are turned it has the wrong sign); no centre of pressure or twisting moment (the probe) |
 | Where he meets the ball (0.42 m in front of the plate) and the ball's speed (61 mph) | **no** for the game; **yes** for this practice (it is the pitch he hit) | A machine pitch; big leaguers meet the average fastball about 0.35 m deeper. Its flight time is a fastball's (the probes above) |
 | His muscles | — | Nothing recorded (no EMG). Which muscles do the work is the model's result, with effort counted (D36) |
 | His head's turn on his neck | **no** | The model has no neck; the head rides on the trunk |
