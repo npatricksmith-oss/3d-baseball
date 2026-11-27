@@ -159,6 +159,44 @@ def energy(ctx, u):
     return out
 
 
+SIZE_ONLY = "ON SIZE ONLY"       # the mark, in a row's margin, of a pass that the row's own reading qualifies
+EARLY_SHARE = 0.5                # [E] a front foot's peak load in this share of launch-to-contact is called early (below)
+
+
+def front_foot_row(out):
+    """the gate's row for the front foot's greatest load (body-motion 13: 1.5-2.6 x body weight, the size alone), read
+    with WHEN the peak falls and what the feet carry at contact (4.13, after the review of session 11, P2-2). A hitter's
+    front leg is loaded into contact; a start that drops the body onto the front leg makes a peak of the same size
+    just after launch with the foot nearly empty at contact, and the size cannot tell the two apart. So the row says
+    the peak's time before contact and after the start, the front foot's and both feet's load at contact, and a peak
+    in the first EARLY_SHARE of the time from launch to contact is marked as passing ON SIZE ONLY: the gate's band is
+    not changed (the owner's, D40) and the mark is mine, a reading and not a measurement of when hitters peak.
+    Needs out["lead_foot_peak"] (x body weight, ms from contact), ["feet_at_contact"] (front, rear) and
+    ["start_to_contact_ms"]."""
+    pk, t_pk = out["lead_foot_peak"]
+    front, rear = out["feet_at_contact"]
+    T = out.get("start_to_contact_ms")
+    lo, hi = 1.5, 2.6
+    ok = lo <= pk <= hi
+    mg = ("inside by %.2f" % min(pk - lo, hi - pk)) if ok else ("short by %.2f" % (lo - pk) if pk < lo else "over by %.2f" % (pk - hi))
+    mg += " x body weight"
+    has = "%.2f x body weight %.0f ms before contact" % (pk, -t_pk)
+    early = False
+    if T:
+        after = T + t_pk
+        early = after < EARLY_SHARE * T
+        has += " (%.0f ms after the start, of %.0f)" % (after, T)
+    has += "; at contact the front foot %.2f, both feet %.2f" % (front, front + rear)
+    if ok and early:
+        mg += "; %s: the peak is in the first half of the swing, an early spike" % SIZE_ONLY
+    return ("the front foot's greatest load", has, "%.2f to %.2f" % (lo, hi), mg, ok)
+
+
+def passed(rows):
+    """(rows passed outright, rows passed only as their own reading qualifies, rows failed), as lists of names."""
+    return ([r[0] for r in rows if r[4] and SIZE_ONLY not in r[3]], [r[0] for r in rows if r[4] and SIZE_ONLY in r[3]], [r[0] for r in rows if not r[4]])
+
+
 def gate(out):
     """the gate's rows (body-motion 13, PLAN D40) for a report: (check, what the swing has, the gate's figure, margin as
     text, passes?). The margin is how far outside (or inside) the gate's own test the figure lies."""
@@ -186,7 +224,7 @@ def gate(out):
                      "%+.0f ms" % (out["clock_ms"] - allowed), out["clock_ms"] <= allowed + 0.5))
     band("the hands' first motion before contact", -out["bat_first_motion_ms"], 130.0, 220.0, "ms", "%.0f")
     band("the lead knee at contact", out["lead_knee"][2], 2.0, 26.0, "deg", "%.0f")
-    band("the front foot's greatest load", out["lead_foot_peak"][0], 1.5, 2.6, "x body weight", "%.2f")
+    rows.append(front_foot_row(out))
     xo, least, zr = out["balance"]
     rows.append(("in balance", "%.1f cm outside" % xo, "0", "%+.1f cm" % xo, xo <= 0.05))
     rows.append(("does not jump", "feet never under %.2f of his weight" % least, "0.10", "%+.2f" % (least - 0.10), least >= 0.10))
@@ -223,7 +261,9 @@ def show(ctx, u, log=print):
     out["gate"] = rows
     log("   THE GATE (body-motion 13), row by row:")
     for name, has, asks, mg, ok in rows:
-        log("      %-46s %-58s [%s]  %s  %s" % (name, has, asks, mg, "passes" if ok else "FAILS"))
+        log("      %-46s %-58s [%s]  %s  %s" % (name, has, asks, mg, ("passes" if SIZE_ONLY not in mg else "passes " + SIZE_ONLY.lower()) if ok else "FAILS"))
+    yes, half, no = passed(rows)
+    log("      rows passed outright %d; passed only as its own reading qualifies %d%s; failed %d" % (len(yes), len(half), (" (" + ", ".join(half) + ")") if half else "", len(no)))
     return out
 
 
@@ -319,6 +359,8 @@ def block(rung, log=print):
     row("first rises: legs, trunk, arms (ms before contact)", lambda d: "%.0f, %.0f, %.0f" % tuple(-d["first_rise_ms"][g][0] for g in ("legs", "trunk", "arms")))
     row("the first arm muscle before contact (253 allowed)", lambda d: "%.0f ms" % (d["clock_ms"] or 0.0))
     row("the lead knee at contact; the front foot's greatest load", lambda d: "%.0f deg; %.2f x body weight" % (d["lead_knee"][2], d["lead_foot_peak"][0]))
+    row("the front foot's greatest load: when; at contact the front foot, both feet", lambda d: "%.0f ms before contact (%.0f after the start); %.2f, %.2f"
+        % (-d["lead_foot_peak"][1], d["start_to_contact_ms"] + d["lead_foot_peak"][1], d["feet_at_contact"][0], sum(d["feet_at_contact"])))
     row("balance: outside his feet; least on the feet; height kept", lambda d: "%.1f cm; %.2f; %.2f" % tuple(d["balance"]))
     row("joints past their range: to contact; to 50 ms after", lambda d: "%.1f deg (%s); %.1f (%s)" % (max((x[3], k) for k, x in d["stops"].items()) + max((x[1], k) for k, x in d["stops"].items())))
     row("joint ends over 50 N m; the heaviest", lambda d: "%d; %.0f N m (%s)" % ((len(d["ligaments_over_50"]),) + max(((x[0], k) for k, x in d["stops"].items() if k != "shoulder_L"), default=(0.0, "-"))))
@@ -334,8 +376,9 @@ def block(rung, log=print):
     row("muscles (with holding) by joint, the five largest", lambda d: top(e(d)["muscles and holding muscles by joint"]))
     row("damping by joint, the five largest", lambda d: top(e(d)["damping by joint"]))
     row("hold-still torques by joint, the three largest", lambda d: top(e(d)["hold-still torques by joint"], 3))
-    for i, g in enumerate(ds[0]["gate"]):
-        row("GATE: " + g[0], lambda d, i=i: "%s (%s)" % ("passes" if d["gate"][i][4] else "fails", d["gate"][i][3] or d["gate"][i][1]))
+    gs = [gate(d) for d in ds]                # read again from the stored result, so a row's reading is the current one
+    for i, g in enumerate(gs[0]):
+        row("GATE: " + g[0], lambda d, i=i: (lambda r: "%s (%s)" % ("passes" if r[4] else "fails", r[3] or r[1]))(gs[ds.index(d)][i]))
 
 
 def main():

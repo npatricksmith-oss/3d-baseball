@@ -2325,9 +2325,10 @@ class LadderChecks(unittest.TestCase):
     def test_the_damping_table_is_read_as_written(self):
         """drive.damping_of: no option is sessions 1-10's body (1.0 everywhere, capped at 30 N m); a number is that value
         everywhere with no cap; a set by name is the set, with no cap; "from" takes only the named group's joints from
-        another set and "scale" multiplies only those. The central set's values are the ones body-motion 4.13 writes
-        from the sources (note 14): the relaxed wrist's bend 0.04 on the forearm's x, the knee's 0.25, the ankle's bend
-        0.40 on the shank's y and roll 0.165, the shoulder's 0.47; and the sets differ only at the joints not read."""
+        another set and "scale" multiplies only those. The three sets differ only at the joints nothing was read for
+        (a read joint has one value in all three; an unread one's low end is not above its high end). The values
+        themselves are not restated here (session 11's review, P3-4): they are written once, in drive.DAMPING, from
+        note 14."""
         t, cap = Dr.damping_of(None)
         self.assertEqual(set(t.values()), {(1.0, 1.0, 1.0)})
         self.assertEqual(cap, 30.0)
@@ -2336,11 +2337,6 @@ class LadderChecks(unittest.TestCase):
         self.assertEqual(cap, Dr.NO_CAP)
         read, cap = Dr.damping_of("read")
         self.assertEqual(cap, Dr.NO_CAP)
-        self.assertEqual(read["wrist_R"][0], 0.04)
-        self.assertEqual(read["knee_L"], (0.25, 0.25, 0.25))
-        self.assertEqual(read["ankle_R"], (0.165, 0.40, 0.165))
-        self.assertEqual(read["shoulder_L"], (0.47, 0.47, 0.47))
-        self.assertEqual(read["elbow_L"], (0.03, 0.43, 0.03))
         for name in ("low", "high"):
             other = Dr.damping_of(name)[0]
             self.assertEqual(set(other), set(Dr.JOINTS))
@@ -2469,6 +2465,146 @@ class LadderChecks(unittest.TestCase):
         self.assertEqual(eff["knee_flex_L"], 0.0)
 
 
+class ReviewElevenChecks(unittest.TestCase):
+    """body-motion 4.13, after the independent review of session 11: the front foot's load read with its time; the
+    strength scaling of rung 6's what-ifs; the reading of Statcast's foot points."""
+
+    @staticmethod
+    def _research(name):
+        _practice()
+        import importlib
+        return importlib.import_module(name)
+
+    def test_the_front_foots_load_row_says_when_the_peak_falls_and_what_the_feet_carry_at_contact(self):
+        """ladder3d.front_foot_row (review P2-2), against three made-up swings worked by hand, each 270 ms from launch
+        to contact. (1) A peak of 2.0 x body weight 200 ms before contact is 70 ms after the start, 0.26 of the way:
+        inside the gate's band on its size, marked as passing on size only; the row says both times and the loads at
+        contact, 0.04 on the front foot and 0.04 + 0.31 = 0.35 on both. (2) The same peak 60 ms before contact (210 ms
+        after the start, 0.78 of the way) passes with no mark. (3) A peak of 1.2, late, fails on its size: short by
+        0.30. (4) Without the time from launch to contact the row cannot place the peak and does not mark it.
+        Then rung 4's kept swing, whose figures practice3d prints itself and the review read by its own replay: 2.35 x
+        body weight 201 ms before contact, 70 ms after the start, the front foot 0.04 and both feet 0.35 at contact:
+        passed on size only, so of the gate's eighteen rows eight pass outright, one so, nine fail."""
+        L = self._research("ladder3d")
+        r = L.front_foot_row({"lead_foot_peak": (2.0, -200.0), "feet_at_contact": (0.04, 0.31), "start_to_contact_ms": 270.0})
+        self.assertTrue(r[4])
+        self.assertIn(L.SIZE_ONLY, r[3])
+        self.assertIn("inside by 0.50", r[3])
+        self.assertIn("200 ms before contact", r[1])
+        self.assertIn("70 ms after the start", r[1])
+        self.assertIn("the front foot 0.04, both feet 0.35", r[1])
+        r = L.front_foot_row({"lead_foot_peak": (2.0, -60.0), "feet_at_contact": (0.9, 0.2), "start_to_contact_ms": 270.0})
+        self.assertTrue(r[4])
+        self.assertNotIn(L.SIZE_ONLY, r[3])
+        self.assertIn("210 ms after the start", r[1])
+        self.assertIn("both feet 1.10", r[1])
+        r = L.front_foot_row({"lead_foot_peak": (1.2, -60.0), "feet_at_contact": (0.9, 0.2), "start_to_contact_ms": 270.0})
+        self.assertFalse(r[4])
+        self.assertIn("short by 0.30", r[3])
+        self.assertNotIn(L.SIZE_ONLY, r[3])
+        r = L.front_foot_row({"lead_foot_peak": (2.0, -200.0), "feet_at_contact": (0.04, 0.31)})
+        self.assertTrue(r[4])
+        self.assertNotIn(L.SIZE_ONLY, r[3])
+        import json
+        import os
+        with open(os.path.join(os.path.dirname(os.path.abspath(L.__file__)), "practice3d_s11_rung4.json")) as f:
+            kept = json.load(f)
+        rows = L.gate(kept)
+        row = [x for x in rows if x[0] == "the front foot's greatest load"][0]
+        self.assertIn("2.35 x body weight 201 ms before contact (70 ms after the start", row[1])
+        self.assertIn("the front foot 0.04, both feet 0.35", row[1])
+        self.assertIn(L.SIZE_ONLY, row[3])
+        yes, half, no = L.passed(rows)
+        self.assertEqual((len(yes), half, len(no)), (8, ["the front foot's greatest load"], 9))
+
+    @NEED
+    def test_a_scaled_strength_reaches_the_bound_the_tendon_spring_the_bursts_cap_and_the_effort(self):
+        """practice3d's bound_scale (rung 6's what-if bodies; review P1-3 and P3-4), the body with every muscle at 1.5
+        times beside the body as it is, each expectation worked from the unscaled body: (1) every group's bound is 1.5
+        times; (2) every tendon spring is 1.5 times as stiff (a tendon stretches a fixed share of its length at the
+        muscle's full strength, 4.5, so a muscle half as strong again has a spring half as stiff again), and the legs'
+        have one; (3) holding the same posture takes the same torques, so the holding strengths are unchanged in N m
+        and the most a burst may ask is 1.5 x the bound less the same holding strength: more than 1.5 times the old
+        cap wherever the group holds; (4) the search's box lets the plan ask that; (5) held and doing nothing else, a
+        group's effort is 1/2.25 of what it was (the same torque, of a bound 1.5 times as large, squared); (6) the
+        hold-only trunk-bending groups, which cannot fire, are not scaled."""
+        PR = _practice()
+        o = dict(LadderChecks.O, stand="muscle", damp="read")
+        a = PR.Ctx(**o)
+        b = PR.Ctx(bound_scale={n: 1.5 for n in PR.CH}, **o)
+        for n in PR.CH:
+            self.assertAlmostEqual(b.bd[n], 1.5 * a.bd[n], delta=1e-9 * a.bd[n])
+        ka = {x[0]: x[11] for x in a.m.sys.acts}
+        kb = {x[0]: x[11] for x in b.m.sys.acts}
+        self.assertEqual(set(ka), set(kb))
+        sprung = [n for n in PR.CH if ka[n] > 0.0]
+        self.assertTrue({"knee_ext_L", "hip_ext_R", "ankle_pf_L"} <= set(sprung))
+        for n in sprung:
+            self.assertAlmostEqual(kb[n], 1.5 * ka[n], delta=1e-9 * ka[n])
+        self.assertEqual(set(a.hold_T), set(b.hold_T))
+        self.assertGreater(len([n for n in PR.CH if n in a.hold_T]), 10)
+        for n, T in a.hold_T.items():
+            self.assertAlmostEqual(b.hold_T[n], T, delta=1e-6 * max(1.0, T))
+        for n in PR.CH:
+            self.assertAlmostEqual(b.cap[n], 1.5 * a.bd[n] - a.hold_T.get(n, 0.0), delta=1e-6 * a.bd[n])
+            if a.hold_T.get(n, 0.0) > 1.0:
+                self.assertGreater(b.cap[n], 1.5 * a.cap[n])
+        hi = {n: h for n, f, lo, h in b.box if f == "T"}
+        for n in PR.CH:
+            self.assertAlmostEqual(hi[n], b.cap[n], delta=1e-12)
+        effort = lambda c: c.effort([(PR.T0 + 0.001 * k, None, None, [(0.0, 0.0, 0.0)] * len(PR.CH) + [(0.0, 0.0, 1.0)] * len(c.hold_ix), None, None)
+                                     for k in range(5)], PR.T0 + 0.1, c.plan(c.u_of({})))
+        ea, eb = effort(a), effort(b)
+        self.assertGreater(ea["knee_ext_L"], 1e-4)
+        for n in ("knee_ext_L", "hip_flex_L", "hip_ext_R", "core"):
+            self.assertGreater(ea[n], 0.0)
+            self.assertAlmostEqual(eb[n], ea[n] / 2.25, delta=1e-6 * ea[n])
+        for n in Dr.HOLD_ONLY:
+            self.assertAlmostEqual(b.hold_bd[n], a.hold_bd[n], delta=1e-12)
+
+    def test_a_foots_ankle_and_turn_are_read_from_its_three_points_and_a_left_hander_is_mirrored(self):
+        """statcast_feet.feet and .measures (review P3-3), on a made-up right-handed hitter worked by hand, in feet in the
+        plate's frame as the page has them. His front (left) foot at the intercept: heel at (-2.0, 3.0), big toe at
+        (-1.2, 3.7), small toe at (-1.4, 3.9), so the toe's midpoint is (-1.3, 3.8): heel to toe (0.7, 0.8), turned
+        atan2(0.8, 0.7) = 48.81 deg toward the pitcher from square; the ankle a quarter of the way: (-1.825, 3.2).
+        His rear (right) foot: heel (-2.4, -0.4), toes (-1.5, -0.3) and (-1.5, -0.5): toe (-1.5, -0.4), square (0 deg),
+        ankle (-2.175, -0.4). So the ankles are 3.6 ft = 109.728 cm apart along the line to the pitcher and the lead one
+        0.35 ft = 10.668 cm nearer the plate; with the intercept 3.1 ft ahead of the plate's rear apex the ball is
+        3.5 ft = 106.68 cm ahead of the rear ankle and 0.1 ft = 3.048 cm behind the lead one. His hips in the stance
+        30 in behind the plate's front edge are 17 - 30 = -13 in = -33.02 cm, so the ball is 94.488 + 33.02 = 127.508 cm
+        ahead of them. The same hitter left-handed (every x negated, left and right feet swapped) gives every figure the
+        same."""
+        SF = self._research("statcast_feet")
+
+        def hitter(side):
+            m = 1.0 if side == "R" else -1.0
+            lead, rear = ("l", "r") if side == "R" else ("r", "l")
+            r = {"bat_side": side, "avg_intercept_y": 3.1, "avg_batter_y_position": 30.0, "avg_foot_sep0": 30.0, "avg_intercept_y_in": 37.2,
+                 "avg_intercept_y_vs_batter": 50.2}
+            pts = {(lead, "heel"): (-2.0, 3.0), (lead, "bigtoe"): (-1.2, 3.7), (lead, "smalltoe"): (-1.4, 3.9),
+                   (rear, "heel"): (-2.4, -0.4), (rear, "bigtoe"): (-1.5, -0.3), (rear, "smalltoe"): (-1.5, -0.5)}
+            for (f, part), (x, y) in pts.items():
+                for t in (0, 1, 2):
+                    r["avg_%s%s_x%d" % (f, part, t)] = m * x
+                    r["avg_%s%s_y%d" % (f, part, t)] = y
+            return r
+        for side in "RL":
+            F = SF.feet(hitter(side))
+            self.assertAlmostEqual(F["lead", 2]["turn"], 48.8141, delta=1e-3)
+            self.assertAlmostEqual(F["rear", 2]["turn"], 0.0, delta=1e-9)
+            for got, want in zip(F["lead", 2]["ankle"], (-1.825 * 30.48, 3.2 * 30.48)):
+                self.assertAlmostEqual(got, want, delta=1e-9)
+            for got, want in zip(F["rear", 2]["ankle"], (-2.175 * 30.48, -0.4 * 30.48)):
+                self.assertAlmostEqual(got, want, delta=1e-9)
+            o = SF.measures([hitter(side)])
+            self.assertAlmostEqual(o["ankles apart, along (cm)"][0], 109.728, delta=1e-9)
+            self.assertAlmostEqual(o["lead ankle across (cm)"][0], 10.668, delta=1e-9)
+            self.assertAlmostEqual(o["ball ahead of the rear ankle (cm)"][0], 106.68, delta=1e-9)
+            self.assertAlmostEqual(o["ball ahead of the lead ankle (cm)"][0], -3.048, delta=1e-9)
+            self.assertAlmostEqual(o["ball ahead of the hips in the stance (cm)"][0], 127.508, delta=1e-9)
+            self.assertAlmostEqual(o["front foot's turn (deg)"][0], 48.8141, delta=1e-3)
+
+
 class StanceChecks(unittest.TestCase):
     """body-motion 4.13, rungs 3 and 4: the start on major leaguers' feet; the hips' turn by their own muscles."""
 
@@ -2479,9 +2615,9 @@ class StanceChecks(unittest.TestCase):
         pitcher from square to the plate, the rear foot is flat; every joint is inside its anatomical end by at least the
         4.0 deg the rule reached (it asks 5: the rear ankle's roll, both hips sideways and the lead ankle's roll are the
         ones short, as stated with the stored result), and no stop is moved (add_ranges fails if the start is outside).
-        On that start the practice search's ball is 1.022 m toward the pitcher from the rear ankle, within a centimetre
-        of level with the lead ankle, where Statcast has the intercept (-0.4 +- 9.4 cm). With BB_SLOW=1 the rule is
-        rerun on the given feet (7 minutes) and must return the stored numbers."""
+        On that start the practice search's ball is within 1.2 cm of level with the lead ankle, where Statcast has the
+        intercept (-0.4 +- 9.4 cm; the 1.022 m from the rear ankle is not restated here, review P3-4). With BB_SLOW=1
+        the rule is rerun on the given feet (7 minutes) and must return the stored numbers."""
         import os
         m = B.Model(ranges=(), grip="hands", feet="cleats", wrist="oval", shift=B.START_STANCE)
         st = B.place(m, T0)
@@ -2498,8 +2634,8 @@ class StanceChecks(unittest.TestCase):
         PR = _practice()
         c = PR.Ctx(grip="hands", feet="cleats", hold="let_go", wrist="oval", clear=True, stance="mlb")
         aL, aR = c.m.joint_pos(c.st, "ankle_L"), c.m.joint_pos(c.st, "ankle_R")
-        self.assertAlmostEqual(c.Pc[1] - aR[1], 1.022, delta=1e-9)
         self.assertLess(abs(c.Pc[1] - aL[1]), 0.012)
+        self.assertGreater(c.Pc[1] - aR[1], 0.9)
         self.assertAlmostEqual(c.Pc[2], 0.78, delta=1e-12)
         if os.environ.get("BB_SLOW"):
             given = {k: B.START_STANCE[k] for k in ("stride_cm", "stride_closed_cm", "lead_foot")}
