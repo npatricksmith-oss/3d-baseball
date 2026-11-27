@@ -2481,7 +2481,8 @@ class ReviewElevenChecks(unittest.TestCase):
         inside the gate's band on its size, marked as passing on size only; the row says both times and the loads at
         contact, 0.04 on the front foot and 0.04 + 0.31 = 0.35 on both. (2) The same peak 60 ms before contact (210 ms
         after the start, 0.78 of the way) passes with no mark. (3) A peak of 1.2, late, fails on its size: short by
-        0.30. (4) Without the time from launch to contact the row cannot place the peak and does not mark it.
+        0.30. (4) Without the time from launch to contact the row cannot place the peak and does not mark it; given how
+        long the load lasted (13 ms at or over 1.5) and its mean over the last 100 ms (0.44), it says them.
         Then rung 4's kept swing, whose figures practice3d prints itself and the review read by its own replay: 2.35 x
         body weight 201 ms before contact, 70 ms after the start, the front foot 0.04 and both feet 0.35 at contact:
         passed on size only, so of the gate's eighteen rows eight pass outright, one so, nine fail."""
@@ -2505,6 +2506,10 @@ class ReviewElevenChecks(unittest.TestCase):
         r = L.front_foot_row({"lead_foot_peak": (2.0, -200.0), "feet_at_contact": (0.04, 0.31)})
         self.assertTrue(r[4])
         self.assertNotIn(L.SIZE_ONLY, r[3])
+        self.assertNotIn("at or over 1.5", r[1])
+        r = L.front_foot_row({"lead_foot_peak": (2.0, -60.0), "feet_at_contact": (0.9, 0.2), "start_to_contact_ms": 270.0,
+                              "lead_foot_load": {"ms at or over 1.5": 13.0, "mean over the last 100 ms": (0.44, 0.29)}})
+        self.assertIn("at or over 1.5 for 13 ms in all; the mean over the last 100 ms 0.44", r[1])
         import json
         import os
         with open(os.path.join(os.path.dirname(os.path.abspath(L.__file__)), "practice3d_s11_rung4.json")) as f:

@@ -178,7 +178,9 @@ def front_foot_row(out):
     in the first EARLY_SHARE of the time from launch to contact is marked as passing ON SIZE ONLY: the gate's band is
     not changed (the owner's, D40) and the mark is mine, a reading and not a measurement of when hitters peak.
     Needs out["lead_foot_peak"] (x body weight, ms from contact), ["feet_at_contact"] (front, rear) and
-    ["start_to_contact_ms"]."""
+    ["start_to_contact_ms"]; with ["lead_foot_load"] (practice3d.report, since the review's fixes) it also says for how
+    long the load is at or over the band's lower figure and the front foot's mean load over the last 100 ms: on rung 4's
+    kept swing the "greatest load" is two impacts of 7 ms each."""
     pk, t_pk = out["lead_foot_peak"]
     front, rear = out["feet_at_contact"]
     T = out.get("start_to_contact_ms")
@@ -193,6 +195,9 @@ def front_foot_row(out):
         early = after < EARLY_SHARE * T
         has += " (%.0f ms after the start, of %.0f)" % (after, T)
     has += "; at contact the front foot %.2f, both feet %.2f" % (front, front + rear)
+    ld = out.get("lead_foot_load")                  # results stored before the review's fixes do not carry it
+    if ld:
+        has += "; at or over 1.5 for %.0f ms in all; the mean over the last 100 ms %.2f" % (ld["ms at or over 1.5"], ld["mean over the last 100 ms"][0])
     if ok and early:
         mg += "; %s: the peak is in the first half of the swing, an early spike" % SIZE_ONLY
     return ("the front foot's greatest load", has, "%.2f to %.2f" % (lo, hi), mg, ok)

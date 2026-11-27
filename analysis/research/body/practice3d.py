@@ -710,10 +710,20 @@ def report(ctx, u, log=print):
     rate = max((kn[q - 5] - kn[q + 5]) / 0.010 for q in range(5, ic - 4)) if ic > 12 else 0.0
     out["lead_foot_peak"] = (pk[0], rel(pk[1]))
     out["feet_at_contact"] = (fz[ic][0], fzr[ic][0])
+    # how long the front foot's load lasts (4.13, after the review of session 11, P2-2): a peak can be an impact of a few
+    # ms. The time at or over the gate's lower figure (1.5 x body weight) to contact, and both feet's mean load over the
+    # last 100 ms (trapezoids over the records).
+    dts = [recs[q + 1][0] - recs[q][0] for q in range(ic)]
+    i100 = at(tx - 0.100)
+    mean = lambda v: sum(0.5 * (v[q][0] + v[q + 1][0]) * dts[q] for q in range(i100, ic)) / max(1e-12, sum(dts[i100:ic]))
+    out["lead_foot_load"] = {"ms at or over 1.5": 1e3 * sum(dts[q] for q in range(ic) if fz[q][0] >= 1.5),
+                             "mean over the last 100 ms": (mean(fz), mean(fzr))}
     out["lead_knee"] = (kn[0], kn[i50], kn[ic], rate)
     out["trail_knee"] = (obs[0][1]["trail_knee_flex"], obs[ic][1]["trail_knee_flex"])
     log("   CHECK the front leg braced: the lead knee %.0f deg bent at the start, %.0f at -50 ms, %.0f at contact, straightening at up to %.0f deg/s   [46 at foot plant, 14 +- 12 at contact, 350 deg/s (OpenBiomechanics); 15 at contact ([3])]" % out["lead_knee"])
     log("   CHECK the front foot's greatest load: %.2f x body weight at %.0f ms; at contact front %.2f, rear %.2f   [2.0 +- 0.4, p10-p90 1.5-2.6]; the rear knee %.0f -> %.0f deg" % (pk[0], rel(pk[1]), fz[ic][0], fzr[ic][0], out["trail_knee"][0], out["trail_knee"][1]))
+    log("      the front foot is at or over 1.5 x body weight for %.1f ms in all before contact; over the last 100 ms the front foot carries %.2f and the rear %.2f of his weight on average"
+        % ((out["lead_foot_load"]["ms at or over 1.5"],) + out["lead_foot_load"]["mean over the last 100 ms"]))
     # what each foot did on the ground (4.11, part 3): its heel's greatest height before contact, how far it turned on the
     # ground from the start to contact (+ is the toe going toward the pitcher), and the pelvis's turn over the same time
     out["feet"] = {}
