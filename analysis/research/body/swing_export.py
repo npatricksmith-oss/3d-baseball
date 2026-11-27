@@ -66,8 +66,9 @@ def load_tree(tree):
     sys.path.insert(0, os.path.join(tree, "analysis", "research", "body"))
     if "BB_FORT_CSV" not in os.environ:
         # [4]'s digitised curves (common.py reads them from a path relative to the working directory): this tree's
-        # copy, else the other tree's (read only). They are made by analysis/research/fortenbaugh_appendix_e.py.
-        for base in (ROOT, tree):
+        # copy, else the other tree's, else any worktree's of this repository (read only). They are made by analysis/research/fortenbaugh_appendix_e.py.
+        others = [ln[len("worktree "):] for ln in git(ROOT, "worktree", "list", "--porcelain").splitlines() if ln.startswith("worktree ")]
+        for base in [ROOT, tree] + others:                    # then any checkout of this repository that has them
             csv = os.path.join(base, "sim", "target", "research-dl", "4", "csv")
             if os.path.isdir(csv):
                 os.environ["BB_FORT_CSV"] = csv
