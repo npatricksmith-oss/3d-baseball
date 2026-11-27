@@ -46,4 +46,13 @@ Range `main..work/swing-flow`, 10 commits (ce81363 at the tip). Nothing in it ca
 
 ## Resolution
 
-Open.
+Resolved by the Coordinator, 2026-11-27. Reviewer: Sonnet at medium effort (the change cannot alter a game).
+
+- **P2-1: fixed** (b6bc97f): a missing numpy or c3d skips `test_real_swing.py` with its reason; the docstring says how to run it and that a skip says nothing about the mapping.
+- **P2-2: fixed** (66543a1): the hips against a second regression from the raw pelvis markers, the head's turn against its raw markers; note 12 lists what stays unchecked (the lumbar joint, the shoulders beyond the dataset's own centres, the level calibration stance, the feet's roll and ball point).
+- **P2-3: fixed** (520b439): the drawn feet against his raw heel and toe markers.
+- **P3-5: fixed** (5a8c549). **P3-6: fixed** by the Coordinator's handoff.
+- **P3-4: with the owner as Q68** (the note quotes one hitter's metadata from a non-commercial dataset).
+- **P3-7, P3-8: deferred** (a help label and a note on `uv`; cosmetic).
+- Found at the pre-merge check: the docs check failed on a checkout with no export (a backticked git-ignored path); fixed (90f28ff).
+- No re-review of the fixes: small and test-covered. Pre-merge on main: 16 tests (10 new pass, 6 old skip as before), the viewer's check passes on the recorded swing (3.68 mm, 0.54 deg) and on the force-driven one (4.21 mm, 1.54 deg).
