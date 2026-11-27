@@ -216,6 +216,28 @@ def frame_zx(z, xhint):
     return x, np.cross(z, x), z
 
 
+def head_frame(lf, rf, lb, rb):
+    """(x forward, y left, z up) of the head from its four markers (rows are samples)."""
+    hf = (lf + rf) / 2 - (lb + rb) / 2
+    hl = (lf + lb) / 2 - (rf + rb) / 2
+    return frame_zx(np.cross(hf, hl), hf)
+
+
+def head_offset(static_path):
+    """the turn from the head markers' frame to the head's own, in the markers' frame (3 x 3), from the standing
+    calibration trial: there the head is taken as level and facing as the pelvis does (forward from its back markers to
+    its front ones, made level)."""
+    M, _ = markers(static_path)
+    H = np.stack(head_frame(M["LFHD"], M["RFHD"], M["LBHD"], M["RBHD"]), axis=-1).mean(axis=0)
+    u_, _, vt = np.linalg.svd(H)
+    H = u_ @ vt                                                       # the mean of the trial's frames, made a turn again
+    pf = (M["LASI"] + M["RASI"] - M["LPSI"] - M["RPSI"]).mean(axis=0)
+    x = np.array([pf[0], pf[1], 0.0]) / math.hypot(pf[0], pf[1])
+    z = np.array([0.0, 0.0, 1.0])
+    T = np.stack([x, np.cross(z, x), z], axis=-1)
+    return H.T @ T
+
+
 # ---- the swing ------------------------------------------------------------------------------------------------------------
 LAB_TO_SIM = np.array([[0.0, -1.0, 0.0], [1.0, 0.0, 0.0], [0.0, 0.0, 1.0]])
 
@@ -233,6 +255,11 @@ class Swing:
         self.lm = lm = landmarks(sid)
         self.c3d = c3d_path(sid, self.meta)
         M, self.rate = markers(self.c3d)
+        static = os.path.join(os.path.dirname(self.c3d), "%s_%s_model.c3d" % (self.meta["user"], self.meta["session"]))
+        if not os.path.isfile(static):
+            raise SystemExit("no standing calibration trial %s (the head's offset is read from it)" % static)
+        self.head_offset = head_offset(static)
+        self.static = static
         n = len(lm["time"])
         if any(len(v) != n for v in M.values()):
             raise SystemExit("the C3D has %d samples, landmarks.csv %d" % (len(next(iter(M.values()))), n))
@@ -377,11 +404,12 @@ class Swing:
         # the bat: z knob to tip, x toward the wrists' side (body3d's -x points to the wrists)
         wmid = (out["wrist_L"] + out["wrist_R"]) / 2 - out["knob"]
         Q["bat"] = frame_zx(axis, -wmid)
-        # the head: forward from the back markers to the front ones, left from right to left
-        hf = (r["LFHD"] + r["RFHD"]) / 2 - (r["LBHD"] + r["RBHD"]) / 2
-        hl = (r["LFHD"] + r["LBHD"]) / 2 - (r["RFHD"] + r["RBHD"]) / 2
-        hz = unit(np.cross(hf, hl))
-        Q["head"] = frame_zx(hz, hf)
+        # the head: its four markers' frame (forward from the back pair to the front pair, up square to that and to the
+        # left), set right by the headband's own tilt and turn on his head, read from his standing calibration trial (the
+        # dataset's <user>_<session>_model.c3d), where he stands looking straight ahead: there the head's true frame is
+        # taken as level and facing as his pelvis faces (Plug-in Gait's head offset does the same)
+        Hm = np.stack(head_frame(r["LFHD"], r["RFHD"], r["LBHD"], r["RBHD"]), axis=-1)            # n x 3 x 3, columns
+        Q["head"] = tuple((Hm @ self.head_offset)[:, :, k] for k in range(3))
         self.Q = Q
         # the feet's soles. The heel's under his heel marker by that marker's height when the foot is flat (the 10th
         # percentile of its height over the swing). The ball of the foot is where the viewer's shoe has it for his ankle's
