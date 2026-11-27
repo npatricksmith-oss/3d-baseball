@@ -993,7 +993,7 @@ def cost_of(r):
 CMA_LAMBDA, CMA_SIGMA, CMA_OUT = 24, 0.03, 1e4          # plans a generation; the first spread, of each number's range; the charge for leaving the box [E]
 
 
-def cma(ctx, u0, gens, log, pool, seed=1, lam=CMA_LAMBDA, sigma0=CMA_SIGMA, stop=None, leap=None):
+def cma(ctx, u0, gens, log, pool, seed=1, lam=CMA_LAMBDA, sigma0=CMA_SIGMA, stop=None, leap=None, state=None, keep=None):
     """The practice search without slopes (body-motion 4.12): the separable form of CMA-ES (Ros & Hansen 2008) on the free
     numbers of the plan, in the unit box. Each generation `lam` plans are drawn about a centre with one spread per number,
     all are run, they are RANKED by score, the centre moves to the weighted mean of the better half and each number's
@@ -1008,7 +1008,11 @@ def cma(ctx, u0, gens, log, pool, seed=1, lam=CMA_LAMBDA, sigma0=CMA_SIGMA, stop
     leap = (every, (b1, b2, ...)) (4.14, part 3): every `every` generations the centre's travel over those generations
     is tried carried on by each multiple b (the plans at centre + b x travel, held inside the box, run as one more small
     generation); if the best of them scores under the best ever, the centre moves there. A search creeping down a long
-    valley with a small step gets there sooner; nothing else of the search changes. None: no leaps."""
+    valley with a small step gets there sooner; nothing else of the search changes. None: no leaps.
+    state, keep (4.14, part 3): keep = {} is filled with the search's whole state at its last generation (the centre,
+    each number's spread, the paths, the step, the draws' generator, the best plan, the history); given back as state,
+    the search goes on from there to generation `gens` (counted from its first) exactly as if it had never stopped. A
+    search STARTED AFRESH from a result has lost the spreads it had learned and finds nothing for hundreds of generations."""
     free = ctx.free
     n = len(free)
     rng = random.Random(seed)
@@ -1033,7 +1037,16 @@ def cma(ctx, u0, gens, log, pool, seed=1, lam=CMA_LAMBDA, sigma0=CMA_SIGMA, stop
     best_u, best = list(u0), cost_of(r0)
     hist = [(0, best, best, best, sigma, 0)]
     m_marks, leaps = {0: list(m)}, 0
-    for g in range(1, gens + 1):
+    g0 = 0
+    if state is not None:
+        m, C, ps, pc, sigma = list(state["m"]), list(state["C"]), list(state["ps"]), list(state["pc"]), state["sigma"]
+        best_u, best = list(state["best_u"]), state["best"]
+        hist = [tuple(h_) for h_ in state["hist"]]
+        m_marks = {int(k_): list(v_) for k_, v_ in state["m_marks"].items()}
+        leaps, g0 = state["leaps"], state["g"]
+        rs_ = state["rng"]
+        rng.setstate((rs_[0], tuple(rs_[1]), rs_[2]))
+    for g in range(g0 + 1, gens + 1):
         zs = [[rng.gauss(0.0, 1.0) for _ in range(n)] for _ in range(lam)]
         ys = [[math.sqrt(C[k]) * z[k] for k in range(n)] for z in zs]
         us, pens = [], []
@@ -1093,6 +1106,11 @@ def cma(ctx, u0, gens, log, pool, seed=1, lam=CMA_LAMBDA, sigma0=CMA_SIGMA, stop
     mfull = list(u0)
     for k, i in enumerate(free):
         mfull[i] = min(1.0, max(0.0, m[k]))
+    if keep is not None:
+        rs_ = rng.getstate()
+        last = max(m_marks) if m_marks else 0
+        keep.update(m=list(m), C=list(C), ps=list(ps), pc=list(pc), sigma=sigma, best_u=list(best_u), best=best, hist=[list(h_) for h_ in hist],
+                    m_marks={str(k_): v_ for k_, v_ in m_marks.items() if k_ == last}, leaps=leaps, g=hist[-1][0], rng=[rs_[0], list(rs_[1]), rs_[2]])
     return best_u, best, hist, mfull, [sigma * math.sqrt(c) for c in C]
 
 

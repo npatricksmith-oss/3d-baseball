@@ -2730,6 +2730,45 @@ class SessionTwelveChecks(unittest.TestCase):
         finally:
             PR._CTX = old
 
+    def test_a_search_carried_on_from_its_kept_state_is_the_search_that_never_stopped(self):
+        """practice3d.cma's state (4.14, part 3). On the curved valley of the leaps' test: a search of 300 generations
+        run in one go, and the same search stopped at 120 generations, its state kept, turned into text and back (as a
+        result's file does), and carried on to 300: the same best score at every generation and the same plan at the
+        end, to the last digit, with leaps and without. And started AFRESH from the plan it had at 120 generations (what
+        every stage of sessions 10 and 11 did) it is not the same search: its score at 300 differs."""
+        import json
+        PR = _practice()
+        n = 8
+
+        class Toy:
+            free = list(range(n))
+
+            @staticmethod
+            def residuals(u):
+                return [10.0 * ((u[i + 1] - 0.2) - 2.0 * (u[i] - 0.2) ** 2) for i in range(n - 1)] + [0.7 - x for x in u]
+
+        class Pool:
+            @staticmethod
+            def map(f, us, chunksize=1):
+                return [f(u) for u in us]
+        old = PR._CTX
+        PR._CTX = Toy
+        try:
+            quiet = lambda s_: None
+            for leap in (None, (25, (1.0, 2.0, 4.0, 8.0))):
+                u_all, b_all, h_all, _, _ = PR.cma(Toy, [0.3] * n, 300, quiet, Pool, seed=4, sigma0=0.012, leap=leap)
+                keep = {}
+                u_a, b_a, h_a, _, _ = PR.cma(Toy, [0.3] * n, 120, quiet, Pool, seed=4, sigma0=0.012, leap=leap, keep=keep)
+                state = json.loads(json.dumps(keep))
+                u_b, b_b, h_b, _, _ = PR.cma(Toy, [0.3] * n, 300, quiet, Pool, seed=4, sigma0=0.012, leap=leap, state=state)
+                self.assertEqual(h_b[-1][0], 300)
+                self.assertEqual([h[1] for h in h_b], [h[1] for h in h_all])
+                self.assertEqual(list(u_b), list(u_all))
+                u_c, b_c, h_c, _, _ = PR.cma(Toy, list(u_a), 180, quiet, Pool, seed=4, sigma0=0.012, leap=leap)
+                self.assertNotEqual(b_c, b_all)
+        finally:
+            PR._CTX = old
+
     def test_the_first_stage_charges_a_bat_that_does_not_come_through_the_ball(self):
         """practice3d.through_charge (4.14, part 3: the parked basin's remedy), worked by hand at 5 m/s asked. A bat
         parked at the ball (0 m/s along the ball's line where it comes nearest) is charged 5, which the score squares

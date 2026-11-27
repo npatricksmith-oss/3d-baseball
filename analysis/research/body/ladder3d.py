@@ -6,6 +6,7 @@
     python3 analysis/research/body/ladder3d.py --table                        the ladder's table from the results kept so far
     python3 analysis/research/body/ladder3d.py --show <json>                  a kept result re-read (no search)
     python3 analysis/research/body/ladder3d.py --settle <json> --rung r4 --seed 21 --tag _s1_end   a kept result's search carried to its end (4.14)
+    python3 analysis/research/body/ladder3d.py --carry <json> --rung r4 --seed 22 --tag _s2_carry [--leap] [--resume <..._gN.json>]   one search carried on in blocks, its state kept (4.14)
     ... --dir s12                                                             results kept under that session's folder (default s11)
 
 THE PROTOCOL, the same for every rung (written in 4.13 before any run): session 10's own search (practice3d.cma, every
@@ -394,6 +395,57 @@ def settle(rung, path, seed, tag, log, brace=False, cap=END_CAP, square=False, l
     return out
 
 
+def carry(rung, path, seed, tag, log, cap=6000, block=500, square=True, leap=False, resume=None):
+    """ONE search carried on in blocks with its state kept (body-motion 4.14, part 3): settle()'s search, but never started
+    afresh: after every `block` generations the result is read (the whole report, so the bat's speed is known at each)
+    and kept as <rung><tag>_g<generations>.json WITH THE SEARCH'S STATE, and the search goes on from that state exactly as
+    if it had not stopped. It ends by settle()'s rule (the best score fallen under END_FALL over END_WINDOW generations,
+    END_LEAST at least) or at `cap`. resume: a kept ..._g<N>.json to go on from (its state), in place of starting at path."""
+    o = options(rung)
+    if square:
+        o["square"] = "contact"
+    ctx = PR.Ctx(contact="nearest", **o)
+    state, hist = None, None
+    if resume:
+        dres = json.load(open(resume))
+        state, u0 = dres["state"], ctx.u_of(dres["start_plan"])
+        path = dres["start"]
+    else:
+        d = json.load(open(path))
+        u0 = ctx.u_of({n: [min(v[0], ctx.cap[n])] + list(v[1:]) for n, v in d["plan"].items()})
+    log("== ONE SEARCH CARRIED ON IN BLOCKS, its state kept, on rung %s%s; body %s; from %s%s; first step %.3f; blocks of %d generations, each read and kept; until the best score has fallen under %.2f over %d generations, %d at least (at most %d); leaps %s; seed %d"
+        % (rung, tag, o, path, " (resumed from %s at generation %d)" % (resume, state["g"]) if resume else "", END_SIGMA, block, END_FALL, END_WINDOW, END_LEAST, cap, LEAP if leap else "none", seed))
+    t = time.time()
+    PR._CTX = ctx
+    c0 = PR.cost_of(ctx.residuals(u0))
+    g = state["g"] if state else 0
+    out = None
+    while g < cap:
+        target = min(cap, (g // block + 1) * block)
+        keep = {}
+        with multiprocessing.get_context("fork").Pool(PR.WORKERS) as pool:
+            u, cost, hist, mfull, sp = PR.cma(ctx, u0, target, log, pool, seed, sigma0=END_SIGMA, stop=(END_WINDOW, END_FALL, END_LEAST), leap=LEAP if leap else None, state=state, keep=keep)
+        state, g = keep, hist[-1][0]
+        ended = g < target
+        fall = hist[max(0, len(hist) - 1 - END_WINDOW)][1] - hist[-1][1]
+        log("-- after %d generations (%.0f s): the best score %.2f from %.2f; it fell %.3f over its last %d; leaps taken %d%s" % (g, time.time() - t, cost, c0, fall, END_WINDOW, keep["leaps"], "; ENDED BY THE RULE" if ended else ""))
+        out = show(ctx, u, log)
+        out.update(cost=cost, rung=rung, start=path, seed=seed, history=[("one search carried on, its state kept", hist)], at_end=ended, settled=ended, fall_last_100=hist[max(0, len(hist) - 101)][1] - hist[-1][1],
+                   fall_last_50=hist[max(0, len(hist) - 51)][1] - hist[-1][1], generations=g, start_cost=c0, leap=bool(leap), leaps=keep["leaps"],
+                   step_check=PR.verify(ctx, u, log), start_plan=ctx.plan(u0) if not isinstance(u0, dict) else u0, state=state, seconds=time.time() - t)
+        out["start_plan"] = {n: list(v) for n, v in ctx.plan(u0).items()}
+        os.makedirs(OUT, exist_ok=True)
+        dest = os.path.join(OUT, "%s%s_g%d.json" % (rung, tag, g))
+        json.dump(out, open(dest, "w"), indent=1)
+        log("   kept: %s   (%.0f s)" % (os.path.relpath(dest, os.path.join(HERE, "..", "..", "..")), time.time() - t))
+        if ended:
+            break
+    if out is not None:
+        out.update(failed_differences=PR.failed_differences(ctx, u, log), search_checks=PR.search_checks(dict(o, contact="nearest"), u0, u, log))
+        json.dump(out, open(os.path.join(OUT, "%s%s.json" % (rung, tag)), "w"), indent=1)
+    return out
+
+
 def table(log=print):
     """the ladder so far, from the results kept: one line a result."""
     log("| Result | Start | Sweet spot at contact | Its fastest before | Miss | Score | Settled | Muscles; holding; hold-still; damping (J) |")
@@ -492,6 +544,10 @@ def main():
             PR.verify(ctx, ctx.u_of(plan), log)
         if "--out" in a:
             json.dump(out, open(arg("--out", ""), "w"), indent=1)
+        return
+    if "--carry" in a:
+        carry(arg("--rung", "r4"), arg("--carry", ""), int(arg("--seed", 22)), arg("--tag", "_carry"), log, cap=int(arg("--cap", 6000)), block=int(arg("--block-gens", 500)),
+              square="--old-square" not in a, leap="--leap" in a, resume=arg("--resume", None))
         return
     if "--settle" in a:
         settle(arg("--rung", "r4"), arg("--settle", ""), int(arg("--seed", 21)), arg("--tag", "_end"), log, brace="--brace" in a, cap=int(arg("--cap", END_CAP)), square="--square" in a, leap="--leap" in a)
