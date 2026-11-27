@@ -21,9 +21,9 @@ Status: `[ ]` not started · `[~]` partly done · `[?]` needs an owner decision
 
 **Sessions 8–12 are merged** (spec §4.10–§4.14): 26.25 m/s (58.7 mph; the gate asks 29). **D42:** on while each session gains honest bat speed. Session 12 gained.
 
-**D44 (Q64):** session 13 finds the ball's place by practice, after settling the baseline.
+**Owner, 2026-11-27: not a baseball swing; searches cancelled** until he rules on what the score asks. D44 waits.
 
-**Running** (restart if stopped): session 13, `body-3d-13` (Fable), worktree `swing-research`, `work/body-3d`, brief WORKER-BODY-3D-13 there; hours of searches in the job queue. Then: an Opus review, fixes, checks, merge, push, report. **The swing in the viewer (D43):** `bin/body-swing.sh`, player-visuals §14. Deferred: its tests skip on main (no [4] curves here).
+**Running** (restart if stopped): session 13, `body-3d-13` (Fable), worktree `swing-research`, `work/body-3d`, brief WORKER-BODY-3D-13, changed by message: it only looks at the swing and proposes. Then: the owner. **The swing in the viewer (D43):** `bin/body-swing.sh`, player-visuals §14. Deferred: its tests skip on main (no [4] curves here).
 
 **Next:** §2: the ground-dive leftovers ([note](docs/calibration/2026-11-23-of-ground-dive.md) §9).
 
