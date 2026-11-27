@@ -5,7 +5,7 @@
 
 Draws HIS points, not the figure's: his joint centres and markers scaled and placed as the file is (real_swing.Swing.rec), the
 bat from its end markers, his head from its four markers, each foot from heel to toe marker, and the file's ball. Black: his
-left (lead) side and trunk; red: his right (rear) side; brown: the bat. The figure's shoulders (the only joints the file moves
+left (lead) side and trunk; red: his right (rear) side; brown: the bat; green: where his face points (the file's head turn). The figure's shoulders (the only joints the file moves
 off his, squared to the trunk) are drawn as small blue rings. Pictures: <dir>/stick_<nnn>_<m|p><ms>ms_<pitcher|open|above>.png,
 numbered and named as the viewer's bodyswing_* pictures, so that the two sort side by side.
 
@@ -85,7 +85,8 @@ def draw(sw, out_dir, every_ms=10.0):
             # the head: its four markers and the face's forward
             hq = proj(np.stack([P["LFHD"], P["RFHD"], P["RBHD"], P["LBHD"], P["LFHD"]]))
             ax.plot(hq[:, 0], hq[:, 1], color="k", lw=1.5)
-            fq = proj(np.stack([head, head + 0.15 * (P["LFHD"] + P["RFHD"] - P["LBHD"] - P["RBHD"]) / np.linalg.norm(P["LFHD"] + P["RFHD"] - P["LBHD"] - P["RBHD"])]))
+            hx = at(sw.Q["head"][0], tt)                       # the face's forward, set right by the headband's offset
+            fq = proj(np.stack([head, head + 0.15 * hx / np.linalg.norm(hx)]))
             ax.plot(fq[:, 0], fq[:, 1], color="g", lw=1.5)
             for s_ in ("shoulder_L", "shoulder_R"):
                 q = proj(at(o[s_], tt)[None, :])
