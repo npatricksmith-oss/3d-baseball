@@ -19,9 +19,9 @@ Status: `[ ]` not started · `[~]` partly done · `[?]` needs an owner decision
 
 **State.** PLAN D31–D48: a force-driven body; PLAN §14.1, spec [docs/body-motion.md](docs/body-motion.md). Its practised swing (sessions 8–13) was a chop; the owner cancelled its searches.
 
-**Owner, 2026-11-27.** D45: a real batter's swing is the base; it plays in the viewer, `bin/body-swing.sh --real` (player-visuals §14.1, [note](docs/research/swing/12-real-swing-on-the-figure.md)); he says it looks a lot better. D46: its data is looked at, never shipped. D47: the body practises toward it; how batters differ: later.
+**Owner, 2026-11-27.** D45–D46: a real batter's swing plays in the viewer (`bin/body-swing.sh --real`), looked at only. D48: no tracing; "create a realistic looking force-driven MLB swing", his body at measured strength. On 53 mph: "there's no reason why we are falling short."
 
-**D48:** first force-driven swing merged, reviewed (`bin/body-swing.sh --look`, §4.17). `work/swing-arms` (second pass): stopped by the owner, unmerged, unreviewed, docs stale; state in 77c6960.
+**Running:** Fable worker `swing-arms` (Workers tab, t5g; worktree swing-research, `work/swing-arms`, its brief is JOB.md there) finds where bat speed is lost. Unmerged, unreviewed: check it, then an Opus review. `--look` on main is the first pass.
 
 **Next:** §2: the ground-dive leftovers ([note](docs/calibration/2026-11-23-of-ground-dive.md) §9).
 
