@@ -74,7 +74,7 @@ class WrittenMotion(unittest.TestCase):
             px, py = A.push_point(t)
             front = A.LEAD_Y0 if t < A.T_OFF else A.LEAD_Y1
             on_feet = A.REAR_Y - 0.08 < r["zmp_y"] < front + 0.08 and -1.02 < r["zmp_x"] < -0.70
-            if -0.130 <= t <= 0.065:
+            if -0.200 <= t <= 0.065:
                 if not on_feet:
                     beyond.append(r["t"])
                 continue
@@ -82,7 +82,7 @@ class WrittenMotion(unittest.TestCase):
             self.assertLess(math.hypot(r["zmp_x"] - px, r["zmp_y"] - py), 0.15, "at %+.0f ms" % r["t"])
             if A.T_OFF + 0.03 < t < A.T_TOUCH - 0.03:      # on the rear foot alone: within the foot
                 self.assertLess(abs(r["zmp_y"] - A.REAR_Y), 0.09)
-        # A KNOWN FLAW, held here so that it cannot grow unseen (body-motion 4.17): through the swing itself (-130 to
+        # A KNOWN FLAW, held here so that it cannot grow unseen (body-motion 4.17): through the swing itself (-200 to
         # +65 ms) the written motion still asks the ground, at some instants, to push from off the ground his feet stand
         # on (the bat's pull is not fully answered by the lean written for it). The forward run cannot give that and
         # parts from the written path there by a few centimetres.

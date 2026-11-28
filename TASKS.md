@@ -17,11 +17,11 @@ Status: `[ ]` not started · `[~]` partly done · `[?]` needs an owner decision
 
 ## Resume here (2026-11-27)
 
-**State.** PLAN D31–D47: a force-driven body; PLAN §14.1, spec [docs/body-motion.md](docs/body-motion.md). Its own practised swing (sessions 8–13, 58.7 mph) was a chop; the owner cancelled its searches.
+**State.** PLAN D31–D48: a force-driven body; PLAN §14.1, spec [docs/body-motion.md](docs/body-motion.md). Its practised swing (sessions 8–13) was a chop; the owner cancelled its searches.
 
 **Owner, 2026-11-27.** D45: a real batter's swing is the base; it plays in the viewer, `bin/body-swing.sh --real` (player-visuals §14.1, [note](docs/research/swing/12-real-swing-on-the-figure.md)); he says it looks a lot better. D46: its data is looked at, never shipped. D47: the body practises toward it; how batters differ: later.
 
-**D48:** no tracing; §4.16 and Q71–Q75 withdrawn. Worker `swing-look` (Fable, `work/swing-look`, worktree swing-research) makes the swing. Nothing waits on the owner.
+**D48:** §4.16, Q71–Q75 withdrawn. `work/swing-look` (unmerged): a force-driven swing that looks like a hitter's (52 mph), `bin/body-swing.sh --look`, body-motion §4.17. Review next; nothing waits on him.
 
 **Next:** §2: the ground-dive leftovers ([note](docs/calibration/2026-11-23-of-ground-dive.md) §9).
 

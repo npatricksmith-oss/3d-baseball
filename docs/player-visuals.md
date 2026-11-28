@@ -518,6 +518,16 @@ Each step updates §9 and this section's status to say what is built, ticks noth
 
 **Checks**: the viewer's check passes on it (every joint within 3.7 mm, every turn within 0.6°, handedness right; note §2 has the figures), and `uv run --with numpy --with c3d python3 -m unittest analysis/research/body/test_real_swing.py` checks the file against the raw C3D markers, HitTrax's contact height, the model's legs, the feet's stillness while planted and the hands on the handle (skipped when the data are not on the machine).
 
+### 14.2 The swing written by hand and made by muscles (PLAN D48)
+
+**What it is.** The force-driven body's swing of [body-motion §4.17](body-motion.md#417-a-swing-written-by-hand-then-made-by-muscles-plan-d48-worker-swing-look-2026-11-27): one forward run of the kept plan, muscles and the ground only, from the stance through a held finish (2.2 s). A picture for the owner to judge; nothing in a game.
+
+**The one command:** `bin/body-swing.sh --look` (or `--look <plan.json>`). It runs `analysis/research/body/swing_track.py` on `analysis/research/body/swing_look_plan.json` (about 30 s the first time: it works the written motion out and compiles the run; a few seconds after), writes the swing file under analysis/research/body/swings/swing-look/ (git-ignored) and opens the viewer. Arguments starting with `-` go to the viewer: `bin/body-swing.sh --look -RenderOffscreen -BbBodySwingShots=10` takes a picture every 10 ms from three sides through the finish (660 pictures, about 11 minutes), and `-BbBodySwingCheck` runs the check. `python3 analysis/research/body/swing_author.py --swing <file>` writes the motion as it was written by hand, with no forces in it, for the same viewer.
+
+**The file** is `bb-body-swing 1` (§14) with three additions. `shots to_end`: `-BbBodySwingShots=<ms>` runs to the file's last sample, as for a recording (a computed swing with its finish). A 14th body `head`: the head is **drawn** turned toward the ball as far as a neck turns; the model has no neck and computes no head. The sole points carry the forward run's loads. Times are from the instant the barrel comes square to the pitch, seen from above. The ball is a picture: a fastball's straight line through where the sweet spot is at that instant.
+
+**Check:** the viewer's check passes on it (2,201 samples; joints within 4.2 mm, turns within 1.54°, handedness right).
+
 ## 15. Records
 
 - PLAN D13 (revised 2026-11-15) covers this stage.
