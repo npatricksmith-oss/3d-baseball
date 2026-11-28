@@ -119,9 +119,10 @@ class WrittenMotion(unittest.TestCase):
     def test_no_recorded_swing_is_read(self):
         # PLAN D48: nothing of the OpenBiomechanics data, and none of the lab study's curves, is an input
         for f in ("swing_author.py", "swing_track.py", "swing_inverse.py", "swing_track.rs"):
-            src = open(os.path.join(HERE, f)).read()
-            for word in ("real_swing", "obp", "c3d", "landmarks", "curve(", "C.load(", "BB_FORT_CSV", "practice3d"):
-                self.assertNotIn(word, src.replace("practice3d.py:", ""), "%s mentions %s" % (f, word))
+            src = open(os.path.join(HERE, f)).read().lower().replace("practice3d.py:", "")
+            for word in ("real_swing", "obp", "openbiomech", "c3d", "driveline", "landmarks", "curve(", "c.load(",
+                         "bb_fort_csv", "practice3d"):
+                self.assertNotIn(word, src, "%s mentions %s" % (f, word))
 
 
 class Muscles(unittest.TestCase):
@@ -177,14 +178,13 @@ class Muscles(unittest.TestCase):
             tr.ff = keep[1]
 
     def test_a_steady_torque_is_held_by_one_muscle_of_the_pair(self):
-        # the rule the levels follow, run by itself to its rest: the pair gives the torque wanted and the opposite
+        # the code's own rule for the levels (swing_track.pair_levels), run by itself to its rest: the pair gives the torque wanted and the opposite
         # muscle is slack (BRAKE under 1 exists for this)
         for want in (30.0, -30.0):
             ap = am = 0.4
             Tp, Tm = 100.0, 80.0
             for _ in range(4000):
-                up = max(0.0, min(1.0, (want + T.BRAKE * am * Tm) / Tp))
-                um = max(0.0, min(1.0, (T.BRAKE * ap * Tp - want) / Tm))
+                up, um = T.pair_levels(want, ap, am, Tp, Tm)
                 ap += 5e-4 * (up - ap) / (E.TA_UP if up > ap else E.TA_DN)
                 am += 5e-4 * (um - am) / (E.TA_UP if um > am else E.TA_DN)
             self.assertAlmostEqual(ap * Tp - am * Tm, want, delta=0.05)
@@ -221,6 +221,13 @@ class KeptSwing(unittest.TestCase):
         # ends, the ground and gravity (the engine's own work integrals), within a hundredth
         s = self.tr.m.sys
         nb = s.nb
+        # and nothing else acts on him: no drives, holds, constant torques or outside forces in the model, and no
+        # muscle level above 1 anywhere in the run
+        self.assertEqual((len(s.acts), len(s.holds), len(s.tones), len(s.ext)), (0, 0, 0, 0))
+        for r in self.recs:
+            lv = r.st[len(r.st) - 2 * self.tr.nax:]
+            self.assertLessEqual(max(lv), 1.0 + 1e-9)
+            self.assertGreaterEqual(min(lv), -1e-9)
 
         def energy(st):
             ke = pe = 0.0

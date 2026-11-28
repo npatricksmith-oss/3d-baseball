@@ -377,8 +377,7 @@ class TrackSystem(E.System):
                 # each muscle of the pair is asked for what the torque wanted needs beyond what its opposite number is
                 # giving now (BRAKE of it: a muscle still tensed from a moment ago is braked by the other, as a quick
                 # movement's antagonist burst does, which is how the pair's torque can fall as fast as it can rise)
-                up = max(0.0, min(1.0, (want + BRAKE * am * availm) / availp)) if availp > SAT_EPS else (1.0 if want > 0.0 else 0.0)
-                um = max(0.0, min(1.0, (BRAKE * ap * availp - want) / availm)) if availm > SAT_EPS else (1.0 if want < 0.0 else 0.0)
+                up, um = pair_levels(want, ap, am, availp, availm)
                 ds[oa + 2 * iax] = (up - ap) / (E.TA_UP if up > ap else E.TA_DN)
                 ds[oa + 2 * iax + 1] = (um - am) / (E.TA_UP if um > am else E.TA_DN)
                 tmus = ap * availp - am * availm
@@ -394,6 +393,14 @@ class TrackSystem(E.System):
         ds[ow + 2] += p_damp
         if row is not None:
             self.trace.append(row)
+
+
+def pair_levels(want, ap, am, availp, availm):
+    """The levels asked of a muscle pair for the torque `want`, given the levels it has now (ap, am) and what each can give
+    now (availp, availm). The compiled run (swing_track.rs) holds the same rule; the tests run this one."""
+    up = max(0.0, min(1.0, (want + BRAKE * am * availm) / availp)) if availp > SAT_EPS else (1.0 if want > 0.0 else 0.0)
+    um = max(0.0, min(1.0, (BRAKE * ap * availp - want) / availm)) if availm > SAT_EPS else (1.0 if want < 0.0 else 0.0)
+    return up, um
 
 
 # ---- the compiled run -------------------------------------------------------------------------------------------------

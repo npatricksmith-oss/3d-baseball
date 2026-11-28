@@ -8,7 +8,7 @@
 #   bin/body-swing.sh --real [<swing id>]      a real hitter's recorded swing on the figure (PLAN D45; default
 #                                              OpenBiomechanics swing 478_5): analysis/research/body/real_swing.py,
 #                                              whose data must be fetched first (its docstring; never committed)
-#   bin/body-swing.sh --look [<plan.json>]     the force-driven swing that follows a motion written by hand (PLAN D48;
+#   bin/body-swing.sh --look [<plan.json>]     (with --tree: that checkout's swing_track.py and plan) the force-driven swing that follows a motion written by hand (PLAN D48;
 #                                              docs/body-motion.md 4.17; default analysis/research/body/swing_look_plan.json),
 #                                              run forward once by analysis/research/body/swing_track.py (about 30 s the
 #                                              first time: it works the written motion out and compiles the run)
@@ -32,7 +32,7 @@ while [ $# -gt 0 ]; do
       if [ $# -ge 2 ] && [[ "$2" != -* ]]; then REAL="$2"; shift; fi
       shift ;;
     --look)
-      LOOK="$HERE/analysis/research/body/swing_look_plan.json"
+      LOOK="analysis/research/body/swing_look_plan.json"
       if [ $# -ge 2 ] && [[ "$2" != -* ]]; then LOOK="$2"; shift; fi
       shift ;;
     --tree)
@@ -55,12 +55,13 @@ if [ ! -x "$UE/Engine/Build/BatchFiles/Linux/Build.sh" ]; then
   exit 1
 fi
 if [ -n "$LOOK" ]; then
+  if [ ! -f "$LOOK" ] && [ -f "$TREE/$LOOK" ]; then LOOK="$TREE/$LOOK"; fi
   if [ ! -f "$LOOK" ]; then
     echo "there is no plan file $LOOK" >&2
     exit 1
   fi
   OUT="$HERE/analysis/research/body/swings/swing-look/$(basename "${LOOK%.json}").swing"
-  python3 "$HERE/analysis/research/body/swing_track.py" "$LOOK" --swing "$OUT"
+  python3 "$TREE/analysis/research/body/swing_track.py" "$LOOK" --swing "$OUT"
   echo "showing $OUT"
   exec "$HERE/client/run.sh" 7 -BbBodySwing="$OUT" "${EXTRA[@]}"
 fi
