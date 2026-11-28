@@ -121,8 +121,9 @@ KEYS = [
 # The hands and the bat. Written by hand first (where the hands are from the chest, where the barrel points), then each
 # row moved as little as it took to bring every joint of both arms inside its range, with the bat's roll and the elbows
 # where the arms are least strained (a search on this body's own joint ranges: swing_look_tools/fit_arms.py;
-# body.strain). The wrists' end toward the barrel is taken 19 deg further out than
-# a closed hand's (body-motion 4.17: the handle shifts in the fingers at full extension).
+# body.strain), with the wrists' end toward the barrel taken 19 deg further out than a closed hand's (the handle shifts
+# in the fingers). The elbows' and the roll's rows were then smoothed by hand, which takes the rear wrist up to 23 deg
+# past a closed hand's cocked end and the lead forearm 6 deg past its end before contact (body-motion 4.17 lists both).
 KEYS += [
     # stance, load, stride: the hands by the rear shoulder, the bat up and tipped back over it
     (T_START, dict(hand_f=0.250, hand_l=-0.180, hand_u=0.000, bat_az=-168, bat_el=55, bat_roll=40, sw_L=-10, sw_R=-20)),
@@ -170,7 +171,7 @@ WRIST_ULN_LOOSE = 55.0         # deg: the wrists' end toward the barrel (body.RO
 # own weight; the same rule has him lean away from it beforehand instead of being asked to hold still.
 PUSH_X = (-0.860, -0.790)      # m: toward the plate, the push acts under the middle of the feet: in the stance; once the front foot is down
 #                                (it lands turned open, so the two feet's ground then lies nearer the plate)
-PUSH_REAR_Y, PUSH_STANCE = -0.420, 0.43      # m: under the rear foot's inside half; in the stance the share of the way to the front foot
+PUSH_REAR_Y, PUSH_STANCE = -0.437, 0.43      # m: under the rear foot's inside half; in the stance the share of the way to the front foot
 PUSH_FRONT = (0.66, 0.50)      # the share of the way from the rear foot's push to the front foot's ball: through the swing; at rest in the finish
 T_SHIFT = 0.200                # s: the weight goes back onto the rear foot over this long before the lead foot leaves
 T_TAKE = 0.110                 # s: the front foot takes its share over this long from toe touch
@@ -922,7 +923,6 @@ def main():
     if "--check" in a:
         rows = read(m, ts, states, 5.0)
         lowk = min(rows, key=lambda r: min(r["knee_L"], r["knee_R"]))
-        mo = Motion(); build(mo, m, close=False) if False else None
         print("the straightest a knee gets: %.0f deg at %+.0f ms (under 10 the leg's joints fly about: lower the hips or shorten the reach)" % (min(lowk["knee_L"], lowk["knee_R"]), lowk["t"]))
         print("the ground must push up between %.2f and %.2f of his weight" % (min(r["fz"] for r in rows), max(r["fz"] for r in rows)))
         bad = [r for r in rows if abs(r["fh_x"]) > 0.6 or abs(r["fh_y"]) > 0.6]

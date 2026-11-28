@@ -41,8 +41,13 @@ C = B.C
 OUT = os.path.join(ROOT, "sim", "target", "codex-probes", "swing-look")
 BIN = os.path.join(OUT, "swing_track")
 SRC = os.path.join(HERE, "swing_track.rs")
-H_STEP = 5e-4                  # s: the integration step (classical RK4)
-REC_EVERY = 2                  # a record every millisecond
+# The integration step (classical RK4). A tenth of a millisecond, and not the half the earlier sessions' runs used: a
+# muscle's strength falls with its shortening speed, which acts on its joint as a brake, and on the lightest thing a
+# muscle turns (a foot about its own length, 0.0014 kg m^2, by the muscles that roll the sole) that brake is too stiff
+# for a longer step: at 0.5 ms the foot's turning rate flips sign every step while he stands on one leg, and the
+# books of energy no longer close (body-motion 4.17; test_swing_look holds the books to a hundredth).
+H_STEP = 1e-4
+REC_EVERY = 10                 # a record every millisecond
 TREE_ORDER = (("shank_L", "foot_L"), ("thigh_L", "shank_L"), ("pelvis", "thigh_L"),
               ("shank_R", "foot_R"), ("thigh_R", "shank_R"), ("pelvis", "thigh_R"),
               ("farm_L", "bat"), ("uarm_L", "farm_L"), ("trunk", "uarm_L"),
@@ -54,7 +59,7 @@ TREE_ORDER = (("shank_L", "foot_L"), ("thigh_L", "shank_L"), ("pelvis", "thigh_L
 ADDED = {"hip_flex_R": ("hip_flex_L", 1.0),      # the rear hip's flexor: the lead's (the body had none: 4.15)
          "hip_rot_back": ("hip_rot_L", 1.0),     # each hip's rotators the other way: as strong as the one way (itself [E])
          "ankle_df": 50.0,                       # N m: lifting the toes [E: 40-60, a man's dorsiflexors; not read]
-         "ankle_roll": 40.0,                     # N m: rolling the sole in or out [E: 30-45; not read]
+         "ankle_roll": 50.0,                     # N m: rolling the sole in or out [E: 30-50; not read]
          "sh_other": None,                       # each shoulder's sweep the other way: the other arm's measured value
          "wrist_radial": 0.75}                   # the wrist cocked toward the thumb: 0.75 of the measured tilt the other way [E]
 STRENGTH = 1.0                 # every muscle's strength x this (1 = body-motion 4.5's bounds)
