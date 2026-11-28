@@ -21,7 +21,7 @@ Status: `[ ]` not started · `[~]` partly done · `[?]` needs an owner decision
 
 **Owner, 2026-11-27.** D45–D46: a real batter's swing plays in the viewer (`bin/body-swing.sh --real`), looked at only. D48: no tracing; "create a realistic looking force-driven MLB swing", his body at measured strength. On 53 mph: "there's no reason why we are falling short."
 
-**Running:** Fable worker `swing-arms` (Workers tab, t5g; worktree swing-research, `work/swing-arms`, its brief is JOB.md there) finds where bat speed is lost. Unmerged, unreviewed: check it, then an Opus review. `--look` on main is the first pass.
+**Not started (owner: only after his /clear):** resume Fable worker `swing-arms` (Workers tab, t5g, interrupted; worktree swing-research, `work/swing-arms`): tell it to do JOB.md there, find where bat speed is lost. Then an Opus review.
 
 **Next:** §2: the ground-dive leftovers ([note](docs/calibration/2026-11-23-of-ground-dive.md) §9).
 
