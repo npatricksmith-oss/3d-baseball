@@ -148,4 +148,9 @@ All runs were in `sim/target` (probes in `sim/target/review-probes/`). The compi
 
 ## Resolution
 
-Open.
+Resolved 2026-11-27 (Coordinator). Every finding was fixed by a Sonnet worker in c9089e6 and 329c519, as each "Fix:" line asked; no re-review, the fixes being text, three tests and the launcher (the Coordinator reran the 13 tests, the compiled-run check and the docs check before merging).
+
+- P2-1, P2-2, P2-3, P3-1, P3-2, P3-4 (text): body-motion §4.17 corrected. What the extra strength buys is stated as not settled; no practice was rerun, and the two uncommitted plans are named with where they live.
+- P3-3: the tests now call the code's own rule, assert no drives, holds, constant torques, outside forces or muscle level above 1, and search the recorded-data words in any case. Left: the compiled run keeps its own copy of the muscle-pair rule, covered only by the compiled-against-Python check.
+- P3-4 (launcher): `--look` honours `--tree`; syntax-checked only, not run in the viewer.
+- Not fixed here, carried to the next swing job (TASKS "Resume here"): the follow-through leaning on joint ends, the frozen finish, the small leg lift, the start not at rest, and what the extra strength buys.

@@ -21,7 +21,7 @@ Status: `[ ]` not started · `[~]` partly done · `[?]` needs an owner decision
 
 **Owner, 2026-11-27.** D45: a real batter's swing is the base; it plays in the viewer, `bin/body-swing.sh --real` (player-visuals §14.1, [note](docs/research/swing/12-real-swing-on-the-figure.md)); he says it looks a lot better. D46: its data is looked at, never shipped. D47: the body practises toward it; how batters differ: later.
 
-**D48:** §4.16, Q71–Q75 withdrawn. `work/swing-look` (unmerged): a force-driven swing that looks like a hitter's (52 mph), `bin/body-swing.sh --look`, body-motion §4.17. Review next; nothing waits on him.
+**D48:** §4.16, Q71–Q75 withdrawn. Merged, reviewed: a force-driven swing that looks like a hitter's (52 mph), `bin/body-swing.sh --look`, §4.17. Owner to watch it. Next: worker `swing-arms`.
 
 **Next:** §2: the ground-dive leftovers ([note](docs/calibration/2026-11-23-of-ground-dive.md) §9).
 
